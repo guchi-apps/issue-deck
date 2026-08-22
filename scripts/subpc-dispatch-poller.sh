@@ -90,6 +90,10 @@
 #   WORKTREE_CLEANUP_INTERVAL_MINUTES
 #                                   worktreeを掃除する間隔の分数（省略時は60・0で無効）
 #
+# コンフリクトしたPRの巡回検知（#2116）は毎巡issue-deckへ促すだけで、**間隔の設定はここには
+# 無い**。どれくらいの間隔で見に行くか（＝GitHub APIをどれだけ使うか）はissue-deck側の
+# `CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分）が決める。
+#
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
 # issue-deckの画面にも出る）。
@@ -118,7 +122,8 @@ set -euo pipefail
 #     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
 # 16: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
 # 17: メモリ・SWAPが逼迫している間、起動ジョブを`maxJobs=0`で見送り、その理由を申告する（#2095）。
-DISPATCH_POLLER_VERSION="17"
+# 18: コンフリクトしたPRの巡回検知を1巡ごとにissue-deckへ促す（#2116）。
+DISPATCH_POLLER_VERSION="18"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -833,6 +838,48 @@ reap_worktrees() {
   # **回収の失敗でポーリングを止めない**（開発サーバー・セッションの回収と同じ扱い）。
   timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --yes ||
     echo "Error: worktreeの掃除に失敗しました。" >&2
+  return 0
+}
+
+# --- コンフリクトの巡回検知 -----------------------------------------------------
+# developとコンフリクトしたPRを、issue-deckに巡回して見つけさせる（#2116）。
+#
+# **GitHub Actions側の自動検知だけでは取りこぼす。** `pull_request(opened)`のイベントが
+# 配送されないことがあり（guchi-apps/myroom#191）、安全網の`schedule`も15分間隔の指定に
+# 対して実測24〜36分でしか走らない。「作った時点で既にコンフリクトしているPR」がそこへ
+# 落ちると、人が画面のボタンを押すまで誰も直しにいかない。
+#
+# **pollerがやるのは「呼ぶ」ことだけ。** 実際に巡回するかどうかも、どのPRへ何を起動するかも
+# issue-deck側が決める（`POST /api/pull-requests/conflict-sweep`）。間隔に達していなければ
+# `swept: false`が返って終わる。ここに間隔を持たせないのは、呼ぶ側が増えたときに
+# GitHub APIの消費が二重になるのを避けるため。
+#
+# **失敗しても1巡を止めない**（開発サーバー・セッションの回収と同じ扱い）。
+sweep_pull_request_conflicts() {
+  if ! api_call POST /api/pull-requests/conflict-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # **404と接続不可は黙って見送る。** 404はサブPCのチェックアウトだけ先に更新されて
+      # 本番のissue-deckがまだこの受け口を持っていない期間（更新の順序は運用で決まらない）、
+      # 接続不可は直後のジョブ取得が同じ理由で必ず報告する。どちらも30秒ごとに同じ行が
+      # 積まれるだけで、新しく分かることが無い。
+      404|000) return 0 ;;
+      *) report_api_failure "コンフリクトの巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept dispatched
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  dispatched="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.dispatched | length' 2>/dev/null || echo 0)"
+  [[ "${dispatched:-0}" -gt 0 ]] || return 0
+
+  # 起動したときだけ出す。**毎巡ログを出さない**（30秒ごとに「異常なし」が積まれると、
+  # journalctlで本当に見たい失敗が埋もれる）。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.dispatched[] | "コンフリクト解消を起動しました: \(.repositoryFullName)#\(.pullRequestNumber)（Issue #\(.issueNumber)）"' 2>/dev/null ||
+    true
   return 0
 }
 
@@ -1976,6 +2023,12 @@ run_once() {
 
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
     return 0
+  fi
+
+  # コンフリクトしたPRの巡回検知をissue-deckへ促す（#2116）。**dry-runでは呼ばない**
+  # （ワークフローの起動という外向きの副作用があるため）。
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    sweep_pull_request_conflicts
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

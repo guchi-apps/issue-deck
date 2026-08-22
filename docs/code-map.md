@@ -1299,6 +1299,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **コンフリクトしたPRは、GitHubのイベントを待たずにissue-deck側から巡回して見つける**
+  （#2116。判定は[`lib/github/conflict-sweep.ts`](../src/lib/github/conflict-sweep.ts)、IOは
+  [`lib/github/conflict-sweep-run.ts`](../src/lib/github/conflict-sweep-run.ts)）。
+  サブPCのpollerが1巡ごとに`POST /api/pull-requests/conflict-sweep`（認証は`DISPATCH_SECRET`）を
+  叩き、連携済みリポジトリ全部のdevelop向け`issue-<番号>`PRのうちコンフリクトしているものへ
+  `claude-conflict-resolve.yml`を`workflow_dispatch`する。**GitHub Actions側の自動検知は
+  取りこぼす**——`pull_request(opened)`のイベントが1本も配送されないことがあり
+  （guchi-apps/myroom#191）、安全網の`schedule`も15分の指定に対して実測24〜36分でしか走らない。
+  **実際に巡回するかどうかを決めるのはサーバー側**（`CONFLICT_SWEEP_INTERVAL_MINUTES`・既定5分・
+  0で無効）で、pollerは毎巡素直に呼ぶ。同じPRへは30分（`CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES`）
+  空けるまで起動し直さず、対応Issueに`00.check-user`が付いていれば起動しない（自動解消を断念した
+  ワークフローが付けるラベルなので、そのまま「人が見ると決めたもの」の目印にする）。
+  設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「issue-deckからの巡回検知」。
 - **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
   `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
   修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは

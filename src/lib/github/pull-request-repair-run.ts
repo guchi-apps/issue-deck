@@ -177,3 +177,40 @@ export async function fetchActivePullRequestRepairRun(
   );
   return active.get(repairRunKey(repositoryFullName, pullRequestNumber)) ?? null;
 }
+
+/**
+ * コンフリクト解消の直近の1行を、対象PRぶんまとめて引く（#2116。DBへの問い合わせは1回）。
+ *
+ * `fetchActivePullRequestRepairRuns`と違い、**終わった行も返す。** 巡回起動
+ * （`conflict-sweep.ts`）は「いま走っているか」だけでなく「直前にいつ試したか」も見るため
+ * （解消できずに終わったPRへ巡回のたびに起動し直さないようにする）。
+ *
+ * 1つのPR×`conflict`につき行は1つ（`@@unique`）なので、返るのはPRごとに高々1件。
+ */
+export async function fetchLatestConflictRepairRuns(
+  targets: PullRequestRepairRunTarget[],
+): Promise<Map<string, { status: string; startedAt: Date }>> {
+  const latest = new Map<string, { status: string; startedAt: Date }>();
+  if (targets.length === 0) return latest;
+
+  // **失敗を握り潰さない**（`fetchActivePullRequestRepairRuns`と違う点）。空を返すと抑制が
+  // 全部外れ、巡回のたびに同じPRへ起動し直すことになるため、呼び出し側で巡回ごと見送る。
+  const rows = await db.pullRequestRepairRun.findMany({
+    where: {
+      kind: "conflict",
+      OR: targets.map((target) => ({
+        repositoryFullName: target.repositoryFullName,
+        pullRequestNumber: target.pullRequestNumber,
+      })),
+    },
+    select: { repositoryFullName: true, pullRequestNumber: true, status: true, startedAt: true },
+  });
+
+  for (const row of rows) {
+    latest.set(repairRunKey(row.repositoryFullName, row.pullRequestNumber), {
+      status: row.status,
+      startedAt: row.startedAt,
+    });
+  }
+  return latest;
+}
