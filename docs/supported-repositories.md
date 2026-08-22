@@ -672,6 +672,26 @@ done
 main宛PRのCIで先に落とすもの。**対象は「`deploy.yml`が`main`から`vX.Y.Z`タグを作るリポジトリ」だけ**
 で、無人実行を入れているかどうかとは独立している。
 
+**#2135で検査項目が増え、ジョブが2つになった。** `version-tag-check`（タグの重複）に加えて
+`deploy-config-check`が、`deploy.yml`のうち**mainへ入るまで露見しない設定漏れ**を見る。
+
+| ジョブ | 見るもの | 落ちると分かること |
+|---|---|---|
+| `version-tag-check` | `package.json`のバージョンと既存タグ | バージョンの上げ忘れ（#1367） |
+| `deploy-config-check` | `appleboy/ssh-action`の`env:`／`with.envs:`／リモートスクリプトの3者 | 環境変数を増やしたときの`envs:`への追記漏れ（**本番だけ値が空になる**） |
+| 〃 | 配布物を固める`tar`の対象 | 追跡されていないパス（`tar: public: Cannot stat`でビルドが落ちる） |
+| 〃 | `packageManager`のpnpmメジャー | VPSのNode 20で動かないpnpm 11（`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`） |
+
+**配り直しは要らない。** 検査は既存の`reusable-version-tag-check.yml`へジョブとして足してあり、
+callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`）を上げるだけで14リポジトリ全部で
+効き始める**。逆に、参照タグを上げるまではどのリポジトリでも効かない。
+
+`deploy-config-check`は`appleboy/ssh-action`を使わないリポジトリ（`myroom`・`signaly`は`rsync`、
+`solitaire`は`easingthemes/ssh-deploy`）ではその検査をスキップする。判定できない形（`cd`を挟む
+`run:`、GitHubの式や変数を含む`tar`の引数）も黙って通し、理由をログに残す——**誤検知でmain宛PRを
+止める方が、見逃すより高くつく**ため。配布前に14リポジトリすべての`deploy.yml`へ通して、
+誤検知が出ないことを確かめてある。
+
 配った14リポジトリ（#1459。`@workflows/v16`）は次のとおり。
 
 | リポジトリ | `with:`に渡す入力 |

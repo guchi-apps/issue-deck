@@ -1,6 +1,14 @@
 name: Reusable version tag check
 
-# main宛のPRの時点で「バージョンを上げ忘れていないか」を検査する再利用可能ワークフロー（#1367）。
+# **main宛のPRの時点で、mainへ入るまで露見しないデプロイの失敗を落とす再利用可能ワークフロー。**
+# ジョブは2つある。
+#   - `version-tag-check` — バージョンの上げ忘れによるリリースタグの重複（#1367）
+#   - `deploy-config-check` — `deploy.yml` の設定漏れ（#2135。ジョブ本体の冒頭に一覧がある）
+#
+# **ファイル名は`version-tag-check`のままにしてある。** 14リポジトリのcallerが
+# `reusable-version-tag-check.yml@workflows/vN` を名指ししており、改名すると参照タグを
+# 上げた瞬間に全リポジトリのmain宛PRが startup_failure になる。**検査を増やすときも
+# ここへジョブを足す**——callerを配り直さずに、参照タグの更新だけで全リポジトリへ届く。
 #
 # **なぜ要るか。** `deploy.yml`の`tag`ジョブは`package.json`の`version`から`v<version>`タグを
 # 作るが、同名のタグが別のコミットに既に存在すると
@@ -16,7 +24,9 @@ name: Reusable version tag check
 # 対応するタグが必ず存在するため、developへの全PRが赤くなる。落とすべきなのはmainへ入る直前だけ。
 #
 # 呼び出し元ごとの差異は`reusable-release-develop-to-main.yml`と同じ名前のinputで吸収する
-# （ルートに`package.json`が無いリポジトリがあるため）。
+# （ルートに`package.json`が無いリポジトリがあるため）。**新しい検査のinputも既定値だけで
+# 動くようにする。** 既存の14リポジトリのcallerは`with:`を書き換えずにタグだけ上げるため、
+# 必須inputを足すとその瞬間に全リポジトリが赤くなる。
 on:
   workflow_call:
     inputs:
@@ -35,6 +45,19 @@ on:
         required: false
         type: string
         default: v
+      deploy-workflow:
+        description: "検査するデプロイワークフロー（既定: .github/workflows/deploy.yml。無ければ検査をスキップする）"
+        required: false
+        type: string
+        default: .github/workflows/deploy.yml
+      pnpm-major-max:
+        description: >-
+          `packageManager` に書いてよい pnpm のメジャーバージョンの上限（既定: 10）。
+          pnpm 11 は Node 22.13 以上を要求し、VPSの Node 20 では依存インストールが
+          `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite` で落ちる。
+        required: false
+        type: number
+        default: 10
 
 # **concurrency と permissions は呼び出し元（caller）が持つ。** 再利用可能ワークフローの
 # トップレベルに置くと、呼び出し時に startup_failure になりうる（#1181）。
@@ -97,3 +120,381 @@ jobs:
           fi
 
           echo "OK: タグ ${TAG} はまだ存在しません"
+
+  deploy-config-check:
+    # **`deploy.yml` の書き方の不整合のうち、mainへ入るまで露見しないものを落とす（#2135）。**
+    #
+    # `version-tag-check` と同じ「main宛PRで先に落とす」形だが、見るものが違うので別ジョブに
+    # してある（片方が落ちても、もう片方の結果は読める）。**callerは変えなくてよい**——
+    # 既に14リポジトリへ配ってある `version-tag-check.yml` の参照タグを上げれば効き始める。
+    #
+    # 検査するのは次の3つ。いずれも guchi-apps/docs の `knowledge/deployment.md` に
+    # 実際に踏んだ記録がある。
+    #   A. `appleboy/ssh-action` の `with.envs:` への追記漏れ（本番だけ値が空になる）
+    #   B. 配布物を固める `tar` の対象に、チェックアウト後に実在しないパスがある
+    #   C. `packageManager` の pnpm が、デプロイ先のNodeで動かないメジャーになっている
+    #
+    # **落とせるのは静的に確かめられるものだけ**で、`deploy.yml` の書き方はリポジトリごとに
+    # 違う。判定できない形（`cd` を挟む `run:`、変数・グロブを含む `tar` の引数など）は
+    # 黙って通し、ログに理由を残す。**誤検知でmain宛PRを止める方が、見逃すより高くつく。**
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: デプロイ設定の漏れを確認する
+        env:
+          DEPLOY_WORKFLOW: ${{ inputs.deploy-workflow }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          PNPM_MAJOR_MAX: ${{ inputs.pnpm-major-max }}
+        run: |
+          set -euo pipefail
+
+          # ここに直接書いているのは、再利用可能ワークフローが他リポジトリから呼ばれたとき、
+          # checkoutされるのは**呼び出し元**のリポジトリで、issue-deck側の隣のファイルは
+          # 読めないため（`reusable-issue-dispatch.yml` の prompts-ref と同じ制約）。
+          # このスクリプトは scripts/reusable-version-tag-check.test.mjs がYAMLから
+          # 取り出して実行するので、テストとの正はこの1か所にある。
+          SCRIPT="$(mktemp)"
+          cat > "$SCRIPT" <<'PYTHON'
+          import json
+          import os
+          import re
+          import shlex
+          import subprocess
+          import sys
+
+          # `key: value` 形式の行。値が無い（ブロックが続く）場合もここで拾う
+          KEY_RE = re.compile(r"^(\s*)([A-Za-z0-9_.\-]+):(?:\s+(.*))?$")
+          # シェルの変数参照。GitHubの式 `${{ ... }}` は `{` が名前に含まれないため一致しない
+          VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+          BLOCK_SCALARS = {"|", "|-", "|+", ">", ">-", ">+"}
+          TAR_FLAGS_RE = re.compile(r"^[cxtrujzvfJZa]+$")
+
+          errors = []
+          warnings = []
+          notes = []
+
+
+          def indent_of(line):
+              return len(line) - len(line.lstrip())
+
+
+          def children_of(lines, idx):
+              """`lines[idx]` のキーより深いインデントの行（＝そのキーの子）を返す"""
+              key_indent = indent_of(lines[idx])
+              out = []
+              for line in lines[idx + 1 :]:
+                  if line.strip() and indent_of(line) <= key_indent:
+                      break
+                  out.append(line)
+              return out
+
+
+          def parse_map(lines, key_indent):
+              """`key_indent` の位置にあるキーだけを拾い、{キー: (値, 子行)} を返す。
+
+              YAMLパーサを足さずに済ませるための最小実装。ワークフローのステップ定義のように
+              構造が決まっている範囲にだけ使う。
+              """
+              out = {}
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  if not line.strip() or line.lstrip().startswith("#") or indent_of(line) != key_indent:
+                      i += 1
+                      continue
+                  matched = KEY_RE.match(line)
+                  if not matched:
+                      i += 1
+                      continue
+                  kids = children_of(lines, i)
+                  out[matched.group(2)] = ((matched.group(3) or "").strip(), kids)
+                  i += 1 + len(kids)
+              return out
+
+
+          def scalar_value(entry):
+              """`key: value` と `key: |` のブロックスカラーの両方から文字列を取り出す"""
+              value, kids = entry
+              if value and value not in BLOCK_SCALARS:
+                  return value
+              return "\n".join(kids)
+
+
+          def step_range(lines, idx):
+              """`lines[idx]` を含むステップの [開始, 終了) を、インデントから割り出す"""
+              dash_indent = indent_of(lines[idx]) - 2
+              start = idx
+              for i in range(idx, -1, -1):
+                  line = lines[i]
+                  if line.strip() and indent_of(line) == dash_indent and line.lstrip().startswith("- "):
+                      start = i
+                      break
+              end = len(lines)
+              for i in range(start + 1, len(lines)):
+                  line = lines[i]
+                  if not line.strip():
+                      continue
+                  ind = indent_of(line)
+                  if ind < dash_indent or (ind == dash_indent and line.lstrip().startswith("- ")):
+                      end = i
+                      break
+              return start, end
+
+
+          def step_map(lines, idx):
+              """`lines[idx]` を含むステップを、キーの辞書として返す"""
+              start, end = step_range(lines, idx)
+              # 先頭行の `- ` を空白に均し、ステップのキーが同じインデントに並ぶようにする
+              block = [lines[start].replace("- ", "  ", 1)] + lines[start + 1 : end]
+              return parse_map(block, indent_of(block[0]))
+
+
+          def shell_vars(text):
+              """シェルスクリプト中の変数参照名を集める（行頭が `#` の行は数えない）"""
+              names = set()
+              for line in text.split("\n"):
+                  if line.lstrip().startswith("#"):
+                      continue
+                  for matched in VAR_RE.finditer(line):
+                      names.add(matched.group(1) or matched.group(2))
+              return names
+
+
+          def git_ignored(path):
+              return subprocess.run(
+                  ["git", "check-ignore", "-q", path],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+              ).returncode == 0
+
+
+          def check_ssh_action_envs(lines, all_env_names, workflow):
+              """appleboy/ssh-action の `env:` / `with.envs:` / リモートスクリプトの3者を突き合わせる。
+
+              `envs:` はSSH先へ転送する名前のホワイトリストで、`env:` に定義しただけでは
+              リモートに存在しない。`${FOO:-}` のような既定値付き参照だと空文字のまま `.env` へ
+              書かれて起動してしまうため、気づくのが本番の実行時になる。
+              """
+              found = False
+              for idx, line in enumerate(lines):
+                  if "uses:" not in line or "appleboy/ssh-action" not in line:
+                      continue
+                  found = True
+                  step = step_map(lines, idx)
+                  key_indent = indent_of(lines[idx])
+                  label = scalar_value(step.get("name", ("", []))) or "appleboy/ssh-action"
+
+                  step_env = set(parse_map(step.get("env", ("", []))[1], key_indent + 2))
+                  with_map = parse_map(step.get("with", ("", []))[1], key_indent + 2)
+                  envs_raw = scalar_value(with_map.get("envs", ("", [])))
+                  envs = {n.strip() for n in envs_raw.replace("\n", ",").split(",") if n.strip()}
+                  refs = shell_vars(scalar_value(with_map.get("script", ("", []))))
+
+                  if not envs and not step_env:
+                      continue
+
+                  for name in sorted((step_env & refs) - envs):
+                      errors.append(
+                          f"{workflow} の「{label}」: {name} は env: に定義されリモートスクリプトでも"
+                          f"参照されていますが、with.envs: に入っていません。SSH先へ転送されないため"
+                          f"本番だけ空の値で動きます（with.envs: に {name} を追記してください）"
+                      )
+                  for name in sorted(envs - all_env_names):
+                      errors.append(
+                          f"{workflow} の「{label}」: with.envs: の {name} に対応する env: の定義が"
+                          f"ありません。SSH先には空の値しか届きません（綴りか env: の追記漏れを"
+                          f"確認してください）"
+                      )
+                  for name in sorted((step_env & envs) - refs):
+                      warnings.append(
+                          f"{workflow} の「{label}」: {name} はSSH先へ転送されていますが、リモート"
+                          f"スクリプトで参照されていません（.env へ書く行の追記漏れの可能性）"
+                      )
+                  for name in sorted(step_env - envs - refs):
+                      warnings.append(
+                          f"{workflow} の「{label}」: {name} は env: にありますが、with.envs: にも"
+                          f"リモートスクリプトにも出てきません（消し忘れの可能性）"
+                      )
+              if not found:
+                  notes.append(f"{workflow}: appleboy/ssh-action が無いため envs: の検査はスキップしました")
+
+
+          def logical_commands(text):
+              """行末の `\\` による継続を1行へ畳む"""
+              out = []
+              buf = ""
+              for line in text.split("\n"):
+                  stripped = line.rstrip()
+                  if stripped.endswith("\\"):
+                      buf += stripped[:-1] + " "
+                      continue
+                  out.append(buf + stripped)
+                  buf = ""
+              if buf:
+                  out.append(buf)
+              return out
+
+
+          def tar_inputs(tokens):
+              """tar の引数のうち、リポジトリに存在すべきパスだけを返す"""
+              inputs = []
+              skip_next = False
+              archive_taken = False
+              has_f = False
+              for token in tokens[1:]:
+                  if skip_next:
+                      skip_next = False
+                      continue
+                  if token.startswith("--"):
+                      if token in ("--file", "--exclude", "--directory"):
+                          skip_next = True
+                      continue
+                  if token.startswith("-") or (not inputs and TAR_FLAGS_RE.match(token) and not has_f):
+                      if "f" in token:
+                          has_f = True
+                      continue
+                  if has_f and not archive_taken:
+                      archive_taken = True
+                      continue
+                  # 変数・グロブを含むものは静的に確かめられないので見送る
+                  if any(c in token for c in "$*?`(){}"):
+                      continue
+                  inputs.append(token)
+              return inputs
+
+
+          def check_tar_targets(lines, workflow):
+              """配布物を固める `tar` の対象が、チェックアウト後に実在するかを確かめる。
+
+              gitは空ディレクトリを追跡しないため、`public/` を追跡していないリポジトリでは
+              `tar: public: Cannot stat: No such file or directory` で build ジョブが落ちる。
+              `.next` のようなビルド生成物は追跡されないが `.gitignore` されているので除外する。
+              """
+              checked = 0
+              for idx, line in enumerate(lines):
+                  matched = KEY_RE.match(line)
+                  if not matched or matched.group(2) != "run":
+                      continue
+                  body = scalar_value(((matched.group(3) or "").strip(), children_of(lines, idx)))
+                  if "tar" not in body:
+                      continue
+                  if re.search(r"^\s*cd\s", body, re.MULTILINE):
+                      notes.append(f"{workflow}: `cd` を含む run: の中の tar は検査していません")
+                      continue
+                  workdir = scalar_value(step_map(lines, idx).get("working-directory", ("", [])))
+                  for command in logical_commands(body):
+                      if not re.match(r"^\s*tar\b", command):
+                          continue
+                      if "${{" in command:
+                          # GitHubの式は展開後の値が分からない。`${{` は shlex が3トークンへ割るため、
+                          # そのまま渡すと式の中身をパスとして誤検知する
+                          notes.append(f"{workflow}: GitHubの式を含む tar は検査していません")
+                          continue
+                      try:
+                          tokens = shlex.split(command)
+                      except ValueError:
+                          continue
+                      # 短縮フラグ（`-czf`）と、ダッシュ無しの旧来形（`tar czf`）の両方を拾う。
+                      # パスまで混ぜて数えると、`c` を含むファイル名で展開（`-xzf`）を作成と誤判定する
+                      flag_tokens = [t for t in tokens[1:] if t.startswith("-") and not t.startswith("--")]
+                      if not flag_tokens and len(tokens) > 1 and TAR_FLAGS_RE.match(tokens[1]):
+                          flag_tokens = [tokens[1]]
+                      flags = "".join(flag_tokens)
+                      if "c" not in flags and "--create" not in tokens:
+                          continue
+                      checked += 1
+                      for path in tar_inputs(tokens):
+                          target = os.path.join(workdir, path) if workdir else path
+                          if os.path.exists(target) or git_ignored(target):
+                              continue
+                          errors.append(
+                              f"{workflow}: tar の対象 {target} がリポジトリにありません。"
+                              f"`tar: {target}: Cannot stat: No such file or directory` で本番デプロイの"
+                              f"ビルドが失敗します（gitは空ディレクトリを追跡しません。"
+                              f"`{target}/.gitkeep` のようなファイルを追跡対象へ加えるか、tar の対象から"
+                              f"外してください）"
+                          )
+              if checked == 0:
+                  notes.append(f"{workflow}: 検査対象の tar コマンドはありませんでした")
+
+
+          def check_package_manager(candidates, major_max):
+              """`packageManager` の pnpm が、デプロイ先のNodeで動くメジャーかを確かめる。
+
+              pnpm 11 は Node 22.13 以上を要求し、VPSの Node 20 では依存インストールが
+              `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite` で落ちる。
+              """
+              for path in candidates:
+                  if not os.path.isfile(path):
+                      continue
+                  try:
+                      with open(path, encoding="utf-8") as handle:
+                          data = json.load(handle)
+                  except (OSError, ValueError):
+                      continue
+                  spec = data.get("packageManager")
+                  if not isinstance(spec, str):
+                      continue
+                  matched = re.match(r"pnpm@(\d+)", spec)
+                  if not matched:
+                      continue
+                  major = int(matched.group(1))
+                  if major > major_max:
+                      errors.append(
+                          f"{path}: packageManager が {spec} です。pnpm {major} は Node 22.13 以上を"
+                          f"要求し、デプロイ先の Node ではインストールが "
+                          f"`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite` で失敗します"
+                          f"（pnpm {major_max} 系に固定してください）"
+                      )
+                  else:
+                      notes.append(f"{path}: packageManager は {spec}")
+
+
+          def main():
+              workflow = os.environ.get("DEPLOY_WORKFLOW") or ".github/workflows/deploy.yml"
+              version_file = os.environ.get("VERSION_FILE") or "package.json"
+              major_max = int(os.environ.get("PNPM_MAJOR_MAX") or "10")
+
+              candidates = []
+              for path in ("package.json", version_file):
+                  if path.endswith("package.json") and path not in candidates:
+                      candidates.append(path)
+              check_package_manager(candidates, major_max)
+
+              if not os.path.isfile(workflow):
+                  notes.append(f"{workflow} が無いため、デプロイ設定の検査はスキップしました")
+              else:
+                  with open(workflow, encoding="utf-8") as handle:
+                      lines = handle.read().split("\n")
+                  # `envs:` の名前に対応する定義を探す先。ステップ・ジョブ・ワークフローの
+                  # どの階層の env: に置かれていてもリモートへ渡せるため、全部を集める
+                  all_env_names = set()
+                  for idx, line in enumerate(lines):
+                      matched = KEY_RE.match(line)
+                      if matched and matched.group(2) == "env" and not (matched.group(3) or "").strip():
+                          all_env_names |= set(parse_map(children_of(lines, idx), indent_of(line) + 2))
+                  check_ssh_action_envs(lines, all_env_names, workflow)
+                  check_tar_targets(lines, workflow)
+
+              for message in notes:
+                  print(message)
+              for message in warnings:
+                  print(f"::warning::{message}")
+              for message in errors:
+                  print(f"::error::{message}")
+              if errors:
+                  print(f"デプロイ設定の検査で {len(errors)} 件の問題が見つかりました")
+                  return 1
+              print("OK: 本番でだけ失敗するデプロイ設定の漏れは見つかりませんでした")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+
+          PYTHON
+          python3 "$SCRIPT"

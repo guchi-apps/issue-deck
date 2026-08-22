@@ -106,6 +106,29 @@ HEAD以外のコミットに存在すれば失敗させる。バージョンが�
 - 上記の自動化（バンプPR → develop→mainのPR）を通る限りバージョンは必ず上がっているため、この
   チェックが落ちるのは手動でPRを作った場合か、バンプPRを飛ばした場合になる。
 
+### 同じ形で落とす`deploy-config-check`（#2135）
+
+「mainへマージした後に初めて分かる」失敗はタグの重複だけではない。`reusable-version-tag-check.yml`
+には`deploy-config-check`ジョブがあり、`deploy.yml`を静的に読んで次の3つを同じタイミングで落とす。
+
+1. **`appleboy/ssh-action`の`with.envs:`への追記漏れ。** `envs:`はSSH先へ転送する名前の
+   ホワイトリストで、`env:`に定義しただけではリモートに存在しない。`${FOO:-}`のような既定値付き
+   参照だと**空文字のまま`.env`へ書かれて起動してしまう**ため、気づくのが本番の実行時になる。
+   `env:`・`with.envs:`・リモートスクリプトの3者を突き合わせ、集合がずれていれば落とす。
+2. **`tar`の対象に実在しないパスがある。** gitは空ディレクトリを追跡しないため、`public/`を
+   追跡していないリポジトリでは`tar: public: Cannot stat: No such file or directory`で`build`が
+   落ちる。`.gitignore`済みのビルド生成物（`.next`など）は対象外。
+3. **`packageManager`のpnpmメジャー。** pnpm 11はNode 22.13以上を要求し、VPSのNode 20では
+   依存インストールが`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`で落ちる（上限は`pnpm-major-max`で
+   変えられる。既定は10）。
+
+**判定できない形は黙って通す。** `deploy.yml`の書き方はリポジトリごとに違うため、`cd`を挟む
+`run:`やGitHubの式・変数を含む`tar`の引数は検査せず、理由をログに残すだけにしてある。誤検知で
+main宛PRを止める方が、見逃すより高くつく。検査本体（Python）は再利用可能ワークフローのYAMLへ
+直接書いてある——他リポジトリから呼ばれたときcheckoutされるのは**呼び出し元**のリポジトリで、
+issue-deck側の隣のファイルは読めないため。テスト（`scripts/reusable-version-tag-check.test.mjs`）は
+そのYAMLから`run:`本文を取り出して実行するので、正はYAMLの1か所にある。
+
 ## バージョンの上げ幅の判定
 
 issueのラベルではなく、main/develop間の実際のコード差分の内容から判定する。専用のClaude
