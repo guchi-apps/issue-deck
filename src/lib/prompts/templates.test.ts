@@ -116,6 +116,21 @@ describe("buildImplementationPrompt", () => {
     expect(prompt).toContain("実装後にPR本文へURLを貼る必要はありません");
   });
 
+  // #2110: 手順は#1745でdocs/multi-agent/labels.mdに決まっているが、他リポジトリのworktreeから
+  // issue-deckのdocs/は読めない。プロンプトへ写していないと、計画レビューで見た目が変わった
+  // 時点で「古いURLの計画を承認させる／Plan modeを抜ける」の二択で止まる
+  it("計画レビューで見た目が変わったときの差し替え手順を渡す", () => {
+    const prompt = buildImplementationPrompt({
+      ...BASE,
+      labels: [{ name: "25.artifact-required" }, { name: "21.plan-required" }],
+    });
+    // URLを載せる時点で差し替えがあり得ると断らせる（定型文）
+    expect(prompt).toContain("承認後・コードを書く前に同じURLへ差し替えます");
+    // Plan modeの中では差し替えず、承認後に同じパスで再公開する順序
+    expect(prompt).toContain("Plan modeの中では差し替えないでください");
+    expect(prompt).toContain("最初と同じファイルパス");
+  });
+
   // #1632: 見た目の合意はPCだけでは足りず、スマホ幅の崩れは実装後に発覚すると作り直しになる
   it("ラベルの有無によらずPC・スマホ(iPhone 15)の2画面を求める", () => {
     for (const labels of [[], [{ name: "25.artifact-required" }]]) {
