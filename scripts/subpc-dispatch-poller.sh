@@ -118,7 +118,8 @@ set -euo pipefail
 #     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
 # 16: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
 # 17: メモリ・SWAPが逼迫している間、起動ジョブを`maxJobs=0`で見送り、その理由を申告する（#2095）。
-DISPATCH_POLLER_VERSION="17"
+# 18: 定期的なworktreeの掃除を`--all-repos`で全リポジトリへ広げる（#2123）。
+DISPATCH_POLLER_VERSION="18"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -805,11 +806,19 @@ reap_sessions() {
 # 稼働開始（2026-08-13）から3日で181本・38GBまで溜まり、ルートFSが77%に達した。
 # 掃除さえ回れば181本中177本が削除対象になりうる状態だったので、足りなかったのは判定ではなく起点。
 #
+# **`--all-repos`で全リポジトリを回す**（#2123）。issue-deckだけを掃除していた頃は、汎用
+# ランチャーで起こした他リポジトリのworktreeに起点が無く、166本中153本が他リポジトリのまま
+# 溜まってルートFSが91%に達した。#1716で足りなかったのが起点なら、ここで足りなかったのは範囲。
+#
 # **非対話では`--yes`が必須**（付けないと表示だけで終わる）。
 WORKTREE_CLEANUP_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/worktree-cleanup.stamp"
-# 掃除が固まっても1巡を止めないための上限（秒）。#1680の改善後で実測「170本を数十秒」なので、
-# 5分あれば通常は足りる。**この間ポーリングは止まる**（ジョブの取得が最大5分遅れる）が、
-# 別プロセスへ逃がすと失敗がjournaldに出ないままになるため、上限付きの同期実行にしている。
+# 掃除が固まっても1巡を止めないための上限（秒）。**この間ポーリングは止まる**（ジョブの取得が
+# その分だけ遅れる）が、別プロセスへ逃がすと失敗がjournaldに出ないままになるため、上限付きの
+# 同期実行にしている。
+#
+# 全リポジトリ（19リポジトリ・166本）の`--dry-run`が実測42秒なので、削除を含めても5分あれば
+# 足りる。**リポジトリを増やしたらここを見直す**（#2123。1リポジトリあたりfetch1回とgh1回が
+# 増える）。
 WORKTREE_CLEANUP_TIMEOUT_SECONDS=300
 
 reap_worktrees() {
@@ -829,9 +838,9 @@ reap_worktrees() {
   mkdir -p "$(dirname "$WORKTREE_CLEANUP_STAMP")" 2>/dev/null || true
   touch "$WORKTREE_CLEANUP_STAMP" 2>/dev/null || true
 
-  echo "worktreeを掃除します（間隔 ${WORKTREE_CLEANUP_INTERVAL_MINUTES}分）..."
+  echo "worktreeを掃除します（全リポジトリ・間隔 ${WORKTREE_CLEANUP_INTERVAL_MINUTES}分）..."
   # **回収の失敗でポーリングを止めない**（開発サーバー・セッションの回収と同じ扱い）。
-  timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --yes ||
+  timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --all-repos --yes ||
     echo "Error: worktreeの掃除に失敗しました。" >&2
   return 0
 }

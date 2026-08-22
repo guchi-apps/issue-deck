@@ -1520,10 +1520,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
-- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716）。pollerは`WORKTREE_CLEANUP_INTERVAL_MINUTES`
-  （既定60分・0で無効）の間隔で`scripts/cleanup-worktrees.sh --yes`を呼ぶ。**足りなかったのは
+- **worktreeの掃除も同じ1巡に相乗りさせる**（#1716・#2123）。pollerは
+  `WORKTREE_CLEANUP_INTERVAL_MINUTES`（既定60分・0で無効）の間隔で
+  `scripts/cleanup-worktrees.sh --all-repos --yes`を呼ぶ。**足りなかったのは
   判定ではなく起点**で、スクリプトは#1100からあったのに実行の起点がどこにも無く、3日で181本・38GB
-  溜まってルートFSが77%に達した。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
+  溜まってルートFSが77%に達した。**次に足りなかったのは範囲**で、起点を置いたあともissue-deckの
+  worktreeしか見ておらず、汎用ランチャー（#1224）で起こした他リポジトリのworktreeが166本中153本
+  まで溜まってルートFSが91%に達した（#2123。`--repo <owner/repo>`で1リポジトリ、`--all-repos`で
+  `local-repos.conf`の全リポジトリ）。無人で回すための安全弁が2つあり、(1)起動の準備から30分が
   経っていないworktreeは触らない（`--min-age-minutes`。`start-issue.sh`が作ってからセッションの
   プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
   消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
