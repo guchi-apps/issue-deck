@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -29,7 +30,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
@@ -270,7 +271,7 @@ describe("PullRequestList", () => {
     renderList([
       makePullRequest({
         ciState: "success",
-        mergeJudgement: { state: "pending", step: null, runUrl: null },
+        mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       }),
     ]);
     const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
@@ -287,6 +288,7 @@ describe("PullRequestList", () => {
           state: "pending",
           step: "claude-review",
           runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
+          aiReview: AI_REVIEW_NONE,
         },
       }),
     ]);
@@ -299,7 +301,7 @@ describe("PullRequestList", () => {
     renderList([
       makePullRequest({
         ciState: "success",
-        mergeJudgement: { state: "settled", step: null, runUrl: null },
+        mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       }),
     ]);
     expect(screen.queryByText("マージ可否を判定中")).toBeNull();

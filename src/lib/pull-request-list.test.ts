@@ -20,6 +20,7 @@ import {
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -44,7 +45,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
@@ -410,7 +411,7 @@ describe("pullRequestsAwaitingUserMerge", () => {
         releasePullRequest({ number: 1, ciState: "pending" }),
         releasePullRequest({
           number: 2,
-          mergeJudgement: { state: "pending", step: "claude-review", runUrl: null },
+          mergeJudgement: { state: "pending", step: "claude-review", runUrl: null, aiReview: AI_REVIEW_NONE },
         }),
         releasePullRequest({ number: 3 }),
       ],
@@ -459,7 +460,7 @@ describe("pullRequestsWaitingForMergeChecks", () => {
       releasePullRequest({ number: 1, ciState: "pending" }),
       releasePullRequest({
         number: 2,
-        mergeJudgement: { state: "pending", step: "risk-check", runUrl: null },
+        mergeJudgement: { state: "pending", step: "risk-check", runUrl: null, aiReview: AI_REVIEW_NONE },
       }),
       releasePullRequest({ number: 3 }),
       // マージ待ちですらないものは、どちらにも入らない
@@ -521,10 +522,10 @@ describe("canMergeFromDeck", () => {
 
 describe("isMergeJudgementPending", () => {
   it("判定が走っている間だけ真になる（#1968）", () => {
-    expect(isMergeJudgementPending({ state: "pending", step: null, runUrl: null })).toBe(true);
-    expect(isMergeJudgementPending({ state: "settled", step: null, runUrl: null })).toBe(false);
+    expect(isMergeJudgementPending({ state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(true);
+    expect(isMergeJudgementPending({ state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(false);
     // 判定のワークフローが配られていないリポジトリまで塞がない。
-    expect(isMergeJudgementPending({ state: "unknown", step: null, runUrl: null })).toBe(false);
+    expect(isMergeJudgementPending({ state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE })).toBe(false);
   });
 
   it("未取得（null・undefined）は押せる側として扱う（#2059）", () => {
@@ -544,7 +545,7 @@ describe("isMergeJudgementPending", () => {
   it("判定中でも`mergeWarnings`は増やさない（止め方はボタンの無効化。#1968）", () => {
     const judging = pullRequest({
       ciState: "success",
-      mergeJudgement: { state: "pending", step: null, runUrl: null },
+      mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     });
     expect(mergeWarnings(judging)).toEqual([]);
   });

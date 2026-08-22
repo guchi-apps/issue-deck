@@ -8,6 +8,7 @@ import {
   resolveCheckUserToasts,
   type PendingCheckUserToast,
 } from "@/lib/check-user-notification";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -70,7 +71,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: true,
     linkedIssueCheckReason: "merge",
     ciState: "pending",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,

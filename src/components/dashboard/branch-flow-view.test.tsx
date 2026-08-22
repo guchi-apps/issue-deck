@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import { buildBranchFlow, type BranchFlowIssueSource } from "@/lib/branch-flow";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -34,7 +35,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,

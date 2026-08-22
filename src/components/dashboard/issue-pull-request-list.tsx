@@ -7,6 +7,7 @@ import { GitPullRequest } from "lucide-react";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
 import {
+  AiReviewBadge,
   ConflictBadge,
   MergeJudgementBadge,
   RepairRunBadge,
@@ -176,6 +177,8 @@ export function IssuePullRequestList({
               </GithubReferenceLink>
               {detail && <IssuePullRequestStateBadge pullRequest={detail} />}
               {detail && <PullRequestCiStatusBadge status={detail.ciStatus} />}
+              {/* Claudeのレビューが終わったかも、PR画面と同じ部品・同じ並び順で出す（#2150） */}
+              {detail && <AiReviewBadge aiReview={detail.mergeJudgement.aiReview} />}
               {/* コンフリクトと自動修復の実行中は、PR画面と同じバッジ・同じ文言で出す（#2145）。
                   CI状態だけを出していた頃は、コンフリクトしていても「CI通過」しか見えなかった */}
               {detail && <ConflictBadge mergeable={detail.mergeable} />}

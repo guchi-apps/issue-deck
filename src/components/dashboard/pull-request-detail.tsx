@@ -6,6 +6,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
+  AiReviewBadge,
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
@@ -246,6 +247,8 @@ export function PullRequestDetail({
             ) : (
               <CiStateBadge ciState={pullRequest.ciState} />
             )}
+            {/* CIとは別の軸として、Claudeのレビューが終わったかをCI状態の隣に出す（#2150）。 */}
+            <AiReviewBadge aiReview={pullRequest.mergeJudgement.aiReview} />
             <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
             <DeployStatusBadge status={deployStatus} />
             {pullRequest.autoMergeEnabled && (

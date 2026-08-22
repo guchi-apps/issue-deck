@@ -7,6 +7,7 @@ import {
   selectIssuePullRequests,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { IssuePullRequest } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRequest {
@@ -18,7 +19,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: 600,
@@ -85,7 +86,7 @@ describe("isIssuePullRequestSettling", () => {
   it("自動マージ可否の判定中はまだ動いている", () => {
     expect(
       isIssuePullRequestSettling(
-        pullRequest({ mergeJudgement: { state: "pending", step: null, runUrl: null } }),
+        pullRequest({ mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE } }),
       ),
     ).toBe(true);
   });
