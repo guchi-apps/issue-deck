@@ -204,6 +204,7 @@ function renderDetail(issue: Issue) {
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
       onCreateCodeReviewFindingIssue={vi.fn()}
+      onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,
@@ -226,6 +227,7 @@ function renderMobileDetail(issue: Issue) {
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
       onCreateCodeReviewFindingIssue={vi.fn()}
+      onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,

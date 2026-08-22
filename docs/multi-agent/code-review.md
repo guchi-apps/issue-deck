@@ -20,6 +20,7 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
               （<!-- issue-deck-code-review-report -->）
   → 画面が結果コメントを読んで指摘カードにする（CodeReviewPanel）
   → カードの「Issueを作成」→ 埋まった新規作成ダイアログ
+  → 「もう一度レビュー」→ 同じリポジトリで実行ダイアログを開き直す
 ```
 
 ## 記録はGitHubのIssue1件にする

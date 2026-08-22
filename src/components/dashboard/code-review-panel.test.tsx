@@ -98,6 +98,21 @@ describe("CodeReviewPanel（#698）", () => {
     expect(screen.getByText(/#2170 として起票済み/)).toBeTruthy();
   });
 
+  // 直したあとに効いたかを見たくなるのは結果を読んだ直後。ここに無いとビューまで戻ることになる
+  it("結果が出てからは「もう一度レビュー」を出す（レビュー中は出さない）", () => {
+    const onRestartReview = vi.fn();
+    const { rerender } = render(
+      <CodeReviewPanel report={null} isPending onRestartReview={onRestartReview} />,
+    );
+    expect(screen.queryByRole("button", { name: "もう一度レビュー" })).toBeNull();
+
+    rerender(
+      <CodeReviewPanel report={report()} isPending={false} onRestartReview={onRestartReview} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "もう一度レビュー" }));
+    expect(onRestartReview).toHaveBeenCalledTimes(1);
+  });
+
   // 書式が崩れて指摘を拾えなかった場合でも、投稿された結果そのものは隠さない
   it("指摘が0件でも総評は出す", () => {
     const parsed = parseCodeReviewReport(

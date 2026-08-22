@@ -1,6 +1,6 @@
 "use client";
 
-import { FilePlus2, Loader2, ScanSearch } from "lucide-react";
+import { FilePlus2, Loader2, RotateCw, ScanSearch } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ export function CodeReviewPanel({
   isPending,
   createdFindingIssues,
   onCreateFindingIssue,
+  onRestartReview,
   className,
 }: {
   /** いちばん新しいレビュー結果。まだ返っていなければ`null` */
@@ -51,6 +52,14 @@ export function CodeReviewPanel({
   createdFindingIssues?: ReadonlyMap<string, number>;
   /** 指摘をIssueにする。渡さない画面ではボタンを出さない */
   onCreateFindingIssue?: (finding: CodeReviewFinding) => void;
+  /**
+   * 同じリポジトリをもう一度レビューする（実行ダイアログを開く）。
+   *
+   * **結果を読んだ場所から起こし直せるようにする。** 直したあとに効いたかを見たくなるのは
+   * 結果を読んだ直後で、そのたびに「コードレビュー」ビューへ戻るのは遠い。
+   * 走っている最中（`isPending`）は出さない。
+   */
+  onRestartReview?: () => void;
   className?: string;
 }) {
   if (!report && !isPending) return null;
@@ -80,6 +89,12 @@ export function CodeReviewPanel({
             <Loader2 className="size-3.5 animate-spin" />
             レビュー中
           </span>
+        )}
+        {report && onRestartReview && (
+          <Button size="xs" variant="outline" className="ml-auto" onClick={onRestartReview}>
+            <RotateCw />
+            もう一度レビュー
+          </Button>
         )}
       </div>
 

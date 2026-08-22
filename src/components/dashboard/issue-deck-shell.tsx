@@ -1362,6 +1362,7 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={selectRepositoryByFullName}
                   onStartManualStepGuide={manualStepGuide.start}
                 />
@@ -1537,6 +1538,7 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
                   }

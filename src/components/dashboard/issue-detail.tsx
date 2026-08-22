@@ -161,6 +161,8 @@ type IssueDetailProps = {
   onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
   /** コードレビューの指摘（#698）を、対象リポジトリのIssueとして起票する下書きを開く */
   onCreateCodeReviewFindingIssue: (issue: Issue, finding: CodeReviewFinding) => void;
+  /** 同じリポジトリのコードレビュー（#698）をもう一度実行するダイアログを開く */
+  onStartCodeReview: (repositoryFullName: string) => void;
   onSelectRepository: (repositoryFullName: string) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
@@ -178,6 +180,7 @@ export function IssueDetail({
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
+  onStartCodeReview,
   onSelectRepository,
   onStartManualStepGuide,
 }: IssueDetailProps) {
@@ -857,6 +860,7 @@ export function IssueDetail({
               report={codeReview.report}
               isPending={codeReview.isPending}
               createdFindingIssues={codeReview.createdFindingIssues}
+              onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
               onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
             />
           )}
