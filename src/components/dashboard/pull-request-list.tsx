@@ -10,6 +10,7 @@ import {
   ConflictBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
+  RepairRunBadge,
   UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
@@ -145,6 +146,8 @@ function PullRequestCard({
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
         <ConflictBadge mergeable={pullRequest.mergeable} />
+        {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
+        <RepairRunBadge run={pullRequest.repairRun} />
         {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
         {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -157,6 +160,7 @@ function PullRequestCard({
           pullRequestNumber={pullRequest.number}
           kinds={repairKinds}
           availability={pullRequest.repairWorkflowAvailability}
+          runningKind={pullRequest.repairRun?.kind ?? null}
         />
         {canMergeFromDeck(pullRequest) && (
           <PullRequestMergeButton

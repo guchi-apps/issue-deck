@@ -10,6 +10,10 @@ import {
   extractBumpUsage,
 } from "@/lib/github/release-bump-reason";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import {
+  fetchActivePullRequestRepairRuns,
+  repairRunKey,
+} from "@/lib/github/pull-request-repair-run";
 import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
   dispatchReleaseWorkflow,
@@ -141,6 +145,14 @@ async function handleGET(request: NextRequest) {
         : Promise.resolve({}),
     ]);
 
+    // いま走っている自動修復（#2072）。バンプPR・リリースPRを直すのは`claude-pr-repair.yml`で、
+    // 走っているあいだは段に「自動修正中」を出してボタンを押せなくする。DBを1回引くだけ。
+    const repairRuns = await fetchActivePullRequestRepairRuns(
+      [bumpPr?.number, releasePr?.number]
+        .filter((number): number is number => number !== undefined)
+        .map((number) => ({ repositoryFullName: `${owner}/${repo}`, pullRequestNumber: number })),
+    );
+
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
     // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
     // - release_pr_open: develop→mainのPRがオープン中（mainマージ待ち＝人手）
@@ -170,6 +182,7 @@ async function handleGET(request: NextRequest) {
             ciState: bumpState?.ciState ?? null,
             mergeable: bumpState?.mergeable ?? null,
             repairWorkflowAvailability: bumpRepairAvailability,
+            repairRun: repairRuns.get(repairRunKey(`${owner}/${repo}`, bumpPr.number)) ?? null,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -184,6 +197,7 @@ async function handleGET(request: NextRequest) {
             ciState: releaseState?.ciState ?? null,
             mergeable: releaseState?.mergeable ?? null,
             repairWorkflowAvailability: releaseRepairAvailability,
+            repairRun: repairRuns.get(repairRunKey(`${owner}/${repo}`, releasePr.number)) ?? null,
           }
         : null,
       otherPullRequests,

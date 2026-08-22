@@ -2,6 +2,7 @@ import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
+import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { CiState } from "@/lib/github/release-api";
 
 /** マージ待ちPRの種別。リポジトリ横断の一覧で「何を待っているPRか」を一目で区別するために使う */
@@ -105,6 +106,18 @@ export type PullRequestSummary = {
    * これが`false`の種類は押しても`workflow_dispatch`が404になるため、画面側で無効化する。
    */
   repairWorkflowAvailability: RepairWorkflowAvailability;
+  /**
+   * このPRの自動修復がいま走っているか（#2072）。走っていなければnull。
+   *
+   * **CI状態（`ciState`）・コンフリクト（`mergeable`）とは別の軸。** CIが失敗したまま
+   * 修復が走っている時間帯があり、そこを「チェック失敗」だけで見せると、放っておけば
+   * 片付くのか自分で直すのかが判断できない（それがこのIssueの起点）。
+   *
+   * 材料はGitHubではなくissue-deckのDB（`PullRequestRepairRun`）で、走っている
+   * ワークフロー自身が報告する。**GitHub APIからは引けない**理由は
+   * [`lib/github/pull-request-repair-run.ts`](../lib/github/pull-request-repair-run.ts)を参照。
+   */
+  repairRun: PullRequestRepairRunSummary | null;
   createdAt: string;
   updatedAt: string;
 };

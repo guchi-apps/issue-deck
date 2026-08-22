@@ -12,6 +12,7 @@ import {
   DeployStatusBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
+  RepairRunBadge,
   UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
@@ -250,6 +251,8 @@ export function PullRequestDetail({
             )}
             {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
             <ConflictBadge mergeable={pullRequest.mergeable} />
+            {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
+            <RepairRunBadge run={pullRequest.repairRun} />
 
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <UserAvatar login={pullRequest.authorLogin} className="size-4" />
@@ -263,6 +266,7 @@ export function PullRequestDetail({
               pullRequestNumber={pullRequest.number}
               kinds={repairKinds}
               availability={pullRequest.repairWorkflowAvailability}
+              runningKind={pullRequest.repairRun?.kind ?? null}
             />
             {canMergeFromDeck(pullRequest) && (
               <PullRequestMergeButton

@@ -267,6 +267,37 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
   `reusable-claude-ci-fix.yml`は指定自体が無く、3つとも押しても効かない状態だった。
   **今後この導線から起動するワークフローを増やすときは`allowed_bots`への追加を忘れないこと。**
 
+## 走っていることを画面に出す（#2072）
+
+CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面と通知には赤い「チェック失敗」しか
+出ていなかった。受け取った側からは**放っておけば片付くのか、自分で直すのか**が判断できず、
+「失敗しか通知されない」状態になっていた（実例: PR #2068。`lint-and-build`の失敗から14秒後に
+`claude-ci-fix.yml`が起動していたが、画面には何も出なかった）。
+
+- **走っているワークフロー自身が報告する。** 3つの修復ワークフローが、対象PRを確定した直後に
+  `POST /api/pull-requests/repair-runs`へ`status=running`、ジョブの最後（`if: always()`）に
+  `status=finished`を送る。認証・「失敗してもワークフローを止めない」扱いは`POST /api/progress`と同じ
+  （`PROGRESS_REPORT_SECRET`）。**この2ステップは`reusable-*.yml`側にあるため、他リポジトリへは
+  参照タグ（`@workflows/vN`）を上げた時点で効く**（callerの変更は要らない）。
+- **GitHub APIからは引けない。** `claude-ci-fix.yml`は`workflow_run`で起動するため、runの
+  `head_branch`は`develop`・`head_sha`はdevelopのSHAで、**実行から対象PRへ辿る手段が無い**
+  （PR #2068の実行で実測）。headコミットへcheck-runを立てて既存の`statusCheckRollup`へ
+  相乗りさせる案もあるが、Checks APIはGitHub Appでしか書けず、callerごとに`checks: write`を
+  足して回ることになるため採っていない。
+- **保存するのは「いまの状態」だけ。** `PullRequestRepairRun`は1PR×1種別につき1行を上書きする
+  （履歴はActionsとコメントに残る）。実行がキャンセルされて終了の報告が届かない場合に備え、
+  開始から`REPAIR_RUN_STALE_MINUTES`（60分）で失効させる。
+- **画面のボタンから起動した場合は、APIが起動した時点でも同じ行を書く**
+  （`POST /api/pull-requests/repair`）。ワークフローが自分で報告するのは対象PRを再確認した後に
+  なるため、押した直後の数十秒が空白になるのを避ける。
+- 出るのは`RepairRunBadge`（マージ待ちPR一覧のカード・PR詳細ヘッダー・リリース進捗の各段）と
+  通知ベル。**CI失敗の赤は消さず、その隣に重ねる**——失敗している事実は変わらないため。
+  通知ベルだけは赤（`error`）をやめて`info`まで弱める（いま人が動けるものではないので、
+  確認待ちの「CI実行中」と同じ扱い）。走っているあいだは同じ種類の修復ボタンを押せなくする。
+- CI失敗のSignaly通知（`ci.yml`の`notify`ジョブ）も、develop向けの`issue-<番号>`ブランチの
+  失敗であれば本文へ「自動修正を試みます」を添える。**このジョブはリポジトリごとの`ci.yml`に
+  あるため、他リポジトリへは波及しない**（画面の表示だけが共通で効く）。
+
 ## 配布状況と、不足しているcallerの配布（#1948）
 
 **自動修復のcallerは、そのリポジトリの`.github/workflows/`に置かれていなければ起動できない。**

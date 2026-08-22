@@ -2,6 +2,7 @@ import { buildPullRequestId } from "@/lib/github-reference";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgementState } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
+import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
 import { classifyPullRequest, extractLinkedIssueNumbers } from "@/lib/pull-request-list";
@@ -26,6 +27,8 @@ import type { PullRequestSummary } from "@/types/pull-request";
  *
  * 自動修復ワークフローの配布状況（`repairWorkflowAvailability`。#1960）も同じく呼び出し側が
  * 渡す。**修復ボタンを出すPRでしか判定しない**ため、いつ問い合わせるかは経路ごとに違う。
+ * いま走っている自動修復（`repairRun`。#2072）も同じ扱いで、材料がGitHubではなくissue-deckの
+ * DBのため、一覧はまとめて1クエリ・詳細は1件だけと引き方が違う。
  */
 export function toPullRequestSummary(
   pullRequest: GithubApiOpenPullRequest,
@@ -41,6 +44,8 @@ export function toPullRequestSummary(
     linkedIssueCheckReason?: CheckUserReason | null;
     /** 修復ワークフローの配布状況。判定していない経路では省略＝`{}`（押せる扱い） */
     repairWorkflowAvailability?: RepairWorkflowAvailability;
+    /** いま走っている自動修復（#2072）。引いていない経路では省略＝`null`（何も出さない） */
+    repairRun?: PullRequestRepairRunSummary | null;
   },
 ): PullRequestSummary {
   const baseRef = pullRequest.base.ref;
@@ -77,6 +82,7 @@ export function toPullRequestSummary(
     mergeJudgement: options.mergeJudgement ?? "unknown",
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
+    repairRun: options.repairRun ?? null,
     createdAt: pullRequest.created_at,
     updatedAt: pullRequest.updated_at,
   };
