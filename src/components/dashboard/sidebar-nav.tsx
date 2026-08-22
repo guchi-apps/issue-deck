@@ -18,6 +18,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-count";
+import { useNotificationState } from "@/components/dashboard/notification-state";
 import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
@@ -31,6 +32,7 @@ import {
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   isRepositoryAutomationUnsupported,
@@ -65,6 +67,12 @@ type SidebarNavProps = {
    * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
    */
   unconfirmedQuestionCount: number;
+  /**
+   * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
+   * 使う。**nullは未取得**で、そのときは件数を出さない（0を出すと「動いているものが無い」と
+   * 読めてしまう）。
+   */
+  releaseActivity: ReleaseActivityCounts | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
@@ -82,7 +90,24 @@ type SidebarNavProps = {
   style?: CSSProperties;
 };
 
-export function SidebarNav({
+/**
+ * PCの左メニュー（#742ほか）。
+ *
+ * **「ブランチ」行の件数はProviderから自分で読む**（#2167。`MobileBottomNav`と同じ形）。
+ * 材料はベルと同じ1本のポーリング（`/api/repositories/release-pending-merges`）で、
+ * これを描いている`issue-deck-shell.tsx`は`NotificationProvider`の親なのでフックを呼べず、
+ * propで配れない。**新しく`useRepositoryReleaseStatuses`を呼ぶと取得が2本走る。**
+ */
+export function SidebarNav(props: Omit<SidebarNavProps, "releaseActivity">) {
+  const { releaseActivity } = useNotificationState();
+
+  return <SidebarNavView {...props} releaseActivity={releaseActivity} />;
+}
+
+/**
+ * 描画だけを持つ本体。Providerに依存しないので、件数を渡してそのまま試験できる。
+ */
+export function SidebarNavView({
   activeView,
   onSelectView,
   activePane,
@@ -93,6 +118,7 @@ export function SidebarNav({
   checkUserPullRequestCount,
   manualStepAttention,
   unconfirmedQuestionCount,
+  releaseActivity,
   pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -237,7 +263,16 @@ export function SidebarNav({
             icon: GitBranch,
             active: activePane === "flow",
             onClick: onSelectFlow,
-            title: "Issue・ブランチ・Pull Requestの関係とマージ先までの流れ",
+            // 数えるのは**リリース・デプロイが動いているプロジェクト（リポジトリ）の数**
+            // （#2167）。開いた先の画面がリポジトリ単位で並ぶので、そこと単位を揃える。
+            // **手作業（`71.manual-step`）は含めない**——上の「ユーザーの作業待ち」が
+            // 持つ別の項目で、両方に出すとどちらを押せば片付くのか分からなくなる
+            count: releaseActivity?.total ?? null,
+            // 人が操作するまで進まないもの（バンプPR・リリースPRのマージ待ち、
+            // リリース・デプロイの失敗）があるときだけオレンジの丸にする
+            emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
+            // 数字（動いている数）と丸（操作待ち）で意味が違うため、内訳を吹き出しで補う
+            title: describeReleaseActivity(releaseActivity),
           })}
         </ul>
       </div>

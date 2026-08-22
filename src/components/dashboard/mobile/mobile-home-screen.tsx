@@ -18,6 +18,7 @@ import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-count";
+import { useNotificationState } from "@/components/dashboard/notification-state";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -31,6 +32,7 @@ import {
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -52,6 +54,11 @@ type MobileHomeScreenProps = {
    * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
    */
   unconfirmedQuestionCount: number;
+  /**
+   * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
+   * 使う。**nullは未取得**で、そのときは件数を出さない。PCの左メニューと同じ数え方。
+   */
+  releaseActivity: ReleaseActivityCounts | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   onSelectQuickView: (view: NavViewId) => void;
@@ -81,13 +88,27 @@ type MobileHomeScreenProps = {
  * **PCにある「リポジトリ（全件）」「ラベル」は置かない。** リポジトリはフッターの「Issue」タブ
  * （リポジトリ一覧）、ラベルは一覧の絞り込みシートが既に担っており、ホームに3つ目の入口を
  * 作ると押す場所が割れる。
+ *
+ * **「ブランチ」行の件数はProviderから自分で読む**（#2167。`MobileBottomNav`・PCの左メニューと
+ * 同じ形）。材料はベルと同じ1本のポーリングで、この画面を描いている`issue-deck-shell.tsx`は
+ * `NotificationProvider`の親なのでフックを呼べず、propで配れない。
  */
-export function MobileHomeScreen({
+export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "releaseActivity">) {
+  const { releaseActivity } = useNotificationState();
+
+  return <MobileHomeScreenView {...props} releaseActivity={releaseActivity} />;
+}
+
+/**
+ * 描画だけを持つ本体。Providerに依存しないので、件数を渡してそのまま試験できる。
+ */
+export function MobileHomeScreenView({
   overviewStats,
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
   unconfirmedQuestionCount,
+  releaseActivity,
   pullRequestNavCounts,
   onSelectQuickView,
   onSelectPullRequests,
@@ -254,7 +275,17 @@ export function MobileHomeScreen({
                 title={formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount)}
               />
             ))}
-            <MobileNavRow label="ブランチ" icon={GitBranch} onClick={onSelectFlow} />
+            {/* 件数の意味と数え方はPCの左メニュー（`sidebar-nav.tsx`）と同じ（#2167）。
+                リリース・デプロイが動いているプロジェクト数を出し、人が操作するまで進まない
+                ものがあるときだけオレンジの丸にする。手作業は含めない */}
+            <MobileNavRow
+              label="ブランチ"
+              icon={GitBranch}
+              onClick={onSelectFlow}
+              count={releaseActivity?.total ?? null}
+              emphasis={(releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none"}
+              title={describeReleaseActivity(releaseActivity)}
+            />
           </ul>
         </div>
 

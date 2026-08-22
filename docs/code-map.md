@@ -788,6 +788,25 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     （#1910）。`navCounts["question"]`はスマホの一覧のビュー切替（`mobile-issue-list-screen.tsx`）と
     ビュー選択シート（`mobile-issue-view-sheet.tsx`）にも出るため、画面ごとに数字を差し替えると
     左メニューの`1`と一覧の`3`が食い違う。手作業（#1763）と同じ置き場。
+- **左メニュー・スマホのホームの「ブランチ」行には、リリース・デプロイが動いている
+  プロジェクト（リポジトリ）の数を出す**（#2167。
+  [`lib/release-activity.ts`](../src/lib/release-activity.ts)）。数えるのは**リポジトリ数**で、
+  スマホのフッターの「ブランチ」タブのバッジ（マージ待ちPRの**本数**。#2055）とは単位が違う。
+  材料は同じ`/api/repositories/release-pending-merges`で、**`status`が`idle`のリポジトリを
+  APIが返さない**ため、返ってきた件数がそのまま「動いている数」になる。
+  - **オレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは、人が操作するまで進まない
+    ものがあるとき**——バージョンバンプPR・リリースPRのマージ待ち（`action_required`）と、
+    リリース・本番デプロイの失敗（`error`）。実行中（`progressing`）だけなら点けない。
+    **数字（動いている数）と丸（操作待ち）で意味が違う**ので、内訳は行の吹き出し
+    （`describeReleaseActivity`）で読む——「質問」の行（#2070）と同じ形。
+  - **手作業（`71.manual-step`）は数えない。** 上の「ユーザーの作業待ち」が持つ別の項目で、
+    両方の行に同じものが出ると、どちらを押せば片付くのか分からなくなる。
+  - **材料は`NotificationProvider`から`SidebarNav`・`MobileHomeScreen`が自分で読む**——
+    これらを描く`issue-deck-shell.tsx`はProviderの親でフックを呼べず、propで配れない。
+    新しく`useRepositoryReleaseStatuses`を呼ぶとポーリングが2本走る（フッターと同じ事情。
+    #1772）。描画だけの`SidebarNavView`・`MobileHomeScreenView`を別に出してあるのは、
+    Providerを立てずに件数を渡して試験するため。
+  - **未取得（`null`）と0件は区別する。** 未取得のうちは数字を出さない。
 - **Issue間の実施順序は本文の`## 前提条件`に書き、待つ側と待たれる側の両方へ出す**（#2003。
   [`lib/manual-step-prerequisites.ts`](../src/lib/manual-step-prerequisites.ts)・
   [`lib/issue-dependents.ts`](../src/lib/issue-dependents.ts)）。順序を表せるのは手作業Issueが

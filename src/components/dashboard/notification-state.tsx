@@ -12,6 +12,7 @@ import {
   type NotificationGroup,
   type NotificationItem,
 } from "@/lib/notifications";
+import { countReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import {
   countReleaseMergePending,
   type ReleaseMergePendingCounts,
@@ -60,6 +61,15 @@ type NotificationState = {
    */
   releaseMergePending: ReleaseMergePendingCounts | null;
   /**
+   * リリース・デプロイが動いているリポジトリ数と、そのうち操作待ちの数（#2167）。
+   * PCの左メニューとスマホのホームの「ブランチ」行が件数とオレンジの丸に使う。
+   * **まだ取れていない間はnull**（0件と区別する）。
+   *
+   * `releaseMergePending`とは数える単位が違う——あちらは人が押す番になったPRの**本数**で、
+   * こちらは動いている**リポジトリ数**（マージ待ちに限らず、実行中・失敗も含む）。
+   */
+  releaseActivity: ReleaseActivityCounts | null;
+  /**
    * ベルの材料（リリース状況・Issue一覧・Pull Request一覧）をまとめて取り直す（#1909）。
    * 開いている間の自動更新と、右上の更新ボタンの両方がこれを呼ぶ。
    */
@@ -85,6 +95,7 @@ const EMPTY_STATE: NotificationState = {
   countLabel: "0件",
   hasError: false,
   releaseMergePending: null,
+  releaseActivity: null,
   refresh: () => {},
   isFetching: false,
   fetchedAt: null,
@@ -194,6 +205,7 @@ export function NotificationProvider({
       countLabel: describeNotificationCount(items),
       hasError: hasErrorNotification(items),
       releaseMergePending: countReleaseMergePending(releaseStatuses),
+      releaseActivity: countReleaseActivity(releaseStatuses),
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
       isFetching: isSelfFetching || isRefreshingPullRequests,

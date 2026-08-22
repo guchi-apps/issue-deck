@@ -2,10 +2,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SidebarNav } from "@/components/dashboard/sidebar-nav";
+import { SidebarNav, SidebarNavView } from "@/components/dashboard/sidebar-nav";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import { navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
+import type { ReleaseActivityCounts } from "@/lib/release-activity";
 import { getPullRequestView } from "@/lib/pull-request-views";
 import type { NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -25,14 +26,16 @@ function renderSidebar(
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
     unconfirmedQuestionCount = 0,
+    releaseActivity = null,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
     unconfirmedQuestionCount?: number;
+    releaseActivity?: ReleaseActivityCounts | null;
   } = {},
 ) {
   render(
-    <SidebarNav
+    <SidebarNavView
       activeView="all"
       onSelectView={() => {}}
       activePane="issues"
@@ -43,6 +46,7 @@ function renderSidebar(
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
       unconfirmedQuestionCount={unconfirmedQuestionCount}
+      releaseActivity={releaseActivity}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
       labelSummary={[]}
@@ -294,5 +298,81 @@ describe("SidebarNav", () => {
     expect(repositoryNamesInOrder()).toEqual(["beta", "alpha"]);
     // 表示済みの1件を数に含めると、押しても増えない件数を出してしまう
     expect(screen.queryByText(/すべて表示する/)).toBeNull();
+  });
+});
+
+describe("SidebarNavの「ブランチ」行（#2167）", () => {
+  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0 };
+
+  /** 「ブランチ」行はラベルが1語なので、ボタンのテキストで引く */
+  function branchNavItem() {
+    return screen.getByRole("button", { name: /ブランチ/ });
+  }
+
+  it("未取得のうちは件数を出さない（0件と区別する）", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, { releaseActivity: null });
+
+    expect(branchNavItem().textContent).toBe("ブランチ");
+  });
+
+  it("リリース・デプロイが動いているプロジェクト数を出す", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
+      releaseActivity: { total: 3, actionRequired: 0 },
+    });
+
+    expect(branchNavItem().textContent).toContain("3");
+  });
+
+  it("操作待ちが無ければ強調しない（待てば進むもので橙を点けない）", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
+      releaseActivity: { total: 3, actionRequired: 0 },
+    });
+
+    expect(branchNavItem().querySelector("span:last-child")?.className).not.toContain(
+      "bg-amber-500",
+    );
+  });
+
+  it("バンプPRのマージ待ちなど操作待ちがあればオレンジの丸にする", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
+      releaseActivity: { total: 3, actionRequired: 1 },
+    });
+
+    // 出す数字は動いているプロジェクト数のままで、丸だけが操作待ちの合図（質問の行と同じ）
+    expect(branchNavItem().textContent).toContain("3");
+    expect(branchNavItem().querySelector("span:last-child")?.className).toContain("bg-amber-500");
+  });
+
+  it("数字と丸で意味が違うので、内訳を吹き出しで補う", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
+      releaseActivity: { total: 3, actionRequired: 1 },
+    });
+
+    expect(branchNavItem().getAttribute("title")).toContain(
+      "リリース・デプロイ中3件・うち操作待ち1件",
+    );
+  });
+
+  // 手作業は上の「ユーザーの作業待ち」が持つ別の項目（#2167）。
+  it("手作業が残っていてもブランチの件数・強調には影響しない", () => {
+    renderSidebar(
+      NO_PR_COUNTS,
+      { ...NAV_COUNTS, "manual-step": 3 },
+      {
+        manualStepAttention: { total: 3, actionable: 3, waitingForPrerequisites: 0 },
+        releaseActivity: { total: 0, actionRequired: 0 },
+      },
+    );
+
+    expect(branchNavItem().textContent).toContain("0");
+    expect(branchNavItem().querySelector("span:last-child")?.className).not.toContain(
+      "bg-amber-500",
+    );
+  });
+
+  it("Providerの外では件数を出さない（未取得と同じ扱い）", () => {
+    renderSidebarWithRepositories([]);
+
+    expect(branchNavItem().textContent).toBe("ブランチ");
   });
 });
