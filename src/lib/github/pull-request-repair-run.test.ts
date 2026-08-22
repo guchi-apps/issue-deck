@@ -4,7 +4,9 @@ import {
   isRepairKind,
   isRepairRunActive,
   isRepairRunStatus,
+  isRepairSymptomGone,
   repairRunKey,
+  visibleRepairRun,
   REPAIR_RUN_STALE_MINUTES,
 } from "@/lib/github/pull-request-repair-run";
 
@@ -59,5 +61,59 @@ describe("isRepairKind / isRepairRunStatus", () => {
 describe("repairRunKey", () => {
   it("リポジトリとPR番号で引けるキーを作る", () => {
     expect(repairRunKey("guchi-apps/issue-deck", 2068)).toBe("guchi-apps/issue-deck#2068");
+  });
+});
+
+describe("isRepairSymptomGone", () => {
+  it("コンフリクトが解消されていれば、コンフリクト解消は終わっているとみなす", () => {
+    expect(isRepairSymptomGone("conflict", { mergeable: true })).toBe(true);
+    expect(isRepairSymptomGone("conflict", { mergeable: false })).toBe(false);
+  });
+
+  // GitHubが判定中の`null`を「解消済み」に倒すと、走っている最中にピルが消える。
+  it("コンフリクト有無が未判定なら、まだ消えていないものとして扱う", () => {
+    expect(isRepairSymptomGone("conflict", { mergeable: null })).toBe(false);
+    expect(isRepairSymptomGone("conflict", {})).toBe(false);
+  });
+
+  it("CIが通っていれば、CI失敗の自動修正は終わっているとみなす", () => {
+    expect(isRepairSymptomGone("ci", { ciState: "success" })).toBe(true);
+    expect(isRepairSymptomGone("ci", { ciState: "failure" })).toBe(false);
+    expect(isRepairSymptomGone("ci", { ciState: "pending" })).toBe(false);
+    expect(isRepairSymptomGone("ci", { ciState: null })).toBe(false);
+  });
+
+  it("種別ごとに見る軸が違う（コンフリクトはCI状態を見ない）", () => {
+    expect(isRepairSymptomGone("conflict", { mergeable: false, ciState: "success" })).toBe(false);
+    expect(isRepairSymptomGone("ci", { mergeable: true, ciState: "failure" })).toBe(false);
+  });
+});
+
+describe("visibleRepairRun", () => {
+  const conflictRun = {
+    kind: "conflict",
+    startedAt: NOW.toISOString(),
+    runUrl: null,
+  } as const;
+
+  // 終了の報告が届かないと`running`の行が6時間残る。行の有無だけで出すと、解消後も
+  // 「コンフリクトを自動解消中」が消えない（#2165）。
+  it("コンフリクトが解消されたPRでは出さない", () => {
+    expect(visibleRepairRun(conflictRun, { mergeable: true })).toBeNull();
+  });
+
+  it("コンフリクトしたままのPRでは出す", () => {
+    expect(visibleRepairRun(conflictRun, { mergeable: false })).toEqual(conflictRun);
+    expect(visibleRepairRun(conflictRun, { mergeable: null })).toEqual(conflictRun);
+  });
+
+  it("走っている修復が無ければnullのまま", () => {
+    expect(visibleRepairRun(null, { mergeable: false })).toBeNull();
+  });
+
+  it("CI失敗の自動修正は、CIが通った時点で出さない", () => {
+    const ciRun = { kind: "ci", startedAt: NOW.toISOString(), runUrl: null } as const;
+    expect(visibleRepairRun(ciRun, { ciState: "success" })).toBeNull();
+    expect(visibleRepairRun(ciRun, { ciState: "failure" })).toEqual(ciRun);
   });
 });
