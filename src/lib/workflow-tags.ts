@@ -260,6 +260,11 @@ export type RepairWorkflowSpec = {
  * 点が同じなので同じ配布経路に載せる（#1475）。develop向けPRを「自動マージしてよい」
  * 「ユーザーのマージが必要」のどちらかへ確定させるのはこのcallerだけで、無いリポジトリでは
  * 低リスクPRも含めて全て手動マージになる（#1470）。
+ *
+ * `deploy-retry.yml`（#2134）も同じ理由で載せる。本番デプロイが一時的な失敗で落ちたときに
+ * 拾うのはこのcallerだけで、無いリポジトリでは人が「本番へ再デプロイ」を押しに来るまで本番が
+ * 古いままになる。**ただし`vps`・`subpc`へ配るかは配布のときに判断すること**——あの2つは
+ * 実機のインフラ設定を流すリポジトリで、Issue #2134でも自動再実行に含めるかを別扱いにしている。
  */
 export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
   {
@@ -281,6 +286,11 @@ export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
     file: "claude-review-develop.yml",
     requires: "claude-issue-dispatch.yml",
     label: "develop向けPRの自動マージ判定",
+  },
+  {
+    file: "deploy-retry.yml",
+    requires: "deploy.yml",
+    label: "本番デプロイの一時的な失敗の再実行",
   },
 ];
 

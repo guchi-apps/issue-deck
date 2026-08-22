@@ -767,6 +767,7 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
                 htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
                 createdAt: "2026-08-15T10:00:30Z",
                 event: "push",
+                runAttempt: 1,
                 ...input.deployRun,
               },
             },
@@ -825,6 +826,31 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
     // mainへのpushで走った実行は従来どおり（版が本番へ出たかを表す）
     expect(buildDeploy({ deployRun: { status: "in_progress", conclusion: null } }).summary.deploy)
       .toMatchObject({ kind: "running", manual: false });
+  });
+
+  // #2134。自動再実行は同じrunのattemptを増やすだけなので、`createdAt`も`event`も初回のまま
+  // 変わらない。再実行されたことを言える材料は`runAttempt`しかない
+  it("自動再実行された実行にはautoRetriedの印を付ける", () => {
+    const running = buildDeploy({
+      deployRun: { status: "in_progress", conclusion: null, runAttempt: 2 },
+    });
+    expect(running.summary.deploy).toMatchObject({ kind: "running", autoRetried: true });
+
+    const failed = buildDeploy({ deployRun: { conclusion: "failure", runAttempt: 2 } });
+    expect(failed.summary.deploy).toMatchObject({ kind: "failure", autoRetried: true });
+
+    // 初回の試行には付けない
+    expect(
+      buildDeploy({ deployRun: { status: "in_progress", conclusion: null } }).summary.deploy,
+    ).toMatchObject({ kind: "running", autoRetried: false });
+  });
+
+  // まだ現れていない実行に試行回数は無い（印を付けると「再実行を待っている」ように読める）
+  it("デプロイ待ちにはautoRetriedを付けない", () => {
+    const repository = buildDeploy({
+      deployRun: { createdAt: "2026-08-15T09:00:00Z", runAttempt: 2 },
+    });
+    expect(repository.summary.deploy).toMatchObject({ kind: "waiting", autoRetried: false });
   });
 
   // 出し直しの実行はマージ時刻との比較に掛けない（掛けると「デプロイ待ち」に化ける）
@@ -1035,6 +1061,7 @@ describe("本番デプロイの状態（#1579）", () => {
           // 既定は「マージの後に始まった実行」
           createdAt: "2026-08-15T10:00:30Z",
           event: "push",
+          runAttempt: 1,
           ...overrides,
         },
       },
@@ -1056,6 +1083,7 @@ describe("本番デプロイの状態（#1579）", () => {
     expect(repository.releaseGroups[0].deploy).toEqual({
       kind: "running",
       manual: false,
+      autoRetried: false,
       htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
     });
     // 畳んだ1行にも同じ状態を出す
@@ -1081,6 +1109,7 @@ describe("本番デプロイの状態（#1579）", () => {
       kind: "waiting",
       htmlUrl: null,
       manual: false,
+      autoRetried: false,
     });
   });
 
