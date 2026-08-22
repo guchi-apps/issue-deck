@@ -2,7 +2,10 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
+import {
+  CompactHostCardSkeleton,
+  DispatchHostPanel,
+} from "@/components/dashboard/dispatch-host-panel";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
@@ -470,6 +473,56 @@ describe("DispatchHostPanel", () => {
       );
 
       expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+    });
+  });
+
+  /**
+   * 取得できるまでのあいだ、縮めた版と同じ高さで場所を取るスケルトン（#2090）。
+   * **高さが揃っていることがこの部品の目的**なので、実物と同じ組み方で描けているかを見る。
+   */
+  describe("CompactHostCardSkeleton（#2090）", () => {
+    /**
+     * **高さを決めているクラスが実物と1つずつ一致することを見る。**
+     * 縮めた版の高さは固定値ではなく、文字サイズ（`text-xs`・`text-[10px]`など＝行の高さ）と
+     * 余白（`p-2`・`mt-2`・`gap-*`・`h-1`）の積み上げで決まる。片方だけを直すと、
+     * 見た目には気付かないまま差し替えの瞬間に行が動くので、ここで並べて突き合わせる。
+     */
+    it("高さを決めるクラスが実物と一致する", () => {
+      const HEIGHT_CLASS =
+        /^(?:text-(?:xs|sm|base|\[[\d.]+px\])|mt-\d|p-\d|gap-[\d.]+|size-[\d.]+|h-\d)$/;
+      // 数えるのはカード1枚の中だけ。`DispatchHostPanel`が複数枚を縦に積むための
+      // `gap-2`はカードの外側の話で、1枚しか描かないスケルトンには無くてよい
+      const cardOf = (container: Element) => {
+        const card = container.querySelector(".rounded-md.border.p-2");
+        if (!card) throw new Error("カードが見つからない");
+        return card;
+      };
+      const collect = (card: Element) =>
+        [card, ...Array.from(card.querySelectorAll<HTMLElement>("*"))]
+          .flatMap((el) => Array.from(el.classList))
+          .filter((name) => HEIGHT_CLASS.test(name))
+          .sort();
+
+      // 山括弧（`size-3.5`）は`onOpenDetail`を渡したときだけ付く飾りで、行の高さ
+      // （`text-[11px]`の16.5px）より小さい。突き合わせの邪魔になるので渡さずに描く
+      const real = render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} compact />);
+      const realClasses = collect(cardOf(real.container));
+      real.unmount();
+
+      const { container } = render(<CompactHostCardSkeleton />);
+
+      expect(collect(cardOf(container))).toEqual(realClasses);
+      expect(realClasses.length).toBeGreaterThan(0);
+    });
+
+    it("中身は読み上げず、読み込み中であることだけを渡す", () => {
+      render(<CompactHostCardSkeleton />);
+
+      expect(screen.getByRole("status").textContent).toBe("サブPCの状態を読み込み中");
+      // 帯の下に敷いた文字（`サブPC`・`CPU`など）は幅を実物へ合わせるためだけのものなので、
+      // まとめて`aria-hidden`の中へ入れる
+      expect(screen.getByText("CPU").closest("[aria-hidden]")).toBeTruthy();
+      expect(screen.getByText("サブPC").closest("[aria-hidden]")).toBeTruthy();
     });
   });
 
