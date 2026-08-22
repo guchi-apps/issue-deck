@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-detail-dialog";
+import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -30,7 +31,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
