@@ -43,13 +43,15 @@ const OVERVIEW_STATS: OverviewStat[] = [
 function makeDispatch(overrides: {
   hosts?: DispatchHostView[];
   sessions?: DispatchSessionView[];
+  /** 最初の取得が終わったか（#2090）。偽の間はサブPCのカードの代わりにスケルトンが出る */
+  isLoaded?: boolean;
 }): DispatchStateHandle {
   return {
     hosts: overrides.hosts ?? [],
     jobs: [],
     sessions: overrides.sessions ?? [],
     concurrency: 2,
-    isLoaded: true,
+    isLoaded: overrides.isLoaded ?? true,
     error: null,
     setError: vi.fn(),
     isSubmitting: false,
@@ -244,6 +246,34 @@ describe("MobileHomeScreen（#1690）", () => {
     renderHome();
 
     expect(screen.getByText("サブPC")).toBeTruthy();
+    expect(screen.getByText("セッション 3/12")).toBeTruthy();
+  });
+
+  /**
+   * #2090。`hosts`は取得前も`[]`なので、これが無いと届くまでカードごと消え、その下の
+   * メニューがカード1枚ぶん繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ
+   * 押した指が別の行に当たっていた。
+   */
+  it("最初の取得が終わるまではサブPCのカードの代わりにスケルトンを置く", () => {
+    dispatchState = makeDispatch({ isLoaded: false });
+    const { container } = renderHome();
+
+    expect(container.querySelector('[data-testid="dispatch-host-skeleton"]')).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("サブPCの状態を読み込み中");
+  });
+
+  it("取得が終わればスケルトンを消す（ホストが1台も無くても残さない）", () => {
+    dispatchState = makeDispatch({ isLoaded: true });
+    const { container } = renderHome();
+
+    expect(container.querySelector('[data-testid="dispatch-host-skeleton"]')).toBeNull();
+  });
+
+  it("取得が終わればスケルトンと同じ場所へカードが入る", () => {
+    dispatchState = makeDispatch({ isLoaded: true, hosts: [makeHost()] });
+    const { container } = renderHome();
+
+    expect(container.querySelector('[data-testid="dispatch-host-skeleton"]')).toBeNull();
     expect(screen.getByText("セッション 3/12")).toBeTruthy();
   });
 

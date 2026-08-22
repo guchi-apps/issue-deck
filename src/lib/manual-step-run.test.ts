@@ -506,6 +506,17 @@ describe("listManualStepRunViews", () => {
     });
   });
 
+  /** 終わった実行は返さない（#2073）。描く画面が無くなり、引くだけ無駄になったため */
+  it("走っている・止まっている実行だけを引く", async () => {
+    manualStepRunFindMany.mockResolvedValue([]);
+
+    await listManualStepRunViews(NOW);
+
+    expect(manualStepRunFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: { in: ["RUNNING", "PAUSED"] } } }),
+    );
+  });
+
   /**
    * 止まったままの実行の片付け（#2073）。**`PAUSED`は自分では終わらない**ので、Issueだけ
    * closeされると居座り、開いている画面の自動更新が5秒間隔から戻らなくなる。

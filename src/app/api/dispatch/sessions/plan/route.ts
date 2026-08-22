@@ -8,6 +8,8 @@ import {
   parseSessionPlanText,
   postSessionPlan,
 } from "@/lib/dispatch/session-plan";
+import { createSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import { parseSessionPlanWaitSeconds } from "@/lib/dispatch/session-plan-request";
 import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 
 /**
@@ -42,19 +44,48 @@ export async function POST(request: NextRequest) {
 
   // 形が想定外のものは**受け付けずにnullへ倒す**（リクエスト自体は拒否しない）。
   // 計画本文が載ることの方が価値が高く、付随情報が欠けても投稿する意味は変わらない
+  const hostName = parseSessionHostName(payload?.hostName);
   const posted = await postSessionPlan({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
     plan,
     remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
     planBaseSha: parsePlanBaseSha(payload?.planBaseSha),
-    hostName: parseSessionHostName(payload?.hostName),
+    hostName,
   });
+
+  // 画面からの返事を待つ（#2061）。**投稿できたときだけ作る。** 投稿できていない＝画面に
+  // 計画が出ないので、待たせても押す材料が無い（フックは`planRequestId`が返らなければ
+  // 待たずに終え、端末に従来どおりの承認プロンプトが出る）。
+  //
+  // **待ち時間が`0`（ホスト側で無効にしている）なら作らない。** 作ると、フックは待たないのに
+  // 画面には押しても誰も受け取らないパネルが残る。
+  const waitSeconds = parseSessionPlanWaitSeconds(payload?.waitSeconds);
+  let planRequestId: string | null = null;
+  if (posted && waitSeconds > 0) {
+    try {
+      const request = await createSessionPlanRequest({
+        repositoryFullName: target.repositoryFullName,
+        issueNumber: target.issueNumber,
+        hostName,
+        plan,
+        waitSeconds,
+      });
+      planRequestId = request.id;
+    } catch (error) {
+      // **作れなくても計画の投稿は成功として扱う。** 待てないだけで、答える経路
+      // （端末・Remote Control）はそのまま残っている
+      console.error(
+        `[dispatch] 計画の返事待ちを作れませんでした（${target.repositoryFullName}#${target.issueNumber}）`,
+        error,
+      );
+    }
+  }
 
   // 投稿できなくても200で返す。呼び出し側（フック）は再送の判断ができる相手ではなく、
   // 非0を返してもセッションのログにエラーが増えるだけになる
   return NextResponse.json(
-    { ok: true, posted },
+    { ok: true, posted, planRequestId },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

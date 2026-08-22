@@ -492,11 +492,11 @@ model DispatchJob {
 // `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
 // 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
 model DispatchHost {
-  id                       String    @id @default(cuid())
-  name                     String    @unique
+  id                       String   @id @default(cuid())
+  name                     String   @unique
   // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
   // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
-  repositories             String    @db.Text
+  repositories             String   @db.Text
   // ホストの受け口が扱えるローカル起動プロトコルの上限版数
   // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
   contractVersion          Int?
@@ -556,7 +556,7 @@ model DispatchHost {
   // **`manualStepCapable`とは分けて持つ。** 両方とも枠外で配る「セッションを立てない」ジョブ
   // （`OUT_OF_BAND_JOB_KINDS`）だが、手作業の代行に対応した既存のpollerは更新のジョブを知らず、
   // まとめて配ると未知の種別として`failed`になり、押した更新が失われる。
-  selfUpdateCapable        Boolean?
+  selfUpdateCapable   Boolean?
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
@@ -566,8 +566,8 @@ model DispatchHost {
   // 判定には使わない（サブPCのtmuxを見られるのはpollerだけで、こちらに判定を置くとずれる）。
   // **`null`は「申告していない」**（古いpoller）＝上限そのものが不明という意味で、
   // `liveSessions`が0であることとは区別する
-  maxSessions              Int?
-  liveSessions             Int?
+  maxSessions         Int?
+  liveSessions        Int?
   // 申告した時点のリソース使用率（#1567）。「もう1本セッションを起こしてよいか」を
   // issue-deckの画面だけで判断できるようにするための写しで、**判定には一切使わない**
   // （起動を止めているのは引き続き`maxSessions`と同時実行数）。
@@ -580,18 +580,18 @@ model DispatchHost {
   // **`null`は「申告していない」**（古いpoller・取得に失敗した巡）で、0（空いている）とは
   // 区別する。5つは**まとめて入るかまとめてnullか**のどちらかで、部分的には埋まらない
   // （受け口の`parseDispatchHostMetrics`が全体を落とす）
-  cpuPercent               Float?
-  memoryUsedMb             Int?
-  memoryTotalMb            Int?
-  diskUsedGb               Float?
-  diskTotalGb              Float?
+  cpuPercent          Float?
+  memoryUsedMb        Int?
+  memoryTotalMb       Int?
+  diskUsedGb          Float?
+  diskTotalGb         Float?
   // SWAP（#1624）。**上の5つの「まとめて入るかまとめてnullか」には含めない。** SWAPを持たない
   // ホストとSWAPを申告しない古いpollerがどちらもありうるため、必須にするとCPU・メモリ・
   // ディスクごと消える。この2つは対で入るか、対でnullか。
   // **総量0（SWAPを持たない）はnullと区別する**（申告は届いている）が、画面ではどちらも
   // 行ごと出さない（`describeDispatchHostMetrics`）
-  swapUsedMb               Int?
-  swapTotalMb              Int?
+  swapUsedMb          Int?
+  swapTotalMb         Int?
   // pollerが動かしているチェックアウトの鮮度（#1612）。**`agentVersion`とは別物**で、
   // あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に走っているスクリプトが
   // どのコミットのものかという事実。
@@ -604,13 +604,13 @@ model DispatchHost {
   // **`null`は「申告していない」**（古いpoller・gitが無い・チェックアウトを読めなかった巡）。
   // `checkoutBehind`だけは別に`null`になりうる（fetchできず、遅れを数えられなかった場合）。
   // 数えた遅れがいつ時点のものかは`checkoutFetchedAt`（最後にoriginを見た時刻）で分かる
-  checkoutCommit           String?
-  checkoutBranch           String?
-  checkoutCommittedAt      DateTime?
-  checkoutBehind           Int?
-  checkoutFetchedAt        DateTime?
+  checkoutCommit      String?
+  checkoutBranch      String?
+  checkoutCommittedAt DateTime?
+  checkoutBehind      Int?
+  checkoutFetchedAt   DateTime?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
-  lastSeenAt               DateTime
+  lastSeenAt          DateTime
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -874,4 +874,80 @@ model SecretSyncRun {
   // 「このリポジトリの最新の実行」を引くのが画面・クールダウン判定・報告の突き合わせの
   // すべてで共通の読み方
   @@index([repositoryFullName, startedAt])
+}
+
+// ローカルセッションが`ExitPlanMode`で出した計画に対する、画面からの返事（#2061）。
+//
+// **`send-keys`は使わない。** 計画を投稿している`PreToolUse(ExitPlanMode)`フック
+// （`scripts/session-notify.sh`）が、投稿のあとそのままここの`status`が決まるのを待ち、
+// 決まった内容をClaude Code自身の許可判定（`permissionDecision`）として返す。承認プロンプトの
+// 選択フォームに答えさせる操作はどこにも無いため、`docs/multi-agent/gates.md`の禁止に触れない。
+//
+// WAITING=画面の返事を待っている／APPROVED=承認された（`allow`を返す）／
+// REVISION_REQUESTED=修正が送られた（`deny`＋`revisionText`を返す）／
+// DEFERRED=「端末で答える」を押された／EXPIRED=待ち時間が切れた。
+// 後ろの3つはどれも「何も返さずに終える」で、端末に従来どおりの承認ダイアログが出る。
+model SessionPlanRequest {
+  id                 String                   @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 報告してきたホスト名（DispatchHost.nameと対応）。取れないこともある
+  hostName           String?
+  // 画面に出す計画本文。Issueコメントにも同じものが残っているが、**コメントの取得に
+  // 依存させない**（画面はディスパッチの状態と同じ1本のポーリングでこれを読む）
+  plan               String                   @db.Text
+  status             SessionPlanRequestStatus @default(WAITING)
+  // 修正の本文（REVISION_REQUESTEDのときだけ）。そのままClaudeへ渡る
+  revisionText       String?                  @db.Text
+  // 画面から押したユーザー（User.id）。Userを消しても履歴は残すためFKは張らない
+  decidedByUserId    String?
+  decidedAt          DateTime?
+  // ここを過ぎたらフックは待つのをやめる。画面のカウントダウンもこれを見る
+  expiresAt          DateTime
+  // フックが結論を受け取った時刻。**受け取ったあとに押しても届かない**ことを画面へ出す
+  deliveredAt        DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([repositoryFullName, issueNumber])
+  @@index([status, expiresAt])
+}
+
+enum SessionPlanRequestStatus {
+  WAITING
+  APPROVED
+  REVISION_REQUESTED
+  DEFERRED
+  EXPIRED
+}
+
+/// PRの自動修復（`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-pr-repair.yml`）が
+/// いま走っているかどうか（#2072）。
+///
+/// **1つのPR×1つの種別につき1行**（`@@unique`）で、次の実行は同じ行を上書きする。履歴は
+/// GitHub ActionsとIssue・PRのコメントに残るため、ここで持つのは「いまの状態」だけでよい。
+///
+/// 状態を報告するのはワークフロー側（`POST /api/pull-requests/repair-runs`）と、画面のボタンから
+/// 起動する`POST /api/pull-requests/repair`の2経路。**GitHub APIからは引けない**——自動検知で
+/// 起動した実行は`workflow_run`イベント発の実行で、`head_branch`・`head_sha`が対象PRではなく
+/// デフォルトブランチを指すため、実行から対象PRへ辿る手段が無い。
+model PullRequestRepairRun {
+  id                 String   @id @default(cuid())
+  repositoryFullName String
+  pullRequestNumber  Int
+  /// `RepairKind`（`ci` / `conflict`）。DB側では文字列で持ち、解釈はアプリ側に寄せる
+  kind               String
+  /// `running`（実行中） / `finished`（終わった）。**画面に出すのは`running`だけ**で、
+  /// `finished`は「もう走っていない」ことを表すために残す
+  status             String
+  /// 実行ログのURL。画面のボタンから起動した直後はまだrunが決まらないためnull
+  runUrl             String?
+  startedAt          DateTime @default(now())
+  finishedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber, kind])
+  @@index([status])
 }

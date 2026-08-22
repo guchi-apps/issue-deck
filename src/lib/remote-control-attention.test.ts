@@ -31,6 +31,21 @@ function labels(...names: string[]) {
 
 // #1964: 一覧で「押さないと先へ進まない行」を見分けられるようにする
 describe("shouldEmphasizeRemoteControl", () => {
+  /**
+   * #2061: 計画への返事は画面から送れるようになったので、押す場所はアプリの中。
+   * ここでRemote Controlを強調し続けると、行の中でオレンジが2つ並ぶうえ、
+   * アプリで承認できること自体が画面から読み取れない。
+   */
+  it("計画への返事を画面から送れるなら、Remote Controlは強調しない", () => {
+    expect(
+      shouldEmphasizeRemoteControl({
+        labels: labels("00.check-user", "01.check-plan", "11.local"),
+        session: session({ activity: "WAITING_INPUT" }),
+        planDecisionPending: true,
+      }),
+    ).toBe(false);
+  });
+
   it("セッションが入力待ちなら強調する", () => {
     expect(
       shouldEmphasizeRemoteControl({

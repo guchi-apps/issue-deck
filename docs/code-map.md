@@ -352,6 +352,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   進捗率は出さない（サーバー側から分からないため、止まった数字は止まったアプリに見える）。
   **エラー画面はSSRのHTMLには出ず、クライアントで描かれる**ので、`curl`では確認できない
   （レンダリングテストか実ブラウザで見る）。
+- **後から届くものの場所は、実物と同じクラスで組んだスケルトンで取る**（#2090）。スマホの
+  ホームのサブPCのカードは`dispatch.hosts.length > 0`で出し分けていたが、`hosts`は取得前も`[]`
+  なので、届くまでカードごと消えて下のメニューがカード1枚ぶん繰り上がっていた。出し分けは
+  件数ではなく`useDispatchState`の`isLoaded`（**一度でも確定したか**。失敗しても立つ）で行い、
+  確定するまでは[`dashboard/dispatch-host-panel.tsx`](../src/components/dashboard/dispatch-host-panel.tsx)の
+  `CompactHostCardSkeleton`を1枚置く。
+  - **高さは`min-h-*`の固定値ではなく、実物と同じクラスから取る。** Tailwind v4の任意値
+    （`text-[10px]`など）はfont-sizeだけを設定し、行の高さは継承した`line-height: 1.5`を
+    自分のfont-sizeへ掛けて決まる。したがって**同じクラスを同じ入れ子で並べれば、高さは
+    自動的に一致する**。帯は既存の[`ui/skeleton.tsx`](../src/components/ui/skeleton.tsx)へ
+    `text-transparent`と実物と同じ文字列を渡して作る（文字が行の高さと横幅を決め、
+    `bg-muted`が帯に見せる）
+  - **合わせられるのは1通りだけ。** 実物のカードは「応答なし（見出しのみ）」「最新（見出し＋
+    使用率）」「遅れている（＋スクリプトの版が1行）」で高さが違い、どれになるかは取得するまで
+    分からない。いちばん普通の1通りに合わせ、残りは差ぶん（約21px／約51px）動くのを許す
+  - ずれを防ぐのは`dispatch-host-panel.test.tsx`の「高さを決めるクラスが実物と一致する」で、
+    実物とスケルトンから高さに効くクラス（`text-*`のサイズ・`p-*`・`mt-*`・`gap-*`・`h-*`）を
+    集めて多重集合として突き合わせる。片方だけ直すと落ちる
+  - **`aria-hidden`＋`role="status"`の1行**にして、帯の下の文字を読み上げさせない
 - **ホーム画面から起動する先は`/dashboard`**（`app/manifest.ts`の`start_url`。#1978）。
   `/`は`redirect("/dashboard")`するだけの通過点で、以前のように`/login`へ送ると
   middlewareが`/dashboard`へ折り返し、認証の確認を含む往復が毎回1回余計に増える。
@@ -577,6 +596,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `MobileIssueListScreen`の`pinned`（固定表示する枠・件数・対象ビューを1つのpropで受け取り、
   ヘッダーの「N件」・下端のビュー行・ビュー選択シートの件数へ同じ数を足す）、PCでは`IssueList`の
   `pinnedSection`と`pinnedCount`が担う。
+  - **並べるのは「いま押せば入るPR」だけ**（#2081）。CI実行中（`ciState`が`pending`）と自動マージ
+    可否の判定中（`isMergeJudgementPending`）は`pullRequestsAwaitingUserMerge`が外す。前者は
+    GitHubがマージを弾き、後者は画面がマージボタンを無効化する（#1968）ので、並べても開いた先に
+    操作が無い。リリースPRを各リポジトリへ一斉に起票した直後は、この2つで一覧が埋まっていた。
+    **CI失敗・コンフリクト・CI状態不明（`unknown`）は外さない**——待っても解消せず人が動くしか
+    ないもので、`unknown`を外さないのは#1433のリリースボタンと同じ倒し方（状態が取れないことを
+    理由にマージの導線まで消さない）。
+  - **外したぶんは`pullRequestsWaitingForMergeChecks`が返し、枠の下の1行にだけ出す。**
+    件数（左メニュー・ホームの「要対応」）には足さない。完全に消すと、対応Issueを持たない
+    リリースPRはどこにも現れないまま数分後に突然6件現れる。件数から外して一覧の見出しへ
+    内訳を出す手作業待ち（#1763）と同じ扱い。
+  - **どちらの関数も母集団は`pullRequestsRequiringUserMerge`1つ**（`requiresUserMerge`＋二重表示の
+    除外）。2つの数を足したものが従来の件数と必ず一致するようにするため、判定を2か所に書かない。
 - **「ユーザーの作業待ち」（`71.manual-step`）は、いま実行できる件数だけを出す**
   （#1613で橙色の強調を、#1763で件数そのものを。
   [`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。
@@ -848,6 +880,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`mobile-issue-view-sheet.tsx`](../src/components/dashboard/mobile/mobile-issue-view-sheet.tsx)が
   全ビューを縦に並べる（横スクロールでは画面に2つ強しか映らなかった）。表示中のビュー名は
   ヘッダーの件数行にも出し、スクロール中でも何を見ているか確かめられるようにする。
+  **ただしIssue以外も並ぶビューでは、見出し（1行目）そのものをビュー名にする**（#2081。判定は
+  [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`navViewIsUserActionList`＝「ユーザーの確認待ち」・
+  「ユーザーの作業待ち」）。確認待ちにはユーザーのマージを待つPull Requestが混ざり、作業待ちに
+  並ぶのは開発のIssueではなく人が実行する手順なので、見出しが「Issue」だと並んでいるものと
+  食い違う。**判定はビューの性質としてここに持つ**——画面側で書くと片方だけ直され続ける
+  （`ignoresIssueFilters`と同じ理由）。見出しをビュー名にしたぶん件数行からはビュー名が落ちる
+  （`MobileIssueListScreen`が見出しと同じ言葉を重ねない）。リポジトリ別一覧は見出しが
+  リポジトリ名のままなので、件数行のビュー名も今までどおり出る。
   一覧に出すビューはPCの左メニュー（`sidebarIssueNavViews`）と揃える。外しているのは
   「直近本番に反映した」だけで（「本番反映待ち」は左メニューへ戻した#1743にあわせてこちらにも出す）、
   **既存のURLからはそのビューでも開かれうる**ため、現在のビューが一覧に無いときだけ末尾へ足す
@@ -999,6 +1039,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リクエストも消費する方が害が大きく、そこまで並べても画面では読めないため、打ち切ったことを
   `truncated`で伝えてGitHubの「Files changed」へ誘導する。**差分そのもの（`patch`）は受け取らない**。
   この画面が答えるのは「どこを触ったPRか」までで、行単位の差分はGitHubに任せる。
+- **mainへのPRのマージ確認ダイアログには「このリリースに含まれる変更」を並べる**（#2080。
+  [`pull-request-merge-changes.tsx`](../src/components/dashboard/pull-request-merge-changes.tsx)・
+  [`hooks/use-pull-request-changes.ts`](../src/hooks/use-pull-request-changes.ts)・
+  `GET /api/pull-requests/changes`）。押した瞬間に本番デプロイが走るマージなのに、ダイアログには
+  PR番号とブランチ名しか出ておらず、何を本番へ出そうとしているのかを確かめるにはGitHubのPRを
+  開くしかなかった。材料は`GET /pulls/{number}/commits`から拾ったマージコミット
+  （`Merge pull request #<番号> from <owner>/<ブランチ>`）で、ブランチ名`issue-<番号>`から対応Issueまで
+  辿り、**タイトルはDBキャッシュ（`Issue`テーブル）から解決する**ためIssueの件数ぶんのリクエストは
+  増えない（[`lib/pull-request-changes.ts`](../src/lib/pull-request-changes.ts)）。
+  **PR本文の`## 対象issue`は使わない**——あれはPRを作った時点の一覧で、PRが開いているあいだに
+  developへ入った変更が抜ける。出すのは`isProductionMerge`（`lib/pull-request-list.ts`。
+  `mergeWarnings`が本番デプロイの警告を返すのと同じ判定）が真のPRだけで、develop向けPRの
+  ダイアログでは取得もしない。100件（`PULL_REQUEST_COMMITS_PER_PAGE`）で打ち切る方針も、同じPRを
+  開き直すぶんがETagの304になる点も変更ファイル一覧と同じ。**取得できなくてもマージは止めない**
+  ——変更点は判断材料であって、マージの前提条件ではない。マージコミットが1件も無いリポジトリ
+  （squash運用）ではコミットの件名をそのまま並べる。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -1233,6 +1289,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
+  `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
+  修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは
+  なくデフォルトブランチを指し、**GitHub APIからは実行と対象PRを結び付けられない**。走っている
+  側が`POST /api/pull-requests/repair-runs`（認証は`PROGRESS_REPORT_SECRET`）で開始・終了を
+  報告する。PR一覧・PR詳細・リリース進捗はこれを`PullRequestSummary.repairRun`として受け取り、
+  `RepairRunBadge`（`components/dashboard/pull-request-badges.tsx`）と通知ベルへ出す。
+  終了の報告が届かなかった実行は開始から60分で失効させる。
 - **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
   詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、**モバイルの
   リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを
@@ -1364,6 +1428,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
   同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
+  **その計画の承認・修正はIssue詳細の画面から送れる**（#2061。計画を投稿したフックが
+  `GET /api/dispatch/sessions/plan/decision`を引いて返事を待ち、決まった内容をClaude Code自身の
+  許可判定として返す。押す側は`POST /api/dispatch/plan-decision`。値の検証・表示の判定は
+  `lib/dispatch/session-plan-request.ts`、DBは`lib/dispatch/plan-requests.ts`、画面は
+  `components/dashboard/plan-approval-panel.tsx`。**`send-keys`は使わない**ので
+  `docs/multi-agent/gates.md`の禁止に触れず、返事が決まらなければ端末に従来どおりの承認
+  プロンプトが出る）。**押す先の案内もアプリの中へ向ける**——一覧の行は「計画を承認」を出して
+  Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
+  `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
+  **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
@@ -1447,6 +1521,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
   読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
   足すと同じ役が2つになる）。
+- **重いコマンド（テスト・ビルド）は機体全体で同時2本までに絞る**（#2076。
+  `scripts/heavy-command.sh`）。`package.json`の`test:unit`・`build`が`flock`で枠を取ってから
+  走る。既存の上限（`AppSetting.dispatchConcurrency`・`DISPATCH_MAX_SESSIONS`）は**ジョブの
+  払い出しとセッション本数にしか効かず**、立った後の12本が同時にテストを始められた
+  （1本でピーク3.24GiB・12スレッド）。枠の置き場はリポジトリの外
+  （`${XDG_CACHE_HOME:-~/.cache}/heavy-command`）で、制約が機体にあるため他リポジトリと共有できる。
+  1本あたりのワーカー数は`vitest.config.ts`が6に絞る。設計は
+  [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「立った後のセッションが走らせるものには上限が無い」。
 - **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
   worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
   既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は

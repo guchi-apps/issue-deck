@@ -17,6 +17,7 @@ import {
   Loader2,
   Lock,
   MessageSquare,
+  ScrollText,
   Star,
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ import {
 } from "@/lib/dispatch/issue-execution-target";
 import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -346,6 +348,23 @@ export function IssueList({
     }
     return map;
   }, [issues, dispatch.sessions]);
+  // 計画への返事待ち（#2061）。**待っている行だけ「計画を承認」を出す**ための集合で、
+  // 押した先はアプリの中（そのIssueを開くと上部に計画パネルが出る）
+  const planPendingIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
+    const requests = dispatch.planRequests ?? [];
+    if (requests.length === 0) return ids;
+    for (const issue of issues) {
+      const request = findPlanRequestForIssue(
+        requests,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      if (request?.status === "WAITING") ids.add(issue.id);
+    }
+    return ids;
+  }, [issues, dispatch.planRequests]);
   const actionsUnexpectedIssueIds = useMemo(() => {
     const ids = new Set<string>();
     for (const [id, target] of executionTargetByIssueId) {
@@ -446,7 +465,8 @@ export function IssueList({
 
   // 走っている自動実行（#1882）。**入口に出すのはこの一覧に居る手作業の分だけ**——
   // 別のビューを見ているときに手作業の進捗を割り込ませない。
-  // **#2073で実行キューの節を撤去したので、進み具合を追える常設の場所はこことアシスタントだけ**
+  // **#2073で実行キューの節を撤去したので、進み具合が出る常設の場所はここだけ**
+  // （ここはバッジで、中断できるのはアシスタントの中）
   const activeManualStepRun =
     view === "manual-step"
       ? ((dispatch.manualStepRuns ?? []).find(
@@ -484,9 +504,13 @@ export function IssueList({
     })();
     // 押さないと先へ進まない行を見分けられるようにする（#1964）。**出す条件とは別物**で、
     // 判定は`shouldEmphasizeRemoteControl`に置いてある
+    // 計画への返事を画面から送れる行（#2061）。**ここが主導線になり、Remote Controlは
+    // 通常の枠線へ戻る**（`shouldEmphasizeRemoteControl`が`false`を返す）
+    const planPending = planPendingIssueIds.has(issue.id);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
+      planDecisionPending: planPending,
     });
     return (
       <li
@@ -597,6 +621,29 @@ export function IssueList({
               ))}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {/* 計画の承認へ入る（#2061）。**行き先はアプリの中**で、押すとそのIssueが開き、
+                  上部に計画パネル（「計画の承認を待っています」）が出る。ここを出す間は
+                  Remote Controlの強調を下ろすので、行の中でオレンジは1つに保たれる。
+                  **`<a>`ではなく`<button>`**——外部へ出る導線ではないため */}
+              {planPending && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
+                  title="計画を承認する"
+                  aria-label={`#${issue.number}の計画を承認する`}
+                  onClick={(event) => {
+                    // 行そのものの当たり判定（カード全面のボタン）へ伝わらないようにする。
+                    // 開く先は同じだが、二重に走らせない
+                    event.stopPropagation();
+                    setOptimisticSelectedId(issue.id);
+                    onSelectIssue(issue);
+                  }}
+                >
+                  <ScrollText />
+                  計画を承認
+                </Button>
+              )}
               {/* 走っているセッションを一覧から開く（#1915）。**ラベル行の右端に置く**——
                   カードの下へ1行足すと、セッションのあるカードだけ高さが変わって一覧が
                   不揃いになる。文言は「Remote」まで詰め、全文は`title`・`aria-label`に持たせる */}

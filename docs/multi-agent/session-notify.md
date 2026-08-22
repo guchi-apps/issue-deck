@@ -65,23 +65,72 @@ ExitPlanMode（計画の提示）
             → Issueへ計画コメントを投稿（末尾にRemote Controlのリンク）
             → 00.check-user を付与
        → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
-  → 承認プロンプト（Notification）→ 従来どおりの入力待ち通知・画面表示
-  → 人がRemote Controlで承認 → 実装 → Stop
+            → 返事待ち（SessionPlanRequest）を作り、そのidを返す（#2061）
+       → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
+       → Signalyへ「計画の承認待ち」を通知（#2061）
+       → GET /api/dispatch/sessions/plan/decision?id=… を3秒おきに引いて待つ
+  → 人がissue-deckの画面で「承認」／「修正を送る」を押す
+       → allow ／ deny＋修正の本文 を返す（＝承認プロンプトは出ない）
+  → 実装 ／ 計画の練り直し → Stop
        → POST /api/dispatch/sessions/activity に planResolved: true を添える
             → 00.check-user を除去
        → 印を消す
 ```
 
+**返事が決まらなければ何も返さず、従来どおりの経路へ倒れる。**
+
+```text
+（待ち時間切れ／「端末で答える」／issue-deckが応答しない）
+  → フックは何も出力せずに終える
+  → 承認プロンプト（Notification）→ 従来どおりの入力待ち通知・画面表示
+  → 人がRemote Controlで承認 → 実装 → Stop
+```
+
 - **計画をIssueへ残せる唯一の機会が`ExitPlanMode`の`PreToolUse`。** 承認プロンプトの
   `Notification`のJSONには計画に関する情報が何も無い。`PreToolUse`にmatcherを付けるのは
   このためで、付けずに置くと`Read`・`Bash`のたびにスクリプトが起動する
-- **このイベントではSignalyへ送らない。** 直後に承認プロンプトの`Notification`が必ず飛び、
-  同じ「入力待ち」が二重になる。計画本文を外部サービスへ出す経路を作らない意味もある
-  （下の「通知の中身」と同じ理由）
+- **このイベントからSignalyへ送るのは「計画の承認待ち」だけ**（#2061）。従来はここで送らず、
+  直後に飛ぶ承認プロンプトの`Notification`に任せていた（同じ「入力待ち」が二重になるため）。
+  画面から承認できるようになると、承認された場合は承認プロンプトが出ない＝`Notification`が
+  飛ばないため、任せたままだと**計画が出たことが誰にも通知されない**。載せるのは他の
+  イベントと同じ項目だけで、**計画本文は入れない**（下の「通知の中身」と同じ理由）
 - **リンクは計画本文の下に、別の段落として置く。** 計画が長いほど、末尾に出口が無いと
   「読んだ後どうすればよいか」が画面から消える
 - コメント本文の組み立ては`src/lib/dispatch/session-plan.ts`。GitHubへ書く経路は異常終了の
   引き上げ（`session-escalation.ts`）と同じで、**サブPCにGitHubの認証を持たせない**
+
+### 承認・修正は画面から送れる（#2061）
+
+**`send-keys`は使わない。** 計画を投稿したフックがそのまま画面の返事を待ち、決まった内容を
+**Claude Code自身の許可判定**（`hookSpecificOutput.permissionDecision`）として返す。承認なら
+`allow`（承認プロンプトを出さずに実装へ進む）、修正なら`deny`＋書かれた本文
+（`permissionDecisionReason`。Claudeがそれを読んで計画を練り直す）。承認プロンプトの選択
+フォームに答えさせる操作はどこにも無いため、[gates.md](gates.md)の「実行体が判断して組み立てた
+文字列・確定キーの送出」の禁止に触れない。
+
+- **画面から答えられるのは、待っている間だけ。** 待ち時間（既定30分）が切れると`EXPIRED`に
+  なり、端末に従来どおりの承認プロンプトが出る。画面には残り時間がカウントダウンで出る
+- **待っている間、端末には承認プロンプトが出ない。** 端末に座っているなら`Esc`で中断すれば
+  すぐプロンプトへ戻せる。画面の「端末・Remote Controlで答える」を押しても同じ
+- **フェイルオープン。** issue-deckが応答しない・返事待ちを作れなかった・`planRequestId`が
+  返らなかった、のいずれでも待たずに終える。**この機能が壊れてもセッションは詰まらない**
+- 待ち時間は`~/.config/issue-deck/notify.env`の`SESSION_PLAN_WAIT_SECONDS`（秒。`0`で待たない。
+  60〜3600の範囲へissue-deck側が丸める）。`ExitPlanMode`のフックだけ`timeout`を延ばして
+  あるのはこのため（`scripts/run-issue-session.sh`。**打ち切られても壊れない**）
+- 押した内容（承認・修正・端末で答える）は**Issueコメントとしても残る**。投稿はissue-deckの
+  GitHub App名義になるので、末尾の投稿者マーカーで押した本人の発言として画面に出す
+- **画面の導線もアプリの中で完結させる。** 計画の返事を待っている間は、Issue一覧の行に
+  「計画を承認」（押すとそのIssueが開く）を出し、**Remote Controlの強調（#1964のamber）は
+  下ろす**。Issue詳細の確認待ちの案内は「計画へ移動」でパネルまでスクロールし、コメント欄の
+  案内も「上の『計画の承認を待っています』から送れます」に変わる。ここを直さないと、
+  **アプリで承認できること自体が画面のどこからも読み取れない**
+- **パネルはPC版・スマホ版の両方の詳細に置く。** Issue詳細は`issue-detail.tsx`と
+  `mobile/mobile-issue-detail.tsx`で別のコンポーネントで、片方へ足しただけでは
+  もう片方が従来どおりの案内のままになる（置き忘れは`plan-approval-mount.test.ts`が捕まえる）
+- サーバー側は`src/lib/dispatch/session-plan-request.ts`（値の検証・表示の判定）と
+  `src/lib/dispatch/plan-requests.ts`（DB）。画面は`plan-approval-panel.tsx`、
+  一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
+  `lib/github/check-user-guidance.ts`
 
 ### 計画本文は`ExitPlanMode`の引数では渡ってこない
 

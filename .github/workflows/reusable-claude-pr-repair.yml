@@ -294,6 +294,29 @@ jobs:
           BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-pr-repair -->'
           gh pr comment "$PR_NUMBER" --body "$BODY"
 
+      - name: 修復の開始をissue-deckへ報告する
+        # 画面（マージ待ちPR一覧・PR詳細・リリース進捗）へ「自動修正中」「自動解消中」を出す
+        # ため（#2072）。詳細は`reusable-claude-ci-fix.yml`の同名ステップのコメントを参照。
+        if: steps.state.outputs.should_repair == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          MODE: ${{ inputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、修復状況の報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/pull-requests/repair-runs" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"pullRequest\":$PR_NUMBER,\"kind\":\"$MODE\",\"status\":\"running\",\"runUrl\":\"$RUN_URL\"}")" || code=000
+          [ "$code" = "200" ] || echo "::warning::修復状況（開始）の報告に失敗しました（PR #$PR_NUMBER / HTTP $code）"
+
       - name: 実行前のコメント数を記録する
         id: before
         if: steps.state.outputs.should_repair == 'true'
@@ -489,3 +512,25 @@ jobs:
           echo "PRが作られなかった $WORK_BRANCH を削除します"
           gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$WORK_BRANCH" \
             || echo "::warning::$WORK_BRANCH の削除に失敗しました"
+
+      - name: 修復の終了をissue-deckへ報告する
+        # 画面から「自動修正中」「自動解消中」を消す（#2072）。直せた場合も断念した場合も通す。
+        if: always() && steps.state.outputs.should_repair == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          MODE: ${{ inputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、修復状況の報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/pull-requests/repair-runs" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"pullRequest\":$PR_NUMBER,\"kind\":\"$MODE\",\"status\":\"finished\",\"runUrl\":\"$RUN_URL\"}")" || code=000
+          [ "$code" = "200" ] || echo "::warning::修復状況（終了）の報告に失敗しました（PR #$PR_NUMBER / HTTP $code）"

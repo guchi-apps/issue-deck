@@ -122,6 +122,12 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 - 進捗（Project Status）は計画の検討に着手した時点（Plan mode開始時点）で`Planning`になり、承認後・実装着手時点で`Implementation`へ進む。
 - ラベルが付いていない場合は直接実装してよく、`Planning`は経由せず最初から`Implementation`になる。
 - 承認待ちの合図には`00.check-user`ラベルを使う。
+- **ローカルセッションが出した計画は、issue-deckのIssue詳細から承認・修正できる**（#2061）。
+  Plan modeで計画を出すと画面に「計画の承認を待っています」パネルが出て、「承認して実装へ
+  進む」「修正を送る」を押せる（押した内容はIssueコメントにも残る）。**`send-keys`は使わず**、
+  計画を投稿したフックがClaude Code自身の許可判定として返すため、
+  [docs/multi-agent/gates.md](docs/multi-agent/gates.md)の禁止には触れない。既定30分で待ちが
+  切れ、その後は従来どおり端末・Remote Controlから答える
 
 ### Issueの進捗の状態遷移
 

@@ -14,6 +14,7 @@ import {
   mergeJudgementReason,
   mergeWarnings,
   pullRequestsAwaitingUserMerge,
+  pullRequestsWaitingForMergeChecks,
   requiresUserMerge,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
@@ -45,10 +46,22 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
+    repairRun: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
   };
+}
+
+/** 対応Issueを持たないdevelop→mainのリリースPR。`requiresUserMerge`が`kind`だけで真になる */
+function releasePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
+  return pullRequest({
+    kind: "release",
+    baseRef: "main",
+    headRef: "develop",
+    linkedIssueNumber: null,
+    ...overrides,
+  });
 }
 
 describe("classifyPullRequest", () => {
@@ -374,6 +387,39 @@ describe("pullRequestsAwaitingUserMerge", () => {
     expect(result).toEqual([]);
   });
 
+  // Issueの本題（#2081）。CIが回っている間はGitHubがマージを弾き、判定中は画面が
+  // マージボタンを無効化するため、並べても開いた先に押せる操作が無い
+  it("CI実行中・判定中のPRは返さない", () => {
+    const result = pullRequestsAwaitingUserMerge(
+      [
+        releasePullRequest({ number: 1, ciState: "pending" }),
+        releasePullRequest({
+          number: 2,
+          mergeJudgement: { state: "pending", step: "claude-review", runUrl: null },
+        }),
+        releasePullRequest({ number: 3 }),
+      ],
+      [],
+    );
+
+    expect(result.map((pr) => pr.number)).toEqual([3]);
+  });
+
+  // 待っても解消せず、人が動くしかないもの。CI失敗は確認ダイアログを挟めばマージでき、
+  // コンフリクトは「コンフリクトを自動解消」の入口になる
+  it("CI失敗・コンフリクト・CI状態不明のPRは返す", () => {
+    const result = pullRequestsAwaitingUserMerge(
+      [
+        releasePullRequest({ number: 1, ciState: "failure" }),
+        releasePullRequest({ number: 2, mergeable: false }),
+        releasePullRequest({ number: 3, ciState: "unknown" }),
+      ],
+      [],
+    );
+
+    expect(result.map((pr) => pr.number)).toEqual([1, 2, 3]);
+  });
+
   // リポジトリが違えば同じ番号でも別のIssue
   it("重複の判定はリポジトリと番号の組で行う", () => {
     const result = pullRequestsAwaitingUserMerge(
@@ -389,6 +435,44 @@ describe("pullRequestsAwaitingUserMerge", () => {
     );
 
     expect(result.map((pr) => pr.number)).toEqual([5]);
+  });
+});
+
+describe("pullRequestsWaitingForMergeChecks", () => {
+  it("一覧から外した「完了待ち」だけを返す（合計は従来の件数と一致する）", () => {
+    const pullRequests = [
+      releasePullRequest({ number: 1, ciState: "pending" }),
+      releasePullRequest({
+        number: 2,
+        mergeJudgement: { state: "pending", step: "risk-check", runUrl: null },
+      }),
+      releasePullRequest({ number: 3 }),
+      // マージ待ちですらないものは、どちらにも入らない
+      pullRequest({ number: 4, linkedIssueCheckUser: false, ciState: "pending" }),
+    ];
+
+    const waiting = pullRequestsWaitingForMergeChecks(pullRequests, []);
+    const awaiting = pullRequestsAwaitingUserMerge(pullRequests, []);
+
+    expect(waiting.map((pr) => pr.number)).toEqual([1, 2]);
+    expect(awaiting.map((pr) => pr.number)).toEqual([3]);
+  });
+
+  it("対応Issueが同じ一覧に並ぶPRは、完了待ちとしても数えない", () => {
+    const result = pullRequestsWaitingForMergeChecks(
+      [
+        pullRequest({
+          number: 5,
+          linkedIssueNumber: 12,
+          linkedIssueCheckReason: "merge",
+          linkedIssueCheckUser: true,
+          ciState: "pending",
+        }),
+      ],
+      [{ repositoryFullName: "guchi-apps/issue-deck", number: 12 }],
+    );
+
+    expect(result).toEqual([]);
   });
 });
 
