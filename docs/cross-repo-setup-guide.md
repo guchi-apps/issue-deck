@@ -74,7 +74,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 
 | 方式 | 対象ワークフロー | やること |
 |---|---|---|
-| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`・`claude-pr-repair.yml`・`version-tag-check.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
+| **参照方式**（移行済み） | `claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-review-develop.yml`・`release-develop-to-main.yml`・`claude-pr-repair.yml`・`version-tag-check.yml`・`deploy-retry.yml` | 薄いcallerを置き、issue-deck側の`reusable-*.yml`を`uses:`で呼ぶ。**ワークフロー本体もプロンプトもコピーしない** |
 
 参照方式は薄いcallerを置くだけで済み、issue-deck側の改善が**参照タグを上げるだけ**で反映される（背景と方式は[docs/cross-repo-automation.md](cross-repo-automation.md)を参照）。未移行のものも順次こちらへ寄せていく。
 
@@ -95,6 +95,8 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `version-tag-check.yml` | `main`宛のPRの時点で、リリースタグ（`vX.Y.Z`）がバージョンを上げないまま重複しないかを検査する（#1367）。**トリガー定義のみ**を持ち、本体は`reusable-version-tag-check.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`で、タグの接頭辞は`tag-prefix`で指定する（既定は`package.json`・`.version`・`v`）。**トリガーを`develop`へ広げないこと**（featureブランチのバージョンは直前のリリースのままでタグが必ず存在するため、developへの全PRが赤くなる） |
 | `reusable-version-tag-check.yml` | 上記のジョブ本体（`on: workflow_call`）。`version-tag-check`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
+| `deploy-retry.yml` | 本番デプロイ（`deploy.yml`）が一時的な失敗（SSH断・ネットワーク・アプリの起動待ち等）で落ちたとき、1回だけ自動で再実行する（#2134）。**トリガー定義のみ**を持ち、本体は`reusable-deploy-retry.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** `workflow_run`の`workflows:`には**そのリポジトリの`deploy.yml`の`name:`**を書く（issue-deckは`Deploy to Production`）。Signalyの通知に出す名前は`app-name`で指定する。**`deploy.yml`のジョブ名が`build`・`deploy`と違う場合は`retryable-jobs`を渡して合わせる**（合っていないジョブだけが失敗したときは安全側に倒れて再実行しない）。導入は任意。**`vps`・`subpc`は実機のインフラ設定を流すため、入れるかを個別に判断する** |
+| `reusable-deploy-retry.yml` | 上記のジョブ本体（`on: workflow_call`）。`deploy-retry`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
 [docs/cross-repo-automation.md](cross-repo-automation.md)の「ワークフローごとの移植コスト」を参照。
@@ -477,11 +479,14 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 > やり直すことになる。
 >
 > **例外は自動修復の3つ**（`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・
-> `claude-pr-repair.yml`。#1948）**と`claude-review-develop.yml`**（#1475）。
+> `claude-pr-repair.yml`。#1948）**と`claude-review-develop.yml`**（#1475）**・
+> `deploy-retry.yml`**（#2134）。
 > **対象の判定を機械で書けた**ため、別の配布
 > （`propagate-repair-workflows.yml`）として初回配置まで自動化してある——自動修復の前2つと
 > `claude-review-develop.yml`は`claude-issue-dispatch.yml`を持つリポジトリ、
-> `claude-pr-repair.yml`は`release-develop-to-main.yml`を持つリポジトリが対象。`with:`は
+> `claude-pr-repair.yml`は`release-develop-to-main.yml`を持つリポジトリ、
+> `deploy-retry.yml`は`deploy.yml`を持つリポジトリが対象（ただし**`vps`・`subpc`へ配るかは
+> 配布のときに判断する**。実機のインフラ設定を流すリポジトリのため）。`with:`は
 > 同じリポジトリの`claude-issue-dispatch.yml`から写す（**`claude-review-develop.yml`だけは
 > 写さない**。`reusable-claude-review-develop.yml`が`runtime-setup`等を宣言しておらず、
 > 渡すと読み込みごと失敗するため）。**タグの配布とは別のボタン・別のワークフローで、
