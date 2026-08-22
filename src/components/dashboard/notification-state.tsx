@@ -61,12 +61,13 @@ type NotificationState = {
    */
   releaseMergePending: ReleaseMergePendingCounts | null;
   /**
-   * リリース・デプロイが動いているリポジトリ数と、そのうち操作待ちの数（#2167）。
+   * リリース・デプロイが片付いていないリポジトリ数と、その内訳（#2167）。
    * PCの左メニューとスマホのホームの「ブランチ」行が件数とオレンジの丸に使う。
    * **まだ取れていない間はnull**（0件と区別する）。
    *
    * `releaseMergePending`とは数える単位が違う——あちらは人が押す番になったPRの**本数**で、
-   * こちらは動いている**リポジトリ数**（マージ待ちに限らず、実行中・失敗も含む）。
+   * こちらは片付いていない**リポジトリ数**（マージ待ちに限らず、実行中・失敗も含む）。
+   * **左メニューで非表示にしたリポジトリは除く**（押して開くブランチ画面と母集団を揃える）。
    */
   releaseActivity: ReleaseActivityCounts | null;
   /**
@@ -205,7 +206,7 @@ export function NotificationProvider({
       countLabel: describeNotificationCount(items),
       hasError: hasErrorNotification(items),
       releaseMergePending: countReleaseMergePending(releaseStatuses),
-      releaseActivity: countReleaseActivity(releaseStatuses),
+      releaseActivity: countReleaseActivity(releaseStatuses, repositories),
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
       isFetching: isSelfFetching || isRefreshingPullRequests,

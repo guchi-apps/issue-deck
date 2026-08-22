@@ -29,48 +29,99 @@ describe("countReleaseActivity（#2167）", () => {
     expect(countReleaseActivity(null)).toBeNull();
   });
 
-  it("動いているリポジトリが無ければ0件を返す", () => {
-    expect(countReleaseActivity([])).toEqual({ total: 0, actionRequired: 0 });
+  it("片付いていないリポジトリが無ければ0件を返す", () => {
+    expect(countReleaseActivity([])).toEqual({
+      total: 0,
+      progressing: 0,
+      mergePending: 0,
+      failed: 0,
+      actionRequired: 0,
+    });
   });
 
-  it("返ってきたリポジトリ数がそのまま「リリース・デプロイ中」の件数になる", () => {
+  it("返ってきたリポジトリ数がそのまま「未完了」の件数になる", () => {
     const counts = countReleaseActivity([
       makeReleaseStatus("guchi-apps/issue-deck", "progressing"),
       makeReleaseStatus("guchi-apps/myroom", "progressing"),
     ]);
 
-    expect(counts).toEqual({ total: 2, actionRequired: 0 });
+    expect(counts).toMatchObject({ total: 2, progressing: 2, actionRequired: 0 });
   });
 
-  it("マージ待ち（action_required）と失敗（error）を操作待ちに数える", () => {
+  it("マージ待ちと失敗を内訳として別々に持ち、合わせて操作待ちに数える", () => {
     const counts = countReleaseActivity([
       makeReleaseStatus("guchi-apps/issue-deck", "action_required"),
       makeReleaseStatus("guchi-apps/myroom", "error"),
       makeReleaseStatus("guchi-apps/vps", "progressing"),
     ]);
 
-    expect(counts).toEqual({ total: 3, actionRequired: 2 });
+    expect(counts).toEqual({
+      total: 3,
+      progressing: 1,
+      mergePending: 1,
+      failed: 1,
+      actionRequired: 2,
+    });
+  });
+
+  // 押して開くブランチ画面は非表示リポジトリを出さないため、揃えないと
+  // 「1件と出ているのに開いた先に無い」が起こる（#2167のレビュー指摘）。
+  it("左メニューで非表示にしたリポジトリは数えない", () => {
+    const counts = countReleaseActivity(
+      [
+        makeReleaseStatus("guchi-apps/issue-deck", "action_required"),
+        makeReleaseStatus("guchi-apps/myroom", "progressing"),
+      ],
+      [
+        { fullName: "guchi-apps/issue-deck", hidden: false },
+        { fullName: "guchi-apps/myroom", hidden: true },
+      ],
+    );
+
+    expect(counts).toMatchObject({ total: 1, progressing: 0, mergePending: 1, actionRequired: 1 });
+  });
+
+  it("リポジトリ一覧を渡さなければ絞り込まない", () => {
+    const counts = countReleaseActivity([makeReleaseStatus("guchi-apps/myroom", "progressing")]);
+
+    expect(counts).toMatchObject({ total: 1 });
   });
 });
 
 describe("describeReleaseActivity（#2167）", () => {
-  it("未取得・0件では動いているものが無いことを添える", () => {
-    expect(describeReleaseActivity(null)).toContain("リリース・デプロイ中のプロジェクトはありません");
-    expect(describeReleaseActivity({ total: 0, actionRequired: 0 })).toContain(
-      "リリース・デプロイ中のプロジェクトはありません",
-    );
+  const NONE = { total: 0, progressing: 0, mergePending: 0, failed: 0, actionRequired: 0 };
+
+  it("未取得・0件では片付いていないものが無いことを添える", () => {
+    expect(describeReleaseActivity(null)).toContain("未完了のリリース・デプロイはありません");
+    expect(describeReleaseActivity(NONE)).toContain("未完了のリリース・デプロイはありません");
   });
 
-  it("操作待ちが無ければ件数だけを添える", () => {
-    expect(describeReleaseActivity({ total: 3, actionRequired: 0 })).toContain(
-      "リリース・デプロイ中3件",
-    );
-    expect(describeReleaseActivity({ total: 3, actionRequired: 0 })).not.toContain("操作待ち");
+  it("0件の内訳は出さない（実行中だけなら実行中だけを書く）", () => {
+    const title = describeReleaseActivity({
+      total: 2,
+      progressing: 2,
+      mergePending: 0,
+      failed: 0,
+      actionRequired: 0,
+    });
+
+    expect(title).toContain("リリース・デプロイが未完了のプロジェクト2件: 実行中2件");
+    expect(title).not.toContain("マージ待ち");
+    expect(title).not.toContain("失敗");
   });
 
-  it("操作待ちがあれば内訳を添える", () => {
-    expect(describeReleaseActivity({ total: 3, actionRequired: 1 })).toContain(
-      "リリース・デプロイ中3件・うち操作待ち1件",
+  // 失敗は動いていないので、まとめて「実行中」と書くと数字の意味が崩れる（レビュー指摘）。
+  it("実行中と失敗を書き分ける", () => {
+    const title = describeReleaseActivity({
+      total: 3,
+      progressing: 1,
+      mergePending: 1,
+      failed: 1,
+      actionRequired: 2,
+    });
+
+    expect(title).toContain(
+      "リリース・デプロイが未完了のプロジェクト3件: 実行中1件・マージ待ち1件・失敗1件",
     );
   });
 });
