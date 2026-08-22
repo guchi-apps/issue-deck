@@ -218,16 +218,27 @@ done
 自動マージは1本も成立せず、失敗したジョブのぶんノイズが増えるだけ**になる
 （[organization-migration-checklist.md](organization-migration-checklist.md)にも既知として記載）。
 
-そのため配布は、issue-deckの画面（設定＞フリート運用）の「不足しているワークフローを配る」で
-**リポジトリ設定まで含めて**行う（[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
-「配布状況と、不足しているcallerの配布」）。
+**設定はGitHub Actionsからは変えられない。** `WORKFLOW_PAT`の権限は Contents / Issues /
+Pull requests / Actions / Workflows / Metadata だけで、**Administration を持たない**
+（[organization-migration.md](organization-migration.md)）。`PATCH /repos/{repo}`
+（`allow_auto_merge`）もブランチ保護APIも Administration: write が要る。実際
+`propagate-workflow-tag.sh`は配布のたびに`allow_auto_merge=true`を`|| true`付きで試して
+いたが、タグ配布PRが何度もマージされたリポジトリを含む**12件中8件が今も`false`**だった——
+握り潰していたため失敗が一度も表に出ていない。
 
-- `Allow auto-merge`を有効化する（未配布12件のうち8件が無効だった）
-- `develop`にブランチ保護が無ければ作る。**必須チェック名はワークフローのジョブ名から推測せず**、
-  直近のdevelop向けPRで実際に走ったcheck runと突き合わせて一致したものだけを使う。実在しない
-  名前を必須にすると永久に埋まらずマージ不能になるため、突き合わせに失敗したら保護は作らない
-- CIのジョブ名はリポジトリごとに違う（実測: `lint-and-build`が4件、`test`が3件、`verify`が2件、
-  `typecheck-and-test`・`backend`が各1件、`myroom`だけ`backend`と`frontend`の2件）
+そのため次の順で行う。
+
+1. **前提を揃える**（org owner本人が一度だけ）: `scripts/setup-develop-auto-merge.sh`。
+   既定はdry-runで、`--apply`で`Allow auto-merge`の有効化と`develop`のブランチ保護作成を行う。
+   **必須チェック名はワークフローのジョブ名から推測せず**、直近のdevelop向けPRで実際に
+   成功したcheck runと突き合わせて一致したものだけを使う（実在しない名前を必須にすると
+   永久に埋まらずマージ不能になるため、突き合わせに失敗したら保護を作らない）。
+   CIのジョブ名はリポジトリごとに違う（実測: `lint-and-build`が4件、`test`が3件、
+   `verify`が2件、`typecheck-and-test`・`backend`が各1件、`myroom`だけ`backend`と`frontend`の2件）
+2. **callerを配る**: issue-deckの画面（設定＞フリート運用）の「不足しているワークフローを配る」
+   （[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「配布状況と、不足しているcallerの配布」）。
+   配布スクリプトは前提が揃っているかを**読んで警告するだけ**で、設定は変えない
+3. 各リポジトリで配布PRを確認してマージする（GitHub Actionsの変更なので自動マージしない）
 
 **同じ保護が`release-develop-to-main.yml`のバンプPRにも効く。** バンプPRも
 `gh pr merge --auto --merge`で自動マージを予約しており、保護が無いリポジトリでは同じ理由で

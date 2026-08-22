@@ -194,6 +194,29 @@ describe("callerの生成", () => {
     expect(body).not.toContain("^\\.github/workflows/");
   });
 
+  it("ルート以外の依存ファイルをリスクパスで補う", () => {
+    // `dependency-check`はルートの`package.json`しか見ない。signalyは`backend/requirements.txt`
+    // だけ、myroomはルートが空スタブで実体が`frontend/package.json`のため、
+    // 補わないと依存の更新が一度もリスク判定されないまま自動マージされる（#1475）
+    const body = render("claude-review-develop.yml", DISPATCH);
+    const riskPaths = /^ {6}risk-paths: \|\n((?: {8}.*\n)+)/m.exec(body)?.[1] ?? "";
+    const patterns = riskPaths
+      .trim()
+      .split("\n")
+      .map((line) => line.trim().split(" :: ")[0] as string);
+
+    const matches = (path: string) =>
+      patterns.some((pattern) => new RegExp(pattern).test(path));
+
+    expect(matches("backend/requirements.txt")).toBe(true);
+    expect(matches("frontend/package.json")).toBe(true);
+    expect(matches("deployment/nginx.conf")).toBe(true);
+    // ルートの`package.json`は`dependency-check`の担当なので、ここでは拾わない
+    expect(matches("package.json")).toBe(false);
+    // 普通の実装PRを巻き込まない
+    expect(matches("src/app/page.tsx")).toBe(false);
+  });
+
   it("pr-repair は workflow_dispatch の入力を再利用ワークフローへ渡す", () => {
     // 再利用ワークフロー内の inputs は workflow_call のものを指すため、明示的に渡す必要がある
     const body = render("claude-pr-repair.yml", DISPATCH);

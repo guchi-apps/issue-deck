@@ -331,13 +331,22 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
   **`claude-review-develop.yml`にはこの3つを写さない**——
   `reusable-claude-review-develop.yml`が宣言していないため、渡すと読み込みごと失敗する。
   写す値が要るかどうかは雛形に`__WITH_INPUTS__`があるかで決まる。
-- **`claude-review-develop.yml`を配るときは、配布先のリポジトリ設定も揃える**（#1475）。
-  `Allow auto-merge`を有効化し、`develop`にブランチ保護（必須ステータスチェック）が無ければ
-  作る。**保護が無いと自動マージは成立しない**——判定の時点でPRは「既にマージ可能」なので
-  `gh pr merge --auto`が断られ、`auto-merge-fallback`が毎回`00.check-user`を付けるだけで
-  終わる。必須チェック名は**ワークフローのジョブ名から推測せず**、直近のdevelop向けPRで実際に
-  走ったcheck runと突き合わせて一致したものだけを使う（実在しない名前を必須にすると永久に
-  埋まらずマージ不能になる）。突き合わせに失敗したら保護は作らず、PR本文へ警告を残す。
+- **`claude-review-develop.yml`を配るときは、配布先の前提が揃っているかを確かめて警告する**
+  （#1475）。`Allow auto-merge`が有効か、`develop`にブランチ保護があるかを読み、
+  欠けていればワークフローのログとPR本文へ残す。**保護が無いと自動マージは成立しない**——
+  判定の時点でPRは「既にマージ可能」なので`gh pr merge --auto`が断られ、
+  `auto-merge-fallback`が毎回`00.check-user`を付けるだけで終わる。
+- **設定そのものはここでは変えない。** `WORKFLOW_PAT`は Contents / Issues / Pull requests /
+  Actions / Workflows / Metadata だけで**Administration を持たない**ため、
+  `PATCH /repos/{repo}`（`allow_auto_merge`）もブランチ保護APIも通らない。
+  `propagate-workflow-tag.sh`が`|| true`付きで有効化を試し続けていたが、**12リポジトリ中8件が
+  `false`のまま**で、失敗が一度も表に出ていなかった。設定はorg owner本人の`gh`で
+  `scripts/setup-develop-auto-merge.sh`を一度だけ実行して揃える（必須チェック名は
+  **ワークフローのジョブ名から推測せず**、直近のdevelop向けPRで実際に成功したcheck runと
+  突き合わせて一致したものだけを使う。実在しない名前を必須にすると永久に埋まらず
+  マージ不能になるため、突き合わせに失敗したら保護を作らない）。
+- **保護の有無は`branches/develop`の`protected`で見る。** `branches/develop/protection`は
+  必須チェック名まで返す代わりにAdministrationが要り、配布のトークンでは読めない。
 - **`verify-commands`・`build-env`は配らない。** リポジトリごとに違い機械的に決められないため、
   必要なら配布後に手で足す（issue-deck・dayspanのcallerが実例）。
 - **`workflow_run`はワークフローの「名前」で購読する。** 雛形の購読先は配布先の`ci.yml`

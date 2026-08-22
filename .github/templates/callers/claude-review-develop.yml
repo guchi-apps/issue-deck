@@ -43,12 +43,20 @@ jobs:
   review:
     uses: guchi-apps/issue-deck/.github/workflows/reusable-claude-review-develop.yml@__TAG__
     with:
-      # 内蔵パターンでは拾えない本番設定・シークレット定義のうち、どのリポジトリにも共通で
-      # 置けるぶんだけ。`.env.tpl`は内蔵の`.env*`（`(^|/)\.env`）に当たらない
-      # （`.github/deploy.env.tpl`のようにファイル名の途中に現れるため）。
+      # 内蔵パターンでは拾えないもののうち、**どのリポジトリにも共通で置けるぶん**だけ。
+      #
+      # - `.env.tpl`は内蔵の`.env*`（`(^|/)\.env`）に当たらない
+      #   （`.github/deploy.env.tpl`のようにファイル名の途中に現れるため）
+      # - デプロイ資材のディレクトリ名は`deploy/`と`deployment/`に割れている（myroom）
+      # - **`dependency-check`はルートの`package.json`しか見ない。** ルートに置いていない
+      #   リポジトリ（signalyは`backend/requirements.txt`だけ、myroomはルートが空スタブで
+      #   実体が`frontend/package.json`・`requirements.txt`）では依存の更新が一度も
+      #   リスク判定されないため、依存ファイルのパスで補う
       risk-paths: |
-        ^deploy/|\.env\.tpl$ :: 本番環境設定の変更 (deploy/**, **/*.env.tpl)
+        ^deploy(ment)?/|\.env\.tpl$ :: 本番環境設定の変更 (deploy/**, deployment/**, **/*.env.tpl)
         ^\.github/secrets-manifest\.tsv$ :: シークレット定義の変更 (.github/secrets-manifest.tsv)
+        (^|/)requirements[^/]*\.txt$|(^|/)pyproject\.toml$|(^|/)Pipfile$ :: 依存関係の変更 (requirements*.txt, pyproject.toml, Pipfile)
+        /package\.json$ :: ルート以外の依存関係の変更 (frontend/package.json など。dependency-checkはルートしか見ない)
       # 上の uses: と同じタグを指定する。片方だけ上げると新しいワークフローで
       # 古いプロンプトが使われる。
       prompts-ref: __TAG__
