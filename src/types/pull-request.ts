@@ -207,9 +207,11 @@ export type PullRequestListScope = "open" | "all";
 /**
  * 左メニューの「Pull Request」セクションで選べる状態別ビュー（#1312）。
  *
- * - `all` … マージ済み・クローズ済みも含む全件
+ * - `all` … openなPRの全件
  * - `in-progress` … CIの結果待ち（ドラフト・CI状態不明を含む）。待つしかないPR
- * - `completed` … CIが確定したopenなPR（マージできる、または失敗している）。手を動かすべきPR
+ * - `completed` … CIが確定したopenなPR（マージできる、または失敗している）。手を動かすべきPR。
+ *   画面上の表示名は「マージ待ち」（#2120）。idを変えると`prview=completed`のURLが切れるため、
+ *   ここは`completed`のままにしてある
  *
  * `in-progress`と`completed`でopenなPRを過不足なく二分する。
  */

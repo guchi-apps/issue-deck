@@ -43,7 +43,7 @@ function renderScreen(
 
 /** 下端のビュー行（シートを開くボタン） */
 function viewRow() {
-  return screen.getByRole("button", { name: /実行中|すべてのPR|完了したPR/ });
+  return screen.getByRole("button", { name: /実行中|すべてのPR|マージ待ち/ });
 }
 
 describe("MobilePullRequestsScreen のビュー切り替え（#1691）", () => {
@@ -66,8 +66,8 @@ describe("MobilePullRequestsScreen のビュー切り替え（#1691）", () => {
   it("上部の横スクロールタブは出さない（切り替えの口を1つにする）", () => {
     renderScreen();
 
-    // 「完了したPR」はシートを開くまで画面に無い
-    expect(screen.queryByRole("button", { name: /完了したPR/ })).toBeNull();
+    // 「マージ待ち」はシートを開くまで画面に無い
+    expect(screen.queryByRole("button", { name: /マージ待ち/ })).toBeNull();
   });
 
   it("行を押して開くシートからビューを選べる", () => {
@@ -75,7 +75,7 @@ describe("MobilePullRequestsScreen のビュー切り替え（#1691）", () => {
     renderScreen({ onChangeView });
 
     fireEvent.click(viewRow());
-    fireEvent.click(screen.getByRole("button", { name: /完了したPR/ }));
+    fireEvent.click(screen.getByRole("button", { name: /マージ待ち/ }));
 
     expect(onChangeView).toHaveBeenCalledWith("completed");
   });
