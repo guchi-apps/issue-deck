@@ -833,7 +833,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
   98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
   `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
-  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。**PRタブから開くときの
+  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。
+- **「ブランチ」タブのアイコンには反映待ちの件数を重ねる**（#2055。
+  [`lib/release-merge-pending.ts`](../src/lib/release-merge-pending.ts)）。
+  数えるのは**PRの本数**で、developへ（バージョンバンプPR `release/v…`）と
+  mainへ（リリースPR `develop`）のマージ待ちの合計。**Issueの件数ではない**——進捗Statusの
+  `Develop`・`Release`を数える「本番反映待ち」（左メニュー・ホームのカード）とは母集団が違う。
+  **出すのは合計だけで、内訳は`title`・`aria-label`に入れる。** 1タブ98pxに内訳2つを並べると
+  フッターを56px→68pxへ伸ばすことになり、5枠に増やせないのと同じ制約に当たる。
+  材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
+  **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
+  `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
+  したがって**CI実行中のPRは数えない**（`pendingMerge`がCIの確定後にしか埋まらないため。
+  #1433）。通知ベル・リポジトリ一覧のバッジと同じ判定で、ここだけ基準を変えると同じ状態が
+  場所によって別の数になる。**未取得（`null`）と0件は区別する**——未取得のうちは何も出さない
+  （0を出すと「待っているものが無い」と読めてしまう）。バッジの見た目は
+  ベルと同じ`NotificationBadge`を使い回す。
+  フッターは`NotificationProvider`の内側にあり、Providerを描く`issue-deck-shell.tsx`は
+  その親でフックを呼べないため、**件数はpropで配らず`MobileBottomNav`が自分で読む**。
+  描画だけの`MobileBottomNavView`を別に出してあるのは、Providerを立てずに件数を渡して
+  試験するため。
+- **PRタブから開くときの
   ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
