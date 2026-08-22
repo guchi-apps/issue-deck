@@ -32,6 +32,7 @@ import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { useNow } from "@/hooks/use-now";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
+import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
@@ -41,7 +42,7 @@ import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import { isActiveManualStepRun } from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { formatDateTime } from "@/lib/format-date-time";
+import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
@@ -148,6 +149,17 @@ type IssueListProps = {
    * 引っ張るという操作はタッチにしか無く、PCの一覧は渡さないので今までどおり。
    */
   onPullToRefresh?: () => Promise<unknown> | void;
+  /**
+   * 最終取得時刻（ISO8601）。未取得・渡さない場合は出さない（#1797）。
+   * PR一覧・ブランチ画面と同じ「◯件 ・ HH:MM時点」の形でヘッダーに出す。
+   */
+  fetchedAt?: string | null;
+  /**
+   * 自動更新の間隔（#1797）。`null`＝自動更新しない。**渡した一覧だけがヘッダーに状態を出す**
+   * ——取り直しを持たない一覧（Issue詳細から開く小さな一覧など）に「手動更新のみ」と
+   * 出しても、押す手段が無いことしか伝わらない。
+   */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
 };
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
@@ -296,6 +308,8 @@ export function IssueList({
   filtersIgnored = false,
   dispatch: injectedDispatch,
   onPullToRefresh,
+  fetchedAt = null,
+  autoRefreshIntervalMs,
 }: IssueListProps) {
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
@@ -431,7 +445,8 @@ export function IssueList({
       : 0;
 
   // 走っている自動実行（#1882）。**入口に出すのはこの一覧に居る手作業の分だけ**——
-  // 別のビューを見ているときに手作業の進捗を割り込ませない（進み具合は実行キューでも見られる）
+  // 別のビューを見ているときに手作業の進捗を割り込ませない。
+  // **#2073で実行キューの節を撤去したので、進み具合を追える常設の場所はこことアシスタントだけ**
   const activeManualStepRun =
     view === "manual-step"
       ? ((dispatch.manualStepRuns ?? []).find(
@@ -648,18 +663,25 @@ export function IssueList({
 
       {showHeader && (
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold">{title}</h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="truncate text-xs text-muted-foreground">
               {countLabel}
               {filtersIgnored && (
                 <span title="このビューはリポジトリ横断で全体を表示します（#1750）。キーワード・リポジトリ・状態・ラベル・担当者の絞り込みは適用しません。">
                   {" ・ 絞り込みは適用外"}
                 </span>
               )}
+              {/* いつ時点の内容かと、自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並び・
+                  同じ文言にそろえる。この一覧は開いている間ずっと10秒間隔で取り直しているが、
+                  その形跡が画面に無く、止まっていても正常時と見分けが付かなかった */}
+              {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
+              {autoRefreshIntervalMs !== undefined && (
+                <span>{` ・ ${describeAutoRefreshState(autoRefreshIntervalMs)}`}</span>
+              )}
             </p>
           </div>
-          <Star className="size-4 text-muted-foreground" />
+          <Star className="size-4 shrink-0 text-muted-foreground" />
         </div>
       )}
 

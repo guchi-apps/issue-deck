@@ -91,4 +91,51 @@ describe("WorkflowStatusSteps", () => {
     expect(items[0].getAttribute("aria-current")).toBeNull();
     expect(items[0].title).toBe("Planning");
   });
+
+  /**
+   * #2069。計画フェーズを通らずに実装へ入ったIssueで、1段目に済みのチェックを出すと、
+   * 計画を立てて承認まで通したIssueと見分けが付かない。
+   */
+  it("planningSkipped=trueなら1段目をスキップとして描く（#2069）", () => {
+    render(
+      <WorkflowStatusSteps labels={labels()} projectStatus="Implementation" planningSkipped />,
+    );
+    const items = screen.getAllByRole("listitem");
+    // 塗りつぶし（済み）にせず、破線の輪郭にする
+    expect(items[0].className).toContain("border-dashed");
+    expect(items[0].className).not.toContain("bg-primary");
+    expect(items[0].getAttribute("aria-label")).toBe("計画スキップ");
+    expect(items[0].title).toContain("計画フェーズを通らずに実装へ入りました");
+    // PCの段のラベルと、段のラベルが出ないスマホ向けのキャプションの両方で言う
+    expect(screen.getAllByText("計画スキップ")).toHaveLength(2);
+    expect(screen.getByText("実装中（2/6）")).not.toBeNull();
+  });
+
+  it("planningSkippedを渡さなければ従来どおり済みのチェックを出す（#2069）", () => {
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Implementation" />);
+    const items = screen.getAllByRole("listitem");
+    expect(items[0].className).toContain("bg-primary");
+    expect(items[0].className).not.toContain("border-dashed");
+    expect(screen.queryByText("計画スキップ")).toBeNull();
+  });
+
+  it("まだ計画中（Planning）のIssueはスキップ表示にしない（#2069）", () => {
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Planning" planningSkipped />);
+    const items = screen.getAllByRole("listitem");
+    expect(items[0].className).not.toContain("border-dashed");
+    expect(screen.queryByText("計画スキップ")).toBeNull();
+    expect(screen.getByText("計画検討中（1/6）")).not.toBeNull();
+  });
+
+  it("スキップと実行先はキャプションで並べて出す（#2069）", () => {
+    render(
+      <WorkflowStatusSteps
+        labels={labels()}
+        projectStatus="Implementation"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        planningSkipped
+      />,
+    );
+    expect(screen.getByText("計画スキップ・サブPCで実行中")).not.toBeNull();
+  });
 });

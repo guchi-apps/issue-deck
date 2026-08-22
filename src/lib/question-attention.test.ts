@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   countUnconfirmedQuestions,
   formatQuestionListCount,
+  formatQuestionNavTitle,
   resolveQuestionState,
 } from "@/lib/question-attention";
 
@@ -61,6 +62,19 @@ describe("countUnconfirmedQuestions", () => {
 
   it("1件も無ければ0を返す", () => {
     expect(countUnconfirmedQuestions([])).toBe(0);
+  });
+});
+
+describe("formatQuestionNavTitle", () => {
+  // 数字（一覧に並ぶ件数）と丸（未確認）で意味が違うため、行のラベルだけでは読めない（#2070）
+  it("未確認があれば内訳を添える", () => {
+    expect(formatQuestionNavTitle(3, 1)).toBe(
+      "開いている質問が3件（うち回答が届いていてまだ開いていないものが1件）あります",
+    );
+  });
+
+  it("未確認が無ければ総数だけを出す", () => {
+    expect(formatQuestionNavTitle(3, 0)).toBe("開いている質問が3件あります");
   });
 });
 

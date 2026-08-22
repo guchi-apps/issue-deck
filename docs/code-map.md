@@ -119,6 +119,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
+- **画像を拡大して見せるのは[`image-preview-dialog.tsx`](../src/components/dashboard/image-preview-dialog.tsx)だけで、`target="_blank"`で別タブに開かない**（#2065）。
+  このアプリはホーム画面へ追加して使う（`app/manifest.ts`の`display: "standalone"`）。
+  **その起動のしかたではタブもアドレスバーも無く、別タブで開いた画像を閉じて元の画面へ戻る
+  導線が画面から消える。** 画像に入口を足すときは、本文・コメント
+  （[`markdown-body.tsx`](../src/components/dashboard/markdown-body.tsx)）でも入力欄の添付
+  サムネイル（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）でも
+  このダイアログを通す。別タブで開く導線はプレビューの下辺のリンクとして残してある。
+  - **全画面に重ねるものは、背景を押して閉じる判定を自分で持つ。** Radixの
+    `onPointerDownOutside`は「Contentの外側」を見るが、Contentが画面全体を覆っていると
+    外側が存在しない。プレビューは画像そのもの以外のクリック（`event.target`が余白か）で閉じる。
+  - **スマホの戻る操作で閉じたい重ね表示は、開いている間だけ履歴を1つ積む**
+    （[`hooks/use-history-dismiss.ts`](../src/hooks/use-history-dismiss.ts)）。積まないと
+    戻る操作が下の画面へ効き、閉じたつもりが現在地まで変わる。深さの数え方は
+    [`lib/history-stack.ts`](../src/lib/history-stack.ts)に合わせ、閉じた時点で
+    `history.back()`により自分が積んだぶんを片付ける。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -360,8 +375,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
-- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
+- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す
+  （間隔の定数は[`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`ISSUE_POLL_INTERVAL_MS`）。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。
+- **一覧のヘッダーに出す取得の状態は、3画面（Issue一覧・PR一覧・ブランチ）で同じ並び・同じ文言に
+  そろえる**（#1797）。`◯件 ・ HH:MM時点 ・ 自動更新10秒間隔`で、**自動更新していないときも黙らず
+  「手動更新のみ」と出す**——何も出さないと「自動更新していない」のか「この画面は状態を出さない」のかを
+  見分けられない。文言は`lib/auto-refresh.ts`の`describeAutoRefreshState`（ヘッダー）と
+  `describeRefreshButtonHint`（更新ボタンのツールチップ「今すぐ更新（自動更新10秒間隔）」）から
+  配り、通知ベル・実行キューの更新インジケーター（`lib/refresh-status.ts`）も同じ言い方を使う。
+- **Issue一覧の「HH:MM時点」の初期値は、サーバー側で描いた時刻をpropsで渡す**（#1797。
+  `app/dashboard/page.tsx`の`issuesFetchedAt` → `useIssuePolling`の第2引数）。一覧の初期値は
+  サーバー描画ぶんで、ポーリングが最初に取りに行くのは10秒後。クライアントで現在時刻を作ると
+  初期描画がサーバーと食い違ってハイドレーションが崩れ、effectの中で置くのは
+  `react-hooks/set-state-in-effect`（lint）が通さない。
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
 - **Issueの親子関係（GitHubネイティブのサブIssue）もキャッシュせず、詳細を開いたときだけ取得する**
   （`/api/issues/sub-issues`・[`lib/github/sub-issues-api.ts`](../src/lib/github/sub-issues-api.ts)）。
@@ -526,6 +553,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   見ていたリポジトリが勝手に閉じる。理由は、このアプリが複数リポジトリを横断で見るためのもので、
   「人が動くまで進まないもの」は全体で取りこぼしが無いかを確かめる場所だから。個々のIssue一覧・
   PR一覧がリポジトリで絞られるのは従来どおり。
+- **メニューの行の「数字」と「オレンジの丸」は別のものを表す**（#2070）。数字は
+  **押した先の一覧に並ぶ件数**、丸は**いま人が手を動かせるものがあるという合図**。数え方は
+  [`lib/issue-stats.ts`](../src/lib/issue-stats.ts)の`computeNavCountsForFilters`に集約してあり、
+  左メニュー・スマホのホーム・スマホの一覧のビュー切替が同じ数字を見る。
+  - 例外は**「ユーザーの作業待ち」だけ**で、数字も`actionable`（いま実行できる手作業）にする
+    （#1763）。前提待ちは「まだできない」ものなので、在庫に数えると手を動かせる数が読めない。
+    総数との差は一覧ヘッダーの`formatManualStepListCount`（`2件・前提待ち2件`）で読む。
+  - **「質問」は#1910で数字を未確認（回答が届いていて未読）へ差し替えていたが、#2070で戻した。**
+    読み終えた質問しか無いと、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
+    （質問の確認済みは作業待ちの前提待ちと違い、「読んだがまだcloseしていない」＝人が片付ける
+    余地が残っているもの）。未確認は`countUnconfirmedQuestions`をシェルで別に数え、丸を点ける
+    判定と吹き出し（`formatQuestionNavTitle`）にだけ渡す。**総数は`navCounts`から引き、
+    画面側で数え直さない**——数え直すと同じ行の数字と吹き出しが別の数え方になる。
 - **「ユーザーの確認待ち」にはIssueだけでなく、ユーザーがマージするしかないPRも出す**（#1613。
   一覧の先頭に`MergePendingPullRequests`、選ぶ対象は`pullRequestsAwaitingUserMerge`）。
   develop→mainのリリースPRは対応Issueを持たないため、これが無いとどの確認待ちにも現れない。
@@ -601,8 +641,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       [`lib/manual-step-run.ts`](../src/lib/manual-step-run.ts)・`ManualStepRun`）。
       **アシスタントを閉じても・ブラウザを閉じても続く**（次の1件を積むのは代行実行の結果報告を
       受けたサーバー）。画面は状態を読んで出すだけで、**次を積まない**（両方が積むと二重に走る）。
-      進み具合は実行キュー（PCのトップバー・スマホのヘッダー）に出す。Issueはまたがない
-      （次の手作業は承認し直す）
+      進み具合は「ユーザーの作業待ち」ビューの入口バッジとアシスタント本体で追う（#2073で
+      実行キューの節は撤去した）。Issueはまたがない（次の手作業は承認し直す）
     - **いつでも中断できる**（#1882）。次を積まないだけでなく走っている1件も止める——
       順番待ちは取り消し、走り出したものは`MANUAL_STEP_ABORT`のジョブでpollerが
       `systemctl --user stop`。**止められないpollerでは打ち切り（5分）まで待つことを画面に出す**
@@ -656,10 +696,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
     同じ。開いた時点で既読）に乗せる——質問だけ別の基準を作ると、同じ行の中でドットとラベルが
     食い違う。
-  - **左メニューの件数は未確認の件数で、確認待ち・作業待ちと同じ塗りつぶしのオレンジの丸
-    （`NavCount`の`emphasis="attention"`）で出す**（#1910）。数字の文字色だけを変える弱い強調
-    （旧`emphasis="unread"`）は#1796の判断だったが、色だけでは未確認の回答に気づけず見落として
-    いたため廃止した。**丸が点いている行は、上から順に手を動かせば消える**という読み方に揃える。
+  - **左メニューの丸は、確認待ち・作業待ちと同じ塗りつぶしのオレンジ
+    （`NavCount`の`emphasis="attention"`）で、未確認が1件でもあれば点ける**（#1910）。数字の
+    文字色だけを変える弱い強調（旧`emphasis="unread"`）は#1796の判断だったが、色だけでは未確認の
+    回答に気づけず見落としていたため廃止した。**丸が点いている行は、上から順に手を動かせば
+    消える**という読み方に揃える。
+  - **ただし行に出す数字は未確認の件数ではなく、一覧に並ぶ件数（開いている質問の総数）**
+    （#2070）。#1910では数字も未確認にしていたが、読み終えた質問しか無いと`0`と出て
+    「質問は無い」と読めていた。内訳は行の吹き出し（`formatQuestionNavTitle`）と一覧ヘッダー
+    （`formatQuestionListCount`）で読む。
     件数の見た目はPC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
   - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と
@@ -743,10 +788,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
   CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
   （`claude-review-develop.yml`）・コンフリクト自動解消・共有知識の提案なども同じheadコミットに
-  check-runを付ける。とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、
-  通ったらマージする**ワークフローなので、`wait-for-ci` → `risk-check` → `claude-review` →
-  `auto-merge`のいずれかがPRの開いている間ずっと実行中で、**自動マージされるPRは一度も
-  「CI通過」を表示できなかった**。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
+  check-runを付ける。とくに`claude-review-develop.yml`は**レビューして通ったらマージする**
+  ワークフローなので、`wait-for-ci`・`risk-check` → `claude-review` → `auto-merge`のいずれかが
+  PRの開いている間ずっと実行中で、**自動マージされるPRは一度も「CI通過」を表示できなかった**
+  （当時はCIの完了を待ってからレビューする直列構成だった。#2066でレビューはCIと並行になったが、
+  `auto-merge`が終わるまでcheck-runが残る点は変わらない）。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
   ままで、ボタンが効いていないように見えていた（#1799。PR #1798の実測では`lint-and-build`の
   完了が13:53:49・`ci.yml`のジョブが出揃ったのが13:53:55なのに対し、`review / auto-merge`の
   完了はマージ後の13:54:27）。同じ詰まりでマージボタンが押せなかった事例は
@@ -891,7 +937,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   10秒間隔なら毎時「360 × draft以外のopen PR数」ポイント（上限5,000ポイント/時）。共有
   ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に触れうるので、
   **PR1件ごとのGraphQLを1回へまとめる改善を#1962として分けてある。**
-  **値が同じでもIssue一覧のポーリング（`use-issue-polling.ts`の`POLL_INTERVAL_MS`）とは定数を
+  **値が同じでもIssue一覧のポーリング（`lib/auto-refresh.ts`の`ISSUE_POLL_INTERVAL_MS`）とは定数を
   分ける**——あちらは`GET /api/issues`（DBの読み取りだけ）で、`lib/auto-refresh.ts`冒頭の
   「1回の取得コストが重い画面ほど間隔を長くする」に従って片方だけ見直せるようにしておく。
   並び順は「すべてのPR」だけ更新が新しい順で、

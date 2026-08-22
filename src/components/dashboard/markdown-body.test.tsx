@@ -228,3 +228,25 @@ describe("MarkdownBody のDOM属性", () => {
     expect(container.querySelectorAll("[node]")).toHaveLength(0);
   });
 });
+
+// 本文の画像は別タブではなくアプリ内のプレビューで開く（#2065）。ホーム画面から起動した
+// アプリにはタブが無く、別タブに開くと元の画面へ戻る導線が消えていた。
+describe("MarkdownBody の画像", () => {
+  it("画像を押すとプレビューが開き、バツボタンで閉じる", () => {
+    render(
+      <GithubReferenceNavigationProvider openReference={vi.fn()}>
+        <MarkdownBody content="![kanban.png](https://example.com/kanban.png)" />
+      </GithubReferenceNavigationProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "プレビューを閉じる" })).toBeNull();
+
+    fireEvent.click(screen.getByAltText("kanban.png"));
+    const close = screen.getByRole("button", { name: "プレビューを閉じる" });
+    // 本文のサムネイルとプレビューの2枚になる
+    expect(screen.getAllByAltText("kanban.png")).toHaveLength(2);
+
+    fireEvent.click(close);
+    expect(screen.queryByRole("button", { name: "プレビューを閉じる" })).toBeNull();
+  });
+});

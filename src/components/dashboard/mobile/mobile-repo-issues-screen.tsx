@@ -8,6 +8,7 @@ import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issu
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
@@ -48,6 +49,10 @@ type MobileRepoIssuesScreenProps = {
   onAskCrossRepoQuestion: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
+  /** 最終取得時刻（ISO8601）。`MobileIssueListScreen`へそのまま渡す（#1797） */
+  fetchedAt?: string | null;
+  /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
 };
 
 export function MobileRepoIssuesScreen({
@@ -67,6 +72,8 @@ export function MobileRepoIssuesScreen({
   onCreateIssue,
   onAskCrossRepoQuestion,
   onRefresh,
+  fetchedAt,
+  autoRefreshIntervalMs,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -198,6 +205,8 @@ export function MobileRepoIssuesScreen({
       onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       scrollKey={scrollKey}
       onRefresh={onRefresh}
+      fetchedAt={fetchedAt}
+      autoRefreshIntervalMs={autoRefreshIntervalMs}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}

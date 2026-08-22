@@ -9,6 +9,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { ImagePreviewDialog } from "@/components/dashboard/image-preview-dialog";
 import { copyText } from "@/lib/copy-text";
 import { hastToCopyText } from "@/lib/hast-text";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   if (failed) {
     return (
@@ -59,19 +61,26 @@ function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
     />
   );
 
-  // 本文中の画像は表示幅が狭く内容を確認しづらいので、クリックで原寸を別タブに開けるようにする（#384）。
+  // 本文中の画像は表示幅が狭く内容を確認しづらいので、クリックで原寸を開けるようにする（#384）。
+  // 開く先は別タブではなくアプリ内のプレビュー（#2065）。ホーム画面から起動したアプリには
+  // タブが無く、別タブに開くと元の画面へ戻る導線が画面から消えていた。
   if (typeof src !== "string" || src === "") return image;
 
   return (
-    <a
-      href={src}
-      target="_blank"
-      rel="noreferrer"
-      title="画像を新しいタブで開く"
-      className="inline-block cursor-zoom-in"
-    >
-      {image}
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setIsPreviewOpen(true)}
+        title="画像を拡大する"
+        className="inline-block cursor-zoom-in"
+      >
+        {image}
+      </button>
+      <ImagePreviewDialog
+        image={isPreviewOpen ? { src, name: alt ?? "" } : null}
+        onClose={() => setIsPreviewOpen(false)}
+      />
+    </>
   );
 }
 

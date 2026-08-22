@@ -19,6 +19,8 @@ type MobileFlowScreenProps = {
   mergedPullRequestsLoaded: boolean;
   /** 自動更新の間隔（#1767）。`BranchFlowView`へそのまま渡す */
   autoRefreshIntervalMs: AutoRefreshIntervalMs;
+  /** デプロイ状況だけが回っている間隔（#1797）。`BranchFlowView`へそのまま渡す */
+  deployAutoRefreshIntervalMs: AutoRefreshIntervalMs;
   onChangeAutoRefreshInterval: (intervalMs: AutoRefreshIntervalMs) => void;
   onRefresh: () => void;
   /** PRをこの画面からマージできたとき（#1756）。`BranchFlowView`へそのまま渡す */
@@ -44,6 +46,7 @@ export function MobileFlowScreen({
   failedRepositories,
   mergedPullRequestsLoaded,
   autoRefreshIntervalMs,
+  deployAutoRefreshIntervalMs,
   onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
@@ -58,6 +61,7 @@ export function MobileFlowScreen({
       failedRepositories={failedRepositories}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
+      deployAutoRefreshIntervalMs={deployAutoRefreshIntervalMs}
       onChangeAutoRefreshInterval={onChangeAutoRefreshInterval}
       onRefresh={onRefresh}
       onMerged={onMerged}

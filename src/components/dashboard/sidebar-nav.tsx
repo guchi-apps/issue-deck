@@ -22,6 +22,7 @@ import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import { formatQuestionNavTitle } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
@@ -59,6 +60,11 @@ type SidebarNavProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1613）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
+  /**
+   * 未確認（回答が届いていて未読）の質問の件数（#2070）。**行に出す数字は`navCounts`から
+   * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
+   */
+  unconfirmedQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   repositories: ConnectedRepository[];
@@ -86,6 +92,7 @@ export function SidebarNav({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
+  unconfirmedQuestionCount,
   pullRequestNavCounts,
   repositories,
   selectedRepoFullNames = [],
@@ -213,17 +220,15 @@ export function SidebarNav({
               icon: navViewIcons[view.id],
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
-              // 件数は未確認（回答が届いていて未読）の数で、確認待ち・作業待ちと同じく
-              // 「いま手を動かせる数」を出す（#1910。数え方は`computeNavCountsForFilters`）。
-              // 総数との差は一覧のヘッダーの内訳（`3件・未確認1件`）で読む
+              // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070）。#1910では
+              // 未確認（回答が届いていて未読）の数を出していたが、読み終えた質問しか
+              // 無いときに、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
               count: navCounts[view.id],
-              emphasis: navCounts[view.id] > 0 ? "attention" : "none",
-              // 丸の数字が何を数えているのかは、行のラベル（「質問」）からは読めないため
-              // 吹き出しで補う（作業待ち（#1763）と違い、言い直しにならない）
-              title:
-                navCounts[view.id] > 0
-                  ? `回答が届いていてまだ開いていない質問が${navCounts[view.id]}件あります`
-                  : undefined,
+              // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
+              emphasis: unconfirmedQuestionCount > 0 ? "attention" : "none",
+              // 数字（総数）と丸（未確認）で意味が違うため、行のラベル（「質問」）からは
+              // 何を数えているのか読めない。吹き出しで内訳を補う
+              title: formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount),
             }),
           )}
           {navRow({

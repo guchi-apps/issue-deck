@@ -264,6 +264,47 @@ describe("fetchCheckRollup", () => {
     });
   });
 
+  it("CI完了待ちとレビューが同時に走っている間はレビューを名乗る（#2066）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 4,
+          nodes: [
+            checkRun("IN_PROGRESS", null, "ci.yml", "lint-and-build"),
+            // wait-for-ciはrisk-check・claude-reviewと並行して走る（#2066）。CIの進み具合は
+            // 隣のCI状態のピルが出しているので、判定側で動いているものを優先して名乗らせる。
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "wait-for-ci"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("claude-review");
+  });
+
+  it("レビューが終わってCI完了待ちだけが残れば「CIの完了待ち」を名乗る（#2066）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "wait-for-ci"),
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("wait-for-ci");
+  });
+
   it("実行中が無ければ、進行順がいちばん早い未完了のジョブを待っているものとする（#2059）", async () => {
     stubGraphql(
       rollupResponse({

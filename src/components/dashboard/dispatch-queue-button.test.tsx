@@ -476,7 +476,7 @@ describe("DispatchQueueButton の更新インジケーター（#1773）", () => 
   it("いつ時点の内容かと、次に取りに行く間隔を出す", async () => {
     await openQueue([makeJob()]);
 
-    expect(screen.getByText("12秒前に更新・20秒ごと")).toBeDefined();
+    expect(screen.getByText("12秒前に更新・20秒間隔")).toBeDefined();
   });
 
   it("押すと次の自動更新を待たずに取り直す", async () => {

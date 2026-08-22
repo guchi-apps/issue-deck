@@ -57,6 +57,14 @@ type UsePullRequestsResult = {
    *   「引っ張っても何も起きない」としか見えない。
    */
   refreshFromPull: () => Promise<void>;
+  /**
+   * 自動更新が有効か（#1797）。呼び出し側が渡した`autoRefreshIntervalMs`をそのまま映す。
+   * Issue一覧（`use-issue-polling.ts`）・ブランチ状況と返り値の形をそろえ、画面が
+   * 「取得の状態」を1か所（このフック）から受け取れるようにするため。
+   */
+  autoRefresh: boolean;
+  /** 自動更新の間隔（#1797）。`null`＝自動更新しない。画面に出す間隔もこの値を使う */
+  pollIntervalMs: AutoRefreshIntervalMs;
 };
 
 /**
@@ -219,5 +227,7 @@ export function usePullRequests(
     refresh,
     refreshInBackground,
     refreshFromPull,
+    autoRefresh: autoRefreshIntervalMs !== null,
+    pollIntervalMs: autoRefreshIntervalMs,
   };
 }
