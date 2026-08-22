@@ -103,7 +103,10 @@ name: Issue Progress (reusable)
 # 変わる(「ユーザーの作業待ち」ビューに並び、エージェントへ送る導線が消え、実行者向けの案内パネルが
 # 出る)ため、付け忘れると**エージェントへ送る導線が出たままの、ただのIssue**になる。
 # 起票経路が3つある(issue-deckの作成ダイアログ・エージェントの`gh issue create`・GitHubから
-# 直接)以上、どの経路も通る最後の地点で担保できるのはIssueのopenイベントだけなので、ここに置く。
+# 直接)以上、どの経路も通る最後の地点で担保できるのはIssueのopenイベントなので、ここに置く。
+# **ただしイベントだけでは取りこぼす(#2010)。** caller側の`on: issues: types:`に`opened`が
+# 無い時期に起票されたIssueは後からイベントが再発火せず永久に埋まらないため、同じジョブを
+# scheduleでも動かし、ラベルの無い手作業Issueを定期的に埋め直す(develop-merge-sweepと同じ安全網)。
 
 
 on:
@@ -1338,18 +1341,40 @@ jobs:
     # editedも拾うのは、起票時にプレフィックスを付け忘れて後からタイトルを直す経路が実際に
     # あるため。付与済みなら何もせずに終わるので、本文だけの編集で再発火しても害はない。
     #
+    # **イベントだけでは取りこぼす(#2010)。** `on:`はcaller側にしかないため、caller側の
+    # `issues: types:`に`opened`・`edited`が無い時期に起票されたIssueは、後からタグを上げても
+    # イベントが再発火せず**永久に埋まらない**。guchi-apps/signaly#148は`manual-step-label`
+    # ジョブがまだ無い`workflows/v21`を指していた時期に起票され、ラベルが1つも付かないまま
+    # 2日以上openのままだった(「ユーザーの作業待ち」ビューにも通知にも一度も出ていない)。
+    # そのため`schedule`・`workflow_dispatch`でも動かし、**タイトルが`[手作業]`で始まるopenな
+    # Issueのうちラベルの無いものを埋め直す**。develop-merge-sweepと同じ「安全網」の位置づけ。
+    #
+    # scheduleでの対象の探し方は`gh issue list --search`。GitHubの検索は日本語もタイトルの
+    # `[手作業]`で引けるが(実測)、`手作業`を含むだけの別Issueも混ざるため、**プレフィックスの
+    # 一致は取得後に自分で確かめる**(検索を絞り込みにだけ使い、判定はイベント経路と同じ規則で行う)。
+    #
+    # **scheduleを持つcallerでは、このジョブぶんのActions実行が1回増える**(課金はジョブ単位で
+    # 1分に切り上げ)。対象0件でも起動はするため、cronを詰めているリポジトリほど効く。
+    # それでも別ジョブのままにしてあるのは、develop-merge-sweepが進捗報告APIへ依存するのに対し
+    # こちらはGitHubだけで完結し、片方が落ちてももう片方が動くようにするため。
+    #
     # ラベル定義が無いリポジトリでは`gh issue edit --add-label`がexit 1で落ちる(#975)ため、
     # cleanup-on-closeと同じく`gh label list`と突き合わせてから呼ぶ。ラベルが無いこと自体は
     # そのリポジトリへラベル体系を配れていないという別の問題なので、警告に留めて落とさない。
+    # **突き合わせるのは対象が1件でも見つかってから**にしてある。先に確かめると、ラベルを配れて
+    # いないリポジトリでイベントのたび・15分ごとに無関係な警告が出続けるため。
     if: |
-      github.event_name == 'issues' &&
-      (github.event.action == 'opened' || github.event.action == 'edited')
+      (github.event_name == 'issues' &&
+        (github.event.action == 'opened' || github.event.action == 'edited')) ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       issues: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       # タイトルはユーザー入力なので、run:本文へ展開せずenv経由でのみ参照する(script injection対策)
       ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -1358,25 +1383,52 @@ jobs:
         run: |
           set -euo pipefail
           prefix='[手作業]'
-          if [ "${ISSUE_TITLE#"$prefix"}" = "$ISSUE_TITLE" ]; then
-            echo "タイトルが $prefix で始まらないため何もしません: $ISSUE_TITLE"
-            exit 0
-          fi
-          # grep -q は一致した時点で終了するため、pipefail下ではgh側がSIGPIPE(141)で落ちて
-          # パイプライン全体の終了ステータスが1になりうる。判定を取り違えないよう、
-          # 出力を変数へ受けてから突き合わせる
-          attached="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
-          if grep -qx "71.manual-step" <<< "$attached"; then
-            echo "issue #$ISSUE_NUMBER には既に 71.manual-step が付与されています"
-            exit 0
+          targets=""
+          if [ "$EVENT_NAME" = "issues" ]; then
+            # scheduleではissue関連のenvが空になるため、set -u下でも触れるように既定値を置く
+            title="${ISSUE_TITLE:-}"
+            number="${ISSUE_NUMBER:-}"
+            if [ "${title#"$prefix"}" = "$title" ]; then
+              echo "タイトルが $prefix で始まらないため何もしません: $title"
+              exit 0
+            fi
+            # grep -q は一致した時点で終了するため、pipefail下ではgh側がSIGPIPE(141)で落ちて
+            # パイプライン全体の終了ステータスが1になりうる。判定を取り違えないよう、
+            # 出力を変数へ受けてから突き合わせる
+            attached="$(gh issue view "$number" --json labels --jq '.labels[].name')"
+            if grep -qx "71.manual-step" <<< "$attached"; then
+              echo "issue #$number には既に 71.manual-step が付与されています"
+              exit 0
+            fi
+            targets="$number"
+          else
+            # 検索は絞り込みだけに使い、プレフィックスの一致はjq側で確かめる(`手作業`を
+            # 含むだけの別Issueが混ざるため)。検索インデックスの遅れで既に付与済みのものが
+            # 返ってきても、--add-labelは冪等なので害は無い
+            targets="$(gh issue list --state open --limit 200 \
+              --search 'in:title "[手作業]" -label:"71.manual-step"' \
+              --json number,title \
+              --jq '.[] | select(.title | startswith("[手作業]")) | .number')"
+            if [ -z "$targets" ]; then
+              echo "ラベルの付いていない手作業Issueはありません"
+              exit 0
+            fi
+            echo "ラベルの付いていない手作業Issue: $(tr '\n' ' ' <<< "$targets")"
           fi
           defined="$(gh label list --json name --jq '.[].name' --limit 200)"
-          if grep -qx "71.manual-step" <<< "$defined"; then
-            gh issue edit "$ISSUE_NUMBER" --add-label "71.manual-step"
-            echo "issue #$ISSUE_NUMBER へ 71.manual-step を付与しました"
-          else
+          if ! grep -qx "71.manual-step" <<< "$defined"; then
             echo "::warning::ラベル '71.manual-step' がリポジトリに存在しないため付与をスキップします"
+            exit 0
           fi
+          while IFS= read -r n; do
+            [ -n "$n" ] || continue
+            if gh issue edit "$n" --add-label "71.manual-step"; then
+              echo "issue #$n へ 71.manual-step を付与しました"
+            else
+              # sweepでは1件の失敗で残りを止めない(次のrunで拾い直せるが、気付けるよう警告は出す)
+              echo "::warning::issue #$n への 71.manual-step の付与に失敗しました"
+            fi
+          done <<< "$targets"
 
   manual-step-body-check:
     # 手作業Issueの本文が、issue-deckの手作業アシスタントが読む書式に合っているかを検査し、

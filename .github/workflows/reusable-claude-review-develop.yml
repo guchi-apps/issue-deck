@@ -598,11 +598,16 @@ jobs:
             if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
               gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
             fi
-            COMMENT_BODY="⚠️ 自動レビュー（claude-review）が実行できなかったため、developへのマージ前にユーザーの確認が必要です。"
+            # 理由は必ず「見出し語 + 箇条書き」の形で書く。issue-deckのIssue詳細
+            # (src/lib/merge-check-reasons.ts)がこの形からしか理由を取り出せず、
+            # 散文だけのコメントは「理由の記録が見つかりませんでした」になる(#2062)。
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"- 自動レビュー（claude-review）が実行できなかったため（安全のため自動マージはスキップされます）"
             if [ "$RISKY" = "true" ]; then
-              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"機械的リスク判定にも以下の理由で該当しています。"
-              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+              COMMENT_BODY="$COMMENT_BODY"$'\n'"$REASONS"
             fi
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"実行ログ: ${RUN_URL}"
             COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
@@ -724,7 +729,7 @@ jobs:
           gh pr merge "$PR_NUMBER" --auto --merge
 
   auto-merge-fallback:
-    needs: [identify-issue, auto-merge]
+    needs: [identify-issue, risk-check, auto-merge]
     if: always() && needs.auto-merge.result == 'failure'
     runs-on: ubuntu-latest
     permissions:
@@ -737,6 +742,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          RISKY: ${{ needs.risk-check.outputs.risky }}
+          REASONS: ${{ needs.risk-check.outputs.reasons }}
         run: |
           set -e
           gh pr comment "$PR_NUMBER" --body "⚠️ 自動マージ（auto-merge）が失敗しました。Actionsの実行ログを確認し、必要であれば手動でマージしてください。"
@@ -762,4 +769,17 @@ jobs:
             if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
               gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
             fi
+            # Issueにも理由を残す(#2062)。従来はPRコメントにしか書いておらず、Issue側は
+            # ラベルだけが付くため、issue-deckのIssue詳細が「理由の記録が見つかりませんでした」
+            # としか出せなかった。文面は「見出し語 + 箇条書き」の形を守る
+            # (src/lib/merge-check-reasons.ts がこの形からしか理由を取り出せない)。
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"- 自動マージ（auto-merge）の有効化に失敗したため、ユーザーのマージ操作が必要です"
+            if [ "$RISKY" = "true" ]; then
+              COMMENT_BODY="$COMMENT_BODY"$'\n'"$REASONS"
+            fi
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"実行ログ: ${RUN_URL}"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi

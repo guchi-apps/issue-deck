@@ -12,6 +12,10 @@ import {
   type NotificationGroup,
   type NotificationItem,
 } from "@/lib/notifications";
+import {
+  countReleaseMergePending,
+  type ReleaseMergePendingCounts,
+} from "@/lib/release-merge-pending";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
@@ -48,6 +52,14 @@ type NotificationState = {
   /** 1件でも失敗が混ざっているか（バッジを赤にする条件） */
   hasError: boolean;
   /**
+   * developへ・mainへの反映待ちの本数（#2055）。スマホのフッターの「ブランチ」タブが
+   * 合計をバッジに出す。**まだ取れていない間はnull**（0件と区別する）。
+   *
+   * ベルの`badgeCount`とは母集団が違う——あちらは確認待ち・PR・リリースを合わせた
+   * 「対応が必要なもの」全体で、こちらはリリース系のマージ待ちだけ。
+   */
+  releaseMergePending: ReleaseMergePendingCounts | null;
+  /**
    * ベルの材料（リリース状況・Issue一覧・Pull Request一覧）をまとめて取り直す（#1909）。
    * 開いている間の自動更新と、右上の更新ボタンの両方がこれを呼ぶ。
    */
@@ -72,6 +84,7 @@ const EMPTY_STATE: NotificationState = {
   badgeCount: 0,
   countLabel: "0件",
   hasError: false,
+  releaseMergePending: null,
   refresh: () => {},
   isFetching: false,
   fetchedAt: null,
@@ -180,6 +193,7 @@ export function NotificationProvider({
       badgeCount: countBadgeNotifications(items),
       countLabel: describeNotificationCount(items),
       hasError: hasErrorNotification(items),
+      releaseMergePending: countReleaseMergePending(releaseStatuses),
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
       isFetching: isSelfFetching || isRefreshingPullRequests,

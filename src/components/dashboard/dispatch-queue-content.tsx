@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowUp, CircleStop, Loader2, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
 
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
@@ -22,11 +22,6 @@ import {
   type DispatchQueueSummary,
 } from "@/lib/dispatch/queue-summary";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import {
-  describeManualStepRun,
-  isActiveManualStepRun,
-  manualStepRunProgressPercent,
-} from "@/lib/manual-step-run-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -67,6 +62,13 @@ import { cn } from "@/lib/utils";
  * **先頭に更新インジケーターを出す**（#1773・`QueueRefreshRow`）。この中身は開いている間ずっと
  * 自動で取り直しているが、その形跡が画面に無く、最新なのか取得が止まって固まっているのかを
  * 見分けられなかった。PCとスマホで同じものを出す都合上、置き場所もここ1か所にする。
+ *
+ * **手作業アシスタントの自動実行はここに出さない**（#2073で#1882の節を撤去した）。ここは
+ * 「積んだジョブがいつ流れるか」を見る場所で、順に流れて消えていくものしか並ばない。
+ * 自動実行は**人が手順を実行するまで`PAUSED`のまま無期限に残る**ため、Issueの数だけ
+ * 積み上がってジョブの並びを押し出し、完了済みが混ざっているようにしか読めなくなっていた
+ * （#2064）。進み具合と中断は手作業アシスタントと「ユーザーの作業待ち」ビューの入口バッジ
+ * （`issue-list.tsx`）が持つ。
  */
 export function DispatchQueueContent({
   dispatch,
@@ -129,13 +131,6 @@ export function DispatchQueueContent({
             まで並行し、あとは順番に流れます。
           </p>
         )}
-
-      {/*
-        手作業アシスタントの自動実行（#1882）。**ジョブの節より先に出す。**
-        アシスタントを閉じてもここで進み具合を追える、というのがこの節の役目で、
-        ジョブの並びの下に置くと「閉じた後にどこを見ればよいか」の答えにならない
-      */}
-      <ManualStepRunSection dispatch={dispatch} onOpenIssue={onOpenIssue} />
 
       <QueueSection
         title="実行中"
@@ -411,88 +406,3 @@ function QueueSection({
   );
 }
 
-
-/**
- * 手作業アシスタントの自動実行（#1882）。
- *
- * **進めているのはサーバー**なので、アシスタントを閉じても・ブラウザを閉じても進む。
- * その進み具合を確かめる場所として、既にPC・スマホの両方から開ける実行キューへ置く
- * （常設のバーを新しく足さない）。
- *
- * 出すのは**走っている・止まっている実行だけ**。終わった実行は`GET /api/dispatch`が
- * 30分だけ返すので、結果（終わった・中断した）を見てから静かに消える。
- */
-function ManualStepRunSection({
-  dispatch,
-  onOpenIssue,
-}: {
-  dispatch: DispatchStateHandle;
-  onOpenIssue?: (issueId: string) => void;
-}) {
-  const runs = dispatch.manualStepRuns ?? [];
-  if (runs.length === 0) return null;
-
-  return (
-    <section className="mt-3 flex flex-col gap-1.5">
-      <h4 className="text-[11px] font-semibold text-muted-foreground">手作業の自動実行</h4>
-      {runs.map((run) => {
-        const failed = run.pausedReason === "FAILED" || run.pausedReason === "ENQUEUE_FAILED";
-        return (
-          <div
-            key={`${run.repositoryFullName}#${run.issueNumber}`}
-            className={cn(
-              "flex flex-col gap-1.5 rounded-md border p-2",
-              run.status === "RUNNING" && "border-amber-500/40 bg-amber-500/5",
-              failed && "border-destructive/40 bg-destructive/5",
-            )}
-          >
-            <DispatchIssueTitle
-              issueNumber={run.issueNumber}
-              issueTitle={run.issueTitle}
-              issueId={run.issueId}
-              onOpenIssue={onOpenIssue}
-            />
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-              {run.status === "RUNNING" && (
-                <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
-              )}
-              <span className="tabular-nums">{describeManualStepRun(run)}</span>
-              <span className="h-1 w-14 shrink-0 overflow-hidden rounded-full bg-foreground/15">
-                <span
-                  className="block h-full bg-foreground/50"
-                  style={{ width: `${manualStepRunProgressPercent(run)}%` }}
-                />
-              </span>
-              <span className="truncate">{run.targetHost}</span>
-            </div>
-            {run.currentLabel !== null && isActiveManualStepRun(run.status) && (
-              <p className="truncate text-[11px] text-muted-foreground">{run.currentLabel}</p>
-            )}
-            {run.message !== null && (
-              <p className="text-[11px] break-words text-muted-foreground">{run.message}</p>
-            )}
-            {isActiveManualStepRun(run.status) && (
-              <div className="flex justify-end">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={dispatch.isSubmitting}
-                  onClick={() =>
-                    void dispatch.controlManualStepRun({
-                      repositoryFullName: run.repositoryFullName,
-                      issueNumber: run.issueNumber,
-                      action: "stop",
-                    })
-                  }
-                >
-                  {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <CircleStop />}
-                  中断する
-                </Button>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </section>
-  );
-}

@@ -39,6 +39,24 @@ describe("MergeCheckReasonNotice", () => {
     expect(container.textContent).not.toContain("`");
   });
 
+  it("`**`で囲まれた該当カテゴリは太字として描く（記号を生で出さない）", () => {
+    const { container } = render(
+      <MergeCheckReasonNotice
+        reasons={{
+          source: "review",
+          items: [
+            "**GitHub Actionsやデプロイ設定**: `.github/workflows/deploy.yml` を変更している",
+          ],
+          postedAtLabel: null,
+        }}
+      />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe("GitHub Actionsやデプロイ設定");
+    expect(container.querySelector("code")?.textContent).toBe(".github/workflows/deploy.yml");
+    expect(container.textContent).not.toContain("*");
+    expect(container.textContent).not.toContain("`");
+  });
+
   it("ラベル由来のときは投稿時刻を持たないので、出所だけを出す", () => {
     render(
       <MergeCheckReasonNotice

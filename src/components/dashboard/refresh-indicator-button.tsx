@@ -3,7 +3,8 @@
 import { RefreshCw } from "lucide-react";
 
 import { useNow } from "@/hooks/use-now";
-import { describeRefreshHint, describeRefreshStatus, type RefreshTone } from "@/lib/refresh-status";
+import { describeRefreshButtonHint } from "@/lib/auto-refresh";
+import { describeRefreshStatus, type RefreshTone } from "@/lib/refresh-status";
 import { cn } from "@/lib/utils";
 
 /**
@@ -57,7 +58,7 @@ export function RefreshIndicatorButton({
     <button
       type="button"
       aria-label={label}
-      title={describeRefreshHint(pollIntervalMs)}
+      title={describeRefreshButtonHint(pollIntervalMs)}
       className={cn(
         // 秒が変わるたびに文字幅が動かないよう桁を固定する
         "flex items-center gap-1 rounded px-1 py-0.5 text-[11px] tabular-nums hover:bg-accent hover:text-foreground",

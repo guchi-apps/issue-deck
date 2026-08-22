@@ -40,9 +40,16 @@ export function IssueOrderSection({
 }) {
   const hasPrerequisites = prerequisiteSummary !== null && prerequisites.length > 0;
   const hasDependents = dependents.length > 0;
-  if (!hasPrerequisites && !hasDependents) return null;
-
   const blocking = prerequisiteSummary?.blocking.length ?? 0;
+  /**
+   * **前提が全部そろっていて、自分を待っている相手もいないときは節ごと出さない**（#2057）。
+   *
+   * その状態の畳んだ行は「実施順序 1 前提はそろっている」で、開いても押す先が無く、読んでも
+   * 次にやることが変わらない。順序を書いた意味があるのは、待たされているか待たせているかの
+   * どちらかが成立しているときだけ。**前提待ちが1件でもあれば従来どおり**（開いたまま・
+   * 注意色で出す）で、そこは変えていない。
+   */
+  if (blocking === 0 && !hasDependents) return null;
 
   return (
     <IssueDetailSection

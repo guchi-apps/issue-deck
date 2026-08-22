@@ -50,6 +50,8 @@ function renderScreen(
     onChangeFilters: (filters: MobileIssueLocalFilters) => void;
     pinned: { view: NavViewId; count: number; section: ReactNode };
     onRefresh: () => Promise<unknown> | void;
+    fetchedAt: string | null;
+    autoRefreshIntervalMs: number | null;
   }> = {},
 ) {
   render(
@@ -69,6 +71,8 @@ function renderScreen(
       pinned={overrides.pinned}
       scrollKey="test"
       onRefresh={overrides.onRefresh}
+      fetchedAt={overrides.fetchedAt}
+      autoRefreshIntervalMs={overrides.autoRefreshIntervalMs}
     />,
   );
 }
@@ -206,5 +210,26 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
 
     const fabs = screen.getByRole("button", { name: "新しいIssueを作成" }).parentElement!;
     expect(fabs.className).toContain("z-20");
+  });
+});
+
+/** #1797。PCの一覧・PR一覧・ブランチ画面と同じ並び・同じ文言でヘッダーへ出す */
+describe("MobileIssueListScreen ヘッダーの自動更新の状態（#1797）", () => {
+  it("ビュー名・件数の後ろに、いつ時点かと自動更新の間隔を添える", () => {
+    renderScreen({
+      view: "all",
+      fetchedAt: "2026-08-22T05:32:00.000Z",
+      autoRefreshIntervalMs: 10_000,
+    });
+
+    const meta = screen.getByText(/すべてのIssue・0件/).textContent ?? "";
+    expect(meta).toContain("時点");
+    expect(meta).toContain("自動更新10秒間隔");
+  });
+
+  it("状態を渡していない画面には何も足さない", () => {
+    renderScreen({ view: "all" });
+
+    expect(screen.getByText("すべてのIssue・0件")).toBeTruthy();
   });
 });

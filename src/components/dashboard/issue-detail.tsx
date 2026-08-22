@@ -107,6 +107,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
   canAskClaude,
@@ -216,6 +217,9 @@ export function IssueDetail({
     [issues, issue],
   );
   const qaAnswerPending = isQaAnswerPending(comments);
+  // 進捗ステッパーの計画フェーズをスキップ表示にするか（#2069）。コメントを持っている
+  // この層でだけ判定できる
+  const planningSkipped = issue ? isPlanningPhaseSkipped(issue, comments, isLoading) : false;
   const pullRequestLinks = usePullRequestLinks(
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
@@ -751,6 +755,7 @@ export function IssueDetail({
             workflowRunId={workflowRunId}
             qaAnswerPending={qaAnswerPending}
             checkUserGuidance={checkUserGuidance}
+            planningSkipped={planningSkipped}
           />
 
           {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。

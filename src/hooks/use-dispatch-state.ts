@@ -9,10 +9,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import {
-  isActiveManualStepRun,
-  type ManualStepRunView,
-} from "@/lib/manual-step-run-view";
+import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
@@ -73,8 +70,16 @@ function hasActiveJob(state: DispatchState | null): boolean {
   // **走っている自動実行も「動いている」に数える**（#1882）。次の1件を積むのはサーバーで、
   // 積まれた瞬間は画面に何も無い（ジョブが現れるのは次の取得）。ここを数えないと、
   // 1件終わってから次が見えるまで最大20秒黙る
+  // **数えるのは`RUNNING`だけで、`PAUSED`は数えない**（#2073）。止まっている間はサーバー側で
+  // 何も進まないので速く取り直す意味が無く、`PAUSED`は人が手順を実行するまで無期限に残るため、
+  // 数えると開いている画面すべてが5秒間隔のまま戻らなくなる。再開・中断を押したときは
+  // `controlManualStepRun`が応答をその場で状態へ反映するので、押した本人の体感は変わらない
+  // **数えるのは`RUNNING`だけで、`PAUSED`は数えない**（#2073）。止まっている間はサーバー側で
+  // 何も進まないので速く取り直す意味が無く、`PAUSED`は人が手順を実行するまで無期限に残るため、
+  // 数えると開いている画面すべてが5秒間隔のまま戻らなくなる。再開・中断を押したときは
+  // `controlManualStepRun`が応答をその場で状態へ反映するので、押した本人の体感は変わらない
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「動いていない」として読む
-  if (state.manualStepRuns?.some((run) => isActiveManualStepRun(run.status))) return true;
+  if (state.manualStepRuns?.some((run) => run.status === "RUNNING")) return true;
   // **計画の返事待ちも「動いている」に数える**（#2061）。押してからセッションが動き出す
   // までを追うのに20秒間隔では遅い（フックのポーリングは数秒間隔で回っている）
   if (state.planRequests?.some((request) => request.status === "WAITING")) return true;

@@ -1,15 +1,31 @@
 import { TriangleAlert } from "lucide-react";
+import { Fragment } from "react";
 
 import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { cn } from "@/lib/utils";
 
+/** `**強調**`を太字にする。コード以外の部分にだけ適用する */
+function renderEmphasis(text: string) {
+  return text.split(/\*\*([^*]+)\*\*/).map((part, index) =>
+    // 奇数番目が`**`で囲まれていた部分
+    index % 2 === 1 ? (
+      <strong key={index} className="font-semibold">
+        {part}
+      </strong>
+    ) : (
+      part
+    ),
+  );
+}
+
 /**
- * 理由の本文にはラベル名がバックティック付きで入る（ワークフローが書く
- * 「Issueに `22.merge-confirm-required` ラベルが付与されているため」など）。そのまま描くと
- * 記号が生で出るため、インラインコードだけを解釈する。**Markdown全体は解釈しない** —
- * ここに来るのはワークフローが組み立てた1行の文で、見出しやリンクは入らない。
+ * 理由の本文にはラベル名がバックティック付きで入り（ワークフローが書く
+ * 「Issueに `22.merge-confirm-required` ラベルが付与されているため」など）、レビュー
+ * エージェントが自由文で書く二次判定には`**GitHub Actionsやデプロイ設定**: …`のように
+ * 該当カテゴリの強調が入る（#2062）。そのまま描くと記号が生で出るため、この2つだけを解釈する。
+ * **Markdown全体は解釈しない** — ここに来るのは箇条書き1行ぶんの文で、見出しやリンクは入らない。
  */
-function InlineCodeText({ text }: { text: string }) {
+function InlineReasonText({ text }: { text: string }) {
   return (
     <>
       {text.split(/`([^`]+)`/).map((part, index) =>
@@ -19,7 +35,7 @@ function InlineCodeText({ text }: { text: string }) {
             {part}
           </code>
         ) : (
-          part
+          <Fragment key={index}>{renderEmphasis(part)}</Fragment>
         ),
       )}
     </>
@@ -67,7 +83,7 @@ export function MergeCheckReasonNotice({
       <ul className="flex list-disc flex-col gap-0.5 pl-4 text-[13px] leading-relaxed">
         {reasons.items.map((item) => (
           <li key={item} className="break-words">
-            <InlineCodeText text={item} />
+            <InlineReasonText text={item} />
           </li>
         ))}
       </ul>
