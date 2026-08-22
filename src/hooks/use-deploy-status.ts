@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { readTriggeredAt } from "@/hooks/use-trigger-pending";
+import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { resolveDeployState } from "@/lib/branch-flow";
 import { DEPLOY_TRIGGER_PENDING_MS, isTriggerPending } from "@/lib/trigger-pending-guard";
 import type { BranchFlowDeployResponse, RepositoryDeployStatus } from "@/types/branch-flow";
@@ -11,6 +12,16 @@ type UseDeployStatusResult = {
   deployStatuses: RepositoryDeployStatus[];
   /** 最終取得時刻（ISO8601）。未取得はnull */
   fetchedAt: string | null;
+  /**
+   * いま自動更新が回っているか（#1797）。**この取得だけは「デプロイが動いている間」しか
+   * 回らない**ので、他の一覧と違って画面を開いている間ずっと真にはならない。
+   *
+   * ブランチ画面は既定が「自動更新しない」なので、これを出さないと、デプロイの表示が
+   * 勝手に進んでいるのに画面には「手動更新のみ」としか書かれていない状態になる。
+   */
+  autoRefresh: boolean;
+  /** 自動更新の間隔（#1797）。回っていない間も、回るときの間隔として返す */
+  pollIntervalMs: AutoRefreshIntervalMs;
   refresh: () => void;
 };
 
@@ -76,6 +87,8 @@ export function useDeployStatus(
 ): UseDeployStatusResult {
   const [deployStatuses, setDeployStatuses] = useState<RepositoryDeployStatus[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  // 次の周回を予約したかどうか（#1797）。画面に「デプロイ中は30秒間隔で確認」と出すために持つ
+  const [autoRefresh, setAutoRefresh] = useState(false);
   // refreshで再取得させるためのキー。増やすと下のeffectが再実行される。
   const [reloadKey, setReloadKey] = useState(0);
   // ポーリングを続けるかの判定にだけ使う。PR一覧が更新されるたびにポーリングを
@@ -125,7 +138,9 @@ export function useDeployStatus(
     }
 
     function schedule() {
-      if (cancelled || !shouldKeepPolling()) return;
+      const keepPolling = !cancelled && shouldKeepPolling();
+      setAutoRefresh(keepPolling);
+      if (!keepPolling) return;
       timerId = setTimeout(poll, ACTIVE_POLL_INTERVAL_MS);
     }
 
@@ -149,9 +164,16 @@ export function useDeployStatus(
       cancelled = true;
       clearTimeout(timerId);
       controller.abort();
+      setAutoRefresh(false);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [enabled, reloadKey]);
 
-  return { deployStatuses, fetchedAt, refresh };
+  return {
+    deployStatuses,
+    fetchedAt,
+    autoRefresh,
+    pollIntervalMs: ACTIVE_POLL_INTERVAL_MS,
+    refresh,
+  };
 }

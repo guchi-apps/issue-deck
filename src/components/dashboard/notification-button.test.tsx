@@ -325,7 +325,7 @@ describe("NotificationButton 自動更新", () => {
 
     // 取得が終わって「いつ時点か」が出るまで待つ（取得中の重複呼び出しは弾かれるため）
     await waitFor(
-      () => expect(screen.getByLabelText("対応が必要なものを今すぐ更新").textContent).toContain("30秒ごと"),
+      () => expect(screen.getByLabelText("対応が必要なものを今すぐ更新").textContent).toContain("30秒間隔"),
       { timeout: 3_000 },
     );
 

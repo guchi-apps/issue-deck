@@ -77,6 +77,9 @@ export default async function DashboardPage() {
         favorite: favoriteRepositoryIds.has(repo.id),
       }))}
       issues={issues}
+      /* 一覧のヘッダーに出す「HH:MM時点」の初期値（#1797）。クライアント側で現在時刻を
+         作るとハイドレーションが崩れるため、描いた時刻はここで確定させて渡す */
+      issuesFetchedAt={new Date().toISOString()}
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
       claudeModelAssist={claudeModelAssist}

@@ -42,6 +42,8 @@ import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
+  describeAutoRefreshState,
+  describeRefreshButtonHint,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
 import { useTriggerPending } from "@/hooks/use-trigger-pending";
@@ -109,6 +111,14 @@ type BranchFlowViewProps = {
    * 「有効かどうか」を別に持たない**——別々に持つと表示と実際の間隔がずれうる。
    */
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
+  /**
+   * デプロイ状況（`use-deploy-status.ts`）だけが回っている間隔（#1797）。回っていなければ`null`。
+   *
+   * この画面の既定は「自動更新しない」だが、**本番デプロイが動いている間はデプロイ状況だけが
+   * 30秒ごとに取り直されている**。それを出さないと、画面には「手動更新のみ」と書いてあるのに
+   * 表示が勝手に進む状態になる。
+   */
+  deployAutoRefreshIntervalMs?: AutoRefreshIntervalMs;
   /** 自動更新の間隔をメニューから変えたとき（#1767）。渡さない場合はメニューを出さない */
   onChangeAutoRefreshInterval?: (intervalMs: AutoRefreshIntervalMs) => void;
   onRefresh: () => void;
@@ -1521,6 +1531,7 @@ export function BranchFlowView({
   mergedPullRequestsLoaded,
   expandedRepositoryFullNames = [],
   autoRefreshIntervalMs = null,
+  deployAutoRefreshIntervalMs = null,
   onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
@@ -1634,9 +1645,13 @@ export function BranchFlowView({
               )}
               {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
               {/* 何分間隔で更新中なのかを画面に出す（#1767）。更新アイコンが回っているだけでは
-                  「いま取りに行った」ことしか分からず、次にいつ更新されるかが読めない */}
-              {autoRefreshIntervalMs !== null && (
-                <span>{` ・ 自動更新${autoRefreshIntervalLabel(autoRefreshIntervalMs)}`}</span>
+                  「いま取りに行った」ことしか分からず、次にいつ更新されるかが読めない。
+                  **自動更新していないときも黙らない**（#1797。文言はPR一覧・Issue一覧と共通） */}
+              <span>{` ・ ${describeAutoRefreshState(autoRefreshIntervalMs)}`}</span>
+              {/* 本番デプロイが動いている間だけ回っているぶん（#1797）。「手動更新のみ」と
+                  出ている裏でデプロイの表示だけが進むため、その1点だけを添える */}
+              {deployAutoRefreshIntervalMs !== null && (
+                <span>{` ・ デプロイ中は${autoRefreshIntervalLabel(deployAutoRefreshIntervalMs)}で確認`}</span>
               )}
             </p>
           </div>
@@ -1674,6 +1689,9 @@ export function BranchFlowView({
             variant="ghost"
             /* アイコンだけにしても読み上げ用の名前は「更新」のまま（#1958） */
             aria-label="更新"
+            /* 押すと何が起きるかと、放っておいても更新されるのかの両方を出す（#1797）。
+               通知ベル・実行キューの更新インジケーターと同じ文言 */
+            title={describeRefreshButtonHint(autoRefreshIntervalMs)}
             className={cn(
               "h-8 shrink-0",
               refreshIconOnly && "px-2",

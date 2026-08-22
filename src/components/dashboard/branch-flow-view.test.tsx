@@ -67,6 +67,8 @@ function renderFlow(input: {
   isRefreshing?: boolean;
   /** 自動更新の間隔（#1767）。既定は「自動更新しない」 */
   autoRefreshIntervalMs?: number | null;
+  /** デプロイ状況だけが回っている間隔（#1797）。既定は回っていない */
+  deployAutoRefreshIntervalMs?: number | null;
   onChangeAutoRefreshInterval?: (intervalMs: number | null) => void;
   onRefresh?: () => void;
   /** マージできたときの後始末（#1756）。渡さない場合は`onRefresh`へ縮退する */
@@ -95,6 +97,7 @@ function renderFlow(input: {
       failedRepositories={input.failedRepositories ?? []}
       mergedPullRequestsLoaded={input.mergedPullRequestsLoaded ?? true}
       autoRefreshIntervalMs={input.autoRefreshIntervalMs ?? null}
+      deployAutoRefreshIntervalMs={input.deployAutoRefreshIntervalMs ?? null}
       onChangeAutoRefreshInterval={input.onChangeAutoRefreshInterval}
       onRefresh={input.onRefresh ?? vi.fn()}
       onMerged={input.onMerged}
@@ -1831,10 +1834,34 @@ describe("BranchFlowView の自動更新（#1767）", () => {
     expect(screen.getByText(/自動更新1分間隔/)).toBeTruthy();
   });
 
-  it("自動更新しないときは間隔を出さない", () => {
+  // #1797。何も出さないと「自動更新していない」のか「この画面は状態を出さない」のかを
+  // 見分けられないため、黙らずに言い切る
+  it("自動更新しないときは「手動更新のみ」と出す", () => {
     renderFlow({ autoRefreshIntervalMs: null });
 
-    expect(screen.queryByText(/自動更新/)).toBeNull();
+    expect(screen.getByText(/手動更新のみ/)).toBeTruthy();
+  });
+
+  it("更新ボタンのツールチップに、押すと何が起きるかと自動更新の状態を出す（#1797）", () => {
+    renderFlow({ autoRefreshIntervalMs: 60_000 });
+    expect(screen.getByRole("button", { name: "更新" }).getAttribute("title")).toBe(
+      "今すぐ更新（自動更新1分間隔）",
+    );
+
+    cleanup();
+    renderFlow({ autoRefreshIntervalMs: null });
+    expect(screen.getByRole("button", { name: "更新" }).getAttribute("title")).toBe(
+      "今すぐ更新（手動更新のみ）",
+    );
+  });
+
+  // デプロイ状況（`use-deploy-status.ts`）だけは、この画面が「自動更新しない」設定でも
+  // デプロイが動いている間は30秒ごとに回っている（#1797）
+  it("デプロイ中に回っているぶんは、その旨を添える", () => {
+    renderFlow({ autoRefreshIntervalMs: null, deployAutoRefreshIntervalMs: 30_000 });
+
+    expect(screen.getByText(/手動更新のみ/)).toBeTruthy();
+    expect(screen.getByText(/デプロイ中は30秒間隔で確認/)).toBeTruthy();
   });
 
   it("自動更新中の取得でも更新アイコンを回す（isLoadingは立てない）", () => {

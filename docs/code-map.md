@@ -342,8 +342,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
-- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す。
+- 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す
+  （間隔の定数は[`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`ISSUE_POLL_INTERVAL_MS`）。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。
+- **一覧のヘッダーに出す取得の状態は、3画面（Issue一覧・PR一覧・ブランチ）で同じ並び・同じ文言に
+  そろえる**（#1797）。`◯件 ・ HH:MM時点 ・ 自動更新10秒間隔`で、**自動更新していないときも黙らず
+  「手動更新のみ」と出す**——何も出さないと「自動更新していない」のか「この画面は状態を出さない」のかを
+  見分けられない。文言は`lib/auto-refresh.ts`の`describeAutoRefreshState`（ヘッダー）と
+  `describeRefreshButtonHint`（更新ボタンのツールチップ「今すぐ更新（自動更新10秒間隔）」）から
+  配り、通知ベル・実行キューの更新インジケーター（`lib/refresh-status.ts`）も同じ言い方を使う。
+- **Issue一覧の「HH:MM時点」の初期値は、サーバー側で描いた時刻をpropsで渡す**（#1797。
+  `app/dashboard/page.tsx`の`issuesFetchedAt` → `useIssuePolling`の第2引数）。一覧の初期値は
+  サーバー描画ぶんで、ポーリングが最初に取りに行くのは10秒後。クライアントで現在時刻を作ると
+  初期描画がサーバーと食い違ってハイドレーションが崩れ、effectの中で置くのは
+  `react-hooks/set-state-in-effect`（lint）が通さない。
 - **コメントはキャッシュせず、都度GitHub APIから取得する**（`/api/issues/comments`）。
 - **Issueの親子関係（GitHubネイティブのサブIssue）もキャッシュせず、詳細を開いたときだけ取得する**
   （`/api/issues/sub-issues`・[`lib/github/sub-issues-api.ts`](../src/lib/github/sub-issues-api.ts)）。
@@ -853,7 +865,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   10秒間隔なら毎時「360 × draft以外のopen PR数」ポイント（上限5,000ポイント/時）。共有
   ワークフローのタグ配布のようにPRが10件を超えて並ぶ局面で画面を開き続けると上限に触れうるので、
   **PR1件ごとのGraphQLを1回へまとめる改善を#1962として分けてある。**
-  **値が同じでもIssue一覧のポーリング（`use-issue-polling.ts`の`POLL_INTERVAL_MS`）とは定数を
+  **値が同じでもIssue一覧のポーリング（`lib/auto-refresh.ts`の`ISSUE_POLL_INTERVAL_MS`）とは定数を
   分ける**——あちらは`GET /api/issues`（DBの読み取りだけ）で、`lib/auto-refresh.ts`冒頭の
   「1回の取得コストが重い画面ほど間隔を長くする」に従って片方だけ見直せるようにしておく。
   並び順は「すべてのPR」だけ更新が新しい順で、

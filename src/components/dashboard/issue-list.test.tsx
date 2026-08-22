@@ -508,3 +508,37 @@ describe("一覧のカードに出すラベル（#1915）", () => {
     expect(screen.getByText("80.Priority: High")).toBeTruthy();
   });
 });
+
+/**
+ * #1797。この一覧は開いている間ずっと10秒間隔で取り直しているのに、その形跡が画面に無く、
+ * 止まっていても正常時と見分けが付かなかった。PR一覧・ブランチ画面と同じ並び・同じ文言にそろえる。
+ */
+describe("IssueList ヘッダーの自動更新の状態（#1797）", () => {
+  it("いつ時点の内容かと自動更新の間隔を、件数の後ろに出す", () => {
+    renderList({
+      showHeader: true,
+      fetchedAt: "2026-08-22T05:32:00.000Z",
+      autoRefreshIntervalMs: 10_000,
+    });
+
+    const meta = screen.getByText(/件/).textContent ?? "";
+    expect(meta).toContain("時点");
+    expect(meta).toContain("自動更新10秒間隔");
+  });
+
+  // 何も出さないと「自動更新していない」のか「この一覧は状態を出さない」のかを見分けられない
+  it("自動更新しない一覧では「手動更新のみ」と出す", () => {
+    renderList({ showHeader: true, fetchedAt: null, autoRefreshIntervalMs: null });
+
+    expect(screen.getByText(/件/).textContent).toContain("手動更新のみ");
+  });
+
+  // 取り直しを持たない一覧に「手動更新のみ」と出しても、押す手段が無いことしか伝わらない
+  it("状態を渡していない一覧には何も足さない", () => {
+    renderList({ showHeader: true });
+
+    const meta = screen.getByText(/件/).textContent ?? "";
+    expect(meta).not.toContain("時点");
+    expect(meta).not.toContain("更新");
+  });
+});

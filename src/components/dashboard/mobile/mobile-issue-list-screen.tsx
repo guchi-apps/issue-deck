@@ -15,6 +15,8 @@ import { MobileIssueViewSheet } from "@/components/dashboard/mobile/mobile-issue
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
+import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { formatTimeOfDay } from "@/lib/format-date-time";
 import {
   clearIssueFilterConditions,
   countActiveIssueFilters,
@@ -97,6 +99,13 @@ type MobileIssueListScreenProps = {
    * ヘッダーの実行状況（`useDispatchState`）はこの画面が持っているため、ここで一緒に撃つ。
    */
   onRefresh?: () => Promise<unknown> | void;
+  /** 最終取得時刻（ISO8601）。件数の行に「HH:MM時点」として出す（#1797） */
+  fetchedAt?: string | null;
+  /**
+   * 自動更新の間隔（#1797）。`null`＝自動更新しない。渡さない一覧はこの状態を出さない。
+   * PCの一覧・PR一覧・ブランチ画面と同じ文言で、`describeAutoRefreshState`から作る。
+   */
+  autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   /** 画面固有のシート等（リリースシート） */
   children?: ReactNode;
 };
@@ -132,6 +141,8 @@ export function MobileIssueListScreen({
   issueOrderCount,
   scrollKey,
   onRefresh,
+  fetchedAt = null,
+  autoRefreshIntervalMs,
   children,
 }: MobileIssueListScreenProps) {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -239,8 +250,21 @@ export function MobileIssueListScreen({
           <h1 className="truncate text-base font-semibold">{title}</h1>
           {/* 表示中のビュー名を件数の行にも出す（#1645）。操作は下端の行で行うが、
               一覧をスクロールしている最中に「何を見ているのか」を見上げて確かめられる */}
+          {/* いつ時点の内容かと自動更新の状態も、PCの一覧・PR一覧・ブランチ画面と同じ並びで
+              足す（#1797）。**先頭は今までどおりビュー名と件数**で、幅が足りなければ
+              後ろから省略される（追加ぶんが押し出すのは追加ぶん自身） */}
           <p className="truncate text-xs text-muted-foreground">
-            {[meta, getNavViewLabel(view), countLabel].filter(Boolean).join("・")}
+            {[
+              meta,
+              getNavViewLabel(view),
+              countLabel,
+              fetchedAt ? `${formatTimeOfDay(fetchedAt)}時点` : null,
+              autoRefreshIntervalMs === undefined
+                ? null
+                : describeAutoRefreshState(autoRefreshIntervalMs),
+            ]
+              .filter(Boolean)
+              .join("・")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">

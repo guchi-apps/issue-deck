@@ -26,7 +26,9 @@ export async function GET() {
   }
 
   const issues = await getIssuesForUser(userId);
-  return NextResponse.json({ issues });
+  // 「いつ時点の内容か」を画面に出すため、PR一覧（`/api/pull-requests`）・デプロイ状況
+  // （`/api/branch-flow/deploy`）と同じ形で取得時刻も返す（#1797）
+  return NextResponse.json({ issues, fetchedAt: new Date().toISOString() });
 }
 
 export function POST(request: NextRequest) {
