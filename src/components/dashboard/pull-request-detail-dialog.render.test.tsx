@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-detail-dialog";
-import { resetHistoryStack } from "@/lib/history-stack";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -95,7 +94,6 @@ describe("PullRequestDetailDialog", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
-    resetHistoryStack();
   });
 
   it("idがnullのあいだは何も出さない", () => {

@@ -30,6 +30,9 @@ export function useReferenceNavigation() {
         params.set("pane", "pull-requests");
         params.set("pr", pullRequestId);
         params.set("mscreen", "pull-requests");
+        // 重ねて開いていたPR詳細は畳む（#2149）。リンクは重ね表示の中にも出るので、
+        // 残すと下の画面だけが遷移し、閉じた先が押したときの一覧ではなくなる。
+        params.delete("prmodal");
       });
     },
     [pushParams],
@@ -44,6 +47,8 @@ export function useReferenceNavigation() {
       pushParams((params) => {
         params.delete("pane");
         params.delete("pr");
+        // 重ねて開いていたPR詳細は畳む（#2149。`openPullRequest`と同じ理由）
+        params.delete("prmodal");
         params.delete("mrepo");
         params.set("issue", issueId);
         params.set("mscreen", "issue-detail");

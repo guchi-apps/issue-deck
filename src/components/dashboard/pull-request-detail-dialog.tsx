@@ -4,7 +4,6 @@ import { X } from "lucide-react";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useHistoryDismiss } from "@/hooks/use-history-dismiss";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -31,10 +30,15 @@ type PullRequestDetailDialogProps = {
  * 続きを見るのに毎回戻る操作が要る。マージボタンまで含めて同じ`PullRequestDetail`を重ねて
  * 出せば、閉じた時点で一覧がそのまま残る。
  *
- * **開閉はURLクエリに持たず、呼び出し側のstateで持つ**。戻る操作への対応は#2065の画像
- * プレビューと同じ`useHistoryDismiss`（開いている間だけ履歴を1つ積み、戻る操作で閉じる）。
- * `pr`のようなクエリで持つと、ビュー切り替え・スマホの画面遷移それぞれでクエリを畳む
- * 後始末が要るうえ、スマホのPR詳細画面（`mscreen=pull-requests`＋`pr`）と条件が重なる。
+ * **開いているかどうかはURLクエリ（`prmodal`）が正**で、`useHistoryDismiss`（#2065の画像
+ * プレビュー）のようにstateで持って履歴を自前で積むことはしない。**この重ね表示の中には
+ * アプリ内リンク（ヘッダーの「Issue #N」・本文とコメントの参照）があり、押すと現在地の
+ * クエリが進む**ため、開閉をstateで持つと下の画面だけが遷移して重ね表示が残る——閉じた先が
+ * 押したときの一覧ではなくなり、このIssueで直したい状態そのものになる。クエリなら、リンク側で
+ * `prmodal`を落とす（`use-reference-navigation.ts`）だけで「閉じて遷移」になり、戻る操作で
+ * 重ね表示ごと戻ってくる。
+ *
+ * `pr`（PRペイン・スマホのPR詳細画面）とクエリを分ける理由は`use-issue-filters.ts`を参照。
  *
  * 閉じる導線はヘッダー左のバツボタン。`PullRequestDetail`のヘッダー右端は「更新」ボタンが
  * 使っているため、`DialogContent`の既定のバツボタン（右上）とは重なる。
@@ -50,7 +54,6 @@ export function PullRequestDetailDialog({
   onClose,
 }: PullRequestDetailDialogProps) {
   const open = pullRequestId !== null;
-  useHistoryDismiss(open, onClose);
 
   return (
     <Dialog

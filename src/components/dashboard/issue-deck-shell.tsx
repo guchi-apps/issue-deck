@@ -153,6 +153,7 @@ export function IssueDeckShell({
     selectPullRequestView,
     selectFlowPane,
     selectPullRequest,
+    selectPullRequestModal,
     toggleLabel,
     toggleRepo,
   } = useIssueFilters();
@@ -891,26 +892,25 @@ export function IssueDeckShell({
 
   // 「ユーザーの確認待ち」に並ぶマージ待ちPRを、その場に重ねて開く（#2149）。**PR一覧画面へ
   // 遷移しない**——確認待ちは上から順に片付ける場所で、1件開くたびに画面ごと移ると続きを
-  // 見るのに毎回戻る操作が要る。開閉は`pr`クエリではなくここのstateで持つ（理由は
-  // `pull-request-detail-dialog.tsx`）。
-  const [checkUserPullRequestId, setCheckUserPullRequestId] = useState<string | null>(null);
-  const checkUserPullRequestDetail = usePullRequestDetail(checkUserPullRequestId);
+  // 見るのに毎回戻る操作が要る。開いているかどうかは`prmodal`クエリが正（`pr`と分ける理由と
+  // 重ね表示をstateで持たない理由は`pull-request-detail-dialog.tsx`）。
+  const modalPullRequestDetail = usePullRequestDetail(filters.prmodal);
   // ヘッダーの材料は、一覧に並んでいるものと同じ母集団（リポジトリ絞り込みを掛けない
   // `crossRepositoryPullRequests`）から引く。押した直後にヘッダーを描けるので、詳細の
   // 取得を待つのは本文とコメントだけになる。
-  const checkUserPullRequest = useMemo(
+  const modalPullRequest = useMemo(
     () =>
       resolvePullRequestHeader(
-        checkUserPullRequestId,
+        filters.prmodal,
         crossRepositoryPullRequests,
         openPullRequests.fetchedAt,
-        checkUserPullRequestDetail.detail,
+        modalPullRequestDetail.detail,
       ),
     [
-      checkUserPullRequestId,
+      filters.prmodal,
       crossRepositoryPullRequests,
       openPullRequests.fetchedAt,
-      checkUserPullRequestDetail.detail,
+      modalPullRequestDetail.detail,
     ],
   );
 
@@ -924,7 +924,7 @@ export function IssueDeckShell({
     if (filters.pr === pullRequest.id) selectPullRequest(null);
     // 確認待ちの一覧から重ねて開いていた場合も同じ（#2149）。マージすると一覧から外れるため、
     // 閉じないと「押せるものが無い詳細」が残る。
-    if (checkUserPullRequestId === pullRequest.id) setCheckUserPullRequestId(null);
+    if (filters.prmodal === pullRequest.id) selectPullRequestModal(null);
     openPullRequests.refresh();
   }
 
@@ -1239,9 +1239,7 @@ export function IssueDeckShell({
                   mergePendingPullRequests={mergePendingPullRequests}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
                   /* PR画面へ移らず、その場に重ねて開く（#2149）。戻る操作で閉じる */
-                  onSelectPullRequest={(pullRequest) =>
-                    setCheckUserPullRequestId(pullRequest.id)
-                  }
+                  onSelectPullRequest={(pullRequest) => selectPullRequestModal(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
@@ -1456,7 +1454,7 @@ export function IssueDeckShell({
                       waitingForChecksCount={mergeCheckWaitingCount}
                       /* PR一覧画面へ移らず、その場に重ねて開く（#2149） */
                       onSelectPullRequest={(pullRequest) =>
-                        setCheckUserPullRequestId(pullRequest.id)
+                        selectPullRequestModal(pullRequest.id)
                       }
                     />
                   ) : undefined
@@ -1526,16 +1524,16 @@ export function IssueDeckShell({
 
         {/* 「ユーザーの確認待ち」から重ねて開くPR詳細（#2149）。PC・スマホの入口が同じ1つを開く */}
         <PullRequestDetailDialog
-          pullRequestId={checkUserPullRequestId}
-          pullRequest={checkUserPullRequest}
-          detail={checkUserPullRequestDetail.detail}
-          isLoading={checkUserPullRequestDetail.isLoading}
-          error={checkUserPullRequestDetail.error}
-          onRefresh={checkUserPullRequestDetail.refresh}
-          onMerged={() =>
-            checkUserPullRequest && handlePullRequestMerged(checkUserPullRequest)
-          }
-          onClose={() => setCheckUserPullRequestId(null)}
+          pullRequestId={filters.prmodal}
+          pullRequest={modalPullRequest}
+          detail={modalPullRequestDetail.detail}
+          isLoading={modalPullRequestDetail.isLoading}
+          error={modalPullRequestDetail.error}
+          onRefresh={modalPullRequestDetail.refresh}
+          onMerged={() => modalPullRequest && handlePullRequestMerged(modalPullRequest)}
+          /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
+             クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
+          onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
         />
 
         {/* 「次にやること」（#1853）。PC・スマホの入口が同じ1つを開く */}

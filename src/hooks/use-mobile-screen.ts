@@ -215,6 +215,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           params.set("mscreen", next.screen);
         }
 
+        // 重ねて開いていたPR詳細は畳む（#2149）。下の画面が変わったのに重ね表示だけ残ると、
+        // 閉じた先が押したときの画面ではなくなる。
+        params.delete("prmodal");
+
         if (next.repo) {
           params.set("mrepo", next.repo);
         } else {
