@@ -9,6 +9,7 @@ import {
   parseSessionInstruction,
 } from "@/lib/dispatch/dispatch-job";
 import {
+  enqueueCodeReviewJob,
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
@@ -211,6 +212,29 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(
       { ok: true, job: abortResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // リポジトリ全体のコードレビュー（#698）。**計画レビューと同じく`enqueueDispatchJob`とは
+  // 別の関数へ振る**（対象リポジトリのcloneは要るが、動いているセッションでは弾かない）。
+  // 押すのは人だけで、自動で積む経路は無い
+  if (kind === "CODE_REVIEW") {
+    const codeReviewResult = await enqueueCodeReviewJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      requestedByUserId: userId,
+    });
+    if (!codeReviewResult.ok) {
+      const status = codeReviewResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: codeReviewResult.rejection, message: codeReviewResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: codeReviewResult.job },
       { headers: { "Cache-Control": "no-store" } },
     );
   }

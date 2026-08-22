@@ -662,6 +662,20 @@ describe("件数バーの折り返し（#2107）", () => {
     expect(screen.getByText(/未着手のIssueが/).className).toContain("basis-48");
   });
 
+  // #698。**このビュー唯一の起動口**なので、Issueが0件でも出す
+  it("「コードレビュー」ビューでは、Issueが1件も無くても実行の入口を出す", () => {
+    renderList({ issues: [], view: "code-review", onStartCodeReview: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "レビューを実行" })).toBeTruthy();
+    expect(barOf(/リポジトリ全体を読ませて/).className).toContain("flex-wrap");
+  });
+
+  it("他のビューには実行の入口を出さない", () => {
+    renderList({ view: "all", onStartCodeReview: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
+  });
+
   it("「まとめて実行」の入口バーも折り返せる", () => {
     useDispatchHost();
     renderList();

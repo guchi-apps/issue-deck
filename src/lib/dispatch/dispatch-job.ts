@@ -43,6 +43,9 @@ export type DispatchJobStatus =
  * - `PLAN_REVIEW` … 計画の関門（G1・#1218）のセッションを立てる（#1855）。計画コメントの投稿を
  *   契機に自動で積まれ、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を
  *   Issueコメントへ投稿する。**worktreeは作らず、レビュー1本で終わってセッションごと畳む**
+ * - `CODE_REVIEW` … リポジトリ全体のコードレビューのセッションを立てる（#698）。`PLAN_REVIEW`と
+ *   同じく`origin/develop`のスナップショットを読むだけで、指摘は**レビュー用に1件作ったIssueへの
+ *   コメント**として返す。人が画面から押して起こす
  * - `MANUAL_STEP_ABORT` … 走っている代行実行を止める（#1882）。pollerが
  *   `systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。**セッションを
  *   操作するジョブではない**（相手はtmuxではなくtransient unit）ので`SESSION_CONTROL_JOB_KINDS`
@@ -58,7 +61,8 @@ export type DispatchJobKind =
   | "MANUAL_STEP"
   | "MANUAL_STEP_ABORT"
   | "PLAN_REVIEW"
-  | "SELF_UPDATE";
+  | "SELF_UPDATE"
+  | "CODE_REVIEW";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -87,7 +91,12 @@ export function isSessionControlJobKind(kind: DispatchJobKind): kind is SessionC
  *
  * 制御ジョブ（`SESSION_CONTROL_JOB_KINDS`）は含めない。あちらは**枠外で先に配られる**（#1332）。
  */
-export const SESSION_LAUNCH_JOB_KINDS = ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] as const;
+export const SESSION_LAUNCH_JOB_KINDS = [
+  "LAUNCH",
+  "CROSS_REPO_QUESTION",
+  "PLAN_REVIEW",
+  "CODE_REVIEW",
+] as const;
 
 export type SessionLaunchJobKind = (typeof SESSION_LAUNCH_JOB_KINDS)[number];
 
@@ -108,6 +117,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "manual_step_abort") return "MANUAL_STEP_ABORT";
   if (value === "plan_review") return "PLAN_REVIEW";
   if (value === "self_update") return "SELF_UPDATE";
+  if (value === "code_review") return "CODE_REVIEW";
   return null;
 }
 
@@ -312,6 +322,14 @@ export type DispatchHostView = {
    * 未知の種別として`failed`になったジョブが画面へ並ぶ。
    */
   planReviewCapable: boolean | null;
+  /**
+   * リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**`null`（未申告）は
+   * 「できない」として扱う**（`planReviewCapable`と同じ）。
+   *
+   * **画面はこれを見て、選べないホストの理由を押す前に出す。** レビューは人が押して起こすため、
+   * 配ってから`failed`で返るより、選択肢の側で「pollerが対応していない」と言う方が早い。
+   */
+  codeReviewCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -640,6 +658,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "代行の中断";
     case "PLAN_REVIEW":
       return "計画レビュー";
+    case "CODE_REVIEW":
+      return "コードレビュー";
     case "SELF_UPDATE":
       return "チェックアウトの更新";
     case "INTERRUPT":
@@ -1025,6 +1045,112 @@ export function resolveDefaultPlanReviewHost(
 }
 
 /**
+ * リポジトリ全体のコードレビュー（#698）のセッションを起こせない理由。
+ *
+ * 判定の並びは計画レビュー（`PlanReviewRejection`）とそっくりだが、**別の型・別の申告として持つ。**
+ * 走らせ方が似ていても、対応していないpollerへ配ったときに起きることは違う（あちらは自動で
+ * 積まれるので`failed`が溜まり、こちらは押した人がその場で理由を知りたい）。
+ *
+ * **`session_alive`は無い。** レビューは実行のたびに新しいIssueを作るため、そのIssueの
+ * セッションが既に動いていることはあり得ない。
+ */
+export type CodeReviewRejection =
+  | "host_unknown"
+  | "host_offline"
+  | "code_review_unsupported"
+  | "repository_not_runnable"
+  | "already_queued";
+
+export function describeCodeReviewRejection(
+  rejection: CodeReviewRejection,
+  context: { hostName: string; repositoryFullName?: string },
+): string {
+  switch (rejection) {
+    case "host_unknown":
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "code_review_unsupported":
+      // **何をすれば押せるようになるかまで書く**（`plan_review_unsupported`と同じ）
+      return `${formatDispatchHostName(context.hostName)} のpollerがコードレビューに対応していません（更新してから押せるようになります）。`;
+    case "repository_not_runnable":
+      return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} にチェックアウトされていないためレビューできません（cloneと \`local-repos.conf\` への記載を確認してください）。`;
+    case "already_queued":
+      return "このレビューIssueには実行中または待機中のジョブが既にあります。";
+  }
+}
+
+/**
+ * コードレビューを起こせない理由を、**押される前に**判定する（#698）。
+ *
+ * 判定の並びと文言は`enqueueCodeReviewJob`（`jobs.ts`）と同じものを使う。片方だけで持つと
+ * 「画面では押せるのにAPIが断る」状態が生まれる（起動側・計画レビュー側と同じ）。
+ */
+export function resolveCodeReviewRejection(params: {
+  host: Pick<DispatchHostView, "online" | "codeReviewCapable" | "repositories"> | null | undefined;
+  repositoryFullName: string;
+  hasActiveJob: boolean;
+}): CodeReviewRejection | null {
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.codeReviewCapable !== true) return "code_review_unsupported";
+  if (!params.host.repositories.includes(params.repositoryFullName)) {
+    return "repository_not_runnable";
+  }
+  if (params.hasActiveJob) return "already_queued";
+  return null;
+}
+
+/**
+ * コードレビューの既定の起動先を決める（#698）。選べるホストが1台も無ければ`null`。
+ *
+ * **GitHub Actionsへのフォールバックは無い**（`resolveDefaultPlanReviewHost`と同じ）。
+ * レビューはホスト上のチェックアウトを読むもので、Actions側に同じ経路が無い。
+ */
+export function resolveDefaultCodeReviewHost(
+  hosts: readonly DispatchHostView[],
+  repositoryFullName: string,
+): string | null {
+  return (
+    hosts.find(
+      (host) =>
+        resolveCodeReviewRejection({ host, repositoryFullName, hasActiveJob: false }) === null,
+    )?.name ?? null
+  );
+}
+
+/**
+ * あるIssueについて画面に出すコードレビュージョブ（#698）を1件選ぶ。
+ *
+ * **起動ジョブとは別に返す**（`findPlanReviewJobForIssue`と同じ理由）。
+ */
+export function findCodeReviewJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "CODE_REVIEW",
+  );
+}
+
+/**
+ * そのリポジトリをレビューできるホストがあるか（#698）。
+ *
+ * ダイアログのリポジトリの選択肢を絞るのに使う。**選ばせてから断らない**——サブPCに
+ * チェックアウトが無いリポジトリは、そもそも読むコードが無い。
+ */
+export function canCodeReviewRepository(
+  hosts: readonly DispatchHostView[],
+  repositoryFullName: string,
+): boolean {
+  return resolveDefaultCodeReviewHost(hosts, repositoryFullName) !== null;
+}
+
+/**
  * そのIssueの起動を止めるべきセッションを探す（#1311）。
  *
  * 起動済みのIssueをもう一度積むと、pollerの重複起動ガードに弾かれるまで（実測で最大75秒）
@@ -1149,6 +1275,7 @@ export function describeDispatchJobStatus(
   if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
+  if (kind === "CODE_REVIEW") return describeCodeReviewJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -1265,6 +1392,36 @@ function describePlanReviewJobStatus(status: DispatchJobStatus): {
       return { label: "計画レビューを起動しました", tone: "success" };
     case "FAILED":
       return { label: "計画レビューを起動できませんでした", tone: "error" };
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * コードレビュー（#698）の状態の見せ方。
+ *
+ * **`succeeded`は「レビューのセッションが立った」まで**で、指摘が投稿されたことではない
+ * （`PLAN_REVIEW`と同じ立場）。結果はレビューIssueのコメントとして返るため、そちらを見てもらう。
+ */
+function describeCodeReviewJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "コードレビューを起動中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "コードレビューを開始しました", tone: "success" };
+    case "FAILED":
+      return { label: "コードレビューを起動できませんでした", tone: "error" };
     case "SKIPPED":
       return { label: "起動済みのため見送り", tone: "muted" };
     case "TIMEOUT":

@@ -16,6 +16,7 @@ import {
   ListChecks,
   Lock,
   MessageSquare,
+  ScanSearch,
   ScrollText,
   Star,
 } from "lucide-react";
@@ -132,6 +133,14 @@ type IssueListProps = {
    * 渡すのをやめるので、押しても何も起きないボタンが残らない
    */
   onStartIssueOrder?: () => void;
+  /**
+   * コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ使う。
+   *
+   * **ヘッダーではなく一覧の上に置く**（手作業アシスタント・「次にやること」と同じ理由）。
+   * このビューには他に起動の入口が無いので、**Issueが0件でも出す**——出さないと、最初の
+   * 1件を作る手段が画面から無くなる。
+   */
+  onStartCodeReview?: () => void;
   /** 「次にやること」で1位を自動でサブPCへ積む設定か（#1853）。ボタンの文言が変わる */
   issueOrderAutoStart?: boolean;
   /**
@@ -334,6 +343,7 @@ export function IssueList({
   prerequisiteReadiness,
   onStartManualStepGuide,
   onStartIssueOrder,
+  onStartCodeReview,
   issueOrderAutoStart = false,
   issueOrderCount = 0,
   filtersIgnored = false,
@@ -818,6 +828,22 @@ export function IssueList({
             <Button size="xs" className="shrink-0" onClick={onStartIssueOrder}>
               <Compass />
               {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* リポジトリ全体のコードレビューを実行する入口（#698）。**このビュー唯一の起動口**なので、
+          並んでいるIssueが0件でも出す */}
+      {onStartCodeReview && view === "code-review" && (
+        <div className={cn(COUNT_BAR_CLASS, "bg-emerald-500/5")}>
+          <p className={COUNT_BAR_TEXT_CLASS}>
+            リポジトリ全体を読ませて、指摘を受け取れます。
+          </p>
+          <div className={COUNT_BAR_ACTIONS_CLASS}>
+            <Button size="xs" className="shrink-0" onClick={onStartCodeReview}>
+              <ScanSearch />
+              レビューを実行
             </Button>
           </div>
         </div>

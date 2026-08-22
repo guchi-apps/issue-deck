@@ -1731,6 +1731,16 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/question-refs.sh`）で、**本体チェックアウトを占有しない**（G2の`gh pr checkout`と
   衝突しないため）。フックは付けない（`Stop`フックがそのIssueの`00.check-user`＝計画の承認待ちを
   外してしまうため）。積むのは`21.plan-required`が付いた計画だけ。
+- **リポジトリ全体のコードレビュー（#698）は、計画レビューと同じ作りの別の種別**
+  （`CODE_REVIEW`。`scripts/start-code-review.sh` ＋ `scripts/prompts/code-review-agent.md`）。
+  画面の「コードレビューを実行」（`code-review-dialog.tsx`）がレビューIssueを1件立て、
+  依頼コメントを投稿し、ジョブを積む。結果は**そのIssueへの1件のコメント**として返り、
+  画面（`code-review-panel.tsx`）が`lib/github/code-review.ts`の`parseCodeReviewReport`で
+  指摘カードにする。**結果の書式を変えるときはプロンプトとパーサーを必ず両方直す**
+  （片方だけだと、投稿はされるのにカードにならず「レビュー中のまま」に見える）。
+  指摘の起票はエージェントに任せず（`gh issue create`を渡していない）、カードの
+  「Issueを作成」が**埋めた新規作成ダイアログを開くだけ**にしてある。設計は
+  [multi-agent/code-review.md](multi-agent/code-review.md)。
 - **他セッションのやり取りを読むのは`scripts/inspect-session.sh`だけ**（#1477）。人が叩いたときに
   1回だけ転記（`~/.claude/projects/<スラッグ>/*.jsonl`）を解決して端末へ畳んで出す読み取り専用の
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと

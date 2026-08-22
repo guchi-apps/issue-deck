@@ -244,16 +244,17 @@ describe("SidebarNav", () => {
   });
 
   // 「まず人が動くもの」を上から順に並べる（#1613）
-  it("要対応・質問・ブランチ・Issue・PRの順に並べる", () => {
+  it("要対応・質問・コードレビュー・ブランチ・Issue・PRの順に並べる", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 9)).toEqual([
+    expect(labels.slice(0, 10)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
+      "コードレビュー",
       "ブランチ",
       "すべてのIssue",
       "お気に入り",

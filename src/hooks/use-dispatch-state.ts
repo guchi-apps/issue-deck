@@ -255,7 +255,7 @@ export function useDispatchState(enabled: boolean) {
        * `cross_repo_question`、計画レビュー（#1855）は`plan_review`を渡す。
        * **セッションを立てる種別に限る**（停止・終了・追加指示は`sendSessionControl`が扱う）
        */
-      kind?: "cross_repo_question" | "plan_review";
+      kind?: "cross_repo_question" | "plan_review" | "code_review";
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);

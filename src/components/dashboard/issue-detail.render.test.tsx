@@ -203,6 +203,8 @@ function renderDetail(issue: Issue) {
       onToggleFavorite={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
+      onCreateCodeReviewFindingIssue={vi.fn()}
+      onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,
@@ -224,6 +226,8 @@ function renderMobileDetail(issue: Issue) {
       onCreateIssue={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
+      onCreateCodeReviewFindingIssue={vi.fn()}
+      onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
     />,
@@ -360,6 +364,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     manualStepCapable: true,
     manualStepAbortCapable: null,
     planReviewCapable: null,
+    codeReviewCapable: null,
     selfUpdateCapable: null,
     maxSessions: 12,
     liveSessions: 0,

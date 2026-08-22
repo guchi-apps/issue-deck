@@ -4,6 +4,7 @@ import { MessageCircleQuestion, Server } from "lucide-react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
+import { CodeReviewJobStatus } from "@/components/dashboard/code-review-job-status";
 import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
@@ -181,6 +182,7 @@ export function IssueStatusCard({
             </div>
           )}
           <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="end" />
+          <CodeReviewJobStatus issue={issue} dispatch={dispatch} align="end" />
           {(qaAnswerPending || hasCancelableRun) && (
             <div className="flex flex-wrap items-center justify-end gap-2">
               {qaAnswerPending && (
