@@ -99,7 +99,14 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 
 ## 変更したときに一緒に見る場所
 
-- 種別を足す・変える → `prisma/schema.prisma`（`DispatchJobKind`）・`src/lib/dispatch/dispatch-job.ts`・
-  `src/lib/dispatch/jobs.ts`・`src/app/api/dispatch/route.ts`・`scripts/subpc-dispatch-poller.sh`
+- 種別を足す・変える → `prisma/schema.prisma`（`DispatchJobKind`と`DispatchHost`の`*Capable`）＋
+  マイグレーション・`src/lib/dispatch/dispatch-job.ts`（種別の型・`parseDispatchJobKind`・
+  `SESSION_LAUNCH_JOB_KINDS`・状態と拒否理由の文言）・`src/lib/dispatch/jobs.ts`
+  （`toHostView`・払い出しの`launchKinds`・`announceDispatchHost`・積む関数）・
+  `src/app/api/dispatch/route.ts`・`src/app/api/dispatch/hosts/route.ts`・
+  `scripts/subpc-dispatch-poller.sh`（申告・種別の分岐・版数）。
+  **`SESSION_LAUNCH_JOB_KINDS`の中身はテストにリテラルで写してある**
+  （`jobs.test.ts`・`session-close.test.ts`の`kind: { in: [...] }`）ので、足すとそこも落ちる。
+  落ちるのは正しい挙動で、**払い出しと枠の計算と取り消しが同じ集合を見ていること**の確認になる
 - 結果の書式を変える → `scripts/prompts/code-review-agent.md`と`src/lib/github/code-review.ts`を**必ず両方**。
   片方だけ変えると、投稿はされるのにカードにならない（画面からは「レビュー中のまま」に見える）
