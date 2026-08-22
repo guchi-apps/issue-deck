@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import {
+  describeDispatchHostLaunchHold,
   describeDispatchHostMetrics,
   formatHostMetricPercent,
+  formatLaunchHoldMetric,
+  parseDispatchHostLaunchHold,
   parseDispatchHostMetrics,
   resolveHostMetricTone,
 } from "@/lib/dispatch/host-metrics";
@@ -39,6 +42,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     maxSessions: 12,
     liveSessions: 6,
     metrics: VALID,
+    launchHold: null,
     checkout: null,
     ...overrides,
   };
@@ -182,5 +186,67 @@ describe("formatHostMetricPercent", () => {
   it("整数の%で出す", () => {
     expect(formatHostMetricPercent(34.2)).toBe("34%");
     expect(formatHostMetricPercent(99.6)).toBe("100%");
+  });
+});
+
+describe("parseDispatchHostLaunchHold（#2095）", () => {
+  it("pollerが送る形をそのまま読む", () => {
+    expect(
+      parseDispatchHostLaunchHold({ reason: "MEMORY", percent: 92.3, thresholdPercent: 85 }),
+    ).toEqual({ reason: "MEMORY", percent: 92.3, thresholdPercent: 85 });
+    expect(
+      parseDispatchHostLaunchHold({ reason: "SWAP", percent: 73.3, thresholdPercent: 50 }),
+    ).toEqual({ reason: "SWAP", percent: 73.3, thresholdPercent: 50 });
+  });
+
+  it("見送っていない巡・申告しない古いpollerではnull", () => {
+    expect(parseDispatchHostLaunchHold(undefined)).toBeNull();
+    expect(parseDispatchHostLaunchHold(null)).toBeNull();
+  });
+
+  // 部分的に採用すると「理由は分かるが割合が0%」という、読んでも判断できない表示になる
+  it("理由・使用率・閾値のどれかが欠けている・壊れていれば全体をnullにする", () => {
+    expect(parseDispatchHostLaunchHold({ reason: "CPU", percent: 92, thresholdPercent: 85 })).toBeNull();
+    expect(parseDispatchHostLaunchHold({ reason: "MEMORY", thresholdPercent: 85 })).toBeNull();
+    expect(parseDispatchHostLaunchHold({ reason: "MEMORY", percent: 92 })).toBeNull();
+    expect(
+      parseDispatchHostLaunchHold({ reason: "MEMORY", percent: 120, thresholdPercent: 85 }),
+    ).toBeNull();
+    expect(
+      parseDispatchHostLaunchHold({ reason: "MEMORY", percent: 92, thresholdPercent: -1 }),
+    ).toBeNull();
+  });
+});
+
+describe("describeDispatchHostLaunchHold（#2095）", () => {
+  const HOLD = { reason: "MEMORY", percent: 92.3, thresholdPercent: 85 } as const;
+
+  it("見送っている理由と、判断に使った使用率を出す", () => {
+    expect(describeDispatchHostLaunchHold(host({ launchHold: HOLD }))).toBe(
+      "メモリ 92%（上限 85%）のため、新しいセッションの起動を見送っています",
+    );
+  });
+
+  it("SWAPで見送っている場合はSWAPと出す", () => {
+    expect(
+      describeDispatchHostLaunchHold(
+        host({ launchHold: { reason: "SWAP", percent: 73.3, thresholdPercent: 50 } }),
+      ),
+    ).toContain("SWAP 73%（上限 50%）");
+  });
+
+  // 落ちているホストは「余力が無くて待っている」のではなく「取りに来られない」。
+  // 古い見送りの理由をいまの状態として見せると、pollerが落ちていることに気付けない
+  it("見送っていないホスト・応答していないホストではnullを返す", () => {
+    expect(describeDispatchHostLaunchHold(host({ launchHold: null }))).toBeNull();
+    expect(describeDispatchHostLaunchHold(host({ launchHold: HOLD, online: false }))).toBeNull();
+  });
+});
+
+describe("formatLaunchHoldMetric（#2095）", () => {
+  it("見送りの説明のどこでも同じ形で出す", () => {
+    expect(formatLaunchHoldMetric({ reason: "MEMORY", percent: 92.3, thresholdPercent: 85 })).toBe(
+      "メモリ 92%（上限 85%）",
+    );
   });
 });

@@ -364,6 +364,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     maxSessions: 12,
     liveSessions: 0,
     metrics: null,
+    launchHold: null,
     checkout: null,
   };
 

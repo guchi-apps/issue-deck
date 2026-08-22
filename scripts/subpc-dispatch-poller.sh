@@ -74,6 +74,8 @@
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
 #   DISPATCH_MAX_PLAN_REVIEWS       同時に走らせる計画レビューの上限（省略時は2）
+#   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
+#   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
@@ -115,7 +117,8 @@ set -euo pipefail
 # 15: tmuxサーバーを`systemd-run --user --scope`でpollerとは別のcgroupに置き、pollerの再起動で
 #     走っている実装セッションが巻き添えで落ちないようにする（#1935）。
 # 16: APIエラー（529等）で中断したセッションを、1巡ごとに検知して自動再開する（#1971）。
-DISPATCH_POLLER_VERSION="16"
+# 17: メモリ・SWAPが逼迫している間、起動ジョブを`maxJobs=0`で見送り、その理由を申告する（#2095）。
+DISPATCH_POLLER_VERSION="17"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -135,6 +138,11 @@ source "$SCRIPT_DIR/lib/session-state.sh"
 source "$SCRIPT_DIR/lib/session-transcript.sh"
 # shellcheck source=scripts/lib/session-resume.sh
 source "$SCRIPT_DIR/lib/session-resume.sh"
+# メモリ・SWAPの逼迫で起動を見送るかの判定（#2095）。**判定だけを別に持つ**のは、
+# 壊れると「起動が永久に止まる」か「逼迫しても止まらない」のどちらかになる境界で、
+# 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
+# shellcheck source=scripts/lib/launch-hold.sh
+source "$SCRIPT_DIR/lib/launch-hold.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
@@ -266,6 +274,42 @@ MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSI
 # ここで別に止める。実装セッションより小さく取るのは、読むだけで数分で終わる代わりに、
 # 走っている間はモデル呼び出しがそのぶん並ぶため（1本$0.7〜1.5）。
 MAX_PLAN_REVIEWS="$(require_positive_int DISPATCH_MAX_PLAN_REVIEWS "${DISPATCH_MAX_PLAN_REVIEWS:-}" 2)"
+
+# 0〜100の割合として受け取る設定値のための版（#2095）。**0は「無効」**（その項目では見送らない）で、
+# 回収まわりの分数と同じ約束。100を超える値は、そのまま「絶対に超えない閾値」＝無効と区別が
+# 付かなくなるため弾く。
+require_percent() {
+  local name="$1" value="$2" fallback="$3"
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  if [[ ! "$value" =~ ^(0|[1-9][0-9]?|100)$ ]]; then
+    echo "Error: $name は0〜100の整数で指定してください: $value（$DISPATCH_ENV_FILE）" >&2
+    exit 1
+  fi
+  printf '%s\n' "$value"
+}
+
+# メモリ・SWAPが逼迫している間、新しいセッションの起動ジョブを取りに行かないための閾値（#2095）。
+# **0で無効**（その項目では見送らない）。
+#
+# **`DISPATCH_MAX_SESSIONS`が見ているのは本数だけで、実際の空きメモリは見ていない。** 12本に
+# 届いていなくても重い作業（テスト・ビルド）が重なっていれば、そこへさらにセッションを足して
+# しまう。#2076で重いコマンドの同時本数は絞ったが、あちらは走り出した後の話で、こちらは
+# 「入口で実際の余力を見る」という別の対処。片方だけでは残る。
+#
+# 見るのは1巡の入口で集めた`metrics`（`collect_host_metrics`）で、**画面に出ている数字と同じもの**。
+# 見送っている間も制御ジョブ（停止・追加指示）は従来どおり取りに行く（`live_sessions >= MAX_SESSIONS`
+# と同じ形）。**取れなかった巡は見送らない**（余力が分からないことを理由に止めると、
+# `/proc`が読めないだけで起動が永久に止まる）。
+#
+# 既定の85%は画面の使用率が赤くなる境目（`src/lib/dispatch/host-metrics.ts`の
+# `CRITICAL_PERCENT`）に合わせてある。**見た目の警告と実際の見送りを同じ線に置く**ためで、
+# 別の値にすると「赤いのに起動する」「赤くないのに止まっている」が起きる。
+# SWAPの50%は、平常時（実装セッション6本前後）の実測が20%程度であることから取った値。
+MEMORY_HOLD_PERCENT="$(require_percent DISPATCH_MEMORY_HOLD_PERCENT "${DISPATCH_MEMORY_HOLD_PERCENT:-}" 85)"
+SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" 50)"
 
 # チェックアウトの遅れ（#1612）を数え直す間隔（分）。**0で無効**（fetchを一切行わない）。
 #
@@ -651,6 +695,10 @@ announce() {
   # 5列をnullへ戻すため、**取れなくなった巡で古い数字が残り続けることはない**
   metrics="$(collect_host_metrics 2>/dev/null)" || metrics=""
 
+  # 集めた使用率から「この巡は起動ジョブを見送るか」を決める（#2095）。**申告と判定を同じ
+  # 場所で行う**ので、画面に出る理由と実際の動きが必ず一致する。取れなかった巡は見送らない
+  resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT"
+
   # 動かしているチェックアウトの版（#1612）。取れなければ空にし、下で`null`として送る
   # （issue-deck側はそれを「申告なし」として5列をnullへ戻すため、古い版が残り続けない）
   checkout="$(collect_checkout_state)" || checkout=""
@@ -671,6 +719,11 @@ announce() {
   # `metrics`も**画面へ出すためだけの申告**（#1567）。「もう1本起こしてよいか」を判断するのに
   # ops-dashboardを開かなくて済むようにするためのもので、こちらも判定には使わない。
   # 取れなければ`null`（＝申告なし）。
+  #
+  # `launchHold`は**その使用率を見てpollerが決めた見送り**（#2095）。ここだけは画面へ出すための
+  # 写しであると同時に、この巡の実際の動き（`maxJobs: 0`）そのもの。**判定はpoller側のまま**で、
+  # issue-deckはこれを受け取って「順番待ちのまま進まない」理由を出す（#1394と同じ形）。
+  # 見送っていない巡は`null`。
   #
   # `manualStep`は「手作業アシスタントからの代行実行（#1828）を実行できる」という申告。
   # **`instruction`とも別に持つ。** あちらは走っているセッションの入力欄へ1行送るだけなのに対し、
@@ -697,8 +750,9 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson metrics "${metrics:-null}" \
+    --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1938,11 +1992,19 @@ run_once() {
   # **上限に達していても取りに行くのをやめない**（#1332）。`maxJobs: 0`で「起動ジョブは要らない」
   # と伝え、停止・終了の制御ジョブだけを受け取る。上限に達しているのは**セッションを畳みたい
   # ときそのもの**で、ここで何も取りに行かないと、画面から押した停止が届かないまま5分で失効する。
+  #
+  # **本数に空きがあっても、メモリ・SWAPが逼迫していれば同じく見送る**（#2095）。上限が見ている
+  # のは本数だけで、実際の空きメモリではない。重い作業が重なっているところへ足すと、12本に
+  # 届く前にホストごと止まる（2026-08-14に実際に起きている）。判定に使うのは`announce`が
+  # この巡の入口で集めた使用率で、**画面に出ている数字と同じもの**。
   local live_sessions claim_max_jobs
   live_sessions="$(count_issue_sessions)"
   claim_max_jobs="$MAX_JOBS"
   if [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
     echo "セッションが上限に達しているため、起動ジョブは取りに行きません（$live_sessions/$MAX_SESSIONS 本）。"
+    claim_max_jobs=0
+  elif [[ -n "$LAUNCH_HOLD_MESSAGE" ]]; then
+    echo "$LAUNCH_HOLD_MESSAGE"
     claim_max_jobs=0
   fi
 

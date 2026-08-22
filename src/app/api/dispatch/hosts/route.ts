@@ -3,7 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { parseDispatchHostCheckout } from "@/lib/dispatch/host-checkout";
-import { parseDispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+import {
+  parseDispatchHostLaunchHold,
+  parseDispatchHostMetrics,
+} from "@/lib/dispatch/host-metrics";
 import { announceDispatchHost } from "@/lib/dispatch/jobs";
 
 function parsePositiveInt(value: unknown): number | null {
@@ -28,10 +31,11 @@ function parseNonNegativeInt(value: unknown): number | null {
  * セッション一覧はops-dashboard#34の担当で、issue-deckには持ち込まない」としていたが、
  * 「もう1本セッションを起こしてよいか」を判断するたびに別のアプリを開くことになっていた。
  * 新しい線は**「この仕組みが起こすセッションの起動可否に効くか」**で、issue-deckが持つのは
- * 次の2つに限る。
+ * 次の3つに限る。
  *
  * - この仕組みが起こしたtmuxセッションそのもの（`DispatchSession`。#1217から持っている）
  * - 起動可否の判断材料になる使用率（CPU・メモリ・SWAP・`/`のディスク。`metrics`）
+ * - その使用率を見てpollerが起動を見送っていること（`launchHold`。#2095）
  *
  * サービス・プロセス・温度・ネットワーク・履歴といったホスト全体の監視は引き続き
  * ops-dashboardの担当で、こちらには持ち込まない。**数値が食い違ったときの正もあちら**
@@ -105,6 +109,10 @@ export async function POST(request: NextRequest) {
     // リソース使用率（#1567）。**1つでも壊れていれば全体を`null`にする**
     // （`parseDispatchHostMetrics`）。部分的に採用すると、取れなかった項目が0＝空きに見える
     metrics: parseDispatchHostMetrics(payload?.metrics),
+    // メモリ・SWAPの逼迫で起動ジョブを見送っているか（#2095）。**判定はpoller側**で、ここは
+    // 結果を受け取るだけ（閾値はサブPCの`dispatch.env`が正。2か所に持つと必ずずれる）。
+    // 見送っていない巡・申告しない古いpollerでは`null`＝「見送りの説明を出さない」
+    launchHold: parseDispatchHostLaunchHold(payload?.launchHold),
     // pollerが動かしているチェックアウトの版（#1612）。**`agentVersion`とは別物**で、
     // あちらは手で上げるプロトコル版数、こちらは実際に走っているスクリプトの事実。
     // `develop`へマージしても届かないことに気付ける唯一の手掛かりになる

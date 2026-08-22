@@ -34,6 +34,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
       swapUsedMb: 1_024,
       swapTotalMb: 8_192,
     },
+    launchHold: null,
     checkout: null,
     ...overrides,
   };
@@ -630,6 +631,33 @@ describe("DispatchHostPanel", () => {
       );
 
       expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+    });
+  });
+  describe("メモリ・SWAPの逼迫による起動の見送り（#2095）", () => {
+    const HOLD = { reason: "MEMORY", percent: 92.3, thresholdPercent: 85 } as const;
+
+    it("見送っていることと、判断に使った使用率を出す", () => {
+      render(<DispatchHostPanel hosts={[makeHost({ launchHold: HOLD })]} sessions={[]} />);
+
+      expect(
+        screen.getByText("メモリ 92%（上限 85%）のため、新しいセッションの起動を見送っています"),
+      ).toBeTruthy();
+    });
+
+    // ホームで「実行中」が増えないことに気付くのがいちばん早く、そこに理由が無いと
+    // 結局サブPCを見に行くことになる
+    it("縮めた版（スマホのホーム）にも出す", () => {
+      render(<DispatchHostPanel hosts={[makeHost({ launchHold: HOLD })]} sessions={[]} compact />);
+
+      expect(
+        screen.getByText("メモリ 92%（上限 85%）のため、新しいセッションの起動を見送っています"),
+      ).toBeTruthy();
+    });
+
+    it("見送っていなければ何も出さない", () => {
+      render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
+
+      expect(screen.queryByText(/起動を見送っています/)).toBeNull();
     });
   });
 });
