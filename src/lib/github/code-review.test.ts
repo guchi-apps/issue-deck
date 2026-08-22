@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCodeReviewFindingIssueDraft,
+  buildCodeReviewFindingIssueIndex,
   buildCodeReviewIssueBody,
   buildCodeReviewTitle,
   CODE_REVIEW_REPORT_MARKER,
@@ -168,6 +169,20 @@ describe("isCodeReviewReportComment", () => {
   it("結果コメントだけを拾う", () => {
     expect(isCodeReviewReportComment({ body: REPORT })).toBe(true);
     expect(isCodeReviewReportComment({ body: codeReviewRequestCommentBody("") })).toBe(false);
+  });
+});
+
+describe("buildCodeReviewFindingIssueIndex", () => {
+  const issues = [
+    { repositoryFullName: "guchi-apps/issue-deck", title: "同じ指摘", number: 2172 },
+    { repositoryFullName: "guchi-apps/issue-deck", title: "同じ指摘", number: 2170 },
+    { repositoryFullName: "guchi-apps/myroom", title: "別リポジトリの同名", number: 10 },
+  ];
+
+  it("同じリポジトリのタイトルだけを引き、先に立てた番号を返す", () => {
+    const index = buildCodeReviewFindingIssueIndex(issues, "guchi-apps/issue-deck");
+    expect(index.get("同じ指摘")).toBe(2170);
+    expect(index.has("別リポジトリの同名")).toBe(false);
   });
 });
 

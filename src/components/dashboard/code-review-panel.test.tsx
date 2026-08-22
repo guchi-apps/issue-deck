@@ -83,18 +83,19 @@ describe("CodeReviewPanel（#698）", () => {
     );
   });
 
-  it("起票済みの指摘にはボタンを出さない", () => {
+  // レビューを回し直すと同じ指摘が返るので、これが無いと同じIssueが何件も立つ
+  it("起票済みの指摘にはボタンを出さず、Issue番号を出す", () => {
     render(
       <CodeReviewPanel
         report={report()}
         isPending={false}
-        createdFindingTitles={new Set(["未完了ジョブの判定が種別を見ていない"])}
+        createdFindingIssues={new Map([["未完了ジョブの判定が種別を見ていない", 2170]])}
         onCreateFindingIssue={vi.fn()}
       />,
     );
 
     expect(screen.getAllByRole("button", { name: "Issueを作成" })).toHaveLength(1);
-    expect(screen.getByText("Issueにしました")).toBeTruthy();
+    expect(screen.getByText(/#2170 として起票済み/)).toBeTruthy();
   });
 
   // 書式が崩れて指摘を拾えなかった場合でも、投稿された結果そのものは隠さない

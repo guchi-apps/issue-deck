@@ -6,8 +6,10 @@ import type { Issue, IssueComment } from "@/types/issue";
  * issue-deckの画面から1リポジトリまるごとに対して走らせる。
  *
  * **記録はGitHubのIssue1件**で、指摘はそのIssueへのコメントとして返る。横断質問（#1454）と
- * 同じ形にしてあるので、通知・実行中バッジ・実行の取り消し・スマホ表示といった既存の仕組みが
+ * 同じ形にしてあるので、コメントの描画・未読の印・スマホの詳細画面・順番待ちの取り消しが
  * そのまま効く。issue-deck側にレビュー専用のテーブルも取得口も足していない。
+ * **通知・走っているセッションの中止・`dispatchPendingAt`由来の「実行中」は付いてこない**
+ * （理由と代わりの受け方はdocs/multi-agent/code-review.mdの表を参照）。
  *
  * ここに置くのは**文字列の組み立てと読み取りだけ**（純粋関数）。DBに触る処理は
  * `lib/dispatch/jobs.ts`、実行そのものは`scripts/start-code-review.sh`。
@@ -278,6 +280,30 @@ export function isCodeReviewPending(comments: readonly Pick<IssueComment, "body"
     if (comments[i].body.includes(CODE_REVIEW_REQUEST_MARKER)) return true;
   }
   return false;
+}
+
+/**
+ * 既にIssueにした指摘を引くための索引（見出し → Issue番号）。
+ *
+ * **同じリポジトリの、タイトルが完全一致するIssue**だけを拾う。指摘から起票するIssueの
+ * タイトルは`buildCodeReviewFindingIssueDraft`が指摘の見出しをそのまま使うので、これで
+ * 「もう起票したか」が引ける。**レビューを回し直すと同じ指摘が返る**ため、これが無いと
+ * 同じIssueが何件も立つ。
+ *
+ * 判定はタイトルの一致だけで、正はGitHub側のIssue（ここは表示のための当て推量）。
+ * 同じタイトルが複数あれば**番号の小さい方＝先に立てた方**を返す。
+ */
+export function buildCodeReviewFindingIssueIndex(
+  issues: readonly Pick<Issue, "repositoryFullName" | "title" | "number">[],
+  repositoryFullName: string,
+): Map<string, number> {
+  const index = new Map<string, number>();
+  for (const issue of issues) {
+    if (issue.repositoryFullName !== repositoryFullName) continue;
+    const known = index.get(issue.title);
+    if (known === undefined || issue.number < known) index.set(issue.title, issue.number);
+  }
+  return index;
 }
 
 /**

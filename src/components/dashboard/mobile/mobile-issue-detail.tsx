@@ -111,6 +111,7 @@ import {
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
 import {
+  buildCodeReviewFindingIssueIndex,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
   isCodeReviewPending,
@@ -335,6 +336,9 @@ export function MobileIssueDetail({
     ? {
         report: findLatestCodeReviewReport(comments),
         isPending: isCodeReviewPending(comments),
+        // 同じ指摘を2回起票しないための照合（#698）。**同じリポジトリの同じタイトル**だけを見る
+        // （レビューを回し直すと同じ指摘が返るため、無いと同じIssueが何件も立つ）
+        createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
       }
     : null;
   const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
@@ -826,6 +830,7 @@ export function MobileIssueDetail({
           <CodeReviewPanel
             report={codeReview.report}
             isPending={codeReview.isPending}
+            createdFindingIssues={codeReview.createdFindingIssues}
             onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
           />
         )}

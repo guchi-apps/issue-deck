@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 export function CodeReviewPanel({
   report,
   isPending,
-  createdFindingTitles,
+  createdFindingIssues,
   onCreateFindingIssue,
   className,
 }: {
@@ -42,10 +42,13 @@ export function CodeReviewPanel({
   /** 依頼したがまだ結果が返っていない（`isCodeReviewPending`） */
   isPending: boolean;
   /**
-   * 既にIssueにした指摘の見出し。**押した後に「起票済み」へ変えるためだけのもの**で、
-   * 正はGitHub側のIssue。取れなければ空でよい（ボタンが出続けるだけ）。
+   * 既にIssueにした指摘（見出し → Issue番号）。**同じ指摘を2回起票するのを防ぐためのもの。**
+   *
+   * 判定は**同じリポジトリに同じタイトルのIssueがあるか**だけで、正はGitHub側のIssue。
+   * 取れなければ空でよい（ボタンが出続けるだけ）。レビューを回し直すと同じ指摘が返るので、
+   * ここが無いと同じIssueが何件も立つ。
    */
-  createdFindingTitles?: ReadonlySet<string>;
+  createdFindingIssues?: ReadonlyMap<string, number>;
   /** 指摘をIssueにする。渡さない画面ではボタンを出さない */
   onCreateFindingIssue?: (finding: CodeReviewFinding) => void;
   className?: string;
@@ -127,8 +130,10 @@ export function CodeReviewPanel({
 
               {onCreateFindingIssue && (
                 <div className="flex flex-wrap items-center gap-2">
-                  {createdFindingTitles?.has(finding.title) ? (
-                    <span className="text-[11px] text-muted-foreground">Issueにしました</span>
+                  {createdFindingIssues?.has(finding.title) ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      #{createdFindingIssues.get(finding.title)} として起票済み
+                    </span>
                   ) : (
                     <Button
                       size="xs"
