@@ -13,6 +13,7 @@ import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRuns,
   repairRunKey,
+  visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
@@ -185,7 +186,11 @@ async function handleGET(request: NextRequest) {
             ciState: bumpState?.ciState ?? null,
             mergeable: bumpState?.mergeable ?? null,
             repairWorkflowAvailability: bumpRepairAvailability,
-            repairRun: repairRuns.get(repairRunKey(`${owner}/${repo}`, bumpPr.number)) ?? null,
+            // 症状（コンフリクト・CI失敗）が消えたPRでは出さない（#2165）。
+            repairRun: visibleRepairRun(
+              repairRuns.get(repairRunKey(`${owner}/${repo}`, bumpPr.number)) ?? null,
+              { mergeable: bumpState?.mergeable ?? null, ciState: bumpState?.ciState ?? null },
+            ),
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -200,7 +205,10 @@ async function handleGET(request: NextRequest) {
             ciState: releaseState?.ciState ?? null,
             mergeable: releaseState?.mergeable ?? null,
             repairWorkflowAvailability: releaseRepairAvailability,
-            repairRun: repairRuns.get(repairRunKey(`${owner}/${repo}`, releasePr.number)) ?? null,
+            repairRun: visibleRepairRun(
+              repairRuns.get(repairRunKey(`${owner}/${repo}`, releasePr.number)) ?? null,
+              { mergeable: releaseState?.mergeable ?? null, ciState: releaseState?.ciState ?? null },
+            ),
           }
         : null,
       otherPullRequests,

@@ -1,5 +1,6 @@
 import {
   Clock,
+  Code2,
   GitMerge,
   Inbox,
   ListChecks,
@@ -42,6 +43,13 @@ export type NavView = {
   questionOnly?: boolean;
   /** 質問Issueを除外するビューかどうか（#1514） */
   excludeQuestions?: boolean;
+  /**
+   * コードレビューIssue（`isCodeReviewIssue`）だけに絞り込むビューかどうか（#698）。
+   * 質問と同じく、レビューであることはラベルにもStatusにも現れない。
+   */
+  codeReviewOnly?: boolean;
+  /** コードレビューIssueを除外するビューかどうか（#698） */
+  excludeCodeReviews?: boolean;
   /**
    * このビューが要求する状態フィルター。stateクエリ未指定時の既定値になるほか、
    * ビュー切り替え時には明示的に選ばれていたstateも上書きして自動で適用する（#475）。
@@ -92,6 +100,8 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
   "manual-step": Wrench,
   question: MessageCircleQuestionMark,
+  // コードを読んで指摘を返す場所なので、コードの記号（`</>`）を使う（#698）
+  "code-review": Code2,
   // 「すべてのIssue」（ListChecks）と並ぶため、同じ線画に見えるListTodoは使わない（#1613）。
   // 受け皿の絵（Inbox）なら「まだ手を付けていないものが溜まっている場所」としても読める。
   "not-started": Inbox,
@@ -124,7 +134,12 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
  *
  * 「ブランチ」（`pane=flow`）も同じ扱いにするが、ビューではないので画面側で行う。
  */
-const IGNORE_FILTER_VIEWS: readonly LabelNavViewId[] = ["check-user", "manual-step", "question"];
+const IGNORE_FILTER_VIEWS: readonly LabelNavViewId[] = [
+  "check-user",
+  "manual-step",
+  "question",
+  "code-review",
+];
 
 /**
  * Issue以外のものが並ぶ「人が手を動かすもの」のビュー（#2081。`NavView.userActionList`）。
@@ -141,6 +156,8 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   statuses: preset.statuses,
   questionOnly: preset.questionOnly,
   excludeQuestions: preset.excludeQuestions,
+  codeReviewOnly: preset.codeReviewOnly,
+  excludeCodeReviews: preset.excludeCodeReviews,
   defaultState: preset.state,
   latestReleaseOnly: preset.key === "recently-merged",
   groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),
@@ -173,10 +190,12 @@ export const sidebarAttentionNavViews: NavView[] = labelNavViews.filter((view) =
 /**
  * 要対応の枠とIssueの枠のあいだに置くビュー（#1613）。「質問」は人が読む先だが承認の待ちでは
  * ないため要対応には入れず、Issueの絞り込みとも性質が違うので独立させる。
+ * 「コードレビュー」（#698）も同じ性質——エージェントに読ませて結果を人が読む場所で、
+ * 実装フローには乗らない。
  * 「ブランチ」（`pane=flow`）はビューではないので、ここではなく画面側で並べる。
  */
-export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter(
-  (view) => view.id === "question",
+export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter((view) =>
+  ["question", "code-review"].includes(view.id),
 );
 
 /**

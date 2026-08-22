@@ -99,6 +99,10 @@ export async function POST(request: NextRequest) {
     // このジョブは計画コメントの投稿を契機に**自動で積まれる**ため、非対応のpollerへ配ると
     // 計画のたびに`failed`のジョブが並ぶ（他の種別より、申告を見てから配る意味が大きい）
     planReviewCapable: typeof payload?.planReview === "boolean" ? payload.planReview : null,
+    // リポジトリ全体のコードレビュー（#698）を起こせるpollerだけが送ってくる。**未申告はnull＝
+    // 非対応扱い**。`planReview`と分けるのは、こちらは人が画面から押して起こすもので、非対応の
+    // ホストへ配ると「押したのに`failed`だけが返る」ことになるため（選択肢の側で理由を出す）
+    codeReviewCapable: typeof payload?.codeReview === "boolean" ? payload.codeReview : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは

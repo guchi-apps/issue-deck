@@ -8,6 +8,7 @@ const fetchRepairWorkflowAvailability = vi.fn();
 const fetchCheckUserIssueReasons = vi.fn();
 const fetchLatestConflictRepairRuns = vi.fn();
 const recordPullRequestRepairRun = vi.fn();
+const settleResolvedConflictRepairRuns = vi.fn();
 const dispatchWorkflow = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -68,6 +69,9 @@ vi.mock("@/lib/github/pull-request-repair-run", async (importOriginal) => {
     get recordPullRequestRepairRun() {
       return recordPullRequestRepairRun;
     },
+    get settleResolvedConflictRepairRuns() {
+      return settleResolvedConflictRepairRuns;
+    },
   };
 });
 
@@ -115,6 +119,7 @@ describe("runConflictSweep", () => {
     fetchCheckUserIssueReasons.mockResolvedValue(new Map());
     fetchLatestConflictRepairRuns.mockResolvedValue(new Map());
     recordPullRequestRepairRun.mockResolvedValue(undefined);
+    settleResolvedConflictRepairRuns.mockResolvedValue(0);
     dispatchWorkflow.mockResolvedValue(undefined);
   });
 
@@ -159,6 +164,27 @@ describe("runConflictSweep", () => {
     expect(dispatchWorkflow).not.toHaveBeenCalled();
     // コンフリクトしていないPRのためにDBを引きにいかない。
     expect(fetchCheckUserIssueReasons).not.toHaveBeenCalled();
+  });
+
+  // 終了の報告が届かないままの行を残すと、そのPRが再びコンフリクトしても`repair_running`で
+  // 6時間起動しなくなる（#2165）。
+  it("コンフリクトが解消されたPRの「実行中」の行を終わったことにする", async () => {
+    fetchPullRequestCiStates.mockResolvedValue(
+      new Map([["guchi-apps/myroom#191", { ciState: "success", mergeable: true }]]),
+    );
+
+    await runConflictSweep();
+
+    expect(settleResolvedConflictRepairRuns).toHaveBeenCalledWith(
+      [{ repositoryFullName: "guchi-apps/myroom", pullRequestNumber: 191 }],
+      expect.any(Date),
+    );
+  });
+
+  it("コンフリクトしたままのPRの行は終わったことにしない", async () => {
+    await runConflictSweep();
+
+    expect(settleResolvedConflictRepairRuns).toHaveBeenCalledWith([], expect.any(Date));
   });
 
   it("issue-<番号>→develop以外のPRはコンフリクト判定すら取りに行かない", async () => {

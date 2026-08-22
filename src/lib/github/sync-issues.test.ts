@@ -160,6 +160,62 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
       expect.objectContaining({ update: expect.objectContaining({ checkUserLabeledAt: null }) }),
     );
   });
+
+  // Push通知（#838）の送信済み記録。送るのは巡回側（notifications/check-user-push.ts）で、
+  // ここは「いつ記録を落とすか」だけを持つ
+  it("00.check-userが付き直したら、Push通知の送信済み記録を落とす", async () => {
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: null,
+      checkUserPushSentAt: new Date("2026-08-01T00:00:00.000Z"),
+      labels: [],
+    });
+    const raw = makeRawIssue({
+      labels: [{ id: 1, name: "00.check-user", color: "d3f2d0", description: null }],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ checkUserPushSentAt: null }) }),
+    );
+  });
+
+  it("00.check-userが付いたまま変化していなければ、送信済み記録を維持する（同じ確認待ちで鳴らし直さない）", async () => {
+    const labeledAt = new Date("2026-08-01T00:00:00.000Z");
+    const sentAt = new Date("2026-08-01T00:03:00.000Z");
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: labeledAt,
+      checkUserPushSentAt: sentAt,
+      labels: [{ name: "00.check-user" }],
+    });
+    const raw = makeRawIssue({
+      labels: [{ id: 1, name: "00.check-user", color: "d3f2d0", description: null }],
+    });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ checkUserPushSentAt: sentAt }) }),
+    );
+  });
+
+  it("00.check-userが外れたら、送信済み記録もnullに戻す", async () => {
+    findUnique.mockResolvedValue({
+      githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      checkUserLabeledAt: new Date("2026-08-01T00:00:00.000Z"),
+      checkUserPushSentAt: new Date("2026-08-01T00:03:00.000Z"),
+      labels: [{ name: "00.check-user" }],
+    });
+    const raw = makeRawIssue({ labels: [] });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ checkUserPushSentAt: null }) }),
+    );
+  });
 });
 
 describe("updateQaAnswerPendingState", () => {

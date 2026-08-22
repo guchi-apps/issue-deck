@@ -45,6 +45,10 @@
 #                         **自動で積まれる**（#1855）。対象リポジトリの origin/develop の
 #                         スナップショットを読み、指摘をIssueコメントへ投稿して終わる
 #                         （scripts/start-plan-review.sh）
+#   CODE_REVIEW         … リポジトリ全体のコードレビューのセッション（#698）。画面から人が
+#                         押したときだけ積まれる。origin/develop のスナップショットを読み、
+#                         指摘をレビューIssueのコメントへ投稿して終わる
+#                         （scripts/start-code-review.sh）
 #
 # **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
 # （#1176）。issue-deck側からSSHでキックする経路は採れない。
@@ -74,6 +78,7 @@
 #   DISPATCH_MAX_JOBS               1巡で取りに行く最大本数（省略時は1）
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
 #   DISPATCH_MAX_PLAN_REVIEWS       同時に走らせる計画レビューの上限（省略時は2）
+#   DISPATCH_MAX_CODE_REVIEWS       同時に走らせるコードレビューの上限（省略時は2）
 #   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
 #   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
@@ -127,7 +132,8 @@ set -euo pipefail
 # 18: コンフリクトしたPRの巡回検知を1巡ごとにissue-deckへ促す（#2116）。
 # 19: 定期的なworktreeの掃除を`--all-repos`で全リポジトリへ広げる（#2123）。
 # 20: npm・yarnのworktreeで重複した`node_modules`を1日1回ハードリンクへまとめる（#2124）。
-DISPATCH_POLLER_VERSION="20"
+# 21: リポジトリ全体のコードレビュー（`CODE_REVIEW`）のセッションを起こす（#698）。
+DISPATCH_POLLER_VERSION="21"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -163,6 +169,7 @@ MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
 # 計画の関門（G1・#1218）のセッション（#1855）。**実装セッションとも横断質問とも別のランチャー**で、
 # worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
 PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
+CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -285,6 +292,7 @@ MAX_SESSIONS="$(require_positive_int DISPATCH_MAX_SESSIONS "${DISPATCH_MAX_SESSI
 # ここで別に止める。実装セッションより小さく取るのは、読むだけで数分で終わる代わりに、
 # 走っている間はモデル呼び出しがそのぶん並ぶため（1本$0.7〜1.5）。
 MAX_PLAN_REVIEWS="$(require_positive_int DISPATCH_MAX_PLAN_REVIEWS "${DISPATCH_MAX_PLAN_REVIEWS:-}" 2)"
+MAX_CODE_REVIEWS="$(require_positive_int DISPATCH_MAX_CODE_REVIEWS "${DISPATCH_MAX_CODE_REVIEWS:-}" 2)"
 
 # 0〜100の割合として受け取る設定値のための版（#2095）。**0は「無効」**（その項目では見送らない）で、
 # 回収まわりの分数と同じ約束。100を超える値は、そのまま「絶対に超えない閾値」＝無効と区別が
@@ -465,6 +473,14 @@ count_plan_review_sessions() {
     grep -cE '^.+-plan-review-[1-9][0-9]*$' || true
 }
 
+# 生きているコードレビューのセッションの本数（#698）。**`count_plan_review_sessions`と同じ理由で
+# 別に数える**（セッション名を`-issue-`の規約から外してあるぶん、`DISPATCH_MAX_SESSIONS`の
+# 計上に入らない）。リポジトリ全体を読むぶん1本が重いので、上限は計画レビューと同じ2本を既定にする。
+count_code_review_sessions() {
+  tmux list-sessions -F '#{session_name}' 2>/dev/null |
+    grep -cE '^.+-code-review-[1-9][0-9]*$' || true
+}
+
 # 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
 # 申告した種別のジョブは実行できなければならないため、`true`固定にはしない（pollerだけ
 # 新しくしてランチャーが同期されていない、という状態がありうる）。
@@ -511,6 +527,17 @@ manual_step_abort_capable() {
 # 計画を出すたびに「未知のジョブ種別です」で失敗したジョブが画面へ並ぶ。
 plan_review_capable() {
   if [[ -f "$PLAN_REVIEW_LAUNCHER" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**ランチャーが手元にあるかで
+# 判定する**（`plan_review_capable`と同じ）。こちらは人が画面から押す種別なので、申告しないと
+# ダイアログの選択肢に理由付きで出る（配ってから`failed`で返すより早い）。
+code_review_capable() {
+  if [[ -f "$CODE_REVIEW_LAUNCHER" ]]; then
     printf 'true'
   else
     printf 'false'
@@ -763,11 +790,12 @@ announce() {
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson planReview "$(plan_review_capable)" \
+    --argjson codeReview "$(code_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1305,6 +1333,13 @@ expected_session_name() {
 plan_review_session_name() {
   local repo="$1" issue_number="$2"
   printf '%s' "${repo//[^A-Za-z0-9_-]/-}-plan-review-$issue_number"
+}
+
+# コードレビュー（#698）のセッション名。**`-issue-`の規約からは外してある**（計画レビューと
+# 同じ理由）。組み立て方は`scripts/start-code-review.sh`と揃える。
+code_review_session_name() {
+  local repo="$1" issue_number="$2"
+  printf '%s' "${repo//[^A-Za-z0-9_-]/-}-code-review-$issue_number"
 }
 
 # --- 追加指示の送出（#1012・3段階プロトコル）------------------------------------
@@ -1932,6 +1967,32 @@ run_job() {
     return 0
   fi
 
+  # リポジトリ全体のコードレビュー（#698）。**`local_repo_check`は通さない**（版数の契約は
+  # 実装セッション用で、こちらは読むだけ）。cloneが無い場合はランチャー側が理由を出して落ちる。
+  #
+  # **重複起動の判定に使うセッション名は`<repo>-code-review-<番号>`**（計画レビューと同じ理由で
+  # `-issue-`の規約から外してある）。
+  if [[ "$kind" == "CODE_REVIEW" ]]; then
+    if [[ ! -f "$CODE_REVIEW_LAUNCHER" ]]; then
+      report_job "$job_id" failed "コードレビューのランチャーがありません（$CODE_REVIEW_LAUNCHER）。"
+      return 0
+    fi
+    # **本数の上限はここでしか見られない**（計画レビューと同じ。セッションは`count_issue_sessions`に
+    # 数えられず、ジョブも起動した時点で閉じる）。**失敗ではなく見送り**として報告する——
+    # ガードが正常に働いた結果で、何も壊れていない。見送ったレビューは画面から起こし直せる
+    local live_code_reviews
+    live_code_reviews="$(count_code_review_sessions)"
+    if [[ "$MAX_CODE_REVIEWS" -gt 0 && "${live_code_reviews:-0}" -ge "$MAX_CODE_REVIEWS" ]]; then
+      report_job "$job_id" skipped \
+        "コードレビューのセッションが上限（$MAX_CODE_REVIEWS本）に達しているため起動しませんでした（現在 $live_code_reviews 本）。"
+      return 0
+    fi
+    launch_and_report "$job_id" "$(code_review_session_name "$repo" "$issue_number")" \
+      "コードレビューを起動しています" \
+      bash "$CODE_REVIEW_LAUNCHER" "$owner" "$repo" "$issue_number"
+    return 0
+  fi
+
   # 手作業の代行実行（#1828）。**セッションを立てず、tmuxにも触らない。** cloneの有無も
   # 問わない（実行するのはホスト上のコマンドで、worktreeを作るわけではない）。
   if [[ "$kind" == "MANUAL_STEP" ]]; then
@@ -1968,7 +2029,8 @@ run_job() {
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
 #
-# **セッションを立てる3種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`）で共有する。**
+# **セッションを立てる4種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`）で
+# 共有する。**
 # 違うのは走らせるコマンドと期待するセッション名だけで、重複防止・`running`の報告・差分による
 # 成否判定・失敗時の出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。
 #

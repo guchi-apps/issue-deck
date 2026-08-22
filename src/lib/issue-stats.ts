@@ -1,6 +1,7 @@
 import type { Issue, LabelSummary, NavViewId, OverviewStat } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
+import { isCodeReviewIssue } from "@/lib/github/code-review";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import {
@@ -79,7 +80,9 @@ export function filterIssuesByView(
         (!excludeLabels || excludeLabels.length === 0) &&
         (!viewStatuses || viewStatuses.length === 0) &&
         !navView.questionOnly &&
-        !navView.excludeQuestions;
+        !navView.excludeQuestions &&
+        !navView.codeReviewOnly &&
+        !navView.excludeCodeReviews;
       if (hasNoCondition) return issues;
 
       const matchesView = (issue: Issue) => {
@@ -89,6 +92,11 @@ export function filterIssuesByView(
         const isQuestion = isAskRepoQuestionIssue(issue);
         if (navView.questionOnly && !isQuestion) return false;
         if (navView.excludeQuestions && isQuestion) return false;
+        // レビューIssue（#698）も質問と同じ扱い。**下の`dispatchPendingAt`の特例より先に
+        // 判定する。** 後ろに置くと、レビューを積んだ直後のIssueが「実行中」へ抜ける
+        const isCodeReview = isCodeReviewIssue(issue);
+        if (navView.codeReviewOnly && !isCodeReview) return false;
+        if (navView.excludeCodeReviews && isCodeReview) return false;
         // 「リポジトリに質問する」等（@claude 質問: コメント）の回答待ちは、進捗を進めない
         // （付与元のmode=askは進捗の報告を行わない）ため、Statusだけでは実行中ビューに
         // 出てこない。qaAnswerPendingAtが立っている間は実行中とみなし、他の条件より優先する

@@ -749,6 +749,7 @@ describe("time-dependent stats", () => {
         "check-user": 1,
         "manual-step": 0,
         question: 0,
+        "code-review": 0,
         "not-started": 1,
         "in-progress": 0,
         "release-pending": 0,

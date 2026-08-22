@@ -18,6 +18,7 @@ import {
   fetchLatestConflictRepairRuns,
   recordPullRequestRepairRun,
   repairRunKey,
+  settleResolvedConflictRepairRuns,
 } from "@/lib/github/pull-request-repair-run";
 import { fetchOpenPullRequests } from "@/lib/github/pull-requests-api";
 import { fetchPullRequestCiStates, UNKNOWN_PULL_REQUEST_CI_STATE } from "@/lib/github/release-api";
@@ -249,6 +250,26 @@ export async function runConflictSweep(
         pullRequestRollupKey(candidate.ownerLogin, candidate.name, candidate.number),
       ) ?? UNKNOWN_PULL_REQUEST_CI_STATE.mergeable) === false,
   );
+
+  // コンフリクトが消えたPRに「実行中」の行が残っていたら、ここで終わったことにする（#2165）。
+  // 終了の報告は届かないことがある（ジョブが始まる前のキャンセル・報告のステップを持たない
+  // 世代のワークフロー）ため、**巡回がコンフリクト有無を見たついでに片付ける**。放っておくと、
+  // そのPRが再びコンフリクトしても`repair_running`で6時間起動しなくなる。
+  await settleResolvedConflictRepairRuns(
+    candidates
+      .filter(
+        (candidate) =>
+          mergeables.get(
+            pullRequestRollupKey(candidate.ownerLogin, candidate.name, candidate.number),
+          ) === true,
+      )
+      .map((candidate) => ({
+        repositoryFullName: candidate.fullName,
+        pullRequestNumber: candidate.number,
+      })),
+    now,
+  );
+
   if (conflicting.length === 0) {
     return emptyResult({
       swept: true,

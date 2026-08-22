@@ -9,7 +9,10 @@ import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { fetchActivePullRequestRepairRun } from "@/lib/github/pull-request-repair-run";
+import {
+  fetchActivePullRequestRepairRun,
+  visibleRepairRun,
+} from "@/lib/github/pull-request-repair-run";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchPullRequest,
@@ -113,7 +116,11 @@ async function handleGET(request: NextRequest) {
     );
 
     // いま走っている自動修復（#2072）。GitHub APIは消費せず、DBを1件引くだけ。
-    const repairRun = await fetchActivePullRequestRepairRun(repository.fullName, number);
+    // 症状（コンフリクト・CI失敗）が消えていれば、終了の報告が届いていなくても出さない（#2165）。
+    const repairRun = visibleRepairRun(
+      await fetchActivePullRequestRepairRun(repository.fullName, number),
+      { mergeable: pullRequest.mergeable, ciState },
+    );
 
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,

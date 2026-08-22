@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
@@ -74,6 +75,10 @@ import {
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { subscribeIssueCreated } from "@/lib/issue-broadcast";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
+import {
+  buildCodeReviewFindingIssueDraft,
+  type CodeReviewFinding,
+} from "@/lib/github/code-review";
 import {
   buildInfraConfigIssueDraft,
   type InfraConfigTarget,
@@ -224,6 +229,8 @@ export function IssueDeckShell({
   const [configIssueOrigin, setConfigIssueOrigin] = useState<Issue | null>(null);
   const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
   const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
+  const [codeReviewDialogOpen, setCodeReviewDialogOpen] = useState(false);
+  const [codeReviewDialogRepo, setCodeReviewDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
   const [checkUserToasts, setCheckUserToasts] = useState<CheckUserToastItem[]>([]);
   // 対応PRのCIが確定するまで出さずに持っておく確認待ち（#1709）。判定は
@@ -310,6 +317,32 @@ export function IssueDeckShell({
   function openCrossRepoQuestionDialog(repositoryFullName?: string | null) {
     setCrossQuestionDialogRepo(repositoryFullName ?? null);
     setCrossQuestionDialogOpen(true);
+  }
+
+  /** リポジトリ全体のコードレビュー（#698）。対象は選び直せるので、文脈のリポジトリは初期値だけ */
+  function openCodeReviewDialog(repositoryFullName?: string | null) {
+    setCodeReviewDialogRepo(repositoryFullName ?? null);
+    setCodeReviewDialogOpen(true);
+  }
+
+  /**
+   * レビューの指摘を、対象リポジトリのIssueとして起票する（#698）。
+   *
+   * **ここでは起票しない**（`openConfigChangeIssueDialog`と同じ立場）。埋めた新規作成
+   * ダイアログを開くだけで、立てるかどうかは指摘を読んだ人が決める。
+   */
+  function openCodeReviewFindingIssueDialog(issue: Issue, finding: CodeReviewFinding) {
+    const draft = buildCodeReviewFindingIssueDraft({
+      finding,
+      repositoryFullName: issue.repositoryFullName,
+      reviewNumber: issue.number,
+    });
+    setCreateDialogRepo(draft.repositoryFullName);
+    setCreateDialogTitle(draft.title);
+    setCreateDialogBody(draft.body);
+    setCreateDialogBodyPrefix(null);
+    setConfigIssueOrigin(null);
+    setCreateDialogOpen(true);
   }
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
@@ -1256,6 +1289,7 @@ export function IssueDeckShell({
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
                   }
+                  onStartCodeReview={() => openCodeReviewDialog()}
                   issueOrderAutoStart={issueOrderGuide.autoStart}
                   issueOrderCount={issueOrderGuide.totalCount}
                 />
@@ -1327,6 +1361,8 @@ export function IssueDeckShell({
                   onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
+                  onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={selectRepositoryByFullName}
                   onStartManualStepGuide={manualStepGuide.start}
                 />
@@ -1475,6 +1511,10 @@ export function IssueDeckShell({
                 onStartManualStepGuide={manualStepGuide.start}
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）
                 onStartIssueOrder={issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start}
+                // リポジトリ全体のコードレビューを実行する入口（#698）
+                onStartCodeReview={() =>
+                  openCodeReviewDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+                }
                 issueOrderAutoStart={issueOrderGuide.autoStart}
                 issueOrderCount={issueOrderGuide.totalCount}
                 // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）
@@ -1497,6 +1537,8 @@ export function IssueDeckShell({
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
+                  onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
                   }
@@ -1560,6 +1602,13 @@ export function IssueDeckShell({
           defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
           issues={issues}
+          onCreated={handleIssueCreated}
+        />
+        <CodeReviewDialog
+          open={codeReviewDialogOpen}
+          onOpenChange={setCodeReviewDialogOpen}
+          repositories={visibleRepositories}
+          defaultRepositoryFullName={codeReviewDialogRepo}
           onCreated={handleIssueCreated}
         />
         <CrossRepoQuestionDialog

@@ -111,10 +111,14 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `CROSS_REPO_QUESTION`（#1454） | `scripts/start-cross-repo-question.sh` | 複数リポジトリ横断の質問セッションを立てる |
 | `MANUAL_STEP`（#1828） | `scripts/run-manual-step.sh`（別プロセス） | 手作業アシスタントで承認された1手順ぶんのコマンドを実行する |
 | `MANUAL_STEP_ABORT`（#1882） | `systemctl --user stop issue-deck-manual-step-<対象ジョブID>` | 走っている代行実行を止める |
+| `PLAN_REVIEW`（#1855） | `scripts/start-plan-review.sh` | 計画の関門（G1）のセッションを立てる |
+| `CODE_REVIEW`（#698） | `scripts/start-code-review.sh` | リポジトリ全体のコードレビューのセッションを立てる |
+| `SELF_UPDATE`（#1875） | チェックアウトの更新と自己再起動 | pollerが動かしているチェックアウトを`develop`に合わせる |
 
-**`CROSS_REPO_QUESTION`だけはセッションを立てる側**（`LAUNCH`と同じ枠・同じ払い出し経路）で、
-上の4つのように「立っているセッションを操作する」ものではない。詳細は
-[複数リポジトリ横断の質問セッション](#複数リポジトリ横断の質問セッション1454)。
+**`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`はセッションを立てる側**（`LAUNCH`と同じ枠・
+同じ払い出し経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものでは
+ない。詳細は[複数リポジトリ横断の質問セッション](#複数リポジトリ横断の質問セッション1454)と
+[リポジトリ全体のコードレビュー](code-review.md)。
 
 **`MANUAL_STEP`と`MANUAL_STEP_ABORT`はセッションにも tmux にも触らない**（枠外で先に配る点だけ
 制御ジョブと同じ）。詳細は[手作業アシスタントからの代行実行](#手作業アシスタントからの代行実行1828)。

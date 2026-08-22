@@ -16,11 +16,12 @@ import {
 } from "@/lib/nav-views";
 
 describe("navViews", () => {
-  it("「質問」ビューは手作業と未着手のあいだに並ぶ（#1514）", () => {
+  it("「質問」「コードレビュー」は手作業と未着手のあいだに並ぶ（#1514・#698）", () => {
     const ids = navViews.map((view) => view.id);
     expect(ids.slice(ids.indexOf("manual-step"), ids.indexOf("not-started") + 1)).toEqual([
       "manual-step",
       "question",
+      "code-review",
       "not-started",
     ]);
   });
@@ -64,8 +65,8 @@ describe("左メニューのグループ（#1613）", () => {
     expect(sidebarAttentionNavViews.map((view) => view.id)).toEqual(["check-user", "manual-step"]);
   });
 
-  it("質問は要対応にもIssueにも入れない", () => {
-    expect(sidebarQuestionNavViews.map((view) => view.id)).toEqual(["question"]);
+  it("質問とコードレビューは要対応にもIssueにも入れない", () => {
+    expect(sidebarQuestionNavViews.map((view) => view.id)).toEqual(["question", "code-review"]);
   });
 
   // 絞ったものどうしは進捗の順（未着手 → 実行中 → 本番反映待ち、#1743）
@@ -175,9 +176,14 @@ describe("getAdjacentNavViewId", () => {
 
 // #1750: リポジトリ横断で全体を見るビューは、ユーザーの絞り込みを適用しない
 describe("navViewIgnoresIssueFilters", () => {
-  it("要対応の2つと質問だけが対象になる", () => {
+  it("要対応の2つと質問・コードレビューだけが対象になる", () => {
     const ignored = navViews.filter((view) => navViewIgnoresIssueFilters(view.id));
-    expect(ignored.map((view) => view.id)).toEqual(["check-user", "manual-step", "question"]);
+    expect(ignored.map((view) => view.id)).toEqual([
+      "check-user",
+      "manual-step",
+      "question",
+      "code-review",
+    ]);
   });
 
   it("左メニュー最上段（要対応）はすべて対象（画像の並びと揃える）", () => {
