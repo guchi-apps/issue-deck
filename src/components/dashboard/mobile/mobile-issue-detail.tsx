@@ -744,7 +744,13 @@ export function MobileIssueDetail({
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
         {planRequest && (
           <div {...checkUserTargetProps("plan")}>
-            <PlanApprovalPanel request={planRequest} session={issueSession} dispatch={dispatch} />
+            {/* **計画が変われば作り直す**（#2158。PCの詳細と同じ理由） */}
+            <PlanApprovalPanel
+              key={planRequest.id}
+              request={planRequest}
+              session={issueSession}
+              dispatch={dispatch}
+            />
           </div>
         )}
 

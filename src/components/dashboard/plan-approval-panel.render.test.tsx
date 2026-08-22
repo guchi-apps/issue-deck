@@ -120,6 +120,35 @@ describe("PlanApprovalPanel", () => {
     expect(screen.queryByRole("button", { name: /承認して実装へ進む/ })).toBeNull();
   });
 
+  /**
+   * #2158。**押していない計画に「承認を送りました」が出ていた。**
+   *
+   * Issue詳細はIssueを切り替えてもマウントされたままなので、押した結果を
+   * 「承認した」とだけ覚えていると、別のIssueの計画・出し直された計画に差し替わっても
+   * その表示が残る（画面の上には「計画の承認が必要です」が出たまま、下には
+   * 「承認を送りました」が並ぶ）。
+   */
+  it("別の計画に差し替わったら、押した結果を持ち越さない", async () => {
+    const { rerender } = render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle()} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /承認して実装へ進む/ }));
+    await waitFor(() => expect(screen.getByText("承認を送りました。")).toBeTruthy());
+
+    rerender(
+      <PlanApprovalPanel
+        request={request({ id: "req-2" })}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    expect(screen.queryByText("承認を送りました。")).toBeNull();
+    expect(screen.getByText("計画の承認を待っています")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ })).toBeTruthy();
+  });
+
   it("待ち時間が切れたら、端末で答えるよう案内する", () => {
     render(
       <PlanApprovalPanel
