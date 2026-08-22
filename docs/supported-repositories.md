@@ -16,6 +16,9 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 **インフラ設定・共有知識・個人設定のリポジトリ（`vps`・`subpc`・`docs`・`claude-config`）は、
 この表には載せない。** 無人実行は入れず、ローカルセッションとリリースフローだけを載せる、
 というのが#1697・#1741の判断（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。
+**ただし`vps`・`subpc`には#2103で`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せる**——コードを書かない読み取りだけのレビューで、無人実装を入れる判断とは
+別の軸にある（下記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」）。
 #1011が「順次導入する」としていた`vps`もこの扱いになる。`claude-config`（個人設定）は#1988で
 同じ枠へ加えた（下記「`claude-config`（個人設定）」）。
 
@@ -154,7 +157,8 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 
 | 配布済み | `issue-deck`（ローカルパス参照）・`dayspan`・`shopping-list` |
 |---|---|
-| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab` |
+| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab`（#1475で**12件すべてへ配ると決めた**。下記）・**`vps`・`subpc`**（#2103で**配ると決めた**。画面のボタンの対象外なので手で配る。下記「`vps`・`subpc`（#2103）」） |
+| **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
 
 **未配布のリポジトリでは、develop向けPRは一切自動マージされない。** #1470の時点では
 `00.check-user`も付かなかったため、13本のPRが判定されないまま開いたまま残っていた
@@ -244,6 +248,89 @@ Pull requests / Actions / Workflows / Metadata だけで、**Administration を�
 `gh pr merge --auto --merge`で自動マージを予約しており、保護が無いリポジトリでは同じ理由で
 失敗して警告だけ出し、実際には画面のリリース操作で手動マージされていた。
 
+### `vps`・`subpc`（#2103）
+
+**この2件へも配ると決めた**（起点は guchi-apps/question#26「すべてのリポジトリで、developへの
+マージ前に問題ないかをClaude Codeがチェックする機能はあるか。**特にVPSやsubPC**」）。#1475の
+12件とは別枠で、「無人実行は入れない」4件（下記「`subpc`・`vps`・`docs`」「`claude-config`」）
+のうち`develop`を持つ2つが対象。**無人実装（`claude-issue-dispatch.yml`）は入れないままで、#1741の
+判断は変えない**——レビュージョブの許可ツールは`Read`/`Grep`/`Glob`と`gh`の読み取り、および
+Issueへのコメント・ラベル付与だけで、コードを書かない。
+
+**#1475の12件と違い、配る前の前提はもう揃っている**（2026-08-22実測。`setup-develop-auto-merge.sh`
+を掛ける必要が無い）。
+
+| 項目 | `guchi-apps/vps` | `guchi-apps/subpc` |
+|---|---|---|
+| `Allow auto-merge` | 有効 | 有効 |
+| `develop`のブランチ保護 | ruleset `protect develop`（id=20909317） | 同（id=20909724） |
+| 必須ステータスチェック | `verify`（`ci.yml`の実ジョブ名） | `shell`（同左） |
+| CIのワークフロー名 | `CI`（`wait-for-ci`は`name == "CI"`で探す） | 同左 |
+| org secrets | `CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`とも到達済み（`release-develop-to-main.yml`が使用中） | 同左 |
+
+**自動マージの取り分は文書だけになる。** 直近のdevelop向けPR（vps 16本・subpc 14本）を内蔵
+パターンと下記`risk-paths`で判定すると、自動マージされるのは7本で、**すべてREADME.md・
+CLAUDE.md・docs/のみのPR**。`apache/`・`scripts/`・`setup.sh`・`configs/`・`.github/`を触るPRは
+全部止まる。**これは「レビューが要らない」ではなく「実配置の変更は全部レビュー対象になる」で、
+mainマージが即本番反映になるこの2件ではむしろ望ましい。** 得られるのは自動マージ本数ではなく、
+人がマージする前に読めるレビューコメントの方である。
+
+> **バンプPRではレビューだけが走る。** `release/vX.Y.Z`は`issue-<番号>`でないため
+> `identify-issue`が空になり、`auto-merge`はスキップされる一方、`risk-check`は
+> 「対応Issue番号を特定できないため（安全側でレビューを実行）」で`claude-review`を起動する
+> （issue-deck自身のバンプPRでも実際に走っている）。この2件はバンプPRの比率が高い
+> （vps 5/16・subpc 4/14）ため、callerの`on:`へ`paths-ignore: [version.json]`を入れて避ける。
+> バンプPRは`version.json`1ファイルなので、`paths-ignore`が全ファイルに当たり丸ごとスキップされる。
+
+#### `main`へ届くまでは「レビュー無しの自動マージ」だけが効く
+
+**この2件はデフォルトブランチが`main`のまま**（`drift-check.yml`のschedule実行がデフォルト
+ブランチを実機と突き合わせるため。下記「`subpc`・`vps`・`docs`」）。ここに次の食い違いがある。
+
+- `develop-pr-opened`の保険は**PRのbase（＝`develop`）側**のcallerの有無しか見ない
+  （`reusable-issue-labels.yml`の`repos/$GH_REPO/contents/.github/workflows?ref=$BASE_REF`）。
+  callerが`develop`へ入った瞬間に`00.check-user`を付けなくなる
+- 一方`claude-code-action`は**ワークフローファイルがデフォルトブランチ（＝`main`）の同ファイルと
+  一致しない限りClaudeを実行しない**。しかも**ステップもジョブも`success`で終わる**
+  （[multi-agent/labels.md](multi-agent/labels.md)「ワークフローファイルを変更するPRでは
+  claude-reviewが必ずスキップされる」）
+- `auto-merge`の条件は`claude-review`が`success`または`skipped`であることだけで、
+  レビューが実際に行われたかは見ない
+
+つまり**callerを`develop`へマージしてから`main`へ届くまでの間、低リスクPRはレビュー無しで
+自動マージされる。** 配るときは`develop`へのマージで止めず、続けてリリース（develop→main）を
+回して`main`へ入れ、その次のdevelop向けPRで`claude-review`の`execution_file`が出ている
+（＝Claudeが実際に走った）ことまで確認する。
+
+#### 画面の配布ボタンの対象外なので手で配る
+
+「不足しているワークフローを配る」（#1948・#1475）は`claude-review-develop.yml`の`requires`を
+`claude-issue-dispatch.yml`としており（[`lib/workflow-tags.ts`](../src/lib/workflow-tags.ts)の
+`REPAIR_WORKFLOW_SPECS`）、無人実行を入れないこの2件は永久に対象にならない。**`requires`は
+緩めない**——`issue-labels.yml`へ替えると`develop`を持たない`docs`まで対象に入り、置いても
+発火しないcallerを配ることになる。代わりに各リポジトリへIssueを立てて手で配る
+（guchi-apps/vps#108・guchi-apps/subpc#45）。
+
+雛形は`.github/templates/callers/claude-review-develop.yml`を写し、`__TAG__`（`uses:`と
+`prompts-ref`の2か所）を現行タグへ置換したうえで、共通の`risk-paths` 4行へリポジトリ固有の
+行を足す。**固有の行は`deploy.yml`の`paths`（＝実機へ反映される受け口）に合わせる。**
+
+**書式は`<正規表現> :: <理由>`（区切りは半角スペース2つのコロン）で、正規表現だけを書くと
+`risk-check`が`::error::`で落ちる。** 落ち方が静かなのが厄介で、`risk-check`が失敗すると
+`auto-merge`は条件（`needs.risk-check.result == 'success'`）を満たさずskip、
+`auto-merge-fallback`は`auto-merge`がfailureのときしか動かないのでこちらもskipになり、
+**`00.check-user`が付かないまま自動マージもされない**PRになる（PR作成時の保険は、callerの実在を
+見た時点で通り抜けている）。下の表は正規表現だけを載せているので、写すときに理由を足すこと。
+
+| | 足す`risk-paths`の正規表現 | 由来 |
+|---|---|---|
+| `vps` | `^(apache\|systemd\|cron\|scripts\|fail2ban)/`・`^\.github/scripts/` | `deploy.yml`の`paths`と同じ5つ。`mysql/`（記録用）・`.claude/`は`paths`外 |
+| `subpc` | `^(setup\.sh$\|scripts/\|configs/)`・`^\.github/scripts/` | 同じく`deploy.yml`の`paths`の3つ |
+
+**`dependency-check`は指定しない。** 判定はルートの`package.json`の変更しか見ず
+（`reusable-claude-review-develop.yml`の`grep -q '^package\.json$'`）、この2件はどちらも
+ルートに`package.json`を持たない方針のため、`any`・`none`のどちらでも結果が変わらない。
+
 ## `release-develop-to-main.yml`の配布状況（#1551）
 
 **issue-deckの画面のリリースボタンが出るかどうかは、このcallerの実在だけで決まる**
@@ -271,6 +358,13 @@ Pull requests / Actions / Workflows / Metadata だけで、**Administration を�
 （#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80。**2026-08-16に完了**）。
 `docs`だけはリリースフローも入れない（後述）。
 
+**その後#2103で、`subpc`・`vps`には`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せると決めた**（`docs`は`develop`を持たないため対象外）。**「リリース
+フローだけ」ではなくなったが、無人実装（`claude-issue-dispatch.yml`）を入れない判断は
+変えていない**——レビュージョブはコードを書かず、Issueへのコメントとラベル付与だけを行う。
+判断・前提・配り方は上記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」を
+参照（作業は guchi-apps/vps#108・guchi-apps/subpc#45）。
+
 > **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
 > フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
 > 無人実行を入れていない2件でも、**この2件のIssueはサブPCのローカルセッションで回せる**
@@ -288,7 +382,8 @@ Pull requests / Actions / Workflows / Metadata だけで、**Administration を�
 | `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
 | `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
 | ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
-| `issue-labels.yml` | `@workflows/v22`（guchi-apps/subpc#32で2026-08-18に追加） | **未配置**（#1901の残課題） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `issue-labels.yml` | `@workflows/v25`（guchi-apps/subpc#32で2026-08-18に追加） | `@workflows/v25`（#1901の残課題だったが配置済み。2026-08-22に実測） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `claude-review-develop.yml` | **#2103で配ると決定**（guchi-apps/subpc#45） | **#2103で配ると決定**（guchi-apps/vps#108） | 対象外（`develop`を持たない） |
 
 > **進捗を`Implementation`から先へ進める経路は`issue-labels.yml`が持っている。** 3件とも当初は
 > 持っておらず、ローカルセッションが起動時に付ける`Implementation`のまま、PRをマージしても
