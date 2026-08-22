@@ -170,6 +170,36 @@ describe("isMergeAwaitingCi", () => {
   });
 });
 
+describe("resolveCheckUserToasts（実行中の保留・#2174）", () => {
+  it("エージェントが実行中の間は出さずに持つ", () => {
+    const pending = makePending();
+    const { ready, held } = resolve([pending], {
+      runningIssueIds: new Set([pending.issue.id]),
+    });
+    expect(ready).toHaveLength(0);
+    expect(held).toHaveLength(1);
+  });
+
+  it("実行中でも上限を過ぎたら出す", () => {
+    const pending = makePending();
+    const { ready } = resolve([pending], {
+      runningIssueIds: new Set([pending.issue.id]),
+      now: DETECTED_AT + CHECK_USER_TOAST_MAX_HOLD_MS,
+    });
+    expect(ready).toHaveLength(1);
+  });
+
+  it("自動マージ可否の判定中も持つ（#2081と同じ`isMergeWaitingForChecks`）", () => {
+    const pullRequest = makePullRequest({
+      ciState: "success",
+      mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+    });
+    const { ready, held } = resolve([makePending()], { pullRequests: [pullRequest] });
+    expect(ready).toHaveLength(0);
+    expect(held).toHaveLength(1);
+  });
+});
+
 describe("resolveCheckUserToasts", () => {
   it("対応PRのCIが実行中の間は保留する", () => {
     const pending = makePending();

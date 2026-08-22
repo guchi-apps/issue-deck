@@ -645,6 +645,21 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     内訳を出す手作業待ち（#1763）と同じ扱い。
   - **どちらの関数も母集団は`pullRequestsRequiringUserMerge`1つ**（`requiresUserMerge`＋二重表示の
     除外）。2つの数を足したものが従来の件数と必ず一致するようにするため、判定を2か所に書かない。
+- **「ユーザーの確認待ち」の件数からは、エージェントがまだ動いているIssueを外す**（#2174。
+  [`lib/check-user-attention.ts`](../src/lib/check-user-attention.ts)）。`00.check-user`を付ける側は
+  エージェントが止まるのを待たないため、develop向けPRを作った直後（`01.check-merge`＋CI実行中・
+  自動マージ判定中）やサブPCのセッションが作業を続けている間も確認待ちとして数えられ、開いても
+  押せる操作が無いのにオレンジの丸が点いていた。上のPR側（#2081）と同じ扱いをIssue側へ広げたもの。
+  - **判定材料は画面が既に持っているものだけ**——対応PRの`isMergeWaitingForChecks`（#2081と同じ関数）と、
+    セッションの`isSessionActivelyWorking`（一覧のバッジの回転と同じ関数。
+    [`lib/workflow-badge-activity.ts`](../src/lib/workflow-badge-activity.ts)）。GitHub APIの消費は増えない。
+  - **GitHub Actionsの実行そのものは見ていない。** `useIssuesWorkflowRunning`は確認待ちのIssueを
+    最初からポーリング対象から外しているため、確認待ちの間はActions側の材料が無い。無人実行で
+    確認待ちになる場面はPRを伴うものが大半で、そちらはPR側の材料で拾える。
+  - **一覧には今までどおり並べる**（PR側と違うのはここ）。差はヘッダーの`formatCheckUserListCount`
+    （`2件・実行中1件`）で説明する。集合（`selectCheckUserRunningIssueIds`）は`IssueDeckShell`が
+    1回だけ作り、左メニューの件数・一覧のヘッダー・ベル・確認待ちトーストへ配る——判定を
+    呼び出し側ごとに書くと「メニューからは消えているのにベルには出ている」状態になる。
 - **「ユーザーの作業待ち」（`71.manual-step`）は、いま実行できる件数だけを出す**
   （#1613で橙色の強調を、#1763で件数そのものを。
   [`lib/manual-step-attention.ts`](../src/lib/manual-step-attention.ts)）。

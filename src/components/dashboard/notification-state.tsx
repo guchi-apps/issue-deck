@@ -121,6 +121,7 @@ export function NotificationProvider({
   repositories,
   issues,
   pullRequests,
+  checkUserRunningIssueIds,
   onRefreshIssues,
   onRefreshPullRequests,
   isRefreshingPullRequests = false,
@@ -130,6 +131,11 @@ export function NotificationProvider({
   issues: Issue[];
   /** リポジトリ横断のPR。TopBarの絞り込みは適用しない（#1750） */
   pullRequests: PullRequestSummary[];
+  /**
+   * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
+   * 左メニューの件数と同じ集合を受け取り、その行を「実行中」として弱く出す。
+   */
+  checkUserRunningIssueIds?: ReadonlySet<string>;
   /**
    * Issue一覧の取り直し（#1909）。取得できたかを返す——失敗を成功として数えると、
    * 取れていないのに「たった今更新」と出てしまう。渡さない場合はIssueを取り直さない
@@ -186,7 +192,12 @@ export function NotificationProvider({
   }, [hasConnectedRepository, refetch, onRefreshIssues, onRefreshPullRequests]);
 
   const value = useMemo<NotificationState>(() => {
-    const items = buildNotifications({ issues, pullRequests, releaseStatuses });
+    const items = buildNotifications({
+      issues,
+      pullRequests,
+      releaseStatuses,
+      checkUserRunningIssueIds,
+    });
     return {
       items,
       groups: groupNotifications(items),
@@ -206,6 +217,7 @@ export function NotificationProvider({
     issues,
     repositories,
     pullRequests,
+    checkUserRunningIssueIds,
     releaseStatuses,
     refresh,
     isSelfFetching,

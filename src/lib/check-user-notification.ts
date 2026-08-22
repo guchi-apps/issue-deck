@@ -1,4 +1,5 @@
 import { checkUserReason, isApprovalPending } from "@/lib/github/approval-labels";
+import { isMergeWaitingForChecks } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -100,6 +101,13 @@ export type ResolveCheckUserToastsInput = {
   pullRequests: PullRequestSummary[];
   /** PR一覧の最終取得時刻（未取得はnull） */
   pullRequestsFetchedAt: string | null;
+  /**
+   * まだエージェントが動いている確認待ちIssueのid（#2174。`selectCheckUserRunningIssueIds`）。
+   *
+   * **集合は呼び出し側が作る。** 判定にはサブPCのセッションが要り、それを持っているのは画面
+   * （`IssueDeckShell`）だけ。ここで取りに行くと、通知の組み立てがデータの取得を抱えることになる。
+   */
+  runningIssueIds?: ReadonlySet<string>;
   now: number;
 };
 
@@ -113,7 +121,7 @@ export function resolveCheckUserToasts(
   pending: readonly PendingCheckUserToast[],
   input: ResolveCheckUserToastsInput,
 ): CheckUserToastResolution {
-  const { issues, pullRequests, pullRequestsFetchedAt, now } = input;
+  const { issues, pullRequests, pullRequestsFetchedAt, runningIssueIds, now } = input;
   const issuesById = new Map(issues.map((issue) => [issue.id, issue] as const));
   const ready: PendingCheckUserToast[] = [];
   const held: PendingCheckUserToast[] = [];
@@ -129,6 +137,11 @@ export function resolveCheckUserToasts(
     // 上限を過ぎたら、判定できていなくても出す
     if (now - item.detectedAt >= CHECK_USER_TOAST_MAX_HOLD_MS) {
       ready.push(resolved);
+      continue;
+    }
+    // エージェントがまだ動いている間は、開いても押せる操作が無いので持つ（#2174）
+    if (runningIssueIds?.has(issue.id)) {
+      held.push(resolved);
       continue;
     }
     // マージ以外（計画の承認・質問への回答など）はCIと関係が無いので、そのまま出す
@@ -147,7 +160,8 @@ export function resolveCheckUserToasts(
       ready.push(resolved);
       continue;
     }
-    if (pullRequest.ciState === "pending") {
+    // CIの実行中に加え、自動マージ可否の判定中も押せないので持つ（#2081と同じ`isMergeWaitingForChecks`）
+    if (isMergeWaitingForChecks(pullRequest)) {
       held.push(resolved);
       continue;
     }

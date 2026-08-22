@@ -34,6 +34,7 @@ import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
 import { useNow } from "@/hooks/use-now";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { formatCheckUserListCount } from "@/lib/check-user-attention";
 import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
@@ -117,6 +118,15 @@ type IssueListProps = {
    * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /**
+   * 確認待ち（`00.check-user`）のうち、まだエージェントが動いていて押せる操作が無いIssueのid
+   * （#2174。判定は`lib/check-user-attention.ts`）。
+   *
+   * 左メニューの件数はこれを外した数を出すため、ヘッダーが行数のままだと数字だけが食い違う。
+   * **一覧には今までどおり並べ**、ヘッダーの内訳（`2件・実行中1件`）で説明する。
+   * 省略時は今までどおり行数を出す。
+   */
+  checkUserRunningIssueIds?: ReadonlySet<string>;
   /**
    * 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う。
    * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない。
@@ -332,6 +342,7 @@ export function IssueList({
   pinnedSection,
   pinnedCount = 0,
   prerequisiteReadiness,
+  checkUserRunningIssueIds,
   onStartManualStepGuide,
   onStartIssueOrder,
   issueOrderAutoStart = false,
@@ -476,13 +487,19 @@ export function IssueList({
   // 「ユーザーの作業待ち」だけは、左メニューと同じ「いま実行できる件数」を先に出し、
   // 差である前提待ちを添える（#1763）。「質問」は総数に未確認の内訳を添える（#1796。
   // 左メニューの数字は総数のままで、色でしか未確認の有無が出ないため）。
+  // 「ユーザーの確認待ち」も同じ形で、実行中のぶんを差として添える（#2174）。
   // 他のビューは今までどおり並んでいる行数。
   const listedCount = issues.length + pinnedCount;
+  const checkUserRunningCount =
+    view === "check-user" && checkUserRunningIssueIds
+      ? issues.filter((issue) => checkUserRunningIssueIds.has(issue.id)).length
+      : 0;
   const countLabel =
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(issues, prerequisiteReadiness)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    formatCheckUserListCount(listedCount, checkUserRunningCount) ??
     `${listedCount}件`;
 
   // アシスタントが案内できるのは「いま実行できる」手作業だけ（`buildManualStepQueue`）。
