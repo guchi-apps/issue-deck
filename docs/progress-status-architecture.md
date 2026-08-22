@@ -559,6 +559,12 @@ Statusは**いまどこにいるか**しか持たず、**どの段を通って�
   出しておらず段の割合を塗るだけなので、見分けが付かない問題自体が起きない
 - **DBへ「Planningを通った日時」を持たせる案は採っていない。** スキーマ変更が要るうえ、
   すでに進んでいるIssueには値が入らない
+- **`<!-- issue-deck:session-plan -->`は`session-plan.ts`からimportせず文字列で持つ。**
+  あちらはGitHub Appのトークン解決とジョブの積み込み（Prisma）を抱えたサーバー専用モジュールで、
+  `"use client"`のIssue詳細から辿ると同じバンドルへ入る（`session-wrapup.ts`も同じ理由で
+  同じマーカーを文字列で持っている）。二重管理は**正とずれたら落ちるテスト**
+  （[`planning-phase.test.ts`](../src/lib/github/planning-phase.test.ts)）で潰す——テストは
+  サーバー側のモジュールを読んでよい
 
 ### Phase 3（実装済み）
 
