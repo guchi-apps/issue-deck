@@ -24,11 +24,22 @@ import type { IssueLabel } from "@/types/issue";
 export function shouldEmphasizeRemoteControl({
   labels,
   session,
+  planDecisionPending = false,
 }: {
   labels: readonly Pick<IssueLabel, "name">[];
   /** そのIssueのセッション（`findSessionForIssue`の結果）。無ければnull */
   session: DispatchSessionView | null;
+  /**
+   * 計画への返事を画面から送れる状態か（#2061。`findPlanRequestForIssue`が`WAITING`を返したか）。
+   *
+   * **このときRemote Controlは強調しない。** 押す場所はアプリの中（Issueを開くと出る
+   * 計画パネル）で、そちらを「計画を承認」として強調する。行の中でオレンジが2つ並ぶと
+   * どちらを押せばよいのか分からなくなるうえ、Remote Controlを主導線として出し続けると
+   * **アプリで承認できること自体が画面から読み取れない**。
+   */
+  planDecisionPending?: boolean;
 }): boolean {
+  if (planDecisionPending) return false;
   // セッションが質問・承認プロンプトの前で止まっている。答える先はRemote Controlしかない
   if (isSessionWaitingInput(session)) return true;
   if (!isApprovalPending(labels)) return false;

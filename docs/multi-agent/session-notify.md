@@ -119,8 +119,18 @@ ExitPlanMode（計画の提示）
   あるのはこのため（`scripts/run-issue-session.sh`。**打ち切られても壊れない**）
 - 押した内容（承認・修正・端末で答える）は**Issueコメントとしても残る**。投稿はissue-deckの
   GitHub App名義になるので、末尾の投稿者マーカーで押した本人の発言として画面に出す
+- **画面の導線もアプリの中で完結させる。** 計画の返事を待っている間は、Issue一覧の行に
+  「計画を承認」（押すとそのIssueが開く）を出し、**Remote Controlの強調（#1964のamber）は
+  下ろす**。Issue詳細の確認待ちの案内は「計画へ移動」でパネルまでスクロールし、コメント欄の
+  案内も「上の『計画の承認を待っています』から送れます」に変わる。ここを直さないと、
+  **アプリで承認できること自体が画面のどこからも読み取れない**
+- **パネルはPC版・スマホ版の両方の詳細に置く。** Issue詳細は`issue-detail.tsx`と
+  `mobile/mobile-issue-detail.tsx`で別のコンポーネントで、片方へ足しただけでは
+  もう片方が従来どおりの案内のままになる（置き忘れは`plan-approval-mount.test.ts`が捕まえる）
 - サーバー側は`src/lib/dispatch/session-plan-request.ts`（値の検証・表示の判定）と
-  `src/lib/dispatch/plan-requests.ts`（DB）。画面は`plan-approval-panel.tsx`
+  `src/lib/dispatch/plan-requests.ts`（DB）。画面は`plan-approval-panel.tsx`、
+  一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
+  `lib/github/check-user-guidance.ts`
 
 ### 計画本文は`ExitPlanMode`の引数では渡ってこない
 

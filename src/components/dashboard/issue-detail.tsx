@@ -573,6 +573,8 @@ export function IssueDetail({
     sessionAlive,
     remoteControlUrl: issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null,
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
+    // 計画への返事を画面から送れる間は、行き先をRemote Controlではなく計画パネルにする（#2061）
+    planDecisionPending: planRequest?.status === "WAITING",
     sessionStatePending,
   });
 
@@ -761,11 +763,13 @@ export function IssueDetail({
           {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
               待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
           {planRequest && (
-            <PlanApprovalPanel
-              request={planRequest}
-              session={issueSession}
-              dispatch={dispatch}
-            />
+            <div {...checkUserTargetProps("plan")}>
+              <PlanApprovalPanel
+                request={planRequest}
+                session={issueSession}
+                dispatch={dispatch}
+              />
+            </div>
           )}
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
@@ -923,7 +927,10 @@ export function IssueDetail({
               checkUserReason={checkUserReason(issue.labels)}
               localSessionNotice={
                 executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
-                  <LocalSessionWaitingInputNotice session={issueSession} />
+                  <LocalSessionWaitingInputNotice
+                    session={issueSession}
+                    planDecisionPending={planRequest?.status === "WAITING"}
+                  />
                 ) : (
                   <LocalSessionApprovalNotice session={issueSession} />
                 )

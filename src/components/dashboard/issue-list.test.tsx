@@ -375,11 +375,31 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
   };
 }
 
-function makeDispatch(sessions: DispatchSessionView[]): DispatchStateHandle {
+function makePlanRequest(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "req-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    hostName: "subpc",
+    plan: "## 要約",
+    status: "WAITING",
+    createdAt: "2026-08-22T09:58:00.000Z",
+    expiresAt: "2126-08-22T10:28:00.000Z",
+    decidedAt: null,
+    delivered: false,
+    ...overrides,
+  };
+}
+
+function makeDispatch(
+  sessions: DispatchSessionView[],
+  planRequests: unknown[] = [],
+): DispatchStateHandle {
   return {
     hosts: [],
     jobs: [],
     sessions,
+    planRequests,
     concurrency: null,
     error: null,
     isSubmitting: false,
@@ -471,6 +491,62 @@ describe("Remoteボタンの強調（#1964）", () => {
     });
 
     expect(remoteLinkOf(1).className).not.toContain("border-amber-500");
+  });
+});
+
+/**
+ * #2061: 計画の承認・修正はアプリの中で完結する。一覧の主導線をRemote Controlから
+ * アプリ内（Issueを開くと出る計画パネル）へ向け直す。
+ */
+describe("計画の承認への入口（#2061）", () => {
+  function planButton(issueNumber: number): HTMLElement {
+    return screen.getByRole("button", { name: `#${issueNumber}の計画を承認する` });
+  }
+
+  it("計画の返事を待っている行にだけ「計画を承認」を出す", () => {
+    renderList({
+      issues: [makeIssue({ number: 1 }), makeIssue({ number: 2 })],
+      dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
+    });
+
+    expect(planButton(1)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "#2の計画を承認する" })).toBeNull();
+  });
+
+  it("押すとそのIssueを開く（外部へは出ない）", () => {
+    const onSelectIssue = vi.fn();
+    renderList({
+      onSelectIssue,
+      dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
+    });
+
+    fireEvent.click(planButton(1));
+
+    expect(onSelectIssue).toHaveBeenCalledTimes(1);
+    expect(onSelectIssue.mock.calls[0][0].number).toBe(1);
+  });
+
+  /** 行の中でオレンジが2つ並ぶと、どちらを押せばよいのか分からなくなる */
+  it("「計画を承認」を出す行では、Remote Controlの強調を下ろす", () => {
+    renderList({
+      dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
+    });
+
+    expect(
+      screen.getByRole("link", { name: "#1のRemote Controlで開く" }).className,
+    ).not.toContain("border-amber-500");
+  });
+
+  /** 決まったあと（承認済み・待ち時間切れ）は押す相手がいない */
+  it("返事が決まっている行には出さない", () => {
+    renderList({
+      dispatch: makeDispatch(
+        [makeSession({ activity: "WAITING_INPUT" })],
+        [makePlanRequest({ status: "APPROVED", decidedAt: "2026-08-22T10:00:00.000Z" })],
+      ),
+    });
+
+    expect(screen.queryByRole("button", { name: "#1の計画を承認する" })).toBeNull();
   });
 });
 
