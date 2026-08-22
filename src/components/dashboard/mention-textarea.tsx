@@ -12,6 +12,10 @@ import {
 } from "react";
 import { Eye, ImagePlus, Loader2, Pencil, X } from "lucide-react";
 
+import {
+  ImagePreviewDialog,
+  type ImagePreviewTarget,
+} from "@/components/dashboard/image-preview-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -477,6 +481,7 @@ function AttachmentStrip({
   disabled?: boolean;
   className?: string;
 }) {
+  const [preview, setPreview] = useState<ImagePreviewTarget | null>(null);
   const countLabel = uploads.length > 0 ? `${uploads.length}枚アップロード中` : null;
 
   return (
@@ -484,21 +489,22 @@ function AttachmentStrip({
       className={cn("flex items-center gap-2 overflow-x-auto py-0.5", className)}
       data-slot="mention-attachments"
     >
+      <ImagePreviewDialog image={preview} onClose={() => setPreview(null)} />
       {attachments.map((attachment, index) => (
         <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
-          <a
-            href={attachment.url}
-            target="_blank"
-            rel="noreferrer"
-            title={`${attachment.name}（新しいタブで開く）`}
-            className="block size-full overflow-hidden rounded-md border"
+          {/* サムネイルは小さく中身を確かめられないので、押すとアプリ内で原寸を開く（#2065） */}
+          <button
+            type="button"
+            onClick={() => setPreview({ src: attachment.url, name: attachment.name })}
+            title={`${attachment.name}（拡大する）`}
+            className="block size-full cursor-zoom-in overflow-hidden rounded-md border"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={attachment.url} alt={attachment.name} className="size-full object-cover" />
             <span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-[9px] leading-tight text-white">
               {attachment.name}
             </span>
-          </a>
+          </button>
           <button
             type="button"
             onClick={() => onRemove(index)}
