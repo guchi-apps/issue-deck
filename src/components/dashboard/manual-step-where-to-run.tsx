@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { copyText } from "@/lib/copy-text";
-import type { ManualStepGuide } from "@/lib/manual-step-guide";
+import { matchManualStepDeviceNames, type ManualStepGuide } from "@/lib/manual-step-guide";
 
 /**
  * 手作業を自分で実行するときの「どこから実行するか」（#1882）。
@@ -27,23 +27,29 @@ import type { ManualStepGuide } from "@/lib/manual-step-guide";
  */
 export function ManualStepWhereToRun({
   where,
+  device,
   command,
   /** 代行できない理由（サブPC以外の手作業など）。あれば見出しの下に出す */
   reason,
 }: {
   where: ManualStepGuide["where"];
+  /**
+   * その手順を実行する端末（#2052）。`resolveManualStepDevice`で解決済みの値を受ける——
+   * ここで`where.device`を読み直すと、手順ごとに違う端末が案内できなくなる。
+   */
+  device: string | null;
   /** 実行するコマンド。手順にコマンドが無い場合は`null`で、接続と移動だけを案内する */
   command: string | null;
   reason?: string | null;
 }) {
-  const lines = buildWhereToRunLines(where, command);
+  const lines = buildWhereToRunLines(where, command, device);
   if (lines.length === 0) return null;
 
   return (
     <section className="flex flex-col gap-2 rounded-md border border-violet-500/40 bg-violet-500/5 p-2.5">
       <h4 className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
         <MonitorSmartphone className="size-3.5 shrink-0" aria-hidden />
-        手元で実行する{where.device === null ? "" : `（${where.device}）`}
+        手元で実行する{device === null ? "" : `（${device}）`}
       </h4>
       {reason != null && reason !== "" && (
         <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
@@ -79,18 +85,33 @@ export function ManualStepWhereToRun({
 type WhereToRunLine = { label: string; command: string };
 
 /**
+ * 手元に居るだけで作業できる端末（#2052）。ここへ`ssh …`は要らない。
+ *
+ * 接続コマンドは`## 前提条件`の1行から拾ったもので、**どの端末へ入るためのものかまでは
+ * 分からない**。ブラウザ・メインPCの手順でそれを出すと、`ssh subpc`してから
+ * ブラウザを開けと読める案内になる。
+ */
+const LOCAL_DEVICES = ["ブラウザ", "メインPC"];
+
+/**
  * 「接続 → 移動 → 実行」の並びを作る。**書かれていない行は出さない。**
  *
  * 移動の行は、カレントディレクトリがパスとして読める場合だけ出す（`## 前提条件`には
  * 「不要」やリポジトリ名だけが書かれることもあり、そのまま`cd`にすると動かない）。
+ *
+ * @param device その手順を実行する端末（`resolveManualStepDevice`の結果）
  */
 export function buildWhereToRunLines(
   where: ManualStepGuide["where"],
   command: string | null,
+  device: string | null = where.device,
 ): WhereToRunLine[] {
+  const names = matchManualStepDeviceNames(device);
+  const isLocal = names.length === 1 && LOCAL_DEVICES.includes(names[0]);
+  const connect = isLocal ? null : where.connect;
   const lines: WhereToRunLine[] = [];
-  if (where.connect !== null) {
-    lines.push({ label: "つなぐ", command: where.connect });
+  if (connect !== null) {
+    lines.push({ label: "つなぐ", command: connect });
   }
   if (where.directory !== null && /^[~/.]/.test(where.directory)) {
     lines.push({ label: "移動する", command: `cd ${where.directory}` });
@@ -99,7 +120,7 @@ export function buildWhereToRunLines(
     lines.push({ label: "実行する（本文に書かれたコマンド）", command });
   }
   // 実行するコマンドだけが分かっていて、接続も移動も無いなら案内する値が無い
-  return lines.length <= 1 && where.connect === null ? [] : lines;
+  return lines.length <= 1 && connect === null ? [] : lines;
 }
 
 /** 並び全体を1回でコピーする。**コピーできたときだけ成功表示を出す**（`markdown-body`と同じ） */

@@ -263,7 +263,9 @@ async function syncManualStepRun(run: ManualStepRun, now: Date): Promise<ManualS
     const reason = next.rejection === null ? "no_command" : next.rejection;
     const message = describeManualStepExecutionRejection(reason, {
       hostName: current.targetHost,
-      device: context.device,
+      // **止まった項目のデバイス**（#2052）。Issue単位の既定値を出すと、ブラウザの手順で
+      // 止まったのに「サブPCで実行するため」と表示される
+      device: next.device,
       interactiveCommand: next.interactiveCommand,
     });
     // **`## 完了の確認方法`のコマンドにはチェックが無い**（#1869）。人が実行するしかない確認で
@@ -536,7 +538,6 @@ async function checkManualStepLine(
 
 type RunContext = {
   plan: ManualStepRunPlan;
-  device: string | null;
   issueTitle: string | null;
   issueId: string | null;
 };
@@ -569,7 +570,6 @@ async function loadRunContext(run: ManualStepRun, now: Date): Promise<RunContext
         : null,
       isManualStepIssue: issue.labels.some((label) => label.name === MANUAL_STEP_LABEL),
     }),
-    device: guide.where.device,
     issueTitle: issue.title,
     issueId: String(issue.githubIssueId),
   };

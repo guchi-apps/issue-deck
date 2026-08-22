@@ -102,17 +102,27 @@ describe("前提条件", () => {
 });
 
 describe("実行するデバイス", () => {
-  // guchi-apps/car-care#99 の「ブラウザ（Zaim 開発者ページ・1Password）と、サブPCの端末」
-  it("端末が2つ以上書かれていれば指摘する", () => {
-    const body = templateBody().replace(
+  const multiDevice = (body = templateBody()) =>
+    body.replace(
       /- 実行するデバイス: .*/,
       "- 実行するデバイス: ブラウザ（Zaim 開発者ページ・1Password）と、サブPCの端末",
     );
+
+  // guchi-apps/car-care#99 の「ブラウザ（Zaim 開発者ページ・1Password）と、サブPCの端末」。
+  // 端末が複数書かれていると既定値が決まらず、デバイスの無い手順は代行できなくなる（#2052）
+  it("端末が複数書かれていて、デバイスの無い手順が残っていれば指摘する", () => {
+    const body = multiDevice(templateBody().replace("- [ ] （ブラウザ）2手順目", "- [ ] 2手順目"));
     const finding = checkManualStepBody(body).find(
       (entry) => entry.rule === "multiple-devices",
     );
+    expect(finding?.severity).toBe("error");
     expect(finding?.message).toContain("サブPC");
     expect(finding?.message).toContain("ブラウザ");
+  });
+
+  // **複数書かれていること自体は指摘しない。** 手順ごとに端末が決まっているなら正しい情報である
+  it("全手順の文頭に端末が書かれていれば、複数書かれていても指摘しない", () => {
+    expect(rules(multiDevice())).toEqual([]);
   });
 
   it("1つだけなら指摘しない（括弧書きの補足は端末名として数えない）", () => {
@@ -127,8 +137,8 @@ describe("実行するデバイス", () => {
 describe("やること", () => {
   it("1つの手順にコードブロックが2つあればerrorで指摘する", () => {
     const body = templateBody().replace(
-      "- [ ] （2手順目）",
-      ["- [ ] （2手順目）", "", "  ```bash", "  echo one", "  ```", "", "  ```bash", "  echo two", "  ```"].join("\n"),
+      "- [ ] （ブラウザ）2手順目",
+      ["- [ ] （ブラウザ）2手順目", "", "  ```bash", "  echo one", "  ```", "", "  ```bash", "  echo two", "  ```"].join("\n"),
     );
     const finding = checkManualStepBody(body).find(
       (entry) => entry.rule === "multiple-blocks-in-step",

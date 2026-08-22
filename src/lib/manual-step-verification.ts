@@ -280,7 +280,9 @@ export function resolveManualStepPatrolTarget(
   guide: ManualStepGuide = parseManualStepGuide(body),
 ): ManualStepPatrolTarget {
   if (!isManualStepIssue) return { patrollable: false, rejection: "not_manual_step" };
-  if (!isSubpcManualStepDevice(guide.where.device)) {
+  // **確認節にデバイスを書く場所は無い**ので、手作業の既定値で判定する（#2052）。端末が複数
+  // 書かれていて既定値が決まらない本文は、巡回の対象から外れる（代行と同じ倒し方）
+  if (!isSubpcManualStepDevice(guide.where.defaultDevice)) {
     return { patrollable: false, rejection: "device_not_subpc" };
   }
 

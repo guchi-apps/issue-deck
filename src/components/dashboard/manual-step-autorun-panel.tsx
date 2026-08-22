@@ -22,7 +22,6 @@ import { cn } from "@/lib/utils";
 export function ManualStepAutoRunPanel({
   plan,
   hostName,
-  device,
   consent,
   onConsentChange,
   onApprove,
@@ -30,8 +29,6 @@ export function ManualStepAutoRunPanel({
 }: {
   plan: ManualStepRunPlan;
   hostName: string;
-  /** `## 前提条件`の「実行するデバイス」。代行できない理由の説明に使う */
-  device: string | null;
   consent: boolean;
   onConsentChange: (consent: boolean) => void;
   onApprove: () => void;
@@ -42,7 +39,8 @@ export function ManualStepAutoRunPanel({
 
   // 1件も代行できない場合は、承認ではなく**理由**を出す（押せないボタンを出さない）
   if (plan.runnable === 0) {
-    const { rejection, interactiveCommand } = pending[0];
+    // デバイスは**その項目のもの**（#2052）。Issue単位の既定値ではない
+    const { rejection, interactiveCommand, device } = pending[0];
     return (
       <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
         <Terminal className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -103,7 +101,7 @@ export function ManualStepAutoRunPanel({
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 {describeManualStepExecutionRejection(entry.rejection, {
                   hostName,
-                  device,
+                  device: entry.device,
                   // どのコマンドで引っかかったのかまで出す（#2025）。人はそれを手元で実行する
                   interactiveCommand: entry.interactiveCommand,
                 })}

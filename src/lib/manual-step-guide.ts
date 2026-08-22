@@ -15,6 +15,12 @@ import type { Issue } from "@/types/issue";
  *
  * **テンプレートに沿っていない本文（`hasTemplate: false`）を隠さない。** 手順に割れない
  * だけで、案内する相手からは外さない（呼び出し側は本文をそのまま1画面で出す）。
+ *
+ * **実行する端末は手順ごとに持てる**（#2052）。実際の手作業は端末をまたぐ（手順1はブラウザ、
+ * 手順2はサブPC、手順6はVPS）のに、書ける場所が`## 前提条件`の1行しか無かったため、
+ * 代行の可否がIssue単位でしか決まらず「ブラウザ作業が大半のIssueでも代行対象になる」状態に
+ * なっていた。手順の文頭の`（サブPC）`を`ManualStepGuideStep.device`として拾い、
+ * 書かれていない手順は`where.defaultDevice`へ落とす（`resolveManualStepDevice`）。
  */
 
 /** `## やること`から切り出した手順1件 */
@@ -32,13 +38,83 @@ export type ManualStepGuideStep = {
    * コードブロックはコードブロックのまま残る
    */
   markdown: string;
-  /** 一覧・見出しに使う素のテキスト（Markdownの記法を落としたもの） */
+  /**
+   * 一覧・見出しに使う素のテキスト（Markdownの記法を落としたもの）。
+   * **文頭のデバイスの印（`（サブPC）`）は落としてある**——一覧ではデバイスを隣に別に出すため、
+   * 残すと同じ語が二重に並ぶ。`markdown`は本文のまま（GitHubと同じ見え方を崩さない）。
+   */
   text: string;
+  /**
+   * この手順を実行する端末（#2052）。手順の文頭に`（サブPC）`と書かれていれば、その名前
+   * （`MANUAL_STEP_DEVICE_NAMES`の`label`）。書かれていなければ`null`で、呼び出し側は
+   * `where.defaultDevice`へフォールバックする（`resolveManualStepDevice`）。
+   *
+   * **明示された括弧書きだけを読む。** 「サブPCで〜する」のような散文からは推測しない——
+   * デバイスを文字列の部分一致で決めたことがIssue単位の判定が壊れていた原因そのもの
+   * （`isSubpcManualStepDevice`が「ブラウザとサブPC」で真になっていた）で、推測を足すと
+   * 同じ壊れ方を手順単位で作り直すことになる。
+   */
+  device: string | null;
 };
+
+/**
+ * 手作業の実行先として本文に書ける端末（#2052）。**この4つ以外はデバイスとして読まない。**
+ *
+ * ここが唯一の正で、本文の書式検査（`manual-step-body-check.ts`）も同じ定義を使う。
+ * 別々に持つと、検査を通った書き方を画面が読めない（その逆も）が必ず出る。
+ */
+export const MANUAL_STEP_DEVICE_NAMES = [
+  { label: "サブPC", needles: ["サブpc", "subpc"] },
+  { label: "メインPC", needles: ["メインpc", "mainpc"] },
+  { label: "VPS", needles: ["vps"] },
+  { label: "ブラウザ", needles: ["ブラウザ"] },
+] as const;
+
+/** 端末名の照合用に、装飾と空白を落として小文字へ寄せる */
+function normalizeDeviceText(text: string): string {
+  return text.replace(/[\s　*`_]/g, "").toLowerCase();
+}
+
+/**
+ * 文字列に現れる端末の名前を列挙する（現れた順ではなく`MANUAL_STEP_DEVICE_NAMES`の順）。
+ *
+ * 2つ以上返るということは、その1行では「どこで実行するのか」が1つに決まらないということ。
+ * 呼び出し側はそれを**決まらないものとして扱う**（既定値にしない・指摘する）。
+ */
+export function matchManualStepDeviceNames(value: string | null): string[] {
+  if (value === null) return [];
+  const normalized = normalizeDeviceText(value);
+  return MANUAL_STEP_DEVICE_NAMES.filter((entry) =>
+    entry.needles.some((needle) => normalized.includes(needle)),
+  ).map((entry) => entry.label);
+}
+
+/**
+ * その手順を実行する端末を決める（#2052）。手順に書かれていればそれ、無ければ手作業の既定値。
+ *
+ * **代行の可否・チップ・接続の案内は、すべてこの1つの関数を通す。** 手順とIssueのどちらを
+ * 見るかを呼び出し側ごとに書くと、画面では代行できるのにAPIが拒否する（その逆も）が生まれる。
+ */
+export function resolveManualStepDevice(
+  where: ManualStepGuideWhere,
+  step: Pick<ManualStepGuideStep, "device"> | null | undefined,
+): string | null {
+  return step?.device ?? where.defaultDevice;
+}
 
 /** `## 前提条件`から拾った「どこで実行するか」。書かれていない項目はnull */
 export type ManualStepGuideWhere = {
+  /** 「実行するデバイス」に書かれていた値そのまま（チップ・理由文の表示に使う） */
   device: string | null;
+  /**
+   * デバイスが書かれていない手順の既定値（#2052）。**判定に使うのはこちら。**
+   *
+   * `device`に端末が2つ以上書かれていたら`null`にする。「ブラウザ（…）とサブPC」のような
+   * 本文で「サブPCを含むから代行してよい」と読むと、ブラウザでしかできない手順まで代行の
+   * 対象になる（実際にそうなっていた）。**読み取れないものは代行しない側へ倒し**、どの手順を
+   * どこで実行するかは手順の文頭に書いてもらう（`ManualStepGuideStep.device`）。
+   */
+  defaultDevice: string | null;
   directory: string | null;
   branch: string | null;
   /**
@@ -186,6 +262,7 @@ function sectionText(section: Section | null): string | null {
 function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
   const where: ManualStepGuideWhere = {
     device: null,
+    defaultDevice: null,
     directory: null,
     branch: null,
     connect: null,
@@ -211,7 +288,29 @@ function parseManualStepWhere(section: Section | null): ManualStepGuideWhere {
     else if (where.branch === null && label.includes("ブランチ")) where.branch = value;
   }
 
+  // 端末が2つ以上書かれていたら既定値は決まらない（#2052）。0個・1個のときは書かれた値を
+  // そのまま既定値にする——`本番VPS`のような書き方を、正式名へ丸めずチップにも理由文にも出す
+  where.defaultDevice = matchManualStepDeviceNames(where.device).length >= 2 ? null : where.device;
+
   return where;
+}
+
+/**
+ * 手順の文頭に置かれたデバイスの印（`（サブPC）`）。半角括弧・角括弧も受ける。
+ *
+ * **中身が端末の名前1つに読めるときだけ**デバイスとして扱う。`（任意）`や`（初回のみ）`のような
+ * 別の注記を巻き込まないための条件で、読めなければ印そのものが無かったことにする（既定値へ落ちる）。
+ */
+const STEP_DEVICE_PATTERN = /^[（(［[]\s*([^）)］\]\n]+?)\s*[）)］\]]/;
+
+/** @returns `[デバイス名, 印の文字数]`。デバイスとして読めなければ`[null, 0]` */
+function parseStepDevice(head: string): [string | null, number] {
+  const leading = /^[*`\s]*/.exec(head)?.[0].length ?? 0;
+  const match = STEP_DEVICE_PATTERN.exec(head.slice(leading));
+  if (!match) return [null, 0];
+  const names = matchManualStepDeviceNames(match[1]);
+  if (names.length !== 1) return [null, 0];
+  return [names[0], leading + match[0].length];
 }
 
 /**
@@ -288,7 +387,9 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     if (markdown === "") return { intro: null, steps: [] };
     return {
       intro: null,
-      steps: [{ line: null, checked: false, markdown, text: firstLineText(markdown) }],
+      steps: [
+        { line: null, checked: false, markdown, text: firstLineText(markdown), device: null },
+      ],
     };
   }
 
@@ -298,11 +399,13 @@ function parseSteps(section: Section): { intro: string | null; steps: ManualStep
     const head = section.lines[mark.index].replace(TASK_LINE_PATTERN, "").trim();
     const rest = blockMarkdown(section.lines.slice(mark.index + 1, end), mark.indent);
     const markdown = rest === "" ? head : `${head}\n\n${rest}`;
+    const [device, marker] = parseStepDevice(head);
     return {
       line: section.startLine + mark.index,
       checked: mark.checked,
       markdown,
-      text: normalizeInline(head),
+      text: normalizeInline(head.slice(marker)),
+      device,
     };
   });
 
@@ -376,7 +479,7 @@ export function parseManualStepGuide(body: string | null): ManualStepGuide {
   const empty: ManualStepGuide = {
     hasTemplate: false,
     outcome: null,
-    where: { device: null, directory: null, branch: null, connect: null },
+    where: { device: null, defaultDevice: null, directory: null, branch: null, connect: null },
     todoIntro: null,
     steps: [],
     verification: null,

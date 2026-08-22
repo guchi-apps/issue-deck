@@ -10,7 +10,11 @@ import {
   isSubpcManualStepDevice,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
-import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-guide";
+import {
+  parseManualStepGuide,
+  resolveManualStepDevice,
+  type ManualStepGuide,
+} from "@/lib/manual-step-guide";
 
 /**
  * 手作業アシスタント（#1826）を、承認1回で最後まで流すための実行計画（#1869）。
@@ -41,6 +45,12 @@ export type ManualStepRunEntry = {
   text: string;
   /** 実行するコマンド。代行できない項目では`null` */
   command: string | null;
+  /**
+   * この項目を実行する端末（#2052）。手順に書かれていればそれ、無ければ手作業の既定値
+   * （`resolveManualStepDevice`）。**代行の可否はこの値で決まる**ので、画面の理由文・チップも
+   * ここを見る（Issue単位の`where.device`を各所で読み直すと、判定と表示がずれる）。
+   */
+  device: string | null;
   /** 手順のチェック状態。確認にはチェックが無いので常に`false` */
   checked: boolean;
   /**
@@ -78,21 +88,23 @@ export function buildManualStepRunPlan(
     hasActiveJob?: boolean;
   },
 ): ManualStepRunPlan {
-  const isSubpcDevice = isSubpcManualStepDevice(guide.where.device);
   const stepCommands = new Map(
     extractManualStepCommands(body, guide).map((entry) => [entry.stepLine, entry.command]),
   );
   const steps = guide.steps.filter((step) => step.line !== null);
   const verifications = extractVerificationCommands(body, guide);
 
+  // 代行の可否は**項目ごと**に判定する（#2052）。「ブラウザの手順は人、サブPCの手順は代行」が
+  // 同じ手作業の中で混在しうるため、Issue単位で1回だけ判定すると必ずどちらかを取り違える
   const reject = (
+    device: string | null,
     hasCommand: boolean,
     interactiveCommand: string | null,
   ): ManualStepExecutionRejection | null =>
     resolveManualStepExecutionRejection({
       host: context.host,
       isManualStepIssue: context.isManualStepIssue,
-      isSubpcDevice,
+      isSubpcDevice: isSubpcManualStepDevice(device),
       hasCommand,
       interactiveCommand,
       hasActiveJob: context.hasActiveJob ?? false,
@@ -102,6 +114,7 @@ export function buildManualStepRunPlan(
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
       const interactiveCommand = findInteractiveCommand(command);
+      const device = resolveManualStepDevice(guide.where, step);
       return {
         kind: "step",
         order: index + 1,
@@ -109,13 +122,17 @@ export function buildManualStepRunPlan(
         line: step.line as number,
         text: step.text,
         command,
+        device,
         checked: step.checked,
         interactiveCommand,
-        rejection: reject(command !== null, interactiveCommand),
+        rejection: reject(device, command !== null, interactiveCommand),
       };
     }),
+    // **完了の確認に手順ごとのデバイスは無い。** `## 完了の確認方法`は節ひとつで、どの端末で
+    // 確かめるかを書く場所がないため、手作業の既定値をそのまま使う
     ...verifications.map((entry, index): ManualStepRunEntry => {
       const interactiveCommand = findInteractiveCommand(entry.command);
+      const device = guide.where.defaultDevice;
       return {
         kind: "verification",
         order: index + 1,
@@ -123,9 +140,10 @@ export function buildManualStepRunPlan(
         line: entry.stepLine,
         text: verifications.length > 1 ? `完了の確認 ${index + 1}` : "完了の確認",
         command: entry.command,
+        device,
         checked: false,
         interactiveCommand,
-        rejection: reject(true, interactiveCommand),
+        rejection: reject(device, true, interactiveCommand),
       };
     }),
   ];

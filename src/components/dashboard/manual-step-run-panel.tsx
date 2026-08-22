@@ -117,7 +117,8 @@ export function ManualStepRunPanel({
   const rejection = resolveManualStepExecutionRejection({
     host,
     isManualStepIssue: isManualStepIssue(issue.labels),
-    isSubpcDevice: isSubpcManualStepDevice(guide.where.device),
+    // デバイスは**この項目のもの**（#2052）。実行計画が解決済みなので、ここで引き直さない
+    isSubpcDevice: isSubpcManualStepDevice(entry.device),
     hasCommand: command !== null,
     // 対話が要るコマンドかどうかは実行計画が判定済み（#2025）。ここで見直さない
     interactiveCommand: entry.interactiveCommand,
@@ -247,7 +248,9 @@ export function ManualStepRunPanel({
         />
         {/* 失敗したら、手元で実行するための「どこから」を出す（#1882）。**成功したら出さない**
             ——実行し終えたものについて接続方法を並べても読む相手がいない */}
-        {failed && <ManualStepWhereToRun where={guide.where} command={command} />}
+        {failed && (
+          <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
+        )}
         {fixPanel}
       </div>
     );
@@ -266,13 +269,13 @@ export function ManualStepRunPanel({
           <span>
             {describeManualStepExecutionRejection(rejection, {
               hostName: host?.name ?? "サブPC",
-              device: guide.where.device,
+              device: entry.device,
               interactiveCommand: entry.interactiveCommand,
             })}
           </span>
         </p>
         {/* 代行できない手順こそ、どこから実行するのかが要る（#1882） */}
-        <ManualStepWhereToRun where={guide.where} command={command} />
+        <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
         {canContinue && (
           <div className="flex justify-end">
             <Button variant="outline" size="sm" onClick={onRetry}>
