@@ -149,6 +149,26 @@ ExitPlanMode（計画の提示）
   一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
   `lib/github/check-user-guidance.ts`
 
+### フックが何をしたかは転記の`hook_success`で追える
+
+**フックの標準出力・標準エラー・所要時間・終了コードは、転記（`~/.claude/projects/<スラッグ>/<セッションID>.jsonl`）に
+`{"type":"attachment","attachment":{"type":"hook_success",...}}`として残る**（#2108で判明）。フックは
+端末に何も出さないまま終わることがあり、Signalyにもissue-deckにも残らないため、**ここが唯一の記録**になる。
+
+```bash
+python3 -c '
+import json, sys
+for line in open(sys.argv[1]):
+    hook = (json.loads(line).get("attachment") or {})
+    if hook.get("type") == "hook_success":
+        print(hook["hookName"], hook["durationMs"], repr(hook["stderr"]))
+' <転記のパス>
+```
+
+「計画の返事待ちが108秒で降りていた」も、`durationMs: 107886`と
+`stderr: session-notify: 計画の返事をissue-deckから取得できませんでした`から確定させた。
+**フックの挙動を疑ったら、まずここを見る。**
+
 ### 計画本文は`ExitPlanMode`の引数では渡ってこない（版による）
 
 **Claude Code 2.1.239の実測では`tool_input.plan`に本文が入っていた**（#2108）。下に書いた
