@@ -16,6 +16,7 @@ import {
   pullRequestsAwaitingUserMerge,
   pullRequestsWaitingForMergeChecks,
   requiresUserMerge,
+  resolvePullRequestHeader,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
@@ -731,5 +732,78 @@ describe("applyOptimisticMerges", () => {
   it("対象が無ければ配列をそのまま返す", () => {
     const pullRequests = [pullRequest()];
     expect(applyOptimisticMerges(pullRequests, [])).toBe(pullRequests);
+  });
+});
+
+describe("resolvePullRequestHeader", () => {
+  const summaryFromDetail = pullRequest({ title: "詳細から来たタイトル" });
+
+  function detail(fetchedAt: string, summary = summaryFromDetail) {
+    return { id: summary.id, summary, fetchedAt };
+  }
+
+  it("未選択ならnull", () => {
+    expect(
+      resolvePullRequestHeader(null, [pullRequest()], "2026-08-01T00:00:00Z", null),
+    ).toBeNull();
+  });
+
+  it("一覧に載っていればその項目を使う", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    expect(
+      resolvePullRequestHeader(listed.id, [listed], "2026-08-01T00:00:00Z", null),
+    ).toBe(listed);
+  });
+
+  it("一覧に載っていなければ詳細の`summary`で補う", () => {
+    expect(
+      resolvePullRequestHeader(
+        summaryFromDetail.id,
+        [],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:00:00Z"),
+      ),
+    ).toBe(summaryFromDetail);
+  });
+
+  it("一覧にも詳細にも無ければnull", () => {
+    expect(
+      resolvePullRequestHeader("guchi-apps/issue-deck#999", [], "2026-08-01T00:00:00Z", null),
+    ).toBeNull();
+  });
+
+  it("両方あるときは取得が新しい方を採る（#1578）", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    // 詳細ヘッダーの更新ボタンを押した直後＝詳細の方が新しい
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:05:00Z"),
+      ),
+    ).toBe(summaryFromDetail);
+    // 一覧のポーリングが後から回った＝一覧の方が新しい
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:10:00Z",
+        detail("2026-08-01T00:05:00Z"),
+      ),
+    ).toBe(listed);
+  });
+
+  it("別のPRの詳細が残っていても使わない", () => {
+    const listed = pullRequest({ title: "一覧から来たタイトル" });
+    const other = pullRequest({ id: "guchi-apps/issue-deck#2", number: 2 });
+    expect(
+      resolvePullRequestHeader(
+        listed.id,
+        [listed],
+        "2026-08-01T00:00:00Z",
+        detail("2026-08-01T00:05:00Z", other),
+      ),
+    ).toBe(listed);
   });
 });

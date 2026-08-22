@@ -45,6 +45,14 @@ export type IssueFilters = {
    */
   pr: string | null;
   /**
+   * 画面に重ねてPR詳細を開いているPRのid（#2149）。未選択はnull。
+   *
+   * `pr`（PRペイン・スマホのPR詳細画面の選択）とは**別のクエリにする**。重ね表示は下の画面を
+   * 残したまま出るもので、`pr`はスマホのPR詳細画面（`mscreen=pull-requests`）が既に使って
+   * いるため、同じクエリだと条件が重なる。ペインと違って一覧・詳細の2カラムを持たない。
+   */
+  prmodal: string | null;
+  /**
    * PC版で詳細を開いているIssueのid（`String(githubIssueId)`。スマホの`missue`と同じ識別子）。
    * 未選択はnull。#688では初期表示用の読み取り専用クエリだったが、戻る操作で前の画面へ
    * 戻れるようにするため、PC版の選択中Issueもこのクエリを正とする（#1396）。
@@ -63,6 +71,7 @@ const DEFAULT_FILTERS: IssueFilters = {
   pane: "issues",
   prview: DEFAULT_PULL_REQUEST_VIEW,
   pr: null,
+  prmodal: null,
   issue: null,
   q: "",
   repos: [],
@@ -107,6 +116,7 @@ const NAVIGATION_KEYS: ReadonlySet<keyof IssueFilters> = new Set([
   "pane",
   "prview",
   "pr",
+  "prmodal",
   "issue",
 ]);
 
@@ -137,6 +147,7 @@ export function useIssueFilters() {
       pane: parsePane(searchParams.get("pane")),
       prview: isPullRequestViewId(prViewParam) ? prViewParam : DEFAULT_FILTERS.prview,
       pr: searchParams.get("pr"),
+      prmodal: searchParams.get("prmodal"),
       issue: searchParams.get("issue"),
       q: searchParams.get("q") ?? DEFAULT_FILTERS.q,
       repos: reposParam ? reposParam.split(",").filter(Boolean) : [],
@@ -195,6 +206,9 @@ export function useIssueFilters() {
         // 左メニューの選択と表示内容が食い違って見えるため。
         pane: "issues",
         pr: null,
+        // 重ねて開いていたPR詳細も畳む（#2149）。下の画面が変わったのに重ね表示だけ残ると、
+        // 閉じた先が押したときの一覧ではなくなる。
+        prmodal: null,
         // ビューを切り替えたら選択中Issueも畳む。別のビューの一覧に、そこに並んでいない
         // Issueの詳細が残るのを避ける（1回のURL更新にまとめないと互いの変更を落とす）。
         issue: null,
@@ -209,7 +223,7 @@ export function useIssueFilters() {
     (prview: PullRequestViewId) => {
       // ビューを切り替えるときは選択中PRを畳む。PRは開きっぱなしにする対象ではなく
       // （マージすれば一覧から消える）、戻ってきたときに存在しないPRの詳細が残るのを避ける。
-      setFilters({ pane: "pull-requests", prview, pr: null });
+      setFilters({ pane: "pull-requests", prview, pr: null, prmodal: null });
     },
     [setFilters],
   );
@@ -217,7 +231,7 @@ export function useIssueFilters() {
   // 左メニューの「ブランチ」画面への遷移（#1455）。この画面はPRの選択状態を持たない
   // ので、開くときに選択中PRを畳んでおく（戻ってきたときに前のPRが残らないようにする）。
   const selectFlowPane = useCallback(() => {
-    setFilters({ pane: "flow", pr: null });
+    setFilters({ pane: "flow", pr: null, prmodal: null });
   }, [setFilters]);
 
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
@@ -225,6 +239,15 @@ export function useIssueFilters() {
   const selectPullRequest = useCallback(
     (pullRequestId: string | null) => {
       setFilter("pr", pullRequestId, { history: pullRequestId ? "push" : "replace" });
+    },
+    [setFilter],
+  );
+
+  // 画面に重ねてPR詳細を開く・閉じる（#2149）。履歴の積み方は`selectPullRequest`と同じで、
+  // 開くときだけ積む——戻る操作（スマホのスワイプを含む）で閉じられるようにするため。
+  const selectPullRequestModal = useCallback(
+    (pullRequestId: string | null) => {
+      setFilter("prmodal", pullRequestId, { history: pullRequestId ? "push" : "replace" });
     },
     [setFilter],
   );
@@ -258,6 +281,7 @@ export function useIssueFilters() {
     selectPullRequestView,
     selectFlowPane,
     selectPullRequest,
+    selectPullRequestModal,
     toggleLabel,
     toggleRepo,
   };
