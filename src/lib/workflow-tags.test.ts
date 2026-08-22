@@ -350,9 +350,22 @@ describe("missingRepairWorkflows", () => {
     expect(missing).toContain("claude-pr-repair.yml");
   });
 
-  it("無人実行のcallerが無いリポジトリには配らない", () => {
-    // 参照タグも with: の値も写す先が無く、既定値だけのcallerは動かない
-    expect(missingRepairWorkflows(["ci.yml", "deploy.yml"])).toEqual([]);
+  it("無人実行のcallerが無いリポジトリには、自動修復のcallerを配らない", () => {
+    // 参照タグも with: の値も写す先が無く、既定値だけのcallerは動かない。
+    // `deploy-retry.yml`だけは`deploy.yml`の有無で決まるので、ここには残る（#2134）
+    expect(missingRepairWorkflows(["ci.yml", "deploy.yml"])).toEqual(["deploy-retry.yml"]);
+  });
+
+  // #2134。本番デプロイが一時的な失敗で落ちたときに拾う唯一の経路
+  it("deploy.yml があれば deploy-retry.yml を不足に挙げる", () => {
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml", "deploy.yml"])).toContain(
+      "deploy-retry.yml",
+    );
+  });
+
+  it("deploy.yml が無いリポジトリには deploy-retry.yml を配らない", () => {
+    // 購読する対象が無く、置いても一度も発火しない
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml"])).not.toContain("deploy-retry.yml");
   });
 
   it("既に置かれているものは不足に挙げない", () => {

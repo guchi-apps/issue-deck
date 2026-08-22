@@ -1,0 +1,215 @@
+name: Reusable deploy retry
+
+# 本番デプロイ（`deploy.yml`）が**押し直せば直る失敗**で落ちたとき、人の操作を待たずに
+# 1回だけ再実行する再利用可能ワークフロー（#2134。起点は guchi-apps/question#28）。
+#
+# **なぜ要るか。** mainへ入った後のデプロイ失敗を自動で拾う仕組みが無かった。自動修復
+# （`claude-ci-fix.yml`）が働くのはmainへ入る前のPR段階までで、デプロイが落ちたときに
+# 起きるのはSignalyへの通知と画面の「デプロイ失敗」表示だけ。復旧は人が「本番へ再デプロイ」を
+# 押すまで始まらない（`src/lib/deploy-request.ts`）。SSH断・ネットワーク・アプリの起動待ちの
+# ような一時的な失敗まで、人が気づくまで本番が古いままになっていた。
+#
+# **コードを直さない。** 直すのは「同じmainをもう一度流せば直るもの」だけで、コードの修正が
+# 要る失敗は対象外。本番へ無人でコードを入れるのはPR段階の自動修復とリスクの性質が違うため、
+# #2134のスコープから外してある。やるのは`gh run rerun --failed`だけ。
+#
+# ## 何を「一時的な失敗」とみなすか
+#
+# **失敗ログの内容ではなく、失敗したジョブの名前で切り分ける**（`retryable-jobs`）。ログの
+# 文言はリポジトリごと・ツールのバージョンごとに変わるため、シグネチャの一覧を持つと必ず腐る。
+# 既定の`build,deploy`が意味するのは次のとおり。
+#
+# - `tag`（既定では対象外）… **本番には一切変更が入っていない**うえ、失敗の理由は
+#   「`package.json`のバージョンを上げ忘れて同名タグが別コミットに既にある」で、
+#   バージョンを上げない限り何度流しても同じところで落ちる（`reusable-version-tag-check.yml`）。
+#   再実行は必ず無駄打ちになる
+# - `build` … ネットワーク・レジストリ断で落ちることがあり、落ちても本番には何も入らない
+# - `deploy` … SSH断・アプリの起動待ちで落ちる。**再実行したいのは主にここ**
+# - `release`・`notify`（既定では対象外）… ここまで来ていれば本番反映は済んでいる。
+#   再実行しても本番の状態は変わらないため、通知の取りこぼしは人が見て判断する
+#
+# 失敗したジョブが**ひとつでも**許可リストの外にあれば再実行しない。「`deploy`も落ちているが
+# `tag`も落ちている」ような組み合わせで、直らないと分かっている再実行を打たないため。
+#
+# ## 上限が1回であることを、どこにも記録せずに保証する
+#
+# **GitHubが持っている`run_attempt`をそのまま上限に使う**。`gh run rerun`は新しいrunを作らず
+# 同じrunのattemptを増やすので、`run_attempt == 1`のときだけ再実行すれば、同じrunが
+# 2回以上自動で流れることは構造上ありえない。
+#
+# `claude-ci-fix.yml`は対象Issueの着手コメント数でリトライを数えているが、デプロイには
+# 対応するIssueもPRも無く、数える場所が無い（#2134の検討点2）。issue-deckのDBへ記録する案も
+# あったが、**デプロイが落ちているときにissue-deck自身が落ちている可能性がある**——
+# issue-deckのデプロイ失敗を拾えないのでは意味が無いため採らなかった。
+#
+# ## 注意
+#
+# - `workflow_run`は**デフォルトブランチ上のワークフローファイルでのみ発火する**。
+#   callerがデフォルトブランチへ入るまでは動かない
+# - 購読先は**ワークフローの名前**（`deploy.yml`の`name:`）。名前を変えると黙って発火しなくなる
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: "Signalyの通知に出すアプリ名（既定: リポジトリ名）"
+        required: false
+        type: string
+        default: ""
+      retryable-jobs:
+        description: >-
+          自動で再実行してよいジョブ名（カンマ区切り）。失敗したジョブが全てここに
+          含まれるときだけ再実行する。既定: build,deploy
+        required: false
+        type: string
+        default: build,deploy
+      deploy-branch:
+        description: "本番デプロイが走るブランチ（既定: main）。これ以外のブランチの実行は無視する"
+        required: false
+        type: string
+        default: main
+
+# **concurrency と permissions は呼び出し元（caller）が持つ。** 再利用可能ワークフローの
+# トップレベルに置くと、呼び出し時に startup_failure になりうる（#1181）。
+jobs:
+  deploy-retry:
+    runs-on: ubuntu-latest
+    # ここで弾けるものは弾いておく。ジョブが起動しなければActionsの一覧も汚れない。
+    # `workflow_run`のペイロードは再利用可能ワークフローにもそのまま引き継がれる
+    # （`inputs`だけがworkflow_callのものに差し替わる）。
+    #
+    # **ここに書くのは`github`コンテキストだけにする。** ブランチの判定（`deploy-branch`）は
+    # `inputs`を要するが、job levelの`if`で`inputs`を参照している例がこのリポジトリにまだ無く、
+    # 誤ると「条件が常にfalseで一度も動かない」形で黙って壊れる。判定ステップの側へ置く。
+    if: >-
+      github.event.workflow_run.conclusion == 'failure'
+      && github.event.workflow_run.run_attempt == 1
+    permissions:
+      # `gh run rerun` に要る
+      actions: write
+      contents: read
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+
+    steps:
+      - name: Checkout code
+        # 通知スクリプト（.github/scripts/signaly-notify.sh）を使うためだけのcheckout。
+        # 判定と再実行はGitHub APIだけで済むので、コードそのものは要らない。
+        uses: actions/checkout@v4
+
+      - name: 再実行してよい失敗かを判定する
+        id: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RETRYABLE_JOBS: ${{ inputs.retryable-jobs }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          DEPLOY_BRANCH: ${{ inputs.deploy-branch }}
+        run: |
+          set -euo pipefail
+
+          # 本番デプロイのブランチ以外で走った実行は見ない。`deploy.yml`は基本mainでしか
+          # 走らないが、他のブランチでも走るリポジトリで巻き添えにしないための歯止め。
+          if [ "$HEAD_BRANCH" != "$DEPLOY_BRANCH" ]; then
+            echo "::notice::再実行しません。${DEPLOY_BRANCH} 以外のブランチの実行です（${HEAD_BRANCH}）"
+            {
+              echo "retry=false"
+              echo "reason=${DEPLOY_BRANCH} 以外のブランチの実行です（${HEAD_BRANCH}）"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 失敗したジョブの名前を取る。**`gh api`は失敗時もエラーJSONを標準出力へ出す**ため、
+          # 代入の終了コードを見る（`set -e`で止まる）。取れないまま「対象外のジョブは無い」と
+          # 読むと、本来打たない再実行を打ってしまう。
+          FAILED_JOBS="$(gh api \
+            "repos/${TARGET_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+            --paginate --jq '.jobs[] | select(.conclusion == "failure") | .name')"
+
+          RETRY=true
+          REASON=""
+
+          if [ -z "$FAILED_JOBS" ]; then
+            # conclusion は failure なのに失敗ジョブが無い＝startup_failure（ワークフローの
+            # 構文エラー・権限不足など）。流し直しても同じところで落ちる。
+            RETRY=false
+            REASON="失敗したジョブを特定できませんでした（startup_failure の可能性）"
+          else
+            echo "失敗したジョブ:"
+            printf '  - %s\n' $FAILED_JOBS
+            while IFS= read -r JOB; do
+              [ -n "$JOB" ] || continue
+              ALLOWED=false
+              # カンマ区切りを空白区切りへ直して素朴に突き合わせる。ジョブ名に空白を含む
+              # リポジトリでは一致しないが、その場合は再実行しない側（安全側）へ倒れる。
+              for CANDIDATE in ${RETRYABLE_JOBS//,/ }; do
+                if [ "$JOB" = "$CANDIDATE" ]; then
+                  ALLOWED=true
+                  break
+                fi
+              done
+              if [ "$ALLOWED" != "true" ]; then
+                RETRY=false
+                REASON="再実行の対象外のジョブが失敗しています: ${JOB}"
+                break
+              fi
+            done <<< "$FAILED_JOBS"
+          fi
+
+          if [ "$RETRY" = "true" ]; then
+            echo "::notice::一時的な失敗とみなして再実行します（run ${RUN_ID}）"
+          else
+            echo "::notice::再実行しません。${REASON}"
+          fi
+
+          {
+            echo "retry=${RETRY}"
+            echo "reason=${REASON}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 失敗したジョブだけを再実行する
+        if: steps.judge.outputs.retry == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          # `--failed`にするのは、**成功したジョブをやり直さないため**。`deploy`だけが落ちた
+          # 場合は`build`の成果物（artifact）をそのまま使って`deploy`から再開できる。
+          # 失敗ジョブに`needs`で連なるジョブ（`release`・`notify`）は一緒に流れるので、
+          # 成功したときの通知とGitHub Releaseの作成も従来どおり行われる。
+          gh run rerun "$RUN_ID" --failed --repo "$TARGET_REPOSITORY"
+
+      # **1Passwordからの補完（`.github/actions/load-secrets`）は通さない。** 1Passwordの
+      # サービスアカウントには日次レート制限があり、使い切るとフリート全体のデプロイが止まる
+      # （#1302）。デプロイ失敗のたびに読みに行く価値は無く、`SIGNALY_WEBHOOK_URL`が
+      # GitHub側に無いリポジトリでは通知が出ないだけで済む（再実行そのものは先のステップで
+      # 終わっている）。
+      - name: Signaly に通知
+        if: steps.judge.outputs.retry == 'true'
+        env:
+          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          NOTIFY_APP: ${{ inputs.app-name != '' && inputs.app-name || github.event.repository.name }}
+          NOTIFY_KIND: デプロイ
+          # `success|failure|cancelled`以外はそのまま見出しに出る（ℹ️・青）。
+          # **失敗の通知に続けてこれが出ることに意味がある**——失敗しか通知されないと、
+          # 人は自分で押しに行くしかないと読んでしまう（#2072と同じ問題）。
+          NOTIFY_STATUS: 自動で再実行中
+          # リンク先は**再実行したデプロイのrun**にする（このワークフロー自身のrunではない）。
+          # 押した先で見たいのは失敗したログと、そこから再開する様子のため。
+          NOTIFY_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+
+          # 通知スクリプトは各リポジトリの`.github/scripts/`にコピーして使う運用のため、
+          # 置いていないリポジトリがありうる。**無くてもジョブは落とさない**——再実行は
+          # 既に済んでおり、通知が出ないことと再実行できないことは重さが違う。
+          if [ ! -f .github/scripts/signaly-notify.sh ]; then
+            echo "::warning::.github/scripts/signaly-notify.sh がありません。通知をスキップします"
+            exit 0
+          fi
+
+          bash .github/scripts/signaly-notify.sh

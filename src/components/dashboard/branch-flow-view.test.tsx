@@ -1228,6 +1228,8 @@ describe("BranchFlowView", () => {
             createdAt: "2026-08-15T10:00:30Z",
             // 既定はmainへのpushで走った本番反映（手動の出し直しは`event`で分ける。#2020）
             event: "push",
+            // 既定は初回の試行（自動再実行は`runAttempt`で分ける。#2134）
+            runAttempt: 1,
             ...overrides,
           },
         },
@@ -1322,6 +1324,39 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.getByText("8/15に本番反映")).toBeTruthy();
       expect(screen.getAllByText("再デプロイ失敗").length).toBeGreaterThan(0);
+      expect(screen.queryByText("デプロイ失敗")).toBeNull();
+    });
+
+    // #2134。走っている最中に何も言わないと、人は自分で「本番へ再デプロイ」を押しに行く
+    // しかないと読む
+    it("自動再実行中は「自動で再デプロイ中」と出す", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({
+          status: "in_progress",
+          conclusion: null,
+          runAttempt: 2,
+        }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getAllByText("自動で再デプロイ中").length).toBeGreaterThan(0);
+      expect(screen.queryByText("本番へデプロイ中")).toBeNull();
+    });
+
+    // やり直しても駄目だった＝人が見る番になった、と読めるようにする
+    it("自動再実行しても失敗したときは、初回の失敗と言葉を分ける", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({ conclusion: "failure", runAttempt: 2 }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("再デプロイしても失敗")).toBeTruthy();
       expect(screen.queryByText("デプロイ失敗")).toBeNull();
     });
 
@@ -1492,6 +1527,7 @@ describe("BranchFlowView", () => {
               htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
               createdAt: "2026-08-15T10:00:30Z",
               event: "push",
+              runAttempt: 1,
             },
           },
         ],

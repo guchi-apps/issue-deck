@@ -821,6 +821,48 @@ GitHub Actionsは実行のたびにまっさらなプロセスが立ち、計画
 `PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`（未設定なら連携しない）がその実例で、「マージするか」と
 「有効にするか」を分離できている。以降の機能追加も同じ方針を取る。
 
+## 本番へ出たのにStatusが取り残されたときの直し方（#2140）
+
+`Done`への一括遷移は`reusable-issue-labels.yml`の`main-pr-merged`ジョブが1回だけ行う。
+**この1回を取りこぼしたIssueは`Release`のまま誰にも拾われない。** ジョブ自身のコメントにも
+「取りこぼした場合はissue-deckの復旧後にこのrunを再実行する」とあるが、再実行では直らない
+ケースがある。
+
+- **対象はリリースPR本文の`## 対象issue`が先で、無いときだけProject Statusで探す。**
+  本文の一覧はバージョンバンプの時点で凍結されるため、**その後にdevelopへ入ったIssueは
+  一覧に載らないまま`develop`のマージでmainへ出る**（#2117以前、リリースPRのheadが`develop`
+  だった頃の構造。v4.23.0のPR #2132 で#2117・#2121・#2123・#2126の4件が実際に取り残された）
+- 再実行しても本文の一覧は変わらないので、**取り残しは手で直す**
+
+直し方は次の3手順。**進捗を先に`done`にしてからcloseする**——順番を逆にすると、closeを
+受けたissue-deckが終端`Closed`（対応終了）へ送る条件（`Planning`・`Implementation`・
+`Develop PR`）に当たる可能性があり、本番反映済みのIssueが`Done`と別の終端に落ちる。
+
+1. 取り残しを引く。`APP_BASE_URL`・`PROGRESS_REPORT_SECRET`は`.env.local`（サブPCは
+   `~/.config/issue-deck/dispatch.env`）にあり、`scripts/lib/progress-report.sh`の
+   `progress_resolve_endpoint`で解決できる
+
+   ```bash
+   source scripts/lib/progress-report.sh && progress_resolve_endpoint "$PWD"
+   curl -sS -H "Authorization: Bearer $PROGRESS_SECRET" \
+     "$PROGRESS_BASE_URL/api/progress?repository=guchi-apps/issue-deck&status=release"
+   ```
+
+2. mainに入っていることを実物で確かめる（`git log origin/main --oneline --merges`に
+   `from guchi-apps/issue-<番号>`のマージコミットがあること、その先端の`deploy.yml`が
+   成功していること）
+3. `done`を報告してからcloseする
+
+   ```bash
+   curl -sS -X POST "$PROGRESS_BASE_URL/api/progress" \
+     -H "Authorization: Bearer $PROGRESS_SECRET" -H "Content-Type: application/json" \
+     -d '{"repository":"guchi-apps/issue-deck","issue":<番号>,"status":"done"}'
+   gh issue close <番号> --reason completed
+   ```
+
+**GraphQLでProjectのフィールドを直接書き換えないこと。** Projectへの書き込みはissue-deckに
+一本化してあり（上記「中核の判断」）、直接書くとDBのキャッシュと画面がずれる。
+
 ## 参考リンク
 
 - GitHub Docs: [Using the API to manage Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects)

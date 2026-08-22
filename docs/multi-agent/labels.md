@@ -189,7 +189,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | --- | --- | --- |
 | エージェントがユーザーに質問した | `reusable-issue-dispatch.yml`が回答コメントの投稿後に`00.check-user`＋`00.qa-answered`を付与（#887） | `Notification / permission_prompt`フックが`POST /api/dispatch/sessions/activity`へ`checkUserRequested`を報告し、`requestSessionCheckUser`が付与（#1417） |
 | 計画を提示した | 計画コメントの投稿後に付与（`.github/prompts/plan.md`） | `PreToolUse(ExitPlanMode)`フックが計画をIssueへ投稿して付与（#1342） |
-| PRを作成し、自動マージされなかった | `reusable-claude-review-develop.yml`の`risk-check`（機械的判定・`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`）と`claude-review`（意味的判定）が付与（後述「自動マージ可否の判定方法」） | 同じ（PR作成後はレビュー・統合側の担当） |
+| PRを作成し、自動マージされなかった | `reusable-claude-review-develop.yml`の`auto-merge`が、`risk-check`（機械的判定・`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`）と`claude-review`（意味的判定）の結果をまとめて付与（後述「自動マージ可否の判定方法」。**判定したジョブ自身は付けない**。#1406・#2136） | 同じ（PR作成後はレビュー・統合側の担当） |
 | PRを作成したが、そのリポジトリに自動マージ判定の経路が無い | `reusable-issue-labels.yml`の`develop-pr-opened`が付与（#1470。後述「判定経路を持たないリポジトリではPR作成時に付ける」） | 同じ（判定はリポジトリ単位で、起動元を問わない） |
 | 開発環境のリンクを提示した | 無人実行からプレビューURLを出す経路は無い。`23.preview-required`があれば`risk-check`がPR時に付与（#813） | 提示は入力待ちになるため、質問と同じ経路で付く。プロンプトが`AskUserQuestion`で承認を尋ねるよう指示している（#1417） |
 | スクリーンショットを提示した | `24.screenshot-required`があれば`risk-check`がPR時に付与（#567。撮影より前に付く） | 同上 |
@@ -203,9 +203,9 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 
 上の表のとおり、**「PRをマージしてください」（`00.check-user`＋`01.check-merge`）を付けるのは
 レビュー経路だけ**で、実装エージェントは付けない。`reusable-claude-review-develop.yml`は
-`wait-for-ci`ジョブでCI（`ci.yml`）の完了を待ってから`auto-merge`（一次判定の反映とマージ有効化を
+`wait-for-ci`ジョブでCI（`ci.yml`）の完了を待ってから`auto-merge`（両判定の反映とマージ有効化を
 行うジョブ）を動かすため、この経路で付く限り「マージしてください」と言われた時点で押せる状態に
-なっている。
+なっている（意味的判定の分も`auto-merge`が付ける。#2136）。
 
 実装エージェントがPR作成の直後に自分で付けると、この待ちを飛び越える。#1709で実際に起きたのは
 次の形で、**通知そのものが不要だった**。
@@ -375,7 +375,7 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | 質問・確認の入力待ちに入った | `01.check-input` | `session-plan.ts`の`requestSessionCheckUser`（ローカル。無人実行に入力待ちは無い） |
 | ユーザー自身にコマンドを実行してもらう必要が出た | `01.check-input`（ローカル）／`01.check-blocked`（無人実行） | `scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`（ローカル。実体はフックの`requestSessionCheckUser`）、`.github/prompts/implement.md`（無人実行。#2002） |
 | ユーザーの質問へ回答した | `01.check-answered` | `.github/prompts/plan.md`・`implement.md`（無人実行） |
-| PRが自動マージされなかった／判定経路が無い | `01.check-merge` | `reusable-claude-review-develop.yml`の`auto-merge`・`auto-merge-fallback`、`reusable-issue-labels.yml`の`develop-pr-opened`、`.github/prompts/review-develop.md` |
+| PRが自動マージされなかった／判定経路が無い | `01.check-merge` | `reusable-claude-review-develop.yml`の`auto-merge`・`auto-merge-fallback`、`reusable-issue-labels.yml`の`develop-pr-opened`（`.github/prompts/review-develop.md`＝意味的判定は**自分では付けず**、判定マーカーを`auto-merge`へ渡す。#2136） |
 | 行き詰まり・依存追加・異常終了で停止した／すでに実装済みで実装不要と判断して停止した | `01.check-blocked` | `.github/prompts/implement.md`・`plan.md`（実装済み判断。#1601）、`reusable-issue-dispatch.yml`のフォールバック3か所、`reusable-claude-ci-fix.yml`・`reusable-claude-conflict-resolve.yml`・`reusable-claude-review-develop.yml`のレビュー失敗、`reusable-release-develop-to-main.yml`、`session-escalation.ts`（ローカル） |
 
 **未配布のリポジトリで壊れないようにする作法は、付ける側の経路で違う。**
@@ -1538,9 +1538,14 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **CI完了待ち（`wait-for-ci`ジョブ）**: `ci.yml`（ワークフロー名`CI`）がそのPRのhead SHAに対して`completed`になるまで待つ待機ジョブ。20秒間隔・最大60回（約20分）ポーリングし、タイムアウトした場合もジョブ自体は失敗させずそのまま後続へ進める（fail-open）。CIが`in_progress`のうちに`00.check-user`が付き、issue-deck画面上で時期尚早に「要確認」と見えてしまう問題を防ぐためのもの（#810）。**依存するのは最後の`auto-merge`ジョブだけで、`risk-check`・`claude-review`はCIと並行して走る**（#2066。後述「判定とレビューはCIと並行して走らせる」）。なお実際のマージ可否は`auto-merge`ジョブがGitHub Auto-merge機能（`develop`の`required_status_checks`でCI完了を待つ）に委ねているため、`wait-for-ci`の有無に関わらずマージの安全性自体は保たれる。
 - **一次判定（機械的、`risk-check`ジョブ）**: `git diff --name-only origin/develop...HEAD` のパスを、上記カテゴリに対応するパターン（`prisma/migrations/**`, `.env*`, `.github/workflows/**`, `**/auth/**`, `.shared-context/**`）に照合する。これらは`reusable-claude-review-develop.yml`に**内蔵**されており、呼び出し元から無効化できない（#1078）。リポジトリ固有のリスクパスは`risk-paths`入力で**追加**する。入力でリスクを追加できても削減はできない設計で、宣言し忘れたリポジトリで認証やマイグレーションの変更が無確認のままマージされるのを防いでいる。`package.json`は変更前後の`dependencies`/`devDependencies`をNode.jsで比較し、メジャーバージョンが変わった依存があるかで判定する（パッチ・マイナー更新は対象外）。あわせて、共有知識リポジトリのcheckout先である`.shared-context/`（`.gitignore`済み）が差分に混入していないかも確認する。従来はこの確認を`claude-review`のプロンプトだけが担っていたが、`claude-review`は低リスクPRではskipされるようになった（#992）ため、機械判定側にも同じ確認を置いている。ヒットした場合、**このジョブは判定結果を出力（`risky`・`reasons`・`already-check-user`）に載せるだけで、`00.check-user`の付与と理由コメントの投稿は行わない**。実際に反映するのは最後の`auto-merge`ジョブ（後述「`00.check-user`はレビュー完了後に付ける」、#1406）。
-- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断し、該当時は同様に`00.check-user`を付与する。ただしこのジョブは全PRで実行されるわけではなく、`risk-check`ジョブの`needs-review`出力によってゲートされる（後述「Claude Reviewの実行要否を`risk-check`でゲートする」、#992）。
+- **二次判定（`claude-review`ジョブ、意味的）**: パターンに引っかからない意味的リスク（例: 認可ロジックの変更だがファイルパスに`auth`が含まれない）をレビューエージェントが読解して判断する。該当時は**対応Issueへ理由コメントを投稿するだけで、`00.check-user`は付けない**（#2136。後述「意味的判定もラベルは`auto-merge`が付ける」）。ただしこのジョブは全PRで実行されるわけではなく、`risk-check`ジョブの`needs-review`出力によってゲートされる（後述「Claude Reviewの実行要否を`risk-check`でゲートする」、#992）。
 - **明示的指定（`risk-check`ジョブ、`22.merge-confirm-required`・`24.screenshot-required`ラベル）**: 変更内容によらず、対応Issueに`22.merge-confirm-required`または`24.screenshot-required`ラベルが付いている場合は常に`00.check-user`を付与する（「developへのマージ前確認要否をIssueラベルでトグルする」参照、#366・#567）。
 - **`00.check-user`はレビュー完了後に付ける（#1406）**: 一次判定の結果を反映する（ラベル付与・理由コメント投稿）のは、`risk-check`ではなくワークフロー最後の`auto-merge`ジョブの先頭ステップ。`risk-check`の時点で付けていた頃は、そのあとに走る`claude-review`（数分かかる）と`auto-merge`のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では**head SHAの全check-runを集約したCI状態が`in_progress`のまま**（`src/lib/github/pull-request-ci.ts`）でマージボタンが押せなかった。実測（PR #1404）ではCI（`lint-and-build`）成功が17:43:23、`00.check-user`付与が17:43:51、`claude-review`完了が17:50:18で、**通知から約6分半**押せない状態が続いていた。**レビュー用ワークフローが自分自身の完了を待ってからラベルを付けることはできない**（デッドロックになる）ため、「ラベルを読む直前＝最後のジョブで書く」形にして、通知後に残るcheck-runを`auto-merge`ジョブ自身の数秒だけにしている。なお`risky`が真なら`needs-review`も必ず真になる（`add_review_reason "機械的リスク判定に該当したため"`）ので、一次判定に当たったPRでは`claude-review`が必ず走り、付与は常にレビュー完了後になる。`claude-review`が失敗して`auto-merge`ごとスキップされる経路では、`claude-review-fallback`がラベル付与と理由の伝達を肩代わりする。**なお画面側は#1799で、CI状態の集約からレビュー・自動マージ（`claude-review-develop.yml`）のcheck-runを外した**（`src/lib/github/check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）ため、`auto-merge`ジョブ自身が残っていてもCI状態は`success`になる。ここでの「最後のジョブで書く」構成は通知のタイミングを揃えるために引き続き必要だが、**残るcheck-runがマージボタンを塞ぐことはなくなっている**。
+- **意味的判定もラベルは`auto-merge`が付ける（#2136）**: 上の#1406で一次判定（`risk-check`）の付与は最後のジョブへ移したが、二次判定（`claude-review`）は**レビューエージェント自身が`gh issue edit`で付けていた**。#2066でレビューをCIと並行させた結果、この付与はCIの実行中に起きるようになり、しかも**ラベルが理由コメントより先に付く**（レビューはラベルを付けてから残りの読解を続け、コメントを最後に投稿する）。実測（Issue #2126 / PR #2131）ではラベルが12:06:09、CI完了が12:07:26、理由コメントが12:09:20で、**約3分間、issue-deckのIssue詳細に「⚠️ 自動マージされなかった理由: 理由の記録が見つかりませんでした」と「CI実行中」「Claudeがレビュー中」「判定中」が同時に並ぶ**状態になっていた（通知だけが飛び、押せる操作は無い）。対処として、`claude-review`はラベルを付けず、対応Issueへ投稿する理由コメントの末尾に判定マーカー`<!-- issue-deck-review-verdict:merge-blocked sha=<head SHA> -->`を残すだけにし、`auto-merge`がそれを読んでラベルを付ける。`auto-merge`は`wait-for-ci`と`claude-review`の両方を`needs`に持つ唯一のジョブで、「CIの完了とレビューの完了の両方が終わってから付く」ことを構造として保証できるのはここだけ。
+  - **`sha=`で今回のhead SHAに絞る。** 追いコミットしたPRで、前のコミットに対する判定のマーカーを拾わないため。`claude-review`が`skipped`（#992のゲート）・`failure`の実行では、マーカーを読まない（前者は判定自体が無く、後者は`claude-review-fallback`が付ける）
+  - **マーカーが無ければ「該当なし」に倒す（fail-open）。** レビューが判定を残せなかったときの挙動は、ラベルを自分で付けていた頃（付け忘れれば同じく自動マージされる）と変わらない。ただし文字列がプロンプトとワークフローで**ずれると黙って倒れる**ため、`scripts/check-review-verdict-marker.sh`がCI（`docs-sync-check`）で両ファイルを突き合わせる。あわせて`claude-review`の`allowedTools`から`Bash(gh issue edit:*)`を外し、道具の側でもラベルを付けられないようにしている
+  - **理由コメントは重複させない。** `auto-merge`が投稿するのは一次判定（`risk-check`）の理由だけで、二次判定の理由は`claude-review`が投稿済みのものをそのまま使う（マーカーはそのコメントに付いている）
+  - **`claude-review-fallback`も`wait-for-ci`を`needs`に加えた。** レビュー失敗時に`00.check-user`を付けるのはこのジョブで、待たないとCIの実行中に同じ時期尚早の通知が飛ぶ。`wait-for-ci`はタイムアウトしても成功する（fail-open）ので、レビュー失敗の通知がこの待機で失われることはない
 - **判定が終わるまで画面からマージさせない（#1968）**: 上の#1799で`claude-review-develop.yml`のcheck-runをCI状態の集約から外した結果、**判定が走っている最中でも画面のCI状態は`success`になる**。issue-deckのマージボタンは`mergeWarnings`（`src/lib/pull-request-list.ts`）が空なら確認ダイアログを挟まないため、判定が下る前に**1クリック・警告なしでdevelopへマージできる状態**になっていた。実際にPR #1959（`secrets.WORKFLOW_PAT`で他リポジトリへpushする新規ワークフローの追加）は、PR作成の6分後・`auto-merge`ジョブの6分前に画面からマージされ、`00.check-user`・`01.check-merge`はマージ後に付いた（マージ前の確認として機能していない）。**ワークフロー内の順序（当時は`wait-for-ci`→`risk-check`→`claude-review`→`auto-merge`の直列。現在は後述#2066の並行構成）は壊れておらず、先行したのは画面からの手動マージの方**である。対処として、同じ`statusCheckRollup`から`claude-review-develop.yml`のcheck-runだけを取り出した`mergeJudgement`（`src/lib/github/check-rollup.ts`）を`PullRequestSummary`・`IssuePullRequest`に持たせ、`pending`の間はPR一覧・PR詳細・Issue画面のマージボタンを「判定中」で無効化する（`isMergeJudgementPending`）。
   - **警告ダイアログではなく無効化にした。** 事故は「ダイアログを読み飛ばした」ではなく「ダイアログが出なかった」ために起きているため
   - **この窓の間、人がマージを押す必要は本来ない。** 判定が「自動マージしてよい」ならワークフロー自身がマージし、「確認が必要」なら`00.check-user`が付いて`requiresUserMerge`が真になり、ボタンはまた押せるようになる
