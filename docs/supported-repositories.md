@@ -116,6 +116,32 @@ git log workflows/v18..origin/develop --oneline -- .github/workflows/reusable-is
 まとめて解消する（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローの
 タグ運用」）。
 
+## `issue-labels.yml`callerの`issues:`トリガーの揃い方（#2010）
+
+`manual-step-label`ジョブ（#1492。タイトルが`[手作業]`のIssueへ`71.manual-step`を付ける）は
+`issues: types:`に`opened`・`edited`が無いと発火しない。**`on:`はcaller側にしか無く、
+`@workflows/vN`のタグを上げても増えない。** 2026-08-22時点の実測は次のとおり。
+
+| `types: [opened, edited, closed]` | `issue-labels.yml`のcallerを持つ全リポジトリ（`db-console`・`question`を除く） |
+|---|---|
+| `types: [closed]`のみ | `db-console`（#1501の配布から漏れたもの）・`question`（意図的。下記） |
+
+```bash
+# 揃っているかの確認
+for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+  body=$(gh api "repos/guchi-apps/$r/contents/.github/workflows/issue-labels.yml" \
+    --jq .content 2>/dev/null | base64 -d 2>/dev/null) || continue
+  [ -n "$body" ] || continue
+  echo "$r: $(grep -A2 '^  issues:' <<< "$body" | grep 'types:' | head -1)"
+done
+```
+
+- **`db-console`は`schedule`（`*/30`）を持つため、#2010の定期巡回では結果的に救われる**
+  （タイトルが`[手作業]`で始まるopenなIssueのうちラベルの無いものを埋め直す）。ただし最大30分
+  遅れるため、トリガー定義自体はguchi-apps/db-console#60で揃える
+- **`question`は`schedule`も持たないため巡回も届かない。** 盤面に載らず手作業Issueも
+  `71.manual-step`の定義も無いリポジトリなので、意図どおり（上記「`on:`をIssueのcloseだけに絞る」）
+
 ## `claude-review-develop.yml`の配布状況（#1470）
 
 develop向けPRを「自動マージしてよい」「ユーザーのマージが必要」のどちらかへ確定させるのは
