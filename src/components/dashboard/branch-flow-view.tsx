@@ -1454,8 +1454,11 @@ function RepositorySummaryRow({
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
 
-      {/* リリースPRのマージ待ちは上の琥珀のピルが表すので、重ねて出さない（#2038） */}
-      {summary.needsUserMerge && <AttentionPill>ユーザーのマージが必要</AttentionPill>}
+      {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。8リポジトリを1行ずつ並べる画面で
+          ピルが長く、スマホ幅ではその行だけが2段に折り返していた。マージの導線は開いたPR行
+          （`PullRequestLine`）とPR一覧画面が持っているので、畳んだままでも操作は失われない。
+          ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`）。
+          リリースPRのマージ待ち（「mainへマージ待ち」）は上の琥珀のピルが表す（#2038） */}
       {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする */}
       {summary.openManualStepCount > 0 && (
         <AttentionPill>手作業{summary.openManualStepCount}</AttentionPill>

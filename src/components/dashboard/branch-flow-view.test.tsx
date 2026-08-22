@@ -201,7 +201,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("issue-1454")).toBeTruthy();
     });
 
-    it("ユーザーのマージを待っているリポジトリも畳んだまま並べる（#1932）", () => {
+    it("ユーザーのマージ待ちは畳んだ行に出さず、ヘッダーの件数だけで伝える（#2172）", () => {
       renderFlow({
         pullRequests: [
           makePullRequest({
@@ -216,8 +216,15 @@ describe("BranchFlowView", () => {
         ],
       });
 
-      expect(screen.getByText("ユーザーのマージが必要")).toBeTruthy();
+      // 畳んだ行にピルは出さない（#2172）。文言が長く、スマホ幅で行が2段に折り返していた
+      expect(screen.queryByText("ユーザーのマージが必要")).toBeNull();
+      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
       expect(screen.queryByText("issue-1454")).toBeNull();
+
+      // 開けば従来どおりバッジとマージボタンが出る（#1469・#1756）
+      openRepository();
+      expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
     });
 
     it("動きの無いリポジトリも1行で並べる", () => {
