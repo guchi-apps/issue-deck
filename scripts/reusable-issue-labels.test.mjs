@@ -74,7 +74,18 @@ case "$1 \${2:-}" in
     elif [ "$value" = "fail" ]; then echo "gh: server error (HTTP 502)" >&2; exit 1
     else echo "$value"; fi
     ;;
+  "api --method")
+    # manual-step-body-checkが指摘コメントを消す・貼り直す（DELETE / PATCH）。
+    # 呼び出しの全文は $STUB_LOG に残るので、ここは成功して返すだけでよい
+    ;;
   "api repos"*)
+    # manual-step-body-checkが引く「前回の指摘コメントのid」
+    # （repos/<owner>/<repo>/issues/<n>/comments?per_page=100 を --jq でid化したもの）
+    if [[ "$2" == */comments\?* ]]; then
+      if [ "\${STUB_EXISTING_COMMENT:-}" = "fail" ]; then echo "gh: server error" >&2; exit 1; fi
+      [ -z "\${STUB_EXISTING_COMMENT:-}" ] || echo "\${STUB_EXISTING_COMMENT}"
+      exit 0
+    fi
     # develop-merge-sweepが引く「developとブランチの差分」（repos/<owner>/<repo>/compare/develop...issue-<n>）
     if [[ "$2" == */compare/* ]]; then
       var="STUB_COMPARE_\${2##*...issue-}"
@@ -110,6 +121,19 @@ case "$1 \${2:-}" in
       echo "gh: server error (HTTP 500)" >&2
       exit 1
     fi
+    # 本文が空のコメント投稿はGitHubが拒否する（#2106で実際にジョブが落ちた）。
+    # スタブが黙って成功すると、その失敗経路をテストで踏めない
+    if [ "$2" = "comment" ]; then
+      file=""
+      for arg in "$@"; do
+        if [ "\${prev:-}" = "--body-file" ]; then file="$arg"; fi
+        prev="$arg"
+      done
+      if [ -n "$file" ] && [ -z "$(tr -d '[:space:]' < "$file")" ]; then
+        echo "GraphQL: Body cannot be blank (addComment)" >&2
+        exit 1
+      fi
+    fi
     ;;
   *)
     echo "gh stub: unhandled: $*" >&2
@@ -136,7 +160,7 @@ if [ "$method" = "POST" ]; then
   code="$(head -n1 "$codes_file")"
   tail -n +2 "$codes_file" > "$codes_file.tmp" && mv "$codes_file.tmp" "$codes_file"
   [ -n "$code" ] || code=200
-  [ -z "$out" ] || : > "$out"
+  [ -z "$out" ] || printf '%s' "\${STUB_POST_BODY:-}" > "$out"
   printf '%s' "$code"
   exit 0
 fi
@@ -185,6 +209,8 @@ function runStep(stepName, env = {}) {
     stdout = execFileSync("bash", ["-e", script], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      // ステップが作る一時ファイル（request.json・comment.md など）をリポジトリへ落とさない
+      cwd: workDir,
       env: {
         PATH: `${path.join(workDir, "stub")}:/usr/bin:/bin`,
         STUB_LOG: logFile,
@@ -506,6 +532,103 @@ describe("Project Status の報告", () => {
     const result = runStep(reportStep, { ...base, STUB_POST_CODES: "000 200" });
 
     expect(result.stdout).toContain("issue #1583 を develop-pr として報告しました");
+  });
+});
+
+describe("manual-step-body-check（手作業Issueの本文検査・#2048）", () => {
+  const STEP = "本文の書式を検査して指摘コメントを貼り直す";
+  const base = {
+    ISSUE_NUMBER: "2105",
+    ISSUE_TITLE: "[手作業] サブPC: pollerを再起動する",
+    ISSUE_BODY: "## この作業でできるようになること\n",
+  };
+  /** 指摘が1件も無いときのAPI応答。`comment`はnullで返る */
+  const noFindings = { STUB_POST_BODY: '{"findings":[],"comment":null}' };
+  const withFinding = {
+    STUB_POST_BODY: JSON.stringify({
+      findings: [{ severity: "error", message: "## 関連 の対応PRがURLで書かれています" }],
+      comment: "<!-- issue-deck-source:manual-step-body-check -->\n⚠️ ...",
+    }),
+  };
+
+  it("指摘が無いときはコメントを投稿しない（#2106の空本文でのジョブ失敗）", () => {
+    // `jq -r`が付ける末尾の改行で comment.md が1バイトになり、`[ -s ]`を素通りして
+    // 空本文の投稿へ進んでいた。書式どおりの手作業Issueを起票するたびに落ちていた
+    const result = runStep(STEP, { ...base, ...noFindings });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("本文の書式に指摘はありません");
+  });
+
+  it("指摘が解消したら前回の指摘コメントを削除する", () => {
+    // 削除も同じifの中にあるため、#2106の間は「直しても古い指摘が残る」状態だった
+    const result = runStep(STEP, {
+      ...base,
+      ...noFindings,
+      STUB_EXISTING_COMMENT: "9001",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain(
+      "gh api --method DELETE repos/guchi-apps/issue-deck/issues/comments/9001",
+    );
+    expect(result.stdout).toContain("前回のコメントを削除しました");
+  });
+
+  it("指摘があれば指摘コメントを投稿する", () => {
+    const result = runStep(STEP, { ...base, ...withFinding });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("gh issue comment 2105 --body-file comment.md");
+    expect(result.stdout).toContain("指摘コメントを投稿しました");
+  });
+
+  it("前回の指摘コメントがあれば、重ねず更新する", () => {
+    const result = runStep(STEP, {
+      ...base,
+      ...withFinding,
+      STUB_EXISTING_COMMENT: "9001",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain(
+      "gh api --method PATCH repos/guchi-apps/issue-deck/issues/comments/9001",
+    );
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("指摘コメントを更新しました");
+  });
+
+  it("タイトルが[手作業]で始まらないIssueには何もしない", () => {
+    const result = runStep(STEP, {
+      ...base,
+      ...withFinding,
+      ISSUE_TITLE: "pollerを再起動する",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("gh issue comment");
+  });
+
+  it("APP_BASE_URLが未設定のリポジトリでは検査ごとスキップする", () => {
+    const result = runStep(STEP, { ...base, ...withFinding, APP_BASE_URL: "" });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("curl");
+    expect(result.stdout).toContain("書式検査をスキップします");
+  });
+
+  it("issue-deckが落ちていてもワークフローを失敗させない", () => {
+    const result = runStep(STEP, {
+      ...base,
+      ...withFinding,
+      STUB_POST_CODES: "500",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).not.toContain("gh issue comment");
+    expect(result.stdout).toContain("::warning::本文の書式検査に失敗しました");
   });
 });
 
