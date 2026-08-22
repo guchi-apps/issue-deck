@@ -222,6 +222,24 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
+  `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
+  `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
+  `resolveIssueExecutionTarget`）から独立に文言を組み立てる**ため、素直に並べると1つの用件が
+  4回出る（確認待ちのIssueで実際にそうなっていた: サマリーのバッジ・ラベルチップ
+  `00.check-user`/`01.check-merge`・ステッパー下のバッジ・案内パネルの見出し）。
+  子は「出せるかどうか」だけを知っていて「他に誰が言っているか」を知らないので、
+  **判断は並べる側に置き、子には`showApprovalBadge`・`showExecutionTarget`・
+  `excludeAttention`のような出し分けのpropを渡す。** 子の中で他の部品の有無を推測しない。
+  - 状態そのものを表す**形（現在ステップの琥珀色・確認待ちのバッジ色）は消さない**。
+    重複しているのは文字だけで、色は一目で読むための別経路。
+  - **文言が「押すボタン」を名指しする場合は、その行き先に実在するか確かめる**。
+    `01.check-merge`の上部案内は「直したい点があれば『修正を依頼する』」と書いていたが、
+    そのボタンはコメント欄の承認カード（`comment-thread.tsx`）にしか無く、案内が送る
+    上部の対応PRセクションには「マージ」しか無かった（`buttonsAway`と`buttonsHere`を
+    分けているのはこのため）。
+  - **押す先が無く、読んでも次の行動が変わらない表示は出さない。** 「実施順序 1
+    前提はそろっている」がその例で、`IssueOrderSection`は前提待ちか被依存があるときだけ描く。
 - **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
   （#1666・#1810）。[`use-dispatch-state.ts`](../src/hooks/use-dispatch-state.ts)の
   `hosts`・`sessions`・`jobs`は**取得前も`[]`を返す**ため、受け取る側からは「1台も無い」
@@ -833,7 +851,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
   98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
   `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
-  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。**PRタブから開くときの
+  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。
+- **「ブランチ」タブのアイコンには反映待ちの件数を重ねる**（#2055。
+  [`lib/release-merge-pending.ts`](../src/lib/release-merge-pending.ts)）。
+  数えるのは**PRの本数**で、developへ（バージョンバンプPR `release/v…`）と
+  mainへ（リリースPR `develop`）のマージ待ちの合計。**Issueの件数ではない**——進捗Statusの
+  `Develop`・`Release`を数える「本番反映待ち」（左メニュー・ホームのカード）とは母集団が違う。
+  **出すのは合計だけで、内訳は`title`・`aria-label`に入れる。** 1タブ98pxに内訳2つを並べると
+  フッターを56px→68pxへ伸ばすことになり、5枠に増やせないのと同じ制約に当たる。
+  材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
+  **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
+  `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
+  したがって**CI実行中のPRは数えない**（`pendingMerge`がCIの確定後にしか埋まらないため。
+  #1433）。通知ベル・リポジトリ一覧のバッジと同じ判定で、ここだけ基準を変えると同じ状態が
+  場所によって別の数になる。**未取得（`null`）と0件は区別する**——未取得のうちは何も出さない
+  （0を出すと「待っているものが無い」と読めてしまう）。バッジの見た目は
+  ベルと同じ`NotificationBadge`を使い回す。
+  フッターは`NotificationProvider`の内側にあり、Providerを描く`issue-deck-shell.tsx`は
+  その親でフックを呼べないため、**件数はpropで配らず`MobileBottomNav`が自分で読む**。
+  描画だけの`MobileBottomNavView`を別に出してあるのは、Providerを立てずに件数を渡して
+  試験するため。
+- **PRタブから開くときの
   ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと

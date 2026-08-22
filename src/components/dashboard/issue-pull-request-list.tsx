@@ -6,6 +6,7 @@ import { GitPullRequest } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
+import { MergeJudgementBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
@@ -171,6 +172,7 @@ export function IssuePullRequestList({
               </GithubReferenceLink>
               {detail && <IssuePullRequestStateBadge pullRequest={detail} />}
               {detail && <PullRequestCiStatusBadge status={detail.ciStatus} />}
+              {detail && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
               {showMergeButton && onMerge && (
                 <IssueMergeButton
                   className="ml-auto"

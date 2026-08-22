@@ -374,7 +374,7 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
             draft: false,
             merged: false,
             ciStatus: pullRequestCiStatus,
-            mergeJudgement: "unknown",
+            mergeJudgement: { state: "unknown", step: null, runUrl: null },
             linkedIssueNumber: 1288,
           },
         ]}

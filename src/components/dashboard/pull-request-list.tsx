@@ -8,6 +8,7 @@ import {
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
+  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
@@ -144,6 +145,7 @@ function PullRequestCard({
         ) : (
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
+        <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
         <ConflictBadge mergeable={pullRequest.mergeable} />
         {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
         {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}

@@ -996,7 +996,7 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 
 **タイトルが`[手作業]`で始まるIssueには、`71.manual-step`が自動で付く。**
 `reusable-issue-labels.yml`の`manual-step-label`ジョブが、Issueのopen・タイトル編集を
-きっかけに付与する。
+きっかけに付与し、**取りこぼしは`schedule`の定期巡回が埋め直す**（#2010）。
 
 ラベルの付与を担保するものが以前はどこにも無かった。実装エージェントはプロンプトの指示に
 従って`gh issue create --label`を書くだけで、忘れても誰も気付かない。issue-deckの作成
@@ -1016,6 +1016,32 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 - **他リポジトリではcallerの更新が要る。** トリガー定義（`on: issues: types:`）は各リポジトリの
   `issue-labels.yml`にしか無いため、`@workflows/vN`のタグを上げるだけでは`opened`・`edited`が
   届かない（[../cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能ワークフローの参照」）。
+
+##### イベントで取りこぼしたものはscheduleが埋め直す（#2010）
+
+**イベント駆動だけでは、一度取りこぼすと永久に埋まらない。** `on:`はcaller側にしか無いため、
+そのリポジトリが`opened`・`edited`を拾っていない時期（あるいは`manual-step-label`ジョブを
+含まないタグを指していた時期）に起票されたIssueは、後からタグを上げてもIssueのイベントが
+再発火せず、ラベルが付かないまま残り続ける。
+
+実例が`guchi-apps/signaly#148`で、`manual-step-label`ジョブがまだ無い`workflows/v21`を
+指していた時期に起票され、タイトルは規約どおり`[手作業]`で始まるのに**ラベルが1つも付かないまま
+2日以上openだった**。「ユーザーの作業待ち」ビューにも通知にも一度も出ておらず、
+重複や完了漏れを見分ける以前に管理対象へ入っていなかった。
+
+そこで`manual-step-label`ジョブは`schedule`・`workflow_dispatch`でも動く。
+
+- 対象は**タイトルが`[手作業]`で始まるopenなIssueのうち`71.manual-step`が無いもの**。
+  `gh issue list --search 'in:title "[手作業]" -label:"71.manual-step"'`で引く
+- **検索は絞り込みにしか使わない。** GitHubの検索は`手作業`を含むだけの別Issueも返すため、
+  プレフィックスの一致は取得後にもう一度確かめる（判定規則はイベント経路と同じ）
+- **付けるだけで外さないのも、ラベル未定義のリポジトリで警告に留めるのも変わらない**
+- **`schedule`を持つcallerでは、このジョブぶんのActions実行が1回増える**（課金はジョブ単位で
+  1分に切り上げ。対象0件でも起動はする）。`develop-merge-sweep`と別ジョブのままにしてあるのは、
+  あちらが進捗報告APIへ依存するのに対しこちらはGitHubだけで完結し、片方が落ちても
+  もう片方が動くようにするため
+- **`schedule`を持たないcallerには届かない**（`guchi-apps/question`。手作業Issueも
+  `71.manual-step`の定義も無いリポジトリなので、現状は問題にならない）
 
 ### タイトル
 
@@ -1498,6 +1524,11 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
   - **この窓の間、人がマージを押す必要は本来ない。** 判定が「自動マージしてよい」ならワークフロー自身がマージし、「確認が必要」なら`00.check-user`が付いて`requiresUserMerge`が真になり、ボタンはまた押せるようになる
   - **判定のcheck-runが1件も無ければ`unknown`で従来どおり押せる。** `claude-review-develop.yml`を配っていないリポジトリ・起動前・チェックが100件を超えて1件ずつ見られない場合が該当する。キャンセル・スキップされたcheck-runは`completed`なので`settled`扱いで、判定が得られないまま画面を塞ぎ続けない（`wait-for-ci`のfail-openと方針を揃えている）
   - **既にマージされてしまった場合の伝え方も直した。** `auto-merge`ジョブの理由コメントと`claude-review`の二次判定コメント（`.github/prompts/review-develop.md`）は、投稿前にPRがマージ済みかを確認し、マージ済みなら「判定が終わる前にマージされている。事後の確認が必要」という文面へ切り替える。**ラベル（`00.check-user`・`01.check-merge`）は従来どおり付ける**——確認が要る変更が入ったこと自体は変わらないため
+- **判定中は何を待っているかを画面に出す（#2059）**: 上の#1968で判定中のマージボタンを無効化したが、押せない理由の文言（`MERGE_JUDGEMENT_PENDING_REASON`）を置いていたのは**ボタンの`title`属性だけ**だった。`title`のツールチップはマウスを載せたときにしか出ず、**スマホでは表示手段が無い**。その結果、PR詳細に「CI通過」と灰色の「判定中」が並ぶだけの画面になり、押せない理由も、あと何分待てばよいのかも読み取れなかった（#2059はスマホのスクリーンショットで報告されている）。対処として、CI状態のピルの隣に**待っている段階のピル**（`MergeJudgementBadge`。`src/components/dashboard/pull-request-badges.tsx`）を出す。文言はジョブごとに「CIの完了待ち」（`wait-for-ci`）・「マージ可否を判定中」（`risk-check`）・「Claudeがレビュー中」（`claude-review`）・「自動マージの判定中」（`auto-merge`）で、ピルごとそのジョブの実行ログへのリンクにする。ジョブ名と実行ログURLはCI状態と同じ`statusCheckRollup`の1クエリに`name`・`detailsUrl`を足すだけで取れるので、GitHub APIの消費は増えない。
+  - **「CI通過」と「判定中」が並ぶのは矛盾ではない。** `claude-review-develop.yml`のジョブは直列（`wait-for-ci` → `risk-check` → `claude-review` → `auto-merge`）で、CIが落ちるコミットにClaude Codeのレビューを消費させないため、**レビューはCIが完了してから始まる**。実測（PR #2056）では`lint-and-build`完了が06:42:11、`claude-review`完了が06:45:03で、**「CI通過」が出た後にレビューと判定だけが動いている窓が約3分ある**。この窓を指しているのが判定中のピル。
+  - **CI状態へ混ぜ戻す案は採らない。** それは#1799で外した状態そのもので、戻すと自動マージされるPRが一度も「CI通過」を表示できなくなる。CIとは別の軸のまま、別のピルとして並べる。
+  - **ボタンは「判定中」で無効のまま。** 追いコミットしたPRでは「ユーザーのマージが必要です」（`00.check-user`）は**1つ前のコミットに対する判定結果**が残っているだけで、いま乗っている変更はまだ判定されていない（`00.check-user`は最後の`auto-merge`ジョブで付く。#1406）。押せるようにすると#1968の事故（未判定コミットの1クリックマージ）が再発する。
+  - **段階を特定できないときは「マージ可否を判定中」へ縮退する。** ジョブ名が想定外（`identify-issue`など）・チェックが100件を超えて1件ずつ見られない場合（`mergeJudgement`が`unknown`になり、ピル自体が出ない）。
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは上記の反映を済ませたうえで、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266・#1901）。
 - **判定経路を持たないリポジトリではPR作成時に付ける（#1470）**: 上の判定は**すべて`claude-review-develop.yml`（caller）を持つリポジトリでしか走らない**。callerが無いリポジトリでは`risk-check`も`auto-merge`も一度も起動せず、自動マージされないのに`00.check-user`も付かないため、develop向けPRが誰にも気付かれないまま開いたまま残る。実測（2026-08-15）では、callerを持つのは`issue-deck`・`dayspan`・`shopping-list`の3つだけで、**他12リポジトリに判定されないままのdevelop向けPRが13本**あった（配布状況は[docs/supported-repositories.md](../supported-repositories.md)「`claude-review-develop.yml`の配布状況」）。そのため`reusable-issue-labels.yml`の`develop-pr-opened`ジョブ（展開済みの全リポジトリが呼ぶ唯一の共通経路）が、PR作成時に`.github/workflows/claude-review-develop.yml`の有無を`gh api`で確認し、**無ければその場で`00.check-user`を付ける**。理由はPR作成通知コメントの末尾に1行足す形で伝える（コメントを増やさないため）。

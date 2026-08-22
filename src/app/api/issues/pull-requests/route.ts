@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { toPullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -62,7 +63,7 @@ async function toIssuePullRequest(
     draft: pullRequest.draft,
     merged: pullRequest.merged,
     ciStatus,
-    mergeJudgement: checkState?.mergeJudgement ?? "unknown",
+    mergeJudgement: checkState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     linkedIssueNumber: extractLinkedIssueNumber({
       headRef: pullRequest.head.ref,
       title: pullRequest.title,

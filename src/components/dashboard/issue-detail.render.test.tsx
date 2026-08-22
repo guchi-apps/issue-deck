@@ -497,11 +497,24 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
 
   /** 案内パネル（`CheckUserReasonNotice`）の中だけを見る（コメント欄の案内にも同名のリンクがある） */
   function guidancePanel(): HTMLElement {
-    const heading = screen.getByText("質問への回答が必要です");
-    const panel = heading.parentElement;
+    // 見出しは`<p>`の中の`<span>`（#2057で「待機中」タグを同じ行へ寄せた）。
+    // パネルはその外側のdivなので、階層の数ではなく`closest`で辿る
+    const panel = screen.getByText("質問への回答が必要です").closest("div");
     if (!panel) throw new Error("確認待ちの案内が見つからない");
     return panel;
   }
+
+  /**
+   * #2057。案内パネルの見出しが同じ用件を書いているので、その1行上のバッジは重複になる。
+   * 確認待ちであること自体は現在ステップの琥珀色で読める。
+   */
+  it("案内パネルが出ているとき、ステッパーの確認待ちバッジは出さない（#2057）", () => {
+    withSessions([waitingSession], true, () => {
+      renderDetail(checkUserIssue());
+      expect(screen.getByText("質問への回答が必要です")).toBeTruthy();
+      expect(screen.queryByText(/^ユーザー確認待ち/)).toBeNull();
+    });
+  });
 
   it("PCは、届いた時点でRemote Controlの案内を出す", () => {
     withSessions([waitingSession], true, () => {

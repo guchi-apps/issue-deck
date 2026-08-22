@@ -12,7 +12,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { CiState } from "@/lib/github/release-api";
+import { mergeJudgementLabel, mergeJudgementReason } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestDeployStatus,
@@ -106,6 +108,52 @@ export function PullRequestStateIcon({
     return <GitPullRequestDraft className={cn("text-muted-foreground", className)} aria-label="ドラフト" />;
   }
   return <GitPullRequest className={cn("text-green-600", className)} aria-label="オープン" />;
+}
+
+/**
+ * 自動マージ可否の判定が終わっていないPRに出すピル（#2059）。`pending`のときだけ描く。
+ *
+ * **マージボタンの「判定中」が何を待っているのかを、画面に出すためにある。** 理由の文言は
+ * #1968からあったが置き場所がボタンの`title`属性だけで、スマホではツールチップが出ないため
+ * 読む手段が無かった。CI状態とは別の軸なので（#1799でCI集約から外している）、CI状態のピルの
+ * 隣に別のピルとして並べる——「CI通過」と「判定中」が同時に出るのは矛盾ではなく、CIが終わった
+ * 後にレビューと判定だけが動いている窓（実測で約3分）を指している。
+ *
+ * `runUrl`があればピルごとそのジョブの実行ログへのリンクにする（進み具合を見に行けるように）。
+ * 配色はCI実行中と同じprimaryで「待てば片付く」ことを表し、回転アイコンで見分けを付ける。
+ */
+export function MergeJudgementBadge({ mergeJudgement }: { mergeJudgement: MergeJudgement }) {
+  if (mergeJudgement.state !== "pending") return null;
+
+  const label = mergeJudgementLabel(mergeJudgement.step);
+  const reason = mergeJudgementReason(mergeJudgement.step);
+  const className =
+    "inline-flex w-fit items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary ring-1 ring-inset ring-primary";
+  const content = (
+    <>
+      <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      {label}
+    </>
+  );
+
+  if (mergeJudgement.runUrl === null) {
+    return (
+      <span className={className} title={reason}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={mergeJudgement.runUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(className, "hover:underline")}
+      title={`${reason}（クリックで実行ログを開きます）`}
+    >
+      {content}
+    </a>
+  );
 }
 
 /**

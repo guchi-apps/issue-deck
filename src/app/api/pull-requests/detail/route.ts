@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
@@ -76,7 +77,7 @@ async function handleGET(request: NextRequest) {
     const { ciState, mergeJudgement } =
       pullRequest.state === "open" && !pullRequest.draft
         ? await fetchRefCheckState(owner, repo, pullRequest.head.sha, token)
-        : { ciState: "unknown" as const, mergeJudgement: "unknown" as const };
+        : { ciState: "unknown" as const, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN };
 
     // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
     // 消費せず、DBキャッシュを1件引くだけ。番号の推定は一覧と同じ純粋関数を通す。

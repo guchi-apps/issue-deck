@@ -21,6 +21,7 @@ import {
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
   CiStateBadge,
+  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   UserMergeRequiredBadge,
@@ -471,6 +472,7 @@ function PullRequestLine({
       ) : (
         pullRequest.state === "open" && <CiStateBadge ciState={pullRequest.ciState} />
       )}
+      <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
       {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
       {/* 種類は「今どうなっているか」ではないので、状態のピルと同じ強さで出さない（#1510） */}
       {kindLabel && pullRequest.kind !== "issue" && (
