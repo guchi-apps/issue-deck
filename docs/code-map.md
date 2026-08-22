@@ -1783,6 +1783,21 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
+## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
+
+**複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
+INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どちらも「無い」を見てINSERTへ進み、
+片方が`P2002`（ユニーク制約違反）で落ちる**。実測で確認した（3本同時に投げて1本が500）。
+
+同じキーへ複数の経路・複数のプロセスから書きうる受け口では、`upsert`を`try`で包み、
+`P2002`を捕まえたら`update`へ回すこと（`lib/dispatch/session-artifacts.ts`の
+`saveSessionArtifact`）。**`instanceof PrismaClientKnownRequestError`ではなく`code`で判定する**
+——生成物の版が変わったときに静かに外れ、外れると「2回届いた方」が500として捨てられる。
+
+**「同時に2回来る」は珍しくない。** セッションのフックは、issue-deck自身のworktreeでは
+`--settings`（`run-issue-session.sh`）と`.claude/settings.json`（#1456）の両方に
+`PostToolUse`が登録されており、1回の操作で2回走る。
+
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
