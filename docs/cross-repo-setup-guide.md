@@ -151,6 +151,12 @@ jobs:
 > 該当するのは`manual-step-label`ジョブ（#1492。`issues: types: [opened, edited]`が必要。無いと
 > タイトルが`[手作業]`のIssueへ`71.manual-step`が自動で付かない）で、issue-deck側の
 > `issue-labels.yml`は`types: [opened, edited, closed]`になっている。
+>
+> **取りこぼしは`schedule`が埋め直すようになった（#2010）。** `manual-step-label`ジョブは
+> `schedule`・`workflow_dispatch`でも動き、タイトルが`[手作業]`で始まるopenなIssueのうち
+> ラベルの無いものを拾い直す。したがって`schedule`を持つcallerであれば、`opened`・`edited`の
+> 追記が遅れても最終的にはラベルが付く。**ただし遅れる**（cronの間隔ぶん）ため、
+> `issues: types:`を揃えること自体は引き続き必要。
 
 `claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
 

@@ -975,7 +975,7 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 
 **タイトルが`[手作業]`で始まるIssueには、`71.manual-step`が自動で付く。**
 `reusable-issue-labels.yml`の`manual-step-label`ジョブが、Issueのopen・タイトル編集を
-きっかけに付与する。
+きっかけに付与し、**取りこぼしは`schedule`の定期巡回が埋め直す**（#2010）。
 
 ラベルの付与を担保するものが以前はどこにも無かった。実装エージェントはプロンプトの指示に
 従って`gh issue create --label`を書くだけで、忘れても誰も気付かない。issue-deckの作成
@@ -995,6 +995,32 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 - **他リポジトリではcallerの更新が要る。** トリガー定義（`on: issues: types:`）は各リポジトリの
   `issue-labels.yml`にしか無いため、`@workflows/vN`のタグを上げるだけでは`opened`・`edited`が
   届かない（[../cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「再利用可能ワークフローの参照」）。
+
+##### イベントで取りこぼしたものはscheduleが埋め直す（#2010）
+
+**イベント駆動だけでは、一度取りこぼすと永久に埋まらない。** `on:`はcaller側にしか無いため、
+そのリポジトリが`opened`・`edited`を拾っていない時期（あるいは`manual-step-label`ジョブを
+含まないタグを指していた時期）に起票されたIssueは、後からタグを上げてもIssueのイベントが
+再発火せず、ラベルが付かないまま残り続ける。
+
+実例が`guchi-apps/signaly#148`で、`manual-step-label`ジョブがまだ無い`workflows/v21`を
+指していた時期に起票され、タイトルは規約どおり`[手作業]`で始まるのに**ラベルが1つも付かないまま
+2日以上openだった**。「ユーザーの作業待ち」ビューにも通知にも一度も出ておらず、
+重複や完了漏れを見分ける以前に管理対象へ入っていなかった。
+
+そこで`manual-step-label`ジョブは`schedule`・`workflow_dispatch`でも動く。
+
+- 対象は**タイトルが`[手作業]`で始まるopenなIssueのうち`71.manual-step`が無いもの**。
+  `gh issue list --search 'in:title "[手作業]" -label:"71.manual-step"'`で引く
+- **検索は絞り込みにしか使わない。** GitHubの検索は`手作業`を含むだけの別Issueも返すため、
+  プレフィックスの一致は取得後にもう一度確かめる（判定規則はイベント経路と同じ）
+- **付けるだけで外さないのも、ラベル未定義のリポジトリで警告に留めるのも変わらない**
+- **`schedule`を持つcallerでは、このジョブぶんのActions実行が1回増える**（課金はジョブ単位で
+  1分に切り上げ。対象0件でも起動はする）。`develop-merge-sweep`と別ジョブのままにしてあるのは、
+  あちらが進捗報告APIへ依存するのに対しこちらはGitHubだけで完結し、片方が落ちても
+  もう片方が動くようにするため
+- **`schedule`を持たないcallerには届かない**（`guchi-apps/question`。手作業Issueも
+  `71.manual-step`の定義も無いリポジトリなので、現状は問題にならない）
 
 ### タイトル
 
