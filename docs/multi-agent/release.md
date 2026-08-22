@@ -117,7 +117,12 @@ HEAD以外のコミットに存在すれば失敗させる。バージョンが�
    `env:`・`with.envs:`・リモートスクリプトの3者を突き合わせ、集合がずれていれば落とす。
 2. **`tar`の対象に実在しないパスがある。** gitは空ディレクトリを追跡しないため、`public/`を
    追跡していないリポジトリでは`tar: public: Cannot stat: No such file or directory`で`build`が
-   落ちる。`.gitignore`済みのビルド生成物（`.next`など）は対象外。
+   落ちる。`.gitignore`済みのビルド生成物（`.next`など）は対象外。**除外の判定は
+   `git check-ignore <path>`と`git check-ignore <path>/`の両方を試す**——`/.next/`のような
+   ディレクトリ限定のパターンは、**対象がまだ存在しないとディレクトリだと分からず**
+   `/`無しではマッチしない。この検査が走るのはチェックアウト直後でビルド前なので、片方だけだと
+   ビルド生成物をそのまま誤検知する（**ローカルのworktreeには開発サーバーが作った`.next`が
+   実在するため、手元で試すと再現しない**。#2135で実際に踏んだ）。
 3. **`packageManager`のpnpmメジャー。** pnpm 11はNode 22.13以上を要求し、VPSのNode 20では
    依存インストールが`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`で落ちる（上限は`pnpm-major-max`で
    変えられる。既定は10）。

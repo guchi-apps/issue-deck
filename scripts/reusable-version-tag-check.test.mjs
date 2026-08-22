@@ -92,9 +92,13 @@ let workDir;
 
 beforeEach(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "deploy-config-check-"));
-  // `git check-ignore` でビルド生成物（`.next`など）を除外するため、実際のリポジトリにする
+  // `git check-ignore` でビルド生成物（`.next`など）を除外するため、実際のリポジトリにする。
+  // **ディレクトリ限定の書き方（`/.next/`）にしてあるのは意図的。** issue-deck自身の
+  // `.gitignore`がこの形で、`git check-ignore .next` は**対象が存在しないと**
+  // ディレクトリだと判断できずマッチしない。CIのチェックアウト直後は`.next`がまだ無いため、
+  // 末尾に`/`を付けた形でも試さないと、ビルド生成物を「存在しないパス」として誤検知する
   execFileSync("git", ["init", "-q"], { cwd: workDir });
-  writeFileSync(path.join(workDir, ".gitignore"), ".next\nnode_modules\n");
+  writeFileSync(path.join(workDir, ".gitignore"), "/.next/\n/node_modules\n");
 });
 
 afterEach(() => {
@@ -223,6 +227,20 @@ describe("reusable-version-tag-check の deploy-config-check", () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).not.toContain(".next");
+    });
+
+    it("ディレクトリ限定パターン（/.next/）でも、まだ生成されていない .next を落とさない", () => {
+      // ローカルでは開発サーバーが作った `.next` が実在するため、この誤検知は
+      // **CIの新規チェックアウトでしか出ない**。仮リポジトリにも `.next` は作らない
+      place(".github/workflows/deploy.yml", deployWorkflow());
+      place("package.json", "{}\n");
+      place("public/.gitkeep", "");
+      writeFileSync(path.join(workDir, ".gitignore"), "/.next/\n");
+
+      const result = runCheck();
+
+      expect(result.stdout).not.toContain("::error::");
+      expect(result.status).toBe(0);
     });
 
     it("展開（tar -xzf）は作成ではないので見ない（リモートスクリプト側の tar）", () => {
