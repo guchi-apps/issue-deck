@@ -110,6 +110,14 @@ export NOTIFY_PLAN_WAIT_SECONDS="$PLAN_WAIT_SECONDS"
 PLAN_POLL_INTERVAL_SECONDS="${SESSION_PLAN_POLL_INTERVAL_SECONDS:-3}"
 [[ "$PLAN_POLL_INTERVAL_SECONDS" =~ ^[0-9]+$ ]] && ((PLAN_POLL_INTERVAL_SECONDS > 0)) ||
   PLAN_POLL_INTERVAL_SECONDS=3
+# issue-deckへ届かない状態がここまで続いたら待つのをやめる（秒。#2108）。
+#
+# **1回の失敗で降りない。** 宛先は本番のissue-deck（`APP_BASE_URL`）で、30分待つあいだに
+# 数百回引くため、途中で1回失敗することは普通に起きる。実際に**35回目あたりの1回の失敗で
+# 待ちを降り**、画面にはカウントダウンが残ったまま誰も受け取らない状態になった
+# （#2103の2回目の計画。フックは108秒で終了していた）。
+PLAN_POLL_GRACE_SECONDS="${SESSION_PLAN_POLL_GRACE_SECONDS:-60}"
+[[ "$PLAN_POLL_GRACE_SECONDS" =~ ^[0-9]+$ ]] || PLAN_POLL_GRACE_SECONDS=60
 
 # セッションの状態ファイル（#1256）。読み書きの作法は回収スクリプトと共有する。
 # **無くても通知は続ける**（このスクリプトはセッションを止めないことが最優先）。
@@ -294,7 +302,9 @@ def resolve_plan_text(tool_input):
       出力や引用も入るため、パスらしき文字列を拾うと別セッションの計画ファイルを掴む
     - **候補は`~/.claude/plans/`直下の`.md`に限る。** 転記ファイルの中身はエージェントの
       出力そのもので、任意のパスを読ませないため
-    - 引数で渡ってくる版に当たった場合はそれを優先する（版差に強くしておく）
+    - 引数で渡ってくる版に当たった場合はそれを優先する（版差に強くしておく）。
+      **Claude Code 2.1.239の実測では`tool_input.plan`に本文が入っていた**（#2108）。
+      どちらかへ寄せると、寄せた側でない版に当たった時点で計画が載らなくなる
     """
     if isinstance(tool_input, dict):
         direct = tool_input.get("plan")
@@ -585,7 +595,10 @@ post_to_issue_deck_capture() {
     printf '%s %s\n' "$path" "$body" >&2
     return 0
   fi
-  curl -fsS --max-time 10 \
+  # **計画の投稿はGitHubへコメントを書く往復を含む**ので、報告（`post_to_issue_deck`）より
+  # 長く待つ。ここで切れると`planRequestId`が返らず、サーバー側には返事待ちができているのに
+  # フックは待たない＝画面にだけ「承認を待っています」が残る（#2108）。
+  curl -fsS --max-time 30 \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $dispatch_secret" \
     -d "$body" \
@@ -662,40 +675,85 @@ report_plan_to_issue_deck() {
 #
 # **決まらなければ何も出力しない（フェイルオープン）。** 待ち切った・「端末で答える」を
 # 押された・issue-deckが応答しない、のいずれでも従来どおりの承認プロンプトが端末に出る。
+#
+# **issue-deckへ届かないことを理由に降りるのは、その状態が`PLAN_POLL_GRACE_SECONDS`続いた
+# ときだけ**（#2108）。降りるときは`release_plan_request`で画面の待ちも畳む。
 wait_for_plan_decision() {
-  local request_id="$1" deadline response status revision
+  local request_id="$1" deadline response outcome failing=0 failed_since=0
   [[ -n "$request_id" ]] || return 0
   ((PLAN_WAIT_SECONDS > 0)) || return 0
 
   deadline=$((SECONDS + PLAN_WAIT_SECONDS))
   while ((SECONDS < deadline)); do
-    if ! response="$(get_from_issue_deck "/api/dispatch/sessions/plan/decision?id=$request_id")"; then
-      # issue-deckへ届かない＝返事を受け取る術が無い。**待ち続けない**（届かないまま
-      # 待ち切ると、その時間ぶんセッションが黙って止まる）
-      echo "session-notify: 計画の返事をissue-deckから取得できませんでした（端末で答えてください）" >&2
-      return 0
+    if response="$(get_from_issue_deck "/api/dispatch/sessions/plan/decision?id=$request_id")"; then
+      failing=0
+      outcome=0
+      plan_decision_from_response "$response" || outcome=$?
+      # 0＝決まった（判定は出力済み）／2＝もう決まらない／1＝まだ待つ
+      if ((outcome != 1)); then
+        return 0
+      fi
+    else
+      # **1回の失敗では降りない**（#2108）。宛先は本番のissue-deckで、30分待つあいだに
+      # 数百回引くため、瞬断や再起動で1回外すことは普通に起きる。ここで即座に降りると、
+      # 画面にはカウントダウンが残ったまま、押しても誰も受け取らないパネルになる。
+      if ((failing == 0)); then
+        failing=1
+        failed_since=$SECONDS
+      fi
+      if ((SECONDS - failed_since >= PLAN_POLL_GRACE_SECONDS)); then
+        echo "session-notify: 計画の返事をissue-deckから取得できない状態が${PLAN_POLL_GRACE_SECONDS}秒続きました（端末で答えてください）" >&2
+        release_plan_request "$request_id"
+        return 0
+      fi
     fi
-    status="$(json_field "$response" status)"
-    case "$status" in
-      APPROVED)
-        plan_decision_output allow "issue-deckの画面で承認されました"
-        return 0
-        ;;
-      REVISION_REQUESTED)
-        revision="$(json_field "$response" revisionText)"
-        # **`deny`の理由がそのまま次の指示になる。** 空で返すとClaudeは何を直せばよいか
-        # 分からないため、その場合も理由を明示する
-        plan_decision_output deny "${revision:-issue-deckの画面で計画の修正を求められました。}"
-        return 0
-        ;;
-      WAITING) ;;
-      *)
-        # DEFERRED・EXPIRED・GONE、および想定外の値。**何も返さずに終える**
-        return 0
-        ;;
-    esac
     sleep "$PLAN_POLL_INTERVAL_SECONDS"
   done
+  # 待ち切った。**畳むのはサーバー側**（期限を過ぎた行は`EXPIRED`へ倒す）なので、
+  # ここからは何も伝えない
+}
+
+# 応答の`status`を許可判定に変える。**出力するのはここだけ**（poll中と、待ちを畳むときの
+# 最後の確認の2箇所から同じ形で呼ぶ）。
+#
+#   0 … 決まった（`plan_decision_output`で出力済み）
+#   1 … まだ決まっていない（`WAITING`）
+#   2 … もう決まらない（`DEFERRED`・`EXPIRED`・`GONE`、および想定外の値）
+plan_decision_from_response() {
+  local response="$1" status revision
+  status="$(json_field "$response" status)"
+  case "$status" in
+    APPROVED)
+      plan_decision_output allow "issue-deckの画面で承認されました"
+      return 0
+      ;;
+    REVISION_REQUESTED)
+      revision="$(json_field "$response" revisionText)"
+      # **`deny`の理由がそのまま次の指示になる。** 空で返すとClaudeは何を直せばよいか
+      # 分からないため、その場合も理由を明示する
+      plan_decision_output deny "${revision:-issue-deckの画面で計画の修正を求められました。}"
+      return 0
+      ;;
+    WAITING)
+      return 1
+      ;;
+  esac
+  return 2
+}
+
+# 待つのをやめたことをissue-deckへ伝える（#2108）。**伝えないと画面は待ち時間いっぱい
+# 「計画の承認を待っています」を出し続け、押しても誰も受け取らないボタンが残る。**
+#
+# **応答は最後の確認も兼ねる。** サーバーが畳むのは`WAITING`の行だけなので、降りると決めた
+# 直後に押されていればその結論が返り、そのまま許可判定として使える。
+# **届かなければ何もしない**（届かないことが降りる理由なので、失敗は想定内）。
+release_plan_request() {
+  local request_id="$1" response
+  # 自分が受け取ったidをそのままJSONへ入れる。念のため形だけ確かめる（cuid）
+  [[ "$request_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+  response="$(post_to_issue_deck_capture /api/dispatch/sessions/plan/decision \
+    "{\"id\":\"$request_id\"}")" || return 0
+  plan_decision_from_response "$response" || true
 }
 
 # `PreToolUse`フックの戻り値。**標準出力のJSONだけがClaude Codeに読まれる**ので、

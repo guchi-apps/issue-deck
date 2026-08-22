@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ClipboardCheck,
+  ExternalLink,
   Keyboard,
   Loader2,
   Pencil,
@@ -19,6 +20,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { SESSION_PLAN_REVISION_MAX_LENGTH } from "@/lib/dispatch/session-plan-request";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
+import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
@@ -69,6 +71,8 @@ export function PlanApprovalPanel({
 
   const hostLabel = request.hostName ? formatDispatchHostName(request.hostName) : "ローカル";
   const sessionGone = session !== null && session.state !== "ALIVE";
+  // 「ここからは送れない」と言うだけでは、どこで答えればよいのかが画面から辿れない（#2108）
+  const remoteControlUrl = session ? summarizeIssueSession(session).remoteControlUrl : null;
 
   async function send(decision: "approve" | "revise" | "defer") {
     setError(null);
@@ -89,7 +93,13 @@ export function PlanApprovalPanel({
   // **押した本人が「効いたのか」を確かめられれば足りる**ので、結果だけを出して枠を畳む
   const decided = sent ?? decisionOf(request.status);
   if (decided) {
-    return <PlanDecisionResult decision={decided} hostLabel={hostLabel} />;
+    return (
+      <PlanDecisionResult
+        decision={decided}
+        hostLabel={hostLabel}
+        remoteControlUrl={remoteControlUrl}
+      />
+    );
   }
 
   const canSend = !sessionGone && remainingMs > 0;
@@ -244,9 +254,12 @@ const REVISION_PRESETS = [
 function PlanDecisionResult({
   decision,
   hostLabel,
+  remoteControlUrl,
 }: {
   decision: "approve" | "revise" | "defer" | "expired";
   hostLabel: string;
+  /** 端末で答えることになったときの行き先。無ければリンクを出さない */
+  remoteControlUrl: string | null;
 }) {
   const tone =
     decision === "approve"
@@ -255,39 +268,51 @@ function PlanDecisionResult({
         ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400"
         : "border-border bg-muted text-muted-foreground";
 
+  const answerElsewhere = decision === "defer" || decision === "expired";
+
   return (
-    <section className={`flex items-start gap-2 rounded-md border p-3 text-xs ${tone}`}>
-      <span className="mt-0.5 shrink-0">
-        {decision === "approve" ? (
-          <ClipboardCheck className="size-3.5" aria-hidden />
-        ) : decision === "revise" ? (
-          <Pencil className="size-3.5" aria-hidden />
-        ) : (
-          <Keyboard className="size-3.5" aria-hidden />
-        )}
-      </span>
-      <span className="leading-relaxed">
-        {decision === "approve" && (
-          <>
-            <strong className="font-semibold">承認を送りました。</strong>
-            {hostLabel}のセッションが実装に入ります。この結果はIssueコメントにも残しました。
-          </>
-        )}
-        {decision === "revise" && (
-          <>
-            <strong className="font-semibold">修正を送りました。</strong>
-            計画を練り直しています。新しい計画が出たら、またここに出ます。
-          </>
-        )}
-        {(decision === "defer" || decision === "expired") && (
-          <>
-            <strong className="font-semibold">端末に承認プロンプトを出しました。</strong>
-            ここからは送れません。Remote Controlか
-            <code className="mx-1 rounded bg-background/60 px-1 py-0.5 font-mono">tmux attach</code>
-            で答えてください。
-          </>
-        )}
-      </span>
+    <section className={`flex flex-col gap-2 rounded-md border p-3 text-xs ${tone}`}>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0">
+          {decision === "approve" ? (
+            <ClipboardCheck className="size-3.5" aria-hidden />
+          ) : decision === "revise" ? (
+            <Pencil className="size-3.5" aria-hidden />
+          ) : (
+            <Keyboard className="size-3.5" aria-hidden />
+          )}
+        </span>
+        <span className="leading-relaxed">
+          {decision === "approve" && (
+            <>
+              <strong className="font-semibold">承認を送りました。</strong>
+              {hostLabel}のセッションが実装に入ります。この結果はIssueコメントにも残しました。
+            </>
+          )}
+          {decision === "revise" && (
+            <>
+              <strong className="font-semibold">修正を送りました。</strong>
+              計画を練り直しています。新しい計画が出たら、またここに出ます。
+            </>
+          )}
+          {answerElsewhere && (
+            <>
+              <strong className="font-semibold">端末に承認プロンプトを出しました。</strong>
+              ここからは送れません。Remote Controlか
+              <code className="mx-1 rounded bg-background/60 px-1 py-0.5 font-mono">tmux attach</code>
+              で答えてください。
+            </>
+          )}
+        </span>
+      </div>
+      {answerElsewhere && remoteControlUrl && (
+        <Button variant="outline" size="sm" className="self-start" asChild>
+          <a href={remoteControlUrl} target="_blank" rel="noreferrer">
+            Remote Controlで答える
+            <ExternalLink />
+          </a>
+        </Button>
+      )}
     </section>
   );
 }

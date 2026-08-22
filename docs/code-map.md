@@ -1448,6 +1448,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
   `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
   **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
+  **返事を待つあいだの1回のHTTP失敗で降りない**（#2108）。降りるのは届かない状態が
+  `SESSION_PLAN_POLL_GRACE_SECONDS`（既定60秒）続いたときだけで、そのときは
+  `POST /api/dispatch/sessions/plan/decision`で画面の待ちも畳ませる（畳ませないと、押しても
+  誰も受け取らないボタンがカウントダウン付きで残る）。返事待ちを作るかどうかは
+  **Issueコメントを投稿できたかとは切り離す**（パネルはDBに保存した計画本文を描くため）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
