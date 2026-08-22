@@ -1228,7 +1228,7 @@ export function IssueDeckShell({
                   onRefresh={issuePolling.refresh}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
-                  onStartManualStepGuide={() => manualStepGuide.start()}
+                  onStartManualStepGuide={manualStepGuide.start}
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
                   }
@@ -1442,7 +1442,7 @@ export function IssueDeckShell({
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
-                onStartManualStepGuide={() => manualStepGuide.start()}
+                onStartManualStepGuide={manualStepGuide.start}
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）
                 onStartIssueOrder={issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start}
                 issueOrderAutoStart={issueOrderGuide.autoStart}

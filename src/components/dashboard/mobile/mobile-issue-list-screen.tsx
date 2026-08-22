@@ -91,7 +91,7 @@ type MobileIssueListScreenProps = {
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
-  onStartManualStepGuide?: () => void;
+  onStartManualStepGuide?: (startIssueId?: string) => void;
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
   onStartIssueOrder?: () => void;
   issueOrderAutoStart?: boolean;
