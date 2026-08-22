@@ -743,10 +743,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
   CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
   （`claude-review-develop.yml`）・コンフリクト自動解消・共有知識の提案なども同じheadコミットに
-  check-runを付ける。とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、
-  通ったらマージする**ワークフローなので、`wait-for-ci` → `risk-check` → `claude-review` →
-  `auto-merge`のいずれかがPRの開いている間ずっと実行中で、**自動マージされるPRは一度も
-  「CI通過」を表示できなかった**。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
+  check-runを付ける。とくに`claude-review-develop.yml`は**レビューして通ったらマージする**
+  ワークフローなので、`wait-for-ci`・`risk-check` → `claude-review` → `auto-merge`のいずれかが
+  PRの開いている間ずっと実行中で、**自動マージされるPRは一度も「CI通過」を表示できなかった**
+  （当時はCIの完了を待ってからレビューする直列構成だった。#2066でレビューはCIと並行になったが、
+  `auto-merge`が終わるまでcheck-runが残る点は変わらない）。CIが終わってから詳細画面の更新ボタンを押しても「CI実行中」の
   ままで、ボタンが効いていないように見えていた（#1799。PR #1798の実測では`lint-and-build`の
   完了が13:53:49・`ci.yml`のジョブが出揃ったのが13:53:55なのに対し、`review / auto-merge`の
   完了はマージ後の13:54:27）。同じ詰まりでマージボタンが押せなかった事例は
