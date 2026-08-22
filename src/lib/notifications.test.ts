@@ -341,7 +341,7 @@ describe("buildNotifications Pull Request", () => {
     expect(hasErrorNotification(items)).toBe(false);
   });
 
-  it("CI実行中・ドラフトは出さない（左メニューの「完了したPR」と同じ母集団）", () => {
+  it("CI実行中・ドラフトは出さない（左メニューの「マージ待ち」と同じ母集団）", () => {
     const items = build({
       pullRequests: [
         makePullRequest({ id: "owner/repo#1", number: 1, ciState: "pending" }),

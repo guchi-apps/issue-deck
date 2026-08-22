@@ -496,7 +496,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `sidebarQuestionNavViews`・`sidebarIssueNavViews`、
   [`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)の`sidebarPullRequestViews`）。
   `navViews`はスマホのスワイプ順と件数計算も見る配列なので、**そこから外すとURLごと消える**。
-  左メニューから外した「最近追加した」「直近本番に反映した」「完了したPR」は
+  左メニューから外した「最近追加した」「直近本番に反映した」は
   viewクエリとしては生きており、既存リンクからは今までどおり開ける。
   並びは**最上段が「人が動くまで進まないもの」**（ユーザーの確認待ち・ユーザーの作業待ち）で、
   ここに他のビューを足すと「上から順に手を動かせば盤面が進む」という読み方が崩れる。
@@ -792,9 +792,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   スキーマ・Webhook設定を増やさない方が勝つと判断した。
   取得コストは「対象リポジトリ数（REST）＋ installationごとに数回（GraphQL。CI状態と
   コンフリクトをPRごとではなくエイリアスでまとめて引く。#1962）」で、母集団が広いぶん
-  1回が重い。そのため**自動更新は「完了したPR」ビューを表示している間だけ**にしている
-  （10秒間隔。それ以外のビューとPRペイン外は画面を開いたときと手動更新のみ。
-  `hooks/use-pull-requests.ts`。#1531）。**ブランチ画面で自動更新を有効にしている間は、
+  1回が重い。そのため**自動更新はPR画面（PCのPRペイン・スマホのPR画面）を開いている間だけ**に
+  している（ビューによらず10秒間隔。ペイン・画面の外では画面を開いたときと手動更新のみ。
+  `hooks/use-pull-requests.ts`。#1531・#1947）。**ブランチ画面で自動更新を有効にしている間は、
   そちらの間隔でもこの取得が回る**（#1767。両方の要求が重なったときは短い方。
   [`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`shorterAutoRefreshInterval`）。
 - **10秒間隔で回せるのは、GitHubへの取得がETagの条件付きGETを通っているから**（#1531。
@@ -972,13 +972,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
   すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
   同じく履歴を積まない（`selectPullRequestView`）。
-- **PRの状態別ビューは3つあるが、左メニューに出すのは「すべてのPR」「実行中」の2つ**（#1312・
-  #1613）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
+- **PRの状態別ビューは3つで、左メニューにも3つとも出す**（#1312・#1613・#2120）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
-  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「完了したPR」
+  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「マージ待ち」
   （CIがsuccess/failure）は**同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えても
-  GitHub APIを叩き直さない。「完了したPR」は左メニューから外したが`prview=completed`のURLは
-  生きている。**10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「完了したPR」
+  GitHub APIを叩き直さない。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
+  **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
+  ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
+  **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
   ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
   歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
   ポーリングと同じ間隔・同じ止め方にそろえてある。**ただし1巡のコストは「消費0」ではない。**
@@ -1011,13 +1012,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   [`lib/github/pull-request-events.ts`](../src/lib/github/pull-request-events.ts) が1本の時系列へ
   統合する。こちらも自動ポーリングは無い（`hooks/use-pull-request-detail.ts`）。
   ヘッダー表示用の`summary`（タイトル・ブランチ・状態・CI状態）もあわせて返す。
-  **「処理中」「完了」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
+  **「実行中」「マージ待ち」ビューの一覧はopenのPRしか持たないのに、画面内のリンクからはマージ済み・
   クローズ済みのPRも開けるため**（#1260）、一覧の項目が無い経路でもヘッダーを描けるようにしている。
   一覧・詳細の両方が[`lib/github/pull-request-summary.ts`](../src/lib/github/pull-request-summary.ts)
   の`toPullRequestSummary`で同じ形に揃える。
   **両方あるときは`fetchedAt`が新しい方を使う**（#1578。`issue-deck-shell.tsx`の
   `selectedPullRequest`）。一覧を無条件に優先していたころは、詳細ヘッダーの更新ボタンが
-  詳細しか取り直さない（一覧は「完了したPR」ビューを見ている間しか自動更新されない）ため、
+  詳細しか取り直さない（一覧はPR画面を開いている間しか自動更新されない）ため、
   CIが通った後に更新を押しても一覧を開いた時点の「CI失敗」バッジと「CI失敗を自動修正」ボタンが
   残り続けていた。
   **そのPRが本番へ出たかは、「マージ済み」の隣のバッジで出す**（#1814。`DeployStatusBadge`）。
@@ -1330,7 +1331,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   PCはヘッダー右端、スマホは各画面のヘッダーの実行状況の右隣に置く（#1772）。
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
   同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
-  リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「完了したPR」と同じ
+  リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「マージ待ち」と同じ
   母集団）／`71.manual-step`の4区分。
   - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
     作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
