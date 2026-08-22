@@ -352,6 +352,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   進捗率は出さない（サーバー側から分からないため、止まった数字は止まったアプリに見える）。
   **エラー画面はSSRのHTMLには出ず、クライアントで描かれる**ので、`curl`では確認できない
   （レンダリングテストか実ブラウザで見る）。
+- **後から届くものの場所は、実物と同じクラスで組んだスケルトンで取る**（#2090）。スマホの
+  ホームのサブPCのカードは`dispatch.hosts.length > 0`で出し分けていたが、`hosts`は取得前も`[]`
+  なので、届くまでカードごと消えて下のメニューがカード1枚ぶん繰り上がっていた。出し分けは
+  件数ではなく`useDispatchState`の`isLoaded`（**一度でも確定したか**。失敗しても立つ）で行い、
+  確定するまでは[`dashboard/dispatch-host-panel.tsx`](../src/components/dashboard/dispatch-host-panel.tsx)の
+  `CompactHostCardSkeleton`を1枚置く。
+  - **高さは`min-h-*`の固定値ではなく、実物と同じクラスから取る。** Tailwind v4の任意値
+    （`text-[10px]`など）はfont-sizeだけを設定し、行の高さは継承した`line-height: 1.5`を
+    自分のfont-sizeへ掛けて決まる。したがって**同じクラスを同じ入れ子で並べれば、高さは
+    自動的に一致する**。文字は`text-transparent`にして`bg-muted`を敷き、帯として見せる
+    （実物と同じ文字列を置くので、横幅も揃う）
+  - ずれを防ぐのは`dispatch-host-panel.test.tsx`の「高さを決めるクラスが実物と一致する」で、
+    実物とスケルトンから高さに効くクラス（`text-*`のサイズ・`p-*`・`mt-*`・`gap-*`・`h-*`）を
+    集めて多重集合として突き合わせる。片方だけ直すと落ちる
+  - **`aria-hidden`＋`role="status"`の1行**にして、帯の下の文字を読み上げさせない
 - **ホーム画面から起動する先は`/dashboard`**（`app/manifest.ts`の`start_url`。#1978）。
   `/`は`redirect("/dashboard")`するだけの通過点で、以前のように`/login`へ送ると
   middlewareが`/dashboard`へ折り返し、認証の確認を含む往復が毎回1回余計に増える。

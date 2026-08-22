@@ -10,7 +10,10 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
-import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
+import {
+  CompactHostCardSkeleton,
+  DispatchHostPanel,
+} from "@/components/dashboard/dispatch-host-panel";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
@@ -174,16 +177,30 @@ export function MobileHomeScreen({
             セッション・スクリプトの版・「更新して再起動」はここには出さず、押して開く
             実行状況シートに任せる。従来はこの1枚だけで縦242pxを占め、メニューの1行目が
             画面の外にあった。申告しているホストが1台も無ければ`DispatchHostPanel`は何も描かない
+
+            **最初の取得が終わるまでは同じ高さのスケルトンを置く**（#2090）。`hosts`は取得前も
+            `[]`なので、これが無いと届くまでカードごと消え、下のメニューがカード1枚ぶん
+            繰り上がる。届いた瞬間に全部が下へ落ちるため、開いてすぐ押した指が別の行に当たる。
+            出すのは`isLoaded`が立つまでの1回だけで、20秒ごとの取り直しでは出さない
+            （出すと20秒おきにカードが灰色に戻る）。**取得に失敗しても`isLoaded`は立つ**ので、
+            届かないまま灰色の板が残り続けることはない（従来どおり何も出ない状態へ落ちる）。
+            枚数が1枚なのは、台数が取得するまで分からないため——いま申告しているのはサブPC1台
           */}
-          {dispatch.hosts.length > 0 && (
+          {!dispatch.isLoaded ? (
             <div className="mt-2">
-              <DispatchHostPanel
-                hosts={dispatch.hosts}
-                sessions={dispatch.sessions}
-                compact
-                onOpenDetail={() => setDispatchStatusOpen(true)}
-              />
+              <CompactHostCardSkeleton />
             </div>
+          ) : (
+            dispatch.hosts.length > 0 && (
+              <div className="mt-2">
+                <DispatchHostPanel
+                  hosts={dispatch.hosts}
+                  sessions={dispatch.sessions}
+                  compact
+                  onOpenDetail={() => setDispatchStatusOpen(true)}
+                />
+              </div>
+            )
           )}
         </div>
 
