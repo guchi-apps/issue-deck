@@ -608,6 +608,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     （`isReadOnlyVerificationCommand`）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
     常駐プロセスは置かない。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。
+  - **本文の書式は起票時に機械検査する**（#2048。
+    [`lib/manual-step-body-check.ts`](../src/lib/manual-step-body-check.ts)・
+    `POST /api/manual-steps/body-check`・`reusable-issue-labels.yml`の`manual-step-body-check`）。
+    タイトルが`[手作業]`で始まるIssueのopen・editedで、**画面のパーサーが読む書式から
+    外れていないか**だけを見て、指摘をマーカー付きコメント1件として貼り直す。判定を
+    ワークフローへ写さないのは「検査は通るが画面は読めない」食い違いを作らないため。
+    **ラベルは付けず起票も止めない。** 雛形の正は
+    [docs/multi-agent/manual-step-body-template.md](multi-agent/manual-step-body-template.md)で、
+    `scripts/generate-prompt-templates.mjs`が起票側の3プロンプトへ差し込む
+    （ずれはCIの`Prompt shared template sync check`が落とす）。設計は
+    [docs/multi-agent/labels.md](multi-agent/labels.md#本文の書式は起票時に機械検査する2048)。
   - **現在地はIssueのidで持ち、並びの添字では持たない**。クローズした手作業がポーリングで
     一覧から外れると添字がずれ、次の1件を飛ばす。並び自体は開いた時点のスナップショット
     （`hooks/use-manual-step-guide.ts`）で、進めるたびに分母が減らないようにする。
