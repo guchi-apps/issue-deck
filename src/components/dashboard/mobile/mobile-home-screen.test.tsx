@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
@@ -19,7 +19,10 @@ vi.mock("@/hooks/use-reference-navigation", () => ({
   useReferenceNavigation: () => ({ openIssue: () => {}, openPullRequest: () => {} }),
 }));
 
-import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
+import {
+  MobileHomeScreen,
+  MobileHomeScreenView,
+} from "@/components/dashboard/mobile/mobile-home-screen";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { NAV_VIEW_IDS } from "@/types/issue";
@@ -60,6 +63,8 @@ function makeDispatch(overrides: {
     cancel: vi.fn(),
     dismiss: vi.fn(),
     prioritize: vi.fn(),
+    // 引っ張って更新（#2182）がサブPCのカードを取り直すのに呼ぶ
+    refresh: vi.fn(),
   } as unknown as DispatchStateHandle;
 }
 
@@ -340,5 +345,91 @@ describe("MobileHomeScreen（#1690）", () => {
 
     expect(onCreateIssue).toHaveBeenCalledTimes(1);
     expect(onAskCrossRepoQuestion).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 引っ張って更新（#2182）。ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が見るので、
+// ここでは「ホームの枠に付いていて、離すとホームに出ているものが取り直されるか」だけを確かめる
+describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
+  afterEach(cleanup);
+
+  // jsdomには`TouchEvent`のコンストラクタが無いため、ハンドラが読む`touches`だけを持つ
+  // イベントを組み立てる（`branch-flow-view.test.tsx`と同じ作り）
+  function touchEvent(type: string, x: number, y: number) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "touches", { value: [{ clientX: x, clientY: y }] });
+    return event;
+  }
+
+  /** 引っ張りのタッチを受ける枠（スクロール領域を包む枠） */
+  function pullContainer(container: HTMLElement) {
+    const scroller = container.querySelector(".overflow-y-auto");
+    if (!scroller?.parentElement) throw new Error("スクロール領域が見つからない");
+    return scroller.parentElement;
+  }
+
+  /** Providerを噛ませずに取り直しを差し込むため、描画だけの本体を直接描く */
+  function renderHomeView(
+    props: Partial<Parameters<typeof MobileHomeScreenView>[0]> = {},
+  ) {
+    return render(
+      <MobileHomeScreenView
+        overviewStats={OVERVIEW_STATS}
+        navCounts={NAV_COUNTS}
+        checkUserPullRequestCount={0}
+        manualStepAttention={NO_MANUAL_STEP}
+        unconfirmedQuestionCount={0}
+        releaseActivity={null}
+        pullRequestNavCounts={PR_NAV_COUNTS}
+        onSelectQuickView={() => {}}
+        onSelectPullRequests={() => {}}
+        onSelectFlow={() => {}}
+        favoriteRepositories={[]}
+        onSelectRepository={() => {}}
+        onCreateIssue={() => {}}
+        onAskCrossRepoQuestion={() => {}}
+        onOpenSettings={() => {}}
+        {...props}
+      />,
+    );
+  }
+
+  it("下へ引っ張ると表示が出て、離すと数字と実行状況の両方を取り直す", async () => {
+    const onRefresh = vi.fn();
+    const { container } = renderHomeView({ onRefresh });
+    const target = pullContainer(container);
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchstart", 100, 100));
+      target.dispatchEvent(touchEvent("touchmove", 100, 140));
+    });
+    expect(screen.getByText("引っ張って更新")).toBeTruthy();
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+    expect(screen.getByText("離すと更新")).toBeTruthy();
+
+    await act(async () => {
+      target.dispatchEvent(new Event("touchend", { bubbles: true }));
+    });
+
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    // サブPCのカードはベルの取り直しに入っていないので、この画面が自分で取り直す
+    expect(dispatchState.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("更新中…")).toBeTruthy();
+  });
+
+  it("取り直しを渡さない場合は引っ張っても反応しない", () => {
+    const { container } = renderHomeView();
+    const target = pullContainer(container);
+
+    act(() => {
+      target.dispatchEvent(touchEvent("touchstart", 100, 100));
+      target.dispatchEvent(touchEvent("touchmove", 100, 300));
+    });
+
+    expect(screen.queryByText("引っ張って更新")).toBeNull();
+    expect(screen.queryByText("離すと更新")).toBeNull();
   });
 });

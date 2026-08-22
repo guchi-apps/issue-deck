@@ -225,12 +225,13 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958）。
+- **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958・#2182）。
   判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
   引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。
   `onPullToRefresh`を渡した画面だけで有効になり、渡しているのはスマホのIssue一覧2画面・PR一覧
-  （#1947）・ブランチ画面（`BranchFlowView`。#1958）。**描画を一覧ごとに書かない**——文言・色・
-  戻りのアニメーションが片方だけ変わると、同じ操作なのに画面ごとに見え方が違うことになる。
+  （#1947）・ブランチ画面（`BranchFlowView`。#1958）・スマホのホーム（#2182）。
+  **描画を一覧ごとに書かない**——文言・色・戻りのアニメーションが片方だけ変わると、
+  同じ操作なのに画面ごとに見え方が違うことになる。
   **取り直しの完了を待てない画面は、画面側の取得中フラグを`isRefreshing`として渡す**（#1958）。
   ブランチ画面の`refresh`は取り直しの合図を出すだけの同期関数で、待っても取得の完了とは無関係に
   返るため、渡さないと数秒かかる取得の途中で「更新中…」が消える。フックはフラグが立つのを
@@ -247,6 +248,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   取り直すのは`GET /api/issues`（`use-issue-polling.ts`の`refresh`）と実行状況までで、
   **GitHubからの再同期（`POST /api/sync/issues`）はしない**。1回でリポジトリ数ぶんのGitHub APIを
   使うため、指を下ろすたびに走ってよい操作ではない（再同期は設定の「フリート運用」に置いてある）。
+  **ホーム（`mobile-home-screen.tsx`）だけは`useNotificationState`の`refresh`を渡す**（#2182）。
+  ホームに出ている数字はIssue一覧・PR一覧・リリース状況の3つから来ており、Issueだけを取り直すと
+  「ブランチ」行やPRの件数が古いまま残って、更新したのに変わらない画面になる。ベル右上の
+  「更新」ボタンと同じ経路で、`isFetching`をそのまま`isRefreshing`として渡す。リリース状況の
+  取得はGitHub APIを使う（通常は5分間隔）ぶん消費は増えるが、押した回数ぶんしか走らない。
+  **サブPCのカードの取り直し（`dispatch.refresh`）はホーム側で足す**——実行状況はこの画面が
+  自分で取っているもので、ベルの`refresh`には入っていない。**ヘッダーの`MobileReloadButton`は
+  残す**（引っ張る方は数字だけ、ボタンはページ全体の再読み込み＝新しいビルドへの追従）。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
