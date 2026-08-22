@@ -601,6 +601,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   見ていたリポジトリが勝手に閉じる。理由は、このアプリが複数リポジトリを横断で見るためのもので、
   「人が動くまで進まないもの」は全体で取りこぼしが無いかを確かめる場所だから。個々のIssue一覧・
   PR一覧がリポジトリで絞られるのは従来どおり。
+  **PCで左右2ペインに分かれているとき（#2157）は「展開」ではなく「右ペインに表示」になる。**
+  同時に出せるのは1件なので選択の先頭を右へ出し、ヘッダーの文言も「絞り込み中の◯件を展開」から
+  「絞り込み中の先頭を表示」へ変える（選んだ数と右に出ているものが食い違って見えるため）。
+  **右ペインに出しているリポジトリの正はURLではなく端末の記憶**（localStorage）で、URLの`repos`は
+  「選択が変わった瞬間にその先頭を右へ出す」きっかけとしてだけ効く。`repos`は複数選択の絞り込み
+  条件で、右に出す1件とは粒度が違うため、同じ意味のキーをURLへもう1つ増やさない。左ペインの
+  並べ替え（`orderRepositoriesBySelection`）は分割後もそのまま効く。
 - **メニューの行の「数字」と「オレンジの丸」は別のものを表す**（#2070）。数字は
   **押した先の一覧に並ぶ件数**、丸は**いま人が手を動かせるものがあるという合図**。数え方は
   [`lib/issue-stats.ts`](../src/lib/issue-stats.ts)の`computeNavCountsForFilters`に集約してあり、
@@ -1167,6 +1174,26 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   という画面の趣旨と食い違っていた。手が要ることはヘッダーの「手が要るもの◯件」
   （`needsAttention`）と畳んだ行のピルが伝え、開くかどうかは行のクリックか「すべて開く」で
   ユーザーが決める。**左メニューで選択中のリポジトリを開く動き（#1750）はこれとは別で残す。**
+  **PCで幅が足りるときは左右2ペインに分ける**（#2157。`BranchFlowView`の`splitLayout`）。
+  左は畳んだ1行の一覧のまま、選んだ1件の流れ図を右ペインへ出して独立にスクロールさせる。
+  1カラムのまま行の下へ展開していたころは、横幅が余っているのに縦へ伸び、一覧と中身を
+  同時に見られなかった。**分けるかどうかはウィンドウ幅ではなく、この画面が占めている幅の
+  実測（`ResizeObserver`。`SPLIT_MIN_WIDTH`＝880px）で決める**——左メニューは畳めるうえ幅も
+  変えられるので、同じウィンドウ幅でも中央に残る幅は倍近く違う。幅が足りないPCとスマホ
+  （`splitLayout`を渡さない）は従来どおり行の下へ開く。**分割中は「すべて開く」を出さない**
+  （同時に出せるのは1件のため）。右に出しているリポジトリと左ペインの幅は端末ごとに覚える
+  （`issue-deck:branch-flow-selected-repository`・`issue-deck:branch-flow-list-width`。幅の
+  ドラッグは左メニュー・Issue一覧と同じ`useResizableWidth`＋`ResizeHandle`）。
+  **右ペインは別コンポーネントにせず、`RepositorySection`が中身を`createPortal`で送り込む。**
+  行と中身を別々に組み立てると`useTriggerPending`（起動中）を2か所から呼ぶことになり、
+  押した瞬間の書き込みが互いに伝わらない状態（#1955でわざわざ1か所へまとめたもの）が戻る。
+  **実測で分岐するUIは、jsdomのテストでは既定で「狭い側」を通る**（#2157）。jsdomはレイアウトを
+  持たず`getBoundingClientRect()`が常に0を返すため、幅を差し替えないテストは自動的に従来の
+  折りたたみのままになり、既存のテストへ手を入れずに分岐を足せる。広い側を通したいテストだけ
+  `vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")`で幅を差し替える
+  （`branch-flow-view.test.tsx`の`mockWideLayout`）。**`ResizeObserver`はjsdomに無い**ので、
+  生成側に`typeof ResizeObserver === "undefined"`のガードを置く（無いと`ReferenceError`で
+  そのコンポーネントのテストが全滅する）。
   **畳んだ行のピルは、紫（待てば進む）と琥珀（あなたの番）で書き分ける**（#2038）。リリースが
   動いている間はCI実行中も、CIが終わって人のマージを待っている間も同じ紫の「リリース中」で、
   違いは回るアイコンの有無しか無かった（#1931）ため、一覧を流し見して自分の番のリポジトリを
@@ -1783,7 +1810,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
-## 画像はVPSのローカルディスクに置く
+## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
+
+**複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
+INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どちらも「無い」を見てINSERTへ進み、
+片方が`P2002`（ユニーク制約違反）で落ちる**。実測で確認した（3本同時に投げて1本が500）。
+
+同じキーへ複数の経路・複数のプロセスから書きうる受け口では、`upsert`を`try`で包み、
+`P2002`を捕まえたら`update`へ回すこと（`lib/dispatch/session-artifacts.ts`の
+`saveSessionArtifact`）。**`instanceof PrismaClientKnownRequestError`ではなく`code`で判定する**
+——生成物の版が変わったときに静かに外れ、外れると「2回届いた方」が500として捨てられる。
+
+**「同時に2回来る」は珍しくない。** セッションのフックは、issue-deck自身のworktreeでは
+`--settings`（`run-issue-session.sh`）と`.claude/settings.json`（#1456）の両方に
+`PostToolUse`が登録されており、1回の操作で2回走る。
+
+## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
 - `GET /api/issues/images/[filename]` … **認証を要求しない。** GitHub.com側のIssue画面からも
@@ -1792,6 +1834,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**
+- **セッションが公開したアーティファクトも同じ置き場**（`uploads/artifacts/`。#2154）。
+  受け取りは`POST /api/dispatch/sessions/artifact`（`DISPATCH_SECRET`。フックから）、配信は
+  `GET /api/issues/artifacts/[id]`（**ログイン必須**——画像と違い、GitHub.com側から表示する
+  必要が無い）。**claude.aiのページは`frame-ancestors 'self'`でiframeに入らない**ため、
+  URLではなくHTMLの原本を運んで自分のオリジンから出し直している。
+  組み立てとCSPは[`lib/artifact-document.ts`](../src/lib/artifact-document.ts)、保存と
+  取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
+  **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
+  `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
+  手が届く）。運用の全体像は
+  [multi-agent/session-notify.md](multi-agent/session-notify.md)を参照。
 - **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
   末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに
   サムネイルで横に並べる**（#1819）。呼び出し元へ渡す`value`は従来どおり画像記法込みの1本の

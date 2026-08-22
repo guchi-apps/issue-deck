@@ -5,7 +5,7 @@
 # フックのstdinに来るJSONを読んで1件処理する。設定は run-issue-session.sh が生成する
 # settings JSON 側にあり、このスクリプトを直接叩くのは検証のときだけ。
 #
-# 扱うイベントは5つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
+# 扱うイベントは6つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
 # 書き、判断を2箇所に分けない）。
 #
 #   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
@@ -15,6 +15,8 @@
 #                                               （＋この時点で「入力待ち」として記録する。#1438）
 #   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
 #                                               （＋`00.check-user`を解く。#1417）
+#   PostToolUse(Artifact)           アーティファクトの公開 → HTMLの原本をissue-deckへ送る（#2154）。
+#                                               **Signalyへは送らない。** 上の間引きより前で扱う
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
 #                                               **Signalyへもissue-deckへも送らない**
 #
@@ -169,6 +171,145 @@ fi
 # ため、Signalyへもissue-deckへも送らない（python3もHTTPも起こさない）。
 if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"SessionStart\" ]]; then
   exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 公開したアーティファクトをissue-deckへ取り込む（#2154）
+#
+# **claude.aiのアーティファクトページはiframeに入らない**（`content-security-policy:
+# frame-ancestors 'self'`。実測）。URLだけを送っても「ブラウザに遷移せずにアプリ上で見る」
+# ことにならないので、**HTMLの原本ごと**送る。issue-deckは自分のオリジンから出し直す。
+#
+# **下の`PostToolUse`の間引きより前に置く。** 間引きは「直前が入力待ちのとき」しか通さないが、
+# アーティファクトの公開の直前に承認プロンプトが出るとは限らず、任せるとほとんどが捨てられる。
+#
+# `dispatch_env_value`をここで定義しているのは、この処理が間引きより前に来るため
+# （bashの関数は呼ぶ前に定義されている必要がある）。宛先と鍵の出どころはpollerと同じ
+# `dispatch.env`で、他の報告（`post_to_issue_deck`）と共有している。
+# ---------------------------------------------------------------------------
+dispatch_env_value() {
+  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}" key="$1"
+  [[ -f "$env_file" ]] || return 0
+  # shellcheck disable=SC1090
+  (
+    source "$env_file" >/dev/null 2>&1
+    printf '%s' "${!key:-}"
+  )
+}
+
+# **HTMLの解釈はshellでやらない。** ファイルの読み出しもJSONの組み立てもpython側に寄せ、
+# ここは「送るかどうか」と送信だけを持つ。判定に外れた場合はpythonが何も出さず、静かに終わる。
+report_artifact_to_issue_deck() {
+  local app_base_url dispatch_secret payload
+  [[ -n "$ISSUE_NUMBER" && -n "$REPO_SLUG" ]] || return 0
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
+  [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
+
+  payload="$(
+    HOOK_JSON="$HOOK_JSON" \
+      ARTIFACT_REPO_SLUG="$REPO_SLUG" \
+      ARTIFACT_ISSUE_NUMBER="$ISSUE_NUMBER" \
+      ARTIFACT_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}" \
+      python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+import re
+import sys
+
+# issue-deck側（`src/lib/dispatch/session-artifact.ts`）と同じ上限。**超える分はここで諦める**
+# （送っても400で返ってくるだけで、その往復に意味が無い）。
+LIMIT = 2 * 1024 * 1024
+
+try:
+    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+except Exception:
+    sys.exit(0)
+if not isinstance(hook, dict) or hook.get("hook_event_name") != "PostToolUse":
+    sys.exit(0)
+if hook.get("tool_name") != "Artifact":
+    sys.exit(0)
+
+tool_input = hook.get("tool_input")
+if not isinstance(tool_input, dict):
+    sys.exit(0)
+# `Artifact`は公開以外（list / read / comments / upload_asset …）にも使う。**公開だけを拾う。**
+# 既定（省略時）が公開なので、Noneと空文字も通す
+if tool_input.get("action") not in (None, "", "publish"):
+    sys.exit(0)
+source_path = tool_input.get("file_path")
+if not isinstance(source_path, str) or not source_path.strip():
+    sys.exit(0)
+source_path = source_path.strip()
+
+try:
+    with open(source_path, "rb") as handle:
+        raw = handle.read(LIMIT + 1)
+except OSError:
+    sys.exit(0)
+if not raw or len(raw) > LIMIT:
+    sys.exit(0)
+try:
+    html = raw.decode("utf-8")
+except UnicodeDecodeError:
+    sys.exit(0)
+
+# 公開したURLはツールの応答から拾う。**取れなくても送る**——見た目を出すのに要るのはHTMLの
+# 原本だけで、URLはclaude.aiで開き直すための逃げ道にすぎない
+response = hook.get("tool_response")
+if not isinstance(response, str):
+    response = json.dumps(response, ensure_ascii=False)
+found = re.search(
+    r"https://claude\.ai/(?:code/artifact|public/artifacts)/"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    response,
+)
+
+
+def text(value):
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+sys.stdout.write(
+    json.dumps(
+        {
+            "repository": os.environ["ARTIFACT_REPO_SLUG"],
+            "issue": int(os.environ["ARTIFACT_ISSUE_NUMBER"]),
+            "hostName": text(os.environ.get("ARTIFACT_HOST_NAME")),
+            "title": text(tool_input.get("title")),
+            "description": text(tool_input.get("description")),
+            "favicon": text(tool_input.get("favicon")),
+            "claudeUrl": found.group(0) if found else None,
+            "sourcePath": source_path,
+            "html": html,
+        },
+        ensure_ascii=False,
+    )
+)
+PY
+  )"
+  [[ -n "$payload" ]] || return 0
+
+  if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
+    # **本文（HTML）は出さない。** 検証で見たいのは宛先と拾えた項目で、数百KBのHTMLが
+    # 端末へ流れると他が読めなくなる
+    printf '/api/dispatch/sessions/artifact %s\n' "${payload:0:300}"
+    return 0
+  fi
+
+  # **本文が大きいので引数ではなく標準入力から渡す。** `-d "$payload"` だと数百KBのHTMLが
+  # `ps` の出力にも argv の上限にも掛かる。失敗しても黙って終える（このスクリプトの約束）
+  printf '%s' "$payload" | curl -fsS --max-time 20 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $dispatch_secret" \
+    --data-binary @- \
+    "${app_base_url%/}/api/dispatch/sessions/artifact" >/dev/null 2>&1 || true
+}
+
+# python3を起こす価値があるかの前捌き（`NOTIFY_PLAN_BASE_SHA`と同じ扱い）。
+# 外れてもpython側が同じ判定で落とすので、結果は変わらない。
+if [[ "$HOOK_JSON" == *'"tool_name"'*'"Artifact"'* ]]; then
+  report_artifact_to_issue_deck
 fi
 
 # **`PostToolUse`のほとんどをここで捨てる**（#1357）。ツールの実行ごとに飛ぶイベントなので、
@@ -557,15 +698,8 @@ fi
 # issue-deckへの報告に使う宛先と鍵は、pollerと同じ`dispatch.env`から読む（#1264）。
 # **未設定でも失敗でも実装は止めない**（このスクリプトの約束）。設定していないホストでは
 # Signalyへの通知だけが飛び、画面には出ないだけになる。
-dispatch_env_value() {
-  local env_file="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}" key="$1"
-  [[ -f "$env_file" ]] || return 0
-  # shellcheck disable=SC1090
-  (
-    source "$env_file" >/dev/null 2>&1
-    printf '%s' "${!key:-}"
-  )
-}
+# 読み出しの`dispatch_env_value`はアーティファクトの取り込み（#2154）でも使うため、
+# `PostToolUse`の間引きより前で定義してある。
 
 # issue-deckのAPIへJSONを1件投げる。送れなかったときだけ非0で返す。
 # **失敗の理由にURLや鍵を混ぜない**（tmuxのスクロールバックに残るため）。

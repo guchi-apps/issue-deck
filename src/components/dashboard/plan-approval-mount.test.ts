@@ -32,4 +32,14 @@ describe("計画の承認パネルの置き場所（#2061）", () => {
     const source = readFileSync(path, "utf8");
     expect(source).toContain("planDecisionPending");
   });
+
+  /**
+   * #2158。**Issueを切り替えても詳細はマウントされたまま**なので、`key`が無いと
+   * 前の計画に対して押した結果や書きかけの修正本文が次の計画へ持ち越される
+   * （押していない計画に「承認を送りました」が出ていた）。
+   */
+  it.each(DETAIL_SOURCES)("%s が計画ごとにパネルを作り直す", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("key={planRequest.id}");
+  });
 });

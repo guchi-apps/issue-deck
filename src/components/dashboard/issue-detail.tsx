@@ -18,9 +18,11 @@ import {
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
@@ -81,6 +83,7 @@ import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-ind
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
@@ -169,6 +172,9 @@ export function IssueDetail({
 }: IssueDetailProps) {
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
+  // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
+  // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
+  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
@@ -579,6 +585,8 @@ export function IssueDetail({
   });
 
   return (
+    // 本文・コメントの中のclaude.aiリンクもプレビューへ差し替えるので、詳細の全体を包む（#2154）
+    <ArtifactPreviewProvider artifacts={artifacts}>
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
           写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
@@ -764,13 +772,26 @@ export function IssueDetail({
               待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
           {planRequest && (
             <div {...checkUserTargetProps("plan")}>
+              {/* **計画が変われば作り直す**（#2158）。Issue詳細はIssueを切り替えても
+                  マウントされたままなので、`key`が無いと押した結果や書きかけの修正本文が
+                  次の計画へ持ち越される */}
               <PlanApprovalPanel
+                key={planRequest.id}
                 request={planRequest}
                 session={issueSession}
                 dispatch={dispatch}
               />
             </div>
           )}
+
+          {/* アーティファクト（#2154）。**計画パネルのすぐ下**に置く——`25.artifact-required`の
+              基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
+              見た目への入口が要る */}
+          <IssueArtifactSection
+            artifacts={artifacts}
+            onReload={reloadArtifacts}
+            idPrefix="pc"
+          />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
               コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
@@ -1077,5 +1098,6 @@ export function IssueDetail({
         error={deleteError}
       />
     </div>
+    </ArtifactPreviewProvider>
   );
 }
