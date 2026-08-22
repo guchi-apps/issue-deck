@@ -1233,6 +1233,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
+  `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
+  修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは
+  なくデフォルトブランチを指し、**GitHub APIからは実行と対象PRを結び付けられない**。走っている
+  側が`POST /api/pull-requests/repair-runs`（認証は`PROGRESS_REPORT_SECRET`）で開始・終了を
+  報告する。PR一覧・PR詳細・リリース進捗はこれを`PullRequestSummary.repairRun`として受け取り、
+  `RepairRunBadge`（`components/dashboard/pull-request-badges.tsx`）と通知ベルへ出す。
+  終了の報告が届かなかった実行は開始から60分で失効させる。
 - **リリースの進捗を出す経路は2本ある。リポジトリ1件の詳細と、全リポジトリ横断のサマリ。**
   詳細は`GET /api/repositories/release`（`hooks/use-release-status.ts`）で、**モバイルの
   リリースシートだけ**が使う（#1614でPCヘッダーのロケットを外したため）。1回でGitHub APIを

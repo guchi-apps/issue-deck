@@ -35,6 +35,7 @@ function statusWithReleaseCi(
       ciState,
       mergeable,
       repairWorkflowAvailability: {},
+      repairRun: null,
     },
   });
 }
@@ -84,6 +85,7 @@ describe("ReleaseProgress CI状態バッジ", () => {
             ciState: "failure",
             mergeable: null,
             repairWorkflowAvailability: {},
+            repairRun: null,
             version: "1.1.0",
             reason: null,
             changelog: null,
@@ -139,6 +141,7 @@ describe("ReleaseProgress 更新履歴・使い方の表示", () => {
         ciState: null,
         mergeable: null,
         repairWorkflowAvailability: {},
+        repairRun: null,
         version: "1.1.0",
         reason,
         changelog,
@@ -218,6 +221,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
           releasePullRequest: {
             ...status.releasePullRequest!,
             repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
+            repairRun: null,
           },
         })}
         repoFullName="owner/repo"
@@ -249,6 +253,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
             ciState: "failure",
             mergeable: null,
             repairWorkflowAvailability: {},
+            repairRun: null,
             version: "1.1.0",
             reason: null,
             changelog: null,

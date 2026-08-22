@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
+import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 
@@ -24,6 +25,11 @@ export type ReleasePullRequest = {
    * 修復ボタンを出す状態（CI失敗・コンフリクト）のときだけ判定するため、それ以外は`{}`。
    */
   repairWorkflowAvailability: RepairWorkflowAvailability;
+  /**
+   * このPRでいま走っている自動修復（#2072）。走っていなければnull。
+   * CI失敗・コンフリクトの表示に重ねて「自動修正中」を出し、同じ種類のボタンを押せなくする。
+   */
+  repairRun: PullRequestRepairRunSummary | null;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {

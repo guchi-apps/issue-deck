@@ -101,6 +101,23 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   conflict: "コンフリクトを自動解消",
 };
 
+/**
+ * 自動修復が走っているあいだの言い回し（#2072）。バッジ・通知ベルで同じ文言にする。
+ *
+ * ボタンの文言（`REPAIR_KIND_LABEL`）と別に持つのは、「押せる操作」と「いま起きていること」を
+ * 同じ言葉で出すと、走っている最中のバッジが押せるボタンに見えるため。
+ */
+export const REPAIR_KIND_RUNNING_LABEL: Record<RepairKind, string> = {
+  ci: "CI失敗を自動修正中",
+  conflict: "コンフリクトを自動解消中",
+};
+
+/** 幅の狭い場所（通知ベル・スマホの一覧）で使う短い言い回し（#2072） */
+export const REPAIR_KIND_RUNNING_SHORT_LABEL: Record<RepairKind, string> = {
+  ci: "自動修正中",
+  conflict: "自動解消中",
+};
+
 /** 未配布を説明するときに使う、修復の種類の呼び方（#1960） */
 const REPAIR_KIND_WORKFLOW_LABEL: Record<RepairKind, string> = {
   ci: "CI失敗修正",

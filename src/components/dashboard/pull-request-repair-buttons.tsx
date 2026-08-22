@@ -36,6 +36,11 @@ type PullRequestRepairButtonsProps = {
    * 判定していない経路では省略してよく、その場合は従来どおり全部押せる。
    */
   availability?: RepairWorkflowAvailability;
+  /**
+   * いま走っている修復の種類（#2072）。その種類のボタンを押せなくして、同じ修復が
+   * 二重に起動するのを防ぐ。走っていなければ`null`（従来どおり押せる）。
+   */
+  runningKind?: RepairKind | null;
   className?: string;
 };
 
@@ -64,6 +69,7 @@ export function PullRequestRepairButtons({
   pullRequestNumber,
   kinds,
   availability,
+  runningKind = null,
   className,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
@@ -93,16 +99,23 @@ export function PullRequestRepairButtons({
         kinds.map((kind) => {
           const Icon = KIND_ICON[kind];
           const missing = isRepairWorkflowMissing(availability, kind);
+          const running = runningKind === kind;
           return (
             <Button
               key={kind}
               size="sm"
               variant="outline"
               className="h-7 shrink-0"
-              disabled={isSubmitting || missing}
+              disabled={isSubmitting || missing || running}
               // 無効化の理由はホバーできない端末にも要るため下の一文でも出すが、
               // マウスで触ったときにその場で読めるようtitleにも同じ趣旨を持たせる。
-              title={missing ? unavailableNotices.join(" ") : undefined}
+              title={
+                running
+                  ? "いま実行中です。結果はIssueのコメントに届きます。"
+                  : missing
+                    ? unavailableNotices.join(" ")
+                    : undefined
+              }
               onClick={() => {
                 setError(null);
                 setConfirmKind(kind);
@@ -113,6 +126,11 @@ export function PullRequestRepairButtons({
             </Button>
           );
         })
+      )}
+      {!startedKind && runningKind !== null && (
+        <span className="text-xs text-muted-foreground">
+          いま実行中です。結果はIssueのコメントに届きます。
+        </span>
       )}
       {!startedKind &&
         unavailableNotices.map((notice) => (

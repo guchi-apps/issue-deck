@@ -3,7 +3,7 @@
 import { Check, CircleAlert, Clock, ExternalLink, GitPullRequest, Loader2 } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
-import { ConflictBadge } from "@/components/dashboard/pull-request-badges";
+import { ConflictBadge, RepairRunBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { parseGithubReferenceUrl } from "@/lib/github-reference";
 import {
@@ -11,6 +11,7 @@ import {
   type RepairKind,
   type RepairWorkflowAvailability,
 } from "@/lib/github/pull-request-repair";
+import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import { cn } from "@/lib/utils";
 import type { CiState, ReleaseStatus, ReleaseWorkflowRun } from "@/hooks/use-release-status";
 
@@ -66,6 +67,8 @@ type Step = {
   ciState?: CiState | null;
   /** マージ待ちPRがbaseとコンフリクトしているか。判定中・取得できない場合はnull */
   mergeable?: boolean | null;
+  /** この段のマージ待ちPRで、いま走っている自動修復（#2072）。走っていなければnull */
+  repairRun?: PullRequestRepairRunSummary | null;
   /**
    * この段のマージ待ちPRを直すボタンの対象（#1293）。CI失敗・コンフリクトで止まっている段に、
    * その場で自動修復を起動する導線を添えるために持つ。
@@ -75,6 +78,8 @@ type Step = {
     kinds: RepairKind[];
     /** 起動先ワークフローの配布状況（#1960）。未配布の種類はボタンを押せなくする */
     availability: RepairWorkflowAvailability;
+    /** いま走っている修復の種類（#2072）。その種類のボタンは押せなくする */
+    runningKind: RepairKind | null;
   };
   /** 要操作・要確認段で表示するリンク（マージ用URL、デプロイ失敗時のrun URLなど） */
   action?: { href: string; label: string };
@@ -121,6 +126,7 @@ function repairForPullRequest(pullRequest: {
   ciState: CiState | null;
   mergeable: boolean | null;
   repairWorkflowAvailability: RepairWorkflowAvailability;
+  repairRun?: PullRequestRepairRunSummary | null;
 }): Step["repair"] {
   const kinds = repairKindsFor(
     { state: "open", draft: false, ciState: pullRequest.ciState },
@@ -131,6 +137,7 @@ function repairForPullRequest(pullRequest: {
         pullRequestNumber: pullRequest.number,
         kinds,
         availability: pullRequest.repairWorkflowAvailability,
+        runningKind: pullRequest.repairRun?.kind ?? null,
       }
     : undefined;
 }
@@ -173,6 +180,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[1].state = waitingCi ? "active" : "action";
     steps[1].ciState = bump.ciState;
     steps[1].mergeable = bump.mergeable;
+    steps[1].repairRun = bump.repairRun ?? null;
     steps[1].repair = repairForPullRequest(bump);
     if (!waitingCi) {
       steps[1].action = {
@@ -203,6 +211,7 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[3].state = waitingCi ? "active" : "action";
     steps[3].ciState = release.ciState;
     steps[3].mergeable = release.mergeable;
+    steps[3].repairRun = release.repairRun ?? null;
     steps[3].repair = repairForPullRequest(release);
     if (waitingCi) {
       steps[3].link = {
@@ -323,6 +332,8 @@ export function ReleaseProgress({
               </span>
               <CiStateBadge ciState={step.ciState} />
               <ConflictBadge mergeable={step.mergeable} />
+              {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
+              <RepairRunBadge run={step.repairRun} compact />
               {step.note && step.state !== "action" && (
                 <span className={cn("text-xs text-muted-foreground")}>{step.note}</span>
               )}
@@ -335,6 +346,7 @@ export function ReleaseProgress({
                 pullRequestNumber={step.repair.pullRequestNumber}
                 kinds={step.repair.kinds}
                 availability={step.repair.availability}
+                runningKind={step.repair.runningKind}
                 className="ml-6"
               />
             )}
