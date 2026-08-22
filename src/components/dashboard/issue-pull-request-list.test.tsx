@@ -20,6 +20,8 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     merged: false,
     ciStatus: "success",
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
+    mergeable: true,
+    repairRun: null,
     linkedIssueNumber: 600,
     ...overrides,
   };
@@ -151,6 +153,55 @@ describe("IssuePullRequestList", () => {
       />,
     );
     expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
+  });
+
+  it("コンフリクトしている行はバッジを出し、マージボタンを出さない（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        // PR画面では「コンフリクトあり」が出ているのに、Issue画面はCI状態しか出していなかった
+        pullRequests={[pullRequest({ ciStatus: "success", mergeable: false })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+  });
+
+  it("自動修復が走っている行はその旨をバッジで出す（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeable: false,
+            repairRun: {
+              kind: "conflict",
+              startedAt: new Date().toISOString(),
+              runUrl: "https://github.com/owner/repo/actions/runs/1",
+            },
+          }),
+        ]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText(/自動解消中/)).toBeTruthy();
+  });
+
+  it("コンフリクトの判定前（null）はマージボタンを出したままにする（#2145）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest({ mergeable: null })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.queryByText("コンフリクトあり")).toBeNull();
+    expect(screen.getByRole("button", { name: /マージする/ })).toBeTruthy();
   });
 
   it("マージするとその行のPR番号でonMerge・onMergedを呼ぶ", async () => {

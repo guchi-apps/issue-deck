@@ -5,9 +5,13 @@ type PullRequestCiStatusBadgeProps = {
   status: PullRequestCiStatus | null;
 };
 
+/**
+ * 文言はPR画面のCI状態バッジ（`pull-request-badges.tsx`の`CI_STATE_LABEL`）に揃える（#2145）。
+ * 同じPRを見ているのに画面によって「CI成功」「CI通過」と呼び分ける理由が無い。
+ */
 const STATUS_LABEL: Record<Exclude<PullRequestCiStatus, "none">, string> = {
   in_progress: "CI実行中",
-  success: "CI成功",
+  success: "CI通過",
   failure: "CI失敗",
 };
 
