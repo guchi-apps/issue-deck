@@ -1188,6 +1188,29 @@ systemd timerにも登録されておらず、`start-issue.sh`は案内メッセ
 無人で回すために足した安全弁（準備中のworktreeを消さない`--min-age-minutes`、残すworktreeの
 `.next`削除）は[branching.md](branching.md)の「掃除を回す起点」を参照。
 
+### コンフリクトの巡回検知も1巡に相乗りさせる（#2116）
+
+pollerは1巡ごとに`POST /api/pull-requests/conflict-sweep`を叩き、developとコンフリクトした
+PRをissue-deckに探させる。見つかれば`claude-conflict-resolve.yml`が起動する。
+
+**GitHub Actions側の自動検知だけでは取りこぼす。** `pull_request(opened)`のイベントが1本も
+配送されないことがあり（guchi-apps/myroom#191）、安全網の`schedule`も15分の指定に対して実測
+24〜36分でしか走らない。「作った時点で既にコンフリクトしているPR」がそこに落ちると、人が画面の
+ボタンを押すまで誰も直しにいかない。**GitHubのイベント配送・スケジューラに依存しない起点として、
+既に常駐しているpollerの1巡に相乗りさせる**（開発サーバー・セッション・worktreeの回収と同じ理由で、
+systemd timerは新設しない）。
+
+**上の3つと違い、pollerは間隔を持たない。** 毎巡そのまま呼び、実際に巡回するかどうかは
+issue-deck側が`CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分・0で無効）で決める。間隔が決めているのは
+GitHub APIをどれだけ使うかであり、それはissue-deckの側の関心事だから——呼ぶ側（別ホストのpoller等）が
+増えても消費が増えないようにしてある。間隔に達していなければ`swept: false`が返って終わる。
+ログに出すのは**実際に起動したときだけ**（30秒ごとに「異常なし」が積まれると、journalctlで
+本当に見たい失敗が埋もれる）。`--dry-run`では呼ばない（ワークフローの起動という外向きの副作用が
+あるため）。
+
+どのPRへ起動するかの判定はissue-deck側にある。設計は
+[auto-repair.md](auto-repair.md)「issue-deckからの巡回検知」。
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
@@ -1998,6 +2021,7 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
+| `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 

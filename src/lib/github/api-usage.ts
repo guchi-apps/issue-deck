@@ -47,6 +47,9 @@ export const GITHUB_API_FEATURES = [
   { key: "workflow_cancel", label: "実行のキャンセル" },
   { key: "pull_request_merge", label: "PRのマージ" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
+  // コンフリクトしたPRの巡回検知（#2116）。PR一覧のRESTはETagが効くので、実際に消費するのは
+  // コンフリクトしているPRがあるときのGraphQLと起動だけ。
+  { key: "conflict_sweep", label: "コンフリクトの巡回検知" },
   { key: "release_dispatch", label: "リリースの起動" },
   { key: "deploy_dispatch", label: "本番デプロイの起動" },
   { key: "secrets_sync", label: "シークレット同期の起動" },
