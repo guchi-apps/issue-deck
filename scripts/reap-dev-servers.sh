@@ -14,7 +14,7 @@
 #
 # 環境変数:
 #   ISSUE_DECK_WORKTREE_BASE           worktreeの置き場（既定: ~/apps/issue-deck-worktrees）
-#   DEV_SERVER_IDLE_MINUTES            アイドルとみなすまでの分数（既定: 60・0で無効）
+#   DEV_SERVER_IDLE_MINUTES            アイドルとみなすまでの分数（既定: 20・0で無効）
 #   DEV_SERVER_ORPHAN_GRACE_MINUTES    /procの走査で止めるまでの猶予（既定: 30・0で無効）
 #
 # ## 在庫がPIDファイルだけでは足りない（#1525・#1523の実測）
@@ -65,7 +65,11 @@ source "$SCRIPT_DIR/lib/dev-server.sh"
 source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
-IDLE_MINUTES="${DEV_SERVER_IDLE_MINUTES:-60}"
+# **既定は20分**（#2076で60分から短くした）。開発サーバーは1本で最大1.6GiB（2026-08-22の実測・
+# `next-server`）まで育ち、セッションは最大12本同時に生きているため、60分ぶん抱えたままだと
+# メモリが尽きて`earlyoom`が`next-server`をkillする（2026-08-16以降7回、すべてこれ）。
+# 起こし直しは実測0.3秒で、プロンプトにも`cd <worktree> && pnpm dev`と案内してある。
+IDLE_MINUTES="${DEV_SERVER_IDLE_MINUTES:-20}"
 ORPHAN_GRACE_MINUTES="${DEV_SERVER_ORPHAN_GRACE_MINUTES:-30}"
 DRY_RUN=0
 
