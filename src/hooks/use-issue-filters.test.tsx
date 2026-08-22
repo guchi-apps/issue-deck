@@ -76,6 +76,41 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
     expect(replace).toHaveBeenCalledTimes(1);
   });
 
+  it("重ねて開くPR詳細（#2149）も、開くときだけ履歴を積む", () => {
+    const { result } = renderFilters("view=check-user");
+
+    act(() => result.current.selectPullRequestModal("owner/repo#12"));
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(urlOf(push.mock.calls[0])).toContain("prmodal=owner%2Frepo%2312");
+    // 下の画面（ビュー）はそのまま。PRペインへ移らないことがこの機能の主眼
+    expect(urlOf(push.mock.calls[0])).toContain("view=check-user");
+    expect(urlOf(push.mock.calls[0])).not.toContain("pane=");
+
+    currentSearchParams = new URLSearchParams("view=check-user&prmodal=owner%2Frepo%2312");
+    const closing = renderHook(() => useIssueFilters());
+    act(() => closing.result.current.selectPullRequestModal(null));
+
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(urlOf(replace.mock.calls[0])).not.toContain("prmodal=");
+  });
+
+  it("ビュー・ペインを切り替えたら、重ねて開いていたPR詳細も畳む（#2149）", () => {
+    const { result } = renderFilters("view=check-user&prmodal=owner%2Frepo%2312");
+    act(() => result.current.selectView("favorites"));
+    expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
+
+    push.mockClear();
+    const toPane = renderFilters("view=check-user&prmodal=owner%2Frepo%2312");
+    act(() => toPane.result.current.selectPullRequestView("in-progress"));
+    expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
+
+    push.mockClear();
+    const toFlow = renderFilters("view=check-user&prmodal=owner%2Frepo%2312");
+    act(() => toFlow.result.current.selectFlowPane());
+    expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
+  });
+
   it("結果が今のURLと同じなら遷移しない（戻る操作が2回必要になるのを防ぐ）", () => {
     const { result } = renderFilters("view=favorites");
 

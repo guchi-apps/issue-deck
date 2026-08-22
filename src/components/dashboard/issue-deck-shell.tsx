@@ -34,6 +34,7 @@ import { MobilePullRequestDetailScreen } from "@/components/dashboard/mobile/mob
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
+import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-detail-dialog";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
@@ -111,6 +112,7 @@ import {
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
   pullRequestsWaitingForMergeChecks,
+  resolvePullRequestHeader,
   type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
@@ -151,6 +153,7 @@ export function IssueDeckShell({
     selectPullRequestView,
     selectFlowPane,
     selectPullRequest,
+    selectPullRequestModal,
     toggleLabel,
     toggleRepo,
   } = useIssueFilters();
@@ -874,25 +877,42 @@ export function IssueDeckShell({
 
   const pullRequestDetail = usePullRequestDetail(filters.pr);
 
-  // 詳細を開いているPR（#1087）。一覧に載っていれば一覧の項目を使い（CI状態まで揃っていて
-  // 即座に描ける）、載っていない場合は詳細APIが返す`summary`で補う。後者は画面内のリンクから
-  // マージ済み・クローズ済みのPRを開いた場合の経路（#1260）。
-  //
-  // **両方あるときは取得が新しい方を採る**（#1578）。一覧はPR画面を開いている間しか
-  // 自動更新されず、詳細ヘッダーの更新ボタンは詳細しか取り直さない。一覧を無条件に優先すると、
-  // 更新を押してCIが通ったことを取り直しても、一覧を開いた時点の「CI失敗」が出たまま消えなかった。
-  const selectedPullRequest = useMemo(() => {
-    if (!filters.pr) return null;
-    const fromList = filteredPullRequests.find((pullRequest) => pullRequest.id === filters.pr);
-    // 取得中・別のPRへ切り替えた直後に前のPRのヘッダーが残らないよう、idの一致を確認する。
-    const detail =
-      pullRequestDetail.detail?.id === filters.pr ? pullRequestDetail.detail : null;
-    if (!detail) return fromList ?? null;
-    if (!fromList) return detail.summary;
-    return openPullRequests.fetchedAt && openPullRequests.fetchedAt > detail.fetchedAt
-      ? fromList
-      : detail.summary;
-  }, [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail]);
+  // 詳細を開いているPR（#1087）。ヘッダーの材料を一覧と詳細のどちらから採るかは
+  // `resolvePullRequestHeader`（#1578・#2149。確認待ちのモーダルと共用する）。
+  const selectedPullRequest = useMemo(
+    () =>
+      resolvePullRequestHeader(
+        filters.pr,
+        filteredPullRequests,
+        openPullRequests.fetchedAt,
+        pullRequestDetail.detail,
+      ),
+    [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail],
+  );
+
+  // 「ユーザーの確認待ち」に並ぶマージ待ちPRを、その場に重ねて開く（#2149）。**PR一覧画面へ
+  // 遷移しない**——確認待ちは上から順に片付ける場所で、1件開くたびに画面ごと移ると続きを
+  // 見るのに毎回戻る操作が要る。開いているかどうかは`prmodal`クエリが正（`pr`と分ける理由と
+  // 重ね表示をstateで持たない理由は`pull-request-detail-dialog.tsx`）。
+  const modalPullRequestDetail = usePullRequestDetail(filters.prmodal);
+  // ヘッダーの材料は、一覧に並んでいるものと同じ母集団（リポジトリ絞り込みを掛けない
+  // `crossRepositoryPullRequests`）から引く。押した直後にヘッダーを描けるので、詳細の
+  // 取得を待つのは本文とコメントだけになる。
+  const modalPullRequest = useMemo(
+    () =>
+      resolvePullRequestHeader(
+        filters.prmodal,
+        crossRepositoryPullRequests,
+        openPullRequests.fetchedAt,
+        modalPullRequestDetail.detail,
+      ),
+    [
+      filters.prmodal,
+      crossRepositoryPullRequests,
+      openPullRequests.fetchedAt,
+      modalPullRequestDetail.detail,
+    ],
+  );
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
     const merge: OptimisticMerge = { id: pullRequest.id, mergedAt: new Date().toISOString() };
@@ -902,6 +922,9 @@ export function IssueDeckShell({
     }));
     // マージしたPRの詳細は用済みなので閉じて一覧へ戻す（スマホでは一覧画面へ戻る）。
     if (filters.pr === pullRequest.id) selectPullRequest(null);
+    // 確認待ちの一覧から重ねて開いていた場合も同じ（#2149）。マージすると一覧から外れるため、
+    // 閉じないと「押せるものが無い詳細」が残る。
+    if (filters.prmodal === pullRequest.id) selectPullRequestModal(null);
     openPullRequests.refresh();
   }
 
@@ -1215,7 +1238,8 @@ export function IssueDeckShell({
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
-                  onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
+                  /* PR画面へ移らず、その場に重ねて開く（#2149）。戻る操作で閉じる */
+                  onSelectPullRequest={(pullRequest) => selectPullRequestModal(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
@@ -1428,7 +1452,10 @@ export function IssueDeckShell({
                     <MergePendingPullRequests
                       pullRequests={mergePendingPullRequests}
                       waitingForChecksCount={mergeCheckWaitingCount}
-                      onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
+                      /* PR一覧画面へ移らず、その場に重ねて開く（#2149） */
+                      onSelectPullRequest={(pullRequest) =>
+                        selectPullRequestModal(pullRequest.id)
+                      }
                     />
                   ) : undefined
                 }
@@ -1494,6 +1521,20 @@ export function IssueDeckShell({
             </>
           )}
         </div>
+
+        {/* 「ユーザーの確認待ち」から重ねて開くPR詳細（#2149）。PC・スマホの入口が同じ1つを開く */}
+        <PullRequestDetailDialog
+          pullRequestId={filters.prmodal}
+          pullRequest={modalPullRequest}
+          detail={modalPullRequestDetail.detail}
+          isLoading={modalPullRequestDetail.isLoading}
+          error={modalPullRequestDetail.error}
+          onRefresh={modalPullRequestDetail.refresh}
+          onMerged={() => modalPullRequest && handlePullRequestMerged(modalPullRequest)}
+          /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
+             クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
+          onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
+        />
 
         {/* 「次にやること」（#1853）。PC・スマホの入口が同じ1つを開く */}
         <IssueOrderDialog guide={issueOrderGuide} onSelectIssue={(issue) => openIssueUrl(issue.id)} />
