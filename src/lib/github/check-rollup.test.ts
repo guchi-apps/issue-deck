@@ -27,10 +27,20 @@ function rollupResponse(rollup: unknown) {
   return { data: { repository: { object: { statusCheckRollup: rollup } } } };
 }
 
-/** GitHub Actions発のcheck-runノード。`workflowFile`はcallerのファイル名（#1799） */
-function checkRun(status: string, conclusion: string | null, workflowFile: string) {
+/**
+ * GitHub Actions発のcheck-runノード。`workflowFile`はcallerのファイル名（#1799）。
+ * `job`はcheck-run名の「callerのジョブID / ジョブ名」のうち後半（#2059）。
+ */
+function checkRun(
+  status: string,
+  conclusion: string | null,
+  workflowFile: string,
+  job = "job",
+) {
   return {
     __typename: "CheckRun",
+    name: `review / ${job}`,
+    detailsUrl: `https://github.com/owner/repo/actions/runs/1/job/${job}`,
     status,
     conclusion,
     checkSuite: {
@@ -82,7 +92,7 @@ describe("fetchCheckRollup", () => {
         { status: "in_progress", conclusion: null },
         { status: "completed", conclusion: "cancelled" },
       ],
-      mergeJudgement: "unknown",
+      mergeJudgement: { state: "unknown", step: null, runUrl: null },
     });
   });
 
@@ -108,7 +118,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "failure" },
         { status: "pending", conclusion: null },
       ],
-      mergeJudgement: "unknown",
+      mergeJudgement: { state: "unknown", step: null, runUrl: null },
     });
   });
 
@@ -131,7 +141,11 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "pending",
       checks: [{ status: "completed", conclusion: "success" }],
-      mergeJudgement: "pending",
+      mergeJudgement: {
+        state: "pending",
+        step: null,
+        runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
+      },
     });
   });
 
@@ -156,7 +170,11 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "pending", conclusion: null },
       ],
-      mergeJudgement: "pending",
+      mergeJudgement: {
+        state: "pending",
+        step: null,
+        runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
+      },
     });
   });
 
@@ -180,7 +198,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "skipped" },
       ],
-      mergeJudgement: "settled",
+      mergeJudgement: { state: "settled", step: null, runUrl: null },
     });
   });
 
@@ -202,7 +220,7 @@ describe("fetchCheckRollup", () => {
     const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
     // CI状態は`success`のままで、判定の進み具合だけが別の軸として`pending`になる。
     expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
-    expect(rollup?.mergeJudgement).toBe("pending");
+    expect(rollup?.mergeJudgement.state).toBe("pending");
   });
 
   it("判定のワークフローが配られていないリポジトリでは`unknown`（#1968）", async () => {
@@ -217,8 +235,129 @@ describe("fetchCheckRollup", () => {
     );
 
     await expect(
-      fetchCheckRollup("owner", "repo", "develop", "token").then((r) => r?.mergeJudgement),
+      fetchCheckRollup("owner", "repo", "develop", "token").then((r) => r?.mergeJudgement.state),
     ).resolves.toBe("unknown");
+  });
+
+  it("判定中は実行中のジョブを`step`・実行ログを`runUrl`として返す（#2059）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 4,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
+            checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "wait-for-ci"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+            // `needs`待ちの後続ジョブもcheck-runとしては先に並ぶ。実行中の方を名乗らせる。
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement).toEqual({
+      state: "pending",
+      step: "claude-review",
+      runUrl: "https://github.com/owner/repo/actions/runs/1/job/claude-review",
+    });
+  });
+
+  it("CI完了待ちとレビューが同時に走っている間はレビューを名乗る（#2066）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 4,
+          nodes: [
+            checkRun("IN_PROGRESS", null, "ci.yml", "lint-and-build"),
+            // wait-for-ciはrisk-check・claude-reviewと並行して走る（#2066）。CIの進み具合は
+            // 隣のCI状態のピルが出しているので、判定側で動いているものを優先して名乗らせる。
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "wait-for-ci"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("claude-review");
+  });
+
+  it("レビューが終わってCI完了待ちだけが残れば「CIの完了待ち」を名乗る（#2066）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review"),
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "wait-for-ci"),
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("wait-for-ci");
+  });
+
+  it("実行中が無ければ、進行順がいちばん早い未完了のジョブを待っているものとする（#2059）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+            checkRun("QUEUED", null, "claude-review-develop.yml", "risk-check"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("risk-check");
+  });
+
+  it("肩代わりジョブ（`*-fallback`）は本体と同じ段階として扱う（#2059）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 1,
+          nodes: [
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review-fallback"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBe("claude-review");
+  });
+
+  it("想定外のジョブ名では`step`をnullにする（画面は「マージ可否を判定中」へ縮退。#2059）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 1,
+          nodes: [
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "identify-issue"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.mergeJudgement.step).toBeNull();
+    expect(rollup?.mergeJudgement.runUrl).toBe(
+      "https://github.com/owner/repo/actions/runs/1/job/identify-issue",
+    );
   });
 
   it("チェックが100件を超える場合は1件ずつ返さず、`state`だけを返す", async () => {
@@ -235,7 +374,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "success",
       checks: null,
-      mergeJudgement: "unknown",
+      mergeJudgement: { state: "unknown", step: null, runUrl: null },
     });
   });
 
@@ -245,7 +384,7 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: null,
       checks: [],
-      mergeJudgement: "unknown",
+      mergeJudgement: { state: "unknown", step: null, runUrl: null },
     });
   });
 
@@ -295,7 +434,7 @@ describe("fetchPullRequestRollup", () => {
       rollup: {
         state: "success",
         checks: [{ status: "completed", conclusion: "success" }],
-        mergeJudgement: "unknown",
+        mergeJudgement: { state: "unknown", step: null, runUrl: null },
       },
       mergeable: false,
     });
@@ -311,13 +450,21 @@ describe("fetchPullRequestRollup", () => {
   it("`MERGEABLE`はtrue、`UNKNOWN`（判定中）はnullにする", async () => {
     stubGraphql(pullRequestWithRollup("MERGEABLE", null));
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
+      rollup: {
+        state: null,
+        checks: [],
+        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      },
       mergeable: true,
     });
 
     stubGraphql(pullRequestWithRollup("UNKNOWN", null));
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
+      rollup: {
+        state: null,
+        checks: [],
+        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      },
       mergeable: null,
     });
   });
@@ -326,7 +473,11 @@ describe("fetchPullRequestRollup", () => {
     stubGraphql(pullRequestResponse({ mergeable: "MERGEABLE", commits: { nodes: [] } }));
 
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
-      rollup: { state: null, checks: [], mergeJudgement: "unknown" },
+      rollup: {
+        state: null,
+        checks: [],
+        mergeJudgement: { state: "unknown", step: null, runUrl: null },
+      },
       mergeable: true,
     });
   });
@@ -427,7 +578,7 @@ describe("fetchPullRequestRollups", () => {
     expect(rollups.get(pullRequestRollupKey("owner", "repo", 2))?.rollup).toEqual({
       state: "success",
       checks: [],
-      mergeJudgement: "unknown",
+      mergeJudgement: { state: "unknown", step: null, runUrl: null },
     });
   });
 

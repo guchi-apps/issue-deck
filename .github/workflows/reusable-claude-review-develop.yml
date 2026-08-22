@@ -5,12 +5,12 @@ name: Reusable Claude Code Review (develop向けPR)
 #
 # ジョブ構成:
 # - identify-issue: 対応Issue番号を特定する(他ジョブが共通で参照する)
-# - wait-for-ci: risk-check/claude-reviewの判定・00.check-user付与を、CI(ci.yml)の
-#   完了を待ってから行うようにするための待機ジョブ。CIが`in_progress`のうちに
-#   00.check-userが付いてしまい、issue-deck画面上で時期尚早に「要確認」に見える
-#   問題を防ぐ(#810)。ポーリングがタイムアウトした場合もジョブ自体は失敗させず
-#   後続へ進める(fail-open。失敗させるとneeds経由でrisk-check/claude-reviewが
-#   skipされ、レビュー自体が行われないまま放置される事故につながるため)
+# - wait-for-ci: CI(ci.yml)の完了を待つ待機ジョブ。**依存するのは最後のauto-mergeだけで、
+#   risk-check/claude-reviewはCIと並行して走る**(#2066)。CIが`in_progress`のうちに
+#   00.check-userが付き、issue-deck画面上で時期尚早に「要確認」に見える問題を防ぐのが
+#   目的(#810)だが、その付与を行うのは既にauto-mergeジョブだけ(#1406)なので、
+#   判定とレビューまで直列に並べる必要は無くなっている。ポーリングがタイムアウトした
+#   場合もジョブ自体は失敗させず後続へ進める(fail-open)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
 #   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
 #   付与の有無を確認する(#94, #366)。**判定するだけで、00.check-userの付与と理由コメントの
@@ -49,10 +49,22 @@ name: Reusable Claude Code Review (develop向けPR)
 # - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
 #   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
+# **判定とレビューはCIと並行して走る(#2066)。** ジョブの依存は
+# identify-issue -> {wait-for-ci | risk-check -> claude-review} -> auto-merge で、
+# CIの完了を待つのは実際にマージを有効化するauto-mergeだけ。直列だった頃(wait-for-ci ->
+# risk-check -> claude-review -> auto-merge)は、直近20実行の実測でwait-for-ciが中央値167秒・
+# claude-reviewが中央値235秒(20件中16件で実行)かかり、PR作成から自動マージ有効化まで約7分あった。
+# 並行にすると律速がレビュー側だけになり、中央値で約2分半縮む。
+# **Claude Codeの消費は増えない。** wait-for-ciはCIのconclusionを見ずcompletedで抜けるため、
+# CIが落ちたコミットにも並行化の前からレビューは走っている。
+# **マージの安全性も変わらない。** auto-mergeが使うGitHub Auto-merge機能は、developの
+# required_status_checks(lint-and-build)の通過を待ってから実際のマージを行う。
+#
 # **判定が終わる前にPRがマージされていることがある(#1968)。** PR #1959は判定の6分前に
 # issue-deckの画面のマージボタンでdevelopへ入り、`00.check-user`・`01.check-merge`は
-# マージ後に付いた。ワークフロー内の順序(wait-for-ci -> risk-check -> claude-review ->
-# auto-merge)は保たれており、先行したのは**画面からの手動マージ**の方である。
+# マージ後に付いた。ワークフロー内の順序(当時はwait-for-ci -> risk-check -> claude-review ->
+# auto-mergeの直列。現在は上の#2066の並行構成)は保たれており、先行したのは
+# **画面からの手動マージ**の方である。
 # 再発防止は画面側で行い(判定中はマージボタンを押せなくする。`src/lib/pull-request-list.ts`の
 # `isMergeJudgementPending`)、こちら側は「もう入ってしまった場合の伝え方」だけを直している——
 # auto-mergeジョブの理由コメントは、PRが既にマージ済みなら事後確認向けの文面へ切り替える
@@ -173,7 +185,7 @@ jobs:
           echo "タイムアウトしました。CI完了を待たずに後続ジョブへ進みます(fail-open)。"
 
   risk-check:
-    needs: [identify-issue, wait-for-ci]
+    needs: identify-issue
     runs-on: ubuntu-latest
     permissions:
       issues: read
@@ -427,7 +439,7 @@ jobs:
   claude-review:
     # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
     # スキップされた場合、auto-mergeはclaude-reviewの結果を'skipped'として許容する
-    needs: [identify-issue, wait-for-ci, risk-check]
+    needs: [identify-issue, risk-check]
     if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -598,17 +610,22 @@ jobs:
             if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
               gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
             fi
-            COMMENT_BODY="⚠️ 自動レビュー（claude-review）が実行できなかったため、developへのマージ前にユーザーの確認が必要です。"
+            # 理由は必ず「見出し語 + 箇条書き」の形で書く。issue-deckのIssue詳細
+            # (src/lib/merge-check-reasons.ts)がこの形からしか理由を取り出せず、
+            # 散文だけのコメントは「理由の記録が見つかりませんでした」になる(#2062)。
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"- 自動レビュー（claude-review）が実行できなかったため（安全のため自動マージはスキップされます）"
             if [ "$RISKY" = "true" ]; then
-              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"機械的リスク判定にも以下の理由で該当しています。"
-              COMMENT_BODY="$COMMENT_BODY"$'\n\n'"$REASONS"
+              COMMENT_BODY="$COMMENT_BODY"$'\n'"$REASONS"
             fi
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"実行ログ: ${RUN_URL}"
             COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
 
   auto-merge:
-    needs: [identify-issue, risk-check, claude-review]
+    needs: [identify-issue, wait-for-ci, risk-check, claude-review]
     # claude-reviewはrisk-checkの判定次第でskipされる(#992)。needsの既定動作では
     # 依存ジョブがskipされると後続もskipされてしまうため、条件を明示的に組み立てて
     # 「claude-reviewがsuccessまたはskipped」を許容する。
@@ -616,6 +633,9 @@ jobs:
     # (レビュー結果が得られていない状態でマージしないための安全側の挙動)。
     # identify-issueはdraft PRのときにskipされるため、successを要求することで
     # draft PRに対する自動マージも従来どおり行われない。
+    # wait-for-ciの結果は条件に入れない(#2066)。CI完了待ちは通知のタイミングを揃えるための
+    # ものでマージの安全性はGitHub Auto-merge機能が担保しており、待機ジョブの失敗で
+    # 自動マージごと止めるとレビュー済みのPRが誰にも拾われないまま残るため(fail-open)。
     # always()ではなく!cancelled()を使うのは、always()がワークフローのキャンセル時にも
     # ジョブを実行してしまうため。本ワークフローは新しいpushが来ると古い実行を
     # concurrencyで丸ごとキャンセルする(#818)ので、always()にすると
@@ -724,7 +744,7 @@ jobs:
           gh pr merge "$PR_NUMBER" --auto --merge
 
   auto-merge-fallback:
-    needs: [identify-issue, auto-merge]
+    needs: [identify-issue, risk-check, auto-merge]
     if: always() && needs.auto-merge.result == 'failure'
     runs-on: ubuntu-latest
     permissions:
@@ -737,6 +757,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          RISKY: ${{ needs.risk-check.outputs.risky }}
+          REASONS: ${{ needs.risk-check.outputs.reasons }}
         run: |
           set -e
           gh pr comment "$PR_NUMBER" --body "⚠️ 自動マージ（auto-merge）が失敗しました。Actionsの実行ログを確認し、必要であれば手動でマージしてください。"
@@ -762,4 +784,17 @@ jobs:
             if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
               gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
             fi
+            # Issueにも理由を残す(#2062)。従来はPRコメントにしか書いておらず、Issue側は
+            # ラベルだけが付くため、issue-deckのIssue詳細が「理由の記録が見つかりませんでした」
+            # としか出せなかった。文面は「見出し語 + 箇条書き」の形を守る
+            # (src/lib/merge-check-reasons.ts がこの形からしか理由を取り出せない)。
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            COMMENT_BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"- 自動マージ（auto-merge）の有効化に失敗したため、ユーザーのマージ操作が必要です"
+            if [ "$RISKY" = "true" ]; then
+              COMMENT_BODY="$COMMENT_BODY"$'\n'"$REASONS"
+            fi
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n'"実行ログ: ${RUN_URL}"
+            COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
+            gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi

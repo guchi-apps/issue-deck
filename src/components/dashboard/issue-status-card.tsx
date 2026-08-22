@@ -45,6 +45,13 @@ type IssueStatusCardProps = {
    * 読めないリポジトリではnullで、従来どおり進捗ステッパーのバッジだけになる。
    */
   checkUserGuidance?: CheckUserGuidance | null;
+  /**
+   * 計画フェーズを通らずに実装へ入ったIssueかどうか（#2069・`isPlanningPhaseSkipped`の結果）。
+   *
+   * 判定にIssueのコメントが要るため、解決は親（Issue詳細）に任せている。このカードは
+   * コメントを持っておらず、ここで取り直すと同じ取得が2本走る。
+   */
+  planningSkipped?: boolean;
 };
 
 /**
@@ -67,6 +74,7 @@ export function IssueStatusCard({
   workflowRunId,
   qaAnswerPending,
   checkUserGuidance = null,
+  planningSkipped = false,
 }: IssueStatusCardProps) {
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
@@ -122,6 +130,7 @@ export function IssueStatusCard({
           executionTarget={executionTarget}
           showApprovalBadge={checkUserGuidance === null}
           showExecutionTarget={issueSession === null}
+          planningSkipped={planningSkipped}
         />
       )}
 

@@ -8,6 +8,7 @@ import {
   BranchBadge,
   CiStateBadge,
   ConflictBadge,
+  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   RepairRunBadge,
@@ -19,7 +20,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
-import { autoRefreshIntervalLabel, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
@@ -145,6 +146,7 @@ function PullRequestCard({
         ) : (
           <CiStateBadge ciState={pullRequest.ciState} />
         )}
+        <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
         <ConflictBadge mergeable={pullRequest.mergeable} />
         {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
         <RepairRunBadge run={pullRequest.repairRun} />
@@ -235,10 +237,10 @@ export function PullRequestList({
           <p className="truncate text-xs text-muted-foreground">
             <span>{pullRequests.length}件</span>
             {fetchedAt && <span>{` ・ ${formatTimeOfDay(fetchedAt)}時点`}</span>}
-            {/* 何分間隔で更新中なのかを画面に出す（#1767） */}
-            {autoRefreshIntervalMs !== null && (
-              <span>{` ・ 自動更新${autoRefreshIntervalLabel(autoRefreshIntervalMs)}`}</span>
-            )}
+            {/* 何分間隔で更新中なのかを画面に出す（#1767）。**自動更新していないときも黙らない**
+                （#1797）——何も出ないと「自動更新していない」のか「この画面は状態を出さない」のかを
+                見分けられない。文言はIssue一覧・ブランチ画面と共通 */}
+            <span>{` ・ ${describeAutoRefreshState(autoRefreshIntervalMs)}`}</span>
           </p>
         </div>
         {/* ヘッダーに「更新」ボタンは置かない（#1947）。取り直しは自動更新（この画面を開いて

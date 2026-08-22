@@ -71,7 +71,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: "unknown",
+    mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,

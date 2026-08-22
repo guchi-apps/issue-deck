@@ -1,4 +1,4 @@
-import type { MergeJudgementState } from "@/lib/github/check-rollup";
+import type { MergeJudgement, MergeJudgementStep } from "@/lib/github/check-rollup";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -299,9 +299,39 @@ export function pullRequestsAwaitingUserMerge(
 /** 判定中でマージボタンを押せないときに、ボタンへ出す短い表示（#1968） */
 export const MERGE_JUDGEMENT_PENDING_LABEL = "判定中";
 
-/** 判定中でマージボタンを押せない理由。ボタンの`title`に出す（#1968） */
-export const MERGE_JUDGEMENT_PENDING_REASON =
-  "developへマージしてよいかを判定中です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。";
+/**
+ * 判定のどの段階を待っているかを表す、画面のバッジの文言（#2059）。
+ *
+ * ジョブ名をそのまま出さないのは、待っている人が知りたいのが「いま何が動いているか」では
+ * なく「あと何が終われば押せるのか」だから。とくに`claude-review`は数分かかり、CIより長い
+ * ことが多いため、CIと並行して走るようにした後（#2066）も「CI通過」が出た後にここだけが
+ * 動いている窓は残る。
+ */
+export const MERGE_JUDGEMENT_STEP_LABEL: Record<MergeJudgementStep, string> = {
+  "wait-for-ci": "CIの完了待ち",
+  "risk-check": "マージ可否を判定中",
+  "claude-review": "Claudeがレビュー中",
+  "auto-merge": "自動マージの判定中",
+};
+
+/** 段階を特定できないときの表示。ジョブ名が想定外・チェックが多すぎて1件ずつ見られない場合（#2059） */
+export const MERGE_JUDGEMENT_FALLBACK_LABEL = "マージ可否を判定中";
+
+/** 判定中のバッジに出す文言。段階が分からなければ`MERGE_JUDGEMENT_FALLBACK_LABEL`（#2059） */
+export function mergeJudgementLabel(step: MergeJudgementStep | null): string {
+  return step === null ? MERGE_JUDGEMENT_FALLBACK_LABEL : MERGE_JUDGEMENT_STEP_LABEL[step];
+}
+
+/**
+ * 判定中でマージボタンを押せない理由。ボタンとバッジの`title`に出す（#1968・#2059）。
+ *
+ * **`title`は補助でしかない。** スマホではツールチップが表示されないため、待っている相手は
+ * バッジ（`MergeJudgementBadge`）として画面に出す。理由の文言をここへ寄せているのは、
+ * PCでマウスを載せたときに「押せない理由」まで読めるようにするため。
+ */
+export function mergeJudgementReason(step: MergeJudgementStep | null): string {
+  return `${mergeJudgementLabel(step)}です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
+}
 
 /**
  * 自動マージ可否の判定がまだ下っていないPRか（#1968）。**真のあいだは画面からマージさせない。**
@@ -319,9 +349,14 @@ export const MERGE_JUDGEMENT_PENDING_REASON =
  * 警告ダイアログではなく無効化にしているのは、事故が「ダイアログを読み飛ばした」ではなく
  * 「ダイアログが出なかった」ために起きているため。判定のcheck-runが1件も無いリポジトリ
  * （ワークフロー未配布・起動前）は`unknown`で従来どおり押せる。
+ *
+ * `null`・`undefined`（未取得）も押せる側＝`false`として扱う。呼び出し元
+ * （`IssueMergeButton`）でその場しのぎの既定値を組み立てさせないための判定側の責務（#2059）。
  */
-export function isMergeJudgementPending(mergeJudgement: MergeJudgementState): boolean {
-  return mergeJudgement === "pending";
+export function isMergeJudgementPending(
+  mergeJudgement: MergeJudgement | null | undefined,
+): boolean {
+  return mergeJudgement?.state === "pending";
 }
 
 /**

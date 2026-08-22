@@ -1,6 +1,6 @@
 import { buildPullRequestId } from "@/lib/github-reference";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
-import type { MergeJudgementState } from "@/lib/github/check-rollup";
+import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
@@ -39,7 +39,7 @@ export function toPullRequestSummary(
     /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
     mergeable?: boolean | null;
     /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
-    mergeJudgement?: MergeJudgementState;
+    mergeJudgement?: MergeJudgement;
     linkedIssueCheckUser?: boolean;
     linkedIssueCheckReason?: CheckUserReason | null;
     /** 修復ワークフローの配布状況。判定していない経路では省略＝`{}`（押せる扱い） */
@@ -79,7 +79,7 @@ export function toPullRequestSummary(
     linkedIssueCheckUser: options.linkedIssueCheckUser ?? false,
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
-    mergeJudgement: options.mergeJudgement ?? "unknown",
+    mergeJudgement: options.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     repairRun: options.repairRun ?? null,

@@ -29,7 +29,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     linkedIssueCheckUser: false,
     linkedIssueCheckReason: null,
     ciState: "success",
-    mergeJudgement: "unknown",
+    mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
@@ -267,10 +267,43 @@ describe("PullRequestList", () => {
 
   it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
     // PR #1959の再現。CIは通っていても判定が終わるまではマージさせない。
-    renderList([makePullRequest({ ciState: "success", mergeJudgement: "pending" })]);
+    renderList([
+      makePullRequest({
+        ciState: "success",
+        mergeJudgement: { state: "pending", step: null, runUrl: null },
+      }),
+    ]);
     const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  it("判定中は待っている段階をバッジで出し、実行ログへのリンクにする（#2059）", () => {
+    // 「CI通過」なのにボタンが「判定中」で押せない理由は、`title`だけではスマホで読めない。
+    renderList([
+      makePullRequest({
+        ciState: "success",
+        mergeJudgement: {
+          state: "pending",
+          step: "claude-review",
+          runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
+        },
+      }),
+    ]);
+    const badge = screen.getByText("Claudeがレビュー中").closest("a") as HTMLAnchorElement;
+    expect(badge.href).toBe("https://github.com/owner/repo/actions/runs/1/job/2");
+    expect(screen.getByText("CI通過")).toBeTruthy();
+  });
+
+  it("判定が終わっていれば判定中のバッジは出さない（#2059）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "success",
+        mergeJudgement: { state: "settled", step: null, runUrl: null },
+      }),
+    ]);
+    expect(screen.queryByText("マージ可否を判定中")).toBeNull();
+    expect(screen.queryByText("Claudeがレビュー中")).toBeNull();
   });
 
   it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {

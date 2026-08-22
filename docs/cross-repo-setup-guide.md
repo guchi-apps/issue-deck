@@ -85,7 +85,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `issue-labels.yml` | `Planning`〜`Done`の進捗（Project Status）の状態遷移を担うワークフローの**トリガー定義のみ**。ジョブ本体は`reusable-issue-labels.yml`にあり、`uses:`で呼び出す | **コピーではなく、issue-deckの`reusable-issue-labels.yml`をタグ固定で参照する薄いcallerを置く**（下記「再利用可能ワークフローの参照」を参照）。`issue-<番号>`ブランチ命名規則が一致していれば改変不要 |
 | `reusable-issue-labels.yml` | 上記のジョブ本体（`on: workflow_call`）。他リポジトリから呼び出される実体 | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-review-develop.yml` | develop向けPRの自動レビュー・自動マージ不可判定（`risk-check`）・Auto-merge有効化を行う。**トリガー定義と`concurrency`のみ**を持ち、本体は`reusable-claude-review-develop.yml`を`uses:`で呼ぶ（#1078） | **コピーではなく薄いcallerを置く。** リポジトリ固有のリスクパスは`risk-paths`、依存関係の判定基準は`dependency-check`、差分規模の閾値は`review-file-threshold`・`review-line-threshold`、除外するlockファイルは`lock-files`で指定する。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
-| `reusable-claude-review-develop.yml` | 上記のジョブ本体（`on: workflow_call`）。`identify-issue`／`wait-for-ci`／`risk-check`／`claude-review`／`auto-merge`と各fallbackを含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
+| `reusable-claude-review-develop.yml` | 上記のジョブ本体（`on: workflow_call`）。`identify-issue`／`wait-for-ci`／`risk-check`／`claude-review`／`auto-merge`と各fallbackを含む。`wait-for-ci`は`auto-merge`の前段だけに効き、`risk-check`・`claude-review`はCIと並行して走る（#2066） | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-conflict-resolve.yml` | develop向けPRがdevelopとコンフリクトした場合に自動解消を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-conflict-resolve.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 指定する入力は`claude-ci-fix.yml`と同じ（`runtime-setup`・`package-manager`・`node-version`・`build-env`・`verify-commands`・`prompts-ref`）。**トリガーに`push`を書かないこと**（`claude-code-action`が`push`イベントに非対応で必ず`Unsupported event type: push`で落ちる。#1330）。developへのpushを契機にしたい場合は、issue-deck側と同じく**そのリポジトリのCIワークフローの`workflow_run`（`types: [requested]`・`branches: [develop]`）**を購読する。`workflows:`には**そのリポジトリのCIワークフローの`name:`**を書く（issue-deckは`CI`だが、リポジトリによって異なる） |
 | `reusable-claude-conflict-resolve.yml` | 上記のジョブ本体（`on: workflow_call`）。`detect-conflicts`／`resolve-conflicts`を含む | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 | `claude-ci-fix.yml` | develop向けPRのCIが失敗した場合に自動修正を試みる。**トリガー定義のみ**を持ち、本体は`reusable-claude-ci-fix.yml`を`uses:`で呼ぶ（#1066） | **コピーではなく薄いcallerを置く。** 技術スタックの差は`with:`の`runtime-setup`・`package-manager`・`node-version`で、ビルド検証に要るダミー環境変数は`build-env`で、修正後の検証手順の説明は`verify-commands`で指定する。**Nodeのセットアップは要るが依存のインストールは不要**なリポジトリ（検証が`node --check`だけで`node_modules`を要さない等）は`install-dependencies: false`を渡す。プロンプトは`prompts-ref`に`uses:`と同じタグを指定してissue-deck側を共有する |
@@ -151,6 +151,12 @@ jobs:
 > 該当するのは`manual-step-label`ジョブ（#1492。`issues: types: [opened, edited]`が必要。無いと
 > タイトルが`[手作業]`のIssueへ`71.manual-step`が自動で付かない）で、issue-deck側の
 > `issue-labels.yml`は`types: [opened, edited, closed]`になっている。
+>
+> **取りこぼしは`schedule`が埋め直すようになった（#2010）。** `manual-step-label`ジョブは
+> `schedule`・`workflow_dispatch`でも動き、タイトルが`[手作業]`で始まるopenなIssueのうち
+> ラベルの無いものを拾い直す。したがって`schedule`を持つcallerであれば、`opened`・`edited`の
+> 追記が遅れても最終的にはラベルが付く。**ただし遅れる**（cronの間隔ぶん）ため、
+> `issues: types:`を揃えること自体は引き続き必要。
 
 `claude-issue-dispatch.yml` のように技術スタックの差がある場合は `with:` で指定する。
 

@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   AUTO_REFRESH_INTERVAL_OPTIONS,
   autoRefreshIntervalLabel,
+  describeAutoRefreshState,
+  describeRefreshButtonHint,
+  ISSUE_POLL_INTERVAL_MS,
   PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
   shorterAutoRefreshInterval,
@@ -49,5 +52,27 @@ describe("shorterAutoRefreshInterval", () => {
 
   it("どちらも要求が無ければ自動更新しない", () => {
     expect(shorterAutoRefreshInterval(null, null)).toBeNull();
+  });
+});
+
+describe("describeAutoRefreshState", () => {
+  it("自動更新している間は間隔を出す", () => {
+    expect(describeAutoRefreshState(ISSUE_POLL_INTERVAL_MS)).toBe("自動更新10秒間隔");
+    expect(describeAutoRefreshState(60_000)).toBe("自動更新1分間隔");
+  });
+
+  // 何も出さないと「自動更新していない」のか「この画面は状態を出さない」のかを
+  // 見分けられない（#1797）
+  it("自動更新していないときも黙らず「手動更新のみ」と出す", () => {
+    expect(describeAutoRefreshState(null)).toBe("手動更新のみ");
+  });
+});
+
+describe("describeRefreshButtonHint", () => {
+  it("押すと何が起きるかと、放っておいても更新されるのかの両方を出す", () => {
+    expect(describeRefreshButtonHint(PULL_REQUEST_POLL_INTERVAL_MS)).toBe(
+      "今すぐ更新（自動更新10秒間隔）",
+    );
+    expect(describeRefreshButtonHint(null)).toBe("今すぐ更新（手動更新のみ）");
   });
 });

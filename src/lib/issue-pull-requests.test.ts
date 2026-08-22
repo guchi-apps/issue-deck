@@ -17,7 +17,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     draft: false,
     merged: false,
     ciStatus: "success",
-    mergeJudgement: "unknown",
+    mergeJudgement: { state: "unknown", step: null, runUrl: null },
     linkedIssueNumber: 600,
     ...overrides,
   };

@@ -1,3 +1,5 @@
+import { autoRefreshIntervalLabel } from "@/lib/auto-refresh";
+
 /**
  * 「いま出ている内容がいつ時点のものか」を出す更新インジケーターの文言と配色
  * （#1773で実行キューに入れたものを、通知ベルと共通化した。#1909）。
@@ -43,7 +45,9 @@ export function describeRefreshStatus({
   isFetching: boolean;
   pollIntervalMs: number;
 }): { label: string; tone: RefreshTone } {
-  const interval = `${Math.round(pollIntervalMs / 1000)}秒ごと`;
+  // 間隔の言い方は画面のヘッダー（`describeAutoRefreshState`）と同じ「◯秒間隔」にそろえる
+  // （#1797）。同じものを画面ごとに違う言い方で出さない
+  const interval = autoRefreshIntervalLabel(pollIntervalMs);
 
   // まだ一度も取れていないとき（初回の取得中・SSR直後）は経過を出しようがない。
   // 「0秒前に更新」のような、取れていないのに取れたように読める表示を出さない
@@ -63,9 +67,4 @@ export function describeRefreshStatus({
   if (elapsedMinutes < 60) return { label: `${elapsedMinutes}分前に更新・${interval}`, tone };
 
   return { label: `${Math.floor(elapsedMinutes / 60)}時間前に更新・${interval}`, tone };
-}
-
-/** ボタンのツールチップ（#1773）。押すと何が起きるかと、放っておいても更新されることの両方を出す */
-export function describeRefreshHint(pollIntervalMs: number): string {
-  return `今すぐ更新（${Math.round(pollIntervalMs / 1000)}秒ごとに自動更新）`;
 }

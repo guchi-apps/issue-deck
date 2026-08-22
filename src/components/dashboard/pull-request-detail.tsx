@@ -10,6 +10,7 @@ import {
   CiStateBadge,
   ConflictBadge,
   DeployStatusBadge,
+  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   RepairRunBadge,
@@ -245,6 +246,7 @@ export function PullRequestDetail({
             ) : (
               <CiStateBadge ciState={pullRequest.ciState} />
             )}
+            <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
             <DeployStatusBadge status={deployStatus} />
             {pullRequest.autoMergeEnabled && (
               <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
