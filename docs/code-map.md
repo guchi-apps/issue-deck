@@ -1553,6 +1553,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   プロセスが立つまでの数分間は削除条件をすべて満たしてしまうため）、(2)残すworktreeの`.next`は
   消す（ビルド成果物で作り直せる。実測で163本が`.next/dev`だけで16GB）。設計は
   [multi-agent/branching.md](multi-agent/branching.md)「掃除を回す起点」。
+- **`node_modules`の重複回収も同じ1巡に相乗りさせる**（#2124）。pollerは
+  `NODE_MODULES_DEDUPE_INTERVAL_MINUTES`（既定1440分＝1日1回・0で無効）の間隔で
+  `scripts/dedupe-node-modules.sh --yes --quiet`を呼ぶ。**掃除と違い同期実行しない**——走査は
+  全リポジトリで15分前後かかり、同期にするとその間ジョブの取得が止まる（掃除の上限は5分）。
+  `setsid`で別プロセスへ出し、多重起動はスクリプト側の`flock`が防ぐ。まとめてよいかの判定は
+  `hardlink`(util-linux)、共有から外すディレクトリは`scripts/lib/node-modules-share.sh`が持ち、
+  同じ判定を`generic-start-issue.sh`のシード（worktree作成時の`cp -al`）と共有する。設計は
+  [multi-agent/branching.md](multi-agent/branching.md)「`node_modules`の実消費」。
 - **開発サーバーの回収は在庫を2通り持つ**（#1525）。PIDファイル（`.dev-servers/issue-<番号>.pid`）
   だけを見ていると、エージェントが手で起こし直した2本目は載らないため存在自体が見えない。
   `scripts/reap-dev-servers.sh`は`/proc`も走査し、動いているプロセスから入る経路を併せ持つ。

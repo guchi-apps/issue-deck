@@ -32,6 +32,7 @@
 #   worktree置き場        ~/apps/<repo>-worktrees
 #   パッケージマネージャ  detect_package_manager（宣言 → ロックファイル → package.json）
 #   envファイル           本体チェックアウトの .env.local / .env をコピーし、不足キーだけ補う
+#   node_modules          npm・yarnのリポジトリだけ、本体からハードリンクで敷いてからinstall
 #   ポート帯              scripts/local-repo-ports.conf
 #   プロンプト            対象リポジトリの scripts/prompts/implementation-agent.md があればそれ、
 #                         無ければ scripts/prompts/generic-implementation-agent.md
@@ -62,6 +63,9 @@ SCRIPT_DIR="$ROOT/scripts"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/env-file-sync.sh
 source "$SCRIPT_DIR/lib/env-file-sync.sh"
+# npm・yarnのリポジトリのnode_modulesを本体チェックアウトとハードリンクで共有する（#2124）。
+# shellcheck source=scripts/lib/node-modules-share.sh
+source "$SCRIPT_DIR/lib/node-modules-share.sh"
 # 起動時の進捗（Project Status）報告も issue-deck 自身のランチャーと共有する（#1236）。
 # shellcheck source=scripts/lib/progress-report.sh
 source "$SCRIPT_DIR/lib/progress-report.sh"
@@ -356,6 +360,11 @@ run_repo_hook issue_session_after_worktree
 
 # --- 依存インストール ---------------------------------------------------------
 if [[ -n "$PACKAGE_MANAGER" && -f "$WORKTREE_DIR/package.json" ]]; then
+  # **installの前に本体のnode_modulesをハードリンクで敷く**（#2124）。npm・yarnには
+  # pnpmのようなストア共有が無く、worktreeごとに実体をコピーするため、1本あたり数百MB〜1GBが
+  # そのまま増える。敷いてからinstallすると差分だけが入り、実ディスクの増分は数十MBで済む
+  # （速度も数十秒→数秒になる）。pnpm・bunのリポジトリでは何もしない。
+  seed_node_modules_from_main "$ISSUE_NUMBER" "$REPO_PATH" "$WORKTREE_DIR" "$PACKAGE_MANAGER"
   echo "#$ISSUE_NUMBER: $PACKAGE_MANAGER install しています..."
   (cd "$WORKTREE_DIR" && "$PACKAGE_MANAGER" install)
 else
