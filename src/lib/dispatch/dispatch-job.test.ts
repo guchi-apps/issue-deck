@@ -38,6 +38,11 @@ import {
   resolvePlanReviewRejection,
   describePlanReviewRejection,
   findPlanReviewJobForIssue,
+  canCodeReviewRepository,
+  describeCodeReviewRejection,
+  findCodeReviewJobForIssue,
+  resolveCodeReviewRejection,
+  resolveDefaultCodeReviewHost,
   resolveDispatchConcurrency,
   resolveDispatchTargetRejection,
   describeManualStepExecutionRejection,
@@ -903,6 +908,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       manualStepCapable: null,
       manualStepAbortCapable: null,
       planReviewCapable: null,
+      codeReviewCapable: null,
       selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
@@ -966,6 +972,7 @@ describe("横断質問（#1454）", () => {
       manualStepCapable: null,
       manualStepAbortCapable: null,
       planReviewCapable: null,
+      codeReviewCapable: null,
       selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
@@ -1136,6 +1143,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       manualStepCapable: true,
       manualStepAbortCapable: null,
       planReviewCapable: true,
+      codeReviewCapable: true,
       selfUpdateCapable: null,
       maxSessions: 12,
       liveSessions: 0,
@@ -1282,6 +1290,156 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
 });
 
 /**
+ * リポジトリ全体のコードレビュー（#698）。人が画面から押して起こすジョブなので、**選べない
+ * 理由を押す前に出せること**がこの種別の要点。
+ */
+describe("コードレビュー（CODE_REVIEW）", () => {
+  function host(
+    overrides: Partial<Pick<DispatchHostView, "online" | "codeReviewCapable" | "repositories">> = {},
+  ): Pick<DispatchHostView, "online" | "codeReviewCapable" | "repositories"> {
+    return {
+      online: true,
+      codeReviewCapable: true,
+      repositories: ["guchi-apps/issue-deck"],
+      ...overrides,
+    };
+  }
+
+  function hostView(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      repositories: ["guchi-apps/issue-deck"],
+      contractVersion: 1,
+      online: true,
+      lastSeenAt: "2026-08-22T00:00:00Z",
+      screenshotCapable: true,
+      sessionControlCapable: true,
+      instructionCapable: true,
+      crossRepoQuestionCapable: true,
+      manualStepCapable: true,
+      manualStepAbortCapable: null,
+      planReviewCapable: true,
+      codeReviewCapable: true,
+      selfUpdateCapable: null,
+      maxSessions: 12,
+      liveSessions: 0,
+      metrics: null,
+      launchHold: null,
+      checkout: null,
+      ...overrides,
+    };
+  }
+
+  it("種別として受け付ける", () => {
+    expect(parseDispatchJobKind("code_review")).toBe("CODE_REVIEW");
+  });
+
+  it("activeKeyは専用の名前空間を持つ", () => {
+    expect(buildDispatchActiveKey("guchi-apps/issue-deck", 698, "CODE_REVIEW")).toBe(
+      "code_review:guchi-apps/issue-deck#698",
+    );
+  });
+
+  // tmuxセッションを1本占めるので、枠（同時実行数）を消費する側に入れる
+  it("セッションを立てるジョブとして数える", () => {
+    expect(isSessionLaunchJobKind("CODE_REVIEW")).toBe(true);
+    expect(isSessionControlJobKind("CODE_REVIEW")).toBe(false);
+  });
+
+  it("キューでは「コードレビュー」として並ぶ", () => {
+    expect(describeDispatchJobKind("CODE_REVIEW")).toBe("コードレビュー");
+    expect(describeDispatchJobStatus("SUCCEEDED", "CODE_REVIEW")).toEqual({
+      label: "コードレビューを開始しました",
+      tone: "success",
+    });
+  });
+
+  it("条件が揃っていれば押せる", () => {
+    expect(
+      resolveCodeReviewRejection({
+        host: host(),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+      }),
+    ).toBeNull();
+  });
+
+  // 未申告（古いpoller）は「できない」側へ倒す。配ると押した人には`failed`だけが返る
+  it("申告していないpollerには押せない", () => {
+    expect(
+      resolveCodeReviewRejection({
+        host: host({ codeReviewCapable: null }),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+      }),
+    ).toBe("code_review_unsupported");
+  });
+
+  // レビューは対象リポジトリのコードを読むので、cloneされていなければ読むものが無い
+  it("チェックアウトされていないリポジトリは選べない", () => {
+    expect(
+      resolveCodeReviewRejection({
+        host: host(),
+        repositoryFullName: "guchi-apps/car-care",
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_not_runnable");
+    expect(canCodeReviewRepository([hostView()], "guchi-apps/car-care")).toBe(false);
+    expect(canCodeReviewRepository([hostView()], "guchi-apps/issue-deck")).toBe(true);
+  });
+
+  it("理由には何をすれば押せるようになるかを書く", () => {
+    expect(describeCodeReviewRejection("code_review_unsupported", { hostName: "subpc" })).toContain(
+      "更新してから",
+    );
+  });
+
+  it("既定の起動先はそのリポジトリをレビューできるホストの先頭", () => {
+    expect(
+      resolveDefaultCodeReviewHost(
+        [
+          hostView({ name: "old-host", codeReviewCapable: null }),
+          hostView({ name: "other", repositories: ["guchi-apps/car-care"] }),
+          hostView({ name: "subpc" }),
+        ],
+        "guchi-apps/issue-deck",
+      ),
+    ).toBe("subpc");
+  });
+
+  // 起動ジョブの未完了判定に混ざると、レビュー中はそのIssueの実装が押せなくなる
+  it("起動ジョブとは別に取り出す", () => {
+    const jobs: DispatchJobView[] = [
+      {
+        id: "code-review-1",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 698,
+        issueTitle: null,
+        issueId: null,
+        targetHost: "subpc",
+        kind: "CODE_REVIEW",
+        status: "QUEUED",
+        message: null,
+        instruction: null,
+        command: null,
+        manualStepLine: null,
+        targetJobId: null,
+        exitCode: null,
+        commandOutput: null,
+        tmuxSessionName: null,
+        queuePriority: 0,
+        createdAt: "2026-08-22T00:00:00Z",
+        claimedAt: null,
+        startedAt: null,
+        finishedAt: null,
+      },
+    ];
+    expect(findCodeReviewJobForIssue(jobs, "guchi-apps/issue-deck", 698)?.id).toBe("code-review-1");
+    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 698)).toBeNull();
+  });
+});
+
+/**
  * 手作業の代行実行（#1828）の可否。**画面とAPIが同じ関数を使う**ので、押せるのに拒否される
  * （その逆も）が生まれない。判定の**順番**にも意味がある。
  */
@@ -1387,6 +1545,7 @@ describe("resolveManualStepHost", () => {
       manualStepCapable: true,
       manualStepAbortCapable: null,
       planReviewCapable: null,
+      codeReviewCapable: null,
       selfUpdateCapable: null,
       repositories: [],
       ...overrides,

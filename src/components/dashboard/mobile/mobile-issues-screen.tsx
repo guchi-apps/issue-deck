@@ -59,6 +59,8 @@ type MobileIssuesScreenProps = {
   onStartManualStepGuide: () => void;
   /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
   onStartIssueOrder?: () => void;
+  /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
+  onStartCodeReview?: () => void;
   issueOrderAutoStart?: boolean;
   issueOrderCount?: number;
 };
@@ -88,6 +90,7 @@ export function MobileIssuesScreen({
   autoRefreshIntervalMs,
   onStartManualStepGuide,
   onStartIssueOrder,
+  onStartCodeReview,
   issueOrderAutoStart,
   issueOrderCount,
 }: MobileIssuesScreenProps) {
@@ -161,6 +164,7 @@ export function MobileIssuesScreen({
       prerequisiteReadiness={prerequisiteReadiness}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}
+      onStartCodeReview={onStartCodeReview}
       issueOrderAutoStart={issueOrderAutoStart}
       issueOrderCount={issueOrderCount}
       // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も

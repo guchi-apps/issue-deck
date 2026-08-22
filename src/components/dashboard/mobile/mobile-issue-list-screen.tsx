@@ -94,6 +94,8 @@ type MobileIssueListScreenProps = {
   onStartManualStepGuide?: (startIssueId?: string) => void;
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
   onStartIssueOrder?: () => void;
+  /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
+  onStartCodeReview?: () => void;
   issueOrderAutoStart?: boolean;
   issueOrderCount?: number;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
@@ -141,6 +143,7 @@ export function MobileIssueListScreen({
   prerequisiteReadiness,
   onStartManualStepGuide,
   onStartIssueOrder,
+  onStartCodeReview,
   issueOrderAutoStart,
   issueOrderCount,
   scrollKey,
@@ -304,6 +307,7 @@ export function MobileIssueListScreen({
         prerequisiteReadiness={prerequisiteReadiness}
         onStartManualStepGuide={onStartManualStepGuide}
         onStartIssueOrder={onStartIssueOrder}
+      onStartCodeReview={onStartCodeReview}
         issueOrderAutoStart={issueOrderAutoStart}
         issueOrderCount={issueOrderCount}
         onPullToRefresh={onRefresh ? handlePullToRefresh : undefined}

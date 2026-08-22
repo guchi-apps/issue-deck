@@ -62,6 +62,7 @@ import {
   LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { IssueOrderSection } from "@/components/dashboard/issue-order-section";
+import { CodeReviewPanel } from "@/components/dashboard/code-review-panel";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import {
   isIssueExecutionStarted,
@@ -109,6 +110,12 @@ import {
   canCloseAskRepoQuestion,
   isQaAnswerPending,
 } from "@/lib/github/ask-claude";
+import {
+  findLatestCodeReviewReport,
+  isCodeReviewIssue,
+  isCodeReviewPending,
+  type CodeReviewFinding,
+} from "@/lib/github/code-review";
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
@@ -154,6 +161,8 @@ type MobileIssueDetailProps = {
    * Issueとして切り出す（#2021）
    */
   onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
+  /** コードレビューの指摘（#698）を、対象リポジトリのIssueとして起票する下書きを開く */
+  onCreateCodeReviewFindingIssue: (issue: Issue, finding: CodeReviewFinding) => void;
   onSelectRepository: (repositoryFullName: string) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
@@ -175,6 +184,7 @@ export function MobileIssueDetail({
   onCreateIssue,
   onCreateFollowupIssue,
   onCreateConfigIssue,
+  onCreateCodeReviewFindingIssue,
   onSelectRepository,
   onStartManualStepGuide,
 }: MobileIssueDetailProps) {
@@ -320,6 +330,13 @@ export function MobileIssueDetail({
   // 質問Issueをワンボタンで終える導線の表示条件（#1770）。⋯メニューとコメント欄の下の
   // 2か所で同じ値を使い、片方だけ出る状態を作らない
   const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
+  // コードレビューIssue（#698）の結果。PC版（`issue-detail.tsx`）と同じ扱い
+  const codeReview = isCodeReviewIssue(issue)
+    ? {
+        report: findLatestCodeReviewReport(comments),
+        isPending: isCodeReviewPending(comments),
+      }
+    : null;
   const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
@@ -803,6 +820,15 @@ export function MobileIssueDetail({
           showJobStatus={false}
           dispatch={dispatch}
         />
+
+        {/* コードレビューの結果（#698）。PC版と同じく本文より上に置く */}
+        {codeReview && (
+          <CodeReviewPanel
+            report={codeReview.report}
+            isPending={codeReview.isPending}
+            onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
+          />
+        )}
 
         {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
         {canCompleteManualStep(issue) && (

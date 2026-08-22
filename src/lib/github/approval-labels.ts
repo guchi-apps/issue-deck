@@ -236,6 +236,16 @@ export type LabelFilterPreset = {
    */
   excludeQuestions?: boolean;
   /**
+   * コードレビューIssue（`isCodeReviewIssue`＝タイトルが`[レビュー] `で始まる）だけに
+   * 絞り込む（#698）。質問Issueと同じく、ラベルにもStatusにも現れないため専用の条件にしている。
+   */
+  codeReviewOnly?: boolean;
+  /**
+   * コードレビューIssueを除外する（#698）。レビューIssueは実装フローに乗らないまま`Ready`に
+   * 居続けるため、除外しないと「未着手」へ恒久的に溜まる（`excludeQuestions`と同じ理由）。
+   */
+  excludeCodeReviews?: boolean;
+  /**
    * プリセット選択時に適用するstateフィルター（省略時はstateを変更しない）。
    * `Done`（本番反映済）はマージ完了と同時にissueをcloseする運用（CLAUDE.md）のため、
    * 「直近main反映済み」プリセットはデフォルトのopen絞り込みのままだと該当issueが
@@ -262,6 +272,9 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   // `00.check-user`が外れ、Statusは`Ready`のままなので、専用ビューが無いと「未着手」へ戻る。
   // 完了の合図はcloseなので、openな質問Issueが全部ここに並ぶ（既定のstate=openのまま）。
   { key: "question", label: "質問", labels: [], questionOnly: true },
+  // 「コードレビューを実行」で作られたレビューIssueの置き場（#698）。質問と同じく実装フローに
+  // 乗らず、完了の合図はcloseなので、openなレビューIssueが全部ここに並ぶ。
+  { key: "code-review", label: "コードレビュー", labels: [], codeReviewOnly: true },
   {
     key: "not-started",
     label: "未着手",
@@ -271,6 +284,8 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
     // 同じく専用ビュー（manual-step）側に寄せる（#1240）。質問Issueも同じ理由で除外する（#1514）。
     excludeLabels: [CHECK_USER_LABEL, MANUAL_STEP_LABEL],
     excludeQuestions: true,
+    // レビューIssueも同じ理由で除外する（#698）
+    excludeCodeReviews: true,
     statuses: ["ready"],
   },
   {
@@ -280,6 +295,7 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
     // 回答待ちの質問Issueは`qaAnswerPendingAt`でここへ来ていたが（#978）、質問ビューへ寄せる
     // （#1514）。通常の実装Issueへ`@claude 質問:`した場合の回答待ちは引き続きここに出る。
     excludeQuestions: true,
+    excludeCodeReviews: true,
     statuses: ["planning", "implementation", "develop-pr"],
   },
   {

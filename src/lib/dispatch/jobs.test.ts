@@ -105,6 +105,7 @@ const {
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
+  enqueueCodeReviewJob,
   enqueuePlanReviewJob,
   enqueueSessionControlJob,
   expireStaleDispatchJobs,
@@ -131,6 +132,7 @@ function host(overrides: Record<string, unknown> = {}) {
     manualStepAbortCapable: null,
     // 計画レビュー（#1855）に対応したpoller
     planReviewCapable: true,
+    codeReviewCapable: true,
     selfUpdateCapable: null,
     maxConcurrency: null,
     ...overrides,
@@ -593,6 +595,69 @@ describe("enqueuePlanReviewJob", () => {
   });
 });
 
+/**
+ * リポジトリ全体のコードレビュー（#698）。**人が画面から押したときだけ積まれる。**
+ * レビューのたびに新しいIssueを立てるので、`already_queued`で止まるのは同じレビューIssueへの
+ * 押し直しだけ。
+ */
+describe("enqueueCodeReviewJob", () => {
+  async function enqueueCodeReview() {
+    return enqueueCodeReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 698,
+      hostName: "subpc",
+      requestedByUserId: null,
+      now: NOW,
+    });
+  }
+
+  it("専用の名前空間のactiveKeyで積む", async () => {
+    const result = await enqueueCodeReview();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "CODE_REVIEW",
+          activeKey: "code_review:guchi-apps/issue-deck#698",
+        }),
+      }),
+    );
+  });
+
+  it("コードレビューに対応していないpollerへは積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ codeReviewCapable: null }));
+
+    const result = await enqueueCodeReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("code_review_unsupported");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  // レビューは対象リポジトリのコードそのものが主題なので、cloneが無ければ読むものが無い
+  it("チェックアウトが無いリポジトリには積まない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ repositories: "[]" }));
+
+    const result = await enqueueCodeReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("repository_not_runnable");
+  });
+
+  it("同じレビューIssueへ重ねて積まない", async () => {
+    dispatchJobCreate.mockRejectedValue(new Error("unique"));
+
+    const result = await enqueueCodeReview();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("already_queued");
+  });
+});
+
 describe("claimDispatchJobs の制御ジョブ", () => {
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
@@ -749,7 +814,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
         }),
       }),
     );
@@ -764,7 +829,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: "QUEUED",
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
         }),
       }),
     );
@@ -773,9 +838,10 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     dispatchJobFindMany.mockResolvedValue([]);
     dispatchJobCount.mockResolvedValue(0);
     appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
-    // 横断質問も計画レビューも申告していない古いpoller（#1855で同じ向きの申告が増えた）
+    // 横断質問も計画レビューもコードレビューも申告していない古いpoller
+    // （#1855・#698で同じ向きの申告が増えた）
     dispatchHostFindUnique.mockResolvedValue(
-      host({ crossRepoQuestionCapable: null, planReviewCapable: null }),
+      host({ crossRepoQuestionCapable: null, planReviewCapable: null, codeReviewCapable: null }),
     );
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
     expect(dispatchJobFindMany).toHaveBeenCalledWith(
@@ -800,7 +866,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
             JSON.stringify(kinds),
         )?.orderBy;
 
-    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"])).toEqual([
+    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"])).toEqual([
       { queuePriority: "desc" },
       { createdAt: "asc" },
     ]);
@@ -1645,7 +1711,7 @@ describe("claimDispatchJobs の代行実行", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
         }),
       }),
     );

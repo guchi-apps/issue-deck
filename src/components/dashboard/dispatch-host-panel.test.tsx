@@ -25,6 +25,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     manualStepCapable: null,
     manualStepAbortCapable: null,
     planReviewCapable: null,
+    codeReviewCapable: null,
     selfUpdateCapable: null,
     maxSessions: 12,
     liveSessions: 2,

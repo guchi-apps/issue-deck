@@ -358,6 +358,9 @@ enum DispatchJobStatus {
 // 同じく「セッションを立てる」側で、worktreeは作らず対象リポジトリの`origin/develop`の
 // スナップショットを読むだけ。**実装セッションが承認待ちで生きている最中に走るのが常態**なので、
 // 起動ジョブと違って「そのIssueのセッションが動いている」ことを理由に弾かない。
+// CODE_REVIEW（#698）はリポジトリ全体のコードレビューのセッションを立てるジョブ。PLAN_REVIEWと
+// 同じく`origin/develop`のスナップショットを読むだけで、指摘は**レビュー用に1件作ったIssueへの
+// コメント**として返す。対象リポジトリのcloneが要る点もPLAN_REVIEWと同じ。
 enum DispatchJobKind {
   LAUNCH
   INTERRUPT
@@ -369,6 +372,7 @@ enum DispatchJobKind {
   MANUAL_STEP_ABORT
   PLAN_REVIEW
   SELF_UPDATE
+  CODE_REVIEW
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -548,6 +552,14 @@ model DispatchHost {
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
   planReviewCapable        Boolean?
+  // リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。
+  // `scripts/start-code-review.sh`を持つpollerだけが申告する。**`null`（未申告＝古いpoller）は
+  // 「できない」として扱う**（`planReviewCapable`と同じ向き）。
+  //
+  // **`planReviewCapable`とは分けて持つ。** 走らせ方は似ているが、レビューは人が画面から押して
+  // 起こすもので、対応していないホストへ配ると「押したのに`failed`だけが返る」ことになる。
+  // 申告を見て、選べないホストは選択肢の側で理由を出す。
+  codeReviewCapable        Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
   // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。

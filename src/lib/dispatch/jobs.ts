@@ -18,6 +18,7 @@ import {
   buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
+  describeCodeReviewRejection,
   describeManualStepAbortRejection,
   describeCrossRepoQuestionRejection,
   describeDispatchReportLost,
@@ -35,6 +36,7 @@ import {
   normalizeDispatchHostRepositories,
   OUT_OF_BAND_JOB_KINDS,
   parseDispatchHostRepositories,
+  resolveCodeReviewRejection,
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
   resolveManualStepAbortRejection,
@@ -45,6 +47,7 @@ import {
   SELF_UPDATE_REPOSITORY,
   SESSION_CONTROL_JOB_KINDS,
   SESSION_LAUNCH_JOB_KINDS,
+  type CodeReviewRejection,
   type CrossRepoQuestionRejection,
   type DispatchEnqueueRejection,
   type DispatchHostView,
@@ -146,6 +149,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
     planReviewCapable: host.planReviewCapable,
+    codeReviewCapable: host.codeReviewCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -579,6 +583,77 @@ export async function enqueuePlanReviewJob(params: {
           params.repositoryFullName,
           params.issueNumber,
           "PLAN_REVIEW",
+        ),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return reject("already_queued");
+  }
+}
+
+export type EnqueueCodeReviewJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: CodeReviewRejection; message: string };
+
+/**
+ * リポジトリ全体のコードレビュー（#698）のセッションを積む。
+ *
+ * 呼ぶのは画面の「コードレビューを実行」だけ（自動で積む経路は無い）。**対象リポジトリが
+ * そのホストにcloneされていることを見る**のは計画レビューと同じで、読むコードがそこにしか無いため。
+ *
+ * 二重投入は`activeKey`（`code_review:owner/repo#番号`）が止める。レビューは実行のたびに
+ * 新しいIssueを作るので、実際にはここで衝突するのは同じレビューIssueへの押し直しだけ。
+ */
+export async function enqueueCodeReviewJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueCodeReviewJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: CodeReviewRejection): EnqueueCodeReviewJobResult => ({
+    ok: false,
+    rejection,
+    message: describeCodeReviewRejection(rejection, {
+      hostName: params.hostName,
+      repositoryFullName: params.repositoryFullName,
+    }),
+  });
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+
+  // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）
+  const rejection = resolveCodeReviewRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          codeReviewCapable: host.codeReviewCapable,
+          repositories: parseDispatchHostRepositories(host.repositories),
+        }
+      : null,
+    repositoryFullName: params.repositoryFullName,
+    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
+    hasActiveJob: false,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "CODE_REVIEW",
+        status: "QUEUED",
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "CODE_REVIEW",
         ),
         requestedByUserId: params.requestedByUserId,
       },
@@ -1056,6 +1131,9 @@ export async function claimDispatchJobs(params: {
   // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は横断質問と同じで、
   // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ
   if (host?.planReviewCapable === true) launchKinds.push("PLAN_REVIEW");
+  // **コードレビュー（#698）も同じ枠。** レビュー1本で終わるが、走っている間はtmuxセッションを
+  // 1本占めるため、枠外へ出すと本数の見積もりが崩れる（計画レビューと同じ扱い）
+  if (host?.codeReviewCapable === true) launchKinds.push("CODE_REVIEW");
 
   const running = await db.dispatchJob.count({
     where: {
@@ -1522,6 +1600,8 @@ export async function announceDispatchHost(params: {
   manualStepAbortCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
+  /** リポジトリ全体のコードレビューを起こせるか（#698）。申告していないpollerでは`null`＝非対応 */
+  codeReviewCapable: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -1564,6 +1644,7 @@ export async function announceDispatchHost(params: {
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,
     planReviewCapable: params.planReviewCapable,
+    codeReviewCapable: params.codeReviewCapable,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,
