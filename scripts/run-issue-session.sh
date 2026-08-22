@@ -566,6 +566,19 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 汎用ランチャーで起こす他リポジトリには`.claude/settings.json`が無いため。二重に呼ばれても
   # 上記の間引きで報告は入力待ち1回につき最大1回に収まる
   # （docs/multi-agent/session-notify.md「`PostToolUse`だけはworktree側の…」）。
+  # **`ExitPlanMode`のフックだけタイムアウトを延ばす**（#2061）。あのフックは計画を投稿した
+  # あと、issue-deckの画面からの返事を`SESSION_PLAN_WAIT_SECONDS`秒（既定30分・上限1時間）
+  # 待つ。Claude Codeの既定（10分）のままだと、待ち切る前にフックが打ち切られて画面から
+  # 承認できる時間が縮む。
+  #
+  # **待ち時間そのものは`~/.config/issue-deck/notify.env`側にあり、ここからは見えない。**
+  # 上限（`SESSION_PLAN_WAIT_SECONDS_MAX`＝3600秒）に余裕を足した固定値を置いて、どう設定
+  # されていても足りるようにする。**ここが長いこと自体は待ち時間を延ばさない**——フックは
+  # 返事が決まるか待ち時間が切れた時点で終わる。
+  #
+  # **打ち切られても壊れない。** フックが何も返さなければ、端末に従来どおりの承認プロンプトが
+  # 出るだけ（`scripts/session-notify.sh`の`wait_for_plan_decision`）。
+  PLAN_HOOK_TIMEOUT=3660
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -578,7 +591,7 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     "PreToolUse": [
       {
         "matcher": "ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
+        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND", "timeout": $PLAN_HOOK_TIMEOUT }]
       }
     ],
     "PostToolUse": [

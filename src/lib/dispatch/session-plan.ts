@@ -91,7 +91,7 @@ export function buildSessionPlanCommentBody(params: {
   // **リンクは計画本文とは別の段落に置く**（Issueの要件）。計画が長いほど、末尾に出口が
   // 無いと「読んだ後どうすればよいか」が画面から消える
   lines.push(
-    "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。承認・修正の指示はRemote Controlから伝えてください。",
+    "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。**承認・修正はissue-deckのIssue詳細に出る「計画の承認を待っています」から送れます**（#2061）。待ち時間が切れた後はRemote Controlから伝えてください。",
     "",
   );
   if (params.remoteControlUrl) {

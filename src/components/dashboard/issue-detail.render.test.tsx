@@ -76,6 +76,7 @@ const dispatchState: {
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
   sessions: DispatchSessionView[];
+  planRequests: unknown[];
   concurrency: number;
   isLoaded: boolean;
   error: string | null;
@@ -87,6 +88,7 @@ const dispatchState: {
   hosts: [],
   jobs: [],
   sessions: [],
+  planRequests: [],
   concurrency: 2,
   isLoaded: true,
   error: null,
@@ -502,6 +504,37 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
     if (!panel) throw new Error("確認待ちの案内が見つからない");
     return panel;
   }
+
+  /**
+   * 計画への返事待ち（#2061）。**セッション表示のすぐ下**に出るので、待っている間は
+   * ここが唯一の答える場所になる（切れると従来どおり端末の承認プロンプトへ戻る）。
+   */
+  it("PCは、計画の返事待ちがあれば承認パネルを出す", () => {
+    const prev = dispatchState.planRequests;
+    dispatchState.planRequests = [
+      {
+        id: "req-1",
+        repositoryFullName: repository.fullName,
+        issueNumber: 1,
+        hostName: "subpc",
+        plan: "## 要約\n\n**計画の承認パネルをIssue詳細に出す**",
+        status: "WAITING",
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+        expiresAt: new Date(Date.now() + 27 * 60_000).toISOString(),
+        decidedAt: null,
+        delivered: false,
+      },
+    ];
+    try {
+      withSessions([waitingSession], true, () => {
+        renderDetail(checkUserIssue());
+        expect(screen.getByText("計画の承認を待っています")).toBeTruthy();
+        expect(screen.getByRole("button", { name: /承認して実装へ進む/ })).toBeTruthy();
+      });
+    } finally {
+      dispatchState.planRequests = prev;
+    }
+  });
 
   it("PCは、届いた時点でRemote Controlの案内を出す", () => {
     withSessions([waitingSession], true, () => {

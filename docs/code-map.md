@@ -1280,6 +1280,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と
   同じで、ラベルを外してよいかの印はホスト側の`<セッション名>.plan`が持つ）。
+  **その計画の承認・修正はIssue詳細の画面から送れる**（#2061。計画を投稿したフックが
+  `GET /api/dispatch/sessions/plan/decision`を引いて返事を待ち、決まった内容をClaude Code自身の
+  許可判定として返す。押す側は`POST /api/dispatch/plan-decision`。値の検証・表示の判定は
+  `lib/dispatch/session-plan-request.ts`、DBは`lib/dispatch/plan-requests.ts`、画面は
+  `components/dashboard/plan-approval-panel.tsx`。**`send-keys`は使わない**ので
+  `docs/multi-agent/gates.md`の禁止に触れず、返事が決まらなければ端末に従来どおりの承認
+  プロンプトが出る）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

@@ -4,6 +4,8 @@ import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import type { DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
+import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
@@ -1418,6 +1420,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
   sessions: DispatchSessionView[];
+  planRequests: SessionPlanRequestView[];
   concurrency: number;
 }> {
   await expireStaleDispatchJobs(now);
@@ -1425,7 +1428,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   // セッション（#1217）を専用のエンドポイントではなくここへ足しているのは、画面側が
   // `GET /api/dispatch`と`use-dispatch-state.ts`の1本で状態を読んでいるため。取得口を
   // 増やすと、同じ画面のためにポーリングが2本走ることになる。
-  const [hosts, jobs, sessions, concurrency] = await Promise.all([
+  const [hosts, jobs, sessions, planRequests, concurrency] = await Promise.all([
     db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
     db.dispatchJob.findMany({
       where: {
@@ -1441,6 +1444,9 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
       take: 100,
     }),
     listDispatchSessions(now),
+    // 計画への返事待ち（#2061）も同じ応答に載せる。**取得口を増やさない**（セッションと
+    // 同じ理由で、分けると同じ画面のためにポーリングが2本走る）
+    listSessionPlanRequests(now),
     getDispatchConcurrency(),
   ]);
 
@@ -1466,6 +1472,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
         resolvedIssues.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null;
       return { ...session, issueTitle: issue?.title ?? null, issueId: issue?.id ?? null };
     }),
+    planRequests,
     concurrency,
   };
 }
