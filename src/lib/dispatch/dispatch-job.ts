@@ -651,6 +651,7 @@ export type ManualStepExecutionRejection =
   | "device_not_subpc"
   | "no_command"
   | "interactive_command"
+  | "placeholder_command"
   | "host_unknown"
   | "host_offline"
   | "manual_step_unsupported"
@@ -664,6 +665,8 @@ export function describeManualStepExecutionRejection(
     device?: string | null;
     /** 対話が要ると判定されたコマンドの表記（`interactive_command`のときだけ使う） */
     interactiveCommand?: string | null;
+    /** プレースホルダと判定された表記（`placeholder_command`のときだけ使う。#2051） */
+    placeholder?: string | null;
   },
 ): string {
   switch (rejection) {
@@ -686,6 +689,13 @@ export function describeManualStepExecutionRejection(
       return context.interactiveCommand
         ? `この手順には対話が必要なコマンド（${context.interactiveCommand}）が含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`
         : `この手順には対話が必要なコマンドが含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`;
+    case "placeholder_command":
+      // **代行できるようになる見込みが無い理由**（`interactive_command`と同じ立場）。
+      // 値が埋まっていないコマンドは、積んでも失敗するか——`KEY=<値>`のように
+      // シェルのリダイレクトとして解釈されて——意図しない失敗の仕方をする（#2051）
+      return context.placeholder
+        ? `この手順には値を埋めるプレースホルダ（\`${context.placeholder}\`）が含まれるため代行できません。値を埋めて ${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`
+        : `この手順には値を埋めるプレースホルダが含まれるため代行できません。値を埋めて ${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`;
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
@@ -724,6 +734,11 @@ export function resolveManualStepExecutionRejection(params: {
    * 自動実行がそれぞれ別の条件を持つことになる。
    */
   interactiveCommand: string | null;
+  /**
+   * そのコマンドに含まれる、人が値を埋めるプレースホルダの表記（`findPlaceholder`の結果。#2051）。
+   * **判定そのものは`lib/manual-step-command.ts`が持つ**——`interactiveCommand`と同じ理由。
+   */
+  placeholder: string | null;
   hasActiveJob: boolean;
 }): ManualStepExecutionRejection | null {
   // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
@@ -733,6 +748,9 @@ export function resolveManualStepExecutionRejection(params: {
   if (!params.hasCommand) return "no_command";
   // **ホストの都合より先に見る。** 更新すれば押せるようになるものではなく、人が実行するしかない
   if (params.interactiveCommand) return "interactive_command";
+  // **こちらもホストの都合より先に見る**（#2051）。穴が空いたまま積むと、失敗するだけでなく
+  // `KEY=<値>`がリダイレクトとして解釈されるなど、意図しない失敗の仕方をする
+  if (params.placeholder) return "placeholder_command";
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.manualStepCapable !== true) return "manual_step_unsupported";

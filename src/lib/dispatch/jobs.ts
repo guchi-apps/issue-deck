@@ -56,6 +56,7 @@ import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import {
   extractRunnableManualStepCommands,
   findInteractiveCommand,
+  findPlaceholder,
   isSubpcManualStepDevice,
   MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
@@ -702,13 +703,13 @@ export async function enqueueManualStepJob(params: {
 
   const reject = (
     rejection: ManualStepExecutionRejection,
-    interactiveCommand: string | null = null,
+    context: { interactiveCommand?: string | null; placeholder?: string | null } = {},
   ): EnqueueManualStepJobResult => ({
     ok: false,
     rejection,
     message: describeManualStepExecutionRejection(rejection, {
       hostName: params.hostName,
-      interactiveCommand,
+      ...context,
     }),
   });
 
@@ -736,6 +737,9 @@ export async function enqueueManualStepJob(params: {
   // 失敗か打ち切りで終わる。画面（`buildManualStepRunPlan`）と同じ関数で判定するので、
   // 押せるのにここで拒否される組み合わせは生まれない
   const interactiveCommand = findInteractiveCommand(extracted.command);
+  // **穴が空いたコマンドも積まない**（#2051）。値が埋まっていないコマンドは失敗するだけでなく、
+  // `KEY=<値>`のようにシェルのリダイレクトとして解釈されて意図しない失敗の仕方をする
+  const placeholder = findPlaceholder(extracted.command);
 
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
   const rejection = resolveManualStepExecutionRejection({
@@ -749,10 +753,11 @@ export async function enqueueManualStepJob(params: {
     isSubpcDevice: true,
     hasCommand: true,
     interactiveCommand,
+    placeholder,
     // 二重投入はactiveKeyのunique制約が止める（下のcatch）。ここでは先読みしない
     hasActiveJob: false,
   });
-  if (rejection) return reject(rejection, interactiveCommand);
+  if (rejection) return reject(rejection, { interactiveCommand, placeholder });
 
   try {
     const job = await db.dispatchJob.create({

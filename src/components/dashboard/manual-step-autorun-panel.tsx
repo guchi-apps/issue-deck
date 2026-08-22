@@ -42,7 +42,7 @@ export function ManualStepAutoRunPanel({
 
   // 1件も代行できない場合は、承認ではなく**理由**を出す（押せないボタンを出さない）
   if (plan.runnable === 0) {
-    const { rejection, interactiveCommand } = pending[0];
+    const { rejection, interactiveCommand, placeholder } = pending[0];
     return (
       <p className="flex items-start gap-2 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground">
         <Terminal className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -53,6 +53,7 @@ export function ManualStepAutoRunPanel({
                 hostName,
                 device,
                 interactiveCommand,
+                placeholder,
               })}
         </span>
       </p>
@@ -106,6 +107,8 @@ export function ManualStepAutoRunPanel({
                   device,
                   // どのコマンドで引っかかったのかまで出す（#2025）。人はそれを手元で実行する
                   interactiveCommand: entry.interactiveCommand,
+                  // 埋める値がどこにあるのかまで出す（#2051）
+                  placeholder: entry.placeholder,
                 })}
               </p>
             )}
