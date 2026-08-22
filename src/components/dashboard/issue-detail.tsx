@@ -764,7 +764,11 @@ export function IssueDetail({
               待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
           {planRequest && (
             <div {...checkUserTargetProps("plan")}>
+              {/* **計画が変われば作り直す**（#2158）。Issue詳細はIssueを切り替えても
+                  マウントされたままなので、`key`が無いと押した結果や書きかけの修正本文が
+                  次の計画へ持ち越される */}
               <PlanApprovalPanel
+                key={planRequest.id}
                 request={planRequest}
                 session={issueSession}
                 dispatch={dispatch}

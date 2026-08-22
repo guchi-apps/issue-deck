@@ -63,7 +63,13 @@ export function PlanApprovalPanel({
   const [isRevising, setIsRevising] = useState(false);
   const [revision, setRevision] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [sent, setSent] = useState<"approve" | "revise" | "defer" | null>(null);
+  // 押した結果は**どの計画に対して押したのか**まで持つ（#2158）。`"approve"`だけを覚えると、
+  // 別の計画に差し替わってもその表示が残り、**押していない計画に「承認を送りました」が出る**
+  // （Issue詳細はIssueを切り替えてもマウントされたままで、計画を出し直したときも同じ）
+  const [sent, setSent] = useState<{
+    requestId: string;
+    decision: "approve" | "revise" | "defer";
+  } | null>(null);
 
   // 押した結果はカウントダウンと同じ1秒刻みで見せる。**返事はサーバーに入っているので、
   // 画面のポーリングが追い付く前でも「送った」ことは確定している**
@@ -85,13 +91,15 @@ export function PlanApprovalPanel({
       setError(result.message);
       return;
     }
-    setSent(decision);
+    setSent({ requestId: request.id, decision });
     setIsRevising(false);
   }
 
   // 送った直後、または他の経路（フックの受け取り・期限切れ）で決まった後の表示。
-  // **押した本人が「効いたのか」を確かめられれば足りる**ので、結果だけを出して枠を畳む
-  const decided = sent ?? decisionOf(request.status);
+  // **押した本人が「効いたのか」を確かめられれば足りる**ので、結果だけを出して枠を畳む。
+  // **いま出ている計画に対して押したものだけを見る**（#2158。別の計画の結果は持ち越さない）
+  const sentForThisRequest = sent?.requestId === request.id ? sent.decision : null;
+  const decided = sentForThisRequest ?? decisionOf(request.status);
   if (decided) {
     return (
       <PlanDecisionResult

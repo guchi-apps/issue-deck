@@ -157,6 +157,14 @@ ExitPlanMode（計画の提示）
 - **パネルはPC版・スマホ版の両方の詳細に置く。** Issue詳細は`issue-detail.tsx`と
   `mobile/mobile-issue-detail.tsx`で別のコンポーネントで、片方へ足しただけでは
   もう片方が従来どおりの案内のままになる（置き忘れは`plan-approval-mount.test.ts`が捕まえる）
+- **押した結果は「どの計画に対して押したのか」まで持つ**（#2158）。**Issue詳細はIssueを
+  切り替えてもアンマウントされない**（`issue-deck-shell.tsx`は`<IssueDetail>`に`key`を
+  付けていない）ため、パネルが「承認した」とだけ覚えていると、別のIssueの計画・出し直された
+  計画に差し替わってもその表示が残る。実際に、**上に「計画の承認が必要です（待機中）」、
+  下に「承認を送りました」が同時に並び、押していない計画が承認済みに見える**状態が出た。
+  押した結果は`request.id`と対で持って照合し、詳細側も`key={planRequest.id}`でパネルごと
+  作り直す（書きかけの修正本文が別のIssueへ持ち越されるのも同時に防げる）。
+  Issue固有の状態を持つ子コンポーネントを詳細へ足すときは同じことが起きうる
 - サーバー側は`src/lib/dispatch/session-plan-request.ts`（値の検証・表示の判定）と
   `src/lib/dispatch/plan-requests.ts`（DB）。画面は`plan-approval-panel.tsx`、
   一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
