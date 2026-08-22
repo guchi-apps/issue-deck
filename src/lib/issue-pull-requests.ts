@@ -27,9 +27,38 @@ export function selectIssuePullRequests(
  *
  * マージできるのはまだopenで、下書きでもマージ済みでもないPRだけ。CI実行中に押させない判定は
  * ボタン側（`IssueMergeButton`の`ciStatus`）が持つので、ここには含めない。
+ *
+ * **コンフリクトしているPR（`mergeable`が`false`）も外す**（#2145。PR画面の`canMergeFromDeck`と
+ * 同じ扱い）。押してもGitHubが受け付けないため、ボタンを出しても失敗するだけになる。代わりに
+ * 行にはコンフリクトのバッジが出る。`null`（GitHubが判定中・未取得）のときはボタンを出す——
+ * 判定前を「コンフリクトあり」として扱わないため。
  */
 export function canMergeIssuePullRequest(pullRequest: IssuePullRequest): boolean {
-  return pullRequest.state === "open" && !pullRequest.draft && !pullRequest.merged;
+  return (
+    pullRequest.state === "open" &&
+    !pullRequest.draft &&
+    !pullRequest.merged &&
+    pullRequest.mergeable !== false
+  );
+}
+
+/**
+ * 対応PRの状態がまだ動いている途中か（#2145）。ポーリングを続けるかどうかの判定に使う。
+ *
+ * CI実行中だけを見て止めていた頃は、**CIが通ったあとに動く状態が更新されなかった**。
+ * コンフリクトの自動解消が走っている最中はCIが「通過」のまま止まるため、解消が終わっても
+ * バッジは「自動解消中」のまま、マージボタンも出てこない（Issueを開き直すまで気付けない）。
+ *
+ * - `in_progress` … CIの結果がまだ確定していない
+ * - 自動マージ可否の判定が`pending` … 判定が終わればマージボタンが押せるようになる（#1968）
+ * - 自動修復が走っている … 終わればコンフリクトかCI失敗のどちらかが解消される（#2072）
+ */
+export function isIssuePullRequestSettling(pullRequest: IssuePullRequest): boolean {
+  return (
+    pullRequest.ciStatus === "in_progress" ||
+    pullRequest.mergeJudgement.state === "pending" ||
+    pullRequest.repairRun !== null
+  );
 }
 
 /** 対応PRの状態を表すラベル。画面の状態バッジに使う */

@@ -187,6 +187,23 @@ export type IssuePullRequest = {
    * 取得し、それ以外は`unknown`。`pending`のあいだはIssue画面のマージボタンを押せなくする。
    */
   mergeJudgement: MergeJudgement;
+  /**
+   * baseブランチとのコンフリクトの有無（#2145）。意味は`PullRequestSummary.mergeable`と同じで、
+   * `false`＝コンフリクトあり・`true`＝マージ可能・`null`＝GitHubが判定中か未取得（draft・closed）。
+   *
+   * **`null`を「コンフリクトなし」として扱わない。** CI状態と同じ1回のGraphQLから取れるため、
+   * これを持つことでGitHub APIの消費は増えない。
+   */
+  mergeable: boolean | null;
+  /**
+   * このPRの自動修復がいま走っているか（#2145）。走っていなければnull。意味は
+   * `PullRequestSummary.repairRun`と同じで、材料もGitHubではなくissue-deckのDB
+   * （`PullRequestRepairRun`）。
+   *
+   * **CI状態・コンフリクトとは別の軸。** コンフリクトしたまま自動解消が走っている時間帯を
+   * 「コンフリクトあり」だけで見せると、放っておけば片付くのか自分で直すのかが判断できない。
+   */
+  repairRun: PullRequestRepairRunSummary | null;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
 };

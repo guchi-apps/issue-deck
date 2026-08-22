@@ -865,6 +865,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   表示と操作は一覧・詳細・確認待ち一覧・リリース進捗・ブランチ画面で揃え、コンフリクト中は
   **「マージする」を出さずに「コンフリクトを自動解消」を出す**（`canMergeFromDeck`。押しても
   GitHubが受け付けないため）。自動解消の起動先は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+- **Issue画面の「対応PR」も、PR画面と同じ状態を出す**（#2145）。同じPRなのに取得口が2つに
+  分かれており（PR画面は`/api/pull-requests`＋`PullRequestSummary`、Issue画面は
+  `/api/issues/pull-requests`＋`IssuePullRequest`）、**PR側へ状態を足してもIssue側は
+  置いていかれる**。実際、PR画面が「コンフリクトあり」「コンフリクトを自動解消中」を出している
+  PRで、Issue画面には「CI通過」しか出ず、押しても入らないマージボタンが並んでいた。
+  Issue側もコンフリクト有無（`mergeable`）と修復状況（`repairRun`）を返し、バッジは
+  `pull-request-badges.tsx`の同じコンポーネント（`ConflictBadge`・`RepairRunBadge`）を使う。
+  **文言も揃える**——CI状態の言い回しがIssue側だけ「CI成功」だった。
+  マージボタンの出し分けも`canMergeIssuePullRequest`を`canMergeFromDeck`と同じ判定にする。
+  消費は増えない: `mergeable`は上のとおりCI状態と同じGraphQLに相乗りし（1件ずつの
+  `fetchRefCheckState`をやめ、`fetchPullRequestCiStates`のまとめ取りにしたので**むしろ減る**）、
+  `repairRun`はGitHubではなくDBを1回引くだけ。
+- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145。
+  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)の
+  `isIssuePullRequestSettling`）。コンフリクトの自動解消と自動マージ可否の判定は**CIが通過した
+  まま**動くため、CI実行中だけを見て止めると、解消が終わってもバッジが「自動解消中」で固まり、
+  マージボタンも出てこない（Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものが
+  あるか**で判断する。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
