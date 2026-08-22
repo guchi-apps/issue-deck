@@ -891,6 +891,12 @@ export function IssueDeckShell({
     [crossRepositoryPullRequests, checkUserIssues],
   );
 
+  // 「ユーザーの確認待ち」に並ぶマージ待ちPRの取り直し（#2175）。PCの「更新」ボタンと、
+  // スマホで一覧を下へ引っ張る操作が同じ入口を使う。**`refreshFromPull`を通す**のは、
+  // 飛んでいる取得の完了を待って返し、失敗を画面に出すのがこのフックではこれだけのため
+  // （#1947。`refresh`は同期の合図で、待っても取得の完了とは無関係に返る）。
+  const refreshCheckUserPullRequests = openPullRequests.refreshFromPull;
+
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
   // すぐ下に並ぶメニューの行と必ず同じ数字になる。
   const overviewStats = useMemo(
@@ -1331,6 +1337,9 @@ export function IssueDeckShell({
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
                      経路（reconcileIssues・確認待ちトーストの判定）を通す */
                   onRefresh={issuePolling.refresh}
+                  /* 同じ操作で走らせるマージ待ちPRの取り直し（#2175）。呼ぶかどうかの
+                     判定（確認待ちを見ているときだけ）は受け取った側が持つ */
+                  onRefreshPullRequests={refreshCheckUserPullRequests}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                   onStartManualStepGuide={manualStepGuide.start}
@@ -1543,6 +1552,9 @@ export function IssueDeckShell({
                       onSelectPullRequest={(pullRequest) =>
                         selectPullRequestModal(pullRequest.id)
                       }
+                      /* PCは一覧を指で引けないため、ここから取り直す（#2175） */
+                      onRefresh={() => void refreshCheckUserPullRequests()}
+                      isRefreshing={openPullRequests.isRefreshing}
                     />
                   ) : undefined
                 }
