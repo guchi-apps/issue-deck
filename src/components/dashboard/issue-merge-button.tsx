@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
+import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import {
   isMergeJudgementPending,
@@ -73,7 +73,7 @@ export function IssueMergeButton({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const busy = Boolean(isMerging);
   const merged = Boolean(isMerged);
-  const judgementPending = isMergeJudgementPending(mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN);
+  const judgementPending = isMergeJudgementPending(mergeJudgement);
   const disabled = busy || merged || ciStatus === "in_progress" || judgementPending;
 
   async function confirmMerge() {

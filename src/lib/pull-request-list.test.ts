@@ -428,6 +428,11 @@ describe("isMergeJudgementPending", () => {
     expect(isMergeJudgementPending({ state: "unknown", step: null, runUrl: null })).toBe(false);
   });
 
+  it("未取得（null・undefined）は押せる側として扱う（#2059）", () => {
+    expect(isMergeJudgementPending(null)).toBe(false);
+    expect(isMergeJudgementPending(undefined)).toBe(false);
+  });
+
   it("待っている段階を画面の文言へ言い換える（#2059）", () => {
     expect(mergeJudgementLabel("claude-review")).toBe("Claudeがレビュー中");
     expect(mergeJudgementLabel("wait-for-ci")).toBe("CIの完了待ち");

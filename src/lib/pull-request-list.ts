@@ -348,9 +348,14 @@ export function mergeJudgementReason(step: MergeJudgementStep | null): string {
  * 警告ダイアログではなく無効化にしているのは、事故が「ダイアログを読み飛ばした」ではなく
  * 「ダイアログが出なかった」ために起きているため。判定のcheck-runが1件も無いリポジトリ
  * （ワークフロー未配布・起動前）は`unknown`で従来どおり押せる。
+ *
+ * `null`・`undefined`（未取得）も押せる側＝`false`として扱う。呼び出し元
+ * （`IssueMergeButton`）でその場しのぎの既定値を組み立てさせないための判定側の責務（#2059）。
  */
-export function isMergeJudgementPending(mergeJudgement: MergeJudgement): boolean {
-  return mergeJudgement.state === "pending";
+export function isMergeJudgementPending(
+  mergeJudgement: MergeJudgement | null | undefined,
+): boolean {
+  return mergeJudgement?.state === "pending";
 }
 
 /**
