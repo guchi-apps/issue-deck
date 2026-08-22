@@ -128,12 +128,15 @@ type IssueDeckShellProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   dispatchConcurrency: number;
+  /** `issues`をサーバー側で取った時刻（#1797）。一覧のヘッダーの「HH:MM時点」の初期値になる */
+  issuesFetchedAt: string;
 };
 
 export function IssueDeckShell({
   currentUser,
   repositories: initialRepositories,
   issues: initialIssues,
+  issuesFetchedAt,
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
@@ -504,7 +507,7 @@ export function IssueDeckShell({
     }
 
     setIssues(reconciledIssues);
-  });
+  }, issuesFetchedAt);
 
   function handleSelectCheckUserToastIssue(issue: Issue) {
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
@@ -1133,6 +1136,9 @@ export function IssueDeckShell({
                   failedRepositories={branchFlowStatus.failedRepositories}
                   mergedPullRequestsLoaded={mergedPullRequestsLoaded}
                   autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+                  deployAutoRefreshIntervalMs={
+                    deployStatus.autoRefresh ? deployStatus.pollIntervalMs : null
+                  }
                   onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
                   onRefresh={() => {
                     branchFlowStatus.refresh();
@@ -1211,6 +1217,8 @@ export function IssueDeckShell({
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
                      経路（reconcileIssues・確認待ちトーストの判定）を通す */
                   onRefresh={issuePolling.refresh}
+                  fetchedAt={issuePolling.fetchedAt}
+                  autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                   onStartManualStepGuide={() => manualStepGuide.start()}
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
@@ -1267,6 +1275,8 @@ export function IssueDeckShell({
                     openCrossRepoQuestionDialog(mobileScreen.repository.fullName)
                   }
                   onRefresh={issuePolling.refresh}
+                  fetchedAt={issuePolling.fetchedAt}
+                  autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 />
               )}
 
@@ -1341,6 +1351,11 @@ export function IssueDeckShell({
               /* 絞り込みでは無く「展開して見せる」形にする（#1750） */
               expandedRepositoryFullNames={filters.repos}
               autoRefreshIntervalMs={flowAutoRefreshIntervalMs}
+              /* デプロイが動いている間だけ回っているぶん（#1797）。既定が「自動更新しない」の
+                 この画面で、デプロイの表示だけが勝手に進む理由を出す */
+              deployAutoRefreshIntervalMs={
+                deployStatus.autoRefresh ? deployStatus.pollIntervalMs : null
+              }
               onChangeAutoRefreshInterval={setFlowAutoRefreshIntervalMs}
               onRefresh={() => {
                 branchFlowStatus.refresh();
@@ -1411,6 +1426,9 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
+                // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
+                fetchedAt={issuePolling.fetchedAt}
+                autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
