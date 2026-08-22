@@ -105,3 +105,30 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
     expect(url).toContain("missue=1001");
   });
 });
+
+describe("フッターの「PR」タブが開くビュー（#2176）", () => {
+  beforeEach(() => {
+    push.mockClear();
+    replace.mockClear();
+    back.mockClear();
+    resetHistoryStack();
+  });
+
+  it("「マージ待ち」（prview=completed）で開く", () => {
+    const { result } = renderMobileScreen("mscreen=home");
+
+    act(() => result.current.selectTab("pull-requests"));
+
+    const url = urlOf(push.mock.calls[0]);
+    expect(url).toContain("mscreen=pull-requests");
+    expect(url).toContain("prview=completed");
+  });
+
+  it("別のビューを見ている最中でも「マージ待ち」へ戻す", () => {
+    const { result } = renderMobileScreen("mscreen=pull-requests&prview=in-progress");
+
+    act(() => result.current.selectTab("pull-requests"));
+
+    expect(urlOf(push.mock.calls[0])).toContain("prview=completed");
+  });
+});
