@@ -1187,6 +1187,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **右ペインは別コンポーネントにせず、`RepositorySection`が中身を`createPortal`で送り込む。**
   行と中身を別々に組み立てると`useTriggerPending`（起動中）を2か所から呼ぶことになり、
   押した瞬間の書き込みが互いに伝わらない状態（#1955でわざわざ1か所へまとめたもの）が戻る。
+  **実測で分岐するUIは、jsdomのテストでは既定で「狭い側」を通る**（#2157）。jsdomはレイアウトを
+  持たず`getBoundingClientRect()`が常に0を返すため、幅を差し替えないテストは自動的に従来の
+  折りたたみのままになり、既存のテストへ手を入れずに分岐を足せる。広い側を通したいテストだけ
+  `vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")`で幅を差し替える
+  （`branch-flow-view.test.tsx`の`mockWideLayout`）。**`ResizeObserver`はjsdomに無い**ので、
+  生成側に`typeof ResizeObserver === "undefined"`のガードを置く（無いと`ReferenceError`で
+  そのコンポーネントのテストが全滅する）。
   **畳んだ行のピルは、紫（待てば進む）と琥珀（あなたの番）で書き分ける**（#2038）。リリースが
   動いている間はCI実行中も、CIが終わって人のマージを待っている間も同じ紫の「リリース中」で、
   違いは回るアイコンの有無しか無かった（#1931）ため、一覧を流し見して自分の番のリポジトリを
