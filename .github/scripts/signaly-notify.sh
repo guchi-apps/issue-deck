@@ -6,6 +6,9 @@
 #
 # Requires: SIGNALY_WEBHOOK_URL, NOTIFY_STATUS (success|failure|cancelled)
 # Optional: NOTIFY_APP, NOTIFY_KIND (e.g. デプロイ / CI), NOTIFY_JOB, NOTIFY_VERSION (リリース時)
+# Optional: NOTIFY_RUN_URL … 「Run」のリンク先。既定はこの通知を出しているrun自身。
+#   別のrunについて通知する場合だけ指定する（例: deploy-retry.yml が「再実行するデプロイの
+#   run」へリンクする。#2134）。未指定なら従来どおりの挙動。
 set -euo pipefail
 
 if [[ -z "${SIGNALY_WEBHOOK_URL:-}" ]]; then
@@ -23,7 +26,7 @@ repository="${GITHUB_REPOSITORY:-}"
 ref_name="${GITHUB_REF_NAME:-}"
 sha="${GITHUB_SHA:-}"
 sha_short="${sha:0:7}"
-run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+run_url="${NOTIFY_RUN_URL:-${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}}"
 
 case "$status" in
   success)

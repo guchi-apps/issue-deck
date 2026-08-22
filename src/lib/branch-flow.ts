@@ -545,21 +545,28 @@ export function resolveDeployState({
   // 「本番反映」を取り消さないよう印を付けて渡す。
   const manual = deployRun.event === "workflow_dispatch";
 
+  // 自動再実行（#2134）。`deploy-retry.yml`は同じrunのattemptを増やすので、`createdAt`も
+  // `event`も初回のまま変わらない。**再実行されたことはこの値でしか分からない。**
+  // 人がGitHubの画面から再実行した場合も2以上になるが、どちらも「1回やり直している」点は
+  // 同じで、画面で言いたいこと（自分で押しに行く前にもう一度走っている）も変わらない。
+  const autoRetried = deployRun.runAttempt > 1;
+
   if (releaseMergedAt !== null && !manual) {
     const mergedAt = new Date(releaseMergedAt).getTime();
     if (new Date(deployRun.createdAt).getTime() < mergedAt) {
       // 今回のマージに対する実行がまだ現れていない。上限を過ぎたら判定を諦める
+      // まだ現れていない実行に試行回数は無い
       return now - mergedAt < DEPLOY_WAIT_LIMIT_MS
-        ? { kind: "waiting", htmlUrl: null, manual: false }
+        ? { kind: "waiting", htmlUrl: null, manual: false, autoRetried: false }
         : null;
     }
   }
 
   if (deployRun.status !== "completed")
-    return { kind: "running", htmlUrl: deployRun.htmlUrl, manual };
+    return { kind: "running", htmlUrl: deployRun.htmlUrl, manual, autoRetried };
   return deployRun.conclusion === "success"
-    ? { kind: "success", htmlUrl: deployRun.htmlUrl, manual }
-    : { kind: "failure", htmlUrl: deployRun.htmlUrl, manual };
+    ? { kind: "success", htmlUrl: deployRun.htmlUrl, manual, autoRetried }
+    : { kind: "failure", htmlUrl: deployRun.htmlUrl, manual, autoRetried };
 }
 
 /**

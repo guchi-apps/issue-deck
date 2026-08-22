@@ -110,6 +110,15 @@ export type ReleaseWorkflowRun = {
    * 失敗したときに、すでに本番へ出ている版まで「まだ本番に出ていない」表示に戻る。
    */
   event: string;
+  /**
+   * この実行が何回目の試行か（初回は1。#2134）。
+   *
+   * `deploy-retry.yml`は失敗を1回だけ自動で再実行するが、**再実行は新しいrunを作らず同じrunの
+   * attemptを増やす**ため、`createdAt`も`event`も初回のまま変わらない。「自動で再実行された」
+   * ことを画面で言える材料はこれだけになる。上限が1回であることの根拠も同じ値
+   * （`reusable-deploy-retry.yml`は`run_attempt == 1`のときしか再実行しない）。
+   */
+  runAttempt: number;
 };
 
 /**
@@ -139,6 +148,7 @@ export async function fetchLatestWorkflowRun(
       html_url: string;
       created_at: string;
       event: string;
+      run_attempt?: number;
     }>;
   }>(url, token);
   if (!result.ok) {
@@ -156,6 +166,9 @@ export async function fetchLatestWorkflowRun(
     htmlUrl: run.html_url,
     createdAt: run.created_at,
     event: run.event,
+    // 取れなかったときは初回（1）として扱う。**「自動で再実行された」と言い切れるのは
+    // 2以上を実際に見たときだけ**で、欠けている値から推測して印を付けない（#2134）。
+    runAttempt: run.run_attempt ?? 1,
   };
 }
 
