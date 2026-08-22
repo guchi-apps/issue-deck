@@ -920,3 +920,34 @@ enum SessionPlanRequestStatus {
   DEFERRED
   EXPIRED
 }
+
+/// PRの自動修復（`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-pr-repair.yml`）が
+/// いま走っているかどうか（#2072）。
+///
+/// **1つのPR×1つの種別につき1行**（`@@unique`）で、次の実行は同じ行を上書きする。履歴は
+/// GitHub ActionsとIssue・PRのコメントに残るため、ここで持つのは「いまの状態」だけでよい。
+///
+/// 状態を報告するのはワークフロー側（`POST /api/pull-requests/repair-runs`）と、画面のボタンから
+/// 起動する`POST /api/pull-requests/repair`の2経路。**GitHub APIからは引けない**——自動検知で
+/// 起動した実行は`workflow_run`イベント発の実行で、`head_branch`・`head_sha`が対象PRではなく
+/// デフォルトブランチを指すため、実行から対象PRへ辿る手段が無い。
+model PullRequestRepairRun {
+  id                 String   @id @default(cuid())
+  repositoryFullName String
+  pullRequestNumber  Int
+  /// `RepairKind`（`ci` / `conflict`）。DB側では文字列で持ち、解釈はアプリ側に寄せる
+  kind               String
+  /// `running`（実行中） / `finished`（終わった）。**画面に出すのは`running`だけ**で、
+  /// `finished`は「もう走っていない」ことを表すために残す
+  status             String
+  /// 実行ログのURL。画面のボタンから起動した直後はまだrunが決まらないためnull
+  runUrl             String?
+  startedAt          DateTime @default(now())
+  finishedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber, kind])
+  @@index([status])
+}

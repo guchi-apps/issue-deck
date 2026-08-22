@@ -52,8 +52,6 @@ import { toggleTaskListLine } from "@/lib/markdown-task-list";
  * 取り決めをそのまま守る）。
  */
 
-/** 終わった実行を画面へ返し続ける時間。結果（終わった・中断した）を見せてから消す */
-const FINISHED_RUN_RETENTION_MS = 30 * 60 * 1000;
 
 /** Issueがcloseされて片付けた実行に残す一文（#2073）。中断と区別が付くようにする */
 const CLOSED_ISSUE_STOP_MESSAGE = "手作業のIssueがクローズされたため、自動実行を終わりにしました。";
@@ -202,16 +200,18 @@ export async function advanceManualStepRun(params: {
  *
  * 走っている実行は**読むついでに1歩進める**。取り消し・タイムアウトで終わったジョブは報告が
  * 来ないため、報告を契機にした前進だけでは止まったことに誰も気づけない。
+ *
+ * **返すのは`RUNNING`と`PAUSED`だけ**（#2073）。#1882では終わった実行も30分は返していたが、
+ * それを描いていたのは実行キューの節だけで、その節を撤去した。残る読み手（アシスタントの
+ * `AutoRunBar`・一覧入口のバッジ）はどちらも`isActiveManualStepRun`で弾くため、窓を残すと
+ * **誰も描かない行に`toRunView`（Repository・Issue・DispatchHostの3クエリ＋実行計画の再構築）を
+ * 5〜20秒ごとに回すだけ**になる。中断・完了を押した直後の表示は`controlManualStepRun`が
+ * 応答をその場で状態へ反映する経路が持っているので、押した本人の体感は変わらない。
  */
 export async function listManualStepRunViews(now: Date = new Date()): Promise<ManualStepRunView[]> {
   const runs = await sweepClosedManualStepRuns(
     await db.manualStepRun.findMany({
-      where: {
-        OR: [
-          { status: { in: ["RUNNING", "PAUSED"] } },
-          { finishedAt: { gte: new Date(now.getTime() - FINISHED_RUN_RETENTION_MS) } },
-        ],
-      },
+      where: { status: { in: ["RUNNING", "PAUSED"] } },
       orderBy: { startedAt: "desc" },
       take: 20,
     }),

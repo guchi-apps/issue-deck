@@ -6,6 +6,10 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { pullRequestRollupKey, type PullRequestRollupTarget } from "@/lib/github/check-rollup";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import {
+  fetchActivePullRequestRepairRuns,
+  repairRunKey,
+} from "@/lib/github/pull-request-repair-run";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchClosedPullRequests,
@@ -166,8 +170,24 @@ async function handleGET(request: Request) {
     }
   }
 
+  // いま走っている自動修復（#2072）を合流させる。GitHub APIは消費せず、全リポジトリぶんを
+  // まとめてDBへ1クエリ引くだけ。走っていないPRはキーが無いのでnullのままになる。
+  const allPullRequests = results.flatMap((result) => result.pullRequests);
+  const repairRuns = await fetchActivePullRequestRepairRuns(
+    allPullRequests
+      .filter((pullRequest) => pullRequest.state === "open" && !pullRequest.draft)
+      .map((pullRequest) => ({
+        repositoryFullName: pullRequest.repositoryFullName,
+        pullRequestNumber: pullRequest.number,
+      })),
+  );
+  for (const pullRequest of allPullRequests) {
+    pullRequest.repairRun =
+      repairRuns.get(repairRunKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
+  }
+
   const response: PullRequestListResponse = {
-    pullRequests: results.flatMap((result) => result.pullRequests),
+    pullRequests: allPullRequests,
     fetchedAt: new Date().toISOString(),
     failedRepositories: failedRepositories.sort((a, b) => a.localeCompare(b)),
   };

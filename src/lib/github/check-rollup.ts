@@ -28,9 +28,11 @@ export type RollupCheck = { status: string; conclusion: string | null };
  * PRのheadコミットにはこれらのcheck-runもぶら下がるため、素直に集約すると「CI」を名乗る
  * バッジが運用自動化の進行状況になってしまう。
  *
- * とくに`claude-review-develop.yml`は**CIの完了を待ってからレビューし、通ったらマージする**
- * ワークフローで、`wait-for-ci` → `risk-check` → `claude-review` → `auto-merge`のいずれかが
- * PRが開いている間ずっと実行中になる。つまり集約に含めている限り、自動マージされるPRは
+ * とくに`claude-review-develop.yml`は**レビューして通ったらマージする**ワークフローで、
+ * `wait-for-ci`・`risk-check` → `claude-review` → `auto-merge`のいずれかがPRが開いている間
+ * ずっと実行中になる（#1799の当時はCIの完了を待ってからレビューする直列構成だった。#2066で
+ * レビューはCIと並行になったが、`auto-merge`が終わるまでcheck-runが残る点は変わらない）。
+ * つまり集約に含めている限り、自動マージされるPRは
  * 一度も「CI通過」を表示できない——CIが終わった後に更新ボタンを押しても「CI実行中」のままで、
  * ボタンが効いていないように見えていた（#1799。マージボタンが押せない事例は
  * [docs/multi-agent/labels.md](../../../docs/multi-agent/labels.md)にも記録がある）。
@@ -65,11 +67,12 @@ export type MergeJudgementState = "pending" | "settled" | "unknown";
 /**
  * 判定のどの段階で止まっているか（#2059）。`state`が`pending`のときだけ意味を持つ。
  *
- * `claude-review-develop.yml`のジョブは**直列**（`wait-for-ci` → `risk-check` →
- * `claude-review` → `auto-merge`）で、CIの完了を待ってからレビューが始まる。実測
- * （PR #2056）ではCI完了が06:42:11、`claude-review`完了が06:45:03で、**画面に「CI通過」が
- * 出てからさらに約3分、レビューと判定だけが動いている窓**がある。この窓で何を待っているかを
- * 画面に出すためにジョブ名を取り出す。
+ * `claude-review-develop.yml`のジョブは`identify-issue` →
+ * {`wait-for-ci` ‖ `risk-check` → `claude-review`} → `auto-merge`で、**CIの完了を待つのは
+ * 実際にマージを有効化する`auto-merge`だけ**（#2066。それまでは直列で、CI完了後にレビューが
+ * 始まっていた）。並行にしてもレビューがCIより長いことが多く、実測（PR #2056）でCI完了が
+ * 06:42:11・`claude-review`完了が06:45:03だったように、**画面に「CI通過」が出てからも判定だけが
+ * 動いている窓は残る**。この窓で何を待っているかを画面に出すためにジョブ名を取り出す。
  */
 export type MergeJudgementStep = "wait-for-ci" | "risk-check" | "claude-review" | "auto-merge";
 
@@ -118,11 +121,20 @@ const JUDGEMENT_STEP_BY_JOB: Record<string, MergeJudgementStep> = {
   "auto-merge-fallback": "auto-merge",
 };
 
-/** ワークフロー内での進行順。未完了のジョブが複数あるときに先に来る方を「いま待っているもの」とする */
+/**
+ * 未完了のジョブが複数あるときに、先に来る方を「いま待っているもの」として名乗らせる順（#2059）。
+ *
+ * **ジョブの実行順ではなく、待っている人にとっての知りたさの順で並べる**（#2066）。
+ * `wait-for-ci`は`risk-check`・`claude-review`と並行して走るため、実行順（`wait-for-ci`が先）で
+ * 選ぶと、Claudeがレビューしている最中でもピルが「CIの完了待ち」になる。CIの進み具合は隣の
+ * CI状態のピルが既に出しているので、ここでは判定側で動いているものを優先して出す。
+ * `wait-for-ci`だけが残っている＝レビューは終わってCIの完了だけを待っている状態で、
+ * そのときに初めて「CIの完了待ち」を名乗る。
+ */
 const JUDGEMENT_STEP_ORDER: MergeJudgementStep[] = [
-  "wait-for-ci",
   "risk-check",
   "claude-review",
+  "wait-for-ci",
   "auto-merge",
 ];
 

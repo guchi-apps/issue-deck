@@ -32,6 +32,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeJudgement: { state: "unknown", step: null, runUrl: null },
     mergeable: null,
     repairWorkflowAvailability: {},
+    repairRun: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -213,6 +214,49 @@ describe("PullRequestList", () => {
       false,
     );
     expect(screen.queryByText(/未配布/)).toBeNull();
+  });
+
+  // CI失敗の自動修正は人の操作なしに走るが、画面には赤い「チェック失敗」しか出ておらず、
+  // 放っておけば片付くのか自分で直すのかが判断できなかった（#2072）。
+  it("自動修正が走っているあいだはバッジを出し、同じ種類のボタンを押せなくする（#2072）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        repairRun: {
+          kind: "ci",
+          startedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+          runUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+        },
+      }),
+    ]);
+
+    const badge = screen.getByText("CI失敗を自動修正中（3分経過）");
+    // ピルごと実行ログへのリンクにする（`DeployStatusBadge`と同じ形）。
+    expect(badge.closest("a")?.getAttribute("href")).toBe(
+      "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+    );
+    // 失敗している事実は打ち消さず、その隣に重ねて出す。
+    expect(screen.getByText("CI失敗")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+  });
+
+  it("コンフリクトの自動解消が走っていてもCI失敗のボタンは押せる（#2072）", () => {
+    renderList([
+      makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairRun: { kind: "conflict", startedAt: new Date().toISOString(), runUrl: null },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    expect(
+      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
