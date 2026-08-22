@@ -21,6 +21,70 @@
 - **main版 != develop版**（バンプPRが既にdevelopへマージ済み）: develop→mainのPRが無いことを
   確認したうえで新規に作成する。
 
+## リリース内容は固定ブランチで凍結する（#2117）
+
+**develop→mainのPRのheadは`develop`ではなく`release-main/vX.Y.Z`。** PRのheadは常にそのブランチ
+の先端を追うため、`develop`をheadにすると**PRを作った後にdevelopへマージされた変更まで同じ
+リリースでmainへ出る**。それらは更新履歴（`RELEASE_CHANGELOG`）にも対象issue一覧にも載って
+いないため、「何が本番へ出たのか」がPRの内容と食い違う。内容を止めるには固定したrefが要る。
+
+### 凍結点はバンプPRのhead（`$GITHUB_SHA^2`）
+
+バンプPRを作るrun（T0）と、そのマージのpushで起きるdevelop→mainのPRを作るrun（T1）は別のrun
+（`need_bump`と`need_main_pr`は排他）。**更新履歴・上げ幅はT0の`git diff origin/main
+origin/develop`から作られ、バンプブランチもT0のdevelopから切られる。** T1のdevelop先端で凍結
+すると、T0〜T1のあいだにdevelopへ入った変更（バンプPRのCI待ちのあいだにマージされたもの）が
+更新履歴に載らないまま入ってしまう。
+
+T1のpushイベントの`$GITHUB_SHA`はバンプPRのマージコミットで、**その第2親がバンプブランチの先端
+＝T0のdevelop＋版上げ**にあたる。ここで凍結すると、更新履歴・対象issue一覧・mainへ出る内容の
+3つが同じ時点を指す。
+
+第2親が無い場合（squashマージ・`workflow_dispatch`での手動起動）と、そのコミットのバージョンが
+developのバージョンと一致しない場合（`package.json`を変えた別のpushで起動した場合）は
+`origin/develop`へフォールバックする。
+
+### 対象issue一覧もT0から引き継ぐ
+
+同じ理由で、develop→mainのPR本文の`## 対象issue`は**マージ済みのバンプPR（head
+`release/v<版>`）の本文から引き継ぐ**。T1でその場の進捗（`status=develop,release`）を問い合わせ
+ると、T0〜T1に入ったissue（リリースには含まれない）まで載る。引き継げなかった場合は従来どおり
+その場で問い合わせる。
+
+### 進捗の遷移とcloseの対象
+
+- `main-pr-in-progress`（`Develop` → `Release`）は`opened`の1回だけが実質の掃き寄せになる。
+  headが動かないので`synchronize`は発火しない。**リリースPRの作成後にdevelopへ入ったissueは
+  `Develop`のまま残り、次のリリースで`Release`へ進む**（それがmainへ出る内容と一致する）。
+- `main-pr-merged`（`Done`＋close）の対象は**リリースPR本文の`## 対象issue`に載った番号**。
+  Project Statusで探すと、リリースに含まれないissueまで`Develop`として拾ってcloseしてしまう。
+  本文から1件も取れなかった場合だけ、従来どおり`Develop`/`Release`のStatusで探す（#2117以前の
+  PR・手で作ったPR・PR作成時にissue-deckへ問い合わせできなかった場合の安全網）。
+
+### リリースPRのCIが落ちたときは、ブランチを直さず切り直す
+
+`release-main/vX.Y.Z`はマージ時に自動削除される（`delete_branch_on_merge`）。そこへ直接修正を
+pushすると、修正がmainにだけ残りdevelopから消え、次のリリースで巻き戻る。そのため自動修復
+（`reusable-claude-pr-repair.yml`）は、headがこのブランチのとき修正の行き先（`FIX_BASE_REF`）を
+`develop`にして**develop向けのPRとして出す**。修正はリリースPR自体には反映されないので、
+developへ取り込んだうえでリリースPRをcloseし、リリースを起動し直す（新しい凍結ブランチが
+現在のdevelop先端で作られる）。
+
+### ブランチ名を変えるときに揃える場所
+
+`release/v`（バンプPR）と接頭辞が重ならない名前にしてある。重なると`classifyPullRequest`の判定順
+でリリースPRが`version-bump`に落ちる。
+
+| 場所 | 何をしているか |
+|---|---|
+| `reusable-release-develop-to-main.yml` | 凍結ブランチのpushとPR作成、既存リリースPRの検出 |
+| `reusable-issue-labels.yml` | `main-pr-in-progress`・`main-pr-merged`のhead条件 |
+| `reusable-claude-pr-repair.yml` | `FIX_BASE_REF`を`develop`に倒すcase |
+| `src/lib/pull-request-list.ts` | `RELEASE_BRANCH_PREFIX`・`isReleaseHeadRef`・`classifyPullRequest` |
+
+**head=`develop`の判定はどこにも残してある。** 共有ワークフローの参照タグが古いリポジトリでは
+まだ`develop`をheadにしたリリースPRが作られるため、混在しても壊れないようにしている。
+
 ## バージョンを上げ忘れたまま main へ入るのを防ぐ（#1367）
 
 `deploy.yml`の`tag`ジョブは`package.json`の`version`から`v<version>`タグを作る。同名のタグが
@@ -149,7 +213,7 @@ pushトリガーは当然`develop`のものになる。**ジョブが対象コ�
 
 ## 自動マージされないことの担保
 
-バージョンbump用PR（`release/v*` → `develop`）・develop→mainのPR（`develop` → `main`）は
+バージョンbump用PR（`release/v*` → `develop`）・develop→mainのPR（`release-main/v*` → `main`）は
 いずれも、ブランチ名が`issue-<番号>`の命名規約に従わないため、`claude-review-develop.yml`の
 `auto-merge`ジョブが対応Issue番号を特定できず自動マージをスキップする（既存の仕組みがそのまま
 効くため、本Phaseで新たなガードは追加していない）。develop→mainのPRについてはそもそも

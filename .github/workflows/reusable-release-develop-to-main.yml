@@ -19,6 +19,15 @@ name: Reusable release develop to main
 #
 # 元の設計（状態はversionフィールドだけから判定する・バンプPRはauto-merge・develop→mainの
 # マージは人間が行う）はそのまま維持している。
+#
+# **リリースPRのheadは`develop`ではなく固定ブランチ`release-main/vX.Y.Z`**（#2117）。
+# PRのheadは常にそのブランチの先端を追うため、`develop`をheadにすると、PRを作った後に
+# developへ入った変更まで同じリリースでmainへ出ていた（更新履歴にも対象issueにも載らないまま
+# 出る）。凍結点はバンプPRのhead（`$GITHUB_SHA^2`）＝更新履歴を判定したときのdevelopで、
+# 更新履歴・対象issue一覧・mainへ出る内容の3つが同じ時点を指すようにしてある。
+# ブランチ名を変えるときは、リリースPRを見つける側もあわせて直すこと
+# （`src/lib/pull-request-list.ts`の`RELEASE_BRANCH_PREFIX`、
+# `reusable-issue-labels.yml`の`main-pr-in-progress`・`main-pr-merged`）。
 on:
   workflow_call:
     inputs:
@@ -117,7 +126,11 @@ jobs:
             fi
           else
             echo "developのバージョン($DEV_VERSION)がmain($MAIN_VERSION)と異なるため、バンプ済みとみなします"
-            EXISTING_MAIN_PR="$(gh pr list --base main --head develop --state open --json url --jq '.[0].url // empty')"
+            # リリースPRのheadは固定ブランチ`release-main/vX.Y.Z`（#2117）。`--head`で絞ると
+            # 版が違うだけの取りこぼしが出るため、base=mainのopenなPRを接頭辞で拾う。
+            # `develop`は#2117以前に作られたPR（移行期間中のみ存在しうる）。
+            EXISTING_MAIN_PR="$(gh pr list --base main --state open --json url,headRefName \
+              --jq '[.[] | select(.headRefName == "develop" or (.headRefName | startswith("release-main/v")))] | .[0].url // empty')"
             if [ -n "$EXISTING_MAIN_PR" ]; then
               echo "develop→mainのPR（$EXISTING_MAIN_PR）が既にオープン中のため、新規作成をスキップします"
             else
@@ -143,8 +156,39 @@ jobs:
           GH_REPO: ${{ github.repository }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          NEED_MAIN_PR: ${{ steps.state.outputs.need_main_pr }}
+          DEV_VERSION: ${{ steps.state.outputs.dev_version }}
         run: |
           set -e
+
+          # develop→mainのPRを作るrunでは、対象issueの一覧を**バンプPR本文から引き継ぐ**（#2117）。
+          # バンプPRを作ったrun（T0）と、そのマージのpushで起きる今のrun（T1）は別のrunで、
+          # 更新履歴・上げ幅・リリースの凍結点はいずれもT0のdevelopから作られる。T1でその場の
+          # 進捗を問い合わせると、T0〜T1のあいだにdevelopへ入ったIssue（リリースには含まれない）
+          # まで一覧に載る。T0の一覧をそのまま持ち越して、更新履歴・凍結内容・対象issueを揃える。
+          # 引き継げなかった場合（バンプPRが見つからない・本文に一覧が無い・手動リリース）は
+          # 従来どおりその場で問い合わせる。
+          if [ "$NEED_MAIN_PR" = "true" ]; then
+            BUMP_BODY="$(gh pr list --base develop --head "release/v$DEV_VERSION" --state merged \
+              --json body --jq '.[0].body // empty' 2>/dev/null || true)"
+            if [ -n "$BUMP_BODY" ]; then
+              # `## 対象issue`の見出しから次の`## `見出しまでを切り出し、`- #<番号> …`の行だけ残す。
+              # 取得に失敗したときの注記（`（issue-deckへ問い合わせできず…）`）はこの形に
+              # ならないため、注記だけを引き継いでしまうことはない。
+              INHERITED_LINES="$(printf '%s\n' "$BUMP_BODY" | tr -d '\r' \
+                | awk '/^## 対象issue[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f' \
+                | grep -E '^- #[0-9]+' || true)"
+              if [ -n "$INHERITED_LINES" ]; then
+                printf '%s\n' "$INHERITED_LINES" > /tmp/release-issue-lines.txt
+                echo "バンプPR（release/v$DEV_VERSION）の対象issue一覧を引き継ぎました"
+                echo "対象issue:"
+                cat /tmp/release-issue-lines.txt
+                exit 0
+              fi
+            fi
+            echo "バンプPRから対象issue一覧を引き継げなかったため、その場で問い合わせます"
+          fi
+
           NUMBERS=""
           # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。取得できなかった場合は
           # PR本文にもその旨を残す。空一覧と同じ文言だと、後から読んだときに「本当にissueが
@@ -486,11 +530,52 @@ jobs:
           GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSHED_SHA: ${{ github.sha }}
         run: |
           set -e
 
+          # **リリースPRのheadは`develop`ではなく固定ブランチにする**（#2117）。
+          # PRのheadは常にそのブランチの先端を追うため、`develop`をheadにすると、PRを作った
+          # 後にdevelopへ入った変更まで同じリリースでmainへ出る（更新履歴にも対象issueにも
+          # 載らないまま出る）。内容を止めるには固定したrefが要る。
+          #
+          # 凍結点はバンプPRのhead（`$GITHUB_SHA^2`）。このrunはバンプPRがdevelopへマージ
+          # されたpushで起きており、`$GITHUB_SHA`はそのマージコミット、第2親がバンプPRの
+          # 先端＝**更新履歴・上げ幅を判定したときのdevelop（T0）＋版上げ**にあたる。
+          # マージコミットそのもの（第1親側）にはT0以降にdevelopへ入った変更が含まれるため、
+          # 更新履歴と食い違う。
+          #
+          # 第2親が無い場合（squashマージ・workflow_dispatchでの手動起動）と、そのコミットの
+          # バージョンが`dev_version`と一致しない場合（package.jsonを変えた別のpushで起動した
+          # 場合）は`origin/develop`へフォールバックする。
+          FREEZE_SHA=""
+          if [ "$EVENT_NAME" = "push" ]; then
+            FREEZE_SHA="$(git rev-parse --verify --quiet "${PUSHED_SHA}^2" || true)"
+            if [ -n "$FREEZE_SHA" ]; then
+              FREEZE_VERSION="$(git show "$FREEZE_SHA:$VERSION_FILE" | jq -r "$VERSION_QUERY" || true)"
+              if [ "$FREEZE_VERSION" != "$DEV_VERSION" ]; then
+                echo "::warning::${PUSHED_SHA}^2 のバージョン($FREEZE_VERSION)が develop($DEV_VERSION) と一致しないため、origin/develop を凍結点にします"
+                FREEZE_SHA=""
+              fi
+            fi
+          fi
+          if [ -z "$FREEZE_SHA" ]; then
+            FREEZE_SHA="$(git rev-parse origin/develop)"
+          fi
+
+          RELEASE_BRANCH="release-main/v${DEV_VERSION}"
+          echo "リリース内容を $FREEZE_SHA で凍結し、$RELEASE_BRANCH として push します"
+          # 同名ブランチが残っているのは、前回のリリースPRがマージされずにcloseされた場合。
+          # そのブランチを参照するopenなPRが無いことは状態判定で確認済みなので、上書きしてよい。
+          git push --force origin "${FREEZE_SHA}:refs/heads/${RELEASE_BRANCH}"
+
           {
             echo "developの内容をv${DEV_VERSION}としてmainへリリースします。"
+            echo
+            echo "リリースする内容は \`${RELEASE_BRANCH}\`（\`${FREEZE_SHA}\`）で凍結しています。このPRを作った後にdevelopへ入った変更は、このリリースには含まれず次のリリースへ回ります（#2117）。"
             echo
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt
@@ -499,9 +584,10 @@ jobs:
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
             echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。ユーザーが内容を確認のうえマージしてください"
             echo "- マージ方式は必ず「Create a merge commit」を選んでください（squash mergeはdevelop/mainの祖先のつながりを切ってしまうため厳禁。詳細はrelease-to-mainスキル参照）"
+            echo "- **このPRのCIが失敗した場合、\`${RELEASE_BRANCH}\`を直接直さないでください。** 自動修復（\`claude-pr-repair.yml\`）は修正をdevelop向けPRとして出します。developへ取り込んだうえで、このPRをcloseしてリリースを起動し直すと、直した内容で凍結され直します"
           } > /tmp/main-pr-body.md
 
-          gh pr create --base main --head develop \
+          gh pr create --base main --head "$RELEASE_BRANCH" \
             --title "v${DEV_VERSION}をmainへリリースする" \
             --body-file /tmp/main-pr-body.md
 
