@@ -89,6 +89,8 @@
 #                                   チェックアウトの遅れを数え直す間隔の分数（省略時は360・0で無効）
 #   WORKTREE_CLEANUP_INTERVAL_MINUTES
 #                                   worktreeを掃除する間隔の分数（省略時は60・0で無効）
+#   NODE_MODULES_DEDUPE_INTERVAL_MINUTES
+#                                   node_modulesの重複を回収する間隔の分数（省略時は1440・0で無効）
 #
 # コンフリクトしたPRの巡回検知（#2116）は毎巡issue-deckへ促すだけで、**間隔の設定はここには
 # 無い**。どれくらいの間隔で見に行くか（＝GitHub APIをどれだけ使うか）はissue-deck側の
@@ -124,7 +126,8 @@ set -euo pipefail
 # 17: メモリ・SWAPが逼迫している間、起動ジョブを`maxJobs=0`で見送り、その理由を申告する（#2095）。
 # 18: コンフリクトしたPRの巡回検知を1巡ごとにissue-deckへ促す（#2116）。
 # 19: 定期的なworktreeの掃除を`--all-repos`で全リポジトリへ広げる（#2123）。
-DISPATCH_POLLER_VERSION="19"
+# 20: npm・yarnのworktreeで重複した`node_modules`を1日1回ハードリンクへまとめる（#2124）。
+DISPATCH_POLLER_VERSION="20"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -167,6 +170,8 @@ SESSION_REAPER="$SCRIPT_DIR/reap-sessions.sh"
 # worktreeの掃除（#1716）。**新しい常駐プロセスもsystemd timerも増やさず、この1巡に相乗りさせる。**
 # ただし上の2つと違い毎巡は呼ばず、`WORKTREE_CLEANUP_INTERVAL_MINUTES` の間隔で呼ぶ。
 WORKTREE_CLEANER="$SCRIPT_DIR/cleanup-worktrees.sh"
+# node_modules の重複回収（#2124）。掃除と違い、ポーリングを止めないよう別プロセスで走らせる。
+NODE_MODULES_DEDUPER="$SCRIPT_DIR/dedupe-node-modules.sh"
 # セッションの通知（#1219）。**通知の文面と送り先を持つのは向こう1箇所**なので、pollerからも
 # 同じスクリプトを呼ぶ（#1971。自動再開をあきらめたときだけ使う）。
 NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
@@ -332,6 +337,10 @@ CHECKOUT_FETCH_INTERVAL_MINUTES="$(require_non_negative_int \
 # 毎巡（30秒ごと）呼ぶには重い。
 WORKTREE_CLEANUP_INTERVAL_MINUTES="$(require_non_negative_int \
   WORKTREE_CLEANUP_INTERVAL_MINUTES "${WORKTREE_CLEANUP_INTERVAL_MINUTES:-}" 60)"
+# npm・yarnのworktreeで重複した node_modules をハードリンクへまとめる間隔（#2124）。
+# 掃除（60分）より桁違いに重い（全リポジトリで15分前後）ので、既定は1日1回。0で無効。
+NODE_MODULES_DEDUPE_INTERVAL_MINUTES="$(require_non_negative_int \
+  NODE_MODULES_DEDUPE_INTERVAL_MINUTES "${NODE_MODULES_DEDUPE_INTERVAL_MINUTES:-}" 1440)"
 
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
@@ -847,6 +856,43 @@ reap_worktrees() {
   # **回収の失敗でポーリングを止めない**（開発サーバー・セッションの回収と同じ扱い）。
   timeout "$WORKTREE_CLEANUP_TIMEOUT_SECONDS" bash "$WORKTREE_CLEANER" --all-repos --yes ||
     echo "Error: worktreeの掃除に失敗しました。" >&2
+  return 0
+}
+
+# --- node_modules の重複回収（#2124）----------------------------------------------
+# npm・yarnのリポジトリはworktreeごとに`node_modules`の実体をコピーするため、worktree1本あたり
+# 数百MB〜1GBがそのまま増える（pnpmは自前のストアから張るので増えない）。`generic-start-issue.sh`は
+# **これから作る**worktreeを本体からハードリンクで敷くようになったが、既にあるコピーは減らない。
+# 実測でサブPCの`~/apps`配下は`node_modules`だけで51.3GB、回収見込みは24.8GiBだった。
+#
+# 掃除（`reap_worktrees`）と同じく**判断は挟まない計器**で、何をまとめてよいかは
+# `hardlink`(util-linux) と `scripts/lib/node-modules-share.sh` が決める。
+#
+# **掃除と違い同期実行にしない。** 走査は全リポジトリで15分前後かかり、同期で回すとその間
+# ジョブの取得が止まる（掃除の上限は5分で、そこに収まらない）。子プロセスの標準出力・標準エラーは
+# 引き継ぐので、失敗はこれまでどおりjournaldに残る。多重起動は`dedupe-node-modules.sh`側の
+# flockが防ぐ。
+NODE_MODULES_DEDUPE_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/node-modules-dedupe.stamp"
+
+reap_node_modules_duplicates() {
+  ((NODE_MODULES_DEDUPE_INTERVAL_MINUTES > 0)) || return 0
+  [[ -f "$NODE_MODULES_DEDUPER" ]] || return 0
+
+  local last now
+  last=0
+  if [[ -f "$NODE_MODULES_DEDUPE_STAMP" ]]; then
+    last="$(date -r "$NODE_MODULES_DEDUPE_STAMP" +%s 2>/dev/null || echo 0)"
+  fi
+  now="$(date +%s)"
+  ((now - last >= NODE_MODULES_DEDUPE_INTERVAL_MINUTES * 60)) || return 0
+
+  # **起動する前に印を置く**（掃除と同じ理由）。失敗し続ける状態で30秒ごとに走査を
+  # 蒸し返さないようにする。
+  mkdir -p "$(dirname "$NODE_MODULES_DEDUPE_STAMP")" 2>/dev/null || true
+  touch "$NODE_MODULES_DEDUPE_STAMP" 2>/dev/null || true
+
+  echo "node_modules の重複を回収します（間隔 ${NODE_MODULES_DEDUPE_INTERVAL_MINUTES}分・別プロセス）..."
+  setsid bash "$NODE_MODULES_DEDUPER" --yes --quiet &
   return 0
 }
 
@@ -2024,6 +2070,11 @@ run_once() {
   # セッションのworktreeを、同じ巡でそのまま消せる（セッションが動いている間は消えない）。
   # 毎巡ではなく WORKTREE_CLEANUP_INTERVAL_MINUTES の間隔でだけ実際に走る。
   reap_worktrees
+
+  # 掃除で消えなかったworktreeの`node_modules`をハードリンクへまとめる（#2124）。
+  # **掃除の後に行う。** 消えるworktreeを走査しても無駄になる。既定は1日1回で、
+  # 走査自体は別プロセスへ出すのでこの巡は待たない。
+  reap_node_modules_duplicates
 
   # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
   # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
