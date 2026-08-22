@@ -86,12 +86,12 @@ export type WorkflowTagStatus = {
    */
   updatePullRequest: WorkflowTagPullRequest | null;
   /**
-   * 置かれていない自動修復のcaller（#1948）。**そのリポジトリで意味を持つものだけ**が入る
+   * 置かれていないcaller（#1948・#1475）。**そのリポジトリで意味を持つものだけ**が入る
    * （判定は`missingRepairWorkflows`）。空なら不足なし。
    */
   missingRepairWorkflows: string[];
   /**
-   * 自動修復ワークフローを配布するPRのうち、まだopenのもの。無ければ`null`。
+   * 不足しているcallerを配布するPRのうち、まだopenのもの。無ければ`null`。
    *
    * **これが有る間は配布の対象から外す**（`repairPropagationTargets`）。callerが増えるのは
    * PRがマージされた後なので、それまでは「不足」と判定されたままになる。
@@ -112,7 +112,7 @@ export function evaluateWorkflowTags(
   latest: string | null,
   updatePullRequest: WorkflowTagPullRequest | null = null,
   /**
-   * 自動修復ワークフローの配布状況（#1948）。参照タグとは独立した軸のため、
+   * 不足しているcallerの配布状況（#1948・#1475）。参照タグとは独立した軸のため、
    * 位置引数を増やさず1つのオブジェクトにまとめて受ける。
    */
   repair: {
@@ -232,7 +232,7 @@ export function canStartPropagation(run: PropagationRun | null): PropagationStar
 }
 
 /**
- * 自動修復のcaller1件ぶんの定義（#1948）。
+ * 配る caller 1件ぶんの定義（#1948）。
  *
  * **配る条件をファイルの実在で表す。** 例えば`claude-pr-repair.yml`が受け持つのは
  * バンプPR・develop→mainのリリースPRなので、リリースフローを持たないリポジトリへ配っても
@@ -249,11 +249,17 @@ export type RepairWorkflowSpec = {
 };
 
 /**
- * 配布対象の自動修復ワークフロー（#1948）。
+ * 配布対象のワークフロー（#1948・#1475）。
  *
- * どれが何を直すかは[docs/multi-agent/auto-repair.md](../../docs/multi-agent/auto-repair.md)を参照。
+ * 自動修復の3種は、どれが何を直すかを
+ * [docs/multi-agent/auto-repair.md](../../docs/multi-agent/auto-repair.md)に書いてある。
  * `claude-ci-fix.yml`・`claude-conflict-resolve.yml`は対応Issueを持つ`issue-<番号>`のPRが、
  * `claude-pr-repair.yml`はIssueを持たないPR（バンプPR・リリースPR）が対象。
+ *
+ * `claude-review-develop.yml`は自動修復ではないが、**置かれていないと機能が丸ごと働かない**
+ * 点が同じなので同じ配布経路に載せる（#1475）。develop向けPRを「自動マージしてよい」
+ * 「ユーザーのマージが必要」のどちらかへ確定させるのはこのcallerだけで、無いリポジトリでは
+ * 低リスクPRも含めて全て手動マージになる（#1470）。
  */
 export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
   {
@@ -271,6 +277,11 @@ export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
     requires: "release-develop-to-main.yml",
     label: "バンプPR・リリースPRの修復",
   },
+  {
+    file: "claude-review-develop.yml",
+    requires: "claude-issue-dispatch.yml",
+    label: "develop向けPRの自動マージ判定",
+  },
 ];
 
 /** ファイル名から画面に出す説明を引く。未知のファイルはそのまま返す */
@@ -279,7 +290,7 @@ export function repairWorkflowLabel(file: string): string {
 }
 
 /**
- * `.github/workflows/`のファイル名一覧から、**あるべきなのに無い**自動修復callerを返す。
+ * `.github/workflows/`のファイル名一覧から、**あるべきなのに無い**callerを返す。
  *
  * 判定にファイルの中身は見ない。issue-deck自身はローカルパス参照（`uses: ./`）で、
  * 他リポジトリはタグ固定と方式が違うが、**どちらも「そのファイルが置いてあるか」だけで
@@ -298,12 +309,15 @@ export function missingRepairWorkflows(files: string[]): string[] {
  * **`.github/scripts/propagate-repair-workflows.sh`の`gh pr create --title`と同じ文面**に
  * する。配布済みかどうかの判定はこのタイトルだけを頼りにしており、片方だけ変えると
  * 同じリポジトリへ2本目のPRが作られる（タグ配布の`workflowTagPullRequestTitle`と同じ理由）。
+ *
+ * 配る対象が自動修復だけではなくなったため「自動修復ワークフローを追加する」から
+ * 改称した（#1475。改称の時点でこのタイトルのopenなPRは1件も無かった）。
  */
 export function repairWorkflowPullRequestTitle(): string {
-  return "自動修復ワークフローを追加する";
+  return "不足しているワークフローを追加する";
 }
 
-/** openなPRの中から、自動修復ワークフローの配布PRを1件探す */
+/** openなPRの中から、callerの配布PRを1件探す */
 export function findRepairWorkflowPullRequest(
   pullRequests: { number: number; title: string; url: string }[],
 ): WorkflowTagPullRequest | null {
@@ -313,7 +327,7 @@ export function findRepairWorkflowPullRequest(
 }
 
 /**
- * いま自動修復ワークフローを配るべきリポジトリ。**配布PRが既にopenのものは含めない。**
+ * いまcallerを配るべきリポジトリ。**配布PRが既にopenのものは含めない。**
  *
  * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
  * （`propagationTargets`と同じ理由）。
@@ -325,7 +339,7 @@ export function repairPropagationTargets(statuses: WorkflowTagStatus[]): Workflo
 }
 
 /**
- * いま自動修復ワークフローの配布を起こしてよいか（#1948）。
+ * いま不足しているcallerの配布を起こしてよいか（#1948）。
  *
  * 判定の形も理由もタグ配布（`canStartPropagation`）と同じ。**実行の正はGitHub側のrun**で、
  * runを別に持つぶんだけ関数を分けてある（タグ配布が動いている間も、こちらは押せてよい）。

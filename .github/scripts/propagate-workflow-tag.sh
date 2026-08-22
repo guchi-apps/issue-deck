@@ -154,7 +154,14 @@ fi
 
 # **自動マージの予約を優先する。** 必須チェックを持つリポジトリではCIの成功後にマージされる。
 # 予約にはリポジトリ側で auto-merge が有効になっている必要があるため、まず有効化を試みる
-# （権限が無ければ黙って次へ進む）
+# （権限が無ければ黙って次へ進む）。
+#
+# **この有効化は現状ほぼ必ず失敗する（#1475）。** `WORKFLOW_PAT`は Administration を
+# 持たないため`PATCH /repos/{repo}`が通らない。実測でも、この行を何度も通った
+# リポジトリを含む12件が`allow_auto_merge=false`のままだった。**失敗が見えないまま
+# 何週間も残っていた**ので、有効化は`scripts/setup-develop-auto-merge.sh`（org ownerの
+# `gh`で一度だけ実行する）へ寄せた。ここは権限が付いたときに効くよう残してあるだけで、
+# 通らなくても下の平マージへ落ちるため配布自体は成立する。
 gh api -X PATCH "repos/$REPO" -F allow_auto_merge=true >/dev/null 2>&1 || true
 
 if gh pr merge "$PR_URL" --squash --delete-branch --auto >/dev/null 2>&1; then

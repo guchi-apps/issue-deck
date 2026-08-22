@@ -12,7 +12,7 @@ type Overview = {
   latest: string | null;
   repositories: WorkflowTagStatus[];
   propagation: PropagationRun | null;
-  /** 自動修復ワークフローの配布（#1948）。タグ配布とは別のrun */
+  /** 不足しているcallerの配布（#1948・#1475）。タグ配布とは別のrun */
   repairPropagation: PropagationRun | null;
 };
 

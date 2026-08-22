@@ -1,12 +1,19 @@
 name: Propagate repair workflows
 
-# 自動修復のcaller（claude-conflict-resolve.yml・claude-ci-fix.yml・claude-pr-repair.yml）が
-# 置かれていないリポジトリへ、それを追加するPRを作成する（#1948）。
+# 置かれていないcallerを追加するPRを、リポジトリごとに作成する（#1948・#1475）。
+# 配るのは自動修復の3種（claude-conflict-resolve.yml・claude-ci-fix.yml・
+# claude-pr-repair.yml）と、claude-review-develop.yml。
 #
-# **なぜ要るか。** issue-deckの画面の「コンフリクトを自動解消」「CI失敗を自動修正」は、
-# 対象リポジトリのcallerをworkflow_dispatchで起動する。callerが無いリポジトリでは押しても
-# 404で何も起きず、押すまでそれが分からない。実測ではフリートのうち3リポジトリしか
-# 持っていなかった（issue-deck・dayspan・shopping-list）。
+# **なぜ要るか。** 自動修復はissue-deckの画面の「コンフリクトを自動解消」「CI失敗を自動修正」
+# から対象リポジトリのcallerをworkflow_dispatchで起動する。callerが無いリポジトリでは押しても
+# 404で何も起きず、押すまでそれが分からない。claude-review-develop.ymlはdevelop向けPRの
+# 自動マージ可否を判定する唯一の経路で、無いリポジトリでは低リスクPRも含めて全て手動マージ
+# になる（#1470・#1475）。どちらも実測ではフリートのうち3リポジトリしか持っていなかった
+# （issue-deck・dayspan・shopping-list）。
+#
+# **claude-review-develop.ymlを配るときは、配布先のリポジトリ設定も揃える**（#1475）。
+# `Allow auto-merge`の有効化と`develop`のブランチ保護（必須ステータスチェック）が無いと
+# 自動マージは成立しない。詳細は.github/scripts/propagate-repair-workflows.shを参照。
 #
 # **タグ配布（propagate-workflow-tag.yml）とは別の操作。** あちらは既存callerの
 # `@workflows/vN`をsedで置換するもので、こちらは新しいcallerを雛形から作って追加する。
@@ -33,7 +40,7 @@ jobs:
     steps:
       - name: Checkout
         # 配布処理（.github/scripts/propagate-repair-workflows.sh）と雛形
-        # （.github/templates/repair-callers/）を使うため、このジョブ自身のチェックアウトが要る。
+        # （.github/templates/callers/）を使うため、このジョブ自身のチェックアウトが要る。
         uses: actions/checkout@v4
 
       - name: 入力を検証する
@@ -54,12 +61,14 @@ jobs:
             exit 1
           fi
 
-          # 配れるのは自動修復の3種だけ。ここを緩めると任意のファイル名を作りにいける
+          # 配れるのは自動修復の3種と claude-review-develop.yml だけ（#1475）。
+          # ここを緩めると任意のファイル名を作りにいける
           if ! printf '%s' "$TARGETS" | jq -e '
             all(.workflows | type == "array" and length > 0
                 and all(. == "claude-ci-fix.yml"
                         or . == "claude-conflict-resolve.yml"
-                        or . == "claude-pr-repair.yml"))' >/dev/null; then
+                        or . == "claude-pr-repair.yml"
+                        or . == "claude-review-develop.yml"))' >/dev/null; then
             echo "::error::workflows に配布対象外のファイル名が含まれています"
             exit 1
           fi

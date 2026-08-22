@@ -35,7 +35,7 @@ function mockFetch(overview: {
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
-      // 自動修復ワークフローの配布（#1948）はタグ配布と別のエンドポイント・別の応答
+      // 不足しているcallerの配布（#1948・#1475）はタグ配布と別のエンドポイント・別の応答
       if (String(input).includes("propagate-repair")) {
         return {
           ok: true,
@@ -200,7 +200,7 @@ describe("WorkflowTagStatusSection", () => {
   });
 });
 
-describe("自動修復ワークフローの配布（#1948）", () => {
+describe("不足しているワークフローの配布（#1948・#1475）", () => {
   it("未配布のリポジトリと、何が不足しているかを出す", async () => {
     // callerが無いリポジトリでは、画面の「コンフリクトを自動解消」を押しても起動しない
     mockFetch({
@@ -210,7 +210,11 @@ describe("自動修復ワークフローの配布（#1948）", () => {
           fullName: "guchi-apps/aide",
           outdated: false,
           refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
-          missingRepairWorkflows: ["claude-conflict-resolve.yml", "claude-ci-fix.yml"],
+          missingRepairWorkflows: [
+            "claude-conflict-resolve.yml",
+            "claude-ci-fix.yml",
+            "claude-review-develop.yml",
+          ],
         }),
       ],
       propagation: null,
@@ -219,8 +223,10 @@ describe("自動修復ワークフローの配布（#1948）", () => {
 
     expect(await screen.findByText("未配布（1）")).toBeTruthy();
     expect(screen.getByText(/develop向けPRのコンフリクト解消/)).toBeTruthy();
+    // 自動修復以外（develop向けPRの自動マージ判定）も同じ一覧に出る（#1475）
+    expect(screen.getByText(/develop向けPRの自動マージ判定/)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /1件へ自動修復ワークフローを配る/ }),
+      screen.getByRole("button", { name: /1件へ不足しているワークフローを配る/ }),
     ).toBeTruthy();
   });
 
@@ -240,7 +246,7 @@ describe("自動修復ワークフローの配布（#1948）", () => {
     render(<WorkflowTagStatusSection open />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: /1件へ自動修復ワークフローを配る/ }),
+      await screen.findByRole("button", { name: /1件へ不足しているワークフローを配る/ }),
     );
 
     await waitFor(() => {
@@ -271,14 +277,14 @@ describe("自動修復ワークフローの配布（#1948）", () => {
 
     expect(await screen.findByText("配布PRの確認待ち（1）")).toBeTruthy();
     expect(screen.getByText(/PR #12/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /自動修復ワークフローを配る/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /不足しているワークフローを配る/ })).toBeNull();
   });
 
-  it("不足が無ければ自動修復の欄自体を出さない", async () => {
+  it("不足が無ければ欄自体を出さない", async () => {
     mockFetch({ latest: "workflows/v19", repositories: [status()], propagation: null });
     render(<WorkflowTagStatusSection open />);
 
     await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"));
-    expect(screen.queryByText("自動修復ワークフロー")).toBeNull();
+    expect(screen.queryByText("不足しているワークフロー")).toBeNull();
   });
 });
