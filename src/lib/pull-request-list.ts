@@ -266,7 +266,7 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
 }
 
 /**
- * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613）。
+ * 「ユーザーの確認待ち」へ一緒に出す候補のPull Request（#1613）。
  *
  * `requiresUserMerge`なPRのうち、**対応Issueが同じ一覧に並んでいないものだけ**を返す。
  * develop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`の
@@ -274,9 +274,11 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
  * リリースPRは対応Issueを持たないため、除外しなければどの確認待ちにも現れない。これが
  * この一覧にPRを混ぜる主な理由。
  *
- * @param checkUserIssues 「ユーザーの確認待ち」ビューに並んでいるIssue（リポジトリ名と番号だけ見る）
+ * ここから先、「いま押せるもの」（`pullRequestsAwaitingUserMerge`）と「CI・判定の完了待ち」
+ * （`pullRequestsWaitingForMergeChecks`）へ分かれる。母集団を1か所に持つのは、2つの数を
+ * 足したものが従来の件数と必ず一致するようにするため。
  */
-export function pullRequestsAwaitingUserMerge(
+function pullRequestsRequiringUserMerge(
   pullRequests: PullRequestSummary[],
   checkUserIssues: readonly { repositoryFullName: string; number: number }[],
 ): PullRequestSummary[] {
@@ -293,6 +295,61 @@ export function pullRequestsAwaitingUserMerge(
         `${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`,
       );
     }),
+  );
+}
+
+/**
+ * ユーザーのマージを待ってはいるが、**いま押しても入らない**PRか（#2081）。
+ *
+ * 外すのは「待てば勝手に状態が変わるもの」だけに絞る。CI実行中（`ciState`が`pending`）は
+ * GitHubがマージを弾き、自動マージ可否の判定中（`isMergeJudgementPending`）は画面側が
+ * マージボタンを無効化する（#1968）ので、どちらも並べたところで押す先が無い。
+ * リリースPRを各リポジトリへ一斉に起票した直後は、この2つで一覧が埋まっていた。
+ *
+ * **CI失敗・コンフリクトは外さない。** 待っても解消せず人が動くしかないもので、CI失敗は
+ * 確認ダイアログを挟めば画面からマージでき（`mergeWarnings`）、コンフリクトは同じ場所が
+ * 「コンフリクトを自動解消」の入口になる（`repairKindsFor`）。
+ *
+ * `ciState`が`unknown`（`Checks: read`が無い・CIを持たないリポジトリ・取得失敗）も外さない。
+ * #1433がリリースボタンの「要操作」判定で取った倒し方と同じで、状態が取れないことを理由に
+ * マージの導線まで消さない。
+ */
+export function isMergeWaitingForChecks(pullRequest: PullRequestSummary): boolean {
+  return pullRequest.ciState === "pending" || isMergeJudgementPending(pullRequest.mergeJudgement);
+}
+
+/**
+ * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613・#2081）。
+ *
+ * 返すのは`pullRequestsRequiringUserMerge`のうち**いまマージを押せるもの**だけ。件数
+ * （左メニュー・一覧ヘッダー・スマホホームの「要対応」）もこの結果から数えるため、
+ * 一覧の中身と数字は今までどおり一致する（#1713）。
+ *
+ * @param checkUserIssues 「ユーザーの確認待ち」ビューに並んでいるIssue（リポジトリ名と番号だけ見る）
+ */
+export function pullRequestsAwaitingUserMerge(
+  pullRequests: PullRequestSummary[],
+  checkUserIssues: readonly { repositoryFullName: string; number: number }[],
+): PullRequestSummary[] {
+  return pullRequestsRequiringUserMerge(pullRequests, checkUserIssues).filter(
+    (pullRequest) => !isMergeWaitingForChecks(pullRequest),
+  );
+}
+
+/**
+ * 一覧から外した「CI・判定の完了待ち」のPull Request（#2081）。
+ *
+ * 外したものを画面から完全に消すと、リリースPRのように対応Issueを持たないPRは
+ * **どこにも現れないまま数分後に突然6件現れる**。一覧には並べないが、枠の下に件数だけ
+ * 1行出して「あと何件来るのか」を読めるようにする。**件数には足さない**——手作業待ちが
+ * 前提待ちを件数から外して一覧の見出しにだけ出すのと同じ扱い（#1763）。
+ */
+export function pullRequestsWaitingForMergeChecks(
+  pullRequests: PullRequestSummary[],
+  checkUserIssues: readonly { repositoryFullName: string; number: number }[],
+): PullRequestSummary[] {
+  return pullRequestsRequiringUserMerge(pullRequests, checkUserIssues).filter(
+    isMergeWaitingForChecks,
   );
 }
 

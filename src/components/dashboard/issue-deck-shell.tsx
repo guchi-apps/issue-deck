@@ -110,6 +110,7 @@ import {
   computePullRequestNavCounts,
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
+  pullRequestsWaitingForMergeChecks,
   type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
@@ -801,6 +802,13 @@ export function IssueDeckShell({
     [crossRepositoryPullRequests, checkUserIssues],
   );
 
+  // 上の一覧から外した「CI・判定の完了待ち」の件数（#2081）。**件数には足さず**、枠の下の
+  // 1行にだけ出す。押せないPRを並べないぶん、あと何件来るのかは読めるようにしておく。
+  const mergeCheckWaitingCount = useMemo(
+    () => pullRequestsWaitingForMergeChecks(crossRepositoryPullRequests, checkUserIssues).length,
+    [crossRepositoryPullRequests, checkUserIssues],
+  );
+
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
   // すぐ下に並ぶメニューの行と必ず同じ数字になる。
   const overviewStats = useMemo(
@@ -1200,6 +1208,7 @@ export function IssueDeckShell({
                   /* ホーム画面の「要対応」が数に含めているのと同じ配列を渡す（#1713）。
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
+                  mergeCheckWaitingCount={mergeCheckWaitingCount}
                   onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
@@ -1403,6 +1412,7 @@ export function IssueDeckShell({
                   filters.view === "check-user" ? (
                     <MergePendingPullRequests
                       pullRequests={mergePendingPullRequests}
+                      waitingForChecksCount={mergeCheckWaitingCount}
                       onSelectPullRequest={(pullRequest) => openPullRequestUrl(pullRequest.id)}
                     />
                   ) : undefined

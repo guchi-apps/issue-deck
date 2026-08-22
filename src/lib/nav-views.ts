@@ -76,6 +76,16 @@ export type NavView = {
    * （`labels`・`questionOnly`・`defaultState`）は従来どおり効く。
    */
   ignoresIssueFilters?: boolean;
+  /**
+   * 「人が手を動かすもの」を集めたビューかどうか（#2081）。スマホの一覧ヘッダーの
+   * 見出しを「Issue」からビュー名へ差し替えるのに使う。
+   *
+   * 対象は「ユーザーの確認待ち」と「ユーザーの作業待ち」。**この2つはIssueだけの一覧では
+   * ない**——確認待ちにはユーザーのマージを待っているPull Requestが混ざり（#1613）、
+   * 作業待ちに並ぶのは開発のIssueではなく人が実行する手順（`71.manual-step`）。
+   * 見出しに「Issue」と出ていると、並んでいるものと見出しが食い違う。
+   */
+  userActionList?: boolean;
 };
 
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
@@ -116,6 +126,12 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
  */
 const IGNORE_FILTER_VIEWS: readonly LabelNavViewId[] = ["check-user", "manual-step", "question"];
 
+/**
+ * Issue以外のものが並ぶ「人が手を動かすもの」のビュー（#2081。`NavView.userActionList`）。
+ * 「質問」を含めないのは、あちらに並ぶのがIssue（質問Issue）だけのため。
+ */
+const USER_ACTION_LIST_VIEWS: readonly LabelNavViewId[] = ["check-user", "manual-step"];
+
 /** 定型の絞り込みを、他のビューと同じviewクエリで表現するためのビュー定義 */
 export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   id: preset.key,
@@ -129,6 +145,7 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   latestReleaseOnly: preset.key === "recently-merged",
   groupByRepoDefault: GROUP_BY_REPO_DEFAULT_VIEWS.includes(preset.key),
   ignoresIssueFilters: IGNORE_FILTER_VIEWS.includes(preset.key),
+  userActionList: USER_ACTION_LIST_VIEWS.includes(preset.key),
 }));
 
 /**
@@ -250,6 +267,14 @@ export function getNavViewDefaultGroupByRepo(id: NavViewId): boolean {
  */
 export function navViewIgnoresIssueFilters(id: NavViewId): boolean {
   return getNavView(id).ignoresIssueFilters ?? false;
+}
+
+/**
+ * Issue以外のものも並ぶ「人が手を動かすもの」のビューか（#2081）。
+ * スマホの一覧ヘッダーの見出しを「Issue」から差し替えるかの判定に使う。
+ */
+export function navViewIsUserActionList(id: NavViewId): boolean {
+  return getNavView(id).userActionList ?? false;
 }
 
 /**

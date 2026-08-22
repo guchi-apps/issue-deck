@@ -35,7 +35,11 @@ import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
 type MobileIssueListScreenProps = {
-  /** ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名） */
+  /**
+   * ヘッダーに出す画面名（Issueタブなら「Issue」、リポジトリ別ならリポジトリ名）。
+   * Issue以外も並ぶビューではビュー名が渡ってくる（#2081。`navViewIsUserActionList`）。
+   * その場合、下の行はビュー名を重ねずに件数だけを出す。
+   */
   title: string;
   /** タイトル左のアイコン（リポジトリ別一覧のみ） */
   icon?: ReactNode;
@@ -190,6 +194,7 @@ export function MobileIssueListScreen({
   const previewView = previewViewId ? getNavView(previewViewId) : null;
   const viewOverlayTransition = isDragging ? "none" : "opacity 0.2s ease-out";
 
+  const viewLabel = getNavViewLabel(view);
   const ViewIcon = navViewIcons[view];
   const PreviewViewIcon = previewView ? navViewIcons[previewView.id] : null;
   const activeFilterCount = countActiveIssueFilters(filters, view);
@@ -238,9 +243,13 @@ export function MobileIssueListScreen({
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{title}</h1>
           {/* 表示中のビュー名を件数の行にも出す（#1645）。操作は下端の行で行うが、
-              一覧をスクロールしている最中に「何を見ているのか」を見上げて確かめられる */}
+              一覧をスクロールしている最中に「何を見ているのか」を見上げて確かめられる。
+              **見出しが既にビュー名のときは重ねない**（#2081）。Issueだけの一覧ではない
+              ビューは見出しをビュー名へ差し替えており、そのまま出すと同じ言葉が2行並ぶ */}
           <p className="truncate text-xs text-muted-foreground">
-            {[meta, getNavViewLabel(view), countLabel].filter(Boolean).join("・")}
+            {[meta, viewLabel === title ? null : viewLabel, countLabel]
+              .filter(Boolean)
+              .join("・")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -313,7 +322,7 @@ export function MobileIssueListScreen({
               }}
             >
               <ViewIcon className="size-4 shrink-0" />
-              <span className="truncate font-medium">{getNavViewLabel(view)}</span>
+              <span className="truncate font-medium">{viewLabel}</span>
               <span className="shrink-0 text-xs text-primary/70">
                 {displayNavCounts[view] ?? 0}
               </span>

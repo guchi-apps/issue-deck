@@ -15,6 +15,7 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
+import { getNavViewLabel, navViewIsUserActionList } from "@/lib/nav-views";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -35,6 +36,11 @@ type MobileIssuesScreenProps = {
    * 受け取る。**数だけを渡して中身を出さないと、押して開いた一覧が空に見える。**
    */
   mergePendingPullRequests: PullRequestSummary[];
+  /**
+   * CI・判定の完了待ちで上の配列から外したPRの件数（#2081）。件数表示には足さず、
+   * 枠の下の1行にだけ出す。
+   */
+  mergeCheckWaitingCount?: number;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
@@ -64,6 +70,7 @@ export function MobileIssuesScreen({
   assignee,
   sort,
   mergePendingPullRequests,
+  mergeCheckWaitingCount = 0,
   onSelectPullRequest,
   onChangeView,
   onChangeFilters,
@@ -119,7 +126,12 @@ export function MobileIssuesScreen({
 
   return (
     <MobileIssueListScreen
-      title="Issue"
+      // 「ユーザーの確認待ち」「ユーザーの作業待ち」はIssueだけの一覧ではないため、
+      // 見出しを「Issue」からビュー名へ差し替える（#2081。判定は`navViewIsUserActionList`）。
+      // 確認待ちにはユーザーのマージを待っているPull Requestが混ざり、作業待ちに並ぶのは
+      // 開発のIssueではなく人が実行する手順。差し替えたぶん、下の行からはビュー名が落ちる
+      // （`MobileIssueListScreen`が見出しと同じ言葉を重ねない）。
+      title={navViewIsUserActionList(view) ? getNavViewLabel(view) : "Issue"}
       issues={displayedIssues}
       navCounts={navCounts}
       selectedIssueId={selectedIssueId}
@@ -150,6 +162,7 @@ export function MobileIssuesScreen({
         section: (
           <MergePendingPullRequests
             pullRequests={mergePendingPullRequests}
+            waitingForChecksCount={mergeCheckWaitingCount}
             onSelectPullRequest={onSelectPullRequest}
           />
         ),
