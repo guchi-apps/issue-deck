@@ -208,6 +208,23 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
     expect(items[0].tone).toBe("info");
   });
 
+  it("エージェントが実行中の確認待ちは「実行中」として弱める（#2174）", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "issue-100",
+          number: 100,
+          labels: [label("00.check-user"), label("01.check-plan")],
+        }),
+      ],
+      checkUserRunningIssueIds: new Set(["issue-100"]),
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].badgeLabel).toBe("実行中");
+    expect(items[0].tone).toBe("info");
+  });
+
   it("対応PRのCIが確定していれば「PRのマージ」として出す", () => {
     const items = build({
       issues: [

@@ -330,17 +330,27 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  * 「回答が届いていてまだ読んでいない」という合図はオレンジの丸（`computeQuestionAttention`）に
  * 残してあり、件数の内訳は一覧ヘッダーの`formatQuestionListCount`（`3件・未確認1件`）で読む。
  *
+ * **「ユーザーの確認待ち」（`check-user`）は、まだエージェントが動いているものを外す**
+ * （#2174。`lib/check-user-attention.ts`）。`00.check-user`が付いていてもCI・自動マージ判定・
+ * サブPCのセッションが動いている間は押せる操作が無く、数えるとオレンジの丸が「手を動かせば
+ * 減る数」として読めない。**一覧には今までどおり並べ**、食い違いは一覧ヘッダーの
+ * `formatCheckUserListCount`（`2件・実行中1件`）で説明する（手作業待ちと同じ形）。
+ *
  * @param referenceIssues 「最新リリース」の基準時刻と、手作業Issueの前提条件（#1763）を
  *   解決するための母集団。**リポジトリで絞り込んだ一覧を数えるときは、絞り込む前の全Issueを
  *   渡す**（`mobile-repo-issues-screen.tsx`）。手作業Issueは`guchi-apps/vps#88`のように別
  *   リポジトリを待っていることがあり、母集団から外れていると「状態不明＝実行できる」と
  *   数えてしまう。省略時は`issues`（＝この一覧の母集団）。
+ * @param checkUserRunningIssueIds まだエージェントが動いている確認待ちIssueのid（#2174）。
+ *   **省略時は従来どおり全件を数える**——材料（PR一覧・セッション）を持たない呼び出し元
+ *   （リポジトリ別の一覧など）で、判定できないことを理由に件数を減らさないため。
  */
 export function computeNavCountsForFilters(
   issues: Issue[],
   filters: IssueFilterInput,
   currentUserLogin: string | null,
   referenceIssues: Issue[] = issues,
+  checkUserRunningIssueIds?: ReadonlySet<string>,
 ): Record<NavViewId, number> {
   const counts = {} as Record<NavViewId, number>;
   for (const view of navViews) {
@@ -353,7 +363,9 @@ export function computeNavCountsForFilters(
     counts[view.id] =
       view.id === "manual-step"
         ? computeManualStepAttention(matched, referenceIssues).actionable
-        : matched.length;
+        : view.id === "check-user" && checkUserRunningIssueIds
+          ? matched.filter((issue) => !checkUserRunningIssueIds.has(issue.id)).length
+          : matched.length;
   }
   return counts;
 }

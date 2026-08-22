@@ -42,6 +42,11 @@ type MobileIssuesScreenProps = {
    * 枠の下の1行にだけ出す。
    */
   mergeCheckWaitingCount?: number;
+  /**
+   * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
+   * タブの件数から外し、ヘッダーの件数には内訳（`2件・実行中1件`）として出す。
+   */
+  checkUserRunningIssueIds?: ReadonlySet<string>;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
@@ -78,6 +83,7 @@ export function MobileIssuesScreen({
   sort,
   mergePendingPullRequests,
   mergeCheckWaitingCount = 0,
+  checkUserRunningIssueIds,
   onSelectPullRequest,
   onChangeView,
   onChangeFilters,
@@ -111,8 +117,16 @@ export function MobileIssuesScreen({
   // タブごとの該当Issue件数（#880）。「ユーザーの確認待ち」のみだった件数バッジを
   // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じ数え方を使う。
   const navCounts = useMemo(
-    () => computeNavCountsForFilters(issues, listFilters, currentUserLogin),
-    [issues, listFilters, currentUserLogin],
+    () =>
+      computeNavCountsForFilters(
+        issues,
+        listFilters,
+        currentUserLogin,
+        issues,
+        // 「ユーザーの確認待ち」からは実行中のIssueを外す（#2174。PCの左メニューと同じ数え方）
+        checkUserRunningIssueIds,
+      ),
+    [issues, listFilters, currentUserLogin, checkUserRunningIssueIds],
   );
 
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
@@ -162,6 +176,7 @@ export function MobileIssuesScreen({
       fetchedAt={fetchedAt}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
+      checkUserRunningIssueIds={checkUserRunningIssueIds}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}
       onStartCodeReview={onStartCodeReview}

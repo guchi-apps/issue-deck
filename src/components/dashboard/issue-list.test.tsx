@@ -243,6 +243,27 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
   });
 });
 
+// #2174: 左メニューが実行中の確認待ちを件数から外すため、一覧の行数のままだと数が食い違う
+describe("「ユーザーの確認待ち」のヘッダーの件数（#2174）", () => {
+  it("実行中のIssueを引いた件数と、その内訳を出す", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set(["1"]) });
+
+    expect(screen.getByText("2件・実行中1件")).toBeTruthy();
+  });
+
+  it("実行中が無ければ今までどおり並んでいる件数を出す", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set<string>() });
+
+    expect(screen.getByText("3件")).toBeTruthy();
+  });
+
+  it("行は実行中でも一覧から消さない", () => {
+    renderList({ view: "check-user", checkUserRunningIssueIds: new Set(["1"]) });
+
+    expect(rowOf(1)).toBeTruthy();
+  });
+});
+
 // #1945: 右下の丸ボタンが一覧の行の後ろに回っていた
 describe("行の重なり順（#1945）", () => {
   it("行の中の重なり順を`isolate`で行の内側に閉じ込める", () => {
