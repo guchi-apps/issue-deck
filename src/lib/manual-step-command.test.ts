@@ -164,6 +164,12 @@ describe("isSubpcManualStepDevice", () => {
   it("記載が無ければ代行対象にしない", () => {
     expect(isSubpcManualStepDevice(null)).toBe(false);
   });
+
+  // 「サブPCを含むから代行してよい」と読むと、ブラウザ作業まで代行対象になっていた（#2052）
+  it("端末が1つに絞れない値は代行対象にしない", () => {
+    expect(isSubpcManualStepDevice("ブラウザ（1Password）とサブPC")).toBe(false);
+    expect(isSubpcManualStepDevice("メインPC と サブPC")).toBe(false);
+  });
 });
 
 describe("extractVerificationCommands", () => {

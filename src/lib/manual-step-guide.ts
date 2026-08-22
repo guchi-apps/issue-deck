@@ -70,9 +70,15 @@ export const MANUAL_STEP_DEVICE_NAMES = [
   { label: "ブラウザ", needles: ["ブラウザ"] },
 ] as const;
 
-/** 端末名の照合用に、装飾と空白を落として小文字へ寄せる */
+/**
+ * 端末名の照合用に、装飾・空白・区切りを落として小文字へ寄せる。
+ *
+ * `sub-pc`・`ｻﾌﾞPC`のような書き方まで吸収するのは、**代行実行の可否がこの照合で決まる**ため
+ * （`isSubpcManualStepDevice`が持っていた正規化をここへ寄せた。#2052）。読み取れなければ
+ * 代行しない側へ倒す作りなので、揺れを吸収できないと書き方の違いだけで押せなくなる。
+ */
 function normalizeDeviceText(text: string): string {
-  return text.replace(/[\s　*`_]/g, "").toLowerCase();
+  return text.replace(/ｻﾌﾞ/g, "サブ").replace(/[\s　*`_-]/g, "").toLowerCase();
 }
 
 /**

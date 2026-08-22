@@ -46,6 +46,12 @@ describe("resolveInfraConfigDevice", () => {
     expect(resolveInfraConfigDevice("ブラウザ")).toBeNull();
     expect(resolveInfraConfigDevice(null)).toBeNull();
   });
+
+  // 端末が1つに絞れない値は、どちらの実機か決められない（#2052）
+  it("端末が複数書かれた値はnullにする", () => {
+    expect(resolveInfraConfigDevice("ブラウザとサブPC")).toBeNull();
+    expect(resolveInfraConfigDevice("VPSとサブPCの両方")).toBeNull();
+  });
 });
 
 describe("detectInfraConfigTargets", () => {
@@ -121,6 +127,21 @@ describe("detectInfraConfigTargets", () => {
     });
 
     expect(detectInfraConfigTargets(body)).toEqual([]);
+  });
+
+  // 手順の文頭に端末を書けば、両方にあるパスでも1つに絞れる（#2052）
+  it("手順の文頭のデバイスで、VPS・サブPCの両方に当たるパスを切り分ける", () => {
+    const body = buildBody({
+      todo: `- [ ] （サブPC）ユニットを置く
+
+    \`\`\`bash
+    sudo cp 10-subpc-port.conf /etc/systemd/system/ssh.socket.d/10-subpc-port.conf
+    \`\`\``,
+    });
+
+    const targets = detectInfraConfigTargets(body);
+    expect(targets).toHaveLength(1);
+    expect(targets[0].repo.repositoryFullName).toBe("guchi-apps/subpc");
   });
 
   it("デバイスが読めず、VPS・サブPCの両方に当たるパスは切り出さない", () => {

@@ -1,4 +1,5 @@
 import {
+  matchManualStepDeviceNames,
   parseManualStepGuide,
   resolveManualStepDevice,
   type ManualStepGuideStep,
@@ -247,14 +248,18 @@ const WRITE_MARKERS = [
   "削除",
 ];
 
-/** `## 前提条件`の「実行するデバイス」から、どちらの実機かを決める */
+/**
+ * その手順を実行する端末から、どちらの実機かを決める。
+ *
+ * 端末名の定義は`manual-step-guide.ts`の1か所から引く（#2052）。1つに絞れないものは
+ * `null`（どちらの実機か決められないまま切り出すと、反映されないリポジトリへPRが出る）。
+ * 「メインPC」「ブラウザ」は管理リポジトリを持たないため、どちらにも寄せない。
+ */
 export function resolveInfraConfigDevice(device: string | null): InfraConfigDevice | null {
-  if (!device) return null;
-  const normalized = device.toLowerCase();
-  // 「メインPC」は管理リポジトリを持たないため、どちらにも寄せない
-  if (normalized.includes("メインpc") || normalized.includes("mainpc")) return null;
-  if (normalized.includes("サブpc") || normalized.includes("subpc")) return "subpc";
-  if (normalized.includes("vps")) return "vps";
+  const names = matchManualStepDeviceNames(device);
+  if (names.length !== 1) return null;
+  if (names[0] === "サブPC") return "subpc";
+  if (names[0] === "VPS") return "vps";
   return null;
 }
 
