@@ -18,8 +18,13 @@ name: Reusable Claude Code Review (develop向けPR)
 #   risky・reasons・already-check-userの各outputで渡す。
 #   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
-#   該当時は00.check-userを付与し、判定理由をissueにコメント投稿する(#94)。
-#   マージや進捗(Project Status)の遷移は行わない。
+#   該当時は判定理由をissueにコメント投稿する(#94)。**00.check-userの付与はここでは
+#   行わない**(#2136)。理由コメントの末尾に
+#   <!-- issue-deck-review-verdict:merge-blocked sha=<head SHA> --> のマーカーを残し、
+#   それを最後のauto-mergeジョブが読んでラベルを付ける。このジョブはCIと並行して走るため
+#   (#2066)、ここで付けるとCIの実行中・レビューの完了前にユーザーへ通知が飛ぶうえ、
+#   理由コメントの投稿はその数分後になるため画面には理由も出ない(実測: Issue #2126は
+#   12:06:09にラベル、12:09:20に理由コメント)。マージや進捗(Project Status)の遷移も行わない。
 #   develop向けPRの大半は小規模・低リスクで、そこにClaude Codeによる意味的レビューを
 #   毎回かけるのは費用対効果が低いため、risk-checkのneeds-review出力が
 #   trueのときだけ実行する(#992)。ゲート条件は risk-check の該当・大きな差分・
@@ -37,15 +42,20 @@ name: Reusable Claude Code Review (develop向けPR)
 #   PRへ失敗を通知し、対応Issueに00.check-userを付与する(auto-mergeは
 #   claude-reviewの失敗により既にスキップされるため二重の安全網になる)(#83)。
 #   auto-mergeごとスキップされる経路では機械的リスク判定の理由も一緒に投稿する(#1406)
-# - auto-merge: **まず機械的リスク判定(risk-check)の結果を反映する**。該当していれば
-#   00.check-userを付与し、判定理由をissueにコメント投稿する(#94, #366, #1406)。ただし
+# - auto-merge: **まず両判定(機械的リスク判定=risk-check・意味的判定=claude-review)の結果を
+#   反映する**。該当していれば00.check-userを付与する(#94, #366, #1406, #2136)。
+#   理由コメントは、risk-check分をこのジョブが投稿し、claude-review分はclaude-review自身が
+#   投稿済みのものを使う。ただし
 #   このpush開始時点で既に00.check-userが付いていた場合はコメント投稿のみ省略する
 #   (ラベルは毎回再付与する)。実装エージェントが同一PRへ連続してpushする間、同内容の確認要求
 #   コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
 #   そのうえで、対応Issueに00.check-userが付いていなければ gh pr merge --auto --merge を実行する。
 #   付与をこの最後のジョブまで遅らせているのは、risk-checkの時点で付けると、そのあとに走る
 #   claude-review(数分)のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では
-#   「CI実行中」としてマージボタンが押せない時間が続くため(#1406)
+#   「CI実行中」としてマージボタンが押せない時間が続くため(#1406)。**同じ理由で、
+#   claude-reviewの意味的判定もここで反映する**(#2136)。このジョブはwait-for-ciと
+#   claude-reviewの両方をneedsに持つ唯一のジョブで、「CIの完了とレビューの完了の両方が
+#   終わってからラベルが付く」ことを構造として保証できるのはここだけ
 # - auto-merge-fallback: auto-mergeが失敗した場合にのみ走る。claude-review-fallback
 #   と同様に、確実にPRへ失敗を通知し、対応Issueに00.check-userを付与する(#238)
 #
@@ -197,8 +207,9 @@ jobs:
       # 該当した理由(複数行)。auto-mergeジョブが投稿するコメントの本文になる(#1406)
       reasons: ${{ steps.risk.outputs.reasons }}
       # このpush開始時点で既に00.check-userが付いていたか。重複コメント抑止(#594)の判定に使う。
-      # auto-mergeジョブ側で読み直すと、claude-review自身が付けたラベルを見て理由コメントを
-      # 取りこぼすため、判定材料はこの時点の状態のまま渡す(#1406)
+      # 判定材料はこの時点の状態のまま渡し、auto-mergeジョブ側で読み直さない(#1406)。
+      # claude-review自身はラベルを付けなくなった(#2136)が、claude-review-fallbackなど
+      # 他経路が付けた分を「元から付いていた」と誤読して理由コメントを取りこぼすのは同じ
       already-check-user: ${{ steps.risk.outputs.already-check-user }}
     steps:
       - name: Checkout repository
@@ -519,6 +530,10 @@ jobs:
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
+          # 判定マーカー(<!-- issue-deck-review-verdict:merge-blocked sha=... -->)に
+          # 埋め込むhead SHA(#2136)。auto-mergeジョブは今回レビューしたコミットの
+          # マーカーだけを見るため、過去のpushで投稿されたマーカーを拾わない
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/review-develop.md"
@@ -530,7 +545,7 @@ jobs:
           fi
           {
             echo 'PROMPT_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY}' < "$PROMPT_FILE"
+            envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY} ${HEAD_SHA}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
@@ -550,7 +565,9 @@ jobs:
           # Read/Grep/Globは、レビュー観点「共有知識との整合性」のために.shared-context/配下を
           # 読む用途で追加している。gh issue viewは対応Issueの本文・コメントの取得に使う。
           # gh pr diff/view/checksは、レビューの起点となる差分の取得とCI結果の確認に使う(#906)。
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
+          # **gh issue editは渡さない**(#2136)。このジョブはラベルを付けない役割になったため、
+          # プロンプトの指示だけでなく道具の側でも付けられないようにしておく。
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
           prompt: ${{ env.PROMPT_REVIEW }}
 
       - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
@@ -567,7 +584,11 @@ jobs:
           "$CLAUDE_USAGE_SCRIPT" "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
 
   claude-review-fallback:
-    needs: [identify-issue, risk-check, claude-review]
+    # wait-for-ciをneedsに入れているのは、このジョブも00.check-userを付けるため(#2136)。
+    # CIが実行中のうちに付けると、auto-merge経由と同じく時期尚早の通知になる。
+    # wait-for-ciはCIのconclusionを見ずcompletedで抜け、タイムアウトしても成功する(fail-open)
+    # ので、レビュー失敗の通知がこの待機で失われることはない。
+    needs: [identify-issue, wait-for-ci, risk-check, claude-review]
     if: always() && needs.claude-review.result == 'failure'
     runs-on: ubuntu-latest
     permissions:
@@ -650,29 +671,64 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # 機械的リスク判定の結果(00.check-user・理由コメント)をここで反映するため(#1406)
+      # 両判定の結果(00.check-user・理由コメント)をここで反映するため(#1406・#2136)
       issues: write
     steps:
-      # 機械的リスク判定(risk-check)の結果を、ワークフローの最後のジョブであるここで反映する(#1406)。
-      # risk-checkの時点で付けると、そのあとに走るclaude-review(数分)とこのジョブのcheck-runが
-      # 残ったまま通知だけが飛び、issue-deckの画面ではCI実行中としてマージボタンが押せない。
+      # 両判定(機械的リスク判定=risk-check・意味的判定=claude-review)の結果を、ワークフローの
+      # 最後のジョブであるここで反映する(#1406・#2136)。判定したジョブがその場で付けると、
+      # そのあとに走るジョブのcheck-runが残ったまま通知だけが飛び、issue-deckの画面では
+      # CI実行中・判定中としてマージボタンが押せない。
       # 付与の直後に下のステップがラベルを読み直すので、自動マージ可否の判定は従来どおり
       # 「ラベルが付いていればスキップ」で成立する。
       #
       # トークンは github.token を使う(マージ実行のステップだけWORKFLOW_PAT)。
       # ラベル付与・コメント投稿の名義を従来のgithub-actions[bot]から変えないため
       # (docs/attribution.md)。
-      - name: 機械的リスク判定の結果を反映する
-        if: needs.risk-check.outputs.risky == 'true' && needs.identify-issue.outputs.number != ''
+      - name: マージ保留の判定を反映する
+        if: needs.identify-issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
+          REVIEW_RESULT: ${{ needs.claude-review.result }}
         run: |
           set -e
+
+          # 意味的判定(claude-review)の結果は、レビューが対応Issueへ投稿した理由コメントの
+          # 末尾のマーカーから読む(#2136)。マーカーの文字列はレビュープロンプト
+          # (.github/prompts/review-develop.md)と対で、ずれるとここが黙って
+          # 「該当なし」に倒れるため、scripts/check-review-verdict-marker.sh がCIで突き合わせる。
+          #
+          # - claude-reviewがskip(#992のゲート)・失敗した実行では読まない。前者は判定自体が
+          #   無く、後者はclaude-review-fallbackがラベルを付けるため
+          # - sha=で今回のhead SHAに絞る。追いコミットしたPRで、前のコミットに対する判定の
+          #   マーカーを拾わないため
+          # - マーカーが無ければ「該当なし」に倒す(fail-open)。Claudeが判定を残せなかった場合の
+          #   挙動は、ラベルを自分で付けていた頃(付け忘れれば同じく自動マージされる)と変わらない
+          REVIEW_BLOCKED=false
+          if [ "$REVIEW_RESULT" = "success" ]; then
+            VERDICT_MARKER="<!-- issue-deck-review-verdict:merge-blocked sha=${HEAD_SHA} -->"
+            # 取得に失敗したらステップごと落とす(set -e)。auto-merge-fallbackが
+            # 00.check-userを付けるので、判定を読めないまま自動マージされることはない
+            ISSUE_COMMENTS="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[].body')"
+            if printf '%s' "$ISSUE_COMMENTS" | grep -qF "$VERDICT_MARKER"; then
+              REVIEW_BLOCKED=true
+              echo "claude-reviewが自動マージ不可と判定しています(判定マーカーを検出)。"
+            else
+              echo "claude-reviewの自動マージ不可の判定マーカーはありません。"
+            fi
+          fi
+
+          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ]; then
+            echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
+            exit 0
+          fi
+
           REASON_LABEL="01.check-merge"
           # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
           # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
@@ -694,10 +750,15 @@ jobs:
           if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
             gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
           fi
+          # ここで投稿するのは機械的リスク判定(risk-check)の理由だけ。意味的判定の理由は
+          # claude-review自身が投稿済みで(その末尾のマーカーを上で読んでいる)、同じ理由を
+          # 二重に並べないため(#2136)。
+          if [ "$RISKY" != "true" ]; then
+            echo "機械的リスク判定には該当していないため、理由コメントの投稿はclaude-review側に任せます。"
           # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)。
           # 判定材料はrisk-checkが掴んだpush開始時点の状態で、ここで読み直さない。読み直すと
-          # claude-review自身が付けたラベルを見て、理由コメントを取りこぼす(#1406)
-          if [ "$ALREADY_CHECK_USER" = "true" ]; then
+          # 他経路が付けたラベルを見て、理由コメントを取りこぼす(#1406)
+          elif [ "$ALREADY_CHECK_USER" = "true" ]; then
             echo "Issue #${ISSUE_NUMBER} は既に00.check-user付与済みのため、重複コメントの投稿をスキップします。"
           else
             # 判定が下る前にPRがマージされていることがある(#1968。PR #1959は判定の6分前に

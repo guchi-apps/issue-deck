@@ -86,6 +86,12 @@ jobs:
       - name: Load secrets env block check
         run: scripts/check-load-secrets-env-block.sh
 
+      # claude-reviewの判定マーカー（#2136）が、レビュープロンプトと再利用ワークフローで
+      # 一致しているか。ずれるとワークフロー側が「該当なし」に倒れ、自動マージ不可と
+      # 判定したPRが黙って自動マージされる。
+      - name: Review verdict marker check
+        run: scripts/check-review-verdict-marker.sh
+
       # 手作業Issueの本文の雛形（docs/multi-agent/manual-step-body-template.md）が、
       # 差し込み先の4ファイルへ反映されているか（#2048）。雛形を直したのに差し込みを
       # 忘れると、起票するエージェントは古い雛形を読み続けるが、どこにも警告が出ない。
