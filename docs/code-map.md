@@ -119,6 +119,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
+- **画像を拡大して見せるのは[`image-preview-dialog.tsx`](../src/components/dashboard/image-preview-dialog.tsx)だけで、`target="_blank"`で別タブに開かない**（#2065）。
+  このアプリはホーム画面へ追加して使う（`app/manifest.ts`の`display: "standalone"`）。
+  **その起動のしかたではタブもアドレスバーも無く、別タブで開いた画像を閉じて元の画面へ戻る
+  導線が画面から消える。** 画像に入口を足すときは、本文・コメント
+  （[`markdown-body.tsx`](../src/components/dashboard/markdown-body.tsx)）でも入力欄の添付
+  サムネイル（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）でも
+  このダイアログを通す。別タブで開く導線はプレビューの下辺のリンクとして残してある。
+  - **全画面に重ねるものは、背景を押して閉じる判定を自分で持つ。** Radixの
+    `onPointerDownOutside`は「Contentの外側」を見るが、Contentが画面全体を覆っていると
+    外側が存在しない。プレビューは画像そのもの以外のクリック（`event.target`が余白か）で閉じる。
+  - **スマホの戻る操作で閉じたい重ね表示は、開いている間だけ履歴を1つ積む**
+    （[`hooks/use-history-dismiss.ts`](../src/hooks/use-history-dismiss.ts)）。積まないと
+    戻る操作が下の画面へ効き、閉じたつもりが現在地まで変わる。深さの数え方は
+    [`lib/history-stack.ts`](../src/lib/history-stack.ts)に合わせ、閉じた時点で
+    `history.back()`により自分が積んだぶんを片付ける。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と

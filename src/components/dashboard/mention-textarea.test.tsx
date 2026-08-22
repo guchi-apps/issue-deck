@@ -164,6 +164,20 @@ describe("MentionTextarea 画像の添付", () => {
     expect(emittedValue(container)).toBe("再現手順です。\n\n![b.png](/img/b.png)");
   });
 
+  // 別タブに開くとホーム画面から起動したアプリで戻れなくなるため、アプリ内で開く（#2065）
+  it("サムネイルを押すとプレビューが開き、バツボタンで閉じる", () => {
+    const { container } = render(<Harness initialValue={"![a.png](/img/a.png)"} />);
+
+    expect(document.querySelector('[aria-label="プレビューを閉じる"]')).toBeNull();
+
+    fireEvent.click(container.querySelector('[title="a.png（拡大する）"]') as HTMLElement);
+    const close = document.querySelector('[aria-label="プレビューを閉じる"]') as HTMLElement;
+    expect(close).not.toBeNull();
+
+    fireEvent.click(close);
+    expect(document.querySelector('[aria-label="プレビューを閉じる"]')).toBeNull();
+  });
+
   it("末尾に画像記法を含む本文を渡すと、入力欄にURLを出さずサムネイルとして表示する", () => {
     const { container } = render(
       <Harness initialValue={"再現手順です。\n\n![a.png](/img/a.png)"} />,
