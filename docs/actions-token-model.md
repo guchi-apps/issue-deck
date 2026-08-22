@@ -55,6 +55,25 @@ Fine-grained PAT（`claude-issue-dispatch.yml`冒頭のコメント参照）。
 least privilege の方針が既に実践されている**。計画ステップ（`mode=plan`）の
 `GH_TOKEN: ${{ github.token }}`もこの方針に沿った意図的な選択であり、うっかり漏れたものではない。
 
+### ジョブに`permissions:`を書くと、書かなかったスコープは`none`になる（#2126）
+
+`permissions:`は**宣言したスコープだけを許可する上書き**であり、書かなかったスコープは既定値を
+継承せず`none`になる。したがって`actions/checkout`を行うジョブで`contents`を省くと、
+`GITHUB_TOKEN`がリポジトリの読み取り権限を持たない。
+
+**この欠落はpublicリポジトリでは表面化しない。** `contents: none`でも匿名cloneが通るため、
+issue-deck自身のCIも実運用も緑のまま通る。**失敗するのはprivateリポジトリへ配ってから**で、
+`remote: Repository not found` / `fatal: repository '...' not found`になる。
+`reusable-claude-review-develop.yml`の`risk-check`が`workflows/v25`までこの状態で、
+privateの`guchi-apps/subpc`へ配った時点で初めて発覚した（guchi-apps/subpc#46）。
+
+- **callerの`permissions:`では直せない。** callerが宣言するのは呼び出し先が持てる**上限**で、
+  呼び出し先のジョブが自分で宣言した`permissions:`を引き上げはしない
+- **落ち方が静か。** `risk-check`が失敗すると後続の`claude-review`・`auto-merge`・両fallbackが
+  すべてskipされ、PRには失敗した旨の通知すら出ない
+- `scripts/check-workflow-job-permissions.sh`（CIの`docs-sync-check`で実行）が、checkoutを行う
+  ジョブの`permissions:`に`contents`が無い状態を静的に検出して落とす
+
 ## 2. 自己ループ防止機構（3層構造）
 
 エージェントが GitHub 上で行った操作が、自分自身のワークフローを再起動してしまうことを、

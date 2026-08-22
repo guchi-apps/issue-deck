@@ -192,7 +192,8 @@ fi
 #   send <状態イベント> <activity> <remote-controlのURL|->   Signalyへ通知する（payloadはSignaly用）
 #   notify <->  <-> <remote-controlのURL|->                 Signalyへ通知するだけ（#1971。記録も報告もしない）
 #   quiet <状態イベント> <activity>                          issue-deckへだけ報告する（#1357）
-#   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用）
+#   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用。
+#                                                           4行目に`ExitPlanMode`の引数を添える。#2121）
 #   skip                                                    何もしない
 #
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
@@ -472,6 +473,10 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
         "waitSeconds": int(os.environ.get("NOTIFY_PLAN_WAIT_SECONDS") or 0),
     }))
     print(json.dumps(build_signaly_payload("\U0001f5d2\ufe0f", "#faa61a", "計画の承認待ち", remote_url)))
+    # 4行目は`ExitPlanMode`の引数そのまま（#2121）。承認を返すときに`updatedInput`として
+    # 添え直すためだけに持ち出すので、**中身は一切変えない**（`plan_decision_output`を参照）。
+    tool_input = hook.get("tool_input")
+    print(json.dumps(tool_input if isinstance(tool_input, dict) else {}))
     sys.exit(0)
 
 # 人が承認プロンプト・質問に答えて作業へ戻ったこと（#1357）。
@@ -758,17 +763,35 @@ release_plan_request() {
 
 # `PreToolUse`フックの戻り値。**標準出力のJSONだけがClaude Codeに読まれる**ので、
 # ここ以外はすべて標準エラーへ出す約束になっている。
+#
+# **承認（`allow`）には`updatedInput`を必ず添える**（#2121）。Claude Codeは`ExitPlanMode`を
+# 「許可が下りていても人へ聞き直す」ツール（`requiresUserInteraction`）として扱っており、
+# `allow`だけを返しても端末に承認プロンプトが出る——**画面で承認したのにRemote Controlで
+# もう一度承認する二重承認**になっていた（実測: このスクリプトが`allow`を返した95秒後、
+# 人が押した2回目の承認でようやくツールが走った）。フックが`updatedInput`を返したときだけ
+# その聞き直しを省く作りなので、受け取った`tool_input`をそのまま添える。
+#
+# **中身は変えない。** ここは「入力を差し替える」機能の副作用を借りているだけで、計画本文を
+# 書き換える意図は無い。`deny`はもともと聞き直されずClaudeへ渡るため添えない。
 plan_decision_output() {
   local decision="$1" reason="$2"
-  DECISION="$decision" REASON="$reason" python3 -c '
+  DECISION="$decision" REASON="$reason" TOOL_INPUT="${PLAN_TOOL_INPUT:-}" python3 -c '
 import json, os
-print(json.dumps({
-    "hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": os.environ["DECISION"],
-        "permissionDecisionReason": os.environ["REASON"],
-    }
-}))' 2>/dev/null || true
+
+output = {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": os.environ["DECISION"],
+    "permissionDecisionReason": os.environ["REASON"],
+}
+if output["permissionDecision"] == "allow":
+    try:
+        updated = json.loads(os.environ.get("TOOL_INPUT") or "{}")
+    except Exception:
+        updated = {}
+    # 読めなかった・形が違うときも空の辞書を添える。**添えること自体が承認プロンプトを
+    # 省く条件**で、省略すると二重承認へ戻る。計画本文はツールが計画ファイルから読み直す。
+    output["updatedInput"] = updated if isinstance(updated, dict) else {}
+print(json.dumps({"hookSpecificOutput": output}))' 2>/dev/null || true
 }
 
 # **付けられたときだけ印を残す。** ラベルを外すのは印があるときだけなので、付けられて
@@ -787,9 +810,12 @@ decision_line="$(printf '%s' "$result" | head -1)"
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
-  # 2行目が計画（issue-deck向け）、3行目が通知（Signaly向け）。**行を分けているのは、
-  # 計画本文を外部サービスへ出す経路を作らないため**（通知には計画が入らない）
+  # 2行目が計画（issue-deck向け）、3行目が通知（Signaly向け）、4行目が`ExitPlanMode`の引数。
+  # **行を分けているのは、計画本文を外部サービスへ出す経路を作らないため**（通知には計画が
+  # 入らない）
   PLAN_REQUEST_ID="$(report_plan_to_issue_deck "$(printf '%s' "$result" | sed -n '2p')")"
+  # 4行目は`ExitPlanMode`の引数そのまま。承認を返すときに`updatedInput`として添え直す（#2121）
+  PLAN_TOOL_INPUT="$(printf '%s' "$result" | sed -n '4p')"
   # **計画を出した時点で、このセッションは人の答えを待っている**（#1438）。承認プロンプトの
   # `Notification`が飛ぶのを待たずにここで記録する。
   #

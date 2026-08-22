@@ -127,11 +127,12 @@ describe("SidebarNav", () => {
     expect(pullRequestNavItem("all").textContent).toContain("4");
   });
 
-  // 「完了したPR」は左メニューから外した（#1613）。prview=completedのURLは今までどおり開ける。
-  it("完了したPRは出さない", () => {
+  // #1613で左メニューから外していたが、「マージ待ち」と改名して戻した（#2120）。
+  it("マージ待ちにも件数を出す", () => {
     renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
 
-    expect(screen.queryByTitle(getPullRequestView("completed").description)).toBeNull();
+    expect(pullRequestNavItem("completed").textContent).toContain("マージ待ち");
+    expect(pullRequestNavItem("completed").textContent).toContain("1");
   });
 
   // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。

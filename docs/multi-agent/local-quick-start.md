@@ -1115,6 +1115,15 @@ pnpm db:seed:dev
   同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
 - 接続先がローカル（`localhost`/`127.0.0.1`）でなければ投入せず中止する。既存行を書き換える処理を含むため。
 
+**自動実行（#1869・#1882）の見た目はシードだけでは出ない**（#2119）。`db:seed:dev`が入れるのは
+手作業Issueの本文までで、`ManualStepRun`の行は作らない。「ユーザーの作業待ち」の帯に出る自動実行の
+バッジと一覧（`manual-step-run-badge.tsx`）を実物で見たい場合は、シードのあとに`ManualStepRun`を
+直接入れる（`repositoryFullName`＋`issueNumber`が一意キー。`doneLines`は流し終えた行番号のJSON配列）。
+**`status: "RUNNING"`で入れても、画面が読んだ時点で`PAUSED`／`pausedReason: "USER"`へ倒れる**
+——`listManualStepRunViews`が読むついでに`syncManualStepRun`を通し、対応する代行実行ジョブが
+無い実行は「人が実行する手順で待っている」と解釈するため。走っている見た目まで作りたいなら
+`DispatchJob`も併せて要る。確かめ終えたら入れた行は消す（開発DBは全worktreeで共通）。
+
 **ダミーで埋まらない範囲がある。** 次はGitHub APIと実インストールが要るので、ダミーデータでは空のまま。
 
 | 埋まる | 埋まらない |

@@ -315,6 +315,14 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 `prompts-ref`の2か所）を現行タグへ置換したうえで、共通の`risk-paths` 4行へリポジトリ固有の
 行を足す。**固有の行は`deploy.yml`の`paths`（＝実機へ反映される受け口）に合わせる。**
 
+> **参照タグは`workflows/v26`以降にする**（#2126）。`workflows/v25`までの
+> `reusable-claude-review-develop.yml`は`risk-check`の`permissions:`に`contents: read`を
+> 持たず、**privateリポジトリではcheckoutが`Repository not found`で必ず失敗する。**
+> `risk-check`が落ちると`claude-review`・`auto-merge`・両fallbackがすべてskipされるため、
+> リスク判定も自動レビューも自動マージも効かず、**PRには失敗した旨の通知すら出ない**
+> （guchi-apps/subpc#46で実測）。callerの`permissions:`は呼び出し先の上限を決めるだけなので
+> caller側では回避できない。**この2件はどちらもprivateなので、v25のまま配ってはいけない。**
+
 **書式は`<正規表現> :: <理由>`（区切りは半角スペース2つのコロン）で、正規表現だけを書くと
 `risk-check`が`::error::`で落ちる。** 落ち方が静かなのが厄介で、`risk-check`が失敗すると
 `auto-merge`は条件（`needs.risk-check.result == 'success'`）を満たさずskip、

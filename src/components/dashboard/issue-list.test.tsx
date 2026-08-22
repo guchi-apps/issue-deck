@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IssueList } from "@/components/dashboard/issue-list";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 /**
@@ -15,7 +16,8 @@ const dispatchState: {
   hosts: { name: string; online: boolean; repositories: string[] }[];
   jobs: unknown[];
   sessions: unknown[];
-} = { hosts: [], jobs: [], sessions: [] };
+  manualStepRuns: ManualStepRunView[];
+} = { hosts: [], jobs: [], sessions: [], manualStepRuns: [] };
 
 vi.mock("@/hooks/use-dispatch-state", () => ({
   useDispatchState: () => ({
@@ -102,6 +104,7 @@ function renderList(props: Partial<React.ComponentProps<typeof IssueList>> = {})
 afterEach(() => {
   cleanup();
   dispatchState.hosts = [];
+  dispatchState.manualStepRuns = [];
 });
 
 /** 積める起動先の申告（`resolveDispatchTargetRejection`が見るぶんだけ） */
@@ -665,5 +668,88 @@ describe("件数バーの折り返し（#2107）", () => {
 
     expect(barOf(/まとめて実行できるIssueが/).className).toContain("flex-wrap");
     expect(screen.getByText(/まとめて実行できるIssueが/).className).toContain("basis-48");
+  });
+});
+
+/**
+ * 手作業の入口に出る自動実行のバッジ（#1882）と、押して開く一覧（#2119）。
+ *
+ * バッジは`.find`で先頭1件しか拾っておらず、複数走っていても1件ぶんの進捗しか出ていなかった。
+ */
+describe("自動実行バッジの一覧（#2119）", () => {
+  function manualStepRun(overrides: Partial<ManualStepRunView> = {}): ManualStepRunView {
+    return {
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1,
+      issueTitle: "Issue 1",
+      issueId: "1",
+      targetHost: "subpc",
+      status: "RUNNING",
+      pausedReason: null,
+      done: 1,
+      total: 4,
+      currentLine: 10,
+      currentLabel: null,
+      currentJobId: null,
+      message: null,
+      diagnoseConsent: false,
+      startedAt: "2026-08-22T00:00:00Z",
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  function renderManualStepList(onStartManualStepGuide = vi.fn()) {
+    renderList({
+      view: "manual-step",
+      prerequisiteReadiness: new Map([["1", { ready: true, blocking: [], message: "" }]]),
+      onStartManualStepGuide,
+    });
+    return onStartManualStepGuide;
+  }
+
+  it("走っている実行を全部数える（先頭1件で打ち切らない）", () => {
+    dispatchState.manualStepRuns = [
+      manualStepRun({ issueNumber: 1, done: 1, total: 4 }),
+      manualStepRun({ issueNumber: 2, issueId: "2", done: 3, total: 5 }),
+    ];
+    renderManualStepList();
+
+    expect(screen.getByRole("button", { name: /自動実行/ }).textContent).toContain(
+      "自動実行 2件 4 / 9",
+    );
+  });
+
+  // 一覧に並んでいない実行まで拾うと、別のビューの進捗がここへ割り込む
+  it("この一覧に居ないIssueの実行は数えない", () => {
+    dispatchState.manualStepRuns = [
+      manualStepRun({ issueNumber: 1, done: 1, total: 4 }),
+      manualStepRun({ repositoryFullName: "guchi-apps/vps", issueNumber: 48, issueId: "vps-48" }),
+    ];
+    renderManualStepList();
+
+    expect(screen.getByRole("button", { name: /自動実行/ }).textContent).toContain("自動実行 1 / 4");
+  });
+
+  it("一覧の行を押すと、そのIssueを先頭にしたアシスタントが開く", () => {
+    dispatchState.manualStepRuns = [
+      manualStepRun({ issueNumber: 1 }),
+      manualStepRun({ issueNumber: 2, issueId: "2", issueTitle: "Issue 2" }),
+    ];
+    const onStartManualStepGuide = renderManualStepList();
+
+    fireEvent.click(screen.getByRole("button", { name: /自動実行/ }));
+    fireEvent.click(screen.getByText("Issue 2"));
+
+    expect(onStartManualStepGuide).toHaveBeenCalledWith("2");
+  });
+
+  // 「順番に進める」は今までどおり並び順に任せる（起点を渡さない）
+  it("「順番に進める」は起点を渡さずに開く", () => {
+    const onStartManualStepGuide = renderManualStepList();
+
+    fireEvent.click(screen.getByRole("button", { name: "順番に進める" }));
+
+    expect(onStartManualStepGuide).toHaveBeenCalledWith();
   });
 });

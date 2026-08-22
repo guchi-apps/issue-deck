@@ -19,9 +19,15 @@
 - **push方式**: `${PUSH_MODE}`
   - `direct`: `${WORK_BRANCH}` はこのPull Requestのheadブランチそのもの。ここへ直接pushすれば
     Pull Requestが更新される
-  - `pull-request`: headの `${HEAD_REF}` は保護ブランチで直接pushできないため、そこから切った
-    `${WORK_BRANCH}` で作業し、**`${HEAD_REF}` 向けの新しいPull Requestを作る**。今回の修復は
-    その新しいPull Requestが `${HEAD_REF}` へマージされて初めて #${PR_NUMBER} に反映される
+  - `pull-request`: `${HEAD_REF}` へ直接pushできない（保護ブランチ）か、pushしても修正が残らない
+    （リリースブランチはマージ時に削除される）ため、**修正の行き先 `${FIX_BASE_REF}`** から切った
+    `${WORK_BRANCH}` で作業し、**`${FIX_BASE_REF}` 向けの新しいPull Requestを作る**
+- **修正の行き先**: `${FIX_BASE_REF}`
+  - `${HEAD_REF}` と同じ場合、その新しいPull Requestが `${FIX_BASE_REF}` へマージされた時点で
+    #${PR_NUMBER} にも反映される
+  - `${HEAD_REF}` と違う場合（`release-main/v…` → main のリリースPRを `develop` で直すとき）、
+    **修正は #${PR_NUMBER} には反映されない。** developへ取り込んだあと、リリースPRをcloseして
+    リリースを起動し直すと、直した内容で凍結され直す
 
 ## 最初にやること
 
@@ -76,13 +82,14 @@
 ## pushと報告（push方式が `pull-request` のとき）
 
 - `git push origin ${WORK_BRANCH}` で作業ブランチをpushする
-- `gh pr create --base ${HEAD_REF} --head ${WORK_BRANCH} --title "..." --body "..."` で
-  `${HEAD_REF}` 向けのPull Requestを作成する。タイトル・本文は日本語で書き、本文には
+- `gh pr create --base ${FIX_BASE_REF} --head ${WORK_BRANCH} --title "..." --body "..."` で
+  `${FIX_BASE_REF}` 向けのPull Requestを作成する。タイトル・本文は日本語で書き、本文には
   「対象PR（${PR_URL}）」「何が原因で止まっていたか」「対処内容」「実行ログ: ${RUN_URL}」を
   含める。**`closes` / `fixes` は使わない**
 - 作成できたら `gh pr comment ${PR_NUMBER} --body "..."` で、元のPull Requestへ「修復用の
-  Pull Requestを作成したこと」「そのURL」「マージすればこのPull Requestに反映されること」を
-  日本語で報告する。コメント末尾に実行ログのリンク `実行ログ: ${RUN_URL}` と、投稿元を示す
+  Pull Requestを作成したこと」「そのURL」「マージした後どうなるか（`${FIX_BASE_REF}` が
+  `${HEAD_REF}` と同じならこのPull Requestに反映されること、違うならリリースを起動し直す
+  必要があること）」を日本語で報告する。コメント末尾に実行ログのリンク `実行ログ: ${RUN_URL}` と、投稿元を示す
   `<!-- issue-deck-source:claude-pr-repair -->` マーカーを必ず追記する
 - **作成したPull Requestを自分でマージしないこと。** マージは人が行う
 

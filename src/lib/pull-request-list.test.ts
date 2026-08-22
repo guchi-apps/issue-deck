@@ -69,6 +69,20 @@ describe("classifyPullRequest", () => {
     expect(classifyPullRequest({ baseRef: "main", headRef: "develop" })).toBe("release");
   });
 
+  it("release-main/vX.Y.Z→mainはリリースPRとして扱う（#2117の固定ブランチ）", () => {
+    expect(classifyPullRequest({ baseRef: "main", headRef: "release-main/v2.19.0" })).toBe(
+      "release",
+    );
+  });
+
+  it("リリース用の固定ブランチはバージョンバンプPRと取り違えない", () => {
+    // `release/v`（バンプPR）と接頭辞が重ならないことの回帰テスト。重なると
+    // classifyPullRequestの判定順でリリースPRがversion-bumpに落ちる
+    expect(classifyPullRequest({ baseRef: "develop", headRef: "release-main/v2.19.0" })).toBe(
+      "other",
+    );
+  });
+
   it("release/vX.Y.Zブランチはバージョンバンプとして扱う", () => {
     expect(classifyPullRequest({ baseRef: "develop", headRef: "release/v2.19.0" })).toBe(
       "version-bump",

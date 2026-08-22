@@ -11,11 +11,15 @@ name: Reusable Claude PR Repair
 # どちらも対応する単一のIssueが無いため、報告先・リトライ管理の前提が既存2つと合わない。
 # 本ワークフローは報告先を**対象PR自身のコメント**に置くことでこの差を埋める。
 #
-# **headブランチへ直接pushできるかどうかで2通りの動きをする。**
-#   - head が develop / main（保護ブランチ）: 直接pushできないため、headから
-#     `pr-repair/<PR番号>-<run_id>` ブランチを切って修復し、head向けのPRを作成する。
-#     develop→main のリリースPRの場合、修復内容はまずdevelopへ入る形になる。
+# **修正をheadブランチへ直接pushしてよいかどうかで2通りの動きをする。**
+#   - head が develop / main（保護ブランチ）: 直接pushできないため、`FIX_BASE_REF`（＝head）から
+#     `pr-repair/<PR番号>-<run_id>` ブランチを切って修復し、`FIX_BASE_REF` 向けのPRを作成する。
 #     そのPRのマージは人が行う（リリース進行中のdevelopへ無人でマージを重ねない）。
+#   - head が `release-main/vX.Y.Z`（develop→main のリリースPR。#2117）: 直接pushはできるが、
+#     このブランチはマージ時に自動削除されるため、修正がmainにだけ残りdevelopから消える。
+#     `FIX_BASE_REF` を develop にして、develop 向けのPRとして出す。**修正はこのリリースPR
+#     自体には反映されない**（developへ取り込んでからリリースを切り直す。
+#     docs/multi-agent/release.md）。
 #   - それ以外（バンプPR等）: 既存2ワークフローと同じくheadブランチへ直接pushする。
 #
 # **自動検知のトリガーは持たない（workflow_dispatchのみ）。** 検知して自動で走る経路は
@@ -235,11 +239,25 @@ jobs:
           fi
 
           # develop・mainへは直接pushできない（ブランチ保護・運用ルールの両方）。
-          # headがそれらの場合は修復用ブランチを切り、head向けのPRを作る形にする。
+          # headがそれらの場合は修復用ブランチを切り、修正の行き先向けのPRを作る形にする。
+          #
+          # **リリースPR（`release-main/vX.Y.Z` → main。#2117）も同じ扱いにする。**
+          # 直接pushできてしまうが、そのブランチはマージ時に自動削除されるため、修正が
+          # mainにだけ残りdevelopに無い状態になり、次のリリースで巻き戻る。修正の行き先
+          # （FIX_BASE_REF）をdevelopにして、developへ残るようにする。
+          # 修正がこのリリースPR自体へ反映されることはない。developへ取り込んだうえで
+          # リリースPRをcloseし、リリースを起動し直すと直した内容で凍結され直す
+          # （docs/multi-agent/release.md）。
+          FIX_BASE_REF="$HEAD_REF"
           case "$HEAD_REF" in
             develop|main)
               WORK_BRANCH="pr-repair/${PR_NUMBER}-${RUN_ID}"
               PUSH_MODE="pull-request"
+              ;;
+            release-main/v*)
+              WORK_BRANCH="pr-repair/${PR_NUMBER}-${RUN_ID}"
+              PUSH_MODE="pull-request"
+              FIX_BASE_REF="develop"
               ;;
             *)
               WORK_BRANCH="$HEAD_REF"
@@ -247,7 +265,7 @@ jobs:
               ;;
           esac
 
-          echo "対象PR #$PR_NUMBER（$HEAD_REF → $BASE_REF） mode=$MODE push=$PUSH_MODE branch=$WORK_BRANCH"
+          echo "対象PR #$PR_NUMBER（$HEAD_REF → $BASE_REF） mode=$MODE push=$PUSH_MODE branch=$WORK_BRANCH fix_base=$FIX_BASE_REF"
           {
             echo "should_repair=true"
             echo "pr_url=$PR_URL"
@@ -255,6 +273,7 @@ jobs:
             echo "head_ref=$HEAD_REF"
             echo "work_branch=$WORK_BRANCH"
             echo "push_mode=$PUSH_MODE"
+            echo "fix_base_ref=$FIX_BASE_REF"
           } >> "$GITHUB_OUTPUT"
 
       - name: 作業ブランチを用意する
@@ -265,13 +284,20 @@ jobs:
           BASE_REF: ${{ steps.state.outputs.base_ref }}
           WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
           PUSH_MODE: ${{ steps.state.outputs.push_mode }}
+          FIX_BASE_REF: ${{ steps.state.outputs.fix_base_ref }}
         run: |
           set -euo pipefail
-          git fetch origin "$HEAD_REF" "$BASE_REF"
-          git checkout "$HEAD_REF"
-          git reset --hard "origin/$HEAD_REF"
+          git fetch origin "$HEAD_REF" "$BASE_REF" "$FIX_BASE_REF"
           if [ "$PUSH_MODE" = "pull-request" ]; then
+            # 修正の行き先（FIX_BASE_REF）から作業ブランチを切る。head が develop / main の
+            # ときは FIX_BASE_REF == HEAD_REF なので従来と同じ。リリースPR（#2117）のときだけ
+            # develop から切って、修正が develop に残るようにする。
+            git checkout "$FIX_BASE_REF"
+            git reset --hard "origin/$FIX_BASE_REF"
             git checkout -b "$WORK_BRANCH"
+          else
+            git checkout "$HEAD_REF"
+            git reset --hard "origin/$HEAD_REF"
           fi
 
       - name: 対応開始をPRへコメントする
@@ -398,6 +424,7 @@ jobs:
           HEAD_REF: ${{ steps.state.outputs.head_ref }}
           WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
           PUSH_MODE: ${{ steps.state.outputs.push_mode }}
+          FIX_BASE_REF: ${{ steps.state.outputs.fix_base_ref }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           VERIFY_COMMANDS_INPUT: ${{ inputs.verify-commands }}
         run: |
@@ -420,7 +447,7 @@ jobs:
           # ようにする。
           {
             echo 'PROMPT_PR_REPAIR<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${REPOSITORY} ${PR_NUMBER} ${PR_URL} ${MODE} ${BASE_REF} ${HEAD_REF} ${WORK_BRANCH} ${PUSH_MODE} ${RUN_URL} ${VERIFY_COMMANDS}' < "$PROMPT_FILE"
+            envsubst '${REPOSITORY} ${PR_NUMBER} ${PR_URL} ${MODE} ${BASE_REF} ${HEAD_REF} ${WORK_BRANCH} ${PUSH_MODE} ${FIX_BASE_REF} ${RUN_URL} ${VERIFY_COMMANDS}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
