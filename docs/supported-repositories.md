@@ -16,6 +16,9 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 **インフラ設定・共有知識・個人設定のリポジトリ（`vps`・`subpc`・`docs`・`claude-config`）は、
 この表には載せない。** 無人実行は入れず、ローカルセッションとリリースフローだけを載せる、
 というのが#1697・#1741の判断（下記「`subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）」）。
+**ただし`vps`・`subpc`には#2103で`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せる**——コードを書かない読み取りだけのレビューで、無人実装を入れる判断とは
+別の軸にある（下記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」）。
 #1011が「順次導入する」としていた`vps`もこの扱いになる。`claude-config`（個人設定）は#1988で
 同じ枠へ加えた（下記「`claude-config`（個人設定）」）。
 
@@ -312,7 +315,14 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 `prompts-ref`の2か所）を現行タグへ置換したうえで、共通の`risk-paths` 4行へリポジトリ固有の
 行を足す。**固有の行は`deploy.yml`の`paths`（＝実機へ反映される受け口）に合わせる。**
 
-| | 足す`risk-paths` | 由来 |
+**書式は`<正規表現> :: <理由>`（区切りは半角スペース2つのコロン）で、正規表現だけを書くと
+`risk-check`が`::error::`で落ちる。** 落ち方が静かなのが厄介で、`risk-check`が失敗すると
+`auto-merge`は条件（`needs.risk-check.result == 'success'`）を満たさずskip、
+`auto-merge-fallback`は`auto-merge`がfailureのときしか動かないのでこちらもskipになり、
+**`00.check-user`が付かないまま自動マージもされない**PRになる（PR作成時の保険は、callerの実在を
+見た時点で通り抜けている）。下の表は正規表現だけを載せているので、写すときに理由を足すこと。
+
+| | 足す`risk-paths`の正規表現 | 由来 |
 |---|---|---|
 | `vps` | `^(apache\|systemd\|cron\|scripts\|fail2ban)/`・`^\.github/scripts/` | `deploy.yml`の`paths`と同じ5つ。`mysql/`（記録用）・`.claude/`は`paths`外 |
 | `subpc` | `^(setup\.sh$\|scripts/\|configs/)`・`^\.github/scripts/` | 同じく`deploy.yml`の`paths`の3つ |
@@ -348,9 +358,12 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 （#1706・#1727。作業は guchi-apps/subpc#13・guchi-apps/vps#80。**2026-08-16に完了**）。
 `docs`だけはリリースフローも入れない（後述）。
 
-**`claude-review-develop.yml`は#2103で`subpc`・`vps`へ配ると決めた**（`docs`は`develop`を
-持たないため対象外）。判断・前提・配り方は上記「`claude-review-develop.yml`の配布状況」の
-「`vps`・`subpc`（#2103）」を参照。
+**その後#2103で、`subpc`・`vps`には`claude-review-develop.yml`（develop向けPRのレビューと
+自動マージ判定）も載せると決めた**（`docs`は`develop`を持たないため対象外）。**「リリース
+フローだけ」ではなくなったが、無人実装（`claude-issue-dispatch.yml`）を入れない判断は
+変えていない**——レビュージョブはコードを書かず、Issueへのコメントとラベル付与だけを行う。
+判断・前提・配り方は上記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」を
+参照（作業は guchi-apps/vps#108・guchi-apps/subpc#45）。
 
 > **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
 > フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
@@ -369,7 +382,8 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 | `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
 | `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
 | ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
-| `issue-labels.yml` | `@workflows/v22`（guchi-apps/subpc#32で2026-08-18に追加） | **未配置**（#1901の残課題） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `issue-labels.yml` | `@workflows/v25`（guchi-apps/subpc#32で2026-08-18に追加） | `@workflows/v25`（#1901の残課題だったが配置済み。2026-08-22に実測） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `claude-review-develop.yml` | **#2103で配ると決定**（guchi-apps/subpc#45） | **#2103で配ると決定**（guchi-apps/vps#108） | 対象外（`develop`を持たない） |
 
 > **進捗を`Implementation`から先へ進める経路は`issue-labels.yml`が持っている。** 3件とも当初は
 > 持っておらず、ローカルセッションが起動時に付ける`Implementation`のまま、PRをマージしても
