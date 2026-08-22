@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs } from "@/lib/dispatch/jobs";
+import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 
 /**
  * サブPCのpollerがジョブを取りに来る口（#1179）。
@@ -38,6 +39,17 @@ export async function POST(request: NextRequest) {
     typeof requested === "number" && Number.isInteger(requested) && requested >= 0
       ? Math.min(requested, 10)
       : 1;
+
+  // 確認待ちのPush通知（#838）を、この取りに来るついでに1歩進める。
+  // **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。ここを選ぶのは
+  // pollerが30秒ごとに叩き、**ブラウザを開いていなくても回る**唯一の定期経路だから
+  // （画面のポーリングに載せると、アプリを閉じているときのための通知が閉じている間だけ止まる）。
+  // **失敗してもジョブの払い出しは続ける。**
+  try {
+    await sweepCheckUserPushNotifications();
+  } catch (error) {
+    console.error("[POST /api/dispatch/claim] 確認待ちのPush通知を送れませんでした:", error);
+  }
 
   const jobs = await claimDispatchJobs({ hostName, maxJobs });
   return NextResponse.json({ ok: true, jobs }, { headers: { "Cache-Control": "no-store" } });

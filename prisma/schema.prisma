@@ -32,6 +32,7 @@ model User {
   favoriteRepositories FavoriteRepository[]
   favoriteIssues       FavoriteIssue[]
   commentReads         IssueCommentRead[]
+  pushSubscriptions    PushSubscription[]
 }
 
 // --- GitHub App 連携 ---
@@ -180,6 +181,11 @@ model Issue {
   // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
   // 並べるための基準）。ラベルが外れるとnullに戻す
   checkUserLabeledAt DateTime?
+
+  // 上の確認待ちについてPush通知（#838）を送った日時。**送信済みの目印にしか使わない**。
+  // checkUserLabeledAtが新しく立つたび（＝ラベルが付き直すたび）にnullへ戻すので、
+  // 「checkUserPushSentAtがnullで、付与から一定時間が経っているもの」が未送信の集合になる
+  checkUserPushSentAt DateTime?
 
   // 「質問する」ボタン経由の質問コメント（isAskClaudeQuestionComment）が
   // 投稿された日時。一覧画面はissueごとにコメント本文を取得しないため、Webhook
@@ -993,13 +999,13 @@ model PullRequestRepairRun {
 /// ファイルパスへ再公開すると同じURLになる（claude.aiの仕様）ので、揃えて上書きする。
 /// 履歴は持たない——見たいのは常に最新の見た目で、過去の版はclaude.ai側の版一覧にある。
 model SessionArtifact {
-  id                 String @id @default(cuid())
+  id                 String  @id @default(cuid())
   repositoryFullName String
   issueNumber        Int
   /// 公開したセッションのホスト名（DispatchHost.nameと対応）。取れないこともある
   hostName           String?
   /// アーティファクトの見出し。`<title>`かファイル名から決まる（フック側が送ってくる）
-  title              String @db.Text
+  title              String  @db.Text
   /// ギャラリーの副題として送られてきた説明。無いことの方が多い
   description        String? @db.Text
   /// タブのアイコンに使う絵文字。無ければ画面側で既定を出す
@@ -1022,4 +1028,32 @@ model SessionArtifact {
 
   @@unique([repositoryFullName, issueNumber, sourceKey])
   @@index([repositoryFullName, issueNumber])
+}
+
+/// ブラウザのPush購読1件（#838）。**端末×ブラウザごとに1行**で、ユーザーごとではない。
+/// 同じ人がPCとスマホの両方で受け取れば2行になる。
+///
+/// 保存するのは`PushSubscription.toJSON()`が返すものと同じ3つ（送信に要るのはこれだけ）。
+/// `endpoint`はPushサービスが払い出すURLで、これ自体が宛先の識別子なので一意にする
+/// （同じ端末から登録し直したときは行が増えず上書きされる）。
+model PushSubscription {
+  id          String  @id @default(cuid())
+  userId      String
+  /// Pushサービスの宛先URL。長いのでTEXTで持ち、一意判定はハッシュ（endpointKey）で行う
+  endpoint    String  @db.Text
+  /// `endpoint`のSHA-256。MySQLのインデックスはTEXTに直接張れないため一意キーはこちら
+  endpointKey String  @unique
+  /// 暗号化に使う購読側の公開鍵（`keys.p256dh`）
+  p256dh      String  @db.Text
+  /// 暗号化に使う認証シークレット（`keys.auth`）
+  auth        String  @db.Text
+  /// 登録した端末の`navigator.userAgent`。設定画面で「どの端末か」を見分けるためだけに使う
+  userAgent   String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

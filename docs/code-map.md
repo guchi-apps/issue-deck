@@ -1531,6 +1531,42 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     （実行キュー → ベル → アバター）と同じ順序になる。**遷移先だけはスマホ側が自分で決める**
     ——PCは`pane`を切り替えれば済むが、スマホは`mscreen`を進めないと画面が変わらない。
     ホーム画面の件数・リポジトリ画面のリリースシートという従来の経路もそのまま残る。
+- **アプリを閉じているときの確認待ちはPush通知で届く**（#838。
+  [`lib/notifications/check-user-push.ts`](../src/lib/notifications/check-user-push.ts)・
+  [`lib/notifications/push.ts`](../src/lib/notifications/push.ts)・[`public/sw.js`](../public/sw.js)）。
+  ベルとトーストは画面を開いていないと見えないため、`00.check-user`が付いたIssueをOSの通知として
+  届ける。登録・解除は設定の「通知」区分（`settings/notification-settings-section.tsx`。PCの
+  ダイアログとスマホの設定画面が共有する）で、**購読は端末×ブラウザごと**に1行（`PushSubscription`）。
+  - **ラベルが付いた瞬間には送らず、少し待ってから、そのとき残っているラベルを読んで送る。**
+    鳴ってからでは取り消せないため。理由は2つで、(1) 実装エージェントがPR作成の直後に付ける
+    `00.check-user`＋`01.check-merge`は、10分後に自動マージされてラベルごと消えることがある
+    （#1709。トーストは保留で済むがOSの通知はそうはいかない）、(2) 理由ラベル（`01.check-*`）は
+    `00.check-user`より後の別リクエストで付く（`dispatch/check-user-labels.ts`）ため、瞬間に読むと
+    「確認待ち」としか言えない。待ち時間は既定3分、`01.check-merge`だけ15分
+    （トーストの保留上限`CHECK_USER_TOAST_MAX_HOLD_MS`＝10分より長く取り、**自動で消えるものは
+    鳴る前に消えている**状態にする）。24時間より古い確認待ちは送らずに畳む（機能を入れた直後や
+    購読を後から足したときに、溜まっていたものが一斉に鳴らないように）。
+  - **送信済みかどうかは`Issue.checkUserPushSentAt`**。`00.check-user`が付き直すたびに
+    `checkUserLabeledAt`とセットでnullへ戻す（書き戻し口は`github/sync-issues.ts`の
+    `upsertIssueRow`だけ）。「nullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。
+  - **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。巡回を呼ぶのは
+    サブPCのpollerが30秒ごとに叩く`POST /api/dispatch/claim`——**ブラウザを開いていなくても回る
+    唯一の定期経路**で、画面のポーリングに載せると閉じているときのための通知が閉じている間だけ
+    止まる。GitHub Actionsの無人実行はサブPCを介さずにラベルを付けるため、Webhookの受け口
+    （`api/webhooks/github`）にも同じ呼び出しを置いてある。どちらも失敗しても本来の処理は続ける。
+  - **`public/sw.js`は`src/proxy.ts`のmatcherから除外する。** 除外しないと、Supabaseのセッションが
+    切れた状態でのService Workerの更新チェックに`/login`のHTMLが返り、MIMEタイプ不一致で更新が
+    落ちる（＝通知が届かなくなる）。`manifest.webmanifest`と同じ扱い。Service Workerは`fetch`を
+    扱わない——キャッシュを持つと古い画面が残る事故と、認証済みの応答が漏れる事故を抱える。
+  - **表示中のウィンドウがあるときは通知を出さない**（`sw.js`の`hasVisibleClient`）。同じ知らせを
+    画面内のトースト（`check-user-toast-viewport.tsx`）が出しており、重ねるとどちらを押せばよいか
+    分からない。タップして開くURLは`useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）と
+    スマホ（`mscreen`・`missue`）の両方の現在地を載せる。
+  - **VAPID鍵（`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT`）が未設定なら機能ごと
+    無効**で、設定画面は「利用できません」を出す。**公開鍵も`NEXT_PUBLIC_`にせず実行時にAPIから
+    返す**（ビルドし直さずに鍵を差し替えられる）。iOS・iPadOSはホーム画面に追加したとき
+    （standalone起動）しかWeb Pushを許さないので、判定を「未対応」と分けて案内する
+    （`lib/push-client.ts`の`detectPushAvailability`）。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -1983,6 +2019,18 @@ pnpm test:unit   # vitestのみ
 `stubPointerApisForSelect`が実装）。トリガーの表示値を読むだけなら
 `getByRole("combobox", { name: ... })`の`textContent`で足り、補う必要は無い。
 
+**`@testing-library/jest-dom`のマッチャは使えない**（#838）。パッケージは`devDependencies`に
+入っているが、読み込むsetupファイルが無いため`toBeInTheDocument`・`toBeDisabled`は
+`Invalid Chai property`で落ちる。存在は`toBeTruthy()`／`queryBy...`が`toBeNull()`、
+無効判定は`getByRole<HTMLButtonElement>(...).disabled`で書く。
+
+**Push通知（#838）の送信は、ローカルの偽Pushサービス相手に実際に流して確かめられる。**
+`web-push`は**購読の`endpoint`のスキームに関わらずTLSで接続する**ので、受け口は`https`で立てる
+必要がある（`http`で立てると`EPROTO ... wrong version number`になる）。自己署名証明書を作り、
+`NODE_EXTRA_CA_CERTS=<cert.pem> pnpm dev`で開発サーバーを起こせば、`Content-Encoding: aes128gcm`と
+`Authorization: vapid ...`が付いたPOSTが届くところまで見える。偽サービスに404/410を返させると、
+失効した購読が`PushSubscription`から消えることも確認できる。
+
 `pnpm dev` は `next dev` の単純なラッパーではなく、[../scripts/dev.sh](../scripts/dev.sh) が
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の
 起動を行う。`next dev` を直接叩くとGitHubからのWebhookがローカルに届かない。
@@ -2000,7 +2048,7 @@ pnpm test:unit   # vitestのみ
 
 ## 環境変数
 
-`.env.local.example` が一次情報源。DB・Supabase・GitHub Appの3系統に分かれる。
+`.env.local.example` が一次情報源。DB・Supabase・GitHub App・Push通知の4系統に分かれる。
 
 既存のworktree（`~/apps/issue-deck-worktrees/issue-<番号>`）の`.env.local`には、`start-issue.sh`が
 セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
