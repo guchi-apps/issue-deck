@@ -1783,7 +1783,7 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
-## 画像はVPSのローカルディスクに置く
+## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
 - `GET /api/issues/images/[filename]` … **認証を要求しない。** GitHub.com側のIssue画面からも
@@ -1792,6 +1792,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**
+- **セッションが公開したアーティファクトも同じ置き場**（`uploads/artifacts/`。#2154）。
+  受け取りは`POST /api/dispatch/sessions/artifact`（`DISPATCH_SECRET`。フックから）、配信は
+  `GET /api/issues/artifacts/[id]`（**ログイン必須**——画像と違い、GitHub.com側から表示する
+  必要が無い）。**claude.aiのページは`frame-ancestors 'self'`でiframeに入らない**ため、
+  URLではなくHTMLの原本を運んで自分のオリジンから出し直している。
+  組み立てとCSPは[`lib/artifact-document.ts`](../src/lib/artifact-document.ts)、保存と
+  取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
+  **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
+  `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
+  手が届く）。運用の全体像は
+  [multi-agent/session-notify.md](multi-agent/session-notify.md)を参照。
 - **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
   末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに
   サムネイルで横に並べる**（#1819）。呼び出し元へ渡す`value`は従来どおり画像記法込みの1本の

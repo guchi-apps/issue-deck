@@ -969,3 +969,44 @@ model PullRequestRepairRun {
   @@unique([repositoryFullName, pullRequestNumber, kind])
   @@index([status])
 }
+
+/// ローカル・サブPC実行のセッションが公開したアーティファクト（#2154）。
+///
+/// **claude.aiのアーティファクトページは`content-security-policy: frame-ancestors 'self'`を
+/// 返すため、URLをそのままiframeへ入れられない**（実測）。代わりに公開した時点で
+/// `PostToolUse(Artifact)`のフックがHTMLの原本を送ってきて、issue-deck自身のオリジンから
+/// 出す。ここが持つのはその原本の在り処と、カードに出す最小限の見出し。
+///
+/// **1つのIssue×1つのソースファイルにつき1行**（`@@unique`）。アーティファクトは同じ
+/// ファイルパスへ再公開すると同じURLになる（claude.aiの仕様）ので、揃えて上書きする。
+/// 履歴は持たない——見たいのは常に最新の見た目で、過去の版はclaude.ai側の版一覧にある。
+model SessionArtifact {
+  id                 String @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  /// 公開したセッションのホスト名（DispatchHost.nameと対応）。取れないこともある
+  hostName           String?
+  /// アーティファクトの見出し。`<title>`かファイル名から決まる（フック側が送ってくる）
+  title              String @db.Text
+  /// ギャラリーの副題として送られてきた説明。無いことの方が多い
+  description        String? @db.Text
+  /// タブのアイコンに使う絵文字。無ければ画面側で既定を出す
+  favicon            String?
+  /// claude.aiのアーティファクトURL。**アプリ内で開けなかったときの逃げ道**として画面に出す
+  claudeUrl          String? @db.Text
+  /// フックが読んだHTMLファイルのパス（worktree内）。再公開の同一判定に使う
+  sourcePath         String  @db.Text
+  /// `sourcePath`の同一判定用ハッシュ。MySQLのインデックスは`TEXT`に直接張れない
+  sourceKey          String
+  /// `uploads/artifacts/`配下の保存ファイル名（UUID.html）
+  storedFilename     String
+  /// 保存したHTMLのバイト数。画面には出さないが、取りこぼしの調査に効く
+  byteSize           Int
+
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([repositoryFullName, issueNumber, sourceKey])
+  @@index([repositoryFullName, issueNumber])
+}

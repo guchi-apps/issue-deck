@@ -3,8 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 import type { GithubReference } from "@/lib/github-reference";
 
 afterEach(() => cleanup());
@@ -70,6 +72,63 @@ describe("MarkdownBody のリンク", () => {
 
 // チェックボックスに付く行番号は`rehypeTaskListItems`がASTの`position`から取る（#1486）。
 // `rehype-raw`・`rehype-sanitize`を通しても行番号が保たれることを、ここで実際に確かめている。
+const ARTIFACT_ID = "f4de9149-e883-4d06-af33-5da3a592aa59";
+const ARTIFACT_URL = `https://claude.ai/code/artifact/${ARTIFACT_ID}`;
+
+const STORED_ARTIFACT: SessionArtifactView = {
+  id: "art_1",
+  title: "見た目案",
+  description: null,
+  favicon: null,
+  claudeUrl: ARTIFACT_URL,
+  claudeArtifactId: ARTIFACT_ID,
+  hostName: "subpc",
+  byteSize: 100,
+  publishedAt: "2026-08-22T10:00:00.000Z",
+};
+
+describe("MarkdownBody のアーティファクトリンク（#2154）", () => {
+  function renderWithArtifacts(content: string, artifacts: SessionArtifactView[]) {
+    return render(
+      <ArtifactPreviewProvider artifacts={artifacts}>
+        <MarkdownBody content={content} repositoryFullName="guchi-apps/issue-deck" />
+      </ArtifactPreviewProvider>,
+    );
+  }
+
+  it("保存済みのアーティファクトURLはアプリ内プレビューを開く", () => {
+    renderWithArtifacts(`アーティファクト: ${ARTIFACT_URL}`, [STORED_ARTIFACT]);
+
+    const event = click(screen.getByText(ARTIFACT_URL));
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.querySelector("iframe")?.getAttribute("src")).toBe(
+      "/api/issues/artifacts/art_1",
+    );
+  });
+
+  it("保存していないURLは素の外部リンクのまま（claude.aiを開く）", () => {
+    renderWithArtifacts(`アーティファクト: ${ARTIFACT_URL}`, []);
+
+    const link = screen.getByText(ARTIFACT_URL);
+    const event = click(link);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(link.getAttribute("href")).toBe(ARTIFACT_URL);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("修飾キー付きのクリックはブラウザに任せる（別タブで開ける）", () => {
+    renderWithArtifacts(`アーティファクト: ${ARTIFACT_URL}`, [STORED_ARTIFACT]);
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+    fireEvent(screen.getByText(ARTIFACT_URL), event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+});
+
 describe("MarkdownBody のタスクリスト", () => {
   const body = ["## やること", "", "- [x] SSHする", "- [ ] .envを直す"].join("\n");
 
