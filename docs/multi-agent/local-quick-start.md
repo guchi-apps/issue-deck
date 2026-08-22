@@ -520,7 +520,7 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
   ディレクトリに` (deleted)`を付けて返すため、そのまま比較すると必ず不一致になり、
   **PIDファイルだけ消してプロセスを永久に残していた**。印を落としてから比較する。
 
-閾値は`~/.config/issue-deck/dispatch.env`の`DEV_SERVER_IDLE_MINUTES`（既定60・**0でアイドル回収を
+閾値は`~/.config/issue-deck/dispatch.env`の`DEV_SERVER_IDLE_MINUTES`（既定20・**0でアイドル回収を
 無効**）。孤児の回収はこの値と無関係に常に行う。手元で確かめるときは
 `scripts/reap-dev-servers.sh --dry-run`。
 

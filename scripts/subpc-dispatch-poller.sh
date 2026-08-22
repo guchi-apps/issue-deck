@@ -78,7 +78,7 @@
 #   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
-#   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は60・0で無効）
+#   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は20・0で無効）
 #   SESSION_RESUME_ENABLED          APIエラーで中断したセッションの自動再開（省略時は1・0で無効）
 #   SESSION_RESUME_STALL_MINUTES    中断とみなすまでの停滞の分数（省略時は10）
 #   SESSION_RESUME_MAX_ATTEMPTS     1セッションあたりの再開の上限回数（省略時は3）

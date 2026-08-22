@@ -352,6 +352,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   進捗率は出さない（サーバー側から分からないため、止まった数字は止まったアプリに見える）。
   **エラー画面はSSRのHTMLには出ず、クライアントで描かれる**ので、`curl`では確認できない
   （レンダリングテストか実ブラウザで見る）。
+- **後から届くものの場所は、実物と同じクラスで組んだスケルトンで取る**（#2090）。スマホの
+  ホームのサブPCのカードは`dispatch.hosts.length > 0`で出し分けていたが、`hosts`は取得前も`[]`
+  なので、届くまでカードごと消えて下のメニューがカード1枚ぶん繰り上がっていた。出し分けは
+  件数ではなく`useDispatchState`の`isLoaded`（**一度でも確定したか**。失敗しても立つ）で行い、
+  確定するまでは[`dashboard/dispatch-host-panel.tsx`](../src/components/dashboard/dispatch-host-panel.tsx)の
+  `CompactHostCardSkeleton`を1枚置く。
+  - **高さは`min-h-*`の固定値ではなく、実物と同じクラスから取る。** Tailwind v4の任意値
+    （`text-[10px]`など）はfont-sizeだけを設定し、行の高さは継承した`line-height: 1.5`を
+    自分のfont-sizeへ掛けて決まる。したがって**同じクラスを同じ入れ子で並べれば、高さは
+    自動的に一致する**。帯は既存の[`ui/skeleton.tsx`](../src/components/ui/skeleton.tsx)へ
+    `text-transparent`と実物と同じ文字列を渡して作る（文字が行の高さと横幅を決め、
+    `bg-muted`が帯に見せる）
+  - **合わせられるのは1通りだけ。** 実物のカードは「応答なし（見出しのみ）」「最新（見出し＋
+    使用率）」「遅れている（＋スクリプトの版が1行）」で高さが違い、どれになるかは取得するまで
+    分からない。いちばん普通の1通りに合わせ、残りは差ぶん（約21px／約51px）動くのを許す
+  - ずれを防ぐのは`dispatch-host-panel.test.tsx`の「高さを決めるクラスが実物と一致する」で、
+    実物とスケルトンから高さに効くクラス（`text-*`のサイズ・`p-*`・`mt-*`・`gap-*`・`h-*`）を
+    集めて多重集合として突き合わせる。片方だけ直すと落ちる
+  - **`aria-hidden`＋`role="status"`の1行**にして、帯の下の文字を読み上げさせない
 - **ホーム画面から起動する先は`/dashboard`**（`app/manifest.ts`の`start_url`。#1978）。
   `/`は`redirect("/dashboard")`するだけの通過点で、以前のように`/login`へ送ると
   middlewareが`/dashboard`へ折り返し、認証の確認を含む往復が毎回1回余計に増える。
@@ -1020,6 +1039,22 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   リクエストも消費する方が害が大きく、そこまで並べても画面では読めないため、打ち切ったことを
   `truncated`で伝えてGitHubの「Files changed」へ誘導する。**差分そのもの（`patch`）は受け取らない**。
   この画面が答えるのは「どこを触ったPRか」までで、行単位の差分はGitHubに任せる。
+- **mainへのPRのマージ確認ダイアログには「このリリースに含まれる変更」を並べる**（#2080。
+  [`pull-request-merge-changes.tsx`](../src/components/dashboard/pull-request-merge-changes.tsx)・
+  [`hooks/use-pull-request-changes.ts`](../src/hooks/use-pull-request-changes.ts)・
+  `GET /api/pull-requests/changes`）。押した瞬間に本番デプロイが走るマージなのに、ダイアログには
+  PR番号とブランチ名しか出ておらず、何を本番へ出そうとしているのかを確かめるにはGitHubのPRを
+  開くしかなかった。材料は`GET /pulls/{number}/commits`から拾ったマージコミット
+  （`Merge pull request #<番号> from <owner>/<ブランチ>`）で、ブランチ名`issue-<番号>`から対応Issueまで
+  辿り、**タイトルはDBキャッシュ（`Issue`テーブル）から解決する**ためIssueの件数ぶんのリクエストは
+  増えない（[`lib/pull-request-changes.ts`](../src/lib/pull-request-changes.ts)）。
+  **PR本文の`## 対象issue`は使わない**——あれはPRを作った時点の一覧で、PRが開いているあいだに
+  developへ入った変更が抜ける。出すのは`isProductionMerge`（`lib/pull-request-list.ts`。
+  `mergeWarnings`が本番デプロイの警告を返すのと同じ判定）が真のPRだけで、develop向けPRの
+  ダイアログでは取得もしない。100件（`PULL_REQUEST_COMMITS_PER_PAGE`）で打ち切る方針も、同じPRを
+  開き直すぶんがETagの304になる点も変更ファイル一覧と同じ。**取得できなくてもマージは止めない**
+  ——変更点は判断材料であって、マージの前提条件ではない。マージコミットが1件も無いリポジトリ
+  （squash運用）ではコミットの件名をそのまま並べる。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -1486,6 +1521,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `scripts/lib/dev-server.sh`の`dev_server_is_dev_command`（`/proc/<pid>/cmdline`をNUL区切りで
   読み、argvの位置で見る）。**systemd timerは新設していない**（周期ではなく在庫の問題なので、
   足すと同じ役が2つになる）。
+- **重いコマンド（テスト・ビルド）は機体全体で同時2本までに絞る**（#2076。
+  `scripts/heavy-command.sh`）。`package.json`の`test:unit`・`build`が`flock`で枠を取ってから
+  走る。既存の上限（`AppSetting.dispatchConcurrency`・`DISPATCH_MAX_SESSIONS`）は**ジョブの
+  払い出しとセッション本数にしか効かず**、立った後の12本が同時にテストを始められた
+  （1本でピーク3.24GiB・12スレッド）。枠の置き場はリポジトリの外
+  （`${XDG_CACHE_HOME:-~/.cache}/heavy-command`）で、制約が機体にあるため他リポジトリと共有できる。
+  1本あたりのワーカー数は`vitest.config.ts`が6に絞る。設計は
+  [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「立った後のセッションが走らせるものには上限が無い」。
 - **走っているセッション同士の関係を見るのは`scripts/fleet-status.sh`**（#1215）。tmux（一次情報源）・
   worktreeの分岐元SHA・未マージPRの変更ファイルを突き合わせ、**同じファイルを触っている組**を出す。
   既定は人が読む表、`--json`はプロンプトへの差し込み用。整形と重なりの判定は

@@ -254,3 +254,45 @@ export async function fetchPullRequestFiles(
   }
   return result.data;
 }
+
+/**
+ * PRに含まれるコミット1件（#2080）。マージ確認ダイアログの「含まれる変更」を組み立てるのに
+ * 使うのは件名（`commit.message`の1行目）だけなので、差分もツリーも受け取らない。
+ */
+export type GithubApiPullRequestCommit = {
+  sha: string;
+  commit: { message: string };
+};
+
+/**
+ * 1回のリクエストで取得するコミットの上限（GitHubの`per_page`の最大値）。
+ *
+ * **ページングはしない**（`PULL_REQUEST_FILES_PER_PAGE`と同じ方針）。develop→mainのリリースPRで
+ * 100コミットを超えるのは数週間ぶんを溜めた場合くらいで、そこまで並べてもダイアログでは読めない。
+ * 超えたぶんは打ち切ったことだけを画面に出してGitHubへ誘導する。
+ */
+export const PULL_REQUEST_COMMITS_PER_PAGE = 100;
+
+/**
+ * PRのコミットを1ページぶん取得する（#2080）。マージ確認ダイアログを**開いたときだけ**呼ぶ。
+ *
+ * **返り値はETagキャッシュと同じ実体になりうるので、呼び出し側で書き換えない**
+ * （`toPullRequestChanges`は新しい配列・新しいオブジェクトを作る）。同じPRのダイアログを
+ * 開き直すぶんは304になり、レート制限を消費しない。
+ */
+export async function fetchPullRequestCommits(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<GithubApiPullRequestCommit[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/commits?per_page=${PULL_REQUEST_COMMITS_PER_PAGE}`;
+  const result = await githubFetchJsonWithEtag<GithubApiPullRequestCommit[]>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  return result.data;
+}

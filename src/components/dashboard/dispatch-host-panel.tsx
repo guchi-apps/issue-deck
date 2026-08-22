@@ -4,6 +4,7 @@ import { ChevronRight, ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-
 import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
@@ -401,6 +402,10 @@ function countWaitingSessions(sessions: DispatchSessionView[]): number {
  * 遅れは「developへマージしたのに効いていない」ことに気付く唯一の手掛かり（#1612）なので、
  * ここだけは残す。「更新して再起動」（#1875・#1927）は押した結果を出す先ごとシート側にあり、
  * ここには置かない（カード全体が開くボタンなので、中にボタンを重ねられない）。
+ *
+ * **文字サイズ・余白を変えるときは`CompactHostCardSkeleton`も直す**（#2090）。取得できるまでの
+ * 場所取りが同じ高さでなくなると、差し替わった瞬間に下のメニューが動く。ずれたことは
+ * `dispatch-host-panel.test.tsx`の「高さを決めるクラスが実物と一致する」が落ちて分かる。
  */
 function CompactHostCard({
   host,
@@ -489,6 +494,79 @@ function CompactHostCard({
 function LaunchHoldRow({ message }: { message: string }) {
   return <p className="mt-1.5 text-[11px] text-destructive">{message}</p>;
 }
+
+/**
+ * 縮めた版のカードを取得できるまでの間、同じ高さで置いておくスケルトン（#2090）。
+ *
+ * **`hosts`は取得前も`[]`なので、`hosts.length > 0`で出し分けている呼び出し側からは
+ * 「まだ届いていない」と「1台も申告していない」の区別が付かず、届くまでカードごと消えていた。**
+ * スマホのホームではこのカードの下にメニューが並んでいるため、届いた瞬間に押したい行が
+ * カード1枚ぶん下へ落ちる。開いてすぐ押した指が別の行に当たるのはこれが理由（#2090の再現画面）。
+ *
+ * **高さは`CompactHostCard`と同じ組み方から取る。** 固定の`min-h-*`を置くと、カード側の
+ * 字の大きさや行数を変えたときに黙ってずれる。ここでは実物と同じ入れ子・同じ文字サイズの
+ * クラスを並べ、**文字だけ`text-transparent`にして背景を敷く**ので、行の高さは実物と一致する
+ * （`text-[10px]`のような任意値のクラスは行の高さを継承の`1.5`から計算するため、
+ * 同じクラスを置くこと自体が高さの一致になる）。**`CompactHostCard`を直すときはここも直す。**
+ *
+ * 使用率は実物が4列（SWAPを申告していないホストでは3列）だが、**列数は高さに影響しない**ので
+ * ここは4列で固定してよい。
+ *
+ * **合わせているのは「応答していて使用率を申告している」1通りだけ**（#2090の計画レビュー指摘1）。
+ * 実物の高さは3通りある。取得するまでどれになるかは分からないので、いちばん普通の1通りに
+ * 合わせ、残りは差ぶんだけ動くのを許す（`min-h-*`を実物とスケルトンに揃えて置く手もあるが、
+ * いちばん高い状態に合わせることになり、普通の状態のカードに常に空きができる）。
+ *
+ * - 応答していて最新: 見出し＋使用率。**ここに合わせている**（ずれ0）
+ * - 応答していて遅れている・遅れ不明: 上にスクリプトの版が1行増える（`mt-1`＋16.5px＝約21px
+ *   ぶん下へ動く）。`describeDispatchHostCheckout`は`behindCount`が0以外か`null`なら
+ *   `tone`を`normal`以外にするため、developが進んで「更新して再起動」を押すまでの間はこちら
+ * - 応答していない: `describeDispatchHostMetrics`が`null`を返して使用率ごと消え、見出しだけの
+ *   カードになる（約51px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
+ * - メモリ・SWAPの逼迫で起動を見送っている（#2095）: 使用率の下に1行増える。逼迫している
+ *   間だけなので、遅れているときと同じく差ぶんだけ動くのを許す
+ */
+export function CompactHostCardSkeleton() {
+  return (
+    <div className="rounded-md border p-2" data-testid="dispatch-host-skeleton">
+      {/* 中身のない飾りなので読み上げからは外し、代わりに状況を1行だけ渡す */}
+      <span className="sr-only" role="status">
+        サブPCの状態を読み込み中
+      </span>
+      <div aria-hidden>
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-xs font-medium">
+            <Skeleton className="size-1.5 shrink-0 rounded-full" />
+            <Skeleton className="rounded-sm text-transparent">サブPC</Skeleton>
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Skeleton className="rounded-sm text-[11px] text-transparent">セッション 0/0</Skeleton>
+          </span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          {SKELETON_METRIC_LABELS.map((label) => (
+            <span key={label} className="flex min-w-0 flex-col gap-0.5">
+              <Skeleton className="truncate rounded-sm text-[10px] text-transparent">
+                {label}
+              </Skeleton>
+              <Skeleton className="rounded-sm text-[13px] font-semibold text-transparent tabular-nums">
+                00%
+              </Skeleton>
+              <Skeleton className="h-1 rounded-full" />
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * スケルトンの4列に敷く見出し。**実物と同じ文字列を使う**（`text-transparent`で見えないが、
+ * 帯の幅が実物と同じになるので、差し替わったときに横方向も動かない）。
+ */
+const SKELETON_METRIC_LABELS = ["CPU", "メモリ", "SWAP", "ディスク"] as const;
 
 /** 縮めた版の1つぶん。割合を主役にして、目盛りはその下に細く敷く */
 function CompactMetric({ label, percent, tone }: DispatchHostMetricRow) {
