@@ -1739,7 +1739,13 @@ export function BranchFlowView({
   const [detailHost, setDetailHost] = useState<HTMLDivElement | null>(null);
   const handleDetailHostRef = useCallback((node: HTMLDivElement | null) => setDetailHost(node), []);
   const listWidth = useResizableWidth(LIST_PANE_WIDTH);
-  // 右に出しているリポジトリ。端末ごとに覚える（開き直しても同じものを見ている状態から始める）
+  // 右に出しているリポジトリ。端末ごとに覚える（開き直しても同じものを見ている状態から始める）。
+  //
+  // **URLへは持たない。** PR一覧・Issue一覧の2カラムは選択をURL（`pr`・`issue`）に置くが、
+  // あちらは通知や本文中の参照から特定の1件を開く経路があるためで、この画面には無い。
+  // 代わりに左メニューの選択（URLの`repos`）が既に「どのリポジトリを見たいか」を持っており、
+  // ここへ`flowrepo`のようなキーを足すと同じことを表すものがURLに2つ並ぶ。`repos`は
+  // 「選択が変わった瞬間にその先頭を右へ出す」きっかけとしてだけ効かせる（下のeffect）。
   const [selectedRepositoryFullName, setSelectedRepositoryFullName] = usePersistedState<
     string | null
   >("issue-deck:branch-flow-selected-repository", null);
@@ -1850,9 +1856,15 @@ export function BranchFlowView({
             <p className="truncate text-xs text-muted-foreground">
               <span>{flow.repositories.length}リポジトリ</span>
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
-                  出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない */}
+                  出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
+                  **2ペインでは同時に1件しか出せないので言い方を変える**（#2157）。
+                  「◯件を展開」のままだと、選んだ数と右に出ているものが食い違う */}
               {expandedRepositoryFullNames.length > 0 && (
-                <span>{` ・ 絞り込み中の${expandedRepositoryFullNames.length}件を展開`}</span>
+                <span>
+                  {isSplit
+                    ? " ・ 絞り込み中の先頭を表示"
+                    : ` ・ 絞り込み中の${expandedRepositoryFullNames.length}件を展開`}
+                </span>
               )}
               {attentionRepositories.length > 0 && (
                 <span>{` ・ 手が要るもの${attentionRepositories.length}件`}</span>

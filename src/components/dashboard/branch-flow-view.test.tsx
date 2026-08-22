@@ -276,7 +276,9 @@ describe("BranchFlowView", () => {
       } as DOMRect);
     }
 
-    function renderTwoRepositories(options: { splitLayout?: boolean } = {}) {
+    function renderTwoRepositories(
+      options: { splitLayout?: boolean; expandedRepositoryFullNames?: string[] } = {},
+    ) {
       const flow = buildBranchFlow({
         repositories: [
           { fullName: REPO, private: false },
@@ -310,6 +312,7 @@ describe("BranchFlowView", () => {
           error={null}
           failedRepositories={[]}
           mergedPullRequestsLoaded
+          expandedRepositoryFullNames={options.expandedRepositoryFullNames}
           onRefresh={vi.fn()}
           splitLayout={options.splitLayout ?? true}
         />,
@@ -379,7 +382,25 @@ describe("BranchFlowView", () => {
 
       expect(isInsideRow(REPO_SHORT, REPO_BRANCH)).toBe(true);
     });
+
+    it("左メニューで選んだリポジトリの先頭を右へ出す（#1750の「展開」の代わり）", () => {
+      mockWideLayout();
+      renderTwoRepositories({ expandedRepositoryFullNames: [REPO_B, REPO] });
+
+      expect(screen.getByRole("heading", { level: 2, name: REPO_B })).toBeTruthy();
+      expect(screen.getByText(REPO_B_BRANCH)).toBeTruthy();
+      // 同時に出せるのは1件なので、ヘッダーも「◯件を展開」とは言わない
+      expect(screen.getByText(/絞り込み中の先頭を表示/)).toBeTruthy();
+      expect(screen.queryByText(/件を展開/)).toBeNull();
+    });
+
+    it("折りたたみのときは今までどおり「◯件を展開」と出す", () => {
+      renderTwoRepositories({ expandedRepositoryFullNames: [REPO_B, REPO] });
+
+      expect(screen.getByText(/絞り込み中の2件を展開/)).toBeTruthy();
+    });
   });
+
   describe("流れ図", () => {
     it("Issue・ブランチ・PRを1本のレーンとして並べる", () => {
       renderFlow({
