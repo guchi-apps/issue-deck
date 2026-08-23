@@ -26,6 +26,7 @@ src/
   hooks/            use-* のクライアントフック。データ取得・更新はここに集約する
   lib/
     github/         GitHub APIとの境界。コンポーネントから直接叩かない
+                    （`issues-api.ts`を辿るモジュールは画面からimportできない。後述）
     claude/         Claude APIを使う機能（要約・提案・本文整形）
     supabase/       client / server / middleware / admin / github-oauth
     crypto/         ユーザートークンの暗号化
@@ -516,6 +517,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （プルダウンの選択だけで無人実行が始まると誤操作の影響が大きいため）。
   失敗理由の日本語化は[`lib/progress-report-message.ts`](../src/lib/progress-report-message.ts)に
   切り出してある（`lib/github/report-progress.ts`は`db`込みでクライアントからimportできない）。
+- **`lib/github/issues-api.ts`を辿るモジュールを、クライアントコンポーネントからimportしない**（#2178）。
+  `issues-api.ts` → `request.ts` → `api-usage.ts` と辿って`node:async_hooks`へ届くため、
+  画面から読んだ瞬間にクライアントのチャンク生成が失敗し、`/dashboard`が500になる
+  （`the chunking context does not support external modules (request: node:async_hooks)`）。
+  **型チェックも単体テストも通る**ので、開発サーバーで画面を開くまで分からない。判定・定数の
+  ような純粋なものと、GitHubを叩くものはファイルを分ける
+  （`lib/github/issue-close.ts`＝両方から読む／`lib/github/issue-close-cleanup.ts`＝サーバー専用。
+  `lib/progress-report-message.ts`と`lib/github/report-progress.ts`も同じ分け方）。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
@@ -729,6 +738,34 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   - **新しい状態もAPIも持たない。** チェックの実体はIssue本文（`use-issue-task-list.ts`）、
     クローズは`ManualStepPanel`と同じ`PATCH /api/issues`。GitHubで付けても一覧で付けても
     アシスタントで付けても、書き換わるのは同じ1か所。
+  - **上の進捗レールは押せる目次で、ドットの形が担い手を表す**（#2194。`StageRail`・
+    `resolveStageMark`）。#1826では「順番に案内するのがこの画面の役目」として押せなくして
+    いたが、前の手順へ戻るのに「戻る」を回数ぶん押す必要があったため覆した。**押しても本文の
+    チェックは変わらない**——付くのは「実行した・次へ」と代行実行が終了コード0で終わったときだけ
+    なので、先の段へ飛べても記録は飛ばせない。**担い手の印は実行計画（`buildManualStepRunPlan`）の
+    `rejection`をそのまま読む**（⚡代行できる／⚡いまは代行できない／✋あなたが実行／✓実行済み）。
+    ここに「サブPCならtrue」のような条件を書き直すと、承認パネルの「代行できる／あなたが実行」と
+    レールの印が食い違う。同じ印を手順の見出しのバッジにも出すので、コマンドを読む前に自分で
+    実行するのか待てばよいのかが分かる。
+    - **`rejection`を「あなたが実行」へ畳まない**（`HOST_SIDE_REJECTIONS`）。`rejection`は
+      「そもそも代行の対象外」（`device_not_subpc`・`no_command`・`interactive_command`・
+      `placeholder_command`）と「ホストの都合でいまは押せない」（`host_unknown`・`host_offline`・
+      `manual_step_unsupported`）を1つの値へまとめている。畳むと**pollerが止まっている間だけ
+      全段が「あなたが実行」に化け**、本当はサブPCが実行する手順まで手で実行しに行くことになる。
+      承認パネルは理由文を隣に出して救っているが、常時見えるドットには理由を書く場所が無いので、
+      `title`・`aria-label`へ`describeManualStepExecutionRejection`の理由文を足す。
+    - **バッジが意味するのは「その手順が代行の対象か」で、いま実行中かどうかは含めない。**
+      `plan`へ`hasActiveJob`を渡していないので`already_queued`はレールには出ない（渡すと、
+      実行中のあいだ印が揺れる）。実行中かどうかは`AutoRunBar`と`ManualStepRunPanel`が出す。
+    - 実行計画に載らない段の既定。`overview`・`body`は担い手を持たない（`neutral`）。
+      `## やること`が`- [ ]`で書かれていない本文は節全体が`line: null`の1手順になり、代行の
+      対象そのものが無いので「あなたが実行」。`## 完了の確認方法`のコマンドが複数あるときは
+      **いちばん重い1件に合わせる**（1件でも人が実行するなら「あなたが実行」）。
+  - **実行済みのチェックは画面から取り消せる**（#2194。手順の見出しの「実行済みを取り消す」）。
+    途中で中断していた・実は実行できていなかったと後から分かることがあるため。押すと
+    `toggleTask(line, false)`で本文の`- [x]`が`- [ ]`へ戻り、その手順は自動実行の計画へ戻るが、
+    **取り消しただけでは実行し直さない**（積むのはサーバーで、「承認して自動実行」か再開のときに
+    拾う。画面から積まないのは#1882の決まりのまま）。
   - **サブPCで実行する手順は「承認して実行」で代行できる**（#1828。
     [`manual-step-run-panel.tsx`](../src/components/dashboard/manual-step-run-panel.tsx)・
     [`lib/manual-step-command.ts`](../src/lib/manual-step-command.ts)）。押すと既存の
@@ -1615,6 +1652,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     画面内のトースト（`check-user-toast-viewport.tsx`）が出しており、重ねるとどちらを押せばよいか
     分からない。タップして開くURLは`useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）と
     スマホ（`mscreen`・`missue`）の両方の現在地を載せる。
+  - **例外はテスト通知だけで、payloadの`force`で抜ける**（#2195）。テスト通知は設定画面のボタンから
+    しか送れず、**押した時点でその画面が必ず表示中**になるため、上の抑止に当たって毎回握りつぶされて
+    いた（送信は成功して「1件の端末へ送りました」と出るので、鍵もOSの許可も切り分けられない）。
+    `force`を付けるのは`api/notifications/test`だけで、`00.check-user`の通知には付けない（付けると
+    アプリを開いている間もトーストと二重に出る）。分岐は`lib/notifications/sw-push.test.ts`が
+    **`public/sw.js`を読み込んで偽の`self`で動かして**確かめる（Service Workerはバンドルされない
+    素のJSでimportできない）。
+  - **設定画面を開くたびにService Workerの更新を確かめる**（`use-push-subscription.ts`の
+    `registration.update()`）。`register`を呼ぶのは購読するときだけで、ホーム画面から開きっぱなしの
+    PWAは読み込み直す機会が無く、通知の出し方を直しても古い版が動き続ける。
+  - **テスト通知の結果は「送れた／失効で消した／送れなかった」を区別して出す。** `sendPushNotification`の
+    戻り値（`sent`・`removed`・`failed`）をそのまま画面へ出し分ける。失効（404/410）で行が消えた場合は
+    登録し直しが要り、一時的な失敗とは次にやることが違う。
   - **VAPID鍵（`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT`）が未設定なら機能ごと
     無効**で、設定画面は「利用できません」を出す。**公開鍵も`NEXT_PUBLIC_`にせず実行時にAPIから
     返す**（ビルドし直さずに鍵を差し替えられる）。iOS・iPadOSはホーム画面に追加したとき
@@ -1976,7 +2026,8 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
   **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
-  手が届く）。運用の全体像は
+  手が届く）。**Issue詳細のカードに出るサムネイルも同じ配信URLのiframe**（#2190。幅1200pxで
+  描かせて`transform`で縮める）なので、この約束はそちらにも掛かる。運用の全体像は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)を参照。
 - **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
   末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに

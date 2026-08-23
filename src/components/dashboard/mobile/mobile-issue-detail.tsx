@@ -24,7 +24,7 @@ import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
+import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
@@ -79,6 +79,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuPortal,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -103,6 +104,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
@@ -412,12 +414,13 @@ export function MobileIssueDetail({
     if (updated) onIssueUpdated(updated);
   }
 
-  async function handleClose(stateReason: "completed" | "not_planned") {
+  async function handleClose(stateReason: "completed" | "not_planned", closeReasonLabel?: string) {
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       state: "closed",
       stateReason,
+      closeReasonLabel,
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -699,6 +702,19 @@ export function MobileIssueDetail({
                     >
                       計画外としてクローズ
                     </DropdownMenuItem>
+                    {/* クローズ理由ラベル（#2178）。区切り線から下は「計画外の内訳」で、
+                        どれも`not_planned`でクローズしつつ`90.Close: *`を1枚付ける */}
+                    <DropdownMenuSeparator />
+                    {CLOSE_REASON_LABELS.map((reason) => (
+                      <DropdownMenuItem
+                        key={reason.name}
+                        className="whitespace-nowrap text-xs"
+                        disabled={isSubmitting}
+                        onSelect={() => handleClose("not_planned", reason.name)}
+                      >
+                        {reason.label}
+                      </DropdownMenuItem>
+                    ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuPortal>
               </DropdownMenuSub>
@@ -785,12 +801,8 @@ export function MobileIssueDetail({
           </div>
         )}
 
-        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く */}
-        <IssueArtifactSection
-          artifacts={artifacts}
-          onReload={reloadArtifacts}
-          idPrefix="mobile"
-        />
+        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く（#2190） */}
+        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
         {showStartDialog && (
           <StartImplementationDialog

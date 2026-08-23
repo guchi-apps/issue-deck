@@ -102,6 +102,12 @@ export function NotificationSettingsSection() {
             押すとブラウザが通知の許可を尋ねます。許可はこの端末・このブラウザにだけ効きます。
           </p>
         )}
+        {isSubscribed && (
+          <p className="text-xs text-muted-foreground">
+            テスト通知だけは、この画面を開いたままでもOSの通知として表示されます。しばらく待っても
+            出てこない場合は、端末側の設定でIssueDeckの通知が許可されているかを確かめてください。
+          </p>
+        )}
         {message && <p className="text-xs text-emerald-700 dark:text-emerald-400">{message}</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>

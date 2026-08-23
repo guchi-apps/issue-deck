@@ -22,7 +22,7 @@ import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
+import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
@@ -73,6 +73,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuPortal,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -111,6 +112,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
   askClaudeCommentBody,
@@ -268,13 +270,14 @@ export function IssueDetail({
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
 
-  async function handleClose(stateReason: "completed" | "not_planned") {
+  async function handleClose(stateReason: "completed" | "not_planned", closeReasonLabel?: string) {
     if (!issue) return;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       state: "closed",
       stateReason,
+      closeReasonLabel,
     });
     if (updated) onIssueUpdated(updated);
   }
@@ -740,6 +743,20 @@ export function IssueDetail({
                           >
                             計画外としてクローズ
                           </DropdownMenuItem>
+                          {/* クローズ理由ラベル（#2178）。区切り線から下は「計画外の内訳」で、
+                              どれも`not_planned`でクローズしつつ`90.Close: *`を1枚付ける。
+                              ダイアログを挟まずクリック1回で終える（上2つと操作を揃える） */}
+                          <DropdownMenuSeparator />
+                          {CLOSE_REASON_LABELS.map((reason) => (
+                            <DropdownMenuItem
+                              key={reason.name}
+                              className="whitespace-nowrap text-xs"
+                              disabled={isSubmitting}
+                              onSelect={() => handleClose("not_planned", reason.name)}
+                            >
+                              {reason.label}
+                            </DropdownMenuItem>
+                          ))}
                         </DropdownMenuSubContent>
                       </DropdownMenuPortal>
                     </DropdownMenuSub>
@@ -810,12 +827,8 @@ export function IssueDetail({
 
           {/* アーティファクト（#2154）。**計画パネルのすぐ下**に置く——`25.artifact-required`の
               基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
-              見た目への入口が要る */}
-          <IssueArtifactSection
-            artifacts={artifacts}
-            onReload={reloadArtifacts}
-            idPrefix="pc"
-          />
+              見た目への入口が要る。畳めるセクションではなく独立したカード（#2190） */}
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
               コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。

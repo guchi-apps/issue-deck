@@ -766,3 +766,133 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(runManualStep).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 進捗レール（#2194）。**押せる目次であること**と、**担い手（代行できる／あなたが実行）が
+ * ドットと手順の見出しに出ること**を見る。代行できるかどうかの判定そのものは
+ * `lib/dispatch/dispatch-job.ts`と`lib/manual-step-autorun.ts`のテストが持つ。
+ */
+describe("ManualStepGuideDialog の進捗レール", () => {
+  beforeEach(() => {
+    taskList.body = BODY;
+    taskList.isToggling = false;
+    taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("ドットを押すとその段へ直接移動する", () => {
+    renderDialog([issue()]);
+
+    // 「戻る」「次へ」を辿らずに手順2（コマンドの無い手順）へ飛べる
+    fireEvent.click(screen.getByRole("button", { name: /手順 2 \/ 2/ }));
+    expect(screen.getByRole("heading", { name: /手順 2 \/ 2/ })).toBeTruthy();
+
+    // 最初の段へも一手で戻れる
+    fireEvent.click(screen.getByRole("button", { name: "この作業の目的" }));
+    expect(screen.getByRole("heading", { name: "この作業でできるようになること" })).toBeTruthy();
+  });
+
+  it("押しても本文のチェックは変わらない（記録は飛ばせない）", () => {
+    renderDialog([issue()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "完了の確認" }));
+
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+  });
+
+  it("ドットと手順の見出しに担い手を出す", () => {
+    renderDialog([issue()]);
+
+    // 手順1はサブPCで実行するコマンドが1つ書かれているので代行できる
+    expect(screen.getByRole("button", { name: /手順 1 \/ 2: 代行できる/ })).toBeTruthy();
+    // 手順2にはコマンドのブロックが無いので人が実行する
+    expect(screen.getByRole("button", { name: /手順 2 \/ 2: あなたが実行/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    expect(screen.getByRole("heading", { name: /手順 1 \/ 2.*代行できる/ })).toBeTruthy();
+  });
+
+  /**
+   * **ホストの都合と「そもそも代行の対象外」を畳まない**（計画レビューG1の指摘1）。
+   * 畳むと、pollerが止まっている間だけ全段が「あなたが実行」に化け、理由も読まずに
+   * 手で実行しに行くことになる。
+   */
+  it("サブPCが居ないときは「いまは代行できない」で、対象外の手順とは区別する", () => {
+    renderDialog([issue()], undefined, dispatchHandle({ hosts: [] }));
+
+    // 手順1はサブPCで実行するコマンドがある＝対象。ホストが居ないだけなので理由も出す
+    const step1 = screen.getByRole("button", { name: /手順 1 \/ 2: いまは代行できない/ });
+    expect(step1.getAttribute("title")).toContain("申告がまだ届いていません");
+    // 手順2はコマンドが無い＝そもそも対象外なので、ホストの状態によらず人が実行する
+    expect(screen.getByRole("button", { name: /手順 2 \/ 2: あなたが実行/ })).toBeTruthy();
+  });
+
+  /**
+   * `## やること`が`- [ ]`で書かれていない本文は、節全体が`line: null`の1手順になり
+   * 実行計画に載らない（計画レビューG1の指摘3）。代行の対象そのものが無い。
+   */
+  it("実行計画に載らない手順（チェックリストでない`## やること`）は「あなたが実行」になる", () => {
+    taskList.body = `## やること
+
+設定画面でトークンを入れ替える。
+`;
+    renderDialog([issue({ body: taskList.body })]);
+
+    expect(screen.getByRole("button", { name: /手順 1 \/ 1: あなたが実行/ })).toBeTruthy();
+  });
+
+  it("完了の確認は、1件でも人が実行するなら「あなたが実行」になる", () => {
+    taskList.body = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+
+## やること
+
+- [ ] pollerを再起動する
+
+## 完了の確認方法
+
+\`\`\`bash
+systemctl --user is-active issue-deck-poller.service
+\`\`\`
+
+\`\`\`bash
+curl -s http://localhost:<ポート>/api/health
+\`\`\`
+`;
+    renderDialog([issue({ body: taskList.body })]);
+
+    // 1件目は代行できるが、2件目にプレースホルダがあるので重い方に合わせる
+    expect(
+      screen.getByRole("button", { name: /完了の確認（あなたが実行）/ }),
+    ).toBeTruthy();
+  });
+
+  it("実行済みの手順は「実行済みを取り消す」でチェックを外せる", () => {
+    taskList.body = BODY.replace("- [ ] チェックアウトを更新する", "- [x] チェックアウトを更新する");
+    renderDialog([issue({ body: taskList.body })]);
+
+    expect(screen.getByRole("button", { name: /手順 1 \/ 2: 実行済み/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "実行済みを取り消す" }));
+
+    expect(taskList.toggleTask).toHaveBeenCalledWith(STEP_LINE, false);
+    // 外すのはチェックだけ。実行し直しはサーバーに任せる（#1882の決まりのまま）
+    expect(runManualStep).not.toHaveBeenCalled();
+    expect(controlManualStepRun).not.toHaveBeenCalled();
+  });
+
+  it("未実行の手順には「実行済みを取り消す」を出さない", () => {
+    renderDialog([issue()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.queryByRole("button", { name: "実行済みを取り消す" })).toBeNull();
+  });
+});

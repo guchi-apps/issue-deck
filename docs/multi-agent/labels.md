@@ -29,7 +29,7 @@
 | `70.` | `70.confirm` | 実施するか未決 | 人・Claudeの推定・ワークフロー | ○ |
 | `71.` | `71.manual-step` | ユーザー自身の手作業が必要 | ワークフロー（タイトル起点）・人 | ✕ |
 | `80.` / `89.` | `80.Priority: High`・`89.Priority: low` | 優先度 | 人・Claudeの推定 | ○ |
-| `90.` | `90.Close: another`・`90.Close: duplicate`・`90.Close: invalid`・`90.Close: wonfix` | closeの理由 | 人 | ✕ |
+| `90.` | `90.Close: another`・`90.Close: duplicate`・`90.Close: invalid`・`90.Close: wonfix` | closeの理由 | 人（画面の「クローズする」・#2178） | ✕ |
 
 「自動付与」は**Issue本文からClaudeがタイトル・ラベルを推定する機能**（`isAutoAssignableLabelName`）の
 対象かどうか。人が手で選べる範囲はこれとは別で、`isSelectableLabelName`が決める（後掲
@@ -262,8 +262,51 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`が進捗の遷移とあわせて外す（#266・#1901） |
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
-| Issueがcloseされた | `reusable-issue-labels.yml`の`cleanup-on-close`（#464） |
+| Issueがcloseされた | issue-deckの`upsertIssueRow`（`clearLabelsOnIssueClose`。#2178）と`reusable-issue-labels.yml`の`cleanup-on-close`（#464）の両方。後述「closeで外れるラベルはissue-deck側でも外す」 |
 | ユーザーが起動確認に答え、Claude Codeが開始した | pollerの次の報告（最大1分）を受けて`resolveNotStartedSession`が外す（#1465）。**この経路だけは印がホストではなくDBの直前の値**（`activity === "NOT_STARTED"`）で、それを立てたのがこの経路しか無いことが「自分で付けた」の根拠になる |
+
+### closeで外れるラベルはissue-deck側でも外す（#2178）
+
+Issueがcloseされたら、issue-deckが`00.check-user`・理由ラベル`01.check-*`（旧名`00.qa-answered`を
+含む）・`11.local`をGitHubから外す。対象の判定は
+[`src/lib/github/issue-close.ts`](../../src/lib/github/issue-close.ts)の`isLabelClearedOnClose`で、
+一覧をベタ書きせず既存の定数・判定関数（`CHECK_USER_LABEL`・`isCheckUserReasonLabel`・
+`LOCAL_LABEL_NAME`）から組み立てている。
+
+- **置き場所は`upsertIssueRow`のOPEN→CLOSED遷移**（`src/lib/github/sync-issues.ts`）。
+  #1518のセッション自動終了と同じ場所で、画面のクローズ・GitHub上のクローズ・定期同期の
+  3経路すべてがここを通る。「今CLOSEDである」ではなく**遷移**で判定するので、定期同期が
+  回るたびに叩き直すことはない
+- **ワークフロー側の`cleanup-on-close`は残す。** 二重に外しても`removeIssueLabel`が404を成功として
+  扱うため害が無く、issue-deckが落ちている間もワークフロー側が効く。逆に、配布先リポジトリの
+  `workflows/vN`タグが古いと理由ラベルまでは外れない（[supported-repositories.md](../supported-repositories.md)
+  「v18では理由ラベル`01.check-*`は外れない」）ため、**タグの配布を待たずに効く経路が要る**
+  ——#1856が進捗Statusの終端遷移をissue-deck側へ置いたのと同じ理由
+- **`11.local`を外すのは、closeした後も残るのが実害だから。** closeで走っているセッションは
+  畳まれる（#1518）が、ラベルはそのままなので、(1) 盤面では「ローカルで対応中」
+  （`isIssueExecutionStarted`）のままになり、(2) KILLが届かなかったホストや`ALIVE`でない
+  セッションは`scripts/reap-sessions.sh`のholdでCLOSED経路へ進めず、tmuxセッションの本数上限
+  （#1361）を埋め続け、(3) 再オープンしたときに無人実行の停止フラグが古いまま残る。
+  **worktreeは元から回収対象ではない**（`scripts/reap-sessions.sh`「worktreeそのものは残り」）ので、
+  そこは変わらない
+- **`21.plan-required`などの実装オプションは外さない。** そのIssueが計画提示を要することは
+  closeしても変わらず、再オープンしたときに選び直させる理由が無い
+- **失敗しても投げない。** 後片付けの失敗でcloseそのものやDB同期を巻き添えにしない
+  （#1856の`closeStrandedProgress`と同じ約束）
+
+### クローズ理由ラベル`90.Close: *`は画面から選ぶ（#2178）
+
+Issue詳細の⋯メニュー →「クローズする」▸ のサブメニューに、区切り線の下として4種
+（`duplicate`・`wonfix`・`invalid`・`another`）が並ぶ。選ぶとクリック1回でクローズまで終わる。
+
+- **どれも`state_reason`は`not_planned`。** 理由ラベルは「計画外の内訳」であって、closeの種類
+  そのものではない。GitHubには`duplicate`という`state_reason`もあるが、Prismaの
+  `IssueStateReason`（`COMPLETED`/`NOT_PLANNED`/`REOPENED`）に無いため使わない
+- **ラベルはクローズより先に付ける。** 後から付けると`updateIssue`が返すペイロードにそのラベルが
+  乗らず、色も説明も無い状態でDBへ入る（次の同期まで直らない）
+- **リポジトリに定義が無いラベルは付けない。** 付与エンドポイントは存在しないラベル名を
+  その場で作ってしまう（#1490）ため、`fetchRepositoryLabelNames`で確かめてから付ける。
+  定義が無ければラベルを諦めてクローズだけ行う（クローズを失敗させない）
 
 ### ローカルセッションで守っている約束（#1342・#1417）
 
