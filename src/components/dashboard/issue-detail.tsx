@@ -22,7 +22,7 @@ import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
+import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
@@ -827,12 +827,8 @@ export function IssueDetail({
 
           {/* アーティファクト（#2154）。**計画パネルのすぐ下**に置く——`25.artifact-required`の
               基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
-              見た目への入口が要る */}
-          <IssueArtifactSection
-            artifacts={artifacts}
-            onReload={reloadArtifacts}
-            idPrefix="pc"
-          />
+              見た目への入口が要る。畳めるセクションではなく独立したカード（#2190） */}
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
               コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
