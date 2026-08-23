@@ -231,6 +231,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （`github-api-usage-list.tsx`）、`ACTIONS`は課金レポートから読んだ実行時間
   （[`github-actions-usage.tsx`](../src/components/dashboard/github-actions-usage.tsx)・
   [`lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)）。
+  **`ACTIONS`だけは専用のclassic PAT（`GITHUB_BILLING_TOKEN`）で読む**——課金レポートは
+  GitHub Appのトークン（インストール・ユーザーとも）では403になる。未設定ならその表示だけが
+  無効になり、アプリは動く（Claudeプラン使用量と同じ扱い）。
   **Actionsに無料枠のメーターは置かない**——今回のスコープ外という判断で、
   `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
   **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を

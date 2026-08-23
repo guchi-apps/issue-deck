@@ -15,6 +15,8 @@ export function useGithubActionsUsage(enabled: boolean) {
   const [data, setData] = useState<ActionsUsageEntry[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** `GITHUB_BILLING_TOKEN`が未設定。エラーではなく「この表示だけ無効」として扱う */
+  const [notConfigured, setNotConfigured] = useState(false);
 
   useEffect(() => {
     if (!enabled) return;
@@ -25,14 +27,19 @@ export function useGithubActionsUsage(enabled: boolean) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setError(null);
+    setNotConfigured(false);
 
     fetch("/api/github/actions-usage")
-      .then((res) => {
+      .then(async (res) => {
+        if (res.status === 501) {
+          if (!cancelled) setNotConfigured(true);
+          return null;
+        }
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
-        return res.json() as Promise<{ installations: ActionsUsageEntry[] }>;
+        return (await res.json()) as { installations: ActionsUsageEntry[] };
       })
       .then((json) => {
-        if (!cancelled) setData(json.installations);
+        if (!cancelled && json) setData(json.installations);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -46,5 +53,5 @@ export function useGithubActionsUsage(enabled: boolean) {
     };
   }, [enabled]);
 
-  return { data, isLoading, error };
+  return { data, isLoading, error, notConfigured };
 }

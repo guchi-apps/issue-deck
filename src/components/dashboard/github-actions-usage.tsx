@@ -12,6 +12,8 @@ type GithubActionsUsageProps = {
   data: ActionsUsageEntry[] | null;
   isLoading: boolean;
   error: string | null;
+  /** `GITHUB_BILLING_TOKEN`が未設定。エラーではないので理由を1行だけ出す */
+  notConfigured: boolean;
 };
 
 /** 「今日」と「今月」。上のAPI消費（今時／過去1日）と軸が違うのは、Actionsの課金が暦月で締まるため */
@@ -154,9 +156,21 @@ function ActionsUsageEntryRow({ entry, mode }: { entry: ActionsUsageEntry; mode:
  * 見出し「Actions」は呼び出し元（`settings/status-section.tsx`）が出すため、
  * このコンポーネント自体は持たない（GithubApiUsageListと同じ約束）。
  */
-export function GithubActionsUsage({ data, isLoading, error }: GithubActionsUsageProps) {
+export function GithubActionsUsage({
+  data,
+  isLoading,
+  error,
+  notConfigured,
+}: GithubActionsUsageProps) {
   const [mode, setMode] = useState<ActionsUsageMode>("thisMonth");
 
+  if (notConfigured) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        GITHUB_BILLING_TOKENが未設定のため表示できません
+      </p>
+    );
+  }
   if (isLoading) return <p className="text-xs text-muted-foreground">読み込み中...</p>;
   if (error) return <p className="text-xs text-destructive">{error}</p>;
   if (!data) return null;

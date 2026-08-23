@@ -45,7 +45,7 @@ describe("GithubActionsUsage", () => {
   afterEach(cleanup);
 
   it("既定は今月で、実行時間と課金額を並べる", () => {
-    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} />);
+    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} notConfigured={false} />);
 
     expect(screen.getByText(/今月（8月）/)).toBeTruthy();
     expect(screen.getByText("44,028分")).toBeTruthy();
@@ -53,7 +53,7 @@ describe("GithubActionsUsage", () => {
   });
 
   it("開くとリポジトリ別の内訳と、課金が出ているリポジトリの金額を出す", () => {
-    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} />);
+    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} notConfigured={false} />);
 
     fireEvent.click(screen.getByRole("button", { expanded: false }));
 
@@ -65,7 +65,7 @@ describe("GithubActionsUsage", () => {
   });
 
   it("どこまで反映されているかを常に出す（課金レポートは半日ほど遅れる）", () => {
-    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} />);
+    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} notConfigured={false} />);
 
     expect(screen.getByText("8/23 10:55までの実行")).toBeTruthy();
   });
@@ -78,13 +78,13 @@ describe("GithubActionsUsage", () => {
       },
     ];
 
-    render(<GithubActionsUsage data={empty} isLoading={false} error={null} />);
+    render(<GithubActionsUsage data={empty} isLoading={false} error={null} notConfigured={false} />);
 
     expect(screen.getByText("まだ何も反映されていません")).toBeTruthy();
   });
 
   it("「今日」へ切り替えると、その日の分だけを出す", () => {
-    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} />);
+    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} notConfigured={false} />);
 
     fireEvent.click(screen.getByRole("button", { name: "今日" }));
 
@@ -101,10 +101,17 @@ describe("GithubActionsUsage", () => {
         data={[{ accountLogin: "m-guchi", usage: null, errorStatus: null, unsupported: true }]}
         isLoading={false}
         error={null}
+        notConfigured={false}
       />,
     );
 
     expect(screen.getByText(/個人アカウントのインストール（m-guchi）では表示できません/)).toBeTruthy();
+  });
+
+  it("トークンが未設定なら、エラーではなく理由を出す", () => {
+    render(<GithubActionsUsage data={null} isLoading={false} error={null} notConfigured />);
+
+    expect(screen.getByText(/GITHUB_BILLING_TOKENが未設定/)).toBeTruthy();
   });
 
   it("取得に失敗したときはステータスを添えて理由を出す", () => {
@@ -113,6 +120,7 @@ describe("GithubActionsUsage", () => {
         data={[{ accountLogin: "guchi-apps", usage: null, errorStatus: 403, unsupported: false }]}
         isLoading={false}
         error={null}
+        notConfigured={false}
       />,
     );
 

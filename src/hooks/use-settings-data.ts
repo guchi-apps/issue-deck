@@ -41,6 +41,7 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
     data: actionsUsage,
     isLoading: actionsUsageLoading,
     error: actionsUsageError,
+    notConfigured: actionsUsageNotConfigured,
   } = useGithubActionsUsage(enabled && statusActive);
   const {
     data: claudeUsage,
@@ -80,6 +81,7 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
       data: actionsUsage,
       isLoading: actionsUsageLoading,
       error: actionsUsageError,
+      notConfigured: actionsUsageNotConfigured,
     },
     claudeUsage: {
       data: claudeUsage,

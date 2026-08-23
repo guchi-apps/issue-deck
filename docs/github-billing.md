@@ -84,7 +84,8 @@ issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日�
   fine-grained権限の記載が無い。**Supabase Authが使っているGitHubの資格情報はGitHub App**
   （`<SUPABASE_URL>/auth/v1/authorize?provider=github`のリダイレクト先の`client_id`が`Iv23li…`）
   なので、**issue-deckが保持しているユーザートークンでも読めない**（`signInWithOAuth`の
-  `scopes: "repo user:email"`はGitHub Appでは無視される）
+  `scopes: "repo user:email"`はGitHub Appでは無視される）。そのため画面の`ACTIONS`だけは
+  専用のclassic PAT（`GITHUB_BILLING_TOKEN`）で読む。未設定ならその表示だけが無効になる
 - 個人アカウントは`/users/{username}/settings/billing/usage`で、`user`スコープが要る（別物）
 - **レポート単体ではpublicとprivateを区別できない。** どちらも「grossの全額がdiscountで相殺されて
   net 0」という同じ形になる。ただし明細は`repositoryName`を持ち、public/privateは

@@ -52,6 +52,7 @@ export function StatusSection({
               data={actionsUsage.data}
               isLoading={actionsUsage.isLoading}
               error={actionsUsage.error}
+              notConfigured={actionsUsage.notConfigured}
             />
           </div>
         </div>
