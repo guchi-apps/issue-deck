@@ -1140,6 +1140,16 @@ pnpm db:seed:dev
 無い実行は「人が実行する手順で待っている」と解釈するため。走っている見た目まで作りたいなら
 `DispatchJob`も併せて要る。確かめ終えたら入れた行は消す（開発DBは全worktreeで共通）。
 
+**アーティファクト（#2154・#2210）もシードだけでは出ない**（#2210）。`db:seed:dev`は
+`SessionArtifact`の行を作らず、受け口の`POST /api/dispatch/sessions/artifact`は`DISPATCH_SECRET`で
+認証するが、**worktreeの`.env.local`にはこの値が無い**（本体チェックアウトからコピーされない）ので
+ローカルからは叩けない。「アーティファクト」カード・重ね表示・単独ページ（`/artifacts/<id>`）を
+実物で見たい場合は、**HTMLファイルとDBの行を手で用意する**——`uploads/artifacts/`へ中身の
+SHA-256（`<64桁>.html`）の名前で書き、同じ名前を`storedFilename`に入れて`SessionArtifact`を1行作る
+（`repositoryFullName`＋`issueNumber`＋`sourceKey`が一意キー。`sourceKey`は`sourcePath`のSHA-256の
+先頭32桁）。**ファイル名を中身のハッシュにしないと配信が404になる**（`STORED_FILENAME_PATTERN`で
+弾かれる）。確かめ終えたら入れた行は消す（開発DBは全worktreeで共通）。
+
 **ダミーで埋まらない範囲がある。** 次はGitHub APIと実インストールが要るので、ダミーデータでは空のまま。
 
 | 埋まる | 埋まらない |

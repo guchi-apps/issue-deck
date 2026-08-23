@@ -220,6 +220,26 @@ export async function readSessionArtifactHtml(
   }
 }
 
+/**
+ * 単独ページ（`/artifacts/<id>`・#2210）が見出しに出すぶんを1件読む。
+ *
+ * **HTMLは読まない**（ページはiframeで`/api/issues/artifacts/<id>`を開くだけ）。どのIssueの
+ * ものかを一緒に返すのは、別ウィンドウから元の話へ戻る導線をページが持つため。
+ */
+export async function readSessionArtifactDetail(id: string): Promise<{
+  artifact: SessionArtifactView;
+  repositoryFullName: string;
+  issueNumber: number;
+} | null> {
+  const row = await db.sessionArtifact.findUnique({ where: { id } });
+  if (!row) return null;
+  return {
+    artifact: toSessionArtifactView(row),
+    repositoryFullName: row.repositoryFullName,
+    issueNumber: row.issueNumber,
+  };
+}
+
 type SessionArtifactRow = {
   id: string;
   title: string;
