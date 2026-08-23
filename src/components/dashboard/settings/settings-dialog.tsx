@@ -147,6 +147,7 @@ export function SettingsDialog({
                 <StatusSection
                   rateLimits={data.rateLimits}
                   apiUsage={data.apiUsage}
+                  actionsUsage={data.actionsUsage}
                   claudeUsage={data.claudeUsage}
                   githubStatus={data.githubStatus}
                 />

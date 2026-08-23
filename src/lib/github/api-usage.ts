@@ -63,6 +63,9 @@ export const GITHUB_API_FEATURES = [
   // 新規アプリの立ち上げ（#2188）。空き確認（vpsのREADMEとvhostの読み取り）と、
   // リポジトリ作成・Issue一式の起票。年に数回の操作なので他とは分けて数える
   { key: "new_app_launch", label: "新規アプリの立ち上げ" },
+  // Actionsの消費量（#2212）。設定の「状態」を開いている間だけ、organizationごとに1回読む。
+  // ETagの条件付きGETに載っているため、内容が変わらない間は304になり計上されない
+  { key: "actions_billing", label: "Actions消費量の取得" },
   { key: "other", label: "その他" },
 ] as const;
 
