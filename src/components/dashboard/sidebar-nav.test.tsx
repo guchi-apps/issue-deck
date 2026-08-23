@@ -42,6 +42,7 @@ function renderSidebar(
       activePullRequestView="all"
       onSelectPullRequestView={() => {}}
       onSelectFlow={() => {}}
+      onLaunchNewApp={() => {}}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
@@ -82,6 +83,7 @@ function renderSidebarWithRepositories(
       activePullRequestView="all"
       onSelectPullRequestView={() => {}}
       onSelectFlow={() => {}}
+      onLaunchNewApp={() => {}}
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
