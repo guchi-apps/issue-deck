@@ -157,6 +157,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （[`markdown-body.tsx`](../src/components/dashboard/markdown-body.tsx)）でも入力欄の添付
   サムネイル（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）でも
   このダイアログを通す。別タブで開く導線はプレビューの下辺のリンクとして残してある。
+  **アーティファクトの「別ウィンドウ」（#2210）も同じ扱いで、スマホでは出さない**（PCだけの
+  `md:`表示）。開くのはPCの別ウィンドウで、スマホでは重ね表示のまま——どちらも全画面になる
+  スマホでは並べて見比べられず、戻る導線だけが消えるため。単独ページ（`/artifacts/<id>`）自体は
+  URLを送られて開いたときのために残す（見出しに「Issueを開く」を持たせてある）。
   - **全画面に重ねるものは、背景を押して閉じる判定を自分で持つ。** Radixの
     `onPointerDownOutside`は「Contentの外側」を見るが、Contentが画面全体を覆っていると
     外側が存在しない。プレビューは画像そのもの以外のクリック（`event.target`が余白か）で閉じる。

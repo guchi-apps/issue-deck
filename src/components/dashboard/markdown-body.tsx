@@ -128,9 +128,10 @@ function MarkdownLink({ children, href, title }: ComponentProps<"a">) {
   if (artifact && artifactPreview) {
     return (
       <a
-        // **`href`はclaude.aiではなくissue-deckの単独ページ**（#2210）。修飾キー付きの
-        // クリックとURLのコピーがここへ効く——claude.aiのままだと、別で開いたときだけ
-        // ログインを求められる（スマホでは特に）。claude.aiへは単独ページから行ける
+        // **`href`はclaude.aiではなくissue-deckの単独ページ**（#2210）。ふつうのクリックは
+        // 下で重ね表示に差し替わるので、**ここが効くのは修飾キー付きのクリックとURLのコピー
+        // だけ**——その2つだけがclaude.aiへ出て、ログインを求められていた。
+        // claude.aiへは単独ページの見出しから行ける
         href={artifactWindowPath(artifact.id)}
         title={title}
         target="_blank"

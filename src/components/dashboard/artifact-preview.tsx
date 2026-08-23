@@ -107,7 +107,8 @@ function ArtifactPreviewDialog({
             </span>
             {/* **重ねて見はじめてから「本文と並べたい」と思うのが実際の流れ**（#2210）なので、
                 閉じるボタンの隣に移し替えの導線を置く。開けたら重ね表示は閉じ、元の画面では
-                Issueの本文・コメントが見える状態へ戻す（別ウィンドウの裏に重ね表示が残らない） */}
+                Issueの本文・コメントが見える状態へ戻す（別ウィンドウの裏に重ね表示が残らない）。
+                **スマホでは出さない**——カードの「別ウィンドウ」と同じ理由（#2065） */}
             {artifact && (
               <a
                 href={artifactWindowPath(artifact.id)}
@@ -124,7 +125,7 @@ function ArtifactPreviewDialog({
                   event.preventDefault();
                   onClose();
                 }}
-                className="grid size-9 shrink-0 place-items-center rounded-full border border-white/30 bg-white/15 transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+                className="hidden size-9 shrink-0 place-items-center rounded-full border border-white/30 bg-white/15 transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none md:grid"
               >
                 <SquareArrowOutUpRight className="size-4.5" />
               </a>

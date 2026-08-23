@@ -97,6 +97,14 @@ describe("IssueArtifactPanel", () => {
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
+  it("別ウィンドウの導線はスマホでは出さない（#2065。戻る導線が消える）", () => {
+    renderPanel([artifact()]);
+
+    const link = screen.getByRole("link", { name: "見た目案 を別ウィンドウで開く" });
+    expect(link.className).toContain("hidden");
+    expect(link.className).toContain("md:inline-flex");
+  });
+
   it("別ウィンドウが開けたらリンクの遷移は止める（同じものが二重に開かない）", () => {
     renderPanel([artifact()]);
 
