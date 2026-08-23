@@ -24,6 +24,7 @@ export function NotificationSettingsSection() {
     publicKey,
     subscriptions,
     currentEndpointKey,
+    deliveryState,
     isLoading,
     isSubmitting,
     error,
@@ -34,9 +35,13 @@ export function NotificationSettingsSection() {
     sendTest,
   } = usePushSubscription(true);
 
-  const isSubscribed =
-    currentEndpointKey !== null &&
-    (subscriptions ?? []).some((item) => item.endpointKey === currentEndpointKey);
+  const isSubscribed = deliveryState === "delivering";
+  // **失効（ブラウザには購読が残っているのにサーバー側の行が無い）を「オフ」と混ぜない**
+  // （#2196）。どちらも受け取っていないが、失効はこちらから消したものではなく、
+  // ユーザーがやることも「登録し直す」で違う
+  // 操作中（登録し直している最中など）は出さない。一覧を取り直すまでのわずかな間、
+  // ブラウザ側だけが新しい購読を持つ状態になり、そこで「失効」が一瞬光る
+  const isExpired = !isLoading && !isSubmitting && deliveryState === "expired";
   const notConfigured = !isLoading && publicKey === null;
   const isDenied = permission === "denied";
   const canSubscribe = availability === "available" && !notConfigured && !isDenied;
@@ -47,8 +52,9 @@ export function NotificationSettingsSection() {
         <p className="text-sm font-medium">確認待ちのPush通知</p>
         <p className="text-xs text-muted-foreground">
           担当リポジトリのIssueに<code className="font-mono">00.check-user</code>
-          が付いた瞬間、アプリを閉じていてもこの端末へ通知します。アプリを開いているあいだは
-          今までどおり画面内のお知らせで伝えるので、通知が二重に出ることはありません。
+          が付いたとき、この端末へ通知します。アプリを開いているあいだも同じように通知するので、
+          他のアプリを見ているときにも気づけます。受け取っているあいだは画面内のお知らせを
+          出さないため、二重になることはありません。
         </p>
       </div>
 
@@ -64,7 +70,9 @@ export function NotificationSettingsSection() {
                 ? "確認しています…"
                 : isSubscribed
                   ? "通知を受け取っています"
-                  : "通知を受け取っていません"}
+                  : isExpired
+                    ? "購読が失効しています"
+                    : "通知を受け取っていません"}
             </p>
           </div>
           <span
@@ -74,7 +82,13 @@ export function NotificationSettingsSection() {
                 : "bg-muted text-muted-foreground"
             }`}
           >
-            {isSubscribed ? "受け取り中" : notConfigured ? "利用できません" : "オフ"}
+            {isSubscribed
+              ? "受け取り中"
+              : notConfigured
+                ? "利用できません"
+                : isExpired
+                  ? "失効"
+                  : "オフ"}
           </span>
         </div>
 
@@ -92,19 +106,27 @@ export function NotificationSettingsSection() {
           ) : (
             <Button onClick={subscribe} disabled={!canSubscribe || isSubmitting || isLoading}>
               <Bell />
-              この端末で受け取る
+              {isExpired ? "登録し直す" : "この端末で受け取る"}
             </Button>
           )}
         </div>
 
-        {!isSubscribed && canSubscribe && (
+        {!isSubscribed && !isExpired && canSubscribe && (
           <p className="text-xs text-muted-foreground">
             押すとブラウザが通知の許可を尋ねます。許可はこの端末・このブラウザにだけ効きます。
           </p>
         )}
+        {isExpired && (
+          <p className="rounded-md border border-l-2 border-amber-300 border-l-amber-500 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            <b className="font-semibold">この端末の購読は失効しています。</b>
+            送ろうとしたときに宛先が無くなっていたため、登録を削除しました。「登録し直す」を押すと
+            取り直せます。登録し直すまでは、アプリを開いているあいだの確認待ちを画面内のお知らせで
+            伝えます。
+          </p>
+        )}
         {isSubscribed && (
           <p className="text-xs text-muted-foreground">
-            テスト通知だけは、この画面を開いたままでもOSの通知として表示されます。しばらく待っても
+            テスト通知は、この画面を開いたままでもOSの通知として表示されます。しばらく待っても
             出てこない場合は、端末側の設定でIssueDeckの通知が許可されているかを確かめてください。
           </p>
         )}

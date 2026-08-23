@@ -20,16 +20,24 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-/** 表示中（画面が見えている）のウィンドウがあるか */
-async function hasVisibleClient() {
-  const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-  return clientList.some((client) => client.visibilityState === "visible");
-}
-
+/*
+ * **届いたpushには必ず通知を出す**（#2196）。以前は表示中のウィンドウがあるときだけ
+ * `showNotification`を呼ばずに終えていた（画面内のトーストと二重にしないため）が、
+ * 購読は`userVisibleOnly: true`で作っており、Web Push仕様では出すことが前提になっている。
+ * 出さないpushが続くとiOSは購読そのものを失効させ、**アプリを閉じているときにも
+ * 届かなくなる**。Chromeも代わりに「バックグラウンドで更新されました」を出す。
+ *
+ * 二重に出さないための調整は画面側へ移した。この端末が通知を受け取れているあいだは
+ * 画面内のトーストを出さない（`use-push-delivery.ts`）。**出口はOSの通知1つ**になる。
+ *
+ * ついでに直る穴が1つある。`visibilityState`はウィンドウが他のアプリの背後にあるだけでも
+ * `visible`のままなので、以前の判定はPCでアプリを開きっぱなしにしている間の通知を
+ * まるごと握りつぶしていた。
+ */
 self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
-      /** @type {{title?: string, body?: string, url?: string, tag?: string, force?: boolean}} */
+      /** @type {{title?: string, body?: string, url?: string, tag?: string}} */
       let payload = {};
       try {
         payload = event.data ? event.data.json() : {};
@@ -37,15 +45,6 @@ self.addEventListener("push", (event) => {
         // 中身を読めない通知は、無言で捨てずに既定の文面で出す
         payload = {};
       }
-
-      // **アプリを開いているあいだは出さない。** 同じ知らせを画面内のトースト
-      // （check-user-toast-viewport.tsx）が出しており、OS側にも重ねると
-      // どちらを押せばよいのか分からなくなる。
-      //
-      // **例外は`force`が付いた通知だけ**（#2195）。テスト通知は設定画面のボタンからしか
-      // 送れず、押した時点でその画面が必ず表示中になるため、この判定に当たると
-      // 「届くかどうかを確かめる通知」が毎回握りつぶされる
-      if (!payload.force && (await hasVisibleClient())) return;
 
       const title = payload.title || "確認待ちのIssueがあります";
       await self.registration.showNotification(title, {

@@ -4,11 +4,14 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 /**
- * `public/sw.js`のpushハンドラのテスト（#2195）。
+ * `public/sw.js`のpushハンドラのテスト（#2195・#2196）。
  *
  * Service Workerはバンドルされない素のJSで、importできない。**ファイルを読んで、偽の`self`を
- * 渡して動かす**ことで、通知を出す・出さないの分岐だけを確かめる。テスト通知が
- * 「押した画面が表示中だから」という理由で毎回握りつぶされていたのを取りこぼさないため。
+ * 渡して動かす**ことで、通知の出し方だけを確かめる。
+ *
+ * **表示中かどうかで出し分けないことがここの要点**（#2196）。出さないpushが続くとiOSは購読を
+ * 失効させるため、届いたpushには必ず通知を出す。二重にしないための調整は画面側にある
+ * （`use-push-delivery.ts`）ので、ここで「表示中なら出さない」を戻すと元の不具合に戻る。
  */
 
 const SW_SOURCE = readFileSync(path.join(process.cwd(), "public/sw.js"), "utf8");
@@ -72,9 +75,10 @@ const CHECK_USER_PAYLOAD = {
 };
 
 describe("public/sw.js のpushハンドラ", () => {
-  it("表示中のウィンドウがあるとき、確認待ちの通知は出さない（トーストと二重になるため）", async () => {
+  it("表示中のウィンドウがあっても、確認待ちの通知を出す（出さないと購読が失効する）", async () => {
     const showNotification = await dispatchPush({ payload: CHECK_USER_PAYLOAD, visible: true });
-    expect(showNotification).not.toHaveBeenCalled();
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(showNotification.mock.calls[0][0]).toBe("確認待ちのIssueがあります");
   });
 
   it("表示中のウィンドウが無ければ、確認待ちの通知を出す", async () => {
@@ -87,14 +91,13 @@ describe("public/sw.js のpushハンドラ", () => {
     });
   });
 
-  it("`force`が付いた通知は、表示中でも出す（テスト通知は押した画面が必ず表示中になる）", async () => {
+  it("テスト通知も、押した画面が表示中のまま出る（#2195の再発を止める）", async () => {
     const showNotification = await dispatchPush({
       payload: {
         title: "IssueDeckのテスト通知",
         body: "この通知が見えていれば、確認待ちになったときも届きます",
         url: "/dashboard",
         tag: "test",
-        force: true,
       },
       visible: true,
     });

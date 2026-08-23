@@ -1653,17 +1653,45 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     切れた状態でのService Workerの更新チェックに`/login`のHTMLが返り、MIMEタイプ不一致で更新が
     落ちる（＝通知が届かなくなる）。`manifest.webmanifest`と同じ扱い。Service Workerは`fetch`を
     扱わない——キャッシュを持つと古い画面が残る事故と、認証済みの応答が漏れる事故を抱える。
-  - **表示中のウィンドウがあるときは通知を出さない**（`sw.js`の`hasVisibleClient`）。同じ知らせを
-    画面内のトースト（`check-user-toast-viewport.tsx`）が出しており、重ねるとどちらを押せばよいか
-    分からない。タップして開くURLは`useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）と
-    スマホ（`mscreen`・`missue`）の両方の現在地を載せる。
-  - **例外はテスト通知だけで、payloadの`force`で抜ける**（#2195）。テスト通知は設定画面のボタンから
-    しか送れず、**押した時点でその画面が必ず表示中**になるため、上の抑止に当たって毎回握りつぶされて
-    いた（送信は成功して「1件の端末へ送りました」と出るので、鍵もOSの許可も切り分けられない）。
-    `force`を付けるのは`api/notifications/test`だけで、`00.check-user`の通知には付けない（付けると
-    アプリを開いている間もトーストと二重に出る）。分岐は`lib/notifications/sw-push.test.ts`が
+  - **届いたpushには必ず通知を出す。表示中かどうかで出し分けない**（#2196）。購読は
+    `userVisibleOnly: true`で作っており、**通知を出さないpushが続くとiOSは購読そのものを失効させる**
+    （Chromeは代わりに「バックグラウンドで更新されました」を出す）。以前は表示中のウィンドウがあると
+    `showNotification`を呼ばずに終えていた（`sw.js`の`hasVisibleClient`）ため、アプリを開いている間に
+    `00.check-user`が付くたびにサイレントpushが積み上がり、**閉じているときにも届かなくなりうる**
+    状態だった。`visibilityState`はウィンドウが他のアプリの背後にあるだけでも`visible`のままなので、
+    PCで開きっぱなしにしている間の通知をまるごと握りつぶしてもいた。タップして開くURLは
+    `useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）とスマホ（`mscreen`・`missue`）の
+    両方の現在地を載せる。**この分岐を戻さない**ことは`lib/notifications/sw-push.test.ts`が
     **`public/sw.js`を読み込んで偽の`self`で動かして**確かめる（Service Workerはバンドルされない
-    素のJSでimportできない）。
+    素のJSでimportできない）。#2195で入れた`force`（テスト通知だけ抑止を抜ける口）は**新しい
+    sw.jsでは読まないが、送信側には残してある**——サーバーの更新と端末のService Workerの更新は
+    同時ではなく、古いsw.jsを持ったままの端末では抑止が生きているため（消すと#2195が再発する）。
+    全端末が更新されたら`push.ts`の型と`api/notifications/test`から消してよい。
+  - **二重に出さないための調整は画面側にある。確認待ちの知らせの出口は端末ごとに1つ**（#2196）。
+    `usePushDeliveryState`（`hooks/use-push-delivery.ts`）がこの端末の受け取り状況を判定し、
+    OSの通知として届いているあいだは`IssueDeckShell`が画面内のトーストを積まない。判定は
+    `describePushDeliveryState`（`lib/push-client.ts`）の純粋関数で、**「届いている」と言い切れる
+    ときだけ`delivering`**——判断できないものをそちらへ倒すと、通知もトーストも出ない状態になりうる。
+    材料はブラウザ側の購読（`getSubscription`。**`register`はしない**）・`Notification.permission`・
+    サーバー側の行（`GET /api/notifications/subscribe`）の3つで、購読を持たない端末はサーバーへ
+    問い合わせずに終える。設定画面での登録・解除は`lib/push-subscription-change.ts`の
+    ブラウザイベントで伝える（親子関係が無く、渡す材料も無いため状態を持ち上げない）。
+    **開いた瞬間の1回で固定しない**——送信時の404/410で購読行はその場で消えるため、開いたまま
+    失効するとトーストが止まったままになる。5分ごと（`PUSH_DELIVERY_RECHECK_INTERVAL_MS`）と
+    画面へ戻ったときに取り直す。
+  - **開いている間の「押せないうちは知らせない」（#2174・#1709）は、OSの通知には効かない。**
+    保留を判断しているのは画面側の`resolveCheckUserToasts`だけで、`sweepCheckUserPushNotifications`は
+    待ち時間（3分・`01.check-merge`は15分）しか見ない。トーストを止めた端末では、エージェントが
+    まだ動いている確認待ちでも付与3分後に鳴りうる。`01.check-merge`は15分がトーストの上限10分を
+    上回るのでほぼ揃い、計画の承認・質問への回答はそもそも保留の対象外（`isSessionActivelyWorking`は
+    入力待ちのセッションを実行中と数えない）なので、残るのは「`00.check-user`を付けたあとも
+    セッションが作業を続けている」場合。**揃えるなら保留の判定をサーバー側（巡回）へ寄せる**
+    ことになるため、必要になってから行う。
+  - **失効（ブラウザには購読が残っているのにサーバー側の行が無い）を「オフ」と混ぜない**（#2196）。
+    送信時の404/410で消された状態で、ユーザーがやることは「登録し直す」。設定画面はこれを専用の
+    文言とバッジで出し、`subscribe`は**サーバー側に行が無い購読を`unsubscribe()`してから取り直す**
+    （そのまま登録し直すと、画面は「受け取り中」に戻るのに通知だけ届かない）。失効している間は
+    トーストが出る側へ倒れるので、通知とトーストの両方が消えることはない。
   - **設定画面を開くたびにService Workerの更新を確かめる**（`use-push-subscription.ts`の
     `registration.update()`）。`register`を呼ぶのは購読するときだけで、ホーム画面から開きっぱなしの
     PWAは読み込み直す機会が無く、通知の出し方を直しても古い版が動き続ける。
