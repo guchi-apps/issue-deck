@@ -119,6 +119,7 @@ describe("buildImplementationPrompt", () => {
   // #2110: 手順は#1745でdocs/multi-agent/labels.mdに決まっているが、他リポジトリのworktreeから
   // issue-deckのdocs/は読めない。プロンプトへ写していないと、計画レビューで見た目が変わった
   // 時点で「古いURLの計画を承認させる／Plan modeを抜ける」の二択で止まる
+  // #2200: その二択自体を無くし、計画ファイルの中で差し替える手順に置き換えた
   it("計画レビューで見た目が変わったときの差し替え手順を渡す", () => {
     const prompt = buildImplementationPrompt({
       ...BASE,
@@ -126,9 +127,19 @@ describe("buildImplementationPrompt", () => {
     });
     // URLを載せる時点で差し替えがあり得ると断らせる（定型文）
     expect(prompt).toContain("承認後・コードを書く前に同じURLへ差し替えます");
-    // Plan modeの中では差し替えず、承認後に同じパスで再公開する順序
-    expect(prompt).toContain("Plan modeの中では差し替えないでください");
+    // 承認前でも計画ファイルの中で差し替えられること（取り込みの合図と書式）
+    expect(prompt).toContain("計画ファイルの中で差し替えます");
+    expect(prompt).toContain("<!-- artifact: <最初に公開したHTMLファイルの絶対パス> -->");
+    expect(prompt).toContain("バッククォート4つ＋`artifact`");
+    // 承認後に同じパスで再公開してclaude.ai側も揃える順序
     expect(prompt).toContain("最初と同じファイルパス");
+  });
+
+  // #2200: ラベルが無いIssueでも、ユーザーの求めで計画中にアーティファクトを出すことはある
+  it("25.artifact-requiredが無くても計画中の差し替え手順に触れる", () => {
+    expect(buildImplementationPrompt(BASE)).toContain(
+      "計画ファイルの末尾へ`<!-- artifact: <HTMLファイルの絶対パス> -->`",
+    );
   });
 
   // #1632: 見た目の合意はPCだけでは足りず、スマホ幅の崩れは実装後に発覚すると作り直しになる

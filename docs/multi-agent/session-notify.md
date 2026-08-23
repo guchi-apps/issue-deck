@@ -361,6 +361,42 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
   手が届く）
 
+### 計画の承認前は、計画ファイル経由で差し替える（#2200）
+
+**Plan modeで書けるのは計画ファイルだけ**（Claude Code 2.1.241のplan modeリマインダに
+`Read-only except plan file (…)`とあり、プロトタイプの案内も「the prototype is built after plan
+mode ends, never during it」と言う）。そのため計画の承認を待っている間は、上の`Artifact`ツール
+経由の経路が使えない——HTMLファイルを書けないので公開し直せない。#1745・#2110では
+「Plan modeの中では差し替えず、承認後に同じパスで再公開する」手順で凌いでいたが、
+**承認するまで新しい見た目を見られない**ままだった。
+
+そこで**書ける唯一のファイルである計画ファイルの中にHTMLを置く**。`ExitPlanMode`の
+`PreToolUse`フックは計画ファイルの中身をそのまま送ってくるので、
+`POST /api/dispatch/sessions/plan`が受け取った本文からHTMLを切り出し、`Artifact`ツール経由と
+**同じ`saveSessionArtifact`**へ渡す（`src/lib/dispatch/plan-artifact.ts`）。
+
+```text
+画面の「修正を送る」（アーティファクトの直し）
+  → フックが deny＋本文を返す → Claudeが計画ファイルのHTMLを書き換える
+  → ExitPlanMode → POST /api/dispatch/sessions/plan
+       → 計画本文からHTMLを切り出す（残りが計画コメントになる）
+       → saveSessionArtifact（同じ sourcePath なら同じカードを上書き）
+  → 画面のカードが新しい見た目に差し替わる → 承認
+```
+
+- **Plan modeの制約は破っていない。** 書き込みを通すフックも、権限の拡大も足していない。
+  エージェントが書き換えるのは計画ファイルだけ
+- 合図は**バッククォート3つ以上＋`artifact`**のフェンス。`html`にしないのは、計画に説明用の
+  HTML片が入ることがあり、巻き添えで取り込むため
+- 差し替え先は直前の`<!-- artifact: <パス> -->`で決める。**`Artifact`ツールで公開したときと
+  同じパス**を書いてもらうことで、カードが2枚に増えない。無い場合は
+  `plan-artifact:<repo>#<番号>`という実在しないキーへ落とす
+- **長さを見るより前に切り出す。** HTMLが載ったままだと計画本文の上限に掛かり、
+  計画そのものがIssueへ残らなくなる
+- **閉じていないフェンス・空・上限超過は触らない**（計画本文をそのまま通す）。この機能が
+  効かないことより、計画が残らないことの方が損失が大きい
+- 取り込めた回だけ、計画コメントの冒頭に「アーティファクトも更新しました」の1行が入る
+
 画面では、Issue詳細の「アーティファクト」カードと、本文・コメント中のclaude.aiリンク
 （保存済みのものだけ）から開ける。**カードは畳めるセクションではなく常時表示**（#2190）で、
 `25.artifact-required`のIssueではこれ自体が承認の対象——畳まれていると開くまでどの案かが

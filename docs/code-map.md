@@ -2024,6 +2024,9 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   URLではなくHTMLの原本を運んで自分のオリジンから出し直している。
   組み立てとCSPは[`lib/artifact-document.ts`](../src/lib/artifact-document.ts)、保存と
   取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
+  **入り口はもう1つあり、計画の承認前はこちらだけが通る**（#2200）。Plan modeで書けるのは
+  計画ファイルだけなので、その中に置かれたHTMLを`POST /api/dispatch/sessions/plan`が
+  切り出して同じ保存へ回す（[`lib/dispatch/plan-artifact.ts`](../src/lib/dispatch/plan-artifact.ts)）。
   **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
   手が届く）。**Issue詳細のカードに出るサムネイルも同じ配信URLのiframe**（#2190。幅1200pxで

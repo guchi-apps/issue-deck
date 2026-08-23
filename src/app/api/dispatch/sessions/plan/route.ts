@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
+import { defaultPlanArtifactSourcePath, splitPlanArtifact } from "@/lib/dispatch/plan-artifact";
+import { saveSessionArtifact } from "@/lib/dispatch/session-artifacts";
 import {
   parsePlanBaseSha,
   parseSessionHostName,
@@ -24,6 +26,10 @@ import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
  * 行ができているかとは無関係に成立させる必要がある（計画は起動から数分で出ることがあり、
  * 行が無いことを理由に落とすと計画がどこにも残らない）。
  *
+ * **計画にアーティファクトのHTMLが埋め込まれていれば、ここで取り込む**（#2200）。Plan modeで
+ * 書けるのは計画ファイルだけなので、承認前に見た目を直す唯一の経路がこれになる
+ * （`src/lib/dispatch/plan-artifact.ts`）。
+ *
  * 認証は`/claim`・`/report`・`/hosts`・`/sessions`と同じ共有シークレット（`DISPATCH_SECRET`）。
  */
 export async function POST(request: NextRequest) {
@@ -37,7 +43,10 @@ export async function POST(request: NextRequest) {
 
   const payload = await request.json().catch(() => null);
   const target = parseDispatchTarget(payload?.repository, payload?.issue);
-  const plan = parseSessionPlanText(payload?.plan);
+  // **計画に埋め込まれたアーティファクトは、長さを見るより前に切り離す**（#2200）。
+  // HTMLが載ったままだと`parseSessionPlanText`の上限に掛かり、計画そのものが載らなくなる
+  const split = splitPlanArtifact(typeof payload?.plan === "string" ? payload.plan : "");
+  const plan = parseSessionPlanText(split.plan);
   if (!target || !plan) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -45,6 +54,38 @@ export async function POST(request: NextRequest) {
   // 形が想定外のものは**受け付けずにnullへ倒す**（リクエスト自体は拒否しない）。
   // 計画本文が載ることの方が価値が高く、付随情報が欠けても投稿する意味は変わらない
   const hostName = parseSessionHostName(payload?.hostName);
+
+  // 埋め込みがあった回だけ、既存のアーティファクトとして保存する（#2200）。**`Artifact`ツール
+  // 経由の公開（`../artifact`）と同じ入り口を使う**ので、パスが公開時と同じなら同じカードが
+  // 差し替わる。**失敗しても計画の投稿は続ける** — 見た目が古いままになるだけで、
+  // 計画が残らないことの方が損失が大きい
+  let artifactUpdated = false;
+  if (split.artifact) {
+    try {
+      await saveSessionArtifact({
+        repositoryFullName: target.repositoryFullName,
+        issueNumber: target.issueNumber,
+        hostName,
+        title: null,
+        description: null,
+        favicon: null,
+        // claude.aiのURLは埋め込みからは分からない。**`null`を渡しても覚えてあるURLは消えない**
+        // （`saveSessionArtifact`は取れた回だけ更新する）
+        claudeUrl: null,
+        sourcePath:
+          split.artifact.sourcePath ??
+          defaultPlanArtifactSourcePath(target.repositoryFullName, target.issueNumber),
+        html: split.artifact.html,
+      });
+      artifactUpdated = true;
+    } catch (error) {
+      console.error(
+        `[dispatch] 計画に埋め込まれたアーティファクトを保存できませんでした（${target.repositoryFullName}#${target.issueNumber}）`,
+        error,
+      );
+    }
+  }
+
   const posted = await postSessionPlan({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
@@ -52,6 +93,7 @@ export async function POST(request: NextRequest) {
     remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
     planBaseSha: parsePlanBaseSha(payload?.planBaseSha),
     hostName,
+    artifactUpdated,
   });
 
   // 画面からの返事を待つ（#2061）。**Issueコメントの投稿に成功したかどうかとは切り離す**

@@ -40,6 +40,24 @@ describe("buildSessionPlanCommentBody", () => {
     expect(body.startsWith("<!-- plan-base: baf823f -->")).toBe(true);
   });
 
+  // #2200: 見た目が変わったことは、計画本文を読み切る前に分かる必要がある
+  it("アーティファクトを取り込んだ回だけ、見出しの直後に案内を足す", () => {
+    const params = {
+      plan: "## アプローチ\n- あれをする",
+      remoteControlUrl: null,
+      planBaseSha: null,
+      hostName: null,
+    };
+
+    const updated = buildSessionPlanCommentBody({ ...params, artifactUpdated: true });
+    expect(updated).toContain("アーティファクトも更新しました");
+    expect(updated.indexOf("アーティファクトも更新しました")).toBeLessThan(
+      updated.indexOf("- あれをする"),
+    );
+
+    expect(buildSessionPlanCommentBody(params)).not.toContain("アーティファクトも更新しました");
+  });
+
   it("SHAが取れなければplan-baseの行ごと落とす", () => {
     const body = buildSessionPlanCommentBody({
       plan: "計画",

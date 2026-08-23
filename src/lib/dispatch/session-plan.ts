@@ -71,6 +71,8 @@ export function buildSessionPlanCommentBody(params: {
   /** 計画が前提にした`origin/develop`のSHA。取れないこともある */
   planBaseSha: string | null;
   hostName: string | null;
+  /** 計画に埋め込まれたアーティファクトを取り込んだか（#2200）。取り込んだ回だけ案内を足す */
+  artifactUpdated?: boolean;
 }): string {
   const plan = params.plan.trim();
   const truncated = plan.length > PLAN_BODY_LIMIT;
@@ -87,7 +89,16 @@ export function buildSessionPlanCommentBody(params: {
   // 前提が無効になることが実際に起きているため、後から`git log <SHA>..origin/develop`で
   // 何が変わったかを辿れるようにする（docs/multi-agent/gates.md）
   if (params.planBaseSha) lines.push(`<!-- plan-base: ${params.planBaseSha} -->`, "");
-  lines.push(`🗒️ **計画を提示しました。** ${where}が承認を待っています。`, "", body, "", "---", "");
+  lines.push(`🗒️ **計画を提示しました。** ${where}が承認を待っています。`, "");
+  // **見出しの直後に置く**（#2200）。見た目が変わったことは計画本文を読み切る前に分かる必要が
+  // あり、本文の途中に残る跡（`PLAN_ARTIFACT_PLACEHOLDER`）だけでは埋もれる
+  if (params.artifactUpdated) {
+    lines.push(
+      "🎨 **アーティファクトも更新しました。** Issue詳細の「アーティファクト」カードで今の見た目を確認できます。",
+      "",
+    );
+  }
+  lines.push(body, "", "---", "");
   // **リンクは計画本文とは別の段落に置く**（Issueの要件）。計画が長いほど、末尾に出口が
   // 無いと「読んだ後どうすればよいか」が画面から消える
   lines.push(
@@ -122,6 +133,8 @@ export async function postSessionPlan(params: {
   remoteControlUrl: string | null;
   planBaseSha: string | null;
   hostName: string | null;
+  /** 計画に埋め込まれたアーティファクトを取り込んだか（#2200） */
+  artifactUpdated?: boolean;
 }): Promise<boolean> {
   const parsed = parseRepositoryFullName(params.repositoryFullName);
   if (!parsed) return false;
@@ -136,6 +149,7 @@ export async function postSessionPlan(params: {
         remoteControlUrl: params.remoteControlUrl,
         planBaseSha: params.planBaseSha,
         hostName: params.hostName,
+        artifactUpdated: params.artifactUpdated,
       }),
     });
 
