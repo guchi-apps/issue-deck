@@ -66,6 +66,26 @@ privateのまま残すリポジトリでActionsの分数が問題になった場
 ジョブの統合だが、実測で3割程度にとどまる。**分数を根本的に減らしたいならpublic化を検討する**
 のが先で、それができないなら実行そのものを減らす。
 
+### 画面から見る（#2212）
+
+issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日・今月の実行時間とリポジトリ別の
+内訳が出る。**上のコマンドを叩かなくても、課金が出ているリポジトリは金額付きで並ぶ。**
+取得元は上の確認コマンドと同じ`/organizations/{org}/settings/billing/usage`で、実装は
+[`src/lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)。
+
+### 課金レポートのAPIで気を付けること
+
+- **旧`/orgs/{org}/settings/billing/actions`は410（This endpoint has been moved）を返す。**
+  新しい課金プラットフォームの`/organizations/{org}/settings/billing/usage`に置き換わっており、
+  **無料枠（`included_minutes`）を返す手段はもう無い**
+- 必要なスコープは`repo`または`admin:org`（応答の`X-Accepted-Oauth-Scopes`）。
+  **GitHub Appのインストールトークンでは読めない**ため、issue-deckはユーザー本人のトークンで読む
+- 個人アカウントは`/users/{username}/settings/billing/usage`で、`user`スコープが要る（別物）
+- **レポートはpublicとprivateを区別しない。** どちらも「grossの全額がdiscountで相殺されてnet 0」
+  という同じ形になるため、**無料枠3,000分に対する残量はこのAPIからは割り出せない**
+- `year`・`month`を付けると明細が発生時刻の粒度で返る（2026年8月分で356件・約97KB）。
+  付けないと月単位に丸められるが、リポジトリが一部しか返らないため付けて呼ぶ
+
 ## 新しくリポジトリを作るときの確認
 
 - **privateで作るなら、secret scanning / push protectionを有効にしない。** 有効にした瞬間から

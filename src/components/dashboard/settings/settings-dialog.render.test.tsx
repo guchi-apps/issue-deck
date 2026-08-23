@@ -22,6 +22,7 @@ const appSettingsMutations = {
 const settingsData = {
   rateLimits: { data: null, isLoading: false, error: null },
   apiUsage: { data: null, isLoading: false, error: null },
+  actionsUsage: { data: null, isLoading: false, error: null },
   claudeUsage: { data: null, isLoading: false, error: null, notConfigured: true },
   githubStatus: { data: null, isLoading: false, error: null },
   fineGrainedTokens: { data: [], isLoading: false, error: null, refetch: vi.fn() },
@@ -267,7 +268,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /状態/ }));
 
-    expect(screen.getByText("GitHub API使用量")).toBeTruthy();
+    expect(screen.getByText("GitHub使用量")).toBeTruthy();
     expect(screen.getByText("Claudeプラン使用量")).toBeTruthy();
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
   });
