@@ -766,3 +766,83 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(runManualStep).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 進捗レール（#2194）。**押せる目次であること**と、**担い手（代行できる／あなたが実行）が
+ * ドットと手順の見出しに出ること**を見る。代行できるかどうかの判定そのものは
+ * `lib/dispatch/dispatch-job.ts`と`lib/manual-step-autorun.ts`のテストが持つ。
+ */
+describe("ManualStepGuideDialog の進捗レール", () => {
+  beforeEach(() => {
+    taskList.body = BODY;
+    taskList.isToggling = false;
+    taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("ドットを押すとその段へ直接移動する", () => {
+    renderDialog([issue()]);
+
+    // 「戻る」「次へ」を辿らずに手順2（コマンドの無い手順）へ飛べる
+    fireEvent.click(screen.getByRole("button", { name: /手順 2 \/ 2/ }));
+    expect(screen.getByRole("heading", { name: /手順 2 \/ 2/ })).toBeTruthy();
+
+    // 最初の段へも一手で戻れる
+    fireEvent.click(screen.getByRole("button", { name: "この作業の目的" }));
+    expect(screen.getByRole("heading", { name: "この作業でできるようになること" })).toBeTruthy();
+  });
+
+  it("押しても本文のチェックは変わらない（記録は飛ばせない）", () => {
+    renderDialog([issue()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "完了の確認" }));
+
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+  });
+
+  it("ドットと手順の見出しに担い手を出す", () => {
+    renderDialog([issue()]);
+
+    // 手順1はサブPCで実行するコマンドが1つ書かれているので代行できる
+    expect(screen.getByRole("button", { name: /手順 1 \/ 2: 代行できる/ })).toBeTruthy();
+    // 手順2にはコマンドのブロックが無いので人が実行する
+    expect(screen.getByRole("button", { name: /手順 2 \/ 2: あなたが実行/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    expect(screen.getByRole("heading", { name: /手順 1 \/ 2.*代行できる/ })).toBeTruthy();
+  });
+
+  it("代行できるサブPCが居ないときは、ドットも「あなたが実行」になる", () => {
+    renderDialog([issue()], undefined, dispatchHandle({ hosts: [] }));
+
+    expect(screen.getByRole("button", { name: /手順 1 \/ 2: あなたが実行/ })).toBeTruthy();
+  });
+
+  it("実行済みの手順は「実行済みを取り消す」でチェックを外せる", () => {
+    taskList.body = BODY.replace("- [ ] チェックアウトを更新する", "- [x] チェックアウトを更新する");
+    renderDialog([issue({ body: taskList.body })]);
+
+    expect(screen.getByRole("button", { name: /手順 1 \/ 2: 実行済み/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "実行済みを取り消す" }));
+
+    expect(taskList.toggleTask).toHaveBeenCalledWith(STEP_LINE, false);
+    // 外すのはチェックだけ。実行し直しはサーバーに任せる（#1882の決まりのまま）
+    expect(runManualStep).not.toHaveBeenCalled();
+    expect(controlManualStepRun).not.toHaveBeenCalled();
+  });
+
+  it("未実行の手順には「実行済みを取り消す」を出さない", () => {
+    renderDialog([issue()]);
+
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    expect(screen.queryByRole("button", { name: "実行済みを取り消す" })).toBeNull();
+  });
+});
