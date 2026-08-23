@@ -24,7 +24,7 @@ import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
-import { IssueArtifactSection } from "@/components/dashboard/issue-artifact-section";
+import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
@@ -801,12 +801,8 @@ export function MobileIssueDetail({
           </div>
         )}
 
-        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く */}
-        <IssueArtifactSection
-          artifacts={artifacts}
-          onReload={reloadArtifacts}
-          idPrefix="mobile"
-        />
+        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く（#2190） */}
+        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
         {showStartDialog && (
           <StartImplementationDialog

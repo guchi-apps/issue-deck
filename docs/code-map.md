@@ -1985,7 +1985,8 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
   **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
-  手が届く）。運用の全体像は
+  手が届く）。**Issue詳細のカードに出るサムネイルも同じ配信URLのiframe**（#2190。幅1200pxで
+  描かせて`transform`で縮める）なので、この約束はそちらにも掛かる。運用の全体像は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)を参照。
 - **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
   末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに
