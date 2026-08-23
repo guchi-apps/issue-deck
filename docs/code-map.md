@@ -1658,8 +1658,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）とスマホ（`mscreen`・`missue`）の
     両方の現在地を載せる。**この分岐を戻さない**ことは`lib/notifications/sw-push.test.ts`が
     **`public/sw.js`を読み込んで偽の`self`で動かして**確かめる（Service Workerはバンドルされない
-    素のJSでimportできない）。#2195で入れた`force`（テスト通知だけ抑止を抜ける口）は、抑止自体が
-    無くなったので削除した。
+    素のJSでimportできない）。#2195で入れた`force`（テスト通知だけ抑止を抜ける口）は**新しい
+    sw.jsでは読まないが、送信側には残してある**——サーバーの更新と端末のService Workerの更新は
+    同時ではなく、古いsw.jsを持ったままの端末では抑止が生きているため（消すと#2195が再発する）。
+    全端末が更新されたら`push.ts`の型と`api/notifications/test`から消してよい。
   - **二重に出さないための調整は画面側にある。確認待ちの知らせの出口は端末ごとに1つ**（#2196）。
     `usePushDeliveryState`（`hooks/use-push-delivery.ts`）がこの端末の受け取り状況を判定し、
     OSの通知として届いているあいだは`IssueDeckShell`が画面内のトーストを積まない。判定は
@@ -1669,6 +1671,17 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     サーバー側の行（`GET /api/notifications/subscribe`）の3つで、購読を持たない端末はサーバーへ
     問い合わせずに終える。設定画面での登録・解除は`lib/push-subscription-change.ts`の
     ブラウザイベントで伝える（親子関係が無く、渡す材料も無いため状態を持ち上げない）。
+    **開いた瞬間の1回で固定しない**——送信時の404/410で購読行はその場で消えるため、開いたまま
+    失効するとトーストが止まったままになる。5分ごと（`PUSH_DELIVERY_RECHECK_INTERVAL_MS`）と
+    画面へ戻ったときに取り直す。
+  - **開いている間の「押せないうちは知らせない」（#2174・#1709）は、OSの通知には効かない。**
+    保留を判断しているのは画面側の`resolveCheckUserToasts`だけで、`sweepCheckUserPushNotifications`は
+    待ち時間（3分・`01.check-merge`は15分）しか見ない。トーストを止めた端末では、エージェントが
+    まだ動いている確認待ちでも付与3分後に鳴りうる。`01.check-merge`は15分がトーストの上限10分を
+    上回るのでほぼ揃い、計画の承認・質問への回答はそもそも保留の対象外（`isSessionActivelyWorking`は
+    入力待ちのセッションを実行中と数えない）なので、残るのは「`00.check-user`を付けたあとも
+    セッションが作業を続けている」場合。**揃えるなら保留の判定をサーバー側（巡回）へ寄せる**
+    ことになるため、必要になってから行う。
   - **失効（ブラウザには購読が残っているのにサーバー側の行が無い）を「オフ」と混ぜない**（#2196）。
     送信時の404/410で消された状態で、ユーザーがやることは「登録し直す」。設定画面はこれを専用の
     文言とバッジで出し、`subscribe`は**サーバー側に行が無い購読を`unsubscribe()`してから取り直す**

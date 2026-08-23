@@ -35,6 +35,10 @@ export async function POST() {
     url: "/dashboard",
     // 確認待ちの通知（`check-user:<id>`）と混ざらない鍵にする
     tag: "test",
+    // **古いService Workerが残っている端末のための保険**（#2195・#2196）。新しいsw.jsは
+    // 表示中かどうかで出し分けないので読まないが、更新前の端末では抑止が生きており、
+    // これが無いと押した設定画面が表示中であることを理由に握りつぶされる
+    force: true,
   });
 
   return NextResponse.json({ ok: true, ...result });

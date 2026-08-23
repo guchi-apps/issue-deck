@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { usePushDeliveryState } from "@/hooks/use-push-delivery";
+import {
+  PUSH_DELIVERY_RECHECK_INTERVAL_MS,
+  usePushDeliveryState,
+} from "@/hooks/use-push-delivery";
 import { pushEndpointKeyInBrowser } from "@/lib/push-client";
 import { notifyPushSubscriptionChanged } from "@/lib/push-subscription-change";
 
@@ -52,11 +55,15 @@ function setupServer(endpointKeys: string[] | "fail") {
 }
 
 beforeEach(() => {
+  // 取り直しの間隔（5分）を待たずに進めるため。`waitFor`が実時間に頼らないよう
+  // `shouldAdvanceTime`を立てる
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   setupBrowser({ subscribed: true });
   setupServer([]);
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -92,6 +99,20 @@ describe("usePushDeliveryState", () => {
     setupServer("fail");
     const { result } = renderHook(() => usePushDeliveryState());
     await waitFor(() => expect(result.current).toBe("unknown"));
+  });
+
+  it("開いたまま失効したら、取り直して気づく（送信時の404/410で購読行が消える）", async () => {
+    const key = await pushEndpointKeyInBrowser(ENDPOINT);
+    setupServer([key]);
+    const { result } = renderHook(() => usePushDeliveryState());
+    await waitFor(() => expect(result.current).toBe("delivering"));
+
+    // サーバー側だけが消えた状態にして、次の取り直しを待つ
+    setupServer([]);
+    await act(async () => {
+      vi.advanceTimersByTime(PUSH_DELIVERY_RECHECK_INTERVAL_MS);
+    });
+    await waitFor(() => expect(result.current).toBe("expired"));
   });
 
   it("設定画面で登録し直したら、そのまま引き直す", async () => {

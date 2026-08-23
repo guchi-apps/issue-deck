@@ -22,6 +22,18 @@ import { onPushSubscriptionChanged } from "@/lib/push-subscription-change";
  * `delivering`へ倒すと、通知もトーストも出ない状態になりうる。購読を持っていない端末では
  * サーバーへ問い合わせずに終える（大半の端末はここで終わり、通信は増えない）。
  */
+
+/**
+ * 判定を取り直す間隔。
+ *
+ * **開いたまま失効することがある**（計画レビューの指摘）。送信時に404/410が返ると
+ * `sendPushNotification`がその場で購読行を消すので、開いた瞬間の1回だけで固定すると
+ * そのセッションのあいだトーストが止まったままになる。取り直すのは`GET`1本なので、
+ * 10秒ごとに回っているIssue一覧のポーリングに比べれば誤差。
+ */
+export const PUSH_DELIVERY_RECHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+/** いまの受け取り状況を1回だけ調べる */
 async function readPushDeliveryState(): Promise<PushDeliveryState> {
   if (detectPushAvailability() !== "available") return "off";
   const permission = typeof Notification === "undefined" ? null : Notification.permission;
@@ -74,11 +86,14 @@ export function usePushDeliveryState(): PushDeliveryState {
       if (document.visibilityState === "visible") check();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    // 開いたままでも失効する（送信時の404/410で消える）ので、定期的に取り直す
+    const timer = setInterval(check, PUSH_DELIVERY_RECHECK_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       stopListening();
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(timer);
     };
   }, []);
 
