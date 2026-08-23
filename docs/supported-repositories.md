@@ -29,6 +29,12 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 ただしワークフローの配布方法には**コピー方式**と**参照方式**の2種類があり、参照方式のものは
 手動記録の対象外とする（後述「参照方式のワークフローは sync-state の対象外」）。
 
+**無人実行での撮影可否だけは、画面が読む正が別にある**（#1118）。下の表の備考にも
+`24.screenshot-required`の成否は書いてあるが、「実装を開始」ダイアログの出し分けは
+[`src/lib/github/screenshot-support.ts`](../src/lib/github/screenshot-support.ts)の一覧だけを見る。
+撮影に対応させた・できなくなったときは、表だけでなくそちらも直す（[docs/multi-agent/screenshots.md](multi-agent/screenshots.md)
+「撮影に対応しないリポジトリでは選ばせない」）。
+
 **アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）は下の表に載せない。**
 実装を行わず盤面にも載らないため、表の読み方（載っている＝無人実行で実装が回る）が崩れる。
 扱いは後述「`guchi-apps/question`（質問専用・盤面外）」を参照。
