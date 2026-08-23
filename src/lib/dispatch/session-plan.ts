@@ -5,6 +5,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { enqueuePlanReviewJob } from "@/lib/dispatch/jobs";
+import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -41,6 +42,16 @@ export const SESSION_PLAN_MARKER = "<!-- issue-deck:session-plan -->";
 const PLAN_BODY_LIMIT = 60000;
 
 /**
+ * 受け取ってよい計画本文の上限。
+ *
+ * **アーティファクトを埋め込んだ計画ファイルがそのまま届くことがある**（#2200。フェンスが
+ * 閉じていないなど、切り出し（`plan-artifact.ts`）に外れた場合）。埋め込むHTMLの上限は2MBで、
+ * 従来の20万字では**その回の計画がどこにも残らない**。投稿する本文は`PLAN_BODY_LIMIT`で、
+ * 画面へ渡す本文は`truncatePlanForPanel`で別に切るので、ここは受け取りの線だけを見る。
+ */
+const PLAN_TEXT_LIMIT = SESSION_ARTIFACT_HTML_LIMIT;
+
+/**
  * 受け取ってよい計画本文の形。**空文字は受け取らない**（中身の無いコメントを投稿しても
  * ノイズにしかならない）。長さの上限は本文の切り詰め（`PLAN_BODY_LIMIT`）とは別に、
  * 明らかに壊れた入力でGitHubへの往復を起こさないための線として置く。
@@ -48,7 +59,7 @@ const PLAN_BODY_LIMIT = 60000;
 export function parseSessionPlanText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > 200000) return null;
+  if (trimmed.length === 0 || trimmed.length > PLAN_TEXT_LIMIT) return null;
   return trimmed;
 }
 
