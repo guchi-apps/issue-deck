@@ -2,11 +2,12 @@
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink, SquareArrowOutUpRight, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useHistoryDismiss } from "@/hooks/use-history-dismiss";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
+import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
 import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 
 type ArtifactPreview = {
@@ -100,13 +101,37 @@ function ArtifactPreviewDialog({
           </DialogPrimitive.Title>
 
           <div className="flex shrink-0 items-center gap-2 px-4 pt-3 pb-2 text-white">
-            <span className="truncate text-sm font-medium">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">
               {artifact?.favicon ? `${artifact.favicon} ` : ""}
               {artifact?.title}
             </span>
+            {/* **重ねて見はじめてから「本文と並べたい」と思うのが実際の流れ**（#2210）なので、
+                閉じるボタンの隣に移し替えの導線を置く。開けたら重ね表示は閉じ、元の画面では
+                Issueの本文・コメントが見える状態へ戻す（別ウィンドウの裏に重ね表示が残らない） */}
+            {artifact && (
+              <a
+                href={artifactWindowPath(artifact.id)}
+                target="_blank"
+                rel="noreferrer"
+                title="別ウィンドウで開く"
+                aria-label="別ウィンドウで開く"
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  if (event.button !== 0) return;
+                  // 開けなかった場合（ポップアップブロック）はリンクのまま別タブが開くので、
+                  // ここでは閉じない——重ね表示だけが消えて何も出ない、を避ける
+                  if (!openArtifactWindow(artifact.id)) return;
+                  event.preventDefault();
+                  onClose();
+                }}
+                className="grid size-9 shrink-0 place-items-center rounded-full border border-white/30 bg-white/15 transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+              >
+                <SquareArrowOutUpRight className="size-4.5" />
+              </a>
+            )}
             <DialogPrimitive.Close
               aria-label="プレビューを閉じる"
-              className="ml-auto grid size-9 shrink-0 place-items-center rounded-full border border-white/30 bg-white/15 transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+              className="grid size-9 shrink-0 place-items-center rounded-full border border-white/30 bg-white/15 transition-colors hover:bg-white/25 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
             >
               <X className="size-4.5" />
             </DialogPrimitive.Close>

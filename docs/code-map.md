@@ -19,6 +19,7 @@ src/
     auth/callback   Supabase Authのコールバック。Userレコードの作成とトークン保存
     dashboard/      メイン画面
     issues/new      Issue作成画面を別ウィンドウで開くためのページ（#1728）
+    artifacts/[id]  アーティファクト1件を別ウィンドウで開くためのページ（#2210）
     github/setup    GitHub Appインストール後の受け口
   components/
     dashboard/      画面固有のコンポーネント（mobile/ にモバイル専用、settings/ に設定画面）
@@ -2030,7 +2031,11 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
   手が届く）。**Issue詳細のカードに出るサムネイルも同じ配信URLのiframe**（#2190。幅1200pxで
-  描かせて`transform`で縮める）なので、この約束はそちらにも掛かる。運用の全体像は
+  描かせて`transform`で縮める）なので、この約束はそちらにも掛かる。**別ウィンドウの単独ページ
+  （[`app/artifacts/[id]/page.tsx`](../src/app/artifacts/[id]/page.tsx)。#2210）も同じ配信URLを
+  iframeで開くだけ**で、HTMLをページに直接描かない（同じオリジンで描くと隔離が丸ごと外れる）。
+  開く導線はカード・重ね表示・本文中のリンクの3か所で、`window.open`の組み立ては
+  [`lib/artifact-window.ts`](../src/lib/artifact-window.ts)。運用の全体像は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)を参照。
 - **入力欄（[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)）は、本文の
   末尾に連続する画像記法（`![alt](url)`だけの行）を「添付」として扱い、入力欄には出さずに

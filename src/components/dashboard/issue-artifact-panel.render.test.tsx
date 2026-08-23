@@ -89,9 +89,66 @@ describe("IssueArtifactPanel", () => {
     );
   });
 
+  it("別ウィンドウの導線は単独ページを指す（中クリック・URLのコピーも効く）", () => {
+    renderPanel([artifact()]);
+
+    const link = screen.getByRole("link", { name: "見た目案 を別ウィンドウで開く" });
+    expect(link.getAttribute("href")).toBe("/artifacts/art_1");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("別ウィンドウが開けたらリンクの遷移は止める（同じものが二重に開かない）", () => {
+    renderPanel([artifact()]);
+
+    const opened = { focus: () => {} } as Window;
+    const calls: string[] = [];
+    const original = window.open;
+    window.open = ((url: string) => {
+      calls.push(url);
+      return opened;
+    }) as typeof window.open;
+    try {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      screen.getByRole("link", { name: "見た目案 を別ウィンドウで開く" }).dispatchEvent(event);
+      expect(calls).toEqual(["/artifacts/art_1"]);
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      window.open = original;
+    }
+  });
+
+  it("ポップアップが止められたらリンクのまま（押しても何も起きない、にしない）", () => {
+    renderPanel([artifact()]);
+
+    const original = window.open;
+    window.open = (() => null) as typeof window.open;
+    try {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+      screen.getByRole("link", { name: "見た目案 を別ウィンドウで開く" }).dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      window.open = original;
+    }
+  });
+
   it("URLを覚えていないものにはclaude.aiのリンクを出さない", () => {
     renderPanel([artifact({ claudeUrl: null, claudeArtifactId: null })]);
     expect(screen.queryByRole("link", { name: /claude.aiで開く/ })).toBeNull();
+  });
+
+  it("重ね表示から別ウィンドウへ移すと、重ね表示は閉じる（裏に残さない）", () => {
+    renderPanel([artifact()]);
+    fireEvent.click(screen.getByRole("button", { name: "開く" }));
+    expect(previewFrame()).not.toBeNull();
+
+    const original = window.open;
+    window.open = (() => ({ focus: () => {} }) as Window) as typeof window.open;
+    try {
+      fireEvent.click(screen.getByRole("link", { name: "別ウィンドウで開く" }));
+    } finally {
+      window.open = original;
+    }
+    expect(previewFrame()).toBeNull();
   });
 
   it("古いものはサムネイルを作らない（Issueを開いた時点で全件を取りに行かない）", () => {

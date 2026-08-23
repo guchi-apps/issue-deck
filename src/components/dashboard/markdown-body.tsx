@@ -12,6 +12,7 @@ import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ImagePreviewDialog } from "@/components/dashboard/image-preview-dialog";
 import { parseArtifactUrlId } from "@/lib/artifact-document";
+import { artifactWindowPath } from "@/lib/artifact-window";
 import { copyText } from "@/lib/copy-text";
 import { hastToCopyText } from "@/lib/hast-text";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
@@ -127,7 +128,10 @@ function MarkdownLink({ children, href, title }: ComponentProps<"a">) {
   if (artifact && artifactPreview) {
     return (
       <a
-        href={href}
+        // **`href`はclaude.aiではなくissue-deckの単独ページ**（#2210）。修飾キー付きの
+        // クリックとURLのコピーがここへ効く——claude.aiのままだと、別で開いたときだけ
+        // ログインを求められる（スマホでは特に）。claude.aiへは単独ページから行ける
+        href={artifactWindowPath(artifact.id)}
         title={title}
         target="_blank"
         rel="noreferrer"
