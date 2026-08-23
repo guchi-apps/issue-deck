@@ -35,9 +35,6 @@ export async function POST() {
     url: "/dashboard",
     // 確認待ちの通知（`check-user:<id>`）と混ざらない鍵にする
     tag: "test",
-    // **このボタンは設定画面からしか押せない＝押した瞬間はアプリが必ず表示中**なので、
-    // Service Workerの「表示中なら出さない」に当たって毎回握りつぶされていた（#2195）
-    force: true,
   });
 
   return NextResponse.json({ ok: true, ...result });

@@ -15,6 +15,51 @@ export type PushAvailability =
   /** そもそもPushに対応していないブラウザ */
   | "unsupported";
 
+/** Service Workerの置き場所。`public/sw.js`をルートスコープで登録する */
+export const SERVICE_WORKER_PATH = "/sw.js";
+
+/**
+ * この端末に確認待ちの通知が「OSの通知として」届いているか（#2196）。
+ *
+ * 届いているなら画面内のトースト（`check-user-toast-viewport.tsx`）を出さない——
+ * Service Workerは表示中でも必ず通知を出すようになったので、そのままでは同じ知らせを
+ * 2か所で受けることになる。**出口を1つにするのはここの判定だけで、
+ * 届いていない端末では従来どおりトーストが出る。**
+ */
+export type PushDeliveryState =
+  /** まだ分からない（購読を確かめている途中）。トーストを出す側へ倒す */
+  | "unknown"
+  /** OSの通知として届く。画面内のトーストは出さない */
+  | "delivering"
+  /**
+   * ブラウザには購読があるのに、サーバー側の行が無い＝失効している。
+   * 送信時に404/410で消された状態で、登録し直すまで通知は届かない
+   */
+  | "expired"
+  /** 購読していない・通知が許可されていない・対応していない */
+  | "off";
+
+/**
+ * この端末の受け取り状況を判定する。
+ *
+ * **「届いている」と言い切れるときだけ`delivering`にする。** 判断できないものを
+ * `delivering`に倒すと、通知もトーストも出ない（＝何も知らされない）状態になりうる。
+ */
+export function describePushDeliveryState(input: {
+  /** `Notification.permission`。取れないブラウザはnull */
+  permission: NotificationPermission | null;
+  /** ブラウザが持っている購読の`endpointKey`。購読していなければnull */
+  browserEndpointKey: string | null;
+  /** サーバーが持っている`endpointKey`の一覧。未取得はnull */
+  serverEndpointKeys: readonly string[] | null;
+}): PushDeliveryState {
+  if (input.browserEndpointKey === null) return "off";
+  // 購読が残っていても、許可を取り消されていればOSは出さない
+  if (input.permission !== "granted") return "off";
+  if (input.serverEndpointKeys === null) return "unknown";
+  return input.serverEndpointKeys.includes(input.browserEndpointKey) ? "delivering" : "expired";
+}
+
 /**
  * この端末でPush通知を登録できるか。
  *

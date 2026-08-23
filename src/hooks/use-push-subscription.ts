@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  describePushDeliveryState,
   detectPushAvailability,
   pushEndpointKeyInBrowser,
+  SERVICE_WORKER_PATH,
   urlBase64ToArrayBuffer,
   type PushAvailability,
+  type PushDeliveryState,
 } from "@/lib/push-client";
+import { notifyPushSubscriptionChanged } from "@/lib/push-subscription-change";
 
 /**
  * Push通知（#838）の購読を、設定画面から登録・解除するためのフック。
@@ -22,9 +26,6 @@ export type PushSubscriptionView = {
   userAgent: string | null;
   createdAt: string;
 };
-
-/** Service Workerの置き場所。`public/sw.js`をルートスコープで登録する */
-const SERVICE_WORKER_PATH = "/sw.js";
 
 async function registerServiceWorker(): Promise<ServiceWorkerRegistration> {
   const registration = await navigator.serviceWorker.register(SERVICE_WORKER_PATH);
@@ -123,10 +124,18 @@ export function usePushSubscription(enabled: boolean) {
       }
 
       const registration = await registerServiceWorker();
-      // 既に購読があればそれを使う。二重にsubscribeすると宛先が変わり、古い方が残る
+      // 既に購読があればそれを使う。二重にsubscribeすると宛先が変わり、古い方が残る。
+      // **ただしサーバー側に行が無い購読は捨ててから取り直す**（#2196）。失効（404/410）で
+      // 消された宛先をそのまま登録し直すと、画面は「受け取り中」に戻るのに通知だけ届かない
       const existing = await registration.pushManager.getSubscription();
+      const existingKey = existing ? await pushEndpointKeyInBrowser(existing.endpoint) : null;
+      const isKnownToServer =
+        existingKey !== null && (subscriptions ?? []).some((s) => s.endpointKey === existingKey);
+      // 一覧を取れていないとき（subscriptionsがnull）は、判断材料が無いので捨てない
+      const reusable = existing && (subscriptions === null || isKnownToServer) ? existing : null;
+      if (existing && !reusable) await existing.unsubscribe();
       const subscription =
-        existing ??
+        reusable ??
         (await registration.pushManager.subscribe({
           // Web Push仕様上、画面に出さない通知（サイレントPush）は許されない
           userVisibleOnly: true,
@@ -140,13 +149,15 @@ export function usePushSubscription(enabled: boolean) {
       });
       if (!res.ok) throw new Error(`登録に失敗しました (${res.status})`);
       setCurrentEndpointKey(await pushEndpointKeyInBrowser(subscription.endpoint));
+      // ダッシュボード側の出し分け（トーストを出すか）を切り替えさせる（#2196）
+      notifyPushSubscriptionChanged();
       refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
     }
-  }, [publicKey, refetch]);
+  }, [publicKey, subscriptions, refetch]);
 
   /** この端末での受け取りをやめる */
   const unsubscribe = useCallback(async () => {
@@ -167,6 +178,7 @@ export function usePushSubscription(enabled: boolean) {
         await subscription.unsubscribe();
       }
       setCurrentEndpointKey(null);
+      notifyPushSubscriptionChanged();
       refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -188,6 +200,8 @@ export function usePushSubscription(enabled: boolean) {
           body: JSON.stringify({ id }),
         });
         if (!res.ok) throw new Error(`解除に失敗しました (${res.status})`);
+        // 外したのがこの端末のこともある。どちらでも引き直せば正しくなる
+        notifyPushSubscriptionChanged();
         refetch();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -229,12 +243,21 @@ export function usePushSubscription(enabled: boolean) {
     }
   }, [refetch]);
 
+  // **失効（ブラウザには購読があるのにサーバー側の行が無い）を「オフ」と混ぜない**（#2196）。
+  // どちらも「受け取っていない」だが、ユーザーがやることが違う——失効は登録し直しが要る
+  const deliveryState: PushDeliveryState = describePushDeliveryState({
+    permission,
+    browserEndpointKey: currentEndpointKey,
+    serverEndpointKeys: subscriptions?.map((item) => item.endpointKey) ?? null,
+  });
+
   return {
     availability,
     permission,
     publicKey,
     subscriptions,
     currentEndpointKey,
+    deliveryState,
     isLoading,
     isSubmitting,
     error,

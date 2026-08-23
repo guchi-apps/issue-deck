@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  describePushDeliveryState,
   describePushDevice,
   detectPushAvailability,
   urlBase64ToArrayBuffer,
@@ -90,5 +91,61 @@ describe("urlBase64ToArrayBuffer", () => {
     // "\xfb\xff\xbe" を base64url にしたもの（標準base64なら "+/++"）
     const bytes = new Uint8Array(urlBase64ToArrayBuffer("-_--"));
     expect(Array.from(bytes)).toEqual([251, 255, 190]);
+  });
+});
+
+/**
+ * 通知とトーストの出し分け（#2196）。**「届いている」と言い切れるときだけ`delivering`**で、
+ * それ以外は画面内のトーストが出る側へ倒す——両方消えて何も知らされない状態を作らないため。
+ */
+describe("describePushDeliveryState", () => {
+  it("ブラウザとサーバーの両方に購読があり、許可も出ていれば届いている", () => {
+    expect(
+      describePushDeliveryState({
+        permission: "granted",
+        browserEndpointKey: "key-1",
+        serverEndpointKeys: ["key-0", "key-1"],
+      }),
+    ).toBe("delivering");
+  });
+
+  it("ブラウザにあってサーバーに無ければ失効（送信時の404/410で消された状態）", () => {
+    expect(
+      describePushDeliveryState({
+        permission: "granted",
+        browserEndpointKey: "key-1",
+        serverEndpointKeys: ["key-2"],
+      }),
+    ).toBe("expired");
+  });
+
+  it("購読していなければオフ", () => {
+    expect(
+      describePushDeliveryState({
+        permission: "granted",
+        browserEndpointKey: null,
+        serverEndpointKeys: ["key-1"],
+      }),
+    ).toBe("off");
+  });
+
+  it("購読が残っていても、通知が許可されていなければオフ（OSが出さない）", () => {
+    expect(
+      describePushDeliveryState({
+        permission: "denied",
+        browserEndpointKey: "key-1",
+        serverEndpointKeys: ["key-1"],
+      }),
+    ).toBe("off");
+  });
+
+  it("サーバー側を取れていないうちは判断しない（トーストを出す側へ倒す）", () => {
+    expect(
+      describePushDeliveryState({
+        permission: "granted",
+        browserEndpointKey: "key-1",
+        serverEndpointKeys: null,
+      }),
+    ).toBe("unknown");
   });
 });

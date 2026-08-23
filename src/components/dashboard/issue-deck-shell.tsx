@@ -54,6 +54,7 @@ import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
+import { usePushDeliveryState } from "@/hooks/use-push-delivery";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
@@ -244,6 +245,9 @@ export function IssueDeckShell({
   const [pendingCheckUserToasts, setPendingCheckUserToasts] = useState<PendingCheckUserToast[]>(
     [],
   );
+  // この端末に確認待ちがOSの通知として届いているか（#2196）。届いているあいだはトーストを
+  // 出さない——Service Workerは表示中でも必ず通知を出すため、両方出すと同じ知らせが2つになる
+  const pushDeliveryState = usePushDeliveryState();
 
   // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
   // サイドバー・Issue一覧・プロパティパネルの3カラムはドラッグで幅を調整できる。
@@ -525,7 +529,14 @@ export function IssueDeckShell({
     // **検知しても即座には出さず、いったん保留の列へ積む**（#1709）。マージを求める確認待ちは
     // 対応PRのCIが確定するまで出さない（判定は`resolveCheckUserToasts`）。積むと同時に
     // PR一覧を取り直すのは、作られたばかりのPRが手元の取得結果にまだ載っていないため。
-    const newlyCheckUserIssues = detectNewlyCheckUserIssues(issues, reconciledIssues);
+    //
+    // **OSの通知が届いている端末では、そもそも積まない**（#2196）。確認待ちの知らせの出口を
+    // 1つにするための分岐はここだけで、届いていない端末（未購読・許可なし・失効中・判定前）は
+    // 従来どおりトーストが出る——通知とトーストの両方が消える状態を作らない。
+    const newlyCheckUserIssues =
+      pushDeliveryState === "delivering"
+        ? []
+        : detectNewlyCheckUserIssues(issues, reconciledIssues);
     // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得でリポジトリ数ぶん
     // GitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
     if (newlyCheckUserIssues.some(isMergeCheckUser)) openPullRequests.refresh();

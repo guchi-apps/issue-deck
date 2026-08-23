@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
-import type { PushAvailability } from "@/lib/push-client";
+import { describePushDeliveryState, type PushAvailability } from "@/lib/push-client";
 
 /**
  * 見るのは**状態と文言の対応**（#838）。実際の登録はブラウザのPush API頼みで、jsdomには
@@ -31,6 +31,13 @@ let hookState: HookState;
 vi.mock("@/hooks/use-push-subscription", () => ({
   usePushSubscription: () => ({
     ...hookState,
+    // 受け取り状況の判定は本物を使う（#2196）。ここで別に組み立てると、画面が「受け取り中」と
+    // 「失効」を出し分ける根拠がフックの実物とずれる
+    deliveryState: describePushDeliveryState({
+      permission: hookState.permission,
+      browserEndpointKey: hookState.currentEndpointKey,
+      serverEndpointKeys: hookState.subscriptions.map((item) => item.endpointKey),
+    }),
     isLoading: false,
     isSubmitting: false,
     error: null,
@@ -70,6 +77,7 @@ describe("NotificationSettingsSection", () => {
 
   it("登録済みなら、停止とテスト送信に切り替わる", () => {
     setup({
+      permission: "granted",
       currentEndpointKey: "key-1",
       subscriptions: [
         {
@@ -87,6 +95,17 @@ describe("NotificationSettingsSection", () => {
     expect(sendTest).toHaveBeenCalled();
     // 押した画面が表示中でも出ることを添える（#2195。出ないときの次の一手も示す）
     expect(screen.getByText(/この画面を開いたままでもOSの通知として表示されます/)).toBeTruthy();
+  });
+
+  it("ブラウザに購読が残っていてもサーバー側に無ければ、失効として登録し直しを促す", () => {
+    // 送信時の404/410でサーバー側の行だけが消えた状態（#2196）。「オフ」と同じ見せ方にすると、
+    // 自分で止めたつもりが無いのに止まっているという肝心のことが伝わらない
+    setup({ permission: "granted", currentEndpointKey: "key-1", subscriptions: [] });
+
+    expect(screen.getByText("失効")).toBeTruthy();
+    expect(screen.getByText(/この端末の購読は失効しています/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "登録し直す" }));
+    expect(subscribe).toHaveBeenCalled();
   });
 
   it("iOSでタブから開いている場合、ホーム画面への追加を案内する", () => {
@@ -110,6 +129,7 @@ describe("NotificationSettingsSection", () => {
 
   it("他の端末の購読は一覧から外せる", () => {
     setup({
+      permission: "granted",
       currentEndpointKey: "key-1",
       subscriptions: [
         {
