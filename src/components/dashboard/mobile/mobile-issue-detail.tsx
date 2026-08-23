@@ -33,6 +33,7 @@ import {
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
+import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MobileIssuePropertiesSection } from "@/components/dashboard/mobile/mobile-issue-properties-section";
@@ -127,6 +128,7 @@ import {
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
+import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -293,6 +295,13 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
+  // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
+  const questionRequest = findQuestionRequestForIssue(
+    dispatch.questionRequests ?? [],
+    issue.repositoryFullName,
+    issue.number,
+  );
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -389,6 +398,7 @@ export function MobileIssueDetail({
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
     // 計画への返事を画面から送れる間は、行き先をRemote Controlではなく計画パネルにする（#2061）
     planDecisionPending: planRequest?.status === "WAITING",
+    questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
   });
 
@@ -787,6 +797,19 @@ export function MobileIssueDetail({
           planningSkipped={planningSkipped}
         />
 
+        {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で計画パネルの上に置く */}
+        {questionRequest && (
+          <div {...checkUserTargetProps("question")}>
+            {/* **質問が変われば作り直す**（#2158。PCの詳細と同じ理由） */}
+            <QuestionAnswerPanel
+              key={questionRequest.id}
+              request={questionRequest}
+              session={issueSession}
+              dispatch={dispatch}
+            />
+          </div>
+        )}
+
         {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
         {planRequest && (
@@ -1013,6 +1036,7 @@ export function MobileIssueDetail({
                 <LocalSessionWaitingInputNotice
                   session={issueSession}
                   planDecisionPending={planRequest?.status === "WAITING"}
+                  questionAnswerPending={questionRequest?.status === "WAITING"}
                 />
               ) : (
                 <LocalSessionApprovalNotice session={issueSession} />

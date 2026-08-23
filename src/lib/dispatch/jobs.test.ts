@@ -7,6 +7,8 @@ const dispatchSessionFindMany = vi.fn();
 // クエリ自体は必ず走る
 const sessionPlanRequestFindMany = vi.fn();
 const sessionPlanRequestUpdateMany = vi.fn();
+const sessionQuestionRequestFindMany = vi.fn();
+const sessionQuestionRequestUpdateMany = vi.fn();
 const dispatchJobCreate = vi.fn();
 const dispatchJobFindMany = vi.fn();
 const dispatchJobFindUnique = vi.fn();
@@ -67,6 +69,14 @@ vi.mock("@/lib/db", () => ({
       },
       get updateMany() {
         return sessionPlanRequestUpdateMany;
+      },
+    },
+    sessionQuestionRequest: {
+      get findMany() {
+        return sessionQuestionRequestFindMany;
+      },
+      get updateMany() {
+        return sessionQuestionRequestUpdateMany;
       },
     },
     dispatchJob: {
@@ -170,6 +180,8 @@ beforeEach(() => {
   dispatchSessionFindFirst.mockResolvedValue(null);
   sessionPlanRequestFindMany.mockResolvedValue([]);
   sessionPlanRequestUpdateMany.mockResolvedValue({ count: 0 });
+  sessionQuestionRequestFindMany.mockResolvedValue([]);
+  sessionQuestionRequestUpdateMany.mockResolvedValue({ count: 0 });
   dispatchJobFindFirst.mockResolvedValue(null);
   dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
     id: "job-1",

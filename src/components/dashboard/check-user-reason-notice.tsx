@@ -14,6 +14,8 @@ const SCROLL_BUTTON_LABEL = {
   "pull-requests": "対応PRへ移動",
   // 計画の承認パネル（#2061）。Issue詳細の上部にあるので、他の2つと違って上へ動く
   plan: "計画へ移動",
+  // 質問の回答パネル（#2189）。計画パネルと同じ位置に出る
+  question: "質問へ移動",
 } as const;
 
 /**

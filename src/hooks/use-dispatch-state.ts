@@ -8,6 +8,10 @@ import {
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
+import type {
+  SessionQuestionAnswerInput,
+  SessionQuestionRequestView,
+} from "@/lib/dispatch/session-question-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 
@@ -41,6 +45,11 @@ export type DispatchState = {
    * 画面へ返るまでの間隔は短い方（`ACTIVE_POLL_INTERVAL_MS`）に寄せる。
    */
   planRequests: SessionPlanRequestView[];
+  /**
+   * 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間セッションは
+   * 止まっている**ので短い方の間隔に寄せる。
+   */
+  questionRequests: SessionQuestionRequestView[];
   concurrency: number;
 };
 
@@ -79,6 +88,8 @@ function hasActiveJob(state: DispatchState | null): boolean {
   // **計画の返事待ちも「動いている」に数える**（#2061）。押してからセッションが動き出す
   // までを追うのに20秒間隔では遅い（フックのポーリングは数秒間隔で回っている）
   if (state.planRequests?.some((request) => request.status === "WAITING")) return true;
+  // 質問への回答待ちも同じ（#2189）
+  if (state.questionRequests?.some((request) => request.status === "WAITING")) return true;
   return state.jobs.some((job) => isActiveDispatchJobStatus(job.status));
 }
 
@@ -630,12 +641,45 @@ export function useDispatchState(enabled: boolean) {
     [markChanged],
   );
 
+  /**
+   * Claude Codeからの質問に、画面から答える（#2189）。
+   *
+   * 端末へキーを送る経路は持たない（受け取るのは質問を送ったフック）。失敗の理由は
+   * `error`（共有）へ入れず戻り値で返す（`decidePlan`と同じ理由）。
+   */
+  const answerQuestion = useCallback(
+    async (params: {
+      id: string;
+      decision: "answer" | "defer";
+      /** `decision`が`answer`のときの回答。選んだラベルと「その他」の自由記述 */
+      answers?: SessionQuestionAnswerInput[];
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/question-answer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
     sessions: state?.sessions ?? [],
     manualStepRuns: state?.manualStepRuns ?? [],
     planRequests: state?.planRequests ?? [],
+    questionRequests: state?.questionRequests ?? [],
     concurrency: state?.concurrency ?? null,
     isLoaded,
     fetchedAt,
@@ -659,5 +703,6 @@ export function useDispatchState(enabled: boolean) {
     dismiss,
     prioritize,
     decidePlan,
+    answerQuestion,
   };
 }

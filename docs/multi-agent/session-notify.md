@@ -144,7 +144,8 @@ ExitPlanMode（計画の提示）
   描いているのはDBに保存した計画本文で、コメントの取得には依存していない。コメントを
   書けなかったことを理由に待ちを作らないと、**端末には計画が出ているのに画面からは承認も
   修正もできない**という、いちばん困る組み合わせになる
-- 待ち時間は`~/.config/issue-deck/notify.env`の`SESSION_PLAN_WAIT_SECONDS`（秒。`0`で待たない。
+- 待ち時間は`~/.config/issue-deck/notify.env`の`SESSION_PLAN_WAIT_SECONDS`（質問は
+  `SESSION_QUESTION_WAIT_SECONDS`。#2189）（秒。`0`で待たない。
   60〜3600の範囲へissue-deck側が丸める）。`ExitPlanMode`のフックだけ`timeout`を延ばして
   あるのはこのため（`scripts/run-issue-session.sh`。**打ち切られても壊れない**）
 - 押した内容（承認・修正・端末で答える）は**Issueコメントとしても残る**。投稿はissue-deckの
@@ -238,6 +239,71 @@ as a parameter - it will read the plan from the file you wrote」とある。実
 
 なお人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として
 扱うのでそのまま通る。
+
+## Claude Codeからの質問にも画面から答える（#2189）
+
+**`AskUserQuestion`の選択肢は、端末とRemote Controlからしか選べなかった。** 画面に出るのは
+「入力を待っています」というバッジと「Remote Controlから答えてください」という案内だけで、
+スマホから選択肢を1つ選ぶためにTUIを開く必要があった。計画の承認（#2061）と同じ作りを
+質問へ広げ、**待っている中身が「1本のテキスト」から「選択肢つきの質問」に変わったもの**として
+扱う。
+
+```text
+AskUserQuestion（質問）
+  → PreToolUse フック → session-notify.sh
+       → POST /api/dispatch/sessions/question
+            → 回答待ち（SessionQuestionRequest）を作り、そのidを返す
+            → 00.check-user ＋ 01.check-input を付与（requestSessionCheckUser）
+       → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
+       → Signalyへ「質問の回答待ち」を通知
+       → GET /api/dispatch/sessions/question/decision?id=… を3秒おきに引いて待つ
+  → 人がissue-deckの画面で選択肢を選んで「回答を送る」を押す
+       → POST /api/dispatch/question-answer
+            → 選んだラベルをDBの質問と突き合わせ、回答（質問文 → 回答文字列）を保存
+            → 質問と回答を1件のIssueコメントとして残す
+       → フックが allow＋updatedInput.answers を返す（＝選択フォームは出ない）
+  → ツールはその answers をそのまま結果にする → 作業の続きへ
+       → PostToolUse → POST /api/dispatch/sessions/activity → 00.check-user を除去
+```
+
+**回答が決まらなければ何も返さず、従来どおりの経路へ倒れる**（待ち時間切れ／「端末で答える」／
+issue-deckが応答しない）。フェイルオープン・60秒の猶予・待ちを畳ませる`POST`は計画とまったく
+同じ作りで、境界は`scripts/session-notify-question.test.mjs`が固定している。
+
+- **回答は`allow`＋`updatedInput.answers`で渡す。** `AskUserQuestion`は入力に`answers`
+  （質問文 → 回答文字列。複数選択は`, `区切り）が入っていればそれをそのまま結果にするツールで、
+  フックが`updatedInput`を返したときだけ「許可が下りていても人へ聞き直す」挙動
+  （`requiresUserInteraction`）が省かれる。**#2121で計画について確かめたのと同じ仕組み**で、
+  Claude Code 2.1.241のバイナリで`AskUserQuestion`にも当てはまることを確認した
+  （抑止の条件はツールがMCP由来でないことだけ）。**公開仕様ではない**ので、変わっても端末に
+  従来どおりの選択フォームが出るだけでセッションは詰まらない
+- **質問（`questions`）は受け取ったままを添える。** `updatedInput`はツールのスキーマ検証を
+  通るため、質問を作り変えると回答ごと`deny`になる。画面から届いたラベルも**DBに保存した
+  質問と突き合わせてから**回答に載せる（`buildSessionQuestionAnswers`）——ここが緩むと、
+  質問に無い文字列がそのままツール入力へ入る
+- **Issueコメントは、答えたときに1件だけ書く。** 質問が出た時点では書かない——聞かれただけで
+  答えていないものがIssueに増えると、後から読む人には何が決まったのか分からない。
+  代わりに`00.check-user`＋`01.check-input`で「人を待っている」ことだけを残す
+- **ラベルの付与は待ちを作れたかどうかと切り離す。** 質問が出た＝人を待っているのは確かで、
+  画面から答えられるかどうかとは別の事実。紐付けると、画面にも一覧にも「待っている」ことが
+  出ないIssueができる（#2108で計画について学んだのと同じ）
+- **待ち時間は計画と別の環境変数**（`SESSION_QUESTION_WAIT_SECONDS`。既定30分）。**引く間隔と
+  降りるまでの猶予は計画と共有する**（`SESSION_PLAN_POLL_INTERVAL_SECONDS`・
+  `SESSION_PLAN_POLL_GRACE_SECONDS`）——どちらも「issue-deckへ何秒おきに引き、届かない状態が
+  何秒続いたら降りるか」という同じ性質の値で、分けても片方だけ調整する理由が無い
+- **フックのmatcherは`ExitPlanMode|AskUserQuestion`**（`scripts/run-issue-session.sh`）。
+  タイムアウトも両方に掛ける——片方だけに付けると、付いていない方は既定の10分で打ち切られ、
+  画面から答えられる時間が縮む
+- **質問の中身はSignalyへ送らない。** 通知に載せるのは他のイベントと同じ項目だけ
+  （計画本文を送らないのと同じ理由）
+- **パネルはPC版・スマホ版の両方の詳細に置く**（置き忘れは`plan-approval-mount.test.ts`が
+  捕まえる）。押した結果は`request.id`と対で持ち、詳細側も`key={questionRequest.id}`で
+  作り直す（#2158と同じ理由）
+- **画面の案内は質問を計画より先に見る。** 計画を出したあとに質問することはあり、そのとき
+  待たれているのは新しい方（質問）になる（`check-user-guidance.ts`・`local-session-notice.tsx`）
+- サーバー側は`src/lib/dispatch/session-question-request.ts`（値の検証・表示の判定）と
+  `src/lib/dispatch/question-requests.ts`（DB）。画面は`question-answer-panel.tsx`、
+  一覧の導線は`issue-list.tsx`
 
 ## 受付と締めもIssueのコメントへ残す（#1119）
 

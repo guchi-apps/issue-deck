@@ -550,9 +550,10 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 値はいずれもこのスクリプトが組み立てた識別子（数字・リポジトリ名・パス）で、
   # 外部由来のテキストはここへ流さない。
   HOOK_COMMAND="'$NOTIFY_SCRIPT' '$ISSUE_NUMBER' '$REPO_NAME' '$REPO_SLUG'"
-  # `PreToolUse`だけmatcherを付ける（#1342）。**計画本文（`tool_input.plan`）が手に入るのは
-  # `ExitPlanMode`のこのフックだけ**で、承認プロンプトの`Notification`には入っていない。
-  # matcherを付けずに全ツールで呼ぶと、`Read`・`Bash`のたびにスクリプトが起動する。
+  # `PreToolUse`だけmatcherを付ける（#1342・#2189）。**計画本文（`tool_input.plan`）と
+  # 質問の中身（`tool_input.questions`）が手に入るのはこのフックだけ**で、承認プロンプト・
+  # 選択フォームの`Notification`には入っていない。matcherを付けずに全ツールで呼ぶと、
+  # `Read`・`Bash`のたびにスクリプトが起動する。
   #
   # **`PostToolUse`はmatcherを付けず全ツールで呼ぶ**（#1357）。これは「人が承認プロンプトに
   # 答えた」ことを知る唯一の手掛かりで、承認が要るツールは`Bash`・`Write`・`WebFetch`・
@@ -566,10 +567,11 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 汎用ランチャーで起こす他リポジトリには`.claude/settings.json`が無いため。二重に呼ばれても
   # 上記の間引きで報告は入力待ち1回につき最大1回に収まる
   # （docs/multi-agent/session-notify.md「`PostToolUse`だけはworktree側の…」）。
-  # **`ExitPlanMode`のフックだけタイムアウトを延ばす**（#2061）。あのフックは計画を投稿した
-  # あと、issue-deckの画面からの返事を`SESSION_PLAN_WAIT_SECONDS`秒（既定30分・上限1時間）
+  # **`ExitPlanMode`・`AskUserQuestion`のフックだけタイムアウトを延ばす**（#2061・#2189）。
+  # あの2つは計画・質問を送ったあと、issue-deckの画面からの返事を
+  # `SESSION_PLAN_WAIT_SECONDS`／`SESSION_QUESTION_WAIT_SECONDS`秒（既定30分・上限1時間）
   # 待つ。Claude Codeの既定（10分）のままだと、待ち切る前にフックが打ち切られて画面から
-  # 承認できる時間が縮む。
+  # 答えられる時間が縮む。
   #
   # **待ち時間そのものは`~/.config/issue-deck/notify.env`側にあり、ここからは見えない。**
   # 上限（`SESSION_PLAN_WAIT_SECONDS_MAX`＝3600秒）に余裕を足した固定値を置いて、どう設定
@@ -578,7 +580,10 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
   #
   # **打ち切られても壊れない。** フックが何も返さなければ、端末に従来どおりの承認プロンプトが
   # 出るだけ（`scripts/session-notify.sh`の`wait_for_plan_decision`）。
-  PLAN_HOOK_TIMEOUT=3660
+  #
+  # **matcherは正規表現で2つのツールに掛ける。** 片方だけに付けると、付いていない方は
+  # 既定の10分で打ち切られる（打ち切られても壊れないが、画面から答えられる時間が縮む）。
+  WAIT_HOOK_TIMEOUT=3660
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
   "hooks": {
@@ -590,8 +595,8 @@ if [[ -x "$NOTIFY_SCRIPT" ]]; then
     ],
     "PreToolUse": [
       {
-        "matcher": "ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND", "timeout": $PLAN_HOOK_TIMEOUT }]
+        "matcher": "ExitPlanMode|AskUserQuestion",
+        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND", "timeout": $WAIT_HOOK_TIMEOUT }]
       }
     ],
     "PostToolUse": [
