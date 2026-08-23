@@ -7,12 +7,18 @@ import {
   CheckCircle2,
   ChevronLeft,
   CircleStop,
+  Flag,
   FolderOpen,
   GitBranch,
+  Hand,
+  Info,
   Loader2,
   MonitorSmartphone,
   PartyPopper,
+  Undo2,
   Wrench,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -102,6 +108,69 @@ function buildStages(guide: ManualStepGuide): GuideStage[] {
     ? guide.steps.map((step, order) => ({ kind: "step" as const, step, order }))
     : [{ kind: "body" as const }];
   return [{ kind: "overview" }, ...middle, { kind: "finish" }];
+}
+
+/**
+ * 進捗レールの1段に出す印（#2194）。**担い手は実行計画の`rejection`をそのまま読む**——
+ * ここで「サブPCならtrue」のような条件を書き直すと、承認パネルに並ぶ「代行できる／あなたが実行」と
+ * レールの印が食い違う（判定の正は`lib/dispatch/dispatch-job.ts`の
+ * `resolveManualStepExecutionRejection`ひとつ）。
+ */
+type StageMark = {
+  tone: "neutral" | "auto" | "manual" | "done";
+  Icon: LucideIcon;
+  /** ツールチップ・読み上げに出す担い手の説明（手順の見出しのバッジにもそのまま出す） */
+  label: string;
+};
+
+const STAGE_MARK_TONE: Record<StageMark["tone"], string> = {
+  neutral: "border-border bg-background text-muted-foreground",
+  auto: "border-violet-500/50 bg-violet-500/10 text-violet-600 dark:text-violet-300",
+  manual: "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-300",
+  done: "border-transparent bg-emerald-500 text-white",
+};
+
+/** いま開いている段。**担い手の色は残したまま**濃くする（現在地が分かっても担い手が分からないと困る） */
+const STAGE_MARK_CURRENT_TONE: Record<StageMark["tone"], string> = {
+  neutral: "border-violet-500 ring-3 ring-violet-500/20",
+  auto: "border-violet-500 bg-violet-500 text-white ring-3 ring-violet-500/20",
+  manual: "border-amber-500 bg-amber-500 text-white ring-3 ring-amber-500/20",
+  done: "ring-3 ring-emerald-500/25",
+};
+
+const STAGE_MARK_BADGE_TONE: Record<StageMark["tone"], string> = {
+  neutral: "bg-muted text-muted-foreground",
+  auto: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  manual: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+};
+
+function resolveStageMark(stage: GuideStage, plan: ManualStepRunPlan): StageMark {
+  switch (stage.kind) {
+    case "overview":
+      return { tone: "neutral", Icon: Info, label: "この作業の目的" };
+    case "body":
+      return { tone: "neutral", Icon: Flag, label: "やること" };
+    case "step": {
+      if (stage.step.checked) return { tone: "done", Icon: Check, label: "実行済み" };
+      const entry =
+        stage.step.line === null ? null : findManualStepEntry(plan, stage.step.line);
+      return entry !== null && entry.rejection === null
+        ? { tone: "auto", Icon: Zap, label: "代行できる" }
+        : { tone: "manual", Icon: Hand, label: "あなたが実行" };
+    }
+    case "finish": {
+      // 確認のコマンドが1つでも代行できるなら手順と同じ印にする。書かれていなければ担い手が
+      // 決まらないので、押す先の名前だけを出す
+      const verifications = plan.entries.filter((entry) => entry.kind === "verification");
+      if (verifications.length === 0) {
+        return { tone: "neutral", Icon: Flag, label: "完了の確認" };
+      }
+      return verifications.some((entry) => entry.rejection === null)
+        ? { tone: "auto", Icon: Zap, label: "完了の確認（代行できる）" }
+        : { tone: "manual", Icon: Hand, label: "完了の確認（あなたが実行）" };
+    }
+  }
 }
 
 export function ManualStepGuideDialog({
@@ -317,6 +386,19 @@ function ManualStepGuideContent({
   }
 
   /**
+   * 実行済みの取り消し（#2194）。途中で中断していた・実は実行できていなかったと後から
+   * 分かったときに、付けたチェックを外す。
+   *
+   * **外すのはチェックだけで、実行し直しはしない。** 外した手順は自動実行の計画（`plan`）へ
+   * 戻るが、積むのはサーバーなので、走らせ直すのは「承認して自動実行」か再開のとき
+   * （画面から積まないのは#1882の決まりのまま）。
+   */
+  async function handleUncheckStep() {
+    if (stage.kind !== "step" || stage.step.line === null || !stage.step.checked) return;
+    await taskList.toggleTask(stage.step.line, false);
+  }
+
+  /**
    * 代行実行（#1828）が終了コード0で終わったときのチェック。
    *
    * **手動で押したときは次の画面へ自動で進めない。** 実行できたことと、出力を見て次へ進んで
@@ -437,7 +519,13 @@ function ManualStepGuideContent({
 
       <div className="flex min-h-0 flex-col overflow-y-auto">
         <div className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-muted/60 p-3 backdrop-blur-sm">
-          <StageRail stages={stages} current={index} stepCount={stepCount} />
+          <StageRail
+            stages={stages}
+            current={index}
+            stepCount={stepCount}
+            plan={plan}
+            onSelect={onStageIndexChange}
+          />
           {/* デバイスは**いま開いている手順のもの**（#2052）。手順にデバイスが書かれて
               いなければ手作業の既定値へ落ちる */}
           <WhereChips
@@ -474,12 +562,15 @@ function ManualStepGuideContent({
               step={stage.step}
               order={stage.order}
               total={stepCount}
+              mark={resolveStageMark(stage, plan)}
               issue={issue}
               guide={guide}
               dispatch={dispatch}
               entry={currentEntry}
               autoDiagnose={autoDiagnose}
+              isToggling={taskList.isToggling}
               onExecuted={handleExecuted}
+              onUncheck={() => void handleUncheckStep()}
               onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
             />
@@ -583,59 +674,85 @@ function ManualStepGuideContent({
 }
 
 /**
- * 進み具合のドット列。**押せる目次にはしない**——順番に案内するのがこの画面の役目で、
- * 好きな手順へ飛べるようにすると、実行した記録（チェック）を飛ばしたまま最後まで進める。
+ * 進み具合のレール。**押せる目次にする**（#2194。#1826では「順番に案内するのがこの画面の
+ * 役目」として押せなくしていた判断を覆した）。押しても本文のチェックは変わらない——
+ * チェックが付くのは「実行した・次へ」と代行実行が終了コード0で終わったときだけなので、
+ * 先の手順へ飛べても記録は飛ばせない。前の手順へ戻るのに「戻る」を回数ぶん押す必要が
+ * あったのが、実際に困っていたところ。
+ *
+ * **ドットの形で担い手も出す**（#2194）。代行できるのか自分で実行するのかは、これまで
+ * 最初の画面の承認パネルを開き直さないと分からなかった。
  */
 function StageRail({
   stages,
   current,
   stepCount,
+  plan,
+  onSelect,
 }: {
   stages: GuideStage[];
   current: number;
   stepCount: number;
+  plan: ManualStepRunPlan;
+  onSelect: (index: number) => void;
 }) {
-  const stage = stages[current];
-  const caption =
-    stage.kind === "step"
-      ? `手順 ${stage.order + 1} / ${stepCount}`
-      : stage.kind === "overview"
-        ? "この作業の目的"
-        : stage.kind === "body"
-          ? "やること"
-          : "完了の確認";
+  const caption = stageCaption(stages[current], stepCount);
 
   return (
-    <div className="flex items-center gap-1.5">
-      <span
-        className="flex items-center gap-1.5"
-        role="img"
-        aria-label={`全${stages.length}段のうち${current + 1}段目（${caption}）`}
-      >
-        {stages.map((_, order) => (
-          <span key={order} className="flex items-center gap-1.5">
-            {order > 0 && (
-              <span
-                className={cn(
-                  "h-px w-3 rounded-full",
-                  order <= current ? "bg-violet-500/60" : "bg-border",
-                )}
-              />
-            )}
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                order < current && "bg-emerald-500",
-                order === current && "bg-violet-500 ring-3 ring-violet-500/20",
-                order > current && "bg-border",
+    <div className="flex items-start gap-2">
+      {/* 手順の多い手作業では折り返す（横スクロールにすると、スマホで見えない手順が出る） */}
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+        {stages.map((stage, order) => {
+          const mark = resolveStageMark(stage, plan);
+          const label =
+            stage.kind === "step"
+              ? `手順 ${stage.order + 1} / ${stepCount}: ${mark.label} — ${stage.step.text}`
+              : mark.label;
+          return (
+            <span key={order} className="flex items-center gap-1">
+              {order > 0 && (
+                <span
+                  className={cn(
+                    "h-px w-2.5 rounded-full",
+                    order <= current ? "bg-violet-500/60" : "bg-border",
+                  )}
+                />
               )}
-            />
-          </span>
-        ))}
-      </span>
-      <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{caption}</span>
+              <button
+                type="button"
+                title={label}
+                aria-label={label}
+                aria-current={order === current ? "step" : undefined}
+                onClick={() => onSelect(order)}
+                className={cn(
+                  "inline-flex size-6 shrink-0 items-center justify-center rounded-full border transition-colors",
+                  "hover:brightness-105 focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
+                  STAGE_MARK_TONE[mark.tone],
+                  order === current && STAGE_MARK_CURRENT_TONE[mark.tone],
+                )}
+              >
+                <mark.Icon className="size-3" aria-hidden />
+              </button>
+            </span>
+          );
+        })}
+      </div>
+      <span className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">{caption}</span>
     </div>
   );
+}
+
+function stageCaption(stage: GuideStage, stepCount: number): string {
+  switch (stage.kind) {
+    case "step":
+      return `手順 ${stage.order + 1} / ${stepCount}`;
+    case "overview":
+      return "この作業の目的";
+    case "body":
+      return "やること";
+    case "finish":
+      return "完了の確認";
+  }
 }
 
 /**
@@ -742,42 +859,65 @@ function StepStage({
   step,
   order,
   total,
+  mark,
   issue,
   guide,
   dispatch,
   entry,
   autoDiagnose,
+  isToggling,
   onExecuted,
+  onUncheck,
   onRetry,
   onApplyFix,
 }: {
   step: ManualStepGuideStep;
   order: number;
   total: number;
+  /** レールのドットと同じ印（#2194）。**同じ関数から作る**ので、上の丸と見出しがずれない */
+  mark: StageMark;
   issue: Issue;
   guide: ManualStepGuide;
   dispatch: DispatchStateHandle;
   /** 実行計画上のこの手順。チェックリストでない本文では`null` */
   entry: ManualStepRunEntry | null;
   autoDiagnose: boolean;
+  isToggling: boolean;
   onExecuted: (entry: ManualStepRunEntry) => void;
+  /** 実行済みの取り消し（#2194） */
+  onUncheck: () => void;
   /** 「もう一度実行」を自前で扱う場合（自動実行中は積み直さず、続きから流す。#1882） */
   onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-        <span className="tabular-nums">
-          手順 {order + 1} / {total}
-        </span>
-        {step.checked && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-px text-[11px] leading-4 text-emerald-700 dark:text-emerald-300">
-            <Check className="size-3" />
-            実行済み
+      <div className="flex flex-wrap items-center gap-1.5">
+        <h3 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+          <span className="tabular-nums">
+            手順 {order + 1} / {total}
           </span>
+          {/* 担い手（代行できる／あなたが実行／実行済み）を出す。**コマンドを読む前に**
+              自分で実行するのか待てばよいのかが分かるようにする（#2194） */}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-px text-[11px] leading-4",
+              STAGE_MARK_BADGE_TONE[mark.tone],
+            )}
+          >
+            <mark.Icon className="size-3" aria-hidden />
+            {mark.label}
+          </span>
+        </h3>
+        {/* 押した後で「実は実行できていなかった」と分かることがある（#2194）。
+            外すのはチェックだけで、実行し直しはしない */}
+        {step.checked && step.line !== null && (
+          <Button variant="outline" size="xs" disabled={isToggling} onClick={onUncheck}>
+            {isToggling ? <Loader2 className="animate-spin" /> : <Undo2 />}
+            実行済みを取り消す
+          </Button>
         )}
-      </h3>
+      </div>
       {/* コードブロックのコピーボタン（#1726）と`#123`のリンクをそのまま使うため、
           手順もMarkdownとして描く。チェックボックスは`- [ ]`ごと外してあるので、
           この中には出ない（付けるのはフッターの「実行した・次へ」） */}
