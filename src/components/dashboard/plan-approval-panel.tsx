@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -22,6 +22,7 @@ import { SESSION_PLAN_REVISION_MAX_LENGTH } from "@/lib/dispatch/session-plan-re
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
 /**
@@ -349,26 +350,4 @@ function decisionOf(
     case "WAITING":
       return null;
   }
-}
-
-/**
- * 残り時間（ms）。**1秒ごとに描き直す。**
- *
- * 状態のポーリングは5秒間隔で、そこに合わせると数字が飛んで「動いていない」ように見える。
- * 期限そのものはサーバーが持っている（`expiresAt`）ので、ここは表示だけを進める。
- */
-function useRemainingMs(expiresAt: string): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timerId = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timerId);
-  }, []);
-  return Math.max(0, new Date(expiresAt).getTime() - now);
-}
-
-function formatRemaining(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }

@@ -43,3 +43,29 @@ describe("計画の承認パネルの置き場所（#2061）", () => {
     expect(source).toContain("key={planRequest.id}");
   });
 });
+
+/**
+ * 質問の回答パネル（#2189）も同じ置き忘れを起こしうる。**計画パネルと同じ位置に出す**ので、
+ * 守る内容も同じ（PC・スマホの両方に置く／案内の行き先を持つ／質問ごとに作り直す）。
+ */
+describe("質問の回答パネルの置き場所（#2189）", () => {
+  it.each(DETAIL_SOURCES)("%s が質問パネルを描く", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("<QuestionAnswerPanel");
+  });
+
+  it.each(DETAIL_SOURCES)("%s が「質問へ移動」の行き先を持つ", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain('checkUserTargetProps("question")');
+  });
+
+  it.each(DETAIL_SOURCES)("%s が確認待ちの案内へ質問待ちを渡す", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("questionAnswerPending");
+  });
+
+  it.each(DETAIL_SOURCES)("%s が質問ごとにパネルを作り直す", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("key={questionRequest.id}");
+  });
+});

@@ -140,6 +140,7 @@ export function LocalSessionApprovalNotice({
 export function LocalSessionWaitingInputNotice({
   session,
   planDecisionPending = false,
+  questionAnswerPending = false,
 }: {
   /** 対応するセッション。見つかっていなければ`null`（案内だけ出す） */
   session: DispatchSessionView | null;
@@ -151,7 +152,27 @@ export function LocalSessionWaitingInputNotice({
    * 読み取れない**。計画待ち以外（質問・スクリーンショットの確認など）は従来どおり。
    */
   planDecisionPending?: boolean;
+  /**
+   * 質問への回答を画面から送れる状態か（#2189）。
+   *
+   * **計画待ちより先に見る。** 計画を出したあとに質問することはあり、そのとき待たれて
+   * いるのは新しい方（質問）になる。
+   */
+  questionAnswerPending?: boolean;
 }) {
+  if (questionAnswerPending) {
+    return (
+      <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">
+        質問の回答を待っています。
+        <strong className="font-medium">
+          上の「質問の回答を待っています」から選択肢を選んで送れます
+        </strong>
+        （このコメント欄へ書いても走っているセッションには届きません）。待ち時間が切れた後は
+        Remote Controlか端末から答えてください。
+      </LocalSessionNotice>
+    );
+  }
+
   if (planDecisionPending) {
     return (
       <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">

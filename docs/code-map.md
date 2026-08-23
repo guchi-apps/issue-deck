@@ -1772,6 +1772,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `POST /api/dispatch/sessions/plan/decision`で画面の待ちも畳ませる（畳ませないと、押しても
   誰も受け取らないボタンがカウントダウン付きで残る）。返事待ちを作るかどうかは
   **Issueコメントを投稿できたかとは切り離す**（パネルはDBに保存した計画本文を描くため）。
+  **`AskUserQuestion`の選択肢も同じ形で画面から選べる**（#2189。`PreToolUse`フックが
+  `POST /api/dispatch/sessions/question`へ質問を送り、`GET /api/dispatch/sessions/question/decision`
+  を引いて回答を待って、`allow`＋`updatedInput.answers`として返す＝端末に選択フォームが出ない。
+  押す側は`POST /api/dispatch/question-answer`。値の検証・表示の判定は
+  `lib/dispatch/session-question-request.ts`、DBは`lib/dispatch/question-requests.ts`、画面は
+  `components/dashboard/question-answer-panel.tsx`。**画面から届いたラベルはDBの質問と
+  突き合わせてから回答に載せる**——`updatedInput`はツールのスキーマ検証を通るため、質問に
+  無い値を載せると回答ごと弾かれる。Issueコメントは**答えたときに1件だけ**書く）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

@@ -957,6 +957,49 @@ enum SessionPlanRequestStatus {
   EXPIRED
 }
 
+/// ローカルセッションが`AskUserQuestion`で聞いた質問への、画面からの回答待ち（#2189）。
+///
+/// **`SessionPlanRequest`（#2061）の質問版で、作りは同じ。** 計画の承認と別テーブルにして
+/// あるのは、待っている中身が「1本のテキスト」と「選択肢つきの質問の配列」で違い、1つの行に
+/// 両方を持たせると画面もフックもどちらなのかを毎回見分けることになるため。
+///
+/// 受け取るのは質問を投げた`PreToolUse(AskUserQuestion)`フック（`scripts/session-notify.sh`）で、
+/// 決まった回答は`updatedInput.answers`としてClaude Codeへ返る。**端末へキーを送る経路は
+/// 持たない**（docs/multi-agent/gates.md）。
+model SessionQuestionRequest {
+  id                 String                       @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 報告してきたホスト名（DispatchHost.nameと対応）。取れないこともある
+  hostName           String?
+  // `AskUserQuestion`の`questions`をそのまま入れたJSON文字列。画面はこれを描き、
+  // フックへ返すときも**受け取ったままの形**で`updatedInput`へ添え直す（#2121と同じ作法）
+  questions          String                       @db.Text
+  status             SessionQuestionRequestStatus @default(WAITING)
+  // 送られた回答のJSON文字列（ANSWEREDのときだけ）。`{"質問文": "選んだラベル"}`で、
+  // 複数選択は`, `で連結する（Claude Code側の受け取り方に合わせる）
+  answers            String?                      @db.Text
+  // 画面から押したユーザー（User.id）。Userを消しても履歴は残すためFKは張らない
+  decidedByUserId    String?
+  decidedAt          DateTime?
+  // ここを過ぎたらフックは待つのをやめる。画面のカウントダウンもこれを見る
+  expiresAt          DateTime
+  // フックが回答を受け取った時刻。**受け取ったあとに押しても届かない**ことを画面へ出す
+  deliveredAt        DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  @@index([repositoryFullName, issueNumber])
+  @@index([status, expiresAt])
+}
+
+enum SessionQuestionRequestStatus {
+  WAITING
+  ANSWERED
+  DEFERRED
+  EXPIRED
+}
+
 /// PRの自動修復（`claude-ci-fix.yml`・`claude-conflict-resolve.yml`・`claude-pr-repair.yml`）が
 /// いま走っているかどうか（#2072）。
 ///
