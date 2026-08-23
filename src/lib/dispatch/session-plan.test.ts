@@ -7,6 +7,7 @@ import {
   parseSessionPlanText,
   SESSION_PLAN_MARKER,
 } from "@/lib/dispatch/session-plan";
+import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 
 describe("buildSessionPlanCommentBody", () => {
   it("計画本文をそのまま載せ、その下にRemote Controlのリンクを置く", () => {
@@ -116,8 +117,14 @@ describe("parseSessionPlanText", () => {
     expect(parseSessionPlanText(123)).toBeNull();
   });
 
+  // #2200: 切り出しに外れたアーティファクト（2MBまで）がそのまま届くことがあるので、
+  // 20万字では**その回の計画がどこにも残らない**。投稿・表示の切り詰めは別に効く
+  it("アーティファクトを埋めたままの計画も受け取る", () => {
+    expect(parseSessionPlanText("a".repeat(300000))).not.toBeNull();
+  });
+
   it("明らかに壊れた長さは受け取らない", () => {
-    expect(parseSessionPlanText("あ".repeat(200001))).toBeNull();
+    expect(parseSessionPlanText("あ".repeat(SESSION_ARTIFACT_HTML_LIMIT + 1))).toBeNull();
   });
 });
 
