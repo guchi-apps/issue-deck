@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const postSessionPlan = vi.fn();
 const createSessionPlanRequest = vi.fn();
+const saveSessionArtifact = vi.fn();
 
 vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/dispatch/session-plan")>();
@@ -18,6 +19,14 @@ vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
 vi.mock("@/lib/dispatch/plan-requests", () => ({
   get createSessionPlanRequest() {
     return createSessionPlanRequest;
+  },
+}));
+
+// 計画に埋め込まれたアーティファクト（#2200）。**`Artifact`ツール経由と同じ保存**を使うので、
+// ここを差し替えれば「何をどのパスで保存したか」だけを見られる
+vi.mock("@/lib/dispatch/session-artifacts", () => ({
+  get saveSessionArtifact() {
+    return saveSessionArtifact;
   },
 }));
 
@@ -45,7 +54,24 @@ beforeEach(() => {
   process.env.DISPATCH_SECRET = "secret-value";
   postSessionPlan.mockResolvedValue(true);
   createSessionPlanRequest.mockResolvedValue({ id: "plan-request-1" });
+  saveSessionArtifact.mockResolvedValue({ id: "artifact-1" });
 });
+
+/** 計画ファイルへ埋め込まれたアーティファクト（#2200）の書式を組み立てる */
+function planWithArtifact(sourcePath?: string): string {
+  return [
+    "## 要約",
+    "",
+    "**あれをする。**",
+    "",
+    "## アーティファクト",
+    "",
+    ...(sourcePath ? [`<!-- artifact: ${sourcePath} -->`] : []),
+    "````artifact",
+    "<title>案</title>",
+    "````",
+  ].join("\n");
+}
 
 describe("POST /api/dispatch/sessions/plan", () => {
   it("DISPATCH_SECRET未設定なら503（値の不一致と区別できるようにする）", async () => {
@@ -86,7 +112,62 @@ describe("POST /api/dispatch/sessions/plan", () => {
       remoteControlUrl: "https://claude.ai/code/session_01ABC",
       planBaseSha: "baf823f30a2ef7d8f80ff95665e7034e67d70171",
       hostName: "subpc",
+      artifactUpdated: false,
     });
+    expect(saveSessionArtifact).not.toHaveBeenCalled();
+  });
+
+  /**
+   * 計画の承認前にアーティファクトを差し替える唯一の経路（#2200）。Plan modeで書けるのは
+   * 計画ファイルだけなので、その中のHTMLをここで取り込む。
+   */
+  it("計画に埋め込まれたHTMLをアーティファクトとして保存し、計画本文からは外す", async () => {
+    const res = await POST(
+      postRequest(
+        { ...validBody, plan: planWithArtifact("/tmp/scratch/design.html") },
+        "Bearer secret-value",
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect(saveSessionArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1342,
+        hostName: "subpc",
+        // 公開時と同じパスなら同じカードが差し替わる
+        sourcePath: "/tmp/scratch/design.html",
+        html: "<title>案</title>",
+        // **取れなかったURLでは既存の値を消さない**（`saveSessionArtifact`側の約束）
+        claudeUrl: null,
+      }),
+    );
+    const [{ plan, artifactUpdated }] = postSessionPlan.mock.calls[0];
+    expect(plan).not.toContain("<title>");
+    expect(plan).toContain("## アーティファクト");
+    expect(artifactUpdated).toBe(true);
+  });
+
+  it("パスが添えられていなければIssueごとの既定キーへ落とす", async () => {
+    await POST(postRequest({ ...validBody, plan: planWithArtifact() }, "Bearer secret-value"));
+
+    expect(saveSessionArtifact).toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: "plan-artifact:guchi-apps/issue-deck#1342" }),
+    );
+  });
+
+  // 見た目が古いままになるだけで、計画が残らないことの方が損失が大きい
+  it("アーティファクトを保存できなくても計画は投稿する", async () => {
+    saveSessionArtifact.mockRejectedValue(new Error("disk full"));
+
+    const res = await POST(
+      postRequest({ ...validBody, plan: planWithArtifact() }, "Bearer secret-value"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(postSessionPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ artifactUpdated: false }),
+    );
   });
 
   /**
