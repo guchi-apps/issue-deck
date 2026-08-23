@@ -15,6 +15,7 @@ import {
   ExternalLink,
   ListChecks,
   Lock,
+  MessageCircleQuestion,
   MessageSquare,
   ScanSearch,
   ScrollText,
@@ -43,6 +44,7 @@ import {
 import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
+import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import {
   isActiveManualStepRun,
@@ -415,6 +417,22 @@ export function IssueList({
     }
     return ids;
   }, [issues, dispatch.planRequests]);
+  // 質問への回答待ち（#2189）。計画の返事待ちと同じで、**待っている行だけ「質問に答える」を
+  // 出す**（押した先はアプリの中で、そのIssueを開くと上部に回答パネルが出る）
+  const questionPendingIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    const requests = dispatch.questionRequests ?? [];
+    if (requests.length === 0) return ids;
+    for (const issue of issues) {
+      const request = findQuestionRequestForIssue(
+        requests,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      if (request?.status === "WAITING") ids.add(issue.id);
+    }
+    return ids;
+  }, [issues, dispatch.questionRequests]);
   const actionsUnexpectedIssueIds = useMemo(() => {
     const ids = new Set<string>();
     for (const [id, target] of executionTargetByIssueId) {
@@ -567,10 +585,12 @@ export function IssueList({
     // 計画への返事を画面から送れる行（#2061）。**ここが主導線になり、Remote Controlは
     // 通常の枠線へ戻る**（`shouldEmphasizeRemoteControl`が`false`を返す）
     const planPending = planPendingIssueIds.has(issue.id);
+    // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
+    const questionPending = questionPendingIssueIds.has(issue.id);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
-      planDecisionPending: planPending,
+      planDecisionPending: planPending || questionPending,
     });
     return (
       <li
@@ -685,7 +705,26 @@ export function IssueList({
                   上部に計画パネル（「計画の承認を待っています」）が出る。ここを出す間は
                   Remote Controlの強調を下ろすので、行の中でオレンジは1つに保たれる。
                   **`<a>`ではなく`<button>`**——外部へ出る導線ではないため */}
-              {planPending && (
+              {/* 質問への回答へ入る（#2189）。計画の承認と同じ作りで、**質問の方を先に出す**
+                  ——計画を出したあとに質問することがあり、待たれているのは新しい方 */}
+              {questionPending && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
+                  title="質問に答える"
+                  aria-label={`#${issue.number}の質問に答える`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOptimisticSelectedId(issue.id);
+                    onSelectIssue(issue);
+                  }}
+                >
+                  <MessageCircleQuestion />
+                  質問に答える
+                </Button>
+              )}
+              {planPending && !questionPending && (
                 <Button
                   variant="outline"
                   size="xs"

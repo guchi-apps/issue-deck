@@ -118,13 +118,16 @@ describe("MarkdownBody のアーティファクトリンク（#2154）", () => {
     expect(document.querySelector("iframe")).toBeNull();
   });
 
-  it("修飾キー付きのクリックはブラウザに任せる（別タブで開ける）", () => {
+  it("修飾キー付きのクリックはブラウザに任せ、遷移先はissue-deckの単独ページ（#2210）", () => {
     renderWithArtifacts(`アーティファクト: ${ARTIFACT_URL}`, [STORED_ARTIFACT]);
 
+    const link = screen.getByText(ARTIFACT_URL);
     const event = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
-    fireEvent(screen.getByText(ARTIFACT_URL), event);
+    fireEvent(link, event);
 
     expect(event.defaultPrevented).toBe(false);
+    // claude.aiのままだと、別で開いたときだけログインを求められる（スマホでは特に）
+    expect(link.getAttribute("href")).toBe("/artifacts/art_1");
     expect(document.querySelector("iframe")).toBeNull();
   });
 });

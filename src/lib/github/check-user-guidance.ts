@@ -1,7 +1,7 @@
 import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/approval-labels";
 
 /** 画面内で「次の操作」をする場所（`check-user-focus.ts`がDOMのidへ対応付ける） */
-export type CheckUserScrollTarget = "approval" | "pull-requests" | "plan";
+export type CheckUserScrollTarget = "approval" | "pull-requests" | "plan" | "question";
 
 /**
  * 次に押すものへの行き先。**`null`は「いま見ている場所が目的地」**（承認カードの中に出す
@@ -104,6 +104,17 @@ const PLAN_PENDING_BUTTONS =
   "上の「承認して実装へ進む」で実装が始まります。方針を変えるなら「修正を送る」。";
 
 /**
+ * Claude Codeからの質問に画面から答えられるときの差し替え文（#2189）。
+ *
+ * **計画の差し替え（上）と同じ理由。** 回答パネルが出ている間、選択肢を選んで送ることが
+ * セッションへ届く出口になっており、「Remote Controlから答えてください」は当てはまらない。
+ */
+const QUESTION_PENDING_DESCRIPTION =
+  "エージェントが選択肢つきの質問をしています。どれを選ぶかを決めてください。";
+const QUESTION_PENDING_BUTTONS =
+  "上の「回答を送る」でセッションが続きを進めます。端末で答えるなら「端末・Remote Controlで答える」。";
+
+/**
  * 走っているセッションが入力待ちのときの差し替え文（#1417の判定をそのまま使う）。
  * 画面の承認・修正ボタンは`11.local`が付いている間どこにも届かないため、
  * **唯一効く出口であるRemote Controlだけを案内する。**
@@ -159,6 +170,15 @@ export type ResolveCheckUserGuidanceOptions = {
    */
   planDecisionPending?: boolean;
   /**
+   * 質問への回答を画面から送れる状態か（#2189。`findQuestionRequestForIssue`が
+   * `WAITING`の行を返したかどうか）。
+   *
+   * **これがtrueの間、答える先はRemote Controlではなく同じ画面の回答パネル。**
+   * 計画の承認より先に見る——計画を出したあとに質問することはあり、そのときに
+   * 待たれているのは新しい方（質問）だから。
+   */
+  questionAnswerPending?: boolean;
+  /**
    * セッションの状態（`/api/dispatch`）がまだ届いていないか（#1810）。
    *
    * **`sessionWaitingInput`の`false`は「入力待ちではない」と「まだ分からない」の
@@ -190,6 +210,7 @@ export function resolveCheckUserGuidance({
   remoteControlUrl = null,
   hasPullRequestSection = true,
   planDecisionPending = false,
+  questionAnswerPending = false,
   sessionStatePending = false,
 }: ResolveCheckUserGuidanceOptions): CheckUserGuidance | null {
   if (reason === null) return null;
@@ -202,6 +223,19 @@ export function resolveCheckUserGuidance({
   // 計画の返事を画面から送れる（#2061）。**入力待ち・ローカル担当の差し替えより先に効く**——
   // どちらも「画面のボタンは届かないのでRemote Controlへ」と言うもので、計画パネルが出ている
   // 間はそれが当てはまらない。マージだけは別（GitHub側の操作で、計画とは待っているものが違う）
+  // 質問への回答を画面から送れる（#2189）。**計画の承認より先に効く**——計画を出したあとに
+  // 質問することはあり、そのとき待たれているのは新しい方（質問）
+  if (questionAnswerPending && reason !== "merge") {
+    return {
+      reason,
+      heading,
+      description: QUESTION_PENDING_DESCRIPTION,
+      buttons: QUESTION_PENDING_BUTTONS,
+      action: { kind: "scroll", target: "question" },
+      agentState: guide.agentState,
+    };
+  }
+
   if (planDecisionPending && reason !== "merge") {
     return {
       reason,

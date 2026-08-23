@@ -9,7 +9,9 @@ import {
   type DispatchHostMetrics,
 } from "@/lib/dispatch/host-metrics";
 import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
+import { listSessionQuestionRequests } from "@/lib/dispatch/question-requests";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
+import type { SessionQuestionRequestView } from "@/lib/dispatch/session-question-request";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
@@ -1511,6 +1513,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   jobs: DispatchJobView[];
   sessions: DispatchSessionView[];
   planRequests: SessionPlanRequestView[];
+  questionRequests: SessionQuestionRequestView[];
   concurrency: number;
 }> {
   await expireStaleDispatchJobs(now);
@@ -1518,7 +1521,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   // セッション（#1217）を専用のエンドポイントではなくここへ足しているのは、画面側が
   // `GET /api/dispatch`と`use-dispatch-state.ts`の1本で状態を読んでいるため。取得口を
   // 増やすと、同じ画面のためにポーリングが2本走ることになる。
-  const [hosts, jobs, sessions, planRequests, concurrency] = await Promise.all([
+  const [hosts, jobs, sessions, planRequests, questionRequests, concurrency] = await Promise.all([
     db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
     db.dispatchJob.findMany({
       where: {
@@ -1537,6 +1540,8 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     // 計画への返事待ち（#2061）も同じ応答に載せる。**取得口を増やさない**（セッションと
     // 同じ理由で、分けると同じ画面のためにポーリングが2本走る）
     listSessionPlanRequests(now),
+    // 質問への回答待ち（#2189）も同じ応答に載せる。計画の返事待ちと同じ理由
+    listSessionQuestionRequests(now),
     getDispatchConcurrency(),
   ]);
 
@@ -1563,6 +1568,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
       return { ...session, issueTitle: issue?.title ?? null, issueId: issue?.id ?? null };
     }),
     planRequests,
+    questionRequests,
     concurrency,
   };
 }

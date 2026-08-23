@@ -12,6 +12,7 @@
 #                                               （＋`00.check-user`を付ける。#1417）
 #   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）
 #   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
+#   PreToolUse(AskUserQuestion)     質問 → issue-deckへ質問を送り、画面からの回答を待つ（#2189）
 #                                               （＋この時点で「入力待ち」として記録する。#1438）
 #   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
 #                                               （＋`00.check-user`を解く。#1417）
@@ -120,6 +121,21 @@ PLAN_POLL_INTERVAL_SECONDS="${SESSION_PLAN_POLL_INTERVAL_SECONDS:-3}"
 # （#2103の2回目の計画。フックは108秒で終了していた）。
 PLAN_POLL_GRACE_SECONDS="${SESSION_PLAN_POLL_GRACE_SECONDS:-60}"
 [[ "$PLAN_POLL_GRACE_SECONDS" =~ ^[0-9]+$ ]] || PLAN_POLL_GRACE_SECONDS=60
+
+# `AskUserQuestion`で聞いたあと、issue-deckの画面からの回答を何秒まで待つか（#2189）。
+#
+# **計画の待ち時間（既定30分）と別に持ち、既定を短くする**（計画レビューG1・指摘1）。
+# `ExitPlanMode`は1セッションに1回の関門だが、質問はturnの途中で何度も起きる常用経路で、
+# **待っている間は端末で答える手段が実質的に無い**——端末に選択フォームは出ず、`Esc`は
+# 待ちを抜けるのではなく**turnごと打ち切る**（実測。結果は「User declined to answer
+# questions」になる）。短くして失うのは「気づくのが遅れたときにRemote Controlで答えることに
+# なる」だけで、それは#2189より前の状態と同じ。
+#
+# **間隔と猶予は計画と共有する**——どちらも「issue-deckへ何秒おきに引き、届かない状態が
+# 何秒続いたら降りるか」という同じ性質の値で、2つに分けても片方だけ調整する理由が無い。
+QUESTION_WAIT_SECONDS="${SESSION_QUESTION_WAIT_SECONDS:-300}"
+[[ "$QUESTION_WAIT_SECONDS" =~ ^[0-9]+$ ]] || QUESTION_WAIT_SECONDS=300
+export NOTIFY_QUESTION_WAIT_SECONDS="$QUESTION_WAIT_SECONDS"
 
 # セッションの状態ファイル（#1256）。読み書きの作法は回収スクリプトと共有する。
 # **無くても通知は続ける**（このスクリプトはセッションを止めないことが最優先）。
@@ -335,6 +351,8 @@ fi
 #   quiet <状態イベント> <activity>                          issue-deckへだけ報告する（#1357）
 #   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用。
 #                                                           4行目に`ExitPlanMode`の引数を添える。#2121）
+#   question <remote-controlのURL|->                        質問を送る（payloadは/sessions/question用。
+#                                                           4行目に`AskUserQuestion`の引数を添える。#2189）
 #   skip                                                    何もしない
 #
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
@@ -620,6 +638,35 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
     print(json.dumps(tool_input if isinstance(tool_input, dict) else {}))
     sys.exit(0)
 
+# 質問（#2189）。**`AskUserQuestion`の`PreToolUse`は、選択フォームが出る前に飛ぶ。**
+# ここが質問の中身（選択肢とその説明）を画面へ運ぶ唯一の機会で、`Notification`のJSONには
+# 何を聞かれているかが入っていない。
+#
+# **Signalyへは「質問の回答待ち」を送る。** 画面から答えた場合は選択フォームが出ない＝
+# `Notification`が飛ばないため、任せたままだと質問が出たことが誰にも届かない。
+# 載せるのは他のイベントと同じ項目だけで、質問の中身は入れない。
+if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
+    tool_input = hook.get("tool_input")
+    questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
+    # 宛先が引けない・質問が読めないなら何もしない。issue-deck側もこれらは400で弾く
+    if not isinstance(questions, list) or not questions or not repo_slug or not issue_number.isdigit():
+        print("skip")
+        sys.exit(0)
+    remote_url = resolve_remote_url()
+    print("question", remote_url or "-")
+    print(json.dumps({
+        "repository": repo_slug,
+        "issue": int(issue_number),
+        "questions": questions,
+        "hostName": host_name or None,
+        "waitSeconds": int(os.environ.get("NOTIFY_QUESTION_WAIT_SECONDS") or 0),
+    }))
+    print(json.dumps(build_signaly_payload("\U0001f64b", "#faa61a", "質問の回答待ち", remote_url)))
+    # 4行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`だけを足して
+    # `updatedInput`として添え直す（`question_decision_output`を参照）
+    print(json.dumps(tool_input if isinstance(tool_input, dict) else {}))
+    sys.exit(0)
+
 # 人が承認プロンプト・質問に答えて作業へ戻ったこと（#1357）。
 #
 # **答えたことを直接知らせるフックは無い。** 承認したツールは必ず走るので、その`PostToolUse`を
@@ -775,6 +822,22 @@ except Exception:
     sys.exit(0)
 if isinstance(value, str):
     sys.stdout.write(value)
+' 2>/dev/null || true
+}
+
+# JSONの応答からフィールドを1つ、**JSONのまま**取り出す（#2189）。取れなければ空。
+# 回答（`answers`）はオブジェクトなので、文字列だけを返す`json_field`では受け取れない。
+json_object_field() {
+  local body="$1" key="$2"
+  [[ -n "$body" ]] || return 0
+  BODY="$body" KEY="$key" python3 -c '
+import json, os, sys
+try:
+    value = json.loads(os.environ["BODY"]).get(os.environ["KEY"])
+except Exception:
+    sys.exit(0)
+if isinstance(value, dict) and value:
+    sys.stdout.write(json.dumps(value))
 ' 2>/dev/null || true
 }
 
@@ -936,6 +999,129 @@ if output["permissionDecision"] == "allow":
 print(json.dumps({"hookSpecificOutput": output}))' 2>/dev/null || true
 }
 
+# 質問をissue-deckへ送る（#2189）。**画面からの回答を待つ相手のid**を標準出力へ返す。
+# 返らなければ待たずに終える＝端末に従来どおりの選択フォームが出る。
+report_question_to_issue_deck() {
+  local body="$1" response=""
+  if ! response="$(post_to_issue_deck_capture /api/dispatch/sessions/question "$body")"; then
+    echo "session-notify: 質問のissue-deckへの送信に失敗しました（実装は続行します）" >&2
+    return 0
+  fi
+  [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]] && return 0
+  mark_check_user_pending
+  json_field "$response" questionRequestId
+}
+
+# 画面からの回答を待ち、Claude Codeの許可判定として標準出力へ返す（#2189）。
+#
+# **これは`send-keys`の例外ではない。** 端末へは何も送らず、`PreToolUse`フックの戻り値
+# （`hookSpecificOutput`）としてClaude Code自身に判定させる。選択フォームに答えさせる操作は
+# どこにも無い（docs/multi-agent/gates.md）。
+#
+# 待ち方は計画（`wait_for_plan_decision`）とまったく同じ——**issue-deckへ届かないことを理由に
+# 降りるのは、その状態が`PLAN_POLL_GRACE_SECONDS`続いたときだけ**で、降りるときは
+# `release_question_request`で画面の待ちも畳む。
+wait_for_question_answer() {
+  local request_id="$1" deadline response outcome failing=0 failed_since=0
+  [[ -n "$request_id" ]] || return 0
+  ((QUESTION_WAIT_SECONDS > 0)) || return 0
+
+  deadline=$((SECONDS + QUESTION_WAIT_SECONDS))
+  while ((SECONDS < deadline)); do
+    if response="$(get_from_issue_deck "/api/dispatch/sessions/question/decision?id=$request_id")"; then
+      failing=0
+      outcome=0
+      question_decision_from_response "$response" || outcome=$?
+      # 0＝決まった（判定は出力済み）／2＝もう決まらない／1＝まだ待つ
+      if ((outcome != 1)); then
+        return 0
+      fi
+    else
+      if ((failing == 0)); then
+        failing=1
+        failed_since=$SECONDS
+      fi
+      if ((SECONDS - failed_since >= PLAN_POLL_GRACE_SECONDS)); then
+        echo "session-notify: 質問の回答をissue-deckから取得できない状態が${PLAN_POLL_GRACE_SECONDS}秒続きました（端末で答えてください）" >&2
+        release_question_request "$request_id"
+        return 0
+      fi
+    fi
+    sleep "$PLAN_POLL_INTERVAL_SECONDS"
+  done
+  # 待ち切った。**畳むのはサーバー側**（期限を過ぎた行は`EXPIRED`へ倒す）
+}
+
+# 応答の`status`を許可判定に変える。**出力するのはここだけ**（poll中と、待ちを畳むときの
+# 最後の確認の2箇所から同じ形で呼ぶ）。
+#
+#   0 … 決まった（`question_decision_output`で出力済み）
+#   1 … まだ決まっていない（`WAITING`）
+#   2 … もう決まらない（`DEFERRED`・`EXPIRED`・`GONE`、および想定外の値）
+question_decision_from_response() {
+  local response="$1" status answers
+  status="$(json_field "$response" status)"
+  case "$status" in
+    ANSWERED)
+      answers="$(json_object_field "$response" answers)"
+      # **回答が空なら決まっていないのと同じ**。空の`answers`を返すとツールの結果が
+      # 「(no option selected)」になり、端末で答え直す機会も無いまま先へ進む
+      [[ -n "$answers" ]] || return 2
+      question_decision_output "$answers"
+      return 0
+      ;;
+    WAITING)
+      return 1
+      ;;
+  esac
+  return 2
+}
+
+# 待つのをやめたことをissue-deckへ伝える（#2189。計画の`release_plan_request`と同じ）。
+release_question_request() {
+  local request_id="$1" response
+  [[ "$request_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+  response="$(post_to_issue_deck_capture /api/dispatch/sessions/question/decision \
+    "{\"id\":\"$request_id\"}")" || return 0
+  question_decision_from_response "$response" || true
+}
+
+# `PreToolUse`フックの戻り値。**標準出力のJSONだけがClaude Codeに読まれる。**
+#
+# **`allow`＋`updatedInput`で回答そのものを渡す。** `AskUserQuestion`は入力に`answers`
+# （質問文 → 回答文字列）が入っていればそれをそのまま結果にするツールで、フックが
+# `updatedInput`を返したときだけ「許可が下りていても人へ聞き直す」挙動
+# （`requiresUserInteraction`）が省かれる（#2121で計画について確かめたのと同じ仕組み。
+# Claude Code 2.1.241のバイナリで確認）。つまり**選択フォームを出さずに回答を届けられる。**
+#
+# **質問（`questions`）は受け取ったままを添える。** 変えてよいのは`answers`だけで、
+# `updatedInput`はツールのスキーマ検証を通るため、質問を作り変えると回答ごと弾かれる。
+question_decision_output() {
+  local answers="$1"
+  ANSWERS="$answers" TOOL_INPUT="${QUESTION_TOOL_INPUT:-}" python3 -c '
+import json, os
+
+try:
+    updated = json.loads(os.environ.get("TOOL_INPUT") or "{}")
+except Exception:
+    updated = {}
+if not isinstance(updated, dict):
+    updated = {}
+try:
+    answers = json.loads(os.environ.get("ANSWERS") or "{}")
+except Exception:
+    answers = {}
+if not isinstance(answers, dict) or not answers:
+    raise SystemExit(0)
+updated["answers"] = answers
+print(json.dumps({"hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "issue-deckの画面で回答されました",
+    "updatedInput": updated,
+}}))' 2>/dev/null || true
+}
+
 # **付けられたときだけ印を残す。** ラベルを外すのは印があるときだけなので、付けられて
 # いないのに印を残すと、人が別の理由で付けた`00.check-user`を落としに行くことになる。
 # tmuxの外で起動したセッションは印を置く場所（キーがtmuxのセッション名）が無い
@@ -948,7 +1134,7 @@ mark_check_user_pending() {
 
 decision_line="$(printf '%s' "$result" | head -1)"
 # 形式: `send <状態イベント> <activity> <URL または "-">` / `quiet <状態イベント> <activity>` /
-#       `plan <URL または "-">` / `skip`
+#       `plan <URL または "-">` / `question <URL または "-">` / `skip`
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
@@ -981,6 +1167,33 @@ if [[ "$decision" == "plan" ]]; then
   # 画面からの返事を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
   # 承認プロンプトが出る）
   wait_for_plan_decision "$PLAN_REQUEST_ID"
+  exit 0
+fi
+
+if [[ "$decision" == "question" ]]; then
+  # 2行目が質問（issue-deck向け）、3行目が通知（Signaly向け）、4行目が`AskUserQuestion`の引数。
+  # **行を分けているのは、質問の中身を外部サービスへ出す経路を作らないため**（通知には
+  # 選択肢が入らない）
+  QUESTION_REQUEST_ID="$(report_question_to_issue_deck "$(printf '%s' "$result" | sed -n '2p')")"
+  # 4行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`を足して
+  # `updatedInput`として添え直す
+  QUESTION_TOOL_INPUT="$(printf '%s' "$result" | sed -n '4p')"
+  # **質問を出した時点で、このセッションは人の答えを待っている**（#1438と同じ理由）。
+  # 選択フォームの`Notification`が飛ぶのを待たずにここで記録する——画面から答えた場合は
+  # そもそも飛ばないので、記録しておかないと承認直後の`PostToolUse`が「直前が入力待ちでは
+  # ない」として捨てられ、答えたのに`00.check-user`が応答終了まで外れない
+  if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_record_event >/dev/null 2>&1; then
+    session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
+      echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+  fi
+
+  # **ここでSignalyへ通知する**（計画と同じ理由）。画面から答えられた場合は選択フォームが
+  # 出ない＝`Notification`が飛ばないため、任せたままだと質問が出たことが誰にも届かない
+  notify_signaly "$(printf '%s' "$result" | sed -n '3p')"
+
+  # 画面からの回答を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
+  # 選択フォームが出る）
+  wait_for_question_answer "$QUESTION_REQUEST_ID"
   exit 0
 fi
 

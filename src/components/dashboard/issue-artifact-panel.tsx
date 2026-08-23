@@ -1,9 +1,16 @@
 "use client";
 
-import { ExternalLink, Image as ImageIcon, Palette, RotateCcw } from "lucide-react";
+import {
+  ExternalLink,
+  Image as ImageIcon,
+  Palette,
+  RotateCcw,
+  SquareArrowOutUpRight,
+} from "lucide-react";
 
 import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
+import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
 import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
@@ -112,6 +119,33 @@ function ArtifactCard({
             >
               開く
             </button>
+            {/* **別ウィンドウ**（#2210）。重ね表示はIssueの本文・コメントを覆うので、
+                見た目案と計画・指摘を見比べるにはウィンドウを分ける必要がある。
+                `<a>`にしてあるので中クリック・URLのコピーもできる。
+
+                **スマホでは出さない。** このアプリはホーム画面から`display: "standalone"`で
+                起動するためタブもアドレスバーも無く、別タブで開くと元の画面へ戻る導線が
+                画面から消える（#2065。画像プレビューと同じ約束）。並べて見比べるという
+                目的自体も、どちらも全画面になるスマホでは成立しない
+                （作成ダイアログの「別ウィンドウで開く」・#1728と同じ判断） */}
+            <a
+              href={artifactWindowPath(artifact.id)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${artifact.title} を別ウィンドウで開く`}
+              onClick={(event) => {
+                // 修飾キー付き・左ボタン以外は「別で開きたい」意思表示なので、ブラウザに任せる
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                if (event.button !== 0) return;
+                // **開けたときだけ止める。** ポップアップを止めているブラウザでは
+                // リンクのまま別タブが開く（押しても何も起きない、にはしない）
+                if (openArtifactWindow(artifact.id)) event.preventDefault();
+              }}
+              className="pointer-events-auto hidden items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:inline-flex"
+            >
+              別ウィンドウ
+              <SquareArrowOutUpRight className="size-3" />
+            </a>
             {artifact.claudeUrl && (
               <a
                 href={artifact.claudeUrl}
