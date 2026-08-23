@@ -14,10 +14,16 @@
  * **個人アカウントのインストールは対象外。** `/users/{username}/settings/billing/usage`は
  * `user`スコープを要求し、こちらは取得していない。
  *
- * **無料枠の残量は出せない。** Teamプランの3,000分/月を消費するのはprivateリポジトリの実行だけで、
- * publicリポジトリの実行は分数を消費しない（[docs/github-billing.md](../../../docs/github-billing.md)）。
- * ところがこのレポートはpublic/privateを区別せず、どちらも「gross全額がdiscountで相殺されてnet 0」
- * という同じ形で返ってくる。区別できない以上、残量メーターは作らずに実数と課金額だけを出す。
+ * **無料枠の残量メーターは今回のスコープ外**（作れないわけではない）。Teamプランの3,000分/月を
+ * 消費するのはprivateリポジトリの実行だけで、publicリポジトリの実行は分数を消費しない
+ * （[docs/github-billing.md](../../../docs/github-billing.md)）。**このレポート単体では
+ * public/privateを区別できない**が、明細は`repositoryName`を持ち、public/privateは
+ * `Repository.private`としてDBにあるので、突き合わせれば出せる。今回は実数と課金額に絞り、
+ * 実際に課金されたリポジトリを色と金額で見分けられるようにするところまでにしている。
+ *
+ * **数字は約半日遅れる。** 課金レポートへの反映が遅く、実測では2026-08-23 14:18Zの時点で最新の
+ * 明細が01:55Z（その間にissue-deckだけで372回の実行があった）。`lastReportedAt`をあわせて返し、
+ * 画面には「どこまで反映されているか」を必ず添える。
  */
 
 import { toJstParts } from "@/lib/format-date-time";
@@ -67,6 +73,11 @@ export type ActionsUsage = {
   /** Actionsのストレージ（アーティファクト・キャッシュ）の消費（GB時） */
   storageGigabyteHours: number;
   storageNetAmount: number;
+  /**
+   * 課金レポートに載っている最後の明細の時刻(epoch ms)。明細が無ければnull。
+   * **この時刻より後の実行はまだ数字に入っていない。**
+   */
+  lastReportedAt: number | null;
 };
 
 export type ActionsUsageResult =
@@ -141,6 +152,9 @@ export function summarizeActionsUsage(
     (item) => Date.parse(item.date) >= options.todayStartedAt,
   );
   const storageItems = items.filter(isActionsStorage);
+  const reportedAt = [...minuteItems, ...storageItems]
+    .map((item) => Date.parse(item.date))
+    .filter((time) => !Number.isNaN(time));
 
   return {
     year: options.year,
@@ -150,6 +164,7 @@ export function summarizeActionsUsage(
     thisMonth: summarizePeriod(minuteItems),
     storageGigabyteHours: storageItems.reduce((sum, item) => sum + item.quantity, 0),
     storageNetAmount: storageItems.reduce((sum, item) => sum + item.netAmount, 0),
+    lastReportedAt: reportedAt.length > 0 ? Math.max(...reportedAt) : null,
   };
 }
 

@@ -35,6 +35,8 @@ const DATA: ActionsUsageEntry[] = [
       },
       storageGigabyteHours: 1486.75,
       storageNetAmount: 0,
+      // JSTで8/23 10:55（画面はJST固定で出す）
+      lastReportedAt: Date.parse("2026-08-23T01:55:00Z"),
     },
   },
 ];
@@ -60,6 +62,25 @@ describe("GithubActionsUsage", () => {
     expect(screen.getByText("$0.02")).toBeTruthy();
     expect(screen.getByText("ほか13リポジトリ")).toBeTruthy();
     expect(screen.getByText(/ストレージ 1,487 GB時/)).toBeTruthy();
+  });
+
+  it("どこまで反映されているかを常に出す（課金レポートは半日ほど遅れる）", () => {
+    render(<GithubActionsUsage data={DATA} isLoading={false} error={null} />);
+
+    expect(screen.getByText("8/23 10:55までの実行")).toBeTruthy();
+  });
+
+  it("まだ1件も反映されていない月は、0分ではなくその旨を出す", () => {
+    const empty: ActionsUsageEntry[] = [
+      {
+        ...DATA[0],
+        usage: { ...DATA[0].usage!, lastReportedAt: null },
+      },
+    ];
+
+    render(<GithubActionsUsage data={empty} isLoading={false} error={null} />);
+
+    expect(screen.getByText("まだ何も反映されていません")).toBeTruthy();
   });
 
   it("「今日」へ切り替えると、その日の分だけを出す", () => {

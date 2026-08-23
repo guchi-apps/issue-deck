@@ -6,7 +6,7 @@ import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { ActionsUsageEntry, ActionsUsagePeriod } from "@/hooks/use-github-actions-usage";
-import { formatMonthDay } from "@/lib/format-date-time";
+import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 
 type GithubActionsUsageProps = {
   data: ActionsUsageEntry[] | null;
@@ -101,6 +101,12 @@ function ActionsUsageEntryRow({ entry, mode }: { entry: ActionsUsageEntry; mode:
     mode === "today"
       ? `今日（${formatMonthDay(usage.todayStartedAt)}）`
       : `今月（${usage.month}月）`;
+  // **どこまで反映されているかを必ず添える。** 課金レポートは半日ほど遅れて載るため、
+  // 数字だけを出すと「今日はほとんど回していない」と読めてしまう（#2212の計画レビュー）。
+  const reportedThrough =
+    usage.lastReportedAt === null
+      ? "まだ何も反映されていません"
+      : `${formatMonthDay(usage.lastReportedAt)} ${formatTimeOfDay(usage.lastReportedAt)}までの実行`;
 
   return (
     <div className="flex flex-col gap-2">
@@ -120,6 +126,7 @@ function ActionsUsageEntryRow({ entry, mode }: { entry: ActionsUsageEntry; mode:
           className={`size-3 shrink-0 transition-transform ${isDetailOpen ? "rotate-90" : ""}`}
         />
       </button>
+      <p className="text-[10px] text-muted-foreground tabular-nums">{reportedThrough}</p>
       {isDetailOpen && (
         <div id={detailId} className="flex flex-col gap-2">
           {period.repositories.length === 0 ? (
@@ -132,7 +139,8 @@ function ActionsUsageEntryRow({ entry, mode }: { entry: ActionsUsageEntry; mode:
             {formatUsd(usage.storageNetAmount)}
             <br />
             GitHubの課金レポート（UTC基準の暦月）。publicリポジトリの実行は無料枠を消費せず、赤いバーが
-            実際に課金された分です。レポートへの反映は最大1日遅れます。
+            実際に課金された分です。レポートへの反映は半日ほど遅れるため、上に出している時刻より
+            後の実行はまだ入っていません。
           </p>
         </div>
       )}

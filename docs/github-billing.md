@@ -78,11 +78,21 @@ issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日�
 - **旧`/orgs/{org}/settings/billing/actions`は410（This endpoint has been moved）を返す。**
   新しい課金プラットフォームの`/organizations/{org}/settings/billing/usage`に置き換わっており、
   **無料枠（`included_minutes`）を返す手段はもう無い**
-- 必要なスコープは`repo`または`admin:org`（応答の`X-Accepted-Oauth-Scopes`）。
-  **GitHub Appのインストールトークンでは読めない**ため、issue-deckはユーザー本人のトークンで読む
+- **classicのOAuthトークン・PATでしか読めない**（実測）。必要なスコープは`repo`または`admin:org`
+  （応答の`X-Accepted-Oauth-Scopes`）。GitHub Appのインストールトークンは
+  `403 Resource not accessible by integration`になり、GitHubのドキュメントにも
+  fine-grained権限の記載が無い。**Supabase Authが使っているGitHubの資格情報はGitHub App**
+  （`<SUPABASE_URL>/auth/v1/authorize?provider=github`のリダイレクト先の`client_id`が`Iv23li…`）
+  なので、**issue-deckが保持しているユーザートークンでも読めない**（`signInWithOAuth`の
+  `scopes: "repo user:email"`はGitHub Appでは無視される）
 - 個人アカウントは`/users/{username}/settings/billing/usage`で、`user`スコープが要る（別物）
-- **レポートはpublicとprivateを区別しない。** どちらも「grossの全額がdiscountで相殺されてnet 0」
-  という同じ形になるため、**無料枠3,000分に対する残量はこのAPIからは割り出せない**
+- **レポート単体ではpublicとprivateを区別できない。** どちらも「grossの全額がdiscountで相殺されて
+  net 0」という同じ形になる。ただし明細は`repositoryName`を持ち、public/privateは
+  `Repository.private`としてDBにあるので、**突き合わせれば無料枠3,000分に対する残量は出せる**
+  （画面には出していないだけ。「できない」ではない）
+- **反映は半日ほど遅れる。** 2026-08-23 14:18Zの時点で最新の明細は01:55Zで、その間に
+  issue-deckだけで372回の実行があった。**「今日」の数字をそのまま出すと「今日はほとんど回して
+  いない」と誤読される**ため、画面には最後の明細の時刻（`lastReportedAt`）を必ず添える
 - `year`・`month`を付けると明細が発生時刻の粒度で返る（2026年8月分で356件・約97KB）。
   付けないと月単位に丸められるが、リポジトリが一部しか返らないため付けて呼ぶ
 

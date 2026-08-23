@@ -102,6 +102,21 @@ describe("summarizeActionsUsage", () => {
     expect(usage.thisMonth.minutes).toBe(0);
     expect(usage.thisMonth.repositories).toEqual([]);
     expect(usage.today.otherRepositoryCount).toBe(0);
+    expect(usage.lastReportedAt).toBeNull();
+  });
+
+  it("どこまで反映されているか（最後の明細の時刻）を返す", () => {
+    const usage = summarizeActionsUsage(
+      [
+        item({ date: "2026-08-23T01:55:50Z" }),
+        item({ date: "2026-08-10T15:48:02Z" }),
+        item({ date: "2026-08-23T02:10:00Z", sku: "Actions storage", unitType: "GigabyteHours" }),
+      ],
+      options,
+    );
+
+    // ストレージの明細も反映の目安になるので同じように見る
+    expect(usage.lastReportedAt).toBe(Date.parse("2026-08-23T02:10:00Z"));
   });
 });
 
