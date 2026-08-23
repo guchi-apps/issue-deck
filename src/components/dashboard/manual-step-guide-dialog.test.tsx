@@ -817,10 +817,60 @@ describe("ManualStepGuideDialog の進捗レール", () => {
     expect(screen.getByRole("heading", { name: /手順 1 \/ 2.*代行できる/ })).toBeTruthy();
   });
 
-  it("代行できるサブPCが居ないときは、ドットも「あなたが実行」になる", () => {
+  /**
+   * **ホストの都合と「そもそも代行の対象外」を畳まない**（計画レビューG1の指摘1）。
+   * 畳むと、pollerが止まっている間だけ全段が「あなたが実行」に化け、理由も読まずに
+   * 手で実行しに行くことになる。
+   */
+  it("サブPCが居ないときは「いまは代行できない」で、対象外の手順とは区別する", () => {
     renderDialog([issue()], undefined, dispatchHandle({ hosts: [] }));
 
-    expect(screen.getByRole("button", { name: /手順 1 \/ 2: あなたが実行/ })).toBeTruthy();
+    // 手順1はサブPCで実行するコマンドがある＝対象。ホストが居ないだけなので理由も出す
+    const step1 = screen.getByRole("button", { name: /手順 1 \/ 2: いまは代行できない/ });
+    expect(step1.getAttribute("title")).toContain("申告がまだ届いていません");
+    // 手順2はコマンドが無い＝そもそも対象外なので、ホストの状態によらず人が実行する
+    expect(screen.getByRole("button", { name: /手順 2 \/ 2: あなたが実行/ })).toBeTruthy();
+  });
+
+  /**
+   * `## やること`が`- [ ]`で書かれていない本文は、節全体が`line: null`の1手順になり
+   * 実行計画に載らない（計画レビューG1の指摘3）。代行の対象そのものが無い。
+   */
+  it("実行計画に載らない手順（チェックリストでない`## やること`）は「あなたが実行」になる", () => {
+    taskList.body = `## やること
+
+設定画面でトークンを入れ替える。
+`;
+    renderDialog([issue({ body: taskList.body })]);
+
+    expect(screen.getByRole("button", { name: /手順 1 \/ 1: あなたが実行/ })).toBeTruthy();
+  });
+
+  it("完了の確認は、1件でも人が実行するなら「あなたが実行」になる", () => {
+    taskList.body = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+
+## やること
+
+- [ ] pollerを再起動する
+
+## 完了の確認方法
+
+\`\`\`bash
+systemctl --user is-active issue-deck-poller.service
+\`\`\`
+
+\`\`\`bash
+curl -s http://localhost:<ポート>/api/health
+\`\`\`
+`;
+    renderDialog([issue({ body: taskList.body })]);
+
+    // 1件目は代行できるが、2件目にプレースホルダがあるので重い方に合わせる
+    expect(
+      screen.getByRole("button", { name: /完了の確認（あなたが実行）/ }),
+    ).toBeTruthy();
   });
 
   it("実行済みの手順は「実行済みを取り消す」でチェックを外せる", () => {

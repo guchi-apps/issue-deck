@@ -44,9 +44,11 @@ import {
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
 import {
   describeManualStepAbortRejection,
+  describeManualStepExecutionRejection,
   resolveManualStepAbortRejection,
   resolveManualStepHost,
   type DispatchHostView,
+  type ManualStepExecutionRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import {
@@ -115,17 +117,37 @@ function buildStages(guide: ManualStepGuide): GuideStage[] {
  * ここで「サブPCならtrue」のような条件を書き直すと、承認パネルに並ぶ「代行できる／あなたが実行」と
  * レールの印が食い違う（判定の正は`lib/dispatch/dispatch-job.ts`の
  * `resolveManualStepExecutionRejection`ひとつ）。
+ *
+ * ただし**`rejection`を「あなたが実行」へ畳まない**。`rejection`は「そもそも代行の対象外」と
+ * 「ホストの都合でいまは押せない」を1つの値にまとめており、pollerが止まっている間に畳むと、
+ * 本当はサブPCが実行する手順まで「人がやるもの」として並ぶ（レールは常時見えているので、
+ * 理由を読まずに手で実行しに行くことになる）。前者だけを`manual`、後者は`pending`にする。
  */
 type StageMark = {
-  tone: "neutral" | "auto" | "manual" | "done";
+  tone: "neutral" | "auto" | "pending" | "manual" | "done";
   Icon: LucideIcon;
   /** ツールチップ・読み上げに出す担い手の説明（手順の見出しのバッジにもそのまま出す） */
   label: string;
+  /** 代行できない理由（`title`・読み上げに足す）。ドットには理由文を書く場所が無いため */
+  reason: string | null;
 };
+
+/**
+ * **ホストの都合で「いまは」代行できない理由**（更新すれば押せるようになる）。
+ * これ以外は手順そのものの性質で、押せるようになる見込みが無い
+ * （`resolveManualStepExecutionRejection`のコメントと同じ切り分け）。
+ */
+const HOST_SIDE_REJECTIONS = new Set<ManualStepExecutionRejection>([
+  "host_unknown",
+  "host_offline",
+  "manual_step_unsupported",
+  "already_queued",
+]);
 
 const STAGE_MARK_TONE: Record<StageMark["tone"], string> = {
   neutral: "border-border bg-background text-muted-foreground",
   auto: "border-violet-500/50 bg-violet-500/10 text-violet-600 dark:text-violet-300",
+  pending: "border-dashed border-border bg-muted text-muted-foreground",
   manual: "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-300",
   done: "border-transparent bg-emerald-500 text-white",
 };
@@ -134,6 +156,7 @@ const STAGE_MARK_TONE: Record<StageMark["tone"], string> = {
 const STAGE_MARK_CURRENT_TONE: Record<StageMark["tone"], string> = {
   neutral: "border-violet-500 ring-3 ring-violet-500/20",
   auto: "border-violet-500 bg-violet-500 text-white ring-3 ring-violet-500/20",
+  pending: "border-solid border-violet-500 ring-3 ring-violet-500/20",
   manual: "border-amber-500 bg-amber-500 text-white ring-3 ring-amber-500/20",
   done: "ring-3 ring-emerald-500/25",
 };
@@ -141,34 +164,75 @@ const STAGE_MARK_CURRENT_TONE: Record<StageMark["tone"], string> = {
 const STAGE_MARK_BADGE_TONE: Record<StageMark["tone"], string> = {
   neutral: "bg-muted text-muted-foreground",
   auto: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  pending: "bg-muted text-muted-foreground",
   manual: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
   done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
 };
 
-function resolveStageMark(stage: GuideStage, plan: ManualStepRunPlan): StageMark {
+/**
+ * 実行計画の1件から印を作る。
+ *
+ * **`entry`が`null`なのは実行計画に載らない手順**（`## やること`が`- [ ]`で書かれておらず、
+ * 節全体が1手順になったもの。`lib/manual-step-guide.ts`が`line: null`で返す）。代行の対象
+ * そのものが無いので「あなたが実行」でよい——ホストの状態とは関係なく、押せるようにはならない。
+ */
+function resolveEntryMark(entry: ManualStepRunEntry | null, hostName: string): StageMark {
+  if (entry === null) {
+    return { tone: "manual", Icon: Hand, label: "あなたが実行", reason: null };
+  }
+  if (entry.rejection === null) {
+    return { tone: "auto", Icon: Zap, label: "代行できる", reason: null };
+  }
+  const reason = describeManualStepExecutionRejection(entry.rejection, {
+    hostName,
+    device: entry.device,
+    interactiveCommand: entry.interactiveCommand,
+    placeholder: entry.placeholder,
+  });
+  return HOST_SIDE_REJECTIONS.has(entry.rejection)
+    ? { tone: "pending", Icon: Zap, label: "いまは代行できない", reason }
+    : { tone: "manual", Icon: Hand, label: "あなたが実行", reason };
+}
+
+/**
+ * 段の印を決める。
+ *
+ * **バッジが意味するのは「その手順が代行の対象か」で、いま実行中かどうかは含めない**——
+ * `plan`へ`hasActiveJob`を渡していないので`already_queued`はここには出ない（渡すと、実行中の
+ * あいだレールの印が「いまは代行できない」へ揺れる）。実行中かどうかは`AutoRunBar`と
+ * `ManualStepRunPanel`が出す。
+ */
+function resolveStageMark(
+  stage: GuideStage,
+  plan: ManualStepRunPlan,
+  hostName: string,
+): StageMark {
   switch (stage.kind) {
     case "overview":
-      return { tone: "neutral", Icon: Info, label: "この作業の目的" };
+      return { tone: "neutral", Icon: Info, label: "この作業の目的", reason: null };
     case "body":
-      return { tone: "neutral", Icon: Flag, label: "やること" };
+      return { tone: "neutral", Icon: Flag, label: "やること", reason: null };
     case "step": {
-      if (stage.step.checked) return { tone: "done", Icon: Check, label: "実行済み" };
+      if (stage.step.checked) {
+        return { tone: "done", Icon: Check, label: "実行済み", reason: null };
+      }
       const entry =
         stage.step.line === null ? null : findManualStepEntry(plan, stage.step.line);
-      return entry !== null && entry.rejection === null
-        ? { tone: "auto", Icon: Zap, label: "代行できる" }
-        : { tone: "manual", Icon: Hand, label: "あなたが実行" };
+      return resolveEntryMark(entry, hostName);
     }
     case "finish": {
-      // 確認のコマンドが1つでも代行できるなら手順と同じ印にする。書かれていなければ担い手が
-      // 決まらないので、押す先の名前だけを出す
+      // 完了の確認はコマンドが複数ありうるので、**いちばん重い1件に合わせる**（1件でも人が
+      // 実行するなら「あなたが実行」）。書かれていなければ担い手が決まらないので押す先の名前だけ
       const verifications = plan.entries.filter((entry) => entry.kind === "verification");
       if (verifications.length === 0) {
-        return { tone: "neutral", Icon: Flag, label: "完了の確認" };
+        return { tone: "neutral", Icon: Flag, label: "完了の確認", reason: null };
       }
-      return verifications.some((entry) => entry.rejection === null)
-        ? { tone: "auto", Icon: Zap, label: "完了の確認（代行できる）" }
-        : { tone: "manual", Icon: Hand, label: "完了の確認（あなたが実行）" };
+      const marks = verifications.map((entry) => resolveEntryMark(entry, hostName));
+      const worst =
+        marks.find((mark) => mark.tone === "manual") ??
+        marks.find((mark) => mark.tone === "pending") ??
+        marks[0];
+      return { ...worst, label: `完了の確認（${worst.label}）` };
     }
   }
 }
@@ -524,6 +588,7 @@ function ManualStepGuideContent({
             current={index}
             stepCount={stepCount}
             plan={plan}
+            hostName={host?.name ?? "サブPC"}
             onSelect={onStageIndexChange}
           />
           {/* デバイスは**いま開いている手順のもの**（#2052）。手順にデバイスが書かれて
@@ -562,7 +627,7 @@ function ManualStepGuideContent({
               step={stage.step}
               order={stage.order}
               total={stepCount}
-              mark={resolveStageMark(stage, plan)}
+              mark={resolveStageMark(stage, plan, host?.name ?? "サブPC")}
               issue={issue}
               guide={guide}
               dispatch={dispatch}
@@ -688,12 +753,14 @@ function StageRail({
   current,
   stepCount,
   plan,
+  hostName,
   onSelect,
 }: {
   stages: GuideStage[];
   current: number;
   stepCount: number;
   plan: ManualStepRunPlan;
+  hostName: string;
   onSelect: (index: number) => void;
 }) {
   const caption = stageCaption(stages[current], stepCount);
@@ -703,11 +770,13 @@ function StageRail({
       {/* 手順の多い手作業では折り返す（横スクロールにすると、スマホで見えない手順が出る） */}
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
         {stages.map((stage, order) => {
-          const mark = resolveStageMark(stage, plan);
-          const label =
+          const mark = resolveStageMark(stage, plan, hostName);
+          const described =
             stage.kind === "step"
               ? `手順 ${stage.order + 1} / ${stepCount}: ${mark.label} — ${stage.step.text}`
               : mark.label;
+          // ドットには理由文を書く場所が無いので、`title`・読み上げへ足す（#2194）
+          const label = mark.reason === null ? described : `${described}（${mark.reason}）`;
           return (
             <span key={order} className="flex items-center gap-1">
               {order > 0 && (
