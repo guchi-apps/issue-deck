@@ -1624,6 +1624,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     画面内のトースト（`check-user-toast-viewport.tsx`）が出しており、重ねるとどちらを押せばよいか
     分からない。タップして開くURLは`useReferenceNavigation.openIssue`と同じ形で、PC（`issue`）と
     スマホ（`mscreen`・`missue`）の両方の現在地を載せる。
+  - **例外はテスト通知だけで、payloadの`force`で抜ける**（#2195）。テスト通知は設定画面のボタンから
+    しか送れず、**押した時点でその画面が必ず表示中**になるため、上の抑止に当たって毎回握りつぶされて
+    いた（送信は成功して「1件の端末へ送りました」と出るので、鍵もOSの許可も切り分けられない）。
+    `force`を付けるのは`api/notifications/test`だけで、`00.check-user`の通知には付けない（付けると
+    アプリを開いている間もトーストと二重に出る）。分岐は`lib/notifications/sw-push.test.ts`が
+    **`public/sw.js`を読み込んで偽の`self`で動かして**確かめる（Service Workerはバンドルされない
+    素のJSでimportできない）。
+  - **設定画面を開くたびにService Workerの更新を確かめる**（`use-push-subscription.ts`の
+    `registration.update()`）。`register`を呼ぶのは購読するときだけで、ホーム画面から開きっぱなしの
+    PWAは読み込み直す機会が無く、通知の出し方を直しても古い版が動き続ける。
+  - **テスト通知の結果は「送れた／失効で消した／送れなかった」を区別して出す。** `sendPushNotification`の
+    戻り値（`sent`・`removed`・`failed`）をそのまま画面へ出し分ける。失効（404/410）で行が消えた場合は
+    登録し直しが要り、一時的な失敗とは次にやることが違う。
   - **VAPID鍵（`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT`）が未設定なら機能ごと
     無効**で、設定画面は「利用できません」を出す。**公開鍵も`NEXT_PUBLIC_`にせず実行時にAPIから
     返す**（ビルドし直さずに鍵を差し替えられる）。iOS・iPadOSはホーム画面に追加したとき

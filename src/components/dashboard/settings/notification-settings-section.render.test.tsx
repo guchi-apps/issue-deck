@@ -85,6 +85,8 @@ describe("NotificationSettingsSection", () => {
     expect(screen.queryByRole("button", { name: "この端末で受け取る" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "テスト通知を送る" }));
     expect(sendTest).toHaveBeenCalled();
+    // 押した画面が表示中でも出ることを添える（#2195。出ないときの次の一手も示す）
+    expect(screen.getByText(/この画面を開いたままでもOSの通知として表示されます/)).toBeTruthy();
   });
 
   it("iOSでタブから開いている場合、ホーム画面への追加を案内する", () => {
