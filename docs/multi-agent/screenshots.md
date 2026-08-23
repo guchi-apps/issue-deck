@@ -143,6 +143,32 @@ developへは自動マージされない。`23.preview-required`についても�
 処理のため、chromiumダウンロード（数分かかる）と同様にstate stepが出力する
 `screenshot_required`が`true`の場合のみ実行するよう変更した（#319）。
 
+## 撮影に対応しないリポジトリでは選ばせない（#1118）
+
+`24.screenshot-required`のラベルはフリートの全リポジトリへ配ってあるが、**撮影が成立するのは
+撮る仕組みを自前で持っているリポジトリだけ**で、持っていないリポジトリで選ぶと実装だけ進んで
+画像が出ないまま完了報告に至る（dayspanは全画面がSupabase Authの背後にありCIバイパスが無い、
+solitaireは`runtime-setup: minimal`でPlaywrightが入らない、など）。
+
+そこで「実装を開始」ダイアログでは、**実行先にGitHub Actionsを選んでいるとき**に限り、対応
+していないリポジトリの「スクリーンショットが必要」を理由付きで無効化する。サブPC・ローカルの
+セッションは実行中の画面をそのまま確認でき、必要なら手で撮れる（後述「ローカルセッションで
+撮る」）ため、こちらの理由は当てはまらない。ホスト側の事情（Playwrightが入っていない・#1268）は
+`resolveScreenshotRejection`が別の軸として見る。
+
+- **判定する唯一の場所は[`src/lib/github/screenshot-support.ts`](../../src/lib/github/screenshot-support.ts)**。
+  `docs/supported-repositories.md`の表にも撮影可否は書かれているが、画面はこのファイルだけを見る。
+  撮影に対応させたリポジトリが増えたら、まずここへ足す
+- **一覧に載っていないリポジトリは「撮れない」として扱う。** 申告の無いホストを塞がない
+  `resolveScreenshotRejection`とはわざと逆に倒している。あちらの「未申告」は古いpollerであって
+  撮れる可能性が十分あるが、こちらの「未登録」は撮る仕組みをどちらも置いていないということで、
+  その状態で撮れることは無い。ただし**リポジトリ名そのものが分からないとき（読み込み中）は塞がない**
+- **既に`24.screenshot-required`が付いているIssueでは塞がない。** 塞ぐと、付いてしまったラベルを
+  このダイアログから外せなくなる（`visibleStartImplementationOptions`と同じ考え方）
+- 撮影の仕組みは2種類あり、どちらで対応と判断したかを一覧の`basis`に残している。(1) 実装
+  エージェントが`<package manager> run capture:issue-screenshots`を呼ぶ方式（issue-deck本体）、
+  (2) 実装後フック`post-implement-script`で自前のスクリプトを走らせる方式（shopping-list）
+
 ## ローカルセッションで撮る（#1468）
 
 `24.screenshot-required`が付いたIssueをローカルセッションで進める場合、上記の
