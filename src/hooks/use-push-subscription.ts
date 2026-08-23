@@ -83,6 +83,11 @@ export function usePushSubscription(enabled: boolean) {
       if (detected === "available") {
         try {
           const registration = await navigator.serviceWorker.getRegistration(SERVICE_WORKER_PATH);
+          // **登録済みでも更新を確かめる**（#2195）。`subscribe`のときしか`register`を
+          // 呼んでおらず、ホーム画面から開きっぱなしのPWAは読み込み直す機会が無い。
+          // 通知の出し方を直しても古いService Workerが動き続けると直らない。
+          // 失敗しても購読の確認は続ける（オフラインでも画面は開ける）
+          await registration?.update().catch(() => {});
           const existing = await registration?.pushManager.getSubscription();
           const key = existing ? await pushEndpointKeyInBrowser(existing.endpoint) : null;
           if (!cancelled) setCurrentEndpointKey(key);
@@ -201,18 +206,28 @@ export function usePushSubscription(enabled: boolean) {
     try {
       const res = await fetch("/api/notifications/test", { method: "POST" });
       if (!res.ok) throw new Error(`テスト通知を送れませんでした (${res.status})`);
-      const json = (await res.json()) as { sent: number };
-      setMessage(
-        json.sent > 0
-          ? `${json.sent}件の端末へ送りました`
-          : "送り先がありませんでした。もう一度登録してください",
-      );
+      const json = (await res.json()) as { sent: number; removed?: number; failed?: number };
+      // **「送れなかった」を「送り先が無い」と混ぜない**（#2195）。失効（404/410）で
+      // 購読が消えたのか、一時的に送れなかったのかで、次にやることが違う
+      if (json.sent > 0) {
+        setMessage(`${json.sent}件の端末へ送りました`);
+      } else if ((json.removed ?? 0) > 0) {
+        setError(
+          "この端末の購読は失効していました。「受け取りを止める」を押してから、もう一度「この端末で受け取る」で登録し直してください",
+        );
+        // サーバー側の行は消えている。一覧も合わせておかないと、登録済みに見えたまま残る
+        refetch();
+      } else if ((json.failed ?? 0) > 0) {
+        setError("送信に失敗しました。時間をおいてもう一度お試しください");
+      } else {
+        setMessage("送り先がありませんでした。もう一度登録してください");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
     }
-  }, []);
+  }, [refetch]);
 
   return {
     availability,

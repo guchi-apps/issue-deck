@@ -29,7 +29,7 @@ async function hasVisibleClient() {
 self.addEventListener("push", (event) => {
   event.waitUntil(
     (async () => {
-      /** @type {{title?: string, body?: string, url?: string, tag?: string}} */
+      /** @type {{title?: string, body?: string, url?: string, tag?: string, force?: boolean}} */
       let payload = {};
       try {
         payload = event.data ? event.data.json() : {};
@@ -40,8 +40,12 @@ self.addEventListener("push", (event) => {
 
       // **アプリを開いているあいだは出さない。** 同じ知らせを画面内のトースト
       // （check-user-toast-viewport.tsx）が出しており、OS側にも重ねると
-      // どちらを押せばよいのか分からなくなる
-      if (await hasVisibleClient()) return;
+      // どちらを押せばよいのか分からなくなる。
+      //
+      // **例外は`force`が付いた通知だけ**（#2195）。テスト通知は設定画面のボタンからしか
+      // 送れず、押した時点でその画面が必ず表示中になるため、この判定に当たると
+      // 「届くかどうかを確かめる通知」が毎回握りつぶされる
+      if (!payload.force && (await hasVisibleClient())) return;
 
       const title = payload.title || "確認待ちのIssueがあります";
       await self.registration.showNotification(title, {
