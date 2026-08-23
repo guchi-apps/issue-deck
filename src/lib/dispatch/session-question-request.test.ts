@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SESSION_PLAN_WAIT_SECONDS_DEFAULT } from "@/lib/dispatch/session-plan-request";
 import {
   SESSION_QUESTION_FREE_TEXT_MAX_LENGTH,
   SESSION_QUESTION_PREVIEW_LIMIT,
@@ -194,6 +195,16 @@ describe("parseSessionQuestionWaitSeconds", () => {
   // `0`を下限へ丸めると、フックは待たないのに画面へ押しても届かないパネルが残る
   it("0はそのまま0（＝待たない）", () => {
     expect(parseSessionQuestionWaitSeconds(0)).toBe(0);
+  });
+
+  /**
+   * #2189の計画レビューG1・指摘1。**待っている間は端末で答える手段が実質的に無い**
+   * （`Esc`は待ちを抜けるのではなくturnごと打ち切る）。`ExitPlanMode`は1セッションに1回の
+   * 関門だが質問は常用経路なので、既定を計画より短くしてある。ここを揃えると、端末に
+   * 座っている人が質問のたびに長く待たされる。
+   */
+  it("既定は計画の待ち時間より短い", () => {
+    expect(SESSION_QUESTION_WAIT_SECONDS_DEFAULT).toBeLessThan(SESSION_PLAN_WAIT_SECONDS_DEFAULT);
   });
 });
 
