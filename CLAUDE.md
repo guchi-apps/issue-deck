@@ -189,6 +189,14 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 Issueコメントとして投稿し、「なぜエージェントが実行できないか」「コピペで実行できるコマンド」「実行後にエージェントが何をするか」を書いたうえで`00.check-user`と理由ラベルを付ける。理由ラベルはローカルセッションが`01.check-input`（待機）、無人実行が`01.check-blocked`（その場で停止するため）。**`71.manual-step`の単独Issueにはしない**（あれはPRマージ後も残る手作業の追跡用で、セッション中に今すぐ実行してほしい1コマンドには重い）。詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ユーザーにコマンドを実行してもらうときは、Issueコメントにも書く」を参照。
 
+### 新規アプリの立ち上げは画面の「新規アプリを立ち上げる」から行う
+
+新しい個人アプリの立ち上げ（#2188）は、画面から相談 → 設定 → 確認と進めると、GitHubリポジトリの作成と残りの作業のIssue一式（初期化・`guchi-apps/vps`のVirtualHost・手作業3件）までを起票する。**手順の正は共有知識（`guchi-apps/docs`の`guides/new-app-checklist.md`）で、issue-deck側に手順を複製しない。**
+
+- **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・予約済みポート）と、vhostの`ServerName`／`ServerAlias`を読む。**READMEの散文の「空きは〜」とvhostのファイル名は読まない**（どちらも実態とずれる）
+- **自動化できないものは自動化したように見せない。** DNSのAレコードはVPS管理画面にAPIが無く、VPS実機の操作（`/apps/<name>/`・DB作成・PM2・certbot）は`guchi-apps/vps`の`deploy.yml`が配る受け口ではないため、どちらも手作業Issueとして残す
+- 生成する手作業Issueの書式・失敗したときの扱い・盤面へ載るまでの順序は[docs/new-app-launch.md](docs/new-app-launch.md)を参照する
+
 ### Issue間の実施順序は`## 前提条件`に書く（`71.manual-step`以外も）
 
 「AをやってからBをマージする」のように順序が決まっている場合、**PR本文の散文やIssueコメントに書くだけでは画面に出ない**（#2003）。**待つ側のIssueの本文**に`## 前提条件`の見出しを足し、`- 先に完了している必要があるIssue・PR: #39`のように**番号を`#39`の形で**書く（別リポジトリは`owner/repo#39`）。

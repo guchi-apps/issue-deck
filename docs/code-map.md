@@ -2150,6 +2150,25 @@ pnpm test:unit   # vitestのみ
 （ワンクリック起動経路でUAC待ちから戻らずdevサーバーが起動しなくなるため。#1094。詳細は
 [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)）。
 
+## 新規アプリの立ち上げ
+
+画面の「新規アプリを立ち上げる」（#2188）。相談 → 設定 → 確認の4ステップで、GitHub
+リポジトリの作成と残りの作業のIssue起票までを行う。設計と「何を自動化し、何を人へ残すか」の
+線引きは[new-app-launch.md](new-app-launch.md)を参照。
+
+- **判定・本文の組み立ては`lib/new-app/`の純粋関数**（`spec.ts`＝決めごとの型と導出、
+  `vps-inventory.ts`＝vps READMEとvhostの解析、`plan.ts`＝作られるものとIssue本文、
+  `parse.ts`＝APIが受け取る値の検証）。**ウィザードのコンポーネントが直接importするので、
+  ここから`lib/github/`を読まない**（上記の`issues-api.ts`の制約）。GitHubを叩くのは
+  `lib/github/vps-inventory-api.ts`と`lib/github/repositories-api.ts`。
+- **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・
+  予約済みポート）と、vhostの`ServerName`／`ServerAlias`。**READMEの散文の「空きは〜」と
+  vhostのファイル名は読まない**——どちらも実態とずれる（`wordpress.conf`の`ServerName`は
+  `blog.gucchii.com`）。読めなかったときは自動採番せず手入力に倒す。
+- **生成する手作業Issueのうち、サブPCのものは代行実行の条件を満たす形で書く**
+  （デバイスがサブPC1つ・1手順1コマンドブロック・対話コマンドとプレースホルダ無し）。
+  `lib/new-app/plan.test.ts`が実物の`buildManualStepRunPlan`に通して見張っている。
+
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub App・Push通知の4系統に分かれる。
