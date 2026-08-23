@@ -5,6 +5,7 @@ import {
   GitBranch,
   MessageCircleQuestion,
   Plus,
+  Rocket,
   Settings,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -72,6 +73,11 @@ type MobileHomeScreenProps = {
   /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
   onCreateIssue: () => void;
   onAskCrossRepoQuestion: () => void;
+  /**
+   * 新規アプリの立ち上げ（#2188）。**メニューの最後に1行だけ置き、丸ボタンは増やさない**——
+   * 使うのは年に数回で、いちばん使うIssue作成の導線を1タップ遠くしないため。
+   */
+  onLaunchNewApp: () => void;
   /** 設定画面を開く（#1638。フッターのタブから外し、このヘッダーの歯車が入口になった） */
   onOpenSettings: () => void;
   /**
@@ -144,6 +150,7 @@ export function MobileHomeScreenView({
   onSelectRepository,
   onCreateIssue,
   onAskCrossRepoQuestion,
+  onLaunchNewApp,
   onOpenSettings,
   onRefresh,
   isRefreshing,
@@ -411,6 +418,23 @@ export function MobileHomeScreenView({
               </ul>
             </div>
           )}
+
+          {/*
+            新規アプリの立ち上げ（#2188）。PCの左メニュー（`sidebar-nav.tsx`）と同じく
+            **最下部に1行だけ**置く。丸ボタン（FAB）は「質問」「Issue作成」の2つのまま増やさない
+          */}
+          <div className="px-4 pb-4">
+            <Separator className="mb-2" />
+            <ul className="flex flex-col gap-1">
+              <MobileNavRow
+                label="新規アプリを立ち上げる"
+                icon={Rocket}
+                onClick={onLaunchNewApp}
+                count={null}
+                title="リポジトリの作成と、残りの作業のIssue起票までを行う"
+              />
+            </ul>
+          </div>
         </div>
       </div>
 

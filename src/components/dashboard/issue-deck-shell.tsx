@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
+import { NewAppDialog } from "@/components/dashboard/new-app-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
   CheckUserToastViewport,
@@ -231,6 +232,8 @@ export function IssueDeckShell({
    */
   const [configIssueOrigin, setConfigIssueOrigin] = useState<Issue | null>(null);
   const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
+  /** 新規アプリの立ち上げ（#2188）。入口はPCの左メニューとスマホのホームの最下部の1行だけ */
+  const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
   const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [codeReviewDialogOpen, setCodeReviewDialogOpen] = useState(false);
   const [codeReviewDialogRepo, setCodeReviewDialogRepo] = useState<string | null>(null);
@@ -1237,6 +1240,7 @@ export function IssueDeckShell({
                   onSelectRepository={selectRepository}
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
+                  onLaunchNewApp={() => setNewAppDialogOpen(true)}
                   onOpenSettings={selectMobileSettings}
                 />
               )}
@@ -1439,6 +1443,7 @@ export function IssueDeckShell({
                 activePullRequestView={filters.prview}
                 onSelectPullRequestView={selectPullRequestView}
                 onSelectFlow={selectFlowPane}
+                onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
@@ -1676,6 +1681,7 @@ export function IssueDeckShell({
           defaultRepositoryFullName={codeReviewDialogRepo}
           onCreated={handleIssueCreated}
         />
+        <NewAppDialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen} />
         <CrossRepoQuestionDialog
           open={crossQuestionDialogOpen}
           onOpenChange={setCrossQuestionDialogOpen}

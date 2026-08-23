@@ -184,6 +184,30 @@ export async function addIssueLabels(
 }
 
 /**
+ * GitHubネイティブのサブIssueとして紐付ける（#2188）。
+ *
+ * 親は`owner`/`repo`/`number`で指し、子は**Issueの数値id**（`number`ではない）で指す。
+ * サブIssueはリポジトリをまたげるので、`guchi-apps/vps`のIssueもissue-deckの親へ付けられる。
+ *
+ * **失敗しても呼び出し側は処理を止めない想定。** 紐付けが欠けても各Issueは独立して読めるため、
+ * 立ち上げ全体をやり直させるほどの失敗ではない。
+ */
+export async function addSubIssue(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+  subIssueId: number,
+): Promise<void> {
+  await requestJson(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/sub_issues`,
+    token,
+    "POST",
+    { sub_issue_id: subIssueId },
+  );
+}
+
+/**
  * リポジトリに**定義されている**ラベル名の集合を返す（#1490）。
  *
  * ラベルの付与エンドポイント（`addIssueLabels`）は、リポジトリに存在しないラベル名を渡すと

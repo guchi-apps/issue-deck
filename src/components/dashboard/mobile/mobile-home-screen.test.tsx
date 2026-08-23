@@ -107,6 +107,7 @@ function renderHome(
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
       onSelectFlow={() => {}}
+      onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
       onCreateIssue={() => {}}
@@ -147,6 +148,8 @@ describe("MobileHomeScreen（#1690）", () => {
       "すべてのPR",
       "実行中",
       "マージ待ち",
+      // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
+      "新規アプリを立ち上げる",
     ]);
   });
 
@@ -191,6 +194,7 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
+        onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
         onCreateIssue={() => {}}
@@ -384,6 +388,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
+        onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
         onCreateIssue={() => {}}

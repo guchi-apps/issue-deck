@@ -7,6 +7,7 @@ import {
   parseSessionPlanText,
   SESSION_PLAN_MARKER,
 } from "@/lib/dispatch/session-plan";
+import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 
 describe("buildSessionPlanCommentBody", () => {
   it("計画本文をそのまま載せ、その下にRemote Controlのリンクを置く", () => {
@@ -38,6 +39,24 @@ describe("buildSessionPlanCommentBody", () => {
     });
 
     expect(body.startsWith("<!-- plan-base: baf823f -->")).toBe(true);
+  });
+
+  // #2200: 見た目が変わったことは、計画本文を読み切る前に分かる必要がある
+  it("アーティファクトを取り込んだ回だけ、見出しの直後に案内を足す", () => {
+    const params = {
+      plan: "## アプローチ\n- あれをする",
+      remoteControlUrl: null,
+      planBaseSha: null,
+      hostName: null,
+    };
+
+    const updated = buildSessionPlanCommentBody({ ...params, artifactUpdated: true });
+    expect(updated).toContain("アーティファクトも更新しました");
+    expect(updated.indexOf("アーティファクトも更新しました")).toBeLessThan(
+      updated.indexOf("- あれをする"),
+    );
+
+    expect(buildSessionPlanCommentBody(params)).not.toContain("アーティファクトも更新しました");
   });
 
   it("SHAが取れなければplan-baseの行ごと落とす", () => {
@@ -98,8 +117,14 @@ describe("parseSessionPlanText", () => {
     expect(parseSessionPlanText(123)).toBeNull();
   });
 
+  // #2200: 切り出しに外れたアーティファクト（2MBまで）がそのまま届くことがあるので、
+  // 20万字では**その回の計画がどこにも残らない**。投稿・表示の切り詰めは別に効く
+  it("アーティファクトを埋めたままの計画も受け取る", () => {
+    expect(parseSessionPlanText("a".repeat(300000))).not.toBeNull();
+  });
+
   it("明らかに壊れた長さは受け取らない", () => {
-    expect(parseSessionPlanText("あ".repeat(200001))).toBeNull();
+    expect(parseSessionPlanText("あ".repeat(SESSION_ARTIFACT_HTML_LIMIT + 1))).toBeNull();
   });
 });
 

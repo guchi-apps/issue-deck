@@ -2024,6 +2024,9 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   URLではなくHTMLの原本を運んで自分のオリジンから出し直している。
   組み立てとCSPは[`lib/artifact-document.ts`](../src/lib/artifact-document.ts)、保存と
   取り出しは[`lib/dispatch/session-artifacts.ts`](../src/lib/dispatch/session-artifacts.ts)。
+  **入り口はもう1つあり、計画の承認前はこちらだけが通る**（#2200）。Plan modeで書けるのは
+  計画ファイルだけなので、その中に置かれたHTMLを`POST /api/dispatch/sessions/plan`が
+  切り出して同じ保存へ回す（[`lib/dispatch/plan-artifact.ts`](../src/lib/dispatch/plan-artifact.ts)）。
   **中身はエージェントが書いた任意のHTML・JSなので、配信のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
   手が届く）。**Issue詳細のカードに出るサムネイルも同じ配信URLのiframe**（#2190。幅1200pxで
@@ -2149,6 +2152,25 @@ pnpm test:unit   # vitestのみ
 管理者権限を要求するため、`ISSUE_DECK_SKIP_LAN_SETUP=1` が設定されている場合はスキップする
 （ワンクリック起動経路でUAC待ちから戻らずdevサーバーが起動しなくなるため。#1094。詳細は
 [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)）。
+
+## 新規アプリの立ち上げ
+
+画面の「新規アプリを立ち上げる」（#2188）。相談 → 設定 → 確認の4ステップで、GitHub
+リポジトリの作成と残りの作業のIssue起票までを行う。設計と「何を自動化し、何を人へ残すか」の
+線引きは[new-app-launch.md](new-app-launch.md)を参照。
+
+- **判定・本文の組み立ては`lib/new-app/`の純粋関数**（`spec.ts`＝決めごとの型と導出、
+  `vps-inventory.ts`＝vps READMEとvhostの解析、`plan.ts`＝作られるものとIssue本文、
+  `parse.ts`＝APIが受け取る値の検証）。**ウィザードのコンポーネントが直接importするので、
+  ここから`lib/github/`を読まない**（上記の`issues-api.ts`の制約）。GitHubを叩くのは
+  `lib/github/vps-inventory-api.ts`と`lib/github/repositories-api.ts`。
+- **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・
+  予約済みポート）と、vhostの`ServerName`／`ServerAlias`。**READMEの散文の「空きは〜」と
+  vhostのファイル名は読まない**——どちらも実態とずれる（`wordpress.conf`の`ServerName`は
+  `blog.gucchii.com`）。読めなかったときは自動採番せず手入力に倒す。
+- **生成する手作業Issueのうち、サブPCのものは代行実行の条件を満たす形で書く**
+  （デバイスがサブPC1つ・1手順1コマンドブロック・対話コマンドとプレースホルダ無し）。
+  `lib/new-app/plan.test.ts`が実物の`buildManualStepRunPlan`に通して見張っている。
 
 ## 環境変数
 

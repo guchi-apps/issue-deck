@@ -11,6 +11,7 @@ import {
   GitBranch,
   Lock,
   Plus,
+  Rocket,
   Settings2,
   Star,
   X,
@@ -54,6 +55,11 @@ type SidebarNavProps = {
   onSelectPullRequestView: (view: PullRequestViewId) => void;
   /** 「ブランチ」画面を開く（#1455） */
   onSelectFlow: () => void;
+  /**
+   * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
+   * 使うのは年に数回で、状態を持たない入口のため。
+   */
+  onLaunchNewApp: () => void;
   navCounts: Record<NavViewId, number>;
   /**
    * 「ユーザーの確認待ち」へ一緒に出す、ユーザーのマージ待ちPRの件数（#1613）。
@@ -114,6 +120,7 @@ export function SidebarNavView({
   activePullRequestView,
   onSelectPullRequestView,
   onSelectFlow,
+  onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
@@ -503,6 +510,24 @@ export function SidebarNavView({
         <button type="button" className="mt-1 px-2 text-xs text-primary hover:underline">
           すべてのラベルを見る
         </button>
+      </div>
+
+      {/*
+        新規アプリの立ち上げ（#2188）。**最下部に1行だけ置く。** 使うのは年に数回なので、
+        上の常用の並びには混ぜない。スマホは同じ扱いでホーム画面のメニューの最後に置いている
+      */}
+      <div>
+        <ul className="flex flex-col gap-0.5">
+          {navRow({
+            key: "new-app",
+            label: "新規アプリを立ち上げる",
+            icon: Rocket,
+            active: false,
+            onClick: onLaunchNewApp,
+            count: null,
+            title: "リポジトリの作成と、残りの作業のIssue起票までを行う",
+          })}
+        </ul>
       </div>
     </nav>
   );

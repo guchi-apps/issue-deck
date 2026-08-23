@@ -731,16 +731,24 @@ post_to_issue_deck_capture() {
   dispatch_secret="$(dispatch_env_value DISPATCH_SECRET)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 1
   if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
-    printf '%s %s\n' "$path" "$body" >&2
+    # **本文は先頭だけ出す**（#2200）。計画にアーティファクトのHTMLが入ると数百KBになり、
+    # 端末へ丸ごと流れると他が読めなくなる（アーティファクトの送出と同じ扱い）
+    printf '%s %s\n' "$path" "${body:0:300}" >&2
     return 0
   fi
   # **計画の投稿はGitHubへコメントを書く往復を含む**ので、報告（`post_to_issue_deck`）より
   # 長く待つ。ここで切れると`planRequestId`が返らず、サーバー側には返事待ちができているのに
   # フックは待たない＝画面にだけ「承認を待っています」が残る（#2108）。
-  curl -fsS --max-time 30 \
+  #
+  # **本文は引数ではなく標準入力から渡す**（#2200）。計画にアーティファクトのHTMLを埋めて
+  # 差し替えられるようになったため、ここを通る本文は数百KBになりうる。`-d "$body"`だと
+  # `ps`の出力にも argv の上限にも掛かり、送信ごと落ちる（＝`planRequestId`が返らず、
+  # 計画コメントも承認パネルも出ない）。アーティファクトの送出が同じ理由で
+  # `--data-binary @-`にしてある
+  printf '%s' "$body" | curl -fsS --max-time 30 \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $dispatch_secret" \
-    -d "$body" \
+    --data-binary @- \
     "${app_base_url%/}$path" 2>/dev/null
 }
 

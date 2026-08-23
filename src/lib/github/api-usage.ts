@@ -60,6 +60,9 @@ export const GITHUB_API_FEATURES = [
   { key: "sync", label: "Issueの再同期" },
   { key: "repo_sync", label: "リポジトリの再同期" },
   { key: "setup", label: "セットアップ・インストール" },
+  // 新規アプリの立ち上げ（#2188）。空き確認（vpsのREADMEとvhostの読み取り）と、
+  // リポジトリ作成・Issue一式の起票。年に数回の操作なので他とは分けて数える
+  { key: "new_app_launch", label: "新規アプリの立ち上げ" },
   { key: "other", label: "その他" },
 ] as const;
 
