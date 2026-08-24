@@ -6,6 +6,8 @@ import {
   selectCheckUserRunningIssueIds,
 } from "@/lib/check-user-attention";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
+import type { SessionQuestionRequestView } from "@/lib/dispatch/session-question-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -104,6 +106,43 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
   };
 }
 
+function makePlanRequest(
+  overrides: Partial<SessionPlanRequestView> = {},
+): SessionPlanRequestView {
+  return {
+    id: "plan-1",
+    repositoryFullName: REPO,
+    issueNumber: 100,
+    hostName: "subpc",
+    plan: "## 要約",
+    status: "WAITING",
+    createdAt: new Date(NOW - 60_000).toISOString(),
+    expiresAt: new Date(NOW + 29 * 60 * 1000).toISOString(),
+    decidedAt: null,
+    delivered: false,
+    ...overrides,
+  };
+}
+
+function makeQuestionRequest(
+  overrides: Partial<SessionQuestionRequestView> = {},
+): SessionQuestionRequestView {
+  return {
+    id: "question-1",
+    repositoryFullName: REPO,
+    issueNumber: 100,
+    hostName: "subpc",
+    questions: [],
+    answers: null,
+    status: "WAITING",
+    createdAt: new Date(NOW - 60_000).toISOString(),
+    expiresAt: new Date(NOW + 4 * 60 * 1000).toISOString(),
+    decidedAt: null,
+    delivered: false,
+    ...overrides,
+  };
+}
+
 function context(overrides: Partial<Parameters<typeof isCheckUserWaitingForAgent>[1]> = {}) {
   return { pullRequests: [], sessions: [], now: NOW, ...overrides };
 }
@@ -176,6 +215,71 @@ describe("isCheckUserWaitingForAgent", () => {
     ).toBe(false);
   });
 
+  it("計画の承認待ちがあれば、セッションが作業中でも実行中ではない（#2238）", () => {
+    const issue = makeIssue({ labels: [label("00.check-user"), label("01.check-plan")] });
+    expect(
+      isCheckUserWaitingForAgent(
+        issue,
+        context({ sessions: [makeSession()], planRequests: [makePlanRequest()] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("質問の回答待ちがあれば、セッションが作業中でも実行中ではない（#2238）", () => {
+    const issue = makeIssue({ labels: [label("00.check-user"), label("01.check-input")] });
+    expect(
+      isCheckUserWaitingForAgent(
+        issue,
+        context({ sessions: [makeSession()], questionRequests: [makeQuestionRequest()] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("対応PRのCIが実行中でも、答えを待っているなら実行中ではない（#2238）", () => {
+    expect(
+      isCheckUserWaitingForAgent(
+        makeIssue(),
+        context({
+          pullRequests: [makePullRequest({ ciState: "pending" })],
+          planRequests: [makePlanRequest()],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isCheckUserWaitingForAgent(
+        makeIssue(),
+        context({
+          pullRequests: [makePullRequest({ ciState: "pending" })],
+          questionRequests: [makeQuestionRequest()],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("答えが済んだ・別Issueの待ちは材料にしない（#2238）", () => {
+    const issue = makeIssue({ labels: [label("00.check-user"), label("01.check-plan")] });
+    expect(
+      isCheckUserWaitingForAgent(
+        issue,
+        context({
+          sessions: [makeSession()],
+          planRequests: [
+            makePlanRequest({
+              status: "APPROVED",
+              decidedAt: new Date(NOW - 1_000).toISOString(),
+            }),
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isCheckUserWaitingForAgent(
+        issue,
+        context({ sessions: [makeSession()], planRequests: [makePlanRequest({ issueNumber: 999 })] }),
+      ),
+    ).toBe(true);
+  });
+
   it("別Issueのセッションは材料にしない", () => {
     expect(
       isCheckUserWaitingForAgent(
@@ -199,6 +303,37 @@ describe("selectCheckUserRunningIssueIds", () => {
       context({ pullRequests: [makePullRequest({ ciState: "pending" })] }),
     );
     expect([...ids]).toEqual(["running"]);
+  });
+
+  it("計画・質問の待ちを抱えた2件は、セッションが作業中でも実行中に数えない（#2238）", () => {
+    // #2238の再現。どちらもサブPCのセッションが`WORKING`のまま残っており、
+    // 待ちを見ないと2件とも実行中に落ちて左メニューの件数が0になっていた
+    const planIssue = makeIssue({
+      id: "plan",
+      number: 2236,
+      labels: [label("00.check-user"), label("01.check-plan")],
+    });
+    const questionIssue = makeIssue({
+      id: "question",
+      number: 2237,
+      labels: [label("00.check-user"), label("01.check-input")],
+    });
+    const sessions = [makeSession({ issueNumber: 2236 }), makeSession({ issueNumber: 2237 })];
+
+    expect([
+      ...selectCheckUserRunningIssueIds([planIssue, questionIssue], context({ sessions })),
+    ]).toEqual(["plan", "question"]);
+
+    expect([
+      ...selectCheckUserRunningIssueIds(
+        [planIssue, questionIssue],
+        context({
+          sessions,
+          planRequests: [makePlanRequest({ issueNumber: 2236 })],
+          questionRequests: [makeQuestionRequest({ issueNumber: 2237 })],
+        }),
+      ),
+    ]).toEqual([]);
   });
 });
 

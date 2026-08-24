@@ -70,6 +70,39 @@ describe("decideCheckUserPush", () => {
     ).toBe("send");
   });
 
+  it("計画・質問の待ちが生きていれば、待ち時間を過ぎていなくても送る（#2238）", () => {
+    expect(
+      decideCheckUserPush({
+        labels: [CHECK_USER, { name: "01.check-input" }],
+        checkUserLabeledAt: at(5_000),
+        hasPendingSessionRequest: true,
+        now: NOW,
+      }),
+    ).toBe("send");
+  });
+
+  it("01.check-mergeでも、待ちが生きていれば長い待ち時間を待たない（#2238）", () => {
+    expect(
+      decideCheckUserPush({
+        labels: [CHECK_USER, { name: "01.check-merge" }],
+        checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
+        hasPendingSessionRequest: true,
+        now: NOW,
+      }),
+    ).toBe("send");
+  });
+
+  it("待ちが無ければ従来どおり待ち時間で決める（#2238）", () => {
+    expect(
+      decideCheckUserPush({
+        labels: [CHECK_USER, { name: "01.check-input" }],
+        checkUserLabeledAt: at(5_000),
+        hasPendingSessionRequest: false,
+        now: NOW,
+      }),
+    ).toBe("wait");
+  });
+
   it("古すぎる確認待ちは送らずに送信済みとして畳む", () => {
     expect(
       decideCheckUserPush({
