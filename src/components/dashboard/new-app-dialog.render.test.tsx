@@ -35,6 +35,11 @@ const PREFLIGHT_OK = {
   repository: { name: "kakei-report", taken: false },
   hostname: { value: "kakei-report.gucchii.com", taken: false },
   port: { suggested: 3112, note: "使用中: 3101・3111", used: [3101, 3111] },
+  localPortBand: {
+    base: 25000,
+    alreadyListed: false,
+    note: "ベース値 25000 を確保します（開発サーバーは 25000 + Issue番号）",
+  },
   vpsRead: true,
 };
 
@@ -135,6 +140,7 @@ describe("NewAppDialog", () => {
         repository: { name: "kakei-report", taken: false },
         hostname: { value: "", taken: null },
         port: { suggested: null, note: null },
+        localPortBand: { base: null, alreadyListed: false, note: "読めませんでした" },
         vpsRead: false,
       }),
     });
@@ -146,14 +152,17 @@ describe("NewAppDialog", () => {
     ).toBeTruthy();
   });
 
-  it("確認ステップで7件と、自動・代行・手作業の内訳を出す", async () => {
+  it("確認ステップで8件と、自動・代行・手作業の内訳を出す", async () => {
     mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
     await advanceToPlacement();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("7件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
 
     expect(screen.getAllByText("guchi-apps/kakei-report").length).toBeGreaterThan(0);
+    // 払い出す予定のポート帯も押す前に読み取れる（#2225）
+    expect(screen.getByText(/ローカルセッションのポート帯: ベース値 25000 を確保します/)).toBeTruthy();
+    expect(screen.getByText(/ローカルセッションの開発サーバーのポート帯 25000 を確保する/)).toBeTruthy();
     // DNSが自動化できないことが、押す前に読み取れる
     expect(screen.getAllByText("あなたが実行").length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText("代行できる").length).toBeGreaterThanOrEqual(1);
@@ -205,7 +214,7 @@ describe("NewAppDialog", () => {
 
     await advanceToPlacement();
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("7件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /立ち上げを開始/ }));
 
     await waitFor(() =>

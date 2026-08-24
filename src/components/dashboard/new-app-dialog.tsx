@@ -28,6 +28,7 @@ import {
   buildNewAppPlan,
   type NewAppArtifact,
   type NewAppCreatedRef,
+  type NewAppPlanOptions,
 } from "@/lib/new-app/plan";
 import {
   NEW_APP_AUTH_LABELS,
@@ -98,6 +99,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
   const [draft, setDraft] = useState<NewAppDraft | null>(null);
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [created, setCreated] = useState<NewAppCreatedRef[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [launchFailed, setLaunchFailed] = useState(false);
 
   const { consult, preflight: runPreflight, launch, isConsulting, isChecking, isLaunching, error, setError } =
@@ -188,6 +190,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
   const start = async () => {
     const result = await launch(spec);
     setCreated(result.created);
+    setWarnings(result.warnings);
     setLaunchFailed(result.failed);
     if (result.created.length > 0) setStep("done");
   };
@@ -199,6 +202,9 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
     preflight?.hostname.taken === true &&
     preflight.hostname.value === hostnameFor(spec);
   const canProceed = specErrors.length === 0 && !repositoryTaken && !hostnameTaken;
+  // 払い出す帯はpreflightが実物の対応表から決める。まだ読めていなければ値を出さない
+  const planOptions = { localPortBase: preflight?.localPortBand?.base ?? null };
+  const parentIssue = created.find((ref) => ref.kind === "parent-issue");
   const turns = countConsultTurns(messages);
 
   return (
@@ -249,10 +255,12 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
             />
           )}
 
-          {step === "confirm" && <ConfirmStep spec={spec} />}
+          {step === "confirm" && (
+            <ConfirmStep spec={spec} preflight={preflight} planOptions={planOptions} />
+          )}
 
           {step === "done" && (
-            <DoneStep spec={spec} created={created} failed={launchFailed} />
+            <DoneStep spec={spec} created={created} warnings={warnings} failed={launchFailed} />
           )}
 
           {specErrors.length > 0 && step === "confirm" && (
@@ -314,7 +322,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
               </Button>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
-                  {buildNewAppPlan(spec).length}件を作成します
+                  {buildNewAppPlan(spec, planOptions).length}件を作成します
                 </span>
                 <Button onClick={start} disabled={!canProceed || isLaunching}>
                   {isLaunching ? <Loader2 className="animate-spin" /> : <Rocket />}
@@ -329,9 +337,9 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 閉じる
               </Button>
-              {created[1] && (
+              {parentIssue && (
                 <Button asChild>
-                  <a href={created[1].url} target="_blank" rel="noreferrer">
+                  <a href={parentIssue.url} target="_blank" rel="noreferrer">
                     親Issueを開く
                     <ExternalLink data-icon="inline-end" />
                   </a>
@@ -816,8 +824,16 @@ function PlacementStep({
   );
 }
 
-function ConfirmStep({ spec }: { spec: NewAppSpec }) {
-  const artifacts = buildNewAppPlan(spec);
+function ConfirmStep({
+  spec,
+  preflight,
+  planOptions,
+}: {
+  spec: NewAppSpec;
+  preflight: PreflightResult | null;
+  planOptions: NewAppPlanOptions;
+}) {
+  const artifacts = buildNewAppPlan(spec, planOptions);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -831,6 +847,11 @@ function ConfirmStep({ spec }: { spec: NewAppSpec }) {
         ))}
       </div>
       <p className="text-xs text-muted-foreground">公開URL: {publicUrlFor(spec)}</p>
+      {preflight?.localPortBand && (
+        <p className="text-xs text-muted-foreground">
+          ローカルセッションのポート帯: {preflight.localPortBand.note}
+        </p>
+      )}
       <ul className="flex flex-col gap-2">
         {artifacts.map((artifact) => (
           <li key={artifact.kind} className="flex items-start gap-2 rounded-lg border p-2.5">
@@ -866,10 +887,12 @@ function AutomationChip({ automation }: { automation: NewAppArtifact["automation
 function DoneStep({
   spec,
   created,
+  warnings,
   failed,
 }: {
   spec: NewAppSpec;
   created: NewAppCreatedRef[];
+  warnings: string[];
   failed: boolean;
 }) {
   return (
@@ -911,6 +934,19 @@ function DoneStep({
           </li>
         ))}
       </ul>
+      {warnings.length > 0 && (
+        <ul className="flex flex-col gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+          {warnings.map((warning) => (
+            <li
+              key={warning}
+              className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+            >
+              <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+              <span className="min-w-0 flex-1">{warning}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

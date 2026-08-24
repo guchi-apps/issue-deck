@@ -5,6 +5,11 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { addSubIssue, createIssue } from "@/lib/github/issues-api";
 import {
+  openLocalPortBandPullRequest,
+  planLocalPortBand,
+  type LocalPortBandPlan,
+} from "@/lib/github/local-port-band-api";
+import {
   cloneRepositoryLabels,
   createOrgRepository,
   repositoryExists,
@@ -21,12 +26,16 @@ import {
   buildInitIssueTitle,
   buildParentIssueBody,
   buildParentIssueTitle,
+  buildPortBandCommitMessage,
+  buildPortBandPullRequestBody,
+  buildPortBandPullRequestTitle,
   buildSubpcManualIssueBody,
   buildSubpcManualIssueTitle,
   buildVpsIssueBody,
   buildVpsIssueTitle,
   buildVpsManualIssueBody,
   buildVpsManualIssueTitle,
+  portBandBranchName,
   repositoryFullName,
   type NewAppArtifactKind,
   type NewAppCreatedRef,
@@ -52,10 +61,21 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 作成で弾かれるので、続きは作られたIssueから人が進める。
  *
  * 作る順序はIssueの本文が互いを参照する都合で決まっている。
- * 親 → サブPCの手作業 → ブラウザの手作業 → vpsのVirtualHost → VPSの手作業 → 初期化。
+ * 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 → vpsのVirtualHost → VPSの手作業 → 初期化。
+ *
+ * **ローカルセッションのポート帯（#2225）だけは、何かを作る前に決めておく。**
+ * `scripts/local-repo-ports.conf`を読めなければ`port_band_unavailable`で止める——
+ * 帯を確保せずに立ち上げを終えると、汎用ランチャーの既定 `3000 + Issue番号` に落ちて
+ * 未登録のリポジトリ同士でポートが衝突する（#2213で実際に漏れた）。まだ何も作っていない
+ * 時点で止めるので、直してから押し直せる。**Pull Requestの作成そのものに失敗したときは
+ * 止めない**——残りのIssueを作らずに終える方が損失が大きいので、`warnings`で画面へ返す。
  */
 
-type FailureReason = "repository_taken" | "hostname_taken" | "launch_failed";
+type FailureReason =
+  | "repository_taken"
+  | "hostname_taken"
+  | "port_band_unavailable"
+  | "launch_failed";
 
 type LaunchFailure = {
   step: NewAppArtifactKind;
@@ -87,10 +107,11 @@ async function handlePOST(request: NextRequest) {
   }
 
   const created: NewAppCreatedRef[] = [];
+  const warnings: string[] = [];
 
   const result = await withUserGithubToken(user, "POST /api/new-app", async (token) => {
     try {
-      return await launchNewApp(token, spec, created);
+      return await launchNewApp(token, spec, created, warnings);
     } catch (error) {
       // 401だけは`withUserGithubToken`へトークンの更新を任せるため投げ直す
       if (error instanceof GithubApiError && error.status === 401) throw error;
@@ -114,11 +135,12 @@ async function handlePOST(request: NextRequest) {
         step: result.value.step,
         message: result.value.message,
         created,
+        warnings,
       },
       { status: 409 },
     );
   }
-  return NextResponse.json({ created });
+  return NextResponse.json({ created, warnings });
 }
 
 /** 成功したら`null`、続けられない理由が分かっていれば`LaunchFailure`を返す。 */
@@ -126,6 +148,7 @@ async function launchNewApp(
   token: string,
   spec: NewAppSpec,
   created: NewAppCreatedRef[],
+  warnings: string[],
 ): Promise<LaunchFailure | null> {
   const [parentOwner, parentRepo] = NEW_APP_PARENT_REPOSITORY.split("/");
   const [vpsOwner, vpsRepo] = NEW_APP_VPS_REPOSITORY.split("/");
@@ -141,6 +164,21 @@ async function launchNewApp(
 
   const repo = repositoryFullName(spec);
 
+  // ローカルセッションのポート帯は**何かを作る前に**決める。読めない・上限に達したなら
+  // ここで止める（まだ何も作っていないので、直して押し直せる）
+  let portBand: LocalPortBandPlan;
+  try {
+    portBand = await planLocalPortBand(token, repo);
+  } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) throw error;
+    console.error("[POST /api/new-app] ポート帯を決められませんでした", error);
+    return {
+      step: "port-band",
+      reason: "port_band_unavailable",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
   // 1. リポジトリ
   const repository = await createOrgRepository(NEW_APP_ORG, token, {
     name: spec.repositoryName,
@@ -155,7 +193,13 @@ async function launchNewApp(
     token,
   );
 
-  const refs: NewAppIssueRefs = { parent: "", vps: null, subpc: null };
+  const refs: NewAppIssueRefs = {
+    parent: "",
+    vps: null,
+    subpc: null,
+    localPortBase: portBand.base,
+    portBandPullRequest: null,
+  };
 
   const createIn = async (
     owner: string,
@@ -177,13 +221,47 @@ async function launchNewApp(
     parentRepo,
     "parent-issue",
     buildParentIssueTitle(spec),
-    buildParentIssueBody(spec),
+    buildParentIssueBody(spec, { localPortBase: portBand.base }),
   );
   refs.parent = parent.reference;
 
   const children: number[] = [];
 
-  // 3. サブPCの手作業（初期化Issueがこれを前提条件に指す）
+  // 3. ポート帯のPull Request。**ここの失敗では止めない**——残りのIssueを作らずに
+  //    終える方が損失が大きい。帯の値は親Issueの本文に残るので手でも足せる
+  if (portBand.alreadyListed) {
+    warnings.push(
+      `${repo} はすでに scripts/local-repo-ports.conf に載っていました（ベース値 ${portBand.base}）。Pull Requestは作っていません。`,
+    );
+  } else {
+    try {
+      const pull = await openLocalPortBandPullRequest(token, {
+        branch: portBandBranchName(spec),
+        repositoryFullName: repo,
+        base: portBand.base,
+        comment: `${spec.displayName}（${parent.reference}）。画面の「新規アプリを立ち上げる」が確保した帯。`,
+        commitMessage: buildPortBandCommitMessage(spec, portBand.base),
+        title: buildPortBandPullRequestTitle(spec, portBand.base),
+        body: buildPortBandPullRequestBody(spec, portBand.base, refs),
+        conf: portBand.conf,
+      });
+      refs.portBandPullRequest = pull.reference;
+      created.push({
+        kind: "port-band",
+        title: buildPortBandPullRequestTitle(spec, portBand.base),
+        reference: pull.reference,
+        url: pull.htmlUrl,
+      });
+    } catch (error) {
+      if (error instanceof GithubApiError && error.status === 401) throw error;
+      console.error("[POST /api/new-app] ポート帯のPull Requestを作れませんでした", error);
+      warnings.push(
+        `ローカルセッションのポート帯（ベース値 ${portBand.base}）のPull Requestを作れませんでした。scripts/local-repo-ports.conf へ手で追記してください。`,
+      );
+    }
+  }
+
+  // 4. サブPCの手作業（初期化Issueがこれを前提条件に指す）
   const subpc = await createIn(
     parentOwner,
     parentRepo,
@@ -195,7 +273,7 @@ async function launchNewApp(
   refs.subpc = subpc.reference;
   children.push(subpc.id);
 
-  // 4. ブラウザの手作業
+  // 5. ブラウザの手作業
   const browser = await createIn(
     parentOwner,
     parentRepo,
@@ -206,7 +284,7 @@ async function launchNewApp(
   );
   children.push(browser.id);
 
-  // 5. vpsのVirtualHost（VPSの手作業Issueがこれを指す）
+  // 6. vpsのVirtualHost（VPSの手作業Issueがこれを指す）
   const vps = await createIn(
     vpsOwner,
     vpsRepo,
@@ -217,7 +295,7 @@ async function launchNewApp(
   refs.vps = vps.reference;
   children.push(vps.id);
 
-  // 6. VPSの手作業
+  // 7. VPSの手作業
   const vpsManual = await createIn(
     parentOwner,
     parentRepo,
@@ -228,7 +306,7 @@ async function launchNewApp(
   );
   children.push(vpsManual.id);
 
-  // 7. 新しいリポジトリの初期化
+  // 8. 新しいリポジトリの初期化
   const init = await createIn(
     NEW_APP_ORG,
     spec.repositoryName,
@@ -238,7 +316,7 @@ async function launchNewApp(
   );
   children.push(init.id);
 
-  // 8. サブIssueとして紐付ける。**ここの失敗では止めない**——紐付きが欠けても
+  // 9. サブIssueとして紐付ける。**ここの失敗では止めない**——紐付きが欠けても
   //    各Issueは独立して読め、作り直しの必要が無い
   for (const childId of children) {
     try {

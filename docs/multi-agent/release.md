@@ -70,6 +70,19 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 developへ取り込んだうえでリリースPRをcloseし、リリースを起動し直す（新しい凍結ブランチが
 現在のdevelop先端で作られる）。
 
+**この1手順目（修復PRをdevelopへ入れる）は自動では進まない**（#2230）。
+`reusable-claude-review-develop.yml`の`identify-issue`は対応Issue番号をブランチ名
+`issue-<番号>`からしか特定せず、自動修復が作る`pr-repair/<対象PR番号>-<run_id>`では番号が
+空になる。その結果、最後の`auto-merge`ジョブが「対応Issue番号を特定できないため、自動マージを
+スキップします。」で終わる。人がマージするのは設計どおりだが、**気づく手がかりは対象PRへ
+投稿されるコメント1件しか無い。** 実際に#2230では、CIグリーン・コンフリクト無しの修復PRが
+18時間openのまま放置され、そのあいだ`main`は`4.31.0`・`develop`は`4.32.0`で本番デプロイが
+止まっていた。自動修復を起動したら、修復PRがdevelopへ入ったかまで見届けること。
+
+**`deploy.yml`の実行履歴から診断しない。** `deploy.yml`は`main`へのpushでしか走らないため、
+リリースPRが止まっている間は「直近すべて成功」に見え、本番も動いたままになる。見るべきは
+`main`と`develop`の`package.json`のversion差と、base=mainのopenなPRのCI状態。
+
 ### ブランチ名を変えるときに揃える場所
 
 `release/v`（バンプPR）と接頭辞が重ならない名前にしてある。重なると`classifyPullRequest`の判定順
