@@ -85,7 +85,7 @@ export type IssueListQueryResult =
  * 指定した進捗状態にある**openな**Issueの番号を、リポジトリ単位で返す（昇順）。
  *
  * develop→mainのリリース関連ジョブ（`main-pr-in-progress`・`main-pr-merged`）と
- * `develop-merge-sweep`が使う。以前は`gh issue list --label "05.develop"`のように
+ * `main-pr-in-progress`・`main-pr-merged`が使う。以前は`gh issue list --label "05.develop"`のように
  * ラベルで探していた部分にあたる。
  *
  * **closedなIssueは返さない。** 元のラベル検索が`--state open`で絞っていたのと揃える。

@@ -45,6 +45,9 @@ export const COMMENT_SOURCE_IDS = [
   "issue-labels",
   // カンバンのStatus変更を受けてissue-deckが投稿する起動コメント（#991 Phase 3）
   "project-status-dispatch",
+  // developへのマージ後に取り残された進捗を回収する巡回（#2294）。`issue-labels`の
+  // `develop-merge-sweep`ジョブが投稿していたものを、issue-deck側の巡回へ移した先
+  "progress-sweep",
 ] as const;
 
 export type CommentSourceId = (typeof COMMENT_SOURCE_IDS)[number];
@@ -167,6 +170,7 @@ const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "claude-conflict-resolve": "conflict-resolver",
   "claude-ci-fix": "ci-fixer",
   "issue-labels": "notifier",
+  "progress-sweep": "notifier",
   // project-status-dispatchは意図的に割り当てない。カンバンのStatus変更で起動した
   // コメントは、issue-mapper.tsが投稿者マーカーから操作者本人へ寄せて表示するため
   // （ボタン経由の起動と同じ見た目にする。#1026）、ボットの役割を持たせるとボット名と

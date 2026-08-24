@@ -58,13 +58,18 @@ JSON
 ## Actions分数はpublic化で実質ゼロになっている
 
 2026-08時点で、org全体のActions実行 約25,800分のうちpublicぶん（約24,300分）は全額割引で
-$0になっており、**Actionsの課金はorg全体でnet $0.00**。無料枠の逼迫はprivateリポジトリ
+$0になっており、**Actionsの課金はorg全体でnet $0.00**だった。無料枠の逼迫はprivateリポジトリ
 （`ops-dashboard`・`clip-hive`・`db-console`）に集中していたため、public化で解消した
 （guchi-apps/ops-dashboard#120・guchi-apps/clip-hive#51）。
 
-privateのまま残すリポジトリでActionsの分数が問題になった場合、削れるのは`schedule`の間引きと
-ジョブの統合だが、実測で3割程度にとどまる。**分数を根本的に減らしたいならpublic化を検討する**
-のが先で、それができないなら実行そのものを減らす。
+**ただし無料枠は2026-08-23に枯れ、以後はprivateリポジトリの全量が課金される**（#2294。
+割引額が0になり、`vps` 265分・`docs` 113分・`claude-config` 75分・`subpc` 66分が
+1日で$2.4になった）。**public化していないリポジトリが残っている限り、この状態は毎月続く。**
+
+privateのまま残すリポジトリでActionsの分数が問題になった場合、`schedule`の間引きとジョブの
+統合で削れるのは実測で3割程度にとどまる。**分数を根本的に減らしたいなら、その定期実行を
+Actionsの外へ出せないかを先に考える**（下記#2294）。出せないならpublic化を検討し、
+それもできないなら実行そのものを減らす。
 
 ### 画面から見る（#2212）
 
@@ -96,6 +101,58 @@ issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日�
   いない」と誤読される**ため、画面には最後の明細の時刻（`lastReportedAt`）を必ず添える
 - `year`・`month`を付けると明細が発生時刻の粒度で返る（2026年8月分で356件・約97KB）。
   付けないと月単位に丸められるが、リポジトリが一部しか返らないため付けて呼ぶ
+
+## `schedule`は「対象0件でも」課金される（#2294）
+
+**Actionsの課金はジョブ単位で、1分未満は1分に切り上げられる。** 実際に何もしなかったジョブも、
+起動した以上は1分ぶんが課金される。**skipされたジョブは課金されない**（ランナーを取らないため）
+ので、効くのは「起動した」ジョブの数だけになる。
+
+2026年8月に無料枠が枯れた時点で、privateリポジトリのActions課金のほぼ全部が
+`issue-labels.yml`（ワークフロー名: Issue Progress）の15分ごとのcronだった。
+
+- 呼び出し先の`reusable-issue-labels.yml`は11ジョブだが、`schedule`で起きるのは
+  `develop-merge-sweep`と`manual-step-label`の2つだけ。残り9つはskipで課金されない
+- その2つの実測は20秒・5秒。それでも切り上げで**1回の実行あたり2分**が課金される
+- cronを持つprivateリポジトリは`vps`・`subpc`・`docs`・`claude-config`の4件。
+  `claude-config`は他にワークフローを持たず、月間消費180分すべてがこれだった。
+  `docs`も月306実行のうち301がIssue Progressで、月間消費302分とほぼ一致する
+
+**対処は「間引き」ではなく「Actionsの外へ出す」。** どちらのジョブも定期的に全体を見直す
+安全網で、GitHubのイベントとは無関係に動けばよい。issue-deckには同じ形の巡回が既に2本あった
+（コンフリクト巡回#2116・デプロイ失敗巡回#2236。サブPCのpollerが1巡ごとにissue-deckのAPIを
+叩き、issue-deckが連携済みリポジトリ全部を見る）ので、その3本目として
+`POST /api/issues/progress-sweep`へ移した（[progress-status-architecture.md](progress-status-architecture.md)
+「取り残しの回収はissue-deck側の巡回が担う」）。
+
+- **cronはcaller側（各リポジトリの`issue-labels.yml`）にあり、issue-deckから配る仕組みが無い。**
+  それでも課金は止まる——reusable側に`schedule`で動くジョブが1つも無くなれば、cronが起きても
+  全ジョブがskipになるため。**caller側のcronを消して回る必要はない**（空のrunが並ぶだけ）
+- **公開リポジトリぶんの無駄も同時に消える。** 課金されていなかっただけで、フリート全体では
+  月4万分規模のランナー時間をこの2ジョブが使っていた
+- **確認方法**は下記の「1回の実行で何分課金されたかを見る」
+
+### 1回の実行で何分課金されたかを見る
+
+```bash
+# 直近のscheduleのrunを1本取り、ジョブごとの実行・skipを見る
+rid=$(gh api "repos/guchi-apps/<repo>/actions/workflows/issue-labels.yml/runs?event=schedule&per_page=1" \
+  --jq '.workflow_runs[0].id')
+gh api "repos/guchi-apps/<repo>/actions/runs/$rid/jobs" \
+  --jq '.jobs[] | "\(.name)\t\(.conclusion)\t\(.started_at)→\(.completed_at)"'
+```
+
+`conclusion`が`skipped`のジョブは課金されない。`success`／`failure`のジョブの数が、
+そのまま**そのrunの課金分数の下限**（1ジョブ＝最低1分）になる。
+
+**ワークフロー別の内訳は実行回数から見る。** 課金レポート（下記API）はリポジトリ単位までしか
+分けてくれないため、どのワークフローが食っているかは実行回数で当たりを付ける。
+
+```bash
+gh api "repos/guchi-apps/<repo>/actions/runs?per_page=100&created=>=2026-08-23" \
+  --jq '[.workflow_runs[] | {n:.name, e:.event}] | group_by(.n)
+        | map("\(.[0].n): \(length) (\([.[].e]|unique|join(",")))") | .[]'
+```
 
 ## 新しくリポジトリを作るときの確認
 

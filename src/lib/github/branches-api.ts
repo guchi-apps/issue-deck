@@ -1,4 +1,6 @@
+import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql } from "@/lib/github/graphql";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import type { BranchComparison } from "@/types/branch-flow";
 
 /**
@@ -84,5 +86,80 @@ export async function lookupBranchRefs(
   return {
     existingBranches,
     developVsMain: repository.comparison?.compare ?? null,
+  };
+}
+
+/**
+ * ブランチの先端SHAを読む（#2294）。**ブランチが存在しなければ`null`。**
+ *
+ * 進捗の取り残し巡回（`progress-sweep-run.ts`）が「マージ済みPRの先端と現在のブランチの
+ * 先端が一致するか」を確かめるのに使う。`develop-merge-sweep`ジョブだった頃の
+ * `gh api repos/<repo>/git/ref/heads/issue-<番号>`にあたる。
+ *
+ * **404（＝マージ後に削除済み）は`null`を返して呼び出し側へ渡す。** 追加のpushが無い証拠
+ * として扱うため、取得できなかった（他の失敗）と区別する必要がある。それ以外の失敗は
+ * 例外にして、呼び出し側が次の巡回へ回せるようにする。
+ */
+export async function fetchBranchHeadSha(
+  owner: string,
+  repo: string,
+  branch: string,
+  token: string,
+): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const body: { object?: { sha?: unknown } } = await res.json().catch(() => ({}));
+  return typeof body.object?.sha === "string" ? body.object.sha : null;
+}
+
+/** `compareBranches`の結果。`develop...issue-<番号>`の三点比較から取れるものだけを持つ */
+export type BranchCompareResult = {
+  /** headにあってbaseに無いコミット数 */
+  aheadBy: number;
+  /**
+   * baseへ持ち込む変更のファイル数。**応答に`files`が無ければ`null`。**
+   * 三点比較なので、これが0ならマージしても何も入らない（#2289）。
+   */
+  changedFiles: number | null;
+  /** baseに無い最後のコミットの時刻（ISO8601）。取れなければ`null` */
+  lastCommitAt: string | null;
+};
+
+/**
+ * 2つのブランチを三点比較する（#2294）。取得できなければ`null`。
+ *
+ * 進捗の取り残し巡回が「developへ入っていないコミットが本当に残っているか」を確かめるのに
+ * 使う。`gh api repos/<repo>/compare/develop...issue-<番号>`にあたる。
+ */
+export async function compareBranches(
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+  token: string,
+): Promise<BranchCompareResult | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return null;
+  const body: {
+    ahead_by?: unknown;
+    files?: unknown;
+    commits?: { commit?: { committer?: { date?: unknown } } }[];
+  } = await res.json().catch(() => ({}));
+  if (typeof body.ahead_by !== "number") return null;
+  const lastCommit = Array.isArray(body.commits) ? body.commits[body.commits.length - 1] : undefined;
+  const lastCommitAt = lastCommit?.commit?.committer?.date;
+  return {
+    aheadBy: body.ahead_by,
+    changedFiles: Array.isArray(body.files) ? body.files.length : null,
+    lastCommitAt: typeof lastCommitAt === "string" ? lastCommitAt : null,
   };
 }

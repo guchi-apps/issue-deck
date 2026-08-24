@@ -179,8 +179,8 @@ Issueの完了判定をそこへ持ち込まない。
 - **`claude-review-develop.yml`は`base: main`のPRを判定しない**（callerのトリガーが
   `branches: [develop]`固定）。したがってこのPRは必ず人がマージする前提で、
   `main-direct-pr-opened`は経路の有無を調べず常に`00.check-user`を付ける
-- **定期実行の安全網は無い。** `develop-merge-sweep`が見るのは`--base develop`のマージ済みPR
-  だけで、main直行の取りこぼしは拾えない。`docs`は自動マージの経路を持たず人が手でマージする
+- **定期実行の安全網は無い。** 取り残しの巡回（後述「取り残しの回収はissue-deck側の巡回が担う」）が
+  見るのは`base: develop`のマージ済みPRだけで、main直行の取りこぼしは拾えない。`docs`は自動マージの経路を持たず人が手でマージする
   ため`pull_request: closed`は確実に発火するが、報告が5xxに当たり続けた場合は画面の
   「進捗」セレクトで直す
 - **拾い直せない以上、巻き戻す側を先に塞いである。** `wip-on-push`のマージ済み判定が
@@ -291,22 +291,46 @@ YAMLから`run:`本文を取り出し、`gh`・`curl`をスタブに差し替え
   （読み違えて見送ると、#1999で直したはずの「黙って取り残す」に戻るため）
 - **未マージのコミットがある場合だけ、取り残しかを判定する。** develop向けPRが開いていれば
   実装中なので何もしない。開いておらず、最後のコミットから猶予時間（既定120分）が過ぎている
-  ものだけを取り残しとして扱う。**回数ではなく時間で見るのは、このジョブが実行と実行の間に
-  状態を持てないため**（15分おきに走るだけで、前回何をしたかを覚えていない）
+  ものだけを取り残しとして扱う。**回数ではなく時間で見るのは、巡回が実行と実行の間に
+  状態を持てないため**（定期的に走るだけで、前回何をしたかを覚えていない）
 - **通知は`00.check-user`＋`01.check-blocked`とIssueコメント。** ユーザーがやることは計画の
   承認ではなく続け方の指示（新しいPRを作る／ブランチを捨てる）なので理由は`01.check-blocked`
 - **同じ先端について繰り返さない。** コメント末尾の`<!-- issue-deck-stranded:issue-<番号>@<SHA> -->`
   を既存コメントから探して冪等にする。新しいコミットがpushされればSHAが変わり、また通知される。
-  既存コメントの取得に失敗したときは通知せず次回のcronへ回す（二重投稿の方が重いため）
+  既存コメントの取得に失敗したときは通知せず次回の巡回へ回す（二重投稿の方が重いため）
 
-**検知できるのは`Develop PR`・`Implementation`にいるIssueだけ**（このジョブの走査対象がそこに
+**検知できるのは`Develop PR`・`Implementation`にいるIssueだけ**（走査対象がそこに
 限られるため）。取り残しを生むpushは`wip-on-push`が`implementation`を報告するので、実際に
 起きた形はこの範囲に入る。`Develop`のまま取り残された場合は拾えないが、走査対象を広げると
-リリース待ちの全Issueに対して15分おきにPRとcompareを引くことになるため広げていない。
+リリース待ちの全Issueに対して巡回のたびにPRとcompareを引くことになるため広げていない。
 
 **取り残しが解消されると自動で`Develop`へ進む。** 新しいPRを作ってマージすれば
 `develop-pr-merged`が、cherry-pick等で解消した場合は上の「未マージのコミットが無ければ進める」が
 拾い、どちらでも`00.check-user`は進捗の遷移とあわせて外れる。
+
+### 取り残しの回収はissue-deck側の巡回が担う（#2294）
+
+上の回収はもともと`reusable-issue-labels.yml`の`develop-merge-sweep`ジョブで、各リポジトリの
+`issue-labels.yml`が持つ15分ごとのcronで動いていた。**判定の中身は変えずに、実行する場所だけを
+issue-deck側の巡回（`POST /api/issues/progress-sweep`）へ移した。**
+
+移した理由は課金。**Actionsの課金はジョブ単位で1分未満切り上げ**なので、実測20秒しか動かない
+このジョブでも1回の実行で1分が課金される。同じcronで動く`manual-step-label`の埋め直しと
+あわせて2分で、privateリポジトリ（`vps`・`subpc`・`docs`・`claude-config`）のActions従量課金の
+ほとんどがこれになっていた（[github-billing.md](github-billing.md)）。
+
+- **判定は[`lib/github/progress-sweep.ts`](../src/lib/github/progress-sweep.ts)、IOは
+  [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)。** コンフリクト
+  巡回（#2116）・デプロイ失敗巡回（#2236）と同じ分け方で、サブPCのpollerが1巡ごとに叩く
+- **速くなった。** GitHubのscheduleはcronに15分と書いてもそのとおりには走らず、実測は24〜36分
+  間隔だった。巡回の間隔はissue-deck側の`PROGRESS_SWEEP_INTERVAL_MINUTES`（既定5分・0で無効）
+  だけで決まる
+- **対象の探し方が変わった。** `GET /api/progress`を経由せず、Projectのアイテム一覧を
+  installationごとに1回引いて全リポジトリぶんを振り分ける（リポジトリ数だけ盤面を読み直さない）
+- **pollerが止まっている間は巡回も止まる。** 既存の巡回2本と同じ前提で、GitHubのスケジューラ
+  への依存がサブPCへの依存に変わっている
+- **`schedule`で動くジョブはもう無い。** 他リポジトリのcallerに`cron`が残っていても、reusable側で
+  受けるジョブが1つも無いので全ジョブがskipされ、課金は発生しない（skipジョブは課金対象外）
 
 ## 目標アーキテクチャ
 
@@ -706,7 +730,7 @@ Status = 今どこにいるか、Label = どんな性質・条件があるか、
 | 形 | 返すもの | 使う側 |
 |---|---|---|
 | `?repository=owner/name&issue=123` | `{ status: "implementation" \| null }` | `reusable-issue-dispatch.yml`の実行モード判定 |
-| `?repository=owner/name&status=develop,release` | `{ issues: [12, 34] }`（openのみ・昇順） | `develop-merge-sweep`・`main-pr-in-progress`・`main-pr-merged`・`release-develop-to-main.yml` |
+| `?repository=owner/name&status=develop,release` | `{ issues: [12, 34] }`（openのみ・昇順） | `main-pr-in-progress`・`main-pr-merged`・`release-develop-to-main.yml` |
 
 実体は[`query-progress.ts`](../src/lib/github/query-progress.ts)。書き込み側と同じく
 **DBの`projectStatus`ではなくGitHubへ問い合わせる**（判定の正しさをDBの鮮度に依存させないため）。
