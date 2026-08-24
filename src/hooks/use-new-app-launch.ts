@@ -19,6 +19,14 @@ export type PreflightResult = {
   port: { suggested: number | null; note: string | null; used?: number[] };
   /** ローカルセッションの開発サーバーのポート帯（#2225） */
   localPortBand: { base: number | null; alreadyListed: boolean; note: string };
+  /**
+   * GitHub Appのインストール対象の選び方（#2248）。`needsRepositoryAdd`が真のときだけ、
+   * ブラウザの手作業Issueに「インストール対象へ追加する」が入る
+   */
+  githubApp: {
+    repositorySelection: "all" | "selected" | null;
+    needsRepositoryAdd: boolean;
+  };
   /** `guchi-apps/vps`を読めたか。falseなら空き番号は提案されない */
   vpsRead: boolean;
 };

@@ -6,6 +6,7 @@ import { planLocalPortBand } from "@/lib/github/local-port-band-api";
 import { repositoryExists } from "@/lib/github/repositories-api";
 import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
+import { resolveNewAppInstallationScope } from "@/lib/new-app/installation-scope";
 import { LOCAL_PORT_BAND_CONF_PATH } from "@/lib/new-app/local-port-bands";
 import { NEW_APP_ORG, newAppKindProfile, type NewAppKind } from "@/lib/new-app/spec";
 import {
@@ -21,6 +22,8 @@ import {
  * - ホスト名が空いているか（`guchi-apps/vps`のREADMEとvhostの`ServerName`）
  * - 本番ポートの空き番号（READMEの2つの表から計算する）
  * - ローカルセッションの開発サーバーのポート帯（issue-deckの`scripts/local-repo-ports.conf`）
+ * - GitHub Appのインストール対象の選び方（#2248。`selected`のときだけ、ブラウザの手作業Issueに
+ *   「インストール対象へ追加する」が入る）
  *
  * **何も作らない。** 押す前に何度でも呼べるようにしてある。
  *
@@ -56,6 +59,7 @@ async function handlePOST(request: NextRequest) {
       : null;
 
     const localPortBand = await describeLocalPortBand(token, repositoryName);
+    const githubApp = await resolveNewAppInstallationScope(user.id);
 
     // ホスト名を確かめないときはvhostを読まない（README だけでポートは決まる）
     const usage = await fetchVpsUsage(token, { includeVhosts: Boolean(hostname) });
@@ -67,6 +71,7 @@ async function handlePOST(request: NextRequest) {
         hostname: { value: hostname, taken: null },
         port: { suggested: null, note: null },
         localPortBand,
+        githubApp,
         vpsRead: false,
       };
     }
@@ -86,6 +91,7 @@ async function handlePOST(request: NextRequest) {
           : [],
       },
       localPortBand,
+      githubApp,
       vpsRead: true,
     };
   });

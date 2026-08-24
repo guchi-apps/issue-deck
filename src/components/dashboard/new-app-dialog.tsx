@@ -202,8 +202,13 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
     preflight?.hostname.taken === true &&
     preflight.hostname.value === hostnameFor(spec);
   const canProceed = specErrors.length === 0 && !repositoryTaken && !hostnameTaken;
-  // 払い出す帯はpreflightが実物の対応表から決める。まだ読めていなければ値を出さない
-  const planOptions = { localPortBase: preflight?.localPortBand?.base ?? null };
+  // 払い出す帯はpreflightが実物の対応表から決める。まだ読めていなければ値を出さない。
+  // GitHub Appのインストール対象への追加も、preflightが読んだ`repository_selection`で決まる
+  // （#2248。押した時点でサーバーがもう一度確かめるので、ここは表示のためだけ）
+  const planOptions = {
+    localPortBase: preflight?.localPortBand?.base ?? null,
+    githubAppNeedsRepositoryAdd: preflight?.githubApp?.needsRepositoryAdd ?? false,
+  };
   const parentIssue = created.find((ref) => ref.kind === "parent-issue");
   const turns = countConsultTurns(messages);
 
