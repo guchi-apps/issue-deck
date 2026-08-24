@@ -76,7 +76,7 @@ export type ProgressSweepSkipReason =
   | "develop_pr_open"
   /** 取り残しの疑いはあるが、最後のコミットから猶予時間が経っていない */
   | "within_grace"
-  /** 同じ先端についての取り残しを既に通知済み */
+  /** 同じ先端についての取り残しを既に通知済み（判定後に既存コメントを見て分かる） */
   | "already_notified";
 
 /** developとの三点比較の結果。取得できなかった場合はIO側が`null`を渡す */
@@ -110,8 +110,6 @@ export type ProgressSweepFacts = {
   compare: ProgressSweepCompare | null;
   /** 開いているdevelop向けPRがあるか */
   hasOpenDevelopPullRequest: boolean;
-  /** この先端についての取り残しを既に通知済みか */
-  strandedNotified: boolean;
 };
 
 export type ProgressSweepDecision =
@@ -173,9 +171,9 @@ export function decideProgressSweep(
   const grace = context.graceMinutes ?? PROGRESS_SWEEP_STRANDED_GRACE_MINUTES;
   if (ageMinutes < grace) return { action: "skip", reason: "within_grace" };
 
-  // 同じ先端について通知を繰り返さない。冪等でないと同じ内容が一日に何十件も積まれる。
-  if (facts.strandedNotified) return { action: "skip", reason: "already_notified" };
-
+  // 「同じ先端について通知済みか」はここでは見ない。**既存コメントの取得はGitHub APIを
+  // 消費する**ので、書く直前（この関数が`notify_stranded`を返した後）にIOが
+  // `hasStrandedNotice`で確かめる。見送るだけの巡回でコメントを引かないため。
   return {
     action: "notify_stranded",
     pullRequestUrl: merged.url,

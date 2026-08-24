@@ -41,11 +41,21 @@ import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress
  *
  * ## GitHub APIの消費
  *
- * 巡回1回あたり、installationごとにProjectのアイテム一覧（GraphQL）を1回。あとは
- * **`Develop PR`・`Implementation`にいるopenなIssueぶん**だけREST 1回（そのブランチの
- * クローズ済みPR。**ETagの条件付きGETが効くので、状況が変わらない間はレート制限を
- * 消費しない**）。マージ済みPRが見つかったIssueについてだけ、先端SHA・コメント・
- * （先端が食い違うときだけ）developとの比較が追加で走る。
+ * **消費先が変わる点に注意。** ジョブだったときは各リポジトリの`GITHUB_TOKEN`（リポジトリごと
+ * 1,000 req/時で隔離）だったが、ここではissue-deckのインストールトークン（5,000 req/時〜。
+ * PR一覧・Issue同期・CI状態と共有）を使う。共有枠を食い潰すと巻き添えで他の機能が落ちるため
+ * （`docs/code-map.md`「条件付きGET」）、平常時にほとんど消費しない形にしてある。
+ *
+ * - installationごとにProjectのアイテム一覧（GraphQL）を1回
+ * - `Develop PR`・`Implementation`にいるopenなIssueぶんだけREST 1回（そのブランチの
+ *   クローズ済みPR）。**ETagの条件付きGETを通すので、状況が変わらない間は304になり
+ *   レート制限を消費しない**——ジョブだったときの`gh pr list`には無かった性質
+ * - マージ済みPRが見つかったIssueについてだけ、先端SHAの取得が1回。先端が食い違うときだけ
+ *   developとの比較、さらに取り残しの疑いがあるときだけ開いているPRの確認（こちらも条件付きGET）
+ * - **コメント一覧は「書くと決めてから」1回だけ**。見送るだけの巡回では引かない
+ *
+ * 進めたIssueは次の巡回で対象から外れるので、増え続けるのは「取り残しとして通知済み」の
+ * ものだけになる（1件あたり2回・巡回ごと）。
  *
  * 手作業ラベルの埋め直し（`manual-step-label`ジョブのschedule分）は**issue-deckのDBを引く**
  * ので、GitHubへの問い合わせは実際に付けるときだけになる。
@@ -312,19 +322,8 @@ async function sweepIssue(params: {
     }
   }
 
-  const commentBodies = (await fetchCommentsForIssue(ownerLogin, name, issueNumber, token)).map(
-    (comment) => comment.body,
-  );
-
   const decision = decideProgressSweep(
-    {
-      mergedPullRequest,
-      branchHead,
-      compare,
-      hasOpenDevelopPullRequest,
-      strandedNotified:
-        branchHead !== null && hasStrandedNotice(commentBodies, issueNumber, branchHead),
-    },
+    { mergedPullRequest, branchHead, compare, hasOpenDevelopPullRequest },
     { now },
   );
 
@@ -333,7 +332,20 @@ async function sweepIssue(params: {
     return null;
   }
 
+  // **既存コメントは、書くと決めてから読む。** 見送るだけの巡回（`develop_pr_open`・
+  // `within_grace`など、同じIssueで何度も繰り返される側）でコメント一覧を引かないため。
+  const commentBodies = (await fetchCommentsForIssue(ownerLogin, name, issueNumber, token)).map(
+    (comment) => comment.body,
+  );
+
   if (decision.action === "notify_stranded") {
+    // 同じ先端について通知を繰り返さない。冪等でないと同じ内容が一日に何十件も積まれる。
+    // **マーカーは`develop-merge-sweep`ジョブと同じ形にしてある**ので、参照タグを配り終える
+    // までの間に両方が動いても二重には通知されない。
+    if (hasStrandedNotice(commentBodies, issueNumber, decision.branchHead)) {
+      countSkip("already_notified");
+      return null;
+    }
     // ユーザーがやることは「計画の承認」ではなく「続け方の指示」なので理由は`01.check-blocked`。
     await addCheckUserWithReason(ownerLogin, name, issueNumber, token, "blocked");
     await createComment(ownerLogin, name, issueNumber, token, {
@@ -351,6 +363,8 @@ async function sweepIssue(params: {
 
   // 進める。**確認待ちを先に解く**（人がやることは無くなったため）。
   await clearCheckUser(ownerLogin, name, issueNumber, token);
+  // 通知の重複判定も`develop-merge-sweep`ジョブと同じ（PRのURLと定型文で見分ける）ため、
+  // 配布前のリポジトリで両方が動いてもコメントは1件しか付かない。
   if (!hasDevelopMergedNotice(commentBodies, decision.pullRequestUrl)) {
     await createComment(ownerLogin, name, issueNumber, token, {
       body: buildDevelopMergedComment(decision.pullRequestUrl),

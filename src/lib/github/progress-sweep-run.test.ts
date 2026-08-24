@@ -229,6 +229,33 @@ describe("runProgressSweep", () => {
     expect(reportProgressStatus).not.toHaveBeenCalled();
   });
 
+  it("同じ先端について通知済みなら重ねて通知しない（配布前のジョブと同じマーカーで見分ける）", async () => {
+    fetchBranchHeadSha.mockResolvedValue("bbb222");
+    compareBranches.mockResolvedValue({
+      aheadBy: 2,
+      changedFiles: 3,
+      lastCommitAt: new Date(NOW.getTime() - 300 * 60_000).toISOString(),
+    });
+    fetchCommentsForIssue.mockResolvedValue([
+      { body: "⚠️ 既に通知済み\n<!-- issue-deck-stranded:issue-2294@bbb222 -->" },
+    ]);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(result.actions).toEqual([]);
+    expect(result.skipped).toMatchObject({ already_notified: 1 });
+    expect(createComment).not.toHaveBeenCalled();
+    expect(addCheckUserWithReason).not.toHaveBeenCalled();
+  });
+
+  it("見送るだけの巡回ではコメント一覧を引かない（共有のレート制限枠を使わない）", async () => {
+    fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([]));
+
+    await runProgressSweep({ now: NOW });
+
+    expect(fetchCommentsForIssue).not.toHaveBeenCalled();
+  });
+
   it("開いているdevelop向けPRがあれば実装中とみなして見送る", async () => {
     fetchBranchHeadSha.mockResolvedValue("bbb222");
     compareBranches.mockResolvedValue({

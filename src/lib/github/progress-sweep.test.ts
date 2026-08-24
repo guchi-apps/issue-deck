@@ -29,7 +29,6 @@ function facts(overrides: Partial<ProgressSweepFacts> = {}): ProgressSweepFacts 
     branchHead: MERGED.headSha,
     compare: null,
     hasOpenDevelopPullRequest: false,
-    strandedNotified: false,
     ...overrides,
   };
 }
@@ -164,19 +163,6 @@ describe("decideProgressSweep", () => {
       aheadBy: 2,
       ageMinutes: PROGRESS_SWEEP_STRANDED_GRACE_MINUTES + 30,
     });
-  });
-
-  it("同じ先端について通知済みなら重ねて通知しない", () => {
-    const decision = decideProgressSweep(
-      facts({
-        branchHead: "bbb222",
-        compare: { aheadBy: 2, changedFiles: 3, lastCommitAt: minutesAgo(1000) },
-        strandedNotified: true,
-      }),
-      { now: NOW },
-    );
-
-    expect(decision).toEqual({ action: "skip", reason: "already_notified" });
   });
 
   it("コミット日時が読めなければ判定せず次の巡回へ回す", () => {
