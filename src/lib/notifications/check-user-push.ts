@@ -183,7 +183,7 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     },
     include: {
       labels: { select: { name: true } },
-      repository: { select: { fullName: true, installationId: true } },
+      repository: { select: { id: true, fullName: true, installationId: true } },
     },
     orderBy: { checkUserLabeledAt: "asc" },
     take: SWEEP_BATCH_SIZE,
@@ -212,9 +212,17 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
 
     if (decision === "send") {
       // 宛先は「そのリポジトリのインストールに紐づくユーザー」の購読すべて。
-      // リポジトリ単位・種別単位のON/OFFは今回の範囲外（購読の有無だけで決める）
+      // 種別単位のON/OFFは今回の範囲外（購読の有無だけで決める）。
+      //
+      // **そのリポジトリを非表示にしているユーザーへは送らない**（#2279）。非表示にすると
+      // 一覧にも確認待ちビューにも出なくなるため、通知だけが届いても開いた先に何も無い
       const targets = await db.pushSubscription.findMany({
-        where: { user: { userInstallations: { some: { installationId: issue.repository.installationId } } } },
+        where: {
+          user: {
+            userInstallations: { some: { installationId: issue.repository.installationId } },
+            hiddenRepositories: { none: { repositoryId: issue.repository.id } },
+          },
+        },
         select: { id: true, endpoint: true, p256dh: true, auth: true },
       });
       const result = await sendPushNotification(

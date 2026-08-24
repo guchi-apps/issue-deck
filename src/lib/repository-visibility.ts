@@ -37,3 +37,33 @@ export function selectRepositoriesToToggle(
 ): ConnectedRepository[] {
   return repositories.filter((repository) => repository.hidden !== hidden);
 }
+
+/**
+ * 一覧に出すIssueの母集団から、非表示にしたリポジトリのものを除く（#2279）。
+ *
+ * **明示的に選択中のリポジトリは、非表示でも除かない。** 左メニューは選択中のリポジトリを
+ * 非表示でも行として出し（#1480）、「すべて表示する」で隠れている行も出せるため、そこから
+ * 選べるのに一覧が必ず空になる、という状態を作らないための逃げ道。横断ビュー（確認待ち・
+ * 作業待ち・質問）は`resolveFiltersForView`でリポジトリの選択を捨てるので、逃げ道は効かず
+ * 常に除かれる。
+ *
+ * サーバー側（`getIssuesForUser`）ではなくここで除くのは、この逃げ道が画面の絞り込み条件に
+ * 依存するため。**非表示リポジトリの母集団はクライアントまで届いている**ので、件数・ラベル
+ * 集計などの派生値もすべてこの関数を通した集合から作ること。
+ */
+export function selectVisibleIssues<T extends { repositoryFullName: string }>(
+  issues: readonly T[],
+  repositories: readonly ConnectedRepository[],
+  selectedRepoFullNames: readonly string[] = [],
+): T[] {
+  const excluded = new Set(
+    repositories
+      .filter(
+        (repository) =>
+          repository.hidden && !selectedRepoFullNames.includes(repository.fullName),
+      )
+      .map((repository) => repository.fullName),
+  );
+  if (excluded.size === 0) return [...issues];
+  return issues.filter((issue) => !excluded.has(issue.repositoryFullName));
+}

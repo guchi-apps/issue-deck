@@ -91,6 +91,30 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ハイライトはURLの反映を待たずに出す**（`issue-list.tsx`・`pull-request-list.tsx`が押された
   行を自分でも持ち、正の選択が追いついたら捨てる）。待つと、右カラムの再描画が終わるまで
   押した行が反応しない。
+- **非表示にしたリポジトリ（`HiddenRepository`）を除く場所は、逃げ道が要るかどうかで分かれる**
+  （#2279）。**サーバー側で除くのは、逃げ道を持たない経路だけ**——
+  `api/pull-requests`・`api/branch-flow`・`api/branch-flow/deploy`が同じ
+  `hiddenRepository.findMany`＋`id: { notIn: ... }`で母集団を揃えている（片方だけ除くと、
+  同じ画面でPRとブランチの母集団が食い違う）。
+  - **Issueとリリース状況はクライアント側で除く。** `getIssuesForUser`と
+    `api/repositories/release-pending-merges`は全件返し、
+    [`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)が
+    `selectVisibleIssues`（[`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)）、
+    [`notification-state.tsx`](../src/components/dashboard/notification-state.tsx)が
+    `selectVisibleReleaseStatuses`（[`lib/release-activity.ts`](../src/lib/release-activity.ts)）で絞る。
+    **サーバー側で除けないのは、非表示のリポジトリを出す画面があるため**——左メニューは選択中の
+    行と「すべて表示する」で隠れている行を出せる（#1480）し、スマホのリポジトリ画面も
+    「すべて表示する」で並べてリリース状況のバッジを出す。落とすと、押せるのに中身が空になる
+  - **Issueの逃げ道は「明示的に選択中のリポジトリ」。** 横断ビュー（確認待ち・作業待ち・質問）は
+    `resolveFiltersForView`がリポジトリの選択を捨てるので、そこでは逃げ道が効かず常に除かれる
+  - shellの中の線引きは**横断で並べる・数える先が`issues`（絞った集合）、リポジトリ1件ぶん／
+    Issue1件ぶんの解決に使う先が`allIssues`（生の取得結果）**。前提条件の参照先・本文の補完候補・
+    参照リンクの解決を`issues`にすると、非表示にした瞬間に解決できなくなる
+  - **通知も同じ扱いにする。** 確認待ちのトーストは`selectVisibleIssues`を通した集合で検知し、
+    プッシュ通知（[`lib/notifications/check-user-push.ts`](../src/lib/notifications/check-user-push.ts)）は
+    宛先の購読を`hiddenRepositories: { none: ... }`で絞る。開いた先に何も無い知らせを送らない
+  - 巡回（`conflict-sweep-run.ts`・`deploy-failure-sweep-run.ts`）と無人実行はユーザー単位の
+    概念を持たないため、従来どおり全リポジトリを対象にする
 - **PR詳細の開き方は2つあり、入口ごとに決まっている**（#2149）。「ユーザーの確認待ち」に並ぶ
   マージ待ちPRのカードだけが**その場に重ねて開く**（`prmodal`クエリ＋
   [`pull-request-detail-dialog.tsx`](../src/components/dashboard/pull-request-detail-dialog.tsx)）。
@@ -202,8 +226,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   一括操作（すべて表示・すべて非表示）だけは`PUT /api/repositories/hidden`にまとめ、
   1件ずつのトグルは従来の`POST`/`DELETE`のまま。件数の数え方と一括の対象決定は
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
-  **非表示が効く範囲は左メニュー・PR一覧・「ブランチ」画面・Issue作成の選択肢までで、
-  Issue一覧と各ビューの件数には効かない**（#367以来の挙動。区分の説明文でもそう書いている）。
+  **非表示はIssue一覧・各ビューの件数・通知にも効く**（#2279。#367以来「効かない」ままだった
+  範囲を揃えた。効く範囲の一覧と、どこで除いているかは下の「非表示にしたリポジトリ〜」を参照）。
 - **設定画面は「開いた区分のぶんだけ」読み込む**（#2022）。以前は設定を開いた時点で5本
   （レート制限・API使用量・Claude使用量・GitHubの障害状況・PAT一覧）が走り、さらに
   「フリート運用」を開くと共有ワークフローのタグ照会と同期履歴が走っていた。今は
@@ -919,7 +943,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   - **左メニューで非表示にしたリポジトリは数えない。** APIの母集団は`archived: false`だけで
     絞っており非表示のものも返すが、この行を押して開くブランチ画面は`visibleRepositories`
     （`hidden`を除く）で組み立てられる。揃えないと「1件と出ているのに開いた先に無い」が起こる。
-    通知ベル・フッターのバッジは従来どおり非表示も含めて出す（あちらは取りこぼしを防ぐ場所）。
+    **通知ベルの項目とマージ待ちの本数も同じ集合から作る**（#2279。#2167では「取りこぼしを
+    防ぐ場所」として項目だけ非表示ぶんを含めていたが、非表示にした以上は開いた先に何も無い）。
+    絞るのは`selectVisibleReleaseStatuses`（[`lib/release-activity.ts`](../src/lib/release-activity.ts)）
+    の1か所で、**APIの母集団は絞らない**——同じ結果をスマホのリポジトリ画面がバッジに使っており、
+    あちらは「すべて表示する」で非表示のリポジトリも並べる。
   - **材料は`NotificationProvider`から`SidebarNav`・`MobileHomeScreen`が自分で読む**——
     これらを描く`issue-deck-shell.tsx`はProviderの親でフックを呼べず、propで配れない。
     新しく`useRepositoryReleaseStatuses`を呼ぶとポーリングが2本走る（フッターと同じ事情。
@@ -1160,7 +1188,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （`repos`から来たときだけ「Issue」タブが点いたままリポジトリ一覧へ戻る）。
   **`home`と`repos`をまとめない**——まとめると、リポジトリ一覧から開いたのにホームへ戻る。
   行に出す件数は`navCounts.all`をそのまま渡す（左メニュー・ホームと同じ数え方。
-  #367以来の挙動で**非表示リポジトリのIssueも含む**）。
+  #2279以降は**非表示リポジトリのIssueを含まない**——遷移先の横断Issue一覧も同じ集合なので、
+  ここで数え直さない限り件数と中身はずれない）。
   **4枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
   1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
   98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→

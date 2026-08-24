@@ -116,6 +116,7 @@ import {
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
 import { countUnconfirmedQuestions } from "@/lib/question-attention";
+import { selectVisibleIssues } from "@/lib/repository-visibility";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -173,8 +174,24 @@ export function IssueDeckShell({
   // PC版ヘッダーの戻るボタンが押せるかどうか（#1771）
   const canGoBack = useCanGoBackInApp();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
-  const [issues, setIssues] = useState<Issue[]>(initialIssues);
+  const [allIssues, setAllIssues] = useState<Issue[]>(initialIssues);
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
+  /**
+   * 一覧・件数・横断ビューの母集団（#2279）。左メニューで非表示にしたリポジトリのIssueを外す。
+   *
+   * **以降で`issues`と書いたらこの絞り込み済みの集合**で、生の取得結果（`allIssues`）を使うのは
+   * 「選択中・表示中のIssueを解決する」「参照リンクを解決する」「ポーリングの結果と突き合わせる」
+   * のように、画面に出すかどうかと関係のない場所だけにする。非表示のリポジトリのIssueも、
+   * リンクやURLから開いたときには従来どおり見えるようにするため。
+   *
+   * 子コンポーネントへ配るときも同じ線引きで、**横断で並べる・数える先には`issues`、
+   * リポジトリ1件ぶん／Issue1件ぶんの解決に使う先には`allIssues`**を渡す（前提条件の参照先や
+   * 本文の補完候補が、非表示にした瞬間に解決できなくなるのを避ける）。
+   */
+  const issues = useMemo(
+    () => selectVisibleIssues(allIssues, repositories, filters.repos),
+    [allIssues, repositories, filters.repos],
+  );
   // PC版の選択中Issueは`issue`クエリ（missueと同じ識別子＝String(githubIssueId)）が正で、
   // 表示するIssueはそこからの派生値（#1396）。stateで持つとIssueを開く操作が履歴に載らず、
   // 戻る操作でアプリの外へ出てしまうため移した。ポーリングや編集でissuesが更新されれば
@@ -182,8 +199,8 @@ export function IssueDeckShell({
   // `?issue=<id>`付きで直接開けるのは以前から（#688。無人実行のスクリーンショット撮影
   // scripts/capture-issue-screenshots.shが承認待ち等のIssueをPC版で開くのに使う）。
   const selectedIssue = useMemo<Issue | null>(
-    () => (filters.issue ? (issues.find((item) => item.id === filters.issue) ?? null) : null),
-    [issues, filters.issue],
+    () => (filters.issue ? (allIssues.find((item) => item.id === filters.issue) ?? null) : null),
+    [allIssues, filters.issue],
   );
   /**
    * いま画面に出ているIssue（#1884）。PR・ブランチのペインでは詳細を描かないため、
@@ -221,7 +238,7 @@ export function IssueDeckShell({
     selectAllIssues,
     updateListFilters,
     goBack,
-  } = useMobileScreen(issues, repositories);
+  } = useMobileScreen(allIssues, repositories);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createDialogRepo, setCreateDialogRepo] = useState<string | null>(null);
   const [createDialogBodyPrefix, setCreateDialogBodyPrefix] = useState<string | null>(null);
@@ -368,7 +385,7 @@ export function IssueDeckShell({
   function handleIssueCreated(issue: Issue) {
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
-    setIssues((prev) => upsertIssue(prev, issue));
+    setAllIssues((prev) => upsertIssue(prev, issue));
     // 設定変更Issueとして切り出したものは、手作業がそのPRのマージを待つ（#2021）
     if (configIssueOrigin) {
       void linkConfigIssueToManualStep(configIssueOrigin, issue);
@@ -411,19 +428,19 @@ export function IssueDeckShell({
   }
 
   function handleIssueUpdated(issue: Issue) {
-    setIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
+    setAllIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
   }
 
   // 別ウィンドウ（`/issues/new`）で作られたIssueを一覧へ加える（#1728）。
   // **選択中のIssueは動かさない**——別ウィンドウで書いているのはこの画面を見ながら書くためで、
   // 作成のたびに見ていた画面が切り替わると目的と逆になる。
-  useEffect(() => subscribeIssueCreated((issue) => setIssues((prev) => upsertIssue(prev, issue))), []);
+  useEffect(() => subscribeIssueCreated((issue) => setAllIssues((prev) => upsertIssue(prev, issue))), []);
 
   // 削除したIssueはissuesから消えた時点で選択中Issueの解決に失敗するため、URLは触らない。
   // 触ると、スマホの削除直後の戻る操作（MobileIssueDetailがonBackを続けて呼ぶ）と
   // 遷移が二重になる。
   function handleIssueDeleted(issue: Issue) {
-    setIssues((prev) => prev.filter((item) => item.id !== issue.id));
+    setAllIssues((prev) => prev.filter((item) => item.id !== issue.id));
   }
 
   // PC・スマホどちらで開いていても、現在表示中のIssueを検知して既読化する
@@ -433,7 +450,7 @@ export function IssueDeckShell({
 
   useEffect(() => {
     if (!displayedIssueId) return;
-    const issue = issues.find((item) => item.id === displayedIssueId);
+    const issue = allIssues.find((item) => item.id === displayedIssueId);
     if (!issue || !issue.hasUnreadComments) return;
 
     let cancelled = false;
@@ -445,7 +462,7 @@ export function IssueDeckShell({
     })
       .then((response) => {
         if (!response.ok || cancelled) return;
-        setIssues((prev) =>
+        setAllIssues((prev) =>
           prev.map((item) =>
             item.id === issue.id
               ? { ...item, hasUnreadComments: false, readCommentCount: item.commentCount }
@@ -460,7 +477,7 @@ export function IssueDeckShell({
     return () => {
       cancelled = true;
     };
-  }, [displayedIssueId, issues]);
+  }, [displayedIssueId, allIssues]);
 
   // PR一覧（#1058）。Issue一覧と違いDBキャッシュを持たず都度GitHub APIから取得するが、
   // 左メニューに件数を出すため（#1389）PRペイン（PC）・PR画面（スマホ）を開いていなくても
@@ -519,7 +536,7 @@ export function IssueDeckShell({
   const now = useNow(60_000);
 
   const issuePolling = useIssuePolling((polledIssues) => {
-    const reconciledIssues = reconcileIssues(issues, polledIssues);
+    const reconciledIssues = reconcileIssues(allIssues, polledIssues);
 
     // 画面を開いている間に、新たに00.check-userラベルが付与されたIssueをトーストで知らせる
     // （画面下部にポコッと表示する方式。#852）。初回マウント時の直前状態（initialIssues）
@@ -536,7 +553,13 @@ export function IssueDeckShell({
     const newlyCheckUserIssues =
       pushDeliveryState === "delivering"
         ? []
-        : detectNewlyCheckUserIssues(issues, reconciledIssues);
+        : detectNewlyCheckUserIssues(
+            // **非表示リポジトリぶんはトーストも出さない**（#2279）。逃げ道（選択中の
+            // リポジトリ）は効かせない——確認待ちビューはリポジトリの選択を捨てるため、
+            // 一覧に出ないIssueの知らせだけが出る状態になる
+            selectVisibleIssues(allIssues, repositories),
+            selectVisibleIssues(reconciledIssues, repositories),
+          );
     // 取り直すのはマージ待ちになりうるものが現れたときだけ（1回の取得でリポジトリ数ぶん
     // GitHub APIを消費するため）。計画の承認・質問への回答は待たせない。
     if (newlyCheckUserIssues.some(isMergeCheckUser)) openPullRequests.refresh();
@@ -581,7 +604,7 @@ export function IssueDeckShell({
       setPendingCheckUserToasts(held);
     }
 
-    setIssues(reconciledIssues);
+    setAllIssues(reconciledIssues);
   }, issuesFetchedAt);
 
   function handleSelectCheckUserToastIssue(issue: Issue) {
@@ -1058,7 +1081,7 @@ export function IssueDeckShell({
    */
   function openReference(reference: GithubReference) {
     if (reference.kind === "issue") {
-      const issue = issues.find(
+      const issue = allIssues.find(
         (item) =>
           item.repositoryFullName === reference.repositoryFullName &&
           item.number === reference.number,
@@ -1155,7 +1178,7 @@ export function IssueDeckShell({
 
   async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
     function applyFavorite(target: boolean) {
-      setIssues((prev) =>
+      setAllIssues((prev) =>
         prev.map((item) => (item.id === issue.id ? { ...item, favorite: target } : item)),
       );
     }
@@ -1409,7 +1432,9 @@ export function IssueDeckShell({
               {mobileScreen.kind === "repo-detail" && (
                 <MobileRepoIssuesScreen
                   repository={mobileScreen.repository}
-                  issues={issues}
+                  /* リポジトリ画面はそのリポジトリで絞った一覧なので、非表示にしていても
+                     開いた以上は出す（#2279。PCの左メニューで選んだときと同じ扱い） */
+                  issues={allIssues}
                   currentUserLogin={currentUserLogin}
                   selectedIssueId={mobileScreen.returnToIssueId}
                   view={mobileScreen.view}
@@ -1434,7 +1459,7 @@ export function IssueDeckShell({
               {mobileScreen.kind === "issue-detail" && (
                 <MobileIssueDetail
                   issue={mobileScreen.issue}
-                  issues={issues}
+                  issues={allIssues}
                   repositories={visibleRepositories}
                   currentUserLogin={currentUserLogin}
                   onBack={goBack}
@@ -1621,7 +1646,7 @@ export function IssueDeckShell({
               <div className="hidden flex-1 overflow-hidden md:flex">
                 <IssueDetail
                   issue={selectedIssue}
-                  issues={issues}
+                  issues={allIssues}
                   repositories={visibleRepositories}
                   currentUserLogin={currentUserLogin}
                   onEdit={setEditingIssue}
@@ -1680,7 +1705,7 @@ export function IssueDeckShell({
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
         <ManualStepGuideDialog
           queueIds={manualStepGuide.queueIds}
-          issues={issues}
+          issues={allIssues}
           open={manualStepGuide.open}
           onOpenChange={manualStepGuide.setOpen}
           onIssueUpdated={handleIssueUpdated}
@@ -1694,7 +1719,7 @@ export function IssueDeckShell({
           defaultTitle={createDialogTitle}
           defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
-          issues={issues}
+          issues={allIssues}
           onCreated={handleIssueCreated}
         />
         <CodeReviewDialog
@@ -1710,7 +1735,7 @@ export function IssueDeckShell({
           onOpenChange={setCrossQuestionDialogOpen}
           repositories={visibleRepositories}
           defaultRepositoryFullName={crossQuestionDialogRepo}
-          issues={issues}
+          issues={allIssues}
           onCreated={handleIssueCreated}
         />
         <SettingsDialog
@@ -1732,7 +1757,7 @@ export function IssueDeckShell({
             if (!open) setEditingIssue(null);
           }}
           issue={editingIssue}
-          issues={issues}
+          issues={allIssues}
           onUpdated={handleIssueUpdated}
         />
         <CheckUserToastViewport
