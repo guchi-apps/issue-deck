@@ -23,6 +23,8 @@ import {
   MANUAL_STEP_LABEL,
   buildBrowserManualIssueBody,
   buildBrowserManualIssueTitle,
+  buildDeployCheckIssueBody,
+  buildDeployCheckIssueTitle,
   buildInitIssueBody,
   buildInitIssueTitle,
   buildParentIssueBody,
@@ -63,7 +65,8 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 作成で弾かれるので、続きは作られたIssueから人が進める。
  *
  * 作る順序はIssueの本文が互いを参照する都合で決まっている。
- * 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 → vpsのVirtualHost → VPSの手作業 → 初期化。
+ * 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 → vpsのVirtualHost → VPSの手作業 → 初期化
+ * → 初回デプロイ前チェック（#2252。前提条件として初期化Issueの番号を指すので最後に置く）。
  *
  * **ローカルセッションのポート帯（#2225）だけは、何かを作る前に決めておく。**
  * `scripts/local-repo-ports.conf`を読めなければ`port_band_unavailable`で止める——
@@ -208,6 +211,8 @@ async function launchNewApp(
     parent: "",
     vps: null,
     subpc: null,
+    vpsManual: null,
+    init: null,
     localPortBase: portBand.base,
     portBandPullRequest: null,
     githubAppNeedsRepositoryAdd: installationScope.needsRepositoryAdd,
@@ -319,6 +324,7 @@ async function launchNewApp(
     buildVpsManualIssueBody(spec, refs),
     [MANUAL_STEP_LABEL],
   );
+  refs.vpsManual = vpsManual.reference;
   children.push(vpsManual.id);
 
   // 8. 新しいリポジトリの初期化
@@ -329,9 +335,22 @@ async function launchNewApp(
     buildInitIssueTitle(spec),
     buildInitIssueBody(spec, refs),
   );
+  refs.init = init.reference;
   children.push(init.id);
 
-  // 9. サブIssueとして紐付ける。**ここの失敗では止めない**——紐付きが欠けても
+  // 9. 初回デプロイ前チェックと公開確認（#2252）。**初期化Issueの後に置く**——前提条件として
+  //    その番号を指すため。deployジョブの成功では公開できたことを確かめられないので、
+  //    公開URLの疎通まで見届ける担当をここで作る
+  const deployCheck = await createIn(
+    NEW_APP_ORG,
+    spec.repositoryName,
+    "deploy-check-issue",
+    buildDeployCheckIssueTitle(spec),
+    buildDeployCheckIssueBody(spec, refs),
+  );
+  children.push(deployCheck.id);
+
+  // 10. サブIssueとして紐付ける。**ここの失敗では止めない**——紐付きが欠けても
   //    各Issueは独立して読め、作り直しの必要が無い
   for (const childId of children) {
     try {
@@ -341,7 +360,7 @@ async function launchNewApp(
     }
   }
 
-  // 10. 作ったリポジトリとそのIssueを盤面へ取り込む（#2248）。**初期化Issueを作ったあとに
+  // 11. 作ったリポジトリとそのIssueを盤面へ取り込む（#2248）。**初期化Issueを作ったあとに
   //     置く**——先に回すとIssueがまだ無く、取り込むものが無い
   const resync = await resyncNewRepository(userId, NEW_APP_ORG, spec.repositoryName);
   if (!resync.ok) {
