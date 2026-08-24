@@ -839,8 +839,10 @@ describe("BranchFlowView", () => {
       expect(screen.getByText(/手作業 #184/)).toBeTruthy();
       expect(screen.getByText("起点")).toBeTruthy();
       expect(screen.getByText("issue-1454")).toBeTruthy();
-      // 畳んだ行にも件数を出す
-      expect(screen.getByText("手作業1")).toBeTruthy();
+      // 畳んだ行にも件数を出す（アイコン＋数字なので読み上げの語で引く。#2243）
+      const count = screen.getByLabelText("手作業 1件");
+      expect(count.textContent).toBe("1");
+      expect(count.className).toContain("text-amber-600");
     });
 
     it("完了した手作業は畳んだ束と一緒に隠す（#1586）", () => {
@@ -849,7 +851,7 @@ describe("BranchFlowView", () => {
       openRepository();
       expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
       expect(screen.queryByText(/手作業 #184/)).toBeNull();
-      expect(screen.queryByText("手作業1")).toBeNull();
+      expect(screen.queryByLabelText("手作業 1件")).toBeNull();
     });
 
     it("束を開いたら別枠は出さず、レーンにぶら下げる（#1586）", () => {
