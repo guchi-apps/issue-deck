@@ -93,6 +93,7 @@ export type NewAppArtifactKind =
   | "port-band"
   | "parent-issue"
   | "init-issue"
+  | "deploy-check-issue"
   | "vps-issue"
   | "manual-vps"
   | "manual-subpc"
@@ -174,6 +175,13 @@ export function buildNewAppPlan(
         : "雛形の作成・CI・デプロイ設定。サブPCのローカルセッションで実装する",
     },
     {
+      kind: "deploy-check-issue",
+      automation: "auto",
+      title: "初回デプロイ前チェックと公開確認",
+      target: repo,
+      description: `周辺インフラの実地確認と、${publicUrlFor(spec)} が開けることの確認。**deployジョブの成功は公開できたことを保証しない**（#2252）`,
+    },
+    {
       kind: "vps-issue",
       automation: "auto",
       title:
@@ -203,8 +211,8 @@ export function buildNewAppPlan(
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
       description: githubAppNeedsRepositoryAdd
-        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecrets・GitHub Appもここで行う"
-        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecretsもここで行う",
+        ? "AレコードはVPSの管理画面でしか登録できない。Secrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。Secretsもここで行う",
     },
   ];
 
@@ -244,6 +252,10 @@ export type NewAppIssueRefs = {
   vps: string | null;
   /** サブPCの手作業Issue。まだ作っていなければ`null` */
   subpc: string | null;
+  /** VPSの手作業Issue。まだ作っていなければ`null` */
+  vpsManual?: string | null;
+  /** 新しいリポジトリの初期化Issue。まだ作っていなければ`null` */
+  init?: string | null;
   /** 払い出したローカルセッションのポート帯。決められなかったときだけ`null` */
   localPortBase: number | null;
   /** ポート帯を足すPull Request（`guchi-apps/issue-deck#124`の形）。作れなかったら`null` */
@@ -263,8 +275,12 @@ export function buildParentIssueTitle(spec: NewAppSpec): string {
 /**
  * 親Issueの本文。**この1本を開けば、立ち上げの決めごとと残りの作業が分かる**ようにする。
  *
- * 「一覧への登録」を持つのはここ。`_docs/guides/new-app-checklist.md`の最終項目は3か所への
- * 追記を求めており、vps READMEは`guchi-apps/vps`のIssueが扱うが、issue-deck自身の
+ * 「完了条件」を持つのはここ。**判定は公開URLの`curl`で行う**（#2252）。`deploy.yml`の
+ * ヘルスチェックはVPS内の`http://127.0.0.1:<port>/`宛で、ApacheのVirtualHostが無くても
+ * 成功するため、deployジョブの成功では公開できたことを確かめられない。
+ *
+ * 完了条件には「一覧への登録」も畳んである。`_docs/guides/new-app-checklist.md`の最終項目は
+ * 3か所への追記を求めており、vps READMEは`guchi-apps/vps`のIssueが扱うが、issue-deck自身の
  * `docs/supported-repositories.md`と共有知識の`standards/tech-stack.md`はどのサブIssueにも
  * 属さない。
  */
@@ -288,24 +304,32 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・Signalyのチャンネル・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
+2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
 3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
 4. \`${repo}\` の初期化と、developへのマージ
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
 6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
+7. 初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）
 
 **ポート帯のPull Requestは、developへマージしただけでは効きません。**
 \`${LOCAL_PORT_BAND_CONF_PATH}\` はサブPCの本体チェックアウトから読まれるため、
 issue-deckの画面のホスト一覧で「更新して再起動」を押すまで反映されません
 （[docs/multi-agent/generic-launcher.md](https://github.com/${NEW_APP_PARENT_REPOSITORY}/blob/develop/docs/multi-agent/generic-launcher.md)）。
 
-## 一覧への登録
+## 完了条件
 
-立ち上げが済んだら、次の3か所へ追記します（vps READMEは \`${NEW_APP_VPS_REPOSITORY}\` のIssueが扱います）。
+**この立ち上げが終わったと言えるのは、公開URLが実際に開けたときです**（#2252）。
 
-- [ ] \`${NEW_APP_VPS_REPOSITORY}\` のREADMEのアプリ一覧
-- [ ] issue-deckの \`docs/supported-repositories.md\`${spec.multiAgent ? "" : "（マルチエージェント運用に対応させないため、対象外なら不要）"}
-- [ ] 共有知識（\`guchi-apps/docs\`）の \`standards/tech-stack.md\` のスタック一覧
+- [ ] \`curl -I ${publicUrlFor(spec)}\` が 200 か 3xx を返す
+- [ ] \`${repo}\` の「初回デプロイ前チェックと公開確認」Issueが閉じている
+- [ ] \`${NEW_APP_VPS_REPOSITORY}\` のREADMEのアプリ一覧へ追記した
+- [ ] issue-deckの \`docs/supported-repositories.md\` へ追記した${spec.multiAgent ? "" : "（マルチエージェント運用に対応させないため、対象外なら不要）"}
+- [ ] 共有知識（\`guchi-apps/docs\`）の \`standards/tech-stack.md\` のスタック一覧へ追記した
+
+**\`deploy.yml\` の deploy ジョブが成功しても、公開できたことにはなりません。**
+ヘルスチェックが叩くのはVPS内の \`http://127.0.0.1:<ポート>/\` で、ApacheのVirtualHostが
+無くても成功します（\`aide-bot\` では公開できていないことに気づくのが \`${NEW_APP_VPS_REPOSITORY}#128\` の
+調査まで遅れました）。上の \`curl\` だけが、DNS・Apache・TLS・アプリのすべてを通した確認になります。
 
 ## 参考
 
@@ -376,7 +400,7 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
     --ref <このIssueのブランチ>
   \`\`\`
 
-- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く
+- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
 - [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
 ${multiAgent}
 ## 参考
@@ -385,6 +409,105 @@ ${multiAgent}
 - ディレクトリ構成・ポート・DB名の規約: 同リポジトリの \`standards/\`
 - 立ち上げ全体: ${refs.parent}
 - リポジトリ: \`${repo}\`
+`;
+}
+
+export function buildDeployCheckIssueTitle(spec: NewAppSpec): string {
+  return `${spec.displayName}の初回デプロイ前チェックと公開確認`;
+}
+
+/**
+ * 新しいリポジトリに立てる、初回デプロイ前チェックと公開確認のIssue（#2252）。
+ *
+ * **`deploy.yml`のdeployジョブの成功は、公開できたことを保証しない。** ヘルスチェックが叩くのは
+ * VPS内の`http://127.0.0.1:<port>/`で、ApacheのVirtualHostが無くても成功する。`aide-bot`では
+ * そのせいで公開できていないことに気づくのが`guchi-apps/vps#128`の調査まで遅れた。
+ *
+ * **初期化Issueへ畳まず、独立したIssueにする。** 初期化Issueは`develop`へのマージで`Done`に
+ * なるが、初回デプロイは`develop`→`main`のリリースPRをマージした後なので、そこまで開いたまま
+ * 追えるものが誰も残らない。
+ *
+ * **サブPCのローカルセッションで実装する。** 実地確認の手順は個人スキル
+ * （`initial-deploy-check`）にあり、GitHub Actions上の無人実行からは読めない。1Passwordや
+ * VPSへのSSHも同じ理由でローカルからしか確かめられない。
+ */
+export function buildDeployCheckIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
+  const repo = repositoryFullName(spec);
+  const host = hostnameFor(spec);
+  const url = publicUrlFor(spec);
+  const vpsRef = refs.vps ?? `${NEW_APP_VPS_REPOSITORY}のVirtualHostのIssue`;
+  const vpsManualRef = refs.vpsManual ?? `${refs.parent} のVPS手作業Issue`;
+  const initRef = refs.init ?? "このリポジトリの初期化Issue";
+  const dbCheck = spec.databaseName
+    ? `\n- [ ] VPSに \`${spec.databaseName}\` のデータベースがあり、\`DATABASE_URL\` で接続できる`
+    : "";
+  const processCheck =
+    spec.port === null
+      ? ""
+      : `\n- [ ] PM2に \`${spec.repositoryName}\` が登録され、\`pm2 save\` まで済んでいる`;
+
+  return `${origin(refs.parent)}
+
+## このIssueで確かめること
+
+**\`deploy.yml\` の deploy ジョブが成功しても、公開できたことにはなりません**（#2252）。
+ヘルスチェックが叩くのはVPS内の \`http://127.0.0.1:${spec.port ?? "<ポート>"}/\` で、ApacheのVirtualHostが
+無くてもジョブは成功します。\`aide-bot\` では、そのせいで公開できていないことに気づくのが
+\`${NEW_APP_VPS_REPOSITORY}#128\` の調査まで遅れました。
+
+このIssueは、初回デプロイの前に周辺インフラが**実際に疎通する**ことを確かめ、デプロイの後に
+**${url} が開けること**まで見届けるためのものです。
+
+${specTable(spec)}
+
+## 前提条件
+
+- 実行するデバイス: サブPC（ローカルセッション）
+- 先に完了している必要があるIssue・PR: ${[initRef, vpsRef, vpsManualRef].join("・")}
+- その他の前提: \`op\`・\`gh\` がサブPCでログイン済みで、VPSへSSHできること
+
+**このIssueはサブPCのローカルセッションで実装します。** 実地確認の手順は個人スキル
+\`initial-deploy-check\` にあり、GitHub Actions上の無人実行からは読めません。1Password・VPSへの
+SSHも同じ理由で、無人実行からは確かめられません。
+
+## やること（初回デプロイの前）
+
+\`initial-deploy-check\` スキルに沿って、設定が「ファイルとして存在する」ではなく
+「実際に疎通する」ことを確かめます。
+
+- [ ] 1Passwordの \`apps\` ボールトの \`${spec.repositoryName}\` に実値が入っている（\`op run --env-file=.github/deploy.env.tpl -- env\` が解決できる。**値そのものは出力・記録しない**）
+- [ ] \`gh secret list --repo ${repo}\` に必要なsecretが並ぶ
+- [ ] \`ci.yml\` が1回以上成功し、\`main\` のBranch protectionが設定済み
+- [ ] \`dig +short ${host} A\` がVPSのIPを返す
+- [ ] VPSに \`/apps/${spec.repositoryName}/\` があり、\`${host}\` のVirtualHostが実機へ反映済み${dbCheck}${processCheck}
+
+## やること（初回デプロイ）
+
+- [ ] \`develop\` → \`main\` のリリースPRを作る
+- [ ] **人がマージする**（\`develop\` → \`main\` は自動マージ不可カテゴリ）
+- [ ] \`deploy.yml\` の成功と、Signalyへのデプロイ結果の通知を確認する
+
+## 完了の確認方法
+
+\`\`\`bash
+curl -I ${url}
+\`\`\`
+
+**200 か 3xx が返ればここまで届いています。これが立ち上げの完了条件です**（${refs.parent}）。
+返らないときの切り分けは次のとおりです。
+
+| 症状 | 見るところ |
+|---|---|
+| 名前を解決できない | DNSのAレコード（${refs.parent} のブラウザ手作業Issue） |
+| 404が返る・別のアプリが出る | ApacheのVirtualHost（${vpsRef} が \`main\` まで進んで実機へ反映されているか） |
+| 502・503が返る | アプリのプロセス（${vpsManualRef}。VPSで \`pm2 describe ${spec.repositoryName}\`） |
+| TLSのエラーになる | certbot（${vpsManualRef}） |
+
+## 関連
+
+- 立ち上げ全体: ${refs.parent}
+- 初期化: ${initRef}
+- VirtualHost: ${vpsRef}
 `;
 }
 
@@ -609,7 +732,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
     verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
 pollerは申告のたびに対応表を読み直すので、再起動は要りません。
 **この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
-\`.github/secrets-manifest.tsv\` が要るので、初期化のマージ後（Signalyのwebhook URLを入れるとき）に揃います。`,
+\`.github/secrets-manifest.tsv\` が要るので、初期化Issueでこのマニフェストを作ってマージした後に揃います。`,
     why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
@@ -764,24 +887,12 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: "なし",
-    otherPrerequisites: `1PasswordとGitHubにログイン済みであること。Signalyの手順はサブPCで実行するため、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること`,
-    steps: `${dnsStep}- [ ] （ブラウザ）Signaly（https://signaly.gucchii.com/）でCI・デプロイ通知のチャンネルを作り、Webhook URLを控える
-
-  \`\`\`
-  チャンネル名: ${spec.repositoryName}-ci
-  \`\`\`
-
-- [ ] （サブPC）控えたWebhook URLを1Passwordへ入れ、GitHubのsecretへ同期する
-
-  \`\`\`bash
-  ${provisionCommand(spec, "<控えたWebhook URL>")}
-  \`\`\`
-
-${secretsStep.trimEnd()}${githubAppStep}`,
+    otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
+    steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
     verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
-アプリ自身のシークレット（配置先・DB名・Signaly）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+アプリ自身のシークレット（配置先・DB名）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
-    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

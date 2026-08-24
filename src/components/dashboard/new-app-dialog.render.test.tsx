@@ -154,12 +154,12 @@ describe("NewAppDialog", () => {
     ).toBeTruthy();
   });
 
-  it("確認ステップで8件と、自動・代行・手作業の内訳を出す", async () => {
+  it("確認ステップで9件と、自動・代行・手作業の内訳を出す", async () => {
     mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
     await advanceToPlacement();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
 
     expect(screen.getAllByText("guchi-apps/kakei-report").length).toBeGreaterThan(0);
     // 払い出す予定のポート帯も押す前に読み取れる（#2225）
@@ -186,7 +186,7 @@ describe("NewAppDialog", () => {
     await advanceToPlacement();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
 
     expect(screen.getByText("guchi-apps/vps#121")).toBeTruthy();
     expect(screen.getByText(/新しく作らず、このIssueへ書き足します/)).toBeTruthy();
@@ -238,7 +238,7 @@ describe("NewAppDialog", () => {
 
     await advanceToPlacement();
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /立ち上げを開始/ }));
 
     await waitFor(() =>

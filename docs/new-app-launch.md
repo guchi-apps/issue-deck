@@ -24,7 +24,7 @@
 | 0. 相談 | 何を作るかをAIと数往復して固める。仕様案（名前・種別・DB・認証・URL）が下にまとまる | [`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts) |
 | 1. 基本 | アプリ名・リポジトリ名・公開範囲・概要。リポジトリ名の空きをGitHubで確かめる | [`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts) |
 | 2. 配置 | 種別・公開URL・本番ポート・DB名・認証・マルチエージェント運用の要否 | 同上 |
-| 3. 確認 | 作られるもの8件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
+| 3. 確認 | 作られるもの9件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
 
 **相談と設定を同じ画面に混ぜない。** 会話しながら横で仕様が埋まっていく形も検討したが、
 スマホでは会話と設定の両方を1画面に収めることになる。相談を先に終えて値を引き渡す形なら、
@@ -33,7 +33,7 @@
 **相談で決まっていない項目は空のまま渡す**（`normalizeDraft`が知らない値・使えない値を
 `null`へ落とす）。埋めさせると、聞かれていない前提が既定値として設定ステップへ流れ込む。
 
-## 作られるもの（8件）
+## 作られるもの（9件）
 
 | 作られるもの | 場所 | 自動化 |
 |---|---|---|
@@ -41,6 +41,7 @@
 | 親Issue「◯◯の立ち上げ」 | `guchi-apps/issue-deck` | 自動 |
 | ポート帯を足すPull Request | `guchi-apps/issue-deck` | 自動（`scripts/local-repo-ports.conf`へ1行） |
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
+| 初回デプロイ前チェックと公開確認 | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
 | `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
@@ -62,11 +63,10 @@
 - **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
   certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
   反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **Signalyのチャンネル作成。** Googleログインの背後にある画面操作で、共有知識の
-  `guides/signaly-notifications.md` も「実行者: 人間のみ」としている。**控えたWebhook URLの
-  登録は自動化してある**ので、人が行うのはチャンネルを作って値をコマンドへ貼るところまで。
 - **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
-  アプリ自身の値（配置先・DB名・許可メール・Signaly）は後述のとおり自動で投入する。
+  アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
+  CI・デプロイ通知の`SIGNALY_WEBHOOK_URL`はorganization secretへ寄せたため（#2255）、
+  新規アプリの立ち上げにSignalyのチャンネル作成もWebhook URLの登録も要らない。
 - **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
@@ -140,8 +140,10 @@
 
 - **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
   Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
-- **人が決める値**（SignalyのWebhook URL）だけを**ブラウザの手作業Issue**に残す。残す形も
-  同じスクリプトの1コマンドで、控えた値を`--ci-webhook-url`へ貼るだけにする。
+- **SignalyのWebhook URLはここで扱わない。** organization secretへ寄せたため（#2255）、
+  ブラウザの手作業Issueにチャンネル作成・登録の手順は残さない。スクリプト自体は
+  引き続き`--ci-webhook-url`オプションを持つが（他アプリの値を後から直すときなどに使う）、
+  立ち上げのコマンドからは渡さない。
 - **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
   発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
   **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。
@@ -261,6 +263,33 @@ gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-b
 **1件へ統合しなかった理由。** `guchi-apps/vps#132`（プロビジョニングの受け口）が入ると
 置き場・DB・PM2は自動化され、実機に残る手作業はcertbotだけになる。残る量が変わる前に
 統合すると、統合したIssue自体を作り直すことになる。
+
+### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
+
+`deploy.yml`のヘルスチェックが叩くのは**VPS内の`http://127.0.0.1:<port>/`**なので、
+ApacheのVirtualHostが無くてもdeployジョブは成功する。`aide-bot`ではそのせいで
+「デプロイが通った＝公開できた」と読めてしまい、vhostが無いことに気づくのが
+`guchi-apps/vps#128`の調査まで遅れた（#2252）。
+
+そこで置いているのが次の2つ。
+
+- **親Issueの`## 完了条件`**（`buildParentIssueBody`）。先頭が
+  `curl -I https://<host>/`が200か3xxを返すことで、「一覧への登録」の3項目もここへ畳んである。
+  DNS・Apache・TLS・アプリのすべてを通る確認はこの1本だけ。
+- **新しいリポジトリの「初回デプロイ前チェックと公開確認」Issue**（`buildDeployCheckIssueBody`）。
+  初回デプロイの前に周辺インフラの疎通を確かめ、デプロイ後に公開URLまで見届ける。返らない
+  ときの切り分け（名前解決→DNS、404→vhost、502/503→PM2、TLS→certbot）を表で持たせてある。
+
+**初期化Issueへ畳まない。** 初期化Issueは`develop`へのマージで`Done`になるが、初回デプロイは
+`develop`→`main`のリリースPRをマージした後なので、そこまで開いたまま追えるものが残らない。
+
+**実行経路はサブPCのローカルセッション**（初期化Issueと同じ）。実地確認の手順は個人スキル
+`initial-deploy-check`にあり、GitHub Actions上の無人実行は個人スキルを読めない。1Passwordの
+解決やVPSへのSSHも無人実行からは行えない。
+
+**雛形の`deploy.yml`（#2247）には、失敗させない形で入れる。** 疎通の確認をdeployジョブの成否に
+するとcertbot前の初回デプロイが必ず落ちるので、`::warning::`として出すだけにする。初回だけの
+分岐は持たない——2回目以降もApacheの設定が壊れていれば拾えるほうがよい。
 
 ### certbotが作る`-le-ssl.conf`は`guchi-apps/vps`へ戻す
 

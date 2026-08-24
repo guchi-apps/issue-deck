@@ -1061,8 +1061,20 @@ scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
 | `SHARED_DB_HOST`・`SHARED_DB_PORT`・`SHARED_DB_USER`・`SHARED_DB_PASSWORD` | 9 | secret |
 | `SHARED_DB_MIGRATE_USER`・`SHARED_DB_MIGRATE_PASSWORD` | 5 | secret |
 | `SUPABASE_PROJECT_URL`・`SUPABASE_PUBLISHABLE_KEY` | 8 | variable（公開値） |
+| `SIGNALY_WEBHOOK_URL` | 17 | secret（#2255） |
 
 1リポジトリでしか使わない値（実測115件）は各リポジトリのrepository secretに置く。
+
+`SIGNALY_WEBHOOK_URL`（CI・デプロイ通知）だけは事情が違い、**参照している`op://`はリポジトリごとに
+別だった**（`op://apps/<アプリ>/ci-webhook-url`）。通知先もアプリごとの別チャンネルだったが、
+リポジトリを増やすたびにSignalyでのチャンネル作成・1Passwordへの登録・repository secretの投入が
+必要で、**新規リポジトリの設定の手間がそのまま増え続けていた**。そこで#2255で
+「全リポジトリのCI・デプロイ結果を1つのチャンネルへ集約する」ことにし、issue-deckの既存の
+CIチャンネルを共通チャンネルとして流用してorganizationへ寄せた。
+
+**repository secretは同名のorganization secretを覆い隠す。** そのため各リポジトリでは、
+マニフェストを`scope=inherit`へ変えたうえで**repository secretを削除する**まで従来の
+チャンネルへ飛び続ける。逆に言えば、リポジトリ単位で好きな順に移行できる。
 
 #### 環境変数名がリポジトリごとに違っても吸収できる
 
@@ -1117,9 +1129,9 @@ GitHubへ移した。GitHub側のsecret/variableにはレート制限が無い�
 |---|---|
 | Secret（接続・認証） | `SSH_PRIVATE_KEY`・`HOST`・`USERNAME`・`SSH_PORT`・`TARGET_DIR` |
 | Secret（DB） | `DB_USER`・`DB_PASSWORD`・`DB_HOST`・`DB_PORT`・`DB_NAME`・`MIGRATE_DB_USER`・`MIGRATE_DB_PASSWORD` |
-| Secret（アプリ） | `SUPABASE_SERVICE_ROLE_KEY`・`APP_GITHUB_APP_PRIVATE_KEY_BASE64`・`APP_GITHUB_WEBHOOK_SECRET`・`APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY`・`APP_GITHUB_OAUTH_CLIENT_ID`・`APP_GITHUB_OAUTH_CLIENT_SECRET`・`APP_GITHUB_BILLING_TOKEN`・`ALLOWED_EMAILS`・`DISPATCH_SECRET`・`SIGNALY_WEBHOOK_URL`・`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT` |
+| Secret（アプリ） | `SUPABASE_SERVICE_ROLE_KEY`・`APP_GITHUB_APP_PRIVATE_KEY_BASE64`・`APP_GITHUB_WEBHOOK_SECRET`・`APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY`・`APP_GITHUB_OAUTH_CLIENT_ID`・`APP_GITHUB_OAUTH_CLIENT_SECRET`・`APP_GITHUB_BILLING_TOKEN`・`ALLOWED_EMAILS`・`DISPATCH_SECRET`・`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT` |
 | Variable（公開されても害が無い値） | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`・`NEXT_PUBLIC_GITHUB_APP_SLUG`・`APP_GITHUB_APP_ID`・`PORT` |
-| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET` |
+| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET`・`SIGNALY_WEBHOOK_URL`（#2255） |
 
 **Push通知のVAPID鍵（`VAPID_*`。#838）は、公開鍵もsecretに置く。** Web Pushの「公開鍵」は
 ブラウザへ配る値で秘密ではないが、issue-deckはPUBLICでActionsのログが誰でも読めるため、

@@ -462,8 +462,9 @@ IssueもPRも無く、数える場所が無い。**issue-deckのDBへ記録す�
 
 通知は**1Passwordからの補完を通さない**——サービスアカウントの日次レート制限を使い切ると
 フリート全体のデプロイが止まる（#1302）ため、デプロイ失敗のたびに読みに行かない。
-`SIGNALY_WEBHOOK_URL`がGitHub側に無いリポジトリ、`.github/scripts/signaly-notify.sh`を
-置いていないリポジトリでは**通知が出ないだけ**で、再実行そのものは行われる。
+`SIGNALY_WEBHOOK_URL`は#2255でorganization secretへ寄せたため、organization配下のリポジトリは
+何も設定しなくても解決できる。`.github/scripts/signaly-notify.sh`を置いていないリポジトリでは
+**通知が出ないだけ**で、再実行そのものは行われる。
 
 画面（「ブランチとPRの流れ」）では、`run_attempt`が2以上のとき
 `BranchFlowDeployState.autoRetried`が立ち、バッジの文言が変わる。
