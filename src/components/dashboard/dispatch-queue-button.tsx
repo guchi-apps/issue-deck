@@ -37,7 +37,7 @@ export function DispatchQueueButton({
   const own = useDispatchState(injected === undefined);
   const dispatch = injected ?? own;
   const [open, setOpen] = useState(false);
-  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
 
   // 申告しているホストが1台も無ければ、キューという概念自体が無い
   if (dispatch.hosts.length === 0) return null;

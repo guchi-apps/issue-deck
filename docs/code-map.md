@@ -1844,7 +1844,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `expireStaleDispatchJobs`が掃く遅延評価。**セッション本数の上限（#1361）で待っていることは、
   pollerが申告する`maxSessions`/`liveSessions`から画面に出す**（#1394。文言は
   `lib/dispatch/queue-summary.ts`。**割り当ての判定はpoller側のままで、issue-deckは表示にしか
-  使わない**）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
+  使わない**）。**ヘッダーの実行キューのバッジの数字も同じ`liveSessions`**（#2265。
+  `countDispatchQueueBadge`。ジョブの件数はセッションが立った時点で0へ戻るため、
+  混み具合を映せなかった）。**順番待ちは`DispatchJob.queuePriority`（既定0）で先頭へ上げられる**
   （#1541。`POST /api/dispatch/<id>/prioritize`。払い出しも画面も`queuePriority`降順→`createdAt`昇順で、
   **見えている順番と走る順番を一致させる**。任意の並べ替えは持たない）。
   「どのリポジトリを起動できるか」はサブPCが申告し、
