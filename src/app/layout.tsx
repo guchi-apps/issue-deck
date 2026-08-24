@@ -48,11 +48,21 @@ export default function RootLayout({
     // アプリシェルごと上下に動いてヘッダー・フッターが固定されていないように見える（#607）。
     // overscroll-none（overscroll-behavior: none）でバウンス・引っ張って更新を無効化し、
     // bodyをfixed inset-0でビューポートに固定して、ドキュメントが一切動かないようにする。
+    //
+    // bodyのh-full（height: 100%）はfixed inset-0と重複して見えるが、外さないこと（#2263）。
+    // Radixのダイアログ・セレクトを開いている間、react-remove-scrollが
+    // `body[data-scroll-locked] { position: relative !important }`をbodyへ当てる。高さを
+    // inset-0＋fixedだけで決めていると、positionが書き換わった時点でbodyの高さがauto（中身の高さ）に
+    // なり、h-full→flex-1＋min-h-0で組んだ画面の高さの連鎖が全部ほどける。Issue一覧などの
+    // スクロール領域が中身の高さまで伸びてスクロール不能になり、その瞬間にブラウザがscrollTopを
+    // 0へ落とすため、モーダルを閉じたあと一覧が先頭に戻ってしまう。height: 100%はhtml（h-full）の
+    // 100%＝ビューポート高に解決され、fixed時の高さと同じ値になるので、positionが書き換わっても
+    // 高さが定まったままになる。
     <html
       lang="ja"
       className={`${geistMono.variable} h-full overflow-x-hidden overscroll-none antialiased`}
     >
-      <body className="fixed inset-0 flex flex-col overflow-hidden overscroll-none">
+      <body className="fixed inset-0 h-full flex flex-col overflow-hidden overscroll-none">
         {children}
         <AppUpdateChecker currentVersion={packageJson.version} />
       </body>

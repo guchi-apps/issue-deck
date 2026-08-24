@@ -59,6 +59,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     ホバーで出す完全な日時（`formatDateTimeFull`）は「（日本時間）」を添えている。
   - 相対表現（`formatRelativeDate`の「3時間前」）は差分の計算なのでこの規約の対象外。
     DB・API応答・スクリプトが受け渡すISO文字列はUTCのままでよい（表示ではないため）。
+- **アプリシェルの高さを`position`に依存させない**（#2263）。`body`は`fixed inset-0`で
+  ビューポートへ固定してある（#607。iOS Safariのラバーバンド対策）が、**高さは`h-full`
+  （`height: 100%`）でも別に決めておく**。Radixのダイアログ・セレクト・ドロップダウンを開いて
+  いる間、`react-remove-scroll`が`body[data-scroll-locked] { position: relative !important }`を
+  bodyへ当てるため、`fixed`が外れた時点で`inset-0`が効かなくなり、bodyの高さがauto（中身の高さ）に
+  なる。すると`h-full`→`flex-1`＋`min-h-0`で組んだ画面の高さの連鎖が全部ほどけ、Issue一覧・
+  Issue詳細・コメント欄などのスクロール領域が中身の高さまで伸びてスクロール不能になる。
+  **その瞬間にブラウザがscrollTopを0へ落とし、モーダルを閉じても戻らない**（「実装を開始」を
+  押すと一覧が先頭に戻る、として報告された）。`height: 100%`はhtml（`h-full`）の100%＝
+  ビューポート高に解決され、`fixed`のときの高さと同じ値になるので、見た目は変わらない。
+  - **`react-remove-scroll`側の`!important`を打ち消す方向で直さない。** ライブラリの内部属性
+    （`data-scroll-locked`）と`!important`を取り合う形になり、更新で静かに壊れる。
+  - `h-full`は`fixed inset-0`と重複して見えるため消されやすく、症状はモーダルを開閉したときに
+    しか出ない。jsdomはレイアウトを持たず描画のテストでも捕まらないため、
+    [`src/app/layout.test.ts`](../src/app/layout.test.ts)がクラスの並びだけを見張っている。
 - **画面の現在地を表すURLクエリの更新は
   [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
   だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの
@@ -257,7 +272,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   返るため、渡さないと数秒かかる取得の途中で「更新中…」が消える。フックはフラグが立つのを
   待ってから下りるのを待つ（立たない・下りないときはそれぞれ上限で表示だけ戻す）。
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
-  `fixed inset-0`でドキュメントを固定しているため（#607）。ホーム画面から起動したPWAには
+  `fixed inset-0`でドキュメントを固定しているため（#607。この固定と高さの決め方については、
+  上の「アプリシェルの高さを`position`に依存させない」も参照）。ホーム画面から起動したPWAには
   ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
   実装で外せない点が3つある。**Reactの`onTouchMove`ではなく`{ passive: false }`のネイティブ
   リスナーを張る**（Reactはルートでpassive登録するため`preventDefault()`が効かない）。
