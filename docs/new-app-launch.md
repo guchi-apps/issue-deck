@@ -24,7 +24,7 @@
 | 0. 相談 | 何を作るかをAIと数往復して固める。仕様案（名前・種別・DB・認証・URL）が下にまとまる | [`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts) |
 | 1. 基本 | アプリ名・リポジトリ名・公開範囲・概要。リポジトリ名の空きをGitHubで確かめる | [`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts) |
 | 2. 配置 | 種別・公開URL・本番ポート・DB名・認証・マルチエージェント運用の要否 | 同上 |
-| 3. 確認 | 作られるもの7件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
+| 3. 確認 | 作られるもの8件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
 
 **相談と設定を同じ画面に混ぜない。** 会話しながら横で仕様が埋まっていく形も検討したが、
 スマホでは会話と設定の両方を1画面に収めることになる。相談を先に終えて値を引き渡す形なら、
@@ -33,12 +33,13 @@
 **相談で決まっていない項目は空のまま渡す**（`normalizeDraft`が知らない値・使えない値を
 `null`へ落とす）。埋めさせると、聞かれていない前提が既定値として設定ステップへ流れ込む。
 
-## 作られるもの（7件）
+## 作られるもの（8件）
 
 | 作られるもの | 場所 | 自動化 |
 |---|---|---|
 | リポジトリ | `guchi-apps/<name>` | 自動（`develop`既定・ラベル一式を写す） |
 | 親Issue「◯◯の立ち上げ」 | `guchi-apps/issue-deck` | 自動 |
+| ポート帯を足すPull Request | `guchi-apps/issue-deck` | 自動（`scripts/local-repo-ports.conf`へ1行） |
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
@@ -86,6 +87,31 @@
 
 `githubFetch`は`Accept`ヘッダを`application/vnd.github+json`で上書きするので、
 **`application/vnd.github.raw`は使えない。** base64の`content`を自分で戻す。
+
+### ローカルセッションのポート帯は、立ち上げが払い出す
+
+**Issueにせず、issue-deck自身のdevelopへPull Requestを作る**（#2225）。追記の内容は
+「現状の最大 + 1000」で機械的に決まり、変更は1行。Issueにすると立ち上げのたびに1行のために
+実装セッションを1回起こすことになる（CLAUDE.md「同じ作業が繰り返し発生するものは、その作業を
+なくすIssueを立てる」）。develop向けPRなので`claude-review-develop.yml`がCIの完了を待って
+自動マージする。
+
+- 採番は[`lib/new-app/local-port-bands.ts`](../src/lib/new-app/local-port-bands.ts)（純粋関数）。
+  **空きを詰め直さない**——帯を外したリポジトリの番号を再利用すると、古いチェックアウトが
+  残っているサブPCで前の持ち主と衝突しうる。
+- **書式の正はシェル側**（`scripts/lib/local-repo-resolve.sh`の`local_repo_port_base`）。
+  行全体が`<名前><空白><数字>`に一致しないと読まれないので、**行末コメントは書けない**。
+  `local-port-bands.test.ts`が、生成した行を実際に`bash`へ読ませて突き合わせている。
+- **帯を決められないときは、何も作る前に止める**（`port_band_unavailable`）。`guchi-apps/vps`の
+  読み取り（`vpsRead: false`で続行）と扱いが違うのは、黙って飛ばすと帯が未確保のまま立ち上げが
+  終わり、#2213と同じ漏れが再発するから。まだ何も作っていない時点なので押し直せる。
+- **Pull Requestの作成そのものに失敗したときは止めない。** 残りのIssueを作らずに終える方が
+  損失が大きいので、`warnings`として画面へ返す（帯の値は親Issueの本文にも残る）。
+- **developへマージしただけでは効かない。** このファイルはサブPCの本体チェックアウト
+  （`~/apps/issue-deck/scripts/`）から読まれるため、画面のホスト一覧で「更新して再起動」を
+  押すまで反映されない（[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)）。
+  **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。サブPCの手作業
+  Issueの`## 前提条件`に1行書いてある。
 
 ### 新しいリポジトリのIssueは、作った直後には盤面に載らない
 

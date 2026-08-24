@@ -8,9 +8,12 @@ import {
   buildInitIssueBody,
   buildNewAppPlan,
   buildParentIssueBody,
+  buildPortBandPullRequestBody,
+  buildPortBandPullRequestTitle,
   buildSubpcManualIssueBody,
   buildVpsIssueBody,
   buildVpsManualIssueBody,
+  portBandBranchName,
   repositoryFullName,
   type NewAppIssueRefs,
 } from "@/lib/new-app/plan";
@@ -34,6 +37,8 @@ const REFS: NewAppIssueRefs = {
   parent: "guchi-apps/issue-deck#2201",
   vps: "guchi-apps/vps#91",
   subpc: "guchi-apps/issue-deck#2203",
+  localPortBase: 25000,
+  portBandPullRequest: "guchi-apps/issue-deck#2204",
 };
 
 const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable"> = {
@@ -42,10 +47,11 @@ const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable"> = {
 };
 
 describe("buildNewAppPlan", () => {
-  it("実行順に7件を並べる", () => {
+  it("実行順に8件を並べる", () => {
     const artifacts = buildNewAppPlan(spec());
     expect(artifacts.map((a) => a.kind)).toEqual([
       "repository",
+      "port-band",
       "parent-issue",
       "init-issue",
       "vps-issue",
@@ -63,6 +69,40 @@ describe("buildNewAppPlan", () => {
     expect(byKind["manual-subpc"]).toBe("proxy");
     expect(byKind["manual-vps"]).toBe("manual");
     expect(byKind["manual-browser"]).toBe("manual");
+    // ポート帯はissue-deckへのPRとして自動で作る（#2225）
+    expect(byKind["port-band"]).toBe("auto");
+  });
+
+  it("払い出す帯が分かっていれば見出しに出し、分からなければ出さない", () => {
+    const withBase = buildNewAppPlan(spec(), { localPortBase: 25000 }).find(
+      (a) => a.kind === "port-band",
+    );
+    expect(withBase?.title).toContain("25000");
+    const withoutBase = buildNewAppPlan(spec()).find((a) => a.kind === "port-band");
+    expect(withoutBase?.title).not.toMatch(/\d/);
+  });
+});
+
+describe("ポート帯のPull Request（#2225）", () => {
+  it("Issue用のブランチ名（issue-<番号>）と紛れない名前にする", () => {
+    expect(portBandBranchName(spec())).toBe("new-app-port-band/kakei-report");
+  });
+
+  it("PR本文はテンプレートの見出しを持ち、closesを使わない", () => {
+    const body = buildPortBandPullRequestBody(spec(), 25000, REFS);
+    expect(body).toContain("## 対応Issue");
+    expect(body).toContain("## 実装内容");
+    expect(body).toContain("## テスト内容");
+    expect(body).toContain("## 確認方法");
+    expect(body).toContain("## 注意点");
+    expect(body).toContain(REFS.parent);
+    expect(body).not.toContain("closes #");
+    expect(body).not.toContain("fixes #");
+  });
+
+  it("タイトルと本文に払い出す帯を書く", () => {
+    expect(buildPortBandPullRequestTitle(spec(), 25000)).toContain("25000");
+    expect(buildPortBandPullRequestBody(spec(), 25000, REFS)).toContain("`25000`");
   });
 });
 
@@ -80,6 +120,13 @@ describe("buildParentIssueBody", () => {
     expect(body).toContain("docs/supported-repositories.md");
     expect(body).toContain("standards/tech-stack.md");
   });
+
+  it("ポート帯はマージだけでは効かないことを書く（#2225）", () => {
+    const withBase = buildParentIssueBody(spec(), { localPortBase: 25000 });
+    expect(withBase).toContain("scripts/local-repo-ports.conf");
+    expect(withBase).toContain("guchi-apps/kakei-report 25000");
+    expect(withBase).toContain("更新して再起動");
+  });
 });
 
 describe("buildInitIssueBody", () => {
@@ -87,6 +134,7 @@ describe("buildInitIssueBody", () => {
     const body = buildInitIssueBody(spec(), REFS);
     expect(body).toContain("## 前提条件");
     expect(body).toContain(REFS.subpc!);
+    expect(body).toContain(REFS.portBandPullRequest!);
     expect(body).toContain("local-repos.conf");
     expect(body).toContain("盤面にも載りません");
   });
