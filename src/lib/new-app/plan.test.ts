@@ -225,13 +225,33 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).not.toMatch(/<[^>]+>/);
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
   });
+
+  it("機械的に定まる値を、そのまま貼れる1コマンドで投入する（#2249）", () => {
+    expect(body).toContain("provision-app-secrets.sh");
+    expect(body).toContain("--repo guchi-apps/kakei-report");
+    expect(body).toContain("--db-name app_kakei_report");
+    expect(body).toContain("--copy-allowed-emails");
+    // フィールド名の羅列に戻さない（aide-botの立ち上げで未登録のまま本番デプロイが失敗した）
+    expect(body).not.toContain("db-name = app_kakei_report");
+  });
+
+  it("DBも認証も無いアプリでは、そのオプションを渡さない", () => {
+    const plain = buildSubpcManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null, auth: "none" }),
+      REFS,
+    );
+    expect(plain).toContain("provision-app-secrets.sh");
+    expect(plain).not.toContain("--db-name");
+    expect(plain).not.toContain("--copy-allowed-emails");
+  });
 });
 
 describe("buildVpsManualIssueBody", () => {
   const body = buildVpsManualIssueBody(spec(), REFS);
 
   it("Gitで配れない実機の操作だけを書き、VirtualHostは書かない", () => {
-    expect(body).toContain("sudo mkdir -p /apps/kakei-report");
+    // 実機の配置先は `/apps/<name>` ではない（#2246・#2249。target-dirと同じパスにする）
+    expect(body).toContain("sudo mkdir -p /home/github-user/apps/kakei-report");
     expect(body).toContain("CREATE DATABASE IF NOT EXISTS app_kakei_report");
     expect(body).toContain("pm2 save");
     expect(body).toContain("certbot --apache -d kakei-report.gucchii.com");
@@ -270,6 +290,14 @@ describe("buildBrowserManualIssueBody", () => {
     expect(body).toContain("Aレコード");
     expect(body).toContain("GitHub Appのインストール対象");
     expect(body).toContain("「リポジトリを再同期」→「Issueを再同期」");
+  });
+
+  it("Signalyのwebhook URLは、控えた値を渡すだけのコマンドで残す（#2249）", () => {
+    expect(body).toContain("Signaly");
+    expect(body).toContain("provision-app-secrets.sh");
+    expect(body).toContain("--ci-webhook-url '<控えたWebhook URL>'");
+    // 機械的に定まる値はサブPCの手作業Issueで投入済みなので、ここでは求めない
+    expect(body).not.toContain("--db-name");
   });
 
   it("マルチエージェント運用に対応させるときだけWORKFLOW_PATを求める", () => {
