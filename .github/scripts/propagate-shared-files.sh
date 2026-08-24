@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# 1リポジトリぶんの「共有スクリプトを最新版へ更新するPR」を作る（#2240）。
+#
+# propagate-shared-files.yml から1リポジトリずつ呼ばれる。配るのは
+# `.github/scripts/signaly-notify.sh` のような**ワークフロー以外の配布物**で、
+# **どれを配るかは呼び出し元（issue-deckの画面）が決めて渡す**（ここで再検知すると画面の
+# 表示と実際の対象がずれる。propagate-repair-workflows.sh と同じ方針）。
+#
+# **caller配布（propagate-repair-workflows.sh）との違いは3つ。**
+#   1. 配布元は `.github/templates/` の雛形ではなく**issue-deck自身の実物**。中身をそのまま
+#      配るので雛形を置くと二重管理になり、実物を直したのに古い写しが配られる事故になる。
+#      issue-deck自身が同じスクリプトを ci.yml・deploy.yml から使っているため、壊れれば
+#      このリポジトリのCIで先に分かる。
+#   2. 配るのは**既に置いてあるリポジトリだけ**。signaly-notify.sh を呼ぶのは ci.yml・
+#      deploy.yml 側のステップなので、スクリプトだけ新規に置いても誰も呼ばない。
+#   3. 判定が「有るか無いか」ではなく**中身が同じか**。同じならスキップする（毎回PRを作らない）。
+#
+# **配布先の独自の変更は消えうる。** 実際 guchi-apps/subpc のコピーには、そのリポジトリだけの
+# NOTIFY_NOTE が入っている。**配布先のコピーにしか無い記述をPR本文へ書き出す**ので、確認して
+# マージすること（自動マージはしない。caller配布と同じ）。
+#
+# **「しか無い記述」は行ではなく語で見る**（src/lib/workflow-tags.ts の
+# hasLocalSharedFileContent と同じ判定）。行で比べると、配布元で書き換わっただけの行
+# （run_url= ・curl -fsS \ など）が全リポジトリで引っかかり、本当に独自の変更がある subpc を
+# 見分けられなかった（実測で16件中16件が該当）。
+#
+# **このスクリプトは1リポジトリの失敗で全体を止めない前提で書かれている。** 呼び出し元が
+# 戻り値を見て件数を数えるため、失敗時は非0で返すこと。
+set -uo pipefail
+
+REPO="$1"        # owner/repo
+FILES="$2"       # 配るパス（空白区切り。例: ".github/scripts/signaly-notify.sh"）
+SOURCE_REPO="$3" # 配布元（guchi-apps/issue-deck）
+
+# 配布元はこのリポジトリ（issue-deck）のチェックアウトそのもの
+SOURCE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# 配れるパスの許可リスト。**src/lib/workflow-tags.ts の SHARED_FILE_SPECS と同じ内容**にする
+# （食い違うと、画面から配ろうとしたファイルがここで黙ってスキップされる）。
+ALLOWED_FILES=".github/scripts/signaly-notify.sh"
+
+fail() {
+  echo "  $1" >&2
+  exit 1
+}
+
+DEFAULT_BRANCH="$(gh api "repos/$REPO" --jq .default_branch 2>/dev/null)" \
+  || fail "リポジトリ情報を取得できません"
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+git clone --quiet --depth 1 --branch "$DEFAULT_BRANCH" "https://x-access-token:${GH_TOKEN}@github.com/$REPO.git" "$WORK/repo" \
+  || fail "cloneに失敗しました"
+
+cd "$WORK/repo" || fail "作業ディレクトリへ移動できません"
+
+# 配布先のコピーにしか無い記述。**ファイルごとに見出しを付けてPR本文へ書き出す**
+LOST="$WORK/lost.md"
+: > "$LOST"
+
+UPDATED=""
+for FILE in $FILES; do
+  ALLOWED=false
+  for CANDIDATE in $ALLOWED_FILES; do
+    [ "$FILE" = "$CANDIDATE" ] && { ALLOWED=true; break; }
+  done
+  if [ "$ALLOWED" != "true" ]; then
+    echo "  $FILE は配布対象外です。スキップします"
+    continue
+  fi
+
+  SOURCE="$SOURCE_DIR/$FILE"
+  [ -f "$SOURCE" ] || fail "配布元に $FILE がありません"
+
+  # **置かれていないリポジトリへは配らない。** 呼び出し側のステップごと入れるのは
+  # 「そのリポジトリにCI・デプロイ通知を導入する」作業で、機械的な配布とは別物
+  if [ ! -f "$FILE" ]; then
+    echo "  $FILE は置かれていません。スキップします"
+    continue
+  fi
+
+  if cmp -s "$SOURCE" "$FILE"; then
+    echo "  $FILE は既に最新です。スキップします"
+    continue
+  fi
+
+  # 消えるものを先に取る（上書き後には比べられない）。配布元に一度も出てこない語を含む行だけを
+  # 挙げる（書き換わっただけの行を除くため。上のコメントを参照）
+  LOST_LINES="$(awk '
+    NR == FNR {
+      tmp = $0
+      while (match(tmp, /[A-Za-z_][A-Za-z0-9_]*/)) {
+        known[substr(tmp, RSTART, RLENGTH)] = 1
+        tmp = substr(tmp, RSTART + RLENGTH)
+      }
+      next
+    }
+    {
+      tmp = $0
+      keep = 0
+      while (match(tmp, /[A-Za-z_][A-Za-z0-9_]*/)) {
+        if (!(substr(tmp, RSTART, RLENGTH) in known)) keep = 1
+        tmp = substr(tmp, RSTART + RLENGTH)
+      }
+      if (keep) print
+    }
+  ' "$SOURCE" "$FILE")"
+  if [ -n "$LOST_LINES" ]; then
+    {
+      printf '<details><summary><code>%s</code>（%s行）</summary>\n\n```\n' \
+        "$FILE" "$(printf '%s\n' "$LOST_LINES" | wc -l)"
+      printf '%s\n' "$LOST_LINES"
+      printf '```\n\n</details>\n\n'
+    } >> "$LOST"
+  fi
+
+  # **実行ビットも配布元にそろえる。** gitが記録するmodeは100755/100644の別だけなので、
+  # 中身を写したうえで配布元と同じパーミッションにする（呼び出し側は `bash <path>` と
+  # 直接実行の両方があり、実行ビットが落ちていると後者だけが `Permission denied` になる）
+  cat "$SOURCE" > "$FILE" || fail "$FILE の更新に失敗しました"
+  chmod --reference="$SOURCE" "$FILE" || fail "$FILE のパーミッションを合わせられません"
+
+  UPDATED="$UPDATED $FILE"
+done
+
+UPDATED="${UPDATED# }"
+
+if [ -z "$(git status --porcelain)" ]; then
+  echo "  更新するファイルがありません。スキップします"
+  exit 0
+fi
+
+if [ -s "$LOST" ]; then
+  LOST_NOTE="$(printf '**このリポジトリのコピーにしか無い記述が消えます。** 残すべきものが含まれていないか確認してください。\n\n%s' "$(cat "$LOST")")"
+else
+  LOST_NOTE="このリポジトリのコピーにしか無い記述はありません（配布元に無い語を含む行が1つもありません）。"
+fi
+
+# ブランチ名は固定。`issue-*`ではないため、配布先の issue-labels.yml（push on issue-*）は動かない
+BRANCH="shared-files"
+
+git checkout --quiet -b "$BRANCH" || fail "ブランチを作成できません"
+git add -A
+
+COMMIT_MESSAGE="$(printf '共有スクリプトを最新版へ更新する\n\n各リポジトリの .github/scripts/ へコピーして使っているスクリプトを、配布元\n（%s）の内容へそろえる。コピー運用のため、配布元を直しても\n各リポジトリへは自動では行き渡らない。\n\n更新: %s\n' "$SOURCE_REPO" "$UPDATED")"
+git commit --quiet -m "$COMMIT_MESSAGE" || fail "コミットに失敗しました"
+
+# ブランチ名が固定のため、前回マージされずに閉じたPRの残骸が残っていることがある。
+# **中身は毎回このスクリプトが作り直すもの**なので上書きしてよい（propagate-repair-workflows.sh と
+# 同じ理由・同じ手順。単一ブランチcloneでは素の --force-with-lease が使えない）。
+if ! git push --quiet -u origin "$BRANCH"; then
+  git fetch --quiet --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" \
+    || fail "pushに失敗しました（残っているブランチも取得できません）"
+
+  REMOTE_SHA="$(git rev-parse "refs/remotes/origin/$BRANCH")" || fail "pushに失敗しました"
+  git push --quiet --force-with-lease="$BRANCH:$REMOTE_SHA" -u origin "$BRANCH" \
+    || fail "pushに失敗しました"
+fi
+
+PR_BODY="$(printf '## 実装内容\n\n各リポジトリの `.github/scripts/` へコピーして使っているスクリプトを、配布元（%s）の\n内容へそろえた。**コピー運用のため、配布元を直しても各リポジトリへは自動では行き渡らない。**\n\n更新: %s\n\n`signaly-notify.sh` を含む場合、今回そろえる主な変更は\n**「通知が届かなくても `exit 0` で返す」**（%s#2237・#2239）。Signalyが止まっている間に\nデプロイすると、デプロイ自体は成功しているのに通知のステップだけが `curl: (22) 503` で\n失敗し、**run全体が赤くなっていた。**\n\n## 上書きで消える記述\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、次のデプロイ・CIでSignalyへ通知が届くこと（届かない場合も run が緑のままで、\n  ログに `::warning::Signalyへの通知に失敗しました` が出ること）\n\n## 注意点\n\n- **呼び出し側のステップには `continue-on-error: true` を付けておく。** スクリプトは常に0で\n  返すが、付けておくと将来スクリプト自体が落ちたときもrunを赤くしない\n- **自動マージしない。** 配布先の独自の変更を上書きしうるため、内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' \
+  "$SOURCE_REPO" "$UPDATED" "$SOURCE_REPO" "$LOST_NOTE" "$SOURCE_REPO")"
+
+PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
+  --title "共有スクリプトを最新版へ更新する" \
+  --body "$PR_BODY" 2>/dev/null)" \
+  || fail "PRの作成に失敗しました"
+
+echo "  作成しました: $PR_URL"
