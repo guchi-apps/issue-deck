@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
   cancelableDispatchJobs,
+  countDispatchQueueBadge,
   describeDispatchJobWaitReason,
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
+  describeDispatchSessionLoad,
   selectHostSelfUpdateJob,
   selectHostSessions,
   summarizeDispatchQueue,
@@ -284,6 +286,61 @@ describe("describeDispatchQueueLoad", () => {
 
   it("上限が分からなければ分母を出さない", () => {
     expect(describeDispatchQueueLoad(summarizeDispatchQueue([], null))).toBe("実行中 0");
+  });
+});
+
+/**
+ * #2265。バッジの数字は「積まれているジョブの件数」ではなく「サブPCで生きているセッション本数」。
+ * ジョブはtmuxセッションが立った時点で`succeeded`になるため、10本走っていてもジョブの件数は
+ * 0〜1にしかならず、バッジがサブPCの混み具合を映していなかった。
+ */
+describe("バッジに出す件数（セッション本数）", () => {
+  it("申告しているホストのセッション本数と上限を要約へ入れる", () => {
+    const summary = summarizeDispatchQueue([], 2, [host({ liveSessions: 10 })]);
+    expect(summary.liveSessions).toBe(10);
+    expect(summary.maxSessions).toBe(12);
+    expect(countDispatchQueueBadge(summary)).toBe(10);
+    expect(describeDispatchSessionLoad(summary)).toBe("セッション 10/12");
+  });
+
+  it("ホストが複数あれば足す", () => {
+    const summary = summarizeDispatchQueue([], 2, [
+      host({ liveSessions: 10 }),
+      host({ name: "subpc2", liveSessions: 2, maxSessions: 4 }),
+    ]);
+    expect(summary.liveSessions).toBe(12);
+    expect(summary.maxSessions).toBe(16);
+  });
+
+  // ホストの行は消えないため、絞らないと止まったpollerの最後の値でバッジが固まる
+  it("応答していないホストの申告は数えず、ジョブの件数へ落とす", () => {
+    const summary = summarizeDispatchQueue([job()], 2, [
+      host({ liveSessions: 10, online: false }),
+    ]);
+    expect(summary.liveSessions).toBeNull();
+    expect(countDispatchQueueBadge(summary)).toBe(1);
+  });
+
+  // 判定材料が無いことを理由にバッジを消すと、ジョブを積んだこと自体が画面から消える
+  it("本数を申告するホストが1台も無ければ、従来どおりジョブの件数を出す", () => {
+    const summary = summarizeDispatchQueue([job(), job({ id: "b" })], 2, [
+      host({ maxSessions: null, liveSessions: null }),
+    ]);
+    expect(summary.liveSessions).toBeNull();
+    expect(describeDispatchSessionLoad(summary)).toBeNull();
+    expect(countDispatchQueueBadge(summary)).toBe(2);
+  });
+
+  // ホストを渡さない呼び出し（テスト・古い呼び出し元）でも壊れない
+  it("ホストを渡さなければ申告なしとして扱う", () => {
+    expect(summarizeDispatchQueue([], 2).liveSessions).toBeNull();
+  });
+
+  // セッションが0本でジョブだけ積まれている状態は、数字ではなく点で出す（DispatchQueueBadge）
+  it("セッションが0本なら、順番待ちがあっても0を返す", () => {
+    const summary = summarizeDispatchQueue([job()], 2, [host({ liveSessions: 0 })]);
+    expect(countDispatchQueueBadge(summary)).toBe(0);
+    expect(summary.activeCount).toBe(1);
   });
 });
 
