@@ -675,7 +675,18 @@ jobs:
                 echo "::warning::issue #$n: ブランチ issue-$n とdevelopの差分を取得できませんでした。次回のスケジュール実行で再判定します"
                 continue
               fi
-              if [ "$ahead" != "0" ]; then
+              # **コミット数だけでは取り残しと言えない(#2289)。** developへ入っていない
+              # コミットはあるが、developへ持ち込む変更は1件も無いブランチがある。
+              # コンフリクト解消のワークフロー(claude-conflict-resolve)とローカル
+              # セッションが同じコンフリクトを別々に解消し、PRには片方だけが載って
+              # マージされた場合がこれで、残るのは中身の同じマージコミットだけになる
+              # (#2249。ahead_by=2・変更ファイル0件で`00.check-user`が付いた)。
+              # compareは三点比較なので、filesが空＝マージしても何も入らない。
+              # **`files`が読めなかったときは従来どおり取り残しとして扱う**(応答の形が
+              # 変わって「変更なし」と読み違えると、本物の取り残しを黙って見送ることに
+              # なる。#1999で直したのはまさにその見送りだった)。
+              changed_files="$(jq -r 'if has("files") then ([.files[]] | length) else "" end' <<<"$compare_json" 2>/dev/null || true)"
+              if [ "$ahead" != "0" ] && [ "$changed_files" != "0" ]; then
                 # ここから先は「取り残しかどうか」の判定。実装中(a)と区別が付かないため、
                 # (1)developへのPRが開いていない、(2)最後のコミットから猶予時間が過ぎている、
                 # の両方を満たすものだけを取り残しとして扱う。回数ではなく時間で見るのは、
@@ -728,7 +739,11 @@ jobs:
                 echo "issue #$n: developへ入っていないコミット${ahead}件を取り残しとして通知しました"
                 continue
               fi
-              echo "issue #$n: ブランチ issue-$n の先端はマージ済みPR（$pr_url）と違いますが、developへ入っていないコミットは無いため進めます"
+              if [ "$ahead" = "0" ]; then
+                echo "issue #$n: ブランチ issue-$n の先端はマージ済みPR（$pr_url）と違いますが、developへ入っていないコミットは無いため進めます"
+              else
+                echo "issue #$n: ブランチ issue-$n にdevelopへ入っていないコミットが${ahead}件ありますが、developへ持ち込む変更が無いため進めます（コンフリクト解消のマージコミットなど）"
+              fi
             elif [ -z "$branch_head" ] && [ "$ref_status" != "404" ]; then
               echo "::warning::issue #$n: ブランチ issue-$n の状態を確認できませんでした。次回のスケジュール実行で再判定します"
               continue

@@ -270,11 +270,14 @@ describe("develop-merge-sweep", () => {
   /**
    * `develop`へ入っていないコミットがある状態のcompare応答。
    * 最新コミットの日時だけが判定に効くため、`minutesAgo`で「いつpushされたか」を作る。
+   * `files`は「developへ持ち込む変更があるか」の判定に効く（#2289）。既定では変更ありに
+   * するが、コンフリクト解消のマージコミットだけが残った状態は`files: []`で作れる。
    */
-  function aheadOf(count, minutesAgo) {
+  function aheadOf(count, minutesAgo, files = [{ filename: "src/app/page.tsx" }]) {
     const date = new Date(Date.now() - minutesAgo * 60_000).toISOString();
     return JSON.stringify({
       ahead_by: count,
+      files,
       commits: Array.from({ length: count }, () => ({
         commit: { committer: { date } },
       })),
@@ -377,6 +380,47 @@ describe("develop-merge-sweep", () => {
 
     expect(result.reported).toEqual(["1583"]);
     expect(result.stdout).toContain("developへ入っていないコミットは無いため進めます");
+  });
+
+  it("コミットは残っていても変更を持ち込まないなら取り残しとして扱わない（#2289）", () => {
+    // コンフリクト解消のワークフローとローカルセッションが同じコンフリクトを別々に
+    // 解消し、PRには片方だけが載ってマージされた状態（#2249）。ahead_by=2だが
+    // developへ持ち込む変更は1件も無く、`00.check-user`を付けてはいけない
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      STUB_PR_1583: MERGED_PR,
+      STUB_REF_1583: "bbb222",
+      STUB_COMPARE_1583: aheadOf(2, 300, []),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual(["1583"]);
+    expect(result.calls).not.toContain("--add-label 00.check-user");
+    expect(result.stdout).toContain("developへ持ち込む変更が無いため進めます");
+  });
+
+  it("変更の有無を読めない応答なら、従来どおり取り残しとして扱う", () => {
+    // `files`を持たない応答を「変更なし」と読み違えると、本物の取り残しを黙って
+    // 見送ることになる（#1999で直したのがその見送り）
+    const result = runStep(SWEEP_STEP, {
+      ...inImplementation,
+      STUB_PR_1583: MERGED_PR,
+      STUB_REF_1583: "bbb222",
+      STUB_COMPARE_1583: JSON.stringify({
+        ahead_by: 1,
+        commits: [
+          {
+            commit: {
+              committer: { date: new Date(Date.now() - 300 * 60_000).toISOString() },
+            },
+          },
+        ],
+      }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.reported).toEqual([]);
+    expect(result.calls).toContain("--add-label 00.check-user");
   });
 
   it("developとの差分を取得できないときは進めず、通知もしない", () => {
