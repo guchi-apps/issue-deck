@@ -4,6 +4,7 @@ import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { CiState } from "@/lib/github/release-api";
+import type { DeployFailureIssueRef } from "@/types/branch-flow";
 
 /** マージ待ちPRの種別。リポジトリ横断の一覧で「何を待っているPRか」を一目で区別するために使う */
 export type PullRequestKind =
@@ -155,6 +156,12 @@ export type PullRequestDeployStatus = {
 export type PullRequestDeployStatusResponse = {
   /** 判定できなければnull */
   status: PullRequestDeployStatus | null;
+  /**
+   * そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull。
+   * **`status.kind`が`failed`のときにしか使わない**が、判定はリポジトリ単位なので
+   * `status`とは別に持つ。
+   */
+  failureIssue: DeployFailureIssueRef | null;
   /** 取得時刻（ISO8601） */
   fetchedAt: string;
 };

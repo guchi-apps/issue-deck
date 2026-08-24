@@ -1383,6 +1383,7 @@ describe("BranchFlowView", () => {
       return [
         {
           repositoryFullName: REPO,
+          failureIssue: null,
           deployRun: {
             status: "completed",
             conclusion: "success",
@@ -1433,6 +1434,34 @@ describe("BranchFlowView", () => {
         badges.map((badge) => badge.closest("a")?.getAttribute("href")),
       ).toContain(`https://github.com/${REPO}/actions/runs/1`);
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
+    });
+
+    it("デプロイ失敗の版の束に、その場で出し直せる帯を出す（#2236）", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({ conclusion: "failure", runAttempt: 2 }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("本番デプロイが失敗しています")).toBeTruthy();
+      // 1回やり直したうえでの失敗であることを言う（#2134の自動再実行）
+      expect(screen.getByText(/自動で1回やり直しても失敗/)).toBeTruthy();
+      // 帯からそのまま出し直せる（リポジトリの節にあるボタンと同じ確認ダイアログを通る）
+      expect(screen.getAllByRole("button", { name: /本番へ再デプロイ/ }).length).toBeGreaterThan(0);
+    });
+
+    it("手動の出し直しが落ちた場合は帯を出さない（その版が本番へ出ていないことを意味しないため）", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus()],
+        deployStatuses: deployStatuses({ conclusion: "failure", event: "workflow_dispatch" }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("本番デプロイが失敗しています")).toBeNull();
     });
 
     it("デプロイ成功のときだけ「本番反映」と書き、裏付けのバッジを添える", () => {
@@ -1683,6 +1712,7 @@ describe("BranchFlowView", () => {
         deployStatuses: [
           {
             repositoryFullName: REPO,
+            failureIssue: null,
             deployRun: {
               status: "in_progress",
               conclusion: null,

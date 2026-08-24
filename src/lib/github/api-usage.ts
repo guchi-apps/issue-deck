@@ -52,6 +52,9 @@ export const GITHUB_API_FEATURES = [
   { key: "conflict_sweep", label: "コンフリクトの巡回検知" },
   { key: "release_dispatch", label: "リリースの起動" },
   { key: "deploy_dispatch", label: "本番デプロイの起動" },
+  // 本番デプロイ失敗の巡回検知（#2236）。最新runのRESTはETagが効くので、実際に消費するのは
+  // 失敗しているリポジトリがあるときの起票・更新・クローズだけ。
+  { key: "deploy_failure_sweep", label: "デプロイ失敗の巡回検知" },
   { key: "secrets_sync", label: "シークレット同期の起動" },
   // 元は「Issueの再同期」(`sync`)として計上していたが、実態は共有ワークフローのタグ確認で、
   // 消費量も大きかったため#1503で分けた（同時にGraphQLへ寄せて消費自体を減らしている）

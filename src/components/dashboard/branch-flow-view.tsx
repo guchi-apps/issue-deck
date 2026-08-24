@@ -39,6 +39,7 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -85,6 +86,7 @@ import type {
   BranchFlowPlannedIssue,
   BranchFlowReleaseGroup,
   BranchFlowRepository,
+  DeployFailureIssueRef,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -891,10 +893,15 @@ function ReleaseProgressPill({
 function ReleaseGroupHeader({
   group,
   releaseButton,
+  repositoryFullName,
+  deployFailureIssue,
   onMerged,
 }: {
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  repositoryFullName: string;
+  /** そのリポジトリで開いているデプロイ失敗Issue（#2236） */
+  deployFailureIssue: DeployFailureIssueRef | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const released = group.mergedAt !== null;
@@ -979,6 +986,24 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
+
+        {/* 本番デプロイが失敗しているときだけ、その版の束の中に赤い帯を出す（#2236）。
+            **「本番へ再デプロイ」はリポジトリの節にもあるが、そこは失敗の表示と離れた行**で、
+            失敗に気づいた人が押しに行くまでに視線が1往復する。落ちた版のところに置く。
+            **手動の出し直しが落ちた場合は出さない**（`manual`）——出し直しの失敗は、その版が
+            本番へ出ていないことを意味しないため（`inProduction`の判定と揃える） */}
+        {group.deploy?.kind === "failure" && !group.deploy.manual && (
+          <DeployFailureAlert
+            repositoryFullName={repositoryFullName}
+            title="本番デプロイが失敗しています"
+            version={group.version}
+            autoRetried={group.deploy.autoRetried}
+            runUrl={group.deploy.htmlUrl}
+            failureIssue={deployFailureIssue}
+            className="mt-1"
+          />
+        )}
+
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
         {group.bumpPullRequest && (
@@ -1174,6 +1199,7 @@ function ReleaseFlowGraph({
             key={group.key}
             repositoryFullName={repository.repositoryFullName}
             group={group}
+            deployFailureIssue={repository.deployFailureIssue}
             onMerged={onMerged}
             releaseButton={
               index === 0 && repository.canTriggerRelease ? (
@@ -1281,16 +1307,25 @@ function ReleaseGroupHeaderWithLanes({
   repositoryFullName,
   group,
   releaseButton,
+  deployFailureIssue,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  /** そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければリンクを出さない */
+  deployFailureIssue?: DeployFailureIssueRef | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
+      <ReleaseGroupHeader
+        group={group}
+        releaseButton={releaseButton}
+        repositoryFullName={repositoryFullName}
+        deployFailureIssue={deployFailureIssue ?? null}
+        onMerged={onMerged}
+      />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow

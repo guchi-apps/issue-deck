@@ -228,6 +228,25 @@ export async function fetchRepositoryLabelNames(
 }
 
 /**
+ * Issue1件の状態（open / closed）を読む（#2236）。**存在しなければnull。**
+ *
+ * デプロイ失敗の追跡Issue（`deploy-failure-sweep-run.ts`）が、DBに「起票済み・open」と
+ * 記録している行の実物を確かめるのに使う。**人が画面から先に閉じることがある**ため、
+ * DBの記録だけを信じると「閉じたのに次の失敗でIssueが立たない」状態が続く。
+ */
+export async function fetchIssueState(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<"open" | "closed" | null> {
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`, token);
+  if (!res.ok) return null;
+  const issue: { state?: unknown } = await res.json().catch(() => ({}));
+  return issue.state === "closed" ? "closed" : issue.state === "open" ? "open" : null;
+}
+
+/**
  * Issueに**いま付いている**ラベル名を返す（#1905）。
  *
  * 使うのは「外してよいか」を外す前に確かめたいときだけ（`src/lib/dispatch/check-user-labels.ts`）。

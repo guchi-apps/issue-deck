@@ -64,6 +64,7 @@ import {
 } from "@/components/dashboard/local-session-notice";
 import { IssueOrderSection } from "@/components/dashboard/issue-order-section";
 import { CodeReviewPanel } from "@/components/dashboard/code-review-panel";
+import { DeployFailurePanel } from "@/components/dashboard/deploy-failure-panel";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import {
   isIssueExecutionStarted,
@@ -129,6 +130,7 @@ import {
 import { checkUserTargetProps } from "@/lib/check-user-focus";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
+import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -200,6 +202,8 @@ export function MobileIssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
   const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
+  // デプロイ失敗Issue（#2236）。PCの詳細と同じ判定・同じ部品を使う
+  const deployFailureMeta = useMemo(() => parseDeployFailureMeta(issue?.body), [issue?.body]);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   // 手作業Issueが待っている相手の状況（#1705）。PCの詳細と同じフック・同じ部品を使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
@@ -873,6 +877,9 @@ export function MobileIssueDetail({
             onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
           />
         )}
+
+        {/* デプロイ失敗Issueの案内と出口（#2236）。PC版と同じく本文より上に置く */}
+        {deployFailureMeta && <DeployFailurePanel meta={deployFailureMeta} />}
 
         {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
         {canCompleteManualStep(issue) && (

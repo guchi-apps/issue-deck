@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { requestDeploy } from "@/lib/deploy-request";
+import { cn } from "@/lib/utils";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 
 type RepositoryDeployButtonProps = {
@@ -26,9 +27,17 @@ type RepositoryDeployButtonProps = {
   /** developがmainより進んでいるコミット数。今回のデプロイでは出ないことを伝えるのに使う */
   unreleasedCommits?: number;
   /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か */
-  isPending: boolean;
+  isPending?: boolean;
   /** 起動に成功したあと。起動中の記録とデプロイ状況の取り直しを親が行う */
-  onTriggered: () => void;
+  onTriggered?: () => void;
+  /**
+   * 失敗の帯（#2236）から押すときの見た目。既定（`outline`）はリポジトリの節に置く
+   * 「本番へ再デプロイ」で、`destructive`は**デプロイが失敗しているときだけ**使う。
+   * 押すと何が起きるかは同じなので、確認ダイアログは共通のまま。
+   */
+  tone?: "outline" | "destructive";
+  /** スマホで1行を占有させる（横に並べると指で押せる幅が残らないため） */
+  block?: boolean;
 };
 
 /**
@@ -51,8 +60,10 @@ export function RepositoryDeployButton({
   currentVersion = null,
   deployedAt = null,
   unreleasedCommits = 0,
-  isPending,
+  isPending = false,
   onTriggered,
+  tone = "outline",
+  block = false,
 }: RepositoryDeployButtonProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
@@ -64,7 +75,7 @@ export function RepositoryDeployButton({
     try {
       await requestDeploy(repositoryFullName);
       setConfirmOpen(false);
-      onTriggered();
+      onTriggered?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -76,8 +87,8 @@ export function RepositoryDeployButton({
     <>
       <Button
         size="sm"
-        variant="outline"
-        className="h-6 gap-1 px-2 text-xs"
+        variant={tone === "destructive" ? "destructive" : "outline"}
+        className={cn("h-6 gap-1 px-2 text-xs", block && "h-8 w-full justify-center")}
         disabled={isTriggering || isPending}
         onClick={() => setConfirmOpen(true)}
       >

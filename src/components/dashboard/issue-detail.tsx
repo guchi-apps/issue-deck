@@ -22,6 +22,7 @@ import { ArtifactPreviewProvider } from "@/components/dashboard/artifact-preview
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
+import { DeployFailurePanel } from "@/components/dashboard/deploy-failure-panel";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
@@ -137,6 +138,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -201,6 +203,9 @@ export function IssueDetail({
     () => (issue && canCompleteManualStep(issue) ? detectInfraConfigTargets(issue.body) : []),
     [issue],
   );
+  // デプロイ失敗Issue（#2236）。**判定は本文へ埋めた不可視マーカーだけを見る**——
+  // 新しいラベルを14リポジトリへ配り終えるまで機能が半端に効く状態を作らないため。
+  const deployFailureMeta = useMemo(() => parseDeployFailureMeta(issue?.body), [issue?.body]);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   const hasSubIssueRelations =
     subIssueRelations.parent !== null || subIssueRelations.children.length > 0;
@@ -902,6 +907,11 @@ export function IssueDetail({
               onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
             />
           )}
+
+          {/* デプロイ失敗Issueの案内と出口（#2236）。**本文より上に置く**——このIssueを
+              開いた人がやることはたいてい「もう一度流す」の1つだけで、説明を読ませる前に
+              直す手段を出す */}
+          {deployFailureMeta && <DeployFailurePanel meta={deployFailureMeta} />}
 
           {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
           {canCompleteManualStep(issue) && (

@@ -762,6 +762,7 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
         : [
             {
               repositoryFullName: REPO,
+              failureIssue: null,
               deployRun: {
                 status: "completed",
                 conclusion: "success",
@@ -1055,6 +1056,7 @@ describe("本番デプロイの状態（#1579）", () => {
     return [
       {
         repositoryFullName: REPO,
+        failureIssue: null,
         deployRun: {
           status: "completed",
           conclusion: "success",

@@ -95,6 +95,12 @@ export async function fetchOpenPullRequestsForBase(
 }
 
 export type ReleaseWorkflowRun = {
+  /**
+   * runのid（#2236）。**同じ失敗で二重にIssueを起票しないための鍵**として使う。
+   * `deploy-retry.yml`の再実行は新しいrunを作らずattemptを増やすだけなので、
+   * 「1回の失敗」をこの値で数えられる。
+   */
+  id: number;
   /** queued | in_progress | completed など */
   status: string;
   /** success | failure | cancelled | null（未完了時） */
@@ -119,6 +125,14 @@ export type ReleaseWorkflowRun = {
    * （`reusable-deploy-retry.yml`は`run_attempt == 1`のときしか再実行しない）。
    */
   runAttempt: number;
+  /**
+   * この実行が最後に動いた時刻（ISO8601。#2236）。
+   *
+   * **失敗してからどれだけ経ったかは、これでしか分からない。** `createdAt`は最初に
+   * キューされた時刻なので、`deploy-retry.yml`が再実行したぶんの経過時間が入らない。
+   * デプロイ失敗の自動起票は「失敗のまま一定時間が過ぎたか」で判定するため、この値を見る。
+   */
+  updatedAt: string;
 };
 
 /**
@@ -143,10 +157,12 @@ export async function fetchLatestWorkflowRun(
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1${qs}`;
   const result = await githubFetchJsonWithEtag<{
     workflow_runs?: Array<{
+      id?: number;
       status: string;
       conclusion: string | null;
       html_url: string;
       created_at: string;
+      updated_at?: string;
       event: string;
       run_attempt?: number;
     }>;
@@ -161,10 +177,14 @@ export async function fetchLatestWorkflowRun(
   const run = result.data.workflow_runs?.[0];
   if (!run) return null;
   return {
+    id: run.id ?? 0,
     status: run.status,
     conclusion: run.conclusion ?? null,
     htmlUrl: run.html_url,
     createdAt: run.created_at,
+    // 取れなかったときは`created_at`で代用する。**「まだ新しい」側へ倒す**——古い側へ
+    // 倒すと、経過時間で判定するデプロイ失敗の起票（#2236）が実際より早く走ってしまう。
+    updatedAt: run.updated_at ?? run.created_at,
     event: run.event,
     // 取れなかったときは初回（1）として扱う。**「自動で再実行された」と言い切れるのは
     // 2以上を実際に見たときだけ**で、欠けている値から推測して印を付けない（#2134）。
@@ -191,6 +211,34 @@ export async function fetchLatestDeployWorkflowRun(
   token: string,
 ): Promise<ReleaseWorkflowRun | null> {
   return fetchLatestWorkflowRun(owner, repo, DEPLOY_WORKFLOW_FILE, token, "branch=main");
+}
+
+/**
+ * 1つのrunで失敗したジョブの名前を返す（#2236）。
+ *
+ * デプロイ失敗のIssueに「どこで落ちたか」を書くためだけに使う。**起票する直前にしか
+ * 呼ばない**——巡回のたびに呼ぶと、失敗が続いている間ずっとレート制限を消費し続けるため。
+ *
+ * 取れなかったとき（権限不足・`startup_failure`でジョブが1件も無い）は空配列を返す。
+ * その場合はIssueの本文からジョブ名の行が消えるだけで、起票そのものは止めない
+ * （**失敗を知らせることの方が、内訳より優先する**）。
+ */
+export async function fetchFailedJobNames(
+  owner: string,
+  repo: string,
+  runId: number,
+  token: string,
+): Promise<string[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/jobs?per_page=100&filter=latest`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return [];
+  const data: { jobs?: Array<{ name?: unknown; conclusion?: unknown }> } = await res
+    .json()
+    .catch(() => ({}));
+  return (data.jobs ?? [])
+    .filter((job) => job.conclusion === "failure" || job.conclusion === "timed_out")
+    .map((job) => job.name)
+    .filter((name): name is string => typeof name === "string");
 }
 
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */

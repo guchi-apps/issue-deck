@@ -19,6 +19,7 @@ import type {
   BranchFlowReleaseState,
   BranchFlowRepository,
   BranchFlowRepositorySummary,
+  DeployFailureIssueRef,
   RepositoryBranchStatus,
   RepositoryDeployStatus,
 } from "@/types/branch-flow";
@@ -216,6 +217,10 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
   const deployRunByRepo = new Map(
     (input.deployStatuses ?? []).map((status) => [status.repositoryFullName, status.deployRun]),
   );
+  // 失敗の帯から追跡Issueへ移るためのリンク（#2236）。判定には使わない。
+  const deployFailureIssueByRepo = new Map(
+    (input.deployStatuses ?? []).map((status) => [status.repositoryFullName, status.failureIssue]),
+  );
   const now = input.now ?? Date.now();
 
   const repositories = input.repositories.map((repository) =>
@@ -227,6 +232,7 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
       issues: input.issues.filter((issue) => issue.repositoryFullName === repository.fullName),
       branchStatus: branchStatusByRepo.get(repository.fullName) ?? null,
       deployRun: deployRunByRepo.get(repository.fullName) ?? null,
+      deployFailureIssue: deployFailureIssueByRepo.get(repository.fullName) ?? null,
       now,
     }),
   );
@@ -257,6 +263,7 @@ function buildRepository({
   issues,
   branchStatus,
   deployRun,
+  deployFailureIssue,
   now,
 }: {
   repository: { fullName: string; private: boolean };
@@ -264,6 +271,7 @@ function buildRepository({
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
   deployRun: BranchFlowDeployRun | null;
+  deployFailureIssue: DeployFailureIssueRef | null;
   now: number;
 }): BranchFlowRepository {
   // リリースPR（develop→main）はレーンではなく幹の一部なので、作業レーンからは外す。
@@ -407,6 +415,7 @@ function buildRepository({
     canTriggerDeploy:
       (branchStatus?.hasDeployWorkflow ?? false) &&
       (deployState === null || deployState.kind === "success" || deployState.kind === "failure"),
+    deployFailureIssue,
     orphanIssues: issues
       .filter(
         (issue) =>

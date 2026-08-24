@@ -95,10 +95,14 @@ function renderDetail(
 }
 
 /** 本番デプロイ状況の取得（#1814）。既定では「判定できない」を返し、バッジを出さない */
-function mockDeployStatus(status: PullRequestDeployStatus | null = null) {
+function mockDeployStatus(
+  status: PullRequestDeployStatus | null = null,
+  /** 追跡している自動起票Issue（#2236）。既定は無し */
+  failureIssue: { number: number; htmlUrl: string } | null = null,
+) {
   const fetchMock = vi.fn(async () => ({
     ok: true,
-    json: async () => ({ status, fetchedAt: "2026-08-16T12:00:00.000Z" }),
+    json: async () => ({ status, failureIssue, fetchedAt: "2026-08-16T12:00:00.000Z" }),
   }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -261,6 +265,39 @@ describe("PullRequestDetail", () => {
     expect(badge.closest("a")?.getAttribute("href")).toBe(
       "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     );
+  });
+
+  // 失敗が見えている場所からそのまま出し直せるようにする（#2236）
+  it("デプロイが失敗しているときは、出し直しの帯と追跡Issueへのリンクを出す", async () => {
+    mockDeployStatus(
+      {
+        kind: "failed",
+        version: "4.1.0",
+        releasePullRequestNumber: 100,
+        deployRunUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+      },
+      { number: 312, htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/312" },
+    );
+    renderDetail({ pullRequest: makePullRequest({ state: "closed", merged: true }) });
+
+    expect(await screen.findByText("このPRの変更は本番へ出ていません")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /本番へ再デプロイ/ })).toBeTruthy();
+    expect(screen.getByText("デプロイ失敗 #312").getAttribute("href")).toBe(
+      "https://github.com/guchi-apps/issue-deck/issues/312",
+    );
+  });
+
+  it("デプロイが成功しているときは出し直しの帯を出さない", async () => {
+    mockDeployStatus({
+      kind: "deployed",
+      version: "4.1.0",
+      releasePullRequestNumber: 100,
+      deployRunUrl: null,
+    });
+    renderDetail({ pullRequest: makePullRequest({ state: "closed", merged: true }) });
+
+    await screen.findByText("本番反映済み v4.1.0");
+    expect(screen.queryByText("このPRの変更は本番へ出ていません")).toBeNull();
   });
 
   it("判定できないときはバッジを出さない（未反映と言い切らない）", async () => {
