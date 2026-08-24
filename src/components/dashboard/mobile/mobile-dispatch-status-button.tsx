@@ -66,7 +66,7 @@ export function MobileDispatchStatusButton({
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
-  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
 
   if (dispatch.hosts.length === 0) return null;
 

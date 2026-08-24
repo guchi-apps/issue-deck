@@ -192,6 +192,11 @@ GitHub純正の画像CDNではないため自動では読み込めません。�
 
 - 元Issue自体の実装はまだ承認待ちのままで構いません。承認フローを経ずに、この計画提示ステップの
   中でそのまま `gh issue create --title "..." --body "..."` を実行してよいです
+- **起票の前に、同じ対象のopenなIssueが既に無いかを引いてください**（#2250）。あれば起票せず、
+  そのIssueへコメントします。探す語は**対象の固有名**（アプリ名・ホスト名・サービス名）にします
+  （`gh issue list --repo <owner/repo> --state open --search "<固有名>" --json number,title`）。
+  `aide-bot`の立ち上げでは、同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件
+  立ちました。**後から調査に入ったエージェントが既存のIssueを探さなかったことが原因です**
 - 新規Issueの本文には、元Issueへのトレーサビリティのため「起点: #${ISSUE_NUMBER}」を
   含め、元Issueを読み返さなくても単独で内容が伝わる程度に背景・要件を書いてください
 - Issue本文を `@claude` から書き始めないでください（`claude-issue-dispatch.yml`の

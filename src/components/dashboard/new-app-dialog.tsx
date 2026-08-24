@@ -34,6 +34,7 @@ import {
   type ConsultMessage,
   type NewAppDraft,
 } from "@/lib/claude/new-app-consult";
+import { EXISTING_LAUNCH_ISSUE_REASON_LABELS } from "@/lib/new-app/launch-marker";
 import {
   buildNewAppPlan,
   type NewAppArtifact,
@@ -1076,6 +1077,23 @@ function ConfirmStep({
         ))}
       </div>
       <p className="text-xs text-muted-foreground">公開URL: {publicUrlFor(spec)}</p>
+      {/* 同じ対象のIssueが`guchi-apps/vps`に開いていれば、押す前に知らせる（#2250） */}
+      {preflight?.existingVpsIssue && (
+        <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+          <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <a
+              href={preflight.existingVpsIssue.url}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono underline"
+            >
+              {preflight.existingVpsIssue.reference}
+            </a>
+            {` に同じ対象のIssueが開いています（${EXISTING_LAUNCH_ISSUE_REASON_LABELS[preflight.existingVpsIssue.reason]}）。VirtualHostのIssueは新しく作らず、このIssueへ書き足します。`}
+          </span>
+        </div>
+      )}
       {preflight?.localPortBand && (
         <p className="text-xs text-muted-foreground">
           ローカルセッションのポート帯: {preflight.localPortBand.note}
@@ -1160,6 +1178,11 @@ function DoneStep({
               className="flex items-center gap-2 hover:underline"
             >
               <span className="min-w-0 flex-1 truncate">{ref.title}</span>
+              {ref.existing && (
+                <span className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                  既存
+                </span>
+              )}
               <span className="font-mono text-xs text-muted-foreground">{ref.reference}</span>
             </a>
           </li>

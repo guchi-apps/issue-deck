@@ -47,6 +47,10 @@
 | `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
+**`guchi-apps/vps`のIssueだけは、同じ対象のopenなIssueが既にあれば作らない**（#2250。
+後述「同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない」）。そのときは既存Issueへ
+コメントを書き足し、画面の一覧には「既存」の印を付けて出す。
+
 手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
 **進捗を追う専用の画面は持たない**——サブIssueはいつもの盤面と「ユーザーの作業待ち」に
 出るので、同じ状態を2か所で持たない。
@@ -236,6 +240,68 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
 
 1つでも崩すと、その手順は「あなたが実行」として並ぶだけになる。
 `lib/new-app/plan.test.ts`が、生成した本文を実物の`buildManualStepRunPlan`に通して見張っている。
+
+### 同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない（#2250）
+
+`aide-bot`の立ち上げでは、**同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件**
+並んだ（`#121`＝立ち上げが起票・`#122`＝別セッションが「受け入れる設定が無い」として起票・
+`#124`＝手作業Issue・`#128`＝デプロイ失敗の調査から起票）。**後から入ったエージェントが既存の
+Issueを見つけられず、起票し直した**のが原因。
+
+対策は2つで、判定は[`lib/new-app/launch-marker.ts`](../src/lib/new-app/launch-marker.ts)（純粋関数）、
+IOは[`lib/github/new-app-existing-issue.ts`](../src/lib/github/new-app-existing-issue.ts)にある。
+
+**1. 立ち上げが作るIssueの本文へ、不可視のマーカーを埋める。**
+
+```
+<!-- new-app-launch: {"app":"aide-bot","repo":"guchi-apps/aide-bot","host":"aide-bot.gucchii.com","kind":"vps-issue","parent":"guchi-apps/issue-deck#2213"} -->
+```
+
+**GitHubのIssue検索はHTMLコメントの中身も索引している**ので、これで引ける。人が読む本文は
+変わらない（`deploy-failure.ts`と同じやり方）。
+
+```bash
+gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-bot" --json number,title
+```
+
+**2. 起票の前に、`guchi-apps/vps`のopenなIssueから同じ対象のものを探す。** 見つかったら
+新しく作らず、そのIssueへコメントを書き足し、以降の本文（VPSの手作業Issue）もそちらを指す。
+
+- 判定の強さは **マーカー > ホスト名 > タイトルのアプリ名** の順。同じ理由の中では**いちばん
+  番号の小さい（古い）Issue**へ寄せる——重複の元になった1件目へ集約したいため
+- **ホスト名で照合するのはサブドメインのときだけ。** パス配下（`gucchii.com/foo`）では
+  ホスト名が既存アプリと共有で、そのホストに関わるIssueがすべて当たってしまう
+- アプリ名は**タイトルだけ**を見る。本文には「他のアプリでは〜」のような言及が入りうる
+- 語として一致したときだけ拾う（`aide-bot`は`aide-bottle`に当たらない）
+- **検索API（`/search/issues`）は使わない。** 作った直後のIssueが索引に載るまで数十秒かかり、
+  「押した直後にもう一度押す」形の重複を取りこぼす。openなIssueの一覧なら`guchi-apps/vps`でも
+  1〜2ページで収まる
+- **読めなかったときは従来どおり起票する。** 判定できないことを理由に起票を止めると、必要な
+  Issueが1件も無いまま立ち上げが終わる。重複は人が閉じられるが、欠落は気付かれない
+- **既存Issueをサブissueとして紐付けない。** 別の親が付いていることがあり、付け替えると元の
+  追跡が外れる。つながりはコメントのリンクで残す
+- 押す前の確認ステップにも同じ判定を出す（`POST /api/new-app/preflight`の`existingVpsIssue`）。
+  後から警告だけ出しても、何が起きたのか分からない
+
+**エージェント側にも「起票の前に探す」を書いてある**（`.github/prompts/`・`scripts/prompts/`の
+実装・質問応答プロンプトと[multi-agent/labels.md](multi-agent/labels.md)）。#1875で「更新して
+再起動」を入れた後も同じ形の手作業Issueが立ち続けたのと同じで、**仕組みを作っただけでは
+止まらず、起票する側の基準に書いて初めて止まる。**
+
+### 手作業の分担は、Issueの本文に書いて固定する（#2250）
+
+`#2216`（issue-deck側のVPSの手作業）と`guchi-apps/vps#124`では、certbotの実行と
+`-le-ssl.conf`を控える手順が**両方に書かれていた**。`aide-bot`では`#124`の側で実施され、
+`#2216`の同じ手順が宙に浮いた。
+
+分担そのものは変えていない（**vhostの追加と`-le-ssl.conf`の取り込み＝vps側、DNS＝ブラウザの
+手作業、置き場・DB・PM2・certbot＝VPSの手作業**）。変えたのは、`guchi-apps/vps`のIssueに
+**「このIssueが持たない作業」の表を置いた**こと。読んだ人・エージェントが、足りない手順を
+見つけたときに新しいIssueを立てず、担当のIssueへ書き足せるようにする。
+
+**1件へ統合しなかった理由。** `guchi-apps/vps#132`（プロビジョニングの受け口）が入ると
+置き場・DB・PM2は自動化され、実機に残る手作業はcertbotだけになる。残る量が変わる前に
+統合すると、統合したIssue自体を作り直すことになる。
 
 ### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
 
