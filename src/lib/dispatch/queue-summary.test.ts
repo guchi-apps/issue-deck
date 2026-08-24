@@ -312,10 +312,13 @@ describe("バッジに出す件数（セッション本数）", () => {
     expect(summary.maxSessions).toBe(16);
   });
 
-  // pollerが落ちてもtmuxのセッションは生き続けるため、最後の申告を出す方が実態に近い
-  it("応答していないホストの申告も足す", () => {
-    const summary = summarizeDispatchQueue([], 2, [host({ liveSessions: 10, online: false })]);
-    expect(countDispatchQueueBadge(summary)).toBe(10);
+  // ホストの行は消えないため、絞らないと止まったpollerの最後の値でバッジが固まる
+  it("応答していないホストの申告は数えず、ジョブの件数へ落とす", () => {
+    const summary = summarizeDispatchQueue([job()], 2, [
+      host({ liveSessions: 10, online: false }),
+    ]);
+    expect(summary.liveSessions).toBeNull();
+    expect(countDispatchQueueBadge(summary)).toBe(1);
   });
 
   // 判定材料が無いことを理由にバッジを消すと、ジョブを積んだこと自体が画面から消える

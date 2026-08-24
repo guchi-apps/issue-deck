@@ -388,6 +388,26 @@ describe("DispatchQueueButton のバッジ", () => {
   it("何も無ければ印を出さない", () => {
     expect(renderBadge({ liveSessions: 0 }).textContent).toBe("");
   });
+
+  // #1519の狙い（閉じたボタンからも失敗に気づける）を、数字が常時出るようになっても保つ
+  it("見るべき失敗が残っていれば数字を赤くする", () => {
+    const button = renderBadge({ liveSessions: 10 }, [makeJob()]);
+    expect(button.querySelector(".bg-destructive")?.textContent).toBe("10");
+    expect(button.getAttribute("title")).toContain("失敗 1");
+  });
+
+  it("失敗が無ければ数字は通常の色", () => {
+    const button = renderBadge({ liveSessions: 10 });
+    expect(button.querySelector(".bg-destructive")).toBeNull();
+    expect(button.querySelector(".bg-primary")?.textContent).toBe("10");
+  });
+
+  // 何も動いていないときの赤いドット（#1519）はそのまま
+  it("セッションが0本で失敗だけ残っていれば赤いドットを出す", () => {
+    const button = renderBadge({ liveSessions: 0 }, [makeJob()]);
+    expect(button.textContent).toBe("");
+    expect(button.querySelector(".bg-destructive")).not.toBeNull();
+  });
 });
 
 describe("DispatchQueueButton のホスト表示", () => {

@@ -50,7 +50,8 @@ export type DispatchQueueSummary = {
   activeCount: number;
   /**
    * ホストで生きているセッション本数とその上限（#2265）。**バッジに出す数字はこちら。**
-   * 申告しているホストが1台も無ければ`null`（`liveSessions`と`maxSessions`は同時にnullになる）。
+   * 応答していて本数を申告しているホストが1台も無ければ`null`（`liveSessions`と`maxSessions`は
+   * 同時にnullになる）。
    *
    * **`activeCount`では「今どれだけ埋まっているか」を出せない。** ジョブはtmuxセッションが
    * 立った時点で`succeeded`になるため、10本走っていてもジョブの件数は0〜1にしかならず、
@@ -92,13 +93,14 @@ export function summarizeDispatchQueue(
     .filter((job) => isSessionControlJobKind(job.kind) && isActiveDispatchJobStatus(job.status))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-  // 生きているセッション本数（#2265）。**申告しているホストだけを足す**
-  // （`summarizeDispatchSessionCapacity`と同じ集合）。1台も申告していなければ`null`にして、
-  // バッジ側が従来どおりジョブの件数へ落とせるようにする。
+  // 生きているセッション本数（#2265）。**応答していて本数を申告しているホストだけを足す**
+  // （`describeDispatchQueueStall`と同じ絞り方）。どちらも無ければ`null`にして、バッジ側が
+  // 従来どおりジョブの件数へ落とせるようにする。
   //
-  // **応答しているホスト（`online`）に絞らない。** pollerが落ちてもtmuxのセッションは生き続けるため、
-  // 最後の申告を出す方が実態に近い（落ちていること自体はホストのカードが出す）。
-  const capacities = summarizeDispatchSessionCapacity(hosts);
+  // **`online`で絞るのは、ホストの行が消えないため。** `listDispatchState`は`findMany`で全件
+  // 返すので、pollerが止まったホストの`liveSessions`は最後の値のまま残り続ける。絞らないと、
+  // バッジが古い数字（例: 12）で固まったまま「今12本走っている」と読める状態になる。
+  const capacities = summarizeDispatchSessionCapacity(hosts.filter((host) => host.online));
   const sessionTotals =
     capacities.length === 0
       ? null
@@ -120,10 +122,11 @@ export function summarizeDispatchQueue(
 }
 
 /**
- * バッジに出す件数（#2265）。**セッション本数を申告しているホストがあればそれを出す。**
+ * バッジに出す件数（#2265）。**応答していてセッション本数を申告しているホストがあればそれを出す。**
  *
- * 申告が1台も無いとき（古いpollerだけの環境）に限り、従来どおり積まれているジョブの件数を出す。
- * 判定材料が無いことを理由にバッジを消すと、ジョブを積んだこと自体が画面から消える。
+ * 申告が1台も無いとき（古いpollerだけの環境・pollerが止まっている間）に限り、従来どおり
+ * 積まれているジョブの件数を出す。判定材料が無いことを理由にバッジを消すと、ジョブを積んだこと
+ * 自体が画面から消える。
  */
 export function countDispatchQueueBadge(summary: DispatchQueueSummary): number {
   return summary.liveSessions ?? summary.activeCount;

@@ -237,35 +237,46 @@ function QueueRefreshRow({ dispatch }: { dispatch: DispatchStateHandle }) {
  *   （`DISPATCH_MAX_SESSIONS`・既定12）まで出る。従来はジョブの件数（実行中＋順番待ち）を
  *   出していたが、**ジョブはtmuxセッションが立った時点で`succeeded`になる**ため、10本走っていても
  *   数字は0〜1にしかならず、サブPCの混み具合はポップオーバーを開くまで分からなかった
+ * - **見るべき失敗が残っていれば、その数字を赤くする**（#1519・#2265）。**数字と失敗の印を
+ *   排他にしない。** 元は「動いていなければ赤いドット」だったが、数字がセッション本数になると
+ *   走っている間はずっと数字側が出るため、そのままでは失敗が閉じたボタンから読めなくなる。
+ *   色を変える形は通知ベルのバッジ（`NotificationBadge`）と同じ規則
  * - **セッションが0本でジョブだけ積まれているときは数字ではなく点**。数字の意味を
  *   「セッション本数」に固定するためで、この状態（起動待ちの数十秒か、pollerが取りに来ていない）は
  *   開いて理由（`describeDispatchQueueStall`）を読むべきものなので、件数より合図の方が合う
- * - **動いてはいないが見るべき失敗が残っているときは赤いドット**。数字は動いているときにしか
- *   出ないため、失敗だけが残っているとボタンが無印になり、開くまで気づけなかった。件数ではなく
+ * - **何も動いていないのに失敗が残っているときは赤いドット**（#1519のまま）。件数ではなく
  *   ドットにしているのは、押して確かめてほしいのが「何件あるか」ではなく「何が失敗したか」のため
  */
 export function DispatchQueueBadge({ summary }: { summary: DispatchQueueSummary }) {
   const count = countDispatchQueueBadge(summary);
+  const hasFailure = summary.failed.length > 0;
+
   if (count > 0) {
     return (
-      <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+      <span
+        className={cn(
+          "absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full text-[10px] font-semibold",
+          hasFailure ? "bg-destructive text-white" : "bg-primary text-primary-foreground",
+        )}
+      >
         {count}
       </span>
+    );
+  }
+
+  // 失敗は「まだ立っていないジョブがある」より先に出す。押して確かめてほしいのはこちら
+  if (hasFailure) {
+    return (
+      <span
+        aria-hidden
+        className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-destructive"
+      />
     );
   }
 
   if (summary.activeCount > 0) {
     return (
       <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary" />
-    );
-  }
-
-  if (summary.failed.length > 0) {
-    return (
-      <span
-        aria-hidden
-        className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-destructive"
-      />
     );
   }
 
