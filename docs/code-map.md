@@ -1566,7 +1566,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   読み、`DeployFailurePanel`が出す。**押す口（「本番へ再デプロイ」）は
   [`components/dashboard/deploy-failure-alert.tsx`](../src/components/dashboard/deploy-failure-alert.tsx)
   ひとつにまとめ**、ブランチ画面・PR詳細・Issue詳細の3か所で同じものを出す（確認ダイアログと
-  `POST /api/repositories/deploy`の呼び出しを書き分けない）。
+  `POST /api/repositories/deploy`の呼び出しを書き分けない）。**ブランチ画面での置き場所は
+  リポジトリの節で、落ちた版の束ではない**——束は「次のリリースに乗る分」があると畳まれるため、
+  直らないまま次のリリースが動き出すと帯ごと消える（#2020が同じ理由でボタンを束へ置いていない）。
+  帯を出しているあいだ凡例の行のボタンは出さず、押す口を1つに保つ。
+  **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
+  ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
 - **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
   `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。

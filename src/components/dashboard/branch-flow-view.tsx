@@ -86,7 +86,6 @@ import type {
   BranchFlowPlannedIssue,
   BranchFlowReleaseGroup,
   BranchFlowRepository,
-  DeployFailureIssueRef,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -893,15 +892,10 @@ function ReleaseProgressPill({
 function ReleaseGroupHeader({
   group,
   releaseButton,
-  repositoryFullName,
-  deployFailureIssue,
   onMerged,
 }: {
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
-  repositoryFullName: string;
-  /** そのリポジトリで開いているデプロイ失敗Issue（#2236） */
-  deployFailureIssue: DeployFailureIssueRef | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const released = group.mergedAt !== null;
@@ -986,23 +980,6 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
-
-        {/* 本番デプロイが失敗しているときだけ、その版の束の中に赤い帯を出す（#2236）。
-            **「本番へ再デプロイ」はリポジトリの節にもあるが、そこは失敗の表示と離れた行**で、
-            失敗に気づいた人が押しに行くまでに視線が1往復する。落ちた版のところに置く。
-            **手動の出し直しが落ちた場合は出さない**（`manual`）——出し直しの失敗は、その版が
-            本番へ出ていないことを意味しないため（`inProduction`の判定と揃える） */}
-        {group.deploy?.kind === "failure" && !group.deploy.manual && (
-          <DeployFailureAlert
-            repositoryFullName={repositoryFullName}
-            title="本番デプロイが失敗しています"
-            version={group.version}
-            autoRetried={group.deploy.autoRetried}
-            runUrl={group.deploy.htmlUrl}
-            failureIssue={deployFailureIssue}
-            className="mt-1"
-          />
-        )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
@@ -1134,6 +1111,17 @@ function ReleaseFlowGraph({
     : []
   ).flatMap((lane) => (lane.issue ? [lane.issue] : []));
 
+  // 本番デプロイが失敗しているか（#2236）。**帯の置き場所はリポジトリの節で、束ではない**
+  // ——束は「次のリリースに乗る分」があると畳まれる（`visibleGroups`）ので、直らないまま
+  // 次のリリースが動き出した瞬間に、いちばん見せたい失敗の帯が画面から消える。#2020が
+  // 「本番へ再デプロイ」を束へ置かなかったのと同じ理由。
+  //
+  // **手動の出し直しが落ちた場合は出さない**（`manual`）——出し直しはすでに本番へ出ている
+  // mainをもう一度出しているだけで、その版が本番へ出ていないことを意味しないため
+  // （版の見出しの「本番反映」を取り消さない`inProduction`の判定と揃える）。
+  const deploy = repository.summary.deploy;
+  const deployFailure = deploy !== null && deploy.kind === "failure" && !deploy.manual ? deploy : null;
+
   return (
     <div className="relative px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 text-xs text-muted-foreground">
@@ -1150,8 +1138,10 @@ function ReleaseFlowGraph({
         )}
         {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
             隠れたりするため、束に付けると押したいときに画面から消える。ここなら
-            リポジトリを開いている間はつねに同じ位置にある */}
-        {repository.canTriggerDeploy && (
+            リポジトリを開いている間はつねに同じ位置にある。
+            **失敗しているあいだは、すぐ下の帯（#2236）が同じボタンを持つのでこちらは出さない**
+            ——同じ操作が同じ画面に2つ並ぶのを避ける */}
+        {repository.canTriggerDeploy && !deployFailure && (
           <>
             <span className="flex-1" />
             <RepositoryDeployButton
@@ -1165,6 +1155,23 @@ function ReleaseFlowGraph({
           </>
         )}
       </div>
+
+      {/* 本番デプロイが失敗しているときだけ出す帯（#2236）。**畳まれない場所（リポジトリの節）に
+          置く**ので、直らないまま次のリリースが動き出しても消えない。押す口はここに1つだけで、
+          上の行の「本番へ再デプロイ」はこのあいだ出さない（同じ操作を2つ並べない） */}
+      {deployFailure && (
+        <DeployFailureAlert
+          repositoryFullName={repository.repositoryFullName}
+          title="本番デプロイが失敗しています"
+          version={repository.release.latestVersion}
+          autoRetried={deployFailure.autoRetried}
+          runUrl={deployFailure.htmlUrl}
+          failureIssue={repository.deployFailureIssue}
+          isPending={deployTriggerPending}
+          onTriggered={onDeployTriggered}
+          className="mb-2"
+        />
+      )}
 
       <ul className="relative">
         {/* 2本のレール。行の高さによらず端まで伸ばす */}
@@ -1199,7 +1206,6 @@ function ReleaseFlowGraph({
             key={group.key}
             repositoryFullName={repository.repositoryFullName}
             group={group}
-            deployFailureIssue={repository.deployFailureIssue}
             onMerged={onMerged}
             releaseButton={
               index === 0 && repository.canTriggerRelease ? (
@@ -1307,25 +1313,16 @@ function ReleaseGroupHeaderWithLanes({
   repositoryFullName,
   group,
   releaseButton,
-  deployFailureIssue,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
-  /** そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければリンクを出さない */
-  deployFailureIssue?: DeployFailureIssueRef | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
     <>
-      <ReleaseGroupHeader
-        group={group}
-        releaseButton={releaseButton}
-        repositoryFullName={repositoryFullName}
-        deployFailureIssue={deployFailureIssue ?? null}
-        onMerged={onMerged}
-      />
+      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow
