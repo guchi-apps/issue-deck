@@ -142,6 +142,12 @@ describe("buildParentIssueBody", () => {
     expect(body).toContain("standards/tech-stack.md");
   });
 
+  it("初期化は盤面から無人実行で始められると書く（#2247）", () => {
+    const body = buildParentIssueBody(spec());
+    expect(body).toContain("盤面から無人実行で始められます");
+    expect(body).toContain("初期化Issueは待ちません");
+  });
+
   it("ポート帯はマージだけでは効かないことを書く（#2225）", () => {
     const withBase = buildParentIssueBody(spec(), { localPortBase: 25000 });
     expect(withBase).toContain("scripts/local-repo-ports.conf");
@@ -151,16 +157,65 @@ describe("buildParentIssueBody", () => {
 });
 
 describe("buildInitIssueBody", () => {
-  it("サブPCのローカルセッションで実装する前提と、その依存を書く", () => {
+  const SCAFFOLD = {
+    paths: [
+      ".env.example",
+      ".github/scripts/signaly-notify.sh",
+      ".github/secrets-manifest.tsv",
+      ".github/workflows/ci.yml",
+      ".github/workflows/claude-issue-dispatch.yml",
+      ".github/workflows/deploy.yml",
+      "deploy/ecosystem.config.js",
+      "prisma.config.ts",
+      "src/app/manifest.ts",
+    ],
+    workflowTag: "workflows/v25",
+  };
+
+  it("雛形が置けていれば、盤面から無人実行で回せると書く（#2247）", () => {
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain("## 前提条件");
+    expect(body).toContain("先に完了している必要があるIssue・PR: なし");
+    expect(body).toContain("無人実行で実装できます");
+    expect(body).toContain("## すでに置かれているもの");
+    expect(body).toContain("`.github/workflows/claude-issue-dispatch.yml`");
+    expect(body).toContain("workflows/v25");
+    // 置いてあるものを作り直させない
+    expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
+    expect(body).not.toContain("`deploy/ecosystem.config.js` を作る");
+    expect(body).not.toContain("`.github/secrets-manifest.tsv` を作る");
+  });
+
+  it("callerだけ置けなかったときは、その理由を書いてローカルセッション前提に切り替える", () => {
+    const body = buildInitIssueBody(spec(), REFS, {
+      paths: [".github/workflows/ci.yml", "CLAUDE.md"],
+      workflowTag: null,
+    });
+    expect(body).toContain("無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため");
+    expect(body).toContain("## すでに置かれているもの");
+    expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
+  });
+
+  it("マルチエージェント運用に対応させないときは、そのことを理由として書く", () => {
+    const body = buildInitIssueBody(spec({ multiAgent: false }), REFS, {
+      paths: [".github/workflows/ci.yml"],
+      workflowTag: null,
+    });
+    expect(body).toContain("マルチエージェント運用に対応させない選択のため");
+  });
+
+  it("雛形を置けなかったときは、従来どおりサブPCのローカルセッション前提で書く", () => {
     const body = buildInitIssueBody(spec(), REFS);
     expect(body).toContain("## 前提条件");
     expect(body).toContain(REFS.subpc!);
     expect(body).toContain(REFS.portBandPullRequest!);
     expect(body).toContain("local-repos.conf");
     expect(body).toContain("盤面にも載りません");
+    expect(body).toContain("`.github/workflows/ci.yml` を作る");
+    expect(body).not.toContain("## すでに置かれているもの");
   });
 
-  it("種別に応じた共有ワークフローの入力を書く", () => {
+  it("種別に応じた共有ワークフローの入力を書く（雛形を置けなかった場合）", () => {
     expect(buildInitIssueBody(spec(), REFS)).toContain("`runtime-setup: node-db`");
     expect(buildInitIssueBody(spec({ kind: "static" }), REFS)).toContain("`runtime-setup: minimal`");
   });
@@ -176,6 +231,13 @@ describe("buildInitIssueBody", () => {
     expect(buildInitIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
       "claude-issue-dispatch.yml を置く",
     );
+  });
+
+  it("Next.js系ではPWAと更新履歴の残りだけを人へ渡す（#2254の受け皿）", () => {
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain("viewport.themeColor");
+    expect(body).toContain("apple-icon.png");
+    expect(body).toContain("version-changelog.mjs");
   });
 });
 
@@ -295,6 +357,12 @@ describe("buildSubpcManualIssueBody", () => {
   it("値を埋め終えており、プレースホルダを残さない（残すと代行の対象から外れる）", () => {
     expect(body).not.toMatch(/<[^>]+>/);
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
+  });
+
+  it("無人実行の妨げにはならないこと、同期がこの時点で終わることを書く（#2247）", () => {
+    expect(body).toContain("無人実行は雛形のcallerで動くため");
+    expect(body).toContain("GitHubのsecretへの同期もこの時点で終わります");
+    expect(body).not.toContain("初期化Issueでこのマニフェストを作ってマージした後");
   });
 
   it("機械的に定まる値を、そのまま貼れる1コマンドで投入する（#2249）", () => {

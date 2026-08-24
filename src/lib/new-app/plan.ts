@@ -14,10 +14,12 @@
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
  *   含まない、のすべてを満たしたときだけ画面から流せる
  *   （`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
- * - **新しいリポジトリのIssueは、作った直後には盤面に載らない。** 載る条件は
- *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、それを作るのが初期化Issue
- *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定する
- *   （条件は`local-repos.conf`への記載）。
+ * - **新しいリポジトリのIssueは、作った直後から盤面に載る**（#2247）。載る条件は
+ *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが
+ *   初期化Issue自身だった。いまはリポジトリを作った直後にissue-deckが雛形一式をコミット
+ *   する（`lib/new-app/scaffold.ts`）ので、初期化Issueも最初から無人実行で回せる。
+ *   **サブPCの手作業Issueは残るが、初期化Issueの前提ではなくなった**——あちらの目的は
+ *   1Passwordへの値の投入（#2249）で、cloneはローカルセッションを使いたいときのため。
  * - **人が空振りする手順を書かない**（#2248）。2つの再同期は立ち上げ自身が実行し
  *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
  *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
@@ -146,7 +148,7 @@ export function buildNewAppPlan(
       automation: "auto",
       title: repo,
       target: null,
-      description: `リポジトリを${spec.visibility === "private" ? "private" : "public"}で作り、既定ブランチを develop にしてラベル一式を写す`,
+      description: `リポジトリを${spec.visibility === "private" ? "private" : "public"}で作り、既定ブランチを develop にしてラベル一式を写す。CI・デプロイ・無人実行の雛形一式もこの時点でコミットする`,
     },
     {
       kind: "port-band",
@@ -171,8 +173,8 @@ export function buildNewAppPlan(
       title: "プロジェクトを初期化する",
       target: repo,
       description: spec.multiAgent
-        ? "雛形の作成・CI・デプロイ設定と、マルチエージェント運用の導入。サブPCのローカルセッションで実装する"
-        : "雛形の作成・CI・デプロイ設定。サブPCのローカルセッションで実装する",
+        ? "アプリ本体の雛形とpackage.jsonの整備。ワークフローは作成時にコミット済みで、盤面から無人実行で回せる"
+        : "アプリ本体の雛形とpackage.jsonの整備。CI・デプロイの雛形は作成時にコミット済み",
     },
     {
       kind: "deploy-check-issue",
@@ -201,9 +203,9 @@ export function buildNewAppPlan(
     {
       kind: "manual-subpc",
       automation: "proxy",
-      title: `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`,
+      title: `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`,
       target: "guchi-apps/issue-deck",
-      description: "cloneと対応表への追記、1Passwordへの値の投入。手作業アシスタントの代行実行で流せる",
+      description: "1Passwordへの値の投入とGitHub secretへの同期。cloneはローカルセッションを使うとき用。手作業アシスタントの代行実行で流せる",
     },
     {
       kind: "manual-browser",
@@ -305,8 +307,9 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
 2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
-3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
-4. \`${repo}\` の初期化と、developへのマージ
+3. サブPCで1Passwordへ値を投入する（初回デプロイまでに済んでいればよく、初期化Issueは待ちません）
+4. \`${repo}\` の初期化と、developへのマージ（**盤面から無人実行で始められます**。
+   リポジトリの作成時に \`claude-issue-dispatch.yml\` までコミット済みのため、cloneは要りません）
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
 6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
 7. 初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）
@@ -342,21 +345,116 @@ export function buildInitIssueTitle(spec: NewAppSpec): string {
   return `${spec.displayName}のプロジェクトを初期化する`;
 }
 
+/** 初期化Issueの本文に添える、雛形として置かれたファイルの状況（#2247）。 */
+export type ScaffoldOutcome = {
+  /** 実際にコミットしたパス（`.github/workflows/ci.yml`など）。空なら置けなかった */
+  paths: string[];
+  /** callerが参照している共有ワークフローのタグ。決められなかったら`null` */
+  workflowTag: string | null;
+};
+
 /**
  * 新しいリポジトリに立てる初期化Issue。
  *
- * **`## 前提条件`にサブPCの手作業Issueを書く。** このIssueは無人実行では動かせない
- * （`claude-issue-dispatch.yml`がまだ無く、盤面にも載らない）ので、サブPCのローカル
- * セッションで実装する。そのためには`local-repos.conf`への記載が要る。
+ * **雛形がコミットされていれば、このIssueは無人実行で回せる**（#2247）。以前は
+ * `claude-issue-dispatch.yml`を作るのがこのIssue自身だったため盤面に載らず、実行経路を
+ * サブPCのローカルセッションに固定し、cloneの手作業Issueを`## 前提条件`に置いていた。
+ *
+ * **雛形を置けなかった場合は、その旨と従来の手順を書く。** 置けたことにして書くと、
+ * 無人実行が始まらないまま`Ready`で止まっていることに誰も気づけない。
  */
-export function buildInitIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
+export function buildInitIssueBody(
+  spec: NewAppSpec,
+  refs: NewAppIssueRefs,
+  scaffold: ScaffoldOutcome | null = null,
+): string {
   const profile = newAppKindProfile(spec.kind);
   const repo = repositoryFullName(spec);
-  const dbScripts = profile.usesDatabase
-    ? `\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
-    : "";
-  const multiAgent = spec.multiAgent
+  const scaffolded = scaffold !== null && scaffold.paths.length > 0;
+  const has = (path: string) => scaffolded && scaffold.paths.includes(path);
+  // **無人実行で回せるかどうかは、雛形が置けたかではなくcallerが置けたかで決まる。**
+  // 参照タグを読めなかった回はcallerだけが欠け、他のファイルは置かれている
+  const dispatchReady = has(".github/workflows/claude-issue-dispatch.yml");
+
+  const prerequisites = dispatchReady
+    ? `- 先に完了している必要があるIssue・PR: なし
+
+**このIssueはissue-deckの盤面から無人実行で実装できます。** リポジトリの作成時に
+\`.github/workflows/claude-issue-dispatch.yml\` までコミット済みで（下記「すでに置かれているもの」）、
+盤面へ載る条件を満たしています。サブPCのローカルセッションで実装しても構いません。`
+    : `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
+
+**${
+        !spec.multiAgent
+          ? "マルチエージェント運用に対応させない選択のため"
+          : scaffolded
+            ? "無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため"
+            : "雛形のコミットに失敗したため"
+      }、このIssueはサブPCのローカルセッションで実装します。**
+\`claude-issue-dispatch.yml\` が無いあいだは無人実行では動かず、issue-deckの盤面にも載りません。
+ローカルセッションを起こせる条件は \`~/.config/issue-deck/local-repos.conf\` への記載で、
+それを行うのが上の手作業Issueです。`;
+
+  const alreadyThere = scaffolded
     ? `
+## すでに置かれているもの
+
+リポジトリの作成時に、issue-deckが次のファイルをコミットしています（#2247）。
+**同じものを作り直さないでください。** 内容が現行の標準からずれていた場合は、
+このリポジトリで直したうえでissue-deckの \`src/lib/new-app/scaffold.ts\` にも反映します。
+
+${scaffold.paths.map((path) => `- \`${path}\``).join("\n")}
+
+${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffold.workflowTag}\`（\`uses:\` と \`prompts-ref\` は同じ値）。\n` : ""}**アプリの雛形（\`create-next-app\` など）は空のディレクトリを前提にするものが多く、
+このリポジトリの上では実行できません。** 一時ディレクトリで作ってから、必要なファイルだけを
+取り込んでください。
+`
+    : "";
+
+  const dbTasks = profile.usesDatabase
+    ? `\n- [ ] \`prisma/schema.prisma\` と初期マイグレーションを作る${has("prisma.config.ts") ? "（\`prisma.config.ts\` は雛形にあり、\`loadEnv\` の \`quiet: true\` を落とさないこと）" : ""}\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
+    : "";
+
+  const ciTasks = has(".github/workflows/ci.yml")
+    ? `\n- [ ] \`.github/workflows/ci.yml\` が呼ぶ \`lint\`・\`typecheck\`・\`build:ci\` のnpm scriptsを用意する`
+    : `\n- [ ] \`.github/workflows/ci.yml\` を作る（必須）
+- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）`;
+
+  const secretTasks = has(".github/secrets-manifest.tsv")
+    ? ""
+    : `\n- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
+- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)} \\
+    --ref <このIssueのブランチ>
+  \`\`\`
+`;
+
+  const pwaTasks =
+    (spec.kind === "next" || spec.kind === "next-db") && has("src/app/manifest.ts")
+      ? `
+- [ ] \`src/app/layout.tsx\` に \`metadata\`（\`title\`・\`applicationName\`・\`appleWebApp\`・\`icons\`）と \`viewport.themeColor\` を書く
+
+  \`\`\`ts
+  export const metadata: Metadata = {
+    title: "${spec.displayName}",
+    description: "${(spec.summary.trim() || spec.displayName).replace(/"/g, '\\"')}",
+    applicationName: "${spec.displayName}",
+    appleWebApp: { capable: true, title: "${spec.displayName}", statusBarStyle: "default" },
+    icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }] },
+  };
+  export const viewport: Viewport = { themeColor: "#0f766e", viewportFit: "cover" };
+  \`\`\`
+
+- [ ] アイコン（\`public/icon-192.png\`・\`icon-512.png\`・\`apple-icon.png\`）とテーマカラーを決めて差し替える。
+      雛形の \`public/icon.svg\` と \`#0f766e\` は暫定値（${NEW_APP_PARENT_REPOSITORY}#2254）
+- [ ] \`package.json\` の scripts へ \`"version": "node scripts/version-changelog.mjs"\` を足す（更新履歴の受け皿は \`src/lib/changelog.ts\`）`
+      : "";
+
+  const multiAgent =
+    spec.multiAgent && !dispatchReady
+      ? `
 ## マルチエージェント運用の導入
 
 手順の正はissue-deckの \`docs/cross-repo-setup-guide.md\` です。ここに複製しません。
@@ -367,7 +465,16 @@ export function buildInitIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): str
 - [ ] \`.gitignore\` に \`.shared-context/\` を足す
 - [ ] \`develop\` にもBranch protection（CI必須）を設定する
 `
-    : "";
+      : spec.multiAgent
+        ? `
+## マルチエージェント運用
+
+callerは雛形として置かれています。残りは保護設定と、まだ配られていないcallerだけです。
+
+- [ ] \`develop\` にBranch protection（CI必須）を設定する
+- [ ] 自動修復系のcaller（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・\`claude-review-develop.yml\`・\`deploy-retry.yml\`）を、issue-deckの画面（設定＞フリート運用）から配る
+`
+        : "";
 
   return `${origin(refs.parent)}
 
@@ -378,30 +485,14 @@ ${specTable(spec)}
 ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 ## 前提条件
 
-- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCへのcloneの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
-
-**このIssueはサブPCのローカルセッションで実装します。** 新しいリポジトリはまだ
-\`claude-issue-dispatch.yml\` を持たないため無人実行では動かず、issue-deckの盤面にも載りません。
-ローカルセッションを起こせる条件は \`~/.config/issue-deck/local-repos.conf\` への記載で、
-それを行うのが上の手作業Issueです。
-
+${prerequisites}
+${alreadyThere}
 ## やること
 
-- [ ] 雛形を作る（${profile.label}）
+- [ ] アプリの雛形を作る（${profile.label}）
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる
-- [ ] \`.env.example\`（変数名のみ）と \`.env.tpl\`（\`op://\` 参照）を作る
-- [ ] \`.github/workflows/ci.yml\` を作る（必須）
-- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）
-- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
-- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
-
-  \`\`\`bash
-  ${provisionCommand(spec, null)} \\
-    --ref <このIssueのブランチ>
-  \`\`\`
-
-- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
-- [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
+- [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
+- [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}
 ${multiAgent}
 ## 参考
 
@@ -668,7 +759,7 @@ function portBandPrerequisite(refs: NewAppIssueRefs): string {
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`;
+  return `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`;
 }
 
 /**
@@ -685,9 +776,9 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになり、1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入る`,
-    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない。シークレットも未登録のままで、初回の本番デプロイが値の不足で失敗する`,
-    urgency: "初期化Issueに着手する前",
+    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCで \`${spec.repositoryName}\` のローカルセッションも起こせるようになる`,
+    blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（**無人実行は雛形のcallerで動くため、こちらは止まりません**）`,
+    urgency: "初回の本番デプロイまで（初期化Issueは待ちません）",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",
@@ -720,9 +811,9 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   \`\`\``,
     verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
 pollerは申告のたびに対応表を読み直すので、再起動は要りません。
-**この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
-\`.github/secrets-manifest.tsv\` が要るので、初期化Issueでこのマニフェストを作ってマージした後に揃います。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
+**GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
+リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
+    why: "1Passwordへの書き込み（サブPCにだけ置いてある書き込み用トークンを使う）と、サブPCの個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

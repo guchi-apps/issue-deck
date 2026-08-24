@@ -37,14 +37,14 @@
 
 | 作られるもの | 場所 | 自動化 |
 |---|---|---|
-| リポジトリ | `guchi-apps/<name>` | 自動（`develop`既定・ラベル一式を写す） |
+| リポジトリ | `guchi-apps/<name>` | 自動（`develop`既定・ラベル一式を写す・**雛形一式をコミット**） |
 | 親Issue「◯◯の立ち上げ」 | `guchi-apps/issue-deck` | 自動 |
 | ポート帯を足すPull Request | `guchi-apps/issue-deck` | 自動（`scripts/local-repo-ports.conf`へ1行） |
-| プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
-| 初回デプロイ前チェックと公開確認 | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
+| プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。**実装は盤面から無人実行で回せる**） |
+| 初回デプロイ前チェックと公開確認 | 新しいリポジトリ | 自動（起票のみ。同上） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
-| `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
+| `[手作業] サブPC: シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
 手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
@@ -172,10 +172,51 @@
   （ポート帯のPull Requestと同じ扱い）。
 
 **カンバンの盤面へ載る条件は別で、`claude-issue-dispatch.yml`がデフォルトブランチにあること**
-（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。**それを作るのが初期化Issue自身**
-なので、初期化Issueの実行経路は**サブPCのローカルセッション**に固定してある（条件は
-`~/.config/issue-deck/local-repos.conf`への記載で、サブPCの手作業Issueを初期化Issueの
-`## 前提条件`に置いてある）。
+（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。これは次の節の雛形コミットで
+作成時点から満たしている。
+
+### リポジトリを作った直後に、雛形一式をコミットする
+
+盤面へ載る条件（`claude-issue-dispatch.yml`）を作るのが初期化Issue自身だったため、以前は
+初期化Issueだけが無人実行で回せず、実行経路をサブPCのローカルセッションに固定し、その前提と
+してcloneと`local-repos.conf`への追記を`## 前提条件`に置いていた。**リポジトリを作った時点で
+callerを置いてしまえば、初期化Issueも最初から無人実行で回せる**（#2247）。
+
+- 置くファイルの宣言は[`lib/new-app/scaffold.ts`](../src/lib/new-app/scaffold.ts)、
+  ワークフローの中身は[`lib/new-app/scaffold-workflows.ts`](../src/lib/new-app/scaffold-workflows.ts)、
+  GitHubとのやり取りは[`lib/github/scaffold-api.ts`](../src/lib/github/scaffold-api.ts)。
+- **雛形の正はissue-deck内に置く。** `uses:`のタグ（`workflows/vN`）と`prompts-ref`を揃え
+  続ける必要があり、タグを切るのも配るのもissue-deck側だから。ただし
+  **`.github/templates/`には置けない**——本番の配布物（`deploy.yml`の`tar`）に`.github/`は
+  入らず、実行中のNext.jsサーバーからは読めない。TypeScriptのモジュールにしてビルド成果物へ
+  入れている。
+- **issue-deck自身が実物を持っているファイルは、写しを作らず`main`からそのまま配る**
+  （`.github/scripts/signaly-notify.sh`・`scripts/update-env-file.sh`・
+  `scripts/construct-database-url.sh`・`scripts/sync-github-secrets.sh`・
+  `scripts/generate-workflow-env-block.sh`・`scripts/version-changelog.mjs`）。写しを置くと
+  「実物を直したのに配られるのは古い写し」という食い違いが起こる（#2240で共有スクリプトの
+  配布に同じ方針を採った）。**そのままでは置けない1行だけを、行を丸ごと指定して差し替える**
+  （`sync-github-secrets.sh`の`REPO`の既定値）。目印が見つからなければ配らずに警告へ回す。
+- **`develop`を切る前にコミットする。** そうすると`main`と`develop`の両方が最初から雛形を
+  持つ（`develop`はこのコミットから枝分かれする）。
+- **1コミットにまとめる**（Git Data APIのblob → tree → commit → ref）。Contents APIで
+  1ファイルずつPUTすると、失敗したときに「どこまで置かれたのか」が履歴からしか分からない。
+- **参照タグを読めなかったらcallerを1枚も置かない。** 存在しないタグを指すcallerは、置いた
+  瞬間から全イベントで失敗し続ける。`warnings`で画面へ返す。
+- **雛形のコミットに失敗しても立ち上げを止めない。** 初期化Issueの本文が従来の
+  （サブPCのローカルセッション前提の）書き方へ切り替わる。
+- **`.github/workflows/`への書き込みにはWorkflows権限が要る**（issue-deckのGitHub Appは
+  `Workflows: Read and write`を持つ。[github-app-permissions.md](github-app-permissions.md)）。
+  外れるとここだけが403で落ちる。
+
+雛形に含めないものは3つ。**アプリ本体の雛形**（`create-next-app`が作るもの。空の
+ディレクトリを前提にするため、初期化Issueが一時ディレクトリで作って取り込む）、
+**アイコンのPNGとテーマカラーの確定**（#2254）、**自動修復系のcaller**（既存の
+「設定＞フリート運用」から配る経路がある）。
+
+**サブPCの手作業Issueは残る。** あちらの目的は1Passwordへの値の投入（#2249）で、雛形では
+代われない。ただし初期化Issueの前提ではなくなり、`.github/secrets-manifest.tsv`が作成時点で
+あるぶん、GitHubのsecretへの同期もその場で終わる。
 
 ### `repository_selection`はDBではなくGitHubへ聞く
 
