@@ -213,6 +213,7 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 新しい個人アプリの立ち上げ（#2188）は、画面から相談 → 設定 → 確認と進めると、GitHubリポジトリの作成と残りの作業のIssue一式（初期化・`guchi-apps/vps`のVirtualHost・手作業3件）までを起票する。**手順の正は共有知識（`guchi-apps/docs`の`guides/new-app-checklist.md`）で、issue-deck側に手順を複製しない。**
 
 - **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・予約済みポート）と、vhostの`ServerName`／`ServerAlias`を読む。**READMEの散文の「空きは〜」とvhostのファイル名は読まない**（どちらも実態とずれる）
+- **リポジトリを作った直後に雛形一式（ワークフローのcaller・CI・デプロイ・`CLAUDE.md`など）をコミットする**（#2247）。盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが初期化Issue自身だったため、初期化IssueだけがサブPCのローカルセッション専用になっていた。雛形の宣言は[`src/lib/new-app/scaffold.ts`](src/lib/new-app/scaffold.ts)にあり、**issue-deck自身が実物を持つファイル（`signaly-notify.sh`など）は写しを作らず`main`からそのまま配る**
 - **自動化できないものは自動化したように見せない。** DNSのAレコードはVPS管理画面にAPIが無く、VPS実機の操作（`/apps/<name>/`・DB作成・PM2・certbot）は`guchi-apps/vps`の`deploy.yml`が配る受け口ではないため、どちらも手作業Issueとして残す
 - 生成する手作業Issueの書式・失敗したときの扱い・盤面へ載るまでの順序は[docs/new-app-launch.md](docs/new-app-launch.md)を参照する
 

@@ -16,11 +16,14 @@ import {
   repositoryExists,
   setupDevelopBranch,
 } from "@/lib/github/repositories-api";
+import { commitScaffoldFiles, resolveScaffoldCopies } from "@/lib/github/scaffold-api";
 import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
+import { fetchLatestWorkflowTag } from "@/lib/github/workflow-tags";
 import { resolveNewAppInstallationScope } from "@/lib/new-app/installation-scope";
 import { buildExistingLaunchIssueComment, withNewAppMarker } from "@/lib/new-app/launch-marker";
 import { parseNewAppSpec } from "@/lib/new-app/parse";
+import { buildScaffoldFiles, scaffoldCopies } from "@/lib/new-app/scaffold";
 import {
   MANUAL_STEP_LABEL,
   buildBrowserManualIssueBody,
@@ -45,6 +48,7 @@ import {
   type NewAppArtifactKind,
   type NewAppCreatedRef,
   type NewAppIssueRefs,
+  type ScaffoldOutcome,
 } from "@/lib/new-app/plan";
 import { resyncNewRepository } from "@/lib/new-app/resync";
 import {
@@ -67,7 +71,15 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 作成で弾かれるので、続きは作られたIssueから人が進める。
  *
  * 作る順序はIssueの本文が互いを参照する都合で決まっている。
- * 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 → vpsのVirtualHost → VPSの手作業 → 初期化
+ * リポジトリ → 雛形のコミット → 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 →
+ * vpsのVirtualHost → VPSの手作業 → 初期化
+ *
+ * **雛形のコミット（#2247）はリポジトリを作った直後、`develop`を切る前に行う。**
+ * `claude-issue-dispatch.yml`がデフォルトブランチにあることが盤面へ載る条件で、それを
+ * 初期化Issue自身が作っていたために、以前は初期化IssueだけがサブPCのローカルセッション
+ * 専用になっていた。**ここの失敗では止めない**——雛形が無くても初期化Issueは実装できる
+ * ので、`warnings`で画面へ返し、初期化Issueの本文を従来の（ローカルセッション前提の）
+ * 書き方に切り替える
  * → 初回デプロイ前チェック（#2252。前提条件として初期化Issueの番号を指すので最後に置く）。
  *
  * **ローカルセッションのポート帯（#2225）だけは、何かを作る前に決めておく。**
@@ -204,6 +216,11 @@ async function launchNewApp(
     private: spec.visibility === "private",
   });
   created.push({ kind: "repository", title: repo, reference: repo, url: repository.htmlUrl });
+
+  // **`develop`を切る前に置く。** ここで置いておけば、`main`と`develop`の両方が
+  // 最初から雛形を持つ（`develop`はこのコミットから枝分かれする）
+  const scaffold = await commitScaffold(token, spec, repository.defaultBranch, warnings);
+
   await setupDevelopBranch(NEW_APP_ORG, spec.repositoryName, token, repository.defaultBranch);
   await cloneRepositoryLabels(
     { owner: parentOwner, repo: parentRepo },
@@ -389,7 +406,7 @@ async function launchNewApp(
     spec.repositoryName,
     "init-issue",
     buildInitIssueTitle(spec),
-    buildInitIssueBody(spec, refs),
+    buildInitIssueBody(spec, refs, scaffold),
   );
   refs.init = init.reference;
   children.push(init.id);
@@ -426,4 +443,58 @@ async function launchNewApp(
   }
 
   return null;
+}
+
+/**
+ * 雛形一式を`main`へ1コミットで置く（#2247）。
+ *
+ * **参照タグを決められなければcallerを置かない。** 存在しないタグを指すcallerは、置いた
+ * 瞬間から全イベントで失敗し続ける（`buildScaffoldFiles`が`workflowTag: null`で判断する）。
+ *
+ * **失敗しても立ち上げは止めない。** 戻り値が`null`なら、初期化Issueは従来どおり
+ * 「サブPCのローカルセッションで実装する」形の本文になる。
+ */
+async function commitScaffold(
+  token: string,
+  spec: NewAppSpec,
+  branch: string,
+  warnings: string[],
+): Promise<ScaffoldOutcome | null> {
+  let workflowTag: string | null = null;
+  try {
+    workflowTag = await fetchLatestWorkflowTag(token);
+  } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) throw error;
+    console.warn("[POST /api/new-app] 共有ワークフローの最新タグを読めませんでした", error);
+  }
+  if (!workflowTag) {
+    warnings.push(
+      "共有ワークフローの最新タグ（workflows/vN）を読めなかったため、caller（issue-labels.yml・claude-issue-dispatch.yml など）は置いていません。初期化Issueで手動配置するか、issue-deckの画面（設定＞フリート運用）から配ってください。",
+    );
+  }
+
+  const generated = buildScaffoldFiles(spec, { workflowTag });
+  const copies = await resolveScaffoldCopies(token, spec, scaffoldCopies(spec));
+  for (const problem of copies.problems) {
+    warnings.push(`雛形の ${problem}。初期化Issueで置いてください。`);
+  }
+
+  const files = [...generated, ...copies.files];
+  if (files.length === 0) return null;
+
+  try {
+    await commitScaffoldFiles(NEW_APP_ORG, spec.repositoryName, token, {
+      branch,
+      message: `${spec.displayName}の雛形一式を追加する。`,
+      files,
+    });
+    return { paths: files.map((file) => file.path).sort(), workflowTag };
+  } catch (error) {
+    if (error instanceof GithubApiError && error.status === 401) throw error;
+    console.error("[POST /api/new-app] 雛形をコミットできませんでした", error);
+    warnings.push(
+      `雛形一式をコミットできませんでした（${error instanceof Error ? error.message : String(error)}）。初期化IssueはサブPCのローカルセッションで実装してください。`,
+    );
+    return null;
+  }
 }

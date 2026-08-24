@@ -2256,10 +2256,18 @@ pnpm test:unit   # vitestのみ
 
 - **判定・本文の組み立ては`lib/new-app/`の純粋関数**（`spec.ts`＝決めごとの型と導出、
   `vps-inventory.ts`＝vps READMEとvhostの解析、`local-port-bands.ts`＝ローカルセッションの
-  ポート帯の採番、`plan.ts`＝作られるものとIssue本文、`parse.ts`＝APIが受け取る値の検証）。
+  ポート帯の採番、`plan.ts`＝作られるものとIssue本文、`scaffold.ts`・`scaffold-workflows.ts`＝新しい
+  リポジトリへ最初に置く雛形、`parse.ts`＝APIが受け取る値の検証）。
   **ウィザードのコンポーネントが直接importするので、ここから`lib/github/`を読まない**
   （上記の`issues-api.ts`の制約）。GitHubを叩くのは`lib/github/vps-inventory-api.ts`・
-  `lib/github/repositories-api.ts`・`lib/github/local-port-band-api.ts`。
+  `lib/github/repositories-api.ts`・`lib/github/local-port-band-api.ts`・
+  `lib/github/scaffold-api.ts`。
+- **リポジトリを作った直後に雛形一式をコミットする**（#2247）。`claude-issue-dispatch.yml`が
+  デフォルトブランチにあることが盤面へ載る条件で、以前はそれを作るのが初期化Issue自身
+  だった。`develop`を切る前にGit Data API（blob → tree → commit → ref）で1コミット置くので、
+  初期化Issueも最初から無人実行で回せる。**雛形の正はissue-deck内**（`.github/templates/`は
+  本番の配布物に入らず実行時に読めないため、TypeScriptのモジュールで持つ）。**issue-deck自身が
+  実物を持つファイルは写しを作らず`main`からそのまま配る**（`signaly-notify.sh`など）。
 - **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・
   予約済みポート）と、vhostの`ServerName`／`ServerAlias`。**READMEの散文の「空きは〜」と
   vhostのファイル名は読まない**——どちらも実態とずれる（`wordpress.conf`の`ServerName`は
