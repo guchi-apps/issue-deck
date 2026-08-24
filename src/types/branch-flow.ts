@@ -64,10 +64,24 @@ export type BranchFlowDeployRun = {
   runAttempt: number;
 };
 
+/**
+ * 本番デプロイの失敗を追跡するために自動起票したIssueへの参照（#2236）。
+ *
+ * **失敗の表示から、それを追いかけているIssueへ1回で移れるようにするためだけの型。**
+ * 起票そのものは`lib/github/deploy-failure-sweep-run.ts`が行い、ここに出るのは
+ * その結果（DBの`DeployFailureIssue`）を読んだもの。
+ */
+export type DeployFailureIssueRef = {
+  number: number;
+  htmlUrl: string;
+};
+
 /** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
 export type RepositoryDeployStatus = {
   repositoryFullName: string;
   deployRun: BranchFlowDeployRun | null;
+  /** そのリポジトリで開いているデプロイ失敗Issue。無ければnull（#2236） */
+  failureIssue: DeployFailureIssueRef | null;
 };
 
 export type BranchFlowDeployResponse = {
@@ -380,6 +394,11 @@ export type BranchFlowRepository = {
    * 実装が進んでいるはずなのにブランチもPRも見つからないIssue。
    * 「関連が付いていない」ことを隠さないために出す。
    */
+  /**
+   * そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull。
+   * 失敗の帯からこのIssueへ移れるようにするためだけに持つ。
+   */
+  deployFailureIssue: DeployFailureIssueRef | null;
   orphanIssues: BranchFlowIssueRef[];
   /**
    * これから着手するIssue（#1704）。進捗が`ready`・`planning`で、まだどのレーンにも現れていないもの。

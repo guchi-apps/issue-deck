@@ -1383,6 +1383,7 @@ describe("BranchFlowView", () => {
       return [
         {
           repositoryFullName: REPO,
+          failureIssue: null,
           deployRun: {
             status: "completed",
             conclusion: "success",
@@ -1433,6 +1434,57 @@ describe("BranchFlowView", () => {
         badges.map((badge) => badge.closest("a")?.getAttribute("href")),
       ).toContain(`https://github.com/${REPO}/actions/runs/1`);
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
+    });
+
+    it("デプロイ失敗のときは、リポジトリの節にその場で出し直せる帯を出す（#2236）", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus({ hasDeployWorkflow: true })],
+        deployStatuses: deployStatuses({ conclusion: "failure", runAttempt: 2 }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("本番デプロイが失敗しています")).toBeTruthy();
+      // 1回やり直したうえでの失敗であることを言う（#2134の自動再実行）
+      expect(screen.getByText(/自動で1回やり直しても失敗/)).toBeTruthy();
+      // **押す口は1つだけ**（帯を出しているあいだ、凡例の行のボタンは出さない）
+      expect(screen.getAllByRole("button", { name: /本番へ再デプロイ/ })).toHaveLength(1);
+    });
+
+    it("失敗の帯は、次のリリースが動き出して束が畳まれても消えない（#2236）", () => {
+      renderFlow({
+        // openなリリースPRがあると`visibleGroups`は未リリースの束だけになり、
+        // 落ちた版の束は畳まれる。帯を束に置いていたらここで画面から消えていた。
+        pullRequests: [
+          ...released,
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [branchStatus({ hasDeployWorkflow: true })],
+        deployStatuses: deployStatuses({ conclusion: "failure" }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("本番デプロイが失敗しています")).toBeTruthy();
+    });
+
+    it("手動の出し直しが落ちた場合は帯を出さない（その版が本番へ出ていないことを意味しないため）", () => {
+      renderFlow({
+        pullRequests: released,
+        branchStatuses: [branchStatus({ hasDeployWorkflow: true })],
+        deployStatuses: deployStatuses({ conclusion: "failure", event: "workflow_dispatch" }),
+        now: NOW,
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("本番デプロイが失敗しています")).toBeNull();
+      // 帯を出さないぶん、凡例の行のボタンは従来どおり出る
+      expect(screen.getAllByRole("button", { name: /本番へ再デプロイ/ })).toHaveLength(1);
     });
 
     it("デプロイ成功のときだけ「本番反映」と書き、裏付けのバッジを添える", () => {
@@ -1683,6 +1735,7 @@ describe("BranchFlowView", () => {
         deployStatuses: [
           {
             repositoryFullName: REPO,
+            failureIssue: null,
             deployRun: {
               status: "in_progress",
               conclusion: null,

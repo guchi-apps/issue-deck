@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { parsePullRequestId } from "@/lib/github-reference";
 import { isPendingPullRequestDeployStatus } from "@/lib/pull-request-deploy";
+import type { DeployFailureIssueRef } from "@/types/branch-flow";
 import type {
   PullRequestDeployStatus,
   PullRequestDeployStatusResponse,
@@ -11,6 +12,14 @@ import type {
 
 /** デプロイが動いている間の再取得間隔（ミリ秒）。ブランチ画面（#1579）と揃える */
 const ACTIVE_POLL_INTERVAL_MS = 30_000;
+
+export type PullRequestDeployStatusResult = {
+  status: PullRequestDeployStatus | null;
+  /** そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull */
+  failureIssue: DeployFailureIssueRef | null;
+};
+
+const EMPTY_RESULT: PullRequestDeployStatusResult = { status: null, failureIssue: null };
 
 /**
  * 選択中PRが本番へ届いたかを取得する（#1814）。
@@ -23,6 +32,10 @@ const ACTIVE_POLL_INTERVAL_MS = 30_000;
  *
  * 取得に失敗しても画面にエラーを出さない（バッジが出ないだけ）。**間違った状態を出すより
  * 「何も言わない」方がよい**という方針をブランチ画面から引き継いでいる。
+ *
+ * 併せて、そのリポジトリで開いているデプロイ失敗Issue（#2236）も返す。失敗しているときに
+ * 「デプロイ失敗 #312」へ移れるようにするためで、**同じ1リクエストで受け取る**
+ * （issue-deck自身のDBを引くだけなのでGitHub APIは増えない）。
  */
 export function usePullRequestDeployStatus(
   /** PRのid（`<owner>/<repo>#<番号>`）。未選択ならnull */
@@ -31,13 +44,12 @@ export function usePullRequestDeployStatus(
   merged: boolean,
   /** 詳細の取得時刻。ヘッダーの「更新」を押したときにこちらも取り直すためのキー */
   refreshKey?: string | null,
-): PullRequestDeployStatus | null {
+): PullRequestDeployStatusResult {
   // どのPRの結果かを一緒に持つ。別のPRへ切り替えた直後に前のPRのバッジを出さないためで、
   // 「更新」での取り直し（refreshKeyの変化）ではidが変わらないためバッジが消えない。
-  const [result, setResult] = useState<{
-    pullRequestId: string;
-    status: PullRequestDeployStatus | null;
-  } | null>(null);
+  const [result, setResult] = useState<
+    ({ pullRequestId: string } & PullRequestDeployStatusResult) | null
+  >(null);
 
   useEffect(() => {
     const parsed = pullRequestId ? parsePullRequestId(pullRequestId) : null;
@@ -64,7 +76,11 @@ export function usePullRequestDeployStatus(
         const data: PullRequestDeployStatusResponse = await res.json();
         if (cancelled) return;
         lastStatus = data.status;
-        setResult({ pullRequestId, status: data.status });
+        setResult({
+          pullRequestId,
+          status: data.status,
+          failureIssue: data.failureIssue ?? null,
+        });
       } catch {
         // 前回の取得結果を保ったままにする（失敗を理由に表示を消さない）
       } finally {
@@ -100,5 +116,5 @@ export function usePullRequestDeployStatus(
     };
   }, [pullRequestId, merged, refreshKey]);
 
-  return result !== null && result.pullRequestId === pullRequestId ? result.status : null;
+  return result !== null && result.pullRequestId === pullRequestId ? result : EMPTY_RESULT;
 }
