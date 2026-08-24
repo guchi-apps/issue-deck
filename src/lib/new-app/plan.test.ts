@@ -494,6 +494,19 @@ describe("体裁と運用の決めごと（#2254）", () => {
     expect(conditions).not.toContain("アイコン");
   });
 
+  it("`runtime-setup: minimal` では無人撮影が成立しないことを断って書く", () => {
+    const fastapi = spec({ kind: "fastapi", port: 8003, auth: "fastapi-google" });
+    expect(buildParentIssueBody(fastapi)).toContain(
+      "| CI撮影の認証バイパス | 用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用） |",
+    );
+    const init = buildInitIssueBody(fastapi, REFS);
+    expect(init).toContain("`24.screenshot-required` は無人実行では成立しない");
+    // Next.js（`node-db`）ではこれまでどおり成立する
+    expect(buildInitIssueBody(spec(), REFS)).toContain(
+      "**これが無いと `24.screenshot-required` が成立しない**",
+    );
+  });
+
   it("Python系では npm の lifecycle ではなく bump_version.py を案内する", () => {
     const body = buildInitIssueBody(spec({ kind: "fastapi", port: 8003 }), REFS);
     expect(body).toContain("scripts/bump_version.py");

@@ -52,6 +52,7 @@ import {
   hostnameFor,
   isAppearanceDefault,
   newAppKindProfile,
+  supportsUnattendedScreenshot,
   publicUrlFor,
   validateNewAppSpec,
   NEW_APP_SPEC_ERROR_MESSAGES,
@@ -1039,8 +1040,9 @@ function AppearancePanel({
               <span className="flex flex-col">
                 <span className="text-sm">CI撮影の認証バイパスを用意する</span>
                 <span className="text-xs text-muted-foreground">
-                  無人実行のスクリーンショット（<code>24.screenshot-required</code>）が成立する
-                  条件。後付けが効きにくいのでここで決めます
+                  {supportsUnattendedScreenshot(spec.kind)
+                    ? "無人実行のスクリーンショット（24.screenshot-required）が成立する条件。後付けが効きにくいのでここで決めます"
+                    : `${newAppKindProfile(spec.kind).label}ではPlaywrightが入らないため、無人実行での撮影は成立しません。ローカルでの画面確認用として用意します`}
                 </span>
               </span>
             </label>

@@ -256,6 +256,18 @@ export function screenshotBypassEnabled(
 }
 
 /**
+ * 無人実行のスクリーンショット（`24.screenshot-required`）が成立する種別か。
+ *
+ * **`runtime-setup: minimal`（FastAPI・静的サイト）ではPlaywrightがインストールされない**ため、
+ * バイパスを用意しても無人では撮れない（`docs/cross-repo-setup-guide.md`「なお`minimal`では
+ * Playwrightがインストールされないため、`24.screenshot-required`は無人実行では成立しない」）。
+ * バイパス自体はローカルでの画面確認に効くので、**用意しないのではなく用途を断って書く**。
+ */
+export function supportsUnattendedScreenshot(kind: NewAppKind): boolean {
+  return newAppKindProfile(kind).runtimeSetup !== "minimal";
+}
+
+/**
  * 体裁と運用が標準どおりか。畳んだパネルの「標準どおり」バッジの出し分けに使う。
  * **表示名は標準の判定に含めない**——アプリ名と同じかどうかは体裁の逸脱ではない。
  */
@@ -285,7 +297,9 @@ export function appearanceSummary(spec: NewAppSpec): string {
     `更新履歴${spec.changelog ? "あり" : "なし"}`,
     spec.auth === "none"
       ? "CI撮影の認証バイパスは不要（認証なし）"
-      : `CI撮影の認証バイパス${screenshotBypassEnabled(spec) ? "あり" : "なし"}`,
+      : screenshotBypassEnabled(spec)
+        ? `CI撮影の認証バイパスあり${supportsUnattendedScreenshot(spec.kind) ? "" : "（ローカル実行専用）"}`
+        : "CI撮影の認証バイパスなし",
   ];
   return parts.join("／");
 }

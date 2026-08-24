@@ -86,7 +86,7 @@
 | アイコン・テーマカラー | 暫定で始める（`#0f172a`） | 標準方針（`standards/tech-stack.md`） |
 | PWA・オフライン | PWA対応する／オフラインは対応しない | 同上 |
 | 更新履歴 | 持つ | `RELEASE_CHANGELOG`（[supported-repositories.md](supported-repositories.md)） |
-| CI撮影の認証バイパス | 用意する（認証があるときだけ） | `24.screenshot-required`の前提 |
+| CI撮影の認証バイパス | 用意する（認証があるときだけ。`minimal`ではローカル実行専用） | `24.screenshot-required`の前提 |
 
 守っている点が4つある。
 
@@ -99,6 +99,10 @@
   ——暫定のアイコンでも公開はできるので、条件にすると立ち上げを閉じられなくなる。
 - **認証が無いアプリでは撮影バイパスの項目そのものを出さない**（`screenshotBypassEnabled`）。
   迂回する相手が無いので、チェックを残すと「用意したのに効かない」ものになる。
+- **`runtime-setup: minimal`（FastAPI・静的サイト）では、撮影バイパスの用途を断って書く**
+  （`supportsUnattendedScreenshot`）。`minimal`ではPlaywrightがインストールされないため
+  `24.screenshot-required`は無人実行では成立しない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。
+  バイパス自体はローカルの画面確認に効くので、**用意しないのではなく「ローカル実行専用」と書く**。
 
 雛形（#2247）が`manifest`・アイコン・更新履歴を含むようになれば、ここで決めた値は
 **雛形をどう埋めるか**の指定になる。決める場所はここのままでよい。

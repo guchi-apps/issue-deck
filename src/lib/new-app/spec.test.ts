@@ -12,6 +12,7 @@ import {
   isValidThemeColor,
   offlineEnabled,
   screenshotBypassEnabled,
+  supportsUnattendedScreenshot,
   isValidSubdomain,
   publicUrlFor,
   slugifyRepositoryName,
@@ -167,6 +168,15 @@ describe("体裁と運用（#2254）", () => {
   it("認証が無いアプリでは撮影バイパスを不要にする", () => {
     expect(screenshotBypassEnabled(spec({ auth: "none", screenshotBypass: true }))).toBe(false);
     expect(screenshotBypassEnabled(spec({ auth: "supabase-google" }))).toBe(true);
+  });
+
+  it("`runtime-setup: minimal` の種別では無人撮影が成立しない（要約にも断りを出す）", () => {
+    expect(supportsUnattendedScreenshot("next-db")).toBe(true);
+    expect(supportsUnattendedScreenshot("fastapi")).toBe(false);
+    expect(supportsUnattendedScreenshot("static")).toBe(false);
+    expect(appearanceSummary(spec({ kind: "fastapi", auth: "fastapi-google" }))).toContain(
+      "CI撮影の認証バイパスあり（ローカル実行専用）",
+    );
   });
 
   it("標準から外すと「標準どおり」ではなくなる（表示名は判定に含めない）", () => {
