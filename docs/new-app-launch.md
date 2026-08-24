@@ -23,7 +23,7 @@
 |---|---|---|
 | 0. 相談 | 何を作るかをAIと数往復して固める。仕様案（名前・種別・DB・認証・URL）が下にまとまる | [`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts) |
 | 1. 基本 | アプリ名・リポジトリ名・公開範囲・概要。リポジトリ名の空きをGitHubで確かめる | [`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts) |
-| 2. 配置 | 種別・公開URL・本番ポート・DB名・認証・マルチエージェント運用の要否 | 同上 |
+| 2. 配置 | 種別・公開URL・本番ポート・DB名・認証・マルチエージェント運用の要否と、畳んだ「体裁と運用」（表示名・アイコン・PWA・更新履歴・撮影バイパス） | 同上 |
 | 3. 確認 | 作られるもの9件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
 
 **相談と設定を同じ画面に混ぜない。** 会話しながら横で仕様が埋まっていく形も検討したが、
@@ -47,6 +47,10 @@
 | `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
+**`guchi-apps/vps`のIssueだけは、同じ対象のopenなIssueが既にあれば作らない**（#2250。
+後述「同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない」）。そのときは既存Issueへ
+コメントを書き足し、画面の一覧には「既存」の印を付けて出す。
+
 手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
 **進捗を追う専用の画面は持たない**——サブIssueはいつもの盤面と「ユーザーの作業待ち」に
 出るので、同じ状態を2か所で持たない。
@@ -67,6 +71,45 @@
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
   ブラウザの手作業Issueに手順が出る。
+
+## 体裁と運用は、既定値で畳んで置く（#2254）
+
+共有知識の新規アプリ作成チェックリストは、計画段階で公開URLやDBのほかに**表示名・PWA対応方針・
+オフライン対応・更新履歴・CI撮影の認証バイパス**も決めるとしている。ウィザードはこれを
+決めていなかったため、`aide-bot`ではPWA対応まで入ったものの**アイコンのデザインもテーマカラー
+（`#0f766e`）も人が決めておらず**、更新履歴は持たないまま始まった。
+
+**ステップは増やさず、「2. 配置」の末尾に畳んだパネルとして置く。** 5項目すべてに標準の
+既定値を持たせ、畳んだ1行に決まった値を出す（[`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts)の
+`appearanceSummary`）。**開かずに「次へ」を押せることが要件**で、項目を入力欄として並べると
+立ち上げの手数がそのぶん増える。
+
+| 項目 | 既定 | 出どころ |
+|---|---|---|
+| 表示名 | アプリ名と同じ | `title` / `applicationName` / `appleWebApp.title` |
+| アイコン・テーマカラー | 暫定で始める（`#0f172a`） | 標準方針（`standards/tech-stack.md`） |
+| PWA・オフライン | PWA対応する／オフラインは対応しない | 同上 |
+| 更新履歴 | 持つ | `RELEASE_CHANGELOG`（[supported-repositories.md](supported-repositories.md)） |
+| CI撮影の認証バイパス | 用意する（認証があるときだけ。`minimal`ではローカル実行専用） | `24.screenshot-required`の前提 |
+
+守っている点が4つある。
+
+- **決めた事実は必ず表に残す。** 「標準どおりで通した」も決定なので、親Issueと初期化Issueの
+  決めごとの表へ5行として出す（`specTable`）。**ApacheのVirtualHostと疎通確認のIssueには
+  出さない**——あちらの判断材料にならないので、`specTable(spec, { appearance: false })`で呼ぶ。
+- **「やらない」と決めたものは、初期化Issueの「やること」に並べない**（`appearanceSteps`）。
+  「PWA対応はしない」のようなチェックを置くと、消し込む相手が無い項目が増える。
+- **暫定で始めたものは、親Issueの「後で決めること」に残す。** ただし**完了条件には入れない**
+  ——暫定のアイコンでも公開はできるので、条件にすると立ち上げを閉じられなくなる。
+- **認証が無いアプリでは撮影バイパスの項目そのものを出さない**（`screenshotBypassEnabled`）。
+  迂回する相手が無いので、チェックを残すと「用意したのに効かない」ものになる。
+- **`runtime-setup: minimal`（FastAPI・静的サイト）では、撮影バイパスの用途を断って書く**
+  （`supportsUnattendedScreenshot`）。`minimal`ではPlaywrightがインストールされないため
+  `24.screenshot-required`は無人実行では成立しない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。
+  バイパス自体はローカルの画面確認に効くので、**用意しないのではなく「ローカル実行専用」と書く**。
+
+雛形（#2247）が`manifest`・アイコン・更新履歴を含むようになれば、ここで決めた値は
+**雛形をどう埋めるか**の指定になる。決める場所はここのままでよい。
 
 ## 実装のうえで外せない前提
 
@@ -217,6 +260,67 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
   「未登録」と読めてしまう。`aide-bot`ではまさにそれで、Actions secretsへの登録は不要な手順だった
 - DNSの`dig`は**手順ではなく確認**なので、`## やること`から`## 完了の確認方法`へ移してある。
   確認節に置いたものだけが代行実行・巡回の対象になる
+### 同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない（#2250）
+
+`aide-bot`の立ち上げでは、**同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件**
+並んだ（`#121`＝立ち上げが起票・`#122`＝別セッションが「受け入れる設定が無い」として起票・
+`#124`＝手作業Issue・`#128`＝デプロイ失敗の調査から起票）。**後から入ったエージェントが既存の
+Issueを見つけられず、起票し直した**のが原因。
+
+対策は2つで、判定は[`lib/new-app/launch-marker.ts`](../src/lib/new-app/launch-marker.ts)（純粋関数）、
+IOは[`lib/github/new-app-existing-issue.ts`](../src/lib/github/new-app-existing-issue.ts)にある。
+
+**1. 立ち上げが作るIssueの本文へ、不可視のマーカーを埋める。**
+
+```
+<!-- new-app-launch: {"app":"aide-bot","repo":"guchi-apps/aide-bot","host":"aide-bot.gucchii.com","kind":"vps-issue","parent":"guchi-apps/issue-deck#2213"} -->
+```
+
+**GitHubのIssue検索はHTMLコメントの中身も索引している**ので、これで引ける。人が読む本文は
+変わらない（`deploy-failure.ts`と同じやり方）。
+
+```bash
+gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-bot" --json number,title
+```
+
+**2. 起票の前に、`guchi-apps/vps`のopenなIssueから同じ対象のものを探す。** 見つかったら
+新しく作らず、そのIssueへコメントを書き足し、以降の本文（VPSの手作業Issue）もそちらを指す。
+
+- 判定の強さは **マーカー > ホスト名 > タイトルのアプリ名** の順。同じ理由の中では**いちばん
+  番号の小さい（古い）Issue**へ寄せる——重複の元になった1件目へ集約したいため
+- **ホスト名で照合するのはサブドメインのときだけ。** パス配下（`gucchii.com/foo`）では
+  ホスト名が既存アプリと共有で、そのホストに関わるIssueがすべて当たってしまう
+- アプリ名は**タイトルだけ**を見る。本文には「他のアプリでは〜」のような言及が入りうる
+- 語として一致したときだけ拾う（`aide-bot`は`aide-bottle`に当たらない）
+- **検索API（`/search/issues`）は使わない。** 作った直後のIssueが索引に載るまで数十秒かかり、
+  「押した直後にもう一度押す」形の重複を取りこぼす。openなIssueの一覧なら`guchi-apps/vps`でも
+  1〜2ページで収まる
+- **読めなかったときは従来どおり起票する。** 判定できないことを理由に起票を止めると、必要な
+  Issueが1件も無いまま立ち上げが終わる。重複は人が閉じられるが、欠落は気付かれない
+- **既存Issueをサブissueとして紐付けない。** 別の親が付いていることがあり、付け替えると元の
+  追跡が外れる。つながりはコメントのリンクで残す
+- 押す前の確認ステップにも同じ判定を出す（`POST /api/new-app/preflight`の`existingVpsIssue`）。
+  後から警告だけ出しても、何が起きたのか分からない
+
+**エージェント側にも「起票の前に探す」を書いてある**（`.github/prompts/`・`scripts/prompts/`の
+実装・質問応答プロンプトと[multi-agent/labels.md](multi-agent/labels.md)）。#1875で「更新して
+再起動」を入れた後も同じ形の手作業Issueが立ち続けたのと同じで、**仕組みを作っただけでは
+止まらず、起票する側の基準に書いて初めて止まる。**
+
+### 手作業の分担は、Issueの本文に書いて固定する（#2250）
+
+`#2216`（issue-deck側のVPSの手作業）と`guchi-apps/vps#124`では、certbotの実行と
+`-le-ssl.conf`を控える手順が**両方に書かれていた**。`aide-bot`では`#124`の側で実施され、
+`#2216`の同じ手順が宙に浮いた。
+
+分担そのものは変えていない（**vhostの追加と`-le-ssl.conf`の取り込み＝vps側、DNS＝ブラウザの
+手作業、置き場・DB・PM2・certbot＝VPSの手作業**）。変えたのは、`guchi-apps/vps`のIssueに
+**「このIssueが持たない作業」の表を置いた**こと。読んだ人・エージェントが、足りない手順を
+見つけたときに新しいIssueを立てず、担当のIssueへ書き足せるようにする。
+
+**1件へ統合しなかった理由。** `guchi-apps/vps#132`（プロビジョニングの受け口）が入ると
+置き場・DB・PM2は自動化され、実機に残る手作業はcertbotだけになる。残る量が変わる前に
+統合すると、統合したIssue自体を作り直すことになる。
 
 ### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
 

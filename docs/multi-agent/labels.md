@@ -976,6 +976,36 @@ gh issue list --repo guchi-apps/issue-deck --state open \
   いま追跡すべきものではない。ただし**closedが何件も出てきたら「繰り返し発生するもの」の
   合図**なので、起票ではなく作業をなくすIssueを立てる
 
+#### 他リポジトリへ起票するときも、先に探す（#2250）
+
+**この確認は`71.manual-step`だけの話ではない。** `guchi-apps/vps`へは、`aide-bot`の立ち上げで
+**同じ「vhostを作って公開する」作業のIssueが4件**立った（`#121`＝立ち上げが自動起票・`#122`＝
+別セッションが「受け入れる設定が無い」として起票・`#124`＝手作業Issue・`#128`＝デプロイ失敗の
+調査から起票）。ラベルもタイトルの形もばらばらで、**後から入ったエージェントは既存のIssueを
+探しに行かないまま起票し直していた。**
+
+`gh issue create --repo <owner>/<repo>` を打つ前に、**対象リポジトリのopenなIssueをラベル無しで
+引く。** 探す語は、そのIssueが指している**対象の固有名**（アプリ名・ホスト名・サービス名）にする。
+「vhost」「証明書」のような作業名では、別の対象のIssueまで釣れて役に立たない。
+
+```bash
+gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json number,title
+```
+
+- **立ち上げが作ったIssueには印が入っている**（#2250）。本文の先頭に
+  `<!-- new-app-launch: {"app":"aide-bot",…} -->` があり、**GitHubのIssue検索はHTMLコメントの
+  中身も索引している**ので `--search "new-app-launch aide-bot"` で引ける
+  （[new-app-launch.md](../new-app-launch.md)）
+- **見つかったら起票しない。** そのIssueへ「#<起点Issue番号>の調査でも同じ作業が必要だと
+  分かった」とコメントし、足りない手順があればそのIssueへ書き足す。PR本文と完了報告には
+  そのIssueへのリンクを書く
+- **手順を2か所に持たない。** `#2216`と`guchi-apps/vps#124`ではcertbotの実行と
+  `-le-ssl.conf`を控える手順が両方に書かれ、片方で実施されたぶんがもう片方で宙に浮いた。
+  分担が分からないときは、既存Issueの`## このIssueが持たない作業`を読む
+- 対象が同じでも、**リポジトリが違えば別のIssue**（`guchi-apps/vps`の設定変更と
+  `guchi-apps/issue-deck`の実装は別々に起票する。CLAUDE.md「複数リポジトリに影響する変更は、
+  リポジトリごとにIssueを分ける」）
+
 ### 実機の設定ファイル変更は、管理リポジトリのIssueへ切り出す（#2021）
 
 VPS・サブPCの設定ファイルは**Gitで管理されていて、`main`へマージすれば実機へ自動で反映される**。

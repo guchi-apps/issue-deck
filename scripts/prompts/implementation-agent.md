@@ -229,6 +229,17 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 `guchi-apps/issue-deck`の`src/lib/infra-config-repos.ts`。**`deploy.yml`の`paths`に載っている
 受け口だけ**が対象で、vpsの`mysql/`のような記録用ディレクトリは従来どおり手作業です）。
 
+- **切り出す前に、対象リポジトリのopenなIssueを引いてください**（#2250）。同じ対象のIssueが
+  既に開いていたら起票せず、そのIssueへコメントし、足りない手順があればそちらへ書き足します。
+  `aide-bot`の立ち上げでは、同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件
+  立ちました。探す語は**対象の固有名**（アプリ名・ホスト名・サービス名）にします
+
+  ```
+  gh issue list --repo guchi-apps/vps --state open --search "<アプリ名・ホスト名>" --json number,title
+  ```
+
+  立ち上げが作ったIssueには本文の先頭に`<!-- new-app-launch: … -->`の印があり、**GitHubのIssue
+  検索はHTMLコメントの中身も索引している**ので`--search "new-app-launch <アプリ名>"`でも引けます
 - 該当する変更は**対象リポジトリへIssueを起票**して切り出す
   （`gh issue create --repo guchi-apps/vps ...`）。起点Issueのサブissueとして紐付け、PR本文と
   完了報告コメントにリンクを書く。**そのリポジトリでの実装（ファイルの変更・PR作成）は
