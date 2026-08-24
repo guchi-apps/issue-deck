@@ -14,10 +14,12 @@
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
  *   含まない、のすべてを満たしたときだけ画面から流せる
  *   （`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
- * - **新しいリポジトリのIssueは、作った直後には盤面に載らない。** 載る条件は
- *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、それを作るのが初期化Issue
- *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定する
- *   （条件は`local-repos.conf`への記載）。
+ * - **新しいリポジトリのIssueは、作った直後から盤面に載る**（#2247）。載る条件は
+ *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが
+ *   初期化Issue自身だった。いまはリポジトリを作った直後にissue-deckが雛形一式をコミット
+ *   する（`lib/new-app/scaffold.ts`）ので、初期化Issueも最初から無人実行で回せる。
+ *   **サブPCの手作業Issueは残るが、初期化Issueの前提ではなくなった**——あちらの目的は
+ *   1Passwordへの値の投入（#2249）で、cloneはローカルセッションを使いたいときのため。
  * - **人が空振りする手順を書かない**（#2248）。2つの再同期は立ち上げ自身が実行し
  *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
  *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
@@ -32,9 +34,13 @@ import {
   NEW_APP_ORG,
   NEW_APP_PARENT_REPOSITORY,
   NEW_APP_VPS_REPOSITORY,
+  appTitleFor,
   hostnameFor,
   newAppKindProfile,
+  offlineEnabled,
   publicUrlFor,
+  screenshotBypassEnabled,
+  supportsUnattendedScreenshot,
   vpsAppListLocation,
   type NewAppSpec,
 } from "@/lib/new-app/spec";
@@ -65,18 +71,25 @@ function serverAppDir(spec: Pick<NewAppSpec, "repositoryName">): string {
  * 機械的に定まる値（配置先・DB名・許可メール）と、人がSignalyで作らないと決まらない
  * webhook URLとで**呼び分ける**。スクリプトは何度実行してもよい作りなので、順序は問わない。
  */
-function provisionCommand(spec: NewAppSpec, ciWebhookUrl: string | null): string {
-  const options = [`--repo ${repositoryFullName(spec)}`];
+function provisionCommand(
+  spec: NewAppSpec,
+  ciWebhookUrl: string | null,
+  options: { check?: boolean } = {},
+): string {
+  const args = [`--repo ${repositoryFullName(spec)}`];
   if (ciWebhookUrl === null) {
-    if (spec.databaseName) options.push(`--db-name ${spec.databaseName}`);
+    if (spec.databaseName) args.push(`--db-name ${spec.databaseName}`);
     // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
-    if (spec.auth !== "none") options.push("--copy-allowed-emails");
+    if (spec.auth !== "none") args.push("--copy-allowed-emails");
   } else {
-    options.push(`--ci-webhook-url '${ciWebhookUrl}'`);
+    args.push(`--ci-webhook-url '${ciWebhookUrl}'`);
   }
+  // 確認用は同じ引数に`--check`を足すだけにする（#2256）。投入と確認で対象のフィールドが
+  // ずれると、「入っていない値を確かめていない」という一番まずい形になる
+  if (options.check) args.push("--check");
   // 続きの行は2つ下げる（コードブロック自体が箇条書きの下に2スペース下がっているため、
   // 同じ幅だと折り返しに見えない）
-  return [PROVISION_SCRIPT, ...options].join(" \\\n    ");
+  return [PROVISION_SCRIPT, ...args].join(" \\\n    ");
 }
 
 /** 作成物の自動化の度合い。画面のチップの色に対応する。 */
@@ -146,7 +159,7 @@ export function buildNewAppPlan(
       automation: "auto",
       title: repo,
       target: null,
-      description: `リポジトリを${spec.visibility === "private" ? "private" : "public"}で作り、既定ブランチを develop にしてラベル一式を写す`,
+      description: `リポジトリを${spec.visibility === "private" ? "private" : "public"}で作り、既定ブランチを develop にしてラベル一式を写す。CI・デプロイ・無人実行の雛形一式もこの時点でコミットする`,
     },
     {
       kind: "port-band",
@@ -171,8 +184,8 @@ export function buildNewAppPlan(
       title: "プロジェクトを初期化する",
       target: repo,
       description: spec.multiAgent
-        ? "雛形の作成・CI・デプロイ設定と、マルチエージェント運用の導入。サブPCのローカルセッションで実装する"
-        : "雛形の作成・CI・デプロイ設定。サブPCのローカルセッションで実装する",
+        ? "アプリ本体の雛形とpackage.jsonの整備。ワークフローは作成時にコミット済みで、盤面から無人実行で回せる"
+        : "アプリ本体の雛形とpackage.jsonの整備。CI・デプロイの雛形は作成時にコミット済み",
     },
     {
       kind: "deploy-check-issue",
@@ -201,9 +214,9 @@ export function buildNewAppPlan(
     {
       kind: "manual-subpc",
       automation: "proxy",
-      title: `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`,
+      title: `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`,
       target: "guchi-apps/issue-deck",
-      description: "cloneと対応表への追記、1Passwordへの値の投入。手作業アシスタントの代行実行で流せる",
+      description: "1Passwordへの値の投入とGitHub secretへの同期。cloneはローカルセッションを使うとき用。手作業アシスタントの代行実行で流せる",
     },
     {
       kind: "manual-browser",
@@ -219,8 +232,17 @@ export function buildNewAppPlan(
   return artifacts;
 }
 
+export type SpecTableOptions = {
+  /**
+   * 体裁と運用の5行（表示名・アイコン・PWA・更新履歴・撮影バイパス）を含めるか（#2254）。
+   * **既定は含める。** ApacheのVirtualHostや疎通確認のIssueでは判断材料にならないので、
+   * そちらだけ`false`で呼ぶ。
+   */
+  appearance?: boolean;
+};
+
 /** 立ち上げの決めごとを、どのIssueにも同じ形で載せるための表。 */
-export function specTable(spec: NewAppSpec): string {
+export function specTable(spec: NewAppSpec, options: SpecTableOptions = {}): string {
   const profile = newAppKindProfile(spec.kind);
   const rows: [string, string][] = [
     ["アプリ名", spec.displayName],
@@ -233,6 +255,36 @@ export function specTable(spec: NewAppSpec): string {
     ["認証", NEW_APP_AUTH_LABELS[spec.auth]],
     ["マルチエージェント運用", spec.multiAgent ? "対応させる" : "対応させない"],
   ];
+
+  if (options.appearance !== false) {
+    rows.push(
+      ["表示名", `${appTitleFor(spec)}（\`title\` / \`applicationName\` / \`appleWebApp.title\`）`],
+      [
+        "アイコン・テーマカラー",
+        spec.pwa
+          ? `${spec.iconPlan === "provisional" ? "暫定で始める" : "用意してから始める"}（\`${spec.themeColor}\`）`
+          : "用意しない（PWA対応しないため）",
+      ],
+      [
+        "PWA",
+        spec.pwa
+          ? `対応する（オフラインは${offlineEnabled(spec) ? "対応する" : "対応しない"}）`
+          : "対応しない",
+      ],
+      ["更新履歴", spec.changelog ? "持つ" : "持たない（バージョンだけが上がる）"],
+      [
+        "CI撮影の認証バイパス",
+        spec.auth === "none"
+          ? "不要（認証なし）"
+          : screenshotBypassEnabled(spec)
+            ? supportsUnattendedScreenshot(spec.kind)
+              ? "用意する"
+              : "用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用）"
+            : "用意しない（`24.screenshot-required`は使えない）",
+      ],
+    );
+  }
+
   return [
     "| 項目 | 値 |",
     "|---|---|",
@@ -283,6 +335,9 @@ export function buildParentIssueTitle(spec: NewAppSpec): string {
  * 3か所への追記を求めており、vps READMEは`guchi-apps/vps`のIssueが扱うが、issue-deck自身の
  * `docs/supported-repositories.md`と共有知識の`standards/tech-stack.md`はどのサブIssueにも
  * 属さない。
+ *
+ * **暫定で始めた体裁は「後で決めること」として残す**（#2254）。完了条件には入れない——
+ * 暫定のアイコンでも公開はできるので、これを条件にすると立ち上げが閉じられなくなる。
  */
 export function buildParentIssueBody(
   spec: NewAppSpec,
@@ -294,6 +349,25 @@ export function buildParentIssueBody(
     localPortBase === null
       ? `\`${LOCAL_PORT_BAND_CONF_PATH}\` への追記`
       : `\`${formatLocalPortBandLine(repositoryFullName(spec), localPortBase).replace(/\s+/g, " ")}\` の追記`;
+  // **暫定で始めたものだけを書く**（#2254）。`aide-bot`ではテーマカラー`#0f766e`が誰にも
+  // 決められないまま入り、暫定だったことがどこにも残らなかった。
+  const pending: string[] = [];
+  if (spec.pwa && spec.iconPlan === "provisional") {
+    pending.push(
+      `- [ ] アイコンとテーマカラー（暫定で \`${spec.themeColor}\` の1色で始めています）を決めて差し替える`,
+    );
+  }
+  const pendingSection =
+    pending.length === 0
+      ? ""
+      : `## 後で決めること
+
+暫定のまま始めたものです。**立ち上げの完了条件には含めません**が、放っておくと誰も決めないまま
+本番に残ります。
+
+${pending.join("\n")}
+
+`;
   return `## 立ち上げるアプリ
 
 ${specTable(spec)}
@@ -305,8 +379,9 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
 2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
-3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
-4. \`${repo}\` の初期化と、developへのマージ
+3. サブPCで1Passwordへ値を投入する（初回デプロイまでに済んでいればよく、初期化Issueは待ちません）
+4. \`${repo}\` の初期化と、developへのマージ（**盤面から無人実行で始められます**。
+   リポジトリの作成時に \`claude-issue-dispatch.yml\` までコミット済みのため、cloneは要りません）
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
 6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
 7. 初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）
@@ -331,32 +406,193 @@ issue-deckの画面のホスト一覧で「更新して再起動」を押すま�
 無くても成功します（\`aide-bot\` では公開できていないことに気づくのが \`${NEW_APP_VPS_REPOSITORY}#128\` の
 調査まで遅れました）。上の \`curl\` だけが、DNS・Apache・TLS・アプリのすべてを通した確認になります。
 
-## 参考
+${pendingSection}## 参考
 
 - 新規アプリ作成チェックリスト: \`guchi-apps/docs\` の \`guides/new-app-checklist.md\`
 - マルチエージェント運用の導入手順: issue-deckの \`docs/cross-repo-setup-guide.md\`
 `;
 }
 
+/**
+ * 初期化Issueの「やること」に入る、体裁と運用の項目（#2254）。
+ *
+ * **決めた結果「やらない」ことは項目にしない。** 決めた事実は決めごとの表に残るので、
+ * ここに「PWA対応はしない」のような空振りのチェックを並べると、消し込む相手が無い項目が増える。
+ */
+type AppearanceStepsOptions = {
+  /**
+   * 雛形（#2247）がPWA・changelogの受け皿（`src/app/manifest.ts`・`public/icon.svg`・
+   * `src/lib/changelog.ts`）をすでにコミット済みなら`true`。**置く指示は出さない**——
+   * 値を決めて差し替える指示（`buildInitIssueBody`の`pwaTasks`）に譲る。
+   */
+  pwaAndChangelogScaffolded?: boolean;
+};
+
+function appearanceSteps(
+  spec: NewAppSpec,
+  refs: NewAppIssueRefs,
+  options: AppearanceStepsOptions = {},
+): string {
+  const profile = newAppKindProfile(spec.kind);
+  const steps: string[] = [
+    `- [ ] 表示名を \`${appTitleFor(spec)}\` にする（\`title\` / \`applicationName\` / \`appleWebApp.title\`）`,
+  ];
+
+  if (spec.pwa && !options.pwaAndChangelogScaffolded) {
+    steps.push(
+      `- [ ] PWA対応の一式を置く（\`manifest\`・アイコン・テーマカラー \`${spec.themeColor}\`）。${
+        offlineEnabled(spec)
+          ? "**オフライン対応も行う**（Service Workerでのキャッシュ）"
+          : "**オフライン対応（Service Worker）は入れない**"
+      }`,
+    );
+    steps.push(
+      spec.iconPlan === "provisional"
+        ? `- [ ] アイコンは暫定（テーマカラー1色）で置いて始める。差し替えは ${refs.parent} の「後で決めること」で追う`
+        : "- [ ] 用意されたアイコンを置く（`icon-192.png`・`icon-512.png`・`apple-icon.png`・`favicon.ico`）",
+    );
+  }
+
+  if (spec.changelog && !options.pwaAndChangelogScaffolded) {
+    steps.push(
+      spec.kind === "fastapi"
+        ? "- [ ] 更新履歴（changelog）を持たせる（`version.json` + `frontend/changelog.js` + `scripts/bump_version.py`。callerの`bump-command`から呼ぶ）"
+        : `- [ ] 更新履歴（changelog）を持たせる。\`"version"\` lifecycleスクリプトで \`RELEASE_CHANGELOG\`・\`RELEASE_USAGE\` を受け取る（受け取り方はissue-deckの \`docs/cross-repo-setup-guide.md\`）。**\`preversion\` は作らず、スクリプトはNode標準モジュールだけで書く**——共有ワークフローはbumpのために依存をインストールしない`,
+    );
+  }
+
+  if (screenshotBypassEnabled(spec)) {
+    // `runtime-setup: minimal`ではPlaywrightが入らないため、無人実行では撮れない。
+    // バイパス自体はローカルの画面確認に効くので、用途を断って書く
+    const unattended = supportsUnattendedScreenshot(spec.kind)
+      ? `**これが無いと \`24.screenshot-required\` が成立しない**`
+      : `\`runtime-setup: ${profile.runtimeSetup}\` ではPlaywrightが入らないため、**\`24.screenshot-required\` は無人実行では成立しない**。ローカル実行での画面確認用として作り、その旨を \`CLAUDE.md\` に書く`;
+    steps.push(
+      `- [ ] CI撮影の認証バイパスを用意する（開発用ログインのエンドポイントと、ダミーデータを入れる \`${profile.packageManager === "pnpm" ? "pnpm" : "npm run"} db:seed:dev\` 相当）。${unattended}（参照実装はissue-deckの \`/api/dev/login\`）`,
+    );
+  }
+
+  return steps.join("\n");
+}
+
 export function buildInitIssueTitle(spec: NewAppSpec): string {
   return `${spec.displayName}のプロジェクトを初期化する`;
 }
 
+/** 初期化Issueの本文に添える、雛形として置かれたファイルの状況（#2247）。 */
+export type ScaffoldOutcome = {
+  /** 実際にコミットしたパス（`.github/workflows/ci.yml`など）。空なら置けなかった */
+  paths: string[];
+  /** callerが参照している共有ワークフローのタグ。決められなかったら`null` */
+  workflowTag: string | null;
+};
+
 /**
  * 新しいリポジトリに立てる初期化Issue。
  *
- * **`## 前提条件`にサブPCの手作業Issueを書く。** このIssueは無人実行では動かせない
- * （`claude-issue-dispatch.yml`がまだ無く、盤面にも載らない）ので、サブPCのローカル
- * セッションで実装する。そのためには`local-repos.conf`への記載が要る。
+ * **雛形がコミットされていれば、このIssueは無人実行で回せる**（#2247）。以前は
+ * `claude-issue-dispatch.yml`を作るのがこのIssue自身だったため盤面に載らず、実行経路を
+ * サブPCのローカルセッションに固定し、cloneの手作業Issueを`## 前提条件`に置いていた。
+ *
+ * **雛形を置けなかった場合は、その旨と従来の手順を書く。** 置けたことにして書くと、
+ * 無人実行が始まらないまま`Ready`で止まっていることに誰も気づけない。
  */
-export function buildInitIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
+export function buildInitIssueBody(
+  spec: NewAppSpec,
+  refs: NewAppIssueRefs,
+  scaffold: ScaffoldOutcome | null = null,
+): string {
   const profile = newAppKindProfile(spec.kind);
   const repo = repositoryFullName(spec);
-  const dbScripts = profile.usesDatabase
-    ? `\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
-    : "";
-  const multiAgent = spec.multiAgent
+  const scaffolded = scaffold !== null && scaffold.paths.length > 0;
+  const has = (path: string) => scaffolded && scaffold.paths.includes(path);
+  // **無人実行で回せるかどうかは、雛形が置けたかではなくcallerが置けたかで決まる。**
+  // 参照タグを読めなかった回はcallerだけが欠け、他のファイルは置かれている
+  const dispatchReady = has(".github/workflows/claude-issue-dispatch.yml");
+
+  const prerequisites = dispatchReady
+    ? `- 先に完了している必要があるIssue・PR: なし
+
+**このIssueはissue-deckの盤面から無人実行で実装できます。** リポジトリの作成時に
+\`.github/workflows/claude-issue-dispatch.yml\` までコミット済みで（下記「すでに置かれているもの」）、
+盤面へ載る条件を満たしています。サブPCのローカルセッションで実装しても構いません。`
+    : `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
+
+**${
+        !spec.multiAgent
+          ? "マルチエージェント運用に対応させない選択のため"
+          : scaffolded
+            ? "無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため"
+            : "雛形のコミットに失敗したため"
+      }、このIssueはサブPCのローカルセッションで実装します。**
+\`claude-issue-dispatch.yml\` が無いあいだは無人実行では動かず、issue-deckの盤面にも載りません。
+ローカルセッションを起こせる条件は \`~/.config/issue-deck/local-repos.conf\` への記載で、
+それを行うのが上の手作業Issueです。`;
+
+  const alreadyThere = scaffolded
     ? `
+## すでに置かれているもの
+
+リポジトリの作成時に、issue-deckが次のファイルをコミットしています（#2247）。
+**同じものを作り直さないでください。** 内容が現行の標準からずれていた場合は、
+このリポジトリで直したうえでissue-deckの \`src/lib/new-app/scaffold.ts\` にも反映します。
+
+${scaffold.paths.map((path) => `- \`${path}\``).join("\n")}
+
+${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffold.workflowTag}\`（\`uses:\` と \`prompts-ref\` は同じ値）。\n` : ""}**アプリの雛形（\`create-next-app\` など）は空のディレクトリを前提にするものが多く、
+このリポジトリの上では実行できません。** 一時ディレクトリで作ってから、必要なファイルだけを
+取り込んでください。
+`
+    : "";
+
+  const dbTasks = profile.usesDatabase
+    ? `\n- [ ] \`prisma/schema.prisma\` と初期マイグレーションを作る${has("prisma.config.ts") ? "（\`prisma.config.ts\` は雛形にあり、\`loadEnv\` の \`quiet: true\` を落とさないこと）" : ""}\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
+    : "";
+
+  const ciTasks = has(".github/workflows/ci.yml")
+    ? `\n- [ ] \`.github/workflows/ci.yml\` が呼ぶ \`lint\`・\`typecheck\`・\`build:ci\` のnpm scriptsを用意する`
+    : `\n- [ ] \`.github/workflows/ci.yml\` を作る（必須）
+- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）`;
+
+  const secretTasks = has(".github/secrets-manifest.tsv")
+    ? ""
+    : `\n- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
+- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)} \\
+    --ref <このIssueのブランチ>
+  \`\`\`
+`;
+
+  const pwaAndChangelogScaffolded =
+    (spec.kind === "next" || spec.kind === "next-db") && has("src/app/manifest.ts");
+
+  const pwaTasks = pwaAndChangelogScaffolded
+    ? `
+- [ ] \`src/app/layout.tsx\` に \`metadata\`（\`title\`・\`applicationName\`・\`appleWebApp\`・\`icons\`）と \`viewport.themeColor\` を書く
+
+  \`\`\`ts
+  export const metadata: Metadata = {
+    title: "${spec.displayName}",
+    description: "${(spec.summary.trim() || spec.displayName).replace(/"/g, '\\"')}",
+    applicationName: "${spec.displayName}",
+    appleWebApp: { capable: true, title: "${spec.displayName}", statusBarStyle: "default" },
+    icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }] },
+  };
+  export const viewport: Viewport = { themeColor: "#0f766e", viewportFit: "cover" };
+  \`\`\`
+
+- [ ] アイコン（\`public/icon-192.png\`・\`icon-512.png\`・\`apple-icon.png\`）とテーマカラーを決めて差し替える。
+      雛形の \`public/icon.svg\` と \`#0f766e\` は暫定値（${NEW_APP_PARENT_REPOSITORY}#2254）
+- [ ] \`package.json\` の scripts へ \`"version": "node scripts/version-changelog.mjs"\` を足す（更新履歴の受け皿は \`src/lib/changelog.ts\`）`
+    : "";
+
+  const appearance = `\n${appearanceSteps(spec, refs, { pwaAndChangelogScaffolded })}`;
+
+  const multiAgent =
+    spec.multiAgent && !dispatchReady
+      ? `
 ## マルチエージェント運用の導入
 
 手順の正はissue-deckの \`docs/cross-repo-setup-guide.md\` です。ここに複製しません。
@@ -367,7 +603,16 @@ export function buildInitIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): str
 - [ ] \`.gitignore\` に \`.shared-context/\` を足す
 - [ ] \`develop\` にもBranch protection（CI必須）を設定する
 `
-    : "";
+      : spec.multiAgent
+        ? `
+## マルチエージェント運用
+
+callerは雛形として置かれています。残りは保護設定と、まだ配られていないcallerだけです。
+
+- [ ] \`develop\` にBranch protection（CI必須）を設定する
+- [ ] 自動修復系のcaller（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・\`claude-review-develop.yml\`・\`deploy-retry.yml\`）を、issue-deckの画面（設定＞フリート運用）から配る
+`
+        : "";
 
   return `${origin(refs.parent)}
 
@@ -378,30 +623,14 @@ ${specTable(spec)}
 ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 ## 前提条件
 
-- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCへのcloneの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
-
-**このIssueはサブPCのローカルセッションで実装します。** 新しいリポジトリはまだ
-\`claude-issue-dispatch.yml\` を持たないため無人実行では動かず、issue-deckの盤面にも載りません。
-ローカルセッションを起こせる条件は \`~/.config/issue-deck/local-repos.conf\` への記載で、
-それを行うのが上の手作業Issueです。
-
+${prerequisites}
+${alreadyThere}
 ## やること
 
-- [ ] 雛形を作る（${profile.label}）
+- [ ] アプリの雛形を作る（${profile.label}）
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる
-- [ ] \`.env.example\`（変数名のみ）と \`.env.tpl\`（\`op://\` 参照）を作る
-- [ ] \`.github/workflows/ci.yml\` を作る（必須）
-- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）
-- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
-- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
-
-  \`\`\`bash
-  ${provisionCommand(spec, null)} \\
-    --ref <このIssueのブランチ>
-  \`\`\`
-
-- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
-- [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
+- [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
+- [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}
 ${multiAgent}
 ## 参考
 
@@ -458,7 +687,7 @@ export function buildDeployCheckIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 このIssueは、初回デプロイの前に周辺インフラが**実際に疎通する**ことを確かめ、デプロイの後に
 **${url} が開けること**まで見届けるためのものです。
 
-${specTable(spec)}
+${specTable(spec, { appearance: false })}
 
 ## 前提条件
 
@@ -568,7 +797,7 @@ ${proxy}
 
 ## 立ち上げるアプリ
 
-${specTable(spec)}
+${specTable(spec, { appearance: false })}
 
 ## やること（1段目・すぐ着手できる）
 
@@ -593,6 +822,17 @@ TLS証明書を取ると、certbotが実機に \`/etc/apache2/sites-available/${
 certbotは \`:80\` のVirtualHostをそのまま複製するため \`"http"\` が残ることがあり、アプリが自分を \`http://\` だと
 誤認して**本番でだけログインが失敗します**（OAuthのリダイレクトURIが登録済みの \`https://\` と一致しなくなるため）。
 \`"http"\` のまま貼られていたら、実機を直し直してから控え直してもらってください。
+
+## このIssueが持たない作業
+
+**同じアプリの作業でも、次はこのIssueの担当ではありません。同じ対象のIssueを新しく立てず、
+下のIssueへ書いてください**（\`aide-bot\` の立ち上げでは同じ作業のIssueが4件並びました。#2250）。
+
+| 作業 | 担当するIssue |
+|---|---|
+| DNSのAレコードの登録 | ${refs.parent} のブラウザの手作業Issue |
+| 置き場・DB・PM2への登録・**certbotの実行** | ${refs.parent} のVPSの手作業Issue |
+| \`${host}-le-ssl.conf\` の**取り込み** | このIssue（上の2段目） |
 
 ## 注意点
 
@@ -668,7 +908,7 @@ function portBandPrerequisite(refs: NewAppIssueRefs): string {
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`;
+  return `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`;
 }
 
 /**
@@ -685,9 +925,9 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになり、1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入る`,
-    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない。シークレットも未登録のままで、初回の本番デプロイが値の不足で失敗する`,
-    urgency: "初期化Issueに着手する前",
+    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCで \`${spec.repositoryName}\` のローカルセッションも起こせるようになる`,
+    blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（**無人実行は雛形のcallerで動くため、こちらは止まりません**）`,
+    urgency: "初回の本番デプロイまで（初期化Issueは待ちません）",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",
@@ -707,22 +947,40 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   printf '%s\\n' '${repo} ${path}' >> "$HOME/.config/issue-deck/local-repos.conf"
   \`\`\`
 
-- [ ] （サブPC）対応表に載ったことを確かめる
-
-  \`\`\`bash
-  grep -F '${repo}' "$HOME/.config/issue-deck/local-repos.conf"
-  \`\`\`
-
 - [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
 
   \`\`\`bash
   ${provisionCommand(spec, null)}
   \`\`\``,
-    verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
-pollerは申告のたびに対応表を読み直すので、再起動は要りません。
-**この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
-\`.github/secrets-manifest.tsv\` が要るので、初期化Issueでこのマニフェストを作ってマージした後に揃います。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
+
+- リポジトリがcloneできている
+
+  \`\`\`bash
+  test -d ${path}/.git && echo cloned
+  \`\`\`
+
+  \`cloned\` が出れば完了です。
+
+- ローカルセッションの対応表に載っている
+
+  \`\`\`bash
+  grep -F '${repo} ${path}' "$HOME/.config/issue-deck/local-repos.conf"
+  \`\`\`
+
+  追記した1行がそのまま出れば完了です。pollerは申告のたびに読み直すので、再起動は要りません。
+
+- 1Passwordのアイテムに値が入っている
+
+  \`\`\`bash
+  ${provisionCommand(spec, null, { check: true })}
+  \`\`\`
+
+  「すべて値が入っています」が出れば完了です。**未登録が1つでもあれば終了コード1で終わります**（\`aide-bot\` では投入が未実施のままIssueがcloseされ、初回デプロイが \`DB_NAME is required\` で落ちました）。
+
+**GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
+リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
+    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
@@ -753,6 +1011,18 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
 `
     : "";
 
+  // 確認は手順と1対1にする（#2256）。手順を出し分けたのに確認が固定だと、
+  // 「確かめる先が無いコマンド」が並んで必ず失敗する
+  const dbCheck = spec.databaseName
+    ? `
+- データベースがある
+
+  \`\`\`bash
+  sudo mysql -N -e "SHOW DATABASES LIKE '${spec.databaseName}'" | grep -x ${spec.databaseName}
+  \`\`\`
+`
+    : "";
+
   const pm2Step =
     spec.port === null
       ? ""
@@ -761,6 +1031,17 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
 
   \`\`\`bash
   cd ${appDir} && pm2 start deploy/ecosystem.config.js && pm2 save
+  \`\`\`
+`;
+
+  const pm2Check =
+    spec.port === null
+      ? ""
+      : `
+- PM2に登録され、\`online\` で動いている
+
+  \`\`\`bash
+  pm2 describe ${spec.repositoryName}
   \`\`\`
 `;
 
@@ -798,11 +1079,34 @@ ${dbStep}${pm2Step}
   \`\`\`bash
   sudo cat /etc/apache2/sites-available/${host}-le-ssl.conf
   \`\`\``,
-    verification: `\`curl -I ${publicUrlFor(spec)}\` が 200 か 3xx を返せば公開まで届いています。
-\`grep X-Forwarded-Proto /etc/apache2/sites-available/${host}-le-ssl.conf\` が何も返さないか
-\`"https"\` を返せば、\`:443\` 側の直しは済んでいます（\`"http"\` が残っていると本番でだけログインが失敗します）。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。VPSで上から順に流し、すべてが成功すれば完了です。
+
+- アプリの置き場がある
+
+  \`\`\`bash
+  test -d ${appDir} && echo ok
+  \`\`\`
+${dbCheck}${pm2Check}
+- 公開まで届いている
+
+  \`\`\`bash
+  curl -fsS -o /dev/null -w '%{http_code}\\n' ${publicUrlFor(spec)}
+  \`\`\`
+
+  200 か 3xx が出れば完了です。400以上は終了コードが0になりません。
+
+- \`:443\` 側に \`X-Forwarded-Proto "http"\` が残っていない
+
+  \`\`\`bash
+  conf=/etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo test -f "$conf" && ! sudo grep -q 'X-Forwarded-Proto "http"' "$conf" && echo ok
+  \`\`\`
+
+  \`ok\` が出れば完了です（\`"http"\` が残っていると本番でだけログインが失敗します）。
+
 控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むまでは、毎日のドリフト検知に
-「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。`,
+「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。ここだけは
+コマンドで確かめられないので、${vpsRef} にコメントが付いていることを目で確かめてください。`,
     why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はサブPCだけです）。",
     related: `- 起点Issue: ${refs.parent}
 - VirtualHost: ${vpsRef}`,
@@ -835,13 +1139,29 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     spec.urlMode === "subdomain"
       ? `- [ ] （ブラウザ）VPS管理画面のDNS設定で \`${spec.subdomain}\` のAレコードを追加し、VPSのIPへ向ける
 
+`
+      : "";
+
+  // 確認は手順と1対1にする（#2256）。\`dig\` は操作ではなく確認なので、手順ではなく
+  // \`## 完了の確認方法\` に置く（そこに置いたものだけが代行実行・定期巡回の対象になる）
+  const dnsCheck =
+    spec.urlMode === "subdomain"
+      ? `
+- Aレコードが引ける
+
   \`\`\`bash
   dig +short ${host} A
   \`\`\`
 
+  VPSのIPアドレスが1行返れば完了です。何も返らなければ、まだDNSに伝わっていません。
 `
       : "";
 
+  // 登録する名前と確認する名前を1つの配列から出す（#2256）。別々に書くと、片方を足したときに
+  // もう片方が古いままになり、「登録したのに確認で落ちる」が起きる
+  const secretNames = spec.multiAgent
+    ? ["OP_SERVICE_ACCOUNT_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "WORKFLOW_PAT"]
+    : ["OP_SERVICE_ACCOUNT_TOKEN"];
   const secretsStep = spec.multiAgent
     ? `- [ ] （ブラウザ）\`${repo}\` のActions secretsへ \`OP_SERVICE_ACCOUNT_TOKEN\`・\`CLAUDE_CODE_OAUTH_TOKEN\`・\`WORKFLOW_PAT\` を登録する
 
@@ -878,8 +1198,18 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     prerequisiteIssues: "なし",
     otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
     steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
-    verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
-アプリ自身のシークレット（配置先・DB名）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
+${dnsCheck}
+- ワークフローから${secretNames.length}件のsecretを読める
+
+  \`\`\`bash
+  { gh secret list --repo ${repo} --json name --jq '.[].name'; gh api repos/${repo}/actions/organization-secrets --jq '.secrets[].name'; } | sort -u | grep -cE '^(${[...secretNames].sort().join("|")})$'
+  \`\`\`
+
+  **\`${secretNames.length}\` が出れば完了です。** リポジトリのsecretだけでなく、organizationに \`visibility=all\` で
+  登録済みのものも数えます（\`aide-bot\` ではorganizationに揃っていたため、この登録自体が不要な手順でした。
+  実行して既に \`${secretNames.length}\` が出るなら、登録は要りません）。
+
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
     why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
@@ -957,4 +1287,9 @@ export type NewAppCreatedRef = {
   /** `guchi-apps/issue-deck#123` / `guchi-apps/kakei-report` */
   reference: string;
   url: string;
+  /**
+   * 新しく作ったのではなく、**既にあったIssueへコメントした**（#2250）。
+   * 画面はこれを見て「既存」の印を出す。
+   */
+  existing?: boolean;
 };

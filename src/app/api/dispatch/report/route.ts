@@ -5,7 +5,10 @@ import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
-import { advanceManualStepVerificationCheck } from "@/lib/manual-step-verification-patrol";
+import {
+  advanceManualStepVerificationCheck,
+  recordManualStepVerificationPass,
+} from "@/lib/manual-step-verification-patrol";
 
 /** メッセージは画面にそのまま出る。長文が流れ込まないよう頭で切る */
 const MAX_MESSAGE_LENGTH = 2000;
@@ -94,6 +97,13 @@ export async function POST(request: NextRequest) {
       // 同時には走らない**（巡回は自動実行が動いているIssueを選ばない）ので、どちらか一方だけが
       // 動く。片方ずつ呼び分ける条件をここに書くと、判定が2か所に増える
       await advanceManualStepVerificationCheck({
+        repositoryFullName: result.job.repositoryFullName,
+        issueNumber: result.job.issueNumber,
+      });
+      // 人が流した確認コマンドの結果も残す（#2256）。**巡回の外で全部通ったときに、
+      // 画面へ何も残らないのを塞ぐ**——実行の口ごとに書き分けず、報告が届くこの1か所で数え直す
+      // （手順ごとに承認して流す使い方でも、自動実行でも、通る経路はここに集まる）
+      await recordManualStepVerificationPass({
         repositoryFullName: result.job.repositoryFullName,
         issueNumber: result.job.issueNumber,
       });

@@ -1,6 +1,16 @@
 "use client";
 
-import { Ban, BadgeCheck, CheckCircle2, GitBranch, ListChecks, Loader2, Wrench } from "lucide-react";
+import { useState } from "react";
+import {
+  Ban,
+  BadgeCheck,
+  CheckCircle2,
+  GitBranch,
+  ListChecks,
+  Loader2,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
 
 import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
@@ -8,6 +18,10 @@ import { Button } from "@/components/ui/button";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import type { IssueDependent } from "@/lib/issue-dependents";
 import type { InfraConfigTarget } from "@/lib/infra-config-repos";
+import {
+  resolveManualStepCloseWarning,
+  type ManualStepCloseWarning,
+} from "@/lib/manual-step-close-warning";
 import type {
   ManualStepPrerequisite,
   ManualStepPrerequisiteSummary,
@@ -45,6 +59,7 @@ export function ManualStepPanel({
   prerequisiteSummary,
   dependents,
   verifiedAt,
+  body,
   configTargets,
   onCreateConfigIssue,
   repositoryFullName,
@@ -79,6 +94,11 @@ export function ManualStepPanel({
    */
   verifiedAt?: string | null;
   /**
+   * Issueの本文（#2256）。`## 完了の確認方法`のコマンドを読み、通った記録が無いまま
+   * クローズしようとしたときに1回聞き返すために使う。渡さない場合は聞き返さない
+   */
+  body?: string | null;
+  /**
    * 実機のファイルを書き換える手順のうち、`guchi-apps/vps`・`guchi-apps/subpc`で管理されて
    * いるもの（#2021）。`lib/infra-config-repos.ts`の検出結果をそのまま渡す。
    */
@@ -88,6 +108,15 @@ export function ManualStepPanel({
   repositoryFullName?: string;
   className?: string;
 }) {
+  // 確認が通った記録が無いまま閉じようとしていないか（#2256）。**押す前ではなく押した後に出す**
+  // ——実行の前から警告が出ていると、実行し終えた人にとっては消えない飾りになる
+  const closeWarning = resolveManualStepCloseWarning({
+    body: body ?? null,
+    verifiedAt: verifiedAt ?? null,
+  });
+  const [askedAboutClose, setAskedAboutClose] = useState(false);
+  const asking = closeWarning !== null && askedAboutClose;
+
   return (
     <section
       className={cn(
@@ -128,6 +157,7 @@ export function ManualStepPanel({
         />
       )}
       {verifiedAt && <ManualStepVerifiedNotice verifiedAt={verifiedAt} />}
+      {asking && <ManualStepCloseWarningNotice warning={closeWarning} />}
       <div className="flex flex-wrap gap-2">
         {/* 手順を1つずつ案内する入口（#1826）。**実行の前に押すもの**なので、
             終わった後に押すクローズの2つより前に置く */}
@@ -143,10 +173,24 @@ export function ManualStepPanel({
           variant={onStartGuide && !verifiedAt ? "outline" : "default"}
           size="sm"
           disabled={isSubmitting}
-          onClick={onComplete}
+          // **1回だけ聞き返して、2回目はそのまま閉じる**（#2256）。確かめようのない手作業は
+          // 実際にあるので、押せなくはしない
+          onClick={() => {
+            if (closeWarning !== null && !askedAboutClose) {
+              setAskedAboutClose(true);
+              return;
+            }
+            onComplete();
+          }}
         >
-          {isSubmitting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-          手作業を完了してクローズ
+          {isSubmitting ? (
+            <Loader2 className="animate-spin" />
+          ) : asking ? (
+            <TriangleAlert />
+          ) : (
+            <CheckCircle2 />
+          )}
+          {asking ? "確認せずクローズ" : "手作業を完了してクローズ"}
         </Button>
         <Button variant="outline" size="sm" disabled={isSubmitting} onClick={onSkip}>
           <Ban />
@@ -181,6 +225,46 @@ function ManualStepVerifiedNotice({ verifiedAt }: { verifiedAt: string }) {
           "出力の中身までは照合していないため、確かめてからクローズしてください。"}
       </span>
     </p>
+  );
+}
+
+/**
+ * 確認コマンドが通った記録が無いまま閉じようとしたときに出す（#2256）。
+ *
+ * **チェックが付いていることは、実施された証拠にならない。** `aide-bot`の立ち上げでは
+ * 1Passwordへの登録がチェック済みのままcloseされ、初回デプロイが`DB_NAME is required`で
+ * 落ちた。ここでコマンドをそのまま出すのは、「順番に進める」で流し直すか、手元へ貼って
+ * 確かめるかを**その場で選べるようにする**ため。
+ *
+ * **止めない。** もう一度押せば閉じられる（ボタンの文言が「確認せずクローズ」に変わる）。
+ */
+function ManualStepCloseWarningNotice({ warning }: { warning: ManualStepCloseWarning }) {
+  return (
+    <section
+      className="rounded-md border border-violet-500/40 bg-background p-2.5"
+      aria-labelledby="manual-step-close-warning-title"
+    >
+      <p
+        id="manual-step-close-warning-title"
+        className="flex items-center gap-1.5 text-xs font-medium"
+      >
+        <TriangleAlert className="size-3.5 shrink-0" />
+        確認コマンドが通った記録がありません
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {"「順番に進める」から流すか、手元で実行してから閉じてください。" +
+          "確かめようがない手作業なら、もう一度押せばそのまま閉じられます。"}
+      </p>
+      <ul className="mt-2 space-y-1">
+        {warning.commands.map((command) => (
+          <li key={command}>
+            <code className="block overflow-x-auto whitespace-pre rounded bg-muted px-1.5 py-1 text-xs">
+              {command}
+            </code>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

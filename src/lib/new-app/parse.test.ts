@@ -15,6 +15,13 @@ const VALID = {
   databaseName: "app_kakei_report",
   auth: "supabase-google",
   multiAgent: true,
+  appTitle: "",
+  pwa: true,
+  offline: false,
+  iconPlan: "provisional",
+  themeColor: "#0f172a",
+  changelog: true,
+  screenshotBypass: true,
 };
 
 describe("parseNewAppSpec", () => {
@@ -52,5 +59,26 @@ describe("parseNewAppSpec", () => {
     expect(parseNewAppSpec({ ...VALID, displayName: "  家計レポート  " })?.displayName).toBe(
       "家計レポート",
     );
+  });
+});
+
+describe("parseNewAppSpec の体裁と運用（#2254）", () => {
+  it("知らないアイコンの決め方は不正な要求にする", () => {
+    expect(parseNewAppSpec({ ...VALID, iconPlan: "later" })).toBeNull();
+  });
+
+  it("テーマカラーが `#rrggbb` でなければ不正な要求にする", () => {
+    expect(parseNewAppSpec({ ...VALID, themeColor: "#0f1" })).toBeNull();
+    expect(parseNewAppSpec({ ...VALID, themeColor: "teal" })).toBeNull();
+  });
+
+  it("体裁の項目が欠けていれば既定へ倒さず不正な要求にする", () => {
+    const { pwa: _pwa, ...withoutPwa } = VALID;
+    expect(parseNewAppSpec(withoutPwa)).toBeNull();
+  });
+
+  it("表示名は空文字を許す（アプリ名を使う）", () => {
+    expect(parseNewAppSpec({ ...VALID, appTitle: "" })?.appTitle).toBe("");
+    expect(parseNewAppSpec({ ...VALID, appTitle: "  秘書  " })?.appTitle).toBe("秘書");
   });
 });

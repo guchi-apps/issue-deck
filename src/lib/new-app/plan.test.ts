@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import { buildManualStepRunPlan } from "@/lib/manual-step-autorun";
+import { extractVerificationCommands } from "@/lib/manual-step-command";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 import {
   buildBrowserManualIssueBody,
@@ -142,6 +143,12 @@ describe("buildParentIssueBody", () => {
     expect(body).toContain("standards/tech-stack.md");
   });
 
+  it("初期化は盤面から無人実行で始められると書く（#2247）", () => {
+    const body = buildParentIssueBody(spec());
+    expect(body).toContain("盤面から無人実行で始められます");
+    expect(body).toContain("初期化Issueは待ちません");
+  });
+
   it("ポート帯はマージだけでは効かないことを書く（#2225）", () => {
     const withBase = buildParentIssueBody(spec(), { localPortBase: 25000 });
     expect(withBase).toContain("scripts/local-repo-ports.conf");
@@ -151,16 +158,65 @@ describe("buildParentIssueBody", () => {
 });
 
 describe("buildInitIssueBody", () => {
-  it("サブPCのローカルセッションで実装する前提と、その依存を書く", () => {
+  const SCAFFOLD = {
+    paths: [
+      ".env.example",
+      ".github/scripts/signaly-notify.sh",
+      ".github/secrets-manifest.tsv",
+      ".github/workflows/ci.yml",
+      ".github/workflows/claude-issue-dispatch.yml",
+      ".github/workflows/deploy.yml",
+      "deploy/ecosystem.config.js",
+      "prisma.config.ts",
+      "src/app/manifest.ts",
+    ],
+    workflowTag: "workflows/v25",
+  };
+
+  it("雛形が置けていれば、盤面から無人実行で回せると書く（#2247）", () => {
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain("## 前提条件");
+    expect(body).toContain("先に完了している必要があるIssue・PR: なし");
+    expect(body).toContain("無人実行で実装できます");
+    expect(body).toContain("## すでに置かれているもの");
+    expect(body).toContain("`.github/workflows/claude-issue-dispatch.yml`");
+    expect(body).toContain("workflows/v25");
+    // 置いてあるものを作り直させない
+    expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
+    expect(body).not.toContain("`deploy/ecosystem.config.js` を作る");
+    expect(body).not.toContain("`.github/secrets-manifest.tsv` を作る");
+  });
+
+  it("callerだけ置けなかったときは、その理由を書いてローカルセッション前提に切り替える", () => {
+    const body = buildInitIssueBody(spec(), REFS, {
+      paths: [".github/workflows/ci.yml", "CLAUDE.md"],
+      workflowTag: null,
+    });
+    expect(body).toContain("無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため");
+    expect(body).toContain("## すでに置かれているもの");
+    expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
+  });
+
+  it("マルチエージェント運用に対応させないときは、そのことを理由として書く", () => {
+    const body = buildInitIssueBody(spec({ multiAgent: false }), REFS, {
+      paths: [".github/workflows/ci.yml"],
+      workflowTag: null,
+    });
+    expect(body).toContain("マルチエージェント運用に対応させない選択のため");
+  });
+
+  it("雛形を置けなかったときは、従来どおりサブPCのローカルセッション前提で書く", () => {
     const body = buildInitIssueBody(spec(), REFS);
     expect(body).toContain("## 前提条件");
     expect(body).toContain(REFS.subpc!);
     expect(body).toContain(REFS.portBandPullRequest!);
     expect(body).toContain("local-repos.conf");
     expect(body).toContain("盤面にも載りません");
+    expect(body).toContain("`.github/workflows/ci.yml` を作る");
+    expect(body).not.toContain("## すでに置かれているもの");
   });
 
-  it("種別に応じた共有ワークフローの入力を書く", () => {
+  it("種別に応じた共有ワークフローの入力を書く（雛形を置けなかった場合）", () => {
     expect(buildInitIssueBody(spec(), REFS)).toContain("`runtime-setup: node-db`");
     expect(buildInitIssueBody(spec({ kind: "static" }), REFS)).toContain("`runtime-setup: minimal`");
   });
@@ -176,6 +232,13 @@ describe("buildInitIssueBody", () => {
     expect(buildInitIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
       "claude-issue-dispatch.yml を置く",
     );
+  });
+
+  it("Next.js系ではPWAと更新履歴の残りだけを人へ渡す（#2254の受け皿）", () => {
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain("viewport.themeColor");
+    expect(body).toContain("apple-icon.png");
+    expect(body).toContain("version-changelog.mjs");
   });
 });
 
@@ -297,6 +360,12 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
   });
 
+  it("無人実行の妨げにはならないこと、同期がこの時点で終わることを書く（#2247）", () => {
+    expect(body).toContain("無人実行は雛形のcallerで動くため");
+    expect(body).toContain("GitHubのsecretへの同期もこの時点で終わります");
+    expect(body).not.toContain("初期化Issueでこのマニフェストを作ってマージした後");
+  });
+
   it("機械的に定まる値を、そのまま貼れる1コマンドで投入する（#2249）", () => {
     expect(body).toContain("provision-app-secrets.sh");
     expect(body).toContain("--repo guchi-apps/kakei-report");
@@ -304,6 +373,28 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).toContain("--copy-allowed-emails");
     // フィールド名の羅列に戻さない（aide-botの立ち上げで未登録のまま本番デプロイが失敗した）
     expect(body).not.toContain("db-name = app_kakei_report");
+  });
+
+  // #2256。散文の確認では「登録されたか」を確かめられず、aide-botでは未実施のままcloseされた
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    expect(commands).toHaveLength(3);
+    expect(commands[0]).toContain("test -d /home/guchi/apps/kakei-report/.git");
+    expect(commands[1]).toContain("grep -F 'guchi-apps/kakei-report /home/guchi/apps/kakei-report'");
+    // 投入と同じ引数に`--check`を足しただけの形。ずれると確かめていないフィールドが生まれる
+    expect(commands[2]).toContain("--check");
+    expect(commands[2]).toContain("--db-name app_kakei_report");
+    expect(commands[2]).toContain("--copy-allowed-emails");
+  });
+
+  it("確認コマンドまで手作業アシスタントが代行実行できる（#2256）", () => {
+    const plan = buildManualStepRunPlan(body, undefined, {
+      host: READY_HOST,
+      isManualStepIssue: true,
+    });
+    const verifications = plan.entries.filter((entry) => entry.kind === "verification");
+    expect(verifications).toHaveLength(3);
+    expect(verifications.every((entry) => entry.rejection === null)).toBe(true);
   });
 
   it("DBも認証も無いアプリでは、そのオプションを渡さない", () => {
@@ -361,6 +452,28 @@ describe("buildVpsManualIssueBody", () => {
     expect(plan.entries.every((entry) => entry.rejection === "device_not_subpc")).toBe(true);
   });
 
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    // 置き場・DB・PM2・公開・X-Forwarded-Proto
+    expect(commands).toHaveLength(5);
+    expect(commands[0]).toContain("test -d /home/github-user/apps/kakei-report");
+    expect(commands[1]).toContain("SHOW DATABASES LIKE 'app_kakei_report'");
+    expect(commands[2]).toContain("pm2 describe kakei-report");
+    expect(commands[3]).toContain("curl -fsS");
+    expect(commands[4]).toContain('X-Forwarded-Proto "http"');
+  });
+
+  it("手順を出し分けた種別では、確認も同じだけ減る（#2256）", () => {
+    const staticBody = buildVpsManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null }),
+      REFS,
+    );
+    const commands = extractVerificationCommands(staticBody).map((entry) => entry.command);
+    expect(commands).toHaveLength(3);
+    expect(commands.some((command) => command.includes("SHOW DATABASES"))).toBe(false);
+    expect(commands.some((command) => command.includes("pm2 describe"))).toBe(false);
+  });
+
   it("DBもポートも無い種別では、その手順を出さない", () => {
     const staticBody = buildVpsManualIssueBody(
       spec({ kind: "static", port: null, databaseName: null }),
@@ -416,6 +529,33 @@ describe("buildBrowserManualIssueBody", () => {
     expect(pathBody).not.toContain("Aレコードを追加");
   });
 
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe("dig +short kakei-report.gucchii.com A");
+    // organizationのsecretも数える（repo secretだけ見ると、足りているのに落ちる）
+    expect(commands[1]).toContain("actions/organization-secrets");
+    expect(commands[1]).toContain(
+      "grep -cE '^(CLAUDE_CODE_OAUTH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|WORKFLOW_PAT)$'",
+    );
+    expect(body).toContain("**`3` が出れば完了です。**");
+  });
+
+  it("登録する名前が減ると、確認の期待値も減る（#2256）", () => {
+    const single = buildBrowserManualIssueBody(spec({ multiAgent: false }), REFS);
+    const commands = extractVerificationCommands(single).map((entry) => entry.command);
+    expect(commands[1]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
+    expect(single).toContain("**`1` が出れば完了です。**");
+  });
+
+  it("パス配置ではAレコードの確認を出さない（#2256）", () => {
+    const pathBody = buildBrowserManualIssueBody(
+      spec({ urlMode: "path", basePath: "kakei-report" }),
+      REFS,
+    );
+    expect(extractVerificationCommands(pathBody)).toHaveLength(1);
+  });
+
   it("実行するデバイスはブラウザ", () => {
     expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("ブラウザ");
   });
@@ -433,5 +573,83 @@ describe("buildBrowserManualIssueBody", () => {
 describe("repositoryFullName", () => {
   it("organizationを前に付ける", () => {
     expect(repositoryFullName({ repositoryName: "kakei-report" })).toBe("guchi-apps/kakei-report");
+  });
+});
+
+describe("体裁と運用の決めごと（#2254）", () => {
+  it("親Issueと初期化Issueの表に体裁の行が並ぶ", () => {
+    const body = buildParentIssueBody(spec());
+    expect(body).toContain("| 表示名 | 家計レポート（`title` / `applicationName` / `appleWebApp.title`） |");
+    expect(body).toContain("| PWA | 対応する（オフラインは対応しない） |");
+    expect(body).toContain("| 更新履歴 | 持つ |");
+    expect(body).toContain("| CI撮影の認証バイパス | 用意する |");
+    expect(buildInitIssueBody(spec(), REFS)).toContain("| アイコン・テーマカラー | 暫定で始める（`#0f172a`） |");
+  });
+
+  it("VirtualHostと疎通確認のIssueには体裁の行を出さない", () => {
+    expect(buildVpsIssueBody(spec(), REFS)).not.toContain("| PWA |");
+    expect(buildDeployCheckIssueBody(spec(), REFS)).not.toContain("| 更新履歴 |");
+  });
+
+  it("認証が無ければ撮影バイパスは「不要」になり、初期化Issueにも項目が出ない", () => {
+    const noAuth = spec({ auth: "none" });
+    expect(buildParentIssueBody(noAuth)).toContain("| CI撮影の認証バイパス | 不要（認証なし） |");
+    expect(buildInitIssueBody(noAuth, REFS)).not.toContain("CI撮影の認証バイパスを用意する");
+  });
+
+  it("初期化Issueの「やること」に体裁の項目が入る", () => {
+    const body = buildInitIssueBody(spec(), REFS);
+    expect(body).toContain("- [ ] 表示名を `家計レポート` にする");
+    expect(body).toContain("**オフライン対応（Service Worker）は入れない**");
+    expect(body).toContain("- [ ] アイコンは暫定（テーマカラー1色）で置いて始める");
+    expect(body).toContain("`RELEASE_CHANGELOG`");
+    expect(body).toContain("- [ ] CI撮影の認証バイパスを用意する");
+  });
+
+  it("やらないと決めたものは「やること」に並べない", () => {
+    const body = buildInitIssueBody(
+      spec({ pwa: false, changelog: false, screenshotBypass: false }),
+      REFS,
+    );
+    expect(body).not.toContain("PWA対応の一式を置く");
+    expect(body).not.toContain("更新履歴（changelog）を持たせる");
+    expect(body).not.toContain("CI撮影の認証バイパスを用意する");
+    // 決めた事実そのものは表に残る
+    expect(body).toContain("| PWA | 対応しない |");
+    expect(body).toContain("| 更新履歴 | 持たない（バージョンだけが上がる） |");
+  });
+
+  it("アイコンを暫定にしたときだけ、親Issueに「後で決めること」が出る", () => {
+    expect(buildParentIssueBody(spec())).toContain("## 後で決めること");
+    expect(buildParentIssueBody(spec())).toContain(
+      "- [ ] アイコンとテーマカラー（暫定で `#0f172a` の1色で始めています）を決めて差し替える",
+    );
+    expect(buildParentIssueBody(spec({ iconPlan: "prepared" }))).not.toContain("## 後で決めること");
+    expect(buildParentIssueBody(spec({ pwa: false }))).not.toContain("## 後で決めること");
+  });
+
+  it("暫定のアイコンは完了条件に混ぜない（暫定でも公開はできる）", () => {
+    const body = buildParentIssueBody(spec());
+    const conditions = body.slice(body.indexOf("## 完了条件"), body.indexOf("## 後で決めること"));
+    expect(conditions).not.toContain("アイコン");
+  });
+
+  it("`runtime-setup: minimal` では無人撮影が成立しないことを断って書く", () => {
+    const fastapi = spec({ kind: "fastapi", port: 8003, auth: "fastapi-google" });
+    expect(buildParentIssueBody(fastapi)).toContain(
+      "| CI撮影の認証バイパス | 用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用） |",
+    );
+    const init = buildInitIssueBody(fastapi, REFS);
+    expect(init).toContain("`24.screenshot-required` は無人実行では成立しない");
+    // Next.js（`node-db`）ではこれまでどおり成立する
+    expect(buildInitIssueBody(spec(), REFS)).toContain(
+      "**これが無いと `24.screenshot-required` が成立しない**",
+    );
+  });
+
+  it("Python系では npm の lifecycle ではなく bump_version.py を案内する", () => {
+    const body = buildInitIssueBody(spec({ kind: "fastapi", port: 8003 }), REFS);
+    expect(body).toContain("scripts/bump_version.py");
+    expect(body).not.toContain("`\"version\"` lifecycleスクリプト");
   });
 });

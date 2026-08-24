@@ -153,8 +153,12 @@ const OPEN_PULL_REQUESTS_PER_REPOSITORY = 30;
  * **タグ名の昇順だと `workflows/v9` が `workflows/v10` より後ろに来る**ため、
  * 100件で切れたときに新しいタグを取りこぼさないようタグの日付降順で取る
  * （どれが最新かの判定自体は `latestWorkflowTag` が版数で行う）。
+ *
+ * 立ち上げの雛形（#2247）も、置くcallerの `uses:` と `prompts-ref` にこの値を入れる。
+ * **読めなかったときは `null`**（呼び出し側は「タグが分からない」として扱う。誤ったタグを
+ * 埋めたcallerを置くと、そのリポジトリでは全イベントが失敗し続ける）。
  */
-async function fetchLatestTag(token: string): Promise<string | null> {
+export async function fetchLatestWorkflowTag(token: string): Promise<string | null> {
   const [owner, name] = SOURCE_REPOSITORY.split("/");
   const query = `query($owner: String!, $name: String!, $first: Int!) {
     repository(owner: $owner, name: $name) {
@@ -375,7 +379,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
 
   const firstToken = await tokenFor(repositories[0]!.installation.installationId);
   const [latest, sharedFileSources] = await Promise.all([
-    fetchLatestTag(firstToken),
+    fetchLatestWorkflowTag(firstToken),
     fetchSharedFileSources(firstToken),
   ]);
 
