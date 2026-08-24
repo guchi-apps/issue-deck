@@ -88,6 +88,61 @@ describe("ManualStepPanel", () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
+  // #2256: aide-botの立ち上げでは、チェックが付いたまま未実施のIssueがcloseされた
+  describe("確認が通っていないままのクローズ", () => {
+    const BODY = [
+      "## やること",
+      "",
+      "- [ ] （サブPC）pollerを入れ替える",
+      "",
+      "  ```bash",
+      "  systemctl --user restart issue-deck-dispatch-poller.service",
+      "  ```",
+      "",
+      "## 完了の確認方法",
+      "",
+      "- 動いている",
+      "",
+      "  ```bash",
+      "  systemctl --user is-active issue-deck-dispatch-poller.service",
+      "  ```",
+    ].join("\n");
+
+    it("1回目は聞き返し、2回目で閉じる", () => {
+      const onComplete = vi.fn();
+      render(
+        <ManualStepPanel isSubmitting={false} onComplete={onComplete} onSkip={vi.fn()} body={BODY} />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "手作業を完了してクローズ" }));
+      expect(onComplete).not.toHaveBeenCalled();
+      expect(screen.getByText("確認コマンドが通った記録がありません")).toBeTruthy();
+      // 手元へ貼って確かめられるよう、コマンドをそのまま出す
+      expect(
+        screen.getByText("systemctl --user is-active issue-deck-dispatch-poller.service"),
+      ).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "確認せずクローズ" }));
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("確認が通っていれば聞き返さない", () => {
+      const onComplete = vi.fn();
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          onComplete={onComplete}
+          onSkip={vi.fn()}
+          body={BODY}
+          verifiedAt="2026-08-20T09:00:00.000Z"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "手作業を完了してクローズ" }));
+      expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // 手順は本文テンプレートの見出しと重複していたので出さない（#1732）
   it("手順の説明は出さず、クローズのボタンだけを出す", () => {
     render(<ManualStepPanel isSubmitting={false} onComplete={vi.fn()} onSkip={vi.fn()} />);

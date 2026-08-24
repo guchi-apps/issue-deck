@@ -163,6 +163,35 @@ describe("やること", () => {
   });
 });
 
+describe("完了の確認方法（#2256）", () => {
+  /** 確認節を、渡した行だけの内容へ置き換える */
+  const withVerification = (body: string, lines: string[]) =>
+    body.replace(
+      /## 完了の確認方法\n[\s\S]*?\n## なぜエージェントが実施しないか/,
+      [...["## 完了の確認方法", ""], ...lines, "", "## なぜエージェントが実施しないか"].join("\n"),
+    );
+
+  it("実行できるコマンドが1つも無ければwarningで指摘する", () => {
+    const body = withVerification(templateBody(), ["左メニューに並べば完了です。"]);
+    const finding = checkManualStepBody(body).find(
+      (entry) => entry.rule === "verification-without-command",
+    );
+    expect(finding?.severity).toBe("warning");
+  });
+
+  it("手順にもコマンドが無い手作業（画面での操作だけ）は指摘しない", () => {
+    const body = withVerification(templateBody(), ["左メニューに並べば完了です。"])
+      .replace(/## やること\n[\s\S]*?\n## 完了の確認方法/, [
+        "## やること",
+        "",
+        "- [ ] （ブラウザ）管理画面でAレコードを足す",
+        "",
+        "## 完了の確認方法",
+      ].join("\n"));
+    expect(rules(body)).toEqual([]);
+  });
+});
+
 describe("関連の参照", () => {
   // guchi-apps/aide#103・car-care#99 が対応PRをURLで書いており、参照抽出から落ちていた
   it("URLで書かれていればerrorで指摘し、同じリポジトリなら#番号を提案する", () => {

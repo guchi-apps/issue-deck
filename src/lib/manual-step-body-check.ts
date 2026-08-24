@@ -100,6 +100,7 @@ export function checkManualStepBody(
   findings.push(...checkPrerequisites(sections));
   findings.push(...checkDevice(guide));
   findings.push(...checkTodo(sections, guide));
+  findings.push(...checkVerification(sections, guide));
   findings.push(...checkRelatedReferences(sections, options.repositoryFullName));
 
   return findings;
@@ -261,6 +262,41 @@ function checkTodo(
     });
   }
   return findings;
+}
+
+/**
+ * `## 完了の確認方法`に、機械的に確かめられるコマンドが置かれているか（#2256）。
+ *
+ * **チェックを付ける操作と、実際に効いたかの検証は別物である。** `aide-bot`の立ち上げでは
+ * 1Passwordへの登録がチェック済みのままcloseされ、初回デプロイが`DB_NAME is required`で
+ * 落ちた（`guchi-apps/aide-bot#8`）。そのIssueの確認方法は「`dig`がIPを返し、左メニューに
+ * 並べば完了」で、**登録されたかを見ていなかった**。
+ *
+ * 落ちる機能は2つ。確認節のコマンドは手作業アシスタントの代行実行（#1869）で流せ、
+ * 読み取りだけなら定期巡回（#2008）が1日1回流して「完了済みの可能性」を画面へ出す。
+ * 1つも無い本文は、そのどちらにも乗らない。
+ *
+ * **`warning`にとどめる。** 画面の操作でしか確かめようのない手作業（管理画面での設定など）は
+ * 実際にあり、`error`にすると直しようのない指摘が正しい本文へ出続ける。
+ */
+function checkVerification(
+  sections: ReturnType<typeof splitManualStepSections>,
+  guide: ReturnType<typeof parseManualStepGuide>,
+): ManualStepBodyFinding[] {
+  const section = sections.find((entry) => entry.key === "verification");
+  if (!section) return [];
+  if (collectShellBlocks(section.lines.join("\n")).length > 0) return [];
+  // 手順そのものにコマンドが1つも無い本文（画面での操作だけの手作業）は、確認もコマンドに
+  // ならないのが自然。指摘するのは「実行するコマンドがあるのに確認だけ散文」のときに絞る
+  if (guide.steps.every((step) => collectShellBlocks(step.markdown).length === 0)) return [];
+
+  return [
+    {
+      rule: "verification-without-command",
+      severity: "warning",
+      message: "`## 完了の確認方法`に実行できるコマンド（```bash のコードブロック）がありません。ここに置いたコマンドだけが代行実行と定期巡回の対象になり、「チェックは付いているが実施されていない」を画面から拾えます。手順と1対1で、効いていなければ終了コードが0にならないコマンドを並べてください。",
+    },
+  ];
 }
 
 /** `## 関連`の参照が`#番号`形式か（URLは参照抽出に一致しない） */

@@ -314,6 +314,93 @@ describe("runManualStepVerificationPatrol", () => {
   });
 });
 
+describe("recordManualStepVerificationPass（#2256）", () => {
+  const EARLIER = new Date("2026-08-20T08:00:00.000Z");
+  const LATER = new Date("2026-08-20T08:30:00.000Z");
+
+  /** 本文の確認コマンド（15行目・19行目）に対応する成功ジョブ */
+  const succeededJobs = () => [
+    {
+      command: "cat /home/guchi/apps/issue-deck/README.md",
+      finishedAt: LATER,
+      targetHost: "subpc",
+    },
+    {
+      command: "systemctl --user is-active issue-deck-dispatch-poller.service",
+      finishedAt: EARLIER,
+      targetHost: "subpc",
+    },
+  ];
+
+  it("確認コマンドが全部通っていればPASSEDを記録する", async () => {
+    dispatchJobFindMany.mockResolvedValue(succeededJobs());
+
+    await expect(
+      patrol.recordManualStepVerificationPass({
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1994,
+        now: NOW,
+      }),
+    ).resolves.toBe(true);
+
+    expect(checkUpsert).toHaveBeenCalledTimes(1);
+    const { update } = checkUpsert.mock.calls[0][0];
+    expect(update.status).toBe("PASSED");
+    // 揃った時刻＝最後の1件が通った時刻。いちばん古い成功でも`now`でもない
+    expect(update.finishedAt).toEqual(LATER);
+    expect(JSON.parse(update.doneLines)).toEqual(VERIFICATION_LINES);
+  });
+
+  it("1件でも通っていなければ記録しない", async () => {
+    dispatchJobFindMany.mockResolvedValue([succeededJobs()[0]]);
+
+    await expect(
+      patrol.recordManualStepVerificationPass({
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1994,
+        now: NOW,
+      }),
+    ).resolves.toBe(false);
+    expect(checkUpsert).not.toHaveBeenCalled();
+  });
+
+  // 行番号で照合すると、本文を書き換えたときに別のコマンドの成功を引き継いでしまう
+  it("確認コマンドを書き換えたら、前のコマンドの成功は引き継がない", async () => {
+    dispatchJobFindMany.mockResolvedValue(succeededJobs());
+    issueFindFirst.mockResolvedValue({
+      body: BODY.replace("cat /home/guchi/apps/issue-deck/README.md", "cat /etc/hostname"),
+      state: "OPEN",
+      labels: [{ name: "71.manual-step" }],
+    });
+
+    await expect(
+      patrol.recordManualStepVerificationPass({
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1994,
+        now: NOW,
+      }),
+    ).resolves.toBe(false);
+    expect(checkUpsert).not.toHaveBeenCalled();
+  });
+
+  it("確認コマンドが無い本文では何もしない", async () => {
+    dispatchJobFindMany.mockResolvedValue(succeededJobs());
+    issueFindFirst.mockResolvedValue({
+      body: BODY.split("## 完了の確認方法")[0],
+      state: "OPEN",
+      labels: [{ name: "71.manual-step" }],
+    });
+
+    await expect(
+      patrol.recordManualStepVerificationPass({
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1994,
+        now: NOW,
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
 describe("abandonManualStepVerificationCheck", () => {
   it("人が自動実行を始めたら、走っている巡回をやめる", async () => {
     checkFindUnique.mockResolvedValue(checkRow({ currentJobId: "job-1" }));

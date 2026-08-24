@@ -924,6 +924,7 @@ export function IssueDetail({
               prerequisiteSummary={manualStepPrerequisites.summary}
               dependents={manualStepPrerequisites.dependents}
               verifiedAt={issue.manualStepVerifiedAt}
+              body={issue.body}
               configTargets={infraConfigTargets}
               onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
               repositoryFullName={issue.repositoryFullName}
