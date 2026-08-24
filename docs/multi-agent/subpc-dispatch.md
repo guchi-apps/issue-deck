@@ -369,7 +369,7 @@ Claude Codeはサーバー側の一時エラー（529 Overloaded など）を再
 |---|---|
 | 検知 | 生きている実装セッション（`<リポジトリ名>-issue-<番号>`）の転記の**最後のレコードがAPIエラー**で、かつそのファイルが `SESSION_RESUME_STALL_MINUTES`（既定10分）更新されていないこと |
 | 送出 | **固定の1行**を上の3段階プロトコルで送る。**段1aだけ`working`も通す**（中断したセッションは`Stop`が飛ばないまま`working`で止まるため。`permission_prompt`はどの経路でも通さない） |
-| 打ち切り | `SESSION_RESUME_MAX_ATTEMPTS`（既定3回）まで、`SESSION_RESUME_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、issue-deckへ**1度だけ**引き上げて人へ渡す（#2280。`00.check-user`＋`01.check-input`が付き、Push通知が鳴る） |
+| 打ち切り | `SESSION_RESUME_MAX_ATTEMPTS`（既定3回）まで、`SESSION_RESUME_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、issue-deckへ**1度だけ**引き上げて人へ渡す（#2280。Issueコメント＋`00.check-user`＋`01.check-blocked`が付き、Push通知が鳴る） |
 
 **送る本文は`scripts/lib/session-resume.sh`が持つ定数**で、状況によって変えない。これが
 [gates.md](gates.md)「やらせないこと」の例外として成立する条件そのもので、内容を組み立て始めた

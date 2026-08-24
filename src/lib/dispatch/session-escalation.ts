@@ -24,6 +24,9 @@ const SESSION_FAILED_MARKER = "<!-- supervisor:session-failed -->";
 /** Claude Codeが開始しないまま止まっていることを知らせたマーカー（#1465） */
 const SESSION_NOT_STARTED_MARKER = "<!-- supervisor:session-not-started -->";
 
+/** APIエラーで中断したまま止まっていることを知らせたマーカー（#1971） */
+const SESSION_INTERRUPTED_MARKER = "<!-- supervisor:session-interrupted -->";
+
 export function buildSessionFailedCommentBody(params: {
   hostName: string;
   tmuxSessionName: string;
@@ -195,6 +198,100 @@ export async function escalateFailedSession(params: {
   } catch (error) {
     console.error(
       `[dispatch] セッションの異常終了をIssueへ引き上げられませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+    return false;
+  }
+}
+
+/**
+ * APIエラーで中断したまま止まっていることをIssueへ知らせる本文（#1971・#2280）。
+ *
+ * **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか）。セッションの画面も
+ * 応答テキストも載せない——`escalateFailedSession`と同じ約束で、見に行く経路は`tmux attach`と
+ * Remote Controlのリンクにする。
+ */
+export function buildSessionInterruptedCommentBody(params: {
+  hostName: string;
+  tmuxSessionName: string;
+  detail: string | null;
+  remoteControlUrl: string | null;
+}): string {
+  const lines = [
+    "⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。",
+    "",
+    `- ホスト: \`${params.hostName}\``,
+    `- tmuxセッション: \`${params.tmuxSessionName}\``,
+  ];
+  if (params.detail) lines.push(`- 状況: ${params.detail}`);
+  lines.push(
+    "",
+    "Claude CodeがAPIの一時エラー（529 Overloaded など）を再試行しきるとturnが打ち切られ、",
+    "**`Stop`フックが飛ばないまま**セッションが入力欄で止まります。pollerが固定の1行を送って",
+    "自動再開を試みましたが、上限回数まで復帰しませんでした（`scripts/lib/session-resume.sh`）。",
+    "",
+    "続きは人が指示してください。端末から続けるか、",
+    "",
+    "```bash",
+    `tmux attach -t ${params.tmuxSessionName}`,
+    "```",
+  );
+  if (params.remoteControlUrl) {
+    lines.push("", `Remote Controlから続けてください: ${params.remoteControlUrl}`);
+  }
+  lines.push(
+    "",
+    "セッションが動き出しても、この`00.check-user`は自動では外れません（人が続け方を決めたこと",
+    "自体が合図なので、画面の承認ボタンか`gh issue edit`で外してください）。",
+    "",
+    SESSION_INTERRUPTED_MARKER,
+  );
+  return lines.join("\n");
+}
+
+/**
+ * APIエラーで中断したセッションをIssueへ引き上げ、`00.check-user`と理由ラベル
+ * `01.check-blocked`を付ける（#1971・#2280）。
+ *
+ * **#2280より前はSignalyへ通知するだけだった。** webhookを消したので、`escalateFailedSession`と
+ * 同じ形（Issueコメント＋`01.check-blocked`）へ寄せた。理由が`input`ではなく`blocked`なのは、
+ * ユーザーがやることが「回答」ではなく**続け方の指示**だから（CLAUDE.mdの理由ラベルの定義）。
+ *
+ * 呼ぶのはサブPCのpollerが合成する`SessionInterrupted`を受けた
+ * `POST /api/dispatch/sessions/interrupted`で、**1セッションにつき1回**
+ * （送ったかどうかの記録はホスト側の`.resume`が持つ）。
+ *
+ * **失敗しても例外を投げない**（`escalateFailedSession`と同じ）。
+ */
+export async function escalateInterruptedSession(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  tmuxSessionName: string;
+  detail: string | null;
+  remoteControlUrl: string | null;
+}): Promise<boolean> {
+  const parsed = parseRepositoryFullName(params.repositoryFullName);
+  if (!parsed) return false;
+
+  try {
+    const token = await resolveInstallationToken(params.repositoryFullName);
+    if (!token) return false;
+
+    await createComment(parsed.owner, parsed.repo, params.issueNumber, token, {
+      body: buildSessionInterruptedCommentBody({
+        hostName: params.hostName,
+        tmuxSessionName: params.tmuxSessionName,
+        detail: params.detail,
+        remoteControlUrl: params.remoteControlUrl,
+      }),
+    });
+
+    await addCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, "blocked");
+    return true;
+  } catch (error) {
+    console.error(
+      `[dispatch] セッションの中断をIssueへ引き上げられませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
       error,
     );
     return false;

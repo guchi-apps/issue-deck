@@ -412,7 +412,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
 | `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述） |
-| （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971） | `00.check-user`だけを付ける（#2280。後述） |
+| （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を報告した約60秒後に同じ内容がもう1件飛ぶことになる。
@@ -426,11 +426,19 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
 **`SessionInterrupted`だけはフックではない**（#1971）。APIエラー（529等）でturnが打ち切られると
 Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限まで試したあとに同じ形のJSONを
 合成して`session-notify.sh`へ渡す。**#2280より前はSignalyへ通知するだけだった**が、通知先が
-無くなったので`POST /api/dispatch/sessions/activity`へ`checkUserRequested`だけを立てて報告する
-（`activity`は載せない——「今このセッションが何をしているか」を言えないため）。`00.check-user`＋
-`01.check-input`が付き、Push通知が人へ届ける。**この経路は`activity`を持たないぶん、
-「様子を報告するとき」の条件で括ると黙って落ちる**——`scripts/session-notify-activity.test.mjs`が
-境界を固定している。
+無くなったので専用の受け口（`POST /api/dispatch/sessions/interrupted`）へ送り、**異常終了
+（#1217）・起動確認での足止め（#1465）と同じ形**——Issueコメント＋`00.check-user`＋
+`01.check-blocked`——で引き上げる（文面は`src/lib/dispatch/session-escalation.ts`）。
+
+- **様子の受け口（`/activity`）へは相乗りさせない。** 中断は「今このセッションが何をしているか」
+  を言えない（`working`のまま止まっている、が最後に分かっている事実）。ラベルだけを立てて通す
+  こともできるが、それだと**何が起きたのかがIssueに残らず、理由ラベルも`01.check-input`になる**
+- **理由は`01.check-blocked`。** ユーザーがやることは「回答」ではなく**続け方の指示**
+  （[labels.md](labels.md)の理由ラベルの定義）
+- **`00.check-user`の印（`<セッション名>.check-user`）は置かない。** 置くとセッションが動き出した
+  `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
+- 境界は`scripts/session-notify-activity.test.mjs`と
+  `src/lib/dispatch/session-escalation.test.ts`が固定している
 
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 
@@ -534,6 +542,10 @@ Remote ControlのURL（取れたときだけ）・`00.check-user`を付けるか
 
 **`dispatch.env`を設定していないPCでは、`session-notify.sh`は黙って何もしない。** メインPCで
 同じリポジトリのセッションを起動しても画面には出ない。
+
+**#2280より前に設定したホストには不要な残骸がある。** `~/.config/issue-deck/notify.env`の
+`SESSION_NOTIFY_WEBHOOK_URL`と、1Passwordの`apps/issue-deck/session-webhook-url`。読む側が
+無くなったので消してよい（放置しても害は無いため、掃除のためのIssueは立てていない）。
 
 ## 設定したら1回手で発火させる
 
@@ -976,7 +988,9 @@ APIエラーで中断したセッションの引き上げ（#1971）は、状態
 
 - **grepで探すのは送信の呼び出しではなく、送信「しか」しない分岐。** `session-notify.sh`では
   `decision`が`notify`のときだけ状態記録と報告の両方を飛ばしていた（＝webhookが唯一の出口）
-- 置き換え先は既存の`00.check-user`に寄せた。issue-deck側の変更が要らず、Push通知・画面の
-  確認待ち表示・一覧の件数がまとめて効く
-- **同じことは`activity`の有無でも起きる。** 引き上げは「今どうしているか」を言えないので
-  `activity`を持たず、報告の条件を`[[ -n "$ACTIVITY" ]]`のままにすると通らない
+- **置き換え先は「同じ性質の引き上げ」に合わせる。** 最初は既存の`checkUserRequested`
+  （`/activity`）へ相乗りさせようとしたが、それだと`interrupt_detail`の行き先が無くなり、
+  理由ラベルも`01.check-input`（＝回答待ち）になってしまう。実際にやることは
+  **続け方の指示**なので、異常終了（`escalateFailedSession`）と同じ`01.check-blocked`に揃えた
+- **消す側の`activity`にも注意。** 引き上げは「今どうしているか」を言えないので`activity`を
+  持たない。様子の報告と同じ条件（`[[ -n "$ACTIVITY" ]]`）で括ると、そもそも通らない

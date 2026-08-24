@@ -338,8 +338,8 @@ fi
 # 標準出力の1行目を「何をするか」、2行目以降をpayloadとして返す。
 #
 #   report <状態イベント> <activity> [remote-controlのURL|-]  issue-deckへ様子を報告する
-#   interrupted                                             `00.check-user`を付けるだけ（#1971・#2280。
-#                                                           状態は記録しない）
+#   interrupted                                             中断を引き上げる（#1971・#2280。
+#                                                           payloadは/sessions/interrupted用）
 #   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用。
 #                                                           3行目に`ExitPlanMode`の引数を添える。#2121）
 #   question <remote-controlのURL|->                        質問を送る（payloadは/sessions/question用。
@@ -394,6 +394,8 @@ repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
 # **APIへ送る`hostName`は識別子のまま**にする（照合キーであり、`ssh`・`tmux`の相手でもある）。
 # 画面に出す表記（`subpc` → サブPC）への変換はissue-deck側（`src/lib/dispatch/host-label.ts`）が持つ。
 host_name = os.environ.get("NOTIFY_HOST_NAME", "")
+# 引き上げ（`SessionInterrupted`）の宛先。`tmux attach -t <名前>`としてIssueコメントに出る
+tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
 
 
 def resolve_remote_url():
@@ -594,9 +596,25 @@ if event == "SessionInterrupted":
     # pollerは自動再開を上限まで試したあとにだけ呼ぶ（1セッションにつき1回）。
     #
     # **状態（`state_event`）も様子（`activity`）も持たない**——`working`のまま止まっている、が
-    # 最後に分かっている事実で、pollerから見て「今どうしているか」は言えない。issue-deckへは
-    # `00.check-user`を付けるためだけに報告し（#2280）、Push通知で人へ渡す。
-    print("interrupted", resolve_remote_url() or "-")
+    # 最後に分かっている事実で、pollerから見て「今どうしているか」は言えない。そこで様子の
+    # 受け口ではなく専用の受け口（`/sessions/interrupted`）へ送り、異常終了（#1217）と同じ形
+    # ——Issueコメント＋`00.check-user`＋`01.check-blocked`——で引き上げる（#2280）。
+    #
+    # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか）。セッションの画面も
+    # 応答テキストも載せない。
+    if not repo_slug or not issue_number.isdigit() or not tmux_session:
+        print("skip")
+        sys.exit(0)
+    detail = hook.get("interrupt_detail")
+    print("interrupted")
+    print(json.dumps({
+        "repository": repo_slug,
+        "issue": int(issue_number),
+        "hostName": host_name,
+        "tmuxSessionName": tmux_session,
+        "detail": detail.strip() if isinstance(detail, str) and detail.strip() else None,
+        "remoteControlUrl": resolve_remote_url() or None,
+    }))
     sys.exit(0)
 
 if event == "Stop":
@@ -987,7 +1005,7 @@ mark_check_user_pending() {
 }
 
 decision_line="$(printf '%s' "$result" | head -1)"
-# 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted <URL または "-">` /
+# 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted` /
 #       `plan <URL または "-">` / `question <URL または "-">` / `skip`
 decision="${decision_line%% *}"
 
@@ -1042,16 +1060,24 @@ fi
 if [[ "$decision" != "report" && "$decision" != "interrupted" ]]; then
   exit 0
 fi
-# 中断の引き上げ（#1971）は`interrupted <URL>`の2語で来るので、`STATE_EVENT`に`-`が入る。
-# **状態も様子も持たない合図**（「今このセッションが何をしているか」を表す値が無い）ので、
-# ここで空へ倒し、以降の記録・報告の条件から自然に外す。
+
+# APIエラーで中断したセッションの引き上げ（#1971）。**状態の記録も様子の報告も行わない。**
+# pollerから来る合図で「今このセッションが何をしているか」を表す値を持たないため、様子の
+# 受け口ではなく専用の受け口へ送り、異常終了と同じ形（Issueコメント＋`00.check-user`＋
+# `01.check-blocked`）で引き上げる（#2280。文面はissue-deck側の`session-escalation.ts`）。
+#
+# **ここでは`00.check-user`の印（`<セッション名>.check-user`）を置かない。** 印を置くと
+# セッションが動き出した`Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。
+# 異常終了・起動確認での足止めと同じく、外すのは人の操作に任せる。
 if [[ "$decision" == "interrupted" ]]; then
-  read -r _ REMOTE_URL <<<"$decision_line"
-  STATE_EVENT=""
-  ACTIVITY=""
-else
-  read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
+  if ! post_to_issue_deck /api/dispatch/sessions/interrupted \
+    "$(printf '%s' "$result" | sed -n '2p')"; then
+    echo "session-notify: セッションの中断をissue-deckへ引き上げられませんでした" >&2
+  fi
+  exit 0
 fi
+
+read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 [[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
 
 # このセッションが入力待ちに入ったこと（#1417）。**`00.check-user`を付けるのはここだけ。**
@@ -1059,12 +1085,8 @@ fi
 # 「エージェントが人に聞いて止まっている」ことを知る唯一のフックで、
 # Issue #1417の「質問したとき」「開発環境のリンクを提示したとき」「スクリーンショットを
 # 提示したとき」はローカルセッションではすべてこの形になる。
-#
-# **中断の引き上げ（#1971）もここに載せる**（#2280）。Signalyへの通知を消したため、
-# `00.check-user`とissue-deckのPush通知が「APIエラーで止まったまま」を人へ届ける唯一の経路に
-# なった。理由ラベルは他の入力待ちと同じ`01.check-input`が付く。
 CHECK_USER_REQUESTED=0
-if [[ "$STATE_EVENT" == "permission_prompt" || "$decision" == "interrupted" ]]; then
+if [[ "$STATE_EVENT" == "permission_prompt" ]]; then
   CHECK_USER_REQUESTED=1
 fi
 
@@ -1131,10 +1153,8 @@ print(json.dumps({
     session_state_clear_check_user_pending "$NOTIFY_TMUX_SESSION" || true
   fi
 }
-# **`activity`を持たない中断の引き上げ（#1971）も通す**（#2280）。`activity`はnullになるが、
-# `checkUserRequested`が立っていればissue-deck側は受け付ける（`sessions/activity/route.ts`は
-# 「中身が1つも無いリクエスト」だけを400で弾く）。
-if [[ -n "$ACTIVITY" || "$CHECK_USER_REQUESTED" == "1" ]]; then
+# `activity`を持たない報告は無い（中断の引き上げは上で`exit`している）。
+if [[ -n "$ACTIVITY" ]]; then
   report_activity_to_issue_deck
 fi
 

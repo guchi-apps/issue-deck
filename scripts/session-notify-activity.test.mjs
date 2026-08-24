@@ -6,8 +6,10 @@
 //
 //   1. 入力待ち（`Notification / permission_prompt`）で`checkUserRequested`が立つ
 //      ——ここが立たないと`00.check-user`が付かず、Push通知も鳴らない
-//   2. APIエラーで中断（pollerが合成する`SessionInterrupted`。#1971）でも立つ
-//      ——`activity`を持たない合図なので、報告そのものを飛ばしてしまう間違いを踏みやすい
+//   2. APIエラーで中断（pollerが合成する`SessionInterrupted`。#1971）は、様子の受け口ではなく
+//      `POST /api/dispatch/sessions/interrupted`へ、宛先と`detail`を添えて送る
+//      ——`activity`を持たない合図なので、様子の報告に相乗りさせると理由ラベルが`input`になり、
+//      何が起きたのかもIssueに残らない
 //   3. 応答終了（`Stop`）では立たない——毎ターン確認待ちにしない
 //
 // 実物のissue-deckは立てられないので、受け取った本文を記録するだけのHTTPサーバーを置く
@@ -72,8 +74,8 @@ afterEach(async () => {
 /**
  * フックを1回実行する。
  *
- * `HOME`をテスト用のディレクトリへ向けるので、状態ファイル（`~/.local/state/...`）も
- * `tmux`のセッション名も持たない状態で走る＝実セッションの記録を汚さない。
+ * `HOME`をテスト用のディレクトリへ向けるので、状態ファイル（`~/.local/state/...`）はそちらへ
+ * 書かれる＝走っている実セッションの記録を汚さない。
  */
 function runHook(hookJson) {
   const child = execFile("bash", [script, "2280", "issue-deck", "guchi-apps/issue-deck"], {
@@ -83,7 +85,7 @@ function runHook(hookJson) {
       ...process.env,
       HOME: workDir,
       TMUX: "",
-      SESSION_NOTIFY_TMUX_SESSION: "",
+      SESSION_NOTIFY_TMUX_SESSION: "issue-deck-issue-2280",
       ISSUE_DECK_DISPATCH_ENV: path.join(workDir, "dispatch.env"),
       ISSUE_DECK_NOTIFY_ENV: path.join(workDir, "notify.env"),
     },
@@ -127,19 +129,28 @@ describe("session-notify.sh の様子の報告", () => {
     });
   });
 
-  // #1971の引き上げ。**`activity`を持たないので、報告ごと落とす実装だと黙って消える。**
+  // #1971の引き上げ。**`activity`を持たないので、様子の報告に相乗りさせる実装だと
+  // 理由ラベルが`01.check-input`になり、`detail`の行き先も無くなる。**
   // Signalyを消した（#2280）今はここだけが「APIエラーで止まったまま」を人へ届ける。
-  it("APIエラーで中断した合図は activity 無しで checkUserRequested だけを立てる", async () => {
+  it("APIエラーで中断した合図は、様子ではなく専用の受け口へ宛先つきで送る", async () => {
     await runHook({
       hook_event_name: "SessionInterrupted",
       session_id: "sess-1",
       interrupt_detail: "API Error: 529 Overloaded",
     });
 
-    expect(activityReports()).toHaveLength(1);
-    expect(activityReports()[0].body).toMatchObject({ checkUserRequested: true });
-    // `activity`は空（issue-deck側で`null`へ倒れる）。`working`等を勝手に名乗らせない
-    expect(activityReports()[0].body.activity).toBe("");
+    expect(activityReports()).toEqual([]);
+    const escalations = received.filter(
+      (entry) => entry.path === "/api/dispatch/sessions/interrupted",
+    );
+    expect(escalations).toHaveLength(1);
+    expect(escalations[0].body).toMatchObject({
+      repository: "guchi-apps/issue-deck",
+      issue: 2280,
+      hostName: expect.any(String),
+      tmuxSessionName: "issue-deck-issue-2280",
+      detail: "API Error: 529 Overloaded",
+    });
   });
 
   it("idle_prompt と SessionStart では何も送らない", async () => {

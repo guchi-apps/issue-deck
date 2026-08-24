@@ -35,7 +35,8 @@ SESSION_RESUME_ENABLED="${SESSION_RESUME_ENABLED:-1}"
 # **短くすると、エラーの直後に自力で書き始めたturnへ割り込む。**
 SESSION_RESUME_STALL_MINUTES="${SESSION_RESUME_STALL_MINUTES:-10}"
 # 1つのセッションに対して自動で再開を試みる回数の上限。
-# 使い切ったら以降は送らず、issue-deckへ1度だけ引き上げて人へ渡す（#2280。`00.check-user`が付く）。
+# 使い切ったら以降は送らず、issue-deckへ1度だけ引き上げて人へ渡す
+# （#2280。Issueコメント＋`00.check-user`＋`01.check-blocked`が付く）。
 SESSION_RESUME_MAX_ATTEMPTS="${SESSION_RESUME_MAX_ATTEMPTS:-3}"
 # 再開を試みる間隔（分）。過負荷が続いている間に連打しても同じことになるため間を置く。
 SESSION_RESUME_INTERVAL_MINUTES="${SESSION_RESUME_INTERVAL_MINUTES:-5}"

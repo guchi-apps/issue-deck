@@ -1589,8 +1589,8 @@ send_session_instruction() {
 # `session-notify.sh`1箇所**なので、pollerは合成したフックJSONを渡すだけにする。
 # `session_id`を載せるのは、向こうがRemote ControlのURLを引くのに使うため。
 #
-# 引き上げの中身は`00.check-user`＋`01.check-input`の付与で（#2280。以前はSignalyへの通知
-# だった）、issue-deckのPush通知が人へ届ける。
+# 引き上げの中身はIssueコメント＋`00.check-user`＋`01.check-blocked`（#2280。以前はSignalyへの
+# 通知だった）。異常終了（`escalateFailedSession`）と同じ形で、issue-deckのPush通知が人へ届ける。
 notify_session_interrupted() {
   local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5"
   local session_id hook_json
