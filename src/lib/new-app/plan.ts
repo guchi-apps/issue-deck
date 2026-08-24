@@ -8,7 +8,7 @@
  *
  * - **実機の設定ファイルを直接書き換える手順を書かない。** ApacheのVirtualHostは
  *   `guchi-apps/vps`のIssueへ切り出す（CLAUDE.md「VPS・サブPCの設定ファイルの変更は、
- *   管理リポジトリのIssueへ切り出す」）。ただし`/apps/<name>/`の作成・DB作成・PM2への登録・
+ *   管理リポジトリのIssueへ切り出す」）。ただし`/home/github-user/apps/<name>/`の作成・DB作成・PM2への登録・
  *   certbotは**`deploy.yml`が配る受け口ではない**ので、VPSの手作業として残る。
  * - **サブPCの手順は代行実行の条件を満たす形で書く。** 実行するデバイスがサブPC・1手順に
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
@@ -41,6 +41,43 @@ import {
 
 /** 手作業Issueに付けるラベル（`00.check-user`は付けない）。 */
 export const MANUAL_STEP_LABEL = "71.manual-step";
+
+/**
+ * 立ち上げが決めた値を1PasswordとGitHubのsecretへ入れるスクリプト（#2249）。
+ *
+ * **サブPCの本体チェックアウトから絶対パスで呼ぶ。** 代行実行のcwdはホームに固定されており
+ * （`scripts/run-manual-step.sh`）、新しいリポジトリのチェックアウトはまだ無いことがある。
+ */
+const PROVISION_SCRIPT = "$HOME/apps/issue-deck/scripts/provision-app-secrets.sh";
+
+/** 実機の配置先。`/apps/<name>`ではない（#2246。同じ立ち上げの中で2つのパスが混在していた）。 */
+function serverAppDir(spec: Pick<NewAppSpec, "repositoryName">): string {
+  return `/home/github-user/apps/${spec.repositoryName}`;
+}
+
+/**
+ * シークレット投入コマンド。**フィールド名の羅列にせず、そのまま貼れる1コマンドで出す**（#2249）。
+ *
+ * `aide-bot`の立ち上げでは「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = …`」
+ * という羅列を手作業Issueに書いていたため、値が未登録のまま初回の本番デプロイが走り
+ * `DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
+ *
+ * 機械的に定まる値（配置先・DB名・許可メール）と、人がSignalyで作らないと決まらない
+ * webhook URLとで**呼び分ける**。スクリプトは何度実行してもよい作りなので、順序は問わない。
+ */
+function provisionCommand(spec: NewAppSpec, ciWebhookUrl: string | null): string {
+  const options = [`--repo ${repositoryFullName(spec)}`];
+  if (ciWebhookUrl === null) {
+    if (spec.databaseName) options.push(`--db-name ${spec.databaseName}`);
+    // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
+    if (spec.auth !== "none") options.push("--copy-allowed-emails");
+  } else {
+    options.push(`--ci-webhook-url '${ciWebhookUrl}'`);
+  }
+  // 続きの行は2つ下げる（コードブロック自体が箇条書きの下に2スペース下がっているため、
+  // 同じ幅だと折り返しに見えない）
+  return [PROVISION_SCRIPT, ...options].join(" \\\n    ");
+}
 
 /** 作成物の自動化の度合い。画面のチップの色に対応する。 */
 export type NewAppAutomation =
@@ -156,9 +193,9 @@ export function buildNewAppPlan(
     {
       kind: "manual-subpc",
       automation: "proxy",
-      title: `[手作業] サブPC: ${spec.repositoryName}をcloneして対応表に載せる`,
+      title: `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`,
       target: "guchi-apps/issue-deck",
-      description: "手作業アシスタントの代行実行で流せる",
+      description: "cloneと対応表への追記、1Passwordへの値の投入。手作業アシスタントの代行実行で流せる",
     },
     {
       kind: "manual-browser",
@@ -166,8 +203,8 @@ export function buildNewAppPlan(
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
       description: githubAppNeedsRepositoryAdd
-        ? "AレコードはVPSの管理画面でしか登録できない。1Password・Secrets・GitHub Appもここで行う"
-        : "AレコードはVPSの管理画面でしか登録できない。1PasswordとSecretsもここで行う",
+        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecretsもここで行う",
     },
   ];
 
@@ -251,8 +288,8 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・1Password・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
-3. サブPCへclone（ここまで済むと初期化Issueをローカルセッションで実装できる）
+2. ブラウザでの登録（DNSのAレコード・Signalyのチャンネル・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
+3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
 4. \`${repo}\` の初期化と、developへのマージ
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
 6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
@@ -330,7 +367,15 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる
 - [ ] \`.env.example\`（変数名のみ）と \`.env.tpl\`（\`op://\` 参照）を作る
 - [ ] \`.github/workflows/ci.yml\` を作る（必須）
-- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`/apps/${spec.repositoryName}/\`）
+- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）
+- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
+- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)} \\
+    --ref <このIssueのブランチ>
+  \`\`\`
+
 - [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く
 - [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
 ${multiAgent}
@@ -421,6 +466,11 @@ TLS証明書を取ると、certbotが実機に \`/etc/apache2/sites-available/${
 
 - [ ] certbot実行後、${refs.parent} のVPS手作業Issueへ貼られた \`${host}-le-ssl.conf\` の内容を \`apache/sites-available/\` へ追加する
 
+**\`:443\` 側の \`RequestHeader set X-Forwarded-Proto\` が \`"https"\` になっていることを確かめてから取り込みます。**
+certbotは \`:80\` のVirtualHostをそのまま複製するため \`"http"\` が残ることがあり、アプリが自分を \`http://\` だと
+誤認して**本番でだけログインが失敗します**（OAuthのリダイレクトURIが登録済みの \`https://\` と一致しなくなるため）。
+\`"http"\` のまま貼られていたら、実機を直し直してから控え直してもらってください。
+
 ## このIssueが持たない作業
 
 **同じアプリの作業でも、次はこのIssueの担当ではありません。同じ対象のIssueを新しく立てず、
@@ -506,7 +556,7 @@ function portBandPrerequisite(refs: NewAppIssueRefs): string {
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}をcloneして対応表に載せる`;
+  return `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`;
 }
 
 /**
@@ -523,8 +573,8 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになる（初期化Issueの実装がここから始まる）`,
-    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない`,
+    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになり、1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入る`,
+    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない。シークレットも未登録のままで、初回の本番デプロイが値の不足で失敗する`,
     urgency: "初期化Issueに着手する前",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
@@ -532,7 +582,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
     prerequisiteIssues: refs.githubAppNeedsRepositoryAdd
       ? `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`
       : refs.parent,
-    otherPrerequisites: `\`gh\` がサブPCでログイン済みであること。${portBandPrerequisite(refs)}`,
+    otherPrerequisites: `\`gh\` がサブPCでログイン済みで、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること。${portBandPrerequisite(refs)}`,
     steps: `- [ ] （サブPC）リポジトリをcloneする
 
   \`\`\`bash
@@ -549,10 +599,18 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 
   \`\`\`bash
   grep -F '${repo}' "$HOME/.config/issue-deck/local-repos.conf"
+  \`\`\`
+
+- [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)}
   \`\`\``,
-    verification: `最後の手順の出力に \`${repo} ${path}\` の1行が出れば完了です。
-pollerは申告のたびに対応表を読み直すので、再起動は要りません。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの3手順は手作業アシスタントの代行実行で流せます。",
+    verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
+pollerは申告のたびに対応表を読み直すので、再起動は要りません。
+**この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
+\`.github/secrets-manifest.tsv\` が要るので、初期化のマージ後（Signalyのwebhook URLを入れるとき）に揃います。`,
+    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
@@ -564,13 +622,13 @@ export function buildVpsManualIssueTitle(spec: NewAppSpec): string {
 /**
  * VPSの手作業Issue。
  *
- * **`guchi-apps/vps`へ切り出さないものだけを書く。** `/apps/<name>/`・MariaDBのデータベース・
+ * **`guchi-apps/vps`へ切り出さないものだけを書く。** `/home/github-user/apps/<name>/`・MariaDBのデータベース・
  * PM2のプロセス登録・certbotはいずれも`deploy.yml`が配る受け口ではなく、実機で1度だけ
  * 実行する。ApacheのVirtualHostはここには書かない（あちらはリポジトリ管理下）。
  */
 export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const host = hostnameFor(spec);
-  const appDir = `/apps/${spec.repositoryName}`;
+  const appDir = serverAppDir(spec);
   const vpsRef = refs.vps ?? `${NEW_APP_VPS_REPOSITORY}のIssue`;
 
   const dbStep = spec.databaseName
@@ -615,12 +673,22 @@ ${dbStep}${pm2Step}
   sudo certbot --apache -d ${host}
   \`\`\`
 
+- [ ] （VPS）certbotが複製した \`:443\` 側の \`X-Forwarded-Proto\` を \`"https"\` へ直す（\`"http"\` のままだと本番でだけログインが失敗する）
+
+  \`\`\`bash
+  grep -n 'X-Forwarded-Proto' /etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo sed -i 's/X-Forwarded-Proto "http"/X-Forwarded-Proto "https"/' /etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo apachectl configtest && sudo systemctl reload apache2
+  \`\`\`
+
 - [ ] （VPS）certbotが作った設定ファイルの内容を控え、${vpsRef} へコメントする
 
   \`\`\`bash
   sudo cat /etc/apache2/sites-available/${host}-le-ssl.conf
   \`\`\``,
     verification: `\`curl -I ${publicUrlFor(spec)}\` が 200 か 3xx を返せば公開まで届いています。
+\`grep X-Forwarded-Proto /etc/apache2/sites-available/${host}-le-ssl.conf\` が何も返さないか
+\`"https"\` を返せば、\`:443\` 側の直しは済んでいます（\`"http"\` が残っていると本番でだけログインが失敗します）。
 控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むまでは、毎日のドリフト検知に
 「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。`,
     why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はサブPCだけです）。",
@@ -696,17 +764,24 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: "なし",
-    otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
-    steps: `${dnsStep}- [ ] （ブラウザ）1Passwordの \`apps\` ボールトへ \`${spec.repositoryName}\` のアイテムを作り、必要なフィールドを追加する
+    otherPrerequisites: `1PasswordとGitHubにログイン済みであること。Signalyの手順はサブPCで実行するため、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること`,
+    steps: `${dnsStep}- [ ] （ブラウザ）Signaly（https://signaly.gucchii.com/）でCI・デプロイ通知のチャンネルを作り、Webhook URLを控える
 
   \`\`\`
-  ${spec.databaseName ? `db-name = ${spec.databaseName} / ci-webhook-url（Signaly）/ target-dir = /apps/${spec.repositoryName}` : `ci-webhook-url（Signaly）/ target-dir = /apps/${spec.repositoryName}`}
+  チャンネル名: ${spec.repositoryName}-ci
+  \`\`\`
+
+- [ ] （サブPC）控えたWebhook URLを1Passwordへ入れ、GitHubのsecretへ同期する
+
+  \`\`\`bash
+  ${provisionCommand(spec, "<控えたWebhook URL>")}
   \`\`\`
 
 ${secretsStep.trimEnd()}${githubAppStep}`,
     verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
+アプリ自身のシークレット（配置先・DB名・Signaly）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
-    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。1PasswordとGitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

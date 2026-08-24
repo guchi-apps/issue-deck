@@ -43,7 +43,7 @@
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
-| `[手作業] サブPC: cloneして対応表に載せる` | `guchi-apps/issue-deck` | 代行実行できる |
+| `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
 **`guchi-apps/vps`のIssueだけは、同じ対象のopenなIssueが既にあれば作らない**（#2250。
@@ -59,10 +59,14 @@
 - **DNSのAレコードの登録。** DNSはVPSプロバイダの管理画面でしか設定できず、使えるAPIが無い
   （共有知識の`guides/apache-domain-setup.md`も「実行者: 人間のみ」としている）。自動化
   できるのはサブドメイン名の決定と重複チェックまで。
-- **VPS実機の操作**（`/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
+- **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
   certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
   反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **1PasswordとGitHub Secrets。** 無断で変更してよい設定ではない。
+- **Signalyのチャンネル作成。** Googleログインの背後にある画面操作で、共有知識の
+  `guides/signaly-notifications.md` も「実行者: 人間のみ」としている。**控えたWebhook URLの
+  登録は自動化してある**ので、人が行うのはチャンネルを作って値をコマンドへ貼るところまで。
+- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
+  アプリ自身の値（配置先・DB名・許可メール・Signaly）は後述のとおり自動で投入する。
 - **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
@@ -120,6 +124,34 @@
   押すまで反映されない（[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)）。
   **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。サブPCの手作業
   Issueの`## 前提条件`に1行書いてある。
+
+### 1Passwordのアイテムは、コマンドで投入する（#2249）
+
+**フィールド名の羅列を手作業Issueに書かない。** `aide-bot`の立ち上げでは
+「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = /apps/aide-bot`」という
+羅列を書いていたため、値が未登録のまま初回の本番デプロイが走り
+`DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
+
+投入は[`scripts/provision-app-secrets.sh`](../scripts/provision-app-secrets.sh)が行う。
+**画面（立ち上げのAPI）からは実行しない**——本番のissue-deckは1Passwordを直接読み書きせず、
+書き込み用のサービスアカウント（`~/.config/issue-deck/op-writer.env`）を持つのはサブPCだけ
+（画面の「シークレット同期」もワークフローを起こしているだけ。#1309）。したがって実行の場は
+**サブPCの手作業Issueとローカルセッション**になる。
+
+- **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
+  Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
+- **人が決める値**（SignalyのWebhook URL）だけを**ブラウザの手作業Issue**に残す。残す形も
+  同じスクリプトの1コマンドで、控えた値を`--ci-webhook-url`へ貼るだけにする。
+- **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
+  発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
+  **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。
+- **GitHubのsecretへの同期には`.github/secrets-manifest.tsv`が要る**（どのKEYがどのフィールドを
+  読むかの正はマニフェストで、スクリプトは参照を引数で受けない）。それを作るのは初期化Issue
+  なので、サブPCの手順の時点では1Passwordへ入るだけで同期は見送られる。**同じコマンドを後から
+  実行すると同期まで進む**——何度実行してもよい作りにしてあるのはこのため。初期化Issueの
+  やることにも、マニフェストを作った後の同期を1項目として入れてある。
+- **入ったことはGitHub側から引き直して確かめる**（`actions/secrets`の`total_count`）。同期
+  スクリプトの出力は送った側の記録でしかなく、名前の取り違えや権限不足に気付けない。
 
 ### 新しいリポジトリのIssueは、立ち上げ自身が取り込む
 
@@ -237,6 +269,14 @@ gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-b
 `<host>-le-ssl.conf`を取り込むまで「[新規（未取り込み）]」として毎日出続ける。
 VPSの手作業Issueに「内容を控えてvpsのIssueへコメントする」手順を置き、vpsのIssue側に
 2段目として取り込みを書いてある。
+
+**控える前に`:443`側の`X-Forwarded-Proto`を`"https"`へ直す**（#2253）。certbotは`:80`の
+VirtualHostをそのまま`:443`へ複製するため、`RequestHeader set X-Forwarded-Proto "http"`が
+残る。アプリは自分を`http://`だと誤認し、生成したリダイレクトURIが登録済みの`https://`と
+一致せず、**本番でだけOAuthログインが失敗する**。共有知識には2026-08-09の時点で記録があった
+（`guchi-apps/docs`の`knowledge/deployment.md`）のに、生成する手順に入っていなかったのが
+`guchi-apps/vps#124`で顕在化した理由なので、**認証の有無にかかわらず常に手順として出す**
+（後から認証を足すアプリがあるため）。
 
 ## 失敗したときの扱い
 

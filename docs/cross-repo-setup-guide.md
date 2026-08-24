@@ -534,6 +534,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
 | `load-secrets-check.yml` | シークレットの供給元（GitHub／1Password）を検証する（`workflow_dispatch`）。本番には触れず、解決できたかどうかと解決できなかった項目名だけを報告する（#1306） | **展開時に有用。** 対象リポジトリへGitHub側のsecret/variableを投入したあと、`deploy.yml`を切り替える前にこれで確認できる |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
+| `propagate-shared-files.yml` | ワークフロー以外の配布物（`.github/scripts/signaly-notify.sh`等、`.github/scripts/`配下にコピーして使うファイル）を、配布元（issue-deck）の内容へそろえるPRを配布先ごとに作成する（`workflow_dispatch`）。issue-deck画面（設定＞フリート運用＞共有ワークフローのバージョン「共有スクリプト」欄）から起動される（#2240） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |
 | `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と、同期・スキップ・失敗した項目名だけ）をissue-deckへ報告する（#1309・#2022） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
 

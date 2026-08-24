@@ -180,6 +180,12 @@ describe("buildVpsIssueBody", () => {
     expect(body).toContain("新規（未取り込み）");
   });
 
+  it("2段目に :443 の X-Forwarded-Proto を確かめてから取り込む旨を書く", () => {
+    const body = buildVpsIssueBody(spec(), REFS);
+    expect(body).toContain("X-Forwarded-Proto");
+    expect(body).toContain('`"https"` になっていること');
+  });
+
   it("READMEのアプリ一覧に足す行を出す", () => {
     expect(buildVpsIssueBody(spec(), REFS)).toContain(
       "| kakei-report | 家計の月次推移をZaimのデータから作る | kakei-report.gucchii.com / 3112 | PM2 |",
@@ -233,13 +239,33 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).not.toMatch(/<[^>]+>/);
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
   });
+
+  it("機械的に定まる値を、そのまま貼れる1コマンドで投入する（#2249）", () => {
+    expect(body).toContain("provision-app-secrets.sh");
+    expect(body).toContain("--repo guchi-apps/kakei-report");
+    expect(body).toContain("--db-name app_kakei_report");
+    expect(body).toContain("--copy-allowed-emails");
+    // フィールド名の羅列に戻さない（aide-botの立ち上げで未登録のまま本番デプロイが失敗した）
+    expect(body).not.toContain("db-name = app_kakei_report");
+  });
+
+  it("DBも認証も無いアプリでは、そのオプションを渡さない", () => {
+    const plain = buildSubpcManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null, auth: "none" }),
+      REFS,
+    );
+    expect(plain).toContain("provision-app-secrets.sh");
+    expect(plain).not.toContain("--db-name");
+    expect(plain).not.toContain("--copy-allowed-emails");
+  });
 });
 
 describe("buildVpsManualIssueBody", () => {
   const body = buildVpsManualIssueBody(spec(), REFS);
 
   it("Gitで配れない実機の操作だけを書き、VirtualHostは書かない", () => {
-    expect(body).toContain("sudo mkdir -p /apps/kakei-report");
+    // 実機の配置先は `/apps/<name>` ではない（#2246・#2249。target-dirと同じパスにする）
+    expect(body).toContain("sudo mkdir -p /home/github-user/apps/kakei-report");
     expect(body).toContain("CREATE DATABASE IF NOT EXISTS app_kakei_report");
     expect(body).toContain("pm2 save");
     expect(body).toContain("certbot --apache -d kakei-report.gucchii.com");
@@ -249,6 +275,23 @@ describe("buildVpsManualIssueBody", () => {
   it("certbotが作る設定ファイルをvpsのIssueへ戻す手順を持つ", () => {
     expect(body).toContain("kakei-report.gucchii.com-le-ssl.conf");
     expect(body).toContain(REFS.vps!);
+  });
+
+  it("控える前に :443 の X-Forwarded-Proto を https へ直す手順を持つ", () => {
+    expect(body).toContain(
+      "sudo sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/'",
+    );
+    expect(body).toContain("sudo apachectl configtest && sudo systemctl reload apache2");
+    // 控えた内容がそのまま取り込まれるため、直す手順はcatより前に無いと意味がない
+    expect(body.indexOf("X-Forwarded-Proto")).toBeLessThan(body.indexOf("sudo cat"));
+  });
+
+  it("認証を持たない種別でも X-Forwarded-Proto の手順を出す", () => {
+    const staticBody = buildVpsManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null }),
+      REFS,
+    );
+    expect(staticBody).toContain("X-Forwarded-Proto");
   });
 
   it("実行するデバイスはVPSで、代行実行の対象にはしない", () => {
@@ -295,6 +338,14 @@ describe("buildBrowserManualIssueBody", () => {
     expect(selected).toContain("settings/installations");
   });
 
+  it("Signalyのwebhook URLは、控えた値を渡すだけのコマンドで残す（#2249）", () => {
+    expect(body).toContain("Signaly");
+    expect(body).toContain("provision-app-secrets.sh");
+    expect(body).toContain("--ci-webhook-url '<控えたWebhook URL>'");
+    // 機械的に定まる値はサブPCの手作業Issueで投入済みなので、ここでは求めない
+    expect(body).not.toContain("--db-name");
+  });
+
   it("マルチエージェント運用に対応させるときだけWORKFLOW_PATを求める", () => {
     expect(body).toContain("WORKFLOW_PAT");
     expect(buildBrowserManualIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
@@ -318,8 +369,9 @@ describe("buildBrowserManualIssueBody", () => {
   it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
     const steps = (refs: NewAppIssueRefs) =>
       parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
-    expect(steps(REFS)).toBe(3);
-    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(4);
+    // DNS・Signalyのチャンネル作成・シークレットの投入・Actions secrets（#2249）
+    expect(steps(REFS)).toBe(4);
+    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(5);
   });
 });
 

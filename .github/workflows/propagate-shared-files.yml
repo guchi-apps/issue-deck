@@ -1,0 +1,102 @@
+name: Propagate shared files
+
+# 各リポジトリへコピーして使っている「ワークフロー以外の配布物」を、配布元（issue-deck）の
+# 内容へそろえるPRを、リポジトリごとに作成する（#2240）。
+#
+# **なぜ要るか。** `.github/scripts/signaly-notify.sh` は各リポジトリの `.github/scripts/` へ
+# コピーして使う運用で、issue-deck 側を直しても自動では行き渡らない。#2237・#2239 で
+# 「通知が届かなくても `exit 0` で返す」形に直したが、届いていないリポジトリでは
+# **デプロイが成功しているのに run だけが赤い**状態が残る（Signaly が止まっている間）。
+# 16件の個別 Issue を立てる代わりに、既にある配布の仕組みへ載せた（#2009 で、同内容の Issue を
+# 乱立させないと決めた形）。
+#
+# **caller 配布（propagate-repair-workflows.yml）とは別の操作。** あちらは `.github/workflows/`
+# へ**無い**ファイルを雛形から作って追加する。こちらは `.github/scripts/` の**既にある**
+# ファイルを配布元の内容で上書きする。触るディレクトリが重ならないため同時に走ってよい。
+#
+# **自動マージはしない。** 配布先の独自の変更を上書きしうるため（実際 subpc のコピーには
+# NOTIFY_NOTE がある）、各リポジトリで PR を確認してマージする。
+#
+# **対象は呼び出し元（issue-deckの画面）が決めて渡す。** ここで再検知すると、画面の表示と
+# 実際の対象がずれる。
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: '配布先のJSON配列（例: [{"repository":"guchi-apps/aide","files":[".github/scripts/signaly-notify.sh"]}]）'
+        required: true
+        type: string
+
+concurrency:
+  # 同じリポジトリへ二重にPRを作りうる
+  group: propagate-shared-files
+  cancel-in-progress: false
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # 配布処理（.github/scripts/propagate-shared-files.sh）だけでなく、**配る中身そのもの**
+        # （.github/scripts/signaly-notify.sh）もこのチェックアウトから読む。
+        uses: actions/checkout@v4
+
+      - name: 入力を検証する
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$TARGETS" | jq -e 'type == "array" and length > 0' >/dev/null; then
+            echo "::error::targets は空でないJSON配列である必要があります"
+            exit 1
+          fi
+
+          # owner/repo 以外を弾く。ここを緩めるとgh apiの宛先を任意に指定できてしまう
+          if ! printf '%s' "$TARGETS" \
+            | jq -e 'all(.repository | test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))' >/dev/null; then
+            echo "::error::targets に owner/repo 形式でない repository が含まれています"
+            exit 1
+          fi
+
+          # 配れるのは許可リストのパスだけ。**src/lib/workflow-tags.ts の SHARED_FILE_SPECS・
+          # .github/scripts/propagate-shared-files.sh の ALLOWED_FILES と同じ内容**にする。
+          # ここを緩めると配布先の任意のファイルを上書きしにいける
+          if ! printf '%s' "$TARGETS" | jq -e '
+            all(.files | type == "array" and length > 0
+                and all(. == ".github/scripts/signaly-notify.sh"))' >/dev/null; then
+            echo "::error::files に配布対象外のパスが含まれています"
+            exit 1
+          fi
+
+      - name: 各リポジトリへPRを作成する
+        env:
+          # 配布先の .github/ を変更するため、workflow権限を持つPATが要る
+          # （`.github/scripts/` 自体はworkflow権限の対象外だが、caller配布と同じトークンで揃える）
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          TARGETS: ${{ inputs.targets }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          git config --global user.name "Claude Code"
+          git config --global user.email "claude-code@example.com"
+
+          FAILED=0
+          while read -r REPO FILES; do
+            echo "::group::$REPO"
+
+            # 1リポジトリの失敗で全体を止めない。残りは配れるほうがよい
+            if ! bash .github/scripts/propagate-shared-files.sh \
+              "$REPO" "$FILES" "$SOURCE_REPOSITORY"; then
+              echo "::warning::$REPO への配布に失敗しました"
+              FAILED=$((FAILED + 1))
+            fi
+
+            echo "::endgroup::"
+          done < <(printf '%s' "$TARGETS" | jq -r '.[] | "\(.repository) \(.files | join(" "))"')
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED 件のリポジトリで失敗しました"
+            exit 1
+          fi
