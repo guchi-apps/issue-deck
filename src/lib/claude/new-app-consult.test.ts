@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CONSULT_OPENING_MESSAGE,
+  CONSULT_RESPONSE_SCHEMA,
   MAX_CONSULT_TURNS,
   buildConsultMessages,
+  continueNewAppConsult,
   countConsultTurns,
   isConsultExhausted,
   normalizeDraft,
@@ -112,10 +114,74 @@ describe("parseConsultResponse", () => {
 
   it("返事が取れなければ失敗させる", () => {
     expect(() => parseConsultResponse('{"ready":true}')).toThrow();
-    expect(() => parseConsultResponse("こんにちは")).toThrow();
+  });
+
+  it("JSONでない地の文は返事として扱い、会話を止めない（#2281）", () => {
+    const result = parseConsultResponse("収益化を考えるとZennがよさそうですね。");
+    expect(result.reply).toBe("収益化を考えるとZennがよさそうですね。");
+    expect(result.draft).toBeNull();
+    expect(result.ready).toBe(false);
+  });
+
+  it("途中で切れたJSONは地の文にせず失敗させる（#2281）", () => {
+    expect(() => parseConsultResponse('{"reply":"保存先はDBでよいで')).toThrow();
   });
 
   it("readyはtrueのときだけtrue", () => {
     expect(parseConsultResponse('{"reply":"a","ready":"yes"}').ready).toBe(false);
+  });
+});
+
+describe("CONSULT_RESPONSE_SCHEMA", () => {
+  it("構造化出力の必須条件（required・additionalProperties: false）を満たす", () => {
+    expect(CONSULT_RESPONSE_SCHEMA.additionalProperties).toBe(false);
+    expect(CONSULT_RESPONSE_SCHEMA.required).toEqual(["reply", "ready", "draft"]);
+
+    const draft = CONSULT_RESPONSE_SCHEMA.properties.draft.anyOf[0];
+    expect(draft.additionalProperties).toBe(false);
+    // `draft`の項目とスキーマの項目がずれると、決めた値が設定ステップへ渡らない
+    expect([...draft.required].sort()).toEqual(
+      ["auth", "displayName", "kind", "repositoryName", "subdomain", "summary", "usesDatabase"],
+    );
+  });
+});
+
+describe("continueNewAppConsult", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockClaudeResponse(text: string, stopReason = "end_turn") {
+    return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ content: [{ type: "text", text }], stop_reason: stopReason }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+
+  function sentBody(fetchMock: ReturnType<typeof mockClaudeResponse>) {
+    return JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+  }
+
+  it("応答の形をスキーマで縛って送る（#2281）", async () => {
+    const fetchMock = mockClaudeResponse('{"reply":"はい","ready":false,"draft":null}');
+
+    const result = await continueNewAppConsult("dummy-token", [
+      { role: "user", content: "記事投稿ツールを作りたい" },
+    ]);
+
+    expect(result.reply).toBe("はい");
+    expect(sentBody(fetchMock).output_config).toEqual({
+      format: { type: "json_schema", schema: CONSULT_RESPONSE_SCHEMA },
+    });
+  });
+
+  it("途中で切れた応答は、原因の分かる文言で失敗させる（#2281）", async () => {
+    mockClaudeResponse('{"reply":"保存先は', "max_tokens");
+
+    await expect(
+      continueNewAppConsult("dummy-token", [{ role: "user", content: "作りたい" }]),
+    ).rejects.toThrow(/途中で切れました/);
   });
 });
