@@ -40,6 +40,7 @@ const PREFLIGHT_OK = {
     alreadyListed: false,
     note: "ベース値 25000 を確保します（開発サーバーは 25000 + Issue番号）",
   },
+  githubApp: { repositorySelection: "all", needsRepositoryAdd: false },
   vpsRead: true,
 };
 
@@ -141,6 +142,7 @@ describe("NewAppDialog", () => {
         hostname: { value: "", taken: null },
         port: { suggested: null, note: null },
         localPortBand: { base: null, alreadyListed: false, note: "読めませんでした" },
+        githubApp: { repositorySelection: "all", needsRepositoryAdd: false },
         vpsRead: false,
       }),
     });
