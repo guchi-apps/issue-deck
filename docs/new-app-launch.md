@@ -62,6 +62,7 @@
   `guides/signaly-notifications.md` も「実行者: 人間のみ」としている。**控えたWebhook URLの
   登録は自動化してある**ので、人が行うのはチャンネルを作って値をコマンドへ貼るところまで。
 - **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
+  アプリ自身の値（配置先・DB名・許可メール・Signaly）は後述のとおり自動で投入する。
 - **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、

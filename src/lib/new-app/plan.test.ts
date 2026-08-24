@@ -346,6 +346,7 @@ describe("buildBrowserManualIssueBody", () => {
   it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
     const steps = (refs: NewAppIssueRefs) =>
       parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
+    // DNS・Signalyのチャンネル作成・シークレットの投入・Actions secrets（#2249）
     expect(steps(REFS)).toBe(4);
     expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(5);
   });

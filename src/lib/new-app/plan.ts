@@ -203,8 +203,8 @@ export function buildNewAppPlan(
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
       description: githubAppNeedsRepositoryAdd
-        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとActions secrets・GitHub Appもここで行う"
-        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとActions secretsもここで行う",
+        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecretsもここで行う",
     },
   ];
 
@@ -753,9 +753,9 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
 
 ${secretsStep.trimEnd()}${githubAppStep}`,
     verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
-シークレットは投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+アプリ自身のシークレット（配置先・DB名・Signaly）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
-    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "・GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
