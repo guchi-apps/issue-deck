@@ -127,7 +127,11 @@ function runHook() {
       ISSUE_DECK_NOTIFY_ENV: path.join(workDir, "notify.env"),
       SESSION_QUESTION_WAIT_SECONDS: "30",
       SESSION_PLAN_POLL_INTERVAL_SECONDS: "1",
-      SESSION_PLAN_POLL_GRACE_SECONDS: "2",
+      // 2秒だと、CIの負荷が高いときにcurl・python3の起動オーバーヘッドだけで猶予を
+      // 使い切り、2回連続の失敗をシミュレートするテストが本物の再試行の前に諦めてしまう
+      // （#2255）。同じ経路を検証する session-notify-plan.test.mjs は6秒を使っており、
+      // それに合わせる。
+      SESSION_PLAN_POLL_GRACE_SECONDS: "6",
     },
   });
   const done = new Promise((resolve, reject) => {
