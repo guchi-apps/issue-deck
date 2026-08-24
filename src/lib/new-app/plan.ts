@@ -16,9 +16,11 @@
  *   （`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
  * - **新しいリポジトリのIssueは、作った直後には盤面に載らない。** 載る条件は
  *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、それを作るのが初期化Issue
- *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定し
- *   （条件は`local-repos.conf`への記載）、GitHub Appへの追加と2つの再同期をブラウザの
- *   手作業Issueへ入れる。
+ *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定する
+ *   （条件は`local-repos.conf`への記載）。
+ * - **人が空振りする手順を書かない**（#2248）。2つの再同期は立ち上げ自身が実行し
+ *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
+ *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
  */
 
 import {
@@ -117,6 +119,11 @@ export type NewAppPlanOptions = {
    * 決まっていなければ`null`で、そのときは値を出さずに「確保する」とだけ書く。
    */
   localPortBase?: number | null;
+  /**
+   * GitHub Appのインストール対象へ手で追加する手順が要るか（#2248）。
+   * `repository_selection=all`なら不要で、既定はその想定の`false`。
+   */
+  githubAppNeedsRepositoryAdd?: boolean;
 };
 
 /**
@@ -130,6 +137,7 @@ export function buildNewAppPlan(
   const repo = repositoryFullName(spec);
   const host = hostnameFor(spec);
   const localPortBase = options.localPortBase ?? null;
+  const githubAppNeedsRepositoryAdd = options.githubAppNeedsRepositoryAdd ?? false;
 
   const artifacts: NewAppArtifact[] = [
     {
@@ -194,7 +202,9 @@ export function buildNewAppPlan(
       automation: "manual",
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
-      description: "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとActions secrets・GitHub Appもここで行う",
+      description: githubAppNeedsRepositoryAdd
+        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとActions secrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとActions secretsもここで行う",
     },
   ];
 
@@ -238,6 +248,12 @@ export type NewAppIssueRefs = {
   localPortBase: number | null;
   /** ポート帯を足すPull Request（`guchi-apps/issue-deck#124`の形）。作れなかったら`null` */
   portBandPullRequest: string | null;
+  /**
+   * GitHub Appのインストール対象へ手で追加する手順が要るか（#2248）。
+   * `lib/new-app/installation-scope.ts`が実物の`repository_selection`から決める。
+   * 既定は不要（`repository_selection=all`）。
+   */
+  githubAppNeedsRepositoryAdd?: boolean;
 };
 
 export function buildParentIssueTitle(spec: NewAppSpec): string {
@@ -272,7 +288,7 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・Signalyのチャンネル・Secrets・GitHub App）
+2. ブラウザでの登録（DNSのAレコード・Signalyのチャンネル・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
 3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
 4. \`${repo}\` の初期化と、developへのマージ
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
@@ -547,7 +563,9 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",
-    prerequisiteIssues: `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`,
+    prerequisiteIssues: refs.githubAppNeedsRepositoryAdd
+      ? `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`
+      : refs.parent,
     otherPrerequisites: `\`gh\` がサブPCでログイン済みで、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること。${portBandPrerequisite(refs)}`,
     steps: `- [ ] （サブPC）リポジトリをcloneする
 
@@ -662,9 +680,15 @@ export function buildBrowserManualIssueTitle(spec: NewAppSpec): string {
  *
  * **AレコードはVPSプロバイダの管理画面でしか登録できない**（APIが無い。
  * `_docs/guides/apache-domain-setup.md` も「実行者: 人間のみ」としている）。
- * あわせて、新しいリポジトリが盤面へ載るまでに要る**2つの再同期**もここに入れる——
- * GitHub Appへ追加しただけでは載らず、「リポジトリを再同期」→「Issueを再同期」の順に
- * 押す必要がある（`docs/cross-repo-setup-guide.md`）。
+ *
+ * **2つの再同期はここに書かない**（#2248）。立ち上げ自身がリポジトリとIssueを取り込む
+ * （`lib/new-app/resync.ts`）。押し忘れると新しいリポジトリのIssueが画面に出ず、#2215では
+ * 実際に押されないままだった。
+ *
+ * **GitHub Appのインストール対象への追加も、必要なときだけ書く**（#2248）。
+ * `issue-deck`・`issue-deck-dev`とも`repository_selection=all`で入っているため、通常は
+ * 新しいリポジトリが自動で対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）
+ * だけ手順を出す（`refs.githubAppNeedsRepositoryAdd`）。
  */
 export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const repo = repositoryFullName(spec);
@@ -696,9 +720,19 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
 
 `;
 
+  const githubAppStep = refs.githubAppNeedsRepositoryAdd
+    ? `
+
+- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
+
+  \`\`\`
+  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
+  \`\`\``
+    : "";
+
   return manualStepBody({
-    benefit: `${host} が名前解決できるようになり、\`${repo}\` のCI・デプロイがシークレットを読めるようになる。issue-deckの盤面にもこのリポジトリのIssueが並ぶ`,
-    blocked: `TLS証明書が取れず（certbotはAレコードを引けることが前提）、CI・デプロイがシークレット不足で失敗する。\`${repo}\` のIssueはissue-deckの画面に出ない`,
+    benefit: `${host} が名前解決できるようになり、\`${repo}\` のCI・デプロイがシークレットを読めるようになる`,
+    blocked: `TLS証明書が取れず（certbotはAレコードを引けることが前提）、CI・デプロイがシークレット不足で失敗する`,
     urgency: "立ち上げの最初に行う（後続がすべてこれを待つ）",
     device: "**ブラウザ**",
     cwd: "不要",
@@ -717,21 +751,11 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
   ${provisionCommand(spec, "<控えたWebhook URL>")}
   \`\`\`
 
-${secretsStep}- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
-
-  \`\`\`
-  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
-  \`\`\`
-
-- [ ] （ブラウザ）issue-deckの設定で「リポジトリを再同期」→「Issueを再同期」の順に押す
-
-  \`\`\`
-  https://issuedeck.gucchii.com
-  \`\`\``,
-    verification: `\`dig +short ${host} A\` がVPSのIPを返し、issue-deckの左メニューに \`${spec.repositoryName}\` が並べば完了です。
+${secretsStep.trimEnd()}${githubAppStep}`,
+    verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
 シークレットは投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
-再同期は2つとも押してください。「リポジトリを再同期」だけではIssueが取り込まれません。`,
-    why: "DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の `guides/signaly-notifications.md` が「人間のみ」としています。GitHub Secrets・GitHub Appの権限も、無断で変更してよいものではないためです。",
+リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "・GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

@@ -4,18 +4,11 @@ import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getAppJwt, getInstallationToken } from "@/lib/github/app-auth";
+import { fetchInstallation } from "@/lib/github/installations-api";
 import { syncInstallationRepositories } from "@/lib/github/repository-sync";
 import { syncRepositoryIssues } from "@/lib/github/sync-issues";
-import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { getRequestOrigin } from "@/lib/request-origin";
 import type { AccountType, RepositorySelection } from "@prisma/client";
-
-type GithubInstallationResponse = {
-  id: number;
-  account: { id: number; login: string; type: string } | null;
-  repository_selection: "all" | "selected";
-  suspended_at: string | null;
-};
 
 function toAccountType(githubType: string): AccountType {
   return githubType === "Organization" ? "ORGANIZATION" : "USER";
@@ -23,17 +16,6 @@ function toAccountType(githubType: string): AccountType {
 
 function toRepositorySelection(value: "all" | "selected"): RepositorySelection {
   return value === "all" ? "ALL" : "SELECTED";
-}
-
-async function fetchInstallation(
-  installationId: number,
-  jwt: string,
-): Promise<GithubInstallationResponse> {
-  const res = await githubFetch(`${GITHUB_API}/app/installations/${installationId}`, jwt);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch installation: ${res.status}`);
-  }
-  return res.json();
 }
 
 export function GET(request: NextRequest) {

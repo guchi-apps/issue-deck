@@ -17,6 +17,7 @@ import {
 } from "@/lib/github/repositories-api";
 import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
+import { resolveNewAppInstallationScope } from "@/lib/new-app/installation-scope";
 import { parseNewAppSpec } from "@/lib/new-app/parse";
 import {
   MANUAL_STEP_LABEL,
@@ -41,6 +42,7 @@ import {
   type NewAppCreatedRef,
   type NewAppIssueRefs,
 } from "@/lib/new-app/plan";
+import { resyncNewRepository } from "@/lib/new-app/resync";
 import {
   NEW_APP_ORG,
   NEW_APP_PARENT_REPOSITORY,
@@ -69,6 +71,11 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 未登録のリポジトリ同士でポートが衝突する（#2213で実際に漏れた）。まだ何も作っていない
  * 時点で止めるので、直してから押し直せる。**Pull Requestの作成そのものに失敗したときは
  * 止めない**——残りのIssueを作らずに終える方が損失が大きいので、`warnings`で画面へ返す。
+ *
+ * **最後に、作ったリポジトリとそのIssueを自分で取り込む**（#2248。`lib/new-app/resync.ts`）。
+ * 設定の「リポジトリを再同期」→「Issueを再同期」を人が押す手順にしていたが、押し忘れると
+ * 初期化Issueが画面に出ない（#2215で実際に押されていなかった）。ここも失敗では止めず、
+ * `warnings`で「2つを手で押してください」と返す。
  */
 
 type FailureReason =
@@ -111,7 +118,7 @@ async function handlePOST(request: NextRequest) {
 
   const result = await withUserGithubToken(user, "POST /api/new-app", async (token) => {
     try {
-      return await launchNewApp(token, spec, created, warnings);
+      return await launchNewApp(token, user.id, spec, created, warnings);
     } catch (error) {
       // 401だけは`withUserGithubToken`へトークンの更新を任せるため投げ直す
       if (error instanceof GithubApiError && error.status === 401) throw error;
@@ -146,6 +153,7 @@ async function handlePOST(request: NextRequest) {
 /** 成功したら`null`、続けられない理由が分かっていれば`LaunchFailure`を返す。 */
 async function launchNewApp(
   token: string,
+  userId: string,
   spec: NewAppSpec,
   created: NewAppCreatedRef[],
   warnings: string[],
@@ -193,12 +201,16 @@ async function launchNewApp(
     token,
   );
 
+  // GitHub Appのインストール対象への追加が要るかは、**Issueの本文を作る前に**決める（#2248）
+  const installationScope = await resolveNewAppInstallationScope(userId);
+
   const refs: NewAppIssueRefs = {
     parent: "",
     vps: null,
     subpc: null,
     localPortBase: portBand.base,
     portBandPullRequest: null,
+    githubAppNeedsRepositoryAdd: installationScope.needsRepositoryAdd,
   };
 
   const createIn = async (
@@ -221,7 +233,10 @@ async function launchNewApp(
     parentRepo,
     "parent-issue",
     buildParentIssueTitle(spec),
-    buildParentIssueBody(spec, { localPortBase: portBand.base }),
+    buildParentIssueBody(spec, {
+      localPortBase: portBand.base,
+      githubAppNeedsRepositoryAdd: installationScope.needsRepositoryAdd,
+    }),
   );
   refs.parent = parent.reference;
 
@@ -324,6 +339,15 @@ async function launchNewApp(
     } catch (error) {
       console.warn("[POST /api/new-app] サブIssueの紐付けに失敗しました", error);
     }
+  }
+
+  // 10. 作ったリポジトリとそのIssueを盤面へ取り込む（#2248）。**初期化Issueを作ったあとに
+  //     置く**——先に回すとIssueがまだ無く、取り込むものが無い
+  const resync = await resyncNewRepository(userId, NEW_APP_ORG, spec.repositoryName);
+  if (!resync.ok) {
+    warnings.push(
+      `${repo} を画面へ取り込めませんでした（${resync.message}）。設定で「リポジトリを再同期」→「Issueを再同期」の順に押してください。`,
+    );
   }
 
   return null;

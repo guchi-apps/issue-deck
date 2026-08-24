@@ -61,8 +61,11 @@
 - **Signalyのチャンネル作成。** Googleログインの背後にある画面操作で、共有知識の
   `guides/signaly-notifications.md` も「実行者: 人間のみ」としている。**控えたWebhook URLの
   登録は自動化してある**ので、人が行うのはチャンネルを作って値をコマンドへ貼るところまで。
-- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）とGitHub Appのインストール対象。**
-  無断で変更してよい設定ではない。
+- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
+- **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
+  `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
+  何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
+  ブラウザの手作業Issueに手順が出る。
 
 ## 実装のうえで外せない前提
 
@@ -145,17 +148,40 @@
 - **入ったことはGitHub側から引き直して確かめる**（`actions/secrets`の`total_count`）。同期
   スクリプトの出力は送った側の記録でしかなく、名前の取り違えや権限不足に気付けない。
 
-### 新しいリポジトリのIssueは、作った直後には盤面に載らない
+### 新しいリポジトリのIssueは、立ち上げ自身が取り込む
 
-盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあること
-（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）で、**それを作るのが初期化Issue
-自身**という順序になっている。そこで次の2つで噛み合わせている。
+リポジトリを作っただけでは、issue-deckのDBに現れない。`repository_selection=all`の
+インストールでは新しいリポジトリを足しても`installation_repositories`のwebhookが飛ばず、
+設定の「リポジトリを再同期」を押すまでDBに入らないためで、Issueの取り込みはさらにその後に
+なる。当初はこの2つを人が押す手順としてブラウザの手作業Issueへ入れていたが、押し忘れると
+初期化Issueが画面に出ないままになる（#2215で実際に押されていなかった）。
 
-- 初期化Issueの実行経路を**サブPCのローカルセッション**に固定する（条件は
-  `~/.config/issue-deck/local-repos.conf`への記載）。サブPCの手作業Issueを初期化Issueの
-  `## 前提条件`に置いてある。
-- ブラウザの手作業Issueに「GitHub Appへ追加 → **リポジトリを再同期 → Issueを再同期**」を
-  入れる。**2つとも押す必要がある**（片方だけではIssueが取り込まれない）。
+そこで**立ち上げの最後で、issue-deck自身が同じ2つを実行する**（#2248。
+[`lib/new-app/resync.ts`](../src/lib/new-app/resync.ts)）。
+
+- **初期化Issueを作ったあとに置く。** 先に回すと取り込むIssueがまだ無い。
+- **Issueの再同期は作ったリポジトリ1つだけに絞る。** 画面のボタンは接続中の全リポジトリを
+  回すが、ここで欲しいのは今作ったものだけ。
+- **Projectへの追加（`addMissingProjectItems`）は呼ばない。** 対象は
+  `claude-issue-dispatch.yml`を持つリポジトリに限られ、それを作るのが初期化Issue自身なので、
+  この時点では何も載らない。
+- **失敗しても止めない。** `warnings`で「設定で2つを押してください」と画面へ返す
+  （ポート帯のPull Requestと同じ扱い）。
+
+**カンバンの盤面へ載る条件は別で、`claude-issue-dispatch.yml`がデフォルトブランチにあること**
+（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。**それを作るのが初期化Issue自身**
+なので、初期化Issueの実行経路は**サブPCのローカルセッション**に固定してある（条件は
+`~/.config/issue-deck/local-repos.conf`への記載で、サブPCの手作業Issueを初期化Issueの
+`## 前提条件`に置いてある）。
+
+### `repository_selection`はDBではなくGitHubへ聞く
+
+DBの`GithubInstallation.repositorySelection`は`installation`イベントでしか更新されず、
+インストール画面で対象を選び直したときに飛ぶ`installation_repositories`イベントでは
+更新されない。立ち上げの判断に使うと、`selected`へ戻されたことに気付かないまま手順を落とす。
+そのためApp JWTで取り直す（[`lib/new-app/installation-scope.ts`](../src/lib/new-app/installation-scope.ts)）。
+**読めなかったときは手順を出す側に倒す**——余分な手順が1つ増えるだけで済み、落とすと
+立ち上げが黙って壊れる。
 
 ### サブPCの手作業Issueは代行実行の条件を満たす形で書く
 

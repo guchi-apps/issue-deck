@@ -81,6 +81,14 @@ describe("buildNewAppPlan", () => {
     const withoutBase = buildNewAppPlan(spec()).find((a) => a.kind === "port-band");
     expect(withoutBase?.title).not.toMatch(/\d/);
   });
+
+  // #2248。押す前の一覧でも、空振りする手順を予告しない
+  it("ブラウザの手作業の説明は、インストール対象への追加が要るときだけGitHub Appに触れる", () => {
+    const description = (options?: Parameters<typeof buildNewAppPlan>[1]) =>
+      buildNewAppPlan(spec(), options).find((a) => a.kind === "manual-browser")?.description ?? "";
+    expect(description()).not.toContain("GitHub App");
+    expect(description({ githubAppNeedsRepositoryAdd: true })).toContain("GitHub App");
+  });
 });
 
 describe("ポート帯のPull Request（#2225）", () => {
@@ -286,10 +294,25 @@ describe("buildVpsManualIssueBody", () => {
 describe("buildBrowserManualIssueBody", () => {
   const body = buildBrowserManualIssueBody(spec(), REFS);
 
-  it("AレコードとGitHub App、そして2つの再同期を書く", () => {
+  it("Aレコードを書く", () => {
     expect(body).toContain("Aレコード");
-    expect(body).toContain("GitHub Appのインストール対象");
-    expect(body).toContain("「リポジトリを再同期」→「Issueを再同期」");
+  });
+
+  // #2248。立ち上げ自身が取り込むようになったので、人が押す手順にはしない
+  it("2つの再同期は書かない", () => {
+    expect(body).not.toContain("リポジトリを再同期");
+    expect(body).not.toContain("Issueを再同期");
+  });
+
+  // #2248。`repository_selection=all`では新しいリポジトリが自動で対象に入る
+  it("インストール対象への追加は、selectedのときだけ書く", () => {
+    expect(body).not.toContain("GitHub Appのインストール対象");
+    const selected = buildBrowserManualIssueBody(spec(), {
+      ...REFS,
+      githubAppNeedsRepositoryAdd: true,
+    });
+    expect(selected).toContain("GitHub Appのインストール対象");
+    expect(selected).toContain("settings/installations");
   });
 
   it("Signalyのwebhook URLは、控えた値を渡すだけのコマンドで残す（#2249）", () => {
@@ -317,6 +340,14 @@ describe("buildBrowserManualIssueBody", () => {
 
   it("実行するデバイスはブラウザ", () => {
     expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("ブラウザ");
+  });
+
+  // 手順の並びが崩れると、画面の手作業アシスタントが手順を読み落とす
+  it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
+    const steps = (refs: NewAppIssueRefs) =>
+      parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
+    expect(steps(REFS)).toBe(4);
+    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(5);
   });
 });
 
