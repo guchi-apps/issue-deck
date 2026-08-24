@@ -837,6 +837,10 @@ function PlannedIssues({
  * リリースのマージ待ちも合流させた。配色の由来は`pull-request-badges.tsx`の
  * `UserMergeRequiredBadge`（`00.check-user`と同じamber）。
  *
+ * **ピルにするのは「状態」だけで、件数はピルにしない**（#2243）。畳んだ行の手作業の残数は
+ * ここから抜けて`SummaryCount`（オレンジのレンチ＋数字）になった。琥珀という色の意味は
+ * そのままで、右端に並ぶ件数どうしの形をそろえるための切り分け。
+ *
  * 対になるのが紫の`ReleaseProgressPill`で、あちらは「待っていれば次へ進む」。
  */
 function AttentionPill({ children }: { children: React.ReactNode }) {
@@ -1463,9 +1467,17 @@ function RepositorySummaryRow({
           （`PullRequestLine`）とPR一覧画面が持っているので、畳んだままでも操作は失われない。
           ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`）。
           リリースPRのマージ待ち（「mainへマージ待ち」）は上の琥珀のピルが表す（#2038） */}
-      {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする */}
+      {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする。
+          **他の件数と同じアイコン＋数字で出す**（#2243）。琥珀のピルだけ形が違ったため、
+          右端に件数が並んでも手作業だけ縦位置と字送りがそろわず、スマホ幅ではそのぶん
+          行が折り返していた。色はオレンジのまま残して「あなたの番」であることは失わない */}
       {summary.openManualStepCount > 0 && (
-        <AttentionPill>手作業{summary.openManualStepCount}</AttentionPill>
+        <SummaryCount
+          icon={Wrench}
+          label={`手作業 ${summary.openManualStepCount}件`}
+          count={summary.openManualStepCount}
+          className="text-amber-600 dark:text-amber-400"
+        />
       )}
       {/* 開かなくても、これから流れてくるものが溜まっているかが分かるようにする（#1704）。
           破線の丸は流れ図の実装予定ノードと同じ描き方で、まだブランチが無いことを形で出す */}
