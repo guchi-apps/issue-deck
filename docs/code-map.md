@@ -231,6 +231,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
+- **設定の「状態」1枚目のカードは「GitHub使用量」で、中を`API`と`ACTIONS`に分ける**（#2212）。
+  `API`はレート制限（`github-rate-limit-list.tsx`）と用途別の呼び出し回数
+  （`github-api-usage-list.tsx`）、`ACTIONS`は課金レポートから読んだ実行時間
+  （[`github-actions-usage.tsx`](../src/components/dashboard/github-actions-usage.tsx)・
+  [`lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)）。
+  **`ACTIONS`だけは専用のclassic PAT（`GITHUB_BILLING_TOKEN`）で読む**——課金レポートは
+  GitHub Appのトークン（インストール・ユーザーとも）では403になる。未設定ならその表示だけが
+  無効になり、アプリは動く（Claudeプラン使用量と同じ扱い）。
+  **Actionsに無料枠のメーターは置かない**——今回のスコープ外という判断で、
+  `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
+  **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
+  添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958・#2182）。
   判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
   引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。

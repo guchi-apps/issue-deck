@@ -37,6 +37,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
+import { resolveScreenshotRepositoryRejection } from "@/lib/github/screenshot-support";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
   ARTIFACT_REQUIRED_LABEL,
@@ -326,8 +327,15 @@ export function StartImplementationDialog({
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
   // **トリガーではなくここで止める**（#1262）
   const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
-  // 選んだホストでスクリーンショットを撮れない場合（#1268）。**申告していないホストは塞がない**
-  const screenshotRejection = resolveScreenshotRejection(selectedHost);
+  // スクリーンショットを撮れない場合の理由。**軸が2つある。**
+  // - 選んだホストにPlaywrightが入っていない（#1268）。**申告していないホストは塞がない**
+  // - リポジトリが無人実行での撮影に対応していない（#1118）。**GitHub Actionsを選んだときだけ**
+  //   （サブPC・ローカルは実行中の画面をそのまま確認できるため当てはまらない）
+  const screenshotRejection =
+    resolveScreenshotRejection(selectedHost) ??
+    (effectiveTarget.kind === "actions"
+      ? resolveScreenshotRepositoryRejection(issue.repositoryFullName)
+      : null);
   // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
   const visibleOptions = visibleStartImplementationOptions({
     isActionsTarget: effectiveTarget.kind === "actions",
@@ -645,7 +653,9 @@ export function StartImplementationDialog({
             <div className="grid grid-cols-2 gap-2">
               {visibleOptions.map((option) => {
                 // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
-                // 止まる（#1268）。**既に付いているものは外せるよう、チェック済みなら塞がない**
+                // 止まる（#1268）。撮影に対応していないリポジトリでは、実装だけ進んで画像が
+                // 出ないまま完了する（#1118）。**既に付いているものは外せるよう、
+                // チェック済みなら塞がない**
                 const unavailable =
                   option.key === "screenshotRequired" && screenshotRejection !== null;
                 return (

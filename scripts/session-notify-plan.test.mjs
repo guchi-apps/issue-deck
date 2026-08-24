@@ -114,7 +114,13 @@ function runHook() {
       ISSUE_DECK_NOTIFY_ENV: path.join(workDir, "notify.env"),
       SESSION_PLAN_WAIT_SECONDS: "30",
       SESSION_PLAN_POLL_INTERVAL_SECONDS: "1",
-      SESSION_PLAN_POLL_GRACE_SECONDS: "2",
+      // 猶予をポーリング間隔のちょうど2倍にすると、「2回連続で失敗してから成功する」テストが
+      // CIの負荷次第でその境界（`SECONDS - failed_since >= 猶予`）を踏んでしまい、
+      // 本来は降りるべきでない場面でも降りて `decision` が `null` になることがあった
+      // （実測。lint-and-buildジョブでは他の全テストと並行してこのスクリプトを何度も
+      // 起動するため、curl・python3の起動待ちだけで1秒近く揺れる）。境界ぴったりでなく
+      // 十分な余白を持たせる。
+      SESSION_PLAN_POLL_GRACE_SECONDS: "6",
     },
   });
   const done = new Promise((resolve, reject) => {

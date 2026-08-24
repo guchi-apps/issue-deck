@@ -169,6 +169,7 @@ export function MobileSettingsScreen({
           <StatusSection
             rateLimits={data.rateLimits}
             apiUsage={data.apiUsage}
+            actionsUsage={data.actionsUsage}
             claudeUsage={data.claudeUsage}
             githubStatus={data.githubStatus}
           />

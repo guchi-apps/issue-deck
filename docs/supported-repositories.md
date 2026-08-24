@@ -29,6 +29,12 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 ただしワークフローの配布方法には**コピー方式**と**参照方式**の2種類があり、参照方式のものは
 手動記録の対象外とする（後述「参照方式のワークフローは sync-state の対象外」）。
 
+**無人実行での撮影可否だけは、画面が読む正が別にある**（#1118）。下の表の備考にも
+`24.screenshot-required`の成否は書いてあるが、「実装を開始」ダイアログの出し分けは
+[`src/lib/github/screenshot-support.ts`](../src/lib/github/screenshot-support.ts)の一覧だけを見る。
+撮影に対応させた・できなくなったときは、表だけでなくそちらも直す（[docs/multi-agent/screenshots.md](multi-agent/screenshots.md)
+「撮影に対応しないリポジトリでは選ばせない」）。
+
 **アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）は下の表に載せない。**
 実装を行わず盤面にも載らないため、表の読み方（載っている＝無人実行で実装が回る）が崩れる。
 扱いは後述「`guchi-apps/question`（質問専用・盤面外）」を参照。
@@ -49,7 +55,8 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 | `guchi-apps/clip-hive` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1376, #1591, guchi-apps/clip-hive#21, guchi-apps/clip-hive#31 | **#1011（Phase 6）の1周目で、privateリポジトリを載せた最初の例。** Next.js + Prisma + MariaDB/MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`（このリポジトリのCIはサービスコンテナを使わず、ビルド時の`DATABASE_URL`にプレースホルダを渡している）。`lint`・`typecheck`・`build:ci`・`db:migrate:deploy`をすべて持ち、共有ワークフローと過不足なく噛み合う唯一のリポジトリだったため1周目に選んだ。**`npm test`は`lint && typecheck`の別名**でテストランナーは動かず、`npm run dev`は`scripts/ensure-mysql.sh`とローカルの`.env.local`を要求して無人実行では使えない点をCLAUDE.mdに明記した。旧世代ラベルは`05.develop`が#15に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/clip-hive#31・#32）——`preversion`（`npm test`）を持つため、callerに`bump-command`で`--ignore-scripts`を渡している（後述「`release-develop-to-main.yml`の配布状況」） |
 | `guchi-apps/ops-dashboard` | 対応済み | **参照**: `issue-labels.yml`・`claude-issue-dispatch.yml`・`version-tag-check.yml`（`@workflows/v18`）・`release-develop-to-main.yml`（`@workflows/v19`） | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1377, #1591, guchi-apps/ops-dashboard#64, guchi-apps/ops-dashboard#81 | #1011（Phase 6）の2周目。**`runtime-setup: node`をprivateで初めて使った周**（`prisma/`を持たずDBを使わない）。`package-manager: npm`・`node-version: "22.23.1"`。**`node-version`は`.nvmrc`から手で写す**——CIは`node-version-file`で`.nvmrc`を読むが、共有ワークフローはこの入力しか見ない。`test`・`typecheck`のnpm scriptを持たず、CIが`npx tsc --noEmit`を直接叩いているため、AGENTS.mdへ実際の検証コマンド（`lint`・`npx tsc --noEmit`・`build`）を書いた。**ブランチ命名が`feature/<番号>-<説明>`だった唯一のリポジトリ**で、この命名ではワークフローが対象Issueを特定できず進捗が一切遷移しないため、`issue-<番号>`へ揃えることをAGENTS.mdに明記した（既存の`feature/`ブランチ8本は、マージ済みかどうかの判断が要り作業中のものを巻き込む恐れがあるため触っていない）。旧世代ラベルは`07.m:marge`が#26に付いていたが、盤面では既に`Release`になっており書き戻しは不要だった。**リリースフロー（`release-develop-to-main.yml`）は#1591で後から足した**（guchi-apps/ops-dashboard#81・#84）——`preversion`を持たないためcallerの`with:`は`bump-kind`だけで済み、あわせて`"version"` lifecycleスクリプト（`scripts/version-changelog.mjs`）を新設して更新履歴（`src/data/changelog.ts`）がバンプPRに入るようにした |
 | `guchi-apps/db-console` | 対応済み | **参照**（3つとも`@workflows/v18`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`release-develop-to-main.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-15 | #1378, #1551, guchi-apps/db-console#19, guchi-apps/db-console#28 | #1011（Phase 6）の3周目。**デフォルトブランチが`main`だった唯一のリポジトリ**で、`develop`へ変更した（`issues`・`issue_comment`はデフォルトブランチのワークフローしか起動しない）。変更前に`develop...main`のファイル差分が空であること——mainの内容はすべてdevelopに含まれ、コミット数の差8件はdevelop→mainのマージコミットだけであること——を実測した。`runtime-setup: node-db`・`package-manager: npm`・`node-version: "22.23.1"`（`.nvmrc`準拠）。**`prisma.config.ts`の`env("DATABASE_URL")`が未設定で即失敗し、postinstallの`prisma generate`ごと`npm ci`が落ちていた**ため、未設定時は接続できないプレースホルダーへ倒す形へ直した（共有ワークフローの依存インストールはDATABASE_URLを渡さない。car-care・clip-hive・dayspanは元から未設定でも通る作りで、`env()`を必須にしていたのはここだけ）。`npm run build`は素だと`/auth/callback`で`ERR_INVALID_URL`になるため、CIと同じプレースホルダーを渡す実行例をAGENTS.mdに書いた。CIのDBは他アプリの`mysql:8.0`ではなく`mariadb:10.11`。旧世代ラベルは`05.develop`が#13に付いており、削除前に控えて書き戻した。**リリースフロー（`release-develop-to-main.yml`）は#1551で後から足した**（guchi-apps/db-console#28・#29）——導入の周では入れておらず、issue-deckの画面のリリースボタンが出ない唯一の対応済みリポジトリになっていた。callerに`with:`は渡していない（ルートの`package.json`の`.version`・npm・更新履歴ファイル無しで、3つのinputはすべて既定値でよい）。`claude-review-develop.yml`は今回も入れていない（develop向けPRの自動マージは、他アプリのDBを直接操作する管理コンソールという性質から保留のまま）。**この保留は#1475で解除した**（下記「12リポジトリすべてへ配ると決めた」） |
-| `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**フリートで唯一のNode 24**（`ci.yml`・`engines`とも。他は20〜22帯）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`はこの周では入れず、後からguchi-apps/aide#6（クローズ済み）で`@workflows/v18`参照のcallerが追加された（2026-08-15に実測） |
+| `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**Node 24を最初に使ったリポジトリ**（`ci.yml`・`engines`とも。当時の他は20〜22帯。#2213の`aide-bot`が2件目）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`はこの周では入れず、後からguchi-apps/aide#6（クローズ済み）で`@workflows/v18`参照のcallerが追加された（2026-08-15に実測） |
+| `guchi-apps/aide-bot` | 対応済み | **参照**（8つとも`@workflows/v25`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`・`release-develop-to-main.yml`・`version-tag-check.yml` | あり（`CLAUDE.md`を新規作成。`AGENTS.md`は`CLAUDE.md`を読ませる薄い1枚） | 2026-08-23 | #2213, guchi-apps/aide-bot#1 | **画面の「新規アプリを立ち上げる」（#2188）から立ち上げた最初のリポジトリ**（[new-app-launch.md](new-app-launch.md)）。Next.js 16 + Prisma + MariaDBで`runtime-setup: node-db`・**`package-manager: pnpm`**（`issue-deck`・`dayspan`に続く3件目）・`database-name: app_aide_bot`・`node-version: "24"`（`ci.yml`準拠）。**フリートで唯一、8つのcallerを最初から揃えて始めたリポジトリ**——他リポジトリが#1475・#1948で後追いしている自動修復3つと`claude-review-develop.yml`を、初期化の時点で置いてある。`develop`のブランチ保護（必須チェックは`lint-and-build`）と`Allow auto-merge`も揃っており、`scripts/setup-develop-auto-merge.sh`の後追いは要らなかった（2026-08-23にdry-runで実測）。**`pnpm test`は`lint && typecheck`の別名**でテストランナーは動かず、`pnpm dev`は`scripts/dev.sh`（`ensure-mysql.sh`とローカルの`.env.local`を要求）のため無人実行では使えない。`24.screenshot-required`は撮影の仕組みを持たないため無人実行では成立しない（[`screenshot-support.ts`](../src/lib/github/screenshot-support.ts)にも載せていない） |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
@@ -159,6 +166,12 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 |---|---|
 | **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab`（#1475で**12件すべてへ配ると決めた**。下記）・**`vps`・`subpc`**（#2103で**配ると決めた**。画面のボタンの対象外なので手で配る。下記「`vps`・`subpc`（#2103）」） |
 | **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
+
+**`aide-bot`は立ち上げ（#2213）の時点から配布済み。** 初期化Issue（guchi-apps/aide-bot#1）で
+callerを8つまとめて置いたため、この配布経路の後追いが要らなかった。同じことが下の
+`release-develop-to-main.yml`・自動修復3つ・`version-tag-check.yml`にも当てはまる。
+**新しいリポジトリでこう置けるとは限らない**——揃えたのは初期化を実装したセッションで、
+画面の「新規アプリを立ち上げる」が自動で配るわけではない。
 
 **未配布のリポジトリでは、develop向けPRは一切自動マージされない。** #1470の時点では
 `00.check-user`も付かなかったため、13本のPRが判定されないまま開いたまま残っていた
@@ -360,6 +373,8 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 | **未配布** | なし |
 | **対象外** | **`docs`**（デプロイを持たず「マージ＝全アプリへ反映」のため、リリースという段階を挟む意味が無い。guchi-apps/docs#15） |
 
+**`aide-bot`はこの実測の後に作られ、立ち上げ（#2213）の時点で配布済み。**
+
 ### `subpc`・`vps`・`docs`（インフラ設定・共有知識のリポジトリ）
 
 無人実行（計画〜実装）は入れないまま、**リリースフローだけを載せた**対象
@@ -545,6 +560,8 @@ jobs:
 |---|---|
 | **未対応** | なし |
 
+**`aide-bot`もcaller対応済み**（立ち上げ時点で`bump-kind`付きのv25 callerを置いている）。
+
 > **`db-console`は#1565の対象リストから漏れていた。** #1551で後から`release-develop-to-main.yml`を
 > 足したリポジトリで、リストが書かれた時点の11件に入っていなかった。配布状況を数えるときは、
 > 上の「配布済み」の表（callerの実在）を起点にする。
@@ -590,7 +607,7 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 | `RELEASE_CHANGELOG`を反映する | `shopping-list`・`dayspan`・`meisai-lab`・`solitaire`・**`clip-hive`**（#1591で対応へ改修）・**`ops-dashboard`**（#1591で新設）・**`issue-deck`**（#1764で新設） |
 |---|---|
 | 追記はするが**枠だけ**（`RELEASE_CHANGELOG`を読まない） | `signaly`（`scripts/bump_version.py`が`frontend/changelog.js`へスタブを足す。`bump-command`経由のため`npm`のlifecycleではない） |
-| 何もしない（バージョンだけが上がる） | `car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide` |
+| 何もしない（バージョンだけが上がる） | `car-care`・`subscription-lists`・`asset-manager`・`portfolio`・`myroom`・`db-console`・`aide`・**`aide-bot`**（更新履歴ファイルと`"version"` lifecycleスクリプトのどちらも持たない） |
 
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
@@ -646,6 +663,9 @@ for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
   echo "$out"
 done
 ```
+
+**`aide-bot`は3つとも立ち上げ（#2213）の時点で配置済み**で、この表の母集団に入っていない。
+`claude-pr-repair.yml`を`issue-deck`以外で持つ最初のリポジトリでもある。
 
 **この配布経路は自動修復専用ではない**（#1475）。上の
 「`claude-review-develop.yml`の配布状況」で配ると決めた`claude-review-develop.yml`も、
@@ -710,6 +730,9 @@ callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`�
 - `docs`・`claude-config`・`gucchii-os`・`pi0w_260719`・`uptime-kuma`・`sensor_260531`・
   `sensor_260218`・`wifi-speed` — `deploy.yml`を持たない
 
+**`aide-bot`は#2213の立ち上げ時に、`deploy.yml`の`tag`ジョブとセットで最初から配置した**
+（`with:`は無し＝既定値の`package.json`・`.version`・`v`）。下の確認コマンドの一覧にも足してある。
+
 **新しくリポジトリを増やしたときは、`deploy.yml`に`tag`ジョブを入れるかどうかとセットで判断する。**
 配布（`propagate-workflow-tag.yml`）は既存ファイルのタグを書き換えるだけで、callerの新規追加は
 行わない（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローのタグ運用」）。
@@ -720,7 +743,8 @@ callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`�
 ```bash
 # 配置状況の確認
 for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
-         portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide; do
+         portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
+         aide-bot; do
   echo -n "$r: "
   gh api "repos/guchi-apps/$r/contents/.github/workflows/version-tag-check.yml" --jq .name \
     2>/dev/null || echo "未配置"
@@ -759,11 +783,14 @@ done
 残り11リポジトリは標準どおり実装済み（`for i in $(seq 1 30)` + `sleep 2`）。ただし**`aide`だけは
 `seq 1 15`で待ち時間が30秒**しかない（形は同じ）。
 
+**#2213で増えた`aide-bot`も標準どおり**（`appleboy/ssh-action` → pm2、`seq 1 30` + `sleep 2`で
+`http://127.0.0.1:${PORT}/`を叩く）。立ち上げ時点で満たしているため、この横展開の対象外。
+
 ```bash
 # 実装状況の確認。deploy.yml に health が無いリポジトリは、呼び出し先のスクリプトも見ること
 for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
          portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
-         subpc vps issue-deck; do
+         aide-bot subpc vps issue-deck; do
   printf '%-20s ' "$r"
   gh api "repos/guchi-apps/$r/contents/.github/workflows/deploy.yml?ref=main" --jq .content \
     2>/dev/null | base64 -d | grep -oiE 'seq 1 [0-9]+' | head -1 || echo "なし"
@@ -807,6 +834,7 @@ done
 | `guchi-apps/ops-dashboard` | — | ○（※3） |
 | `guchi-apps/db-console` | — | ○（※3） |
 | `guchi-apps/aide` | — | ○（※3） |
+| `guchi-apps/aide-bot` | — | ○（※6） |
 | `guchi-apps/subpc` | — | ○（※4） |
 | `guchi-apps/vps` | — | ○（※4） |
 | `guchi-apps/docs` | — | ○（※4） |
@@ -867,6 +895,14 @@ done
 持たないため進捗が`Implementation`で止まる**（導入は guchi-apps/claude-config#2）。
 `package.json`を持たないがポート帯（23000）は同じ理由で確保した。フォルダの信頼確認（#1838）だけは
 対話が要るので手作業として起票した（#1994）。実測と判断は上記「`claude-config`（個人設定）」を参照。
+
+※6 `aide-bot`は#2213で追加した（public）。**画面の「新規アプリを立ち上げる」（#2188）が起票した
+手作業Issue（#2214）でcloneと`local-repos.conf`への記載を済ませてある**ため、サブPCからは
+汎用ランチャーで起動できる。**ただしポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)）は
+立ち上げの流れが面倒を見ておらず、#2213で手で足した**（24000）。載せないと汎用ランチャーの既定
+`3000 + Issue番号`に落ち、同じく未登録のリポジトリと相乗りする。**次に立ち上げるアプリでも同じ穴が
+開く**ので、ウィザードが生成するもの（[new-app-launch.md](new-app-launch.md)「作られるもの」）に
+帯の払い出しを足すかどうかは#2225で扱う。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
