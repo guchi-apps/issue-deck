@@ -57,6 +57,8 @@ jobs:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
+        # 通知が届かないことでリリース済みのrunを赤くしない（#2237）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}

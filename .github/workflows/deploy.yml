@@ -362,6 +362,9 @@ jobs:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
+        # 通知はデプロイの成否そのものではない。ここが失敗してもrun全体を落とさない
+        # （Signalyが止まっている間のmainマージでデプロイ成功のrunが赤くなった。#2237）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: issue-deck
@@ -392,6 +395,8 @@ jobs:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
+        # 通知が届かないことでリリース済みのrunを赤くしない（#2237）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}

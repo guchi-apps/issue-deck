@@ -562,6 +562,27 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
 **Signalyでのチャンネル作成と1Passwordへのフィールド登録は人間の作業で、エージェントは
 実行できない。**
 
+### 通知の障害でrunを赤くしない（#2237）
+
+セッション側の「通知の障害でセッションを止めない」（後述）と対になる方針で、
+`.github/scripts/signaly-notify.sh`も**何が起きても`exit 0`で返す**。
+
+- v4.33.0のmainマージでは、`tag`・`build`・`deploy`・`release`が全て成功しているのに通知の
+  `curl`が503で落ち、`Deploy to Production`のrunが失敗として残った（run 32721175959）。
+  **通知はデプロイの結果の記録であって、デプロイの成否そのものではない**
+- 送信は`--retry 2 --retry-delay 2`付きで行う。`--retry`はタイムアウトと408・429・500・502・
+  503・504を一時エラーとみなすので、Signaly自身のデプロイ中に当たった503はここで拾える
+- それでも届かなければ`::warning::`だけを残す。**気付けるのはrunの警告だけ**なので、
+  webhookのURLが恒久的に壊れた場合はここに出続ける
+- **失敗時にcurlのstderrは出さない。** 接続に失敗したときのメッセージにはwebhookのホスト名が
+  載り、GitHubのマスクは完全一致でしか効かないため、runのログへ接続先が残ってしまう。
+  代わりに`%{http_code}`だけを出す（接続できなかった場合は`000`）
+- 呼び出し側のステップにも`continue-on-error: true`を付ける（`ci.yml`・`deploy.yml`・
+  `release.yml`・`reusable-deploy-retry.yml`）。**スクリプトは各リポジトリの
+  `.github/scripts/`にコピーして使う運用**で、古いコピーを置いたままのリポジトリでは
+  スクリプト側の`exit 0`が効かないため、ワークフロー側でも守る
+- 境界は`scripts/signaly-notify.test.mjs`で固定してある（503を返すwebhookに対して終了コード0）
+
 ## セットアップ
 
 1. **【人間】** Signalyにセッション通知用のチャンネルを作り、Webhook URLをコピーする。
