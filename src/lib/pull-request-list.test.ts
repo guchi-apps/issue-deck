@@ -215,6 +215,55 @@ describe("filterPullRequestsByView", () => {
     ]);
   });
 
+  // 判定ワークフローのcheck-runはCI状態の集約から外してあるため（#1799）、Claudeがレビュー
+  // している最中でも`ciState`は`success`のまま。押せる操作が無いので「実行中」側へ入れる。
+  it("マージ可否の判定中はCI通過でも完了に入れない（#2283）", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, ciState: "success" }),
+      pullRequest({
+        number: 2,
+        ciState: "success",
+        mergeJudgement: {
+          state: "pending",
+          step: "claude-review",
+          runUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+          aiReview: AI_REVIEW_NONE,
+        },
+      }),
+      pullRequest({
+        number: 3,
+        ciState: "failure",
+        mergeJudgement: {
+          state: "pending",
+          step: "auto-merge",
+          runUrl: null,
+          aiReview: AI_REVIEW_NONE,
+        },
+      }),
+    ];
+
+    expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([1]);
+    expect(filterPullRequestsByView(pullRequests, "in-progress").map((pr) => pr.number)).toEqual([
+      2, 3,
+    ]);
+  });
+
+  // 判定のcheck-runが1件も無いリポジトリ（ワークフロー未配布・起動前）まで巻き込まない。
+  it("判定がsettled・unknownのPRは今までどおり完了に入る（#2283）", () => {
+    const pullRequests = [
+      pullRequest({
+        number: 1,
+        ciState: "success",
+        mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      }),
+      pullRequest({ number: 2, ciState: "success" }),
+    ];
+
+    expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([
+      1, 2,
+    ]);
+  });
+
   // ドラフトはCI状態を取得していないので常にunknown。CI状態を取得したが確定していないPRと
   // 同じく「まだ判断できない」ため処理中側へ入れる。
   it("処理中はCI待ち・CI状態不明・ドラフトを返す", () => {
@@ -261,6 +310,27 @@ describe("computePullRequestNavCounts", () => {
     );
 
     expect(counts).toEqual({ all: 4, "in-progress": 2, completed: 2 });
+  });
+
+  it("マージ可否の判定中のPRは実行中側に数える（#2283）", () => {
+    const counts = computePullRequestNavCounts(
+      [
+        pullRequest({ number: 1, ciState: "success" }),
+        pullRequest({
+          number: 2,
+          ciState: "success",
+          mergeJudgement: {
+            state: "pending",
+            step: "claude-review",
+            runUrl: null,
+            aiReview: AI_REVIEW_NONE,
+          },
+        }),
+      ],
+      true,
+    );
+
+    expect(counts).toEqual({ all: 2, "in-progress": 1, completed: 1 });
   });
 
   it("未取得のときはどのビューも件数を出さない", () => {

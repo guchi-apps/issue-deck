@@ -152,6 +152,14 @@ export function sortPullRequestsByUpdated(
  *
  * ドラフトとCI状態不明を`in-progress`側へ入れているのは、どちらも「まだ結果が確定していない」
  * ためにマージの判断ができない点で同じだから（ドラフトはCI状態を取得していないので常に`unknown`）。
+ *
+ * **自動マージ可否の判定中（`isMergeJudgementPending`）も`in-progress`側へ入れる**（#2283）。
+ * 判定ワークフロー（`claude-review-develop.yml`）のcheck-runはCI状態の集約から外してあるため
+ * （#1799）、Claudeがレビューしている最中でも`ciState`は`success`になり、「マージ待ち」に
+ * 並んでいた。だが判定中は画面のマージボタン自体が無効で（#1968）、押せる操作が何も無い。
+ * 「いま押せるか」で二分するのは、確認待ちの一覧が判定中のPRを外したのと同じ考え方
+ * （`isMergeWaitingForChecks`・#2081）。ベルの「対応が必要なもの」もこの母集団を使うため、
+ * 一覧・件数バッジからも同時に外れる（`lib/notifications.ts`）。
  */
 export function filterPullRequestsByView(
   pullRequests: PullRequestSummary[],
@@ -160,7 +168,10 @@ export function filterPullRequestsByView(
   return pullRequests.filter((pullRequest) => {
     if (pullRequest.state !== "open") return false;
     if (view === "all") return true;
-    const completed = !pullRequest.draft && ["success", "failure"].includes(pullRequest.ciState);
+    const completed =
+      !pullRequest.draft &&
+      ["success", "failure"].includes(pullRequest.ciState) &&
+      !isMergeJudgementPending(pullRequest.mergeJudgement);
     return view === "completed" ? completed : !completed;
   });
 }
