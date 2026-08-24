@@ -59,11 +59,10 @@
 - **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
   certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
   反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **Signalyのチャンネル作成。** Googleログインの背後にある画面操作で、共有知識の
-  `guides/signaly-notifications.md` も「実行者: 人間のみ」としている。**控えたWebhook URLの
-  登録は自動化してある**ので、人が行うのはチャンネルを作って値をコマンドへ貼るところまで。
 - **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
-  アプリ自身の値（配置先・DB名・許可メール・Signaly）は後述のとおり自動で投入する。
+  アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
+  CI・デプロイ通知の`SIGNALY_WEBHOOK_URL`はorganization secretへ寄せたため（#2255）、
+  新規アプリの立ち上げにSignalyのチャンネル作成もWebhook URLの登録も要らない。
 - **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
@@ -137,8 +136,10 @@
 
 - **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
   Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
-- **人が決める値**（SignalyのWebhook URL）だけを**ブラウザの手作業Issue**に残す。残す形も
-  同じスクリプトの1コマンドで、控えた値を`--ci-webhook-url`へ貼るだけにする。
+- **SignalyのWebhook URLはここで扱わない。** organization secretへ寄せたため（#2255）、
+  ブラウザの手作業Issueにチャンネル作成・登録の手順は残さない。スクリプト自体は
+  引き続き`--ci-webhook-url`オプションを持つが（他アプリの値を後から直すときなどに使う）、
+  立ち上げのコマンドからは渡さない。
 - **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
   発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
   **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。

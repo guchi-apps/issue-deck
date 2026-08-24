@@ -395,12 +395,10 @@ describe("buildBrowserManualIssueBody", () => {
     expect(selected).toContain("settings/installations");
   });
 
-  it("Signalyのwebhook URLは、控えた値を渡すだけのコマンドで残す（#2249）", () => {
-    expect(body).toContain("Signaly");
-    expect(body).toContain("provision-app-secrets.sh");
-    expect(body).toContain("--ci-webhook-url '<控えたWebhook URL>'");
-    // 機械的に定まる値はサブPCの手作業Issueで投入済みなので、ここでは求めない
-    expect(body).not.toContain("--db-name");
+  it("SignalyのWebhook URLはorganization secretから来るため、チャンネル作成・登録を求めない（#2255）", () => {
+    expect(body).not.toContain("Signaly");
+    expect(body).not.toContain("provision-app-secrets.sh");
+    expect(body).not.toContain("--ci-webhook-url");
   });
 
   it("マルチエージェント運用に対応させるときだけWORKFLOW_PATを求める", () => {
@@ -426,9 +424,9 @@ describe("buildBrowserManualIssueBody", () => {
   it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
     const steps = (refs: NewAppIssueRefs) =>
       parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
-    // DNS・Signalyのチャンネル作成・シークレットの投入・Actions secrets（#2249）
-    expect(steps(REFS)).toBe(4);
-    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(5);
+    // DNS・Actions secrets（#2255でSignalyのチャンネル作成・webhook投入を削除）
+    expect(steps(REFS)).toBe(2);
+    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(3);
   });
 });
 

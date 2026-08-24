@@ -211,8 +211,8 @@ export function buildNewAppPlan(
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
       description: githubAppNeedsRepositoryAdd
-        ? "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecrets・GitHub Appもここで行う"
-        : "AレコードはVPSの管理画面でしか登録できない。SignalyのチャンネルとSecretsもここで行う",
+        ? "AレコードはVPSの管理画面でしか登録できない。Secrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。Secretsもここで行う",
     },
   ];
 
@@ -304,7 +304,7 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・Signalyのチャンネル・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
+2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
 3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
 4. \`${repo}\` の初期化と、developへのマージ
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
@@ -400,7 +400,7 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
     --ref <このIssueのブランチ>
   \`\`\`
 
-- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く
+- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
 - [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
 ${multiAgent}
 ## 参考
@@ -721,7 +721,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
     verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
 pollerは申告のたびに対応表を読み直すので、再起動は要りません。
 **この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
-\`.github/secrets-manifest.tsv\` が要るので、初期化のマージ後（Signalyのwebhook URLを入れるとき）に揃います。`,
+\`.github/secrets-manifest.tsv\` が要るので、初期化Issueでこのマニフェストを作ってマージした後に揃います。`,
     why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
@@ -876,24 +876,12 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: "なし",
-    otherPrerequisites: `1PasswordとGitHubにログイン済みであること。Signalyの手順はサブPCで実行するため、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること`,
-    steps: `${dnsStep}- [ ] （ブラウザ）Signaly（https://signaly.gucchii.com/）でCI・デプロイ通知のチャンネルを作り、Webhook URLを控える
-
-  \`\`\`
-  チャンネル名: ${spec.repositoryName}-ci
-  \`\`\`
-
-- [ ] （サブPC）控えたWebhook URLを1Passwordへ入れ、GitHubのsecretへ同期する
-
-  \`\`\`bash
-  ${provisionCommand(spec, "<控えたWebhook URL>")}
-  \`\`\`
-
-${secretsStep.trimEnd()}${githubAppStep}`,
+    otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
+    steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
     verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
-アプリ自身のシークレット（配置先・DB名・Signaly）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+アプリ自身のシークレット（配置先・DB名）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
-    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。Signalyのチャンネル作成もGoogleログインの背後にある画面操作で、共有知識の \`guides/signaly-notifications.md\` が「人間のみ」としています。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
