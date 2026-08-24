@@ -682,6 +682,43 @@ done
 **この表は手動記録なので、正は各リポジトリの`.github/workflows/`と画面の「未配布」欄。**
 配布PRをマージしたら、画面の欄から消えたことを確認したうえでこの表も直す。
 
+## `.github/scripts/signaly-notify.sh`の配布状況（#2240）
+
+**ワークフローではないが、同じ画面の同じパネルから配る**（設定＞フリート運用＞共有ワークフローの
+バージョン ＞「共有スクリプト」）。各リポジトリの`.github/scripts/`へコピーして使う運用のため、
+issue-deckを直しても自動では行き渡らない。
+
+2026-08-24時点で同じスクリプトを持つのは次の16リポジトリで、**全件が#2237・#2239の修正
+（通知が届かなくても`exit 0`で返す）より前の内容**だった。
+
+`clip-hive` / `aide-bot` / `signaly` / `meisai-lab` / `dayspan` / `asset-manager` /
+`shopping-list` / `car-care` / `myroom` / `aide` / `ops-dashboard` / `subscription-lists` /
+`solitaire` / `portfolio` / `db-console` / `subpc`
+
+**`guchi-apps/subpc`だけは独自の変更がある。** そのリポジトリだけの`NOTIFY_NOTE`（反映は成功
+したが再起動などの操作が残っていることを通知へ足す）が入っており、配布は中身をそのまま上書き
+するため消える。画面の行に「独自の変更あり」が出て、消える記述は配布PRの本文に書き出されるので、
+**マージ前に取り込むかどうかを判断すること。**
+
+**この表は手動記録なので、正は各リポジトリの`.github/scripts/`と画面の「未更新」欄。**
+判定・配布の仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
+「ワークフロー以外の配布物を配る」を参照。
+
+```bash
+# 配布状況の確認（issue-deckのmainと同じ内容かどうか）
+gh api "repos/guchi-apps/issue-deck/contents/.github/scripts/signaly-notify.sh?ref=main" \
+  --jq .content | base64 -d > /tmp/signaly-notify-source.sh
+for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-list car-care \
+         myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
+  br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
+  gh api "repos/guchi-apps/$r/contents/.github/scripts/signaly-notify.sh?ref=$br" --jq .content \
+    2>/dev/null | base64 -d > /tmp/signaly-notify-target.sh \
+    || { echo "$r: 未配置"; continue; }
+  cmp -s /tmp/signaly-notify-source.sh /tmp/signaly-notify-target.sh \
+    && echo "$r: 最新" || echo "$r: 未更新"
+done
+```
+
 ## `version-tag-check.yml`の配布状況
 
 上の表の「導入済み自動化ワークフロー」列は無人実行（計画〜実装〜レビュー）のワークフローについて

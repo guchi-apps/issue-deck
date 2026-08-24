@@ -7,14 +7,18 @@ import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
   canStartPropagation,
   canStartRepairPropagation,
+  canStartSharedFilePropagation,
   evaluateWorkflowTags,
   findRepairWorkflowPullRequest,
+  findSharedFilePullRequest,
   extractWorkflowTagRef,
   findWorkflowTagPullRequest,
   latestWorkflowTag,
   parseWorkflowTagVersion,
   propagationTargets,
   repairPropagationTargets,
+  sharedFilePropagationTargets,
+  SHARED_FILE_SPECS,
   type PropagationRun,
   type WorkflowTagPullRequest,
   type WorkflowTagRef,
@@ -70,6 +74,12 @@ export type WorkflowTagOverview = {
    * 既存callerのsed置換、こちらは新しいcallerの追加で、触るファイルが重ならない。
    */
   repairPropagation: PropagationRun | null;
+  /**
+   * ワークフロー以外の配布物の更新（`propagate-shared-files.yml`）の最新の実行（#2240）。
+   *
+   * これも別のrun。触るのは`.github/scripts/`で、上の2つ（`.github/workflows/`）と重ならない。
+   */
+  sharedFilePropagation: PropagationRun | null;
 };
 
 /** GraphQLで読む対象リポジトリ（DBから引いた行のうち、問い合わせに要る項目だけ） */
@@ -90,11 +100,21 @@ type TreeEntry = {
 /** GraphQLで一緒に読むopenなPull Request（更新PRが既に有るかの判定に使う） */
 type OpenPullRequest = { number: number; title: string; url: string };
 
-/** エイリアス1つぶんの応答。ディレクトリが無ければ `object` が null になる */
-type RepositoryEntry = {
-  object: { entries?: TreeEntry[] | null } | null;
-  pullRequests?: { nodes?: (OpenPullRequest | null)[] | null } | null;
-} | null;
+/** Blobの本文。テキストでなければ `text` が null になる */
+type BlobText = { text?: string | null } | null;
+
+/**
+ * エイリアス1つぶんの応答。ディレクトリが無ければ `object` が null になる。
+ *
+ * 配布物のBlob（`sf0`・`sf1`…）はファイル数ぶんの動的なエイリアスなので、
+ * インデックスシグネチャで受けて`sharedFileAlias`で引く（#2240）。
+ */
+type RepositoryEntry =
+  | ({
+      object: { entries?: TreeEntry[] | null } | null;
+      pullRequests?: { nodes?: (OpenPullRequest | null)[] | null } | null;
+    } & Record<string, unknown>)
+  | null;
 
 /** 1リポジトリぶんの読み取り結果 */
 type RepositoryRefs = {
@@ -104,8 +124,20 @@ type RepositoryRefs = {
    * **中身ではなくファイルの実在**で決まるため、参照タグの解析と同じ応答から拾える。
    */
   files: string[];
+  /**
+   * ワークフロー以外の配布物の本文（#2240）。パス → 本文。置かれていなければ`null`。
+   *
+   * **こちらは中身まで読む。** callerは「置いてあるか」で配るかが決まるが、配布物は
+   * 既に全リポジトリに置いてあり、判定するのは「配布元と同じ内容か」だから。
+   */
+  sharedFiles: Record<string, string | null>;
   pullRequests: OpenPullRequest[];
 };
+
+/** GraphQLのエイリアス名。配布物はリポジトリの選択セット内で `sf0`・`sf1`… とする */
+function sharedFileAlias(fileIndex: number): string {
+  return `sf${fileIndex}`;
+}
 
 /**
  * 1リポジトリから読むopenなPRの件数。
@@ -171,9 +203,15 @@ async function fetchRefsBatch(
   token: string,
 ): Promise<Map<string, RepositoryRefs>> {
   const declarations = targets
-    .map(
-      (_, index) =>
-        `$owner${index}: String!, $name${index}: String!, $expression${index}: String!`,
+    .map((_, index) =>
+      [
+        `$owner${index}: String!`,
+        `$name${index}: String!`,
+        `$expression${index}: String!`,
+        // 配布物は1ファイル＝1変数。パスをクエリ本文へ埋め込まないのは、値を必ず変数で渡す
+        // という他の箇所と同じ方針（`SHARED_FILE_SPECS`は固定値だが形を揃える）
+        ...SHARED_FILE_SPECS.map((_spec, fileIndex) => `$shared${index}_${fileIndex}: String!`),
+      ].join(", "),
     )
     .join(", ");
   const selections = targets
@@ -182,6 +220,10 @@ async function fetchRefsBatch(
     object(expression: $expression${index}) {
       ... on Tree { entries { name type object { ... on Blob { text } } } }
     }
+${SHARED_FILE_SPECS.map(
+  (_spec, fileIndex) =>
+    `    ${sharedFileAlias(fileIndex)}: object(expression: $shared${index}_${fileIndex}) { ... on Blob { text } }`,
+).join("\n")}
     pullRequests(states: OPEN, first: ${OPEN_PULL_REQUESTS_PER_REPOSITORY}, orderBy: { field: CREATED_AT, direction: DESC }) {
       nodes { number title url }
     }
@@ -194,6 +236,9 @@ async function fetchRefsBatch(
     variables[`owner${index}`] = target.ownerLogin;
     variables[`name${index}`] = target.name;
     variables[`expression${index}`] = `${target.defaultBranch}:.github/workflows`;
+    SHARED_FILE_SPECS.forEach((spec, fileIndex) => {
+      variables[`shared${index}_${fileIndex}`] = `${target.defaultBranch}:${spec.path}`;
+    });
   });
 
   const data = await githubGraphql<Record<string, RepositoryEntry>>(
@@ -221,12 +266,67 @@ async function fetchRefsBatch(
       if (ref) refs.push(ref);
     }
 
+    const sharedFiles: Record<string, string | null> = {};
+    SHARED_FILE_SPECS.forEach((spec, fileIndex) => {
+      const blob = repository?.[sharedFileAlias(fileIndex)] as BlobText | undefined;
+      sharedFiles[spec.path] = typeof blob?.text === "string" ? blob.text : null;
+    });
+
     const pullRequests = (repository?.pullRequests?.nodes ?? []).filter(
       (node): node is OpenPullRequest => node !== null,
     );
-    refsByRepository.set(target.fullName, { refs, files, pullRequests });
+    refsByRepository.set(target.fullName, { refs, files, sharedFiles, pullRequests });
   });
   return refsByRepository;
+}
+
+/**
+ * 配布元（issue-deckの`main`）の配布物の本文を読む（#2240）。
+ *
+ * **`main`から読む。** 配布ワークフローは`ref: main`で起動し`actions/checkout`が`main`を
+ * 取るため、実際に配られるのは`main`の内容。ここを`develop`にすると、まだ本番へ出ていない
+ * 内容を基準に「古い」と判定してしまい、画面の件数と配られる中身が食い違う。
+ *
+ * **読めなければ空で返す。** `compareSharedFiles`は配布元が読めないファイルを対象にしないため、
+ * 取得に失敗しても「全リポジトリが配布対象」にはならない（一覧自体は出す）。
+ */
+async function fetchSharedFileSources(token: string): Promise<Record<string, string | null>> {
+  const [owner, name] = SOURCE_REPOSITORY.split("/");
+  const declarations = SHARED_FILE_SPECS.map(
+    (_spec, fileIndex) => `$shared${fileIndex}: String!`,
+  ).join(", ");
+  const selections = SHARED_FILE_SPECS.map(
+    (_spec, fileIndex) =>
+      `    ${sharedFileAlias(fileIndex)}: object(expression: $shared${fileIndex}) { ... on Blob { text } }`,
+  ).join("\n");
+
+  const variables: Record<string, unknown> = { owner, name };
+  SHARED_FILE_SPECS.forEach((spec, fileIndex) => {
+    variables[`shared${fileIndex}`] = `main:${spec.path}`;
+  });
+
+  try {
+    const data = await githubGraphql<{ repository: Record<string, unknown> | null }>(
+      token,
+      `query($owner: String!, $name: String!, ${declarations}) {
+  repository(owner: $owner, name: $name) {
+${selections}
+  }
+}`,
+      variables,
+      "配布する共有ファイルの取得",
+    );
+
+    const sources: Record<string, string | null> = {};
+    SHARED_FILE_SPECS.forEach((spec, fileIndex) => {
+      const blob = data.repository?.[sharedFileAlias(fileIndex)] as BlobText | undefined;
+      sources[spec.path] = typeof blob?.text === "string" ? blob.text : null;
+    });
+    return sources;
+  } catch (error) {
+    console.warn(`[workflow-tags] 配布する共有ファイルを取得できませんでした: ${String(error)}`);
+    return {};
+  }
 }
 
 /**
@@ -254,7 +354,13 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
   });
 
   if (repositories.length === 0) {
-    return { latest: null, repositories: [], propagation: null, repairPropagation: null };
+    return {
+      latest: null,
+      repositories: [],
+      propagation: null,
+      repairPropagation: null,
+      sharedFilePropagation: null,
+    };
   }
 
   // インストールごとにトークンを取り直す。1ユーザーが複数インストールを持つことがある
@@ -268,7 +374,10 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
   };
 
   const firstToken = await tokenFor(repositories[0]!.installation.installationId);
-  const latest = await fetchLatestTag(firstToken);
+  const [latest, sharedFileSources] = await Promise.all([
+    fetchLatestTag(firstToken),
+    fetchSharedFileSources(firstToken),
+  ]);
 
   // トークンはインストール単位なので、1本のクエリに混ぜられるのは同じインストールのぶんだけ
   const byInstallation = new Map<number, TargetRepository[]>();
@@ -300,19 +409,31 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
       latest,
     );
     statuses.push(
-      evaluateWorkflowTags(repository.fullName, result.refs, latest, updatePullRequest, {
-        files: result.files,
-        pullRequest: findRepairWorkflowPullRequest(result.pullRequests),
-      }),
+      evaluateWorkflowTags(
+        repository.fullName,
+        result.refs,
+        latest,
+        updatePullRequest,
+        {
+          files: result.files,
+          pullRequest: findRepairWorkflowPullRequest(result.pullRequests),
+        },
+        {
+          source: sharedFileSources,
+          target: result.sharedFiles,
+          pullRequest: findSharedFilePullRequest(result.pullRequests),
+        },
+      ),
     );
   }
 
-  const [propagation, repairPropagation] = await Promise.all([
+  const [propagation, repairPropagation, sharedFilePropagation] = await Promise.all([
     fetchPropagationRun(firstToken, PROPAGATE_WORKFLOW_FILE),
     fetchPropagationRun(firstToken, PROPAGATE_REPAIR_WORKFLOW_FILE),
+    fetchPropagationRun(firstToken, PROPAGATE_SHARED_FILES_WORKFLOW_FILE),
   ]);
 
-  return { latest, repositories: statuses, propagation, repairPropagation };
+  return { latest, repositories: statuses, propagation, repairPropagation, sharedFilePropagation };
 }
 
 /**
@@ -344,6 +465,9 @@ const PROPAGATE_WORKFLOW_FILE = "propagate-workflow-tag.yml";
 
 /** 不足している自動修復callerを配るワークフロー（issue-deck 側。#1948） */
 const PROPAGATE_REPAIR_WORKFLOW_FILE = "propagate-repair-workflows.yml";
+
+/** ワークフロー以外の配布物を更新するワークフロー（issue-deck 側。#2240） */
+const PROPAGATE_SHARED_FILES_WORKFLOW_FILE = "propagate-shared-files.yml";
 
 export type CreateWorkflowTagResult = {
   created: boolean;
@@ -603,6 +727,79 @@ export async function dispatchRepairPropagation(
   const res = await githubFetch(url, token, {
     method: "POST",
     // 配布処理・雛形は`main`のものを使う（配るワークフローはタグ配布と揃えて本番の内容にする）
+    body: { ref: "main", inputs: { targets: JSON.stringify(targets) } },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(
+      res.status,
+      `GitHub API request failed: ${res.status} ${url} ${detail}`,
+    );
+  }
+
+  return { dispatched: true, targets };
+}
+
+export type DispatchSharedFilePropagationResult = {
+  dispatched: boolean;
+  /** 配布先とファイルの組。画面の件数表示にそのまま使う */
+  targets: { repository: string; files: string[] }[];
+  /** 起動しなかった理由。`running`のときだけ呼び出し側が409にする */
+  reason?: "running" | "no_targets";
+  message?: string;
+};
+
+/**
+ * 配布物（ワークフロー以外）が古いリポジトリへ、最新版へ更新するPRを作るワークフローを
+ * 起動する（#2240）。
+ *
+ * **なぜ要るか。** `.github/scripts/signaly-notify.sh`は各リポジトリの`.github/scripts/`へ
+ * コピーして使う運用のため、issue-deck側を直しても行き渡らない。#2237・#2239で
+ * 「通知が届かなくても`exit 0`で返す」形に直したが、届いていないリポジトリでは
+ * **デプロイが成功しているのにrunだけが赤い**状態が残る。16件の個別Issueを立てる代わりに、
+ * 既にある配布の仕組みへ載せる。
+ *
+ * **対象はここ（DBを持つissue-deck側）で決めて渡す。** ワークフロー側で再検知すると、
+ * 画面に出ている一覧と実際の対象がずれる（タグ配布・caller配布と同じ方針）。
+ *
+ * **自動マージはしない。** caller配布と同じく、配布先でPRを確認してマージする。
+ * 独自の変更が入っているリポジトリ（`customizedSharedFiles`）では上書きで消える行があるため、
+ * 人が読む余地を必ず残す。
+ */
+export async function dispatchSharedFilePropagation(
+  userId: string,
+): Promise<DispatchSharedFilePropagationResult> {
+  const overview = await collectWorkflowTags(userId);
+
+  const decision = canStartSharedFilePropagation(overview.sharedFilePropagation);
+  if (!decision.allowed) {
+    return { dispatched: false, targets: [], reason: decision.reason, message: decision.message };
+  }
+
+  const targets = sharedFilePropagationTargets(overview.repositories).map((status) => ({
+    repository: status.fullName,
+    files: status.outdatedSharedFiles,
+  }));
+
+  // 対象が無いのに起動すると、何もしないrunが履歴に残って紛らわしい
+  if (targets.length === 0) {
+    return { dispatched: false, targets: [], reason: "no_targets" };
+  }
+
+  const [owner, repo] = SOURCE_REPOSITORY.split("/");
+  const source = await db.repository.findFirst({
+    where: { fullName: SOURCE_REPOSITORY },
+    select: { installation: { select: { installationId: true } } },
+  });
+  if (!source) {
+    throw new Error(`${SOURCE_REPOSITORY} が同期されていません`);
+  }
+
+  const token = await getInstallationToken(source.installation.installationId);
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${PROPAGATE_SHARED_FILES_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    // 配る中身も`main`のものを使う（画面が「古い」と判定した基準と揃える）
     body: { ref: "main", inputs: { targets: JSON.stringify(targets) } },
   });
   if (!res.ok) {

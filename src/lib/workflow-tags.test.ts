@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   canStartPropagation,
   canStartRepairPropagation,
+  canStartSharedFilePropagation,
+  compareSharedFiles,
   evaluateWorkflowTags,
+  findSharedFilePullRequest,
+  hasLocalSharedFileContent,
+  sharedFileLabel,
+  sharedFilePropagationTargets,
+  sharedFilePullRequestTitle,
+  SHARED_FILE_SPECS,
   findRepairWorkflowPullRequest,
   extractWorkflowTagRef,
   findWorkflowTagPullRequest,
@@ -223,6 +231,9 @@ describe("propagationTargets / workflowTagGroup", () => {
     updatePullRequest: null,
     missingRepairWorkflows: [],
     repairPullRequest: null,
+    outdatedSharedFiles: [],
+    customizedSharedFiles: [],
+    sharedFilePullRequest: null,
     ...overrides,
   });
 
@@ -389,6 +400,9 @@ describe("repairPropagationTargets", () => {
     updatePullRequest: null,
     missingRepairWorkflows: [],
     repairPullRequest: null,
+    outdatedSharedFiles: [],
+    customizedSharedFiles: [],
+    sharedFilePullRequest: null,
     ...overrides,
   });
 
@@ -481,5 +495,219 @@ describe("repairWorkflowLabel", () => {
 
   it("未知のファイル名はそのまま返す", () => {
     expect(repairWorkflowLabel("unknown.yml")).toBe("unknown.yml");
+  });
+});
+
+/** 配布物のパス。テストでは第1号（`signaly-notify.sh`）を使う */
+const SHARED_FILE = SHARED_FILE_SPECS[0]!.path;
+
+describe("hasLocalSharedFileContent", () => {
+  it("配布元に無い語があれば真", () => {
+    // `guchi-apps/subpc`のコピーにある`NOTIFY_NOTE`のような、そのリポジトリだけの追加
+    expect(
+      hasLocalSharedFileContent("a\nb\n", 'a\nb\nexport NOTIFY_NOTE="${NOTIFY_NOTE:-}"\n'),
+    ).toBe(true);
+  });
+
+  it("書き換わっただけの行は真にしない", () => {
+    // **行で比べていたときの取りこぼしの本体。** 配布元で`run_url=`の右辺を包んだだけの
+    // 変更でも、行の集合で見ると配布先の行が「消える行」になり、実測で16件中16件が
+    // 該当して目印にならなかった
+    const source = 'run_url="${NOTIFY_RUN_URL:-${GITHUB_SERVER_URL}/${GITHUB_RUN_ID}}"\n';
+    const target = 'run_url="${GITHUB_SERVER_URL}/${GITHUB_RUN_ID}"\n';
+
+    expect(hasLocalSharedFileContent(source, target)).toBe(false);
+  });
+
+  it("配布元の側にだけある語は数えない", () => {
+    // これから増える語であって、消えるものではない
+    expect(hasLocalSharedFileContent("alpha\nbeta\n", "alpha\n")).toBe(false);
+  });
+
+  it("日本語だけのコメントは語として数えない", () => {
+    // 語は識別子・変数名・コマンド名だけを見る（コメントの差だけで警告を出さない）
+    expect(hasLocalSharedFileContent("alpha\n", "alpha\n# 説明を足した\n")).toBe(false);
+  });
+});
+
+describe("compareSharedFiles", () => {
+  it("内容が違えば配布対象にする", () => {
+    const result = compareSharedFiles({ [SHARED_FILE]: "new" }, { [SHARED_FILE]: "old" });
+
+    expect(result.outdated).toEqual([SHARED_FILE]);
+  });
+
+  it("同じ内容ならスキップする", () => {
+    // **毎回PRを作らないための本体。** 判定は中身の一致だけで見る
+    const result = compareSharedFiles({ [SHARED_FILE]: "same" }, { [SHARED_FILE]: "same" });
+
+    expect(result.outdated).toEqual([]);
+  });
+
+  it("配布先に置かれていなければ対象にしない", () => {
+    // 呼び出し側のステップが無いリポジトリへスクリプトだけ置いても誰も呼ばない
+    const result = compareSharedFiles({ [SHARED_FILE]: "new" }, { [SHARED_FILE]: null });
+
+    expect(result.outdated).toEqual([]);
+  });
+
+  it("配布元が読めなければ対象にしない", () => {
+    // ここを緩めると、取得が失敗しただけで全リポジトリが配布対象になる
+    const result = compareSharedFiles({ [SHARED_FILE]: null }, { [SHARED_FILE]: "old" });
+
+    expect(result.outdated).toEqual([]);
+  });
+
+  it("独自の変更があるものを別に挙げる", () => {
+    const result = compareSharedFiles(
+      { [SHARED_FILE]: "alpha\nbeta\n" },
+      { [SHARED_FILE]: "alpha\nNOTIFY_NOTE\n" },
+    );
+
+    expect(result.outdated).toEqual([SHARED_FILE]);
+    expect(result.customized).toEqual([SHARED_FILE]);
+  });
+
+  it("独自の変更が無ければ customized は空", () => {
+    const result = compareSharedFiles(
+      { [SHARED_FILE]: "alpha\nbeta\ngamma\n" },
+      { [SHARED_FILE]: "alpha\nbeta\n" },
+    );
+
+    expect(result.outdated).toEqual([SHARED_FILE]);
+    expect(result.customized).toEqual([]);
+  });
+});
+
+describe("evaluateWorkflowTags の配布物まわり（#2240）", () => {
+  it("配布物の状況を判定結果へ載せる", () => {
+    const status = evaluateWorkflowTags(
+      "guchi-apps/subpc",
+      [],
+      null,
+      null,
+      {},
+      {
+        source: { [SHARED_FILE]: "alpha\nbeta\n" },
+        target: { [SHARED_FILE]: "alpha\nNOTIFY_NOTE\n" },
+      },
+    );
+
+    expect(status.outdatedSharedFiles).toEqual([SHARED_FILE]);
+    expect(status.customizedSharedFiles).toEqual([SHARED_FILE]);
+    expect(status.sharedFilePullRequest).toBeNull();
+  });
+
+  it("渡さなければ空になる", () => {
+    const status = evaluateWorkflowTags("guchi-apps/aide", [], null);
+
+    expect(status.outdatedSharedFiles).toEqual([]);
+    expect(status.customizedSharedFiles).toEqual([]);
+  });
+});
+
+describe("sharedFilePropagationTargets", () => {
+  const status = (overrides: Partial<WorkflowTagStatus>): WorkflowTagStatus => ({
+    fullName: "guchi-apps/aide",
+    refs: [],
+    outdated: false,
+    mismatched: false,
+    updatePullRequest: null,
+    missingRepairWorkflows: [],
+    repairPullRequest: null,
+    outdatedSharedFiles: [],
+    customizedSharedFiles: [],
+    sharedFilePullRequest: null,
+    ...overrides,
+  });
+
+  it("古い配布物があるリポジトリだけを対象にする", () => {
+    const targets = sharedFilePropagationTargets([
+      status({ fullName: "guchi-apps/aide", outdatedSharedFiles: [SHARED_FILE] }),
+      status({ fullName: "guchi-apps/dayspan" }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/aide"]);
+  });
+
+  it("更新PRが既にopenのリポジトリは対象から外す", () => {
+    // マージされるまで中身は古いままなので、除外しないと押すたびに2本目のPRが作られる
+    const targets = sharedFilePropagationTargets([
+      status({
+        fullName: "guchi-apps/aide",
+        outdatedSharedFiles: [SHARED_FILE],
+        sharedFilePullRequest: { number: 7, url: "https://example.test/pr/7" },
+      }),
+    ]);
+
+    expect(targets).toEqual([]);
+  });
+
+  it("独自の変更があっても対象から外さない", () => {
+    // 独自の変更があるリポジトリこそ修正が届いていない。消える行はPR本文で人へ見せる
+    const targets = sharedFilePropagationTargets([
+      status({
+        fullName: "guchi-apps/subpc",
+        outdatedSharedFiles: [SHARED_FILE],
+        customizedSharedFiles: [SHARED_FILE],
+      }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/subpc"]);
+  });
+});
+
+describe("findSharedFilePullRequest", () => {
+  const pr = (number: number, title: string) => ({
+    number,
+    title,
+    url: `https://example.test/pr/${number}`,
+  });
+
+  it("配布PRのタイトルで見つける", () => {
+    const found = findSharedFilePullRequest([
+      pr(1, "別のPR"),
+      pr(2, sharedFilePullRequestTitle()),
+    ]);
+
+    expect(found).toEqual({ number: 2, url: "https://example.test/pr/2" });
+  });
+
+  it("無ければ null", () => {
+    expect(findSharedFilePullRequest([pr(1, "別のPR")])).toBeNull();
+  });
+});
+
+describe("canStartSharedFilePropagation", () => {
+  it("実行中は断る", () => {
+    const decision = canStartSharedFilePropagation({
+      status: "in_progress",
+      conclusion: null,
+      htmlUrl: "https://example.test/run",
+      createdAt: "2026-08-24T00:00:00Z",
+    });
+
+    expect(decision.allowed).toBe(false);
+  });
+
+  it("完了していれば起こしてよい", () => {
+    const decision = canStartSharedFilePropagation({
+      status: "completed",
+      conclusion: "success",
+      htmlUrl: "https://example.test/run",
+      createdAt: "2026-08-24T00:00:00Z",
+    });
+
+    expect(decision.allowed).toBe(true);
+  });
+});
+
+describe("sharedFileLabel", () => {
+  it("パスを画面向けの説明に変える", () => {
+    expect(sharedFileLabel(".github/scripts/signaly-notify.sh")).toBe("Signaly通知スクリプト");
+  });
+
+  it("未知のパスはそのまま返す", () => {
+    expect(sharedFileLabel(".github/scripts/unknown.sh")).toBe(".github/scripts/unknown.sh");
   });
 });
