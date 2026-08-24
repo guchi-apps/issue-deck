@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
+import { planLocalPortBand } from "@/lib/github/local-port-band-api";
 import { repositoryExists } from "@/lib/github/repositories-api";
 import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
+import { LOCAL_PORT_BAND_CONF_PATH } from "@/lib/new-app/local-port-bands";
 import { NEW_APP_ORG, newAppKindProfile, type NewAppKind } from "@/lib/new-app/spec";
 import {
   chooseAvailablePort,
@@ -18,6 +20,7 @@ import {
  * - リポジトリ名が空いているか（GitHub）
  * - ホスト名が空いているか（`guchi-apps/vps`のREADMEとvhostの`ServerName`）
  * - 本番ポートの空き番号（READMEの2つの表から計算する）
+ * - ローカルセッションの開発サーバーのポート帯（issue-deckの`scripts/local-repo-ports.conf`）
  *
  * **何も作らない。** 押す前に何度でも呼べるようにしてある。
  *
@@ -52,6 +55,8 @@ async function handlePOST(request: NextRequest) {
       ? await repositoryExists(NEW_APP_ORG, repositoryName, token)
       : null;
 
+    const localPortBand = await describeLocalPortBand(token, repositoryName);
+
     // ホスト名を確かめないときはvhostを読まない（README だけでポートは決まる）
     const usage = await fetchVpsUsage(token, { includeVhosts: Boolean(hostname) });
     const profile = newAppKindProfile(kind);
@@ -61,6 +66,7 @@ async function handlePOST(request: NextRequest) {
         repository: { name: repositoryName, taken: repositoryTaken },
         hostname: { value: hostname, taken: null },
         port: { suggested: null, note: null },
+        localPortBand,
         vpsRead: false,
       };
     }
@@ -79,6 +85,7 @@ async function handlePOST(request: NextRequest) {
           ? [...usage.usedPorts].filter((port) => port >= range.from && port <= range.to).sort((a, b) => a - b)
           : [],
       },
+      localPortBand,
       vpsRead: true,
     };
   });
@@ -87,4 +94,45 @@ async function handlePOST(request: NextRequest) {
     return result.errorResponse;
   }
   return NextResponse.json(result.value);
+}
+
+export type LocalPortBandPreflight = {
+  /** 払い出す予定のベース値。決められなければ`null` */
+  base: number | null;
+  /** すでに対応表に載っていた */
+  alreadyListed: boolean;
+  /** 画面に出す1行 */
+  note: string;
+};
+
+/**
+ * ローカルセッションのポート帯の下見（#2225）。
+ *
+ * **読めなかったときも失敗にしない。** ここは押す前の表示で、実際の払い出しは
+ * `POST /api/new-app`が押された時点でもう一度読んで決める（そちらは読めなければ止める）。
+ */
+async function describeLocalPortBand(
+  token: string,
+  repositoryName: string,
+): Promise<LocalPortBandPreflight> {
+  if (!repositoryName) {
+    return { base: null, alreadyListed: false, note: "リポジトリ名を決めると払い出す帯が分かります" };
+  }
+  try {
+    const plan = await planLocalPortBand(token, `${NEW_APP_ORG}/${repositoryName}`);
+    return {
+      base: plan.base,
+      alreadyListed: plan.alreadyListed,
+      note: plan.alreadyListed
+        ? `すでに ${LOCAL_PORT_BAND_CONF_PATH} に載っています（ベース値 ${plan.base}）`
+        : `ベース値 ${plan.base} を確保します（開発サーバーは ${plan.base} + Issue番号）`,
+    };
+  } catch (error) {
+    console.warn("[POST /api/new-app/preflight] ポート帯を下見できませんでした", error);
+    return {
+      base: null,
+      alreadyListed: false,
+      note: `${LOCAL_PORT_BAND_CONF_PATH} を読めませんでした。立ち上げを押すと止まります。`,
+    };
+  }
 }

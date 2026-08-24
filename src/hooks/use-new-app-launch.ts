@@ -17,6 +17,8 @@ export type PreflightResult = {
   repository: { name: string; taken: boolean | null };
   hostname: { value: string; taken: boolean | null };
   port: { suggested: number | null; note: string | null; used?: number[] };
+  /** ローカルセッションの開発サーバーのポート帯（#2225） */
+  localPortBand: { base: number | null; alreadyListed: boolean; note: string };
   /** `guchi-apps/vps`を読めたか。falseなら空き番号は提案されない */
   vpsRead: boolean;
 };
@@ -102,16 +104,23 @@ export function useNewAppLaunch() {
   const launch = useCallback(
     async (
       spec: NewAppSpec,
-    ): Promise<{ created: NewAppCreatedRef[]; failed: boolean }> => {
+    ): Promise<{ created: NewAppCreatedRef[]; warnings: string[]; failed: boolean }> => {
       setIsLaunching(true);
       setError(null);
       try {
-        const result = await postJson<{ created: NewAppCreatedRef[] }>("/api/new-app", { spec });
-        return { created: result.created ?? [], failed: false };
+        const result = await postJson<{ created: NewAppCreatedRef[]; warnings?: string[] }>(
+          "/api/new-app",
+          { spec },
+        );
+        return { created: result.created ?? [], warnings: result.warnings ?? [], failed: false };
       } catch (e) {
-        const payload = (e as { payload?: { created?: NewAppCreatedRef[]; error?: string } }).payload;
+        const payload = (
+          e as {
+            payload?: { created?: NewAppCreatedRef[]; warnings?: string[]; error?: string };
+          }
+        ).payload;
         setError(describeLaunchError(payload?.error, e));
-        return { created: payload?.created ?? [], failed: true };
+        return { created: payload?.created ?? [], warnings: payload?.warnings ?? [], failed: true };
       } finally {
         setIsLaunching(false);
       }
@@ -137,6 +146,8 @@ function describeLaunchError(code: string | undefined, fallback: unknown): strin
       return "そのリポジトリ名は既に使われています。名前を変えてください。";
     case "hostname_taken":
       return "そのホスト名は既に使われています。サブドメインを変えてください。";
+    case "port_band_unavailable":
+      return "ローカルセッションのポート帯を決められませんでした（scripts/local-repo-ports.conf を読めていません）。まだ何も作っていないので、直してから押し直せます。";
     case "invalid_spec":
       return "入力に足りないところがあります。前のステップへ戻って直してください。";
     default:

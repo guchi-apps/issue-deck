@@ -22,8 +22,13 @@
  */
 
 import {
+  LOCAL_PORT_BAND_CONF_PATH,
+  formatLocalPortBandLine,
+} from "@/lib/new-app/local-port-bands";
+import {
   NEW_APP_AUTH_LABELS,
   NEW_APP_ORG,
+  NEW_APP_PARENT_REPOSITORY,
   NEW_APP_VPS_REPOSITORY,
   hostnameFor,
   newAppKindProfile,
@@ -46,6 +51,7 @@ export type NewAppAutomation =
 
 export type NewAppArtifactKind =
   | "repository"
+  | "port-band"
   | "parent-issue"
   | "init-issue"
   | "vps-issue"
@@ -68,13 +74,25 @@ export function repositoryFullName(spec: Pick<NewAppSpec, "repositoryName">): st
   return `${NEW_APP_ORG}/${spec.repositoryName}`;
 }
 
+export type NewAppPlanOptions = {
+  /**
+   * 払い出す予定のローカルセッションのポート帯。preflightが実物の対応表から決める。
+   * 決まっていなければ`null`で、そのときは値を出さずに「確保する」とだけ書く。
+   */
+  localPortBase?: number | null;
+};
+
 /**
  * 「立ち上げを開始」で作られるものの一覧。**押す前にそのまま画面へ出す**ため、
  * 実行順と同じ並びにする。
  */
-export function buildNewAppPlan(spec: NewAppSpec): NewAppArtifact[] {
+export function buildNewAppPlan(
+  spec: NewAppSpec,
+  options: NewAppPlanOptions = {},
+): NewAppArtifact[] {
   const repo = repositoryFullName(spec);
   const host = hostnameFor(spec);
+  const localPortBase = options.localPortBase ?? null;
 
   const artifacts: NewAppArtifact[] = [
     {
@@ -83,6 +101,16 @@ export function buildNewAppPlan(spec: NewAppSpec): NewAppArtifact[] {
       title: repo,
       target: null,
       description: `リポジトリを${spec.visibility === "private" ? "private" : "public"}で作り、既定ブランチを develop にしてラベル一式を写す`,
+    },
+    {
+      kind: "port-band",
+      automation: "auto",
+      title:
+        localPortBase === null
+          ? "ローカルセッションの開発サーバーのポート帯を確保する"
+          : `ローカルセッションの開発サーバーのポート帯 ${localPortBase} を確保する`,
+      target: NEW_APP_PARENT_REPOSITORY,
+      description: `\`${LOCAL_PORT_BAND_CONF_PATH}\` へ1行足すPull Requestを作る。載せないと汎用ランチャーの既定 3000 + Issue番号 に落ち、未登録のリポジトリ同士でポートが衝突する`,
     },
     {
       kind: "parent-issue",
@@ -169,6 +197,10 @@ export type NewAppIssueRefs = {
   vps: string | null;
   /** サブPCの手作業Issue。まだ作っていなければ`null` */
   subpc: string | null;
+  /** 払い出したローカルセッションのポート帯。決められなかったときだけ`null` */
+  localPortBase: number | null;
+  /** ポート帯を足すPull Request（`guchi-apps/issue-deck#124`の形）。作れなかったら`null` */
+  portBandPullRequest: string | null;
 };
 
 export function buildParentIssueTitle(spec: NewAppSpec): string {
@@ -183,8 +215,16 @@ export function buildParentIssueTitle(spec: NewAppSpec): string {
  * `docs/supported-repositories.md`と共有知識の`standards/tech-stack.md`はどのサブIssueにも
  * 属さない。
  */
-export function buildParentIssueBody(spec: NewAppSpec): string {
+export function buildParentIssueBody(
+  spec: NewAppSpec,
+  options: NewAppPlanOptions = {},
+): string {
   const repo = repositoryFullName(spec);
+  const localPortBase = options.localPortBase ?? null;
+  const portBandLine =
+    localPortBase === null
+      ? `\`${LOCAL_PORT_BAND_CONF_PATH}\` への追記`
+      : `\`${formatLocalPortBandLine(repositoryFullName(spec), localPortBase).replace(/\s+/g, " ")}\` の追記`;
   return `## 立ち上げるアプリ
 
 ${specTable(spec)}
@@ -194,11 +234,17 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
-1. ブラウザでの登録（DNSのAレコード・1Password・Secrets・GitHub App）
-2. サブPCへclone（ここまで済むと初期化Issueをローカルセッションで実装できる）
-3. \`${repo}\` の初期化と、developへのマージ
-4. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
-5. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
+1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
+2. ブラウザでの登録（DNSのAレコード・1Password・Secrets・GitHub App）
+3. サブPCへclone（ここまで済むと初期化Issueをローカルセッションで実装できる）
+4. \`${repo}\` の初期化と、developへのマージ
+5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
+6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
+
+**ポート帯のPull Requestは、developへマージしただけでは効きません。**
+\`${LOCAL_PORT_BAND_CONF_PATH}\` はサブPCの本体チェックアウトから読まれるため、
+issue-deckの画面のホスト一覧で「更新して再起動」を押すまで反映されません
+（[docs/multi-agent/generic-launcher.md](https://github.com/${NEW_APP_PARENT_REPOSITORY}/blob/develop/docs/multi-agent/generic-launcher.md)）。
 
 ## 一覧への登録
 
@@ -255,7 +301,7 @@ ${specTable(spec)}
 ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 ## 前提条件
 
-- 先に完了している必要があるIssue・PR: ${refs.subpc ?? "（サブPCへのcloneの手作業Issue）"}
+- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCへのcloneの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
 
 **このIssueはサブPCのローカルセッションで実装します。** 新しいリポジトリはまだ
 \`claude-issue-dispatch.yml\` を持たないため無人実行では動かず、issue-deckの盤面にも載りません。
@@ -418,6 +464,20 @@ ${params.related}
 `;
 }
 
+/**
+ * サブPCの手作業Issueの「その他の前提」に足す1行。
+ *
+ * **ポート帯はdevelopへマージしただけでは効かない。** `local-repo-ports.conf`はサブPCの
+ * 本体チェックアウト（`~/apps/issue-deck/scripts/`）から読まれるため、画面の
+ * 「更新して再起動」でチェックアウトを更新するまで、汎用ランチャーの既定
+ * `3000 + Issue番号` が使われ続ける（docs/multi-agent/generic-launcher.md）。
+ * **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。
+ */
+function portBandPrerequisite(refs: NewAppIssueRefs): string {
+  const pr = refs.portBandPullRequest ?? `\`${LOCAL_PORT_BAND_CONF_PATH}\` へポート帯を足すPull Request`;
+  return `${pr} がdevelopへマージされ、issue-deckの画面のホスト一覧で「更新して再起動」を押してサブPCのチェックアウトを更新済みであること`;
+}
+
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
   return `[手作業] サブPC: ${spec.repositoryName}をcloneして対応表に載せる`;
 }
@@ -443,7 +503,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
     cwd: "`/home/guchi/apps`",
     branch: "不要",
     prerequisiteIssues: `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`,
-    otherPrerequisites: "`gh` がサブPCでログイン済みであること",
+    otherPrerequisites: `\`gh\` がサブPCでログイン済みであること。${portBandPrerequisite(refs)}`,
     steps: `- [ ] （サブPC）リポジトリをcloneする
 
   \`\`\`bash
@@ -614,6 +674,70 @@ ${secretsStep}- [ ] （ブラウザ）issue-deckのGitHub Appのインストー�
     why: "DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。1Password・GitHub Secrets・GitHub Appの権限も、無断で変更してよいものではないためです。",
     related: `- 起点Issue: ${refs.parent}`,
   });
+}
+
+/**
+ * ポート帯を足すPull Requestのブランチ名。
+ *
+ * `issue-<番号>`の形は使わない——Issue単位の作業ブランチと取り違えると、進捗の遷移が
+ * ブランチ名だけを見ている仕組み（`issue-labels.yml`）が誤って反応する。
+ */
+export function portBandBranchName(spec: Pick<NewAppSpec, "repositoryName">): string {
+  return `new-app-port-band/${spec.repositoryName}`;
+}
+
+export function buildPortBandCommitMessage(spec: NewAppSpec, base: number): string {
+  return `${spec.displayName}（${spec.repositoryName}）のローカルセッションのポート帯 ${base} を確保する。`;
+}
+
+export function buildPortBandPullRequestTitle(spec: NewAppSpec, base: number): string {
+  return `${spec.repositoryName}のローカルセッションのポート帯 ${base} を確保する`;
+}
+
+/**
+ * ポート帯を足すPull Requestの本文（CLAUDE.mdのPR本文テンプレートの見出しに揃える）。
+ *
+ * **`closes`は使わない。** developへのマージ時点では親Issueをcloseしない運用で、
+ * 立ち上げはここから先も続く。
+ */
+export function buildPortBandPullRequestBody(
+  spec: NewAppSpec,
+  base: number,
+  refs: Pick<NewAppIssueRefs, "parent">,
+): string {
+  const repo = repositoryFullName(spec);
+  return `${origin(refs.parent)}
+
+## 対応Issue
+
+- ${refs.parent}
+
+## 実装内容
+
+- \`${LOCAL_PORT_BAND_CONF_PATH}\` へ \`${repo}\` のポート帯（ベース値 \`${base}\`）を追記する
+
+対応表に載っていないリポジトリは、汎用ランチャー（\`scripts/generic-start-issue.sh\`）の既定
+\`3000 + Issue番号\` に落ちます。未登録のリポジトリ同士が同じ帯へ相乗りするため、同じ番号の
+Issueを別リポジトリで同時に起こすと開発サーバーのポートが衝突します（#1741・#1276・#2213）。
+
+## テスト内容
+
+- なし（設定ファイルへの1行追記のみ。CIのlint・型チェック・テストは通ります）
+
+## 確認方法
+
+\`\`\`bash
+grep -F '${repo}' scripts/local-repo-ports.conf
+\`\`\`
+
+サブPCでは、developへマージしたうえで**issue-deckの画面のホスト一覧で「更新して再起動」**を
+押すと反映されます（このファイルは本体チェックアウトから読まれるため、マージだけでは効きません）。
+
+## 注意点
+
+- 帯は「現状の最大 + 1000」で決めています。空きを詰め直してはいません（古いチェックアウトが
+  残っているサブPCで前の持ち主と衝突しうるため）。
+`;
 }
 
 /** 立ち上げの最後に画面へ出す、作られたものの参照。 */

@@ -2217,14 +2217,20 @@ pnpm test:unit   # vitestのみ
 線引きは[new-app-launch.md](new-app-launch.md)を参照。
 
 - **判定・本文の組み立ては`lib/new-app/`の純粋関数**（`spec.ts`＝決めごとの型と導出、
-  `vps-inventory.ts`＝vps READMEとvhostの解析、`plan.ts`＝作られるものとIssue本文、
-  `parse.ts`＝APIが受け取る値の検証）。**ウィザードのコンポーネントが直接importするので、
-  ここから`lib/github/`を読まない**（上記の`issues-api.ts`の制約）。GitHubを叩くのは
-  `lib/github/vps-inventory-api.ts`と`lib/github/repositories-api.ts`。
+  `vps-inventory.ts`＝vps READMEとvhostの解析、`local-port-bands.ts`＝ローカルセッションの
+  ポート帯の採番、`plan.ts`＝作られるものとIssue本文、`parse.ts`＝APIが受け取る値の検証）。
+  **ウィザードのコンポーネントが直接importするので、ここから`lib/github/`を読まない**
+  （上記の`issues-api.ts`の制約）。GitHubを叩くのは`lib/github/vps-inventory-api.ts`・
+  `lib/github/repositories-api.ts`・`lib/github/local-port-band-api.ts`。
 - **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・
   予約済みポート）と、vhostの`ServerName`／`ServerAlias`。**READMEの散文の「空きは〜」と
   vhostのファイル名は読まない**——どちらも実態とずれる（`wordpress.conf`の`ServerName`は
   `blog.gucchii.com`）。読めなかったときは自動採番せず手入力に倒す。
+- **ローカルセッションの開発サーバーのポート帯（`scripts/local-repo-ports.conf`）も
+  立ち上げが払い出す**（#2225）。「現状の最大 + 1000」を決め、issue-deck自身のdevelopへ
+  1行足すPull Requestを作る。**帯を決められないときは何も作る前に止める**
+  （`port_band_unavailable`）——載っていないと汎用ランチャーの既定 `3000 + Issue番号` に
+  落ち、未登録のリポジトリ同士でポートが衝突する（#2213で実際に漏れた）。
 - **生成する手作業Issueのうち、サブPCのものは代行実行の条件を満たす形で書く**
   （デバイスがサブPC1つ・1手順1コマンドブロック・対話コマンドとプレースホルダ無し）。
   `lib/new-app/plan.test.ts`が実物の`buildManualStepRunPlan`に通して見張っている。
