@@ -198,6 +198,26 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
 1つでも崩すと、その手順は「あなたが実行」として並ぶだけになる。
 `lib/new-app/plan.test.ts`が、生成した本文を実物の`buildManualStepRunPlan`に通して見張っている。
 
+### 手作業Issueの`## 完了の確認方法`は、手順と1対1のコマンドにする（#2256）
+
+`aide-bot`の立ち上げでは、**チェックが付いているのに実際には行われていない手順**が複数あった。
+1Passwordへの登録は未実施のままIssueがcloseされ、初回デプロイが`DB_NAME: DB_NAME is required`で
+失敗した（`guchi-apps/aide-bot#8`として起票し直し）。原因は確認節が散文で、
+**「登録されたか」を見ていなかった**こと。3つの手作業Issue（サブPC・VPS・ブラウザ）はいずれも、
+`## やること`の手順ぶんの確認コマンドを`## 完了の確認方法`へ並べる。
+
+- **効いていなければ終了コードが0にならないコマンドにする。** 代行実行も定期巡回（#2008）も
+  見ているのは終了コードだけで、「期待する出力」との照合はしない。`--dry-run`のように常に0で
+  終わるものを置くと、確かめていないのに通ったことになる
+- **1Passwordの投入は`provision-app-secrets.sh --check`で確かめる。** 投入と同じ引数に
+  `--check`を足しただけの形にしてあり、未登録が1つでもあれば終了コード1で終わる。引数がずれると
+  「確かめていないフィールド」が生まれるので、`provisionCommand`が両方を1か所から組み立てている
+- **secretsの確認はorganizationのsecretも数える**（`repos/{repo}/actions/organization-secrets`）。
+  リポジトリのsecretだけを見ると、`visibility=all`のorganization secretで足りている場合に
+  「未登録」と読めてしまう。`aide-bot`ではまさにそれで、Actions secretsへの登録は不要な手順だった
+- DNSの`dig`は**手順ではなく確認**なので、`## やること`から`## 完了の確認方法`へ移してある。
+  確認節に置いたものだけが代行実行・巡回の対象になる
+
 ### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
 
 `deploy.yml`のヘルスチェックが叩くのは**VPS内の`http://127.0.0.1:<port>/`**なので、

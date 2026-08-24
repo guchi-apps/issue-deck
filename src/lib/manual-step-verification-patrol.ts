@@ -8,7 +8,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { enqueueManualStepJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
-import type { ManualStepCommand } from "@/lib/manual-step-command";
+import { extractVerificationCommands, type ManualStepCommand } from "@/lib/manual-step-command";
 import { resolveManualStepPatrolTarget } from "@/lib/manual-step-verification";
 
 /**
@@ -133,6 +133,124 @@ export async function advanceManualStepVerificationCheck(params: {
   const check = await findCheck(params.repositoryFullName, params.issueNumber);
   if (!check || check.status !== "RUNNING") return;
   await syncCheck(check, now);
+}
+
+/**
+ * 人が流した代行実行の結果を、「確認がすべて通った」記録として残す（#2256）。
+ *
+ * **これまで印を付けられるのは定期巡回だけだった。** 巡回が回るのは確認コマンドが全部
+ * 読み取りだけで、実行するデバイスがサブPCのIssueに限られる（`resolveManualStepPatrolTarget`）。
+ * それ以外は、手作業アシスタントで確認コマンドを流して**目の前で全部通しても**画面には
+ * 何も残らず、`## 完了の確認方法`が本当に通ったのかを後から誰も判断できなかった。
+ * 人が押した実行には承認という歯止めがあるぶん、巡回より条件は緩くてよい。
+ *
+ * **照合は行番号ではなくコマンドの文字列で行う。** 行番号は本文を編集するとずれるので、
+ * 中身の違うコマンドの成功を引き継いでしまう。文字列で突き合わせれば、確認コマンドを
+ * 書き換えた時点でその1件は未確認へ戻る。
+ *
+ * **`PASSED`は「完了済みの可能性」までで、クローズはしない**（巡回と同じ取り決め）。
+ * 見ているのは終了コードだけで、本文の「期待する出力」との照合はしていない。
+ *
+ * @returns 記録したら`true`。確認コマンドが無い・まだ全部は通っていない場合は`false`
+ */
+export async function recordManualStepVerificationPass(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  now?: Date;
+}): Promise<boolean> {
+  const now = params.now ?? new Date();
+  const issue = await loadManualStepIssue(params.repositoryFullName, params.issueNumber);
+  if (issue === null) return false;
+
+  const commands = extractVerificationCommands(issue.body);
+  if (commands.length === 0) return false;
+
+  const succeeded = await db.dispatchJob.findMany({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      kind: "MANUAL_STEP",
+      status: "SUCCEEDED",
+      exitCode: 0,
+      finishedAt: { not: null },
+    },
+    select: { command: true, finishedAt: true, targetHost: true },
+    orderBy: { finishedAt: "desc" },
+    take: SUCCEEDED_JOB_LOOKBACK,
+  });
+
+  const latestByCommand = new Map<string, { finishedAt: Date; targetHost: string }>();
+  for (const job of succeeded) {
+    if (job.command === null || job.finishedAt === null) continue;
+    // `orderBy`が新しい順なので、最初に見つかったものが最新
+    if (!latestByCommand.has(job.command)) {
+      latestByCommand.set(job.command, { finishedAt: job.finishedAt, targetHost: job.targetHost });
+    }
+  }
+
+  const matched = commands.map((entry) => latestByCommand.get(entry.command));
+  if (matched.some((entry) => entry === undefined)) return false;
+
+  // **揃った時刻は「最後の1件が通った時刻」**。画面はこれを出すので、いちばん古い成功では
+  // 新しく見えすぎ、`now`では実行していない時刻を出すことになる
+  const finished = matched
+    .filter((entry) => entry !== undefined)
+    .reduce((latest, entry) => (entry.finishedAt > latest.finishedAt ? entry : latest));
+
+  await db.manualStepVerificationCheck.upsert({
+    where: {
+      repositoryFullName_issueNumber: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+      },
+    },
+    create: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      ...passedValues(commands, finished, now),
+    },
+    update: passedValues(commands, finished, now),
+  });
+  return true;
+}
+
+/** 1つのIssueについて数え直す成功ジョブの上限。同じ確認を何度も流しても最新だけ効く */
+const SUCCEEDED_JOB_LOOKBACK = 100;
+
+function passedValues(
+  commands: ManualStepCommand[],
+  finished: { finishedAt: Date; targetHost: string },
+  now: Date,
+) {
+  return {
+    targetHost: finished.targetHost,
+    status: "PASSED" as const,
+    doneLines: JSON.stringify(commands.map((entry) => entry.stepLine)),
+    currentJobId: null,
+    message: "代行実行で確認コマンドがすべて成功しました。",
+    startedAt: now,
+    finishedAt: finished.finishedAt,
+  };
+}
+
+/** openな手作業Issueとして読めるときだけ本文を返す */
+async function loadManualStepIssue(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<{ body: string | null } | null> {
+  const repository = await db.repository.findFirst({
+    where: { fullName: repositoryFullName },
+    select: { id: true },
+  });
+  if (!repository) return null;
+
+  const issue = await db.issue.findFirst({
+    where: { repositoryId: repository.id, number: issueNumber },
+    select: { body: true, state: true, labels: { select: { name: true } } },
+  });
+  if (!issue || issue.state !== "OPEN") return null;
+  if (!issue.labels.some((label) => label.name === MANUAL_STEP_LABEL)) return null;
+  return { body: issue.body };
 }
 
 /**
@@ -398,22 +516,10 @@ async function loadPatrolTarget(
   repositoryFullName: string,
   issueNumber: number,
 ): Promise<ManualStepCommand[] | null> {
-  const repository = await db.repository.findFirst({
-    where: { fullName: repositoryFullName },
-    select: { id: true },
-  });
-  if (!repository) return null;
+  const issue = await loadManualStepIssue(repositoryFullName, issueNumber);
+  if (issue === null) return null;
 
-  const issue = await db.issue.findFirst({
-    where: { repositoryId: repository.id, number: issueNumber },
-    select: { body: true, state: true, labels: { select: { name: true } } },
-  });
-  if (!issue || issue.state !== "OPEN") return null;
-
-  const target = resolveManualStepPatrolTarget(
-    issue.body,
-    issue.labels.some((label) => label.name === MANUAL_STEP_LABEL),
-  );
+  const target = resolveManualStepPatrolTarget(issue.body, true);
   return target.patrollable ? target.commands : null;
 }
 

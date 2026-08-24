@@ -15,6 +15,7 @@ import {
   Loader2,
   MonitorSmartphone,
   PartyPopper,
+  TriangleAlert,
   Undo2,
   Wrench,
   Zap,
@@ -42,6 +43,7 @@ import {
   type ManualStepAutoRunHandle,
 } from "@/hooks/use-manual-step-autorun";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
+import { resolveManualStepCloseWarning } from "@/lib/manual-step-close-warning";
 import {
   describeManualStepAbortRejection,
   describeManualStepExecutionRejection,
@@ -422,6 +424,19 @@ function ManualStepGuideContent({
     [taskList.body, guide, host, issue.labels],
   );
 
+  // 確認が通った記録が無いまま閉じようとしていないか（#2256）。Issue詳細の手作業パネルと
+  // 同じ判定を通す——2か所で違う条件にすると、同じIssueで聞かれたり聞かれなかったりする
+  const closeWarning = useMemo(
+    () =>
+      resolveManualStepCloseWarning({
+        body: taskList.body,
+        verifiedAt: issue.manualStepVerifiedAt,
+      }),
+    [taskList.body, issue.manualStepVerifiedAt],
+  );
+  const [askedAboutClose, setAskedAboutClose] = useState(false);
+  const askingAboutClose = closeWarning !== null && askedAboutClose;
+
   // 本文が別経路で書き換わって手順が減ることがある。範囲外に居座らせない
   const index = Math.min(stageIndex, stages.length - 1);
   const stage = stages[index];
@@ -651,6 +666,7 @@ function ManualStepGuideContent({
               onExecuted={handleExecuted}
               onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
+              asking={askingAboutClose}
             />
           )}
           <ApiErrorMessage message={taskList.error ?? closeError} />
@@ -698,9 +714,27 @@ function ManualStepGuideContent({
                 <Ban />
                 実施せずクローズ
               </Button>
-              <Button size="sm" disabled={isSubmitting} onClick={() => handleClose("completed")}>
-                {isSubmitting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-                完了してクローズ
+              <Button
+                size="sm"
+                disabled={isSubmitting}
+                // **1回だけ聞き返して、2回目はそのまま閉じる**（#2256）。確かめようのない
+                // 手作業は実際にあるので、押せなくはしない
+                onClick={() => {
+                  if (closeWarning !== null && !askedAboutClose) {
+                    setAskedAboutClose(true);
+                    return;
+                  }
+                  void handleClose("completed");
+                }}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="animate-spin" />
+                ) : askingAboutClose ? (
+                  <TriangleAlert />
+                ) : (
+                  <CheckCircle2 />
+                )}
+                {askingAboutClose ? "確認せずクローズ" : "完了してクローズ"}
               </Button>
             </>
           ) : stage.kind === "step" ? (
@@ -1029,12 +1063,15 @@ function FinishStage({
   onExecuted,
   onRetry,
   onApplyFix,
+  asking,
 }: {
   guide: ManualStepGuide;
   issue: Issue;
   plan: ManualStepRunPlan;
   dispatch: DispatchStateHandle;
   autoDiagnose: boolean;
+  /** 確認が通った記録が無いまま「完了してクローズ」を押されたか（#2256） */
+  asking: boolean;
   onExecuted: (entry: ManualStepRunEntry) => void;
   onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
@@ -1044,6 +1081,17 @@ function FinishStage({
   return (
     <section className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold text-muted-foreground">完了の確認方法</h3>
+      {/* 確認が通った記録が無いまま閉じようとしたとき（#2256）。**コマンドはこのすぐ下に
+          並んでいる**ので、ここでは何が足りないかだけを言い、もう一度出し直さない */}
+      {asking && (
+        <p className="flex items-start gap-1.5 rounded-md border px-2 py-1.5 text-xs">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {"下の確認コマンドが通った記録がありません。流してから閉じてください。" +
+              "確かめようがない手作業なら、もう一度「確認せずクローズ」を押せば閉じられます。"}
+          </span>
+        </p>
+      )}
       {guide.verification === null ? (
         <p className="text-sm text-muted-foreground">
           この手作業には確認方法が書かれていません。実行し終えていればクローズしてください。
