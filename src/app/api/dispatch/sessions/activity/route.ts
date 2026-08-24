@@ -13,9 +13,9 @@ import { recordDispatchSessionActivity } from "@/lib/dispatch/sessions";
 /**
  * 実装セッション自身が、フック（#1219）から送ってくる直近の様子の受け口（#1264）。
  *
- * 送るのは`scripts/session-notify.sh`で、Signalyへの通知と同じタイミングで叩く。
- * **通知だけだと、消したら承認待ちであることを知る手段が無くなる**ため、画面にも出せるように
- * ここへも残す。
+ * 送るのは`scripts/session-notify.sh`（Claude Codeのフックと、pollerが合成する
+ * `SessionInterrupted`）。**#2280でSignalyへの通知を消してからは、ここがセッションの様子を
+ * 外へ出す唯一の経路**で、画面の表示も確認待ちのPush通知もこの報告から出る。
  *
  * **pollerの一括報告（`../route.ts`）とは別の入口。** あちらは「そのホストで今見えている
  * セッションの全て」を前提に、含まれない行を`GONE`へ倒す。フックの1件を同じ経路へ流すと
@@ -24,7 +24,7 @@ import { recordDispatchSessionActivity } from "@/lib/dispatch/sessions";
  * 認証は`/claim`・`/report`・`/hosts`・`/sessions`と同じ共有シークレット（`DISPATCH_SECRET`）。
  *
  * **失敗しても呼び出し側は実装を止めない。** `session-notify.sh`は何が起きても`exit 0`で返す
- * 約束なので、ここが落ちているときは通知だけが飛び、画面に出ないだけになる。
+ * 約束なので、ここが落ちているときは画面にも通知にも出ないだけになる。
  */
 export async function POST(request: NextRequest) {
   const auth = authorizeDispatch(request.headers.get("authorization"));
@@ -52,8 +52,10 @@ export async function POST(request: NextRequest) {
   // セッションが入力待ちに入ったこと（#1417）。質問・権限の承認プロンプト・プレビューや
   // スクリーンショットの承認依頼は、ローカルセッションではどれもこの形になる
   const checkUserRequested = payload?.checkUserRequested === true;
-  // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）は
-  // `activity`を伴わない**ので、そちらを必須にはできない
+  // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）と
+  // APIエラーで中断したセッションの引き上げ（#1971・#2280）は`activity`を伴わない**ので、
+  // そちらを必須にはできない（中断は「今どうしているか」を言えないまま`00.check-user`だけを
+  // 付けに来る）
   if (
     !target ||
     (!activity && !remoteControlUrl && !previewUrl && !planResolved && !checkUserRequested)

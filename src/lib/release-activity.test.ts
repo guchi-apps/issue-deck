@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { RepositoryReleaseStatus } from "@/hooks/use-repository-release-statuses";
-import { countReleaseActivity, describeReleaseActivity } from "@/lib/release-activity";
+import {
+  countReleaseActivity,
+  describeReleaseActivity,
+  selectVisibleReleaseStatuses,
+} from "@/lib/release-activity";
 
 function makeReleaseStatus(
   repoFullName: string,
@@ -64,10 +68,17 @@ describe("countReleaseActivity（#2167）", () => {
     });
   });
 
-  // 押して開くブランチ画面は非表示リポジトリを出さないため、揃えないと
-  // 「1件と出ているのに開いた先に無い」が起こる（#2167のレビュー指摘）。
-  it("左メニューで非表示にしたリポジトリは数えない", () => {
-    const counts = countReleaseActivity(
+  it("未取得のうちはnullを返す（0件と区別する）", () => {
+    expect(countReleaseActivity(null)).toBeNull();
+  });
+});
+
+// 押して開くブランチ画面は非表示リポジトリを出さないため、揃えないと
+// 「1件と出ているのに開いた先に無い」が起こる（#2167のレビュー指摘）。#2279で通知ベルの
+// 項目・マージ待ちの本数も同じ集合から作るようになり、絞り込みをここへ寄せた。
+describe("selectVisibleReleaseStatuses（#2279）", () => {
+  it("左メニューで非表示にしたリポジトリを取り除く", () => {
+    const visible = selectVisibleReleaseStatuses(
       [
         makeReleaseStatus("guchi-apps/issue-deck", "action_required"),
         makeReleaseStatus("guchi-apps/myroom", "progressing"),
@@ -78,13 +89,17 @@ describe("countReleaseActivity（#2167）", () => {
       ],
     );
 
-    expect(counts).toMatchObject({ total: 1, progressing: 0, mergePending: 1, actionRequired: 1 });
+    expect(visible?.map((status) => status.repoFullName)).toEqual(["guchi-apps/issue-deck"]);
   });
 
-  it("リポジトリ一覧を渡さなければ絞り込まない", () => {
-    const counts = countReleaseActivity([makeReleaseStatus("guchi-apps/myroom", "progressing")]);
+  it("非表示が無ければ受け取ったものをそのまま返す", () => {
+    const releaseStatuses = [makeReleaseStatus("guchi-apps/myroom", "progressing")];
 
-    expect(counts).toMatchObject({ total: 1 });
+    expect(selectVisibleReleaseStatuses(releaseStatuses, [])).toBe(releaseStatuses);
+  });
+
+  it("未取得（null）はnullのまま返す", () => {
+    expect(selectVisibleReleaseStatuses(null, [])).toBeNull();
   });
 });
 

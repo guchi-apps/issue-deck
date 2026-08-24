@@ -168,7 +168,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
    - **実行後にあなたが何をするか**（結果をどう使って作業を続けるか。実行結果のうち何を伝え返して
      ほしいかも書く）
 2. **端末での問いかけは`AskUserQuestion`で行う。** そうするとフックが`00.check-user`と
-   `01.check-input`を自動で付け、Signalyへ通知が飛びます（答えた時点で自動的に外れます。#1417）。
+   `01.check-input`を自動で付け、issue-deckのPush通知が飛びます（答えた時点で自動的に外れます。#1417）。
    `gh issue view {{ISSUE_NUMBER}}`でラベルが付いたことを確かめ、**付いていなければ**
    `gh issue edit {{ISSUE_NUMBER}} --add-label "00.check-user" --add-label "01.check-input"`で
    手で付け、再開時に同じラベルを`--remove-label`で外します

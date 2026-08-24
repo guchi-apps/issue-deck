@@ -686,8 +686,8 @@ model DispatchSession {
   // 行では報告の受け口（reportDispatchSessions・isRevivedSession）が捨てる（#1353）。
   activity         DispatchSessionActivity?
   activityAt       DateTime?
-  // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので、
-  // 通知（Signaly）だけでなく画面にも出す。取れないこともある（Claude Codeの内部ファイル依存）
+  // claude --remote-control が表示するURL。スマホから答えるための唯一の出口なので画面に出す。
+  // 取れないこともある（Claude Codeの内部ファイル依存）
   remoteControlUrl String?                  @db.Text
   // tailscale serveでtailnetへ出した開発サーバーのURL（#1265）。スマホから画面を見る唯一の
   // 出口なので画面へ出す。`23.preview-required`が付いたセッションでだけ埋まる

@@ -35,42 +35,59 @@ export type ReleaseActivityCounts = {
 };
 
 /**
+ * リリース状況のサマリから、左メニューで非表示にしたリポジトリぶんを取り除く（#2279）。
+ *
+ * **APIの母集団は絞らない**——同じAPIをスマホのリポジトリ画面
+ * （`mobile-repos-screen.tsx`）が使っており、あちらは「すべて表示する」で非表示の
+ * リポジトリも一覧へ出す。サーバー側で落とすと、表示に切り替えてもリリース状況の
+ * バッジだけが出ないことになる。**落とすのは通知ベル・フッターのバッジのように
+ * リポジトリ横断で見せる場所だけ**にする。
+ *
+ * 未取得（`null`）はそのまま`null`を返す（0件と区別する呼び出し側の作法に合わせる）。
+ */
+export function selectVisibleReleaseStatuses(
+  releaseStatuses: RepositoryReleaseStatus[] | null,
+  repositories: readonly Pick<ConnectedRepository, "fullName" | "hidden">[],
+): RepositoryReleaseStatus[] | null {
+  if (releaseStatuses === null) return null;
+  const hiddenFullNames = new Set(
+    repositories.filter((repo) => repo.hidden).map((repo) => repo.fullName),
+  );
+  if (hiddenFullNames.size === 0) return releaseStatuses;
+  return releaseStatuses.filter(
+    (releaseStatus) => !hiddenFullNames.has(releaseStatus.repoFullName),
+  );
+}
+
+/**
  * リリース状況のサマリ（`GET /api/repositories/release-pending-merges`）から、
  * リリース・デプロイが片付いていないリポジトリ数と、その内訳を数える。
  *
  * **APIは`idle`のリポジトリを返さない**（`api/repositories/release-pending-merges/route.ts`）ため、
  * 返ってきたものがそのまま「片付いていないプロジェクト」になる。
  *
- * **左メニューで非表示にしたリポジトリは数えない**（#2167のレビュー指摘）。APIの母集団は
- * `archived: false`だけで絞っており非表示のものも返すが、この件数を押して開くブランチ画面は
- * `visibleRepositories`（`hidden`を除いた集合）で組み立てられる（`issue-deck-shell.tsx`）。
- * 揃えないと「1件と出ているのに開いた先に無い」が起こる。`repositories`を渡さない場合は
- * 絞り込まない。
+ * **左メニューで非表示にしたリポジトリは数えない**（#2167のレビュー指摘）。この件数を押して
+ * 開くブランチ画面は`visibleRepositories`（`hidden`を除いた集合）で組み立てられるため、
+ * 揃えないと「1件と出ているのに開いた先に無い」が起こる。**除くのはこの関数の外**——
+ * #2279で通知ベルの項目・マージ待ちの本数も同じ集合から作るようになり、絞り込みを
+ * `selectVisibleReleaseStatuses`の1か所へ寄せた。
  *
  * **未取得（`null`）と0件を区別して返す。** 未取得のうちは`null`を返し、呼ぶ側は数字を出さない。
  * 0を出すと「片付いていないものが無い」と読めてしまうため（`countReleaseMergePending`と同じ作法）。
  */
 export function countReleaseActivity(
   releaseStatuses: RepositoryReleaseStatus[] | null,
-  repositories?: Pick<ConnectedRepository, "fullName" | "hidden">[],
 ): ReleaseActivityCounts | null {
   if (releaseStatuses === null) return null;
 
-  const hiddenFullNames = new Set(
-    (repositories ?? []).filter((repo) => repo.hidden).map((repo) => repo.fullName),
-  );
-  const visible = releaseStatuses.filter(
-    (releaseStatus) => !hiddenFullNames.has(releaseStatus.repoFullName),
-  );
-
   const countOf = (status: RepositoryReleaseStatus["status"]) =>
-    visible.filter((releaseStatus) => releaseStatus.status === status).length;
+    releaseStatuses.filter((releaseStatus) => releaseStatus.status === status).length;
 
   const mergePending = countOf("action_required");
   const failed = countOf("error");
 
   return {
-    total: visible.length,
+    total: releaseStatuses.length,
     progressing: countOf("progressing"),
     mergePending,
     failed,

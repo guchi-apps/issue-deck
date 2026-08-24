@@ -36,7 +36,11 @@ export const pullRequestViews: PullRequestView[] = [
     id: "in-progress",
     label: "実行中",
     title: "実行中のプルリクエスト",
-    description: "CIの結果待ちのPull Request（ドラフト・CI状態不明を含む）",
+    // CI通過後にClaudeのレビュー・自動マージ可否の判定が動いている間もここに入る（#2283）。
+    // CI状態とは別の軸なので、「CIの結果待ち」だけだと「CI通過」と出ているPRがここにいる
+    // 理由を読めない。CI失敗は判定中でも「マージ待ち」側に残る。
+    description:
+      "CIの結果待ち・CI通過後にClaudeのレビュー中／マージ可否の判定中のPull Request（ドラフト・CI状態不明を含む）",
     emptyMessage: "実行中のPull Requestはありません。",
   },
   {
@@ -47,8 +51,9 @@ export const pullRequestViews: PullRequestView[] = [
     title: "マージ待ちのプルリクエスト",
     // CI失敗を含むことを明示する。「ユーザーの確認待ち」に並ぶPR（`requiresUserMerge`）とは
     // 母集団が別で、あちらはCIの結果を見ないため、CI実行中のリリースPRはここには出ない。
+    // CI通過分は判定が終わるまで「実行中」側にいる（#2283）。CI失敗は判定中でもここに残す。
     description:
-      "CIが確定してマージを待っているPull Request（CI失敗を含む。「ユーザーの確認待ち」とは母集団が別）",
+      "CIも自動マージ可否の判定も終わってマージを待っているPull Request（CI失敗は判定中でもここに出る。「ユーザーの確認待ち」とは母集団が別）",
     emptyMessage: "マージ待ちのPull Requestはありません。",
   },
 ];

@@ -356,7 +356,7 @@ Claude Codeはサーバー側の一時エラー（529 Overloaded など）を再
 `API Error: 529 Overloaded. ...` を表示して**そのturnを打ち切る**。セッションは生きたまま入力欄へ
 戻るが、**このとき`Stop`フックが飛ばない**。その結果、
 
-- Signalyにも画面にも「止まった」と伝わらない（人は気づけない）
+- 画面にも通知にも「止まった」と伝わらない（人は気づけない）
 - 状態ファイル（#1219・#1357）は`working`のまま止まる
 - 回収（#1256）は`Stop`しか畳まないので、セッションは残り続ける
 - 上の「追加指示を送る」も段1aで弾かれ、**人が画面から送ることすらできない**
@@ -369,7 +369,7 @@ Claude Codeはサーバー側の一時エラー（529 Overloaded など）を再
 |---|---|
 | 検知 | 生きている実装セッション（`<リポジトリ名>-issue-<番号>`）の転記の**最後のレコードがAPIエラー**で、かつそのファイルが `SESSION_RESUME_STALL_MINUTES`（既定10分）更新されていないこと |
 | 送出 | **固定の1行**を上の3段階プロトコルで送る。**段1aだけ`working`も通す**（中断したセッションは`Stop`が飛ばないまま`working`で止まるため。`permission_prompt`はどの経路でも通さない） |
-| 打ち切り | `SESSION_RESUME_MAX_ATTEMPTS`（既定3回）まで、`SESSION_RESUME_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、Signalyへ**1度だけ**通知して人へ渡す |
+| 打ち切り | `SESSION_RESUME_MAX_ATTEMPTS`（既定3回）まで、`SESSION_RESUME_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、issue-deckへ**1度だけ**引き上げて人へ渡す（#2280。Issueコメント＋`00.check-user`＋`01.check-blocked`が付き、Push通知が鳴る） |
 
 **送る本文は`scripts/lib/session-resume.sh`が持つ定数**で、状況によって変えない。これが
 [gates.md](gates.md)「やらせないこと」の例外として成立する条件そのもので、内容を組み立て始めた
@@ -1692,7 +1692,7 @@ Issue詳細の「ローカルで開始」を、**起動先の選択**に変え�
 - 設定値（`DISPATCH_HOST_NAME=subpc`）・MagicDNSの短い名前・`ssh subpc`
 - APIへ送る`hostName`とDBの値
 
-Signalyのセッション通知（`scripts/session-notify.sh`）のタイトルも同じ表記に揃えているが、
+セッションの状態報告（`scripts/session-notify.sh`）が送る`hostName`も同じ識別子で揃えているが、
 **あちらは同じ対応表の写しを持っている**。通知を組み立てる時点でホスト名しか手元に無く、
 issue-deckへ問い合わせる経路も無い（通知は起動先が落ちていても届く必要がある）ため。片方だけ
 足すと表記がずれるので、対応表を増やすときは両方に入れる。
