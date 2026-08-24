@@ -180,6 +180,12 @@ describe("buildVpsIssueBody", () => {
     expect(body).toContain("新規（未取り込み）");
   });
 
+  it("2段目に :443 の X-Forwarded-Proto を確かめてから取り込む旨を書く", () => {
+    const body = buildVpsIssueBody(spec(), REFS);
+    expect(body).toContain("X-Forwarded-Proto");
+    expect(body).toContain('`"https"` になっていること');
+  });
+
   it("READMEのアプリ一覧に足す行を出す", () => {
     expect(buildVpsIssueBody(spec(), REFS)).toContain(
       "| kakei-report | 家計の月次推移をZaimのデータから作る | kakei-report.gucchii.com / 3112 | PM2 |",
@@ -269,6 +275,23 @@ describe("buildVpsManualIssueBody", () => {
   it("certbotが作る設定ファイルをvpsのIssueへ戻す手順を持つ", () => {
     expect(body).toContain("kakei-report.gucchii.com-le-ssl.conf");
     expect(body).toContain(REFS.vps!);
+  });
+
+  it("控える前に :443 の X-Forwarded-Proto を https へ直す手順を持つ", () => {
+    expect(body).toContain(
+      "sudo sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/'",
+    );
+    expect(body).toContain("sudo apachectl configtest && sudo systemctl reload apache2");
+    // 控えた内容がそのまま取り込まれるため、直す手順はcatより前に無いと意味がない
+    expect(body.indexOf("X-Forwarded-Proto")).toBeLessThan(body.indexOf("sudo cat"));
+  });
+
+  it("認証を持たない種別でも X-Forwarded-Proto の手順を出す", () => {
+    const staticBody = buildVpsManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null }),
+      REFS,
+    );
+    expect(staticBody).toContain("X-Forwarded-Proto");
   });
 
   it("実行するデバイスはVPSで、代行実行の対象にはしない", () => {
