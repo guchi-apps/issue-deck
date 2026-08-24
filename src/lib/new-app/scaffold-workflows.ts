@@ -13,7 +13,7 @@
  * `\${{ ... }}` と書く（`$` をエスケープする）。
  */
 
-import { newAppKindProfile, type NewAppSpec } from "@/lib/new-app/spec";
+import { newAppKindProfile, publicUrlFor, type NewAppSpec } from "@/lib/new-app/spec";
 
 /** callerが参照する共有ワークフローの提供元。 */
 const SHARED_WORKFLOW_REPOSITORY = "guchi-apps/issue-deck";
@@ -452,6 +452,7 @@ export function deployWorkflow(spec: NewAppSpec): string {
   const usesDb = profile.usesDatabase;
   const supabase = spec.auth === "supabase-google";
   const port = spec.port ?? 3000;
+  const publicUrl = publicUrlFor(spec);
 
   const secretsEnv = [
     "      SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}",
@@ -783,6 +784,27 @@ ${migrate}
             pm2 describe ${spec.repositoryName} || true
             pm2 logs ${spec.repositoryName} --lines 50 --nostream || true
             exit 1
+
+      # **deployジョブの成功は公開できたことを保証しない**（guchi-apps/issue-deck#2252）。
+      # 上のヘルスチェックが叩くのはVPS内の127.0.0.1で、ApacheのVirtualHostが無くても通る。
+      # ここで公開URLを外から引き、DNS・Apache・TLSまで通っているかを確かめる。
+      #
+      # **失敗させない。** certbot前・DNS未反映の初回デプロイは必ず落ちるため、
+      # 警告として出すだけにする（初回だけの分岐も持たない。2回目以降もApacheの設定や
+      # プロセスが壊れていれば拾えるほうがよい）。
+      - name: 公開URLの疎通を確認する（警告のみ）
+        continue-on-error: true
+        run: |
+          URL="${publicUrl}"
+          # 失敗時もcurl自身が %{http_code} に 000 を出す。パイプで 000 を足すと
+          # 2行になって数値比較が壊れるので、終了コードだけを握りつぶす
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' -I --max-time 20 "$URL") || true
+          [ -n "$CODE" ] || CODE=000
+          if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 400 ]; then
+            echo "$URL -> $CODE"
+          else
+            echo "::warning::$URL が開けませんでした（HTTP $CODE）。デプロイ自体は成功しています。DNSのAレコード・ApacheのVirtualHost・TLS証明書を確認してください。"
+          fi
 
   notify:
     runs-on: ubuntu-latest

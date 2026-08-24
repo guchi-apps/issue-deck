@@ -118,6 +118,14 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     expect(withoutDb).not.toContain("SHARED_DB_HOST");
   });
 
+  it("公開URLの疎通を確認するが、deployジョブの成否にはしない（#2252から引き継ぎ）", () => {
+    const deploy = content(spec(), ".github/workflows/deploy.yml");
+    expect(deploy).toContain("https://kakei-report.gucchii.com/");
+    expect(deploy).toContain("::warning::");
+    const step = /- name: 公開URLの疎通を確認する（警告のみ）\n([\s\S]*?)\n\n/.exec(deploy)?.[1] ?? "";
+    expect(step).toContain("continue-on-error: true");
+  });
+
   it("SSH先へ渡す envs: と env: の名前がそろっている（ここに無い変数はSSH先に存在しない）", () => {
     const deploy = content(spec(), ".github/workflows/deploy.yml");
     const block = /- name: Deploy and restart\n([\s\S]*?)\n          script: \|/.exec(deploy)?.[1] ?? "";
