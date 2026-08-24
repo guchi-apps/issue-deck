@@ -92,7 +92,9 @@ describe("signaly-notify.sh", () => {
       // ここが要点。**通知の失敗でrunを落とさない**
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("::warning::");
+      // 原因の切り分けに使うので、HTTPコードとcurlの終了コードは警告に残す
       expect(result.stdout).toContain("503");
+      expect(result.stdout).toContain("curl exit 22");
       // 一時エラーは再試行する（Signaly自身の再起動中に当たった503を拾うため）
       expect(received.length).toBeGreaterThan(1);
       // webhookのURLはそれ自体が投稿権限を持つシークレットなので、失敗時も出さない

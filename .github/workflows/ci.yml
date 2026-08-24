@@ -208,6 +208,9 @@ jobs:
 
       - name: 不足分を1Passwordから補う
         if: steps.status.outputs.should_notify == 'true'
+        # 通知のためだけのステップなので、ここが落ちてもrunは落とさない
+        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302・#2237）。
+        continue-on-error: true
         uses: ./.github/actions/load-secrets
         with:
           only: SIGNALY_WEBHOOK_URL

@@ -132,19 +132,27 @@ PY
 # `--retry`はタイムアウトと408・429・500・502・503・504を一時エラーとみなして再試行するので、
 # Signaly自身のデプロイ中に当たった503はこれで拾える。それでも駄目なら警告だけ残して0で返す。
 #
-# **curlのstderrは出さない。** 接続に失敗したときのメッセージにはwebhookのホスト名が載り、
-# GitHubのマスクは完全一致でしか効かないため、runのログへ接続先が残ってしまう
-# （`session-notify.sh`が失敗時にURLを出さないのと同じ理由）。代わりにHTTPコードだけ出す。
+# **curlのstderrは出さない。** HTTPエラーのメッセージ（`curl: (22) The requested URL returned
+# error: 503`）にURLは載らないが、接続に失敗したとき（`curl: (7) Failed to connect to <host>`）は
+# webhookのホスト名が載る。GitHubのマスクはsecretの完全一致でしか効かないため、URL全体を
+# secretにしていてもホスト名だけがPUBLICなrunのログへ残ってしまう
+# （`session-notify.sh`が失敗時にURLを出さないのと同じ理由）。
+#
+# 代わりに**HTTPコードとcurlの終了コード**を出す。原因の切り分けにはこれで足りる
+# （`22`=HTTPエラー、`6`=名前解決、`7`=接続不可、`28`=タイムアウト）。
 http_code=""
-if http_code="$(curl -fsS -o /dev/null -w '%{http_code}' \
+curl_status=0
+http_code="$(curl -fsS -o /dev/null -w '%{http_code}' \
   --max-time 10 --retry 2 --retry-delay 2 \
   -H "Content-Type: application/json" \
   -d "$payload" \
-  "$SIGNALY_WEBHOOK_URL" 2>/dev/null)"; then
+  "$SIGNALY_WEBHOOK_URL" 2>/dev/null)" || curl_status=$?
+
+if [[ "$curl_status" -eq 0 ]]; then
   echo "Signalyへ通知しました (HTTP ${http_code})"
   exit 0
 fi
 
 # 接続そのものに失敗した場合、`%{http_code}`は`000`になる。
-echo "::warning::Signalyへの通知に失敗しました (HTTP ${http_code:-000})。通知先が停止している可能性がありますが、このrunは成功として扱います"
+echo "::warning::Signalyへの通知に失敗しました (HTTP ${http_code:-000} / curl exit ${curl_status})。通知先が停止している可能性がありますが、このrunは成功として扱います"
 exit 0
