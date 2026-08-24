@@ -3,12 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { addSubIssue, createIssue } from "@/lib/github/issues-api";
+import { addSubIssue, createComment, createIssue } from "@/lib/github/issues-api";
 import {
   openLocalPortBandPullRequest,
   planLocalPortBand,
   type LocalPortBandPlan,
 } from "@/lib/github/local-port-band-api";
+import { findExistingVpsLaunchIssue } from "@/lib/github/new-app-existing-issue";
 import {
   cloneRepositoryLabels,
   createOrgRepository,
@@ -18,6 +19,7 @@ import {
 import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { resolveNewAppInstallationScope } from "@/lib/new-app/installation-scope";
+import { buildExistingLaunchIssueComment, withNewAppMarker } from "@/lib/new-app/launch-marker";
 import { parseNewAppSpec } from "@/lib/new-app/parse";
 import {
   MANUAL_STEP_LABEL,
@@ -74,6 +76,11 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 未登録のリポジトリ同士でポートが衝突する（#2213で実際に漏れた）。まだ何も作っていない
  * 時点で止めるので、直してから押し直せる。**Pull Requestの作成そのものに失敗したときは
  * 止めない**——残りのIssueを作らずに終える方が損失が大きいので、`warnings`で画面へ返す。
+ *
+ * **`guchi-apps/vps`には、同じ対象のopenなIssueがあれば起票しない**（#2250）。`aide-bot`の
+ * 立ち上げでは同じ作業のIssueが4件並んだ。見つかったときは新しく作らず、そのIssueへ
+ * コメントを書き足して`refs.vps`をそちらへ向ける（`lib/new-app/launch-marker.ts`）。
+ * 作るIssueの本文には、後から来たエージェントが判別できるよう不可視のマーカーを埋める。
  *
  * **最後に、作ったリポジトリとそのIssueを自分で取り込む**（#2248。`lib/new-app/resync.ts`）。
  * 設定の「リポジトリを再同期」→「Issueを再同期」を人が押す手順にしていたが、押し忘れると
@@ -218,6 +225,16 @@ async function launchNewApp(
     githubAppNeedsRepositoryAdd: installationScope.needsRepositoryAdd,
   };
 
+  // 立ち上げが作ったIssueだと後から機械的に分かるよう、本文の先頭へ印を埋める（#2250）
+  const marked = (kind: NewAppArtifactKind, body: string, parent: string) =>
+    withNewAppMarker(body, {
+      app: spec.repositoryName,
+      repo,
+      host: spec.urlMode === "subdomain" ? hostnameFor(spec) : "",
+      kind,
+      parent,
+    });
+
   const createIn = async (
     owner: string,
     name: string,
@@ -226,7 +243,11 @@ async function launchNewApp(
     body: string,
     labels?: string[],
   ) => {
-    const issue = await createIssue(owner, name, token, { title, body, labels });
+    const issue = await createIssue(owner, name, token, {
+      title,
+      body: marked(kind, body, refs.parent),
+      labels,
+    });
     const reference = `${owner}/${name}#${issue.number}`;
     created.push({ kind, title, reference, url: issue.html_url });
     return { id: issue.id, number: issue.number, reference };
@@ -304,16 +325,51 @@ async function launchNewApp(
   );
   children.push(browser.id);
 
-  // 6. vpsのVirtualHost（VPSの手作業Issueがこれを指す）
-  const vps = await createIn(
-    vpsOwner,
-    vpsRepo,
-    "vps-issue",
-    buildVpsIssueTitle(spec),
-    buildVpsIssueBody(spec, refs),
-  );
-  refs.vps = vps.reference;
-  children.push(vps.id);
+  // 6. vpsのVirtualHost（VPSの手作業Issueがこれを指す）。**同じ対象のopenなIssueが
+  //    あれば起票せず、そちらへコメントする**（#2250）
+  const existingVps = await findExistingVpsLaunchIssue(token, {
+    appName: spec.repositoryName,
+    hostname: spec.urlMode === "subdomain" ? hostnameFor(spec) : null,
+  });
+  if (existingVps) {
+    refs.vps = existingVps.reference;
+    try {
+      await createComment(vpsOwner, vpsRepo, existingVps.number, token, {
+        body: buildExistingLaunchIssueComment({
+          displayName: spec.displayName,
+          repositoryFullName: repo,
+          hostname: hostnameFor(spec),
+          parent: refs.parent,
+          reason: existingVps.reason,
+        }),
+      });
+    } catch (error) {
+      if (error instanceof GithubApiError && error.status === 401) throw error;
+      console.warn("[POST /api/new-app] 既存Issueへコメントできませんでした", error);
+    }
+    // **サブIssueとしては紐付けない。** 既存Issueには別の親が付いていることがあり、
+    // 付け替えると元の追跡が外れる。つながりはコメントのリンクで残す
+    created.push({
+      kind: "vps-issue",
+      title: existingVps.title,
+      reference: existingVps.reference,
+      url: existingVps.url,
+      existing: true,
+    });
+    warnings.push(
+      `${NEW_APP_VPS_REPOSITORY} には同じ対象のIssue（${existingVps.reference}）が開いていたため、新しく作らずコメントを書き足しました。`,
+    );
+  } else {
+    const vps = await createIn(
+      vpsOwner,
+      vpsRepo,
+      "vps-issue",
+      buildVpsIssueTitle(spec),
+      buildVpsIssueBody(spec, refs),
+    );
+    refs.vps = vps.reference;
+    children.push(vps.id);
+  }
 
   // 7. VPSの手作業
   const vpsManual = await createIn(
