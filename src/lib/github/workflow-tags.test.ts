@@ -32,7 +32,11 @@ vi.mock("@/lib/github/request", () => ({
   },
 }));
 
-import { collectWorkflowTags, dispatchPropagation } from "@/lib/github/workflow-tags";
+import {
+  collectWorkflowTags,
+  dispatchPropagation,
+  dispatchSharedFilePropagation,
+} from "@/lib/github/workflow-tags";
 
 function repo(fullName: string, installationId = 42) {
   const [ownerLogin, name] = fullName.split("/");
@@ -89,6 +93,10 @@ type RouteHandlers = {
   pullRequests?: Record<string, { number: number; title: string; url: string }[]>;
   /** 配布ワークフローの最新run。省略すると「1度も動いていない」 */
   latestRun?: ReturnType<typeof run> | null;
+  /** 配布元（issue-deckの`main`）の共有ファイルの本文（#2240）。省略すると読めなかった扱い */
+  sharedFileSource?: string | null;
+  /** リポジトリごとの共有ファイルの本文（#2240）。省略すると置かれていない扱い */
+  sharedFiles?: Record<string, string | null>;
 };
 
 /**
@@ -113,6 +121,15 @@ function route(handlers: RouteHandlers) {
       return Promise.resolve(ok({ data: { repository: { refs: { nodes } } } }));
     }
 
+    // 配布する共有ファイルの本文（#2240）。配布元1リポジトリぶんなので、変数は添字なしの
+    // `owner`・`name`になる（リポジトリごとの取得は`owner0`・`name0`…）
+    if (body?.variables && "name" in body.variables) {
+      const text = handlers.sharedFileSource ?? null;
+      return Promise.resolve(
+        ok({ data: { repository: { sf0: text === null ? null : { text } } } }),
+      );
+    }
+
     const data: Record<string, unknown> = {};
     const variables = body?.variables ?? {};
     for (const key of Object.keys(variables)) {
@@ -122,7 +139,12 @@ function route(handlers: RouteHandlers) {
       const fullName = `${variables[`owner${index}`]}/${variables[`name${index}`]}`;
       const entries = handlers.entries?.[fullName] ?? [blob("claude-issue-dispatch.yml")];
       const nodes = handlers.pullRequests?.[fullName] ?? [];
-      data[`r${index}`] = { object: { entries }, pullRequests: { nodes } };
+      const sharedFile = handlers.sharedFiles?.[fullName] ?? null;
+      data[`r${index}`] = {
+        object: { entries },
+        sf0: sharedFile === null ? null : { text: sharedFile },
+        pullRequests: { nodes },
+      };
     }
     return Promise.resolve(ok({ data }));
   };
@@ -261,11 +283,12 @@ describe("collectWorkflowTags", () => {
     const overview = await collectWorkflowTags("user-1");
 
     expect(overview.repositories).toHaveLength(3);
-    // 最新タグ用の1本と、3リポジトリぶんをまとめた1本だけ
-    expect(graphqlCalls()).toHaveLength(2);
-    // GraphQLの2本＋配布ワークフロー2種（タグ配布・不足callerの配布。#1948）の最新run
-    // （REST・ETagの条件付きGET）の2本
-    expect(githubFetch.mock.calls).toHaveLength(4);
+    // 最新タグ用の1本、配布する共有ファイルの本文用の1本（#2240）、
+    // 3リポジトリぶんをまとめた1本だけ。**リポジトリが増えても増えるのは最後の1本の中身だけ**
+    expect(graphqlCalls()).toHaveLength(3);
+    // GraphQLの3本＋配布ワークフロー3種（タグ配布・不足callerの配布・共有ファイルの更新）の
+    // 最新run（REST・ETagの条件付きGET）の3本
+    expect(githubFetch.mock.calls).toHaveLength(6);
   });
 
   it("タグ取得に失敗しても結果を返し、latest は null になる", async () => {
@@ -325,9 +348,12 @@ describe("collectWorkflowTags", () => {
     await collectWorkflowTags("user-1");
 
     const treeCalls = githubFetch.mock.calls.filter((call) => {
-      // 配布ワークフローの最新runはRESTで、bodyを持たない
+      // 配布ワークフローの最新runはRESTで、bodyを持たない。最新タグ（refPrefix）と
+      // 配布する共有ファイルの本文（#2240。エイリアスが`sf`で始まる）は対象リポジトリを
+      // 跨がないので数えない
       const body = (call[2] as { body?: GraphqlCall } | undefined)?.body;
-      return body !== undefined && !body.query.includes("refPrefix");
+      if (body === undefined) return false;
+      return !body.query.includes("refPrefix") && body.query.includes("$owner0");
     });
     expect(treeCalls).toHaveLength(2);
     expect(treeCalls.map((call) => call[1])).toEqual(["token-42", "token-99"]);
@@ -343,6 +369,7 @@ describe("collectWorkflowTags", () => {
       repositories: [],
       propagation: null,
       repairPropagation: null,
+      sharedFilePropagation: null,
     });
     expect(githubFetch).not.toHaveBeenCalled();
   });
@@ -485,5 +512,148 @@ describe("dispatchPropagation", () => {
     expect((post?.[2] as { body: { inputs: Record<string, string> } }).body.inputs.auto_merge).toBe(
       "false",
     );
+  });
+});
+
+describe("共有ファイルの検知（#2240）", () => {
+  beforeEach(() => {
+    repositoryFindMany.mockReset().mockResolvedValue([repo("guchi-apps/car-care")]);
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    githubFetch.mockReset();
+  });
+
+  it("配布元と内容が違えば配布対象にする", async () => {
+    githubFetch.mockImplementation(
+      route({
+        tags: ["workflows/v11"],
+        sharedFileSource: "new\n",
+        sharedFiles: { "guchi-apps/car-care": "old\n" },
+      }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.outdatedSharedFiles).toEqual([
+      ".github/scripts/signaly-notify.sh",
+    ]);
+  });
+
+  it("内容が同じならスキップする", async () => {
+    githubFetch.mockImplementation(
+      route({
+        tags: ["workflows/v11"],
+        sharedFileSource: "same\n",
+        sharedFiles: { "guchi-apps/car-care": "same\n" },
+      }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.outdatedSharedFiles).toEqual([]);
+  });
+
+  it("置かれていないリポジトリは対象にしない", async () => {
+    // 呼び出し側のステップが無いリポジトリへスクリプトだけ置いても誰も呼ばない
+    githubFetch.mockImplementation(route({ tags: ["workflows/v11"], sharedFileSource: "new\n" }));
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.outdatedSharedFiles).toEqual([]);
+  });
+
+  it("配布元を読めなければ対象にしない", async () => {
+    // ここを緩めると、取得が失敗しただけで全リポジトリが配布対象になる
+    githubFetch.mockImplementation(
+      route({ tags: ["workflows/v11"], sharedFiles: { "guchi-apps/car-care": "old\n" } }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories[0]?.outdatedSharedFiles).toEqual([]);
+  });
+
+  it("配布元は main から読む", async () => {
+    // 配布ワークフローは`ref: main`で起動するため、developを基準にすると
+    // 画面の件数と配られる中身が食い違う
+    githubFetch.mockImplementation(route({ tags: ["workflows/v11"], sharedFileSource: "new\n" }));
+
+    await collectWorkflowTags("user-1");
+
+    const sourceCall = graphqlCalls().find((call) => "shared0" in call.variables);
+    expect(sourceCall?.variables.shared0).toBe("main:.github/scripts/signaly-notify.sh");
+  });
+
+  it("配布先はデフォルトブランチから読む", async () => {
+    githubFetch.mockImplementation(route({ tags: ["workflows/v11"], sharedFileSource: "new\n" }));
+
+    await collectWorkflowTags("user-1");
+
+    const treeCall = graphqlCalls().find((call) => "shared0_0" in call.variables);
+    expect(treeCall?.variables.shared0_0).toBe("develop:.github/scripts/signaly-notify.sh");
+  });
+});
+
+describe("dispatchSharedFilePropagation", () => {
+  beforeEach(() => {
+    repositoryFindMany.mockReset().mockResolvedValue([repo("guchi-apps/car-care")]);
+    repositoryFindFirst.mockReset().mockResolvedValue({ installation: { installationId: 42 } });
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    githubFetch.mockReset();
+  });
+
+  /** 検知（GraphQL）は成功させ、dispatch（REST POST）だけを差し替える */
+  function withDispatch(dispatchResponse: unknown, handlers: Parameters<typeof route>[0] = {}) {
+    const detect = route({
+      tags: ["workflows/v11"],
+      sharedFileSource: "new\n",
+      sharedFiles: { "guchi-apps/car-care": "old\n" },
+      ...handlers,
+    });
+    githubFetch.mockImplementation(
+      (url: string, token: string, options?: { method?: string; body?: GraphqlCall }) => {
+        if (String(url).includes("/dispatches")) return Promise.resolve(dispatchResponse);
+        return detect(url, token, options);
+      },
+    );
+  }
+
+  it("古い配布物を持つリポジトリを対象に起動する", async () => {
+    withDispatch({ ok: true, status: 204 });
+
+    const result = await dispatchSharedFilePropagation("user-1");
+
+    expect(result).toMatchObject({
+      dispatched: true,
+      targets: [
+        { repository: "guchi-apps/car-care", files: [".github/scripts/signaly-notify.sh"] },
+      ],
+    });
+
+    const post = githubFetch.mock.calls.find((call) => String(call[0]).includes("/dispatches"));
+    expect(String(post?.[0])).toContain("propagate-shared-files.yml");
+    // 配る中身も`main`のものを使う（画面が「古い」と判定した基準と揃える）
+    expect((post?.[2] as { body: { ref: string } }).body.ref).toBe("main");
+  });
+
+  it("対象が無ければ起動しない", async () => {
+    // 何もしないrunが履歴に残ると紛らわしい
+    withDispatch({ ok: true, status: 204 }, { sharedFiles: { "guchi-apps/car-care": "new\n" } });
+
+    const result = await dispatchSharedFilePropagation("user-1");
+
+    expect(result).toMatchObject({ dispatched: false, reason: "no_targets" });
+    expect(githubFetch.mock.calls.some((call) => String(call[0]).includes("/dispatches"))).toBe(
+      false,
+    );
+  });
+
+  it("実行中なら起動しない", async () => {
+    // 起動は数秒で返るのにPRが出来上がるまでは数分かかる。画面のボタンを無効にするだけでは
+    // リロード後・別のタブから押せてしまう
+    withDispatch({ ok: true, status: 204 }, { latestRun: run("in_progress") });
+
+    const result = await dispatchSharedFilePropagation("user-1");
+
+    expect(result).toMatchObject({ dispatched: false, reason: "running" });
   });
 });

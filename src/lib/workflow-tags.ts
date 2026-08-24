@@ -97,6 +97,23 @@ export type WorkflowTagStatus = {
    * PRがマージされた後なので、それまでは「不足」と判定されたままになる。
    */
   repairPullRequest: WorkflowTagPullRequest | null;
+  /**
+   * 内容が配布元（issue-deckの`main`）と違う配布物のパス（#2240）。**配布先に置かれて
+   * いないものは含めない**（判定は`compareSharedFiles`）。空なら最新。
+   */
+  outdatedSharedFiles: string[];
+  /**
+   * そのうち、配布先のコピーにしか無い記述を持つもの（上書きで消える）。**配布の対象からは
+   * 外さず、画面とPR本文で目印にする**——独自の変更があるリポジトリこそ修正が届いていない。
+   */
+  customizedSharedFiles: string[];
+  /**
+   * 配布物を更新するPRのうち、まだopenのもの。無ければ`null`。
+   *
+   * **これが有る間は配布の対象から外す**（`sharedFilePropagationTargets`）。内容が変わるのは
+   * PRがマージされた後なので、それまでは「古い」と判定されたままになる。
+   */
+  sharedFilePullRequest: WorkflowTagPullRequest | null;
 };
 
 /**
@@ -120,6 +137,17 @@ export function evaluateWorkflowTags(
     files?: string[];
     pullRequest?: WorkflowTagPullRequest | null;
   } = {},
+  /**
+   * ワークフロー以外の配布物の状況（#2240）。参照タグ・callerの不足とは独立した軸のため、
+   * これも1つのオブジェクトにまとめて受ける。
+   */
+  sharedFiles: {
+    /** 配布元（issue-deckの`main`）の内容。パス → 本文 */
+    source?: Record<string, string | null>;
+    /** 配布先の内容。パス → 本文（置かれていなければ欠けるか`null`） */
+    target?: Record<string, string | null>;
+    pullRequest?: WorkflowTagPullRequest | null;
+  } = {},
 ): WorkflowTagStatus {
   const latestVersion = latest === null ? null : parseWorkflowTagVersion(latest);
 
@@ -131,6 +159,8 @@ export function evaluateWorkflowTags(
 
   const mismatched = refs.some((ref) => ref.promptsRef !== null && ref.promptsRef !== ref.uses);
 
+  const shared = compareSharedFiles(sharedFiles.source ?? {}, sharedFiles.target ?? {});
+
   return {
     fullName,
     refs,
@@ -139,6 +169,9 @@ export function evaluateWorkflowTags(
     updatePullRequest,
     missingRepairWorkflows: missingRepairWorkflows(repair.files ?? []),
     repairPullRequest: repair.pullRequest ?? null,
+    outdatedSharedFiles: shared.outdated,
+    customizedSharedFiles: shared.customized,
+    sharedFilePullRequest: sharedFiles.pullRequest ?? null,
   };
 }
 
@@ -355,6 +388,160 @@ export function repairPropagationTargets(statuses: WorkflowTagStatus[]): Workflo
  * runを別に持つぶんだけ関数を分けてある（タグ配布が動いている間も、こちらは押せてよい）。
  */
 export function canStartRepairPropagation(run: PropagationRun | null): PropagationStartDecision {
+  if (!isPropagationRunning(run)) return { allowed: true };
+
+  return {
+    allowed: false,
+    reason: "running",
+    message: "配布の実行中です。完了してからもう一度実行してください。",
+  };
+}
+
+/**
+ * ワークフロー以外の配布物1件ぶんの定義（#2240）。
+ *
+ * **配布元はissue-deck自身の実物で、`.github/templates/`に写しは置かない。**
+ * caller（`.github/templates/callers/`）は配布先ごとに参照タグ・`with:`を差し込んで生成する
+ * ため雛形が要るが、こちらは中身をそのまま配るので、写しを置くと**issue-deckの実物を直したのに
+ * 配られるのは古い写し**という食い違いが起こりうる。issue-deck自身がこのスクリプトを
+ * `ci.yml`・`deploy.yml`から使っている（＝壊れればこのリポジトリのCIで先に分かる）ことも、
+ * 実物を正にする根拠になる。
+ *
+ * 配布元と配布先でパスは同じ。`.github/scripts/signaly-notify.sh`は各リポジトリの
+ * `.github/scripts/`へコピーして使う運用のため、コピー先も同じ位置になる。
+ */
+export type SharedFileSpec = {
+  /** 配布元（issue-deckの`main`）・配布先とも同じパス */
+  path: string;
+  /** 画面に出す説明 */
+  label: string;
+};
+
+/**
+ * 配布するファイル（#2240）。
+ *
+ * `signaly-notify.sh`は#2237・#2239で「通知が届かなくても`exit 0`で返す」形に直したが、
+ * **各リポジトリの`.github/scripts/`へコピーして使う運用**のため、issue-deckを直しただけでは
+ * 行き渡らない。直っていないリポジトリでは、Signalyが止まっている間にデプロイすると
+ * **デプロイは成功しているのにrunだけが赤い**状態が残る。
+ *
+ * ここへ足すときは`.github/workflows/propagate-shared-files.yml`の許可リストも同じ内容にする
+ * （食い違うと、画面から配ろうとしたファイルがワークフロー側で弾かれる）。
+ */
+export const SHARED_FILE_SPECS: readonly SharedFileSpec[] = [
+  {
+    path: ".github/scripts/signaly-notify.sh",
+    label: "Signaly通知スクリプト",
+  },
+];
+
+/** パスから画面に出す説明を引く。未知のパスはそのまま返す */
+export function sharedFileLabel(path: string): string {
+  return SHARED_FILE_SPECS.find((spec) => spec.path === path)?.label ?? path;
+}
+
+/** 語の切り出し。識別子・変数名・コマンド名を拾う（日本語のコメントは語として数えない） */
+const SHARED_FILE_WORD_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
+
+/**
+ * 配布先のコピーにしか無い記述があるか（#2240）。
+ *
+ * 上書きで消えるものがあるかを**語の集合**で粗く見る。「このリポジトリは独自に手を入れて
+ * いるので、配布PRを注意して読む必要がある」ことを画面へ出すための目印で、差分そのものを
+ * 取るのが目的ではない。実際`guchi-apps/subpc`のコピーには、このリポジトリだけの
+ * `NOTIFY_NOTE`（反映は成功したが再起動などの操作が残っていることを通知へ足す）が入っている。
+ *
+ * **行単位では見ない。** 行で比べると、配布元で書き換わっただけの行（`run_url=`・`curl -fsS \`
+ * など）が「消える行」として全リポジトリに出てしまい、目印にならなかった——実測で16件中16件が
+ * 該当し、本当に独自の変更がある`subpc`を見分けられなかった。語で見ると`subpc`だけが残る。
+ *
+ * **語がすべて配布元にもある独自の変更は検出しない。** これは目印であって保証ではなく、
+ * 実際に消えるものは配布PRの本文へ全部書き出したうえで人が読む。
+ */
+export function hasLocalSharedFileContent(source: string, target: string): boolean {
+  const known = new Set(source.match(SHARED_FILE_WORD_PATTERN) ?? []);
+  return (target.match(SHARED_FILE_WORD_PATTERN) ?? []).some((word) => !known.has(word));
+}
+
+/** 配布物の突き合わせ結果（1リポジトリぶん） */
+export type SharedFileComparison = {
+  /** 内容が配布元と違うファイル。**配布先に置かれていないものは含めない** */
+  outdated: string[];
+  /** そのうち、配布先のコピーにしか無い記述を持つファイル（上書きで消える） */
+  customized: string[];
+};
+
+/**
+ * 配布元（issue-deckの`main`）と配布先の内容を突き合わせる（#2240）。
+ *
+ * **配布先に置かれていないファイルは対象にしない。** `signaly-notify.sh`を呼ぶのは
+ * `ci.yml`・`deploy.yml`側のステップなので、スクリプトだけを新規に置いても誰も呼ばない。
+ * 呼び出し側ごと入れるのは「そのリポジトリにCI・デプロイ通知を導入する」作業で、
+ * 機械的な配布とは別物（callerの新規配布＝`propagate-repair-workflows`が受け持つ範囲とも違う）。
+ *
+ * **配布元が読めないファイルも対象にしない。** 中身が分からないまま「違う」と判定すると、
+ * 取得が失敗しただけで全リポジトリが配布対象になる。
+ */
+export function compareSharedFiles(
+  source: Record<string, string | null>,
+  target: Record<string, string | null>,
+): SharedFileComparison {
+  const outdated: string[] = [];
+  const customized: string[] = [];
+
+  for (const spec of SHARED_FILE_SPECS) {
+    const sourceText = source[spec.path];
+    const targetText = target[spec.path];
+    if (typeof sourceText !== "string" || typeof targetText !== "string") continue;
+    if (sourceText === targetText) continue;
+
+    outdated.push(spec.path);
+    if (hasLocalSharedFileContent(sourceText, targetText)) customized.push(spec.path);
+  }
+
+  return { outdated, customized };
+}
+
+/**
+ * 配布ワークフローが作るPRのタイトル（#2240）。
+ *
+ * **`.github/scripts/propagate-shared-files.sh`の`gh pr create --title`と同じ文面**にする。
+ * 配布済みかどうかの判定はこのタイトルだけを頼りにしており、片方だけ変えると同じリポジトリへ
+ * 2本目のPRが作られる（`repairWorkflowPullRequestTitle`と同じ理由）。
+ */
+export function sharedFilePullRequestTitle(): string {
+  return "共有スクリプトを最新版へ更新する";
+}
+
+/** openなPRの中から、配布物の更新PRを1件探す */
+export function findSharedFilePullRequest(
+  pullRequests: { number: number; title: string; url: string }[],
+): WorkflowTagPullRequest | null {
+  const title = sharedFilePullRequestTitle();
+  const found = pullRequests.find((pullRequest) => pullRequest.title.trim() === title);
+  return found ? { number: found.number, url: found.url } : null;
+}
+
+/**
+ * いま配布物を配るべきリポジトリ。**更新PRが既にopenのものは含めない。**
+ *
+ * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
+ * （`propagationTargets`・`repairPropagationTargets`と同じ理由）。
+ */
+export function sharedFilePropagationTargets(statuses: WorkflowTagStatus[]): WorkflowTagStatus[] {
+  return statuses.filter(
+    (status) => status.outdatedSharedFiles.length > 0 && status.sharedFilePullRequest === null,
+  );
+}
+
+/**
+ * いま配布物の更新を起こしてよいか（#2240）。
+ *
+ * 判定の形も理由もタグ配布（`canStartPropagation`）と同じ。**実行の正はGitHub側のrun**で、
+ * runを別に持つぶんだけ関数を分けてある（`.github/scripts/`しか触らないため、
+ * `.github/workflows/`を触る2つの配布が動いている間も押せてよい）。
+ */
+export function canStartSharedFilePropagation(run: PropagationRun | null): PropagationStartDecision {
   if (!isPropagationRunning(run)) return { allowed: true };
 
   return {

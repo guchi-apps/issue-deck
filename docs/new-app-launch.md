@@ -24,7 +24,7 @@
 | 0. 相談 | 何を作るかをAIと数往復して固める。仕様案（名前・種別・DB・認証・URL）が下にまとまる | [`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts) |
 | 1. 基本 | アプリ名・リポジトリ名・公開範囲・概要。リポジトリ名の空きをGitHubで確かめる | [`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts) |
 | 2. 配置 | 種別・公開URL・本番ポート・DB名・認証・マルチエージェント運用の要否 | 同上 |
-| 3. 確認 | 作られるもの8件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
+| 3. 確認 | 作られるもの9件を「自動 / 代行できる / あなたが実行」の内訳付きで出す | [`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts) |
 
 **相談と設定を同じ画面に混ぜない。** 会話しながら横で仕様が埋まっていく形も検討したが、
 スマホでは会話と設定の両方を1画面に収めることになる。相談を先に終えて値を引き渡す形なら、
@@ -33,7 +33,7 @@
 **相談で決まっていない項目は空のまま渡す**（`normalizeDraft`が知らない値・使えない値を
 `null`へ落とす）。埋めさせると、聞かれていない前提が既定値として設定ステップへ流れ込む。
 
-## 作られるもの（8件）
+## 作られるもの（9件）
 
 | 作られるもの | 場所 | 自動化 |
 |---|---|---|
@@ -41,9 +41,10 @@
 | 親Issue「◯◯の立ち上げ」 | `guchi-apps/issue-deck` | 自動 |
 | ポート帯を足すPull Request | `guchi-apps/issue-deck` | 自動（`scripts/local-repo-ports.conf`へ1行） |
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
+| 初回デプロイ前チェックと公開確認 | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
-| `[手作業] サブPC: cloneして対応表に載せる` | `guchi-apps/issue-deck` | 代行実行できる |
+| `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
 手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
@@ -55,10 +56,17 @@
 - **DNSのAレコードの登録。** DNSはVPSプロバイダの管理画面でしか設定できず、使えるAPIが無い
   （共有知識の`guides/apache-domain-setup.md`も「実行者: 人間のみ」としている）。自動化
   できるのはサブドメイン名の決定と重複チェックまで。
-- **VPS実機の操作**（`/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
+- **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
   certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
   反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **1Password・GitHub Secrets・GitHub Appのインストール対象。** 無断で変更してよい設定ではない。
+- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
+  アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
+  CI・デプロイ通知の`SIGNALY_WEBHOOK_URL`はorganization secretへ寄せたため（#2255）、
+  新規アプリの立ち上げにSignalyのチャンネル作成もWebhook URLの登録も要らない。
+- **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
+  `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
+  何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
+  ブラウザの手作業Issueに手順が出る。
 
 ## 実装のうえで外せない前提
 
@@ -113,17 +121,70 @@
   **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。サブPCの手作業
   Issueの`## 前提条件`に1行書いてある。
 
-### 新しいリポジトリのIssueは、作った直後には盤面に載らない
+### 1Passwordのアイテムは、コマンドで投入する（#2249）
 
-盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあること
-（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）で、**それを作るのが初期化Issue
-自身**という順序になっている。そこで次の2つで噛み合わせている。
+**フィールド名の羅列を手作業Issueに書かない。** `aide-bot`の立ち上げでは
+「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = /apps/aide-bot`」という
+羅列を書いていたため、値が未登録のまま初回の本番デプロイが走り
+`DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
 
-- 初期化Issueの実行経路を**サブPCのローカルセッション**に固定する（条件は
-  `~/.config/issue-deck/local-repos.conf`への記載）。サブPCの手作業Issueを初期化Issueの
-  `## 前提条件`に置いてある。
-- ブラウザの手作業Issueに「GitHub Appへ追加 → **リポジトリを再同期 → Issueを再同期**」を
-  入れる。**2つとも押す必要がある**（片方だけではIssueが取り込まれない）。
+投入は[`scripts/provision-app-secrets.sh`](../scripts/provision-app-secrets.sh)が行う。
+**画面（立ち上げのAPI）からは実行しない**——本番のissue-deckは1Passwordを直接読み書きせず、
+書き込み用のサービスアカウント（`~/.config/issue-deck/op-writer.env`）を持つのはサブPCだけ
+（画面の「シークレット同期」もワークフローを起こしているだけ。#1309）。したがって実行の場は
+**サブPCの手作業Issueとローカルセッション**になる。
+
+- **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
+  Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
+- **SignalyのWebhook URLはここで扱わない。** organization secretへ寄せたため（#2255）、
+  ブラウザの手作業Issueにチャンネル作成・登録の手順は残さない。スクリプト自体は
+  引き続き`--ci-webhook-url`オプションを持つが（他アプリの値を後から直すときなどに使う）、
+  立ち上げのコマンドからは渡さない。
+- **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
+  発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
+  **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。
+- **GitHubのsecretへの同期には`.github/secrets-manifest.tsv`が要る**（どのKEYがどのフィールドを
+  読むかの正はマニフェストで、スクリプトは参照を引数で受けない）。それを作るのは初期化Issue
+  なので、サブPCの手順の時点では1Passwordへ入るだけで同期は見送られる。**同じコマンドを後から
+  実行すると同期まで進む**——何度実行してもよい作りにしてあるのはこのため。初期化Issueの
+  やることにも、マニフェストを作った後の同期を1項目として入れてある。
+- **入ったことはGitHub側から引き直して確かめる**（`actions/secrets`の`total_count`）。同期
+  スクリプトの出力は送った側の記録でしかなく、名前の取り違えや権限不足に気付けない。
+
+### 新しいリポジトリのIssueは、立ち上げ自身が取り込む
+
+リポジトリを作っただけでは、issue-deckのDBに現れない。`repository_selection=all`の
+インストールでは新しいリポジトリを足しても`installation_repositories`のwebhookが飛ばず、
+設定の「リポジトリを再同期」を押すまでDBに入らないためで、Issueの取り込みはさらにその後に
+なる。当初はこの2つを人が押す手順としてブラウザの手作業Issueへ入れていたが、押し忘れると
+初期化Issueが画面に出ないままになる（#2215で実際に押されていなかった）。
+
+そこで**立ち上げの最後で、issue-deck自身が同じ2つを実行する**（#2248。
+[`lib/new-app/resync.ts`](../src/lib/new-app/resync.ts)）。
+
+- **初期化Issueを作ったあとに置く。** 先に回すと取り込むIssueがまだ無い。
+- **Issueの再同期は作ったリポジトリ1つだけに絞る。** 画面のボタンは接続中の全リポジトリを
+  回すが、ここで欲しいのは今作ったものだけ。
+- **Projectへの追加（`addMissingProjectItems`）は呼ばない。** 対象は
+  `claude-issue-dispatch.yml`を持つリポジトリに限られ、それを作るのが初期化Issue自身なので、
+  この時点では何も載らない。
+- **失敗しても止めない。** `warnings`で「設定で2つを押してください」と画面へ返す
+  （ポート帯のPull Requestと同じ扱い）。
+
+**カンバンの盤面へ載る条件は別で、`claude-issue-dispatch.yml`がデフォルトブランチにあること**
+（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。**それを作るのが初期化Issue自身**
+なので、初期化Issueの実行経路は**サブPCのローカルセッション**に固定してある（条件は
+`~/.config/issue-deck/local-repos.conf`への記載で、サブPCの手作業Issueを初期化Issueの
+`## 前提条件`に置いてある）。
+
+### `repository_selection`はDBではなくGitHubへ聞く
+
+DBの`GithubInstallation.repositorySelection`は`installation`イベントでしか更新されず、
+インストール画面で対象を選び直したときに飛ぶ`installation_repositories`イベントでは
+更新されない。立ち上げの判断に使うと、`selected`へ戻されたことに気付かないまま手順を落とす。
+そのためApp JWTで取り直す（[`lib/new-app/installation-scope.ts`](../src/lib/new-app/installation-scope.ts)）。
+**読めなかったときは手順を出す側に倒す**——余分な手順が1つ増えるだけで済み、落とすと
+立ち上げが黙って壊れる。
 
 ### サブPCの手作業Issueは代行実行の条件を満たす形で書く
 
@@ -137,6 +198,33 @@
 1つでも崩すと、その手順は「あなたが実行」として並ぶだけになる。
 `lib/new-app/plan.test.ts`が、生成した本文を実物の`buildManualStepRunPlan`に通して見張っている。
 
+### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
+
+`deploy.yml`のヘルスチェックが叩くのは**VPS内の`http://127.0.0.1:<port>/`**なので、
+ApacheのVirtualHostが無くてもdeployジョブは成功する。`aide-bot`ではそのせいで
+「デプロイが通った＝公開できた」と読めてしまい、vhostが無いことに気づくのが
+`guchi-apps/vps#128`の調査まで遅れた（#2252）。
+
+そこで置いているのが次の2つ。
+
+- **親Issueの`## 完了条件`**（`buildParentIssueBody`）。先頭が
+  `curl -I https://<host>/`が200か3xxを返すことで、「一覧への登録」の3項目もここへ畳んである。
+  DNS・Apache・TLS・アプリのすべてを通る確認はこの1本だけ。
+- **新しいリポジトリの「初回デプロイ前チェックと公開確認」Issue**（`buildDeployCheckIssueBody`）。
+  初回デプロイの前に周辺インフラの疎通を確かめ、デプロイ後に公開URLまで見届ける。返らない
+  ときの切り分け（名前解決→DNS、404→vhost、502/503→PM2、TLS→certbot）を表で持たせてある。
+
+**初期化Issueへ畳まない。** 初期化Issueは`develop`へのマージで`Done`になるが、初回デプロイは
+`develop`→`main`のリリースPRをマージした後なので、そこまで開いたまま追えるものが残らない。
+
+**実行経路はサブPCのローカルセッション**（初期化Issueと同じ）。実地確認の手順は個人スキル
+`initial-deploy-check`にあり、GitHub Actions上の無人実行は個人スキルを読めない。1Passwordの
+解決やVPSへのSSHも無人実行からは行えない。
+
+**雛形の`deploy.yml`（#2247）には、失敗させない形で入れる。** 疎通の確認をdeployジョブの成否に
+するとcertbot前の初回デプロイが必ず落ちるので、`::warning::`として出すだけにする。初回だけの
+分岐は持たない——2回目以降もApacheの設定が壊れていれば拾えるほうがよい。
+
 ### certbotが作る`-le-ssl.conf`は`guchi-apps/vps`へ戻す
 
 `guchi-apps/vps`のドリフト検知（`.github/scripts/check-drift.sh`）は**実機の
@@ -144,6 +232,14 @@
 `<host>-le-ssl.conf`を取り込むまで「[新規（未取り込み）]」として毎日出続ける。
 VPSの手作業Issueに「内容を控えてvpsのIssueへコメントする」手順を置き、vpsのIssue側に
 2段目として取り込みを書いてある。
+
+**控える前に`:443`側の`X-Forwarded-Proto`を`"https"`へ直す**（#2253）。certbotは`:80`の
+VirtualHostをそのまま`:443`へ複製するため、`RequestHeader set X-Forwarded-Proto "http"`が
+残る。アプリは自分を`http://`だと誤認し、生成したリダイレクトURIが登録済みの`https://`と
+一致せず、**本番でだけOAuthログインが失敗する**。共有知識には2026-08-09の時点で記録があった
+（`guchi-apps/docs`の`knowledge/deployment.md`）のに、生成する手順に入っていなかったのが
+`guchi-apps/vps#124`で顕在化した理由なので、**認証の有無にかかわらず常に手順として出す**
+（後から認証を足すアプリがあるため）。
 
 ## 失敗したときの扱い
 

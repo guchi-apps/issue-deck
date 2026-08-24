@@ -2254,6 +2254,11 @@ pnpm test:unit   # vitestのみ
 - **生成する手作業Issueのうち、サブPCのものは代行実行の条件を満たす形で書く**
   （デバイスがサブPC1つ・1手順1コマンドブロック・対話コマンドとプレースホルダ無し）。
   `lib/new-app/plan.test.ts`が実物の`buildManualStepRunPlan`に通して見張っている。
+- **完了の判定は公開URLの`curl`で行う**（#2252）。`deploy.yml`のヘルスチェックはVPS内の
+  `http://127.0.0.1:<port>/`宛で、ApacheのVirtualHostが無くてもdeployジョブは成功するため、
+  「デプロイが通った＝公開できた」にはならない。親Issueの`## 完了条件`（先頭が
+  `curl -I https://<host>/`）と、新しいリポジトリへ立てる「初回デプロイ前チェックと公開確認」
+  Issue（`buildDeployCheckIssueBody`）の2つで担保する。
 
 ## 環境変数
 
