@@ -88,6 +88,25 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 
 横展開が必要だと分かったら、**このセッションで他リポジトリを触らず**、対象リポジトリごとにIssueを立てて親IssueへサブIssueとして紐付ける。上の禁止事項「担当Issue以外の実装」がそのまま当てはまる。影響範囲の調べ方（横断質問）・変更の種類ごとの配り方・追跡の残し方は[docs/multi-repo-changes.md](docs/multi-repo-changes.md)を参照する。
 
+### 他リポジトリへ起票する前に、同じ対象のopenなIssueを探す
+
+**`gh issue create --repo <owner>/<repo>`を打つ前に、対象リポジトリのopenなIssueを引く**（#2250）。
+`aide-bot`の立ち上げでは、同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件立った。
+ラベルもタイトルの形もばらばらで、後から調査に入ったエージェントが既存のIssueを探さないまま
+起票し直したのが原因。
+
+```bash
+gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json number,title
+```
+
+- 探す語は**対象の固有名**（アプリ名・ホスト名・サービス名）にする。「vhost」「証明書」のような
+  作業名では別の対象まで釣れる
+- 立ち上げが作ったIssueには本文の先頭に`<!-- new-app-launch: … -->`の印がある。
+  **GitHubのIssue検索はHTMLコメントの中身も索引している**ので`--search "new-app-launch <アプリ名>"`で引ける
+- **見つかったら起票せず、そのIssueへコメントする。** 手順が足りなければそのIssueへ書き足す。
+  **同じ手順を2か所に持たない**（`#2216`と`guchi-apps/vps#124`でcertbotの手順が重複し、片方が宙に浮いた）
+- 判断基準の詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「他リポジトリへ起票するときも、先に探す」を参照
+
 ### すでに実装済み・対応不要のIssueは実装せず、報告して止まる
 
 起票から時間が経ったIssueは、**別のIssue・PRで先に対応されていたり、前提の変更で問題自体が消えていることがある**（#1601）。その場合は無理にファイルを変更せず、根拠を添えて報告し、続け方の指示を待つ。既に満たされている要求へ重ねて実装すると、既存の実装と競合し、レビューの手間だけが増える。

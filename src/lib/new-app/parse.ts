@@ -11,7 +11,9 @@
 import {
   NEW_APP_KINDS,
   emptyNewAppSpec,
+  isValidThemeColor,
   type NewAppAuth,
+  type NewAppIconPlan,
   type NewAppKind,
   type NewAppSpec,
   type NewAppUrlMode,
@@ -20,6 +22,7 @@ import {
 const KINDS = new Set<NewAppKind>(NEW_APP_KINDS);
 const AUTHS = new Set<NewAppAuth>(["none", "supabase-google", "fastapi-google"]);
 const URL_MODES = new Set<NewAppUrlMode>(["subdomain", "path"]);
+const ICON_PLANS = new Set<NewAppIconPlan>(["provisional", "prepared"]);
 
 function text(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -44,6 +47,16 @@ export function parseNewAppSpec(value: unknown): NewAppSpec | null {
   if (typeof raw.urlMode !== "string" || !URL_MODES.has(raw.urlMode as NewAppUrlMode)) return null;
   if (typeof raw.auth !== "string" || !AUTHS.has(raw.auth as NewAppAuth)) return null;
   if (typeof raw.multiAgent !== "boolean") return null;
+
+  // 体裁と運用（#2254）。**画面が必ず既定値を載せて送る**ので、欠けていれば要求のほうが古い
+  const appTitle = text(raw.appTitle, 120);
+  if (appTitle === null) return null;
+  if (typeof raw.pwa !== "boolean") return null;
+  if (typeof raw.offline !== "boolean") return null;
+  if (typeof raw.changelog !== "boolean") return null;
+  if (typeof raw.screenshotBypass !== "boolean") return null;
+  if (typeof raw.iconPlan !== "string" || !ICON_PLANS.has(raw.iconPlan as NewAppIconPlan)) return null;
+  if (typeof raw.themeColor !== "string" || !isValidThemeColor(raw.themeColor)) return null;
 
   let port: number | null = null;
   if (raw.port !== null && raw.port !== undefined) {
@@ -72,5 +85,12 @@ export function parseNewAppSpec(value: unknown): NewAppSpec | null {
     databaseName: databaseName || null,
     auth: raw.auth as NewAppAuth,
     multiAgent: raw.multiAgent,
+    appTitle,
+    pwa: raw.pwa,
+    offline: raw.offline,
+    iconPlan: raw.iconPlan as NewAppIconPlan,
+    themeColor: raw.themeColor,
+    changelog: raw.changelog,
+    screenshotBypass: raw.screenshotBypass,
   };
 }
