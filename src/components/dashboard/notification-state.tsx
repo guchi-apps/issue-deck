@@ -12,7 +12,11 @@ import {
   type NotificationGroup,
   type NotificationItem,
 } from "@/lib/notifications";
-import { countReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
+import {
+  countReleaseActivity,
+  selectVisibleReleaseStatuses,
+  type ReleaseActivityCounts,
+} from "@/lib/release-activity";
 import {
   countReleaseMergePending,
   type ReleaseMergePendingCounts,
@@ -204,10 +208,16 @@ export function NotificationProvider({
   }, [hasConnectedRepository, refetch, onRefreshIssues, onRefreshPullRequests]);
 
   const value = useMemo<NotificationState>(() => {
+    // 左メニューで非表示にしたリポジトリは、通知ベルの項目からも件数からも外す（#2279）。
+    // **絞るのはここ1か所**——項目だけ非表示ぶんを含んでいた（#2167は「取りこぼしを防ぐ
+    // 場所」として意図的に残していた）が、非表示にした以上は開いた先に何も無い。
+    // APIの母集団は絞らない（スマホのリポジトリ画面が同じ結果でバッジを出しており、
+    // あちらは「すべて表示する」で非表示のリポジトリも並べる）
+    const visibleReleaseStatuses = selectVisibleReleaseStatuses(releaseStatuses, repositories);
     const items = buildNotifications({
       issues,
       pullRequests,
-      releaseStatuses,
+      releaseStatuses: visibleReleaseStatuses,
       checkUserRunningIssueIds,
     });
     return {
@@ -216,8 +226,8 @@ export function NotificationProvider({
       badgeCount: countBadgeNotifications(items),
       countLabel: describeNotificationCount(items),
       hasError: hasErrorNotification(items),
-      releaseMergePending: countReleaseMergePending(releaseStatuses),
-      releaseActivity: countReleaseActivity(releaseStatuses, repositories),
+      releaseMergePending: countReleaseMergePending(visibleReleaseStatuses),
+      releaseActivity: countReleaseActivity(visibleReleaseStatuses),
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
       isFetching: isSelfFetching || isRefreshingPullRequests,

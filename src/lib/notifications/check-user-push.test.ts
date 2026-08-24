@@ -1,17 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { db } from "@/lib/db";
 import {
   buildCheckUserPushPayload,
   CHECK_USER_MERGE_PUSH_DELAY_MS,
   CHECK_USER_PUSH_DELAY_MS,
   CHECK_USER_PUSH_MAX_AGE_MS,
   decideCheckUserPush,
+  sweepCheckUserPushNotifications,
 } from "@/lib/notifications/check-user-push";
+import { isPushConfigured, sendPushNotification } from "@/lib/notifications/push";
 
 // 判定だけを見るテスト。DBとweb-pushはこのモジュールの読み込みで引きずられるだけなので潰す
+// （宛先の絞り込みを見るテストだけ、必要なメソッドをその場で生やす）
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/notifications/push", () => ({
-  isPushConfigured: () => false,
+  isPushConfigured: vi.fn(() => false),
   sendPushNotification: vi.fn(),
 }));
 
@@ -147,5 +151,50 @@ describe("buildCheckUserPushPayload", () => {
   it("同じIssueの通知はまとまるよう、Issueごとのtagを付ける", () => {
     const payload = buildCheckUserPushPayload({ ...issue, labels: [CHECK_USER] });
     expect(payload.tag).toBe("check-user:987654321");
+  });
+});
+
+describe("sweepCheckUserPushNotifications", () => {
+  it("そのリポジトリを非表示にしているユーザーの購読は宛先から外す（#2279）", async () => {
+    vi.mocked(isPushConfigured).mockReturnValue(true);
+    vi.mocked(sendPushNotification).mockResolvedValue({ sent: 1, removed: 0, failed: 0 });
+
+    const findSubscriptions = vi.fn().mockResolvedValue([]);
+    Object.assign(db, {
+      issue: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "issue-1",
+            githubIssueId: 987654321,
+            number: 12,
+            title: "確認してほしい",
+            checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
+            labels: [CHECK_USER, { name: "01.check-plan" }],
+            repository: {
+              id: "repo-1",
+              fullName: "guchi-apps/issue-deck",
+              installationId: "install-1",
+            },
+          },
+        ]),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      pushSubscription: { findMany: findSubscriptions },
+    });
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(findSubscriptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user: {
+            userInstallations: { some: { installationId: "install-1" } },
+            hiddenRepositories: { none: { repositoryId: "repo-1" } },
+          },
+        },
+      }),
+    );
   });
 });
