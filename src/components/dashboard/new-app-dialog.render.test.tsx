@@ -170,6 +170,50 @@ describe("NewAppDialog", () => {
     expect(screen.getAllByText("代行できる").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("体裁と運用は畳んだまま次へ進める（既定値が1行で読める。#2254）", async () => {
+    mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
+    await advanceToPlacement();
+
+    expect(screen.getByText("体裁と運用")).toBeTruthy();
+    expect(screen.getByText("標準どおり")).toBeTruthy();
+    expect(screen.getByText(/表示名「家計レポート」／.*PWA対応・オフラインなし／更新履歴あり/)).toBeTruthy();
+    // 畳んだままでは入力欄を出さない
+    expect(screen.queryByLabelText("表示名")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
+    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
+    expect(screen.getByText(/体裁と運用: 表示名「家計レポート」/)).toBeTruthy();
+  });
+
+  it("開いて標準から外すと「標準どおり」が消え、要約もそれに追従する（#2254）", async () => {
+    mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
+    await advanceToPlacement();
+
+    fireEvent.click(screen.getByRole("button", { name: "変更する" }));
+    fireEvent.change(screen.getByLabelText("表示名"), { target: { value: "家計" } });
+    fireEvent.click(screen.getByLabelText(/更新履歴（changelog）を持つ/));
+
+    expect(screen.queryByText("標準どおり")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(screen.getByText(/表示名「家計」／.*更新履歴なし/)).toBeTruthy();
+  });
+
+  it("認証が無いアプリでは撮影バイパスの項目を出さない（#2254）", async () => {
+    mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
+    await advanceToPlacement();
+
+    // このウィザードの認証の既定は「なし」で、そのときは迂回するものが無い
+    fireEvent.click(screen.getByRole("button", { name: "変更する" }));
+    expect(screen.queryByLabelText(/CI撮影の認証バイパスを用意する/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("認証"), { target: { value: "supabase-google" } });
+    expect(screen.getByLabelText(/CI撮影の認証バイパスを用意する/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("認証"), { target: { value: "none" } });
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(screen.getByText(/CI撮影の認証バイパスは不要（認証なし）/)).toBeTruthy();
+  });
+
   it("立ち上げが途中で失敗しても、作られたものをリンクとして出す", async () => {
     mockFetch({
       "/api/new-app/preflight": () => PREFLIGHT_OK,

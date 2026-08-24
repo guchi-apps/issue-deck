@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appTitleFor,
+  appearanceSummary,
   databaseNameFor,
   defaultsForKind,
   emptyNewAppSpec,
   hostnameFor,
+  isAppearanceDefault,
   isValidRepositoryName,
+  isValidThemeColor,
+  offlineEnabled,
+  screenshotBypassEnabled,
   isValidSubdomain,
   publicUrlFor,
   slugifyRepositoryName,
@@ -134,5 +140,56 @@ describe("validateNewAppSpec", () => {
     const errors = validateNewAppSpec(s);
     expect(errors).toContain("base_path_required");
     expect(errors).not.toContain("subdomain_required");
+  });
+});
+
+describe("体裁と運用（#2254）", () => {
+  it("既定は「PWA対応・オフラインなし・アイコン暫定・更新履歴あり・撮影バイパスあり」", () => {
+    const base = emptyNewAppSpec();
+    expect(base.pwa).toBe(true);
+    expect(base.offline).toBe(false);
+    expect(base.iconPlan).toBe("provisional");
+    expect(base.changelog).toBe(true);
+    expect(base.screenshotBypass).toBe(true);
+    expect(isAppearanceDefault(base)).toBe(true);
+  });
+
+  it("表示名が空ならアプリ名を使う", () => {
+    expect(appTitleFor(spec())).toBe("家計レポート");
+    expect(appTitleFor(spec({ appTitle: "  家計  " }))).toBe("家計");
+  });
+
+  it("PWA対応しないならオフライン対応も成立しない", () => {
+    expect(offlineEnabled(spec({ pwa: false, offline: true }))).toBe(false);
+    expect(offlineEnabled(spec({ pwa: true, offline: true }))).toBe(true);
+  });
+
+  it("認証が無いアプリでは撮影バイパスを不要にする", () => {
+    expect(screenshotBypassEnabled(spec({ auth: "none", screenshotBypass: true }))).toBe(false);
+    expect(screenshotBypassEnabled(spec({ auth: "supabase-google" }))).toBe(true);
+  });
+
+  it("標準から外すと「標準どおり」ではなくなる（表示名は判定に含めない）", () => {
+    expect(isAppearanceDefault(spec({ appTitle: "家計" }))).toBe(true);
+    expect(isAppearanceDefault(spec({ changelog: false }))).toBe(false);
+    expect(isAppearanceDefault(spec({ themeColor: "#0f766e" }))).toBe(false);
+  });
+
+  it("要約は決めた値をそのまま並べる", () => {
+    const summary = appearanceSummary(spec({ auth: "supabase-google" }));
+    expect(summary).toContain("表示名「家計レポート」");
+    expect(summary).toContain("PWA対応・オフラインなし");
+    expect(summary).toContain("更新履歴あり");
+    expect(summary).toContain("CI撮影の認証バイパスあり");
+    expect(appearanceSummary(spec({ auth: "none" }))).toContain("不要（認証なし）");
+  });
+
+  it("テーマカラーは `#rrggbb` だけを認め、PWA対応時に検証する", () => {
+    expect(isValidThemeColor("#0F172A")).toBe(true);
+    expect(isValidThemeColor("#0f1")).toBe(false);
+    expect(validateNewAppSpec(spec({ themeColor: "teal" }))).toContain("theme_color_invalid");
+    expect(validateNewAppSpec(spec({ pwa: false, themeColor: "teal" }))).not.toContain(
+      "theme_color_invalid",
+    );
   });
 });
