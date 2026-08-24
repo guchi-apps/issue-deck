@@ -7,7 +7,7 @@
 # `API Error: 529 Overloaded. ...` と表示して**そのturnを打ち切る**。セッション自体は生きたまま
 # 入力欄へ戻るが、このとき**`Stop`フックは飛ばない**（2026-08-18の実測。下記）。つまり、
 #
-#   - Signalyへも画面へも「止まった」と伝わらない（人は気づけない）
+#   - 画面にも通知にも「止まった」と伝わらない（人は気づけない）
 #   - 状態ファイル（`lib/session-state.sh`の`.event`）は`working`のまま止まる
 #   - 回収（`reap-sessions.sh`）は`Stop`しか畳まないので、セッションは残り続ける
 #   - 画面の「追加指示を送る」も1a（最後のイベントが`Stop`）で弾かれ、人が送ることもできない
@@ -35,7 +35,7 @@ SESSION_RESUME_ENABLED="${SESSION_RESUME_ENABLED:-1}"
 # **短くすると、エラーの直後に自力で書き始めたturnへ割り込む。**
 SESSION_RESUME_STALL_MINUTES="${SESSION_RESUME_STALL_MINUTES:-10}"
 # 1つのセッションに対して自動で再開を試みる回数の上限。
-# 使い切ったら以降は送らず、Signalyへ1度だけ通知して人へ渡す。
+# 使い切ったら以降は送らず、issue-deckへ1度だけ引き上げて人へ渡す（#2280。`00.check-user`が付く）。
 SESSION_RESUME_MAX_ATTEMPTS="${SESSION_RESUME_MAX_ATTEMPTS:-3}"
 # 再開を試みる間隔（分）。過負荷が続いている間に連打しても同じことになるため間を置く。
 SESSION_RESUME_INTERVAL_MINUTES="${SESSION_RESUME_INTERVAL_MINUTES:-5}"

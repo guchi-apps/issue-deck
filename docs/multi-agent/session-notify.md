@@ -1,8 +1,13 @@
 # 実装セッションの状態通知とRemote Control
 
-サブPC（`subpc`）のtmuxで動く実装セッションが、入力待ちと応答終了を自分からSignalyへ通知する
-仕組み（#1219）。あわせて`--remote-control`で、通知に気づいた側がスマホやブラウザから
+サブPC（`subpc`）のtmuxで動く実装セッションが、入力待ちと応答終了を自分からissue-deckへ
+報告する仕組み（#1219）。あわせて`--remote-control`で、気づいた側がスマホやブラウザから
 そのセッションへ答えられるようにする。
+
+**#2280でSignalyへのwebhook通知を削除した。** 人へ届けるのはissue-deck自身のPush通知
+（`00.check-user`が付いたIssueを鳴らす。`src/lib/notifications/`）で、このスクリプトが外へ
+出す先はissue-deckのAPIだけになった。以下で「報告」と書いているのはすべてissue-deck宛で、
+`~/.config/issue-deck/notify.env`にあった`SESSION_NOTIFY_WEBHOOK_URL`は無くなっている。
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
@@ -28,9 +33,11 @@ tmuxの実装セッション（run-issue-session.sh が起動）
   ↓
 scripts/session-notify.sh（フックのstdinでJSONを受け取る）
   ├→ ~/.local/state/issue-deck/sessions/<tmuxセッション名>.event へ最後のイベントを記録（#1256）
-  ↓ webhook（~/.config/issue-deck/notify.env の SESSION_NOTIFY_WEBHOOK_URL）
-Signaly → スマホ・メインPCへ通知
-  ↓ 通知に載っているURLを開く
+  ↓ POST /api/dispatch/sessions/activity（~/.config/issue-deck/dispatch.env の APP_BASE_URL）
+issue-deck → 画面に様子を出す＋入力待ちなら 00.check-user
+  ↓ Push通知（src/lib/notifications/check-user-push.ts）
+スマホ・メインPC → タップでそのIssueが開く
+  ↓ 画面のパネル、または Remote Control のリンク
 claude.ai/code/<セッション> （--remote-control）→ その場で答える
 ```
 
@@ -44,8 +51,8 @@ claude.ai/code/<セッション> （--remote-control）→ その場で答える
 同時に、`PostToolUse`を間引く鍵でもある**（後述）。回収側から見れば`Stop`以外なので、
 `permission_prompt`と同じく畳まない側に倒れる。
 
-**記録はwebhookの設定より前に行う。** 送信先の判定を先に置くと、通知を設定していないホストで
-記録も行われず、回収がまったく効かなくなる。記録の失敗は1行のログに留め、通知もセッションも
+**記録は報告より前に行う。** 送信先の判定を先に置くと、報告先を設定していないホストで
+記録も行われず、回収がまったく効かなくなる。記録の失敗は1行のログに留め、報告もセッションも
 止めない。書式と使い道は
 [作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 
@@ -67,7 +74,7 @@ ExitPlanMode（計画の提示）
        → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
             → 返事待ち（SessionPlanRequest）を作り、そのidを返す（#2061）
        → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
-       → Signalyへ「計画の承認待ち」を通知（#2061）
+            → 00.check-user ＋ 01.check-plan を付与（＝Push通知が鳴る）
        → GET /api/dispatch/sessions/plan/decision?id=… を3秒おきに引いて待つ
   → 人がissue-deckの画面で「承認」／「修正を送る」を押す
        → allow＋updatedInput ／ deny＋修正の本文 を返す（＝承認プロンプトは出ない。#2121）
@@ -89,11 +96,11 @@ ExitPlanMode（計画の提示）
 - **計画をIssueへ残せる唯一の機会が`ExitPlanMode`の`PreToolUse`。** 承認プロンプトの
   `Notification`のJSONには計画に関する情報が何も無い。`PreToolUse`にmatcherを付けるのは
   このためで、付けずに置くと`Read`・`Bash`のたびにスクリプトが起動する
-- **このイベントからSignalyへ送るのは「計画の承認待ち」だけ**（#2061）。従来はここで送らず、
+- **人へ届けるのは`00.check-user`とPush通知**（#2061・#2280）。従来はここで何も飛ばさず、
   直後に飛ぶ承認プロンプトの`Notification`に任せていた（同じ「入力待ち」が二重になるため）。
   画面から承認できるようになると、承認された場合は承認プロンプトが出ない＝`Notification`が
-  飛ばないため、任せたままだと**計画が出たことが誰にも通知されない**。載せるのは他の
-  イベントと同じ項目だけで、**計画本文は入れない**（下の「通知の中身」と同じ理由）
+  飛ばないため、任せたままだと**計画が出たことが誰にも通知されない**。待ちを作るのと同じ
+  往復でラベルまで付けきることが、気づける唯一の経路になる
 - **リンクは計画本文の下に、別の段落として置く。** 計画が長いほど、末尾に出口が無いと
   「読んだ後どうすればよいか」が画面から消える
 - コメント本文の組み立ては`src/lib/dispatch/session-plan.ts`。GitHubへ書く経路は異常終了の
@@ -178,7 +185,7 @@ ExitPlanMode（計画の提示）
 
 **フックの標準出力・標準エラー・所要時間・終了コードは、転記（`~/.claude/projects/<スラッグ>/<セッションID>.jsonl`）に
 `{"type":"attachment","attachment":{"type":"hook_success",...}}`として残る**（#2108で判明）。フックは
-端末に何も出さないまま終わることがあり、Signalyにもissue-deckにも残らないため、**ここが唯一の記録**になる。
+端末に何も出さないまま終わることがあり、issue-deckにも残らないため、**ここが唯一の記録**になる。
 
 ```bash
 python3 -c '
@@ -258,7 +265,7 @@ AskUserQuestion（質問）
             → 回答待ち（SessionQuestionRequest）を作り、そのidを返す
             → 00.check-user ＋ 01.check-input を付与（requestSessionCheckUser）
        → ホストに「ラベルを付けた」印を残す（<セッション名>.check-user）
-       → Signalyへ「質問の回答待ち」を通知
+            → （↑と同じ往復で 00.check-user が付く＝Push通知が鳴る）
        → GET /api/dispatch/sessions/question/decision?id=… を3秒おきに引いて待つ
   → 人がissue-deckの画面で選択肢を選んで「回答を送る」を押す
        → POST /api/dispatch/question-answer
@@ -306,8 +313,8 @@ issue-deckが応答しない）。フェイルオープン・60秒の猶予・�
   （横断質問セッション）からも呼ばれる。どちらもissue-deckが見ているIssueから起動するので
   パネルは出るが、**issue-deckに無いIssueで質問すると待ち時間ぶん誰も答えられない**
   （待ち切れば端末のフォームへ倒れる）。既定を5分にしてあるのはここの上限でもある
-- **質問の中身はSignalyへ送らない。** 通知に載せるのは他のイベントと同じ項目だけ
-  （計画本文を送らないのと同じ理由）
+- **質問の中身はPush通知に載せない。** 通知はIssueの識別と「確認待ち」であることだけを出し、
+  中身は開いてから読ませる（計画本文を通知に載せないのと同じ理由）
 - **パネルはPC版・スマホ版の両方の詳細に置く**（置き忘れは`plan-approval-mount.test.ts`が
   捕まえる）。押した結果は`request.id`と対で持ち、詳細側も`key={questionRequest.id}`で
   作り直す（#2158と同じ理由）
@@ -389,31 +396,41 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 **文面を変えたら`node scripts/generate-prompt-templates.mjs`を実行する**
 （`src/lib/prompts/templates.generated.ts`。ずれは`src/lib/prompts/templates.test.ts`が検出する）。
 
-## 飛ばすのは2種類だけ
+## 扱うイベント
 
-`--permission-mode auto`（#1205）により承認プロンプトは激減しているので、飛ばすのは
+`--permission-mode auto`（#1205）により承認プロンプトは激減しているので、報告するのは
 **「本当に人の判断が要るもの」と「完了」**に絞る。判定は
 [scripts/session-notify.sh](../../scripts/session-notify.sh)が持つ。
 
-| フック | 条件 | 意味 | 通知 |
+| フック | 条件 | 意味 | issue-deckへ |
 | --- | --- | --- | --- |
-| `Notification` | `notification_type` が `permission_prompt` | 承認プロンプト・`AskUserQuestion`の質問 | 🙋 入力待ち |
+| `Notification` | `notification_type` が `permission_prompt` | 承認プロンプト・`AskUserQuestion`の質問 | 様子（`waiting_input`）＋`00.check-user`（＝Push通知） |
 | `Notification` | `notification_type` が `idle_prompt` | 応答終了から60秒アイドル | **送らない** |
-| `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | ✅ 応答終了 |
-| `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | **送らない**（Issueのコメントへ回す） |
-| `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | **送らない**（issue-deckの画面へだけ回す） |
-| `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | **送らない**（issue-deckの画面へだけ回す。後述） |
+| `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | 様子（`responded`）＋`00.check-user`を解く保険 |
+| `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | 計画を送り、画面の返事を待つ |
+| `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
+| `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
+| `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述） |
+| （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971） | `00.check-user`だけを付ける（#2280。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
-放置されると発火するので、`Stop`を送った約60秒後に同じ内容がもう1件飛ぶことになる。
-通知が多すぎると意味を失う。
+放置されると発火するので、`Stop`を報告した約60秒後に同じ内容がもう1件飛ぶことになる。
 
 `--permission-mode auto`でも`AskUserQuestion`では`permission_prompt`が発火する（実測）。
 autoは「Claudeが自分で判断してよいもの」を自動承認するだけで、人に聞く意思そのものは
 潰さないため、この経路は生きている。
 
-`SessionEnd`は使っていない。tmuxのウィンドウを閉じただけのイベントに通知の価値が薄い。
+`SessionEnd`は使っていない。tmuxのウィンドウを閉じただけのイベントに報告の価値が薄い。
+
+**`SessionInterrupted`だけはフックではない**（#1971）。APIエラー（529等）でturnが打ち切られると
+Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限まで試したあとに同じ形のJSONを
+合成して`session-notify.sh`へ渡す。**#2280より前はSignalyへ通知するだけだった**が、通知先が
+無くなったので`POST /api/dispatch/sessions/activity`へ`checkUserRequested`だけを立てて報告する
+（`activity`は載せない——「今このセッションが何をしているか」を言えないため）。`00.check-user`＋
+`01.check-input`が付き、Push通知が人へ届ける。**この経路は`activity`を持たないぶん、
+「様子を報告するとき」の条件で括ると黙って落ちる**——`scripts/session-notify-activity.test.mjs`が
+境界を固定している。
 
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 
@@ -485,138 +502,38 @@ mode ends, never during it」と言う）。そのため計画の承認を待っ
 `25.artifact-required`のIssueではこれ自体が承認の対象——畳まれていると開くまでどの案かが
 分からない。各行のサムネイルも同じ配信URLをiframeで縮小したもの（新しい方から6件まで）。
 
-## 通知の中身
+## 報告の中身
 
-載せるのは Issue番号・リポジトリ名・ホスト名・イベント種別・`tmux attach`のコマンド・
-IssueのURL・Remote ControlのURL（取れたときだけ）・**開発環境のURL**（#1265。
-`23.preview-required`のセッションで`tailscale serve`が通っているときだけ）。
+`POST /api/dispatch/sessions/activity`へ載せるのは、リポジトリ・Issue番号・様子（`activity`）・
+Remote ControlのURL（取れたときだけ）・`00.check-user`を付けるか外すかだけ。開発環境のURL
+（#1265。`23.preview-required`のセッションで`tailscale serve`が通っているとき）は、セッションの
+起動時に`run-issue-session.sh`が同じ受け口へ別途送る。
 
-**応答テキスト（`Stop`フックの`last_assistant_message`）は載せない。** 応答本文には
-Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。それを外部サービスである
-Signalyへ出す経路を最初から作らない。中身はRemote ControlのURLから見る。
-
-## fieldsの値にリンクを載せるときの制約（#1234・#1247）
-
-**Signalyのfieldsの値でリンクになるのは`[表示名](URL)`のマスクドリンク記法だけで、生URLを
-置いても自動ではリンクにならない。** そのうえで、次の2つを守らないと表示が壊れる。
-
-1. **URLに`_`を含めない**（含む場合は`%5F`へパーセントエンコードする）
-2. **1つの値にリンクを2つ以上入れない**
-
-理由はSignaly側のレンダラ（`frontend/app.js`の`renderFieldValue`）の処理順にある。
-`[表示名](URL)`を`<a href="..." target="_blank" rel="noopener noreferrer">`へ置換した**あとで**
-`_..._`を`<em>`へ変換するため、**生成後のHTMLに残る`_blank`の`_`が、値の中の他の`_`と対になる**。
-対になった時点でhrefとtarget属性ごと壊れる。
-
-```text
-[セッションを開く](https://claude.ai/code/session_01ABC)
-→ <a href="https://claude.ai/code/session<em>01ABC" target="</em>blank" ...>
-```
-
-つまり「値に残る`_`が2個以上」が壊れる条件で、マスクドリンク1つにつき`_blank`の`_`が1個増える。
-Remote ControlのURL（`session_XXX`）は`_`を1個持つので、素直にマスクドリンクへ入れると必ず対になる。
-
-- #1234では、これを避けるためにマスクドリンクをやめて生URLに戻した。しかしSignalyには
-  自動リンク検出が無いためリンクにならず、しかもIssueリンク（マスクドリンク）と同じ値へ
-  `·`で連結していたので、結局`_blank`と`session_`が対になって両方壊れていた（#1247）
-- #1247では、URL中の`_`を`%5F`にしたうえでマスクドリンクへ戻し、IssueリンクとセッションURLを
-  別々のフィールドへ分けた。`%5F`は`_`のパーセントエンコードなので指す先は変わらない
-- 生URLも`Remote Control URL`フィールドに別途載せている。**スマホのプッシュ通知の本文は
-  Signaly側がMarkdownを除去する**ため（`backend/push.py`の`_plain_text`）、マスクドリンクだけだと
-  プッシュ通知には表示名しか残らずURLが消える。単独の値なら`_`は1個だけなので壊れない
-
-実機で確認した結果（#1247）。
-
-| 書式 | カードでリンクになるか | 開けるか |
-| --- | --- | --- |
-| `[表示名](.../session%5FXXX)` | なる | 開く |
-| `[表示名](.../session_XXX)` | なる | **開かない**（hrefに`<em>`が混入する） |
-| 生URL `.../session_XXX` | **ならない** | — |
-| `[表示名](URLに_なし)` | なる | 開く |
-
-`scripts/session-notify.sh`の`signaly_link()`がこのエンコードを行う。**fieldsへリンクを足す
-ときは必ずこの関数を通し、1フィールド1リンクを保つこと。**
-
-CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run](...)`はURLに`_`を
-含まないため、この問題は起きていない。
-
-## CI/デプロイ通知とチャンネルを分ける
-
-セッション通知は**CI/デプロイ通知とは別のSignalyチャンネル・別の1Passwordフィールド**を使う
-（#1231）。
-
-| 通知 | 1Passwordのフィールド | 環境変数 | 設定場所 |
-| --- | --- | --- | --- |
-| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | GitHubの**organization secret**（正は1Password。対応は`.github/org-secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh --manifest`。#1302・#2255） |
-| セッション状態 | `apps/issue-deck` の `session-webhook-url` | `SESSION_NOTIFY_WEBHOOK_URL` | `~/.config/issue-deck/notify.env` |
-
-**CI/デプロイ通知は全リポジトリで1つのチャンネルを共有する**（#2255）。以前はリポジトリごとに
-`op://apps/<アプリ>/ci-webhook-url`と別チャンネルへ飛ばしていたが、新しいリポジトリを増やすたびに
-Signalyでのチャンネル作成・1Passwordへの登録・repository secretの投入が要るため、organization
-secretへ寄せた。**repository secretは同名のorganization secretを覆い隠す**ので、各リポジトリは
-`.github/secrets-manifest.tsv`を`scope=inherit`にしたうえでrepository secretを削除する。
-
-分ける理由。
-
-- **性質が違う。** CI/デプロイ通知は結果の記録で、見逃してもGitHubに残る。セッションの
-  入力待ちは今すぐ人が答えないとセッションが止まる。混ぜると、後者を後者として扱えない
-- **頻度が違う。** `Stop`は応答ごとに発火し、`21.plan-required`のIssueではturnごとに飛ぶ
-  （後述の既知の制約）。CIのチャンネルに混ぜると、リリース失敗の通知が埋もれる
-- 全アプリ共通の運用でも、ログイン通知は`login-webhook-url`としてCI/デプロイ通知と
-  別チャンネルに分けている。種類ごとにチャンネルを分けるのが既定
-
-**Signalyでのチャンネル作成と1Passwordへのフィールド登録は人間の作業で、エージェントは
-実行できない。**
-
-### 通知の障害でrunを赤くしない（#2237）
-
-セッション側の「通知の障害でセッションを止めない」（後述）と対になる方針で、
-`.github/scripts/signaly-notify.sh`も**何が起きても`exit 0`で返す**。
-
-- v4.33.0のmainマージでは、`tag`・`build`・`deploy`・`release`が全て成功しているのに通知の
-  `curl`が503で落ち、`Deploy to Production`のrunが失敗として残った（run 32721175959）。
-  **通知はデプロイの結果の記録であって、デプロイの成否そのものではない**
-- 送信は`--retry 2 --retry-delay 2`付きで行う。`--retry`はタイムアウトと408・429・500・502・
-  503・504を一時エラーとみなすので、Signaly自身のデプロイ中に当たった503はここで拾える
-- それでも届かなければ`::warning::`だけを残す。**気付けるのはrunの警告だけ**なので、
-  webhookのURLが恒久的に壊れた場合はここに出続ける
-- **失敗時にcurlのstderrは出さない。** 接続に失敗したときのメッセージにはwebhookのホスト名が
-  載り、GitHubのマスクは完全一致でしか効かないため、runのログへ接続先が残ってしまう。
-  代わりに`%{http_code}`だけを出す（接続できなかった場合は`000`）
-- 呼び出し側のステップにも`continue-on-error: true`を付ける（`ci.yml`・`deploy.yml`・
-  `release.yml`・`reusable-deploy-retry.yml`）。**スクリプトは各リポジトリの
-  `.github/scripts/`にコピーして使う運用**で、古いコピーを置いたままのリポジトリでは
-  スクリプト側の`exit 0`が効かないため、ワークフロー側でも守る
-- 境界は`scripts/signaly-notify.test.mjs`で固定してある（503を返すwebhookに対して終了コード0）
+**応答テキスト（`Stop`フックの`last_assistant_message`）・計画本文・質問の選択肢は、Push通知に
+載せない。** 応答本文にはIssue本文の引用・ファイルの中身・コマンドの出力が混ざりうる。
+通知に出すのはIssueの識別と「確認待ちである」ことだけにして、中身は開いてから読ませる
+（`buildCheckUserPushPayload`）。計画と質問の中身はissue-deckのDBには保存され、画面のパネルに出る。
 
 ## セットアップ
 
-1. **【人間】** Signalyにセッション通知用のチャンネルを作り、Webhook URLをコピーする。
-   CI/デプロイ用のチャンネルを再利用しない
-2. **【人間】** 1Passwordの`apps/issue-deck`に`session-webhook-url`として登録する
-3. `deploy/subpc/notify.env.example` を `~/.config/issue-deck/notify.env` へ置き
-   （**chmod 600**）、1Passwordから値を書き出す。
+**#2280より前はSignalyのwebhook URLの登録が要ったが、今は不要。** 必要なのはissue-deckへの
+報告先だけで、それはディスパッチpollerと同じ`~/.config/issue-deck/dispatch.env`
+（`APP_BASE_URL`・`DISPATCH_SECRET`）から読む。
+
+1. 待ち時間を既定から変えたいときだけ、`deploy/subpc/notify.env.example`を
+   `~/.config/issue-deck/notify.env`へ置いて編集する（**chmod 600**）。無くても動く
 
    ```bash
    install -D -m 600 deploy/subpc/notify.env.example ~/.config/issue-deck/notify.env
-   WH=$(op read "op://apps/issue-deck/session-webhook-url") || exit 1
-   [ -n "$WH" ] || exit 1
-   printf 'SESSION_NOTIFY_WEBHOOK_URL=%s\n' "$WH" >> ~/.config/issue-deck/notify.env
    ```
 
-   **代入を`export`と分けること・`2>&1`を付けないこと。** `export WH=$(op read ... 2>&1)`
-   と書くと、返るのは`export`の終了コードなので`op`の失敗を検出できず、エラーメッセージが
-   値に混入してそのままwebhook URLとして書き込まれる（#1231で実際に踏んだ）。中間ファイル
-   （`/tmp`等）を介さないのも、消す前に他ユーザーから読まれうるため
-4. **書き出した直後に手で1回発火させ、届くことを確認する**（次節）
-5. フックの設定は`run-issue-session.sh`が起動のたびに生成する（`PostToolUse`だけは
+2. Push通知を受け取る端末で、issue-deckの設定＞通知から購読を1回登録する
+   （`src/components/dashboard/settings/notification-settings-section.tsx`）
+3. フックの設定は`run-issue-session.sh`が起動のたびに生成する（`PostToolUse`だけは
    リポジトリの`.claude/settings.json`にも入っている。#1456）ので、他にやることは無い
 
-**この設定をしていないPCでは、`session-notify.sh`は黙って何もしない。** メインPCで同じ
-リポジトリのセッションを起動しても通知は飛ばない。
-
-`SESSION_NOTIFY_WEBHOOK_URL`が未設定のときは旧名の`SIGNALY_WEBHOOK_URL`も読む。#1231より前に
-設定した`notify.env`をそのまま動かすための互換で、新規に設定するときは新しい名前を使う。
+**`dispatch.env`を設定していないPCでは、`session-notify.sh`は黙って何もしない。** メインPCで
+同じリポジトリのセッションを起動しても画面には出ない。
 
 ## 設定したら1回手で発火させる
 
@@ -629,14 +546,13 @@ printf '{"hook_event_name":"Stop","session_id":"manual-test"}' \
   | scripts/session-notify.sh 1231 issue-deck guchi-apps/issue-deck
 ```
 
-- 成功: Signalyのセッション通知チャンネルに `✅ [issue-deck #1231] 応答終了 (サブPC)` が届く。
-  標準出力・標準エラーには何も出ない
-- 失敗: `session-notify: Signalyへの通知に失敗しました（実装は続行します）` がstderrに出る。
-  URLが誤り・値にエラーメッセージが混入している・Signalyが落ちている、のいずれか
+- 成功: 標準出力・標準エラーには何も出ない。issue-deckのIssue詳細に「応答を終えました」が出る
+- 失敗: `session-notify: issue-deckへの様子の報告に失敗しました（実装は続行します）` が
+  stderrに出る。`dispatch.env`の`APP_BASE_URL`・`DISPATCH_SECRET`が誤っているか、
+  issue-deckが落ちている
 
-`SESSION_NOTIFY_DRY_RUN=1`を付けると送信せずにpayloadだけを出力する。**これはpayloadの
-組み立てまでしか見ておらず、webhook URLが正しいかは検証されない**（#1231で壊れていたのは
-まさにURL側だった）。届くことの確認には必ず実際に発火させる。
+`SESSION_NOTIFY_DRY_RUN=1`を付けると送信せず、宛先とpayloadだけを出力する。**これは組み立て
+までしか見ておらず、宛先が正しいかは検証されない。** 届くことの確認には必ず実際に発火させる。
 
 ## フックはこのスクリプトから起動したセッションにだけ適用する
 
@@ -727,7 +643,7 @@ pollerは作業ツリーのままなので、警告が要らなくなったわ�
 ```
 
 - **足すのは`PostToolUse`だけ。** `Notification`・`Stop`・`PreToolUse`は古い作業ツリーでも
-  生成されるので、ここに置くと**同じ入力待ちがSignalyへ二重に飛ぶ**。`PostToolUse`は
+  生成されるので、ここに置くと**同じ入力待ちがissue-deckへ二重に飛ぶ**。`PostToolUse`は
   古いホストでは生成されない（＝二重にならない）一方、新しいホストでは二重になるが、
   `session-notify.sh`が「状態ファイルの最後のイベントが`permission_prompt`のとき」以外を即座に
   捨てるため、報告が飛ぶのは**入力待ち1回につき最大1回**。二重に走っても`/activity`が1回余計に
@@ -748,18 +664,18 @@ pollerは作業ツリーのままなので、警告が要らなくなったわ�
 起こすセッションは従来どおり本体の作業ツリーの新しさに依存する。`run-issue-session.sh`が
 `PostToolUse`を生成し続けるのはそのため。
 
-## 通知の障害でセッションを止めない
+## 報告の障害でセッションを止めない
 
-通知経路の障害で実装が止まるのは本末転倒なので、`session-notify.sh`は**何が起きても
-`exit 0`で返す**。webhookのURLが未設定でも、`curl`が失敗しても、`python3`が無くても同じ。
-`curl`には`--max-time 10`を掛けてあり、応答が返らないwebhookでセッションを待たせない。
+報告経路の障害で実装が止まるのは本末転倒なので、`session-notify.sh`は**何が起きても
+`exit 0`で返す**。宛先が未設定でも、`curl`が失敗しても、`python3`が無くても同じ。
+`curl`には`--max-time`を掛けてあり、応答が返らないissue-deckでセッションを待たせない。
 
 フックが非0で終了してもClaude Codeは`Failed with non-blocking status code`と表示して続行する
 （実測）が、セッションのログに毎回エラーが出ると本来見たいものが読めなくなるため、
 そもそも非0を返さない。なお**exit 2はフックの規約でブロッキング扱いになるので絶対に返さない**。
 
-失敗をログに出すときもURLは出さない。webhookのURLはそれ自体が投稿権限を持つシークレットで、
-tmuxのスクロールバックに残る。
+失敗をログに出すときも宛先と鍵は出さない。`DISPATCH_SECRET`はそれ自体が報告権限を持つ
+シークレットで、tmuxのスクロールバックに残る。
 
 ## Remote Control
 
@@ -800,8 +716,9 @@ tmuxのスクロールバックに残る。
 issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions側の計画提示ステップだけ）、
 唯一の合図がプッシュ通知だった。
 
-そこで`session-notify.sh`が、Signalyへの通知と同じタイミングで
-`POST /api/dispatch/sessions/activity`へも投げる。
+そこで`session-notify.sh`が、状態ファイルへ記録するのと同じタイミングで
+`POST /api/dispatch/sessions/activity`へも投げる（#2280でSignalyを消してからは、これが唯一の
+外向きの経路）。
 
 | 送るもの | 値 |
 | --- | --- |
@@ -943,7 +860,8 @@ Stop → .event = Stop / 画面は「応答を終えています」
   代わりに`session-notify.sh`が**状態ファイルの最後のイベントが`permission_prompt`のとき以外を
   即座に捨てる**（python3も起こさず、HTTPも投げない）。1回報告すれば`.event`は`working`になるので、
   続くツールの実行では自然に止まる＝**入力待ち1回につき、報告は最大1回**
-- **Signalyへは送らない。** 答えたのは人自身で、同じことを通知し返す意味が無い
+- **Push通知は鳴らない。** ここでやるのは`00.check-user`を外すことなので、通知が飛ぶ側には
+  回らない（答えたのは人自身で、同じことを通知し返す意味も無い）
 - **承認を拒否した場合は解けない。** 拒否ではツールが走らず`PostToolUse`も飛ばないため、
   従来どおり`Stop`まで待つ。拒否の直後は次の指示を待つ形で止まることが多く、実害は小さい
 
@@ -1009,7 +927,7 @@ pollerが作るので、取りこぼしても次のフックで載る。
 
 **画面から答えられる待ちを作っている間、セッションは`activity`を1度も報告しない。**
 `ExitPlanMode`・`AskUserQuestion`の`PreToolUse`分岐（`scripts/session-notify.sh`）は、
-issue-deckへ待ちを作り、Signalyへ通知し、そのまま画面の返事をポーリングして止まる。この経路には
+issue-deckへ待ちを作り、そのまま画面の返事をポーリングして止まる。この経路には
 `POST /api/dispatch/sessions/activity`への報告が無い。**pollerは1巡ごとに`lastReportedAt`だけを
 更新する**ので報告の古さでも落ちず、直前の`WORKING`／`RESPONDED`が残ったまま
 `isSessionActivelyWorking`（上の表と同じ判定）が真になる。
@@ -1030,8 +948,8 @@ issue-deckへ待ちを作り、Signalyへ通知し、そのまま画面の返事
   `decideCheckUserPush`）。待ち時間の意味は「理由ラベルが揃うのを待つ」「早すぎる
   `00.check-user`が自動で消えるのを待つ」の2つで、待ちがあるならどちらも当てはまらない。
   **質問の待ち時間は既定5分**なので、3分待つと残り2分で届くことになっていた
-- **Signalyへの通知（#2061・#2189）とは別チャネルで、両方鳴る。** Signalyは汎用の通知先で、
-  Web Pushはタップするとそのissue-deckのIssueが開く導線。Signaly側が落ちている間も届く
+- **#2280より前はSignalyへの通知（#2061・#2189）と両方鳴っていた。** Signalyを消したので、
+  今はこのPush通知だけが「画面から答えられる待ちができた」ことを外へ出す
 
 ## 既知の制約
 
@@ -1045,3 +963,20 @@ issue-deckへ待ちを作り、Signalyへ通知し、そのまま画面の返事
 - 他リポジトリ（`dayspan`等）の`run-issue-session.sh`は別のコピーなので、この仕組みは
   issue-deckのセッションにしか掛かっていない。横展開は
   [local-quick-start.md](local-quick-start.md)のローカル起動プロトコルの版数と一緒に扱う
+- **「応答終了」を知らせる手段は無くなった**（#2280）。issue-deckのPush通知は`00.check-user`が
+  付いたIssueだけを鳴らすので、作業が終わったことは画面（一覧のバッジ・Issue詳細）を見に行くまで
+  分からない。**Signalyを消すときに承知のうえで捨てた**もので、必要になったら`Stop`の報告
+  （`activity: responded`）を材料に通知を足せる
+
+## 通知先を消すときは、そこだけが宛先の引き上げを探す（#2280）
+
+Signalyへのwebhook通知を消すにあたって、**送信をやめるだけでは黙って死ぬ経路が1つあった**。
+APIエラーで中断したセッションの引き上げ（#1971）は、状態の記録もissue-deckへの報告も持たず
+**Signalyへ通知するだけ**の設計で、通知先を消した時点で「止まったまま」を誰にも伝えられなくなる。
+
+- **grepで探すのは送信の呼び出しではなく、送信「しか」しない分岐。** `session-notify.sh`では
+  `decision`が`notify`のときだけ状態記録と報告の両方を飛ばしていた（＝webhookが唯一の出口）
+- 置き換え先は既存の`00.check-user`に寄せた。issue-deck側の変更が要らず、Push通知・画面の
+  確認待ち表示・一覧の件数がまとめて効く
+- **同じことは`activity`の有無でも起きる。** 引き上げは「今どうしているか」を言えないので
+  `activity`を持たず、報告の条件を`[[ -n "$ACTIVITY" ]]`のままにすると通らない

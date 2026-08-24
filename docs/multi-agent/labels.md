@@ -625,7 +625,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 - 承認の得方は実行形態により異なる。
   - **サブPC実行**: ラベルが付いているセッションだけ開発サーバーを起動し、`tailscale serve`で
     tailnetへ出す（#1265）。**提示するURLは`localhost`ではなく`http://<ホスト名>.<tailnet>.ts.net:<ポート>`**
-    （主な用途が外出先のスマホで、`localhost`では届かない）。URLはプロンプト・Signalyの通知・
+    （主な用途が外出先のスマホで、`localhost`では届かない）。URLはプロンプト・
     issue-deckのIssue詳細の3か所に出る。詳細は[local-quick-start.md](local-quick-start.md)
     「Tailscale経由でスマホから画面を見る」
   - **ローカル実行**: 実際に到達可能な開発サーバーが起動しているため、`21.plan-required`と同じ考え方で
