@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, ExternalLink, Loader2, Rocket, Send, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  Rocket,
+  Send,
+  TriangleAlert,
+} from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
@@ -36,10 +46,14 @@ import {
   NEW_APP_BASE_DOMAIN,
   NEW_APP_KINDS,
   NEW_APP_ORG,
+  NEW_APP_THEME_COLOR_PRESETS,
+  appearanceSummary,
   databaseNameFor,
   emptyNewAppSpec,
   hostnameFor,
+  isAppearanceDefault,
   newAppKindProfile,
+  supportsUnattendedScreenshot,
   publicUrlFor,
   validateNewAppSpec,
   NEW_APP_SPEC_ERROR_MESSAGES,
@@ -826,6 +840,216 @@ function PlacementStep({
           </span>
         </span>
       </label>
+
+      <AppearancePanel spec={spec} onChange={onChange} />
+    </div>
+  );
+}
+
+/**
+ * 体裁と運用（#2254）。**畳んだ状態を既定にする。**
+ *
+ * 共有知識のチェックリストは計画段階でこの5項目も決めるとしているが、入力欄として並べると
+ * 立ち上げの手数がそのぶん増える。すべてに標準の既定値を持たせ、**決まった値を1行で見せて
+ * 「次へ」を押せる形**にし、標準から外すときだけ開く。
+ */
+function AppearancePanel({
+  spec,
+  onChange,
+}: {
+  spec: NewAppSpec;
+  onChange: (updater: (current: NewAppSpec) => NewAppSpec) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          aria-expanded={open}
+        >
+          <Chevron className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="text-xs font-semibold">体裁と運用</span>
+          {isAppearanceDefault(spec) && (
+            <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+              標準どおり
+            </span>
+          )}
+        </button>
+        <Button variant="outline" size="sm" onClick={() => setOpen((current) => !current)}>
+          {open ? "閉じる" : "変更する"}
+        </Button>
+      </div>
+
+      {!open && <p className="text-xs text-muted-foreground">{appearanceSummary(spec)}</p>}
+
+      {open && (
+        <div className="flex flex-col gap-4 border-t pt-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="new-app-app-title">表示名</Label>
+            <Input
+              id="new-app-app-title"
+              value={spec.appTitle}
+              placeholder={spec.displayName}
+              onChange={(event) =>
+                onChange((current) => ({ ...current, appTitle: event.target.value }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              ブラウザのタブとホーム画面に出る名前（<code>title</code> /{" "}
+              <code>applicationName</code> / <code>appleWebApp.title</code>）。空ならアプリ名を
+              そのまま使います。
+            </p>
+          </div>
+
+          {spec.pwa && (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1 text-xs font-semibold">アイコンとテーマカラー</legend>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="new-app-icon-plan"
+                  className="mt-1"
+                  checked={spec.iconPlan === "provisional"}
+                  onChange={() => onChange((current) => ({ ...current, iconPlan: "provisional" }))}
+                />
+                <span className="flex flex-col">
+                  <span className="text-sm">暫定で始める</span>
+                  <span className="text-xs text-muted-foreground">
+                    テーマカラー1色のアイコンで作り、差し替えは親Issueの「後で決めること」に残します
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="new-app-icon-plan"
+                  className="mt-1"
+                  checked={spec.iconPlan === "prepared"}
+                  onChange={() => onChange((current) => ({ ...current, iconPlan: "prepared" }))}
+                />
+                <span className="flex flex-col">
+                  <span className="text-sm">用意してから始める</span>
+                  <span className="text-xs text-muted-foreground">
+                    初期化Issueが完成版のアイコンを待ちます
+                  </span>
+                </span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {NEW_APP_THEME_COLOR_PRESETS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label={`テーマカラー ${color}`}
+                    onClick={() => onChange((current) => ({ ...current, themeColor: color }))}
+                    style={{ backgroundColor: color }}
+                    className={cn(
+                      "size-6 rounded-md border",
+                      spec.themeColor.toLowerCase() === color.toLowerCase() &&
+                        "ring-2 ring-foreground ring-offset-2 ring-offset-background",
+                    )}
+                  />
+                ))}
+                <Input
+                  value={spec.themeColor}
+                  onChange={(event) =>
+                    onChange((current) => ({ ...current, themeColor: event.target.value.trim() }))
+                  }
+                  className="h-8 w-28 font-mono text-xs"
+                  aria-label="テーマカラー"
+                />
+              </div>
+            </fieldset>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <Label>PWA対応</Label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={spec.pwa}
+                onChange={(event) =>
+                  onChange((current) => ({
+                    ...current,
+                    pwa: event.target.checked,
+                    // PWA対応しないアプリでオフラインだけ残しても意味を持たない
+                    offline: event.target.checked ? current.offline : false,
+                  }))
+                }
+              />
+              <span className="flex flex-col">
+                <span className="text-sm">
+                  PWA対応する（<code>manifest</code>＋アイコン）
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  標準方針。ホーム画面に追加できるようになります
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={spec.offline}
+                disabled={!spec.pwa}
+                onChange={(event) =>
+                  onChange((current) => ({ ...current, offline: event.target.checked }))
+                }
+              />
+              <span className="flex flex-col">
+                <span className="text-sm">オフラインでも開けるようにする</span>
+                <span className="text-xs text-muted-foreground">
+                  Service Workerでキャッシュします。標準は「対応しない」
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={spec.changelog}
+              onChange={(event) =>
+                onChange((current) => ({ ...current, changelog: event.target.checked }))
+              }
+            />
+            <span className="flex flex-col">
+              <span className="text-sm">更新履歴（changelog）を持つ</span>
+              <span className="text-xs text-muted-foreground">
+                リリース時に生成された文面を <code>RELEASE_CHANGELOG</code> で受け取り、アプリの
+                画面に出します
+              </span>
+            </span>
+          </label>
+
+          {spec.auth !== "none" && (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={spec.screenshotBypass}
+                onChange={(event) =>
+                  onChange((current) => ({ ...current, screenshotBypass: event.target.checked }))
+                }
+              />
+              <span className="flex flex-col">
+                <span className="text-sm">CI撮影の認証バイパスを用意する</span>
+                <span className="text-xs text-muted-foreground">
+                  {supportsUnattendedScreenshot(spec.kind)
+                    ? "無人実行のスクリーンショット（24.screenshot-required）が成立する条件。後付けが効きにくいのでここで決めます"
+                    : `${newAppKindProfile(spec.kind).label}ではPlaywrightが入らないため、無人実行での撮影は成立しません。ローカルでの画面確認用として用意します`}
+                </span>
+              </span>
+            </label>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -875,6 +1099,8 @@ function ConfirmStep({
           ローカルセッションのポート帯: {preflight.localPortBand.note}
         </p>
       )}
+      {/* 体裁のパネルを開かずに通した人も、押す前に決まった値を読めるようにする（#2254） */}
+      <p className="text-xs text-muted-foreground">体裁と運用: {appearanceSummary(spec)}</p>
       <ul className="flex flex-col gap-2">
         {artifacts.map((artifact) => (
           <li key={artifact.kind} className="flex items-start gap-2 rounded-lg border p-2.5">
