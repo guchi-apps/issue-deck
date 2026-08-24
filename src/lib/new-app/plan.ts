@@ -71,18 +71,25 @@ function serverAppDir(spec: Pick<NewAppSpec, "repositoryName">): string {
  * 機械的に定まる値（配置先・DB名・許可メール）と、人がSignalyで作らないと決まらない
  * webhook URLとで**呼び分ける**。スクリプトは何度実行してもよい作りなので、順序は問わない。
  */
-function provisionCommand(spec: NewAppSpec, ciWebhookUrl: string | null): string {
-  const options = [`--repo ${repositoryFullName(spec)}`];
+function provisionCommand(
+  spec: NewAppSpec,
+  ciWebhookUrl: string | null,
+  options: { check?: boolean } = {},
+): string {
+  const args = [`--repo ${repositoryFullName(spec)}`];
   if (ciWebhookUrl === null) {
-    if (spec.databaseName) options.push(`--db-name ${spec.databaseName}`);
+    if (spec.databaseName) args.push(`--db-name ${spec.databaseName}`);
     // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
-    if (spec.auth !== "none") options.push("--copy-allowed-emails");
+    if (spec.auth !== "none") args.push("--copy-allowed-emails");
   } else {
-    options.push(`--ci-webhook-url '${ciWebhookUrl}'`);
+    args.push(`--ci-webhook-url '${ciWebhookUrl}'`);
   }
+  // 確認用は同じ引数に`--check`を足すだけにする（#2256）。投入と確認で対象のフィールドが
+  // ずれると、「入っていない値を確かめていない」という一番まずい形になる
+  if (options.check) args.push("--check");
   // 続きの行は2つ下げる（コードブロック自体が箇条書きの下に2スペース下がっているため、
   // 同じ幅だと折り返しに見えない）
-  return [PROVISION_SCRIPT, ...options].join(" \\\n    ");
+  return [PROVISION_SCRIPT, ...args].join(" \\\n    ");
 }
 
 /** 作成物の自動化の度合い。画面のチップの色に対応する。 */
@@ -940,22 +947,40 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   printf '%s\\n' '${repo} ${path}' >> "$HOME/.config/issue-deck/local-repos.conf"
   \`\`\`
 
-- [ ] （サブPC）対応表に載ったことを確かめる
-
-  \`\`\`bash
-  grep -F '${repo}' "$HOME/.config/issue-deck/local-repos.conf"
-  \`\`\`
-
 - [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
 
   \`\`\`bash
   ${provisionCommand(spec, null)}
   \`\`\``,
-    verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
-pollerは申告のたびに対応表を読み直すので、再起動は要りません。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
+
+- リポジトリがcloneできている
+
+  \`\`\`bash
+  test -d ${path}/.git && echo cloned
+  \`\`\`
+
+  \`cloned\` が出れば完了です。
+
+- ローカルセッションの対応表に載っている
+
+  \`\`\`bash
+  grep -F '${repo} ${path}' "$HOME/.config/issue-deck/local-repos.conf"
+  \`\`\`
+
+  追記した1行がそのまま出れば完了です。pollerは申告のたびに読み直すので、再起動は要りません。
+
+- 1Passwordのアイテムに値が入っている
+
+  \`\`\`bash
+  ${provisionCommand(spec, null, { check: true })}
+  \`\`\`
+
+  「すべて値が入っています」が出れば完了です。**未登録が1つでもあれば終了コード1で終わります**（\`aide-bot\` では投入が未実施のままIssueがcloseされ、初回デプロイが \`DB_NAME is required\` で落ちました）。
+
 **GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
 リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
-    why: "1Passwordへの書き込み（サブPCにだけ置いてある書き込み用トークンを使う）と、サブPCの個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
+    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
@@ -986,6 +1011,18 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
 `
     : "";
 
+  // 確認は手順と1対1にする（#2256）。手順を出し分けたのに確認が固定だと、
+  // 「確かめる先が無いコマンド」が並んで必ず失敗する
+  const dbCheck = spec.databaseName
+    ? `
+- データベースがある
+
+  \`\`\`bash
+  sudo mysql -N -e "SHOW DATABASES LIKE '${spec.databaseName}'" | grep -x ${spec.databaseName}
+  \`\`\`
+`
+    : "";
+
   const pm2Step =
     spec.port === null
       ? ""
@@ -994,6 +1031,17 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
 
   \`\`\`bash
   cd ${appDir} && pm2 start deploy/ecosystem.config.js && pm2 save
+  \`\`\`
+`;
+
+  const pm2Check =
+    spec.port === null
+      ? ""
+      : `
+- PM2に登録され、\`online\` で動いている
+
+  \`\`\`bash
+  pm2 describe ${spec.repositoryName}
   \`\`\`
 `;
 
@@ -1031,11 +1079,34 @@ ${dbStep}${pm2Step}
   \`\`\`bash
   sudo cat /etc/apache2/sites-available/${host}-le-ssl.conf
   \`\`\``,
-    verification: `\`curl -I ${publicUrlFor(spec)}\` が 200 か 3xx を返せば公開まで届いています。
-\`grep X-Forwarded-Proto /etc/apache2/sites-available/${host}-le-ssl.conf\` が何も返さないか
-\`"https"\` を返せば、\`:443\` 側の直しは済んでいます（\`"http"\` が残っていると本番でだけログインが失敗します）。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。VPSで上から順に流し、すべてが成功すれば完了です。
+
+- アプリの置き場がある
+
+  \`\`\`bash
+  test -d ${appDir} && echo ok
+  \`\`\`
+${dbCheck}${pm2Check}
+- 公開まで届いている
+
+  \`\`\`bash
+  curl -fsS -o /dev/null -w '%{http_code}\\n' ${publicUrlFor(spec)}
+  \`\`\`
+
+  200 か 3xx が出れば完了です。400以上は終了コードが0になりません。
+
+- \`:443\` 側に \`X-Forwarded-Proto "http"\` が残っていない
+
+  \`\`\`bash
+  conf=/etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo test -f "$conf" && ! sudo grep -q 'X-Forwarded-Proto "http"' "$conf" && echo ok
+  \`\`\`
+
+  \`ok\` が出れば完了です（\`"http"\` が残っていると本番でだけログインが失敗します）。
+
 控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むまでは、毎日のドリフト検知に
-「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。`,
+「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。ここだけは
+コマンドで確かめられないので、${vpsRef} にコメントが付いていることを目で確かめてください。`,
     why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はサブPCだけです）。",
     related: `- 起点Issue: ${refs.parent}
 - VirtualHost: ${vpsRef}`,
@@ -1068,13 +1139,29 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     spec.urlMode === "subdomain"
       ? `- [ ] （ブラウザ）VPS管理画面のDNS設定で \`${spec.subdomain}\` のAレコードを追加し、VPSのIPへ向ける
 
+`
+      : "";
+
+  // 確認は手順と1対1にする（#2256）。\`dig\` は操作ではなく確認なので、手順ではなく
+  // \`## 完了の確認方法\` に置く（そこに置いたものだけが代行実行・定期巡回の対象になる）
+  const dnsCheck =
+    spec.urlMode === "subdomain"
+      ? `
+- Aレコードが引ける
+
   \`\`\`bash
   dig +short ${host} A
   \`\`\`
 
+  VPSのIPアドレスが1行返れば完了です。何も返らなければ、まだDNSに伝わっていません。
 `
       : "";
 
+  // 登録する名前と確認する名前を1つの配列から出す（#2256）。別々に書くと、片方を足したときに
+  // もう片方が古いままになり、「登録したのに確認で落ちる」が起きる
+  const secretNames = spec.multiAgent
+    ? ["OP_SERVICE_ACCOUNT_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "WORKFLOW_PAT"]
+    : ["OP_SERVICE_ACCOUNT_TOKEN"];
   const secretsStep = spec.multiAgent
     ? `- [ ] （ブラウザ）\`${repo}\` のActions secretsへ \`OP_SERVICE_ACCOUNT_TOKEN\`・\`CLAUDE_CODE_OAUTH_TOKEN\`・\`WORKFLOW_PAT\` を登録する
 
@@ -1111,8 +1198,18 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     prerequisiteIssues: "なし",
     otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
     steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
-    verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
-アプリ自身のシークレット（配置先・DB名）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
+${dnsCheck}
+- ワークフローから${secretNames.length}件のsecretを読める
+
+  \`\`\`bash
+  { gh secret list --repo ${repo} --json name --jq '.[].name'; gh api repos/${repo}/actions/organization-secrets --jq '.secrets[].name'; } | sort -u | grep -cE '^(${[...secretNames].sort().join("|")})$'
+  \`\`\`
+
+  **\`${secretNames.length}\` が出れば完了です。** リポジトリのsecretだけでなく、organizationに \`visibility=all\` で
+  登録済みのものも数えます（\`aide-bot\` ではorganizationに揃っていたため、この登録自体が不要な手順でした。
+  実行して既に \`${secretNames.length}\` が出るなら、登録は要りません）。
+
 リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
     why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,

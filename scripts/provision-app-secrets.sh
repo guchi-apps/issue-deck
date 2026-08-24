@@ -40,6 +40,7 @@
 #   --ref <ブランチ>          マニフェストを読むブランチ（既定 develop）
 #   --no-sync                 1Passwordへ入れるだけで、GitHubへは同期しない
 #   --dry-run                 何もせず、何をするかだけ出す
+#   --check                   何も書かず、投入済みかだけを確かめる（未登録があれば終了コード1）
 #   --force                   既に値があるフィールドも上書きする
 #
 # 前提:
@@ -47,6 +48,12 @@
 #   `OP_SERVICE_ACCOUNT_TOKEN=…` の形で置く（`apps:read_items,write_items`）。
 #   **常時exportしない**——個人アカウントで `op signin` してもサービスアカウントが優先され、
 #   opの書き込みが全部失敗する（`provision-secret.sh` の冒頭と同じ理由）。
+#
+# **`--check` は手作業Issueの `## 完了の確認方法` から呼ぶ**（#2256）。チェックを付ける操作と
+# 「実際に効いたか」は別物で、`aide-bot` では投入が未実施のままIssueがcloseされ、初回デプロイが
+# `DB_NAME: DB_NAME is required` で落ちた（`guchi-apps/aide-bot#8`）。`--dry-run` は何が起きるかを
+# 見せるだけで**常に終了コード0**なので、確認には使えない。`--check` は未登録が1つでもあれば1で
+# 終わるため、代行実行・定期巡回の「通った／通っていない」がそのまま結論になる。
 #
 # **値は一切出力しない。** 渡された値も、読んだ値も、長さ以外は表示しない。
 set -euo pipefail
@@ -72,6 +79,7 @@ CI_WEBHOOK_URL=""
 REF="develop"
 SYNC=true
 DRY_RUN=false
+CHECK=false
 FORCE=false
 
 while [[ $# -gt 0 ]]; do
@@ -89,6 +97,8 @@ while [[ $# -gt 0 ]]; do
     --ref) REF="$2"; shift 2 ;;
     --no-sync) SYNC=false; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    # 確かめるだけ。1Passwordへの書き込みもGitHubへの同期も行わない
+    --check) CHECK=true; shift ;;
     --force) FORCE=true; shift ;;
     -h|--help) sed -n '2,51p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -190,6 +200,24 @@ for i in "${!FIELD_NAMES[@]}"; do
   fi
   unset existing
 done
+
+# --- 2.5 確かめるだけで終わる（--check） --------------------------------------
+#
+# **未登録が1つでもあれば終了コード1で終わる。** 手作業Issueの `## 完了の確認方法` から
+# 呼ばれ、終了コードがそのまま「投入が済んでいるか」の答えになる（#2256）。
+# `--dry-run` と違って「これから何を書くか」ではなく「いま入っているか」を出す。
+if [[ "$CHECK" == true ]]; then
+  echo
+  if ((${#WRITE_INDEXES[@]} > 0)); then
+    missing=()
+    for i in "${WRITE_INDEXES[@]}"; do missing+=("${FIELD_NAMES[$i]}"); done
+    echo "未登録のフィールドがあります: ${missing[*]}" >&2
+    echo "  投入するには --check を外して同じコマンドを実行してください。" >&2
+    exit 1
+  fi
+  echo "1Password: $VAULT/$ITEM に ${#FIELD_NAMES[@]} 件すべて値が入っています（${FIELD_NAMES[*]}）"
+  exit 0
+fi
 
 if [[ "$DRY_RUN" == true ]]; then
   echo

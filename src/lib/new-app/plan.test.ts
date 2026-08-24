@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import { buildManualStepRunPlan } from "@/lib/manual-step-autorun";
+import { extractVerificationCommands } from "@/lib/manual-step-command";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 import {
   buildBrowserManualIssueBody,
@@ -374,6 +375,28 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).not.toContain("db-name = app_kakei_report");
   });
 
+  // #2256。散文の確認では「登録されたか」を確かめられず、aide-botでは未実施のままcloseされた
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    expect(commands).toHaveLength(3);
+    expect(commands[0]).toContain("test -d /home/guchi/apps/kakei-report/.git");
+    expect(commands[1]).toContain("grep -F 'guchi-apps/kakei-report /home/guchi/apps/kakei-report'");
+    // 投入と同じ引数に`--check`を足しただけの形。ずれると確かめていないフィールドが生まれる
+    expect(commands[2]).toContain("--check");
+    expect(commands[2]).toContain("--db-name app_kakei_report");
+    expect(commands[2]).toContain("--copy-allowed-emails");
+  });
+
+  it("確認コマンドまで手作業アシスタントが代行実行できる（#2256）", () => {
+    const plan = buildManualStepRunPlan(body, undefined, {
+      host: READY_HOST,
+      isManualStepIssue: true,
+    });
+    const verifications = plan.entries.filter((entry) => entry.kind === "verification");
+    expect(verifications).toHaveLength(3);
+    expect(verifications.every((entry) => entry.rejection === null)).toBe(true);
+  });
+
   it("DBも認証も無いアプリでは、そのオプションを渡さない", () => {
     const plain = buildSubpcManualIssueBody(
       spec({ kind: "static", port: null, databaseName: null, auth: "none" }),
@@ -429,6 +452,28 @@ describe("buildVpsManualIssueBody", () => {
     expect(plan.entries.every((entry) => entry.rejection === "device_not_subpc")).toBe(true);
   });
 
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    // 置き場・DB・PM2・公開・X-Forwarded-Proto
+    expect(commands).toHaveLength(5);
+    expect(commands[0]).toContain("test -d /home/github-user/apps/kakei-report");
+    expect(commands[1]).toContain("SHOW DATABASES LIKE 'app_kakei_report'");
+    expect(commands[2]).toContain("pm2 describe kakei-report");
+    expect(commands[3]).toContain("curl -fsS");
+    expect(commands[4]).toContain('X-Forwarded-Proto "http"');
+  });
+
+  it("手順を出し分けた種別では、確認も同じだけ減る（#2256）", () => {
+    const staticBody = buildVpsManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null }),
+      REFS,
+    );
+    const commands = extractVerificationCommands(staticBody).map((entry) => entry.command);
+    expect(commands).toHaveLength(3);
+    expect(commands.some((command) => command.includes("SHOW DATABASES"))).toBe(false);
+    expect(commands.some((command) => command.includes("pm2 describe"))).toBe(false);
+  });
+
   it("DBもポートも無い種別では、その手順を出さない", () => {
     const staticBody = buildVpsManualIssueBody(
       spec({ kind: "static", port: null, databaseName: null }),
@@ -482,6 +527,33 @@ describe("buildBrowserManualIssueBody", () => {
       REFS,
     );
     expect(pathBody).not.toContain("Aレコードを追加");
+  });
+
+  it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toBe("dig +short kakei-report.gucchii.com A");
+    // organizationのsecretも数える（repo secretだけ見ると、足りているのに落ちる）
+    expect(commands[1]).toContain("actions/organization-secrets");
+    expect(commands[1]).toContain(
+      "grep -cE '^(CLAUDE_CODE_OAUTH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|WORKFLOW_PAT)$'",
+    );
+    expect(body).toContain("**`3` が出れば完了です。**");
+  });
+
+  it("登録する名前が減ると、確認の期待値も減る（#2256）", () => {
+    const single = buildBrowserManualIssueBody(spec({ multiAgent: false }), REFS);
+    const commands = extractVerificationCommands(single).map((entry) => entry.command);
+    expect(commands[1]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
+    expect(single).toContain("**`1` が出れば完了です。**");
+  });
+
+  it("パス配置ではAレコードの確認を出さない（#2256）", () => {
+    const pathBody = buildBrowserManualIssueBody(
+      spec({ urlMode: "path", basePath: "kakei-report" }),
+      REFS,
+    );
+    expect(extractVerificationCommands(pathBody)).toHaveLength(1);
   });
 
   it("実行するデバイスはブラウザ", () => {
