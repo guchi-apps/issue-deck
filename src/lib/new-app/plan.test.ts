@@ -5,6 +5,8 @@ import { buildManualStepRunPlan } from "@/lib/manual-step-autorun";
 import { parseManualStepGuide } from "@/lib/manual-step-guide";
 import {
   buildBrowserManualIssueBody,
+  buildDeployCheckIssueBody,
+  buildDeployCheckIssueTitle,
   buildInitIssueBody,
   buildNewAppPlan,
   buildParentIssueBody,
@@ -37,6 +39,8 @@ const REFS: NewAppIssueRefs = {
   parent: "guchi-apps/issue-deck#2201",
   vps: "guchi-apps/vps#91",
   subpc: "guchi-apps/issue-deck#2203",
+  vpsManual: "guchi-apps/issue-deck#2205",
+  init: "guchi-apps/kakei-report#1",
   localPortBase: 25000,
   portBandPullRequest: "guchi-apps/issue-deck#2204",
 };
@@ -47,13 +51,14 @@ const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable"> = {
 };
 
 describe("buildNewAppPlan", () => {
-  it("実行順に8件を並べる", () => {
+  it("実行順に9件を並べる", () => {
     const artifacts = buildNewAppPlan(spec());
     expect(artifacts.map((a) => a.kind)).toEqual([
       "repository",
       "port-band",
       "parent-issue",
       "init-issue",
+      "deploy-check-issue",
       "vps-issue",
       "manual-vps",
       "manual-subpc",
@@ -65,6 +70,7 @@ describe("buildNewAppPlan", () => {
     const byKind = Object.fromEntries(buildNewAppPlan(spec()).map((a) => [a.kind, a.automation]));
     expect(byKind["repository"]).toBe("auto");
     expect(byKind["vps-issue"]).toBe("auto");
+    expect(byKind["deploy-check-issue"]).toBe("auto");
     // サブPCだけが代行実行できる
     expect(byKind["manual-subpc"]).toBe("proxy");
     expect(byKind["manual-vps"]).toBe("manual");
@@ -124,6 +130,13 @@ describe("buildParentIssueBody", () => {
     expect(body).toContain("`app_kakei_report`");
   });
 
+  it("完了条件を公開URLのcurlで判定する（#2252）", () => {
+    expect(body).toContain("## 完了条件");
+    expect(body).toContain("`curl -I https://kakei-report.gucchii.com/` が 200 か 3xx を返す");
+    expect(body).toContain("公開できたことにはなりません");
+    expect(body).toContain("http://127.0.0.1:<ポート>/");
+  });
+
   it("どのサブIssueにも属さない2か所の一覧登録を持つ", () => {
     expect(body).toContain("docs/supported-repositories.md");
     expect(body).toContain("standards/tech-stack.md");
@@ -163,6 +176,50 @@ describe("buildInitIssueBody", () => {
     expect(buildInitIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
       "claude-issue-dispatch.yml を置く",
     );
+  });
+});
+
+describe("buildDeployCheckIssueBody（#2252）", () => {
+  const body = buildDeployCheckIssueBody(spec(), REFS);
+
+  it("deployジョブの成功では公開を確かめられないことを書く", () => {
+    expect(body).toContain("公開できたことにはなりません");
+    expect(body).toContain("http://127.0.0.1:3112/");
+    expect(body).toContain("guchi-apps/vps#128");
+  });
+
+  it("初期化・VirtualHost・VPSの手作業を前提条件に並べる", () => {
+    expect(body).toContain("## 前提条件");
+    expect(body).toContain(REFS.init!);
+    expect(body).toContain(REFS.vps!);
+    expect(body).toContain(REFS.vpsManual!);
+  });
+
+  it("サブPCのローカルセッションで実装する理由を書く", () => {
+    expect(body).toContain("initial-deploy-check");
+    expect(body).toContain("無人実行からは読めません");
+  });
+
+  it("完了の確認方法を公開URLのcurlにする", () => {
+    expect(body).toContain("## 完了の確認方法");
+    expect(body).toContain("curl -I https://kakei-report.gucchii.com/");
+    expect(body).toContain("200 か 3xx");
+  });
+
+  it("種別に応じてDBとプロセスの確認を出し分ける", () => {
+    expect(body).toContain("`app_kakei_report` のデータベース");
+    expect(body).toContain("PM2に `kakei-report` が登録され");
+    const staticBody = buildDeployCheckIssueBody(
+      spec({ kind: "static", port: null, databaseName: null }),
+      REFS,
+    );
+    expect(staticBody).not.toContain("のデータベース");
+    expect(staticBody).not.toContain("PM2に");
+    expect(staticBody).toContain("http://127.0.0.1:<ポート>/");
+  });
+
+  it("タイトルにアプリ名を出す", () => {
+    expect(buildDeployCheckIssueTitle(spec())).toBe("家計レポートの初回デプロイ前チェックと公開確認");
   });
 });
 
