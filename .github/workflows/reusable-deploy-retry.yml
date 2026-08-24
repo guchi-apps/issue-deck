@@ -190,6 +190,9 @@ jobs:
       # 終わっている）。
       - name: Signaly に通知
         if: steps.judge.outputs.retry == 'true'
+        # 通知の失敗で再実行の成否を塗り替えない。Signalyが止まっていると通知だけが落ちる
+        # （#2237。スクリプト側も0で返すが、古いコピーを置いたリポジトリのためにここでも守る）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: ${{ inputs.app-name != '' && inputs.app-name || github.event.repository.name }}

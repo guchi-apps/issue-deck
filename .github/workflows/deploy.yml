@@ -353,6 +353,9 @@ jobs:
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
       - name: 不足分を1Passwordから補う
+        # 通知のためだけのステップなので、ここが落ちてもrunは落とさない
+        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302・#2237）。
+        continue-on-error: true
         uses: ./.github/actions/load-secrets
         with:
           only: SIGNALY_WEBHOOK_URL
@@ -362,6 +365,9 @@ jobs:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
+        # 通知はデプロイの成否そのものではない。ここが失敗してもrun全体を落とさない
+        # （Signalyが止まっている間のmainマージでデプロイ成功のrunが赤くなった。#2237）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_APP: issue-deck
@@ -383,6 +389,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 不足分を1Passwordから補う
+        # 通知のためだけのステップなので、ここが落ちてもrunは落とさない
+        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302・#2237）。
+        continue-on-error: true
         uses: ./.github/actions/load-secrets
         with:
           only: SIGNALY_WEBHOOK_URL
@@ -392,6 +401,8 @@ jobs:
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 
       - name: Signaly に通知
+        # 通知が届かないことでリリース済みのrunを赤くしない（#2237）。
+        continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}

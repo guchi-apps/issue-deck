@@ -562,6 +562,27 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
 **Signalyでのチャンネル作成と1Passwordへのフィールド登録は人間の作業で、エージェントは
 実行できない。**
 
+### 通知の障害でrunを赤くしない（#2237）
+
+セッション側の「通知の障害でセッションを止めない」（後述）と対になる方針で、
+`.github/scripts/signaly-notify.sh`も**何が起きても`exit 0`で返す**。
+
+- v4.33.0のmainマージでは、`tag`・`build`・`deploy`・`release`が全て成功しているのに通知の
+  `curl`が503で落ち、`Deploy to Production`のrunが失敗として残った（run 32721175959）。
+  **通知はデプロイの結果の記録であって、デプロイの成否そのものではない**
+- 送信は`--retry 2 --retry-delay 2`付きで行う。`--retry`はタイムアウトと408・429・500・502・
+  503・504を一時エラーとみなすので、Signaly自身のデプロイ中に当たった503はここで拾える
+- それでも届かなければ`::warning::`だけを残す。**気付けるのはrunの警告だけ**なので、
+  webhookのURLが恒久的に壊れた場合はここに出続ける
+- **失敗時にcurlのstderrは出さない。** 接続に失敗したときのメッセージにはwebhookのホスト名が
+  載り、GitHubのマスクは完全一致でしか効かないため、runのログへ接続先が残ってしまう。
+  代わりに`%{http_code}`だけを出す（接続できなかった場合は`000`）
+- 呼び出し側のステップにも`continue-on-error: true`を付ける（`ci.yml`・`deploy.yml`・
+  `release.yml`・`reusable-deploy-retry.yml`）。**スクリプトは各リポジトリの
+  `.github/scripts/`にコピーして使う運用**で、古いコピーを置いたままのリポジトリでは
+  スクリプト側の`exit 0`が効かないため、ワークフロー側でも守る
+- 境界は`scripts/signaly-notify.test.mjs`で固定してある（503を返すwebhookに対して終了コード0）
+
 ## セットアップ
 
 1. **【人間】** Signalyにセッション通知用のチャンネルを作り、Webhook URLをコピーする。
@@ -977,6 +998,34 @@ pollerが作るので、取りこぼしても次のフックで載る。
 - サブPC側の材料は`GET /api/dispatch`（`useDispatchState`）から来る。**取得間隔をActionsの実行状況
   ポーリングと同じ20秒に揃えた**（従来は無風時60秒）。間隔が違うと、同じ「実行中」でも実行先に
   よって画面へ出るまでの速さが変わる。叩き先は自前のDBのみでGitHub APIは消費しない
+
+### 計画・質問の待ちは`activity`に現れない（#2238）
+
+**画面から答えられる待ちを作っている間、セッションは`activity`を1度も報告しない。**
+`ExitPlanMode`・`AskUserQuestion`の`PreToolUse`分岐（`scripts/session-notify.sh`）は、
+issue-deckへ待ちを作り、Signalyへ通知し、そのまま画面の返事をポーリングして止まる。この経路には
+`POST /api/dispatch/sessions/activity`への報告が無い。**pollerは1巡ごとに`lastReportedAt`だけを
+更新する**ので報告の古さでも落ちず、直前の`WORKING`／`RESPONDED`が残ったまま
+`isSessionActivelyWorking`（上の表と同じ判定）が真になる。
+
+このため#2174の「エージェントが動いている確認待ちは数えない」がそのまま当たり、
+**行に「計画を承認」「質問に答える」が並んでいるのに左メニューの件数は`0`**（一覧のヘッダーは
+`0件・実行中2件`）になっていた。ベル・画面内のトーストも同じ集合を読むので一緒に伏せられる。
+
+- **判定材料に待ちそのものを足す。** `src/lib/check-user-attention.ts`が
+  `planRequests`／`questionRequests`を受け取り、`WAITING`が1件でもあれば他の材料より先に
+  「実行中ではない」と決める。引き当ては一覧の行がボタンを出すのと同じ
+  `findPlanRequestForIssue`／`findQuestionRequestForIssue`を通す——別々に書くと、
+  ボタンは出ているのに数から外れる食い違いが戻る
+- **`activity`の報告をこの経路へ足す形は採らなかった。** 待ちは`GET /api/dispatch`が既に
+  横断で返しており、こちらの方が「人が押せるものがある」ことの直接の根拠になる。
+  フックからの追加の報告を増やすと、答えた後に元へ戻す責任も増える
+- **Push通知も同じ待ちを見て、3分の待ち時間を飛ばす**（`notifications/check-user-push.ts`の
+  `decideCheckUserPush`）。待ち時間の意味は「理由ラベルが揃うのを待つ」「早すぎる
+  `00.check-user`が自動で消えるのを待つ」の2つで、待ちがあるならどちらも当てはまらない。
+  **質問の待ち時間は既定5分**なので、3分待つと残り2分で届くことになっていた
+- **Signalyへの通知（#2061・#2189）とは別チャネルで、両方鳴る。** Signalyは汎用の通知先で、
+  Web Pushはタップするとそのissue-deckのIssueが開く導線。Signaly側が落ちている間も届く
 
 ## 既知の制約
 

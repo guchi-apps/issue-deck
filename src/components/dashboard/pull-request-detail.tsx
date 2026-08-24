@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 
+import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
@@ -136,7 +137,7 @@ export function PullRequestDetail({
   // 本番へ届いたか（#1814）。マージ済みのPRでだけ取りに行く。ヘッダーの「更新」でも
   // 取り直したいので、詳細の取得時刻をキーに渡す。スマホのPR詳細画面もこの部品を使うため、
   // ここで持つことでPC・スマホの両方に同じ表示が出る。
-  const deployStatus = usePullRequestDeployStatus(
+  const { status: deployStatus, failureIssue: deployFailureIssue } = usePullRequestDeployStatus(
     pullRequest?.id ?? null,
     pullRequest?.merged ?? false,
     detail?.fetchedAt ?? null,
@@ -282,6 +283,19 @@ export function PullRequestDetail({
               />
             )}
           </div>
+
+          {/* このPRの変更が本番へ出ていないとき、押せる場所をその場に出す（#2236）。
+              ピルは実行ログへのリンクにしかならず、出し直すには別画面へ移る必要があった。
+              **失敗しているときだけ出す**——それ以外の状態でこの帯を出す意味が無い */}
+          {deployStatus?.kind === "failed" && (
+            <DeployFailureAlert
+              repositoryFullName={pullRequest.repositoryFullName}
+              title="このPRの変更は本番へ出ていません"
+              version={deployStatus.version}
+              runUrl={deployStatus.deployRunUrl}
+              failureIssue={deployFailureIssue}
+            />
+          )}
 
           {currentDetail && (
             <p className="text-xs text-muted-foreground">

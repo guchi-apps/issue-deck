@@ -244,6 +244,39 @@ function composer(): HTMLElement {
 
 afterEach(cleanup);
 
+// デプロイ失敗Issueの案内と出口（#2236）
+describe("デプロイ失敗Issueのパネル", () => {
+  const META = {
+    repositoryFullName: "guchi-apps/issue-deck",
+    runId: 482,
+    runUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/482",
+    version: "4.33.0",
+    previousVersion: "4.32.0",
+    failedJobs: ["deploy"],
+    attempt: 2,
+    detectedAt: "2026-08-24T05:00:00.000Z",
+  };
+  const BODY = `<!-- deploy-failure: ${JSON.stringify(META)} -->\n\n## 何が起きているか`;
+
+  it("PCは、本文のマーカーを読んで出し直しのボタンを出す", () => {
+    renderDetail(buildIssue({ body: BODY }));
+    expect(screen.getByText("本番デプロイが失敗しています")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /本番へ再デプロイ/ })).toBeTruthy();
+    expect(screen.getByText(/本番はv4.32.0のままです/)).toBeTruthy();
+  });
+
+  it("スマホも同じ（PCと同じ部品を使う）", () => {
+    renderMobileDetail(buildIssue({ body: BODY }));
+    expect(screen.getByText("本番デプロイが失敗しています")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /本番へ再デプロイ/ })).toBeTruthy();
+  });
+
+  it("マーカーが無いIssueでは出ない", () => {
+    renderDetail(buildIssue({ body: "ふつうの本文" }));
+    expect(screen.queryByText("本番デプロイが失敗しています")).toBeNull();
+  });
+});
+
 describe("IssueDetailのコメント欄の下の操作列（#1770）", () => {
   it("回答済みの質問Issueでは「回答を確認してクローズ」が出る", () => {
     renderDetail(buildIssue());

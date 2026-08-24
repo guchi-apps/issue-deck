@@ -966,6 +966,39 @@ sweep_pull_request_conflicts() {
   return 0
 }
 
+# --- 本番デプロイ失敗の巡回検知 -------------------------------------------------
+# 本番デプロイ（`deploy.yml`）が失敗したまま止まっているリポジトリを、issue-deckに巡回して
+# 見つけさせ、追跡用のIssueを起票させる（#2236）。
+#
+# **失敗はこれまで通知1件と赤いバッジにしか残らなかった。** `deploy-retry.yml`の自動再実行
+# （#2134）で直らない失敗は、人が気づいて「本番へ再デプロイ」を押すまで本番が古い版のまま残る。
+#
+# コンフリクトの巡回検知（上）と同じ形で、**pollerがやるのは「呼ぶ」ことだけ**。実際に
+# 巡回するかどうかも、起票するかどうかもissue-deck側が決める。失敗しても1巡を止めない。
+sweep_deploy_failures() {
+  if ! api_call POST /api/repositories/deploy-failure-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+      404|000) return 0 ;;
+      *) report_api_failure "デプロイ失敗の巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept actions
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  actions="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.actions | length' 2>/dev/null || echo 0)"
+  [[ "${actions:-0}" -gt 0 ]] || return 0
+
+  # 起票・更新・クローズしたときだけ出す（毎巡「異常なし」を積まない）。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[] | "デプロイ失敗Issueを\(if .kind == "created" then "起票" elif .kind == "updated" then "更新" else "クローズ" end)しました: \(.repositoryFullName)#\(.issueNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- ジョブの実行 -------------------------------------------------------------
 # ジョブ状態の報告を再送する回数と間隔（#1620）。
 #
@@ -2151,6 +2184,9 @@ run_once() {
   # （ワークフローの起動という外向きの副作用があるため）。
   if [[ "$DRY_RUN" -eq 0 ]]; then
     sweep_pull_request_conflicts
+    # 本番デプロイ失敗の巡回検知（#2236）。**dry-runでは呼ばない**（Issueの起票という
+    # 外向きの副作用があるため）。
+    sweep_deploy_failures
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

@@ -27,6 +27,10 @@ import {
  *   （`dispatch/check-user-labels.ts`）。付いた瞬間に読むと理由が引けず、
  *   「確認待ちになりました」としか言えない
  *
+ * **例外は「画面から答えられる待ちが生きているとき」**（#2238）。計画の承認待ち・質問の
+ * 回答待ちは、待ちを作った時点で理由ラベルまで確定しており、人が答えるまで自動では消えない。
+ * 上の2つの理由がどちらも当てはまらないので待たずに送る（`decideCheckUserPush`）。
+ *
  * 送信済みかどうかは`Issue.checkUserPushSentAt`で持つ。`00.check-user`が付き直すたびに
  * `checkUserLabeledAt`とセットでnullへ戻る（`github/sync-issues.ts`）ので、
  * 「まだnullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。
@@ -67,12 +71,26 @@ export type CheckUserPushDecision = "send" | "wait" | "skip";
  *
  * 理由ラベルが読めない（配られていない）リポジトリは既定の待ち時間で送る。
  * 判断できないものを黙らせると、通知が来ないことにも気づけないため。
+ *
+ * **画面から答えられる待ち（計画の承認・質問の回答）が生きているなら待たない**（#2238）。
+ * 待ち時間の意味は「理由ラベルが揃うのを待つ」「早すぎる`00.check-user`が自動で消えるのを
+ * 待つ」の2つだが、待ちがあるならどちらも当てはまらない——理由は既に確定していて
+ * （`01.check-plan`・`01.check-input`）、その待ちは人が答えるまで消えない。
+ * **質問の待ち時間は既定5分**（`SESSION_QUESTION_WAIT_SECONDS_DEFAULT`）なので、3分待って
+ * から送ると残り2分で届くか、期限切れに間に合わないことになる。
  */
 export function decideCheckUserPush(input: {
   labels: readonly { name: string }[];
   checkUserLabeledAt: Date;
+  /**
+   * そのIssueに、まだ期限の来ていない計画・質問の待ちがあるか（#2238）。
+   * **省略時は従来どおり待ち時間だけで決める**——待ちを引けない呼び出し元で、
+   * 判定できないことを理由に通知を早めないため。
+   */
+  hasPendingSessionRequest?: boolean;
   now: Date;
 }): CheckUserPushDecision {
+  if (input.hasPendingSessionRequest) return "send";
   const elapsed = input.now.getTime() - input.checkUserLabeledAt.getTime();
   if (elapsed >= CHECK_USER_PUSH_MAX_AGE_MS) return "skip";
   const reason = checkUserReason(input.labels);
@@ -103,6 +121,45 @@ export function buildCheckUserPushPayload(issue: {
   };
 }
 
+function sessionRequestKey(repositoryFullName: string, issueNumber: number): string {
+  return `${repositoryFullName}#${issueNumber}`;
+}
+
+/**
+ * 渡したIssueのうち、**まだ期限の来ていない計画・質問の待ち**があるものの鍵を返す（#2238）。
+ *
+ * 見るのは`WAITING`かつ`expiresAt`が未来のものだけ。`WAITING`は本来フックのポーリングが
+ * 期限切れを`EXPIRED`へ倒すが（`plan-requests.ts`・`question-requests.ts`）、セッションが
+ * 落ちてポーリングが止まると`WAITING`のまま残る。**残骸を理由に通知を早めない**ため、
+ * 期限そのものを見る。
+ *
+ * リポジトリ名とIssue番号を別々の`in`で絞るので、取れる行には他の組み合わせも混ざりうる。
+ * 使うのは鍵の集合として引き当てるときだけなので、混ざっていても結果は変わらない。
+ */
+async function selectPendingSessionRequestKeys(
+  targets: readonly { repositoryFullName: string; issueNumber: number }[],
+  now: Date,
+): Promise<Set<string>> {
+  const keys = new Set<string>();
+  if (targets.length === 0) return keys;
+
+  const where = {
+    status: "WAITING" as const,
+    expiresAt: { gt: now },
+    repositoryFullName: { in: [...new Set(targets.map((t) => t.repositoryFullName))] },
+    issueNumber: { in: [...new Set(targets.map((t) => t.issueNumber))] },
+  };
+  const select = { repositoryFullName: true, issueNumber: true } as const;
+  const [plans, questions] = await Promise.all([
+    db.sessionPlanRequest.findMany({ where, select }),
+    db.sessionQuestionRequest.findMany({ where, select }),
+  ]);
+  for (const row of [...plans, ...questions]) {
+    keys.add(sessionRequestKey(row.repositoryFullName, row.issueNumber));
+  }
+  return keys;
+}
+
 /**
  * 待ち時間の過ぎた確認待ちをまとめて通知する。
  *
@@ -115,11 +172,14 @@ export function buildCheckUserPushPayload(issue: {
 export async function sweepCheckUserPushNotifications(now: Date = new Date()): Promise<number> {
   if (!isPushConfigured()) return 0;
 
+  // **待ち時間の下限で絞らない**（#2238）。計画・質問の待ちがあるものは待たずに送るため、
+  // 付いたばかりの確認待ちもここに含める必要がある。待ち時間の判断は
+  // `decideCheckUserPush`が1か所で持ち、まだ早いものは`wait`として次の巡回へ回る
   const candidates = await db.issue.findMany({
     where: {
       state: "OPEN",
       checkUserPushSentAt: null,
-      checkUserLabeledAt: { lte: new Date(now.getTime() - CHECK_USER_PUSH_DELAY_MS) },
+      checkUserLabeledAt: { not: null, lte: now },
     },
     include: {
       labels: { select: { name: true } },
@@ -129,12 +189,23 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     take: SWEEP_BATCH_SIZE,
   });
 
+  const pendingRequestKeys = await selectPendingSessionRequestKeys(
+    candidates.map((issue) => ({
+      repositoryFullName: issue.repository.fullName,
+      issueNumber: issue.number,
+    })),
+    now,
+  );
+
   let sent = 0;
   for (const issue of candidates) {
     if (!issue.checkUserLabeledAt) continue;
     const decision = decideCheckUserPush({
       labels: issue.labels,
       checkUserLabeledAt: issue.checkUserLabeledAt,
+      hasPendingSessionRequest: pendingRequestKeys.has(
+        sessionRequestKey(issue.repository.fullName, issue.number),
+      ),
       now,
     });
     if (decision === "wait") continue;

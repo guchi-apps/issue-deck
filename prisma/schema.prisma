@@ -1100,3 +1100,36 @@ model PushSubscription {
 
   @@index([userId])
 }
+
+/// 本番デプロイ（`deploy.yml`）の失敗を追跡するために自動起票したIssue（#2236）。
+///
+/// **デプロイ失敗はこれまで通知1件と赤いバッジにしか残らなかった。** `deploy-retry.yml`の
+/// 自動再実行（#2134）で直らない失敗は、人が気づいて「本番へ再デプロイ」を押すまで本番が
+/// 古い版のまま残る。盤面に載るIssueとして残せば、他の作業と同じ場所に並んで消えない。
+///
+/// この表が持つのは**起票したかどうか**だけで、失敗そのものの正はGitHubのrun。
+/// 二重起票を防ぐ鍵に`runId`を使う（同じrunの再検知では起票しない）。
+model DeployFailureIssue {
+  id                 String @id @default(cuid())
+  repositoryFullName String
+  /// 失敗した`deploy.yml`のrun id。**同じrunで二重に起票しないための鍵**
+  runId              BigInt
+  /// 起票したIssueの番号
+  issueNumber        Int
+  /// `open` / `closed`。後続のデプロイが成功した時点で`closed`にする
+  state              String @default("open")
+  /// 失敗した版（`4.14.0`）。特定できなければnull
+  version            String?
+  /// 失敗したrunのURL。画面から実行ログを開くのに使う
+  runUrl             String @db.Text
+
+  detectedAt DateTime  @default(now())
+  /// 自動でクローズした時刻。人が先に閉じた場合はnullのまま`closed`になる
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, runId])
+  @@index([repositoryFullName, state])
+}

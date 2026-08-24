@@ -1229,6 +1229,13 @@ GitHub APIをどれだけ使うかであり、それはissue-deckの側の関心
 どのPRへ起動するかの判定はissue-deck側にある。設計は
 [auto-repair.md](auto-repair.md)「issue-deckからの巡回検知」。
 
+**本番デプロイ失敗の巡回検知（#2236）も同じ1巡に相乗りしている。**
+`POST /api/repositories/deploy-failure-sweep`を毎巡そのまま呼び、間隔
+（`DEPLOY_FAILURE_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）も起票の判定もissue-deck側が持つ。
+ログに出すのは起票・更新・クローズしたときだけで、`--dry-run`では呼ばない（Issueの起票という
+外向きの副作用があるため）。設計は
+[auto-repair.md](auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
