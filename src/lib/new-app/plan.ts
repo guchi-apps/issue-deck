@@ -421,6 +421,11 @@ TLS証明書を取ると、certbotが実機に \`/etc/apache2/sites-available/${
 
 - [ ] certbot実行後、${refs.parent} のVPS手作業Issueへ貼られた \`${host}-le-ssl.conf\` の内容を \`apache/sites-available/\` へ追加する
 
+**\`:443\` 側の \`RequestHeader set X-Forwarded-Proto\` が \`"https"\` になっていることを確かめてから取り込みます。**
+certbotは \`:80\` のVirtualHostをそのまま複製するため \`"http"\` が残ることがあり、アプリが自分を \`http://\` だと
+誤認して**本番でだけログインが失敗します**（OAuthのリダイレクトURIが登録済みの \`https://\` と一致しなくなるため）。
+\`"http"\` のまま貼られていたら、実機を直し直してから控え直してもらってください。
+
 ## 注意点
 
 - 実機を直接編集しないでください。\`develop\` へマージし、さらに \`develop\` → \`main\` のリリースPRを
@@ -604,12 +609,22 @@ ${dbStep}${pm2Step}
   sudo certbot --apache -d ${host}
   \`\`\`
 
+- [ ] （VPS）certbotが複製した \`:443\` 側の \`X-Forwarded-Proto\` を \`"https"\` へ直す（\`"http"\` のままだと本番でだけログインが失敗する）
+
+  \`\`\`bash
+  grep -n 'X-Forwarded-Proto' /etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo sed -i 's/X-Forwarded-Proto "http"/X-Forwarded-Proto "https"/' /etc/apache2/sites-available/${host}-le-ssl.conf
+  sudo apachectl configtest && sudo systemctl reload apache2
+  \`\`\`
+
 - [ ] （VPS）certbotが作った設定ファイルの内容を控え、${vpsRef} へコメントする
 
   \`\`\`bash
   sudo cat /etc/apache2/sites-available/${host}-le-ssl.conf
   \`\`\``,
     verification: `\`curl -I ${publicUrlFor(spec)}\` が 200 か 3xx を返せば公開まで届いています。
+\`grep X-Forwarded-Proto /etc/apache2/sites-available/${host}-le-ssl.conf\` が何も返さないか
+\`"https"\` を返せば、\`:443\` 側の直しは済んでいます（\`"http"\` が残っていると本番でだけログインが失敗します）。
 控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むまでは、毎日のドリフト検知に
 「[新規（未取り込み）] apache/sites-available/${host}-le-ssl.conf」として出続けます。`,
     why: "VPSへのSSHと`sudo`を伴う実機の操作で、エージェントの実行環境からは行えないためです（代行実行の対象はサブPCだけです）。",

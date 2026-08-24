@@ -172,6 +172,14 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
 VPSの手作業Issueに「内容を控えてvpsのIssueへコメントする」手順を置き、vpsのIssue側に
 2段目として取り込みを書いてある。
 
+**控える前に`:443`側の`X-Forwarded-Proto`を`"https"`へ直す**（#2253）。certbotは`:80`の
+VirtualHostをそのまま`:443`へ複製するため、`RequestHeader set X-Forwarded-Proto "http"`が
+残る。アプリは自分を`http://`だと誤認し、生成したリダイレクトURIが登録済みの`https://`と
+一致せず、**本番でだけOAuthログインが失敗する**。共有知識には2026-08-09の時点で記録があった
+（`guchi-apps/docs`の`knowledge/deployment.md`）のに、生成する手順に入っていなかったのが
+`guchi-apps/vps#124`で顕在化した理由なので、**認証の有無にかかわらず常に手順として出す**
+（後から認証を足すアプリがあるため）。
+
 ## 失敗したときの扱い
 
 **途中で失敗しても、作り終えたものは消さない。** 作成済みのリポジトリ・Issueを`created`として
