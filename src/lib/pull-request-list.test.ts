@@ -230,12 +230,25 @@ describe("filterPullRequestsByView", () => {
           aiReview: AI_REVIEW_NONE,
         },
       }),
+    ];
+
+    expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([1]);
+    expect(filterPullRequestsByView(pullRequests, "in-progress").map((pr) => pr.number)).toEqual([
+      2,
+    ]);
+  });
+
+  // 判定はCIと並行に走り、`wait-for-ci`はCIのconclusionを見ずに抜ける（#2066）ため、CIが
+  // 落ちた後も判定が終わるまでの数分は`pending`のまま。ここで外すとベルの赤い「チェック失敗」が
+  // その間だけ消える。判定の結果によらず人が直すしかないので「マージ待ち」に残す。
+  it("CI失敗は判定中でも完了に残す（#2283）", () => {
+    const pullRequests = [
       pullRequest({
-        number: 3,
+        number: 1,
         ciState: "failure",
         mergeJudgement: {
           state: "pending",
-          step: "auto-merge",
+          step: "claude-review",
           runUrl: null,
           aiReview: AI_REVIEW_NONE,
         },
@@ -243,9 +256,7 @@ describe("filterPullRequestsByView", () => {
     ];
 
     expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([1]);
-    expect(filterPullRequestsByView(pullRequests, "in-progress").map((pr) => pr.number)).toEqual([
-      2, 3,
-    ]);
+    expect(filterPullRequestsByView(pullRequests, "in-progress")).toEqual([]);
   });
 
   // 判定のcheck-runが1件も無いリポジトリ（ワークフロー未配布・起動前）まで巻き込まない。

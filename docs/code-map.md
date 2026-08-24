@@ -1221,16 +1221,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   同じく履歴を積まない（`selectPullRequestView`）。
 - **PRの状態別ビューは3つで、左メニューにも3つとも出す**（#1312・#1613・#2120）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
-  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明・自動マージ可否の
-  判定中）と「マージ待ち」（CIがsuccess/failureで判定も完了）は**同じopen取得の結果をクライアント
-  側で絞るだけ**なので、切り替えてもGitHub APIを叩き直さない。
-  **自動マージ可否の判定中（`isMergeJudgementPending`）を「実行中」側へ入れているのは#2283。**
+  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明・CI通過後の
+  自動マージ可否の判定中）と「マージ待ち」（CIがsuccessで判定も完了・またはCIがfailure）は
+  **同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えてもGitHub APIを叩き直さない。
+  **CI通過後の判定中（`isMergeJudgementPending`）を「実行中」側へ入れているのは#2283。**
   判定ワークフローのcheck-runはCI状態の集約から外してある（#1799）ため、Claudeがレビューして
   いる最中でも`ciState`は`success`になり「マージ待ち」に並んでいたが、判定中は画面のマージボタン
-  自体が無効（#1968）で押せる操作が無い。二分の基準を「CIが確定したか」から「いま押せるか」へ
-  そろえた形で、確認待ちの一覧が判定中のPRを外したのと同じ考え方（`isMergeWaitingForChecks`・
-  #2081）。**通知ベルのPR区分も同じ母集団を使うため、判定中のPRは一覧からも件数バッジからも
-  同時に外れる。**この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
+  自体が無効（#1968）で押せる操作が無い。**通知ベルのPR区分も同じ母集団を使うため、判定中のPRは
+  一覧からも件数バッジからも同時に外れる。**
+  **CI失敗だけは判定中でも「マージ待ち」に残す**（#2283）。判定はCIと並行に走り`wait-for-ci`は
+  CIのconclusionを見ずに抜ける（#2066）ので、**CIが落ちた後も判定が終わるまでの数分は`pending`の
+  まま**になる。ここで外すとベルの赤い「チェック失敗」がその窓だけ消える。判定の結果によらず
+  CIが落ちたPRは人が直すしかなく、`isMergeWaitingForChecks`が「待っても解消しないもの」として
+  CI失敗を外さないのと同じ扱い。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
   **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
   ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
   **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
