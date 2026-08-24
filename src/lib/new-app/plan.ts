@@ -315,7 +315,7 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 - [ ] \`.env.example\`（変数名のみ）と \`.env.tpl\`（\`op://\` 参照）を作る
 - [ ] \`.github/workflows/ci.yml\` を作る（必須）
 - [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`/apps/${spec.repositoryName}/\`）
-- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く
+- [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
 - [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
 ${multiAgent}
 ## 参考
@@ -655,7 +655,7 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
     steps: `${dnsStep}- [ ] （ブラウザ）1Passwordの \`apps\` ボールトへ \`${spec.repositoryName}\` のアイテムを作り、必要なフィールドを追加する
 
   \`\`\`
-  ${spec.databaseName ? `db-name = ${spec.databaseName} / ci-webhook-url（Signaly）/ target-dir = /apps/${spec.repositoryName}` : `ci-webhook-url（Signaly）/ target-dir = /apps/${spec.repositoryName}`}
+  ${spec.databaseName ? `db-name = ${spec.databaseName} / target-dir = /apps/${spec.repositoryName}` : `target-dir = /apps/${spec.repositoryName}`}
   \`\`\`
 
 ${secretsStep}- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する

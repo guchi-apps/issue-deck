@@ -547,8 +547,14 @@ CI/デプロイ通知（`.github/scripts/signaly-notify.sh`）の`[Workflow Run]
 
 | 通知 | 1Passwordのフィールド | 環境変数 | 設定場所 |
 | --- | --- | --- | --- |
-| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | GitHubのrepository secret（正は1Password。対応は`.github/secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh`。#1302） |
+| CI/デプロイ | `apps/issue-deck` の `ci-webhook-url` | `SIGNALY_WEBHOOK_URL` | GitHubの**organization secret**（正は1Password。対応は`.github/org-secrets-manifest.tsv`、同期は`scripts/sync-github-secrets.sh --manifest`。#1302・#2255） |
 | セッション状態 | `apps/issue-deck` の `session-webhook-url` | `SESSION_NOTIFY_WEBHOOK_URL` | `~/.config/issue-deck/notify.env` |
+
+**CI/デプロイ通知は全リポジトリで1つのチャンネルを共有する**（#2255）。以前はリポジトリごとに
+`op://apps/<アプリ>/ci-webhook-url`と別チャンネルへ飛ばしていたが、新しいリポジトリを増やすたびに
+Signalyでのチャンネル作成・1Passwordへの登録・repository secretの投入が要るため、organization
+secretへ寄せた。**repository secretは同名のorganization secretを覆い隠す**ので、各リポジトリは
+`.github/secrets-manifest.tsv`を`scope=inherit`にしたうえでrepository secretを削除する。
 
 分ける理由。
 
