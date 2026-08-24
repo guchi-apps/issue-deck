@@ -565,6 +565,8 @@ export function IssueDeckShell({
         runningIssueIds: selectCheckUserRunningIssueIds(reconciledIssues, {
           pullRequests: openPullRequests.pullRequests,
           sessions: dispatch.sessions,
+          planRequests: dispatch.planRequests,
+          questionRequests: dispatch.questionRequests,
           now: detectedAt,
         }),
         now: detectedAt,
@@ -857,9 +859,19 @@ export function IssueDeckShell({
       selectCheckUserRunningIssueIds(checkUserIssues, {
         pullRequests: crossRepositoryPullRequests,
         sessions: dispatch.sessions,
+        // 計画・質問の待ちは`activity`に現れないので、待ちそのものを材料に足す（#2238）
+        planRequests: dispatch.planRequests,
+        questionRequests: dispatch.questionRequests,
         now,
       }),
-    [checkUserIssues, crossRepositoryPullRequests, dispatch.sessions, now],
+    [
+      checkUserIssues,
+      crossRepositoryPullRequests,
+      dispatch.sessions,
+      dispatch.planRequests,
+      dispatch.questionRequests,
+      now,
+    ],
   );
 
   // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
