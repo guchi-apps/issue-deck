@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
-# 実装セッションの状態をSignalyへ通知するフックスクリプト（#1219）。
+# 実装セッションの状態をissue-deckへ報告するフックスクリプト（#1219）。
 #
 # Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`・`SessionStart`）から呼ばれ、
 # フックのstdinに来るJSONを読んで1件処理する。設定は run-issue-session.sh が生成する
 # settings JSON 側にあり、このスクリプトを直接叩くのは検証のときだけ。
 #
+# **報告先はissue-deckだけ**（#2280）。かつてはここからSignalyのwebhookへも通知していたが、
+# issue-deck自身がPush通知（`00.check-user`が付いたIssueを鳴らす。`src/lib/notifications/`）を
+# 持ったため、外部サービスへ送る経路は丸ごと落とした。人が気づく手段はissue-deckのPush通知・
+# ベル・一覧の確認待ち表示になる。
+#
 # 扱うイベントは6つ。**どれを扱うかの判定はすべてここが持つ**（フック設定には「呼ぶ」ことだけを
 # 書き、判断を2箇所に分けない）。
 #
-#   Notification(permission_prompt) 入力待ち  → Signalyへ通知＋issue-deckへ様子を報告
+#   Notification(permission_prompt) 入力待ち  → issue-deckへ様子を報告
 #                                               （＋`00.check-user`を付ける。#1417）
 #   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）
-#   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）。**Signalyへは送らない**
+#   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）
 #   PreToolUse(AskUserQuestion)     質問 → issue-deckへ質問を送り、画面からの回答を待つ（#2189）
 #                                               （＋この時点で「入力待ち」として記録する。#1438）
-#   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）。**Signalyへは送らない**
+#   PostToolUse（入力待ちの直後だけ） 作業再開  → issue-deckへ様子を報告（#1357）
 #                                               （＋`00.check-user`を解く。#1417）
 #   PostToolUse(Artifact)           アーティファクトの公開 → HTMLの原本をissue-deckへ送る（#2154）。
-#                                               **Signalyへは送らない。** 上の間引きより前で扱う
+#                                               上の間引きより前で扱う
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
-#                                               **Signalyへもissue-deckへも送らない**
+#                                               **issue-deckへも送らない**
 #
 # **1つだけフック以外の入口がある**（#1971）。`SessionInterrupted`はClaude Codeのフックではなく、
 # pollerが合成して渡してくる合図で、「APIエラー（529等）でturnが打ち切られたまま止まっている」
 # ことを人へ引き上げる。このときClaude Codeは`Stop`を飛ばさないため、フックだけを待っていると
-# 誰にも伝わらない。**Signalyへ通知するだけ**で、状態の記録もissue-deckへの報告も行わない。
+# 誰にも伝わらない。**`00.check-user`を付けるためだけにissue-deckへ報告する**（#2280。状態の
+# 記録は行わない——「今このセッションが何をしているか」を表す値を持たないため）。
 # 対象のセッション名は`SESSION_NOTIFY_TMUX_SESSION`で受け取る（`$TMUX`が使えないため）。
 #
 # **`00.check-user`を付け外しするのは、自分が付けたときだけ**（印は`lib/session-state.sh`の
 # `<セッション名>.check-user`）。Issueに書かれた「Claudeがユーザーに質問したとき」
 # 「開発環境のリンクを提示したとき」「スクリーンショットを提示したとき」は、ローカルセッションでは
 # どれも「入力待ちで止まる」という同じ形になるため、契機を分けずに扱う（#1417）。
-#
-# `ExitPlanMode`でSignalyへ送らないのは、直後に承認プロンプトの`Notification`が必ず飛び、
-# 同じ「入力待ち」が二重になるため。`PostToolUse`で送らないのは、人が答えたことは
-# その人が既に知っているため（通知の価値が無く、数だけ増える）。
 #
 # **`PostToolUse`は「人が承認プロンプトに答えた」ことを知る唯一の手掛かり**（#1357）。答えた
 # こと自体を知らせるフックは無いが、承認したツールは必ず走るので、その直後に飛ぶ。ただし
@@ -53,23 +55,21 @@
 # なお exit 2 はフックの規約でブロッキング扱いになるため絶対に返さない。
 #
 # 設定は `~/.config/issue-deck/notify.env`（chmod 600）から読む。書式は
-# deploy/subpc/notify.env.example を参照。設定していない環境では黙って何もしない
-# （通知を設定していないPCでもセッションの起動を妨げないため）。
-#
-# 送信先の変数は `SESSION_NOTIFY_WEBHOOK_URL`。旧名の `SIGNALY_WEBHOOK_URL` も互換のため
-# 読むが、新規に設定するときは新しい名前を使う（#1231）。
+# deploy/subpc/notify.env.example を参照。無くても動く（待ち時間の既定値だけで回る）。
 #
 # 検証用の環境変数:
-#   SESSION_NOTIFY_DRY_RUN=1   送信せず、送るはずのpayloadを標準出力へ出す。
-#                              Signalyだけでなくissue-deckへの報告も止める（#1342で計画の投稿が
-#                              GitHubへのコメント書き込みになったため、検証で実際に書かせない）
+#   SESSION_NOTIFY_DRY_RUN=1   送信せず、送るはずの宛先とpayloadを標準出力へ出す（#1342で
+#                              計画の投稿がGitHubへのコメント書き込みになったため、検証で
+#                              実際に書かせない）
 
 set -uo pipefail
 
 # 引数が足りなくても落とさない。フックのcommandを書き間違えたときに、
 # セッションのたびにエラーが出るだけで済ませる。
 ISSUE_NUMBER="${1:-}"
-REPO_NAME="${2:-}"
+# 第2引数のリポジトリ名は、Signalyの通知タイトルに出すためだけに使っていた（#2280で削除）。
+# **引数の位置は変えない**——呼び出し側（run-issue-session.sh・pollerと、他リポジトリへ配った
+# 同じ形のランチャー）が3つ渡してくるため、詰めると第3引数の`owner/repo`がずれる。
 REPO_SLUG="${3:-}"
 
 # stdinのJSON。端末から直接叩かれたときにcatで待ち続けないよう、ttyなら何もせずに終わる。
@@ -89,15 +89,6 @@ if [[ -f "$NOTIFY_ENV_FILE" ]]; then
   source "$NOTIFY_ENV_FILE" || true
   set +a
 fi
-
-# 送信先はセッション通知専用のチャンネル（1Passwordの session-webhook-url）で、
-# CI/デプロイ通知の SIGNALY_WEBHOOK_URL とは別物（#1231）。
-# 旧名のまま設定されている既存インストールを壊さないよう、未設定のときだけ旧名へ落とす。
-#
-# **未設定でもここでは終わらない**（#1256）。webhookの設定はSignalyへ送るかどうかを決めるだけで、
-# セッションの状態をホストへ記録する処理（回収の判定材料）はそれとは独立している。
-# 通知を設定していないホストでもセッションが畳まれるようにするため、判定は送信の直前まで下げた。
-WEBHOOK_URL="${SESSION_NOTIFY_WEBHOOK_URL:-${SIGNALY_WEBHOOK_URL:-}}"
 
 # 計画を出したあと、issue-deckの画面からの返事を何秒まで待つか（#2061）。
 #
@@ -145,12 +136,12 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-state.sh" ]]; then
   source "$SCRIPT_DIR/lib/session-state.sh" || true
 fi
 
-# tmuxのセッション名。状態ファイルのキーであり、`tmux attach -t <名前>` でそのまま繋げるよう
-# 通知にも載せる。tmuxの外で起動した場合は空になる。
+# tmuxのセッション名。状態ファイルのキーであり、`tmux attach -t <名前>` でそのまま繋げる。
+# tmuxの外で起動した場合は空になる。
 #
 # **`SESSION_NOTIFY_TMUX_SESSION`で外から渡せる**（#1971）。APIエラーで中断したセッションの
 # 引き上げは、そのセッションの中ではなくpollerから呼ばれるため`$TMUX`が使えない。
-# 渡された名前はそのセッションを指すだけで、ここから送る操作は無い（読むのと通知だけ）。
+# 渡された名前はそのセッションを指すだけで、ここから送る操作は無い（読むのと報告だけ）。
 NOTIFY_TMUX_SESSION=""
 if [[ -n "${SESSION_NOTIFY_TMUX_SESSION:-}" ]]; then
   NOTIFY_TMUX_SESSION="$SESSION_NOTIFY_TMUX_SESSION"
@@ -184,7 +175,7 @@ fi
 
 # セッションが始まった（#1465）。**印を消す以外にやることは無いので、ここで打ち切る。**
 # 開始したこと自体は人にとって新しい情報ではない（画面には既に起動の受付コメントが出ている）
-# ため、Signalyへもissue-deckへも送らない（python3もHTTPも起こさない）。
+# ため、issue-deckへも送らない（python3もHTTPも起こさない）。
 if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"SessionStart\" ]]; then
   exit 0
 fi
@@ -340,19 +331,19 @@ if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\
 fi
 
 # ---------------------------------------------------------------------------
-# 送るかどうかの判定とpayloadの組み立て
+# 報告するかどうかの判定とpayloadの組み立て
 #
 # 判定・組み立て・シェルへ返す値の生成をすべてpython3側に寄せる。フックのJSONを
 # シェルでパースする（grep -o 等）と、値に引用符や改行が入った時点で壊れるため。
 # 標準出力の1行目を「何をするか」、2行目以降をpayloadとして返す。
 #
-#   send <状態イベント> <activity> <remote-controlのURL|->   Signalyへ通知する（payloadはSignaly用）
-#   notify <->  <-> <remote-controlのURL|->                 Signalyへ通知するだけ（#1971。記録も報告もしない）
-#   quiet <状態イベント> <activity>                          issue-deckへだけ報告する（#1357）
+#   report <状態イベント> <activity> [remote-controlのURL|-]  issue-deckへ様子を報告する
+#   interrupted                                             中断を引き上げる（#1971・#2280。
+#                                                           payloadは/sessions/interrupted用）
 #   plan <remote-controlのURL|->                            計画を送る（payloadは/sessions/plan用。
-#                                                           4行目に`ExitPlanMode`の引数を添える。#2121）
+#                                                           3行目に`ExitPlanMode`の引数を添える。#2121）
 #   question <remote-controlのURL|->                        質問を送る（payloadは/sessions/question用。
-#                                                           4行目に`AskUserQuestion`の引数を添える。#2189）
+#                                                           3行目に`AskUserQuestion`の引数を添える。#2189）
 #   skip                                                    何もしない
 #
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
@@ -360,13 +351,9 @@ fi
 # ---------------------------------------------------------------------------
 export HOOK_JSON
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
-export NOTIFY_REPO_NAME="$REPO_NAME"
 export NOTIFY_REPO_SLUG="$REPO_SLUG"
 export NOTIFY_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}"
 export NOTIFY_CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
-# tailnetへ公開した開発サーバー（#1265）。run-issue-session.shがexportしている。
-# 入力待ちの通知に載せると、気づいた側がその場で画面を開ける
-export NOTIFY_PREVIEW_URL="${ISSUE_DECK_PREVIEW_URL:-}"
 
 # 計画コメントの先頭に残す前提コミット（#1342）。手でIssueへ投稿していたときと同じ形
 # （`<!-- plan-base: <SHA> -->`）を保ち、`git log <SHA>..origin/develop`で前提の変化を
@@ -403,18 +390,12 @@ event = hook.get("hook_event_name", "")
 notification_type = hook.get("notification_type", "")
 
 issue_number = os.environ.get("NOTIFY_ISSUE_NUMBER", "")
-repo_name = os.environ.get("NOTIFY_REPO_NAME", "")
 repo_slug = os.environ.get("NOTIFY_REPO_SLUG", "").strip("/")
+# **APIへ送る`hostName`は識別子のまま**にする（照合キーであり、`ssh`・`tmux`の相手でもある）。
+# 画面に出す表記（`subpc` → サブPC）への変換はissue-deck側（`src/lib/dispatch/host-label.ts`）が持つ。
 host_name = os.environ.get("NOTIFY_HOST_NAME", "")
+# 引き上げ（`SessionInterrupted`）の宛先。`tmux attach -t <名前>`としてIssueコメントに出る
 tmux_session = os.environ.get("NOTIFY_TMUX_SESSION", "")
-
-# 通知のタイトルに出すホストの表記（#1416）。**issue-deck側の`src/lib/dispatch/host-label.ts`と
-# 同じ対応表を持つ。** ここは通知を組み立てる時点でホスト名しか持っておらず、issue-deckへ問い
-# 合わせる経路も無い（通知は起動先が落ちていても届く必要がある）ため、写しを置く方を選んでいる。
-# **APIへ送る`hostName`と「Host」フィールドは識別子のまま**にする（照合キーであり、`ssh`・
-# `tmux`の相手でもある）。
-HOST_DISPLAY_NAMES = {"subpc": "サブPC"}
-host_display_name = HOST_DISPLAY_NAMES.get(host_name.lower(), host_name)
 
 
 def resolve_remote_url():
@@ -518,101 +499,16 @@ def resolve_plan_text(tool_input):
         return ""
 
 
-def signaly_link(text, url):
-    """Signalyのfields値で「リンクとして表示される」書式を作る（#1247）。
-
-    Signalyがfieldsの値でリンクにできるのは `[text](url)` のマスクドリンク記法だけで、
-    生URLを置いても自動ではリンクにならない（Signalyの`docs/webhook.md`・
-    `frontend/app.js`の`renderFieldValue`）。
-
-    ただし`renderFieldValue`は `[text](url)` を
-    `<a href="..." target="_blank" rel="noopener noreferrer">` へ置換した**あとで**
-    `_..._` を `<em>` へ変換するため、生成後のHTMLに残る `_blank` のアンダースコアと
-    URL中のアンダースコアが対になり、hrefとtarget属性ごと壊れる（#1234で観測した
-    `</em>`の混入はこれ）。つまり1つの値に含まれるアンダースコアが2個以上あると壊れる。
-
-    URL中の `_` を `%5F` にしておけば値に残るアンダースコアは `_blank` の1個だけになり、
-    対にならないので壊れない。`%5F` は `_` のパーセントエンコードなので、URLとしての
-    指す先は変わらない。
-    """
-    return f"[{text}]({url.replace('_', '%5F')})"
-
-
-def build_signaly_payload(emoji, color, label, remote_url):
-    """Signalyへ送るpayloadを組み立てる（#2061でここだけ関数へ切り出した）。
-
-    計画の承認待ち（`plan`）も通知したいが、あちらは`decision`ブロックより手前で
-    確定するため、同じ組み立てを2箇所に持たずに済むようにしている。
-    """
-    title_parts = [emoji]
-    if repo_name and issue_number:
-        title_parts.append(f"[{repo_name} #{issue_number}]")
-    elif repo_name:
-        title_parts.append(f"[{repo_name}]")
-    title_parts.append(label)
-    if host_name:
-        title_parts.append(f"({host_display_name})")
-    title = " ".join(title_parts)
-
-    # **応答テキスト（hook の last_assistant_message）は載せない。**
-    # Issue本文の引用・ファイルの中身・コマンドの出力が混ざりうるものを、外部サービスである
-    # Signalyへ出す経路を最初から作らない。中身はremote-controlのURLから見る。
-    #
-    # **リンクは1つのフィールドに1つだけ入れる。** マスクドリンク1つにつき `target="_blank"` 由来の
-    # アンダースコアが1個増えるため、同じ値に2つ並べると `_` が対になって両方壊れる
-    # （`signaly_link`のコメント参照）。旧「Links」フィールドはIssueリンクとセッションURLを
-    # `·`で連結していて、これに該当していた（#1247）。
-    fields = []
-    if repo_name:
-        fields.append({"name": "Repository", "value": f"`{repo_name}`", "inline": True})
-    if issue_number:
-        issue_value = f"#{issue_number}"
-        if repo_slug:
-            issue_value = signaly_link(issue_value, f"https://github.com/{repo_slug}/issues/{issue_number}")
-        fields.append({"name": "Issue", "value": issue_value, "inline": True})
-    if host_name:
-        fields.append({"name": "Host", "value": host_name, "inline": True})
-    fields.append({"name": "Event", "value": label, "inline": True})
-    # 中断の引き上げ（#1971）に添える一文。**pollerが持つ固定の文言だけが入る**
-    # （セッションの画面や応答テキストは、他のイベントと同じくここへ載せない）。
-    interrupt_detail = hook.get("interrupt_detail", "")
-    if isinstance(interrupt_detail, str) and interrupt_detail.strip():
-        fields.append({"name": "詳細", "value": interrupt_detail.strip(), "inline": False})
-    if tmux_session:
-        fields.append({"name": "tmux", "value": f"`tmux attach -t {tmux_session}`", "inline": False})
-    preview_url = os.environ.get("NOTIFY_PREVIEW_URL", "")
-    if preview_url:
-        # 1フィールド1リンクを守る（`signaly_link`のコメント参照）
-        fields.append(
-            {"name": "開発環境", "value": signaly_link("画面を開く", preview_url), "inline": False}
-        )
-
-    if remote_url:
-        fields.append({
-            "name": "Remote Control",
-            "value": signaly_link("セッションを開く", remote_url),
-            "inline": False,
-        })
-        # 生URLも別フィールドで残す。**スマホのプッシュ通知の本文はSignaly側がMarkdownを
-        # 除去する**（`backend/push.py`の`_plain_text`）ので、マスクドリンクだけだと
-        # プッシュ通知には表示名しか出ずURLが消える。手でコピーする経路を残しておく。
-        # 単独の値なら含まれるアンダースコアは1個だけなので、`<em>`化で壊れない。
-        fields.append({"name": "Remote Control URL", "value": remote_url, "inline": False})
-    return {"title": title, "color": color, "fields": fields}
-
-
 # 計画の提示（#1342）。**`ExitPlanMode`の`PreToolUse`は、承認プロンプトが出る前に飛ぶ。**
 # ここが計画をIssueへ残す唯一の機会で、`Notification`のJSONには計画に関する情報が何も無い。
 #
-# 送り先はSignalyではなくissue-deck。**計画本文を外部サービスへ出す経路は作らない**という
-# 方針（下の「応答テキストは載せない」と同じ理由）を守りつつ、Issueのコメントとしてなら
-# 残す価値がある（元々プロンプトが手で投稿するよう指示していたもの）。
+# 送り先はissue-deckで、Issueのコメントとして残す（元々プロンプトが手で投稿するよう指示して
+# いたもの）。
 #
-# **Signalyへは「計画の承認待ち」だけを送る（#2061）。** 従来はここで送らず、直後に飛ぶ
-# 承認プロンプトの`Notification`に任せていた。画面から承認できるようになると、承認された
-# 場合は承認プロンプトが出ない＝`Notification`が飛ばないため、任せたままだと
-# **計画が出たことが誰にも通知されない。** 載せるのは他のイベントと同じ項目だけで、
-# 計画本文は入れない。
+# **人へ気づかせるのは`00.check-user`とissue-deckのPush通知**（#2280）。計画の待ちを作った
+# 時点でissue-deck側が`00.check-user`＋`01.check-plan`を付け、Pushが鳴る。画面から承認された
+# 場合は承認プロンプトが出ない＝`Notification`が飛ばないため、ここで待ちを作れていることが
+# 「計画が出た」ことを人へ届ける唯一の経路になる。
 if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
     plan = resolve_plan_text(hook.get("tool_input"))
     # 宛先が引けない・計画が読めないなら何もしない。issue-deck側もこれらは400で弾く。
@@ -631,8 +527,7 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
         "hostName": host_name or None,
         "waitSeconds": int(os.environ.get("NOTIFY_PLAN_WAIT_SECONDS") or 0),
     }))
-    print(json.dumps(build_signaly_payload("\U0001f5d2\ufe0f", "#faa61a", "計画の承認待ち", remote_url)))
-    # 4行目は`ExitPlanMode`の引数そのまま（#2121）。承認を返すときに`updatedInput`として
+    # 3行目は`ExitPlanMode`の引数そのまま（#2121）。承認を返すときに`updatedInput`として
     # 添え直すためだけに持ち出すので、**中身は一切変えない**（`plan_decision_output`を参照）。
     tool_input = hook.get("tool_input")
     print(json.dumps(tool_input if isinstance(tool_input, dict) else {}))
@@ -642,9 +537,9 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
 # ここが質問の中身（選択肢とその説明）を画面へ運ぶ唯一の機会で、`Notification`のJSONには
 # 何を聞かれているかが入っていない。
 #
-# **Signalyへは「質問の回答待ち」を送る。** 画面から答えた場合は選択フォームが出ない＝
-# `Notification`が飛ばないため、任せたままだと質問が出たことが誰にも届かない。
-# 載せるのは他のイベントと同じ項目だけで、質問の中身は入れない。
+# **人へ気づかせるのは`00.check-user`とissue-deckのPush通知**（#2280。計画と同じ）。画面から
+# 答えた場合は選択フォームが出ない＝`Notification`が飛ばないため、ここで待ちを作れていることが
+# 「質問が出た」ことを人へ届ける唯一の経路になる。
 if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
     tool_input = hook.get("tool_input")
     questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
@@ -661,8 +556,7 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
         "hostName": host_name or None,
         "waitSeconds": int(os.environ.get("NOTIFY_QUESTION_WAIT_SECONDS") or 0),
     }))
-    print(json.dumps(build_signaly_payload("\U0001f64b", "#faa61a", "質問の回答待ち", remote_url)))
-    # 4行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`だけを足して
+    # 3行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`だけを足して
     # `updatedInput`として添え直す（`question_decision_output`を参照）
     print(json.dumps(tool_input if isinstance(tool_input, dict) else {}))
     sys.exit(0)
@@ -674,66 +568,66 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
 # ときだけ**扱う（シェル側が状態ファイルから読んで渡してくる）。1回報告すれば状態ファイルは
 # `working`になるので、続くツールの実行では自然に止まる。
 #
-# **Signalyへは送らない。** 答えたのは人自身で、通知を受け取る意味が無い。
 if event == "PostToolUse":
     if os.environ.get("NOTIFY_LAST_STATE_EVENT", "") != "permission_prompt":
         print("skip")
         sys.exit(0)
-    print("quiet", "working", "working")
+    print("report", "working", "working")
     sys.exit(0)
 
-# 飛ばすのは「本当に人の判断が要るもの」と「完了」の2つだけ（#1219）。
+# 報告するのは「本当に人の判断が要るもの」と「完了」の2つだけ（#1219）。
 #
 # - Notification / permission_prompt: 承認プロンプト・AskUserQuestionの質問。
 #   `--permission-mode auto`（#1205）でもAskUserQuestionでは発火する。
 # - Stop: 応答の終了。無人で回すセッションでは実質「作業完了」。
 #
 # **Notification / idle_prompt は捨てる。** 応答終了から60秒アイドルすると発火するので、
-# 直前のStopと必ず二重になる。通知が多すぎると意味を失う。
+# 直前のStopと必ず二重になる。
 #
 # `state_event` はシェル側が状態ファイルへ記録する値（#1256）。回収の判定はこの2値だけを見て
-# 「人の入力待ちか、応答が終わっているか」を決めるため、表示用のラベルとは別に返す。
+# 「人の入力待ちか、応答が終わっているか」を決める。
 #
 # `activity` はissue-deckの画面へ渡す値（#1264）。状態ファイル用の`state_event`と別に持つのは、
 # 片方がホスト内の回収判定、もう片方が画面表示という別々の用途のため。
-#
-# `decision`は下の1行にそのまま出る。`notify`はSignalyへ通知するだけで、状態の記録も
-# issue-deckへの報告も行わない（#1971。フックではなくpollerから来る合図のため、
-# 「今このセッションが何をしているか」を表す値を持たない）。
-decision = "send"
-
 if event == "SessionInterrupted":
     # APIエラー（529 Overloaded など）でturnが打ち切られ、止まったままのセッション（#1971）。
     # **これはClaude Codeのフックではなく、pollerが合成して渡してくる合図。**
     # このときClaude Codeは`Stop`を飛ばさないため、ここが人へ届く唯一の経路になる。
     # pollerは自動再開を上限まで試したあとにだけ呼ぶ（1セッションにつき1回）。
-    emoji = "⚠️"
-    color = "#ed4245"
-    label = "APIエラーで中断"
-    state_event = "-"
-    activity = "-"
-    decision = "notify"
-elif event == "Stop":
-    emoji = "✅"
-    color = "#57f287"
-    label = "応答終了"
+    #
+    # **状態（`state_event`）も様子（`activity`）も持たない**——`working`のまま止まっている、が
+    # 最後に分かっている事実で、pollerから見て「今どうしているか」は言えない。そこで様子の
+    # 受け口ではなく専用の受け口（`/sessions/interrupted`）へ送り、異常終了（#1217）と同じ形
+    # ——Issueコメント＋`00.check-user`＋`01.check-blocked`——で引き上げる（#2280）。
+    #
+    # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか）。セッションの画面も
+    # 応答テキストも載せない。
+    if not repo_slug or not issue_number.isdigit() or not tmux_session:
+        print("skip")
+        sys.exit(0)
+    detail = hook.get("interrupt_detail")
+    print("interrupted")
+    print(json.dumps({
+        "repository": repo_slug,
+        "issue": int(issue_number),
+        "hostName": host_name,
+        "tmuxSessionName": tmux_session,
+        "detail": detail.strip() if isinstance(detail, str) and detail.strip() else None,
+        "remoteControlUrl": resolve_remote_url() or None,
+    }))
+    sys.exit(0)
+
+if event == "Stop":
     state_event = "Stop"
     activity = "responded"
 elif event == "Notification" and notification_type == "permission_prompt":
-    emoji = "🙋"
-    color = "#faa61a"
-    label = "入力待ち"
     state_event = "permission_prompt"
     activity = "waiting_input"
 else:
     print("skip")
     sys.exit(0)
 
-remote_url = resolve_remote_url()
-
-
-print(decision, state_event, activity, remote_url or "-")
-print(json.dumps(build_signaly_payload(emoji, color, label, remote_url)))
+print("report", state_event, activity, resolve_remote_url() or "-")
 PY
 )"
 
@@ -744,7 +638,7 @@ fi
 
 # issue-deckへの報告に使う宛先と鍵は、pollerと同じ`dispatch.env`から読む（#1264）。
 # **未設定でも失敗でも実装は止めない**（このスクリプトの約束）。設定していないホストでは
-# Signalyへの通知だけが飛び、画面には出ないだけになる。
+# 画面にも通知にも出ないだけになる。
 # 読み出しの`dispatch_env_value`はアーティファクトの取り込み（#2154）でも使うため、
 # `PostToolUse`の間引きより前で定義してある。
 
@@ -839,28 +733,6 @@ except Exception:
 if isinstance(value, dict) and value:
     sys.stdout.write(json.dumps(value))
 ' 2>/dev/null || true
-}
-
-# Signalyへ通知を1件送る（#2061でここだけ関数へ切り出した）。webhookが未設定・payloadが空なら
-# 何もしない。**これはこのスクリプトの終端だけでなく、計画の承認待ち（`plan`）からも呼ばれる。**
-notify_signaly() {
-  local payload="$1"
-  # 未設定は異常ではない。通知を使わない環境ではこれが正常な経路（状態の記録だけ行う）。
-  [[ -n "$WEBHOOK_URL" && -n "$payload" ]] || return 0
-
-  if [[ "${SESSION_NOTIFY_DRY_RUN:-}" == "1" ]]; then
-    printf '%s\n' "$payload"
-    return 0
-  fi
-
-  # 応答が返らないwebhookで実装セッションを待たせないため、必ずタイムアウトを掛ける。
-  if ! curl -fsS --max-time 10 \
-    -H "Content-Type: application/json" \
-    -d "$payload" \
-    "$WEBHOOK_URL" >/dev/null 2>&1; then
-    # 失敗理由をURLごと出すとwebhookのシークレットがセッションのログに残る。1行に留める。
-    echo "session-notify: Signalyへの通知に失敗しました（実装は続行します）" >&2
-  fi
 }
 
 # 計画をIssueへ残す（#1342）。**画面からの返事を待つ相手のid**（#2061）を標準出力へ返す。
@@ -1133,17 +1005,15 @@ mark_check_user_pending() {
 }
 
 decision_line="$(printf '%s' "$result" | head -1)"
-# 形式: `send <状態イベント> <activity> <URL または "-">` / `quiet <状態イベント> <activity>` /
+# 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted` /
 #       `plan <URL または "-">` / `question <URL または "-">` / `skip`
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "plan" ]]; then
-  # 2行目が計画（issue-deck向け）、3行目が通知（Signaly向け）、4行目が`ExitPlanMode`の引数。
-  # **行を分けているのは、計画本文を外部サービスへ出す経路を作らないため**（通知には計画が
-  # 入らない）
+  # 2行目が計画（issue-deck向け）、3行目が`ExitPlanMode`の引数。
   PLAN_REQUEST_ID="$(report_plan_to_issue_deck "$(printf '%s' "$result" | sed -n '2p')")"
-  # 4行目は`ExitPlanMode`の引数そのまま。承認を返すときに`updatedInput`として添え直す（#2121）
-  PLAN_TOOL_INPUT="$(printf '%s' "$result" | sed -n '4p')"
+  # 3行目は`ExitPlanMode`の引数そのまま。承認を返すときに`updatedInput`として添え直す（#2121）
+  PLAN_TOOL_INPUT="$(printf '%s' "$result" | sed -n '3p')"
   # **計画を出した時点で、このセッションは人の答えを待っている**（#1438）。承認プロンプトの
   # `Notification`が飛ぶのを待たずにここで記録する。
   #
@@ -1160,10 +1030,6 @@ if [[ "$decision" == "plan" ]]; then
       echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
   fi
 
-  # **ここでSignalyへ通知する**（#2061）。画面から承認された場合は承認プロンプトが出ない＝
-  # `Notification`が飛ばないため、任せたままだと計画が出たことが誰にも届かない。
-  notify_signaly "$(printf '%s' "$result" | sed -n '3p')"
-
   # 画面からの返事を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
   # 承認プロンプトが出る）
   wait_for_plan_decision "$PLAN_REQUEST_ID"
@@ -1171,13 +1037,11 @@ if [[ "$decision" == "plan" ]]; then
 fi
 
 if [[ "$decision" == "question" ]]; then
-  # 2行目が質問（issue-deck向け）、3行目が通知（Signaly向け）、4行目が`AskUserQuestion`の引数。
-  # **行を分けているのは、質問の中身を外部サービスへ出す経路を作らないため**（通知には
-  # 選択肢が入らない）
+  # 2行目が質問（issue-deck向け）、3行目が`AskUserQuestion`の引数。
   QUESTION_REQUEST_ID="$(report_question_to_issue_deck "$(printf '%s' "$result" | sed -n '2p')")"
-  # 4行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`を足して
+  # 3行目は`AskUserQuestion`の引数そのまま。回答を返すときに`answers`を足して
   # `updatedInput`として添え直す
-  QUESTION_TOOL_INPUT="$(printf '%s' "$result" | sed -n '4p')"
+  QUESTION_TOOL_INPUT="$(printf '%s' "$result" | sed -n '3p')"
   # **質問を出した時点で、このセッションは人の答えを待っている**（#1438と同じ理由）。
   # 選択フォームの`Notification`が飛ぶのを待たずにここで記録する——画面から答えた場合は
   # そもそも飛ばないので、記録しておかないと承認直後の`PostToolUse`が「直前が入力待ちでは
@@ -1187,30 +1051,34 @@ if [[ "$decision" == "question" ]]; then
       echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
   fi
 
-  # **ここでSignalyへ通知する**（計画と同じ理由）。画面から答えられた場合は選択フォームが
-  # 出ない＝`Notification`が飛ばないため、任せたままだと質問が出たことが誰にも届かない
-  notify_signaly "$(printf '%s' "$result" | sed -n '3p')"
-
   # 画面からの回答を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
   # 選択フォームが出る）
   wait_for_question_answer "$QUESTION_REQUEST_ID"
   exit 0
 fi
 
-if [[ "$decision" != "send" && "$decision" != "quiet" && "$decision" != "notify" ]]; then
+if [[ "$decision" != "report" && "$decision" != "interrupted" ]]; then
   exit 0
 fi
+
+# APIエラーで中断したセッションの引き上げ（#1971）。**状態の記録も様子の報告も行わない。**
+# pollerから来る合図で「今このセッションが何をしているか」を表す値を持たないため、様子の
+# 受け口ではなく専用の受け口へ送り、異常終了と同じ形（Issueコメント＋`00.check-user`＋
+# `01.check-blocked`）で引き上げる（#2280。文面はissue-deck側の`session-escalation.ts`）。
+#
+# **ここでは`00.check-user`の印（`<セッション名>.check-user`）を置かない。** 印を置くと
+# セッションが動き出した`Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。
+# 異常終了・起動確認での足止めと同じく、外すのは人の操作に任せる。
+if [[ "$decision" == "interrupted" ]]; then
+  if ! post_to_issue_deck /api/dispatch/sessions/interrupted \
+    "$(printf '%s' "$result" | sed -n '2p')"; then
+    echo "session-notify: セッションの中断をissue-deckへ引き上げられませんでした" >&2
+  fi
+  exit 0
+fi
+
 read -r _ STATE_EVENT ACTIVITY REMOTE_URL <<<"$decision_line"
 [[ "$REMOTE_URL" == "-" ]] && REMOTE_URL=""
-
-# 中断の引き上げ（#1971）はSignalyへ通知するだけ。**状態の記録もissue-deckへの報告も行わない。**
-# これはフックではなくpollerから来る合図で、「今このセッションが何をしているか」を表す値を
-# 持たない（`working`のまま止まっている、が最後に分かっている事実）。空にして、以降の
-# 記録・報告の条件から自然に外す。
-if [[ "$decision" == "notify" ]]; then
-  STATE_EVENT=""
-  ACTIVITY=""
-fi
 
 # このセッションが入力待ちに入ったこと（#1417）。**`00.check-user`を付けるのはここだけ。**
 # `Notification / permission_prompt`はAskUserQuestionの質問と権限の承認プロンプトで飛ぶ、
@@ -1236,8 +1104,8 @@ if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_T
   CHECK_USER_RESOLVED=1
 fi
 
-# セッションの状態を記録する（#1256）。**送信より先に行う。**
-# webhookが未設定でも・Signalyが落ちていても、回収の判定材料はホストに残る必要がある。
+# セッションの状態を記録する（#1256）。**報告より先に行う。**
+# issue-deckが落ちていても、回収の判定材料はホストに残る必要がある。
 # tmuxの外で起動したセッション（セッション名が空）は回収の対象外なので記録しない。
 if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
   declare -F session_state_record_event >/dev/null 2>&1; then
@@ -1245,8 +1113,8 @@ if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
     echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
 fi
 
-# issue-deckの画面へも同じ様子を渡す（#1264）。**Signalyへの通知だけだと、通知を消した時点で
-# 承認待ちであることを知る手段が無くなる。**
+# issue-deckの画面へ様子を渡す（#1264）。**#2280でSignalyへの通知を消してからは、これが
+# 承認待ちであることを人へ届ける唯一の経路**（画面の表示とPush通知の両方がこの報告から出る）。
 #
 # `00.check-user`の付け外し（#1342・#1417）も同じ往復に載せる。**受け口を分けないのは、
 # 「今どうしている」と「確認待ちに入った／出た」が同じイベントで、往復を2回にする理由が
@@ -1285,17 +1153,9 @@ print(json.dumps({
     session_state_clear_check_user_pending "$NOTIFY_TMUX_SESSION" || true
   fi
 }
-# `activity`を持たない通知（#1971）はここを通さない。
+# `activity`を持たない報告は無い（中断の引き上げは上で`exit`している）。
 if [[ -n "$ACTIVITY" ]]; then
   report_activity_to_issue_deck
 fi
-
-# 作業再開の報告（#1357）はここまで。**Signalyへは送らない**（答えたのは人自身で、
-# 同じことを通知し返す意味が無い）。
-if [[ "$decision" == "quiet" ]]; then
-  exit 0
-fi
-
-notify_signaly "$(printf '%s' "$result" | tail -n +2)"
 
 exit 0

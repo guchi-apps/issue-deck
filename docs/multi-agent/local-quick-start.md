@@ -707,7 +707,7 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 
 ### 判定の材料は状態ファイルとgit・GitHubの事実だけ
 
-`Stop`フック（#1219）はSignalyへ通知するだけで、**いつ応答が終わったかをホストに残していなかった**。
+`Stop`フック（#1219）は外へ報告するだけで、**いつ応答が終わったかをホストに残していなかった**。
 そこで`scripts/lib/session-state.sh`を足し、tmuxのセッション名をキーに次の2つを残す。
 置き場は`~/.local/state/issue-deck/sessions/`（`ISSUE_DECK_SESSION_STATE_DIR`で変更可能）。
 

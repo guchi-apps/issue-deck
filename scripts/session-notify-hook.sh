@@ -22,7 +22,7 @@
 # ## 置くのは`PostToolUse`だけ
 #
 # `Notification`・`Stop`・`PreToolUse`は古い作業ツリーでも生成されるので、ここに足すと
-# **同じ入力待ちがSignalyへ二重に飛ぶ**。`PostToolUse`だけは、
+# **同じ入力待ちがissue-deckへ二重に飛ぶ**。`PostToolUse`だけは、
 #
 # - 古いホストでは生成されない＝二重にならない
 # - 新しいホストでは二重になるが、`session-notify.sh`が「状態ファイルの最後のイベントが

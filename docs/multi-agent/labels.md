@@ -197,6 +197,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | 依存関係の追加・行き詰まりで停止した | 各プロンプト（`implement.md`・`ci-fix.md`・`conflict-resolve.md`）と`reusable-claude-ci-fix.yml`が付与 | セッションが異常終了した場合は`session-escalation.ts`が付与（#1256） |
 | すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
+| APIエラーで中断し、自動再開を諦めた | 該当なし（同上） | pollerが`POST /api/dispatch/sessions/interrupted`へ引き上げ、`escalateInterruptedSession`が`00.check-user`＋`01.check-blocked`を付与（#1971・#2280。**turnが打ち切られて`Stop`フックが飛ばない状態**。ユーザーがやるのは回答ではなく続け方の指示なので理由は`blocked`） |
 | PRマージとほぼ同時のpushでdevelopへ入らないコミットが取り残された | `reusable-issue-labels.yml`の`develop-merge-sweep`が`00.check-user`＋`01.check-blocked`を付与（#1999。後述「取り残されたコミットは見送らず人へ渡す」） | 同じ（15分おきのcronでの検知なので、コミットの起点を問わない） |
 
 ### マージを求める`00.check-user`は、実装側から付けない（#1709）
@@ -625,7 +626,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 - 承認の得方は実行形態により異なる。
   - **サブPC実行**: ラベルが付いているセッションだけ開発サーバーを起動し、`tailscale serve`で
     tailnetへ出す（#1265）。**提示するURLは`localhost`ではなく`http://<ホスト名>.<tailnet>.ts.net:<ポート>`**
-    （主な用途が外出先のスマホで、`localhost`では届かない）。URLはプロンプト・Signalyの通知・
+    （主な用途が外出先のスマホで、`localhost`では届かない）。URLはプロンプト・
     issue-deckのIssue詳細の3か所に出る。詳細は[local-quick-start.md](local-quick-start.md)
     「Tailscale経由でスマホから画面を見る」
   - **ローカル実行**: 実際に到達可能な開発サーバーが起動しているため、`21.plan-required`と同じ考え方で

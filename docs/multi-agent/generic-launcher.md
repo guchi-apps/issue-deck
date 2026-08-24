@@ -119,7 +119,7 @@ Ryzen 5 PRO 4650G（6C/12T）へ載せ替え済みで、常駐の制約になっ
 
 **ただし`23.preview-required`が付いている場合は起動する**（#1265）。あのラベルは「PR作成前に
 画面を確認する」ためのもので、起動していなければ確認そのものが成立しない。あわせて
-`tailscale serve`でtailnetへ出し、**スマホから開けるURL**をプロンプト・Signalyの通知・
+`tailscale serve`でtailnetへ出し、**スマホから開けるURL**をプロンプト・
 issue-deckの画面へ渡す（`localhost`のURLでは外出先から届かない）。
 
 実装は`run-issue-session.sh`の`ISSUE_DECK_DEV_SERVER`で、汎用ランチャーがラベルを見て

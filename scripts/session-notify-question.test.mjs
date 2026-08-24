@@ -121,8 +121,6 @@ function runHook() {
       HOME: workDir,
       TMUX: "",
       SESSION_NOTIFY_TMUX_SESSION: "",
-      SESSION_NOTIFY_WEBHOOK_URL: "",
-      SIGNALY_WEBHOOK_URL: "",
       ISSUE_DECK_DISPATCH_ENV: path.join(workDir, "dispatch.env"),
       ISSUE_DECK_NOTIFY_ENV: path.join(workDir, "notify.env"),
       SESSION_QUESTION_WAIT_SECONDS: "30",
