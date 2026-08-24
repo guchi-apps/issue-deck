@@ -1221,9 +1221,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   同じく履歴を積まない（`selectPullRequestView`）。
 - **PRの状態別ビューは3つで、左メニューにも3つとも出す**（#1312・#1613・#2120）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
-  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明）と「マージ待ち」
-  （CIがsuccess/failure）は**同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えても
-  GitHub APIを叩き直さない。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
+  **どのビューもopenなPRだけを出す。**「実行中」（CI待ち・ドラフト・CI状態不明・CI通過後の
+  自動マージ可否の判定中）と「マージ待ち」（CIがsuccessで判定も完了・またはCIがfailure）は
+  **同じopen取得の結果をクライアント側で絞るだけ**なので、切り替えてもGitHub APIを叩き直さない。
+  **CI通過後の判定中（`isMergeJudgementPending`）を「実行中」側へ入れているのは#2283。**
+  判定ワークフローのcheck-runはCI状態の集約から外してある（#1799）ため、Claudeがレビューして
+  いる最中でも`ciState`は`success`になり「マージ待ち」に並んでいたが、判定中は画面のマージボタン
+  自体が無効（#1968）で押せる操作が無い。**通知ベルのPR区分も同じ母集団を使うため、判定中のPRは
+  一覧からも件数バッジからも同時に外れる。**
+  **CI失敗だけは判定中でも「マージ待ち」に残す**（#2283）。判定はCIと並行に走り`wait-for-ci`は
+  CIのconclusionを見ずに抜ける（#2066）ので、**CIが落ちた後も判定が終わるまでの数分は`pending`の
+  まま**になる。ここで外すとベルの赤い「チェック失敗」がその窓だけ消える。判定の結果によらず
+  CIが落ちたPRは人が直すしかなく、`isMergeWaitingForChecks`が「待っても解消しないもの」として
+  CI失敗を外さないのと同じ扱い。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
   **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
   ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
   **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
@@ -1650,7 +1660,8 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   元はリリース専用のロケットボタンだったが、リリースの起動・マージ・版の確認は「ブランチ」画面が
   同じものを持っていたため、**横断で拾えること**だけを残してリリース以外へ広げた。集めるのは
   リリースのマージ待ち・失敗／`00.check-user`／マージ待ちPR（左メニューの「マージ待ち」と同じ
-  母集団）／`71.manual-step`の4区分。
+  母集団。Claudeのレビュー・マージ可否の判定が動いているPRは入らない。#2283）／
+  `71.manual-step`の4区分。
   - **判定は[`lib/notifications.ts`](../src/lib/notifications.ts)（純粋関数）に閉じ、新しい基準を
     作らない。** 文言・トーンは既存の`describeReleaseStatusBadge`・`CHECK_USER_REASON_TEXT`・
     `filterPullRequestsByView`・`computeManualStepReadiness`から得る。ここで独自判定を書くと、

@@ -389,6 +389,72 @@ describe("buildNotifications Pull Request", () => {
 
     expect(items).toHaveLength(1);
   });
+
+  // 判定中は画面のマージボタンが無効（#1968）で、ベルへ出しても押せる操作が無い。
+  // 判定のcheck-runはCI状態の集約から外してあるため（#1799）、`ciState`は`success`のまま。
+  it("Claudeのレビュー・マージ可否の判定中は出さず、件数にも数えない（#2283）", () => {
+    const items = build({
+      pullRequests: [
+        makePullRequest({
+          id: "owner/repo#1",
+          number: 1,
+          linkedIssueNumber: null,
+          ciState: "success",
+          mergeJudgement: {
+            state: "pending",
+            step: "claude-review",
+            runUrl: "https://github.com/owner/repo/actions/runs/1",
+            aiReview: AI_REVIEW_NONE,
+          },
+        }),
+      ],
+    });
+
+    expect(items).toEqual([]);
+    expect(countBadgeNotifications(items)).toBe(0);
+  });
+
+  // CIが落ちた後も判定が終わるまでの数分はpendingのまま（#2066）。赤い「チェック失敗」が
+  // その窓だけ消えないよう、CI失敗は判定中でも出す。
+  it("CI失敗は判定中でも出す（#2283）", () => {
+    const items = build({
+      pullRequests: [
+        makePullRequest({
+          id: "owner/repo#1",
+          number: 1,
+          linkedIssueNumber: null,
+          ciState: "failure",
+          mergeJudgement: {
+            state: "pending",
+            step: "claude-review",
+            runUrl: null,
+            aiReview: AI_REVIEW_NONE,
+          },
+        }),
+      ],
+    });
+
+    expect(items.map((item) => item.badgeLabel)).toEqual(["チェック失敗"]);
+    expect(items[0].tone).toBe("error");
+    expect(countBadgeNotifications(items)).toBe(1);
+  });
+
+  it("判定が終われば今までどおり出す（#2283）", () => {
+    const items = build({
+      pullRequests: [
+        makePullRequest({
+          id: "owner/repo#1",
+          number: 1,
+          linkedIssueNumber: null,
+          ciState: "success",
+          mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        }),
+      ],
+    });
+
+    expect(items.map((item) => item.badgeLabel)).toEqual(["developへマージ待ち"]);
+    expect(countBadgeNotifications(items)).toBe(1);
+  });
 });
 
 describe("buildNotifications 重複除去", () => {
