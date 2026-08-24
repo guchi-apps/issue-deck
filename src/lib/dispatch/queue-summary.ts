@@ -46,13 +46,25 @@ export type DispatchQueueSummary = {
   controls: DispatchJobView[];
   /** 同時実行数の上限。ホストの申告と設定の小さい方が入る（不明ならnull） */
   concurrency: number | null;
-  /** バッジに出す件数。走っている数＋待っている数 */
+  /** 積まれているジョブの件数。走っている数＋待っている数 */
   activeCount: number;
+  /**
+   * ホストで生きているセッション本数とその上限（#2265）。**バッジに出す数字はこちら。**
+   * 申告しているホストが1台も無ければ`null`（`liveSessions`と`maxSessions`は同時にnullになる）。
+   *
+   * **`activeCount`では「今どれだけ埋まっているか」を出せない。** ジョブはtmuxセッションが
+   * 立った時点で`succeeded`になるため、10本走っていてもジョブの件数は0〜1にしかならず、
+   * バッジがサブPCの混み具合を映していなかった。数え方の元は`summarizeDispatchSessionCapacity`と
+   * 同じホストの申告（`*-issue-<番号>`のtmuxセッション数／`DISPATCH_MAX_SESSIONS`・既定12）。
+   */
+  liveSessions: number | null;
+  maxSessions: number | null;
 };
 
 export function summarizeDispatchQueue(
   jobs: readonly DispatchJobView[],
   concurrency: number | null,
+  hosts: readonly DispatchHostView[] = [],
 ): DispatchQueueSummary {
   // **同時実行数の枠を使うジョブだけを数える**（#1332・#1544）。セッションの停止・終了は
   // 枠を使わず、tmuxを1回叩いて終わるため、ここへ混ぜると「実行中 3/2」のような数え方になる。
@@ -80,6 +92,21 @@ export function summarizeDispatchQueue(
     .filter((job) => isSessionControlJobKind(job.kind) && isActiveDispatchJobStatus(job.status))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
+  // 生きているセッション本数（#2265）。**申告しているホストだけを足す**
+  // （`summarizeDispatchSessionCapacity`と同じ集合）。1台も申告していなければ`null`にして、
+  // バッジ側が従来どおりジョブの件数へ落とせるようにする。
+  //
+  // **応答しているホスト（`online`）に絞らない。** pollerが落ちてもtmuxのセッションは生き続けるため、
+  // 最後の申告を出す方が実態に近い（落ちていること自体はホストのカードが出す）。
+  const capacities = summarizeDispatchSessionCapacity(hosts);
+  const sessionTotals =
+    capacities.length === 0
+      ? null
+      : capacities.reduce(
+          (total, capacity) => ({ live: total.live + capacity.live, max: total.max + capacity.max }),
+          { live: 0, max: 0 },
+        );
+
   return {
     running,
     queued,
@@ -87,10 +114,33 @@ export function summarizeDispatchQueue(
     controls,
     concurrency,
     activeCount: running.length + queued.length,
+    liveSessions: sessionTotals?.live ?? null,
+    maxSessions: sessionTotals?.max ?? null,
   };
 }
 
-/** ヘッダーのバッジに出す1行（例:「実行中 2/2・待機 3」） */
+/**
+ * バッジに出す件数（#2265）。**セッション本数を申告しているホストがあればそれを出す。**
+ *
+ * 申告が1台も無いとき（古いpollerだけの環境）に限り、従来どおり積まれているジョブの件数を出す。
+ * 判定材料が無いことを理由にバッジを消すと、ジョブを積んだこと自体が画面から消える。
+ */
+export function countDispatchQueueBadge(summary: DispatchQueueSummary): number {
+  return summary.liveSessions ?? summary.activeCount;
+}
+
+/**
+ * 生きているセッション本数の1行（例:「セッション 10/12」。#2265）。申告が無ければ`null`。
+ *
+ * バッジの数字が何を指しているかを`title`で答えるためのもの。**キューの「実行中 n/m」とは
+ * 別物**（あちらはジョブと同時実行数で、セッションが立った時点で数から外れる）。
+ */
+export function describeDispatchSessionLoad(summary: DispatchQueueSummary): string | null {
+  if (summary.liveSessions === null || summary.maxSessions === null) return null;
+  return `セッション ${summary.liveSessions}/${summary.maxSessions}`;
+}
+
+/** 実行キューのポップオーバーの見出しに添える1行（例:「実行中 2/2・待機 3」） */
 export function describeDispatchQueueLoad(summary: DispatchQueueSummary): string {
   const running =
     summary.concurrency === null

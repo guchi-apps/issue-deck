@@ -16,8 +16,10 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   cancelableDispatchJobs,
+  countDispatchQueueBadge,
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
+  describeDispatchSessionLoad,
   summarizeDispatchQueue,
   type DispatchQueueSummary,
 } from "@/lib/dispatch/queue-summary";
@@ -77,7 +79,7 @@ export function DispatchQueueContent({
   dispatch: DispatchStateHandle;
   onOpenIssue?: (issueId: string) => void;
 }) {
-  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency);
+  const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
   const stall = describeDispatchQueueStall(summary, dispatch.hosts);
   const cancelable = cancelableDispatchJobs(summary);
 
@@ -231,17 +233,30 @@ function QueueRefreshRow({ dispatch }: { dispatch: DispatchStateHandle }) {
  * 実行キューを開くボタンに重ねる印（#1519・#1638）。PCのトップバーとスマホのヘッダーで
  * 同じ規則にする。
  *
- * - 動いているものがあれば件数バッジ
- * - **動いてはいないが見るべき失敗が残っているときはドット**。件数バッジは`activeCount`にしか
+ * - **数字はサブPCで生きているセッション本数**（#2265・`countDispatchQueueBadge`）。上限
+ *   （`DISPATCH_MAX_SESSIONS`・既定12）まで出る。従来はジョブの件数（実行中＋順番待ち）を
+ *   出していたが、**ジョブはtmuxセッションが立った時点で`succeeded`になる**ため、10本走っていても
+ *   数字は0〜1にしかならず、サブPCの混み具合はポップオーバーを開くまで分からなかった
+ * - **セッションが0本でジョブだけ積まれているときは数字ではなく点**。数字の意味を
+ *   「セッション本数」に固定するためで、この状態（起動待ちの数十秒か、pollerが取りに来ていない）は
+ *   開いて理由（`describeDispatchQueueStall`）を読むべきものなので、件数より合図の方が合う
+ * - **動いてはいないが見るべき失敗が残っているときは赤いドット**。数字は動いているときにしか
  *   出ないため、失敗だけが残っているとボタンが無印になり、開くまで気づけなかった。件数ではなく
  *   ドットにしているのは、押して確かめてほしいのが「何件あるか」ではなく「何が失敗したか」のため
  */
 export function DispatchQueueBadge({ summary }: { summary: DispatchQueueSummary }) {
-  if (summary.activeCount > 0) {
+  const count = countDispatchQueueBadge(summary);
+  if (count > 0) {
     return (
       <span className="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-        {summary.activeCount}
+        {count}
       </span>
+    );
+  }
+
+  if (summary.activeCount > 0) {
+    return (
+      <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary" />
     );
   }
 
@@ -257,11 +272,21 @@ export function DispatchQueueBadge({ summary }: { summary: DispatchQueueSummary 
   return null;
 }
 
-/** ボタンのtitle・シートの見出しに添える負荷の要約（#1519）。失敗も文言に出す */
+/**
+ * ボタンのtitle・シートの見出しに添える負荷の要約（#1519）。失敗も文言に出す。
+ *
+ * **先頭はセッション本数**（#2265）。バッジに出ている数字がこれなので、押さずに確かめられる
+ * ようにする。続く「実行中 n/m」はジョブと同時実行数の話で、**セッションが立った時点で
+ * 数から外れる**ため別の項として並べる。
+ */
 export function describeDispatchQueueTitle(summary: DispatchQueueSummary): string {
-  return `${describeDispatchQueueLoad(summary)}${
-    summary.failed.length > 0 ? `・失敗 ${summary.failed.length}` : ""
-  }`;
+  return [
+    describeDispatchSessionLoad(summary),
+    describeDispatchQueueLoad(summary),
+    summary.failed.length > 0 ? `失敗 ${summary.failed.length}` : null,
+  ]
+    .filter(Boolean)
+    .join("・");
 }
 
 function QueueSection({

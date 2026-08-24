@@ -352,6 +352,44 @@ describe("DispatchQueueButton の送信中の操作", () => {
  * #1567。ポップオーバーがキューだけでなく「サブPCが今どうなっているか」も映すようになった。
  * 従来はセッションの本数しか出ておらず、その中身とホストの余力は別のアプリでしか見られなかった。
  */
+/**
+ * #2265。数字はジョブの件数ではなくサブPCで生きているセッション本数。ジョブはtmuxセッションが
+ * 立った時点で`succeeded`になるため、件数では「今どれだけ埋まっているか」を出せなかった。
+ */
+describe("DispatchQueueButton のバッジ", () => {
+  function renderBadge(hostOverrides: Partial<DispatchHostView>, jobs: DispatchJobView[] = []) {
+    const dispatch = {
+      ...makeDispatch(jobs),
+      hosts: [makeHost(hostOverrides)],
+    } as DispatchStateHandle;
+    render(<DispatchQueueButton dispatch={dispatch} />);
+    return screen.getByLabelText("実行キュー");
+  }
+
+  it("数字は生きているセッション本数で、上限まで出す", () => {
+    const button = renderBadge({ liveSessions: 12 });
+    expect(button.textContent).toBe("12");
+    expect(button.getAttribute("title")).toContain("セッション 12/12");
+  });
+
+  // 積まれているジョブの件数（従来の数字）に引きずられない
+  it("順番待ちのジョブがあってもセッション本数を出す", () => {
+    const button = renderBadge({ liveSessions: 10 }, [makeJob({ id: "q", status: "QUEUED" })]);
+    expect(button.textContent).toBe("10");
+    expect(button.getAttribute("title")).toContain("待機 1");
+  });
+
+  // 数字の意味を「セッション本数」に固定するため、この状態は点で合図する
+  it("セッションが0本ならジョブが積まれていても数字を出さない", () => {
+    const button = renderBadge({ liveSessions: 0 }, [makeJob({ id: "q", status: "QUEUED" })]);
+    expect(button.textContent).toBe("");
+  });
+
+  it("何も無ければ印を出さない", () => {
+    expect(renderBadge({ liveSessions: 0 }).textContent).toBe("");
+  });
+});
+
 describe("DispatchQueueButton のホスト表示", () => {
   function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
     return {
