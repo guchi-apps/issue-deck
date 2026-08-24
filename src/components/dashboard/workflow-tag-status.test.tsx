@@ -23,6 +23,9 @@ function status(overrides: Partial<WorkflowTagStatus> = {}): WorkflowTagStatus {
     updatePullRequest: null,
     missingRepairWorkflows: [],
     repairPullRequest: null,
+    outdatedSharedFiles: [],
+    customizedSharedFiles: [],
+    sharedFilePullRequest: null,
     ...overrides,
   };
 }
@@ -32,10 +35,26 @@ function mockFetch(overview: {
   repositories: WorkflowTagStatus[];
   propagation: PropagationRun | null;
   repairPropagation?: PropagationRun | null;
+  sharedFilePropagation?: PropagationRun | null;
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
       // 不足しているcallerの配布（#1948・#1475）はタグ配布と別のエンドポイント・別の応答
+      // 共有スクリプトの更新（#2240）も別のエンドポイント・別の応答
+      if (String(input).includes("propagate-shared")) {
+        return {
+          ok: true,
+          json: async () => ({
+            dispatched: true,
+            targets: [
+              {
+                repository: "guchi-apps/aide",
+                files: [".github/scripts/signaly-notify.sh"],
+              },
+            ],
+          }),
+        } as Response;
+      }
       if (String(input).includes("propagate-repair")) {
         return {
           ok: true,
@@ -56,7 +75,7 @@ function mockFetch(overview: {
     }
     return {
       ok: true,
-      json: async () => ({ repairPropagation: null, ...overview }),
+      json: async () => ({ repairPropagation: null, sharedFilePropagation: null, ...overview }),
     } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -286,5 +305,86 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
 
     await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"));
     expect(screen.queryByText("不足しているワークフロー")).toBeNull();
+  });
+
+  it("共有スクリプトが古いリポジトリと、独自の変更の目印を出す（#2240）", async () => {
+    // 上書きで独自の変更が消えうるリポジトリは、押す前に見分けられる必要がある
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/subpc",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+          customizedSharedFiles: [".github/scripts/signaly-notify.sh"],
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("未更新（1）")).toBeTruthy();
+    expect(screen.getByText(/Signaly通知スクリプト/)).toBeTruthy();
+    expect(screen.getByText(/独自の変更あり/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /1件の共有スクリプトを更新する/ }),
+    ).toBeTruthy();
+  });
+
+  it("共有スクリプトの更新ボタンは専用のエンドポイントへPOSTする", async () => {
+    const fetchMock = mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/aide",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /1件の共有スクリプトを更新する/ }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            init?.method === "POST" && String(input).includes("/api/workflow-tags/propagate-shared"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("共有スクリプトの更新PRが既にあるリポジトリは対象から外す", async () => {
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/aide",
+          outdated: false,
+          refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+          sharedFilePullRequest: { number: 33, url: "https://github.com/guchi-apps/aide/pull/33" },
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("更新PRの確認待ち（1）")).toBeTruthy();
+    expect(screen.getByText(/PR #33/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /共有スクリプトを更新する/ })).toBeNull();
+  });
+
+  it("共有スクリプトが最新なら欄自体を出さない", async () => {
+    mockFetch({ latest: "workflows/v19", repositories: [status()], propagation: null });
+    render(<WorkflowTagStatusSection open />);
+
+    await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"));
+    expect(screen.queryByText("共有スクリプト")).toBeNull();
   });
 });

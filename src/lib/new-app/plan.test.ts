@@ -81,6 +81,14 @@ describe("buildNewAppPlan", () => {
     const withoutBase = buildNewAppPlan(spec()).find((a) => a.kind === "port-band");
     expect(withoutBase?.title).not.toMatch(/\d/);
   });
+
+  // #2248。押す前の一覧でも、空振りする手順を予告しない
+  it("ブラウザの手作業の説明は、インストール対象への追加が要るときだけGitHub Appに触れる", () => {
+    const description = (options?: Parameters<typeof buildNewAppPlan>[1]) =>
+      buildNewAppPlan(spec(), options).find((a) => a.kind === "manual-browser")?.description ?? "";
+    expect(description()).not.toContain("GitHub App");
+    expect(description({ githubAppNeedsRepositoryAdd: true })).toContain("GitHub App");
+  });
 });
 
 describe("ポート帯のPull Request（#2225）", () => {
@@ -225,13 +233,33 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).not.toMatch(/<[^>]+>/);
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
   });
+
+  it("機械的に定まる値を、そのまま貼れる1コマンドで投入する（#2249）", () => {
+    expect(body).toContain("provision-app-secrets.sh");
+    expect(body).toContain("--repo guchi-apps/kakei-report");
+    expect(body).toContain("--db-name app_kakei_report");
+    expect(body).toContain("--copy-allowed-emails");
+    // フィールド名の羅列に戻さない（aide-botの立ち上げで未登録のまま本番デプロイが失敗した）
+    expect(body).not.toContain("db-name = app_kakei_report");
+  });
+
+  it("DBも認証も無いアプリでは、そのオプションを渡さない", () => {
+    const plain = buildSubpcManualIssueBody(
+      spec({ kind: "static", port: null, databaseName: null, auth: "none" }),
+      REFS,
+    );
+    expect(plain).toContain("provision-app-secrets.sh");
+    expect(plain).not.toContain("--db-name");
+    expect(plain).not.toContain("--copy-allowed-emails");
+  });
 });
 
 describe("buildVpsManualIssueBody", () => {
   const body = buildVpsManualIssueBody(spec(), REFS);
 
   it("Gitで配れない実機の操作だけを書き、VirtualHostは書かない", () => {
-    expect(body).toContain("sudo mkdir -p /apps/kakei-report");
+    // 実機の配置先は `/apps/<name>` ではない（#2246・#2249。target-dirと同じパスにする）
+    expect(body).toContain("sudo mkdir -p /home/github-user/apps/kakei-report");
     expect(body).toContain("CREATE DATABASE IF NOT EXISTS app_kakei_report");
     expect(body).toContain("pm2 save");
     expect(body).toContain("certbot --apache -d kakei-report.gucchii.com");
@@ -266,10 +294,31 @@ describe("buildVpsManualIssueBody", () => {
 describe("buildBrowserManualIssueBody", () => {
   const body = buildBrowserManualIssueBody(spec(), REFS);
 
-  it("AレコードとGitHub App、そして2つの再同期を書く", () => {
+  it("Aレコードを書く", () => {
     expect(body).toContain("Aレコード");
-    expect(body).toContain("GitHub Appのインストール対象");
-    expect(body).toContain("「リポジトリを再同期」→「Issueを再同期」");
+  });
+
+  // #2248。立ち上げ自身が取り込むようになったので、人が押す手順にはしない
+  it("2つの再同期は書かない", () => {
+    expect(body).not.toContain("リポジトリを再同期");
+    expect(body).not.toContain("Issueを再同期");
+  });
+
+  // #2248。`repository_selection=all`では新しいリポジトリが自動で対象に入る
+  it("インストール対象への追加は、selectedのときだけ書く", () => {
+    expect(body).not.toContain("GitHub Appのインストール対象");
+    const selected = buildBrowserManualIssueBody(spec(), {
+      ...REFS,
+      githubAppNeedsRepositoryAdd: true,
+    });
+    expect(selected).toContain("GitHub Appのインストール対象");
+    expect(selected).toContain("settings/installations");
+  });
+
+  it("SignalyのWebhook URLはorganization secretから来るため、チャンネル作成・登録を求めない（#2255）", () => {
+    expect(body).not.toContain("Signaly");
+    expect(body).not.toContain("provision-app-secrets.sh");
+    expect(body).not.toContain("--ci-webhook-url");
   });
 
   it("マルチエージェント運用に対応させるときだけWORKFLOW_PATを求める", () => {
@@ -289,6 +338,15 @@ describe("buildBrowserManualIssueBody", () => {
 
   it("実行するデバイスはブラウザ", () => {
     expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("ブラウザ");
+  });
+
+  // 手順の並びが崩れると、画面の手作業アシスタントが手順を読み落とす
+  it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
+    const steps = (refs: NewAppIssueRefs) =>
+      parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
+    // DNS・Actions secrets（#2255でSignalyのチャンネル作成・webhook投入を削除）
+    expect(steps(REFS)).toBe(2);
+    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(3);
   });
 });
 

@@ -43,7 +43,7 @@
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。実装はサブPCのローカルセッション） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
 | `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
-| `[手作業] サブPC: cloneして対応表に載せる` | `guchi-apps/issue-deck` | 代行実行できる |
+| `[手作業] サブPC: cloneし、シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
 
 手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
@@ -55,10 +55,17 @@
 - **DNSのAレコードの登録。** DNSはVPSプロバイダの管理画面でしか設定できず、使えるAPIが無い
   （共有知識の`guides/apache-domain-setup.md`も「実行者: 人間のみ」としている）。自動化
   できるのはサブドメイン名の決定と重複チェックまで。
-- **VPS実機の操作**（`/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
+- **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
   certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
   反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **1Password・GitHub Secrets・GitHub Appのインストール対象。** 無断で変更してよい設定ではない。
+- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
+  アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
+  CI・デプロイ通知の`SIGNALY_WEBHOOK_URL`はorganization secretへ寄せたため（#2255）、
+  新規アプリの立ち上げにSignalyのチャンネル作成もWebhook URLの登録も要らない。
+- **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
+  `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
+  何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
+  ブラウザの手作業Issueに手順が出る。
 
 ## 実装のうえで外せない前提
 
@@ -113,17 +120,70 @@
   **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。サブPCの手作業
   Issueの`## 前提条件`に1行書いてある。
 
-### 新しいリポジトリのIssueは、作った直後には盤面に載らない
+### 1Passwordのアイテムは、コマンドで投入する（#2249）
 
-盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあること
-（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）で、**それを作るのが初期化Issue
-自身**という順序になっている。そこで次の2つで噛み合わせている。
+**フィールド名の羅列を手作業Issueに書かない。** `aide-bot`の立ち上げでは
+「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = /apps/aide-bot`」という
+羅列を書いていたため、値が未登録のまま初回の本番デプロイが走り
+`DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
 
-- 初期化Issueの実行経路を**サブPCのローカルセッション**に固定する（条件は
-  `~/.config/issue-deck/local-repos.conf`への記載）。サブPCの手作業Issueを初期化Issueの
-  `## 前提条件`に置いてある。
-- ブラウザの手作業Issueに「GitHub Appへ追加 → **リポジトリを再同期 → Issueを再同期**」を
-  入れる。**2つとも押す必要がある**（片方だけではIssueが取り込まれない）。
+投入は[`scripts/provision-app-secrets.sh`](../scripts/provision-app-secrets.sh)が行う。
+**画面（立ち上げのAPI）からは実行しない**——本番のissue-deckは1Passwordを直接読み書きせず、
+書き込み用のサービスアカウント（`~/.config/issue-deck/op-writer.env`）を持つのはサブPCだけ
+（画面の「シークレット同期」もワークフローを起こしているだけ。#1309）。したがって実行の場は
+**サブPCの手作業Issueとローカルセッション**になる。
+
+- **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
+  Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
+- **SignalyのWebhook URLはここで扱わない。** organization secretへ寄せたため（#2255）、
+  ブラウザの手作業Issueにチャンネル作成・登録の手順は残さない。スクリプト自体は
+  引き続き`--ci-webhook-url`オプションを持つが（他アプリの値を後から直すときなどに使う）、
+  立ち上げのコマンドからは渡さない。
+- **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
+  発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
+  **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。
+- **GitHubのsecretへの同期には`.github/secrets-manifest.tsv`が要る**（どのKEYがどのフィールドを
+  読むかの正はマニフェストで、スクリプトは参照を引数で受けない）。それを作るのは初期化Issue
+  なので、サブPCの手順の時点では1Passwordへ入るだけで同期は見送られる。**同じコマンドを後から
+  実行すると同期まで進む**——何度実行してもよい作りにしてあるのはこのため。初期化Issueの
+  やることにも、マニフェストを作った後の同期を1項目として入れてある。
+- **入ったことはGitHub側から引き直して確かめる**（`actions/secrets`の`total_count`）。同期
+  スクリプトの出力は送った側の記録でしかなく、名前の取り違えや権限不足に気付けない。
+
+### 新しいリポジトリのIssueは、立ち上げ自身が取り込む
+
+リポジトリを作っただけでは、issue-deckのDBに現れない。`repository_selection=all`の
+インストールでは新しいリポジトリを足しても`installation_repositories`のwebhookが飛ばず、
+設定の「リポジトリを再同期」を押すまでDBに入らないためで、Issueの取り込みはさらにその後に
+なる。当初はこの2つを人が押す手順としてブラウザの手作業Issueへ入れていたが、押し忘れると
+初期化Issueが画面に出ないままになる（#2215で実際に押されていなかった）。
+
+そこで**立ち上げの最後で、issue-deck自身が同じ2つを実行する**（#2248。
+[`lib/new-app/resync.ts`](../src/lib/new-app/resync.ts)）。
+
+- **初期化Issueを作ったあとに置く。** 先に回すと取り込むIssueがまだ無い。
+- **Issueの再同期は作ったリポジトリ1つだけに絞る。** 画面のボタンは接続中の全リポジトリを
+  回すが、ここで欲しいのは今作ったものだけ。
+- **Projectへの追加（`addMissingProjectItems`）は呼ばない。** 対象は
+  `claude-issue-dispatch.yml`を持つリポジトリに限られ、それを作るのが初期化Issue自身なので、
+  この時点では何も載らない。
+- **失敗しても止めない。** `warnings`で「設定で2つを押してください」と画面へ返す
+  （ポート帯のPull Requestと同じ扱い）。
+
+**カンバンの盤面へ載る条件は別で、`claude-issue-dispatch.yml`がデフォルトブランチにあること**
+（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）。**それを作るのが初期化Issue自身**
+なので、初期化Issueの実行経路は**サブPCのローカルセッション**に固定してある（条件は
+`~/.config/issue-deck/local-repos.conf`への記載で、サブPCの手作業Issueを初期化Issueの
+`## 前提条件`に置いてある）。
+
+### `repository_selection`はDBではなくGitHubへ聞く
+
+DBの`GithubInstallation.repositorySelection`は`installation`イベントでしか更新されず、
+インストール画面で対象を選び直したときに飛ぶ`installation_repositories`イベントでは
+更新されない。立ち上げの判断に使うと、`selected`へ戻されたことに気付かないまま手順を落とす。
+そのためApp JWTで取り直す（[`lib/new-app/installation-scope.ts`](../src/lib/new-app/installation-scope.ts)）。
+**読めなかったときは手順を出す側に倒す**——余分な手順が1つ増えるだけで済み、落とすと
+立ち上げが黙って壊れる。
 
 ### サブPCの手作業Issueは代行実行の条件を満たす形で書く
 

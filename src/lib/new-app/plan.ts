@@ -8,7 +8,7 @@
  *
  * - **実機の設定ファイルを直接書き換える手順を書かない。** ApacheのVirtualHostは
  *   `guchi-apps/vps`のIssueへ切り出す（CLAUDE.md「VPS・サブPCの設定ファイルの変更は、
- *   管理リポジトリのIssueへ切り出す」）。ただし`/apps/<name>/`の作成・DB作成・PM2への登録・
+ *   管理リポジトリのIssueへ切り出す」）。ただし`/home/github-user/apps/<name>/`の作成・DB作成・PM2への登録・
  *   certbotは**`deploy.yml`が配る受け口ではない**ので、VPSの手作業として残る。
  * - **サブPCの手順は代行実行の条件を満たす形で書く。** 実行するデバイスがサブPC・1手順に
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
@@ -16,9 +16,11 @@
  *   （`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
  * - **新しいリポジトリのIssueは、作った直後には盤面に載らない。** 載る条件は
  *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、それを作るのが初期化Issue
- *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定し
- *   （条件は`local-repos.conf`への記載）、GitHub Appへの追加と2つの再同期をブラウザの
- *   手作業Issueへ入れる。
+ *   自身。したがって初期化Issueの実行経路は**サブPCのローカルセッション**に固定する
+ *   （条件は`local-repos.conf`への記載）。
+ * - **人が空振りする手順を書かない**（#2248）。2つの再同期は立ち上げ自身が実行し
+ *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
+ *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
  */
 
 import {
@@ -39,6 +41,43 @@ import {
 
 /** 手作業Issueに付けるラベル（`00.check-user`は付けない）。 */
 export const MANUAL_STEP_LABEL = "71.manual-step";
+
+/**
+ * 立ち上げが決めた値を1PasswordとGitHubのsecretへ入れるスクリプト（#2249）。
+ *
+ * **サブPCの本体チェックアウトから絶対パスで呼ぶ。** 代行実行のcwdはホームに固定されており
+ * （`scripts/run-manual-step.sh`）、新しいリポジトリのチェックアウトはまだ無いことがある。
+ */
+const PROVISION_SCRIPT = "$HOME/apps/issue-deck/scripts/provision-app-secrets.sh";
+
+/** 実機の配置先。`/apps/<name>`ではない（#2246。同じ立ち上げの中で2つのパスが混在していた）。 */
+function serverAppDir(spec: Pick<NewAppSpec, "repositoryName">): string {
+  return `/home/github-user/apps/${spec.repositoryName}`;
+}
+
+/**
+ * シークレット投入コマンド。**フィールド名の羅列にせず、そのまま貼れる1コマンドで出す**（#2249）。
+ *
+ * `aide-bot`の立ち上げでは「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = …`」
+ * という羅列を手作業Issueに書いていたため、値が未登録のまま初回の本番デプロイが走り
+ * `DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
+ *
+ * 機械的に定まる値（配置先・DB名・許可メール）と、人がSignalyで作らないと決まらない
+ * webhook URLとで**呼び分ける**。スクリプトは何度実行してもよい作りなので、順序は問わない。
+ */
+function provisionCommand(spec: NewAppSpec, ciWebhookUrl: string | null): string {
+  const options = [`--repo ${repositoryFullName(spec)}`];
+  if (ciWebhookUrl === null) {
+    if (spec.databaseName) options.push(`--db-name ${spec.databaseName}`);
+    // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
+    if (spec.auth !== "none") options.push("--copy-allowed-emails");
+  } else {
+    options.push(`--ci-webhook-url '${ciWebhookUrl}'`);
+  }
+  // 続きの行は2つ下げる（コードブロック自体が箇条書きの下に2スペース下がっているため、
+  // 同じ幅だと折り返しに見えない）
+  return [PROVISION_SCRIPT, ...options].join(" \\\n    ");
+}
 
 /** 作成物の自動化の度合い。画面のチップの色に対応する。 */
 export type NewAppAutomation =
@@ -80,6 +119,11 @@ export type NewAppPlanOptions = {
    * 決まっていなければ`null`で、そのときは値を出さずに「確保する」とだけ書く。
    */
   localPortBase?: number | null;
+  /**
+   * GitHub Appのインストール対象へ手で追加する手順が要るか（#2248）。
+   * `repository_selection=all`なら不要で、既定はその想定の`false`。
+   */
+  githubAppNeedsRepositoryAdd?: boolean;
 };
 
 /**
@@ -93,6 +137,7 @@ export function buildNewAppPlan(
   const repo = repositoryFullName(spec);
   const host = hostnameFor(spec);
   const localPortBase = options.localPortBase ?? null;
+  const githubAppNeedsRepositoryAdd = options.githubAppNeedsRepositoryAdd ?? false;
 
   const artifacts: NewAppArtifact[] = [
     {
@@ -148,16 +193,18 @@ export function buildNewAppPlan(
     {
       kind: "manual-subpc",
       automation: "proxy",
-      title: `[手作業] サブPC: ${spec.repositoryName}をcloneして対応表に載せる`,
+      title: `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`,
       target: "guchi-apps/issue-deck",
-      description: "手作業アシスタントの代行実行で流せる",
+      description: "cloneと対応表への追記、1Passwordへの値の投入。手作業アシスタントの代行実行で流せる",
     },
     {
       kind: "manual-browser",
       automation: "manual",
       title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
       target: "guchi-apps/issue-deck",
-      description: "AレコードはVPSの管理画面でしか登録できない。1Password・Secrets・GitHub Appもここで行う",
+      description: githubAppNeedsRepositoryAdd
+        ? "AレコードはVPSの管理画面でしか登録できない。Secrets・GitHub Appもここで行う"
+        : "AレコードはVPSの管理画面でしか登録できない。Secretsもここで行う",
     },
   ];
 
@@ -201,6 +248,12 @@ export type NewAppIssueRefs = {
   localPortBase: number | null;
   /** ポート帯を足すPull Request（`guchi-apps/issue-deck#124`の形）。作れなかったら`null` */
   portBandPullRequest: string | null;
+  /**
+   * GitHub Appのインストール対象へ手で追加する手順が要るか（#2248）。
+   * `lib/new-app/installation-scope.ts`が実物の`repository_selection`から決める。
+   * 既定は不要（`repository_selection=all`）。
+   */
+  githubAppNeedsRepositoryAdd?: boolean;
 };
 
 export function buildParentIssueTitle(spec: NewAppSpec): string {
@@ -235,8 +288,8 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
 1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・1Password・Secrets・GitHub App）
-3. サブPCへclone（ここまで済むと初期化Issueをローカルセッションで実装できる）
+2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
+3. サブPCへcloneし、1Passwordへ値を投入する（ここまで済むと初期化Issueをローカルセッションで実装できる）
 4. \`${repo}\` の初期化と、developへのマージ
 5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
 6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
@@ -314,7 +367,15 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる
 - [ ] \`.env.example\`（変数名のみ）と \`.env.tpl\`（\`op://\` 参照）を作る
 - [ ] \`.github/workflows/ci.yml\` を作る（必須）
-- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`/apps/${spec.repositoryName}/\`）
+- [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）
+- [ ] \`.github/secrets-manifest.tsv\` を作る（\`op://apps/${spec.repositoryName}/…\` を読む行。これが無いとGitHubのsecretへ同期できない）
+- [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)} \\
+    --ref <このIssueのブランチ>
+  \`\`\`
+
 - [ ] \`.github/deploy.env.tpl\` と \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）
 - [ ] \`main\` のBranch protectionを設定する${spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbScripts}
 ${multiAgent}
@@ -479,7 +540,7 @@ function portBandPrerequisite(refs: NewAppIssueRefs): string {
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}をcloneして対応表に載せる`;
+  return `[手作業] サブPC: ${spec.repositoryName}をcloneし、シークレットを投入する`;
 }
 
 /**
@@ -496,14 +557,16 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになる（初期化Issueの実装がここから始まる）`,
-    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない`,
+    benefit: `サブPCで \`${spec.repositoryName}\` のローカルセッションを起こせるようになり、1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入る`,
+    blocked: `\`${repo}\` のIssueをローカルセッションで実装できない。新しいリポジトリはまだ \`claude-issue-dispatch.yml\` を持たないため、無人実行でも動かせない。シークレットも未登録のままで、初回の本番デプロイが値の不足で失敗する`,
     urgency: "初期化Issueに着手する前",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",
-    prerequisiteIssues: `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`,
-    otherPrerequisites: `\`gh\` がサブPCでログイン済みであること。${portBandPrerequisite(refs)}`,
+    prerequisiteIssues: refs.githubAppNeedsRepositoryAdd
+      ? `${refs.parent}（GitHub Appのインストール対象への追加が済んでいること）`
+      : refs.parent,
+    otherPrerequisites: `\`gh\` がサブPCでログイン済みで、\`~/.config/issue-deck/op-writer.env\` に1Passwordの書き込み用トークンがあること。${portBandPrerequisite(refs)}`,
     steps: `- [ ] （サブPC）リポジトリをcloneする
 
   \`\`\`bash
@@ -520,10 +583,18 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 
   \`\`\`bash
   grep -F '${repo}' "$HOME/.config/issue-deck/local-repos.conf"
+  \`\`\`
+
+- [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
+
+  \`\`\`bash
+  ${provisionCommand(spec, null)}
   \`\`\``,
-    verification: `最後の手順の出力に \`${repo} ${path}\` の1行が出れば完了です。
-pollerは申告のたびに対応表を読み直すので、再起動は要りません。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの3手順は手作業アシスタントの代行実行で流せます。",
+    verification: `対応表の手順の出力に \`${repo} ${path}\` の1行が出て、投入の手順が \`ok\` で終われば完了です。
+pollerは申告のたびに対応表を読み直すので、再起動は要りません。
+**この時点ではGitHubのsecretへの同期は行われません**——同期には \`${repo}\` の
+\`.github/secrets-manifest.tsv\` が要るので、初期化Issueでこのマニフェストを作ってマージした後に揃います。`,
+    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの4手順は手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }
@@ -535,13 +606,13 @@ export function buildVpsManualIssueTitle(spec: NewAppSpec): string {
 /**
  * VPSの手作業Issue。
  *
- * **`guchi-apps/vps`へ切り出さないものだけを書く。** `/apps/<name>/`・MariaDBのデータベース・
+ * **`guchi-apps/vps`へ切り出さないものだけを書く。** `/home/github-user/apps/<name>/`・MariaDBのデータベース・
  * PM2のプロセス登録・certbotはいずれも`deploy.yml`が配る受け口ではなく、実機で1度だけ
  * 実行する。ApacheのVirtualHostはここには書かない（あちらはリポジトリ管理下）。
  */
 export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const host = hostnameFor(spec);
-  const appDir = `/apps/${spec.repositoryName}`;
+  const appDir = serverAppDir(spec);
   const vpsRef = refs.vps ?? `${NEW_APP_VPS_REPOSITORY}のIssue`;
 
   const dbStep = spec.databaseName
@@ -609,9 +680,15 @@ export function buildBrowserManualIssueTitle(spec: NewAppSpec): string {
  *
  * **AレコードはVPSプロバイダの管理画面でしか登録できない**（APIが無い。
  * `_docs/guides/apache-domain-setup.md` も「実行者: 人間のみ」としている）。
- * あわせて、新しいリポジトリが盤面へ載るまでに要る**2つの再同期**もここに入れる——
- * GitHub Appへ追加しただけでは載らず、「リポジトリを再同期」→「Issueを再同期」の順に
- * 押す必要がある（`docs/cross-repo-setup-guide.md`）。
+ *
+ * **2つの再同期はここに書かない**（#2248）。立ち上げ自身がリポジトリとIssueを取り込む
+ * （`lib/new-app/resync.ts`）。押し忘れると新しいリポジトリのIssueが画面に出ず、#2215では
+ * 実際に押されないままだった。
+ *
+ * **GitHub Appのインストール対象への追加も、必要なときだけ書く**（#2248）。
+ * `issue-deck`・`issue-deck-dev`とも`repository_selection=all`で入っているため、通常は
+ * 新しいリポジトリが自動で対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）
+ * だけ手順を出す（`refs.githubAppNeedsRepositoryAdd`）。
  */
 export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const repo = repositoryFullName(spec);
@@ -643,35 +720,30 @@ export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueR
 
 `;
 
+  const githubAppStep = refs.githubAppNeedsRepositoryAdd
+    ? `
+
+- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
+
+  \`\`\`
+  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
+  \`\`\``
+    : "";
+
   return manualStepBody({
-    benefit: `${host} が名前解決できるようになり、\`${repo}\` のCI・デプロイがシークレットを読めるようになる。issue-deckの盤面にもこのリポジトリのIssueが並ぶ`,
-    blocked: `TLS証明書が取れず（certbotはAレコードを引けることが前提）、CI・デプロイがシークレット不足で失敗する。\`${repo}\` のIssueはissue-deckの画面に出ない`,
+    benefit: `${host} が名前解決できるようになり、\`${repo}\` のCI・デプロイがシークレットを読めるようになる`,
+    blocked: `TLS証明書が取れず（certbotはAレコードを引けることが前提）、CI・デプロイがシークレット不足で失敗する`,
     urgency: "立ち上げの最初に行う（後続がすべてこれを待つ）",
     device: "**ブラウザ**",
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: "なし",
     otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
-    steps: `${dnsStep}- [ ] （ブラウザ）1Passwordの \`apps\` ボールトへ \`${spec.repositoryName}\` のアイテムを作り、必要なフィールドを追加する
-
-  \`\`\`
-  ${spec.databaseName ? `db-name = ${spec.databaseName} / target-dir = /apps/${spec.repositoryName}` : `target-dir = /apps/${spec.repositoryName}`}
-  \`\`\`
-
-${secretsStep}- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
-
-  \`\`\`
-  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
-  \`\`\`
-
-- [ ] （ブラウザ）issue-deckの設定で「リポジトリを再同期」→「Issueを再同期」の順に押す
-
-  \`\`\`
-  https://issuedeck.gucchii.com
-  \`\`\``,
-    verification: `\`dig +short ${host} A\` がVPSのIPを返し、issue-deckの左メニューに \`${spec.repositoryName}\` が並べば完了です。
-再同期は2つとも押してください。「リポジトリを再同期」だけではIssueが取り込まれません。`,
-    why: "DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。1Password・GitHub Secrets・GitHub Appの権限も、無断で変更してよいものではないためです。",
+    steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
+    verification: `\`dig +short ${host} A\` がVPSのIPを返し、\`${repo}\` のActions secretsに登録した名前が並べば完了です。
+アプリ自身のシークレット（配置先・DB名）は、投入の手順の最後に出る「総数」で確かめます（\`gh api repos/${repo}/actions/secrets --jq .total_count\` と同じ値）。
+リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
+    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

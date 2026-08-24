@@ -14,6 +14,8 @@ type Overview = {
   propagation: PropagationRun | null;
   /** 不足しているcallerの配布（#1948・#1475）。タグ配布とは別のrun */
   repairPropagation: PropagationRun | null;
+  /** ワークフロー以外の配布物の更新（#2240）。これも別のrun */
+  sharedFilePropagation: PropagationRun | null;
 };
 
 /** 配布ワークフローが動いている間の再取得間隔。PRの作成は1リポジトリあたり数秒〜数十秒 */
@@ -62,7 +64,8 @@ export function useWorkflowTags(enabled: boolean) {
   // 何が進行中なのか読めなくなる（#1948）。
   const isTagRunning = isPropagationRunning(overview?.propagation ?? null);
   const isRepairRunning = isPropagationRunning(overview?.repairPropagation ?? null);
-  const isRunning = isTagRunning || isRepairRunning || awaiting;
+  const isSharedFileRunning = isPropagationRunning(overview?.sharedFilePropagation ?? null);
+  const isRunning = isTagRunning || isRepairRunning || isSharedFileRunning || awaiting;
 
   useEffect(() => {
     if (!enabled) return;
@@ -85,6 +88,7 @@ export function useWorkflowTags(enabled: boolean) {
           since !== null &&
           (isPropagationRunning(json.propagation) ||
             isPropagationRunning(json.repairPropagation) ||
+            isPropagationRunning(json.sharedFilePropagation) ||
             Date.now() - since > AWAITING_RUN_TIMEOUT_MS)
         ) {
           awaitingSince.current = null;
@@ -115,5 +119,14 @@ export function useWorkflowTags(enabled: boolean) {
     };
   }, [enabled, reloadCount, isRunning]);
 
-  return { overview, isLoading, error, isRunning, isRepairRunning, reload, markDispatched };
+  return {
+    overview,
+    isLoading,
+    error,
+    isRunning,
+    isRepairRunning,
+    isSharedFileRunning,
+    reload,
+    markDispatched,
+  };
 }
