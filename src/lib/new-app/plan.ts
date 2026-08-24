@@ -34,9 +34,13 @@ import {
   NEW_APP_ORG,
   NEW_APP_PARENT_REPOSITORY,
   NEW_APP_VPS_REPOSITORY,
+  appTitleFor,
   hostnameFor,
   newAppKindProfile,
+  offlineEnabled,
   publicUrlFor,
+  screenshotBypassEnabled,
+  supportsUnattendedScreenshot,
   vpsAppListLocation,
   type NewAppSpec,
 } from "@/lib/new-app/spec";
@@ -221,8 +225,17 @@ export function buildNewAppPlan(
   return artifacts;
 }
 
+export type SpecTableOptions = {
+  /**
+   * 体裁と運用の5行（表示名・アイコン・PWA・更新履歴・撮影バイパス）を含めるか（#2254）。
+   * **既定は含める。** ApacheのVirtualHostや疎通確認のIssueでは判断材料にならないので、
+   * そちらだけ`false`で呼ぶ。
+   */
+  appearance?: boolean;
+};
+
 /** 立ち上げの決めごとを、どのIssueにも同じ形で載せるための表。 */
-export function specTable(spec: NewAppSpec): string {
+export function specTable(spec: NewAppSpec, options: SpecTableOptions = {}): string {
   const profile = newAppKindProfile(spec.kind);
   const rows: [string, string][] = [
     ["アプリ名", spec.displayName],
@@ -235,6 +248,36 @@ export function specTable(spec: NewAppSpec): string {
     ["認証", NEW_APP_AUTH_LABELS[spec.auth]],
     ["マルチエージェント運用", spec.multiAgent ? "対応させる" : "対応させない"],
   ];
+
+  if (options.appearance !== false) {
+    rows.push(
+      ["表示名", `${appTitleFor(spec)}（\`title\` / \`applicationName\` / \`appleWebApp.title\`）`],
+      [
+        "アイコン・テーマカラー",
+        spec.pwa
+          ? `${spec.iconPlan === "provisional" ? "暫定で始める" : "用意してから始める"}（\`${spec.themeColor}\`）`
+          : "用意しない（PWA対応しないため）",
+      ],
+      [
+        "PWA",
+        spec.pwa
+          ? `対応する（オフラインは${offlineEnabled(spec) ? "対応する" : "対応しない"}）`
+          : "対応しない",
+      ],
+      ["更新履歴", spec.changelog ? "持つ" : "持たない（バージョンだけが上がる）"],
+      [
+        "CI撮影の認証バイパス",
+        spec.auth === "none"
+          ? "不要（認証なし）"
+          : screenshotBypassEnabled(spec)
+            ? supportsUnattendedScreenshot(spec.kind)
+              ? "用意する"
+              : "用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用）"
+            : "用意しない（`24.screenshot-required`は使えない）",
+      ],
+    );
+  }
+
   return [
     "| 項目 | 値 |",
     "|---|---|",
@@ -285,6 +328,9 @@ export function buildParentIssueTitle(spec: NewAppSpec): string {
  * 3か所への追記を求めており、vps READMEは`guchi-apps/vps`のIssueが扱うが、issue-deck自身の
  * `docs/supported-repositories.md`と共有知識の`standards/tech-stack.md`はどのサブIssueにも
  * 属さない。
+ *
+ * **暫定で始めた体裁は「後で決めること」として残す**（#2254）。完了条件には入れない——
+ * 暫定のアイコンでも公開はできるので、これを条件にすると立ち上げが閉じられなくなる。
  */
 export function buildParentIssueBody(
   spec: NewAppSpec,
@@ -296,6 +342,25 @@ export function buildParentIssueBody(
     localPortBase === null
       ? `\`${LOCAL_PORT_BAND_CONF_PATH}\` への追記`
       : `\`${formatLocalPortBandLine(repositoryFullName(spec), localPortBase).replace(/\s+/g, " ")}\` の追記`;
+  // **暫定で始めたものだけを書く**（#2254）。`aide-bot`ではテーマカラー`#0f766e`が誰にも
+  // 決められないまま入り、暫定だったことがどこにも残らなかった。
+  const pending: string[] = [];
+  if (spec.pwa && spec.iconPlan === "provisional") {
+    pending.push(
+      `- [ ] アイコンとテーマカラー（暫定で \`${spec.themeColor}\` の1色で始めています）を決めて差し替える`,
+    );
+  }
+  const pendingSection =
+    pending.length === 0
+      ? ""
+      : `## 後で決めること
+
+暫定のまま始めたものです。**立ち上げの完了条件には含めません**が、放っておくと誰も決めないまま
+本番に残ります。
+
+${pending.join("\n")}
+
+`;
   return `## 立ち上げるアプリ
 
 ${specTable(spec)}
@@ -334,11 +399,73 @@ issue-deckの画面のホスト一覧で「更新して再起動」を押すま�
 無くても成功します（\`aide-bot\` では公開できていないことに気づくのが \`${NEW_APP_VPS_REPOSITORY}#128\` の
 調査まで遅れました）。上の \`curl\` だけが、DNS・Apache・TLS・アプリのすべてを通した確認になります。
 
-## 参考
+${pendingSection}## 参考
 
 - 新規アプリ作成チェックリスト: \`guchi-apps/docs\` の \`guides/new-app-checklist.md\`
 - マルチエージェント運用の導入手順: issue-deckの \`docs/cross-repo-setup-guide.md\`
 `;
+}
+
+/**
+ * 初期化Issueの「やること」に入る、体裁と運用の項目（#2254）。
+ *
+ * **決めた結果「やらない」ことは項目にしない。** 決めた事実は決めごとの表に残るので、
+ * ここに「PWA対応はしない」のような空振りのチェックを並べると、消し込む相手が無い項目が増える。
+ */
+type AppearanceStepsOptions = {
+  /**
+   * 雛形（#2247）がPWA・changelogの受け皿（`src/app/manifest.ts`・`public/icon.svg`・
+   * `src/lib/changelog.ts`）をすでにコミット済みなら`true`。**置く指示は出さない**——
+   * 値を決めて差し替える指示（`buildInitIssueBody`の`pwaTasks`）に譲る。
+   */
+  pwaAndChangelogScaffolded?: boolean;
+};
+
+function appearanceSteps(
+  spec: NewAppSpec,
+  refs: NewAppIssueRefs,
+  options: AppearanceStepsOptions = {},
+): string {
+  const profile = newAppKindProfile(spec.kind);
+  const steps: string[] = [
+    `- [ ] 表示名を \`${appTitleFor(spec)}\` にする（\`title\` / \`applicationName\` / \`appleWebApp.title\`）`,
+  ];
+
+  if (spec.pwa && !options.pwaAndChangelogScaffolded) {
+    steps.push(
+      `- [ ] PWA対応の一式を置く（\`manifest\`・アイコン・テーマカラー \`${spec.themeColor}\`）。${
+        offlineEnabled(spec)
+          ? "**オフライン対応も行う**（Service Workerでのキャッシュ）"
+          : "**オフライン対応（Service Worker）は入れない**"
+      }`,
+    );
+    steps.push(
+      spec.iconPlan === "provisional"
+        ? `- [ ] アイコンは暫定（テーマカラー1色）で置いて始める。差し替えは ${refs.parent} の「後で決めること」で追う`
+        : "- [ ] 用意されたアイコンを置く（`icon-192.png`・`icon-512.png`・`apple-icon.png`・`favicon.ico`）",
+    );
+  }
+
+  if (spec.changelog && !options.pwaAndChangelogScaffolded) {
+    steps.push(
+      spec.kind === "fastapi"
+        ? "- [ ] 更新履歴（changelog）を持たせる（`version.json` + `frontend/changelog.js` + `scripts/bump_version.py`。callerの`bump-command`から呼ぶ）"
+        : `- [ ] 更新履歴（changelog）を持たせる。\`"version"\` lifecycleスクリプトで \`RELEASE_CHANGELOG\`・\`RELEASE_USAGE\` を受け取る（受け取り方はissue-deckの \`docs/cross-repo-setup-guide.md\`）。**\`preversion\` は作らず、スクリプトはNode標準モジュールだけで書く**——共有ワークフローはbumpのために依存をインストールしない`,
+    );
+  }
+
+  if (screenshotBypassEnabled(spec)) {
+    // `runtime-setup: minimal`ではPlaywrightが入らないため、無人実行では撮れない。
+    // バイパス自体はローカルの画面確認に効くので、用途を断って書く
+    const unattended = supportsUnattendedScreenshot(spec.kind)
+      ? `**これが無いと \`24.screenshot-required\` が成立しない**`
+      : `\`runtime-setup: ${profile.runtimeSetup}\` ではPlaywrightが入らないため、**\`24.screenshot-required\` は無人実行では成立しない**。ローカル実行での画面確認用として作り、その旨を \`CLAUDE.md\` に書く`;
+    steps.push(
+      `- [ ] CI撮影の認証バイパスを用意する（開発用ログインのエンドポイントと、ダミーデータを入れる \`${profile.packageManager === "pnpm" ? "pnpm" : "npm run"} db:seed:dev\` 相当）。${unattended}（参照実装はissue-deckの \`/api/dev/login\`）`,
+    );
+  }
+
+  return steps.join("\n");
 }
 
 export function buildInitIssueTitle(spec: NewAppSpec): string {
@@ -431,9 +558,11 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
   \`\`\`
 `;
 
-  const pwaTasks =
-    (spec.kind === "next" || spec.kind === "next-db") && has("src/app/manifest.ts")
-      ? `
+  const pwaAndChangelogScaffolded =
+    (spec.kind === "next" || spec.kind === "next-db") && has("src/app/manifest.ts");
+
+  const pwaTasks = pwaAndChangelogScaffolded
+    ? `
 - [ ] \`src/app/layout.tsx\` に \`metadata\`（\`title\`・\`applicationName\`・\`appleWebApp\`・\`icons\`）と \`viewport.themeColor\` を書く
 
   \`\`\`ts
@@ -450,7 +579,9 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
 - [ ] アイコン（\`public/icon-192.png\`・\`icon-512.png\`・\`apple-icon.png\`）とテーマカラーを決めて差し替える。
       雛形の \`public/icon.svg\` と \`#0f766e\` は暫定値（${NEW_APP_PARENT_REPOSITORY}#2254）
 - [ ] \`package.json\` の scripts へ \`"version": "node scripts/version-changelog.mjs"\` を足す（更新履歴の受け皿は \`src/lib/changelog.ts\`）`
-      : "";
+    : "";
+
+  const appearance = `\n${appearanceSteps(spec, refs, { pwaAndChangelogScaffolded })}`;
 
   const multiAgent =
     spec.multiAgent && !dispatchReady
@@ -492,7 +623,7 @@ ${alreadyThere}
 - [ ] アプリの雛形を作る（${profile.label}）
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる
 - [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
-- [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}
+- [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}
 ${multiAgent}
 ## 参考
 
@@ -549,7 +680,7 @@ export function buildDeployCheckIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 このIssueは、初回デプロイの前に周辺インフラが**実際に疎通する**ことを確かめ、デプロイの後に
 **${url} が開けること**まで見届けるためのものです。
 
-${specTable(spec)}
+${specTable(spec, { appearance: false })}
 
 ## 前提条件
 
@@ -659,7 +790,7 @@ ${proxy}
 
 ## 立ち上げるアプリ
 
-${specTable(spec)}
+${specTable(spec, { appearance: false })}
 
 ## やること（1段目・すぐ着手できる）
 

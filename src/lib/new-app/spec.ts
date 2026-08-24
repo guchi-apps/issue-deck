@@ -34,6 +34,27 @@ export type NewAppAuth = "none" | "supabase-google" | "fastapi-google";
 /** 公開URLの取り方（`_docs/guides/apache-domain-setup.md`「ルーティングの2パターン」）。 */
 export type NewAppUrlMode = "subdomain" | "path";
 
+/**
+ * アイコンとテーマカラーの決め方（#2254）。
+ *
+ * **既定は`provisional`（暫定で始める）。** `aide-bot`では実装エージェントが標準方針に従って
+ * PWA対応まで行ったが、アイコンのデザインもテーマカラー（`#0f766e`）も人が決めていなかった。
+ * 暫定で始めること自体は妥当なので、**暫定だと分かる形で残す**（親Issueの「後で決めること」）。
+ */
+export type NewAppIconPlan = "provisional" | "prepared";
+
+/** テーマカラーの既定値。ニュートラルな濃紺で、決めていないことが色から分からなくならないようにする。 */
+export const NEW_APP_DEFAULT_THEME_COLOR = "#0f172a";
+
+/** 画面に出す色見本。ここから選ぶか、`#rrggbb`を直接入れる。 */
+export const NEW_APP_THEME_COLOR_PRESETS = [
+  NEW_APP_DEFAULT_THEME_COLOR,
+  "#0f766e",
+  "#1d4ed8",
+  "#b45309",
+  "#9d174d",
+];
+
 export type NewAppSpec = {
   /** 画面やIssueのタイトルに出る名前。日本語でよい */
   displayName: string;
@@ -55,6 +76,29 @@ export type NewAppSpec = {
   auth: NewAppAuth;
   /** マルチエージェント運用（issue-deck）に対応させるか */
   multiAgent: boolean;
+
+  // --- 体裁と運用（#2254）。**すべて既定値を持ち、開かずに次へ進める** ---
+
+  /**
+   * ブラウザのタブとホーム画面に出る名前（`title` / `applicationName` / `appleWebApp.title`）。
+   * **空ならアプリ名をそのまま使う**（`appTitleFor`）。
+   */
+  appTitle: string;
+  /** PWA対応（`manifest`＋アイコン）するか。標準は対応する */
+  pwa: boolean;
+  /** オフライン対応（Service Workerでのキャッシュ）するか。標準は対応しない */
+  offline: boolean;
+  /** アイコンとテーマカラーを暫定で始めるか、用意してから始めるか */
+  iconPlan: NewAppIconPlan;
+  /** テーマカラー（`#rrggbb`） */
+  themeColor: string;
+  /** 更新履歴（changelog）を持つか */
+  changelog: boolean;
+  /**
+   * CI撮影の認証バイパス（開発用ログイン＋ダミーデータ）を用意するか。
+   * **認証が無いアプリでは意味を持たない**ので、読むときは`screenshotBypassEnabled`を使う。
+   */
+  screenshotBypass: boolean;
 };
 
 /** 種別ごとに決まる値。ウィザードの既定値と、生成するIssueの本文の両方が読む。 */
@@ -183,6 +227,83 @@ export function vpsAppListLocation(
   return spec.port === null ? place : `${place} / ${spec.port}`;
 }
 
+/** テーマカラーとして使えるか（`#rrggbb`）。3桁の短縮形は`manifest`で扱いが揺れるので許さない。 */
+export function isValidThemeColor(value: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+/** 実際に`title`へ入る表示名。**空欄はアプリ名で埋める**（入力を必須にしない）。 */
+export function appTitleFor(spec: Pick<NewAppSpec, "appTitle" | "displayName">): string {
+  return spec.appTitle.trim() || spec.displayName.trim();
+}
+
+/**
+ * オフライン対応を実施するか。**PWA対応しないアプリでは成立しない**（Service Workerだけ
+ * 置いても、ホーム画面へ追加する導線が無い）。
+ */
+export function offlineEnabled(spec: Pick<NewAppSpec, "pwa" | "offline">): boolean {
+  return spec.pwa && spec.offline;
+}
+
+/**
+ * CI撮影の認証バイパスを用意するか。**認証が無いアプリでは迂回するものが無い**ため、
+ * チェックの値によらず不要とする。
+ */
+export function screenshotBypassEnabled(
+  spec: Pick<NewAppSpec, "auth" | "screenshotBypass">,
+): boolean {
+  return spec.auth !== "none" && spec.screenshotBypass;
+}
+
+/**
+ * 無人実行のスクリーンショット（`24.screenshot-required`）が成立する種別か。
+ *
+ * **`runtime-setup: minimal`（FastAPI・静的サイト）ではPlaywrightがインストールされない**ため、
+ * バイパスを用意しても無人では撮れない（`docs/cross-repo-setup-guide.md`「なお`minimal`では
+ * Playwrightがインストールされないため、`24.screenshot-required`は無人実行では成立しない」）。
+ * バイパス自体はローカルでの画面確認に効くので、**用意しないのではなく用途を断って書く**。
+ */
+export function supportsUnattendedScreenshot(kind: NewAppKind): boolean {
+  return newAppKindProfile(kind).runtimeSetup !== "minimal";
+}
+
+/**
+ * 体裁と運用が標準どおりか。畳んだパネルの「標準どおり」バッジの出し分けに使う。
+ * **表示名は標準の判定に含めない**——アプリ名と同じかどうかは体裁の逸脱ではない。
+ */
+export function isAppearanceDefault(spec: NewAppSpec): boolean {
+  const base = emptyNewAppSpec();
+  return (
+    spec.pwa === base.pwa &&
+    spec.offline === base.offline &&
+    spec.iconPlan === base.iconPlan &&
+    spec.themeColor.toLowerCase() === base.themeColor.toLowerCase() &&
+    spec.changelog === base.changelog &&
+    spec.screenshotBypass === base.screenshotBypass
+  );
+}
+
+/**
+ * 決めた体裁を1行にまとめた文。畳んだパネルと確認ステップの両方が同じ文を出す
+ * （**開かずに通した人も、押す前に決まった値を読める**ようにするため）。
+ */
+export function appearanceSummary(spec: NewAppSpec): string {
+  const parts = [
+    `表示名「${appTitleFor(spec) || "（アプリ名）"}」`,
+    spec.pwa
+      ? `アイコンとテーマカラーは${spec.iconPlan === "provisional" ? "暫定" : "用意する"}（${spec.themeColor}）`
+      : "アイコンは用意しない",
+    spec.pwa ? `PWA対応・オフライン${offlineEnabled(spec) ? "あり" : "なし"}` : "PWA対応しない",
+    `更新履歴${spec.changelog ? "あり" : "なし"}`,
+    spec.auth === "none"
+      ? "CI撮影の認証バイパスは不要（認証なし）"
+      : screenshotBypassEnabled(spec)
+        ? `CI撮影の認証バイパスあり${supportsUnattendedScreenshot(spec.kind) ? "" : "（ローカル実行専用）"}`
+        : "CI撮影の認証バイパスなし",
+  ];
+  return parts.join("／");
+}
+
 /**
  * 種別を選び直したときの既定値。**人が触った値は上書きしない**ため、呼び出し側で
  * 差し替えるのは「その種別では意味を持たなくなる値」だけにする。
@@ -207,7 +328,8 @@ export type NewAppSpecError =
   | "base_path_required"
   | "port_required"
   | "port_out_of_range"
-  | "database_name_required";
+  | "database_name_required"
+  | "theme_color_invalid";
 
 export const NEW_APP_SPEC_ERROR_MESSAGES: Record<NewAppSpecError, string> = {
   display_name_required: "アプリ名を入力してください。",
@@ -221,6 +343,7 @@ export const NEW_APP_SPEC_ERROR_MESSAGES: Record<NewAppSpecError, string> = {
   port_required: "本番ポートを決めてください。",
   port_out_of_range: "本番ポートが種別ごとの割り当て範囲から外れています。",
   database_name_required: "データベース名を入力してください。",
+  theme_color_invalid: "テーマカラーは `#rrggbb` の形式で入力してください。",
 };
 
 /**
@@ -256,6 +379,9 @@ export function validateNewAppSpec(spec: NewAppSpec): NewAppSpecError[] {
 
   if (profile.usesDatabase && !spec.databaseName) errors.push("database_name_required");
 
+  // テーマカラーは`manifest`へそのまま入るので、PWA対応するときだけ形式を見る
+  if (spec.pwa && !isValidThemeColor(spec.themeColor)) errors.push("theme_color_invalid");
+
   return errors;
 }
 
@@ -274,5 +400,12 @@ export function emptyNewAppSpec(): NewAppSpec {
     databaseName: null,
     auth: "none",
     multiAgent: true,
+    appTitle: "",
+    pwa: true,
+    offline: false,
+    iconPlan: "provisional",
+    themeColor: NEW_APP_DEFAULT_THEME_COLOR,
+    changelog: true,
+    screenshotBypass: true,
   };
 }
