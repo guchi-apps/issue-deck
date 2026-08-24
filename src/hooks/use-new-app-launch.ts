@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import type { ConsultMessage, NewAppDraft } from "@/lib/claude/new-app-consult";
+import type { ExistingLaunchIssue } from "@/lib/new-app/launch-marker";
 import type { NewAppCreatedRef } from "@/lib/new-app/plan";
 import type { NewAppSpec } from "@/lib/new-app/spec";
 
@@ -27,6 +28,11 @@ export type PreflightResult = {
     repositorySelection: "all" | "selected" | null;
     needsRepositoryAdd: boolean;
   };
+  /**
+   * `guchi-apps/vps`に同じ対象のopenなIssueが既にあるか（#2250）。
+   * あれば立ち上げは新しく作らず、そのIssueへコメントする
+   */
+  existingVpsIssue: ExistingLaunchIssue | null;
   /** `guchi-apps/vps`を読めたか。falseなら空き番号は提案されない */
   vpsRead: boolean;
 };

@@ -421,6 +421,17 @@ TLS証明書を取ると、certbotが実機に \`/etc/apache2/sites-available/${
 
 - [ ] certbot実行後、${refs.parent} のVPS手作業Issueへ貼られた \`${host}-le-ssl.conf\` の内容を \`apache/sites-available/\` へ追加する
 
+## このIssueが持たない作業
+
+**同じアプリの作業でも、次はこのIssueの担当ではありません。同じ対象のIssueを新しく立てず、
+下のIssueへ書いてください**（\`aide-bot\` の立ち上げでは同じ作業のIssueが4件並びました。#2250）。
+
+| 作業 | 担当するIssue |
+|---|---|
+| DNSのAレコードの登録 | ${refs.parent} のブラウザの手作業Issue |
+| 置き場・DB・PM2への登録・**certbotの実行** | ${refs.parent} のVPSの手作業Issue |
+| \`${host}-le-ssl.conf\` の**取り込み** | このIssue（上の2段目） |
+
 ## 注意点
 
 - 実機を直接編集しないでください。\`develop\` へマージし、さらに \`develop\` → \`main\` のリリースPRを
@@ -771,4 +782,9 @@ export type NewAppCreatedRef = {
   /** `guchi-apps/issue-deck#123` / `guchi-apps/kakei-report` */
   reference: string;
   url: string;
+  /**
+   * 新しく作ったのではなく、**既にあったIssueへコメントした**（#2250）。
+   * 画面はこれを見て「既存」の印を出す。
+   */
+  existing?: boolean;
 };

@@ -45,6 +45,25 @@ export async function fetchIssuesForRepo(
   return items.filter((item) => !item.pull_request);
 }
 
+/**
+ * openなIssueだけを取る。**重複起票の判定に使う**（#2250）。
+ *
+ * 検索API（`/search/issues`）を使わないのは、作った直後のIssueが索引に載るまで数十秒かかり、
+ * 「押した直後にもう一度押す」形の重複を取りこぼすため。openだけなら`guchi-apps/vps`でも
+ * 1〜2ページで収まる。
+ */
+export async function fetchOpenIssuesForRepo(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<GithubApiIssue[]> {
+  const items = await fetchAllPages<GithubApiIssue>(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues?state=open&per_page=100&sort=created&direction=asc`,
+    token,
+  );
+  return items.filter((item) => !item.pull_request);
+}
+
 export async function fetchCommentsForIssue(
   owner: string,
   repo: string,

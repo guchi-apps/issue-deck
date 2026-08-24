@@ -170,6 +170,28 @@ describe("NewAppDialog", () => {
     expect(screen.getAllByText("代行できる").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("vpsに同じ対象のIssueが開いていれば、押す前に知らせる", async () => {
+    mockFetch({
+      "/api/new-app/preflight": () => ({
+        ...PREFLIGHT_OK,
+        existingVpsIssue: {
+          number: 121,
+          title: "kakei-report.gucchii.com のVirtualHostを追加する",
+          url: "https://github.com/guchi-apps/vps/issues/121",
+          reference: "guchi-apps/vps#121",
+          reason: "hostname",
+        },
+      }),
+    });
+    await advanceToPlacement();
+
+    fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
+
+    expect(screen.getByText("guchi-apps/vps#121")).toBeTruthy();
+    expect(screen.getByText(/新しく作らず、このIssueへ書き足します/)).toBeTruthy();
+  });
+
   it("立ち上げが途中で失敗しても、作られたものをリンクとして出す", async () => {
     mockFetch({
       "/api/new-app/preflight": () => PREFLIGHT_OK,
