@@ -628,6 +628,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ような純粋なものと、GitHubを叩くものはファイルを分ける
   （`lib/github/issue-close.ts`＝両方から読む／`lib/github/issue-close-cleanup.ts`＝サーバー専用。
   `lib/progress-report-message.ts`と`lib/github/report-progress.ts`も同じ分け方）。
+- **`src/instrumentation.ts`とRoute Handlerは別バンドルなので、両者で共有する状態は`globalThis`へ
+  載せる**（#2360）。素朴にモジュールスコープの`let`・`const`で持つと**同じファイルの実体が2つでき、
+  起動時に登録したリスナーが記録側から見えない。** GitHub API使用量の永続化
+  （[`lib/github/api-usage.ts`](../src/lib/github/api-usage.ts)）がこれで、`instrumentation.ts`が
+  `onBucketClosed()`で登録した書き込みが一度も呼ばれず、`GithubApiUsageBucket`が0行のまま
+  「再起動をまたいで引き継ぎます」と表示していた。**型チェックも単体テストも通り、画面の内訳も
+  出る**（メモリ側だけで完結するため）ので、再起動して消えることでしか気付けない。
+  `lib/db.ts`のPrismaClientと同じ形で1つに寄せる（`AsyncLocalStorage`も同じ理由で共有する。
+  同じ作りのAI API消費量`lib/claude/api-usage.ts`も同様）。開発時のHMRで実体が増えるのも防げる。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
