@@ -55,7 +55,9 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
+import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
+import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
 import {
@@ -602,6 +604,21 @@ export function IssueList({
     const planPending = planPendingIssueIds.has(issue.id);
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
+    /**
+     * 右上の進捗バッジ（`WorkflowStepBadge`）が回答待ちを言うか（#2309）。**言うなら
+     * `QuestionStateBadge`の「回答待ち」は出さない**——同じ行の左右で同じことを2回言わせない
+     * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+     * 判定を行の側に置いているのは、どちらを出すかを知れるのが両方を並べているここだけだから。
+     *
+     * バッジはProject Statusを持たない行では何も描かず（`getWorkflowStepIndex`がnull）、
+     * 承認待ちの行では確認待ちの方を優先する（`workflow-status-steps.tsx`の
+     * `showQaAnswerPending`と同じ条件）。そのどちらでも回答待ちはこの行から読めなくなるので、
+     * ラベル側が引き受ける。質問Issueは`ready`のまま置かれるのが普通なので、実際に出るのは
+     * ほぼこちら。
+     */
+    const stepBadgeShowsQaAnswerPending =
+      getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null &&
+      !isApprovalPending(issue.labels);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -706,7 +723,7 @@ export function IssueList({
             <div className="flex flex-wrap items-center gap-1">
               <QuestionStateBadge
                 state={resolveQuestionState(issue)}
-                waiting={isQaAnswerWaiting(issue)}
+                waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}
               />
               {listCardLabels(issue.labels).map((label) => (
                 <span

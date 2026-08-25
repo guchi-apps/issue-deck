@@ -337,12 +337,31 @@ describe("質問Issueの状態ラベル（#1796）", () => {
   });
 
   // 「質問する」はIssue詳細のコメント欄にもあり、通常のIssueも回答待ちになる（#2309）
-  it("質問Issueでなくても回答待ちなら「回答待ち」を出す", () => {
+  it("質問Issueでなくても、進捗バッジが出ない行なら「回答待ち」を出す", () => {
     renderList({
       issues: [makeIssue({ number: 21, qaAnswerPendingAt: "2026-08-16T00:00:00Z" })],
     });
 
     expect(rowOf(21).textContent).toContain("回答待ち");
+  });
+
+  // 進捗バッジ（右上）は回答待ちを青いパイ＋ツールチップで既に出している。同じ行の左右で
+  // 2回言わせない（#2309）
+  it("進捗バッジが回答待ちを出す行にはラベルを重ねない", () => {
+    renderList({
+      issues: [
+        makeIssue({
+          number: 22,
+          projectStatus: "Implementation",
+          qaAnswerPendingAt: "2026-08-16T00:00:00Z",
+        }),
+      ],
+    });
+
+    const row = rowOf(22);
+    expect(row.querySelector('[title*="Claudeの回答待ち"]')).not.toBeNull();
+    // ラベル側の「回答待ち」ピルは出さない（ツールチップの文言だけが残る）
+    expect(row.querySelector(".ring-blue-500")).toBeNull();
   });
 
   // 待っているのは処理なので回す。未確認（人が読む番）は回さない（#2309）
