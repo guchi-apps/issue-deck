@@ -154,20 +154,21 @@ describe("NewAppDialog", () => {
     ).toBeTruthy();
   });
 
-  it("確認ステップで9件と、自動・代行・手作業の内訳を出す", async () => {
+  it("確認ステップで8件と、自動・代行・手作業の内訳を出す", async () => {
     mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
     await advanceToPlacement();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
 
     expect(screen.getAllByText("guchi-apps/kakei-report").length).toBeGreaterThan(0);
     // 払い出す予定のポート帯も押す前に読み取れる（#2225）
     expect(screen.getByText(/ローカルセッションのポート帯: ベース値 25000 を確保します/)).toBeTruthy();
     expect(screen.getByText(/ローカルセッションの開発サーバーのポート帯 25000 を確保する/)).toBeTruthy();
-    // DNSが自動化できないことが、押す前に読み取れる
-    expect(screen.getAllByText("あなたが実行").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText("代行できる").length).toBeGreaterThanOrEqual(1);
+    // 残る手作業がすべて代行実行できることが、押す前に読み取れる（#2246）。
+    // 凡例にも1つずつ並ぶので、作成物ぶんはそこからの差で数える
+    expect(screen.getAllByText("あなたが実行")).toHaveLength(1);
+    expect(screen.getAllByText("代行できる")).toHaveLength(3);
   });
 
   it("体裁と運用は畳んだまま次へ進める（既定値が1行で読める。#2254）", async () => {
@@ -181,7 +182,7 @@ describe("NewAppDialog", () => {
     expect(screen.queryByLabelText("表示名")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
     expect(screen.getByText(/体裁と運用: 表示名「家計レポート」/)).toBeTruthy();
   });
 
@@ -230,7 +231,7 @@ describe("NewAppDialog", () => {
     await advanceToPlacement();
 
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
 
     expect(screen.getByText("guchi-apps/vps#121")).toBeTruthy();
     expect(screen.getByText(/新しく作らず、このIssueへ書き足します/)).toBeTruthy();
@@ -282,7 +283,7 @@ describe("NewAppDialog", () => {
 
     await advanceToPlacement();
     fireEvent.click(screen.getByRole("button", { name: /次へ/ }));
-    await waitFor(() => expect(screen.getByText("9件を作成します")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("8件を作成します")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /立ち上げを開始/ }));
 
     await waitFor(() =>

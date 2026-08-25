@@ -8,8 +8,9 @@
  *
  * - **実機の設定ファイルを直接書き換える手順を書かない。** ApacheのVirtualHostは
  *   `guchi-apps/vps`のIssueへ切り出す（CLAUDE.md「VPS・サブPCの設定ファイルの変更は、
- *   管理リポジトリのIssueへ切り出す」）。ただし`/home/github-user/apps/<name>/`の作成・DB作成・PM2への登録・
- *   certbotは**`deploy.yml`が配る受け口ではない**ので、VPSの手作業として残る。
+ *   管理リポジトリのIssueへ切り出す」）。`/home/github-user/apps/<name>/`の作成・DB作成・
+ *   PM2への登録・certbotも、`guchi-apps/vps`の「アプリをプロビジョニングする」ワークフロー
+ *   （`guchi-apps/vps#132`）へ寄せた。**人がVPSへSSHする手順はもう出さない**（#2246）。
  * - **サブPCの手順は代行実行の条件を満たす形で書く。** 実行するデバイスがサブPC・1手順に
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
  *   含まない、のすべてを満たしたときだけ画面から流せる
@@ -20,9 +21,12 @@
  *   する（`lib/new-app/scaffold.ts`）ので、初期化Issueも最初から無人実行で回せる。
  *   **サブPCの手作業Issueは残るが、初期化Issueの前提ではなくなった**——あちらの目的は
  *   1Passwordへの値の投入（#2249）で、cloneはローカルセッションを使いたいときのため。
- * - **人が空振りする手順を書かない**（#2248）。2つの再同期は立ち上げ自身が実行し
+ * - **人が空振りする手順を書かない**（#2248・#2246）。2つの再同期は立ち上げ自身が実行し
  *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
  *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
+ *   DNSのAレコードは`*.gucchii.com`のワイルドカードで済み（`guchi-apps/vps#131`）、
+ *   Actions secretsはorganizationに`visibility=all`で登録済み（#2255）なので、
+ *   **ブラウザの手作業Issueは残る手順があるときだけ作る**。
  */
 
 import {
@@ -59,6 +63,43 @@ const PROVISION_SCRIPT = "$HOME/apps/issue-deck/scripts/provision-app-secrets.sh
 /** 実機の配置先。`/apps/<name>`ではない（#2246。同じ立ち上げの中で2つのパスが混在していた）。 */
 function serverAppDir(spec: Pick<NewAppSpec, "repositoryName">): string {
   return `/home/github-user/apps/${spec.repositoryName}`;
+}
+
+/**
+ * VPS実機の受け入れ（置き場・DB・vhostの有効化・PM2への登録・certbot・`:443`の
+ * `X-Forwarded-Proto`）を1回で行う`guchi-apps/vps`のワークフロー（`guchi-apps/vps#132`）。
+ *
+ * **これができたので、VPSの手作業はSSHではなくサブPCからの1コマンドになった**（#2246）。
+ * 実行するのは実機に配置済みの`scripts/provision-app.sh`で、何度流しても結果は同じ。
+ * 済んでいる段は「(変更なし)」と出るだけなので、初回デプロイの前と後で2回流してよい。
+ */
+const VPS_PROVISION_WORKFLOW = "provision-app.yml";
+
+/**
+ * プロビジョニングのワークフローで受け入れられるか。
+ *
+ * **常駐プロセスを持たない種別（静的サイト）は対象外。** ワークフローの入力`app_port`が必須で、
+ * `scripts/provision-app.sh`も1024〜65535を要求する。その場合だけ従来どおり実機の手順を出す。
+ */
+function vpsProvisionable(spec: Pick<NewAppSpec, "port">): boolean {
+  return spec.port !== null;
+}
+
+/**
+ * プロビジョニングを流すコマンド。**`<…>`のプレースホルダを残さない**——残すと
+ * 代行実行の対象から外れる（`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
+ */
+function vpsProvisionCommand(spec: NewAppSpec): string {
+  const args = [
+    `-f app_name=${spec.repositoryName}`,
+    `-f app_host=${hostnameFor(spec)}`,
+    `-f app_port=${spec.port}`,
+  ];
+  if (spec.databaseName) args.push(`-f db_name=${spec.databaseName}`);
+  return [
+    `gh workflow run ${VPS_PROVISION_WORKFLOW} --repo ${NEW_APP_VPS_REPOSITORY}`,
+    ...args,
+  ].join(" \\\n    ");
 }
 
 /**
@@ -206,10 +247,12 @@ export function buildNewAppPlan(
     },
     {
       kind: "manual-vps",
-      automation: "manual",
-      title: `[手作業] VPS: ${spec.displayName}の置き場とプロセスを用意する`,
+      automation: vpsProvisionable(spec) ? "proxy" : "manual",
+      title: buildVpsManualIssueTitle(spec),
       target: "guchi-apps/issue-deck",
-      description: "ディレクトリ作成・DB作成・PM2への登録・certbot。Gitで配れない実機の操作",
+      description: vpsProvisionable(spec)
+        ? `置き場・DB・vhostの有効化・PM2への登録・certbotを、${NEW_APP_VPS_REPOSITORY}の「アプリをプロビジョニングする」ワークフローへ流すだけ（\`guchi-apps/vps#132\`）。SSHもsudoも要らず、手作業アシスタントの代行実行で流せる`
+        : "ディレクトリ作成・vhostの有効化・certbot。常駐プロセスを持たない種別はプロビジョニングのワークフローを使えないため、実機での操作が残る",
     },
     {
       kind: "manual-subpc",
@@ -218,16 +261,22 @@ export function buildNewAppPlan(
       target: "guchi-apps/issue-deck",
       description: "1Passwordへの値の投入とGitHub secretへの同期。cloneはローカルセッションを使うとき用。手作業アシスタントの代行実行で流せる",
     },
-    {
+  ];
+
+  // ブラウザの手作業は、残る手順があるときだけ作る（#2246）。DNSのAレコードは
+  // `*.gucchii.com`のワイルドカードで済み（`guchi-apps/vps#131`）、Actions secretsは
+  // organizationに`visibility=all`で登録済み（#2255）。`aide-bot`の立ち上げでは、
+  // 中身が全部空振りのIssueが人の着手を待ち続けた（#2215）
+  if (githubAppNeedsRepositoryAdd) {
+    artifacts.push({
       kind: "manual-browser",
       automation: "manual",
-      title: `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`,
+      title: buildBrowserManualIssueTitle(spec),
       target: "guchi-apps/issue-deck",
-      description: githubAppNeedsRepositoryAdd
-        ? "AレコードはVPSの管理画面でしか登録できない。Secrets・GitHub Appもここで行う"
-        : "AレコードはVPSの管理画面でしか登録できない。Secretsもここで行う",
-    },
-  ];
+      description:
+        "GitHub Appのインストール対象が`selected`のため、新しいリポジトリを手で追加する必要がある",
+    });
+  }
 
   return artifacts;
 }
@@ -349,6 +398,21 @@ export function buildParentIssueBody(
     localPortBase === null
       ? `\`${LOCAL_PORT_BAND_CONF_PATH}\` への追記`
       : `\`${formatLocalPortBandLine(repositoryFullName(spec), localPortBase).replace(/\s+/g, " ")}\` の追記`;
+  // 実施順。**空振りの段を並べない**（#2246）——`aide-bot`の立ち上げでは、中身が不要だった
+  // ブラウザの登録が2番目に居座り、後続がそれを待つ形に見えていた
+  const steps = [
+    `ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）`,
+    ...(options.githubAppNeedsRepositoryAdd
+      ? [`ブラウザでissue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する`]
+      : []),
+    "サブPCで1Passwordへ値を投入する（初回デプロイまでに済んでいればよく、初期化Issueは待ちません）",
+    `\`${repo}\` の初期化と、developへのマージ（**盤面から無人実行で始められます**。\n   リポジトリの作成時に \`claude-issue-dispatch.yml\` までコミット済みのため、cloneは要りません）`,
+    `\`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映`,
+    vpsProvisionable(spec)
+      ? `サブPCから \`${NEW_APP_VPS_REPOSITORY}\` のプロビジョニングを流し（置き場・DB・vhostの有効化・PM2・TLS）、初回デプロイ`
+      : "VPSで置き場とTLSを用意して初回デプロイ",
+    `初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）`,
+  ];
   // **暫定で始めたものだけを書く**（#2254）。`aide-bot`ではテーマカラー`#0f766e`が誰にも
   // 決められないまま入り、暫定だったことがどこにも残らなかった。
   const pending: string[] = [];
@@ -377,14 +441,12 @@ ${spec.summary.trim() ? `${spec.summary.trim()}\n` : ""}
 
 サブIssueが実施順に並んでいます。実機へ出るまでの流れは次のとおりです。
 
-1. ローカルセッションのポート帯を確保する（${portBandLine}。立ち上げが自動でPull Requestを作ります）
-2. ブラウザでの登録（DNSのAレコード・Secrets${options.githubAppNeedsRepositoryAdd ? "・GitHub App" : ""}）
-3. サブPCで1Passwordへ値を投入する（初回デプロイまでに済んでいればよく、初期化Issueは待ちません）
-4. \`${repo}\` の初期化と、developへのマージ（**盤面から無人実行で始められます**。
-   リポジトリの作成時に \`claude-issue-dispatch.yml\` までコミット済みのため、cloneは要りません）
-5. \`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映
-6. VPSで置き場・DB・PM2・TLSを用意して初回デプロイ
-7. 初回デプロイ前チェックを行い、公開URLが開けることを確かめる（\`${repo}\` の「初回デプロイ前チェックと公開確認」Issue）
+${steps.map((line, index) => `${index + 1}. ${line}`).join("\n")}
+
+**DNSのAレコードとActions secretsの登録は要りません**（#2246）。\`*.gucchii.com\` はワイルドカードで
+登録済みで（\`guchi-apps/vps#131\`）、共通のsecretはorganizationに \`visibility=all\` で入っています（#2255）。
+**VPSへSSHする手順もありません**——実機の操作は ${NEW_APP_VPS_REPOSITORY} の「アプリをプロビジョニングする」
+ワークフローが行います（\`guchi-apps/vps#132\`）。
 
 **ポート帯のPull Requestは、developへマージしただけでは効きません。**
 \`${LOCAL_PORT_BAND_CONF_PATH}\` はサブPCの本体チェックアウトから読まれるため、
@@ -727,10 +789,10 @@ curl -I ${url}
 
 | 症状 | 見るところ |
 |---|---|
-| 名前を解決できない | DNSのAレコード（${refs.parent} のブラウザ手作業Issue） |
+| 名前を解決できない | \`*.gucchii.com\` のワイルドカードで引けるはず（\`guchi-apps/vps#131\`）。引けなければDNSの障害 |
 | 404が返る・別のアプリが出る | ApacheのVirtualHost（${vpsRef} が \`main\` まで進んで実機へ反映されているか） |
-| 502・503が返る | アプリのプロセス（${vpsManualRef}。VPSで \`pm2 describe ${spec.repositoryName}\`） |
-| TLSのエラーになる | certbot（${vpsManualRef}） |
+| 502・503が返る | アプリのプロセス（${vpsManualRef} のプロビジョニングを初回デプロイの後にもう一度流す） |
+| TLSのエラーになる | certbot（${vpsManualRef} のプロビジョニング） |
 
 ## 関連
 
@@ -830,8 +892,8 @@ certbotは \`:80\` のVirtualHostをそのまま複製するため \`"http"\` �
 
 | 作業 | 担当するIssue |
 |---|---|
-| DNSのAレコードの登録 | ${refs.parent} のブラウザの手作業Issue |
-| 置き場・DB・PM2への登録・**certbotの実行** | ${refs.parent} のVPSの手作業Issue |
+| DNSのAレコードの登録 | 不要（\`*.gucchii.com\` のワイルドカードで引ける。\`guchi-apps/vps#131\`） |
+| 置き場・DB・vhostの有効化・PM2への登録・**certbotの実行** | ${refs.parent} のVPS受け入れの手作業Issue（\`scripts/provision-app.sh\` を流す） |
 | \`${host}-le-ssl.conf\` の**取り込み** | このIssue（上の2段目） |
 
 ## 注意点
@@ -902,6 +964,55 @@ ${params.related}
  * `3000 + Issue番号` が使われ続ける（docs/multi-agent/generic-launcher.md）。
  * **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。
  */
+/**
+ * organizationのsecretで足りていることの確認（#2246）。
+ *
+ * **登録の手順は出さない。** `OP_SERVICE_ACCOUNT_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・
+ * `WORKFLOW_PAT`はorganizationに`visibility=all`で登録済みで（#2255）、リポジトリごとの
+ * 登録は空振りになる。ただし**確認は残す**——`visibility`が`selected`へ変えられたときに
+ * 黙って壊れるのを、定期巡回が拾えるようにするため。
+ *
+ * 数えるのはリポジトリのsecretとorganizationのsecretの和集合で、どちらで揃っていてもよい。
+ */
+function sharedSecretCheck(spec: NewAppSpec): string {
+  const repo = repositoryFullName(spec);
+  const names = spec.multiAgent
+    ? ["CLAUDE_CODE_OAUTH_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN", "WORKFLOW_PAT"]
+    : ["OP_SERVICE_ACCOUNT_TOKEN"];
+  return `
+- ワークフローから${names.length}件の共通secretを読める
+
+  \`\`\`bash
+  { gh secret list --repo ${repo} --json name --jq '.[].name'; gh api repos/${repo}/actions/organization-secrets --jq '.secrets[].name'; } | sort -u | grep -cE '^(${names.join("|")})$'
+  \`\`\`
+
+  **\`${names.length}\` が出れば完了です。** organizationに \`visibility=all\` で登録済みのため、
+  通常は何もしなくてもこの数になります（\`aide-bot\` では、これを知らずにリポジトリごとの登録を
+  手作業Issueへ書いていました）。足りなければ \`https://github.com/organizations/${NEW_APP_ORG}/settings/secrets/actions\` を確かめてください。
+`;
+}
+
+/**
+ * ワイルドカードのAレコードで名前が引けることの確認（#2246）。
+ *
+ * **登録の手順は出さない。** `*.gucchii.com`を登録済みのため（`guchi-apps/vps#131`）、
+ * 新しいサブドメインは追加登録なしで引ける。`aide-bot`の立ち上げでは、この空振りの手順が
+ * 手作業Issueの先頭に置かれ、後続がすべてそれを待つ形になっていた。
+ */
+function wildcardDnsCheck(spec: NewAppSpec): string {
+  if (spec.urlMode !== "subdomain") return "";
+  return `
+- ホスト名が引ける
+
+  \`\`\`bash
+  dig +short ${hostnameFor(spec)} A | grep -qE '^[0-9]+\\.' && echo ok
+  \`\`\`
+
+  \`ok\` が出れば完了です。\`*.gucchii.com\` はワイルドカードで登録済みなので、
+  **Aレコードの追加登録は要りません**（\`guchi-apps/vps#131\`）。
+`;
+}
+
 function portBandPrerequisite(refs: NewAppIssueRefs): string {
   const pr = refs.portBandPullRequest ?? `\`${LOCAL_PORT_BAND_CONF_PATH}\` へポート帯を足すPull Request`;
   return `${pr} がdevelopへマージされ、issue-deckの画面のホスト一覧で「更新して再起動」を押してサブPCのチェックアウトを更新済みであること`;
@@ -977,7 +1088,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   \`\`\`
 
   「すべて値が入っています」が出れば完了です。**未登録が1つでもあれば終了コード1で終わります**（\`aide-bot\` では投入が未実施のままIssueがcloseされ、初回デプロイが \`DB_NAME is required\` で落ちました）。
-
+${sharedSecretCheck(spec)}${wildcardDnsCheck(spec)}
 **GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
 リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
     why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
@@ -986,17 +1097,106 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 }
 
 export function buildVpsManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] VPS: ${spec.displayName}の置き場とプロセスを用意する`;
+  // 実行する場所が変わるとタイトルの先頭も変わる（CLAUDE.md「[手作業] <実行する場所>: <やること>」）。
+  // ワークフローへ流せるならサブPCの1コマンドで済む（#2246）
+  return vpsProvisionable(spec)
+    ? `[手作業] サブPC: ${spec.displayName}をVPSへ受け入れる（置き場・DB・証明書）`
+    : `[手作業] VPS: ${spec.displayName}の置き場と証明書を用意する`;
 }
 
 /**
- * VPSの手作業Issue。
+ * VPS実機の受け入れの手作業Issue。
  *
- * **`guchi-apps/vps`へ切り出さないものだけを書く。** `/home/github-user/apps/<name>/`・MariaDBのデータベース・
- * PM2のプロセス登録・certbotはいずれも`deploy.yml`が配る受け口ではなく、実機で1度だけ
- * 実行する。ApacheのVirtualHostはここには書かない（あちらはリポジトリ管理下）。
+ * **常駐プロセスを持つ種別では、サブPCから1コマンド流すだけになった**（#2246）。
+ * `/home/github-user/apps/<name>/`の作成・DB作成・vhostの有効化・PM2への登録・certbot・
+ * `:443`の`X-Forwarded-Proto`の修正は、`guchi-apps/vps`の「アプリをプロビジョニングする」
+ * ワークフローが実機の`scripts/provision-app.sh`を叩いて行う（`guchi-apps/vps#132`）。
+ * SSHもsudoも要らないので、手作業アシスタントの代行実行で流せる。
+ *
+ * **ApacheのVirtualHostはここには書かない**（あちらはリポジトリ管理下で、
+ * ワークフローは配置済みのファイルを`a2ensite`で有効化するだけ）。
  */
 export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
+  if (vpsProvisionable(spec)) return buildVpsProvisionIssueBody(spec, refs);
+  return buildVpsSshManualIssueBody(spec, refs);
+}
+
+/** ワークフローへ流すだけで済む形（常駐プロセスを持つ種別）。 */
+function buildVpsProvisionIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
+  const host = hostnameFor(spec);
+  const vpsRef = refs.vps ?? `${NEW_APP_VPS_REPOSITORY}のIssue`;
+  const command = vpsProvisionCommand(spec);
+  const runList = `gh run list --repo ${NEW_APP_VPS_REPOSITORY} --workflow ${VPS_PROVISION_WORKFLOW}`;
+
+  return manualStepBody({
+    benefit: `${spec.displayName}が ${publicUrlFor(spec)} で開けるようになる`,
+    blocked: `デプロイの配布先が無く、${spec.databaseName ? "DBにも接続できず、" : ""}HTTPSでも開けない`,
+    urgency: "初回デプロイの前（1回目）と、初回デプロイの後（2回目）",
+    device: "**サブPC**",
+    cwd: "不要",
+    branch: "不要",
+    prerequisiteIssues: `${vpsRef}（VirtualHostが \`main\` まで進んで実機へ反映済み）`,
+    otherPrerequisites: `\`gh\` がログイン済みであること。**VPSへのSSHも \`sudo\` も要りません**——実機の操作は ${NEW_APP_VPS_REPOSITORY} の「アプリをプロビジョニングする」ワークフローが行います（\`guchi-apps/vps#132\`）。DNSは \`*.gucchii.com\` のワイルドカードで登録済みなので、Aレコードの追加も要りません（\`guchi-apps/vps#131\`）`,
+    steps: `**同じコマンドを2回流します。** 何度実行しても結果は同じで、済んでいる段は
+\`(変更なし)\` と出るだけです。1回目で置き場・DB・vhostの有効化・証明書まで進み、
+2回目で\`deploy/ecosystem.config.js\`ができたPM2への登録が進みます。
+
+- [ ] （サブPC）初回デプロイの前に、VPSの受け入れを流す
+
+  \`\`\`bash
+  ${command}
+  \`\`\`
+
+- [ ] （サブPC）初回デプロイの後に、もう一度流してPM2へ登録する
+
+  \`\`\`bash
+  ${command}
+  \`\`\`
+
+- [ ] （サブPC）実行ログの末尾「リポジトリへ取り込む差分」に出た内容を ${vpsRef} へ控える
+
+  \`\`\`bash
+  ${runList} --limit 1 --json databaseId --jq '.[0].databaseId' \\
+    | xargs -I{} gh run view {} --repo ${NEW_APP_VPS_REPOSITORY} --log
+  \`\`\`
+
+  certbotは実機の設定ファイルだけを書き換えます。控えて取り込むまで、毎日のドリフト検知に
+  「[新規（未取り込み）]」として出続けます。`,
+    verification: `**手順ごとに1つずつ確かめます**（#2256）。サブPCで上から順に流し、すべてが成功すれば完了です。
+
+- 直近のプロビジョニングが成功している
+
+  \`\`\`bash
+  ${runList} --limit 1 --json conclusion --jq '.[0].conclusion' | grep -x success
+  \`\`\`
+
+  \`success\` が出れば完了です。実行が1件も無ければ何も返らず、終了コードは0になりません。
+
+- 公開まで届いている
+
+  \`\`\`bash
+  curl -fsS -o /dev/null -w '%{http_code}\\n' ${publicUrlFor(spec)}
+  \`\`\`
+
+  200 か 3xx が出れば完了です。**DNS・Apache・TLS・アプリのプロセスをすべて通るので、
+  ここが通れば置き場もDBもPM2も証明書も揃っています**（#2252）。400以上は終了コードが0になりません。
+
+控えた \`${host}-le-ssl.conf\` を ${vpsRef} で取り込むところだけは、コマンドで確かめられません。
+${vpsRef} にコメントが付いていることを目で確かめてください。`,
+    why: `${NEW_APP_VPS_REPOSITORY} のワークフローを \`workflow_dispatch\` で起動する操作で、実機の設定と本番のDBに触れるためです。**この手順と \`## 完了の確認方法\` のコマンドは、手作業アシスタントの代行実行で流せます。**`,
+    related: `- 起点Issue: ${refs.parent}
+- VirtualHost: ${vpsRef}
+- プロビジョニングの受け口: \`guchi-apps/vps#132\``,
+  });
+}
+
+/**
+ * 実機での手順を残す形（常駐プロセスを持たない種別）。
+ *
+ * **プロビジョニングのワークフローは`app_port`が必須なので使えない。** 静的サイトのように
+ * ポートを持たない種別だけがここへ来る。
+ */
+function buildVpsSshManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const host = hostnameFor(spec);
   const appDir = serverAppDir(spec);
   const vpsRef = refs.vps ?? `${NEW_APP_VPS_REPOSITORY}のIssue`;
@@ -1023,28 +1223,6 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
 `
     : "";
 
-  const pm2Step =
-    spec.port === null
-      ? ""
-      : `
-- [ ] （VPS）初回デプロイの後、PM2へ登録して保存する
-
-  \`\`\`bash
-  cd ${appDir} && pm2 start deploy/ecosystem.config.js && pm2 save
-  \`\`\`
-`;
-
-  const pm2Check =
-    spec.port === null
-      ? ""
-      : `
-- PM2に登録され、\`online\` で動いている
-
-  \`\`\`bash
-  pm2 describe ${spec.repositoryName}
-  \`\`\`
-`;
-
   return manualStepBody({
     benefit: `${spec.displayName}が ${publicUrlFor(spec)} で開けるようになる`,
     blocked: `デプロイの配布先が無く、${spec.databaseName ? "DBにも接続できず、" : ""}HTTPSでも開けない`,
@@ -1052,14 +1230,14 @@ export function buildVpsManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs)
     device: "**VPS**（`ssh` で接続する）",
     cwd: "不要",
     branch: "不要",
-    prerequisiteIssues: `${vpsRef}（VirtualHostが \`main\` まで進んで実機へ反映済み）、および ${refs.parent} のDNS登録`,
-    otherPrerequisites: `\`sudo\` が使えること。certbotは ${host} のAレコードが引けるようになってから実行すること`,
+    prerequisiteIssues: `${vpsRef}（VirtualHostが \`main\` まで進んで実機へ反映済み）`,
+    otherPrerequisites: `\`sudo\` が使えること。DNSは \`*.gucchii.com\` のワイルドカードで登録済みなので、${host} は最初から引けます（\`guchi-apps/vps#131\`）`,
     steps: `- [ ] （VPS）アプリの置き場を作る
 
   \`\`\`bash
   sudo mkdir -p ${appDir} && sudo chown -R github-user:github-user ${appDir}
   \`\`\`
-${dbStep}${pm2Step}
+${dbStep}
 - [ ] （VPS）TLS証明書を取得する
 
   \`\`\`bash
@@ -1086,7 +1264,7 @@ ${dbStep}${pm2Step}
   \`\`\`bash
   test -d ${appDir} && echo ok
   \`\`\`
-${dbCheck}${pm2Check}
+${dbCheck}
 - 公開まで届いている
 
   \`\`\`bash
@@ -1114,104 +1292,56 @@ ${dbCheck}${pm2Check}
 }
 
 export function buildBrowserManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] ブラウザ: ${spec.repositoryName}のDNSとシークレットを登録する`;
+  return `[手作業] ブラウザ: ${spec.repositoryName}をGitHub Appのインストール対象へ追加する`;
 }
 
 /**
- * ブラウザでの登録をまとめた手作業Issue。
+ * ブラウザでしか行えない登録の手作業Issue。
  *
- * **AレコードはVPSプロバイダの管理画面でしか登録できない**（APIが無い。
- * `_docs/guides/apache-domain-setup.md` も「実行者: 人間のみ」としている）。
+ * **中身が空振りの手順しか無いときは、このIssue自体を作らない**（#2246。
+ * `newAppArtifacts`と`POST /api/new-app`が`githubAppNeedsRepositoryAdd`で出し分ける）。
+ * `aide-bot`の立ち上げ（#2215）では、5手順のうち独自に必要なものが実質1つも無いIssueが
+ * 人の着手を待ち続けた。外した3つの根拠は次のとおり。
  *
- * **2つの再同期はここに書かない**（#2248）。立ち上げ自身がリポジトリとIssueを取り込む
- * （`lib/new-app/resync.ts`）。押し忘れると新しいリポジトリのIssueが画面に出ず、#2215では
- * 実際に押されないままだった。
+ * - **DNSのAレコード**: `*.gucchii.com`のワイルドカードを登録済み（`guchi-apps/vps#131`）。
+ *   新しいサブドメインは追加登録なしで引ける
+ * - **Actions secrets**: `OP_SERVICE_ACCOUNT_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・
+ *   `WORKFLOW_PAT`はorganizationに`visibility=all`で登録済み（#2255）。
+ *   確認だけはサブPCの手作業Issueへ移した（`buildSubpcManualIssueBody`）
+ * - **2つの再同期**: 立ち上げ自身が実行する（#2248・`lib/new-app/resync.ts`）
  *
- * **GitHub Appのインストール対象への追加も、必要なときだけ書く**（#2248）。
- * `issue-deck`・`issue-deck-dev`とも`repository_selection=all`で入っているため、通常は
- * 新しいリポジトリが自動で対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）
- * だけ手順を出す（`refs.githubAppNeedsRepositoryAdd`）。
+ * 残るのはGitHub Appのインストール対象への追加だけで、これも
+ * `repository_selection`が`selected`のときにしか要らない（`lib/new-app/installation-scope.ts`）。
  */
 export function buildBrowserManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const repo = repositoryFullName(spec);
-  const host = hostnameFor(spec);
-  const dnsStep =
-    spec.urlMode === "subdomain"
-      ? `- [ ] （ブラウザ）VPS管理画面のDNS設定で \`${spec.subdomain}\` のAレコードを追加し、VPSのIPへ向ける
-
-`
-      : "";
-
-  // 確認は手順と1対1にする（#2256）。\`dig\` は操作ではなく確認なので、手順ではなく
-  // \`## 完了の確認方法\` に置く（そこに置いたものだけが代行実行・定期巡回の対象になる）
-  const dnsCheck =
-    spec.urlMode === "subdomain"
-      ? `
-- Aレコードが引ける
-
-  \`\`\`bash
-  dig +short ${host} A
-  \`\`\`
-
-  VPSのIPアドレスが1行返れば完了です。何も返らなければ、まだDNSに伝わっていません。
-`
-      : "";
-
-  // 登録する名前と確認する名前を1つの配列から出す（#2256）。別々に書くと、片方を足したときに
-  // もう片方が古いままになり、「登録したのに確認で落ちる」が起きる
-  const secretNames = spec.multiAgent
-    ? ["OP_SERVICE_ACCOUNT_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "WORKFLOW_PAT"]
-    : ["OP_SERVICE_ACCOUNT_TOKEN"];
-  const secretsStep = spec.multiAgent
-    ? `- [ ] （ブラウザ）\`${repo}\` のActions secretsへ \`OP_SERVICE_ACCOUNT_TOKEN\`・\`CLAUDE_CODE_OAUTH_TOKEN\`・\`WORKFLOW_PAT\` を登録する
-
-  \`\`\`
-  https://github.com/${repo}/settings/secrets/actions
-  \`\`\`
-
-`
-    : `- [ ] （ブラウザ）\`${repo}\` のActions secretsへ \`OP_SERVICE_ACCOUNT_TOKEN\` を登録する
-
-  \`\`\`
-  https://github.com/${repo}/settings/secrets/actions
-  \`\`\`
-
-`;
-
-  const githubAppStep = refs.githubAppNeedsRepositoryAdd
-    ? `
-
-- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
-
-  \`\`\`
-  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
-  \`\`\``
-    : "";
 
   return manualStepBody({
-    benefit: `${host} が名前解決できるようになり、\`${repo}\` のCI・デプロイがシークレットを読めるようになる`,
-    blocked: `TLS証明書が取れず（certbotはAレコードを引けることが前提）、CI・デプロイがシークレット不足で失敗する`,
-    urgency: "立ち上げの最初に行う（後続がすべてこれを待つ）",
+    benefit: `\`${repo}\` のIssueがissue-deckの盤面に載り、無人実行を起動できるようになる`,
+    blocked: "新しいリポジトリのIssueが画面に出ず、無人実行を起動できない",
+    urgency: "初期化Issueを盤面から起動するまで",
     device: "**ブラウザ**",
     cwd: "不要",
     branch: "不要",
     prerequisiteIssues: "なし",
-    otherPrerequisites: "1PasswordとGitHubにログイン済みであること",
-    steps: `${dnsStep}${secretsStep.trimEnd()}${githubAppStep}`,
-    verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
-${dnsCheck}
-- ワークフローから${secretNames.length}件のsecretを読める
+    otherPrerequisites: "GitHubにorganizationの管理者としてログイン済みであること",
+    steps: `- [ ] （ブラウザ）issue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する
+
+  \`\`\`
+  https://github.com/organizations/${NEW_APP_ORG}/settings/installations
+  \`\`\``,
+    verification: `- インストール対象に入っている
 
   \`\`\`bash
-  { gh secret list --repo ${repo} --json name --jq '.[].name'; gh api repos/${repo}/actions/organization-secrets --jq '.secrets[].name'; } | sort -u | grep -cE '^(${[...secretNames].sort().join("|")})$'
+  gh api repos/${repo}/installation --jq .id
   \`\`\`
 
-  **\`${secretNames.length}\` が出れば完了です。** リポジトリのsecretだけでなく、organizationに \`visibility=all\` で
-  登録済みのものも数えます（\`aide-bot\` ではorganizationに揃っていたため、この登録自体が不要な手順でした。
-  実行して既に \`${secretNames.length}\` が出るなら、登録は要りません）。
+  インストールIDが1行出れば完了です。対象に入っていなければ404で終わり、終了コードは0になりません。
 
-リポジトリとIssueの取り込みは立ち上げが済ませているので、再同期を押す必要はありません。`,
-    why: `DNSはVPSプロバイダの管理画面でしか設定できずAPIがありません。GitHub Secrets${refs.githubAppNeedsRepositoryAdd ? "、GitHub Appの権限" : ""}も、無断で変更してよいものではないためです。`,
+DNSのAレコードとActions secretsの登録は要りません（\`*.gucchii.com\` のワイルドカードと、
+organizationの \`visibility=all\` のsecretで足ります）。リポジトリとIssueの取り込みも
+立ち上げが済ませているので、再同期を押す必要はありません。`,
+    why: "GitHub Appのインストール対象は、無断で変更してよいものではないためです。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

@@ -52,7 +52,7 @@ const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable"> = {
 };
 
 describe("buildNewAppPlan", () => {
-  it("実行順に9件を並べる", () => {
+  it("実行順に8件を並べ、ブラウザの手作業は要るときだけ足す（#2246）", () => {
     const artifacts = buildNewAppPlan(spec());
     expect(artifacts.map((a) => a.kind)).toEqual([
       "repository",
@@ -63,8 +63,10 @@ describe("buildNewAppPlan", () => {
       "vps-issue",
       "manual-vps",
       "manual-subpc",
-      "manual-browser",
     ]);
+    expect(
+      buildNewAppPlan(spec(), { githubAppNeedsRepositoryAdd: true }).map((a) => a.kind),
+    ).toContain("manual-browser");
   });
 
   it("自動で作れるものと手作業を色分けできる形で返す", () => {
@@ -74,10 +76,18 @@ describe("buildNewAppPlan", () => {
     expect(byKind["deploy-check-issue"]).toBe("auto");
     // サブPCだけが代行実行できる
     expect(byKind["manual-subpc"]).toBe("proxy");
-    expect(byKind["manual-vps"]).toBe("manual");
-    expect(byKind["manual-browser"]).toBe("manual");
+    // VPSの受け入れもワークフローを流すだけになったので代行実行できる（#2246）
+    expect(byKind["manual-vps"]).toBe("proxy");
     // ポート帯はissue-deckへのPRとして自動で作る（#2225）
     expect(byKind["port-band"]).toBe("auto");
+  });
+
+  // #2246。`app_port`が必須なので、ポートを持たない種別だけは実機の手順が残る
+  it("常駐プロセスを持たない種別では、VPSの受け入れが代行実行できないまま残る", () => {
+    const artifacts = buildNewAppPlan(spec({ kind: "static", port: null }));
+    const vps = artifacts.find((a) => a.kind === "manual-vps");
+    expect(vps?.automation).toBe("manual");
+    expect(vps?.title).toContain("[手作業] VPS:");
   });
 
   it("払い出す帯が分かっていれば見出しに出し、分からなければ出さない", () => {
@@ -89,12 +99,13 @@ describe("buildNewAppPlan", () => {
     expect(withoutBase?.title).not.toMatch(/\d/);
   });
 
-  // #2248。押す前の一覧でも、空振りする手順を予告しない
-  it("ブラウザの手作業の説明は、インストール対象への追加が要るときだけGitHub Appに触れる", () => {
-    const description = (options?: Parameters<typeof buildNewAppPlan>[1]) =>
-      buildNewAppPlan(spec(), options).find((a) => a.kind === "manual-browser")?.description ?? "";
-    expect(description()).not.toContain("GitHub App");
-    expect(description({ githubAppNeedsRepositoryAdd: true })).toContain("GitHub App");
+  // #2248・#2246。押す前の一覧でも、空振りする手順を予告しない。中身が空振りだけになる
+  // ときは、そもそも一覧に出さない
+  it("ブラウザの手作業は、インストール対象への追加が要るときだけ一覧に出る", () => {
+    const browser = (options?: Parameters<typeof buildNewAppPlan>[1]) =>
+      buildNewAppPlan(spec(), options).find((a) => a.kind === "manual-browser");
+    expect(browser()).toBeUndefined();
+    expect(browser({ githubAppNeedsRepositoryAdd: true })?.description).toContain("GitHub App");
   });
 });
 
@@ -378,7 +389,8 @@ describe("buildSubpcManualIssueBody", () => {
   // #2256。散文の確認では「登録されたか」を確かめられず、aide-botでは未実施のままcloseされた
   it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
     const commands = extractVerificationCommands(body).map((entry) => entry.command);
-    expect(commands).toHaveLength(3);
+    // 手順の3つに加えて、#2246で手順を外した2つ（共通secret・ホスト名）の確認だけを引き取る
+    expect(commands).toHaveLength(5);
     expect(commands[0]).toContain("test -d /home/guchi/apps/kakei-report/.git");
     expect(commands[1]).toContain("grep -F 'guchi-apps/kakei-report /home/guchi/apps/kakei-report'");
     // 投入と同じ引数に`--check`を足しただけの形。ずれると確かめていないフィールドが生まれる
@@ -387,13 +399,42 @@ describe("buildSubpcManualIssueBody", () => {
     expect(commands[2]).toContain("--copy-allowed-emails");
   });
 
+  // #2246。登録の手順は外したが、`visibility`が`selected`へ戻されたときに黙って壊れないよう
+  // 確認だけは残し、定期巡回が拾えるようにする
+  it("登録を求めずに、共通secretとホスト名の確認だけを引き取る", () => {
+    const commands = extractVerificationCommands(body).map((entry) => entry.command);
+    expect(commands[3]).toContain("actions/organization-secrets");
+    expect(commands[3]).toContain(
+      "grep -cE '^(CLAUDE_CODE_OAUTH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|WORKFLOW_PAT)$'",
+    );
+    expect(commands[4]).toContain("dig +short kakei-report.gucchii.com A");
+    // リポジトリごとの登録画面は案内しない（organizationの設定だけ、足りないときの逃げ道に残す）
+    expect(body).not.toContain("github.com/guchi-apps/kakei-report/settings/secrets");
+    expect(body).not.toContain("Aレコードを追加");
+  });
+
+  it("マルチエージェント運用に対応させないと、数える共通secretも減る", () => {
+    const single = buildSubpcManualIssueBody(spec({ multiAgent: false }), REFS);
+    const commands = extractVerificationCommands(single).map((entry) => entry.command);
+    expect(commands[3]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
+    expect(single).toContain("**`1` が出れば完了です。**");
+  });
+
+  it("パス配置ではホスト名の確認を出さない", () => {
+    const pathBody = buildSubpcManualIssueBody(
+      spec({ urlMode: "path", basePath: "kakei-report" }),
+      REFS,
+    );
+    expect(extractVerificationCommands(pathBody)).toHaveLength(4);
+  });
+
   it("確認コマンドまで手作業アシスタントが代行実行できる（#2256）", () => {
     const plan = buildManualStepRunPlan(body, undefined, {
       host: READY_HOST,
       isManualStepIssue: true,
     });
     const verifications = plan.entries.filter((entry) => entry.kind === "verification");
-    expect(verifications).toHaveLength(3);
+    expect(verifications).toHaveLength(5);
     expect(verifications.every((entry) => entry.rejection === null)).toBe(true);
   });
 
@@ -408,87 +449,123 @@ describe("buildSubpcManualIssueBody", () => {
   });
 });
 
-describe("buildVpsManualIssueBody", () => {
+describe("buildVpsManualIssueBody（ワークフローへ流す形・#2246）", () => {
   const body = buildVpsManualIssueBody(spec(), REFS);
 
-  it("Gitで配れない実機の操作だけを書き、VirtualHostは書かない", () => {
-    // 実機の配置先は `/apps/<name>` ではない（#2246・#2249。target-dirと同じパスにする）
-    expect(body).toContain("sudo mkdir -p /home/github-user/apps/kakei-report");
-    expect(body).toContain("CREATE DATABASE IF NOT EXISTS app_kakei_report");
-    expect(body).toContain("pm2 save");
-    expect(body).toContain("certbot --apache -d kakei-report.gucchii.com");
+  it("実機のコマンドではなく、vpsのプロビジョニングを流す手順にする", () => {
+    expect(body).toContain("gh workflow run provision-app.yml --repo guchi-apps/vps");
+    expect(body).toContain("-f app_name=kakei-report");
+    expect(body).toContain("-f app_host=kakei-report.gucchii.com");
+    expect(body).toContain("-f app_port=3112");
+    expect(body).toContain("-f db_name=app_kakei_report");
+    // 実機を直接叩く手順はもう出さない
+    expect(body).not.toContain("sudo mkdir -p");
+    expect(body).not.toContain("CREATE DATABASE");
+    expect(body).not.toContain("certbot --apache");
     expect(body).not.toContain("<VirtualHost");
   });
 
+  it("初回デプロイの前と後で2回流すことを書く（PM2の登録は後でしか進まない）", () => {
+    const command = "gh workflow run provision-app.yml";
+    const first = body.indexOf(command);
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf(command, first + 1)).toBeGreaterThan(first);
+    expect(body).toContain("初回デプロイの後");
+  });
+
   it("certbotが作る設定ファイルをvpsのIssueへ戻す手順を持つ", () => {
+    expect(body).toContain("リポジトリへ取り込む差分");
     expect(body).toContain("kakei-report.gucchii.com-le-ssl.conf");
     expect(body).toContain(REFS.vps!);
   });
 
-  it("控える前に :443 の X-Forwarded-Proto を https へ直す手順を持つ", () => {
-    expect(body).toContain(
-      "sudo sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/'",
-    );
-    expect(body).toContain("sudo apachectl configtest && sudo systemctl reload apache2");
-    // 控えた内容がそのまま取り込まれるため、直す手順はcatより前に無いと意味がない
-    expect(body.indexOf("X-Forwarded-Proto")).toBeLessThan(body.indexOf("sudo cat"));
+  it("DNSのAレコードの登録を前提にしない（ワイルドカードで引ける）", () => {
+    expect(body).toContain("guchi-apps/vps#131");
+    expect(body).not.toContain("Aレコードを追加");
   });
 
-  it("認証を持たない種別でも X-Forwarded-Proto の手順を出す", () => {
-    const staticBody = buildVpsManualIssueBody(
-      spec({ kind: "static", port: null, databaseName: null }),
-      REFS,
-    );
-    expect(staticBody).toContain("X-Forwarded-Proto");
-  });
-
-  it("実行するデバイスはVPSで、代行実行の対象にはしない", () => {
-    expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("VPS");
+  it("実行するデバイスはサブPCで、代行実行の対象になる", () => {
+    expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("サブPC");
     const plan = buildManualStepRunPlan(body, undefined, {
       host: READY_HOST,
       isManualStepIssue: true,
     });
-    expect(plan.runnable).toBe(0);
-    expect(plan.entries.every((entry) => entry.rejection === "device_not_subpc")).toBe(true);
+    expect(plan.runnable).toBe(plan.entries.length);
+    expect(plan.entries.every((entry) => entry.rejection === null)).toBe(true);
   });
 
   it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
     const commands = extractVerificationCommands(body).map((entry) => entry.command);
-    // 置き場・DB・PM2・公開・X-Forwarded-Proto
-    expect(commands).toHaveLength(5);
-    expect(commands[0]).toContain("test -d /home/github-user/apps/kakei-report");
-    expect(commands[1]).toContain("SHOW DATABASES LIKE 'app_kakei_report'");
-    expect(commands[2]).toContain("pm2 describe kakei-report");
-    expect(commands[3]).toContain("curl -fsS");
-    expect(commands[4]).toContain('X-Forwarded-Proto "http"');
+    // 直近の実行の成否・公開URLの疎通
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toContain("gh run list --repo guchi-apps/vps");
+    expect(commands[0]).toContain("grep -x success");
+    expect(commands[1]).toContain("curl -fsS");
   });
 
-  it("手順を出し分けた種別では、確認も同じだけ減る（#2256）", () => {
-    const staticBody = buildVpsManualIssueBody(
-      spec({ kind: "static", port: null, databaseName: null }),
-      REFS,
+  it("DBを持たない種別では db_name を渡さない", () => {
+    const noDb = buildVpsManualIssueBody(spec({ kind: "next", databaseName: null }), REFS);
+    expect(noDb).toContain("-f app_name=kakei-report");
+    expect(noDb).not.toContain("-f db_name=");
+  });
+});
+
+describe("buildVpsManualIssueBody（実機の手順が残る形・#2246）", () => {
+  // `app_port`が必須なので、ポートを持たない種別だけはワークフローを使えない
+  const staticBody = buildVpsManualIssueBody(
+    spec({ kind: "static", port: null, databaseName: null }),
+    REFS,
+  );
+
+  it("実機の手順を出し、デバイスはVPSのままにする", () => {
+    expect(staticBody).toContain("sudo mkdir -p /home/github-user/apps/kakei-report");
+    expect(staticBody).toContain("certbot --apache -d kakei-report.gucchii.com");
+    expect(parseManualStepGuide(staticBody)?.where.defaultDevice).toBe("VPS");
+  });
+
+  it("控える前に :443 の X-Forwarded-Proto を https へ直す手順を持つ", () => {
+    expect(staticBody).toContain(
+      "sudo sed -i 's/X-Forwarded-Proto \"http\"/X-Forwarded-Proto \"https\"/'",
     );
+    expect(staticBody).toContain("sudo apachectl configtest && sudo systemctl reload apache2");
+    // 控えた内容がそのまま取り込まれるため、直す手順はcatより前に無いと意味がない
+    expect(staticBody.indexOf("X-Forwarded-Proto")).toBeLessThan(staticBody.indexOf("sudo cat"));
+  });
+
+  it("DBもポートも無いので、その手順と確認を出さない（#2256）", () => {
+    expect(staticBody).not.toContain("CREATE DATABASE");
+    expect(staticBody).not.toContain("pm2 save");
     const commands = extractVerificationCommands(staticBody).map((entry) => entry.command);
     expect(commands).toHaveLength(3);
     expect(commands.some((command) => command.includes("SHOW DATABASES"))).toBe(false);
     expect(commands.some((command) => command.includes("pm2 describe"))).toBe(false);
   });
-
-  it("DBもポートも無い種別では、その手順を出さない", () => {
-    const staticBody = buildVpsManualIssueBody(
-      spec({ kind: "static", port: null, databaseName: null }),
-      REFS,
-    );
-    expect(staticBody).not.toContain("CREATE DATABASE");
-    expect(staticBody).not.toContain("pm2 save");
-  });
 });
 
-describe("buildBrowserManualIssueBody", () => {
-  const body = buildBrowserManualIssueBody(spec(), REFS);
+describe("buildBrowserManualIssueBody（GitHub Appの追加だけ・#2246）", () => {
+  const body = buildBrowserManualIssueBody(spec(), {
+    ...REFS,
+    githubAppNeedsRepositoryAdd: true,
+  });
 
-  it("Aレコードを書く", () => {
-    expect(body).toContain("Aレコード");
+  it("インストール対象への追加だけを書く", () => {
+    expect(body).toContain("GitHub Appのインストール対象");
+    expect(body).toContain("settings/installations");
+    expect(parseManualStepGuide(body)?.steps.length).toBe(1);
+  });
+
+  // #2246。`*.gucchii.com`のワイルドカードで引けるため、アプリごとの登録は空振りになる
+  it("DNSのAレコードの登録を書かない", () => {
+    expect(body).not.toContain("Aレコードを追加");
+    expect(body).not.toContain("VPS管理画面");
+    // 「要らない」ことは残す（読んだ人が別のIssueを立て直さないように）
+    expect(body).toContain("登録は要りません");
+  });
+
+  // #2246。organizationに`visibility=all`で入っているため、リポジトリごとの登録は空振りになる
+  it("Actions secretsの登録を書かない", () => {
+    expect(body).not.toContain("settings/secrets/actions");
+    expect(body).not.toContain("WORKFLOW_PAT");
   });
 
   // #2248。立ち上げ自身が取り込むようになったので、人が押す手順にはしない
@@ -497,76 +574,20 @@ describe("buildBrowserManualIssueBody", () => {
     expect(body).not.toContain("Issueを再同期");
   });
 
-  // #2248。`repository_selection=all`では新しいリポジトリが自動で対象に入る
-  it("インストール対象への追加は、selectedのときだけ書く", () => {
-    expect(body).not.toContain("GitHub Appのインストール対象");
-    const selected = buildBrowserManualIssueBody(spec(), {
-      ...REFS,
-      githubAppNeedsRepositoryAdd: true,
-    });
-    expect(selected).toContain("GitHub Appのインストール対象");
-    expect(selected).toContain("settings/installations");
-  });
-
   it("SignalyのWebhook URLはorganization secretから来るため、チャンネル作成・登録を求めない（#2255）", () => {
     expect(body).not.toContain("Signaly");
     expect(body).not.toContain("provision-app-secrets.sh");
     expect(body).not.toContain("--ci-webhook-url");
   });
 
-  it("マルチエージェント運用に対応させるときだけWORKFLOW_PATを求める", () => {
-    expect(body).toContain("WORKFLOW_PAT");
-    expect(buildBrowserManualIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
-      "WORKFLOW_PAT",
-    );
-  });
-
-  it("パス配置ではAレコードの手順を出さない", () => {
-    const pathBody = buildBrowserManualIssueBody(
-      spec({ urlMode: "path", basePath: "kakei-report" }),
-      REFS,
-    );
-    expect(pathBody).not.toContain("Aレコードを追加");
-  });
-
   it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
     const commands = extractVerificationCommands(body).map((entry) => entry.command);
-    expect(commands).toHaveLength(2);
-    expect(commands[0]).toBe("dig +short kakei-report.gucchii.com A");
-    // organizationのsecretも数える（repo secretだけ見ると、足りているのに落ちる）
-    expect(commands[1]).toContain("actions/organization-secrets");
-    expect(commands[1]).toContain(
-      "grep -cE '^(CLAUDE_CODE_OAUTH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|WORKFLOW_PAT)$'",
-    );
-    expect(body).toContain("**`3` が出れば完了です。**");
-  });
-
-  it("登録する名前が減ると、確認の期待値も減る（#2256）", () => {
-    const single = buildBrowserManualIssueBody(spec({ multiAgent: false }), REFS);
-    const commands = extractVerificationCommands(single).map((entry) => entry.command);
-    expect(commands[1]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
-    expect(single).toContain("**`1` が出れば完了です。**");
-  });
-
-  it("パス配置ではAレコードの確認を出さない（#2256）", () => {
-    const pathBody = buildBrowserManualIssueBody(
-      spec({ urlMode: "path", basePath: "kakei-report" }),
-      REFS,
-    );
-    expect(extractVerificationCommands(pathBody)).toHaveLength(1);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain("gh api repos/guchi-apps/kakei-report/installation");
   });
 
   it("実行するデバイスはブラウザ", () => {
     expect(parseManualStepGuide(body)?.where.defaultDevice).toBe("ブラウザ");
-  });
-
-  // 手順の並びが崩れると、画面の手作業アシスタントが手順を読み落とす
-  it("どちらの形でも手順として読める（selectedのときは1つ増える）", () => {
-    const steps = (refs: NewAppIssueRefs) =>
-      parseManualStepGuide(buildBrowserManualIssueBody(spec(), refs))?.steps.length ?? 0;
-    // DNS・Actions secrets（#2255でSignalyのチャンネル作成・webhook投入を削除）
-    expect(steps(REFS)).toBe(2);
-    expect(steps({ ...REFS, githubAppNeedsRepositoryAdd: true })).toBe(3);
   });
 });
 
