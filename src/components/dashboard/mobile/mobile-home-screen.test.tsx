@@ -252,6 +252,20 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(questionRow(3).querySelector(".animate-spin")).toBeNull();
   });
 
+  // 質問の合図をコードレビューの行へ持ち込まない（#2325・PCと同じ）
+  it("回答待ちの質問があってもコードレビューの行は回さない", () => {
+    renderHome({
+      navCounts: { ...NAV_COUNTS, question: 3 },
+      unconfirmedQuestionCount: 1,
+      waitingQuestionCount: 2,
+    });
+
+    const row = screen.getByRole("button", { name: /^コードレビュー/ });
+    expect(row.querySelector(".animate-spin")).toBeNull();
+    expect(row.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(row.getAttribute("title")).toBeNull();
+  });
+
   it("未確認の質問が無くても、開いている質問の件数は出す（強調はしない）", () => {
     renderHome({
       navCounts: { ...NAV_COUNTS, question: 3 },

@@ -27,7 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import { formatQuestionNavTitle } from "@/lib/question-attention";
+import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
@@ -341,24 +341,29 @@ export function MobileHomeScreenView({
             <Separator className="my-2" />
 
             <ul className="flex flex-col gap-1">
-              {sidebarQuestionNavViews.map((view) => (
-                <MobileNavRow
-                  key={view.id}
-                  label={view.label}
-                  icon={navViewIcons[view.id]}
-                  onClick={() => onSelectQuickView(view.id)}
-                  // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）。
-                  // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
-                  count={navCounts[view.id]}
-                  emphasis={unconfirmedQuestionCount > 0 ? "attention" : "none"}
-                  busy={waitingQuestionCount > 0}
-                  title={formatQuestionNavTitle(
-                    navCounts[view.id],
-                    unconfirmedQuestionCount,
-                    waitingQuestionCount,
-                  )}
-                />
-              ))}
+              {sidebarQuestionNavViews.map((view) => {
+                // 合図は行ごとに決める（#2325・PCと同じ`resolveQuestionNavSignals`）。
+                // まとめて渡すと、質問の回答待ちのあいだ「コードレビュー」の行まで回る
+                const signals = resolveQuestionNavSignals(view.id, {
+                  total: navCounts.question,
+                  unconfirmed: unconfirmedQuestionCount,
+                  waiting: waitingQuestionCount,
+                });
+                return (
+                  <MobileNavRow
+                    key={view.id}
+                    label={view.label}
+                    icon={navViewIcons[view.id]}
+                    onClick={() => onSelectQuickView(view.id)}
+                    // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）。
+                    // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
+                    count={navCounts[view.id]}
+                    emphasis={signals.attention ? "attention" : "none"}
+                    busy={signals.busy}
+                    title={signals.title}
+                  />
+                );
+              })}
               {/* 件数の意味と数え方はPCの左メニュー（`sidebar-nav.tsx`）と同じ（#2167）。
                   リリース・デプロイが動いているプロジェクト数を出し、人が操作するまで進まない
                   ものがあるときだけオレンジの丸にする。手作業は含めない */}

@@ -253,6 +253,22 @@ describe("SidebarNav", () => {
     ).toBeNull();
   });
 
+  // 質問の合図をコードレビューの行へ持ち込まない（#2325）。同じ枠に並んでいるだけで、
+  // 回っているのは質問の回答待ち——押した先にレビューは1件も走っていない
+  it("回答待ちの質問があってもコードレビューの行は回さない", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
+    );
+
+    const button = screen.getByRole("button", { name: /コードレビュー/ });
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    // 質問の未確認でオレンジの丸を点けたり、質問の内訳を吹き出しに出したりもしない
+    expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(button.getAttribute("title")).toBeNull();
+  });
+
   it("未確認の質問が無ければ強調しないが、件数は出す", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0 },
