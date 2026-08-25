@@ -12,6 +12,8 @@ import { clearLabelsOnIssueClose } from "@/lib/github/issue-close-cleanup";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
+import { runExclusive } from "@/lib/keyed-mutex";
+import { isUniqueConstraintError } from "@/lib/prisma-error";
 import type { Issue } from "@/types/issue";
 import type { IssueState, IssueStateReason } from "@prisma/client";
 
@@ -57,7 +59,68 @@ function toIssueStateReason(
   }
 }
 
+/**
+ * GitHubのIssue1件をDBへ反映する。画面のPATCH・Webhook・定期同期の3経路が通る。
+ *
+ * **同じIssueの「読んでから書く」を同時に2本走らせない**（#2365）。この関数はDBを読んでから
+ * 書くまでに隙間があり、同時に走ると両方が同じ「読んだ値」を見て書きに行く。実測（開発DBで
+ * 同時2本×3回）では**6回中5回**が落ち、内訳はユニーク制約違反（P2002）とデッドロック
+ * （P2034）だった。落ちるとラベルの同期だけでなく、下のOPEN→CLOSED検知にも到達しない。
+ *
+ * **ロックの中はDBの読み書きだけにする。** closeの後片付け（GitHubへのラベル除去・
+ * ローカルセッションの停止）は秒単位かかるので、中へ入れると同じIssueへ続けて届いた
+ * Webhookがその間ずっと待たされる。
+ */
 async function upsertIssueRow(
+  repositoryId: string,
+  raw: GithubApiIssue,
+  commentCreatedAt?: Date,
+) {
+  const written = await runExclusive(`issue:${raw.id}`, () =>
+    writeIssueRow(repositoryId, raw, commentCreatedAt),
+  );
+
+  // closeされたら、そのIssueで走っているローカルセッションを畳み（#1518）、残ると害になる
+  // ラベルを外す（#2178）。
+  //
+  // **OPEN→CLOSEDの遷移だけで発火させる。** 「今CLOSEDである」で判定すると、定期同期が回るたび
+  // （closedなIssueへ人が手で起こしたセッションも含めて）畳みに行ってしまう。更新前の状態を
+  // 持っているのは`writeIssueRow`だけで、画面のPATCH・webhook・定期同期の3経路がそこを通る。
+  //
+  // 配信順序が前後した古いペイロードは`writeIssueRow`の`githubUpdatedAt`のガードで先に返るため、
+  // 「closeされた後に届いたopenの通知」で二重に発火することはない。
+  if (written.closedNow) {
+    // `repositoryFullName`はこの関数が持っていないので、遷移を検知したときだけ引く
+    // （呼び出し3経路のシグネチャを変えないため）。ラベルの除去はGitHubへ書きに行くので、
+    // インストールIDもここで一緒に取る。
+    const repository = await db.repository.findUnique({
+      where: { id: repositoryId },
+      select: {
+        fullName: true,
+        ownerLogin: true,
+        name: true,
+        installation: { select: { installationId: true } },
+      },
+    });
+    if (repository) {
+      await handleIssueClosedForDispatch({
+        repositoryFullName: repository.fullName,
+        issueNumber: written.issue.number,
+      });
+      await clearLabelsOnClose(
+        repository,
+        written.issue.id,
+        written.issue.number,
+        written.labelNames,
+      );
+    }
+  }
+
+  return written.issue;
+}
+
+/** `upsertIssueRow`のうち、同じIssueで重ねてはいけないDBの読み書き。 */
+async function writeIssueRow(
   repositoryId: string,
   raw: GithubApiIssue,
   commentCreatedAt?: Date,
@@ -71,7 +134,7 @@ async function upsertIssueRow(
   if (existing && existing.githubUpdatedAt > githubUpdatedAt) {
     // Webhookの配信順序はGitHub側で保証されないため、既に反映済みより古いペイロードは無視する
     // （新しいラベル状態が古い状態で上書きされるのを防ぐ）。
-    return existing;
+    return { issue: existing, closedNow: false, labelNames: [] as string[] };
   }
 
   // 「確認待ちフィルターを実際のコメント投稿日時順に並べる」ための基準時刻。
@@ -129,68 +192,87 @@ async function upsertIssueRow(
     lastCommentAt,
   };
 
-  const issue = await db.issue.upsert({
-    where: { githubIssueId: BigInt(raw.id) },
-    create: { githubIssueId: BigInt(raw.id), ...data },
-    update: keepCheckUserPushSentAt ? data : { ...data, checkUserPushSentAt: null },
-  });
+  const update = keepCheckUserPushSentAt ? data : { ...data, checkUserPushSentAt: null };
+  const issueWhere = { githubIssueId: BigInt(raw.id) };
+  let issue;
+  try {
+    issue = await db.issue.upsert({
+      where: issueWhere,
+      create: { githubIssueId: BigInt(raw.id), ...data },
+      update,
+    });
+  } catch (error) {
+    // 直列化（`upsertIssueRow`）を抜けてもなお同時に走った場合の保険（#2365）。まだDBに
+    // 無いIssueで両方がINSERTへ進むと後発が`Issue_githubIssueId_key`で落ちるので、
+    // **落ちた側をUPDATEへ回して吸収する**（先発のINSERTは済んでいるので必ず引ける）。
+    // プロセスを増やしたときに、ここが黙って壊れないようにしておく。
+    if (!isUniqueConstraintError(error)) throw error;
+    issue = await db.issue.update({ where: issueWhere, data: update });
+  }
 
   const labelNames = raw.labels.map(mapLabelName);
+  await syncIssueLabels(issue.id, raw.labels);
+
+  return {
+    issue,
+    closedNow: existing?.state === "OPEN" && data.state === "CLOSED",
+    labelNames,
+  };
+}
+
+/**
+ * IssueのラベルをGitHub側の状態へ合わせる（付いたものを足し、外れたものを消す）。
+ *
+ * **1件ずつの`upsert`にしない**（#2365）。複合ユニークキー（`issueId_name`）に対する
+ * Prismaの`upsert`はMySQLでは1文にならず「SELECTしてからINSERT／UPDATE」に分かれるため、
+ * 同時に走った2本が揃って「まだ無い」を見てINSERTへ進み、後発が
+ * `IssueLabel_issueId_name_key`のユニーク制約（P2002）で落ちる。本番で出ていたのはこれ。
+ *
+ * 同時実行そのものは`upsertIssueRow`の直列化で止めているので、**ここは同じプロセスの外から
+ * 重なったときの保険**。`createMany({ skipDuplicates: true })`はMySQLでは`INSERT IGNORE`の
+ * 1文になり、競合しても落ちない。色・説明・GitHubのラベルIDの追随はユニークキーを動かさない
+ * `updateMany`で行う（既に他方が入れていれば上書き、まだ無ければ0件でそのまま）。
+ * どちらもP2002を起こしえない。
+ *
+ * **ただし`skipDuplicates`だけでは足りない**（実測）。この`$transaction`はINSERTのギャップロックと
+ * `DELETE ... name NOT IN (...)`の範囲ロックを1つのトランザクションで取るため、同時に走ると
+ * 今度はデッドロック（P2034）になる。落とさないための本体は直列化のほう。
+ */
+async function syncIssueLabels(
+  issueId: string,
+  labels: GithubApiIssue["labels"],
+): Promise<void> {
+  const rows = labels.map((label) => ({
+    name: mapLabelName(label),
+    color: mapLabelColor(label),
+    description: mapLabelDescription(label),
+    githubLabelId: mapLabelId(label),
+  }));
+
   await db.$transaction([
-    ...raw.labels.map((label) =>
-      db.issueLabel.upsert({
-        where: { issueId_name: { issueId: issue.id, name: mapLabelName(label) } },
-        create: {
-          issueId: issue.id,
-          name: mapLabelName(label),
-          color: mapLabelColor(label),
-          description: mapLabelDescription(label),
-          githubLabelId: mapLabelId(label),
-        },
-        update: {
-          color: mapLabelColor(label),
-          description: mapLabelDescription(label),
-          githubLabelId: mapLabelId(label),
+    // ラベルが1枚も無いIssueで空配列のINSERTを投げない
+    ...(rows.length > 0
+      ? [
+          db.issueLabel.createMany({
+            data: rows.map((row) => ({ issueId, ...row })),
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
+    ...rows.map((row) =>
+      db.issueLabel.updateMany({
+        where: { issueId, name: row.name },
+        data: {
+          color: row.color,
+          description: row.description,
+          githubLabelId: row.githubLabelId,
         },
       }),
     ),
     db.issueLabel.deleteMany({
-      where: { issueId: issue.id, name: { notIn: labelNames } },
+      where: { issueId, name: { notIn: rows.map((row) => row.name) } },
     }),
   ]);
-
-  // closeされたら、そのIssueで走っているローカルセッションを畳み（#1518）、残ると害になる
-  // ラベルを外す（#2178）。
-  //
-  // **OPEN→CLOSEDの遷移だけで発火させる。** 「今CLOSEDである」で判定すると、定期同期が回るたび
-  // （closedなIssueへ人が手で起こしたセッションも含めて）畳みに行ってしまう。更新前の状態を
-  // 持っているのはこの関数だけで、画面のPATCH・webhook・定期同期の3経路がここを通る。
-  //
-  // 配信順序が前後した古いペイロードは上の`githubUpdatedAt`のガードで先に返るため、
-  // 「closeされた後に届いたopenの通知」で二重に発火することはない。
-  if (existing?.state === "OPEN" && data.state === "CLOSED") {
-    // `repositoryFullName`はこの関数が持っていないので、遷移を検知したときだけ引く
-    // （呼び出し3経路のシグネチャを変えないため）。ラベルの除去はGitHubへ書きに行くので、
-    // インストールIDもここで一緒に取る。
-    const repository = await db.repository.findUnique({
-      where: { id: repositoryId },
-      select: {
-        fullName: true,
-        ownerLogin: true,
-        name: true,
-        installation: { select: { installationId: true } },
-      },
-    });
-    if (repository) {
-      await handleIssueClosedForDispatch({
-        repositoryFullName: repository.fullName,
-        issueNumber: issue.number,
-      });
-      await clearLabelsOnClose(repository, issue.id, issue.number, labelNames);
-    }
-  }
-
-  return issue;
 }
 
 export async function syncRepositoryIssues(repository: RepoForSync): Promise<void> {

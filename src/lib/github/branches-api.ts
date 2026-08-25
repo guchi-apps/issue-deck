@@ -1,5 +1,5 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { githubGraphql } from "@/lib/github/graphql";
+import { githubGraphql, type GraphqlError } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
 import type { BranchComparison, UnreleasedUnits } from "@/types/branch-flow";
@@ -60,6 +60,10 @@ type GraphqlResult = {
  * 1リクエストで何本でも引けるので、進行中のIssueのぶんだけ存在を確認すれば足りる
  * （「ブランチはあるがPRがまだ無い」を出すための判定）。`main...develop`の差分も
  * 同じクエリに相乗りさせている。
+ *
+ * **`develop`が無いリポジトリでも失敗させない**（#2364）。相乗りさせた`compare`だけが
+ * エラーになるので、そのエラーは`isMissingCompareHeadRef`で無視し、ブランチの存在確認は
+ * そのまま返す。
  */
 export async function lookupBranchRefs(
   owner: string,
@@ -115,7 +119,10 @@ export async function lookupBranchRefs(
     query,
     variables,
     "branch refs",
-    { permissionHint: "（リポジトリのContents/Metadataの読み取り権限が必要です）" },
+    {
+      permissionHint: "（リポジトリのContents/Metadataの読み取り権限が必要です）",
+      ignoreErrors: isMissingCompareHeadRef,
+    },
   );
 
   const repository = data.repository;
@@ -129,6 +136,27 @@ export async function lookupBranchRefs(
     existingBranches,
     developVsMain: toBranchComparison(repository.comparison?.compare ?? null),
   };
+}
+
+/**
+ * `develop`を解決できずに`compare`だけが落ちたGraphQLエラーか（#2364）。
+ *
+ * **`develop`を持たないのは正常な状態**（`docs`・`claude-config`などは単一ブランチ運用）なのに、
+ * GitHubは`Could not resolve head ref 'develop'.`を`errors`へ入れて返す。既定では`errors`が
+ * 1件でもあれば全体を失敗にするため、**同じクエリに相乗りしているブランチ存在確認まで
+ * 丸ごと落ちて**、ポーリングのたびに`/api/branch-flow`がそのリポジトリを取得失敗として扱い、
+ * 本番のエラーログを埋めていた。
+ *
+ * `data`は`compare`だけを`null`にして返ってくるので、このエラーは無視して`developVsMain`を
+ * `null`（＝どちらかのブランチが無い）へ落とせば足りる。**このクエリの`compare`は
+ * `headRef: "develop"`しか指定していない**ため、`path`の末尾が`compare`であることまで見れば
+ * 他の失敗と取り違えない。
+ */
+function isMissingCompareHeadRef(error: GraphqlError): boolean {
+  return (
+    error.path?.[error.path.length - 1] === "compare" &&
+    /Could not resolve head ref/.test(error.message)
+  );
 }
 
 /**

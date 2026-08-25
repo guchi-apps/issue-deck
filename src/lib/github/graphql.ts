@@ -10,9 +10,20 @@ import { githubFetch, GITHUB_API } from "@/lib/github/request";
  * として扱うのがGraphQLの仕様で、ここを素通しにすると権限不足が静かに空データになる。
  */
 
+/**
+ * GraphQLの`errors`の1件。`type`・`path`はGitHubが付ける拡張で、無い場合もある。
+ * **フィールド単位のエラーは`path`でどのフィールドが落ちたかまで分かる**ため、
+ * 「正常な状態でも返るエラー」を`ignoreErrors`で見分けるのに使う（#2364）。
+ */
+export type GraphqlError = {
+  message: string;
+  type?: string;
+  path?: (string | number)[];
+};
+
 type GraphqlResponse<T> = {
   data?: T;
-  errors?: { message: string }[];
+  errors?: GraphqlError[];
 };
 
 /** 権限不足のエラーメッセージ。必要な権限のヒントを添える判定に使う */
@@ -34,6 +45,18 @@ export type GraphqlOptions = {
    * 1件の欠けで一覧そのものが出なくなるため、まとめ取りの呼び出し側だけがこれを立てる。
    */
   allowPartialData?: boolean;
+  /**
+   * **正常な状態でも必ず返るエラー**を、失敗としても警告としても扱わずに落とす（#2364）。
+   *
+   * GraphQLはフィールド単位のエラーを`errors`に入れつつ、そのフィールドだけを`null`にした
+   * `data`を返す。`develop`を持たないリポジトリでの`main...develop`比較のように、
+   * **そのエラーが出るのが正常**なケースでは、同じクエリに相乗りしている他のフィールドまで
+   * 巻き添えで失敗させる理由が無い（ポーリングのたびに本番のエラーログが埋まっていた）。
+   *
+   * ここでtrueにしたエラーを除いても`errors`が残っていれば、従来どおり
+   * `allowPartialData`の判定へ進む（＝既定では例外にする）。
+   */
+  ignoreErrors?: (error: GraphqlError) => boolean;
 };
 
 /**
@@ -57,13 +80,16 @@ export async function githubGraphql<T>(
   }
 
   const json: GraphqlResponse<T> = await res.json();
-  if (json.errors?.length && json.data && options.allowPartialData) {
-    const message = json.errors.map((error) => error.message).join("; ");
+  // 呼び出し側が「正常な状態でも返る」と宣言したエラーは、ここで先に落とす（#2364）。
+  // 残らなければ`data`をそのまま返す——ログにも出さない。
+  const errors = (json.errors ?? []).filter((error) => !options.ignoreErrors?.(error));
+  if (errors.length && json.data && options.allowPartialData) {
+    const message = errors.map((error) => error.message).join("; ");
     console.warn(`[githubGraphql] ${operationLabel}: 一部を取得できませんでした: ${message}`);
     return json.data;
   }
-  if (json.errors?.length || !json.data) {
-    const message = json.errors?.map((error) => error.message).join("; ") ?? "unknown error";
+  if (errors.length || !json.data) {
+    const message = errors.map((error) => error.message).join("; ") || "unknown error";
     // 権限不足はここに出るため、原因を切り分けやすいようヒントを添える
     const hint = options.permissionHint && message.includes(NOT_ACCESSIBLE) ? options.permissionHint : "";
     throw new GithubApiError(403, `GitHub GraphQL ${operationLabel} failed: ${message}${hint}`);

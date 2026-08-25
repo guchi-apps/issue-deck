@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.43.1",
+    date: "2026-08-25",
+    changes: [
+      "Webhookで届いたIssueの更新が処理中に稀に失敗し、ラベルやステータスの反映が抜け落ちることがある不具合を修正しました。developブランチを持たないリポジトリで発生していた表示エラーも解消しました。あわせて、サーバーの安定性を高める内部的な改善を行いました。",
+    ],
+  },
+  {
     version: "4.43.0",
     date: "2026-08-25",
     changes: [
