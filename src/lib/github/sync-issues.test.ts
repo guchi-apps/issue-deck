@@ -197,13 +197,14 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
     );
   });
 
-  it("00.check-userが付いたまま変化していなければ、送信済み記録を維持する（同じ確認待ちで鳴らし直さない）", async () => {
+  // #2300: 読んだ値を書き戻すと、`existing`を読んでからupsertするまでの隙間に巡回側が
+  // 立てた記録を消してしまい、同じ通知がもう一度送られる
+  it("00.check-userが付いたまま変化していなければ、送信済み記録の列を書かない（同じ確認待ちで鳴らし直さない）", async () => {
     const labeledAt = new Date("2026-08-01T00:00:00.000Z");
-    const sentAt = new Date("2026-08-01T00:03:00.000Z");
     findUnique.mockResolvedValue({
       githubUpdatedAt: new Date("2026-01-01T00:00:00.000Z"),
       checkUserLabeledAt: labeledAt,
-      checkUserPushSentAt: sentAt,
+      checkUserPushSentAt: new Date("2026-08-01T00:03:00.000Z"),
       labels: [{ name: "00.check-user" }],
     });
     const raw = makeRawIssue({
@@ -212,9 +213,9 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
 
     await upsertIssueFromWebhookPayload("repo-1", raw);
 
-    expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: expect.objectContaining({ checkUserPushSentAt: sentAt }) }),
-    );
+    const update = upsert.mock.calls.at(-1)?.[0].update;
+    expect(update).not.toHaveProperty("checkUserPushSentAt");
+    expect(update).toEqual(expect.objectContaining({ checkUserLabeledAt: labeledAt }));
   });
 
   it("00.check-userが外れたら、送信済み記録もnullに戻す", async () => {

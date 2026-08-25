@@ -33,7 +33,9 @@ import {
  *
  * 送信済みかどうかは`Issue.checkUserPushSentAt`で持つ。`00.check-user`が付き直すたびに
  * `checkUserLabeledAt`とセットでnullへ戻る（`github/sync-issues.ts`）ので、
- * 「まだnullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。
+ * 「まだnullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。**この記録は送る前に
+ * 立てて席を取る**（#2300。`reserveCheckUserPush`）——巡回は同時に何本も走るため、
+ * 送ってから付けていると同じ通知が続けて2件届く。
  */
 
 /** 既定の待ち時間。理由ラベルが揃うのを待つだけなので短くてよい */
@@ -161,6 +163,30 @@ async function selectPendingSessionRequestKeys(
 }
 
 /**
+ * 「これから送る」ことを先に記録して席を取る（#2300）。取れたらtrue。
+ *
+ * **巡回は同時に何本も走る。** 呼び口は`POST /api/dispatch/claim`（pollerが30秒ごと）と
+ * GitHubのWebhook受け口の2つで、Webhookは`00.check-user`が付くときに何件かまとめて届く
+ * （ラベルの付与・理由ラベルの付与・計画コメントの投稿）。送ってから記録を付けていると、
+ * その隙間に入った別の巡回も同じIssueを未送信として拾い、**同じ通知が続けて2件届く**。
+ *
+ * `updateMany`の更新件数で確定させる楽観的な取り方は、ジョブの払い出し
+ * （`dispatch/jobs.ts`の`claimCandidates`）と同じ。`where`に`checkUserPushSentAt: null`を
+ * 含めるので、取り合いが起きても勝つのは1本だけで、トランザクションもロックも要らない。
+ *
+ * **送信の成否で記録を戻さない。** 一時的な失敗のために巡回のたび鳴らし直すより、
+ * 1件落とす方が軽い（次の確認待ちは同じ経路で届く）。`skip`（古すぎるもの）も同じ口を
+ * 通し、送らずに記録だけ付ける。
+ */
+async function reserveCheckUserPush(issueId: string, now: Date): Promise<boolean> {
+  const result = await db.issue.updateMany({
+    where: { id: issueId, checkUserPushSentAt: null },
+    data: { checkUserPushSentAt: now },
+  });
+  return result.count > 0;
+}
+
+/**
  * 待ち時間の過ぎた確認待ちをまとめて通知する。
  *
  * **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。呼ぶのは
@@ -210,6 +236,10 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     });
     if (decision === "wait") continue;
 
+    // **送る前に「送信済み」を立てて席を取る**（#2300）。取れなかったら、同じIssueを
+    // 別の巡回が既に掴んでいるので何もしない
+    if (!(await reserveCheckUserPush(issue.id, now))) continue;
+
     if (decision === "send") {
       // 宛先は「そのリポジトリのインストールに紐づくユーザー」の購読すべて。
       // 種別単位のON/OFFは今回の範囲外（購読の有無だけで決める）。
@@ -237,10 +267,6 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
       );
       sent += result.sent;
     }
-
-    // 送れなかった場合も記録は付ける。一時的な失敗のために巡回のたび鳴らし直すより、
-    // 1件落とす方が軽い（次の確認待ちは同じ経路で届く）
-    await db.issue.update({ where: { id: issue.id }, data: { checkUserPushSentAt: now } });
   }
 
   return sent;

@@ -66,6 +66,7 @@ export function ManualStepRunPanel({
   onSucceeded,
   onRetry,
   onApplyFix,
+  onApplyInstruction,
 }: {
   issue: Issue;
   guide: ManualStepGuide;
@@ -93,6 +94,14 @@ export function ManualStepRunPanel({
     line: number;
     command: string;
     run: boolean;
+  }) => Promise<{ ok: boolean; message?: string }>;
+  /**
+   * 手順の説明文の直し案を本文へ書き戻す（#2299）。コマンドではなく文言がずれていた場合の
+   * 適用先。渡されない場合は適用ボタンを出さない
+   */
+  onApplyInstruction?: (params: {
+    line: number;
+    instruction: string;
   }) => Promise<{ ok: boolean; message?: string }>;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -174,17 +183,37 @@ export function ManualStepRunPanel({
     fix.dismiss();
   }
 
+  /** 手順の説明文の直し案を適用する（#2299）。**実行はしない**（文言を直しても手順は済まない） */
+  async function handleApplyInstruction(nextInstruction: string) {
+    if (!onApplyInstruction) return;
+    setIsApplying(true);
+    setError(null);
+    const result = await onApplyInstruction({ line: entry.line, instruction: nextInstruction });
+    setIsApplying(false);
+    if (!result.ok) {
+      setError(result.message ?? "手順を直せませんでした。");
+      return;
+    }
+    fix.dismiss();
+  }
+
   const fixPanel =
-    fix.state !== null && job !== null && fix.state.jobId === job.id ? (
+    fix.state !== null && job !== null && fix.state.key === job.id ? (
       <ManualStepFixPanel
         fix={fix.state.fix}
         currentCommand={fix.state.currentCommand}
+        currentInstruction={fix.state.currentInstruction}
         isApplying={isApplying || dispatch.isSubmitting}
         error={null}
         onApply={
           onApplyFix
             ? (nextCommand, options) => void handleApplyFix(nextCommand, options)
             : () => undefined
+        }
+        onApplyInstruction={
+          onApplyInstruction
+            ? (nextInstruction) => void handleApplyInstruction(nextInstruction)
+            : undefined
         }
         onRetry={() => void handleRun()}
         onDismiss={fix.dismiss}

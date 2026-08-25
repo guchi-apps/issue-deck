@@ -781,6 +781,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
   **デバイスは手順ごとに持てる**（#2052。手順の文頭の`（サブPC）`。無ければ`## 前提条件`の
   「実行するデバイス」が既定値で、そこに端末が複数書かれていれば既定値は決まらない）。
+  - **本文の箇条書きから値を引く正規表現は、`\s*`ではなく`[^\S\n]*`で書く**（#2299）。
+    `m`フラグを付けても`\s*`は改行をまたぐため、`- 起きたこと: ` のように値が空の行に当てると、
+    **次の行以降を値として拾ってしまう**（`parseManualStepTroubleComments`が、値が空のコメントから
+    直後のHTMLコメントを「起きたこと」として読んでいた）。
   - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
     Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
     手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
@@ -867,6 +871,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **想定外だったら「うまくいかない」から相談できる**（#2299。
+    [`manual-step-trouble-panel.tsx`](../src/components/dashboard/manual-step-trouble-panel.tsx)・
+    [`lib/manual-step-trouble.ts`](../src/lib/manual-step-trouble.ts)）。#1869が拾うのは代行実行が
+    0以外で終わったときだけで、**人が自分で実行した手順**（ブラウザ・別デバイス・プレースホルダ入り）は
+    終了コードも出力も画面に届かない。手順と`## 完了の確認方法`の画面に出口を置き、分類・自由記述・
+    任意の貼り付けを受けて`POST /api/manual-steps/fix`（**jobIdの代わりに行と報告を送る**）で
+    診断する。**直せる先はコマンドと手順の説明文の2つ**で、後者は`replaceManualStepInstruction`が
+    `- [ ]`の後ろの1行だけを差し替える（**文言を直しても実行はしない**）。解決しなかったものは
+    Issueコメント（`<!-- manual-step-trouble:… -->`）として残り、次に開いた人の最初の画面に出る。
+    **貼り付けた内容はIssueへ入れず、Claudeへ送るのも同意があるときだけ**（既定オフ）。
+    `00.check-user`は付けない（手作業Issueには承認して再開させる相手が居ない）。設計は
+    [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#想定外だったらうまくいかないから相談する2299)。
   - **openな手作業の`## 完了の確認方法`は1日1回、人の操作なしに巡回する**（#2008。
     [`lib/manual-step-verification.ts`](../src/lib/manual-step-verification.ts)・
     [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・
@@ -1747,8 +1763,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     鳴る前に消えている**状態にする）。24時間より古い確認待ちは送らずに畳む（機能を入れた直後や
     購読を後から足したときに、溜まっていたものが一斉に鳴らないように）。
   - **送信済みかどうかは`Issue.checkUserPushSentAt`**。`00.check-user`が付き直すたびに
-    `checkUserLabeledAt`とセットでnullへ戻す（書き戻し口は`github/sync-issues.ts`の
+    `checkUserLabeledAt`とセットでnullへ戻す（落とす口は`github/sync-issues.ts`の
     `upsertIssueRow`だけ）。「nullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。
+  - **送る前にこの列を立てて席を取る**（#2300。`reserveCheckUserPush`）。**巡回は同時に何本も
+    走る**——下記のとおり呼び口がpollerとWebhookの2つあり、Webhookは`00.check-user`が付くとき
+    何件かまとめて届く（ラベルの付与・理由ラベルの付与・計画コメントの投稿）。送ってから記録を
+    付けていると、Pushサービスへの往復（数百ms）のあいだに入った別の巡回も同じIssueを未送信
+    として拾い、**同じ通知が続けて2件届く**。`updateMany`の`where`に`checkUserPushSentAt: null`を
+    含めて更新件数で確定させる楽観的な取り方（`dispatch/jobs.ts`の`claimCandidates`と同じ）に
+    しておけば、取り合いが起きても勝つのは1本だけで、トランザクションもロックも要らない。
+    送信の成否で記録は戻さない（一時的な失敗のために巡回のたび鳴らし直すより、1件落とす方が軽い）。
+  - **落とさないときは、`upsertIssueRow`はこの列を書かない**（#2300）。読んだ値をそのまま
+    書き戻すと、`existing`を読んでからupsertするまでの隙間に巡回側が立てた記録を消してしまい
+    （Webhookの取り込みと通知の巡回は同時に走る）、次の巡回が同じ通知をもう一度送る。
+    **Webhookの取り込みで「変えないつもりの列」を書き戻さない**のは、この列に限らず効く。
   - **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。巡回を呼ぶのは
     サブPCのpollerが30秒ごとに叩く`POST /api/dispatch/claim`——**ブラウザを開いていなくても回る
     唯一の定期経路**で、画面のポーリングに載せると閉じているときのための通知が閉じている間だけ
@@ -2277,6 +2305,14 @@ pnpm test:unit   # vitestのみ
 ドロップダウンが開かず、選択を伴う画面の挙動をテストできない（`create-issue-dialog.render.test.tsx`の
 `stubPointerApisForSelect`が実装）。トリガーの表示値を読むだけなら
 `getByRole("combobox", { name: ... })`の`textContent`で足り、補う必要は無い。
+
+**`fetch`をまるごとモックしている画面テストは、その画面へデータ取得フックを1つ足しただけで
+壊れる**（#2299）。`manual-step-guide-dialog.test.tsx`は`vi.stubGlobal("fetch", fetchMock)`で
+`POST /api/manual-steps/fix`の応答を返していたため、あとから足した`useIssueComments`が同じ応答を
+受け取り、`data.comments`が配列でないまま画面へ流れて`comments is not iterable`で落ちた
+（**失敗するのは足したテストではなく、既存のテスト全部**）。画面へ取得フックを足すときは、
+そのフックごと`vi.mock`で差し込む。URLで振り分ける形にすると、`fetchMock.mock.calls[0]`を
+見ている既存の検証が呼び出し順のずれで壊れる。
 
 **`@testing-library/jest-dom`のマッチャは使えない**（#838）。パッケージは`devDependencies`に
 入っているが、読み込むsetupファイルが無いため`toBeInTheDocument`・`toBeDisabled`は

@@ -34,6 +34,20 @@ vi.mock("@/hooks/use-issue-mutations", () => ({ useIssueMutations: () => issueMu
 vi.mock("@/hooks/use-manual-step-prerequisites", () => ({
   useManualStepPrerequisites: () => ({ prerequisites: [], summary: null }),
 }));
+// つまずきの記録（#2299）はIssueコメントに置く。**コメントの取得は差し込む**——
+// 差し込まないと、画面が`/api/issues/comments`を叩いてfetchのモックと噛み合わない
+const comments = { list: [] as { body: string }[] };
+const createComment = vi.fn();
+vi.mock("@/hooks/use-issue-comments", () => ({
+  useIssueComments: () => ({ comments: comments.list, isLoading: false, error: null }),
+}));
+vi.mock("@/hooks/use-issue-comment-mutations", () => ({
+  useIssueCommentMutations: () => ({
+    createComment,
+    isSubmitting: false,
+    error: null,
+  }),
+}));
 
 const REPO = "guchi-apps/issue-deck";
 
@@ -531,6 +545,8 @@ describe("ManualStepGuideDialog の自動実行", () => {
     controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
     issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ body: AUTO_BODY }));
     fetchMock.mockReset();
+    comments.list = [];
+    createComment.mockReset().mockResolvedValue({ id: "c1" });
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -894,5 +910,166 @@ curl -s http://localhost:<ポート>/api/health
     fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
 
     expect(screen.queryByRole("button", { name: "実行済みを取り消す" })).toBeNull();
+  });
+});
+
+/**
+ * 想定外だったときの出口（#2299）。
+ *
+ * 代行実行の失敗（#1869）と違い、**issue-deckには終了コードも出力も届かない**経路なので、
+ * 人が書いたものが正しく運ばれること（送り先・Issueに残るもの・残らないもの）を中心に見る。
+ */
+describe("ManualStepGuideDialog のつまずきの報告", () => {
+  const lines = BODY.split("\n");
+  const FIRST_STEP_LINE = lines.findIndex((text) => text.includes("チェックアウトを更新する")) + 1;
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    taskList.body = BODY;
+    taskList.isToggling = false;
+    taskList.toggleTask.mockReset();
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    controlManualStepRun.mockReset().mockResolvedValue({ ok: true, run: manualStepRun() });
+    issueMutations.updateIssue.mockReset().mockResolvedValue(issue());
+    comments.list = [];
+    createComment.mockReset().mockResolvedValue({ id: "c1" });
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  /** 手順1の画面で「うまくいかない」を開き、起きたことを書くところまで */
+  function openTrouble(detail: string) {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    fireEvent.click(screen.getByRole("button", { name: "うまくいかない" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: detail } });
+  }
+
+  it("手順の画面から開ける（代行実行の成否によらず）", () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "うまくいかない" }));
+
+    expect(screen.getByText("何が起きましたか？")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "外部ツールの表示が違う" })).toBeTruthy();
+  });
+
+  it("起きたことを書くまでは記録も診断も押せない", () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    fireEvent.click(screen.getByRole("button", { name: "うまくいかない" }));
+
+    expect(screen.getByRole("button", { name: "原因を調べる" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(
+      screen.getByRole("button", { name: "Issueに記録して次へ" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("記録するとIssueコメントになり、チェックは付かないまま次へ進む", async () => {
+    openTrouble("画面に「新規アイテム」がありません");
+    fireEvent.click(screen.getByRole("button", { name: "外部ツールの表示が違う" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Issueに記録して次へ" }));
+
+    await vi.waitFor(() => expect(createComment).toHaveBeenCalled());
+    const [input] = createComment.mock.calls[0];
+    expect(input.number).toBe(1823);
+    expect(input.body).toContain("- つまずいたところ: 手順 1 / 2");
+    expect(input.body).toContain("- 分類: 外部ツールの表示が違う");
+    expect(input.body).toContain("画面に「新規アイテム」がありません");
+    expect(input.body).toContain("<!-- manual-step-trouble:1:display -->");
+    // 実行できていないので、チェックは付けない
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+    // 次の手順へは進む
+    await vi.waitFor(() => expect(screen.getAllByText("手順 2 / 2").length).toBeGreaterThan(0));
+  });
+
+  it("診断はどの手順についてかを送り、同意が無ければ貼った内容を送らない", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: { kind: "manual", cause: "権限が足りません。", command: null, instruction: null, advice: null },
+        currentCommand: null,
+        currentInstruction: "チェックアウトを更新する",
+      }),
+    });
+
+    openTrouble("権限エラーになりました");
+    fireEvent.click(screen.getByRole("button", { name: "出力・画面の文言を貼る（任意）" }));
+    const [, paste] = screen.getAllByRole("textbox");
+    fireEvent.change(paste, { target: { value: "Permission denied" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "原因を調べる" }));
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/manual-steps/fix");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      repositoryFullName: REPO,
+      number: 1823,
+      kind: "step",
+      line: FIRST_STEP_LINE,
+      report: { category: null, detail: "権限エラーになりました", pasted: "" },
+    });
+    expect(await screen.findByText("権限が足りません。")).toBeTruthy();
+  });
+
+  it("手順の説明文の直し案を適用すると、その1行だけが書き換わる", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: {
+          kind: "instruction",
+          cause: "リポジトリの場所が変わっています。",
+          command: null,
+          instruction: "チェックアウトを最新のdevelopへ更新する",
+          advice: null,
+        },
+        currentCommand: null,
+        currentInstruction: "チェックアウトを更新する",
+      }),
+    });
+
+    openTrouble("手順書の場所にリポジトリがありません");
+    fireEvent.click(screen.getByRole("button", { name: "原因を調べる" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "手順を直す" }));
+
+    await vi.waitFor(() => expect(issueMutations.updateIssue).toHaveBeenCalled());
+    const [patch] = issueMutations.updateIssue.mock.calls[0];
+    expect(patch.body).toContain("- [ ] チェックアウトを最新のdevelopへ更新する");
+    // 下のコマンドも、他の手順もそのまま
+    expect(patch.body).toContain("git pull --ff-only");
+    expect(patch.body).toContain("- [ ] pollerを再起動する");
+    // 文言を直しただけなので、実行済みにはしない
+    expect(taskList.toggleTask).not.toHaveBeenCalled();
+  });
+
+  it("過去に報告されたつまずきを最初の画面に出す", () => {
+    comments.list = [
+      {
+        body: [
+          "⚠️ **手作業でつまずきました。**",
+          "",
+          "- つまずいたところ: 手順 1 / 2「チェックアウトを更新する」",
+          "- 分類: コマンドの出力が違う",
+          "- 起きたこと: 別のブランチが出ていました",
+          "",
+          "<!-- manual-step-trouble:1:output -->",
+        ].join("\n"),
+      },
+    ];
+
+    renderDialog([issue()]);
+
+    expect(screen.getByText("過去に報告されたつまずき（1件）")).toBeTruthy();
+    expect(screen.getByText(/別のブランチが出ていました/)).toBeTruthy();
   });
 });
