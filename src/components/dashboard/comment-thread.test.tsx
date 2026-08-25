@@ -39,6 +39,42 @@ function renderThread(comments: IssueComment[]) {
   );
 }
 
+// #2309: 状態カードのバッジはコメントを読み下げると画面の外へ出てしまい、
+// 質問した本人が「投げたきり返ってこない」のか「まだ処理中」なのかを読めなかった
+describe("CommentThread 回答待ちの吹き出し（#2309）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function renderWithPending(qaAnswerPending: boolean) {
+    render(
+      <CommentThread
+        comments={[makeComment({ body: "この作業はpollerを止めずにできますか？" })]}
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+        qaAnswerPending={qaAnswerPending}
+      />,
+    );
+  }
+
+  it("回答待ちなら一覧の末尾に回るアイコンつきの吹き出しを出す", () => {
+    renderWithPending(true);
+
+    const status = screen.getByRole("status");
+    expect(status.textContent).toContain("回答待ち");
+    expect(status.parentElement?.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("回答待ちでなければ出さない", () => {
+    renderWithPending(false);
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
 describe("CommentThread ボットの役割表示", () => {
   afterEach(() => {
     cleanup();

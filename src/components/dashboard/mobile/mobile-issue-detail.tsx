@@ -1055,6 +1055,7 @@ export function MobileIssueDetail({
             localSession={!executionTarget.expectsActionsRun}
             sessionAlive={sessionAlive}
             canAskClaude={canAskClaude(issue)}
+            qaAnswerPending={qaAnswerPending}
             mergeApprovalPending={mergeApprovalPending}
             mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}

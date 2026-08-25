@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircleQuestion, Server } from "lucide-react";
+import { Loader2, Server } from "lucide-react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
@@ -187,7 +187,9 @@ export function IssueStatusCard({
             <div className="flex flex-wrap items-center justify-end gap-2">
               {qaAnswerPending && (
                 <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
-                  <MessageCircleQuestion className="size-3" />
+                  {/* 待っているのは処理なのでアイコンを回す（#2309）。一覧の行・コメント欄の
+                      吹き出しと同じ表現にそろえる。**承認待ち（琥珀）は人待ちなので回さない** */}
+                  <Loader2 className="size-3 animate-spin" />
                   Claudeの回答待ち
                 </span>
               )}

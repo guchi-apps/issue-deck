@@ -3,6 +3,7 @@
 import {
   FolderGit2,
   GitBranch,
+  Loader2,
   MessageCircleQuestion,
   Plus,
   Rocket,
@@ -57,6 +58,11 @@ type MobileHomeScreenProps = {
    * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
    */
   unconfirmedQuestionCount: number;
+  /**
+   * 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。**「質問」の行の
+   * スピナーを回すかどうかと、吹き出しの内訳に使う。行に出す数字はこれまでどおり`navCounts`。**
+   */
+  waitingQuestionCount: number;
   /**
    * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
    * 使う。**nullは未取得**で、そのときは件数を出さない。PCの左メニューと同じ数え方。
@@ -141,6 +147,7 @@ export function MobileHomeScreenView({
   checkUserPullRequestCount,
   manualStepAttention,
   unconfirmedQuestionCount,
+  waitingQuestionCount,
   releaseActivity,
   pullRequestNavCounts,
   onSelectQuickView,
@@ -344,7 +351,12 @@ export function MobileHomeScreenView({
                   // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
                   count={navCounts[view.id]}
                   emphasis={unconfirmedQuestionCount > 0 ? "attention" : "none"}
-                  title={formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount)}
+                  busy={waitingQuestionCount > 0}
+                  title={formatQuestionNavTitle(
+                    navCounts[view.id],
+                    unconfirmedQuestionCount,
+                    waitingQuestionCount,
+                  )}
                 />
               ))}
               {/* 件数の意味と数え方はPCの左メニュー（`sidebar-nav.tsx`）と同じ（#2167）。
@@ -477,6 +489,7 @@ function MobileNavRow({
   onClick,
   count,
   emphasis = "none",
+  busy = false,
   title,
 }: {
   label: string;
@@ -486,6 +499,8 @@ function MobileNavRow({
   count?: number | null;
   /** 件数の強調（`NavCount`。左メニューと同じ使い分け） */
   emphasis?: NavCountEmphasis;
+  /** その行の先で何かが処理中か（#2309・PCの左メニューと同じ使い分け） */
+  busy?: boolean;
   title?: string;
 }) {
   return (
@@ -499,6 +514,7 @@ function MobileNavRow({
         <span className="flex items-center gap-2">
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           {label}
+          {busy && <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />}
         </span>
         {/* 強調の使い分けと見た目は`NavCount`（PCの左メニューと共通） */}
         <NavCount count={count} emphasis={emphasis} />

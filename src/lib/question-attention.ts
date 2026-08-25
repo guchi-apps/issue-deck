@@ -45,6 +45,35 @@ export function countUnconfirmedQuestions(
 }
 
 /**
+ * 一覧の行に「回答待ち」を出すか（#2309）。
+ *
+ * **`resolveQuestionState`の`waiting`と違い、質問Issue（タイトルの接頭辞）に限らない。**
+ * 「質問する」ボタンはIssue詳細のコメント欄にもあり、通常のIssueへ投げた質問も同じように
+ * `qaAnswerPendingAt`が立つ。あちらの判定をそのまま使うと、投げた直後の行に何も出ないまま
+ * 数分待つことになる。
+ *
+ * **未確認（回答が届いていて未読）の判定はこちらへ移していない。** あちらは「質問」ビューの
+ * 在庫を数えるためのもので、母集団を広げると左メニューの数字と一覧の行数が食い違う。
+ */
+export function isQaAnswerWaiting(issue: Pick<Issue, "qaAnswerPendingAt">): boolean {
+  return issue.qaAnswerPendingAt !== null;
+}
+
+/**
+ * 回答待ち（質問を投げて、まだ回答が届いていない）の質問Issueの件数（#2309）。
+ * **左メニュー・スマホのホームでスピナーを回すかどうかの判定**と、吹き出しの内訳に使う。
+ *
+ * **数えるのは質問Issueだけ**（`isQaAnswerWaiting`ではなく`resolveQuestionState`を使う）。
+ * この件数が付くのは「質問」の行で、押した先に並ぶのは質問Issueに限られる。通常のIssueへ
+ * 投げた質問まで数えると、スピナーを追って開いた先にその質問が居ない。
+ */
+export function countWaitingQuestions(
+  issues: Pick<Issue, "title" | "qaAnswerPendingAt" | "hasUnreadComments">[],
+): number {
+  return issues.filter((issue) => resolveQuestionState(issue) === "waiting").length;
+}
+
+/**
  * 「質問」の行のツールチップ（#2070）。**行の数字（一覧に並ぶ件数）と丸（未確認があるという
  * 合図）で意味が違うため、行のラベル（「質問」）だけでは何を数えているのか読めない。**
  *
@@ -59,12 +88,24 @@ export function countUnconfirmedQuestions(
  * 「まだできない」ものなのに対し、質問の確認済みは「読んだがまだcloseしていない」＝
  * 人が片付ける余地が残っているもので、在庫として数えるほうが実態に合うため。**
  *
+ * **回答待ちの件数もここへ入れる**（#2309）。行に回るアイコンを足したが、アイコンだけでは
+ * 何件待っているのかを読めない。内訳は「回答待ち」→「未確認」の順に並べる——待っている方が
+ * 新しく、読める方が後から増えるため。
+ *
  * @param total 一覧に並ぶ件数（＝`navCounts["question"]`）
  * @param unconfirmed 未確認の件数（`countUnconfirmedQuestions`）
+ * @param waiting 回答待ちの件数（`countWaitingQuestions`）
  */
-export function formatQuestionNavTitle(total: number, unconfirmed: number): string {
-  if (unconfirmed === 0) return `開いている質問が${total}件あります`;
-  return `開いている質問が${total}件（うち回答が届いていてまだ開いていないものが${unconfirmed}件）あります`;
+export function formatQuestionNavTitle(
+  total: number,
+  unconfirmed: number,
+  waiting = 0,
+): string {
+  const parts: string[] = [];
+  if (waiting > 0) parts.push(`回答待ちが${waiting}件`);
+  if (unconfirmed > 0) parts.push(`回答が届いていてまだ開いていないものが${unconfirmed}件`);
+  if (parts.length === 0) return `開いている質問が${total}件あります`;
+  return `開いている質問が${total}件（うち${parts.join("・")}）あります`;
 }
 
 /**

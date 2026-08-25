@@ -349,6 +349,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **Issue詳細のコメントは定期的に取り直さない**（#2309）。
+  [`use-issue-comments.ts`](../src/hooks/use-issue-comments.ts)が`GET /api/issues/comments`を
+  叩くのは**選択中のIssueが切り替わったときだけ**で、Issue一覧のポーリング（10秒ごと・
+  `GET /api/issues`はDBだけを読む）には乗っていない。コメントの取得はGitHub APIを消費するため、
+  開いている画面のために回し続けない。
+  - **開いたまま何かの到着を待つ表示を足すときは、DBに乗る合図で1回だけ取り直す。**
+    コメント欄の回答待ちの吹き出し（`CommentThread`の`qaAnswerPending`）は
+    `Issue.qaAnswerPendingAt`が**立ち→消えへ変わったこと**を合図にしている。この列は
+    `issue_comment`のWebhookで更新され（`updateQaAnswerPendingState`）、一覧のポーリングに
+    乗ってクライアントへ届くので、**待っているあいだのGitHub API消費は0で、回答1件につき1回**
+    だけ取り直せる。取り直しでは`isLoading`を立てない（立てると読んでいたコメントが
+    読み込み中の骨組みへ差し替わる）。
+  - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
+    左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・

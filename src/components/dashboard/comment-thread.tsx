@@ -109,6 +109,14 @@ type CommentThreadProps = {
   /** 「質問する」を出してよいか（`canAskClaude`の結果）。openなIssueなら常にtrue */
   canAskClaude?: boolean;
   /**
+   * Claudeへの質問が回答待ちか（#2309・`isQaAnswerPending`の結果）。trueの間、コメント一覧の
+   * 末尾に待ちの吹き出しを出す。
+   *
+   * **判定を親に任せているのは、状態カードのバッジ（`IssueStatusCard`）と同じ値を使うため。**
+   * ここで数え直すと、同じ画面の上と下で回答待ちの判定が食い違いうる。
+   */
+  qaAnswerPending?: boolean;
+  /**
    * セッションの状態（`/api/dispatch`）がまだ届いていない（#1810）。**`sessionWaitingInput`が
    * 未確定**であることを表し、trueの間は承認カードを描かない。取得前は必ず
    * `sessionWaitingInput === false`になるため、そのまま描くと承認・修正ボタンを一瞬出してから
@@ -644,6 +652,49 @@ function ApprovalActions({
   );
 }
 
+/**
+ * 「Claudeの回答待ち」の吹き出し（#2309）。**コメント一覧の末尾に、会話の続きとして置く。**
+ *
+ * 同じ意味のバッジはIssue詳細の上（`IssueStatusCard`）にもあるが、コメントを読み下げると
+ * 画面の外へ出てしまい、質問した本人が「投げたきり返ってこない」のか「まだ処理中」なのかを
+ * 読めなかった。**回答が届くとこの吹き出しは消え、回答コメントに入れ替わる**——
+ * `qaAnswerPending`の根拠が「直近の質問より後に回答コメントが無いこと」だから。
+ *
+ * 破線にしているのは、これが投稿されたコメントではなく到着を待っている枠だから。
+ */
+function QaAnswerPendingBubble() {
+  return (
+    <li className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <span
+          aria-hidden
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-600 ring-1 ring-inset ring-blue-500 dark:text-blue-400"
+        >
+          <Loader2 className="size-3.5 animate-spin" />
+        </span>
+        <div
+          role="status"
+          className="min-w-0 max-w-[92%] flex-1 rounded-lg rounded-tl-none border border-dashed border-blue-500 bg-blue-500/5 p-3 md:max-w-[85%]"
+        >
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+            <span className="font-medium text-blue-600 dark:text-blue-400">Claude</span>
+            <Badge
+              variant="outline"
+              className="border-blue-500/40 bg-blue-500/15 text-blue-600 dark:text-blue-400"
+            >
+              回答待ち
+            </Badge>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            回答を待っています。返るまで数十秒〜数分かかります。届くとここが回答コメントに
+            入れ替わります。
+          </p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export function CommentThread({
   comments,
   isLoading,
@@ -663,6 +714,7 @@ export function CommentThread({
   localSession,
   sessionAlive,
   canAskClaude,
+  qaAnswerPending = false,
   mergeApprovalPending,
   mergeCheckReasons = null,
   pullRequestLinks,
@@ -959,6 +1011,9 @@ export function CommentThread({
             </li>
           );
         })}
+        {/* 回答待ちは一覧の末尾に置く（#2309）。承認カード（`approvalActions`）より内側に
+            置くのは、これが操作ではなく会話の続きだから */}
+        {qaAnswerPending && <QaAnswerPendingBubble />}
       </ul>
       {approvalActions}
 

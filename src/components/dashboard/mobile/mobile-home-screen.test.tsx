@@ -103,6 +103,7 @@ function renderHome(
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
       unconfirmedQuestionCount={0}
+      waitingQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
@@ -190,6 +191,7 @@ describe("MobileHomeScreen（#1690）", () => {
         checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
         unconfirmedQuestionCount={0}
+        waitingQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
@@ -225,6 +227,29 @@ describe("MobileHomeScreen（#1690）", () => {
     // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
     expect(row.getAttribute("title")).toContain("3件");
     expect(row.getAttribute("title")).toContain("1件");
+  });
+
+  // 回答待ちのあいだは回るアイコンを出す（#2309・PCと同じ）
+  it("回答待ちの質問があれば回るアイコンを出す", () => {
+    renderHome({
+      navCounts: { ...NAV_COUNTS, question: 3 },
+      unconfirmedQuestionCount: 1,
+      waitingQuestionCount: 2,
+    });
+
+    const row = questionRow(3);
+    expect(row.querySelector(".animate-spin")).not.toBeNull();
+    expect(row.getAttribute("title")).toContain("回答待ちが2件");
+  });
+
+  it("回答待ちの質問が無ければ回るアイコンを出さない", () => {
+    renderHome({
+      navCounts: { ...NAV_COUNTS, question: 3 },
+      unconfirmedQuestionCount: 1,
+      waitingQuestionCount: 0,
+    });
+
+    expect(questionRow(3).querySelector(".animate-spin")).toBeNull();
   });
 
   it("未確認の質問が無くても、開いている質問の件数は出す（強調はしない）", () => {
@@ -383,6 +408,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         checkUserPullRequestCount={0}
         manualStepAttention={NO_MANUAL_STEP}
         unconfirmedQuestionCount={0}
+        waitingQuestionCount={0}
         releaseActivity={null}
         pullRequestNavCounts={PR_NAV_COUNTS}
         onSelectQuickView={() => {}}
