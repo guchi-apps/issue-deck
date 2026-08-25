@@ -1747,8 +1747,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     鳴る前に消えている**状態にする）。24時間より古い確認待ちは送らずに畳む（機能を入れた直後や
     購読を後から足したときに、溜まっていたものが一斉に鳴らないように）。
   - **送信済みかどうかは`Issue.checkUserPushSentAt`**。`00.check-user`が付き直すたびに
-    `checkUserLabeledAt`とセットでnullへ戻す（書き戻し口は`github/sync-issues.ts`の
+    `checkUserLabeledAt`とセットでnullへ戻す（落とす口は`github/sync-issues.ts`の
     `upsertIssueRow`だけ）。「nullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。
+  - **送る前にこの列を立てて席を取る**（#2300。`reserveCheckUserPush`）。**巡回は同時に何本も
+    走る**——下記のとおり呼び口がpollerとWebhookの2つあり、Webhookは`00.check-user`が付くとき
+    何件かまとめて届く（ラベルの付与・理由ラベルの付与・計画コメントの投稿）。送ってから記録を
+    付けていると、Pushサービスへの往復（数百ms）のあいだに入った別の巡回も同じIssueを未送信
+    として拾い、**同じ通知が続けて2件届く**。`updateMany`の`where`に`checkUserPushSentAt: null`を
+    含めて更新件数で確定させる楽観的な取り方（`dispatch/jobs.ts`の`claimCandidates`と同じ）に
+    しておけば、取り合いが起きても勝つのは1本だけで、トランザクションもロックも要らない。
+    送信の成否で記録は戻さない（一時的な失敗のために巡回のたび鳴らし直すより、1件落とす方が軽い）。
+  - **落とさないときは、`upsertIssueRow`はこの列を書かない**（#2300）。読んだ値をそのまま
+    書き戻すと、`existing`を読んでからupsertするまでの隙間に巡回側が立てた記録を消してしまい
+    （Webhookの取り込みと通知の巡回は同時に走る）、次の巡回が同じ通知をもう一度送る。
+    **Webhookの取り込みで「変えないつもりの列」を書き戻さない**のは、この列に限らず効く。
   - **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。巡回を呼ぶのは
     サブPCのpollerが30秒ごとに叩く`POST /api/dispatch/claim`——**ブラウザを開いていなくても回る
     唯一の定期経路**で、画面のポーリングに載せると閉じているときのための通知が閉じている間だけ

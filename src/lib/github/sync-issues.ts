@@ -95,15 +95,17 @@ async function upsertIssueRow(
       : new Date();
 
   // Push通知（#838）の送信済み記録は、**`00.check-user`が付き直したら落とす**。
-  // ここが唯一の書き戻し口で、送る側（`notifications/check-user-push.ts`）は
+  // 落とす口はここだけで、送る側（`notifications/check-user-push.ts`）は
   // 「nullで、付与から待ち時間が過ぎたもの」だけを拾う。
   // **この関数からは送らない。** 付いた瞬間はまだ理由ラベル（`01.check-*`）が揃っておらず、
   // 早すぎる`00.check-user`（#1709）が自動マージで取り消される場合もあるため。
-  const checkUserPushSentAt =
+  //
+  // **落とさないときは、この列を書かない**（#2300）。読んだ値をそのまま書き戻すと、
+  // `existing`を読んでからupsertするまでの隙間に送信側が立てた記録を消してしまい
+  // （Webhookの取り込みと通知の巡回は同時に走る）、次の巡回が同じ通知をもう一度送る。
+  const keepCheckUserPushSentAt =
     checkUserLabeledAt !== null &&
-    existing?.checkUserLabeledAt?.getTime() === checkUserLabeledAt.getTime()
-      ? existing?.checkUserPushSentAt ?? null
-      : null;
+    existing?.checkUserLabeledAt?.getTime() === checkUserLabeledAt.getTime();
 
   const data = {
     repositoryId,
@@ -124,14 +126,13 @@ async function upsertIssueRow(
     githubClosedAt: raw.closed_at ? new Date(raw.closed_at) : null,
     syncedAt: new Date(),
     checkUserLabeledAt,
-    checkUserPushSentAt,
     lastCommentAt,
   };
 
   const issue = await db.issue.upsert({
     where: { githubIssueId: BigInt(raw.id) },
     create: { githubIssueId: BigInt(raw.id), ...data },
-    update: data,
+    update: keepCheckUserPushSentAt ? data : { ...data, checkUserPushSentAt: null },
   });
 
   const labelNames = raw.labels.map(mapLabelName);
