@@ -285,6 +285,31 @@ model GithubApiUsageBucket {
   @@index([startedAt])
 }
 
+// issue-deck自身が投げたAnthropic API（/v1/messages）の消費を、機能別・モデル別に5分バケットで
+// 保持する（#2347）。GithubApiUsageBucketと同じで、正はプロセス内メモリ（src/lib/claude/api-usage.ts）で
+// あり、この表は再起動をまたいで直近7日ぶんを引き継ぐためだけに使う。7日より古い行は
+// 書き出しのたびに削除する。
+//
+// **書き出しはバケットの繰り上がり時ではなく呼び出しのたび。** AIの呼び出しはボタン起点で
+// 次まで数時間空くことがあり、繰り上がりを待つと直近の消費が保存されないまま消える。
+//
+// トークン数は推計ではなく、応答のusageが返す実測値。GitHub Actionsの無人実行や
+// ローカルセッション（Claude Code本体）の消費はここに入らない。
+model ClaudeApiUsageBucket {
+  id                  String   @id @default(cuid())
+  startedAt           DateTime
+  feature             String
+  model               String
+  calls               Int
+  inputTokens         Int
+  outputTokens        Int
+  cacheReadTokens     Int
+  cacheCreationTokens Int
+
+  @@unique([startedAt, feature, model])
+  @@index([startedAt])
+}
+
 // アプリ全体で共通の設定値を保持するシングルトンテーブル（id=1固定の1行のみ）。
 // autoRetryLimit: claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限
 // （0は自動リトライ無効）。リポジトリ間で個別設定にする必要が無いため全リポジトリ共通の値とする（#497）。

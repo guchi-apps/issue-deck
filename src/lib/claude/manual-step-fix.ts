@@ -1,3 +1,4 @@
+import { callClaudeMessages } from "@/lib/claude/request";
 import { FENCE_PATTERN } from "@/lib/markdown-task-list";
 import {
   MANUAL_STEP_COMMAND_MAX_LENGTH,
@@ -8,10 +9,6 @@ import {
   describeManualStepTroubleCategory,
   type ManualStepTroubleReport,
 } from "@/lib/manual-step-trouble";
-
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
 
 /**
  * 失敗した手作業の診断に使うモデル。他の機能（`issue-order.ts`など）と揃える。
@@ -433,29 +430,22 @@ export async function diagnoseManualStepFailure(
   token: string,
   input: ManualStepFixInput,
 ): Promise<ManualStepFixResult> {
-  const res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-beta": OAUTH_BETA,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+  const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
+    feature: "manual_step_fix",
+    token,
+    body: {
       model: MODEL,
       // `steps`（#2310）のぶんだけ応答が長くなる。途中で切れるとJSONとして読めず`manual`へ倒れる
       max_tokens: 1536,
       messages: [{ role: "user", content: buildManualStepFixPrompt(input) }],
-    }),
-    cache: "no-store",
+    },
   });
 
   if (!res.ok) {
     throw new Error(`Claudeによる原因の調査に失敗しました (${res.status})`);
   }
 
-  const json = (await res.json()) as AnthropicMessageResponse;
-  const text = json.content?.find((block) => block.type === "text")?.text?.trim();
+  const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
     return { kind: "manual", cause: "", command: null, instruction: null, advice: null, steps: [] };
   }

@@ -97,11 +97,6 @@ type Bucket = {
   counts: Map<string, number>;
 };
 
-/** 開始時刻の昇順に保つ */
-let buckets: Bucket[] = [];
-
-const featureStore = new AsyncLocalStorage<GithubApiFeature>();
-
 export type ClosedGithubApiUsageBucketEntry = {
   feature: GithubApiFeature;
   endpoint: string;
@@ -116,23 +111,47 @@ export type ClosedGithubApiUsageBucket = {
 
 type BucketClosedListener = (bucket: ClosedGithubApiUsageBucket) => void;
 
-const bucketClosedListeners: BucketClosedListener[] = [];
+/**
+ * 集計・リスナー・用途の文脈の置き場。**`globalThis`へ載せる**（#2360）。
+ *
+ * Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、素朴に
+ * モジュールスコープへ持つと**同じファイルの実体が2つでき、起動時に登録した永続化の
+ * リスナーが記録側から見えない**（実測でリスナー0件のまま、`GithubApiUsageBucket`へ
+ * 1行も書かれていなかった）。開発時のHMRでも実体が増える。`lib/db.ts`のPrismaClientと
+ * 同じ形で1つに寄せる。`AsyncLocalStorage`も同じ理由で共有し、`withGithubApiFeature()`を
+ * 呼んだ側と`recordGithubApiCall()`が別バンドルでも用途を引き継げるようにする。
+ *
+ * `buckets`は開始時刻の昇順に保つ。
+ */
+type GithubApiUsageState = {
+  buckets: Bucket[];
+  listeners: BucketClosedListener[];
+  featureStore: AsyncLocalStorage<GithubApiFeature>;
+};
+
+const globalForUsage = globalThis as unknown as { githubApiUsage?: GithubApiUsageState };
+
+const state: GithubApiUsageState = (globalForUsage.githubApiUsage ??= {
+  buckets: [],
+  listeners: [],
+  featureStore: new AsyncLocalStorage<GithubApiFeature>(),
+});
 
 /**
  * バケットが繰り上がる（新しい5分バケットが作られる）たびに、直前に閉じたバケットを渡して
  * `listener`を呼ぶ。永続化（DB書き込み）など、集計ロジック自体とは独立した副作用の登録に使う。
  */
 export function onBucketClosed(listener: BucketClosedListener): void {
-  bucketClosedListeners.push(listener);
+  state.listeners.push(listener);
 }
 
 function notifyBucketClosed(bucket: Bucket): void {
-  if (bucketClosedListeners.length === 0) return;
+  if (state.listeners.length === 0) return;
   const entries = [...bucket.counts].map(([key, count]) => {
     const [feature, endpoint] = key.split("\t");
     return { feature: feature as GithubApiFeature, endpoint, count };
   });
-  for (const listener of bucketClosedListeners) listener({ startedAt: bucket.startedAt, entries });
+  for (const listener of state.listeners) listener({ startedAt: bucket.startedAt, entries });
 }
 
 /**
@@ -140,12 +159,12 @@ function notifyBucketClosed(bucket: Bucket): void {
  * ルートハンドラの本体を包んで使う。
  */
 export function withGithubApiFeature<T>(feature: GithubApiFeature, fn: () => T): T {
-  return featureStore.run(feature, fn);
+  return state.featureStore.run(feature, fn);
 }
 
 /** 現在の用途。文脈が設定されていない場合は`other`として計上する */
 export function currentGithubApiFeature(): GithubApiFeature {
-  return featureStore.getStore() ?? "other";
+  return state.featureStore.getStore() ?? "other";
 }
 
 /**
@@ -185,7 +204,7 @@ function currentHourStartAt(now: number): number {
 
 function pruneBuckets(now: number): void {
   const oldest = now - USAGE_WINDOW_MS;
-  buckets = buckets.filter((bucket) => bucket.startedAt >= oldest);
+  state.buckets = state.buckets.filter((bucket) => bucket.startedAt >= oldest);
 }
 
 /** GitHub APIの呼び出しを1件計上する */
@@ -200,15 +219,15 @@ export function recordGithubApiCall(
   pruneBuckets(now);
 
   const startedAt = bucketStartAt(now);
-  let bucket = buckets.at(-1);
+  let bucket = state.buckets.at(-1);
   if (!bucket || bucket.startedAt !== startedAt) {
     // 直前のバケットより後ろに進む場合のみ、そのバケットは書き込みを終えたとみなして通知する
     // （時刻が巻き戻った場合のバックデート挿入では、既存の最新バケットはまだ閉じていない）
     if (bucket && bucket.startedAt < startedAt) notifyBucketClosed(bucket);
     bucket = { startedAt, counts: new Map() };
-    buckets.push(bucket);
+    state.buckets.push(bucket);
     // 時刻が巻き戻った場合（NTP補正など）でも昇順を保つ
-    buckets.sort((a, b) => a.startedAt - b.startedAt);
+    state.buckets.sort((a, b) => a.startedAt - b.startedAt);
   }
 
   bucket.counts.set(key, (bucket.counts.get(key) ?? 0) + 1);
@@ -221,17 +240,17 @@ export function recordGithubApiCall(
 export function loadPersistedBuckets(persisted: ClosedGithubApiUsageBucket[], now: number = Date.now()): void {
   for (const persistedBucket of persisted) {
     const startedAt = bucketStartAt(persistedBucket.startedAt);
-    let bucket = buckets.find((candidate) => candidate.startedAt === startedAt);
+    let bucket = state.buckets.find((candidate) => candidate.startedAt === startedAt);
     if (!bucket) {
       bucket = { startedAt, counts: new Map() };
-      buckets.push(bucket);
+      state.buckets.push(bucket);
     }
     for (const entry of persistedBucket.entries) {
       const key = `${entry.feature}\t${entry.endpoint}`;
       bucket.counts.set(key, (bucket.counts.get(key) ?? 0) + entry.count);
     }
   }
-  buckets.sort((a, b) => a.startedAt - b.startedAt);
+  state.buckets.sort((a, b) => a.startedAt - b.startedAt);
   pruneBuckets(now);
 }
 
@@ -272,7 +291,7 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
   const currentHourStartedAt = currentHourStartAt(now);
   const totals = new Map<string, { currentHour: number; last24h: number }>();
 
-  for (const bucket of buckets) {
+  for (const bucket of state.buckets) {
     // バケットの開始時刻が現在の正時起点1時間ウィンドウ内なら数える（ローリング60分ではない）
     const withinCurrentHour = bucket.startedAt >= currentHourStartedAt;
     for (const [key, count] of bucket.counts) {
@@ -308,7 +327,7 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
     .sort((a, b) => b.last24h - a.last24h);
 
   return {
-    measuringSince: buckets[0]?.startedAt ?? now,
+    measuringSince: state.buckets[0]?.startedAt ?? now,
     currentHourStartedAt,
     totalCurrentHour: features.reduce((sum, feature) => sum + feature.currentHour, 0),
     totalLast24h: features.reduce((sum, feature) => sum + feature.last24h, 0),
@@ -318,6 +337,6 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
 
 /** テスト用に計測結果・`onBucketClosed`のリスナー登録を空にする */
 export function resetGithubApiUsage(): void {
-  buckets = [];
-  bucketClosedListeners.length = 0;
+  state.buckets = [];
+  state.listeners.length = 0;
 }

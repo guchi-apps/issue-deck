@@ -132,6 +132,10 @@ type IssueListProps = {
    * 左メニューの件数はこれを外した数を出すため、ヘッダーが行数のままだと数字だけが食い違う。
    * **一覧には今までどおり並べ**、ヘッダーの内訳（`2件・実行中1件`）で説明する。
    * 省略時は今までどおり行数を出す。
+   *
+   * **各行の進捗バッジ（`WorkflowStepBadge`）の回転にも同じ集合を使う**（#2358）。
+   * 「確認待ちだがまだ動いている」を件数では実行中として扱いながら、バッジだけ止めていると、
+   * 同じ画面の2か所が同じIssueについて逆のことを言うことになる。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
   /**
@@ -693,6 +697,9 @@ export function IssueList({
                 executionTarget={executionTargetByIssueId.get(issue.id)}
                 session={sessionByIssueId.get(issue.id) ?? null}
                 now={now}
+                // 確認待ちでもエージェントが動いている間は回し続ける（#2358）。判定は
+                // 左メニュー・ヘッダーの件数と同じ集合（#2174）を使い、材料を増やさない
+                checkUserRunning={checkUserRunningIssueIds?.has(issue.id) ?? false}
               />
               {issue.favorite && (
                 <Star

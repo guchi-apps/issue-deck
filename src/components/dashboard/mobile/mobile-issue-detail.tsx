@@ -100,6 +100,7 @@ import {
   labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
+  withoutCheckUserLabels,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -112,7 +113,9 @@ import {
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
+  canContinueQuestionFromComposer,
   isQaAnswerPending,
+  resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
 import {
   buildCodeReviewFindingIssueIndex,
@@ -349,6 +352,15 @@ export function MobileIssueDetail({
   // 質問Issueをワンボタンで終える導線の表示条件（#1770）。⋯メニューとコメント欄の下の
   // 2か所で同じ値を使い、片方だけ出る状態を作らない
   const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
+  // 操作列の主ボタン（#2345）。PC版（`issue-detail.tsx`）と同じ判定を共有する
+  const composerPrimaryAction = resolveComposerPrimaryAction(
+    issue,
+    comments,
+    newCommentBody.trim().length > 0,
+  );
+  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
+    ? "続けて質問する場合はここへ..."
+    : "コメントを追加...";
   // コードレビューIssue（#698）の結果。PC版（`issue-detail.tsx`）と同じ扱い
   const codeReview = isCodeReviewIssue(issue)
     ? {
@@ -359,7 +371,11 @@ export function MobileIssueDetail({
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
       }
     : null;
-  const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
+  const {
+    pullRequests,
+    isLoadingDetails: isLoadingPullRequests,
+    refresh: refreshPullRequests,
+  } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
     pullRequestLinks,
@@ -480,6 +496,12 @@ export function MobileIssueDetail({
     if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
   }
 
+  /** `Ctrl`+`Enter`の宛先（#2345。PCのIssue詳細と同じ。クローズには割り当てない） */
+  async function handleSubmitPrimary() {
+    if (composerPrimaryAction === "question") await handleAskClaudeFromComposer();
+    else await handleCreateComment();
+  }
+
   /** ローカルセッション担当中の承認欄から押せる3つ（#1903。PCのIssue詳細と同じ） */
   async function handleApprovalComment(body: string) {
     await postComment(body);
@@ -494,6 +516,21 @@ export function MobileIssueDetail({
       labelsAfterCheckUserDismissal(issue.labels),
       dismissCheckUserCommentBody(text),
     );
+  }
+
+  /**
+   * 画面から計画に答えた・質問に回答した直後に、手元のIssueから`00.check-user`と理由ラベルを
+   * 落とす（#2341）。**外すのはサーバー側**（`POST /api/dispatch/plan-decision`・
+   * `/question-answer`）で、ここはその結果を一覧のポーリング（10秒間隔）より先に画面へ映すだけ。
+   *
+   * これが無いと、押した直後の画面にラベルと「計画の承認が必要です」のカードが残り続け、
+   * まだ何か操作が要るように見える（Issueの元になった症状）。`21.plan-required`は残す
+   * （フックが外すときと同じ）。
+   */
+  function handleCheckUserResolved() {
+    const labels = withoutCheckUserLabels(issue.labels);
+    if (labels.length === issue.labels.length) return;
+    onIssueUpdated({ ...issue, labels, checkUserLabeledAt: null });
   }
 
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
@@ -810,6 +847,7 @@ export function MobileIssueDetail({
               request={questionRequest}
               session={issueSession}
               dispatch={dispatch}
+              onCheckUserResolved={handleCheckUserResolved}
             />
           </div>
         )}
@@ -824,6 +862,7 @@ export function MobileIssueDetail({
               request={planRequest}
               session={issueSession}
               dispatch={dispatch}
+              onCheckUserResolved={handleCheckUserResolved}
             />
           </div>
         )}
@@ -935,6 +974,7 @@ export function MobileIssueDetail({
               }
               links={pullRequestLinks}
               pullRequests={pullRequests}
+              isLoadingDetails={isLoadingPullRequests}
               mergeApprovalPending={mergeApprovalPending}
               onMerge={handleMergePullRequest}
               onMerged={handlePullRequestMerged}
@@ -1060,6 +1100,7 @@ export function MobileIssueDetail({
             mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
+            isLoadingPullRequests={isLoadingPullRequests}
             workflowRun={workflowRun}
             workflowRunCommentId={workflowRunCommentId}
             onApprove={handleApprove}
@@ -1093,7 +1134,7 @@ export function MobileIssueDetail({
               <LocalSessionCommentNotice session={issueSession} />
             )}
             <MentionTextarea
-              placeholder="コメントを追加..."
+              placeholder={composerPlaceholder}
               className="min-h-20"
               value={newCommentBody}
               onChange={setNewCommentBody}
@@ -1104,7 +1145,7 @@ export function MobileIssueDetail({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  handleCreateComment();
+                  handleSubmitPrimary();
                 }
               }}
             />
@@ -1120,7 +1161,7 @@ export function MobileIssueDetail({
                   ここへ引き継ぐ（#1913） */}
               {canAskClaude(issue) && (
                 <Button
-                  variant="outline"
+                  variant={composerPrimaryAction === "question" ? "default" : "outline"}
                   title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
                   onClick={handleAskClaudeFromComposer}
                   disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
@@ -1129,9 +1170,10 @@ export function MobileIssueDetail({
                   質問する
                 </Button>
               )}
-              {/* PC側と同じ理由で、質問Issueでは主ボタンを「コメント」に持たせない（#1770） */}
+              {/* PC側と同じ理由で、質問Issueでは「コメント」を主ボタンにせず（#1770）、
+                  枠なしまで沈める（#2345） */}
               <Button
-                variant={canCloseQuestion ? "outline" : "default"}
+                variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
                 onClick={handleCreateComment}
                 disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
               >
@@ -1139,9 +1181,14 @@ export function MobileIssueDetail({
                 {isCommentSubmitting ? "送信中..." : "コメント"}
               </Button>
               {/* 回答を読み終えた位置に出口を置く（#1770）。スマホでは同じ操作が⋯メニューの
-                  奥にしかなく、開き直さないと終えられなかった */}
+                  奥にしかなく、開き直さないと終えられなかった。書きかけがあるときは主ボタンを
+                  「質問する」へ譲る（#2345） */}
               {canCloseQuestion && (
-                <Button disabled={isSubmitting} onClick={() => handleClose("completed")}>
+                <Button
+                  variant={composerPrimaryAction === "close" ? "default" : "outline"}
+                  disabled={isSubmitting}
+                  onClick={() => handleClose("completed")}
+                >
                   <XCircle />
                   回答を確認してクローズ
                 </Button>

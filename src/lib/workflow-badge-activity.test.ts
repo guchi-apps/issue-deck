@@ -141,4 +141,29 @@ describe("isWorkflowBadgeSpinning", () => {
       }),
     ).toBe(false);
   });
+
+  // 確認待ちでも、押せる操作がまだ無い（＝待っているのは処理）間は回す（#2358）
+  it("確認待ちでもエージェントが動いている間は回す", () => {
+    expect(
+      isWorkflowBadgeSpinning({
+        session: session(),
+        approvalPending: true,
+        checkUserRunning: true,
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  // 材料は`selectCheckUserRunningIssueIds`の結果そのもの。計画の承認待ち・質問の回答待ちは
+  // あちらが先に「実行中ではない」と決める（#2238）ので、ここでは`false`で届く
+  it("確認待ちでエージェントも動いていなければ回さない", () => {
+    expect(
+      isWorkflowBadgeSpinning({
+        session: session(),
+        approvalPending: true,
+        checkUserRunning: false,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
 });

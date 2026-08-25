@@ -24,6 +24,7 @@ const settingsData = {
   apiUsage: { data: null, isLoading: false, error: null },
   actionsUsage: { data: null, isLoading: false, error: null, notConfigured: false },
   claudeUsage: { data: null, isLoading: false, error: null, notConfigured: true },
+  claudeApiUsage: { data: null, isLoading: false, error: null },
   githubStatus: { data: null, isLoading: false, error: null },
   fineGrainedTokens: { data: [], isLoading: false, error: null, refetch: vi.fn() },
   hasExpiringFineGrainedToken: false,
@@ -269,7 +270,7 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /状態/ }));
 
     expect(screen.getByText("GitHub使用量")).toBeTruthy();
-    expect(screen.getByText("Claudeプラン使用量")).toBeTruthy();
+    expect(screen.getByText("AI使用量")).toBeTruthy();
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
   });
 });

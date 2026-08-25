@@ -106,6 +106,46 @@ describe("QuestionAnswerPanel", () => {
     );
   });
 
+  /**
+   * #2341。ラベルを外すのはサーバー側だが、一覧のポーリングは10秒間隔なので、押した直後の
+   * 画面には確認待ちのラベルとカードが残ったままになる。手元のIssueにも先に反映させる。
+   */
+  it("回答を送ると、確認待ちが解けたことを親へ伝える", async () => {
+    const onCheckUserResolved = vi.fn();
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        onCheckUserResolved={onCheckUserResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Supabase Auth/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Issue詳細（PC）/ }));
+    fireEvent.click(screen.getByRole("button", { name: /回答を送る/ }));
+
+    await waitFor(() => expect(onCheckUserResolved).toHaveBeenCalledTimes(1));
+  });
+
+  // 端末で答えると言っただけで、人はまだ答えていない
+  it("端末・Remote Controlで答える場合は伝えない", async () => {
+    const onCheckUserResolved = vi.fn();
+    const answerQuestion = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(answerQuestion)}
+        onCheckUserResolved={onCheckUserResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /端末・Remote Controlで答える/ }));
+    await waitFor(() => expect(answerQuestion).toHaveBeenCalled());
+    expect(onCheckUserResolved).not.toHaveBeenCalled();
+  });
+
   it("単一選択は選び直しで入れ替わり、複数選択は足せる", async () => {
     const answerQuestion = vi.fn().mockResolvedValue({ ok: true });
     render(

@@ -362,6 +362,13 @@ export function CreateIssueDialog({
    * `block: "nearest"`なので、すでに見えているときは動かない。
    */
   const questionHintRef = useRef<HTMLDivElement>(null);
+  /**
+   * いま開いている回のぶんの初期化を済ませたか（#2354）。
+   *
+   * **フォームを初期状態へ戻してよいのは、閉じた状態から開いた瞬間だけ。** 開いている
+   * あいだに初期値（`defaultRepositoryFullName`等）が変わっても入力へ触らない。
+   */
+  const initializedForOpenRef = useRef(false);
   const [repositoryFullName, setRepositoryFullName] = useState<string>("");
   /**
    * リポジトリを**人が選び直したか**（#1710・#1884）。`表示中のリポジトリ`バッジを消す判断に使う。
@@ -426,7 +433,17 @@ export function CreateIssueDialog({
     Boolean(body.trim()) && Boolean(repositoryFullName) && !isMetaLoading && !isSuggesting;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      // 閉じた時点で「次に開いたら初期化する」へ戻す
+      initializedForOpenRef.current = false;
+      return;
+    }
+    // **開いている間は二度と初期化しない**（#2354）。以前は初期値（画面のリポジトリ・
+    // プリフィル）が変わるたびにここが走り、書いている最中でも選んだリポジトリと本文が
+    // 初期状態へ戻せる作りだった。人が選び直したリポジトリがひとりでに変わる、という
+    // 現象の唯一のコード上の経路がここで、押した本人には何が起きたのか見えない。
+    if (initializedForOpenRef.current) return;
+    initializedForOpenRef.current = true;
     // ダイアログを開くたびにフォームを初期状態へ戻す。明示的なプリフィル（引用元テキスト等）が
     // 渡されていればそちらを優先し、それ以外は空の状態にする（保存済みの下書きは自動では
     // 反映せず、readRestorableIssueDraftの結果をユーザーが「復元する」で選んだ場合のみ反映する）。
@@ -439,7 +456,6 @@ export function CreateIssueDialog({
         defaultTitle,
         defaultBody,
       });
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setKind(draft.kind);
     // 移してきた値は「人が書いたもの」として扱う。`自動`の出どころは移す前の画面に残っており、
     // ここで復元すると、直したはずの項目まで自動と書かれかねない
@@ -553,10 +569,19 @@ export function CreateIssueDialog({
     if (!restorableDraft) return;
     // 下書きは書いていたときの種別ごと戻す（質問の書きかけを復元してIssueとして作らない）
     setKind(restorableDraft.kind);
+    // **書いていたときに選んでいたリポジトリを優先する**（#2354）。以前は開いていた画面の
+    // リポジトリが優先されており、別のリポジトリで書いた下書きを復元すると、中身だけが
+    // 別のリポジトリへ入った状態になっていた。連携が外れて選択肢に無い値は、欄が空に見えるのに
+    // 値だけ残るのを避けるため開いていた画面の値へ落とす
+    const draftRepository = repositories.some(
+      (repo) => repo.fullName === restorableDraft.repositoryFullName,
+    )
+      ? restorableDraft.repositoryFullName
+      : (defaultRepositoryFullName ?? "");
     const restoredRepository = resolveKindRepository(
       restorableDraft.kind,
       repositories,
-      defaultRepositoryFullName ?? restorableDraft.repositoryFullName,
+      draftRepository,
     );
     setRepositoryFullName(restoredRepository);
     // 書いていたときに入っていた値は本人が決めたものとして扱う（#1733）

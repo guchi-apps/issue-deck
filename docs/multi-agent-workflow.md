@@ -54,7 +54,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [関門と計器（実装セッションを監督する仕組み）](multi-agent/gates.md) | 監督のための役を増やさず、判断が要る関門と判断が要らない計器に分けて配る整理。計画の関門、セッションの停滞計測、並行セッションを俯瞰する手当て |
 | [個人設定（グローバルルール・個人skill）の同期](multi-agent/personal-config-sync.md) | メインPCとサブPCで`~/.claude/CLAUDE.md`・個人skillの実体を1つにするsymlink方式、取り残しの検知 |
 | [実装セッションの状態通知とRemote Control](multi-agent/session-notify.md) | フック（`Notification`・`Stop`）によるissue-deckへの即時報告と確認待ちのPush通知、扱うイベントの選別、`--remote-control`で外出先から答える経路 |
-| [他セッションのやり取りを見る](multi-agent/session-inspect.md) | 走っている別セッションの会話を読む3経路と`scripts/inspect-session.sh`、読んだ内容の扱い（端末に留める・そのセッションへ送らない） |
+| [他セッションのやり取りを見る](multi-agent/session-inspect.md) | 走っている別セッションの会話を読む3経路と`scripts/inspect-session.sh`、読んだ内容の扱い（端末に留める・そのセッションへ送らない）、トークン使用量の集計（`scripts/session-usage.sh`） |
 
 ## 段階的導入計画
 

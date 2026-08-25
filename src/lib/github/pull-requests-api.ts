@@ -309,18 +309,23 @@ export async function fetchPullRequestCommits(
  * `fetchClosedPullRequestsForBase`の「更新が新しい順に30件」からは落ちる。
  * headで名指しすれば件数に関係なく引けて、**ETagの条件付きGETが効く**ので、
  * 状況が変わらない間（＝大多数の巡回）はレート制限を消費しない。
+ *
+ * `base`に`null`を渡すと絞り込まない。滞留した`01.check-merge`の巡回（#2335）は
+ * `develop`宛と`main`宛のどちらのPRも対象になる（`develop`を持たないリポジトリでは
+ * `issue-<番号>`→`main`が唯一のPRになる）ため、`state="all"`とあわせて1回で引く。
  */
 export async function fetchPullRequestsForHead(
   owner: string,
   repo: string,
-  base: string,
+  base: string | null,
   headRef: string,
-  state: "open" | "closed",
+  state: "open" | "closed" | "all",
   token: string,
 ): Promise<GithubApiOpenPullRequest[]> {
   const head = encodeURIComponent(`${owner}:${headRef}`);
+  const baseParam = base === null ? "" : `&base=${encodeURIComponent(base)}`;
   return fetchPullRequestPage(
-    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=${state}&base=${encodeURIComponent(base)}&head=${head}&per_page=20`,
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=${state}${baseParam}&head=${head}&per_page=20`,
     token,
   );
 }

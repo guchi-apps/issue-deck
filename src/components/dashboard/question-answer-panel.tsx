@@ -49,11 +49,18 @@ export function QuestionAnswerPanel({
   request,
   session,
   dispatch,
+  onCheckUserResolved,
 }: {
   request: SessionQuestionRequestView;
   /** 質問したセッション。見つかっていなければ`null` */
   session: DispatchSessionView | null;
   dispatch: DispatchStateHandle;
+  /**
+   * 回答を送って確認待ちが解けたときに呼ぶ（#2341。計画の承認パネルと同じ）。サーバーが
+   * `00.check-user`と理由ラベルを外すのと同じことを、手元のIssueにも先に反映させる。
+   * 「端末・Remote Controlで答える」では呼ばない（人はまだ答えていない）。
+   */
+  onCheckUserResolved?: () => void;
 }) {
   const [selections, setSelections] = useState<Record<string, Selection>>({});
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +124,7 @@ export function QuestionAnswerPanel({
       return;
     }
     setSent({ requestId: request.id, decision });
+    if (decision !== "defer") onCheckUserResolved?.();
   }
 
   // 送った直後、または他の経路（フックの受け取り・期限切れ）で決まった後の表示。

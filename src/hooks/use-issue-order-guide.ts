@@ -4,7 +4,8 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useIssueOrder } from "@/hooks/use-issue-order";
 import { usePersistedState } from "@/hooks/use-persisted-state";
-import { ISSUE_ORDER_CANDIDATE_LIMIT, type IssueOrderResult } from "@/lib/claude/issue-order";
+import { ISSUE_ORDER_CANDIDATE_LIMIT } from "@/lib/claude/limits";
+import type { IssueOrderResult } from "@/lib/claude/issue-order";
 import { resolveIssueOrderView, type IssueOrderView } from "@/lib/issue-order-view";
 import { filterIssuesByView } from "@/lib/issue-stats";
 import type { Issue } from "@/types/issue";

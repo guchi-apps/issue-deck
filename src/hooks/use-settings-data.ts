@@ -1,5 +1,6 @@
 "use client";
 
+import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubActionsUsage } from "@/hooks/use-github-actions-usage";
@@ -19,8 +20,9 @@ import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
  *
  * `enabled`は設定画面を開いているあいだ真になる。**それだけでは足りない**（#2022）——
  * 設定を開いた時点では、どの区分も選んでいないのに全部の取得が走っていた。そのうち
- * 使用量・レート制限（`StatusSection`でしか読まないもの。#2212で足したActionsの消費量も
- * ここに入る）は`statusActive`が真、つまり**「状態」区分を開いているあいだだけ**取りに行く。
+ * 使用量・レート制限（`StatusSection`でしか読まないもの。#2212で足したActionsの消費量と、
+ * #2347で足したAI APIの消費量もここに入る）は`statusActive`が真、つまり**「状態」区分を
+ * 開いているあいだだけ**取りに行く。
  * 区分を離れて戻ると取り直すが、使用量は見るたびに新しいほうがよいので、そのままにしている。
  *
  * 残る2本（GitHubの障害状況・PATの一覧）は`enabled`のままにする。**どちらも区分を
@@ -49,6 +51,11 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
     error: claudeUsageError,
     notConfigured: claudeUsageNotConfigured,
   } = useClaudeUsage(enabled && statusActive);
+  const {
+    data: claudeApiUsage,
+    isLoading: claudeApiUsageLoading,
+    error: claudeApiUsageError,
+  } = useClaudeApiUsage(enabled && statusActive);
   const {
     data: githubStatus,
     isLoading: githubStatusLoading,
@@ -88,6 +95,11 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
       isLoading: claudeUsageLoading,
       error: claudeUsageError,
       notConfigured: claudeUsageNotConfigured,
+    },
+    claudeApiUsage: {
+      data: claudeApiUsage,
+      isLoading: claudeApiUsageLoading,
+      error: claudeApiUsageError,
     },
     githubStatus: {
       data: githubStatus,

@@ -29,6 +29,12 @@ type IssuePullRequestListProps = {
   links: PullRequestLink[];
   /** 取得済みの対応PRの詳細。`links`の部分集合で、取得前は空になる */
   pullRequests: IssuePullRequest[];
+  /**
+   * `pullRequests`の取得がまだ一度も終わっていないか（#2352）。取得前の行のマージボタンを
+   * 「確認中」で押せなくするために使う。**空配列だけでは「取得前」と「取得できなかった」を
+   * 区別できない**ため、判定は取得元（`useIssuePullRequests`）から受け取る。
+   */
+  isLoadingDetails?: boolean;
   /** ユーザーのマージ確認待ちか。trueのときだけマージボタンを出し、枠をハイライトする */
   mergeApprovalPending: boolean;
   /** マージを実行する。成功したらtrueを返す。省略するとマージボタンを出さない */
@@ -121,10 +127,16 @@ export function IssuePullRequestStateCounts({ buckets }: { buckets: IssuePullReq
  * 並びの正は`links`（コメント本文・timelineから得たPR番号）で、`pullRequests`はそこへ
  * 後から合流するタイトル・状態。詳細が取れていない行でも番号とマージボタンは出す
  * （取得に失敗しただけでマージできなくなるのを避けるため）。
+ *
+ * **ただし合流を待っている間は、マージボタンを「確認中」で押せなくする**（#2352）。
+ * CI・Claudeレビュー・マージ判定のバッジは詳細と一緒に届くため、待っている間の行は
+ * 「押せる『マージする』だけがある行」に見え、直後にバッジが増えて「判定中」へ変わる。
+ * その数秒が誤操作の窓になっていた。ボタン自体は出したままにして、行の形は変えない。
  */
 export function IssuePullRequestList({
   links,
   pullRequests,
+  isLoadingDetails = false,
   mergeApprovalPending,
   onMerge,
   onMerged,
@@ -159,6 +171,8 @@ export function IssuePullRequestList({
       <ul className="flex flex-col gap-2">
         {visibleLinks.map((link) => {
           const detail = detailByNumber.get(link.number);
+          // 取得が終わるまでは押せなくする。終わったのに詳細が無い行（取得失敗）は従来どおり
+          const detailPending = !detail && isLoadingDetails;
           const merged = Boolean(mergedNumbers?.has(link.number)) || Boolean(detail?.merged);
           // 詳細が取れていない行では判断材料が無いので、マージできる前提で出す
           const canMerge = detail ? canMergeIssuePullRequest(detail) : true;
@@ -192,6 +206,7 @@ export function IssuePullRequestList({
                   pullRequestNumber={link.number}
                   ciStatus={detail?.ciStatus ?? null}
                   mergeJudgement={detail?.mergeJudgement ?? null}
+                  isDetailPending={detailPending}
                   isMerging={Boolean(isMerging) && mergeTargetNumber === link.number}
                   isMerged={merged}
                   error={mergeTargetNumber === link.number ? mergeError : null}

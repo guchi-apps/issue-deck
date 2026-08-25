@@ -21,6 +21,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
  * | サブPC | `EXITED`/`FAILED`/`GONE` | × |
  * | サブPC | `ALIVE`だが`lastReportedAt`が{@link SESSION_ACTIVITY_STALE_MS}より古い | × |
  * | 共通 | Claudeへの質問が回答待ち（#2309） | ○ |
+ * | 共通 | 承認待ち（`00.check-user`）で、まだエージェントが動いている（#2358） | ○ |
  * | 共通 | 承認待ち（`00.check-user`） | × |
  *
  * `RESPONDED`（応答を終えた）を回す側に含めるのは、`summarizeIssueSession`が同じものを
@@ -37,6 +38,16 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
  * 示す状態だから。回転（＝エージェントが動いている）と同時に出すと合図が矛盾する。Actions側は
  * ポーリング自体が承認待ちのIssueを外している（`use-issues-workflow-running.ts`）ので、これは
  * サブPC側にも同じ扱いを広げるもの。
+ *
+ * **ただし「確認待ちだが、まだエージェントが動いている」だけは回す**（#2358）。`00.check-user`は
+ * 「人の対応が要る」ことしか表さず、付けた側はエージェントが止まるのを待たない（#2174）。
+ * developへPRを作った直後（`01.check-merge`＋CI実行中）や、確認待ちのままサブPCのセッションが
+ * 作業を続けている間がこれで、**押せる操作がまだ無いのに回転だけが止まる**ため、一覧からは
+ * 動いているのか止まったのかを読めなくなっていた。判定は`lib/check-user-attention.ts`の
+ * `selectCheckUserRunningIssueIds`（＝左メニュー・ヘッダーの件数が読む集合）をそのまま受け取る。
+ * **計画の承認待ち・質問の回答待ちはあちらが先に「実行中ではない」と決める**ので、ここも回らない
+ * （#2238）。中央のアラートアイコンと色（amber）は変えないので、「人が対応する番だが、いまは
+ * まだ処理が動いている」が1つのバッジで読める。
  *
  * 運用の背景は`docs/multi-agent/session-notify.md`「実行中の回転はどこから決まるか（#1439）」。
  */
@@ -67,13 +78,20 @@ export function isWorkflowBadgeSpinning(params: {
   session?: WorkflowBadgeSession | null;
   /** `00.check-user`が付いているか */
   approvalPending: boolean;
+  /**
+   * その確認待ちが、まだエージェントの実行を待っている状態か（#2358）。
+   * `selectCheckUserRunningIssueIds`（`lib/check-user-attention.ts`）の結果を渡す。
+   * **渡さなければ従来どおり**、確認待ちの間は回さない。
+   */
+  checkUserRunning?: boolean;
   /** Claudeへの質問が回答待ちか（#2309・`Issue.qaAnswerPendingAt`） */
   qaAnswerPending?: boolean;
   /** 現在時刻(epoch ms)。マウント前などで未取得(null)のときは古さの判定を行わない */
   now: number | null;
 }): boolean {
-  const { actionsRunning, session, approvalPending, qaAnswerPending, now } = params;
-  if (approvalPending) return false;
+  const { actionsRunning, session, approvalPending, checkUserRunning, qaAnswerPending, now } =
+    params;
+  if (approvalPending) return checkUserRunning === true;
   if (qaAnswerPending) return true;
   if (actionsRunning?.isRunning) return true;
   return isSessionActivelyWorking(session ?? null, now);

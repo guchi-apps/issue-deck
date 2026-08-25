@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SidebarNav, SidebarNavView } from "@/components/dashboard/sidebar-nav";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import type { MergePendingAttention } from "@/lib/merge-pending-attention";
 import { navViews } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import type { ReleaseActivityCounts } from "@/lib/release-activity";
@@ -19,6 +20,14 @@ const NAV_COUNTS = Object.fromEntries(navViews.map((view) => [view.id, 0])) as R
 
 const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
 
+/** 「マージ待ち」の内訳。件数を渡さないテストでは0件（丸は点かない）にしておく */
+const NO_MERGE_PENDING: MergePendingAttention = {
+  total: 0,
+  autoMerging: 0,
+  repairing: 0,
+  actionRequired: 0,
+};
+
 function renderSidebar(
   pullRequestNavCounts: PullRequestNavCounts,
   navCounts: Record<NavViewId, number> = NAV_COUNTS,
@@ -28,12 +37,14 @@ function renderSidebar(
     unconfirmedQuestionCount = 0,
     waitingQuestionCount = 0,
     releaseActivity = null,
+    mergePendingAttention = NO_MERGE_PENDING,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
     unconfirmedQuestionCount?: number;
     waitingQuestionCount?: number;
     releaseActivity?: ReleaseActivityCounts | null;
+    mergePendingAttention?: MergePendingAttention | null;
   } = {},
 ) {
   render(
@@ -52,6 +63,7 @@ function renderSidebar(
       waitingQuestionCount={waitingQuestionCount}
       releaseActivity={releaseActivity}
       pullRequestNavCounts={pullRequestNavCounts}
+      mergePendingAttention={mergePendingAttention}
       repositories={[]}
       labelSummary={[]}
     />,
@@ -93,6 +105,7 @@ function renderSidebarWithRepositories(
       unconfirmedQuestionCount={0}
       waitingQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
+      mergePendingAttention={NO_MERGE_PENDING}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
       labelSummary={[]}
@@ -110,9 +123,15 @@ function repositoryNamesInOrder() {
     .filter((text) => text.length > 0);
 }
 
-/** PRビューのボタンは判定条件の補足をtitle属性に持つので、それを手掛かりに引く */
+/**
+ * PRビューのボタンは判定条件の補足をtitle属性に持つので、それを手掛かりに引く。
+ * 「マージ待ち」だけは内訳が後ろに付く（#2334）ため、前方一致で引く。
+ */
 function pullRequestNavItem(view: PullRequestViewId) {
-  return screen.getByTitle(getPullRequestView(view).description);
+  const description = getPullRequestView(view).description;
+  return screen.getByTitle((_content, element) =>
+    (element?.getAttribute("title") ?? "").startsWith(description),
+  );
 }
 
 afterEach(() => cleanup());
@@ -145,14 +164,26 @@ describe("SidebarNav", () => {
     expect(pullRequestNavItem("completed").textContent).toContain("1");
   });
 
-  // マージ待ちはCIも自動マージ可否の判定も終わっており、あとは人がマージするか
-  // CI失敗を直すかしかない（#2334）。
-  it("マージ待ちが残っていれば件数をオレンジの丸で出す", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 });
+  // マージ待ちのうち、人がマージするかCI失敗を直すかしかないPRが残っているときだけ（#2334）
+  it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
+    });
 
     expect(pullRequestNavItem("completed").querySelector("span:last-child")?.className).toContain(
       "bg-amber-500",
     );
+  });
+
+  // Auto-merge有効でCI成功のPR・自動修復中のPRは放っておけば片付く（ベルと同じ除外）
+  it("マージ待ちが自動で進むものだけなら丸にしない", () => {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 1, actionRequired: 0 },
+    });
+
+    expect(
+      pullRequestNavItem("completed").querySelector("span:last-child")?.className,
+    ).not.toContain("bg-amber-500");
   });
 
   it("マージ待ちが0件なら丸にしない（手を動かせるものが無い）", () => {
@@ -165,13 +196,25 @@ describe("SidebarNav", () => {
 
   // 「すべてのPR」は実行中を含む在庫の数、「実行中」は人が何もしなくても進むもの（#2334）
   it("すべてのPR・実行中は件数があっても丸にしない", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 });
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+      mergePendingAttention: { total: 2, autoMerging: 0, repairing: 0, actionRequired: 2 },
+    });
 
     for (const view of ["all", "in-progress"] as const) {
       expect(pullRequestNavItem(view).querySelector("span:last-child")?.className).not.toContain(
         "bg-amber-500",
       );
     }
+  });
+
+  // 数字（一覧に並ぶ総数）と丸（要操作）で意味が違うため、内訳を吹き出しで補う（#2334）
+  it("マージ待ちの行の吹き出しに内訳を添える", () => {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
+    });
+
+    const title = screen.getByText("マージ待ち").closest("button")?.getAttribute("title") ?? "";
+    expect(title).toContain("2件: 要操作1件・自動マージ待ち1件");
   });
 
   // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。

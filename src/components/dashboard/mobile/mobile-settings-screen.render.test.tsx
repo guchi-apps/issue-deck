@@ -19,6 +19,7 @@ const settingsData = {
   apiUsage: { data: null, isLoading: false, error: null },
   actionsUsage: { data: null, isLoading: false, error: null, notConfigured: false },
   claudeUsage: { data: null, isLoading: false, error: null, notConfigured: true },
+  claudeApiUsage: { data: null, isLoading: false, error: null },
   githubStatus: { data: null, isLoading: false, error: null },
   fineGrainedTokens: { data: [], isLoading: false, error: null, refetch: vi.fn() },
   hasExpiringFineGrainedToken: false,

@@ -54,11 +54,20 @@ export function PlanApprovalPanel({
   request,
   session,
   dispatch,
+  onCheckUserResolved,
 }: {
   request: SessionPlanRequestView;
   /** 計画を出したセッション。見つかっていなければ`null` */
   session: DispatchSessionView | null;
   dispatch: DispatchStateHandle;
+  /**
+   * 承認・修正を送って確認待ちが解けたときに呼ぶ（#2341）。**サーバーが`00.check-user`と
+   * 理由ラベルを外すのと同じことを、手元のIssueにも先に反映させる**ためのもの——
+   * Issue一覧のポーリングは10秒間隔で、押した直後の画面にはラベルも
+   * 「計画の承認が必要です」のカードも残ったままになる。
+   * 「端末・Remote Controlで答える」では呼ばない（人はまだ答えていない）。
+   */
+  onCheckUserResolved?: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
@@ -94,6 +103,7 @@ export function PlanApprovalPanel({
     }
     setSent({ requestId: request.id, decision });
     setIsRevising(false);
+    if (decision !== "defer") onCheckUserResolved?.();
   }
 
   // 送った直後、または他の経路（フックの受け取り・期限切れ）で決まった後の表示。

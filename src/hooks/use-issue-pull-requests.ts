@@ -12,6 +12,17 @@ const EMPTY: IssuePullRequest[] = [];
 
 type UseIssuePullRequestsResult = {
   pullRequests: IssuePullRequest[];
+  /**
+   * いま表示している対応PRについて、**まだ一度も取得が終わっていない**か（#2352）。
+   *
+   * `pullRequests`が空なだけでは「取得前」と「取得したが詳細が取れなかった」を区別できず、
+   * 画面はどちらも「詳細の無い行」として描くしかない。マージボタンは取得前だけ押せなく
+   * したい（取得失敗でマージ不能にはしない。#1339）ので、その区別をここで持つ。
+   *
+   * 取得が**失敗しても**falseになる。ポーリングでの取り直し・`refresh`ではtrueに戻さない
+   * （一度出した状態が消えて、押せていたボタンが押せなくなるのを避けるため）。
+   */
+  isLoadingDetails: boolean;
   /** マージ直後など、GitHub側の状態が変わったときに取り直す */
   refresh: () => void;
 };
@@ -35,10 +46,17 @@ export function useIssuePullRequests(
 ): UseIssuePullRequestsResult {
   const [pullRequests, setPullRequests] = useState<IssuePullRequest[]>(EMPTY);
   const [reloadToken, setReloadToken] = useState(0);
+  // 初回の取得が終わった対象を覚えておく。取得中かどうかは「いま見ている対象と一致するか」で決める
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   const [owner, repo] = repositoryFullName ? repositoryFullName.split("/") : [null, null];
   // 配列は毎レンダー新しい参照になるため、依存配列にはクエリ文字列そのものを使う
   const numbersKey = links.map((link) => link.number).join(",");
+  // 取得の対象を一意に表すキー。Issueを切り替えたら別物として扱う
+  const loadKey =
+    owner && repo && issueNumber && numbersKey !== ""
+      ? `${owner}/${repo}#${issueNumber}:${numbersKey}`
+      : null;
 
   useEffect(() => {
     if (!owner || !repo || !issueNumber || numbersKey === "") {
@@ -72,6 +90,10 @@ export function useIssuePullRequests(
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+      } finally {
+        // 失敗しても「取得は終わった」として記録する（#2352）。取得中のまま据え置くと、
+        // 取れなかっただけのPRでマージボタンが永久に押せなくなる
+        if (!cancelled) setLoadedKey(loadKey);
       }
     }
 
@@ -85,9 +107,9 @@ export function useIssuePullRequests(
       controller.abort();
       if (intervalId) clearInterval(intervalId);
     };
-  }, [owner, repo, issueNumber, numbersKey, pollWhileCiRunning, reloadToken]);
+  }, [owner, repo, issueNumber, numbersKey, pollWhileCiRunning, reloadToken, loadKey]);
 
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 
-  return { pullRequests, refresh };
+  return { pullRequests, isLoadingDetails: loadKey !== null && loadedKey !== loadKey, refresh };
 }

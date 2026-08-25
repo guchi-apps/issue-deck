@@ -74,6 +74,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - `h-full`は`fixed inset-0`と重複して見えるため消されやすく、症状はモーダルを開閉したときに
     しか出ない。jsdomはレイアウトを持たず描画のテストでも捕まらないため、
     [`src/app/layout.test.ts`](../src/app/layout.test.ts)がクラスの並びだけを見張っている。
+- **入力中のフォームを初期化し直さない**（#2354）。ダイアログ・別ウィンドウのフォームは
+  「開いた瞬間」に初期値（開いていた画面のリポジトリ、引用元のプリフィルなど）を入れるが、
+  **その初期化は閉じた状態から開いた遷移でだけ走らせる**。初期値をuseEffectの依存に置いたまま
+  にすると、開いている最中に画面側の値が変わっただけで人の入力が初期状態へ戻り、
+  「選んだリポジトリがひとりでに変わった」「書いた本文が消えた」として現れる。押した本人には
+  何が起きたのか見えず、再現手順も残らない。
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)は
+  `initializedForOpenRef`で1回に限っている。
+  - **人が選んだ値を、文脈から決めた値で上書きしない。** 下書きの復元も同じで、戻すのは
+    書いていたときに選んでいたリポジトリ。開いていた画面のリポジトリを優先すると、中身だけが
+    別のリポジトリへ入った状態になる。
 - **画面の現在地を表すURLクエリの更新は
   [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
   だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの
@@ -282,6 +293,39 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
   **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
   添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
+- **設定の「状態」2枚目のカードは「AI使用量」で、中を`プラン枠`と`API呼び出し`に分ける**（#2347）。
+  `プラン枠`はレート制限ヘッダから読む5時間枠・週間枠の使用率（`claude-usage-card.tsx`・
+  [`lib/claude/usage.ts`](../src/lib/claude/usage.ts)）、`API呼び出し`はissue-deck自身が投げた
+  呼び出しの機能別内訳（[`claude-api-usage-list.tsx`](../src/components/dashboard/claude-api-usage-list.tsx)・
+  [`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)）。
+  **Anthropic APIを叩くのは[`lib/claude/request.ts`](../src/lib/claude/request.ts)だけにする**——
+  数えられるのはそこを通った呼び出しだけで、`fetch`を各機能へ書き戻すと計上から漏れる。
+  トークン数は推計ではなく応答の`usage`の実測値で、キャッシュの読み書きも合計に含める
+  （どれもプラン枠を消費するため）。集計は5分バケット＋`ClaudeApiUsageBucket`への永続化で、
+  `src/instrumentation.ts`が起動時に復元する。**GitHub版と違い、DBへ書くのはバケットの
+  繰り上がり時ではなく呼び出しのたび**——GitHub APIは常時ポーリングがあり5分以内に必ず
+  繰り上がるが、AIの呼び出しは9つともボタン起点で次まで数時間空くことがあり、繰り上がりを
+  待つといちばん見たい直近の消費が保存されないまま再起動で消える。
+  **保持は7日で、画面の切り替えも`過去1日`・`過去7日`**（プラン枠が5時間・週間なので、
+  GitHub側の「今時」に当たる区切りがAIには無い）。
+  **`lib/claude/`のうち画面からも読む定数・純粋関数は
+  [`limits.ts`](../src/lib/claude/limits.ts)、画面が読む集計の型は
+  [`api-usage-totals.ts`](../src/lib/claude/api-usage-totals.ts)へ置く**——
+  AI呼び出し本体（`issue-search.ts`など）から値importすると、集計モジュールごと
+  クライアントバンドルへ載る（後述の`issues-api.ts`と同じ分け方）。
+  **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
+  からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
+  同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
+  **金額は出さない**——すべて`CLAUDE_CODE_OAUTH_TOKEN`（プラン契約）で動いており、
+  従量課金の請求は発生しないため。
+- **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
+  Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
+  実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
+  実測（`pnpm dev`）では、起動時に登録したはずのリスナーが記録側から見ると0件で、
+  `ClaudeApiUsageBucket`へ1行も書かれなかった。**プロセスで1つに保ちたい状態は
+  `globalThis`へ載せる**（`lib/db.ts`のPrismaClientと同じ形。
+  [`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)の`ClaudeApiUsageState`）。
+  型チェックも単体テストも通り、**画面には「まだ記録がありません」と出るだけ**なので気付きにくい。
 - **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958・#2182）。
   判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
   引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。
@@ -573,6 +617,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
     **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
     畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
+- **コメント欄の下の操作列は、主ボタン（塗りつぶし）を1つだけ持ち、それを固定しない**（#2345）。
+  どれを主にするかの判定は[`lib/github/ask-claude.ts`](../src/lib/github/ask-claude.ts)の
+  `resolveComposerPrimaryAction`にあり、**PC（`issue-detail.tsx`）とスマホ
+  （`mobile/mobile-issue-detail.tsx`）が同じ関数を共有する**。見るのは「質問Issueか」
+  「回答待ちか」に加えて**入力欄が空かどうか**で、書き始めた時点で強調が
+  「回答を確認してクローズ」から「質問する」へ移る（続きを聞きたい人に、話を終える操作が
+  いちばん強く見えていた）。副操作は枠線、質問Issueの「コメント」は枠なしまで沈める。
+  - **`Ctrl`+`Enter`の宛先は、そのとき主ボタンになっている投稿操作と一致させる。**
+    一致していないと、続きを聞いたつもりの文章が「誰も読まないふつうのコメント」として積まれる
+    （質問Issueへのコメントは`@claude`が付かないため回答されない）。
+  - **クローズをキーボードショートカットに割り当てない。** 主ボタンが`close`のときは
+    `Ctrl`+`Enter`を投稿（コメント）へ倒す。取り返しの付く操作だけをキーへ載せる。
+  - 表示条件そのもの（`canCloseAskRepoQuestion`）は変えていない。**「出るかどうか」と
+    「どれが主か」は別の判定**で、前者を強さの判定に流用するとヘッダー側の同名ボタンとずれる。
+  - **横断質問Issue（#1454）は`[質問] `タイトルを持つが、この強調から外す。** 記録先
+    （既定は`guchi-apps/question`。ワークフローは`issue-labels.yml`だけ）にはコメントを拾う
+    無人実行が無く、答えるのはサブPCの質問セッションで、追い質問は追加指示（#1012）で送る。
+    それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えないまま
+    `isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**。
+    判定は`isCrossRepoQuestionIssue`（コメントの`CROSS_REPO_QUESTION_MARKER`を見る。
+    **リポジトリ名で判定しない**——`resolveCrossRepoQuestionRepository`がフォールバックを持つ）。
 - **人が進捗を直接動かす入口は、Issue詳細の「進捗」セレクト**（#1350・#1920）。中身・並び・注記は
   [`components/dashboard/issue-progress-select.tsx`](../src/components/dashboard/issue-progress-select.tsx)
   が持ち、**PCとスマホがこれ1つを共有する**——PCはラベル・担当者と並ぶ右パネル
@@ -596,6 +661,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ような純粋なものと、GitHubを叩くものはファイルを分ける
   （`lib/github/issue-close.ts`＝両方から読む／`lib/github/issue-close-cleanup.ts`＝サーバー専用。
   `lib/progress-report-message.ts`と`lib/github/report-progress.ts`も同じ分け方）。
+- **`src/instrumentation.ts`とRoute Handlerは別バンドルなので、両者で共有する状態は`globalThis`へ
+  載せる**（#2360）。素朴にモジュールスコープの`let`・`const`で持つと**同じファイルの実体が2つでき、
+  起動時に登録したリスナーが記録側から見えない。** GitHub API使用量の永続化
+  （[`lib/github/api-usage.ts`](../src/lib/github/api-usage.ts)）がこれで、`instrumentation.ts`が
+  `onBucketClosed()`で登録した書き込みが一度も呼ばれず、`GithubApiUsageBucket`が0行のまま
+  「再起動をまたいで引き継ぎます」と表示していた。**型チェックも単体テストも通り、画面の内訳も
+  出る**（メモリ側だけで完結するため）ので、再起動して消えることでしか気付けない。
+  `lib/db.ts`のPrismaClientと同じ形で1つに寄せる（`AsyncLocalStorage`も同じ理由で共有する。
+  同じ作りのAI API消費量`lib/claude/api-usage.ts`も同様）。開発時のHMRで実体が増えるのも防げる。
 - **Projectへの書き込み経路は`POST /api/progress`の1本だけ。** ワークフローもローカル実行も
   Projectを直接更新せず、このAPIへ`ProgressStatusKey`を報告する
   （[`lib/github/report-progress.ts`](../src/lib/github/report-progress.ts)）。Projects v2の
@@ -1293,15 +1367,29 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   CI失敗を外さないのと同じ扱い。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
   **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
   ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
-  **件数にオレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは「マージ待ち」だけ**
-  （#2334。判定は`pull-request-views.ts`の`isPullRequestViewAttention`）。CIも自動マージ可否の
-  判定も終わったPRしか並ばないビューで、残っているのは人がマージするかCI失敗を直すかしかない
-  ——「ユーザーの確認待ち」（#742）と同じ性質のもの。「すべてのPR」は実行中を含む在庫の数、
-  「実行中」は人が何もしなくても進むものなので点けない。0件・未取得でも点けない。
-  **判定は`lib`の関数1つに置き、画面側に書かない**——PCの左メニュー・スマホのホーム・
-  スマホのビュー選択シートの3か所に同じ条件が散ると、片方だけ直された時点で意味が食い違う。
-  **対応Issueを持たないリリースPRは「ユーザーの確認待ち」でも数えられるので丸が2行に点くが、
-  母集団が別**（あちらはCIの結果を見ない。上の#1613の項）で、どちらから入ってもマージ画面へ着く。
+  **件数にオレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは「マージ待ち」だけ、
+  それも人が手を動かすまで進まないPRが残っているとき**（#2334。
+  [`lib/merge-pending-attention.ts`](../src/lib/merge-pending-attention.ts)）。
+  - **数字は`completed`の総数、丸は`actionRequired`**（「ブランチ」の行と同じ形。上の#2167の項）。
+    丸から外すのは**放っておけば片付く2つ**——Auto-merge有効でCI成功（`isAutoMergingPullRequest`。
+    GitHubが入れる）と、CI失敗の自動修復中（#2072。エージェントが直しにいっている）。
+    **develop向けPRはAuto-mergeが通常の経路**（`claude-review-develop.yml`が自動マージ可と
+    判定したら`gh pr merge --auto`）なので、外さないと「マージ待ち」の丸がほぼ常時点いたままになる。
+    **修復が走っていないCI失敗は外さない**——待っても解消せず人が直すしかない。
+  - **除外の条件は通知ベルと同じ関数を使う**（`lib/notifications.ts`の
+    `buildPullRequestNotifications`が元から同じ除外をしていた）。2か所に書くと、片方だけ
+    直された時点でベルとメニューの合図が食い違う。
+  - **「すべてのPR」（実行中を含む在庫の数）と「実行中」（人が何もしなくても進む）は点けない。**
+    0件・未取得でも点けない。
+  - **判定（`isPullRequestViewAttention`）は`lib`の関数1つに置き、画面側に書かない**——PCの
+    左メニュー・スマホのホーム・スマホのビュー選択シートの3か所に同じ条件が散ると、片方だけ
+    直された時点でPCとスマホで意味が食い違う。件数を数えるのは`IssueDeckShell`が1回だけで、
+    母集団（`visiblePullRequests`）はメニューの件数とそろえる。
+  - **数字と丸で意味が違うぶんは行の吹き出しで補う**（`describeMergePendingAttention`。
+    `3件: 要操作1件・自動マージ待ち2件`）。「質問」（#2070）・「ブランチ」（#2167）と同じ形。
+  - **対応Issueを持たないリリースPRは「ユーザーの確認待ち」でも数えられるので丸が2行に点くが、
+    母集団が別**（あちらはCIの結果を見ず、Auto-merge有効なPRを外す。上の#1613の項）で、
+    どちらから入ってもマージ画面へ着く。
   **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
   ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
   歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
@@ -1701,7 +1789,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   の各行の中だけにあり、画面上部の操作列・スマホのヘッダーには置かない。** 「コメント欄まで
   下げなくても押せる」という#1288の要件は、この一覧をIssue本文より上に置くことで満たしている。
   ポーリングするのはマージ待ち かつ CI実行中のときだけで、CIが確定したら自分で止まる
-  （`hooks/use-issue-pull-requests.ts`）。
+  （`hooks/use-issue-pull-requests.ts`）。**この詳細が届くまでのあいだ、行のマージボタンは
+  「確認中」で押せない**（#2352）。CI・Claudeレビュー・マージ判定のバッジは詳細と一緒に届くため、
+  待っている間の行は「押せる『マージする』だけがある行」に見え、直後にバッジが増えて「判定中」
+  （#1968）へ変わる。その数秒が誤操作の窓になっていた。**空配列だけでは「取得前」と
+  「取得したが詳細が取れなかった」を区別できない**ので、区別はフックが`isLoadingDetails`として
+  持つ（取得が失敗してもfalseになる——取得できなかっただけでマージ不能にしない#1339の扱いは
+  そのまま）。
 - **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
   （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
   一覧・PR詳細・スマホのリリースシートの進捗に出る。**どのワークフローを起動するかの判定は
@@ -1753,6 +1847,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
   人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
   そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
+  **マージ時に外しそこねた`00.check-user`を外すのも同じ巡回**（#2335。判定は
+  `decideStaleCheckUser`）。マージ時の除去は7枚まとめての1回で再試行が無く、GitHubの
+  一時的な5xxに当たると次のmainリリースまで確認待ちが残る（guchi-apps/signaly#200で18分）。
+  こちらも探し先はDBで、対象は**`Develop`・`Release`にいるopenなIssue**。開いているPRが
+  あるIssue・`issue-<番号>`のマージ済みPRが無いIssue・**`00.check-user`が最後のマージより
+  後に付いたIssue**（#1968の事後確認）には触らない。設計は
+  [multi-agent/labels.md](multi-agent/labels.md)「マージ時に外しそこねた`00.check-user`は
+  巡回が外す」。
   **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
   `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
   Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で
@@ -2159,6 +2261,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
   `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+- **ローカルセッションのトークン使用量は`scripts/session-usage.sh`が集計する**（#2350）。転記の
+  `message.usage`を`message.id`で重複除去して足し、種別（実装／計画レビュー／横断質問）・
+  Issue番号ごとにAPI換算の目安を出す。**`message.id`で除去しないと約2.5倍に膨らむ**
+  （`guchi-apps/question#34`）。集計と整形は`scripts/lib/session-usage.sh`にあり、
+  `inspect-session.sh`は見出しの1行（`oneline`）だけを借りる。これも転記を読むが、読むのは
+  usageと時刻・作業ディレクトリだけで、**やり取りの中身は出力に載せない**。設計は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)「使用量を集計する」。
   **`run-issue-session.sh`が同じ置き場を見るのは「`*.jsonl`が1つでもあるか」だけ**
   （#1541。`claude --continue`を付けるかの判定で、**中身は開かない**）。名前の導き方が変われば
   ヒットしなくなり、新規会話で始まるだけなので、上のルールの主旨（内部仕様への依存を広げない）は

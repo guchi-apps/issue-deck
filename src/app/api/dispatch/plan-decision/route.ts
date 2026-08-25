@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth-user";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { decideSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import {
   buildSessionPlanDecisionCommentBody,
   describeSessionPlanDecisionRejection,
@@ -70,6 +71,23 @@ export async function POST(request: NextRequest) {
     revisionText,
     login: user.githubLogin,
   });
+
+  // **答えた時点で確認待ちを解く**（#2341）。従来はセッション側のフック任せで、外れるのは
+  // 人が答えた直後の`PostToolUse`——しかし**画面から答えた回は承認プロンプトが出ない**ため、
+  // その合図が飛ばず`Stop`（turnの終了＝実装が全部終わるまで）まで残ることがある。
+  // 押したのに「計画の承認が必要です」とラベルが居座り、まだ何か操作が要るように見えていた。
+  //
+  // **`defer`では外さない。** 端末・Remote Controlで答えると言っただけで、人はまだ答えていない。
+  // ここで外すと待たれていること自体が画面から消える。
+  //
+  // 外し方はフックと同じ（`removeCheckUserWithReason`）で、`21.plan-required`は残す。
+  // **失敗しても成功として返す**——返事はもうDBに入っていてセッションへ届く（コメント投稿と同じ）。
+  if (decision !== "defer") {
+    await resolveSessionPlanCheckUser({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+    });
+  }
 
   return NextResponse.json({ request: result.request });
 }
