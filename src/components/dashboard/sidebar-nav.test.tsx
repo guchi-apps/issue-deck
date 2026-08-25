@@ -145,6 +145,35 @@ describe("SidebarNav", () => {
     expect(pullRequestNavItem("completed").textContent).toContain("1");
   });
 
+  // マージ待ちはCIも自動マージ可否の判定も終わっており、あとは人がマージするか
+  // CI失敗を直すかしかない（#2334）。
+  it("マージ待ちが残っていれば件数をオレンジの丸で出す", () => {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 });
+
+    expect(pullRequestNavItem("completed").querySelector("span:last-child")?.className).toContain(
+      "bg-amber-500",
+    );
+  });
+
+  it("マージ待ちが0件なら丸にしない（手を動かせるものが無い）", () => {
+    renderSidebar({ all: 2, "in-progress": 2, completed: 0 });
+
+    expect(
+      pullRequestNavItem("completed").querySelector("span:last-child")?.className,
+    ).not.toContain("bg-amber-500");
+  });
+
+  // 「すべてのPR」は実行中を含む在庫の数、「実行中」は人が何もしなくても進むもの（#2334）
+  it("すべてのPR・実行中は件数があっても丸にしない", () => {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2 });
+
+    for (const view of ["all", "in-progress"] as const) {
+      expect(pullRequestNavItem(view).querySelector("span:last-child")?.className).not.toContain(
+        "bg-amber-500",
+      );
+    }
+  });
+
   // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。
   it("確認待ちが残っていても強調するのは件数バッジだけにする", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, "check-user": 2 });
@@ -251,6 +280,22 @@ describe("SidebarNav", () => {
     expect(
       screen.getByRole("button", { name: /質問/ }).querySelector(".animate-spin"),
     ).toBeNull();
+  });
+
+  // 質問の合図をコードレビューの行へ持ち込まない（#2325）。同じ枠に並んでいるだけで、
+  // 回っているのは質問の回答待ち——押した先にレビューは1件も走っていない
+  it("回答待ちの質問があってもコードレビューの行は回さない", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
+    );
+
+    const button = screen.getByRole("button", { name: /コードレビュー/ });
+    expect(button.querySelector(".animate-spin")).toBeNull();
+    // 質問の未確認でオレンジの丸を点けたり、質問の内訳を吹き出しに出したりもしない
+    expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(button.getAttribute("title")).toBeNull();
   });
 
   it("未確認の質問が無ければ強調しないが、件数は出す", () => {

@@ -22,6 +22,7 @@ function status(overrides: Partial<WorkflowTagStatus> = {}): WorkflowTagStatus {
     mismatched: false,
     updatePullRequest: null,
     missingRepairWorkflows: [],
+    brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
     customizedSharedFiles: [],
@@ -220,6 +221,28 @@ describe("WorkflowTagStatusSection", () => {
 });
 
 describe("不足しているワークフローの配布（#1948・#1475）", () => {
+  it("壊れているcallerは「（壊れています）」を添えて同じ一覧に出す（#2330）", async () => {
+    // 置いてある以上pushのたびに失敗し続けるため、不足と見分けが付かないと後回しになる
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [
+        status({
+          fullName: "guchi-apps/asset-manager",
+          outdated: false,
+          brokenRepairWorkflows: ["claude-ci-fix.yml"],
+        }),
+      ],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("未配布・要作り直し（1）")).toBeTruthy();
+    expect(screen.getByText(/develop向けPRのCI失敗修正（壊れています）/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /1件へ不足・破損しているワークフローを配る/ }),
+    ).toBeTruthy();
+  });
+
   it("未配布のリポジトリと、何が不足しているかを出す", async () => {
     // callerが無いリポジトリでは、画面の「コンフリクトを自動解消」を押しても起動しない
     mockFetch({
@@ -240,12 +263,12 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
     });
     render(<WorkflowTagStatusSection open />);
 
-    expect(await screen.findByText("未配布（1）")).toBeTruthy();
+    expect(await screen.findByText("未配布・要作り直し（1）")).toBeTruthy();
     expect(screen.getByText(/develop向けPRのコンフリクト解消/)).toBeTruthy();
     // 自動修復以外（develop向けPRの自動マージ判定）も同じ一覧に出る（#1475）
     expect(screen.getByText(/develop向けPRの自動マージ判定/)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /1件へ不足しているワークフローを配る/ }),
+      screen.getByRole("button", { name: /1件へ不足・破損しているワークフローを配る/ }),
     ).toBeTruthy();
   });
 
@@ -265,7 +288,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
     render(<WorkflowTagStatusSection open />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: /1件へ不足しているワークフローを配る/ }),
+      await screen.findByRole("button", { name: /1件へ不足・破損しているワークフローを配る/ }),
     );
 
     await waitFor(() => {
@@ -296,7 +319,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
 
     expect(await screen.findByText("配布PRの確認待ち（1）")).toBeTruthy();
     expect(screen.getByText(/PR #12/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /不足しているワークフローを配る/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /不足・破損しているワークフローを配る/ })).toBeNull();
   });
 
   it("不足が無ければ欄自体を出さない", async () => {
@@ -304,7 +327,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
     render(<WorkflowTagStatusSection open />);
 
     await screen.findByText(repositoryNameMatcher("guchi-apps/car-care"));
-    expect(screen.queryByText("不足しているワークフロー")).toBeNull();
+    expect(screen.queryByText("不足・破損しているワークフロー")).toBeNull();
   });
 
   it("共有スクリプトが古いリポジトリと、独自の変更の目印を出す（#2240）", async () => {

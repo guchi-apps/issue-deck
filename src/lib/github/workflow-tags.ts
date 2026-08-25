@@ -17,6 +17,7 @@ import {
   parseWorkflowTagVersion,
   propagationTargets,
   repairPropagationTargets,
+  repairPropagationWorkflows,
   sharedFilePropagationTargets,
   SHARED_FILE_SPECS,
   type PropagationRun,
@@ -124,6 +125,14 @@ type RepositoryRefs = {
    * **中身ではなくファイルの実在**で決まるため、参照タグの解析と同じ応答から拾える。
    */
   files: string[];
+  /**
+   * 配布対象callerの本文（#2330）。ファイル名 → 本文。
+   *
+   * **置いてあるかだけでは足りない。** 雛形から機械的に作ったcallerは、置換の材料が
+   * 汚れていると読めないYAMLのまま配られる（`brokenRepairWorkflows`）。同じ応答に
+   * `text`まで載っているので、追加の往復なしで判定できる。
+   */
+  callerContents: Record<string, string>;
   /**
    * ワークフロー以外の配布物の本文（#2240）。パス → 本文。置かれていなければ`null`。
    *
@@ -260,12 +269,14 @@ ${SHARED_FILE_SPECS.map(
     const entries = repository?.object?.entries ?? [];
     const refs: WorkflowTagRef[] = [];
     const files: string[] = [];
+    const callerContents: Record<string, string> = {};
     for (const entry of entries) {
       if (entry.type !== "blob" || !entry.name.endsWith(".yml")) continue;
       files.push(entry.name);
       // バイナリや巨大ファイルでは text が null になる。ワークフローYAMLでは起こらない想定
       if (typeof entry.object?.text !== "string") continue;
 
+      callerContents[entry.name] = entry.object.text;
       const ref = extractWorkflowTagRef(entry.name, entry.object.text);
       if (ref) refs.push(ref);
     }
@@ -279,7 +290,13 @@ ${SHARED_FILE_SPECS.map(
     const pullRequests = (repository?.pullRequests?.nodes ?? []).filter(
       (node): node is OpenPullRequest => node !== null,
     );
-    refsByRepository.set(target.fullName, { refs, files, sharedFiles, pullRequests });
+    refsByRepository.set(target.fullName, {
+      refs,
+      files,
+      callerContents,
+      sharedFiles,
+      pullRequests,
+    });
   });
   return refsByRepository;
 }
@@ -429,6 +446,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
         updatePullRequest,
         {
           files: result.files,
+          contents: result.callerContents,
           pullRequest: findRepairWorkflowPullRequest(result.pullRequests),
         },
         {
@@ -718,7 +736,8 @@ export async function dispatchRepairPropagation(
 
   const targets = repairPropagationTargets(overview.repositories).map((status) => ({
     repository: status.fullName,
-    workflows: status.missingRepairWorkflows,
+    // 不足しているものと壊れているものの両方を渡す（#2330）
+    workflows: repairPropagationWorkflows(status),
   }));
 
   // 対象が無いのに起動すると、何もしないrunが履歴に残って紛らわしい

@@ -14,6 +14,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  formatUnreleasedSummary,
+  type UnreleasedSummary,
+} from "@/lib/branch-flow";
 import { requestDeploy } from "@/lib/deploy-request";
 import { cn } from "@/lib/utils";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
@@ -24,8 +28,11 @@ type RepositoryDeployButtonProps = {
   currentVersion?: string | null;
   /** 直近のリリースがmainへ入った時刻（ISO8601）。分からなければnull */
   deployedAt?: string | null;
-  /** developがmainより進んでいるコミット数。今回のデプロイでは出ないことを伝えるのに使う */
-  unreleasedCommits?: number;
+  /**
+   * developがmainより進んでいるぶんの内訳（#2333）。今回のデプロイでは出ないことを伝えるのに使う。
+   * 省略時は「developの差分」の行を出さない。
+   */
+  unreleased?: UnreleasedSummary;
   /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か */
   isPending?: boolean;
   /** 起動に成功したあと。起動中の記録とデプロイ状況の取り直しを親が行う */
@@ -59,7 +66,7 @@ export function RepositoryDeployButton({
   repositoryFullName,
   currentVersion = null,
   deployedAt = null,
-  unreleasedCommits = 0,
+  unreleased = { count: 0, unit: "件", versionBumpCount: 0 },
   isPending = false,
   onTriggered,
   tone = "outline",
@@ -121,11 +128,13 @@ export function RepositoryDeployButton({
               <dd>mainの先端（いまと同じ内容）</dd>
             </div>
             {/* **developの差分は出ない。** リリースと取り違えたまま押されるのがいちばん困る */}
-            {unreleasedCommits > 0 && (
+            {unreleased.count > 0 && (
               <div className="flex gap-2">
                 <dt className="w-24 shrink-0 text-muted-foreground">developの差分</dt>
                 <dd>
-                  <span className="font-medium">{unreleasedCommits}コミットぶんは出ません</span>
+                  <span className="font-medium">
+                    {formatUnreleasedSummary(unreleased)}ぶんは出ません
+                  </span>
                   （出すには「リリースする」を使います）
                 </dd>
               </div>

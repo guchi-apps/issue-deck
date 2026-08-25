@@ -1261,8 +1261,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
   **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
   `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
-  したがって**CI実行中のPRは数えない**（`pendingMerge`がCIの確定後にしか埋まらないため。
-  #1433）。通知ベル・リポジトリ一覧のバッジと同じ判定で、ここだけ基準を変えると同じ状態が
+  したがって**CI実行中のPRと、自動マージ可否の判定中のPRは数えない**（`pendingMerge`が
+  CIの確定後、かつ判定の完了後にしか埋まらないため。#1433・#2326）。通知ベル・リポジトリ
+  一覧のバッジ・ブランチ画面と同じ判定で、ここだけ基準を変えると同じ状態が
   場所によって別の数になる。**未取得（`null`）と0件は区別する**——未取得のうちは何も出さない
   （0を出すと「待っているものが無い」と読めてしまう）。バッジの見た目は
   ベルと同じ`NotificationBadge`を使い回す。
@@ -1292,6 +1293,15 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   CI失敗を外さないのと同じ扱い。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
   **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
   ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
+  **件数にオレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは「マージ待ち」だけ**
+  （#2334。判定は`pull-request-views.ts`の`isPullRequestViewAttention`）。CIも自動マージ可否の
+  判定も終わったPRしか並ばないビューで、残っているのは人がマージするかCI失敗を直すかしかない
+  ——「ユーザーの確認待ち」（#742）と同じ性質のもの。「すべてのPR」は実行中を含む在庫の数、
+  「実行中」は人が何もしなくても進むものなので点けない。0件・未取得でも点けない。
+  **判定は`lib`の関数1つに置き、画面側に書かない**——PCの左メニュー・スマホのホーム・
+  スマホのビュー選択シートの3か所に同じ条件が散ると、片方だけ直された時点で意味が食い違う。
+  **対応Issueを持たないリリースPRは「ユーザーの確認待ち」でも数えられるので丸が2行に点くが、
+  母集団が別**（あちらはCIの結果を見ない。上の#1613の項）で、どちらから入ってもマージ画面へ着く。
   **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
   ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
   歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
@@ -1449,7 +1459,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   違いは回るアイコンの有無しか無かった（#1931）ため、一覧を流し見して自分の番のリポジトリを
   見つけられなかった。判定は`lib/branch-flow.ts`の`resolveReleaseMergeTarget`
   （→`summary.releaseMergeTarget`）で、基準は展開したときのリリースの見出しと同じ
-  「CIが`pending`でなくなった時点」。**`failure`だけは待ちに数えない**——同じ行に赤の「CI失敗」が
+  「CIが`pending`でなくなり、**自動マージ可否の判定も終わった**時点」。
+  **判定中（`isMergeJudgementPending`）を待ちに数えないのは#2326。** 判定ワークフロー
+  （`claude-review-develop`）のcheck-runはCI状態の集約から外してある（#1799）ため、
+  Claudeがレビューしている最中でも`ciState`は`success`になり、琥珀の「mainへマージ待ち」が
+  出ていた。その窓のあいだ隣のマージボタンは「判定中」で無効（#1968）＝押せる操作が無いので、
+  「あなたの番」と促すのは誤り。**PR一覧・通知ベルが#2283で同じ理由の判定を先に入れており、
+  リリース側の表示だけが取り残されていた**（判定を通す場所は
+  `resolveReleaseMergeTarget`・`ReleaseGroupHeader`の`waitingUserMerge`・
+  `summarizeReleaseStatus`の3つで、**この3つは同時に直す**——1か所でも残ると同じ状態が
+  画面によって紫と琥珀に割れる）。判定中は紫の「リリース中」に戻り、回るアイコンも付く
+  （`isReleaseAutoProgressing`＝`summary.releaseAutoProgressing`。CI実行中に加えて判定中も
+  「自動で進んでいる」に数えるようにしたのが#2326で、それまでは判定中だけアイコンが止まり
+  「止まっているリリース」に見えた）。
+  **`failure`だけは待ちに数えない**——同じ行に赤の「CI失敗」が
   出るため、「直す必要がある」と「マージすればよい」を取り違えさせない（#1059と同じ優先順位）。
   auto-mergeが効いているバンプPRも待ちにしない（放っておけばdevelopへ入る）。文言は
   `lib/github/release-button-status.ts`の`releaseMergeTargetLabel`に寄せ、スマホのリポジトリ一覧・
@@ -1521,6 +1544,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
   **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
   リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
+  **残った数はコミット数ではなく「マージコミット単位の件数」で出す**（#2333・`unreleasedSummary`）。
+  通常マージ運用ではPR 1件のマージにつき作業ブランチ側のコミット（1個とは限らない）と
+  マージコミットが両方`aheadBy`へ載るため、**コミット数は実質的な作業の件数より必ず多く出る**
+  （実測: issue-deckの`main..develop`が12コミット＝マージ6個＋作業6個で、PR単位では6件）。
+  そこで同じGraphQLの`compare`から`commits`（各コミットの`oid`・`messageHeadline`・親のOID）まで取り、
+  **developの先端から`parents[0]`をたどったfirst-parentの列だけ**を数える
+  （`git log --first-parent main..develop`と同じ数。`branches-api.ts`の`toUnreleasedUnits`）。
+  **一覧の並び順に依存しない**——GitHubは古い順で返すが、一覧は「その比較に含まれるか」の集合として
+  しか使わず、幹をたどる起点は`headTarget.oid`にしている。
+  **squash mergeのリポジトリも同じ数え方でよい。** 1PR＝1コミットが幹に載るだけなので、
+  マージコミットを持たない列は「直接載ったコミット」（`directCount`）としてそのまま件数になる。
+  **バージョンバンプPRのマージだけは件数の本体から外し、「（+バージョンバンプ1件）」として添える**
+  （リリースの配管であって出す中身ではないため）。バンプかどうかはマージコミットのメッセージから
+  取り込んだブランチ名を読んで判定する（`mergedHeadRefFromHeadline`＋`isVersionBumpHeadRef`）——
+  `associatedPullRequests`を引けば確実だが、コミット100件ぶんのネストした問い合わせになり
+  1画面ぶんの取得コストが跳ね上がる。
+  **数えられないときはコミット数へ落とす**（`BranchComparison.units`が`null`）。該当するのは
+  比較のコミットが取得上限（100件）を超えているときと、`headTarget`のOIDが読めず幹をたどれないとき。
+  数え落としたまま「◯件」と言い切るより害が小さい。
+  **`canTriggerRelease`の判定は`unreleasedCommitCount`（コミット数）のままにしてある**——
+  押してよいかは「出すものがあるか」で決まり、件数の数え方を変えたことでリリースの可否が
+  動くべきではないため。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。

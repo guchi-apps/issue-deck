@@ -91,6 +91,11 @@ export type WorkflowTagStatus = {
    */
   missingRepairWorkflows: string[];
   /**
+   * 置かれてはいるが**GitHubがワークフローとして読めない**caller（#2330）。
+   * 判定は`brokenRepairWorkflows`。空なら壊れていない。
+   */
+  brokenRepairWorkflows: string[];
+  /**
    * 不足しているcallerを配布するPRのうち、まだopenのもの。無ければ`null`。
    *
    * **これが有る間は配布の対象から外す**（`repairPropagationTargets`）。callerが増えるのは
@@ -135,6 +140,8 @@ export function evaluateWorkflowTags(
   repair: {
     /** `.github/workflows/`直下のファイル名一覧 */
     files?: string[];
+    /** そのうち配布対象callerの本文。ファイル名 → 本文（#2330の破損判定に使う） */
+    contents?: Record<string, string>;
     pullRequest?: WorkflowTagPullRequest | null;
   } = {},
   /**
@@ -168,6 +175,7 @@ export function evaluateWorkflowTags(
     mismatched,
     updatePullRequest,
     missingRepairWorkflows: missingRepairWorkflows(repair.files ?? []),
+    brokenRepairWorkflows: brokenRepairWorkflows(repair.contents ?? {}),
     repairPullRequest: repair.pullRequest ?? null,
     outdatedSharedFiles: shared.outdated,
     customizedSharedFiles: shared.customized,
@@ -372,6 +380,50 @@ export function missingRepairWorkflows(files: string[]): string[] {
 }
 
 /**
+ * 配布済みcallerが壊れていると判定する条件（#2330）。
+ *
+ * **置いてあるだけでは足りない。** `missingRepairWorkflows`は「そのファイルが有るか」しか
+ * 見ないため、**中身が壊れていても「配布済み」として一覧から消える。** 実際
+ * `guchi-apps/asset-manager`の`claude-ci-fix.yml`は`workflows: - "CI\r"`という
+ * 読めないYAMLのまま置かれており、developへpushするたびGitHubが
+ * 「This run likely failed because of a workflow file issue」で即失敗するrunを作り、
+ * 30回連続で失敗通知だけが飛んでいた。画面には不足として出ず、押しても直せない状態だった。
+ *
+ * 見るのは次の2つだけにする。**YAMLとして解析はしない**——雛形から機械的に作ったファイルの
+ * 破損はこの2つで説明でき、解析まで持ち込むと「配布とは無関係な書き換え」まで壊れている
+ * 扱いになって上書きしてしまう。
+ *
+ * - **CR（`\r`）を含む。** CRLFのリポジトリのCIワークフロー名（`name: CI\r`）を
+ *   `__CI_WORKFLOW__`へ差し込んだのが原因で、引用符の途中に改行が入りYAMLが閉じない
+ * - **未展開のプレースホルダ（`__TAG__`など）が残っている。** 置換に失敗したまま配られた形
+ */
+const BROKEN_PLACEHOLDER = /__[A-Z0-9_]+__/;
+
+/**
+ * 配布対象callerの本文から、壊れているものを返す（#2330）。
+ *
+ * 引数は「ファイル名 → 本文」。**`REPAIR_WORKFLOW_SPECS`に載っているファイルだけ**を見る。
+ * 他のワークフローはこの配布経路で作り直せないため、壊れていると出しても行き止まりになる。
+ */
+export function brokenRepairWorkflows(contents: Record<string, string>): string[] {
+  return REPAIR_WORKFLOW_SPECS.filter((spec) => {
+    const source = contents[spec.file];
+    if (typeof source !== "string") return false;
+    return source.includes("\r") || BROKEN_PLACEHOLDER.test(source);
+  }).map((spec) => spec.file);
+}
+
+/**
+ * そのリポジトリへ配るcaller（#2330）。**不足しているものと壊れているものの両方**。
+ *
+ * 画面の表示・ボタンの件数・ワークフローへ渡す対象は必ずこれで揃える
+ * （`repairPropagationTargets`と同じ理由）。
+ */
+export function repairPropagationWorkflows(status: WorkflowTagStatus): string[] {
+  return [...status.missingRepairWorkflows, ...status.brokenRepairWorkflows];
+}
+
+/**
  * 配布ワークフローが作るPRのタイトル（#1948）。
  *
  * **`.github/scripts/propagate-repair-workflows.sh`の`gh pr create --title`と同じ文面**に
@@ -399,10 +451,13 @@ export function findRepairWorkflowPullRequest(
  *
  * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
  * （`propagationTargets`と同じ理由）。
+ *
+ * **不足しているものだけでなく、壊れているものも対象にする**（#2330）。壊れたcallerは
+ * 置いてある以上ずっと失敗し続けるので、不足より急いで直す必要がある。
  */
 export function repairPropagationTargets(statuses: WorkflowTagStatus[]): WorkflowTagStatus[] {
   return statuses.filter(
-    (status) => status.missingRepairWorkflows.length > 0 && status.repairPullRequest === null,
+    (status) => repairPropagationWorkflows(status).length > 0 && status.repairPullRequest === null,
   );
 }
 

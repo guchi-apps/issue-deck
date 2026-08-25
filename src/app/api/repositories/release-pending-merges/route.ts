@@ -9,7 +9,8 @@ import {
   fetchLatestDeployWorkflowRun,
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
-  fetchRefCiState,
+  fetchRefCheckState,
+  type RefCheckState,
 } from "@/lib/github/release-api";
 import {
   resolveFailedReleaseWorkflow,
@@ -19,7 +20,7 @@ import {
   type ReleaseStatusSummaryInput,
 } from "@/lib/github/release-button-status";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
-import { isReleaseHeadRef } from "@/lib/pull-request-list";
+import { isMergeJudgementPending, isReleaseHeadRef } from "@/lib/pull-request-list";
 
 export type ReleasePendingMerge = {
   mergeTarget: ReleaseMergeTarget;
@@ -120,13 +121,31 @@ async function handleGET() {
         // `lib/github/check-rollup.ts`）。ワークフロー名でCIを特定する方式はファイル名が
         // リポジトリごとに違う（asset-managerはtest.yml）ため採らず、集約値をそのまま使う。
         // 画面側の表記を「CI失敗」ではなく「チェック失敗」にしているのはこのため。
-        const releaseCiState = releasePr
-          ? await fetchRefCiState(repository.ownerLogin, repository.name, releasePr.head.ref, token)
+        //
+        // **CI状態と一緒に自動マージ可否の判定の進み具合も取る**（#2326）。同じ
+        // `statusCheckRollup`から取り出せるためGitHub APIの消費は増えず、Claudeのレビューが
+        // 走っている最中に「mainへマージ待ち」と促してしまうのを止められる。
+        const releaseCheck: RefCheckState | null = releasePr
+          ? await fetchRefCheckState(
+              repository.ownerLogin,
+              repository.name,
+              releasePr.head.ref,
+              token,
+            )
           : null;
-        const bumpCiState =
+        const bumpCheck: RefCheckState | null =
           !releasePr && bumpPr
-            ? await fetchRefCiState(repository.ownerLogin, repository.name, bumpPr.head.ref, token)
+            ? await fetchRefCheckState(
+                repository.ownerLogin,
+                repository.name,
+                bumpPr.head.ref,
+                token,
+              )
             : null;
+        const releaseCiState = releaseCheck?.ciState ?? null;
+        const bumpCiState = bumpCheck?.ciState ?? null;
+        const releaseJudgementPending = isMergeJudgementPending(releaseCheck?.mergeJudgement);
+        const bumpJudgementPending = isMergeJudgementPending(bumpCheck?.mergeJudgement);
 
         // `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）は判定しない。
         // 判定には`package.json`の版数取得が1リポジトリあたり2回増えるのに対し、その状態は
@@ -136,17 +155,27 @@ async function handleGET() {
           deployWorkflowRun,
           // develop→mainのPRを優先する上記の方針に合わせ、そちらがオープン中の間は
           // バンプPRを見ない（`/api/repositories/release`の`phase`とは優先順位が逆になる）。
-          bumpPullRequest: !releasePr && bumpPr ? { ciState: bumpCiState } : null,
-          releasePullRequest: releasePr ? { ciState: releaseCiState } : null,
+          bumpPullRequest:
+            !releasePr && bumpPr
+              ? { ciState: bumpCiState, mergeJudgementPending: bumpJudgementPending }
+              : null,
+          releasePullRequest: releasePr
+            ? { ciState: releaseCiState, mergeJudgementPending: releaseJudgementPending }
+            : null,
           releasePending: false,
         };
         const status = summarizeReleaseStatus(summaryInput);
         if (status === "idle") return null;
 
+        // CI実行中と自動マージ可否の判定中はまだマージできないため、マージ待ちとして
+        // 数えない（#1433・#2326）。`summarizeReleaseStatus`のaction_required判定基準と揃える。
+        const releaseWaiting =
+          releaseCiState !== null && releaseCiState !== "pending" && !releaseJudgementPending;
+        const bumpWaiting =
+          bumpCiState !== null && bumpCiState !== "pending" && !bumpJudgementPending;
+
         let pendingMerge: ReleasePendingMerge | null = null;
-        if (releasePr && releaseCiState && releaseCiState !== "pending") {
-          // CI実行中はまだマージできないため、マージ待ちとして数えない（#1433）。
-          // `summarizeReleaseStatus`のaction_required判定基準・バンプPR側の条件と揃える。
+        if (releasePr && releaseWaiting) {
           pendingMerge = {
             mergeTarget: "main",
             pullRequestNumber: releasePr.number,
@@ -154,9 +183,8 @@ async function handleGET() {
             pullRequestTitle: releasePr.title,
             ciState: releaseCiState,
           };
-        } else if (bumpPr && bumpCiState && bumpCiState !== "pending") {
+        } else if (bumpPr && bumpWaiting) {
           // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
-          // `summarizeReleaseStatus`のaction_required判定基準（CIがpendingでなくなった時点）と揃える。
           pendingMerge = {
             mergeTarget: "develop",
             pullRequestNumber: bumpPr.number,

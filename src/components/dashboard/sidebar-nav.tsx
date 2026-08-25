@@ -25,7 +25,7 @@ import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import { formatQuestionNavTitle } from "@/lib/question-attention";
+import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
@@ -33,7 +33,11 @@ import {
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import {
+  isPullRequestViewAttention,
+  pullRequestViewIcons,
+  sidebarPullRequestViews,
+} from "@/lib/pull-request-views";
 import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import {
@@ -263,31 +267,35 @@ export function SidebarNavView({
         <Separator className="my-1" />
 
         <ul className="flex flex-col gap-0.5">
-          {sidebarQuestionNavViews.map((view) =>
-            navRow({
+          {sidebarQuestionNavViews.map((view) => {
+            // 合図（丸・回るアイコン・吹き出し）は行ごとに決める（#2325）。この枠には
+            // 「質問」と「コードレビュー」が並ぶだけで、質問の合図をまとめて渡すと
+            // 回答待ちのあいだ「コードレビュー」の行まで回る
+            const signals = resolveQuestionNavSignals(view.id, {
+              // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070）。#1910では
+              // 未確認（回答が届いていて未読）の数を出していたが、読み終えた質問しか
+              // 無いときに、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
+              total: navCounts.question,
+              unconfirmed: unconfirmedQuestionCount,
+              waiting: waitingQuestionCount,
+            });
+            return navRow({
               key: view.id,
               label: view.label,
               icon: navViewIcons[view.id],
               active: activeView === view.id && activePane === "issues",
               onClick: () => onSelectView(view.id),
-              // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070）。#1910では
-              // 未確認（回答が届いていて未読）の数を出していたが、読み終えた質問しか
-              // 無いときに、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
               count: navCounts[view.id],
               // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
-              emphasis: unconfirmedQuestionCount > 0 ? "attention" : "none",
+              emphasis: signals.attention ? "attention" : "none",
               // 回答を待っているあいだは回す（#2309）。**丸と併存する**——「返事待ちが
               // ある」ことと「読める回答がある」ことは別で、片方だけを出すと他方を見落とす
-              busy: waitingQuestionCount > 0,
+              busy: signals.busy,
               // 数字（総数）と丸（未確認）で意味が違うため、行のラベル（「質問」）からは
               // 何を数えているのか読めない。吹き出しで内訳を補う
-              title: formatQuestionNavTitle(
-                navCounts[view.id],
-                unconfirmedQuestionCount,
-                waitingQuestionCount,
-              ),
-            }),
-          )}
+              title: signals.title,
+            });
+          })}
           {navRow({
             key: "flow",
             label: "ブランチ",
@@ -335,6 +343,12 @@ export function SidebarNavView({
               active: activePane === "pull-requests" && activePullRequestView === view.id,
               onClick: () => onSelectPullRequestView(view.id),
               count: pullRequestNavCounts[view.id],
+              // 「マージ待ち」だけオレンジの丸にする（#2334）。あとはユーザーがマージするか
+              // CI失敗を直すかしかなく、上の「ユーザーの確認待ち」と同じ性質のため。
+              // 条件は`isPullRequestViewAttention`（スマホと共通）
+              emphasis: isPullRequestViewAttention(view.id, pullRequestNavCounts[view.id])
+                ? "attention"
+                : "none",
               title: view.description,
             }),
           )}

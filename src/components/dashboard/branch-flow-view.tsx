@@ -65,15 +65,20 @@ import { useTriggerPending } from "@/hooks/use-trigger-pending";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
+  formatUnreleasedSummary,
   isClosedLane,
-  isReleaseCiPending,
-  unreleasedCommitCount,
+  isReleaseAutoProgressing,
+  unreleasedSummary,
   type BranchFlow,
 } from "@/lib/branch-flow";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
-import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
+import {
+  canMergeFromDeck,
+  isMergeJudgementPending,
+  requiresUserMerge,
+} from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
@@ -915,6 +920,13 @@ function ReleaseGroupHeader({
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
   //
+  // **自動マージ可否の判定中（`claude-review-develop`）も同じく「マージ待ち」と言わない**
+  // （#2326）。判定のcheck-runはCI状態の集約から外してある（#1799）ため、Claudeのレビューが
+  // 走っている最中でも`ciState`は`success`になり、この見出しには琥珀の「mainへマージ待ち」が
+  // 出ていた。その窓のあいだ隣のマージボタンは「判定中」で無効（#1968）なので、押せる操作が
+  // 無いのに「あなたの番」と促していたことになる。判定は畳んだ1行（`releaseMergeTarget`）と
+  // 同じ`isMergeJudgementPending`を通す。
+  //
   // **CIが落ちているときはここでは「マージ待ち」のまま**——畳んだ1行（`releaseMergeTarget`）が
   // `failure`を除くのは、同じ行に赤の「CI失敗」が並んで意味が競合するからで（#2038）、
   // この見出しには失敗を示すものが無く、外すと止まっているリリースが「リリース中」に見える。
@@ -922,7 +934,8 @@ function ReleaseGroupHeader({
   const waitingUserMerge =
     group.pullRequest !== null &&
     group.pullRequest.state === "open" &&
-    group.pullRequest.ciState !== "pending";
+    group.pullRequest.ciState !== "pending" &&
+    !isMergeJudgementPending(group.pullRequest.mergeJudgement);
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
@@ -973,9 +986,9 @@ function ReleaseGroupHeader({
                     ? "バージョンバンプ中"
                     : "本番未反映"
               }
-              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも走っていない
-              spinning={isReleaseCiPending(group.pullRequest, group.bumpPullRequest)}
-              note="チェック実行中"
+              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも判定も走っていない
+              spinning={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
+              note="チェック・判定の実行中"
             />
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
@@ -1106,9 +1119,10 @@ function ReleaseFlowGraph({
         all.findIndex((other) => other.manualStep.number === entry.manualStep.number) === index,
     );
 
-  // **`comparison.aheadBy`をそのまま出さない**（#2316）。バンプPRのマージコミットのように
-  // 中身の差分がゼロのまま残るコミットを数えないための判定を、3か所で共有する。
-  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
+  // **`comparison.aheadBy`をそのまま出さない**（#2316・#2333）。中身の差分がゼロのまま残る
+  // コミットを数えず（#2316）、残りもマージコミット単位＝PR単位の「件」で数える（#2333）
+  // ための判定を、3か所で共有する。
+  const unreleased = unreleasedSummary(repository.release.comparison);
   // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
@@ -1140,8 +1154,8 @@ function ReleaseFlowGraph({
           <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-primary" />
           {DEVELOP_BRANCH}
         </span>
-        {unreleasedCommits > 0 && (
-          <span>未リリース {unreleasedCommits}コミット</span>
+        {unreleased.count > 0 && (
+          <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
         )}
         {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
             隠れたりするため、束に付けると押したいときに画面から消える。ここなら
@@ -1155,7 +1169,7 @@ function ReleaseFlowGraph({
               repositoryFullName={repository.repositoryFullName}
               currentVersion={repository.release.latestVersion}
               deployedAt={latestReleaseMergedAt}
-              unreleasedCommits={unreleasedCommits}
+              unreleased={unreleased}
               isPending={deployTriggerPending}
               onTriggered={onDeployTriggered}
             />
@@ -1408,7 +1422,7 @@ function RepositorySummaryRow({
   onToggle: () => void;
 }) {
   const { summary } = repository;
-  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
+  const unreleased = unreleasedSummary(repository.release.comparison);
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -1421,7 +1435,7 @@ function RepositorySummaryRow({
     summary.releaseInProgress ||
     releaseLaunching ||
     deploy !== null ||
-    unreleasedCommits > 0 ||
+    unreleased.count > 0 ||
     summary.openManualStepCount > 0 ||
     summary.plannedIssueCount > 0 ||
     repository.orphanIssues.length > 0;
@@ -1483,8 +1497,8 @@ function RepositorySummaryRow({
         ) : (
           <ReleaseProgressPill
             label="リリース中"
-            spinning={summary.releaseCiPending}
-            note="チェック実行中"
+            spinning={summary.releaseAutoProgressing}
+            note="チェック・判定の実行中"
           />
         )
       ) : (
@@ -1532,11 +1546,11 @@ function RepositorySummaryRow({
         />
       )}
       {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886） */}
-      {unreleasedCommits > 0 && !summary.releaseInProgress && !releaseLaunching && (
+      {unreleased.count > 0 && !summary.releaseInProgress && !releaseLaunching && (
         <SummaryCount
           icon={ArrowUpToLine}
-          label={`未リリース ${unreleasedCommits}コミット`}
-          count={unreleasedCommits}
+          label={`未リリース ${formatUnreleasedSummary(unreleased)}`}
+          count={unreleased.count}
           className="text-purple-600 dark:text-purple-400"
         />
       )}
@@ -1702,7 +1716,7 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  * `owner/`を落としているフル名と、開いたときに毎回目で追う数（未リリース・進行中）を置く。
  */
 function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
-  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
+  const unreleased = unreleasedSummary(repository.release.comparison);
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
@@ -1719,7 +1733,9 @@ function RepositoryDetailHeader({ repository }: { repository: BranchFlowReposito
           ) : (
             <span>リリース済みのバージョンなし</span>
           )}
-          {unreleasedCommits > 0 && <span>{` ・ 未リリース ${unreleasedCommits}コミット`}</span>}
+          {unreleased.count > 0 && (
+            <span>{` ・ 未リリース ${formatUnreleasedSummary(unreleased)}`}</span>
+          )}
           {repository.summary.activeLaneCount > 0 && (
             <span>{` ・ 進行中 ${repository.summary.activeLaneCount}件`}</span>
           )}

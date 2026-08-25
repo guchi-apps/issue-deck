@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
+import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   extractBumpChangelog,
@@ -191,6 +192,9 @@ async function handleGET(request: NextRequest) {
               repairRuns.get(repairRunKey(`${owner}/${repo}`, bumpPr.number)) ?? null,
               { mergeable: bumpState?.mergeable ?? null, ciState: bumpState?.ciState ?? null },
             ),
+            // 自動マージ可否の判定中は「人が押す番」にしない（#2326）。CI状態と同じ
+            // `fetchPullRequestCiState`の戻り値から取れるため、API消費は増えない。
+            mergeJudgement: bumpState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
             version: versionFromBranch(bumpPr.head.ref),
             reason: extractBumpReason(bumpPr.body),
             changelog: extractBumpChangelog(bumpPr.body),
@@ -209,6 +213,7 @@ async function handleGET(request: NextRequest) {
               repairRuns.get(repairRunKey(`${owner}/${repo}`, releasePr.number)) ?? null,
               { mergeable: releaseState?.mergeable ?? null, ciState: releaseState?.ciState ?? null },
             ),
+            mergeJudgement: releaseState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
           }
         : null,
       otherPullRequests,

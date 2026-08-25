@@ -1128,6 +1128,59 @@ gh api repos/guchi-apps/<repo>/actions/secrets --jq '.secrets[].name' | grep -i 
 
 （2026-08-25時点。いずれも`inherit`化とあわせて削除する）
 
+#### 各リポジトリの移行手順（#2287）
+
+対象は8リポジトリ（`asset-manager`・`portfolio`・`ops-dashboard`・`meisai-lab`・`car-care`・
+`clip-hive`・`subscription-lists`・`signaly`）。リポジトリごとに次の順で行う。
+
+1. **通知のペイロードへ `source` を足す。** これが先。詳細は下の「`source` を足すのが先」を参照
+2. `.github/secrets-manifest.tsv` を `inherit` へ切り替える。**環境変数名（KEY列）も
+   `SIGNALY_LOGIN_WEBHOOK_URL` へ揃える**（`signaly` の `LOGIN_WEBHOOK_URL`・`car-care` の
+   `SIGNALY_WEBHOOK_LOGIN_URL` はこの機会に改名する）
+
+   ```
+   SIGNALY_LOGIN_WEBHOOK_URL	inherit	secret	SIGNALY_LOGIN_WEBHOOK_URL	-
+   ```
+
+3. `deploy.yml` の `secrets.*` 参照と `.env` テンプレート・`.env.example` の名前も同じ名前へ揃える
+4. repository secretを削除する（1〜3が`main`まで出た後）
+5. 1Passwordのアプリアイテムから `login-webhook-url` フィールドを削除する
+
+4と5はSecretsの変更にあたるため、エージェントは実施せず`71.manual-step`のIssueへ切り出す。
+1〜3はリポジトリごとに子Issueへ切り出す（#2287のサブIssue）。
+
+**切り替わる時点はリポジトリで違う。** repository secretの名前がorganization項目と同名の6
+リポジトリは、手順4（削除）まで従来のチャンネルへ飛び続ける。名前が違う`signaly`・`car-care`は
+**手順2〜3が本番へ出た時点で切り替わる**ため、`source` の追加を同じPRに入れておく必要がある。
+
+#### `source` を足すのが先
+
+**共通チャンネルのURLを直接叩き始めた瞬間に、送信元の情報が消える。** 今はチャンネル統合
+（merge）で旧チャンネルIDが `channel_aliases` に残っており、Signalyが別名から送信元を補って
+いる（`channel_aliases.source`）。organization secretへ寄せると別名を経由しなくなるため、
+この救済が効かなくなる。
+
+`signaly` の `backend/login_notify.py` はペイロードに `source` を持っているが、**他アプリの
+Next.js側（`src/lib/signaly.ts` 等）は Discord 形式の `embeds` か `content` だけで、`source` も
+`username` も `App` フィールドも持たない**（2026-08-25時点で7アプリすべて）。
+
+```ts
+body: JSON.stringify({
+  source: APP_NAME,   // ← 追加
+  embeds: [{ title: `🔐 ${APP_NAME} にログイン`, color: 5763719, fields }],
+})
+```
+
+Signalyの送信元の判定は `X-Signaly-Source` ヘッダー → `?source=` クエリ → ペイロードの
+`source` → `fields` の `App`／`Repository` → Discord形式の `username` の順。**HTTPヘッダーは
+ASCIIしか運べない**ため、日本語のアプリ名を渡すならヘッダーではなくペイロードの `source` を
+使う（guchi-apps/signaly の `CLAUDE.md`「通知チャンネルと送信元（source）」）。
+
+**`source` の値はリポジトリ名に揃える**（`asset-manager`・`car-care` など）。CI・デプロイ通知は
+embedの `Repository` フィールド（`guchi-apps/<repo>`）の末尾を送信元にするため（signalyの
+`backend/webhook.py` の `_source_from_fields`）、ログイン通知も同じ形にしておくと共通チャンネルの
+一覧で表記が揃う。
+
 #### 環境変数名がリポジトリごとに違っても吸収できる
 
 同じ値を別の名前で受けているリポジトリが実際にある。
