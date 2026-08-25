@@ -874,3 +874,116 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
     expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
   });
 });
+
+/**
+ * #2354。**書いている最中に、人が選んだリポジトリをコードが書き換えない。**
+ * 選び直したリポジトリがひとりでに別のものへ変わる、という報告への対処で、フォームの
+ * 初期化は「閉じた状態から開いた瞬間」だけに限る。
+ */
+describe("CreateIssueDialog の選んだリポジトリの保持", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue());
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    resetSuggest();
+    window.localStorage.clear();
+  });
+
+  /** 開いたまま、画面側のリポジトリ（`defaultRepositoryFullName`）だけが変わる状況を作る */
+  function ReopenableHarness() {
+    const [defaultRepositoryFullName, setDefaultRepositoryFullName] = useState<string | null>(
+      REPOSITORY_FULL_NAME,
+    );
+    return (
+      <>
+        {/* ダイアログを開いている間は外側がaria-hiddenになるため、roleではなくtestIdで引く */}
+        <button
+          data-testid="change-default-repository"
+          onClick={() => setDefaultRepositoryFullName(OTHER_REPOSITORY_FULL_NAME)}
+        >
+          画面のリポジトリを変える
+        </button>
+        <CreateIssueDialog
+          open
+          onOpenChange={vi.fn()}
+          repositories={[makeRepository(), makeOtherRepository()]}
+          defaultRepositoryFullName={defaultRepositoryFullName}
+          issues={[]}
+          onCreated={vi.fn()}
+        />
+      </>
+    );
+  }
+
+  it("開いている最中に画面側のリポジトリが変わっても、選んだリポジトリと書いた内容は変わらない", () => {
+    render(<ReopenableHarness />);
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "書きかけの本文" } });
+
+    fireEvent.click(screen.getByTestId("change-default-repository"));
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(REPOSITORY_FULL_NAME);
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("書きかけの本文");
+  });
+
+  it("「タイトル・ラベルを付与」を押しても、選び直したリポジトリは変わらない", async () => {
+    suggestGenerate.mockResolvedValue({ kind: "issue", title: "タイトル案", labels: [] });
+    render(
+      <Harness onCreated={vi.fn()} repositories={[makeRepository(), makeOtherRepository()]} />,
+    );
+    pickRepository(OTHER_REPOSITORY_FULL_NAME);
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
+    );
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+  });
+
+  it("下書きを復元すると、書いていたときに選んでいたリポジトリに戻る", () => {
+    window.localStorage.setItem(
+      "issue-create-draft",
+      JSON.stringify({
+        kind: "issue",
+        repositoryFullName: OTHER_REPOSITORY_FULL_NAME,
+        title: "",
+        body: "書きかけの本文",
+        selectedLabels: [],
+        assignee: null,
+      }),
+    );
+    render(
+      <Harness onCreated={vi.fn()} repositories={[makeRepository(), makeOtherRepository()]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "復元する" }));
+
+    // 開いていた画面のリポジトリ（REPOSITORY_FULL_NAME）ではなく、書いていたときのものに戻す
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("書きかけの本文");
+  });
+
+  it("連携が外れて選択肢に無い下書きのリポジトリは、開いていた画面のリポジトリへ落とす", () => {
+    window.localStorage.setItem(
+      "issue-create-draft",
+      JSON.stringify({
+        kind: "issue",
+        repositoryFullName: "guchi-apps/removed",
+        title: "",
+        body: "書きかけの本文",
+        selectedLabels: [],
+        assignee: null,
+      }),
+    );
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "復元する" }));
+
+    expect(screen.getByLabelText("リポジトリ").textContent).toContain(REPOSITORY_FULL_NAME);
+  });
+});
