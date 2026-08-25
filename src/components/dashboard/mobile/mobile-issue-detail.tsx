@@ -112,7 +112,7 @@ import {
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
-  isAskRepoQuestionIssue,
+  canContinueQuestionFromComposer,
   isQaAnswerPending,
   resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
@@ -357,7 +357,7 @@ export function MobileIssueDetail({
     comments,
     newCommentBody.trim().length > 0,
   );
-  const composerPlaceholder = isAskRepoQuestionIssue(issue)
+  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
     ? "続けて質問する場合はここへ..."
     : "コメントを追加...";
   // コードレビューIssue（#698）の結果。PC版（`issue-detail.tsx`）と同じ扱い

@@ -122,6 +122,18 @@ export function isCrossRepoQuestionComment(comment: Pick<IssueComment, "body">):
 }
 
 /**
+ * 横断質問（#1454）として立てられたIssueかどうかを、コメント列から判定する。
+ *
+ * 記録先のリポジトリ名（`question`）では判定しない。**`resolveCrossRepoQuestionRepository`が
+ * フォールバックを持つため、`question`リポジトリが無い環境では別のリポジトリへ立つ。**
+ * `CrossRepoQuestionDialog`が必ず投稿する`CROSS_REPO_QUESTION_MARKER`付きのコメントだけが
+ * 恒久的な目印になる。
+ */
+export function isCrossRepoQuestionIssue(comments: Pick<IssueComment, "body">[]): boolean {
+  return comments.some(isCrossRepoQuestionComment);
+}
+
+/**
  * 横断質問Issueの既定の置き場所として探すリポジトリ名（#1454）。
  *
  * **`owner`は問わず、リポジトリ名だけで探す。** 質問Issueが実装対象のリポジトリへ混ざると、
@@ -223,6 +235,12 @@ export type ComposerPrimaryAction = "question" | "comment" | "close";
  *
  * 質問Issueでない場合と、closeしたIssue（「質問する」ボタンが出ない）では従来どおり
  * `comment`が主。
+ *
+ * **横断質問Issue（#1454）でも`question`を主にしない。** 記録先（既定は`guchi-apps/question`）は
+ * コメントを拾う無人実行を持たず、答えるのはサブPCの質問セッションで、追い質問は追加指示
+ * （#1012）で送る。それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えない
+ * まま`isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**ため、
+ * 強調と`Ctrl`+`Enter`の宛先からは外す（ボタン自体は従来どおり残す）。
  */
 export function resolveComposerPrimaryAction(
   issue: Pick<Issue, "state" | "title">,
@@ -230,6 +248,22 @@ export function resolveComposerPrimaryAction(
   hasDraft: boolean,
 ): ComposerPrimaryAction {
   if (!isAskRepoQuestionIssue(issue) || !canAskClaude(issue)) return "comment";
+  if (isCrossRepoQuestionIssue(comments)) {
+    return canCloseAskRepoQuestion(issue, comments) ? "close" : "comment";
+  }
   if (hasDraft) return "question";
   return canCloseAskRepoQuestion(issue, comments) ? "close" : "question";
+}
+
+/**
+ * 入力欄のプレースホルダで「続けて質問する場所」だと案内してよいか（#2345）。
+ * `resolveComposerPrimaryAction`が`question`を主にし得るIssueと同じ範囲にする。
+ */
+export function canContinueQuestionFromComposer(
+  issue: Pick<Issue, "state" | "title">,
+  comments: Pick<IssueComment, "body">[],
+): boolean {
+  return (
+    isAskRepoQuestionIssue(issue) && canAskClaude(issue) && !isCrossRepoQuestionIssue(comments)
+  );
 }

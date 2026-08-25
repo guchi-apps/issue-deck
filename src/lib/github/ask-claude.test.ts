@@ -13,6 +13,8 @@ import {
   isAskClaudeQuestionComment,
   isAskRepoQuestionIssue,
   isCrossRepoQuestionComment,
+  isCrossRepoQuestionIssue,
+  canContinueQuestionFromComposer,
   isQaAnswerComment,
   isQaAnswerPending,
   QA_ANSWER_MARKER,
@@ -280,5 +282,57 @@ describe("resolveComposerPrimaryAction", () => {
     expect(resolveComposerPrimaryAction({ ...askIssue, state: "closed" }, answered, true)).toBe(
       "comment",
     );
+  });
+
+  /**
+   * 横断質問Issue（#1454）では「質問する」に受け手がいない。押すと回答が来ないまま
+   * `isQaAnswerPending`が立ち続け、「回答を確認してクローズ」が二度と出なくなる。
+   */
+  describe("横断質問Issue", () => {
+    const crossRepoAnswered = [
+      { body: crossRepoQuestionCommentBody("横断の質問") },
+      { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+    ];
+
+    it("入力があってもクローズが主のまま（質問へは移らない）", () => {
+      expect(resolveComposerPrimaryAction(askIssue, crossRepoAnswered, true)).toBe("close");
+    });
+
+    it("回答待ちのときはコメントが主（質問へは移らない）", () => {
+      const pendingCrossRepo = [{ body: crossRepoQuestionCommentBody("横断の質問") }];
+      expect(resolveComposerPrimaryAction(askIssue, pendingCrossRepo, true)).toBe("comment");
+    });
+  });
+});
+
+describe("isCrossRepoQuestionIssue", () => {
+  it("横断質問のコメントが1件でもあればtrue", () => {
+    expect(isCrossRepoQuestionIssue([{ body: crossRepoQuestionCommentBody("横断の質問") }])).toBe(
+      true,
+    );
+  });
+
+  it("ふつうの質問コメントだけならfalse", () => {
+    expect(isCrossRepoQuestionIssue([{ body: askClaudeCommentBody("質問内容") }])).toBe(false);
+  });
+});
+
+describe("canContinueQuestionFromComposer", () => {
+  const askIssue = { state: "open" as const, title: `${ASK_REPO_QUESTION_TITLE_PREFIX}質問内容` };
+
+  it("openな質問Issue（横断でない）ならtrue", () => {
+    expect(canContinueQuestionFromComposer(askIssue, [])).toBe(true);
+  });
+
+  it("横断質問Issueならfalse", () => {
+    expect(
+      canContinueQuestionFromComposer(askIssue, [
+        { body: crossRepoQuestionCommentBody("横断の質問") },
+      ]),
+    ).toBe(false);
+  });
+
+  it("質問Issueでなければfalse", () => {
+    expect(canContinueQuestionFromComposer({ state: "open", title: "通常のIssue" }, [])).toBe(false);
   });
 });

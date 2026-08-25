@@ -587,6 +587,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `Ctrl`+`Enter`を投稿（コメント）へ倒す。取り返しの付く操作だけをキーへ載せる。
   - 表示条件そのもの（`canCloseAskRepoQuestion`）は変えていない。**「出るかどうか」と
     「どれが主か」は別の判定**で、前者を強さの判定に流用するとヘッダー側の同名ボタンとずれる。
+  - **横断質問Issue（#1454）は`[質問] `タイトルを持つが、この強調から外す。** 記録先
+    （既定は`guchi-apps/question`。ワークフローは`issue-labels.yml`だけ）にはコメントを拾う
+    無人実行が無く、答えるのはサブPCの質問セッションで、追い質問は追加指示（#1012）で送る。
+    それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えないまま
+    `isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**。
+    判定は`isCrossRepoQuestionIssue`（コメントの`CROSS_REPO_QUESTION_MARKER`を見る。
+    **リポジトリ名で判定しない**——`resolveCrossRepoQuestionRepository`がフォールバックを持つ）。
 - **人が進捗を直接動かす入口は、Issue詳細の「進捗」セレクト**（#1350・#1920）。中身・並び・注記は
   [`components/dashboard/issue-progress-select.tsx`](../src/components/dashboard/issue-progress-select.tsx)
   が持ち、**PCとスマホがこれ1つを共有する**——PCはラベル・担当者と並ぶ右パネル

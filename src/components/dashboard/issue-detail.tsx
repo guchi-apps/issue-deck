@@ -121,7 +121,7 @@ import {
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
-  isAskRepoQuestionIssue,
+  canContinueQuestionFromComposer,
   isQaAnswerPending,
   resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
@@ -512,7 +512,7 @@ export function IssueDetail({
     newCommentBody.trim().length > 0,
   );
   // 質問Issueでは、この欄が次の質問を書く場所だと分かるようにする（#2345）
-  const composerPlaceholder = isAskRepoQuestionIssue(issue)
+  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
     ? "続けて質問する場合はここへ..."
     : "コメントを追加...";
   // コードレビューIssue（#698）の結果。**いちばん新しい結果だけ**をパネルに出す

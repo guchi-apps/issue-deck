@@ -6,7 +6,11 @@ import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { QA_ANSWER_MARKER, QUESTION_COMMENT_MARKER } from "@/lib/github/ask-claude";
+import {
+  CROSS_REPO_QUESTION_MARKER,
+  QA_ANSWER_MARKER,
+  QUESTION_COMMENT_MARKER,
+} from "@/lib/github/ask-claude";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -336,6 +340,26 @@ describe("IssueDetailのコメント欄の下の操作列（#1770・#2345）", (
       ).toBeNull();
       expect(variantOf("質問する")).toBe("default");
       expect(variantOf("コメント")).toBe("ghost");
+    } finally {
+      commentsState.comments = comments;
+    }
+  });
+
+  /**
+   * 横断質問Issue（#1454）は`[質問] `タイトルを持つが、記録先にコメントを拾う無人実行が無い。
+   * 「質問する」を主ボタンにすると、押した人が回答も出口も失う（#2345）。
+   */
+  it("横断質問Issueでは、入力があっても主ボタンが「質問する」へ移らない", () => {
+    commentsState.comments = [
+      { ...comments[0], body: `横断の質問\n\n${QUESTION_COMMENT_MARKER}\n${CROSS_REPO_QUESTION_MARKER}` },
+      comments[1],
+    ];
+    try {
+      renderDetail(buildIssue());
+      typeDraft("続きの質問です");
+      expect(variantOf("回答を確認してクローズ")).toBe("default");
+      expect(variantOf("質問する")).toBe("outline");
+      expect(composerTextarea().placeholder).toBe("コメントを追加...");
     } finally {
       commentsState.comments = comments;
     }
