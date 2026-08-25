@@ -9,7 +9,8 @@ const findUnique = vi.fn();
 const upsert = vi.fn();
 const updateMany = vi.fn();
 const $transaction = vi.fn();
-const issueLabelUpsert = vi.fn();
+const issueLabelCreateMany = vi.fn();
+const issueLabelUpdateMany = vi.fn();
 const issueLabelDeleteMany = vi.fn();
 const repositoryFindUnique = vi.fn();
 const issueUpdate = vi.fn();
@@ -60,8 +61,11 @@ vi.mock("@/lib/db", () => ({
       },
     },
     issueLabel: {
-      get upsert() {
-        return issueLabelUpsert;
+      get createMany() {
+        return issueLabelCreateMany;
+      },
+      get updateMany() {
+        return issueLabelUpdateMany;
       },
       get deleteMany() {
         return issueLabelDeleteMany;
@@ -102,7 +106,8 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
     vi.setSystemTime(NOW);
     findUnique.mockReset();
     upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
-    issueLabelUpsert.mockReset().mockResolvedValue(undefined);
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
     issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
     $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
   });
@@ -289,7 +294,8 @@ describe("upsertIssueFromWebhookPayload の lastCommentAt 更新", () => {
     vi.setSystemTime(NOW);
     findUnique.mockReset();
     upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
-    issueLabelUpsert.mockReset().mockResolvedValue(undefined);
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
     issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
     $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
   });
@@ -370,7 +376,8 @@ describe("upsertIssueFromWebhookPayload のclose検知", () => {
     vi.setSystemTime(NOW);
     findUnique.mockReset();
     upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
-    issueLabelUpsert.mockReset().mockResolvedValue(undefined);
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
     issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
     $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
     repositoryFindUnique.mockReset().mockResolvedValue({
@@ -542,5 +549,173 @@ describe("upsertIssueFromWebhookPayload のclose検知", () => {
     await upsertIssueFromWebhookPayload("repo-1", raw);
 
     expect(clearLabelsOnIssueClose).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ラベルの同期（#2365）。
+ *
+ * **1件ずつの`upsert`はP2002で落ちる。** 複合ユニークキーへのPrismaの`upsert`はMySQLでは
+ * 「SELECT→INSERT」に分かれるため、同じIssueの同期が同時に2本走ると後発が
+ * `IssueLabel_issueId_name_key`で落ち、Webhookの処理が丸ごと失敗する（後段のclose検知にも
+ * 到達しない）。ここでは競合しても落ちない書き方（`INSERT IGNORE`＋`updateMany`）に
+ * なっていることを見る。
+ */
+describe("upsertIssueFromWebhookPayload のラベル同期", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    findUnique.mockReset().mockResolvedValue(null);
+    upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
+    issueUpdate.mockReset().mockResolvedValue(undefined);
+    $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const LABELS = [
+    { id: 1, name: "11.local", color: "ededed", description: null },
+    { id: 2, name: "40.unexpected", color: "d73a4a", description: "想定外の挙動" },
+  ];
+
+  it("同時実行で落ちない書き方で入れる（skipDuplicates付きのcreateMany）", async () => {
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: LABELS }));
+
+    expect(issueLabelCreateMany).toHaveBeenCalledWith({
+      data: [
+        {
+          issueId: "issue-1",
+          name: "11.local",
+          color: "ededed",
+          description: null,
+          githubLabelId: BigInt(1),
+        },
+        {
+          issueId: "issue-1",
+          name: "40.unexpected",
+          color: "d73a4a",
+          description: "想定外の挙動",
+          githubLabelId: BigInt(2),
+        },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it("色・説明・GitHubのラベルIDの追随は、ユニークキーを動かさないupdateManyで行う", async () => {
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: LABELS }));
+
+    expect(issueLabelUpdateMany).toHaveBeenCalledTimes(2);
+    expect(issueLabelUpdateMany).toHaveBeenCalledWith({
+      where: { issueId: "issue-1", name: "40.unexpected" },
+      data: { color: "d73a4a", description: "想定外の挙動", githubLabelId: BigInt(2) },
+    });
+  });
+
+  it("GitHub側で外れたラベルはDBからも消す", async () => {
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: LABELS }));
+
+    expect(issueLabelDeleteMany).toHaveBeenCalledWith({
+      where: { issueId: "issue-1", name: { notIn: ["11.local", "40.unexpected"] } },
+    });
+  });
+
+  it("ラベルが1枚も無いIssueでは空配列のINSERTを投げず、全部消すだけにする", async () => {
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: [] }));
+
+    expect(issueLabelCreateMany).not.toHaveBeenCalled();
+    expect(issueLabelUpdateMany).not.toHaveBeenCalled();
+    expect(issueLabelDeleteMany).toHaveBeenCalledWith({
+      where: { issueId: "issue-1", name: { notIn: [] } },
+    });
+  });
+
+  // Issue本体のupsertも同じ競合を持つ（まだDBに無いIssueへ同時に2本届くと後発が
+  // `Issue_githubIssueId_key`で落ちる）。落ちた側はUPDATEへ回して処理を続ける
+  it("Issue本体のINSERTが競合したら、UPDATEへ回して処理を続ける", async () => {
+    upsert.mockRejectedValue(Object.assign(new Error("Unique constraint failed"), { code: "P2002" }));
+    issueUpdate.mockResolvedValue({ id: "issue-1", number: 1 });
+
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: LABELS }));
+
+    expect(issueUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { githubIssueId: BigInt(1) } }),
+    );
+    expect(issueLabelCreateMany).toHaveBeenCalled();
+  });
+
+  it("ユニーク制約違反以外のエラーは握り潰さない", async () => {
+    upsert.mockRejectedValue(Object.assign(new Error("接続できません"), { code: "P1001" }));
+
+    await expect(upsertIssueFromWebhookPayload("repo-1", makeRawIssue())).rejects.toThrow(
+      "接続できません",
+    );
+    expect(issueUpdate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 同じIssueの同期を直列に流す（#2365）。
+ *
+ * この関数はDBを「読んでから書く」ため、同時に2本走ると両方が同じ読んだ値を見て書きに行く。
+ * 本番のP2002はこれで、開発DBでの実測では同時2本でも高い確率でP2002／P2034に落ちた。
+ */
+describe("upsertIssueFromWebhookPayload の直列化", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
+    $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+  });
+
+  it("同じIssueへ同時に届いても、前の書き込みが終わるまで次の読み取りを始めない", async () => {
+    let releaseFirst!: () => void;
+    const firstRead = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    findUnique.mockImplementationOnce(async () => {
+      await firstRead;
+      return null;
+    });
+    findUnique.mockResolvedValue(null);
+
+    const raw = makeRawIssue({ id: 2365 });
+    const both = Promise.all([
+      upsertIssueFromWebhookPayload("repo-1", raw),
+      upsertIssueFromWebhookPayload("repo-1", raw),
+    ]);
+
+    await Promise.resolve();
+    expect(findUnique).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await both;
+    expect(findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it("別のIssueは待たせない", async () => {
+    let releaseFirst!: () => void;
+    const firstRead = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    findUnique.mockImplementationOnce(async () => {
+      await firstRead;
+      return null;
+    });
+    findUnique.mockResolvedValue(null);
+
+    const blocked = upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ id: 2365 }));
+    await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ id: 2366 }));
+
+    expect(findUnique).toHaveBeenCalledTimes(2);
+    releaseFirst();
+    await blocked;
   });
 });
