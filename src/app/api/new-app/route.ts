@@ -71,8 +71,11 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 作成で弾かれるので、続きは作られたIssueから人が進める。
  *
  * 作る順序はIssueの本文が互いを参照する都合で決まっている。
- * リポジトリ → 雛形のコミット → 親 → ポート帯のPR → サブPCの手作業 → ブラウザの手作業 →
- * vpsのVirtualHost → VPSの手作業 → 初期化
+ * リポジトリ → 雛形のコミット → 親 → ポート帯のPR → サブPCの手作業 →
+ * （ブラウザの手作業） → vpsのVirtualHost → VPS受け入れの手作業 → 初期化
+ *
+ * **ブラウザの手作業は、GitHub Appのインストール対象への追加が要るときだけ作る**（#2246）。
+ * DNSのAレコードとActions secretsの登録を外した結果、通常は中身が空になるため。
  *
  * **雛形のコミット（#2247）はリポジトリを作った直後、`develop`を切る前に行う。**
  * `claude-issue-dispatch.yml`がデフォルトブランチにあることが盤面へ載る条件で、それを
@@ -331,16 +334,21 @@ async function launchNewApp(
   refs.subpc = subpc.reference;
   children.push(subpc.id);
 
-  // 5. ブラウザの手作業
-  const browser = await createIn(
-    parentOwner,
-    parentRepo,
-    "manual-browser",
-    buildBrowserManualIssueTitle(spec),
-    buildBrowserManualIssueBody(spec, refs),
-    [MANUAL_STEP_LABEL],
-  );
-  children.push(browser.id);
+  // 5. ブラウザの手作業。**残る手順があるときだけ作る**（#2246）。DNSのAレコードは
+  //    `*.gucchii.com`のワイルドカードで済み（`guchi-apps/vps#131`）、Actions secretsは
+  //    organizationに`visibility=all`で登録済み（#2255）。両方を外すと、`repository_selection`が
+  //    `all`のときは中身が空になるので、空のIssueで人の着手を待たせない
+  if (installationScope.needsRepositoryAdd) {
+    const browser = await createIn(
+      parentOwner,
+      parentRepo,
+      "manual-browser",
+      buildBrowserManualIssueTitle(spec),
+      buildBrowserManualIssueBody(spec, refs),
+      [MANUAL_STEP_LABEL],
+    );
+    children.push(browser.id);
+  }
 
   // 6. vpsのVirtualHost（VPSの手作業Issueがこれを指す）。**同じ対象のopenなIssueが
   //    あれば起票せず、そちらへコメントする**（#2250）

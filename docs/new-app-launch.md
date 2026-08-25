@@ -54,7 +54,7 @@
 - **それでも地の文が返ってきたら、それを返事として扱って会話を続ける。** 詰まるのは会話の
   途中で、止めても利用者にできることが無い（仕様案が進まないだけで、設定ステップへは進める）
 
-## 作られるもの（9件）
+## 作られるもの（8件）
 
 | 作られるもの | 場所 | 自動化 |
 |---|---|---|
@@ -64,34 +64,68 @@
 | プロジェクトを初期化する | 新しいリポジトリ | 自動（起票のみ。**実装は盤面から無人実行で回せる**） |
 | 初回デプロイ前チェックと公開確認 | 新しいリポジトリ | 自動（起票のみ。同上） |
 | VirtualHostを追加し、アプリ一覧に載せる | `guchi-apps/vps` | 自動（起票のみ） |
-| `[手作業] VPS: 置き場とプロセスを用意する` | `guchi-apps/issue-deck` | あなたが実行 |
+| `[手作業] サブPC: VPSへ受け入れる（置き場・DB・証明書）` | `guchi-apps/issue-deck` | 代行実行できる |
 | `[手作業] サブPC: シークレットを投入する` | `guchi-apps/issue-deck` | 代行実行できる |
-| `[手作業] ブラウザ: DNSとシークレットを登録する` | `guchi-apps/issue-deck` | あなたが実行 |
+
+これに加えて、GitHub Appのインストール対象が`selected`のときだけ
+`[手作業] ブラウザ: GitHub Appのインストール対象へ追加する`が9件目として作られる（#2248・#2246）。
 
 **`guchi-apps/vps`のIssueだけは、同じ対象のopenなIssueが既にあれば作らない**（#2250。
 後述「同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない」）。そのときは既存Issueへ
 コメントを書き足し、画面の一覧には「既存」の印を付けて出す。
 
-手作業の3件は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
+手作業の2件（か3件）は`71.manual-step`ラベル付きで、親Issueのサブissueとして紐付く。
 **進捗を追う専用の画面は持たない**——サブIssueはいつもの盤面と「ユーザーの作業待ち」に
 出るので、同じ状態を2か所で持たない。
 
+## 空振りの手順を出さない（#2246）
+
+`aide-bot`の立ち上げ（#2213）では、手作業Issue 3件がそれぞれ人の着手を待つ形になっていた。
+依存関係を洗い直すと、**実際に順序が必要なのは「初期化 → デプロイ」だけ**で、残りは
+「Issueが分かれていたために直列に見えていた」か、**そもそも実施する必要が無い手順**だった。
+とくに`#2215`（ブラウザの手作業）は5手順のうち独自に必要なものが実質1つも無かった。
+
+外したものと、その根拠は次のとおり。**「一応書いておく」は選ばない**——不要な手順が1つでも
+残っていると、それが済むまで後続が止まっているように見えるため。
+
+| 外した手順 | 根拠 |
+|---|---|
+| DNSのAレコードの登録 | `*.gucchii.com`のワイルドカードAレコードを登録済み（`guchi-apps/vps#131`）。新しいサブドメインは追加登録なしで引ける |
+| リポジトリごとのActions secretsの登録 | `OP_SERVICE_ACCOUNT_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`はorganizationに`visibility=all`で登録済み |
+| VPSへSSHしての置き場作成・`CREATE DATABASE`・`pm2 start`・certbot | `guchi-apps/vps`の「アプリをプロビジョニングする」ワークフローが実機の`scripts/provision-app.sh`を叩く（`guchi-apps/vps#132`） |
+| 2つの再同期（リポジトリ・Issue） | 立ち上げ自身が実行する（#2248・`lib/new-app/resync.ts`） |
+| Signalyのチャンネル作成とWebhook URLの登録 | `SIGNALY_WEBHOOK_URL`をorganization secretへ寄せた（#2255） |
+
+**手順は外しても、確認は残す。** ワイルドカードのAレコードと共通secretは`## 完了の確認方法`の
+コマンドとしてサブPCの手作業Issueへ移した（`sharedSecretCheck`・`wildcardDnsCheck`）。
+`visibility`が`selected`へ戻されたときや、DNSが壊れたときに、定期巡回がそれを拾えるようにしておく。
+
+### VPS実機の受け入れは、ワークフローへ流すだけにする
+
+`guchi-apps/vps#132`が`scripts/provision-app.sh`と「アプリをプロビジョニングする」ワークフロー
+（`workflow_dispatch`）を作ったので、issue-deckが出す手順は`gh workflow run`の1行になった。
+`sudo`は`github-user`のNOPASSWD設定で通る（`guchi-apps/vps`のREADME「運用方針」）。
+
+- **同じコマンドを2回流す。** スクリプトは冪等で、済んだ段は`(変更なし)`と出る。
+  PM2への登録は`deploy/ecosystem.config.js`が配置されてからでないと進まないので、
+  初回デプロイの前に1回、後にもう1回流す
+- **実行するデバイスがサブPCになったので、手作業アシスタントの代行実行で流せる。**
+  タイトルの先頭も`[手作業] VPS:`から`[手作業] サブPC:`へ変えている
+  （CLAUDE.mdの`[手作業] <実行する場所>: <やること>`）
+- **常駐プロセスを持たない種別（静的サイト）だけは、従来どおり実機の手順を出す。**
+  ワークフローの`app_port`が必須で、`provision-app.sh`も1024〜65535を要求するため
+  （`vpsProvisionable`）
+
 ## 自動化できないこと（そう決めた理由）
 
-- **DNSのAレコードの登録。** DNSはVPSプロバイダの管理画面でしか設定できず、使えるAPIが無い
-  （共有知識の`guides/apache-domain-setup.md`も「実行者: 人間のみ」としている）。自動化
-  できるのはサブドメイン名の決定と重複チェックまで。
-- **VPS実機の操作**（`/home/github-user/apps/<name>/`の作成・`CREATE DATABASE`・PM2への登録と`pm2 save`・
-  certbot）。**`guchi-apps/vps`の`deploy.yml`が配る受け口ではない**ため、リポジトリ経由では
-  反映されない。手作業アシスタントの代行実行もサブPC限定なので、ここは人が実行する。
-- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）。** 無断で変更してよい設定ではない。
-  アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
-  CI・デプロイ通知の`SIGNALY_WEBHOOK_URL`はorganization secretへ寄せたため（#2255）、
-  新規アプリの立ち上げにSignalyのチャンネル作成もWebhook URLの登録も要らない。
+- **GitHub Secrets（`OP_SERVICE_ACCOUNT_TOKEN`など）の変更。** 無断で変更してよい設定ではない。
+  ただし新規リポジトリでは**登録そのものが要らない**（organizationに`visibility=all`で
+  入っている）。アプリ自身の値（配置先・DB名・許可メール）は後述のとおり自動で投入する。
 - **GitHub Appのインストール対象への追加は、必要なときだけ残す**（#2248）。`issue-deck`・
   `issue-deck-dev`とも`repository_selection=all`で入っているので、新しく作ったリポジトリは
   何もしなくても対象に入る。`selected`へ戻されたとき（と選び方を読めなかったとき）だけ、
-  ブラウザの手作業Issueに手順が出る。
+  ブラウザの手作業Issueを作る。**それ以外のときはIssue自体を作らない**（#2246。
+  中身が空のIssueが人の着手を待つ形になっていた）。
 
 ## 体裁と運用は、既定値で畳んで置く（#2254）
 
@@ -308,7 +342,7 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
 `aide-bot`の立ち上げでは、**チェックが付いているのに実際には行われていない手順**が複数あった。
 1Passwordへの登録は未実施のままIssueがcloseされ、初回デプロイが`DB_NAME: DB_NAME is required`で
 失敗した（`guchi-apps/aide-bot#8`として起票し直し）。原因は確認節が散文で、
-**「登録されたか」を見ていなかった**こと。3つの手作業Issue（サブPC・VPS・ブラウザ）はいずれも、
+**「登録されたか」を見ていなかった**こと。手作業Issueはいずれも、
 `## やること`の手順ぶんの確認コマンドを`## 完了の確認方法`へ並べる。
 
 - **効いていなければ終了コードが0にならないコマンドにする。** 代行実行も定期巡回（#2008）も
@@ -320,8 +354,9 @@ DBの`GithubInstallation.repositorySelection`は`installation`イベントでし
 - **secretsの確認はorganizationのsecretも数える**（`repos/{repo}/actions/organization-secrets`）。
   リポジトリのsecretだけを見ると、`visibility=all`のorganization secretで足りている場合に
   「未登録」と読めてしまう。`aide-bot`ではまさにそれで、Actions secretsへの登録は不要な手順だった
-- DNSの`dig`は**手順ではなく確認**なので、`## やること`から`## 完了の確認方法`へ移してある。
-  確認節に置いたものだけが代行実行・巡回の対象になる
+- DNSの`dig`と共通secretの数え上げは、**手順を丸ごと外した後も確認だけ残してある**（#2246。
+  サブPCの手作業Issueの`## 完了の確認方法`）。確認節に置いたものだけが代行実行・巡回の対象に
+  なるので、ワイルドカードDNSやorganization secretが壊れたときはここが拾う
 ### 同じ対象のIssueが`guchi-apps/vps`に開いていれば、起票しない（#2250）
 
 `aide-bot`の立ち上げでは、**同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件**
@@ -375,14 +410,15 @@ gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-b
 `-le-ssl.conf`を控える手順が**両方に書かれていた**。`aide-bot`では`#124`の側で実施され、
 `#2216`の同じ手順が宙に浮いた。
 
-分担そのものは変えていない（**vhostの追加と`-le-ssl.conf`の取り込み＝vps側、DNS＝ブラウザの
-手作業、置き場・DB・PM2・certbot＝VPSの手作業**）。変えたのは、`guchi-apps/vps`のIssueに
-**「このIssueが持たない作業」の表を置いた**こと。読んだ人・エージェントが、足りない手順を
-見つけたときに新しいIssueを立てず、担当のIssueへ書き足せるようにする。
+現在の分担は**vhostの追加と`-le-ssl.conf`の取り込み＝vps側、置き場・DB・PM2・certbot＝
+プロビジョニングのワークフローを流すサブPCの手作業**で、DNSは分担ごと消えた（#2246）。
+分担を固定するために、`guchi-apps/vps`のIssueへ**「このIssueが持たない作業」の表を置いた**。
+読んだ人・エージェントが、足りない手順を見つけたときに新しいIssueを立てず、担当のIssueへ
+書き足せるようにする。
 
-**1件へ統合しなかった理由。** `guchi-apps/vps#132`（プロビジョニングの受け口）が入ると
-置き場・DB・PM2は自動化され、実機に残る手作業はcertbotだけになる。残る量が変わる前に
-統合すると、統合したIssue自体を作り直すことになる。
+**1件へ統合はしない。** `guchi-apps/vps#132`（プロビジョニングの受け口）が入ったことで
+置き場・DB・PM2・certbotはワークフロー1本になったが、`-le-ssl.conf`の取り込みは
+`guchi-apps/vps`のリポジトリへのコミットなので、担当はvps側のままにする。
 
 ### 完了の判定は本番URLの`curl`で行う（deployジョブの成功は公開を保証しない）
 
@@ -416,16 +452,21 @@ ApacheのVirtualHostが無くてもdeployジョブは成功する。`aide-bot`�
 `guchi-apps/vps`のドリフト検知（`.github/scripts/check-drift.sh`）は**実機の
 `/etc/apache2/sites-available/*.conf`を正として列挙する**ため、certbotが作った
 `<host>-le-ssl.conf`を取り込むまで「[新規（未取り込み）]」として毎日出続ける。
-VPSの手作業Issueに「内容を控えてvpsのIssueへコメントする」手順を置き、vpsのIssue側に
-2段目として取り込みを書いてある。
+VPS受け入れの手作業Issueに「実行ログの末尾『リポジトリへ取り込む差分』を控えてvpsのIssueへ
+コメントする」手順を置き、vpsのIssue側に2段目として取り込みを書いてある
+（`provision-app.sh`が取り込むべき`:80`・`:443`両方の内容をそのまま貼れる形で出力する）。
 
-**控える前に`:443`側の`X-Forwarded-Proto`を`"https"`へ直す**（#2253）。certbotは`:80`の
+**`:443`側の`X-Forwarded-Proto`は`"https"`でなければならない**（#2253）。certbotは`:80`の
 VirtualHostをそのまま`:443`へ複製するため、`RequestHeader set X-Forwarded-Proto "http"`が
 残る。アプリは自分を`http://`だと誤認し、生成したリダイレクトURIが登録済みの`https://`と
 一致せず、**本番でだけOAuthログインが失敗する**。共有知識には2026-08-09の時点で記録があった
 （`guchi-apps/docs`の`knowledge/deployment.md`）のに、生成する手順に入っていなかったのが
-`guchi-apps/vps#124`で顕在化した理由なので、**認証の有無にかかわらず常に手順として出す**
-（後から認証を足すアプリがあるため）。
+`guchi-apps/vps#124`で顕在化した理由。**認証の有無にかかわらず必ず通す**（後から認証を足す
+アプリがあるため）。
+
+現在は`scripts/provision-app.sh`がcertbotの直後にこれを直すので（`guchi-apps/vps#132`）、
+issue-deckが手順として書くのは**プロビジョニングのワークフローを使えない種別（静的サイト）
+だけ**になった（#2246）。
 
 ## 失敗したときの扱い
 
