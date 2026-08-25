@@ -2,15 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CONSULT_OPENING_MESSAGE,
-  CONSULT_RESPONSE_SCHEMA,
-  MAX_CONSULT_TURNS,
-  buildConsultMessages,
-  continueNewAppConsult,
   countConsultTurns,
   isConsultExhausted,
+  MAX_CONSULT_TURNS,
+  type ConsultMessage,
+} from "@/lib/claude/limits";
+import {
+  CONSULT_RESPONSE_SCHEMA,
+  buildConsultMessages,
+  continueNewAppConsult,
   normalizeDraft,
   parseConsultResponse,
-  type ConsultMessage,
 } from "@/lib/claude/new-app-consult";
 
 function conversation(userTurns: number): ConsultMessage[] {

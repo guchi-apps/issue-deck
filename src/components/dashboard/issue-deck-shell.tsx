@@ -89,7 +89,7 @@ import {
   type InfraConfigTarget,
 } from "@/lib/infra-config-repos";
 import { appendPrerequisiteReference } from "@/lib/manual-step-prerequisites";
-import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/issue-search";
+import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/limits";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import type { NotificationTarget } from "@/lib/notifications";
 import {

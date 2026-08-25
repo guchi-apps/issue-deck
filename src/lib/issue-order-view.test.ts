@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ISSUE_ORDER_CANDIDATE_LIMIT } from "@/lib/claude/issue-order";
+import { ISSUE_ORDER_CANDIDATE_LIMIT } from "@/lib/claude/limits";
 import {
   buildIssueOrderBodyHead,
   buildIssueOrderCandidates,
