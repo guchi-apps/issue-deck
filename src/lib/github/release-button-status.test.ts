@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
 import {
   describeReleaseStatusBadge,
   releaseAttentionRank,
@@ -65,12 +66,38 @@ describe("summarizeReleaseButtonStatus", () => {
               mergeable: null,
               repairWorkflowAvailability: {},
               repairRun: null,
+              mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
             },
           }),
         ),
       ).toBe("action_required");
     },
   );
+
+  it("develop→main PRのCIが通っていても判定中の間はprogressingを返す（#2326）", () => {
+    expect(
+      summarizeReleaseButtonStatus(
+        baseStatus({
+          phase: "release_pr_open",
+          releasePullRequest: {
+            number: 1,
+            url: "https://github.com/example/example/pull/1",
+            title: "release",
+            ciState: "success",
+            mergeable: null,
+            repairWorkflowAvailability: {},
+            repairRun: null,
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          },
+        }),
+      ),
+    ).toBe("progressing");
+  });
 
   it("develop→main PRがオープン中でもciStateがpendingの間はprogressingを返す（#1433）", () => {
     expect(
@@ -85,6 +112,7 @@ describe("summarizeReleaseButtonStatus", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
           },
         }),
       ),
@@ -106,6 +134,7 @@ describe("summarizeReleaseButtonStatus", () => {
               mergeable: null,
               repairWorkflowAvailability: {},
               repairRun: null,
+              mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
               version: "1.1.0",
               reason: null,
               changelog: null,
@@ -130,6 +159,7 @@ describe("summarizeReleaseButtonStatus", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
             version: "1.1.0",
             reason: null,
             changelog: null,
@@ -187,6 +217,7 @@ describe("summarizeReleaseButtonStatus", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
           },
           workflowRun: workflowRun({ status: "completed", conclusion: "failure" }),
         }),
@@ -207,6 +238,7 @@ describe("summarizeReleaseButtonStatus", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
           },
           deployWorkflowRun: workflowRun({ status: "completed", conclusion: "failure" }),
         }),
@@ -235,20 +267,64 @@ describe("summarizeReleaseStatus", () => {
 
   it("develop→mainのPRのCIがpendingの間はprogressing、通過後はaction_requiredを返す（#1433）", () => {
     expect(
-      summarizeReleaseStatus(summaryInput({ releasePullRequest: { ciState: "pending" } })),
+      summarizeReleaseStatus(
+        summaryInput({ releasePullRequest: { ciState: "pending", mergeJudgementPending: false } }),
+      ),
     ).toBe("progressing");
     expect(
-      summarizeReleaseStatus(summaryInput({ releasePullRequest: { ciState: "success" } })),
+      summarizeReleaseStatus(
+        summaryInput({ releasePullRequest: { ciState: "success", mergeJudgementPending: false } }),
+      ),
     ).toBe("action_required");
   });
 
+  /**
+   * CI通過後にClaudeのレビュー・マージ可否の判定が走っている窓（#2326）。判定のcheck-runは
+   * CI状態の集約から外してある（#1799）ため`ciState`は`success`になる。そのあいだ画面の
+   * マージボタンは「判定中」で無効（#1968）なので、「人が押す番」にはしない。
+   */
+  it("自動マージ可否の判定中はaction_requiredにしない（#2326）", () => {
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({
+          releasePullRequest: { ciState: "success", mergeJudgementPending: true },
+        }),
+      ),
+    ).toBe("progressing");
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({ bumpPullRequest: { ciState: "success", mergeJudgementPending: true } }),
+      ),
+    ).toBe("progressing");
+  });
+
+  // CI失敗は判定中でも人の対応が要る。マージ待ちより優先して出す既存の順序を崩さない（#1059）
+  it("判定中でもCIが落ちていればバッジは「チェック失敗」のまま（#2326）", () => {
+    const status = summarizeReleaseStatus(
+      summaryInput({ releasePullRequest: { ciState: "failure", mergeJudgementPending: true } }),
+    );
+    expect(status).toBe("progressing");
+    expect(
+      describeReleaseStatusBadge({
+        status,
+        failedWorkflow: null,
+        mergeTarget: null,
+        ciState: "failure",
+      }),
+    ).toEqual({ label: "チェック失敗", tone: "error" });
+  });
+
   it("バンプPRのCIがpendingの間はprogressing、通過後はaction_requiredを返す", () => {
-    expect(summarizeReleaseStatus(summaryInput({ bumpPullRequest: { ciState: "pending" } }))).toBe(
-      "progressing",
-    );
-    expect(summarizeReleaseStatus(summaryInput({ bumpPullRequest: { ciState: "success" } }))).toBe(
-      "action_required",
-    );
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({ bumpPullRequest: { ciState: "pending", mergeJudgementPending: false } }),
+      ),
+    ).toBe("progressing");
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({ bumpPullRequest: { ciState: "success", mergeJudgementPending: false } }),
+      ),
+    ).toBe("action_required");
   });
 
   it("PRが無くてもリリースworkflowが実行中ならprogressingを返す", () => {
@@ -263,7 +339,7 @@ describe("summarizeReleaseStatus", () => {
     expect(
       summarizeReleaseStatus(
         summaryInput({
-          releasePullRequest: { ciState: "success" },
+          releasePullRequest: { ciState: "success", mergeJudgementPending: false },
           deployWorkflowRun: { status: "completed", conclusion: "failure" },
         }),
       ),

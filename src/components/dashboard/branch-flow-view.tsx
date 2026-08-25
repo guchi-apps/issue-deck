@@ -67,14 +67,18 @@ import {
   MAIN_BRANCH,
   formatUnreleasedSummary,
   isClosedLane,
-  isReleaseCiPending,
+  isReleaseAutoProgressing,
   unreleasedSummary,
   type BranchFlow,
 } from "@/lib/branch-flow";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
-import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
+import {
+  canMergeFromDeck,
+  isMergeJudgementPending,
+  requiresUserMerge,
+} from "@/lib/pull-request-list";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
@@ -916,6 +920,13 @@ function ReleaseGroupHeader({
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
   //
+  // **自動マージ可否の判定中（`claude-review-develop`）も同じく「マージ待ち」と言わない**
+  // （#2326）。判定のcheck-runはCI状態の集約から外してある（#1799）ため、Claudeのレビューが
+  // 走っている最中でも`ciState`は`success`になり、この見出しには琥珀の「mainへマージ待ち」が
+  // 出ていた。その窓のあいだ隣のマージボタンは「判定中」で無効（#1968）なので、押せる操作が
+  // 無いのに「あなたの番」と促していたことになる。判定は畳んだ1行（`releaseMergeTarget`）と
+  // 同じ`isMergeJudgementPending`を通す。
+  //
   // **CIが落ちているときはここでは「マージ待ち」のまま**——畳んだ1行（`releaseMergeTarget`）が
   // `failure`を除くのは、同じ行に赤の「CI失敗」が並んで意味が競合するからで（#2038）、
   // この見出しには失敗を示すものが無く、外すと止まっているリリースが「リリース中」に見える。
@@ -923,7 +934,8 @@ function ReleaseGroupHeader({
   const waitingUserMerge =
     group.pullRequest !== null &&
     group.pullRequest.state === "open" &&
-    group.pullRequest.ciState !== "pending";
+    group.pullRequest.ciState !== "pending" &&
+    !isMergeJudgementPending(group.pullRequest.mergeJudgement);
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
@@ -974,9 +986,9 @@ function ReleaseGroupHeader({
                     ? "バージョンバンプ中"
                     : "本番未反映"
               }
-              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも走っていない
-              spinning={isReleaseCiPending(group.pullRequest, group.bumpPullRequest)}
-              note="チェック実行中"
+              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも判定も走っていない
+              spinning={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
+              note="チェック・判定の実行中"
             />
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
@@ -1485,8 +1497,8 @@ function RepositorySummaryRow({
         ) : (
           <ReleaseProgressPill
             label="リリース中"
-            spinning={summary.releaseCiPending}
-            note="チェック実行中"
+            spinning={summary.releaseAutoProgressing}
+            note="チェック・判定の実行中"
           />
         )
       ) : (

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import type { CiState, ReleaseStatus } from "@/hooks/use-release-status";
+import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
@@ -36,6 +37,7 @@ function statusWithReleaseCi(
       mergeable,
       repairWorkflowAvailability: {},
       repairRun: null,
+      mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
     },
   });
 }
@@ -86,6 +88,7 @@ describe("ReleaseProgress CI状態バッジ", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
             version: "1.1.0",
             reason: null,
             changelog: null,
@@ -142,6 +145,7 @@ describe("ReleaseProgress 更新履歴・使い方の表示", () => {
         mergeable: null,
         repairWorkflowAvailability: {},
         repairRun: null,
+        mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
         version: "1.1.0",
         reason,
         changelog,
@@ -222,6 +226,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
             ...status.releasePullRequest!,
             repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
           },
         })}
         repoFullName="owner/repo"
@@ -254,6 +259,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
             mergeable: null,
             repairWorkflowAvailability: {},
             repairRun: null,
+            mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
             version: "1.1.0",
             reason: null,
             changelog: null,
