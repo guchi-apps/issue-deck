@@ -126,6 +126,59 @@ export function unreleasedCommitCount(comparison: BranchComparison | null | unde
   return comparison.aheadBy;
 }
 
+/** 画面に出す「未リリース ◯」の数と単位（#2333） */
+export type UnreleasedSummary = {
+  /** 出す数字。0なら何も出さない */
+  count: number;
+  /** 数字に添える単位。コミット一覧を取れなかったときだけ`コミット` */
+  unit: "件" | "コミット";
+  /** 別枠で添えるバージョンバンプのマージの数。0なら添えない */
+  versionBumpCount: number;
+};
+
+/**
+ * 「未リリース ◯コミット」を「◯件」へ言い換えるための数（#2333）。
+ *
+ * **コミット数は実質的な未リリースの作業量を表さない。** 通常マージ運用ではPR 1件につき
+ * 作業コミットとマージコミットが両方`aheadBy`へ載るため、必ず実態より多い数字が出ていた
+ * （PR 2件で5コミット、など）。`main..develop`のfirst-parentだけを数えると、developの幹に
+ * 載った単位＝「PRのマージ1回」または「直接push 1回」になり、PR単位の感覚と一致する。
+ * squash mergeのリポジトリでも1PR＝1コミットが幹に載るので、同じ数え方でそのまま正しい。
+ *
+ * **バージョンバンプのマージは件数の本体から外す。** リリースの配管であって出す中身では
+ * ないため、他に未リリースの作業があるときだけ「（+バージョンバンプ1件）」として添える。
+ * バンプのマージしか残っていない（＝出すものが無い）状態は`sameContent`が0へ落とすので
+ * （#2316）、ここで別枠にしても「未リリース」が消えることはない。ただし何らかの理由で
+ * tree差分が残っている場合だけは0件と言い切らず、バンプのぶんを本体で数える。
+ *
+ * コミット一覧を取れなかったとき（取得上限超え・head OIDが読めない）は従来どおりコミット数。
+ */
+export function unreleasedSummary(
+  comparison: BranchComparison | null | undefined,
+): UnreleasedSummary {
+  const commits = unreleasedCommitCount(comparison);
+  const units = comparison?.units ?? null;
+  if (commits === 0 || units === null) {
+    return { count: commits, unit: "コミット", versionBumpCount: 0 };
+  }
+  const work = units.mergeCount + units.directCount;
+  if (work === 0) {
+    return { count: units.versionBumpCount, unit: "件", versionBumpCount: 0 };
+  }
+  return { count: work, unit: "件", versionBumpCount: units.versionBumpCount };
+}
+
+/**
+ * `unreleasedSummary`を「5件（+バージョンバンプ1件）」の形にする（#2333）。
+ * 「未リリース 」のような前置きは呼び出し側が付ける。0件のときは空文字。
+ */
+export function formatUnreleasedSummary(summary: UnreleasedSummary): string {
+  if (summary.count === 0) return "";
+  const bump =
+    summary.versionBumpCount > 0 ? `（+バージョンバンプ${summary.versionBumpCount}件）` : "";
+  return `${summary.count}${summary.unit}${bump}`;
+}
+
 /**
  * リリースを進めているPRのCIが実行中か（#1931）。**回るアイコンを出してよいかの唯一の判定。**
  *

@@ -1521,6 +1521,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
   **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
   リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
+  **残った数はコミット数ではなく「マージコミット単位の件数」で出す**（#2333・`unreleasedSummary`）。
+  通常マージ運用ではPR 1件のマージにつき作業ブランチ側のコミット（1個とは限らない）と
+  マージコミットが両方`aheadBy`へ載るため、**コミット数は実質的な作業の件数より必ず多く出る**
+  （実測: issue-deckの`main..develop`が12コミット＝マージ6個＋作業6個で、PR単位では6件）。
+  そこで同じGraphQLの`compare`から`commits`（各コミットの`oid`・`messageHeadline`・親のOID）まで取り、
+  **developの先端から`parents[0]`をたどったfirst-parentの列だけ**を数える
+  （`git log --first-parent main..develop`と同じ数。`branches-api.ts`の`toUnreleasedUnits`）。
+  **一覧の並び順に依存しない**——GitHubは古い順で返すが、一覧は「その比較に含まれるか」の集合として
+  しか使わず、幹をたどる起点は`headTarget.oid`にしている。
+  **squash mergeのリポジトリも同じ数え方でよい。** 1PR＝1コミットが幹に載るだけなので、
+  マージコミットを持たない列は「直接載ったコミット」（`directCount`）としてそのまま件数になる。
+  **バージョンバンプPRのマージだけは件数の本体から外し、「（+バージョンバンプ1件）」として添える**
+  （リリースの配管であって出す中身ではないため）。バンプかどうかはマージコミットのメッセージから
+  取り込んだブランチ名を読んで判定する（`mergedHeadRefFromHeadline`＋`isVersionBumpHeadRef`）——
+  `associatedPullRequests`を引けば確実だが、コミット100件ぶんのネストした問い合わせになり
+  1画面ぶんの取得コストが跳ね上がる。
+  **数えられないときはコミット数へ落とす**（`BranchComparison.units`が`null`）。該当するのは
+  比較のコミットが取得上限（100件）を超えているときと、`headTarget`のOIDが読めず幹をたどれないとき。
+  数え落としたまま「◯件」と言い切るより害が小さい。
+  **`canTriggerRelease`の判定は`unreleasedCommitCount`（コミット数）のままにしてある**——
+  押してよいかは「出すものがあるか」で決まり、件数の数え方を変えたことでリリースの可否が
+  動くべきではないため。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。

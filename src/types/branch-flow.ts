@@ -2,6 +2,30 @@ import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
 
+/**
+ * 未リリースの変更を「マージコミット単位」で数えた内訳（#2333）。
+ *
+ * **数えるのは`main..develop`のfirst-parentの列だけ。** 通常マージ運用では、PR 1件の
+ * マージにつき作業ブランチ側のコミット（1個とは限らない）とマージコミットが両方
+ * `aheadBy`へ載るため、コミット数は実質的な作業の件数より必ず多く出る。first-parentを
+ * たどると、developの幹に直接載った単位＝「PRのマージ1回」または「直接push 1回」だけが
+ * 残るので、squash mergeのリポジトリ（1PR＝1コミット）でも同じ数え方で正しくなる。
+ */
+export type UnreleasedUnits = {
+  /** PRのマージコミットの数。**バージョンバンプのマージは含まない**（`versionBumpCount`へ分ける） */
+  mergeCount: number;
+  /**
+   * マージを経ずdevelopの幹へ直接載ったコミットの数。直接pushのほか、
+   * squash mergeしたPRもここに入る（マージコミットが残らないため）。
+   */
+  directCount: number;
+  /**
+   * バージョンバンプPR（`release/vX.Y.Z`→`develop`）のマージコミットの数。
+   * リリースの配管であって出す中身ではないので、件数の本体からは外して別枠で数える。
+   */
+  versionBumpCount: number;
+};
+
 /** `develop`が`main`よりどれだけ進んでいるか */
 export type BranchComparison = {
   /** baseに対してheadが進んでいるコミット数 */
@@ -21,6 +45,14 @@ export type BranchComparison = {
    * 取得できなかった場合はfalse（＝差分があるものとして扱い、リリースを止めない）。
    */
   sameContent: boolean;
+  /**
+   * マージコミット単位で数えた内訳（#2333）。**コミット一覧を取れなければ`null`**で、
+   * その場合は従来どおり`aheadBy`をコミット数として出す。
+   *
+   * 取れないのは、比較のコミットが取得上限（100件）を超えているとき、または
+   * `headTarget`のOIDが読めずfirst-parentをたどれないとき。
+   */
+  units: UnreleasedUnits | null;
 };
 
 /**

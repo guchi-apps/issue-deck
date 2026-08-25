@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import {
   buildBranchFlow,
   extractManualStepOrigin,
+  formatUnreleasedSummary,
   isClosedLane,
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
+  unreleasedSummary,
   type BranchFlowIssueSource,
 } from "@/lib/branch-flow";
 import type {
+  BranchComparison,
   BranchFlowDeployRun,
   BranchFlowLane,
   BranchFlowRepository,
@@ -283,12 +286,12 @@ describe("buildBranchFlow", () => {
 
     const flow = build({
       pullRequests: [release],
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 12, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 12, behindBy: 0, sameContent: false, units: null } })],
     });
 
     const [repository] = flow.repositories;
     expect(repository.release.pullRequest?.number).toBe(500);
-    expect(repository.release.comparison).toEqual({ aheadBy: 12, behindBy: 0, sameContent: false });
+    expect(repository.release.comparison).toEqual({ aheadBy: 12, behindBy: 0, sameContent: false, units: null });
     expect(allLanes(repository)).toEqual([]);
     // 幹に置いたリリースPRは、未リリースの束の見出しとして出す
     expect(repository.releaseGroups[0].pullRequest?.number).toBe(500);
@@ -362,7 +365,7 @@ describe("buildBranchFlow", () => {
           repositoryFullName: "guchi-apps/quiet",
           checkedBranches: ["main", "develop"],
           existingBranches: ["main", "develop"],
-          developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false },
+          developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null },
           hasReleaseWorkflow: false,
           hasDeployWorkflow: false,
         },
@@ -391,7 +394,7 @@ describe("buildBranchFlow", () => {
 
   it("未リリースの変更があれば、レーンが無くても未リリースの束を作る", () => {
     const flow = build({
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
     });
     expect(flow.repositories[0].releaseGroups).toHaveLength(1);
     expect(flow.repositories[0].releaseGroups[0]).toMatchObject({
@@ -404,7 +407,7 @@ describe("buildBranchFlow", () => {
   // #2316。リリース直後はバンプPRのマージコミットだけが`develop`に残り、`aheadBy`は1のまま
   it("コミットが残っていても中身の差分が無ければ未リリースの束を作らない", () => {
     const flow = build({
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 1, behindBy: 24, sameContent: true } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 1, behindBy: 24, sameContent: true, units: null } })],
     });
     expect(flow.repositories[0].releaseGroups).toEqual([]);
   });
@@ -581,7 +584,7 @@ describe("バージョンごとの束（releaseGroups）", () => {
       // まだマージしていない
       pullRequest({ number: 187, headRef: "issue-186", linkedIssueNumber: 186, state: "open" }),
     ],
-    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 6, behindBy: 26, sameContent: false } })],
+    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 6, behindBy: 26, sameContent: false, units: null } })],
   });
   const [repository] = flow.repositories;
 
@@ -786,7 +789,7 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
       pullRequests: RELEASED,
       branchStatuses: [
         branchStatus({
-          developVsMain: { aheadBy: input.aheadBy ?? 0, behindBy: 0, sameContent: false },
+          developVsMain: { aheadBy: input.aheadBy ?? 0, behindBy: 0, sameContent: false, units: null },
           hasDeployWorkflow: input.hasDeployWorkflow ?? true,
         }),
       ],
@@ -905,6 +908,7 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
                 aheadBy: input.aheadBy ?? 3,
                 behindBy: 0,
                 sameContent: input.sameContent ?? false,
+                units: null,
               },
               hasReleaseWorkflow: input.hasReleaseWorkflow ?? true,
             }),
@@ -980,7 +984,7 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
       pullRequest({ number: 1545, headRef: "issue-1541", linkedIssueNumber: 1541, state: "open" }),
     ],
     issues: [issue({ number: 1541, projectStatus: "Develop PR" })],
-    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false } })],
+    branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null } })],
   });
   const [repository] = flow.repositories;
 
@@ -1009,7 +1013,7 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
   it("CIが終わったバンプPRはリリースのCI実行中にしない", () => {
     const done = build({
       pullRequests: [pullRequest({ ...openBump, ciState: "success" })],
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null } })],
     }).repositories[0];
     expect(done.summary.releaseCiPending).toBe(false);
   });
@@ -1017,7 +1021,7 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
   it("CIが落ちたバンプPRはCI失敗として拾う", () => {
     const failing = build({
       pullRequests: [pullRequest({ ...openBump, ciState: "failure" })],
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null } })],
     }).repositories[0];
     expect(failing.summary.hasCiFailure).toBe(true);
   });
@@ -1035,7 +1039,7 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
           mergedAt: "2026-08-15T01:00:00Z",
         }),
       ],
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null } })],
     }).repositories[0];
 
     expect(allLanes(merged).map((lane) => lane.branchName)).toEqual([]);
@@ -1226,7 +1230,7 @@ describe("本番デプロイの状態（#1579）", () => {
           state: "open",
         }),
       ],
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       deployStatuses: deployRun(),
       now: JUST_AFTER_MERGE,
     }).repositories;
@@ -1326,7 +1330,7 @@ describe("リリースのマージ待ち（releaseMergeTarget）", () => {
   function summaryOf(pullRequests: PullRequestSummary[]) {
     return build({
       pullRequests,
-      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+      branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
     }).repositories[0].summary;
   }
 
@@ -1485,5 +1489,67 @@ describe("orderRepositoriesBySelection", () => {
 
   it("選択されていても一覧に無いリポジトリは足さない（＝件数は増えない）", () => {
     expect(orderRepositoriesBySelection(repositories, ["owner/unknown"])).toEqual(repositories);
+  });
+});
+
+describe("未リリースの件数（unreleasedSummary・#2333）", () => {
+  const comparison = (overrides: Partial<BranchComparison> = {}): BranchComparison => ({
+    aheadBy: 5,
+    behindBy: 0,
+    sameContent: false,
+    units: null,
+    ...overrides,
+  });
+
+  it("マージコミット単位の件数を出し、バージョンバンプは別枠にする", () => {
+    const summary = unreleasedSummary(
+      comparison({ units: { mergeCount: 2, directCount: 0, versionBumpCount: 1 } }),
+    );
+
+    expect(summary).toEqual({ count: 2, unit: "件", versionBumpCount: 1 });
+    expect(formatUnreleasedSummary(summary)).toBe("2件（+バージョンバンプ1件）");
+  });
+
+  it("マージを経ないコミットも1件として数える", () => {
+    const summary = unreleasedSummary(
+      comparison({ aheadBy: 3, units: { mergeCount: 1, directCount: 2, versionBumpCount: 0 } }),
+    );
+
+    expect(formatUnreleasedSummary(summary)).toBe("3件");
+  });
+
+  // バンプのマージしか残っていないのに差分がある、という想定外の状態で「0件」と言い切らない
+  it("バージョンバンプのマージだけが残っているときは本体で数える", () => {
+    const summary = unreleasedSummary(
+      comparison({ aheadBy: 1, units: { mergeCount: 0, directCount: 0, versionBumpCount: 1 } }),
+    );
+
+    expect(formatUnreleasedSummary(summary)).toBe("1件");
+  });
+
+  // コミット一覧を取れなかったときは、数え落とした件数ではなくコミット数を出す
+  it("内訳が無ければ従来どおりコミット数を出す", () => {
+    const summary = unreleasedSummary(comparison({ aheadBy: 12 }));
+
+    expect(summary).toEqual({ count: 12, unit: "コミット", versionBumpCount: 0 });
+    expect(formatUnreleasedSummary(summary)).toBe("12コミット");
+  });
+
+  // #2316の判定はそのまま効かせる（中身が同じなら出すものは無い）
+  it("mainとdevelopの中身が同じなら0", () => {
+    const summary = unreleasedSummary(
+      comparison({
+        aheadBy: 1,
+        sameContent: true,
+        units: { mergeCount: 0, directCount: 0, versionBumpCount: 1 },
+      }),
+    );
+
+    expect(summary.count).toBe(0);
+    expect(formatUnreleasedSummary(summary)).toBe("");
+  });
+
+  it("比較が取れていなければ0", () => {
+    expect(unreleasedSummary(null).count).toBe(0);
   });
 });
