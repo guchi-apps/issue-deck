@@ -4,6 +4,8 @@ import {
   buildManualStepFixPrompt,
   pickManualStepFix,
   MANUAL_STEP_FIX_OUTPUT_MAX_LENGTH,
+  MANUAL_STEP_FIX_STEPS_MAX_COUNT,
+  MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH,
   type ManualStepFixCurrent,
   type ManualStepFixInput,
 } from "@/lib/claude/manual-step-fix";
@@ -117,6 +119,16 @@ describe("buildManualStepFixPrompt", () => {
     ).toContain("Error: item not found");
   });
 
+  // #2310。「確認してください」で終わる助言では、読んだ人が次に何を打てばよいか決まらない
+  it("この後にやることを求め、原因が分からないときは調べ直す手順を書かせる", () => {
+    const prompt = buildManualStepFixPrompt(BROWSER_INPUT);
+
+    expect(prompt).toContain("# この後にやること（`steps`）");
+    expect(prompt).toContain("必ず1件以上");
+    expect(prompt).toContain("決まらない書き方をしないでください");
+    expect(prompt).toContain("「何を調べれば分かるか」を手順にしてください");
+  });
+
   it("直せる文言が無い（確認節など）ときは`instruction`を選択肢に出さない", () => {
     const prompt = buildManualStepFixPrompt({ ...INPUT, kind: "verification", instruction: "" });
 
@@ -143,6 +155,7 @@ describe("pickManualStepFix", () => {
       command: "systemctl --user restart issue-deck-dispatch-poller.service",
       instruction: null,
       advice: null,
+      steps: [],
     });
   });
 
@@ -233,8 +246,76 @@ describe("pickManualStepFix", () => {
     }
   });
 
+  // #2310
+  it("この後にやることを取り出す（コマンドが無い手順も残す）", () => {
+    const result = pickManualStepFix(
+      JSON.stringify({
+        kind: "manual",
+        cause: "DBのマイグレーションが当たっていません。",
+        steps: [
+          { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
+          { text: "（ブラウザ）画面を開き直してテーブルが出ることを見る", command: null },
+        ],
+      }),
+      CURRENT,
+    );
+
+    expect(result.kind).toBe("manual");
+    expect(result.steps).toEqual([
+      { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
+      { text: "（ブラウザ）画面を開き直してテーブルが出ることを見る", command: null },
+    ]);
+  });
+
+  it("使えない手順は落とし、コマンドだけが使えない場合は説明文を残す", () => {
+    const result = pickManualStepFix(
+      JSON.stringify({
+        kind: "manual",
+        cause: "原因",
+        steps: [
+          "文字列だけの手順",
+          { text: "", command: "ls" },
+          { text: "1行目\n2行目", command: null },
+          { text: "あ".repeat(MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH + 1), command: null },
+          { text: "（サブPC）ログを見る", command: "```bash\njournalctl\n```" },
+        ],
+      }),
+      CURRENT,
+    );
+
+    expect(result.steps).toEqual([{ text: "（サブPC）ログを見る", command: null }]);
+  });
+
+  it("手順が多すぎる応答は上限で打ち切る", () => {
+    const steps = Array.from({ length: MANUAL_STEP_FIX_STEPS_MAX_COUNT + 3 }, (_, index) => ({
+      text: `${index + 1}件目`,
+      command: null,
+    }));
+    const result = pickManualStepFix(JSON.stringify({ kind: "manual", cause: "原因", steps }), CURRENT);
+
+    expect(result.steps).toHaveLength(MANUAL_STEP_FIX_STEPS_MAX_COUNT);
+  });
+
+  // 手順書を直せないことと、人が手元で何をすればよいか分からないことは別
+  it("使えない直し案でmanualへ倒すときも、この後にやることは残す", () => {
+    const result = pickManualStepFix(
+      JSON.stringify({
+        kind: "command",
+        cause: "原因",
+        command: INPUT.command,
+        steps: [{ text: "（サブPC）ユニット名を調べる", command: "systemctl --user list-units" }],
+      }),
+      CURRENT,
+    );
+
+    expect(result.kind).toBe("manual");
+    expect(result.command).toBeNull();
+    expect(result.steps).toHaveLength(1);
+  });
+
   it("JSONとして読めない応答・未知の種別はmanualへ倒す", () => {
     expect(pickManualStepFix("直し方が分かりません", CURRENT).kind).toBe("manual");
+    expect(pickManualStepFix("直し方が分かりません", CURRENT).steps).toEqual([]);
     expect(pickManualStepFix(JSON.stringify({ kind: "explode", cause: "x" }), CURRENT).kind).toBe(
       "manual",
     );

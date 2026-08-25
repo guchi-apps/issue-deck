@@ -883,6 +883,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     **貼り付けた内容はIssueへ入れず、Claudeへ送るのも同意があるときだけ**（既定オフ）。
     `00.check-user`は付けない（手作業Issueには承認して再開させる相手が居ない）。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#想定外だったらうまくいかないから相談する2299)。
+  - **診断は「この後にやること」まで出す**（#2310。`ManualStepFixResult.steps`・
+    [`manual-step-fix-panel.tsx`](../src/components/dashboard/manual-step-fix-panel.tsx)）。
+    本文を直しても進めないとき（`manual`）に返していたのは原因と自由記述の助言だけで、
+    「確認してください」「必要に応じて〜」で終わり**次に何を打てばよいかが決まらなかった**。
+    1件1行＋コピーできるコマンドで並べ、原因を特定できなかった場合は**何を調べれば分かるか**
+    （状況を集めるコマンド → 貼り付けて調べ直す）を手順にする。**ここのコマンドは本文へ入らず、
+    issue-deckからも実行しない**——押して実行できるのは変わらず本文に書かれたコマンドだけで、
+    できるのはコピーまで。
   - **openな手作業の`## 完了の確認方法`は1日1回、人の操作なしに巡回する**（#2008。
     [`lib/manual-step-verification.ts`](../src/lib/manual-step-verification.ts)・
     [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・

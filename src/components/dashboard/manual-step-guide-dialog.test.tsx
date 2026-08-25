@@ -1021,6 +1021,64 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
     expect(await screen.findByText("権限が足りません。")).toBeTruthy();
   });
 
+  // #2310。原因だけ出して「手元で対処してください」で終わると、読んだ人が次に何を打てばよいか決まらない
+  it("本文を直せないときは、この後にやることをコマンド付きで並べる", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: {
+          kind: "manual",
+          cause: "ZaimGenreテーブルがありません。",
+          command: null,
+          instruction: null,
+          advice: null,
+          steps: [
+            { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
+            { text: "（ブラウザ）画面を開き直す", command: null },
+          ],
+        },
+        currentCommand: null,
+        currentInstruction: "チェックアウトを更新する",
+      }),
+    });
+
+    openTrouble("テーブルが無いというエラーが出ました");
+    fireEvent.click(screen.getByRole("button", { name: "原因を調べる" }));
+
+    expect(await screen.findByText("この後にやること")).toBeTruthy();
+    expect(screen.getByText("（サブPC）マイグレーションを流す")).toBeTruthy();
+    expect(screen.getByText("pnpm prisma migrate deploy")).toBeTruthy();
+    // コマンドが無い手順も出る（画面での操作）
+    expect(screen.getByText("（ブラウザ）画面を開き直す")).toBeTruthy();
+    // **実行はさせない。** issue-deckが実行するのは本文に書かれたコマンドだけ
+    expect(screen.getByRole("button", { name: "コマンドをコピー" })).toBeTruthy();
+  });
+
+  it("やることを絞り込めなかったときは、貼り付けて調べ直すよう促す", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        fix: {
+          kind: "manual",
+          cause: "情報が足りず原因を特定できません。",
+          command: null,
+          instruction: null,
+          advice: null,
+          steps: [],
+        },
+        currentCommand: null,
+        currentInstruction: "チェックアウトを更新する",
+      }),
+    });
+
+    openTrouble("よく分からないエラーが出ました");
+    fireEvent.click(screen.getByRole("button", { name: "原因を調べる" }));
+
+    expect(
+      await screen.findByText(/「出力・画面の文言を貼る」へ足して、もう一度「原因を調べる」/),
+    ).toBeTruthy();
+  });
+
   it("手順の説明文の直し案を適用すると、その1行だけが書き換わる", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
