@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { parseFineGrainedTokenInput, toFineGrainedToken } from "@/lib/fine-grained-tokens";
+import { isUniqueConstraintError } from "@/lib/prisma-error";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -32,12 +33,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ fineGrainedToken: toFineGrainedToken(row) });
   } catch (error) {
-    if (
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      (error as { code?: string }).code === "P2002"
-    ) {
+    if (isUniqueConstraintError(error)) {
       return NextResponse.json({ error: "duplicate_name" }, { status: 409 });
     }
     throw error;

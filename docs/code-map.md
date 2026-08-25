@@ -564,6 +564,24 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
+- **同じIssueの取り込みは`lib/keyed-mutex.ts`の`runExclusive`で直列化する**（#2365）。
+  `sync-issues.ts`の`upsertIssueRow`はDBを「読んでから書く」形で、同時に2本走ると両方が同じ
+  読んだ値を見て書きに行く。上のプッシュ型・プル型に加えて画面のPATCH（`upsertIssueAndGetDisplay`）も
+  同じ関数を通り、issue-deckはラベルを頻繁に付け替えるため現実に重なる。開発DBでの実測では
+  **同時2本×3回のうち6回中5回**が落ち、内訳はユニーク制約違反（P2002・`IssueLabel_issueId_name_key`）と
+  デッドロック（P2034）だった。**落ちるとラベルの同期だけでは済まず**、同じ関数の後段にある
+  OPEN→CLOSED検知（ローカルセッションを畳む#1518・残ると害になるラベルを外す#2178）へ到達しない。
+  本番は`instances: 1`／`exec_mode: "fork"`（`deploy/ecosystem.config.js`）で3経路が同じプロセスに
+  載っているため、プロセス内の直列化で足りる。**プロセスを増やすときはDB側のロックが要る。**
+  - **ロックの中はDBの読み書きだけにする。** closeの後片付けはGitHubやtmuxを叩いて秒単位かかり、
+    中に入れると同じIssueへ続けて届いたWebhookがその間ずっと待たされる。
+  - **Prismaの`upsert`は競合の対策にならない。** 複合ユニークキーへの`upsert`はMySQLでは1文にならず
+    「SELECT→INSERT／UPDATE」に分かれる（`lib/dispatch/session-artifacts.ts`でも実測済み）。
+    競合しても落ちない書き方は`createMany({ skipDuplicates: true })`（＝`INSERT IGNORE`）＋
+    ユニークキーを動かさない`updateMany`。ただし**それだけではP2034が残る**——`INSERT`のギャップロックと
+    `DELETE ... NOT IN (...)`の範囲ロックを同じトランザクションで取るため。落とさないための本体は直列化のほう。
+  - P2002の判定は`lib/prisma-error.ts`の`isUniqueConstraintError`に寄せる（`instanceof`で見ると
+    生成物の版が変わったときに静かに外れる）。
 - 画面の更新は別の話で、`hooks/use-issue-polling.ts` が10秒間隔で `/api/issues`（＝DB）を読み直す
   （間隔の定数は[`lib/auto-refresh.ts`](../src/lib/auto-refresh.ts)の`ISSUE_POLL_INTERVAL_MS`）。
   ポーリングしてもGitHubには問い合わせないため、Webhookが届いていない変更はここでは拾えない。

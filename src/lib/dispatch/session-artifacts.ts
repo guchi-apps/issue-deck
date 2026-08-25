@@ -9,6 +9,7 @@ import {
   SESSION_ARTIFACT_PER_ISSUE_LIMIT,
   type SessionArtifactView,
 } from "@/lib/dispatch/session-artifact";
+import { isUniqueConstraintError } from "@/lib/prisma-error";
 
 /**
  * セッションが公開したアーティファクト（#2154）の保存と取り出し。
@@ -153,20 +154,6 @@ export async function saveSessionArtifact(params: {
   await pruneSessionArtifacts(params.repositoryFullName, params.issueNumber);
 
   return toSessionArtifactView(row);
-}
-
-/**
- * Prismaのユニーク制約違反（`P2002`）か。**型に依存せずコードだけを見る**——
- * `PrismaClientKnownRequestError`を`instanceof`で判定すると、生成物の版が変わったときに
- * 静かに外れる（外れると、二重に届いた公開が500として捨てられる）。
- */
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "P2002"
-  );
 }
 
 /** 上限を超えた分を古いものから消す。ファイルも一緒に消す（残すと誰も辿れないゴミになる）。 */
