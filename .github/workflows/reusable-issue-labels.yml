@@ -49,15 +49,16 @@ name: Issue Progress (reusable)
 # 非同期に実行)では発火しないことがある(Issue #112。GITHUB_TOKEN起点のイベントは他の
 # ワークフローを起動しないというGitHub仕様の影響を受けるため。auto-mergeジョブ自体は
 # WORKFLOW_PATで有効化するよう対応済みだが、根本解消したか確証がないための安全網)。
-# develop-merge-sweepジョブはこれを取りこぼした`Develop PR`・`Implementation`のissueを
-# scheduleで定期的に拾い直す。**拾えなかったもの(developへ入らないまま取り残された
+# これを取りこぼした`Develop PR`・`Implementation`のissueは、issue-deck側の巡回
+# (`POST /api/issues/progress-sweep`。#2294でこのワークフローのdevelop-merge-sweepジョブから
+# 移した)が定期的に拾い直す。**拾えなかったもの(developへ入らないまま取り残された
 # コミットがあるブランチ)も見送るだけで終わらせず、`00.check-user`を付けて人へ渡す(#1999)。**
 #
 # **一時的なAPI不調でこの経路が丸ごと失われないようにしてある(#1861)。** #1583では
 # develop-pr-openedの報告がHTTP 500、develop-pr-mergedの`gh label list`がHTTP 503に当たり、
 # マージ済みのissueが`Implementation`のまま取り残された。対処は3つで、(1)進捗の報告より先に
 # 対象issue番号をGITHUB_OUTPUTへ書き、ラベル操作・コメント投稿の失敗は警告に留める、
-# (2)issue-deckへのPOST/GETは5xxと接続失敗にだけ再試行する、(3)develop-merge-sweepが
+# (2)issue-deckへのPOST/GETは5xxと接続失敗にだけ再試行する、(3)巡回が
 # `Implementation`も走査する。詳細はdocs/progress-status-architecture.mdを参照。
 # 判定の失敗経路はscripts/reusable-issue-labels.test.mjsが`run:`本文を直接実行して検証する。
 #
@@ -70,8 +71,8 @@ name: Issue Progress (reusable)
 #
 # `00.check-user`はclaude-review-develop.ymlの自動マージ不可判定でも「マージ保留」
 # シグナルとして使われ、付与時は人間がPRリンクから手動マージする運用になっている。
-# その手動マージ自体が確認完了を意味するため、develop-pr-merged・develop-merge-sweep・
-# main-pr-mergedの各ジョブでは進捗の報告とあわせて`00.check-user`も除去する(#266。
+# その手動マージ自体が確認完了を意味するため、develop-pr-merged・main-pr-mergedの各ジョブ
+# (とissue-deck側の巡回)では進捗の報告とあわせて`00.check-user`も除去する(#266。
 # 除去のタイミングが無く残り続けていた)。
 #
 # **その判定を行うclaude-review-develop.ymlは、全リポジトリにあるわけではない。**
@@ -90,13 +91,12 @@ name: Issue Progress (reusable)
 # 取り決めで、疎通失敗・未設定は警告に留める。
 #
 # **ただしPhase 5以降、対象issueの「検索」もissue-deck経由になった。**
-# develop-merge-sweep・main-pr-in-progress・main-pr-mergedの3ジョブは、以前
+# main-pr-in-progress・main-pr-mergedの2ジョブは、以前
 # `gh issue list --label <進捗ラベル>`で対象を探していた。ラベルが無くなった
 # 以上、探し先はProjectしかなく、Projectへの読み書きはissue-deckへ一本化する設計
 # (docs/progress-status-architecture.md「中核の判断」)に従って`GET /api/progress`を使う。
 # **issue-deckへ届かない間、これらのジョブは対象を1件も見つけられず何もしない。**
-# ラベルという代替の判断材料はもう無い。取りこぼしはissue-deckの復旧後に
-# workflow_dispatch(develop-merge-sweep)またはrun再実行で回収する。
+# ラベルという代替の判断材料はもう無い。取りこぼしはissue-deckの復旧後にrun再実行で回収する。
 #
 # manual-step-labelジョブだけは進捗ではなく条件系ラベルを扱う(#1492)。タイトルが`[手作業]`で
 # 始まるIssueへ`71.manual-step`を付ける。このラベルは付いているかどうかでissue-deckの画面が
@@ -104,9 +104,15 @@ name: Issue Progress (reusable)
 # 出る)ため、付け忘れると**エージェントへ送る導線が出たままの、ただのIssue**になる。
 # 起票経路が3つある(issue-deckの作成ダイアログ・エージェントの`gh issue create`・GitHubから
 # 直接)以上、どの経路も通る最後の地点で担保できるのはIssueのopenイベントなので、ここに置く。
-# **ただしイベントだけでは取りこぼす(#2010)。** caller側の`on: issues: types:`に`opened`が
-# 無い時期に起票されたIssueは後からイベントが再発火せず永久に埋まらないため、同じジョブを
-# scheduleでも動かし、ラベルの無い手作業Issueを定期的に埋め直す(develop-merge-sweepと同じ安全網)。
+#
+# **`schedule`で動くジョブはもう無い(#2294)。** 以前はdevelop-merge-sweep(マージ済みなのに
+# `Develop PR`・`Implementation`へ取り残された進捗の回収)とmanual-step-labelの埋め直しを
+# 15分ごとのcronで動かしていた。Actionsの課金はジョブ単位で1分未満切り上げのため、
+# 実測20秒・5秒の2ジョブでもcallerが回るたびに2分が課金され、privateリポジトリの
+# 従量課金のほとんどがこれになっていた。どちらもサブPCのpollerが叩く
+# `POST /api/issues/progress-sweep`へ移してある(docs/github-billing.md・
+# src/lib/github/progress-sweep.ts)。**callerに`schedule:`が残っていても、
+# ここで受けるジョブが1つも無いのでskipされ、課金は発生しない。**
 
 
 on:
@@ -153,9 +159,9 @@ jobs:
           # #1503では`git push`(07:48:41)に対してrunの作成が07:59:29までずれ込み、その間に
           # develop-pr-opened(07:49)・develop-pr-merged(07:51)が先に走ってStatusを
           # `Develop`まで進めていた。後から動いた当ジョブが`implementation`を報告した結果、
-          # マージ済みのIssueが`Implementation`へ巻き戻った。**この巻き戻りは自力で戻らない**
-          # ——develop-merge-sweepが拾うのは`Develop PR`にいるIssueだけで、
-          # `Implementation`は対象外のため。
+          # マージ済みのIssueが`Implementation`へ巻き戻った。**当時はこの巻き戻りが自力で
+          # 戻らなかった**——拾い直す安全網が`Develop PR`にいるIssueしか見ていなかったため
+          # (#1861で`Implementation`も対象になり、いまはissue-deck側の巡回が拾う)。
           #
           # 判定は「このコミットを先端とする、同じブランチからdevelopまたはmainへのマージ済みPRが
           # あるか」。`.head.ref`まで見るのは、developの先端から切ったブランチを**コミット前に**
@@ -167,7 +173,7 @@ jobs:
           # **`main`も見るのはmain直行リポジトリのため(#1901)。** そちらのマージ済みPRは
           # `base.ref == 'main'`なので、developだけを見ていると常に「マージ済みでない」と判定し、
           # 遅れて走ったこのジョブがmain-direct-mergedの`Done`を`Implementation`へ巻き戻す。
-          # しかも`develop-merge-sweep`は`--base develop`固定で拾い直せない。develop運用の
+          # しかも拾い直す巡回は`base: develop`固定なので拾えない。develop運用の
           # リポジトリでは`issue-<番号>` -> `main`のPRを作らないため、条件を緩めても挙動は
           # 変わらない(`.head.ref`の一致も必ず要求している)。
           #
@@ -503,315 +509,6 @@ jobs:
             fi
           done <<< "$ISSUE_NUMBERS"
 
-  develop-merge-sweep:
-    # GitHub Auto-merge機能によるマージがdevelop-pr-mergedジョブを起動しなかった
-    # ケースの安全網。`Develop PR`・`Implementation`にいる全issueについて、対応ブランチ
-    # (issue-<番号>)からdevelopへのPRが既にマージ済みかを確認し、マージ済みなら`Develop`へ進める。
-    #
-    # **`Implementation`も対象にするのは、`Develop PR`へ一度も到達しないまま
-    # 取り残されるケースがあるため(#1861)。** develop-pr-openedの`POST /api/progress`が
-    # 一時的な5xxで失敗すると、PRを作ってもStatusは`Implementation`のまま動かない。
-    # そのまま人がPRをマージし、develop-pr-mergedも同じ時間帯のAPI不調で落ちると、
-    # 「`Develop PR`にいるissue」しか見ていなかった従来のこのジョブは対象にすら入れられず、
-    # 拾い直す経路がどこにも無かった(#1583で実測)。
-    #
-    # ただし`Implementation`には「developへマージしたあと追加対応でブランチへpushした」
-    # 正規の状態(reusable-issue-dispatch.ymlのmode=additional)も含まれる。マージ済みPRが
-    # あるだけで進めると実装中のissueを勝手に動かすため、**マージ済みPRの先端と現在の
-    # ブランチの先端が一致するか**を必ず確かめる(#1513と同じ考え方)。マージ後に
-    # ブランチが削除されている場合は追加のpushが無い証拠として扱う。
-    #
-    # **先端が一致しないときに黙って見送らない(#1999)。** 先端不一致には「追加対応で
-    # 実装中」だけでなく「PRのマージとほぼ同時にpushされ、どのPRにも載らないまま
-    # developへ入らないコミット」も含まれる。従来はどちらも同じ1行をログへ書いて
-    # 見送るだけだったため、後者は15分ごとに見送られ続けるだけで誰にも伝わらなかった
-    # (guchi-apps/subscription-lists#99で実測。本番の画面が404のまま残った)。
-    # developへ入っていないコミットの有無を比較で確かめ、猶予時間を過ぎても
-    # develop向けPRが開かれないものへ`00.check-user`+`01.check-blocked`を付けて通知する。
-    #
-    # 対象の探し方がPhase 5で変わった。以前は`gh issue list --label <進捗ラベル>`で
-    # GitHubのラベルから探していたが、ラベルを廃止したためissue-deckへ問い合わせる。
-    # **issue-deckへ届かなければ対象は0件になり、このrunは何もしない。**
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    # ブランチとdevelopの比較(compare API)を読むためcontentsが要る。ワークフロー先頭の
-    # permissions:には無いので、develop-pr-openedと同じ形でジョブ側に明示する。
-    permissions:
-      issues: write
-      pull-requests: write
-      contents: read
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: マージ済みのdevelop向けPRを持つissueをDevelopへ進める
-        id: transition
-        env:
-          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
-          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
-          REPO: ${{ github.repository }}
-        run: |
-          missing=""
-          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
-          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
-          if [ -n "$missing" ]; then
-            echo "::warning::$missing が未設定のため、対象issueを特定できません（進捗の問い合わせにissue-deckが必要です）"
-            exit 0
-          fi
-          body_file="${RUNNER_TEMP:-/tmp}/progress-develop-pr.json"
-          # 一時的な5xx・接続失敗だけを再試行する(#1861)。4xxは設定・実装の誤りで、
-          # 待っても変わらないため即座に諦める。
-          code=""
-          for attempt in 1 2 3 4; do
-            if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
-            code="$(curl -sS -m 20 -o "$body_file" -w '%{http_code}' \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/progress?repository=$REPO&status=develop-pr,implementation")" || code=000
-            if [ "$code" = "200" ]; then break; fi
-            case "$code" in
-              000|5??) ;;
-              *) break ;;
-            esac
-            if [ "$attempt" != 4 ]; then
-              echo "issue-deckへの問い合わせに失敗しました（HTTP $code）。再試行します"
-            fi
-          done
-          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。進捗ラベルを廃止した
-          # 後はラベルという代替の判断材料が無く、両者を同じ文言にすると「リリースしたのに
-          # issueが1件もcloseされない」が正常系と見分けられなくなる。
-          if [ "$code" != "200" ]; then
-            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $code）。対象issueを特定できないため何もしません"
-            exit 0
-          fi
-          if [ "$(jq -r '.available // false' "$body_file" 2>/dev/null || echo false)" != "true" ]; then
-            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$body_file" 2>/dev/null || echo unknown)）。対象issueを特定できないため何もしません"
-            exit 0
-          fi
-          numbers="$(jq -r '.issues[]' "$body_file" 2>/dev/null || true)"
-          if [ -z "$numbers" ]; then
-            echo "Develop PR・Implementation にいるopenなissueはありません（対象なしのため何もしません）"
-            exit 0
-          fi
-
-          # `00.check-user`と理由ラベル`01.check-*`(#1490。旧名`00.qa-answered`を含む)を
-          # まとめて外す。展開先リポジトリにラベル定義自体が無いと gh issue edit が exit 1 になり
-          # ジョブごと落ちる(#975)ため、実在するものだけを渡す。
-          #
-          # ラベル一覧の取得もGitHub APIの一時的な5xxで落ちる(#1583でHTTP 503を実測)。
-          # 取れなければラベルの除去だけを諦め、進捗の報告は続ける(#1861)。
-          DEFINED_LABELS=""
-          for attempt in 1 2 3; do
-            if [ "$attempt" != 1 ]; then sleep 5; fi
-            if DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200 2>/dev/null)" \
-              && [ -n "$DEFINED_LABELS" ]; then
-              break
-            fi
-            DEFINED_LABELS=""
-          done
-          if [ -z "$DEFINED_LABELS" ]; then
-            echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告は続けます）"
-          fi
-          REMOVE_ARGS=()
-          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
-              REMOVE_ARGS+=(--remove-label "$name")
-            fi
-          done
-          # developへ入らないまま取り残されたコミットを見つけたときに付けるラベル(#1999)。
-          # ユーザーがやることは「計画の承認」ではなく「続け方の指示」なので理由は
-          # `01.check-blocked`。理由は常に1枚なので、定義済みの他の理由ラベルは同じ
-          # 呼び出しで外す(develop-pr-openedと同じ作法)。
-          STRANDED_REASON_LABEL="01.check-blocked"
-          ADD_ARGS=()
-          if grep -qx "00.check-user" <<<"$DEFINED_LABELS"; then
-            ADD_ARGS+=(--add-label "00.check-user")
-            if grep -qx "$STRANDED_REASON_LABEL" <<<"$DEFINED_LABELS"; then
-              ADD_ARGS+=(--add-label "$STRANDED_REASON_LABEL")
-            fi
-            for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-              if [ "$name" != "$STRANDED_REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
-                ADD_ARGS+=(--remove-label "$name")
-              fi
-            done
-          fi
-          transitioned=""
-          for n in $numbers; do
-            # 該当なしなら`[]`、取得に失敗したときだけ空になる。失敗を「マージ済みPRが無い」と
-            # 取り違えないよう区別し、失敗は次回のスケジュール実行に回す(#1861)
-            merged_json="$(gh pr list --state merged --base develop --head "issue-$n" \
-              --json url,headRefOid,mergedAt --limit 20 2>/dev/null)" || merged_json=""
-            if [ -z "$merged_json" ]; then
-              echo "::warning::issue #$n: マージ済みPRを取得できませんでした。次回のスケジュール実行で再判定します"
-              continue
-            fi
-            pr_url="$(jq -r 'sort_by(.mergedAt) | last | .url // empty' <<<"$merged_json" 2>/dev/null || true)"
-            pr_head="$(jq -r 'sort_by(.mergedAt) | last | .headRefOid // empty' <<<"$merged_json" 2>/dev/null || true)"
-            if [ -z "$pr_url" ]; then
-              continue
-            fi
-
-            # マージ後に追加でpushされていないかを確かめる(#1861)。`Implementation`には
-            # マージ後の追加対応(mode=additional)も含まれるため、マージ済みPRがあるだけで
-            # 進めると実装中のissueを勝手に`Develop`へ動かしてしまう。
-            # ブランチが消えている(HTTP 404)なら、そのissueへの追加のpushは無い。
-            ref_json="$(gh api "repos/$GH_REPO/git/ref/heads/issue-$n" 2>/dev/null)" || true
-            branch_head="$(jq -r '.object.sha // empty' <<<"$ref_json" 2>/dev/null || true)"
-            ref_status="$(jq -r '.status // empty' <<<"$ref_json" 2>/dev/null || true)"
-            if [ -n "$branch_head" ] && [ "$branch_head" != "$pr_head" ]; then
-              # 先端が一致しない理由は2つあり、従来はまとめて見送っていた(#1999)。
-              # (a)マージ後の追加対応でpushした実装中(mode=additional)
-              # (b)PRのマージとほぼ同時にpushされ、どのPRにも載らないまま取り残された
-              #    コミット。**このジョブが15分ごとに同じ行をログへ書くだけで、
-              #    developへ入らないことが誰にも伝わらなかった**(guchi-apps/subscription-lists#99。
-              #    2秒差のpushでdevelopに画面のルートが入らず、本番が404のまま残った)。
-              #
-              # 見分けにはdevelopとの比較を使う。developへ入っていないコミットが1件も
-              # 無ければ、先端が違っても取り残しは無いので、そのまま`Develop`へ進めてよい
-              # (人がcherry-pick等で取り残しを解消した後、ここで止まり続けないための経路でもある)。
-              compare_json="$(gh api "repos/$GH_REPO/compare/develop...issue-$n" 2>/dev/null)" || compare_json=""
-              ahead="$(jq -r '.ahead_by // empty' <<<"$compare_json" 2>/dev/null || true)"
-              if [ -z "$ahead" ]; then
-                echo "::warning::issue #$n: ブランチ issue-$n とdevelopの差分を取得できませんでした。次回のスケジュール実行で再判定します"
-                continue
-              fi
-              # **コミット数だけでは取り残しと言えない(#2289)。** developへ入っていない
-              # コミットはあるが、developへ持ち込む変更は1件も無いブランチがある。
-              # コンフリクト解消のワークフロー(claude-conflict-resolve)とローカル
-              # セッションが同じコンフリクトを別々に解消し、PRには片方だけが載って
-              # マージされた場合がこれで、残るのは中身の同じマージコミットだけになる
-              # (#2249。ahead_by=2・変更ファイル0件で`00.check-user`が付いた)。
-              # compareは三点比較なので、filesが空＝マージしても何も入らない。
-              # **`files`が読めなかったときは従来どおり取り残しとして扱う**(応答の形が
-              # 変わって「変更なし」と読み違えると、本物の取り残しを黙って見送ることに
-              # なる。#1999で直したのはまさにその見送りだった)。
-              changed_files="$(jq -r 'if has("files") then ([.files[]] | length) else "" end' <<<"$compare_json" 2>/dev/null || true)"
-              if [ "$ahead" != "0" ] && [ "$changed_files" != "0" ]; then
-                # ここから先は「取り残しかどうか」の判定。実装中(a)と区別が付かないため、
-                # (1)developへのPRが開いていない、(2)最後のコミットから猶予時間が過ぎている、
-                # の両方を満たすものだけを取り残しとして扱う。回数ではなく時間で見るのは、
-                # ジョブが実行間の状態を持てないため(#1999)。
-                open_json="$(gh pr list --state open --base develop --head "issue-$n" \
-                  --json url --limit 5 2>/dev/null)" || open_json=""
-                if [ -z "$open_json" ]; then
-                  echo "::warning::issue #$n: 開いているdevelop向けPRを取得できませんでした。取り残しの判定は次回のスケジュール実行に回します"
-                  continue
-                fi
-                if [ "$(jq -r 'length' <<<"$open_json" 2>/dev/null || echo 0)" != "0" ]; then
-                  echo "issue #$n: developへ未マージのコミットがありますが、develop向けPRが開いているため進めません（取り残しではありません）"
-                  continue
-                fi
-                grace_minutes="${STRANDED_GRACE_MINUTES:-120}"
-                last_commit_at="$(jq -r '.commits | last | .commit.committer.date // empty' <<<"$compare_json" 2>/dev/null || true)"
-                last_epoch=""
-                if [ -n "$last_commit_at" ]; then
-                  last_epoch="$(date -u -d "$last_commit_at" +%s 2>/dev/null || true)"
-                fi
-                if [ -z "$last_epoch" ]; then
-                  echo "::warning::issue #$n: 未マージコミットの日時を判定できませんでした。次回のスケジュール実行で再判定します"
-                  continue
-                fi
-                age_minutes=$(( ( $(date -u +%s) - last_epoch ) / 60 ))
-                if [ "$age_minutes" -lt "$grace_minutes" ]; then
-                  echo "issue #$n: developへ未マージのコミットが${ahead}件ありますが、最後のコミットから${age_minutes}分のため様子を見ます（${grace_minutes}分を超えたら通知します）"
-                  continue
-                fi
-                # 同じ先端について通知を繰り返さない。15分おきに走るため、冪等でないと
-                # 同じ内容が一日100件近く積まれる。**取得に失敗したときは通知しない**
-                # (二重投稿より、次回の実行へ回す方が軽い)。
-                stranded_marker="<!-- issue-deck-stranded:issue-$n@$branch_head -->"
-                stranded_notified="$(gh issue view "$n" --json comments 2>/dev/null \
-                  | jq --arg m "$stranded_marker" '[.comments[].body | select(contains($m))] | length' 2>/dev/null)" || stranded_notified=""
-                if [ -z "$stranded_notified" ]; then
-                  echo "::warning::issue #$n: 既存コメントを取得できませんでした。取り残しの通知は次回のスケジュール実行に回します"
-                  continue
-                fi
-                if [ "$stranded_notified" != "0" ]; then
-                  echo "issue #$n: 取り残し（$branch_head）は通知済みのため、コメントは投稿しません"
-                  continue
-                fi
-                if [ "${#ADD_ARGS[@]}" -gt 0 ]; then
-                  gh issue edit "$n" "${ADD_ARGS[@]}" \
-                    || echo "::warning::issue #$n: 00.check-user の付与に失敗しました（コメントの投稿は続けます）"
-                fi
-                gh issue comment "$n" --body "⚠️ developへ入っていないコミットが \`issue-$n\` に残っています。"$'\n\n'"- ブランチ \`issue-$n\` の先端: \`$branch_head\`"$'\n'"- 直近のマージ済みPR: $pr_url （head \`$pr_head\`）"$'\n'"- developへ入っていないコミット: ${ahead}件（最後のコミットから約${age_minutes}分）"$'\n\n'"PRのマージとほぼ同時にpushされたコミットは、そのPRに含まれずdevelopへも入りません。このままでは進捗も\`Develop\`へ進みません。次のどちらかで解消してください。"$'\n\n'"1. コミットが必要なら、\`issue-$n\` から \`develop\` への新しいPull Requestを作成してマージする"$'\n'"2. コミットが不要なら、ブランチ \`issue-$n\` を削除する"$'\n\n'"実行ログ: $RUN_URL"$'\n\n'"$stranded_marker"$'\n<!-- issue-deck-source:issue-labels -->' \
-                  || echo "::warning::issue #$n: 取り残しのコメント投稿に失敗しました"
-                echo "issue #$n: developへ入っていないコミット${ahead}件を取り残しとして通知しました"
-                continue
-              fi
-              if [ "$ahead" = "0" ]; then
-                echo "issue #$n: ブランチ issue-$n の先端はマージ済みPR（$pr_url）と違いますが、developへ入っていないコミットは無いため進めます"
-              else
-                echo "issue #$n: ブランチ issue-$n にdevelopへ入っていないコミットが${ahead}件ありますが、developへ持ち込む変更が無いため進めます（コンフリクト解消のマージコミットなど）"
-              fi
-            elif [ -z "$branch_head" ] && [ "$ref_status" != "404" ]; then
-              echo "::warning::issue #$n: ブランチ issue-$n の状態を確認できませんでした。次回のスケジュール実行で再判定します"
-              continue
-            fi
-
-            if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${REMOVE_ARGS[@]}" \
-                || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告は続けます）"
-            fi
-            # 同じPRのマージを既に通知済みなら重ねて通知しない。`Implementation`を対象に
-            # 加えたことで、develop-pr-mergedが通知だけ済ませた後にStatusが巻き戻った
-            # ケース(#1511)を拾うと二重に通知しうるため(#1861)
-            notified="$(gh issue view "$n" --json comments 2>/dev/null \
-              | jq --arg url "$pr_url" '[.comments[].body | select(contains($url) and contains("developへのマージが完了しました"))] | length' 2>/dev/null)" || notified=""
-            if [ "$notified" = "0" ] || [ -z "$notified" ]; then
-              gh issue comment "$n" --body "✅ developへのマージが完了しました: $pr_url"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:issue-labels -->' \
-                || echo "::warning::issue #$n: マージ完了のコメント投稿に失敗しました（進捗の報告は続けます）"
-            else
-              echo "issue #$n: $pr_url のマージは通知済みのため、コメントは投稿しません"
-            fi
-            transitioned="${transitioned}${n}"$'\n'
-          done
-          if [ -n "$transitioned" ]; then
-            {
-              echo "issue_numbers<<TRANSITIONED_EOF"
-              printf '%s' "$transitioned"
-              echo "TRANSITIONED_EOF"
-            } >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Project Status を報告する
-        if: steps.transition.outputs.issue_numbers != ''
-        env:
-          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
-          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
-          REPO: ${{ github.repository }}
-          ISSUE_NUMBERS: ${{ steps.transition.outputs.issue_numbers }}
-          STATUS: develop
-        run: |
-          while read -r n; do
-            [ -n "$n" ] || continue
-            # 一時的な5xx・接続失敗だけを再試行する(#1861)。#1583では17:06〜17:13の
-            # API不調に単発のcurlが当たり、`Develop PR`への報告が失われた。4xxは設定・
-            # 実装の誤りで待っても変わらないため、再試行せず即座に諦める。
-            code=""
-            for attempt in 1 2 3 4; do
-              if [ "$attempt" != 1 ]; then sleep "$(( (attempt - 1) * 10 ))"; fi
-              code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-                -X POST "$APP_BASE_URL/api/progress" \
-                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-                -H "Content-Type: application/json" \
-                -d "{\"repository\":\"$REPO\",\"issue\":$n,\"status\":\"$STATUS\"}")" || code=000
-              if [ "$code" = "200" ]; then break; fi
-              case "$code" in
-                000|5??) ;;
-                *) break ;;
-              esac
-              if [ "$attempt" != 4 ]; then
-                echo "Project Statusの報告に失敗しました（issue #$n / HTTP $code）。再試行します"
-              fi
-            done
-            if [ "$code" = "200" ]; then
-              echo "issue #$n を $STATUS として報告しました"
-            else
-              echo "::warning::Project Statusの報告に失敗しました（issue #$n / status=$STATUS / HTTP $code）"
-            fi
-          done <<< "$ISSUE_NUMBERS"
-
   main-pr-in-progress:
     # develop -> main のPRが開いている間、その時点で`Develop`にいる全issueを`Release`へ
     # 一括で進める。synchronizeも対象にすることで、PRオープン後にheadへ追加された分も
@@ -823,7 +520,7 @@ jobs:
     # （それがmainへ出る内容と一致する）。`develop`をheadに持つのは#2117以前のPRか、
     # 共有ワークフローの参照タグが古いリポジトリのPR。
     #
-    # 対象の探し方はdevelop-merge-sweepと同じ理由でissue-deckへの問い合わせになっている。
+    # 対象の探し方は、進捗ラベルを廃止した#991 Phase 5以降issue-deckへの問い合わせになっている。
     if: |
       github.event_name == 'pull_request' &&
       (github.event.action == 'opened' || github.event.action == 'synchronize') &&
@@ -1392,35 +1089,28 @@ jobs:
     # イベントが再発火せず**永久に埋まらない**。guchi-apps/signaly#148は`manual-step-label`
     # ジョブがまだ無い`workflows/v21`を指していた時期に起票され、ラベルが1つも付かないまま
     # 2日以上openのままだった(「ユーザーの作業待ち」ビューにも通知にも一度も出ていない)。
-    # そのため`schedule`・`workflow_dispatch`でも動かし、**タイトルが`[手作業]`で始まるopenな
-    # Issueのうちラベルの無いものを埋め直す**。develop-merge-sweepと同じ「安全網」の位置づけ。
     #
-    # scheduleでの対象の探し方は`gh issue list --search`。GitHubの検索は日本語もタイトルの
-    # `[手作業]`で引けるが(実測)、`手作業`を含むだけの別Issueも混ざるため、**プレフィックスの
-    # 一致は取得後に自分で確かめる**(検索を絞り込みにだけ使い、判定はイベント経路と同じ規則で行う)。
-    #
-    # **scheduleを持つcallerでは、このジョブぶんのActions実行が1回増える**(課金はジョブ単位で
-    # 1分に切り上げ)。対象0件でも起動はするため、cronを詰めているリポジトリほど効く。
-    # それでも別ジョブのままにしてあるのは、develop-merge-sweepが進捗報告APIへ依存するのに対し
-    # こちらはGitHubだけで完結し、片方が落ちてももう片方が動くようにするため。
+    # **その埋め直しはissue-deck側の巡回へ移した(#2294)。** 以前はこのジョブを`schedule`でも
+    # 動かしていたが、Actionsの課金はジョブ単位で1分未満切り上げのため、対象0件でもcallerの
+    # cronが回るたびに1分ぶんが課金される。privateリポジトリの従量課金のほとんどが
+    # このジョブと`develop-merge-sweep`だったので、両方ともサブPCのpollerが叩く
+    # `POST /api/issues/progress-sweep`へ移し、**ここはイベント経路だけを担う**
+    # (docs/github-billing.md・src/lib/github/progress-sweep.ts)。
     #
     # ラベル定義が無いリポジトリでは`gh issue edit --add-label`がexit 1で落ちる(#975)ため、
     # cleanup-on-closeと同じく`gh label list`と突き合わせてから呼ぶ。ラベルが無いこと自体は
     # そのリポジトリへラベル体系を配れていないという別の問題なので、警告に留めて落とさない。
     # **突き合わせるのは対象が1件でも見つかってから**にしてある。先に確かめると、ラベルを配れて
-    # いないリポジトリでイベントのたび・15分ごとに無関係な警告が出続けるため。
+    # いないリポジトリでイベントのたびに無関係な警告が出続けるため。
     if: |
-      (github.event_name == 'issues' &&
-        (github.event.action == 'opened' || github.event.action == 'edited')) ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'issues' &&
+      (github.event.action == 'opened' || github.event.action == 'edited')
     runs-on: ubuntu-latest
     permissions:
       issues: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      EVENT_NAME: ${{ github.event_name }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       # タイトルはユーザー入力なので、run:本文へ展開せずenv経由でのみ参照する(script injection対策)
       ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -1429,52 +1119,31 @@ jobs:
         run: |
           set -euo pipefail
           prefix='[手作業]'
-          targets=""
-          if [ "$EVENT_NAME" = "issues" ]; then
-            # scheduleではissue関連のenvが空になるため、set -u下でも触れるように既定値を置く
-            title="${ISSUE_TITLE:-}"
-            number="${ISSUE_NUMBER:-}"
-            if [ "${title#"$prefix"}" = "$title" ]; then
-              echo "タイトルが $prefix で始まらないため何もしません: $title"
-              exit 0
-            fi
-            # grep -q は一致した時点で終了するため、pipefail下ではgh側がSIGPIPE(141)で落ちて
-            # パイプライン全体の終了ステータスが1になりうる。判定を取り違えないよう、
-            # 出力を変数へ受けてから突き合わせる
-            attached="$(gh issue view "$number" --json labels --jq '.labels[].name')"
-            if grep -qx "71.manual-step" <<< "$attached"; then
-              echo "issue #$number には既に 71.manual-step が付与されています"
-              exit 0
-            fi
-            targets="$number"
-          else
-            # 検索は絞り込みだけに使い、プレフィックスの一致はjq側で確かめる(`手作業`を
-            # 含むだけの別Issueが混ざるため)。検索インデックスの遅れで既に付与済みのものが
-            # 返ってきても、--add-labelは冪等なので害は無い
-            targets="$(gh issue list --state open --limit 200 \
-              --search 'in:title "[手作業]" -label:"71.manual-step"' \
-              --json number,title \
-              --jq '.[] | select(.title | startswith("[手作業]")) | .number')"
-            if [ -z "$targets" ]; then
-              echo "ラベルの付いていない手作業Issueはありません"
-              exit 0
-            fi
-            echo "ラベルの付いていない手作業Issue: $(tr '\n' ' ' <<< "$targets")"
+          title="${ISSUE_TITLE:-}"
+          number="${ISSUE_NUMBER:-}"
+          if [ "${title#"$prefix"}" = "$title" ]; then
+            echo "タイトルが $prefix で始まらないため何もしません: $title"
+            exit 0
+          fi
+          # grep -q は一致した時点で終了するため、pipefail下ではgh側がSIGPIPE(141)で落ちて
+          # パイプライン全体の終了ステータスが1になりうる。判定を取り違えないよう、
+          # 出力を変数へ受けてから突き合わせる
+          attached="$(gh issue view "$number" --json labels --jq '.labels[].name')"
+          if grep -qx "71.manual-step" <<< "$attached"; then
+            echo "issue #$number には既に 71.manual-step が付与されています"
+            exit 0
           fi
           defined="$(gh label list --json name --jq '.[].name' --limit 200)"
           if ! grep -qx "71.manual-step" <<< "$defined"; then
             echo "::warning::ラベル '71.manual-step' がリポジトリに存在しないため付与をスキップします"
             exit 0
           fi
-          while IFS= read -r n; do
-            [ -n "$n" ] || continue
-            if gh issue edit "$n" --add-label "71.manual-step"; then
-              echo "issue #$n へ 71.manual-step を付与しました"
-            else
-              # sweepでは1件の失敗で残りを止めない(次のrunで拾い直せるが、気付けるよう警告は出す)
-              echo "::warning::issue #$n への 71.manual-step の付与に失敗しました"
-            fi
-          done <<< "$targets"
+          if gh issue edit "$number" --add-label "71.manual-step"; then
+            echo "issue #$number へ 71.manual-step を付与しました"
+          else
+            # 付与に失敗しても落とさない(issue-deck側の巡回が埋め直すが、気付けるよう警告は出す)
+            echo "::warning::issue #$number への 71.manual-step の付与に失敗しました"
+          fi
 
   manual-step-body-check:
     # 手作業Issueの本文が、issue-deckの手作業アシスタントが読む書式に合っているかを検査し、

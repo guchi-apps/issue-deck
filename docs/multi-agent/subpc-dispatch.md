@@ -1236,6 +1236,19 @@ GitHub APIをどれだけ使うかであり、それはissue-deckの側の関心
 外向きの副作用があるため）。設計は
 [auto-repair.md](auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
 
+**進捗の取り残しの巡回回収（#2294）も同じ1巡に相乗りしている。** `POST /api/issues/progress-sweep`を
+毎巡そのまま呼び、間隔（`PROGRESS_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）も、どのIssueを
+`Develop`へ進めるか・取り残しとして人へ渡すかの判定もissue-deck側が持つ。ラベルの無い手作業Issueへ
+`71.manual-step`を付け直すのも同じ巡回。ログに出すのは進めた・通知した・ラベルを付けたときだけで、
+`--dry-run`では呼ばない（進捗の書き換えとコメント投稿という外向きの副作用があるため）。
+
+**この3本目だけは、新しい安全網ではなくGitHub Actionsから移設したもの。**
+`reusable-issue-labels.yml`の`develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとの
+cronで動いており、**Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも
+1回の実行で2分が課金されていた**（privateリポジトリのActions従量課金のほとんどがこれだった）。
+設計は[progress-status-architecture.md](../progress-status-architecture.md)「取り残しの回収は
+issue-deck側の巡回が担う」と[github-billing.md](../github-billing.md)。
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
@@ -2077,6 +2090,8 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 | `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |
+| `POST /api/repositories/deploy-failure-sweep` | `DISPATCH_SECRET` | 本番デプロイ失敗の巡回検知を促す（#2236）。巡回するかどうかも、起票するかどうかもissue-deck側が決める |
+| `POST /api/issues/progress-sweep` | `DISPATCH_SECRET` | 進捗の取り残しの巡回回収を促す（#2294）。巡回するかどうかも、どのIssueをどう扱うかもissue-deck側が決める |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 

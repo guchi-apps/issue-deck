@@ -148,11 +148,13 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 機能による実際のマージ（必須ステータスチェック通過後にGitHub側が非同期に実行）では発火しないことが
 ある（Issue #112。GITHUB_TOKEN起点のイベントは他のワークフローを起動しないというGitHub仕様の影響を
 受けるため）。`auto-merge`ジョブ自体はWORKFLOW_PATでAuto-mergeを有効化するよう対応済みだが、
-根本解消したか確証が持てないため、`develop-merge-sweep`ジョブが`schedule`（15分おき）・
-`workflow_dispatch`をトリガーに、`Develop PR`・`Implementation`にいる全issueを走査し、対応ブランチ
-（`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`Develop`へ進める安全網を
-別途設けている。走査対象はissue-deckの進捗問い合わせAPIから引くため、**issue-deckへ疎通
-できない間このジョブは何も見つけられない**（ラベルという代替の判断材料はもう無い）。
+根本解消したか確証が持てないため、`Develop PR`・`Implementation`にいる全issueを定期的に走査し、
+対応ブランチ（`issue-<番号>`）からのdevelop向けPRが既にマージ済みであれば`Develop`へ進める
+安全網を別途設けている。**この巡回はissue-deck側にある**（サブPCのpollerが1巡ごとに叩く
+`POST /api/issues/progress-sweep`。#2294で`reusable-issue-labels.yml`の`develop-merge-sweep`
+ジョブから移した。理由は[github-billing.md](../github-billing.md)「`schedule`は「対象0件でも」
+課金される」）。**issue-deckが動いていない間、この安全網も働かない**（ラベルという代替の
+判断材料はもう無い）。
 
 `Implementation`も走査するのは、`develop-pr-opened`の進捗報告が一時的なAPI不調で失敗すると
 `Develop PR`へ一度も到達せず、`Develop PR`だけを見ていた頃はどの安全網でも拾えなかったため
@@ -163,9 +165,9 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 #### 取り残されたコミットは見送らず人へ渡す（#1999）
 
 先端が一致しないときに黙って見送ると、**PRのマージとほぼ同時にpushされたコミット**が
-どのPRにも載らないままdevelopへ入らず、15分おきに見送られ続けるだけで誰にも伝わらない
+どのPRにも載らないままdevelopへ入らず、巡回のたびに見送られ続けるだけで誰にも伝わらない
 （`guchi-apps/subscription-lists#99`で実測。本番の画面が404のまま残った）。そこで
-`develop-merge-sweep`は見送る前に`compare/develop...issue-<番号>`を引き、
+巡回は見送る前に`compare/develop...issue-<番号>`を引き、
 
 - developへ入っていないコミットが**無ければ**、先端が違ってもそのまま`Develop`へ進める
 - **あって**、develop向けPRが開いておらず、最後のコミットから猶予時間（既定120分）が過ぎて
@@ -198,7 +200,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
 | APIエラーで中断し、自動再開を諦めた | 該当なし（同上） | pollerが`POST /api/dispatch/sessions/interrupted`へ引き上げ、`escalateInterruptedSession`が`00.check-user`＋`01.check-blocked`を付与（#1971・#2280。**turnが打ち切られて`Stop`フックが飛ばない状態**。ユーザーがやるのは回答ではなく続け方の指示なので理由は`blocked`） |
-| PRマージとほぼ同時のpushでdevelopへ入らないコミットが取り残された | `reusable-issue-labels.yml`の`develop-merge-sweep`が`00.check-user`＋`01.check-blocked`を付与（#1999。後述「取り残されたコミットは見送らず人へ渡す」） | 同じ（15分おきのcronでの検知なので、コミットの起点を問わない） |
+| PRマージとほぼ同時のpushでdevelopへ入らないコミットが取り残された | issue-deck側の巡回（`POST /api/issues/progress-sweep`）が`00.check-user`＋`01.check-blocked`を付与（#1999・#2294。後述「取り残されたコミットは見送らず人へ渡す」） | 同じ（定期的な巡回での検知なので、コミットの起点を問わない） |
 
 ### マージを求める`00.check-user`は、実装側から付けない（#1709）
 
@@ -260,7 +262,7 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | --- | --- |
 | ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
 | ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
-| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`が進捗の遷移とあわせて外す（#266・#1901） |
+| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`と、issue-deck側の巡回（`POST /api/issues/progress-sweep`）が進捗の遷移とあわせて外す（#266・#1901・#2294） |
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
 | Issueがcloseされた | issue-deckの`upsertIssueRow`（`clearLabelsOnIssueClose`。#2178）と`reusable-issue-labels.yml`の`cleanup-on-close`（#464）の両方。後述「closeで外れるラベルはissue-deck側でも外す」 |
@@ -401,7 +403,8 @@ Issue詳細の⋯メニュー →「クローズする」▸ のサブメニュ�
 - **理由は常に1枚。** 付け替えのときは他の理由ラベルを外す。判定は
   `src/lib/github/approval-labels.ts`に寄せ、画面・API・ローカル経路はそこだけを通す。
 - **外すのは`00.check-user`を外すのと同じ場所**（`labelsAfterApproval`／`labelsAfterRejection`、
-  `develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`・`cleanup-on-close`）。
+  `develop-pr-merged`・`main-pr-merged`・`main-direct-merged`・`cleanup-on-close`、
+  issue-deck側の巡回`progress-sweep-run.ts`）。
 - リネームは`gh label edit "00.qa-answered" --name "01.check-answered"`（付いているIssueから
   外れずにその場で名前が変わる）。移行期間は**読む側が新旧どちらの名前も受け付ける**。
   書く側は「`01.check-answered`があればそれ、無ければ`00.qa-answered`」の順に解決する
@@ -1132,19 +1135,19 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 2日以上openだった**。「ユーザーの作業待ち」ビューにも通知にも一度も出ておらず、
 重複や完了漏れを見分ける以前に管理対象へ入っていなかった。
 
-そこで`manual-step-label`ジョブは`schedule`・`workflow_dispatch`でも動く。
+そこで**埋め直しをissue-deck側の巡回が行う**（`POST /api/issues/progress-sweep`。#2294で
+`manual-step-label`ジョブの`schedule`分をここへ移した。ジョブ側はIssueのopen・editイベント
+専用になっている）。
 
 - 対象は**タイトルが`[手作業]`で始まるopenなIssueのうち`71.manual-step`が無いもの**。
-  `gh issue list --search 'in:title "[手作業]" -label:"71.manual-step"'`で引く
-- **検索は絞り込みにしか使わない。** GitHubの検索は`手作業`を含むだけの別Issueも返すため、
-  プレフィックスの一致は取得後にもう一度確かめる（判定規則はイベント経路と同じ）
-- **付けるだけで外さないのも、ラベル未定義のリポジトリで警告に留めるのも変わらない**
-- **`schedule`を持つcallerでは、このジョブぶんのActions実行が1回増える**（課金はジョブ単位で
-  1分に切り上げ。対象0件でも起動はする）。`develop-merge-sweep`と別ジョブのままにしてあるのは、
-  あちらが進捗報告APIへ依存するのに対しこちらはGitHubだけで完結し、片方が落ちても
-  もう片方が動くようにするため
-- **`schedule`を持たないcallerには届かない**（`guchi-apps/question`。手作業Issueも
-  `71.manual-step`の定義も無いリポジトリなので、現状は問題にならない）
+  **探し先はissue-deckのDB**で、GitHubの検索APIは引かない（`手作業`を含むだけの別Issueが
+  混ざらず、対象が無い平常時はGitHubへのリクエストが1回も出ない）
+- **付けるだけで外さないのも、ラベル未定義のリポジトリでは付けないのも変わらない**
+  （付与エンドポイントは存在しないラベル名をその場で作ってしまうため、定義を先に確かめる）
+- **どのリポジトリにも届く。** callerの`schedule`の有無に依存しなくなった（以前は
+  `guchi-apps/question`のようにcronを持たないcallerへ届かなかった）
+- **Actions実行は増えない。** 移した理由がまさにそれで、対象0件でもcronのたびに1分ぶんが
+  課金されていた（[github-billing.md](../github-billing.md)「`schedule`は「対象0件でも」課金される」）
 
 ### タイトル
 
@@ -1693,9 +1696,9 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
   - **レビューはCI結果を判定材料にしない。** 並行実行では`gh pr checks`が実行中を返すのが普通なので、`.github/prompts/review-develop.md`には「実行中ならその旨だけ書き、完了を待たない」と書いてある。CI失敗の修正は`claude-ci-fix.yml`の担当
   - **画面のピルは判定側を優先して出す。** `wait-for-ci`と`claude-review`が同時に走るため、実行順で選ぶとレビュー中でも「CIの完了待ち」と出てしまう。CIの進み具合は隣のCI状態のピルが既に出しているので、`JUDGEMENT_STEP_ORDER`（`src/lib/github/check-rollup.ts`）は`risk-check` → `claude-review` → `wait-for-ci` → `auto-merge`の順にしてある
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは上記の反映を済ませたうえで、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
-- **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`の各ジョブは、状態遷移とあわせて`00.check-user`も除去する（#266・#1901）。
+- **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`の各ジョブとissue-deck側の巡回は、状態遷移とあわせて`00.check-user`も除去する（#266・#1901・#2294）。
 - **判定経路を持たないリポジトリではPR作成時に付ける（#1470）**: 上の判定は**すべて`claude-review-develop.yml`（caller）を持つリポジトリでしか走らない**。callerが無いリポジトリでは`risk-check`も`auto-merge`も一度も起動せず、自動マージされないのに`00.check-user`も付かないため、develop向けPRが誰にも気付かれないまま開いたまま残る。実測（2026-08-15）では、callerを持つのは`issue-deck`・`dayspan`・`shopping-list`の3つだけで、**他12リポジトリに判定されないままのdevelop向けPRが13本**あった（配布状況は[docs/supported-repositories.md](../supported-repositories.md)「`claude-review-develop.yml`の配布状況」）。そのため`reusable-issue-labels.yml`の`develop-pr-opened`ジョブ（展開済みの全リポジトリが呼ぶ唯一の共通経路）が、PR作成時に`.github/workflows/claude-review-develop.yml`の有無を`gh api`で確認し、**無ければその場で`00.check-user`を付ける**。理由はPR作成通知コメントの末尾に1行足す形で伝える（コメントを増やさないため）。
   - **経路を持つリポジトリでは何もしない。** ここで付けると`auto-merge`ジョブが「`00.check-user`が付いている」と読んで自動マージを常にスキップしてしまう。将来callerを配ったリポジトリでは、この保険は自動的に発火しなくなる
   - **一覧の取得に失敗したときは「経路なし」に倒す（fail-closed）。** 3回リトライしても取れなければ警告を出したうえでラベルを付ける。誤って付いた`00.check-user`は画面から外せるが、付かなかったPRは気付かれずに残り続けるため
-  - 外れるタイミングは他の経路と同じで、`develop-pr-merged`・`develop-merge-sweep`・`main-pr-merged`・`main-direct-merged`がマージ時に、`cleanup-on-close`がIssue close時に外す
+  - 外れるタイミングは他の経路と同じで、`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`とissue-deck側の巡回がマージ時に、`cleanup-on-close`がIssue close時に外す
 - **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。**この「push開始時点で付いていたか」は`risk-check`が掴んで`already-check-user`出力で渡す**（#1406）。付与を行う`auto-merge`ジョブ側で読み直すと、`claude-review`が二次判定で付けたラベルを見て一次判定の理由コメントを取りこぼす。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
