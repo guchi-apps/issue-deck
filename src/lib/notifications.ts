@@ -12,6 +12,7 @@ import {
 import { REPAIR_KIND_RUNNING_SHORT_LABEL } from "@/lib/github/pull-request-repair";
 import { buildPullRequestId } from "@/lib/github-reference";
 import { computeManualStepReadiness } from "@/lib/manual-step-attention";
+import { isAutoMergingPullRequest } from "@/lib/merge-pending-attention";
 import { filterPullRequestsByView } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -257,7 +258,7 @@ function buildPullRequestNotifications(
 ): NotificationItem[] {
   return filterPullRequestsByView(pullRequests, "completed")
     .filter((pullRequest) => !excludedIds.has(pullRequest.id))
-    .filter((pullRequest) => !(pullRequest.autoMergeEnabled && pullRequest.ciState === "success"))
+    .filter((pullRequest) => !isAutoMergingPullRequest(pullRequest))
     .map((pullRequest) => {
       // 自動修復が走っているあいだは赤（`error`）を出さない（#2072）。CIは失敗したままだが、
       // いま人が動けるものではないため、確認待ちの「CI実行中」と同じく`info`まで弱める。
