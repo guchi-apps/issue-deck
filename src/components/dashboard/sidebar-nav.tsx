@@ -33,7 +33,11 @@ import {
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import {
+  isPullRequestViewAttention,
+  pullRequestViewIcons,
+  sidebarPullRequestViews,
+} from "@/lib/pull-request-views";
 import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import {
@@ -339,6 +343,12 @@ export function SidebarNavView({
               active: activePane === "pull-requests" && activePullRequestView === view.id,
               onClick: () => onSelectPullRequestView(view.id),
               count: pullRequestNavCounts[view.id],
+              // 「マージ待ち」だけオレンジの丸にする（#2334）。あとはユーザーがマージするか
+              // CI失敗を直すかしかなく、上の「ユーザーの確認待ち」と同じ性質のため。
+              // 条件は`isPullRequestViewAttention`（スマホと共通）
+              emphasis: isPullRequestViewAttention(view.id, pullRequestNavCounts[view.id])
+                ? "attention"
+                : "none",
               title: view.description,
             }),
           )}

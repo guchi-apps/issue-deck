@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
@@ -15,6 +15,7 @@ const NAV_COUNTS: PullRequestNavCounts = {
 function renderScreen(
   overrides: Partial<{
     view: PullRequestViewId;
+    navCounts: PullRequestNavCounts;
     origin: "tab" | "home";
     onChangeView: (view: PullRequestViewId) => void;
     onBack: () => void;
@@ -24,7 +25,7 @@ function renderScreen(
   render(
     <MobilePullRequestsScreen
       view={overrides.view ?? "in-progress"}
-      navCounts={NAV_COUNTS}
+      navCounts={overrides.navCounts ?? NAV_COUNTS}
       origin={overrides.origin ?? "tab"}
       pullRequests={[]}
       failedRepositories={[]}
@@ -156,5 +157,38 @@ describe("MobilePullRequestsScreen の更新（#1947）", () => {
     renderScreen();
 
     expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
+  });
+});
+
+// ビュー選択シートの件数も、PCの左メニュー・ホームと同じ判定で強調する（#2334）
+describe("MobilePullRequestsScreen のビュー選択シートの強調（#2334）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** シートを開いて、そのビューの行に出ている件数のバッジを返す */
+  function sheetBadge(label: RegExp) {
+    fireEvent.click(viewRow());
+    // 下端のビュー行にも同じ文言が出るため、シート（ダイアログ）の中だけを見る
+    const row = within(screen.getByRole("dialog")).getByRole("button", { name: label });
+    return row.querySelectorAll("span")[1];
+  }
+
+  it("マージ待ちが残っていれば件数をオレンジの丸で出す", () => {
+    renderScreen();
+
+    expect(sheetBadge(/マージ待ち/)?.className).toContain("bg-amber-500");
+  });
+
+  it("マージ待ちが0件なら丸にしない", () => {
+    renderScreen({ navCounts: { all: 2, "in-progress": 2, completed: 0 } });
+
+    expect(sheetBadge(/マージ待ち/)?.className).not.toContain("bg-amber-500");
+  });
+
+  it("実行中は件数があっても丸にしない", () => {
+    renderScreen();
+
+    expect(sheetBadge(/実行中/)?.className).not.toContain("bg-amber-500");
   });
 });

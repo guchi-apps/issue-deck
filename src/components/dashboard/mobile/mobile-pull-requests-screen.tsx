@@ -16,6 +16,7 @@ import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import {
   getAdjacentPullRequestViewId,
   getPullRequestView,
+  isPullRequestViewAttention,
   pullRequestViewIcons,
   pullRequestViews,
 } from "@/lib/pull-request-views";
@@ -239,6 +240,13 @@ export function MobilePullRequestsScreen({
           label: pullRequestView.label,
           icon: pullRequestViewIcons[pullRequestView.id],
           count: navCounts[pullRequestView.id],
+          // 「マージ待ち」だけオレンジの丸にする（#2334）。判定はホーム・PCの左メニューと
+          // 同じ`isPullRequestViewAttention`。Issue側のシートが「ユーザーの確認待ち」を
+          // 強調しているのと同じ扱い（`mobile-issue-view-sheet.tsx`）
+          highlighted: isPullRequestViewAttention(
+            pullRequestView.id,
+            navCounts[pullRequestView.id],
+          ),
         }))}
         selectedId={view}
         onSelect={onChangeView}
