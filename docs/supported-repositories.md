@@ -164,7 +164,7 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 
 | 配布済み | `issue-deck`（ローカルパス参照）・`dayspan`・`shopping-list` |
 |---|---|
-| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab`（#1475で**12件すべてへ配ると決めた**。下記）・**`vps`・`subpc`**（#2103で**配ると決めた**。画面のボタンの対象外なので手で配る。下記「`vps`・`subpc`（#2103）」） |
+| **未配布** | `aide`・`asset-manager`・`db-console`・`ops-dashboard`・`clip-hive`・`signaly`・`myroom`・`solitaire`・`portfolio`・`subscription-lists`・`car-care`・`meisai-lab`（#1475で**12件すべてへ配ると決めた**。下記）・**`vps`・`subpc`**（#2103で**配ると決めた**。callerの新規配布は画面のボタンの対象外なので手で配る。参照タグの配布は#2303で対象に入った。下記「`vps`・`subpc`（#2103）」） |
 | **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
 
 **`aide-bot`は立ち上げ（#2213）の時点から配布済み。** 初期化Issue（guchi-apps/aide-bot#1）で
@@ -323,6 +323,18 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 緩めない**——`issue-labels.yml`へ替えると`develop`を持たない`docs`まで対象に入り、置いても
 発火しないcallerを配ることになる。代わりに各リポジトリへIssueを立てて手で配る
 （guchi-apps/vps#108・guchi-apps/subpc#45）。
+
+**対象外なのは「callerの新規配布」だけで、参照タグの配布は#2303で対象に入った。** 一覧の
+母集団は`hasClaudeWorkflow`ではなく「`.github/workflows/`が`@workflows/vN`を参照して
+いるか」で決まるようになったため、`vps`・`subpc`・`docs`・`claude-config`・`question`にも
+画面のボタンからタグ更新PRが配られる（共有スクリプトの更新も同じ）。手で配り続ける必要が
+あるのは、無人実行のcallerを持たないリポジトリへの**新しいcallerの追加**だけ。
+
+**`missingRepairWorkflows`はその母集団の中で、`claude-issue-dispatch.yml`が無ければ何も
+挙げない**（#2303）。`vps`・`subpc`は`release-develop-to-main.yml`・`deploy.yml`を持つため、
+入口の判定が無いと`claude-pr-repair.yml`・`deploy-retry.yml`が不足として挙がるが、
+`.github/scripts/propagate-repair-workflows.sh`は参照タグと`with:`の写し元である
+`claude-issue-dispatch.yml`が無いと`fail`で落ちるので、押した時点で必ず失敗する。
 
 雛形は`.github/templates/callers/claude-review-develop.yml`を写し、`__TAG__`（`uses:`と
 `prompts-ref`の2か所）を現行タグへ置換したうえで、共通の`risk-paths` 4行へリポジトリ固有の

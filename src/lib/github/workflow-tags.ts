@@ -336,14 +336,23 @@ ${selections}
 /**
  * 対象リポジトリすべての参照状況を集める。
  *
- * 対象は**マルチエージェント対応かつアーカイブ済みでない**リポジトリ（既存の再同期と同じ条件）。
- * issue-deck 自身はローカルパス参照（`uses: ./.github/workflows/...`）でタグを持たないため、
- * 参照が見つからず結果に現れない。
+ * 対象は**連携済みかつアーカイブ済みでない**リポジトリすべて。**共有ワークフローを参照して
+ * いるかどうかだけで絞る**（参照が無いものは下のループで落とす）。issue-deck 自身は
+ * ローカルパス参照（`uses: ./.github/workflows/...`）でタグを持たないため結果に現れない。
+ *
+ * **`hasClaudeWorkflow: true`で絞ってはいけない**（#2303）。あれは
+ * `claude-issue-dispatch.yml`の有無、つまり**無人実行に対応しているか**の列であって、
+ * 「共有ワークフローを参照しているか」とは別の軸。絞っていた間、タグだけを参照している
+ * `vps`・`docs`・`subpc`・`claude-config`・`question`は配布対象から永久に外れており、
+ * タグを配るたびに手作業が残っていた（`docs/supported-repositories.md`に既知の制約として
+ * 書いてあった）。実害として、#2294で`schedule`ジョブを外した`workflows/v27`を配っても
+ * **課金が発生している4リポジトリには1件もPRが作られず**、目的の従量課金停止が達成できて
+ * いなかった。母集団の取り方は`/api/repositories/release-pending-merges`が#1727で同じ
+ * 代用を取り除いたのと同じ形にしてある。
  */
 export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOverview> {
   const repositories = await db.repository.findMany({
     where: {
-      hasClaudeWorkflow: true,
       archived: false,
       installation: { userInstallations: { some: { userId } } },
     },

@@ -173,16 +173,42 @@ describe("collectWorkflowTags", () => {
     });
   });
 
-  it("マルチエージェント対応・アーカイブ済みでないものだけを対象にする", async () => {
+  it("アーカイブ済みでない連携リポジトリすべてを対象にする", async () => {
     githubFetch.mockImplementation(route({}));
 
     await collectWorkflowTags("user-1");
 
-    expect(repositoryFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ hasClaudeWorkflow: true, archived: false }),
+    const [call] = repositoryFindMany.mock.calls;
+    expect(call?.[0].where).toEqual(
+      expect.objectContaining({ archived: false }),
+    );
+    // #2303。`claude-issue-dispatch.yml`の有無（＝無人実行に対応しているか）で絞ると、
+    // タグだけを参照している`vps`・`docs`・`subpc`・`claude-config`が永久に配布対象から外れる
+    expect(call?.[0].where).not.toHaveProperty("hasClaudeWorkflow");
+  });
+
+  it("無人実行に対応していないリポジトリも、参照タグを持てば一覧に出す", async () => {
+    // #2303。`vps`と同じ構成（`claude-issue-dispatch.yml`は無いが`issue-labels.yml`が
+    // 共有ワークフローを参照している）
+    repositoryFindMany.mockResolvedValue([repo("guchi-apps/vps")]);
+    githubFetch.mockImplementation(
+      route({
+        tags: ["workflows/v12"],
+        entries: {
+          "guchi-apps/vps": [blob("ci.yml", null), blob("issue-labels.yml")],
+        },
       }),
     );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.repositories).toHaveLength(1);
+    expect(overview.repositories[0]).toMatchObject({
+      fullName: "guchi-apps/vps",
+      outdated: true,
+      // 無人実行のcallerが無いので、callerの配布の対象にはしない
+      missingRepairWorkflows: [],
+    });
   });
 
   it("共有ワークフローを参照していないリポジトリは結果に含めない", async () => {
