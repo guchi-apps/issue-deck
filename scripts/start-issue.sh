@@ -14,6 +14,11 @@
 #   scripts/start-issue.sh --recreate <issue番号>      既存worktreeを捨ててdevelopから作り直す
 #   scripts/start-issue.sh --no-recreate <issue番号>   作り直しの確認を出さず必ず再利用する
 #   scripts/start-issue.sh --no-tmux <issue番号>       tmuxを使わずこのターミナルで起動する
+#   scripts/start-issue.sh --agent codex <issue番号>   Claude Codeではなく Codex CLI で起動する（#2377）
+#
+# `--agent`（既定は`claude`）で起こすエージェントCLIを選ぶ。`ISSUE_DECK_AGENT=codex`でも同じ。
+# **Codexでは揃わないものがある**（フックによる通知・Remote Control・Plan modeの承認・前回会話の
+# 引き継ぎ）。何が使えて何が使えないかは docs/multi-agent/codex.md を参照。
 #
 # --prepare-only はworktree・ブランチ・起動用プロンプトの準備だけを行い、開発サーバーも
 # Claude Codeセッションも起動せずに終了する。VSCodeのClaude Codeタブから `/issue <番号>`
@@ -103,6 +108,12 @@ source "$ROOT/scripts/lib/dev-server.sh"
 # 引数の検証より前に置くのは、ここで PROMPT_TEMPLATE の場所が決まるため。
 resolve_launcher_scripts_dir "$ROOT"
 PROMPT_TEMPLATE="$LAUNCHER_SCRIPTS_DIR/prompts/implementation-agent.md"
+# Codexで起こしたときだけプロンプトの末尾へ足す読み替え（#2377）。ひな形と同じ場所から読む。
+CODEX_SUPPLEMENT="$LAUNCHER_SCRIPTS_DIR/prompts/codex-supplement.md"
+
+# 起こすエージェントCLIの種別（#2377）。`--agent`（または`ISSUE_DECK_AGENT`）で切り替える。
+# shellcheck source=scripts/lib/agent-cli.sh
+source "$ROOT/scripts/lib/agent-cli.sh"
 
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
@@ -128,17 +139,40 @@ PREPARE_ONLY=0
 RECREATE_MODE=auto
 # セッションの出口。auto=tmuxがあればtmux、無ければこのターミナル（#1178）
 TMUX_MODE=auto
+# 起こすエージェント（#2377）。既定は環境変数、無ければ`claude`
+AGENT_KIND_RAW="${ISSUE_DECK_AGENT:-}"
+# `--agent codex`（値が次の引数）を受けるための状態。`--agent=codex`の形も受ける
+AGENT_VALUE_PENDING=0
 POSITIONAL=()
 for arg in "$@"; do
+  if [[ "$AGENT_VALUE_PENDING" == "1" ]]; then
+    AGENT_KIND_RAW="$arg"
+    AGENT_VALUE_PENDING=0
+    continue
+  fi
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
     --recreate) RECREATE_MODE=always ;;
     --no-recreate) RECREATE_MODE=never ;;
     --no-tmux) TMUX_MODE=classic ;;
+    --agent) AGENT_VALUE_PENDING=1 ;;
+    --agent=*) AGENT_KIND_RAW="${arg#--agent=}" ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
 set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
+
+if [[ "$AGENT_VALUE_PENDING" == "1" ]]; then
+  echo "Error: --agent には種別を指定してください（${AGENT_CLI_KINDS[*]}）。" >&2
+  exit 1
+fi
+
+# 不正な値はここで止める（worktreeを作る前）。
+agent_cli_resolve_kind "$AGENT_KIND_RAW" || exit 1
+AGENT_KIND="$AGENT_CLI_KIND"
+AGENT_COMMAND="$(agent_cli_command_name "$AGENT_KIND")"
+# tmuxの中（run-issue-session.sh）と、tmuxが無い環境の`exec bash`の両方へ届かせる。
+export ISSUE_DECK_AGENT="$AGENT_KIND"
 
 # ワンクリック起動（scripts/start-local-session.sh）から呼ばれた場合に立つ。LANアクセス設定は
 # Windowsの管理者権限を要求し、wt.exeで開いたタブではUACを承認しても待ちから戻らずタブが
@@ -146,7 +180,7 @@ set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 SKIP_LAN_SETUP="${ISSUE_DECK_SKIP_LAN_SETUP:-0}"
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] [--no-tmux] <issue番号> [issue番号...]" >&2
+  echo "Usage: scripts/start-issue.sh [--prepare-only] [--recreate|--no-recreate] [--no-tmux] [--agent claude|codex] <issue番号> [issue番号...]" >&2
   exit 1
 fi
 
@@ -155,8 +189,12 @@ if ! command -v gh >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
-  echo "Error: claude コマンドが見つかりません。" >&2
+if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$AGENT_COMMAND" >/dev/null 2>&1; then
+  echo "Error: $AGENT_COMMAND コマンドが見つかりません（$(agent_cli_display_name "$AGENT_KIND")）。" >&2
+  # 未導入のまま起動すると、worktreeだけ作られてセッションが立たない。導入の入口をここで示す。
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    echo "       導入: npm install -g @openai/codex && codex login（docs/multi-agent/codex.md）" >&2
+  fi
   exit 1
 fi
 
@@ -169,6 +207,13 @@ fi
 
 if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
   echo "Error: $PROMPT_TEMPLATE がありません。" >&2
+  exit 1
+fi
+
+# **読み替えが無いままCodexで起こさない**（#2377）。Claude Code前提の記述（Plan mode・承認
+# プロンプト・ツール名）だけが残ったプロンプトを渡すと、存在しない手順を待って止まる。
+if [[ "$AGENT_KIND" != "claude" && ! -f "$CODEX_SUPPLEMENT" ]]; then
+  echo "Error: $CODEX_SUPPLEMENT がありません（$AGENT_KIND で起動するには必要です）。" >&2
   exit 1
 fi
 
@@ -673,6 +718,16 @@ result = (
 sys.stdout.write(result)
 PY
   rm -f "$issue_json_file"
+
+  # Codexで起こす場合だけ、読み替えの補足をプロンプトの末尾へ足す（#2377）。
+  #
+  # **実装プロンプト本体を分岐させない。** ひな形は43KBあり、Codex専用の写しを作れば片方が
+  # 必ず古くなる。共通の指示はそのままにして、**Claude Code前提で書かれている箇所の読み替え**
+  # （Plan mode・承認プロンプト・ツール名）だけを差分として追記する。
+  if [[ "$AGENT_KIND" != "claude" && -f "$CODEX_SUPPLEMENT" ]]; then
+    printf '\n' >>"$PROMPT_FILE"
+    cat "$CODEX_SUPPLEMENT" >>"$PROMPT_FILE"
+  fi
 }
 
 # tmuxセッションへ引き継ぐ環境変数（#1178）。新しいセッションはtmuxサーバー側の環境を
@@ -685,9 +740,12 @@ build_env_prefix() {
   # 記述子に載らず、回収の対象にならない。
   # ISSUE_DECK_CLAUDE_RESUME は前回の会話を引き継ぐかどうか（#1541）。prepare_issue が
   # worktreeの扱いを見て決めた値で、tmuxの中まで届かないと新規worktreeでも再開してしまう。
+  # ISSUE_DECK_AGENT は起こすエージェントCLIの種別（#2377）。tmuxの中まで届かないと、
+  # `--agent codex`で起動したつもりでもClaude Codeが立つ。
   for var in ISSUE_DECK_WORKTREE_BASE ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_LAN_SETUP \
     ISSUE_DECK_DEV_HOST ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR \
-    ISSUE_DECK_CLAUDE_RESUME; do
+    ISSUE_DECK_CLAUDE_RESUME ISSUE_DECK_AGENT ISSUE_DECK_CODEX_MODEL \
+    ISSUE_DECK_CODEX_SANDBOX ISSUE_DECK_CODEX_EXTRA_ARGS; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
@@ -702,10 +760,10 @@ build_env_prefix() {
   printf '%s' "$prefix"
 }
 
-# 単一worktree内で開発サーバー起動〜claude起動〜終了時のdevサーバー停止までを行う
+# 単一worktree内で開発サーバー起動〜エージェント起動〜終了時のdevサーバー停止までを行う
 # run-issue-session.sh を起動するコマンド文字列を作る（PROMPT_FILEのパスのみを埋め込み、
 # Issue本文・コメントなどの外部由来テキストはコマンド文字列に直接展開しない）。
-build_claude_cmd() {
+build_session_cmd() {
   local issue_number="$1"
   local worktree_dir="$2"
   local dev_port="$3"
@@ -795,7 +853,7 @@ if [[ "$LAUNCHER" == "tmux" ]]; then
     session="$(tmux_session_name "$n")"
     echo "#$n: tmuxセッション「$session」で開発サーバーとClaude Codeセッションを起動します..."
     start_tmux_session "$n" "$session" "$WORKTREE_DIR" \
-      "$(build_claude_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
+      "$(build_session_cmd "$n" "$WORKTREE_DIR" "$DEV_PORT" "$PROMPT_FILE")"
   done
 
   echo

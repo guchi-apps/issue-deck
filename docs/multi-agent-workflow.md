@@ -48,6 +48,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [Phase 7: 無人実行でのスクリーンショット撮影・画像埋め込み](multi-agent/screenshots.md) | Playwrightによる撮影とIssueコメントへの埋め込み |
 | [PRコンフリクト・CI失敗の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`（Issueに紐づかないPR向け）と画面のボタンからの起動 |
 | [ローカルセッションの起動](multi-agent/local-quick-start.md) | ローカル起動プロトコル、ヘッドレス（tmux）起動、開発サーバーのポート帯と回収、手元へ貼るプロンプト・起動コマンドのコピー |
+| [Codex CLIでローカルセッションを起こす](multi-agent/codex.md) | `--agent codex`での起動、Claude Codeと揃わないもの（フック・Remote Control・Plan modeの承認）、サンドボックスとネットワークの設定 |
 | [サブPCへのディスパッチ](multi-agent/subpc-dispatch.md) | pull型のジョブキュー、実行可能リポジトリの申告、同時実行数の上限、サブPC側のpollerとsystemd |
 | [汎用ランチャー](multi-agent/generic-launcher.md) | 対象リポジトリに何も置かずにサブPCで起動する仕組み。リポジトリ固有の値の解決方法、起動可否の判定、対象リポジトリの増やし方 |
 | [リポジトリ全体のコードレビュー](multi-agent/code-review.md) | 画面から1リポジトリまるごとをレビューする仕組み。レビューIssueと結果コメントの書式、指摘カードからの起票、実行の制約 |
