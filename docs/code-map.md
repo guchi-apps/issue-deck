@@ -573,6 +573,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
     **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが
     畳まれていると気付けないため。**畳んでもデータ取得は止めない**（件数と内訳を畳んだ行に出すのに要る）。
+- **コメント欄の下の操作列は、主ボタン（塗りつぶし）を1つだけ持ち、それを固定しない**（#2345）。
+  どれを主にするかの判定は[`lib/github/ask-claude.ts`](../src/lib/github/ask-claude.ts)の
+  `resolveComposerPrimaryAction`にあり、**PC（`issue-detail.tsx`）とスマホ
+  （`mobile/mobile-issue-detail.tsx`）が同じ関数を共有する**。見るのは「質問Issueか」
+  「回答待ちか」に加えて**入力欄が空かどうか**で、書き始めた時点で強調が
+  「回答を確認してクローズ」から「質問する」へ移る（続きを聞きたい人に、話を終える操作が
+  いちばん強く見えていた）。副操作は枠線、質問Issueの「コメント」は枠なしまで沈める。
+  - **`Ctrl`+`Enter`の宛先は、そのとき主ボタンになっている投稿操作と一致させる。**
+    一致していないと、続きを聞いたつもりの文章が「誰も読まないふつうのコメント」として積まれる
+    （質問Issueへのコメントは`@claude`が付かないため回答されない）。
+  - **クローズをキーボードショートカットに割り当てない。** 主ボタンが`close`のときは
+    `Ctrl`+`Enter`を投稿（コメント）へ倒す。取り返しの付く操作だけをキーへ載せる。
+  - 表示条件そのもの（`canCloseAskRepoQuestion`）は変えていない。**「出るかどうか」と
+    「どれが主か」は別の判定**で、前者を強さの判定に流用するとヘッダー側の同名ボタンとずれる。
+  - **横断質問Issue（#1454）は`[質問] `タイトルを持つが、この強調から外す。** 記録先
+    （既定は`guchi-apps/question`。ワークフローは`issue-labels.yml`だけ）にはコメントを拾う
+    無人実行が無く、答えるのはサブPCの質問セッションで、追い質問は追加指示（#1012）で送る。
+    それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えないまま
+    `isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**。
+    判定は`isCrossRepoQuestionIssue`（コメントの`CROSS_REPO_QUESTION_MARKER`を見る。
+    **リポジトリ名で判定しない**——`resolveCrossRepoQuestionRepository`がフォールバックを持つ）。
 - **人が進捗を直接動かす入口は、Issue詳細の「進捗」セレクト**（#1350・#1920）。中身・並び・注記は
   [`components/dashboard/issue-progress-select.tsx`](../src/components/dashboard/issue-progress-select.tsx)
   が持ち、**PCとスマホがこれ1つを共有する**——PCはラベル・担当者と並ぶ右パネル
@@ -1767,12 +1788,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
   人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
   そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
-  **マージ済みなのに残った`00.check-user`＋`01.check-merge`を外すのも同じ巡回**（#2335。
-  判定は`decideStaleCheckMerge`）。外す役はマージのイベントを受け取るワークフローだけで
-  再試行が無く、GitHubの一時的な5xxに当たると誰も外し直さなかった（guchi-apps/signaly#200）。
-  こちらも探し先はDBで、開いているPRがあるIssue・`issue-<番号>`のPRが1件も無いIssueには
-  触らない。設計は[multi-agent/labels.md](multi-agent/labels.md)「マージ済みなのに残った
-  `01.check-merge`は巡回が外す」。
+  **マージ時に外しそこねた`00.check-user`を外すのも同じ巡回**（#2335。判定は
+  `decideStaleCheckUser`）。マージ時の除去は7枚まとめての1回で再試行が無く、GitHubの
+  一時的な5xxに当たると次のmainリリースまで確認待ちが残る（guchi-apps/signaly#200で18分）。
+  こちらも探し先はDBで、対象は**`Develop`・`Release`にいるopenなIssue**。開いているPRが
+  あるIssue・`issue-<番号>`のマージ済みPRが無いIssue・**`00.check-user`が最後のマージより
+  後に付いたIssue**（#1968の事後確認）には触らない。設計は
+  [multi-agent/labels.md](multi-agent/labels.md)「マージ時に外しそこねた`00.check-user`は
+  巡回が外す」。
   **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
   `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
   Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で

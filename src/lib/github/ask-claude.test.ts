@@ -13,9 +13,12 @@ import {
   isAskClaudeQuestionComment,
   isAskRepoQuestionIssue,
   isCrossRepoQuestionComment,
+  isCrossRepoQuestionIssue,
+  canContinueQuestionFromComposer,
   isQaAnswerComment,
   isQaAnswerPending,
   QA_ANSWER_MARKER,
+  resolveComposerPrimaryAction,
   resolveCrossRepoQuestionRepository,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
@@ -241,5 +244,95 @@ describe("buildAskRepoQuestionTitle", () => {
   it("40文字以下の質問はそのまま使う", () => {
     const exact = "あ".repeat(40);
     expect(buildAskRepoQuestionTitle(exact)).toBe(`[質問] ${exact}`);
+  });
+});
+
+/**
+ * コメント欄の下の操作列の主ボタン（#2345）。**入力欄が空かどうかで付け替える**ので、
+ * 同じIssue・同じコメント列でも下書きの有無で答えが変わる。
+ */
+describe("resolveComposerPrimaryAction", () => {
+  const askIssue = { state: "open" as const, title: `${ASK_REPO_QUESTION_TITLE_PREFIX}質問内容` };
+  const answered = [
+    { body: askClaudeCommentBody("質問内容") },
+    { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+  ];
+  const pending = [{ body: askClaudeCommentBody("質問内容") }];
+
+  it("質問Issueで回答済み・入力が空なら、クローズが主", () => {
+    expect(resolveComposerPrimaryAction(askIssue, answered, false)).toBe("close");
+  });
+
+  it("質問Issueで回答済みでも、入力があれば質問が主", () => {
+    expect(resolveComposerPrimaryAction(askIssue, answered, true)).toBe("question");
+  });
+
+  it("質問Issueで回答待ちなら、入力の有無によらず質問が主", () => {
+    expect(resolveComposerPrimaryAction(askIssue, pending, false)).toBe("question");
+    expect(resolveComposerPrimaryAction(askIssue, pending, true)).toBe("question");
+  });
+
+  it("質問Issueでなければ、入力の有無によらずコメントが主", () => {
+    const normal = { state: "open" as const, title: "ログイン画面のレイアウトを見直す" };
+    expect(resolveComposerPrimaryAction(normal, [], false)).toBe("comment");
+    expect(resolveComposerPrimaryAction(normal, answered, true)).toBe("comment");
+  });
+
+  it("closedな質問Issueではコメントが主（「質問する」ボタンが出ないため）", () => {
+    expect(resolveComposerPrimaryAction({ ...askIssue, state: "closed" }, answered, true)).toBe(
+      "comment",
+    );
+  });
+
+  /**
+   * 横断質問Issue（#1454）では「質問する」に受け手がいない。押すと回答が来ないまま
+   * `isQaAnswerPending`が立ち続け、「回答を確認してクローズ」が二度と出なくなる。
+   */
+  describe("横断質問Issue", () => {
+    const crossRepoAnswered = [
+      { body: crossRepoQuestionCommentBody("横断の質問") },
+      { body: `回答本文\n\n${QA_ANSWER_MARKER}` },
+    ];
+
+    it("入力があってもクローズが主のまま（質問へは移らない）", () => {
+      expect(resolveComposerPrimaryAction(askIssue, crossRepoAnswered, true)).toBe("close");
+    });
+
+    it("回答待ちのときはコメントが主（質問へは移らない）", () => {
+      const pendingCrossRepo = [{ body: crossRepoQuestionCommentBody("横断の質問") }];
+      expect(resolveComposerPrimaryAction(askIssue, pendingCrossRepo, true)).toBe("comment");
+    });
+  });
+});
+
+describe("isCrossRepoQuestionIssue", () => {
+  it("横断質問のコメントが1件でもあればtrue", () => {
+    expect(isCrossRepoQuestionIssue([{ body: crossRepoQuestionCommentBody("横断の質問") }])).toBe(
+      true,
+    );
+  });
+
+  it("ふつうの質問コメントだけならfalse", () => {
+    expect(isCrossRepoQuestionIssue([{ body: askClaudeCommentBody("質問内容") }])).toBe(false);
+  });
+});
+
+describe("canContinueQuestionFromComposer", () => {
+  const askIssue = { state: "open" as const, title: `${ASK_REPO_QUESTION_TITLE_PREFIX}質問内容` };
+
+  it("openな質問Issue（横断でない）ならtrue", () => {
+    expect(canContinueQuestionFromComposer(askIssue, [])).toBe(true);
+  });
+
+  it("横断質問Issueならfalse", () => {
+    expect(
+      canContinueQuestionFromComposer(askIssue, [
+        { body: crossRepoQuestionCommentBody("横断の質問") },
+      ]),
+    ).toBe(false);
+  });
+
+  it("質問Issueでなければfalse", () => {
+    expect(canContinueQuestionFromComposer({ state: "open", title: "通常のIssue" }, [])).toBe(false);
   });
 });
