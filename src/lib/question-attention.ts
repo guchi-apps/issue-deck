@@ -126,3 +126,33 @@ export function formatQuestionListCount(
   if (unconfirmed === 0) return null;
   return `${listedCount}件・未確認${unconfirmed}件`;
 }
+
+/**
+ * 「質問」「コードレビュー」の行（`sidebarQuestionNavViews`）に出す合図（#2325）。
+ *
+ * **この2つは同じ枠に並んでいるだけで、合図は共有しない。** 以前はPC・スマホの両方で
+ * 枠ごとまとめて`map`し、丸（未確認）・回るアイコン（回答待ち）・吹き出しに質問の値を
+ * そのまま渡していたため、**質問の回答を待っているあいだ「コードレビュー」の行まで
+ * 回っていた**（押した先にレビューは1件も走っていない）。
+ *
+ * **コードレビューには対応する合図が無い。** レビューが走っているかどうかは依頼コメントに
+ * 対する結果コメントの有無（`isCodeReviewPending`）でしか分からず、左メニューが見ている
+ * 一覧のデータにはコメントが載っていない。ジョブ（`dispatchPendingAt`）はセッションが
+ * 立った時点で閉じるので、代わりには使えない
+ * （docs/multi-agent/code-review.md「付いてこないもの」）。出せないものは出さず、
+ * レビュー中かどうかは開いた先の「レビュー中」表示で読む。
+ *
+ * @param viewId その行のビューID
+ * @param counts 質問の件数（`total`は`navCounts["question"]`）
+ */
+export function resolveQuestionNavSignals(
+  viewId: string,
+  counts: { total: number; unconfirmed: number; waiting: number },
+): { attention: boolean; busy: boolean; title: string | undefined } {
+  if (viewId !== "question") return { attention: false, busy: false, title: undefined };
+  return {
+    attention: counts.unconfirmed > 0,
+    busy: counts.waiting > 0,
+    title: formatQuestionNavTitle(counts.total, counts.unconfirmed, counts.waiting),
+  };
+}

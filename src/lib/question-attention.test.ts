@@ -6,6 +6,7 @@ import {
   formatQuestionListCount,
   formatQuestionNavTitle,
   isQaAnswerWaiting,
+  resolveQuestionNavSignals,
   resolveQuestionState,
 } from "@/lib/question-attention";
 
@@ -138,5 +139,22 @@ describe("formatQuestionListCount", () => {
 
   it("未確認が無ければnullを返す（呼び出し側が従来の表記に落とす）", () => {
     expect(formatQuestionListCount([makeQuestion(), makeQuestion()], 2)).toBeNull();
+  });
+});
+
+describe("resolveQuestionNavSignals", () => {
+  // 同じ枠に並んでいるだけの「コードレビュー」へ質問の合図を持ち込まない（#2325）
+  it("「質問」の行には丸・回るアイコン・吹き出しを渡す", () => {
+    expect(resolveQuestionNavSignals("question", { total: 3, unconfirmed: 1, waiting: 2 })).toEqual({
+      attention: true,
+      busy: true,
+      title: "開いている質問が3件（うち回答待ちが2件・回答が届いていてまだ開いていないものが1件）あります",
+    });
+  });
+
+  it("「コードレビュー」の行には何も渡さない", () => {
+    expect(
+      resolveQuestionNavSignals("code-review", { total: 3, unconfirmed: 1, waiting: 2 }),
+    ).toEqual({ attention: false, busy: false, title: undefined });
   });
 });
