@@ -1029,7 +1029,7 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
           kind: "instruction",
           cause: "リポジトリの場所が変わっています。",
           command: null,
-          instruction: "（サブPC）チェックアウトを最新のdevelopへ更新する",
+          instruction: "チェックアウトを最新のdevelopへ更新する",
           advice: null,
         },
         currentCommand: null,
@@ -1044,7 +1044,7 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
 
     await vi.waitFor(() => expect(issueMutations.updateIssue).toHaveBeenCalled());
     const [patch] = issueMutations.updateIssue.mock.calls[0];
-    expect(patch.body).toContain("- [ ] （サブPC）チェックアウトを最新のdevelopへ更新する");
+    expect(patch.body).toContain("- [ ] チェックアウトを最新のdevelopへ更新する");
     // 下のコマンドも、他の手順もそのまま
     expect(patch.body).toContain("git pull --ff-only");
     expect(patch.body).toContain("- [ ] pollerを再起動する");

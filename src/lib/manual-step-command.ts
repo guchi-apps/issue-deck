@@ -534,9 +534,19 @@ export function replaceManualStepInstruction(
   // 書き換えた本文を読み直して、手順の数もこの手順の位置も、下のコマンドも変わっていないこと
   const after = parseManualStepGuide(replaced);
   if (after.steps.length !== before.steps.length) return null;
-  if (!after.steps.some((step) => step.line === stepLine)) return null;
+  const next = after.steps.find((step) => step.line === stepLine);
+  if (next === undefined) return null;
   if (findManualStepCommand(replaced, stepLine)?.command !== findManualStepCommand(body, stepLine)?.command) {
     return null;
   }
+
+  // **文頭のデバイスの印を落とさせない**（#2299）。手順の実行端末は`（ブラウザ）`のような
+  // 括弧書きだけから読み、書かれていない手順は`where.defaultDevice`へ落ちる
+  // （`resolveManualStepDevice`）。印が消えると、既定値がサブPCのIssueでは**ブラウザ手順が
+  // 代行実行の対象へ反転する**（代行の可否は`ManualStepRunEntry.device`ひとつで決まる）。
+  // コマンドを引き直せるかの確認ではこの反転を検出できないので、ここで別に確かめる。
+  if (next.device !== current.device) return null;
+  // チェック状態は組み立てで保っているが、読み直しても同じであることまで確かめる
+  if (next.checked !== current.checked) return null;
   return replaced;
 }

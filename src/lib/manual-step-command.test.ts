@@ -420,10 +420,10 @@ describe("replaceManualStepInstruction", () => {
   const checked = stepLine("- [x] pollerを再起動する");
 
   it("チェックボックスを残したまま説明文だけを差し替える", () => {
-    const replaced = replaceManualStepInstruction(REAL_BODY, unchecked, "（サブPC）本体を最新のdevelopへ更新する");
+    const replaced = replaceManualStepInstruction(REAL_BODY, unchecked, "本体チェックアウトを最新のmainへ更新する");
 
     expect(replaced?.split("\n")[unchecked - 1]).toBe(
-      "- [ ] （サブPC）本体を最新のdevelopへ更新する",
+      "- [ ] 本体チェックアウトを最新のmainへ更新する",
     );
     // 下のコードブロックは触らない
     expect(findManualStepCommand(replaced, unchecked)?.command).toBe(
@@ -452,6 +452,34 @@ describe("replaceManualStepInstruction", () => {
     ).toBeNull();
     expect(replaceManualStepInstruction(REAL_BODY, unchecked, "1行目\n2行目")).toBeNull();
     expect(replaceManualStepInstruction(REAL_BODY, unchecked, "```bash")).toBeNull();
+  });
+
+  // #2299。デバイスの印が消えると、既定値がサブPCのIssueでは代行実行の対象へ反転する
+  it("文頭のデバイスの印を落とす直し案は適用しない", () => {
+    const body = REAL_BODY.replace(
+      "- [ ] 本体チェックアウトを最新のdevelopへ更新する",
+      "- [ ] （ブラウザ）GitHubの設定画面から更新する",
+    );
+    const line = body.split("\n").indexOf("- [ ] （ブラウザ）GitHubの設定画面から更新する") + 1;
+
+    // 印を落とす → 既定値（サブPC）へ落ちてしまうので適用しない
+    expect(replaceManualStepInstruction(body, line, "GitHubの新しい設定画面から更新する")).toBeNull();
+    // 印を残したままの言い換えは通す
+    expect(
+      replaceManualStepInstruction(body, line, "（ブラウザ）GitHubの新しい設定画面から更新する"),
+    ).not.toBeNull();
+  });
+
+  it("別のデバイスの印へ書き換える直し案も適用しない", () => {
+    const body = REAL_BODY.replace(
+      "- [ ] 本体チェックアウトを最新のdevelopへ更新する",
+      "- [ ] （ブラウザ）GitHubの設定画面から更新する",
+    );
+    const line = body.split("\n").indexOf("- [ ] （ブラウザ）GitHubの設定画面から更新する") + 1;
+
+    expect(
+      replaceManualStepInstruction(body, line, "（サブPC）GitHubの設定画面から更新する"),
+    ).toBeNull();
   });
 
   it("手順ではない行・本文が無い場合は適用しない", () => {
