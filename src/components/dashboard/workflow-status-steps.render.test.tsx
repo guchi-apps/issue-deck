@@ -84,6 +84,24 @@ describe("WorkflowStepBadge", () => {
     expect(spinner(container)).not.toBeNull();
   });
 
+  // #2358。確認待ちのまま処理が動いている間も回す。判定材料は一覧が持つ
+  // `checkUserRunningIssueIds`（#2174）で、渡さなければ従来どおり止まる
+  it("確認待ちでもエージェントが動いていれば回す", () => {
+    const labels = [{ name: "00.check-user", color: "", description: null }];
+    const props = {
+      labels,
+      projectStatus: "Implementation" as const,
+      executionTarget: { host: "subpc", expectsActionsRun: false },
+      session: session(),
+      now: NOW,
+    };
+    const running = render(<WorkflowStepBadge {...props} checkUserRunning />);
+    expect(spinner(running.container)).not.toBeNull();
+    cleanup();
+    const stopped = render(<WorkflowStepBadge {...props} />);
+    expect(spinner(stopped.container)).toBeNull();
+  });
+
   it("サブPC実行では「起動待ち」を出さない（#1262の判定を壊していない）", () => {
     const { container } = render(
       <WorkflowStepBadge
