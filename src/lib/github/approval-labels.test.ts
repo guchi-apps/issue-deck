@@ -17,6 +17,7 @@ import {
   labelsAfterRejection,
   rejectCommentBody,
   requestPrFixCommentBody,
+  withoutCheckUserLabels,
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
@@ -468,5 +469,28 @@ describe("理由ラベルがある場合の既存判定（#1490）", () => {
     ];
     expect(labelsAfterApproval(labels)).toEqual(["bug"]);
     expect(labelsAfterRejection(labels)).toEqual(["21.plan-required", "bug"]);
+  });
+
+  /**
+   * #2341。画面が手元のIssueを描き直すのに使うので、**名前だけでなくラベルのまま**返す
+   * （色と説明を落とすと、次のポーリングまで灰色のラベルが並ぶ）。
+   */
+  it("withoutCheckUserLabelsは00.check-userと01.check-*だけをラベルのまま落とす", () => {
+    const labels = [
+      makeLabel("00.check-user"),
+      makeLabel("01.check-plan"),
+      makeLabel("00.qa-answered"),
+      makeLabel("21.plan-required"),
+      makeLabel("bug"),
+    ];
+    expect(withoutCheckUserLabels(labels)).toEqual([
+      makeLabel("21.plan-required"),
+      makeLabel("bug"),
+    ]);
+  });
+
+  it("withoutCheckUserLabelsは外すものが無ければそのまま返す", () => {
+    const labels = [makeLabel("21.plan-required"), makeLabel("bug")];
+    expect(withoutCheckUserLabels(labels)).toEqual(labels);
   });
 });
