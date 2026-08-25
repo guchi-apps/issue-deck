@@ -206,3 +206,30 @@ export function canCloseAskRepoQuestion(
 ): boolean {
   return issue.state === "open" && isAskRepoQuestionIssue(issue) && !isQaAnswerPending(comments);
 }
+
+/** コメント入力欄の下の操作列で、主ボタン（塗りつぶし）を持つ操作（#2345） */
+export type ComposerPrimaryAction = "question" | "comment" | "close";
+
+/**
+ * コメント入力欄の下の操作列で、どれを主ボタンにするかを決める（#2345）。
+ *
+ * **主ボタンは固定せず、入力欄が空かどうかで「いま人がやろうとしていること」に付け替える。**
+ * 従来は質問Issueなら常にクローズが主で（#1770）、続きを聞きたい人にも話を終える操作が
+ * いちばん強く見えていた。空なら回答を読み終えた人なので用事はクローズ、書きかけがあるなら
+ * 会話の途中なので用事は次の質問、と読み替える。
+ *
+ * `Ctrl`+`Enter`の宛先もこの判定に合わせる（`close`のときは投稿操作の`comment`へ倒す）。
+ * **クローズをキーボードショートカットに割り当ててはいけない。**
+ *
+ * 質問Issueでない場合と、closeしたIssue（「質問する」ボタンが出ない）では従来どおり
+ * `comment`が主。
+ */
+export function resolveComposerPrimaryAction(
+  issue: Pick<Issue, "state" | "title">,
+  comments: Pick<IssueComment, "body">[],
+  hasDraft: boolean,
+): ComposerPrimaryAction {
+  if (!isAskRepoQuestionIssue(issue) || !canAskClaude(issue)) return "comment";
+  if (hasDraft) return "question";
+  return canCloseAskRepoQuestion(issue, comments) ? "close" : "question";
+}
