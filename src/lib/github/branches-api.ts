@@ -17,8 +17,16 @@ export type BranchRefLookup = {
 };
 
 type RefNode = { name: string } | null;
+/** `compare`が返すコミット。tree OIDが取れないケース（targetがCommitでない）を許す */
+type CompareTarget = { tree?: { oid?: string | null } | null } | null;
+type CompareNode = {
+  aheadBy: number;
+  behindBy: number;
+  baseTarget: CompareTarget;
+  headTarget: CompareTarget;
+} | null;
 type GraphqlResult = {
-  repository: ({ comparison: { compare: BranchComparison | null } | null } & Record<
+  repository: ({ comparison: { compare: CompareNode } | null } & Record<
     string,
     unknown
   >) | null;
@@ -56,7 +64,15 @@ export async function lookupBranchRefs(
     query($owner: String!, $name: String!${variableDeclarations ? `, ${variableDeclarations}` : ""}) {
       repository(owner: $owner, name: $name) {
         comparison: ref(qualifiedName: "refs/heads/main") {
-          compare(headRef: "develop") { aheadBy behindBy }
+          compare(headRef: "develop") {
+            aheadBy
+            behindBy
+            # 「未リリース ◯コミット」をコミット数ではなく中身の差分で判定するために取る
+            # （#2316）。baseはこのref（main）、headはdevelop。同じ1リクエストに乗るので
+            # GitHub APIの消費は増えない。
+            baseTarget { ... on Commit { tree { oid } } }
+            headTarget { ... on Commit { tree { oid } } }
+          }
         }
         ${refSelections}
       }
@@ -85,7 +101,24 @@ export async function lookupBranchRefs(
 
   return {
     existingBranches,
-    developVsMain: repository.comparison?.compare ?? null,
+    developVsMain: toBranchComparison(repository.comparison?.compare ?? null),
+  };
+}
+
+/**
+ * `compare`の応答を`BranchComparison`へ落とす（#2316）。
+ *
+ * **tree OIDが両方取れて一致したときだけ`sameContent: true`。** 取れなかった場合は
+ * false（＝差分があるものとして扱う）へ倒し、取得の失敗でリリースを止めないようにする。
+ */
+function toBranchComparison(compare: CompareNode): BranchComparison | null {
+  if (!compare) return null;
+  const baseTree = compare.baseTarget?.tree?.oid ?? null;
+  const headTree = compare.headTarget?.tree?.oid ?? null;
+  return {
+    aheadBy: compare.aheadBy,
+    behindBy: compare.behindBy,
+    sameContent: baseTree !== null && baseTree === headTree,
   };
 }
 

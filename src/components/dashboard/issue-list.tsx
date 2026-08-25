@@ -14,6 +14,7 @@ import {
   Compass,
   ExternalLink,
   ListChecks,
+  Loader2,
   Lock,
   MessageCircleQuestion,
   MessageSquare,
@@ -54,7 +55,9 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
+import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
+import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
 import {
@@ -65,6 +68,7 @@ import {
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import {
   formatQuestionListCount,
+  isQaAnswerWaiting,
   resolveQuestionState,
   type QuestionState,
 } from "@/lib/question-attention";
@@ -278,25 +282,38 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
  *
  * 読み終わったもの（`confirmed`）と質問以外（null）には何も出さない——一覧の大半を占める
  * 通常のIssueにまでラベルが増えると、隣に並ぶGitHubのラベルが読めなくなる。
+ *
+ * **回答待ちだけは質問Issue以外にも出し、アイコンを回す**（#2309）。判定を`waiting`
+ * （`isQaAnswerWaiting`）で受け取るのは、「質問する」ボタンが通常のIssueのコメント欄にも
+ * あるため（`resolveQuestionState`の`waiting`はタイトルが質問Issueの形のものしか通さない）。
+ * 回すのは待っているのが処理だから——**承認待ち（琥珀）は人を待っているので回さない**
+ * （`WorkflowStepBadge`の外周リングと同じ使い分け）。未確認も回さない。
  */
-function QuestionStateBadge({ state }: { state: QuestionState | null }) {
-  if (state !== "unconfirmed" && state !== "waiting") return null;
-  const unconfirmed = state === "unconfirmed";
+function QuestionStateBadge({
+  state,
+  waiting,
+}: {
+  state: QuestionState | null;
+  /** 回答待ちか（`isQaAnswerWaiting`の結果。質問Issueに限らない） */
+  waiting: boolean;
+}) {
+  if (!waiting && state !== "unconfirmed") return null;
   return (
     <span
       title={
-        unconfirmed
-          ? "回答が届いていますが、まだ開いていません"
-          : "質問を投げたところで、まだ回答が届いていません"
+        waiting
+          ? "質問を投げたところで、まだ回答が届いていません"
+          : "回答が届いていますが、まだ開いていません"
       }
       className={cn(
         "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-        unconfirmed
-          ? "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
-          : "bg-blue-500/15 text-blue-700 ring-blue-500 dark:text-blue-400",
+        waiting
+          ? "bg-blue-500/15 text-blue-700 ring-blue-500 dark:text-blue-400"
+          : "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400",
       )}
     >
-      {unconfirmed ? "未確認" : "回答待ち"}
+      {waiting && <Loader2 className="size-3 animate-spin" />}
+      {waiting ? "回答待ち" : "未確認"}
     </span>
   );
 }
@@ -587,6 +604,21 @@ export function IssueList({
     const planPending = planPendingIssueIds.has(issue.id);
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
+    /**
+     * 右上の進捗バッジ（`WorkflowStepBadge`）が回答待ちを言うか（#2309）。**言うなら
+     * `QuestionStateBadge`の「回答待ち」は出さない**——同じ行の左右で同じことを2回言わせない
+     * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+     * 判定を行の側に置いているのは、どちらを出すかを知れるのが両方を並べているここだけだから。
+     *
+     * バッジはProject Statusを持たない行では何も描かず（`getWorkflowStepIndex`がnull）、
+     * 承認待ちの行では確認待ちの方を優先する（`workflow-status-steps.tsx`の
+     * `showQaAnswerPending`と同じ条件）。そのどちらでも回答待ちはこの行から読めなくなるので、
+     * ラベル側が引き受ける。質問Issueは`ready`のまま置かれるのが普通なので、実際に出るのは
+     * ほぼこちら。
+     */
+    const stepBadgeShowsQaAnswerPending =
+      getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null &&
+      !isApprovalPending(issue.labels);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -689,7 +721,10 @@ export function IssueList({
           </p>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center gap-1">
-              <QuestionStateBadge state={resolveQuestionState(issue)} />
+              <QuestionStateBadge
+                state={resolveQuestionState(issue)}
+                waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}
+              />
               {listCardLabels(issue.labels).map((label) => (
                 <span
                   key={label.name}

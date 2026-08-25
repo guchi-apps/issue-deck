@@ -36,10 +36,15 @@ function workflowExists(
  * 未配布のcallerを、これから配れるのか（`missing`）配布の対象ですらないのか（`unsupported`）に分ける。
  *
  * 配布の一覧は`missingRepairWorkflows`が作っており、`REPAIR_WORKFLOW_SPECS`の`requires`を
- * 持つリポジトリしか対象にしない（#1948）。例えば`release-develop-to-main.yml`はあるが
+ * **すべて**持つリポジトリしか対象にしない（#1948）。例えば`release-develop-to-main.yml`はあるが
  * `claude-issue-dispatch.yml`が無いリポジトリでは、`issue-<番号>`のPRに出るCI修正ボタンの
  * 起動先（`claude-ci-fix.yml`）は配布の一覧に現れない。そこへ「設定＞フリート運用から配れます」と
  * 案内すると行き止まりになるため、前提ファイルの有無まで確かめて文言を分ける。
+ *
+ * **`requires`が複数になった**（#2303）。1つでも欠ければ配布の一覧に出ないので`unsupported`。
+ * 順に確かめて**欠けが見つかった時点で打ち切る**（残りを問い合わせても結論は変わらず、
+ * GitHub APIを無駄に消費するだけ）。並びは安い順ではなく宣言順で、`REPAIR_WORKFLOW_SOURCE`
+ * （どのcallerにも要る参照元）が先頭に来るため、対象外のリポジトリでは1回で決まる。
  */
 async function resolveMissingState(
   owner: string,
@@ -49,7 +54,10 @@ async function resolveMissingState(
 ): Promise<RepairWorkflowState> {
   const requires = REPAIR_WORKFLOW_SPECS.find((spec) => spec.file === workflowFile)?.requires;
   if (!requires) return "missing";
-  return (await workflowExists(owner, repo, requires, token)) ? "missing" : "unsupported";
+  for (const required of requires) {
+    if (!(await workflowExists(owner, repo, required, token))) return "unsupported";
+  }
+  return "missing";
 }
 
 /**

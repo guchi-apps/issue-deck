@@ -361,10 +361,36 @@ describe("missingRepairWorkflows", () => {
     expect(missing).toContain("claude-pr-repair.yml");
   });
 
-  it("無人実行のcallerが無いリポジトリには、自動修復のcallerを配らない", () => {
-    // 参照タグも with: の値も写す先が無く、既定値だけのcallerは動かない。
-    // `deploy-retry.yml`だけは`deploy.yml`の有無で決まるので、ここには残る（#2134）
-    expect(missingRepairWorkflows(["ci.yml", "deploy.yml"])).toEqual(["deploy-retry.yml"]);
+  it("無人実行のcallerが無いリポジトリには、1つも配らない", () => {
+    // 参照タグも with: の値も写す先が無く、配布スクリプトが`fail`で落ちる（#2303）。
+    // 挙げると画面のボタンを押した時点でそのリポジトリぶんが必ず失敗する
+    expect(missingRepairWorkflows(["ci.yml", "deploy.yml"])).toEqual([]);
+  });
+
+  it("参照タグの配布に加わった vps・subpc を、callerの配布の対象にはしない", () => {
+    // #2303で参照タグの対象を広げた結果、この構成が一覧へ出るようになった。
+    // `release-develop-to-main.yml`・`deploy.yml`を持つので、`requires`に
+    // `claude-issue-dispatch.yml`が無いと`claude-pr-repair.yml`・`deploy-retry.yml`が
+    // 不足として挙がってしまう（配布スクリプトは写し元が無く必ず失敗する）
+    expect(
+      missingRepairWorkflows([
+        "ci.yml",
+        "claude-review-develop.yml",
+        "deploy.yml",
+        "issue-labels.yml",
+        "release-develop-to-main.yml",
+        "sync-secrets.yml",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("`requires`は全部そろって初めて配る", () => {
+    // #2303で`requires`を配列にした。`deploy-retry.yml`は`deploy.yml`だけでは配れない
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml"])).not.toContain("deploy-retry.yml");
+    expect(missingRepairWorkflows(["deploy.yml"])).not.toContain("deploy-retry.yml");
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml", "deploy.yml"])).toContain(
+      "deploy-retry.yml",
+    );
   });
 
   // #2134。本番デプロイが一時的な失敗で落ちたときに拾う唯一の経路

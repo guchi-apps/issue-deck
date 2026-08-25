@@ -349,6 +349,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **Issue詳細のコメントは定期的に取り直さない**（#2309）。
+  [`use-issue-comments.ts`](../src/hooks/use-issue-comments.ts)が`GET /api/issues/comments`を
+  叩くのは**選択中のIssueが切り替わったときだけ**で、Issue一覧のポーリング（10秒ごと・
+  `GET /api/issues`はDBだけを読む）には乗っていない。コメントの取得はGitHub APIを消費するため、
+  開いている画面のために回し続けない。
+  - **開いたまま何かの到着を待つ表示を足すときは、DBに乗る合図で1回だけ取り直す。**
+    コメント欄の回答待ちの吹き出し（`CommentThread`の`qaAnswerPending`）は
+    `Issue.qaAnswerPendingAt`が**立ち→消えへ変わったこと**を合図にしている。この列は
+    `issue_comment`のWebhookで更新され（`updateQaAnswerPendingState`）、一覧のポーリングに
+    乗ってクライアントへ届くので、**待っているあいだのGitHub API消費は0で、回答1件につき1回**
+    だけ取り直せる。取り直しでは`isLoading`を立てない（立てると読んでいたコメントが
+    読み込み中の骨組みへ差し替わる）。
+  - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
+    左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
@@ -922,8 +936,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
   [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
   （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
-  （`formatQuestionListCount`）・左メニューとスマホのホームの色（`countUnconfirmedQuestions`）が
-  同じ関数を通す。**画面ごとに条件を書き足さない。**
+  （`formatQuestionListCount`）・左メニューとスマホのホームの色（`countUnconfirmedQuestions`）・
+  左メニューのスピナー（`countWaitingQuestions`・#2309）が同じ関数を通す。
+  **画面ごとに条件を書き足さない。**
+  - **例外は「回答待ち」1つで、質問Issueに限らない**（#2309。`isQaAnswerWaiting`）。
+    「質問する」はIssue詳細のコメント欄にもあり、通常のIssueも`qaAnswerPendingAt`が立つ。
+    **判定を分けたのはここだけ**で、未確認・確認済みは今までどおり`resolveQuestionState`が持つ
+    ——あちらは「質問」ビューの在庫を数えるためのもので、母集団を広げると左メニューの数字と
+    一覧の行数が食い違う。だから**左メニューのスピナーも質問Issueだけを数える**
+    （押した先に居ないものを数えない）。
+  - **同じ行で回答待ちを2回言わせない**（#2309）。右上の進捗バッジ（`WorkflowStepBadge`）は
+    以前から`qaAnswerPending`を受け取って青いパイと「（Claudeの回答待ち）」を出しており、
+    ラベルを無条件に足すと左右に並ぶ。**どちらを出すかは行を組み立てる`issue-list.tsx`が決める**
+    （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」・#2057）。
+    バッジが何も描かない行（Project Statusを持たない＝`getWorkflowStepIndex`がnull。質問Issueは
+    ふつうここ）と、確認待ちを優先する行でだけラベルが引き受ける。
+    **回すかどうかの条件は`isWorkflowBadgeSpinning`に集約したまま**で、`qaAnswerPending`も
+    そこへ足した（承認待ちが先に効く順序も同じ場所で決まる）。
   - **「未確認」は回答が届いていて未読のものだけで、回答待ちは含めない。** 未確認は
     *いま読める*ものを指す合図で、質問を投げた直後から点けると回答が返ってきたかどうかを
     そこから読めなくなる。未読の判定は既存の未読管理（`hasUnreadComments`＝行の青いドットと
@@ -940,6 +969,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     （`formatQuestionListCount`）で読む。
     件数の見た目はPC（`sidebar-nav.tsx`）とスマホ（`mobile-home-screen.tsx`）で共通の
     [`nav-count.tsx`](../src/components/dashboard/nav-count.tsx)に置く。
+  - **丸（未確認）とスピナー（回答待ち）は併存する**（#2309）。丸は人が動くまで進まないもの、
+    スピナーは人が何もしなくても進むもので、促す行為が違う。同じ行に両方出ることがあるので
+    片方へ寄せない。`formatQuestionNavTitle`の吹き出しは「回答待ち」→「未確認」の順に並べる。
   - **件数は「いま読める数」で、確認済みを含む総数ではない**（手作業の`actionable`（#1763）と
     同じ考え方。未確認が無ければ`0`になる）。総数との差は一覧のヘッダー（`3件・未確認1件`）で説明する。
   - **数え方の差し替えは`issue-stats.ts`の`computeNavCountsForFilters`で行い、画面側では行わない**
@@ -1476,6 +1508,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   手作業Issueは本文の`## 関連`へ起点Issueの番号を書く決まりなので、DBキャッシュにある`body`と
   ラベルだけで足りる（`extractManualStepOrigin`）。**本文の先頭から最初の`#番号`を拾うのは誤り**で、
   `## 前提条件`に別Issueへの参照が入るため見出しの中だけを読む。一般のサブIssueは表示しない。
+  **「未リリース ◯コミット」はコミット数ではなく中身の差分で決める**（#2316・`unreleasedCommitCount`）。
+  `main...develop`の`aheadBy`をそのまま出すと、**リリース直後のリポジトリがすべて
+  「未リリース 1コミット」になる**。リリースフローはバンプPR（`release/vX.Y.Z`→develop）の
+  head（`$GITHUB_SHA^2`）を`release-main/vX.Y.Z`として凍結してmainへ出すため（#2117）、
+  バンプPRを`develop`へマージしたときにできる**マージコミットだけがdevelop側に取り残される**
+  ——差分は0ファイルなのに`aheadBy`は1になる（実測: aide v0.14.2 は`ahead_by=1 files=0`で、
+  `main`と`develop`のtree OIDはどちらも同じ）。表示だけの問題ではなく、`canTriggerRelease`が
+  `aheadBy > 0`で決まっていたため、**出すものが無くても「リリースする」が押せて中身ゼロの
+  リリースが1本走る**状態だった。そこで`branches-api.ts`のGraphQLで`compare`の
+  `baseTarget`/`headTarget`のtree OIDも取り（**同じ1リクエストに乗るのでAPI消費は増えない**）、
+  一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
+  **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
+  リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。

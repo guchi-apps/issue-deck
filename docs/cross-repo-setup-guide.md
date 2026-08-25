@@ -650,6 +650,29 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 **上げ忘れても何も起きないため、この一覧が唯一の気づく手段になる。** `workflows/v10`は
 car-careだけに配られ、他9リポジトリはv9のまま残っていた（#1147の修正が届いていない状態）。
 
+#### 一覧の対象は「共有ワークフローを参照しているか」で決める（#2303）
+
+母集団は**連携済み・アーカイブ済みでないリポジトリすべて**で、`.github/workflows/`に
+`@workflows/vN`の参照が1つも無いものだけを落とす（`collectWorkflowTags`）。
+
+**`Repository.hasClaudeWorkflow`で絞ってはいけない。** あれは`claude-issue-dispatch.yml`の
+有無、つまり**無人実行に対応しているか**の列で、「共有ワークフローを参照しているか」とは
+別の軸である。絞っていた間、`issue-labels.yml`だけで共有ワークフローを参照している
+`vps`・`docs`・`subpc`・`claude-config`・`question`は一覧にも配布にも永久に現れなかった。
+
+実害が出ている。#2294で`reusable-issue-labels.yml`から`schedule`ジョブを外し
+`workflows/v27`を配ったところ、**PRが作られたのは15リポジトリで、課金が発生している
+`vps`・`docs`・`subpc`・`claude-config`は1件も含まれず**、目的の従量課金停止が達成できて
+いなかった（4件とも`claude-issue-dispatch.yml`が404だったため）。同じ代用は
+`/api/repositories/release-pending-merges`が#1727で先に取り除いている。
+
+**広がるのはタグ配布と共有スクリプトの更新だけで、callerの新規配布は広がらない。**
+`REPAIR_WORKFLOW_SPECS`の`requires`はすべて`claude-issue-dispatch.yml`を含んでおり、
+持たないリポジトリは配布の対象外になる（下記
+[supported-repositories.md](supported-repositories.md)「画面の配布ボタンの対象外なので
+手で配る」）。配布スクリプトが参照タグと`with:`の値をそのcallerから写すため、無ければ
+`fail`で落ちるからで、挙げるとボタンを押した時点で必ず失敗する。
+
 #### 更新PRは既定で自動マージする（#1602）
 
 チェックボックス「作成したPRを自動でマージする」が既定でON。ONのときの配布は次のように動く。

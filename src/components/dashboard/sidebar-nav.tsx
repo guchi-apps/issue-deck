@@ -9,6 +9,7 @@ import {
   EyeOff,
   FolderGit2,
   GitBranch,
+  Loader2,
   Lock,
   Plus,
   Rocket,
@@ -74,6 +75,11 @@ type SidebarNavProps = {
    */
   unconfirmedQuestionCount: number;
   /**
+   * 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。**「質問」の行の
+   * スピナーを回すかどうかと、吹き出しの内訳に使う。行に出す数字はこれまでどおり`navCounts`。**
+   */
+  waitingQuestionCount: number;
+  /**
    * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
    * 使う。**nullは未取得**で、そのときは件数を出さない（0を出すと「動いているものが無い」と
    * 読めてしまう）。
@@ -125,6 +131,7 @@ export function SidebarNavView({
   checkUserPullRequestCount,
   manualStepAttention,
   unconfirmedQuestionCount,
+  waitingQuestionCount,
   releaseActivity,
   pullRequestNavCounts,
   repositories,
@@ -181,6 +188,7 @@ export function SidebarNavView({
     onClick,
     count,
     emphasis = "none",
+    busy = false,
     title,
   }: {
     key: string;
@@ -192,6 +200,14 @@ export function SidebarNavView({
     count?: number | null;
     /** 件数の強調（`NavCount`。塗りつぶしの丸は人が動くまで進まないものだけ） */
     emphasis?: NavCountEmphasis;
+    /**
+     * その行の先で何かが処理中か（#2309）。ラベルの右に回るアイコンを出す。
+     *
+     * **オレンジの丸（`emphasis`）と役割が違う。** 丸は人が動くまで進まないもの、これは
+     * 人が何もしなくても進むものを表す。同じ行に両方出ることがあり（回答待ちの質問と、
+     * 読んでいない回答が同居する）、それぞれ別の行為を促すので片方へ寄せない。
+     */
+    busy?: boolean;
     title?: string;
   }) {
     return (
@@ -208,6 +224,7 @@ export function SidebarNavView({
           <span className="flex items-center gap-2">
             <Icon className="size-3.5 text-muted-foreground" />
             {label}
+            {busy && <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />}
           </span>
           {/* 強調の使い分けと見た目は`NavCount`（スマホのホームと共通） */}
           <NavCount count={count} emphasis={emphasis} />
@@ -259,9 +276,16 @@ export function SidebarNavView({
               count: navCounts[view.id],
               // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
               emphasis: unconfirmedQuestionCount > 0 ? "attention" : "none",
+              // 回答を待っているあいだは回す（#2309）。**丸と併存する**——「返事待ちが
+              // ある」ことと「読める回答がある」ことは別で、片方だけを出すと他方を見落とす
+              busy: waitingQuestionCount > 0,
               // 数字（総数）と丸（未確認）で意味が違うため、行のラベル（「質問」）からは
               // 何を数えているのか読めない。吹き出しで内訳を補う
-              title: formatQuestionNavTitle(navCounts[view.id], unconfirmedQuestionCount),
+              title: formatQuestionNavTitle(
+                navCounts[view.id],
+                unconfirmedQuestionCount,
+                waitingQuestionCount,
+              ),
             }),
           )}
           {navRow({

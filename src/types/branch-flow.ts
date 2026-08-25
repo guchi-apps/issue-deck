@@ -8,6 +8,19 @@ export type BranchComparison = {
   aheadBy: number;
   /** baseに対してheadが遅れているコミット数 */
   behindBy: number;
+  /**
+   * `main`と`develop`の**中身（tree）が同一**か（#2316）。
+   *
+   * **`aheadBy`が1以上でも、出すものが無いことがある。** リリースフローは
+   * バンプPR（`release/vX.Y.Z`→develop）のhead（`$GITHUB_SHA^2`）を`release-main/vX.Y.Z`
+   * として凍結してmainへ出す（#2117）ため、バンプPRを`develop`へマージしたときにできる
+   * **マージコミットだけがdevelop側に取り残される**。差分は0ファイルなのに`aheadBy`は1に
+   * なり、リリース直後のリポジトリすべてが「未リリース 1コミット」に見えていた。
+   *
+   * tree OIDの一致で判定するので、コミット数ではなく実際に出るものの有無を表す。
+   * 取得できなかった場合はfalse（＝差分があるものとして扱い、リリースを止めない）。
+   */
+  sameContent: boolean;
 };
 
 /**

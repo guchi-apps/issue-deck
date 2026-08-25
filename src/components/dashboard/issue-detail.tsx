@@ -1054,6 +1054,7 @@ export function IssueDetail({
               localSession={!executionTarget.expectsActionsRun}
               sessionAlive={sessionAlive}
               canAskClaude={canAskClaude(issue)}
+              qaAnswerPending={qaAnswerPending}
               onComment={handleApprovalComment}
               onAskClaude={handleApprovalAskClaude}
               onDismissCheckUser={handleDismissCheckUser}

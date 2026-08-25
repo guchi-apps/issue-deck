@@ -59,6 +59,39 @@ describe("fetchRepairWorkflowAvailability", () => {
     );
   });
 
+  it("無人実行のcallerが無いリポジトリのバンプPRは、配布の対象外として返す", async () => {
+    // #2303。`vps`と同じ構成（`release-develop-to-main.yml`はあるが
+    // `claude-issue-dispatch.yml`が無い）。`requires`が複数になったので、
+    // 「リリースフローがあるから配れます」と案内してはいけない——配布スクリプトは
+    // 参照タグと`with:`の写し元が無く必ず失敗する
+    fetchWorkflowExists.mockImplementation(
+      async (_owner, _repo, file: string) => file === "release-develop-to-main.yml",
+    );
+
+    const availability = await fetchRepairWorkflowAvailability(
+      "guchi-apps",
+      "vps",
+      BUMP_PR,
+      ["ci"],
+      "token",
+    );
+
+    expect(availability).toEqual({ ci: "unsupported" });
+    // 欠けが見つかった時点で打ち切るので、`release-develop-to-main.yml`は問い合わせない
+    expect(fetchWorkflowExists).toHaveBeenCalledWith(
+      "guchi-apps",
+      "vps",
+      "claude-issue-dispatch.yml",
+      "token",
+    );
+    expect(fetchWorkflowExists).not.toHaveBeenCalledWith(
+      "guchi-apps",
+      "vps",
+      "release-develop-to-main.yml",
+      "token",
+    );
+  });
+
   it("ボタンを出す種類が無ければGitHub APIを呼ばない", async () => {
     const availability = await fetchRepairWorkflowAvailability(
       "guchi-apps",

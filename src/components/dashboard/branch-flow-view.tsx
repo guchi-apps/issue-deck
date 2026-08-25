@@ -67,6 +67,7 @@ import {
   MAIN_BRANCH,
   isClosedLane,
   isReleaseCiPending,
+  unreleasedCommitCount,
   type BranchFlow,
 } from "@/lib/branch-flow";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
@@ -1105,7 +1106,9 @@ function ReleaseFlowGraph({
         all.findIndex((other) => other.manualStep.number === entry.manualStep.number) === index,
     );
 
-  const unreleasedCommits = repository.release.comparison?.aheadBy ?? null;
+  // **`comparison.aheadBy`をそのまま出さない**（#2316）。バンプPRのマージコミットのように
+  // 中身の差分がゼロのまま残るコミットを数えないための判定を、3か所で共有する。
+  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
   // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
@@ -1137,7 +1140,7 @@ function ReleaseFlowGraph({
           <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-primary" />
           {DEVELOP_BRANCH}
         </span>
-        {unreleasedCommits !== null && unreleasedCommits > 0 && (
+        {unreleasedCommits > 0 && (
           <span>未リリース {unreleasedCommits}コミット</span>
         )}
         {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
@@ -1152,7 +1155,7 @@ function ReleaseFlowGraph({
               repositoryFullName={repository.repositoryFullName}
               currentVersion={repository.release.latestVersion}
               deployedAt={latestReleaseMergedAt}
-              unreleasedCommits={unreleasedCommits ?? 0}
+              unreleasedCommits={unreleasedCommits}
               isPending={deployTriggerPending}
               onTriggered={onDeployTriggered}
             />
@@ -1405,7 +1408,7 @@ function RepositorySummaryRow({
   onToggle: () => void;
 }) {
   const { summary } = repository;
-  const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -1699,7 +1702,7 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  * `owner/`を落としているフル名と、開いたときに毎回目で追う数（未リリース・進行中）を置く。
  */
 function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
-  const unreleasedCommits = repository.release.comparison?.aheadBy ?? 0;
+  const unreleasedCommits = unreleasedCommitCount(repository.release.comparison);
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
