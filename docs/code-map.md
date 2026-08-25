@@ -2208,6 +2208,13 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   道具で、常駐せず、**読んだ結果から対象セッションへ何も送らない**。転記を読む処理をここと
   `session-notify.sh`の外へ広げないこと（Claude Codeの内部仕様に依存しているため）。設計は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)。
+- **ローカルセッションのトークン使用量は`scripts/session-usage.sh`が集計する**（#2350）。転記の
+  `message.usage`を`message.id`で重複除去して足し、種別（実装／計画レビュー／横断質問）・
+  Issue番号ごとにAPI換算の目安を出す。**`message.id`で除去しないと約2.5倍に膨らむ**
+  （`guchi-apps/question#34`）。集計と整形は`scripts/lib/session-usage.sh`にあり、
+  `inspect-session.sh`は見出しの1行（`oneline`）だけを借りる。これも転記を読むが、読むのは
+  usageと時刻・作業ディレクトリだけで、**やり取りの中身は出力に載せない**。設計は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)「使用量を集計する」。
   **`run-issue-session.sh`が同じ置き場を見るのは「`*.jsonl`が1つでもあるか」だけ**
   （#1541。`claude --continue`を付けるかの判定で、**中身は開かない**）。名前の導き方が変われば
   ヒットしなくなり、新規会話で始まるだけなので、上のルールの主旨（内部仕様への依存を広げない）は
