@@ -23,7 +23,14 @@ describe("lookupBranchRefs", () => {
   it("問い合わせたブランチのうち実在するものだけを返す", async () => {
     stubGraphql({
       repository: {
-        comparison: { compare: { aheadBy: 12, behindBy: 0 } },
+        comparison: {
+          compare: {
+            aheadBy: 12,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { tree: { oid: "tree-develop" } },
+          },
+        },
         b0: { name: "issue-1455" },
         b1: null,
       },
@@ -37,7 +44,40 @@ describe("lookupBranchRefs", () => {
     );
 
     expect(result.existingBranches).toEqual(["issue-1455"]);
-    expect(result.developVsMain).toEqual({ aheadBy: 12, behindBy: 0 });
+    expect(result.developVsMain).toEqual({ aheadBy: 12, behindBy: 0, sameContent: false });
+  });
+
+  // #2316。バンプPRを`develop`へマージしたときのマージコミットが残っている状態
+  it("treeが一致すればsameContentをtrueで返す（差分ゼロのコミットが残っている状態）", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          compare: {
+            aheadBy: 1,
+            behindBy: 24,
+            baseTarget: { tree: { oid: "same-tree" } },
+            headTarget: { tree: { oid: "same-tree" } },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "aide", [], "token");
+
+    expect(result.developVsMain).toEqual({ aheadBy: 1, behindBy: 24, sameContent: true });
+  });
+
+  // tree OIDが取れないときに「差分なし」へ倒すと、出すものがあるのにリリースを止めてしまう
+  it("tree OIDが取れなければsameContentはfalse", async () => {
+    stubGraphql({
+      repository: {
+        comparison: { compare: { aheadBy: 3, behindBy: 0, baseTarget: null, headTarget: null } },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "aide", [], "token");
+
+    expect(result.developVsMain).toEqual({ aheadBy: 3, behindBy: 0, sameContent: false });
   });
 
   it("ブランチ名はクエリ本文へ埋め込まず、GraphQLの変数として渡す", async () => {

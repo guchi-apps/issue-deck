@@ -1508,6 +1508,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   手作業Issueは本文の`## 関連`へ起点Issueの番号を書く決まりなので、DBキャッシュにある`body`と
   ラベルだけで足りる（`extractManualStepOrigin`）。**本文の先頭から最初の`#番号`を拾うのは誤り**で、
   `## 前提条件`に別Issueへの参照が入るため見出しの中だけを読む。一般のサブIssueは表示しない。
+  **「未リリース ◯コミット」はコミット数ではなく中身の差分で決める**（#2316・`unreleasedCommitCount`）。
+  `main...develop`の`aheadBy`をそのまま出すと、**リリース直後のリポジトリがすべて
+  「未リリース 1コミット」になる**。リリースフローはバンプPR（`release/vX.Y.Z`→develop）の
+  head（`$GITHUB_SHA^2`）を`release-main/vX.Y.Z`として凍結してmainへ出すため（#2117）、
+  バンプPRを`develop`へマージしたときにできる**マージコミットだけがdevelop側に取り残される**
+  ——差分は0ファイルなのに`aheadBy`は1になる（実測: aide v0.14.2 は`ahead_by=1 files=0`で、
+  `main`と`develop`のtree OIDはどちらも同じ）。表示だけの問題ではなく、`canTriggerRelease`が
+  `aheadBy > 0`で決まっていたため、**出すものが無くても「リリースする」が押せて中身ゼロの
+  リリースが1本走る**状態だった。そこで`branches-api.ts`のGraphQLで`compare`の
+  `baseTarget`/`headTarget`のtree OIDも取り（**同じ1リクエストに乗るのでAPI消費は増えない**）、
+  一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
+  **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
+  リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。

@@ -7,6 +7,7 @@ import {
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type {
+  BranchComparison,
   BranchFlowDeployRun,
   BranchFlowDeployState,
   BranchFlowIssuePriority,
@@ -103,6 +104,26 @@ export function releaseVersionFromTitle(title: string): string | null {
  */
 export function isClosedLane(lane: BranchFlowLane): boolean {
   return lane.status === "closed";
+}
+
+/**
+ * 画面に出す「未リリース ◯コミット」の数（#2316）。**コミット数をそのまま出さない。**
+ *
+ * リリースフローはバンプPR（`release/vX.Y.Z`→develop）のheadを`release-main/vX.Y.Z`として
+ * 凍結してmainへ出す（#2117）ため、バンプPRを`develop`へマージしたときにできる
+ * **マージコミットだけがdevelop側に残る**。中身の差分は0ファイルなのに`aheadBy`は1になり、
+ * リリース直後のリポジトリがすべて「未リリース 1コミット」に見えていた。表示だけの問題では
+ * なく、`canTriggerRelease`が`aheadBy > 0`で決まるため、**出すものが無くても
+ * 「リリースする」が押せて中身ゼロのリリースが1本走る**状態だった。
+ *
+ * そこで`main`と`develop`のtreeが一致するときは0を返す。**中身が同じなら出すものは無い**、
+ * という判定なので、バンプのマージコミット以外の「差分ゼロで残るコミット」にも同じく効く。
+ *
+ * `comparison`が取れていない（ブランチが無い・取得に失敗した）ときは0。
+ */
+export function unreleasedCommitCount(comparison: BranchComparison | null | undefined): number {
+  if (!comparison || comparison.sameContent) return 0;
+  return comparison.aheadBy;
 }
 
 /**
@@ -339,7 +360,7 @@ function buildRepository({
     releases,
     openReleasePullRequest: releasePullRequest,
     openBumpPullRequest: bumpPullRequest,
-    unreleasedCommits: branchStatus?.developVsMain?.aheadBy ?? 0,
+    unreleasedCommits: unreleasedCommitCount(branchStatus?.developVsMain),
     deployState,
   });
 
@@ -407,7 +428,7 @@ function buildRepository({
       canRelease &&
       releasePullRequest === null &&
       bumpPullRequest === null &&
-      (branchStatus?.developVsMain?.aheadBy ?? 0) > 0,
+      unreleasedCommitCount(branchStatus?.developVsMain) > 0,
     // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
     // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
     // デプロイが動いている間だけ押させない（`deploy.yml`の`concurrency`は
