@@ -105,6 +105,32 @@ describe("isWorkflowBadgeSpinning", () => {
     );
   });
 
+  // 質問を投げてから回答が返るまで動いているのはエージェント（#2309）。実行が紐づかない
+  // 経路（サブPCの質問セッション）でも待ち時間は数十秒〜数分ある
+  it("Claudeの回答待ちなら、実行が紐づいていなくても回す", () => {
+    expect(
+      isWorkflowBadgeSpinning({
+        actionsRunning: { isRunning: false },
+        session: null,
+        approvalPending: false,
+        qaAnswerPending: true,
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it("承認待ちのときは回答待ちでも回さない", () => {
+    expect(
+      isWorkflowBadgeSpinning({
+        actionsRunning: null,
+        session: null,
+        approvalPending: true,
+        qaAnswerPending: true,
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
   it("承認待ちのときは実行先によらず回さない", () => {
     expect(
       isWorkflowBadgeSpinning({

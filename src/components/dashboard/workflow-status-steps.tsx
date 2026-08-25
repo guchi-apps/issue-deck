@@ -141,6 +141,9 @@ export function WorkflowStepBadge({
     actionsRunning: running,
     session,
     approvalPending,
+    // 回答を待っているあいだも回す（#2309）。実行が紐づかない質問（サブPCの質問セッション）
+    // でも待ち時間は数十秒〜数分あり、回さないと一覧では止まって見える
+    qaAnswerPending: showQaAnswerPending,
     now,
   });
   // セッションの様子の短い表現（#1264）。入力待ち・終了・異常終了のときだけ出す

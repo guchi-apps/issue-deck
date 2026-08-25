@@ -26,11 +26,13 @@ function renderSidebar(
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
     unconfirmedQuestionCount = 0,
+    waitingQuestionCount = 0,
     releaseActivity = null,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
     unconfirmedQuestionCount?: number;
+    waitingQuestionCount?: number;
     releaseActivity?: ReleaseActivityCounts | null;
   } = {},
 ) {
@@ -47,6 +49,7 @@ function renderSidebar(
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
       unconfirmedQuestionCount={unconfirmedQuestionCount}
+      waitingQuestionCount={waitingQuestionCount}
       releaseActivity={releaseActivity}
       pullRequestNavCounts={pullRequestNavCounts}
       repositories={[]}
@@ -88,6 +91,7 @@ function renderSidebarWithRepositories(
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
       unconfirmedQuestionCount={0}
+      waitingQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -221,6 +225,32 @@ describe("SidebarNav", () => {
     // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
     expect(button.getAttribute("title")).toContain("3件");
     expect(button.getAttribute("title")).toContain("1件");
+  });
+
+  // 回答待ちのあいだは回るアイコンを出す（#2309）。丸（未確認）とは別の合図で、併存する
+  it("回答待ちの質問があれば回るアイコンを出し、内訳を吹き出しへ添える", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
+    );
+
+    const button = screen.getByRole("button", { name: /質問/ });
+    expect(button.querySelector(".animate-spin")).not.toBeNull();
+    expect(button.getAttribute("title")).toContain("回答待ちが2件");
+    expect(button.getAttribute("title")).toContain("まだ開いていないものが1件");
+  });
+
+  it("回答待ちの質問が無ければ回るアイコンを出さない", () => {
+    renderSidebar(
+      { all: 0, "in-progress": 0, completed: 0 },
+      { ...NAV_COUNTS, question: 3 },
+      { unconfirmedQuestionCount: 1, waitingQuestionCount: 0 },
+    );
+
+    expect(
+      screen.getByRole("button", { name: /質問/ }).querySelector(".animate-spin"),
+    ).toBeNull();
   });
 
   it("未確認の質問が無ければ強調しないが、件数は出す", () => {

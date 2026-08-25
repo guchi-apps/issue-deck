@@ -20,11 +20,18 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
  * | サブPC | セッションが`ALIVE`だが`activity === "NOT_STARTED"`（#1465） | × |
  * | サブPC | `EXITED`/`FAILED`/`GONE` | × |
  * | サブPC | `ALIVE`だが`lastReportedAt`が{@link SESSION_ACTIVITY_STALE_MS}より古い | × |
+ * | 共通 | Claudeへの質問が回答待ち（#2309） | ○ |
  * | 共通 | 承認待ち（`00.check-user`） | × |
  *
  * `RESPONDED`（応答を終えた）を回す側に含めるのは、`summarizeIssueSession`が同じものを
  * tone`running`として扱っているため（`src/lib/dispatch/issue-session.ts`）。判定を2種類に割ると、
  * 同じ画面の別の場所で「実行中」と「実行中でない」が同時に出る。
+ *
+ * 回答待ちを回す側に置いているのは、質問を投げてから回答コメントが返るまでの間、**動いているのは
+ * エージェント**だから（#2309）。Actionsの実行が紐づかない経路（サブPCの質問セッション・
+ * 実行を伴わない質問）でも待ち時間は数十秒〜数分あり、回さないと一覧では止まって見える。
+ * 承認待ちと同時に立つことは無い（`WorkflowStepBadge`が`!approvalPending`で絞ってから渡す）が、
+ * ここでも承認待ちを先に見て、順序を1か所で決めている。
  *
  * 承認待ちを回さない側に置いているのは、バッジ中央にアラートアイコンが重なって「人が対応する番」を
  * 示す状態だから。回転（＝エージェントが動いている）と同時に出すと合図が矛盾する。Actions側は
@@ -60,11 +67,14 @@ export function isWorkflowBadgeSpinning(params: {
   session?: WorkflowBadgeSession | null;
   /** `00.check-user`が付いているか */
   approvalPending: boolean;
+  /** Claudeへの質問が回答待ちか（#2309・`Issue.qaAnswerPendingAt`） */
+  qaAnswerPending?: boolean;
   /** 現在時刻(epoch ms)。マウント前などで未取得(null)のときは古さの判定を行わない */
   now: number | null;
 }): boolean {
-  const { actionsRunning, session, approvalPending, now } = params;
+  const { actionsRunning, session, approvalPending, qaAnswerPending, now } = params;
   if (approvalPending) return false;
+  if (qaAnswerPending) return true;
   if (actionsRunning?.isRunning) return true;
   return isSessionActivelyWorking(session ?? null, now);
 }

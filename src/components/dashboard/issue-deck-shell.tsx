@@ -115,7 +115,7 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
-import { countUnconfirmedQuestions } from "@/lib/question-attention";
+import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import {
   applyOptimisticMerges,
@@ -783,6 +783,22 @@ export function IssueDeckShell({
       ),
     [issues, filters, currentUserLogin],
   );
+  // 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。左メニュー・
+  // スマホのホームでスピナーを回すかどうかと、吹き出しの内訳に使う。**母集団は
+  // `unconfirmedQuestionCount`と同じ**——同じ行に出す2つの合図が別の集合を数えていると、
+  // 丸とスピナーで指している質問が食い違う。
+  const waitingQuestionCount = useMemo(
+    () =>
+      countWaitingQuestions(
+        filterIssuesByView(
+          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
+          "question",
+          currentUserLogin,
+          issues,
+        ),
+      ),
+    [issues, filters, currentUserLogin],
+  );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
   // 参照先のIssueを1件も引けない。
@@ -1278,6 +1294,7 @@ export function IssueDeckShell({
                   checkUserPullRequestCount={mergePendingPullRequests.length}
                   manualStepAttention={manualStepAttention}
                   unconfirmedQuestionCount={unconfirmedQuestionCount}
+                  waitingQuestionCount={waitingQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
@@ -1496,6 +1513,7 @@ export function IssueDeckShell({
                 checkUserPullRequestCount={mergePendingPullRequests.length}
                 manualStepAttention={manualStepAttention}
                 unconfirmedQuestionCount={unconfirmedQuestionCount}
+                waitingQuestionCount={waitingQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
