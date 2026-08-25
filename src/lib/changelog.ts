@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.37.1",
+    date: "2026-08-25",
+    changes: [
+      "developへのマージ後に進捗ステータスが取り残されてしまう不具合の巡回チェックを、より速い間隔で確実に行えるように改善しました。",
+    ],
+  },
+  {
     version: "4.37.0",
     date: "2026-08-25",
     changes: [
