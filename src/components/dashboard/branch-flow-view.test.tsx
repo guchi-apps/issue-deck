@@ -1697,9 +1697,7 @@ describe("BranchFlowView", () => {
             },
           }),
         ],
-        branchStatuses: [
-          branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } }),
-        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
