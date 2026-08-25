@@ -100,6 +100,7 @@ import {
   labelsAfterCheckUserDismissal,
   labelsAfterRejection,
   rejectCommentBody,
+  withoutCheckUserLabels,
   requestContinuationCommentBody,
   requestPrFixCommentBody,
   withRollbackFailureNotice,
@@ -496,6 +497,21 @@ export function MobileIssueDetail({
     );
   }
 
+  /**
+   * 画面から計画に答えた・質問に回答した直後に、手元のIssueから`00.check-user`と理由ラベルを
+   * 落とす（#2341）。**外すのはサーバー側**（`POST /api/dispatch/plan-decision`・
+   * `/question-answer`）で、ここはその結果を一覧のポーリング（10秒間隔）より先に画面へ映すだけ。
+   *
+   * これが無いと、押した直後の画面にラベルと「計画の承認が必要です」のカードが残り続け、
+   * まだ何か操作が要るように見える（Issueの元になった症状）。`21.plan-required`は残す
+   * （フックが外すときと同じ）。
+   */
+  function handleCheckUserResolved() {
+    const labels = withoutCheckUserLabels(issue.labels);
+    if (labels.length === issue.labels.length) return;
+    onIssueUpdated({ ...issue, labels, checkUserLabeledAt: null });
+  }
+
   async function handleUpdateComment(commentId: string, body: string): Promise<boolean> {
     const [owner, repo] = issue.repositoryFullName.split("/");
     const updated = await updateComment({ owner, repo, commentId: Number(commentId), body });
@@ -810,6 +826,7 @@ export function MobileIssueDetail({
               request={questionRequest}
               session={issueSession}
               dispatch={dispatch}
+              onCheckUserResolved={handleCheckUserResolved}
             />
           </div>
         )}
@@ -824,6 +841,7 @@ export function MobileIssueDetail({
               request={planRequest}
               session={issueSession}
               dispatch={dispatch}
+              onCheckUserResolved={handleCheckUserResolved}
             />
           </div>
         )}

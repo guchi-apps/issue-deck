@@ -6,6 +6,7 @@ import {
   decideSessionQuestionRequest,
   findSessionQuestionRequestQuestions,
 } from "@/lib/dispatch/question-requests";
+import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import {
   buildSessionQuestionAnswerCommentBody,
   buildSessionQuestionAnswers,
@@ -94,6 +95,16 @@ export async function POST(request: NextRequest) {
     answers,
     login: user.githubLogin,
   });
+
+  // **答えた時点で確認待ちを解く**（#2341。計画への返事と同じ理由・同じ作法）。画面から
+  // 答えた回は選択フォームが出ないため、フックの「答えた合図」（`PostToolUse`）が飛ばず、
+  // `00.check-user`が`Stop`まで残ることがある。**`defer`では外さない**（人はまだ答えていない）。
+  if (decision !== "defer") {
+    await resolveSessionPlanCheckUser({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+    });
+  }
 
   return NextResponse.json({ request: result.request });
 }

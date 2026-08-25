@@ -292,11 +292,18 @@ export async function requestSessionCheckUser(params: {
 /**
  * 自分で付けた`00.check-user`を、理由ラベルごと外す（#1342・#1417・#1490）。
  *
- * 呼ぶのは`PostToolUse`（人が答えて作業へ戻った）・`Stop`（保険）フックの報告
- * （`POST /api/dispatch/sessions/activity`）で、**自分が付けたと分かっているときだけ**
- * （ホスト側の印。`scripts/lib/session-state.sh`の`.check-user`）。
- * `Stop`はturnごとに飛ぶため、無条件に外すと人が別の理由で付けた`00.check-user`まで落とす。
+ * 呼ぶのは2経路ある。
  *
+ * - `PostToolUse`（人が答えて作業へ戻った）・`Stop`（保険）フックの報告
+ *   （`POST /api/dispatch/sessions/activity`）。**自分が付けたと分かっているときだけ**
+ *   （ホスト側の印。`scripts/lib/session-state.sh`の`.check-user`）。`Stop`はturnごとに飛ぶため、
+ *   無条件に外すと人が別の理由で付けた`00.check-user`まで落とす
+ * - 画面から計画に答えた・質問に回答したとき（#2341。`POST /api/dispatch/plan-decision`・
+ *   `POST /api/dispatch/question-answer`）。**画面から答えると承認プロンプト・選択フォームが
+ *   出ない**ため上のフックの合図が飛ばず、`Stop`（＝実装が全部終わるまで）まで確認待ちが
+ *   残っていた。押した時点で外れないと、人には「まだ何か操作が要る」ようにしか見えない
+ *
+ * どちらの経路でも外すのは`00.check-user`と理由ラベルだけで、`21.plan-required`は残す。
  * 人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として
  * 扱うのでそのまま通る。
  */

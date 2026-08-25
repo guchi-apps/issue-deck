@@ -418,9 +418,22 @@ export function labelsAfterRejection(labels: IssueLabel[]): string[] {
  * （そのIssueが計画提示を要することは変わらない）。
  */
 export function labelsAfterCheckUserDismissal(labels: IssueLabel[]): string[] {
-  return labels
-    .map((label) => label.name)
-    .filter((name) => name !== CHECK_USER_LABEL && !isCheckUserReasonLabel(name));
+  return withoutCheckUserLabels(labels).map((label) => label.name);
+}
+
+/**
+ * `00.check-user`と理由ラベル（`01.check-*`・旧名`00.qa-answered`）を落とした**ラベルのまま**の
+ * 配列を返す（#2341）。
+ *
+ * 名前だけを返す`labelsAfterCheckUserDismissal`と別に置いているのは、**送り先が違う**ため。
+ * あちらはGitHubへ渡す全置換の指示（名前の配列）で、こちらは画面が手元のIssueを描き直すのに使う
+ * ——色も説明も落とさずに残す必要がある。計画の承認・質問への回答を画面から送った直後、
+ * サーバーがラベルを外したことを次のポーリング（最大10秒）を待たずに反映させる。
+ */
+export function withoutCheckUserLabels<T extends { name: string }>(labels: readonly T[]): T[] {
+  return labels.filter(
+    (label) => label.name !== CHECK_USER_LABEL && !isCheckUserReasonLabel(label.name),
+  );
 }
 
 /**

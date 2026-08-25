@@ -85,6 +85,44 @@ describe("PlanApprovalPanel", () => {
     await waitFor(() => expect(screen.getByText("承認を送りました。")).toBeTruthy());
   });
 
+  /**
+   * #2341。ラベルを外すのはサーバー側だが、一覧のポーリングは10秒間隔なので、押した直後の
+   * 画面にはラベルと確認待ちのカードが残ったままになる。手元のIssueにも先に反映させる。
+   */
+  it("承認・修正を送ると、確認待ちが解けたことを親へ伝える", async () => {
+    const onCheckUserResolved = vi.fn();
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        onCheckUserResolved={onCheckUserResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /承認して実装へ進む/ }));
+    await waitFor(() => expect(onCheckUserResolved).toHaveBeenCalledTimes(1));
+  });
+
+  // 端末で答えると言っただけで、人はまだ答えていない
+  it("端末・Remote Controlで答える場合は伝えない", async () => {
+    const onCheckUserResolved = vi.fn();
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        onCheckUserResolved={onCheckUserResolved}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /端末・Remote Controlで答える/ }));
+    await waitFor(() =>
+      expect(screen.getByText("端末に承認プロンプトを出しました。")).toBeTruthy(),
+    );
+    expect(onCheckUserResolved).not.toHaveBeenCalled();
+  });
+
   /** `deny`の理由がそのまま次の指示になるので、本文が空のまま送れてはいけない */
   it("修正は本文を書くまで送れない", () => {
     render(

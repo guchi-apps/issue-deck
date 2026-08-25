@@ -261,7 +261,7 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | 契機 | 外す実行体 |
 | --- | --- |
 | ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
-| ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
+| ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330）。**ローカルセッションの計画パネル・質問パネルから答えた場合は、受け口（`POST /api/dispatch/plan-decision`・`/question-answer`）がその場で外す**（#2341。後述「画面から答えたときは、フックを待たずに外す」） |
 | ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`と、issue-deck側の巡回（`POST /api/issues/progress-sweep`）が進捗の遷移とあわせて外す（#266・#1901・#2294）。**ワークフロー側が落ちた場合の受け皿も巡回**（後述「マージ時に外しそこねた`00.check-user`は巡回が外す」。#2335） |
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
@@ -336,6 +336,32 @@ baseは`develop`に絞らない——`develop`を持たないリポジトリで�
 
 **進捗（Status）は動かさない。** 進めるのは取り残しの巡回の役目で、こちらは進み終えた
 Issueに取り残されたラベルだけを相手にする。
+
+### 画面から答えたときは、フックを待たずに外す（#2341）
+
+ローカルセッションの計画・質問に**issue-deckの画面から答えた場合**（Issue詳細の
+「計画の承認を待っています」「質問の回答を待っています」）、`00.check-user`と理由ラベルは
+返事を受け取った時点で外す。外すのは受け口
+（[`src/app/api/dispatch/plan-decision/route.ts`](../../src/app/api/dispatch/plan-decision/route.ts)・
+[`question-answer/route.ts`](../../src/app/api/dispatch/question-answer/route.ts)）で、
+使うのはフックと同じ`resolveSessionPlanCheckUser`。
+
+**フック任せにできないのは、画面から答えると承認プロンプト・選択フォームが出ないため。**
+ラベルを外す合図は「人が答えた直後の`PostToolUse`」だが、`session-notify.sh`はその報告を
+**直前の状態が`permission_prompt`のときだけ**に間引いている（ツールの実行ごとに飛ぶため）。
+画面から答えた回はその状態にならないことがあり、そのときは`Stop`＝turnの終了、つまり実装が
+全部終わるまで確認待ちが残る。押したのに「計画の承認が必要です」とラベルが居座り、まだ何か
+操作が要るように見えていた。
+
+- **「端末・Remote Controlで答える」では外さない。** 人はまだ答えていないので、外すと
+  待たれていること自体が画面から消える
+- **`21.plan-required`は残す**（フックが外すときと同じ）。修正を送った場合は計画の再提示が
+  要るし、承認した場合もそのIssueが計画提示を要することは変わらない
+- **ラベルを外せなくても返事は成功として返す。** 返事はもうDBに入っていてセッションへ届く
+  （Issueコメントの記録と同じ作法）。失敗を返すと「効かなかった」と誤解して押し直すことになる
+- **画面は押した時点で手元のIssueからもラベルを落とす**（`withoutCheckUserLabels`）。
+  Issue一覧のポーリングは10秒間隔で、GitHub → Webhook → DB → ポーリングと伝わるのを待つと、
+  押した直後の画面にはラベルも確認待ちのカードも残ったままになる
 
 ### closeで外れるラベルはissue-deck側でも外す（#2178）
 
