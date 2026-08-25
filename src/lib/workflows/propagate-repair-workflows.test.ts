@@ -44,6 +44,20 @@ jobs:
 
 let workspace: string | null = null;
 
+/**
+ * スクリプト本体から `validate_generated` の定義を取り出す。
+ *
+ * **写経しない。** ここへ条件をコピーすると、スクリプト側だけ直したときにテストが
+ * 通り続けてしまう（画面側の`brokenRepairWorkflows`と条件を揃える必要がある関門なので、
+ * 実物を動かして確かめる）。
+ */
+function validateGeneratedFunction(): string {
+  const script = readFileSync(SCRIPT, "utf8");
+  const found = /^validate_generated\(\) \{\n[\s\S]*?\n\}$/m.exec(script);
+  if (!found) throw new Error("validate_generated がスクリプトに見つかりません");
+  return found[0];
+}
+
 afterEach(() => {
   if (workspace) rmSync(workspace, { recursive: true, force: true });
   workspace = null;
@@ -89,6 +103,39 @@ describe("propagate-repair-workflows.sh", () => {
     for (const name of TEMPLATES) {
       expect(() => readFileSync(join(TEMPLATE_DIR, name), "utf8"), name).not.toThrow();
     }
+  });
+
+  it("生成結果の検証がCRと未展開のプレースホルダを弾く", () => {
+    // **配る前に落とすための関門**（#2330）。CRLFのリポジトリのCIワークフロー名（`name: CI\r`）を
+    // 差し込んだcallerはYAMLが閉じず、GitHubが読めないまま配られていた。スクリプト本体から
+    // 関数を取り出して、実物の判定をそのまま動かす
+    const validate = validateGeneratedFunction();
+    const dir = mkdtempSync(join(tmpdir(), "validate-"));
+    workspace = dir;
+
+    const check = (name: string, body: string) => {
+      const path = join(dir, name);
+      writeFileSync(path, body);
+      try {
+        execFileSync("bash", ["-c", `${validate}\nvalidate_generated "${path}"`]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    expect(check("ok.yml", 'workflows:\n  - "CI"\n')).toBe(true);
+    expect(check("cr.yml", 'workflows:\n  - "CI\r"\n')).toBe(false);
+    expect(check("placeholder.yml", "uses: x.yml@__TAG__\n")).toBe(false);
+  });
+
+  it("既にあるcallerでも壊れていれば作り直す", () => {
+    // 無条件にスキップしていたため、読めないYAMLのまま配られたcallerを直す経路が
+    // どこにも無かった（#2330）
+    const script = readFileSync(SCRIPT, "utf8");
+
+    expect(script).toContain("REBUILD=true");
+    expect(script).toContain('if validate_generated "$TARGET"; then');
   });
 
   it("配布できるファイル名の許可リストが雛形と一致している", () => {

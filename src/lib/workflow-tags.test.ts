@@ -20,7 +20,9 @@ import {
   parseWorkflowTagVersion,
   missingRepairWorkflows,
   propagationTargets,
+  brokenRepairWorkflows,
   repairPropagationTargets,
+  repairPropagationWorkflows,
   repairWorkflowLabel,
   repairWorkflowPullRequestTitle,
   shortWorkflowTag,
@@ -230,6 +232,7 @@ describe("propagationTargets / workflowTagGroup", () => {
     mismatched: false,
     updatePullRequest: null,
     missingRepairWorkflows: [],
+    brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
     customizedSharedFiles: [],
@@ -417,6 +420,43 @@ describe("missingRepairWorkflows", () => {
   });
 });
 
+describe("brokenRepairWorkflows", () => {
+  // 実物の壊れ方（guchi-apps/asset-manager の claude-ci-fix.yml）。CIワークフロー名が
+  // CRLFのファイルから `CI\r` として抜かれ、そのまま差し込まれていた（#2330）
+  const brokenByCr = `on:
+  workflow_run:
+    workflows:
+      - "CI\r"
+`;
+
+  it("CRを含むcallerを壊れていると判定する", () => {
+    expect(brokenRepairWorkflows({ "claude-ci-fix.yml": brokenByCr })).toEqual([
+      "claude-ci-fix.yml",
+    ]);
+  });
+
+  it("未展開のプレースホルダが残っているcallerを壊れていると判定する", () => {
+    expect(
+      brokenRepairWorkflows({
+        "claude-pr-repair.yml": "uses: guchi-apps/issue-deck/.github/workflows/x.yml@__TAG__\n",
+      }),
+    ).toEqual(["claude-pr-repair.yml"]);
+  });
+
+  it("正常なcallerは対象にしない", () => {
+    expect(
+      brokenRepairWorkflows({
+        "claude-ci-fix.yml": 'on:\n  workflow_run:\n    workflows:\n      - "CI"\n',
+      }),
+    ).toEqual([]);
+  });
+
+  it("配布対象ではないワークフローは見ない", () => {
+    // この配布経路で作り直せないファイルを「壊れている」と出しても行き止まりになる
+    expect(brokenRepairWorkflows({ "ci.yml": brokenByCr })).toEqual([]);
+  });
+});
+
 describe("repairPropagationTargets", () => {
   const status = (overrides: Partial<WorkflowTagStatus>): WorkflowTagStatus => ({
     fullName: "guchi-apps/aide",
@@ -425,6 +465,7 @@ describe("repairPropagationTargets", () => {
     mismatched: false,
     updatePullRequest: null,
     missingRepairWorkflows: [],
+    brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
     customizedSharedFiles: [],
@@ -451,6 +492,28 @@ describe("repairPropagationTargets", () => {
     ]);
 
     expect(targets).toEqual([]);
+  });
+
+  it("壊れているだけのリポジトリも対象にする", () => {
+    // 置いてある以上pushのたびに失敗し続けるため、不足より急いで直す必要がある（#2330）
+    const targets = repairPropagationTargets([
+      status({ fullName: "guchi-apps/asset-manager", brokenRepairWorkflows: ["claude-ci-fix.yml"] }),
+      status({ fullName: "guchi-apps/dayspan" }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/asset-manager"]);
+  });
+
+  it("配るファイルは不足しているものと壊れているものの両方", () => {
+    // 画面の件数・ボタン・ワークフローへ渡す対象は必ずこれで揃える
+    expect(
+      repairPropagationWorkflows(
+        status({
+          missingRepairWorkflows: ["claude-pr-repair.yml"],
+          brokenRepairWorkflows: ["claude-ci-fix.yml"],
+        }),
+      ),
+    ).toEqual(["claude-pr-repair.yml", "claude-ci-fix.yml"]);
   });
 
   it("配布PRはタイトルで見つける（スクリプトの --title と同じ文面）", () => {
@@ -640,6 +703,7 @@ describe("sharedFilePropagationTargets", () => {
     mismatched: false,
     updatePullRequest: null,
     missingRepairWorkflows: [],
+    brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
     customizedSharedFiles: [],

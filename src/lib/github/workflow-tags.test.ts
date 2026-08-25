@@ -208,6 +208,7 @@ describe("collectWorkflowTags", () => {
       outdated: true,
       // 無人実行のcallerが無いので、callerの配布の対象にはしない
       missingRepairWorkflows: [],
+    brokenRepairWorkflows: [],
     });
   });
 
