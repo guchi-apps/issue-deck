@@ -667,7 +667,8 @@ car-careだけに配られ、他9リポジトリはv9のまま残っていた（
 `/api/repositories/release-pending-merges`が#1727で先に取り除いている。
 
 **広がるのはタグ配布と共有スクリプトの更新だけで、callerの新規配布は広がらない。**
-`missingRepairWorkflows`は`claude-issue-dispatch.yml`が無ければ空を返す（下記
+`REPAIR_WORKFLOW_SPECS`の`requires`はすべて`claude-issue-dispatch.yml`を含んでおり、
+持たないリポジトリは配布の対象外になる（下記
 [supported-repositories.md](supported-repositories.md)「画面の配布ボタンの対象外なので
 手で配る」）。配布スクリプトが参照タグと`with:`の値をそのcallerから写すため、無ければ
 `fail`で落ちるからで、挙げるとボタンを押した時点で必ず失敗する。

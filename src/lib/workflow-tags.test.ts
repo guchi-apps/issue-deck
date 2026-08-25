@@ -369,8 +369,9 @@ describe("missingRepairWorkflows", () => {
 
   it("参照タグの配布に加わった vps・subpc を、callerの配布の対象にはしない", () => {
     // #2303で参照タグの対象を広げた結果、この構成が一覧へ出るようになった。
-    // `release-develop-to-main.yml`・`deploy.yml`を持つので、入口の判定が無いと
-    // `claude-pr-repair.yml`・`deploy-retry.yml`が不足として挙がってしまう
+    // `release-develop-to-main.yml`・`deploy.yml`を持つので、`requires`に
+    // `claude-issue-dispatch.yml`が無いと`claude-pr-repair.yml`・`deploy-retry.yml`が
+    // 不足として挙がってしまう（配布スクリプトは写し元が無く必ず失敗する）
     expect(
       missingRepairWorkflows([
         "ci.yml",
@@ -381,6 +382,15 @@ describe("missingRepairWorkflows", () => {
         "sync-secrets.yml",
       ]),
     ).toEqual([]);
+  });
+
+  it("`requires`は全部そろって初めて配る", () => {
+    // #2303で`requires`を配列にした。`deploy-retry.yml`は`deploy.yml`だけでは配れない
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml"])).not.toContain("deploy-retry.yml");
+    expect(missingRepairWorkflows(["deploy.yml"])).not.toContain("deploy-retry.yml");
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml", "deploy.yml"])).toContain(
+      "deploy-retry.yml",
+    );
   });
 
   // #2134。本番デプロイが一時的な失敗で落ちたときに拾う唯一の経路

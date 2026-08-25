@@ -275,8 +275,16 @@ export function canStartPropagation(run: PropagationRun | null): PropagationStar
 export type RepairWorkflowSpec = {
   /** 配るcallerのファイル名 */
   file: string;
-  /** これを持つリポジトリにだけ配る */
-  requires: string;
+  /**
+   * これを**すべて**持つリポジトリにだけ配る。
+   *
+   * **配る条件を関数側の特例ではなくここで表す**（#2303）。同じ`requires`を
+   * `missingRepairWorkflows`（配布の一覧）と`resolveMissingState`
+   * （`src/lib/github/repair-workflow-cache.ts`。PR詳細の「配れます／対象外です」の
+   * 文言）が別々に読むため、片方だけに特例を足すと**一覧には出ないのにPR詳細は
+   * 「設定 › フリート運用 から配れます」と案内する**行き止まりになる（#1960が消したもの）。
+   */
+  requires: readonly string[];
   /** 画面に出す説明 */
   label: string;
 };
@@ -298,39 +306,44 @@ export type RepairWorkflowSpec = {
  * 拾うのはこのcallerだけで、無いリポジトリでは人が「本番へ再デプロイ」を押しに来るまで本番が
  * 古いままになる。**ただし`vps`・`subpc`へ配るかは配布のときに判断すること**——あの2つは
  * 実機のインフラ設定を流すリポジトリで、Issue #2134でも自動再実行に含めるかを別扱いにしている。
+ * 現状は下の`REPAIR_WORKFLOW_SOURCE`を満たさないため配布の対象外（＝画面では「対象外のため
+ * 必要なら手動で追加」）になり、配るなら手で配る。
  */
 /**
- * callerの配布に必要な参照元（#2303）。
+ * どのcallerを配るにも要る参照元（#2303）。
  *
- * `.github/scripts/propagate-repair-workflows.sh`はここから参照タグと`with:`の値を写す。
- * **無いリポジトリへは1つも配れない**ので、判定側もこのファイルの実在を入口にする。
+ * `.github/scripts/propagate-repair-workflows.sh`はここから参照タグ（`uses:`・`prompts-ref`）と
+ * `with:`の値を写しており、**無ければ`fail`で落ちて1つも配れない**（「参照元が無ければ
+ * 配らない」）。そのため全specの`requires`に入れる。**参照タグの配布が#2303で
+ * `vps`・`subpc`まで対象を広げたので、入れておかないと画面には不足として出るのに押すと
+ * 必ず失敗する**——あの2つは`release-develop-to-main.yml`・`deploy.yml`を持つ。
  */
 export const REPAIR_WORKFLOW_SOURCE = "claude-issue-dispatch.yml";
 
 export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
   {
     file: "claude-conflict-resolve.yml",
-    requires: "claude-issue-dispatch.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE],
     label: "develop向けPRのコンフリクト解消",
   },
   {
     file: "claude-ci-fix.yml",
-    requires: "claude-issue-dispatch.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE],
     label: "develop向けPRのCI失敗修正",
   },
   {
     file: "claude-pr-repair.yml",
-    requires: "release-develop-to-main.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE, "release-develop-to-main.yml"],
     label: "バンプPR・リリースPRの修復",
   },
   {
     file: "claude-review-develop.yml",
-    requires: "claude-issue-dispatch.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE],
     label: "develop向けPRの自動マージ判定",
   },
   {
     file: "deploy-retry.yml",
-    requires: "deploy.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE, "deploy.yml"],
     label: "本番デプロイの一時的な失敗の再実行",
   },
 ];
@@ -347,22 +360,14 @@ export function repairWorkflowLabel(file: string): string {
  * 他リポジトリはタグ固定と方式が違うが、**どちらも「そのファイルが置いてあるか」だけで
  * 起動できるかが決まる**ため（`workflow_dispatch`の受け口はファイルの実在で解決される）。
  *
- * **無人実行のcaller（`claude-issue-dispatch.yml`）が無いリポジトリには何も配らない**
- * （#2303）。配布スクリプトは参照タグと`with:`の値をそのcallerから写すため、無ければ
- * `fail`で落ちる（`.github/scripts/propagate-repair-workflows.sh`の
- * 「参照元が無ければ配らない」）。ここで挙げてしまうと、画面のボタンを押した時点で
- * そのリポジトリぶんが必ず失敗する。**参照タグの配布（`collectWorkflowTags`）が
- * `vps`・`subpc`まで対象を広げたことで、実際に起こりうる状態になった**——あの2つは
- * `release-develop-to-main.yml`・`deploy.yml`を持つので、この判定だけなら
- * `claude-pr-repair.yml`・`deploy-retry.yml`が不足として挙がる。
- * 配るなら手で配る（`docs/supported-repositories.md`「画面の配布ボタンの対象外なので
- * 手で配る」）。
+ * **条件は`REPAIR_WORKFLOW_SPECS.requires`にしか書かない**（#2303）。ここへ特例を足すと、
+ * 同じ`requires`を読むPR詳細（`resolveMissingState`）と食い違い、一覧には出ないのに
+ * 「設定 › フリート運用 から配れます」と案内する行き止まりになる。
  */
 export function missingRepairWorkflows(files: string[]): string[] {
   const present = new Set(files);
-  if (!present.has(REPAIR_WORKFLOW_SOURCE)) return [];
   return REPAIR_WORKFLOW_SPECS.filter(
-    (spec) => present.has(spec.requires) && !present.has(spec.file),
+    (spec) => spec.requires.every((required) => present.has(required)) && !present.has(spec.file),
   ).map((spec) => spec.file);
 }
 
