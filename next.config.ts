@@ -24,14 +24,15 @@ const extraDevOrigins = (process.env.ISSUE_DECK_DEV_ALLOWED_ORIGINS ?? "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+// `output: "standalone"`は置かない。元はFly.ioプレビュー環境のDocker化のために入れた設定
+// だが、そのプレビューは#1308で廃止済みで、本番はPM2から`next start`で起動している
+// （`deploy/ecosystem.config.js`）。両者は併用できず、起動のたびに
+// `"next start" does not work with "output: standalone" configuration.`という警告が
+// 本番ログへ出続けていたため外した（#2366）。使わない`.next/standalone`がビルド成果物に
+// 入って転送量が増える問題も同時に消える。
 const nextConfig: NextConfig = {
   /* config options here */
   allowedDevOrigins: [...DEFAULT_DEV_ORIGINS, ...extraDevOrigins],
-  // 単体実行可能な出力形式。元はFly.ioプレビュー環境のDocker化のために入れた設定で、
-  // そのプレビューは#1308で廃止した。本番はPM2から`next start`で起動しており
-  // `.next/standalone`を使わないため必須ではないが、ビルド出力を変える変更は本Issueの
-  // 範囲外として残している。
-  output: "standalone",
 };
 
 export default nextConfig;
