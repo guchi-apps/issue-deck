@@ -21,9 +21,14 @@ VPS側のリポジトリ（`guchi-apps/vps`）の`scripts/pm2-monitor.sh`がcron
 | #1121 以前 | ヒープ上限なし（既定 約1006MB） / `max_memory_restart: 512M` | 再起動ループなし |
 | #1121（[guchi-apps/vps#62](https://github.com/guchi-apps/vps/issues/62)の一環） | `--max-old-space-size=128` / `320M` | issue-deckだけ再起動ループになり、PM2再起動検知が5分おきに届いた（#1546） |
 | #1546 | `--max-old-space-size=256` / `512M` | ヒープ上限の明示（#1121の意図）は残しつつ、殺す閾値を#1121以前の値へ戻した |
+| #2331（2026-08-25） | `--max-old-space-size=256` / `768M` | 512Mでも足りず7〜8分ごとの再起動になった。**リークではなく、平常時のピーク（実測506MB）が512Mに接していた**ため閾値を上げた |
 
 #1121は「メモリ2GBのVPSにNext.jsが10本常駐しており、既定のヒープ上限では各プロセスが使わない
 メモリを抱え込む」という全アプリ共通の対応で、8アプリへ同じ`128MB / 320M`を適用したもの。
+
+> **この「2GB」は現在の実態と合わない。** #2331時点の`free -m`はVPS全体で`total 3910MB`
+> （空き`available 1362MB`・Swap使用536MB）だった。#1121が前提にした数字のままドキュメントに
+> 残っていたもので、閾値を決めるときは実測（`free -m`）を見ること。
 issue-deckは**実測RSSが10本中で最大（当時200MB）**のアプリで、他アプリで問題にならなかった
 320Mが唯一足りなかった。#1121のissue本文自身が「128MBが狭すぎる場合は再起動ループになる」と
 デプロイ後の確認事項に挙げていたケースにあたる。
@@ -52,6 +57,36 @@ issue-deckは**実測RSSが10本中で最大（当時200MB）**のアプリで�
 そのため#1546では、`max_memory_restart`を#1121以前の`512M`へ戻すことを主な対処とし、
 ヒープ上限も256MBへ広げた（どちらの原因でも再起動が止まるようにした）。
 
+## 実測値（#2331・本番VPSでの実測）
+
+#1546の実測はサブPCでの最低限の負荷だったため、実運用のRSSがどこで頭打ちになるのかは
+分かっていなかった。#2331では**本番のプロセスそのもの**を30秒ごとに10分ぶん測った。
+
+```
+21:51:07 pid=544696 rss=284MB     ← 起動直後
+21:51:38 pid=544696 rss=472MB
+21:52:08 pid=544696 rss=448MB
+21:53:39 pid=544696 rss=491MB
+21:54:09 pid=544696 rss=506MB     ← ここでPM2が殺した
+21:55:09 pid=545388 rss=376MB     ← pidが変わる＝再起動
+21:56:10 pid=545388 rss=477MB
+21:57:10 pid=545388 rss=384MB
+22:00:12 pid=545388 rss=379MB
+22:01:13 pid=545388 rss=401MB
+```
+
+読み取れること。
+
+- **RSSは376〜506MBを上下しており、増え続けてはいない**。GCのたびに380MB台へ戻る。
+  リークなら閾値を上げても周期が伸びるだけだが、そうではなかった
+- 殺されたのは506MBに達した直後で、**512Mが平常時のピークに接していた**だけ
+- したがって**閾値を上げても実使用量は増えない**。すでにその量を使っており、殺されるのを止める
+  だけになる。VPSの空きは同時点で1.3GBあり、観測ピーク506MBに対して768Mなら260MBの余裕が残る
+
+同時点の`pm2 describe issue-deck`は`Used Heap 127.76MiB` / `Heap Size 217.15MiB`で、
+RSS 481MBとの差**約264MBはヒープ外**（Prismaのクエリエンジン・undiciのバッファ・コード領域）。
+`--max-old-space-size`を触ってもこの264MBは減らないので、ヒープ上限は256MBのまま据え置いた。
+
 ## 変更したときの反映
 
 `ecosystem.config.js`の変更は`pm2 restart`では反映されず、`pm2 start <file> --env production`での
@@ -63,21 +98,63 @@ issue-deckは**実測RSSが10本中で最大（当時200MB）**のアプリで�
 
 VPS上（PM2の実行ユーザーは`github-user`）で次を確認する。issue-deckのリポジトリ側からは分からない。
 
+**`pm2`は必ず`github-user`として実行する。** `guchi`のまま叩くとプロセス一覧が空
+（`pm2 pid issue-deck`が何も返さない）になるうえ、`guchi`用のPM2デーモンが新しく起動する
+（`guchi-apps/vps`の`docs/tips.md`）。起動してしまったら`pm2 kill`で消す。
+
 ```bash
-pm2 describe issue-deck   # 再起動回数（restarts）・現在のメモリ・落ちた理由
-pm2 logs issue-deck --lines 100 --nostream
+sudo su github-user -s /bin/bash -c 'pm2 describe issue-deck'   # 再起動回数・現在のメモリ
+sudo su github-user -s /bin/bash -c 'pm2 logs issue-deck --lines 200 --nostream'
 ```
+
+### 1. どちらの機構で落ちているか
 
 - ログに`FATAL ERROR: Reached heap limit Allocation failed`があれば**ヒープ上限が狭い**側。
   `node_args`の`--max-old-space-size`を上げる。
 - ログに異常が無いのに`restarts`だけ増えるなら**PM2が`max_memory_restart`で殺している**側。
-  `pm2 describe`のメモリが閾値付近まで伸びているはず。閾値を上げるか、伸びる原因を潰す。
+  `pm2 describe`のメモリが閾値付近まで伸びているはず。
+- どちらでもなく`journalctl -k`にOOM killerの行があるなら**VPS全体のメモリ不足**で、
+  issue-deck単体の設定では直らない。
+
+  ```bash
+  sudo journalctl -k --since "-6 hours" | grep -iE "out of memory|oom-kill|killed process"
+  free -m
+  ```
+
+### 2. 増え方の形（頭打ちかリークか）
+
+**`max_memory_restart`側だったときは、閾値を上げる前に必ずこれを見る。** #1546は形を見ずに
+閾値を上げたため、同じ症状が10日で再発した（#2331）。頭打ちなら閾値を上げれば終わりだが、
+リークなら周期が伸びるだけになる。
+
+プロセス自身が`[memory]`行を出す（[`src/lib/process-memory-watch.ts`](../src/lib/process-memory-watch.ts)。#2331）。
+**それまでの最大値を16MB以上更新したときだけ**出るので、頭打ちなら起動直後に数行出て静かになり、
+リークなら延々と行が増える。
+
+```bash
+sudo su github-user -s /bin/bash -c 'pm2 logs issue-deck --lines 500 --nostream' | grep '\[memory\]'
+```
+
+間隔と更新幅は`MEMORY_WATCH_INTERVAL_SECONDS`（既定60秒。`0`で見張りを止める）と
+`MEMORY_WATCH_STEP_MB`（既定16MB）で変えられる。どちらも未設定で問題ないので、
+`.env`にもGitHubのsecret/variableにも置いていない。
+
+ログが足りない・PM2が殺した瞬間を見たいときは、外から30秒ごとに測る（10分ぶん）。
+`pid`が変わった行が再起動の瞬間で、その直前のRSSが殺されたときの値になる。
+
+```bash
+sudo su github-user -s /bin/bash -c 'for i in $(seq 1 21); do PID=$(pm2 pid issue-deck); RSS=$(ps -o rss= -p "$PID" 2>/dev/null); echo "$(date +%H:%M:%S) pid=$PID rss=$(( ${RSS:-0} /1024))MB"; sleep 30; done'
+```
 
 ## 値を触るときの注意
 
-- VPSは**メモリ2GBでNext.jsが10本常駐**している。`max_memory_restart`は「暴走時の保険」であって
-  目標値ではないが、全アプリで無闇に上げると保険として機能しなくなる。issue-deckだけ他8アプリ
-  （`128MB / 320M`）より緩いのは、上の実測にもとづく意図的な差分。
+- VPSは**Next.jsが10本常駐**している（メモリは#2331時点の実測で約3.9GB。上の注記のとおり
+  「2GB」は古い）。`max_memory_restart`は「暴走時の保険」であって目標値ではないが、全アプリで
+  無闇に上げると保険として機能しなくなる。issue-deckだけ他8アプリ（`128MB / 320M`）より
+  緩いのは、上の実測にもとづく意図的な差分。
+- **閾値は「観測したピーク」ではなく「観測したピーク＋余裕」で決める。** #2331の実測ピークは
+  506MBだが、画像アップロード（最大10MB）や巡回3本が重なる山はこの10分に入っていない可能性が
+  ある。768Mは観測ピークに対して約1.5倍を確保した値。
 - 再起動ループは通知がうるさいだけでなく、**プロセス内キャッシュが毎回空になる**
   （[`src/lib/github/issue-run-cache.ts`](../src/lib/github/issue-run-cache.ts)は
   「プロセスが入れ替わればキャッシュは空になる」前提で組んである）ため、GitHub APIの消費が増え、
