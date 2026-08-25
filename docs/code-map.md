@@ -293,6 +293,39 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
   **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
   添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
+- **設定の「状態」2枚目のカードは「AI使用量」で、中を`プラン枠`と`API呼び出し`に分ける**（#2347）。
+  `プラン枠`はレート制限ヘッダから読む5時間枠・週間枠の使用率（`claude-usage-card.tsx`・
+  [`lib/claude/usage.ts`](../src/lib/claude/usage.ts)）、`API呼び出し`はissue-deck自身が投げた
+  呼び出しの機能別内訳（[`claude-api-usage-list.tsx`](../src/components/dashboard/claude-api-usage-list.tsx)・
+  [`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)）。
+  **Anthropic APIを叩くのは[`lib/claude/request.ts`](../src/lib/claude/request.ts)だけにする**——
+  数えられるのはそこを通った呼び出しだけで、`fetch`を各機能へ書き戻すと計上から漏れる。
+  トークン数は推計ではなく応答の`usage`の実測値で、キャッシュの読み書きも合計に含める
+  （どれもプラン枠を消費するため）。集計は5分バケット＋`ClaudeApiUsageBucket`への永続化で、
+  `src/instrumentation.ts`が起動時に復元する。**GitHub版と違い、DBへ書くのはバケットの
+  繰り上がり時ではなく呼び出しのたび**——GitHub APIは常時ポーリングがあり5分以内に必ず
+  繰り上がるが、AIの呼び出しは9つともボタン起点で次まで数時間空くことがあり、繰り上がりを
+  待つといちばん見たい直近の消費が保存されないまま再起動で消える。
+  **保持は7日で、画面の切り替えも`過去1日`・`過去7日`**（プラン枠が5時間・週間なので、
+  GitHub側の「今時」に当たる区切りがAIには無い）。
+  **`lib/claude/`のうち画面からも読む定数・純粋関数は
+  [`limits.ts`](../src/lib/claude/limits.ts)、画面が読む集計の型は
+  [`api-usage-totals.ts`](../src/lib/claude/api-usage-totals.ts)へ置く**——
+  AI呼び出し本体（`issue-search.ts`など）から値importすると、集計モジュールごと
+  クライアントバンドルへ載る（後述の`issues-api.ts`と同じ分け方）。
+  **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
+  からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
+  同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
+  **金額は出さない**——すべて`CLAUDE_CODE_OAUTH_TOKEN`（プラン契約）で動いており、
+  従量課金の請求は発生しないため。
+- **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
+  Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
+  実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
+  実測（`pnpm dev`）では、起動時に登録したはずのリスナーが記録側から見ると0件で、
+  `ClaudeApiUsageBucket`へ1行も書かれなかった。**プロセスで1つに保ちたい状態は
+  `globalThis`へ載せる**（`lib/db.ts`のPrismaClientと同じ形。
+  [`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)の`ClaudeApiUsageState`）。
+  型チェックも単体テストも通り、**画面には「まだ記録がありません」と出るだけ**なので気付きにくい。
 - **一覧を下へ引っ張って更新する操作は[`use-pull-to-refresh.ts`](../src/hooks/use-pull-to-refresh.ts)に集約する**（#1893・#1947・#1958・#2182）。
   判定と時間の定数は[`lib/pull-to-refresh.ts`](../src/lib/pull-to-refresh.ts)へ集約し、
   引っ張ったときの表示は[`pull-to-refresh-indicator.tsx`](../src/components/dashboard/pull-to-refresh-indicator.tsx)が持つ。

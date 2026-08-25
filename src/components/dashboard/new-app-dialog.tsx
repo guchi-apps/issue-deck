@@ -29,11 +29,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNewAppLaunch, type PreflightResult } from "@/hooks/use-new-app-launch";
 import {
   CONSULT_OPENING_MESSAGE,
-  MAX_CONSULT_TURNS,
   countConsultTurns,
+  MAX_CONSULT_TURNS,
   type ConsultMessage,
-  type NewAppDraft,
-} from "@/lib/claude/new-app-consult";
+} from "@/lib/claude/limits";
+import type { NewAppDraft } from "@/lib/claude/new-app-consult";
 import { EXISTING_LAUNCH_ISSUE_REASON_LABELS } from "@/lib/new-app/launch-marker";
 import {
   buildNewAppPlan,

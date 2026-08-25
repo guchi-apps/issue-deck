@@ -1,18 +1,9 @@
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
+import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/limits";
+import { callClaudeMessages } from "@/lib/claude/request";
 
 /** あいまい検索に使うモデル。プラン枠の消費を抑える軽量なもの。 */
 const MODEL = "claude-haiku-4-5";
 
-/**
- * 1回の判定でClaudeへ渡す候補Issueの上限（#1788）。
- *
- * 候補はプロンプトへそのまま並ぶため、母集団が数千件あると入力だけで枠を食い潰す。
- * 一覧に並んでいる順（＝新しい順）の先頭から数えてここまでを対象にし、
- * 超過分は対象外である旨を画面に出す。
- */
-export const ISSUE_SEARCH_CANDIDATE_LIMIT = 300;
 
 /** 1回の判定で残すIssueの上限。これを超えると絞り込みとして役に立たないため。 */
 export const ISSUE_SEARCH_RESULT_LIMIT = 50;
@@ -113,7 +104,7 @@ export function pickMatchedIssueKeys(text: string, candidateKeys: string[]): str
  * 検索語に意味が近いIssueをClaudeに選ばせ、そのキーを確からしい順に返す。
  *
  * `CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
- * `/v1/messages`を直接呼び出す。**呼び出しごとにプラン枠を消費するため、入力のたびではなく
+ * `/v1/messages`を呼び出す（送信は`request.ts`が担う）。**呼び出しごとにプラン枠を消費するため、入力のたびではなく
  * ボタンを押したときだけ呼ぶ**（画面側の`use-issue-ai-search.ts`もEnterには割り当てていない）。
  *
  * 候補が0件ならClaudeを呼ばない（判定する対象が無く、枠を消費するだけのため）。
@@ -122,28 +113,21 @@ export async function searchIssues(token: string, input: IssueSearchInput): Prom
   const candidates = input.candidates.slice(0, ISSUE_SEARCH_CANDIDATE_LIMIT);
   if (candidates.length === 0) return [];
 
-  const res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-beta": OAUTH_BETA,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+  const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
+    feature: "issue_search",
+    token,
+    body: {
       model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: buildIssueSearchPrompt({ ...input, candidates }) }],
-    }),
-    cache: "no-store",
+    },
   });
 
   if (!res.ok) {
     throw new Error(`Claudeのあいまい検索に失敗しました (${res.status})`);
   }
 
-  const json = (await res.json()) as AnthropicMessageResponse;
-  const text = json.content?.find((block) => block.type === "text")?.text?.trim();
+  const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) return [];
 
   return pickMatchedIssueKeys(

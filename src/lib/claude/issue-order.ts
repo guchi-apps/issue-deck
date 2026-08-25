@@ -1,18 +1,12 @@
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
+import {
+  ISSUE_ORDER_BODY_HEAD_LENGTH,
+  ISSUE_ORDER_CANDIDATE_LIMIT,
+} from "@/lib/claude/limits";
+import { callClaudeMessages } from "@/lib/claude/request";
 
 /** 着手順の判定に使うモデル。`issue-search.ts`と同じくプラン枠の消費を抑える軽量なもの。 */
 const MODEL = "claude-haiku-4-5";
 
-/**
- * 1回の判定でClaudeへ渡す候補Issueの上限（#1853）。
- *
- * あいまい検索（`issue-search.ts`の300件）より少ないのは、こちらは1件ごとに本文の冒頭も
- * 載せるため。未着手がこれより多い場合は一覧に並んでいる順（＝新しい順）の先頭から数えて
- * ここまでを対象にし、超過分は対象外である旨を画面に出す。
- */
-export const ISSUE_ORDER_CANDIDATE_LIMIT = 60;
 
 /** 着手順として返させるIssueの上限。これ以上並べても、上から順に着手する用途では読まれない。 */
 export const ISSUE_ORDER_RESULT_LIMIT = 5;
@@ -20,8 +14,6 @@ export const ISSUE_ORDER_RESULT_LIMIT = 5;
 /** 「実施しない方がよい」として返させるIssueの上限。 */
 export const ISSUE_ORDER_SKIP_LIMIT = 5;
 
-/** 候補1件につきプロンプトへ載せる本文の文字数。 */
-export const ISSUE_ORDER_BODY_HEAD_LENGTH = 200;
 
 /** 全体の方針（`overview`）として受け取る文字数の上限。 */
 const MAX_OVERVIEW_LENGTH = 300;
@@ -202,7 +194,7 @@ export function pickIssueOrder(text: string, candidateKeys: string[]): IssueOrde
  * 未着手のIssueをClaudeに読ませ、着手順と「実施しない方がよいもの」を返す（#1853）。
  *
  * `issue-search.ts`と同様、`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
- * `/v1/messages`を直接呼び出す。**呼び出しごとにプラン枠を消費するため、ボタンを押したときだけ
+ * `/v1/messages`を呼び出す（送信は`request.ts`が担う）。**呼び出しごとにプラン枠を消費するため、ボタンを押したときだけ
  * 呼ぶ**（画面側の`use-issue-order.ts`も一覧を開いた時点では呼ばない）。
  *
  * 候補が0件ならClaudeを呼ばない（決める対象が無く、枠を消費するだけのため）。
@@ -214,28 +206,21 @@ export async function decideIssueOrder(
   const candidates = input.candidates.slice(0, ISSUE_ORDER_CANDIDATE_LIMIT);
   if (candidates.length === 0) return { overview: "", order: [], skip: [] };
 
-  const res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-beta": OAUTH_BETA,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+  const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
+    feature: "issue_order",
+    token,
+    body: {
       model: MODEL,
       max_tokens: 2048,
       messages: [{ role: "user", content: buildIssueOrderPrompt({ candidates }) }],
-    }),
-    cache: "no-store",
+    },
   });
 
   if (!res.ok) {
     throw new Error(`Claudeによる着手順の判定に失敗しました (${res.status})`);
   }
 
-  const json = (await res.json()) as AnthropicMessageResponse;
-  const text = json.content?.find((block) => block.type === "text")?.text?.trim();
+  const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) return { overview: "", order: [], skip: [] };
 
   return pickIssueOrder(

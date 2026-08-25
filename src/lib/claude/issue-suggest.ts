@@ -1,8 +1,5 @@
+import { callClaudeMessages } from "@/lib/claude/request";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
-
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
 
 /** 提案生成に使うモデル。プラン枠消費を抑えるため軽量なモデルを使う。 */
 const MODEL = "claude-haiku-4-5";
@@ -103,7 +100,7 @@ function extractJsonText(text: string): string {
  * Issue本文からタイトル・ラベルの提案をClaudeに生成させる。
  *
  * `issue-summary.ts`と同様、`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
- * `/v1/messages`を直接呼び出す。呼び出しごとにプラン枠を消費するため、
+ * `/v1/messages`を呼び出す（送信は`request.ts`が担う）。呼び出しごとにプラン枠を消費するため、
  * 呼び出し元でボタン操作等の明示的なトリガーに限定すること。
  */
 export async function generateIssueSuggestion(
@@ -112,28 +109,21 @@ export async function generateIssueSuggestion(
 ): Promise<IssueSuggestResult> {
   const prompt = buildIssueSuggestPrompt(input);
 
-  const res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-beta": OAUTH_BETA,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+  const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
+    feature: "issue_suggest",
+    token,
+    body: {
       model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
-    }),
-    cache: "no-store",
+    },
   });
 
   if (!res.ok) {
     throw new Error(`Claudeの提案生成に失敗しました (${res.status})`);
   }
 
-  const json = (await res.json()) as AnthropicMessageResponse;
-  const text = json.content?.find((block) => block.type === "text")?.text?.trim();
+  const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
     throw new Error("Claudeの応答から提案テキストを取得できませんでした");
   }
