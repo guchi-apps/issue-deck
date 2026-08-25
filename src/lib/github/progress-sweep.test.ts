@@ -4,7 +4,7 @@ import {
   buildDevelopMergedComment,
   buildStrandedComment,
   decideProgressSweep,
-  decideStaleCheckMerge,
+  decideStaleCheckUser,
   hasDevelopMergedNotice,
   hasStrandedNotice,
   isManualStepTitle,
@@ -236,33 +236,76 @@ describe("isManualStepTitle", () => {
   });
 });
 
-describe("decideStaleCheckMerge", () => {
-  it("マージ済みのPRだけならラベルを外す（#2335。signaly#200の形）", () => {
+describe("decideStaleCheckUser", () => {
+  const MERGED_AT = "2026-08-25T11:28:28Z";
+  /** signaly#200の実測。11:27:25にラベルが付き、11:28:28にマージされた */
+  const LABELED_BEFORE = new Date("2026-08-25T11:27:25Z");
+  const LABELED_AFTER = new Date("2026-08-25T11:30:00Z");
+
+  it("マージより前に付いた確認待ちなら外す（#2335。signaly#200の形）", () => {
     expect(
-      decideStaleCheckMerge([{ state: "closed", mergedAt: "2026-08-25T11:28:28Z" }]),
-    ).toEqual({ action: "clear" });
+      decideStaleCheckUser({
+        pullRequests: [{ state: "closed", mergedAt: MERGED_AT }],
+        checkUserLabeledAt: LABELED_BEFORE,
+      }),
+    ).toEqual({ action: "clear", mergedAt: MERGED_AT });
+  });
+
+  it("マージより後に付いた確認待ちは外さない（判定前にマージされた場合の事後確認。#1968）", () => {
+    expect(
+      decideStaleCheckUser({
+        pullRequests: [{ state: "closed", mergedAt: MERGED_AT }],
+        checkUserLabeledAt: LABELED_AFTER,
+      }),
+    ).toEqual({ action: "skip", reason: "check_user_after_merge" });
+  });
+
+  it("比較の相手は最後のマージ。古いマージより後に付いたものは外さない", () => {
+    expect(
+      decideStaleCheckUser({
+        pullRequests: [
+          { state: "closed", mergedAt: "2026-08-20T00:00:00Z" },
+          { state: "closed", mergedAt: MERGED_AT },
+        ],
+        checkUserLabeledAt: LABELED_AFTER,
+      }),
+    ).toEqual({ action: "skip", reason: "check_user_after_merge" });
   });
 
   it("開いているPRが1件でもあれば外さない（本物のマージ待ち）", () => {
     expect(
-      decideStaleCheckMerge([
-        { state: "closed", mergedAt: "2026-08-25T11:28:28Z" },
-        { state: "open", mergedAt: null },
-      ]),
-    ).toEqual({ action: "skip", reason: "check_merge_pr_open" });
+      decideStaleCheckUser({
+        pullRequests: [
+          { state: "closed", mergedAt: MERGED_AT },
+          { state: "open", mergedAt: null },
+        ],
+        checkUserLabeledAt: LABELED_BEFORE,
+      }),
+    ).toEqual({ action: "skip", reason: "check_user_pr_open" });
   });
 
   it("PRが1件も無ければ外さない（人が手で付けた確認待ちを消さない）", () => {
-    expect(decideStaleCheckMerge([])).toEqual({
+    expect(decideStaleCheckUser({ pullRequests: [], checkUserLabeledAt: LABELED_BEFORE })).toEqual({
       action: "skip",
-      reason: "check_merge_no_pr",
+      reason: "check_user_no_merged_pr",
     });
   });
 
   it("closeされただけでマージされていないPRしか無ければ外さない", () => {
-    expect(decideStaleCheckMerge([{ state: "closed", mergedAt: null }])).toEqual({
-      action: "skip",
-      reason: "check_merge_no_pr",
-    });
+    expect(
+      decideStaleCheckUser({
+        pullRequests: [{ state: "closed", mergedAt: null }],
+        checkUserLabeledAt: LABELED_BEFORE,
+      }),
+    ).toEqual({ action: "skip", reason: "check_user_no_merged_pr" });
+  });
+
+  it("付与の時刻が分からなければ外さない（DBの同期が追い付いていない可能性がある）", () => {
+    expect(
+      decideStaleCheckUser({
+        pullRequests: [{ state: "closed", mergedAt: MERGED_AT }],
+        checkUserLabeledAt: null,
+      }),
+    ).toEqual({ action: "skip", reason: "check_user_after_merge" });
   });
 });

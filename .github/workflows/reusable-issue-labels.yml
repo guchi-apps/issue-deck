@@ -77,10 +77,11 @@ name: Issue Progress (reusable)
 #
 # **この除去は再試行する(#2335)。** guchi-apps/signaly#200では`gh issue edit`がGitHubの
 # 502 Bad Gatewayに当たり、警告だけ出して素通りした結果、マージ済みのIssueに
-# 「マージの確認待ち」(`00.check-user`+`01.check-merge`)が残り続けた。3回まで試したうえで
-# なお落ちたものは、issue-deck側の進捗巡回(src/lib/github/progress-sweep.tsの
-# `decideStaleCheckMerge`)が5分ごとに拾い直す。**参照タグが古いままのリポジトリを
-# 拾えるのもそちらだけ**なので、両方を残す。
+# 「マージの確認待ち」(`00.check-user`+`01.check-merge`)が18分残った(次のmainリリースの
+# main-pr-mergedが外すまで)。その間、盤面の確認待ちに開いても押せない札が積まれる。
+# 3回まで試したうえでなお落ちたものは、issue-deck側の進捗巡回
+# (src/lib/github/progress-sweep.tsの`decideStaleCheckUser`)が5分ごとに拾い直す。
+# **参照タグが古いままのリポジトリを拾えるのもそちらだけ**なので、両方を残す。
 #
 # **その判定を行うclaude-review-develop.ymlは、全リポジトリにあるわけではない。**
 # 持たないリポジトリではdevelop向けPRの可否が一度も判定されず、自動マージもされないのに

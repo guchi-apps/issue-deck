@@ -262,50 +262,80 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | --- | --- |
 | ユーザーが質問に返信した | 画面の「承認」「修正」ボタン（`labelsAfterApproval`／`labelsAfterRejection`。`00.qa-answered`もあわせて外す）。ローカルセッションでは、人が答えた直後の`PostToolUse`フックが外す（#1357・#1417） |
 | ユーザーが計画を承認した／修正を依頼した | 同上。承認では`21.plan-required`もあわせて外れ、修正では残る（計画の再提示が要るため、#330） |
-| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`と、issue-deck側の巡回（`POST /api/issues/progress-sweep`）が進捗の遷移とあわせて外す（#266・#1901・#2294）。**ワークフロー側が落ちた場合の受け皿も巡回**（後述「マージ済みなのに残った`01.check-merge`は巡回が外す」。#2335） |
+| ユーザーがPRをマージした | `reusable-issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`と、issue-deck側の巡回（`POST /api/issues/progress-sweep`）が進捗の遷移とあわせて外す（#266・#1901・#2294）。**ワークフロー側が落ちた場合の受け皿も巡回**（後述「マージ時に外しそこねた`00.check-user`は巡回が外す」。#2335） |
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境・スクリーンショットを確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
 | Issueがcloseされた | issue-deckの`upsertIssueRow`（`clearLabelsOnIssueClose`。#2178）と`reusable-issue-labels.yml`の`cleanup-on-close`（#464）の両方。後述「closeで外れるラベルはissue-deck側でも外す」 |
 | ユーザーが起動確認に答え、Claude Codeが開始した | pollerの次の報告（最大1分）を受けて`resolveNotStartedSession`が外す（#1465）。**この経路だけは印がホストではなくDBの直前の値**（`activity === "NOT_STARTED"`）で、それを立てたのがこの経路しか無いことが「自分で付けた」の根拠になる |
 
-### マージ済みなのに残った`01.check-merge`は巡回が外す（#2335）
+### マージ時に外しそこねた`00.check-user`は巡回が外す（#2335）
 
-上の表の「ユーザーがPRをマージした」を実際に外しているのは、マージのイベントを受け取る
-`reusable-issue-labels.yml`のジョブだけだった。**そこの`gh issue edit --remove-label`には
-再試行が無く、失敗しても警告を出して先へ進む**（進捗の報告を最優先に守る設計。#1861）。
-そのため一時的なGitHubのAPI障害に当たると、`00.check-user`＋`01.check-merge`が
-**永久に残る**——外し直す実行体がどこにも無いため。
+上の表の「ユーザーがPRをマージした」で外れるのは、`00.check-user`と理由ラベル
+（`01.check-*`・旧名`00.qa-answered`）の**7枚をまとめた1回の`gh issue edit`**。
+**そこには再試行が無く、失敗しても警告を出して先へ進む**（進捗の報告を最優先に守る設計。#1861）。
 
 guchi-apps/signaly#200で実際に起きた形。
 
 1. `claude-review-develop.yml`が「Secretsや環境変数の変更」を理由に自動マージを見送り、
-   `00.check-user`＋`01.check-merge`を付けた
-2. ユーザーがPR #201をdevelopへマージした
+   11:27:25に`00.check-user`＋`01.check-merge`を付けた
+2. 11:28:28、ユーザーがPR #201をdevelopへマージした
 3. `develop-pr-merged`が動き、進捗は`Develop`へ進み、マージ完了のコメントも投稿された。
-   しかし`gh issue edit`だけが`502 Bad Gateway`で落ちた（実行ログ 32842492174）
+   しかしラベルを外す`gh issue edit`だけが`502 Bad Gateway`で落ちた（実行ログ 32842492174）
 4. 進捗は`Develop`まで進み終えているので、取り残しの巡回（`Develop PR`・`Implementation`が
-   対象）にも掛からない。盤面の「確認待ち」に、開いても押せる操作が無いIssueが残った
+   対象）にも掛からない
+
+**残り続けるわけではない。** 同じ7枚は`main-pr-merged`とIssueのcloseでも外れるので、
+次のmainリリースまでで解消する（signaly#200は11:46:23のリリースPR #203のマージで外れた。
+取り残しは18分）。それでも直すのは、**その窓のあいだ盤面の「確認待ち」に押せない札が
+積まれる**ため——開いてもマージ済みで、できる操作が無い。リリースまで日をまたげば
+Push通知（#838）も飛ぶ。
 
 対策は2つで、**どちらか一方では埋まらない**。
 
-- **ワークフロー側で3回まで再試行する。** 一時的な5xxはこれでほぼ吸収できる。
-  ただし恒久的な失敗（権限・ラベル未定義）は拾えず、`@workflows/vN`の参照タグを配り終える
-  までの間は古いままのリポジトリに効かない
-- **issue-deck側の進捗巡回（5分ごと）が最後の受け皿になる。** `00.check-user`と
-  `01.check-merge`が両方付いたopenなIssueを**issue-deckのDBから**引き、`issue-<番号>`
-  ブランチのPull Requestを1回だけ確かめて外す。判定は
+- **ワークフロー側で3回まで再試行する**（`develop-pr-merged`・`main-pr-merged`・
+  `main-direct-merged`・`cleanup-on-close`）。一時的な5xxはこれでほぼ吸収できる。
+  ただし恒久的な失敗（権限・ラベル未定義）は拾えず、`@workflows/vN`の参照タグを
+  配り終えるまでの間は古いままのリポジトリに効かない
+- **issue-deck側の進捗巡回（5分ごと）が最後の受け皿になる。** 判定は
   [`src/lib/github/progress-sweep.ts`](../../src/lib/github/progress-sweep.ts)の
-  `decideStaleCheckMerge`
+  `decideStaleCheckUser`
 
-**外すのは「待つ相手がもういない」ときだけ。** 開いているPRが1件でもあれば触らない
-（それは本物のマージ待ちで、`01.check-merge`が指しているものそのもの）。`issue-<番号>`の
-PRが1件も無い場合も触らない（人が手で付けた`01.check-merge`まで消してしまうため）。
+#### 外す条件
+
+**`01.check-merge`に限定しない。** 落ちるのは7枚まとめての1回なので、そのとき付いていた
+理由ラベルが何であれ同じように残る（`01.check-answered`はマージ待ちと同時に成立しうる）。
+候補は「`00.check-user`が付いていること」だけで拾い、理由ラベルの除去は`clearCheckUser`の
+既存の挙動（付いているものを外す）に任せる。
+
+そのうえで、次のどれかに当たるものには触らない。
+
+- **開いているPRが1件でもある。** それは本物のマージ待ちで、`01.check-merge`が
+  指しているものそのもの
+- **`issue-<番号>`のマージ済みPRが無い。** マージの記録が無いのに外すと、人が手で付けた
+  確認待ちまで黙って消してしまう
+- **`00.check-user`が付いたのが最後のマージより後。** 判定が下る前にPRがマージされた場合、
+  `reusable-claude-review-develop.yml`は文面だけを事後確認向けに変えて
+  `00.check-user`＋`01.check-merge`を**そのまま付ける**（#1968）。取り残しの通知
+  （`01.check-blocked`）も人が手で付けたものも同じ形になる。付与の時刻
+  （`Issue.checkUserLabeledAt`。ラベルが外れるとnullへ戻る）が最後のマージより前のものだけを
+  相手にする。**時刻が分からない（null）ものにも触らない**
+
 baseは`develop`に絞らない——`develop`を持たないリポジトリでは`issue-<番号>`→`main`が
 唯一のPRで、そちらにも`main-pr-in-progress`が`01.check-merge`を付ける。
 
+#### GitHub APIを消費しないための絞り込み
+
+候補をDBから引く時点で、**`Develop`・`Release`にいるopenなIssue**に絞る。ここに入るのは
+「進捗はマージ後まで進んだのに確認待ちが残っている」ものだけで、平常時は0件になるため、
+対象が無ければGitHubへのリクエストは1回も出ない。
+
+- **進捗の報告も一緒に落ちた場合**は`Develop PR`・`Implementation`に留まるが、それは
+  取り残しの巡回（`sweepIssue`）が`Develop`へ進めるときに`clearCheckUser`を呼ぶので拾える
+- **`Done`はIssueがcloseされる**ので`state: OPEN`の時点で外れ、`cleanup-on-close`と
+  issue-deckの`clearLabelsOnIssueClose`（#2178）が受け持つ
+
 **進捗（Status）は動かさない。** 進めるのは取り残しの巡回の役目で、こちらは進み終えた
-Issueに取り残されたラベルだけを相手にする。滞留は平常時0件なので、対象が無ければ
-GitHubへのリクエストは1回も出ない。
+Issueに取り残されたラベルだけを相手にする。
 
 ### closeで外れるラベルはissue-deck側でも外す（#2178）
 
