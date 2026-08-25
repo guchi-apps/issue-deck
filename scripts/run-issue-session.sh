@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Issue専用worktreeの開発サーバー（pnpm dev）をバックグラウンドで自動起動したうえで、
-# Claude Codeセッションをフォアグラウンドで実行するラッパー。
+# エージェントCLI（既定はClaude Code。#2377でCodex CLIも選べる）のセッションを
+# フォアグラウンドで実行するラッパー。
 # セッション終了時（正常終了・ターミナルclose・kill等）にtrapで開発サーバーも自動停止する。
 # trapを通れない経路（SIGKILL・ホストの再起動）で残った分は、scripts/reap-dev-servers.sh が
 # 別途回収する（#1223）。**このtrapが唯一の後始末ではない。**
@@ -15,6 +16,12 @@
 #   ISSUE_DECK_DEV_SERVER=0     開発サーバーを起動しない（既定は起動する）
 #   ISSUE_DECK_DEV_COMMAND      開発サーバーの起動コマンド（既定は `pnpm dev`）
 #   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める（#1541。既定は引き継ぐ）
+#   ISSUE_DECK_AGENT=codex      Claude Codeではなく Codex CLI を起こす（#2377。既定は claude）
+#
+# **Codexで起こした場合、Claude Code側の連携は一切効かない**（フック・Remote Control・
+# Plan modeの承認・前回会話の引き継ぎ）。何が揃わないかは docs/multi-agent/codex.md を参照。
+# 開発サーバー・tailnetへの公開・セッションの開始／終了報告・状態ファイルはこのスクリプトが
+# 持っている処理なので、どちらのエージェントでも同じように動く。
 #
 # **汎用ランチャー経由（#1224）では既定で起動しない。** サブPCの実効RAMは13Giで、リポジトリ数
 # ぶんのdevサーバーを常駐させる前提が置けない（#1523。根拠はCPUではなくメモリなので、6C/12Tへの
@@ -65,6 +72,17 @@ source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 
 # shellcheck source=scripts/lib/claude-retries.sh
 source "$SCRIPT_DIR/lib/claude-retries.sh"
+
+# 起こすエージェントCLIの種別（#2377）。
+# shellcheck source=scripts/lib/agent-cli.sh
+source "$SCRIPT_DIR/lib/agent-cli.sh"
+
+# **不正な値はここで止める。** 起動直前まで進んでから落ちると、開発サーバーだけが立った状態で
+# セッションが無いという分かりにくい形になる。
+agent_cli_resolve_kind "${ISSUE_DECK_AGENT:-}" || exit 1
+AGENT_KIND="$AGENT_CLI_KIND"
+AGENT_COMMAND="$(agent_cli_command_name "$AGENT_KIND")"
+AGENT_DISPLAY_NAME="$(agent_cli_display_name "$AGENT_KIND")"
 
 # start-issue.sh・generic-start-issue.sh も同じ警告を出しているが、そちらは呼び出し元プロセスの
 # 標準出力に出るだけで、tmux経由（`tmux new-session -d`）で起動した場合はそのまま誰にも見られずに
@@ -423,7 +441,12 @@ if [[ "${ISSUE_DECK_SKIP_SHARED_CONTEXT:-0}" == "1" ]]; then
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）は、このセッションの実装対象そのもののため参照に加えません。"
   echo "     編集するのはworktree側です（本体チェックアウトは他のセッションが読む共有物なので触らないでください）。"
 elif [[ -d "$SHARED_CONTEXT_DIR" ]]; then
-  CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
+  # **Codexには`--add-dir`を渡さない**（#2377）。あちらの`--add-dir`は「書き込み可能なディレクトリを
+  # 増やす」もので、読むだけならサンドボックスの外でもできる。共有知識リポジトリは読み取り専用として
+  # 扱う決まり（CLAUDE.md）なので、渡すと機械的に破れるようになるだけで得が無い。
+  if [[ "$AGENT_KIND" == "claude" ]]; then
+    CLAUDE_EXTRA_ARGS+=(--add-dir "$SHARED_CONTEXT_DIR")
+  fi
   echo "#$ISSUE_NUMBER: 共有知識リポジトリを参照可能にします: $SHARED_CONTEXT_DIR"
 else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
@@ -439,7 +462,10 @@ if [[ -n "${ISSUE_DECK_EXTRA_DIRS:-}" ]]; then
       echo "#$ISSUE_NUMBER: 情報: 参照先が見つからないため飛ばします: $extra_dir" >&2
       continue
     fi
-    CLAUDE_EXTRA_ARGS+=(--add-dir "$extra_dir")
+    # Codexでは付けない（理由は共有知識リポジトリと同じ。#2377）
+    if [[ "$AGENT_KIND" == "claude" ]]; then
+      CLAUDE_EXTRA_ARGS+=(--add-dir "$extra_dir")
+    fi
   done <<<"${ISSUE_DECK_EXTRA_DIRS}"
 fi
 
@@ -447,6 +473,13 @@ fi
 # `Edit,Write,NotebookEdit`を封じたうえで起動する（回答の投稿に`gh issue comment`が要るため
 # Bashは残す）。**プロンプトの指示だけに頼らず、機械的にも塞ぐ。**
 if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
+  # **Codexには相当するフラグが無いので、指定されていたら起動を断る**（#2377）。
+  # ここを黙って素通りさせると、「機械的にも塞ぐ」という前提が外れたまま読み取り専用のはずの
+  # セッションが編集できる状態で立つ。プロンプトの指示だけが残るのは、いちばん危ない落ち方。
+  if [[ "$AGENT_KIND" != "claude" ]]; then
+    echo "Error: #$ISSUE_NUMBER: ISSUE_DECK_DISALLOWED_TOOLS は $AGENT_DISPLAY_NAME では強制できません（この経路は Claude Code で起動してください）。" >&2
+    exit 1
+  fi
   CLAUDE_EXTRA_ARGS+=(--disallowedTools "${ISSUE_DECK_DISALLOWED_TOOLS}")
   echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: ${ISSUE_DECK_DISALLOWED_TOOLS}"
 fi
@@ -475,13 +508,23 @@ fi
 #
 # `--allowedTools`は許可の**追加**であり、ここに挙げていないツールを禁止するものではない
 # （禁止は上の`--disallowedTools`が持つ）。
+#
+# **Codexでは何もしない。** あちらは`--ask-for-approval never`で走らせるため個々の許可規則が無く、
+# 起票が権限で弾かれること自体が起きない（#2377）。
 SESSION_ALLOWED_TOOLS="Bash(gh issue create:*)"
-CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
+fi
 
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
 # 依存せず、このスクリプトから起こしたセッションの応答を日本語に揃える。文面と未対応時の扱いは
 # scripts/lib/agent-language.sh を参照。
-append_language_system_prompt "#$ISSUE_NUMBER: "
+#
+# **Codexには`--append-system-prompt`が無い**ため、同じ文面をキックオフのプロンプト本文の先頭へ
+# 置く（#2377。組み立ては後段）。プロンプト本文側の「## 出力言語」と二層で持つ構図は変わらない。
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  append_language_system_prompt "#$ISSUE_NUMBER: "
+fi
 
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
@@ -497,7 +540,10 @@ if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
 fi
 SESSION_NAME="$REPO_NAME #$ISSUE_NUMBER"
 # --name を解釈しない古いClaude Codeへ渡すと起動自体が失敗するため、対応時のみ付ける。
-if claude --help 2>/dev/null | grep -q -- "--name"; then
+# **Codexでは付けない。** タブのタイトルは呼び出し元（start-issue.sh）が付けたものが残る。
+if [[ "$AGENT_KIND" != "claude" ]]; then
+  :
+elif claude --help 2>/dev/null | grep -q -- "--name"; then
   CLAUDE_EXTRA_ARGS+=(--name "$SESSION_NAME")
 else
   echo "#$ISSUE_NUMBER: 情報: このClaude Codeは --name に未対応のため、タイトルにIssue番号を出しません。" >&2
@@ -543,7 +589,12 @@ fi
 HOOKS_DIR="$WORKTREE_BASE/.claude-hooks"
 HOOK_SETTINGS_FILE="$HOOKS_DIR/issue-$ISSUE_NUMBER.settings.json"
 NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
-if [[ -x "$NOTIFY_SCRIPT" ]]; then
+# **Codexにはこのフックの仕組みが無い**（#2377）。設定を書いても読む相手がいないので生成しない。
+# `HOOKS_ENABLED`が0のままになるため、「まだ開始していない」印（#1465）も置かれない——
+# 置いても消すフック（`SessionStart`）がおらず、画面に「まだ開始していません」が出続けるだけになる。
+if [[ "$AGENT_KIND" != "claude" ]]; then
+  echo "#$ISSUE_NUMBER: 情報: $AGENT_DISPLAY_NAME にはフックの仕組みが無いため、入力待ち・計画の承認・質問の通知は画面に出ません（セッションの開始・終了とプレビューURLの報告は行います）。"
+elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   mkdir -p "$HOOKS_DIR"
   # 引数はシェルのシングルクォートで囲む。シングルクォートはJSONではただの文字なので、
   # `printf %q` のようにバックスラッシュを持ち込まずにスペースを含むパスを渡せる。
@@ -623,7 +674,10 @@ fi
 #
 # --name と同じく、解釈しない古いClaude Codeへ渡すと起動ごと失敗するため対応時のみ付ける。
 # 外部から操作可能になるのを避けたいときは ISSUE_DECK_CLAUDE_REMOTE_CONTROL=0 で無効化できる。
-if [[ "${ISSUE_DECK_CLAUDE_REMOTE_CONTROL:-1}" != "0" ]]; then
+#
+# **Codexでは使わない**（#2377）。同名のフラグはあるが、issue-deckが画面に出しているのは
+# Claude Codeが表示するURL（`session-notify.sh`が拾う）で、フックが飛ばない以上そこへは載らない。
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_CLAUDE_REMOTE_CONTROL:-1}" != "0" ]]; then
   if claude --help 2>/dev/null | grep -q -- "--remote-control"; then
     CLAUDE_EXTRA_ARGS+=(--remote-control "$SESSION_NAME")
   else
@@ -683,8 +737,12 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 #    会話履歴はcwdのパスに紐づいて残るため、ここを塞がないと古い前提のまま再開する
 # 2. cwdに対応する会話履歴のディレクトリに `*.jsonl` が1つ以上ある。ディレクトリ名の導き方は
 #    Claude Code側の都合なので、**変わればヒットしなくなるだけ**で、壊れずに従来の挙動へ落ちる
+#
+# **Codexでは引き継がない**（#2377）。あちらの再開は`codex resume`という別のサブコマンドで、
+# 初回プロンプトの渡し方も変わる。畳んだセッションを続きから起こしたい場合は、worktreeで
+# `codex resume --last`を手で叩く（docs/multi-agent/codex.md）。
 RESUME_CONVERSATION=0
-if [[ "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
   if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
     RESUME_CONVERSATION=1
@@ -705,6 +763,13 @@ fi
 # ようにしたいという目的は変わらない。
 if [[ -n "$KICKOFF_CONTEXT" ]]; then
   KICKOFF_PROMPT+=$'\n\n'"$KICKOFF_CONTEXT"
+fi
+
+# 出力言語（#1395）をプロンプト本文の先頭へ置く（#2377）。**Codexには`--append-system-prompt`が
+# 無い**ため、ここに置かないと指示が個人設定と対象リポジトリのCLAUDE.md任せに戻る。
+# 文面は`scripts/lib/agent-language.sh`の1か所から取る（Claude側と食い違わせない）。
+if [[ "$AGENT_KIND" != "claude" ]]; then
+  KICKOFF_PROMPT="$AGENT_LANGUAGE_SYSTEM_PROMPT"$'\n\n'"$KICKOFF_PROMPT"
 fi
 
 # 貼り直し用に、渡すプロンプトを起動前に必ず表示しておく。起動直後のセッションが何も始めない
@@ -731,9 +796,19 @@ echo
 # `bypassPermissions` は全権限チェックを飛ばし破壊的な操作も無確認で通るため、既定にはしない。
 # 値の妥当性検査はclaude側に任せる（ここで列挙を持つとclaudeの更新でずれる）。不正な値は
 # claudeが起動時にエラーで落ちるため、意図しないモードで動き出すことはない。
-PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
-
-echo "#$ISSUE_NUMBER: Claude Codeセッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
+#
+# **Codexにはこのフラグが無い。** 相当する設定（`--sandbox`・`--ask-for-approval`）は
+# `scripts/lib/agent-cli.sh`が組み立てる。
+AGENT_LAUNCH_ARGS=()
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+  AGENT_LAUNCH_ARGS=(--permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"})
+  echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
+else
+  agent_cli_build_codex_args
+  AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"})
+  echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を起動します（${AGENT_LAUNCH_ARGS[*]}）..."
+fi
 # 受付コメント（#1119）は`claude`を起動する直前に投げる。**ここより後ろには置けない**
 # （`claude`はフォアグラウンドで走り、戻ってくるのはセッションが終わったとき）。
 report_session_started_to_issue_deck
@@ -759,6 +834,11 @@ fi
 export ISSUE_DECK_PREVIEW_URL="$PREVIEW_URL"
 
 # APIの一時的な過負荷（529 Overloaded）で中断しにくくする（#1971。理由は lib/claude-retries.sh）。
-claude_export_max_retries
+# Claude Code固有の環境変数なので、Codexでは何も渡さない（#2377）。
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  claude_export_max_retries
+fi
 
-claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$KICKOFF_PROMPT"
+# 位置引数のプロンプトは**最後**に置く。Codexは `codex [OPTIONS] [PROMPT]` の形で、
+# フラグより後ろに置かないと値として食われる。
+"$AGENT_COMMAND" ${AGENT_LAUNCH_ARGS[@]+"${AGENT_LAUNCH_ARGS[@]}"} "$KICKOFF_PROMPT"
