@@ -14,9 +14,12 @@ import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import {
+  isPullRequestViewAttention,
+  type MergePendingAttention,
+} from "@/lib/merge-pending-attention";
+import {
   getAdjacentPullRequestViewId,
   getPullRequestView,
-  isPullRequestViewAttention,
   pullRequestViewIcons,
   pullRequestViews,
 } from "@/lib/pull-request-views";
@@ -27,6 +30,11 @@ type MobilePullRequestsScreenProps = {
   view: PullRequestViewId;
   /** ビューごとの件数（#1389）。nullのビュー（「全てのPR」）は件数を出さない */
   navCounts: PullRequestNavCounts;
+  /**
+   * 「マージ待ち」の内訳（#2334）。ビュー選択シートでオレンジの丸を点けるかどうかだけに使う
+   * （行に出す数字は`navCounts`）。**nullは未取得。**
+   */
+  mergePendingAttention: MergePendingAttention | null;
   /**
    * この画面へ来た経路（#1436）。フッターのタブから開いた場合（"tab"）は戻る先が無いため
    * 戻るボタンを出さない。ホームの「Pull Request」からのドリルダウン（"home"）でのみ出す。
@@ -64,6 +72,7 @@ type MobilePullRequestsScreenProps = {
 export function MobilePullRequestsScreen({
   view,
   navCounts,
+  mergePendingAttention,
   origin,
   pullRequests,
   failedRepositories,
@@ -240,13 +249,11 @@ export function MobilePullRequestsScreen({
           label: pullRequestView.label,
           icon: pullRequestViewIcons[pullRequestView.id],
           count: navCounts[pullRequestView.id],
-          // 「マージ待ち」だけオレンジの丸にする（#2334）。判定はホーム・PCの左メニューと
-          // 同じ`isPullRequestViewAttention`。Issue側のシートが「ユーザーの確認待ち」を
-          // 強調しているのと同じ扱い（`mobile-issue-view-sheet.tsx`）
-          highlighted: isPullRequestViewAttention(
-            pullRequestView.id,
-            navCounts[pullRequestView.id],
-          ),
+          // 「マージ待ち」のうち人が手を動かすまで進まないものが残っているときだけオレンジの
+          // 丸にする（#2334）。判定はホーム・PCの左メニューと同じ`isPullRequestViewAttention`。
+          // Issue側のシートが「ユーザーの確認待ち」を強調しているのと同じ扱い
+          // （`mobile-issue-view-sheet.tsx`）
+          highlighted: isPullRequestViewAttention(pullRequestView.id, mergePendingAttention),
         }))}
         selectedId={view}
         onSelect={onChangeView}

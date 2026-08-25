@@ -82,28 +82,6 @@ export const pullRequestViewIcons: Record<PullRequestViewId, LucideIcon> = {
   completed: GitMerge,
 };
 
-/**
- * その行の件数をオレンジの丸（`NavCount`の`emphasis="attention"`）で出すか（#2334）。
- *
- * **点けるのは「マージ待ち」だけ。** CIも自動マージ可否の判定も終わったPRしか並ばないビューで、
- * 残っているのはユーザーがマージするか、CI失敗を直すかしかない＝人が手を動かすまで進まない
- * もの。「ユーザーの確認待ち」（#742）・「ユーザーの作業待ち」（#1613）と同じ扱いにそろえる。
- *
- * 「すべてのPR」は実行中のPRを含む在庫の数、「実行中」はCI・判定の結果待ち（人が何もしなくても
- * 進む）なので点けない。0件・未取得（`null`）でも点けない——丸は「いま手を動かせるものがある」
- * という合図で、`0`に丸を付けると合図として読めなくなる。
- *
- * **判定をここに置いて画面側に書かない。** PCの左メニュー・スマホのホーム・スマホのビュー選択
- * シートの3か所に同じ条件が散ると、片方だけ直された時点でPCとスマホで意味が食い違う
- * （`resolveQuestionNavSignals`と同じ置き方）。
- */
-export function isPullRequestViewAttention(
-  id: PullRequestViewId,
-  count: number | null | undefined,
-): boolean {
-  return id === "completed" && (count ?? 0) > 0;
-}
-
 export function isPullRequestViewId(value: string | null | undefined): value is PullRequestViewId {
   return value !== null && value !== undefined && pullRequestViews.some((view) => view.id === value);
 }
