@@ -386,7 +386,7 @@ describe("buildBranchFlow", () => {
       openManualStepCount: 0,
       plannedIssueCount: 0,
       releaseInProgress: false,
-      releaseCiPending: false,
+      releaseAutoProgressing: false,
       releaseMergeTarget: null,
       deploy: null,
     });
@@ -1004,18 +1004,18 @@ describe("バージョンバンプPRの扱い（#1548）", () => {
     expect(repository.summary.releaseInProgress).toBe(true);
   });
 
-  // 畳んだ1行の「リリース中」を回してよいかの判定（#1931）。CIが終わっていれば、
+  // 畳んだ1行の「リリース中」を回してよいかの判定（#1931）。CIも判定も終わっていれば、
   // 待つのではなく人がマージする番なので回さない。
-  it("CI実行中のバンプPRはリリースのCI実行中として拾う", () => {
-    expect(repository.summary.releaseCiPending).toBe(true);
+  it("CI実行中のバンプPRはリリースが自動で進んでいる扱いにする", () => {
+    expect(repository.summary.releaseAutoProgressing).toBe(true);
   });
 
-  it("CIが終わったバンプPRはリリースのCI実行中にしない", () => {
+  it("CIも判定も終わったバンプPRは自動で進んでいる扱いにしない", () => {
     const done = build({
       pullRequests: [pullRequest({ ...openBump, ciState: "success" })],
       branchStatuses: [branchStatus({ developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null } })],
     }).repositories[0];
-    expect(done.summary.releaseCiPending).toBe(false);
+    expect(done.summary.releaseAutoProgressing).toBe(false);
   });
 
   it("CIが落ちたバンプPRはCI失敗として拾う", () => {
@@ -1263,7 +1263,7 @@ describe("サマリー行の集計", () => {
       openManualStepCount: 0,
       plannedIssueCount: 0,
       releaseInProgress: false,
-      releaseCiPending: false,
+      releaseAutoProgressing: false,
       releaseMergeTarget: null,
       deploy: null,
     });
@@ -1327,6 +1327,14 @@ describe("サマリー行の集計", () => {
  * 畳んだ1行が紫の「リリース中」を出すか、琥珀の「mainへマージ待ち」を出すかがここで決まる。
  */
 describe("リリースのマージ待ち（releaseMergeTarget）", () => {
+  /** `claude-review-develop.yml`のレビューが走っている最中（#2326） */
+  const pendingJudgement: PullRequestSummary["mergeJudgement"] = {
+    state: "pending",
+    step: "claude-review",
+    runUrl: null,
+    aiReview: { state: "pending", runUrl: null },
+  };
+
   function summaryOf(pullRequests: PullRequestSummary[]) {
     return build({
       pullRequests,
@@ -1364,6 +1372,47 @@ describe("リリースのマージ待ち（releaseMergeTarget）", () => {
 
   it("CI実行中は待ちにしない（まだマージできない操作を促さない）", () => {
     expect(summaryOf([releasePullRequest({ ciState: "pending" })]).releaseMergeTarget).toBeNull();
+  });
+
+  /**
+   * CI通過後にClaudeのレビューが走っている窓（#2326）。判定のcheck-runはCI状態の集約から
+   * 外してある（#1799）ため`ciState`は`success`のままで、CIだけを基準にすると琥珀の
+   * 「mainへマージ待ち」が出ていた。そのあいだ画面のマージボタンは「判定中」で無効（#1968）。
+   */
+  it("自動マージ可否の判定中は待ちにせず、リリースは自動で進んでいる扱いにする（#2326）", () => {
+    const summary = summaryOf([
+      releasePullRequest({ ciState: "success", mergeJudgement: pendingJudgement }),
+    ]);
+    expect(summary.releaseMergeTarget).toBeNull();
+    expect(summary.releaseAutoProgressing).toBe(true);
+  });
+
+  it("判定が終わっていれば（settled）従来どおりmainへのマージ待ち（#2326）", () => {
+    const summary = summaryOf([
+      releasePullRequest({
+        ciState: "success",
+        mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      }),
+    ]);
+    expect(summary.releaseMergeTarget).toBe("main");
+    expect(summary.releaseAutoProgressing).toBe(false);
+  });
+
+  // 判定のcheck-runを1件も持たないリポジトリ（ワークフロー未配布・起動前）を締め出さない
+  it("判定のcheck-runが無い（unknown）ときは待ちのまま残す（#2326）", () => {
+    expect(summaryOf([releasePullRequest({ ciState: "success" })]).releaseMergeTarget).toBe("main");
+  });
+
+  it("Auto-mergeが効かないバンプPRも、判定中は待ちにしない（#2326）", () => {
+    const summary = summaryOf([
+      bumpPullRequest({
+        autoMergeEnabled: false,
+        ciState: "success",
+        mergeJudgement: pendingJudgement,
+      }),
+    ]);
+    expect(summary.releaseMergeTarget).toBeNull();
+    expect(summary.releaseAutoProgressing).toBe(true);
   });
 
   // 赤の「CI失敗」と琥珀の「マージ待ち」が同じ行に並ぶと、直すのかマージするのかを取り違える（#1059）
