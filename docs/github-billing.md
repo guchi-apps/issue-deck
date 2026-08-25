@@ -135,15 +135,30 @@ issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日�
 ### 1回の実行で何分課金されたかを見る
 
 ```bash
-# 直近のscheduleのrunを1本取り、ジョブごとの実行・skipを見る
-rid=$(gh api "repos/guchi-apps/<repo>/actions/workflows/issue-labels.yml/runs?event=schedule&per_page=1" \
-  --jq '.workflow_runs[0].id')
-gh api "repos/guchi-apps/<repo>/actions/runs/$rid/jobs" \
+repo=guchi-apps/<repo>
+# 直近のscheduleのrunを1本取り、どの版のワークフローで走ったのかも一緒に取る
+read -r rid sha <<<"$(gh api "repos/$repo/actions/workflows/issue-labels.yml/runs?event=schedule&per_page=1" \
+  --jq '"\(.workflow_runs[0].id) \(.workflow_runs[0].head_sha)"')"
+[ "$sha" = "$(gh api "repos/$repo/commits/main" --jq .sha)" ] ||
+  echo "まだ古いrefでの実行（$sha）。次のティックを待つ"
+gh api "repos/$repo/actions/runs/$rid/jobs" \
   --jq '.jobs[] | "\(.name)\t\(.conclusion)\t\(.started_at)→\(.completed_at)"'
 ```
 
 `conclusion`が`skipped`のジョブは課金されない。`success`／`failure`のジョブの数が、
 そのまま**そのrunの課金分数の下限**（1ジョブ＝最低1分）になる。
+
+**`head_sha`を`main`の先端と突き合わせてから数える**（#2298）。`push`や`pull_request`と違い、
+scheduleのrunは`head_sha`を見ないと「どの版のワークフローで走ったのか」が分からない。
+**ワークフローを`main`へマージした直後は、1回ぶん古いrefで走ることがある。** #2294の確認では
+`claude-config`のマージ（04:24:54Z）より後の04:32:16Zのrunが`head_sha=38f04730`（マージ前の
+`main`）で走り、消したはずのジョブが1件動いた。次の05:15:33Zのrunは`head_sha=f54613b2`
+（マージ後）で0件だった。実行時刻がマージより後であることだけを根拠にすると、**直っているのに
+直っていないと誤判定する**（逆に、変更で壊れたのを見逃す向きにも効く）。
+
+**あわせて、待つ時間も見込んでおく。** GitHubのscheduleは`*/15`と書いても実測24〜36分間隔なので、
+マージから最初の「新しいrefでの実行」までは30分〜1時間かかる。#2294では`vps`がマージ04:22Z →
+新refでの実行04:56Z、`claude-config`が04:25Z → 05:15Zだった。
 
 **ワークフロー別の内訳は実行回数から見る。** 課金レポート（下記API）はリポジトリ単位までしか
 分けてくれないため、どのワークフローが食っているかは実行回数で当たりを付ける。
