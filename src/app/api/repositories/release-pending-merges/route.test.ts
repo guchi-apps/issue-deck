@@ -4,7 +4,7 @@ const requireUserId = vi.fn();
 const findMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchOpenPullRequestsForBase = vi.fn();
-const fetchRefCiState = vi.fn();
+const fetchRefCheckState = vi.fn();
 const fetchLatestReleaseWorkflowRun = vi.fn();
 const fetchLatestDeployWorkflowRun = vi.fn();
 const releaseWorkflowExists = vi.fn();
@@ -38,8 +38,8 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     get fetchOpenPullRequestsForBase() {
       return fetchOpenPullRequestsForBase;
     },
-    get fetchRefCiState() {
-      return fetchRefCiState;
+    get fetchRefCheckState() {
+      return fetchRefCheckState;
     },
     get fetchLatestReleaseWorkflowRun() {
       return fetchLatestReleaseWorkflowRun;
@@ -57,6 +57,8 @@ vi.mock("@/lib/github/release-workflow-cache", () => ({
 }));
 
 import { GET } from "@/app/api/repositories/release-pending-merges/route";
+import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
+import type { CiState, RefCheckState } from "@/lib/github/release-api";
 
 const REPO_A = {
   fullName: "owner/repo-a",
@@ -81,6 +83,25 @@ function openPullRequestsFor(target: {
     repo === target.repo && base === target.base ? [target.pullRequest] : [];
 }
 
+/**
+ * `fetchRefCheckState`の戻り値。CI状態と自動マージ可否の判定を同じ1回のクエリで返す（#2326）。
+ * 既定は判定のcheck-runを持たない（`unknown`）リポジトリ＝従来どおりの振る舞い。
+ */
+function checkState(
+  ciState: CiState,
+  mergeJudgement: MergeJudgement = MERGE_JUDGEMENT_UNKNOWN,
+): RefCheckState {
+  return { ciState, mergeJudgement };
+}
+
+/** `claude-review-develop.yml`のレビューが走っている最中（#2326） */
+const PENDING_JUDGEMENT: MergeJudgement = {
+  state: "pending",
+  step: "claude-review",
+  runUrl: null,
+  aiReview: { state: "pending", runUrl: null },
+};
+
 const RELEASE_PR = {
   number: 12,
   html_url: "https://github.com/owner/repo-a/pull/12",
@@ -102,7 +123,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     getInstallationToken.mockReset().mockResolvedValue("token");
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
     fetchOpenPullRequestsForBase.mockReset().mockResolvedValue([]);
-    fetchRefCiState.mockReset().mockResolvedValue("success");
+    fetchRefCheckState.mockReset().mockResolvedValue(checkState("success"));
     fetchLatestReleaseWorkflowRun.mockReset().mockResolvedValue(null);
     fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -143,14 +164,14 @@ describe("GET /api/repositories/release-pending-merges", () => {
       },
     ]);
     // CI状態はリリースPRのheadブランチ（凍結ブランチ）に対して問い合わせる。
-    expect(fetchRefCiState).toHaveBeenCalledWith("owner", "repo-a", "release-main/v1.2.3", "token");
+    expect(fetchRefCheckState).toHaveBeenCalledWith("owner", "repo-a", "release-main/v1.2.3", "token");
   });
 
   it("リリースPRのCIが失敗していても一覧から外さず、ciStateにfailureを返す（#1059）", async () => {
     fetchOpenPullRequestsForBase.mockImplementation(
       openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
     );
-    fetchRefCiState.mockResolvedValue("failure");
+    fetchRefCheckState.mockResolvedValue(checkState("failure"));
 
     const response = await GET();
     const json = await response.json();
@@ -177,7 +198,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     fetchOpenPullRequestsForBase.mockImplementation(
       openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
     );
-    fetchRefCiState.mockResolvedValue("pending");
+    fetchRefCheckState.mockResolvedValue(checkState("pending"));
 
     const response = await GET();
     const json = await response.json();
@@ -193,11 +214,35 @@ describe("GET /api/repositories/release-pending-merges", () => {
     ]);
   });
 
+  /**
+   * CI通過後にClaudeのレビュー・マージ可否の判定が走っている窓（#2326）。判定のcheck-runは
+   * CI状態の集約から外してある（#1799）ため`ciState`は`success`のまま。押せる操作が無い
+   * あいだは通知ベル・スマホの一覧・フッターの件数から外す。
+   */
+  it("リリースPRの自動マージ可否の判定中はマージ待ちにしない（#2326）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+    fetchRefCheckState.mockResolvedValue(checkState("success", PENDING_JUDGEMENT));
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+      },
+    ]);
+  });
+
   it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
     fetchOpenPullRequestsForBase.mockImplementation(
       openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: BUMP_PR }),
     );
-    fetchRefCiState.mockResolvedValue("success");
+    fetchRefCheckState.mockResolvedValue(checkState("success"));
 
     const response = await GET();
     const json = await response.json();
@@ -222,7 +267,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     fetchOpenPullRequestsForBase.mockImplementation(
       openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: BUMP_PR }),
     );
-    fetchRefCiState.mockResolvedValue("pending");
+    fetchRefCheckState.mockResolvedValue(checkState("pending"));
 
     const response = await GET();
     const json = await response.json();
