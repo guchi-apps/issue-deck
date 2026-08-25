@@ -1767,12 +1767,14 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
   人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
   そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
-  **マージ済みなのに残った`00.check-user`＋`01.check-merge`を外すのも同じ巡回**（#2335。
-  判定は`decideStaleCheckMerge`）。外す役はマージのイベントを受け取るワークフローだけで
-  再試行が無く、GitHubの一時的な5xxに当たると誰も外し直さなかった（guchi-apps/signaly#200）。
-  こちらも探し先はDBで、開いているPRがあるIssue・`issue-<番号>`のPRが1件も無いIssueには
-  触らない。設計は[multi-agent/labels.md](multi-agent/labels.md)「マージ済みなのに残った
-  `01.check-merge`は巡回が外す」。
+  **マージ時に外しそこねた`00.check-user`を外すのも同じ巡回**（#2335。判定は
+  `decideStaleCheckUser`）。マージ時の除去は7枚まとめての1回で再試行が無く、GitHubの
+  一時的な5xxに当たると次のmainリリースまで確認待ちが残る（guchi-apps/signaly#200で18分）。
+  こちらも探し先はDBで、対象は**`Develop`・`Release`にいるopenなIssue**。開いているPRが
+  あるIssue・`issue-<番号>`のマージ済みPRが無いIssue・**`00.check-user`が最後のマージより
+  後に付いたIssue**（#1968の事後確認）には触らない。設計は
+  [multi-agent/labels.md](multi-agent/labels.md)「マージ時に外しそこねた`00.check-user`は
+  巡回が外す」。
   **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
   `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
   Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で
