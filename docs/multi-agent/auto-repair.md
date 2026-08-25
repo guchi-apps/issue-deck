@@ -610,14 +610,18 @@ DBを使うのは、判定の置き場所ではなく「起票したことを取
   （`collectWorkflowTags`が読む`.github/workflows/`のTreeのファイル名を使う）。判定は
   `missingRepairWorkflows`（`src/lib/workflow-tags.ts`）で、**そのリポジトリで意味を持つものだけ**を
   不足として挙げる——`claude-ci-fix.yml`・`claude-conflict-resolve.yml`は
-  `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
-  `release-develop-to-main.yml`を持つリポジトリ、`deploy-retry.yml`は`deploy.yml`を持つ
-  リポジトリが対象。
-- **ただし`claude-issue-dispatch.yml`を持たないリポジトリには、`requires`が満たされていても
-  1つも配らない**（#2303）。下の配布スクリプトが参照タグと`with:`の値をそのcallerから写す
-  ため、無ければ`fail`で落ちるからで、挙げるとボタンを押した時点で必ず失敗する。参照タグの
-  配布が#2303で`vps`・`subpc`まで対象を広げたことで、実際に起こりうる状態になった
-  （あの2つは`release-develop-to-main.yml`・`deploy.yml`を持つ）。配るなら手で配る
+  `claude-issue-dispatch.yml`を、`claude-pr-repair.yml`は`claude-issue-dispatch.yml`と
+  `release-develop-to-main.yml`を、`deploy-retry.yml`は`claude-issue-dispatch.yml`と
+  `deploy.yml`を**すべて**持つリポジトリが対象。
+- **`claude-issue-dispatch.yml`はどのcallerの`requires`にも入っている**（#2303）。下の配布
+  スクリプトが参照タグと`with:`の値をそのcallerから写すため、無ければ`fail`で落ちて1つも
+  配れないからで、不足として挙げるとボタンを押した時点で必ず失敗する。参照タグの配布が
+  #2303で`vps`・`subpc`まで対象を広げたことで、実際に起こりうる状態になった（あの2つは
+  `release-develop-to-main.yml`・`deploy.yml`を持つ）。**条件は`REPAIR_WORKFLOW_SPECS`の
+  `requires`にだけ書き、関数側に特例を足さない**——同じ`requires`をPR詳細の文言
+  （`resolveMissingState`。`src/lib/github/repair-workflow-cache.ts`）も読むので、片方だけ
+  変えると「一覧には出ないのに、PR詳細は設定＞フリート運用から配れますと案内する」
+  行き止まり（#1960）が復活する。この2件へ配るなら手で配る
   （[../supported-repositories.md](../supported-repositories.md)「画面の配布ボタンの対象外
   なので手で配る」）。
 - **この配布経路は自動修復専用ではない**（#1475）。`claude-review-develop.yml`——develop向けPRの
