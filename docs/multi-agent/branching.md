@@ -290,6 +290,19 @@ lint・buildの完了から1分足らずでマージされる。#1891では、PR
   マージされたPRは追加pushでは開き直らない
 - **PR本文を後から書き換える場合も、その時点でマージ済みかを確かめる。** マージ済みのPRの本文を
   直しても、入っていない変更を入っているように読ませるだけになる
+- **`gh pr edit`・`gh issue view --comments`は「Projects (classic) is being deprecated」の
+  GraphQLエラーで落ちることがある**（#2287）。`gh`がPRやIssueと一緒に`projectCards`を引くため
+  で、こちらの書き方の問題ではない。`--json`で必要なフィールドだけを取るか、`gh api`へ迂回する。
+  本文の書き換えは`gh api`のPATCHが通る
+
+  ```bash
+  gh pr view <番号> --json state,mergedAt          # gh pr view <番号> の代わり
+  gh api repos/<owner>/<repo>/issues/<番号>/comments --jq '.[].body'   # --comments の代わり
+  gh api -X PATCH repos/<owner>/<repo>/pulls/<番号> -F body=@body.md   # gh pr edit --body-file の代わり
+  ```
+
+  **`gh pr edit`は落ちた側でも本文を書き換えていない。** エラーだけを見て「反映されたが表示に
+  失敗した」と読まないこと。書き換わったかは`gh api ... --jq .body`で確かめる
 
 ### レビュー・統合エージェント
 
