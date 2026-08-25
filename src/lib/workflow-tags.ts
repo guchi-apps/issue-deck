@@ -299,6 +299,14 @@ export type RepairWorkflowSpec = {
  * 古いままになる。**ただし`vps`・`subpc`へ配るかは配布のときに判断すること**——あの2つは
  * 実機のインフラ設定を流すリポジトリで、Issue #2134でも自動再実行に含めるかを別扱いにしている。
  */
+/**
+ * callerの配布に必要な参照元（#2303）。
+ *
+ * `.github/scripts/propagate-repair-workflows.sh`はここから参照タグと`with:`の値を写す。
+ * **無いリポジトリへは1つも配れない**ので、判定側もこのファイルの実在を入口にする。
+ */
+export const REPAIR_WORKFLOW_SOURCE = "claude-issue-dispatch.yml";
+
 export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
   {
     file: "claude-conflict-resolve.yml",
@@ -338,9 +346,21 @@ export function repairWorkflowLabel(file: string): string {
  * 判定にファイルの中身は見ない。issue-deck自身はローカルパス参照（`uses: ./`）で、
  * 他リポジトリはタグ固定と方式が違うが、**どちらも「そのファイルが置いてあるか」だけで
  * 起動できるかが決まる**ため（`workflow_dispatch`の受け口はファイルの実在で解決される）。
+ *
+ * **無人実行のcaller（`claude-issue-dispatch.yml`）が無いリポジトリには何も配らない**
+ * （#2303）。配布スクリプトは参照タグと`with:`の値をそのcallerから写すため、無ければ
+ * `fail`で落ちる（`.github/scripts/propagate-repair-workflows.sh`の
+ * 「参照元が無ければ配らない」）。ここで挙げてしまうと、画面のボタンを押した時点で
+ * そのリポジトリぶんが必ず失敗する。**参照タグの配布（`collectWorkflowTags`）が
+ * `vps`・`subpc`まで対象を広げたことで、実際に起こりうる状態になった**——あの2つは
+ * `release-develop-to-main.yml`・`deploy.yml`を持つので、この判定だけなら
+ * `claude-pr-repair.yml`・`deploy-retry.yml`が不足として挙がる。
+ * 配るなら手で配る（`docs/supported-repositories.md`「画面の配布ボタンの対象外なので
+ * 手で配る」）。
  */
 export function missingRepairWorkflows(files: string[]): string[] {
   const present = new Set(files);
+  if (!present.has(REPAIR_WORKFLOW_SOURCE)) return [];
   return REPAIR_WORKFLOW_SPECS.filter(
     (spec) => present.has(spec.requires) && !present.has(spec.file),
   ).map((spec) => spec.file);

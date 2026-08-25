@@ -613,6 +613,13 @@ DBを使うのは、判定の置き場所ではなく「起票したことを取
   `claude-issue-dispatch.yml`を持つリポジトリ、`claude-pr-repair.yml`は
   `release-develop-to-main.yml`を持つリポジトリ、`deploy-retry.yml`は`deploy.yml`を持つ
   リポジトリが対象。
+- **ただし`claude-issue-dispatch.yml`を持たないリポジトリには、`requires`が満たされていても
+  1つも配らない**（#2303）。下の配布スクリプトが参照タグと`with:`の値をそのcallerから写す
+  ため、無ければ`fail`で落ちるからで、挙げるとボタンを押した時点で必ず失敗する。参照タグの
+  配布が#2303で`vps`・`subpc`まで対象を広げたことで、実際に起こりうる状態になった
+  （あの2つは`release-develop-to-main.yml`・`deploy.yml`を持つ）。配るなら手で配る
+  （[../supported-repositories.md](../supported-repositories.md)「画面の配布ボタンの対象外
+  なので手で配る」）。
 - **この配布経路は自動修復専用ではない**（#1475）。`claude-review-develop.yml`——develop向けPRの
   自動マージ可否を判定する唯一の経路——も同じ一覧・同じボタンから配る。自動修復ではないが
   「置かれていないと機能が丸ごと働かない」点が同じで、判定も`REPAIR_WORKFLOW_SPECS`に1行
