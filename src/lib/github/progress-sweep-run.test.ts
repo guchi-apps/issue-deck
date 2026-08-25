@@ -125,6 +125,43 @@ function pullRequestsForHead(closed: unknown[], open: unknown[] = []) {
   return vi.fn(async (..._args: unknown[]) => (_args[4] === "closed" ? closed : open));
 }
 
+/**
+ * `db.issue.findMany`は2つの巡回（滞留した`01.check-merge`の回収・手作業ラベルの埋め直し）が
+ * 使うので、`where`の形で振り分ける。手作業側だけが`title`で絞り込む。
+ */
+function issueRowsFor(rows: { staleCheckMerge?: unknown[]; manualStep?: unknown[] }) {
+  return vi.fn(async (args: { where?: { title?: unknown } }) =>
+    args?.where?.title === undefined ? (rows.staleCheckMerge ?? []) : (rows.manualStep ?? []),
+  );
+}
+
+/** 滞留した`01.check-merge`の回収が拾う行 */
+function staleCheckMergeRow(number: number, name = "signaly") {
+  return {
+    number,
+    repository: {
+      ownerLogin: "guchi-apps",
+      name,
+      fullName: `guchi-apps/${name}`,
+      installation: { id: "inst-row", installationId: 111 },
+    },
+  };
+}
+
+/** 手作業ラベルの埋め直しが拾う行 */
+function manualStepRow(number: number) {
+  return {
+    number,
+    title: "[手作業] VPS: .envを更新する",
+    repository: {
+      ownerLogin: "guchi-apps",
+      name: "vps",
+      fullName: "guchi-apps/vps",
+      installation: { id: "inst-row", installationId: 111 },
+    },
+  };
+}
+
 describe("runProgressSweep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -134,7 +171,7 @@ describe("runProgressSweep", () => {
     process.env.PROJECT_V2_NUMBER = "1";
 
     repositoryFindMany.mockResolvedValue([REPO]);
-    issueFindMany.mockResolvedValue([]);
+    issueFindMany.mockImplementation(issueRowsFor({}));
     getInstallationToken.mockResolvedValue("token");
     fetchProjectItems.mockResolvedValue([projectItem()]);
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
@@ -305,20 +342,91 @@ describe("runProgressSweep", () => {
     expect(fetchProjectItems).not.toHaveBeenCalled();
   });
 
+  it("マージ済みなのに残った 00.check-user + 01.check-merge を外す（#2335）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(issueRowsFor({ staleCheckMerge: [staleCheckMergeRow(200)] }));
+    fetchPullRequestsForHead.mockResolvedValue([
+      { state: "closed", merged_at: "2026-08-25T11:28:28Z" },
+    ]);
+    removeIssueLabel.mockResolvedValue(["01.check-merge", "40.unexpected"]);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    // baseは絞らず、開いているPRも含めて1回で引く
+    expect(fetchPullRequestsForHead).toHaveBeenCalledWith(
+      "guchi-apps",
+      "signaly",
+      null,
+      "issue-200",
+      "all",
+      "token",
+    );
+    expect(removeIssueLabel).toHaveBeenCalledWith(
+      "guchi-apps",
+      "signaly",
+      200,
+      "token",
+      "00.check-user",
+    );
+    expect(removeIssueLabel).toHaveBeenCalledWith(
+      "guchi-apps",
+      "signaly",
+      200,
+      "token",
+      "01.check-merge",
+    );
+    expect(result.actions).toEqual([
+      { repositoryFullName: "guchi-apps/signaly", issueNumber: 200, kind: "check_merge_cleared" },
+    ]);
+    // 進捗は動かさない（Developまで進み終えたIssueのラベルだけを相手にする）
+    expect(reportProgressStatus).not.toHaveBeenCalled();
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("まだ開いているPRがあれば 01.check-merge を外さない（本物のマージ待ち）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(issueRowsFor({ staleCheckMerge: [staleCheckMergeRow(200)] }));
+    fetchPullRequestsForHead.mockResolvedValue([
+      { state: "closed", merged_at: "2026-08-25T11:28:28Z" },
+      { state: "open", merged_at: null },
+    ]);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(removeIssueLabel).not.toHaveBeenCalled();
+    expect(result.actions).toEqual([]);
+    expect(result.skipped).toMatchObject({ check_merge_pr_open: 1 });
+  });
+
+  it("issue-<番号>のPRが1件も無ければ外さない（人が手で付けた確認待ちを消さない）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(issueRowsFor({ staleCheckMerge: [staleCheckMergeRow(200)] }));
+    fetchPullRequestsForHead.mockResolvedValue([]);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(removeIssueLabel).not.toHaveBeenCalled();
+    expect(result.actions).toEqual([]);
+    expect(result.skipped).toMatchObject({ check_merge_no_pr: 1 });
+  });
+
+  it("DBが古くて実際には付いていなかった場合、巡回の成果として数えない", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(issueRowsFor({ staleCheckMerge: [staleCheckMergeRow(200)] }));
+    fetchPullRequestsForHead.mockResolvedValue([
+      { state: "closed", merged_at: "2026-08-25T11:28:28Z" },
+    ]);
+    // 404（もともと付いていない）
+    removeIssueLabel.mockResolvedValue(null);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(result.actions).toEqual([]);
+  });
+
   it("ラベルの無い手作業Issueへ 71.manual-step を付け直す", async () => {
     fetchProjectItems.mockResolvedValue([]);
-    issueFindMany.mockResolvedValue([
-      {
-        number: 40,
-        title: "[手作業] VPS: .envを更新する",
-        repository: {
-          ownerLogin: "guchi-apps",
-          name: "vps",
-          fullName: "guchi-apps/vps",
-          installation: { id: "inst-row", installationId: 111 },
-        },
-      },
-    ]);
+    issueFindMany.mockImplementation(issueRowsFor({ manualStep: [manualStepRow(40)] }));
 
     const result = await runProgressSweep({ now: NOW });
 
@@ -333,18 +441,7 @@ describe("runProgressSweep", () => {
   it("ラベル定義が無いリポジトリへは付けない（色も説明も無いラベルを生やさない）", async () => {
     fetchProjectItems.mockResolvedValue([]);
     fetchRepositoryLabelNames.mockResolvedValue(new Set(["00.check-user"]));
-    issueFindMany.mockResolvedValue([
-      {
-        number: 40,
-        title: "[手作業] VPS: .envを更新する",
-        repository: {
-          ownerLogin: "guchi-apps",
-          name: "vps",
-          fullName: "guchi-apps/vps",
-          installation: { id: "inst-row", installationId: 111 },
-        },
-      },
-    ]);
+    issueFindMany.mockImplementation(issueRowsFor({ manualStep: [manualStepRow(40)] }));
 
     const result = await runProgressSweep({ now: NOW });
 
@@ -354,18 +451,7 @@ describe("runProgressSweep", () => {
 
   it("Project連携が無効でも手作業ラベルの埋め直しは行う", async () => {
     delete process.env.PROJECT_V2_OWNER;
-    issueFindMany.mockResolvedValue([
-      {
-        number: 40,
-        title: "[手作業] VPS: .envを更新する",
-        repository: {
-          ownerLogin: "guchi-apps",
-          name: "vps",
-          fullName: "guchi-apps/vps",
-          installation: { id: "inst-row", installationId: 111 },
-        },
-      },
-    ]);
+    issueFindMany.mockImplementation(issueRowsFor({ manualStep: [manualStepRow(40)] }));
 
     const result = await runProgressSweep({ now: NOW });
 

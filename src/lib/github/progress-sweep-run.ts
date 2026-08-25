@@ -1,6 +1,11 @@
 import { db } from "@/lib/db";
 import { addCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
-import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, isCheckUserReasonLabel } from "@/lib/github/approval-labels";
+import {
+  CHECK_USER_LABEL,
+  CHECK_USER_REASON_LABELS,
+  MANUAL_STEP_LABEL,
+  isCheckUserReasonLabel,
+} from "@/lib/github/approval-labels";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches, fetchBranchHeadSha } from "@/lib/github/branches-api";
 import {
@@ -16,6 +21,7 @@ import {
   buildDevelopMergedComment,
   buildStrandedComment,
   decideProgressSweep,
+  decideStaleCheckMerge,
   hasDevelopMergedNotice,
   hasStrandedNotice,
   needsStrandedCheck,
@@ -58,14 +64,15 @@ import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress
  * ものだけになる（1件あたり2回・巡回ごと）。
  *
  * 手作業ラベルの埋め直し（`manual-step-label`ジョブのschedule分）は**issue-deckのDBを引く**
- * ので、GitHubへの問い合わせは実際に付けるときだけになる。
+ * ので、GitHubへの問い合わせは実際に付けるときだけになる。滞留した`01.check-merge`の回収
+ * （#2335）も同じで、対象が無ければREST 1回も出ない。
  */
 
 /** 巡回が実際に行ったこと1件ぶん */
 export type ProgressSweepAction = {
   repositoryFullName: string;
   issueNumber: number;
-  kind: "advanced" | "stranded" | "manual_step_labeled";
+  kind: "advanced" | "stranded" | "manual_step_labeled" | "check_merge_cleared";
 };
 
 export type ProgressSweepResult = {
@@ -180,6 +187,7 @@ export async function runProgressSweep(
     }
   }
 
+  actions.push(...(await sweepStaleCheckMerge({ tokenFor, countSkip })));
   actions.push(...(await sweepManualStepLabels({ tokenFor, countSkip })));
 
   return {
@@ -390,19 +398,122 @@ async function sweepIssue(params: {
  * ローカルセッション用の`removeCheckUserWithReason`と違い、**誰が付けたかを問わずに外す。**
  * developへマージされた時点で、計画の承認もマージの確認も待つ相手がいなくなるため
  * （`develop-merge-sweep`ジョブが`gh issue edit --remove-label`を並べていたのと同じ扱い）。
+ *
+ * 戻り値は「実際に`00.check-user`が付いていて外したか」。DBの同期が遅れて対象に挙がった
+ * だけのIssueを、巡回の成果として数えないために見る（#2335）。
  */
 async function clearCheckUser(
   owner: string,
   repo: string,
   issueNumber: number,
   token: string,
-): Promise<void> {
+): Promise<boolean> {
   const remaining = await removeIssueLabel(owner, repo, issueNumber, token, CHECK_USER_LABEL);
   // 404（もともと付いていない）なら理由ラベルも付いていない
-  if (remaining === null) return;
+  if (remaining === null) return false;
   for (const name of remaining.filter(isCheckUserReasonLabel)) {
     await removeIssueLabel(owner, repo, issueNumber, token, name);
   }
+  return true;
+}
+
+/**
+ * マージが済んだのに残っている`00.check-user`＋`01.check-merge`を外す（#2335）。
+ *
+ * 外す役はPRのマージを受け取る`reusable-issue-labels.yml`の`develop-pr-merged`
+ * （`main-pr-merged`も同じ）だけで、そこの`gh issue edit`には再試行が無かった。
+ * guchi-apps/signaly#200ではGitHubの`502 Bad Gateway`に当たり、警告だけ出して素通りしている。
+ * ワークフロー側にも再試行を足したが、恒久的な失敗と、参照タグが古いままのリポジトリは
+ * 拾えないので、こちらを最後の受け皿にする。
+ *
+ * **探し先はissue-deckのDB**（`sweepManualStepLabels`と同じ）。滞留は平常時0件なので、
+ * 対象が無ければGitHubへのリクエストは1回も出ない。対象があるときだけ、そのIssueの
+ * `issue-<番号>`ブランチのPRを1回引いて`decideStaleCheckMerge`にかける。
+ *
+ * **進捗（Status）は動かさない。** 進めるのは上の`sweepIssue`の役目で、こちらは
+ * `Develop`まで進み終えたIssueに取り残されたラベルだけを相手にする。
+ */
+async function sweepStaleCheckMerge(params: {
+  tokenFor: (installationId: number, cacheKey: string) => Promise<string>;
+  countSkip: (reason: keyof ProgressSweepResult["skipped"]) => void;
+}): Promise<ProgressSweepAction[]> {
+  const targets = await db.issue.findMany({
+    where: {
+      state: "OPEN",
+      repository: { archived: false },
+      // `some`を2つ重ねる。1つの`labels: { some: { name: { in: [...] } } }`では
+      // 「どちらか一方でも付いていれば」になってしまう。
+      AND: [
+        { labels: { some: { name: CHECK_USER_LABEL } } },
+        { labels: { some: { name: CHECK_USER_REASON_LABELS.merge } } },
+      ],
+    },
+    select: {
+      number: true,
+      repository: {
+        select: {
+          ownerLogin: true,
+          name: true,
+          fullName: true,
+          installation: { select: { id: true, installationId: true } },
+        },
+      },
+    },
+    orderBy: { number: "asc" },
+  });
+  if (targets.length === 0) return [];
+
+  const actions: ProgressSweepAction[] = [];
+  for (const target of targets) {
+    const repository = target.repository;
+    try {
+      const token = await params.tokenFor(
+        repository.installation.installationId,
+        repository.installation.id,
+      );
+      // baseは絞らない。`develop`を持たないリポジトリでは`issue-<番号>`→`main`が唯一のPRで、
+      // そちらにも`01.check-merge`が付く（`main-pr-in-progress`ジョブ）。
+      const pullRequests = await fetchPullRequestsForHead(
+        repository.ownerLogin,
+        repository.name,
+        null,
+        `issue-${target.number}`,
+        "all",
+        token,
+      );
+      const decision = decideStaleCheckMerge(
+        pullRequests.map((pullRequest) => ({
+          state: pullRequest.state,
+          mergedAt: pullRequest.merged_at,
+        })),
+      );
+      if (decision.action === "skip") {
+        params.countSkip(decision.reason);
+        continue;
+      }
+      const cleared = await clearCheckUser(
+        repository.ownerLogin,
+        repository.name,
+        target.number,
+        token,
+      );
+      if (!cleared) continue;
+      actions.push({
+        repositoryFullName: repository.fullName,
+        issueNumber: target.number,
+        kind: "check_merge_cleared",
+      });
+    } catch (error) {
+      // 1件の失敗で残りを止めない（次の巡回で拾い直せる）。
+      console.error(
+        `[progress-sweep] ${repository.fullName}#${target.number} の ${CHECK_USER_LABEL} 除去:`,
+        error,
+      );
+      params.countSkip("action_failed");
+    }
+  }
+
+  return actions;
 }
 
 /**

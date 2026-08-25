@@ -4,6 +4,7 @@ import {
   buildDevelopMergedComment,
   buildStrandedComment,
   decideProgressSweep,
+  decideStaleCheckMerge,
   hasDevelopMergedNotice,
   hasStrandedNotice,
   isManualStepTitle,
@@ -232,5 +233,36 @@ describe("isManualStepTitle", () => {
     expect(isManualStepTitle("[手作業] VPS: .envを更新する")).toBe(true);
     expect(isManualStepTitle("手作業でVPSの.envを更新する")).toBe(false);
     expect(isManualStepTitle("対応の前に[手作業]が要る")).toBe(false);
+  });
+});
+
+describe("decideStaleCheckMerge", () => {
+  it("マージ済みのPRだけならラベルを外す（#2335。signaly#200の形）", () => {
+    expect(
+      decideStaleCheckMerge([{ state: "closed", mergedAt: "2026-08-25T11:28:28Z" }]),
+    ).toEqual({ action: "clear" });
+  });
+
+  it("開いているPRが1件でもあれば外さない（本物のマージ待ち）", () => {
+    expect(
+      decideStaleCheckMerge([
+        { state: "closed", mergedAt: "2026-08-25T11:28:28Z" },
+        { state: "open", mergedAt: null },
+      ]),
+    ).toEqual({ action: "skip", reason: "check_merge_pr_open" });
+  });
+
+  it("PRが1件も無ければ外さない（人が手で付けた確認待ちを消さない）", () => {
+    expect(decideStaleCheckMerge([])).toEqual({
+      action: "skip",
+      reason: "check_merge_no_pr",
+    });
+  });
+
+  it("closeされただけでマージされていないPRしか無ければ外さない", () => {
+    expect(decideStaleCheckMerge([{ state: "closed", mergedAt: null }])).toEqual({
+      action: "skip",
+      reason: "check_merge_no_pr",
+    });
   });
 });
