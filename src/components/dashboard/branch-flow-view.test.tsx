@@ -1650,9 +1650,42 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // 畳んだ1行と束の見出しの両方に付く
-      const pills = screen.getAllByLabelText("リリース中（チェック実行中）");
+      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
       expect(pills).toHaveLength(2);
       // 「デプロイ中」と同じ回るアイコン。止まったアイコンを添えても状態は伝わらない
+      pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
+    });
+
+    /**
+     * CI通過後にClaudeのレビューが走っている窓（#2326）。判定のcheck-runはCI状態の集約から
+     * 外してある（#1799）ため`ciState`は`success`で、CIだけを見ていると琥珀の
+     * 「mainへマージ待ち」が出ていた。そのあいだ隣のマージボタンは「判定中」で無効（#1968）で、
+     * 押せる操作は無い。
+     */
+    it("Claudeがレビュー中の間は「mainへマージ待ち」を出さず「リリース中」を回す（#2326）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      // 畳んだ1行と束の見出しの両方が、回るアイコン付きの「リリース中」に戻る
+      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
+      expect(pills).toHaveLength(2);
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
 
@@ -1671,7 +1704,7 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // CIが終わった時点で「リリース中」ではなくなる（#2038）。止まっている状態を回さない
-      expect(screen.queryByLabelText("リリース中（チェック実行中）")).toBeNull();
+      expect(screen.queryByLabelText("リリース中（チェック・判定の実行中）")).toBeNull();
       expect(screen.queryByText("リリース中")).toBeNull();
     });
   });
@@ -1715,6 +1748,32 @@ describe("BranchFlowView", () => {
 
     it("CI実行中は「リリース中」のままで、件数も「待てば進むもの」に入れる", () => {
       renderRelease("pending");
+
+      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+
+    // CI通過後の自動マージ可否の判定中も、押せる操作は無い＝人の番ではない（#2326）
+    it("Claudeがレビュー中は「リリース中」のままで、件数も「待てば進むもの」に入れる（#2326）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
 
       expect(screen.getByText("リリース中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();

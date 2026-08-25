@@ -1261,8 +1261,9 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
   **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
   `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
-  したがって**CI実行中のPRは数えない**（`pendingMerge`がCIの確定後にしか埋まらないため。
-  #1433）。通知ベル・リポジトリ一覧のバッジと同じ判定で、ここだけ基準を変えると同じ状態が
+  したがって**CI実行中のPRと、自動マージ可否の判定中のPRは数えない**（`pendingMerge`が
+  CIの確定後、かつ判定の完了後にしか埋まらないため。#1433・#2326）。通知ベル・リポジトリ
+  一覧のバッジ・ブランチ画面と同じ判定で、ここだけ基準を変えると同じ状態が
   場所によって別の数になる。**未取得（`null`）と0件は区別する**——未取得のうちは何も出さない
   （0を出すと「待っているものが無い」と読めてしまう）。バッジの見た目は
   ベルと同じ`NotificationBadge`を使い回す。
@@ -1449,7 +1450,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   違いは回るアイコンの有無しか無かった（#1931）ため、一覧を流し見して自分の番のリポジトリを
   見つけられなかった。判定は`lib/branch-flow.ts`の`resolveReleaseMergeTarget`
   （→`summary.releaseMergeTarget`）で、基準は展開したときのリリースの見出しと同じ
-  「CIが`pending`でなくなった時点」。**`failure`だけは待ちに数えない**——同じ行に赤の「CI失敗」が
+  「CIが`pending`でなくなり、**自動マージ可否の判定も終わった**時点」。
+  **判定中（`isMergeJudgementPending`）を待ちに数えないのは#2326。** 判定ワークフロー
+  （`claude-review-develop`）のcheck-runはCI状態の集約から外してある（#1799）ため、
+  Claudeがレビューしている最中でも`ciState`は`success`になり、琥珀の「mainへマージ待ち」が
+  出ていた。その窓のあいだ隣のマージボタンは「判定中」で無効（#1968）＝押せる操作が無いので、
+  「あなたの番」と促すのは誤り。**PR一覧・通知ベルが#2283で同じ理由の判定を先に入れており、
+  リリース側の表示だけが取り残されていた**（判定を通す場所は
+  `resolveReleaseMergeTarget`・`ReleaseGroupHeader`の`waitingUserMerge`・
+  `summarizeReleaseStatus`の3つで、**この3つは同時に直す**——1か所でも残ると同じ状態が
+  画面によって紫と琥珀に割れる）。判定中は紫の「リリース中」に戻り、回るアイコンも付く
+  （`isReleaseAutoProgressing`＝`summary.releaseAutoProgressing`。CI実行中に加えて判定中も
+  「自動で進んでいる」に数えるようにしたのが#2326で、それまでは判定中だけアイコンが止まり
+  「止まっているリリース」に見えた）。
+  **`failure`だけは待ちに数えない**——同じ行に赤の「CI失敗」が
   出るため、「直す必要がある」と「マージすればよい」を取り違えさせない（#1059と同じ優先順位）。
   auto-mergeが効いているバンプPRも待ちにしない（放っておけばdevelopへ入る）。文言は
   `lib/github/release-button-status.ts`の`releaseMergeTargetLabel`に寄せ、スマホのリポジトリ一覧・

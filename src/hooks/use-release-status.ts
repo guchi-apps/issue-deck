@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
@@ -30,6 +31,16 @@ export type ReleasePullRequest = {
    * CI失敗・コンフリクトの表示に重ねて「自動修正中」を出し、同じ種類のボタンを押せなくする。
    */
   repairRun: PullRequestRepairRunSummary | null;
+  /**
+   * 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#2326）。
+   *
+   * **`ciState`とは別の軸。** 判定のcheck-runはCI状態の集約から外してある（#1799）ため、
+   * Claudeのレビューが走っている最中でも`ciState`は`success`になる。この間は画面のマージ
+   * ボタンが「判定中」で無効（#1968）なので、ヘッダーのリリース状況を「人が押す番」
+   * （琥珀）にしないためにここまで運ぶ（`summarizeReleaseButtonStatus`）。
+   * CI状態と同じ1回のGraphQLで取れるため、これを持ってもGitHub APIの消費は増えない。
+   */
+  mergeJudgement: MergeJudgement;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {
