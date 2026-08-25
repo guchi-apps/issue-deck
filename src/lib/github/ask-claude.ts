@@ -122,6 +122,18 @@ export function isCrossRepoQuestionComment(comment: Pick<IssueComment, "body">):
 }
 
 /**
+ * 横断質問（#1454）として立てられたIssueかどうかを、コメント列から判定する。
+ *
+ * 記録先のリポジトリ名（`question`）では判定しない。**`resolveCrossRepoQuestionRepository`が
+ * フォールバックを持つため、`question`リポジトリが無い環境では別のリポジトリへ立つ。**
+ * `CrossRepoQuestionDialog`が必ず投稿する`CROSS_REPO_QUESTION_MARKER`付きのコメントだけが
+ * 恒久的な目印になる。
+ */
+export function isCrossRepoQuestionIssue(comments: Pick<IssueComment, "body">[]): boolean {
+  return comments.some(isCrossRepoQuestionComment);
+}
+
+/**
  * 横断質問Issueの既定の置き場所として探すリポジトリ名（#1454）。
  *
  * **`owner`は問わず、リポジトリ名だけで探す。** 質問Issueが実装対象のリポジトリへ混ざると、
@@ -205,4 +217,53 @@ export function canCloseAskRepoQuestion(
   comments: Pick<IssueComment, "body">[],
 ): boolean {
   return issue.state === "open" && isAskRepoQuestionIssue(issue) && !isQaAnswerPending(comments);
+}
+
+/** コメント入力欄の下の操作列で、主ボタン（塗りつぶし）を持つ操作（#2345） */
+export type ComposerPrimaryAction = "question" | "comment" | "close";
+
+/**
+ * コメント入力欄の下の操作列で、どれを主ボタンにするかを決める（#2345）。
+ *
+ * **主ボタンは固定せず、入力欄が空かどうかで「いま人がやろうとしていること」に付け替える。**
+ * 従来は質問Issueなら常にクローズが主で（#1770）、続きを聞きたい人にも話を終える操作が
+ * いちばん強く見えていた。空なら回答を読み終えた人なので用事はクローズ、書きかけがあるなら
+ * 会話の途中なので用事は次の質問、と読み替える。
+ *
+ * `Ctrl`+`Enter`の宛先もこの判定に合わせる（`close`のときは投稿操作の`comment`へ倒す）。
+ * **クローズをキーボードショートカットに割り当ててはいけない。**
+ *
+ * 質問Issueでない場合と、closeしたIssue（「質問する」ボタンが出ない）では従来どおり
+ * `comment`が主。
+ *
+ * **横断質問Issue（#1454）でも`question`を主にしない。** 記録先（既定は`guchi-apps/question`）は
+ * コメントを拾う無人実行を持たず、答えるのはサブPCの質問セッションで、追い質問は追加指示
+ * （#1012）で送る。それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えない
+ * まま`isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**ため、
+ * 強調と`Ctrl`+`Enter`の宛先からは外す（ボタン自体は従来どおり残す）。
+ */
+export function resolveComposerPrimaryAction(
+  issue: Pick<Issue, "state" | "title">,
+  comments: Pick<IssueComment, "body">[],
+  hasDraft: boolean,
+): ComposerPrimaryAction {
+  if (!isAskRepoQuestionIssue(issue) || !canAskClaude(issue)) return "comment";
+  if (isCrossRepoQuestionIssue(comments)) {
+    return canCloseAskRepoQuestion(issue, comments) ? "close" : "comment";
+  }
+  if (hasDraft) return "question";
+  return canCloseAskRepoQuestion(issue, comments) ? "close" : "question";
+}
+
+/**
+ * 入力欄のプレースホルダで「続けて質問する場所」だと案内してよいか（#2345）。
+ * `resolveComposerPrimaryAction`が`question`を主にし得るIssueと同じ範囲にする。
+ */
+export function canContinueQuestionFromComposer(
+  issue: Pick<Issue, "state" | "title">,
+  comments: Pick<IssueComment, "body">[],
+): boolean {
+  return (
+    isAskRepoQuestionIssue(issue) && canAskClaude(issue) && !isCrossRepoQuestionIssue(comments)
+  );
 }

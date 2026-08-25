@@ -113,7 +113,9 @@ import {
   askClaudeCommentBody,
   canAskClaude,
   canCloseAskRepoQuestion,
+  canContinueQuestionFromComposer,
   isQaAnswerPending,
+  resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
 import {
   buildCodeReviewFindingIssueIndex,
@@ -350,6 +352,15 @@ export function MobileIssueDetail({
   // 質問Issueをワンボタンで終える導線の表示条件（#1770）。⋯メニューとコメント欄の下の
   // 2か所で同じ値を使い、片方だけ出る状態を作らない
   const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
+  // 操作列の主ボタン（#2345）。PC版（`issue-detail.tsx`）と同じ判定を共有する
+  const composerPrimaryAction = resolveComposerPrimaryAction(
+    issue,
+    comments,
+    newCommentBody.trim().length > 0,
+  );
+  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
+    ? "続けて質問する場合はここへ..."
+    : "コメントを追加...";
   // コードレビューIssue（#698）の結果。PC版（`issue-detail.tsx`）と同じ扱い
   const codeReview = isCodeReviewIssue(issue)
     ? {
@@ -479,6 +490,12 @@ export function MobileIssueDetail({
   async function handleAskClaudeFromComposer() {
     if (!newCommentBody.trim()) return;
     if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+  }
+
+  /** `Ctrl`+`Enter`の宛先（#2345。PCのIssue詳細と同じ。クローズには割り当てない） */
+  async function handleSubmitPrimary() {
+    if (composerPrimaryAction === "question") await handleAskClaudeFromComposer();
+    else await handleCreateComment();
   }
 
   /** ローカルセッション担当中の承認欄から押せる3つ（#1903。PCのIssue詳細と同じ） */
@@ -1111,7 +1128,7 @@ export function MobileIssueDetail({
               <LocalSessionCommentNotice session={issueSession} />
             )}
             <MentionTextarea
-              placeholder="コメントを追加..."
+              placeholder={composerPlaceholder}
               className="min-h-20"
               value={newCommentBody}
               onChange={setNewCommentBody}
@@ -1122,7 +1139,7 @@ export function MobileIssueDetail({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
-                  handleCreateComment();
+                  handleSubmitPrimary();
                 }
               }}
             />
@@ -1138,7 +1155,7 @@ export function MobileIssueDetail({
                   ここへ引き継ぐ（#1913） */}
               {canAskClaude(issue) && (
                 <Button
-                  variant="outline"
+                  variant={composerPrimaryAction === "question" ? "default" : "outline"}
                   title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
                   onClick={handleAskClaudeFromComposer}
                   disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
@@ -1147,9 +1164,10 @@ export function MobileIssueDetail({
                   質問する
                 </Button>
               )}
-              {/* PC側と同じ理由で、質問Issueでは主ボタンを「コメント」に持たせない（#1770） */}
+              {/* PC側と同じ理由で、質問Issueでは「コメント」を主ボタンにせず（#1770）、
+                  枠なしまで沈める（#2345） */}
               <Button
-                variant={canCloseQuestion ? "outline" : "default"}
+                variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
                 onClick={handleCreateComment}
                 disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
               >
@@ -1157,9 +1175,14 @@ export function MobileIssueDetail({
                 {isCommentSubmitting ? "送信中..." : "コメント"}
               </Button>
               {/* 回答を読み終えた位置に出口を置く（#1770）。スマホでは同じ操作が⋯メニューの
-                  奥にしかなく、開き直さないと終えられなかった */}
+                  奥にしかなく、開き直さないと終えられなかった。書きかけがあるときは主ボタンを
+                  「質問する」へ譲る（#2345） */}
               {canCloseQuestion && (
-                <Button disabled={isSubmitting} onClick={() => handleClose("completed")}>
+                <Button
+                  variant={composerPrimaryAction === "close" ? "default" : "outline"}
+                  disabled={isSubmitting}
+                  onClick={() => handleClose("completed")}
+                >
                   <XCircle />
                   回答を確認してクローズ
                 </Button>
