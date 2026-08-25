@@ -74,6 +74,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - `h-full`は`fixed inset-0`と重複して見えるため消されやすく、症状はモーダルを開閉したときに
     しか出ない。jsdomはレイアウトを持たず描画のテストでも捕まらないため、
     [`src/app/layout.test.ts`](../src/app/layout.test.ts)がクラスの並びだけを見張っている。
+- **入力中のフォームを初期化し直さない**（#2354）。ダイアログ・別ウィンドウのフォームは
+  「開いた瞬間」に初期値（開いていた画面のリポジトリ、引用元のプリフィルなど）を入れるが、
+  **その初期化は閉じた状態から開いた遷移でだけ走らせる**。初期値をuseEffectの依存に置いたまま
+  にすると、開いている最中に画面側の値が変わっただけで人の入力が初期状態へ戻り、
+  「選んだリポジトリがひとりでに変わった」「書いた本文が消えた」として現れる。押した本人には
+  何が起きたのか見えず、再現手順も残らない。
+  [`create-issue-dialog.tsx`](../src/components/dashboard/create-issue-dialog.tsx)は
+  `initializedForOpenRef`で1回に限っている。
+  - **人が選んだ値を、文脈から決めた値で上書きしない。** 下書きの復元も同じで、戻すのは
+    書いていたときに選んでいたリポジトリ。開いていた画面のリポジトリを優先すると、中身だけが
+    別のリポジトリへ入った状態になる。
 - **画面の現在地を表すURLクエリの更新は
   [`hooks/use-history-navigation.ts`](../src/hooks/use-history-navigation.ts)の`navigateParams`
   だけを通し、`router.push`/`router.replace`を使わない**（#1597）。App Routerの
