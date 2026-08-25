@@ -1654,6 +1654,20 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **`canTriggerRelease`の判定は`unreleasedCommitCount`（コミット数）のままにしてある**——
   押してよいかは「出すものがあるか」で決まり、件数の数え方を変えたことでリリースの可否が
   動くべきではないため。
+  **`develop`を持たないリポジトリでも、この1クエリを失敗させない**（#2364）。`compare`に
+  相乗りさせている都合で、`develop`が無いリポジトリ（`docs`・`question`・`uptime-kuma`・
+  `claude-config`は単一ブランチ運用）ではGitHubが`Could not resolve head ref 'develop'.`を
+  `errors`へ入れて返す。`githubGraphql`は既定で`errors`が1件でもあれば例外にするため、
+  **同じクエリに相乗りしていたブランチ存在確認まで丸ごと落ち**、ポーリングのたびに
+  そのリポジトリが`failedRepositories`へ入って本番のエラーログが埋まっていた（#2331の
+  再起動調査で発見）。**GraphQLのフィールド単位のエラーは`data`を返す**——実際の応答は
+  `data.repository`の中で`comparison.compare`だけが`null`になり、`b0`以降のブランチ確認は
+  そのまま入っている。そこで`githubGraphql`に`ignoreErrors`（正常な状態でも返るエラーを
+  失敗にも警告にもしない）を足し、`branches-api.ts`の`isMissingCompareHeadRef`で
+  「`path`の末尾が`compare`」かつ「`Could not resolve head ref`」のときだけ落とす。
+  **`allowPartialData`（`check-rollup.ts`・`workflow-tags.ts`が使う）とは別物**——あちらは
+  「一部が欠けても残りを返す（＋警告を出す）」で、こちらは「そのエラーが出るのが正常」。
+  取り違えると本物の失敗が静かに握り潰される。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。

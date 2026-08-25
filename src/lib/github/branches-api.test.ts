@@ -5,11 +5,11 @@ import { lookupBranchRefs, mergedHeadRefFromHeadline } from "@/lib/github/branch
 type GraphqlRequest = { query: string; variables: Record<string, unknown> };
 
 /** GraphQLの応答を返すfetchスタブ。送った本文も記録する */
-function stubGraphql(data: unknown) {
+function stubGraphql(data: unknown, errors?: unknown[]) {
   const requests: GraphqlRequest[] = [];
   const fetchMock = vi.fn(async (_url: string, init: { body: string }) => {
     requests.push(JSON.parse(init.body));
-    return { ok: true, status: 200, json: async () => ({ data }) };
+    return { ok: true, status: 200, json: async () => (errors ? { data, errors } : { data }) };
   });
   vi.stubGlobal("fetch", fetchMock);
   return { requests, fetchMock };
@@ -238,6 +238,42 @@ describe("lookupBranchRefs", () => {
     const result = await lookupBranchRefs("guchi-apps", "missing", ["issue-1"], "token");
 
     expect(result).toEqual({ existingBranches: [], developVsMain: null });
+  });
+
+  // #2364。単一ブランチ運用のリポジトリで毎回のポーリングが失敗し、本番のログが埋まっていた
+  it("developが無くcompareだけが落ちた応答でも、ブランチの存在確認は返す", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubGraphql(
+      { repository: { comparison: { compare: null }, b0: { name: "issue-2364" }, b1: null } },
+      [
+        {
+          type: "NOT_FOUND",
+          path: ["repository", "comparison", "compare"],
+          message: "Could not resolve head ref 'develop'.",
+        },
+      ],
+    );
+
+    const result = await lookupBranchRefs(
+      "guchi-apps",
+      "docs",
+      ["issue-2364", "issue-9999"],
+      "token",
+    );
+
+    expect(result).toEqual({ existingBranches: ["issue-2364"], developVsMain: null });
+    // 正常な状態なので警告も出さない（ポーリングのたびにログへ出るのを避けるのが目的）
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // 無視するのは`compare`が解決できなかったときだけ。他の失敗は従来どおり取得失敗にする
+  it("compare以外のエラーは従来どおり例外にする", async () => {
+    stubGraphql({ repository: null }, [{ message: "Resource not accessible by integration" }]);
+
+    await expect(lookupBranchRefs("guchi-apps", "docs", ["issue-1"], "token")).rejects.toThrow(
+      /Resource not accessible by integration/,
+    );
   });
 });
 
