@@ -138,6 +138,14 @@ export function buildScaffoldFiles(spec: NewAppSpec, options: ScaffoldOptions): 
       path: ".github/workflows/claude-issue-dispatch.yml",
       content: claudeIssueDispatchCaller(spec, tag),
     });
+  }
+  // **リリース衛生の2枚はマルチエージェント運用と関係がない**（#2378）。`version-tag-check.yml`が
+  // 無いと、初回の`main`マージが作った`vX.Y.Z`タグと同じバージョンのまま2回目のリリースを出した
+  // ときに、main宛PRでは何も起きず`deploy.yml`のタグ作成が落ちて本番デプロイが止まる
+  // （`guchi-apps/trainroute`が実際にこれに当たった）。雛形の`CLAUDE.md`も両方が存在する前提で
+  // ワークフロー一覧に載せている。**Next.js系だけ`multiAgent`から外す**——fastapi・静的サイトは
+  // `version-file`の既定値（`package.json`）がそのままでは合わず、別に直す必要がある。
+  if (tag && (spec.multiAgent || isNextKind(spec))) {
     files.push({
       path: ".github/workflows/release-develop-to-main.yml",
       content: releaseDevelopToMainCaller(spec, tag),
@@ -155,6 +163,7 @@ export function buildScaffoldFiles(spec: NewAppSpec, options: ScaffoldOptions): 
     files.push({ path: ".github/workflows/ci.yml", content: ciWorkflow(spec) });
     files.push({ path: ".github/workflows/deploy.yml", content: deployWorkflow(spec) });
     files.push({ path: ".env.example", content: envExample(spec) });
+    files.push({ path: "pnpm-workspace.yaml", content: pnpmWorkspace(spec) });
     files.push({ path: "src/lib/changelog.ts", content: changelogModule() });
     files.push({ path: "src/app/manifest.ts", content: manifestModule(spec) });
     files.push({ path: "public/icon.svg", content: placeholderIcon(spec) });
@@ -268,6 +277,51 @@ ${rows.join("\n")}
 #
 # PORTは1Passwordでもマニフェストでも管理しない。deploy.ymlに平文で持つ
 # （guchi-apps/docs の standards/ports.md）。
+`;
+}
+
+/**
+ * `pnpm-workspace.yaml`（依存パッケージのビルドスクリプトの承認。#2378）。
+ *
+ * **pnpm 10系は依存のinstall/postinstallを既定で実行せず、警告だけ出して終了コード0で
+ * 素通りする。** 承認は対話的なプロンプト（`pnpm approve-builds`）でしか求められないため、
+ * CIでも無人実行でも「気づかないまま実行されていない」形になる。Prismaはこの段でクエリ
+ * エンジンを取りに行くので、承認が無いとエンジンが無いまま先へ進む。**このIssueが扱っている
+ * 「失敗が静かに通る」類型そのもの**なので、最初から承認済みの状態で始める。
+ *
+ * **効くのはCIとローカルだけで、VPSへは配られない。** `deploy.yml`が作るtarの中身
+ * （`scaffold-workflows.ts`の`archiveEntries`）にこのファイルは入っておらず、VPS上の
+ * `pnpm install --prod` はこの承認を見ない。それで問題が出ていないのは、本番で必要な
+ * `prisma generate` がアプリ自身の`postinstall`（＝依存のビルドスクリプトではないので
+ * 承認の対象外）だからで、issue-deck自身も同じ構成で動いている。**要否を確かめずに
+ * 配布物へ足さないこと**——本番の`pnpm install --prod`の挙動が変わる。
+ *
+ * `packages:`は書かない（単一パッケージのリポジトリで、ここはワークスペースルートを
+ * 宣言するためだけに置いている）。
+ */
+function pnpmWorkspace(spec: NewAppSpec): string {
+  const profile = newAppKindProfile(spec.kind);
+  const entries = [
+    ...(profile.usesDatabase
+      ? ["'@prisma/client': true", "'@prisma/engines': true", "prisma: true"]
+      : []),
+    "sharp: true",
+    "unrs-resolver: true",
+  ];
+  return `# 依存パッケージのうち、install/postinstallの実行を許可するもの（guchi-apps/issue-deck#2378）。
+#
+# pnpm 10系は依存のビルドスクリプトを既定で実行せず、**警告だけ出して終了コード0で
+# 素通りする**。承認は対話的な \`pnpm approve-builds\` でしか求められないため、CIや無人実行
+# では「実行されていないことに誰も気づかない」形になる。${profile.usesDatabase ? "Prismaはこの段でクエリエンジンを\n# 取りに行くので、承認が無いとエンジンが無いまま先へ進む。" : ""}
+#
+# **ビルドスクリプトを持つ依存を足したら、\`pnpm approve-builds\` を実行してこのファイルの
+# 差分をコミットすること。** 承認しないままでもインストールは成功扱いになる。
+#
+# **効くのはCIとローカルだけ。** \`deploy.yml\` が作るtarにこのファイルは入っておらず、
+# VPS上の \`pnpm install --prod\` はこの承認を見ない（本番で要る \`prisma generate\` は
+# アプリ自身の \`postinstall\` なので承認の対象外）。
+allowBuilds:
+${entries.map((entry) => `  ${entry}`).join("\n")}
 `;
 }
 
@@ -545,9 +599,38 @@ ${profile.packageManager} typecheck
 ${profile.packageManager} build:ci
 \`\`\`
 
+**\`typecheck\` は \`next typegen && tsc --noEmit\` にしておくこと**（guchi-apps/issue-deck#2378）。
+Next.js 16の \`PageProps\` / \`LayoutProps\` / \`RouteContext\` は \`.next/types\` へ生成される
+グローバル型で、生成前は \`Cannot find name 'LayoutProps'\` になる。\`next build\` は内部で
+型生成するため、**ビルドは通るのに \`typecheck\` だけが落ちる**という分かりにくい形になる。
+
+**依存を足したら \`${profile.packageManager} approve-builds\` を実行し、\`pnpm-workspace.yaml\` の差分をコミットする。**
+pnpm 10系は依存のビルドスクリプトを既定で実行せず、警告だけ出して終了コード0で素通りする。
+
 **型チェック・Lintが通ることと、実際の動作が正しいことは別。** 振る舞いが変わる変更では
 両方を確かめる。`
     : "検証コマンドは初期化時に決めてここへ書く（何も書かないと、エージェントは毎回推測する）。";
+
+  // **実際に置いたcallerだけを並べる。** 置いていないファイルを載せると、エージェントが
+  // 「あるはずのものが消された」と判断して作り直す（判定は`buildScaffoldFiles`と同じ条件）。
+  const workflowList = [
+    ...(spec.multiAgent
+      ? [
+          "- `issue-labels.yml` … 進捗の状態遷移をイベント駆動で報告する",
+          `- \`claude-issue-dispatch.yml\` … Issue起点の無人実行。**このファイルがデフォルトブランチに
+  あることがissue-deckの盤面へ載る条件**なので消さない`,
+        ]
+      : []),
+    ...(spec.multiAgent || isNextKind(spec)
+      ? [
+          "- `release-develop-to-main.yml` … バージョンbump PRと develop→main のPR作成",
+          `- \`version-tag-check.yml\` … バージョンの上げ忘れをmain宛PRで落とす。**消さないこと**——
+  初回の\`main\`マージが作った\`vX.Y.Z\`タグと同じバージョンのまま2回目のリリースを出すと、
+  \`deploy.yml\`のタグ作成が落ちて本番デプロイが止まる（${NEW_APP_ORG}/issue-deck#2378）`,
+        ]
+      : []),
+    "- `sync-secrets.yml` … 1Passwordから`.github/secrets-manifest.tsv`のとおりに同期する",
+  ].join("\n");
 
   return `# ${spec.repositoryName} 固有ルール
 
@@ -678,12 +761,7 @@ Secretsや環境変数／課金・決済／大規模な依存関係の更新／\
 \`@workflows/vN\`のタグ固定で、**\`uses:\`のタグと\`prompts-ref\`は必ず同じ値にする。**
 タグを上げるPull Requestはissue-deckの画面（設定＞フリート運用）から配られる。
 
-- \`issue-labels.yml\` … 進捗の状態遷移をイベント駆動で報告する
-- \`claude-issue-dispatch.yml\` … Issue起点の無人実行。**このファイルがデフォルトブランチに
-  あることがissue-deckの盤面へ載る条件**なので消さない
-- \`release-develop-to-main.yml\` … バージョンbump PRと develop→main のPR作成
-- \`version-tag-check.yml\` … バージョンの上げ忘れをmain宛PRで落とす
-- \`sync-secrets.yml\` … 1Passwordから\`.github/secrets-manifest.tsv\`のとおりに同期する
+${workflowList}
 
 自動修復系（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・
 \`claude-review-develop.yml\`・\`deploy-retry.yml\`）はまだ置かれていない。issue-deckの画面
