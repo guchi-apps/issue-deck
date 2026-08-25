@@ -132,7 +132,7 @@ worktree**はビルド成果物を抱えたままになる。38GBの内訳の実
 | 対象 | 合計 | 備考 |
 |---|---|---|
 | `.next/dev` | 16GB | 163本が保持。Turbopackのdevキャッシュ。実データで共有されない |
-| `.next/standalone` | 5.1GB | 本番ビルド成果物 |
+| `.next/standalone` | 5.1GB | 本番ビルド成果物（#2366で`output: "standalone"`を外したため、以降のビルドでは作られない） |
 | `.next` 全体 | 25GB | 1本あたり平均138MB・最大679MB |
 | `node_modules` | 14GB | pnpmストアとのハードリンクで1本あたり約77MB相当 |
 
