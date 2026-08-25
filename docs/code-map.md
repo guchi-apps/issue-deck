@@ -781,6 +781,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   ブランチ）のチップをどのステップでも同じ位置に出したまま**1手順ずつ出す。
   **デバイスは手順ごとに持てる**（#2052。手順の文頭の`（サブPC）`。無ければ`## 前提条件`の
   「実行するデバイス」が既定値で、そこに端末が複数書かれていれば既定値は決まらない）。
+  - **本文の箇条書きから値を引く正規表現は、`\s*`ではなく`[^\S\n]*`で書く**（#2299）。
+    `m`フラグを付けても`\s*`は改行をまたぐため、`- 起きたこと: ` のように値が空の行に当てると、
+    **次の行以降を値として拾ってしまう**（`parseManualStepTroubleComments`が、値が空のコメントから
+    直後のHTMLコメントを「起きたこと」として読んでいた）。
   - **解析は[`lib/manual-step-guide.ts`](../src/lib/manual-step-guide.ts)の純粋関数だけ**で、
     Claude APIのような推定を挟まない。実行するコマンドを推定で書き換える余地を作ると、
     手作業ではそのまま事故になる。**手順の判定は`lib/markdown-task-list.ts`の
@@ -867,6 +871,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **想定外だったら「うまくいかない」から相談できる**（#2299。
+    [`manual-step-trouble-panel.tsx`](../src/components/dashboard/manual-step-trouble-panel.tsx)・
+    [`lib/manual-step-trouble.ts`](../src/lib/manual-step-trouble.ts)）。#1869が拾うのは代行実行が
+    0以外で終わったときだけで、**人が自分で実行した手順**（ブラウザ・別デバイス・プレースホルダ入り）は
+    終了コードも出力も画面に届かない。手順と`## 完了の確認方法`の画面に出口を置き、分類・自由記述・
+    任意の貼り付けを受けて`POST /api/manual-steps/fix`（**jobIdの代わりに行と報告を送る**）で
+    診断する。**直せる先はコマンドと手順の説明文の2つ**で、後者は`replaceManualStepInstruction`が
+    `- [ ]`の後ろの1行だけを差し替える（**文言を直しても実行はしない**）。解決しなかったものは
+    Issueコメント（`<!-- manual-step-trouble:… -->`）として残り、次に開いた人の最初の画面に出る。
+    **貼り付けた内容はIssueへ入れず、Claudeへ送るのも同意があるときだけ**（既定オフ）。
+    `00.check-user`は付けない（手作業Issueには承認して再開させる相手が居ない）。設計は
+    [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#想定外だったらうまくいかないから相談する2299)。
   - **openな手作業の`## 完了の確認方法`は1日1回、人の操作なしに巡回する**（#2008。
     [`lib/manual-step-verification.ts`](../src/lib/manual-step-verification.ts)・
     [`lib/manual-step-verification-patrol.ts`](../src/lib/manual-step-verification-patrol.ts)・
@@ -2277,6 +2293,14 @@ pnpm test:unit   # vitestのみ
 ドロップダウンが開かず、選択を伴う画面の挙動をテストできない（`create-issue-dialog.render.test.tsx`の
 `stubPointerApisForSelect`が実装）。トリガーの表示値を読むだけなら
 `getByRole("combobox", { name: ... })`の`textContent`で足り、補う必要は無い。
+
+**`fetch`をまるごとモックしている画面テストは、その画面へデータ取得フックを1つ足しただけで
+壊れる**（#2299）。`manual-step-guide-dialog.test.tsx`は`vi.stubGlobal("fetch", fetchMock)`で
+`POST /api/manual-steps/fix`の応答を返していたため、あとから足した`useIssueComments`が同じ応答を
+受け取り、`data.comments`が配列でないまま画面へ流れて`comments is not iterable`で落ちた
+（**失敗するのは足したテストではなく、既存のテスト全部**）。画面へ取得フックを足すときは、
+そのフックごと`vi.mock`で差し込む。URLで振り分ける形にすると、`fetchMock.mock.calls[0]`を
+見ている既存の検証が呼び出し順のずれで壊れる。
 
 **`@testing-library/jest-dom`のマッチャは使えない**（#838）。パッケージは`devDependencies`に
 入っているが、読み込むsetupファイルが無いため`toBeInTheDocument`・`toBeDisabled`は

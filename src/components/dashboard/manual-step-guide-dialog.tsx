@@ -21,13 +21,17 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { ManualStepAutoRunPanel } from "@/components/dashboard/manual-step-autorun-panel";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { ManualStepRunPanel } from "@/components/dashboard/manual-step-run-panel";
+import {
+  ManualStepTroublePanel,
+  type ManualStepTroubleTarget,
+} from "@/components/dashboard/manual-step-trouble-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,6 +40,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { useIssueComments } from "@/hooks/use-issue-comments";
+import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import {
@@ -62,6 +68,7 @@ import {
 import {
   MANUAL_STEP_TIMEOUT_SECONDS,
   replaceManualStepCommand,
+  replaceManualStepInstruction,
 } from "@/lib/manual-step-command";
 import {
   describeManualStepRun,
@@ -75,6 +82,13 @@ import {
   type ManualStepGuide,
   type ManualStepGuideStep,
 } from "@/lib/manual-step-guide";
+import {
+  buildManualStepTroubleComment,
+  describeManualStepTroubleCategory,
+  parseManualStepTroubleComments,
+  type ManualStepTroubleRecord,
+  type ManualStepTroubleReport,
+} from "@/lib/manual-step-trouble";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -442,6 +456,14 @@ function ManualStepGuideContent({
   const stage = stages[index];
   const isLast = index === stages.length - 1;
 
+  // 想定外だったときの出口（#2299）。**開いているのは1画面につき1つ**で、手順を移ると閉じる
+  const [troubleStage, setTroubleStage] = useState<number | null>(null);
+  const troubleOpen = troubleStage === index;
+  const { comments } = useIssueComments(issue);
+  const { createComment, isSubmitting: isRecording } = useIssueCommentMutations();
+  // 過去に報告されたつまずき。**次に開いた人が同じところで詰まらない**ようにするためのもの
+  const troubles = useMemo(() => parseManualStepTroubleComments(comments), [comments]);
+
   async function handleClose(stateReason: "completed" | "not_planned") {
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
@@ -547,6 +569,63 @@ function ManualStepGuideContent({
     [autorun, dispatch, host, issue, onIssueUpdated, taskList.body, updateIssue],
   );
 
+  /**
+   * 手順の説明文の直し案（#2299）を適用する。
+   *
+   * **書き換えるのはその1行だけで、実行はしない。** 外部ツールの画面が変わって文言がずれて
+   * いただけなら、直った手順を読んでから人が実行する（文言を直したことは、その手順が
+   * 済んだことを意味しない）。
+   */
+  const handleApplyInstruction = useCallback(
+    async (params: { line: number; instruction: string }) => {
+      const nextBody = replaceManualStepInstruction(taskList.body, params.line, params.instruction);
+      if (nextBody === null) {
+        return {
+          ok: false as const,
+          message:
+            "本文の書き換え先を特定できなかったため、適用しませんでした。手元で本文を直してください。",
+        };
+      }
+      const updated = await updateIssue({
+        repositoryFullName: issue.repositoryFullName,
+        number: issue.number,
+        body: nextBody,
+      });
+      if (!updated) return { ok: false as const, message: "本文を書き換えられませんでした。" };
+      onIssueUpdated(updated);
+      return { ok: true as const };
+    },
+    [issue, onIssueUpdated, taskList.body, updateIssue],
+  );
+
+  /**
+   * つまずきをIssueコメントとして残す（#2299）。
+   *
+   * **貼り付けた出力・画面の文言は入れない**（`lib/manual-step-trouble.ts`）。ラベルも付けない
+   * ——手作業Issueには承認して再開させる相手が居ないため（CLAUDE.md）。気付く経路はIssueの
+   * コメント欄と、次に同じ手作業を開いた人の最初の画面。
+   */
+  async function handleRecordTrouble(report: ManualStepTroubleReport) {
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const created = await createComment({
+      owner,
+      repo,
+      number: issue.number,
+      body: buildManualStepTroubleComment({
+        stepOrder: stage.kind === "step" ? stage.order + 1 : null,
+        stepCount: stage.kind === "step" ? stepCount : null,
+        stepText: stage.kind === "step" ? stage.step.text : "",
+        category: report.category,
+        detail: report.detail,
+      }),
+    });
+    if (created === null) return { ok: false as const, message: "Issueに記録できませんでした。" };
+    setTroubleStage(null);
+    // **記録した手順にはチェックを付けない。** 実行できていないまま次を見に行く形にする
+    onStageIndexChange(index + 1);
+    return { ok: true as const };
+  }
+
   // サーバーが流している項目まで画面を進める（#1882）。**進めるのは1項目につき1回**で、
   // 人が前の手順へ戻ったのを引き戻さない
   useManualStepRunNavigation({
@@ -572,6 +651,42 @@ function ManualStepGuideContent({
     stage.kind === "step" && stage.step.line !== null
       ? findManualStepEntry(plan, stage.step.line)
       : null;
+
+  // 「うまくいかない」を押せるのは手順と完了の確認の画面（#2299）。目的の画面・テンプレートに
+  // 沿っていない本文には、直す先になる1手順が無い
+  const troubleTarget: ManualStepTroubleTarget | null =
+    stage.kind === "step"
+      ? {
+          kind: "step",
+          line: stage.step.line,
+          order: stage.order + 1,
+          count: stepCount,
+          text: stage.step.text,
+        }
+      : stage.kind === "finish"
+        ? {
+            kind: "verification",
+            // 確認コマンドが1つに定まるときだけ、その行を直す先にする
+            line: onlyVerificationLine(plan),
+            order: null,
+            count: null,
+            text: "",
+          }
+        : null;
+
+  const troublePanel =
+    troubleOpen && troubleTarget !== null ? (
+      <ManualStepTroublePanel
+        repositoryFullName={issue.repositoryFullName}
+        issueNumber={issue.number}
+        target={troubleTarget}
+        isRecording={isRecording}
+        onRecord={handleRecordTrouble}
+        onApplyCommand={handleApplyFix}
+        onApplyInstruction={handleApplyInstruction}
+        onClose={() => setTroubleStage(null)}
+      />
+    ) : null;
 
   return (
     <>
@@ -622,6 +737,9 @@ function ManualStepGuideContent({
           {stage.kind === "overview" && (
             <>
               <OverviewStage guide={guide} issue={issue} prerequisites={prerequisites} />
+              {/* 前に進めた人が残したつまずき（#2299）。**手順を読む前に出す**——同じところで
+                  もう一度詰まってから気付いても遅い */}
+              <ManualStepTroubleHistory troubles={troubles} />
               {/* 押す1回で実行される全文を、押す前に並べる（#1869） */}
               {!autorun.active && (
                 <ManualStepAutoRunPanel
@@ -653,6 +771,8 @@ function ManualStepGuideContent({
               onUncheck={() => void handleUncheckStep()}
               onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
+              onApplyInstruction={handleApplyInstruction}
+              troublePanel={troublePanel}
             />
           )}
           {stage.kind === "body" && <BodyStage issue={issue} body={taskList.body} />}
@@ -666,6 +786,8 @@ function ManualStepGuideContent({
               onExecuted={handleExecuted}
               onRetry={autorunRetry}
               onApplyFix={handleApplyFix}
+              onApplyInstruction={handleApplyInstruction}
+              troublePanel={troublePanel}
               asking={askingAboutClose}
             />
           )}
@@ -687,6 +809,20 @@ function ManualStepGuideContent({
         ) : (
           <Button variant="ghost" size="sm" onClick={onNextIssue} className="sm:order-1">
             この手作業は飛ばす
+          </Button>
+        )}
+        {/* 想定外だったときの出口（#2299）。**代行実行の成否によらず出す**——自分で実行した
+            手順は出力が画面に届かないので、失敗を検知してから出したのでは間に合わない */}
+        {troubleTarget !== null && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-amber-500/40 text-amber-700 sm:order-2 dark:text-amber-300"
+            aria-pressed={troubleOpen}
+            onClick={() => setTroubleStage(troubleOpen ? null : index)}
+          >
+            <TriangleAlert />
+            うまくいかない
           </Button>
         )}
         <div className="flex flex-col-reverse gap-2 sm:order-3 sm:ml-auto sm:flex-row">
@@ -973,6 +1109,8 @@ function StepStage({
   onUncheck,
   onRetry,
   onApplyFix,
+  onApplyInstruction,
+  troublePanel,
 }: {
   step: ManualStepGuideStep;
   order: number;
@@ -992,6 +1130,10 @@ function StepStage({
   /** 「もう一度実行」を自前で扱う場合（自動実行中は積み直さず、続きから流す。#1882） */
   onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
+  /** 手順の説明文の直し案の適用（#2299） */
+  onApplyInstruction: ManualStepApplyInstruction;
+  /** 「うまくいかない」のパネル（#2299）。開いていなければ`null` */
+  troublePanel: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -1036,8 +1178,10 @@ function StepStage({
           onSucceeded={() => onExecuted(entry)}
           onRetry={onRetry}
           onApplyFix={onApplyFix}
+          onApplyInstruction={onApplyInstruction}
         />
       )}
+      {troublePanel}
     </section>
   );
 }
@@ -1063,6 +1207,8 @@ function FinishStage({
   onExecuted,
   onRetry,
   onApplyFix,
+  onApplyInstruction,
+  troublePanel,
   asking,
 }: {
   guide: ManualStepGuide;
@@ -1075,6 +1221,10 @@ function FinishStage({
   onExecuted: (entry: ManualStepRunEntry) => void;
   onRetry?: () => void;
   onApplyFix: ManualStepApplyFix;
+  /** 手順の説明文の直し案の適用（#2299）。確認節では使わないが、経路を1つに保つため渡す */
+  onApplyInstruction: ManualStepApplyInstruction;
+  /** 「うまくいかない」のパネル（#2299）。開いていなければ`null` */
+  troublePanel: ReactNode;
 }) {
   const verifications = plan.entries.filter((entry) => entry.kind === "verification");
 
@@ -1115,13 +1265,20 @@ function FinishStage({
           onSucceeded={() => onExecuted(entry)}
           onRetry={onRetry}
           onApplyFix={onApplyFix}
+          onApplyInstruction={onApplyInstruction}
         />
       ))}
+      {troublePanel}
     </section>
   );
 }
 
 /** 修正案を本文へ書き戻して（必要なら）実行する（#1869） */
+type ManualStepApplyInstruction = (params: {
+  line: number;
+  instruction: string;
+}) => Promise<{ ok: boolean; message?: string }>;
+
 type ManualStepApplyFix = (params: {
   line: number;
   command: string;
@@ -1235,4 +1392,49 @@ function useManualStepRunNavigation({
     // 手順に無い行＝`## 完了の確認方法`のコマンド。最後の画面で待つ
     onStageIndexChange(target >= 0 ? target : stages.length - 1);
   }, [line, stages, onStageIndexChange]);
+}
+
+/**
+ * 確認コマンドが1つに定まるときだけ、その行を返す（#2299）。
+ *
+ * `## 完了の確認方法`には複数のコマンドが並ぶ。どれについてのつまずきかを画面で選ばせるほどの
+ * ものではないので、**1つのときだけ直す先にする**。複数あるときは`null`（原因の説明と記録は
+ * できるが、本文の書き換えは出さない）。
+ */
+function onlyVerificationLine(plan: ManualStepRunPlan): number | null {
+  const verifications = plan.entries.filter((entry) => entry.kind === "verification");
+  return verifications.length === 1 ? verifications[0].line : null;
+}
+
+/**
+ * 前に進めた人が残したつまずき（#2299）。**最初の画面に出す。**
+ *
+ * 手順書は実態とずれる（外部ツールの画面が変わる・環境が変わる）。直せたものは本文が
+ * 書き換わって消えるので、ここに残るのは**まだ直っていないもの**だけになる。
+ */
+function ManualStepTroubleHistory({ troubles }: { troubles: ManualStepTroubleRecord[] }) {
+  if (troubles.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
+      <h3 className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+        <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+        過去に報告されたつまずき（{troubles.length}件）
+      </h3>
+      <ul className="flex flex-col gap-1">
+        {troubles.map((trouble, order) => (
+          <li key={order} className="text-xs leading-relaxed text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              {trouble.stepOrder === null ? "完了の確認" : `手順 ${trouble.stepOrder}`}
+            </span>
+            {describeManualStepTroubleCategory(trouble.category) === null
+              ? ""
+              : `・${describeManualStepTroubleCategory(trouble.category)}`}
+            {" — "}
+            {trouble.detail}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }

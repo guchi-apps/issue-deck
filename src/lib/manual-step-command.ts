@@ -459,3 +459,84 @@ export function findPlaceholder(command: string | null): string | null {
   }
   return null;
 }
+
+/**
+ * 手順の説明文（`- [ ]`の行）として受け付ける長さの上限。
+ *
+ * テンプレートの決まりは「1手順＝1行で何をするかを書く」なので、ここに収まらない直し案は
+ * 手順の形を崩している（複数手順へ割るべきもの）と見なして捨てる。
+ */
+export const MANUAL_STEP_INSTRUCTION_MAX_LENGTH = 300;
+
+/**
+ * `stepLine`が指す手順の説明文（`- [ ]`の後ろの1行）を引く（#2299）。
+ *
+ * 直し案の差分に出す「いまの本文」と、Claudeへ渡す材料。**手順として読めている行だけ**を
+ * 返す（コードブロックの中のタスク風の行は`parseManualStepGuide`が手順に数えない）。
+ * 直せる文言が無ければ`null`——確認節・チェックリストでない本文がこれにあたる。
+ */
+export function findManualStepInstruction(
+  body: string | null,
+  stepLine: number,
+): string | null {
+  if (!body) return null;
+  if (!parseManualStepGuide(body).steps.some((step) => step.line === stepLine)) return null;
+
+  const line: string | undefined = body.split("\n")[stepLine - 1];
+  if (line === undefined) return null;
+  const task = TASK_LINE_PATTERN.exec(line);
+  if (task === null) return null;
+
+  const text = line.slice(task[1].length + "[ ]".length).trim();
+  return text === "" ? null : text;
+}
+
+/**
+ * `stepLine`が指す手順の説明文を、`nextText`へ差し替えた本文を返す（#2299）。
+ *
+ * 外部ツールの画面が変わったときに直すべきなのは**コマンドではなく手順の文言**で、
+ * `replaceManualStepCommand`では届かない（コードブロックしか書き換えない）。ここでは
+ * チェックボックスとリストマーカーを残したまま、その後ろの1行だけを差し替える。
+ *
+ * **歯止めは`replaceManualStepCommand`と同じ。** 書き換えるのはこの1行だけで、原因の説明も
+ * 貼り付けた出力も入らない。差分を見た人が押したときにだけ呼ばれ、書き換えた本文から
+ * 同じ手順とコマンドを読み直せることまで確かめてから返す（`null`なら適用しない）。
+ */
+export function replaceManualStepInstruction(
+  body: string | null,
+  stepLine: number,
+  nextText: string,
+): string | null {
+  if (!body) return null;
+
+  const text = nextText.trim();
+  if (text === "" || text.length > MANUAL_STEP_INSTRUCTION_MAX_LENGTH) return null;
+  // 複数行・フェンスは手順の形（1行＋その下のコードブロック）を壊す
+  if (text.includes("\n") || FENCE_PATTERN.test(text)) return null;
+
+  const lines = body.split("\n");
+  const line: string | undefined = lines[stepLine - 1];
+  if (line === undefined) return null;
+  const task = TASK_LINE_PATTERN.exec(line);
+  if (task === null) return null;
+
+  // いま手順として読めている行だけを対象にする（コードブロックの中のタスク風の行を除く）
+  const before = parseManualStepGuide(body);
+  const current = before.steps.find((step) => step.line === stepLine);
+  if (current === undefined) return null;
+
+  const replaced = [
+    ...lines.slice(0, stepLine - 1),
+    `${task[1]}[${task[2]}] ${text}`,
+    ...lines.slice(stepLine),
+  ].join("\n");
+
+  // 書き換えた本文を読み直して、手順の数もこの手順の位置も、下のコマンドも変わっていないこと
+  const after = parseManualStepGuide(replaced);
+  if (after.steps.length !== before.steps.length) return null;
+  if (!after.steps.some((step) => step.line === stepLine)) return null;
+  if (findManualStepCommand(replaced, stepLine)?.command !== findManualStepCommand(body, stepLine)?.command) {
+    return null;
+  }
+  return replaced;
+}
