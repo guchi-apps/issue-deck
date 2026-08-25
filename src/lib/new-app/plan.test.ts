@@ -251,6 +251,37 @@ describe("buildInitIssueBody", () => {
     expect(body).toContain("apple-icon.png");
     expect(body).toContain("version-changelog.mjs");
   });
+
+  it("typecheckにnext typegenを含めることを、npm scriptsごと書く（#2378）", () => {
+    // `next build`は内部で型生成するため、ビルドは通るのに`typecheck`だけが落ちる
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain('"typecheck": "next typegen && tsc --noEmit"');
+    expect(body).toContain("Cannot find name 'LayoutProps'");
+    // DBを使う種別だけ build:ci に prisma generate が要る
+    expect(body).toContain('"build:ci": "prisma generate && next build"');
+    expect(
+      buildInitIssueBody(spec({ kind: "next", databaseName: null }), REFS, SCAFFOLD),
+    ).toContain('"build:ci": "next build"');
+  });
+
+  it("packageManagerでpnpmの版を固定させる（#2378）", () => {
+    // ci.yml・deploy.ymlのpnpm/action-setupもVPSのcorepackも、ここを見て版を決める
+    const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
+    expect(body).toContain('`"packageManager"`');
+    expect(body).toContain("corepack use pnpm@latest");
+  });
+
+  it("pnpm-workspace.yamlを置けたときは、作り直さず承認し直す形で書く（#2378）", () => {
+    const body = buildInitIssueBody(spec(), REFS, {
+      ...SCAFFOLD,
+      paths: [...SCAFFOLD.paths, "pnpm-workspace.yaml"],
+    });
+    expect(body).toContain("pnpm approve-builds");
+    expect(body).toContain("このファイルを作り直さない");
+    expect(body).toContain("終了コード0で素通りする");
+    // 置けなかった回に、あるはずのファイルの話を書かない
+    expect(buildInitIssueBody(spec(), REFS, SCAFFOLD)).not.toContain("pnpm approve-builds");
+  });
 });
 
 describe("buildDeployCheckIssueBody（#2252）", () => {
@@ -294,6 +325,16 @@ describe("buildDeployCheckIssueBody（#2252）", () => {
 
   it("タイトルにアプリ名を出す", () => {
     expect(buildDeployCheckIssueTitle(spec())).toBe("家計レポートの初回デプロイ前チェックと公開確認");
+  });
+
+  it("リリースPRはrelease-develop-to-main.yml経由で作らせ、2回目にバンプが要ることを書く（#2378）", () => {
+    // 初回デプロイの時点で`v<version>`のタグが切られるため、上げずに次を出すと
+    // `Tag v0.1.0 already exists`でデプロイが止まる
+    expect(body).toContain("`release-develop-to-main.yml` から作る");
+    expect(body).toContain("gh workflow run release-develop-to-main.yml --repo guchi-apps/kakei-report");
+    expect(body).toContain("2回目以降も同じ経路");
+    expect(body).toContain("Tag v0.1.0 already exists");
+    expect(body).toContain("version-tag-check.yml");
   });
 });
 

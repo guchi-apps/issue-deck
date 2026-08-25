@@ -60,6 +60,67 @@ describe("buildScaffoldFiles", () => {
     expect(paths).toContain(".github/workflows/sync-secrets.yml");
   });
 
+  it("マルチエージェント運用に対応させなくても、Next.js系にはリリース衛生のcallerを置く（#2378）", () => {
+    // 初回の`main`マージが作ったタグと同じversionのまま2回目を出すと、main宛PRでは何も
+    // 起きずに`deploy.yml`のタグ作成が落ちて本番デプロイが止まる
+    const paths = [...filesOf(spec({ multiAgent: false })).keys()];
+    expect(paths).toContain(".github/workflows/version-tag-check.yml");
+    expect(paths).toContain(".github/workflows/release-develop-to-main.yml");
+  });
+
+  it("fastapiではリリース衛生のcallerをマルチエージェント運用の有無に従わせる（version-fileの既定値が合わないため）", () => {
+    const paths = [...filesOf(spec({ kind: "fastapi", multiAgent: false })).keys()];
+    expect(paths).not.toContain(".github/workflows/version-tag-check.yml");
+    expect(paths).not.toContain(".github/workflows/release-develop-to-main.yml");
+  });
+
+  it("CLAUDE.mdのワークフロー一覧は、実際に置いたcallerだけを並べる", () => {
+    const target = spec({ multiAgent: false });
+    const claudeMd = content(target, "CLAUDE.md");
+    const placed = [...filesOf(target).keys()].filter((path) =>
+      path.startsWith(".github/workflows/"),
+    );
+    for (const name of [
+      "issue-labels.yml",
+      "claude-issue-dispatch.yml",
+      "release-develop-to-main.yml",
+      "version-tag-check.yml",
+      "sync-secrets.yml",
+    ]) {
+      const listed = claudeMd.includes(`- \`${name}\``);
+      expect(listed, name).toBe(placed.includes(`.github/workflows/${name}`));
+    }
+  });
+
+  it("pnpm-workspace.yamlでPrismaのビルドスクリプトを承認済みにする（#2378）", () => {
+    // pnpm 10系は未承認のビルドスクリプトを警告だけ出して終了コード0で素通りするため、
+    // 承認漏れは`pnpm install`の成功では気づけない
+    const workspace = content(spec(), "pnpm-workspace.yaml");
+    expect(workspace).toContain("allowBuilds:");
+    expect(workspace).toContain("prisma: true");
+    expect(workspace).toContain("'@prisma/engines': true");
+    // VPSへは配られない（deploy.ymlのtarに入っていない）ことを本文に断ってある
+    expect(workspace).toContain("pnpm install --prod");
+  });
+
+  it("DBを使わないNext.jsではPrismaを承認一覧に入れない", () => {
+    const workspace = content(spec({ kind: "next", databaseName: null }), "pnpm-workspace.yaml");
+    const entries = workspace.slice(workspace.indexOf("allowBuilds:"));
+    expect(entries).not.toContain("prisma");
+    expect(entries).toContain("sharp: true");
+  });
+
+  it("pnpmを使わない種別にはpnpm-workspace.yamlを置かない", () => {
+    expect(filesOf(spec({ kind: "fastapi" })).has("pnpm-workspace.yaml")).toBe(false);
+    expect(filesOf(spec({ kind: "static" })).has("pnpm-workspace.yaml")).toBe(false);
+  });
+
+  it("CLAUDE.mdの検証コマンドに next typegen の理由を書く（#2378）", () => {
+    const claudeMd = content(spec(), "CLAUDE.md");
+    expect(claudeMd).toContain("next typegen && tsc --noEmit");
+    expect(claudeMd).toContain("pnpm approve-builds");
+  });
+
   it("すべてのcallerで uses: のタグと prompts-ref が一致する", () => {
     const callers = [...filesOf(spec()).entries()].filter(([path]) =>
       path.startsWith(".github/workflows/"),
