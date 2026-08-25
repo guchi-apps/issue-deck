@@ -44,6 +44,11 @@
  * まま残った）。developへ入っていないコミットの有無を比較で確かめ、猶予時間を過ぎても
  * develop向けPRが開かれないものへ`00.check-user`＋`01.check-blocked`を付けて通知する。
  *
+ * あわせて、**developへのマージ時に外しそこねた`00.check-user`も外す**（#2335）。外す役は
+ * PRのマージを受け取るワークフローだけで再試行が無く、GitHubの一時的な5xxに当たると、
+ * 次のmainリリース（`main-pr-merged`）かIssueのcloseまで確認待ちが残る。
+ * 判定は`decideStaleCheckUser`。
+ *
  * **判定はこの純粋関数に閉じる。** 「進める」「取り残しとして通知する」「見送る」の分岐は
  * 人の目を通らないまま進捗とラベルを書き換えるため、IOから切り離してテストできる形にする
  * （コンフリクト巡回の`decideConflictSweep`と同じ分け方）。IOは
@@ -77,7 +82,13 @@ export type ProgressSweepSkipReason =
   /** 取り残しの疑いはあるが、最後のコミットから猶予時間が経っていない */
   | "within_grace"
   /** 同じ先端についての取り残しを既に通知済み（判定後に既存コメントを見て分かる） */
-  | "already_notified";
+  | "already_notified"
+  /** 滞留した`00.check-user`の確認で、まだ開いているPRがあった（本当にマージ待ち） */
+  | "check_user_pr_open"
+  /** 滞留した`00.check-user`の確認で、`issue-<番号>`のマージ済みPRが無かった */
+  | "check_user_no_merged_pr"
+  /** 滞留した`00.check-user`の確認で、付与がマージより後だった（事後確認・人が付けたもの） */
+  | "check_user_after_merge";
 
 /** developとの三点比較の結果。取得できなかった場合はIO側が`null`を渡す */
 export type ProgressSweepCompare = {
@@ -182,6 +193,96 @@ export function decideProgressSweep(
     aheadBy: compare.aheadBy,
     ageMinutes,
   };
+}
+
+/**
+ * 滞留した`00.check-user`の判定に使う、`issue-<番号>`ブランチのPull Request1件ぶん。
+ * 見るのは状態とマージ済みかだけで、baseがdevelopかmainかは問わない。
+ */
+export type StaleCheckUserPullRequest = {
+  /** `open` / `closed` */
+  state: string;
+  /** マージされた時刻（ISO8601）。マージされていなければ`null` */
+  mergedAt: string | null;
+};
+
+export type StaleCheckUserDecision =
+  /** `00.check-user`と理由ラベルを外す */
+  | { action: "clear"; mergedAt: string }
+  | {
+      action: "skip";
+      reason: "check_user_pr_open" | "check_user_no_merged_pr" | "check_user_after_merge";
+    };
+
+/**
+ * developへのマージ時に外しそこねた`00.check-user`を外してよいかを決める（#2335）。
+ *
+ * ## なぜ要るか
+ *
+ * `00.check-user`と理由ラベル（`01.check-*`）を**7枚まとめて1回の`gh issue edit`で**外すのが
+ * `reusable-issue-labels.yml`の`develop-pr-merged`で、そこには再試行が無く、失敗しても
+ * 警告を出して先へ進む（進捗の報告を最優先で守る設計。#1861）。guchi-apps/signaly#200では
+ * GitHubの`502 Bad Gateway`に当たって素通りし、マージ済みのIssueに「マージの確認待ち」が
+ * 残った（実行ログ 32842492174）。
+ *
+ * **残り続けるわけではない。** 同じ7枚は`main-pr-merged`とIssueのcloseでも外れるので、
+ * 次のmainリリースまでで解消する（signaly#200の実測は18分で、リリースPR #203のマージが
+ * 外した）。それでも直す理由は、その窓のあいだ**盤面の「確認待ち」に押せない札が積まれる**
+ * こと——開いてもマージ済みで、できる操作が無い。リリースまで日をまたげばPush通知も飛ぶ。
+ *
+ * ## 外す条件
+ *
+ * **`01.check-merge`に限定しない。** 落ちるのは7枚まとめての1回なので、そのとき付いていた
+ * 理由ラベルが何であれ同じように残る（`01.check-answered`はマージ待ちと同時に成立しうる）。
+ * 見るのは`00.check-user`が付いていることだけにして、理由ラベルの除去は
+ * `clearCheckUser`の既存の挙動（付いているものを外す）に任せる。
+ *
+ * そのうえで、次のどれかに当たるものには触らない。
+ *
+ * - **開いているPRが1件でもある。** それは本物のマージ待ちで、`01.check-merge`が
+ *   指しているものそのもの
+ * - **`issue-<番号>`のマージ済みPRが無い。** マージの記録が無いのに外すと、人が手で
+ *   付けた確認待ちまで黙って消してしまう
+ * - **`00.check-user`が付いたのがマージより後。** 判定が下る前にPRがマージされた場合、
+ *   `reusable-claude-review-develop.yml`は文面だけを事後確認向けに変えて
+ *   `00.check-user`＋`01.check-merge`を**そのまま付ける**（#1968）。取り残しの通知
+ *   （`01.check-blocked`）も人が手で付けたものも同じ形になる。**マージ時の除去が
+ *   落ちたものだけ**を相手にするので、付与の時刻がマージより前のものに限る
+ *
+ * 判定をIOから切り離してあるのは`decideProgressSweep`と同じ理由で、人の目を通らないまま
+ * ラベルを書き換えるため。IOは[`progress-sweep-run.ts`](./progress-sweep-run.ts)。
+ */
+export function decideStaleCheckUser(facts: {
+  pullRequests: readonly StaleCheckUserPullRequest[];
+  /** `Issue.checkUserLabeledAt`。`00.check-user`が外れるとnullへ戻る列 */
+  checkUserLabeledAt: Date | null;
+}): StaleCheckUserDecision {
+  if (facts.pullRequests.some((pullRequest) => pullRequest.state === "open")) {
+    return { action: "skip", reason: "check_user_pr_open" };
+  }
+
+  // 最後にマージされたPRと比べる。1つのIssueに複数のPRが発生するため、比較の相手は
+  // 「直近のマージ」でなければならない（古いマージと比べると、その後に付いた確認待ちを
+  // 「マージより後」と判定できない）。
+  let mergedAt: string | null = null;
+  let mergedAtMs = Number.NEGATIVE_INFINITY;
+  for (const pullRequest of facts.pullRequests) {
+    if (pullRequest.mergedAt === null) continue;
+    const ms = Date.parse(pullRequest.mergedAt);
+    if (Number.isNaN(ms) || ms <= mergedAtMs) continue;
+    mergedAt = pullRequest.mergedAt;
+    mergedAtMs = ms;
+  }
+  if (mergedAt === null) return { action: "skip", reason: "check_user_no_merged_pr" };
+
+  // 付与の時刻が分からないものは触らない。DBの同期が追い付いていない可能性があり、
+  // 「マージより前」と決めつける根拠が無い。
+  const labeledAt = facts.checkUserLabeledAt;
+  if (labeledAt === null || labeledAt.getTime() >= mergedAtMs) {
+    return { action: "skip", reason: "check_user_after_merge" };
+  }
+
+  return { action: "clear", mergedAt };
 }
 
 /** 巡回の間隔（分）。環境変数が読めない・数値でない場合は既定値。**0以下は「巡回しない」** */

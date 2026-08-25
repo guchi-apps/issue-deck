@@ -1,6 +1,4 @@
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
+import { callClaudeMessages } from "@/lib/claude/request";
 
 /**
  * 取得成功時にレスポンスを保持する時間。
@@ -9,11 +7,11 @@ const OAUTH_BETA = "oauth-2025-04-20";
 const CACHE_TTL_MS = 5 * 60_000;
 
 /** ヘッダを得るためだけに送る最小の推論リクエスト。 */
-const PROBE_REQUEST_BODY = JSON.stringify({
+const PROBE_REQUEST_BODY = {
   model: "claude-haiku-4-5",
   max_tokens: 1,
   messages: [{ role: "user", content: "ping" }],
-});
+};
 
 /** 表示するウィンドウと表示順。キーはヘッダ名に埋め込まれる略称。 */
 const USAGE_WINDOWS: { key: string; label: string; durationMs: number }[] = [
@@ -120,17 +118,13 @@ export async function fetchClaudeUsage(token: string): Promise<ClaudeUsage> {
 
   let res: Response;
   try {
-    res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "anthropic-beta": OAUTH_BETA,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-      },
+    // この取得自体もプラン枠を消費するため、他の機能と同じように消費量へ計上する（#2347）。
+    const { response } = await callClaudeMessages({
+      feature: "plan_usage",
+      token,
       body: PROBE_REQUEST_BODY,
-      cache: "no-store",
     });
+    res = response;
   } catch (cause) {
     return staleOrThrow(cause instanceof Error ? cause.message : String(cause));
   }

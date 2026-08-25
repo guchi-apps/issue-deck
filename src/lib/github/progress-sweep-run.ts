@@ -1,6 +1,10 @@
 import { db } from "@/lib/db";
 import { addCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
-import { CHECK_USER_LABEL, MANUAL_STEP_LABEL, isCheckUserReasonLabel } from "@/lib/github/approval-labels";
+import {
+  CHECK_USER_LABEL,
+  MANUAL_STEP_LABEL,
+  isCheckUserReasonLabel,
+} from "@/lib/github/approval-labels";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches, fetchBranchHeadSha } from "@/lib/github/branches-api";
 import {
@@ -16,6 +20,7 @@ import {
   buildDevelopMergedComment,
   buildStrandedComment,
   decideProgressSweep,
+  decideStaleCheckUser,
   hasDevelopMergedNotice,
   hasStrandedNotice,
   needsStrandedCheck,
@@ -58,14 +63,16 @@ import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress
  * ものだけになる（1件あたり2回・巡回ごと）。
  *
  * 手作業ラベルの埋め直し（`manual-step-label`ジョブのschedule分）は**issue-deckのDBを引く**
- * ので、GitHubへの問い合わせは実際に付けるときだけになる。
+ * ので、GitHubへの問い合わせは実際に付けるときだけになる。滞留した`00.check-user`の回収
+ * （#2335）も同じで、`Develop`・`Release`にいるopenなIssueに絞るため、対象が無ければ
+ * REST 1回も出ない。
  */
 
 /** 巡回が実際に行ったこと1件ぶん */
 export type ProgressSweepAction = {
   repositoryFullName: string;
   issueNumber: number;
-  kind: "advanced" | "stranded" | "manual_step_labeled";
+  kind: "advanced" | "stranded" | "manual_step_labeled" | "check_user_cleared";
 };
 
 export type ProgressSweepResult = {
@@ -93,6 +100,13 @@ const ADVANCE_TO: ProgressStatusKey = "develop";
 
 /** Issue用ブランチが向く先。この運用ではdevelop固定（`develop`を持たないリポジトリでは対象0件） */
 const BASE_BRANCH = "develop";
+
+/**
+ * 外しそこねた`00.check-user`を探す進捗（#2335）。**マージ後まで進んだものだけ**を見る。
+ * `Done`はIssueがcloseされるので`state: "OPEN"`の時点で外れ、`cleanup-on-close`と
+ * issue-deckの`clearLabelsOnIssueClose`（#2178）が受け持つ。
+ */
+const STALE_CHECK_USER_STATUSES = ["Develop", "Release"];
 
 /**
  * 最後に巡回した時刻（epoch ms）。**プロセス内にしか持たない**（既存の巡回2本と同じ）。
@@ -180,6 +194,7 @@ export async function runProgressSweep(
     }
   }
 
+  actions.push(...(await sweepStaleCheckUser({ tokenFor, countSkip })));
   actions.push(...(await sweepManualStepLabels({ tokenFor, countSkip })));
 
   return {
@@ -390,19 +405,126 @@ async function sweepIssue(params: {
  * ローカルセッション用の`removeCheckUserWithReason`と違い、**誰が付けたかを問わずに外す。**
  * developへマージされた時点で、計画の承認もマージの確認も待つ相手がいなくなるため
  * （`develop-merge-sweep`ジョブが`gh issue edit --remove-label`を並べていたのと同じ扱い）。
+ *
+ * 戻り値は「実際に`00.check-user`が付いていて外したか」。DBの同期が遅れて対象に挙がった
+ * だけのIssueを、巡回の成果として数えないために見る（#2335）。
  */
 async function clearCheckUser(
   owner: string,
   repo: string,
   issueNumber: number,
   token: string,
-): Promise<void> {
+): Promise<boolean> {
   const remaining = await removeIssueLabel(owner, repo, issueNumber, token, CHECK_USER_LABEL);
   // 404（もともと付いていない）なら理由ラベルも付いていない
-  if (remaining === null) return;
+  if (remaining === null) return false;
   for (const name of remaining.filter(isCheckUserReasonLabel)) {
     await removeIssueLabel(owner, repo, issueNumber, token, name);
   }
+  return true;
+}
+
+/**
+ * developへのマージ時に外しそこねた`00.check-user`を外す（#2335）。
+ *
+ * 外す役はPRのマージを受け取る`reusable-issue-labels.yml`の`develop-pr-merged`だけで、
+ * そこの`gh issue edit`には再試行が無い。guchi-apps/signaly#200ではGitHubの
+ * `502 Bad Gateway`に当たり、次のmainリリースまでの18分間、盤面の「確認待ち」に
+ * 押せない札が残った。ワークフロー側にも再試行を足したが、恒久的な失敗と、参照タグが
+ * 古いままのリポジトリは拾えないので、こちらを最後の受け皿にする。
+ * 外してよいかの判定は`decideStaleCheckUser`。
+ *
+ * **探し先はissue-deckのDB**（`sweepManualStepLabels`と同じ）。対象を
+ * **`Develop`・`Release`にいるopenなIssue**へ絞るのがGitHub APIを消費しないための要で、
+ * ここには「進捗はマージ後まで進んだのに確認待ちが残っている」ものしか入らない。
+ * 進捗の報告も一緒に落ちて`Develop PR`・`Implementation`に留まった場合は、上の
+ * `sweepIssue`が`Develop`へ進めるときに`clearCheckUser`を呼ぶので、そちらで拾える。
+ *
+ * **進捗（Status）は動かさない。** 進めるのは`sweepIssue`の役目で、こちらは進み終えた
+ * Issueに取り残されたラベルだけを相手にする。
+ */
+async function sweepStaleCheckUser(params: {
+  tokenFor: (installationId: number, cacheKey: string) => Promise<string>;
+  countSkip: (reason: keyof ProgressSweepResult["skipped"]) => void;
+}): Promise<ProgressSweepAction[]> {
+  const targets = await db.issue.findMany({
+    where: {
+      state: "OPEN",
+      repository: { archived: false },
+      labels: { some: { name: CHECK_USER_LABEL } },
+      // 付与の時刻が分からないものは`decideStaleCheckUser`が見送るので、ここで落としておく。
+      checkUserLabeledAt: { not: null },
+      projectStatus: { in: STALE_CHECK_USER_STATUSES },
+    },
+    select: {
+      number: true,
+      checkUserLabeledAt: true,
+      repository: {
+        select: {
+          ownerLogin: true,
+          name: true,
+          fullName: true,
+          installation: { select: { id: true, installationId: true } },
+        },
+      },
+    },
+    orderBy: { number: "asc" },
+  });
+  if (targets.length === 0) return [];
+
+  const actions: ProgressSweepAction[] = [];
+  for (const target of targets) {
+    const repository = target.repository;
+    try {
+      const token = await params.tokenFor(
+        repository.installation.installationId,
+        repository.installation.id,
+      );
+      // baseは絞らない。`develop`を持たないリポジトリでは`issue-<番号>`→`main`が唯一のPRで、
+      // そちらにも`01.check-merge`が付く（`main-pr-in-progress`ジョブ）。
+      const pullRequests = await fetchPullRequestsForHead(
+        repository.ownerLogin,
+        repository.name,
+        null,
+        `issue-${target.number}`,
+        "all",
+        token,
+      );
+      const decision = decideStaleCheckUser({
+        pullRequests: pullRequests.map((pullRequest) => ({
+          state: pullRequest.state,
+          mergedAt: pullRequest.merged_at,
+        })),
+        checkUserLabeledAt: target.checkUserLabeledAt,
+      });
+      if (decision.action === "skip") {
+        params.countSkip(decision.reason);
+        continue;
+      }
+      const cleared = await clearCheckUser(
+        repository.ownerLogin,
+        repository.name,
+        target.number,
+        token,
+      );
+      // DBの同期が遅れて対象に挙がっただけなら、巡回の成果として数えない。
+      if (!cleared) continue;
+      actions.push({
+        repositoryFullName: repository.fullName,
+        issueNumber: target.number,
+        kind: "check_user_cleared",
+      });
+    } catch (error) {
+      // 1件の失敗で残りを止めない（次の巡回で拾い直せる）。
+      console.error(
+        `[progress-sweep] ${repository.fullName}#${target.number} の ${CHECK_USER_LABEL} 除去:`,
+        error,
+      );
+      params.countSkip("action_failed");
+    }
+  }
+
+  return actions;
 }
 
 /**

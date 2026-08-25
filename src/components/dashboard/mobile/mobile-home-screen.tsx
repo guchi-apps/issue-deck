@@ -35,6 +35,11 @@ import {
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
+import {
+  describeMergePendingAttention,
+  isPullRequestViewAttention,
+  type MergePendingAttention,
+} from "@/lib/merge-pending-attention";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
@@ -70,6 +75,11 @@ type MobileHomeScreenProps = {
   releaseActivity: ReleaseActivityCounts | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
+  /**
+   * 「マージ待ち」の内訳（#2334・PCの左メニューと同じ使い分け）。行に出す数字は
+   * `pullRequestNavCounts`から引き、これはオレンジの丸と吹き出しにだけ使う
+   */
+  mergePendingAttention: MergePendingAttention | null;
   onSelectQuickView: (view: NavViewId) => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
   /** 「ブランチ」画面を開く（#1455）。ビューではないのでメニューへ直接1行として置く */
@@ -150,6 +160,7 @@ export function MobileHomeScreenView({
   waitingQuestionCount,
   releaseActivity,
   pullRequestNavCounts,
+  mergePendingAttention,
   onSelectQuickView,
   onSelectPullRequests,
   onSelectFlow,
@@ -403,6 +414,20 @@ export function MobileHomeScreenView({
                   icon={pullRequestViewIcons[view.id]}
                   onClick={() => onSelectPullRequests(view.id)}
                   count={pullRequestNavCounts[view.id]}
+                  // 「マージ待ち」のうち人が手を動かすまで進まないものが残っているときだけ
+                  // オレンジの丸にする（#2334・PCの左メニューと同じ
+                  // `isPullRequestViewAttention`）。判定を画面ごとに書くと、片方だけ
+                  // 直された時点でPCとスマホで意味が食い違う
+                  emphasis={
+                    isPullRequestViewAttention(view.id, mergePendingAttention)
+                      ? "attention"
+                      : "none"
+                  }
+                  title={
+                    view.id === "completed"
+                      ? describeMergePendingAttention(view.description, mergePendingAttention)
+                      : undefined
+                  }
                 />
               ))}
             </ul>

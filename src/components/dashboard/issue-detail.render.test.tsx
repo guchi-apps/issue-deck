@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import { QA_ANSWER_MARKER, QUESTION_COMMENT_MARKER } from "@/lib/github/ask-claude";
+import {
+  CROSS_REPO_QUESTION_MARKER,
+  QA_ANSWER_MARKER,
+  QUESTION_COMMENT_MARKER,
+} from "@/lib/github/ask-claude";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -98,7 +102,7 @@ const dispatchState: {
   setError: vi.fn(),
 };
 const pullRequestLinks: [] = [];
-const pullRequestsState = { pullRequests: [], refresh: vi.fn() };
+const pullRequestsState = { pullRequests: [], isLoadingDetails: false, refresh: vi.fn() };
 const mergeMutation = {
   mergePullRequest: vi.fn(),
   isSubmitting: false,
@@ -234,12 +238,27 @@ function renderMobileDetail(issue: Issue) {
   );
 }
 
+/** コメント入力欄そのもの。質問Issueではプレースホルダが変わる（#2345） */
+function composerTextarea(): HTMLTextAreaElement {
+  return screen.getByPlaceholderText(/コメントを追加\.\.\.|続けて質問する場合はここへ\.\.\./) as
+    HTMLTextAreaElement;
+}
+
 /** コメント入力欄と同じブロックにあるボタンだけを見る（ヘッダーの同名ボタンと区別する） */
 function composer(): HTMLElement {
-  const textarea = screen.getByPlaceholderText("コメントを追加...");
-  const block = textarea.closest("div.mt-4");
+  const block = composerTextarea().closest("div.mt-4");
   if (!block) throw new Error("コメント入力欄のブロックが見つからない");
   return block as HTMLElement;
+}
+
+/** ボタンの強さ（`Button`が`data-variant`に出している値）を読む */
+function variantOf(name: string): string | null {
+  return within(composer()).getByRole("button", { name }).getAttribute("data-variant");
+}
+
+/** 入力欄へ下書きを入れる（主ボタンの付け替えは入力の有無で決まる。#2345） */
+function typeDraft(text: string): void {
+  fireEvent.change(composerTextarea(), { target: { value: text } });
 }
 
 afterEach(cleanup);
@@ -277,39 +296,119 @@ describe("デプロイ失敗Issueのパネル", () => {
   });
 });
 
-describe("IssueDetailのコメント欄の下の操作列（#1770）", () => {
+describe("IssueDetailのコメント欄の下の操作列（#1770・#2345）", () => {
   it("回答済みの質問Issueでは「回答を確認してクローズ」が出る", () => {
     renderDetail(buildIssue());
     expect(within(composer()).getByRole("button", { name: "回答を確認してクローズ" })).toBeTruthy();
   });
 
-  it("質問Issueでは主ボタン（塗りつぶし）がクローズで、「コメント」は枠線になる", () => {
+  it("入力が空なら、クローズが主ボタンで「コメント」は枠なしまで沈む", () => {
     renderDetail(buildIssue());
-    const close = within(composer()).getByRole("button", { name: "回答を確認してクローズ" });
-    const comment = within(composer()).getByRole("button", { name: "コメント" });
-    expect(close.className).toContain("bg-primary");
-    expect(comment.className).toContain("bg-background");
-    expect(comment.className).not.toContain("bg-primary");
+    expect(variantOf("回答を確認してクローズ")).toBe("default");
+    expect(variantOf("質問する")).toBe("outline");
+    expect(variantOf("コメント")).toBe("ghost");
+  });
+
+  it("入力があれば、主ボタンが「質問する」へ移りクローズは枠線へ下がる", () => {
+    renderDetail(buildIssue());
+    typeDraft("その場合、`11.local`が付いたままだとどうなりますか？");
+    expect(variantOf("質問する")).toBe("default");
+    expect(variantOf("回答を確認してクローズ")).toBe("outline");
+    expect(variantOf("コメント")).toBe("ghost");
+  });
+
+  it("空白だけの入力では主ボタンが移らない", () => {
+    renderDetail(buildIssue());
+    typeDraft("   ");
+    expect(variantOf("回答を確認してクローズ")).toBe("default");
+    expect(variantOf("質問する")).toBe("outline");
   });
 
   it("通常のIssueでは出ず、「コメント」が主ボタンのまま", () => {
     renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
     expect(within(composer()).queryByRole("button", { name: "回答を確認してクローズ" })).toBeNull();
-    expect(
-      within(composer()).getByRole("button", { name: "コメント" }).className,
-    ).toContain("bg-primary");
+    expect(variantOf("コメント")).toBe("default");
+    expect(variantOf("質問する")).toBe("outline");
   });
 
-  it("回答待ち（最後が質問コメント）では出ない", () => {
+  it("回答待ち（最後が質問コメント）ではクローズが出ず、「質問する」が主ボタンになる", () => {
     commentsState.comments = [comments[0]];
     try {
       renderDetail(buildIssue());
       expect(
         within(composer()).queryByRole("button", { name: "回答を確認してクローズ" }),
       ).toBeNull();
+      expect(variantOf("質問する")).toBe("default");
+      expect(variantOf("コメント")).toBe("ghost");
     } finally {
       commentsState.comments = comments;
     }
+  });
+
+  /**
+   * 横断質問Issue（#1454）は`[質問] `タイトルを持つが、記録先にコメントを拾う無人実行が無い。
+   * 「質問する」を主ボタンにすると、押した人が回答も出口も失う（#2345）。
+   */
+  it("横断質問Issueでは、入力があっても主ボタンが「質問する」へ移らない", () => {
+    commentsState.comments = [
+      { ...comments[0], body: `横断の質問\n\n${QUESTION_COMMENT_MARKER}\n${CROSS_REPO_QUESTION_MARKER}` },
+      comments[1],
+    ];
+    try {
+      renderDetail(buildIssue());
+      typeDraft("続きの質問です");
+      expect(variantOf("回答を確認してクローズ")).toBe("default");
+      expect(variantOf("質問する")).toBe("outline");
+      expect(composerTextarea().placeholder).toBe("コメントを追加...");
+    } finally {
+      commentsState.comments = comments;
+    }
+  });
+
+  it("質問Issueでは入力欄のプレースホルダが「続けて質問する場合はここへ...」になる", () => {
+    renderDetail(buildIssue());
+    expect(composerTextarea().placeholder).toBe("続けて質問する場合はここへ...");
+    cleanup();
+    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
+    expect(composerTextarea().placeholder).toBe("コメントを追加...");
+  });
+});
+
+/**
+ * `Ctrl`+`Enter`は、そのとき主ボタンになっている投稿操作へ届かせる（#2345）。
+ * **クローズには割り当てない**ので、クローズが主のときはコメントとして投稿される。
+ */
+describe("IssueDetailのコメント欄のCtrl+Enter（#2345）", () => {
+  afterEach(() => commentMutations.createComment.mockReset());
+
+  function pressCtrlEnter(): void {
+    fireEvent.keyDown(composerTextarea(), { key: "Enter", ctrlKey: true });
+  }
+
+  it("質問Issueで入力があるときは、質問コメントとして投稿する", () => {
+    renderDetail(buildIssue());
+    typeDraft("続きの質問です");
+    pressCtrlEnter();
+    const body = commentMutations.createComment.mock.calls[0][0].body as string;
+    expect(body).toContain(QUESTION_COMMENT_MARKER);
+    expect(body).toContain("続きの質問です");
+  });
+
+  it("通常のIssueでは、ふつうのコメントとして投稿する", () => {
+    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
+    typeDraft("ふつうのコメント");
+    pressCtrlEnter();
+    const body = commentMutations.createComment.mock.calls[0][0].body as string;
+    expect(body).toBe("ふつうのコメント");
+    expect(body).not.toContain(QUESTION_COMMENT_MARKER);
+  });
+
+  it("PCとスマホで宛先が揃う", () => {
+    renderMobileDetail(buildIssue());
+    typeDraft("スマホから続きの質問です");
+    pressCtrlEnter();
+    const body = commentMutations.createComment.mock.calls[0][0].body as string;
+    expect(body).toContain(QUESTION_COMMENT_MARKER);
   });
 });
 
@@ -317,14 +416,18 @@ describe("IssueDetailのコメント欄の下の操作列（#1770）", () => {
  * スマホの詳細にも同じ出口を置く（#1770）。こちらは同じ操作が⋯メニューの奥にしかなく、
  * 開き直さないと終えられなかった
  */
-describe("MobileIssueDetailのコメント欄の下の操作列（#1770）", () => {
-  it("回答済みの質問Issueでは「回答を確認してクローズ」が主ボタンとして出る", () => {
+describe("MobileIssueDetailのコメント欄の下の操作列（#1770・#2345）", () => {
+  it("入力が空なら、クローズが主ボタンで「コメント」は枠なしまで沈む", () => {
     renderMobileDetail(buildIssue());
-    const close = within(composer()).getByRole("button", { name: "回答を確認してクローズ" });
-    expect(close.className).toContain("bg-primary");
-    expect(within(composer()).getByRole("button", { name: "コメント" }).className).toContain(
-      "bg-background",
-    );
+    expect(variantOf("回答を確認してクローズ")).toBe("default");
+    expect(variantOf("コメント")).toBe("ghost");
+  });
+
+  it("入力があれば、主ボタンが「質問する」へ移る（PCと同じ）", () => {
+    renderMobileDetail(buildIssue());
+    typeDraft("続きの質問です");
+    expect(variantOf("質問する")).toBe("default");
+    expect(variantOf("回答を確認してクローズ")).toBe("outline");
   });
 
   it("通常のIssueでは出ない", () => {

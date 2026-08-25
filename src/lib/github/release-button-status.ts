@@ -1,5 +1,6 @@
 import type { ReleaseStatus } from "@/hooks/use-release-status";
 import type { CiState } from "@/lib/github/release-api";
+import { isMergeJudgementPending } from "@/lib/pull-request-list";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
@@ -16,6 +17,19 @@ export type ReleaseButtonStatus = "idle" | "progressing" | "action_required" | "
 type WorkflowRunState = { status: string; conclusion: string | null };
 
 /**
+ * マージ待ちPRのうち、「人が押す番か」の判定に使う状態だけ（#2326）。
+ *
+ * `MergeJudgement`をそのまま受け取らず真偽値にしているのは、この判定が
+ * `claude-review-develop.yml`のcheck-runの形に依存しないようにするため。
+ * 判定の中身を読むのは`isMergeJudgementPending`（`lib/pull-request-list.ts`）の役目。
+ */
+type PendingMergePullRequestState = {
+  ciState: CiState | null;
+  /** 自動マージ可否の判定（`claude-review-develop.yml`）がまだ走っているか（#1968・#2326） */
+  mergeJudgementPending: boolean;
+};
+
+/**
  * 4値サマリの判定に必要な最小の入力。`ReleaseStatus`（＝`/api/repositories/release`の戻り値）
  * を組み立てずに判定できるよう、リポジトリ横断で状態を返す
  * `/api/repositories/release-pending-merges`からも同じ判定を通せる形にしている（#1117）。
@@ -26,9 +40,9 @@ export type ReleaseStatusSummaryInput = {
   /** mainブランチ上の`deploy.yml`の最新実行 */
   deployWorkflowRun: WorkflowRunState | null;
   /** developへのマージ待ちバンプPR。オープン中でなければnull */
-  bumpPullRequest: { ciState: CiState | null } | null;
+  bumpPullRequest: PendingMergePullRequestState | null;
   /** mainへのマージ待ちdevelop→mainのPR。オープン中でなければnull */
-  releasePullRequest: { ciState: CiState | null } | null;
+  releasePullRequest: PendingMergePullRequestState | null;
   /** developだけbump済みでdevelop→mainのPRが未作成の過渡状態か */
   releasePending: boolean;
 };
@@ -67,6 +81,12 @@ export function resolveFailedReleaseWorkflow(
  * この基準を持っていたが、develop→main PRも同じ基準に揃えた。`unknown`（`Checks: read`が無い・
  * check-runsが0件・取得失敗）は「要操作」のまま残す。CI状態が取れないだけでマージの導線が
  * 消えてしまわないようにするため。
+ *
+ * **自動マージ可否の判定（`claude-review-develop`）が走っている間も「要操作」にしない**
+ * （#2326）。判定のcheck-runはCI状態の集約から外してある（#1799）ため、Claudeのレビュー中でも
+ * `ciState`は`success`になり、CIだけを基準にすると琥珀の「mainへマージ待ち」が出ていた。
+ * その窓のあいだ画面のマージボタンは「判定中」で無効（#1968）で、押せる操作は無い。
+ * ブランチ画面（`resolveReleaseMergeTarget`）・通知ベル・PR一覧（#2283）と同じ基準。
  */
 export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): ReleaseButtonStatus {
   const { workflowRun, deployWorkflowRun, bumpPullRequest, releasePullRequest, releasePending } =
@@ -74,8 +94,8 @@ export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): Releas
 
   if (resolveFailedReleaseWorkflow(input)) return "error";
 
-  if (releasePullRequest && releasePullRequest.ciState !== "pending") return "action_required";
-  if (bumpPullRequest && bumpPullRequest.ciState !== "pending") return "action_required";
+  if (isWaitingUserMerge(releasePullRequest)) return "action_required";
+  if (isWaitingUserMerge(bumpPullRequest)) return "action_required";
 
   if (isRunning(workflowRun)) return "progressing";
   if (isRunning(deployWorkflowRun)) return "progressing";
@@ -84,6 +104,15 @@ export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): Releas
   if (releasePending) return "progressing";
 
   return "idle";
+}
+
+/**
+ * マージ待ちPRが「人が押す番」で止まっているか（#1433・#2326）。
+ * CIが実行中でも、自動マージ可否の判定中でもない＝いま押せば進む状態。
+ */
+function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | null): boolean {
+  if (pullRequest === null) return false;
+  return pullRequest.ciState !== "pending" && !pullRequest.mergeJudgementPending;
 }
 
 /**
@@ -97,11 +126,19 @@ export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): Re
     deployWorkflowRun: status.deployWorkflowRun,
     bumpPullRequest:
       status.phase === "bump_pr_open" && status.bumpPullRequest
-        ? { ciState: status.bumpPullRequest.ciState }
+        ? {
+            ciState: status.bumpPullRequest.ciState,
+            mergeJudgementPending: isMergeJudgementPending(status.bumpPullRequest.mergeJudgement),
+          }
         : null,
     releasePullRequest:
       status.phase === "release_pr_open" && status.releasePullRequest
-        ? { ciState: status.releasePullRequest.ciState }
+        ? {
+            ciState: status.releasePullRequest.ciState,
+            mergeJudgementPending: isMergeJudgementPending(
+              status.releasePullRequest.mergeJudgement,
+            ),
+          }
         : null,
     releasePending: status.phase === "release_pending",
   });

@@ -1,7 +1,8 @@
 # 他セッションのやり取りを見る（#1477）
 
 **いつ読むか**: 走っている（または畳んだ）別の実装セッションが何をしているか・何を話したかを
-確認したいとき。見た内容をもとに次の手を打ちたいとき。
+確認したいとき。見た内容をもとに次の手を打ちたいとき。**どのセッションがトークンをいくら
+使ったかを知りたいとき**（→「使用量を集計する」）。
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
@@ -35,8 +36,8 @@ scripts/inspect-session.sh 1473 --screen        # 画面（capture-pane）の末
 scripts/inspect-session.sh 1473 --raw           # 転記ファイルのパスだけ（他コマンドへ渡す用）
 ```
 
-出るのは、セッションの生死・作業ディレクトリ・ブランチ・転記の場所と大きさ・最終更新時刻に続いて、
-直近のやり取りとツール使用の内訳。
+出るのは、セッションの生死・作業ディレクトリ・ブランチ・転記の場所と大きさ・最終更新時刻・
+そのセッションのトークン使用量に続いて、直近のやり取りとツール使用の内訳。
 
 ### 既定で「文章だけ」を出す理由
 
@@ -64,14 +65,72 @@ Edit x35 / ...`）で足りるものとして扱う。個々のツール呼び�
 [session-notify.md](session-notify.md) が Remote Control のURL解決（`~/.claude/sessions/<pid>.json`）に
 ついて置いている断りと同じ扱いで、ここに依存した判定を他の仕組みへ広げないこと。
 
-同じ理由で、**転記を読むのはこのスクリプトと `scripts/session-notify.sh`、それに
-`scripts/subpc-dispatch-poller.sh` の中断検知（#1971）だけ**に留める。転記の場所を引く手順は
-`scripts/lib/session-transcript.sh` に集めてあり、**写しを増やさない**。
+同じ理由で、**転記を読むのはこのスクリプトと `scripts/session-notify.sh`、
+`scripts/subpc-dispatch-poller.sh` の中断検知（#1971）、`scripts/session-usage.sh` の使用量集計
+（#2350）だけ**に留める。転記の場所を引く手順は `scripts/lib/session-transcript.sh` に
+集めてあり、**写しを増やさない**。
+
+使用量集計が読むのは`message.usage`と時刻・作業ディレクトリで、**内容の分類も状態の推定も
+行わない**（1箇所だけ最初のユーザー発言からIssue番号を拾うが、これも決まった形の抽出であって
+判断ではない）。`fleet-status.sh`側へ足さなかったのは、あちらが**tmux・git・GitHubの事実だけを
+読む計器**として作られており、転記への依存を持ち込むとこの節の線引きが崩れるため。
 
 pollerが読むのは「最後のレコードが`isApiErrorMessage`か」という1つの事実と、そのファイルが
 更新されていない時間だけで、**内容の分類も状態の推定も行わない**（APIエラーで打ち切られたturnは
 `Stop`フックが飛ばず、これ以外に気づく手掛かりが無い。[gates.md](gates.md)「計器の担当範囲は
 『フックが飛ぶか』で切る」）。
+
+## 使用量を集計する（#2350）
+
+**ローカルセッションが全消費の約93%を占めるのに、そこだけ計測が無かった**
+（`guchi-apps/question#34`の調査。直近21日でOpus 5のAPI換算 約$6,556 / 全体 約$7,041）。
+無人実行は #903 がJob Summaryへ出し、サブスクの消費率は ops-dashboard の
+`src/lib/ai-usage/claude.ts` が出すが、「どのIssueのセッションがいくら使ったか」はどこにも
+出ていない。削減策を入れても効果を測れないため、まず出す。
+
+```bash
+scripts/session-usage.sh                     # 直近7日をセッション別に多い順で
+scripts/session-usage.sh 2350                # Issue番号で絞る（実装と計画レビューの両方が出る）
+scripts/session-usage.sh issue-deck-issue-2350   # tmuxセッション名でも指定できる
+scripts/session-usage.sh --days 21 --by kind # 種別別（実装／計画レビュー／横断質問／その他）
+scripts/session-usage.sh --by repo|day|model # 別のまとめ方
+scripts/session-usage.sh --all --json        # 全期間の正規化JSON
+```
+
+`inspect-session.sh` の見出しにも1行だけ出る（`使用量: 88応答 / 出力 50k / …`）。
+実装は入口が `scripts/session-usage.sh`、集計と整形が `scripts/lib/session-usage.sh`
+（テストは `src/lib/session-usage.test.ts`）。
+
+### `message.id`で重複除去しないと約2.5倍に膨らむ
+
+**転記の`message.usage`は、同じ`message.id`を持つ全content行に重複して書かれる。**
+1つの応答がテキスト＋ツール呼び出し3つに分かれていれば、同じusageが4行に載る。
+`question#34`の調査は最初これを踏んで金額を約2.5倍（$12,123）に見積もった。
+
+除去が効いていることは出力から確かめられる。表の末尾に「`message.id`で重複除去した行 N件」が
+出るので、**ここが0のまま応答数だけ多い**なら除去が空振りしている。
+
+### キャッシュ書き込みの単価はTTLで違う
+
+キャッシュ読み出しは入力の0.1倍だが、**書き込みは5分TTLで1.25倍・1時間TTLで2.0倍**。
+転記は`usage.cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`で
+内訳を持っているので、それぞれの倍率で計算する。ローカルセッションは1時間TTLが支配的なため、
+一律1.25倍にすると2割ほど低く出る（`question#34`の$6,556はこの一律1.25倍での見積もり）。
+
+### 計画レビュー・横断質問のIssue番号は転記の中から拾う
+
+実装セッションは作業ディレクトリ（`~/apps/<repo>-worktrees/issue-<n>`）に番号が入っているが、
+計画レビュー（`.plan-reviews/_refs/<owner>-<repo>`）と横断質問（`.questions/_session-<repo>`）は
+**対象リポジトリごとの作業場を使い回す**ため、パスからは番号が分からない。ここだけ最初の
+ユーザー発言の`Issue #<番号>`を正規表現で拾っている。**中身を読むのはこの1箇所だけで、
+拾えなければ番号なしの行として出す**（`## 作法`と同じく、壊れたら黙って諦める側へ倒す）。
+
+### 出す数字はAPI換算の目安
+
+サブスクの実費ではない。実費に相当する消費率は ops-dashboard の Claude 使用量表示
+（`/api/claude-usage`）と端末の `/usage` で見る。単価表（`scripts/lib/session-usage.sh`の
+`PRICES`）は手で持っているので、**モデルが増えたら足す**。表に無いモデルはAPI換算に含めず、
+表の末尾に警告として名前が出る。
 
 ## 見た内容をどう扱うか
 

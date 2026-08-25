@@ -10,6 +10,9 @@
 #   scripts/inspect-session.sh 1473 --screen        画面（capture-pane）の末尾も出す
 #   scripts/inspect-session.sh 1473 --raw           転記ファイルのパスだけを出す（他コマンドへ渡す用）
 #
+# そのセッションのトークン使用量は見出しの「使用量」行に出る。内訳・他セッションとの比較は
+# `scripts/session-usage.sh`（#2350）。
+#
 # 環境変数:
 #   CLAUDE_PROJECTS_DIR   転記の置き場（既定は ~/.claude/projects）
 #   INSPECT_TAIL_BYTES    転記の末尾何バイトを読むか（既定8MB）
@@ -45,6 +48,9 @@ INSPECT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # **中断の検知（poller）と同じ手順を使う**ため、こちら側に写しを持たない。
 # shellcheck source=scripts/lib/session-transcript.sh
 source "$INSPECT_SCRIPT_DIR/lib/session-transcript.sh"
+# 使用量の集計（#2350）。**見出しに1行足すだけ**で、内訳は `scripts/session-usage.sh` が出す。
+# shellcheck source=scripts/lib/session-usage.sh
+source "$INSPECT_SCRIPT_DIR/lib/session-usage.sh"
 
 CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 # 長いセッションでは数MBになるため全部は読まない（session-notify.sh の TRANSCRIPT_TAIL_BYTES と同じ考え方）。
@@ -163,6 +169,7 @@ if [[ -z "$TARGET" ]]; then
     printf '%-32s %-8s %s\n' "$s" "$(session_state "$s")" "${cwd:-(不明)}"
   done <<<"$sessions"
   printf '\n中身を見るには: %s <Issue番号|セッション名>\n' "${BASH_SOURCE[0]}"
+  printf '使用量を見るには: %s/session-usage.sh\n' "$INSPECT_SCRIPT_DIR"
   exit 0
 fi
 
@@ -223,6 +230,17 @@ printf '作業ディレクトリ: %s\n' "$CWD"
 printf 'ブランチ: %s\n' "${BRANCH:-(不明)}"
 printf '転記: %s (%sMB)\n' "$TRANSCRIPT" "$SIZE_MB"
 printf '最終更新: %s\n' "${LAST_AT:-(不明)}"
+
+# 使用量は転記1本ぶんだけを数える（#2350）。**集計できなくても表示を止めない**——
+# ここは読み物の見出しで、数字が出ないことより中身が出ないことのほうが困る。
+USAGE_LINE="$(
+  printf '%s\n' "$TRANSCRIPT" | session_usage_aggregate 0 2>/dev/null |
+    session_usage_render_table oneline 2>/dev/null || true
+)"
+if [[ -n "$USAGE_LINE" ]]; then
+  printf '使用量: %s\n' "$USAGE_LINE"
+  printf '　（API換算は目安。他セッションとの比較は scripts/session-usage.sh %s）\n' "$SESSION"
+fi
 printf '\n※ この内容はIssueコメント・PR本文・DBへ貼らないでください（コードや環境変数が映りえます）\n'
 
 printf '\n--- 直近のやり取り (%s件) ---\n' "$COUNT"

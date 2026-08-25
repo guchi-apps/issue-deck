@@ -19,3 +19,4 @@ describe("getAdjacentPullRequestViewId（#1691）", () => {
     expect(getAdjacentPullRequestViewId(ids[ids.length - 1], "next")).toBeNull();
   });
 });
+

@@ -24,6 +24,7 @@ import {
   MobileHomeScreenView,
 } from "@/components/dashboard/mobile/mobile-home-screen";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import type { MergePendingAttention } from "@/lib/merge-pending-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { NAV_VIEW_IDS } from "@/types/issue";
 import type { NavViewId, OverviewStat } from "@/types/issue";
@@ -36,6 +37,13 @@ const NAV_COUNTS = Object.fromEntries(NAV_VIEW_IDS.map((id) => [id, 0])) as Reco
 const PR_NAV_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: null };
 
 const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
+
+const NO_MERGE_PENDING: MergePendingAttention = {
+  total: 0,
+  autoMerging: 0,
+  repairing: 0,
+  actionRequired: 0,
+};
 
 const OVERVIEW_STATS: OverviewStat[] = [
   { label: "要対応", value: "2", linkedView: "check-user" },
@@ -105,6 +113,7 @@ function renderHome(
       unconfirmedQuestionCount={0}
       waitingQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
+      mergePendingAttention={NO_MERGE_PENDING}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
       onSelectFlow={() => {}}
@@ -171,6 +180,27 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(row.textContent).toBe("ユーザーの確認待ち5");
   });
 
+  // PCの左メニューと同じ判定（`isPullRequestViewAttention`）を使う（#2334）
+  it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
+    renderHome({
+      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2 },
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
+    });
+
+    const row = screen.getByRole("button", { name: /マージ待ち/ });
+    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+  });
+
+  it("マージ待ちが自動で進むものだけなら丸にしない", () => {
+    renderHome({
+      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2 },
+      mergePendingAttention: { total: 2, autoMerging: 2, repairing: 0, actionRequired: 0 },
+    });
+
+    const row = screen.getByRole("button", { name: /マージ待ち/ });
+    expect(row.querySelector("span:last-child")?.className).not.toContain("bg-amber-500");
+  });
+
   it("「ユーザーの作業待ち」を強調するのは、いま実行できる手作業があるときだけ", () => {
     const { rerender } = renderHome({
       navCounts: { ...NAV_COUNTS, "manual-step": 2 },
@@ -193,6 +223,7 @@ describe("MobileHomeScreen（#1690）", () => {
         unconfirmedQuestionCount={0}
         waitingQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
+      mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
@@ -425,6 +456,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         waitingQuestionCount={0}
         releaseActivity={null}
         pullRequestNavCounts={PR_NAV_COUNTS}
+      mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}

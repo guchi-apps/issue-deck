@@ -1,9 +1,8 @@
+import type { IssueOrderCandidate, IssueOrderResult } from "@/lib/claude/issue-order";
 import {
   ISSUE_ORDER_BODY_HEAD_LENGTH,
   ISSUE_ORDER_CANDIDATE_LIMIT,
-  type IssueOrderCandidate,
-  type IssueOrderResult,
-} from "@/lib/claude/issue-order";
+} from "@/lib/claude/limits";
 import type { Issue } from "@/types/issue";
 
 /**

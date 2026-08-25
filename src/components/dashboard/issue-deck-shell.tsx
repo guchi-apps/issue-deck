@@ -89,7 +89,7 @@ import {
   type InfraConfigTarget,
 } from "@/lib/infra-config-repos";
 import { appendPrerequisiteReference } from "@/lib/manual-step-prerequisites";
-import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/issue-search";
+import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/limits";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import type { NotificationTarget } from "@/lib/notifications";
 import {
@@ -115,6 +115,7 @@ import {
   computeManualStepAttention,
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
+import { countMergePendingAttention } from "@/lib/merge-pending-attention";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import {
@@ -940,6 +941,16 @@ export function IssueDeckShell({
     [visiblePullRequests, openPullRequests.fetchedAt],
   );
 
+  // 「マージ待ち」の行にオレンジの丸を点けるかの判定材料（#2334）。**行に出す数字は上の
+  // `pullRequestNavCounts`のまま**で、こちらは「そのうち人が手を動かすまで進まないものが
+  // 何件か」を数える。Auto-merge有効でCI成功のPRと自動修復中のPRは放っておけば片付くため、
+  // ベル（`lib/notifications.ts`）と同じ理由で丸から外す。母集団は件数と同じ
+  // `visiblePullRequests`にそろえる（違えると丸の中の数字だけ別の数え方になる）。
+  const mergePendingAttention = useMemo(
+    () => countMergePendingAttention(visiblePullRequests, openPullRequests.fetchedAt !== null),
+    [visiblePullRequests, openPullRequests.fetchedAt],
+  );
+
   // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものは
   // 二重に出さないため、確認待ちのIssue一覧を渡して除く。**リポジトリ絞り込みは掛けない**
   // （#1750）——並ぶ先が絞り込みを適用しないビューなので、掛けると同じ一覧の中でIssueだけ
@@ -1296,6 +1307,7 @@ export function IssueDeckShell({
                   unconfirmedQuestionCount={unconfirmedQuestionCount}
                   waitingQuestionCount={waitingQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
+                  mergePendingAttention={mergePendingAttention}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
                   onSelectFlow={() => selectTab("flow")}
@@ -1354,6 +1366,7 @@ export function IssueDeckShell({
                   <MobilePullRequestsScreen
                     view={filters.prview}
                     navCounts={pullRequestNavCounts}
+                    mergePendingAttention={mergePendingAttention}
                     origin={mobileScreen.origin}
                     onChangeView={selectMobilePullRequestView}
                     pullRequests={filteredPullRequests}
@@ -1515,6 +1528,7 @@ export function IssueDeckShell({
                 unconfirmedQuestionCount={unconfirmedQuestionCount}
                 waitingQuestionCount={waitingQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
+                mergePendingAttention={mergePendingAttention}
                 repositories={repositories}
                 selectedRepoFullNames={filters.repos}
                 onSelectRepository={(repo) => toggleRepo(repo.fullName)}

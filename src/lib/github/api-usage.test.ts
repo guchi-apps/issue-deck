@@ -174,6 +174,28 @@ describe("onBucketClosed", () => {
 
     expect(listener).not.toHaveBeenCalled();
   });
+
+  // #2360。Next.jsは`instrumentation.ts`とRoute Handlerを別バンドルへ入れるため、このモジュールの
+  // 実体が2つできる。集計とリスナーを`globalThis`へ載せていないと、起動時に登録した永続化の
+  // リスナーが記録側から見えず、`GithubApiUsageBucket`へ1行も書かれない。
+  // `vi.resetModules()`での読み直しが、その「実体が2つ」を同じ形で再現する。
+  it("モジュールが別インスタンスとして読み直されても、登録済みのリスナーへ通知が届く", async () => {
+    const listener = vi.fn();
+    onBucketClosed(listener);
+
+    vi.resetModules();
+    const reimported = await import("@/lib/github/api-usage");
+    expect(reimported.recordGithubApiCall).not.toBe(recordGithubApiCall);
+
+    reimported.recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+    reimported.recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW + 5 * 60_000 });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0].startedAt).toBe(NOW);
+
+    // 読み直した側で記録した内容が、元のインスタンスの集計からも見える
+    expect(getGithubApiUsageSummary(NOW + 5 * 60_000).totalLast24h).toBe(2);
+  });
 });
 
 describe("loadPersistedBuckets", () => {

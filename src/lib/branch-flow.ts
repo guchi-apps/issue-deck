@@ -4,6 +4,7 @@ import { resolveProgressStatus, type ProgressStatusKey } from "@/lib/issue-progr
 import {
   classifyPullRequest,
   extractLinkedIssueNumber,
+  isMergeJudgementPending,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type {
@@ -126,18 +127,82 @@ export function unreleasedCommitCount(comparison: BranchComparison | null | unde
   return comparison.aheadBy;
 }
 
+/** 画面に出す「未リリース ◯」の数と単位（#2333） */
+export type UnreleasedSummary = {
+  /** 出す数字。0なら何も出さない */
+  count: number;
+  /** 数字に添える単位。コミット一覧を取れなかったときだけ`コミット` */
+  unit: "件" | "コミット";
+  /** 別枠で添えるバージョンバンプのマージの数。0なら添えない */
+  versionBumpCount: number;
+};
+
 /**
- * リリースを進めているPRのCIが実行中か（#1931）。**回るアイコンを出してよいかの唯一の判定。**
+ * 「未リリース ◯コミット」を「◯件」へ言い換えるための数（#2333）。
+ *
+ * **コミット数は実質的な未リリースの作業量を表さない。** 通常マージ運用ではPR 1件につき
+ * 作業コミットとマージコミットが両方`aheadBy`へ載るため、必ず実態より多い数字が出ていた
+ * （PR 2件で5コミット、など）。`main..develop`のfirst-parentだけを数えると、developの幹に
+ * 載った単位＝「PRのマージ1回」または「直接push 1回」になり、PR単位の感覚と一致する。
+ * squash mergeのリポジトリでも1PR＝1コミットが幹に載るので、同じ数え方でそのまま正しい。
+ *
+ * **バージョンバンプのマージは件数の本体から外す。** リリースの配管であって出す中身では
+ * ないため、他に未リリースの作業があるときだけ「（+バージョンバンプ1件）」として添える。
+ * バンプのマージしか残っていない（＝出すものが無い）状態は`sameContent`が0へ落とすので
+ * （#2316）、ここで別枠にしても「未リリース」が消えることはない。ただし何らかの理由で
+ * tree差分が残っている場合だけは0件と言い切らず、バンプのぶんを本体で数える。
+ *
+ * コミット一覧を取れなかったとき（取得上限超え・head OIDが読めない）は従来どおりコミット数。
+ */
+export function unreleasedSummary(
+  comparison: BranchComparison | null | undefined,
+): UnreleasedSummary {
+  const commits = unreleasedCommitCount(comparison);
+  const units = comparison?.units ?? null;
+  if (commits === 0 || units === null) {
+    return { count: commits, unit: "コミット", versionBumpCount: 0 };
+  }
+  const work = units.mergeCount + units.directCount;
+  if (work === 0) {
+    return { count: units.versionBumpCount, unit: "件", versionBumpCount: 0 };
+  }
+  return { count: work, unit: "件", versionBumpCount: units.versionBumpCount };
+}
+
+/**
+ * `unreleasedSummary`を「5件（+バージョンバンプ1件）」の形にする（#2333）。
+ * 「未リリース 」のような前置きは呼び出し側が付ける。0件のときは空文字。
+ */
+export function formatUnreleasedSummary(summary: UnreleasedSummary): string {
+  if (summary.count === 0) return "";
+  const bump =
+    summary.versionBumpCount > 0 ? `（+バージョンバンプ${summary.versionBumpCount}件）` : "";
+  return `${summary.count}${summary.unit}${bump}`;
+}
+
+/**
+ * リリースを進めているPRが自動で進んでいる最中か（#1931・#2326）。
+ * **回るアイコンを出してよいかの唯一の判定。**
  *
  * 「リリース中」のバッジは、CIが走っている間も、CIが終わって人のマージを待っている間も
  * 同じ見た目だったため、行を開くまで「待てばよいのか、自分が押す番なのか」が分からなかった。
- * 畳んだ1行（`summary.releaseCiPending`）と束の見出しで同じ規則にするためここに置く。
+ * 畳んだ1行（`summary.releaseAutoProgressing`）と束の見出しで同じ規則にするためここに置く。
+ *
+ * **CIの実行中に加えて、自動マージ可否の判定中（`claude-review-develop`）も回す**（#2326）。
+ * 判定はCI状態の集約から外してある（#1799）ため、Claudeのレビューが走っている最中でも
+ * `ciState`は`success`になる。CIだけを見ていると、レビューが終わるまでの数分間だけ
+ * 「止まっているリリース」に見えていた。
  *
  * **`unknown`（`Checks: read`が無い・チェックが0件・取得失敗）では回さない。** 実行中だと
  * 言い切れないものを「進行中」と見せると、止まっているものを待ち続けることになる。
  */
-export function isReleaseCiPending(...pullRequests: (PullRequestSummary | null)[]): boolean {
-  return pullRequests.some((pullRequest) => pullRequest?.ciState === "pending");
+export function isReleaseAutoProgressing(
+  ...pullRequests: (PullRequestSummary | null)[]
+): boolean {
+  return pullRequests.some(
+    (pullRequest) =>
+      pullRequest?.ciState === "pending" || isMergeJudgementPending(pullRequest?.mergeJudgement),
+  );
 }
 
 /**
@@ -147,6 +212,13 @@ export function isReleaseCiPending(...pullRequests: (PullRequestSummary | null)[
  * どちらも同じ紫のバッジで、違いは回るアイコンの有無しか無かったため、一覧を流し見して
  * 「自分の番のリポジトリ」を見つけられなかった（#2038）。展開したときの見出し
  * （`ReleaseGroupHeader`の`waitingUserMerge`）と同じ「CIが`pending`でなくなった時点」を基準にする。
+ *
+ * **自動マージ可否の判定中（`claude-review-develop`）は待ちにしない**（#2326）。判定のcheck-runは
+ * CI状態の集約から外してある（#1799）ため、Claudeのレビューが走っている最中でも`ciState`は
+ * `success`になり、CIだけを基準にすると琥珀の「mainへマージ待ち」が出ていた。その窓の
+ * あいだ画面のマージボタンは「判定中」で無効（#1968）なので、押せる操作が無いのに
+ * 「あなたの番」と促していたことになる。通知ベル・PR一覧が既に同じ理由で判定中のPRを
+ * 母集団から外している（#2283）ので、リリースの表示もそこへ揃える。
  *
  * **`failure`は待ちに数えない。** 畳んだ1行にはリリースPR・バンプPRのCI失敗も含む「CI失敗」の
  * バッジが出る（`summary.hasCiFailure`）ため、両方を出すと赤と琥珀が同じ行に並ぶ。
@@ -166,9 +238,13 @@ export function resolveReleaseMergeTarget(
   return null;
 }
 
-/** openで、CIが実行中でも失敗でもない（＝マージできる状態で止まっている） */
+/**
+ * openで、CIが実行中でも失敗でもなく、自動マージ可否の判定も終わっている
+ * （＝マージできる状態で止まっている）
+ */
 function isWaitingUserMerge(pullRequest: PullRequestSummary | null): boolean {
   if (pullRequest === null || pullRequest.state !== "open") return false;
+  if (isMergeJudgementPending(pullRequest.mergeJudgement)) return false;
   return pullRequest.ciState !== "pending" && pullRequest.ciState !== "failure";
 }
 
@@ -391,9 +467,9 @@ function buildRepository({
     // バンプPRが開いている間もリリースは進行中。レーンとして数えていたころは
     // `activeLaneCount`が畳んだ行に「進行中1」として出ていた（#1548）。
     releaseInProgress: releasePullRequest !== null || bumpPullRequest !== null,
-    // CIが走っている間だけ畳んだ1行の「リリース中」を回す（#1931）。マージ待ちで止まって
-    // いるのか自動で進んでいるのかを、行を開かずに見分けられるようにするため。
-    releaseCiPending: isReleaseCiPending(releasePullRequest, bumpPullRequest),
+    // 自動で進んでいる間だけ畳んだ1行の「リリース中」を回す（#1931・#2326）。マージ待ちで
+    // 止まっているのか自動で進んでいるのかを、行を開かずに見分けられるようにするため。
+    releaseAutoProgressing: isReleaseAutoProgressing(releasePullRequest, bumpPullRequest),
     // 人が押す番になったら、紫の「リリース中」から琥珀の「mainへマージ待ち」へ変える（#2038）。
     // 展開したときの見出しと同じ判定・同じ文言を、開かなくても読めるところまで引き上げる。
     releaseMergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),

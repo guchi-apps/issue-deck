@@ -93,6 +93,12 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * セッションの報告の古さを判定しない（`isWorkflowBadgeSpinning`）。
    */
   now?: number | null;
+  /**
+   * 確認待ち（`00.check-user`）だが、まだエージェントが動いているか（#2358）。
+   * 一覧が持っている`checkUserRunningIssueIds`（#2174の判定）をそのまま渡す。
+   * **省略時は従来どおり**、確認待ちの間は回さない。
+   */
+  checkUserRunning?: boolean;
 };
 
 const BADGE_SIZE = 18;
@@ -113,6 +119,9 @@ const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りま�
  * 実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と実行中（回転）を
  * 同じ円で同時に表現する。**回すかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
  * `isWorkflowBadgeSpinning`（#1439）に集約している。**
+ *
+ * リングは**常時見えるトラックの上を半周ぶんの弧が回る**形にしている（#2358）。細い弧だけを
+ * 出していた頃は、18pxのバッジの周りで回っているかどうかが読み取れなかった。
  */
 export function WorkflowStepBadge({
   labels,
@@ -122,6 +131,7 @@ export function WorkflowStepBadge({
   executionTarget,
   session = null,
   now = null,
+  checkUserRunning = false,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -141,6 +151,8 @@ export function WorkflowStepBadge({
     actionsRunning: running,
     session,
     approvalPending,
+    // 確認待ちでも、エージェントが動いている間は回し続ける（#2358）
+    checkUserRunning,
     // 回答を待っているあいだも回す（#2309）。実行が紐づかない質問（サブPCの質問セッション）
     // でも待ち時間は数十秒〜数分あり、回さないと一覧では止まって見える
     qaAnswerPending: showQaAnswerPending,
@@ -197,16 +209,40 @@ export function WorkflowStepBadge({
         className="relative flex shrink-0 items-center justify-center"
         style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
       >
-        {/* 承認待ちのときは回さない（`isWorkflowBadgeSpinning`）ので、amberのリングは存在しない */}
+        {/* 実行中の回転（#1439・#2358）。**常時見えるトラックの上を、半周ぶんの弧が回る。**
+            以前は2pxの弧が1/4周だけで、18pxのバッジの周りでは回っているかどうかが分からず、
+            スマホでは動きに気付けなかった（#2358の「一瞬だけしか出ていない」）。トラックが
+            あると弧の位置に関わらず輪郭が見えるので、止まっているのか回っているのかを
+            視線を止めずに読める。
+            色は円グラフと同じ系統に合わせる。**承認待ち（amber）のリングも出る**——確認待ちの
+            まま処理が動いている状態を回転で表すため（`isWorkflowBadgeSpinning`） */}
         {isSpinning && (
-          <span
-            aria-hidden="true"
-            className={cn(
-              "absolute animate-spin rounded-full border-2 border-transparent",
-              showQaAnswerPending ? "border-t-blue-500" : "border-t-primary",
-            )}
-            style={{ inset: -3 }}
-          />
+          <>
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute rounded-full border-[2.5px]",
+                approvalPending
+                  ? "border-amber-500/25"
+                  : showQaAnswerPending
+                    ? "border-blue-500/25"
+                    : "border-primary/25",
+              )}
+              style={{ inset: -4 }}
+            />
+            <span
+              aria-hidden="true"
+              className={cn(
+                "absolute animate-spin rounded-full border-[2.5px] border-transparent",
+                approvalPending
+                  ? "border-t-amber-500 border-r-amber-500"
+                  : showQaAnswerPending
+                    ? "border-t-blue-500 border-r-blue-500"
+                    : "border-t-primary border-r-primary",
+              )}
+              style={{ inset: -4 }}
+            />
+          </>
         )}
         <span
           aria-hidden="true"

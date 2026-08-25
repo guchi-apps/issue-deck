@@ -70,6 +70,33 @@ describe("IssueMergeButton", () => {
     expect(button.disabled).toBe(false);
   });
 
+  it("対応PRの状態を取得中は「確認中」を表示して押せなくする（#2352）", () => {
+    render(<IssueMergeButton onMerge={async () => true} isDetailPending />);
+    const button = screen.getByRole("button", { name: /確認中/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    // 押せない理由が分かるようtitleに出す
+    expect(button.title).toContain("確認しています");
+    expect(screen.queryByRole("button", { name: /^マージする/ })).toBeNull();
+  });
+
+  it("取得が終われば押せる（#2352）", () => {
+    render(
+      <IssueMergeButton
+        onMerge={async () => true}
+        ciStatus="success"
+        mergeJudgement={{ state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE }}
+        isDetailPending={false}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
+  it("この画面でマージ済みにした行は、取得中でも「マージ済み」のままにする（#2352）", () => {
+    render(<IssueMergeButton onMerge={async () => true} isDetailPending isMerged />);
+    expect(screen.getByRole("button", { name: /マージ済み/ })).not.toBeNull();
+  });
+
   it("マージ済みのときは「マージ済み」を表示して押せなくする", () => {
     render(<IssueMergeButton onMerge={async () => true} isMerged />);
     const button = screen.getByRole("button", { name: /マージ済み/ }) as HTMLButtonElement;

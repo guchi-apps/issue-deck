@@ -18,6 +18,13 @@
  */
 
 import {
+  CONSULT_OPENING_MESSAGE,
+  type ConsultMessage,
+  countConsultTurns,
+  MAX_CONSULT_TURNS,
+} from "@/lib/claude/limits";
+import { callClaudeMessages } from "@/lib/claude/request";
+import {
   NEW_APP_BASE_DOMAIN,
   isValidRepositoryName,
   isValidSubdomain,
@@ -25,30 +32,13 @@ import {
   type NewAppKind,
 } from "@/lib/new-app/spec";
 
-const ANTHROPIC_API = "https://api.anthropic.com";
-const ANTHROPIC_VERSION = "2023-06-01";
-const OAUTH_BETA = "oauth-2025-04-20";
-
 /** 相談に使うモデル。`lib/claude/`の他の機能と同じ軽量モデルに揃える。 */
 const MODEL = "claude-haiku-4-5";
 
-/**
- * 相談の往復数の上限。**超えたら設定ステップへ進んでもらう。**
- *
- * 構想を固めるのが目的で、仕様を詰めきる場ではない。細かい決めごとは設定ステップの
- * 入力欄と、そこから起票される初期化Issueで扱う。
- */
-export const MAX_CONSULT_TURNS = 8;
+export type { ConsultMessage, ConsultRole } from "@/lib/claude/limits";
 
 /** 1回の発言の長さの上限（文字）。長文はIssueへ書いてもらう。 */
 export const MAX_CONSULT_MESSAGE_LENGTH = 2000;
-
-export type ConsultRole = "user" | "assistant";
-
-export type ConsultMessage = {
-  role: ConsultRole;
-  content: string;
-};
 
 /**
  * 相談から出てきた仕様案。**決まっていない項目はnull**で、設定ステップは
@@ -151,20 +141,6 @@ export const CONSULT_RESPONSE_SCHEMA = {
   required: ["reply", "ready", "draft"],
   additionalProperties: false,
 } as const;
-
-/** 最初にこちらから話しかける一言。**APIを呼ばずに出す**（開いただけでプラン枠を使わない）。 */
-export const CONSULT_OPENING_MESSAGE =
-  "どんなアプリを作りたいですか。ざっくりで大丈夫です。";
-
-/** 会話の往復数（ユーザーの発言の数）。 */
-export function countConsultTurns(messages: ConsultMessage[]): number {
-  return messages.filter((message) => message.role === "user").length;
-}
-
-/** 上限に達したか。達していたら設定ステップへ促す。 */
-export function isConsultExhausted(messages: ConsultMessage[]): boolean {
-  return countConsultTurns(messages) >= MAX_CONSULT_TURNS;
-}
 
 /**
  * APIへ送る`messages`を組み立てる。
@@ -277,39 +253,29 @@ export async function continueNewAppConsult(
   token: string,
   messages: ConsultMessage[],
 ): Promise<ConsultResult> {
-  const res = await fetch(`${ANTHROPIC_API}/v1/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-beta": OAUTH_BETA,
-      "anthropic-version": ANTHROPIC_VERSION,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
+  const { response: res, json } = await callClaudeMessages({
+    feature: "new_app_consult",
+    token,
+    body: {
       model: MODEL,
       // 返事＋仕様案で1024では足りないことがある。**途中で切れるとJSONが読めなくなる**ため余裕を持たせる
       max_tokens: 2048,
       system: SYSTEM_PROMPT,
       messages: buildConsultMessages(messages),
       output_config: { format: { type: "json_schema", schema: CONSULT_RESPONSE_SCHEMA } },
-    }),
-    cache: "no-store",
+    },
   });
 
   if (!res.ok) {
     throw new Error(`Claudeへの相談に失敗しました (${res.status})`);
   }
 
-  const json = (await res.json()) as {
-    content?: { type: string; text?: string }[];
-    stop_reason?: string;
-  };
-  const text = json.content?.find((block) => block.type === "text")?.text?.trim();
+  const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
     throw new Error("Claudeの応答から本文を取得できませんでした");
   }
   // 打ち切られた応答は必ず壊れたJSONになる。「解析できませんでした」より原因の分かる文言で返す
-  if (json.stop_reason === "max_tokens") {
+  if (json?.stop_reason === "max_tokens") {
     throw new Error("Claudeの応答が長すぎて途中で切れました。短く言い直して送ってください");
   }
   return parseConsultResponse(text);

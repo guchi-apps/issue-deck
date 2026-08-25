@@ -133,6 +133,8 @@ type CommentThreadProps = {
   pullRequestLinks?: PullRequestLink[];
   /** 対応PRのタイトル・状態・CI状態。取得前は空配列 */
   pullRequests?: IssuePullRequest[];
+  /** `pullRequests`の取得がまだ終わっていないか（#2352）。マージボタンを「確認中」で無効にする */
+  isLoadingPullRequests?: boolean;
   /** 直近の「実行ログ:」リンクが指すGitHub Actions実行の状態。取得できない場合はnull */
   workflowRun?: WorkflowRunInfo | null;
   /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
@@ -239,6 +241,7 @@ function ApprovalActions({
   canAskClaude = false,
   pullRequestLinks,
   pullRequests,
+  isLoadingPullRequests,
   repositoryFullName,
   issueSuggestions,
   localSessionNotice,
@@ -284,6 +287,7 @@ function ApprovalActions({
   canAskClaude?: boolean;
   pullRequestLinks?: PullRequestLink[];
   pullRequests?: IssuePullRequest[];
+  isLoadingPullRequests?: boolean;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   localSessionNotice?: ReactNode;
@@ -461,6 +465,7 @@ function ApprovalActions({
           className="mt-2"
           links={pullRequestLinks ?? []}
           pullRequests={pullRequests ?? []}
+          isLoadingDetails={isLoadingPullRequests}
           mergeApprovalPending
           onMerge={onMergePullRequest}
           onMerged={handleMerged}
@@ -719,6 +724,7 @@ export function CommentThread({
   mergeCheckReasons = null,
   pullRequestLinks,
   pullRequests,
+  isLoadingPullRequests,
   workflowRun,
   workflowRunCommentId,
   onApprove,
@@ -809,6 +815,7 @@ export function CommentThread({
         canAskClaude={canAskClaude}
         pullRequestLinks={pullRequestLinks}
         pullRequests={pullRequests}
+        isLoadingPullRequests={isLoadingPullRequests}
         repositoryFullName={repositoryFullName}
         issueSuggestions={issueSuggestions}
       />

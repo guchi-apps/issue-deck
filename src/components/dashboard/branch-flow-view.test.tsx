@@ -427,7 +427,7 @@ describe("BranchFlowView", () => {
           branchStatus({
             checkedBranches: ["issue-1454"],
             existingBranches: ["issue-1454"],
-            developVsMain: { aheadBy: 12, behindBy: 0, sameContent: false },
+            developVsMain: { aheadBy: 12, behindBy: 0, sameContent: false, units: null },
           }),
         ],
       });
@@ -440,10 +440,29 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("未リリース 12コミット")).toBeTruthy();
     });
 
+    // #2333。コミット数のままだと「PR 2件ぶん」が5コミットに見えていた
+    it("内訳が取れていればマージコミット単位の件数で出す", () => {
+      renderFlow({
+        branchStatuses: [
+          branchStatus({
+            developVsMain: {
+              aheadBy: 5,
+              behindBy: 0,
+              sameContent: false,
+              units: { mergeCount: 2, directCount: 0, versionBumpCount: 1 },
+            },
+          }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("未リリース 2件（+バージョンバンプ1件）")).toBeTruthy();
+    });
+
     // #2316。リリース直後はバンプPRのマージコミットだけが`develop`に残り、`aheadBy`は1のまま
     it("コミットが残っていても中身の差分が無ければ未リリースの表示を出さない", () => {
       renderFlow({
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 1, behindBy: 24, sameContent: true } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 1, behindBy: 24, sameContent: true, units: null } })],
       });
 
       openRepository();
@@ -452,7 +471,7 @@ describe("BranchFlowView", () => {
 
     it("mainにしか無いコミット数は出さない（リリースのマージコミットで必ず増えるだけのため）", () => {
       renderFlow({
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 26, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 26, sameContent: false, units: null } })],
       });
 
       openRepository();
@@ -493,7 +512,7 @@ describe("BranchFlowView", () => {
             mergedAt: "2026-08-01T00:00:00Z",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null } })],
       });
 
       openRepository();
@@ -526,7 +545,7 @@ describe("BranchFlowView", () => {
             mergedAt: "2026-08-10T00:00:00Z",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       openRepository();
@@ -582,7 +601,7 @@ describe("BranchFlowView", () => {
           }),
         ],
         // 次のリリースに乗る分がある状態。無いと、いちばん新しい版の束が既定で開く（#1711）
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       openRepository();
@@ -624,7 +643,7 @@ describe("BranchFlowView", () => {
             mergedAt: "2026-08-03T00:00:00Z",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
@@ -834,7 +853,7 @@ describe("BranchFlowView", () => {
         issues: [{ ...manualStepIssue, state: manualStepState }],
         // 次のリリースに乗る分（未リリースのコミット）がある＝v3.17.0の束は畳まれる。
         // 無いと、いちばん新しい版の束が既定で開く（#1711）
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
     }
 
@@ -877,7 +896,7 @@ describe("BranchFlowView", () => {
 
   describe("本番デプロイ起動ボタン（#2020）", () => {
     const deployable = branchStatus({
-      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false },
+      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
       hasDeployWorkflow: true,
     });
 
@@ -889,7 +908,7 @@ describe("BranchFlowView", () => {
 
     it("deploy.ymlが無ければ出さない", () => {
       renderFlow({
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
       openRepository();
       expect(screen.queryByText("本番へ再デプロイ")).toBeNull();
@@ -921,7 +940,7 @@ describe("BranchFlowView", () => {
 
   describe("リリース起動ボタン", () => {
     const unreleased = branchStatus({
-      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false },
+      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
       hasReleaseWorkflow: true,
     });
 
@@ -933,7 +952,7 @@ describe("BranchFlowView", () => {
 
     it("リリース用workflowが無ければ出さない（#1538）", () => {
       renderFlow({
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
       openRepository();
       expect(screen.queryByText("リリースする")).toBeNull();
@@ -942,7 +961,7 @@ describe("BranchFlowView", () => {
     it("未リリースの変更が無ければ出さない", () => {
       renderFlow({
         branchStatuses: [
-          branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false }, hasReleaseWorkflow: true }),
+          branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null }, hasReleaseWorkflow: true }),
         ],
       });
       openRepository();
@@ -1118,7 +1137,7 @@ describe("BranchFlowView", () => {
 
   describe("mainへのマージ（#1548）", () => {
     const unreleased = branchStatus({
-      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false },
+      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
       hasReleaseWorkflow: true,
     });
 
@@ -1178,7 +1197,7 @@ describe("BranchFlowView", () => {
             mergedAt: "2026-07-01T00:00:00Z",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
@@ -1291,7 +1310,7 @@ describe("BranchFlowView", () => {
           }),
         ],
         branchStatuses: [
-          branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false }, hasReleaseWorkflow: true }),
+          branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null }, hasReleaseWorkflow: true }),
         ],
       });
 
@@ -1318,7 +1337,7 @@ describe("BranchFlowView", () => {
     }
 
     const unreleased = branchStatus({
-      developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false },
+      developVsMain: { aheadBy: 16, behindBy: 0, sameContent: false, units: null },
       hasReleaseWorkflow: true,
     });
 
@@ -1605,7 +1624,7 @@ describe("BranchFlowView", () => {
             ciState: "success",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
@@ -1625,7 +1644,7 @@ describe("BranchFlowView", () => {
             ciState: "pending",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
@@ -1645,14 +1664,47 @@ describe("BranchFlowView", () => {
             ciState: "pending",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
       // 畳んだ1行と束の見出しの両方に付く
-      const pills = screen.getAllByLabelText("リリース中（チェック実行中）");
+      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
       expect(pills).toHaveLength(2);
       // 「デプロイ中」と同じ回るアイコン。止まったアイコンを添えても状態は伝わらない
+      pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
+    });
+
+    /**
+     * CI通過後にClaudeのレビューが走っている窓（#2326）。判定のcheck-runはCI状態の集約から
+     * 外してある（#1799）ため`ciState`は`success`で、CIだけを見ていると琥珀の
+     * 「mainへマージ待ち」が出ていた。そのあいだ隣のマージボタンは「判定中」で無効（#1968）で、
+     * 押せる操作は無い。
+     */
+    it("Claudeがレビュー中の間は「mainへマージ待ち」を出さず「リリース中」を回す（#2326）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
+      });
+
+      ensureRepositoryOpen();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      // 畳んだ1行と束の見出しの両方が、回るアイコン付きの「リリース中」に戻る
+      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
+      expect(pills).toHaveLength(2);
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
 
@@ -1666,12 +1718,12 @@ describe("BranchFlowView", () => {
             ciState: "success",
           }),
         ],
-        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false } })],
+        branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
 
       ensureRepositoryOpen();
       // CIが終わった時点で「リリース中」ではなくなる（#2038）。止まっている状態を回さない
-      expect(screen.queryByLabelText("リリース中（チェック実行中）")).toBeNull();
+      expect(screen.queryByLabelText("リリース中（チェック・判定の実行中）")).toBeNull();
       expect(screen.queryByText("リリース中")).toBeNull();
     });
   });
@@ -1686,7 +1738,7 @@ describe("BranchFlowView", () => {
    */
   describe("リリース中と押す番の見分け（#2038）", () => {
     const unreleased = branchStatus({
-      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false },
+      developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
       hasReleaseWorkflow: true,
     });
 
@@ -1715,6 +1767,32 @@ describe("BranchFlowView", () => {
 
     it("CI実行中は「リリース中」のままで、件数も「待てば進むもの」に入れる", () => {
       renderRelease("pending");
+
+      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+
+    // CI通過後の自動マージ可否の判定中も、押せる操作は無い＝人の番ではない（#2326）
+    it("Claudeがレビュー中は「リリース中」のままで、件数も「待てば進むもの」に入れる（#2326）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "success",
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
 
       expect(screen.getByText("リリース中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();

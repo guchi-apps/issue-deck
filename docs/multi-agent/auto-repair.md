@@ -627,8 +627,28 @@ DBを使うのは、判定の置き場所ではなく「起票したことを取
 - **この配布経路は自動修復専用ではない**（#1475）。`claude-review-develop.yml`——develop向けPRの
   自動マージ可否を判定する唯一の経路——も同じ一覧・同じボタンから配る。自動修復ではないが
   「置かれていないと機能が丸ごと働かない」点が同じで、判定も`REPAIR_WORKFLOW_SPECS`に1行
-  足すだけで済むため。画面の見出しは「不足しているワークフロー」、配布PRのタイトルは
+  足すだけで済むため。画面の見出しは「不足・破損しているワークフロー」、配布PRのタイトルは
   「不足しているワークフローを追加する」。
+- **置いてあるだけでは足りない。壊れているcallerも同じ一覧・同じボタンで作り直す**（#2330）。
+  `guchi-apps/asset-manager`の`claude-ci-fix.yml`は`workflows: - "CI\r"`という閉じないYAMLの
+  まま置かれており、developへpushするたびGitHubが
+  「This run likely failed because of a workflow file issue」で即失敗するrunを作っていた
+  （30回連続。ジョブが1つも無いのでログも残らない）。**ファイルの実在しか見ていなかったため
+  画面には「配布済み」として消えており、押しても直せなかった。**
+  - 壊れ方の元は**配布先のCIワークフローがCRLF**だったこと。`name: CI`から名前を抜くと
+    `CI\r`になり、それを雛形の`__CI_WORKFLOW__`へ差し込むと引用符の途中に改行が入る。
+    抽出側の`tr -d '\r'`は#2134で入ったが、**それ以前に配られたファイルはそのまま残っていた**
+  - 判定は`brokenRepairWorkflows`（`src/lib/workflow-tags.ts`）と、配布スクリプトの
+    `validate_generated`の2か所にあり、**条件はCR（`\r`）と未展開のプレースホルダ
+    （`__[A-Z0-9_]+__`）の2つで揃えてある**。片方だけ直すと、画面が「壊れている」と出し
+    続けるのに配布は素通りする。**YAMLとしての解析はしない**——配布とは無関係な書き換えまで
+    壊れている扱いになり、上書きで消してしまう
+  - 配布スクリプトは既存ファイルを無条件でスキップしていたのをやめ、**壊れているときだけ
+    作り直す**。作り直しは既存ファイルを上書きするため、コミットメッセージとPR本文では
+    「追加」と「作り直し」を別の行に出し、PR本文の注意点に
+    「そのリポジトリだけで足した`verify-commands`・`build-env`は消える」と書く
+  - 生成した結果も配る前に`validate_generated`へ通す。**直しに来た配布が同じ壊れ方の
+    ファイルを作り直して置くだけ**になるのを防ぐ
 - ボタンは`propagate-repair-workflows.yml`を起動し、`.github/scripts/propagate-repair-workflows.sh`が
   リポジトリごとにPRを作る。callerの中身は`.github/templates/callers/`の雛形から生成し、
   **参照タグ（`uses:`・`prompts-ref`）と`runtime-setup`・`package-manager`・`node-version`は

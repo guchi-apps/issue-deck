@@ -75,6 +75,14 @@ name: Issue Progress (reusable)
 # (とissue-deck側の巡回)では進捗の報告とあわせて`00.check-user`も除去する(#266。
 # 除去のタイミングが無く残り続けていた)。
 #
+# **この除去は再試行する(#2335)。** guchi-apps/signaly#200では`gh issue edit`がGitHubの
+# 502 Bad Gatewayに当たり、警告だけ出して素通りした結果、マージ済みのIssueに
+# 「マージの確認待ち」(`00.check-user`+`01.check-merge`)が18分残った(次のmainリリースの
+# main-pr-mergedが外すまで)。その間、盤面の確認待ちに開いても押せない札が積まれる。
+# 3回まで試したうえでなお落ちたものは、issue-deck側の進捗巡回
+# (src/lib/github/progress-sweep.tsの`decideStaleCheckUser`)が5分ごとに拾い直す。
+# **参照タグが古いままのリポジトリを拾えるのもそちらだけ**なので、両方を残す。
+#
 # **その判定を行うclaude-review-develop.ymlは、全リポジトリにあるわけではない。**
 # 持たないリポジトリではdevelop向けPRの可否が一度も判定されず、自動マージもされないのに
 # `00.check-user`も付かず、PRが開いたまま残る(#1470)。このワークフローは展開済みの全
@@ -451,8 +459,20 @@ jobs:
             fi
           done
           if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-            gh issue edit "$n" "${REMOVE_ARGS[@]}" \
-              || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告は続けます）"
+            # **除去は再試行する(#2335)。** guchi-apps/signaly#200では`gh issue edit`が
+            # GitHubの502 Bad Gatewayに当たり、警告だけ出して素通りした。ここを外す役は
+            # 他に無いため、素通りするとマージ済みのIssueに「マージの確認待ち」が残り続ける。
+            removed=""
+            for attempt in 1 2 3; do
+              if [ "$attempt" != 1 ]; then sleep 5; fi
+              if gh issue edit "$n" "${REMOVE_ARGS[@]}"; then
+                removed=1
+                break
+              fi
+            done
+            if [ -z "$removed" ]; then
+              echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告は続けます）"
+            fi
           elif [ -z "$DEFINED_LABELS" ]; then
             echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告は続けます）"
           else
@@ -744,8 +764,18 @@ jobs:
           transitioned=""
           for n in $numbers; do
             if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$n" "${REMOVE_ARGS[@]}" \
-                || echo "::warning::issue #$n: ラベルの除去に失敗しました（closeと進捗の報告は続けます）"
+              # 除去は再試行する(#2335。develop-pr-mergedと同じ理由)。
+              removed=""
+              for attempt in 1 2 3; do
+                if [ "$attempt" != 1 ]; then sleep 5; fi
+                if gh issue edit "$n" "${REMOVE_ARGS[@]}"; then
+                  removed=1
+                  break
+                fi
+              done
+              if [ -z "$removed" ]; then
+                echo "::warning::issue #$n: ラベルの除去に失敗しました（closeと進捗の報告は続けます）"
+              fi
             fi
             gh issue close "$n" || echo "::warning::issue #$n: closeに失敗しました（進捗の報告は続けます）"
             transitioned="${transitioned}${n}"$'\n'
@@ -996,8 +1026,18 @@ jobs:
             fi
           done
           if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-            gh issue edit "$n" "${REMOVE_ARGS[@]}" \
-              || echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告とcloseは続けます）"
+            # 除去は再試行する(#2335。develop-pr-mergedと同じ理由)。
+            removed=""
+            for attempt in 1 2 3; do
+              if [ "$attempt" != 1 ]; then sleep 5; fi
+              if gh issue edit "$n" "${REMOVE_ARGS[@]}"; then
+                removed=1
+                break
+              fi
+            done
+            if [ -z "$removed" ]; then
+              echo "::warning::issue #$n: ラベルの除去に失敗しました（進捗の報告とcloseは続けます）"
+            fi
           elif [ -z "$DEFINED_LABELS" ]; then
             echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします（進捗の報告とcloseは続けます）"
           else
@@ -1294,8 +1334,18 @@ jobs:
             fi
           done
           if [ "${#REMOVE_ARGS[@]}" -gt 0 ]; then
-            gh issue edit "$ISSUE_NUMBER" "${REMOVE_ARGS[@]}" \
-              || echo "::warning::issue #$ISSUE_NUMBER: ラベルの除去に失敗しました"
+            # 除去は再試行する(#2335。develop-pr-mergedと同じ理由)。
+            removed=""
+            for attempt in 1 2 3; do
+              if [ "$attempt" != 1 ]; then sleep 5; fi
+              if gh issue edit "$ISSUE_NUMBER" "${REMOVE_ARGS[@]}"; then
+                removed=1
+                break
+              fi
+            done
+            if [ -z "$removed" ]; then
+              echo "::warning::issue #$ISSUE_NUMBER: ラベルの除去に失敗しました"
+            fi
           elif [ -z "$DEFINED_LABELS" ]; then
             echo "::warning::ラベル一覧を取得できませんでした。ラベルの除去をスキップします"
           else

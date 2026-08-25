@@ -308,6 +308,35 @@ describe("IssuePullRequestList", () => {
     expect(button.disabled).toBe(false);
   });
 
+  it("詳細の取得が終わるまではマージボタンを「確認中」で押せなくする（#2352）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[]}
+        isLoadingDetails
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    expect(screen.getByText("#616")).not.toBeNull();
+    const button = screen.getByRole("button", { name: /確認中/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("詳細が届いている行は取得中でも押せる（判定は行ごと。#2352）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest({ number: 616 })]}
+        isLoadingDetails
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
+
   it("絞り込みで落ちたPR（別Issueの言及）は行に出さない", () => {
     render(
       <IssuePullRequestList

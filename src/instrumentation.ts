@@ -1,7 +1,8 @@
 /**
  * Next.jsのサーバー起動時に一度だけ呼ばれるフック。
  *
- * - GitHub API消費内訳（src/lib/github/api-usage.ts）をDBへ永続化する仕組みの初期化
+ * - GitHub API消費内訳（src/lib/github/api-usage.ts）とAI API消費内訳
+ *   （src/lib/claude/api-usage.ts）をDBへ永続化する仕組みの初期化
  * - 本番プロセスのRSSの見張り（src/lib/process-memory-watch.ts。#2331）
  */
 export async function register() {
@@ -18,5 +19,16 @@ export async function register() {
   await hydrateGithubApiUsageFromDb();
   onBucketClosed((bucket) => {
     void flushBucketToDb(bucket);
+  });
+
+  // AI側は呼び出しのたびに書く（`lib/claude/api-usage.ts`のコメントを参照）。
+  const { onBucketUpdated } = await import("@/lib/claude/api-usage");
+  const { hydrateClaudeApiUsageFromDb, flushBucketToDb: flushClaudeBucketToDb } = await import(
+    "@/lib/claude/api-usage-persistence"
+  );
+
+  await hydrateClaudeApiUsageFromDb();
+  onBucketUpdated((bucket) => {
+    void flushClaudeBucketToDb(bucket);
   });
 }

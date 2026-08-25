@@ -25,6 +25,11 @@ import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
 import { getLabelDotStyle } from "@/lib/label-color";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
+import {
+  describeMergePendingAttention,
+  isPullRequestViewAttention,
+  type MergePendingAttention,
+} from "@/lib/merge-pending-attention";
 import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
@@ -87,6 +92,11 @@ type SidebarNavProps = {
   releaseActivity: ReleaseActivityCounts | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
+  /**
+   * 「マージ待ち」の内訳（#2334）。**行に出す数字は`pullRequestNavCounts`から引き、これは
+   * 使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。**nullは未取得。**
+   */
+  mergePendingAttention: MergePendingAttention | null;
   repositories: ConnectedRepository[];
   selectedRepoFullNames?: string[];
   onSelectRepository?: (repository: ConnectedRepository) => void;
@@ -134,6 +144,7 @@ export function SidebarNavView({
   waitingQuestionCount,
   releaseActivity,
   pullRequestNavCounts,
+  mergePendingAttention,
   repositories,
   selectedRepoFullNames = [],
   onSelectRepository,
@@ -339,7 +350,17 @@ export function SidebarNavView({
               active: activePane === "pull-requests" && activePullRequestView === view.id,
               onClick: () => onSelectPullRequestView(view.id),
               count: pullRequestNavCounts[view.id],
-              title: view.description,
+              // 「マージ待ち」のうち**人が手を動かすまで進まないもの**が残っているときだけ
+              // オレンジの丸にする（#2334）。Auto-merge有効でCI成功のPRと自動修復中のPRは
+              // 放っておけば片付くので外す（ベルと同じ除外）。条件はスマホと共通
+              emphasis: isPullRequestViewAttention(view.id, mergePendingAttention)
+                ? "attention"
+                : "none",
+              // 数字（一覧に並ぶ総数）と丸（要操作）で意味が違うため、内訳を吹き出しで補う
+              title:
+                view.id === "completed"
+                  ? describeMergePendingAttention(view.description, mergePendingAttention)
+                  : view.description,
             }),
           )}
         </ul>

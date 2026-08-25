@@ -252,7 +252,7 @@ Pull requests / Actions / Workflows / Metadata だけで、**Administration を�
    永久に埋まらずマージ不能になるため、突き合わせに失敗したら保護を作らない）。
    CIのジョブ名はリポジトリごとに違う（実測: `lint-and-build`が4件、`test`が3件、
    `verify`が2件、`typecheck-and-test`・`backend`が各1件、`myroom`だけ`backend`と`frontend`の2件）
-2. **callerを配る**: issue-deckの画面（設定＞フリート運用）の「不足しているワークフローを配る」
+2. **callerを配る**: issue-deckの画面（設定＞フリート運用）の「不足・破損しているワークフローを配る」
    （[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「配布状況と、不足しているcallerの配布」）。
    配布スクリプトは前提が揃っているかを**読んで警告するだけ**で、設定は変えない
 3. 各リポジトリで配布PRを確認してマージする（GitHub Actionsの変更なので自動マージしない）
@@ -317,7 +317,7 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 
 #### 画面の配布ボタンの対象外なので手で配る
 
-「不足しているワークフローを配る」（#1948・#1475）は`claude-review-develop.yml`の`requires`を
+「不足・破損しているワークフローを配る」（#1948・#1475）は`claude-review-develop.yml`の`requires`を
 `claude-issue-dispatch.yml`としており（[`lib/workflow-tags.ts`](../src/lib/workflow-tags.ts)の
 `REPAIR_WORKFLOW_SPECS`）、無人実行を入れないこの2件は永久に対象にならない。**`requires`は
 緩めない**——`issue-labels.yml`へ替えると`develop`を持たない`docs`まで対象に入り、置いても
@@ -685,7 +685,7 @@ done
 
 **この配布経路は自動修復専用ではない**（#1475）。上の
 「`claude-review-develop.yml`の配布状況」で配ると決めた`claude-review-develop.yml`も、
-同じ一覧・同じボタンから配る（画面の見出しは「不足しているワークフロー」）。
+同じ一覧・同じボタンから配る（画面の見出しは「不足・破損しているワークフロー」）。
 
 **配布はissue-deckの画面（設定＞フリート運用＞共有ワークフローのバージョン）から行う。**
 不足しているcallerの検知は参照タグと同じGraphQL取得に相乗りしており、押すと

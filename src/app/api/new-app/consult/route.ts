@@ -2,11 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import {
-  MAX_CONSULT_MESSAGE_LENGTH,
-  MAX_CONSULT_TURNS,
-  continueNewAppConsult,
   isConsultExhausted,
+  MAX_CONSULT_TURNS,
   type ConsultMessage,
+} from "@/lib/claude/limits";
+import {
+  MAX_CONSULT_MESSAGE_LENGTH,
+  continueNewAppConsult,
 } from "@/lib/claude/new-app-consult";
 
 /**

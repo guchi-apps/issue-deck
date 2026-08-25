@@ -2,6 +2,30 @@ import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
 
+/**
+ * 未リリースの変更を「マージコミット単位」で数えた内訳（#2333）。
+ *
+ * **数えるのは`main..develop`のfirst-parentの列だけ。** 通常マージ運用では、PR 1件の
+ * マージにつき作業ブランチ側のコミット（1個とは限らない）とマージコミットが両方
+ * `aheadBy`へ載るため、コミット数は実質的な作業の件数より必ず多く出る。first-parentを
+ * たどると、developの幹に直接載った単位＝「PRのマージ1回」または「直接push 1回」だけが
+ * 残るので、squash mergeのリポジトリ（1PR＝1コミット）でも同じ数え方で正しくなる。
+ */
+export type UnreleasedUnits = {
+  /** PRのマージコミットの数。**バージョンバンプのマージは含まない**（`versionBumpCount`へ分ける） */
+  mergeCount: number;
+  /**
+   * マージを経ずdevelopの幹へ直接載ったコミットの数。直接pushのほか、
+   * squash mergeしたPRもここに入る（マージコミットが残らないため）。
+   */
+  directCount: number;
+  /**
+   * バージョンバンプPR（`release/vX.Y.Z`→`develop`）のマージコミットの数。
+   * リリースの配管であって出す中身ではないので、件数の本体からは外して別枠で数える。
+   */
+  versionBumpCount: number;
+};
+
 /** `develop`が`main`よりどれだけ進んでいるか */
 export type BranchComparison = {
   /** baseに対してheadが進んでいるコミット数 */
@@ -21,6 +45,14 @@ export type BranchComparison = {
    * 取得できなかった場合はfalse（＝差分があるものとして扱い、リリースを止めない）。
    */
   sameContent: boolean;
+  /**
+   * マージコミット単位で数えた内訳（#2333）。**コミット一覧を取れなければ`null`**で、
+   * その場合は従来どおり`aheadBy`をコミット数として出す。
+   *
+   * 取れないのは、比較のコミットが取得上限（100件）を超えているとき、または
+   * `headTarget`のOIDが読めずfirst-parentをたどれないとき。
+   */
+  units: UnreleasedUnits | null;
 };
 
 /**
@@ -318,14 +350,19 @@ export type BranchFlowRepositorySummary = {
    */
   releaseInProgress: boolean;
   /**
-   * リリースを進めているPR（リリースPR・バージョンバンプPR）のCIが実行中（#1931）。
+   * リリースを進めているPR（リリースPR・バージョンバンプPR）が自動で進んでいる最中
+   * （CIの実行中、または自動マージ可否の判定中）（#1931・#2326）。
    *
    * **畳んだ1行の「リリース中」に回るアイコンを出すためだけに持つ。** 「リリース中」は
    * CIが走っている間も、CIが終わって人のマージを待っている間も同じ見た目で、開くまで
    * 「待てばよいのか、自分が押す番なのか」を区別できなかった。`unknown`（`Checks: read`が
    * 無い・取得失敗）では実行中と言い切れないためfalseにする。
+   *
+   * **自動マージ可否の判定中（`claude-review-develop`）も含む**（#2326）。判定はCI状態の
+   * 集約から外してある（#1799）ため、CIだけを見ているとClaudeのレビュー中だけアイコンが
+   * 止まり、自動で進んでいるリリースが止まって見えていた。
    */
-  releaseCiPending: boolean;
+  releaseAutoProgressing: boolean;
   /**
    * リリースを進めているPRのうち、**人がマージするしかない状態で止まっているもの**の
    * マージ先（#2038）。待っていなければnull。
@@ -335,7 +372,8 @@ export type BranchFlowRepositorySummary = {
    * 必要」「手作業◯」が琥珀）で、そこへリリースのマージ待ちを合流させる。
    *
    * 判定の基準は展開したときのリリースの見出し（`ReleaseGroupHeader`）と同じく
-   * 「CIが`pending`でなくなった時点」。**`failure`だけは除く**——赤の「CI失敗」と並べると
+   * 「CIが`pending`でなくなり、自動マージ可否の判定も終わった時点」（#2326）。
+   * **`failure`だけは除く**——赤の「CI失敗」と並べると
    * 「直す必要がある」と「マージすればよい」を取り違えるため（#1059と同じ優先順位）。
    * `unknown`（`Checks: read`が無い・取得失敗）はマージ待ちのまま残す（CI状態が取れない
    * だけで、待っているものが画面から消える方が困る）。

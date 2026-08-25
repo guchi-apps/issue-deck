@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
+import type { MergePendingAttention } from "@/lib/merge-pending-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import type { PullRequestViewId } from "@/types/pull-request";
 
@@ -12,9 +13,19 @@ const NAV_COUNTS: PullRequestNavCounts = {
   completed: 3,
 };
 
+/** 「マージ待ち」3件のうち1件だけが要操作（残りはAuto-merge待ち・自動修復中） */
+const MERGE_PENDING: MergePendingAttention = {
+  total: 3,
+  autoMerging: 1,
+  repairing: 1,
+  actionRequired: 1,
+};
+
 function renderScreen(
   overrides: Partial<{
     view: PullRequestViewId;
+    navCounts: PullRequestNavCounts;
+    mergePendingAttention: MergePendingAttention | null;
     origin: "tab" | "home";
     onChangeView: (view: PullRequestViewId) => void;
     onBack: () => void;
@@ -24,7 +35,8 @@ function renderScreen(
   render(
     <MobilePullRequestsScreen
       view={overrides.view ?? "in-progress"}
-      navCounts={NAV_COUNTS}
+      navCounts={overrides.navCounts ?? NAV_COUNTS}
+      mergePendingAttention={overrides.mergePendingAttention ?? MERGE_PENDING}
       origin={overrides.origin ?? "tab"}
       pullRequests={[]}
       failedRepositories={[]}
@@ -156,5 +168,40 @@ describe("MobilePullRequestsScreen の更新（#1947）", () => {
     renderScreen();
 
     expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
+  });
+});
+
+// ビュー選択シートの件数も、PCの左メニュー・ホームと同じ判定で強調する（#2334）
+describe("MobilePullRequestsScreen のビュー選択シートの強調（#2334）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** シートを開いて、そのビューの行に出ている件数のバッジを返す */
+  function sheetBadge(label: RegExp) {
+    fireEvent.click(viewRow());
+    // 下端のビュー行にも同じ文言が出るため、シート（ダイアログ）の中だけを見る
+    const row = within(screen.getByRole("dialog")).getByRole("button", { name: label });
+    return row.querySelectorAll("span")[1];
+  }
+
+  it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
+    renderScreen();
+
+    expect(sheetBadge(/マージ待ち/)?.className).toContain("bg-amber-500");
+  });
+
+  it("マージ待ちが自動で進むものだけなら丸にしない", () => {
+    renderScreen({
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 1, actionRequired: 0 },
+    });
+
+    expect(sheetBadge(/マージ待ち/)?.className).not.toContain("bg-amber-500");
+  });
+
+  it("実行中は件数があっても丸にしない", () => {
+    renderScreen();
+
+    expect(sheetBadge(/実行中/)?.className).not.toContain("bg-amber-500");
   });
 });
