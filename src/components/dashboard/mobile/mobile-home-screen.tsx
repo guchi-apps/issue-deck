@@ -35,7 +35,11 @@ import {
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import {
+  isPullRequestViewAttention,
+  pullRequestViewIcons,
+  sidebarPullRequestViews,
+} from "@/lib/pull-request-views";
 import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
@@ -403,6 +407,14 @@ export function MobileHomeScreenView({
                   icon={pullRequestViewIcons[view.id]}
                   onClick={() => onSelectPullRequests(view.id)}
                   count={pullRequestNavCounts[view.id]}
+                  // 「マージ待ち」だけオレンジの丸にする（#2334・PCの左メニューと同じ
+                  // `isPullRequestViewAttention`）。判定を画面ごとに書くと、片方だけ
+                  // 直された時点でPCとスマホで意味が食い違う
+                  emphasis={
+                    isPullRequestViewAttention(view.id, pullRequestNavCounts[view.id])
+                      ? "attention"
+                      : "none"
+                  }
                 />
               ))}
             </ul>

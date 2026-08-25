@@ -171,6 +171,21 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(row.textContent).toBe("ユーザーの確認待ち5");
   });
 
+  // PCの左メニューと同じ判定（`isPullRequestViewAttention`）を使う（#2334）
+  it("マージ待ちのPRが残っていれば件数をオレンジの丸で出す", () => {
+    renderHome({ pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2 } });
+
+    const row = screen.getByRole("button", { name: /マージ待ち/ });
+    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+  });
+
+  it("マージ待ちが0件なら丸にしない", () => {
+    renderHome({ pullRequestNavCounts: { all: 1, "in-progress": 1, completed: 0 } });
+
+    const row = screen.getByRole("button", { name: /マージ待ち/ });
+    expect(row.querySelector("span:last-child")?.className).not.toContain("bg-amber-500");
+  });
+
   it("「ユーザーの作業待ち」を強調するのは、いま実行できる手作業があるときだけ", () => {
     const { rerender } = renderHome({
       navCounts: { ...NAV_COUNTS, "manual-step": 2 },
