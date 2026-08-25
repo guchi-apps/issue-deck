@@ -27,9 +27,16 @@ on:
   # 同じ追記が要る**(タグを上げるだけでは届かない。docs/cross-repo-setup-guide.md)。
   issues:
     types: [opened, edited, closed]
-  schedule:
-    - cron: "*/15 * * * *"
-  workflow_dispatch: {}
+  # **`schedule`は持たない(#2294)。** 以前はここに15分ごとのcronを置き、
+  # reusable側のdevelop-merge-sweep・manual-step-labelを定期的に動かしていた。
+  # Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも
+  # 1回の実行で2分が課金され、privateリポジトリの従量課金のほとんどがこれになっていた。
+  # どちらもサブPCのpollerが叩く`POST /api/issues/progress-sweep`へ移した
+  # (docs/github-billing.md・src/lib/github/progress-sweep.ts)。
+  #
+  # **他リポジトリのcallerには`schedule:`が残っている。** callerの配布の仕組みが無く、
+  # リポジトリごとに書き換える必要があるため。ただしreusable側にscheduleで動くジョブが
+  # 1つも無くなったので、全ジョブがskipされ課金は発生しない(空のrunが並ぶだけ)。
 
 jobs:
   labels:

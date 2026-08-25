@@ -264,6 +264,9 @@ Claudeに聞く）と**サブPCで実行する**（ローカルセッション�
   `issue-labels.yml`に`schedule`（15分おき）で走査する`develop-merge-sweep`ジョブを追加し、
   取りこぼした`Develop PR`を拾い直す安全網とした。PATへの切り替えで根本解消したかはGitHubの
   非公開の内部仕様に依存するため確証がなく、安全網を併設することでリスクを吸収している。
+  **この安全網は#2294でissue-deck側の巡回（`POST /api/issues/progress-sweep`）へ移した**
+  （Actionsのcronはジョブ単位で1分未満切り上げの課金になるため。
+  [github-billing.md](../github-billing.md)）。走査の中身は変わっていない。
 - `24.screenshot-required`が付いたissueをPhase5経由（無人実行）で処理する場合は、Phase7で統合した
   Playwright撮影（#258）により、実際にスクリーンショットを撮影してIssueコメントに埋め込んだ
   うえで通常どおり完了処理（PR作成）まで進める（PR作成自体はブロックしない。スクリーンショットは

@@ -1628,6 +1628,23 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
   ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
+- **developへのマージ後に取り残された進捗も、issue-deckが巡回して回収する**
+  （#2294。判定は[`lib/github/progress-sweep.ts`](../src/lib/github/progress-sweep.ts)、IOは
+  [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)）。上の2本と同じ形で、
+  pollerが1巡ごとに`POST /api/issues/progress-sweep`を叩き、間隔
+  （`PROGRESS_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）はサーバー側が決める。
+  `Develop PR`・`Implementation`にいるopenなIssueについて、`issue-<番号>`→developのPRが
+  マージ済みなら`Develop`へ進め、`00.check-user`と理由ラベルを外し、マージ完了を通知する。
+  マージ済みPRの先端とブランチの先端が食い違う場合は`compare/develop...issue-<番号>`を引き、
+  **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
+  人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
+  そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
+  **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
+  `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
+  Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で
+  2分が課金されていた（privateリポジトリの従量課金のほとんどがこれ）。
+  設計は[progress-status-architecture.md](progress-status-architecture.md)「取り残しの回収は
+  issue-deck側の巡回が担う」と[github-billing.md](github-billing.md)。
 - **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
   `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
   修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは

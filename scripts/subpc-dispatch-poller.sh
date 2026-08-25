@@ -999,6 +999,41 @@ sweep_deploy_failures() {
   return 0
 }
 
+# --- 進捗の取り残しの巡回回収 ---------------------------------------------------
+# developへのマージ後に`Develop PR`・`Implementation`へ取り残された進捗を、issue-deckに
+# 巡回して回収させる（#2294）。あわせて、ラベルの無い手作業Issueへ`71.manual-step`を付け直す。
+#
+# **これはGitHub Actionsから移した安全網。** `reusable-issue-labels.yml`の
+# `develop-merge-sweep`・`manual-step-label`が各リポジトリのcronで15分ごとに動いており、
+# 1ジョブ20秒でもActionsの課金は1分未満切り上げなので、privateリポジトリの従量課金の
+# ほとんどがこの2ジョブになっていた（docs/github-billing.md）。
+#
+# 上の2つと同じ形で、**pollerがやるのは「呼ぶ」ことだけ**。実際に巡回するかどうかも、
+# どのIssueをどう扱うかもissue-deck側が決める。失敗しても1巡を止めない。
+sweep_progress() {
+  if ! api_call POST /api/issues/progress-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+      404|000) return 0 ;;
+      *) report_api_failure "進捗の巡回回収に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept actions
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  actions="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.actions | length' 2>/dev/null || echo 0)"
+  [[ "${actions:-0}" -gt 0 ]] || return 0
+
+  # 進めた・通知した・ラベルを付けたときだけ出す（毎巡「異常なし」を積まない）。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[] | "進捗を\(if .kind == "advanced" then "Developへ進めました" elif .kind == "stranded" then "取り残しとして通知しました" else "手作業Issueへラベルを付けました" end): \(.repositoryFullName)#\(.issueNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- ジョブの実行 -------------------------------------------------------------
 # ジョブ状態の報告を再送する回数と間隔（#1620）。
 #
@@ -2190,6 +2225,9 @@ run_once() {
     # 本番デプロイ失敗の巡回検知（#2236）。**dry-runでは呼ばない**（Issueの起票という
     # 外向きの副作用があるため）。
     sweep_deploy_failures
+    # 進捗の取り残しの巡回回収（#2294）。**dry-runでは呼ばない**（進捗の書き換えと
+    # コメント投稿という外向きの副作用があるため）。
+    sweep_progress
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

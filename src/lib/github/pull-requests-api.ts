@@ -296,3 +296,31 @@ export async function fetchPullRequestCommits(
   }
   return result.data;
 }
+
+/**
+ * 特定のheadブランチからbaseブランチへのPull Requestを取る（#2294）。
+ *
+ * 進捗の取り残し巡回（`progress-sweep-run.ts`）が「`issue-<番号>`→developのPRが既に
+ * マージ済みか」「いま開いているPRがあるか」を確かめるのに使う。
+ * `develop-merge-sweep`ジョブだった頃の`gh pr list --state <state> --base develop --head issue-<番号>`
+ * にあたる。
+ *
+ * **リポジトリ単位の一覧で代用しない。** 取り残しは日をまたいで残るため、
+ * `fetchClosedPullRequestsForBase`の「更新が新しい順に30件」からは落ちる。
+ * headで名指しすれば件数に関係なく引けて、**ETagの条件付きGETが効く**ので、
+ * 状況が変わらない間（＝大多数の巡回）はレート制限を消費しない。
+ */
+export async function fetchPullRequestsForHead(
+  owner: string,
+  repo: string,
+  base: string,
+  headRef: string,
+  state: "open" | "closed",
+  token: string,
+): Promise<GithubApiOpenPullRequest[]> {
+  const head = encodeURIComponent(`${owner}:${headRef}`);
+  return fetchPullRequestPage(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=${state}&base=${encodeURIComponent(base)}&head=${head}&per_page=20`,
+    token,
+  );
+}

@@ -69,8 +69,9 @@ async function handlePOST(request: NextRequest) {
  * - `?repository=owner/name&issue=123` → `{ status: "implementation" | null }`
  *   1件の現在の進捗。`reusable-issue-dispatch.yml`の実行モード判定が使う
  * - `?repository=owner/name&status=develop,release` → `{ issues: [12, 34] }`
- *   その進捗にあるopenなIssueの番号。develop→mainのリリース関連ジョブと
- *   `develop-merge-sweep`が、以前`gh issue list --label`で探していた部分に使う
+ *   その進捗にあるopenなIssueの番号。develop→mainのリリース関連ジョブが、
+ *   以前`gh issue list --label`で探していた部分に使う（取り残しの回収は#2294で
+ *   issue-deck側の巡回へ移り、`query-progress.ts`を直接呼ぶ）
  *
  * **答えられない場合も200で理由を返す。** 呼び出し側はこのAPIの失敗でワークフローを
  * 止めない取り決め（docs/progress-status-architecture.md）で、`available: false`は
