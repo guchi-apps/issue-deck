@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "@/lib/db";
 import {
@@ -155,11 +155,13 @@ describe("buildCheckUserPushPayload", () => {
 });
 
 describe("sweepCheckUserPushNotifications", () => {
-  it("そのリポジトリを非表示にしているユーザーの購読は宛先から外す（#2279）", async () => {
-    vi.mocked(isPushConfigured).mockReturnValue(true);
-    vi.mocked(sendPushNotification).mockResolvedValue({ sent: 1, removed: 0, failed: 0 });
-
+  /**
+   * 巡回1回ぶんのDBを差し替える。`reservedCount`は「送信済みの席を取れたか」で、
+   * 0は別の巡回に先を越された状態（#2300）。
+   */
+  function mockDb(options?: { reservedCount?: number; labels?: { name: string }[] }) {
     const findSubscriptions = vi.fn().mockResolvedValue([]);
+    const updateMany = vi.fn().mockResolvedValue({ count: options?.reservedCount ?? 1 });
     Object.assign(db, {
       issue: {
         findMany: vi.fn().mockResolvedValue([
@@ -169,7 +171,7 @@ describe("sweepCheckUserPushNotifications", () => {
             number: 12,
             title: "確認してほしい",
             checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
-            labels: [CHECK_USER, { name: "01.check-plan" }],
+            labels: options?.labels ?? [CHECK_USER, { name: "01.check-plan" }],
             repository: {
               id: "repo-1",
               fullName: "guchi-apps/issue-deck",
@@ -177,12 +179,23 @@ describe("sweepCheckUserPushNotifications", () => {
             },
           },
         ]),
-        update: vi.fn().mockResolvedValue({}),
+        updateMany,
       },
       sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
       pushSubscription: { findMany: findSubscriptions },
     });
+    return { findSubscriptions, updateMany };
+  }
+
+  beforeEach(() => {
+    vi.mocked(isPushConfigured).mockReturnValue(true);
+    vi.mocked(sendPushNotification).mockReset();
+    vi.mocked(sendPushNotification).mockResolvedValue({ sent: 1, removed: 0, failed: 0 });
+  });
+
+  it("そのリポジトリを非表示にしているユーザーの購読は宛先から外す（#2279）", async () => {
+    const { findSubscriptions } = mockDb();
 
     await sweepCheckUserPushNotifications(NOW);
 
@@ -196,5 +209,90 @@ describe("sweepCheckUserPushNotifications", () => {
         },
       }),
     );
+  });
+
+  it("送る前に「送信済み」を立てて席を取る（#2300）", async () => {
+    const { updateMany } = mockDb();
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: "issue-1", checkUserPushSentAt: null },
+      data: { checkUserPushSentAt: NOW },
+    });
+    expect(sendPushNotification).toHaveBeenCalledTimes(1);
+    // 席を取る更新は1回だけ。送った後に記録を付け直さない
+    expect(updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("席を取れなかったら送らない（同時に走った巡回で同じ通知を2件送らない。#2300）", async () => {
+    mockDb({ reservedCount: 0 });
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("同時に走った2本の巡回でも、送るのは1件だけ（#2300）", async () => {
+    // 1行ぶんのDBを模す。`updateMany`はMySQLの行ロックと同じく、
+    // 条件（まだ未送信）に合う行が残っていたときだけ更新される
+    let checkUserPushSentAt: Date | null = null;
+    const row = {
+      id: "issue-1",
+      githubIssueId: 987654321,
+      number: 12,
+      title: "確認してほしい",
+      checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
+      labels: [CHECK_USER, { name: "01.check-plan" }],
+      repository: { id: "repo-1", fullName: "guchi-apps/issue-deck", installationId: "install-1" },
+    };
+    Object.assign(db, {
+      issue: {
+        findMany: vi.fn(async () => (checkUserPushSentAt === null ? [row] : [])),
+        updateMany: vi.fn(async ({ data }: { data: { checkUserPushSentAt: Date } }) => {
+          if (checkUserPushSentAt !== null) return { count: 0 };
+          checkUserPushSentAt = data.checkUserPushSentAt;
+          return { count: 1 };
+        }),
+      },
+      sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      pushSubscription: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    // 送信には時間がかかる（Pushサービスへの往復）。**その間にもう1本が走る**のが
+    // 実際に起きていた並びなので、送信を待たせて重ねる
+    vi.mocked(sendPushNotification).mockImplementation(
+      async () =>
+        await new Promise((resolve) =>
+          setTimeout(() => resolve({ sent: 1, removed: 0, failed: 0 }), 10),
+        ),
+    );
+
+    await Promise.all([
+      sweepCheckUserPushNotifications(NOW),
+      sweepCheckUserPushNotifications(NOW),
+    ]);
+
+    expect(sendPushNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("古すぎる確認待ちは送らずに記録だけ付ける", async () => {
+    const { updateMany } = mockDb();
+    (db.issue.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "issue-1",
+        githubIssueId: 987654321,
+        number: 12,
+        title: "確認してほしい",
+        checkUserLabeledAt: at(CHECK_USER_PUSH_MAX_AGE_MS),
+        labels: [CHECK_USER],
+        repository: { id: "repo-1", fullName: "guchi-apps/issue-deck", installationId: "install-1" },
+      },
+    ]);
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(sendPushNotification).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledTimes(1);
   });
 });
