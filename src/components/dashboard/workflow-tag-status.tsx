@@ -22,6 +22,7 @@ import { useWorkflowTags } from "@/hooks/use-workflow-tags";
 import {
   propagationTargets,
   repairPropagationTargets,
+  repairPropagationWorkflows,
   repairWorkflowLabel,
   sharedFileLabel,
   sharedFilePropagationTargets,
@@ -149,13 +150,21 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * callerが不足しているリポジトリの1行（#1948・#1475）。
+ * callerが不足している・壊れているリポジトリの1行（#1948・#1475・#2330）。
  *
  * 何が不足しているかまで出す。**リポジトリによって不足するものが違う**（リリースフローを
  * 持たないリポジトリには`claude-pr-repair.yml`を配らない）ため、件数だけでは何が配られるのか
  * 分からない。
+ *
+ * **壊れているものは「（壊れています）」を添えて区別する**（#2330）。不足は「まだ動いて
+ * いない」だけだが、壊れているcallerは**pushのたびに失敗して通知を飛ばし続ける**ので、
+ * 同じ一覧に混ぜたまま見分けが付かないと後回しにされる。
  */
 function RepairRow({ status, running }: { status: Status; running: boolean }) {
+  const labels = [
+    ...status.missingRepairWorkflows.map(repairWorkflowLabel),
+    ...status.brokenRepairWorkflows.map((file) => `${repairWorkflowLabel(file)}（壊れています）`),
+  ];
   return (
     <FleetRepositoryRow
       fullName={status.fullName}
@@ -164,6 +173,8 @@ function RepairRow({ status, running }: { status: Status; running: boolean }) {
           <GitPullRequestArrow className="size-3.5 text-muted-foreground" />
         ) : running ? (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : status.brokenRepairWorkflows.length > 0 ? (
+          <Wrench className="size-3.5 text-destructive" />
         ) : (
           <Wrench className="size-3.5 text-amber-500" />
         )
@@ -171,7 +182,7 @@ function RepairRow({ status, running }: { status: Status; running: boolean }) {
       result={
         // 不足しているワークフロー名は3件つながると長い。折り返して全文を出す（#1952）
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 break-words text-muted-foreground">
-          <span>{status.missingRepairWorkflows.map(repairWorkflowLabel).join(" / ")}</span>
+          <span>{labels.join(" / ")}</span>
           {status.repairPullRequest && (
             <a
               className="inline-flex items-center gap-0.5 underline underline-offset-2"
@@ -266,7 +277,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   // 不足しているリポジトリ。配布PRが既に出ているものは対象から外し、下に分けて出す（#1948）
   const repairTargets = repairPropagationTargets(repositories);
   const repairPending = repositories.filter(
-    (status) => status.missingRepairWorkflows.length > 0 && status.repairPullRequest !== null,
+    (status) => repairPropagationWorkflows(status).length > 0 && status.repairPullRequest !== null,
   );
   const sharedFileRun = overview?.sharedFilePropagation ?? null;
   // 配布物が古いリポジトリ。更新PRが既に出ているものは対象から外し、下に分けて出す（#2240）
@@ -574,13 +585,13 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
 
       {(repairTargets.length > 0 || repairPending.length > 0) && (
         <div className="mt-2 flex flex-col gap-1.5 border-t pt-2">
-          <span className="text-sm font-medium">不足しているワークフロー</span>
+          <span className="text-sm font-medium">不足・破損しているワークフロー</span>
 
           {repairError && <p className="text-sm text-destructive">{repairError}</p>}
 
           {repairTargets.length > 0 && (
             <>
-              <GroupLabel>未配布（{repairTargets.length}）</GroupLabel>
+              <GroupLabel>未配布・要作り直し（{repairTargets.length}）</GroupLabel>
               <ul className="flex flex-col">
                 {repairTargets.map((status) => (
                   <RepairRow key={status.fullName} status={status} running={isRepairRunning} />
@@ -611,7 +622,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
               {isRepairDispatching || isRepairRunning ? <Loader2 className="animate-spin" /> : <Wrench />}
               {isRepairRunning
                 ? "配布を実行中..."
-                : `${repairTargets.length}件へ不足しているワークフローを配る`}
+                : `${repairTargets.length}件へ不足・破損しているワークフローを配る`}
             </Button>
           )}
 
