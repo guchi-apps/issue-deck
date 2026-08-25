@@ -102,7 +102,7 @@ const dispatchState: {
   setError: vi.fn(),
 };
 const pullRequestLinks: [] = [];
-const pullRequestsState = { pullRequests: [], refresh: vi.fn() };
+const pullRequestsState = { pullRequests: [], isLoadingDetails: false, refresh: vi.fn() };
 const mergeMutation = {
   mergePullRequest: vi.fn(),
   isSubmitting: false,

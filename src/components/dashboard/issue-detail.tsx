@@ -257,7 +257,11 @@ export function IssueDetail({
     issue?.number ?? null,
     comments,
   );
-  const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
+  const {
+    pullRequests,
+    isLoadingDetails: isLoadingPullRequests,
+    refresh: refreshPullRequests,
+  } = useIssuePullRequests(
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
     pullRequestLinks,
@@ -927,6 +931,7 @@ export function IssueDetail({
                 }
                 links={pullRequestLinks}
                 pullRequests={pullRequests}
+                isLoadingDetails={isLoadingPullRequests}
                 mergeApprovalPending={mergeApprovalPending}
                 onMerge={handleMergePullRequest}
                 onMerged={handlePullRequestMerged}
@@ -1104,6 +1109,7 @@ export function IssueDetail({
               mergeCheckReasons={mergeCheckReasons}
               pullRequestLinks={pullRequestLinks}
               pullRequests={pullRequests}
+              isLoadingPullRequests={isLoadingPullRequests}
               workflowRun={workflowRun}
               workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}

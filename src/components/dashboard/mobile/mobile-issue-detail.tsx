@@ -371,7 +371,11 @@ export function MobileIssueDetail({
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
       }
     : null;
-  const { pullRequests, refresh: refreshPullRequests } = useIssuePullRequests(
+  const {
+    pullRequests,
+    isLoadingDetails: isLoadingPullRequests,
+    refresh: refreshPullRequests,
+  } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
     pullRequestLinks,
@@ -970,6 +974,7 @@ export function MobileIssueDetail({
               }
               links={pullRequestLinks}
               pullRequests={pullRequests}
+              isLoadingDetails={isLoadingPullRequests}
               mergeApprovalPending={mergeApprovalPending}
               onMerge={handleMergePullRequest}
               onMerged={handlePullRequestMerged}
@@ -1095,6 +1100,7 @@ export function MobileIssueDetail({
             mergeCheckReasons={mergeCheckReasons}
             pullRequestLinks={pullRequestLinks}
             pullRequests={pullRequests}
+            isLoadingPullRequests={isLoadingPullRequests}
             workflowRun={workflowRun}
             workflowRunCommentId={workflowRunCommentId}
             onApprove={handleApprove}
