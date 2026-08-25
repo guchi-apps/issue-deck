@@ -20,7 +20,7 @@ const OAUTH_BETA = "oauth-2025-04-20";
 const MODEL = "claude-haiku-4-5";
 
 /**
- * 手作業アシスタントで想定外のことが起きたときに、原因と直し案を出す（#1869・#2299）。
+ * 手作業アシスタントで想定外のことが起きたときに、原因と直し案を出す（#1869・#2299・#2310）。
  *
  * #1869では**代行実行（#1828）が0以外で終わったとき**だけを見ていた。いちばん多い失敗が
  * 「本文に書かれたコマンドが実際の環境と食い違っている」（ユニット名・パスの誤り）で、
@@ -37,6 +37,11 @@ const MODEL = "claude-haiku-4-5";
  * `replaceManualStepCommand`・`replaceManualStepInstruction`）。
  * 「実行するのは本文に書かれたコマンドだけ」という歯止め（docs/multi-agent/gates.md）を、
  * この機能でも崩さないための形。
+ *
+ * #2310で**`steps`（この後にやること）**を足した。手順書を直しても進めない（`manual`）ときに
+ * 返していたのは`cause`と自由記述の`advice`だけで、「確認してください」「必要に応じて〜」で
+ * 終わることが多く、**読んだ人が次に何を打てばよいか決まらなかった**。`steps`は1件1行＋
+ * コピーできるコマンドで、画面に並ぶだけ（本文へ入れず、実行もしない）。
  */
 
 /** プロンプトへ載せる出力の長さ。**末尾を残して切る**（エラーは最後に出るため） */
@@ -47,6 +52,17 @@ const MAX_CAUSE_LENGTH = 400;
 
 /** 助言として受け取る長さの上限 */
 const MAX_ADVICE_LENGTH = 400;
+
+/**
+ * 対処の手順として受け取る件数の上限（#2310）。
+ *
+ * **ここに並ぶのは「画面を閉じたあとに人が手でやること」**で、多いほど良いものではない。
+ * 5つも6つも並ぶなら、それは1つの手順のつまずきではなく手順書ごと作り直す話になっている。
+ */
+export const MANUAL_STEP_FIX_STEPS_MAX_COUNT = 4;
+
+/** 対処の手順1件の説明として受け取る長さの上限（#2310。テンプレートの「1手順＝1行」に合わせる） */
+export const MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH = MANUAL_STEP_INSTRUCTION_MAX_LENGTH;
 
 export type ManualStepFixInput = {
   issueTitle: string;
@@ -76,6 +92,21 @@ export type ManualStepFixInput = {
   report: ManualStepTroubleReport | null;
 };
 
+/**
+ * 人がこの後に手でやること1件（#2310）。
+ *
+ * **本文へは入らず、実行もしない。** 画面に並べてコピーできるようにするだけで、
+ * 実行できるのは変わらず本文に書かれたコマンドだけ（docs/multi-agent/gates.md）。
+ * 手順書そのものを直せるなら`command`・`instruction`の直し案が出ているはずで、
+ * ここに並ぶのはそれでは届かない手元の作業。
+ */
+export type ManualStepFixStep = {
+  /** 何をするかを1行で（命令形。文頭に`（サブPC）`のようにデバイスが付く） */
+  text: string;
+  /** その場で打てるコマンド。画面での操作などコマンドが無いものは`null` */
+  command: string | null;
+};
+
 export type ManualStepFixResult = {
   /**
    * - `command` … コマンドを直せば通る。`command`に修正案が入る
@@ -92,6 +123,11 @@ export type ManualStepFixResult = {
   instruction: string | null;
   /** 人がやることの助言。無ければ`null` */
   advice: string | null;
+  /**
+   * この後に人が手でやること（#2310）。**`manual`・`retry`では原則ここが埋まる。**
+   * 原因を特定できなかった場合は「何を調べれば分かるか」が入る（空配列もありうる）
+   */
+  steps: ManualStepFixStep[];
 };
 
 /** 応答の検証に使う「いま本文に書かれているもの」 */
@@ -184,6 +220,13 @@ export function buildManualStepFixPrompt(input: ManualStepFixInput): string {
     "- 迷ったら `manual` にしてください。**確信が持てない直し案を出さないでください**",
   ].filter((line): line is string => line !== null);
 
+  // 直し案として選べる種別。**選べないものは名前ごと出さない**（実行していない手順について
+  // 修正コマンドを出させない、という#2299の線をこの節でも保つ）
+  const fixableKinds = [
+    canFixCommand ? "`command`" : null,
+    canFixInstruction ? "`instruction`" : null,
+  ].filter((name): name is string => name !== null);
+
   const conditions = [
     canFixCommand
       ? `## \`command\`（コマンドの修正案）
@@ -229,11 +272,25 @@ ${kinds.join("\n")}
 
 ${conditions.length === 0 ? "本文を直して解決できる余地はありません（`retry` か `manual` を選んでください）。" : conditions.join("\n\n")}
 
+# この後にやること（\`steps\`）
+
+**画面を閉じたあと、実行する人が手でやることを順番に書いてください。** これを読む人は
+${input.where.device ?? "作業する端末"}の前におり、「${input.issueTitle}」という手作業を途中まで進めて止まっています。
+**「確認してください」「必要に応じて対処してください」のように、次に何を押すか・何を打つかが
+決まらない書き方をしないでください。** それでは進められません。
+
+- \`kind\`が \`manual\` か \`retry\` のときは**必ず1件以上**書いてください（最大${MANUAL_STEP_FIX_STEPS_MAX_COUNT}件）
+${fixableKinds.length === 0 ? "" : `- \`kind\`が ${fixableKinds.join(" か ")} のときは、**画面のボタンで直る分は書かず**、それでも人がやることが残る場合だけ書いてください（無ければ空配列）\n`}- 1件は**改行を含まない1行**で、${MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH}文字以内。命令形で「何をするか」を書いてください
+- **どこでやるかを文頭に**\`（サブPC）\`\`（メインPC）\`\`（VPS）\`\`（ブラウザ）\`のいずれかで書いてください
+- その場で打てるコマンドがあるものは \`steps[].command\` へ入れてください（無ければnull）。コードフェンスを含めず、対話的な入力を求めるコマンド・確認なしで広範囲を消すコマンド（\`rm -rf\`など）にしないでください
+- **原因を特定できなかった場合は、「何を調べれば分かるか」を手順にしてください。** 状況を集めるコマンドを1件目に置き、最後の1件は「その出力を『うまくいかない』の貼り付け欄に貼って、もう一度『原因を調べる』を押す」にしてください
+- 出力・画面から読み取った値（トークン・パスワード等）を書き込まないでください
+
 # 出力
 
 前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
 
-{"kind": ${[canFixCommand ? '"command"' : null, canFixInstruction ? '"instruction"' : null, '"retry"', '"manual"'].filter(Boolean).join(" | ")}, "cause": "何が起きたのかを日本語で1〜3文", "command": "コマンドの修正案（kindがcommandのときだけ。それ以外はnull）", "instruction": "手順の説明文の直し案（kindがinstructionのときだけ。それ以外はnull）", "advice": "人がやること（あれば。無ければnull）"}`;
+{"kind": ${[canFixCommand ? '"command"' : null, canFixInstruction ? '"instruction"' : null, '"retry"', '"manual"'].filter(Boolean).join(" | ")}, "cause": "何が起きたのかを日本語で1〜3文", "command": "コマンドの修正案（kindがcommandのときだけ。それ以外はnull）", "instruction": "手順の説明文の直し案（kindがinstructionのときだけ。それ以外はnull）", "advice": "補足があれば1〜2文（stepsに書いたことを繰り返さない。無ければnull）", "steps": [{"text": "（サブPC）この後にやること1件を1行で", "command": "そこで打つコマンド（無ければnull）"}]}`;
 }
 
 type AnthropicMessageResponse = {
@@ -247,11 +304,53 @@ function extractJsonText(text: string): string {
 }
 
 /**
+ * この後にやること（#2310）を取り出す。
+ *
+ * **1件ずつ形を見て、使えないものだけを落とす。** 直し案（`command`・`instruction`）と違い、
+ * ここは本文へ書き戻すものではないので、1件が壊れていても全体を`manual`へ倒す必要はない。
+ * 逆に、次に何をするかが1つも出せなかった場合は空配列で返し、画面が「調べ直す」導線を出す。
+ */
+function pickSteps(raw: unknown): ManualStepFixStep[] {
+  if (!Array.isArray(raw)) return [];
+
+  const steps: ManualStepFixStep[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { text, command } = entry as { text?: unknown; command?: unknown };
+
+    const label = typeof text === "string" ? text.trim() : "";
+    // 空・複数行・長すぎ・フェンス入りは「1手順＝1行」の形を崩している
+    if (
+      label === "" ||
+      label.includes("\n") ||
+      label.length > MANUAL_STEP_FIX_STEP_TEXT_MAX_LENGTH ||
+      FENCE_PATTERN.test(label)
+    ) {
+      continue;
+    }
+
+    const proposed = typeof command === "string" ? command.trim() : "";
+    // コマンドだけが使えない場合は、説明文だけを残す（やることは伝わる）
+    const usable =
+      proposed !== "" &&
+      proposed.length <= MANUAL_STEP_COMMAND_MAX_LENGTH &&
+      !proposed.split("\n").some((line) => FENCE_PATTERN.test(line));
+
+    steps.push({ text: label, command: usable ? proposed : null });
+    if (steps.length >= MANUAL_STEP_FIX_STEPS_MAX_COUNT) break;
+  }
+  return steps;
+}
+
+/**
  * 応答から診断結果を取り出す。
  *
  * **直し案は形だけを検証する**（本文へ書き戻せる形か、元と違うか）。中身が正しいかどうかを
  * ここで判定する術は無く、判断するのは画面で差分を見た人。読めない応答・条件を満たさない
  * 直し案は`manual`へ倒す——提示できないことより、壊れたものを提示することの方が悪い。
+ *
+ * **`manual`へ倒すときも`steps`（#2310）は残す。** 手順書を直せないことと、人が手元で何を
+ * すればよいかが分からないことは別で、後者まで落とすと画面に助言だけが残る。
  */
 export function pickManualStepFix(
   text: string,
@@ -263,6 +362,7 @@ export function pickManualStepFix(
     command: null,
     instruction: null,
     advice: null,
+    steps: [],
   };
 
   let parsed: unknown;
@@ -273,12 +373,13 @@ export function pickManualStepFix(
   }
   if (typeof parsed !== "object" || parsed === null) return fallback;
 
-  const { kind, cause, command, instruction, advice } = parsed as {
+  const { kind, cause, command, instruction, advice, steps } = parsed as {
     kind?: unknown;
     cause?: unknown;
     command?: unknown;
     instruction?: unknown;
     advice?: unknown;
+    steps?: unknown;
   };
 
   const result: ManualStepFixResult = {
@@ -293,6 +394,7 @@ export function pickManualStepFix(
       typeof advice === "string" && advice.trim() !== ""
         ? truncate(advice, MAX_ADVICE_LENGTH)
         : null,
+    steps: pickSteps(steps),
   };
 
   if (result.kind === "command") {
@@ -341,7 +443,8 @@ export async function diagnoseManualStepFailure(
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1024,
+      // `steps`（#2310）のぶんだけ応答が長くなる。途中で切れるとJSONとして読めず`manual`へ倒れる
+      max_tokens: 1536,
       messages: [{ role: "user", content: buildManualStepFixPrompt(input) }],
     }),
     cache: "no-store",
@@ -354,7 +457,7 @@ export async function diagnoseManualStepFailure(
   const json = (await res.json()) as AnthropicMessageResponse;
   const text = json.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    return { kind: "manual", cause: "", command: null, instruction: null, advice: null };
+    return { kind: "manual", cause: "", command: null, instruction: null, advice: null, steps: [] };
   }
   return pickManualStepFix(text, { command: input.command, instruction: input.instruction });
 }

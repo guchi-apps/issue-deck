@@ -1063,6 +1063,7 @@ scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
 | `SHARED_DB_MIGRATE_USER`・`SHARED_DB_MIGRATE_PASSWORD` | 5 | secret |
 | `SUPABASE_PROJECT_URL`・`SUPABASE_PUBLISHABLE_KEY` | 8 | variable（公開値） |
 | `SIGNALY_WEBHOOK_URL` | 17 | secret（#2255） |
+| `SIGNALY_LOGIN_WEBHOOK_URL` | 8 | secret（#2286） |
 
 1リポジトリでしか使わない値（実測115件）は各リポジトリのrepository secretに置く。
 
@@ -1076,6 +1077,33 @@ CIチャンネルを共通チャンネルとして流用してorganizationへ寄
 **repository secretは同名のorganization secretを覆い隠す。** そのため各リポジトリでは、
 マニフェストを`scope=inherit`へ変えたうえで**repository secretを削除する**まで従来の
 チャンネルへ飛び続ける。逆に言えば、リポジトリ単位で好きな順に移行できる。
+
+#### ログイン通知も同じ形で集約する（#2286）
+
+ログイン通知（`LOGIN_WEBHOOK_URL`）もCI・デプロイ通知と同じ理由で1本のチャンネルへ集約する
+（guchi-apps/signaly#192）。どのアプリへのログインかは、チャンネルではなく通知の
+`notifications.source` で見分ける。organization上の名前は `SIGNALY_LOGIN_WEBHOOK_URL`、
+値の正は `op://apps/Notify/login-webhook-url`。
+
+**organization secretを先に作り、各リポジトリの`inherit`化はその後。** organization secretが
+無いうちにマニフェストだけ`inherit`へ変えると、デプロイが空値を`.env`へ書き、ログイン通知が
+**エラーを出さずに止まる**。
+
+CI・デプロイ通知と違い、**repository secret側の名前がリポジトリごとに割れている**。
+organization項目と同名（`SIGNALY_LOGIN_WEBHOOK_URL`）のものだけが覆い隠すため、
+`inherit`へ切り替える前にリポジトリごとに実際の名前を確認する。
+
+```bash
+gh api repos/guchi-apps/<repo>/actions/secrets --jq '.secrets[].name' | grep -i login
+```
+
+| repository secretの名前 | リポジトリ | org項目を覆い隠すか |
+|---|---|---|
+| `SIGNALY_LOGIN_WEBHOOK_URL` | asset-manager・clip-hive・meisai-lab・ops-dashboard・subscription-lists・portfolio | **覆い隠す**（削除が要る） |
+| `LOGIN_WEBHOOK_URL` | signaly | 覆い隠さない |
+| `SIGNALY_WEBHOOK_LOGIN_URL`（綴り違い） | car-care | 覆い隠さない |
+
+（2026-08-25時点。いずれも`inherit`化とあわせて削除する）
 
 #### 環境変数名がリポジトリごとに違っても吸収できる
 
