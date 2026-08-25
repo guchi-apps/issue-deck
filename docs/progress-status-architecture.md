@@ -343,24 +343,17 @@ issue-deck側の巡回（`POST /api/issues/progress-sweep`）へ移した。**
    issue-deck自身の定期実行はそこで止まる
 2. **他リポジトリへ効く（`workflows/vN`の作成と画面からの配布）** — 人がタグを切って配るまで
    効かない。本番のデプロイとは無関係
-3. **移設先が動き出す（pollerが新しい受け口を叩く）** — pollerが動かしているチェックアウト
-   （`/home/guchi/apps/issue-deck`）を画面の「更新して再起動」で上げるまで効かない。
-   **本番アプリとは別のチェックアウトなので、`deploy.yml`では更新されない**
+3. **移設先が動き出す（pollerが新しい受け口を叩く）** — pollerが動かしているチェックアウトを
+   更新するまで効かない。**本番アプリとは別のチェックアウトなので、`deploy.yml`では更新されない**。
+   確認と更新の手順は[multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)
+   「pollerが動かすのは`~/apps/issue-deck`のスクリプト」（遅れは画面のホストの行にも出る。#1612）
 
 結果、**自リポジトリだけが1が効いて3が効いていない状態**になり、安全網が空白になる。#2294では
 実装PRのマージ（2026-08-25T00:03Z）から約3時間、取り残しの巡回が旧ジョブ・新しい巡回のどちらでも
 走っていなかった。他リポジトリは2が未実施で旧ジョブが動き続けていたため、逆に空白にならない。
 
-```bash
-# 移設先が本番に居るか（404でなく401ならある）
-curl -s -o /dev/null -w "%{http_code}\n" -X POST https://issuedeck.gucchii.com/api/issues/progress-sweep
-# pollerがそれを叩けるか（0なら古いチェックアウト）
-grep -c sweep_progress /home/guchi/apps/issue-deck/scripts/subpc-dispatch-poller.sh
-```
-
-**Actionsの定期実行を常駐プロセスへ移すPRでは、「reusable側のジョブ削除」と「pollerの更新」を
-同じ手順の中に並べる**（PR本文の注意点だけでなく、完了報告にも「画面から更新して再起動する」と
-書く）。配布タグは元から人の手順として分かれているが、poller更新は忘れられやすい。
+**3つのうち忘れられやすいのは3。** 上の節にある「回収まわりを直したら、この更新まで含めて1つの
+作業と考える」が、Actionsから移設する場合にも同じように当てはまる。
 
 ## 目標アーキテクチャ
 

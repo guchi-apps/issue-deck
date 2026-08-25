@@ -139,7 +139,9 @@ repo=guchi-apps/<repo>
 # 直近のscheduleのrunを1本取り、どの版のワークフローで走ったのかも一緒に取る
 read -r rid sha <<<"$(gh api "repos/$repo/actions/workflows/issue-labels.yml/runs?event=schedule&per_page=1" \
   --jq '"\(.workflow_runs[0].id) \(.workflow_runs[0].head_sha)"')"
-[ "$sha" = "$(gh api "repos/$repo/commits/main" --jq .sha)" ] ||
+# 比較先はデフォルトブランチ（scheduleはそこの内容で動く）。`main`と決め打たない
+br=$(gh api "repos/$repo" --jq .default_branch)
+[ "$sha" = "$(gh api "repos/$repo/commits/$br" --jq .sha)" ] ||
   echo "まだ古いrefでの実行（$sha）。次のティックを待つ"
 gh api "repos/$repo/actions/runs/$rid/jobs" \
   --jq '.jobs[] | "\(.name)\t\(.conclusion)\t\(.started_at)→\(.completed_at)"'
@@ -148,9 +150,12 @@ gh api "repos/$repo/actions/runs/$rid/jobs" \
 `conclusion`が`skipped`のジョブは課金されない。`success`／`failure`のジョブの数が、
 そのまま**そのrunの課金分数の下限**（1ジョブ＝最低1分）になる。
 
-**`head_sha`を`main`の先端と突き合わせてから数える**（#2298）。`push`や`pull_request`と違い、
-scheduleのrunは`head_sha`を見ないと「どの版のワークフローで走ったのか」が分からない。
-**ワークフローを`main`へマージした直後は、1回ぶん古いrefで走ることがある。** #2294の確認では
+**`head_sha`をデフォルトブランチの先端と突き合わせてから数える**（#2298）。`push`や
+`pull_request`と違い、scheduleのrunは`head_sha`を見ないと「どの版のワークフローで走ったのか」が
+分からない。**デフォルトブランチへマージした直後は、1回ぶん古いrefで走ることがある。**
+比較先を`main`と決め打たないこと——cronを持つ4件はいずれも`main`だが、`dayspan`のように
+デフォルトブランチが`develop`のリポジトリもあり、決め打つと常に「まだ古いref」と出る。
+#2294の確認では
 `claude-config`のマージ（04:24:54Z）より後の04:32:16Zのrunが`head_sha=38f04730`（マージ前の
 `main`）で走り、消したはずのジョブが1件動いた。次の05:15:33Zのrunは`head_sha=f54613b2`
 （マージ後）で0件だった。実行時刻がマージより後であることだけを根拠にすると、**直っているのに
