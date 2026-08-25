@@ -1293,15 +1293,29 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   CI失敗を外さないのと同じ扱い。この2つでopenなPRを二分するため、件数の和は「すべてのPR」に一致する。
   **「マージ待ち」は#1613で左メニューから外し、#2120で戻した**（当時の表示名は「完了したPR」。
   ビューidは`completed`のままなので`prview=completed`のURLは一貫して生きている）。
-  **件数にオレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは「マージ待ち」だけ**
-  （#2334。判定は`pull-request-views.ts`の`isPullRequestViewAttention`）。CIも自動マージ可否の
-  判定も終わったPRしか並ばないビューで、残っているのは人がマージするかCI失敗を直すかしかない
-  ——「ユーザーの確認待ち」（#742）と同じ性質のもの。「すべてのPR」は実行中を含む在庫の数、
-  「実行中」は人が何もしなくても進むものなので点けない。0件・未取得でも点けない。
-  **判定は`lib`の関数1つに置き、画面側に書かない**——PCの左メニュー・スマホのホーム・
-  スマホのビュー選択シートの3か所に同じ条件が散ると、片方だけ直された時点で意味が食い違う。
-  **対応Issueを持たないリリースPRは「ユーザーの確認待ち」でも数えられるので丸が2行に点くが、
-  母集団が別**（あちらはCIの結果を見ない。上の#1613の項）で、どちらから入ってもマージ画面へ着く。
+  **件数にオレンジの丸（`NavCount`の`emphasis="attention"`）を点けるのは「マージ待ち」だけ、
+  それも人が手を動かすまで進まないPRが残っているとき**（#2334。
+  [`lib/merge-pending-attention.ts`](../src/lib/merge-pending-attention.ts)）。
+  - **数字は`completed`の総数、丸は`actionRequired`**（「ブランチ」の行と同じ形。上の#2167の項）。
+    丸から外すのは**放っておけば片付く2つ**——Auto-merge有効でCI成功（`isAutoMergingPullRequest`。
+    GitHubが入れる）と、CI失敗の自動修復中（#2072。エージェントが直しにいっている）。
+    **develop向けPRはAuto-mergeが通常の経路**（`claude-review-develop.yml`が自動マージ可と
+    判定したら`gh pr merge --auto`）なので、外さないと「マージ待ち」の丸がほぼ常時点いたままになる。
+    **修復が走っていないCI失敗は外さない**——待っても解消せず人が直すしかない。
+  - **除外の条件は通知ベルと同じ関数を使う**（`lib/notifications.ts`の
+    `buildPullRequestNotifications`が元から同じ除外をしていた）。2か所に書くと、片方だけ
+    直された時点でベルとメニューの合図が食い違う。
+  - **「すべてのPR」（実行中を含む在庫の数）と「実行中」（人が何もしなくても進む）は点けない。**
+    0件・未取得でも点けない。
+  - **判定（`isPullRequestViewAttention`）は`lib`の関数1つに置き、画面側に書かない**——PCの
+    左メニュー・スマホのホーム・スマホのビュー選択シートの3か所に同じ条件が散ると、片方だけ
+    直された時点でPCとスマホで意味が食い違う。件数を数えるのは`IssueDeckShell`が1回だけで、
+    母集団（`visiblePullRequests`）はメニューの件数とそろえる。
+  - **数字と丸で意味が違うぶんは行の吹き出しで補う**（`describeMergePendingAttention`。
+    `3件: 要操作1件・自動マージ待ち2件`）。「質問」（#2070）・「ブランチ」（#2167）と同じ形。
+  - **対応Issueを持たないリリースPRは「ユーザーの確認待ち」でも数えられるので丸が2行に点くが、
+    母集団が別**（あちらはCIの結果を見ず、Auto-merge有効なPRを外す。上の#1613の項）で、
+    どちらから入ってもマージ画面へ着く。
   **10秒ごとの自動更新（`PULL_REQUEST_POLL_INTERVAL_MS`）は、元は「マージ待ち」
   ビューだけだったが、PR画面を開いている間はどのビューでも回すようにした**（#1531・#1947）。
   歯止めは「画面を開いている間だけ」「裏に回ったタブでは取りに行かない」の2つで、Issue一覧の
@@ -1544,6 +1558,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
   **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
   リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
+  **残った数はコミット数ではなく「マージコミット単位の件数」で出す**（#2333・`unreleasedSummary`）。
+  通常マージ運用ではPR 1件のマージにつき作業ブランチ側のコミット（1個とは限らない）と
+  マージコミットが両方`aheadBy`へ載るため、**コミット数は実質的な作業の件数より必ず多く出る**
+  （実測: issue-deckの`main..develop`が12コミット＝マージ6個＋作業6個で、PR単位では6件）。
+  そこで同じGraphQLの`compare`から`commits`（各コミットの`oid`・`messageHeadline`・親のOID）まで取り、
+  **developの先端から`parents[0]`をたどったfirst-parentの列だけ**を数える
+  （`git log --first-parent main..develop`と同じ数。`branches-api.ts`の`toUnreleasedUnits`）。
+  **一覧の並び順に依存しない**——GitHubは古い順で返すが、一覧は「その比較に含まれるか」の集合として
+  しか使わず、幹をたどる起点は`headTarget.oid`にしている。
+  **squash mergeのリポジトリも同じ数え方でよい。** 1PR＝1コミットが幹に載るだけなので、
+  マージコミットを持たない列は「直接載ったコミット」（`directCount`）としてそのまま件数になる。
+  **バージョンバンプPRのマージだけは件数の本体から外し、「（+バージョンバンプ1件）」として添える**
+  （リリースの配管であって出す中身ではないため）。バンプかどうかはマージコミットのメッセージから
+  取り込んだブランチ名を読んで判定する（`mergedHeadRefFromHeadline`＋`isVersionBumpHeadRef`）——
+  `associatedPullRequests`を引けば確実だが、コミット100件ぶんのネストした問い合わせになり
+  1画面ぶんの取得コストが跳ね上がる。
+  **数えられないときはコミット数へ落とす**（`BranchComparison.units`が`null`）。該当するのは
+  比較のコミットが取得上限（100件）を超えているときと、`headTarget`のOIDが読めず幹をたどれないとき。
+  数え落としたまま「◯件」と言い切るより害が小さい。
+  **`canTriggerRelease`の判定は`unreleasedCommitCount`（コミット数）のままにしてある**——
+  押してよいかは「出すものがあるか」で決まり、件数の数え方を変えたことでリリースの可否が
+  動くべきではないため。
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。
@@ -1731,6 +1767,12 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
   人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
   そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
+  **マージ済みなのに残った`00.check-user`＋`01.check-merge`を外すのも同じ巡回**（#2335。
+  判定は`decideStaleCheckMerge`）。外す役はマージのイベントを受け取るワークフローだけで
+  再試行が無く、GitHubの一時的な5xxに当たると誰も外し直さなかった（guchi-apps/signaly#200）。
+  こちらも探し先はDBで、開いているPRがあるIssue・`issue-<番号>`のPRが1件も無いIssueには
+  触らない。設計は[multi-agent/labels.md](multi-agent/labels.md)「マージ済みなのに残った
+  `01.check-merge`は巡回が外す」。
   **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
   `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
   Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で

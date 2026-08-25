@@ -30,6 +30,16 @@ const VERSION_BUMP_BRANCH_PREFIX = "release/v";
  */
 export const RELEASE_BRANCH_PREFIX = "release-main/v";
 
+/**
+ * バージョンバンプPR（`release/vX.Y.Z`→`develop`）のheadか。
+ *
+ * `classifyPullRequest`のほか、未リリース件数の内訳（`lib/github/branches-api.ts`。#2333）が
+ * マージコミットのメッセージから読んだブランチ名の判定にも使う。接頭辞を2か所に写さない。
+ */
+export function isVersionBumpHeadRef(headRef: string): boolean {
+  return headRef.startsWith(VERSION_BUMP_BRANCH_PREFIX);
+}
+
 /** リリースPR（→`main`）のheadか。`develop`は`release-main/v`導入前の形式（#2117） */
 export function isReleaseHeadRef(headRef: string): boolean {
   return headRef === "develop" || headRef.startsWith(RELEASE_BRANCH_PREFIX);
@@ -61,7 +71,7 @@ export function classifyPullRequest(pullRequest: {
 }): PullRequestKind {
   const { baseRef, headRef } = pullRequest;
   if (baseRef === MAIN_BRANCH && isReleaseHeadRef(headRef)) return "release";
-  if (headRef.startsWith(VERSION_BUMP_BRANCH_PREFIX)) return "version-bump";
+  if (isVersionBumpHeadRef(headRef)) return "version-bump";
   if (ISSUE_BRANCH_PATTERN.test(headRef)) return "issue";
   return "other";
 }

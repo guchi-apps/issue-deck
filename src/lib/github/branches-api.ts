@@ -1,7 +1,8 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
-import type { BranchComparison } from "@/types/branch-flow";
+import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
+import type { BranchComparison, UnreleasedUnits } from "@/types/branch-flow";
 
 /**
  * 1リポジトリあたりに存在を確認するブランチ数の上限。
@@ -16,15 +17,29 @@ export type BranchRefLookup = {
   developVsMain: BranchComparison | null;
 };
 
+/**
+ * 比較のコミットを1リクエストで読む上限（GraphQLのconnectionの上限と同じ100）。
+ * これを超える比較では件数のグルーピングを諦め、従来どおりコミット数を出す。
+ */
+const MAX_COMPARE_COMMITS = 100;
+
 type RefNode = { name: string } | null;
 /** `compare`が返すコミット。tree OIDが取れないケース（targetがCommitでない）を許す */
-type CompareTarget = { tree?: { oid?: string | null } | null } | null;
+type CompareTarget = { oid?: string | null; tree?: { oid?: string | null } | null } | null;
+/** `compare`が返すコミット1件。first-parentをたどるのに親のOIDまで見る（#2333） */
+type CompareCommit = {
+  oid?: string | null;
+  messageHeadline?: string | null;
+  parents?: { totalCount?: number | null; nodes?: ({ oid?: string | null } | null)[] | null } | null;
+};
 type CompareNode = {
   aheadBy: number;
   behindBy: number;
   baseTarget: CompareTarget;
   headTarget: CompareTarget;
+  commits?: { totalCount?: number | null; nodes?: (CompareCommit | null)[] | null } | null;
 } | null;
+
 type GraphqlResult = {
   repository: ({ comparison: { compare: CompareNode } | null } & Record<
     string,
@@ -71,7 +86,18 @@ export async function lookupBranchRefs(
             # （#2316）。baseはこのref（main）、headはdevelop。同じ1リクエストに乗るので
             # GitHub APIの消費は増えない。
             baseTarget { ... on Commit { tree { oid } } }
-            headTarget { ... on Commit { tree { oid } } }
+            # headのOIDはfirst-parentをたどる起点（#2333）。tree OIDとは別物なので両方取る。
+            headTarget { ... on Commit { oid tree { oid } } }
+            # 「未リリース ◯件」をマージコミット単位で数えるためのコミット一覧（#2333）。
+            # 親のOIDまで取るのは、developの幹（first-parent）に載った単位だけを数えるため。
+            commits(first: ${MAX_COMPARE_COMMITS}) {
+              totalCount
+              nodes {
+                oid
+                messageHeadline
+                parents(first: 2) { totalCount nodes { oid } }
+              }
+            }
           }
         }
         ${refSelections}
@@ -119,7 +145,69 @@ function toBranchComparison(compare: CompareNode): BranchComparison | null {
     aheadBy: compare.aheadBy,
     behindBy: compare.behindBy,
     sameContent: baseTree !== null && baseTree === headTree,
+    units: toUnreleasedUnits(compare),
   };
+}
+
+/**
+ * マージコミットのメッセージから、取り込んだブランチ名を読む（#2333）。読めなければ`null`。
+ *
+ * バージョンバンプのマージ（`release/vX.Y.Z`→`develop`）を件数の本体から外すためだけに使う。
+ * `associatedPullRequests`を引けば確実だが、コミット100件ぶんのネストした問い合わせになり
+ * 1画面ぶんの取得コストが跳ね上がるため、既定のマージコミットメッセージを読む方を採る。
+ */
+export function mergedHeadRefFromHeadline(headline: string): string | null {
+  // GitHubのマージボタン: `Merge pull request #123 from owner/branch`
+  const viaPullRequest = /^Merge pull request #\d+ from [^\s/]+\/(\S+)/.exec(headline);
+  if (viaPullRequest) return viaPullRequest[1];
+  // 手元での`git merge`: `Merge branch 'branch' into develop`
+  const viaGit = /^Merge branch '([^']+)'/.exec(headline);
+  return viaGit ? viaGit[1] : null;
+}
+
+/**
+ * `main..develop`をfirst-parentでたどって「実質的な未リリースの件数」を数える（#2333）。
+ *
+ * **たどるのはdevelopの先端からで、比較のコミット一覧は「そこに含まれるか」の集合として
+ * しか使わない。** 一覧の並び順（GitHubは古い順で返す）に依存せず、幹から枝へ降りた
+ * コミット（PRの作業コミット）を確実に落とせる。`git log --first-parent main..develop`と
+ * 同じ数になる。
+ *
+ * 数えられない場合は`null`を返し、呼び出し側は従来どおりコミット数を出す。
+ */
+function toUnreleasedUnits(compare: NonNullable<CompareNode>): UnreleasedUnits | null {
+  const nodes = compare.commits?.nodes ?? null;
+  if (!nodes) return null;
+  // 取得上限を超えた比較では、先端側のコミットが一覧に入っていない可能性がある。
+  // 数え落としたまま「◯件」と言い切るより、コミット数へ落とすほうが害が小さい。
+  if ((compare.commits?.totalCount ?? nodes.length) > nodes.length) return null;
+
+  const byOid = new Map<string, CompareCommit>();
+  for (const node of nodes) {
+    if (node?.oid) byOid.set(node.oid, node);
+  }
+
+  let cursor: string | null = compare.headTarget?.oid ?? null;
+  if (!cursor || !byOid.has(cursor)) return null;
+
+  const units: UnreleasedUnits = { mergeCount: 0, directCount: 0, versionBumpCount: 0 };
+  const visited = new Set<string>();
+  while (cursor && byOid.has(cursor) && !visited.has(cursor)) {
+    visited.add(cursor);
+    const commit: CompareCommit = byOid.get(cursor)!;
+    const parents = commit.parents?.nodes ?? [];
+    const parentCount = commit.parents?.totalCount ?? parents.length;
+    if (parentCount >= 2) {
+      const headRef = mergedHeadRefFromHeadline(commit.messageHeadline ?? "");
+      if (headRef !== null && isVersionBumpHeadRef(headRef)) units.versionBumpCount += 1;
+      else units.mergeCount += 1;
+    } else {
+      units.directCount += 1;
+    }
+    cursor = parents[0]?.oid ?? null;
+  }
+
+  return units;
 }
 
 /**

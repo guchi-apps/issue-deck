@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
+import type { MergePendingAttention } from "@/lib/merge-pending-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import type { PullRequestViewId } from "@/types/pull-request";
 
@@ -12,10 +13,19 @@ const NAV_COUNTS: PullRequestNavCounts = {
   completed: 3,
 };
 
+/** 「マージ待ち」3件のうち1件だけが要操作（残りはAuto-merge待ち・自動修復中） */
+const MERGE_PENDING: MergePendingAttention = {
+  total: 3,
+  autoMerging: 1,
+  repairing: 1,
+  actionRequired: 1,
+};
+
 function renderScreen(
   overrides: Partial<{
     view: PullRequestViewId;
     navCounts: PullRequestNavCounts;
+    mergePendingAttention: MergePendingAttention | null;
     origin: "tab" | "home";
     onChangeView: (view: PullRequestViewId) => void;
     onBack: () => void;
@@ -26,6 +36,7 @@ function renderScreen(
     <MobilePullRequestsScreen
       view={overrides.view ?? "in-progress"}
       navCounts={overrides.navCounts ?? NAV_COUNTS}
+      mergePendingAttention={overrides.mergePendingAttention ?? MERGE_PENDING}
       origin={overrides.origin ?? "tab"}
       pullRequests={[]}
       failedRepositories={[]}
@@ -174,14 +185,16 @@ describe("MobilePullRequestsScreen のビュー選択シートの強調（#2334�
     return row.querySelectorAll("span")[1];
   }
 
-  it("マージ待ちが残っていれば件数をオレンジの丸で出す", () => {
+  it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
     renderScreen();
 
     expect(sheetBadge(/マージ待ち/)?.className).toContain("bg-amber-500");
   });
 
-  it("マージ待ちが0件なら丸にしない", () => {
-    renderScreen({ navCounts: { all: 2, "in-progress": 2, completed: 0 } });
+  it("マージ待ちが自動で進むものだけなら丸にしない", () => {
+    renderScreen({
+      mergePendingAttention: { total: 2, autoMerging: 1, repairing: 1, actionRequired: 0 },
+    });
 
     expect(sheetBadge(/マージ待ち/)?.className).not.toContain("bg-amber-500");
   });

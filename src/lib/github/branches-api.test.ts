@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { lookupBranchRefs } from "@/lib/github/branches-api";
+import { lookupBranchRefs, mergedHeadRefFromHeadline } from "@/lib/github/branches-api";
 
 type GraphqlRequest = { query: string; variables: Record<string, unknown> };
 
@@ -18,6 +18,15 @@ function stubGraphql(data: unknown) {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** GraphQLの`commits.nodes`の1件（#2333） */
+function commit(oid: string, messageHeadline: string, parents: string[]) {
+  return {
+    oid,
+    messageHeadline,
+    parents: { totalCount: parents.length, nodes: parents.map((parent) => ({ oid: parent })) },
+  };
+}
 
 describe("lookupBranchRefs", () => {
   it("問い合わせたブランチのうち実在するものだけを返す", async () => {
@@ -44,7 +53,7 @@ describe("lookupBranchRefs", () => {
     );
 
     expect(result.existingBranches).toEqual(["issue-1455"]);
-    expect(result.developVsMain).toEqual({ aheadBy: 12, behindBy: 0, sameContent: false });
+    expect(result.developVsMain).toEqual({ aheadBy: 12, behindBy: 0, sameContent: false, units: null });
   });
 
   // #2316。バンプPRを`develop`へマージしたときのマージコミットが残っている状態
@@ -64,7 +73,7 @@ describe("lookupBranchRefs", () => {
 
     const result = await lookupBranchRefs("guchi-apps", "aide", [], "token");
 
-    expect(result.developVsMain).toEqual({ aheadBy: 1, behindBy: 24, sameContent: true });
+    expect(result.developVsMain).toEqual({ aheadBy: 1, behindBy: 24, sameContent: true, units: null });
   });
 
   // tree OIDが取れないときに「差分なし」へ倒すと、出すものがあるのにリリースを止めてしまう
@@ -77,7 +86,128 @@ describe("lookupBranchRefs", () => {
 
     const result = await lookupBranchRefs("guchi-apps", "aide", [], "token");
 
-    expect(result.developVsMain).toEqual({ aheadBy: 3, behindBy: 0, sameContent: false });
+    expect(result.developVsMain).toEqual({ aheadBy: 3, behindBy: 0, sameContent: false, units: null });
+  });
+
+  // #2333。PR 2件のマージ（マージコミット2個＋作業コミット2個）とバンプPRのマージ1個で
+  // 5コミット、という#2324で実際に見えていた状態
+  it("マージコミット単位で数え、バージョンバンプのマージは別枠にする", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          compare: {
+            aheadBy: 5,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { oid: "merge-2323", tree: { oid: "tree-develop" } },
+            commits: {
+              totalCount: 5,
+              nodes: [
+                commit("merge-bump", "Merge pull request #2320 from guchi-apps/release/v4.41.0", [
+                  "main-tip",
+                  "bump-work",
+                ]),
+                commit("work-a", "#2294の確認で出た2つの誤判定の元を書き込む。", ["main-tip"]),
+                commit("merge-2322", "Merge pull request #2322 from guchi-apps/issue-2298", [
+                  "merge-bump",
+                  "work-a",
+                ]),
+                commit("work-b", "poller更新の手順を寄せる。", ["merge-2322"]),
+                commit("merge-2323", "Merge pull request #2323 from guchi-apps/issue-2298", [
+                  "merge-2322",
+                  "work-b",
+                ]),
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "issue-deck", [], "token");
+
+    expect(result.developVsMain?.aheadBy).toBe(5);
+    expect(result.developVsMain?.units).toEqual({
+      mergeCount: 2,
+      directCount: 0,
+      versionBumpCount: 1,
+    });
+  });
+
+  // squash mergeのリポジトリではマージコミットが残らない。1PR＝1コミットなので
+  // first-parentの列がそのままPRの件数になる
+  it("マージコミットが無ければ幹のコミットをそのまま数える", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          compare: {
+            aheadBy: 2,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { oid: "squash-2", tree: { oid: "tree-develop" } },
+            commits: {
+              totalCount: 2,
+              nodes: [
+                commit("squash-1", "画面の文言を直す (#12)", ["main-tip"]),
+                commit("squash-2", "取得の失敗を握りつぶさない (#13)", ["squash-1"]),
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "other", [], "token");
+
+    expect(result.developVsMain?.units).toEqual({
+      mergeCount: 0,
+      directCount: 2,
+      versionBumpCount: 0,
+    });
+  });
+
+  // 数え落としたまま「◯件」と言い切らない。取れなければコミット数へ落とす
+  it("コミット一覧が取得上限を超えていればunitsをnullにする", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          compare: {
+            aheadBy: 120,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { oid: "head", tree: { oid: "tree-develop" } },
+            commits: {
+              totalCount: 120,
+              nodes: [commit("head", "直近のコミット", ["one-before"])],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "other", [], "token");
+
+    expect(result.developVsMain?.units).toBeNull();
+  });
+
+  it("headのOIDが読めなければunitsをnullにする", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          compare: {
+            aheadBy: 1,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { tree: { oid: "tree-develop" } },
+            commits: { totalCount: 1, nodes: [commit("only", "1件だけ", ["main-tip"])] },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "other", [], "token");
+
+    expect(result.developVsMain?.units).toBeNull();
   });
 
   it("ブランチ名はクエリ本文へ埋め込まず、GraphQLの変数として渡す", async () => {
@@ -108,5 +238,27 @@ describe("lookupBranchRefs", () => {
     const result = await lookupBranchRefs("guchi-apps", "missing", ["issue-1"], "token");
 
     expect(result).toEqual({ existingBranches: [], developVsMain: null });
+  });
+});
+
+// #2333。バンプのマージを件数の本体から外せるかがこの読み取りだけに掛かっている
+describe("mergedHeadRefFromHeadline", () => {
+  it("GitHubのマージボタンのメッセージからブランチ名を読む", () => {
+    expect(
+      mergedHeadRefFromHeadline("Merge pull request #2320 from guchi-apps/release/v4.41.0"),
+    ).toBe("release/v4.41.0");
+    expect(
+      mergedHeadRefFromHeadline("Merge pull request #2322 from guchi-apps/issue-2298"),
+    ).toBe("issue-2298");
+  });
+
+  it("手元での`git merge`のメッセージからも読む", () => {
+    expect(mergedHeadRefFromHeadline("Merge branch 'release/v1.2.3' into develop")).toBe(
+      "release/v1.2.3",
+    );
+  });
+
+  it("マージコミットでないメッセージからは読まない", () => {
+    expect(mergedHeadRefFromHeadline("画面の文言を直す。")).toBeNull();
   });
 });
