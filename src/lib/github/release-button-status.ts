@@ -23,7 +23,7 @@ type WorkflowRunState = { status: string; conclusion: string | null };
  * `claude-review-develop.yml`のcheck-runの形に依存しないようにするため。
  * 判定の中身を読むのは`isMergeJudgementPending`（`lib/pull-request-list.ts`）の役目。
  */
-type PendingMergePullRequestState = {
+export type PendingMergePullRequestState = {
   ciState: CiState | null;
   /** 自動マージ可否の判定（`claude-review-develop.yml`）がまだ走っているか（#1968・#2326） */
   mergeJudgementPending: boolean;
@@ -109,8 +109,13 @@ export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): Releas
 /**
  * マージ待ちPRが「人が押す番」で止まっているか（#1433・#2326）。
  * CIが実行中でも、自動マージ可否の判定中でもない＝いま押せば進む状態。
+ *
+ * **この判定を各所で書き写さない。** 4値サマリ（上）のほか、リリース状況の一括確認
+ * （`/api/repositories/release-pending-merges`）と本番マージ待ちのPush通知
+ * （`lib/notifications/release-merge-push.ts`。#2376）が同じ基準を要る。書き写すと、
+ * 画面が「まだ押せない」と我慢している最中に通知だけが鳴る、といった食い違いが生まれる。
  */
-function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | null): boolean {
+export function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | null): boolean {
   if (pullRequest === null) return false;
   return pullRequest.ciState !== "pending" && !pullRequest.mergeJudgementPending;
 }

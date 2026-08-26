@@ -11,7 +11,9 @@ import { describePushDevice } from "@/lib/push-client";
  * 設定の「通知」区分（#838）。**PCの設定ダイアログとスマホの設定画面が同じものを描く。**
  *
  * 置いてあるのは「この端末で受け取るかどうか」だけで、リポジトリ単位・種別単位のON/OFFは
- * 持たない。通知するのは確認待ち（`00.check-user`）1種類なので、増やすなら種類が増えてから。
+ * 持たない。通知するのは確認待ち（`00.check-user`）と本番へのマージ待ち（#2376）の2種類で、
+ * **どちらも「人が動かないと止まるもの」**——片方だけ止めたい理由が出ていないので、
+ * 種別のスイッチは3種類目が出たときにまとめて作る（受け取りたくない端末は購読を解除する）。
  *
  * **「押せない」で終わらせない。** iOSはホーム画面に追加しないと受け取れず、一度
  * 「許可しない」を選ぶとこの画面からは尋ね直せない。どちらも画面の外でしか直せないため、
@@ -49,12 +51,14 @@ export function NotificationSettingsSection() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <p className="text-sm font-medium">確認待ちのPush通知</p>
+        <p className="text-sm font-medium">確認待ち・本番マージ待ちのPush通知</p>
         <p className="text-xs text-muted-foreground">
           担当リポジトリのIssueに<code className="font-mono">00.check-user</code>
-          が付いたとき、この端末へ通知します。アプリを開いているあいだも同じように通知するので、
-          他のアプリを見ているときにも気づけます。受け取っているあいだは画面内のお知らせを
-          出さないため、二重になることはありません。
+          が付いたときと、本番（<code className="font-mono">main</code>
+          ）へのマージ待ちのリリースPRが残っているときに、この端末へ通知します。
+          アプリを開いているあいだも同じように通知するので、他のアプリを見ているときにも
+          気づけます。受け取っているあいだは画面内のお知らせを出さないため、二重になることは
+          ありません。
         </p>
       </div>
 

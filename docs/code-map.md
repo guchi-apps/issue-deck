@@ -125,7 +125,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     プッシュ通知（[`lib/notifications/check-user-push.ts`](../src/lib/notifications/check-user-push.ts)）は
     宛先の購読を`hiddenRepositories: { none: ... }`で絞る。開いた先に何も無い知らせを送らない
   - 巡回（`conflict-sweep-run.ts`・`deploy-failure-sweep-run.ts`）と無人実行はユーザー単位の
-    概念を持たないため、従来どおり全リポジトリを対象にする
+    概念を持たないため、従来どおり全リポジトリを対象にする。**本番マージ待ちのPush通知
+    （`notifications/release-merge-push.ts`。#2376）も同じで、母集団は全リポジトリ・
+    絞るのは宛先の購読の側**
 - **PR詳細の開き方は2つあり、入口ごとに決まっている**（#2149）。「ユーザーの確認待ち」に並ぶ
   マージ待ちPRのカードだけが**その場に重ねて開く**（`prmodal`クエリ＋
   [`pull-request-detail-dialog.tsx`](../src/components/dashboard/pull-request-detail-dialog.tsx)）。
@@ -2068,6 +2070,39 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     返す**（ビルドし直さずに鍵を差し替えられる）。iOS・iPadOSはホーム画面に追加したとき
     （standalone起動）しかWeb Pushを許さないので、判定を「未対応」と分けて案内する
     （`lib/push-client.ts`の`detectPushAvailability`）。
+- **本番へのマージ待ちもPush通知で届く**（#2376。
+  [`lib/notifications/release-merge-push.ts`](../src/lib/notifications/release-merge-push.ts)）。
+  develop→mainのリリースPR（`release-main/vX.Y.Z`→`main`）は**対応Issue番号を持たないため
+  自動マージが掛からず**、人がマージするまで本番が古い版のまま止まる。それが分かるのは通知ベルと
+  バッジだけで、どちらもブラウザを開いていないと見えない。**`deploy.yml`の実行履歴からも
+  気づけない**——`main`へのpushでしか走らないため、止まっている間は「直近すべて成功」に見える
+  （[docs/multi-agent/release.md](multi-agent/release.md)）。#2230では止まったリリースが
+  18時間放置され、そのあいだ`main`は`4.31.0`・`develop`は`4.32.0`のままだった。
+  - **判定は`isWaitingUserMerge`（`github/release-button-status.ts`）の1か所を通す。** CIが
+    走っている最中・自動マージ可否の判定中は画面も「押す番」にしない（#1433・#2326）ので、
+    ここで別の基準を作ると**画面が我慢している最中に通知だけが鳴る**。`release-pending-merges`が
+    同じ判定を書き写していたのも#2376でここへ寄せた。
+  - **鳴らした記録は`ReleaseMergePushNotice`（リポジトリ＋PR番号＋最後に鳴らした時刻）。**
+    巡回の間隔と違って**プロセス内には置けない**——巡回の再実行は冪等でも通知は鳴り直すもので、
+    本番はPM2の`max_memory_restart`で落ちることがあり（#2331）、`public/sw.js`は
+    `renotify: true`で出すため同じ`tag`でも静かには置き換わらない。確認待ちが
+    `Issue.checkUserPushSentAt`へ送信前に席を取っている（#2300）のと同じ役割で、リリースPRは
+    Issueに紐づかないため表を分けてある。マージ・クローズされたPRの行は次の巡回が消す。
+  - **1回鳴らして終わりにしない。** 気づかれずに残るのがこの待ちの問題そのものなので、
+    マージされないあいだは`RELEASE_MERGE_PUSH_RENOTIFY_HOURS`（既定6時間）ごとに鳴らし直す
+    （`0`で1回きり）。
+  - **`POST /api/dispatch/claim`へは相乗りさせない**（確認待ちの巡回とはここが違う）。あちらは
+    ジョブの払い出しで、poller側は`--max-time 30`の中で待ち、失敗するとその巡はジョブを1本も
+    取りに行かない。GitHub APIを叩く巡回をそこへ入れると、通知の遅さがそのまま実装セッションの
+    起動の遅さになる。**pollerが`--dry-run`で呼ぶのもclaimの側**で、相乗りすると本物の通知が飛ぶ。
+    既存3本（コンフリクト・デプロイ失敗・進捗）と同じ専用の受け口
+    （`POST /api/repositories/release-merge-push-sweep`）を持ち、間隔は
+    `RELEASE_MERGE_PUSH_SWEEP_INTERVAL_MINUTES`（既定10分）でサーバー側が決める。
+  - **購読が1件も無ければGitHubを叩かない。** 送り先の無い巡回でレート制限を使わない。
+    消費は巡回1回あたり、リリースworkflowを持つリポジトリごとにREST 1回（`main`宛のopen PR一覧）で、
+    リリースPRがあるときだけCI状態のGraphQLが1回増える。
+  - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
+    「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
