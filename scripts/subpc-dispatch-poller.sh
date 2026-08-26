@@ -1034,6 +1034,39 @@ sweep_progress() {
   return 0
 }
 
+# --- 本番マージ待ちの巡回通知 ---------------------------------------------------
+# 本番へのマージ待ち（develop→mainのリリースPR）を、issue-deckに巡回して見つけさせ、
+# Push通知させる（#2376）。
+#
+# **マージ待ちは通知ベルと画面のバッジにしか出ず、ブラウザを開くまで見えなかった。**
+# #2230では止まったリリースが18時間放置され、そのあいだ本番デプロイが止まっていた。
+#
+# 上の3つと同じ形で、**pollerがやるのは「呼ぶ」ことだけ**。実際に巡回するかどうかも、
+# 鳴らすかどうか（同じPRを鳴らし直す間隔）もissue-deck側が決める。失敗しても1巡を止めない。
+sweep_release_merges() {
+  if ! api_call POST /api/repositories/release-merge-push-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+      404|000) return 0 ;;
+      *) report_api_failure "本番マージ待ちの巡回通知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept notified
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  notified="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.notified | length' 2>/dev/null || echo 0)"
+  [[ "${notified:-0}" -gt 0 ]] || return 0
+
+  # 鳴らしたときだけ出す（毎巡「異常なし」を積まない）。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.notified[] | "本番マージ待ちを通知しました: \(.repositoryFullName)#\(.pullRequestNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- ジョブの実行 -------------------------------------------------------------
 # ジョブ状態の報告を再送する回数と間隔（#1620）。
 #
@@ -2228,6 +2261,9 @@ run_once() {
     # 進捗の取り残しの巡回回収（#2294）。**dry-runでは呼ばない**（進捗の書き換えと
     # コメント投稿という外向きの副作用があるため）。
     sweep_progress
+    # 本番マージ待ちの巡回通知（#2376）。**dry-runでは呼ばない**（Push通知という
+    # 外向きの副作用があるため）。
+    sweep_release_merges
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

@@ -83,6 +83,13 @@ developへ取り込んだうえでリリースPRをcloseし、リリースを起
 リリースPRが止まっている間は「直近すべて成功」に見え、本番も動いたままになる。見るべきは
 `main`と`develop`の`package.json`のversion差と、base=mainのopenなPRのCI状態。
 
+**気づく手がかりとしてPush通知が飛ぶ**（#2376）。`main`宛のリリースPRが「人が押す番」（CIが
+終わっていて自動マージ可否の判定も走っていない）で残っていると、サブPCのpollerが叩く巡回
+（`POST /api/repositories/release-merge-push-sweep`）がPush通知を出す。マージされないあいだは
+既定6時間ごとに鳴り直す。**修復PR（`pr-repair/*`→develop）そのものは対象ではない**——通知が
+出ているのは常に`main`宛のPRについてで、修復PRが止まっていることはその結果として現れる。
+設計は[../code-map.md](../code-map.md)の「本番へのマージ待ちもPush通知で届く」。
+
 ### ブランチ名を変えるときに揃える場所
 
 `release/v`（バンプPR）と接頭辞が重ならない名前にしてある。重なると`classifyPullRequest`の判定順

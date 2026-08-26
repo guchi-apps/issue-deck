@@ -566,6 +566,7 @@ export function buildInitIssueBody(
 ): string {
   const profile = newAppKindProfile(spec.kind);
   const repo = repositoryFullName(spec);
+  const isNext = spec.kind === "next" || spec.kind === "next-db";
   const scaffolded = scaffold !== null && scaffold.paths.length > 0;
   const has = (path: string) => scaffolded && scaffold.paths.includes(path);
   // **無人実行で回せるかどうかは、雛形が置けたかではなくcallerが置けたかで決まる。**
@@ -611,8 +612,48 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
     ? `\n- [ ] \`prisma/schema.prisma\` と初期マイグレーションを作る${has("prisma.config.ts") ? "（\`prisma.config.ts\` は雛形にあり、\`loadEnv\` の \`quiet: true\` を落とさないこと）" : ""}\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
     : "";
 
+  // **`typecheck`の中身をここで固定する**（#2378）。Next.js 16の`PageProps`/`LayoutProps`/
+  // `RouteContext`は`.next/types`へ生成されるグローバル型で、`tsc --noEmit`だけでは
+  // `Cannot find name 'LayoutProps'`になる。`next build`は内部で型生成するため、
+  // **ビルドは通るのに`typecheck`だけが落ちる**という分かりにくい形になる
+  const typecheckScript = isNext
+    ? `
+
+  \`\`\`json
+  "lint": "eslint",
+  "typecheck": "next typegen && tsc --noEmit",
+  "build:ci": "${profile.usesDatabase ? "prisma generate && " : ""}next build"
+  \`\`\`
+
+  **\`typecheck\` から \`next typegen\` を外さないこと。** Next.js 16の \`PageProps\`・\`LayoutProps\`・
+  \`RouteContext\` は \`.next/types\` へ生成されるグローバル型で、生成前は
+  \`Cannot find name 'LayoutProps'\` になる。\`next build\` は内部で型生成するため、
+  **ビルドは通るのに \`typecheck\` だけが落ちる**という分かりにくい形になる。`
+    : "";
+
+  // **`packageManager`を書かないと、雛形が置いた設定が無言で効かない**（#2378）。
+  // `ci.yml`・`deploy.yml`の`pnpm/action-setup@v4`は`version:`を持たず、VPSの
+  // `corepack enable pnpm`も、どちらも`package.json`の`packageManager`を見てpnpmの版を決める。
+  // 版が変わると`pnpm-workspace.yaml`の設定キーの解釈も変わりうる
+  const packageManagerTask = isNext
+    ? `
+- [ ] \`package.json\` に \`"packageManager"\` を書いてpnpmの版を固定する（\`corepack use pnpm@latest\` が
+      ハッシュ付きで書き込む）。**書かないと \`ci.yml\`・\`deploy.yml\`・VPSの \`corepack enable pnpm\` が
+      それぞれ別の版を拾い、\`pnpm-workspace.yaml\` の設定が無言で効かないことがある**`
+    : "";
+
+  // **ビルドスクリプトの承認は雛形（`pnpm-workspace.yaml`）で済んでいる**（#2378）。
+  // ここに書くのは「作り直さない」「依存を足したら承認し直す」の2点だけ
+  const buildApprovalTask = has("pnpm-workspace.yaml")
+    ? `
+- [ ] 依存を入れたら \`pnpm approve-builds\` を実行し、\`pnpm-workspace.yaml\` の差分をコミットする。
+      雛形が${[...(profile.usesDatabase ? ["prisma", "@prisma/client", "@prisma/engines"] : []), "sharp", "unrs-resolver"].map((name) => `\`${name}\``).join("・")}を承認済みにしてあるので、**このファイルを作り直さない**。
+      pnpm 10系は未承認のビルドスクリプトを**警告だけ出して終了コード0で素通りする**ため、
+      承認漏れは\`${profile.packageManager} install\`の成功では気づけない`
+    : "";
+
   const ciTasks = has(".github/workflows/ci.yml")
-    ? `\n- [ ] \`.github/workflows/ci.yml\` が呼ぶ \`lint\`・\`typecheck\`・\`build:ci\` のnpm scriptsを用意する`
+    ? `\n- [ ] \`.github/workflows/ci.yml\` が呼ぶ \`lint\`・\`typecheck\`・\`build:ci\` のnpm scriptsを用意する${typecheckScript}`
     : `\n- [ ] \`.github/workflows/ci.yml\` を作る（必須）
 - [ ] \`.github/workflows/deploy.yml\` を作る（\`main\` へのpushでVPSへ配る。配布先は \`${serverAppDir(spec)}/\`）`;
 
@@ -627,8 +668,7 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
   \`\`\`
 `;
 
-  const pwaAndChangelogScaffolded =
-    (spec.kind === "next" || spec.kind === "next-db") && has("src/app/manifest.ts");
+  const pwaAndChangelogScaffolded = isNext && has("src/app/manifest.ts");
 
   const pwaTasks = pwaAndChangelogScaffolded
     ? `
@@ -690,7 +730,7 @@ ${alreadyThere}
 ## やること
 
 - [ ] アプリの雛形を作る（${profile.label}）
-- [ ] バージョン管理を \`package.json\` の \`version\` に載せる
+- [ ] バージョン管理を \`package.json\` の \`version\` に載せる${packageManagerTask}${buildApprovalTask}
 - [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
 - [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}
 ${multiAgent}
@@ -774,9 +814,19 @@ SSHも同じ理由で、無人実行からは確かめられません。
 
 ## やること（初回デプロイ）
 
-- [ ] \`develop\` → \`main\` のリリースPRを作る
+- [ ] \`develop\` → \`main\` のリリースPRを、**\`release-develop-to-main.yml\` から作る**
+      （issue-deckの画面のリリースボタン、または \`gh workflow run release-develop-to-main.yml --repo ${repo} -f bump_kind=auto\`）
 - [ ] **人がマージする**（\`develop\` → \`main\` は自動マージ不可カテゴリ）
 - [ ] \`deploy.yml\` の成功と、Signalyへのデプロイ結果の通知を確認する
+
+**2回目以降も同じ経路を使ってください。** \`deploy.yml\` の tag ジョブは \`package.json\` の
+\`version\` から \`v<version>\` のタグを作るため、**この初回デプロイの時点で最初のタグが
+切られます**（\`create-next-app\` の既定のままなら \`v0.1.0\`）。
+バージョンを上げずに次の \`develop\` → \`main\` を出すと、\`Tag v0.1.0 already exists\` で
+デプロイが止まります。\`release-develop-to-main.yml\` はバージョンbump用のPRを先に作るので、
+この経路を通っているかぎり詰まりません。雛形の \`version-tag-check.yml\` が
+main宛PRのCIで先に落としますが、**落ちてから直すより、最初からこの経路を使うほうが早い**
+（${NEW_APP_PARENT_REPOSITORY}#2378）。
 
 ## 完了の確認方法
 

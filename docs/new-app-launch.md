@@ -316,6 +316,42 @@ callerを置いてしまえば、初期化Issueも最初から無人実行で回
 代われない。ただし初期化Issueの前提ではなくなり、`.github/secrets-manifest.tsv`が作成時点で
 あるぶん、GitHubのsecretへの同期もその場で終わる。
 
+### 失敗が静かに通るものは、雛形かIssue本文で先回りする（#2378）
+
+`guchi-apps/trainroute`を**この機能を使わず手写しで**立ち上げたときに踏んだ3点は、いずれも
+**失敗が警告どまりか、別の経路では成功する**ため、初期化を担当するエージェントが自力で
+気づけない。テストや型チェックが通ることと動くことが別、という形で出てくる。
+
+- **`typecheck`は`next typegen && tsc --noEmit`にする。** Next.js 16の`PageProps`・
+  `LayoutProps`・`RouteContext`は`.next/types`へ生成されるグローバル型で、生成前は
+  `Cannot find name 'LayoutProps'`になる。`next build`は内部で型生成するため、
+  **ビルドは通るのに`typecheck`だけが落ちる**。初期化Issueにnpm scriptsごと書いてある
+  （[`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts)の`typecheckScript`）。
+- **依存のビルドスクリプトは`pnpm-workspace.yaml`で承認済みにして始める。** pnpm 10系は
+  依存の`install`/`postinstall`を既定で実行せず、**警告だけ出して終了コード0で素通りする**
+  （実測: 未承認だと`Ignored build scripts: …`の枠が出るだけで`pnpm install`は成功扱い、
+  `allowBuilds`を書くと`postinstall`が走る）。Prismaはこの段でクエリエンジンを取りに行く。
+  承認は対話的な`pnpm approve-builds`でしか求められないので、CIでも無人実行でも承認漏れに
+  気づけない。**効くのはCIとローカルだけで、VPSへは配られない**——`deploy.yml`が作るtarの
+  中身（`scaffold-workflows.ts`の`archiveEntries`）にこのファイルは無く、本番で要る
+  `prisma generate`はアプリ自身の`postinstall`（＝依存のビルドスクリプトではない）なので
+  承認の対象外。**要否を確かめずに配布物へ足さないこと。** あわせて初期化Issueで
+  `package.json`の`packageManager`を書かせる——`pnpm/action-setup@v4`もVPSの
+  `corepack enable pnpm`も、ここを見てpnpmの版を決める。
+- **初回の`main`マージが`v<version>`のタグを作る。** その後versionを上げずに次の
+  `develop`→`main`を出すと、`deploy.yml`のtagジョブが`Tag v0.1.0 already exists`で落ちて
+  本番デプロイが止まる。**雛形の`version-tag-check.yml`がmain宛PRのCIで先に落とす**ので、
+  trainrouteが詰まったのは手写しでこのcallerが無かったから。初回デプロイ前チェックIssueには
+  「リリースPRは`release-develop-to-main.yml`から作る」と書いてある。
+  **初期versionを`0.0.0`にする案は採らなかった**——タグが無ければ`version-tag-check`は
+  素通りするので、最初のリリースがリリースワークフローを通ることを強制できず、詰まる位置が
+  1つずれるだけだった。
+- **`release-develop-to-main.yml`と`version-tag-check.yml`は`multiAgent`で出し分けない**
+  （Next.js系のみ）。どちらもリリース衛生のワークフローでエージェント運用とは関係がなく、
+  雛形の`CLAUDE.md`も両方が存在する前提で一覧に載せている。fastapi・静的サイトは
+  `version-file`の既定値（`package.json`）がそのままでは合わないため、現状のまま
+  `multiAgent`に従わせてある。
+
 ### `repository_selection`はDBではなくGitHubへ聞く
 
 DBの`GithubInstallation.repositorySelection`は`installation`イベントでしか更新されず、
