@@ -34,6 +34,20 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.44.0",
+    date: "2026-08-26",
+    changes: [
+      "本番環境へのリリース待ち状態もプッシュ通知でお知らせするようになりました。また、ローカルでのIssue対応セッションをCodex CLIからも起動できるようになりました。",
+    ],
+    usage: [
+      "1. アプリの通知設定を開く",
+      "2. リリース待ち（developからmainへのマージ待ち）の通知が有効になっていることを確認する",
+      "3. 対応対象のIssueが本番反映待ちの状態になると、プッシュ通知が届けば成功",
+      "4. ローカルセッションを開始する画面で、起動方法にCodex CLIを選べることを確認する",
+      "5. Codex CLIを選んでセッションが起動すれば成功",
+    ],
+  },
+  {
     version: "4.43.1",
     date: "2026-08-25",
     changes: [
