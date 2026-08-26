@@ -13,6 +13,7 @@ import {
   type RefCheckState,
 } from "@/lib/github/release-api";
 import {
+  isWaitingUserMerge,
   resolveFailedReleaseWorkflow,
   summarizeReleaseStatus,
   type ReleaseButtonStatus,
@@ -168,14 +169,13 @@ async function handleGET() {
         if (status === "idle") return null;
 
         // CI実行中と自動マージ可否の判定中はまだマージできないため、マージ待ちとして
-        // 数えない（#1433・#2326）。`summarizeReleaseStatus`のaction_required判定基準と揃える。
-        const releaseWaiting =
-          releaseCiState !== null && releaseCiState !== "pending" && !releaseJudgementPending;
-        const bumpWaiting =
-          bumpCiState !== null && bumpCiState !== "pending" && !bumpJudgementPending;
+        // 数えない（#1433・#2326）。**基準は`isWaitingUserMerge`の1か所**で、
+        // `summarizeReleaseStatus`のaction_required判定と同じものを通す（#2376で書き写しをやめた）。
+        const releaseWaiting = isWaitingUserMerge(summaryInput.releasePullRequest);
+        const bumpWaiting = isWaitingUserMerge(summaryInput.bumpPullRequest);
 
         let pendingMerge: ReleasePendingMerge | null = null;
-        if (releasePr && releaseWaiting) {
+        if (releasePr && releaseCiState !== null && releaseWaiting) {
           pendingMerge = {
             mergeTarget: "main",
             pullRequestNumber: releasePr.number,
@@ -183,7 +183,7 @@ async function handleGET() {
             pullRequestTitle: releasePr.title,
             ciState: releaseCiState,
           };
-        } else if (bumpPr && bumpWaiting) {
+        } else if (bumpPr && bumpCiState !== null && bumpWaiting) {
           // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
           pendingMerge = {
             mergeTarget: "develop",

@@ -59,6 +59,9 @@ export const GITHUB_API_FEATURES = [
   // `develop-merge-sweep`・`manual-step-label`をここへ移した。対象Issueの
   // PR一覧はETagが効くので、実際に消費するのは進める・通知するときだけ。
   { key: "progress_sweep", label: "進捗の取り残しの巡回回収" },
+  // 本番へのマージ待ちの巡回通知（#2376）。リリースworkflowを持つリポジトリごとに
+  // `main`宛のopen PR一覧をREST 1回。リリースPRがあるときだけCI状態のGraphQLが1回増える。
+  { key: "release_merge_push", label: "本番マージ待ちの巡回通知" },
   { key: "secrets_sync", label: "シークレット同期の起動" },
   // 元は「Issueの再同期」(`sync`)として計上していたが、実態は共有ワークフローのタグ確認で、
   // 消費量も大きかったため#1503で分けた（同時にGraphQLへ寄せて消費自体を減らしている）

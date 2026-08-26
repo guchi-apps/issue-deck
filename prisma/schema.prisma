@@ -1158,3 +1158,30 @@ model DeployFailureIssue {
   @@unique([repositoryFullName, runId])
   @@index([repositoryFullName, state])
 }
+
+/// 本番へのマージ待ち（develop→mainのリリースPR）をPush通知した記録（#2376）。
+///
+/// **Push通知は「もう鳴らしたか」をプロセスの外に持つ必要がある。** 巡回の再実行そのものは
+/// 冪等だが、通知は再実行すると鳴る。本番はPM2の`max_memory_restart`で落ちることがあり
+/// （`deploy/ecosystem.config.js`・#2331）、プロセス内に持つと再起動のたびに鳴り直す
+/// （`public/sw.js`は`renotify: true`で出すので、同じ`tag`でも静かには置き換わらない）。
+/// 確認待ちのPushが`Issue.checkUserPushSentAt`に席を取っている（#2300）のと同じ役割で、
+/// リリースPRはIssueに紐づかないため別の表にしている。
+///
+/// 持つのは**いつ鳴らしたか**だけで、マージ待ちかどうかの正はGitHubのPR。
+/// 鍵は`repositoryFullName` + `pullRequestNumber`（`DeployFailureIssue`の`runId`と同じ考え方）。
+/// マージ・クローズされたPRの行は次の巡回が消すので、平常時は数行しか残らない。
+model ReleaseMergePushNotice {
+  id                 String @id @default(cuid())
+  repositoryFullName String
+  /// マージ待ちのリリースPRの番号。**同じPRで鳴らし続けないための鍵**
+  pullRequestNumber  Int
+  /// 最後に鳴らした時刻。ここから再通知までの間隔を測る
+  notifiedAt         DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber])
+  @@index([repositoryFullName])
+}

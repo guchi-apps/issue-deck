@@ -1327,6 +1327,20 @@ cronで動いており、**Actionsの課金はジョブ単位で1分未満切り
 設計は[progress-status-architecture.md](../progress-status-architecture.md)「取り残しの回収は
 issue-deck側の巡回が担う」と[github-billing.md](../github-billing.md)。
 
+**本番へのマージ待ちの巡回通知（#2376）も同じ1巡に相乗りしている。**
+`POST /api/repositories/release-merge-push-sweep`を毎巡そのまま呼び、間隔
+（`RELEASE_MERGE_PUSH_SWEEP_INTERVAL_MINUTES`・既定10分・0で無効）も、鳴らすかどうか
+（同じPRを鳴らし直すまでの間隔）もissue-deck側が持つ。他より間隔が長いのは、リリース
+workflowを持つリポジトリごとにGitHub APIを叩くため。ログに出すのは鳴らしたときだけで、
+`--dry-run`では呼ばない（Push通知という外向きの副作用があるため）。設計は
+[../code-map.md](../code-map.md)「本番へのマージ待ちもPush通知で届く」。
+
+**`POST /api/dispatch/claim`へ相乗りさせなかったのはここが理由**（確認待ちのPush通知とはここが
+違う）。claimは`--max-time 30`の中で待つうえ、失敗するとその巡はジョブを1本も取りに行かない
+（`report_api_failure`して`return 1`）。GitHub APIを叩く巡回をそこへ入れると、通知の遅さが
+そのまま実装セッションの起動の遅さになる。`--dry-run`が呼ぶのもclaimの側で、相乗りすると
+dry-runで本物のPush通知が飛ぶ。
+
 ### セッションの本数の上限（#1361）
 
 回収は「判定できないときは畳まない」設計なので、IssueがOPENのセッションも人の入力待ちのセッションも
@@ -2170,6 +2184,7 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 | `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |
 | `POST /api/repositories/deploy-failure-sweep` | `DISPATCH_SECRET` | 本番デプロイ失敗の巡回検知を促す（#2236）。巡回するかどうかも、起票するかどうかもissue-deck側が決める |
 | `POST /api/issues/progress-sweep` | `DISPATCH_SECRET` | 進捗の取り残しの巡回回収を促す（#2294）。巡回するかどうかも、どのIssueをどう扱うかもissue-deck側が決める |
+| `POST /api/repositories/release-merge-push-sweep` | `DISPATCH_SECRET` | 本番へのマージ待ちの巡回通知を促す（#2376）。巡回するかどうかも、鳴らすかどうかもissue-deck側が決める |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 
