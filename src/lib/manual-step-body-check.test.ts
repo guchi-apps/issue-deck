@@ -275,4 +275,35 @@ describe("1Passwordを扱うコマンド", () => {
       );
     expect(rules(body)).toEqual([]);
   });
+
+  // サブPCにはread専用のサービスアカウントが常時exportされており、`op signin`しても
+  // 勝てないため、生のopでの書き換えは人が実行しても落ちる（#2417）
+  it("`op`で1Passwordを書き換える手順をwarningで指摘する", () => {
+    for (const command of [
+      "op item edit 'aide' --vault apps 'dayspan-token[password]=<控えた値>'",
+      "op item create --category 'API Credential' --vault apps --title aide-bot",
+      "op document create ./key.pem --vault apps --title vapid",
+    ]) {
+      const body = templateBody().replace("（その手順で実行するコマンド）", command);
+      const finding = checkManualStepBody(body).find(
+        (entry) => entry.rule === "op-write-command",
+      );
+      expect(finding?.severity).toBe("warning");
+      expect(finding?.message).toContain("1Passwordアプリ");
+    }
+  });
+
+  it("読み取りだけの`op`は指摘しない", () => {
+    for (const command of [
+      "op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
+      "op item get aide --vault apps --fields dayspan-token > /dev/null",
+      "op item list --vault apps > /dev/null",
+    ]) {
+      const body = templateBody().replace(
+        "（確かめるコマンド。効いていなければ終了コードが0にならないもの）",
+        command,
+      );
+      expect(rules(body)).toEqual([]);
+    }
+  });
 });
