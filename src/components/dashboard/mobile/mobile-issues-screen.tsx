@@ -6,6 +6,7 @@ import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-p
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
+import { useNow } from "@/hooks/use-now";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
@@ -17,6 +18,12 @@ import {
 } from "@/lib/issue-stats";
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getNavViewLabel, navViewIsUserActionList } from "@/lib/nav-views";
+import {
+  selectSnoozedIssueIds,
+  type SnoozeEntry,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -47,6 +54,17 @@ type MobileIssuesScreenProps = {
    * タブの件数から外し、ヘッダーの件数には内訳（`2件・実行中1件`）として出す。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /**
+   * 「いまは実施しない」として伏せた項目（#2398）。件数・一覧・通知が同じ集合を読む。
+   * 渡さない場合は保留の仕組みごと出さない。
+   */
+  snoozes?: SnoozeMap;
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  onUnsnooze?: (target: SnoozeTarget) => void;
+  /** 保留中で上の配列から外したマージ待ちPR（#2398）。「保留中N件」を開くと並ぶ */
+  snoozedMergePendingPullRequests?: PullRequestSummary[];
+  /** そのPRの期限（#2398）。「最短でいつ戻るか」の1行に使う */
+  snoozedMergePendingEntries?: SnoozeEntry[];
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
@@ -92,6 +110,11 @@ export function MobileIssuesScreen({
   mergePendingPullRequests,
   mergeCheckWaitingCount = 0,
   checkUserRunningIssueIds,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
+  snoozedMergePendingPullRequests,
+  snoozedMergePendingEntries,
   onSelectPullRequest,
   onChangeView,
   onChangeFilters,
@@ -118,6 +141,13 @@ export function MobileIssuesScreen({
     [state, labels, assignee],
   );
 
+  // 保留中のIssue（#2398）。件数と一覧が同じ集合を読むよう、ここで1回だけ求める
+  const now = useNow();
+  const snoozedIssueIds = useMemo(
+    () => (snoozes ? selectSnoozedIssueIds(issues, snoozes, now) : undefined),
+    [issues, snoozes, now],
+  );
+
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
     return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
@@ -134,8 +164,10 @@ export function MobileIssuesScreen({
         issues,
         // 「ユーザーの確認待ち」からは実行中のIssueを外す（#2174。PCの左メニューと同じ数え方）
         checkUserRunningIssueIds,
+        // 要対応の2ビューからは保留中も外す（#2398。同上、PCと同じ数え方）
+        snoozedIssueIds,
       ),
-    [issues, listFilters, currentUserLogin, checkUserRunningIssueIds],
+    [issues, listFilters, currentUserLogin, checkUserRunningIssueIds, snoozedIssueIds],
   );
 
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
@@ -211,9 +243,29 @@ export function MobileIssuesScreen({
             pullRequests={mergePendingPullRequests}
             waitingForChecksCount={mergeCheckWaitingCount}
             onSelectPullRequest={onSelectPullRequest}
+            onSnooze={onSnooze}
+            now={now}
           />
         ),
       }}
+      snoozes={snoozes}
+      onSnooze={onSnooze}
+      onUnsnooze={onUnsnooze}
+      snoozedPinned={
+        view === "check-user" && snoozes && onUnsnooze
+          ? {
+              count: snoozedMergePendingPullRequests?.length ?? 0,
+              entries: snoozedMergePendingEntries ?? [],
+              section: (
+                <MergePendingPullRequests
+                  pullRequests={snoozedMergePendingPullRequests ?? []}
+                  onSelectPullRequest={onSelectPullRequest}
+                  snoozed={{ snoozes, now, onUnsnooze }}
+                />
+              ),
+            }
+          : undefined
+      }
     />
   );
 }

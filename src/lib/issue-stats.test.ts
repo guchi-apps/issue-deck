@@ -780,6 +780,38 @@ describe("time-dependent stats", () => {
       expect(computeNavCountsForFilters(issues, listFilters, null)["manual-step"]).toBe(1);
     });
 
+    // #2398: 保留は「上から順に手を動かせば盤面が進む」枠の読み方を守るための仕掛け
+    it("要対応の2ビューからは保留中を外す", () => {
+      const checkUserLabel = { name: "00.check-user", color: "red", description: null };
+      const manualStepLabel = { name: "71.manual-step", color: "d876e3", description: null };
+      const issues = [
+        makeIssue({ id: "1", number: 1, labels: [checkUserLabel] }),
+        makeIssue({ id: "2", number: 2, labels: [checkUserLabel] }),
+        makeIssue({ id: "3", number: 3, labels: [manualStepLabel] }),
+      ];
+
+      const counts = computeNavCountsForFilters(
+        issues,
+        listFilters,
+        null,
+        issues,
+        undefined,
+        new Set(["1", "3"]),
+      );
+
+      expect(counts["check-user"]).toBe(1);
+      expect(counts["manual-step"]).toBe(0);
+    });
+
+    it("保留中でも他のビュー（すべてのIssue）の件数は減らさない", () => {
+      const issues = [makeIssue({ id: "1", number: 1 }), makeIssue({ id: "2", number: 2 })];
+
+      expect(
+        computeNavCountsForFilters(issues, listFilters, null, issues, undefined, new Set(["1"]))
+          .all,
+      ).toBe(2);
+    });
+
     // 未確認だけを数えると、読み終えた質問しか無いときに「質問は無い」と読めてしまう（#2070）
     it("質問は一覧に並ぶ件数（確認済み・回答待ちも含む）を数える", () => {
       const issues = [

@@ -31,6 +31,10 @@ import {
  * 回答待ちは、待ちを作った時点で理由ラベルまで確定しており、人が答えるまで自動では消えない。
  * 上の2つの理由がどちらも当てはまらないので待たずに送る（`decideCheckUserPush`）。
  *
+ * **「いまは実施しない」として伏せているユーザーへは送らない**（#2398）。非表示リポジトリ
+ * （#2279）と同じく宛先の側で落とし、**宛先が全員保留なら送信済みの記録も付けない**——
+ * 付けると保留を解除しても二度と鳴らないため、次の巡回へ回して保留が解けるのを待つ。
+ *
  * 送信済みかどうかは`Issue.checkUserPushSentAt`で持つ。`00.check-user`が付き直すたびに
  * `checkUserLabeledAt`とセットでnullへ戻る（`github/sync-issues.ts`）ので、
  * 「まだnullで、付与から待ち時間が過ぎたもの」が未送信の集合になる。**この記録は送る前に
@@ -236,25 +240,48 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     });
     if (decision === "wait") continue;
 
-    // **送る前に「送信済み」を立てて席を取る**（#2300）。取れなかったら、同じIssueを
-    // 別の巡回が既に掴んでいるので何もしない
-    if (!(await reserveCheckUserPush(issue.id, now))) continue;
-
     if (decision === "send") {
       // 宛先は「そのリポジトリのインストールに紐づくユーザー」の購読すべて。
       // 種別単位のON/OFFは今回の範囲外（購読の有無だけで決める）。
       //
       // **そのリポジトリを非表示にしているユーザーへは送らない**（#2279）。非表示にすると
       // 一覧にも確認待ちビューにも出なくなるため、通知だけが届いても開いた先に何も無い
-      const targets = await db.pushSubscription.findMany({
-        where: {
-          user: {
-            userInstallations: { some: { installationId: issue.repository.installationId } },
-            hiddenRepositories: { none: { repositoryId: issue.repository.id } },
+      //
+      // **「いまは実施しない」として伏せているユーザーへも送らない**（#2398）。判定は
+      // 画面側（`lib/snooze.ts`）と同じで、`until`がnull（手動解除まで）か未来のものだけを
+      // 効いている保留として見る
+      const subscriberWhere = {
+        userInstallations: { some: { installationId: issue.repository.installationId } },
+        hiddenRepositories: { none: { repositoryId: issue.repository.id } },
+      };
+      const snoozedWhere = {
+        snoozedItems: {
+          some: {
+            repositoryId: issue.repository.id,
+            kind: "ISSUE" as const,
+            number: issue.number,
+            OR: [{ until: null }, { until: { gt: now } }],
           },
         },
-        select: { id: true, endpoint: true, p256dh: true, auth: true },
-      });
+      };
+      const [targets, snoozedSubscriberCount] = await Promise.all([
+        db.pushSubscription.findMany({
+          where: { user: { ...subscriberWhere, NOT: snoozedWhere } },
+          select: { id: true, endpoint: true, p256dh: true, auth: true },
+        }),
+        db.pushSubscription.count({ where: { user: { ...subscriberWhere, ...snoozedWhere } } }),
+      ]);
+
+      // **宛先が保留のせいで全員消えたときは、席を取らずに次の巡回へ回す**（#2398）。
+      // `checkUserPushSentAt`は一度立つと`00.check-user`が付き直すまで戻らないので、
+      // ここで送信済みにすると保留を解除しても二度と鳴らない。保留が解ければ、この巡回が
+      // そのまま拾って送る（`decideCheckUserPush`は`checkUserLabeledAt`しか見ない）
+      if (targets.length === 0 && snoozedSubscriberCount > 0) continue;
+
+      // **送る前に「送信済み」を立てて席を取る**（#2300）。取れなかったら、同じIssueを
+      // 別の巡回が既に掴んでいるので何もしない
+      if (!(await reserveCheckUserPush(issue.id, now))) continue;
+
       const result = await sendPushNotification(
         targets,
         buildCheckUserPushPayload({
@@ -266,7 +293,11 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
         }),
       );
       sent += result.sent;
+      continue;
     }
+
+    // `skip`（古すぎるもの）は送らずに記録だけ付ける
+    await reserveCheckUserPush(issue.id, now);
   }
 
   return sent;

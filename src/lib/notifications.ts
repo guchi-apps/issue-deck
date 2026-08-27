@@ -14,6 +14,7 @@ import { buildPullRequestId } from "@/lib/github-reference";
 import { computeManualStepReadiness } from "@/lib/manual-step-attention";
 import { isAutoMergingPullRequest } from "@/lib/merge-pending-attention";
 import { filterPullRequestsByView } from "@/lib/pull-request-list";
+import { findActiveIssueSnooze, findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -95,6 +96,17 @@ export type BuildNotificationsInput = {
    * メニューからは消えているのにベルには「PRのマージ」と出ている状態になる。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /**
+   * ユーザーが「いまは実施しない」として伏せた項目（#2398。`lib/snooze.ts`）。
+   *
+   * **確認待ち・手作業待ち・マージ待ちPRのどれからも外す。** 保留は「いまの保留はCIの完了を
+   * 待つ一時的なもので、人の意思による保留は無い」という前提を崩す機能なので、件数から
+   * 消しておいてベルだけ鳴らすと、押せる操作が無い項目へ呼び出されることになる。
+   * **省略時は従来どおり全件を出す**（判定できないことを理由に通知を減らさない）。
+   */
+  snoozes?: SnoozeMap;
+  /** 保留の期限判定に使う現在時刻(epoch ms)。未取得(null)なら実時刻を使う */
+  now?: number | null;
 };
 
 /**
@@ -290,7 +302,30 @@ function buildPullRequestNotifications(
  * `sort`の安定性で保つ。
  */
 export function buildNotifications(input: BuildNotificationsInput): NotificationItem[] {
-  const { issues, pullRequests, releaseStatuses, checkUserRunningIssueIds } = input;
+  const { releaseStatuses, checkUserRunningIssueIds, snoozes } = input;
+
+  // 保留中（#2398）はここで母集団から落とす。**Issueもマージ待ちPRも同じ場所で落とす**ので、
+  // 「確認待ちからは消えたのにマージ待ちPRとしてもう一度出る」という抜けが起きない
+  const now = input.now ?? Date.now();
+  const issues =
+    snoozes && snoozes.size > 0
+      ? input.issues.filter((issue) => findActiveIssueSnooze(snoozes, issue, now) === null)
+      : input.issues;
+  const pullRequests =
+    snoozes && snoozes.size > 0
+      ? input.pullRequests.filter(
+          (pullRequest) =>
+            findActiveSnooze(
+              snoozes,
+              {
+                kind: "pull-request",
+                repositoryFullName: pullRequest.repositoryFullName,
+                number: pullRequest.number,
+              },
+              now,
+            ) === null,
+        )
+      : input.pullRequests;
 
   const releaseItems = buildReleaseNotifications(releaseStatuses);
   const checkUserItems = buildCheckUserNotifications(

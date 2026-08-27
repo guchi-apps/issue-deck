@@ -26,8 +26,10 @@ import {
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -72,6 +74,14 @@ import {
   resolveQuestionState,
   type QuestionState,
 } from "@/lib/question-attention";
+import {
+  describeSnoozeResume,
+  describeSnoozeUntil,
+  findActiveIssueSnooze,
+  type SnoozeEntry,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
 
@@ -117,6 +127,20 @@ type IssueListProps = {
    */
   pinnedCount?: number;
   /**
+   * 保留中で`pinnedSection`から外したもの（#2398）。マージ待ちPull Requestを伏せたぶんで、
+   * 「保留中N件」の1行を開いたときに保留中のIssueと一緒に並べる。
+   *
+   * **PR側に別の1行を作らない**ため、件数・期限・枠をここで受け取って合流させる。
+   */
+  snoozedPinned?: {
+    /** 件数。ヘッダーの内訳と1行の件数へ合流させる */
+    count: number;
+    /** いつ戻るかを1行にまとめるための保留（`describeSnoozeResume`へ渡す） */
+    entries: SnoozeEntry[];
+    /** 開いたときに並べる枠 */
+    section: ReactNode;
+  };
+  /**
    * 手作業Issue（`71.manual-step`）が、いま実行できるかどうか（#1763）。
    * 行の右上へアイコンで出し、「ユーザーの作業待ち」ではヘッダーの件数にも使う。
    *
@@ -125,6 +149,17 @@ type IssueListProps = {
    * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /**
+   * ユーザーが「いまは実施しない」として伏せた項目の引き当て表（#2398。`lib/snooze.ts`）。
+   *
+   * **効かせるのは要対応の2ビュー（`check-user`・`manual-step`）だけ。** 他の一覧では
+   * 保留中の行も今までどおり並び、時計ボタンも出さない。省略時は保留の仕組みごと出さない。
+   */
+  snoozes?: SnoozeMap;
+  /** 保留にする・期限を付け替える（`useSnoozes`の`snooze`）。省略時は時計ボタンを出さない */
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  /** 保留を解除する（`useSnoozes`の`unsnooze`）。省略時は解除ボタンを出さない */
+  onUnsnooze?: (target: SnoozeTarget) => void;
   /**
    * 確認待ち（`00.check-user`）のうち、まだエージェントが動いていて押せる操作が無いIssueのid
    * （#2174。判定は`lib/check-user-attention.ts`）。
@@ -359,7 +394,7 @@ const COUNT_BAR_ACTIONS_CLASS = "ml-auto flex shrink-0 items-center gap-2";
 
 export function IssueList({
   title,
-  issues,
+  issues: allIssues,
   selectedIssueId,
   onSelectIssue,
   className,
@@ -373,7 +408,11 @@ export function IssueList({
   view,
   pinnedSection,
   pinnedCount = 0,
+  snoozedPinned,
   prerequisiteReadiness,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
   checkUserRunningIssueIds,
   onStartManualStepGuide,
   onStartIssueOrder,
@@ -386,6 +425,41 @@ export function IssueList({
   fetchedAt = null,
   autoRefreshIntervalMs,
 }: IssueListProps) {
+  // 現在時刻(epoch ms)。保留の期限判定と相対時刻の表示が同じ値を見る（#2398・#1891）
+  const now = useNow();
+  /**
+   * 「いまは実施しない」として伏せた行を一覧から外す（#2398）。
+   *
+   * **左メニューの件数（`computeNavCountsForFilters`）と同じ判定・同じ2ビュー**なので、
+   * メニューの数字と並んでいる行数は食い違わない。伏せたぶんはヘッダーの内訳
+   * （`2件・保留中1件`）と、一覧の上に出す「保留中がN件あります」の1行で読める。
+   */
+  const snoozeEnabled =
+    Boolean(snoozes && onSnooze) && (view === "check-user" || view === "manual-step");
+  const { issues, snoozedIssues } = useMemo(() => {
+    if (!snoozeEnabled || !snoozes) return { issues: allIssues, snoozedIssues: [] as Issue[] };
+    const listed: Issue[] = [];
+    const snoozed: Issue[] = [];
+    for (const issue of allIssues) {
+      (findActiveIssueSnooze(snoozes, issue, now) ? snoozed : listed).push(issue);
+    }
+    return { issues: listed, snoozedIssues: snoozed };
+  }, [allIssues, snoozes, snoozeEnabled, now]);
+  // 保留中の行を開いているか。**既定はたたむ**——伏せたものを見に来るのは解除するときだけで、
+  // 開いたままにすると件数から外した意味が薄れる
+  const [isSnoozedOpen, setIsSnoozedOpen] = useState(false);
+  // 伏せたIssueとマージ待ちPRを合わせた件数と期限。**1行にまとめて出す**ので、ここで合流させる
+  const snoozedTotal = snoozedIssues.length + (snoozedPinned?.count ?? 0);
+  const snoozedEntries = useMemo(() => {
+    const fromIssues = snoozes
+      ? snoozedIssues.flatMap((issue) => {
+          const entry = findActiveIssueSnooze(snoozes, issue, now);
+          return entry ? [entry] : [];
+        })
+      : [];
+    return [...fromIssues, ...(snoozedPinned?.entries ?? [])];
+  }, [snoozedIssues, snoozes, snoozedPinned, now]);
+
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
   // ポーリングのフックより先に求める必要がある。
@@ -462,9 +536,6 @@ export function IssueList({
     return ids;
   }, [executionTargetByIssueId]);
   const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
-  // セッションの報告が途絶えたまま回り続けるのを止めるための現在時刻（#1439）。
-  // 30秒ごとに更新されれば足りる（判定のしきい値は5分）
-  const now = useNow();
   // 押した行を即座にハイライトするための楽観表示（#1597）。選択の正はURLクエリ
   // （`?issue=`）で、その更新はReactのトランジション＝低優先度の更新として入るため、
   // 右カラム（IssueDetail・プロパティパネル）の再描画が終わるまでハイライトが動かない。
@@ -545,10 +616,10 @@ export function IssueList({
       : 0;
   const countLabel =
     (view === "manual-step" && prerequisiteReadiness
-      ? formatManualStepListCount(issues, prerequisiteReadiness)
+      ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
-    formatCheckUserListCount(listedCount, checkUserRunningCount) ??
+    formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 
   // アシスタントが案内できるのは「いま実行できる」手作業だけ（`buildManualStepQueue`）。
@@ -591,6 +662,55 @@ export function IssueList({
   function exitSelecting() {
     setIsSelecting(false);
     setSelectedIds(new Set());
+  }
+
+  /**
+   * 保留中の行（#2398）。**通常の行より情報を削る**——ここに来るのは解除するときだけで、
+   * 進捗バッジや実行の導線を並べると「伏せた」ようには見えない。
+   */
+  function renderSnoozedRow(issue: Issue) {
+    const entry = snoozes ? findActiveIssueSnooze(snoozes, issue, now) : null;
+    return (
+      <li key={issue.id} className="border-b last:border-b-0">
+        <div className="flex flex-col gap-1.5 px-4 py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => onSelectIssue(issue)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <span className="block truncate text-xs text-muted-foreground">
+                {issue.repositoryFullName.split("/")[1]}
+              </span>
+              <span className="line-clamp-2 text-sm text-muted-foreground">
+                #{issue.number} {issue.title}
+              </span>
+            </button>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <Badge variant="outline" className="gap-1 text-muted-foreground">
+                <Clock className="size-3" />
+                {describeSnoozeUntil(entry?.until ?? null, now)}
+              </Badge>
+              {onUnsnooze && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() =>
+                    onUnsnooze({
+                      kind: "issue",
+                      repositoryFullName: issue.repositoryFullName,
+                      number: issue.number,
+                    })
+                  }
+                >
+                  解除
+                </Button>
+              )}
+            </span>
+          </div>
+        </div>
+      </li>
+    );
   }
 
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
@@ -701,6 +821,20 @@ export function IssueList({
                 // 左メニュー・ヘッダーの件数と同じ集合（#2174）を使い、材料を増やさない
                 checkUserRunning={checkUserRunningIssueIds?.has(issue.id) ?? false}
               />
+              {/* 「いまは実施しない」（#2398）。**要対応の2ビューの行にだけ出す。**
+                  行の当たり判定（カード全面の<button>）の上に重ねるので、
+                  `pointer-events-auto`が要る（Remote Controlのリンクと同じ） */}
+              {snoozeEnabled && onSnooze && (
+                <SnoozeMenu
+                  target={{
+                    kind: "issue",
+                    repositoryFullName: issue.repositoryFullName,
+                    number: issue.number,
+                  }}
+                  onSnooze={onSnooze}
+                  now={now}
+                />
+              )}
               {issue.favorite && (
                 <Star
                   className="size-3.5 fill-yellow-400 text-yellow-400"
@@ -1003,6 +1137,39 @@ export function IssueList({
           }}
         >
           {pinnedSection}
+
+          {/* 保留中で一覧から外したぶんの1行（#2398）。**件数には足さず、消えたことだけを伝える**
+              ——マージ待ちPRが「CI・判定の完了待ちが3件あります」を件数に足さずに出しているのと
+              同じ扱い（#2081）。「表示」で開くと、その場で解除できる */}
+          {snoozeEnabled && snoozedTotal > 0 && (
+            <div className={cn(COUNT_BAR_CLASS, "bg-slate-500/5")}>
+              <p className={cn(COUNT_BAR_TEXT_CLASS, "flex items-center gap-1.5")}>
+                <Clock className="size-3 shrink-0" />
+                <span>
+                  保留中が
+                  <span className="font-medium text-foreground tabular-nums">{snoozedTotal}件</span>
+                  あります（{describeSnoozeResume(snoozedEntries, now)}）
+                </span>
+              </p>
+              <div className={COUNT_BAR_ACTIONS_CLASS}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="shrink-0"
+                  aria-expanded={isSnoozedOpen}
+                  onClick={() => setIsSnoozedOpen((open) => !open)}
+                >
+                  {isSnoozedOpen ? "隠す" : "表示"}
+                </Button>
+              </div>
+            </div>
+          )}
+          {snoozeEnabled && isSnoozedOpen && (
+            <div className="border-b bg-slate-500/5">
+              {snoozedPinned?.section}
+              <ul>{snoozedIssues.map(renderSnoozedRow)}</ul>
+            </div>
+          )}
 
           {issues.length === 0 ? (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">

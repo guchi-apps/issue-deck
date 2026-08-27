@@ -149,11 +149,18 @@ function computeReadiness(
  * **メニューと同じ数を先に出し、その差である前提待ちを添える。**
  * スマホはアイコンにカーソルを合わせられないので、内訳を読めるのはここだけになる。
  *
- * @returns 手作業Issueが1件も無ければnull（呼び出し側は今までどおりの「N件」を出す）
+ * **保留中（#2398）も同じ形で添える。** 伏せたぶんは`issues`に入っていないので、前提待ちと
+ * 違って数え直さず、呼び出し側が数えた件数をそのまま受け取る。
+ *
+ * @param issues 一覧に並んでいる手作業Issue（保留中は含まない）
+ * @param readiness 前提条件の判定
+ * @param snoozedCount 保留中で一覧から外した件数（#2398）
+ * @returns 手作業Issueも保留中も1件も無ければnull（呼び出し側は今までどおりの「N件」を出す）
  */
 export function formatManualStepListCount(
   issues: Issue[],
   readiness: ManualStepReadinessMap,
+  snoozedCount = 0,
 ): string | null {
   let actionable = 0;
   let waiting = 0;
@@ -163,7 +170,9 @@ export function formatManualStepListCount(
     if (state.ready) actionable += 1;
     else waiting += 1;
   }
-  if (actionable === 0 && waiting === 0) return null;
-  if (waiting === 0) return `${actionable}件`;
-  return `${actionable}件・前提待ち${waiting}件`;
+  if (actionable === 0 && waiting === 0 && snoozedCount === 0) return null;
+  const parts = [`${actionable}件`];
+  if (waiting > 0) parts.push(`前提待ち${waiting}件`);
+  if (snoozedCount > 0) parts.push(`保留中${snoozedCount}件`);
+  return parts.join("・");
 }

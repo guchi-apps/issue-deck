@@ -8,8 +8,16 @@ import {
   ConflictBadge,
   MergeJudgementBadge,
 } from "@/components/dashboard/pull-request-badges";
+import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import {
+  describeSnoozeUntil,
+  findActiveSnooze,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -32,6 +40,9 @@ export function MergePendingPullRequests({
   pullRequests,
   waitingForChecksCount = 0,
   onSelectPullRequest,
+  onSnooze,
+  now = null,
+  snoozed,
   onRefresh,
   isRefreshing = false,
 }: {
@@ -39,6 +50,23 @@ export function MergePendingPullRequests({
   /** CI・判定の完了待ちで一覧から外したPRの件数（#2081）。0なら完了待ちの行を出さない */
   waitingForChecksCount?: number;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
+  /**
+   * 「いまは実施しない」（#2398）。渡すとカードに時計ボタンが出る。
+   * **選択肢はIssueの行と同じ`SnoozeMenu`**で、開く場所によって中身が変わらないようにする。
+   */
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  /** 現在時刻(epoch ms)。保留メニューの日付の組み立てに使う */
+  now?: number | null;
+  /**
+   * 保留中のPRを並べる側として描くか（#2398）。渡すと見出しを出さず、各カードに
+   * 期限と「解除」を添えた薄い並びになる（一覧の「保留中N件」を開いた中身）。
+   */
+  snoozed?: {
+    /** 期限を引くための引き当て表（`buildSnoozeMap`） */
+    snoozes: SnoozeMap;
+    now: number | null;
+    onUnsnooze: (target: SnoozeTarget) => void;
+  };
   /**
    * 見出しの「更新」でのPRの取り直し（#2175）。渡さなければボタンを出さない。
    *
@@ -51,6 +79,61 @@ export function MergePendingPullRequests({
   isRefreshing?: boolean;
 }) {
   if (pullRequests.length === 0 && waitingForChecksCount === 0) return null;
+
+  // 保留中のPRは、一覧の「保留中N件」を開いた中に並ぶ（#2398）。見出しも件数の行も出さない
+  // ——それらは開いた側（`IssueList`）が1行にまとめて持っている
+  if (snoozed) {
+    return (
+      <ul className="flex flex-col">
+        {pullRequests.map((pullRequest) => (
+          <li key={pullRequest.id} className="flex items-center gap-2 border-b px-4 py-2.5">
+            <button
+              type="button"
+              onClick={() => onSelectPullRequest(pullRequest)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <span className="block truncate text-xs text-muted-foreground">
+                {pullRequest.repositoryFullName.split("/")[1]}
+              </span>
+              <span className="line-clamp-2 text-sm text-muted-foreground">
+                #{pullRequest.number} {pullRequest.title}
+              </span>
+            </button>
+            <span className="flex shrink-0 items-center gap-1.5">
+              <Badge variant="outline" className="gap-1 text-muted-foreground">
+                <Clock className="size-3" />
+                {describeSnoozeUntil(
+                  findActiveSnooze(
+                    snoozed.snoozes,
+                    {
+                      kind: "pull-request",
+                      repositoryFullName: pullRequest.repositoryFullName,
+                      number: pullRequest.number,
+                    },
+                    snoozed.now,
+                  )?.until ?? null,
+                  snoozed.now,
+                )}
+              </Badge>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  snoozed.onUnsnooze({
+                    kind: "pull-request",
+                    repositoryFullName: pullRequest.repositoryFullName,
+                    number: pullRequest.number,
+                  })
+                }
+              >
+                解除
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   // 押せるPRが1件も無いときは、見出しごと薄い1行に落とす。「あなたのマージを待っている」の
   // 見出しの下に何も並ばない状態は、待たれているのに開けないものがあるように読めるため。
@@ -79,7 +162,7 @@ export function MergePendingPullRequests({
       </div>
       <ul className="mt-2 flex flex-col gap-1.5">
         {pullRequests.map((pullRequest) => (
-          <li key={pullRequest.id}>
+          <li key={pullRequest.id} className="relative">
             <button
               type="button"
               onClick={() => onSelectPullRequest(pullRequest)}
@@ -101,6 +184,20 @@ export function MergePendingPullRequests({
                 </span>
               </span>
             </button>
+            {/* 「いまは実施しない」（#2398）。カード全体が<button>なので、その外へ重ねて置く */}
+            {onSnooze && (
+              <div className="absolute top-1.5 right-1.5">
+                <SnoozeMenu
+                  target={{
+                    kind: "pull-request",
+                    repositoryFullName: pullRequest.repositoryFullName,
+                    number: pullRequest.number,
+                  }}
+                  onSnooze={onSnooze}
+                  now={now}
+                />
+              </div>
+            )}
           </li>
         ))}
       </ul>
