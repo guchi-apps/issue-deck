@@ -148,6 +148,8 @@ export const SESSION_REAP_REASONS = [
   "QUESTION_CLOSED",
   /** 横断質問セッションが放置されている（#1648） */
   "QUESTION_IDLE",
+  /** worktreeが削除されている（#2422） */
+  "WORKTREE_GONE",
 ] as const;
 
 export type DispatchSessionReapReason = (typeof SESSION_REAP_REASONS)[number];
