@@ -1333,20 +1333,30 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
   プレースホルダを含む手順は代行実行の対象から外れ、「あなたが実行」として並ぶ（#2051）。
   `$HOME`のような**実在の環境変数参照は埋める箇所として扱われない**ので、値を埋めてほしい
   ところは必ず`<…>`にする
-- **1Passwordへの書き込みとGitHub secretへの同期に`op signin`を書かない**（#2401）。サインインは
-  対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。サブPCには書き込み権限つきの
-  サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、次のコマンドが1Passwordへの
-  書き込み・GitHubのsecretへの同期・本番への反映までを通しで行う（#1874）。**対象キーの行が
-  `.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側のPull Requestの仕事
+- **1Passwordへの値の登録は、1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書く**
+  （#2417）。サブPCの全シェルには`apps`ボールトへ**read権限しか無い**サービスアカウントが
+  `~/.profile.local`から常時exportされており、`op`は`op signin`よりそちらを優先する。そのため
+  `op item edit`・`op item create`をIssueへ書くと、代行実行でも人の実行でも
+  `Couldn't update the item.`で落ちる（`op read`は通るので気付きにくい）。書くのは次の形
 
-  ```bash
-  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --generate hex32
+  ```
+  - [ ] （ブラウザ）1Passwordで`apps`ボールトの`<item>`を開き、`<field>`に値を登録する
   ```
 
-  値の出どころで使い分ける。ブラウザ等で発行した値を渡すなら`--from-stdin`、1Passwordへ既に
-  入れてあって同期だけなら`--sync-only`、本番への反映を別の経路で行うなら`--no-deploy`、
-  デプロイの完了待ちが5分の打ち切りに掛かりそうなら`--no-wait`を足す。
-  organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`を足す
+- **GitHubのsecretへの同期と本番への反映はCLIに任せる**（#1874・#2401）。`op signin`は書かない
+  ——対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。同期は書き込み権限つきの
+  サービスアカウント（`~/.config/issue-deck/op-writer.env`）を読み込む次のコマンドで行う。
+  **対象キーの行が`.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側の
+  Pull Requestの仕事
+
+  ```bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --sync-only
+  ```
+
+  本番への反映を別の経路で行うなら`--no-deploy`、デプロイの完了待ちが5分の打ち切りに掛かり
+  そうなら`--no-wait`を足す。organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`
+  を足す。**人が値を知る必要の無い機械生成の値**（ランダムなトークン等）は、そもそも手作業Issueに
+  せずエージェントが`--generate hex32`で完結させる
 - **`op read`だけの手順・確認にも`op signin`を書かない**（#2401）。代行実行のシェルには
   1Passwordのセッションが無いので、読むときも上と同じトークンを読み込む。`op signin`を書くと、
   読むだけの確認まで人の実行になる
@@ -1459,7 +1469,8 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
 
 **そもそも`op signin`はほとんどの手順で要らない。** サブPCには書き込み権限つきの
 サービスアカウント（`~/.config/issue-deck/op-writer.env`。`apps:read_items,write_items`）が
-置いてあり、1Passwordへの書き込みも読み取りも非対話で通る（#1874）。それでも
+置いてあり、`provision-secret.sh`を通せば1Passwordへの書き込みも読み取りも非対話で通る
+（#1874。**素の`op`では通らない**理由は次の節）。それでも
 `op signin`を書いた手作業Issueが積み上がっていたのは、**#1874でできるようになったことが
 手作業Issueの雛形へ書かれていなかった**ため。open だった10件のうち4件
 （`guchi-apps/aide#174`・`aide-bot#83`・`myroom#263`・`issue-deck#2397`）がこの形で、
@@ -1481,21 +1492,57 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
   ボタンを押すのは人なので、手作業Issueの手順としては`provision-secret.sh --sync-only`の
   ほうが自動実行に載る。どちらも1Passwordの日次枠（アカウント全体で1,000リクエスト/日。
   #1302）を消費するため、**変更したキーだけに絞る**（`--only` / `--key`）
-- **`op read`だけの確認にも`op signin`は要らない。** 代行実行のシェル（`run-manual-step.sh`）は
-  `~/.config/issue-deck/dispatch.env`しか読み込まないので、1Passwordのセッションもサービス
-  アカウントのトークンも入っていない。読むときも書き込み用のトークンを読み込む
+- **`op read`だけの確認にも`op signin`は要らない。** 代行実行のシェルには1Passwordの
+  **対話セッションが無い**（`run-manual-step.sh`が読むのは`~/.config/issue-deck/dispatch.env`
+  だけ）。一方で**read専用のサービスアカウントは入っている**——`subpc-dispatch-poller.sh`が
+  `/bin/bash -lc`で起こすため、ログインシェルとして`~/.profile.local`を読み直すため（#2417で
+  「サービスアカウントのトークンも入っていない」という誤記を訂正した）。読むだけならそのトークン
+  でも通るが、**書き込みは必ず落ちる**ので、読み書きとも書き込み用のトークンを読み込む形に揃える
 
   ```bash
   set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/aide/dayspan-token' >/dev/null && echo ok
   ```
 
-- **人が行うのは「値の発行そのもの」だけになる。** ブラウザでのトークン発行・チャンネル作成は
-  代行できないため、そこは`（ブラウザ）`の手順として残る。1Passwordへ入れる手順は、発行した
-  値を`--from-stdin`で渡す形（プレースホルダを含むため「あなたが実行」）にするか、
-  ブラウザで1Passwordへ入れてから`--sync-only`で同期する形にする
+- **人が行うのは「値の発行」と「1Passwordへの登録」になる**（#2417で後者を足した）。ブラウザでの
+  トークン発行・チャンネル作成は代行できず、**1Passwordへの登録もサブPCのシェルからは通らない**
+  （下の節）。どちらも`（ブラウザ）`の手順として残し、CLIには`--sync-only`の同期と`op read`の
+  確認だけを残す
 - 本文にこれらが守られていないコマンドがあると、issue-deckの本文検査
   （`src/lib/manual-step-body-check.ts`）が起票・編集のたびに指摘を返す（`op-signin-in-command`・
-  `local-secret-sync`）
+  `local-secret-sync`・`op-write-command`）
+
+#### 1Passwordへの値の登録は1Passwordアプリで行う（#2417）
+
+**サブPCでは`op`の書き込みが構造的に失敗する。** `~/.profile.local`（`guchi-apps/subpc`が配る
+managed block）が`~/.config/op/service-account-token`を読んで`OP_SERVICE_ACCOUNT_TOKEN`へ
+**常時export**しており、そのサービスアカウントは`apps`ボールトへ**read権限しか持たない**
+（`guchi-apps/subpc`のREADME「1Password CLI のサービスアカウントトークン」）。`op`は環境変数の
+サービスアカウントを`op signin`より優先するため、`op read`・`op item get`は通るのに
+`op item edit`だけが`Couldn't update the item.`で落ちる（共有知識の
+`knowledge/common-gotchas.md`に同じ症状がある）。
+
+**代行実行でも結果は同じ。** 手作業の代行実行は`scripts/subpc-dispatch-poller.sh`が
+`/bin/bash -lc`で起こすため、ログインシェルとして同じ`~/.profile.local`を読み直す。
+
+- **書き込み用トークンは、明示的に読み込んだプロセスにしか効かない。** `provision-secret.sh`は
+  `load_writer()`（`set -a; . ~/.config/issue-deck/op-writer.env; set +a`）で毎回上書きするので
+  通る。**生の`op item edit`・`op item create`を手作業Issueへ書くと必ず落ちる**
+- したがって手作業Issueの1Password手順は次の3つに分ける。**登録だけが人の作業**
+
+  1. `（ブラウザ）`1Passwordアプリで`apps`ボールトの該当アイテムにフィールドを追加し、値を登録する
+  2. `（サブPC）``scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only`で
+     GitHubのsecretへ同期し、デプロイまで通す
+  3. 確認は`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://…'`
+
+- **人が値を知る必要の無い機械生成の値は、そもそも手作業Issueにしない。** ランダムなトークンは
+  エージェントが`provision-secret.sh --generate hex32`で完結させられる（1Password側にアイテムが
+  無ければ`op item create`で作る。#2417でその分岐を足した）
+- **`~/.profile.local`の常時exportはやめない。** 外すと非対話の`op read`が全経路で壊れる。
+  変更が要る場合も`guchi-apps/subpc`側のIssueとして切り出す
+- **届き方は検査と雛形で違う。** 本文検査の判定はissue-deck側のAPI（`POST /api/manual-steps/body-check`）
+  にあるので、規則を足せば配布タグを切らずに全リポジトリへ即日効く。一方**雛形は
+  `.github/prompts/implement.md`へ差し込まれ、他リポジトリはそれを`prompts-ref: workflows/vN`で
+  固定して読む**ため、新しい規約が他リポジトリの起票側へ届くのは`workflows/vN`を切って配布した後
 
 #### 「この作業でできるようになること」を先頭に置く理由（#1730）
 

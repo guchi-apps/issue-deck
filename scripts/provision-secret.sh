@@ -45,6 +45,12 @@
 #   `op signin`してもサービスアカウントが優先され、opの書き込みが全部失敗する
 #   （guchi-apps/docs の knowledge/common-gotchas.md）。このスクリプトは実行中だけ読み込む。
 #
+#   **逆に、サブPCでは read 専用のサービスアカウントが全ログインシェルへ常時exportされている**
+#   （`~/.profile.local`が`~/.config/op/service-account-token`を読む。guchi-apps/subpc）。
+#   `op`は環境変数のサービスアカウントを最優先するため、`load_writer`で明示的に上書きしない
+#   `op`の書き込みは、人が実行しても代行実行でも必ず失敗する。手作業Issueに生の`op item edit`を
+#   書かず、値の登録は1Passwordアプリで行う規約（#2417）はこれが理由。
+#
 # **値は一切出力しない。** 生成した値も、読んだ値も、長さ以外は表示しない。
 set -euo pipefail
 
@@ -229,7 +235,13 @@ fi
 if [[ "$DRY_RUN" == true ]]; then
   echo
   echo "dry-run のためここで終了します。実行時は次を行います:"
-  [[ "$SYNC_ONLY" == true ]] || echo "  1. op item edit \"$op_item\" --vault $op_vault \"$op_field[$FIELD_TYPE]=***\""
+  if [[ "$SYNC_ONLY" != true ]]; then
+    if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 ); then
+      echo "  1. op item edit \"$op_item\" --vault $op_vault \"$op_field[$FIELD_TYPE]=***\""
+    else
+      echo "  1. op item create --category \"Secure Note\" --vault $op_vault --title \"$op_item\" \"$op_field[$FIELD_TYPE]=***\"（アイテムが無いため新規作成）"
+    fi
+  fi
   echo "  2. sync-github-secrets.sh --repo $REPO --only $KEY"
   [[ "$DEPLOY" == true ]] && echo "  3. gh workflow run deploy.yml --repo $REPO --ref main"
   exit 0
@@ -241,10 +253,40 @@ if [[ "$SYNC_ONLY" == true ]]; then
   echo "1Passwordの既存値を使います（書き込みは行いません）"
 else
 echo
-echo "1Passwordへ書き込みます..."
-( load_writer; op item edit "$op_item" --vault "$op_vault" "$op_field[$FIELD_TYPE]=$value" >/dev/null ) || {
-  echo "1Passwordへの書き込みに失敗しました。トークンに write_items があるか確認してください。" >&2
-  exit 1; }
+# **アイテムが無ければ作る**（#2417）。`op item edit`は既にあるアイテムしか編集できないため、
+# 新規アプリの立ち上げのように1Password側にアイテムがまだ無いキーは、書き込み権限があっても
+# ここで必ず落ちていた。しかも失敗の文言が「write_items があるか確認してください」だったので、
+# 権限の問題と取り違える形になっていた。**カテゴリはSecure Note**（`apps`ボールトの既存
+# アイテムがすべてこれで、任意のフィールドを持てる）。
+write_log="$WORK/op-write.log"
+
+# 失敗したopの出力を出す。**値が混ざりうるので必ず伏せてから出す**（usageエラーは引数を
+# そのまま echo することがある）。この関数以外から write_log を読まないこと
+op_write_detail() {
+  local detail
+  detail="$(cat "$write_log" 2>/dev/null)"
+  [[ -n "$value" ]] && detail="${detail//"$value"/***}"
+  [[ -n "$detail" ]] && echo "  op: ${detail%%$'\n'*}" >&2
+  echo "  書き込み用トークンが効いているかは次で確かめられます（Integration IDが出ます）:" >&2
+  echo "    set -a; . $WRITER_ENV; set +a; op whoami" >&2
+}
+
+if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 ); then
+  echo "1Passwordへ書き込みます..."
+  ( load_writer; op item edit "$op_item" --vault "$op_vault" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" ) || {
+    echo "1Passwordへの書き込みに失敗しました（$op_vault / $op_item / $op_field）。" >&2
+    echo "  アイテムはあるので、トークンに write_items があるかを疑ってください。" >&2
+    op_write_detail
+    exit 1; }
+else
+  echo "1Passwordに $op_item がまだ無いため、新規に作成します..."
+  ( load_writer; op item create --category "Secure Note" --vault "$op_vault" \
+    --title "$op_item" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" ) || {
+    echo "1Passwordへのアイテム作成に失敗しました（$op_vault / $op_item）。" >&2
+    echo "  トークンに write_items があるか、ボールト名が合っているかを確認してください。" >&2
+    op_write_detail
+    exit 1; }
+fi
 
 written="$( load_writer; op read "$source" 2>/dev/null )" || written=""
 if [[ "$written" != "$value" ]]; then
