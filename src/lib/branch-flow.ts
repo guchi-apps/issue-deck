@@ -37,7 +37,9 @@ export const DEVELOP_BRANCH = "develop";
  * `ready`・`planning`はまだブランチが無くて当然、`develop`以降はマージ済みなので、
  * ブランチの有無を確かめる意味があるのはこの2つだけ。
  * **使うのはブランチ存在確認（`GET /api/branch-flow`）だけ**で、「ブランチもPRも見つからない
- * Issue」の抽出は`ORPHAN_ISSUE_PROGRESS_STATUSES`が別に持つ（#2386）。
+ * Issue」の抽出は`ORPHAN_ISSUE_PROGRESS_SET`が別に持つ（#2386）。**この定数は狭めない**
+ * ——`implementation`を外すと、実装中のIssueのブランチを問い合わせなくなり、
+ * 「ブランチは上がっているがPRがまだ無い」レーンが丸ごと消える。
  */
 export const ACTIVE_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = [
   "implementation",
@@ -55,6 +57,11 @@ export const ACTIVE_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = [
  *
  * 残った`develop-pr`は、PRが開いたと報告されているのにそのPRが画面のどこにも無い状態で、
  * これは今も異常（`issue-<番号>`をheadとするPRが取得範囲に無い）。
+ *
+ * **平時はほぼ空になる集合**で、それを承知で残している。`Implementation` → `Develop PR`は
+ * pushとPR作成をトリガーに`issue-labels.yml`が報告するため、この進捗のIssueはほぼ必ずPRを
+ * 持つ。枠ごと畳まないのは、取得済みPRの範囲外・報告だけ進んだといった例外を検知する口を
+ * 残すため（出たときは実際に見るべき状態になっている）。
  */
 const ORPHAN_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set<ProgressStatusKey>([
   "develop-pr",
@@ -440,6 +447,15 @@ function buildRepository({
     ]),
   );
 
+  // 「着手中」の除外はレーンの**対応Issueだけ**に限る（#2386）。`relatedIssues`はPRのタイトル・
+  // 本文の`#番号`をそのまま拾ったもの（`extractLinkedIssueNumbers`）で、**単なる言及も混ざる**。
+  // 上の`linkedIssueNumbers`をそのまま使うと、走っているIssueが他のPRの本文で言及されている
+  // だけで件数から消える（実例: PR #2387の本文にある`#2388`）。「いま何本走っているか」を
+  // 表す数字でそれが起きると、数えたいものが理由も分からず減る。
+  const laneMainIssueNumbers = new Set(
+    lanes.flatMap((lane) => (lane.issue ? [lane.issue.number] : [])),
+  );
+
   // 本番デプロイの状態は、いちばん新しくmainへ入ったリリースに対してだけ決まる（#1579）
   const deployState = resolveDeployState({
     deployRun,
@@ -457,8 +473,8 @@ function buildRepository({
   });
 
   // 実行ボタンを押して動き出したIssue（#1704・#2386）。レーンに現れているものは除くので、
-  // `linkedIssueNumbers`を作った後でなければ組み立てられない。
-  const startedIssues = collectStartedIssues(issues, linkedIssueNumbers);
+  // `laneMainIssueNumbers`を作った後でなければ組み立てられない。
+  const startedIssues = collectStartedIssues(issues, laneMainIssueNumbers);
 
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
@@ -556,6 +572,9 @@ const STARTED_PRIORITY_ORDER: Record<string, number> = { high: 0, low: 2 };
  * 「押したがGitHubにはまだ何も現れていない」もの——計画検討中の全部と、実装中のうち
  * 最初のpushがまだのもの。**畳んだ1行の「進行中」（レーンの本数）と足し合わせて総数になる**
  * ように、二重に数えないための除外。
+ *
+ * **除外に使うのはレーンの対応Issueだけ**（`laneMainIssueNumbers`。#2386）。PR本文の`#番号`から
+ * 拾った「関連」まで除くと、他のPRで言及されているだけのIssueが件数から消える。
  *
  * 手作業Issue（`71.manual-step`）は実装するものではなく、既にレーンの下と束の外へ出している
  * （#1510・#1586）ため、ここには混ぜない。

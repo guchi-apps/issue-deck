@@ -1500,6 +1500,34 @@ describe("着手中のIssue（startedIssues。#2386）", () => {
     expect(flow.repositories[0].summary.startedIssueCount).toBe(0);
   });
 
+  /**
+   * #2386: 除外に使うのはレーンの対応Issueだけ。`relatedIssues`はPRのタイトル・本文の`#番号`を
+   * そのまま拾ったもので単なる言及も混ざるため、そこまで除くと走っているIssueが件数から消える。
+   */
+  it("他のPRの本文で言及されているだけのIssueは、着手中から落とさない", () => {
+    const flow = build({
+      issues: [
+        issue({ number: 31, projectStatus: "Implementation" }),
+        issue({ number: 32, projectStatus: "Implementation" }),
+      ],
+      pullRequests: [
+        pullRequest({
+          number: 1,
+          headRef: "issue-31",
+          linkedIssueNumber: 31,
+          linkedIssueNumbers: [31, 32],
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    const [repository] = flow.repositories;
+    // #32はレーンの「関連」としても出るが、走っている本数からは落とさない
+    expect(allLanes(repository)[0].relatedIssues.map((item) => item.number)).toEqual([32]);
+    expect(repository.startedIssues.map((item) => item.number)).toEqual([32]);
+    expect(repository.summary.startedIssueCount).toBe(1);
+  });
+
   it("計画検討中 → 優先度の高い順 → 番号の新しい順で並べる", () => {
     const flow = build({
       issues: [
