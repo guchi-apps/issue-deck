@@ -23,10 +23,23 @@ IssueDeckのGitHub App認証は`src/lib/github/app-auth.ts`（`@octokit/auth-app
 そこから呼ばれるGitHub REST/GraphQL APIのエンドポイントを洗い出した結果は以下のとおり。
 
 **この表は「各機能が動くために必要な権限の推定」であり、Appに実際に付与されている権限の一覧では
-ない。** 実際の付与内容はGitHub側のApp設定画面（Organization/User settings > Developer settings >
-GitHub Apps > Permissions）でのみ確認でき、コードからは導けない。両者を混同すると「この権限は
-付与されていないはずだ」という誤った前提で設計判断をしてしまう（#834 で実際に発生した。後述
-「実際に付与されている権限（実測）」参照）。
+ない。** 両者を混同すると「この権限は付与されていないはずだ」という誤った前提で設計判断を
+してしまう（#834 で実際に発生した。後述「実際に付与されている権限（実測）」参照）。
+
+**実測は`gh`から取れる（#835）。** 「App設定画面でしか確認できない」と書いていたが、
+インストール一覧のAPIが付与済み権限をそのまま返す。App IDも秘密鍵も要らず、organizationの
+管理権限を持つユーザーのトークンで引ける。
+
+```bash
+gh api /orgs/guchi-apps/installations \
+  --jq '.installations[] | select(.app_slug=="issue-deck") | .permissions'
+# => {"actions":"write","administration":"write","checks":"read","contents":"write",
+#     "issues":"write","metadata":"read","organization_projects":"write",
+#     "pull_requests":"write","workflows":"write"}
+```
+
+権限を前提にした設計判断をするときは、下の実測表ではなくこのコマンドを実行して確かめる
+（表は確認した時点のスナップショットで、App設定を変えても自動では更新されない）。
 
 | 機能 | 呼び出し元 | 主なエンドポイント | 必要な権限（推定） |
 |---|---|---|---|

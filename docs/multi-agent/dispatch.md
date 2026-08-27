@@ -207,13 +207,17 @@ Claudeに聞く）と**サブPCで実行する**（ローカルセッション�
   GET専用化）が理想だが、Bashの許可ルールはコマンド文字列の前方一致でしか絞り込めずフラグの
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
-- git push（ラベル操作を含む）はリポジトリsecretsの`WORKFLOW_PAT`（Fine-grained PAT、Repository
-  permissions > Workflows: Read and write を含む）で行う（issue #106）。既定の`GITHUB_TOKEN`は
+- git push（ラベル操作を含む）は、Workflows: Read and write を持つワークフロー用トークンで行う
+  （issue #106）。既定の`GITHUB_TOKEN`は
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの
   「Workflow permissions」設定をRead and writeにしても解除されない）ため、`.github/workflows/`
-  自体を変更するIssueを本ワークフローで扱うにはPATが必須。この認証は`Checkout develop`ステップの
-  直後に置いた`pushの認証をWORKFLOW_PATに固定する`ステップ（`git remote set-url --push origin`で
-  `remote.origin.pushurl`にPATを埋め込んだURLを設定する）で完結しており、後続の実装ステップ
+  自体を変更するIssueを本ワークフローで扱うにはこのトークンが必須。
+  **中身は#835でGitHub Appのインストールトークンへ変わった**（`WORKFLOW_APP_ID`が未登録の
+  リポジトリでは従来の`secrets.WORKFLOW_PAT`へフォールバックする。
+  [actions-token-model.md](../actions-token-model.md)「8. 案Bへの移行（#835）」）。
+  この認証は`Checkout develop`ステップの
+  直後に置いた`pushの認証をワークフロー用トークンに固定する`ステップ（`git remote set-url --push origin`で
+  `remote.origin.pushurl`にトークンを埋め込んだURLを設定する）で完結しており、後続の実装ステップ
   （`claude-code-action`）側の`github_token`入力・`GH_TOKEN`環境変数には依存しない。他のステップ
   （状態判定・通知コメント・計画提示など、ワークフローファイルを変更しない箇所）は既定の
   `GITHUB_TOKEN`のままとし、PATの利用は最小限にとどめている。

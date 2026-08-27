@@ -147,8 +147,9 @@ name: Claude Issue Dispatch (reusable)
 # startsWith()に絞っても正規の起動経路は損なわれない。
 #
 # ブランチのpush(Checkoutステップ)・実装ステップのgit push/PR作成はGITHUB_TOKENではなく、
-# secrets.WORKFLOW_PAT(workflowスコープ/Repository permissions > Workflows: Read and write
-# を持つFine-grained PAT)を使う(issue #106)。既定のGITHUB_TOKENは`.github/workflows/`配下への
+# Workflows: Read and writeを持つワークフロー用トークン(GitHub Appのインストールトークン。
+# 未登録のリポジトリではsecrets.WORKFLOW_PATへフォールバックする。#835)を使う(issue #106)。
+# 既定のGITHUB_TOKENは`.github/workflows/`配下への
 # push権限をGitHubの仕様上原理的に持てない(リポジトリのWorkflow permissions設定をRead and write
 # にしても解除されない制限)ため、本ワークフロー自身がワークフローファイルを変更するIssueを
 # 扱えるようにするにはPATが必須。副次効果として、GITHUB_TOKENによるpush/PR作成と異なりPATに
@@ -163,7 +164,8 @@ name: Claude Issue Dispatch (reusable)
 # 自動リトライ上限(GET /api/settings/auto-retryで取得するautoRetryLimit、#496・#497)未満で
 # あれば、workflow_dispatchで自分自身を再起動して再試行する(#497)。上限に達した場合
 # (未設定なら常に上限0扱い)は従来どおり00.check-userを付与して停止する。自己再起動のgh workflow run
-# 呼び出しはGITHUB_TOKENでは新たなワークフロー実行を誘発しない制約があるためWORKFLOW_PATを使う。
+# 呼び出しはGITHUB_TOKENでは新たなワークフロー実行を誘発しない制約があるため、ワークフロー用
+# トークン(GitHub Appのインストールトークン。未登録時はWORKFLOW_PAT)を使う。
 # workflow_dispatchトリガー自体は、issue_comment/issuesの各トリガーと異なりBot判定・実行者
 # パーミッション確認(下記「実行者の権限・状態を判定する」ステップ)を経由しない。これは
 # workflow_dispatchのAPI呼び出し自体がリポジトリへのwrite権限を要求するGitHub側の仕様により、
@@ -656,7 +658,8 @@ jobs:
       pull-requests: write
       issues: write
       # 自己リトライ(#497)のgh workflow run呼び出しは、GITHUB_TOKENが同呼び出しを誘発しない
-      # 制約があるためsecrets.WORKFLOW_PATを使う(WORKFLOW_PAT側の権限はpermissions:の対象外)。
+      # 制約があるためワークフロー用トークンを使う(GITHUB_TOKEN以外のトークンの権限は
+      # permissions:の対象外)。
       # GITHUB_TOKEN自体はactions:writeを使わないため、least privilegeの観点でreadのままにする。
       actions: read
       id-token: write
@@ -680,17 +683,44 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 1時間で失効するGitHub Appのインストールトークンをその場で発行し、期限切れが単一障害点に
+        # なるsecrets.WORKFLOW_PAT(Fine-grained PAT・最長366日)を置き換える
+        # (#761・#835。docs/actions-token-model.md「案B」)。
+        #
+        # **vars.WORKFLOW_APP_IDが未登録のリポジトリではこのステップがskipされ、outputs.tokenが
+        # 空文字になる。** 以降の使用箇所はいずれも
+        # `steps.app-token.outputs.token || secrets.WORKFLOW_PAT` の形で従来のPATへ落ちるため、
+        # 登録が済むまで挙動は一切変わらない。共有ワークフローはフリート全リポジトリへ同じ実体が
+        # 配られるため、切り替えをorganization variableの登録という1操作にまとめてある。
+        #
+        # **permission-*で、Appが持つ権限のうちこのワークフローが使うものだけへ絞る。** 既定は
+        # インストールの全権限で、issue-deckのAppはIssue移動(transferIssue)のために
+        # administration: writeまで持つ(docs/github-app-permissions.md)。絞らないと
+        # ブランチ保護の変更・リポジトリ削除まで含む、WORKFLOW_PATより広い権限を無人実行へ渡す
+        # ことになる。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: write
       - name: Checkout develop
         uses: actions/checkout@v4
         with:
           ref: develop
           fetch-depth: 1
           # .github/workflows/配下を変更するIssueでも実装ステップのgit pushが拒否されないよう、
-          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106)。
+          # workflow書き込み権限を持つワークフロー用トークンでcheckoutする(issue #106)。
           # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
           # 次のステップで別途固定する(#662)。
-          token: ${{ secrets.WORKFLOW_PAT }}
-      - name: pushの認証をWORKFLOW_PATに固定する
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+      - name: pushの認証をワークフロー用トークンに固定する
         # claude-code-actionは実行時にreplaceCheckoutCredentials()で、actions/checkoutが
         # .git/configに残したhttp.<server>/.extraheaderを削除し、remote.origin.urlを
         # `https://x-access-token:<action自身のトークン>@github.com/...`へ差し替える
@@ -708,11 +738,11 @@ jobs:
         # `git remote set-url origin <URL>`(fetch側のremote.origin.urlのみ)であり、pushurlは
         # 書き換えられないため、fetchはaction自身のトークン、pushはPATという分離が成立する。
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           REPOSITORY: ${{ github.repository }}
         run: |
           git remote set-url --push origin \
-            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+            "https://x-access-token:${WORKFLOW_TOKEN}@github.com/${REPOSITORY}.git"
       - name: 共有知識リポジトリをcheckoutする
         # 全アプリ共通の知識(guchi-apps/docs)をワークツリー内の .shared-context/ へ配置し、
         # 各Claude CodeステップがRead/Grep/Globでそのまま読めるようにする
@@ -1178,7 +1208,7 @@ jobs:
         if: always() && steps.state.outputs.mode == 'plan'
         env:
           GH_TOKEN: ${{ github.token }}
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
@@ -1298,7 +1328,7 @@ jobs:
           NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
-            if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+            if GH_TOKEN="$WORKFLOW_TOKEN" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               # gh workflow runは起動したrunのIDを返さないため、そのまま$RUN_URL(=このrun自身、
               # 既に完了間際で参考にならない)を使うと「自動的に再実行します」の実行ログが前回の
               # 通知と同じURLになってしまう(#1113)。claude-issue-dispatch.ymlのrun-nameで
@@ -1322,7 +1352,7 @@ jobs:
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
-            echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
+            echo "自動リトライの起動（gh workflow run）に失敗しました。ワークフロー用トークン（GitHub Appのインストールトークン、未登録時はWORKFLOW_PAT）に必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
           fi
 
           echo "自動リトライを行わないため、フォールバックコメントを投稿します（エラー種別: $ERROR_TYPE）"
@@ -1775,7 +1805,7 @@ jobs:
         # 先にcheckoutした develop の内容は使わず、ここで改めて既存ブランチへ切り替える(#129)。
         if: steps.state.outputs.mode == 'additional'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
         run: |
           set -e
           git fetch origin "${{ steps.state.outputs.branch }}"
@@ -1986,7 +2016,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないようにする認証は、
-          # 前段の「pushの認証をWORKFLOW_PATに固定する」ステップが設定するremote.origin.pushurl
+          # 前段の「pushの認証をワークフロー用トークンに固定する」ステップが設定する
+          # remote.origin.pushurl
           # で完結しており、このステップのGH_TOKEN/github_tokenには依存しない(#662)。
           # (#635時点では`actions/checkout`のtoken入力がpersist-credentialsで永続化されるため
           # 十分だと判断していたが、claude-code-action自身がその認証情報を消して自前トークンに
@@ -2110,7 +2141,7 @@ jobs:
         if: always() && (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
         env:
           GH_TOKEN: ${{ github.token }}
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
@@ -2209,7 +2240,7 @@ jobs:
           NEXT_ATTEMPT=$((RETRY_ATTEMPT + 1))
           if [ "$NEXT_ATTEMPT" -le "$AUTO_RETRY_LIMIT" ]; then
             echo "自動リトライを試みます（${NEXT_ATTEMPT}/${AUTO_RETRY_LIMIT}回目）"
-            if GH_TOKEN="$WORKFLOW_PAT" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
+            if GH_TOKEN="$WORKFLOW_TOKEN" gh workflow run claude-issue-dispatch.yml --repo "$REPO" --ref develop -f issue_number="$ISSUE_NUMBER" -f retry_attempt="$NEXT_ATTEMPT"; then
               # 新しく起動したrunのURLを特定する。計画提示ステップ側のフォールバック検証ステップと
               # 同じロジック(#1113、詳細はそちら側のコメント参照)。
               NEW_RUN_URL="$RUN_URL"
@@ -2229,7 +2260,7 @@ jobs:
               gh issue comment "$ISSUE_NUMBER" --body "$RETRY_BODY"
               exit 0
             fi
-            echo "自動リトライの起動（gh workflow run）に失敗しました。WORKFLOW_PATに必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
+            echo "自動リトライの起動（gh workflow run）に失敗しました。ワークフロー用トークン（GitHub Appのインストールトークン、未登録時はWORKFLOW_PAT）に必要な権限（Actions: write相当）が不足している可能性があります。従来どおりのフォールバック通知に切り替えます"
           fi
 
           echo "自動リトライを行わないため、フォールバックコメントを投稿します（エラー種別: $ERROR_TYPE）"

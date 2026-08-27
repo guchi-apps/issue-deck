@@ -205,16 +205,32 @@ jobs:
       actions: read
       id-token: write
     steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 期限切れが単一障害点になるsecrets.WORKFLOW_PATを、1時間で失効するインストールトークンへ
+        # 置き換える(#835。仕組みの詳細はreusable-issue-dispatch.ymlの同名ステップと
+        # docs/actions-token-model.mdを参照)。vars.WORKFLOW_APP_IDが未登録ならこのステップは
+        # skipされ、使用箇所は`|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        # permission-*は、このワークフローが実際に使う権限だけへ絞るために付けている。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: develop
           fetch-depth: 0
           # 後続のgit push、および.github/workflows/配下がコンフリクトしていた場合に備え、
-          # workflow書き込み権限を持つPAT(secrets.WORKFLOW_PAT)でcheckoutする(issue #106と同様)。
+          # workflow書き込み権限を持つワークフロー用トークンでcheckoutする(issue #106と同様)。
           # ただしcheckoutが設定する認証情報はclaude-code-actionに消されるため、pushの認証は
           # 次のステップで別途固定する(#662)。
-          token: ${{ secrets.WORKFLOW_PAT }}
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
 
       - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
         # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
@@ -259,7 +275,7 @@ jobs:
           fi
           echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
 
-      - name: pushの認証をWORKFLOW_PATに固定する
+      - name: pushの認証をワークフロー用トークンに固定する
         # claude-code-actionは実行時にactions/checkoutが残した認証情報(extraheader)を削除し、
         # remote.origin.urlを自身のトークン付きURLへ差し替える。github_token未指定時のそれは
         # workflows権限を持たないClaude GitHub Appのインストールトークンのため、
@@ -268,11 +284,11 @@ jobs:
         # 失敗した。actionが書き換えないpush専用URL(remote.origin.pushurl)にPATを固定して回避する。
         # 詳細な理由はclaude-issue-dispatch.ymlの同名ステップのコメントを参照。
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           REPOSITORY: ${{ github.repository }}
         run: |
           git remote set-url --push origin \
-            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+            "https://x-access-token:${WORKFLOW_TOKEN}@github.com/${REPOSITORY}.git"
 
       - name: 対象PRの状態を再確認する
         id: state
@@ -313,7 +329,7 @@ jobs:
       - name: 作業ブランチをcheckoutする
         if: steps.state.outputs.should_resolve == 'true'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
         run: |
           set -e
           git fetch origin "${{ steps.state.outputs.branch }}" develop
@@ -442,7 +458,7 @@ jobs:
         if: steps.state.outputs.should_resolve == 'true'
         uses: anthropics/claude-code-action@v1
         env:
-          # `.github/workflows/`配下を含むgit pushの認証は、前段の「pushの認証をWORKFLOW_PATに
+          # `.github/workflows/`配下を含むgit pushの認証は、前段の「pushの認証をワークフロー用トークンに
           # 固定する」ステップが設定するremote.origin.pushurlで別途完結しており、このステップの
           # GH_TOKENには依存しない。
           # ビルド検証用の環境変数は前段の「ビルド検証用の環境変数を設定する」ステップが
