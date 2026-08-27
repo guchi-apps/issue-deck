@@ -564,6 +564,29 @@ GITHUB_USER=guchi-apps ./sync-labels.sh apply   --from issue-deck --to my-app --
 gh label list --repo guchi-apps/my-app --limit 60 --json name --jq '[.[].name]|sort|join(" ")'
 ```
 
+### ラベルが入る経路は2つで、Organizationのデフォルトラベルは採らない（#1002）
+
+新しいリポジトリへラベルが入る経路は次の2つ。**どちらもissue-deckのラベルを正にしている。**
+
+| 経路 | 使うとき |
+|---|---|
+| 画面の「新規アプリを立ち上げる」がAPIで写す（[`src/lib/github/repositories-api.ts`](../src/lib/github/repositories-api.ts)の`cloneRepositoryLabels`） | issue-deckの導線でリポジトリを作ったとき（既定） |
+| `guchi-apps/docs`の`label-sync/sync-labels.sh`（1件なら`gh label clone --force`） | 導線を通さず作ったリポジトリ・既存リポジトリの差分是正 |
+
+GitHubにはOrganization単位で「新規リポジトリに自動で入るラベル」を定義する機能
+（Organization Settings → Code, planning, and automation → Repository → Repository defaults）が
+あるが、**採用していない**（#1002で見送りを決めた）。
+
+- **効くのは新規リポジトリだけで、既存リポジトリには一切適用されない**
+  （[Managing default labels for repositories in your organization](https://docs.github.com/en/organizations/managing-organization-settings/managing-default-labels-for-repositories-in-your-organization)）。
+  `sync-labels.sh`の置き換えにはならない
+- **その唯一の適用先である「新規リポジトリへの初期投入」は、立ち上げ導線が既にAPIで済ませている**
+  （#2188・#2247）。GitHub既定の`bug`・`documentation`等を消すところまで自動で揃うため、
+  重ねて設定しても増える効果が無い
+- **Organizationのデフォルトラベルを操作するREST APIは提供されていない**
+  （`gh api orgs/guchi-apps/labels`は`Not Found`）。登録も更新もブラウザでの手作業になり、
+  ラベルを1つ足すたびに正（issue-deck）とは別に手で直す場所が増える
+
 ### 既存の別世代のラベルがあるリポジトリ
 
 導入前のリポジトリは旧世代のラベル体系を持っていることが多い（`01.wip`・`22.preview-required`・

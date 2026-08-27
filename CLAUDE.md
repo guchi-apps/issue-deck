@@ -113,6 +113,7 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
 
 - **推測で決めない。** `develop`の最新コードを実際に読み、要求が満たされていることを確かめる。根拠として**該当ファイルのパスと行番号**、および対応したPull Request・コミット・Issue番号のいずれかを示せること
 - **満たされているのが要求の一部だけなら、残りは実装する。** 全体として満たされている場合だけ止まる
+- **「◯◯の手作業を省く」種類のIssueは、要求ではなく目的が満たされていないかを確かめる**（#1002）。要求（Organizationのデフォルトラベルの登録）が未実施でも、目的（新規リポジトリへのラベル初期投入）が起票後に入った別経路で満たされていれば、実装しても効果はゼロになる。**その手作業が今も発生しているのか**をコードで確認してから着手し、消えていれば根拠を添えて報告して続け方の指示を待つ
 - **コミット・push・PR作成をしない。** 空コミットも、辻褄合わせの変更も入れない。**Issueもcloseしない**（closeするか別の要件として作り直すかはユーザーが決める）
 - 止まり方は実行経路で違う。無人実行は`gh issue comment`で報告したうえで`00.check-user`＋`01.check-blocked`を付けて停止する（`.github/prompts/implement.md`・`plan.md`）。ローカル実行は端末でユーザーへ確認しつつ、同じ内容をIssueコメントにも残す（`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`）
 - 理由ラベルが`01.check-plan`でなく`01.check-blocked`なのは、ユーザーがやることが「計画の承認」ではなく「続け方の指示」だから（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「理由を表す`01.check-*`ラベル」）
