@@ -89,9 +89,9 @@ import type {
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
-  BranchFlowPlannedIssue,
   BranchFlowReleaseGroup,
   BranchFlowRepository,
+  BranchFlowStartedIssue,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -753,14 +753,6 @@ function BumpPullRequestLine({
   );
 }
 
-/**
- * 実装予定として既定で出す件数（#1704）。
- *
- * **未着手はバックログ全体なので、全部出すと流れ図が下へ押し出される。** 頭出しだけを既定にし、
- * 残りはリポジトリごとのボタンで開く（件数そのものは見出しに出ているので、隠れていることは分かる）。
- */
-const PLANNED_ISSUE_PREVIEW_COUNT = 3;
-
 /** 優先度のピル。高だけ色を付ける（低は「後回しでよい」という情報なので目立たせない） */
 function IssuePriorityBadge({ priority }: { priority: BranchFlowIssuePriority }) {
   if (priority === "low") return <PullRequestMetaBadge>優先度 低</PullRequestMetaBadge>;
@@ -768,39 +760,34 @@ function IssuePriorityBadge({ priority }: { priority: BranchFlowIssuePriority })
 }
 
 /**
- * まだブランチが無い「実装予定」のIssue（#1704）。
+ * 実行ボタンを押して動き出した、まだブランチが無いIssue（#1704・#2386）。
  *
  * 流れ図のいちばん上、作業レーンより上流に置く。**枝も点も破線にして「まだブランチになっていない」
  * ことを形で出す**——実線の枝（＝実在するブランチ）と同じ描き方にすると、ブランチが切られたものと
  * 見分けが付かない。
  *
- * 既定は`PLANNED_ISSUE_PREVIEW_COUNT`件までで、残りはボタンで開く。**0件のときは見出しごと出さない**
+ * **頭出しはしない**（#2386）。3件までに畳んでいたのは未着手（＝バックログ全体）を並べていた
+ * ときの都合で、着手中は同時に走っているセッションの本数しかない。ここで畳むと、いま動いて
+ * いるものを見に来たのに続きがボタンの下へ隠れる。**0件のときは見出しごと出さない**
  * （何も無いことを毎行に書かない）。
  */
-function PlannedIssues({
+function StartedIssues({
   repositoryFullName,
   issues,
-  showAll,
-  onToggleShowAll,
 }: {
   repositoryFullName: string;
-  issues: BranchFlowPlannedIssue[];
-  showAll: boolean;
-  onToggleShowAll: () => void;
+  issues: BranchFlowStartedIssue[];
 }) {
   if (issues.length === 0) return null;
-
-  const visible = showAll ? issues : issues.slice(0, PLANNED_ISSUE_PREVIEW_COUNT);
-  const hiddenCount = issues.length - visible.length;
 
   return (
     <>
       <li className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-0.5 pl-[3.35rem] max-sm:pl-[2.6rem]">
-        <span className="text-xs font-medium text-muted-foreground">実装予定 {issues.length}件</span>
+        <span className="text-xs font-medium text-muted-foreground">着手中 {issues.length}件</span>
         <span className="text-xs text-muted-foreground">まだブランチが無いIssue</span>
       </li>
 
-      {visible.map((issue) => (
+      {issues.map((issue) => (
         <li key={issue.number} className="relative py-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
           <span
             aria-hidden="true"
@@ -816,21 +803,6 @@ function PlannedIssues({
           </div>
         </li>
       ))}
-
-      {(hiddenCount > 0 || showAll) && (
-        <li className="pt-1 pb-0.5 pl-[3.35rem] max-sm:pl-[2.6rem]">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-6 px-2 text-xs"
-            onClick={onToggleShowAll}
-          >
-            {hiddenCount > 0
-              ? `実装予定の残り${hiddenCount}件を表示`
-              : `実装予定を${PLANNED_ISSUE_PREVIEW_COUNT}件だけ表示`}
-          </Button>
-        </li>
-      )}
     </>
   );
 }
@@ -1051,12 +1023,10 @@ function ReleaseFlowGraph({
   repository,
   showClosed,
   showAllVersions,
-  showAllPlannedIssues,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
   deployTriggerPending,
   onShowAllVersions,
-  onToggleAllPlannedIssues,
   onReleaseTriggered,
   onDeployTriggered,
   onMerged,
@@ -1064,15 +1034,12 @@ function ReleaseFlowGraph({
   repository: BranchFlowRepository;
   showClosed: boolean;
   showAllVersions: boolean;
-  /** 実装予定を全件出しているか（#1704）。既定は頭出しの3件まで */
-  showAllPlannedIssues: boolean;
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
   /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か（#2020） */
   deployTriggerPending: boolean;
   onShowAllVersions: () => void;
-  onToggleAllPlannedIssues: () => void;
   /** リリースworkflowを起こせた後（起動中の記録と、バンプPRを出すための取り直し） */
   onReleaseTriggered: () => void;
   /** 本番デプロイworkflowを起こせた後（起動中の記録と、実行を出すための取り直し。#2020） */
@@ -1206,11 +1173,9 @@ function ReleaseFlowGraph({
         />
 
         {/* 上流（まだブランチが無いIssue）から下流（リリース済み）へ、上から下に並べる（#1704） */}
-        <PlannedIssues
+        <StartedIssues
           repositoryFullName={repository.repositoryFullName}
-          issues={repository.plannedIssues}
-          showAll={showAllPlannedIssues}
-          onToggleShowAll={onToggleAllPlannedIssues}
+          issues={repository.startedIssues}
         />
 
         {activeLanes.map((lane) => (
@@ -1437,7 +1402,7 @@ function RepositorySummaryRow({
     deploy !== null ||
     unreleased.count > 0 ||
     summary.openManualStepCount > 0 ||
-    summary.plannedIssueCount > 0 ||
+    summary.startedIssueCount > 0 ||
     repository.orphanIssues.length > 0;
 
   return (
@@ -1528,13 +1493,14 @@ function RepositorySummaryRow({
           className="text-amber-600 dark:text-amber-400"
         />
       )}
-      {/* 開かなくても、これから流れてくるものが溜まっているかが分かるようにする（#1704）。
-          破線の丸は流れ図の実装予定ノードと同じ描き方で、まだブランチが無いことを形で出す */}
-      {summary.plannedIssueCount > 0 && (
+      {/* 開かなくても、実行ボタンを押したものが何本走っているかが分かるようにする（#1704・#2386）。
+          破線の丸は流れ図の着手中ノードと同じ描き方で、まだブランチが無いことを形で出す。
+          ブランチが上がったぶんは右隣の「進行中」が数えるので、2つを足すと総数になる */}
+      {summary.startedIssueCount > 0 && (
         <SummaryCount
           icon={CircleDashed}
-          label={`実装予定 ${summary.plannedIssueCount}件`}
-          count={summary.plannedIssueCount}
+          label={`着手中 ${summary.startedIssueCount}件`}
+          count={summary.startedIssueCount}
         />
       )}
       {summary.activeLaneCount > 0 && (
@@ -1581,13 +1547,11 @@ function RepositorySection({
   mergedPullRequestsLoaded,
   showClosed,
   showAllVersions,
-  showAllPlannedIssues,
   isOpen,
   selectionMode = false,
   detailHost = null,
   onToggle,
   onShowAllVersions,
-  onToggleAllPlannedIssues,
   onRefresh,
   onMerged,
 }: {
@@ -1596,7 +1560,6 @@ function RepositorySection({
   mergedPullRequestsLoaded: boolean;
   showClosed: boolean;
   showAllVersions: boolean;
-  showAllPlannedIssues: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
   selectionMode?: boolean;
@@ -1611,7 +1574,6 @@ function RepositorySection({
   detailHost?: HTMLElement | null;
   onToggle: () => void;
   onShowAllVersions: () => void;
-  onToggleAllPlannedIssues: () => void;
   /** リリースworkflowを起こした後の取り直し */
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
@@ -1624,12 +1586,10 @@ function RepositorySection({
       repository={repository}
       showClosed={showClosed}
       showAllVersions={showAllVersions}
-      showAllPlannedIssues={showAllPlannedIssues}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       releaseTriggerPending={isPending}
       deployTriggerPending={deployTrigger.isPending}
       onShowAllVersions={onShowAllVersions}
-      onToggleAllPlannedIssues={onToggleAllPlannedIssues}
       onReleaseTriggered={() => {
         markTriggered();
         onRefresh();
@@ -1823,8 +1783,6 @@ export function BranchFlowView({
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
   const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
-  // 実装予定を全件出しているリポジトリ（#1704）。既定は頭出しの3件までで、押すたびに切り替える
-  const [allPlannedRepositories, setAllPlannedRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
   // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
   const progressingRepositories = flow.repositories.filter(
@@ -2084,7 +2042,6 @@ export function BranchFlowView({
               mergedPullRequestsLoaded={releasesLoaded}
               showClosed={showClosed}
               showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
-              showAllPlannedIssues={allPlannedRepositories.has(repository.repositoryFullName)}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}
@@ -2093,17 +2050,6 @@ export function BranchFlowView({
                 setAllVersionsRepositories(
                   (prev) => new Set([...prev, repository.repositoryFullName]),
                 )
-              }
-              onToggleAllPlannedIssues={() =>
-                setAllPlannedRepositories((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(repository.repositoryFullName)) {
-                    next.delete(repository.repositoryFullName);
-                  } else {
-                    next.add(repository.repositoryFullName);
-                  }
-                  return next;
-                })
               }
               onRefresh={onRefresh}
               onMerged={handleMerged}
