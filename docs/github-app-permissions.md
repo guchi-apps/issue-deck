@@ -67,6 +67,7 @@ requests/Actions/Checks/Contents(Read)という、GitHub Appの権限モデル�
 | 2026-08-11 | `Contents` | **Read and write** | #834（WORKFLOW_PAT廃止の事前準備）でApp設定画面を確認 |
 | 2026-08-11 | `Workflows` | **Read and write** | 同上 |
 | 2026-08-11 | `Pull requests` | **Read and write** | 同上 |
+| 2026-08-27 | インストール全体 | `actions:write` / `administration:write` / `checks:read` / `contents:write` / `issues:write` / `metadata:read` / `organization_projects:write` / `pull_requests:write`（**`secrets`は無い**） | #2388（他リポジトリ用途のWORKFLOW_PAT置き換え）で`gh api /orgs/guchi-apps/installations`により実測 |
 
 上の棚卸し表では`Contents: Read`・`Pull requests: Read`と推定していたが、いずれも実際には
 `Read and write`だった。この差により、#834 では当初「`.github/workflows/`を書き換えてPRを作るには
@@ -76,6 +77,22 @@ requests/Actions/Checks/Contents(Read)という、GitHub Appの権限モデル�
 `Workflows: Read and write`が付与済みであることは、`secrets.WORKFLOW_PAT`をGitHub Appインストール
 トークンへ置き換える計画（#834・#835）にとって前提条件にあたる。詳細は
 [docs/actions-token-model.md](actions-token-model.md)を参照。
+
+**`Secrets`は意図して付与していない（#2388）。** 付与すれば`reusable-sync-secrets.yml`に残る
+最後の`WORKFLOW_PAT`も廃止できるが、Appの資格情報はissue-deckのサーバー（VPS上で常時起動）も
+持つため、「フリート全リポジトリのデプロイ用シークレットを書き換えられるアプリ」になる。
+`reusable-sync-secrets.yml`が「権限の置き場所を分ける」目的で作られたこと自体と矛盾するため、
+Appを広げず、寿命の短いPATを手動起動のワークフロー1本へ閉じ込める側を選んだ。
+判断の記録は[docs/actions-token-model.md](actions-token-model.md)「9. 他リポジトリ用途の移行（#2388）」。
+
+**インストールの権限は`gh api /orgs/guchi-apps/installations`で実測できる**（App設定画面を
+開かなくてよい）。`create-github-app-token`の`permission-*`は、**インストールに無い権限を
+要求するとトークン発行そのものが失敗する**ため、足す前に必ずこれで確かめる。
+
+```bash
+gh api /orgs/guchi-apps/installations \
+  --jq '.installations[] | select(.app_slug=="issue-deck") | .permissions'
+```
 
 ## 「Administrationをより狭い権限に置き換えられるか」の結論
 

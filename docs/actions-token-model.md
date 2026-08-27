@@ -3,8 +3,9 @@
 `.github/workflows/`配下のワークフロー群が使うトークンの使い分け、その使い分けが支えている
 自己ループ防止機構、および「他リポジトリを読めるようにする」際の選択肢を整理する。
 
-**#835で案B（GitHub Appのインストールトークン）へ移行した。** 現在の構成と、まだ
-`secrets.WORKFLOW_PAT`が残っている箇所は「8. 案Bへの移行（#835）」を参照。以下の1〜7は
+**#835で案B（GitHub Appのインストールトークン）へ移行し、#2388で他リポジトリを触る用途も
+寄せた。** 現在の構成は「8. 案Bへの移行（#835）」、他リポジトリ用途の移行と、`WORKFLOW_PAT`が
+1箇所だけ残っている理由は「9. 他リポジトリ用途の移行（#2388）」を参照。以下の1〜7は
 移行前の整理であり、`WORKFLOW_PAT`固有の性質（3-4・3-5・3-6など）は移行後には当てはまらない。
 
 発端は issue #357（他リポジトリでの実現可能性調査）で、GitHub Actions 上の実装エージェントが
@@ -436,15 +437,86 @@ PATはユーザー個人に紐づくため、push・PR作成・自動マージ�
   `issue_comment`を起点に本ワークフローを再始動させる経路は無い。`gh workflow run`による
   自己リトライ（#497）は`workflow_dispatch`のためBot判定を経由しない
 
-### まだ`WORKFLOW_PAT`が残っている箇所
+### まだ`WORKFLOW_PAT`が残っている箇所（#835時点）
 
-**他リポジトリを触る用途は今回の置き換え対象外**で、`WORKFLOW_PAT`のまま残っている。
+**他リポジトリを触る用途は#835の置き換え対象外**で、`WORKFLOW_PAT`のまま残していた。
 Appのインストールは組織全体（`repository_selection: all`）なので技術的には到達できるが、
 `create-github-app-token`へ`owner`・`repositories`を渡してスコープを広げる設計判断と、
 Actions secretsの書き込み権限（Appは持たない）の確認が別途要るため分けた。
+**この残りは#2388で解消した（次節）。**
 
-| 箇所 | 用途 | Appトークンへ寄せられない理由 |
+## 9. 他リポジトリ用途の移行（#2388）
+
+#835で残していた3群のうち2群をインストールトークンへ寄せ、`secrets.WORKFLOW_PAT`の参照を
+`reusable-sync-secrets.yml`の1箇所だけにした。
+
+| 箇所 | 用途 | #2388後 |
 |---|---|---|
-| `reusable-issue-dispatch.yml`・`reusable-claude-review-develop.yml`の`.shared-context`のcheckout | privateな`guchi-apps/docs`の読み取り | 別リポジトリのため`repositories`指定が要る（`continue-on-error`のため失効しても実装は止まらない） |
-| `propagate-workflow-tag.yml`・`propagate-shared-files.yml`・`propagate-repair-workflows.yml` | 配布先リポジトリへのPR作成 | 同上 |
-| `reusable-sync-secrets.yml` | 各リポジトリのActions secretsの書き込み | Appに`secrets: write`が無い（付与するかどうかの判断が要る） |
+| `reusable-issue-dispatch.yml`・`reusable-claude-review-develop.yml`の`.shared-context`のcheckout | privateな`guchi-apps/docs`の読み取り | `owner`＋`repositories`で**そのリポジトリだけ**へ絞ったトークンを別途発行（`permission-contents: read`） |
+| `propagate-workflow-tag.yml`・`propagate-shared-files.yml`・`propagate-repair-workflows.yml` | 配布先リポジトリへのPR作成 | `owner`のみ渡して**インストール配下の全リポジトリ**を対象にしたトークンを発行（contents / workflows / pull-requests のwrite） |
+| `reusable-sync-secrets.yml` | 各リポジトリのActions secretsの書き込み | **`WORKFLOW_PAT`のまま残す**（下記の理由） |
+
+### スコープの切り方は用途で2通りある
+
+`create-github-app-token`は`owner`・`repositories`を省くと**実行中のリポジトリだけ**にスコープ
+される。他リポジトリへ届かせるにはどちらかを渡すが、渡し方で広さが変わる。
+
+- **宛先が決まっているなら`owner`＋`repositories`。** `.shared-context`のcheckoutは
+  `guchi-apps/docs`しか読まないため、そこだけに絞る。**専用のトークンをもう1本発行する**形に
+  なる（既存の`app-token`は実行中のリポジトリ用で、そのままでは他リポジトリを読めない）。
+- **宛先が実行時に決まるなら`owner`だけ。** `propagate-*`の配布先は呼び出し元（issue-deckの
+  画面）が`workflow_dispatch`の入力で渡すため、事前に列挙できない。`owner`だけを渡すと
+  インストールが持つそのownerの全リポジトリが対象になる。`repository_selection: all`のため
+  `WORKFLOW_PAT`（All repositories）と同じ到達範囲で、権限の広さは`permission-*`で絞る。
+
+`owner`は`github.repository_owner`で取れるが、`repositories`に渡す**リポジトリ名は`owner/repo`
+形式ではなくリポジトリ名だけ**。checkoutが読む`vars.SHARED_CONTEXT_REPO`は`owner/repo`形式の
+ままにしておきたいので、**分解はシェルのステップで行う**——ワークフローの式には文字列を分割する
+関数が無い（`format`・`join`・`fromJSON`などしかない）。
+
+### 発行の失敗をどう扱うかは用途で変える
+
+`vars.WORKFLOW_APP_ID`が未登録ならステップがskipされ`|| secrets.WORKFLOW_PAT`へ落ちる、という
+#835のフォールバックはそのまま。違うのは**発行そのものが失敗したとき**で、フォールバックは
+効かず（skipのときにしか効かない）ジョブが落ちる。
+
+- `.shared-context`のトークン発行には`continue-on-error: true`を付ける。共有知識は「あれば精度が
+  上がる」補助情報で、checkout側が既に`continue-on-error`なのに、その手前のトークン発行で
+  無人実行ごと落とすのでは本末転倒になる。失敗しても`outputs.token`は空のままなので、
+  checkoutは`WORKFLOW_PAT`へ落ちる。
+- `propagate-*`には付けない。配布そのものが目的のジョブで、トークンが取れないなら黙って
+  進んでも意味がない。手動起動のため失敗はその場で見える。
+
+### `reusable-sync-secrets.yml`だけ`WORKFLOW_PAT`を残した理由
+
+**Appに`secrets: write`を付与しない**という判断による。付与すれば`WORKFLOW_PAT`を完全に
+廃止できるが、そのAppの資格情報を持つのはActionsだけではない——issue-deckのサーバー（VPS上で
+常時起動し、ネットワークに面している）も同じAppとして動く。付与は「フリート全リポジトリの
+デプロイ用シークレットを書き換えられるアプリ」を作ることを意味し、
+`reusable-sync-secrets.yml`の冒頭コメントがこのワークフローを作った理由として挙げている
+「権限の置き場所を分ける」（issue-deckのサーバーからは直接書かず、書き込み権限は対象
+リポジトリのActionsの中に閉じる）が、そこで崩れる。#1309・
+[docs/cross-repo-automation.md](cross-repo-automation.md)と同じ判断を踏襲した。
+
+代わりに`WORKFLOW_PAT`の残存範囲が**手動起動のワークフロー1本**まで縮んだため、期限切れの
+影響も「シークレット同期のボタンが失敗する」に閉じる（無人実行・配布・リリースは止まらない）。
+付与する判断へ切り替える場合は、`GH_TOKEN`を
+`${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}`にし、
+`permission-secrets: write`を要求するトークン発行ステップを足せばよい。
+
+### Appのインストール権限は実測で確認する
+
+`permission-*`で要求した権限が**インストールに無いとトークン発行そのものが失敗する**。
+#2388時点の実測は次のとおりで、`secrets`が無いことがそのまま上の判断の根拠になっている。
+
+```console
+$ gh api /orgs/guchi-apps/installations \
+    --jq '.installations[] | select(.app_slug=="issue-deck") | {repository_selection, permissions}'
+{"repository_selection":"all","permissions":{"actions":"write","administration":"write","checks":"read","contents":"write","issues":"write","metadata":"read","organization_projects":"write","pull_requests":"write","workflows":"write"}}
+```
+
+なお`administration: write`はインストールにはあるが、`propagate-workflow-tag.yml`の
+トークンでは要求していない。配布スクリプトの
+`gh api -X PATCH repos/$REPO -F allow_auto_merge=true`は今後も権限不足で落ちるが、
+`|| true`で受けており、auto-mergeの有効化は`scripts/setup-develop-auto-merge.sh`へ
+寄せてある（#1475）。

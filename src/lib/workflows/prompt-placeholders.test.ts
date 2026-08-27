@@ -33,6 +33,10 @@ const INTENTIONAL = [
   /issue-deck画面/,
   /issue-deck独自の画像アップロードAPI/,
   /guchi-apps\/issue-deck/,
+  // サブPC上の実体のパス（#2401）。1Passwordの書き込み用トークンと`provision-secret.sh`は
+  // issue-deckのチェックアウトにあり、**どのリポジトリの手作業でも同じ場所**を指す
+  /~\/\.config\/issue-deck\//,
+  /~\/apps\/issue-deck/,
 ];
 
 function readPrompt(name: string): string {

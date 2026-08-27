@@ -8,7 +8,9 @@
 // 実物のSignalyは立てられないので、指定した応答を返すだけのHTTPサーバーをwebhookに見立てる。
 
 import { execFile } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,6 +21,13 @@ const script = path.join(repoRoot, ".github/scripts/signaly-notify.sh");
 
 let server;
 let webhookUrl;
+/** リリース専用チャンネルに見立てた2本目のwebhook（#2391） */
+let releaseServer;
+let releaseWebhookUrl;
+/** リリース専用チャンネルが受け取ったリクエストのボディ */
+let releaseReceived;
+/** 変更内容のファイルを置く一時ディレクトリ */
+let workDir;
 /** webhookが返す応答（テストごとに差し替える） */
 let response;
 /** 受け取ったリクエストのボディ */
@@ -41,11 +50,35 @@ beforeEach(async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   // webhookのURLは秘密なので、失敗時のログに出ていないことも見る（ここでは目印を入れておく）。
   webhookUrl = `http://127.0.0.1:${server.address().port}/hooks/secret-token`;
+
+  releaseReceived = [];
+  releaseServer = createServer((request, res) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      releaseReceived.push(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(204);
+      res.end();
+    });
+  });
+  await new Promise((resolve) => releaseServer.listen(0, "127.0.0.1", resolve));
+  releaseWebhookUrl = `http://127.0.0.1:${releaseServer.address().port}/hooks/release`;
+
+  workDir = mkdtempSync(path.join(tmpdir(), "signaly-notify-"));
 });
 
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
+  await new Promise((resolve) => releaseServer.close(resolve));
+  rmSync(workDir, { recursive: true, force: true });
 });
+
+/** 変更内容のファイルを書き、そのパスを返す */
+function writeNotes(contents) {
+  const notesPath = path.join(workDir, "release-notes.md");
+  writeFileSync(notesPath, contents, "utf8");
+  return notesPath;
+}
 
 function run(env = {}) {
   return new Promise((resolve) => {
@@ -71,6 +104,20 @@ function run(env = {}) {
     );
   });
 }
+
+/** リリース通知として実行する。既定では変更内容のファイルを持たない（#2391） */
+function runRelease(env = {}) {
+  return run({
+    NOTIFY_KIND: "リリース",
+    NOTIFY_VERSION: "v4.45.0",
+    GITHUB_SHA: "a1f9c02d4e5f6789012345678901234567890abc",
+    NOTIFY_NOTES_FILE: path.join(workDir, "absent.md"),
+    ...env,
+  });
+}
+
+const fieldNames = (payload) => payload.fields.map((field) => field.name);
+const fieldValue = (payload, name) => payload.fields.find((field) => field.name === name)?.value;
 
 describe("signaly-notify.sh", () => {
   it("通知が届けば成功で終わる", async () => {
@@ -119,5 +166,110 @@ describe("signaly-notify.sh", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("skipping Signaly notification");
     expect(received).toHaveLength(0);
+  });
+
+  it("CI・デプロイ通知には本文を付けず、従来のフィールドを出す", async () => {
+    await run({ GITHUB_REF_NAME: "main", GITHUB_ACTOR: "guchi", GITHUB_EVENT_NAME: "push" });
+
+    const payload = JSON.parse(received[0]);
+    expect(payload.message).toBeUndefined();
+    expect(fieldNames(payload)).toContain("Type");
+    expect(fieldNames(payload)).toContain("Branch");
+    expect(fieldNames(payload)).toContain("Actor");
+  });
+
+  // ── リリース通知の分離（#2391）───────────────────────────────
+  describe("リリース通知", () => {
+    it("リリース専用のwebhookがあればそちらへ送る", async () => {
+      const result = await runRelease({ SIGNALY_RELEASE_WEBHOOK_URL: releaseWebhookUrl });
+
+      expect(result.code).toBe(0);
+      // ここが要点。**CI・デプロイのチャンネルには流さない**
+      expect(received).toHaveLength(0);
+      expect(releaseReceived).toHaveLength(1);
+    });
+
+    it("リリース専用のwebhookが未設定なら従来のチャンネルへ送る", async () => {
+      // 配布先のワークフローがまだ渡していなくても通知が消えないことを固定する
+      const result = await runRelease();
+
+      expect(result.code).toBe(0);
+      expect(received).toHaveLength(1);
+      expect(releaseReceived).toHaveLength(0);
+    });
+
+    it("成功したリリースの見出しは🚀になる", async () => {
+      await runRelease();
+
+      expect(JSON.parse(received[0]).title).toBe("🚀 [issue-deck] リリース v4.45.0 成功");
+    });
+
+    it("失敗したリリースの見出しは❌のままにする", async () => {
+      await runRelease({ NOTIFY_STATUS: "failure" });
+
+      expect(JSON.parse(received[0]).title).toBe("❌ [issue-deck] リリース v4.45.0 失敗");
+    });
+
+    it("毎回同じ値になるフィールドを落とし、GitHub Releaseへのリンクを出す", async () => {
+      await runRelease({ GITHUB_REF_NAME: "main", GITHUB_ACTOR: "guchi", GITHUB_EVENT_NAME: "push" });
+
+      const payload = JSON.parse(received[0]);
+      expect(fieldNames(payload)).toEqual(["App", "Version", "Repository", "Commit", "Release", "Run"]);
+      expect(fieldValue(payload, "Release")).toBe(
+        "[v4.45.0](https://github.com/guchi-apps/issue-deck/releases/tag/v4.45.0)",
+      );
+    });
+
+    it("見出しのバージョンが一致する変更内容を本文に載せる", async () => {
+      const notes = writeNotes(
+        [
+          "<!-- リリースのたびに自動生成されます。手で編集しないでください -->",
+          "",
+          "# v4.45.0",
+          "",
+          "リリースの通知が別のチャンネルに届くようになりました。",
+          "",
+          "**使い方**",
+          "",
+          "1. Signalyで「リリース」チャンネルを開く",
+          "",
+        ].join("\n"),
+      );
+
+      await runRelease({ NOTIFY_NOTES_FILE: notes });
+
+      const payload = JSON.parse(received[0]);
+      expect(payload.message).toContain("リリースの通知が別のチャンネルに届くようになりました。");
+      expect(payload.message).toContain("1. Signalyで「リリース」チャンネルを開く");
+      // 断り書きのHTMLコメントと見出しは本文に混ぜない
+      expect(payload.message).not.toContain("<!--");
+      expect(payload.message).not.toContain("# v4.45.0");
+    });
+
+    it("見出しのバージョンが違えば本文を載せない", async () => {
+      // 古い文面を新しいバージョンの通知に貼るより、本文なしで送るほうがまし
+      const notes = writeNotes("# v4.44.0\n\n前のリリースの文面\n");
+
+      await runRelease({ NOTIFY_NOTES_FILE: notes });
+
+      expect(JSON.parse(received[0]).message).toBeUndefined();
+    });
+
+    it("変更内容のファイルが無くても通知は送る", async () => {
+      const result = await runRelease({ NOTIFY_NOTES_FILE: path.join(workDir, "missing.md") });
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(received[0]).message).toBeUndefined();
+    });
+
+    it("長すぎる変更内容は切り詰める", async () => {
+      const notes = writeNotes(`# v4.45.0\n\n${"あ".repeat(3000)}\n`);
+
+      await runRelease({ NOTIFY_NOTES_FILE: notes });
+
+      const { message } = JSON.parse(received[0]);
+      expect(message.length).toBeLessThanOrEqual(1501);
+      expect(message.endsWith("…")).toBe(true);
+    });
   });
 });

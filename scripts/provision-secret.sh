@@ -19,6 +19,9 @@
 #   printf '%s' "$値" | scripts/provision-secret.sh --repo guchi-apps/aide --key ZAIM_EMAIL --from-stdin
 #   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_OPS_DASHBOARD_TOKEN \
 #     --copy-from "op://apps/ops-dashboard/ops-api-token"
+#   # 1Passwordへ値を入れ済みで、同期だけを行う（organizationの共通値）
+#   scripts/provision-secret.sh --repo guchi-apps/issue-deck --key SIGNALY_RELEASE_WEBHOOK_URL \
+#     --manifest .github/org-secrets-manifest.tsv --sync-only
 #
 # オプション:
 #   --repo <owner/repo>    対象リポジトリ（必須）
@@ -27,6 +30,8 @@
 #   --from-stdin           標準入力から値を読む（外部サービスで発行した値を渡す用）
 #   --copy-from <op://…>   既存の値をコピーする
 #   --field-type <型>      1Password側のフィールド型。password（既定）/ text / url
+#   --manifest <パス>      対応表のパス（既定 .github/secrets-manifest.tsv）。organizationの
+#                          共通値は .github/org-secrets-manifest.tsv を指定する
 #   --ref <ブランチ>       マニフェストを読むブランチ（既定 develop）
 #   --dry-run              書き込み・同期・デプロイを行わず、何をするかだけ出す
 #   --no-deploy            同期までで止める（デプロイを起こさない）
@@ -54,6 +59,7 @@ FROM_STDIN=false
 COPY_FROM=""
 FIELD_TYPE="password"
 REF="develop"
+MANIFEST_PATH=".github/secrets-manifest.tsv"
 DRY_RUN=false
 DEPLOY=true
 WAIT=true
@@ -68,6 +74,7 @@ while [[ $# -gt 0 ]]; do
     --from-stdin) FROM_STDIN=true; shift ;;
     --copy-from) COPY_FROM="$2"; shift 2 ;;
     --field-type) FIELD_TYPE="$2"; shift 2 ;;
+    --manifest) MANIFEST_PATH="$2"; shift 2 ;;
     --ref) REF="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --no-deploy) DEPLOY=false; shift ;;
@@ -121,15 +128,15 @@ trap 'rm -rf "$WORK"' EXIT
 # **参照先を引数で受けない。** マニフェスト（`.github/secrets-manifest.tsv`）が唯一の正で、
 # 実装PRの時点で行が入っている。引数で受けると二重管理になり、綴りの違いに気付けない。
 MANIFEST="$WORK/manifest.tsv"
-if ! gh api "repos/$REPO/contents/.github/secrets-manifest.tsv?ref=$REF" \
+if ! gh api "repos/$REPO/contents/$MANIFEST_PATH?ref=$REF" \
   -H "Accept: application/vnd.github.raw" > "$MANIFEST" 2>/dev/null; then
-  echo "マニフェストを取得できません: $REPO ($REF)" >&2
+  echo "マニフェストを取得できません: $REPO $MANIFEST_PATH ($REF)" >&2
   exit 1
 fi
 
 line="$(awk -F'\t' -v k="$KEY" '$1 == k { print; exit }' "$MANIFEST")"
 if [[ -z "$line" ]]; then
-  echo "マニフェストに $KEY の行がありません: $REPO ($REF)" >&2
+  echo "マニフェストに $KEY の行がありません: $REPO $MANIFEST_PATH ($REF)" >&2
   echo "**先に実装側のPRでマニフェストへ行を追加してください。** ここで足すと、コードが" >&2
   echo "その値を読んでいない状態でsecretだけが増える。" >&2
   exit 1
@@ -165,6 +172,14 @@ fi
 echo "対象      : $REPO"
 echo "キー      : $KEY -> GitHub $kind $gh_name"
 echo "1Password : $op_vault / $op_item / $op_field（$FIELD_TYPE）"
+
+# organizationの共通値（`--manifest .github/org-secrets-manifest.tsv`）は、どれか1つの
+# リポジトリのデプロイでは本番へ行き渡らない（参照している全リポジトリのデプロイが要る）。
+# ここは同期までで止め、反映は各リポジトリのデプロイに任せる
+if [[ "$scope" == "org" && "$DEPLOY" == true ]]; then
+  echo "organizationの共通値のため、デプロイは起こしません（参照する各リポジトリのデプロイで反映されます）"
+  DEPLOY=false
+fi
 
 # --- 2. 値を用意する ----------------------------------------------------------
 load_writer() { set -a; . "$WRITER_ENV"; set +a; }

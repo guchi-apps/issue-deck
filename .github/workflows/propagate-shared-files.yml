@@ -69,11 +69,37 @@ jobs:
             exit 1
           fi
 
+      - name: GitHub Appのインストールトークンを発行する
+        # 配布先は**他リポジトリ**のため、既定のGITHUB_TOKENでは届かない。#835で
+        # issue-deck自身の操作をGitHub Appのインストールトークンへ寄せたときは、
+        # 「別リポジトリはownerを渡してスコープを広げる設計判断が要る」として
+        # secrets.WORKFLOW_PATのまま残していた。ここをその形へ寄せる（#2388）。
+        #
+        # - ownerだけを渡すと、インストールが持つそのownerの全リポジトリが対象になる。
+        #   issue-deckのAppはrepository_selection: allでインストール済みのため、
+        #   配布先を事前に列挙しなくてよい（対象は呼び出し元が入力で渡す）。
+        # - permission-*は配布に実際に要るものだけ。他リポジトリの.github/workflows/を
+        #   書き換えるためworkflowsが要り、ブランチのpushにcontents、PRの作成に
+        #   pull-requestsが要る（docs/actions-token-model.md「案B」）。
+        # - vars.WORKFLOW_APP_IDが未登録ならこのステップはskipされ、使用箇所は
+        #   `|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+
       - name: 各リポジトリへPRを作成する
         env:
-          # 配布先の .github/ を変更するため、workflow権限を持つPATが要る
+          # 配布先の .github/ を変更するため、workflow権限を持つトークンが要る
           # （`.github/scripts/` 自体はworkflow権限の対象外だが、caller配布と同じトークンで揃える）
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          # （GitHub Appのインストールトークン。未登録時はWORKFLOW_PAT。#2388）
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           TARGETS: ${{ inputs.targets }}
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |

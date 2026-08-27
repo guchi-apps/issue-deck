@@ -64,6 +64,9 @@ jobs:
         continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
+          # リリースだけはCI・デプロイと別のチャンネルへ送る（#2391）。未登録のあいだは
+          # 空が渡り、スクリプトが従来のチャンネルへフォールバックする。
+          SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}
           NOTIFY_APP: issue-deck
           NOTIFY_KIND: リリース

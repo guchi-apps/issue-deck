@@ -339,11 +339,21 @@ function findShellBlocks(lines: string[], from: number, to: number): ShellBlock[
  * 代行できている手順が押せなくなる。逆に、ここに挙げそこねたコマンドは失敗として止まるだけで、
  * 人が手元で実行すれば進む——**迷ったら挙げない側**ではなく、**代行しない側**へ倒す。
  */
+/**
+ * 1Passwordの個人アカウントへのサインイン（#2025）。
+ *
+ * **これだけは、本文を書き換えれば代行できる**（#2401）。サブPCには書き込み権限つきの
+ * サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、1Passwordへの書き込みも
+ * 読み取りも非対話で通る（#1874）。画面の理由文（`describeManualStepExecutionRejection`）が
+ * その書き換え先を出すために、この1つだけ名前を付けて外へ出している。
+ */
+export const OP_SIGNIN_COMMAND = "op signin";
+
 const INTERACTIVE_COMMANDS = [
   // 1Passwordの個人アカウントへのサインイン。セッションは実行したシェルの環境変数にしか
   // 残らないため、**同じブロックにある後続のコマンドまで含めて人が実行する**必要がある
   // （人が手元で`op signin`だけ実行しても、代行実行のシェルはそのセッションを引き継げない）
-  "op signin",
+  OP_SIGNIN_COMMAND,
   // GitHub CLIの対話的なログイン・スコープの追加（ブラウザでコードを入力する）
   "gh auth login",
   "gh auth refresh",

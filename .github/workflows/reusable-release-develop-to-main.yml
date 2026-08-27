@@ -417,10 +417,12 @@ jobs:
           BUMP_COMMAND: ${{ inputs.bump-command }}
           BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
           REASON: ${{ steps.bump.outputs.reason }}
-          # 更新履歴表示を自リポジトリに持つ他リポジトリ向けの汎用フック。npm versionの
+          # 更新履歴表示を自リポジトリに持つリポジトリ向けの汎用フック。npm versionの
           # "version" lifecycleスクリプト（対象リポジトリがpackage.jsonに定義した場合のみ実行
           # される）がこの環境変数を読み、自前の更新履歴ファイルを書き換えるという契約にする。
-          # issue-deck自身は"version"スクリプトを持たないため、この変数は現状未使用。
+          # issue-deck自身も#1764で受け取り側になった（scripts/version-changelog.mjs）。
+          # **受け取り側を持たないリポジトリでも通知には載せる**ため、このステップの後半で
+          # .github/release-notes.md へも書き出す（#2391）。
           RELEASE_CHANGELOG: ${{ steps.bump.outputs.changelog }}
           # 同じ契約で渡す、利用者向けの操作手順（#1729）。RELEASE_CHANGELOGが「何が変わったか」、
           # こちらが「どう使うか」。**両者は必ずセットで扱うこと**——env:とexportのどちらかに
@@ -483,6 +485,40 @@ jobs:
           if [ "$APPLIED" != "$NEW_VERSION" ]; then
             echo "::error::バージョンの書き換えに失敗しました（$VERSION_FILE は $APPLIED のまま。期待: $NEW_VERSION）"
             exit 1
+          fi
+
+          # **リリース通知の本文に載せる変更内容を、リポジトリの中へ置く**（#2391）。
+          # リリース通知（各リポジトリの`deploy.yml`の`notify-release`）が読むのはここで、
+          # `.github/scripts/signaly-notify.sh`がバンプ後のチェックアウトから拾う。
+          #
+          # **更新履歴ファイルとは別に持つ。** `RELEASE_CHANGELOG`を受け取る"version"
+          # lifecycleスクリプトを持つのはフリート16リポジトリ中7件しかなく、残りでは
+          # 生成された文面がバンプPRの本文にしか残らない。ここで書き出せば、更新履歴画面を
+          # 持たないアプリでも通知に変更内容を載せられる。
+          #
+          # 生成されなかったリリースでは**更新しない**（前回の文面が残るが、見出しの
+          # バージョンが一致しないので通知には載らない）。
+          if [ -n "$RELEASE_CHANGELOG" ] || [ -n "$RELEASE_USAGE" ]; then
+            mkdir -p .github
+            {
+              echo "<!-- リリースのたびに自動生成されます。手で編集しないでください（guchi-apps/issue-deck#2391） -->"
+              echo
+              echo "# v${NEW_VERSION}"
+              echo
+              if [ -n "$RELEASE_CHANGELOG" ]; then
+                echo "$RELEASE_CHANGELOG"
+                echo
+              fi
+              if [ -n "$RELEASE_USAGE" ]; then
+                echo "**使い方**"
+                echo
+                echo "$RELEASE_USAGE"
+                echo
+              fi
+            } > .github/release-notes.md
+            echo ".github/release-notes.md を更新しました"
+          else
+            echo "利用者向けの文面が生成されなかったため、.github/release-notes.md は更新しません"
           fi
 
           git config user.name "Claude Code"

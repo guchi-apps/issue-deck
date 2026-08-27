@@ -649,6 +649,40 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(runManualStep).not.toHaveBeenCalled();
   });
 
+  // 帯が出ている間だけダイアログの子が1つ増える。段の数を数える組み方（`grid-rows-*`）へ
+  // 戻すと割り当てが1つずつずれ、帯が高さ0まで潰れて読めなくなる（#2402）。
+  // **jsdomは高さを持たないため描画のテストでは捕まらない**ので、クラスの並びで見張る
+  it("止まっている帯は本文の外に置き、縮むのは本文だけ（#2402）", () => {
+    renderAutoDialog(
+      dispatchHandle({
+        manualStepRuns: [
+          manualStepRun({ status: "PAUSED", pausedReason: "FAILED", done: 1 }),
+        ],
+      }),
+    );
+
+    const content = document.querySelector('[data-slot="dialog-content"]');
+    const bar = screen.getByText("失敗したため止まっています").closest('[role="status"]');
+    expect(content).toBeTruthy();
+    expect(bar).toBeTruthy();
+
+    // 高さを配るのはflexの縦積み。段の数を数える組み方へ戻っていない。
+    // `DialogContent`の既定の`grid`はtailwind-mergeが落とし、表示は`flex`で確定する
+    // （残る`grid-cols-[minmax(0,1fr)]`は効かないので、横幅は`max-w-*`が止める）
+    expect(content?.classList.contains("flex")).toBe(true);
+    expect(content?.classList.contains("grid")).toBe(false);
+    expect(content?.className).toContain("flex-col");
+    expect(content?.className).not.toContain("grid-rows-");
+    expect(content?.className).toContain("max-w");
+    // 帯はスクロール領域の外（本文をスクロールしても隠れない）にあり、縮まない
+    expect(bar?.parentElement).toBe(content);
+    expect(bar?.className).toContain("shrink-0");
+    // 伸縮するのは帯の次に来る本文のスクロール領域だけ
+    const body = bar?.nextElementSibling;
+    expect(body?.className).toContain("flex-1");
+    expect(body?.className).toContain("overflow-y-auto");
+  });
+
   it("人が実行して「実行した・次へ」を押すと、続きから流すようサーバーへ伝える", async () => {
     renderAutoDialog(
       dispatchHandle({
