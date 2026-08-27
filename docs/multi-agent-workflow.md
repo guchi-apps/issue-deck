@@ -89,7 +89,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）
 - `develop`のBranch protectionに`required_status_checks`（`lint-and-build`）を設定（Phase4）
-- 共有知識リポジトリ（`guchi-apps/docs`）への`secrets.WORKFLOW_PAT`の到達性（共有知識層。issue-deckのPATはRepository accessが「All repositories」のため追加設定は不要。**到達できない場合でも共有知識のcheckoutが失敗するだけで、各ワークフローは`continue-on-error`で続行する**。この`.shared-context`のcheckoutは、#835でGitHub Appのインストールトークンへ移行した後も`WORKFLOW_PAT`のまま残っている数少ない箇所の1つ）
+- 共有知識リポジトリ（`guchi-apps/docs`）への到達性（共有知識層。#2388で`.shared-context`のcheckoutも、そのリポジトリだけへ絞ったGitHub Appのインストールトークンへ移行した。issue-deckのAppは`repository_selection: all`のため追加設定は不要で、`WORKFLOW_APP_ID`が未登録のリポジトリでは従来の`WORKFLOW_PAT`（All repositories）へ落ちる。**到達できない場合でも共有知識のcheckoutが失敗するだけで、各ワークフローは`continue-on-error`で続行する**）
 - 共有知識リポジトリ`guchi-apps/docs`側へのファイル追加（`CLAUDE.md`・`agent-rules/`・`knowledge/`等。[docs/shared-knowledge.md](shared-knowledge.md)「6. 共有知識リポジトリ側に必要なファイル」参照。**対応済み**）
 
 ## 未解決の課題・申し送り事項

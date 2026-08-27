@@ -743,6 +743,38 @@ jobs:
         run: |
           git remote set-url --push origin \
             "https://x-access-token:${WORKFLOW_TOKEN}@github.com/${REPOSITORY}.git"
+      - name: 共有知識リポジトリの所有者とリポジトリ名を分解する
+        # 次のトークン発行ステップのowner・repositoriesは別々の入力だが、ワークフローの式には
+        # 文字列を分割する関数が無い（format/join/fromJSONだけ）。checkoutが読む
+        # vars.SHARED_CONTEXT_REPO（`owner/repo`形式）を唯一の正のまま使うため、ここで割る（#2388）。
+        id: shared-context-target
+        env:
+          SHARED_CONTEXT_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
+        run: |
+          set -euo pipefail
+          echo "owner=${SHARED_CONTEXT_REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "repo=${SHARED_CONTEXT_REPO##*/}" >> "$GITHUB_OUTPUT"
+      - name: 共有知識リポジトリ用のインストールトークンを発行する
+        # 共有知識は**別リポジトリ**（guchi-apps/docs）にあり、#835で入れたトークンは既定の
+        # スコープ（実行中のリポジトリだけ）のため読めない。そのリポジトリだけを対象にした
+        # トークンをもう1本発行して、この用途に残っていたsecrets.WORKFLOW_PATを置き換える（#2388）。
+        #
+        # - owner・repositoriesを渡すとインストールの中でそのリポジトリだけへ絞られる。
+        #   issue-deckのAppはrepository_selection: allでインストールされているため到達できる。
+        # - permission-contents: read だけを要求する。ここでするのは読み取りのみ。
+        # - continue-on-error: true。共有知識は「あれば精度が上がる」補助情報で、発行の失敗で
+        #   ジョブを落としてはいけない。失敗してもoutputs.tokenは空のままなので、下のcheckoutは
+        #   従来どおりsecrets.WORKFLOW_PATへ落ちる（#835のフォールバックと同じ形）。
+        id: shared-context-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          owner: ${{ steps.shared-context-target.outputs.owner }}
+          repositories: ${{ steps.shared-context-target.outputs.repo }}
+          permission-contents: read
       - name: 共有知識リポジトリをcheckoutする
         # 全アプリ共通の知識(guchi-apps/docs)をワークツリー内の .shared-context/ へ配置し、
         # 各Claude CodeステップがRead/Grep/Globでそのまま読めるようにする
@@ -754,9 +786,11 @@ jobs:
         # - persist-credentials: false により、共有知識リポジトリ向けの認証情報が
         #   .shared-context/.git/config に残らないようにする(本体リポジトリのpush認証と混線
         #   させないため)。
-        # - continue-on-error: true。共有知識は「あれば精度が上がる」補助情報であり、PATの権限
-        #   不足やリポジトリ名の誤りでcheckoutに失敗しても実装自体は続行させる。プロンプト側でも
+        # - continue-on-error: true。共有知識は「あれば精度が上がる」補助情報であり、トークンの
+        #   権限不足やリポジトリ名の誤りでcheckoutに失敗しても実装自体は続行させる。プロンプト側でも
         #   「.shared-context/が無ければ共有知識なしで進める」と明示している。
+        # - tokenは上で発行した共有知識リポジトリ用のインストールトークン。未登録・発行失敗時は
+        #   従来のsecrets.WORKFLOW_PATへ落ちる(#2388)。
         # - リポジトリ名・refはリポジトリ変数で上書きできる。他リポジトリへ本ワークフローを展開
         #   する際、ワークフロー本文を書き換えずに切り替えられるようにするための逃げ道。
         #
@@ -770,7 +804,7 @@ jobs:
           path: .shared-context
           fetch-depth: 1
           persist-credentials: false
-          token: ${{ secrets.WORKFLOW_PAT }}
+          token: ${{ steps.shared-context-token.outputs.token || secrets.WORKFLOW_PAT }}
       - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
         # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
         # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための

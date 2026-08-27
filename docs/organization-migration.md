@@ -222,6 +222,8 @@ Organizationへ移したリポジトリには届かない。
 特に注意が要るのが共有知識リポジトリ`docs`で、`reusable-issue-dispatch.yml`・
 `claude-review-develop.yml`の2つが`WORKFLOW_PAT`でcheckoutしている（#2029より前は
 `shared-knowledge-propose.yml`もcheckoutしていた）。
+**（#2388で、この2つのcheckoutは`docs`だけへ絞ったGitHub Appのインストールトークンへ移行した。
+以下はPATだけで動いていた当時の整理。）**
 issue-deckだけをorgへ移して`docs`を個人アカウントに残すと、共有知識のcheckoutが失敗する
 （各ワークフローは`continue-on-error`で続行するため停止はしないが、共有知識なしで動くことになる）。
 

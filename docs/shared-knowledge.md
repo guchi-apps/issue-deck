@@ -133,8 +133,9 @@ $GITHUB_WORKSPACE/
 - `actions/checkout`の`path:`は`$GITHUB_WORKSPACE`配下しか指定できないため、ワークツリー内に置く。
   誤コミットを防ぐため`.gitignore`に`/.shared-context/`を登録し、あわせて各プロンプトで
   「`.shared-context/`配下は読み取り専用、`git add`しない」ことを明示する。
-- 共有知識リポジトリはprivateのため、checkoutには`secrets.WORKFLOW_PAT`を使う
-  （[7.2 事前設定](#72-事前設定人間が行う)参照）。
+- 共有知識リポジトリはprivateのため、checkoutには**その1リポジトリだけへ絞ったGitHub Appの
+  インストールトークン**を使う（#2388。未登録のリポジトリでは従来の`secrets.WORKFLOW_PAT`へ
+  落ちる。[7.2 事前設定](#72-事前設定人間が行う)参照）。
 - checkoutに失敗しても**ジョブは止めない**（`continue-on-error: true`）。共有知識は「あれば
   精度が上がる」補助情報であり、これが理由で実装そのものが止まる方が損失が大きい。プロンプト側で
   「`.shared-context/`が存在しない場合は共有知識なしで進める」と明示する。
@@ -343,7 +344,33 @@ Claude Code実行前に、以下のステップを挟む。
     path: .shared-context
     fetch-depth: 1
     persist-credentials: false
-    token: ${{ secrets.WORKFLOW_PAT }}
+    token: ${{ steps.shared-context-token.outputs.token || secrets.WORKFLOW_PAT }}
+```
+
+`shared-context-token`はこのcheckoutの直前に置く、**共有知識リポジトリだけを対象にした**
+インストールトークンの発行ステップ（#2388）。ジョブ内の他のトークン（`app-token`）は実行中の
+リポジトリにしかスコープされないため、別リポジトリを読むには別途発行が要る。
+
+```yaml
+- name: 共有知識リポジトリの所有者とリポジトリ名を分解する
+  id: shared-context-target
+  env:
+    SHARED_CONTEXT_REPO: ${{ vars.SHARED_CONTEXT_REPO || 'guchi-apps/docs' }}
+  run: |
+    set -euo pipefail
+    echo "owner=${SHARED_CONTEXT_REPO%%/*}" >> "$GITHUB_OUTPUT"
+    echo "repo=${SHARED_CONTEXT_REPO##*/}" >> "$GITHUB_OUTPUT"
+- name: 共有知識リポジトリ用のインストールトークンを発行する
+  id: shared-context-token
+  if: ${{ vars.WORKFLOW_APP_ID != '' }}
+  continue-on-error: true
+  uses: actions/create-github-app-token@v3
+  with:
+    app-id: ${{ vars.WORKFLOW_APP_ID }}
+    private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+    owner: ${{ steps.shared-context-target.outputs.owner }}
+    repositories: ${{ steps.shared-context-target.outputs.repo }}
+    permission-contents: read
 ```
 
 - `vars.SHARED_CONTEXT_REPO` / `vars.SHARED_CONTEXT_REF`はリポジトリ変数での上書き用。未設定なら
@@ -351,13 +378,19 @@ Claude Code実行前に、以下のステップを挟む。
   切り替えられるようにするための逃げ道。
 - `persist-credentials: false`にして、共有知識リポジトリの認証情報が`.shared-context/.git/config`に
   残らないようにする（本体リポジトリのpush認証と混線させない）。
-- `continue-on-error: true`により、PATの権限不足・リポジトリ名の誤り等で失敗しても実装は続行する。
+- `continue-on-error: true`により、トークンの権限不足・リポジトリ名の誤り等で失敗しても実装は続行する。
+  **トークン発行ステップ側にも`continue-on-error: true`が要る。** checkoutだけに付けても、その手前の
+  発行が失敗した時点でジョブが落ちる（#2388）。
+- `repositories:`に渡すのは`owner/repo`ではなく**リポジトリ名だけ**。ワークフローの式には文字列を
+  分割する関数が無いため、`vars.SHARED_CONTEXT_REPO`の分解はシェルのステップで行う。
 
 ### 7.2 事前設定（人間が行う）
 
-- **issue-deckの`secrets.WORKFLOW_PAT`はRepository accessが「All repositories」で設定済みのため、
-  共有知識リポジトリ向けの追加設定は不要。** `.shared-context/`のcheckoutはこのPATで動く
-  （必要なpermissionは`Contents: Read`。All repositoriesのPATには既に含まれている）。
+- **issue-deckのGitHub Appは`repository_selection: all`でインストールされているため、共有知識
+  リポジトリ向けの追加設定は不要。** `.shared-context/`のcheckoutは、そのリポジトリだけへ絞った
+  インストールトークン（`permission-contents: read`）で動く（#2388）。
+  `vars.WORKFLOW_APP_ID`が未登録のリポジトリでは、従来どおり`secrets.WORKFLOW_PAT`
+  （Repository accessが「All repositories」）へ落ちる。
   `guchi-apps/docs`へのブランチpush・PR作成は、#2029以降は`guchi-apps/docs`側の格上げ判定
   ワークフローが自リポジトリのトークンで行うため、issue-deck側には書き込み権限が要らない。
 - 他リポジトリへ展開する場合は、そのリポジトリの`WORKFLOW_PAT`が共有知識リポジトリへ到達できるかを
