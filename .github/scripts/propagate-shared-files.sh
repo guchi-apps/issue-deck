@@ -139,30 +139,53 @@ UPDATED="${UPDATED# }"
 # 中身が違う`deploy.yml`は丸ごと配れない。そこで**アンカー行の隣へ1行足すだけ**の編集を、
 # 通知スクリプトの配布PRに相乗りさせる。
 #
-# アンカーは`NOTIFY_KIND: リリース`（リリース通知のステップは全リポジトリでこの行を持つ）。
-# **既に入っていれば何もしない**ので、配布を何度実行しても増えない。
+# アンカーは`NOTIFY_KIND:`の値が`リリース`の行（リリース通知のステップは全リポジトリで
+# この行を持つ）。**既に入っていれば何もしない**ので、配布を何度実行しても増えない。
+#
+# **突き合わせは行の完全一致で行わない**（#2421）。`NOTIFY_KIND: リリース`という文字列との
+# 一致で見ていたときは、次の2件が黙って外れ、**配布PRは作られるのにこの1行だけが入らない**
+# 状態が続いた。画面の「配布が必要」判定は通知スクリプトの中身しか見ないため、外れても
+# 表示には出ない。
+#
+#   - `guchi-apps/signaly` … 値を桁揃えしていて`NOTIFY_KIND:     リリース`（コロンの後が複数スペース）
+#   - `guchi-apps/asset-manager` … 改行がCRLFで、行末に`\r`が残る
+#
+# そこでコロンの後の空白は幅を問わず、行末のCRは取り除いてから値を比べる。**足す行の行末も
+# 元の行に合わせる**（CRLFのファイルへLFの行だけを混ぜない）。
 RELEASE_ENV_LINE='SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}'
 PATCHED=""
 for WF in .github/workflows/deploy.yml .github/workflows/release.yml; do
   [ -f "$WF" ] || continue
-  grep -q 'NOTIFY_KIND: リリース' "$WF" || continue
   if grep -q 'SIGNALY_RELEASE_WEBHOOK_URL' "$WF"; then
     echo "  $WF には既にリリース用のwebhookが入っています。スキップします"
     continue
   fi
 
-  awk -v needle='NOTIFY_KIND: リリース' -v insert="$RELEASE_ENV_LINE" '
+  awk -v insert="$RELEASE_ENV_LINE" '
     {
       trimmed = $0
+      eol = ""
+      if (trimmed ~ /\r$/) { eol = "\r"; sub(/\r$/, "", trimmed) }
       sub(/[ \t]+$/, "", trimmed)
       match(trimmed, /^[ \t]*/)
       indent = substr(trimmed, 1, RLENGTH)
-      if (substr(trimmed, RLENGTH + 1) == needle) {
-        printf "%s%s\n", indent, insert
+      body = substr(trimmed, RLENGTH + 1)
+      if (index(body, "NOTIFY_KIND:") == 1) {
+        value = substr(body, length("NOTIFY_KIND:") + 1)
+        sub(/^[ \t]+/, "", value)
+        if (value == "リリース") printf "%s%s%s\n", indent, insert, eol
       }
       print $0
     }
   ' "$WF" > "$WF.tmp" || fail "$WF を書き換えられません"
+
+  # **アンカーが無ければ何も変わらない。** 変わっていないファイルをPATCHEDへ入れると、
+  # PR本文が足していない行を足したと書くことになる
+  if cmp -s "$WF" "$WF.tmp"; then
+    rm -f "$WF.tmp"
+    continue
+  fi
+
   mv "$WF.tmp" "$WF" || fail "$WF の更新に失敗しました"
 
   PATCHED="$PATCHED $WF"

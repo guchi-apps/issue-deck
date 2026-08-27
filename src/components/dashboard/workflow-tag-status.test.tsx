@@ -25,6 +25,7 @@ function status(overrides: Partial<WorkflowTagStatus> = {}): WorkflowTagStatus {
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
+    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,

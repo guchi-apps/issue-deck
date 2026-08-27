@@ -738,25 +738,39 @@ GitHub Actionsのsecretはワークフローが`env:`へ渡さないとスクリ
 **`NOTIFY_KIND: リリース`の行の隣へ1行足す**（既に入っていれば何もしない）。同じ配布PRに
 含まれるので、押すボタンは今までどおり1つ。
 
-- **アンカーは実測で全リポジトリ共通。** リリース通知を出している15リポジトリの
-  `deploy.yml`（`ops-dashboard`のようにジョブを分けず1ステップで出す形も含む）と、
-  `release.yml`を持つ13リポジトリのすべてに`NOTIFY_KIND: リリース`の行がある
-- **画面の「配布が必要」判定は通知スクリプトの中身しか見ない。** スクリプトが既に最新の
-  リポジトリは対象に挙がらないため、この1行だけが未適用の状態は画面からは見えない。
-  行き渡ったかは下のコマンドで確かめる
+- **アンカーは全リポジトリにあるが、書き方は揃っていない**（#2421）。`NOTIFY_KIND: リリース`
+  という**文字列との一致**で見ていたときは2件が黙って外れ、配布PRは作られるのにこの1行だけが
+  入らない状態が続いた。突き合わせは**コロンの後の空白の幅を問わず、行末のCRを無視する**形にし、
+  足す行の行末も元の行に合わせる（CRLFのファイルへLFの行だけを混ぜない）
+  - `guchi-apps/signaly` … 値を桁揃えしていて`NOTIFY_KIND:     リリース`
+  - `guchi-apps/asset-manager` … 改行がCRLFで、行末に`\r`が残る（#2330の`claude-ci-fix.yml`と同じ性質）
+- **画面の「配布が必要」判定はこの1行の有無も見る**（#2421）。以前は通知スクリプトの中身しか
+  見ておらず、スクリプトが既に最新のリポジトリは対象に挙がらないため、**この1行だけが未適用の
+  状態は画面から見えなかった**。いまは`missingReleaseWebhookWorkflows`（`src/lib/workflow-tags.ts`）が
+  `deploy.yml`・`release.yml`を見て、欠けていれば「共有スクリプト」の未更新欄へ
+  `deploy.ymlのリリース通知env`として出す。**判定の条件は配布スクリプト側の挿入条件と同じにする**
+  ——片方だけ緩めると、画面には不足と出るのに配布PRが何も足さない行き止まりになる
+- 配るファイルが無く**この1行だけ**が対象のときは、配布ワークフローへ渡す`files`が空配列になる。
+  `propagate-shared-files.yml`の入力検証はそれを通す
 
 ```bash
 # リリース通知のenvが入っているか（未適用のリポジトリだけが出る）
+# **grepは -aE で引く。** CRLFのリポジトリがあり、値を桁揃えしているリポジトリもある
 for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-list car-care \
          myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
   br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
   for f in deploy release; do
     body="$(gh api "repos/guchi-apps/$r/contents/.github/workflows/$f.yml?ref=$br" --jq .content 2>/dev/null | base64 -d)"
-    printf '%s' "$body" | grep -q 'NOTIFY_KIND: リリース' || continue
-    printf '%s' "$body" | grep -q 'SIGNALY_RELEASE_WEBHOOK_URL' || echo "$r: $f.yml 未適用"
+    printf '%s' "$body" | grep -qaE 'NOTIFY_KIND:[[:space:]]+リリース' || continue
+    printf '%s' "$body" | grep -qa 'SIGNALY_RELEASE_WEBHOOK_URL' || echo "$r: $f.yml 未適用"
   done
 done
 ```
+
+2026-08-27時点で未適用なのは`asset-manager`（`deploy.yml`・`release.yml`）と
+`signaly`（同）の2件。`aide`は`deploy.yml`に`release`ジョブを持ちながら**リリース通知の
+ステップ自体が無い**ため、この配布では届かない（ステップごと足す作業は
+`guchi-apps/aide`側のIssueへ切り出す）。`vps`・`subpc`はリリース通知を出していない。
 
 ```bash
 # 配布状況の確認（issue-deckのmainと同じ内容かどうか）
