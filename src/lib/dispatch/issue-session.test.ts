@@ -386,6 +386,19 @@ describe("describeSessionReap", () => {
     expect(notice?.detail).not.toContain("worktree");
   });
 
+  it("worktreeが消えているセッションは、前回の続きから再開しない旨を出す（#2422）", () => {
+    const notice = describeSessionReap(
+      session({ reapAt: "2026-08-16T12:03:00.000Z", reapReason: "WORKTREE_GONE" }),
+      NOW,
+    );
+    expect(notice?.detail).toContain("worktreeが削除されているため");
+    // 起動し直すとworktreeを作り直す経路になり、会話は引き継がれない（run-issue-session.sh）
+    expect(notice?.detail).toContain("引き継ぎません");
+    expect(notice?.detail).not.toContain("worktreeは残る");
+    // 質問セッション向けの案内（「質問する」から聞き直す）とは別物
+    expect(notice?.detail).not.toContain("新しく質問してください");
+  });
+
   it("生きていないセッションには出さない", () => {
     for (const state of ["EXITED", "FAILED", "GONE"] as const) {
       expect(

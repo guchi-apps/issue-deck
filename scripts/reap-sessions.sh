@@ -347,8 +347,30 @@ reap_one() {
   fi
 
   # --- 畳んだ後に取り返せないものが残っていないか ---
+  # **worktreeそのものが無いなら、畳んで失われるのは会話の文脈だけ**（#2422）。未コミットの
+  # 変更も未pushのコミットも、置き場ごと消えている（畳むのはtmuxセッションで、ファイルは
+  # 何も消さない）。ここを期限もリトライも無い`hold`にしていたため、Issueの移送・取り下げで
+  # worktreeを先に消したセッションが**永久に残っていた**（自分が動いているセッションは自分では
+  # kill できないので、消した本人も畳めない）。質問セッションを畳む判断（#1454）と同じ理屈で、
+  # 失うものが定義上無い側へ倒す。
+  #
+  # **GitHub側の状態（`11.local`・Issue・PR）は見ずにここで決める。** worktreeが無い以上この
+  # セッションはもう実装を続けられず、Issueを他リポジトリへ移送した場合は`gh issue view`が
+  # 解決できない（実例の`guchi-apps/dayspan#420`）ため、下の経路へ進めても
+  # 「Issueの状態を取得できない」という別の期限の無い`hold`に落ちるだけになる。
+  #
+  # 猶予（共通の`IDLE_MINUTES`）は置く。worktreeを消した直後のセッションが、後始末の続き
+  # （Issueコメント・ラベルの付け替え）をしていることがあるため。
   if [[ ! -d "$worktree" ]]; then
-    hold "$session" "worktreeが見つからない（$worktree）"
+    if [[ "$idle_for" -lt "$IDLE_SECONDS" ]]; then
+      # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+      hold_until_reap "$session" "$((event_at + IDLE_SECONDS))" "WORKTREE_GONE" \
+        "worktreeが削除されている（$worktree）が、猶予（${IDLE_MINUTES}分）が経っていない"
+      return 0
+    fi
+    fold_session "$session" "$repository" "$issue_number" \
+      "worktreeが削除されている（$worktree）・最後の応答終了から$((idle_for / 60))分" \
+      "もう一度作業する場合は、issue-deckの画面から起動し直してください（worktreeを作り直すため、前回の会話は引き継ぎません）。"
     return 0
   fi
   if ! dirty="$(git -C "$worktree" status --porcelain 2>/dev/null)"; then

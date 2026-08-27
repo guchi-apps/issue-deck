@@ -235,11 +235,17 @@ const REAP_REASON_TEXT: Record<DispatchSessionReapReason, string> = {
   HANDOFF_NO_PR: "PRを作らずにローカル作業を終えているため",
   QUESTION_CLOSED: "質問Issueがcloseされているため",
   QUESTION_IDLE: "質問セッションが放置されているため",
+  WORKTREE_GONE: "worktreeが削除されているため",
 };
 
 /**
  * 横断質問セッション（#1454）は畳まれても会話を引き継がない（cwdが質問Issue間で共有される
  * ため`--continue`が別の質問を拾う。#1648）。**実装セッションと同じ案内を出さない。**
+ *
+ * worktreeが消えているセッション（`WORKTREE_GONE`・#2422）も会話は引き継がないが、案内の中身が
+ * 違う（起動し直す先は「質問する」ではなく同じIssueで、ランチャーがworktreeを作り直す経路では
+ * `ISSUE_DECK_CLAUDE_RESUME=0`が渡って新しい会話で始まる。`run-issue-session.sh`）ため、
+ * この集合には入れず個別に出し分ける。
  */
 const QUESTION_REAP_REASONS = new Set<DispatchSessionReapReason>(["QUESTION_CLOSED", "QUESTION_IDLE"]);
 
@@ -270,9 +276,15 @@ export function describeSessionReap(
   // （pollerの巡は最大30秒遅れるため、期限ちょうどには畳まれない）
   const minutes = Math.floor(remainingMs / 60_000);
   const imminent = minutes < 1;
-  const suffix = QUESTION_REAP_REASONS.has(session.reapReason)
-    ? "、このまま操作が無ければ自動で終了します。続きを聞くときは「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
-    : "、このまま操作が無ければ自動で終了します。worktreeは残るので、次に起動すると前回の続きから再開します。";
+  const head = "、このまま操作が無ければ自動で終了します。";
+  let suffix: string;
+  if (session.reapReason === "WORKTREE_GONE") {
+    suffix = `${head}次に起動するとworktreeを作り直すため、前回の会話は引き継ぎません。`;
+  } else if (QUESTION_REAP_REASONS.has(session.reapReason)) {
+    suffix = `${head}続きを聞くときは「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。`;
+  } else {
+    suffix = `${head}worktreeは残るので、次に起動すると前回の続きから再開します。`;
+  }
 
   return {
     label: imminent ? "まもなく自動終了" : `あと${minutes}分で自動終了`,
