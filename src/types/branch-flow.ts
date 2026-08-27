@@ -227,13 +227,17 @@ export type BranchFlowIssueRef = {
 export type BranchFlowIssuePriority = "high" | "low";
 
 /**
- * まだブランチが無い「実装予定」のIssue（#1704）。
+ * 実行ボタンを押して動き出した、まだブランチが無いIssue（#1704・#2386）。
  *
  * ブランチ画面のレーンはPRのheadブランチと実在する作業ブランチの和集合で作るため、
- * **着手前のIssueは画面のどこにも現れない。** 「次に何が流れてくるか」を同じ画面で見せるために、
- * レーンにならないIssueをそのまま並べる。材料は既存のIssueキャッシュだけで、追加の取得は無い。
+ * **押した直後のIssueは画面のどこにも現れない**（作業ブランチがGitHubへ現れるのは最初のpushから）。
+ * 「いま何本走っているか」を同じ画面で見せるために、レーンにならないIssueをそのまま並べる。
+ * 材料は既存のIssueキャッシュだけで、追加の取得は無い。
+ *
+ * **`ready`（未着手）は入らない**（#2386）。ここが未着手を含んでいたころは、バックログ全体の
+ * 大きさが畳んだ1行の件数になっており、見ても何も起こせなかった。
  */
-export type BranchFlowPlannedIssue = BranchFlowIssueRef & {
+export type BranchFlowStartedIssue = BranchFlowIssueRef & {
   priority: BranchFlowIssuePriority | null;
 };
 
@@ -380,13 +384,16 @@ export type BranchFlowRepositorySummary = {
    */
   releaseMergeTarget: ReleaseMergeTarget | null;
   /**
-   * まだブランチが無い「実装予定」のIssueの件数（#1704）。畳んだ1行に破線の丸のアイコンと
-   * 数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。
+   * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に破線の丸の
+   * アイコンと数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。
+   *
+   * **`activeLaneCount`（進行中）と足し合わせて「いま動いている総数」になる。** ブランチが
+   * 上がったIssueはレーンとして数えられているため、こちらからは外してある。
    *
    * **手が要るものではない**ので、「手が要るもの◯件」の判定（`needsAttention`）には加えない。
-   * 開かずに溜まり具合だけ分かればよい、というのがこの数字の役目。
+   * 開かずに走っている本数だけ分かればよい、というのがこの数字の役目。
    */
-  plannedIssueCount: number;
+  startedIssueCount: number;
   /**
    * 直近のリリースの本番デプロイの状態（#1579）。畳んだ1行に「デプロイ中」「デプロイ失敗」を
    * 出すために持つ。**mainへマージした後もここが動いている間はまだ本番へ出ていない。**
@@ -442,23 +449,27 @@ export type BranchFlowRepository = {
    */
   canTriggerDeploy: boolean;
   /**
-   * 実装が進んでいるはずなのにブランチもPRも見つからないIssue。
-   * 「関連が付いていない」ことを隠さないために出す。
-   */
-  /**
    * そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull。
    * 失敗の帯からこのIssueへ移れるようにするためだけに持つ。
    */
   deployFailureIssue: DeployFailureIssueRef | null;
+  /**
+   * developへマージの段階まで進んでいるはずなのに、ブランチもPRも見つからないIssue。
+   * 「関連が付いていない」ことを隠さないために出す。
+   *
+   * **実装中は含めない**（#2386）。押した直後は必ずブランチが無い状態を通るため、異常として
+   * 警告すると起動したセッションのぶんだけ枠が出る。そちらは`startedIssues`が普通に並べる。
+   */
   orphanIssues: BranchFlowIssueRef[];
   /**
-   * これから着手するIssue（#1704）。進捗が`ready`・`planning`で、まだどのレーンにも現れていないもの。
+   * 実行ボタンを押して動き出したIssue（#1704・#2386）。進捗が`planning`・`implementation`で、
+   * まだどのレーンにも現れていないもの。
    *
-   * **`orphanIssues`とは別物。** あちらは「実装中なのにブランチが見つからない」という異常を隠さない
-   * ための枠で、こちらは正常な上流（まだブランチが無くて当然のIssue）。並びは
-   * 計画検討中 → 未着手、同じ進捗では優先度の高い順、最後に番号の新しい順。
+   * **`orphanIssues`とは別物。** あちらは「developへマージの段階なのにPRが見つからない」という
+   * 異常を隠さないための枠で、こちらは正常な上流（押した直後で、まだpushが無いIssue）。
+   * 並びは計画検討中 → 実装中、同じ進捗では優先度の高い順、最後に番号の新しい順。
    */
-  plannedIssues: BranchFlowPlannedIssue[];
+  startedIssues: BranchFlowStartedIssue[];
   /** ブランチ状況を取得できたか。falseのときはPRだけから組み立てている */
   branchesLoaded: boolean;
 };

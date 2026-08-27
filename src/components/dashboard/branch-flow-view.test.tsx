@@ -704,7 +704,8 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("一覧に無いIssue")).toBeNull();
     });
 
-    it("ブランチもPRも無い実装中のIssueを別枠で出す", () => {
+    /** #2386: 実装中は押した直後の正常な状態なので、警告するのは`developへマージ`から */
+    it("ブランチもPRも無いdevelopへマージのIssueを別枠で出す", () => {
       renderFlow({
         issues: [
           {
@@ -712,7 +713,7 @@ describe("BranchFlowView", () => {
             title: "何も上がっていないIssue",
             repositoryFullName: REPO,
             state: "open",
-            projectStatus: "Implementation",
+            projectStatus: "Develop PR",
           },
         ],
         branchStatuses: [branchStatus()],
@@ -2072,58 +2073,52 @@ describe("選択中リポジトリの展開（#1750）", () => {
   });
 });
 
-describe("実装予定のIssue（#1704）", () => {
+describe("着手中のIssue（#1704・#2386）", () => {
   afterEach(() => {
     cleanup();
   });
 
-  /** 未着手のIssueを番号だけ変えて並べる */
-  function plannedIssues(numbers: number[]): BranchFlowIssueSource[] {
+  /** 実行ボタンを押して実装中になったIssueを、番号だけ変えて並べる */
+  function startedIssues(numbers: number[]): BranchFlowIssueSource[] {
     return numbers.map((number) => ({
       number,
       title: `やること${number}`,
       repositoryFullName: REPO,
       state: "open",
-      projectStatus: "Ready",
+      projectStatus: "Implementation",
     }));
   }
 
   it("畳んだ1行にはアイコンと数字だけを出す（#1886）", () => {
-    renderFlow({ issues: plannedIssues([10, 11]), branchStatuses: [branchStatus()] });
+    renderFlow({ issues: startedIssues([10, 11]), branchStatuses: [branchStatus()] });
 
-    expect(screen.getByLabelText("実装予定 2件")).toBeTruthy();
-    expect(screen.queryByText("予定2")).toBeNull();
+    expect(screen.getByLabelText("着手中 2件")).toBeTruthy();
     // 開いたときの見出しは畳んだ状態では出さない
-    expect(screen.queryByText(/実装予定 2件/)).toBeNull();
+    expect(screen.queryByText(/着手中 2件/)).toBeNull();
   });
 
-  it("開くと既定で3件まで出し、残りはボタンで開く", () => {
+  /** #2386: 頭出しをやめた。走っているものを見に来た画面で、続きをボタンの下へ隠さない */
+  it("開くと全件を出し、頭出しのボタンは出さない", () => {
     renderFlow({
-      issues: plannedIssues([10, 11, 12, 13, 14]),
+      issues: startedIssues([10, 11, 12, 13, 14]),
       branchStatuses: [branchStatus()],
     });
     ensureRepositoryOpen();
 
-    expect(screen.getByText("実装予定 5件")).toBeTruthy();
-    expect(screen.getByText(/Issue #14/)).toBeTruthy();
-    expect(screen.queryByText(/Issue #11/)).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "実装予定の残り2件を表示" }));
-    expect(screen.getByText(/Issue #11/)).toBeTruthy();
-    expect(screen.getByText(/Issue #10/)).toBeTruthy();
-
-    // 押し直すと頭出しへ戻る
-    fireEvent.click(screen.getByRole("button", { name: "実装予定を3件だけ表示" }));
-    expect(screen.queryByText(/Issue #10/)).toBeNull();
+    expect(screen.getByText("着手中 5件")).toBeTruthy();
+    for (const number of [10, 11, 12, 13, 14]) {
+      expect(screen.getByText(new RegExp(`Issue #${number}`))).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: /着手中(の残り|を)/ })).toBeNull();
   });
 
-  it("3件以下なら展開ボタンは出さない", () => {
-    renderFlow({ issues: plannedIssues([10, 11]), branchStatuses: [branchStatus()] });
+  /** #2386: 押した直後（まだpushが無い）を異常として警告しない */
+  it("実装中でブランチが無いIssueを、琥珀の「ブランチもPRも見つからない」枠に出さない", () => {
+    renderFlow({ issues: startedIssues([10]), branchStatuses: [branchStatus()] });
     ensureRepositoryOpen();
 
-    expect(screen.getByText("実装予定 2件")).toBeTruthy();
-    // 畳んだ行のボタンも読み上げに「実装予定 2件」を持つため、展開ボタンの文言で見る（#1886）
-    expect(screen.queryByRole("button", { name: /実装予定(の残り|を)/ })).toBeNull();
+    expect(screen.getByText("着手中 1件")).toBeTruthy();
+    expect(screen.queryByText("ブランチもPRも見つからないIssue")).toBeNull();
   });
 
   it("優先度が付いているIssueにはピルを出す", () => {
@@ -2134,7 +2129,7 @@ describe("実装予定のIssue（#1704）", () => {
           title: "急ぎのやること",
           repositoryFullName: REPO,
           state: "open",
-          projectStatus: "Ready",
+          projectStatus: "Implementation",
           labels: ["80.Priority: High"],
         },
       ],
@@ -2145,23 +2140,25 @@ describe("実装予定のIssue（#1704）", () => {
     expect(screen.getByText("優先度 高")).toBeTruthy();
   });
 
-  it("実装予定が無ければ見出しごと出さない", () => {
+  /** #2386: 未着手（Ready）はバックログ全体なので、この画面には出さない */
+  it("未着手しか無ければ見出しごと出さない", () => {
     renderFlow({
       issues: [
         {
           number: 30,
-          title: "実装中のもの",
+          title: "未着手のもの",
           repositoryFullName: REPO,
           state: "open",
-          projectStatus: "Implementation",
+          projectStatus: "Ready",
         },
       ],
       branchStatuses: [branchStatus()],
     });
     ensureRepositoryOpen();
 
-    expect(screen.queryByText(/実装予定/)).toBeNull();
-    expect(screen.queryByLabelText(/実装予定/)).toBeNull();
+    expect(screen.queryByText(/着手中/)).toBeNull();
+    expect(screen.queryByLabelText(/着手中/)).toBeNull();
+    expect(screen.queryByText(/Issue #30/)).toBeNull();
   });
 });
 
