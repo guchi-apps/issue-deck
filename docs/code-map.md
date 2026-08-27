@@ -2478,6 +2478,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
+## 時刻を見る判定は`now`を引数で受け取る（描画中に`Date.now()`を呼ばない）（#2398）
+
+ESLintの`react-hooks/purity`が**描画中の`Date.now()`をエラーにする**（`Cannot call impure
+function during render`）。「期限を過ぎたら元に戻す」のような**時刻で結果が変わる判定**を
+書くときは、次の形にそろえる。
+
+- **純粋関数は`now: number | null`を引数で受け取る。** `null`（現在時刻が未取得）は
+  「判定できない」として、**強調しすぎる側へ倒す**（保留なら「効いていない」＝項目を出す）。
+  関数の中で既定値に`Date.now()`を入れない
+- **呼び出し側は`useNow()`の値を渡す**（[`hooks/use-now.ts`](../src/hooks/use-now.ts)）。
+  マウント前は`null`で、サーバーで描いた分とハイドレーション時で結果が食い違わない。
+  `now ?? Date.now()`と書くと同じルールに引っかかるので書かない
+- **開いた瞬間の時刻が要る部品は、イベントハンドラで刻む。**
+  [`snooze-menu.tsx`](../src/components/dashboard/snooze-menu.tsx)は選択肢の日付
+  （「明日まで 8/28」）を出すために時刻が要るが、`useNow()`は30秒間隔なので開いた瞬間には
+  遅れうる。`onOpenChange`（＝イベント）の中で`Date.now()`を読んで状態に置く。**イベント
+  ハンドラの中なら`Date.now()`は呼んでよい**
+- **日付の境界をまたぐ組み立ては[`lib/format-date-time.ts`](../src/lib/format-date-time.ts)を通す**
+  （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
+  9時間ずれる
+
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
 **複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
