@@ -1492,9 +1492,12 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
   ボタンを押すのは人なので、手作業Issueの手順としては`provision-secret.sh --sync-only`の
   ほうが自動実行に載る。どちらも1Passwordの日次枠（アカウント全体で1,000リクエスト/日。
   #1302）を消費するため、**変更したキーだけに絞る**（`--only` / `--key`）
-- **`op read`だけの確認にも`op signin`は要らない。** 代行実行のシェル（`run-manual-step.sh`）は
-  `~/.config/issue-deck/dispatch.env`しか読み込まないので、1Passwordのセッションもサービス
-  アカウントのトークンも入っていない。読むときも書き込み用のトークンを読み込む
+- **`op read`だけの確認にも`op signin`は要らない。** 代行実行のシェルには1Passwordの
+  **対話セッションが無い**（`run-manual-step.sh`が読むのは`~/.config/issue-deck/dispatch.env`
+  だけ）。一方で**read専用のサービスアカウントは入っている**——`subpc-dispatch-poller.sh`が
+  `/bin/bash -lc`で起こすため、ログインシェルとして`~/.profile.local`を読み直すため（#2417で
+  「サービスアカウントのトークンも入っていない」という誤記を訂正した）。読むだけならそのトークン
+  でも通るが、**書き込みは必ず落ちる**ので、読み書きとも書き込み用のトークンを読み込む形に揃える
 
   ```bash
   set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/aide/dayspan-token' >/dev/null && echo ok
@@ -1536,6 +1539,10 @@ managed block）が`~/.config/op/service-account-token`を読んで`OP_SERVICE_A
   無ければ`op item create`で作る。#2417でその分岐を足した）
 - **`~/.profile.local`の常時exportはやめない。** 外すと非対話の`op read`が全経路で壊れる。
   変更が要る場合も`guchi-apps/subpc`側のIssueとして切り出す
+- **届き方は検査と雛形で違う。** 本文検査の判定はissue-deck側のAPI（`POST /api/manual-steps/body-check`）
+  にあるので、規則を足せば配布タグを切らずに全リポジトリへ即日効く。一方**雛形は
+  `.github/prompts/implement.md`へ差し込まれ、他リポジトリはそれを`prompts-ref: workflows/vN`で
+  固定して読む**ため、新しい規約が他リポジトリの起票側へ届くのは`workflows/vN`を切って配布した後
 
 #### 「この作業でできるようになること」を先頭に置く理由（#1730）
 

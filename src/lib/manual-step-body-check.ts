@@ -349,13 +349,21 @@ function checkSecretCommands(
     });
   }
 
-  // 生のopで1Passwordを書き換える手順。サブPCのread専用トークンでは人が実行しても落ちる
-  const opWrite = commands.filter((command) => OP_WRITE_COMMAND.test(command));
+  // 生のopで1Passwordを書き換える手順。サブPCのread専用トークンでは人が実行しても落ちる。
+  // **同じブロックで書き込み用トークンを読み込んでいる形は除く**（`load_writer`と同じことを
+  // 手で書いた形で、実際に通る）。`collectShellBlocks`はフェンス単位で1つの文字列を返すので、
+  // 先頭の読み込み行も同じ文字列に入る——`local-secret-sync`と同じ除き方にしてある
+  const opWrite = commands.filter(
+    (command) =>
+      OP_WRITE_COMMAND.test(command) &&
+      !command.includes("op-writer.env") &&
+      !command.includes("provision-secret.sh"),
+  );
   if (opWrite.length > 0) {
     findings.push({
       rule: "op-write-command",
       severity: "warning",
-      message: `\`op\`で1Passwordを書き換えるコマンドが${opWrite.length}件あります。サブPCの全シェルには\`apps\`ボールトへ**read権限しか無い**サービスアカウントが常時exportされており（\`~/.profile.local\`）、\`op\`は\`op signin\`よりそちらを優先するため、このコマンドは代行実行でも人の実行でも\`Couldn't update the item.\`で落ちます。値の登録は1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書き、CLIには同期（\`scripts/provision-secret.sh … --sync-only\`）と確認（\`op read\`）だけを残してください。`,
+      message: `\`op\`で1Passwordを書き換えるコマンドが${opWrite.length}件あります。サブPCの全シェルには\`apps\`ボールトへ**read権限しか無い**サービスアカウントが常時exportされており（\`~/.profile.local\`）、\`op\`は\`op signin\`よりそちらを優先します。**同じコードブロックで書き込み用トークン（\`~/.config/issue-deck/op-writer.env\`）を読み込まない限り**、このコマンドは代行実行でも人の実行でも\`Couldn't update the item.\`で落ちます。値の登録は1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書き、CLIには同期（\`scripts/provision-secret.sh … --sync-only\`）と確認（\`op read\`）だけを残してください。`,
     });
   }
 

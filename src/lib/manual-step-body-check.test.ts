@@ -293,6 +293,16 @@ describe("1Passwordを扱うコマンド", () => {
     }
   });
 
+  // `load_writer`と同じことを手で書いた形。`collectShellBlocks`はフェンス単位で1つの
+  // 文字列を返すので、先頭の読み込み行も同じ文字列に入る（G1レビューの指摘）
+  it("同じブロックで書き込み用トークンを読み込んでいる`op item edit`は指摘しない", () => {
+    const body = templateBody().replace(
+      "（その手順で実行するコマンド）",
+      "set -a; . ~/.config/issue-deck/op-writer.env; set +a; op item edit aide --vault apps 'dayspan-token[password]=x'",
+    );
+    expect(rules(body)).toEqual([]);
+  });
+
   it("読み取りだけの`op`は指摘しない", () => {
     for (const command of [
       "op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
