@@ -244,6 +244,17 @@ describe(".github/secrets-manifest.tsv", () => {
     expect(keys).not.toContain("ALLOWED_GOOGLE_EMAILS");
     expect(keys).toContain("SIGNALY_WEBHOOK_URL");
   });
+
+  // 通知の宛先は、ワークフロー（scaffold-workflows.ts）とマニフェスト・.env.example
+  // （このファイル）の両方に要る。片方だけ足すと、新規アプリだけリリース通知が
+  // 分離されない状態で立ち上がる（#2391）。
+  it("リリース通知用のWebhookも、マニフェスト・.env.example・deploy.ymlの3か所に出す", () => {
+    expect(rows(spec()).map((row) => row[0])).toContain("SIGNALY_RELEASE_WEBHOOK_URL");
+    expect(content(spec(), ".env.example")).toContain("SIGNALY_RELEASE_WEBHOOK_URL=");
+    expect(content(spec(), ".github/workflows/deploy.yml")).toContain(
+      "SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}",
+    );
+  });
 });
 
 describe("PWA・更新履歴の受け皿（#2254）", () => {

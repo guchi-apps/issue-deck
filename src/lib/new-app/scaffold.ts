@@ -248,6 +248,8 @@ function secretsManifest(spec: NewAppSpec): string {
     "# 全リポジトリのCI・デプロイ結果を1つのチャンネルへ集約するため、値はorganizationに1つだけ",
     "# ある。**repository secretを作ると同名のorganization secretを覆い隠す**ので inherit のままにする。",
     "SIGNALY_WEBHOOK_URL\tinherit\tsecret\tSIGNALY_WEBHOOK_URL\t-",
+    "# リリース通知だけは別チャンネルへ分ける（guchi-apps/issue-deck#2391）。これも共通値。",
+    "SIGNALY_RELEASE_WEBHOOK_URL\tinherit\tsecret\tSIGNALY_RELEASE_WEBHOOK_URL\t-",
   );
 
   return `# ${spec.repositoryName}のデプロイに必要な値を、GitHub側のどこから取るかを定めた対応表
@@ -423,7 +425,14 @@ function envExample(spec: NewAppSpec): string {
       "DB_NAME=",
     );
   }
-  blocks.push("", "# CI/デプロイ通知", "SIGNALY_WEBHOOK_URL=");
+  blocks.push(
+    "",
+    "# CI/デプロイ通知",
+    "SIGNALY_WEBHOOK_URL=",
+    "",
+    "# リリース通知（別チャンネル。未設定ならCI/デプロイと同じチャンネルへ送る）",
+    "SIGNALY_RELEASE_WEBHOOK_URL=",
+  );
   return `${blocks.join("\n")}\n`;
 }
 
