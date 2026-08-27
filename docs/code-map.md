@@ -2132,6 +2132,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
+- **用の済んだPush通知は、画面を開いた時点で閉じる**（#2407。
+  [`hooks/use-push-notification-cleanup.ts`](../src/hooks/use-push-notification-cleanup.ts)・
+  [`lib/notifications/stale-push.ts`](../src/lib/notifications/stale-push.ts)）。`public/sw.js`が
+  `notification.close()`を呼ぶのは`notificationclick`だけなので、確認待ちのラベルが外れても、
+  リリースPRをマージしても、**通知はタップするまでロック画面に残り続ける**。閉じられるのは
+  通知を出したService Workerだけなので、`IssueDeckShell`が`registration.getNotifications()`で
+  表示中のものを引き、済んだぶんを閉じる。
+  - **鳴らす条件と消す条件を別々に書かない。** 判定は`selectStalePushTags`（純粋関数）に閉じ、
+    確認待ちは`isApprovalPending`（＝`check-user-push.ts`が見ているのと同じラベル）、
+    本番マージ待ちは「そのPRがopenなPR一覧にまだ載っているか」だけを見る。ずれると
+    「まだ済んでいないのに消える」か「済んでいるのに残る」のどちらかになる。CIが落ちたまま
+    残っているリリースPRの通知は**閉じない**——押す操作が修正へ変わるだけで、人が動かないと
+    止まっているのは同じ（#2376）。
+  - **判断できないものは残す側へ倒す。** Issue一覧に載っていない（同期対象外・削除済み）ものと、
+    PR一覧の取得に失敗したリポジトリ（`failedRepositories`）のものは触らない。消しすぎると
+    知らせが黙って消え、ユーザーには何も起きていないように見える。知らない`tag`（テスト通知の
+    `test`など）も対象外。
+  - **閉じられるのは画面を開いた端末の通知だけ。** 他の端末に出ているものはその端末で開くまで
+    残る——購読は`userVisibleOnly: true`で作っており、**「閉じるだけのpush」は送れない**（#2196）。
+    送信するpayloadへ「いま鳴っているべきタグの一覧」を載せてService Worker側で閉じる案もあるが、
+    2つの巡回に全タグの計算が要るうえ、効くのは次の通知が届いたときだけなので採っていない。
+  - `register`はしない（`use-push-delivery.ts`と同じ作法）。走らせるのはIssue一覧の
+    ポーリングで`issues`が差し替わったときと、画面が表に戻ったとき。中身はローカルの読み取り
+    2回だけで、通信もGitHub APIの消費も増えない。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
