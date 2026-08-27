@@ -1,8 +1,11 @@
 # GitHub Actions のトークンモデルと自己ループ防止機構
 
-`.github/workflows/`配下のワークフロー群が使う2種類のトークン（既定の`GITHUB_TOKEN`と
-`secrets.WORKFLOW_PAT`）の使い分け、その使い分けが支えている自己ループ防止機構、および
-「他リポジトリを読めるようにする」際の選択肢を整理する。
+`.github/workflows/`配下のワークフロー群が使うトークンの使い分け、その使い分けが支えている
+自己ループ防止機構、および「他リポジトリを読めるようにする」際の選択肢を整理する。
+
+**#835で案B（GitHub Appのインストールトークン）へ移行した。** 現在の構成と、まだ
+`secrets.WORKFLOW_PAT`が残っている箇所は「8. 案Bへの移行（#835）」を参照。以下の1〜7は
+移行前の整理であり、`WORKFLOW_PAT`固有の性質（3-4・3-5・3-6など）は移行後には当てはまらない。
 
 発端は issue #357（他リポジトリでの実現可能性調査）で、GitHub Actions 上の実装エージェントが
 `m-guchi/shopping-list`を読み取れず調査を完遂できなかったこと。その原因分析から、
@@ -50,6 +53,10 @@ Fine-grained PAT（`claude-issue-dispatch.yml`冒頭のコメント参照）。
 | `claude-review-develop.yml` | ラベル付け替えステップの`GH_TOKEN`（L245） | 後続ジョブを発火させるため（issue #112） |
 | `release-develop-to-main.yml` | checkout の`token`（L68）、および各ステップの`GH_TOKEN`（L80・L122・L211・L279）、`github_token`（L151） | バージョン bump コミットの push と、それによる自身の再起動 |
 | `issue-labels.yml` | **使わない**（全ステップ`secrets.GITHUB_TOKEN`） | ラベル操作のみで push を伴わないため |
+
+**この表は移行前（#835以前）の状態。** 現在、上記のうち他リポジトリを読む用途以外は
+GitHub Appのインストールトークンに置き換わっている（「8. 案Bへの移行（#835）」）。
+また、ワークフロー本体は`reusable-*.yml`へ切り出され、上表のファイル名は薄いcallerを指す。
 
 上記以外の40箇所以上は`github.token`。**「PAT が構造的に必要な箇所だけに限定する」という
 least privilege の方針が既に実践されている**。計画ステップ（`mode=plan`）の
@@ -354,3 +361,90 @@ GitHub Actions 上の無人実行では、事前に配置した静的なトー�
 - トークン設定の変更は CLAUDE.md の自動マージ不可カテゴリ「GitHub Actions やデプロイ設定」
   「Secrets や環境変数」の双方に該当するため、いずれの案を採る場合も`00.check-user`付与＋
   人間レビューが必須
+
+## 8. 案Bへの移行（#835）
+
+案B（GitHub Appのインストールトークン）を採用し、`secrets.WORKFLOW_PAT`を置き換えた。
+発行は`actions/create-github-app-token@v3`で、各ジョブの先頭に置いた
+「GitHub Appのインストールトークンを発行する」ステップが行う。トークンは1時間で失効し、
+ジョブ終了時に失効処理も走るため、**期限管理という概念自体が無くなる**（3-6の解消）。
+
+### 使う値と、切り替えのスイッチ
+
+| 名前 | 種別 | 値 |
+|---|---|---|
+| `WORKFLOW_APP_ID` | organization **variable** | issue-deckのGitHub AppのApp ID（`4448617`。App設定画面のURLに出る公開値） |
+| `WORKFLOW_APP_PRIVATE_KEY` | organization **secret** | 同Appの秘密鍵（PEM） |
+
+使用箇所はいずれも`${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}`の形で、
+発行ステップ自体は`if: ${{ vars.WORKFLOW_APP_ID != '' }}`が付いている。
+**`WORKFLOW_APP_ID`が未登録のリポジトリでは発行ステップがskipされ、`outputs.token`が空文字に
+なるため従来の`WORKFLOW_PAT`へ落ちる。** 共有ワークフローは`workflows/vN`タグでフリート全
+リポジトリへ同じ実体が配られるため、ワークフローのマージと実際の切り替えを分離してある。
+
+したがって**登録操作そのものが切り替えのスイッチ**で、順序が決まっている。
+
+1. `WORKFLOW_APP_PRIVATE_KEY`（secret）を先に登録する
+2. `WORKFLOW_APP_ID`（variable）を後に登録する
+
+逆順にすると、鍵が揃うまでの間`create-github-app-token`が起動直後に失敗し、無人実行の全経路が
+止まる（フォールバックは発行ステップがskipされたときにだけ効き、**失敗したときには効かない**）。
+
+秘密鍵は1PasswordにPEMのまま置いた項目が無いため、base64版をデコードして登録する。
+
+```bash
+op read "op://apps/issue-deck/github-app-private-key-base64" | base64 -d \
+  | gh secret set WORKFLOW_APP_PRIVATE_KEY --org guchi-apps --visibility all
+gh variable set WORKFLOW_APP_ID --org guchi-apps --visibility all --body "4448617"
+```
+
+### 権限は`permission-*`で絞る
+
+`create-github-app-token`の既定は**インストールに付与された全権限**で、issue-deckのAppは
+Issue移動（`transferIssue`）のために`administration: write`まで持つ
+（[docs/github-app-permissions.md](github-app-permissions.md)）。絞らないと、ブランチ保護の
+変更・リポジトリ削除まで含む「`WORKFLOW_PAT`より広い」権限を無人実行へ渡すことになる。
+そのため各ワークフローで`permission-contents`・`permission-workflows`・
+`permission-pull-requests`・`permission-issues`（dispatchのみ`permission-actions: write`、
+ci-fix・pr-repairは`permission-actions: read`）だけを要求している。
+
+Appのインストールに実際に付与されている権限は、次のコマンドで確認できる（推定ではなく実測）。
+
+```bash
+gh api /orgs/guchi-apps/installations \
+  --jq '.installations[] | select(.app_slug=="issue-deck") | .permissions'
+```
+
+**要求した権限がインストールに無いとトークン発行そのものが失敗する。** `permission-*`を
+足すときは、必ず上のコマンドで実測を確認してから足すこと。
+
+### 名義が`m-guchi`から`issue-deck[bot]`へ変わる
+
+PATはユーザー個人に紐づくため、push・PR作成・自動マージが`m-guchi`本人の操作として記録されて
+いた（3-4）。インストールトークンでは`issue-deck[bot]`名義になる。**イベントを発火させる
+性質は変わらない**（`GITHUB_TOKEN`だけが特別扱いで、Appのインストールトークンは通常の操作と
+同様にワークフローを起動する）ため、issue #112・#106の対処はそのまま成立する。
+
+変わるのは自己ループ防止の第2層（Bot判定）に触れる点で、実装への影響は2つ。
+
+- **`claude-code-action`の非人間アクター拒否（`checkHumanActor`）に引っかかる。**
+  各`claude-code-action`ステップの`allowed_bots`に`issue-deck[bot]`が要る。
+  `reusable-claude-review-develop.yml`だけが`claude[bot]`のみを許可していたため#835で追加した。
+  ここが抜けると、**無人実行が作ったdevelop向けPRの自動レビューだけが必ず落ちる**
+- **`reusable-issue-dispatch.yml`の`state`ステップのBot判定は、そのままでよい。**
+  Appトークンで行うのはpush・PR作成・コメント・`gh workflow run`であり、`issues`/
+  `issue_comment`を起点に本ワークフローを再始動させる経路は無い。`gh workflow run`による
+  自己リトライ（#497）は`workflow_dispatch`のためBot判定を経由しない
+
+### まだ`WORKFLOW_PAT`が残っている箇所
+
+**他リポジトリを触る用途は今回の置き換え対象外**で、`WORKFLOW_PAT`のまま残っている。
+Appのインストールは組織全体（`repository_selection: all`）なので技術的には到達できるが、
+`create-github-app-token`へ`owner`・`repositories`を渡してスコープを広げる設計判断と、
+Actions secretsの書き込み権限（Appは持たない）の確認が別途要るため分けた。
+
+| 箇所 | 用途 | Appトークンへ寄せられない理由 |
+|---|---|---|
+| `reusable-issue-dispatch.yml`・`reusable-claude-review-develop.yml`の`.shared-context`のcheckout | privateな`guchi-apps/docs`の読み取り | 別リポジトリのため`repositories`指定が要る（`continue-on-error`のため失効しても実装は止まらない） |
+| `propagate-workflow-tag.yml`・`propagate-shared-files.yml`・`propagate-repair-workflows.yml` | 配布先リポジトリへのPR作成 | 同上 |
+| `reusable-sync-secrets.yml` | 各リポジトリのActions secretsの書き込み | Appに`secrets: write`が無い（付与するかどうかの判断が要る） |

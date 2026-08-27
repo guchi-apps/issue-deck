@@ -564,6 +564,29 @@ GITHUB_USER=guchi-apps ./sync-labels.sh apply   --from issue-deck --to my-app --
 gh label list --repo guchi-apps/my-app --limit 60 --json name --jq '[.[].name]|sort|join(" ")'
 ```
 
+### ラベルが入る経路は2つで、Organizationのデフォルトラベルは採らない（#1002）
+
+新しいリポジトリへラベルが入る経路は次の2つ。**どちらもissue-deckのラベルを正にしている。**
+
+| 経路 | 使うとき |
+|---|---|
+| 画面の「新規アプリを立ち上げる」がAPIで写す（[`src/lib/github/repositories-api.ts`](../src/lib/github/repositories-api.ts)の`cloneRepositoryLabels`） | issue-deckの導線でリポジトリを作ったとき（既定） |
+| `guchi-apps/docs`の`label-sync/sync-labels.sh`（1件なら`gh label clone --force`） | 導線を通さず作ったリポジトリ・既存リポジトリの差分是正 |
+
+GitHubにはOrganization単位で「新規リポジトリに自動で入るラベル」を定義する機能
+（Organization Settings → Code, planning, and automation → Repository → Repository defaults）が
+あるが、**採用していない**（#1002で見送りを決めた）。
+
+- **効くのは新規リポジトリだけで、既存リポジトリには一切適用されない**
+  （[Managing default labels for repositories in your organization](https://docs.github.com/en/organizations/managing-organization-settings/managing-default-labels-for-repositories-in-your-organization)）。
+  `sync-labels.sh`の置き換えにはならない
+- **その唯一の適用先である「新規リポジトリへの初期投入」は、立ち上げ導線が既にAPIで済ませている**
+  （#2188・#2247）。GitHub既定の`bug`・`documentation`等を消すところまで自動で揃うため、
+  重ねて設定しても増える効果が無い
+- **Organizationのデフォルトラベルを操作するREST APIは提供されていない**
+  （`gh api orgs/guchi-apps/labels`は`Not Found`）。登録も更新もブラウザでの手作業になり、
+  ラベルを1つ足すたびに正（issue-deck）とは別に手で直す場所が増える
+
 ### 既存の別世代のラベルがあるリポジトリ
 
 導入前のリポジトリは旧世代のラベル体系を持っていることが多い（`01.wip`・`22.preview-required`・
@@ -996,7 +1019,8 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | Secrets名 | 用途 | 備考 |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | `claude-code-action`の実行に使うClaude Codeの認証トークン | 各リポジトリで個別に発行・登録が必要 |
-| `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む）。**`sync-secrets.yml`（#1309）が使うため Secrets・Variables の Read and write も要る** | 既定の`GITHUB_TOKEN`は`.github/workflows/`配下へのpushもActions secretsの書き込みも、GitHub仕様上許可できないため必須 |
+| `WORKFLOW_APP_ID`（variable）・`WORKFLOW_APP_PRIVATE_KEY` | `.github/workflows/`配下へのpush等に使うGitHub Appインストールトークンの発行元（#835）。organizationに1組登録すれば全リポジトリで共有される | **この2つが揃っているリポジトリでは`WORKFLOW_PAT`は使われない。** 1時間で失効するため期限管理が不要。詳細は[actions-token-model.md](actions-token-model.md)「8. 案Bへの移行（#835）」 |
+| `WORKFLOW_PAT` | `.github/workflows/`配下へのpush・`00.check-user`ラベル付け替え等、既定の`GITHUB_TOKEN`では権限が足りない操作に使うFine-grained PAT（Repository permissions > Workflows: Read and write を含む）。**`sync-secrets.yml`（#1309）が使うため Secrets・Variables の Read and write も要る** | 上のApp用の値が未登録のときのフォールバックとして残っている。`sync-secrets.yml`と他リポジトリへの配布（`propagate-*`）は今もこちらを使うため、削除はできない |
 | `GITHUB_TOKEN` | Issue/PRへのコメント投稿・ラベル操作等の既定操作 | GitHub Actionsが自動的に提供する既定のSecretsのため、リポジトリ側での登録は不要 |
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |

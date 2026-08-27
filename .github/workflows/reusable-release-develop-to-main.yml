@@ -74,6 +74,22 @@ jobs:
       issues: read
       id-token: write
     steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 期限切れが単一障害点になるsecrets.WORKFLOW_PATを、1時間で失効するインストールトークンへ
+        # 置き換える(#835。仕組みの詳細はreusable-issue-dispatch.ymlの同名ステップと
+        # docs/actions-token-model.mdを参照)。vars.WORKFLOW_APP_IDが未登録ならこのステップは
+        # skipされ、使用箇所は`|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        # permission-*は、このワークフローが実際に使う権限だけへ絞るために付けている。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
       - name: Checkout develop
         uses: actions/checkout@v4
         with:
@@ -82,8 +98,8 @@ jobs:
           # フィーチャーブランチのpush・PR作成を後続のCI/レビューworkflow
           # (ci.yml, claude-review-develop.yml)が確実に検知できるよう、
           # GITHUB_TOKEN起点のイベントは他のworkflowを起動しないというGitHub仕様を
-          # 避けるためWORKFLOW_PATを使う（claude-issue-dispatch.ymlと同じ方針）。
-          token: ${{ secrets.WORKFLOW_PAT }}
+          # 避けるためワークフロー用トークンを使う（claude-issue-dispatch.ymlと同じ方針）。
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
 
       - name: develop/mainの最新を取得する
         # actions/checkoutが作成するリモート追跡ブランチの範囲に依存せず、
@@ -95,7 +111,7 @@ jobs:
       - name: リリース状態を判定する
         id: state
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
@@ -152,7 +168,7 @@ jobs:
         # 対象issue一覧が空になるだけで、バージョンbumpとPR作成は成立するため）。
         if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
@@ -239,10 +255,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # github_token省略時は既定のGITHUB_TOKENにフォールバックし、このステップの実行中に
-          # チェックアウト済みリポジトリのgit認証情報がWORKFLOW_PATから置き換わってしまう。
-          # 後続の「バージョンをbumpして...」ステップの素のgit pushがWORKFLOW_PATの認証情報を
-          # 使えるよう、claude-issue-dispatch.ymlの実装ステップと同じくWORKFLOW_PATを明示する。
-          github_token: ${{ secrets.WORKFLOW_PAT }}
+          # チェックアウト済みリポジトリのgit認証情報がワークフロー用トークンから置き換わって
+          # しまう。後続の「バージョンをbumpして...」ステップの素のgit pushが同じ認証情報を
+          # 使えるよう、claude-issue-dispatch.ymlの実装ステップと同じく明示する。
+          github_token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           # 本ワークフローはissue-deckアプリ（GitHub App = issue-deck[bot]）からの
           # workflow_dispatchでも起動されるため、非人間アクター起点の実行を明示的に許可する
           # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
@@ -393,7 +409,7 @@ jobs:
       - name: バージョンをbumpしてdevelop向けPRを作成する
         if: always() && steps.state.outputs.need_bump == 'true' && github.event_name == 'workflow_dispatch'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           MAIN_VERSION: ${{ steps.state.outputs.main_version }}
           VERSION_FILE: ${{ inputs.version-file }}
@@ -527,7 +543,7 @@ jobs:
       - name: develop→mainのPRを作成する
         if: steps.state.outputs.need_main_pr == 'true'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           VERSION_FILE: ${{ inputs.version-file }}

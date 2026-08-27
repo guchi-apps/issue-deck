@@ -28,7 +28,8 @@ name: Reusable Claude PR Repair
 # 毎回人が押す前提のため、リトライ上限のような無限ループ防止機構は置いていない。
 #
 # リポジトリ差はinputsで吸収する（意味は reusable-claude-ci-fix.yml と同じ）。
-# 呼び出し元は secrets: inherit で WORKFLOW_PAT・CLAUDE_CODE_OAUTH_TOKEN を渡すこと。
+# 呼び出し元は secrets: inherit で WORKFLOW_APP_PRIVATE_KEY(未登録ならWORKFLOW_PAT)・
+# CLAUDE_CODE_OAUTH_TOKEN を渡すこと。
 
 on:
   workflow_call:
@@ -104,14 +105,31 @@ jobs:
       actions: read
       id-token: write
     steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 期限切れが単一障害点になるsecrets.WORKFLOW_PATを、1時間で失効するインストールトークンへ
+        # 置き換える(#835。仕組みの詳細はreusable-issue-dispatch.ymlの同名ステップと
+        # docs/actions-token-model.mdを参照)。vars.WORKFLOW_APP_IDが未登録ならこのステップは
+        # skipされ、使用箇所は`|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        # permission-*は、このワークフローが実際に使う権限だけへ絞るために付けている。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: read
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: develop
           fetch-depth: 0
           # 後続のgit push、および.github/workflows/配下の修正に備え、workflow書き込み権限を持つ
-          # PAT（secrets.WORKFLOW_PAT）でcheckoutする（既存2ワークフローと同じ理由）。
-          token: ${{ secrets.WORKFLOW_PAT }}
+          # ワークフロー用トークンでcheckoutする（既存2ワークフローと同じ理由）。
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
 
       - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
         # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
@@ -155,16 +173,16 @@ jobs:
           fi
           echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
 
-      - name: pushの認証をWORKFLOW_PATに固定する
+      - name: pushの認証をワークフロー用トークンに固定する
         # claude-code-actionは実行時にactions/checkoutが残した認証情報を削除するため、
         # push専用URL（remote.origin.pushurl）にPATを固定して.github/workflows/配下を含む
         # pushのremote rejectedを防ぐ（既存2ワークフローの同名ステップと同じ理由、#662）。
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           REPOSITORY: ${{ github.repository }}
         run: |
           git remote set-url --push origin \
-            "https://x-access-token:${WORKFLOW_PAT}@github.com/${REPOSITORY}.git"
+            "https://x-access-token:${WORKFLOW_TOKEN}@github.com/${REPOSITORY}.git"
 
       - name: 対象PRの状態を確認し、作業方針を決める
         id: state
@@ -279,7 +297,7 @@ jobs:
       - name: 作業ブランチを用意する
         if: steps.state.outputs.should_repair == 'true'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           HEAD_REF: ${{ steps.state.outputs.head_ref }}
           BASE_REF: ${{ steps.state.outputs.base_ref }}
           WORK_BRANCH: ${{ steps.state.outputs.work_branch }}
@@ -456,7 +474,7 @@ jobs:
         if: steps.state.outputs.should_repair == 'true'
         uses: anthropics/claude-code-action@v1
         env:
-          # git pushの認証は前段の「pushの認証をWORKFLOW_PATに固定する」ステップが設定する
+          # git pushの認証は前段の「pushの認証をワークフロー用トークンに固定する」ステップが設定する
           # remote.origin.pushurlで完結しており、このステップのGH_TOKENには依存しない。
           GH_TOKEN: ${{ github.token }}
         with:

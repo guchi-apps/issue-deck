@@ -46,7 +46,7 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 | 共有ワークフローの**中身**（`reusable-*.yml`） | issue-deckで直す → `workflows/vN`タグを切る → 画面から一括配布PR（既定で自動マージ） | **あり** | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「画面から一括でタグ更新PRを作る」 |
 | callerの`on:`・`with:` | 手。**タグ配布は書き換えない**ため、issue-deck側でトリガーを変えたら全callerを横断確認する | なし | [supported-repositories.md](supported-repositories.md)「タグが記録しないもの」（#1366） |
 | callerの新規追加（`release-develop-to-main.yml`等） | 手。配布は既存ファイルの置換だけで、callerの新規追加はしない | なし | [supported-repositories.md](supported-repositories.md)の各「配布状況」 |
-| ラベル体系 | `guchi-apps/docs`の`label-sync/sync-labels.sh`をリポジトリごとに流す | なし | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
+| ラベル体系 | `guchi-apps/docs`の`label-sync/sync-labels.sh`をリポジトリごとに流す（新規リポジトリは画面の「新規アプリを立ち上げる」が作成時に写す） | 新規のみ | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
 | Secrets・variables | リポジトリごと。共通値はorganizationへ寄せる | 一部 | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「4. Secrets」 |
 | 全アプリ共通の知識（`CLAUDE.md`・運用ルール） | 知見メモ → `guchi-apps/docs`の格上げ判定エージェント → 共有知識リポジトリへのPR | 一部 | [shared-knowledge.md](shared-knowledge.md)「9. 共有知識更新フロー」 |
 | **アプリのコードそのもの**（同じ不具合が各アプリにある等） | **リポジトリごとにIssueを立てて個別に実装する。これ以外の手段は無い** | なし | 下記の手順 |

@@ -16,11 +16,11 @@ import type {
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
-  BranchFlowPlannedIssue,
   BranchFlowReleaseGroup,
   BranchFlowReleaseState,
   BranchFlowRepository,
   BranchFlowRepositorySummary,
+  BranchFlowStartedIssue,
   DeployFailureIssueRef,
   RepositoryBranchStatus,
   RepositoryDeployStatus,
@@ -36,32 +36,55 @@ export const DEVELOP_BRANCH = "develop";
  *
  * `ready`・`planning`はまだブランチが無くて当然、`develop`以降はマージ済みなので、
  * ブランチの有無を確かめる意味があるのはこの2つだけ。
- * ブランチ存在確認の対象（`GET /api/branch-flow`）と、「ブランチもPRも無いのに実装中の
- * Issue」の抽出の、どちらもこの集合を使う。
+ * **使うのはブランチ存在確認（`GET /api/branch-flow`）だけ**で、「ブランチもPRも見つからない
+ * Issue」の抽出は`ORPHAN_ISSUE_PROGRESS_SET`が別に持つ（#2386）。**この定数は狭めない**
+ * ——`implementation`を外すと、実装中のIssueのブランチを問い合わせなくなり、
+ * 「ブランチは上がっているがPRがまだ無い」レーンが丸ごと消える。
  */
 export const ACTIVE_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = [
   "implementation",
   "develop-pr",
 ];
 
-const ACTIVE_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
-  ACTIVE_ISSUE_PROGRESS_STATUSES,
-);
+/**
+ * 「ブランチもPRも見つからないIssue」として警告する進捗（#2386）。
+ *
+ * **`implementation`（実装中）は含めない。** 「実装を開始」を押した時点でStatusは実装中になり、
+ * 作業ブランチがGitHubへ現れるのは最初のpushからなので、**押した直後のIssueは必ずこの状態を
+ * 通る**。そこを異常として警告すると、起動したセッションのぶんだけ毎回琥珀の枠が出る。
+ * 実装中でまだブランチが無いIssueは、上流の「着手中」（`collectStartedIssues`）が
+ * 破線の丸で普通に出すので、隠しているわけではない。
+ *
+ * 残った`develop-pr`は、PRが開いたと報告されているのにそのPRが画面のどこにも無い状態で、
+ * これは今も異常（`issue-<番号>`をheadとするPRが取得範囲に無い）。
+ *
+ * **平時はほぼ空になる集合**で、それを承知で残している。`Implementation` → `Develop PR`は
+ * pushとPR作成をトリガーに`issue-labels.yml`が報告するため、この進捗のIssueはほぼ必ずPRを
+ * 持つ。枠ごと畳まないのは、取得済みPRの範囲外・報告だけ進んだといった例外を検知する口を
+ * 残すため（出たときは実際に見るべき状態になっている）。
+ */
+const ORPHAN_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set<ProgressStatusKey>([
+  "develop-pr",
+]);
 
 /**
- * これから着手する＝まだブランチが無くて当然の進捗（#1704）。
+ * ユーザーが「実装を開始」を押して動き出した進捗（#2386）。
  *
- * **`ready`（未着手）まで含める。** issue-deckの運用では、計画が要らないIssueは`Ready`から直接
- * 実装へ入る（`21.plan-required`が付いたものだけ`Planning`を経由する）ため、`planning`だけに
- * 絞ると「次に流れてくるもの」がほとんど映らない。件数が多くなるぶんは画面側で頭出しする。
+ * **`ready`（未着手）は含めない。** ここに`ready`を入れていたころ（#1704の「実装予定」）は、
+ * 畳んだ1行の件数がバックログ全体の大きさになり、見ても何も起こせなかった。数えたいのは
+ * 「いま何本走っているか」なので、実行ボタンを押した後の2状態だけにする。
  *
- * **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）には足さない。** この集合のIssueは
+ * **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）には足さない。** `planning`は
  * ブランチが無いのが正常で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
+ * `implementation`はもともと確認対象なので、ブランチが上がっていればレーンとして出る。
  */
-export const PLANNED_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = ["planning", "ready"];
+export const STARTED_ISSUE_PROGRESS_STATUSES: readonly ProgressStatusKey[] = [
+  "planning",
+  "implementation",
+];
 
-const PLANNED_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
-  PLANNED_ISSUE_PROGRESS_STATUSES,
+const STARTED_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
+  STARTED_ISSUE_PROGRESS_STATUSES,
 );
 
 /** 優先度ラベル。`11.local`と番号帯が重ならないよう80・89番台へリネーム済み（CLAUDE.md） */
@@ -424,6 +447,15 @@ function buildRepository({
     ]),
   );
 
+  // 「着手中」の除外はレーンの**対応Issueだけ**に限る（#2386）。`relatedIssues`はPRのタイトル・
+  // 本文の`#番号`をそのまま拾ったもの（`extractLinkedIssueNumbers`）で、**単なる言及も混ざる**。
+  // 上の`linkedIssueNumbers`をそのまま使うと、走っているIssueが他のPRの本文で言及されている
+  // だけで件数から消える（実例: PR #2387の本文にある`#2388`）。「いま何本走っているか」を
+  // 表す数字でそれが起きると、数えたいものが理由も分からず減る。
+  const laneMainIssueNumbers = new Set(
+    lanes.flatMap((lane) => (lane.issue ? [lane.issue.number] : [])),
+  );
+
   // 本番デプロイの状態は、いちばん新しくmainへ入ったリリースに対してだけ決まる（#1579）
   const deployState = resolveDeployState({
     deployRun,
@@ -440,9 +472,9 @@ function buildRepository({
     deployState,
   });
 
-  // これから着手するIssue（#1704）。レーンに現れているものは除くので、`linkedIssueNumbers`を
-  // 作った後でなければ組み立てられない。
-  const plannedIssues = collectPlannedIssues(issues, linkedIssueNumbers);
+  // 実行ボタンを押して動き出したIssue（#1704・#2386）。レーンに現れているものは除くので、
+  // `laneMainIssueNumbers`を作った後でなければ組み立てられない。
+  const startedIssues = collectStartedIssues(issues, laneMainIssueNumbers);
 
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
@@ -475,7 +507,7 @@ function buildRepository({
     releaseMergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
-    plannedIssueCount: plannedIssues.length,
+    startedIssueCount: startedIssues.length,
     deploy: deployState,
   };
 
@@ -518,55 +550,60 @@ function buildRepository({
         (issue) =>
           issue.state === "open" &&
           !isManualStepIssue(issue) &&
-          ACTIVE_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
+          ORPHAN_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
           !linkedIssueNumbers.has(issue.number),
       )
       .map(toIssueRef)
       .sort((a, b) => b.number - a.number),
-    plannedIssues,
+    startedIssues,
     branchesLoaded: branchStatus !== null,
   };
 }
 
-/** 実装予定の並び順。計画検討中を先に、次に優先度の高い順（`orphanIssues`と同じく最後は番号の新しい順） */
-const PLANNED_PROGRESS_ORDER: Record<string, number> = { planning: 0, ready: 1 };
-const PLANNED_PRIORITY_ORDER: Record<string, number> = { high: 0, low: 2 };
+/** 着手中の並び順。計画検討中を先に、次に優先度の高い順（`orphanIssues`と同じく最後は番号の新しい順） */
+const STARTED_PROGRESS_ORDER: Record<string, number> = { planning: 0, implementation: 1 };
+const STARTED_PRIORITY_ORDER: Record<string, number> = { high: 0, low: 2 };
 
 /**
- * これから着手するIssueを集める（#1704）。
+ * ユーザーが実行ボタンを押して動き出したIssueのうち、**まだブランチが無いもの**を集める
+ * （#1704・#2386）。
  *
- * **`orphanIssues`と条件がよく似ているが、意味が違う。** あちらは「実装中なのにブランチが
- * 見つからない」異常で、こちらはまだブランチが無くて当然の上流。除外はどちらも同じで、
- * すでにレーンとして画面に出ているIssueは重ねて出さない。
+ * すでにレーンとして画面に出ているIssue（＝ブランチかPRがある）は除くので、ここに残るのは
+ * 「押したがGitHubにはまだ何も現れていない」もの——計画検討中の全部と、実装中のうち
+ * 最初のpushがまだのもの。**畳んだ1行の「進行中」（レーンの本数）と足し合わせて総数になる**
+ * ように、二重に数えないための除外。
+ *
+ * **除外に使うのはレーンの対応Issueだけ**（`laneMainIssueNumbers`。#2386）。PR本文の`#番号`から
+ * 拾った「関連」まで除くと、他のPRで言及されているだけのIssueが件数から消える。
  *
  * 手作業Issue（`71.manual-step`）は実装するものではなく、既にレーンの下と束の外へ出している
  * （#1510・#1586）ため、ここには混ぜない。
  */
-function collectPlannedIssues(
+function collectStartedIssues(
   issues: BranchFlowIssueSource[],
   laneIssueNumbers: ReadonlySet<number>,
-): BranchFlowPlannedIssue[] {
+): BranchFlowStartedIssue[] {
   return issues
     .filter(
       (issue) =>
         issue.state === "open" &&
         !isManualStepIssue(issue) &&
-        PLANNED_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
+        STARTED_ISSUE_PROGRESS_SET.has(resolveProgressStatus(issue)) &&
         !laneIssueNumbers.has(issue.number),
     )
     .map((issue) => ({
       ...toIssueRef(issue),
       priority: resolveIssuePriority(issue.labels ?? []),
     }))
-    .sort(comparePlannedIssues);
+    .sort(compareStartedIssues);
 }
 
-function comparePlannedIssues(a: BranchFlowPlannedIssue, b: BranchFlowPlannedIssue): number {
+function compareStartedIssues(a: BranchFlowStartedIssue, b: BranchFlowStartedIssue): number {
   const byProgress =
-    (PLANNED_PROGRESS_ORDER[a.progress ?? ""] ?? 1) - (PLANNED_PROGRESS_ORDER[b.progress ?? ""] ?? 1);
+    (STARTED_PROGRESS_ORDER[a.progress ?? ""] ?? 1) - (STARTED_PROGRESS_ORDER[b.progress ?? ""] ?? 1);
   if (byProgress !== 0) return byProgress;
   const byPriority =
-    (PLANNED_PRIORITY_ORDER[a.priority ?? ""] ?? 1) - (PLANNED_PRIORITY_ORDER[b.priority ?? ""] ?? 1);
+    (STARTED_PRIORITY_ORDER[a.priority ?? ""] ?? 1) - (STARTED_PRIORITY_ORDER[b.priority ?? ""] ?? 1);
   if (byPriority !== 0) return byPriority;
   return b.number - a.number;
 }

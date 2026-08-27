@@ -27,12 +27,22 @@ issue-deckが行う各種操作（Issue作成・コメント投稿・ラベル�
 | ラベル操作（Issue更新、`PATCH /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人** |
 | Issue削除（`DELETE /api/issues`） | アプリ画面 | 操作した人間個人のOAuthトークン（`user.githubAccessToken`） | **操作した人間本人**（GraphQL `deleteIssue`ミューテーションはリポジトリのadmin権限を要求するため、write権限のみのユーザーは失敗しうる） |
 | ラベル操作 | GitHub Actions（`issue-labels.yml`等） | `GITHUB_TOKEN` | `github-actions[bot]` |
-| ブランチpush・develop向けPR作成 | `claude-issue-dispatch.yml`実装ステップ | `secrets.WORKFLOW_PAT` | PAT所有者個人（現状`m-guchi`固定） |
-| develop向けPRの自動マージ | `claude-review-develop.yml` | `secrets.WORKFLOW_PAT` | PAT所有者個人 |
-| develop→mainのPR作成・バージョンbump | `release-develop-to-main.yml` | `secrets.WORKFLOW_PAT` | PAT所有者個人 |
-| コンフリクト解消コミット | `claude-conflict-resolve.yml` | `secrets.WORKFLOW_PAT` | PAT所有者個人 |
+| ブランチpush・develop向けPR作成 | `claude-issue-dispatch.yml`実装ステップ | GitHub Appのインストールトークン | `issue-deck[bot]` |
+| develop向けPRの自動マージ | `claude-review-develop.yml` | 同上 | `issue-deck[bot]` |
+| develop→mainのPR作成・バージョンbump | `release-develop-to-main.yml` | 同上 | `issue-deck[bot]` |
+| コンフリクト解消コミット | `claude-conflict-resolve.yml` | 同上 | `issue-deck[bot]` |
+| CI修正コミット・PR修復コミット | `claude-ci-fix.yml`・`claude-pr-repair.yml` | 同上 | `issue-deck[bot]` |
 
-各ワークフローでの`WORKFLOW_PAT`/`GITHUB_TOKEN`の使用箇所の網羅的な棚卸しは
+**上の4〜5行目は#835で`secrets.WORKFLOW_PAT`（名義はPAT所有者個人＝`m-guchi`）から変わった。**
+`WORKFLOW_APP_ID`が未登録のリポジトリでは従来どおりPATへフォールバックするため、名義も
+PAT所有者個人のままになる。切り替えの仕組みは
+[actions-token-model.md](actions-token-model.md)の「8. 案Bへの移行（#835）」を参照。
+
+名義が`issue-deck[bot]`になることで、`claude-code-action`の非人間アクター拒否
+（`checkHumanActor`）に引っかかる点に注意する。各`claude-code-action`ステップの
+`allowed_bots`へ`issue-deck[bot]`が入っている必要がある。
+
+各ワークフローでのトークンの使用箇所の網羅的な棚卸しは
 [actions-token-model.md](actions-token-model.md)の「使用箇所の棚卸し」を参照。
 
 ## 一致する経路・しない経路
