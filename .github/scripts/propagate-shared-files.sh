@@ -24,6 +24,11 @@
 # （run_url= ・curl -fsS \ など）が全リポジトリで引っかかり、本当に独自の変更がある subpc を
 # 見分けられなかった（実測で16件中16件が該当）。
 #
+# **配布物のコピーに加えて、ワークフローへの1行追加も相乗りさせている**（#2391）。
+# `deploy.yml`・`release.yml` のリリース通知ステップへ `SIGNALY_RELEASE_WEBHOOK_URL` を足す
+# （詳細は下の該当箇所のコメント）。丸ごと配れないファイルへ**アンカー行の隣に1行足すだけ**の
+# 編集をする例外で、ここを増やすときは「リポジトリごとの中身に依存しない」ことを確かめること。
+#
 # **このスクリプトは1リポジトリの失敗で全体を止めない前提で書かれている。** 呼び出し元が
 # 戻り値を見て件数を数えるため、失敗時は非0で返すこと。
 set -uo pipefail
@@ -126,6 +131,50 @@ done
 
 UPDATED="${UPDATED# }"
 
+# ── リリース通知を専用チャンネルへ向けるenvを、配布先のワークフローへ足す（#2391）───────
+#
+# **スクリプトだけでは分離できない。** GitHub Actionsのsecretはワークフローが`env:`へ
+# 渡さないとスクリプトから読めないため、配布先の`deploy.yml`・`release.yml`にも1行が要る。
+# 配布の仕組みはどれも「丸ごとコピー」「固定の置換」「新規追加」しかできず、リポジトリごとに
+# 中身が違う`deploy.yml`は丸ごと配れない。そこで**アンカー行の隣へ1行足すだけ**の編集を、
+# 通知スクリプトの配布PRに相乗りさせる。
+#
+# アンカーは`NOTIFY_KIND: リリース`（リリース通知のステップは全リポジトリでこの行を持つ）。
+# **既に入っていれば何もしない**ので、配布を何度実行しても増えない。
+RELEASE_ENV_LINE='SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}'
+PATCHED=""
+for WF in .github/workflows/deploy.yml .github/workflows/release.yml; do
+  [ -f "$WF" ] || continue
+  grep -q 'NOTIFY_KIND: リリース' "$WF" || continue
+  if grep -q 'SIGNALY_RELEASE_WEBHOOK_URL' "$WF"; then
+    echo "  $WF には既にリリース用のwebhookが入っています。スキップします"
+    continue
+  fi
+
+  awk -v needle='NOTIFY_KIND: リリース' -v insert="$RELEASE_ENV_LINE" '
+    {
+      trimmed = $0
+      sub(/[ \t]+$/, "", trimmed)
+      match(trimmed, /^[ \t]*/)
+      indent = substr(trimmed, 1, RLENGTH)
+      if (substr(trimmed, RLENGTH + 1) == needle) {
+        printf "%s%s\n", indent, insert
+      }
+      print $0
+    }
+  ' "$WF" > "$WF.tmp" || fail "$WF を書き換えられません"
+  mv "$WF.tmp" "$WF" || fail "$WF の更新に失敗しました"
+
+  PATCHED="$PATCHED $WF"
+done
+PATCHED="${PATCHED# }"
+
+if [ -n "$PATCHED" ]; then
+  RELEASE_NOTE="$(printf 'リリース通知を専用チャンネルへ向ける`SIGNALY_RELEASE_WEBHOOK_URL`を足した: %s\n\n**organization secretが未登録のあいだも通知は消えない。** 空が渡ると、スクリプトが\nこれまでのCI・デプロイ用チャンネルへ送る。' "$PATCHED")"
+else
+  RELEASE_NOTE="リリース通知のワークフローに足すものはなかった（既に入っているか、このリポジトリはリリース通知を出していない）。"
+fi
+
 if [ -z "$(git status --porcelain)" ]; then
   echo "  更新するファイルがありません。スキップします"
   exit 0
@@ -143,7 +192,7 @@ BRANCH="shared-files"
 git checkout --quiet -b "$BRANCH" || fail "ブランチを作成できません"
 git add -A
 
-COMMIT_MESSAGE="$(printf '共有スクリプトを最新版へ更新する\n\n各リポジトリの .github/scripts/ へコピーして使っているスクリプトを、配布元\n（%s）の内容へそろえる。コピー運用のため、配布元を直しても\n各リポジトリへは自動では行き渡らない。\n\n更新: %s\n' "$SOURCE_REPO" "$UPDATED")"
+COMMIT_MESSAGE="$(printf '共有スクリプトを最新版へ更新する\n\n各リポジトリの .github/scripts/ へコピーして使っているスクリプトを、配布元\n（%s）の内容へそろえる。コピー運用のため、配布元を直しても\n各リポジトリへは自動では行き渡らない。\n\n更新: %s\nワークフロー: %s\n' "$SOURCE_REPO" "${UPDATED:-（なし）}" "${PATCHED:-（なし）}")"
 git commit --quiet -m "$COMMIT_MESSAGE" || fail "コミットに失敗しました"
 
 # ブランチ名が固定のため、前回マージされずに閉じたPRの残骸が残っていることがある。
@@ -158,8 +207,8 @@ if ! git push --quiet -u origin "$BRANCH"; then
     || fail "pushに失敗しました"
 fi
 
-PR_BODY="$(printf '## 実装内容\n\n各リポジトリの `.github/scripts/` へコピーして使っているスクリプトを、配布元（%s）の\n内容へそろえた。**コピー運用のため、配布元を直しても各リポジトリへは自動では行き渡らない。**\n\n更新: %s\n\n`signaly-notify.sh` を含む場合、今回そろえる主な変更は\n**「通知が届かなくても `exit 0` で返す」**（%s#2237・#2239）。Signalyが止まっている間に\nデプロイすると、デプロイ自体は成功しているのに通知のステップだけが `curl: (22) 503` で\n失敗し、**run全体が赤くなっていた。**\n\n## 上書きで消える記述\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、次のデプロイ・CIでSignalyへ通知が届くこと（届かない場合も run が緑のままで、\n  ログに `::warning::Signalyへの通知に失敗しました` が出ること）\n\n## 注意点\n\n- **呼び出し側のステップには `continue-on-error: true` を付けておく。** スクリプトは常に0で\n  返すが、付けておくと将来スクリプト自体が落ちたときもrunを赤くしない\n- **自動マージしない。** 配布先の独自の変更を上書きしうるため、内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' \
-  "$SOURCE_REPO" "$UPDATED" "$SOURCE_REPO" "$LOST_NOTE" "$SOURCE_REPO")"
+PR_BODY="$(printf '## 実装内容\n\n各リポジトリの `.github/scripts/` へコピーして使っているスクリプトを、配布元（%s）の\n内容へそろえた。**コピー運用のため、配布元を直しても各リポジトリへは自動では行き渡らない。**\n\n更新: %s\n\n`signaly-notify.sh` を含む場合、今回そろえる主な変更は\n**「リリース通知をCI・デプロイと別のチャンネルへ分け、本文に変更内容を載せる」**\n（%s#2391）。あわせて、通知が届かなくても `exit 0` で返す（#2237・#2239）。\n\n## リリース通知のチャンネル分離\n\n%s\n\n## 上書きで消える記述\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、次のデプロイ・CIでSignalyへ通知が届くこと（届かない場合も run が緑のままで、\n  ログに `::warning::Signalyへの通知に失敗しました` が出ること）\n- 次のリリースの通知が「リリース」チャンネルへ届き、本文に変更内容が出ること\n\n## 注意点\n\n- **呼び出し側のステップには `continue-on-error: true` を付けておく。** スクリプトは常に0で\n  返すが、付けておくと将来スクリプト自体が落ちたときもrunを赤くしない\n- **自動マージしない。** 配布先の独自の変更を上書きしうるため、内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' \
+  "$SOURCE_REPO" "${UPDATED:-（なし）}" "$SOURCE_REPO" "$RELEASE_NOTE" "$LOST_NOTE" "$SOURCE_REPO")"
 
 PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
   --title "共有スクリプトを最新版へ更新する" \

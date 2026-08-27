@@ -1125,6 +1125,36 @@ CIチャンネルを共通チャンネルとして流用してorganizationへ寄
 マニフェストを`scope=inherit`へ変えたうえで**repository secretを削除する**まで従来の
 チャンネルへ飛び続ける。逆に言えば、リポジトリ単位で好きな順に移行できる。
 
+#### リリース通知だけは別チャンネルへ分ける（#2391）
+
+**集約の単位は「用途」であって「アプリ」ではない。** CI・デプロイは1日に何十件も流れるため、
+月に数回のリリースがその中に埋もれ、しかも通知に載るのはバージョン番号だけだった。そこで
+**リリース（`NOTIFY_KIND: リリース`）だけを別チャンネルへ分け、本文に変更内容を載せる**。
+CI・デプロイの通知先は変えない。
+
+| 用途 | organization secret | 値の正 |
+|---|---|---|
+| CI・デプロイ | `SIGNALY_WEBHOOK_URL` | `op://apps/Notify/ci-webhook-url` |
+| **リリース** | `SIGNALY_RELEASE_WEBHOOK_URL` | `op://apps/Notify/release-webhook-url` |
+| ログイン | `SIGNALY_LOGIN_WEBHOOK_URL` | `op://apps/Notify/login-webhook-url` |
+
+**未登録でも通知は消えない。** `.github/scripts/signaly-notify.sh` は
+`SIGNALY_RELEASE_WEBHOOK_URL` が空ならCI・デプロイのチャンネルへ送る。ログイン通知の集約と
+違って「organization secretを先に作る」順序の制約が無く、secretの登録・スクリプトの配布・
+ワークフローの1行追加をどの順で進めてもよい。
+
+**変更内容の出どころは `.github/release-notes.md`。** 共有ワークフロー
+`reusable-release-develop-to-main.yml` がバージョンbumpのたびに、生成した利用者向けの文面
+（`RELEASE_CHANGELOG`・`RELEASE_USAGE`）をこのファイルへ書き出してバンプPRに含める。
+**各アプリの更新履歴ファイルとは別に持つ**——`RELEASE_CHANGELOG` を受け取る `"version"`
+lifecycleスクリプトを持つのはフリート16リポジトリ中7件しかなく、残りでは生成された文面が
+バンプPR本文にしか残らないため。通知スクリプトは**先頭の見出し `# v<バージョン>` が
+`NOTIFY_VERSION` と一致したときだけ**本文に載せる（古い文面を新しいリリースの通知へ貼るより、
+本文なしで送るほうがまし）。
+
+各リポジトリへ行き渡らせる手順は
+[supported-repositories.md](supported-repositories.md)「`.github/scripts/signaly-notify.sh`の配布状況」を参照。
+
 #### ログイン通知も同じ形で集約する（#2286）
 
 ログイン通知（`LOGIN_WEBHOOK_URL`）もCI・デプロイ通知と同じ理由で1本のチャンネルへ集約する

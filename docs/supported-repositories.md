@@ -629,6 +629,12 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 **生成された文面はそのままバンプPRに入る。** 利用者が読む文章のため、バンプPRのレビュー時に
 内容を確認する（記載してよい内容の基準はchangelog-ja skill）。
 
+**あわせて`.github/release-notes.md`へも書き出す（#2391）。** 上の表のとおり受け取り側を持つのは
+7リポジトリだけで、残りでは生成された文面がバンプPR本文にしか残らなかった。共有ワークフローが
+バンプコミットへこのファイルを含めるようにしたため、**更新履歴ファイルを持たないアプリでも
+リリース通知の本文に変更内容が載る**。ファイルは最新リリースぶんだけを持ち、毎回上書きする
+（履歴として積まない。積む場所は各アプリの更新履歴ファイル）。
+
 ### 使い方の自動生成（`RELEASE_USAGE`）の対応状況
 
 同じ判定ステップが利用者向けの操作手順も生成し、`RELEASE_USAGE`環境変数として同じ経路で渡す
@@ -720,6 +726,37 @@ issue-deckを直しても自動では行き渡らない。
 **この表は手動記録なので、正は各リポジトリの`.github/scripts/`と画面の「未更新」欄。**
 判定・配布の仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
 「ワークフロー以外の配布物を配る」を参照。
+
+### 配布PRは`deploy.yml`・`release.yml`への1行追加も運ぶ（#2391）
+
+リリース通知の分離（`SIGNALY_RELEASE_WEBHOOK_URL`）は、**スクリプトを配るだけでは効かない。**
+GitHub Actionsのsecretはワークフローが`env:`へ渡さないとスクリプトから読めないためで、
+配布先の`deploy.yml`・`release.yml`にも1行が要る。しかしこの2つはリポジトリごとに中身が違い、
+既存の配布経路（丸ごとコピー・固定の置換・新規追加）はどれも部分編集ができない。
+
+そこで`.github/scripts/propagate-shared-files.sh`が、スクリプトのコピーに加えて
+**`NOTIFY_KIND: リリース`の行の隣へ1行足す**（既に入っていれば何もしない）。同じ配布PRに
+含まれるので、押すボタンは今までどおり1つ。
+
+- **アンカーは実測で全リポジトリ共通。** リリース通知を出している15リポジトリの
+  `deploy.yml`（`ops-dashboard`のようにジョブを分けず1ステップで出す形も含む）と、
+  `release.yml`を持つ13リポジトリのすべてに`NOTIFY_KIND: リリース`の行がある
+- **画面の「配布が必要」判定は通知スクリプトの中身しか見ない。** スクリプトが既に最新の
+  リポジトリは対象に挙がらないため、この1行だけが未適用の状態は画面からは見えない。
+  行き渡ったかは下のコマンドで確かめる
+
+```bash
+# リリース通知のenvが入っているか（未適用のリポジトリだけが出る）
+for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-list car-care \
+         myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
+  br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
+  for f in deploy release; do
+    body="$(gh api "repos/guchi-apps/$r/contents/.github/workflows/$f.yml?ref=$br" --jq .content 2>/dev/null | base64 -d)"
+    printf '%s' "$body" | grep -q 'NOTIFY_KIND: リリース' || continue
+    printf '%s' "$body" | grep -q 'SIGNALY_RELEASE_WEBHOOK_URL' || echo "$r: $f.yml 未適用"
+  done
+done
+```
 
 ```bash
 # 配布状況の確認（issue-deckのmainと同じ内容かどうか）
