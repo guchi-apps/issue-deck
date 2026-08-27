@@ -860,6 +860,9 @@ ${migrate}
         continue-on-error: true
         env:
           SIGNALY_WEBHOOK_URL: \${{ env.SIGNALY_WEBHOOK_URL }}
+          # リリースだけはCI・デプロイと別のチャンネルへ送る（guchi-apps/issue-deck#2391）。
+          # 未登録なら空が渡り、スクリプトが従来のチャンネルへフォールバックする。
+          SIGNALY_RELEASE_WEBHOOK_URL: \${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
           NOTIFY_STATUS: \${{ needs.release.result }}
           NOTIFY_APP: ${spec.repositoryName}
           NOTIFY_KIND: リリース
