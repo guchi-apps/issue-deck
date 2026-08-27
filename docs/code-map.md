@@ -582,6 +582,21 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
+- **`issues.transferred`のペイロードのトップレベルの`issue`は「移動する前のIssue」**（#2406）。
+  番号もURLも移動元のままで、移動後のIssue（新しい番号・URL・**新しいGitHub ID**）は
+  `changes.new_issue`に、移動先リポジトリは`changes.new_repository`に入る（どちらも
+  [octokitのペイロードスキーマ](https://github.com/octokit/webhooks/blob/main/payload-schemas/api.github.com/issues/transferred.schema.json)で必須）。
+  **トップレベルの`issue`を移動先の`repositoryId`と組み合わせて書くと、「移動先リポジトリの、
+  移動元の番号」というGitHub上に存在しない行ができる**——`guchi-apps/myroom #420`（URLは
+  `guchi-apps/dayspan/issues/420`）として報告された。取り込みは`changes.new_issue`で行い、
+  IDが変わっているので**移動元の行は`deleteIssueByGithubId`で別途消す**。
+  - 画面の「Issueを移動」（`api/issues/transfer`）はWebhookと別経路で、GraphQLの`transferIssue`の後に
+    新しい番号でREST APIから取り直して書く。ここでも移動元の行は残るため、
+    `deleteTransferredSourceIssue`で消している（Webhookの到着を待たない）。
+  - **移動でIssueのGitHub IDが変わるため、移動先では行を作り直すことになる。** `00.check-user`の
+    待ち時間計測（`checkUserLabeledAt`）など、DB行に紐づくissue-deck側の記録は引き継がれない。
+  - 取り込みそこねて残った行は、画面の「再同期」（`syncRepositoryIssues`の
+    `deleteMany`＋`githubIssueId: { notIn: ... }`）で消える。定期実行は無いので、自動では消えない。
 - **同じIssueの取り込みは`lib/keyed-mutex.ts`の`runExclusive`で直列化する**（#2365）。
   `sync-issues.ts`の`upsertIssueRow`はDBを「読んでから書く」形で、同時に2本走ると両方が同じ
   読んだ値を見て書きに行く。上のプッシュ型・プル型に加えて画面のPATCH（`upsertIssueAndGetDisplay`）も

@@ -7,6 +7,7 @@ const getInstallationToken = vi.fn();
 const transferIssue = vi.fn();
 const syncRepositoryIssues = vi.fn();
 const upsertIssueAndGetDisplay = vi.fn();
+const deleteTransferredSourceIssue = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get getCurrentUser() {
@@ -46,6 +47,9 @@ vi.mock("@/lib/github/sync-issues", () => ({
   },
   get upsertIssueAndGetDisplay() {
     return upsertIssueAndGetDisplay;
+  },
+  get deleteTransferredSourceIssue() {
+    return deleteTransferredSourceIssue;
   },
 }));
 
@@ -88,13 +92,14 @@ describe("POST /api/issues/transfer", () => {
     transferIssue.mockReset();
     syncRepositoryIssues.mockReset().mockResolvedValue(undefined);
     upsertIssueAndGetDisplay.mockReset();
+    deleteTransferredSourceIssue.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("移動が成功した場合はDBを更新し移動元のクリーンアップは行わない", async () => {
+  it("移動が成功した場合はDBを更新し、移動元の行だけを消す（再同期はしない）", async () => {
     transferIssue.mockResolvedValue({ id: 999, number: 5 });
     upsertIssueAndGetDisplay.mockResolvedValue({ id: "issue-1", number: 5 });
 
@@ -107,6 +112,8 @@ describe("POST /api/issues/transfer", () => {
     );
 
     expect(response.status).toBe(200);
+    // 移動元の番号のまま残ると、GitHub上に存在しないIssueとして一覧に出続ける（#2406）
+    expect(deleteTransferredSourceIssue).toHaveBeenCalledWith(SOURCE_REPO.id, 1, 999);
     expect(syncRepositoryIssues).not.toHaveBeenCalled();
   });
 

@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { askClaudeCommentBody, QA_ANSWER_MARKER } from "@/lib/github/ask-claude";
 import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
-import { updateQaAnswerPendingState, upsertIssueFromWebhookPayload } from "@/lib/github/sync-issues";
+import {
+  deleteTransferredSourceIssue,
+  updateQaAnswerPendingState,
+  upsertIssueFromWebhookPayload,
+} from "@/lib/github/sync-issues";
 import type { GithubApiIssue } from "@/lib/github/issues-api";
 
 const findUnique = vi.fn();
@@ -14,6 +18,7 @@ const issueLabelUpdateMany = vi.fn();
 const issueLabelDeleteMany = vi.fn();
 const repositoryFindUnique = vi.fn();
 const issueUpdate = vi.fn();
+const issueDeleteMany = vi.fn();
 // closeでセッションを畳む後片付け（#1518）。ここでは「遷移したときだけ呼ぶ」ことだけを見る
 const handleIssueClosedForDispatch = vi.fn();
 // closeで残ると害になるラベルを外す後片付け（#2178）。外す対象の選別自体は
@@ -53,6 +58,9 @@ vi.mock("@/lib/db", () => ({
       },
       get update() {
         return issueUpdate;
+      },
+      get deleteMany() {
+        return issueDeleteMany;
       },
     },
     repository: {
@@ -717,5 +725,23 @@ describe("upsertIssueFromWebhookPayload の直列化", () => {
     expect(findUnique).toHaveBeenCalledTimes(2);
     releaseFirst();
     await blocked;
+  });
+});
+
+describe("deleteTransferredSourceIssue", () => {
+  beforeEach(() => {
+    issueDeleteMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  it("移動元リポジトリの同じ番号の行を、移動後のIssue IDを除いて消す", async () => {
+    await deleteTransferredSourceIssue("repo-source", 420, 456);
+
+    expect(issueDeleteMany).toHaveBeenCalledWith({
+      where: {
+        repositoryId: "repo-source",
+        number: 420,
+        githubIssueId: { not: BigInt(456) },
+      },
+    });
   });
 });

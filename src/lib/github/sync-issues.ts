@@ -360,6 +360,31 @@ export async function deleteIssueByGithubId(githubIssueId: number): Promise<void
 }
 
 /**
+ * Issueを別リポジトリへ移動したあと、移動元に残る行を消す（#2406）。
+ *
+ * 移動でIssueのGitHub IDは変わるため、移動先のIssueを`upsert`しても（キーは`githubIssueId`）
+ * 移動元の行は別の行として残り、**GitHub上に存在しないIssue**として一覧に出続ける。
+ * `issues.transferred` Webhookでも同じ後始末をしているが、そちらの到着を待たずに消す
+ * （Webhookが未設定・遅延する環境でも移動直後の画面が正しくなる）。
+ *
+ * **`newGithubIssueId`と一致する行は消さない。** 将来GitHubが移動でIDを維持するようになった
+ * 場合に、移動先へ書き換えたばかりの行を消してしまわないため。
+ */
+export async function deleteTransferredSourceIssue(
+  repositoryId: string,
+  number: number,
+  newGithubIssueId: number,
+): Promise<void> {
+  await db.issue.deleteMany({
+    where: {
+      repositoryId,
+      number,
+      githubIssueId: { not: BigInt(newGithubIssueId) },
+    },
+  });
+}
+
+/**
  * issue_comment（created）Webhookで届いた新規コメント本文から、質問への回答待ち状態
  * （qaAnswerPendingAt）を更新する。質問コメント（isAskClaudeQuestionComment）なら現在時刻を
  * セットし、回答コメント（isQaAnswerComment）ならnullに戻す。それ以外の通常コメントでは

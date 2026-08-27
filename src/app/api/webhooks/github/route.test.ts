@@ -126,7 +126,7 @@ describe("POST /api/webhooks/github issues.transferred", () => {
     expect(deleteIssueByGithubId).toHaveBeenCalledWith(123);
   });
 
-  it("changes.new_repositoryがあり移動先が接続済みの場合は移動先へupsertする", async () => {
+  it("changes.new_issueが欠落している場合、移動元Issueの行を削除するフォールバックを行う", async () => {
     findUniqueRepository.mockResolvedValue({ id: "repo-destination" });
 
     const response = await POST(
@@ -139,11 +139,83 @@ describe("POST /api/webhooks/github issues.transferred", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).not.toHaveBeenCalled();
+    expect(deleteIssueByGithubId).toHaveBeenCalledWith(123);
+  });
+
+  it("移動先が接続済みの場合、移動前ではなくchanges.new_issueを移動先へupsertし、移動元の行を消す", async () => {
+    findUniqueRepository.mockResolvedValue({ id: "repo-destination" });
+
+    const response = await POST(
+      makeRequest({
+        action: "transferred",
+        issue: {
+          id: 123,
+          number: 420,
+          html_url: "https://github.com/guchi-apps/dayspan/issues/420",
+        },
+        repository: { id: 1 },
+        changes: {
+          new_repository: { id: 2 },
+          new_issue: {
+            id: 456,
+            number: 268,
+            html_url: "https://github.com/guchi-apps/myroom/issues/268",
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith("repo-destination", {
+      id: 456,
+      number: 268,
+      html_url: "https://github.com/guchi-apps/myroom/issues/268",
+    });
+    expect(deleteIssueByGithubId).toHaveBeenCalledWith(123);
+  });
+
+  it("移動の前後でIssueのGitHub IDが同じ場合は、移動元の行を消さない", async () => {
+    findUniqueRepository.mockResolvedValue({ id: "repo-destination" });
+
+    const response = await POST(
+      makeRequest({
+        action: "transferred",
+        issue: { id: 123, number: 420 },
+        repository: { id: 1 },
+        changes: {
+          new_repository: { id: 2 },
+          new_issue: { id: 123, number: 268 },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
     expect(upsertIssueFromWebhookPayload).toHaveBeenCalledWith("repo-destination", {
       id: 123,
-      number: 5,
+      number: 268,
     });
     expect(deleteIssueByGithubId).not.toHaveBeenCalled();
+  });
+
+  it("移動先が未接続のリポジトリなら、移動元Issueの行を削除して移動先へは書かない", async () => {
+    findUniqueRepository.mockResolvedValue(null);
+
+    const response = await POST(
+      makeRequest({
+        action: "transferred",
+        issue: { id: 123, number: 420 },
+        repository: { id: 1 },
+        changes: {
+          new_repository: { id: 2 },
+          new_issue: { id: 456, number: 268 },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsertIssueFromWebhookPayload).not.toHaveBeenCalled();
+    expect(deleteIssueByGithubId).toHaveBeenCalledWith(123);
   });
 });
 
