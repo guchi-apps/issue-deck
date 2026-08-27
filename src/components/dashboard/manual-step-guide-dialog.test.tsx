@@ -666,9 +666,14 @@ describe("ManualStepGuideDialog の自動実行", () => {
     expect(content).toBeTruthy();
     expect(bar).toBeTruthy();
 
-    // 高さを配るのはflexの縦積み。段の数を数える組み方へ戻っていない
+    // 高さを配るのはflexの縦積み。段の数を数える組み方へ戻っていない。
+    // `DialogContent`の既定の`grid`はtailwind-mergeが落とし、表示は`flex`で確定する
+    // （残る`grid-cols-[minmax(0,1fr)]`は効かないので、横幅は`max-w-*`が止める）
+    expect(content?.classList.contains("flex")).toBe(true);
+    expect(content?.classList.contains("grid")).toBe(false);
     expect(content?.className).toContain("flex-col");
     expect(content?.className).not.toContain("grid-rows-");
+    expect(content?.className).toContain("max-w");
     // 帯はスクロール領域の外（本文をスクロールしても隠れない）にあり、縮まない
     expect(bar?.parentElement).toBe(content);
     expect(bar?.className).toContain("shrink-0");
