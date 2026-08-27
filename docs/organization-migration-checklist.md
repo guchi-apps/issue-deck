@@ -331,6 +331,12 @@ private:
   確認できないため付与を見送った。マルチエージェント運用に載っていないため急がない
 - **`docs`の`label-sync/compare-labels.sh`の`guchiOS` → `gucchii-os`の対応付けは推定**。
   旧名にリダイレクトが残っておらず追跡できなかった
-- **Organizationのデフォルトラベルは未設定**。Organization Settings → Repository defaults で
-  設定できるが、**新規リポジトリにしか適用されない**（既存リポジトリには効かない）ため、
-  `sync-labels.sh`の置き換えにはならない。新規アプリ作成時の初期投入を省ける利点はある
+- **Organizationのデフォルトラベルは設定しない**（#1002で見送りを決めた・2026-08-27）。
+  Organization Settings → Repository defaults で定義できるが、**新規リポジトリにしか
+  適用されない**（既存リポジトリには効かない）ため`sync-labels.sh`の置き換えにはならず、
+  唯一の適用先である新規リポジトリへの初期投入も、画面の「新規アプリを立ち上げる」が
+  作成時にAPIでラベル一式を写すようになった（#2188・#2247）ことで既に済んでいる。
+  操作するREST APIも無く（`gh api orgs/guchi-apps/labels`は`Not Found`）、登録は
+  ブラウザでの手作業29件になるため、正（issue-deck）とは別に手で直す場所が増えるだけになる。
+  経緯は[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「ラベルが入る経路は2つで、
+  Organizationのデフォルトラベルは採らない」を参照
