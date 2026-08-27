@@ -2657,6 +2657,15 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   文字列なので、下書きの保存も投稿も変わらない。**入力欄の表示と`value`がズレているのはここだけ**で、
   分解・合成は同ファイルの`splitAttachments` / `composeAttachments`が持つ。文章の途中に書かれた
   画像記法は本文の文字のまま残す（既存のIssue・コメントを編集で書き換えないため）。
+  **分解・合成の実体は[`lib/markdown-attachments.ts`](../src/lib/markdown-attachments.ts)**
+  （#2425でサーバー側からも使うようになったため移した。`mention-textarea.tsx`は
+  再エクスポートするだけ）。**計画への修正送信（`plan-approval-panel.tsx`）もこの入力欄**で、
+  文字数の上限を数えるのは本文だけ・添付は枚数で抑える、という勘定を
+  `parseSessionPlanRevision`と画面の両方が同じ関数で出している。
+  **呼び出し元が`value`へ文字列を足すときは、`splitAttachments`で本文と添付に分けてから
+  本文の末尾へ足す**（#2425）。素朴に`value + "\n" + text`と書くと画像記法の下に文が来て、
+  次の`splitAttachments`が添付として読めなくなる——**サムネイルが黙って消え、入力欄に
+  URLが現れる**（計画の定型文ボタンで踏んだ）。
 
 ## 画面のボタンは`@claude`コメントで動く
 

@@ -14,16 +14,20 @@ import {
 } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { SESSION_PLAN_REVISION_MAX_LENGTH } from "@/lib/dispatch/session-plan-request";
+import {
+  SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
+  SESSION_PLAN_REVISION_MAX_LENGTH,
+} from "@/lib/dispatch/session-plan-request";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { composeAttachments, splitAttachments } from "@/lib/markdown-attachments";
 
 /**
  * ローカルセッションが提示した計画を読んで、その場で承認・修正を送るパネル（#2061）。
@@ -72,6 +76,8 @@ export function PlanApprovalPanel({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
   const [revision, setRevision] = useState("");
+  // 画像のアップロード中に送ると、まだURLの入っていない本文がClaudeへ渡る（#2425）
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 押した結果は**どの計画に対して押したのか**まで持つ（#2158）。`"approve"`だけを覚えると、
   // 別の計画に差し替わってもその表示が残り、**押していない計画に「承認を送りました」が出る**
@@ -122,6 +128,10 @@ export function PlanApprovalPanel({
   }
 
   const canSend = !sessionGone && remainingMs > 0;
+  // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
+  // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
+  const { body: revisionBody, attachments: revisionAttachments } = splitAttachments(revision);
+  const tooManyAttachments = revisionAttachments.length > SESSION_PLAN_REVISION_MAX_ATTACHMENTS;
 
   return (
     <section className="overflow-hidden rounded-md border border-amber-500/50 bg-card">
@@ -165,19 +175,25 @@ export function PlanApprovalPanel({
             <label className="text-xs font-medium" htmlFor={`plan-revision-${request.id}`}>
               修正してほしいこと
             </label>
-            <Textarea
+            {/* **素の`Textarea`ではなく`MentionTextarea`を使う**（#2425）。貼り付け・
+                ドラッグ&ドロップ・「画像を添付」がそのまま手に入り、画面の見た目を直して
+                ほしいときに「こうしたい」を1枚で渡せる。文章で書き起こすより速くて正確 */}
+            <MentionTextarea
               id={`plan-revision-${request.id}`}
               value={revision}
-              onChange={(event) => setRevision(event.target.value)}
+              onChange={setRevision}
+              onUploadingChange={setIsUploadingImage}
+              repositoryFullName={request.repositoryFullName}
               maxLength={SESSION_PLAN_REVISION_MAX_LENGTH}
               rows={4}
-              placeholder="どこを・なぜ・どう直してほしいかを書いてください。この文がそのままClaudeへ渡ります。"
+              placeholder="どこを・なぜ・どう直してほしいかを書いてください。この文がそのままClaudeへ渡ります。画像はここへ貼り付け・ドロップできます。"
             />
             {/* **アーティファクトの直しもここから頼める**（#2200）。承認前は「計画の直し」しか
                 送れないと読めてしまい、見た目の指摘だけRemote Controlへ回されていた */}
             <p className="text-[11px] text-muted-foreground">
               アーティファクト（見た目）の直しもここから頼めます。承認前でも、下の「アーティファクト」
-              カードが新しい見た目に差し替わります。
+              カードが新しい見た目に差し替わります。画面のスクリーンショットや手描きのラフを
+              添付すると、そのままセッションが読みます。
             </p>
             {/* 定型文は**差し込むだけ**で押すのは人（追加指示・#1012と同じ作法）。
                 送る前に手直しできる形にしておく */}
@@ -188,15 +204,34 @@ export function PlanApprovalPanel({
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs"
-                  onClick={() => setRevision((prev) => (prev ? `${prev}\n${preset}` : preset))}
+                  // **差し込む先は本文で、添付の後ろではない**（#2425）。末尾に足すと
+                  // 画像記法の下に文が来て添付として読めなくなり、サムネイルが消えて
+                  // URLが本文に出る（`splitAttachments`は末尾の連なりだけを添付と見る）
+                  onClick={() =>
+                    setRevision((prev) => {
+                      const { body, attachments } = splitAttachments(prev);
+                      return composeAttachments(body ? `${body}\n${preset}` : preset, attachments);
+                    })
+                  }
                 >
                   {preset}
                 </Button>
               ))}
             </div>
+            {tooManyAttachments && (
+              <p className="flex items-start gap-1.5 text-xs text-destructive">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                添付できる画像は{SESSION_PLAN_REVISION_MAX_ATTACHMENTS}枚までです。
+              </p>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                {revision.length} / {SESSION_PLAN_REVISION_MAX_LENGTH}
+                {revisionBody.length} / {SESSION_PLAN_REVISION_MAX_LENGTH}
+                {revisionAttachments.length > 0 && (
+                  <span className={tooManyAttachments ? "ml-1.5 text-destructive" : "ml-1.5"}>
+                    画像{revisionAttachments.length}枚
+                  </span>
+                )}
               </span>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => setIsRevising(false)}>
@@ -204,7 +239,13 @@ export function PlanApprovalPanel({
                 </Button>
                 <Button
                   size="sm"
-                  disabled={!canSend || dispatch.isSubmitting || revision.trim().length === 0}
+                  disabled={
+                    !canSend ||
+                    dispatch.isSubmitting ||
+                    isUploadingImage ||
+                    tooManyAttachments ||
+                    revision.trim().length === 0
+                  }
                   onClick={() => void send("revise")}
                 >
                   {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <Pencil />}

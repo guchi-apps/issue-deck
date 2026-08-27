@@ -5,9 +5,11 @@ import {
   findPlanRequestForIssue,
   isVisibleSessionPlanRequest,
   parseSessionPlanDecision,
+  buildPlanRevisionReason,
   parseSessionPlanRevision,
   parseSessionPlanWaitSeconds,
   SESSION_PLAN_DECIDED_VISIBLE_MS,
+  SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
   SESSION_PLAN_REVISION_MAX_LENGTH,
   SESSION_PLAN_STORED_LIMIT,
   SESSION_PLAN_WAIT_SECONDS_DEFAULT,
@@ -56,6 +58,54 @@ describe("parseSessionPlanRevision", () => {
   it("文字列以外は受け取らない", () => {
     expect(parseSessionPlanRevision(null)).toBeNull();
     expect(parseSessionPlanRevision(12)).toBeNull();
+  });
+
+  /**
+   * #2425。画像1枚のURLで100文字前後を使うため、同じ枠で数えると
+   * 「3枚貼っただけで書ける文章が1割減る」ことになる。
+   */
+  it("末尾の添付（画像記法）は文字数に数えない", () => {
+    const body = "あ".repeat(SESSION_PLAN_REVISION_MAX_LENGTH);
+    const value = `${body}\n\n![shot.png](https://example.com/api/issues/images/shot.png)`;
+    expect(parseSessionPlanRevision(value)).toBe(value);
+    expect(parseSessionPlanRevision(`${body}あ`)).toBeNull();
+  });
+
+  /** 「この見た目にして」と1枚渡すのは、文章を書くより速くて正確な伝え方 */
+  it("画像だけ（文章なし）の修正も通す", () => {
+    expect(parseSessionPlanRevision("![shot.png](/api/issues/images/shot.png)")).toBe(
+      "![shot.png](/api/issues/images/shot.png)",
+    );
+  });
+
+  it("添付の枚数には上限がある", () => {
+    const line = (n: number) => `![${n}.png](/api/issues/images/${n}.png)`;
+    const ok = Array.from({ length: SESSION_PLAN_REVISION_MAX_ATTACHMENTS }, (_, i) => line(i));
+    expect(parseSessionPlanRevision(ok.join("\n"))).toBe(ok.join("\n"));
+    expect(parseSessionPlanRevision([...ok, line(99)].join("\n"))).toBeNull();
+  });
+});
+
+/**
+ * #2425。フックが運べるのは文字列だけで、画像そのものは渡らない。取りに行き方を書かないと、
+ * 貼った本人は見せたつもりで見せられていない状態になる。
+ */
+describe("buildPlanRevisionReason", () => {
+  it("画像が無ければ本文をそのまま返す", () => {
+    expect(buildPlanRevisionReason("待ち時間を短く。")).toBe("待ち時間を短く。");
+  });
+
+  it("画像があれば、curlで落として`Read`で開く手順を添える", () => {
+    const reason = buildPlanRevisionReason(
+      "この見た目にして。\n\n![shot.png](https://example.com/api/issues/images/shot.png)",
+    );
+    expect(reason).toContain("![shot.png](https://example.com/api/issues/images/shot.png)");
+    expect(reason).toContain("curl");
+    expect(reason).toContain("`Read`");
+  });
+
+  it("文中に書かれた画像記法でも案内する", () => {
+    expect(buildPlanRevisionReason("ここ→![a](/img/a.png)←を直して")).toContain("curl");
   });
 });
 
