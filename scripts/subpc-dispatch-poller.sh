@@ -135,12 +135,18 @@ set -euo pipefail
 # 19: 定期的なworktreeの掃除を`--all-repos`で全リポジトリへ広げる（#2123）。
 # 20: npm・yarnのworktreeで重複した`node_modules`を1日1回ハードリンクへまとめる（#2124）。
 # 21: リポジトリ全体のコードレビュー（`CODE_REVIEW`）のセッションを起こす（#698）。
-DISPATCH_POLLER_VERSION="21"
+# 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
+DISPATCH_POLLER_VERSION="22"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 「どのリポジトリを起動できるか」の判定は受け口（start-local-session.sh）と共有する。
 # **判定を二重に持つと、申告と実際の起動可否が必ずずれる**（#1179のコメント）。
+# 手作業の`<…>`へ値を差し込む規則（#2403）。**issue-deck側と突き合わせる2枚目の壁**なので、
+# pollerの中に書かずに切り出してテストから直接呼べるようにしてある
+# shellcheck source=scripts/lib/manual-step-fill.sh
+source "$SCRIPT_DIR/lib/manual-step-fill.sh"
+
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # 進捗報告の設定漏れを起動時に1度だけ知らせるために読む（#1236。報告そのものはランチャーが行う）。
@@ -536,6 +542,18 @@ manual_step_abort_capable() {
   fi
 }
 
+# 埋めた値を差し込んで代行実行できるか（#2403）。**この版のスクリプトが
+# `placeholderValues`を読んで差し込む実装を持っているという申告**なので、環境ではなく
+# 実装の有無で決まる（＝定数`true`）。
+#
+# **`manual_step_capable`とは分けて申告する。** 古いpollerは知らないフィールドを黙って無視し、
+# `command`（＝`<…>`が入ったままのテンプレート）をそのまま実行してしまう。#2051が防いだ
+# 「`KEY=<値>`がリダイレクトとして解釈される」状態そのもので、「配ってから`failed`で返る」では
+# 済まない。issue-deck側はこの申告が真でないホストへ値付きのジョブを払い出さない。
+manual_step_values_capable() {
+  printf 'true'
+}
+
 # 計画レビュー（G1・#1855）のセッションを起こせるか。**ランチャーが手元にあるかで判定する**
 # （`cross_repo_question_capable`と同じ）。
 #
@@ -806,13 +824,14 @@ announce() {
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
+    --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1891,7 +1910,10 @@ run_self_update_job() {
 
 run_manual_step_job() {
   local job_id="$1" owner="$2" repo="$3" issue_number="$4" command="$5"
-  local body payload_file unit
+  local values_json="${6:-{\}}"
+  # issue-deck側が差し込んだ結果（#2403）。届かない場合は空で、そのときは突き合わせを省く
+  local expected="${7:-}"
+  local body payload_file unit resolved
 
   if [[ -z "$command" ]]; then
     report_job "$job_id" failed "実行するコマンドが空です。"
@@ -1920,6 +1942,30 @@ run_manual_step_job() {
     return 0
   fi
 
+  # **照合を通したあとに、人が埋めた値を差し込む**（#2403）。順序が逆だと、値を含む文字列を
+  # 本文と突き合わせることになり、本文照合そのものが成立しない。
+  resolved="$(fill_placeholders "$command" "$values_json")"
+
+  # **穴が残っていたら実行しない**（#2051と同じ被害を防ぐ）。issue-deck側も積む前に弾いて
+  # いるが、判定材料が届かなかった場合に備えてこちらでも見る（実行しない側へ倒す）。
+  # 見るのは4種すべて（`<…>`・`***`・全角`…`・語としての`xxx`）で、issue-deck側の
+  # `findPlaceholder`と同じ並び
+  if printf '%s' "$resolved" | grep -vE '^[[:space:]]*#' |
+    grep -qE '[<＜][^<>＜＞[:space:]][^<>＜＞]*[>＞]|[*＊]{3,}|…|\bx{3,}\b'; then
+    report_job "$job_id" skipped \
+      "コマンドに値の埋まっていない箇所が残っているため実行しませんでした。"
+    return 0
+  fi
+
+  # **issue-deckが差し込んだ結果と突き合わせる**（#2403）。引用の規則は両側が独立に持って
+  # いるので、ずれていれば「誤ったコマンドを実行する」のではなく「実行しない」で止める
+  # （本文照合を2回行うのと同じ形の、2枚目の壁）。届いていなければ突き合わせは省く
+  if [[ -n "$expected" && "$expected" != "$resolved" ]]; then
+    report_job "$job_id" skipped \
+      "issue-deck側が組み立てた実行内容と一致しないため実行しませんでした。"
+    return 0
+  fi
+
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  --dry-run のため実行しません（MANUAL_STEP → $owner/$repo #$issue_number）"
     echo "  照合は通りました（本文に同じコマンドがあります）"
@@ -1927,10 +1973,11 @@ run_manual_step_job() {
   fi
 
   # **コマンドはargvに載せずファイルで渡す**（`ps`で他のユーザーからも見えるため）。
-  # 読んだ側が消す。
+  # 読んだ側が消す。**渡すのは値を差し込んだ後の文字列**（#2403）で、値が入りうるぶん
+  # `chmod 600`の意味はこれまでより重い。
   payload_file="$(mktemp -t issue-deck-manual-step-job.XXXXXX)"
   chmod 600 "$payload_file"
-  jq -n --arg jobId "$job_id" --arg command "$command" '{jobId: $jobId, command: $command}' \
+  jq -n --arg jobId "$job_id" --arg command "$resolved" '{jobId: $jobId, command: $command}' \
     >"$payload_file"
 
   # 実行を始めたことを先に伝える（届くまで最大1巡ぶん遅れるので、画面が黙る時間を短くする）
@@ -2010,6 +2057,7 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command
+  local placeholder_values resolved_command
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2018,8 +2066,14 @@ run_job() {
   requested_session="$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')"
   # 追加指示の本文（#1012）。`INSTRUCTION`以外では空
   instruction="$(printf '%s' "$job_json" | jq -r '.instruction // ""')"
-  # 代行実行するコマンド（#1828）。`MANUAL_STEP`以外では空
+  # 代行実行するコマンド（#1828）。`MANUAL_STEP`以外では空。
+  # **`<…>`が入ったままのテンプレート**（#2403）で、本文との照合はこれで行う
   command="$(printf '%s' "$job_json" | jq -r '.command // ""')"
+  # 人が埋めたプレースホルダの値（#2403。`{"<控えたkey>": "…"}`）。無ければ空のオブジェクト
+  placeholder_values="$(printf '%s' "$job_json" | jq -c '.placeholderValues // {}')"
+  # issue-deck側が値を差し込んだ結果（#2403）。実行するのはこちらではなく、pollerが自分で
+  # 差し込み直したもの。これは突き合わせにだけ使う（`command`が照合専用なのと同じ立場）
+  resolved_command="$(printf '%s' "$job_json" | jq -r '.resolvedCommand // ""')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -2117,7 +2171,8 @@ run_job() {
   # 手作業の代行実行（#1828）。**セッションを立てず、tmuxにも触らない。** cloneの有無も
   # 問わない（実行するのはホスト上のコマンドで、worktreeを作るわけではない）。
   if [[ "$kind" == "MANUAL_STEP" ]]; then
-    run_manual_step_job "$job_id" "$owner" "$repo" "$issue_number" "$command"
+    run_manual_step_job "$job_id" "$owner" "$repo" "$issue_number" "$command" \
+      "$placeholder_values" "$resolved_command"
     return 0
   fi
 

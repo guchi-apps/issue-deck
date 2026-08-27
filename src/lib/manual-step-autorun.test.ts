@@ -50,9 +50,13 @@ const BODY = `## この作業でできるようになること
     \`\`\`
 `;
 
-const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable"> = {
+const READY_HOST: Pick<
+  DispatchHostView,
+  "online" | "manualStepCapable" | "manualStepValuesCapable"
+> = {
   online: true,
   manualStepCapable: true,
+  manualStepValuesCapable: true,
 };
 
 function plan(body = BODY, host = READY_HOST as typeof READY_HOST | null) {
@@ -91,10 +95,10 @@ describe("buildManualStepRunPlan", () => {
 
   it("pollerが未対応・応答なしのときも、判定はディスパッチ側と同じ理由を返す", () => {
     expect(plan(BODY, null).entries[0].rejection).toBe("host_unknown");
-    expect(plan(BODY, { online: false, manualStepCapable: true }).entries[0].rejection).toBe(
+    expect(plan(BODY, { online: false, manualStepCapable: true, manualStepValuesCapable: true }).entries[0].rejection).toBe(
       "host_offline",
     );
-    expect(plan(BODY, { online: true, manualStepCapable: null }).entries[0].rejection).toBe(
+    expect(plan(BODY, { online: true, manualStepCapable: null, manualStepValuesCapable: null }).entries[0].rejection).toBe(
       "manual_step_unsupported",
     );
   });
@@ -376,5 +380,71 @@ describe("1Passwordを扱う手作業", () => {
     expect(result.blocked).toBe(1);
     const blocked = result.entries.filter((entry) => entry.rejection !== null);
     expect(blocked.map((entry) => entry.device)).toEqual(["ブラウザ"]);
+  });
+});
+
+/** 値を埋めるコマンド（#2403）。埋めるまでは代行できない */
+const PLACEHOLDER_BODY = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+
+## やること
+
+- [ ] 控えたキーでトークンを発行する
+
+    \`\`\`bash
+    KEY=<控えたkey> node oauth.mjs
+    \`\`\`
+`;
+
+describe("buildManualStepRunPlan の値の差し込み（#2403）", () => {
+  function planWith(
+    values: Record<string, string> | null,
+    host = READY_HOST as typeof READY_HOST | null,
+    body = PLACEHOLDER_BODY,
+  ) {
+    return buildManualStepRunPlan(body, undefined, { host, isManualStepIssue: true, values });
+  }
+
+  it("値を渡さなければ、これまでどおり穴で止まる", () => {
+    const entry = planWith(null).entries[0];
+
+    expect(entry.rejection).toBe("placeholder_command");
+    expect(entry.placeholders).toEqual(["<控えたkey>"]);
+    // **`command`はテンプレートのまま**（承認・照合・ジョブへの保存はこちら）
+    expect(entry.command).toBe("KEY=<控えたkey> node oauth.mjs");
+    expect(entry.filledCommand).toBe("KEY=<控えたkey> node oauth.mjs");
+  });
+
+  it("値を渡すと代行できるようになり、差し込んだ形を`filledCommand`に持つ", () => {
+    const entry = planWith({ "<控えたkey>": "kM3q" }).entries[0];
+
+    expect(entry.rejection).toBeNull();
+    expect(entry.command).toBe("KEY=<控えたkey> node oauth.mjs");
+    expect(entry.filledCommand).toBe("KEY='kM3q' node oauth.mjs");
+  });
+
+  it("pollerが値の差し込みに未対応なら、埋めても代行しない", () => {
+    const entry = planWith(
+      { "<控えたkey>": "kM3q" },
+      { online: true, manualStepCapable: true, manualStepValuesCapable: null },
+    ).entries[0];
+
+    expect(entry.rejection).toBe("manual_step_values_unsupported");
+  });
+
+  // **山括弧を全部埋めたかどうかで判定しない**（#2403の計画レビューG1・指摘1）。
+  // 4種のうち残り3種（`***`・`…`・`xxx`）は名前が付かず埋めようがないので、
+  // 埋める欄には出ないまま、代行の可否だけが素通りするのがいちばん危ない
+  it("名前の付かないプレースホルダが残っていれば、山括弧を埋めても代行しない", () => {
+    const body = PLACEHOLDER_BODY.replace(
+      "KEY=<控えたkey> node oauth.mjs",
+      "KEY=<控えたkey> SECRET=*** node oauth.mjs",
+    );
+    const entry = planWith({ "<控えたkey>": "kM3q" }, READY_HOST, body).entries[0];
+
+    expect(entry.placeholders).toEqual(["<控えたkey>"]);
+    expect(entry.rejection).toBe("placeholder_command");
+    expect(entry.placeholder).toBe("***");
   });
 });

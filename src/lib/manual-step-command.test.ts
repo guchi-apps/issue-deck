@@ -5,14 +5,19 @@ import {
   extractRunnableManualStepCommands,
   extractShellBlock,
   extractVerificationCommands,
+  fillManualStepPlaceholders,
   findInteractiveCommand,
   findManualStepCommand,
   findPlaceholder,
+  hasUnfilledPlaceholder,
   isSubpcManualStepDevice,
+  listManualStepPlaceholders,
+  normalizeManualStepPlaceholderValues,
   MANUAL_STEP_COMMAND_MAX_LENGTH,
   MANUAL_STEP_INSTRUCTION_MAX_LENGTH,
   replaceManualStepCommand,
   replaceManualStepInstruction,
+  shellQuoteValue,
 } from "@/lib/manual-step-command";
 
 /**
@@ -486,5 +491,104 @@ describe("replaceManualStepInstruction", () => {
     expect(replaceManualStepInstruction(REAL_BODY, 1, "見出しは手順ではない")).toBeNull();
     expect(replaceManualStepInstruction(null, unchecked, "本文が無い")).toBeNull();
     expect(replaceManualStepInstruction(REAL_BODY, 9999, "範囲外")).toBeNull();
+  });
+});
+
+describe("listManualStepPlaceholders", () => {
+  it("名前の付く山括弧を、現れた順に重複なく返す", () => {
+    expect(listManualStepPlaceholders("gh api repos/<owner>/<repo>/issues")).toEqual([
+      "<owner>",
+      "<repo>",
+    ]);
+    expect(listManualStepPlaceholders("a=<k> b=<k>")).toEqual(["<k>"]);
+    expect(listManualStepPlaceholders("gh issue view ＜番号＞")).toEqual(["＜番号＞"]);
+  });
+
+  it("名前の付かない3種は返さない（埋める欄を出しようがないため）", () => {
+    expect(listManualStepPlaceholders("op item create --password '***'")).toEqual([]);
+    expect(listManualStepPlaceholders("gh issue list --search …")).toEqual([]);
+    expect(listManualStepPlaceholders("AIDE_TOKEN=xxx node x.mjs")).toEqual([]);
+  });
+
+  it("リダイレクト・ヒアドキュメント・プロセス置換は拾わない（findPlaceholderと同じ）", () => {
+    expect(listManualStepPlaceholders("cmd < in.txt > out.txt")).toEqual([]);
+    expect(listManualStepPlaceholders("cat <<EOF > f")).toEqual([]);
+    expect(listManualStepPlaceholders("diff <(a) <(b)")).toEqual([]);
+  });
+
+  it("行頭が#のコメント行は見ない", () => {
+    expect(listManualStepPlaceholders("# <k> の説明\necho ok")).toEqual([]);
+  });
+});
+
+describe("shellQuoteValue", () => {
+  // **ここが、画面から届いた値がコマンドの構造を変えられないことの唯一の担保**
+  it("シェルのメタ文字を含む値もリテラルの1語になる", () => {
+    expect(shellQuoteValue("abc123")).toBe("'abc123'");
+    expect(shellQuoteValue("a; rm -rf ~")).toBe("'a; rm -rf ~'");
+    expect(shellQuoteValue("$(whoami)")).toBe("'$(whoami)'");
+    expect(shellQuoteValue("")).toBe("''");
+  });
+
+  it("単引用符を含む値は、いったん閉じて継ぎ足す", () => {
+    expect(shellQuoteValue("a'b")).toBe("'a'\\''b'");
+  });
+});
+
+describe("fillManualStepPlaceholders", () => {
+  it("値を引用で包んで差し込む", () => {
+    expect(fillManualStepPlaceholders("KEY=<控えたkey> node oauth.mjs", { "<控えたkey>": "abc123" })).toBe(
+      "KEY='abc123' node oauth.mjs",
+    );
+  });
+
+  it("同じ穴が2つあれば両方を埋める", () => {
+    expect(fillManualStepPlaceholders("a=<k> b=<k>", { "<k>": "v" })).toBe("a='v' b='v'");
+  });
+
+  it("値が無い穴はそのまま残す（残れば代行の可否判定が拾う）", () => {
+    expect(fillManualStepPlaceholders("a=<k> b=<j>", { "<k>": "v" })).toBe("a='v' b=<j>");
+    expect(hasUnfilledPlaceholder(fillManualStepPlaceholders("a=<k> b=<j>", { "<k>": "v" }))).toBe(
+      true,
+    );
+  });
+
+  it("行頭が#のコメント行は書き換えない", () => {
+    expect(fillManualStepPlaceholders("# <k> の説明\na=<k>", { "<k>": "v" })).toBe(
+      "# <k> の説明\na='v'",
+    );
+  });
+});
+
+describe("hasUnfilledPlaceholder", () => {
+  // **「`<…>`を全部埋めたか」で代用してはいけない**（#2403の計画レビューG1・指摘1）。
+  // 山括弧だけを数えると、残り3種の穴が空いたまま素通りする
+  it("山括弧が0件でも、伏せ字・三点リーダ・埋め草が残っていれば true", () => {
+    expect(listManualStepPlaceholders("op item create --password '***'")).toEqual([]);
+    expect(hasUnfilledPlaceholder("op item create --password '***'")).toBe(true);
+    expect(hasUnfilledPlaceholder("gh issue list --search …")).toBe(true);
+    expect(hasUnfilledPlaceholder("AIDE_TOKEN=xxx node x.mjs")).toBe(true);
+  });
+
+  it("全部埋まっていれば false", () => {
+    expect(hasUnfilledPlaceholder(fillManualStepPlaceholders("a=<k>", { "<k>": "v" }))).toBe(false);
+  });
+});
+
+describe("normalizeManualStepPlaceholderValues", () => {
+  it("プレースホルダの表記でないキーは捨てる", () => {
+    expect(normalizeManualStepPlaceholderValues({ k: "v", "<k>": "v" })).toEqual({ "<k>": "v" });
+  });
+
+  it("空・改行入り・文字列でない値は捨てる", () => {
+    expect(
+      normalizeManualStepPlaceholderValues({ "<a>": "", "<b>": "x\ny", "<c>": 1, "<d>": "v" }),
+    ).toEqual({ "<d>": "v" });
+  });
+
+  it("1件も残らなければ null", () => {
+    expect(normalizeManualStepPlaceholderValues({ k: "v" })).toBeNull();
+    expect(normalizeManualStepPlaceholderValues(null)).toBeNull();
+    expect(normalizeManualStepPlaceholderValues(undefined)).toBeNull();
   });
 });

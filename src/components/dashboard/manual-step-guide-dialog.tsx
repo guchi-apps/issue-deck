@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   CircleStop,
+  Copy,
   Flag,
   FolderOpen,
   GitBranch,
@@ -14,6 +15,7 @@ import {
   Info,
   Loader2,
   MonitorSmartphone,
+  MoreHorizontal,
   PartyPopper,
   TriangleAlert,
   Undo2,
@@ -32,7 +34,14 @@ import {
   ManualStepTroublePanel,
   type ManualStepTroubleTarget,
 } from "@/components/dashboard/manual-step-trouble-panel";
+import { buildWhereToRunLines } from "@/components/dashboard/manual-step-where-to-run";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +53,10 @@ import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
+import {
+  useManualStepValues,
+  type ManualStepValuesHandle,
+} from "@/hooks/use-manual-step-values";
 import {
   useManualStepAutoRun,
   type ManualStepAutoRunHandle,
@@ -58,6 +71,7 @@ import {
   type DispatchHostView,
   type ManualStepExecutionRejection,
 } from "@/lib/dispatch/dispatch-job";
+import { copyText } from "@/lib/copy-text";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import {
   buildManualStepRunPlan,
@@ -79,6 +93,7 @@ import {
 import {
   parseManualStepGuide,
   resolveManualStepDevice,
+  stripCodeBlocks,
   type ManualStepGuide,
   type ManualStepGuideStep,
 } from "@/lib/manual-step-guide";
@@ -121,6 +136,24 @@ type GuideStage =
   /** `## 完了の確認方法`とクローズの出口 */
   | { kind: "finish" };
 
+/**
+ * 下端に並べる操作1つぶん（#2403）。**PC・スマホで同じ定義から描く**——片方だけに操作が
+ * 増えたり、出す条件がずれたりしないようにする。
+ */
+type GuideAction = {
+  key: string;
+  label: string;
+  Icon: LucideIcon | null;
+  onSelect: () => void;
+  disabled?: boolean;
+  /** 注意を引く色（「うまくいかない」だけ） */
+  tone?: "warn";
+  /** トグルとして押されている状態（読み上げの`aria-pressed`に出す） */
+  pressed?: boolean;
+  /** 送信中。アイコンを回す */
+  spinning?: boolean;
+};
+
 function buildStages(guide: ManualStepGuide): GuideStage[] {
   const middle: GuideStage[] = guide.hasTemplate
     ? guide.steps.map((step, order) => ({ kind: "step" as const, step, order }))
@@ -157,6 +190,8 @@ const HOST_SIDE_REJECTIONS = new Set<ManualStepExecutionRejection>([
   "host_unknown",
   "host_offline",
   "manual_step_unsupported",
+  // 値を差し込む実行への未対応（#2403）も**ホストの都合**。pollerを更新すれば押せるようになる
+  "manual_step_values_unsupported",
   "already_queued",
 ]);
 
@@ -417,6 +452,8 @@ function ManualStepGuideContent({
 }) {
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   const prerequisites = useManualStepPrerequisites(issue, issues);
+  // 手順の`<…>`へ人が埋めた値（#2403）。**このタブの中だけ**に残り、Issueへは書かない
+  const values = useManualStepValues(`${issue.repositoryFullName}#${issue.number}`);
   const { updateIssue, isSubmitting, error: closeError } = useIssueMutations();
   // 自動実行の状態はサーバーが持つ（#1882）。**画面は読んで出すだけで、次の1件を積まない**——
   // 画面とサーバーの2か所が積むと、同じ手順が二重に走る
@@ -439,8 +476,11 @@ function ManualStepGuideContent({
       buildManualStepRunPlan(taskList.body, guide, {
         host,
         isManualStepIssue: isManualStepIssue(issue.labels),
+        // 埋めた値を渡すと、埋まった手順は「あなたが実行」から「代行できる」へ変わる（#2403）。
+        // レールの印・見出しのバッジ・承認パネルがまとめて追従する
+        values: values.values,
       }),
-    [taskList.body, guide, host, issue.labels],
+    [taskList.body, guide, host, issue.labels, values.values],
   );
 
   // 確認が通った記録が無いまま閉じようとしていないか（#2256）。Issue詳細の手作業パネルと
@@ -464,6 +504,12 @@ function ManualStepGuideContent({
   // 想定外だったときの出口（#2299）。**開いているのは1画面につき1つ**で、手順を移ると閉じる
   const [troubleStage, setTroubleStage] = useState<number | null>(null);
   const troubleOpen = troubleStage === index;
+  /**
+   * コマンドをコピー済みの画面（#2403）。**画面ごとに1つ**で、手順を移ると主導線が
+   * 「コマンドをコピー」へ戻る。実行したかどうかの記録ではないので、Issue本文には残さない
+   * （記録が付くのは今までどおり「実行した・次へ」と、代行実行が終了コード0で終わったとき）
+   */
+  const [copiedForStep, setCopiedForStep] = useState<number | null>(null);
   const { comments } = useIssueComments(issue);
   const { createComment, isSubmitting: isRecording } = useIssueCommentMutations();
   // 過去に報告されたつまずき。**次に開いた人が同じところで詰まらない**ようにするためのもの
@@ -679,6 +725,123 @@ function ManualStepGuideContent({
           }
         : null;
 
+  /**
+   * この手順を「手元で実行する」形（つなぐ → 移動する → 実行する）。**空になることがある**
+   * ——接続コマンドもカレントディレクトリも本文に無い手順では`ManualStepWhereToRun`が
+   * セクションごと出ない（`buildWhereToRunLines`）。そのときはコマンドを画面に残す必要が
+   * あるので、本文のコードブロックを畳まないし、「コマンドをコピー」も出さない（#2403）。
+   */
+  const whereLines =
+    stage.kind === "step" && currentEntry !== null
+      ? buildWhereToRunLines(guide.where, currentEntry.filledCommand, currentEntry.device)
+      : [];
+  /**
+   * この手順は代行できず、人がターミナルで打つもの（#2403）。そのとき最初にやることは
+   * コピーなので、**主導線をコピーにして、押したら「実行した・次へ」へ変える**。
+   * 親指は下端から動かないまま「コピー → 実行 → 戻って次へ」が閉じる。
+   */
+  const copyFirst =
+    stage.kind === "step" &&
+    currentEntry !== null &&
+    currentEntry.rejection !== null &&
+    whereLines.length > 0 &&
+    !stage.step.checked &&
+    copiedForStep !== index;
+
+  async function handleCopyCommand() {
+    const ok = await copyText(whereLines.map((line) => line.command).join("\n"));
+    // **コピーできたときだけ**主導線を進める（`copyText`と同じ方針。できていないのに
+    // 「コピーしました」を出さない）
+    if (ok) setCopiedForStep(index);
+  }
+
+  /**
+   * 下端に並べる操作（#2403）。**PCは全部を横1行に、スマホは主ボタン以外を`⋯`へ**入れる。
+   * 定義を1つにしておくことで、片方にだけ操作が増える・条件がずれる、が起きない。
+   *
+   * **「中断する」はここに入れない。** 自動実行中は上の実行バー（`AutoRunBar`）に同じボタンが
+   * 必ず出ており、下にも置くと同じことを2か所で言わせることになる（#2403）。
+   */
+  const secondaryActions: GuideAction[] = [];
+  if (troubleTarget !== null) {
+    secondaryActions.push({
+      key: "trouble",
+      label: "うまくいかない",
+      Icon: TriangleAlert,
+      tone: "warn",
+      pressed: troubleOpen,
+      onSelect: () => setTroubleStage(troubleOpen ? null : index),
+    });
+  }
+  if (index > 0) {
+    // 最初の画面ではPCの左端に出ている（`⋯`が無い画面で、そこだけに置く）
+    secondaryActions.push({
+      key: "skip-issue",
+      label: "この手作業は飛ばす",
+      Icon: null,
+      onSelect: onNextIssue,
+    });
+  }
+  if (isLast) {
+    secondaryActions.push({
+      key: "close-not-planned",
+      label: "実施せずクローズ",
+      Icon: Ban,
+      disabled: isSubmitting,
+      onSelect: () => handleClose("not_planned"),
+    });
+  } else if (stage.kind === "step") {
+    secondaryActions.push({
+      key: "later",
+      label: "あとで",
+      Icon: null,
+      onSelect: () => onStageIndexChange(index + 1),
+    });
+  }
+
+  const primaryAction: GuideAction = isLast
+    ? {
+        key: "close-completed",
+        // **1回だけ聞き返して、2回目はそのまま閉じる**（#2256）。確かめようのない手作業は
+        // 実際にあるので、押せなくはしない
+        label: askingAboutClose ? "確認せずクローズ" : "完了してクローズ",
+        Icon: isSubmitting ? Loader2 : askingAboutClose ? TriangleAlert : CheckCircle2,
+        spinning: isSubmitting,
+        disabled: isSubmitting,
+        onSelect: () => {
+          if (closeWarning !== null && !askedAboutClose) {
+            setAskedAboutClose(true);
+            return;
+          }
+          void handleClose("completed");
+        },
+      }
+    : copyFirst
+      ? {
+          key: "copy-command",
+          label: whereLines.length > 1 ? `${whereLines.length}行をコピー` : "コマンドをコピー",
+          Icon: Copy,
+          onSelect: () => void handleCopyCommand(),
+        }
+      : stage.kind === "step"
+        ? {
+            key: "step-done",
+            // 代行実行が成功するとチェックが付く（#1828）。**そのときは主導線を「次へ」に
+            // 変える**——既に実行済みの手順に「実行した」を押させると、押さないと進めないのか
+            // 分からなくなる
+            label: stage.step.checked ? "次へ" : "実行した・次へ",
+            Icon: taskList.isToggling ? Loader2 : stage.step.checked ? ArrowRight : Check,
+            spinning: taskList.isToggling,
+            disabled: taskList.isToggling || autorun.running,
+            onSelect: () => void handleStepDone(),
+          }
+        : {
+            key: "next",
+            label: stage.kind === "overview" ? "はじめる" : "次へ",
+            Icon: ArrowRight,
+            onSelect: () => onStageIndexChange(index + 1),
+          };
+
   const troublePanel =
     troubleOpen && troubleTarget !== null ? (
       <ManualStepTroublePanel
@@ -763,6 +926,12 @@ function ManualStepGuideContent({
           {stage.kind === "step" && (
             <StepStage
               step={stage.step}
+              values={values}
+              // **コマンドを1画面に1回だけ出す**（#2403）。代行できない手順では
+              // 「手元で実行する」が値を差し込んだ実行できる形を出すので、本文側の
+              // コードブロックは畳む。**「手元で実行する」が出ないときは畳まない**——
+              // 畳むとコマンドが画面のどこにも出なくなる
+              foldCommand={currentEntry?.rejection != null && whereLines.length > 0}
               order={stage.order}
               total={stepCount}
               mark={resolveStageMark(stage, plan, host?.name ?? "サブPC")}
@@ -800,114 +969,100 @@ function ManualStepGuideContent({
         </div>
       </div>
 
-      <footer className="flex shrink-0 flex-col gap-2 border-t bg-muted/50 p-3 sm:flex-row sm:items-center">
+      {/* コピーしてターミナルへ行った人が、戻ってきて何を押せばよいかを1行で出す（#2403） */}
+      {copiedForStep === index && (
+        <p className="flex shrink-0 items-center gap-1.5 border-t border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+          <Check className="size-3.5 shrink-0" aria-hidden />
+          コピーしました。ターミナルで実行して、戻ったら「実行した・次へ」
+        </p>
+      )}
+
+      {/* **スマホでは1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みのままだと
+          手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが
+          その上の狭い窓に押し込まれていた。畳んでも操作は1つも減らさず、ふだん押さないものが
+          `⋯`へ移るだけ。**PCは幅が余っているので今までどおり全部を横1行に出す** */}
+      <footer className="flex shrink-0 items-center gap-2 border-t bg-muted/50 p-3">
+        {/* **同じボタンを2つ描かない。** 幅で出し分けるとDOMに同じ名前のボタンが2つ残り、
+            読み上げにも並ぶ。1つだけ置いて、文字をスマホ幅で隠す（名前は`aria-label`が持つ） */}
         {index > 0 ? (
           <Button
             variant="ghost"
             size="sm"
+            className="shrink-0 max-sm:w-11 max-sm:px-0"
+            aria-label="戻る"
             onClick={() => onStageIndexChange(index - 1)}
-            className="sm:order-1"
           >
             <ChevronLeft />
-            戻る
+            <span className="max-sm:hidden">戻る</span>
           </Button>
         ) : (
-          <Button variant="ghost" size="sm" onClick={onNextIssue} className="sm:order-1">
+          // 最初の画面には`⋯`が無い（二次操作がこれ1つだけ）ので、そのまま並べる
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={onNextIssue}>
             この手作業は飛ばす
           </Button>
         )}
-        {/* 想定外だったときの出口（#2299）。**代行実行の成否によらず出す**——自分で実行した
-            手順は出力が画面に届かないので、失敗を検知してから出したのでは間に合わない */}
-        {troubleTarget !== null && (
+
+        {/* PCではそのまま並べる二次操作。スマホでは下の`⋯`へ入る */}
+        {secondaryActions.map((action) => (
           <Button
+            key={action.key}
             variant="outline"
             size="sm"
-            className="border-amber-500/40 text-amber-700 sm:order-2 dark:text-amber-300"
-            aria-pressed={troubleOpen}
-            onClick={() => setTroubleStage(troubleOpen ? null : index)}
+            className={cn(
+              "shrink-0 max-sm:hidden",
+              action.tone === "warn" && "border-amber-500/40 text-amber-700 dark:text-amber-300",
+            )}
+            aria-pressed={action.pressed}
+            disabled={action.disabled}
+            onClick={action.onSelect}
           >
-            <TriangleAlert />
-            うまくいかない
+            {action.Icon && <action.Icon className={cn(action.spinning && "animate-spin")} />}
+            {action.label}
           </Button>
-        )}
-        <div className="flex flex-col-reverse gap-2 sm:order-3 sm:ml-auto sm:flex-row">
-          {/* 自動実行は**いつでも中断できる**（#1882）。次を積まないだけでなく、走っている
-              1件も止める（止められないホストでは、その旨が中断後のメッセージに出る） */}
-          {autorun.active && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={autorun.isSubmitting}
-              onClick={() => void autorun.stop()}
-            >
-              {autorun.isSubmitting ? <Loader2 className="animate-spin" /> : <CircleStop />}
-              中断する
-            </Button>
-          )}
-          {isLast ? (
-            <>
+        ))}
+
+        {secondaryActions.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                size="sm"
-                disabled={isSubmitting}
-                onClick={() => handleClose("not_planned")}
+                size="icon-sm"
+                className="shrink-0 sm:hidden"
+                aria-label="その他の操作"
               >
-                <Ban />
-                実施せずクローズ
+                <MoreHorizontal />
               </Button>
-              <Button
-                size="sm"
-                disabled={isSubmitting}
-                // **1回だけ聞き返して、2回目はそのまま閉じる**（#2256）。確かめようのない
-                // 手作業は実際にあるので、押せなくはしない
-                onClick={() => {
-                  if (closeWarning !== null && !askedAboutClose) {
-                    setAskedAboutClose(true);
-                    return;
-                  }
-                  void handleClose("completed");
-                }}
-              >
-                {isSubmitting ? (
-                  <Loader2 className="animate-spin" />
-                ) : askingAboutClose ? (
-                  <TriangleAlert />
-                ) : (
-                  <CheckCircle2 />
-                )}
-                {askingAboutClose ? "確認せずクローズ" : "完了してクローズ"}
-              </Button>
-            </>
-          ) : stage.kind === "step" ? (
-            <>
-              <Button variant="outline" size="sm" onClick={() => onStageIndexChange(index + 1)}>
-                あとで
-              </Button>
-              {/* 代行実行が成功するとチェックが付く（#1828）。**そのときは主導線を「次へ」に
-                  変える**——既に実行済みの手順に「実行した」を押させると、押さないと進めないのか
-                  分からなくなる */}
-              <Button
-                size="sm"
-                disabled={taskList.isToggling || autorun.running}
-                onClick={() => void handleStepDone()}
-              >
-                {taskList.isToggling ? (
-                  <Loader2 className="animate-spin" />
-                ) : stage.step.checked ? (
-                  <ArrowRight />
-                ) : (
-                  <Check />
-                )}
-                {stage.step.checked ? "次へ" : "実行した・次へ"}
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" onClick={() => onStageIndexChange(index + 1)}>
-              {stage.kind === "overview" ? "はじめる" : "次へ"}
-              <ArrowRight />
-            </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top">
+              {secondaryActions.map((action) => (
+                <DropdownMenuItem
+                  key={action.key}
+                  disabled={action.disabled}
+                  onSelect={action.onSelect}
+                  className={cn(action.tone === "warn" && "text-amber-700 dark:text-amber-300")}
+                >
+                  {action.Icon && (
+                    <action.Icon className={cn(action.spinning && "animate-spin")} />
+                  )}
+                  {action.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {/* **主導線はいつも右端の1つ**。位置を固定して、片手のときに親指の届くところへ置く */}
+        <Button
+          size="sm"
+          className="ml-auto min-w-0 flex-1 sm:flex-none"
+          disabled={primaryAction.disabled}
+          onClick={primaryAction.onSelect}
+        >
+          {primaryAction.Icon && (
+            <primaryAction.Icon className={cn(primaryAction.spinning && "animate-spin")} />
           )}
-        </div>
+          {primaryAction.label}
+        </Button>
       </footer>
     </>
   );
@@ -1101,6 +1256,8 @@ function OverviewStage({
 
 function StepStage({
   step,
+  values,
+  foldCommand,
   order,
   total,
   mark,
@@ -1118,6 +1275,10 @@ function StepStage({
   troublePanel,
 }: {
   step: ManualStepGuideStep;
+  /** 手順の`<…>`へ人が埋めた値（#2403） */
+  values: ManualStepValuesHandle;
+  /** 本文のコードブロックを畳むか（#2403。「手元で実行する」が出るときだけ`true`） */
+  foldCommand: boolean;
   order: number;
   total: number;
   /** レールのドットと同じ印（#2194）。**同じ関数から作る**ので、上の丸と見出しがずれない */
@@ -1171,7 +1332,10 @@ function StepStage({
       {/* コードブロックのコピーボタン（#1726）と`#123`のリンクをそのまま使うため、
           手順もMarkdownとして描く。チェックボックスは`- [ ]`ごと外してあるので、
           この中には出ない（付けるのはフッターの「実行した・次へ」） */}
-      <MarkdownBody content={step.markdown} repositoryFullName={issue.repositoryFullName} />
+      <MarkdownBody
+        content={foldCommand ? stripCodeBlocks(step.markdown) : step.markdown}
+        repositoryFullName={issue.repositoryFullName}
+      />
       {/* サブPCで実行する手順は、承認1回で代行できる（#1828）。できない場合も理由を出す */}
       {entry !== null && (
         <ManualStepRunPanel
@@ -1180,6 +1344,7 @@ function StepStage({
           entry={entry}
           dispatch={dispatch}
           autoDiagnose={autoDiagnose}
+          values={values}
           onSucceeded={() => onExecuted(entry)}
           onRetry={onRetry}
           onApplyFix={onApplyFix}

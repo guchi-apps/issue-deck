@@ -6,9 +6,11 @@ import {
 import {
   extractManualStepCommands,
   extractVerificationCommands,
+  fillManualStepPlaceholders,
   findInteractiveCommand,
   findPlaceholder,
   isSubpcManualStepDevice,
+  listManualStepPlaceholders,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
 import {
@@ -44,8 +46,28 @@ export type ManualStepRunEntry = {
   line: number;
   /** 一覧に出す見出し */
   text: string;
-  /** 実行するコマンド。代行できない項目では`null` */
+  /**
+   * 実行するコマンド。代行できない項目では`null`。
+   *
+   * **`<…>`が入ったままのテンプレート**（#2403）。承認・照合・ジョブへの保存はすべてこちらで、
+   * 人が埋めた値を差し込んだものは`filledCommand`に持つ。
+   */
   command: string | null;
+  /**
+   * 人が埋めた値を差し込んだコマンド（#2403）。埋める値が無ければ`command`と同じ。
+   *
+   * **画面に出す・コピーさせるのはこちら**で、値はシェルの引用で包まれている。
+   * ジョブへ載せるのは`command`（テンプレート）のままで、こちらは送らない。
+   */
+  filledCommand: string | null;
+  /**
+   * このコマンドに含まれる、名前の付くプレースホルダの表記（#2403。`<控えたkey>`）。
+   *
+   * **画面が埋める欄を出すためのもので、代行の可否には使わない。** 可否は差し込んだ後の
+   * 文字列に`findPlaceholder`（4種）を掛けた`placeholder`が持つ——ここが空でも
+   * `***`・`…`・`xxx`が残っていることがある。
+   */
+  placeholders: string[];
   /**
    * この項目を実行する端末（#2052）。手順に書かれていればそれ、無ければ手作業の既定値
    * （`resolveManualStepDevice`）。**代行の可否はこの値で決まる**ので、画面の理由文・チップも
@@ -88,10 +110,21 @@ export function buildManualStepRunPlan(
   body: string | null,
   guide: ManualStepGuide = parseManualStepGuide(body),
   context: {
-    host: Pick<DispatchHostView, "online" | "manualStepCapable"> | null | undefined;
+    host:
+      | Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable">
+      | null
+      | undefined;
     isManualStepIssue: boolean;
     /** そのIssueに未処理の代行実行があるか（`activeKey`はIssue単位） */
     hasActiveJob?: boolean;
+    /**
+     * 人が埋めたプレースホルダの値（#2403。`<控えたkey>`の表記 → 値）。
+     *
+     * **渡すと、埋まった項目は代行できる側へ変わる**（レールの印・承認パネル・自動実行の
+     * 件数がまとめて追従する）。渡さない経路——サーバー側の自動実行（`lib/manual-step-run.ts`）
+     * ——では、これまでどおり穴の空いた項目で止まる（サーバーは値を持っていない）。
+     */
+    values?: Readonly<Record<string, string>> | null;
   },
 ): ManualStepRunPlan {
   const stepCommands = new Map(
@@ -107,6 +140,7 @@ export function buildManualStepRunPlan(
     hasCommand: boolean,
     interactiveCommand: string | null,
     placeholder: string | null,
+    usesPlaceholderValues: boolean,
   ): ManualStepExecutionRejection | null =>
     resolveManualStepExecutionRejection({
       host: context.host,
@@ -115,14 +149,30 @@ export function buildManualStepRunPlan(
       hasCommand,
       interactiveCommand,
       placeholder,
+      usesPlaceholderValues,
       hasActiveJob: context.hasActiveJob ?? false,
     });
+
+  /**
+   * 値を差し込んだ結果と、差し込みが起きたかどうか（#2403）。
+   *
+   * **穴の有無を見るのは差し込んだ後の文字列**で、判定は`findPlaceholder`（4種）に任せる。
+   * 「`<…>`を全部埋めたか」で代用すると、`***`・`…`・`xxx`が残ったまま素通りする。
+   */
+  const fill = (command: string | null): { filled: string | null; used: boolean } => {
+    if (command === null) return { filled: null, used: false };
+    const values = context.values;
+    if (!values) return { filled: command, used: false };
+    const filled = fillManualStepPlaceholders(command, values);
+    return { filled, used: filled !== command };
+  };
 
   const entries: ManualStepRunEntry[] = [
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
+      const { filled, used } = fill(command);
       const interactiveCommand = findInteractiveCommand(command);
-      const placeholder = findPlaceholder(command);
+      const placeholder = findPlaceholder(filled);
       const device = resolveManualStepDevice(guide.where, step);
       return {
         kind: "step",
@@ -131,18 +181,21 @@ export function buildManualStepRunPlan(
         line: step.line as number,
         text: step.text,
         command,
+        filledCommand: filled,
+        placeholders: listManualStepPlaceholders(command),
         device,
         checked: step.checked,
         interactiveCommand,
         placeholder,
-        rejection: reject(device, command !== null, interactiveCommand, placeholder),
+        rejection: reject(device, command !== null, interactiveCommand, placeholder, used),
       };
     }),
     // **完了の確認に手順ごとのデバイスは無い。** `## 完了の確認方法`は節ひとつで、どの端末で
     // 確かめるかを書く場所がないため、手作業の既定値をそのまま使う
     ...verifications.map((entry, index): ManualStepRunEntry => {
+      const { filled, used } = fill(entry.command);
       const interactiveCommand = findInteractiveCommand(entry.command);
-      const placeholder = findPlaceholder(entry.command);
+      const placeholder = findPlaceholder(filled);
       const device = guide.where.defaultDevice;
       return {
         kind: "verification",
@@ -151,11 +204,13 @@ export function buildManualStepRunPlan(
         line: entry.stepLine,
         text: verifications.length > 1 ? `完了の確認 ${index + 1}` : "完了の確認",
         command: entry.command,
+        filledCommand: filled,
+        placeholders: listManualStepPlaceholders(entry.command),
         device,
         checked: false,
         interactiveCommand,
         placeholder,
-        rejection: reject(device, true, interactiveCommand, placeholder),
+        rejection: reject(device, true, interactiveCommand, placeholder, used),
       };
     }),
   ];

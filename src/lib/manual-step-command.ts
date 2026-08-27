@@ -453,10 +453,7 @@ const PLACEHOLDER_LABEL_MAX_LENGTH = 40;
  */
 export function findPlaceholder(command: string | null): string | null {
   if (!command) return null;
-  const body = command
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n");
+  const body = stripCommentLines(command);
   if (body.trim() === "") return null;
 
   for (const pattern of PLACEHOLDER_PATTERNS) {
@@ -468,6 +465,119 @@ export function findPlaceholder(command: string | null): string | null {
       : label;
   }
   return null;
+}
+
+/**
+ * 名前の付くプレースホルダ（`<控えたkey>`・`＜番号＞`）だけを、現れた順に重複なく返す（#2403）。
+ *
+ * `PLACEHOLDER_PATTERNS`の1本目と**同じ形**をグローバルにしたもので、この関数が拾えるのは
+ * 4種のうち山括弧の1種だけ。伏せ字（`***`）・全角の三点リーダ（`…`）・`xxx`は
+ * **何を入れる場所なのかが読み取れない**ので、埋める欄を出しようがない。
+ *
+ * **「全部埋まったか」の判定にこの関数を使ってはいけない。** 判定の正は`findPlaceholder`で、
+ * 埋めた結果へもう一度掛けて`null`になったかどうかを見る（`hasUnfilledPlaceholder`）。
+ * ここが0件でも、残り3種が残っていれば穴あきのまま実行されてしまう
+ * （#2051が防いだ`KEY=<値>`のリダイレクト解釈と同じ被害。#2403の計画レビューG1・指摘1）。
+ */
+export function listManualStepPlaceholders(command: string | null): string[] {
+  if (!command) return [];
+  const body = stripCommentLines(command);
+  if (body.trim() === "") return [];
+
+  const pattern = /[<＜](?!\s)[^<>＜＞\n]*[^<>＜＞\s][>＞]/g;
+  const found = new Set<string>();
+  for (const match of body.matchAll(pattern)) found.add(match[0]);
+  return [...found];
+}
+
+/**
+ * 埋めきれていないプレースホルダが残っているか（#2403）。**代行実行の可否はこれで決める。**
+ *
+ * 見るのは差し込んだ**後**の文字列で、判定そのものは`findPlaceholder`（4種すべて）に任せる。
+ * 「`listManualStepPlaceholders`が0件になったか」で代用しない——山括弧以外の3種を
+ * 見落として素通りさせるため。
+ *
+ * 埋めた**値の中身**が4種のどれかに見えると（`xxxx`のような値）、埋めたのに残っていると
+ * 判定される。誤判定の向きは「代行できない＝人が実行する」側なので、そのまま倒しておく
+ * （このファイル全体が、迷ったら実行しない側へ倒す作りになっている）。
+ */
+export function hasUnfilledPlaceholder(command: string | null): boolean {
+  return findPlaceholder(command) !== null;
+}
+
+/**
+ * シェルへ渡す値を、**リテラルの1語**になるよう引用で包む（#2403）。
+ *
+ * 単引用符の中はシェルが一切解釈しない（`$`・`;`・`&&`・改行も含めて）。値自体に`'`が
+ * 入っている場合だけ`'\''`（＝いったん閉じて`\'`を置き、また開く）で継ぎ足す。これが
+ * **画面から届いた値がコマンドの構造を変えないことの唯一の担保**で、空文字も`''`になる。
+ *
+ * 同じ規則をpoller（`scripts/subpc-dispatch-poller.sh`）も自前で持ち、実行の直前に
+ * 突き合わせる。**2実装あるのは重複ではなく2枚目の壁**で、ずれたときの結果は
+ * 「誤ったコマンドの実行」ではなく「実行しない」になる（本文照合を2回行うのと同じ形）。
+ */
+export function shellQuoteValue(value: string): string {
+  return `'${value.split("'").join(`'\\''`)}'`;
+}
+
+/**
+ * 名前の付くプレースホルダへ値を差し込む（#2403）。埋める値が無いものは**そのまま残す**。
+ *
+ * 差し込むのは`shellQuoteValue`で包んだ形だけで、生の値をそのまま置かない。残した
+ * プレースホルダは`hasUnfilledPlaceholder`が拾うので、穴あきのまま先へ進むことはない。
+ *
+ * 行頭が`#`のコメント行は`findPlaceholder`と同じく見ないが、**書き換えもしない**
+ * （実行されない行を書き換えると、承認画面の再掲と本文の見た目がずれる）。
+ */
+export function fillManualStepPlaceholders(
+  command: string,
+  values: Readonly<Record<string, string>>,
+): string {
+  return command
+    .split("\n")
+    .map((line) =>
+      line.trimStart().startsWith("#")
+        ? line
+        : line.replace(/[<＜](?!\s)[^<>＜＞\n]*[^<>＜＞\s][>＞]/g, (token) => {
+            const value = values[token];
+            return value === undefined || value === "" ? token : shellQuoteValue(value);
+          }),
+    )
+    .join("\n");
+}
+
+/** 埋める値1件の長さの上限（#2403）。トークン・IDを想定した長さで、本文まるごとは受けない */
+export const MANUAL_STEP_PLACEHOLDER_VALUE_MAX_LENGTH = 2000;
+
+/**
+ * 画面から届いた「埋めた値」を、差し込んでよい形だけに絞る（#2403）。1件も残らなければ`null`。
+ *
+ * **キーはプレースホルダの表記そのもの**（`<控えたkey>`）で、`listManualStepPlaceholders`が
+ * 返すのと同じ形でなければ捨てる。値は改行を含まない非空の文字列だけを受ける——改行を通すと
+ * 引用の外に見える形を作れるわけではないが、1手順1コマンドという前提から外れる。
+ */
+export function normalizeManualStepPlaceholderValues(
+  values: Readonly<Record<string, unknown>> | null | undefined,
+): Record<string, string> | null {
+  if (!values || typeof values !== "object") return null;
+  const token = /^[<＜](?!\s)[^<>＜＞\n]*[^<>＜＞\s][>＞]$/;
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!token.test(key)) continue;
+    if (typeof value !== "string") continue;
+    if (value === "" || value.includes("\n")) continue;
+    if (value.length > MANUAL_STEP_PLACEHOLDER_VALUE_MAX_LENGTH) continue;
+    normalized[key] = value;
+  }
+  return Object.keys(normalized).length === 0 ? null : normalized;
+}
+
+/** 行頭が`#`の行（実行されないコメント）を落とす。プレースホルダ判定の共通前処理 */
+function stripCommentLines(command: string): string {
+  return command
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
 }
 
 /**

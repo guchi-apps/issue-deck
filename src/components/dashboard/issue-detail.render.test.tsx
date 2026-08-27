@@ -499,6 +499,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     crossRepoQuestionCapable: true,
     manualStepCapable: true,
     manualStepAbortCapable: null,
+    manualStepValuesCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
     selfUpdateCapable: null,

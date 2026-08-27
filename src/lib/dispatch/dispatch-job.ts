@@ -235,6 +235,24 @@ export type DispatchJobView = {
    * 同じか」の確認に使えるが、実行そのものはこの値で行われる（画面から届いた文字列は照合専用）。
    */
   command: string | null;
+  /**
+   * 人が埋めたプレースホルダの値（#2403。`<控えたkey>`の表記 → 値）。
+   *
+   * **`command`は`<…>`が入ったままのテンプレート**で、値を差し込むのは本文照合を通した
+   * あとのpollerだけ。したがってここが載るのは`POST /api/dispatch/claim`の応答だけで、
+   * 画面が読む`GET /api/dispatch`では常に`null`にしてある（値はシークレットでありうる）。
+   */
+  placeholderValues: Record<string, string> | null;
+  /**
+   * `command`のプレースホルダへ`placeholderValues`を差し込んだもの（#2403）。値が無ければ
+   * `command`と同じ。
+   *
+   * **pollerが実行するのは、poller自身が差し込み直した文字列**で、これはそれと突き合わせる
+   * ためだけに渡す（一致しなければ実行しない）。引用の規則を2実装持つことになるが、
+   * ずれたときの結果は「誤った実行」ではなく「実行しない」になる。
+   * `placeholderValues`と同じく、画面が読む`GET /api/dispatch`では常に`null`。
+   */
+  resolvedCommand: string | null;
   /** 代行実行した手順の行番号（#1828）。画面がジョブと手順を対応付ける */
   manualStepLine: number | null;
   /**
@@ -316,6 +334,15 @@ export type DispatchHostView = {
    * という状態を作らないための材料。
    */
   manualStepAbortCapable: boolean | null;
+  /**
+   * 埋めた値を差し込んで代行実行できるか（#2403）。**`null`（未申告）は「できない」として扱う**
+   * （`manualStepCapable`と同じ向き）。
+   *
+   * **画面はこれを見て、値を埋めても代行できないことを押す前に出す。** 古いpollerは
+   * 知らないフィールドを黙って無視して、穴が空いたままのコマンドを実行してしまうため、
+   * 「配ってから`failed`で返る」では済まない種類の非対応にあたる。
+   */
+  manualStepValuesCapable: boolean | null;
   /**
    * 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。**`null`（未申告）は「できない」として
    * 扱う**（`crossRepoQuestionCapable`と同じ）。
@@ -687,6 +714,7 @@ export type ManualStepExecutionRejection =
   | "host_unknown"
   | "host_offline"
   | "manual_step_unsupported"
+  | "manual_step_values_unsupported"
   | "already_queued"
   | "body_changed";
 
@@ -741,6 +769,10 @@ export function describeManualStepExecutionRejection(
       return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
     case "manual_step_unsupported":
       return `${formatDispatchHostName(context.hostName)} のpollerが手作業の代行実行に対応していません（更新してから押せるようになります）。`;
+    case "manual_step_values_unsupported":
+      // **ホストの都合**（更新すれば押せる）。古いpollerは知らないフィールドを黙って無視し、
+      // 穴が空いたままのコマンドを実行してしまうので、申告が無いホストへは配らない（#2403）
+      return `${formatDispatchHostName(context.hostName)} のpollerが、埋めた値を差し込む代行実行に対応していません（更新してから押せるようになります）。それまでは値を埋めたコマンドをコピーして、手元で実行してください。`;
     case "already_queued":
       return "この手作業には未処理の代行実行が既にあります。";
     case "body_changed":
@@ -760,7 +792,10 @@ export function describeManualStepExecutionRejection(
  * ずれを検出できるのはサーバーだけ（押した後にしか分からない）。
  */
 export function resolveManualStepExecutionRejection(params: {
-  host: Pick<DispatchHostView, "online" | "manualStepCapable"> | null | undefined;
+  host:
+    | Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable">
+    | null
+    | undefined;
   /** 対象が手作業Issue（`71.manual-step`）か */
   isManualStepIssue: boolean;
   /** `## 前提条件`の「実行するデバイス」がサブPCか */
@@ -778,6 +813,15 @@ export function resolveManualStepExecutionRejection(params: {
    * **判定そのものは`lib/manual-step-command.ts`が持つ**——`interactiveCommand`と同じ理由。
    */
   placeholder: string | null;
+  /**
+   * 人が埋めた値を差し込んで実行しようとしているか（#2403）。`true`のとき、pollerが
+   * 値の差し込みに対応していなければ配らない。
+   *
+   * **`placeholder`が`null`になった理由が「埋めたから」なのかを、ここでだけ区別する。**
+   * `placeholder`は差し込んだ**後**の文字列に対する`findPlaceholder`の結果なので、
+   * 埋めて消えた場合と最初から無かった場合を、あちらからは見分けられない。
+   */
+  usesPlaceholderValues?: boolean;
   hasActiveJob: boolean;
 }): ManualStepExecutionRejection | null {
   // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
@@ -793,6 +837,11 @@ export function resolveManualStepExecutionRejection(params: {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.manualStepCapable !== true) return "manual_step_unsupported";
+  // **値を差し込む実行は、pollerの申告とセットにする**（#2403）。古いpollerは`placeholderValues`を
+  // 黙って無視し、`command`（＝`<…>`が入ったままのテンプレート）をそのまま実行してしまう
+  if (params.usesPlaceholderValues === true && params.host.manualStepValuesCapable !== true) {
+    return "manual_step_values_unsupported";
+  }
   if (params.hasActiveJob) return "already_queued";
   return null;
 }

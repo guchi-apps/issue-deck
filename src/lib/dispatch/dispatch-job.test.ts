@@ -587,6 +587,8 @@ describe("findDispatchJobForIssue", () => {
       message: null,
       instruction: null,
       command: null,
+      placeholderValues: null,
+      resolvedCommand: null,
       manualStepLine: null,
       targetJobId: null,
       exitCode: null,
@@ -907,6 +909,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
       manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
@@ -971,6 +974,7 @@ describe("横断質問（#1454）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: null,
       manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
@@ -1096,6 +1100,8 @@ describe("横断質問（#1454）", () => {
         message: null,
         instruction: null,
         command: null,
+        placeholderValues: null,
+        resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
         exitCode: null,
@@ -1142,6 +1148,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: true,
       manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
       selfUpdateCapable: null,
@@ -1272,6 +1279,8 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         message: null,
         instruction: null,
         command: null,
+        placeholderValues: null,
+        resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
         exitCode: null,
@@ -1318,6 +1327,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       crossRepoQuestionCapable: true,
       manualStepCapable: true,
       manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
       selfUpdateCapable: null,
@@ -1422,6 +1432,8 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         message: null,
         instruction: null,
         command: null,
+        placeholderValues: null,
+        resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
         exitCode: null,
@@ -1446,7 +1458,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
 describe("resolveManualStepExecutionRejection", () => {
   function params(overrides: Record<string, unknown> = {}) {
     return {
-      host: { online: true, manualStepCapable: true },
+      host: { online: true, manualStepCapable: true, manualStepValuesCapable: true },
       isManualStepIssue: true,
       isSubpcDevice: true,
       hasCommand: true,
@@ -1542,6 +1554,31 @@ describe("resolveManualStepExecutionRejection", () => {
     expect(resolveManualStepExecutionRejection(params({ host: null }))).toBe("host_unknown");
   });
 
+  // **値を差し込む実行は、pollerの申告とセットにする**（#2403）。古いpollerは
+  // `placeholderValues`を黙って無視し、`<…>`が入ったままの`command`をそのまま実行してしまう
+  it("値を差し込む実行に未対応のpollerには、埋めても押させない", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({
+          usesPlaceholderValues: true,
+          host: { online: true, manualStepCapable: true, manualStepValuesCapable: null },
+        }),
+      ),
+    ).toBe("manual_step_values_unsupported");
+    // 値を差し込まない手順は、未対応のpollerでもこれまでどおり押せる
+    expect(
+      resolveManualStepExecutionRejection(
+        params({ host: { online: true, manualStepCapable: true, manualStepValuesCapable: null } }),
+      ),
+    ).toBeNull();
+    // 更新すれば押せるようになることと、それまでの進め方を文面に出す
+    expect(
+      describeManualStepExecutionRejection("manual_step_values_unsupported", {
+        hostName: "subpc",
+      }),
+    ).toContain("コピー");
+  });
+
   // activeKeyはIssue単位。順番に実行する前提の手順が入れ替わらないようにする
   it("同じIssueに未処理の代行実行があれば押させない", () => {
     expect(resolveManualStepExecutionRejection(params({ hasActiveJob: true }))).toBe(
@@ -1561,6 +1598,7 @@ describe("resolveManualStepHost", () => {
       online: true,
       manualStepCapable: true,
       manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
