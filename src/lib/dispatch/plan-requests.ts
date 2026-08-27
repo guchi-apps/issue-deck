@@ -2,6 +2,7 @@ import type { SessionPlanRequestStatus } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import {
+  buildPlanRevisionReason,
   SESSION_PLAN_DECIDED_VISIBLE_MS,
   SESSION_PLAN_DECISION_STATUS,
   toSessionPlanRequestView,
@@ -90,7 +91,12 @@ export async function pollSessionPlanRequest(
   if (row.deliveredAt === null) {
     await db.sessionPlanRequest.update({ where: { id }, data: { deliveredAt: now } });
   }
-  return { status: row.status, revisionText: row.revisionText };
+  // 画像を添付した修正には、取りに行き方を添えてから渡す（#2425）。**フックが運べるのは
+  // 文字列だけ**なので、ここで書いておかないと画像はURLの文字列として素通りする
+  return {
+    status: row.status,
+    revisionText: row.revisionText === null ? null : buildPlanRevisionReason(row.revisionText),
+  };
 }
 
 /**

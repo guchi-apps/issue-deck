@@ -1,5 +1,7 @@
 import type { SessionPlanRequest, SessionPlanRequestStatus } from "@prisma/client";
 
+import { hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
+
 /**
  * ローカルセッションが提示した計画に対する、画面からの返事（#2061）の**純粋な部分**。
  *
@@ -45,8 +47,18 @@ export const SESSION_PLAN_WAIT_SECONDS_MAX = 3600;
 /**
  * 修正の本文の上限。**Claudeへそのまま渡る文章**なので、追加指示（500文字・1行）より広く取る
  * （計画への指摘は「どこを・なぜ・どう直すか」で数行になる）。
+ *
+ * **数えるのは人が書いた文章だけで、末尾に並ぶ添付の画像記法は勘定に入れない**（#2425）。
+ * 画像1枚で`![スクリーンショット.png](https://…/api/issues/images/<UUID>.png)`＝100文字前後を
+ * 使うため、同じ枠で数えると「3枚貼っただけで書ける文章が1割減る」ことになる。
  */
 export const SESSION_PLAN_REVISION_MAX_LENGTH = 2000;
+
+/**
+ * 修正1回に添付できる画像の枚数（#2425）。**Claudeへ渡す`deny`の理由に載る**ので、
+ * URLの羅列で理由が埋まらない程度に抑える。画面はこの枚数で送信を止める。
+ */
+export const SESSION_PLAN_REVISION_MAX_ATTACHMENTS = 10;
 
 /**
  * 画面へ出すために保存する計画本文の上限。
@@ -76,10 +88,43 @@ export function parseSessionPlanDecision(value: unknown): SessionPlanDecision | 
 export function parseSessionPlanRevision(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > SESSION_PLAN_REVISION_MAX_LENGTH) return null;
+  if (trimmed.length === 0) return null;
   // 改行・タブ以外の制御文字だけを弾く
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(trimmed)) return null;
+  // **上限を数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので数えず、
+  // 代わりに枚数で抑える。**画像だけ（文章なし）の修正も通す**——「この見た目にして」と
+  // スクリーンショットを1枚貼るのは、文章を書くより早くて正確な伝え方になる。
+  const { body, attachments } = splitAttachments(trimmed);
+  if (body.length > SESSION_PLAN_REVISION_MAX_LENGTH) return null;
+  if (attachments.length > SESSION_PLAN_REVISION_MAX_ATTACHMENTS) return null;
   return trimmed;
+}
+
+/**
+ * 修正の本文を、Claudeが受け取る`deny`の理由に仕立てる（#2425）。
+ *
+ * **フックが渡すのは文字列だけで、画像そのものは渡らない。** 画像記法のURLをそのまま置くと、
+ * Claudeは「URLが書いてある」ことしか読み取れず、貼った本人は見せたつもりで見せられていない。
+ * 取りに行き方（`curl`で落として`Read`で開く）を添えて、確かめる手順まで書く。
+ * `WebFetch`ではなく`curl`＋`Read`なのは、`WebFetch`がHTMLをMarkdown化して要約するツールで
+ * **画像そのものをClaudeに見せられない**ため（`docs/multi-agent/dispatch.md`。#195で同じ理由から
+ * 無人実行の許可ツールへ`Bash(curl:*)`と`Read`を足した）。
+ *
+ * 画像が無ければ**本文をそのまま返す**（要らない案内で理由を薄めない）。
+ */
+export function buildPlanRevisionReason(revisionText: string): string {
+  if (!hasImageMarkdown(revisionText)) return revisionText;
+  return [
+    revisionText,
+    "",
+    "---",
+    "上の修正には画像が添付されています（`![...](...)`）。**この文面に画像そのものは含まれていません。**",
+    "次のように取得して`Read`で開き、中身を確かめてから計画を練り直してください（認証は不要です）。",
+    "",
+    "```bash",
+    "curl -sSL -o /tmp/plan-revision-1.png '<画像のURL>'",
+    "```",
+  ].join("\n");
 }
 
 /**

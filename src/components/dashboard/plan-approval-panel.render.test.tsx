@@ -42,9 +42,15 @@ function dispatchHandle(decidePlan = vi.fn().mockResolvedValue({ ok: true })) {
   return { decidePlan, isSubmitting: false } as unknown as DispatchStateHandle;
 }
 
+/** 修正入力モードでは「修正を送る」が2つ並ぶ（切り替えたときのボタンと、送信ボタン） */
+function latestReviseButton() {
+  return screen.getAllByRole("button", { name: /修正を送る/ }).at(-1) as HTMLButtonElement;
+}
+
 describe("PlanApprovalPanel", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("計画の中身と、承認・修正・端末で答えるの3つを出す", () => {
@@ -142,6 +148,137 @@ describe("PlanApprovalPanel", () => {
     });
     expect((screen.getByRole("button", { name: /修正を送る/ }) as HTMLButtonElement).disabled).toBe(
       false,
+    );
+  });
+
+  /**
+   * #2425。**画面の直しを頼むのに、文章だけでは伝わらない。** 素の`Textarea`だった頃は
+   * 「ここの余白を詰めて」を書き起こすしかなく、スクリーンショットを渡すには一度Issueへ
+   * コメントしてからRemote Controlで指す必要があった。
+   */
+  it("修正の入力欄から画像を添付でき、画像記法込みでClaudeへ渡る", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ url: "/api/issues/images/shot.png" }),
+        }),
+      ),
+    );
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    const { container } = render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /修正を送る/ }));
+    fireEvent.change(screen.getByLabelText("修正してほしいこと"), {
+      target: { value: "この見た目にしてください。" },
+    });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["dummy"], "shot.png", { type: "image/png" })],
+      configurable: true,
+    });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-slot="mention-attachments"] img').length).toBe(1),
+    );
+
+    // 入力欄にはURLを出さず、送る値にだけ画像記法が乗る
+    expect((screen.getByLabelText("修正してほしいこと") as HTMLTextAreaElement).value).toBe(
+      "この見た目にしてください。",
+    );
+
+    // アップロード中は送れない（まだURLの入っていない本文が渡ってしまうため）
+    await waitFor(() => expect(latestReviseButton().disabled).toBe(false));
+    fireEvent.click(latestReviseButton());
+    await waitFor(() =>
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "revise",
+        text: "この見た目にしてください。\n\n![shot.png](/api/issues/images/shot.png)",
+      }),
+    );
+  });
+
+  /** 画像だけでも送れる。「この見た目にして」は1枚渡すのがいちばん速い（#2425） */
+  it("文章が空でも、画像を添付していれば送れる", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /修正を送る/ }));
+    fireEvent.change(screen.getByLabelText("修正してほしいこと"), {
+      target: { value: "" },
+    });
+    expect(latestReviseButton().disabled).toBe(true);
+  });
+
+  /**
+   * #2425。定型文を末尾へ足すと画像記法の下に文が来て、`splitAttachments`が添付として
+   * 読めなくなる（サムネイルが消えて本文にURLが出る）。差し込む先は本文。
+   */
+  it("定型文は添付の前（本文の末尾）へ差し込む", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ url: "/api/issues/images/a.png" }),
+        }),
+      ),
+    );
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    const { container } = render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /修正を送る/ }));
+    const textarea = screen.getByLabelText("修正してほしいこと") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "ここを直して。" } });
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["dummy"], "a.png", { type: "image/png" })],
+      configurable: true,
+    });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-slot="mention-attachments"] img').length).toBe(1),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "懸念点をもう少し具体的に書いてください。" }),
+    );
+
+    // 添付はサムネイルのまま残り、定型文は本文の末尾へ入る
+    expect(container.querySelectorAll('[data-slot="mention-attachments"] img').length).toBe(1);
+    expect(textarea.value).toBe("ここを直して。\n懸念点をもう少し具体的に書いてください。");
+
+    // アップロード中は送れない（まだURLの入っていない本文が渡ってしまうため）
+    await waitFor(() => expect(latestReviseButton().disabled).toBe(false));
+    fireEvent.click(latestReviseButton());
+    await waitFor(() =>
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "revise",
+        text: "ここを直して。\n懸念点をもう少し具体的に書いてください。\n\n![a.png](/api/issues/images/a.png)",
+      }),
     );
   });
 

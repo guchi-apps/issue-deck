@@ -19,6 +19,11 @@ import {
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  composeAttachments,
+  splitAttachments,
+  type ImageAttachment,
+} from "@/lib/markdown-attachments";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -43,6 +48,11 @@ type Trigger = {
   query: string;
 };
 
+// 本文と添付の分解・合成は`lib/markdown-attachments.ts`が持つ（#2425でサーバー側からも
+// 使うようになったため移した）。ここからの再エクスポートは既存のimport元を変えないため。
+export { composeAttachments, splitAttachments };
+export type { ImageAttachment };
+
 const TRIGGER_PATTERN = /(^|[\s(（])([@#])([^\s@#]*)$/;
 
 function detectTrigger(text: string, cursor: number): Trigger | null {
@@ -52,52 +62,6 @@ function detectTrigger(text: string, cursor: number): Trigger | null {
   const [, prefix, symbol, query] = match;
   const start = match.index + prefix.length;
   return { type: symbol === "@" ? "mention" : "issue", start, query };
-}
-
-/** 入力欄の下にサムネイルとして並べる、添付済みの画像1枚ぶん */
-export type ImageAttachment = {
-  /** 画像記法のalt。アップロードしたファイル名が入る */
-  name: string;
-  url: string;
-};
-
-/** 単独の行がまるごと画像記法（`![alt](url)`）になっているかどうか */
-const ATTACHMENT_LINE_PATTERN = /^!\[([^\]]*)\]\(([^()\s]+)\)$/;
-
-/**
- * 本文の末尾に並ぶ画像記法を「添付」として切り出す（#1819）。
- *
- * 添付は常に末尾へ足すため、末尾から空行を読み飛ばしつつ画像記法だけの行を集め、
- * それ以外の行が現れた時点で打ち切る。**文章の途中に書かれた画像記法は本文の文字として
- * そのまま残す**——過去の下書きや既存コメントには文中に画像を置いたものがあり、
- * それらを勝手に末尾へ動かすと編集で本文が書き換わってしまうため。
- */
-export function splitAttachments(value: string): { body: string; attachments: ImageAttachment[] } {
-  const lines = value.split("\n");
-  const attachments: ImageAttachment[] = [];
-  let end = lines.length;
-  while (end > 0) {
-    const line = lines[end - 1].trim();
-    if (line === "") {
-      end -= 1;
-      continue;
-    }
-    const match = ATTACHMENT_LINE_PATTERN.exec(line);
-    if (!match) break;
-    attachments.unshift({ name: match[1], url: match[2] });
-    end -= 1;
-  }
-  if (attachments.length === 0) return { body: value, attachments: [] };
-  return { body: lines.slice(0, end).join("\n").replace(/\s+$/, ""), attachments };
-}
-
-/** `splitAttachments`の逆。本文と添付から、呼び出し元へ渡す1本の文字列を組み立てる */
-export function composeAttachments(body: string, attachments: ImageAttachment[]): string {
-  // 添付が無いときに本文へ手を入れると、末尾の改行が消えて入力の邪魔になる。
-  if (attachments.length === 0) return body;
-  const block = attachments.map(({ name, url }) => `![${name}](${url})`).join("\n");
-  const trimmed = body.replace(/\s+$/, "");
-  return trimmed === "" ? block : `${trimmed}\n\n${block}`;
 }
 
 type MentionTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange"> & {

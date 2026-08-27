@@ -176,6 +176,19 @@ ExitPlanMode（計画の提示）
   押した結果は`request.id`と対で持って照合し、詳細側も`key={planRequest.id}`でパネルごと
   作り直す（書きかけの修正本文が別のIssueへ持ち越されるのも同時に防げる）。
   Issue固有の状態を持つ子コンポーネントを詳細へ足すときは同じことが起きうる
+- **修正には画像を添付できる**（#2425）。入力欄は`MentionTextarea`なので貼り付け・
+  ドラッグ&ドロップ・「画像を添付」がそのまま使え、画面の直しを頼むときに
+  スクリーンショットや手描きのラフを1枚渡せる（文章で書き起こすより速くて正確）。
+  **文字数の上限（2000）を数えるのは人が書いた文章だけ**で、末尾に並ぶ画像記法は
+  枚数（10枚）で抑える——URLが1枚100文字前後を食うため、同じ枠で数えると
+  「3枚貼っただけで書ける文章が1割減る」ことになる。**画像だけ（文章なし）でも送れる。**
+  - **フックが運べるのは文字列だけで、画像そのものは渡らない。** URLをそのまま置くと
+    Claudeは「URLが書いてある」ことしか読み取れないため、`revisionText`を返すときに
+    取りに行き方（`curl`で落として`Read`で開く）を`buildPlanRevisionReason`が添える。
+    `WebFetch`ではなく`curl`＋`Read`なのは、`WebFetch`がHTMLをMarkdown化して要約する
+    ツールで画像そのものを見せられないため（#195と同じ理由。[dispatch.md](dispatch.md)）
+  - **定型文を差し込む先は本文で、添付の後ろではない。** 末尾へ足すと画像記法の下に文が
+    来て添付として読めなくなり、サムネイルが消えて本文にURLが出る
 - サーバー側は`src/lib/dispatch/session-plan-request.ts`（値の検証・表示の判定）と
   `src/lib/dispatch/plan-requests.ts`（DB）。画面は`plan-approval-panel.tsx`、
   一覧の導線は`issue-list.tsx`＋`lib/remote-control-attention.ts`、案内の文言は
