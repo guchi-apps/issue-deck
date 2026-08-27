@@ -579,7 +579,7 @@ describe("DispatchHostPanel", () => {
       expect(screen.getByText("subpc の更新は既に積まれています。")).toBeTruthy();
     });
 
-    // pull型で届くまで最大30秒あり、その間に何も出ないと押し直される
+    // pull型で届くまで数秒〜30秒あり、その間に何も出ないと押し直される
     it("積んだ更新が届くまでの間はその旨を出し、押せなくする", () => {
       render(
         <DispatchHostPanel
@@ -590,7 +590,7 @@ describe("DispatchHostPanel", () => {
         />,
       );
 
-      expect(screen.getByText("更新を積みました（届くまで最大30秒）")).toBeTruthy();
+      expect(screen.getByText("更新を積みました（届くまで数秒〜30秒）")).toBeTruthy();
       expect(screen.getByRole("button", { name: "更新して再起動" }).hasAttribute("disabled")).toBe(
         true,
       );
