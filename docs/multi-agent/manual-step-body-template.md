@@ -64,20 +64,30 @@
   プレースホルダを含む手順は代行実行の対象から外れ、「あなたが実行」として並ぶ（#2051）。
   `$HOME`のような**実在の環境変数参照は埋める箇所として扱われない**ので、値を埋めてほしい
   ところは必ず`<…>`にする
-- **1Passwordへの書き込みとGitHub secretへの同期に`op signin`を書かない**（#2401）。サインインは
-  対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。サブPCには書き込み権限つきの
-  サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、次のコマンドが1Passwordへの
-  書き込み・GitHubのsecretへの同期・本番への反映までを通しで行う（#1874）。**対象キーの行が
-  `.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側のPull Requestの仕事
+- **1Passwordへの値の登録は、1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書く**
+  （#2417）。サブPCの全シェルには`apps`ボールトへ**read権限しか無い**サービスアカウントが
+  `~/.profile.local`から常時exportされており、`op`は`op signin`よりそちらを優先する。そのため
+  `op item edit`・`op item create`をIssueへ書くと、代行実行でも人の実行でも
+  `Couldn't update the item.`で落ちる（`op read`は通るので気付きにくい）。書くのは次の形
 
-  ```bash
-  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --generate hex32
+  ```
+  - [ ] （ブラウザ）1Passwordで`apps`ボールトの`<item>`を開き、`<field>`に値を登録する
   ```
 
-  値の出どころで使い分ける。ブラウザ等で発行した値を渡すなら`--from-stdin`、1Passwordへ既に
-  入れてあって同期だけなら`--sync-only`、本番への反映を別の経路で行うなら`--no-deploy`、
-  デプロイの完了待ちが5分の打ち切りに掛かりそうなら`--no-wait`を足す。
-  organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`を足す
+- **GitHubのsecretへの同期と本番への反映はCLIに任せる**（#1874・#2401）。`op signin`は書かない
+  ——対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。同期は書き込み権限つきの
+  サービスアカウント（`~/.config/issue-deck/op-writer.env`）を読み込む次のコマンドで行う。
+  **対象キーの行が`.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側の
+  Pull Requestの仕事
+
+  ```bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --sync-only
+  ```
+
+  本番への反映を別の経路で行うなら`--no-deploy`、デプロイの完了待ちが5分の打ち切りに掛かり
+  そうなら`--no-wait`を足す。organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`
+  を足す。**人が値を知る必要の無い機械生成の値**（ランダムなトークン等）は、そもそも手作業Issueに
+  せずエージェントが`--generate hex32`で完結させる
 - **`op read`だけの手順・確認にも`op signin`を書かない**（#2401）。代行実行のシェルには
   1Passwordのセッションが無いので、読むときも上と同じトークンを読み込む。`op signin`を書くと、
   読むだけの確認まで人の実行になる

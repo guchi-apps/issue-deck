@@ -1117,6 +1117,11 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     タイトルが`[手作業]`で始まるIssueのopen・editedで、**画面のパーサーが読む書式から
     外れていないか**だけを見て、指摘をマーカー付きコメント1件として貼り直す。判定を
     ワークフローへ写さないのは「検査は通るが画面は読めない」食い違いを作らないため。
+    **1Passwordを扱うコマンドもここで見る**（#2401・#2417。`op-signin-in-command`・
+    `local-secret-sync`・`op-write-command`）。サブPCは`~/.profile.local`がread専用の
+    サービスアカウントを常時exportしており、`op`はそれを`op signin`より優先するため、
+    生の`op item edit`を書いた手順は人が実行しても代行実行でも落ちる。**規則を足しても
+    ワークフローのタグを配り直す必要は無い**（判定はissue-deck側のAPIにあるため）。
     **ラベルは付けず起票も止めない。** 雛形の正は
     [docs/multi-agent/manual-step-body-template.md](multi-agent/manual-step-body-template.md)で、
     `scripts/generate-prompt-templates.mjs`が起票側の3プロンプトへ差し込む
@@ -2652,6 +2657,15 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   文字列なので、下書きの保存も投稿も変わらない。**入力欄の表示と`value`がズレているのはここだけ**で、
   分解・合成は同ファイルの`splitAttachments` / `composeAttachments`が持つ。文章の途中に書かれた
   画像記法は本文の文字のまま残す（既存のIssue・コメントを編集で書き換えないため）。
+  **分解・合成の実体は[`lib/markdown-attachments.ts`](../src/lib/markdown-attachments.ts)**
+  （#2425でサーバー側からも使うようになったため移した。`mention-textarea.tsx`は
+  再エクスポートするだけ）。**計画への修正送信（`plan-approval-panel.tsx`）もこの入力欄**で、
+  文字数の上限を数えるのは本文だけ・添付は枚数で抑える、という勘定を
+  `parseSessionPlanRevision`と画面の両方が同じ関数で出している。
+  **呼び出し元が`value`へ文字列を足すときは、`splitAttachments`で本文と添付に分けてから
+  本文の末尾へ足す**（#2425）。素朴に`value + "\n" + text`と書くと画像記法の下に文が来て、
+  次の`splitAttachments`が添付として読めなくなる——**サムネイルが黙って消え、入力欄に
+  URLが現れる**（計画の定型文ボタンで踏んだ）。
 
 ## 画面のボタンは`@claude`コメントで動く
 
@@ -2820,6 +2834,13 @@ pnpm test:unit   # vitestのみ
 既存のworktree（`~/apps/issue-deck-worktrees/issue-<番号>`）の`.env.local`には、`start-issue.sh`が
 セッション再開時に本体の`.env.local`との差分キーを追記する（#1099）。本体さえ更新しておけば、
 古いworktreeを開き直したときに自動で埋まる。
+
+**追記されるのはキーだけで、値は空のまま**（本体側にも実値が無いものがある）。`PROGRESS_REPORT_SECRET`が
+その典型で、これを使う共有シークレット認証のAPI（`POST /api/progress`・
+`POST /api/manual-steps/body-check`など）は、worktreeの開発サーバーでは`503 {"error":"not_configured"}`
+を返す。**ローカルでこれらのAPIを叩いて挙動を確かめようとすると、認証で弾かれた応答を
+「結果が空だった」と読み違える**（`.findings[]?`のようにエラーを黙って潰すjqを書くと特に気付けない。
+#2417で実際に起きた）。判定関数を直接呼ぶテストで確かめるほうが確実。
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/secrets-manifest.tsv`・
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。

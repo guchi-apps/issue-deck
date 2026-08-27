@@ -108,6 +108,13 @@ export type WorkflowTagStatus = {
    */
   outdatedSharedFiles: string[];
   /**
+   * リリース通知のenv（`SIGNALY_RELEASE_WEBHOOK_URL`）が入っていないワークフロー（#2421）。
+   * 判定は`missingReleaseWebhookWorkflows`。空なら不足なし。
+   *
+   * **配布物の更新と同じPRが運ぶ**ため、同じ軸として扱う（`sharedFilePropagationTargets`）。
+   */
+  missingReleaseWebhookWorkflows: string[];
+  /**
    * そのうち、配布先のコピーにしか無い記述を持つもの（上書きで消える）。**配布の対象からは
    * 外さず、画面とPR本文で目印にする**——独自の変更があるリポジトリこそ修正が届いていない。
    */
@@ -140,7 +147,12 @@ export function evaluateWorkflowTags(
   repair: {
     /** `.github/workflows/`直下のファイル名一覧 */
     files?: string[];
-    /** そのうち配布対象callerの本文。ファイル名 → 本文（#2330の破損判定に使う） */
+    /**
+     * `.github/workflows/`直下のymlの本文。ファイル名 → 本文。
+     *
+     * #2330の破損判定（配布対象callerだけを見る）に加えて、リリース通知のenvの有無
+     * （`deploy.yml`・`release.yml`を見る。#2421）もここから判定する。
+     */
     contents?: Record<string, string>;
     pullRequest?: WorkflowTagPullRequest | null;
   } = {},
@@ -179,6 +191,7 @@ export function evaluateWorkflowTags(
     repairPullRequest: repair.pullRequest ?? null,
     outdatedSharedFiles: shared.outdated,
     customizedSharedFiles: shared.customized,
+    missingReleaseWebhookWorkflows: missingReleaseWebhookWorkflows(repair.contents ?? {}),
     sharedFilePullRequest: sharedFiles.pullRequest ?? null,
   };
 }
@@ -520,6 +533,66 @@ export function sharedFileLabel(path: string): string {
   return SHARED_FILE_SPECS.find((spec) => spec.path === path)?.label ?? path;
 }
 
+/**
+ * 配布PRが運ぶもの1件ぶんの説明（#2421）。配布物のパスか、envを足すワークフロー名。
+ *
+ * 同じ配布PRが2種類のものを運ぶため、画面では1つの並びとして出す
+ * （`sharedFilePropagationWork`の各要素をこれに通す）。
+ */
+export function sharedFilePropagationLabel(item: string): string {
+  if (RELEASE_WEBHOOK_WORKFLOWS.some((file) => file === item)) {
+    return `${item}のリリース通知env`;
+  }
+  return sharedFileLabel(item);
+}
+
+/**
+ * リリース通知のenvを足す先のワークフロー（#2391・#2421）。
+ *
+ * `SIGNALY_RELEASE_WEBHOOK_URL`はGitHub Actionsのsecretなので、ワークフローが`env:`へ
+ * 渡さないと通知スクリプトから読めない。**スクリプトの配布と同じPRが1行を運ぶ**
+ * （`.github/scripts/propagate-shared-files.sh`）。
+ */
+const RELEASE_WEBHOOK_WORKFLOWS = ["deploy.yml", "release.yml"] as const;
+
+/** 足すenvの名前。**スクリプト側の`RELEASE_ENV_LINE`と同じ名前**にする */
+const RELEASE_WEBHOOK_ENV = "SIGNALY_RELEASE_WEBHOOK_URL";
+
+/**
+ * リリース通知のステップを持つか。
+ *
+ * 見分けるアンカーは`NOTIFY_KIND:`の値が`リリース`である行で、
+ * **`.github/scripts/propagate-shared-files.sh`の挿入条件と同じ**にする（片方だけ緩めると、
+ * 画面には「不足」と出るのに配布PRが何も足さない、という行き止まりになる）。
+ *
+ * コロンの後の空白は幅を問わず、行末のCRは無視する。桁揃えしているリポジトリ
+ * （`guchi-apps/signaly`）と改行がCRLFのリポジトリ（`guchi-apps/asset-manager`）があるため。
+ */
+function hasReleaseNotifyStep(source: string): boolean {
+  return source
+    .split("\n")
+    .some((line) => /^[ \t]*NOTIFY_KIND:[ \t]+リリース[ \t]*\r?$/.test(line));
+}
+
+/**
+ * リリース通知のenvが入っていないワークフローを返す（#2421）。
+ *
+ * **リリース通知を出していないリポジトリは対象にしない。** アンカーの無いファイルへ足しても
+ * 読む側がいない（`vps`・`subpc`・`aide`が該当する）。
+ *
+ * **画面の「配布が必要」判定を通知スクリプトの中身だけで決めていたのが漏れの原因**だった。
+ * スクリプトが既に最新のリポジトリは対象に挙がらず、この1行だけが未適用の状態は画面から
+ * 見えないまま残っていた（`asset-manager`・`signaly`の2件）。
+ */
+export function missingReleaseWebhookWorkflows(contents: Record<string, string>): string[] {
+  return RELEASE_WEBHOOK_WORKFLOWS.filter((file) => {
+    const source = contents[file];
+    if (typeof source !== "string") return false;
+    if (!hasReleaseNotifyStep(source)) return false;
+    return !source.includes(RELEASE_WEBHOOK_ENV);
+  });
+}
+
 /** 語の切り出し。識別子・変数名・コマンド名を拾う（日本語のコメントは語として数えない） */
 const SHARED_FILE_WORD_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
 
@@ -603,14 +676,29 @@ export function findSharedFilePullRequest(
 }
 
 /**
+ * その配布PRが実際に運ぶもの（#2421）。**配布物の更新とワークフローへの1行追加の両方**。
+ *
+ * 画面の表示・ボタンの件数・ワークフローへ渡す対象は必ずこれで揃える
+ * （`repairPropagationWorkflows`と同じ理由）。
+ */
+export function sharedFilePropagationWork(status: WorkflowTagStatus): string[] {
+  return [...status.outdatedSharedFiles, ...status.missingReleaseWebhookWorkflows];
+}
+
+/**
  * いま配布物を配るべきリポジトリ。**更新PRが既にopenのものは含めない。**
  *
  * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
  * （`propagationTargets`・`repairPropagationTargets`と同じ理由）。
+ *
+ * **配布物が最新でも、リリース通知のenvが欠けていれば対象にする**（#2421）。この1行は
+ * 同じ配布PRが運ぶのに、判定を配布物の中身だけで決めていたため、`asset-manager`・`signaly`の
+ * 2件が画面に出ないまま残っていた。
  */
 export function sharedFilePropagationTargets(statuses: WorkflowTagStatus[]): WorkflowTagStatus[] {
   return statuses.filter(
-    (status) => status.outdatedSharedFiles.length > 0 && status.sharedFilePullRequest === null,
+    (status) =>
+      sharedFilePropagationWork(status).length > 0 && status.sharedFilePullRequest === null,
   );
 }
 

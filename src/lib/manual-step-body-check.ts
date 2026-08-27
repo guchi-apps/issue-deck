@@ -73,6 +73,14 @@ const REQUIRED_PREREQUISITES = [
   severity: ManualStepBodyFindingSeverity;
 }[];
 
+/**
+ * 1Passwordの中身を書き換える`op`のサブコマンド。
+ *
+ * **読み取り（`op read`・`op item get`・`op item list`）は含めない。** サブPCに常時exportされて
+ * いるサービスアカウントはread権限を持つので、読むだけの手順はそのまま代行実行で通る。
+ */
+const OP_WRITE_COMMAND = /\bop\s+(?:item|document)\s+(?:create|edit|delete)\b/;
+
 /** `https://github.com/<owner>/<repo>/(issues|pull)/<番号>` */
 const GITHUB_REFERENCE_URL = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/(?:issues|pull)\/(\d+)/g;
 
@@ -301,24 +309,26 @@ function checkVerification(
 }
 
 /**
- * 1Passwordを扱うコマンドが、代行実行できる書き方になっているか（#2401）。
+ * 1Passwordを扱うコマンドが、サブPCで実際に通る書き方になっているか（#2401・#2417）。
  *
- * **`op signin`は、ほとんどの手作業では要らない。** サブPCには書き込み権限つきの
- * サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、1Passwordへの書き込みも
- * 読み取りも非対話で通る（#1874）。それでも`op signin`から書き始めた手作業Issueが積み上がって
- * いたのは、#1874でできるようになったことが雛形に書かれていなかったため——openだった10件のうち
- * 4件（`guchi-apps/aide#174`・`aide-bot#83`・`myroom#263`・`issue-deck#2397`）が同じ形だった。
+ * **サブPCでは`op`の書き込みが常に失敗する。** `~/.profile.local`（`guchi-apps/subpc`が配る
+ * managed block）が`~/.config/op/service-account-token`を`OP_SERVICE_ACCOUNT_TOKEN`へ常時
+ * exportしており、そのサービスアカウントは`apps`ボールトへ**read権限しか持たない**。`op`は
+ * 環境変数のサービスアカウントを最優先するため、`op signin`しても勝てず、`op read`は通るのに
+ * `op item edit`だけが`Couldn't update the item.`で落ちる（`knowledge/common-gotchas.md`）。
+ * 代行実行も`subpc-dispatch-poller.sh`が`/bin/bash -lc`で起こす＝同じ`~/.profile.local`を
+ * 読み直すので、人が実行しても代行させても結果は同じ。
  *
- * 落ちる機能は代行実行そのもの。`op signin`は`findInteractiveCommand`が対話ありと判定するので
- * その項目が「あなたが実行」になり、`scripts/sync-github-secrets.sh`をそのまま置いた手順は
- * 押せるのに実行時へ倒れる（代行実行のシェルは`dispatch.env`しか読み込まないため、
- * 1Passwordのセッションもサービスアカウントのトークンも無い）。
+ * そこで規約を**「値の登録は1Passwordアプリで人が行い、CLIは同期と確認だけを担う」**に寄せた。
+ * 書き込み権限つきのサービスアカウント（`~/.config/issue-deck/op-writer.env`）は
+ * `provision-secret.sh`が`load_writer`で明示的に読み込むときだけ効く（#1874）ので、生の
+ * `op item edit`をIssueへ書くと必ず落ちる。
  *
- * **どちらも`warning`にとどめる。** 端末の前の人が自分で実行する手順（メインPCでの作業など）は
- * この書き方でも動くため、`error`にすると直しようのない指摘が正しい本文へ出続ける。
+ * **どれも`warning`にとどめる。** read専用トークンを持たない端末（メインPC）では今の書き方でも
+ * 動くため、`error`にすると直しようのない指摘が正しい本文へ出続ける。
  *
- * **判定は`findInteractiveCommand`をそのまま通す**（自前で文字列を見ない）。画面の代行可否と
- * 別の条件をここに持つと、「指摘は出ないのに押せない」が生まれる。
+ * **`op signin`の判定は`findInteractiveCommand`をそのまま通す**（自前で文字列を見ない）。画面の
+ * 代行可否と別の条件をここに持つと、「指摘は出ないのに押せない」が生まれる。
  */
 function checkSecretCommands(
   sections: ReturnType<typeof splitManualStepSections>,
@@ -335,7 +345,25 @@ function checkSecretCommands(
     findings.push({
       rule: "op-signin-in-command",
       severity: "warning",
-      message: `\`op signin\`を含むコマンドが${signin.length}件あります。対話が要るコマンドはその項目まるごとが代行実行から外れますが、1Passwordの読み書きはサブPCの書き込み用トークンで代行できます（書き込みと同期は\`cd ~/apps/issue-deck && scripts/provision-secret.sh --repo <owner/repo> --key <KEY> …\`、読み取りは\`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read '<op://…>'\`）。`,
+      message: `\`op signin\`を含むコマンドが${signin.length}件あります。対話が要るコマンドはその項目まるごとが代行実行から外れるうえ、サブPCでは環境変数のサービスアカウントが優先されるためサインインしても書き込みは通りません。値の登録は1Passwordアプリで行い、GitHubのsecretへの同期は\`cd ~/apps/issue-deck && scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`、読み取りは\`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read '<op://…>'\`で書いてください。`,
+    });
+  }
+
+  // 生のopで1Passwordを書き換える手順。サブPCのread専用トークンでは人が実行しても落ちる。
+  // **同じブロックで書き込み用トークンを読み込んでいる形は除く**（`load_writer`と同じことを
+  // 手で書いた形で、実際に通る）。`collectShellBlocks`はフェンス単位で1つの文字列を返すので、
+  // 先頭の読み込み行も同じ文字列に入る——`local-secret-sync`と同じ除き方にしてある
+  const opWrite = commands.filter(
+    (command) =>
+      OP_WRITE_COMMAND.test(command) &&
+      !command.includes("op-writer.env") &&
+      !command.includes("provision-secret.sh"),
+  );
+  if (opWrite.length > 0) {
+    findings.push({
+      rule: "op-write-command",
+      severity: "warning",
+      message: `\`op\`で1Passwordを書き換えるコマンドが${opWrite.length}件あります。サブPCの全シェルには\`apps\`ボールトへ**read権限しか無い**サービスアカウントが常時exportされており（\`~/.profile.local\`）、\`op\`は\`op signin\`よりそちらを優先します。**同じコードブロックで書き込み用トークン（\`~/.config/issue-deck/op-writer.env\`）を読み込まない限り**、このコマンドは代行実行でも人の実行でも\`Couldn't update the item.\`で落ちます。値の登録は1Passwordアプリ（ブラウザ・デスクトップ）で行う手順として書き、CLIには同期（\`scripts/provision-secret.sh … --sync-only\`）と確認（\`op read\`）だけを残してください。`,
     });
   }
 

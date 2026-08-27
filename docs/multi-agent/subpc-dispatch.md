@@ -1306,6 +1306,37 @@ PRを最後まで作らないため、**どの経路にも当たらず永久に�
   埋めていたのが`入力に答えて作業中`・`人の入力待ち`のセッションだった。そちらは
   `DISPATCH_MAX_SESSIONS`の話で、この変更の範囲外
 
+#### worktreeを先に消したセッションも畳む（#2422）
+
+条件7（worktreeがcleanでpush済み）の手前には「worktreeのディレクトリがあるか」の確認があり、
+無ければ`hold`していた。`hold`は理由を残すだけで**期限もリトライも持たない**ため、この分岐に
+落ちたセッションは毎巡同じ判定を繰り返すだけで**永久に畳まれなかった**。
+
+実例は`guchi-apps/dayspan#420`の実装セッションで、Issueを`guchi-apps/myroom#268`へ移送したうえで
+自分のworktreeを消して作業を終えた。**動いているセッションは自分自身をkillできない**ので、消した
+本人も畳めず、tmuxと`claude`だけが存在しないディレクトリをcwdにして2時間残った（人が
+`tmux kill-session`を打つまで）。Issueの移送・取り下げ・引っ越しのたびに1本ずつ増える形になる。
+
+そこでこの分岐を、猶予（共通の`SESSION_IDLE_MINUTES`）付きで**畳む**側へ反転させた
+（理由コードは`WORKTREE_GONE`）。
+
+- **畳んで失われるのは会話の文脈だけ。** 未コミットの変更も未pushのコミットも、置き場ごと
+  消えている（畳むのはtmuxセッションで、ファイルは何も消さない）。worktreeもPRも持たない
+  質問セッションを畳む判断（#1454）と同じ理屈で、**「worktreeが無い＝失うものが無い」と
+  「worktreeを確認できない＝危ないかもしれない」を分ける**。ディレクトリが在るのに
+  `git status`が失敗する場合は従来どおり残す
+- **この経路だけは条件5・6（`11.local`・Issue・PR）を見ない。** worktreeが無ければもう実装は
+  続けられず、移送されたIssueは`gh issue view`が解決できない（`dayspan#420`は現に
+  `Could not resolve to an issue`になる）ため、先へ進めても「Issueの状態を取得できない」という
+  別の期限の無い`hold`に落ちるだけになる
+- **猶予は置く。** worktreeを消した直後のセッションが、後始末の続き（Issueコメント・ラベルの
+  付け替え）をしていることがある
+- **畳んだ後に起動し直すと、前回の会話は引き継がない。** ランチャーはworktreeを作り直す経路で
+  `ISSUE_DECK_CLAUDE_RESUME=0`を渡す（`run-issue-session.sh`）。画面の終了予告も
+  `WORKTREE_GONE`のときだけ「worktreeは残る」と言わない（`describeSessionReap`）
+- **worktreeの掃除（#1716）も道連れになっていた。** `cleanup-worktrees.sh`は「セッションが
+  動いているworktree」を消さないため、畳めないセッションが残る限りその掃除経路も止まる
+
 ### worktreeの掃除も1巡に相乗りさせる（#1716）
 
 #1223 の第3段階。pollerは`scripts/cleanup-worktrees.sh --all-repos --yes`を呼び、**消しても

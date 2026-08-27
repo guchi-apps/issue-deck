@@ -24,8 +24,9 @@ import {
   repairPropagationTargets,
   repairPropagationWorkflows,
   repairWorkflowLabel,
-  sharedFileLabel,
+  sharedFilePropagationLabel,
   sharedFilePropagationTargets,
+  sharedFilePropagationWork,
   shortWorkflowTag,
   workflowTagGroup,
   type WorkflowTagStatus as Status,
@@ -225,7 +226,7 @@ function SharedFileRow({ status, running }: { status: Status; running: boolean }
       }
       result={
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 break-words text-muted-foreground">
-          <span>{status.outdatedSharedFiles.map(sharedFileLabel).join(" / ")}</span>
+          <span>{sharedFilePropagationWork(status).map(sharedFilePropagationLabel).join(" / ")}</span>
           {status.sharedFilePullRequest && (
             <a
               className="inline-flex items-center gap-0.5 underline underline-offset-2"
@@ -283,7 +284,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   // 配布物が古いリポジトリ。更新PRが既に出ているものは対象から外し、下に分けて出す（#2240）
   const sharedFileTargets = sharedFilePropagationTargets(repositories);
   const sharedFilePending = repositories.filter(
-    (status) => status.outdatedSharedFiles.length > 0 && status.sharedFilePullRequest !== null,
+    (status) => sharedFilePropagationWork(status).length > 0 && status.sharedFilePullRequest !== null,
   );
 
   /**
