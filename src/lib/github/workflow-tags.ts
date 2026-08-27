@@ -808,6 +808,9 @@ export async function dispatchSharedFilePropagation(
     return { dispatched: false, targets: [], reason: decision.reason, message: decision.message };
   }
 
+  // **`files`は空になりうる**（#2421）。通知スクリプトは最新なのに、`deploy.yml`・
+  // `release.yml`へのリリース通知envの追加だけが残っているリポジトリがある。配るファイルは
+  // 無いが、その1行は同じPRが運ぶ（ワークフロー側の入力検証も空配列を通す）。
   const targets = sharedFilePropagationTargets(overview.repositories).map((status) => ({
     repository: status.fullName,
     files: status.outdatedSharedFiles,

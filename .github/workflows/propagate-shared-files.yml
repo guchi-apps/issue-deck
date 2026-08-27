@@ -62,8 +62,12 @@ jobs:
           # 配れるのは許可リストのパスだけ。**src/lib/workflow-tags.ts の SHARED_FILE_SPECS・
           # .github/scripts/propagate-shared-files.sh の ALLOWED_FILES と同じ内容**にする。
           # ここを緩めると配布先の任意のファイルを上書きしにいける
+          #
+          # **filesが空の対象は通す**（#2421）。通知スクリプトは最新なのに、deploy.yml・
+          # release.yml へのリリース通知env（SIGNALY_RELEASE_WEBHOOK_URL）の追加だけが
+          # 残っているリポジトリがある。配るファイルは無いが、その1行は同じPRが運ぶ。
           if ! printf '%s' "$TARGETS" | jq -e '
-            all(.files | type == "array" and length > 0
+            all(.files | type == "array"
                 and all(. == ".github/scripts/signaly-notify.sh"))' >/dev/null; then
             echo "::error::files に配布対象外のパスが含まれています"
             exit 1

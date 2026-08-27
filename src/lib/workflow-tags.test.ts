@@ -9,6 +9,7 @@ import {
   findSharedFilePullRequest,
   hasLocalSharedFileContent,
   sharedFileLabel,
+  missingReleaseWebhookWorkflows,
   sharedFilePropagationTargets,
   sharedFilePullRequestTitle,
   SHARED_FILE_SPECS,
@@ -235,6 +236,7 @@ describe("propagationTargets / workflowTagGroup", () => {
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
+    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,
@@ -468,6 +470,7 @@ describe("repairPropagationTargets", () => {
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
+    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,
@@ -706,6 +709,7 @@ describe("sharedFilePropagationTargets", () => {
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
+    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,
@@ -744,6 +748,65 @@ describe("sharedFilePropagationTargets", () => {
     ]);
 
     expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/subpc"]);
+  });
+
+  it("配布物が最新でも、リリース通知のenvが欠けていれば対象にする", () => {
+    // **これが漏れの本体**（#2421）。判定を配布物の中身だけで決めていたため、
+    // asset-manager・signaly の2件は画面に出ないまま1行が入らなかった
+    const targets = sharedFilePropagationTargets([
+      status({
+        fullName: "guchi-apps/signaly",
+        missingReleaseWebhookWorkflows: ["deploy.yml", "release.yml"],
+      }),
+    ]);
+
+    expect(targets.map((target) => target.fullName)).toEqual(["guchi-apps/signaly"]);
+  });
+});
+
+describe("missingReleaseWebhookWorkflows", () => {
+  const NOTIFY_STEP = (kind: string, extra = "") =>
+    `        env:\n          NOTIFY_KIND: ${kind}\n${extra}`;
+
+  it("リリース通知のステップがあってenvが無ければ挙げる", () => {
+    expect(missingReleaseWebhookWorkflows({ "deploy.yml": NOTIFY_STEP("リリース") })).toEqual([
+      "deploy.yml",
+    ]);
+  });
+
+  it("envが既に入っていれば挙げない", () => {
+    const source = NOTIFY_STEP(
+      "リリース",
+      "          SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}\n",
+    );
+
+    expect(missingReleaseWebhookWorkflows({ "deploy.yml": source })).toEqual([]);
+  });
+
+  it("リリース通知を出していないリポジトリは対象にしない", () => {
+    // 足しても読む側がいない（vps・subpc・aide が該当する）
+    expect(missingReleaseWebhookWorkflows({ "deploy.yml": NOTIFY_STEP("デプロイ") })).toEqual([]);
+  });
+
+  it("値を桁揃えしていても・CRLFでも見つける", () => {
+    // **スクリプト側の挿入条件と同じにする**（片方だけ緩めると、画面には「不足」と出るのに
+    // 配布PRが何も足さない行き止まりになる）。実例は signaly と asset-manager
+    const contents = {
+      "deploy.yml": "          NOTIFY_KIND:     リリース\n",
+      "release.yml": "          NOTIFY_KIND: リリース\r\n",
+    };
+
+    expect(missingReleaseWebhookWorkflows(contents)).toEqual(["deploy.yml", "release.yml"]);
+  });
+
+  it("値が前方一致するだけの行では判定しない", () => {
+    expect(missingReleaseWebhookWorkflows({ "deploy.yml": NOTIFY_STEP("リリース候補") })).toEqual(
+      [],
+    );
+  });
+
+  it("deploy.yml・release.yml 以外は見ない", () => {
+    expect(missingReleaseWebhookWorkflows({ "ci.yml": NOTIFY_STEP("リリース") })).toEqual([]);
   });
 });
 

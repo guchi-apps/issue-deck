@@ -143,3 +143,74 @@ describe("配布の判定", () => {
     expect(lost).toBe("");
   });
 });
+
+/**
+ * 配布PRに相乗りさせている「リリース通知のenvを1行足す」編集（#2391・#2421）。
+ *
+ * 挿入のawkは**スクリプト本体から読み出して**使う（`lostLinesSnippet`と同じ理由）。
+ * ここに書き写すと、片方を直したときにもう片方が古いまま通ってしまう。
+ */
+function insertReleaseEnv(source: string): string {
+  workspace = mkdtempSync(join(tmpdir(), "release-env-"));
+  const file = join(workspace, "deploy.yml");
+  writeFileSync(file, source);
+
+  return execFileSync("awk", ["-v", `insert=${releaseEnvLine()}`, insertAwkProgram(), file], {
+    encoding: "utf8",
+  });
+}
+
+/** スクリプト本体が足す1行（`RELEASE_ENV_LINE`の代入） */
+function releaseEnvLine(): string {
+  const script = readFileSync(SCRIPT, "utf8");
+  const line = /^RELEASE_ENV_LINE='(.*)'$/m.exec(script)?.[1];
+  if (!line) throw new Error("propagate-shared-files.sh から RELEASE_ENV_LINE を読めません");
+  return line;
+}
+
+/** スクリプト本体から、挿入のawkプログラム（クォートの中身）を切り出す */
+function insertAwkProgram(): string {
+  const script = readFileSync(SCRIPT, "utf8");
+  const program = /^ {2}awk -v insert="\$RELEASE_ENV_LINE" '\n([\s\S]*?)\n {2}' "\$WF"/m.exec(
+    script,
+  )?.[1];
+  if (!program) throw new Error("propagate-shared-files.sh から挿入のawkを読めません");
+  return program;
+}
+
+describe("リリース通知のenvの挿入", () => {
+  const ENV_LINE = "SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}";
+
+  it("アンカーの直前へ、同じインデントで足す", () => {
+    const out = insertReleaseEnv("        env:\n          NOTIFY_KIND: リリース\n");
+
+    expect(out).toBe(`        env:\n          ${ENV_LINE}\n          NOTIFY_KIND: リリース\n`);
+  });
+
+  it("値を桁揃えしたアンカーにも足す", () => {
+    // 実例: guchi-apps/signaly（`NOTIFY_KIND:     リリース`）。行の完全一致で見ていたときは
+    // 黙って外れ、配布PRは作られるのにこの1行だけが入らなかった（#2421）
+    const out = insertReleaseEnv("          NOTIFY_KIND:     リリース\n");
+
+    expect(out).toBe(`          ${ENV_LINE}\n          NOTIFY_KIND:     リリース\n`);
+  });
+
+  it("CRLFのファイルにも足し、足した行もCRLFにする", () => {
+    // 実例: guchi-apps/asset-manager（行末に`\r`が残る）。LFの行だけを混ぜない
+    const out = insertReleaseEnv("          NOTIFY_KIND: リリース\r\n");
+
+    expect(out).toBe(`          ${ENV_LINE}\r\n          NOTIFY_KIND: リリース\r\n`);
+  });
+
+  it("リリース以外の通知には足さない", () => {
+    const source = "          NOTIFY_KIND: デプロイ\n";
+
+    expect(insertReleaseEnv(source)).toBe(source);
+  });
+
+  it("値が前方一致するだけの行には足さない", () => {
+    const source = "          NOTIFY_KIND: リリース候補\n";
+
+    expect(insertReleaseEnv(source)).toBe(source);
+  });
+});
