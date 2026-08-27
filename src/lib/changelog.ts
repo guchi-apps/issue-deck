@@ -34,6 +34,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.44.1",
+    date: "2026-08-27",
+    changes: [
+      "ブランチ画面の集計表示を改善しました。他のPRで名前が挙がっただけのIssueが件数から漏れてしまう不具合を修正し、「着手中」の件数がより正確に表示されるようになります。",
+    ],
+  },
+  {
     version: "4.44.0",
     date: "2026-08-26",
     changes: [
