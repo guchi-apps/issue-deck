@@ -357,8 +357,15 @@ export function useDispatchState(enabled: boolean) {
       hostName: string;
       /** 実行する手順の`- [ ]`の行番号 */
       stepLine: number;
-      /** 画面に出ていて、人が承認したコマンド */
+      /** 画面に出ていて、人が承認したコマンド（`<…>`が入ったままのテンプレート） */
       command: string;
+      /**
+       * 人が埋めたプレースホルダの値（#2403。`<控えたkey>` → 値）。
+       *
+       * **送るのは値だけ**で、差し込んだコマンドは送らない。差し込みはサーバーとpollerが
+       * 本文と照合したあとに行うので、この値はコマンドの構造を変えられない。
+       */
+      placeholderValues?: Record<string, string> | null;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -372,6 +379,7 @@ export function useDispatchState(enabled: boolean) {
             kind: "manual_step",
             stepLine: params.stepLine,
             command: params.command,
+            placeholderValues: params.placeholderValues ?? undefined,
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };

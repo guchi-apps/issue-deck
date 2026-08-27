@@ -41,6 +41,10 @@ const createComment = vi.fn();
 vi.mock("@/hooks/use-issue-comments", () => ({
   useIssueComments: () => ({ comments: comments.list, isLoading: false, error: null }),
 }));
+// コピーは実物のクリップボードへ届かせない。**成否を戻り値で見る**作り（`copyText`）なので、
+// ここを差し替えれば「コピーできたときだけ主導線が進む」まで見られる
+const copyText = vi.fn(async (_text: string) => true);
+vi.mock("@/lib/copy-text", () => ({ copyText: (text: string) => copyText(text) }));
 vi.mock("@/hooks/use-issue-comment-mutations", () => ({
   useIssueCommentMutations: () => ({
     createComment,
@@ -141,6 +145,7 @@ function subpcHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView 
     online: true,
     manualStepCapable: true,
     manualStepAbortCapable: null,
+    manualStepValuesCapable: true,
     repositories: [REPO],
     ...overrides,
   } as DispatchHostView;
@@ -373,6 +378,8 @@ describe("ManualStepGuideDialog の代行実行", () => {
       hostName: "subpc",
       stepLine: STEP_LINE,
       command: "git pull --ff-only",
+      // 埋める値の無い手順では`null`。**送るのは値だけで、差し込んだ文字列は送らない**（#2403）
+      placeholderValues: null,
     });
   });
 
@@ -616,13 +623,15 @@ describe("ManualStepGuideDialog の自動実行", () => {
 
     expect(screen.getByText("自動実行中 2 / 3")).toBeTruthy();
     expect(screen.getByText("・この画面を閉じても続きます")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "中断する" }).length).toBeGreaterThan(0);
+    // **「中断する」は実行バーの1つだけ**（#2403）。以前はフッターにも同じものが出ていて、
+    // スマホでは縦積みの一番下にもう1つ並んでいた（同じことを2か所で言わせない）
+    expect(screen.getAllByRole("button", { name: "中断する" })).toHaveLength(1);
   });
 
   it("中断するとサーバーへ中断を伝える（#1882）", () => {
     renderAutoDialog(dispatchHandle({ manualStepRuns: [manualStepRun({ done: 1 })] }));
 
-    fireEvent.click(screen.getAllByRole("button", { name: "中断する" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "中断する" }));
 
     expect(controlManualStepRun).toHaveBeenCalledWith(
       expect.objectContaining({ action: "stop", repositoryFullName: REPO, issueNumber: 1823 }),
@@ -1163,5 +1172,196 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
 
     expect(screen.getByText("過去に報告されたつまずき（1件）")).toBeTruthy();
     expect(screen.getByText(/別のブランチが出ていました/)).toBeTruthy();
+  });
+});
+
+/**
+ * 下端の操作を1行へ畳んだこと（#2403）と、`<…>`へ埋めた値の扱い。
+ *
+ * **見るのは「どこから押せるか」と「何が送られるか」**で、幅による見た目の出し分け
+ * （`max-sm:hidden`）はjsdomでは効かないため見ない。畳んでも操作が減っていないことは、
+ * 同じ定義（`secondaryActions`）から両方を描いていることで担保する。
+ */
+/**
+ * `⋯`（スマホの二次操作）を開く。**Radixのメニューは`pointerdown`で開く**ので、
+ * jsdomでは`fireEvent.click`だけでは開かない。
+ */
+function openOverflowMenu() {
+  const trigger = screen.getByRole("button", { name: "その他の操作" });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+}
+
+describe("ManualStepGuideDialog の操作面（#2403）", () => {
+  beforeEach(() => {
+    taskList.body = BODY;
+    taskList.isToggling = false;
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    issueMutations.updateIssue.mockReset().mockResolvedValue(issue({ state: "closed" }));
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("手順の画面の主導線は1つで、二次操作は`⋯`からも辿れる", async () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    // 主導線は「実行した・次へ」1つだけ
+    expect(screen.getAllByRole("button", { name: "実行した・次へ" })).toHaveLength(1);
+
+    openOverflowMenu();
+    const menu = await screen.findByRole("menu");
+    const labels = screen
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent?.trim())
+      .filter(Boolean);
+    expect(menu).toBeTruthy();
+    // **操作は1つも消していない。** ふだん押さないものが`⋯`へ移っただけ
+    expect(labels).toEqual(["うまくいかない", "この手作業は飛ばす", "あとで"]);
+  });
+
+  it("`⋯`の「あとで」でも次の手順へ進む（PCのボタンと同じ動き）", async () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    openOverflowMenu();
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "あとで" }));
+
+    expect(screen.getByText("pollerを再起動する")).toBeTruthy();
+  });
+
+  it("最後の画面では「完了してクローズ」が主導線で、`⋯`に「実施せずクローズ」が入る", async () => {
+    renderDialog([issue()]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+    fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+
+    expect(screen.getAllByRole("button", { name: "完了してクローズ" })).toHaveLength(1);
+    openOverflowMenu();
+    expect(await screen.findByRole("menuitem", { name: "実施せずクローズ" })).toBeTruthy();
+  });
+});
+
+/** 値を埋めるコマンド（#2403）。`<控えたkey>`があるので、埋めるまでは代行できない */
+const PLACEHOLDER_BODY = `## この作業でできるようになること
+
+- トークンが発行される
+
+## 前提条件
+
+- 実行するデバイス: **サブPC**（メインPCからなら \`ssh subpc\`）
+- カレントディレクトリ: \`~/apps/issue-deck\`
+- Gitブランチ: \`develop\`
+
+## やること
+
+- [ ] 控えたキーでトークンを発行する
+
+    \`\`\`bash
+    KEY=<控えたkey> node oauth.mjs
+    \`\`\`
+
+## 完了の確認方法
+
+- トークンが出ていること
+`;
+
+const PLACEHOLDER_STEP_LINE =
+  PLACEHOLDER_BODY.split("\n").findIndex((text) => text.includes("控えたキーでトークン")) + 1;
+
+describe("ManualStepGuideDialog の値を埋める欄（#2403）", () => {
+  beforeEach(() => {
+    taskList.body = PLACEHOLDER_BODY;
+    taskList.isToggling = false;
+    runManualStep.mockReset().mockResolvedValue({ ok: true });
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    window.sessionStorage.clear();
+  });
+
+  function openStep() {
+    renderDialog([issue({ body: PLACEHOLDER_BODY })]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+  }
+
+  it("埋める前は代行できず、主導線がコピーになる", () => {
+    openStep();
+
+    expect(screen.getByText(/値を埋めるプレースホルダ/)).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "<控えたkey>" })).toBeTruthy();
+    // 代行できない手順で最初にやることはコピー。押すまで「実行した・次へ」は出ない
+    expect(screen.getByRole("button", { name: "3行をコピー" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "実行した・次へ" })).toBeNull();
+  });
+
+  it("コピーすると主導線が「実行した・次へ」へ変わる", async () => {
+    copyText.mockClear().mockResolvedValue(true);
+    openStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "3行をコピー" }));
+
+    // コピーされるのは「つなぐ → 移動する → 実行する」の3行
+    expect(copyText).toHaveBeenCalledWith(
+      "ssh subpc\ncd ~/apps/issue-deck\nKEY=<控えたkey> node oauth.mjs",
+    );
+    expect(await screen.findByRole("button", { name: "実行した・次へ" })).toBeTruthy();
+    expect(screen.getByText(/ターミナルで実行して/)).toBeTruthy();
+  });
+
+  it("コピーできなければ主導線は進めない", async () => {
+    copyText.mockClear().mockResolvedValue(false);
+    openStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "3行をコピー" }));
+    await screen.findByRole("button", { name: "3行をコピー" });
+
+    expect(screen.queryByRole("button", { name: "実行した・次へ" })).toBeNull();
+  });
+
+  it("値を埋めると代行できるようになり、承認すると値だけを送る", () => {
+    openStep();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "<控えたkey>" }), {
+      target: { value: "kM3qA7f2Zt" },
+    });
+
+    // 承認パネルには**実行される形**（引用付き）が出る
+    expect(screen.getByText("KEY='kM3qA7f2Zt' node oauth.mjs")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "承認して実行" }));
+
+    expect(runManualStep).toHaveBeenCalledWith({
+      repositoryFullName: REPO,
+      issueNumber: 1823,
+      hostName: "subpc",
+      stepLine: PLACEHOLDER_STEP_LINE,
+      // **送るのはテンプレートと値だけ。** 差し込みはサーバーとpollerが本文と照合したあと
+      command: "KEY=<控えたkey> node oauth.mjs",
+      placeholderValues: { "<控えたkey>": "kM3qA7f2Zt" },
+    });
+  });
+
+  it("pollerが値の差し込みに未対応なら、埋めても代行しない（#2403）", () => {
+    render(
+      <ManualStepGuideDialog
+        queueIds={["1823"]}
+        issues={[issue({ body: PLACEHOLDER_BODY })]}
+        open
+        onOpenChange={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        dispatch={dispatchHandle({ hosts: [subpcHost({ manualStepValuesCapable: false })] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "<控えたkey>" }), {
+      target: { value: "kM3qA7f2Zt" },
+    });
+
+    expect(screen.getByText(/埋めた値を差し込む代行実行に対応していません/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "承認して実行" })).toBeNull();
   });
 });

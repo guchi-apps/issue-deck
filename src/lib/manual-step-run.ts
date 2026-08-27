@@ -649,6 +649,7 @@ async function loadRunContext(run: ManualStepRun, now: Date): Promise<RunContext
         ? {
             online: isDispatchHostOnline(host.lastSeenAt, now),
             manualStepCapable: host.manualStepCapable,
+            manualStepValuesCapable: host.manualStepValuesCapable,
           }
         : null,
       isManualStepIssue: issue.labels.some((label) => label.name === MANUAL_STEP_LABEL),

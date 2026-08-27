@@ -107,6 +107,7 @@ function makeHost(): DispatchHostView {
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
+    manualStepValuesCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
     selfUpdateCapable: null,

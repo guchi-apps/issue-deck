@@ -1454,16 +1454,31 @@ describe("enqueueManualStepJob", () => {
     });
   }
 
-  async function run(overrides: { stepLine?: number; approvedCommand?: string } = {}) {
+  async function run(
+    overrides: {
+      stepLine?: number;
+      approvedCommand?: string;
+      placeholderValues?: Record<string, string> | null;
+    } = {},
+  ) {
     return enqueueManualStepJob({
       repositoryFullName: REPOSITORY,
       issueNumber: 1823,
       hostName: "subpc",
       stepLine: overrides.stepLine ?? STEP_LINE,
       approvedCommand: overrides.approvedCommand ?? COMMAND,
+      placeholderValues: overrides.placeholderValues ?? null,
       requestedByUserId: "user-1",
       now: NOW,
     });
+  }
+
+  /** `<控えたkey>`を埋める手順に差し替える（#2403） */
+  function setUpPlaceholderIssue(command = "KEY=<控えたkey> node oauth.mjs") {
+    setUpIssue({
+      body: MANUAL_STEP_BODY.replace("cd ~/apps/issue-deck\n    git pull --ff-only", command),
+    });
+    return command;
   }
 
   beforeEach(() => {
@@ -1500,6 +1515,102 @@ describe("enqueueManualStepJob", () => {
         }),
       }),
     );
+  });
+
+  // 値を埋めて代行実行する（#2403）。**送るのは値だけで、コマンドの形は本文から取る**
+  describe("埋めた値を差し込む（#2403）", () => {
+    beforeEach(() => {
+      dispatchHostFindUnique.mockResolvedValue(
+        host({ manualStepCapable: true, manualStepValuesCapable: true }),
+      );
+    });
+
+    it("値が届かなければ、これまでどおり穴で止まる", async () => {
+      const command = setUpPlaceholderIssue();
+      const result = await run({ approvedCommand: command });
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.rejection).toBe("placeholder_command");
+      expect(dispatchJobCreate).not.toHaveBeenCalled();
+    });
+
+    // **保存するのはテンプレート。** 本文との照合はサーバーとpollerがこれで2回行い、
+    // 値を差し込むのは照合を通したあと
+    it("テンプレートと値を分けてジョブに載せる", async () => {
+      const command = setUpPlaceholderIssue();
+      const result = await run({
+        approvedCommand: command,
+        placeholderValues: { "<控えたkey>": "kM3q" },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(dispatchJobCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            command: "KEY=<控えたkey> node oauth.mjs",
+            placeholderValues: { "<控えたkey>": "kM3q" },
+          }),
+        }),
+      );
+    });
+
+    // **山括弧を全部埋めたかどうかで判定しない**（計画レビューG1・指摘1）。
+    // `***`・`…`・`xxx`は名前が付かず埋めようがないので、残っていれば止める
+    it("名前の付かないプレースホルダが残っていれば、山括弧を埋めても積まない", async () => {
+      const command = setUpPlaceholderIssue("KEY=<控えたkey> SECRET=*** node oauth.mjs");
+      const result = await run({
+        approvedCommand: command,
+        placeholderValues: { "<控えたkey>": "kM3q" },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.rejection).toBe("placeholder_command");
+      expect(dispatchJobCreate).not.toHaveBeenCalled();
+    });
+
+    // 古いpollerは知らないフィールドを黙って無視し、穴が空いたままの`command`を実行してしまう
+    it("値の差し込みに未対応のpollerへは配らない", async () => {
+      dispatchHostFindUnique.mockResolvedValue(
+        host({ manualStepCapable: true, manualStepValuesCapable: null }),
+      );
+      const command = setUpPlaceholderIssue();
+      const result = await run({
+        approvedCommand: command,
+        placeholderValues: { "<控えたkey>": "kM3q" },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.rejection).toBe("manual_step_values_unsupported");
+      expect(dispatchJobCreate).not.toHaveBeenCalled();
+    });
+
+    // 画面は開いているIssueぶんの値をまとめて持っている。この手順に合う穴が無ければ
+    // **値付きの実行として扱わない**（未対応のpollerでも従来どおり押せる）
+    it("差し込む穴が無ければ、値は載せず申告も求めない", async () => {
+      dispatchHostFindUnique.mockResolvedValue(
+        host({ manualStepCapable: true, manualStepValuesCapable: null }),
+      );
+      const result = await run({ placeholderValues: { "<控えたkey>": "kM3q" } });
+
+      expect(result.ok).toBe(true);
+      expect(dispatchJobCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ command: COMMAND, placeholderValues: undefined }),
+        }),
+      );
+    });
+
+    // 差し込んでよい形を決めるのは`normalizeManualStepPlaceholderValues`の1か所
+    it("プレースホルダの表記でないキーは無視する", async () => {
+      const command = setUpPlaceholderIssue();
+      const result = await run({
+        approvedCommand: command,
+        placeholderValues: { 控えたkey: "kM3q" },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.ok === false && result.rejection).toBe("placeholder_command");
+    });
   });
 
   // **承認した内容と本文が食い違えば実行しない。** 押した人が見たものと、これから実行される
