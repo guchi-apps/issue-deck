@@ -56,6 +56,7 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
+import { usePushNotificationCleanup } from "@/hooks/use-push-notification-cleanup";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
@@ -527,6 +528,17 @@ export function IssueDeckShell({
     isFlowPaneActive ? "all" : "open",
     pullRequestAutoRefreshIntervalMs,
   );
+
+  // 用の済んだPush通知を、この端末の通知センターから閉じる（#2407）。`public/sw.js`が
+  // 通知を閉じるのはタップされたときだけなので、片付いたぶんはここで閉じる。
+  // **渡すのは絞り込み前の全Issue**——ベルと同じく、いま見ているリポジトリに関係なく
+  // 届いた通知を対象にする。Issue一覧はサーバー側の取得結果から始まるので常にあるが、
+  // PR一覧はマウント後の取得を待つ（`fetchedAt`がnullのうちは判断させない）
+  usePushNotificationCleanup({
+    issues: allIssues,
+    pullRequests: openPullRequests.fetchedAt === null ? null : openPullRequests.pullRequests,
+    failedRepositories: openPullRequests.failedRepositories,
+  });
 
   // サブPCのディスパッチ状態（#1262の取り決めどおり**親で1回だけ呼んで配る**）。
   // ここで持つのは「確認待ちのIssueでエージェントがまだ動いているか」を判定するため（#2174）で、
