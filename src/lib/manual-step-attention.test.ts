@@ -201,6 +201,19 @@ describe("formatManualStepListCount", () => {
   it("手作業Issueが無ければnullを返す（呼び出し側が今までどおりの件数を出す）", () => {
     expect(formatManualStepListCount([makeIssue({ number: 1 })], readiness)).toBeNull();
   });
+
+  // #2398: 保留中は一覧から外してあるので、渡された件数をそのまま添える
+  it("保留中があれば内訳に添える", () => {
+    expect(formatManualStepListCount([issues[0]], readiness, 2)).toBe("1件・保留中2件");
+  });
+
+  it("前提待ちと保留中が両方あれば並べる", () => {
+    expect(formatManualStepListCount(issues, readiness, 1)).toBe("1件・前提待ち1件・保留中1件");
+  });
+
+  it("並ぶものが無くても、保留中があれば0件として出す（消えた理由を読めるように）", () => {
+    expect(formatManualStepListCount([], readiness, 2)).toBe("0件・保留中2件");
+  });
 });
 
 // #2003: 一覧の行アイコンは手作業Issue以外にも出す。ただし数と通知は手作業Issueのまま

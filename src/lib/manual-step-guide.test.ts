@@ -5,6 +5,7 @@ import {
   matchManualStepDeviceNames,
   parseManualStepGuide,
   resolveManualStepDevice,
+  stripCodeBlocks,
 } from "@/lib/manual-step-guide";
 import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import type { Issue } from "@/types/issue";
@@ -469,5 +470,30 @@ describe("verificationRange（#1869）", () => {
   it("確認方法が書かれていない本文ではnull", () => {
     expect(parseManualStepGuide("## やること\n\n- [ ] 何かする").verificationRange).toBeNull();
     expect(parseManualStepGuide(null).verificationRange).toBeNull();
+  });
+});
+
+describe("stripCodeBlocks（#2403）", () => {
+  it("コードブロックだけを落とし、説明文は残す", () => {
+    const markdown = ["控えたキーでトークンを発行する", "", "```bash", "KEY=<k> node x.mjs", "```"].join(
+      "\n",
+    );
+
+    expect(stripCodeBlocks(markdown)).toBe("控えたキーでトークンを発行する");
+  });
+
+  it("フェンスが複数あっても全部落とす", () => {
+    const markdown = ["前置き", "```bash", "a", "```", "あいだの文", "```sh", "b", "```"].join("\n");
+
+    expect(stripCodeBlocks(markdown)).toBe(["前置き", "あいだの文"].join("\n"));
+  });
+
+  // 閉じ忘れた本文でも、残りを全部コードとして落とすだけにする（例外にしない）
+  it("閉じていないフェンスは、そこから先を落とす", () => {
+    expect(stripCodeBlocks(["説明", "```bash", "a"].join("\n"))).toBe("説明");
+  });
+
+  it("コードブロックが無ければそのまま", () => {
+    expect(stripCodeBlocks("pollerを再起動する")).toBe("pollerを再起動する");
   });
 });

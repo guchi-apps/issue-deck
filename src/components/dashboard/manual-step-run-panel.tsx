@@ -15,10 +15,12 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { ManualStepFixPanel } from "@/components/dashboard/manual-step-fix-panel";
+import { ManualStepPlaceholderFill } from "@/components/dashboard/manual-step-placeholder-fill";
 import { ManualStepWhereToRun } from "@/components/dashboard/manual-step-where-to-run";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useManualStepFix } from "@/hooks/use-manual-step-fix";
+import type { ManualStepValuesHandle } from "@/hooks/use-manual-step-values";
 import {
   describeManualStepAbortRejection,
   describeManualStepExecutionRejection,
@@ -63,6 +65,7 @@ export function ManualStepRunPanel({
   entry,
   dispatch,
   autoDiagnose = false,
+  values,
   onSucceeded,
   onRetry,
   onApplyFix,
@@ -75,6 +78,11 @@ export function ManualStepRunPanel({
   dispatch: DispatchStateHandle;
   /** 失敗したときに、押さずに原因を調べてよいか（自動実行の承認に含まれる同意） */
   autoDiagnose?: boolean;
+  /**
+   * 手順の`<…>`へ人が埋めた値（#2403）。渡されない場合は埋める欄を出さず、
+   * プレースホルダを含む手順はこれまでどおり「あなたが実行」のまま。
+   */
+  values?: ManualStepValuesHandle;
   /**
    * 終了コード0で終わったときに1回だけ呼ばれる。呼び出し側が手順のチェックを付ける
    * （**チェックの実体はIssue本文**なので、書き換えは既存の`useIssueTaskList`が行う）。
@@ -109,7 +117,10 @@ export function ManualStepRunPanel({
   const [isApplying, setIsApplying] = useState(false);
   const fix = useManualStepFix();
 
+  // **承認・照合に使うのはテンプレート**（`<…>`が入ったまま）で、画面に出す・コピーさせるのは
+  // 値を差し込んだ`filledCommand`（#2403）。実行計画が両方を持っている
   const command = entry.command;
+  const displayCommand = entry.filledCommand ?? command;
   const host = resolveManualStepHost(dispatch.hosts);
   const job = findManualStepJobForStep(
     dispatch.jobs,
@@ -133,11 +144,24 @@ export function ManualStepRunPanel({
     // ここで見直さない
     interactiveCommand: entry.interactiveCommand,
     placeholder: entry.placeholder,
+    // 値を差し込んで実行するなら、pollerの申告が要る（#2403）。差し込みが起きたかどうかは
+    // **実行計画と同じ見方**（テンプレートと差し込み後が違うか）で判定する
+    usesPlaceholderValues: command !== null && displayCommand !== command,
     hasActiveJob: hasActiveOtherJob,
   });
 
   const succeeded = job !== null && job.status === "SUCCEEDED" && job.exitCode === 0;
   const failed = job !== null && !isRunning && !succeeded;
+
+  // **前の手順の出力から値を拾えるようにする**（#2403）。欲しい値（発行されたトークン・ID）は
+  // 直前の代行実行が画面へ返しているので、目で探して打ち直させない。**この手順自身の出力は
+  // 使わない**——まだ実行していないから値を埋めているのであって、自分の出力は存在しない
+  const previousOutput = findPreviousManualStepOutput(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+    entry.line,
+  );
 
   // 成否を1回だけ拾う。**ジョブのidで覚える**ので、ポーリングのたびに呼び直したり、
   // もう一度実行した結果を取りこぼしたりしない
@@ -165,7 +189,10 @@ export function ManualStepRunPanel({
       issueNumber: issue.number,
       hostName: host.name,
       stepLine: entry.line,
+      // **送るのはテンプレートと値だけ**（#2403）。差し込みはサーバーとpollerが本文と
+      // 照合したあとに行うので、差し込み済みの文字列をここから送ることはしない
       command: nextCommand,
+      placeholderValues: values?.values ?? null,
     });
     if (!result.ok) setError(result.message);
   }
@@ -196,6 +223,23 @@ export function ManualStepRunPanel({
     }
     fix.dismiss();
   }
+
+  /**
+   * 値を埋める欄（#2403）。**代行できない手順にも、代行できる手順にも同じものを出す**——
+   * 埋めた瞬間に「あなたが実行」から「代行できる」へ変わるので、片方にしか無いと
+   * 埋めた直後に欄ごと消える。
+   */
+  const fillPanel =
+    values !== undefined && entry.placeholders.length > 0 ? (
+      <ManualStepPlaceholderFill
+        placeholders={entry.placeholders}
+        values={values.values}
+        onChange={values.setValue}
+        onClear={values.clear}
+        previousOutput={previousOutput}
+        filled={entry.placeholder === null}
+      />
+    ) : null;
 
   const fixPanel =
     fix.state !== null && job !== null && fix.state.key === job.id ? (
@@ -261,7 +305,7 @@ export function ManualStepRunPanel({
             job.status !== "RUNNING"
               ? null
               : abortJob !== null
-                ? "中断を送りました（届くまで最大30秒かかります）。"
+                ? "中断を送りました（届くまで数秒〜30秒かかります）。"
                 : abortRejection === null
                   ? null
                   : describeManualStepAbortRejection(abortRejection, {
@@ -280,7 +324,11 @@ export function ManualStepRunPanel({
         {/* 失敗したら、手元で実行するための「どこから」を出す（#1882）。**成功したら出さない**
             ——実行し終えたものについて接続方法を並べても読む相手がいない */}
         {failed && (
-          <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
+          <ManualStepWhereToRun
+            where={guide.where}
+            device={entry.device}
+            command={displayCommand}
+          />
         )}
         {fixPanel}
       </div>
@@ -308,8 +356,14 @@ export function ManualStepRunPanel({
             })}
           </span>
         </p>
-        {/* 代行できない手順こそ、どこから実行するのかが要る（#1882） */}
-        <ManualStepWhereToRun where={guide.where} device={entry.device} command={command} />
+        {fillPanel}
+        {/* 代行できない手順こそ、どこから実行するのかが要る（#1882）。**出すのは値を差し込んだ
+            あとのコマンド**（#2403）——コピーしてそのまま打てる形でなければ意味がない */}
+        <ManualStepWhereToRun
+          where={guide.where}
+          device={entry.device}
+          command={displayCommand}
+        />
         {canContinue && (
           <div className="flex justify-end">
             <Button variant="outline" size="sm" onClick={onRetry}>
@@ -323,40 +377,75 @@ export function ManualStepRunPanel({
   }
 
   return (
-    <section className="flex flex-col gap-2 rounded-md border border-violet-500/40 bg-violet-500/5 p-2.5">
-      <h4 className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
-        <Zap className="size-3.5 shrink-0" aria-hidden />
-        {host?.name ?? "サブPC"}で
-        {entry.kind === "verification" ? "確認コマンドを実行できます" : "代行実行できます"}
-      </h4>
-      {/* **実行するコマンドをもう一度出す。** 上の手順にも同じものが出ているが、承認する対象は
-          「本文の手順」ではなく「これから実行される文字列」で、そこがずれていないことを
-          押す直前に確かめられるようにする */}
-      <pre className="overflow-x-auto rounded border bg-background p-2 font-mono text-xs leading-relaxed">
-        {command}
-      </pre>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        実行するのは上のコマンドそのものです（承認したあとに本文が変わっていた場合は実行しません）。
-        {entry.kind === "verification" &&
-          "実行しても手作業は完了になりません（出力を見て判断してください）。"}
-        出力はこの画面にだけ表示し、GitHubのIssueには残しません。
-        <strong className="font-semibold">出力にシークレットが混ざることがあります。</strong>
-        {MANUAL_STEP_TIMEOUT_SECONDS / 60}分で打ち切ります。
-      </p>
-      {error !== null && (
-        <p className="flex items-start gap-1.5 text-xs text-destructive">
-          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          <span>{error}</span>
+    <>
+      {fillPanel}
+      <section className="flex flex-col gap-2 rounded-md border border-violet-500/40 bg-violet-500/5 p-2.5">
+        <h4 className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-300">
+          <Zap className="size-3.5 shrink-0" aria-hidden />
+          {host?.name ?? "サブPC"}で
+          {entry.kind === "verification" ? "確認コマンドを実行できます" : "代行実行できます"}
+        </h4>
+        {/* **実行するコマンドをもう一度出す。** 上の手順にも同じものが出ているが、承認する対象は
+            「本文の手順」ではなく「これから実行される文字列」で、そこがずれていないことを
+            押す直前に確かめられるようにする。**埋めた値も引用ごと出す**（#2403）——
+            何が渡るのかを見ずに承認させない */}
+        <pre className="overflow-x-auto rounded border bg-background p-2 font-mono text-xs leading-relaxed">
+          {displayCommand}
+        </pre>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          実行するのは上のコマンドそのものです（承認したあとに本文が変わっていた場合は実行しません）。
+          {displayCommand !== command &&
+            "埋めた値はシェルの引用で包んで差し込むため、コマンドの形は本文のままです。実行が終われば値は捨てます。"}
+          {entry.kind === "verification" &&
+            "実行しても手作業は完了になりません（出力を見て判断してください）。"}
+          出力はこの画面にだけ表示し、GitHubのIssueには残しません。
+          <strong className="font-semibold">出力にシークレットが混ざることがあります。</strong>
+          {MANUAL_STEP_TIMEOUT_SECONDS / 60}分で打ち切ります。
         </p>
-      )}
-      <div className="flex justify-end">
-        <Button size="sm" disabled={dispatch.isSubmitting} onClick={() => void handleRun()}>
-          {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-          {entry.kind === "verification" ? "承認して確認を実行" : "承認して実行"}
-        </Button>
-      </div>
-    </section>
+        {error !== null && (
+          <p className="flex items-start gap-1.5 text-xs text-destructive">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            <span>{error}</span>
+          </p>
+        )}
+        <div className="flex justify-end">
+          <Button size="sm" disabled={dispatch.isSubmitting} onClick={() => void handleRun()}>
+            {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+            {entry.kind === "verification" ? "承認して確認を実行" : "承認して実行"}
+          </Button>
+        </div>
+      </section>
+    </>
   );
+}
+
+/**
+ * 前の手順の代行実行が返した出力を1件だけ引く（#2403）。**この手順より前の行**で、
+ * 出力があり、いちばん近いものを選ぶ。
+ *
+ * 出力にはシークレットが混ざりうるが、これはこのログイン必須の画面の中だけの話で、
+ * **選んだ行がIssueへ入ることはない**（値の行き先は`useManualStepValues`のコメントのとおり）。
+ */
+function findPreviousManualStepOutput(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+  line: number,
+): { label: string; text: string } | null {
+  const candidates = jobs
+    .filter(
+      (job) =>
+        job.kind === "MANUAL_STEP" &&
+        job.repositoryFullName === repositoryFullName &&
+        job.issueNumber === issueNumber &&
+        job.manualStepLine !== null &&
+        job.manualStepLine < line &&
+        job.commandOutput !== null &&
+        job.commandOutput !== "",
+    )
+    .sort((a, b) => (b.manualStepLine ?? 0) - (a.manualStepLine ?? 0));
+  const found = candidates[0];
+  return found ? { label: "前の手順", text: found.commandOutput ?? "" } : null;
 }
 
 /** 送信済み・実行中・終わったあとの表示。**終了コードと出力がここにしか残らない** */
@@ -424,7 +513,7 @@ function ManualStepRunResult({
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         {isRunning
-          ? "サブPCが取りに来るまで最大30秒かかります。終わると結果がここに出ます。"
+          ? "サブPCが取りに来るまで数秒〜30秒かかります（セッションの起動中はさらに待つことがあります）。終わると結果がここに出ます。"
           : succeeded
             ? entry.kind === "verification"
               ? "出力が本文の「期待する出力」と合っているかを確かめてください（チェックは付きません）。"
@@ -478,7 +567,8 @@ function ManualStepRunResult({
               取り消す
             </Button>
           )}
-          {/* 走り出した1件を止める（#1882）。取り消しと違い、**止まるまでに最大30秒**かかる */}
+          {/* 走り出した1件を止める（#1882）。取り消しと違い、**届くまでpull型ぶんかかる**
+              （軽い巡回で数秒。セッションの起動中の巡はそのぶん延びる。#2413） */}
           {onAbort && (
             <Button variant="outline" size="sm" disabled={isSubmitting} onClick={onAbort}>
               <CircleStop />

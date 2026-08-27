@@ -33,6 +33,7 @@ model User {
   favoriteIssues       FavoriteIssue[]
   commentReads         IssueCommentRead[]
   pushSubscriptions    PushSubscription[]
+  snoozedItems         SnoozedItem[]
 }
 
 // --- GitHub App 連携 ---
@@ -108,6 +109,7 @@ model Repository {
   issues       Issue[]
   hiddenBy     HiddenRepository[]
   favoritedBy  FavoriteRepository[]
+  snoozedItems SnoozedItem[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -253,6 +255,41 @@ model FavoriteIssue {
 
   @@unique([userId, issueId])
   @@index([issueId])
+}
+
+// 保留の対象（#2398）。IssueとPull Requestは同じリポジトリの番号空間なので、
+// 種別と番号の組で1つのテーブルに載せる。
+enum SnoozeTargetKind {
+  ISSUE
+  PULL_REQUEST
+}
+
+// ユーザーごとに「いまは実施しない」として伏せた要対応の項目（#2398）。
+//
+// **Issueへの外部キーは張らない。** 対象にはマージ待ちのPull Requestも含まれ、そちらは
+// DBに行を持たない（GitHubから都度取得する）。IssueだけFKにすると同じ機能が2つの
+// テーブルに割れるため、`repositoryId` + `kind` + `number`で両方を指す。
+//
+// `until`がnullなら「手動で解除するまで」。過ぎた行は消さずに残し、
+// 有効かどうかの判定は`src/lib/snooze.ts`の純粋関数が現在時刻を見て行う
+// （件数・一覧・通知が同じ関数を通る）。
+model SnoozedItem {
+  id           String           @id @default(cuid())
+  userId       String
+  repositoryId String
+  kind         SnoozeTargetKind
+  number       Int
+  // 保留が解けて件数・通知へ戻る時刻。nullは「手動で解除するまで」
+  until        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId, kind, number])
+  @@index([repositoryId])
 }
 
 // ユーザーごとに、Issueのコメントを何件まで読んだか（未読コメント判定用）
@@ -465,6 +502,16 @@ model DispatchJob {
   // 「画面から任意のコマンドを流せる口」にしないための一次の歯止めになっている
   // （二次の歯止めはサブPC側で、pollerがGitHubの本文を読み直して同じ照合をもう一度行う）。
   command            String?           @db.Text
+  // 人が埋めたプレースホルダの値（#2403。`<控えたkey>`の表記 → 値のマップ）。
+  //
+  // **`command`は`<…>`が入ったままのテンプレートで保存する。** 本文との照合（サーバーとpollerが
+  // 独立に2回行う）が見るのはそちらで、値はpollerが照合を通したあとに`'…'`で包んで穴へ差し込む。
+  // したがって画面から届いた値は**リテラルの1語**にしかならず、コマンドの構造を変えられない。
+  //
+  // **シークレット（トークン・キー）が入りうる。** 出力（`commandOutput`）と同じ扱いで、
+  // GitHubのIssueにも通知にもpollerのログにも出さない。さらに**ジョブが終わった時点で空にする**
+  // ——出力と違い、後から確かめるための手掛かりとしての価値が無いため残す理由が無い。
+  placeholderValues  Json?
   // 代行実行した手順の、本文中の行番号（#1828。`- [ ]`の行）。画面がジョブと手順を対応付ける。
   //
   // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは
@@ -576,6 +623,15 @@ model DispatchHost {
   // 画面には「中断できなかった」だけが残る。申告を見て、止められないホストでは
   // 「打ち切りまで待つ」ことを先に案内する。
   manualStepAbortCapable   Boolean?
+  // 埋めた値を差し込んで代行実行できるか（#2403）。`placeholderValues`を読んで`'…'`で包み、
+  // 本文照合を通したテンプレートの穴へ差し込むpollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（`manualStepCapable`と同じ向き）。
+  //
+  // **`manualStepCapable`とは分けて持つ。** 古いpollerは知らないフィールドを黙って無視し、
+  // `command`（＝`<…>`が入ったままのテンプレート）をそのまま実行してしまう。#2051が防いだ
+  // 「`KEY=<値>`がリダイレクトとして解釈される」状態そのものなので、**申告が真でないホストへは
+  // 値付きのジョブを払い出さない**（画面も理由を出して押させない）。
+  manualStepValuesCapable  Boolean?
   // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。

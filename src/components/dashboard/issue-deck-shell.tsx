@@ -44,6 +44,7 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useSnoozes } from "@/hooks/use-snoozes";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
@@ -55,6 +56,7 @@ import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
+import { usePushNotificationCleanup } from "@/hooks/use-push-notification-cleanup";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
@@ -72,6 +74,7 @@ import {
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
+import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
   isMergeCheckUser,
   resolveCheckUserToasts,
@@ -124,6 +127,7 @@ import {
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
   pullRequestsWaitingForMergeChecks,
+  splitSnoozedPullRequests,
   resolvePullRequestHeader,
   type OptimisticMerge,
 } from "@/lib/pull-request-list";
@@ -525,6 +529,17 @@ export function IssueDeckShell({
     pullRequestAutoRefreshIntervalMs,
   );
 
+  // 用の済んだPush通知を、この端末の通知センターから閉じる（#2407）。`public/sw.js`が
+  // 通知を閉じるのはタップされたときだけなので、片付いたぶんはここで閉じる。
+  // **渡すのは絞り込み前の全Issue**——ベルと同じく、いま見ているリポジトリに関係なく
+  // 届いた通知を対象にする。Issue一覧はサーバー側の取得結果から始まるので常にあるが、
+  // PR一覧はマウント後の取得を待つ（`fetchedAt`がnullのうちは判断させない）
+  usePushNotificationCleanup({
+    issues: allIssues,
+    pullRequests: openPullRequests.fetchedAt === null ? null : openPullRequests.pullRequests,
+    failedRepositories: openPullRequests.failedRepositories,
+  });
+
   // サブPCのディスパッチ状態（#1262の取り決めどおり**親で1回だけ呼んで配る**）。
   // ここで持つのは「確認待ちのIssueでエージェントがまだ動いているか」を判定するため（#2174）で、
   // 同じものをIssue一覧へも渡す——一覧が自前で持つと、同じ画面のために取得が2本走る。
@@ -535,6 +550,8 @@ export function IssueDeckShell({
   // **`dispatch.fetchedAt`では代用しない。** 取得が失敗している間は進まないため、落ちた
   // セッションのIssueが確認待ちの件数から外れたまま戻らなくなる（数え漏らす側へは倒さない）。
   const now = useNow(60_000);
+  // 「いまは実施しない」（#2398）。**画面で1回だけ取り、件数・一覧・ベル・トーストへ配る**
+  const { snoozes, snooze, unsnooze } = useSnoozes();
 
   const issuePolling = useIssuePolling((polledIssues) => {
     const reconciledIssues = reconcileIssues(allIssues, polledIssues);
@@ -593,6 +610,8 @@ export function IssueDeckShell({
           questionRequests: dispatch.questionRequests,
           now: detectedAt,
         }),
+        // 保留中の確認待ちはトーストも出さない（#2398）
+        snoozes,
         now: detectedAt,
       });
       if (ready.length > 0) {
@@ -914,9 +933,17 @@ export function IssueDeckShell({
     ],
   );
 
+  // ユーザーが「いまは実施しない」として伏せたIssue（#2398）。**件数・一覧・ベル・トーストが
+  // 同じ集合を読む**ので、`checkUserRunningIssueIds`と同じくここで1回だけ求めて配る。
+  const snoozedIssueIds = useMemo(
+    () => selectSnoozedIssueIds(issues, snoozes, now ?? Date.now()),
+    [issues, snoozes, now],
+  );
+
   // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
   // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   // 「ユーザーの確認待ち」だけは実行中のIssueを外した数にする（#2174）。
+  // 要対応の2ビューは、さらに保留中を外す（#2398）。
   const navCounts = useMemo(
     () =>
       computeNavCountsForFilters(
@@ -925,8 +952,9 @@ export function IssueDeckShell({
         currentUserLogin,
         issues,
         checkUserRunningIssueIds,
+        snoozedIssueIds,
       ),
-    [issues, filtersWithAiSearch, currentUserLogin, checkUserRunningIssueIds],
+    [issues, filtersWithAiSearch, currentUserLogin, checkUserRunningIssueIds, snoozedIssueIds],
   );
 
   const filteredPullRequests = useMemo(
@@ -955,9 +983,34 @@ export function IssueDeckShell({
   // 二重に出さないため、確認待ちのIssue一覧を渡して除く。**リポジトリ絞り込みは掛けない**
   // （#1750）——並ぶ先が絞り込みを適用しないビューなので、掛けると同じ一覧の中でIssueだけ
   // 全体・PRだけ絞られた状態になる。
-  const mergePendingPullRequests = useMemo(
-    () => pullRequestsAwaitingUserMerge(crossRepositoryPullRequests, checkUserIssues),
-    [crossRepositoryPullRequests, checkUserIssues],
+  // 保留中（#2398）は一覧から外し、「保留中N件」の1行へ合流させる。**外すのは押せる状態の
+  // ものだけ**で、CI・判定の完了待ちの件数はそのまま（`splitSnoozedPullRequests`）
+  const { listed: mergePendingPullRequests, snoozed: snoozedMergePendingPullRequests } = useMemo(
+    () =>
+      splitSnoozedPullRequests(
+        pullRequestsAwaitingUserMerge(crossRepositoryPullRequests, checkUserIssues),
+        snoozes,
+        now ?? Date.now(),
+      ),
+    [crossRepositoryPullRequests, checkUserIssues, snoozes, now],
+  );
+
+  // 伏せたPRの期限。一覧の1行が「最短でいつ戻るか」を出すのに使う
+  const snoozedMergePendingEntries = useMemo(
+    () =>
+      snoozedMergePendingPullRequests.flatMap((pullRequest) => {
+        const entry = findActiveSnooze(
+          snoozes,
+          {
+            kind: "pull-request",
+            repositoryFullName: pullRequest.repositoryFullName,
+            number: pullRequest.number,
+          },
+          now ?? Date.now(),
+        );
+        return entry ? [entry] : [];
+      }),
+    [snoozedMergePendingPullRequests, snoozes, now],
   );
 
   // 上の一覧から外した「CI・判定の完了待ち」の件数（#2081）。**件数には足さず**、枠の下の
@@ -1240,6 +1293,9 @@ export function IssueDeckShell({
         pullRequests={crossRepositoryPullRequests}
         /* 実行中の確認待ちは「実行中」として弱く出す（#2174）。左メニューの件数と同じ集合 */
         checkUserRunningIssueIds={checkUserRunningIssueIds}
+        /* 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398） */
+        snoozes={snoozes}
+        now={now}
         onRefreshIssues={issuePolling.refresh}
         onRefreshPullRequests={openPullRequests.refreshInBackground}
         isRefreshingPullRequests={openPullRequests.isRefreshing}
@@ -1402,6 +1458,12 @@ export function IssueDeckShell({
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
+                  /* 「いまは実施しない」（#2398）。PCの一覧と同じ集合・同じ導線 */
+                  snoozes={snoozes}
+                  onSnooze={snooze}
+                  onUnsnooze={unsnooze}
+                  snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
+                  snoozedMergePendingEntries={snoozedMergePendingEntries}
                   /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
                      件数の内訳に使う（左メニュー・ホームの数字からは外してある） */
                   checkUserRunningIssueIds={checkUserRunningIssueIds}
@@ -1503,6 +1565,10 @@ export function IssueDeckShell({
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
                   onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={selectRepositoryByFullName}
+                  /* 「いまは実施しない」（#2398）。一覧と同じ引き当て表・同じ操作 */
+                  snoozes={snoozes}
+                  onSnooze={snooze}
+                  onUnsnooze={unsnooze}
                   onStartManualStepGuide={manualStepGuide.start}
                 />
               )}
@@ -1633,6 +1699,9 @@ export function IssueDeckShell({
                     <MergePendingPullRequests
                       pullRequests={mergePendingPullRequests}
                       waitingForChecksCount={mergeCheckWaitingCount}
+                      /* 「いまは実施しない」（#2398）。Issueの行と同じ選択肢を出す */
+                      onSnooze={snooze}
+                      now={now}
                       /* PR一覧画面へ移らず、その場に重ねて開く（#2149） */
                       onSelectPullRequest={(pullRequest) =>
                         selectPullRequestModal(pullRequest.id)
@@ -1647,6 +1716,28 @@ export function IssueDeckShell({
                 pinnedCount={
                   filters.view === "check-user" ? mergePendingPullRequests.length : 0
                 }
+                // 保留中で一覧から外したマージ待ちPR（#2398）。Issue側と1行にまとめて出す
+                snoozedPinned={
+                  filters.view === "check-user"
+                    ? {
+                        count: snoozedMergePendingPullRequests.length,
+                        entries: snoozedMergePendingEntries,
+                        section: (
+                          <MergePendingPullRequests
+                            pullRequests={snoozedMergePendingPullRequests}
+                            onSelectPullRequest={(pullRequest) =>
+                              selectPullRequestModal(pullRequest.id)
+                            }
+                            snoozed={{ snoozes, now, onUnsnooze: unsnooze }}
+                          />
+                        ),
+                      }
+                    : undefined
+                }
+                // 「いまは実施しない」（#2398）。件数・一覧・通知が同じ集合を読む
+                snoozes={snoozes}
+                onSnooze={snooze}
+                onUnsnooze={unsnooze}
                 // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
                 fetchedAt={issuePolling.fetchedAt}
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
@@ -1692,6 +1783,10 @@ export function IssueDeckShell({
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
                   }
+                  /* 「いまは実施しない」（#2398）。一覧と同じ引き当て表・同じ操作 */
+                  snoozes={snoozes}
+                  onSnooze={snooze}
+                  onUnsnooze={unsnooze}
                   onStartManualStepGuide={manualStepGuide.start}
                 />
               </div>

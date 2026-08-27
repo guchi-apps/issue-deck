@@ -151,9 +151,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 手作業の代行実行（#1828）。**受け取るのは「どの手順か」と「人が承認したコマンド」だけ**で、
-  // 実際に実行するのは`enqueueManualStepJob`がIssue本文から抽出し直したもの。届いた文字列は
-  // 「押した人が見ていたのはこれか」の照合にしか使わない
+  // 手作業の代行実行（#1828）。**受け取るのは「どの手順か」と「人が承認したコマンド」、
+  // それに「人が埋めた値」だけ**で、実際に実行するのは`enqueueManualStepJob`がIssue本文から
+  // 抽出し直したもの。届いた文字列は「押した人が見ていたのはこれか」の照合にしか使わない。
+  // 値（#2403）はコマンドの穴へ引用付きで差し込まれるだけで、構造を変えられない
   if (kind === "MANUAL_STEP") {
     const stepLine = payload?.stepLine;
     const approvedCommand = payload?.command;
@@ -174,6 +175,11 @@ export async function POST(request: NextRequest) {
       hostName,
       stepLine,
       approvedCommand,
+      // **形の検査はここではしない**（#2403）。差し込んでよい形かどうかは
+      // `normalizeManualStepPlaceholderValues`が1か所で決める（2か所に条件を置かない）
+      placeholderValues: isPlainObject(payload?.placeholderValues)
+        ? payload.placeholderValues
+        : null,
       requestedByUserId: userId,
     });
     if (!manualStepResult.ok) {
@@ -315,4 +321,9 @@ export async function POST(request: NextRequest) {
     { ok: true, job: result.job },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+/** 素のオブジェクト（配列・nullではない）か。埋めた値のマップを受け取る前の形の確認だけを行う */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

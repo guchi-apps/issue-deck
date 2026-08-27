@@ -21,6 +21,7 @@ import {
   countReleaseMergePending,
   type ReleaseMergePendingCounts,
 } from "@/lib/release-merge-pending";
+import type { SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
@@ -138,6 +139,8 @@ export function NotificationProvider({
   issues,
   pullRequests,
   checkUserRunningIssueIds,
+  snoozes,
+  now = null,
   onRefreshIssues,
   onRefreshPullRequests,
   isRefreshingPullRequests = false,
@@ -152,6 +155,10 @@ export function NotificationProvider({
    * 左メニューの件数と同じ集合を受け取り、その行を「実行中」として弱く出す。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /** ユーザーが「いまは実施しない」として伏せた項目（#2398）。渡すとベルからも外れる */
+  snoozes?: SnoozeMap;
+  /** 保留の期限判定に使う現在時刻(epoch ms)。未取得(null)なら実時刻を使う */
+  now?: number | null;
   /**
    * Issue一覧の取り直し（#1909）。取得できたかを返す——失敗を成功として数えると、
    * 取れていないのに「たった今更新」と出てしまう。渡さない場合はIssueを取り直さない
@@ -219,6 +226,9 @@ export function NotificationProvider({
       pullRequests,
       releaseStatuses: visibleReleaseStatuses,
       checkUserRunningIssueIds,
+      // 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398）
+      snoozes,
+      now,
     });
     return {
       items,
@@ -241,6 +251,8 @@ export function NotificationProvider({
     repositories,
     pullRequests,
     checkUserRunningIssueIds,
+    snoozes,
+    now,
     releaseStatuses,
     refresh,
     isSelfFetching,

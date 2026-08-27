@@ -95,6 +95,12 @@ export async function POST(request: NextRequest) {
     // 限らないため。非対応と分かっていれば、画面は押す前に「打ち切りまで待つ」ことを案内できる
     manualStepAbortCapable:
       typeof payload?.manualStepAbort === "boolean" ? payload.manualStepAbort : null,
+    // 埋めた値を差し込んで代行実行できるpollerだけが送ってくる（#2403）。**未申告はnull＝非対応扱い**。
+    // `manualStep`と分けるのは、古いpollerが`placeholderValues`を黙って無視して、
+    // 穴が空いたままの`command`をそのまま実行してしまうため（#2051が防いだ状態そのもの）。
+    // 「配ってから`failed`で返る」で済まない種類の非対応なので、申告が無ければ配らない
+    manualStepValuesCapable:
+      typeof payload?.manualStepValues === "boolean" ? payload.manualStepValues : null,
     // 計画レビュー（G1・#1855）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**。
     // このジョブは計画コメントの投稿を契機に**自動で積まれる**ため、非対応のpollerへ配ると
     // 計画のたびに`failed`のジョブが並ぶ（他の種別より、申告を見てから配る意味が大きい）

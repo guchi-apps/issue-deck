@@ -541,3 +541,35 @@ export function buildManualStepQueue(
   const start = startIssueId ? issues.find((issue) => issue.id === startIssueId) : undefined;
   return start ? [start, ...actionable] : actionable;
 }
+
+/**
+ * 手順のMarkdownから、コードブロックだけを落とす（#2403）。
+ *
+ * 代行できない手順では、コマンドが**同じ画面に2回**出ていた——手順の本文（`MarkdownBody`が
+ * 描くコードブロック）と、「手元で実行する」（`ManualStepWhereToRun`）の『実行する』の行。
+ * スマホでは両方が縦に積まれるうえ、後者は**人が埋めた値が差し込まれた実行できる形**なので、
+ * 前者を残す意味が無い。
+ *
+ * **落としてよいのは「手元で実行する」が実際に出るときだけ。** あちらは接続コマンドも
+ * カレントディレクトリも本文に書かれていない手順では`null`になる（`buildWhereToRunLines`）ので、
+ * 無条件に落とすと**コマンドが画面のどこにも出なくなる**（#2403の計画レビューG1・指摘2）。
+ * 判断は呼び出し側が行い、この関数は落とすだけ。
+ */
+export function stripCodeBlocks(markdown: string): string {
+  const lines = markdown.split("\n");
+  const kept: string[] = [];
+  let openFence: string | null = null;
+  for (const line of lines) {
+    const fence = FENCE_PATTERN.exec(line);
+    if (fence) {
+      const marker = fence[1][0];
+      if (openFence === null) openFence = marker;
+      else if (marker === openFence) openFence = null;
+      continue;
+    }
+    if (openFence === null) kept.push(line);
+  }
+  // 落とした跡に空行が続くので、末尾の空行だけ畳む（本文中の段落の空行は残す）
+  while (kept.length > 0 && kept[kept.length - 1].trim() === "") kept.pop();
+  return kept.join("\n");
+}

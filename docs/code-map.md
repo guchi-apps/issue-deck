@@ -582,6 +582,21 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   「押しても遷移しない」という形でしか表に出ない（実行状況の行で実際に起きた）。
 - **GitHub → DBの取り込み経路は2つ。** `/api/webhooks/github`（HMAC署名を検証）で受けるプッシュ型と、
   `POST /api/sync/issues`（画面の再同期ボタン、`hooks/use-issue-sync.ts`）で明示的に走らせるプル型。
+- **`issues.transferred`のペイロードのトップレベルの`issue`は「移動する前のIssue」**（#2406）。
+  番号もURLも移動元のままで、移動後のIssue（新しい番号・URL・**新しいGitHub ID**）は
+  `changes.new_issue`に、移動先リポジトリは`changes.new_repository`に入る（どちらも
+  [octokitのペイロードスキーマ](https://github.com/octokit/webhooks/blob/main/payload-schemas/api.github.com/issues/transferred.schema.json)で必須）。
+  **トップレベルの`issue`を移動先の`repositoryId`と組み合わせて書くと、「移動先リポジトリの、
+  移動元の番号」というGitHub上に存在しない行ができる**——`guchi-apps/myroom #420`（URLは
+  `guchi-apps/dayspan/issues/420`）として報告された。取り込みは`changes.new_issue`で行い、
+  IDが変わっているので**移動元の行は`deleteIssueByGithubId`で別途消す**。
+  - 画面の「Issueを移動」（`api/issues/transfer`）はWebhookと別経路で、GraphQLの`transferIssue`の後に
+    新しい番号でREST APIから取り直して書く。ここでも移動元の行は残るため、
+    `deleteTransferredSourceIssue`で消している（Webhookの到着を待たない）。
+  - **移動でIssueのGitHub IDが変わるため、移動先では行を作り直すことになる。** `00.check-user`の
+    待ち時間計測（`checkUserLabeledAt`）など、DB行に紐づくissue-deck側の記録は引き継がれない。
+  - 取り込みそこねて残った行は、画面の「再同期」（`syncRepositoryIssues`の
+    `deleteMany`＋`githubIssueId: { notIn: ... }`）で消える。定期実行は無いので、自動では消えない。
 - **同じIssueの取り込みは`lib/keyed-mutex.ts`の`runExclusive`で直列化する**（#2365）。
   `sync-issues.ts`の`upsertIssueRow`はDBを「読んでから書く」形で、同時に2本走ると両方が同じ
   読んだ値を見て書きに行く。上のプッシュ型・プル型に加えて画面のPATCH（`upsertIssueAndGetDisplay`）も
@@ -897,6 +912,28 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
+- **要対応の項目は「いまは実施しない」として伏せられる**（#2398。[`lib/snooze.ts`](../src/lib/snooze.ts)）。
+  数週間先まで実施しないと決めた項目を、日時を指定するか手動で解除するまで一覧・件数・通知から
+  外す。上の2つ（#2081のCI完了待ち・#2174の実行中）が「いま押せないもの」を機械的に外すのに対し、
+  こちらは**人の意思で外す**——それまでは close するしか一覧から減らす手が無く、実施していない
+  のに close すると実施済みと区別が付かなくなっていた。
+  - **保存先はGitHubのラベルではなくDBのユーザーごとの行**（`SnoozedItem`）。ラベルにすると
+    全リポジトリへのラベル配布（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)）が要り、
+    Issueの履歴に保留の付け外しが残り続ける。IssueとPull Requestを1つの表で持つため、Issueへの
+    外部キーではなく`repositoryId` + `kind` + `number`で指す（マージ待ちPRはDBに行を持たない）。
+  - **期限切れの行は消さない。** 効いているかどうかは`isSnoozeActive`が現在時刻を見て決めるので、
+    何もしなくても件数と通知へ戻る。掃除の巡回を足していない理由でもある。
+  - **効かせるのは要対応の2ビュー（`check-user`・`manual-step`）だけ**。「すべてのIssue」や進捗の
+    ビューから消すと、伏せたIssueがどこにも出てこなくなる。判定の差し替えは
+    `computeNavCountsForFilters`（[`lib/issue-stats.ts`](../src/lib/issue-stats.ts)）1か所で行い、
+    一覧・ベル・トースト・Push通知は同じ`lib/snooze.ts`の関数を通る。
+  - **消えたことは一覧の1行だけで知らせる**（`describeSnoozeResume`）。件数には足さず、
+    「表示」で開くとその場で解除できる——`pullRequestsWaitingForMergeChecks`の1行（#2081）と
+    同じ扱いで、完全に消すと「なぜ減ったのか」を画面から読めない。
+  - **Push通知は宛先の側で落とす**（[`lib/notifications/check-user-push.ts`](../src/lib/notifications/check-user-push.ts)）。
+    非表示リポジトリ（#2279）と同じ形。ただし**宛先が全員保留のときは送信済みの記録を付けない**
+    ——`checkUserPushSentAt`は一度立つと`00.check-user`が付き直すまで戻らないため、付けると
+    保留を解除しても二度と鳴らない。
 - **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
   [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
   本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
@@ -995,6 +1032,55 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **下端の操作はスマホで1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みの
+    ままだと手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが
+    その上の狭い窓に押し込まれていた。並びは**左に「戻る」（アイコンのみ）・`⋯`・右に主ボタン**で、
+    ふだん押さない操作（あとで・うまくいかない・この手作業は飛ばす・実施せずクローズ）が`⋯`へ入る。
+    **PCは幅が余っているので今までどおり全部を横1行に出す。**
+    - **操作を1つも消さない。** PC・スマホの両方を`secondaryActions`／`primaryAction`という
+      **1つの定義**から描く。片方にだけ操作が増える・出す条件がずれる、を作らない
+    - **「中断する」はフッターに置かない。** 自動実行中は実行バー（`AutoRunBar`）に同じボタンが
+      必ず出ており、下にも置くと同じことを2か所で言わせることになる（#2057の決まりと同じ）
+    - **同じ名前のボタンを幅で出し分けて2つ描かない。** DOMに2つ残ると読み上げにも2つ並ぶ。
+      「戻る」は1つだけ置いて、文字を`max-sm:hidden`で隠し、名前は`aria-label`が持つ
+  - **`<控えたkey>`のような値は画面で埋められ、埋めれば代行実行もできる**（#2403。
+    [`manual-step-placeholder-fill.tsx`](../src/components/dashboard/manual-step-placeholder-fill.tsx)・
+    [`hooks/use-manual-step-values.ts`](../src/hooks/use-manual-step-values.ts)・
+    [`scripts/lib/manual-step-fill.sh`](../scripts/lib/manual-step-fill.sh)）。
+    #2051は穴の空いたコマンドを「あなたが実行」へ倒すところまでで、**埋める場所も、前の手順が
+    出した値を持ってくる手段も画面に無かった**。手作業を実際に進めるのはスマホでissue-deckを開き、
+    Tailscale越しのターミナルアプリへ切り替えて戻ってくる人で、値の受け渡しが往復のいちばん
+    詰まるところだった。
+    - **画面から送るのは値だけ。** コマンドの形は今までどおりIssue本文から取り、サーバーと
+      pollerが本文と照合したあとで`<…>`の穴にだけ**単引用符で包んで**差し込む。値は常に
+      リテラルの1語にしかならず、**「画面から任意のコマンドを流せる口にしない」歯止めは
+      そのまま残る**。`DispatchJob.command`はテンプレート（`<…>`が入ったまま）で保存する
+    - **差し込みはpollerとissue-deckが独立に行い、突き合わせて一致しなければ実行しない**
+      （`resolvedCommand`）。引用の規則を2実装持つことになるが、ずれたときの結果は
+      「誤ったコマンドの実行」ではなく「実行しない」になる（本文照合を2回行うのと同じ形）。
+      同じ表を両方へ通す回帰テストが[`scripts/manual-step-fill.test.mjs`](../scripts/manual-step-fill.test.mjs)
+    - **代行できるかどうかを「山括弧を全部埋めたか」で判定しない**（#2403の計画レビューG1）。
+      `findPlaceholder`が拾うのは4種（`<…>`・`***`・全角`…`・語としての`xxx`）で、名前が付いて
+      埋められるのは山括弧だけ。判定は**差し込んだ後の文字列へ`findPlaceholder`を掛け直す**
+      （`hasUnfilledPlaceholder`）。山括弧の個数で数えると、残り3種の穴が空いたまま素通りする
+    - **pollerの申告とセットにする**（`DispatchHost.manualStepValuesCapable`）。古いpollerは
+      知らないフィールドを黙って無視し、穴が空いたままの`command`をそのまま実行してしまう。
+      `manualStepAbortCapable`と同じ作法で、申告が真でないホストへは値付きのジョブを配らない
+    - **値の置き場は3つに分ける。** 画面はそのタブの中だけ（sessionStorage。閉じれば消える）、
+      サーバーは走っているジョブの上だけ（終わった時点で列を空にする）、**Issueには一切書かない**。
+      トークン・キーが入りうるため、出力（`commandOutput`）と違って後から辿る価値が無い
+    - **「貼り付け」はクリップボードを読めるときだけ出す。** 書き込み側（`copyText`）は
+      `document.execCommand("copy")`へ落ちて非セキュアコンテキストでも動くが、**読み取りに
+      同じ逃げ道は無い**（tailnet越しのhttpでは生えない）。出さずに手入力へ落とす
+    - **前の手順の代行実行の出力から値を選べる。** 欲しい値は直前の実行が画面へ返しているので、
+      目で探して打ち直させない。**選んだ行がIssueへ入ることはない**
+  - **代行できない手順では、コマンドを画面に1回だけ出す**（#2403）。手順の本文（`MarkdownBody`の
+    コードブロック）と「手元で実行する」の『実行する』の行で二重に出ていた。**値を差し込んだ
+    実行できる形**を持つ後者へ寄せ、前者は`stripCodeBlocks`で畳む。**ただし畳むのは
+    `buildWhereToRunLines`が実際に行を返すときだけ**——接続コマンドもカレントディレクトリも
+    本文に無い手順ではあちらがセクションごと出ないので、無条件に畳むとコマンドが画面のどこにも
+    出なくなる。同じ条件で、下端の主ボタンを「コマンドをコピー」へ差し替える
+    （押すと「実行した・次へ」へ変わり、コピー → ターミナルで実行 → 戻って次へ、が下端で閉じる）
   - **想定外だったら「うまくいかない」から相談できる**（#2299。
     [`manual-step-trouble-panel.tsx`](../src/components/dashboard/manual-step-trouble-panel.tsx)・
     [`lib/manual-step-trouble.ts`](../src/lib/manual-step-trouble.ts)）。#1869が拾うのは代行実行が
@@ -2132,6 +2218,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
+- **用の済んだPush通知は、画面を開いた時点で閉じる**（#2407。
+  [`hooks/use-push-notification-cleanup.ts`](../src/hooks/use-push-notification-cleanup.ts)・
+  [`lib/notifications/stale-push.ts`](../src/lib/notifications/stale-push.ts)）。`public/sw.js`が
+  `notification.close()`を呼ぶのは`notificationclick`だけなので、確認待ちのラベルが外れても、
+  リリースPRをマージしても、**通知はタップするまでロック画面に残り続ける**。閉じられるのは
+  通知を出したService Workerだけなので、`IssueDeckShell`が`registration.getNotifications()`で
+  表示中のものを引き、済んだぶんを閉じる。
+  - **鳴らす条件と消す条件を別々に書かない。** 判定は`selectStalePushTags`（純粋関数）に閉じ、
+    確認待ちは`isApprovalPending`（＝`check-user-push.ts`が見ているのと同じラベル）、
+    本番マージ待ちは「そのPRがopenなPR一覧にまだ載っているか」だけを見る。ずれると
+    「まだ済んでいないのに消える」か「済んでいるのに残る」のどちらかになる。CIが落ちたまま
+    残っているリリースPRの通知は**閉じない**——押す操作が修正へ変わるだけで、人が動かないと
+    止まっているのは同じ（#2376）。
+  - **判断できないものは残す側へ倒す。** Issue一覧に載っていない（同期対象外・削除済み）ものと、
+    PR一覧の取得に失敗したリポジトリ（`failedRepositories`）のものは触らない。消しすぎると
+    知らせが黙って消え、ユーザーには何も起きていないように見える。知らない`tag`（テスト通知の
+    `test`など）も対象外。
+  - **閉じられるのは画面を開いた端末の通知だけ。** 他の端末に出ているものはその端末で開くまで
+    残る——購読は`userVisibleOnly: true`で作っており、**「閉じるだけのpush」は送れない**（#2196）。
+    送信するpayloadへ「いま鳴っているべきタグの一覧」を載せてService Worker側で閉じる案もあるが、
+    2つの巡回に全タグの計算が要るうえ、効くのは次の通知が届いたときだけなので採っていない。
+  - `register`はしない（`use-push-delivery.ts`と同じ作法）。走らせるのはIssue一覧の
+    ポーリングで`issues`が差し替わったときと、画面が表に戻ったとき。中身はローカルの読み取り
+    2回だけで、通信もGitHub APIの消費も増えない。
 - **画面内のIssue・PRリンクはGitHubへ飛ばさず、IssueDeckの中で開く**（#1260）。リンクは
   `<a href="https://github.com/...">`のまま出しておき、
   [`components/dashboard/github-reference-link.tsx`](../src/components/dashboard/github-reference-link.tsx)
@@ -2471,6 +2581,27 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   （`scripts/reusable-issue-labels.test.mjs`と同じ形）。
 - 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
+
+## 時刻を見る判定は`now`を引数で受け取る（描画中に`Date.now()`を呼ばない）（#2398）
+
+ESLintの`react-hooks/purity`が**描画中の`Date.now()`をエラーにする**（`Cannot call impure
+function during render`）。「期限を過ぎたら元に戻す」のような**時刻で結果が変わる判定**を
+書くときは、次の形にそろえる。
+
+- **純粋関数は`now: number | null`を引数で受け取る。** `null`（現在時刻が未取得）は
+  「判定できない」として、**強調しすぎる側へ倒す**（保留なら「効いていない」＝項目を出す）。
+  関数の中で既定値に`Date.now()`を入れない
+- **呼び出し側は`useNow()`の値を渡す**（[`hooks/use-now.ts`](../src/hooks/use-now.ts)）。
+  マウント前は`null`で、サーバーで描いた分とハイドレーション時で結果が食い違わない。
+  `now ?? Date.now()`と書くと同じルールに引っかかるので書かない
+- **開いた瞬間の時刻が要る部品は、イベントハンドラで刻む。**
+  [`snooze-menu.tsx`](../src/components/dashboard/snooze-menu.tsx)は選択肢の日付
+  （「明日まで 8/28」）を出すために時刻が要るが、`useNow()`は30秒間隔なので開いた瞬間には
+  遅れうる。`onOpenChange`（＝イベント）の中で`Date.now()`を読んで状態に置く。**イベント
+  ハンドラの中なら`Date.now()`は呼んでよい**
+- **日付の境界をまたぐ組み立ては[`lib/format-date-time.ts`](../src/lib/format-date-time.ts)を通す**
+  （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
+  9時間ずれる
 
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 

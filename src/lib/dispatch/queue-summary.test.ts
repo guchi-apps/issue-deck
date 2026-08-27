@@ -28,6 +28,8 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: null,
     instruction: null,
     command: null,
+    placeholderValues: null,
+    resolvedCommand: null,
     manualStepLine: null,
     targetJobId: null,
     exitCode: null,
@@ -55,6 +57,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
+    manualStepValuesCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
     selfUpdateCapable: null,
@@ -212,7 +215,7 @@ describe("summarizeDispatchQueue", () => {
   });
 
   /**
-   * #1519。制御ジョブは枠を使わないので数えないが（#1544）、pull型ぶん届くまで最大30秒あり、
+   * #1519。制御ジョブは枠を使わないので数えないが（#1544）、pull型ぶん届くまで数秒〜30秒あり、
    * その間キューのどこにも出ないと「押したのに何も起きない」に見える。
    * **一覧には出すが、数えない**という分け方が壊れていないことを確かめる。
    */

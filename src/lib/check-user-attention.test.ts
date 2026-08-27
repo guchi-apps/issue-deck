@@ -349,4 +349,17 @@ describe("formatCheckUserListCount", () => {
   it("全件が実行中でも0件を下回らない", () => {
     expect(formatCheckUserListCount(2, 3)).toBe("0件・実行中3件");
   });
+
+  // #2398: 保留中は一覧から外してあるので、listedCountに入っていない。差ではなくそのまま足す
+  it("保留中があれば内訳に添える", () => {
+    expect(formatCheckUserListCount(2, 0, 2)).toBe("2件・保留中2件");
+  });
+
+  it("実行中と保留中が両方あれば並べる", () => {
+    expect(formatCheckUserListCount(3, 1, 2)).toBe("2件・実行中1件・保留中2件");
+  });
+
+  it("保留中も実行中も無ければ今までどおりnull", () => {
+    expect(formatCheckUserListCount(3, 0, 0)).toBeNull();
+  });
 });

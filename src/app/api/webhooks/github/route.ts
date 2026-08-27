@@ -59,7 +59,7 @@ async function handleIssuesEvent(payload: {
   action: string;
   issue: GithubApiIssue;
   repository: { id: number };
-  changes?: { new_repository?: { id: number } };
+  changes?: { new_issue?: GithubApiIssue; new_repository?: { id: number } };
 }) {
   if (payload.action === "deleted") {
     await deleteIssueByGithubId(payload.issue.id);
@@ -82,6 +82,21 @@ async function handleIssuesEvent(payload: {
       return;
     }
 
+    // **書くのは`changes.new_issue`（移動後のIssue）で、トップレベルの`issue`ではない**（#2406）。
+    // `issues.transferred`のペイロードのトップレベルの`issue`は「移動する前のIssue」で、
+    // 番号もURLも移動元のまま。これを移動先の`repositoryId`と組み合わせて書くと、
+    // 「移動先リポジトリの、移動元の番号」という**GitHub上に存在しない行**ができる
+    // （`guchi-apps/myroom #420`・URLは`guchi-apps/dayspan/issues/420`として報告された）。
+    const newIssue = payload.changes?.new_issue;
+    if (!newIssue) {
+      console.error(
+        "[webhooks/github] issues.transferred event is missing changes.new_issue",
+        payload,
+      );
+      await deleteIssueByGithubId(payload.issue.id);
+      return;
+    }
+
     const destinationRepository = await db.repository.findUnique({
       where: { githubRepositoryId: newRepositoryId },
     });
@@ -91,7 +106,13 @@ async function handleIssuesEvent(payload: {
       return;
     }
 
-    await upsertIssueFromWebhookPayload(destinationRepository.id, payload.issue);
+    await upsertIssueFromWebhookPayload(destinationRepository.id, newIssue);
+    // 移動でIssueのGitHub IDは変わるため、移動元の行は上の`upsert`（`githubIssueId`がキー）では
+    // 更新されず残る。**IDが変わったときだけ**消す——同じIDなら上の`upsert`が同じ行を移動先へ
+    // 書き換えており、消すとその行に紐づくローカルの記録（`00.check-user`の待ち時間など）を失う。
+    if (newIssue.id !== payload.issue.id) {
+      await deleteIssueByGithubId(payload.issue.id);
+    }
     return;
   }
 

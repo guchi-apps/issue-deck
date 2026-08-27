@@ -141,12 +141,23 @@ export function selectCheckUserRunningIssueIds(
  * 食い違う。**メニューと同じ数を先に出し、その差である実行中を添える**——手作業待ちの
  * `formatManualStepListCount`（#1763）・質問の`formatQuestionListCount`（#1796）と同じ区切り。
  *
- * @returns 実行中が1件も無ければnull（呼び出し側は今までどおりの「N件」を出す）
+ * **保留中（#2398）も同じ形で添える。** 一覧から伏せたぶんは`listedCount`に入っていないので、
+ * 実行中と違って差ではなく件数をそのまま足して書く。
+ *
+ * @param listedCount 一覧に並んでいる行数（保留中は含まない）
+ * @param runningCount そのうち、まだエージェントが動いているもの
+ * @param snoozedCount 保留中で一覧から外したもの（#2398）
+ * @returns 実行中も保留中も無ければnull（呼び出し側は今までどおりの「N件」を出す）
  */
 export function formatCheckUserListCount(
   listedCount: number,
   runningCount: number,
+  snoozedCount = 0,
 ): string | null {
-  if (runningCount <= 0) return null;
-  return `${Math.max(listedCount - runningCount, 0)}件・実行中${runningCount}件`;
+  if (runningCount <= 0 && snoozedCount <= 0) return null;
+  const actionable = Math.max(listedCount - runningCount, 0);
+  const parts = [`${actionable}件`];
+  if (runningCount > 0) parts.push(`実行中${runningCount}件`);
+  if (snoozedCount > 0) parts.push(`保留中${snoozedCount}件`);
+  return parts.join("・");
 }

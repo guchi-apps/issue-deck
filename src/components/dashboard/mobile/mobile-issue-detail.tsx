@@ -9,6 +9,7 @@ import {
   FilePlus2,
   Loader2,
   MessageCircleQuestion,
+  Clock,
   MoreHorizontal,
   Pencil,
   Play,
@@ -75,6 +76,8 @@ import {
   isSessionWaitingInput,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
+import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
+import { SnoozedItemNotice } from "@/components/dashboard/snoozed-item-notice";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -141,6 +144,12 @@ import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-ind
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
+import { useNow } from "@/hooks/use-now";
+import {
+  findActiveIssueSnooze,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
@@ -176,6 +185,13 @@ type MobileIssueDetailProps = {
   /** 同じリポジトリのコードレビュー（#698）をもう一度実行するダイアログを開く */
   onStartCodeReview: (repositoryFullName: string) => void;
   onSelectRepository: (repositoryFullName: string) => void;
+  /**
+   * 「いまは実施しない」（#2398）。PCの詳細・一覧の行と同じ引き当て表・同じ操作を受け取る。
+   * 渡さない場合はメニュー項目も保留中の帯も出さない。
+   */
+  snoozes?: SnoozeMap;
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  onUnsnooze?: (target: SnoozeTarget) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
 };
@@ -199,8 +215,13 @@ export function MobileIssueDetail({
   onCreateCodeReviewFindingIssue,
   onStartCodeReview,
   onSelectRepository,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
   onStartManualStepGuide,
 }: MobileIssueDetailProps) {
+  // 保留の期限判定に使う現在時刻（#2398）。PCの詳細と同じく、早期returnより前で呼ぶ
+  const snoozeNow = useNow();
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
@@ -235,6 +256,13 @@ export function MobileIssueDetail({
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
+  // 「いまは実施しない」（#2398）。判定はPCの詳細・一覧と同じ`findActiveIssueSnooze`
+  const snoozeTarget: SnoozeTarget | null = snoozes
+    ? { kind: "issue", repositoryFullName: issue.repositoryFullName, number: issue.number }
+    : null;
+  const activeSnooze = snoozes
+    ? findActiveIssueSnooze(snoozes, issue, snoozeNow)
+    : null;
   // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
   // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
   const actionsDisabledReason = startImplementationDisabledReason(
@@ -722,6 +750,18 @@ export function MobileIssueDetail({
               <Pencil className="size-3.5" />
               編集
             </DropdownMenuItem>
+            {/* 「いまは実施しない」（#2398）。保留中は下の帯に操作があるので出さない */}
+            {snoozeTarget && onSnooze && !activeSnooze && (
+              <SnoozeMenu target={snoozeTarget} onSnooze={onSnooze} now={snoozeNow} align="end">
+                <DropdownMenuItem
+                  className="whitespace-nowrap text-xs"
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <Clock className="size-3.5" />
+                  いまは実施しない
+                </DropdownMenuItem>
+              </SnoozeMenu>
+            )}
             {canMove && (
               <DropdownMenuItem
                 className="whitespace-nowrap text-xs"
@@ -812,6 +852,18 @@ export function MobileIssueDetail({
           ScrollToLatestCommentButton（bottom-4・h-11＝下端から3.75rem）と新規作成のFAB
           （bottom-4・size-14＝下端から4.5rem）が、最下部までスクロールしたときにコメント
           入力欄の操作列へ重ならないための余白 */}
+      {/* 保留中であることと、いつ戻るか（#2398）。**スクロールの外**に置くのは、
+          一覧から消えた理由を開いた瞬間に読めるようにするため */}
+      {snoozeTarget && onSnooze && onUnsnooze && (
+        <SnoozedItemNotice
+          entry={activeSnooze}
+          target={snoozeTarget}
+          onSnooze={onSnooze}
+          onUnsnooze={onUnsnooze}
+          now={snoozeNow}
+        />
+      )}
+
       <div
         ref={scrollContainerRef}
         data-capture-scroll-bottom

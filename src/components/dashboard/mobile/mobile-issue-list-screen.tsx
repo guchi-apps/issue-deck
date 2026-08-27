@@ -13,6 +13,7 @@ import {
 } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueViewSheet } from "@/components/dashboard/mobile/mobile-issue-view-sheet";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
+import { useNow } from "@/hooks/use-now";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import { SWIPE_THRESHOLD_PX, useSwipeFilterView } from "@/hooks/use-swipe-filter-view";
 import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
@@ -34,6 +35,12 @@ import {
 } from "@/lib/manual-step-attention";
 import { formatCheckUserListCount } from "@/lib/check-user-attention";
 import { formatQuestionListCount } from "@/lib/question-attention";
+import {
+  findActiveIssueSnooze,
+  type SnoozeEntry,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 
@@ -86,6 +93,15 @@ type MobileIssueListScreenProps = {
    * ビューの件数だけで、他のビューの件数には触らない。
    */
   pinned?: { view: NavViewId; count: number; section: ReactNode };
+  /**
+   * 「いまは実施しない」として伏せた項目（#2398）。**ヘッダーの件数と`IssueList`の両方が
+   * 同じ集合を読む**ので、ここで受け取ってどちらへも配る。渡さない場合は保留の仕組みごと出さない。
+   */
+  snoozes?: SnoozeMap;
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  onUnsnooze?: (target: SnoozeTarget) => void;
+  /** 保留中で`pinned`から外したもの（#2398）。`IssueList`へそのまま渡す */
+  snoozedPinned?: { count: number; entries: SnoozeEntry[]; section: ReactNode };
   /**
    * 手作業Issue（`71.manual-step`）が、いま実行できるかどうか（#1763）。
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
@@ -146,6 +162,10 @@ export function MobileIssueListScreen({
   onCreateIssue,
   onAskCrossRepoQuestion,
   pinned,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
+  snoozedPinned,
   prerequisiteReadiness,
   checkUserRunningIssueIds,
   onStartManualStepGuide,
@@ -166,21 +186,37 @@ export function MobileIssueListScreen({
   // ビュー行・ビュー選択シートの件数は対象のビューの分を足す（スワイプ中に見える隣の
   // ビューの件数も、切り替えた後と同じ数字にするため）。
   const pinnedCount = pinned?.count ?? 0;
-  const listedCount = issues.length + (pinned?.view === view ? pinnedCount : 0);
+  // 保留中は一覧から外してあるので、ヘッダーの件数からも外す（#2398）。**判定は`IssueList`と
+  // 同じ`findActiveIssueSnooze`**で、並ぶ行数とヘッダーの数字が食い違わないようにする
+  const now = useNow();
+  const snoozeEnabled =
+    Boolean(snoozes && onSnooze) && (view === "check-user" || view === "manual-step");
+  const listedIssues = useMemo(
+    () =>
+      snoozeEnabled && snoozes
+        ? issues.filter(
+            (issue) => findActiveIssueSnooze(snoozes, issue, now) === null,
+          )
+        : issues,
+    [issues, snoozes, snoozeEnabled, now],
+  );
+  const snoozedCount =
+    issues.length - listedIssues.length + (snoozeEnabled ? (snoozedPinned?.count ?? 0) : 0);
+  const listedCount = listedIssues.length + (pinned?.view === view ? pinnedCount : 0);
   // 「ユーザーの作業待ち」だけは、メニューと同じ「いま実行できる件数」に前提待ちを添える
   // （#1763）。スマホはアイコンにカーソルを合わせられないため、内訳を読めるのはここだけ。
   // 「質問」の未確認の内訳（#1796）も同じ理由でここに出す（PCの一覧ヘッダーと同じ表記）
   // 「ユーザーの確認待ち」も同じ形で、実行中のぶんを差として添える（#2174）
   const checkUserRunningCount =
     view === "check-user" && checkUserRunningIssueIds
-      ? issues.filter((issue) => checkUserRunningIssueIds.has(issue.id)).length
+      ? listedIssues.filter((issue) => checkUserRunningIssueIds.has(issue.id)).length
       : 0;
   const countLabel =
     (view === "manual-step" && prerequisiteReadiness
-      ? formatManualStepListCount(issues, prerequisiteReadiness)
+      ? formatManualStepListCount(listedIssues, prerequisiteReadiness, snoozedCount)
       : null) ??
-    (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
-    formatCheckUserListCount(listedCount, checkUserRunningCount) ??
+    (view === "question" ? formatQuestionListCount(listedIssues, listedCount) : null) ??
+    formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedCount) ??
     `${listedCount}件`;
   const displayNavCounts = useMemo(() => {
     if (!pinned || pinned.count === 0) return navCounts;
@@ -317,6 +353,10 @@ export function MobileIssueListScreen({
         // ユーザーがマージするしかないPRは、確認待ちの一覧の先頭に出す（#1613・#1713）。
         // PC（`issue-deck-shell.tsx`のIssueList）と同じ位置・同じ内容にする
         pinnedSection={pinned?.view === view ? pinned.section : undefined}
+        snoozes={snoozes}
+        onSnooze={onSnooze}
+        onUnsnooze={onUnsnooze}
+        snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
         checkUserRunningIssueIds={checkUserRunningIssueIds}
         onStartManualStepGuide={onStartManualStepGuide}

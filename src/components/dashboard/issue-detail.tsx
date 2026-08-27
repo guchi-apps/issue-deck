@@ -7,6 +7,7 @@ import {
   FilePlus2,
   Loader2,
   MessageCircleQuestion,
+  Clock,
   MoreHorizontal,
   Pencil,
   Play,
@@ -70,6 +71,8 @@ import {
   isSessionWaitingInput,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
+import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
+import { SnoozedItemNotice } from "@/components/dashboard/snoozed-item-notice";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -90,6 +93,7 @@ import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
+import { useNow } from "@/hooks/use-now";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
@@ -145,6 +149,11 @@ import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
+import {
+  findActiveIssueSnooze,
+  type SnoozeMap,
+  type SnoozeTarget,
+} from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -173,6 +182,13 @@ type IssueDetailProps = {
   /** 同じリポジトリのコードレビュー（#698）をもう一度実行するダイアログを開く */
   onStartCodeReview: (repositoryFullName: string) => void;
   onSelectRepository: (repositoryFullName: string) => void;
+  /**
+   * 「いまは実施しない」（#2398）。一覧の行と同じ引き当て表・同じ操作を受け取る。
+   * 渡さない場合はメニュー項目も保留中の帯も出さない。
+   */
+  snoozes?: SnoozeMap;
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  onUnsnooze?: (target: SnoozeTarget) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
 };
@@ -191,8 +207,14 @@ export function IssueDetail({
   onCreateCodeReviewFindingIssue,
   onStartCodeReview,
   onSelectRepository,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
   onStartManualStepGuide,
 }: IssueDetailProps) {
+  // 保留の期限判定に使う現在時刻（#2398）。**Issueがnullでも呼ぶ**ため、他のフックと同じ
+  // 位置（早期returnより前）に置く
+  const snoozeNow = useNow();
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
@@ -633,6 +655,14 @@ export function IssueDetail({
   // 取得前の`sessions`は`[]`なので`sessionWaitingInput`は必ずfalseになり、承認欄へ送る案内を
   // 出してからRemote Controlの案内へ書き換わっていた
   const sessionStatePending = !dispatch.isLoaded;
+  // 「いまは実施しない」（#2398）。**判定は一覧と同じ`findActiveIssueSnooze`**で、
+  // 一覧から消えているのに詳細では保留中と出ない、という食い違いが起きないようにする
+  const snoozeTarget: SnoozeTarget | null = snoozes
+    ? { kind: "issue", repositoryFullName: issue.repositoryFullName, number: issue.number }
+    : null;
+  const activeSnooze = snoozes
+    ? findActiveIssueSnooze(snoozes, issue, snoozeNow)
+    : null;
   const executionTarget = resolveIssueExecutionTarget({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
@@ -780,6 +810,25 @@ export function IssueDetail({
                     <Pencil className="size-3.5" />
                     編集
                   </DropdownMenuItem>
+                  {/* 「いまは実施しない」（#2398）。**保留中は帯の側に操作があるので出さない**
+                      ——同じ画面の2か所に同じ操作を置くと、どちらが効いているのか読めない */}
+                  {snoozeTarget && onSnooze && !activeSnooze && (
+                    <SnoozeMenu
+                      target={snoozeTarget}
+                      onSnooze={onSnooze}
+                      now={snoozeNow}
+                      align="start"
+                    >
+                      <DropdownMenuItem
+                        className="whitespace-nowrap text-xs"
+                        /* メニューを閉じずに保留の選択肢を開く（`onSelect`の既定は閉じる） */
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        <Clock className="size-3.5" />
+                        いまは実施しない
+                      </DropdownMenuItem>
+                    </SnoozeMenu>
+                  )}
                   {issue.state === "open" ? (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="whitespace-nowrap text-xs" disabled={isSubmitting}>
@@ -846,6 +895,18 @@ export function IssueDetail({
             </>
           }
         />
+
+        {/* 保留中であることと、いつ戻るか（#2398）。**一覧から消えた項目を開いたとき、
+            なぜ数に入っていないのかが分かるのはここだけ** */}
+        {snoozeTarget && onSnooze && onUnsnooze && (
+          <SnoozedItemNotice
+            entry={activeSnooze}
+            target={snoozeTarget}
+            onSnooze={onSnooze}
+            onUnsnooze={onUnsnooze}
+            now={snoozeNow}
+          />
+        )}
 
         {/* 下端はpb-16（4rem）を空ける（#1793）。画面下中央に浮いている
             ScrollToLatestCommentButtonがbottom-4・md:h-7で下端から2.75remを占めるため、

@@ -5,7 +5,11 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { IssueTransferPartialError, transferIssue } from "@/lib/github/issues-api";
-import { syncRepositoryIssues, upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
+import {
+  deleteTransferredSourceIssue,
+  syncRepositoryIssues,
+  upsertIssueAndGetDisplay,
+} from "@/lib/github/sync-issues";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 async function findRepository(userId: string, repositoryFullName: string) {
@@ -61,6 +65,10 @@ async function handlePOST(request: NextRequest) {
     const token = await getInstallationToken(destinationRepository.installation.installationId);
     const transferred = await transferIssue(owner, repo, number, newOwner, newRepo, token);
     const issue = await upsertIssueAndGetDisplay(destinationRepository, transferred);
+    // 移動元の行を消す（#2406）。`upsertIssueAndGetDisplay`は移動後のIssue（GitHub上で別IDに
+    // なっている）を書くだけなので、消さないと移動元の番号・URLのまま一覧に残り続ける。
+    // `issues.transferred` Webhookでも同じ後始末をしているが、到着を待たずにここで消す。
+    await deleteTransferredSourceIssue(repository.id, number, transferred.id);
     return NextResponse.json({ issue });
   } catch (error) {
     console.error(

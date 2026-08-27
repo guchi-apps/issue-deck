@@ -91,6 +91,8 @@ function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     message: null,
     instruction: null,
     command: null,
+    placeholderValues: null,
+    resolvedCommand: null,
     manualStepLine: null,
     targetJobId: null,
     exitCode: null,

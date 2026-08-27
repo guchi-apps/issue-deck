@@ -9,6 +9,7 @@ import {
   type PendingCheckUserToast,
 } from "@/lib/check-user-notification";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import { buildSnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -279,5 +280,45 @@ describe("resolveCheckUserToasts", () => {
     });
 
     expect(ready[0].issue.title).toBe("更新後のタイトル");
+  });
+});
+
+// #2398: 件数からも一覧からも外した項目を、トーストだけが「確認してください」と言わない
+describe("resolveCheckUserToasts（保留中・#2398）", () => {
+  it("保留中のIssueは持たずに捨てる（保留は待てば解けるものではないため）", () => {
+    const pending = makePending();
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: pending.issue.repositoryFullName,
+        number: pending.issue.number,
+        until: "2099-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    const { ready, held } = resolve([pending], { snoozes });
+
+    expect(ready).toEqual([]);
+    expect(held).toEqual([]);
+  });
+
+  it("期限を過ぎた保留は効かない（通常どおり出る）", () => {
+    const pending = makePending();
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: pending.issue.repositoryFullName,
+        number: pending.issue.number,
+        // 基準時刻（`resolve`の既定 `DETECTED_AT + 1_000`）より前
+        until: new Date(DETECTED_AT - 1).toISOString(),
+      },
+    ]);
+
+    const { ready } = resolve([pending], {
+      snoozes,
+      pullRequests: [makePullRequest({ ciState: "success" })],
+    });
+
+    expect(ready.map((item) => item.id)).toEqual([pending.id]);
   });
 });

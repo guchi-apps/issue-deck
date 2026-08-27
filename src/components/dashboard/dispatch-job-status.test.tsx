@@ -18,6 +18,8 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: null,
     instruction: null,
     command: null,
+    placeholderValues: null,
+    resolvedCommand: null,
     manualStepLine: null,
     targetJobId: null,
     exitCode: null,

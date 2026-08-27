@@ -1,4 +1,4 @@
-import type { DispatchHost, DispatchJob } from "@prisma/client";
+import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
 import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -66,9 +66,11 @@ import {
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import {
   extractRunnableManualStepCommands,
+  fillManualStepPlaceholders,
   findInteractiveCommand,
   findPlaceholder,
   isSubpcManualStepDevice,
+  normalizeManualStepPlaceholderValues,
   MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
 import { parseManualStepGuide, resolveManualStepDevice } from "@/lib/manual-step-guide";
@@ -107,6 +109,7 @@ function toJobView(
   job: DispatchJob,
   issue: { id: string; title: string } | null = null,
 ): DispatchJobView {
+  const manualStepValues = parseManualStepPlaceholderValues(job.placeholderValues);
   return {
     id: job.id,
     repositoryFullName: job.repositoryFullName,
@@ -119,6 +122,13 @@ function toJobView(
     message: job.message,
     instruction: job.instruction,
     command: job.command,
+    placeholderValues: manualStepValues,
+    // **サーバー側で差し込んだ結果も渡す**（#2403）。pollerは自分でも差し込み直し、
+    // ここと一致しなければ実行しない（照合を2回行うのと同じ形の2枚目の壁）
+    resolvedCommand:
+      job.command === null || manualStepValues === null
+        ? job.command
+        : fillManualStepPlaceholders(job.command, manualStepValues),
     manualStepLine: job.manualStepLine,
     targetJobId: job.targetJobId,
     exitCode: job.exitCode,
@@ -130,6 +140,17 @@ function toJobView(
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
   };
+}
+
+/**
+ * `DispatchJob.placeholderValues`（JSON列）を、差し込みに使える形だけに絞って読む（#2403）。
+ *
+ * **DBに入っている値も信用しない。** 保存時にも`normalizeManualStepPlaceholderValues`を
+ * 通しているが、読む側で絞り直しておけば、列を手で書き換えられても差し込める形は変わらない。
+ */
+function parseManualStepPlaceholderValues(value: unknown): Record<string, string> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  return normalizeManualStepPlaceholderValues(value as Record<string, unknown>);
 }
 
 /** ISO文字列をそのままDBの日時列へ入れるための変換。渡されなければ`null`（列も`null`へ戻す） */
@@ -150,6 +171,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
+    manualStepValuesCapable: host.manualStepValuesCapable,
     planReviewCapable: host.planReviewCapable,
     codeReviewCapable: host.codeReviewCapable,
     selfUpdateCapable: host.selfUpdateCapable,
@@ -265,6 +287,8 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
             // 報告が届いていればここに入っていた値。実行ログ（`tmux attach`）の在り処なので補う
             tmuxSessionName: job.tmuxSessionName ?? launched,
             message: describeDispatchReportLost(launched),
+            // **終わったら埋めた値を捨てる**（#2403。報告で終わる経路と同じ）
+            placeholderValues: Prisma.DbNull,
           }
         : {
             status: "TIMEOUT",
@@ -274,6 +298,7 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
               job.status === "QUEUED"
                 ? describeDispatchControlTimeout()
                 : describeDispatchTimeout(job.status),
+            placeholderValues: Prisma.DbNull,
           },
     });
     expired += result.count;
@@ -786,6 +811,14 @@ export async function enqueueManualStepJob(params: {
   stepLine: number;
   /** 画面に出ていて、人が承認したコマンド。**照合専用** */
   approvedCommand: string;
+  /**
+   * 人が埋めたプレースホルダの値（#2403。`<控えたkey>`の表記 → 値）。
+   *
+   * **受け取るのは値だけで、コマンドの文字列は受け取らない。** 形は`approvedCommand`と同じく
+   * 本文から取り直したものを使い、値はその穴へ引用付きで差し込む。したがって画面から届いた
+   * 値は**リテラルの1語**にしかならず、コマンドの構造を変えられない。
+   */
+  placeholderValues?: Record<string, string> | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueManualStepJobResult> {
@@ -838,9 +871,24 @@ export async function enqueueManualStepJob(params: {
   // 失敗か打ち切りで終わる。画面（`buildManualStepRunPlan`）と同じ関数で判定するので、
   // 押せるのにここで拒否される組み合わせは生まれない
   const interactiveCommand = findInteractiveCommand(extracted.command);
-  // **穴が空いたコマンドも積まない**（#2051）。値が埋まっていないコマンドは失敗するだけでなく、
+  // **人が埋めた値を先に差し込んでから、穴の有無を見る**（#2403）。差し込むのは名前の付く
+  // `<…>`だけで、値はシェルの引用で包まれる（`fillManualStepPlaceholders`）。
+  //
+  // **判定に使うのは差し込んだ後の文字列で、「埋めた個数」では判定しない**（#2403の計画
+  // レビューG1・指摘1）。`findPlaceholder`が見るのは4種（`<…>`・`***`・`…`・`xxx`）で、
+  // 山括弧だけを数えて「全部埋まった」と見なすと、残り3種の穴が空いたまま素通りする。
+  const received = normalizeManualStepPlaceholderValues(params.placeholderValues);
+  const filledCommand =
+    received === null
+      ? extracted.command
+      : fillManualStepPlaceholders(extracted.command, received);
+  // **差し込みが実際に起きたときだけ「値付きの実行」として扱う。** 画面は開いているIssueぶんの
+  // 値をまとめて持っているので、この手順に合う穴が無ければ何も変わらない。その場合まで
+  // pollerの申告を要求すると、値と無関係な手順まで押せなくなる（修正案の適用後の実行など）
+  const placeholderValues = filledCommand === extracted.command ? null : received;
+  // **穴が空いたコマンドは積まない**（#2051）。値が埋まっていないコマンドは失敗するだけでなく、
   // `KEY=<値>`のようにシェルのリダイレクトとして解釈されて意図しない失敗の仕方をする
-  const placeholder = findPlaceholder(extracted.command);
+  const placeholder = findPlaceholder(filledCommand);
 
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
   const rejection = resolveManualStepExecutionRejection({
@@ -848,6 +896,7 @@ export async function enqueueManualStepJob(params: {
       ? {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           manualStepCapable: host.manualStepCapable,
+          manualStepValuesCapable: host.manualStepValuesCapable,
         }
       : null,
     isManualStepIssue: true,
@@ -855,6 +904,9 @@ export async function enqueueManualStepJob(params: {
     hasCommand: true,
     interactiveCommand,
     placeholder,
+    // 値を差し込む実行は、pollerの申告が真のホストにしか配らない（#2403）。古いpollerは
+    // `placeholderValues`を黙って無視し、穴が空いたままの`command`を実行してしまう
+    usesPlaceholderValues: placeholderValues !== null,
     // 二重投入はactiveKeyのunique制約が止める（下のcatch）。ここでは先読みしない
     hasActiveJob: false,
   });
@@ -876,7 +928,10 @@ export async function enqueueManualStepJob(params: {
           "MANUAL_STEP",
         ),
         requestedByUserId: params.requestedByUserId,
+        // **保存するのはテンプレート（`<…>`が入ったまま）**。本文との照合はサーバーとpollerが
+        // これで2回行い、値を差し込むのは照合を通したあと（#2403）
         command: extracted.command,
+        placeholderValues: placeholderValues ?? undefined,
         manualStepLine: params.stepLine,
       },
     });
@@ -1248,6 +1303,9 @@ export async function reportDispatchJob(params: {
     data.finishedAt = now;
     // 終了したら次のジョブを積めるようにする
     data.activeKey = null;
+    // **埋めた値は終わった時点で捨てる**（#2403）。トークン・キーが入りうるうえ、出力
+    // （`commandOutput`）と違って後から原因を追う手掛かりにならないので、残す理由が無い
+    data.placeholderValues = Prisma.DbNull;
   }
 
   // タイムアウトで既に終了扱いになったジョブへ遅れて報告が届くことがある。**上書きしない。**
@@ -1301,6 +1359,8 @@ export async function cancelDispatchJob(params: {
       activeKey: null,
       finishedAt: now,
       message: "画面から取り消されました。",
+      // **終わったら埋めた値を捨てる**（#2403。報告・失効と同じ）
+      placeholderValues: Prisma.DbNull,
     },
   });
   if (result.count === 0) {
@@ -1556,12 +1616,17 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     hosts: hosts.map((host) => toHostView(host, now)),
     // **`jobs.map(toJobView)`と書かない。** `Array#map`は第2引数にindexを渡すため、
     // それがそのまま引き当て済みのIssueとして渡ってしまう
-    jobs: jobs.map((job) =>
-      toJobView(
+    // **埋めた値は画面へ返さない**（#2403）。送ったのは画面自身だが、値はシークレットで
+    // ありうるうえ、画面が読む理由が無い（入力中の値はそのタブが持っている）。
+    // 値を必要とするのは`POST /api/dispatch/claim`で取りに来るpollerだけ
+    jobs: jobs.map((job) => ({
+      ...toJobView(
         job,
         resolvedIssues.get(issueTitleKey(job.repositoryFullName, job.issueNumber)) ?? null,
       ),
-    ),
+      placeholderValues: null,
+      resolvedCommand: null,
+    })),
     sessions: sessions.map((session) => {
       const issue =
         resolvedIssues.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null;
@@ -1604,6 +1669,8 @@ export async function announceDispatchHost(params: {
   manualStepCapable: boolean | null;
   /** 走っている代行実行を止められるか（#1882）。申告していないpollerでは`null`＝非対応 */
   manualStepAbortCapable: boolean | null;
+  /** 埋めた値を差し込んで代行実行できるか（#2403）。申告していないpollerでは`null`＝非対応 */
+  manualStepValuesCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
   /** リポジトリ全体のコードレビューを起こせるか（#698）。申告していないpollerでは`null`＝非対応 */
@@ -1649,6 +1716,7 @@ export async function announceDispatchHost(params: {
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,
+    manualStepValuesCapable: params.manualStepValuesCapable,
     planReviewCapable: params.planReviewCapable,
     codeReviewCapable: params.codeReviewCapable,
     selfUpdateCapable: params.selfUpdateCapable,

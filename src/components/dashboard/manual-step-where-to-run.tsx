@@ -75,7 +75,9 @@ export function ManualStepWhereToRun({
           </li>
         ))}
       </ol>
-      <div className="flex justify-end">
+      {/* **スマホでは全幅の1つにする**（#2403）。この並びは「コピー → ターミナルアプリで実行 →
+          戻る」の起点で、押す先が右下の小さなボタンだと片手では届きにくい。PCでは従来どおり右寄せ */}
+      <div className="flex sm:justify-end">
         <CopyAllButton lines={lines.map((line) => line.command)} />
       </div>
     </section>
@@ -142,7 +144,12 @@ function CopyAllButton({ lines }: { lines: string[] }) {
   }
 
   return (
-    <Button variant="outline" size="xs" onClick={() => void handleCopy()}>
+    <Button
+      variant="outline"
+      size="sm"
+      className="w-full sm:w-auto"
+      onClick={() => void handleCopy()}
+    >
       {state === "copied" ? <Check /> : <Copy />}
       {state === "copied"
         ? "コピーしました"
