@@ -159,8 +159,15 @@ describe("sweepCheckUserPushNotifications", () => {
    * 巡回1回ぶんのDBを差し替える。`reservedCount`は「送信済みの席を取れたか」で、
    * 0は別の巡回に先を越された状態（#2300）。
    */
-  function mockDb(options?: { reservedCount?: number; labels?: { name: string }[] }) {
-    const findSubscriptions = vi.fn().mockResolvedValue([]);
+  function mockDb(options?: {
+    reservedCount?: number;
+    labels?: { name: string }[];
+    /** 宛先として返す購読（既定は空＝誰も購読していない） */
+    subscriptions?: unknown[];
+    /** そのIssueを保留にしているユーザーの購読数（#2398。既定は0） */
+    snoozedSubscriberCount?: number;
+  }) {
+    const findSubscriptions = vi.fn().mockResolvedValue(options?.subscriptions ?? []);
     const updateMany = vi.fn().mockResolvedValue({ count: options?.reservedCount ?? 1 });
     Object.assign(db, {
       issue: {
@@ -183,7 +190,11 @@ describe("sweepCheckUserPushNotifications", () => {
       },
       sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
-      pushSubscription: { findMany: findSubscriptions },
+      // 保留（#2398）で宛先が全員消えたかを見るための件数。既定は0（誰も伏せていない）
+      pushSubscription: {
+        findMany: findSubscriptions,
+        count: vi.fn().mockResolvedValue(options?.snoozedSubscriberCount ?? 0),
+      },
     });
     return { findSubscriptions, updateMany };
   }
@@ -202,13 +213,48 @@ describe("sweepCheckUserPushNotifications", () => {
     expect(findSubscriptions).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          user: {
+          user: expect.objectContaining({
             userInstallations: { some: { installationId: "install-1" } },
             hiddenRepositories: { none: { repositoryId: "repo-1" } },
-          },
+          }),
         },
       }),
     );
+  });
+
+  it("「いまは実施しない」として伏せているユーザーの購読も宛先から外す（#2398）", async () => {
+    const { findSubscriptions } = mockDb();
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(findSubscriptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          user: expect.objectContaining({
+            NOT: {
+              snoozedItems: {
+                some: {
+                  repositoryId: "repo-1",
+                  kind: "ISSUE",
+                  number: 12,
+                  OR: [{ until: null }, { until: { gt: NOW } }],
+                },
+              },
+            },
+          }),
+        },
+      }),
+    );
+  });
+
+  it("宛先が保留で全員消えたときは送信済みにせず、次の巡回へ回す（#2398）", async () => {
+    const { updateMany } = mockDb({ subscriptions: [], snoozedSubscriberCount: 1 });
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    // 送らないだけでなく、**席も取らない**。取ると保留を解除しても二度と鳴らない
+    expect(sendPushNotification).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("送る前に「送信済み」を立てて席を取る（#2300）", async () => {
@@ -257,7 +303,10 @@ describe("sweepCheckUserPushNotifications", () => {
       },
       sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
-      pushSubscription: { findMany: vi.fn().mockResolvedValue([]) },
+      pushSubscription: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
     });
     // 送信には時間がかかる（Pushサービスへの往復）。**その間にもう1本が走る**のが
     // 実際に起きていた並びなので、送信を待たせて重ねる

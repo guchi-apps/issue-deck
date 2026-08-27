@@ -6,6 +6,7 @@ import { IssueList } from "@/components/dashboard/issue-list";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
+import { buildSnoozeMap } from "@/lib/snooze";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 /**
@@ -855,5 +856,104 @@ describe("先頭に固定したセクションの引っ張って更新（#2175�
     });
 
     expect(onPullToRefresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #2398: 「いまは実施しない」として伏せた項目を一覧・件数から外し、1行だけで知らせる
+describe("IssueListの保留（#2398）", () => {
+  const snoozedIssue = makeIssue({ number: 2 });
+
+  function snoozeMapFor(until: string | null) {
+    return buildSnoozeMap([
+      {
+        kind: "issue" as const,
+        repositoryFullName: snoozedIssue.repositoryFullName,
+        number: snoozedIssue.number,
+        until,
+      },
+    ]);
+  }
+
+  it("保留中の行は一覧から消え、件数にも足さず、1行だけで知らせる", async () => {
+    renderList({
+      view: "check-user",
+      snoozes: snoozeMapFor("2099-09-01T00:00:00.000Z"),
+      onSnooze: vi.fn(),
+      onUnsnooze: vi.fn(),
+    });
+    // `useNow`はマウント後に現在時刻を入れる（それまでは保留を判定しない）
+    await act(async () => {});
+
+    expect(screen.queryByText("#2 Issue 2")).toBeNull();
+    expect(screen.getByText("#1 Issue 1")).toBeTruthy();
+    expect(screen.getByText(/保留中が/)).toBeTruthy();
+    // ヘッダーの件数は保留中を除いた2件で、伏せたぶんは内訳としてだけ添える
+    expect(screen.getByText("2件・保留中1件")).toBeTruthy();
+  });
+
+  it("「表示」を押すと保留中の行が開き、その場で解除できる", async () => {
+    const onUnsnooze = vi.fn();
+    renderList({
+      view: "check-user",
+      snoozes: snoozeMapFor(null),
+      onSnooze: vi.fn(),
+      onUnsnooze,
+    });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "表示" }));
+    expect(screen.getByText("#2 Issue 2")).toBeTruthy();
+    expect(screen.getByText("手動で解除するまで")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "解除" }));
+    expect(onUnsnooze).toHaveBeenCalledWith({
+      kind: "issue",
+      repositoryFullName: "guchi-apps/issue-deck",
+      number: 2,
+    });
+  });
+
+  it("期限を過ぎた保留は効かない（何もしなくても一覧へ戻る）", async () => {
+    renderList({
+      view: "check-user",
+      snoozes: snoozeMapFor("2020-01-01T00:00:00.000Z"),
+      onSnooze: vi.fn(),
+      onUnsnooze: vi.fn(),
+    });
+    await act(async () => {});
+
+    expect(screen.getByText("#2 Issue 2")).toBeTruthy();
+    expect(screen.queryByText(/保留中が/)).toBeNull();
+  });
+
+  // ユーザーの決定（#2398）: 効かせるのは要対応の2ビューだけ
+  it("要対応以外のビューでは伏せず、保留にする導線も出さない", async () => {
+    renderList({
+      view: "all",
+      snoozes: snoozeMapFor(null),
+      onSnooze: vi.fn(),
+      onUnsnooze: vi.fn(),
+    });
+    await act(async () => {});
+
+    expect(screen.getByText("#2 Issue 2")).toBeTruthy();
+    expect(screen.queryByText(/保留中が/)).toBeNull();
+    expect(screen.queryAllByRole("button", { name: "保留にする" })).toHaveLength(0);
+  });
+
+  it("要対応のビューでは各行から保留にできる", async () => {
+    const onSnooze = vi.fn();
+    renderList({ view: "manual-step", snoozes: buildSnoozeMap([]), onSnooze });
+    await act(async () => {});
+
+    const buttons = screen.getAllByRole("button", { name: "保留にする" });
+    expect(buttons).toHaveLength(3);
+
+    fireEvent.click(buttons[1]);
+    fireEvent.click(screen.getByText("手動で解除するまで"));
+    expect(onSnooze).toHaveBeenCalledWith(
+      { kind: "issue", repositoryFullName: "guchi-apps/issue-deck", number: 2 },
+      null,
+    );
   });
 });

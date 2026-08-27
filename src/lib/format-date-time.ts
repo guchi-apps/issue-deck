@@ -118,3 +118,21 @@ export function formatDateOnly(value: number | string | Date): string {
   if (parts === null) return "";
   return `${parts.year}/${parts.month}/${parts.day}`;
 }
+
+/**
+ * 日本時間のその日の0:00をepoch msで返す（#2398）。`offsetDays`で前後の日へずらせる。
+ *
+ * 「明日まで伏せる」のような**日付の境界を跨ぐ時刻**を組み立てるためのもの。呼び出し側で
+ * `getDate()`を使うと実行環境のタイムゾーン（本番・CIはUTC）で境界が9時間ずれるため、
+ * ここを通す。解釈できない値は`null`。
+ */
+export function startOfJstDayMs(
+  value: number | string | Date,
+  offsetDays = 0,
+): number | null {
+  const parts = toJstParts(value);
+  if (parts === null) return null;
+  return (
+    Date.UTC(parts.year, parts.month - 1, parts.day + offsetDays, 0, 0, 0, 0) - JST_OFFSET_MS
+  );
+}

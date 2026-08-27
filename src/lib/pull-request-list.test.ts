@@ -15,12 +15,14 @@ import {
   mergeWarnings,
   pullRequestsAwaitingUserMerge,
   pullRequestsWaitingForMergeChecks,
+  splitSnoozedPullRequests,
   requiresUserMerge,
   resolvePullRequestHeader,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import { buildSnoozeMap } from "@/lib/snooze";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -887,5 +889,68 @@ describe("resolvePullRequestHeader", () => {
         detail("2026-08-01T00:05:00Z", other),
       ),
     ).toBe(listed);
+  });
+});
+
+// #2398: 「いまは実施しない」として伏せたPull Requestを一覧から外す
+describe("splitSnoozedPullRequests", () => {
+  const NOW = Date.parse("2026-08-27T12:00:00.000Z");
+
+  it("効いている保留を持つPRだけを分ける", () => {
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "pull-request",
+        repositoryFullName: "guchi-apps/issue-deck",
+        number: 1,
+        until: "2026-09-01T00:00:00.000Z",
+      },
+    ]);
+
+    const result = splitSnoozedPullRequests(
+      [pullRequest({ number: 1 }), pullRequest({ number: 2 })],
+      snoozes,
+      NOW,
+    );
+
+    expect(result.listed.map((pr) => pr.number)).toEqual([2]);
+    expect(result.snoozed.map((pr) => pr.number)).toEqual([1]);
+  });
+
+  it("期限を過ぎた保留は効かない（何もしなくても一覧へ戻る）", () => {
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "pull-request",
+        repositoryFullName: "guchi-apps/issue-deck",
+        number: 1,
+        until: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
+
+    const result = splitSnoozedPullRequests([pullRequest({ number: 1 })], snoozes, NOW);
+
+    expect(result.listed.map((pr) => pr.number)).toEqual([1]);
+    expect(result.snoozed).toEqual([]);
+  });
+
+  it("同じ番号のIssueを伏せていてもPRは伏せない（種別で分けている）", () => {
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: "guchi-apps/issue-deck",
+        number: 1,
+        until: null,
+      },
+    ]);
+
+    const result = splitSnoozedPullRequests([pullRequest({ number: 1 })], snoozes, NOW);
+
+    expect(result.snoozed).toEqual([]);
+  });
+
+  it("保留が1件も無ければ元の配列をそのまま返す", () => {
+    const pullRequests = [pullRequest({ number: 1 })];
+    expect(splitSnoozedPullRequests(pullRequests, buildSnoozeMap([]), NOW).listed).toBe(
+      pullRequests,
+    );
   });
 });

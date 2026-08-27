@@ -330,6 +330,10 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  * 「回答が届いていてまだ読んでいない」という合図はオレンジの丸（`computeQuestionAttention`）に
  * 残してあり、件数の内訳は一覧ヘッダーの`formatQuestionListCount`（`3件・未確認1件`）で読む。
  *
+ * **要対応の2ビュー（`check-user`・`manual-step`）は、保留中の項目も外す**（#2398。
+ * `lib/snooze.ts`）。ユーザーが「いまは実施しない」と決めたものは、いま手を動かせば減る数には
+ * 入らない。消えたことは一覧の1行（`describeSnoozeResume`）で読める。
+ *
  * **「ユーザーの確認待ち」（`check-user`）は、まだエージェントが動いているものを外す**
  * （#2174。`lib/check-user-attention.ts`）。`00.check-user`が付いていてもCI・自動マージ判定・
  * サブPCのセッションが動いている間は押せる操作が無く、数えるとオレンジの丸が「手を動かせば
@@ -344,6 +348,10 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  * @param checkUserRunningIssueIds まだエージェントが動いている確認待ちIssueのid（#2174）。
  *   **省略時は従来どおり全件を数える**——材料（PR一覧・セッション）を持たない呼び出し元
  *   （リポジトリ別の一覧など）で、判定できないことを理由に件数を減らさないため。
+ * @param snoozedIssueIds ユーザーが「いまは実施しない」として伏せたIssueのid（#2398。
+ *   `selectSnoozedIssueIds`）。**引くのは要対応の2ビューだけ**——保留は「上から順に手を
+ *   動かせば盤面が進む」枠の読み方を守るための仕掛けで、「すべてのIssue」や進捗のビューから
+ *   まで消すと、伏せたIssueがどこにも出てこなくなる。同上、省略時は従来どおり全件を数える。
  */
 export function computeNavCountsForFilters(
   issues: Issue[],
@@ -351,6 +359,7 @@ export function computeNavCountsForFilters(
   currentUserLogin: string | null,
   referenceIssues: Issue[] = issues,
   checkUserRunningIssueIds?: ReadonlySet<string>,
+  snoozedIssueIds?: ReadonlySet<string>,
 ): Record<NavViewId, number> {
   const counts = {} as Record<NavViewId, number>;
   for (const view of navViews) {
@@ -359,7 +368,13 @@ export function computeNavCountsForFilters(
       issues,
       view.defaultState === "all" ? { ...viewFilters, state: "all" } : viewFilters,
     );
-    const matched = filterIssuesByView(base, view.id, currentUserLogin, referenceIssues);
+    const all = filterIssuesByView(base, view.id, currentUserLogin, referenceIssues);
+    // 保留中を引くのは要対応の2ビューだけ（#2398）。一覧の側も同じ集合で伏せるので、
+    // メニューの数と並んでいる行数は食い違わない
+    const matched =
+      snoozedIssueIds && (view.id === "check-user" || view.id === "manual-step")
+        ? all.filter((issue) => !snoozedIssueIds.has(issue.id))
+        : all;
     counts[view.id] =
       view.id === "manual-step"
         ? computeManualStepAttention(matched, referenceIssues).actionable

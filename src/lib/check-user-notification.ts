@@ -1,5 +1,6 @@
 import { checkUserReason, isApprovalPending } from "@/lib/github/approval-labels";
 import { isMergeWaitingForChecks } from "@/lib/pull-request-list";
+import { findActiveIssueSnooze, type SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -108,6 +109,13 @@ export type ResolveCheckUserToastsInput = {
    * （`IssueDeckShell`）だけ。ここで取りに行くと、通知の組み立てがデータの取得を抱えることになる。
    */
   runningIssueIds?: ReadonlySet<string>;
+  /**
+   * ユーザーが「いまは実施しない」として伏せた項目（#2398）。**保留中は捨てる**
+   * （持つのではなく出さずに終える）——保留は人の意思で、CIの完了のように待てば解けるものでは
+   * ないため、保留の期限まで持ち続けても意味が無い。期限が過ぎた後に新しく`00.check-user`が
+   * 付き直せば、そのときは通常どおり出る。省略時は従来どおり全件を出す。
+   */
+  snoozes?: SnoozeMap;
   now: number;
 };
 
@@ -121,7 +129,7 @@ export function resolveCheckUserToasts(
   pending: readonly PendingCheckUserToast[],
   input: ResolveCheckUserToastsInput,
 ): CheckUserToastResolution {
-  const { issues, pullRequests, pullRequestsFetchedAt, runningIssueIds, now } = input;
+  const { issues, pullRequests, pullRequestsFetchedAt, runningIssueIds, snoozes, now } = input;
   const issuesById = new Map(issues.map((issue) => [issue.id, issue] as const));
   const ready: PendingCheckUserToast[] = [];
   const held: PendingCheckUserToast[] = [];
@@ -130,6 +138,9 @@ export function resolveCheckUserToasts(
     const latest = issuesById.get(item.issue.id);
     // 確認待ちが解けた（ラベルが外れた）ものは通知しない
     if (latest && !isApprovalPending(latest.labels)) continue;
+    // 保留中のものも通知しない（#2398）。件数からも一覧からも外している以上、
+    // トーストだけが「確認してください」と言うのは筋が通らない
+    if (snoozes && findActiveIssueSnooze(snoozes, latest ?? item.issue, now)) continue;
 
     const resolved = latest ? { ...item, issue: latest } : item;
     const { issue } = resolved;

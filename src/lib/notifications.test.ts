@@ -10,6 +10,7 @@ import {
   type NotificationItem,
 } from "@/lib/notifications";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import { buildSnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -597,5 +598,54 @@ describe("バッジの件数（#1936）", () => {
     expect(describeNotificationCount(withoutManualStep)).toBe("1件");
 
     expect(describeNotificationCount([])).toBe("0件");
+  });
+});
+
+// #2398: 件数からも一覧からも外した項目を、ベルだけが呼び出さないようにする
+describe("buildNotifications 保留中", () => {
+  const NOW = Date.parse("2026-08-27T12:00:00.000Z");
+
+  it("保留中の確認待ちは出さない", () => {
+    const issue = makeIssue({ id: "check", number: 4, labels: [label("00.check-user")] });
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: issue.repositoryFullName,
+        number: issue.number,
+        until: "2026-09-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(build({ issues: [issue], snoozes, now: NOW })).toEqual([]);
+    // 保留を渡さなければ今までどおり出る
+    expect(build({ issues: [issue] })).toHaveLength(1);
+  });
+
+  it("保留中の手作業待ちも出さない", () => {
+    const issue = makeIssue({ id: "manual", number: 5, labels: [label("71.manual-step")] });
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: issue.repositoryFullName,
+        number: issue.number,
+        until: null,
+      },
+    ]);
+
+    expect(build({ issues: [issue], snoozes, now: NOW })).toEqual([]);
+  });
+
+  it("期限を過ぎた保留は効かない（通常どおり通知へ戻る）", () => {
+    const issue = makeIssue({ id: "check", number: 4, labels: [label("00.check-user")] });
+    const snoozes = buildSnoozeMap([
+      {
+        kind: "issue",
+        repositoryFullName: issue.repositoryFullName,
+        number: issue.number,
+        until: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(build({ issues: [issue], snoozes, now: NOW })).toHaveLength(1);
   });
 });

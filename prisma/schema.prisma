@@ -33,6 +33,7 @@ model User {
   favoriteIssues       FavoriteIssue[]
   commentReads         IssueCommentRead[]
   pushSubscriptions    PushSubscription[]
+  snoozedItems         SnoozedItem[]
 }
 
 // --- GitHub App 連携 ---
@@ -108,6 +109,7 @@ model Repository {
   issues       Issue[]
   hiddenBy     HiddenRepository[]
   favoritedBy  FavoriteRepository[]
+  snoozedItems SnoozedItem[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -253,6 +255,41 @@ model FavoriteIssue {
 
   @@unique([userId, issueId])
   @@index([issueId])
+}
+
+// 保留の対象（#2398）。IssueとPull Requestは同じリポジトリの番号空間なので、
+// 種別と番号の組で1つのテーブルに載せる。
+enum SnoozeTargetKind {
+  ISSUE
+  PULL_REQUEST
+}
+
+// ユーザーごとに「いまは実施しない」として伏せた要対応の項目（#2398）。
+//
+// **Issueへの外部キーは張らない。** 対象にはマージ待ちのPull Requestも含まれ、そちらは
+// DBに行を持たない（GitHubから都度取得する）。IssueだけFKにすると同じ機能が2つの
+// テーブルに割れるため、`repositoryId` + `kind` + `number`で両方を指す。
+//
+// `until`がnullなら「手動で解除するまで」。過ぎた行は消さずに残し、
+// 有効かどうかの判定は`src/lib/snooze.ts`の純粋関数が現在時刻を見て行う
+// （件数・一覧・通知が同じ関数を通る）。
+model SnoozedItem {
+  id           String           @id @default(cuid())
+  userId       String
+  repositoryId String
+  kind         SnoozeTargetKind
+  number       Int
+  // 保留が解けて件数・通知へ戻る時刻。nullは「手動で解除するまで」
+  until        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId, kind, number])
+  @@index([repositoryId])
 }
 
 // ユーザーごとに、Issueのコメントを何件まで読んだか（未読コメント判定用）

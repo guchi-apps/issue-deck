@@ -4,6 +4,7 @@ import type {
   MergeJudgement,
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
+import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -441,6 +442,39 @@ export function pullRequestsWaitingForMergeChecks(
   return pullRequestsRequiringUserMerge(pullRequests, checkUserIssues).filter(
     isMergeWaitingForChecks,
   );
+}
+
+/**
+ * 「いまは実施しない」として伏せたPull Requestを一覧から外す（#2398）。
+ *
+ * **`pullRequestsAwaitingUserMerge`の結果へ後から掛ける。** 母集団を絞る側（`requiresUserMerge`）へ
+ * 混ぜると、CI・判定の完了待ちの件数（`pullRequestsWaitingForMergeChecks`）からも消えてしまい、
+ * 「終わればここに並びます」と言いながら永久に並ばないPRが出る。伏せるのは押せる状態のものだけ。
+ *
+ * @param snoozes 引き当て表（`buildSnoozeMap`）
+ * @param now 現在時刻(epoch ms)
+ */
+export function splitSnoozedPullRequests(
+  pullRequests: PullRequestSummary[],
+  snoozes: SnoozeMap,
+  now: number,
+): { listed: PullRequestSummary[]; snoozed: PullRequestSummary[] } {
+  if (snoozes.size === 0) return { listed: pullRequests, snoozed: [] };
+  const listed: PullRequestSummary[] = [];
+  const snoozed: PullRequestSummary[] = [];
+  for (const pullRequest of pullRequests) {
+    const entry = findActiveSnooze(
+      snoozes,
+      {
+        kind: "pull-request",
+        repositoryFullName: pullRequest.repositoryFullName,
+        number: pullRequest.number,
+      },
+      now,
+    );
+    (entry ? snoozed : listed).push(pullRequest);
+  }
+  return { listed, snoozed };
 }
 
 /** 判定中でマージボタンを押せないときに、ボタンへ出す短い表示（#1968） */
