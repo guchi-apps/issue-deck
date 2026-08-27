@@ -1,4 +1,4 @@
-import { collectShellBlocks } from "@/lib/manual-step-command";
+import { collectShellBlocks, findInteractiveCommand } from "@/lib/manual-step-command";
 import {
   matchManualStepDeviceNames,
   parseManualStepGuide,
@@ -101,6 +101,7 @@ export function checkManualStepBody(
   findings.push(...checkDevice(guide));
   findings.push(...checkTodo(sections, guide));
   findings.push(...checkVerification(sections, guide));
+  findings.push(...checkSecretCommands(sections, guide));
   findings.push(...checkRelatedReferences(sections, options.repositoryFullName));
 
   return findings;
@@ -297,6 +298,62 @@ function checkVerification(
       message: "`## 完了の確認方法`に実行できるコマンド（```bash のコードブロック）がありません。ここに置いたコマンドだけが代行実行と定期巡回の対象になり、「チェックは付いているが実施されていない」を画面から拾えます。手順と1対1で、効いていなければ終了コードが0にならないコマンドを並べてください。",
     },
   ];
+}
+
+/**
+ * 1Passwordを扱うコマンドが、代行実行できる書き方になっているか（#2401）。
+ *
+ * **`op signin`は、ほとんどの手作業では要らない。** サブPCには書き込み権限つきの
+ * サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、1Passwordへの書き込みも
+ * 読み取りも非対話で通る（#1874）。それでも`op signin`から書き始めた手作業Issueが積み上がって
+ * いたのは、#1874でできるようになったことが雛形に書かれていなかったため——openだった10件のうち
+ * 4件（`guchi-apps/aide#174`・`aide-bot#83`・`myroom#263`・`issue-deck#2397`）が同じ形だった。
+ *
+ * 落ちる機能は代行実行そのもの。`op signin`は`findInteractiveCommand`が対話ありと判定するので
+ * その項目が「あなたが実行」になり、`scripts/sync-github-secrets.sh`をそのまま置いた手順は
+ * 押せるのに実行時へ倒れる（代行実行のシェルは`dispatch.env`しか読み込まないため、
+ * 1Passwordのセッションもサービスアカウントのトークンも無い）。
+ *
+ * **どちらも`warning`にとどめる。** 端末の前の人が自分で実行する手順（メインPCでの作業など）は
+ * この書き方でも動くため、`error`にすると直しようのない指摘が正しい本文へ出続ける。
+ *
+ * **判定は`findInteractiveCommand`をそのまま通す**（自前で文字列を見ない）。画面の代行可否と
+ * 別の条件をここに持つと、「指摘は出ないのに押せない」が生まれる。
+ */
+function checkSecretCommands(
+  sections: ReturnType<typeof splitManualStepSections>,
+  guide: ReturnType<typeof parseManualStepGuide>,
+): ManualStepBodyFinding[] {
+  const commands = guide.steps.flatMap((step) => collectShellBlocks(step.markdown));
+  const verification = sections.find((entry) => entry.key === "verification");
+  if (verification) commands.push(...collectShellBlocks(verification.lines.join("\n")));
+
+  const findings: ManualStepBodyFinding[] = [];
+
+  const signin = commands.filter((command) => findInteractiveCommand(command) === "op signin");
+  if (signin.length > 0) {
+    findings.push({
+      rule: "op-signin-in-command",
+      severity: "warning",
+      message: `\`op signin\`を含むコマンドが${signin.length}件あります。対話が要るコマンドはその項目まるごとが代行実行から外れますが、1Passwordの読み書きはサブPCの書き込み用トークンで代行できます（書き込みと同期は\`cd ~/apps/issue-deck && scripts/provision-secret.sh --repo <owner/repo> --key <KEY> …\`、読み取りは\`set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read '<op://…>'\`）。`,
+    });
+  }
+
+  const localSync = commands.filter(
+    (command) =>
+      command.includes("sync-github-secrets.sh") &&
+      !command.includes("op-writer.env") &&
+      !command.includes("provision-secret.sh"),
+  );
+  if (localSync.length > 0) {
+    findings.push({
+      rule: "local-secret-sync",
+      severity: "warning",
+      message: `\`scripts/sync-github-secrets.sh\`をそのまま実行するコマンドが${localSync.length}件あります。代行実行のシェルには1Passwordのセッションが無いため、サブPCで代行すると「opにサインインしていません」で失敗します。\`scripts/provision-secret.sh --repo <owner/repo> --key <KEY> --sync-only\`（書き込み用トークンを読み込んで同じ同期を行う）へ書き換えるか、画面の「シークレットの同期」から実行してください。`,
+    });
+  }
+
+  return findings;
 }
 
 /** `## 関連`の参照が`#番号`形式か（URLは参照抽出に一致しない） */

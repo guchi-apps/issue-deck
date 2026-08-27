@@ -1490,6 +1490,23 @@ describe("resolveManualStepExecutionRejection", () => {
     ).toContain("op signin");
   });
 
+  // `op signin`だけは書き換えれば代行できる（#2401・#1874）。人が「自分で実行するしかない」と
+  // 受け取って毎回手で実行していたため、書き換え先を理由文へ出す
+  it("`op signin`のときだけ、書き換え先を理由文に添える", () => {
+    expect(
+      describeManualStepExecutionRejection("interactive_command", {
+        hostName: "subpc",
+        interactiveCommand: "op signin",
+      }),
+    ).toContain("provision-secret.sh");
+    expect(
+      describeManualStepExecutionRejection("interactive_command", {
+        hostName: "subpc",
+        interactiveCommand: "gh auth login",
+      }),
+    ).not.toContain("provision-secret.sh");
+  });
+
   // 値が埋まっていないコマンドも、更新すれば押せるようになるものではない（#2051）
   it("プレースホルダを含むコマンドはホストの理由より先に出す", () => {
     expect(

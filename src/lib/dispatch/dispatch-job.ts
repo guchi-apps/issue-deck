@@ -7,6 +7,9 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchHostLaunchHold, DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
+// 対話が要るコマンドの表記は`manual-step-command.ts`が持つ（判定もそちら）。ここでは
+// 理由文の出し分けに使うためだけに`op signin`の表記を借りる（#2401）
+import { OP_SIGNIN_COMMAND } from "@/lib/manual-step-command";
 
 /**
  * サブPCへのディスパッチ（#1179）で使う純粋関数と定数。
@@ -711,13 +714,20 @@ export function describeManualStepExecutionRejection(
       // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
       // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
       return "この手順は代行できません。実行するコマンドのブロックがちょうど1つ書かれている手順だけを代行します。";
-    case "interactive_command":
+    case "interactive_command": {
       // **代行できるようになる見込みが無い理由**（`device_not_subpc`と同じ立場）。
       // 代行実行のシェルには標準入力が無く、サインインの答えを渡せない。ここだけは人が
       // 実行して、続きは自動実行に任せてもらう（#2025）
-      return context.interactiveCommand
+      const head = context.interactiveCommand
         ? `この手順には対話が必要なコマンド（${context.interactiveCommand}）が含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`
         : `この手順には対話が必要なコマンドが含まれるため代行できません。${formatDispatchHostName(context.hostName)} の端末で実行してから、続きへ進めてください。`;
+      // **`op signin`だけは、書き換えれば代行できる**（#2401）。サブPCには書き込み権限つきの
+      // サービスアカウントがあり、1Passwordの読み書きは非対話で通る（#1874）。ここへ出すのは、
+      // 人が「自分で実行するしかない」と受け取って毎回手で実行してしまうため
+      return context.interactiveCommand === OP_SIGNIN_COMMAND
+        ? `${head}なお、1Passwordの読み書きは\`scripts/provision-secret.sh\`（サブPCの書き込み用トークンを使う）へ書き換えると代行できます。`
+        : head;
+    }
     case "placeholder_command":
       // **代行できるようになる見込みが無い理由**（`interactive_command`と同じ立場）。
       // 値が埋まっていないコマンドは、積んでも失敗するか——`KEY=<値>`のように

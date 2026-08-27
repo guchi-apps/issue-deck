@@ -1333,6 +1333,28 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
   プレースホルダを含む手順は代行実行の対象から外れ、「あなたが実行」として並ぶ（#2051）。
   `$HOME`のような**実在の環境変数参照は埋める箇所として扱われない**ので、値を埋めてほしい
   ところは必ず`<…>`にする
+- **1Passwordへの書き込みとGitHub secretへの同期に`op signin`を書かない**（#2401）。サインインは
+  対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。サブPCには書き込み権限つきの
+  サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、次のコマンドが1Passwordへの
+  書き込み・GitHubのsecretへの同期・本番への反映までを通しで行う（#1874）。**対象キーの行が
+  `.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側のPull Requestの仕事
+
+  ```bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --generate hex32
+  ```
+
+  値の出どころで使い分ける。ブラウザ等で発行した値を渡すなら`--from-stdin`、1Passwordへ既に
+  入れてあって同期だけなら`--sync-only`、本番への反映を別の経路で行うなら`--no-deploy`、
+  デプロイの完了待ちが5分の打ち切りに掛かりそうなら`--no-wait`を足す。
+  organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`を足す
+- **`op read`だけの手順・確認にも`op signin`を書かない**（#2401）。代行実行のシェルには
+  1Passwordのセッションが無いので、読むときも上と同じトークンを読み込む。`op signin`を書くと、
+  読むだけの確認まで人の実行になる
+
+  ```bash
+  set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/<item>/<field>' >/dev/null && echo ok
+  ```
+
 - **`## 完了の確認方法`は、`## やること`の手順と1対1のコマンドで書く**（#2256）。手順を実行した
   かどうかではなく、**実行した結果が入っているか**を確かめるコマンドを、手順ぶん並べる。
   ここに置いたコマンドだけが手作業アシスタントの代行実行と定期巡回（#2008）の対象になり、
@@ -1391,7 +1413,7 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
   **スタブの`gh issue comment`は、本文が空の`--body-file`をGitHubと同じように拒否する**——
   黙って成功させると#2106の失敗経路をテストで踏めないため
 
-いま見ている規則は次の7つ。
+いま見ている規則は次の10件。
 
 | 規則 | 重さ | 崩れると落ちるもの |
 | --- | --- | --- |
@@ -1401,6 +1423,9 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
 | `## 前提条件`の項目が折り返していないか | `warning` | 続きの行は項目として読まれず、値が途中で切れる |
 | `## やること`がチェックリストで割れているか | `warning` | 割れていないと節まるごとが1ステップになる（#1486） |
 | 1手順のコードブロックがちょうど1つか | `error` | 2つ以上ある手順は代行実行の対象から外れる（`extractShellBlock`） |
+| `## 完了の確認方法`に実行できるコマンドがあるか | `warning` | 代行実行と定期巡回の対象が1件も無くなる（#2256） |
+| `op signin`を含むコマンドが無いか | `warning` | その項目まるごとが代行実行から外れる（#2401） |
+| `scripts/sync-github-secrets.sh`をそのまま実行していないか | `warning` | 代行実行のシェルには1Passwordのセッションが無く、実行時に失敗する（#2401） |
 | `## 関連`の参照が`#番号`形式か | `error` | `REFERENCE_PATTERN`はURLに一致せず、実施順序の表示から落ちる |
 
 
@@ -1429,6 +1454,48 @@ Issueのopen・editedで本文を検査し、指摘があればマーカー付�
 その項目を「あなたが実行」として並べ、自動実行はそこで止まって人へ返す（実行し終えて
 「実行した・次へ」を押すと、残りの手順は自動で流れる）。分けて書くと、人が`op signin`だけを
 実行したところで続きの代行実行はそのセッションを引き継げず、必ず失敗する。
+
+#### 1Passwordを扱う手順に`op signin`を書かない（#2401）
+
+**そもそも`op signin`はほとんどの手順で要らない。** サブPCには書き込み権限つきの
+サービスアカウント（`~/.config/issue-deck/op-writer.env`。`apps:read_items,write_items`）が
+置いてあり、1Passwordへの書き込みも読み取りも非対話で通る（#1874）。それでも
+`op signin`を書いた手作業Issueが積み上がっていたのは、**#1874でできるようになったことが
+手作業Issueの雛形へ書かれていなかった**ため。open だった10件のうち4件
+（`guchi-apps/aide#174`・`aide-bot#83`・`myroom#263`・`issue-deck#2397`）がこの形で、
+どれも「1Passwordへ値を入れて GitHub secret へ同期する」という同じ手順だった。
+
+- **発行から本番反映までは`scripts/provision-secret.sh`（#1874）で1コマンドになる。**
+  値の生成 → 1Passwordへ書く → GitHubのsecretへ同期 → デプロイ、までを通しで行う。
+  対象キーの行が`.github/secrets-manifest.tsv`にあることが前提で、行を足すのは実装側のPR
+
+  ```bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_DAYSPAN_TOKEN --copy-from 'op://apps/dayspan/internal-api-key'
+  ```
+
+  値の出どころは`--generate`（生成）・`--from-stdin`（渡す）・`--copy-from`（写す）・
+  `--sync-only`（1Passwordの既存値をそのまま同期する）から1つだけ選ぶ。
+  organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`を足す（#2401）
+- **同期だけを行いたいときは、画面のボタン（設定 → シークレットの同期。#1309）でもよい。**
+  こちらはActionsの中でサービスアカウントが読むので、やはり`op signin`が要らない。ただし
+  ボタンを押すのは人なので、手作業Issueの手順としては`provision-secret.sh --sync-only`の
+  ほうが自動実行に載る。どちらも1Passwordの日次枠（アカウント全体で1,000リクエスト/日。
+  #1302）を消費するため、**変更したキーだけに絞る**（`--only` / `--key`）
+- **`op read`だけの確認にも`op signin`は要らない。** 代行実行のシェル（`run-manual-step.sh`）は
+  `~/.config/issue-deck/dispatch.env`しか読み込まないので、1Passwordのセッションもサービス
+  アカウントのトークンも入っていない。読むときも書き込み用のトークンを読み込む
+
+  ```bash
+  set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/aide/dayspan-token' >/dev/null && echo ok
+  ```
+
+- **人が行うのは「値の発行そのもの」だけになる。** ブラウザでのトークン発行・チャンネル作成は
+  代行できないため、そこは`（ブラウザ）`の手順として残る。1Passwordへ入れる手順は、発行した
+  値を`--from-stdin`で渡す形（プレースホルダを含むため「あなたが実行」）にするか、
+  ブラウザで1Passwordへ入れてから`--sync-only`で同期する形にする
+- 本文にこれらが守られていないコマンドがあると、issue-deckの本文検査
+  （`src/lib/manual-step-body-check.ts`）が起票・編集のたびに指摘を返す（`op-signin-in-command`・
+  `local-secret-sync`）
 
 #### 「この作業でできるようになること」を先頭に置く理由（#1730）
 

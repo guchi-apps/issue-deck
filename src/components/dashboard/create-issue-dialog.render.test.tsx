@@ -770,7 +770,9 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
 
     await generateAsQuestion();
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    // scrollIntoViewはpassive effectで呼ばれるため、テキストの描画（generateAsQuestion内のwaitFor）
+    // より後のタイミングでコミットされることがある（#2401）。ここもwaitForで待つ
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
     vi.restoreAllMocks();
   });
 

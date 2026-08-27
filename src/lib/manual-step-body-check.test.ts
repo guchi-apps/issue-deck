@@ -226,3 +226,53 @@ describe("関連の参照", () => {
     expect(rules(body)).toEqual([]);
   });
 });
+
+describe("1Passwordを扱うコマンド", () => {
+  // openだった4件（guchi-apps/aide#174・aide-bot#83・myroom#263・issue-deck#2397）が
+  // どれもこの形で、手作業アシスタントの自動実行がそこで止まっていた（#2401）
+  it("`op signin`を含む手順は、書き換え先とあわせてwarningで指摘する", () => {
+    const body = templateBody().replace(
+      "（その手順で実行するコマンド）",
+      "cd ~/apps/aide && eval $(op signin) && scripts/sync-github-secrets.sh --only AIDE_DAYSPAN_TOKEN",
+    );
+    const findings = checkManualStepBody(body);
+    const signin = findings.find((finding) => finding.rule === "op-signin-in-command");
+    expect(signin?.severity).toBe("warning");
+    expect(signin?.message).toContain("provision-secret.sh");
+    // 同じコマンドはローカル同期でもあるため、両方の指摘が出る
+    expect(findings.map((finding) => finding.rule)).toContain("local-secret-sync");
+  });
+
+  it("`## 完了の確認方法`の`op signin`も拾う", () => {
+    const body = templateBody().replace(
+      "（確かめるコマンド。効いていなければ終了コードが0にならないもの）",
+      "eval $(op signin) && op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
+    );
+    expect(rules(body)).toEqual(["op-signin-in-command"]);
+  });
+
+  it("ローカルの同期スクリプトをそのまま置いた手順を指摘する", () => {
+    const body = templateBody().replace(
+      "（その手順で実行するコマンド）",
+      "cd ~/apps/aide && scripts/sync-github-secrets.sh --only AIDE_DAYSPAN_TOKEN",
+    );
+    const finding = checkManualStepBody(body).find(
+      (entry) => entry.rule === "local-secret-sync",
+    );
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.message).toContain("--sync-only");
+  });
+
+  it("書き込み用トークンを使う書き方は指摘しない", () => {
+    const body = templateBody()
+      .replace(
+        "（その手順で実行するコマンド）",
+        "cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_DAYSPAN_TOKEN --sync-only",
+      )
+      .replace(
+        "（確かめるコマンド。効いていなければ終了コードが0にならないもの）",
+        "set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
+      );
+    expect(rules(body)).toEqual([]);
+  });
+});

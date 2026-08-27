@@ -64,6 +64,28 @@
   プレースホルダを含む手順は代行実行の対象から外れ、「あなたが実行」として並ぶ（#2051）。
   `$HOME`のような**実在の環境変数参照は埋める箇所として扱われない**ので、値を埋めてほしい
   ところは必ず`<…>`にする
+- **1Passwordへの書き込みとGitHub secretへの同期に`op signin`を書かない**（#2401）。サインインは
+  対話が要るため、書いた時点でその手順まるごとが代行実行から外れる。サブPCには書き込み権限つきの
+  サービスアカウント（`~/.config/issue-deck/op-writer.env`）があり、次のコマンドが1Passwordへの
+  書き込み・GitHubのsecretへの同期・本番への反映までを通しで行う（#1874）。**対象キーの行が
+  `.github/secrets-manifest.tsv`にあること**が前提で、行を足すのは実装側のPull Requestの仕事
+
+  ```bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/<repo> --key <KEY> --generate hex32
+  ```
+
+  値の出どころで使い分ける。ブラウザ等で発行した値を渡すなら`--from-stdin`、1Passwordへ既に
+  入れてあって同期だけなら`--sync-only`、本番への反映を別の経路で行うなら`--no-deploy`、
+  デプロイの完了待ちが5分の打ち切りに掛かりそうなら`--no-wait`を足す。
+  organizationの共通値は`--manifest .github/org-secrets-manifest.tsv`を足す
+- **`op read`だけの手順・確認にも`op signin`を書かない**（#2401）。代行実行のシェルには
+  1Passwordのセッションが無いので、読むときも上と同じトークンを読み込む。`op signin`を書くと、
+  読むだけの確認まで人の実行になる
+
+  ```bash
+  set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/<item>/<field>' >/dev/null && echo ok
+  ```
+
 - **`## 完了の確認方法`は、`## やること`の手順と1対1のコマンドで書く**（#2256）。手順を実行した
   かどうかではなく、**実行した結果が入っているか**を確かめるコマンドを、手順ぶん並べる。
   ここに置いたコマンドだけが手作業アシスタントの代行実行と定期巡回（#2008）の対象になり、
