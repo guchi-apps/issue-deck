@@ -82,6 +82,8 @@
 #   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
 #   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
+#   DISPATCH_FAST_POLL_INTERVAL_SECONDS
+#                                   枠外ジョブだけを取りに行く軽い巡回の秒数（省略時は3・0で無効）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は20・0で無効）
 #   SESSION_RESUME_ENABLED          APIエラーで中断したセッションの自動再開（省略時は1・0で無効）
@@ -270,6 +272,21 @@ require_non_negative_int() {
 # 始まるまで」と「実行キューに出る使用率の古さ」の上限になる。1巡でissue-deckへ行くのは
 # HTTP 2回・DBクエリ数件なので、倍にしても負荷は無視できる。
 POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 30)"
+
+# 枠外のジョブだけを取りに行く軽い巡回の間隔（#2413）。**0で無効。**
+#
+# 上の巡回は回収・申告・巡回検知まで含んでおり、起動ジョブが無い巡でも実処理だけで実測約14秒
+# かかる（起動ジョブがある巡は`launch_and_report`を前景で待つのでさらに長い）。手作業の
+# 代行実行（#1828・#1869）は1手順ごとにジョブを積み直すため、この待ちが手順の数だけ積み上がる
+# ——かといって`DISPATCH_POLL_INTERVAL_SECONDS`を短くすると、重い処理まで一緒に速くなる。
+# そこで待ち時間をこの間隔で刻み、その合間に`claim`だけを叩く（`claim_out_of_band`）。
+#
+# **重い巡回より短いときだけ働く。** 同じか長い値は「刻まない」と同じ意味なので無効に倒す。
+FAST_POLL_INTERVAL="$(require_non_negative_int DISPATCH_FAST_POLL_INTERVAL_SECONDS "${DISPATCH_FAST_POLL_INTERVAL_SECONDS:-}" 3)"
+if [[ "$FAST_POLL_INTERVAL" -ge "$POLL_INTERVAL" ]]; then
+  FAST_POLL_INTERVAL=0
+fi
+
 LAUNCH_TIMEOUT="$(require_positive_int DISPATCH_LAUNCH_TIMEOUT_SECONDS "${DISPATCH_LAUNCH_TIMEOUT_SECONDS:-}" 900)"
 
 # 生かしておく実装セッションの上限（#1361）。
@@ -2319,6 +2336,66 @@ run_once() {
   return 0
 }
 
+# --- 軽い巡回（#2413）----------------------------------------------------------
+# 上の`run_once`から**ジョブの取得だけ**を抜き出したもの。重い巡回の待ち時間の合間に呼ぶ。
+#
+# **取りに行くのは枠外のジョブだけ**（`maxJobs: 0`）。手作業の代行実行・停止・追加指示・
+# チェックアウトの更新はtmuxを叩くか別のcgroupへ逃がすだけで、枠も本数も消費しない。
+# 一方、セッションを立てる起動ジョブは、払い出してよいかの判定が`announce`がこの巡の入口で
+# 集めた使用率（#2095）と生きている本数（#1361）に依存する——それらは重い巡回でしか
+# 更新されないので、ここで取りに行くと古い材料で判定することになる。立ち上がりに分単位
+# かかる以上、数十秒早く取りに行く利得も小さい。
+#
+# **`fast: true`を添える。** issue-deck側は30秒に1回来る前提の処理（確認待ちPush通知の巡回）を
+# `claim`に相乗りさせているため、これを名乗って省いてもらう。古いissue-deckは未知のキーとして
+# 無視するだけなので、受け口が新しくなるのを待たずに入れてよい。
+#
+# **ジョブを取れなかったときは何も出さない。** 3秒ごとに「取得できるジョブはありません」を
+# 出すとjournalが10倍に膨らみ、重い巡回の記録が読めなくなる。失敗も黙って諦める（同じ宛先の
+# 失敗は、同じ間隔で回っている重い巡回が`report_api_failure`で出す）。
+#
+# **`curl`自身の`--show-error`もここでは捨てる。** issue-deckはデプロイのたびに落ちるので、
+# 繋がらない数十秒のあいだ`Failed to connect`が10倍の勢いで積まれる。
+claim_out_of_band() {
+  local payload jobs_json job_count job
+  payload="$(jq -n --arg host "$HOST_NAME" '{host: $host, maxJobs: 0, fast: true}')"
+  api_call POST /api/dispatch/claim "$payload" 2>/dev/null || return 0
+
+  jobs_json="$API_RESPONSE_BODY"
+  job_count="$(printf '%s' "$jobs_json" | jq '.jobs | length' 2>/dev/null || printf '0')"
+  [[ "$job_count" =~ ^[1-9][0-9]*$ ]] || return 0
+
+  echo "$job_count 件のジョブを取得しました（軽い巡回）。"
+  while IFS= read -r job; do
+    [[ -n "$job" ]] || continue
+    run_job "$job"
+  done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
+  return 0
+}
+
+# 重い巡回の合間の待ち。**まとめて`sleep`せず、軽い巡回を挟みながら刻む**（#2413）。
+# `sleep`を子プロセスとして待つのは、systemdからの停止（SIGTERM）で待ち時間の途中でも
+# 素直に終われるようにするため（刻んでも、刻みの途中で受けたシグナルで抜ける）。
+#
+# **申告だけ（`--announce-only`）では取りに行かない。** 何も起動しないと言っている経路で
+# ジョブを掴むと、掴んだまま失効するだけになる。
+wait_between_polls() {
+  local remaining="$POLL_INTERVAL" step
+  while [[ "$remaining" -gt 0 && "$SHUTDOWN" -eq 0 ]]; do
+    step="$remaining"
+    if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$FAST_POLL_INTERVAL" -lt "$remaining" ]]; then
+      step="$FAST_POLL_INTERVAL"
+    fi
+    sleep "$step" &
+    wait $! 2>/dev/null || true
+    remaining=$((remaining - step))
+    [[ "$SHUTDOWN" -eq 0 ]] || break
+    if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$ANNOUNCE_ONLY" -eq 0 ]]; then
+      claim_out_of_band
+    fi
+  done
+}
+
 # tmuxサーバーを別のcgroupで起こしておく（#1935）。起動のたびにも確かめる（launch_and_report）が、
 # ここで先に置いておくと、手元のターミナルから直接`start-issue.sh`を叩いたセッションも同じ
 # サーバーにぶら下がり、pollerの再起動と無関係でいられる。
@@ -2334,18 +2411,21 @@ fi
 
 # --- 常駐 ----------------------------------------------------------------------
 # systemdからの停止（SIGTERM）で待ち時間の途中でも素直に終わるようにする。
-# `sleep`を子プロセスとして待ち、シグナルで割り込めるようにしておく。
+# `sleep`を子プロセスとして待ち、シグナルで割り込めるようにしておく（`wait_between_polls`）。
 SHUTDOWN=0
 trap 'SHUTDOWN=1' TERM INT
 
-echo "ポーリングを開始します（間隔 ${POLL_INTERVAL} 秒・ホスト $HOST_NAME・宛先 $BASE_URL）"
+if [[ "$FAST_POLL_INTERVAL" -gt 0 ]]; then
+  echo "ポーリングを開始します（間隔 ${POLL_INTERVAL} 秒・枠外ジョブは ${FAST_POLL_INTERVAL} 秒・ホスト $HOST_NAME・宛先 $BASE_URL）"
+else
+  echo "ポーリングを開始します（間隔 ${POLL_INTERVAL} 秒・ホスト $HOST_NAME・宛先 $BASE_URL）"
+fi
 while [[ "$SHUTDOWN" -eq 0 ]]; do
   # 1巡が失敗しても止めない。issue-deckが再起動中・ネットワークが一時的に切れた、といった
   # 理由で落ちるたびにプロセスごと終わると、復帰までポーリングが空く
   run_once || true
   [[ "$SHUTDOWN" -eq 0 ]] || break
-  sleep "$POLL_INTERVAL" &
-  wait $! 2>/dev/null || true
+  wait_between_polls
 done
 
 echo "ポーリングを終了しました。"

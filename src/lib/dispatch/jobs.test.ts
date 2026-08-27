@@ -767,6 +767,23 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(launchQueries).toEqual([]);
   });
 
+  // 軽い巡回（#2413）は`maxJobs: 0`で枠外のジョブだけを取りに来る。**代行実行がそこに
+  // 含まれていることが、この巡回が速さを稼げる根拠そのもの**（手作業アシスタントは1手順ごとに
+  // ジョブを積み直すため、ここが渡らないと待ちが手順の数だけ積み上がる）
+  it("起動ジョブが要らない（maxJobs: 0）と言われても代行実行は渡す", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepCapable: true }));
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | string | undefined;
+      if (typeof kind === "object" && kind?.in?.includes("MANUAL_STEP")) {
+        return [queuedJob({ id: "manual-1", kind: "MANUAL_STEP" })];
+      }
+      return [];
+    });
+
+    const claimed = await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(claimed.map((job) => job.id)).toEqual(["manual-1"]);
+  });
+
   /** claimが引きに行った種別の一覧（失効を掃く問い合わせは`targetHost`が無いので除く） */
   function claimedKinds(): unknown[] {
     return dispatchJobFindMany.mock.calls

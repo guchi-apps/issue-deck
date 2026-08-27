@@ -578,7 +578,7 @@ async function stopCurrentJob(
     now,
   });
   if (aborted.ok) {
-    return `自動実行を中断しました（${run.targetHost}で走っているコマンドの停止を送りました。届くまで最大30秒かかります）。`;
+    return `自動実行を中断しました（${run.targetHost}で走っているコマンドの停止を送りました。届くまで数秒〜30秒かかります）。`;
   }
   return `自動実行を中断しました。ただし${aborted.message}`;
 }

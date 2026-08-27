@@ -261,7 +261,7 @@ export function ManualStepRunPanel({
             job.status !== "RUNNING"
               ? null
               : abortJob !== null
-                ? "中断を送りました（届くまで最大30秒かかります）。"
+                ? "中断を送りました（届くまで数秒〜30秒かかります）。"
                 : abortRejection === null
                   ? null
                   : describeManualStepAbortRejection(abortRejection, {
@@ -424,7 +424,7 @@ function ManualStepRunResult({
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         {isRunning
-          ? "サブPCが取りに来るまで最大30秒かかります。終わると結果がここに出ます。"
+          ? "サブPCが取りに来るまで数秒〜30秒かかります（セッションの起動中はさらに待つことがあります）。終わると結果がここに出ます。"
           : succeeded
             ? entry.kind === "verification"
               ? "出力が本文の「期待する出力」と合っているかを確かめてください（チェックは付きません）。"
@@ -478,7 +478,8 @@ function ManualStepRunResult({
               取り消す
             </Button>
           )}
-          {/* 走り出した1件を止める（#1882）。取り消しと違い、**止まるまでに最大30秒**かかる */}
+          {/* 走り出した1件を止める（#1882）。取り消しと違い、**届くまでpull型ぶんかかる**
+              （軽い巡回で数秒。セッションの起動中の巡はそのぶん延びる。#2413） */}
           {onAbort && (
             <Button variant="outline" size="sm" disabled={isSubmitting} onClick={onAbort}>
               <CircleStop />

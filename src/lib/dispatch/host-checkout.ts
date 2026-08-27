@@ -175,8 +175,9 @@ export function describeDispatchHostCheckout(
  * 終わった更新をボタンの下に出し続ける時間（#1927）。
  *
  * 終了したジョブは24時間ぶん画面へ返るため（`listDispatchState`）、そのまま出すと翌日まで
- * 「更新しました」が残る。**押した直後の答えとして読める間だけ**出す。届くまで最大30秒
- * （ポーリング間隔）＋`git pull`と入れ替えで数十秒あるので、その数倍を取ってある。
+ * 「更新しました」が残る。**押した直後の答えとして読める間だけ**出す。届くまで数秒〜30秒
+ * （ポーリング間隔。#2413の軽い巡回で普段は数秒）＋`git pull`と入れ替えで数十秒あるので、
+ * その数倍を取ってある。
  */
 const SELF_UPDATE_RESULT_WINDOW_MS = 10 * 60 * 1000;
 
@@ -197,7 +198,7 @@ export type DispatchHostSelfUpdateRow = {
  * あります」）は画面のどこにも現れないまま24時間で消えていた。押した本人が見ているのはホストの
  * カードなので、そこへ返す。
  *
- * **pull型で届くまで最大30秒かかる**ため、`QUEUED`の間も「積んだ」ことだけは出す
+ * **pull型で届くまで数秒〜30秒かかる**ため、`QUEUED`の間も「積んだ」ことだけは出す
  * （制御ジョブを一覧に出しているのと同じ理由。「押したのに何も起きない」に見せない）。
  */
 export function describeDispatchHostSelfUpdate(
@@ -207,7 +208,7 @@ export function describeDispatchHostSelfUpdate(
   if (!job) return null;
 
   if (job.status === "QUEUED") {
-    return { label: "更新を積みました（届くまで最大30秒）", tone: "normal", pending: true };
+    return { label: "更新を積みました（届くまで数秒〜30秒）", tone: "normal", pending: true };
   }
   if (job.status === "CLAIMED" || job.status === "RUNNING") {
     return { label: "更新しています", tone: "normal", pending: true };

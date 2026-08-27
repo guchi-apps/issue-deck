@@ -13,6 +13,9 @@ import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-
  *
  * 認証は共有シークレット`DISPATCH_SECRET`。未設定は503で、値の不一致（401）と区別する
  * （poller側が「設定漏れ」と「値が違う」を切り分けられるようにするため）。
+ *
+ * **`fast: true`は「重い巡回の合間に枠外ジョブだけ取りに来た」の合図**（#2413）。払い出しは
+ * 変わらず、ここに相乗りしている定期処理だけを省く。
  */
 export async function POST(request: NextRequest) {
   const auth = authorizeDispatch(request.headers.get("authorization"));
@@ -40,15 +43,23 @@ export async function POST(request: NextRequest) {
       ? Math.min(requested, 10)
       : 1;
 
+  // **軽い巡回（#2413）は`fast: true`を名乗る。** pollerは重い巡回の合間に数秒間隔で
+  // 枠外のジョブ（手作業の代行実行・停止・追加指示）だけを取りに来る。相乗りしている定期処理を
+  // そのまま回すと、30秒に1回の前提で置いたものが10倍走る。**払い出しそのものは同じ**で、
+  // 変わるのは相乗りを省くかどうかだけ。古いpollerはこのキーを送らないため、従来どおり回る。
+  const fast = payload?.fast === true;
+
   // 確認待ちのPush通知（#838）を、この取りに来るついでに1歩進める。
   // **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。ここを選ぶのは
   // pollerが30秒ごとに叩き、**ブラウザを開いていなくても回る**唯一の定期経路だから
   // （画面のポーリングに載せると、アプリを閉じているときのための通知が閉じている間だけ止まる）。
   // **失敗してもジョブの払い出しは続ける。**
-  try {
-    await sweepCheckUserPushNotifications();
-  } catch (error) {
-    console.error("[POST /api/dispatch/claim] 確認待ちのPush通知を送れませんでした:", error);
+  if (!fast) {
+    try {
+      await sweepCheckUserPushNotifications();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 確認待ちのPush通知を送れませんでした:", error);
+    }
   }
 
   const jobs = await claimDispatchJobs({ hostName, maxJobs });

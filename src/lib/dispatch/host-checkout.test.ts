@@ -188,7 +188,7 @@ describe("describeDispatchHostSelfUpdate（#1927）", () => {
 
   it("積んだ直後は届くまでの目安を出し、押し直させない", () => {
     expect(describeDispatchHostSelfUpdate(selfUpdateJob(), NOW)).toEqual({
-      label: "更新を積みました（届くまで最大30秒）",
+      label: "更新を積みました（届くまで数秒〜30秒）",
       tone: "normal",
       pending: true,
     });
