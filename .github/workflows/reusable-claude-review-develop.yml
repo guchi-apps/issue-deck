@@ -565,7 +565,13 @@ jobs:
           # 本運用ではPRをclaude[bot]（Claude CodeのGitHub App）が作成するため、
           # claude-code-actionの非人間アクター拒否機構を明示的に許可する
           # (参考: https://github.com/anthropics/claude-code-action/issues/1299)
-          allowed_bots: "claude[bot]"
+          #
+          # issue-deck[bot]も必須(#835)。実装エージェントのPR作成をGitHub Appの
+          # インストールトークンで行うようにしたため、pull_requestイベントの
+          # github.actorがissue-deck[bot]になる。ここに無いと、無人実行が作った
+          # develop向けPRの自動レビューだけが必ず落ちる(他4ワークフローは
+          # 元からissue-deck[bot]を含んでいた)。
+          allowed_bots: "claude[bot],issue-deck[bot]"
           additional_permissions: |
             actions: read
           # Read/Grep/Globは、レビュー観点「共有知識との整合性」のために.shared-context/配下を
@@ -680,6 +686,21 @@ jobs:
       # 両判定の結果(00.check-user・理由コメント)をここで反映するため(#1406・#2136)
       issues: write
     steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 期限切れが単一障害点になるsecrets.WORKFLOW_PATを、1時間で失効するインストールトークンへ
+        # 置き換える(#835。仕組みの詳細はreusable-issue-dispatch.ymlの同名ステップと
+        # docs/actions-token-model.mdを参照)。vars.WORKFLOW_APP_IDが未登録ならこのステップは
+        # skipされ、使用箇所は`|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        # permission-*は、このワークフローが実際に使う権限だけへ絞るために付けている。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
       # 両判定(機械的リスク判定=risk-check・意味的判定=claude-review)の結果を、ワークフローの
       # 最後のジョブであるここで反映する(#1406・#2136)。判定したジョブがその場で付けると、
       # そのあとに走るジョブのcheck-runが残ったまま通知だけが飛び、issue-deckの画面では
@@ -687,7 +708,7 @@ jobs:
       # 付与の直後に下のステップがラベルを読み直すので、自動マージ可否の判定は従来どおり
       # 「ラベルが付いていればスキップ」で成立する。
       #
-      # トークンは github.token を使う(マージ実行のステップだけWORKFLOW_PAT)。
+      # トークンは github.token を使う(マージ実行のステップだけワークフロー用トークン)。
       # ラベル付与・コメント投稿の名義を従来のgithub-actions[bot]から変えないため
       # (docs/attribution.md)。
       - name: マージ保留の判定を反映する
@@ -787,11 +808,12 @@ jobs:
       # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
       # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の
       # ワークフローを起動しない」というGitHub仕様の影響を受け、issue-labels.ymlの
-      # develop-pr-mergedジョブが発火しないことがある(Issue #112)。WORKFLOW_PAT
-      # （実PAT由来）で有効化することでこの制約を回避する。
+      # develop-pr-mergedジョブが発火しないことがある(Issue #112)。GITHUB_TOKEN以外の
+      # トークン（GitHub Appのインストールトークン。未登録時はWORKFLOW_PAT）で有効化する
+      # ことでこの制約を回避する。
       - name: 自動マージ可否を判定して実行する
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
