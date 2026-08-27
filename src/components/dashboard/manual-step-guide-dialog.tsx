@@ -283,10 +283,15 @@ export function ManualStepGuideDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* ヘッダー・本文・フッターの3段。本文だけをスクロールさせるため、既定の
-          `overflow-y-auto`と`gap-4`／`p-4`を打ち消して自前で持つ */}
+      {/* ヘッダー・本文・フッターの縦積み。本文だけをスクロールさせるため、既定の
+          `overflow-y-auto`と`gap-4`／`p-4`を打ち消して自前で持つ。
+          **段の数を数える組み方（`grid-rows-[auto_minmax(0,1fr)_auto]`）にしない**（#2402）。
+          自動実行の帯のように条件付きで出る段があると子の数が変わり、宣言した段と実際の
+          子が1つずつずれる。本文が`auto`の段に落ちて中身の高さぶんを占め、帯の段が高さ0まで
+          潰れて読めなくなっていた（画面が低いスマホで顕著）。`flex`なら段が増減しても
+          `flex-1`の本文だけが伸縮する */}
       <DialogContent
-        className="grid max-h-[calc(100%-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        className="flex max-h-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
         showCloseButton={false}
       >
         {/* 閉じるとDialogごと外れるので、進んだ位置は自然に捨てられる（次に開くと先頭から） */}
@@ -690,7 +695,7 @@ function ManualStepGuideContent({
 
   return (
     <>
-      <header className="flex flex-col gap-1.5 border-b p-4">
+      <header className="flex shrink-0 flex-col gap-1.5 border-b p-4">
         <div className="flex items-center gap-2">
           <DialogTitle className="flex min-w-0 items-center gap-1.5 text-violet-700 dark:text-violet-300">
             <Wrench className="size-4 shrink-0" />
@@ -711,7 +716,7 @@ function ManualStepGuideContent({
 
       <AutoRunBar autorun={autorun} host={host} />
 
-      <div className="flex min-h-0 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-muted/60 p-3 backdrop-blur-sm">
           <StageRail
             stages={stages}
@@ -795,7 +800,7 @@ function ManualStepGuideContent({
         </div>
       </div>
 
-      <footer className="flex flex-col gap-2 border-t bg-muted/50 p-3 sm:flex-row sm:items-center">
+      <footer className="flex shrink-0 flex-col gap-2 border-t bg-muted/50 p-3 sm:flex-row sm:items-center">
         {index > 0 ? (
           <Button
             variant="ghost"
@@ -1309,7 +1314,9 @@ function AutoRunBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-xs font-semibold",
+        // `shrink-0`: スマホ幅では文言・進み具合・「中断する」が3行に折り返して縦に伸びる。
+        // 縮められると読めなくなるので、縮むのは本文だけにする（#2402）
+        "flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-xs font-semibold",
         failed
           ? "border-destructive/40 bg-destructive/5 text-destructive"
           : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",

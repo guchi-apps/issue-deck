@@ -65,6 +65,13 @@ function DialogContent({
           // 既定の暗黙トラック（auto）は最も長い中身に合わせて伸びるため、折り返さない長い
           // 文字列（画像URL等）が1つあるだけで列がその幅まで広がり、w-fullの項目・ボタンが
           // まとめて画面外へ出ていた。スマホ幅ほど差が出るが、原因は幅ではなく列の伸び方。
+          //
+          // **段（行）の数を数える`grid-rows-*`は渡さない**（#2402）。条件付きで出る帯を
+          // 1つ足しただけで宣言した段と実際の子がずれ、`1fr`の段に入った要素が高さ0まで
+          // 潰れる（縦に余裕があるPCでは起きず、スマホでだけ読めなくなる）。ヘッダー・本文・
+          // フッターの縦積みは`flex flex-col`＋本文だけ`flex-1 min-h-0`で組む
+          // （例: manual-step-guide-dialog.tsx）。`flex`を渡せば上の`grid`は
+          // tailwind-mergeが落とすが、横幅を止めるのは下の`w-full max-w-*`になる。
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] max-h-[calc(100%-2rem)] grid-cols-[minmax(0,1fr)] -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
