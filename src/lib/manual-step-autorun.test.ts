@@ -318,3 +318,63 @@ describe("プレースホルダを含む項目", () => {
     expect(result.runnable).toBe(3);
   });
 });
+
+/**
+ * 「1Passwordへ値を入れて GitHub secret へ同期する」形の手作業（#2401）。
+ *
+ * openだった4件（`guchi-apps/aide#174`・`aide-bot#83`・`myroom#263`・`issue-deck#2397`）が
+ * どれもこの形で、`op signin`を書いていたために自動実行がそこで止まっていた。
+ * 書き込み権限つきのサービスアカウント（#1874）を使う形に書き換えると、**人が実行するのは
+ * 値を発行するブラウザの手順だけ**になる——これがこのIssueの完了の目安。
+ */
+const SECRET_BODY_WITH_SIGNIN = `## 前提条件
+
+- 実行するデバイス: サブPC
+
+## やること
+
+- [ ] （ブラウザ）Signalyでチャンネルを作り、Webhook URLを控える
+
+- [ ] （サブPC）1Passwordへ入れてGitHubのsecretへ同期する
+
+    \`\`\`bash
+    cd ~/apps/aide && eval $(op signin) && scripts/sync-github-secrets.sh --only AIDE_DAYSPAN_TOKEN
+    \`\`\`
+
+## 完了の確認方法
+
+- 1Passwordに値が入っていること
+
+    \`\`\`bash
+    eval $(op signin) && op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok
+    \`\`\`
+`;
+
+const SECRET_BODY_PROVISIONED = SECRET_BODY_WITH_SIGNIN
+  .replace(
+    "cd ~/apps/aide && eval $(op signin) && scripts/sync-github-secrets.sh --only AIDE_DAYSPAN_TOKEN",
+    "cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_DAYSPAN_TOKEN --sync-only",
+  )
+  .replace(
+    "eval $(op signin) && op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
+    "set -a; . ~/.config/issue-deck/op-writer.env; set +a; op read 'op://apps/aide/dayspan-token' > /dev/null && echo ok",
+  );
+
+describe("1Passwordを扱う手作業", () => {
+  it("`op signin`を書くと、同期も確認も人の実行になる", () => {
+    const result = plan(SECRET_BODY_WITH_SIGNIN);
+    expect(result.runnable).toBe(0);
+    expect(result.blocked).toBe(3);
+    expect(
+      result.entries.filter((entry) => entry.interactiveCommand === "op signin"),
+    ).toHaveLength(2);
+  });
+
+  it("書き込み用トークンを使う形なら、残るのはブラウザの手順だけ", () => {
+    const result = plan(SECRET_BODY_PROVISIONED);
+    expect(result.runnable).toBe(2);
+    expect(result.blocked).toBe(1);
+    const blocked = result.entries.filter((entry) => entry.rejection !== null);
+    expect(blocked.map((entry) => entry.device)).toEqual(["ブラウザ"]);
+  });
+});
