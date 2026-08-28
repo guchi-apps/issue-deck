@@ -330,6 +330,27 @@ failed to update https://github.com/guchi-apps/vps/issues/68: '11.local' not fou
 **ラベル体系の整備は対象リポジトリごとのIssueで行う**（`CLAUDE.md`「複数リポジトリに影響する変更は、
 リポジトリごとにIssueを分ける」）。載せる側（issue-deck）でやるのはポート帯の確保までにする。
 
+> **例外は、そのIssueで新規に作ったリポジトリ**（#2430の`guchi-apps/ideas`）。Issueが1件も無く
+> ラベルも既定のままなので、切り出す先のIssueを立てること自体ができない。画面の
+> 「新規アプリを立ち上げる」が作成時にラベルを写すのと同じ扱いで、**作った回でそのまま配る**。
+> 既存リポジトリを後から載せる場合は従来どおり対象リポジトリのIssueで行う。
+>
+> ```bash
+> gh label clone guchi-apps/issue-deck --repo guchi-apps/<repo> --force
+> # GitHub既定の9個（bug・documentation・duplicate・enhancement・good first issue・
+> # help wanted・invalid・question・wontfix）は gh label delete で消す
+> ```
+>
+> `guchi-apps/docs`の`label-sync/sync-labels.sh`は`gh-label-sync`拡張（未インストール）を
+> 要求するため、1リポジトリなら`gh label clone --force`の方が早い
+> （[cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「ラベルの正はこのissue-deck
+> リポジトリに置いている」）。
+
+**この2つはローカルセッションでも実行できない場合がある。** `gh repo create`はauto modeの
+クラシファイアに拒否されるため（#2430で実測）、リポジトリの作成だけはユーザーに1コマンド
+叩いてもらう（`CLAUDE.md`「ユーザー自身にコマンドを実行してもらうときは、Issueコメントに書く」）。
+`gh label clone`・`gh label delete`は通る。
+
 ### 共有知識リポジトリ自身のIssueを起動するとき
 
 `guchi-apps/docs`（`~/apps/_docs`）は**全セッションが`--add-dir`で読む共有知識のチェックアウト
