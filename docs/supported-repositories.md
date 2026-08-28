@@ -35,9 +35,10 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 撮影に対応させた・できなくなったときは、表だけでなくそちらも直す（[docs/multi-agent/screenshots.md](multi-agent/screenshots.md)
 「撮影に対応しないリポジトリでは選ばせない」）。
 
-**アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）は下の表に載せない。**
-実装を行わず盤面にも載らないため、表の読み方（載っている＝無人実行で実装が回る）が崩れる。
-扱いは後述「`guchi-apps/question`（質問専用・盤面外）」を参照。
+**アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）・`guchi-apps/ideas`
+（構想の置き場）は下の表に載せない。** どちらも無人実行を持たないため、表の読み方
+（載っている＝無人実行で実装が回る）が崩れる。扱いは後述
+「`guchi-apps/question`（質問専用・盤面外）」「`guchi-apps/ideas`（構想の置き場）」を参照。
 
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
@@ -126,6 +127,71 @@ git log workflows/v18..origin/develop --oneline -- .github/workflows/reusable-is
 すべて`@workflows/v18`を参照しており、同じ状態にある。次のタグを切って各callerを上げた時点で
 まとめて解消する（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローの
 タグ運用」）。
+
+## `guchi-apps/ideas`（構想の置き場）
+
+`guchi-apps/ideas`は**アプリになる前の構想を練る置き場**で（#2430。起点は
+guchi-apps/question#39）、アプリのコードを持たない。**サブPCのローカルセッションだけで回し、
+無人実行は入れない**——`subpc`・`vps`・`docs`・`claude-config`と同じ枠に置く。
+
+**なぜ要ったか。** 新しいアプリを作るとき、リポジトリがまだ無いため「構想・計画・仕様を
+決める」段のセッションを起こす場所が無かった。画面の「新規アプリを立ち上げる」のステップ0の
+相談（[`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts)）は画面上の軽量な
+チャットで、成果物は仕様案（名前・種別・DB・認証・URL）だけであり検討の過程をファイルとして
+残せない。横断質問セッション（[scripts/start-cross-repo-question.sh](../scripts/start-cross-repo-question.sh)）は
+読み取り専用で`Edit`・`Write`を持たない。**`knowledge/`（踏んだ落とし穴）でも`standards/`
+（決まっていること）でも各アプリの`CLAUDE.md`（アプリがまだ無い）でも`claude-config`
+（個人の作業ルール）でもない「まだアプリになっていない構想」だけが行き先を持たなかった。**
+
+| 項目 | 内容 |
+|---|---|
+| ワークフロー | 無し（`.github/workflows/`を持たない） |
+| ラベル | issue-deckと同一（`guchi-apps/docs`の`label-sync/sync-labels.sh`で配る） |
+| CLAUDE.md | あり（新規作成）。「コードを持たない」「実装しない」「PRは`main`直行」を明記 |
+| デフォルトブランチ | `main`のみ（`develop`は作らない。`docs`・`claude-config`と同じ） |
+| 盤面（Projects Status） | 載る。ただし**`Implementation`で止まり、以降は手で`Done`にしてclose** |
+| ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 26000 |
+| `~/.config/issue-deck/local-repos.conf` | `/home/guchi/apps/ideas` |
+| 公開範囲 | private（`question`・`docs`・`claude-config`と同じ） |
+
+### 判断の理由
+
+- **1リポジトリにまとめる。** アプリ候補ごとにリポジトリを作ると、候補ごとに作成・clone・
+  ポート帯の確保・`local-repos.conf`の追記・フォルダの信頼確認（#1838）が要るうえ、**流れた
+  候補のリポジトリが残り続ける。** 構想1件＝Issue 1本＋`ideas/<候補名>/`ディレクトリで回し、
+  育った構想は画面の「新規アプリを立ち上げる」で本リポジトリを作ってから成果物を移す
+- **無人実行（`claude-issue-dispatch.yml`）は入れない。** 構想を練るのは対話が要る作業で、
+  GitHub Actionsの片道実行と噛み合わない。入れないので**`hasClaudeWorkflow`は偽**になり、
+  `addMissingProjectItems`（[`lib/github/sync-project-status.ts`](../src/lib/github/sync-project-status.ts)）の
+  自動追加の対象にはならない。盤面へ載るのはローカルセッションが起動時に進捗報告API
+  （`POST /api/progress`）を叩いたIssueだけ
+- **進捗は`Implementation`で止まる。** `Develop PR`以降を報告するのは`issue-labels.yml`で、
+  このリポジトリには`.github/workflows/`自体が無い（`docs`#3・`subpc`#10・#14・#19・
+  `claude-config`と同じ状態）。**入れるまでは手で`Done`にしてcloseする。** 入れる場合は
+  `develop`を持たないため`workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`が
+  要る（#1901・#1917。`claude-config`は guchi-apps/claude-config#2 で分けた）
+- **リリースフローも入れない。** `docs`・`claude-config`と同じく`develop`を持たず、デプロイも
+  無い（構想はどこにもデプロイされない）ため、リリースという段階を挟む先が無い
+- **`package.json`を持たない。** 依存インストールとenvの配置は不要
+  （[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「envは既定では置かない」）。
+  ポート帯だけは、上の4件と同じ理由（既定の`3000 + Issue番号`への相乗りを避ける）で確保する
+
+### Obsidianで書く場合、追加の同期の仕組みは要らない
+
+`guchi-apps/claude-config`のREADME「skill の編集に Obsidian を使う場合」と同じく、**vaultの
+置き場をこのリポジトリのチェックアウトそのものにする**（`.obsidian/`は機体ローカル設定なので
+`.gitignore`済み）。Obsidian Sync・iCloudで別途同期する形は採らない——
+[multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)のとおり、コピーを2つ
+持つと「どちらが新しいか分からない」状態が必ず生まれる。実体を1つにすれば残るのは
+「commit/pushしたか」「pullしたか」だけになる。
+
+### 固めた仕様をウィザードへ渡す経路はまだ無い
+
+構想が育ったあと、画面の「新規アプリを立ち上げる」のステップ1・2へ値を入れるのは**人の転記**
+である。転記の手間を減らすため、構想メモの雛形（`templates/idea.md`）の末尾に
+[`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts)の`NewAppSpec`と同じ項目を並べた表を置いて
+ある。自動で渡す経路を作るかは#2430の時点では見送った（構想の実物が1件も無い段階では渡す
+書式を決められないため。#2432で追う）。
 
 ## `issue-labels.yml`callerの`issues:`トリガーの揃い方（#2010）
 
@@ -944,6 +1010,7 @@ done
 | `guchi-apps/vps` | — | ○（※4） |
 | `guchi-apps/docs` | — | ○（※4） |
 | `guchi-apps/claude-config` | — | ○（※5） |
+| `guchi-apps/ideas` | — | ○（※7） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -1008,6 +1075,14 @@ done
 `3000 + Issue番号`に落ち、同じく未登録のリポジトリと相乗りする。**次に立ち上げるアプリでも同じ穴が
 開く**ので、ウィザードが生成するもの（[new-app-launch.md](new-app-launch.md)「作られるもの」）に
 帯の払い出しを足すかどうかは#2225で扱う。
+
+※7 `ideas`（構想の置き場。private）は#2430で追加した。**※4・※5と同じ枠**で、
+`claude-issue-dispatch.yml`も`issue-labels.yml`も持たないため、実行経路はローカルセッション
+だけで進捗は`Implementation`で止まる。`package.json`を持たないがポート帯（26000）は同じ理由で
+確保した。**このリポジトリだけは`gh repo create`の時点でユーザーの手を借りている**——サブPCの
+セッションでは`gh repo create`がauto modeのクラシファイアに拒否されるため（#2430で実測）。
+フォルダの信頼確認（#1838）も`claude-config`と同じく対話が要るので手作業として起票した（#2433）。
+判断は上記「`guchi-apps/ideas`（構想の置き場）」を参照。
 
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
