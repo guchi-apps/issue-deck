@@ -2798,11 +2798,11 @@ pnpm test:unit   # vitestのみ
 - **判定・本文の組み立ては`lib/new-app/`の純粋関数**（`spec.ts`＝決めごとの型と導出、
   `vps-inventory.ts`＝vps READMEとvhostの解析、`local-port-bands.ts`＝ローカルセッションの
   ポート帯の採番、`plan.ts`＝作られるものとIssue本文、`scaffold.ts`・`scaffold-workflows.ts`＝新しい
-  リポジトリへ最初に置く雛形、`parse.ts`＝APIが受け取る値の検証）。
+  リポジトリへ最初に置く雛形、`parse.ts`＝APIが受け取る値の検証、`idea-doc.ts`＝構想メモの解析）。
   **ウィザードのコンポーネントが直接importするので、ここから`lib/github/`を読まない**
   （上記の`issues-api.ts`の制約）。GitHubを叩くのは`lib/github/vps-inventory-api.ts`・
   `lib/github/repositories-api.ts`・`lib/github/local-port-band-api.ts`・
-  `lib/github/scaffold-api.ts`。
+  `lib/github/scaffold-api.ts`・`lib/github/ideas-api.ts`。
 - **リポジトリを作った直後に雛形一式をコミットする**（#2247）。`claude-issue-dispatch.yml`が
   デフォルトブランチにあることが盤面へ載る条件で、以前はそれを作るのが初期化Issue自身
   だった。`develop`を切る前にGit Data API（blob → tree → commit → ref）で1コミット置くので、
@@ -2821,6 +2821,11 @@ pnpm test:unit   # vitestのみ
 - **生成する手作業Issueのうち、サブPCのものは代行実行の条件を満たす形で書く**
   （デバイスがサブPC1つ・1手順1コマンドブロック・対話コマンドとプレースホルダ無し）。
   `lib/new-app/plan.test.ts`が実物の`buildManualStepRunPlan`に通して見張っている。
+- **構想メモ（`guchi-apps/ideas`）から仕様案を読み込める**（#2432）。解析は
+  `lib/new-app/idea-doc.ts`（純粋関数）、取得は`lib/github/ideas-api.ts`、入口は
+  `GET /api/new-app/ideas`。**読めなかった項目は既定値のままにして、読めたものだけを返す**
+  ——`parse.ts`が「知らない値は全体を`null`」にしているのとは方針が逆で、あちらは実際に
+  リポジトリを作る経路、こちらは人が見て直せる入力欄を埋めるだけの経路だから。
 - **完了の判定は公開URLの`curl`で行う**（#2252）。`deploy.yml`のヘルスチェックはVPS内の
   `http://127.0.0.1:<port>/`宛で、ApacheのVirtualHostが無くてもdeployジョブは成功するため、
   「デプロイが通った＝公開できた」にはならない。親Issueの`## 完了条件`（先頭が

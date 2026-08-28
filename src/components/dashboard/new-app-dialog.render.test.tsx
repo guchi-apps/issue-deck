@@ -44,6 +44,28 @@ const PREFLIGHT_OK = {
   vpsRead: true,
 };
 
+/** 構想メモ1件を読んだ結果（#2432。解析そのものは`idea-doc.test.ts`で見る）。 */
+const IDEA_IMPORT = {
+  path: "ideas/kakei-report/README.md",
+  title: "家計レポート",
+  state: "検討中",
+  hasSpecTable: true,
+  values: {
+    displayName: "家計レポート",
+    repositoryName: "kakei-report",
+    summary: "家計の月次推移",
+    kind: "next-db",
+  },
+  filled: [
+    { key: "displayName", label: "アプリ名", display: "家計レポート" },
+    { key: "repositoryName", label: "リポジトリ名", display: "kakei-report" },
+    { key: "summary", label: "概要", display: "家計の月次推移" },
+    { key: "kind", label: "種別", display: "Next.js + DB" },
+  ],
+  undecided: ["本番ポート"],
+  unreadable: [],
+};
+
 beforeEach(() => {
   calls.length = 0;
 });
@@ -68,12 +90,43 @@ async function advanceToPlacement() {
 }
 
 describe("NewAppDialog", () => {
-  it("開いた直後は相談ステップで、こちらから話しかける（この時点ではAPIを呼ばない）", () => {
+  it("開いた直後は相談ステップで、こちらから話しかける（呼ぶのは構想の一覧だけ）", () => {
     mockFetch({});
     render(<NewAppDialog open onOpenChange={() => {}} />);
 
     expect(screen.getByText("どんなアプリを作りたいですか。ざっくりで大丈夫です。")).toBeTruthy();
-    expect(calls).toHaveLength(0);
+    // 相談（Claude）も空き確認も、押されるまで呼ばない（#2432で構想の一覧だけが増えた）
+    expect(calls.map((call) => call.url)).toEqual(["/api/new-app/ideas"]);
+  });
+
+  it("構想メモから読み込んだ値を設定ステップの初期値にし、どの項目を読んだかを出す", async () => {
+    mockFetch({
+      "/api/new-app/ideas": () => ({
+        available: true,
+        ideas: [{ name: "kakei-report", path: "ideas/kakei-report/README.md" }],
+      }),
+      [`/api/new-app/ideas?path=${encodeURIComponent("ideas/kakei-report/README.md")}`]: () => ({
+        available: true,
+        idea: IDEA_IMPORT,
+      }),
+      "/api/new-app/preflight": () => PREFLIGHT_OK,
+    });
+    render(<NewAppDialog open onOpenChange={() => {}} />);
+
+    await waitFor(() => expect(screen.getByRole("option", { name: "kakei-report" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "読み込む" }));
+
+    // 読み取れた項目と、未決のまま残った項目の両方を押す前に出す
+    await waitFor(() => expect(screen.getByText("Next.js + DB")).toBeTruthy());
+    expect(screen.getByText(/未決のまま（設定ステップで埋めます）: 本番ポート/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /この内容で設定へ進む/ }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("アプリ名") as HTMLInputElement).value).toBe("家計レポート"),
+    );
+    expect((screen.getByLabelText("リポジトリ") as HTMLInputElement).value).toBe("kakei-report");
+    expect(screen.getByText("アプリ名・リポジトリ名・概要")).toBeTruthy();
   });
 
   it("相談で決まった値を設定ステップの初期値にする", async () => {
