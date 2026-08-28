@@ -23,9 +23,13 @@ if [ "${#entries[@]}" -eq 0 ]; then
 fi
 
 for entry in "${entries[@]}"; do
-  repo="$(echo "$entry" | grep -oE 'repo=[^ ]+' | cut -d= -f2)"
-  workflow="$(echo "$entry" | grep -oE 'workflow=[^ ]+' | cut -d= -f2)"
-  base_commit="$(echo "$entry" | grep -oE 'base-commit=[^ ]+' | cut -d= -f2)"
+  # `|| true` が要るのは `set -e` のため。マーカーの体裁だけを真似た文章
+  # （説明のために本文へ書いた `sync-state: ...` など）は `repo=` を持たず grep が exit 1 を返し、
+  # 下の「不正な sync-state 記述」のガードへ到達する前にスクリプトごと落ちる。
+  # **出力が1行も無いまま exit 1 で終わる**ので、落ちたことにも気付けない（#2435で実際に踏んだ）。
+  repo="$(echo "$entry" | grep -oE 'repo=[^ ]+' | cut -d= -f2 || true)"
+  workflow="$(echo "$entry" | grep -oE 'workflow=[^ ]+' | cut -d= -f2 || true)"
+  base_commit="$(echo "$entry" | grep -oE 'base-commit=[^ ]+' | cut -d= -f2 || true)"
 
   if [ -z "$repo" ] || [ -z "$workflow" ] || [ -z "$base_commit" ]; then
     echo "警告: 不正な sync-state 記述をスキップします: $entry" >&2
