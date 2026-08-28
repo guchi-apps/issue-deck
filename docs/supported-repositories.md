@@ -711,12 +711,12 @@ done
 バージョン ＞「共有スクリプト」）。各リポジトリの`.github/scripts/`へコピーして使う運用のため、
 issue-deckを直しても自動では行き渡らない。
 
-2026-08-24時点で同じスクリプトを持つのは次の16リポジトリで、**全件が#2237・#2239の修正
-（通知が届かなくても`exit 0`で返す）より前の内容**だった。
+2026-08-28時点で同じスクリプトを持つのは次の17リポジトリで、**全件がissue-deckの`main`と
+同一の内容**（blobのSHAが一致。#2391のリリース本文と#2237・#2239の`exit 0`を含む）。
 
 `clip-hive` / `aide-bot` / `signaly` / `meisai-lab` / `dayspan` / `asset-manager` /
 `shopping-list` / `car-care` / `myroom` / `aide` / `ops-dashboard` / `subscription-lists` /
-`solitaire` / `portfolio` / `db-console` / `subpc`
+`solitaire` / `portfolio` / `db-console` / `subpc` / `trainroute`
 
 **`guchi-apps/subpc`だけは独自の変更がある。** そのリポジトリだけの`NOTIFY_NOTE`（反映は成功
 したが再起動などの操作が残っていることを通知へ足す）が入っており、配布は中身をそのまま上書き
@@ -767,10 +767,10 @@ for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-li
 done
 ```
 
-2026-08-27時点で未適用なのは`asset-manager`（`deploy.yml`・`release.yml`）と
-`signaly`（同）の2件。`aide`は`deploy.yml`に`release`ジョブを持ちながら**リリース通知の
-ステップ自体が無い**ため、この配布では届かない（ステップごと足す作業は
-`guchi-apps/aide`側のIssueへ切り出す）。`vps`・`subpc`はリリース通知を出していない。
+2026-08-28に#2429で`asset-manager`・`signaly`へ配布し（`guchi-apps/asset-manager#267`・
+`guchi-apps/signaly#225`）、**リリース通知ステップを持つ全リポジトリへ行き渡った**。
+`aide`にはこの時点で`notify-release`ステップがあり、1行も適用済み（2026-08-27時点の
+「ステップ自体が無い」という記述は古かった）。`vps`・`subpc`はリリース通知を出していない。
 
 ```bash
 # 配布状況の確認（issue-deckのmainと同じ内容かどうか）
