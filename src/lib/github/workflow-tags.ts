@@ -21,6 +21,7 @@ import {
   sharedFilePropagationTargets,
   SHARED_FILE_SPECS,
   type PropagationRun,
+  type SourceAhead,
   type WorkflowTagPullRequest,
   type WorkflowTagRef,
   type WorkflowTagStatus,
@@ -81,6 +82,13 @@ export type WorkflowTagOverview = {
    * これも別のrun。触るのは`.github/scripts/`で、上の2つ（`.github/workflows/`）と重ならない。
    */
   sharedFilePropagation: PropagationRun | null;
+  /**
+   * 配布元（issue-deckの`main`）が最新タグからどれだけ進んでいるか（#2476）。
+   *
+   * 「新しいタグを切って配る」は未更新が0件でも押せるため、押す前の判断材料として出す。
+   * 最新タグが分からない場合・取得に失敗した場合は null。
+   */
+  sourceAhead: SourceAhead | null;
 };
 
 /** GraphQLで読む対象リポジトリ（DBから引いた行のうち、問い合わせに要る項目だけ） */
@@ -195,6 +203,51 @@ export async function fetchLatestWorkflowTag(token: string): Promise<string | nu
     // 最新タグが分からなくても一覧自体は出す。latest が null なら「古い」判定を行わないため、
     // 誤って全リポジトリを更新対象として表示してしまうことはない
     console.warn(`[workflow-tags] 最新タグを取得できませんでした: ${String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * `main`の先端が最新タグからどれだけ進んでいるかを取る（#2476）。
+ *
+ * **「新しいタグを切って配る」は未更新が0件でも押せる**（配布が一巡した状態こそ次のタグを
+ * 切る場面）。ただし`main`が進んでいなければ切っても中身は最新タグと同じで、全リポジトリへ
+ * 配り直すだけになるため、押す前に読める形にしておく。
+ *
+ * **RESTの`/compare`は使わない。** あちらは差分のコミットとファイルまで返すため、画面を
+ * 開くたび（配布の実行中は10秒ごと）に数百KBを運ぶことになる。GraphQLの`Ref.compare`は
+ * 件数だけを返す。
+ */
+async function fetchSourceAhead(token: string, latest: string | null): Promise<SourceAhead | null> {
+  if (!latest) return null;
+
+  const [owner, name] = SOURCE_REPOSITORY.split("/");
+  const query = `query($owner: String!, $name: String!, $tag: String!) {
+    repository(owner: $owner, name: $name) {
+      ref(qualifiedName: $tag) {
+        compare(headRef: "main") { aheadBy }
+      }
+    }
+  }`;
+
+  type Data = { repository: { ref: { compare: { aheadBy: number } | null } | null } | null };
+  try {
+    const data = await githubGraphql<Data>(
+      token,
+      query,
+      { owner, name, tag: `refs/tags/${latest}` },
+      "配布元の進み具合の取得",
+    );
+    const aheadBy = data.repository?.ref?.compare?.aheadBy;
+    if (typeof aheadBy !== "number") return null;
+    return {
+      tag: latest,
+      aheadBy,
+      compareUrl: `https://github.com/${SOURCE_REPOSITORY}/compare/${latest}...main`,
+    };
+  } catch (error) {
+    // 進み具合が分からなくてもタグは切れる。画面はこの行を出さないだけにする
+    console.warn(`[workflow-tags] 配布元の進み具合を取得できませんでした: ${String(error)}`);
     return null;
   }
 }
@@ -390,6 +443,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
       propagation: null,
       repairPropagation: null,
       sharedFilePropagation: null,
+      sourceAhead: null,
     };
   }
 
@@ -458,13 +512,21 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
     );
   }
 
-  const [propagation, repairPropagation, sharedFilePropagation] = await Promise.all([
+  const [propagation, repairPropagation, sharedFilePropagation, sourceAhead] = await Promise.all([
     fetchPropagationRun(firstToken, PROPAGATE_WORKFLOW_FILE),
     fetchPropagationRun(firstToken, PROPAGATE_REPAIR_WORKFLOW_FILE),
     fetchPropagationRun(firstToken, PROPAGATE_SHARED_FILES_WORKFLOW_FILE),
+    fetchSourceAhead(firstToken, latest),
   ]);
 
-  return { latest, repositories: statuses, propagation, repairPropagation, sharedFilePropagation };
+  return {
+    latest,
+    repositories: statuses,
+    propagation,
+    repairPropagation,
+    sharedFilePropagation,
+    sourceAhead,
+  };
 }
 
 /**

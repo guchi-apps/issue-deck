@@ -249,6 +249,22 @@ export function shortWorkflowTag(tag: string): string {
   return tag.replace(/^workflows\//, "");
 }
 
+/**
+ * 配布元（issue-deckの`main`）が最新タグからどれだけ進んでいるか（#2476）。
+ *
+ * **「新しいタグを切って配る」を押す前の判断材料。** 進んでいなければ次の版数を切っても
+ * 中身は最新タグと同じで、全リポジトリへ配り直すだけになる。取得できなかった場合は`null`
+ * （進み具合が分からないだけで、タグは切れるため画面は行ごと出さない）。
+ */
+export type SourceAhead = {
+  /** 比較の基点にした最新タグ（`workflows/v28`） */
+  tag: string;
+  /** `main`がそのタグより進んでいるコミット数。0なら同じ内容 */
+  aheadBy: number;
+  /** GitHubの比較ページ。押す前に何が入るのかを読めるようにする */
+  compareUrl: string;
+};
+
 /** 配布ワークフローの実行（run）のうち画面に出すぶん */
 export type PropagationRun = {
   /** `queued` | `in_progress` | `completed` など */
