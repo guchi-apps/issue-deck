@@ -289,8 +289,8 @@ export type BranchFlowLane = {
  * リリース1回ぶんの束（#1510）。「このバージョンに何が乗ったか」を表す。
  *
  * 画面はこれを横線1本として描き、`lanes`をその下にぶら下げる。束の作り方は
- * `resolveReleaseState`と同じ計算——作業PRがdevelopへ入った後、最初にマージされた
- * リリースPRがその変更を運んだ——なので、**追加のGitHub API取得は要らない**。
+ * `resolveReleaseState`と同じ計算——作業PRがdevelopへ入った後、最初に内容を凍結した
+ * リリースPRがその変更を運んだ（#2489）——なので、**追加のGitHub API取得は要らない**。
  */
 export type BranchFlowReleaseGroup = {
   /** 一覧のkey */

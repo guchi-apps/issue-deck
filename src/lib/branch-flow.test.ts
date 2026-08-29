@@ -486,6 +486,100 @@ describe("buildBranchFlow", () => {
     expect(flow.repositories[0].release.latestVersion).toBe("3.17.0");
   });
 
+  // #2489。`release-main/vX.Y.Z`をheadにするリリースPRは作成時点で内容が凍結されており
+  // （#2117）、PRが開いている間にdevelopへ入った作業は次のリリースへ回る
+  it("リリースPRが開いている間にdevelopへ入った作業を、その版で本番反映と言わない", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 2484,
+          title: "v4.51.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "release-main/v4.51.0",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          // 17:33に凍結し、18:04に人がマージした
+          createdAt: "2026-08-29T17:33:18Z",
+          mergedAt: "2026-08-29T18:04:43Z",
+        }),
+        // 凍結より前にdevelopへ入った作業 → v4.51.0で本番へ出ている
+        pullRequest({
+          number: 2470,
+          headRef: "issue-2470",
+          linkedIssueNumber: 2470,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-29T17:20:00Z",
+        }),
+        // 凍結の後・マージの前にdevelopへ入った作業 → この版には乗っていない
+        pullRequest({
+          number: 2485,
+          headRef: "issue-2475",
+          linkedIssueNumber: 2475,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-29T17:58:25Z",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    const byBranch = new Map(allLanes(flow.repositories[0]).map((lane) => [lane.branchName, lane]));
+    expect(byBranch.get("issue-2470")?.releaseState).toEqual({
+      kind: "released",
+      version: "4.51.0",
+      pullRequestNumber: 2484,
+    });
+    expect(byBranch.get("issue-2475")?.releaseState).toEqual({ kind: "pending" });
+    // 未リリースの束（先頭）へ入り、v4.51.0の束には並ばない
+    expect(flow.repositories[0].releaseGroups[0]).toMatchObject({ key: "unreleased", mergedAt: null });
+    expect(flow.repositories[0].releaseGroups[0].lanes.map((lane) => lane.branchName)).toEqual([
+      "issue-2475",
+    ]);
+    expect(flow.repositories[0].releaseGroups[1].lanes.map((lane) => lane.branchName)).toEqual([
+      "issue-2470",
+    ]);
+  });
+
+  // #2489。#2117以前・共有ワークフローの参照タグが古いリポジトリではheadが`develop`のままで、
+  // PRのheadがブランチの先端を追い続ける（＝マージ時点のdevelopがmainへ入る）
+  it("headがdevelopのリリースPRは、従来どおりマージ時刻で運び手を決める", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 950,
+          title: "v3.17.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "develop",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          createdAt: "2026-08-09T00:00:00Z",
+          mergedAt: "2026-08-10T00:00:00Z",
+        }),
+        // 作成より後・マージより前にdevelopへ入った作業も、この版でmainへ入る
+        pullRequest({
+          number: 940,
+          headRef: "issue-940",
+          linkedIssueNumber: 940,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-09T12:00:00Z",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(allLanes(flow.repositories[0])[0].releaseState).toEqual({
+      kind: "released",
+      version: "3.17.0",
+      pullRequestNumber: 950,
+    });
+  });
+
   it("マージされていないレーンは本番反映の判定を持たない", () => {
     const flow = build({
       pullRequests: [pullRequest({ state: "open" })],
