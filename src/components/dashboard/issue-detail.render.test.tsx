@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -194,7 +195,7 @@ function buildIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-function renderDetail(issue: Issue) {
+function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof IssueDetail>> = {}) {
   return render(
     <IssueDetail
       issue={issue}
@@ -211,6 +212,7 @@ function renderDetail(issue: Issue) {
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
+      {...overrides}
     />,
   );
 }
@@ -736,5 +738,70 @@ describe("質問の導線（#1913）", () => {
     renderMobileDetail(buildIssue());
     expect(screen.queryByText("Claudeに質問する")).toBeNull();
     expect(within(composer()).getByRole("button", { name: "質問する" })).toBeTruthy();
+  });
+});
+
+/**
+ * 「いまは実施しない」の選択肢（#2398）を⋯メニューから開いたときの振る舞い（#2458）。
+ *
+ * Radixのメニューは**マウスが乗った項目へフォーカスを移す**ため、選択肢を出したあとに
+ * マウスを動かすとポップオーバー側が「フォーカスが外れた」と見なして勝手に閉じ、
+ * パソコンからは何も選べなくなっていた。
+ */
+describe("⋯メニューの「いまは実施しない」（#2458）", () => {
+  /** Radixのメニューはポインタ関連のAPIを触るため、jsdomに無いものだけ足す */
+  function stubPointerApis() {
+    Element.prototype.hasPointerCapture ??= () => false;
+    Element.prototype.setPointerCapture ??= () => {};
+    Element.prototype.releasePointerCapture ??= () => {};
+    Element.prototype.scrollIntoView ??= () => {};
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+
+  /** ⋯メニューを開いて「いまは実施しない」まで進む（Radixのメニューはpointerdownで開く） */
+  function openSnoozeMenu(onSnooze = vi.fn()) {
+    stubPointerApis();
+    renderDetail(buildIssue(), { snoozes: new Map(), onSnooze, onUnsnooze: vi.fn() });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "操作メニュー" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "いまは実施しない" }));
+    return onSnooze;
+  }
+
+  /** メニューの別の項目の上へマウスを動かす（Radixはここで項目へフォーカスを移す） */
+  function movePointerToItem(name: string) {
+    fireEvent.pointerMove(screen.getByRole("menuitem", { name }), { pointerType: "mouse" });
+  }
+
+  it("開いた選択肢はマウスを動かしても閉じない", () => {
+    openSnoozeMenu();
+    expect(screen.getByRole("button", { name: /明日まで/ })).toBeTruthy();
+    movePointerToItem("編集");
+    expect(screen.getByRole("button", { name: /明日まで/ })).toBeTruthy();
+  });
+
+  it("マウスを動かしたあとでも選択肢を押せる", () => {
+    const onSnooze = openSnoozeMenu();
+    movePointerToItem("編集");
+    fireEvent.click(screen.getByRole("button", { name: /明日まで/ }));
+    expect(onSnooze).toHaveBeenCalledTimes(1);
+    expect(onSnooze.mock.calls[0][0]).toEqual({
+      kind: "issue",
+      repositoryFullName: "guchi-apps/issue-deck",
+      number: 1,
+    });
+  });
+
+  it("選んだら⋯メニューごと閉じる", () => {
+    openSnoozeMenu();
+    fireEvent.click(screen.getByRole("button", { name: /明日まで/ }));
+    expect(screen.queryByRole("menuitem", { name: "編集" })).toBeNull();
   });
 });

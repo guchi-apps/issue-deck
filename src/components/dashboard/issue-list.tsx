@@ -90,6 +90,7 @@ import {
   describeSnoozeResume,
   describeSnoozeUntil,
   findActiveIssueSnooze,
+  isSnoozeEnabledForList,
   type SnoozeEntry,
   type SnoozeMap,
   type SnoozeTarget,
@@ -451,8 +452,12 @@ export function IssueList({
    * **左メニューの件数（`computeNavCountsForFilters`）と同じ判定**なので、メニューの
    * 数字と並んでいる行数は食い違わない。伏せたぶんはヘッダーの内訳（`2件・保留中1件`）と、
    * 一覧の上に出す「保留中がN件あります」の1行で読める。
+   *
+   * 判定そのものは`lib/snooze.ts`（`isSnoozeEnabledForList`）が持つ——同じ条件が
+   * スマホの一覧（`mobile-issue-list-screen.tsx`）にもあり、片方だけ直すと
+   * ヘッダーの数字と並ぶ行数が食い違う。
    */
-  const snoozeEnabled = Boolean(snoozes && onSnooze);
+  const snoozeEnabled = isSnoozeEnabledForList(snoozes, onSnooze);
   const { issues, snoozedIssues } = useMemo(() => {
     if (!snoozeEnabled || !snoozes) return { issues: allIssues, snoozedIssues: [] as Issue[] };
     const listed: Issue[] = [];
@@ -652,7 +657,7 @@ export function IssueList({
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
-    (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 

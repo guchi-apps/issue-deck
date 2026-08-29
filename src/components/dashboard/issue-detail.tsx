@@ -263,6 +263,7 @@ export function IssueDetail({
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -792,9 +793,12 @@ export function IssueDetail({
               >
                 <Star className={cn(issue.favorite && "fill-yellow-400 text-yellow-400")} />
               </Button>
-              <DropdownMenu>
+              {/* 開閉を持つのは、保留を選んだ時点でこのメニューも閉じるため（#2458）。
+                  「いまは実施しない」はメニューを開いたまま選択肢を出すので、選び終えても
+                  メニューだけが開きっぱなしで残っていた */}
+              <DropdownMenu open={isMoreMenuOpen} onOpenChange={setIsMoreMenuOpen}>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
+                  <Button variant="outline" size="icon" aria-label="操作メニュー">
                     <MoreHorizontal />
                   </Button>
                 </DropdownMenuTrigger>
@@ -815,7 +819,10 @@ export function IssueDetail({
                   {snoozeTarget && onSnooze && !activeSnooze && (
                     <SnoozeMenu
                       target={snoozeTarget}
-                      onSnooze={onSnooze}
+                      onSnooze={(target, until) => {
+                        setIsMoreMenuOpen(false);
+                        onSnooze(target, until);
+                      }}
                       now={snoozeNow}
                       align="start"
                     >

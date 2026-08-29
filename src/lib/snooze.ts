@@ -108,6 +108,22 @@ export function findActiveIssueSnooze(
 }
 
 /**
+ * その一覧で保留を効かせるか（#2456）。
+ *
+ * **ビューは見ない**——効かせるのはIssue一覧の全ビューなので、判定材料は「引き当て表を
+ * 受け取っているか」「保留にする操作を受け取っているか」だけ。それでも関数にして配るのは、
+ * #2398では同じ`view === "check-user" || view === "manual-step"`が
+ * `issue-list.tsx`・`mobile-issue-list-screen.tsx`・`issue-stats.ts`の3か所に散っており、
+ * 片方だけ直る事故が実際に起きかけたため。**範囲を変えるときはここだけ直す。**
+ */
+export function isSnoozeEnabledForList(
+  snoozes: SnoozeMap | undefined,
+  onSnooze: unknown,
+): boolean {
+  return Boolean(snoozes && onSnooze);
+}
+
+/**
  * 保留中のIssueのid集合（#2398）。
  *
  * **左メニューの件数・一覧・ベル・トーストが同じ集合を読む。** 判定を呼び出し側ごとに
