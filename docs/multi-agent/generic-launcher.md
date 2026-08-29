@@ -284,14 +284,15 @@ systemctl --user restart issue-deck-dispatch-poller.service
 までを行い、**tmuxセッションもClaude Codeも起動しない**。
 
 ```bash
-env -u ISSUE_DECK_DEV_PORT_BASE \
+env -u ISSUE_DECK_DEV_PORT_BASE -u ISSUE_DECK_DEV_PORT_WIDTH \
 ISSUE_DECK_LOCAL_REPO_PORTS_CONFIG="$PWD/scripts/local-repo-ports.conf" \
 ISSUE_DECK_DISPATCH_ENV=/dev/null APP_BASE_URL= PROGRESS_REPORT_SECRET= \
   bash scripts/generic-start-issue.sh --prepare-only <owner> <repo> <番号>
 ```
 
-- **`ISSUE_DECK_DEV_PORT_BASE`は必ず`env -u`で落とす。** ポート帯を`local-repo-ports.conf`から
-  引くのは**受け口（`start-local-session.sh`）**で、ランチャー自身はこの環境変数を足すだけ。
+- **`ISSUE_DECK_DEV_PORT_BASE`と`ISSUE_DECK_DEV_PORT_WIDTH`（帯の幅・#2478）は必ず`env -u`で
+  落とす。** ポート帯を`local-repo-ports.conf`から引くのは**受け口（`start-local-session.sh`）**で、
+  ランチャー自身はこの環境変数を足すだけ。
   ローカルセッションのtmuxの中から手で叩くと、**そのセッション向けの値が残っていて別の帯になる**
   （実際に`vps`の確認で`21068`のはずが`7068`になった）。帯そのものを確かめたいときは
   `local_repo_port_base`を直接呼ぶ方が確実

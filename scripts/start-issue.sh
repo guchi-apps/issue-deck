@@ -55,6 +55,7 @@
 # 環境変数:
 #   ISSUE_DECK_SKIP_LAN_SETUP=1   LANアクセス設定（Windowsの管理者権限が必要）を行わない
 #   ISSUE_DECK_DEV_PORT_BASE=4000 開発サーバーのポートのベース値（未設定ならissue-deckの帯=4000）
+#   ISSUE_DECK_DEV_PORT_WIDTH=2000 ポート帯の幅（未設定ならissue-deckの帯の幅=2000。#2478）
 #   ISSUE_DECK_DEV_HOST           開発サーバーの待ち受けアドレス（未設定なら127.0.0.1・#1526）
 #
 # 前提:
@@ -464,14 +465,14 @@ prepare_issue() {
   # サブPCでは、そのずれがそのまま他リポジトリの帯との衝突になる。帯の一覧は
   # docs/multi-agent/local-quick-start.md を参照。
   #
-  # **採番は`dev_server_port_for_issue`に任せる**（#2470）。「ベース値 + Issue番号」がブラウザの
-  # ブロック対象（`6566`・`10080`など）に当たる場合の繰り上げを、採番する側と止める側
-  # （`--recreate`前の`remove_worktree`・cleanup-worktrees.sh）で同じ計算にするため。ここで
-  # 自前で足すと、繰り上がったセッションを止める側が見つけられなくなる。
-  DEV_PORT_NATURAL=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
+  # **採番は`dev_server_port_for_issue`に任せる**（#2470）。ブラウザのブロック対象
+  # （`6566`・`10080`など）に当たる場合の繰り上げと、帯の幅（issue-deckは2000）を超えたときの
+  # 折り返し（#2478）を、採番する側と止める側（`--recreate`前の`remove_worktree`・
+  # cleanup-worktrees.sh）で同じ計算にするため。ここで自前で足すと、動いたセッションを
+  # 止める側が見つけられなくなる。
   DEV_PORT="$(dev_server_port_for_issue "$n")"
-  if [[ "$DEV_PORT" != "$DEV_PORT_NATURAL" ]]; then
-    echo "#$n: 注記: ポート $DEV_PORT_NATURAL はブラウザが接続を拒否するため、$DEV_PORT を使います（#2470）。"
+  if DEV_PORT_NOTE="$(dev_server_port_note "$n" "${ISSUE_DECK_DEV_PORT_BASE:-4000}" "${ISSUE_DECK_DEV_PORT_WIDTH:-2000}" "$DEV_PORT")"; then
+    echo "#$n: 注記: $DEV_PORT_NOTE"
   fi
   # **envファイルへの書き込みは補助**（#2464）。ポートの受け渡しの本体は環境変数`PORT`で、
   # run-issue-session.shがexportする。ここはissue-deck自身のworktree（必ず`.env.local`を持つ）

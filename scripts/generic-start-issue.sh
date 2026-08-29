@@ -45,6 +45,7 @@
 #
 # 環境変数:
 #   ISSUE_DECK_DEV_PORT_BASE            開発サーバーのポートのベース値（受け口が渡す）
+#   ISSUE_DECK_DEV_PORT_WIDTH           ポート帯の幅（受け口が渡す。既定は原則の1000。#2478）
 #   ISSUE_DECK_GENERIC_WORKTREE_BASE    worktreeの置き場（既定は ~/apps/<repo>-worktrees）
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto。#1205）
@@ -191,15 +192,15 @@ PROMPT_DIR="$WORKTREE_BASE/.prompts"
 WORKTREE_DIR="$WORKTREE_BASE/issue-$ISSUE_NUMBER"
 PROMPT_FILE="$PROMPT_DIR/issue-$ISSUE_NUMBER.md"
 BRANCH="issue-$ISSUE_NUMBER"
-# **採番は`dev_server_port_for_issue`に任せる**（#2470）。「ベース値 + Issue番号」がブラウザの
-# ブロック対象（dayspan #566の`6566`・clip-hive #80の`10080`など）に当たる場合の繰り上げを、
-# 採番する側と止める側（cleanup-worktrees.sh）で同じ計算にするため。ここで自前で足すと、
-# 繰り上がったセッションを止める側が見つけられなくなる。
+# **採番は`dev_server_port_for_issue`に任せる**（#2470）。ブラウザのブロック対象
+# （dayspan #566の`6566`・clip-hive #80の`10080`など）に当たる場合の繰り上げと、帯の幅を
+# 超えたときの折り返し（#2478）を、採番する側と止める側（cleanup-worktrees.sh）で同じ計算に
+# するため。ここで自前で足すと、動いたセッションを止める側が見つけられなくなる。
 DEV_PORT_BASE_VALUE="${ISSUE_DECK_DEV_PORT_BASE:-3000}"
-DEV_PORT_NATURAL=$(( DEV_PORT_BASE_VALUE + ISSUE_NUMBER ))
-DEV_PORT="$(dev_server_port_for_issue "$ISSUE_NUMBER" "$DEV_PORT_BASE_VALUE")"
-if [[ "$DEV_PORT" != "$DEV_PORT_NATURAL" ]]; then
-  echo "#$ISSUE_NUMBER: 注記: ポート $DEV_PORT_NATURAL はブラウザが接続を拒否するため、$DEV_PORT を使います（#2470）。"
+DEV_PORT_WIDTH_VALUE="${ISSUE_DECK_DEV_PORT_WIDTH:-1000}"
+DEV_PORT="$(dev_server_port_for_issue "$ISSUE_NUMBER" "$DEV_PORT_BASE_VALUE" "$DEV_PORT_WIDTH_VALUE")"
+if DEV_PORT_NOTE="$(dev_server_port_note "$ISSUE_NUMBER" "$DEV_PORT_BASE_VALUE" "$DEV_PORT_WIDTH_VALUE" "$DEV_PORT")"; then
+  echo "#$ISSUE_NUMBER: 注記: $DEV_PORT_NOTE"
 fi
 
 mkdir -p "$PROMPT_DIR"
