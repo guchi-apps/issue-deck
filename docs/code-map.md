@@ -2669,6 +2669,30 @@ function during render`）。「期限を過ぎたら元に戻す」のような
   （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
   9時間ずれる
 
+## Radixのポップオーバーをドロップダウンメニューの中に置くと、マウスを動かしただけで閉じる（#2458）
+
+**Radixのメニューは、マウスが乗った項目へフォーカスを移す**（`MenuItem`の`onPointerMove`が
+`item.focus()`を呼ぶ）。メニュー項目をトリガーにしたポップオーバー（`Popover`）を開くと、
+その項目はポップオーバーの外側にあるため、**マウスを少し動かしただけで
+「フォーカスが外へ出た」と判定され、`DismissableLayer`の既定の自動クローズが走る**。
+Issue詳細の⋯メニューの「いまは実施しない」がこれで、パソコンからは選択肢を押す前に必ず
+閉じてしまい、機能ごと使えなくなっていた（スマホは`pointermove`が飛ばないので気づけない）。
+
+- **直し方は`PopoverContent`の`onFocusOutside`で、メニューの中への移動だけ`preventDefault()`する**
+  （[`snooze-menu.tsx`](../src/components/dashboard/snooze-menu.tsx)）。
+  `event.detail.originalEvent.target`が`[data-radix-menu-content]`の中かで見分ける。
+  丸ごと止めると、単独で開いたとき（一覧の行・保留中の帯）にフォーカスが外れて閉じる
+  挙動まで消える
+- **クリックのほうは直さなくてよい。** ポップオーバーの中身はポータルへ出ても**Reactツリー上は
+  メニューの子**なので、`DismissableLayer`の「自分のReactツリーの中か」の判定に引っかかり、
+  親メニューは`pointerdown`で閉じない
+- **選び終えたら親メニューも閉じる。** 項目の`onSelect`で`preventDefault()`してメニューを開いた
+  ままにする作りなので、選択後に閉じるには**親の`DropdownMenu`の開閉を画面側で持つ**
+  （`issue-detail.tsx`・`mobile-issue-detail.tsx`の`isMoreMenuOpen`）
+- **jsdomで再現できる。** `hasPointerCapture`等を補ったうえで、メニュー項目へ
+  `fireEvent.pointerMove(..., { pointerType: "mouse" })`を送るとRadixが`focus()`を呼び、
+  直す前のコードでは選択肢が消える（`issue-detail.render.test.tsx`）
+
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
 **複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
