@@ -93,6 +93,9 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     selfUpdateCapable: null,
+    previewCapable: null,
+    previewRepositories: null,
+    preview: null,
     maxSessions: 12,
     liveSessions: 3,
     metrics: null,
@@ -118,6 +121,8 @@ function renderHome(
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
       onSelectFlow={() => {}}
+      onSelectPreview={() => {}}
+      previewRunning={false}
       onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
@@ -151,6 +156,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "質問",
       "コードレビュー",
       "ブランチ",
+      "確認環境",
       "すべてのIssue",
       "お気に入り",
       "未着手",
@@ -228,6 +234,8 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
+        onSelectPreview={() => {}}
+        previewRunning={false}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
@@ -461,6 +469,8 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
+        onSelectPreview={() => {}}
+        previewRunning={false}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}

@@ -9,6 +9,12 @@ import {
   type DispatchHostMetrics,
 } from "@/lib/dispatch/host-metrics";
 import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
+import {
+  describePreviewRejection,
+  resolvePreviewRejection,
+  type DispatchHostPreview,
+  type PreviewRejection,
+} from "@/lib/dispatch/preview-server";
 import { listSessionQuestionRequests } from "@/lib/dispatch/question-requests";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type { SessionQuestionRequestView } from "@/lib/dispatch/session-question-request";
@@ -17,6 +23,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
+  buildPreviewActiveKey,
   buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
@@ -38,6 +45,8 @@ import {
   normalizeDispatchHostRepositories,
   OUT_OF_BAND_JOB_KINDS,
   parseDispatchHostRepositories,
+  parsePreviewAction,
+  PREVIEW_ISSUE_NUMBER,
   resolveCodeReviewRejection,
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
@@ -60,6 +69,7 @@ import {
   type ManualStepAbortRejection,
   type ManualStepExecutionRejection,
   type PlanReviewRejection,
+  type PreviewAction,
   type SessionControlJobKind,
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
@@ -131,6 +141,9 @@ function toJobView(
         : fillManualStepPlaceholders(job.command, manualStepValues),
     manualStepLine: job.manualStepLine,
     targetJobId: job.targetJobId,
+    // DBの値も信用せず、既知の3語だけを通す（#2444。列を手で書き換えられても、
+    // pollerへ届く操作の種類は変わらない）
+    previewAction: parsePreviewAction(job.previewAction),
     exitCode: job.exitCode,
     commandOutput: job.commandOutput,
     tmuxSessionName: job.tmuxSessionName,
@@ -218,6 +231,30 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             committedAt: host.checkoutCommittedAt?.toISOString() ?? null,
             behindCount: host.checkoutBehind,
             fetchedAt: host.checkoutFetchedAt?.toISOString() ?? null,
+          },
+    previewCapable: host.previewCapable,
+    // **申告が無ければ`null`**（絞り込めない）。空配列へ倒すと、対応していないpollerのホストで
+    // 一覧が丸ごと消える。壊れたJSONも同じ扱いにする（`parseDispatchHostRepositories`は
+    // 壊れていれば空配列を返すため、そこでは区別が付かない）
+    previewRepositories:
+      host.previewRepositories === null
+        ? null
+        : parseDispatchHostRepositories(host.previewRepositories),
+    // 動いている確認環境（#2444）。**`repository`と`port`が揃っているときだけ動いている扱い**で、
+    // 残りは「取れなかった項目」として個別にnullになりうる（チェックアウトの版と同じ向き）。
+    // `tailscale serve`が使えないホストにURLは無く、`--no-update`で起こせばブランチが無い
+    preview:
+      host.previewRepository === null || host.previewPort === null
+        ? null
+        : {
+            repository: host.previewRepository,
+            port: host.previewPort,
+            branch: host.previewBranch,
+            url: host.previewUrl,
+            commit: host.previewCommit,
+            subject: host.previewSubject,
+            startedAt: host.previewStartedAt?.toISOString() ?? null,
+            idleMinutes: host.previewIdleMinutes,
           },
   };
 }
@@ -1094,6 +1131,67 @@ export async function enqueueSelfUpdateJob(params: {
   }
 }
 
+export type EnqueuePreviewJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: PreviewRejection; message: string };
+
+/**
+ * 確認環境（#2444）を起こす・最新へ入れ替える・止める。
+ *
+ * **判定は`resolvePreviewRejection`に寄せて、画面と同じ関数を使う**（`resolveManualStepExecutionRejection`
+ * と同じ形）。画面が押せると判断した操作だけが届く前提にはせず、ここでも同じ判定をやり直す。
+ *
+ * **未処理は1件まで（ホスト単位）。** 同時に動かせる確認環境は1つなので、「issue-deckを起こす」と
+ * 「dayspanを起こす」が同時に積まれると、後から届いた方が前を止めて上書きする。押した人から
+ * 見れば「押したのに別のものが立った」ようにしか見えない（`buildPreviewActiveKey`）。
+ */
+export async function enqueuePreviewJob(params: {
+  hostName: string;
+  repositoryFullName: string;
+  action: PreviewAction;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueuePreviewJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const rejection = resolvePreviewRejection({
+    host: host ? toHostView(host, now) : null,
+    repositoryFullName: params.repositoryFullName,
+    action: params.action,
+    // 未処理があるかはactiveKeyのunique制約が最終的に弾くので、ここでは見ない
+    // （見るなら追加のクエリが要るうえ、競合はどのみち制約でしか閉じられない）
+    hasQueuedJob: false,
+  });
+  if (rejection) {
+    return { ok: false, rejection, message: describePreviewRejection(rejection) };
+  }
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: PREVIEW_ISSUE_NUMBER,
+        targetHost: params.hostName,
+        kind: "PREVIEW",
+        status: "QUEUED",
+        activeKey: buildPreviewActiveKey(params.hostName),
+        previewAction: params.action,
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    // activeKeyのunique制約。二重クリックや、前の操作がまだ終わっていない場合
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: describePreviewRejection("already_queued"),
+    };
+  }
+}
+
 /** 代行実行の判定に要る本文とラベルを、DBのIssueキャッシュから引く（#1828） */
 async function findIssueForManualStep(
   repositoryFullName: string,
@@ -1166,6 +1264,9 @@ export async function claimDispatchJobs(params: {
   // 画面には「中断できなかった」だけが残る（そのときは打ち切りを待つ案内を出す方が正しい）
   if (host?.manualStepAbortCapable === true) controlKinds.push("MANUAL_STEP_ABORT");
   if (host?.selfUpdateCapable === true) controlKinds.push("SELF_UPDATE");
+  // 確認環境（#2444）も枠外。セッションを立てないので枠を消費しない。**申告していないpollerへは
+  // 配らない**（未知の種別として`failed`になり、押した操作が失われる）
+  if (host?.previewCapable === true) controlKinds.push("PREVIEW");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -1700,6 +1801,19 @@ export async function announceDispatchHost(params: {
    * その場合は5列すべてを`null`へ戻す（前回の値を残すと、取り込む前の版が現在の版として出る）。
    */
   checkout: DispatchHostCheckout | null;
+  /** 確認環境を起こせるか（#2444）。申告していないpollerでは`null`＝非対応 */
+  previewCapable: boolean | null;
+  /**
+   * 確認環境を起こせるリポジトリ（#2444）。`repositories`の部分集合。
+   * **申告していないpollerでは`null`＝「絞り込めない」**（`repositories`をそのまま使う）。
+   */
+  previewRepositories: string[] | null;
+  /**
+   * いま動いている確認環境（#2444）。**画面へ出すための写しで、割り当ての判定には使わない**
+   * （`checkout`と同じ立場）。動いていない・申告していない巡では`null`で、その場合は8列すべてを
+   * `null`へ戻す（前回の値を残すと、止まっているものが動いているように出続ける）。
+   */
+  preview: DispatchHostPreview | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -1744,6 +1858,19 @@ export async function announceDispatchHost(params: {
     checkoutCommittedAt: toDate(params.checkout?.committedAt),
     checkoutBehind: params.checkout?.behindCount ?? null,
     checkoutFetchedAt: toDate(params.checkout?.fetchedAt),
+    previewCapable: params.previewCapable,
+    previewRepositories:
+      params.previewRepositories === null ? null : JSON.stringify(params.previewRepositories),
+    // 確認環境も毎回上書きする（#2444）。**前回の値を残さない。** 残すと、止まった確認環境が
+    // 動いているものとして画面に出続け、押しても開けないURLだけが残る
+    previewRepository: params.preview?.repository ?? null,
+    previewBranch: params.preview?.branch ?? null,
+    previewPort: params.preview?.port ?? null,
+    previewUrl: params.preview?.url ?? null,
+    previewCommit: params.preview?.commit ?? null,
+    previewSubject: params.preview?.subject ?? null,
+    previewStartedAt: toDate(params.preview?.startedAt),
+    previewIdleMinutes: params.preview?.idleMinutes ?? null,
     lastSeenAt: now,
   };
 

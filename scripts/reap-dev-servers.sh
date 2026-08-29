@@ -4,18 +4,22 @@
 #   孤児（第0段階）    セッションが畳まれたのに残っている開発サーバーを止める
 #   アイドル（第1段階） 作業が終わって誰も見ていない開発サーバーを、**セッションは残したまま**止める
 #   定期掃除（#1525）  上のどちらにも載っていない開発サーバーを`/proc`の走査で見つけて止める
+#   確認環境（#2444）  誰も見ていない確認環境（scripts/start-preview-dev.sh）を止める
 #
 # 使い方:
 #   scripts/reap-dev-servers.sh                   孤児とアイドルを回収する
 #   scripts/reap-dev-servers.sh --dry-run         判定だけ表示し、何も止めない
 #   scripts/reap-dev-servers.sh --idle-minutes 0  アイドルの回収を行わない（孤児だけ回収する）
 #   scripts/reap-dev-servers.sh --orphan-grace-minutes 0  /procの走査を行わない
+#   scripts/reap-dev-servers.sh --preview-idle-minutes 0  確認環境の回収を行わない
 #   scripts/reap-dev-servers.sh --base <dir>      worktreeの置き場を指定する
 #
 # 環境変数:
 #   ISSUE_DECK_WORKTREE_BASE           worktreeの置き場（既定: ~/apps/issue-deck-worktrees）
 #   DEV_SERVER_IDLE_MINUTES            アイドルとみなすまでの分数（既定: 20・0で無効）
 #   DEV_SERVER_ORPHAN_GRACE_MINUTES    /procの走査で止めるまでの猶予（既定: 30・0で無効）
+#   PREVIEW_IDLE_MINUTES               確認環境をアイドルとみなすまでの分数（既定: 60・0で無効）
+#   ISSUE_DECK_PREVIEW_STATE_FILE      確認環境の状態ファイル（start-preview-dev.sh と共有）
 #
 # ## 在庫がPIDファイルだけでは足りない（#1525・#1523の実測）
 #
@@ -37,9 +41,10 @@
 # こちらは起動途中のセッションを巻き込まないよう、**2回連続で孤児と判定したときだけ撤去する**
 # （#1403）。手で流して溜まった分を片付けるときは2回続けて実行する。
 #
-# **対象は`issue-<番号>.pid`だけ**（下のglob）。`develop.pid`（scripts/start-develop-dev.sh・#1289）は
-# 意図して常駐させる開発サーバーで、親を持たない（PPID==1）ぶん孤児の条件に必ず当てはまるため、
-# ここに含めると起動した直後に止められる。**globを緩めない。**
+# **上の3段の対象は`issue-<番号>.pid`だけ**（下のglob）。確認環境（`preview.pid`・
+# scripts/start-preview-dev.sh・#2444）は意図して常駐させる開発サーバーで、親を持たない
+# （PPID==1）ぶん孤児の条件に必ず当てはまるため、ここに含めると起動した直後に止められる。
+# **globを緩めない。** 確認環境は専用の第4段（`reap_idle_preview`）が、アイドルのときだけ止める。
 #
 # **これは計器であって役ではない**（docs/multi-agent/gates.md「計器」）。判断はせず、
 # 決まった条件に当てはまるプロセスを止めて記録するだけで、LLMも人への問い合わせも挟まない。
@@ -71,6 +76,11 @@ WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 # 起こし直しは実測0.3秒で、プロンプトにも`cd <worktree> && pnpm dev`と案内してある。
 IDLE_MINUTES="${DEV_SERVER_IDLE_MINUTES:-20}"
 ORPHAN_GRACE_MINUTES="${DEV_SERVER_ORPHAN_GRACE_MINUTES:-30}"
+# 確認環境（#2444）は**Issueごとの開発サーバーより長く置く**。あちらは実装エージェントが
+# 起こし直せる（プロンプトにコマンドが書いてある）が、こちらは人がスマホや別の端末で画面を
+# 見ている最中に消えると、issue-deckを開き直して起こし直すところからやり直しになる。
+PREVIEW_IDLE_MINUTES="${PREVIEW_IDLE_MINUTES:-60}"
+PREVIEW_STATE_FILE="${ISSUE_DECK_PREVIEW_STATE_FILE:-$HOME/.local/state/issue-deck/preview.env}"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -84,12 +94,16 @@ while [[ $# -gt 0 ]]; do
       ORPHAN_GRACE_MINUTES="${2:-}"
       shift 2 || true
       ;;
+    --preview-idle-minutes)
+      PREVIEW_IDLE_MINUTES="${2:-}"
+      shift 2 || true
+      ;;
     --base)
       WORKTREE_BASE="${2:-}"
       shift 2 || true
       ;;
     *)
-      echo "Usage: scripts/reap-dev-servers.sh [--dry-run] [--idle-minutes <分>] [--orphan-grace-minutes <分>] [--base <dir>]" >&2
+      echo "Usage: scripts/reap-dev-servers.sh [--dry-run] [--idle-minutes <分>] [--orphan-grace-minutes <分>] [--preview-idle-minutes <分>] [--base <dir>]" >&2
       exit 1
       ;;
   esac
@@ -104,6 +118,10 @@ fi
 # 同じ理由で、こちらは**猶予が0秒になると起動直後の開発サーバーを撃つ**。必ず確かめる。
 if [[ ! "$ORPHAN_GRACE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 定期掃除の猶予の分数は0以上の整数で指定してください: $ORPHAN_GRACE_MINUTES" >&2
+  exit 1
+fi
+if [[ ! "$PREVIEW_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "Error: 確認環境のアイドル判定の分数は0以上の整数で指定してください: $PREVIEW_IDLE_MINUTES" >&2
   exit 1
 fi
 
@@ -405,6 +423,67 @@ reap_untracked_dev_servers() {
   return 0
 }
 
+# 確認環境（#2444）のアイドル回収。**上の3段とは在庫も判定も別**なので独立した関数にする。
+#
+# 在庫は状態ファイル1枚（`scripts/start-preview-dev.sh`が書く）。ホスト全体で1つしか動かない
+# ため、`$WORKTREE_BASE`（issue-deckの置き場）の外にあるworktree——他リポジトリの
+# `~/apps/<repo>-worktrees/preview`——もここから止められる。
+#
+# **孤児の条件（PPID==1）では判定しない。** 確認環境は`nohup`でSSHから切り離して起こす
+# 常駐プロセスで、親が居ないのが正常な姿。ここで見るのは**ログのmtime＝誰も見ていない時間**
+# だけで、判定材料はIssueごとの開発サーバーのアイドル判定とまったく同じにしてある。
+#
+# 止めたら**状態ファイルも消す**。残すと、pollerの申告（`--status --json`）は実プロセスを
+# 見て`running: false`を返すので画面は正しくなるが、次の起動が「入れ替え」として余計な
+# 停止処理を走らせることになる。
+reap_idle_preview() {
+  local idle_seconds=$((PREVIEW_IDLE_MINUTES * 60))
+  local pid log_mtime idle_for
+  local PREVIEW_REPOSITORY="" PREVIEW_WORKTREE="" PREVIEW_PORT="" PREVIEW_LOG="" PREVIEW_PID_FILE=""
+
+  [[ "$idle_seconds" -gt 0 ]] || return 0
+  [[ -f "$PREVIEW_STATE_FILE" ]] || return 0
+  # shellcheck disable=SC1090
+  source "$PREVIEW_STATE_FILE" 2>/dev/null || return 0
+  [[ -n "$PREVIEW_REPOSITORY" && -n "$PREVIEW_PID_FILE" && -n "$PREVIEW_WORKTREE" ]] || return 0
+
+  pid="$(cat "$PREVIEW_PID_FILE" 2>/dev/null || true)"
+  # 既に居ない・別人のPIDなら、記録だけ片付けて何も止めない（PIDの再利用を疑う）。
+  if ! dev_server_pid_matches "$pid" "$PREVIEW_WORKTREE"; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "  確認環境($PREVIEW_REPOSITORY): [dry-run] プロセスが居ないため記録だけ削除する対象です（PID ${pid:-不明}）"
+    else
+      rm -f "$PREVIEW_PID_FILE" "$PREVIEW_STATE_FILE"
+    fi
+    return 0
+  fi
+
+  [[ -f "$PREVIEW_LOG" ]] || return 0
+  log_mtime="$(stat -c %Y "$PREVIEW_LOG" 2>/dev/null || echo "")"
+  [[ "$log_mtime" =~ ^[0-9]+$ ]] || return 0
+  idle_for=$((NOW - log_mtime))
+  [[ "$idle_for" -ge "$idle_seconds" ]] || return 0
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  確認環境($PREVIEW_REPOSITORY): [dry-run] $((idle_for / 60))分アクセスが無いため停止する対象です（PID $pid）"
+    return 0
+  fi
+
+  dev_server_log_event "$PREVIEW_LOG" "確認環境を回収しました: $((idle_for / 60))分アクセスがありませんでした。もう一度見るときは issue-deck の「確認環境」から起こしてください。"
+  # tailnetへの公開は**プロセスを止める前に**外す。残すと繋がらないURLがtailnet上に残るだけで
+  # なく、そのポートで次に開発サーバーを起こせなくなる（#1403）。
+  [[ -n "$PREVIEW_PORT" ]] && tailscale_serve_unpublish "$PREVIEW_PORT"
+  if dev_server_stop_group "$pid"; then
+    echo "  確認環境($PREVIEW_REPOSITORY): 停止しました: $((idle_for / 60))分アクセスが無くアイドルだった"
+    STOPPED=$((STOPPED + 1))
+    rm -f "$PREVIEW_PID_FILE" "$PREVIEW_STATE_FILE"
+  else
+    echo "  確認環境($PREVIEW_REPOSITORY): 警告: 停止できませんでした（PID $pid）" >&2
+    dev_server_log_event "$PREVIEW_LOG" "確認環境（$pid）はSIGKILLでも停止できませんでした。"
+  fi
+  return 0
+}
+
 shopt -s nullglob
 for pid_file in "$DEV_SERVER_DIR"/issue-*.pid; do
   file_name="$(basename "$pid_file")"
@@ -468,7 +547,11 @@ fi
 # PIDファイルのある開発サーバーをこちらが止めてしまい、PIDファイルだけが残る
 reap_untracked_dev_servers
 
+# 確認環境（#2444）。**`reap_orphan_serves`より後に走らせる。** 先に止めるとserveの転送先が
+# 消え、あちらが「孤児」と判定して同じ巡で撤去しに行く（結果は同じだが、記録が二重に出る）。
+reap_idle_preview
+
 # 全インターフェースへの待ち受け警告（#1526）。停止とは無関係なので順序は問わない。
 warn_wildcard_listening
 
-echo "開発サーバーを確認しました: $CHECKED 件（PIDファイル）＋ $UNTRACKED 件（PIDファイルに無い孤児）・停止 $STOPPED 件・アイドル判定 ${IDLE_MINUTES}分・定期掃除の猶予 ${ORPHAN_GRACE_MINUTES}分"
+echo "開発サーバーを確認しました: $CHECKED 件（PIDファイル）＋ $UNTRACKED 件（PIDファイルに無い孤児）・停止 $STOPPED 件・アイドル判定 ${IDLE_MINUTES}分・定期掃除の猶予 ${ORPHAN_GRACE_MINUTES}分・確認環境のアイドル判定 ${PREVIEW_IDLE_MINUTES}分"

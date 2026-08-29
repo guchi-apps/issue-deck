@@ -2839,11 +2839,22 @@ pnpm test:unit   # vitestのみ
 `.env.local` の読み込み・LAN内の別端末から見るためのポートフォワード設定・smeeによるWebhook中継の
 起動を行う。`next dev` を直接叩くとGitHubからのWebhookがローカルに届かない。
 
-`pnpm dev:develop`（[../scripts/start-develop-dev.sh](../scripts/start-develop-dev.sh)・#1289）は、
-`develop`の最新状態を専用worktree（`~/apps/issue-deck-worktrees/develop`・detached HEAD）へ取り直し、
-固定ポート`4000`で開発サーバーを常駐させる。Issueごとの開発サーバーが映すのは実装中のブランチだけで、
-マージ済みが積み上がった`develop`を見る場所が別に要るため
-（[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を開発サーバーで見る」）。
+確認環境（[../scripts/start-preview-dev.sh](../scripts/start-preview-dev.sh)・#1289・#2444）は、
+**どのリポジトリでも**ベースブランチ（`origin/HEAD`）の最新状態を専用worktree
+（`~/apps/<repo>-worktrees/preview`・detached HEAD）へ取り直し、帯のベース値+0のポートで開発
+サーバーを常駐させる。Issueごとの開発サーバーが映すのは実装中のブランチだけで、マージ済みが
+積み上がった`develop`を見る場所が別に要るため
+（[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を確認環境で見る」）。
+
+- 押す口は画面のサイドメニュー「確認環境」（スマホはホームのメニュー）。組み立ては
+  [`lib/dispatch/preview-server.ts`](../src/lib/dispatch/preview-server.ts)、画面は
+  [`dashboard/preview-panel.tsx`](../src/components/dashboard/preview-panel.tsx)（PC・スマホ共用）
+- 経路は**既存のディスパッチのまま**（`POST /api/dispatch`の`kind: preview` → `DispatchJob`の
+  `PREVIEW` → pollerが`claim`で取る）。新しい受信経路も認証も増やさない
+- **同時に動かせるのは1つ**（サブPCの実効RAMは13Gi・#1523）。どれが動いているかは
+  `~/.local/state/issue-deck/preview.env`にあり、pollerが`--status --json`で読んで30秒ごとの申告
+  （`DispatchHost.preview*`）に載せる。画面はその写しを出すだけで、判定には使わない
+- CLI（`pnpm dev:preview`）はサブPCへSSHしているときの逃げ道として残してある
 
 ポートフォワード設定（[../scripts/setup-lan-access.sh](../scripts/setup-lan-access.sh)）はWindowsの
 管理者権限を要求するため、`ISSUE_DECK_SKIP_LAN_SETUP=1` が設定されている場合はスキップする

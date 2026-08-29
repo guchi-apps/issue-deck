@@ -41,7 +41,7 @@ describe("開発サーバーの待ち受けアドレス（#1526）", () => {
   });
 
   it("待ち受けを 0.0.0.0 に直書きしない（IPv4だけに絞られ、tailnetのIPv6から見えなくなる）", () => {
-    for (const name of ["dev.sh", "start-develop-dev.sh", "run-issue-session.sh"]) {
+    for (const name of ["dev.sh", "start-preview-dev.sh", "run-issue-session.sh"]) {
       expect(withoutComments(read(name))).not.toMatch(/-H\s+0\.0\.0\.0/);
     }
   });
@@ -56,8 +56,8 @@ describe("開発サーバーの待ち受けアドレス（#1526）", () => {
     expect(source).not.toMatch(/if.*ISSUE_DECK_DEV_HOST.*tailscale_serve_available/);
   });
 
-  it("develop常駐サーバーは tailscale serve で公開し、停止時に撤去する", () => {
-    const source = withoutComments(read("start-develop-dev.sh"));
+  it("確認環境の常駐サーバーは tailscale serve で公開し、停止時に撤去する", () => {
+    const source = withoutComments(read("start-preview-dev.sh"));
 
     // 待ち受けを閉じたぶん、tailnetへ出す手段はserveに一本化されている。
     expect(source).toContain("tailscale_serve_publish");

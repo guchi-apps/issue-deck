@@ -469,6 +469,48 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * 確認環境（#2444）を起こす・最新へ入れ替える・止める。
+   *
+   * **送るのはホスト名・リポジトリ・操作の3つだけ。** Issueに紐づく操作ではないので番号は
+   * 渡さない（サーバー側が埋め草を入れる）。ポートも起動コマンドもサブPC側が決める。
+   *
+   * 失敗の理由は`error`（共有）へ入れず戻り値で返す（`requestSelfUpdate`と同じ理由。押した
+   * 場所と表示が離れると話が通じない）。
+   */
+  const requestPreview = useCallback(
+    async (params: {
+      hostName: string;
+      repositoryFullName: string;
+      action: "start" | "refresh" | "stop";
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            host: params.hostName,
+            kind: "preview",
+            repository: params.repositoryFullName,
+            action: params.action,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリングを待たずに状態を出す。**pull型で最大30秒何も起きない**ため
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * 手作業アシスタントの自動実行（#1882）を開始・中断・再開する。
    *
    * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ）。`error`は起動ボタンの下に
@@ -707,6 +749,7 @@ export function useDispatchState(enabled: boolean) {
     abortManualStep,
     controlManualStepRun,
     requestSelfUpdate,
+    requestPreview,
     cancel,
     dismiss,
     prioritize,

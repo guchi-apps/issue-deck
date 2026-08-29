@@ -23,7 +23,7 @@
 # 常に末尾へ書くが、開発サーバーを`>`で起動するとそのfdは自分のオフセットを持つ。停止理由を
 # 末尾へ追記した直後に、死にゆく開発サーバーが最後の出力を**理由の行より手前**へ書いて
 # 上書きし、理由の行がマルチバイト文字の途中から壊れる（`.dev-servers/issue-1523.log`で実際に
-# 発生）。起動側は scripts/run-issue-session.sh・scripts/start-develop-dev.sh。
+# 発生）。起動側は scripts/run-issue-session.sh・scripts/start-preview-dev.sh。
 dev_server_log_event() {
   local log_file="$1" message="$2"
   local log_dir
