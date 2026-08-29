@@ -137,12 +137,15 @@ async function describeLocalPortBand(
   }
   try {
     const plan = await planLocalPortBand(token, `${NEW_APP_ORG}/${repositoryName}`);
+    // **残り枠を添える**（#2487）。エフェメラルポート範囲を避けるため空きは飛び地で10枠に
+    // 満たない。尽きてから気付くと立ち上げが止まるので、押す前に見えるようにする。
+    const remaining = `残りの帯は ${plan.remainingAfter} 枠`;
     return {
       base: plan.base,
       alreadyListed: plan.alreadyListed,
       note: plan.alreadyListed
-        ? `すでに ${LOCAL_PORT_BAND_CONF_PATH} に載っています（ベース値 ${plan.base}）`
-        : `ベース値 ${plan.base} を確保します（開発サーバーは ${plan.base} + Issue番号）`,
+        ? `すでに ${LOCAL_PORT_BAND_CONF_PATH} に載っています（ベース値 ${plan.base}。${remaining}）`
+        : `ベース値 ${plan.base} を確保します（開発サーバーは ${plan.base} + Issue番号。${remaining}）`,
     };
   } catch (error) {
     console.warn("[POST /api/new-app/preflight] ポート帯を下見できませんでした", error);

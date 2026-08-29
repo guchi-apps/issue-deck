@@ -7,16 +7,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   BROWSER_BLOCKED_PORTS,
+  EPHEMERAL_PORT_RANGE_END,
+  EPHEMERAL_PORT_RANGE_START,
   LOCAL_PORT_BAND_CONF_PATH,
   LOCAL_PORT_BAND_STEP,
   MAX_LOCAL_PORT_BASE,
   appendLocalPortBand,
   chooseNextLocalPortBase,
+  countRemainingLocalPortBases,
+  findEphemeralRangeLocalPortBands,
   findLocalPortBand,
   findOverlappingLocalPortBands,
   formatLocalPortBandLine,
   isBrowserBlockedPort,
   localPortBandEnd,
+  overlapsEphemeralPortRange,
   parseLocalPortBands,
 } from "@/lib/new-app/local-port-bands";
 
@@ -103,6 +108,81 @@ describe("chooseNextLocalPortBase", () => {
     expect(chooseNextLocalPortBase([{ repository: "a", base: 5000, width: LOCAL_PORT_BAND_STEP }])).toBe(
       7000,
     );
+  });
+
+  it("エフェメラルポート範囲に掛かるベース値は飛ばす（#2487）", () => {
+    // 31000の次は32000だが、帯としては32000〜32999で32768以降がエフェメラル。範囲の終わり
+    // （60999）を越える61000まで飛ぶ
+    expect(chooseNextLocalPortBase([{ repository: "a", base: 31000, width: LOCAL_PORT_BAND_STEP }])).toBe(
+      61000,
+    );
+    // 範囲のど真ん中に居座っている帯（手で足したもの）からでも、次は範囲の外
+    expect(chooseNextLocalPortBase([{ repository: "a", base: 45000, width: LOCAL_PORT_BAND_STEP }])).toBe(
+      61000,
+    );
+  });
+
+  it("エフェメラル範囲の手前に帯が残っていればそちらを先に使う（#2487）", () => {
+    expect(chooseNextLocalPortBase([{ repository: "a", base: 26000, width: LOCAL_PORT_BAND_STEP }])).toBe(
+      27000,
+    );
+  });
+
+  it("上限の帯は16bitのポート番号に収まる（#2487）", () => {
+    // MAX_LOCAL_PORT_BASE は「帯の終わりが65535に収まる最大のベース値」
+    expect(MAX_LOCAL_PORT_BASE + LOCAL_PORT_BAND_STEP - 1).toBeLessThanOrEqual(65535);
+    expect(MAX_LOCAL_PORT_BASE + LOCAL_PORT_BAND_STEP * 2 - 1).toBeGreaterThan(65535);
+  });
+});
+
+/**
+ * **エフェメラルポート範囲（32768〜60999）には帯を置かない**（#2487）。外向きの接続が一時的に
+ * 使う番号なので、開発サーバーを置くと「たまたま使われていたときだけ`EADDRINUSE`」になる。
+ */
+describe("overlapsEphemeralPortRange", () => {
+  it("帯の終わりで判定する（ベース値が32768未満でも掛かる）", () => {
+    expect(overlapsEphemeralPortRange(31000)).toBe(false);
+    expect(overlapsEphemeralPortRange(32000)).toBe(true);
+    expect(overlapsEphemeralPortRange(EPHEMERAL_PORT_RANGE_END)).toBe(true);
+    expect(overlapsEphemeralPortRange(EPHEMERAL_PORT_RANGE_END + 1)).toBe(false);
+  });
+
+  it("幅を広げると掛かるようになる", () => {
+    expect(overlapsEphemeralPortRange(30000, LOCAL_PORT_BAND_STEP)).toBe(false);
+    expect(overlapsEphemeralPortRange(30000, 3000)).toBe(true);
+  });
+});
+
+describe("findEphemeralRangeLocalPortBands", () => {
+  it("実物の対応表はエフェメラルポート範囲に掛かっていない", () => {
+    const conf = readFileSync(join(process.cwd(), LOCAL_PORT_BAND_CONF_PATH), "utf8");
+    const bands = findEphemeralRangeLocalPortBands(parseLocalPortBands(conf));
+    expect(
+      bands.map((band) => `${band.repository}(${band.base}〜${localPortBandEnd(band)})`),
+    ).toEqual([]);
+  });
+
+  it("掛かっている帯は挙げる", () => {
+    const bands = findEphemeralRangeLocalPortBands([
+      { repository: "a", base: 27000, width: LOCAL_PORT_BAND_STEP },
+      { repository: "b", base: EPHEMERAL_PORT_RANGE_START, width: LOCAL_PORT_BAND_STEP },
+    ]);
+    expect(bands.map((band) => band.repository)).toEqual(["b"]);
+  });
+});
+
+describe("countRemainingLocalPortBases", () => {
+  it("実物の対応表の残り枠は飛び地の合計（27000〜31000と61000〜64000）", () => {
+    const conf = readFileSync(join(process.cwd(), LOCAL_PORT_BAND_CONF_PATH), "utf8");
+    expect(countRemainingLocalPortBases(parseLocalPortBands(conf))).toBe(9);
+  });
+
+  it("配れる帯が無ければ0", () => {
+    expect(
+      countRemainingLocalPortBases([
+        { repository: "a", base: MAX_LOCAL_PORT_BASE, width: LOCAL_PORT_BAND_STEP },
+      ]),
+    ).toBe(0);
   });
 });
 
