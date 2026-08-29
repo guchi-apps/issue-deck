@@ -323,6 +323,11 @@ supply_env_files "$ISSUE_NUMBER" "$REPO_PATH" "$WORKTREE_DIR" .env.local .env
 
 # 開発サーバーのポートをIssueごとに一意にする（同じマシンで複数worktree・複数リポジトリの
 # セッションが並ぶため）。**帯はissue-deck側の対応表が持つ**（scripts/local-repo-ports.conf）。
+#
+# **ここはenvファイルが既にあるときだけ動く。** 本体チェックアウトに`.env.local`も`.env`も
+# 無いリポジトリでは`supply_env_files`が何もしないため、この書き込みも起こらない。
+# **ポートの受け渡しの本体は環境変数`PORT`**（run-issue-session.shがexportする・#2464）で、
+# ここはあくまで手で`pnpm dev`を叩き直す経路のための補助。
 for env_name in .env.local .env; do
   if [[ -f "$WORKTREE_DIR/$env_name" ]]; then
     bash "$SCRIPT_DIR/update-env-file.sh" "$WORKTREE_DIR/$env_name" PORT "$DEV_PORT"

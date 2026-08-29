@@ -464,6 +464,9 @@ prepare_issue() {
   # サブPCでは、そのずれがそのまま他リポジトリの帯との衝突になる。帯の一覧は
   # docs/multi-agent/local-quick-start.md を参照。
   DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
+  # **envファイルへの書き込みは補助**（#2464）。ポートの受け渡しの本体は環境変数`PORT`で、
+  # run-issue-session.shがexportする。ここはissue-deck自身のworktree（必ず`.env.local`を持つ）
+  # 向けで、手で`pnpm dev`を叩き直す経路のために書いておく。
   if [[ -f "$WORKTREE_DIR/.env.local" ]]; then
     # `sed`で消して追記する形にすると、再開のたびに先頭改行が積もって空行が増える（実測で
     # 何度も再開したworktreeだけ空行が4行多かった）。既存行があれば置換する共通スクリプトを使う。

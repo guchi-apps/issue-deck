@@ -195,6 +195,58 @@ dev_server_port_listener_pids() {
     grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
 }
 
+# そのworktreeで動いているプロセスが待ち受けているTCPポートを列挙する（#2464）。
+#
+# 「起動したはずのポートに誰も居ない」ときに、**実際にはどこで待ち受けているのか**を
+# 添えるために使う。ポートだけを見る`dev_server_port_listener_pids`とは向きが逆で、
+# worktreeを手掛かりにポートを引く。
+#
+# `ss`が無い環境では何も出力しない（判定できないので黙る）。
+dev_server_listening_ports_for_worktree() {
+  local worktree_dir="$1" local_addr pid port cwd
+  [[ -n "$worktree_dir" ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  while read -r local_addr pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    cwd="$(dev_server_cwd_of "$pid" || true)"
+    [[ "$cwd" == "$worktree_dir" ]] || continue
+    # IPv6は `[::1]:3000` の形なので、最後の `:` から後ろを取る
+    port="${local_addr##*:}"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
+    printf '%s\n' "$port"
+  done < <(ss -tlnpH 2>/dev/null |
+    awk '{ if (match($0, /pid=[0-9]+/)) print $4, substr($0, RSTART + 4, RLENGTH - 4) }') |
+    sort -un
+  return 0
+}
+
+# 起動した開発サーバーが、**意図したポートを実際に掴んだか**を待って確かめる（#2464）。
+#
+# PORTの受け渡しは環境変数とenvファイルの2経路あるが、**対象リポジトリの`dev`スクリプトが
+# どちらも見ない**ことがある（`next dev`をポート決め打ちで叩いている、独自の変数名を使って
+# いる等）。そのとき開発サーバー自体は起動するので「起動した」で先へ進んでしまい、待ち受けは
+# 既定の3000のまま、画面・状態ファイル・tailnetのURLだけが指定したポートを指し続ける。
+# #2464のguchi-apps/dayspanの確認環境がこれで、案内された6000には誰も居なかった。
+#
+# 掴めば0、猶予（既定30秒）の間に掴まなければ1を返す。**判定できない環境（`ss`が無い）では
+# 0を返す**（起動を止めない側＝静かな側に倒す）。第4引数にPIDを渡すと、そのプロセスが
+# 消えた時点で待つのをやめる（落ちた開発サーバーを猶予いっぱい待たない）。
+dev_server_wait_for_port() {
+  local port="$1" worktree_dir="$2" timeout_seconds="${3:-30}" pid="${4:-}" i found
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  for ((i = 0; i < timeout_seconds * 2; i++)); do
+    while read -r found; do
+      [[ "$found" == "$port" ]] && return 0
+    done < <(dev_server_listening_ports_for_worktree "$worktree_dir")
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 # そのPIDが開発サーバーの構成要素に見えるか（#1524）。
 #
 # **使うのは親を遡るときだけ**（`dev_server_tree_root`）。待ち受けている当人の判定には使わない

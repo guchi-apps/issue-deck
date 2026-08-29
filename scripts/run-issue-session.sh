@@ -116,6 +116,21 @@ DEV_PID_FILE="$DEV_SERVER_DIR/issue-$ISSUE_NUMBER.pid"
 DEV_SERVER_ENABLED="${ISSUE_DECK_DEV_SERVER:-1}"
 DEV_COMMAND="${ISSUE_DECK_DEV_COMMAND:-pnpm dev}"
 
+# **ポートは環境変数で渡す（#2464）。** それまでの受け渡しはenvファイル（worktreeの
+# `.env.local` / `.env`へ`PORT=<採番したポート>`を書く）だけで、**本体チェックアウトに
+# envファイルが無いリポジトリでは1文字も書かれなかった**（`supply_env_files`は本体に無ければ
+# 何もしない）。その結果、案内するポートと実際の待ち受け（多くはリポジトリ側の既定＝3000）が
+# 食い違い、画面のURLでは開けない状態になっていた（guchi-apps/dayspanの確認環境で発生）。
+#
+# envファイルへの書き込みは呼び出し元（start-issue.sh・generic-start-issue.sh）に残す。
+# **envファイルを持つリポジトリではそちらが勝つ**（`scripts/dev.sh`が`set -a; source .env.local`
+# で読むため）が、書かれている値は同じポートなので結果は変わらない。
+#
+# ここでexportしておくと、**エージェントが画面確認のために手で起こし直す`pnpm dev`にも効く**
+# （このプロセスの子としてエージェントCLIが動くため）。案内している起こし直しのコマンドに
+# ポートの指定が無いのは、この経路で渡ることを前提にしている。
+export PORT="$DEV_PORT"
+
 mkdir -p "$DEV_SERVER_DIR"
 
 # 前回のセッションがタブの強制終了などでtrapを通らずに終わると、開発サーバーが残ったまま
@@ -363,7 +378,7 @@ cleanup() {
 trap cleanup EXIT HUP TERM
 
 if [[ "$DEV_SERVER_ENABLED" == "0" ]]; then
-  echo "#$ISSUE_NUMBER: 開発サーバーは起動しません（画面確認が必要になったら worktree で \`$DEV_COMMAND\` を実行してください。ポート $DEV_PORT は env に設定済みです）。"
+  echo "#$ISSUE_NUMBER: 開発サーバーは起動しません（画面確認が必要になったら worktree で \`$DEV_COMMAND\` を実行してください。ポート $DEV_PORT は環境変数 PORT に設定済みです）。"
 else
   # 開発サーバーの待ち受けを`127.0.0.1`へ閉じる（#1329・#1526）。理由は2つある。
   #
@@ -412,13 +427,40 @@ else
   DEV_SERVER_STARTED=1
   echo "$DEV_PID" >"$DEV_PID_FILE"
 
+  # **指定したポートを本当に掴んだかを確かめてから先へ進む（#2464）。** 対象リポジトリの
+  # `dev`スクリプトが`PORT`を見ない場合、開発サーバーは起動するのに待ち受けは別のポート
+  # （多くは既定の3000）になる。掴めていないまま次のserveを張ると、**転送先に誰も居ない
+  # 公開**が残り（#1403の孤児serveと同じ形）、案内するURLだけが生きているように見える。
+  if dev_server_wait_for_port "$DEV_PORT" "$PWD" 30 "$DEV_PID"; then
+    DEV_PORT_TAKEN=1
+  else
+    DEV_PORT_TAKEN=0
+    ACTUAL_PORTS="$(dev_server_listening_ports_for_worktree "$PWD" | tr '\n' ' ')"
+    ACTUAL_PORTS="${ACTUAL_PORTS% }"
+    DEV_PORT_WARNING="#$ISSUE_NUMBER: 警告: 開発サーバーがポート $DEV_PORT を掴んでいません"
+    if [[ -n "$ACTUAL_PORTS" ]]; then
+      DEV_PORT_WARNING+="（実際の待ち受け: $ACTUAL_PORTS）。このリポジトリの dev スクリプトが環境変数 PORT を見ていない可能性があります。"
+    else
+      DEV_PORT_WARNING+="（待ち受けが1つも見つかりません）。起動に失敗しているかもしれません。ログを確認してください: $DEV_LOG"
+    fi
+    echo "$DEV_PORT_WARNING" >&2
+    dev_server_log_event "$DEV_LOG" "$DEV_PORT_WARNING"
+  fi
+
   # tailnetへ出す（#1265）。`tailscale serve`が`localhost:<ポート>`へプロキシする。
   # **待ち受けは上で`127.0.0.1`へ閉じてある**（#1329）。使えないホスト（メインPCのWSL等）では
   # 黙って何もしない（そのとき待ち受けも既定のままなので、tailnetからは直接見える）。
-  PREVIEW_URL="$(tailscale_serve_publish "$DEV_PORT" || true)"
+  #
+  # **ポートを掴めていないときは張らない（#2464）。** 開けないURLをissue-deckの画面へ
+  # 報告するより、公開が無いことを伝えるほうが原因に近い。
+  if [[ "$DEV_PORT_TAKEN" -eq 1 ]]; then
+    PREVIEW_URL="$(tailscale_serve_publish "$DEV_PORT" || true)"
+  fi
   if [[ -n "$PREVIEW_URL" ]]; then
     echo "#$ISSUE_NUMBER: 開発サーバーをtailnetへ公開しました: $PREVIEW_URL"
     report_preview_url_to_issue_deck "$PREVIEW_URL"
+  elif [[ "$DEV_PORT_TAKEN" -eq 0 ]]; then
+    echo "#$ISSUE_NUMBER: 情報: ポート $DEV_PORT に待ち受けが無いため、tailnetへの公開は行いません。"
   else
     echo "#$ISSUE_NUMBER: 情報: tailnetへの公開は行いません（tailscale serveが使えないホストです）。"
   fi
