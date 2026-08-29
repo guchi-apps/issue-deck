@@ -18,10 +18,13 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
+  EPHEMERAL_PORT_RANGE_END,
+  EPHEMERAL_PORT_RANGE_START,
   LOCAL_PORT_BAND_CONF_PATH,
   MAX_LOCAL_PORT_BASE,
   appendLocalPortBand,
   chooseNextLocalPortBase,
+  countRemainingLocalPortBases,
   findLocalPortBand,
   parseLocalPortBands,
 } from "@/lib/new-app/local-port-bands";
@@ -50,6 +53,13 @@ export type LocalPortBandPlan = {
   base: number;
   /** すでに対応表に載っていた（＝追記も Pull Request も要らない） */
   alreadyListed: boolean;
+  /**
+   * この帯を確保した後に、あと何リポジトリぶん配れるか（#2487）。
+   *
+   * エフェメラルポート範囲を避けるため空きは飛び地で、残りは10枠に満たない。尽きてから
+   * 気付くと立ち上げが止まるので、下見の時点で画面へ出す。
+   */
+  remainingAfter: number;
   /** developにある対応表の中身とblob SHA。`alreadyListed`のときは使わない */
   conf: { content: string; sha: string };
 };
@@ -76,18 +86,31 @@ export async function planLocalPortBand(
   const content = Buffer.from(file.content, "base64").toString("utf8");
   const bands = parseLocalPortBands(content);
 
+  const remaining = countRemainingLocalPortBases(bands);
+
   const existing = findLocalPortBand(bands, repositoryFullName);
   if (existing !== null) {
-    return { base: existing, alreadyListed: true, conf: { content, sha: file.sha } };
+    return {
+      base: existing,
+      alreadyListed: true,
+      remainingAfter: remaining,
+      conf: { content, sha: file.sha },
+    };
   }
 
   const base = chooseNextLocalPortBase(bands);
   if (base === null) {
     throw new Error(
-      `ローカルセッションのポート帯が上限（${MAX_LOCAL_PORT_BASE}）に達しています。${LOCAL_PORT_BAND_CONF_PATH} の帯を割り直してください。`,
+      `ローカルセッションのポート帯に空きがありません（上限 ${MAX_LOCAL_PORT_BASE}。${EPHEMERAL_PORT_RANGE_START}〜${EPHEMERAL_PORT_RANGE_END} はエフェメラルポート範囲なので配れません）。${LOCAL_PORT_BAND_CONF_PATH} の帯を割り直してください。`,
     );
   }
-  return { base, alreadyListed: false, conf: { content, sha: file.sha } };
+  return {
+    base,
+    alreadyListed: false,
+    // この帯を1つ使うぶんを引く
+    remainingAfter: remaining - 1,
+    conf: { content, sha: file.sha },
+  };
 }
 
 export type OpenedPullRequest = {

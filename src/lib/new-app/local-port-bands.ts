@@ -29,12 +29,33 @@ export const LOCAL_PORT_BAND_CONF_PATH = "scripts/local-repo-ports.conf";
 export const LOCAL_PORT_BAND_STEP = 1000;
 
 /**
+ * サブPCのエフェメラルポート範囲（`net.ipv4.ip_local_port_range` = `32768 60999`。#2487）。
+ *
+ * **この範囲は外向きの接続が一時的に使う。** 開発サーバーのような長時間の待ち受けを置くと、
+ * たまたま同じ番号が使われていたときだけ`EADDRINUSE`になり、再現しづらい形で表面化する。
+ * 帯がこの範囲に少しでも掛かるなら払い出さない。
+ *
+ * ```bash
+ * cat /proc/sys/net/ipv4/ip_local_port_range   # 32768	60999
+ * ```
+ *
+ * **下限を引き上げれば32768〜49151を帯として使える**が、それはサブPCの実機設定なので
+ * `guchi-apps/subpc`側の変更になる。ここは現在の設定をそのまま写している。
+ */
+export const EPHEMERAL_PORT_RANGE_START = 32768;
+export const EPHEMERAL_PORT_RANGE_END = 60999;
+
+/**
  * 払い出してよいベース値の上限。
  *
- * 実際のポートは「ベース値 + Issue番号」なので、上限を60000にしておくと
- * Issue番号が5000番台に達しても16bitのポート番号（65535）に収まる。
+ * **帯の終わり（ベース値 + 幅 - 1）が16bitのポート番号（65535）に収まる最大のベース値。**
+ * 原則の幅1000で、ベース値は1000の倍数なので64000（帯は64000〜64999）。#2478でIssue番号を
+ * 帯の中で折り返すようにしたため、「ベース値 + Issue番号」が帯からはみ出すことはない。
+ *
+ * エフェメラルポート範囲（#2487）はこの上限とは別に`chooseNextLocalPortBase`が飛ばす。
+ * 結果として払い出せるのは32768未満と61000以上の2か所に分かれる。
  */
-export const MAX_LOCAL_PORT_BASE = 60000;
+export const MAX_LOCAL_PORT_BASE = 64000;
 
 /**
  * ブラウザが接続を拒否するポート（#2466）。
@@ -123,6 +144,29 @@ export function findOverlappingLocalPortBands(
   return overlaps;
 }
 
+/**
+ * その帯がエフェメラルポート範囲に掛かるか（#2487）。
+ *
+ * 幅のぶんだけ後ろへ伸びるので、**ベース値が32768未満でも掛かりうる**（32000は帯としては
+ * 32000〜32999で、32768以降がエフェメラル）。
+ */
+export function overlapsEphemeralPortRange(
+  base: number,
+  width: number = LOCAL_PORT_BAND_STEP,
+): boolean {
+  return base <= EPHEMERAL_PORT_RANGE_END && base + width - 1 >= EPHEMERAL_PORT_RANGE_START;
+}
+
+/**
+ * エフェメラルポート範囲に掛かっている帯を挙げる（#2487）。
+ *
+ * 払い出し側（`chooseNextLocalPortBase`）は避けるようになったが、**対応表へ手で足した行**は
+ * そこを通らない。突き合わせは`local-port-bands.test.ts`が実物の対応表に対して行う。
+ */
+export function findEphemeralRangeLocalPortBands(bands: LocalPortBand[]): LocalPortBand[] {
+  return bands.filter((band) => overlapsEphemeralPortRange(band.base, band.width));
+}
+
 /** 既に載っているならそのベース値。載っていなければ`null`。 */
 export function findLocalPortBand(bands: LocalPortBand[], repository: string): number | null {
   const found = bands.find((band) => band.repository === repository);
@@ -130,27 +174,55 @@ export function findLocalPortBand(bands: LocalPortBand[], repository: string): n
 }
 
 /**
- * 次に払い出す帯（現状の最大 + 1000）。
+ * これから払い出せるベース値を若い順に並べる（#2487）。
  *
  * **空きを探して詰めない。** 帯を外したリポジトリの番号を再利用すると、古いチェックアウトが
- * 残っているサブPCで前の持ち主と衝突しうる。上限を超えたら`null`を返し、人に決めさせる。
+ * 残っているサブPCで前の持ち主と衝突しうる。現状の最大の次から上限までを1000刻みで見て、
+ * 配れないものを落とすだけにする。
  *
- * **ブラウザがブロックするポート（#2466）はベース値にしない。** 確認環境
- * （`scripts/start-preview-dev.sh`）は「ベース値 + 0」で開くため、ベース値そのものが
- * ブロック対象だと、待ち受けていても画面を開けない帯を配ることになる。
+ * 落とすのは次の2つ。
+ *
+ * - **ブラウザがブロックするポート（#2466）。** 確認環境（`scripts/start-preview-dev.sh`）は
+ *   「ベース値 + 0」で開くため、ベース値そのものがブロック対象だと、待ち受けていても画面を
+ *   開けない帯を配ることになる
+ * - **エフェメラルポート範囲に掛かる帯（#2487）。** 32768〜60999は外向きの接続が一時的に
+ *   使うので、開発サーバーを置くと再現しづらい`EADDRINUSE`になる
  */
-export function chooseNextLocalPortBase(bands: LocalPortBand[]): number | null {
+export function listAvailableLocalPortBases(bands: LocalPortBand[]): number[] {
   // **幅の広い帯（#2478）の終わりから進める。** 最大のベース値だけを見ると、issue-deckのように
   // 2000ぶんを占める帯の途中を次のリポジトリへ払い出してしまう。
   const max = bands.reduce(
     (current, band) => Math.max(current, localPortBandEnd(band) + 1),
     LOCAL_PORT_BAND_STEP,
   );
-  let next = Math.ceil(max / LOCAL_PORT_BAND_STEP) * LOCAL_PORT_BAND_STEP;
-  while (next <= MAX_LOCAL_PORT_BASE && isBrowserBlockedPort(next)) {
-    next += LOCAL_PORT_BAND_STEP;
+  const available: number[] = [];
+  for (
+    let base = Math.ceil(max / LOCAL_PORT_BAND_STEP) * LOCAL_PORT_BAND_STEP;
+    base <= MAX_LOCAL_PORT_BASE;
+    base += LOCAL_PORT_BAND_STEP
+  ) {
+    if (isBrowserBlockedPort(base)) continue;
+    if (overlapsEphemeralPortRange(base)) continue;
+    available.push(base);
   }
-  return next > MAX_LOCAL_PORT_BASE ? null : next;
+  return available;
+}
+
+/**
+ * 次に払い出す帯。配れる帯が無くなったら`null`を返し、人に決めさせる。
+ */
+export function chooseNextLocalPortBase(bands: LocalPortBand[]): number | null {
+  return listAvailableLocalPortBases(bands)[0] ?? null;
+}
+
+/**
+ * この先いくつ帯を配れるか（#2487）。
+ *
+ * **残り枠は少ない。** エフェメラルポート範囲を挟むため、32768未満と61000以上の飛び地しか
+ * 使えない。立ち上げウィザードの下見に出して、尽きる前に気付けるようにする。
+ */
+export function countRemainingLocalPortBases(bands: LocalPortBand[]): number {
+  return listAvailableLocalPortBases(bands).length;
 }
 
 /**
