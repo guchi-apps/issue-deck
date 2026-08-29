@@ -44,6 +44,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/github/with-user-github-token.ts`](../src/lib/github/with-user-github-token.ts) を通す。**
   トークン未保存時の409応答と、期限切れ時のリフレッシュ・再暗号化をここで一元的に扱っている。
   個別のRoute Handlerで復号処理を書き足さない。
+  - **渡した`fn`は401のときに丸ごと呼び直される。書き込みを2回以上行う`fn`は、途中の401を
+    そのまま投げ直してはいけない**（#2442）。`withUserGithubToken`はリトライの単位を`fn`
+    でしか持っておらず、途中から再開できない。`POST /api/issues`のように書き込みが1回なら
+    安全だが、`POST /api/new-app`（リポジトリ作成 → 雛形 → Issue十数件）のような非冪等な
+    呼び出し元で投げ直すと立ち上げが最初から走り、先頭の重複チェックが**自分でさっき
+    作ったもの**を見つけて、原因と食い違う理由（「リポジトリ名は既に使われています」）で
+    終わる。**投げ直してよいのは、まだ何も書き込んでいないときだけ。** それ以降は
+    自前のエラーとして`created`と一緒に返す
+    （[`lib/new-app/launch-failure.ts`](../src/lib/new-app/launch-failure.ts)の
+    `decideLaunchError`がこの判断を持つ）。
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
