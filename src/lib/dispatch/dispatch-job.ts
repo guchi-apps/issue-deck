@@ -107,6 +107,30 @@ export function isSessionLaunchJobKind(kind: DispatchJobKind): kind is SessionLa
   return (SESSION_LAUNCH_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
+/**
+ * 立てたセッションの名前が`<リポジトリ名>-issue-<番号>`の規約に従い、**pollerの
+ * `report_sessions`から`DispatchSession`の行として報告される種別**（#2443）。
+ *
+ * 計画レビュー（#1855）とコードレビュー（#698）は、セッション名を
+ * `<リポジトリ名>-plan-review-<番号>`・`<リポジトリ名>-code-review-<番号>`と
+ * 規約から外してあるため、報告の対象（`scripts/subpc-dispatch-poller.sh`の
+ * `^(.+)-issue-([1-9][0-9]*)$`）に載らない。**「セッションが立っているか」を
+ * `DispatchSession`で確かめる処理は、この集合だけを対象にする**——外の種別を混ぜると、
+ * 同じIssueの実装セッションの行に誤って一致する（`findSessionsForStaleLaunchJobs`）。
+ *
+ * 種別が増えるたびに同じ判断を繰り返さないよう、ここを一箇所の正とする。
+ */
+export const SESSION_REPORTED_JOB_KINDS = [
+  "LAUNCH",
+  "CROSS_REPO_QUESTION",
+] as const satisfies readonly SessionLaunchJobKind[];
+
+export type SessionReportedJobKind = (typeof SESSION_REPORTED_JOB_KINDS)[number];
+
+export function isSessionReportedJobKind(kind: DispatchJobKind): kind is SessionReportedJobKind {
+  return (SESSION_REPORTED_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
+}
+
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
 export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   // **省略時は`LAUNCH`。** 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
