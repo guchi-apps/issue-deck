@@ -9,11 +9,21 @@ cd "$SCRIPT_DIR/.."
 source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 
 # next devは.env.localを自動読込するが、このスクリプト自身（bash）は読み込まないため明示的に読む。
+#
+# **`set -a; source` は既にある環境変数を上書きする（#2464）。** 呼び出し元（run-issue-session.sh・
+# start-preview-dev.sh）が明示的に渡した`PORT`のほうが新しいので、退避して読み込みの後に戻す。
+# `next`（dotenv）も実環境の値をenvファイルより優先するため、こちらの向きに揃う。
+# 今のところ両者は同じ値（呼び出し元がenvファイルにも同じポートを書く）なので挙動は変わらないが、
+# **ポートの正は環境変数**という向きをここで固定しておく。
+PORT_FROM_ENVIRONMENT="${PORT:-}"
 if [ -f .env.local ]; then
   set -a
   # shellcheck disable=SC1091
   source .env.local
   set +a
+fi
+if [ -n "$PORT_FROM_ENVIRONMENT" ]; then
+  PORT="$PORT_FROM_ENVIRONMENT"
 fi
 
 PORT="${PORT:-3000}"

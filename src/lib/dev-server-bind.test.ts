@@ -90,6 +90,57 @@ describe("開発サーバーの待ち受けアドレス（#1526）", () => {
     expect(read("start-issue.sh")).toContain(marker);
   });
 
+  it("scripts/dev.sh は明示的に渡された PORT を .env.local より優先する（#2464）", () => {
+    const source = withoutComments(read("dev.sh"));
+
+    // `set -a; source .env.local` は既にある環境変数を上書きするため、退避と復元が要る。
+    // ここが外れると、起動側がexportしたポートが黙ってenvファイルの値に負ける。
+    expect(source).toMatch(/PORT_FROM_ENVIRONMENT="\$\{PORT:-\}"/);
+    expect(source).toMatch(/PORT="\$PORT_FROM_ENVIRONMENT"/);
+  });
+});
+
+describe("開発サーバーへのポートの渡し方（#2464）", () => {
+  // envファイルはポートの受け渡し経路にならない。worktreeへ `.env.local` / `.env` を用意する
+  // `supply_env_files` は**本体チェックアウトに無ければ何もしない**ため、envファイルを持たない
+  // リポジトリ（dayspan・clip-hive・portfolio など）ではPORTがどこにも書かれず、
+  // リポジトリ側の既定（3000）へ落ちる。案内するURLだけが採番したポートを指し続けるので、
+  // 利用者からは「開かない」以上のことが分からない。
+  it("セッションと確認環境は採番したポートを環境変数 PORT でexportする", () => {
+    for (const name of ["run-issue-session.sh", "start-preview-dev.sh"]) {
+      expect(withoutComments(read(name))).toMatch(/export PORT="\$DEV_PORT"/);
+    }
+  });
+
+  it("起動した後に、そのポートを実際に掴んだかを確かめる", () => {
+    // プロセスが生きていることは、案内したURLで開けることを意味しない。
+    for (const name of ["run-issue-session.sh", "start-preview-dev.sh"]) {
+      expect(withoutComments(read(name))).toContain("dev_server_wait_for_port");
+    }
+  });
+
+  it("確認環境はポートが食い違ったら起動を取り消す（黙って実際のポートへ合わせない）", () => {
+    const source = withoutComments(read("start-preview-dev.sh"));
+    const failureBranch = /if ! dev_server_wait_for_port[\s\S]*?\nfi\n/.exec(source)?.[0] ?? "";
+
+    expect(failureBranch).toContain("stop_preview");
+    expect(failureBranch).toContain("exit 1");
+    // 実際にどこで待ち受けているかを添える。これが無いと、対象リポジトリ側の何を直せばよいかが分からない。
+    expect(failureBranch).toContain("dev_server_listening_ports_for_worktree");
+  });
+
+  it("待ち受けの判定は worktree をcwdに持つプロセスに限る", () => {
+    const source = read("lib/dev-server.sh");
+    const body =
+      /dev_server_listening_ports_for_worktree\(\) \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? "";
+
+    // `tailscale serve` も同じポートをtailnetアドレスで待ち受ける（#1403）。cwd（`/`）で外れる。
+    expect(body).toContain("dev_server_cwd_of");
+    expect(body).toContain('[[ "$cwd" == "$worktree_dir" ]] || continue');
+  });
+});
+
+describe("開発サーバーの待ち受けアドレス（#1526・続き）", () => {
   it("scripts/lib/dev-server.sh の全インターフェース判定は tailscale serve 自身の待ち受けを拾わない", () => {
     const source = read("lib/dev-server.sh");
 

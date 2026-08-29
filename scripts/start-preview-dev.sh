@@ -537,6 +537,17 @@ fi
 # セッション（run-issue-session.sh）と同じく「devサーバー → serve」の順で張る。
 export ISSUE_DECK_DEV_HOST="${ISSUE_DECK_DEV_HOST:-127.0.0.1}"
 
+# **ポートは環境変数で渡す（#2464）。** 上のenvファイルへの書き込みは`.env.local` / `.env`が
+# **既にある**ときしか動かない。`supply_env_files`は本体チェックアウトに無ければ何もしないので、
+# envファイルを使わないリポジトリ（dayspan・clip-hive・portfolio など）ではPORTがどこにも
+# 書かれず、リポジトリ側の既定（`PORT=${PORT:-3000}`）に落ちていた。状態ファイルと画面だけが
+# 6000を指し続け、利用者からは原因が全く見えない状態になる。
+#
+# envファイルへの書き込みは残す（手で`pnpm dev`を叩き直す経路のため）。envファイルを持つ
+# リポジトリではそちらが勝つ（`scripts/dev.sh`が`set -a; source .env.local`で読む）が、
+# 書いてある値は同じポートなので結果は変わらない。
+export PORT="$DEV_PORT"
+
 PREVIEW_REPOSITORY="$TARGET"
 PREVIEW_WORKTREE="$WORKTREE_DIR"
 PREVIEW_PORT="$DEV_PORT"
@@ -584,6 +595,31 @@ if [[ -z "$(preview_running)" ]]; then
   tail -n 20 "$DEV_LOG" >&2 || true
   rm -f "$DEV_PID_FILE"
   clear_state
+  exit 1
+fi
+
+# **指定したポートを本当に掴んだかを確かめる（#2464）。** 対象リポジトリの`dev`スクリプトが
+# `PORT`（環境変数・envファイルのどちらも）を見ない場合、プロセスは生きているのに待ち受けは
+# 別のポートになる。ここを見ずに先へ進むと、状態ファイル・issue-deckの画面・tailnetのURLの
+# すべてが**誰も居ないポート**を指したまま残り、「起動しました」と言われた側からは原因に
+# 辿り着けない（#2464で実際にそうなった）。
+#
+# **黙って実際のポートへ合わせない。** そのポートは他リポジトリの帯と衝突しうるうえ、
+# 対象リポジトリ側の直すべき不備が見えなくなる。止めて理由を出す。
+if ! dev_server_wait_for_port "$DEV_PORT" "$WORKTREE_DIR" 30 "$(cat "$DEV_PID_FILE" 2>/dev/null || true)"; then
+  ACTUAL_PORTS="$(dev_server_listening_ports_for_worktree "$WORKTREE_DIR" | tr '\n' ' ')"
+  ACTUAL_PORTS="${ACTUAL_PORTS% }"
+  if [[ -n "$ACTUAL_PORTS" ]]; then
+    MESSAGE="確認環境がポート $DEV_PORT ではなく $ACTUAL_PORTS で待ち受けています。$TARGET の dev スクリプトが環境変数 PORT を見ていません。"
+  else
+    MESSAGE="確認環境がポート $DEV_PORT を掴めませんでした（待ち受けが1つも見つかりません）。"
+  fi
+  echo "Error: $MESSAGE" >&2
+  echo "       案内するURLと実際の待ち受けが食い違うため、起動を取り消します。ログ: $DEV_LOG" >&2
+  dev_server_log_event "$DEV_LOG" "$MESSAGE 起動を取り消します。"
+  tail -n 20 "$DEV_LOG" >&2 || true
+  save_state
+  stop_preview "ポートの不一致による起動の取り消し" || true
   exit 1
 fi
 
