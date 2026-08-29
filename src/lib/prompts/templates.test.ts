@@ -143,11 +143,13 @@ describe("buildImplementationPrompt", () => {
   });
 
   // #1632: 見た目の合意はPCだけでは足りず、スマホ幅の崩れは実装後に発覚すると作り直しになる
-  it("ラベルの有無によらずPC・スマホ(iPhone 15)の2画面を求める", () => {
+  // #2460: iPadの幅はPC・スマホのどちらの1枚にも入らないため、3枚目として並べる
+  it("ラベルの有無によらずPC・iPad(横)・スマホ(iPhone 15)の3画面を求める", () => {
     for (const labels of [[], [{ name: "25.artifact-required" }]]) {
       const prompt = buildImplementationPrompt({ ...BASE, labels });
       expect(prompt).toContain("iPhone 15 = 幅393px × 高さ852px");
-      expect(prompt).toContain("2画面");
+      expect(prompt).toContain("iPad（横向き = 幅1180px × 高さ820px）");
+      expect(prompt).toContain("3画面");
     }
   });
 
