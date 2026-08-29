@@ -5,6 +5,7 @@ import {
   GitBranch,
   Loader2,
   MessageCircleQuestion,
+  MonitorPlay,
   Plus,
   Rocket,
   Settings,
@@ -84,6 +85,13 @@ type MobileHomeScreenProps = {
   onSelectPullRequests: (view: PullRequestViewId) => void;
   /** 「ブランチ」画面を開く（#1455）。ビューではないのでメニューへ直接1行として置く */
   onSelectFlow: () => void;
+  /** 「確認環境」画面を開く（#2444）。「ブランチ」と同じくメニューへ直接1行として置く */
+  onSelectPreview: () => void;
+  /**
+   * 確認環境が動いているか（#2444）。動いている間だけオレンジの丸を出す。
+   * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
+   */
+  previewRunning: boolean;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
   /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
@@ -164,6 +172,8 @@ export function MobileHomeScreenView({
   onSelectQuickView,
   onSelectPullRequests,
   onSelectFlow,
+  onSelectPreview,
+  previewRunning,
   favoriteRepositories,
   onSelectRepository,
   onCreateIssue,
@@ -385,6 +395,20 @@ export function MobileHomeScreenView({
                 count={releaseActivity?.total ?? null}
                 emphasis={(releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none"}
                 title={describeReleaseActivity(releaseActivity)}
+              />
+              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
+                  ならない）。動いていることはオレンジの丸で出す */}
+              <MobileNavRow
+                label="確認環境"
+                icon={MonitorPlay}
+                onClick={onSelectPreview}
+                count={null}
+                emphasis={previewRunning ? "attention" : "none"}
+                title={
+                  previewRunning
+                    ? "確認環境が動いています"
+                    : "developの最新をサブPCで動かして画面で確かめる"
+                }
               />
             </ul>
           </div>

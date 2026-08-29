@@ -51,6 +51,9 @@ export type MobileScreen =
   // ブランチ（#1455）。当初はホームからのドリルダウンだけで開く画面だったが、
   // #1638でボトムナビの4枠目（旧「設定」）を受け取り、タブから直接開く画面になった
   | { kind: "flow" }
+  // 確認環境（#2444）。ボトムナビの枠は埋まっているので、ホームのメニューからの
+  // ドリルダウンだけで開く（設定と同じ形。戻る導線はヘッダーの戻るボタンが受け持つ）
+  | { kind: "preview" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -191,6 +194,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: "flow" };
     }
 
+    if (screenParam === "preview") {
+      return { kind: "preview" };
+    }
+
     return { kind: "home" };
   }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
 
@@ -200,7 +207,13 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
         // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）。
         // `settings`も#1638でタブから外れ、ホームのヘッダーから開く画面になった
-        screen: MobileBottomNavTab | "issues" | "issue-detail" | "repo-detail" | "settings";
+        screen:
+          | MobileBottomNavTab
+          | "issues"
+          | "issue-detail"
+          | "repo-detail"
+          | "settings"
+          | "preview";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -344,6 +357,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   // ホームのヘッダーから設定画面へ遷移する（#1638）。フッターのタブから外したため、
   // `selectTab`ではなくこちらを使う。戻る導線はヘッダーの戻るボタン（goBack）が受け持つ。
   const selectSettings = useCallback(() => navigate({ screen: "settings" }), [navigate]);
+
+  // ホームのメニューから確認環境の画面へ遷移する（#2444）。設定と同じくフッターにタブが
+  // 無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの戻るボタン（goBack）が持つ。
+  const selectPreview = useCallback(() => navigate({ screen: "preview" }), [navigate]);
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -514,6 +531,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPullRequests,
     selectPullRequestView,
     selectSettings,
+    selectPreview,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

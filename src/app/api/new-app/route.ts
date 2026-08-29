@@ -21,6 +21,7 @@ import { fetchVpsUsage } from "@/lib/github/vps-inventory-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { fetchLatestWorkflowTag } from "@/lib/github/workflow-tags";
 import { resolveNewAppInstallationScope } from "@/lib/new-app/installation-scope";
+import { decideLaunchError, type NewAppLaunchFailure } from "@/lib/new-app/launch-failure";
 import { buildExistingLaunchIssueComment, withNewAppMarker } from "@/lib/new-app/launch-marker";
 import { parseNewAppSpec } from "@/lib/new-app/parse";
 import { buildScaffoldFiles, scaffoldCopies } from "@/lib/new-app/scaffold";
@@ -70,6 +71,12 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * 何も起きていないのかが分からなくなる。**同じ内容での押し直しもしない**——リポジトリの
  * 作成で弾かれるので、続きは作られたIssueから人が進める。
  *
+ * **この処理は非冪等なので、途中からやり直せない**（#2442）。`withUserGithubToken`は401を
+ * 受けるとトークンを延長して`fn`を先頭から呼び直すため、1つでも作った後に401を投げ直すと
+ * 立ち上げが丸ごと再実行され、先頭の`repositoryExists`が自分で作ったリポジトリを見つけて
+ * 原因と食い違う`repository_taken`で終わる。**投げ直すのは`created`が空のときだけ**とし、
+ * それ以外は`launch_failed`として`created`と一緒に返す（`lib/new-app/launch-failure.ts`）。
+ *
  * 作る順序はIssueの本文が互いを参照する都合で決まっている。
  * リポジトリ → 雛形のコミット → 親 → ポート帯のPR → サブPCの手作業 →
  * （ブラウザの手作業） → vpsのVirtualHost → VPS受け入れの手作業 → 初期化
@@ -103,18 +110,6 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * `warnings`で「2つを手で押してください」と返す。
  */
 
-type FailureReason =
-  | "repository_taken"
-  | "hostname_taken"
-  | "port_band_unavailable"
-  | "launch_failed";
-
-type LaunchFailure = {
-  step: NewAppArtifactKind;
-  reason: FailureReason;
-  message?: string;
-};
-
 export function POST(request: NextRequest) {
   const guard = previewModeGuard();
   if (guard) return guard;
@@ -145,15 +140,14 @@ async function handlePOST(request: NextRequest) {
     try {
       return await launchNewApp(token, user.id, spec, created, warnings);
     } catch (error) {
-      // 401だけは`withUserGithubToken`へトークンの更新を任せるため投げ直す
-      if (error instanceof GithubApiError && error.status === 401) throw error;
+      // **投げ直してよいのは、まだ何も作っていないときの401だけ**（#2442）。
+      // `withUserGithubToken`は401を受けるとトークンを延長して`fn`を先頭から呼び直すが、
+      // 立ち上げは非冪等なので、1つでも作った後に呼び直すと`repositoryExists`が自分で
+      // 作ったリポジトリを見つけて`repository_taken`で終わる（判断は`decideLaunchError`）
+      const decision = decideLaunchError(error, created);
+      if (decision.rethrow) throw error;
       console.error("[POST /api/new-app]", error);
-      const failure: LaunchFailure = {
-        step: created.length > 0 ? created[created.length - 1].kind : "repository",
-        reason: "launch_failed",
-        message: error instanceof Error ? error.message : String(error),
-      };
-      return failure;
+      return decision.failure;
     }
   });
 
@@ -175,14 +169,20 @@ async function handlePOST(request: NextRequest) {
   return NextResponse.json({ created, warnings });
 }
 
-/** 成功したら`null`、続けられない理由が分かっていれば`LaunchFailure`を返す。 */
+/**
+ * 成功したら`null`、続けられない理由が分かっていれば`NewAppLaunchFailure`を返す。
+ *
+ * **401はここでは判断せず、呼び出し元（`handlePOST`）へ投げ上げる。** 投げ直すか
+ * `launch_failed`にするかは`created`が空かどうかで決まり、それを知っているのは呼び出し元
+ * だけだから（#2442）。
+ */
 async function launchNewApp(
   token: string,
   userId: string,
   spec: NewAppSpec,
   created: NewAppCreatedRef[],
   warnings: string[],
-): Promise<LaunchFailure | null> {
+): Promise<NewAppLaunchFailure | null> {
   const [parentOwner, parentRepo] = NEW_APP_PARENT_REPOSITORY.split("/");
   const [vpsOwner, vpsRepo] = NEW_APP_VPS_REPOSITORY.split("/");
 
@@ -203,6 +203,7 @@ async function launchNewApp(
   try {
     portBand = await planLocalPortBand(token, repo);
   } catch (error) {
+    // 401は`handlePOST`が「投げ直すか失敗として返すか」を決める（#2442）
     if (error instanceof GithubApiError && error.status === 401) throw error;
     console.error("[POST /api/new-app] ポート帯を決められませんでした", error);
     return {
@@ -314,6 +315,8 @@ async function launchNewApp(
         url: pull.htmlUrl,
       });
     } catch (error) {
+      // 401は`handlePOST`が判断する（この時点ではリポジトリを作り終えているので、
+      // 投げ直されず`launch_failed`になる。#2442）
       if (error instanceof GithubApiError && error.status === 401) throw error;
       console.error("[POST /api/new-app] ポート帯のPull Requestを作れませんでした", error);
       warnings.push(
@@ -369,6 +372,7 @@ async function launchNewApp(
         }),
       });
     } catch (error) {
+      // 401は`handlePOST`が判断する（#2442）
       if (error instanceof GithubApiError && error.status === 401) throw error;
       console.warn("[POST /api/new-app] 既存Issueへコメントできませんでした", error);
     }
@@ -472,6 +476,7 @@ async function commitScaffold(
   try {
     workflowTag = await fetchLatestWorkflowTag(token);
   } catch (error) {
+    // 401は`handlePOST`が判断する（#2442）
     if (error instanceof GithubApiError && error.status === 401) throw error;
     console.warn("[POST /api/new-app] 共有ワークフローの最新タグを読めませんでした", error);
   }
@@ -498,6 +503,7 @@ async function commitScaffold(
     });
     return { paths: files.map((file) => file.path).sort(), workflowTag };
   } catch (error) {
+    // 401は`handlePOST`が判断する（#2442）
     if (error instanceof GithubApiError && error.status === 401) throw error;
     console.error("[POST /api/new-app] 雛形をコミットできませんでした", error);
     warnings.push(

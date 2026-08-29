@@ -24,11 +24,14 @@ export type IssueStateFilter = "all" | "open" | "closed";
  *
  * `flow`はIssue・ブランチ・PRの関係を1画面で見る「ブランチ」画面（#1455）。
  * 一覧と詳細の2カラムを持たず、中央〜右を1カラムで使う。
+ *
+ * `preview`は確認環境（#2444）。developの最新をサブPCで動かして画面で確かめる。`flow`と同じく
+ * 1カラムで、Issueの絞り込み条件とは無関係。
  */
-export type DashboardPane = "issues" | "pull-requests" | "flow";
+export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview";
 
 function parsePane(value: string | null): DashboardPane {
-  if (value === "pull-requests" || value === "flow") return value;
+  if (value === "pull-requests" || value === "flow" || value === "preview") return value;
   return "issues";
 }
 
@@ -234,6 +237,11 @@ export function useIssueFilters() {
     setFilters({ pane: "flow", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「確認環境」画面への遷移（#2444）。「ブランチ」と同じくPRの選択状態を持たない。
+  const selectPreviewPane = useCallback(() => {
+    setFilters({ pane: "preview", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -280,6 +288,7 @@ export function useIssueFilters() {
     selectView,
     selectPullRequestView,
     selectFlowPane,
+    selectPreviewPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { createNextWorkflowTag, dispatchPropagation } from "@/lib/github/workflow-tags";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * 次の版数のタグを `main` に切り、そのまま配布まで流す（#1876）。
@@ -18,6 +19,8 @@ import { createNextWorkflowTag, dispatchPropagation } from "@/lib/github/workflo
  * 切り直せなかっただけで、狙った版数が存在していれば配る目的は果たせる。
  */
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("workflow_tags", () => handlePOST(request));
 }
 

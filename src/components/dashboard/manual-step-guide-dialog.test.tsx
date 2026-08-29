@@ -160,6 +160,7 @@ function manualStepJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     status: "SUCCEEDED",
     manualStepLine: STEP_LINE,
     targetJobId: null,
+    previewAction: null,
     command: "git pull --ff-only",
     exitCode: 0,
     commandOutput: "Already up to date.",

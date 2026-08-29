@@ -98,7 +98,7 @@ fi
 # **開発サーバーだけが停止すると、公開のほうも撤去される。** アイドルで回収された（#1223）
 # 開発サーバーのポートは転送先（`localhost:<ポート>`）に待ち受けが無くなるため、
 # `scripts/reap-dev-servers.sh`が2巡（既定で約2分）で孤児として撤去する（#1403）。
-# ところが公開を張るのはセッションの起動経路（`run-issue-session.sh`・`start-develop-dev.sh`）
+# ところが公開を張るのはセッションの起動経路（`run-issue-session.sh`・`start-preview-dev.sh`）
 # だけで、**案内している起こし直し（`cd <worktree> && pnpm dev`）にはその一手が無かった。**
 # その結果、localhostでは見えるのにtailnetのURL（issue-deckの画面に出たまま）は死んだままになり、
 # `23.preview-required`で別端末から画面を見る導線が切れていた。

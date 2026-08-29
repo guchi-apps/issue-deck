@@ -22,6 +22,12 @@ export type WithUserGithubTokenResult<T> = { value: T } | { errorResponse: NextR
  *   新しいトークンで`fn`を1回だけリトライする。延長・リトライのいずれかが失敗した場合は
  *   両トークンをクリアして409を返す
  * - 401以外のエラー: 502 (github_api_error)。`logContext`をconsole.errorのプレフィックスに使う
+ *
+ * **リトライの単位は`fn`全体で、途中から再開する手段は無い**（#2442）。したがって、書き込みを
+ * 2回以上行う`fn`（`POST /api/new-app`のリポジトリ作成 → 雛形 → Issue十数件など）は非冪等で、
+ * 途中で出た401をここへ投げ直してはいけない。投げ直すと処理が最初から走り、先頭の重複チェックが
+ * **自分でさっき作ったもの**を見つけて、原因と食い違う理由で終わる。そういう呼び出し元は
+ * 「まだ何も書き込んでいないときだけ投げ直す」形にし、それ以降は自前のエラーとして返すこと。
  */
 export async function withUserGithubToken<T>(
   user: GithubUserTokenUser,

@@ -441,6 +441,7 @@ enum DispatchJobKind {
   PLAN_REVIEW
   SELF_UPDATE
   CODE_REVIEW
+  PREVIEW
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -524,6 +525,17 @@ model DispatchJob {
   // この経路が任意の`systemctl stop`を流す口にはならない（`INTERRUPT`・`KILL`が
   // セッション名を組み立て直すのと同じ作法）。
   targetJobId        String?
+  // 確認環境（#2444）に対する操作。`kind`が`PREVIEW`のときだけ入る。
+  //
+  //   start    そのリポジトリのdevelopで起こす（他のリポジトリが動いていれば止めてから）
+  //   refresh  動いているものを最新のdevelopで入れ替える
+  //   stop     止める
+  //
+  // **pollerへ渡すのはこの3語のどれかと`repositoryFullName`だけで、コマンドも
+  // ポートも渡さない。** ポートは`scripts/local-repo-ports.conf`から、起動の仕方は
+  // `scripts/start-preview-dev.sh`からpollerが決める（`INTERRUPT`・`KILL`が
+  // セッション名を組み立て直すのと同じ作法で、任意のコマンドを流す口にしない）。
+  previewAction      String?
   // 代行実行の終了コード（#1828）。`0`が成功で、画面はこれを見てチェックを付けるかを決める。
   // タイムアウトで打ち切った場合は`timeout`の終了コード（124）が入る。
   exitCode           Int?
@@ -656,6 +668,20 @@ model DispatchHost {
   // （`OUT_OF_BAND_JOB_KINDS`）だが、手作業の代行に対応した既存のpollerは更新のジョブを知らず、
   // まとめて配ると未知の種別として`failed`になり、押した更新が失われる。
   selfUpdateCapable          Boolean?
+  // 確認環境（#2444）を起こせるか。`scripts/start-preview-dev.sh`を持つpollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（他のCapableと同じ向き）。
+  //
+  // **`selfUpdateCapable`とは分けて持つ。** どちらも枠外で配る「セッションを立てない」ジョブ
+  // （`OUT_OF_BAND_JOB_KINDS`）だが、更新に対応した既存のpollerは確認環境のジョブを知らず、
+  // まとめて配ると未知の種別として`failed`になる。
+  previewCapable             Boolean?
+  // 確認環境を起こせるリポジトリのJSON配列（#2444）。**`repositories`の部分集合。**
+  //
+  // あちらは「セッションを起こせるか」で、こちらは「開発サーバーがあるか」。vps・subpc・docs・
+  // claude-config・ideas はローカルセッションのためにポート帯だけ確保してあるが`package.json`が
+  // 無く、確認環境としては起こせない。分けて持たないと、画面に押しても必ず失敗する行が並ぶ。
+  // **`null`（未申告＝古いpoller）は「絞り込めない」**で、そのときは`repositories`をそのまま使う。
+  previewRepositories        String?  @db.Text
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
@@ -726,6 +752,34 @@ model DispatchHost {
   checkoutCommittedAt        DateTime?
   checkoutBehind             Int?
   checkoutFetchedAt          DateTime?
+  // いま動いている確認環境（#2444）。**同時に1つだけ**なので、別テーブルにせずホストの列で持つ。
+  //
+  // サブPCの実効RAMは13Giしかなく、#1523ではIssueごとの開発サーバーの孤児9本でOOM Killerが
+  // 発動している。リポジトリ数ぶんの確認環境を常駐させる前提は置けないため、**起こせるのは
+  // 1つ**で、別のリポジトリを選んだら前のものを止めてから起こす（判定はpoller側。
+  // `scripts/start-preview-dev.sh`が他のポートのserveも撤去する）。
+  //
+  // **`checkout*`と同じく画面へ出すためだけの写しで、判定には使わない。** 実体はサブPCの
+  // プロセスとPIDファイル（`~/apps/<repo>-worktrees/.dev-servers/preview.pid`）で、こちらは
+  // 30秒ごとの申告で置き換わる。**`null`は「動いていない」と「申告していない」の両方**を
+  // 兼ねるが、区別が要るのは`previewCapable`の側なのでここでは分けない。
+  //
+  //   previewRepository    `owner/repo`。動いていなければnull
+  //   previewBranch        映しているブランチ（develop / main）
+  //   previewPort          待ち受けているポート（`scripts/local-repo-ports.conf`の帯 + 0）
+  //   previewUrl           tailnetのURL。`tailscale serve`が使えないホストではnull
+  //   previewCommit        映しているコミット（短縮SHA）
+  //   previewSubject       そのコミットの1行目
+  //   previewStartedAt     起こした時刻
+  //   previewIdleMinutes   何分アクセスが無ければ自動停止するか（`DEV_SERVER_IDLE_MINUTES`）
+  previewRepository          String?
+  previewBranch              String?
+  previewPort                Int?
+  previewUrl                 String?
+  previewCommit              String?
+  previewSubject             String?  @db.Text
+  previewStartedAt           DateTime?
+  previewIdleMinutes         Int?
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt                 DateTime
 

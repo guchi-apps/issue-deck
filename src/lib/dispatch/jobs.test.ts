@@ -144,6 +144,9 @@ function host(overrides: Record<string, unknown> = {}) {
     planReviewCapable: true,
     codeReviewCapable: true,
     selfUpdateCapable: null,
+    previewCapable: null,
+    previewRepositories: null,
+    preview: null,
     maxConcurrency: null,
     ...overrides,
   };
@@ -1043,6 +1046,47 @@ describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
     );
   });
 
+  /**
+   * #2443。コードレビュー（#698）のセッション名も`<repo>-code-review-<番号>`と`-issue-`の規約から
+   * 外してあるため、計画レビューとまったく同じ理由で救済の対象にできない。
+   */
+  it("コードレビューは、同じIssueの実装セッションで救済しない", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ kind: "CODE_REVIEW" })]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "TIMEOUT" }) }),
+    );
+  });
+
+  // 横断質問（#1454）は`expected_session_name`で立つため、実装セッションと同じ規約で報告される
+  it("横断質問は、報告されたセッションで救済する", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ kind: "CROSS_REPO_QUESTION" })]);
+    dispatchSessionFindMany.mockResolvedValue([
+      {
+        host: "subpc",
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1311,
+        tmuxSessionName: "issue-deck-issue-1311",
+      },
+    ]);
+
+    await expireStaleDispatchJobs(NOW);
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCEEDED" }) }),
+    );
+  });
+
   // pollerごと落ちていれば`ALIVE`の行はそのまま古びて残る。古い報告で成功と決めない
   it("探すのは報告が新しいALIVEのセッションだけ", async () => {
     dispatchJobFindMany.mockResolvedValue([staleLaunchJob()]);
@@ -1101,6 +1145,7 @@ describe("dismissDispatchJob", () => {
       command: null,
       manualStepLine: null,
       targetJobId: null,
+      previewAction: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1174,6 +1219,7 @@ describe("prioritizeDispatchJob", () => {
       command: null,
       manualStepLine: null,
       targetJobId: null,
+      previewAction: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1295,6 +1341,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
       command: null,
       manualStepLine: null,
       targetJobId: null,
+      previewAction: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -1763,6 +1810,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       command: "git pull --ff-only",
       manualStepLine: 12,
       targetJobId: null,
+      previewAction: null,
       tmuxSessionName: null,
       exitCode: null,
       commandOutput: null,
@@ -1809,6 +1857,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       command: "git pull --ff-only",
       manualStepLine: 12,
       targetJobId: null,
+      previewAction: null,
       tmuxSessionName: null,
       exitCode: 1,
       commandOutput: "前回の出力",

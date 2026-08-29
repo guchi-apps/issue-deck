@@ -114,6 +114,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `PLAN_REVIEW`（#1855） | `scripts/start-plan-review.sh` | 計画の関門（G1）のセッションを立てる |
 | `CODE_REVIEW`（#698） | `scripts/start-code-review.sh` | リポジトリ全体のコードレビューのセッションを立てる |
 | `SELF_UPDATE`（#1875） | チェックアウトの更新と自己再起動 | pollerが動かしているチェックアウトを`develop`に合わせる |
+| `PREVIEW`（#2444） | `scripts/start-preview-dev.sh` | 確認環境（developの最新を映す開発サーバー）を起こす・入れ替える・止める |
 
 **`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`はセッションを立てる側**（`LAUNCH`と同じ枠・
 同じ払い出し経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものでは
@@ -122,6 +123,12 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 
 **`MANUAL_STEP`と`MANUAL_STEP_ABORT`はセッションにも tmux にも触らない**（枠外で先に配る点だけ
 制御ジョブと同じ）。詳細は[手作業アシスタントからの代行実行](#手作業アシスタントからの代行実行1828)。
+
+**`PREVIEW`もセッションにも tmux にも触らない**（#2444。`SELF_UPDATE`と同じ枠外）。Issueに
+紐づかないため`issueNumber`には埋め草の`0`が入り、pollerへ渡るのは**操作の3語
+（`start`/`refresh`/`stop`）とリポジトリ名だけ**。ポートも起動コマンドもworktreeの場所も
+`scripts/start-preview-dev.sh`が決める。動いているものは30秒ごとの申告（`previewState`）で
+画面へ返る。詳細は[local-quick-start.md](local-quick-start.md)「developの状態を確認環境で見る」。
 
 **中断（`MANUAL_STEP_ABORT`）は代行実行とは別の申告（`manualStepAbort`）で配る。** 代行実行を
 実行できるpollerでも、止める側の実装（poller v13以降）が入っているとは限らない。未対応のホストへ
@@ -955,7 +962,7 @@ tmuxセッションが立つ → 回答は質問Issueへのコメントとして
 
 - **本体の作業ツリーには触れない。** `git worktree add`が書くのは本体リポジトリの
   `.git/worktrees/`だけで、チェックアウト中のブランチも未コミットの変更も動かさない
-  （developを見るための`scripts/start-develop-dev.sh`と同じ手口）。質問セッション側から
+  （確認環境の`scripts/start-preview-dev.sh`と同じ手口）。質問セッション側から
   gitの書き込み操作を禁じている前提も変わらない
 - **質問ごとには分けず、リポジトリごとに固定する。** `_session-<repo>`（#1529）と同じ理由に加え、
   質問のたびに十数リポジトリぶんのチェックアウトを作り直すのが無駄なため。すでに同じコミットなら
@@ -1619,7 +1626,7 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
 だけで、10分後に「起動処理からの応答が途絶えました」としてタイムアウトし、**同じIssueが実行
 キューの「実行中」（セッション一覧）と「直近の失敗」に同時に並んだ**。
 
-そのため`expireStaleDispatchJobs()`は、起動ジョブ（`SESSION_LAUNCH_JOB_KINDS`の`CLAIMED`・
+そのため`expireStaleDispatchJobs()`は、起動ジョブ（`SESSION_REPORTED_JOB_KINDS`の`CLAIMED`・
 `RUNNING`）を落とす前に、同じホスト・リポジトリ・Issue番号の`ALIVE`なセッションを探す
 （`findSessionsForStaleLaunchJobs`）。見つかれば`TIMEOUT`ではなく`SUCCEEDED`として畳み、
 報告に入っていたはずのtmuxセッション名を補う。
@@ -1629,6 +1636,13 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
   決めると、本当に落ちた起動を成功として隠すことになる
 - **制御ジョブは救済しない。** あちらはtmuxを1回叩いて終わるので、セッションが動いていることは
   `C-c`が届いた証拠にならない
+- **計画レビュー・コードレビューも救済しない**（#1855・#2443）。セッションは立てるが、名前を
+  `<リポジトリ名>-plan-review-<番号>`・`<リポジトリ名>-code-review-<番号>`と`-issue-`の規約から
+  外してあるため`report_sessions`が拾わず、`DispatchSession`の行にならない。ここで探すと代わりに
+  **同じIssueの実装セッション**に一致し、届かなかったレビューを「起動できていた」ことにして
+  しまう。対象は`SESSION_LAUNCH_JOB_KINDS`（枠を消費する種別）ではなく
+  **`SESSION_REPORTED_JOB_KINDS`（セッションが`DispatchSession`として報告される種別）**で引く。
+  枠の計算と報告の有無は別の軸なので、種別が増えたときに片方だけ直して食い違うのを防ぐ
 - 表示側（`summarizeDispatchQueue`）には同じ判定を置かない。2か所に持つと片方が緩んだ時点で
   そこが穴になる（[gates.md](gates.md)と同じ考え方）
 
@@ -1862,7 +1876,7 @@ pollerをsystemd timerではなく**常駐サービス**にしているのはこ
 刻み、その合間に`claim`だけを叩く**（`wait_between_polls` → `claim_out_of_band`）。
 
 - **取りに行くのは枠外のジョブだけ**（`maxJobs: 0`。制御ジョブ・`MANUAL_STEP`・
-  `MANUAL_STEP_ABORT`・`SELF_UPDATE`）。**セッションを立てる起動ジョブは従来どおり**で、
+  `MANUAL_STEP_ABORT`・`SELF_UPDATE`・`PREVIEW`）。**セッションを立てる起動ジョブは従来どおり**で、
   払い出してよいかの判定が`announce`がその巡の入口で集めた使用率（#2095）と生きている
   本数（#1361）に依存する——重い巡回でしか更新されない材料で判定させない。起動そのものに
   分単位かかる以上、数十秒早く取りに行く利得も小さい

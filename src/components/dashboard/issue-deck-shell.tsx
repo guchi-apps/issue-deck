@@ -39,6 +39,8 @@ import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-detail-dialog";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
+import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
+import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
@@ -168,6 +170,7 @@ export function IssueDeckShell({
     selectView,
     selectPullRequestView,
     selectFlowPane,
+    selectPreviewPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -236,6 +239,7 @@ export function IssueDeckShell({
     // タブ切り替えで、履歴を積まない（#1436）
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
+    selectPreview,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -544,6 +548,12 @@ export function IssueDeckShell({
   // ここで持つのは「確認待ちのIssueでエージェントがまだ動いているか」を判定するため（#2174）で、
   // 同じものをIssue一覧へも渡す——一覧が自前で持つと、同じ画面のために取得が2本走る。
   const dispatch = useDispatchState(true);
+  /**
+   * 確認環境（#2444）が動いているか。**左メニューの行に丸を出すためだけ**に持つ。
+   * 押し忘れて置きっぱなしになっているのは自動で片付かない（60分は動き続け、その間
+   * サブPCのメモリを占める）ので、確認環境の画面を開いていなくても気付けるようにする。
+   */
+  const previewRunning = dispatch.hosts.some((host) => host.preview !== null);
   // セッションの報告がどれだけ古いかを見るための現在時刻（`isSessionActivelyWorking`）。
   // **間隔は既定より粗い1分**——判定の境目は5分（`SESSION_ACTIVITY_STALE_MS`）なので分解能は
   // これで足り、時計が進むたびにこの画面全体が描き直されるのを抑える。
@@ -1367,12 +1377,24 @@ export function IssueDeckShell({
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
                   onSelectFlow={() => selectTab("flow")}
+                  onSelectPreview={selectPreview}
+                  previewRunning={previewRunning}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onCreateIssue={() => openCreateDialog()}
                   onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onLaunchNewApp={() => setNewAppDialogOpen(true)}
                   onOpenSettings={selectMobileSettings}
+                />
+              )}
+
+              {mobileScreen.kind === "preview" && (
+                <MobilePreviewScreen
+                  hosts={dispatch.hosts}
+                  jobs={dispatch.jobs}
+                  isLoaded={dispatch.isLoaded}
+                  onRequestPreview={dispatch.requestPreview}
+                  onBack={goBack}
                 />
               )}
 
@@ -1587,6 +1609,8 @@ export function IssueDeckShell({
                 activePullRequestView={filters.prview}
                 onSelectPullRequestView={selectPullRequestView}
                 onSelectFlow={selectFlowPane}
+                onSelectPreview={selectPreviewPane}
+                previewRunning={previewRunning}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
@@ -1613,7 +1637,19 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "flow" ? (
+          {filters.pane === "preview" ? (
+            /* PC: 確認環境（#2444）。「ブランチ」と同じく中央〜右を1カラムで使う */
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-3xl">
+                <PreviewPanel
+                  hosts={dispatch.hosts}
+                  jobs={dispatch.jobs}
+                  isLoaded={dispatch.isLoaded}
+                  onRequestPreview={dispatch.requestPreview}
+                />
+              </div>
+            </div>
+          ) : filters.pane === "flow" ? (
             /* PC: ブランチ（#1455）。中央〜右をこの画面だけで使い、その中を
                左（リポジトリ一覧）と右（選んだリポジトリの流れ図）に分ける（#2157）。
                IssueやPRを選ぶとそれぞれのペインへ遷移する */

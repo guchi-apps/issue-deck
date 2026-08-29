@@ -5,6 +5,9 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 // 型だけのimport（コンパイル時に消える）。`host-metrics.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない
 import type { DispatchHostLaunchHold, DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+// 型だけのimport（コンパイル時に消える）。`preview-server.ts`側も`DispatchHostView`を
+// 型としてしか使わないため、実行時の循環importにはならない（`host-checkout.ts`と同じ）
+import type { DispatchHostPreview } from "@/lib/dispatch/preview-server";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 // 対話が要るコマンドの表記は`manual-step-command.ts`が持つ（判定もそちら）。ここでは
@@ -53,6 +56,9 @@ export type DispatchJobStatus =
  *   `systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。**セッションを
  *   操作するジョブではない**（相手はtmuxではなくtransient unit）ので`SESSION_CONTROL_JOB_KINDS`
  *   には入れない
+ * - `PREVIEW` … 確認環境（#2444）を起こす・最新へ入れ替える・止める。pollerが
+ *   `scripts/start-preview-dev.sh`を実行する。**Issueに紐づかない**（対象はリポジトリ）ので
+ *   `issueNumber`には埋め草の0が入り、セッションも立てない
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -65,7 +71,8 @@ export type DispatchJobKind =
   | "MANUAL_STEP_ABORT"
   | "PLAN_REVIEW"
   | "SELF_UPDATE"
-  | "CODE_REVIEW";
+  | "CODE_REVIEW"
+  | "PREVIEW";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -107,6 +114,30 @@ export function isSessionLaunchJobKind(kind: DispatchJobKind): kind is SessionLa
   return (SESSION_LAUNCH_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
+/**
+ * 立てたセッションの名前が`<リポジトリ名>-issue-<番号>`の規約に従い、**pollerの
+ * `report_sessions`から`DispatchSession`の行として報告される種別**（#2443）。
+ *
+ * 計画レビュー（#1855）とコードレビュー（#698）は、セッション名を
+ * `<リポジトリ名>-plan-review-<番号>`・`<リポジトリ名>-code-review-<番号>`と
+ * 規約から外してあるため、報告の対象（`scripts/subpc-dispatch-poller.sh`の
+ * `^(.+)-issue-([1-9][0-9]*)$`）に載らない。**「セッションが立っているか」を
+ * `DispatchSession`で確かめる処理は、この集合だけを対象にする**——外の種別を混ぜると、
+ * 同じIssueの実装セッションの行に誤って一致する（`findSessionsForStaleLaunchJobs`）。
+ *
+ * 種別が増えるたびに同じ判断を繰り返さないよう、ここを一箇所の正とする。
+ */
+export const SESSION_REPORTED_JOB_KINDS = [
+  "LAUNCH",
+  "CROSS_REPO_QUESTION",
+] as const satisfies readonly SessionLaunchJobKind[];
+
+export type SessionReportedJobKind = (typeof SESSION_REPORTED_JOB_KINDS)[number];
+
+export function isSessionReportedJobKind(kind: DispatchJobKind): kind is SessionReportedJobKind {
+  return (SESSION_REPORTED_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
+}
+
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
 export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   // **省略時は`LAUNCH`。** 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
@@ -121,7 +152,49 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "plan_review") return "PLAN_REVIEW";
   if (value === "self_update") return "SELF_UPDATE";
   if (value === "code_review") return "CODE_REVIEW";
+  if (value === "preview") return "PREVIEW";
   return null;
+}
+
+/**
+ * 確認環境（#2444）への操作。**pollerへ渡すのはこの3語だけ**で、コマンドもポートも渡さない。
+ *
+ * - `start` … そのリポジトリのdevelopで起こす（別のものが動いていれば止めてから）
+ * - `refresh` … 動いているものを最新のdevelopで入れ替える
+ * - `stop` … 止める
+ *
+ * `start`と`refresh`はpoller側では同じ処理（`start-preview-dev.sh <owner>/<repo>`）になるが、
+ * **画面のキューに出る言葉が変わる**ので分けている。押したボタンとキューの表示が食い違うと、
+ * それが自分の押したものかどうか分からなくなる（`SESSION_CONTROL_LABELS`と同じ考え方）。
+ */
+export const PREVIEW_ACTIONS = ["start", "refresh", "stop"] as const;
+
+export type PreviewAction = (typeof PREVIEW_ACTIONS)[number];
+
+export function parsePreviewAction(value: unknown): PreviewAction | null {
+  if (typeof value !== "string") return null;
+  return (PREVIEW_ACTIONS as readonly string[]).includes(value) ? (value as PreviewAction) : null;
+}
+
+/**
+ * 確認環境のジョブが使う`DispatchJob.issueNumber`の埋め草。
+ *
+ * `SELF_UPDATE`（`SELF_UPDATE_ISSUE_NUMBER`）と同じ理由で、**このジョブはIssueに紐づかない**
+ * のに`DispatchJob`は`issueNumber`を必須で持つ。0は「Issueではない」印。
+ */
+export const PREVIEW_ISSUE_NUMBER = 0;
+
+/**
+ * 確認環境のジョブの活性キー。**リポジトリではなくホストで一意にする。**
+ *
+ * 同時に動かせる確認環境は1つなので、「issue-deckを起こす」と「dayspanを起こす」が同時に
+ * 積まれると、後から届いた方が前を止めて上書きする。押した人から見れば「押したのに別のものが
+ * 立った」ようにしか見えないため、**ホストごとに未処理を1件へ絞る**。
+ * `buildDispatchActiveKey`が作る`preview:owner/repo#0`と混ざらないよう`host:`を挟む
+ * （`buildSelfUpdateActiveKey`と同じ作法）。
+ */
+export function buildPreviewActiveKey(hostName: string): string {
+  return `preview:host:${hostName}`;
 }
 
 /**
@@ -135,7 +208,12 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
  * 一方で`SESSION_CONTROL_JOB_KINDS`には**入れない**。あちらはpollerがセッション名を組み立て直して
  * 突き合わせる種別の集合で、こちらは操作する相手がセッションではない。
  */
-export const OUT_OF_BAND_JOB_KINDS = ["MANUAL_STEP", "MANUAL_STEP_ABORT", "SELF_UPDATE"] as const;
+export const OUT_OF_BAND_JOB_KINDS = [
+  "MANUAL_STEP",
+  "MANUAL_STEP_ABORT",
+  "SELF_UPDATE",
+  "PREVIEW",
+] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
   return (OUT_OF_BAND_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
@@ -262,6 +340,14 @@ export type DispatchJobView = {
    * 最大1巡かかるため、押した後に何も出ないと押し直してよいのか分からない）。
    */
   targetJobId: string | null;
+  /**
+   * 確認環境への操作（#2444。`kind`が`PREVIEW`のときだけ入る）。
+   *
+   * **画面とpollerの両方が読む。** pollerはこれを見て起こす／止めるを決め、画面は
+   * 「押したのがどの操作だったか」を出す（届くまで最大1巡かかるため、何も出ないと
+   * 押し直してよいのか分からない）。
+   */
+  previewAction: PreviewAction | null;
   /** 代行実行の終了コード（#1828）。`0`のときだけ画面が手順のチェックを付ける */
   exitCode: number | null;
   /**
@@ -366,6 +452,27 @@ export type DispatchHostView = {
    * 扱う**（他のCapableと同じ）。`manualStepCapable`と分けて持つ理由はスキーマ側のコメント参照。
    */
   selfUpdateCapable: boolean | null;
+  /**
+   * 確認環境（#2444）を起こせるか。**`null`（未申告）は「できない」として扱う**
+   * （他のCapableと同じ）。画面はこれを見て、押せない理由を押す前に出す。
+   */
+  previewCapable: boolean | null;
+  /**
+   * 確認環境を起こせるリポジトリ（#2444）。**`repositories`の部分集合**で、開発サーバーを
+   * 持たないリポジトリ（`package.json`が無いもの）が除かれている。
+   *
+   * **`null`（未申告＝古いpoller）は「絞り込めない」**で、そのときは`repositories`をそのまま
+   * 使う（他のCapableの`null`＝「できない」とは向きが違う。ここで空にすると、確認環境を
+   * 起こせるホストの一覧が丸ごと消える）。
+   */
+  previewRepositories: string[] | null;
+  /**
+   * いま動いている確認環境（#2444）。動いていなければ`null`。
+   *
+   * **`metrics`・`checkout`と同じく画面へ出すためだけの写しで、判定には使わない。**
+   * 実体はサブPCのプロセスで、30秒ごとの申告で置き換わる。
+   */
+  preview: DispatchHostPreview | null;
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
@@ -692,6 +799,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "コードレビュー";
     case "SELF_UPDATE":
       return "チェックアウトの更新";
+    case "PREVIEW":
+      return "確認環境";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":

@@ -27,8 +27,10 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
     case "flow":
       return "flow";
     // 設定はフッターから外し、ホームのヘッダー右上から開く画面になった（#1638）。
-    // 対応するタブが無いので、どれも点灯させない。
+    // 確認環境（#2444）も同じくホームのメニューからのドリルダウンで、タブを持たない。
+    // どちらも対応するタブが無いので、どれも点灯させない。
     case "settings":
+    case "preview":
       return null;
     case "issue-detail":
       return resolveBottomNavTab(screen.back);

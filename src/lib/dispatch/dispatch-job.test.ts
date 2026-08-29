@@ -19,6 +19,7 @@ import {
   isCancelableDispatchJobStatus,
   isSessionControlJobKind,
   isSessionLaunchJobKind,
+  isSessionReportedJobKind,
   isIssueExecutionPending,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
@@ -573,6 +574,28 @@ describe("isCancelableDispatchJobStatus", () => {
   });
 });
 
+/**
+ * #2443。`DispatchSession`の行で「セッションが立っているか」を確かめる処理は、
+ * **セッション名が`-issue-`の規約に従う種別だけ**を対象にする必要がある。
+ * 規約から外れた種別（計画レビュー・コードレビュー）を混ぜると、同じIssueの実装セッションの
+ * 行に誤って一致する。種別が増えるたびに同じ判断を繰り返さないよう、集合を一箇所に置く。
+ */
+describe("isSessionReportedJobKind", () => {
+  it("`-issue-`の規約でセッションを立てる種別だけを含む", () => {
+    expect(isSessionReportedJobKind("LAUNCH")).toBe(true);
+    expect(isSessionReportedJobKind("CROSS_REPO_QUESTION")).toBe(true);
+    expect(isSessionReportedJobKind("PLAN_REVIEW")).toBe(false);
+    expect(isSessionReportedJobKind("CODE_REVIEW")).toBe(false);
+  });
+
+  // セッションを立てない種別（制御ジョブ・枠外のジョブ）はそもそも対象外
+  it("セッションを立てない種別は含まない", () => {
+    for (const kind of ["INTERRUPT", "KILL", "INSTRUCTION", "MANUAL_STEP", "SELF_UPDATE"] as const) {
+      expect(isSessionReportedJobKind(kind)).toBe(false);
+    }
+  });
+});
+
 describe("findDispatchJobForIssue", () => {
   function job(overrides: Partial<DispatchJobView>): DispatchJobView {
     return {
@@ -591,6 +614,7 @@ describe("findDispatchJobForIssue", () => {
       resolvedCommand: null,
       manualStepLine: null,
       targetJobId: null,
+      previewAction: null,
       exitCode: null,
       commandOutput: null,
       tmuxSessionName: null,
@@ -913,6 +937,9 @@ describe("resolveScreenshotRejection（#1268）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -978,6 +1005,9 @@ describe("横断質問（#1454）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1104,6 +1134,7 @@ describe("横断質問（#1454）", () => {
         resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
+        previewAction: null,
         exitCode: null,
         commandOutput: null,
         tmuxSessionName: null,
@@ -1152,6 +1183,9 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       selfUpdateCapable: null,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1176,6 +1210,11 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
   it("セッションを立てるジョブとして数える", () => {
     expect(isSessionLaunchJobKind("PLAN_REVIEW")).toBe(true);
     expect(isSessionControlJobKind("PLAN_REVIEW")).toBe(false);
+  });
+
+  // セッション名が`-issue-`の規約から外れているため、pollerは`DispatchSession`として報告しない
+  it("報告されるセッションを持つ種別には数えない", () => {
+    expect(isSessionReportedJobKind("PLAN_REVIEW")).toBe(false);
   });
 
   it("キューでは「計画レビュー」として並ぶ", () => {
@@ -1283,6 +1322,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
+        previewAction: null,
         exitCode: null,
         commandOutput: null,
         tmuxSessionName: null,
@@ -1331,6 +1371,9 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       selfUpdateCapable: null,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       maxSessions: 12,
       liveSessions: 0,
       metrics: null,
@@ -1354,6 +1397,11 @@ describe("コードレビュー（CODE_REVIEW）", () => {
   it("セッションを立てるジョブとして数える", () => {
     expect(isSessionLaunchJobKind("CODE_REVIEW")).toBe(true);
     expect(isSessionControlJobKind("CODE_REVIEW")).toBe(false);
+  });
+
+  // #2443。セッション名は`<repo>-code-review-<番号>`で、計画レビューと同じく報告されない
+  it("報告されるセッションを持つ種別には数えない", () => {
+    expect(isSessionReportedJobKind("CODE_REVIEW")).toBe(false);
   });
 
   it("キューでは「コードレビュー」として並ぶ", () => {
@@ -1436,6 +1484,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         resolvedCommand: null,
         manualStepLine: null,
         targetJobId: null,
+        previewAction: null,
         exitCode: null,
         commandOutput: null,
         tmuxSessionName: null,
@@ -1602,6 +1651,9 @@ describe("resolveManualStepHost", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       selfUpdateCapable: null,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       repositories: [],
       ...overrides,
     } as DispatchHostView;

@@ -154,6 +154,77 @@ main宛PRを止める方が、見逃すより高くつく。検査本体（Pytho
 issue-deck側の隣のファイルは読めないため。テスト（`scripts/reusable-version-tag-check.test.mjs`）は
 そのYAMLから`run:`本文を取り出して実行するので、正はYAMLの1か所にある。
 
+## 「何がどこまで検証されたか」をリリースPRに載せる（#2448）
+
+develop→mainのマージは人が判断するのに、**その判断材料が画面のどこにも無かった。** 自動レビュー
+（`claude-review`）の結果はPRコメントの散文にしか残らず、リリースPRからは「この中身のうち何件が
+レビューを通っているのか」も「そもそもレビューが走ったのか」も読めない。
+
+記録は**2段構え**で、リリース時にレビューを回し直すことはしない（差分が全Issueの和になるうえ、
+済んだレビューを二重に払うことになる）。
+
+| 段 | 誰が | どこへ |
+| --- | --- | --- |
+| 1. 判定を残す | `claude-review`（レビューエージェント） | PRへのレビューコメント末尾のマーカー |
+| 2. 節にする | `auto-merge`ジョブ | **develop向けPRの本文**の`## 検証結果` |
+| 3. 集める | `reusable-release-develop-to-main.yml`の「対象issueの検証結果を集計する」 | **リリースPRの本文**の`## コードレビューの検証結果` |
+| 4. 出す | issue-deckのPR詳細 | 本文より前に置く検証サマリーのパネル |
+
+### 書式は3か所にまたがる契約
+
+```markdown
+<!-- issue-deck-verification:start review=lgtm risk=none -->
+## 検証結果
+
+- 自動レビュー: ✅ 問題なし（LGTM）
+- 機械的リスク判定: 該当なし
+- ユーザーの確認: 不要（自動マージの対象）
+<!-- issue-deck-verification:end -->
+```
+
+- `review=`は`lgtm` / `needs-check` / `changes-requested` / `skipped` / `unavailable`、`risk=`は
+  `none` / `hit`。**段を増やさない。** リポジトリ全体のコードレビュー（[code-review.md](code-review.md)）で
+  重要度を3つに固定しているのと同じ理由で、増やすと色も判断も1対1で対応しなくなる
+- **節は追記ではなく置き換え。** 開始・終了マーカーの間を落としてから足すので、同じPRへ何度
+  pushしても節は1つのまま。PR本文の編集は`pull_request`の`edited`を起こすが、
+  `claude-review-develop.yml`のトリガーに`edited`は無いので再帰しない
+- **`skipped`は危険信号ではない。** 低リスクかつ小規模なPRでレビューを省くのは#992のゲートの
+  設計どおりの動きなので、画面でも灰色で出す。赤やamberにすると本当に見るべき`要確認`が埋もれる
+- **`skipped`になる経路は2つあり、`unavailable`と混ぜない。** #992のゲートで
+  `claude-review`ジョブごとskipされた場合と、**ジョブはsuccessでもClaudeが動かなかった場合**
+  （`.github/workflows/`配下を変更するPRでは、claude-code-actionの検証機構がClaudeの実行だけを
+  飛ばす）。後者を`unavailable`（判定を残せなかった）と書くと、実施していないことが
+  「取りこぼし」に見える。実行の有無は`claude-review`ジョブの`executed`出力
+  （`steps.claude_review.outputs.execution_file != ''`）で判別し、理由はdevelop向けPRの本文へ
+  添える。**リリースPRの表は`— 実施なし`までしか出さない**（理由は元のPRを開けば読める）
+- **`merge-blocked`のマーカーは動かさない。** あちらは自動レビューが**対応Issue**へ投稿する
+  理由コメントに付き、`auto-merge`がそこだけを読んで`00.check-user`を付ける（#2136）。
+  総評の判定マーカーは**PRへのコメント**側に足す別の契約で、既存の読み取り経路は変えていない。
+  PRコメントへ載るのは、claude-code-action自身がレビューの出力を`claude[bot]`名義の
+  PRコメントとして投稿するため（`allowedTools`に`gh pr comment`は要らない）
+- **head refが`issue-<番号>`のPRにしか節を書かない。** バージョンバンプPRの本文にある
+  `## 対象issue`はdevelop→mainのPRを作るrunが引き継ぐ唯一の入力（#2117）で、リリースの配管
+  そのもの。集計側も`issue-<番号>`のPRしか引くので、そこへ足しても誰も読まない
+- **記録が無くても表は作る。** 共有ワークフローの参照タグを配る前にマージされたPRや、ブランチ名が
+  `issue-<番号>`でないPRには節が無い。その行は「記録なし」と出す——表ごと消すと、
+  **検証されていないことも読めなくなる**
+- 記録に失敗してもリリース・マージは止めない（どちらのステップも`continue-on-error: true`）。
+  記録の欠落より、マージが止まって人を呼ぶ方が高くつく
+
+### 変更したときに一緒に見る場所
+
+判定マーカーと節のマーカーは**書く側と読む側でずれても赤くならない**（黙って「記録なし」に
+倒れる）。そのため`scripts/check-review-verdict-marker.sh`がCI（`docs-sync-check`）で次の5ファイルを
+突き合わせる。**文字列を変えるときは全部を揃える。**
+
+| 場所 | 何をしているか |
+|---|---|
+| `.github/prompts/review-develop.md` | 総評の判定マーカーをPRコメントへ残す指示 |
+| `.github/workflows/reusable-claude-review-develop.yml` | マーカーを読み、PR本文へ節を書く |
+| `.github/workflows/reusable-release-develop-to-main.yml` | 節を集めてリリースPR本文の表にする |
+| `scripts/prompts/review-agent.md` | ローカルのレビュー・統合エージェントが同じ節を書く |
+| `src/lib/github/release-verification.ts` | 画面が表を読んでパネルにする |
+
 ## バージョンの上げ幅の判定
 
 issueのラベルではなく、main/develop間の実際のコード差分の内容から判定する。専用のClaude
