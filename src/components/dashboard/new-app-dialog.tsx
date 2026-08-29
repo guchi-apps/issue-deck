@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Lightbulb,
   Loader2,
   Rocket,
   Send,
@@ -26,7 +27,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useNewAppLaunch, type PreflightResult } from "@/hooks/use-new-app-launch";
+import {
+  useNewAppLaunch,
+  type IdeaImportResult,
+  type PreflightResult,
+} from "@/hooks/use-new-app-launch";
 import {
   CONSULT_OPENING_MESSAGE,
   countConsultTurns,
@@ -34,6 +39,12 @@ import {
   type ConsultMessage,
 } from "@/lib/claude/limits";
 import type { NewAppDraft } from "@/lib/claude/new-app-consult";
+import {
+  applyIdeaImport,
+  isIdeaClosed,
+  IDEA_REPOSITORY,
+  type IdeaFieldKey,
+} from "@/lib/new-app/idea-doc";
 import { EXISTING_LAUNCH_ISSUE_REASON_LABELS } from "@/lib/new-app/launch-marker";
 import {
   buildNewAppPlan,
@@ -118,9 +129,22 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
   const [created, setCreated] = useState<NewAppCreatedRef[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [launchFailed, setLaunchFailed] = useState(false);
+  /** 構想メモから読み込んだ内容（#2432）。どの項目が構想由来かを設定ステップで出すために持ち回る */
+  const [idea, setIdea] = useState<IdeaImportResult | null>(null);
 
-  const { consult, preflight: runPreflight, launch, isConsulting, isChecking, isLaunching, error, setError } =
-    useNewAppLaunch();
+  const {
+    consult,
+    listIdeas,
+    importIdea,
+    preflight: runPreflight,
+    launch,
+    isConsulting,
+    isImporting,
+    isChecking,
+    isLaunching,
+    error,
+    setError,
+  } = useNewAppLaunch();
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -134,6 +158,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
     setMessages([{ role: "assistant", content: CONSULT_OPENING_MESSAGE }]);
     setInput("");
     setDraft(null);
+    setIdea(null);
     setPreflight(null);
     setCreated([]);
     setLaunchFailed(false);
@@ -155,6 +180,18 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
     if (!result) return;
     setMessages([...next, { role: "assistant", content: result.reply }]);
     if (result.draft) setDraft(result.draft);
+  };
+
+  /**
+   * 構想メモ（`guchi-apps/ideas`）で決まった値を設定へ移す（#2432）。
+   *
+   * **読み取れた項目だけを重ねる。** 解釈できなかった項目は既定値のままにして、
+   * どれを構想から入れたのかを設定ステップに出す（人が見て直せる形にする）。
+   */
+  const applyIdea = (imported: IdeaImportResult) => {
+    setIdea(imported);
+    setSpec((current) => applyIdeaImport(current, imported.values));
+    setStep("basic");
   };
 
   /** 相談で決まった値だけを設定へ移す。**決まっていない項目は空のままにする。** */
@@ -248,6 +285,10 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
             <ConsultStep
               messages={messages}
               draft={draft}
+              onListIdeas={listIdeas}
+              onImportIdea={importIdea}
+              onApplyIdea={applyIdea}
+              isImporting={isImporting}
               input={input}
               onInputChange={setInput}
               onSend={send}
@@ -264,6 +305,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
               preflight={preflight}
               isChecking={isChecking}
               onCheck={() => check(spec)}
+              idea={idea}
             />
           )}
 
@@ -274,6 +316,7 @@ export function NewAppDialog({ open, onOpenChange }: NewAppDialogProps) {
               preflight={preflight}
               isChecking={isChecking}
               onRecheck={(next) => check(next)}
+              idea={idea}
             />
           )}
 
@@ -414,6 +457,10 @@ function ConsultStep({
   isSending,
   turns,
   chatEndRef,
+  onListIdeas,
+  onImportIdea,
+  onApplyIdea,
+  isImporting,
 }: {
   messages: ConsultMessage[];
   draft: NewAppDraft | null;
@@ -423,10 +470,21 @@ function ConsultStep({
   isSending: boolean;
   turns: number;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
+  onListIdeas: () => Promise<{ available: boolean; ideas: { name: string; path: string }[] }>;
+  onImportIdea: (path: string) => Promise<IdeaImportResult | null>;
+  onApplyIdea: (imported: IdeaImportResult) => void;
+  isImporting: boolean;
 }) {
   const exhausted = turns >= MAX_CONSULT_TURNS;
   return (
     <div className="flex flex-col gap-3">
+      <IdeaPicker
+        onList={onListIdeas}
+        onImport={onImportIdea}
+        onApply={onApplyIdea}
+        isImporting={isImporting}
+      />
+
       <div className="flex max-h-72 flex-col gap-2 overflow-y-auto">
         {messages.map((message, index) => (
           <p
@@ -483,6 +541,192 @@ function ConsultStep({
   );
 }
 
+/**
+ * 構想メモ（`guchi-apps/ideas`）から仕様案を読み込む（#2432）。
+ *
+ * **相談の前に置く。** 構想が育っていれば相談は要らず、ここから設定ステップへ直行できる。
+ * 構想が無ければ1行の案内だけになるので、相談から始める人の邪魔にならない。
+ *
+ * **読めなかった項目は黙って既定値に倒さず、「未決のまま」として並べる。** どの欄を自分で
+ * 埋める必要があるかが、設定ステップを開く前に分かるようにする。
+ */
+function IdeaPicker({
+  onList,
+  onImport,
+  onApply,
+  isImporting,
+}: {
+  onList: () => Promise<{ available: boolean; ideas: { name: string; path: string }[] }>;
+  onImport: (path: string) => Promise<IdeaImportResult | null>;
+  onApply: (imported: IdeaImportResult) => void;
+  isImporting: boolean;
+}) {
+  const [ideas, setIdeas] = useState<{ name: string; path: string }[]>([]);
+  const [available, setAvailable] = useState<boolean | null>(null);
+  const [selected, setSelected] = useState("");
+  const [imported, setImported] = useState<IdeaImportResult | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void onList().then((result) => {
+      if (cancelled) return;
+      setAvailable(result.available);
+      setIdeas(result.ideas);
+      setSelected(result.ideas[0]?.path ?? "");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onList]);
+
+  const load = async () => {
+    if (!selected) return;
+    const result = await onImport(selected);
+    setImported(result);
+  };
+
+  if (available === false || (available === true && ideas.length === 0)) {
+    return (
+      <p className="flex items-start gap-1.5 rounded-lg border border-dashed p-2.5 text-xs text-muted-foreground">
+        <Lightbulb className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          {available === false
+            ? `${IDEA_REPOSITORY} を読めませんでした。相談から始めてください。`
+            : `${IDEA_REPOSITORY} に構想メモはまだありません。相談から始めてください。`}
+        </span>
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <p className="flex items-center gap-1.5 text-xs font-semibold">
+        <Lightbulb className="size-3.5" />
+        構想から読み込む
+      </p>
+      <div className="flex items-center gap-2">
+        <select
+          value={selected}
+          onChange={(event) => {
+            setSelected(event.target.value);
+            setImported(null);
+          }}
+          disabled={available === null}
+          aria-label="構想メモ"
+          className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs"
+        >
+          {available === null && <option value="">読み込んでいます…</option>}
+          {ideas.map((entry) => (
+            <option key={entry.path} value={entry.path}>
+              {entry.name}
+            </option>
+          ))}
+        </select>
+        <Button variant="outline" onClick={load} disabled={!selected || isImporting}>
+          {isImporting ? <Loader2 className="animate-spin" /> : null}
+          読み込む
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {IDEA_REPOSITORY} の <span className="font-mono">ideas/&lt;候補名&gt;/README.md</span>{" "}
+        の「仕様案」の表を読みます。
+      </p>
+
+      {imported && <IdeaImportCard imported={imported} onApply={() => onApply(imported)} />}
+    </div>
+  );
+}
+
+/** 読み込んだ構想メモの中身（#2432）。 */
+function IdeaImportCard({
+  imported,
+  onApply,
+}: {
+  imported: IdeaImportResult;
+  onApply: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+      <p className="text-xs font-semibold">{imported.title ?? imported.path}</p>
+
+      {isIdeaClosed(imported.state) && (
+        <p className="flex items-start gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+          <TriangleAlert className="mt-0.5 size-3 shrink-0" />
+          この構想の状態は「{imported.state}」です。立ち上げ済み・見送りの構想かもしれません。
+        </p>
+      )}
+
+      {!imported.hasSpecTable && (
+        <p className="text-xs text-muted-foreground">
+          「仕様案」の表が見つかりませんでした（雛形は templates/idea.md）。
+        </p>
+      )}
+
+      {imported.filled.length > 0 ? (
+        <dl className="grid grid-cols-[8.5em_1fr] gap-x-3 gap-y-1 text-xs">
+          {imported.filled.map((field) => (
+            <div key={field.key} className="contents">
+              <dt className="text-muted-foreground">{field.label}</dt>
+              <dd className="min-w-0 break-words font-mono">{field.display}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-xs text-muted-foreground">読み取れた項目はありませんでした。</p>
+      )}
+
+      {imported.undecided.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          未決のまま（設定ステップで埋めます）: {imported.undecided.join("・")}
+        </p>
+      )}
+
+      {imported.unreadable.length > 0 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          読めなかった値:{" "}
+          {imported.unreadable.map((entry) => `${entry.label}「${entry.raw}」`).join("・")}
+        </p>
+      )}
+
+      <Button size="sm" className="self-start" onClick={onApply}>
+        この内容で設定へ進む
+        <ArrowRight data-icon="inline-end" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * どの欄を構想から入れたのかを設定ステップに出す（#2432）。
+ *
+ * **入力欄ごとにバッジを付けず、1枚にまとめる。** 構想由来の値も人が直せる普通の入力欄で、
+ * 欄ごとに印を付けると「直してはいけない値」に見える。
+ */
+function IdeaImportBanner({
+  idea,
+  keys,
+}: {
+  idea: IdeaImportResult | null;
+  keys: IdeaFieldKey[];
+}) {
+  if (!idea) return null;
+  const fields = idea.filled.filter((field) => keys.includes(field.key));
+  if (fields.length === 0) return null;
+
+  return (
+    <p className="flex items-start gap-1.5 rounded-lg border border-dashed bg-muted/30 p-2.5 text-xs text-muted-foreground">
+      <Lightbulb className="mt-0.5 size-3.5 shrink-0" />
+      <span>
+        構想「{idea.title ?? idea.path}」から読み込んだ項目:{" "}
+        <span className="font-semibold text-foreground">
+          {fields.map((field) => field.label).join("・")}
+        </span>
+        。直して構いません。
+      </span>
+    </p>
+  );
+}
+
 function DraftCard({ draft }: { draft: NewAppDraft }) {
   const candidates: [string, string | null][] = [
     ["アプリ名", draft.displayName],
@@ -516,18 +760,25 @@ function BasicStep({
   preflight,
   isChecking,
   onCheck,
+  idea,
 }: {
   spec: NewAppSpec;
   onChange: (updater: (current: NewAppSpec) => NewAppSpec) => void;
   preflight: PreflightResult | null;
   isChecking: boolean;
   onCheck: () => void;
+  idea: IdeaImportResult | null;
 }) {
   const taken = preflight?.repository.taken === true && preflight.repository.name === spec.repositoryName;
   const free = preflight?.repository.taken === false && preflight.repository.name === spec.repositoryName;
 
   return (
     <div className="flex flex-col gap-4">
+      <IdeaImportBanner
+        idea={idea}
+        keys={["displayName", "repositoryName", "visibility", "summary"]}
+      />
+
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="new-app-name">アプリ名</Label>
         <Input
@@ -625,12 +876,14 @@ function PlacementStep({
   preflight,
   isChecking,
   onRecheck,
+  idea,
 }: {
   spec: NewAppSpec;
   onChange: (updater: (current: NewAppSpec) => NewAppSpec) => void;
   preflight: PreflightResult | null;
   isChecking: boolean;
   onRecheck: (next: NewAppSpec) => void;
+  idea: IdeaImportResult | null;
 }) {
   const profile = newAppKindProfile(spec.kind);
   const hostname = hostnameFor(spec);
@@ -647,6 +900,26 @@ function PlacementStep({
 
   return (
     <div className="flex flex-col gap-4">
+      <IdeaImportBanner
+        idea={idea}
+        keys={[
+          "kind",
+          "urlMode",
+          "placement",
+          "port",
+          "databaseName",
+          "auth",
+          "multiAgent",
+          "appTitle",
+          "pwa",
+          "offline",
+          "iconPlan",
+          "themeColor",
+          "changelog",
+          "screenshotBypass",
+        ]}
+      />
+
       <div className="flex flex-col gap-1.5">
         <Label>種別</Label>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

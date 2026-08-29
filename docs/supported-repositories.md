@@ -35,14 +35,27 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 撮影に対応させた・できなくなったときは、表だけでなくそちらも直す（[docs/multi-agent/screenshots.md](multi-agent/screenshots.md)
 「撮影に対応しないリポジトリでは選ばせない」）。
 
-**アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）は下の表に載せない。**
-実装を行わず盤面にも載らないため、表の読み方（載っている＝無人実行で実装が回る）が崩れる。
-扱いは後述「`guchi-apps/question`（質問専用・盤面外）」を参照。
+**アプリのコードを持たない`guchi-apps/question`（横断質問の置き場）・`guchi-apps/ideas`
+（構想の置き場）は下の表に載せない。** どちらも無人実行を持たないため、表の読み方
+（載っている＝無人実行で実装が回る）が崩れる。扱いは後述
+「`guchi-apps/question`（質問専用・盤面外）」「`guchi-apps/ideas`（構想の置き場）」を参照。
+
+**運用を終了したリポジトリは表から消さず、ステータスを`運用終了`にして残す**（#2435）。消すと
+「もともと載っていなかった」のか「終了して外した」のかが区別できず、配布・タグ更新の対象を
+数え直すたびに調べ直すことになる。**`運用終了`の行は共有ワークフローの配布・参照タグの更新・
+ドリフト検査（`scripts/check-workflow-sync-drift.sh`）のいずれの対象にもしない。** 下にある
+配布状況の表は日付つきの実測記録なので、そこに終了したリポジトリの名前が残っているのは正しい
+（その時点の記録であって、今の配布対象ではない）。
+
+**画面（設定＞フリート運用）の配布対象は、アーカイブすれば自動で外れる。** 母集団を
+`archived: false`で絞っているため（[`lib/github/workflow-tags.ts`](../src/lib/github/workflow-tags.ts)の
+`collectWorkflowTags`）、手で除外リストを持つ必要は無い。一方**確認用のコマンド例は自動では
+外れない**——`gh repo list`は既定でアーカイブ済みも返すので`--no-archived`を付ける。
 
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `guchi-apps/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
-| `guchi-apps/shopping-list` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #357, #723, #895, #942, #1129 | DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー環境はissue-deckとFly.ioアプリを共有しており相互に上書きされる（#892で解消予定） |
+| `guchi-apps/shopping-list` | **運用終了**（2026-08-28。#2435） | **配布対象外**。運用終了までは**参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-28 | #357, #723, #895, #942, #1129, #2435, guchi-apps/shopping-list#188 | Dayspanへ機能を集約したため運用を終了し、リポジトリをアーカイブする（起点は guchi-apps/shopping-list#188）。**共有ワークフローの配布・参照タグの更新・ドリフト検査の対象から外した**（sync-stateマーカーの削除は下記「guchi-apps/shopping-list（運用終了により削除）」）。運用終了までの構成: DBなし・ビルドなし・npm依存パッケージゼロのため、DBセットアップ・pnpm・Playwrightの前段ステップを削除して簡素化。`24.screenshot-required`は撮影自体を独自実装済み。プレビュー用のFly.ioアプリ（`issue-deck-preview`）はissue-deckと共用していたが、運用終了で相互の上書き（#892）は起きなくなる。**アプリ自体はissue-deckが使い続けるため消さない** |
 | `guchi-apps/dayspan` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #971, #1129 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残している |
 | `guchi-apps/meisai-lab` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1051, guchi-apps/meisai-lab#69 | #1047の1周目。Next.js + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`は入れていない（無人実装はdispatchだけで成立するため1周目はスコープを絞った。必要になれば参照方式で追加できる）。**この保留は#1475で解除した**（下記「12リポジトリすべてへ配ると決めた」）。導入前は旧世代のラベル体系で、`05.develop`が付いていた#66の進捗は削除前に控えて書き戻した |
 | `guchi-apps/car-care` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1050, guchi-apps/car-care#32 | #1047の2周目。Next.js + Prisma 7 + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。**`test`・`typecheck`のnpm scriptを持たない**が、ワークフローが呼ぶのは`db:migrate:deploy`・`db:seed:ci`（どちらも`24.screenshot-required`付きの実行のみ・`--if-present`で保護）だけのため実害は無く、scriptを足さずAGENTS.mdへ実際の検証コマンド（`lint`・`build:ci`）を書く形にした。`npm run build`は`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行は`build:ci`を使う点も明記 |
@@ -63,7 +76,7 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
 >
 > ```bash
-> for r in dayspan shopping-list; do
+> for r in dayspan aide-bot; do
 >   echo "== $r"
 >   for f in $(gh api repos/guchi-apps/$r/contents/.github/workflows --jq '.[].name'); do
 >     gh api "repos/guchi-apps/$r/contents/.github/workflows/$f?ref=develop" --jq .content \
@@ -127,6 +140,78 @@ git log workflows/v18..origin/develop --oneline -- .github/workflows/reusable-is
 まとめて解消する（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「共有ワークフローの
 タグ運用」）。
 
+## `guchi-apps/ideas`（構想の置き場）
+
+`guchi-apps/ideas`は**アプリになる前の構想を練る置き場**で（#2430。起点は
+guchi-apps/question#39）、アプリのコードを持たない。**サブPCのローカルセッションだけで回し、
+無人実行は入れない**——`subpc`・`vps`・`docs`・`claude-config`と同じ枠に置く。
+
+**なぜ要ったか。** 新しいアプリを作るとき、リポジトリがまだ無いため「構想・計画・仕様を
+決める」段のセッションを起こす場所が無かった。画面の「新規アプリを立ち上げる」のステップ0の
+相談（[`lib/claude/new-app-consult.ts`](../src/lib/claude/new-app-consult.ts)）は画面上の軽量な
+チャットで、成果物は仕様案（名前・種別・DB・認証・URL）だけであり検討の過程をファイルとして
+残せない。横断質問セッション（[scripts/start-cross-repo-question.sh](../scripts/start-cross-repo-question.sh)）は
+読み取り専用で`Edit`・`Write`を持たない。**`knowledge/`（踏んだ落とし穴）でも`standards/`
+（決まっていること）でも各アプリの`CLAUDE.md`（アプリがまだ無い）でも`claude-config`
+（個人の作業ルール）でもない「まだアプリになっていない構想」だけが行き先を持たなかった。**
+
+| 項目 | 内容 |
+|---|---|
+| ワークフロー | 無し（`.github/workflows/`を持たない） |
+| ラベル | issue-deckと同一（`guchi-apps/docs`の`label-sync/sync-labels.sh`で配る） |
+| CLAUDE.md | あり（新規作成）。「コードを持たない」「実装しない」「PRは`main`直行」を明記 |
+| デフォルトブランチ | `main`のみ（`develop`は作らない。`docs`・`claude-config`と同じ） |
+| 盤面（Projects Status） | 載る。ただし**`Implementation`で止まり、以降は手で`Done`にしてclose** |
+| ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 26000 |
+| `~/.config/issue-deck/local-repos.conf` | `/home/guchi/apps/ideas` |
+| 公開範囲 | private（`question`・`docs`・`claude-config`と同じ） |
+
+### 判断の理由
+
+- **1リポジトリにまとめる。** アプリ候補ごとにリポジトリを作ると、候補ごとに作成・clone・
+  ポート帯の確保・`local-repos.conf`の追記・フォルダの信頼確認（#1838）が要るうえ、**流れた
+  候補のリポジトリが残り続ける。** 構想1件＝Issue 1本＋`ideas/<候補名>/`ディレクトリで回し、
+  育った構想は画面の「新規アプリを立ち上げる」で本リポジトリを作ってから成果物を移す
+- **無人実行（`claude-issue-dispatch.yml`）は入れない。** 構想を練るのは対話が要る作業で、
+  GitHub Actionsの片道実行と噛み合わない。入れないので**`hasClaudeWorkflow`は偽**になり、
+  `addMissingProjectItems`（[`lib/github/sync-project-status.ts`](../src/lib/github/sync-project-status.ts)）の
+  自動追加の対象にはならない。盤面へ載るのはローカルセッションが起動時に進捗報告API
+  （`POST /api/progress`）を叩いたIssueだけ
+- **進捗は`Implementation`で止まる。** `Develop PR`以降を報告するのは`issue-labels.yml`で、
+  このリポジトリには`.github/workflows/`自体が無い（`docs`#3・`subpc`#10・#14・#19・
+  `claude-config`と同じ状態）。**入れるまでは手で`Done`にしてcloseする。** 入れる場合は
+  `develop`を持たないため`workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`が
+  要る（#1901・#1917。`claude-config`は guchi-apps/claude-config#2 で分けた）
+- **リリースフローも入れない。** `docs`・`claude-config`と同じく`develop`を持たず、デプロイも
+  無い（構想はどこにもデプロイされない）ため、リリースという段階を挟む先が無い
+- **`package.json`を持たない。** 依存インストールとenvの配置は不要
+  （[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「envは既定では置かない」）。
+  ポート帯だけは、上の4件と同じ理由（既定の`3000 + Issue番号`への相乗りを避ける）で確保する
+
+### Obsidianで書く場合、追加の同期の仕組みは要らない
+
+`guchi-apps/claude-config`のREADME「skill の編集に Obsidian を使う場合」と同じく、**vaultの
+置き場をこのリポジトリのチェックアウトそのものにする**（`.obsidian/`は機体ローカル設定なので
+`.gitignore`済み）。Obsidian Sync・iCloudで別途同期する形は採らない——
+[multi-agent/personal-config-sync.md](multi-agent/personal-config-sync.md)のとおり、コピーを2つ
+持つと「どちらが新しいか分からない」状態が必ず生まれる。実体を1つにすれば残るのは
+「commit/pushしたか」「pullしたか」だけになる。
+
+### 固めた仕様はウィザードへ渡せる（#2432）
+
+構想メモの雛形（`templates/idea.md`）の末尾には
+[`lib/new-app/spec.ts`](../src/lib/new-app/spec.ts)の`NewAppSpec`と同じ項目を並べた表がある。
+画面の「新規アプリを立ち上げる」のステップ0の先頭に出る「構想から読み込む」で
+`ideas/<候補名>/README.md`を選ぶと、この表を読んでステップ1・2の入力欄へ入れる（**人の転記が
+要らなくなる**）。解析は[`lib/new-app/idea-doc.ts`](../src/lib/new-app/idea-doc.ts)、取得は
+[`lib/github/ideas-api.ts`](../src/lib/github/ideas-api.ts)。
+
+- **雛形のまま触られていない行は取り込まない**（値の欄に選択肢がそのまま残っている行は「未決」
+  として並べる）。読めなかった項目は既定値のままにし、何を読んだかを設定ステップにも出す
+- **`templates/idea.md`の項目を増減したら`idea-doc.ts`の突き合わせも見直す。** 項目名は括弧書きを
+  外した部分一致で拾っているので、名前を大きく変えると黙って未決へ落ちる
+- 判断の詳細は[new-app-launch.md](new-app-launch.md)「構想メモから読み込む」を参照
+
 ## `issue-labels.yml`callerの`issues:`トリガーの揃い方（#2010）
 
 `manual-step-label`ジョブ（#1492。タイトルが`[手作業]`のIssueへ`71.manual-step`を付ける）は
@@ -139,7 +224,7 @@ git log workflows/v18..origin/develop --oneline -- .github/workflows/reusable-is
 
 ```bash
 # 揃っているかの確認
-for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+for r in $(gh repo list guchi-apps --limit 60 --no-archived --json name --jq '.[].name'); do
   body=$(gh api "repos/guchi-apps/$r/contents/.github/workflows/issue-labels.yml" \
     --jq .content 2>/dev/null | base64 -d 2>/dev/null) || continue
   [ -n "$body" ] || continue
@@ -182,7 +267,7 @@ callerを8つまとめて置いたため、この配布経路の後追いが要�
 
 ```bash
 # 配置状況の確認
-for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+for r in $(gh repo list guchi-apps --limit 60 --no-archived --json name --jq '.[].name'); do
   gh api "repos/guchi-apps/$r/contents/.github/workflows/claude-review-develop.yml" \
     --jq .name >/dev/null 2>&1 && echo "$r: あり"
 done
@@ -655,7 +740,7 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 
 ```bash
 # 配置状況の確認
-for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+for r in $(gh repo list guchi-apps --limit 60 --no-archived --json name --jq '.[].name'); do
   gh api "repos/guchi-apps/$r/contents/.github/workflows/release-develop-to-main.yml" \
     --jq .name >/dev/null 2>&1 && echo "$r: あり"
 done
@@ -677,7 +762,7 @@ guchi-apps/aideでこれを押したことだった。
 
 ```bash
 # 配置状況の確認
-for r in $(gh repo list guchi-apps --limit 60 --json name --jq '.[].name'); do
+for r in $(gh repo list guchi-apps --limit 60 --no-archived --json name --jq '.[].name'); do
   out="$r:"
   for f in claude-conflict-resolve.yml claude-ci-fix.yml claude-pr-repair.yml; do
     gh api "repos/guchi-apps/$r/contents/.github/workflows/$f" --jq .name >/dev/null 2>&1 \
@@ -711,12 +796,14 @@ done
 バージョン ＞「共有スクリプト」）。各リポジトリの`.github/scripts/`へコピーして使う運用のため、
 issue-deckを直しても自動では行き渡らない。
 
-2026-08-24時点で同じスクリプトを持つのは次の16リポジトリで、**全件が#2237・#2239の修正
-（通知が届かなくても`exit 0`で返す）より前の内容**だった。
+2026-08-28時点で同じスクリプトを持つのは次の16リポジトリで、**全件がissue-deckの`main`と
+同一の内容**（blobのSHAが一致。#2391のリリース本文と#2237・#2239の`exit 0`を含む）。
 
 `clip-hive` / `aide-bot` / `signaly` / `meisai-lab` / `dayspan` / `asset-manager` /
-`shopping-list` / `car-care` / `myroom` / `aide` / `ops-dashboard` / `subscription-lists` /
-`solitaire` / `portfolio` / `db-console` / `subpc`
+`car-care` / `myroom` / `aide` / `ops-dashboard` / `subscription-lists` /
+`solitaire` / `portfolio` / `db-console` / `subpc` / `trainroute`
+
+**`shopping-list`も同じ内容を持っていたが、運用終了（#2435）で配布対象から外した。**
 
 **`guchi-apps/subpc`だけは独自の変更がある。** そのリポジトリだけの`NOTIFY_NOTE`（反映は成功
 したが再起動などの操作が残っていることを通知へ足す）が入っており、配布は中身をそのまま上書き
@@ -756,7 +843,7 @@ GitHub Actionsのsecretはワークフローが`env:`へ渡さないとスクリ
 ```bash
 # リリース通知のenvが入っているか（未適用のリポジトリだけが出る）
 # **grepは -aE で引く。** CRLFのリポジトリがあり、値を桁揃えしているリポジトリもある
-for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-list car-care \
+for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
          myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
   br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
   for f in deploy release; do
@@ -767,16 +854,16 @@ for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-li
 done
 ```
 
-2026-08-27時点で未適用なのは`asset-manager`（`deploy.yml`・`release.yml`）と
-`signaly`（同）の2件。`aide`は`deploy.yml`に`release`ジョブを持ちながら**リリース通知の
-ステップ自体が無い**ため、この配布では届かない（ステップごと足す作業は
-`guchi-apps/aide`側のIssueへ切り出す）。`vps`・`subpc`はリリース通知を出していない。
+2026-08-28に#2429で`asset-manager`・`signaly`へ配布し（`guchi-apps/asset-manager#267`・
+`guchi-apps/signaly#225`）、**リリース通知ステップを持つ全リポジトリへ行き渡った**。
+`aide`にはこの時点で`notify-release`ステップがあり、1行も適用済み（2026-08-27時点の
+「ステップ自体が無い」という記述は古かった）。`vps`・`subpc`はリリース通知を出していない。
 
 ```bash
 # 配布状況の確認（issue-deckのmainと同じ内容かどうか）
 gh api "repos/guchi-apps/issue-deck/contents/.github/scripts/signaly-notify.sh?ref=main" \
   --jq .content | base64 -d > /tmp/signaly-notify-source.sh
-for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager shopping-list car-care \
+for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
          myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
   br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
   gh api "repos/guchi-apps/$r/contents/.github/scripts/signaly-notify.sh?ref=$br" --jq .content \
@@ -847,7 +934,7 @@ callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`�
 
 ```bash
 # 配置状況の確認
-for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
+for r in dayspan meisai-lab car-care subscription-lists asset-manager \
          portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
          aide-bot; do
   echo -n "$r: "
@@ -893,7 +980,7 @@ done
 
 ```bash
 # 実装状況の確認。deploy.yml に health が無いリポジトリは、呼び出し先のスクリプトも見ること
-for r in shopping-list dayspan meisai-lab car-care subscription-lists asset-manager \
+for r in dayspan meisai-lab car-care subscription-lists asset-manager \
          portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
          aide-bot subpc vps issue-deck; do
   printf '%-20s ' "$r"
@@ -926,7 +1013,7 @@ done
 |---|---|---|
 | `guchi-apps/issue-deck` | v2 | ○ |
 | `guchi-apps/dayspan` | —（※） | ○ |
-| `guchi-apps/shopping-list` | —（※） | ○ |
+| `guchi-apps/shopping-list` | —（※） | **運用終了**（#2435。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯7000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
 | `guchi-apps/meisai-lab` | — | ○ |
 | `guchi-apps/car-care` | — | ○ |
 | `guchi-apps/subscription-lists` | — | ○ |
@@ -944,6 +1031,7 @@ done
 | `guchi-apps/vps` | — | ○（※4） |
 | `guchi-apps/docs` | — | ○（※4） |
 | `guchi-apps/claude-config` | — | ○（※5） |
+| `guchi-apps/ideas` | — | ○（※7） |
 
 ※ `scripts/start-issue.sh`自体は持つが、マーカー行を宣言していない（2026-08-14に`develop`・`main`の
 両方で実測）。#1224以降は**宣言しないことが通常**で、宣言が無いリポジトリはサブPCから汎用ランチャーで
@@ -1009,6 +1097,14 @@ done
 開く**ので、ウィザードが生成するもの（[new-app-launch.md](new-app-launch.md)「作られるもの」）に
 帯の払い出しを足すかどうかは#2225で扱う。
 
+※7 `ideas`（構想の置き場。private）は#2430で追加した。**※4・※5と同じ枠**で、
+`claude-issue-dispatch.yml`も`issue-labels.yml`も持たないため、実行経路はローカルセッション
+だけで進捗は`Implementation`で止まる。`package.json`を持たないがポート帯（26000）は同じ理由で
+確保した。**このリポジトリだけは`gh repo create`の時点でユーザーの手を借りている**——サブPCの
+セッションでは`gh repo create`がauto modeのクラシファイアに拒否されるため（#2430で実測）。
+フォルダの信頼確認（#1838）も`claude-config`と同じく対話が要るので手作業として起票した（#2433）。
+判断は上記「`guchi-apps/ideas`（構想の置き場）」を参照。
+
 **版が違っても切り捨てない。** 受け口は「宣言された版数が自分の扱える版数以下か」だけを見るため、
 v1を宣言したリポジトリが現れてもそのまま動く（v2で増えたのはWindows Terminalが無い環境向けの
 tmux出口とポート帯の既定値。#1178）。現時点でマーカー行を宣言しているのはissue-deck自身だけで、
@@ -1040,9 +1136,16 @@ Actions側の対応とローカル起動の対応は**必ずしも一致しな�
 <!-- sync-state: repo=<owner/repo> workflow=<ワークフローファイル名> base-commit=<issue-deck側のコミットSHA> -->
 ```
 
-実際の記録例は下記「guchi-apps/shopping-list」の節を参照する。`scripts/check-workflow-sync-drift.sh`は
+実際の記録例は下記「guchi-apps/dayspan」の節を参照する。`scripts/check-workflow-sync-drift.sh`は
 本ドキュメント中のマーカーを（コードブロック内や説明用の記述であっても）すべて実データとして
 読み取るため、ここに架空のサンプル行は置かない。
+
+**体裁を真似ただけの文章も拾われる**（#2435）。拾われた行には`repo=`が無いため`grep`がexit 1を
+返し、スクリプト側のガード（「不正な sync-state 記述をスキップします」）へ到達する前に`set -e`で
+落ちていた。**出力が1行も無いままexit 1で終わる**ので、実行した側は「差分が無かった」のか
+「落ちた」のかを区別できない。#2435で`|| true`を足してガードが効くようにしたが、
+**説明のために書くときはHTMLコメントの囲みを外す**という原則は変わらない（囲んだままだと、
+削除したはずの記録が実データとして復活する）。
 
 導入したワークフローファイルごとに1行記録する（複数ファイルを導入した場合は複数行）。
 `scripts/check-workflow-sync-drift.sh`がこのマーカーを読み取り、issue-deck側にbase-commit以降
@@ -1054,17 +1157,27 @@ Actions側の対応とローカル起動の対応は**必ずしも一致しな�
 そうなると「常に大量に出るので誰も見ない」方向へ劣化し、検知の仕組み自体が機能しなくなる
 （実際に#895で発生した）。
 
-### guchi-apps/shopping-list
+### guchi-apps/shopping-list（運用終了により削除）
 
-<!-- sync-state: repo=guchi-apps/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200 -->
+**2026-08-28にマーカーを削除した**（#2435）。運用終了してアーカイブするリポジトリなので、
+`release-develop-to-main.yml`に差分が出ても取り込む先が無い。残しておくと
+`scripts/check-workflow-sync-drift.sh`が二度と解消されない差分を出し続け、#895と同じ
+「常に大量に出るので誰も見ない」状態へ戻る。削除したのは次の1行。
 
-**残っているのは`release-develop-to-main.yml`だけ。** 他はすべて参照方式へ移行済みで、後述
-「参照方式のワークフローは sync-state の対象外」のとおり記録の対象外になった。
+```
+repo=guchi-apps/shopping-list workflow=release-develop-to-main.yml base-commit=bb7d0f7f48bd0eae0f90c86bd1e7dd35ba2c2200
+```
+
+（**HTMLコメントの囲みは外して記録する。** 囲んだままだと`check-workflow-sync-drift.sh`が
+コードブロックの中でも実データとして読み直し、削除したはずの記録が復活する。上記
+「架空のサンプル行は置かない」と同じ理由。)
+
+他のワークフローのマーカーは、すべて参照方式への移行時に削除済みだった。
 
 - `claude-issue-dispatch.yml`: `@workflows/v6`への移行時に削除（#940・#942）
 - `claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`:
-  **2026-08-13に削除**（#1129）。3ファイルとも参照方式へ移行済みだったのにマーカーだけが残り、
-  ドリフト検知が意味を持たない対象を監視し続けていた。`claude-conflict-resolve.yml`を
+  **2026-08-13に削除**（#1129。3ファイルとも参照方式へ移行済みだったのにマーカーだけが残り、
+  ドリフト検知が意味を持たない対象を監視し続けていた）。`claude-conflict-resolve.yml`を
   「意図的に古いbase-commitのまま」にしていた運用（#814が未反映であることの記録）も、
   参照方式では`uses:`のタグが実態を表すため役目を終えている
 
@@ -1095,8 +1208,8 @@ base-commitは各ワークフローファイル冒頭の「移植元コミット
 **どのリポジトリがどのバージョンを参照しているかは、対象リポジトリのcallerファイルを見る。**
 
 ```bash
-# 例: shopping-list が参照しているバージョンを確認する
-gh api repos/guchi-apps/shopping-list/contents/.github/workflows/issue-labels.yml?ref=develop \
+# 例: dayspan が参照しているバージョンを確認する
+gh api repos/guchi-apps/dayspan/contents/.github/workflows/issue-labels.yml?ref=develop \
   -q .content | base64 -d | grep 'uses:'
 ```
 
@@ -1121,7 +1234,7 @@ issue-deck自身は`./.github/workflows/reusable-*.yml`（ローカルパス）�
 
 ```bash
 # 例: claude-conflict-resolve.yml のトリガーを全リポジトリで確認する
-for r in $(gh repo list guchi-apps --limit 50 --json name --jq '.[].name'); do
+for r in $(gh repo list guchi-apps --limit 50 --no-archived --json name --jq '.[].name'); do
   c=$(gh api "repos/guchi-apps/$r/contents/.github/workflows/claude-conflict-resolve.yml" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
   [ -n "$c" ] && echo "== $r" && echo "$c" | sed -n '/^on:/,/^jobs:/p'
 done
