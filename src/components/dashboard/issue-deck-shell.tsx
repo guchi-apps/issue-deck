@@ -953,7 +953,7 @@ export function IssueDeckShell({
   // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
   // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   // 「ユーザーの確認待ち」だけは実行中のIssueを外した数にする（#2174）。
-  // 要対応の2ビューは、さらに保留中を外す（#2398）。
+  // 保留中はどのビューの数からも外す（#2398・#2456）。
   const navCounts = useMemo(
     () =>
       computeNavCountsForFilters(
@@ -1567,6 +1567,11 @@ export function IssueDeckShell({
                   onRefresh={issuePolling.refresh}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
+                  /* 「いまは実施しない」（#2398・#2456）。リポジトリ別の一覧も他の一覧と
+                     同じように伏せる */
+                  snoozes={snoozes}
+                  onSnooze={snooze}
+                  onUnsnooze={unsnooze}
                 />
               )}
 

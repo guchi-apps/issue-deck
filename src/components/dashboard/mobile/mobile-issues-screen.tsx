@@ -164,7 +164,7 @@ export function MobileIssuesScreen({
         issues,
         // 「ユーザーの確認待ち」からは実行中のIssueを外す（#2174。PCの左メニューと同じ数え方）
         checkUserRunningIssueIds,
-        // 要対応の2ビューからは保留中も外す（#2398。同上、PCと同じ数え方）
+        // どのビューからも保留中を外す（#2398・#2456。同上、PCと同じ数え方）
         snoozedIssueIds,
       ),
     [issues, listFilters, currentUserLogin, checkUserRunningIssueIds, snoozedIssueIds],
