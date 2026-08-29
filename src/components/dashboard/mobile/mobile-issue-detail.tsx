@@ -255,6 +255,9 @@ export function MobileIssueDetail({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
   const [isSummaryDialogOpen, setIsSummaryDialogOpen] = useState(false);
+  // 保留を選んだ時点で操作メニューも閉じる（#2458）。「いまは実施しない」はメニューを
+  // 開いたまま選択肢を出すため、開閉をここで持たないと選び終えても開きっぱなしになる
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   // 「いまは実施しない」（#2398）。判定はPCの詳細・一覧と同じ`findActiveIssueSnooze`
   const snoozeTarget: SnoozeTarget | null = snoozes
@@ -710,7 +713,7 @@ export function MobileIssueDetail({
             }
           />
         </button>
-        <DropdownMenu>
+        <DropdownMenu open={isMoreMenuOpen} onOpenChange={setIsMoreMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -752,7 +755,15 @@ export function MobileIssueDetail({
             </DropdownMenuItem>
             {/* 「いまは実施しない」（#2398）。保留中は下の帯に操作があるので出さない */}
             {snoozeTarget && onSnooze && !activeSnooze && (
-              <SnoozeMenu target={snoozeTarget} onSnooze={onSnooze} now={snoozeNow} align="end">
+              <SnoozeMenu
+                target={snoozeTarget}
+                onSnooze={(target, until) => {
+                  setIsMoreMenuOpen(false);
+                  onSnooze(target, until);
+                }}
+                now={snoozeNow}
+                align="end"
+              >
                 <DropdownMenuItem
                   className="whitespace-nowrap text-xs"
                   onSelect={(event) => event.preventDefault()}
