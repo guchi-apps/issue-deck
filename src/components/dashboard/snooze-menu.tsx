@@ -85,7 +85,7 @@ export function SnoozeMenu({
         <div className="px-3 pt-3 pb-1.5">
           <p className="text-xs font-semibold">いまは実施しない</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            件数と通知から外します。GitHubのラベルは変わりません。
+            一覧・件数・通知から外します。GitHubのラベルは変わりません。
           </p>
         </div>
         <div className="flex flex-col p-1">

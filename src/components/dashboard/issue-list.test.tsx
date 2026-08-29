@@ -927,8 +927,24 @@ describe("IssueListの保留（#2398）", () => {
     expect(screen.queryByText(/保留中が/)).toBeNull();
   });
 
-  // ユーザーの決定（#2398）: 効かせるのは要対応の2ビューだけ
-  it("要対応以外のビューでは伏せず、保留にする導線も出さない", async () => {
+  // ユーザーの決定（#2456）: #2398の2ビュー限定をやめ、Issue一覧の全ビューで伏せる
+  it("「すべてのIssue」でも伏せ、保留にする導線も出す", async () => {
+    renderList({
+      view: "all",
+      snoozes: snoozeMapFor("2099-09-01T00:00:00.000Z"),
+      onSnooze: vi.fn(),
+      onUnsnooze: vi.fn(),
+    });
+    await act(async () => {});
+
+    expect(screen.queryByText("#2 Issue 2")).toBeNull();
+    expect(screen.getByText(/保留中が/)).toBeTruthy();
+    expect(screen.getByText("2件・保留中1件")).toBeTruthy();
+    // 伏せた行のぶんだけ導線も減る（並んでいる2件に出る）
+    expect(screen.queryAllByRole("button", { name: "保留にする" })).toHaveLength(2);
+  });
+
+  it("「すべてのIssue」でも「表示」で開ける", async () => {
     renderList({
       view: "all",
       snoozes: snoozeMapFor(null),
@@ -937,9 +953,9 @@ describe("IssueListの保留（#2398）", () => {
     });
     await act(async () => {});
 
+    fireEvent.click(screen.getByRole("button", { name: "表示" }));
     expect(screen.getByText("#2 Issue 2")).toBeTruthy();
-    expect(screen.queryByText(/保留中が/)).toBeNull();
-    expect(screen.queryAllByRole("button", { name: "保留にする" })).toHaveLength(0);
+    expect(screen.getByText("手動で解除するまで")).toBeTruthy();
   });
 
   it("要対応のビューでは各行から保留にできる", async () => {
