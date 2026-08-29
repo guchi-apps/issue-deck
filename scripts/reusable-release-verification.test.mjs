@@ -125,6 +125,30 @@ describe("対象issueの検証結果を集計する", () => {
     expect(out).not.toContain("issue-deck-review-verdict");
     // 表と折りたたみのあいだに空行が要る（無いとGitHubが表を閉じない）
     expect(out).toMatch(/該当なし \|\n\n<details>/);
+    // **本文は引用にして差し込む。** 素の見出しのまま埋めると、リリースPR本文を見出しで
+    // 区切って読む側（`## 対象issue`の切り出しなど）がレビューの書きぶりで変わる
+    expect(out).toContain("> ## 総評");
+    const detail = out.slice(out.indexOf("<!-- issue-deck-review-detail:start"));
+    expect(detail.split("\n").filter((line) => line.startsWith("## "))).toEqual([]);
+  });
+
+  it("ワークフローが転記したレビュー結果も拾う（#2488）", () => {
+    // 判定マーカーが無くても、転記の印が付いたコメントは結果として載せる
+    const out = runAggregation(["- #2441 転記された結果"], {
+      2441: {
+        number: 2446,
+        body: "",
+        comments: [
+          {
+            url: "https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-9",
+            body: "🤖 **自動レビューの結果**\n\n要確認です。\n\n<!-- issue-deck-review-report sha=abc123 -->",
+          },
+        ],
+      },
+    });
+
+    expect(out).toContain("<!-- issue-deck-review-detail:start issue=2441 -->");
+    expect(out).toContain("> 要確認です。");
   });
 
   it("長いレビューコメントは打ち切り、元コメントへ誘導する", () => {

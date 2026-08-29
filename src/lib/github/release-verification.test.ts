@@ -28,13 +28,13 @@ developへ入れる前に各PRで行った自動レビューの判定です（#2
 
 <!-- issue-deck-review-detail:start issue=2441 -->
 
-## 総評
-
-LGTM。ゲートの条件は仕様どおりです。
-
-| 観点 | 結果 |
-| --- | --- |
-| テスト | 追加あり |
+> ## 総評
+>
+> LGTM。ゲートの条件は仕様どおりです。
+>
+> | 観点 | 結果 |
+> | --- | --- |
+> | テスト | 追加あり |
 
 [元のレビューコメントを開く](https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-1)
 <!-- issue-deck-review-detail:end -->
@@ -46,9 +46,9 @@ LGTM。ゲートの条件は仕様どおりです。
 
 <!-- issue-deck-review-detail:start issue=2443 -->
 
-要確認。GitHub Actionsの設定に触れています。
-
-（長いため以降を省略しました。全文は元のレビューコメントで読めます）
+> 要確認。GitHub Actionsの設定に触れています。
+>
+> （長いため以降を省略しました。全文は元のレビューコメントで読めます）
 <!-- issue-deck-review-detail:end -->
 
 </details>
@@ -118,8 +118,10 @@ describe("parseReleaseVerification", () => {
 
     expect(rows[0].reviewBody).toContain("LGTM。ゲートの条件は仕様どおりです。");
     // 見出しも表も本文の一部としてそのまま持つ（画面はMarkdownとして描く）
-    expect(rows[0].reviewBody).toContain("## 総評");
-    expect(rows[0].reviewBody).toContain("| テスト | 追加あり |");
+    // ワークフローは引用（`> `）にして差し込む。素の見出し・表のままだと、リリースPR本文を
+    // 見出しで区切って読む側がレビューの書きぶりで変わってしまうため
+    expect(rows[0].reviewBody).toContain("> ## 総評");
+    expect(rows[0].reviewBody).toContain("> | テスト | 追加あり |");
     expect(rows[0].reviewBody).toContain(
       "[元のレビューコメントを開く](https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-1)",
     );
