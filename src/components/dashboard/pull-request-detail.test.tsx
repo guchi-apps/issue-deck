@@ -352,7 +352,7 @@ describe("PullRequestDetail", () => {
 | Issue | PR | 自動レビュー | 機械的リスク判定 |
 | --- | --- | --- | --- |
 | #2441 | #2446 | ✅ 問題なし | 該当なし |
-| #2438 | #2450 | — 実施なし（低リスク・小規模） | 該当なし |
+| #2438 | #2450 | — 実施なし | 該当なし |
 | #2432 | — | ? 記録なし | ? 記録なし |
 
 ## 注意点
@@ -373,7 +373,7 @@ describe("PullRequestDetail", () => {
       expect(text).toContain("3 件のIssue");
       expect(text).toContain("1問題なし");
       expect(text).toContain("1レビューなし");
-      expect(text).toContain("実施なし（低リスク・小規模）");
+      expect(text).toContain("実施なし");
       // 記録が無い行も残す（検証されていないことが読めなくなるため）
       expect(text).toContain("記録なし");
       // 対象issue一覧からタイトルを添える

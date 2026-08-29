@@ -635,7 +635,7 @@ jobs:
               lgtm) REVIEW_CELL="✅ 問題なし" ;;
               needs-check) REVIEW_CELL="⚠️ 要確認" ;;
               changes-requested) REVIEW_CELL="❌ 要修正" ;;
-              skipped) REVIEW_CELL="— 実施なし（低リスク・小規模）" ;;
+              skipped) REVIEW_CELL="— 実施なし" ;;
               unavailable) REVIEW_CELL="? 判定を取得できず" ;;
               *) REVIEW_CELL="? 記録なし" ;;
             esac

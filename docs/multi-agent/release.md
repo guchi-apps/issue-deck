@@ -190,6 +190,21 @@ develop→mainのマージは人が判断するのに、**その判断材料が�
   `claude-review-develop.yml`のトリガーに`edited`は無いので再帰しない
 - **`skipped`は危険信号ではない。** 低リスクかつ小規模なPRでレビューを省くのは#992のゲートの
   設計どおりの動きなので、画面でも灰色で出す。赤やamberにすると本当に見るべき`要確認`が埋もれる
+- **`skipped`になる経路は2つあり、`unavailable`と混ぜない。** #992のゲートで
+  `claude-review`ジョブごとskipされた場合と、**ジョブはsuccessでもClaudeが動かなかった場合**
+  （`.github/workflows/`配下を変更するPRでは、claude-code-actionの検証機構がClaudeの実行だけを
+  飛ばす）。後者を`unavailable`（判定を残せなかった）と書くと、実施していないことが
+  「取りこぼし」に見える。実行の有無は`claude-review`ジョブの`executed`出力
+  （`steps.claude_review.outputs.execution_file != ''`）で判別し、理由はdevelop向けPRの本文へ
+  添える。**リリースPRの表は`— 実施なし`までしか出さない**（理由は元のPRを開けば読める）
+- **`merge-blocked`のマーカーは動かさない。** あちらは自動レビューが**対応Issue**へ投稿する
+  理由コメントに付き、`auto-merge`がそこだけを読んで`00.check-user`を付ける（#2136）。
+  総評の判定マーカーは**PRへのコメント**側に足す別の契約で、既存の読み取り経路は変えていない。
+  PRコメントへ載るのは、claude-code-action自身がレビューの出力を`claude[bot]`名義の
+  PRコメントとして投稿するため（`allowedTools`に`gh pr comment`は要らない）
+- **head refが`issue-<番号>`のPRにしか節を書かない。** バージョンバンプPRの本文にある
+  `## 対象issue`はdevelop→mainのPRを作るrunが引き継ぐ唯一の入力（#2117）で、リリースの配管
+  そのもの。集計側も`issue-<番号>`のPRしか引くので、そこへ足しても誰も読まない
 - **記録が無くても表は作る。** 共有ワークフローの参照タグを配る前にマージされたPRや、ブランチ名が
   `issue-<番号>`でないPRには節が無い。その行は「記録なし」と出す——表ごと消すと、
   **検証されていないことも読めなくなる**

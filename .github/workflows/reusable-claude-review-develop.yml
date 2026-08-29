@@ -459,6 +459,13 @@ jobs:
     needs: [identify-issue, risk-check]
     if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      # Claudeが実際に走ったか(#2448)。claude-code-actionには「ワークフローファイルの内容が
+      # デフォルトブランチと完全一致していなければClaudeの実行だけをスキップする」検証機構が
+      # あり、`.github/workflows/`配下を変更するPRでは**このジョブはClaudeを実行しないまま
+      # successで終わる**(このファイル冒頭の説明を参照)。auto-mergeが「判定を取得できなかった」と
+      # 「そもそも実施していない」を取り違えないよう、実行の有無をここから渡す。
+      executed: ${{ steps.claude_review.outputs.execution_file != '' }}
     permissions:
       contents: read
       pull-requests: write
@@ -853,8 +860,12 @@ jobs:
       #   マージが止まって人を呼ぶ方が高くつく)
       # - PR本文の編集は`pull_request`の`edited`を起こすが、呼び出し元のトリガーは
       #   opened/synchronize/reopened/ready_for_reviewだけなので再帰しない
+      # - **head refが`issue-<番号>`のPRにしか書かない。** バージョンバンプPR
+      #   (`release/vX.Y.Z`→develop)の本文にある`## 対象issue`は、develop→mainのPRを作るrunが
+      #   引き継ぐ唯一の入力(#2117)で、リリースの配管そのもの。集計側も`issue-<番号>`のPRしか
+      #   引かないため、そこへ節を足しても誰も読まない
       - name: 検証結果をPR本文へ記録する
-        if: always()
+        if: always() && needs.identify-issue.outputs.number != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -862,6 +873,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
+          REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
         run: |
@@ -872,19 +884,31 @@ jobs:
           # 倒れるため、scripts/check-review-verdict-marker.sh がCIで突き合わせる)。
           # sha=で今回のhead SHAに絞り、追いコミット前の判定を拾わない。
           REVIEW="unavailable"
+          # 「実施していない」理由。`skipped`のときだけ使い、develop向けPRの本文へ添える
+          # (リリースPRの表は`— 実施なし`までしか出さない。理由は元のPRを開けば読める)
+          SKIP_REASON=""
           case "$REVIEW_RESULT" in
             skipped)
               # #992のゲートでレビューを省いた場合。**失敗と区別する**——省くのは
               # 低リスクかつ小規模なPRに限られる設計どおりの動きで、危険信号ではない
               REVIEW="skipped"
+              SKIP_REASON="低リスクかつ小規模のため省略"
               ;;
             success)
-              FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
-                | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
-                | tail -n 1 \
-                | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
-              if [ -n "$FOUND" ]; then
-                REVIEW="$FOUND"
+              if [ "$REVIEW_EXECUTED" != "true" ]; then
+                # ジョブはsuccessでもClaudeが動いていない場合(`.github/workflows/`配下を
+                # 変更するPR)。**「判定を取得できませんでした」と書かない**——判定を残せなかった
+                # のではなく、そもそも実施していない
+                REVIEW="skipped"
+                SKIP_REASON="ワークフローファイルの変更を含むため、Claudeを実行していない"
+              else
+                FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                  | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                  | tail -n 1 \
+                  | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+                if [ -n "$FOUND" ]; then
+                  REVIEW="$FOUND"
+                fi
               fi
               ;;
           esac
@@ -896,7 +920,7 @@ jobs:
             lgtm) REVIEW_TEXT="✅ 問題なし（LGTM）" ;;
             needs-check) REVIEW_TEXT="⚠️ 要確認" ;;
             changes-requested) REVIEW_TEXT="❌ 要修正" ;;
-            skipped) REVIEW_TEXT="— 実施なし（低リスク・小規模のため省略）" ;;
+            skipped) REVIEW_TEXT="— 実施なし（${SKIP_REASON}）" ;;
             *) REVIEW="unavailable"; REVIEW_TEXT="? 判定を取得できませんでした" ;;
           esac
 
