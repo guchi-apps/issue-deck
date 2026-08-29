@@ -1,7 +1,5 @@
-import {
-  isSessionLaunchJobKind,
-  type DispatchJobView,
-} from "@/lib/dispatch/dispatch-job";
+import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchQueueSummary } from "@/lib/dispatch/queue-summary";
 
 /**
  * Issue一覧の行に出す「実行が始まる前」の状態（#2449）。
@@ -13,9 +11,15 @@ import {
  *
  * 材料は`GET /api/dispatch`が既に返しているジョブだけで、DBもAPIも増やさない。
  *
- * **並びは払い出し（`claimDispatchJobs`）・実行キュー（`summarizeDispatchQueue`）と同じ**
- * ——`queuePriority`の降順 → `createdAt`の昇順。見えている順番と走る順番を一致させるための
- * 決まりで、ここだけ別の並びにすると「先頭へ上げる」（#1541）を押した結果が一覧に映らない。
+ * **並べ替えはしない。** 受け取るのは`summarizeDispatchQueue`が並べ終えた要約
+ * （`queuePriority`の降順 → `createdAt`の昇順。払い出し`claimDispatchJobs`と同じ規則）で、
+ * ここで並べ直すと同じ規則が3か所目になり、片方が緩んだときに実行キューのポップオーバーと
+ * 一覧の番号が同じ画面で食い違う。
+ *
+ * **番号はホストごとに数える。** 払い出しは`targetHost`で絞ってから並べるため
+ * （`jobs.ts`の`claimDispatchJobs`）、全ホストを通しで数えると別ホスト宛てのジョブまで
+ * 番号に混ざる。（そのホストが取りに来ない種別まで絞る能力フラグまでは見ない——申告は
+ * pollerの都合で変わるもので、番号のためにそこまで写すと二重管理になる。）
  *
  * Prismaに触れないため、クライアントコンポーネントからimportできる（`dispatch-job.ts`と
  * 同じ扱い。`jobs.ts`はできない）。
@@ -35,12 +39,12 @@ export type IssueQueuePhase = "queued" | "starting";
 export type IssueQueueState = {
   phase: IssueQueuePhase;
   /**
-   * 順番待ちの中で何番目か（1始まり）。`starting`のときはnull。
+   * そのホストの順番待ちの中で何番目か（1始まり）。`starting`のときはnull。
    *
    * **数えるのは`QUEUED`のジョブだけ**で、走っているものは番号を持たない。
    */
   position: number | null;
-  /** 順番待ちの総数（`position`の分母）。`queued`の件数 */
+  /** そのホストの順番待ちの件数（`position`の分母） */
   queuedTotal: number;
   /** そのIssueのジョブ。待っている理由（`describeDispatchJobWaitReason`）を引くのに使う */
   job: DispatchJobView;
@@ -52,40 +56,45 @@ function issueKey(repositoryFullName: string, issueNumber: number): string {
 }
 
 /**
- * ジョブ一覧からIssueごとの待ち状態を組む。鍵は`repositoryFullName#issueNumber`。
+ * 実行キューの要約からIssueごとの待ち状態を組む。鍵は`repositoryFullName#issueNumber`。
  *
  * **同じIssueに未完了のジョブが2件あることは無い**（`DispatchJob.activeKey`が
- * `owner/repo#番号`のunique列）。それでも念のため、先に見つかった＝走る順で早い方を採る。
+ * `owner/repo#番号`のunique列）。それでも念のため、走る順で早い方を採る。
  */
 export function buildIssueQueueStates(
-  jobs: readonly DispatchJobView[],
+  summary: Pick<DispatchQueueSummary, "queued" | "running">,
 ): Map<string, IssueQueueState> {
-  // セッションの枠を使う種別だけを見る（`SESSION_LAUNCH_JOB_KINDS`）。停止・追加指示などの
-  // 制御ジョブは枠外で先に流れるもので、「順番待ち」として数えると実行キューと食い違う
-  const launchJobs = jobs.filter((job) => isSessionLaunchJobKind(job.kind));
-  const byRunOrder = [...launchJobs].sort(
-    (a, b) => b.queuePriority - a.queuePriority || a.createdAt.localeCompare(b.createdAt),
-  );
-
-  const queued = byRunOrder.filter((job) => job.status === "QUEUED");
   const states = new Map<string, IssueQueueState>();
 
-  for (const [index, job] of queued.entries()) {
+  // ホストごとの順番待ちの本数。番号の分母になる
+  const queuedTotalByHost = new Map<string, number>();
+  for (const job of summary.queued) {
+    queuedTotalByHost.set(job.targetHost, (queuedTotalByHost.get(job.targetHost) ?? 0) + 1);
+  }
+
+  const positionByHost = new Map<string, number>();
+  for (const job of summary.queued) {
+    const position = (positionByHost.get(job.targetHost) ?? 0) + 1;
+    positionByHost.set(job.targetHost, position);
     const key = issueKey(job.repositoryFullName, job.issueNumber);
     if (states.has(key)) continue;
     states.set(key, {
       phase: "queued",
-      position: index + 1,
-      queuedTotal: queued.length,
+      position,
+      queuedTotal: queuedTotalByHost.get(job.targetHost) ?? 0,
       job,
     });
   }
 
-  for (const job of byRunOrder) {
-    if (job.status !== "CLAIMED" && job.status !== "RUNNING") continue;
+  for (const job of summary.running) {
     const key = issueKey(job.repositoryFullName, job.issueNumber);
     if (states.has(key)) continue;
-    states.set(key, { phase: "starting", position: null, queuedTotal: queued.length, job });
+    states.set(key, {
+      phase: "starting",
+      position: null,
+      queuedTotal: queuedTotalByHost.get(job.targetHost) ?? 0,
+      job,
+    });
   }
 
   return states;

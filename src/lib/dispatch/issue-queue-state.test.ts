@@ -6,6 +6,7 @@ import {
   describeIssueQueueState,
   findIssueQueueState,
 } from "@/lib/dispatch/issue-queue-state";
+import { summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
 
 function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
   return {
@@ -36,12 +37,13 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
   };
 }
 
+/** 並べ替えは実行キューの要約に任せる（本番の`IssueList`と同じ経路で組む） */
+function statesOf(jobs: DispatchJobView[]) {
+  return buildIssueQueueStates(summarizeDispatchQueue(jobs, null));
+}
+
 function stateFor(jobs: DispatchJobView[], issueNumber: number) {
-  return findIssueQueueState(
-    buildIssueQueueStates(jobs),
-    "guchi-apps/issue-deck",
-    issueNumber,
-  );
+  return findIssueQueueState(statesOf(jobs), "guchi-apps/issue-deck", issueNumber);
 }
 
 describe("buildIssueQueueStates", () => {
@@ -107,10 +109,23 @@ describe("buildIssueQueueStates", () => {
     expect(stateFor(jobs, 11)?.position).toBe(2);
   });
 
+  // 払い出しは`targetHost`で絞ってから並べる（`claimDispatchJobs`）。全ホストを通しで
+  // 数えると、別ホスト宛てのジョブまで番号に混ざる
+  it("番号はホストごとに数える", () => {
+    const jobs = [
+      job({ id: "a", issueNumber: 10, targetHost: "subpc" }),
+      job({ id: "b", issueNumber: 11, targetHost: "other", createdAt: "2026-08-14T00:01:00.000Z" }),
+      job({ id: "c", issueNumber: 12, targetHost: "subpc", createdAt: "2026-08-14T00:02:00.000Z" }),
+    ];
+
+    expect(stateFor(jobs, 10)).toMatchObject({ position: 1, queuedTotal: 2 });
+    expect(stateFor(jobs, 12)).toMatchObject({ position: 2, queuedTotal: 2 });
+    // 別ホストのキューは自分の中で1番目
+    expect(stateFor(jobs, 11)).toMatchObject({ position: 1, queuedTotal: 1 });
+  });
+
   it("鍵はリポジトリと番号の組。番号だけが同じ別リポジトリのIssueには一致しない", () => {
-    const states = buildIssueQueueStates([
-      job({ repositoryFullName: "guchi-apps/dayspan", issueNumber: 10 }),
-    ]);
+    const states = statesOf([job({ repositoryFullName: "guchi-apps/dayspan", issueNumber: 10 })]);
 
     expect(findIssueQueueState(states, "guchi-apps/dayspan", 10)).not.toBeNull();
     expect(findIssueQueueState(states, "guchi-apps/issue-deck", 10)).toBeNull();

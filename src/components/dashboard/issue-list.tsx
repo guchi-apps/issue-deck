@@ -54,7 +54,10 @@ import {
   findIssueQueueState,
   type IssueQueueState,
 } from "@/lib/dispatch/issue-queue-state";
-import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
+import {
+  describeDispatchJobWaitReason,
+  summarizeDispatchQueue,
+} from "@/lib/dispatch/queue-summary";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
@@ -508,7 +511,11 @@ export function IssueList({
   // 円グラフが描かれず、行が押す前とまったく同じに見えていた。**Issueの件数に関わらず
   // 組み立ては1回**で、行ごとにジョブ一覧を走査し直さない
   const queueStateByIssueId = useMemo(() => {
-    const states = buildIssueQueueStates(dispatch.jobs);
+    // 並べ替えは実行キューの要約に任せる（#2449）。同じ規則をここで書き直すと、
+    // ポップオーバーの並びと一覧の番号が同じ画面で食い違いうる
+    const states = buildIssueQueueStates(
+      summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency),
+    );
     const map = new Map<string, IssueQueueState>();
     if (states.size === 0) return map;
     for (const issue of issues) {
@@ -516,7 +523,7 @@ export function IssueList({
       if (state) map.set(issue.id, state);
     }
     return map;
-  }, [issues, dispatch.jobs]);
+  }, [issues, dispatch.jobs, dispatch.concurrency]);
   // 計画への返事待ち（#2061）。**待っている行だけ「計画を承認」を出す**ための集合で、
   // 押した先はアプリの中（そのIssueを開くと上部に計画パネルが出る）
   const planPendingIssueIds = useMemo(() => {
