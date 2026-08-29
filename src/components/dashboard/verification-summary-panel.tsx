@@ -1,6 +1,10 @@
 "use client";
 
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
+
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import type {
   ReleaseVerification,
   ReleaseVerificationRow,
@@ -54,6 +58,12 @@ function TallyItem({ kind, label, count }: { kind: ReviewVerdictKind; label: str
   );
 }
 
+/**
+ * 1件ぶんの行。レビュー本文が載っている場合（#2488）は開いて読めるようにする。
+ *
+ * **既定は閉じたまま。** リリースには10件以上のIssueが載ることがあり、全部を開いて出すと
+ * 「何件のうち何件が問題なしか」を先に読むためのこの帯が、本文と同じ長さになってしまう。
+ */
 function Row({
   row,
   repositoryFullName,
@@ -61,38 +71,64 @@ function Row({
   row: ReleaseVerificationRow;
   repositoryFullName: string;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2 text-xs last:border-b-0">
-      <GithubReferenceLink
-        href={`https://github.com/${repositoryFullName}/issues/${row.issueNumber}`}
-        reference={{ repositoryFullName, number: row.issueNumber, kind: "issue" }}
-        className="shrink-0 font-mono text-[11px] text-primary tabular-nums hover:underline"
-      >
-        #{row.issueNumber}
-      </GithubReferenceLink>
-      {row.issueTitle && (
-        <span className="min-w-[8rem] flex-1 truncate text-muted-foreground">{row.issueTitle}</span>
-      )}
-      {row.pullRequestNumber === null ? (
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">PR —</span>
-      ) : (
+    <li className="border-b px-4 py-2 text-xs last:border-b-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <GithubReferenceLink
-          href={`https://github.com/${repositoryFullName}/pull/${row.pullRequestNumber}`}
-          reference={{ repositoryFullName, number: row.pullRequestNumber, kind: "pull" }}
-          className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums hover:underline"
+          href={`https://github.com/${repositoryFullName}/issues/${row.issueNumber}`}
+          reference={{ repositoryFullName, number: row.issueNumber, kind: "issue" }}
+          className="shrink-0 font-mono text-[11px] text-primary tabular-nums hover:underline"
         >
-          PR #{row.pullRequestNumber}
+          #{row.issueNumber}
         </GithubReferenceLink>
-      )}
-      <VerdictText kind={row.reviewKind} label={row.reviewLabel} />
-      <span
-        className={cn(
-          "whitespace-nowrap",
-          row.riskKind === "hit" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+        {row.issueTitle && (
+          <span className="min-w-[8rem] flex-1 truncate text-muted-foreground">{row.issueTitle}</span>
         )}
-      >
-        リスク{row.riskLabel}
-      </span>
+        {row.pullRequestNumber === null ? (
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground">PR —</span>
+        ) : (
+          <GithubReferenceLink
+            href={`https://github.com/${repositoryFullName}/pull/${row.pullRequestNumber}`}
+            reference={{ repositoryFullName, number: row.pullRequestNumber, kind: "pull" }}
+            className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums hover:underline"
+          >
+            PR #{row.pullRequestNumber}
+          </GithubReferenceLink>
+        )}
+        <VerdictText kind={row.reviewKind} label={row.reviewLabel} />
+        <span
+          className={cn(
+            "whitespace-nowrap",
+            row.riskKind === "hit" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
+          )}
+        >
+          リスク{row.riskLabel}
+        </span>
+        {row.reviewBody && (
+          <button
+            type="button"
+            onClick={() => setIsOpen((open) => !open)}
+            aria-expanded={isOpen}
+            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground"
+          >
+            {isOpen ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+            レビュー内容
+          </button>
+        )}
+      </div>
+      {row.reviewBody && isOpen && (
+        <MarkdownBody
+          content={row.reviewBody}
+          repositoryFullName={repositoryFullName}
+          className="mt-2 rounded-md border bg-muted/30 px-3 py-2 text-[0.8125rem] leading-[1.8]"
+        />
+      )}
     </li>
   );
 }
@@ -103,7 +139,8 @@ function Row({
  * **本文をそのまま読むだけで、ここから問い合わせはしない。** 判定はdevelop向けPRの本文へ
  * `## 検証結果`として残り（`reusable-claude-review-develop.yml`）、リリースPRを作るときに
  * 対象issueぶん集められている（`reusable-release-develop-to-main.yml`）。画面はその表を
- * 読み直して、内訳を先に出しているだけ。
+ * 読み直して、内訳を先に出しているだけ。**レビューコメントの本文（#2488）も同じ本文の
+ * 折りたたみに入っている**ので、行の「レビュー内容」を開けばここで読める。
  *
  * **本文には同じ表がそのまま出る。** 重複に見えるが、mainへ出すかどうかを決める人が最初に
  * 知りたいのは「何件のうち何件が問題なしか」で、そこへ辿り着くのに本文をスクロールさせない
