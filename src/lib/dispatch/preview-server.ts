@@ -156,7 +156,10 @@ export function describePreviewRejection(reason: PreviewRejection): string {
     case "host_offline":
       return "サブPCが応答していません（pollerが動いているか確認してください）。";
     case "preview_unsupported":
-      return "サブPCのpollerが確認環境に対応していません。「更新して再起動」で最新にしてください。";
+      // **押す場所まで書く**（#2455）。「更新して再起動」はこの画面には無く、実行キュー
+      // （PCはトップバー右のアイコン／スマホはヘッダーの「実行状況」）を開いた先の
+      // サブPCのカードにしか出ない。ボタン名だけでは探す場所が分からない
+      return "サブPCのpollerが確認環境に対応していません。実行キュー（スマホはヘッダーの「実行状況」）を開き、サブPCのカードにある「更新して再起動」を押してください。";
     case "repository_unavailable":
       return "このリポジトリはサブPCから起動できません（チェックアウトが登録されていません）。";
     case "no_dev_server":
@@ -166,6 +169,32 @@ export function describePreviewRejection(reason: PreviewRejection): string {
     case "not_running":
       return "確認環境は動いていません。";
   }
+}
+
+/**
+ * ホスト全体に効く理由か（#2455）。**リポジトリを選び直しても変わらないもの**がこれに当たる。
+ *
+ * 画面はこれを見て、リポジトリの行ごとではなくホストの見出しの下へ1回だけ出す。行に置くと、
+ * 申告しているリポジトリの数だけ同じ文言が並び、押す場所を書き足した長い文言がリポジトリ名の
+ * 幅を潰す。残り（`repository_unavailable`・`no_dev_server`・`already_queued`・`not_running`）は
+ * 行ごとに違うので従来どおり行に出す。
+ */
+export function isHostWidePreviewRejection(reason: PreviewRejection): boolean {
+  return reason === "host_unknown" || reason === "host_offline" || reason === "preview_unsupported";
+}
+
+/**
+ * 一覧全体に出す理由（#2455）。**全部の行が同じホスト全体の理由で止まっているときだけ返す。**
+ *
+ * 行が1つも無いとき（起動できるリポジトリが無い）は`null`——その場合は一覧側が
+ * 「起動できるリポジトリがありません」を出すので、二重に理由を並べない。
+ */
+export function selectHostWidePreviewRejection(
+  rows: readonly PreviewRepositoryRow[],
+): PreviewRejection | null {
+  const first = rows[0]?.rejection ?? null;
+  if (first === null || !isHostWidePreviewRejection(first)) return null;
+  return rows.every((row) => row.rejection === first) ? first : null;
 }
 
 /**

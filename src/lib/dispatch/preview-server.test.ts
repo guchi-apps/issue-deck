@@ -5,9 +5,12 @@ import {
   buildPreviewRepositoryRows,
   describePreviewIdleStop,
   describePreviewJob,
+  describePreviewRejection,
+  isHostWidePreviewRejection,
   parseDispatchHostPreview,
   parsePreviewUrl,
   resolvePreviewRejection,
+  selectHostWidePreviewRejection,
 } from "@/lib/dispatch/preview-server";
 
 const NOW = new Date("2026-08-29T12:00:00.000Z");
@@ -209,6 +212,59 @@ describe("resolvePreviewRejection（#2444）", () => {
         hasQueuedJob: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe("describePreviewRejection（#2455）", () => {
+  // ボタン名だけでは探す場所が分からない。「更新して再起動」は確認環境の画面には無く、
+  // 実行キュー（スマホは「実行状況」）を開いた先のサブPCのカードにしか出ない
+  it("pollerが古いときは、押すボタンの場所まで書く", () => {
+    const message = describePreviewRejection("preview_unsupported");
+    expect(message).toContain("実行キュー");
+    expect(message).toContain("実行状況");
+    expect(message).toContain("サブPCのカード");
+    expect(message).toContain("「更新して再起動」");
+  });
+});
+
+describe("isHostWidePreviewRejection・selectHostWidePreviewRejection（#2455）", () => {
+  it("リポジトリを選び直しても変わらない理由だけをホスト全体として扱う", () => {
+    expect(isHostWidePreviewRejection("host_unknown")).toBe(true);
+    expect(isHostWidePreviewRejection("host_offline")).toBe(true);
+    expect(isHostWidePreviewRejection("preview_unsupported")).toBe(true);
+    expect(isHostWidePreviewRejection("no_dev_server")).toBe(false);
+    expect(isHostWidePreviewRejection("repository_unavailable")).toBe(false);
+    expect(isHostWidePreviewRejection("already_queued")).toBe(false);
+    expect(isHostWidePreviewRejection("not_running")).toBe(false);
+  });
+
+  it("全部の行が同じホスト全体の理由なら、その理由を1つ返す", () => {
+    const rows = buildPreviewRepositoryRows({
+      host: host({ previewCapable: null }),
+      hasQueuedJob: false,
+    });
+    expect(selectHostWidePreviewRejection(rows)).toBe("preview_unsupported");
+  });
+
+  // 行ごとに違う理由（開発サーバーの有無）は、まとめて見出しへ上げない
+  it("行ごとに違う理由なら null", () => {
+    const rows = buildPreviewRepositoryRows({
+      host: host({
+        repositories: ["guchi-apps/issue-deck", "guchi-apps/vps"],
+        previewRepositories: ["guchi-apps/issue-deck"],
+      }),
+      hasQueuedJob: false,
+    });
+    expect(selectHostWidePreviewRejection(rows)).toBeNull();
+  });
+
+  it("押せる行がある・行が無い場合は null", () => {
+    expect(
+      selectHostWidePreviewRejection(
+        buildPreviewRepositoryRows({ host: host(), hasQueuedJob: false }),
+      ),
+    ).toBeNull();
+    expect(selectHostWidePreviewRejection([])).toBeNull();
   });
 });
 
