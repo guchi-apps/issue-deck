@@ -23,11 +23,13 @@ import { PullRequestFileList } from "@/components/dashboard/pull-request-file-li
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
+import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import { parseReleaseVerification } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
@@ -177,6 +179,8 @@ export function PullRequestDetail({
   // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
   // コンフリクトの両方の修復ボタンを出せる（#1293）。
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
+  // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
+  const verification = parseReleaseVerification(currentDetail?.body);
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -318,6 +322,17 @@ export function PullRequestDetail({
 
         {currentDetail && (
           <>
+            {/* リリースPRの検証結果は、本文より先に出す（#2448）。mainへ出すかを決める人が
+                最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
+                スクロールしないと読めないのでは判断材料として遅い。
+                見出しを持たないPR（＝リリースPR以外）ではparseがnullを返すので何も出ない */}
+            {verification && (
+              <VerificationSummaryPanel
+                verification={verification}
+                repositoryFullName={pullRequest.repositoryFullName}
+              />
+            )}
+
             <section className="border-b px-4 py-3">
               {currentDetail.body.trim() ? (
                 <MarkdownBody

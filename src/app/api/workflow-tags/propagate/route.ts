@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { dispatchPropagation } from "@/lib/github/workflow-tags";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * 更新が必要なリポジトリへ、共有ワークフローのタグを上げるPRを一括作成する（#1173）。
@@ -14,6 +15,8 @@ import { dispatchPropagation } from "@/lib/github/workflow-tags";
  * 自動マージする。偽なら従来どおりPRの作成までで止まる。
  */
 export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("workflow_tags", () => handlePOST(request));
 }
 

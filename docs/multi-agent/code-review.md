@@ -122,11 +122,17 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 突き合わせはすべて`-issue-`の規約に依存しており、そこへ混ざると実装セッションのつもりで
 レビューを畳むことになる。
 
+**逆に、`DispatchSession`の行でセッションの生存を確かめる処理からは外す必要がある**（#2443）。
+報告されないぶん、探しに行くと代わりに同じIssueの実装セッションの行に一致してしまう。
+判定はissue-deck側の`SESSION_REPORTED_JOB_KINDS`（`src/lib/dispatch/dispatch-job.ts`）を正とし、
+種別ごとに書き分けない。実例は期限切れジョブの救済
+（[subpc-dispatch.md](subpc-dispatch.md)「起動ジョブは落とす前にセッションを見る」）。
+
 ## 変更したときに一緒に見る場所
 
 - 種別を足す・変える → `prisma/schema.prisma`（`DispatchJobKind`と`DispatchHost`の`*Capable`）＋
   マイグレーション・`src/lib/dispatch/dispatch-job.ts`（種別の型・`parseDispatchJobKind`・
-  `SESSION_LAUNCH_JOB_KINDS`・状態と拒否理由の文言）・`src/lib/dispatch/jobs.ts`
+  `SESSION_LAUNCH_JOB_KINDS`・`SESSION_REPORTED_JOB_KINDS`・状態と拒否理由の文言）・`src/lib/dispatch/jobs.ts`
   （`toHostView`・払い出しの`launchKinds`・`announceDispatchHost`・積む関数）・
   `src/app/api/dispatch/route.ts`・`src/app/api/dispatch/hosts/route.ts`・
   `scripts/subpc-dispatch-poller.sh`（申告・種別の分岐・版数）。

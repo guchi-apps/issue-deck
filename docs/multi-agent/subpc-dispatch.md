@@ -1626,7 +1626,7 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
 だけで、10分後に「起動処理からの応答が途絶えました」としてタイムアウトし、**同じIssueが実行
 キューの「実行中」（セッション一覧）と「直近の失敗」に同時に並んだ**。
 
-そのため`expireStaleDispatchJobs()`は、起動ジョブ（`SESSION_LAUNCH_JOB_KINDS`の`CLAIMED`・
+そのため`expireStaleDispatchJobs()`は、起動ジョブ（`SESSION_REPORTED_JOB_KINDS`の`CLAIMED`・
 `RUNNING`）を落とす前に、同じホスト・リポジトリ・Issue番号の`ALIVE`なセッションを探す
 （`findSessionsForStaleLaunchJobs`）。見つかれば`TIMEOUT`ではなく`SUCCEEDED`として畳み、
 報告に入っていたはずのtmuxセッション名を補う。
@@ -1636,6 +1636,13 @@ pollerは1巡の入口で集めた`metrics`を見て、メモリ・SWAPの使用
   決めると、本当に落ちた起動を成功として隠すことになる
 - **制御ジョブは救済しない。** あちらはtmuxを1回叩いて終わるので、セッションが動いていることは
   `C-c`が届いた証拠にならない
+- **計画レビュー・コードレビューも救済しない**（#1855・#2443）。セッションは立てるが、名前を
+  `<リポジトリ名>-plan-review-<番号>`・`<リポジトリ名>-code-review-<番号>`と`-issue-`の規約から
+  外してあるため`report_sessions`が拾わず、`DispatchSession`の行にならない。ここで探すと代わりに
+  **同じIssueの実装セッション**に一致し、届かなかったレビューを「起動できていた」ことにして
+  しまう。対象は`SESSION_LAUNCH_JOB_KINDS`（枠を消費する種別）ではなく
+  **`SESSION_REPORTED_JOB_KINDS`（セッションが`DispatchSession`として報告される種別）**で引く。
+  枠の計算と報告の有無は別の軸なので、種別が増えたときに片方だけ直して食い違うのを防ぐ
 - 表示側（`summarizeDispatchQueue`）には同じ判定を置かない。2か所に持つと片方が緩んだ時点で
   そこが穴になる（[gates.md](gates.md)と同じ考え方）
 

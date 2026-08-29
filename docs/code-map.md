@@ -44,6 +44,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/github/with-user-github-token.ts`](../src/lib/github/with-user-github-token.ts) を通す。**
   トークン未保存時の409応答と、期限切れ時のリフレッシュ・再暗号化をここで一元的に扱っている。
   個別のRoute Handlerで復号処理を書き足さない。
+  - **渡した`fn`は401のときに丸ごと呼び直される。書き込みを2回以上行う`fn`は、途中の401を
+    そのまま投げ直してはいけない**（#2442）。`withUserGithubToken`はリトライの単位を`fn`
+    でしか持っておらず、途中から再開できない。`POST /api/issues`のように書き込みが1回なら
+    安全だが、`POST /api/new-app`（リポジトリ作成 → 雛形 → Issue十数件）のような非冪等な
+    呼び出し元で投げ直すと立ち上げが最初から走り、先頭の重複チェックが**自分でさっき
+    作ったもの**を見つけて、原因と食い違う理由（「リポジトリ名は既に使われています」）で
+    終わる。**投げ直してよいのは、まだ何も書き込んでいないときだけ。** それ以降は
+    自前のエラーとして`created`と一緒に返す
+    （[`lib/new-app/launch-failure.ts`](../src/lib/new-app/launch-failure.ts)の
+    `decideLaunchError`がこの判断を持つ）。
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
@@ -568,6 +578,30 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabaseのセッション更新は
 [../src/proxy.ts](../src/proxy.ts) が `lib/supabase/middleware.ts` の `updateSession` を呼んでいる。
 `middleware.ts` を探しても見つからないのはこのため。
+
+## `PREVIEW_MODE`のガードはルートごとの手書き。追加したらテストで固定する（#2441）
+
+`proxy.ts`は書き込みを止めない。プレビュー環境で本番のGitHubへ書かせないための403は
+[../src/lib/preview-mode.ts](../src/lib/preview-mode.ts)の`previewModeGuard()`が返すが、**これは各
+ルートの`POST`/`PATCH`/`DELETE`の先頭で個別に呼ぶ約束**で、共通の入口は無い。呼び忘れても型もLintも
+何も言わないため、**新しい書き込み系ルートは既定で素通りする側から始まる**（#2441で配布系4ルートが
+1年以上その状態だった）。
+
+```ts
+export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
+  return withGithubApiFeature("workflow_tags", () => handlePOST(request));
+}
+```
+
+- 置くのは`withGithubApiFeature`の**外側**。あのラッパーは計測だけを行い、内部に403分岐を挟めない
+- **見落としは画面から気付けない。** worktreeの`.env.local`には`PREVIEW_MODE=true`が入っているので、
+  塞げているルートは押しても何も起きず、塞げていないルートだけが本番へ通る（配布系は14リポジトリへ
+  PRが出る）。「押したら動いた」は、ガードが無いことの証拠
+- ルートごとの`route.test.ts`で、`process.env.PREVIEW_MODE = "true"`のとき403を返し**本体の関数が
+  呼ばれない**ことを1本ずつ固定する（`src/app/api/workflow-tags/*/route.test.ts`）。次に同じ系統の口が
+  増えたときに落ちる
 
 ## データの流れ
 
@@ -1572,6 +1606,19 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `deploy.yml`が無いリポジトリ、取得した30件より古いリリースしか関係しないPR、15分待っても実行が
   現れないリポジトリでは、「未反映」と言い切らずバッジごと消す（ブランチ画面と同じ方針）。
   スマホのPR詳細は同じ`PullRequestDetail`を使うため、**片方の画面にだけ出す実装にしない**。
+- **リリースPRの「コードレビューの検証結果」は、PR本文を読み直して出す**（#2448。
+  [`lib/github/release-verification.ts`](../src/lib/github/release-verification.ts)・
+  [`verification-summary-panel.tsx`](../src/components/dashboard/verification-summary-panel.tsx)）。
+  **取得は増えない**——判定はdevelop向けPRの本文へ`## 検証結果`として残り
+  （`reusable-claude-review-develop.yml`）、リリースPRを作るときに対象issueぶん集められている
+  （`reusable-release-develop-to-main.yml`）ので、画面は詳細APIが既に返している`body`を
+  parseするだけ。**同じ表は本文にもそのまま出る**が、mainへ出すかを決める人が最初に知りたい
+  「何件のうち何件が問題なしか」へ辿り着くのに本文をスクロールさせないため、本文より前に
+  内訳の帯を置いている（自動マージされなかった理由を本文と別に出しているのと同じ考え方）。
+  見出しを持たないPRではparseがnullを返し、何も出ない。書式は3つのワークフロー・プロンプトと
+  またがる契約で、`scripts/check-review-verdict-marker.sh`がCIで突き合わせる
+  （[docs/multi-agent/release.md](multi-agent/release.md)「「何がどこまで検証されたか」を
+  リリースPRに載せる」）。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、
@@ -2528,8 +2575,10 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒
-  間隔**（それ以外は60秒）。押してから起動が始まるまでポーリング間隔ぶん待つため、その間の
-  状態が見えないと「押しても何も起きていない」ようにしか見えない。画面とAPIで判定が分かれない
+  間隔**（それ以外は20秒。#1439でActionsの実行状況ポーリングと揃えた）。押してから起動が
+  始まるまでポーリング間隔ぶん待つため、その間の状態が見えないと「押しても何も起きていない」
+  ようにしか見えない。**押した本人の画面はポーリングを待たない**——`enqueue`が応答のジョブを
+  その場で状態へ足す。画面とAPIで判定が分かれない
   よう、選べない理由は`lib/dispatch/dispatch-job.ts`の純粋関数を両者が共有する（同ファイルは
   Prismaに触れないため、クライアントコンポーネントからimportできる。`lib/dispatch/jobs.ts`は
   できない）。
@@ -2540,6 +2589,18 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
   `owner/repo#番号`が入るunique列）を1本引いて`Issue.dispatchPendingAt`へ合流させ、
   振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
   **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
+  - **振り分けだけでは、行を見ても何が起きているか読めない**（#2449）。移した先で行の見た目は
+    押す前とまったく同じで、右上の円グラフ（`WorkflowStepBadge`）はStatusが`Ready`だと
+    `getWorkflowStepIndex`がnullを返して何も描かない。そこで**同じ位置・同じ18pxの円**で
+    「順番待ち ◯番目」「起動中」を出す（`components/dashboard/workflow-status-steps.tsx`の
+    `QueueStepBadge`。材料は`lib/dispatch/issue-queue-state.ts`が`GET /api/dispatch`の
+    ジョブから組み、DBもAPIも増やさない）。**番号の並びは払い出し・実行キューと同じ**
+    （`queuePriority`降順→`createdAt`昇順）で、ここだけ別にすると「先頭へ上げる」（#1541）を
+    押した結果が一覧に映らない。**回すのは起動中だけ**にして、順番待ちは破線をゆっくり
+    明滅させる——回すと`isWorkflowBadgeSpinning`が回している行（実際に作業が進んでいる行）と
+    見分けが付かなくなる。**円は2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
+    `queue`を渡して添える字（「サブPC・順番待ち 2番目」）にし、どちらを出すかは並べる側
+    （`issue-list.tsx`の`renderIssueRow`）が決める。
   同じく**質問Issueは「未着手」「実行中」ではなく専用の「質問」ビューに出す**（#1514）。質問Issueは
   Projectに載らずStatusが常に`Ready`扱いになり、回答を読んで承認した後は`00.check-user`も外れるため、
   ビューが無いとcloseするまで「未着手」に居座る。判定材料はタイトル接頭辞

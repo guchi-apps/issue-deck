@@ -1,9 +1,13 @@
-import { Check, CircleAlert, MessageCircleQuestion, Minus } from "lucide-react";
+import { Check, CircleAlert, Hourglass, MessageCircleQuestion, Minus } from "lucide-react";
 
 import {
   describeIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
+import {
+  describeIssueQueueState,
+  type IssueQueueState,
+} from "@/lib/dispatch/issue-queue-state";
 import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
@@ -99,6 +103,29 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * **省略時は従来どおり**、確認待ちの間は回さない。
    */
   checkUserRunning?: boolean;
+  /**
+   * 実行が始まる前の状態（#2449。`buildIssueQueueStates`の結果）。無ければnull。
+   *
+   * **円を2つ並べないための口**。進捗Statusが進んでいるIssueを積み直した場合、この円は
+   * すでに描かれているので、隣に`QueueStepBadge`をもう1つ出すと同じ行に円が2つ並ぶ。
+   * 待っていることは添える字（「サブPC・順番待ち 2番目」）で言う。
+   */
+  queue?: IssueQueueState | null;
+  /**
+   * 順番待ちが進まない理由（`describeDispatchJobWaitReason`の結果）。ツールチップに出す。
+   * 上限にもメモリにも掛かっていない普通の待ちではnull。
+   */
+  queueWaitReason?: string | null;
+};
+
+/**
+ * 実行が始まる前のバッジ（#2449）。**進捗Statusを持たない（＝`WorkflowStepBadge`が
+ * 何も描かない）行だけに出す。**
+ */
+type QueueStepBadgeProps = {
+  queue: IssueQueueState;
+  /** 順番待ちが進まない理由（`describeDispatchJobWaitReason`の結果）。無ければnull */
+  waitReason?: string | null;
 };
 
 const BADGE_SIZE = 18;
@@ -132,6 +159,8 @@ export function WorkflowStepBadge({
   session = null,
   now = null,
   checkUserRunning = false,
+  queue = null,
+  queueWaitReason = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -179,8 +208,12 @@ export function WorkflowStepBadge({
     executionTarget && !executionTarget.expectsActionsRun
       ? describeIssueExecutionTarget(executionTarget)
       : null;
+  // 実行が始まる前（#2449）。**セッションの様子より優先する**——待っている間のセッションは
+  // 前回の実行の残骸で、「終了しています」と出したまま次の実行を待たせると、いま何を待って
+  // いるのかが読めない
+  const queueLabel = queue ? describeIssueQueueState(queue) : null;
   // 実行先とセッションの様子は両方出す（例:「サブPC・入力待ち」）。どちらが欠けても意味が変わる
-  const localSuffix = [targetLabel, sessionLabel].filter(Boolean).join("・") || null;
+  const localSuffix = [targetLabel, queueLabel ?? sessionLabel].filter(Boolean).join("・") || null;
   const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
   const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
@@ -201,7 +234,7 @@ export function WorkflowStepBadge({
               : localSuffix
                 ? `（${localSuffix}）`
                 : ""
-      }`}
+      }${queueWaitReason ? ` ${queueWaitReason}` : ""}`}
       className="flex min-w-0 shrink-0 items-center gap-1.5"
     >
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{stepText}</span>
@@ -261,6 +294,86 @@ export function WorkflowStepBadge({
         {showQaAnswerPending && (
           <span className="absolute inset-0 flex items-center justify-center">
             <MessageCircleQuestion className="size-2.5 text-background" />
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * 実行が始まる前（順番待ち・起動中）を、進捗の円グラフと同じ位置・同じ大きさで示す（#2449）。
+ *
+ * 積んだ直後のIssueは進捗Statusが`Ready`のままで`WorkflowStepBadge`が何も描かないため、
+ * 一覧の行は押す前とまったく同じに見えていた（振り分けだけは#1347で「実行中」ビューへ
+ * 移している）。**出すのはその穴を埋めるためだけ**で、Statusが進んだ行では
+ * `WorkflowStepBadge`が添える字として言う（円を2つ並べない。
+ * `docs/code-map.md`「同じ状態を2か所で言わせない」）。
+ *
+ * 見分け方は外周の動きに寄せてある。
+ *
+ * - **順番待ちは回さない。** 破線の輪をゆっくり明滅させるだけにする。回すと、実際に作業が
+ *   進んでいる行（`isWorkflowBadgeSpinning`）と一覧の上で区別が付かなくなる
+ * - **起動中は`WorkflowStepBadge`と同じ形で回す**（実線のトラック＋半周ぶんの弧。#2358）。
+ *   中の円は塗らない——まだ1段も進んでいないので、進捗としては0
+ */
+export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps) {
+  const isStarting = queue.phase === "starting";
+  const label = describeIssueQueueState(queue);
+  // 起動中はこれから走るものなので進捗と同じ系統（primary）、順番待ちは待たされているだけで
+  // 何も起きていないので、注意を引かない`muted-foreground`にする
+  const accentColorClass = isStarting ? "text-primary" : "text-muted-foreground";
+
+  return (
+    <span
+      // 待たされている理由が分かるならそれを、分からなければ「そのうち始まる」ことを言う
+      // （「順番待ち」だけだと、正常に待っているのかpollerが落ちているのかを区別できない。#1394）
+      title={`${label}${
+        waitReason ? `。${waitReason}` : isStarting ? "" : "。サブPCが順に起動します"
+      }`}
+      className="flex min-w-0 shrink-0 items-center gap-1.5"
+    >
+      <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{label}</span>
+      <span
+        className="relative flex shrink-0 items-center justify-center"
+        style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
+      >
+        {isStarting ? (
+          <>
+            <span
+              aria-hidden="true"
+              className="absolute rounded-full border-[2.5px] border-primary/25"
+              style={{ inset: -4 }}
+            />
+            <span
+              aria-hidden="true"
+              className="absolute animate-spin rounded-full border-[2.5px] border-transparent border-t-primary border-r-primary"
+              style={{ inset: -4 }}
+            />
+          </>
+        ) : (
+          // 破線＋明滅。`animate-pulse`は既定で2秒周期のゆっくりした明滅で、回転と違って
+          // 「進んでいる」とは読めない
+          <span
+            aria-hidden="true"
+            className="absolute animate-pulse rounded-full border-[2.5px] border-dashed border-muted-foreground/55"
+            style={{ inset: -4 }}
+          />
+        )}
+        <span
+          aria-hidden="true"
+          className={cn("block rounded-full", accentColorClass)}
+          style={{
+            width: BADGE_SIZE,
+            height: BADGE_SIZE,
+            // 進捗は0段。`WorkflowStepBadge`の未達部分と同じ濃さで塗り、同じ円の仲間だと
+            // 分かるようにする
+            background: "color-mix(in oklch, currentColor 15%, transparent)",
+          }}
+        />
+        {!isStarting && (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <Hourglass className="size-2.5 text-muted-foreground" />
           </span>
         )}
       </span>
