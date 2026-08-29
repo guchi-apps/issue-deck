@@ -228,7 +228,8 @@ resolve_target() {
   # **ベース値がブラウザのブロック対象なら繰り上げる**（#2466）。dayspanの帯は6000で、6000は
   # X11用としてChrome・Firefox・Safariが既定で拒否する（`ERR_UNSAFE_PORT`）。待ち受けが正しくても
   # 案内するURLを開けないので、ここで開けるポートへ寄せる（判定は scripts/lib/dev-server.sh）。
-  # Issueごとのセッションは「ベース値 + Issue番号」で1以上ずれるため、この繰り上げには当たらない。
+  # Issueごとのセッション（ベース値 + Issue番号）も同じ判定を通る（#2470。
+  # `dev_server_port_for_issue`）。当たるのは6000だけではないため、そちらにも繰り上げが要る。
   port_base="${ISSUE_DECK_DEV_PORT_BASE:-$(local_repo_port_base "$full_name" || echo 3000)}"
   default_port="$(dev_server_browser_safe_port "$((port_base + 0))")"
   DEV_PORT="${ISSUE_DECK_DEVELOP_DEV_PORT:-$default_port}"

@@ -437,8 +437,17 @@ else
     DEV_PORT_TAKEN=0
     ACTUAL_PORTS="$(dev_server_listening_ports_for_worktree "$PWD" | tr '\n' ' ')"
     ACTUAL_PORTS="${ACTUAL_PORTS% }"
+    # **掴めない理由がもう1つある**（#2470）。ブラウザがブロックするポート（`6566`・`10080`など）に
+    # 当たったIssueのポートは繰り上がり、繰り上げ先は同じ帯の別Issueのポートと重なる。相手が先に
+    # 起動していると、`PORT`は正しく渡っているのに掴めない。原因が違えば直し方も違うので分けて出す。
+    PORT_OWNERS="$(dev_server_port_owner_worktrees "$DEV_PORT" "$PWD" | tr '\n' ' ')"
+    PORT_OWNERS="${PORT_OWNERS% }"
     DEV_PORT_WARNING="#$ISSUE_NUMBER: 警告: 開発サーバーがポート $DEV_PORT を掴んでいません"
-    if [[ -n "$ACTUAL_PORTS" ]]; then
+    if [[ -n "$PORT_OWNERS" ]]; then
+      DEV_PORT_WARNING+="（別のworktreeが掴んでいます: $PORT_OWNERS"
+      [[ -n "$ACTUAL_PORTS" ]] && DEV_PORT_WARNING+=" / このセッションの実際の待ち受け: $ACTUAL_PORTS"
+      DEV_PORT_WARNING+="）。ブラウザがブロックするポートを繰り上げた結果、別Issueのポートと重なっている可能性があります（#2470）。"
+    elif [[ -n "$ACTUAL_PORTS" ]]; then
       DEV_PORT_WARNING+="（実際の待ち受け: $ACTUAL_PORTS）。このリポジトリの dev スクリプトが環境変数 PORT を見ていない可能性があります。"
     else
       DEV_PORT_WARNING+="（待ち受けが1つも見つかりません）。起動に失敗しているかもしれません。ログを確認してください: $DEV_LOG"

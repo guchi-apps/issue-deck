@@ -463,7 +463,16 @@ prepare_issue() {
   # 起動経路によって別のポートになる。1台のマシンに複数リポジトリのセッションが常駐する
   # サブPCでは、そのずれがそのまま他リポジトリの帯との衝突になる。帯の一覧は
   # docs/multi-agent/local-quick-start.md を参照。
-  DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
+  #
+  # **採番は`dev_server_port_for_issue`に任せる**（#2470）。「ベース値 + Issue番号」がブラウザの
+  # ブロック対象（`6566`・`10080`など）に当たる場合の繰り上げを、採番する側と止める側
+  # （`--recreate`前の`remove_worktree`・cleanup-worktrees.sh）で同じ計算にするため。ここで
+  # 自前で足すと、繰り上がったセッションを止める側が見つけられなくなる。
+  DEV_PORT_NATURAL=$(( ${ISSUE_DECK_DEV_PORT_BASE:-4000} + n ))
+  DEV_PORT="$(dev_server_port_for_issue "$n")"
+  if [[ "$DEV_PORT" != "$DEV_PORT_NATURAL" ]]; then
+    echo "#$n: 注記: ポート $DEV_PORT_NATURAL はブラウザが接続を拒否するため、$DEV_PORT を使います（#2470）。"
+  fi
   # **envファイルへの書き込みは補助**（#2464）。ポートの受け渡しの本体は環境変数`PORT`で、
   # run-issue-session.shがexportする。ここはissue-deck自身のworktree（必ず`.env.local`を持つ）
   # 向けで、手で`pnpm dev`を叩き直す経路のために書いておく。

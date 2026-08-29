@@ -44,6 +44,10 @@ export const MAX_LOCAL_PORT_BASE = 60000;
  * `DEV_SERVER_BROWSER_BLOCKED_PORTS`）。帯を払い出すのはこちら、実際に起動するのはあちらで、
  * 片方だけ直すと「払い出せた帯なのに確認環境が開けない」という形でずれる。突き合わせは
  * `local-port-bands.test.ts`が行うので、**変えるときは両方を揃える**。
+ *
+ * あちらは確認環境（「ベース値 + 0」）だけでなく、Issueごとのセッション（「ベース値 + Issue番号」）
+ * にも同じ繰り上げを掛ける（#2470。`dev_server_port_for_issue`）。ブロック対象は6000だけでは
+ * ないため、`6566`（dayspan #566）・`10080`（clip-hive #80）のように当たりうる。
  */
 export const BROWSER_BLOCKED_PORTS: readonly number[] = [
   1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697,
