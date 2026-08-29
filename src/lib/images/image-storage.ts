@@ -16,9 +16,13 @@ export const UPLOADED_IMAGE_DIR = path.join(process.cwd(), "uploads", "images");
 /**
  * 自動削除がいったん退避させる先（#2475）。
  *
- * **画像の置き場の中に置く。** 一覧（`readdir`）はディレクトリを`isFile()`で弾き、配信は
- * UUID形式でないファイル名を404にするので、既存の受け口を直さずに共存できる。
+ * **画像の置き場の中に置く。** 一覧（`readdir`）はディレクトリを`isFile()`で弾き、
+ * `.trash`という名前自体もUUID形式ではないので、一覧にも配信にも出てこない。
  * ドットで始めているのは、手でディレクトリを覗いたときに画像と紛れないようにするため。
+ *
+ * **ただし配信（`GET /api/issues/images/[filename]`）はここも読む。** 移した瞬間に404に
+ * なるのでは、「いきなり消さずゴミ箱へ移す」が誤判定の保険にならない（貼り付け先の画像が
+ * その場で壊れ、完全削除までの猶予が表示の上では意味を持たなくなる）。
  */
 export const UPLOADED_IMAGE_TRASH_DIR = path.join(UPLOADED_IMAGE_DIR, ".trash");
 
