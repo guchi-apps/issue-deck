@@ -1606,6 +1606,19 @@ export function POST(request: NextRequest) {
   `deploy.yml`が無いリポジトリ、取得した30件より古いリリースしか関係しないPR、15分待っても実行が
   現れないリポジトリでは、「未反映」と言い切らずバッジごと消す（ブランチ画面と同じ方針）。
   スマホのPR詳細は同じ`PullRequestDetail`を使うため、**片方の画面にだけ出す実装にしない**。
+- **リリースPRの「コードレビューの検証結果」は、PR本文を読み直して出す**（#2448。
+  [`lib/github/release-verification.ts`](../src/lib/github/release-verification.ts)・
+  [`verification-summary-panel.tsx`](../src/components/dashboard/verification-summary-panel.tsx)）。
+  **取得は増えない**——判定はdevelop向けPRの本文へ`## 検証結果`として残り
+  （`reusable-claude-review-develop.yml`）、リリースPRを作るときに対象issueぶん集められている
+  （`reusable-release-develop-to-main.yml`）ので、画面は詳細APIが既に返している`body`を
+  parseするだけ。**同じ表は本文にもそのまま出る**が、mainへ出すかを決める人が最初に知りたい
+  「何件のうち何件が問題なしか」へ辿り着くのに本文をスクロールさせないため、本文より前に
+  内訳の帯を置いている（自動マージされなかった理由を本文と別に出しているのと同じ考え方）。
+  見出しを持たないPRではparseがnullを返し、何も出ない。書式は3つのワークフロー・プロンプトと
+  またがる契約で、`scripts/check-review-verdict-marker.sh`がCIで突き合わせる
+  （[docs/multi-agent/release.md](multi-agent/release.md)「「何がどこまで検証されたか」を
+  リリースPRに載せる」）。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、

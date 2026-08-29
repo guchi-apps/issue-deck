@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
@@ -337,5 +337,65 @@ describe("PullRequestDetail", () => {
     });
     expect(screen.getByText("Pull Requestを開けませんでした")).toBeTruthy();
     expect(screen.getByText("このPull Requestは見つかりませんでした")).toBeTruthy();
+  });
+
+  // #2448。本文は`reusable-release-develop-to-main.yml`が書く形をそのまま写している
+  describe("コードレビューの検証結果（#2448）", () => {
+    const RELEASE_BODY = `developの内容をv4.49.0としてmainへリリースします。
+
+## 対象issue
+- #2441 レビューのゲートを直す
+- #2438 更新履歴の文言を短くする
+
+## コードレビューの検証結果
+
+| Issue | PR | 自動レビュー | 機械的リスク判定 |
+| --- | --- | --- | --- |
+| #2441 | #2446 | ✅ 問題なし | 該当なし |
+| #2438 | #2450 | — 実施なし（低リスク・小規模） | 該当なし |
+| #2432 | — | ? 記録なし | ? 記録なし |
+
+## 注意点
+- このPRはGitHub Actionsが自動作成しました
+`;
+
+    // 同じ表は本文にもそのまま出る（Markdownとして描かれる）ので、パネルの中だけを見る
+    function panel() {
+      return within(screen.getByTestId("verification-summary"));
+    }
+
+    it("リリースPRでは内訳と行を出す", () => {
+      renderDetail({ detail: makeDetail({ body: RELEASE_BODY }) });
+
+      const text = screen.getByTestId("verification-summary").textContent ?? "";
+
+      // 内訳（先に読めること）と、行ごとの判定の両方が出る
+      expect(text).toContain("3 件のIssue");
+      expect(text).toContain("1問題なし");
+      expect(text).toContain("1レビューなし");
+      expect(text).toContain("実施なし（低リスク・小規模）");
+      // 記録が無い行も残す（検証されていないことが読めなくなるため）
+      expect(text).toContain("記録なし");
+      // 対象issue一覧からタイトルを添える
+      expect(panel().getByText("レビューのゲートを直す")).toBeTruthy();
+    });
+
+    it("Issue・PRへのリンクを張る（PRが見つからなかった行はリンクにしない）", () => {
+      renderDetail({ detail: makeDetail({ body: RELEASE_BODY }) });
+
+      expect(panel().getByRole("link", { name: "#2441" }).getAttribute("href")).toBe(
+        "https://github.com/guchi-apps/issue-deck/issues/2441",
+      );
+      expect(panel().getByRole("link", { name: "PR #2446" }).getAttribute("href")).toBe(
+        "https://github.com/guchi-apps/issue-deck/pull/2446",
+      );
+      expect(panel().queryByRole("link", { name: "PR —" })).toBeNull();
+      expect(panel().getByText("PR —")).toBeTruthy();
+    });
+
+    it("検証結果を持たないPRではパネルを出さない", () => {
+      renderDetail();
+      expect(screen.queryByTestId("verification-summary")).toBeNull();
+    });
   });
 });

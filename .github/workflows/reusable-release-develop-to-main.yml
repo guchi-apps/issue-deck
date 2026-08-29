@@ -576,6 +576,80 @@ jobs:
           gh pr merge "$BRANCH" --auto --merge \
             || echo "auto-mergeの有効化に失敗しました。CI通過後に手動でマージしてください（アプリのリリース画面のリンクからマージできます）。"
 
+      # 「本番へ出す中身が、どこまで自動レビューで検証されているのか」をリリースPRの本文に載せる
+      # (#2448)。判定そのものはdevelop向けPRの本文へ`## 検証結果`として残っている
+      # (reusable-claude-review-develop.ymlの「検証結果をPR本文へ記録する」)。ここではそれを
+      # 対象issueぶん集めて1つの表にするだけで、レビューを回し直すことはしない。
+      #
+      # **記録が無くても表は作る。** 共有ワークフローの参照タグを配る前にマージされたPRや、
+      # ブランチ名が`issue-<番号>`でないPRには節が無い。その行は「記録なし」と出す——
+      # 表ごと消すと、検証されていないことも読めなくなる。
+      - name: 対象issueの検証結果を集計する
+        if: steps.state.outputs.need_main_pr == 'true'
+        # 記録は補助情報なので、集計に失敗してもリリースPRの作成は止めない
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          OUT=/tmp/release-verification.md
+          : > "$OUT"
+
+          # 対象issue一覧は`- #<番号> <タイトル>`の行。取得できなかったときの注記
+          # （`（issue-deckへ問い合わせできず…）`）はこの形にならないので拾わない。
+          NUMBERS="$(sed -nE 's/^- #([0-9]+).*/\1/p' /tmp/release-issue-lines.txt || true)"
+          if [ -z "$NUMBERS" ]; then
+            echo "対象issueが無いため、検証結果の表は作りません"
+            exit 0
+          fi
+
+          {
+            echo "## コードレビューの検証結果"
+            echo
+            echo "developへ入れる前に各PRで行った自動レビューの判定です（#2448）。判定の根拠は各PRのレビューコメントにあります。"
+            echo
+            echo "| Issue | PR | 自動レビュー | 機械的リスク判定 |"
+            echo "| --- | --- | --- | --- |"
+          } > "$OUT"
+
+          for NUM in $NUMBERS; do
+            PR_JSON="$(gh pr list --state merged --base develop --head "issue-${NUM}" --limit 1 \
+              --json number,body --jq '.[0] // empty' 2>/dev/null || true)"
+            PR_CELL="—"
+            REVIEW=""
+            RISK=""
+            if [ -n "$PR_JSON" ]; then
+              PR_CELL="#$(printf '%s' "$PR_JSON" | jq -r '.number')"
+              MARKER="$(printf '%s' "$PR_JSON" | jq -r '.body // ""' \
+                | grep -oE '<!-- issue-deck-verification:start [^>]*-->' | tail -n 1 || true)"
+              if [ -n "$MARKER" ]; then
+                REVIEW="$(printf '%s' "$MARKER" | sed -nE 's/.*review=([a-z-]+).*/\1/p')"
+                RISK="$(printf '%s' "$MARKER" | sed -nE 's/.*risk=([a-z-]+).*/\1/p')"
+              fi
+            fi
+            # 文言はreusable-claude-review-develop.yml側と対。画面
+            # (src/lib/github/release-verification.ts)はこの列の先頭の記号で判定を読む
+            case "$REVIEW" in
+              lgtm) REVIEW_CELL="✅ 問題なし" ;;
+              needs-check) REVIEW_CELL="⚠️ 要確認" ;;
+              changes-requested) REVIEW_CELL="❌ 要修正" ;;
+              skipped) REVIEW_CELL="— 実施なし（低リスク・小規模）" ;;
+              unavailable) REVIEW_CELL="? 判定を取得できず" ;;
+              *) REVIEW_CELL="? 記録なし" ;;
+            esac
+            case "$RISK" in
+              none) RISK_CELL="該当なし" ;;
+              hit) RISK_CELL="⚠️ 該当あり" ;;
+              *) RISK_CELL="? 記録なし" ;;
+            esac
+            echo "| #${NUM} | ${PR_CELL} | ${REVIEW_CELL} | ${RISK_CELL} |" >> "$OUT"
+          done
+
+          echo "検証結果の表:"
+          cat "$OUT"
+
       - name: develop→mainのPRを作成する
         if: steps.state.outputs.need_main_pr == 'true'
         env:
@@ -632,6 +706,12 @@ jobs:
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt
             echo
+            # 直前のステップが作った検証結果の表（#2448）。対象issueが取れなかった場合や
+            # 集計に失敗した場合は空なので、その節ごと出さない
+            if [ -s /tmp/release-verification.md ]; then
+              cat /tmp/release-verification.md
+              echo
+            fi
             echo "## 注意点"
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
             echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。ユーザーが内容を確認のうえマージしてください"

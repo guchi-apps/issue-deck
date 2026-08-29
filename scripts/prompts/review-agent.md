@@ -55,7 +55,35 @@
    - 対象カテゴリ: 認証・認可／DBスキーマ変更・マイグレーション／本番環境の設定／GitHub Actionsやデプロイ設定／Secretsや環境変数／課金・決済／大規模な依存関係の更新
    - 一次判定（機械的）: `git diff --name-only develop...HEAD` のパスが `prisma/migrations/**`・`.env*`・`.github/workflows/**`・`**/auth/**`・`package.json`の依存メジャーバージョン変更等に該当するか
    - 二次判定（意味的）: パスパターンに引っかからなくても、diffの内容自体が上記カテゴリに実質該当しないか読解して判断する
-4. 該当する場合
+4. **検証結果をPR本文へ記録する**（#2448。該当・非該当のどちらでも行う）
+   - `gh pr view <PR番号> --json body --jq .body`で本文を取り出し、`<!-- issue-deck-verification:start`
+     から`<!-- issue-deck-verification:end -->`までの節が既にあれば取り除いたうえで、末尾へ下の節を
+     足して`gh pr edit <PR番号> --body-file <一時ファイル>`で書き戻す（**追記ではなく置き換え**）
+   - `review=`・`risk=`に書く値と、箇条書きの文言は次の対応から選ぶ。**develop→mainのリリースPRが
+     この節を対象issueぶん集めて「何がどこまで検証されたか」の表にする**ので、勝手な語を書かない
+
+     | `review=` | 箇条書きに書く文言 | 書く場面 |
+     | --- | --- | --- |
+     | `lgtm` | `✅ 問題なし（LGTM）` | 総評がLGTMで、自動マージ不可カテゴリにも非該当 |
+     | `needs-check` | `⚠️ 要確認` | 総評が要確認、または自動マージ不可カテゴリに該当 |
+     | `changes-requested` | `❌ 要修正` | 総評が要修正 |
+
+     | `risk=` | 箇条書きに書く文言 |
+     | --- | --- |
+     | `none` | `該当なし` |
+     | `hit` | `⚠️ 該当あり: <カテゴリ名>` |
+
+   ````
+   <!-- issue-deck-verification:start review=lgtm risk=none -->
+   ## 検証結果
+
+   - 自動レビュー: ✅ 問題なし（LGTM）
+   - 機械的リスク判定: 該当なし
+   - ユーザーの確認: 不要
+   <!-- issue-deck-verification:end -->
+   ````
+
+5. 該当する場合
    - マージしない
    - `gh pr edit <PR番号> --add-label "00.check-user"` を付与する（進捗（Project Status）は変更しない）。
      対応Issueが特定できる場合は、Issue側にも
@@ -74,7 +102,7 @@
      `<!-- issue-deck-agent:reviewer -->`を**両方**付ける（前者が理由の読み取り、
      後者が発言者の表示に使われる）
    - 次のPRの処理に進む
-5. 非該当の場合
+6. 非該当の場合
    - `gh pr merge <PR番号> --merge --delete-branch` でdevelopへマージする
    - マージ後、`git checkout develop && git pull --ff-only` してから `pnpm lint && pnpm typecheck` を再実行し、問題ないことを確認する
    - 対応Issueの進捗は自分で動かさない。PRマージをトリガーにGitHub Actions（`.github/workflows/issue-labels.yml`）が`Develop PR` → `Develop`を報告する。issueはcloseしない（closeするのは`Done`＝mainへのマージ完了時点で、これも同じワークフローが行う）。**進捗ラベルは#991 Phase 5（#1010）で廃止済み**なので、`gh issue edit`で進捗を付け替えることはできない
