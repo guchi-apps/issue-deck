@@ -79,6 +79,9 @@ async function handleGET(request: NextRequest) {
       .map((item) => ({
         number: item.number,
         title: item.title,
+        // 運び手を決めるのは「内容を凍結した時刻」なので、headと作成時刻まで渡す（#2489）
+        headRef: item.head.ref,
+        createdAt: item.created_at,
         mergedAt: item.merged_at,
       }));
 

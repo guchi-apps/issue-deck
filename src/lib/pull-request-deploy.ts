@@ -1,4 +1,9 @@
-import { MAIN_BRANCH, releaseVersionFromTitle, resolveDeployState } from "@/lib/branch-flow";
+import {
+  MAIN_BRANCH,
+  releaseContentFrozenAt,
+  releaseVersionFromTitle,
+  resolveDeployState,
+} from "@/lib/branch-flow";
 import type { BranchFlowDeployRun } from "@/types/branch-flow";
 import type { PullRequestDeployStatus } from "@/types/pull-request";
 
@@ -11,7 +16,21 @@ import type { PullRequestDeployStatus } from "@/types/pull-request";
 export type MainMergedPullRequest = {
   number: number;
   title: string;
+  /**
+   * headブランチ名。`release-main/vX.Y.Z`なら**PRを作った時点で内容が凍結されている**
+   * （#2117）ため、運び手を決める基準が作成時刻になる（#2489。`releaseContentFrozenAt`）。
+   */
+  headRef: string;
+  /** PRが作られた時刻（ISO8601） */
+  createdAt: string;
   /** mainへマージされた時刻（ISO8601） */
+  mergedAt: string;
+};
+
+/** その変更を本番へ運んだリリース。判定に使わないフィールドは持たない */
+type ReleaseCarrier = {
+  number: number;
+  title: string;
   mergedAt: string;
 };
 
@@ -33,8 +52,9 @@ export type DeployTargetPullRequest = {
  * PR1件へ適用できる形で切り出した。デプロイの成否は`resolveDeployState`をそのまま通すので、
  * 2つの画面で結論がずれない。
  *
- * 前提は**「作業PRがdevelopへ入った後、最初にmainへマージされたPRがその変更を運んだ」**こと
- * （リリースPRはマージ時点のdevelopの先端を運ぶため）。この前提から外れるもの——`releases`の
+ * 前提は**「作業PRがdevelopへ入った後、最初に内容を凍結したリリースPRがその変更を運んだ」**こと
+ * （#2489。`release-main/vX.Y.Z`をheadにするリリースPRは作成時点で内容が止まっており、その後に
+ * developへ入った作業は次のリリースへ回る。#2117）。この前提から外れるもの——`releases`の
  * 範囲より古いPR——は「判定できない」として`null`を返す。
  *
  * **判定できないときに「未反映」と言わない。** 間違った状態を出すより何も言わない方がよい、
@@ -109,14 +129,21 @@ export function resolvePullRequestDeployStatus({
   };
 }
 
-/** マージ時刻より後に、最初にmainへ入ったPR（＝その変更を運んだリリース）を探す */
+/**
+ * developへ入った後、最初に内容を凍結したリリース（＝その変更を運んだリリース）を探す（#2489）。
+ *
+ * **マージ時刻ではなく凍結時刻で比べる。** ブランチ画面（`resolveReleaseState`）と同じ
+ * `releaseContentFrozenAt`を通すので、2つの画面で結論がずれない。
+ */
 function findCarrier(
   sortedReleases: MainMergedPullRequest[],
   mergedAtIso: string,
-): MainMergedPullRequest | null {
+): ReleaseCarrier | null {
   const mergedAt = new Date(mergedAtIso).getTime();
   return (
-    sortedReleases.find((release) => new Date(release.mergedAt).getTime() > mergedAt) ?? null
+    sortedReleases.find(
+      (release) => new Date(releaseContentFrozenAt(release)).getTime() > mergedAt,
+    ) ?? null
   );
 }
 

@@ -22,10 +22,15 @@ function target(overrides: Partial<DeployTargetPullRequest> = {}): DeployTargetP
 }
 
 function release(overrides: Partial<MainMergedPullRequest> = {}): MainMergedPullRequest {
+  const mergedAt = overrides.mergedAt ?? "2026-08-16T11:00:00Z";
   return {
     number: 100,
     title: "v4.1.0をmainへリリースする",
-    mergedAt: "2026-08-16T11:00:00Z",
+    headRef: "release-main/v4.1.0",
+    // 既定は凍結時刻＝マージ時刻。「開いている間にdevelopへ入った作業」を扱うテストだけ
+    // `createdAt`を明示して窓を作る（#2489）
+    createdAt: mergedAt,
+    mergedAt,
     ...overrides,
   };
 }
@@ -85,6 +90,36 @@ describe("resolvePullRequestDeployStatus", () => {
       releasePullRequestNumber: 100,
       deployRunUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     });
+  });
+
+  // #2489。リリースPRは作成時点で内容を凍結している（#2117）ので、開いている間にdevelopへ
+  // 入った作業はその版には乗らない。マージ時刻で比べていたころは「本番反映」と出ていた
+  it("リリースPRが開いている間にdevelopへ入ったPRは、その版で運ばれたと判定しない", () => {
+    const status = resolvePullRequestDeployStatus({
+      pullRequest: target({ mergedAt: "2026-08-16T10:30:00Z" }),
+      releases: [
+        release({ createdAt: "2026-08-16T10:00:00Z", mergedAt: "2026-08-16T11:00:00Z" }),
+      ],
+      deployRun: deployRun(),
+      now: NOW,
+    });
+    expect(status).toMatchObject({ kind: "develop-only", version: null });
+  });
+
+  it("headがdevelopのリリースPRは、従来どおりマージ時刻で運び手を決める", () => {
+    const status = resolvePullRequestDeployStatus({
+      pullRequest: target({ mergedAt: "2026-08-16T10:30:00Z" }),
+      releases: [
+        release({
+          headRef: "develop",
+          createdAt: "2026-08-16T10:00:00Z",
+          mergedAt: "2026-08-16T11:00:00Z",
+        }),
+      ],
+      deployRun: deployRun(),
+      now: NOW,
+    });
+    expect(status).toMatchObject({ kind: "deployed", version: "4.1.0" });
   });
 
   it("デプロイが実行中ならrunning", () => {
