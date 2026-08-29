@@ -946,7 +946,7 @@ export function POST(request: NextRequest) {
     作業待ち」の一覧には手作業Issueしか並ばず、そこからは参照先のIssueを1件も引けない。
   - **内訳のホバー吹き出しは付けない**（#1763で削除）。数字がそのまま実行できる件数を指すため、
     同じことを言い直すだけになる。スマホはホバーできず、内訳を読めるのはヘッダーだけ。
-- **要対応の項目は「いまは実施しない」として伏せられる**（#2398。[`lib/snooze.ts`](../src/lib/snooze.ts)）。
+- **Issueとマージ待ちPRは「いまは実施しない」として伏せられる**（#2398・#2456。[`lib/snooze.ts`](../src/lib/snooze.ts)）。
   数週間先まで実施しないと決めた項目を、日時を指定するか手動で解除するまで一覧・件数・通知から
   外す。上の2つ（#2081のCI完了待ち・#2174の実行中）が「いま押せないもの」を機械的に外すのに対し、
   こちらは**人の意思で外す**——それまでは close するしか一覧から減らす手が無く、実施していない
@@ -957,10 +957,35 @@ export function POST(request: NextRequest) {
     外部キーではなく`repositoryId` + `kind` + `number`で指す（マージ待ちPRはDBに行を持たない）。
   - **期限切れの行は消さない。** 効いているかどうかは`isSnoozeActive`が現在時刻を見て決めるので、
     何もしなくても件数と通知へ戻る。掃除の巡回を足していない理由でもある。
-  - **効かせるのは要対応の2ビュー（`check-user`・`manual-step`）だけ**。「すべてのIssue」や進捗の
-    ビューから消すと、伏せたIssueがどこにも出てこなくなる。判定の差し替えは
+  - **効かせるのはIssue一覧の全ビュー**（#2456）。#2398では要対応の2ビュー
+    （`check-user`・`manual-step`）だけに限っていた——「すべてのIssue」や進捗のビューから消すと
+    伏せたIssueがどこにも出てこなくなる、という理由だったが、**日常的に見る一覧から減らないなら
+    保留にした意味が無い**ため覆した。**代わりに、どのビューでも一覧の上の1行から「表示」で
+    開ける**（下記）ので、消えたまま辿れなくなることはない。判定の差し替えは
     `computeNavCountsForFilters`（[`lib/issue-stats.ts`](../src/lib/issue-stats.ts)）1か所で行い、
     一覧・ベル・トースト・Push通知は同じ`lib/snooze.ts`の関数を通る。
+    - **行の時計ボタン（`SnoozeMenu`）もどのビューにも出す。** 伏せたい対象は要対応の一覧に
+      居るとは限らず、目に入ったその場で下げられないと「気になったら下げる」使い方にならない。
+    - **効かせるかどうかの判定は`isSnoozeEnabledForList`（`lib/snooze.ts`）に1つだけ置く。**
+      #2398では同じ`view === "check-user" || view === "manual-step"`が
+      [`issue-list.tsx`](../src/components/dashboard/issue-list.tsx)・
+      [`mobile-issue-list-screen.tsx`](../src/components/dashboard/mobile/mobile-issue-list-screen.tsx)・
+      `issue-stats.ts`の3か所に散っており、#2456で**スマホのヘッダーだけ古い条件のまま残る**
+      ところだった（ヘッダーは`10件`のまま行は9行になる）。範囲を変えるときはここだけ直す。
+    - **オレンジの丸・スピナー（合図）の母集団からも保留中を引く**
+      （[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)の
+      `manualStepAttention`・`questionAttentionIssues`）。行に出る数字は`navCounts`＝保留中を
+      引いた数なのに、合図だけ別に数えていたため、伏せた時点で**「丸は点いているのに一覧は
+      0件」**になる。判定を1か所（`snoozedIssueIds`）から配って、数と合図が同じ集合を読む形に
+      そろえる。
+    - **ヘッダーの内訳を作る関数は、どれも`snoozedCount`を受け取れるようにしておく**
+      （`formatCheckUserListCount`・`formatManualStepListCount`・`formatQuestionListCount`）。
+      3つはフォールバック順で1つだけが採られるため、受け取れない関数が1つでもあると、その
+      ビューでだけ`保留中N件`が消える（#2456で「質問」がそうなっていた）。
+    - **件数を渡す側も全ビューぶんを引く。** スマホのリポジトリ別一覧
+      （[`mobile-repo-issues-screen.tsx`](../src/components/dashboard/mobile/mobile-repo-issues-screen.tsx)）は
+      #2398では保留を受け取っていなかったので、#2456で渡すようにした。渡さないとその画面
+      だけ保留中が並び、同じIssueが画面によって出たり出なかったりする。
   - **消えたことは一覧の1行だけで知らせる**（`describeSnoozeResume`）。件数には足さず、
     「表示」で開くとその場で解除できる——`pullRequestsWaitingForMergeChecks`の1行（#2081）と
     同じ扱いで、完全に消すと「なぜ減ったのか」を画面から読めない。
@@ -2669,6 +2694,30 @@ function during render`）。「期限を過ぎたら元に戻す」のような
   （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
   9時間ずれる
 
+## Radixのポップオーバーをドロップダウンメニューの中に置くと、マウスを動かしただけで閉じる（#2458）
+
+**Radixのメニューは、マウスが乗った項目へフォーカスを移す**（`MenuItem`の`onPointerMove`が
+`item.focus()`を呼ぶ）。メニュー項目をトリガーにしたポップオーバー（`Popover`）を開くと、
+その項目はポップオーバーの外側にあるため、**マウスを少し動かしただけで
+「フォーカスが外へ出た」と判定され、`DismissableLayer`の既定の自動クローズが走る**。
+Issue詳細の⋯メニューの「いまは実施しない」がこれで、パソコンからは選択肢を押す前に必ず
+閉じてしまい、機能ごと使えなくなっていた（スマホは`pointermove`が飛ばないので気づけない）。
+
+- **直し方は`PopoverContent`の`onFocusOutside`で、メニューの中への移動だけ`preventDefault()`する**
+  （[`snooze-menu.tsx`](../src/components/dashboard/snooze-menu.tsx)）。
+  `event.detail.originalEvent.target`が`[data-radix-menu-content]`の中かで見分ける。
+  丸ごと止めると、単独で開いたとき（一覧の行・保留中の帯）にフォーカスが外れて閉じる
+  挙動まで消える
+- **クリックのほうは直さなくてよい。** ポップオーバーの中身はポータルへ出ても**Reactツリー上は
+  メニューの子**なので、`DismissableLayer`の「自分のReactツリーの中か」の判定に引っかかり、
+  親メニューは`pointerdown`で閉じない
+- **選び終えたら親メニューも閉じる。** 項目の`onSelect`で`preventDefault()`してメニューを開いた
+  ままにする作りなので、選択後に閉じるには**親の`DropdownMenu`の開閉を画面側で持つ**
+  （`issue-detail.tsx`・`mobile-issue-detail.tsx`の`isMoreMenuOpen`）
+- **jsdomで再現できる。** `hasPointerCapture`等を補ったうえで、メニュー項目へ
+  `fireEvent.pointerMove(..., { pointerType: "mouse" })`を送るとRadixが`focus()`を呼び、
+  直す前のコードでは選択肢が消える（`issue-detail.render.test.tsx`）
+
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
 **複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
@@ -2688,8 +2737,27 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
 - `GET /api/issues/images/[filename]` … **認証を要求しない。** GitHub.com側のIssue画面からも
-  画像を表示できるようにするため。代わりにUUID形式のファイル名だけを許可して、パストラバーサルと
-  ファイルの列挙を防いでいる。
+  画像を表示できるようにするため。代わりにUUID形式のファイル名だけを許可して、パストラバーサルを
+  防いでいる。**列挙できる受け口はログイン必須の`GET /api/issues/images`（後述）だけ**で、
+  未認証で辿り着けるのはUUIDを知っている画像に限られる。
+- `GET /api/issues/images`（一覧）・`DELETE /api/issues/images/[filename]`（削除）…
+  **どちらもログイン必須**（#2462）。配信だけが未認証なのは「UUIDを知らない人は画像へ辿り着け
+  ない」ことが前提なので、**一覧を未認証にするとその前提が崩れる**。ファイル名の検証は
+  [`lib/uploaded-images.ts`](../src/lib/uploaded-images.ts)の
+  `UPLOADED_IMAGE_FILENAME_PATTERN`が唯一の正で、一覧・配信・削除の3つが同じものを読む
+  （写すと片方だけ緩んだときに防波堤が崩れる）。
+- 画面は設定の「画像」区分（[`settings/images-section.tsx`](../src/components/dashboard/settings/images-section.tsx)）。
+  サムネイルの×で1枚ずつ消す。**削除するのはVPS上の実ファイルだけで、その画像を貼った
+  Issue本文・コメントのMarkdownはGitHub側に残る**（貼り付け先では画像が表示されなくなる）ため、
+  確認ダイアログでそれを伝えてから消す。**一覧に「どのIssueで使っているか」は出さない**——
+  画像に持ち主・貼り付け先の記録が無く、コメント本文もDBに持っていないので「未使用」を正しく
+  判定できず、誤って未使用と出すと消してよいと読めてしまう。
+- **消しても「もう見られない」とは言い切れない。** 配信は`Cache-Control: immutable`で1年
+  キャッシュさせ、GitHub.com側のIssue画面は画像プロキシ越しに表示するため、原本を消しても
+  すでに開いた画面・GitHub側の表示はしばらく残る。確認ダイアログはその前提で文面を書いてある。
+- **サムネイルは原本をそのまま縮めて出している**（配信APIに縮小版を作る経路が無く、1枚10MBまで
+  受け付ける）。一覧は`loading="lazy"`＋表示件数24枚ずつの「さらに表示」で区切ってあり、
+  一覧API自体は全件返す（区切りを画面側に置いているので、古い画像が消せなくなることはない）。
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**

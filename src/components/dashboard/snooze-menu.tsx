@@ -81,11 +81,29 @@ export function SnoozeMenu({
           </Button>
         )}
       </PopoverTrigger>
-      <PopoverContent align={align} className="w-[17rem] p-0">
+      <PopoverContent
+        align={align}
+        className="w-[17rem] p-0"
+        /*
+         * ドロップダウンメニューの中から開いても、マウスを動かしただけで閉じないようにする
+         * （#2458）。Radixのメニューは**マウスが乗った項目へフォーカスを移す**ため
+         * （`MenuItem`の`onPointerMove`が`item.focus()`を呼ぶ）、このポップオーバーからは
+         * 「フォーカスが外へ出た」ように見え、既定の自動クローズが走っていた。
+         *
+         * 見逃すのは**メニューの中へフォーカスが移った場合だけ**。単独で開いたとき
+         * （一覧の行・保留中の帯）に画面の他所へフォーカスが移って閉じる挙動はそのまま残す。
+         */
+        onFocusOutside={(event) => {
+          const target = event.detail.originalEvent.target;
+          if (target instanceof Element && target.closest("[data-radix-menu-content]")) {
+            event.preventDefault();
+          }
+        }}
+      >
         <div className="px-3 pt-3 pb-1.5">
           <p className="text-xs font-semibold">いまは実施しない</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            件数と通知から外します。GitHubのラベルは変わりません。
+            一覧・件数・通知から外します。GitHubのラベルは変わりません。
           </p>
         </div>
         <div className="flex flex-col p-1">

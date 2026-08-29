@@ -37,6 +37,7 @@ import { formatCheckUserListCount } from "@/lib/check-user-attention";
 import { formatQuestionListCount } from "@/lib/question-attention";
 import {
   findActiveIssueSnooze,
+  isSnoozeEnabledForList,
   type SnoozeEntry,
   type SnoozeMap,
   type SnoozeTarget,
@@ -187,10 +188,10 @@ export function MobileIssueListScreen({
   // ビューの件数も、切り替えた後と同じ数字にするため）。
   const pinnedCount = pinned?.count ?? 0;
   // 保留中は一覧から外してあるので、ヘッダーの件数からも外す（#2398）。**判定は`IssueList`と
-  // 同じ`findActiveIssueSnooze`**で、並ぶ行数とヘッダーの数字が食い違わないようにする
+  // 同じ`findActiveIssueSnooze`・同じ`isSnoozeEnabledForList`**で、並ぶ行数とヘッダーの数字が
+  // 食い違わないようにする（#2456で全ビューへ広げたときも、条件はあちらと1か所を共有する）
   const now = useNow();
-  const snoozeEnabled =
-    Boolean(snoozes && onSnooze) && (view === "check-user" || view === "manual-step");
+  const snoozeEnabled = isSnoozeEnabledForList(snoozes, onSnooze);
   const listedIssues = useMemo(
     () =>
       snoozeEnabled && snoozes
@@ -215,7 +216,7 @@ export function MobileIssueListScreen({
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(listedIssues, prerequisiteReadiness, snoozedCount)
       : null) ??
-    (view === "question" ? formatQuestionListCount(listedIssues, listedCount) : null) ??
+    (view === "question" ? formatQuestionListCount(listedIssues, listedCount, snoozedCount) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedCount) ??
     `${listedCount}件`;
   const displayNavCounts = useMemo(() => {

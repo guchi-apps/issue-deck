@@ -1,6 +1,15 @@
 "use client";
 
-import { Check, Copy, ExternalLink, Loader2, MonitorPlay, RefreshCw, Square } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  ExternalLink,
+  Loader2,
+  MonitorPlay,
+  RefreshCw,
+  Square,
+} from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -14,6 +23,7 @@ import {
   describePreviewIdleStop,
   describePreviewJob,
   describePreviewRejection,
+  selectHostWidePreviewRejection,
   selectPreviewJob,
   type PreviewRepositoryRow,
 } from "@/lib/dispatch/preview-server";
@@ -117,6 +127,10 @@ function HostPreview({
   // 前を上書きする）。`resolvePreviewRejection`と同じ判定を画面でも使う
   const hasQueuedJob = jobRow?.tone === "running";
   const rows = buildPreviewRepositoryRows({ host, hasQueuedJob });
+  // リポジトリを選び直しても変わらない理由（#2455）。**行ごとではなくここへ1回だけ出す**——
+  // 行に置くと申告しているリポジトリの数だけ同じ文言が並び、押す場所まで書いた文言が
+  // リポジトリ名の幅を潰す。スマホ（`compact`）でも出す（行の`title`はタッチでは読めない）
+  const hostWideRejection = selectHostWidePreviewRejection(rows);
 
   async function request(repositoryFullName: string, action: PreviewAction) {
     if (!onRequestPreview) return;
@@ -142,6 +156,19 @@ function HostPreview({
         <p className="text-xs text-muted-foreground">
           developの最新をサブPCで動かし、mainへ出す前の状態を実物の画面で確かめます。
           tailnetのURLはスマホからそのまま開けます。
+        </p>
+      )}
+
+      {/* この画面のどのリポジトリも押せない理由（#2455）。**押す場所まで書いて先頭に出す** */}
+      {hostWideRejection && (
+        <p
+          className="flex items-start gap-1.5 rounded-md bg-amber-500/15 p-2.5 text-xs text-amber-700 ring-1 ring-inset ring-amber-500/40 dark:text-amber-400"
+          role="status"
+        >
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 break-words">
+            {describePreviewRejection(hostWideRejection)}
+          </span>
         </p>
       )}
 
@@ -195,6 +222,8 @@ function HostPreview({
               key={row.repositoryFullName}
               row={row}
               compact={compact}
+              // ホスト全体の理由は見出しの下に1回だけ出したので、行では繰り返さない（#2455）
+              hideRejectionText={hostWideRejection !== null}
               pending={pending === "start"}
               disabled={!onRequestPreview}
               onStart={() => request(row.repositoryFullName, "start")}
@@ -378,12 +407,15 @@ function UrlRow({
 function RepositoryRow({
   row,
   compact,
+  hideRejectionText,
   pending,
   disabled,
   onStart,
 }: {
   row: PreviewRepositoryRow;
   compact: boolean;
+  /** ホスト全体の理由として見出しの下に出し済みか（#2455）。行では繰り返さない */
+  hideRejectionText: boolean;
   pending: boolean;
   disabled: boolean;
   onStart: () => void;
@@ -416,7 +448,7 @@ function RepositoryRow({
             押せない理由は**押す前に出す**（`describePreviewRejection`）。押した先で
             `failed`のジョブだけが返る形にしない
           */}
-          {row.rejection && !compact && (
+          {row.rejection && !compact && !hideRejectionText && (
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {describePreviewRejection(row.rejection)}
             </span>

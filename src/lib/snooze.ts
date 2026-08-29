@@ -7,13 +7,18 @@ import {
 import type { Issue } from "@/types/issue";
 
 /**
- * 「いまは実施しない」として要対応の項目を伏せる判定（#2398）。
+ * 「いまは実施しない」として項目を伏せる判定（#2398・#2456）。
  *
  * 左メニュー先頭の「ユーザーの確認待ち」（`00.check-user`）と「ユーザーの作業待ち」
  * （`71.manual-step`）に並ぶ項目は、close するか承認・修正依頼を返すまで一覧と件数に載り
  * 続けていた。数週間先まで実施しないと分かっているものまで数に乗るため、
  * 「上から順に手を動かせば盤面が進む」という読み方（`nav-views.ts`の
  * `sidebarAttentionNavViews`）が崩れる。
+ *
+ * **効かせる範囲はIssue一覧の全ビュー**（#2456）。#2398では要対応の2ビューだけに限って
+ * いたが、「すべてのIssue」に並んだままでは日常的に見る一覧から減らず、保留にしても
+ * 目に入り続けていた。**伏せたものがどこにも出てこなくなる**という当時の懸念は、
+ * どのビューでも一覧の上の1行（`describeSnoozeResume`＋「表示」）から開けることで担保する。
  *
  * **保存先はGitHubのラベルではなくDBのユーザーごとの行**（`SnoozedItem`）。ラベルにすると
  * 全リポジトリへのラベル配布（`docs/cross-repo-setup-guide.md`）が要るうえ、Issueの履歴に
@@ -100,6 +105,22 @@ export function findActiveIssueSnooze(
     { kind: "issue", repositoryFullName: issue.repositoryFullName, number: issue.number },
     now,
   );
+}
+
+/**
+ * その一覧で保留を効かせるか（#2456）。
+ *
+ * **ビューは見ない**——効かせるのはIssue一覧の全ビューなので、判定材料は「引き当て表を
+ * 受け取っているか」「保留にする操作を受け取っているか」だけ。それでも関数にして配るのは、
+ * #2398では同じ`view === "check-user" || view === "manual-step"`が
+ * `issue-list.tsx`・`mobile-issue-list-screen.tsx`・`issue-stats.ts`の3か所に散っており、
+ * 片方だけ直る事故が実際に起きかけたため。**範囲を変えるときはここだけ直す。**
+ */
+export function isSnoozeEnabledForList(
+  snoozes: SnoozeMap | undefined,
+  onSnooze: unknown,
+): boolean {
+  return Boolean(snoozes && onSnooze);
 }
 
 /**

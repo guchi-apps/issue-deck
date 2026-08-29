@@ -142,7 +142,9 @@ export function selectCheckUserRunningIssueIds(
  * `formatManualStepListCount`（#1763）・質問の`formatQuestionListCount`（#1796）と同じ区切り。
  *
  * **保留中（#2398）も同じ形で添える。** 一覧から伏せたぶんは`listedCount`に入っていないので、
- * 実行中と違って差ではなく件数をそのまま足して書く。
+ * 実行中と違って差ではなく件数をそのまま足して書く。**#2456で保留がどのビューにも効くように
+ * なったため、この内訳は「ユーザーの確認待ち」以外の一覧でも出る**（実行中の内訳は
+ * 今までどおり確認待ちだけ）。
  *
  * @param listedCount 一覧に並んでいる行数（保留中は含まない）
  * @param runningCount そのうち、まだエージェントが動いているもの

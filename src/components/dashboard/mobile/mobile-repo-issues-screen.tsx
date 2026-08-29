@@ -6,6 +6,7 @@ import { CircleAlert, FolderGit2, Rocket } from "lucide-react";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
+import { useNow } from "@/hooks/use-now";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/issue-stats";
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
+import { selectSnoozedIssueIds, type SnoozeMap, type SnoozeTarget } from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -53,6 +55,14 @@ type MobileRepoIssuesScreenProps = {
   fetchedAt?: string | null;
   /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
+  /**
+   * 「いまは実施しない」（#2398）の引き当て表と操作（#2456）。**リポジトリ別の一覧も
+   * Issue一覧なので、他の一覧と同じように伏せる。** 渡さないとこの画面だけ保留中が
+   * 並んだままになり、同じIssueが画面によって出たり出なかったりする。
+   */
+  snoozes?: SnoozeMap;
+  onSnooze?: (target: SnoozeTarget, until: string | null) => void;
+  onUnsnooze?: (target: SnoozeTarget) => void;
 };
 
 export function MobileRepoIssuesScreen({
@@ -74,6 +84,9 @@ export function MobileRepoIssuesScreen({
   onRefresh,
   fetchedAt,
   autoRefreshIntervalMs,
+  snoozes,
+  onSnooze,
+  onUnsnooze,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -103,15 +116,32 @@ export function MobileRepoIssuesScreen({
     return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
   }, [repoIssues, view, currentUserLogin, listFilters, sort]);
 
+  // 保留中のIssue（#2398・#2456）。件数と一覧が同じ集合を読むよう、ここで1回だけ求める
+  const now = useNow();
+  const snoozedIssueIds = useMemo(
+    () => (snoozes ? selectSnoozedIssueIds(repoIssues, snoozes, now) : undefined),
+    [repoIssues, snoozes, now],
+  );
+
   const labelSummary = useMemo(() => computeLabelSummary(repoIssues), [repoIssues]);
   const assigneeOptions = useMemo(() => getAssigneeOptions(repoIssues), [repoIssues]);
   // タブごとの該当Issue件数（#880）。全タブに件数バッジを表示するため、リポジトリで
   // 絞り込んだissuesを母集団に、一覧と同じ絞り込みを適用して求める（#1689）。
   // 母集団に絞り込み前の全Issueを渡すのは、手作業Issueが別リポジトリのIssue・PRを
   // 待っていることがあるため（#1763）。このリポジトリ分だけでは「状態不明＝実行できる」に倒れる
+  // 保留中は件数からも引く（#2456）。一覧の側（`IssueList`）も同じ集合で伏せるので、
+  // タブの数字と並んでいる行数は食い違わない
   const navCounts = useMemo(
-    () => computeNavCountsForFilters(repoIssues, listFilters, currentUserLogin, issues),
-    [repoIssues, listFilters, currentUserLogin, issues],
+    () =>
+      computeNavCountsForFilters(
+        repoIssues,
+        listFilters,
+        currentUserLogin,
+        issues,
+        undefined,
+        snoozedIssueIds,
+      ),
+    [repoIssues, listFilters, currentUserLogin, issues, snoozedIssueIds],
   );
 
   // 手作業Issueの前提条件がそろっているか（#1763）。判定の母集団も全Issue
@@ -207,6 +237,10 @@ export function MobileRepoIssuesScreen({
       onRefresh={onRefresh}
       fetchedAt={fetchedAt}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
+      /* 「いまは実施しない」（#2398・#2456）。他の一覧と同じ引き当て表・同じ操作 */
+      snoozes={snoozes}
+      onSnooze={onSnooze}
+      onUnsnooze={onUnsnooze}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}

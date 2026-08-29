@@ -774,6 +774,14 @@ export function IssueDeckShell({
     [filters],
   );
 
+  // ユーザーが「いまは実施しない」として伏せたIssue（#2398）。**件数・一覧・ベル・トースト・
+  // 合図（オレンジの丸・スピナー）が同じ集合を読む**ので、`checkUserRunningIssueIds`と同じく
+  // ここで1回だけ求めて配る。**下の合図の判定より前に置く**——合図の母集団からも引くため。
+  const snoozedIssueIds = useMemo(
+    () => selectSnoozedIssueIds(issues, snoozes, now ?? Date.now()),
+    [issues, snoozes, now],
+  );
+
   // 「ユーザーの確認待ち」に並ぶIssue（#1613）。マージ待ちPRの重複除去に使うため、
   // どのビューを表示していても求める。絞り込みを適用しないビュー（#1750）なので、
   // 母集団は絞り込み前の全Issue。
@@ -789,45 +797,46 @@ export function IssueDeckShell({
   );
   // 「ユーザーの作業待ち」の内訳（#1613）。こちらも絞り込みを適用しないビューで、
   // 起点Issueを引くための母集団も絞り込み前の全Issue。
+  // **保留中は外す**（#2456）。この`actionable`が左メニューのオレンジの丸を点ける判定で、
+  // 行に出る数字（`navCounts`）は保留中を引いているため、外さないと「丸は点いているのに
+  // 一覧は0件」になる（起点Issueを引くための母集団はそのまま全Issue）。
   const manualStepAttention = useMemo(
     () =>
       computeManualStepAttention(
-        applyIssueFilters(issues, resolveFiltersForView(filters, "manual-step")),
+        applyIssueFilters(issues, resolveFiltersForView(filters, "manual-step")).filter(
+          (issue) => !snoozedIssueIds.has(issue.id),
+        ),
         issues,
       ),
-    [issues, filters],
+    [issues, filters, snoozedIssueIds],
   );
   // 未確認（回答が届いていて未読）の質問の件数（#1796・#2070）。左メニュー・スマホのホームで
   // オレンジの丸を点けるかどうかと、吹き出しの内訳にだけ使う（**件数そのものは`navCounts`から
   // 引く**——画面側で数え直すと同じ行の数字と吹き出しが別の数え方になる）。
   // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
-  const unconfirmedQuestionCount = useMemo(
+  // **保留中は外す**（#2456）。#2456で「質問」でも伏せられるようになったため、外さないと
+  // 未確認の回答が届いた質問を伏せた時点で「丸は点いているのに一覧は0件」になる。
+  const questionAttentionIssues = useMemo(
     () =>
-      countUnconfirmedQuestions(
-        filterIssuesByView(
-          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
-          "question",
-          currentUserLogin,
-          issues,
-        ),
-      ),
-    [issues, filters, currentUserLogin],
+      filterIssuesByView(
+        applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
+        "question",
+        currentUserLogin,
+        issues,
+      ).filter((issue) => !snoozedIssueIds.has(issue.id)),
+    [issues, filters, currentUserLogin, snoozedIssueIds],
+  );
+  const unconfirmedQuestionCount = useMemo(
+    () => countUnconfirmedQuestions(questionAttentionIssues),
+    [questionAttentionIssues],
   );
   // 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。左メニュー・
   // スマホのホームでスピナーを回すかどうかと、吹き出しの内訳に使う。**母集団は
   // `unconfirmedQuestionCount`と同じ**——同じ行に出す2つの合図が別の集合を数えていると、
   // 丸とスピナーで指している質問が食い違う。
   const waitingQuestionCount = useMemo(
-    () =>
-      countWaitingQuestions(
-        filterIssuesByView(
-          applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
-          "question",
-          currentUserLogin,
-          issues,
-        ),
-      ),
-    [issues, filters, currentUserLogin],
+    () => countWaitingQuestions(questionAttentionIssues),
+    [questionAttentionIssues],
   );
   // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
   // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
@@ -943,17 +952,10 @@ export function IssueDeckShell({
     ],
   );
 
-  // ユーザーが「いまは実施しない」として伏せたIssue（#2398）。**件数・一覧・ベル・トーストが
-  // 同じ集合を読む**ので、`checkUserRunningIssueIds`と同じくここで1回だけ求めて配る。
-  const snoozedIssueIds = useMemo(
-    () => selectSnoozedIssueIds(issues, snoozes, now ?? Date.now()),
-    [issues, snoozes, now],
-  );
-
   // 左メニューの件数（#1689・#1750）。ビューごとに適用する絞り込みが違うため、
   // 絞り込み前の全Issueと条件を渡して中で解決させる（一覧と同じ関数を通す）。
   // 「ユーザーの確認待ち」だけは実行中のIssueを外した数にする（#2174）。
-  // 要対応の2ビューは、さらに保留中を外す（#2398）。
+  // 保留中はどのビューの数からも外す（#2398・#2456）。
   const navCounts = useMemo(
     () =>
       computeNavCountsForFilters(
@@ -1567,6 +1569,11 @@ export function IssueDeckShell({
                   onRefresh={issuePolling.refresh}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
+                  /* 「いまは実施しない」（#2398・#2456）。リポジトリ別の一覧も他の一覧と
+                     同じように伏せる */
+                  snoozes={snoozes}
+                  onSnooze={snooze}
+                  onUnsnooze={unsnooze}
                 />
               )}
 

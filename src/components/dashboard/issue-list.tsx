@@ -90,6 +90,7 @@ import {
   describeSnoozeResume,
   describeSnoozeUntil,
   findActiveIssueSnooze,
+  isSnoozeEnabledForList,
   type SnoozeEntry,
   type SnoozeMap,
   type SnoozeTarget,
@@ -440,14 +441,23 @@ export function IssueList({
   // 現在時刻(epoch ms)。保留の期限判定と相対時刻の表示が同じ値を見る（#2398・#1891）
   const now = useNow();
   /**
-   * 「いまは実施しない」として伏せた行を一覧から外す（#2398）。
+   * 「いまは実施しない」として伏せた行を一覧から外す（#2398・#2456）。
    *
-   * **左メニューの件数（`computeNavCountsForFilters`）と同じ判定・同じ2ビュー**なので、
-   * メニューの数字と並んでいる行数は食い違わない。伏せたぶんはヘッダーの内訳
-   * （`2件・保留中1件`）と、一覧の上に出す「保留中がN件あります」の1行で読める。
+   * **効かせるのはIssue一覧のすべてのビュー**（#2456）。#2398では要対応の2ビュー
+   * （`check-user`・`manual-step`）だけに限っていたが、「すべてのIssue」に並んだままだと
+   * 保留にしても日常的に見る一覧からは減らず、伏せた意味が半分しか無かった。
+   * **伏せたものがどこにも出てこなくなる**という#2398の懸念は、どのビューでも
+   * 一覧の上の1行から「表示」で開けることで担保する。
+   *
+   * **左メニューの件数（`computeNavCountsForFilters`）と同じ判定**なので、メニューの
+   * 数字と並んでいる行数は食い違わない。伏せたぶんはヘッダーの内訳（`2件・保留中1件`）と、
+   * 一覧の上に出す「保留中がN件あります」の1行で読める。
+   *
+   * 判定そのものは`lib/snooze.ts`（`isSnoozeEnabledForList`）が持つ——同じ条件が
+   * スマホの一覧（`mobile-issue-list-screen.tsx`）にもあり、片方だけ直すと
+   * ヘッダーの数字と並ぶ行数が食い違う。
    */
-  const snoozeEnabled =
-    Boolean(snoozes && onSnooze) && (view === "check-user" || view === "manual-step");
+  const snoozeEnabled = isSnoozeEnabledForList(snoozes, onSnooze);
   const { issues, snoozedIssues } = useMemo(() => {
     if (!snoozeEnabled || !snoozes) return { issues: allIssues, snoozedIssues: [] as Issue[] };
     const listed: Issue[] = [];
@@ -647,7 +657,7 @@ export function IssueList({
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
-    (view === "question" ? formatQuestionListCount(issues, listedCount) : null) ??
+    (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 
@@ -870,7 +880,9 @@ export function IssueList({
               {!stepBadgeVisible && queueState && (
                 <QueueStepBadge queue={queueState} waitReason={queueWaitReason} />
               )}
-              {/* 「いまは実施しない」（#2398）。**要対応の2ビューの行にだけ出す。**
+              {/* 「いまは実施しない」（#2398）。**どのビューの行にも出す**（#2456）——
+                  伏せたい対象は要対応の一覧に居るとは限らず、目に入ったその場で下げられないと
+                  「気になったら下げる」という使い方にならない。
                   行の当たり判定（カード全面の<button>）の上に重ねるので、
                   `pointer-events-auto`が要る（Remote Controlのリンクと同じ） */}
               {snoozeEnabled && onSnooze && (
