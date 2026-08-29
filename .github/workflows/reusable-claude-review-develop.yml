@@ -459,6 +459,13 @@ jobs:
     needs: [identify-issue, risk-check]
     if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      # Claudeが実際に走ったか(#2448)。claude-code-actionには「ワークフローファイルの内容が
+      # デフォルトブランチと完全一致していなければClaudeの実行だけをスキップする」検証機構が
+      # あり、`.github/workflows/`配下を変更するPRでは**このジョブはClaudeを実行しないまま
+      # successで終わる**(このファイル冒頭の説明を参照)。auto-mergeが「判定を取得できなかった」と
+      # 「そもそも実施していない」を取り違えないよう、実行の有無をここから渡す。
+      executed: ${{ steps.claude_review.outputs.execution_file != '' }}
     permissions:
       contents: read
       pull-requests: write
@@ -840,6 +847,129 @@ jobs:
             COMMENT_BODY="$COMMENT_BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
+
+      # 「このPRが何をもって検証されたのか」をPR本文に残す(#2448)。レビューの判定はこれまで
+      # PRコメントの散文にしか残らず、develop→mainのリリースPRを前にしたときに
+      # 「中身がどこまで検証されたのか」を読む場所が無かった。ここで書いた節を
+      # reusable-release-develop-to-main.ymlが対象issueぶん集めてリリースPRの表にする。
+      #
+      # - **追記ではなく置き換え。** 開始・終了マーカーの間を落としてから足すので、
+      #   同じPRへ何度pushしても節は1つのままになる
+      # - **continue-on-error: true。** 記録は補助情報で、書けなかったことを理由にこのジョブを
+      #   落とすとauto-merge-fallbackが00.check-userを付けてしまう(記録の欠落より、
+      #   マージが止まって人を呼ぶ方が高くつく)
+      # - PR本文の編集は`pull_request`の`edited`を起こすが、呼び出し元のトリガーは
+      #   opened/synchronize/reopened/ready_for_reviewだけなので再帰しない
+      # - **head refが`issue-<番号>`のPRにしか書かない。** バージョンバンプPR
+      #   (`release/vX.Y.Z`→develop)の本文にある`## 対象issue`は、develop→mainのPRを作るrunが
+      #   引き継ぐ唯一の入力(#2117)で、リリースの配管そのもの。集計側も`issue-<番号>`のPRしか
+      #   引かないため、そこへ節を足しても誰も読まない
+      - name: 検証結果をPR本文へ記録する
+        if: always() && needs.identify-issue.outputs.number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_RESULT: ${{ needs.claude-review.result }}
+          REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
+          RISKY: ${{ needs.risk-check.outputs.risky }}
+          REASONS: ${{ needs.risk-check.outputs.reasons }}
+        run: |
+          set -euo pipefail
+
+          # 自動レビューの判定は、レビューがPRへ投稿したコメントの末尾のマーカーから読む
+          # (.github/prompts/review-develop.md と対。ずれるとここは黙って「取得できず」へ
+          # 倒れるため、scripts/check-review-verdict-marker.sh がCIで突き合わせる)。
+          # sha=で今回のhead SHAに絞り、追いコミット前の判定を拾わない。
+          REVIEW="unavailable"
+          # 「実施していない」理由。`skipped`のときだけ使い、develop向けPRの本文へ添える
+          # (リリースPRの表は`— 実施なし`までしか出さない。理由は元のPRを開けば読める)
+          SKIP_REASON=""
+          case "$REVIEW_RESULT" in
+            skipped)
+              # #992のゲートでレビューを省いた場合。**失敗と区別する**——省くのは
+              # 低リスクかつ小規模なPRに限られる設計どおりの動きで、危険信号ではない
+              REVIEW="skipped"
+              SKIP_REASON="低リスクかつ小規模のため省略"
+              ;;
+            success)
+              if [ "$REVIEW_EXECUTED" != "true" ]; then
+                # ジョブはsuccessでもClaudeが動いていない場合(`.github/workflows/`配下を
+                # 変更するPR)。**「判定を取得できませんでした」と書かない**——判定を残せなかった
+                # のではなく、そもそも実施していない
+                REVIEW="skipped"
+                SKIP_REASON="ワークフローファイルの変更を含むため、Claudeを実行していない"
+              else
+                FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                  | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                  | tail -n 1 \
+                  | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+                if [ -n "$FOUND" ]; then
+                  REVIEW="$FOUND"
+                fi
+              fi
+              ;;
+          esac
+
+          # review=・risk=の値と文言の対応は、ローカルのレビュー・統合エージェント
+          # (scripts/prompts/review-agent.md)・リリースPRの集計・画面(src/lib/github/
+          # release-verification.ts)で共通の契約。**片方だけ増やさない**
+          case "$REVIEW" in
+            lgtm) REVIEW_TEXT="✅ 問題なし（LGTM）" ;;
+            needs-check) REVIEW_TEXT="⚠️ 要確認" ;;
+            changes-requested) REVIEW_TEXT="❌ 要修正" ;;
+            skipped) REVIEW_TEXT="— 実施なし（${SKIP_REASON}）" ;;
+            *) REVIEW="unavailable"; REVIEW_TEXT="? 判定を取得できませんでした" ;;
+          esac
+
+          if [ "$RISKY" = "true" ]; then
+            RISK="hit"
+            RISK_TEXT="⚠️ 該当あり"
+          else
+            RISK="none"
+            RISK_TEXT="該当なし"
+          fi
+
+          if [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ]; then
+            CONFIRM_TEXT="必要（自動マージはスキップされます）"
+          else
+            CONFIRM_TEXT="不要（自動マージの対象）"
+          fi
+
+          TMP="${RUNNER_TEMP:-/tmp}"
+          {
+            echo "<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} -->"
+            echo "## 検証結果"
+            echo
+            echo "- 自動レビュー: ${REVIEW_TEXT}"
+            echo "- 機械的リスク判定: ${RISK_TEXT}"
+            if [ "$RISK" = "hit" ] && [ -n "$REASONS" ]; then
+              # risk-checkが組み立てた `- <理由>` の行を、そのままぶら下げる
+              printf '%s\n' "$REASONS" | sed 's/^- /  - /'
+            fi
+            echo "- ユーザーの確認: ${CONFIRM_TEXT}"
+            echo
+            echo "<sub>この節は\`claude-review-develop.yml\`が自動で更新します（#2448）。判定の根拠はこのPRのレビューコメントにあります。</sub>"
+            echo "<!-- issue-deck-verification:end -->"
+          } > "$TMP/verification-section.md"
+
+          # 既にある節を落としてから足す。開始マーカーの行から終了マーカーの行までを捨てる。
+          gh pr view "$PR_NUMBER" --json body --jq .body | tr -d '\r' | awk '
+            index($0, "<!-- issue-deck-verification:start") { skip = 1 }
+            !skip { print }
+            index($0, "<!-- issue-deck-verification:end -->") { skip = 0 }
+          ' > "$TMP/pr-body-base.md"
+
+          # 末尾の空行を落としてから空行1つを挟む(節の前後に空行が増え続けないようにする)
+          awk 'NF { last = NR } { line[NR] = $0 } END { for (i = 1; i <= last; i++) print line[i] }' \
+            "$TMP/pr-body-base.md" > "$TMP/pr-body-new.md"
+          printf '\n' >> "$TMP/pr-body-new.md"
+          cat "$TMP/verification-section.md" >> "$TMP/pr-body-new.md"
+
+          gh pr edit "$PR_NUMBER" --body-file "$TMP/pr-body-new.md"
+          echo "検証結果をPR本文へ記録しました（review=${REVIEW} risk=${RISK}）。"
 
       # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
       # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の

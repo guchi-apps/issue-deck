@@ -48,8 +48,82 @@ if grep -q 'allowedTools .*Bash(gh issue edit' "$WORKFLOW"; then
   fail=1
 fi
 
+# --- ここから、総評の判定マーカーと検証結果の節の契約（#2448）---
+#
+# 総評の判定マーカーは、レビューが**PRへ**投稿するコメントの末尾に必ず付く。
+#   <!-- issue-deck-review-verdict:<判定> sha=<head SHA> -->
+# auto-mergeジョブがこれを読んでPR本文へ`## 検証結果`の節を書き、リリースPRがその節を
+# 対象issueぶん集めて表にする。**上の merge-blocked とは別の契約**で、あちらは
+# 「自動マージを止める合図」、こちらは「何と判定されたかの記録」。
+#
+# ずれても赤くならないのは merge-blocked と同じで、リリースPRの表が黙って
+# 「記録なし」だらけになる。developへ入る前にここで落とす。
+RELEASE_WORKFLOW=".github/workflows/reusable-release-develop-to-main.yml"
+REVIEW_AGENT_PROMPT="scripts/prompts/review-agent.md"
+PARSER="src/lib/github/release-verification.ts"
+
+VERDICT_TEMPLATE='<!-- issue-deck-review-verdict:<判定> sha=${HEAD_SHA} -->'
+VERDICT_READ='issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}'
+SECTION_START='<!-- issue-deck-verification:start'
+SECTION_END='<!-- issue-deck-verification:end -->'
+TABLE_HEADING='## コードレビューの検証結果'
+
+for file in "$RELEASE_WORKFLOW" "$REVIEW_AGENT_PROMPT" "$PARSER"; do
+  [ -f "$file" ] || { echo "エラー: $file が見つかりません" >&2; exit 1; }
+done
+
+if ! grep -qF "$VERDICT_TEMPLATE" "$PROMPT"; then
+  echo "エラー: $PROMPT に総評の判定マーカーの指示が見つかりません。" >&2
+  echo "  期待する行: $VERDICT_TEMPLATE" >&2
+  fail=1
+fi
+
+if ! grep -qF "$VERDICT_READ" "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW に総評の判定マーカーの読み取りが見つかりません。" >&2
+  echo "  期待する文字列: $VERDICT_READ" >&2
+  fail=1
+fi
+
+# 判定の値そのものも、書く側（プロンプト）に3つとも載っていること。
+for verdict in lgtm needs-check changes-requested; do
+  if ! grep -qF "\`$verdict\`" "$PROMPT"; then
+    echo "エラー: $PROMPT に判定値 \`$verdict\` の説明がありません。" >&2
+    fail=1
+  fi
+done
+
+# 検証結果の節のマーカーは、書く側（レビューのワークフロー・ローカルのレビューエージェント）と
+# 読む側（リリースPRの集計）にまたがる。
+for file in "$WORKFLOW" "$RELEASE_WORKFLOW" "$REVIEW_AGENT_PROMPT"; do
+  if ! grep -qF "$SECTION_START" "$file"; then
+    echo "エラー: $file に検証結果の節の開始マーカーがありません。" >&2
+    echo "  期待する文字列: $SECTION_START" >&2
+    fail=1
+  fi
+done
+
+# 終了マーカーは、節を置き換える側だけが要る。集計側は開始マーカーの属性しか読まない。
+for file in "$WORKFLOW" "$REVIEW_AGENT_PROMPT"; do
+  if ! grep -qF "$SECTION_END" "$file"; then
+    echo "エラー: $file に検証結果の節の終了マーカーがありません。" >&2
+    echo "  期待する文字列: $SECTION_END" >&2
+    fail=1
+  fi
+done
+
+# リリースPR本文の見出しは、書く側（リリースのワークフロー）と読む側（画面のパーサー）の
+# 契約。ずれるとパネルが黙って出なくなる。
+for file in "$RELEASE_WORKFLOW" "$PARSER"; do
+  if ! grep -qF "$TABLE_HEADING" "$file"; then
+    echo "エラー: $file にリリースPRの検証結果の見出しがありません。" >&2
+    echo "  期待する文字列: $TABLE_HEADING" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
 echo "OK: claude-reviewの判定マーカーは $PROMPT と $WORKFLOW で一致しています"
+echo "OK: 総評の判定マーカーと検証結果の節の契約も揃っています（#2448）"
