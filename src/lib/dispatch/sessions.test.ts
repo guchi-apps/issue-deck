@@ -283,7 +283,7 @@ describe("reportDispatchSessions", () => {
       expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("activity");
     });
 
-    // #1817。前のセッションに出ていた「あと3分で自動終了」が、起動し直した直後の別の
+    // #1817。前のセッションに出ていた「あと3分」が、起動し直した直後の別の
     // セッションにそのまま出るのを防ぐ（古いpollerで予定が報告されない場合も含む）
     it("前のセッションの畳む予定を捨てる", async () => {
       findMany

@@ -219,7 +219,14 @@ export function compactIssueSessionLabel(session: DispatchSessionView): string {
  * 予定（`reapAt`・`reapReason`）を言い方に直すだけ。
  */
 export type SessionReapNotice = {
-  /** ピル・一覧行に出す短い言い方。例:「あと3分で自動終了」 */
+  /**
+   * ピル・一覧行に出す短い言い方。例:「あと3分」
+   *
+   * **「で自動終了」は付けない**（#2473）。なぜ終わるのか・畳まれた後どうなるかは`detail`が
+   * 「このまま操作が無ければ自動で終了します。」まで含めて持っており、短い方でも繰り返すと
+   * 同じことを2度言うことになる。1分を切ったときの「まもなく」も同じ理由で揃えてある
+   * （片方だけ「まもなく自動終了」にすると、同じピルが残り時間によって長さの違う言い方になる）。
+   */
   label: string;
   /** なぜ終わるのか・畳まれた後どうなるか。1行で添える */
   detail: string;
@@ -253,7 +260,7 @@ const QUESTION_REAP_REASONS = new Set<DispatchSessionReapReason>(["QUESTION_CLOS
  * 期限を過ぎた予定を出し続けない上限（ミリ秒）。
  *
  * 期限が来れば次の巡（既定30秒）で畳まれるが、回収を止めている（`SESSION_IDLE_MINUTES=0`）・
- * pollerが古い・落ちている場合は畳まれないまま予定だけが残る。**そのときに「まもなく自動終了」を
+ * pollerが古い・落ちている場合は畳まれないまま予定だけが残る。**そのときに「まもなく」を
  * 出し続けると、いつまでも終わらない終了予告になる**ので、少し過ぎたら黙る。
  */
 const REAP_NOTICE_STALE_MS = 2 * 60 * 1000;
@@ -287,7 +294,7 @@ export function describeSessionReap(
   }
 
   return {
-    label: imminent ? "まもなく自動終了" : `あと${minutes}分で自動終了`,
+    label: imminent ? "まもなく" : `あと${minutes}分`,
     detail: `${REAP_REASON_TEXT[session.reapReason]}${suffix}`,
     imminent,
   };
