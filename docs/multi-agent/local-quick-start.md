@@ -354,6 +354,31 @@ worktreeの再利用（前述の「2回目以降は再開になる」）と同�
 Issue番号は単調増加するので、同じリポジトリ内でポートが衝突することはない。帯の幅（原則1000）を
 超えるIssue番号になったら帯を割り直す。
 
+### ブラウザがブロックするポートは払い出さない（#2466）
+
+ブラウザ（Chrome・Firefox・Safari）は、他プロトコルの既定ポートへHTTPで繋ぐことを既定で拒否する
+（Chromeなら`ERR_UNSAFE_PORT`）。**開発サーバーがそのポートで正しく待ち受けていても画面は開けず、
+ホスト名が`localhost`でもtailnetのMagicDNS名でも同じ**なので、繋ぐ側では直せない。
+
+実際に当たったのは`dayspan`の確認環境。帯が`6000`で、確認環境は「ベース値 + 0」を使うため
+ちょうど6000（X11用）になり、画面が案内するURLをブラウザが開けない状態だった。
+
+- 一覧は`scripts/lib/dev-server.sh`の`DEV_SERVER_BROWSER_BLOCKED_PORTS`と、
+  [`lib/new-app/local-port-bands.ts`](../../src/lib/new-app/local-port-bands.ts)の
+  `BROWSER_BLOCKED_PORTS`に**二重に持っている**（帯を払い出すのは画面側、実際に起こすのはシェル側）。
+  ずれると「払い出せた帯なのに確認環境が開けない」形で表面化するため、
+  `local-port-bands.test.ts`が両者を突き合わせる。**変えるときは両方を揃える**
+- 載せるのは1000以上のものだけ。ベース値は1000以上で、実際のポートは「ベース値 + Issue番号」か
+  「ベース値 + 0」なので1000未満は出てこない
+- 確認環境は開けるポートが見つかるまで**1ずつ繰り上げる**（6000なら6001）。下げると隣の帯
+  （前のリポジトリのIssue #999）へはみ出す。繰り上げた先はそのリポジトリのIssue #1が使う値だが、
+  Issue番号は単調増加するので実際に取り合いにはならない
+- 新しい帯の払い出し（`chooseNextLocalPortBase`）もブロック対象のベース値を飛ばす
+- **Issueごとのセッション（ベース値 + Issue番号）にはまだ入れていない。** そちらは
+  `6566`（dayspan #566）・`10080`（clip-hive #80）のように当たりうるが、ポートの決め方が
+  `start-issue.sh`・`generic-start-issue.sh`・`cleanup-worktrees.sh`に分かれており、
+  繰り上げを片側だけに入れると起こしたセッションを止められなくなる
+
 ### 運用を終了したリポジトリの帯は、行を消さずコメント化して予約する
 
 **削除すると帯が空きに見える**（#2435）。運用終了した`shopping-list`の7000帯がこれで、行ごと
@@ -649,7 +674,7 @@ scripts/start-preview-dev.sh --foreground             # この端末で動かす
 | --- | --- | --- |
 | worktree | `~/apps/<repo>-worktrees/preview`（detached HEAD） | 本体がベースブランチを開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしてもブランチは動かない |
 | ブランチ | `origin/HEAD`（develop / main） | リポジトリによって既定ブランチが違うため、名前から決め打ちしない（汎用ランチャーと同じ判定） |
-| ポート | 帯のベース値+0（issue-deckは`4000`） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない。帯は`scripts/local-repo-ports.conf` |
+| ポート | 帯のベース値+0（issue-deckは`4000`）。ブラウザがブロックするポートなら繰り上げる（#2466） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない。帯は`scripts/local-repo-ports.conf` |
 | ログ | `~/apps/<repo>-worktrees/.dev-servers/preview.log` | Issueごとの開発サーバーと同じ置き場 |
 | 状態 | `~/.local/state/issue-deck/preview.env` | **どのリポジトリが動いているかはホストで1つ**。pollerの申告（`--status --json`）もここを見る |
 | 対象になるリポジトリ | `--repos-json`（`local-repo-ports.conf`のうち`dev`スクリプトがあるもの） | 起こせるかの判定を持つのは`resolve_target`ひとつ。pollerの中に同じ条件を書くと申告と実際がずれる |
