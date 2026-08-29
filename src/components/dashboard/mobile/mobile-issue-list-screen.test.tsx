@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { navViews } from "@/lib/nav-views";
+import { buildSnoozeMap, type SnoozeMap, type SnoozeTarget } from "@/lib/snooze";
 import type { Issue, NavViewId } from "@/types/issue";
 
 // 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
@@ -54,6 +55,8 @@ function renderScreen(
     autoRefreshIntervalMs: number | null;
     issues: Issue[];
     checkUserRunningIssueIds: ReadonlySet<string>;
+    snoozes: SnoozeMap;
+    onSnooze: (target: SnoozeTarget, until: string | null) => void;
   }> = {},
 ) {
   render(
@@ -76,13 +79,20 @@ function renderScreen(
       onRefresh={overrides.onRefresh}
       fetchedAt={overrides.fetchedAt}
       autoRefreshIntervalMs={overrides.autoRefreshIntervalMs}
+      snoozes={overrides.snoozes}
+      onSnooze={overrides.onSnooze}
     />,
   );
 }
 
 /** ヘッダーの件数だけを見るテスト用。一覧本体は差し替えてあるので中身は最小限でよい */
 function makeIssue(id: string): Issue {
-  return { id, number: Number(id), title: `Issue ${id}` } as Issue;
+  return {
+    id,
+    number: Number(id),
+    title: `Issue ${id}`,
+    repositoryFullName: "guchi-apps/issue-deck",
+  } as Issue;
 }
 
 const MERGE_PENDING_PINNED = {
@@ -187,6 +197,22 @@ describe("MobileIssueListScreen の絞り込み行（#1645）", () => {
     });
 
     expect(screen.getByText("ユーザーの確認待ち・1件・実行中1件")).toBeTruthy();
+  });
+
+  // #2456: 保留はどのビューでも効くので、ヘッダーの件数と内訳もビューを問わず出す
+  it("「すべてのIssue」のヘッダーも、保留中を引いた件数と内訳を出す（#2456）", async () => {
+    renderScreen({
+      view: "all",
+      issues: [makeIssue("1"), makeIssue("2")],
+      snoozes: buildSnoozeMap([
+        { kind: "issue", repositoryFullName: "guchi-apps/issue-deck", number: 2, until: null },
+      ]),
+      onSnooze: vi.fn(),
+    });
+    // `useNow`はマウント後に現在時刻を入れる（それまでは保留を判定しない）
+    await act(async () => {});
+
+    expect(screen.getByText("すべてのIssue・1件・保留中1件")).toBeTruthy();
   });
 
   it("絞り込みシートの「すべて解除」で状態・ラベル・担当者だけを既定へ戻す", () => {

@@ -116,15 +116,24 @@ export function formatQuestionNavTitle(
  * 丸の有無でしか未確認を表せず、何件読めるのかはここでしか読めない。
  * `formatManualStepListCount`（#1763）と同じ役割・同じ区切り。
  *
- * @param listedCount 一覧に並んでいる行数（固定表示ぶんを含む）
+ * **保留中（#2398・#2456）も同じ形で添える。** #2456で「質問」でも伏せられるようになったが、
+ * 未確認が1件でもあるとこの関数の戻り値が採られ（`issue-list.tsx`のフォールバック順）、
+ * `formatCheckUserListCount`が出すはずだった`保留中N件`が消えていた。
+ *
+ * @param listedCount 一覧に並んでいる行数（固定表示ぶんを含む。保留中は含まない）
+ * @param snoozedCount 保留中で一覧から外したもの（#2456）
  */
 export function formatQuestionListCount(
   issues: Pick<Issue, "title" | "qaAnswerPendingAt" | "hasUnreadComments">[],
   listedCount: number,
+  snoozedCount = 0,
 ): string | null {
   const unconfirmed = countUnconfirmedQuestions(issues);
-  if (unconfirmed === 0) return null;
-  return `${listedCount}件・未確認${unconfirmed}件`;
+  if (unconfirmed === 0 && snoozedCount === 0) return null;
+  const parts = [`${listedCount}件`];
+  if (unconfirmed > 0) parts.push(`未確認${unconfirmed}件`);
+  if (snoozedCount > 0) parts.push(`保留中${snoozedCount}件`);
+  return parts.join("・");
 }
 
 /**

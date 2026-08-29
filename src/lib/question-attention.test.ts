@@ -140,6 +140,16 @@ describe("formatQuestionListCount", () => {
   it("未確認が無ければnullを返す（呼び出し側が従来の表記に落とす）", () => {
     expect(formatQuestionListCount([makeQuestion(), makeQuestion()], 2)).toBeNull();
   });
+
+  // #2456: 「質問」でも保留にできるようになったので、内訳から落ちないようにする
+  it("保留中があれば内訳に添える（未確認が無くてもnullにしない）", () => {
+    expect(formatQuestionListCount([makeQuestion(), makeQuestion()], 2, 1)).toBe(
+      "2件・保留中1件",
+    );
+    expect(
+      formatQuestionListCount([makeQuestion({ hasUnreadComments: true }), makeQuestion()], 2, 1),
+    ).toBe("2件・未確認1件・保留中1件");
+  });
 });
 
 describe("resolveQuestionNavSignals", () => {

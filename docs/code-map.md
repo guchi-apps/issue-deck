@@ -966,6 +966,22 @@ export function POST(request: NextRequest) {
     一覧・ベル・トースト・Push通知は同じ`lib/snooze.ts`の関数を通る。
     - **行の時計ボタン（`SnoozeMenu`）もどのビューにも出す。** 伏せたい対象は要対応の一覧に
       居るとは限らず、目に入ったその場で下げられないと「気になったら下げる」使い方にならない。
+    - **効かせるかどうかの判定は`isSnoozeEnabledForList`（`lib/snooze.ts`）に1つだけ置く。**
+      #2398では同じ`view === "check-user" || view === "manual-step"`が
+      [`issue-list.tsx`](../src/components/dashboard/issue-list.tsx)・
+      [`mobile-issue-list-screen.tsx`](../src/components/dashboard/mobile/mobile-issue-list-screen.tsx)・
+      `issue-stats.ts`の3か所に散っており、#2456で**スマホのヘッダーだけ古い条件のまま残る**
+      ところだった（ヘッダーは`10件`のまま行は9行になる）。範囲を変えるときはここだけ直す。
+    - **オレンジの丸・スピナー（合図）の母集団からも保留中を引く**
+      （[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)の
+      `manualStepAttention`・`questionAttentionIssues`）。行に出る数字は`navCounts`＝保留中を
+      引いた数なのに、合図だけ別に数えていたため、伏せた時点で**「丸は点いているのに一覧は
+      0件」**になる。判定を1か所（`snoozedIssueIds`）から配って、数と合図が同じ集合を読む形に
+      そろえる。
+    - **ヘッダーの内訳を作る関数は、どれも`snoozedCount`を受け取れるようにしておく**
+      （`formatCheckUserListCount`・`formatManualStepListCount`・`formatQuestionListCount`）。
+      3つはフォールバック順で1つだけが採られるため、受け取れない関数が1つでもあると、その
+      ビューでだけ`保留中N件`が消える（#2456で「質問」がそうなっていた）。
     - **件数を渡す側も全ビューぶんを引く。** スマホのリポジトリ別一覧
       （[`mobile-repo-issues-screen.tsx`](../src/components/dashboard/mobile/mobile-repo-issues-screen.tsx)）は
       #2398では保留を受け取っていなかったので、#2456で渡すようにした。渡さないとその画面
