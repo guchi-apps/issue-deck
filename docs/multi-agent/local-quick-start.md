@@ -490,7 +490,7 @@ node /…/bin/pnpm dev              ← プロセスグループリーダー
 
 `.dev-servers/issue-1523.log`では実際に行頭の`[2026-08-15 23:XX:XX] ...`が消え、マルチバイト文字の
 途中から壊れた行だけが残った。**起動側も`>>`に揃える**（`scripts/run-issue-session.sh`・
-`scripts/start-develop-dev.sh`）。両方がO_APPENDなら書き込みのたびに末尾へ位置づけられる。
+`scripts/start-preview-dev.sh`）。両方がO_APPENDなら書き込みのたびに末尾へ位置づけられる。
 
 **起動時にログを切り詰めない。** 切り詰めると、セッション再開時の停止処理が直前に書いた
 「前回の開発サーバーを停止します」が消える。消えて困るのがその理由の行なので、伸びるのを
@@ -621,38 +621,75 @@ Route Handlerが読む`process.env`はその値を拾わない。**起こし直�
 従って人へ渡す。急がないなら、既定20分のアイドル回収（`reap-dev-servers.sh`）に任せて
 `pnpm dev`で起こし直してもよい。
 
-## developの状態を開発サーバーで見る（#1289）
+## developの状態を確認環境で見る（#1289・#2444）
 
 Issueごとの開発サーバーが映すのは**実装中のブランチ**だけで、マージ済みの変更が積み上がった
 `develop`そのものを開く場所が無かった。本体チェックアウト（`~/apps/issue-deck`）で`pnpm dev`を
 叩く手は、そのときのブランチ・未コミットの変更・ポートのどれもが手元の作業次第で変わるうえ、
 PIDファイル・ログにも載らないため、`develop`を見る用途には使えない。
 
+**#2444でissue-deckの画面から押せるようにし、全リポジトリへ広げた。** 普段はサイドメニューの
+「確認環境」（スマホはホームのメニュー）から起こす。下のCLIは同じ実体を直接叩くもので、
+サブPCへSSHしているときや、画面が動かないときの逃げ道として残してある。
+
 ```bash
-scripts/start-develop-dev.sh              # 最新のorigin/developへ更新して（再）起動する
-scripts/start-develop-dev.sh --status     # 起動しているか・どのコミットかとURLを表示する
-scripts/start-develop-dev.sh --stop       # 停止する
-scripts/start-develop-dev.sh --no-update  # 今チェックアウトされている内容のまま再起動する
-scripts/start-develop-dev.sh --no-migrate # マイグレーションの適用を行わない
-scripts/start-develop-dev.sh --foreground # この端末で動かす（Ctrl-Cで停止）
+scripts/start-preview-dev.sh                          # issue-deckのdevelopで（再）起動する
+scripts/start-preview-dev.sh guchi-apps/dayspan       # 別のリポジトリへ切り替える
+scripts/start-preview-dev.sh --status                 # 起動しているか・どのコミットかとURLを表示する
+scripts/start-preview-dev.sh --status --json          # 同じ内容をJSONで（pollerが申告に使う）
+scripts/start-preview-dev.sh --stop                   # 停止する
+scripts/start-preview-dev.sh --no-update              # 今チェックアウトされている内容のまま再起動する
+scripts/start-preview-dev.sh --no-migrate             # マイグレーションの適用を行わない
+scripts/start-preview-dev.sh --foreground             # この端末で動かす（Ctrl-Cで停止）
 ```
 
-`pnpm dev:develop`でも同じ（リポジトリのどこから叩いても本体チェックアウトを基準に動く）。
+`pnpm dev:preview`でも同じ（リポジトリのどこから叩いても本体チェックアウトを基準に動く）。
 
 | 項目 | 値 | 理由 |
 | --- | --- | --- |
-| worktree | `~/apps/issue-deck-worktrees/develop`（detached HEAD） | 本体が`develop`を開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしても`develop`は動かない |
-| ポート | `4000`（帯のベース値+0） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない |
-| ログ | `~/apps/issue-deck-worktrees/.dev-servers/develop.log` | Issueごとの開発サーバーと同じ置き場 |
-| 停止 | `--stop`のみ（**自動回収の対象外**） | 意図して常駐させるもの。`reap-dev-servers.sh`・`cleanup-worktrees.sh`はどちらも`issue-*`しか見ないため、`--all-repos`で全リポジトリを回してもそのまま対象外になる |
-| tailnetへの公開 | `tailscale serve --http=4000 localhost:4000`（#1526） | 待ち受けは`127.0.0.1`に閉じる。公開範囲をTailscaleのACLが保証し、「意図した公開」と「閉じ忘れ」が見分けられる |
+| worktree | `~/apps/<repo>-worktrees/preview`（detached HEAD） | 本体がベースブランチを開いているため同じブランチは2か所で開けない。detachedなら誤ってコミットしてもブランチは動かない |
+| ブランチ | `origin/HEAD`（develop / main） | リポジトリによって既定ブランチが違うため、名前から決め打ちしない（汎用ランチャーと同じ判定） |
+| ポート | 帯のベース値+0（issue-deckは`4000`） | Issue番号は1以上なので、ベース値そのものはどのIssueのworktreeとも衝突しない。帯は`scripts/local-repo-ports.conf` |
+| ログ | `~/apps/<repo>-worktrees/.dev-servers/preview.log` | Issueごとの開発サーバーと同じ置き場 |
+| 状態 | `~/.local/state/issue-deck/preview.env` | **どのリポジトリが動いているかはホストで1つ**。pollerの申告（`--status --json`）もここを見る |
+| 対象になるリポジトリ | `--repos-json`（`local-repo-ports.conf`のうち`dev`スクリプトがあるもの） | 起こせるかの判定を持つのは`resolve_target`ひとつ。pollerの中に同じ条件を書くと申告と実際がずれる |
+| 停止 | `--stop`・画面の「停止」・**60分アクセスが無ければ自動停止** | Issueごとの開発サーバー（20分）より長く置く。あちらは実装エージェントが起こし直せるが、こちらは人がスマホで見ている最中に消えると画面を開き直すところからやり直しになる |
+| tailnetへの公開 | `tailscale serve --http=<ポート> localhost:<ポート>`（#1526） | 公開範囲をTailscaleのACLが保証し、「意図した公開」と「閉じ忘れ」が見分けられる |
+
+### 同時に動かせるのは1つ（#2444）
+
+サブPCの実効RAMは13Giしかなく、#1523ではIssueごとの開発サーバーの孤児9本でOOM Killerが発動して
+いる。リポジトリ数ぶんの確認環境を常駐させる前提は置けないため、**別のリポジトリを指定して
+起動すると、いま動いている確認環境を先に止める**。画面の一覧の見出しにも同じことを書いてある。
+
+`package.json`を持たないリポジトリ（vps・subpc・docs・claude-config・ideas）はポート帯だけ
+確保してあるが起こすものが無いため、スクリプトが理由を出して落ちる。
+
+### 画面から押す経路（#2444）
+
+issue-deckの画面 →`POST /api/dispatch`（`kind: preview`）→ `DispatchJob`（`PREVIEW`）→
+サブPCのpollerが`POST /api/dispatch/claim`で取りに来る、という**既存のディスパッチ経路をそのまま
+使う**（新しい受信経路も認証も増やさない）。pollerがこのスクリプトを叩き、`--status --json`の
+結果を30秒ごとの申告（`POST /api/dispatch/hosts`の`previewState`）に載せて返す。
+
+- pollerへ渡すのは**操作の3語（`start`/`refresh`/`stop`）とリポジトリ名だけ**。ポートも起動
+  コマンドもworktreeの場所もスクリプト側が決める（`INTERRUPT`・`KILL`がセッション名を組み立て
+  直すのと同じ作法で、この経路を「画面から任意のコマンドを流せる口」にしない）
+- **対応を申告していないpollerへは配らない**（`previewCapable`）。古いpollerは未知の種別として
+  `failed`を返すため、押しても何も起きなかったようにしか見えない。画面は申告を見て、
+  「更新して再起動」で最新にするよう押す前に案内する
+- **どのリポジトリを起こせるかも申告する**（`previewRepositories`＝`--repos-json`の出力）。
+  セッションを起こせるリポジトリ（`repositories`）との差は「開発サーバーがあるか」で、
+  vps・subpc・docs・claude-config・ideas はポート帯だけ確保してあるが`package.json`が無い。
+  画面ではこれらの行を**消さずに「開発サーバーがありません」と添えて押せなくする**——消すと
+  「vpsはなぜ無いのか」が分からず、確認環境で見られないこととサブPCに無いことの区別も付かない
 
 **既定はバックグラウンド起動で、`nohup`によりSSHを切っても残る。** Tailscale SSHでサブPCに入って
 叩き、そのまま外出先やスマホから画面を開く使い方（#1176 Phase 1と同じ狙い）を前提にしている。
 
 ### 起動のたびに入れ替える
 
-既に動いていれば必ず止めてから起動し直す。`develop`の更新には依存関係の追加やマイグレーションが
+既に動いていれば必ず止めてから起動し直す。ベースブランチの更新には依存関係の追加やマイグレーションが
 混ざり、それらは起動中のプロセスへHMRでは反映されないため、**HMRに任せない**。
 
 worktreeにブランチが乗っている・未コミットの変更があるときは**黙って捨てずにエラーで止める**。
@@ -674,7 +711,8 @@ Issueごとのセッションと同じserve方式へ寄せた。
 - `--stop`と起動し直しのたびにserveを撤去する。**撤去し忘れると繋がらないURLが残るだけでなく、
   そのポートで`next dev`を起こせなくなる**（#1403）。`--foreground`も同じで、Ctrl-Cで撤去される
   （そのため`exec`していない）。
-- `tailscale serve`が使えないホストでは公開せず、`http://localhost:4000`だけを表示する。
+- `tailscale serve`が使えないホストでは公開せず、`http://localhost:<ポート>`だけを表示する
+  （画面にも「このホストからは公開できていません」と出て、スマホからは開けない）。
 
 ### マイグレーションは既定で適用する。失敗したら必ず直す
 
@@ -691,7 +729,7 @@ Issueのworktreeで`prisma migrate dev`を叩いて先に列を足しており�
 復旧は、足りない分だけ手で当ててから「適用済み」として記録する。
 
 ```bash
-cd ~/apps/issue-deck-worktrees/develop
+cd ~/apps/issue-deck-worktrees/preview
 pnpm exec prisma migrate status                     # どのマイグレーションが失敗したかを見る
 # 失敗したマイグレーションのSQLのうち、まだ当たっていない部分だけを実行する
 printf 'ALTER TABLE `X` ADD COLUMN ...;\n' | pnpm exec prisma db execute --stdin --schema prisma/schema.prisma
@@ -1027,7 +1065,7 @@ LISTEN 0  511                           *:5403     *:*
 （**ポートからIssue・セッションを逆算しない**という判定の建て付け上、区別できない）。
 
 ところが**serveを張るのはセッションの起動経路だけ**（`run-issue-session.sh`・
-`start-develop-dev.sh`）で、プロンプトが案内する起こし直し（`cd <worktree> && pnpm dev`）には
+`start-preview-dev.sh`）で、プロンプトが案内する起こし直し（`cd <worktree> && pnpm dev`）には
 その一手が無かった。結果として次のようになっていた。
 
 1. アイドルで開発サーバーが停止する（#1223）
@@ -1192,6 +1230,16 @@ SHA-256（`<64桁>.html`）の名前で書き、同じ名前を`storedFilename`�
 - **確かめ終えたら必ず戻す。** 開発サーバーは実データのGitHubトークンを持ちうるため、
   塞いだままにしておく方が既定として安全
 - ダミーデータ（`pnpm db:seed:dev`）だけを相手にしている間は、外しても書き込み先は開発DBに閉じる
+- **外さずに済ませる手もある**（#2444）。確かめたいのが「積む処理の分岐」（拒否理由・`activeKey`の
+  unique制約など）だけなら、受け口ではなく**ライブラリの関数を直接呼ぶ**。`src/`配下に一時的な
+  テストを置いて`vitest`で流せば、開発用DBに対して実際の分岐まで通せる。`.env.local`を触らないので
+  戻し忘れが起こらない。**`vitest`はNext.jsと違って`.env.local`を読まない**ため、`DATABASE_URL`は
+  自分で渡す（確かめ終えたら一時ファイルは消す）
+
+  ```bash
+  DATABASE_URL="$(grep -m1 '^DATABASE_URL=' .env.local | cut -d= -f2- | tr -d '\"')" \
+    npx vitest run src/lib/<領域>/<一時ファイル>.check.test.ts
+  ```
 
 ### 認証の背後にある画面をコマンドだけで確かめる（#1656）
 

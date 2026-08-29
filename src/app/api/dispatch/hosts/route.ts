@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
-import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
+import {
+  normalizeDispatchHostRepositories,
+  parseDispatchHostName,
+} from "@/lib/dispatch/dispatch-job";
 import { parseDispatchHostCheckout } from "@/lib/dispatch/host-checkout";
+import { parseDispatchHostPreview } from "@/lib/dispatch/preview-server";
 import {
   parseDispatchHostLaunchHold,
   parseDispatchHostMetrics,
@@ -127,6 +131,18 @@ export async function POST(request: NextRequest) {
     // あちらは手で上げるプロトコル版数、こちらは実際に走っているスクリプトの事実。
     // `develop`へマージしても届かないことに気付ける唯一の手掛かりになる
     checkout: parseDispatchHostCheckout(payload?.checkout),
+    // 確認環境（#2444）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**
+    // （`selfUpdate`と同じ向き。配ると未知の種別として`failed`になる）
+    previewCapable: typeof payload?.preview === "boolean" ? payload.preview : null,
+    // 確認環境を起こせるリポジトリ（#2444）。**未申告（古いpoller）は`null`＝「絞り込めない」**で、
+    // そのとき画面は`repositories`をそのまま並べる。空配列へ倒すと一覧が丸ごと消える
+    previewRepositories: Array.isArray(payload?.previewRepositories)
+      ? normalizeDispatchHostRepositories(payload.previewRepositories)
+      : null,
+    // いま動いている確認環境（#2444）。**`repository`と`port`が揃わなければ全体を`null`**にし、
+    // 「動いていない」として扱う（`parseDispatchHostPreview`）。止まっているものが画面で
+    // 動いているように見えるのが、この写しでいちばん困る壊れ方
+    preview: parseDispatchHostPreview(payload?.previewState),
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

@@ -28,6 +28,9 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     selfUpdateCapable: null,
+    previewCapable: null,
+    previewRepositories: null,
+    preview: null,
     maxSessions: 12,
     liveSessions: 2,
     metrics: {
@@ -63,6 +66,7 @@ function makeSelfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJo
     resolvedCommand: null,
     manualStepLine: null,
     targetJobId: null,
+    previewAction: null,
     exitCode: null,
     commandOutput: null,
     tmuxSessionName: null,
@@ -461,6 +465,9 @@ describe("DispatchHostPanel", () => {
           hosts={[
             makeHost({
               selfUpdateCapable: true,
+              previewCapable: null,
+              previewRepositories: null,
+              preview: null,
               checkout: {
                 commit: "7b71764",
                 branch: "develop",
@@ -539,6 +546,9 @@ describe("DispatchHostPanel", () => {
   describe("更新して再起動（#1875・#1927）", () => {
     const BEHIND = makeHost({
       selfUpdateCapable: true,
+      previewCapable: null,
+      previewRepositories: null,
+      preview: null,
       checkout: {
         commit: "7b71764",
         branch: "develop",
@@ -630,6 +640,9 @@ describe("DispatchHostPanel", () => {
           hosts={[
             makeHost({
               selfUpdateCapable: true,
+              previewCapable: null,
+              previewRepositories: null,
+              preview: null,
               checkout: {
                 commit: "fbb809d",
                 branch: "develop",
@@ -660,6 +673,9 @@ describe("DispatchHostPanel", () => {
           hosts={[
             makeHost({
               selfUpdateCapable: true,
+              previewCapable: null,
+              previewRepositories: null,
+              preview: null,
               checkout: {
                 commit: "fbb809d",
                 branch: "develop",

@@ -136,7 +136,8 @@ set -euo pipefail
 # 20: npm・yarnのworktreeで重複した`node_modules`を1日1回ハードリンクへまとめる（#2124）。
 # 21: リポジトリ全体のコードレビュー（`CODE_REVIEW`）のセッションを起こす（#698）。
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
-DISPATCH_POLLER_VERSION="22"
+# 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
+DISPATCH_POLLER_VERSION="23"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -178,6 +179,9 @@ MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
 # worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
 PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
 CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
+# 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
+# developの最新をそのまま開ける開発サーバーを1本だけ起こす。
+PREVIEW_LAUNCHER="$SCRIPT_DIR/start-preview-dev.sh"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -593,6 +597,57 @@ self_update_capable() {
   fi
 }
 
+# 確認環境（#2444）を起こせるか。**スクリプトがあることだけを見る。**
+#
+# どのリポジトリを起こせるかはスクリプト側が`local-repos.conf`・`local-repo-ports.conf`から
+# 決めるので、ここで先読みしない（**判定を二重に持たない**）。起こせないリポジトリを指定された
+# 場合はスクリプトが理由を出して落ち、それがそのままジョブの失敗理由として画面に出る。
+preview_capable() {
+  if [[ -f "$PREVIEW_LAUNCHER" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# 確認環境を起こせるリポジトリ（#2444）。**判定はスクリプト側に置く。**
+#
+# 申告の`repositories`（セッションを起こせるリポジトリ）とは別物で、こちらは「開発サーバーが
+# あるか」まで見た部分集合。pollerの中に同じ条件を書くと、申告と実際の起動可否が必ずずれる。
+# 読めなければ`null`を返し、受け口は「絞り込めない」として`repositories`をそのまま使う。
+preview_repositories() {
+  local out
+  [[ -f "$PREVIEW_LAUNCHER" ]] || { printf 'null'; return 0; }
+  if ! out="$(timeout 60 bash "$PREVIEW_LAUNCHER" --repos-json 2>/dev/null)"; then
+    printf 'null'
+    return 0
+  fi
+  if ! printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    printf 'null'
+    return 0
+  fi
+  printf '%s' "$out"
+}
+
+# いま動いている確認環境（#2444）。**`--status --json`の出力をそのまま申告に載せる。**
+#
+# 状態を組み立て直すとスクリプト側の判定とずれるため、pollerは運ぶだけにする（`checkout`と
+# 同じ立場の「画面へ出すためだけの写し」）。読めなければ`null`を返し、受け口は
+# 「申告が無い」として扱う。
+preview_state() {
+  local out
+  [[ -f "$PREVIEW_LAUNCHER" ]] || { printf 'null'; return 0; }
+  if ! out="$(timeout 20 bash "$PREVIEW_LAUNCHER" --status --json 2>/dev/null)"; then
+    printf 'null'
+    return 0
+  fi
+  if ! printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
+    printf 'null'
+    return 0
+  fi
+  printf '%s' "$out"
+}
+
 # ホストのリソース使用率（#1567）。画面（実行キュー・スマホのホーム）へ出すためだけの申告で、
 # **issue-deck側はこの値で何も判定しない**（起動を止めているのは DISPATCH_MAX_SESSIONS と
 # 同時実行数だけ）。
@@ -828,10 +883,13 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
+    --argjson preview "$(preview_capable)" \
+    --argjson previewState "$(preview_state)" \
+    --argjson previewRepositories "$(preview_repositories)" \
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1908,6 +1966,56 @@ run_self_update_job() {
   exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
 }
 
+# 確認環境（#2444）を起こす・入れ替える・止める。
+#
+# **セッションは立てない。** `SELF_UPDATE`・`MANUAL_STEP`と同じ枠外のジョブで、tmuxの
+# セッション一覧の差分で成否を見る経路（`launch_and_report`）には載せない。成否は
+# スクリプトの終了コードで判定し、出力の末尾を理由として画面へ返す。
+#
+# **pollerが組み立てるのは操作の3語とリポジトリ名だけ。** ポートも起動コマンドもworktreeの場所も
+# `scripts/start-preview-dev.sh`が`local-repos.conf`・`local-repo-ports.conf`から決める
+# （`INTERRUPT`・`KILL`がセッション名を組み立て直すのと同じ作法で、この経路を「画面から任意の
+# コマンドを流せる口」にしない）。
+#
+# **起動は時間がかかる**（`pnpm install`とマイグレーションを通す）。1巡を止めないよう
+# `timeout`で上限を切り、超えたらその旨を返す（実体は動き続けるので、次の巡の申告に出る）。
+run_preview_job() {
+  local job_id="$1" full_name="$2" action="$3"
+  local out rc=0 tail_out
+
+  if [[ ! -f "$PREVIEW_LAUNCHER" ]]; then
+    report_job "$job_id" failed "確認環境のスクリプトがありません（$PREVIEW_LAUNCHER）。"
+    return 0
+  fi
+
+  case "$action" in
+    start | refresh)
+      echo "確認環境を $full_name で起動します（$action）..."
+      out="$(timeout 900 bash "$PREVIEW_LAUNCHER" "$full_name" 2>&1)" || rc=$?
+      ;;
+    stop)
+      echo "確認環境（$full_name）を停止します..."
+      out="$(timeout 120 bash "$PREVIEW_LAUNCHER" --stop "$full_name" 2>&1)" || rc=$?
+      ;;
+    *)
+      report_job "$job_id" failed "確認環境への操作が不正です: $action"
+      return 0
+      ;;
+  esac
+
+  # 画面へ返すのは末尾3行だけ。**成功時も返す**（起動したコミットとURLが出るため、押した人が
+  # 何が起きたのかをその場で確かめられる）。
+  tail_out="$(printf '%s' "$out" | grep -v '^$' | tail -3 | tr '\n' ' ')"
+  if [[ "$rc" -eq 0 ]]; then
+    report_job "$job_id" succeeded "${tail_out:-完了しました。}"
+  elif [[ "$rc" -eq 124 ]]; then
+    report_job "$job_id" failed "時間内に終わりませんでした（実体は動き続けている可能性があります）: ${tail_out}"
+  else
+    report_job "$job_id" failed "${tail_out:-失敗しました（終了コード $rc）。}"
+  fi
+  return 0
+}
+
 run_manual_step_job() {
   local job_id="$1" owner="$2" repo="$3" issue_number="$4" command="$5"
   local values_json="${6:-{\}}"
@@ -2089,6 +2197,15 @@ run_job() {
   # 効いていないことに気付く手掛かりが無かった。
   if [[ "$kind" == "SELF_UPDATE" ]]; then
     run_self_update_job "$job_id"
+    return 0
+  fi
+
+  # 確認環境（#2444）。**`SELF_UPDATE`と同じくIssueに紐づかない**ため、issueNumberには
+  # 埋め草の`0`が入っている。`local_session_validate_target`はIssue番号に`^[1-9][0-9]*$`を
+  # 求めるので、**その手前に置く**（#1927で`SELF_UPDATE`が全件失敗していたのと同じ罠）。
+  if [[ "$kind" == "PREVIEW" ]]; then
+    run_preview_job "$job_id" "$full_name" \
+      "$(printf '%s' "$job_json" | jq -r '.previewAction // ""')"
     return 0
   fi
 

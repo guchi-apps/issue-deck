@@ -23,7 +23,7 @@
 #
 # **本体の作業ツリーには一切触れない。** `git worktree add`が書くのは本体リポジトリの
 # `.git/worktrees/`だけで、チェックアウト中のブランチも未コミットの変更も動かさない
-# （developを見るためのworktreeを作る`scripts/start-develop-dev.sh`と同じ手口）。
+# （確認環境のworktreeを作る`scripts/start-preview-dev.sh`と同じ手口）。
 #
 # 質問セッションごとには分けず**リポジトリごとに固定**するのは、`_session-<repo>`（#1529）と同じ
 # 理由に加え、質問のたびに19リポジトリぶんのチェックアウトを作り直すのが無駄なため。すでに同じ

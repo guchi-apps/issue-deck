@@ -11,6 +11,7 @@ import {
   GitBranch,
   Loader2,
   Lock,
+  MonitorPlay,
   Plus,
   Rocket,
   Settings2,
@@ -61,6 +62,14 @@ type SidebarNavProps = {
   onSelectPullRequestView: (view: PullRequestViewId) => void;
   /** 「ブランチ」画面を開く（#1455） */
   onSelectFlow: () => void;
+  /** 確認環境（#2444）の画面を開く */
+  onSelectPreview: () => void;
+  /**
+   * いま確認環境が動いているか（#2444）。**動いている間だけ行に緑の点を出す。**
+   * 押し忘れて置きっぱなしになっているのを、他の画面を見ている間にも気付けるようにする
+   * （自動停止はするが、それまでサブPCのメモリを占める）。
+   */
+  previewRunning?: boolean;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
    * 使うのは年に数回で、状態を持たない入口のため。
@@ -136,6 +145,8 @@ export function SidebarNavView({
   activePullRequestView,
   onSelectPullRequestView,
   onSelectFlow,
+  onSelectPreview,
+  previewRunning = false,
   onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
@@ -319,6 +330,20 @@ export function SidebarNavView({
             emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
             // 数字（動いている数）と丸（操作待ち）で意味が違うため、内訳を吹き出しで補う
             title: describeReleaseActivity(releaseActivity),
+          })}
+          {navRow({
+            key: "preview",
+            label: "確認環境",
+            icon: MonitorPlay,
+            active: activePane === "preview",
+            onClick: onSelectPreview,
+            // **数字は出さない**（同時に動かせるのは1つなので、常に0か1にしかならない）。
+            // 動いていることは緑ではなくオレンジの丸で出す——押し忘れて置きっぱなしになって
+            // いるのは「放っておくと片付く」ものではなく、サブPCのメモリを占め続ける
+            emphasis: previewRunning ? "attention" : "none",
+            title: previewRunning
+              ? "確認環境が動いています"
+              : "developの最新をサブPCで動かして画面で確かめる",
           })}
         </ul>
       </div>

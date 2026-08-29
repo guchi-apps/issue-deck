@@ -6,6 +6,7 @@ import {
   parseDispatchHostName,
   parseDispatchJobKind,
   parseDispatchTarget,
+  parsePreviewAction,
   parseSessionInstruction,
 } from "@/lib/dispatch/dispatch-job";
 import {
@@ -15,10 +16,12 @@ import {
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
   enqueuePlanReviewJob,
+  enqueuePreviewJob,
   enqueueSessionControlJob,
   enqueueSelfUpdateJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
+import { parseRepositoryFullName } from "@/lib/local-session";
 import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
 import { listManualStepRunViews } from "@/lib/manual-step-run";
 import { runManualStepVerificationPatrol } from "@/lib/manual-step-verification-patrol";
@@ -116,6 +119,30 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json({ job: result.job }, { status: 201 });
+  }
+
+  // 確認環境（#2444）。**リポジトリは要るがIssueは持たない**ため、`target`の必須チェックより
+  // 手前に置く（`SELF_UPDATE`と同じ理由）。`repository`だけを読み、`issue`は見ない。
+  if (kind === "PREVIEW") {
+    const repositoryFullName =
+      typeof payload?.repository === "string" ? payload.repository.trim() : "";
+    const action = parsePreviewAction(payload?.action);
+    if (parseRepositoryFullName(repositoryFullName) === null || !action) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const previewResult = await enqueuePreviewJob({
+      hostName,
+      repositoryFullName,
+      action,
+      requestedByUserId: userId,
+    });
+    if (!previewResult.ok) {
+      return NextResponse.json(
+        { error: previewResult.rejection, message: previewResult.message },
+        { status: previewResult.rejection === "already_queued" ? 409 : 400 },
+      );
+    }
+    return NextResponse.json({ job: previewResult.job }, { status: 201 });
   }
 
   if (!target) {
