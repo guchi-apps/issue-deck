@@ -75,6 +75,9 @@ source "$SCRIPT_DIR/lib/personal-config-sync.sh"
 # 起動スクリプト自身（issue-deckの本体の作業ツリー）が古いままの場合の警告（#1274）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
+# 開発サーバーのポートの採番（ブラウザがブロックするポートの繰り上げを含む。#2470）。
+# shellcheck source=scripts/lib/dev-server.sh
+source "$SCRIPT_DIR/lib/dev-server.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -188,7 +191,16 @@ PROMPT_DIR="$WORKTREE_BASE/.prompts"
 WORKTREE_DIR="$WORKTREE_BASE/issue-$ISSUE_NUMBER"
 PROMPT_FILE="$PROMPT_DIR/issue-$ISSUE_NUMBER.md"
 BRANCH="issue-$ISSUE_NUMBER"
-DEV_PORT=$(( ${ISSUE_DECK_DEV_PORT_BASE:-3000} + ISSUE_NUMBER ))
+# **採番は`dev_server_port_for_issue`に任せる**（#2470）。「ベース値 + Issue番号」がブラウザの
+# ブロック対象（dayspan #566の`6566`・clip-hive #80の`10080`など）に当たる場合の繰り上げを、
+# 採番する側と止める側（cleanup-worktrees.sh）で同じ計算にするため。ここで自前で足すと、
+# 繰り上がったセッションを止める側が見つけられなくなる。
+DEV_PORT_BASE_VALUE="${ISSUE_DECK_DEV_PORT_BASE:-3000}"
+DEV_PORT_NATURAL=$(( DEV_PORT_BASE_VALUE + ISSUE_NUMBER ))
+DEV_PORT="$(dev_server_port_for_issue "$ISSUE_NUMBER" "$DEV_PORT_BASE_VALUE")"
+if [[ "$DEV_PORT" != "$DEV_PORT_NATURAL" ]]; then
+  echo "#$ISSUE_NUMBER: 注記: ポート $DEV_PORT_NATURAL はブラウザが接続を拒否するため、$DEV_PORT を使います（#2470）。"
+fi
 
 mkdir -p "$PROMPT_DIR"
 

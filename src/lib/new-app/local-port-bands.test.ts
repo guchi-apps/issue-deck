@@ -214,3 +214,56 @@ describe("シェル側の dev_server_browser_safe_port との突き合わせ", (
     expect(runDevServerLib("dev_server_browser_safe_port 26000")).toBe("26000");
   });
 });
+
+/**
+ * **Issueごとのセッションのポートも繰り上げる**（#2470）。「ベース値 + Issue番号」も
+ * `6566`（dayspan #566）・`10080`（clip-hive #80）・`6665`〜`6669`（IRC）のようにブロック対象へ
+ * 当たりうる。
+ *
+ * 繰り上げを入れる以上、**採番する側と止める側が同じ計算をしていること**が前提になる。片側だけに
+ * 入れると、止める側が繰り上げ前のポートを探しに行って起こしたセッションを止められなくなるため、
+ * 計算は`dev_server_port_for_issue`だけに置く。ここではその1か所の振る舞いと、呼び出し側が
+ * 自前で足し算へ戻っていないことを固定する。
+ */
+describe("シェル側の dev_server_port_for_issue との突き合わせ", () => {
+  function runDevServerLib(snippet: string): string {
+    return execFileSync(
+      "bash",
+      ["-c", `source "$1" && ${snippet}`, "bash", join(process.cwd(), "scripts/lib/dev-server.sh")],
+      { encoding: "utf8" },
+    ).trim();
+  }
+
+  it("ブロックされないポートは「ベース値 + Issue番号」のまま", () => {
+    expect(runDevServerLib("dev_server_port_for_issue 2470 4000")).toBe("6470");
+    expect(runDevServerLib("dev_server_port_for_issue 464 6000")).toBe("6464");
+  });
+
+  it("ブロック対象に当たるIssue番号は繰り上げる", () => {
+    // dayspan（6000帯）の #566 → 6566（X11以外のブロック対象）、#665〜#669 → IRCの6665〜6669
+    expect(runDevServerLib("dev_server_port_for_issue 566 6000")).toBe("6567");
+    expect(runDevServerLib("dev_server_port_for_issue 665 6000")).toBe("6670");
+    expect(runDevServerLib("dev_server_port_for_issue 669 6000")).toBe("6670");
+    // clip-hive（10000帯）の #80 → 10080
+    expect(runDevServerLib("dev_server_port_for_issue 80 10000")).toBe("10081");
+  });
+
+  it("ベース値は 第2引数 → ISSUE_DECK_DEV_PORT_BASE → 4000 の順で決まる", () => {
+    expect(runDevServerLib("ISSUE_DECK_DEV_PORT_BASE=6000 dev_server_port_for_issue 566")).toBe(
+      "6567",
+    );
+    expect(runDevServerLib("dev_server_port_for_issue 566")).toBe("4566");
+  });
+
+  it("採番する側が自前で「ベース値 + Issue番号」を計算しない", () => {
+    for (const name of ["start-issue.sh", "generic-start-issue.sh"]) {
+      const source = readFileSync(join(process.cwd(), "scripts", name), "utf8")
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      expect(source).toMatch(/DEV_PORT="\$\(dev_server_port_for_issue /);
+      // 繰り上げを通さない代入に戻っていないこと（`DEV_PORT_NATURAL`は注記の比較用なので別名）。
+      expect(source).not.toMatch(/^\s*DEV_PORT=\$\(\(/m);
+    }
+  });
+});
