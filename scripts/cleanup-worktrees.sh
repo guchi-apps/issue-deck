@@ -281,6 +281,9 @@ SAFE_REPO="${SAFE_REPO//[^A-Za-z0-9_-]/-}"
 # 落ちると、他リポジトリの掃除で issue-deck の同じ番号のポートを撃ちに行くことになる
 # （`dev_server_stop_by_port` はcwdも見るので実害は出ないが、そもそも渡さないのが正しい）。
 DEV_PORT_BASE="$(local_repo_port_base "$TARGET_REPO" || true)"
+# 帯の幅（#2478）。「ベース値 + Issue番号」は帯の中で折り返すため、採番と同じ値を止める側でも
+# 使う。3列目が無いリポジトリでは空になり、原則の幅（1000）に落ちる。
+DEV_PORT_WIDTH="$(local_repo_port_width "$TARGET_REPO" || true)"
 
 # --- マージ先のブランチ -------------------------------------------------------
 # リポジトリによって develop / main が混在する（#2123）。実在するものを全部拾い、
@@ -710,7 +713,7 @@ for ((i = 0; i < ${#target_dirs[@]}; i++)); do
   # 掃除でissue-deckのポートを撃ちに行くことになる。
   dev_port=""
   if [[ -n "$DEV_PORT_BASE" || "$TARGET_REPO" == "$DEFAULT_REPO" ]]; then
-    dev_port="$(dev_server_port_for_issue "$n" ${DEV_PORT_BASE:+"$DEV_PORT_BASE"} || true)"
+    dev_port="$(dev_server_port_for_issue "$n" ${DEV_PORT_BASE:+"$DEV_PORT_BASE"} ${DEV_PORT_WIDTH:+"$DEV_PORT_WIDTH"} || true)"
   fi
   if [[ -n "$dev_port" ]]; then
     dev_server_stop_by_port "$dev_port" "$dir" "$DEV_SERVER_DIR/issue-$n.log" "worktreeの削除" ||

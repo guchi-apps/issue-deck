@@ -75,23 +75,40 @@ local_repo_ports_config_file() {
   return 1
 }
 
-# 対応表からポート帯のベース値を引く。載っていなければ何も返さない
-# （そのリポジトリの既定に任せる。勝手な値を渡すと帯が二重管理になる）。
-local_repo_port_base() {
-  local target="$1" config_file line name value
+# 対応表の1行を読む共通部分。`<owner>/<repo> <ベース値> [<帯の幅>]`にだけ一致する。
+# 3列目（帯の幅・#2478）は省略でき、省略時は何も返さない（既定は呼び出し側が決める）。
+# 一致した行の値を第2引数（1=ベース値・2=帯の幅）で選んで返す。
+local_repo_port_field() {
+  local target="$1" field="$2" config_file line name
   config_file="$(local_repo_ports_config_file)" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
     [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-    [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]*$ ]] || continue
+    [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+([0-9]+)([[:space:]]+([0-9]+))?[[:space:]]*$ ]] || continue
     name="${BASH_REMATCH[1]}"
-    value="${BASH_REMATCH[2]}"
     if [[ "$name" == "$target" ]]; then
-      printf '%s\n' "$value"
+      if [[ "$field" == "2" ]]; then
+        [[ -n "${BASH_REMATCH[4]}" ]] || return 1
+        printf '%s\n' "${BASH_REMATCH[4]}"
+      else
+        printf '%s\n' "${BASH_REMATCH[2]}"
+      fi
       return 0
     fi
   done <"$config_file"
   return 1
+}
+
+# 対応表からポート帯のベース値を引く。載っていなければ何も返さない
+# （そのリポジトリの既定に任せる。勝手な値を渡すと帯が二重管理になる）。
+local_repo_port_base() {
+  local_repo_port_field "$1" 1
+}
+
+# 対応表からポート帯の幅を引く（#2478）。3列目が無ければ何も返さない
+# （原則の幅1000は採番側の既定に任せる。ここで埋めると幅が二重管理になる）。
+local_repo_port_width() {
+  local_repo_port_field "$1" 2
 }
 
 # 対象リポジトリが必要とするパッケージマネージャを判定する。リポジトリごとに違うため
