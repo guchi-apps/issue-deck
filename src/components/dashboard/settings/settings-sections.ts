@@ -1,4 +1,13 @@
-import { Activity, Bell, Boxes, Eye, History, SlidersHorizontal, UserRound } from "lucide-react";
+import {
+  Activity,
+  Bell,
+  Boxes,
+  Eye,
+  History,
+  Image as ImageIcon,
+  SlidersHorizontal,
+  UserRound,
+} from "lucide-react";
 
 /**
  * 設定の区分（#1539）。**唯一の定義がここ**で、PCの左タブとスマホの一覧が同じ配列を読む。
@@ -13,6 +22,9 @@ import { Activity, Bell, Boxes, Eye, History, SlidersHorizontal, UserRound } fro
  *
  * 「更新履歴」（#1764）は設定値を持たない読むだけの区分。バージョン表示（`AppVersionButton`）が
  * 区分の外に常設されており、そこから入る先でもある。
+ *
+ * 「画像」（#2462）は保存を押すまで効かない値を持たず、押した瞬間に**このアプリが持つデータ**を
+ * 消す。GitHubへ操作が飛ぶ「フリート運用」とは効く先が違うため別区分にし、その隣へ置いている。
  *
  * 「通知」（#838）は**端末ごとに効く設定**で、他のどの区分とも性質が違う。保存を押すまで
  * 効かない値でも、押した瞬間に走る操作でもなく、この端末のブラウザに許可と購読を作る。
@@ -43,6 +55,12 @@ export const SETTINGS_SECTIONS = [
     label: "フリート運用",
     icon: Boxes,
     description: "押すとその場で走る操作",
+  },
+  {
+    key: "images",
+    label: "画像",
+    icon: ImageIcon,
+    description: "添付した画像の一覧と削除",
   },
   { key: "status", label: "状態", icon: Activity, description: "使用量と障害状況" },
   {

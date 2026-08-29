@@ -11,6 +11,7 @@ import {
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
+import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
@@ -143,7 +144,8 @@ export function SettingsDialog({
                   expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
                 />
               )}
-              {section === "status" && (
+              {section === "images" && <ImagesSection />}
+        {section === "status" && (
                 <StatusSection
                   rateLimits={data.rateLimits}
                   apiUsage={data.apiUsage}

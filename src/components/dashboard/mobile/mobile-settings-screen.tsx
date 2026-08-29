@@ -14,6 +14,7 @@ import {
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
+import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
@@ -165,6 +166,7 @@ export function MobileSettingsScreen({
             expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
           />
         )}
+        {section === "images" && <ImagesSection />}
         {section === "status" && (
           <StatusSection
             rateLimits={data.rateLimits}
