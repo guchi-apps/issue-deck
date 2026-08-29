@@ -34,7 +34,7 @@ import {
   DISPATCH_HOST_ONLINE_WINDOW_MS,
   isActiveDispatchJobStatus,
   isDispatchHostOnline,
-  isSessionLaunchJobKind,
+  isSessionReportedJobKind,
   normalizeDispatchHostRepositories,
   OUT_OF_BAND_JOB_KINDS,
   parseDispatchHostRepositories,
@@ -339,15 +339,14 @@ async function findSessionsForStaleLaunchJobs(
 ): Promise<Map<string, string>> {
   // 制御ジョブ（枠外で走り、tmuxを1回叩いて終わる）はセッションを立てないので対象外。
   //
-  // **計画レビュー（#1855）も外す。** セッションは立てるが、名前が`-issue-`の規約から外れて
-  // いるためpollerは報告せず、`DispatchSession`の行にならない。ここで拾おうとすると、
-  // 代わりに**同じIssueの実装セッション**（計画の承認待ちで生きている）に一致し、
-  // 届かなかったレビューを「そのセッションで起動できていた」ことにしてしまう。
+  // **計画レビュー（#1855）・コードレビュー（#698）も外す。** セッションは立てるが、名前が
+  // `-issue-`の規約から外れているためpollerは報告せず、`DispatchSession`の行にならない。
+  // ここで拾おうとすると、代わりに**同じIssueの実装セッション**（計画の承認待ちなどで
+  // 生きている）に一致し、届かなかったレビューを「そのセッションで起動できていた」ことに
+  // してしまう。判定は`SESSION_REPORTED_JOB_KINDS`を正とする（#2443）。
   const launchJobs = stale.filter(
     (job) =>
-      isSessionLaunchJobKind(job.kind) &&
-      job.kind !== "PLAN_REVIEW" &&
-      (job.status === "CLAIMED" || job.status === "RUNNING"),
+      isSessionReportedJobKind(job.kind) && (job.status === "CLAIMED" || job.status === "RUNNING"),
   );
   if (launchJobs.length === 0) return new Map();
 
