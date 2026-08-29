@@ -2745,13 +2745,13 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   ない」ことが前提なので、**一覧を未認証にするとその前提が崩れる**。ファイル名の検証は
   [`lib/uploaded-images.ts`](../src/lib/uploaded-images.ts)の
   `UPLOADED_IMAGE_FILENAME_PATTERN`が唯一の正で、一覧・配信・削除の3つが同じものを読む
-  （写すと片方だけ緩んだときに防波堤が崩れる）。
+  （写すと片方だけ緩んだときに防波堤が崩れる）。**置き場のパスの正は
+  [`lib/images/image-storage.ts`](../src/lib/images/image-storage.ts)**（#2475。受け口ごとに
+  `path.join(process.cwd(), "uploads", "images")`を写していたのをやめた）。
 - 画面は設定の「画像」区分（[`settings/images-section.tsx`](../src/components/dashboard/settings/images-section.tsx)）。
   サムネイルの×で1枚ずつ消す。**削除するのはVPS上の実ファイルだけで、その画像を貼った
   Issue本文・コメントのMarkdownはGitHub側に残る**（貼り付け先では画像が表示されなくなる）ため、
-  確認ダイアログでそれを伝えてから消す。**一覧に「どのIssueで使っているか」は出さない**——
-  画像に持ち主・貼り付け先の記録が無く、コメント本文もDBに持っていないので「未使用」を正しく
-  判定できず、誤って未使用と出すと消してよいと読めてしまう。
+  確認ダイアログでそれを伝えてから消す。
 - **消しても「もう見られない」とは言い切れない。** 配信は`Cache-Control: immutable`で1年
   キャッシュさせ、GitHub.com側のIssue画面は画像プロキシ越しに表示するため、原本を消しても
   すでに開いた画面・GitHub側の表示はしばらく残る。確認ダイアログはその前提で文面を書いてある。
@@ -2761,6 +2761,57 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 - `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
   入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
   ユーザーがアップロードした画像が消える。**
+
+### 「使っていない画像」は参照の索引で判定する（#2475）
+
+**画像に持ち主・貼り付け先の記録が無いのが元の制約だった。** コメント本文もDBに持っていないため
+「未使用」を判定できず、一覧に貼り付け先を出していなかった。#2475でその索引
+（`UploadedImageReference`）を巡回で作り、容量の可視化と自動削除を載せた。
+
+- **索引の収集元は2つだけ**（[`lib/images/image-references.ts`](../src/lib/images/image-references.ts)）。
+  Issue本文はDBの`Issue.body`（GitHubのキャッシュなのでAPIを使わない・毎回全部読み直す）、
+  コメントは`GET /repos/{owner}/{repo}/issues/comments`を`since`で差分取得する。
+  **見ていないのはPR本文・PRのレビューコメント・リポジトリ内のファイル・投稿前の下書き・
+  GitHub外への貼り付け**で、そこに貼った画像は「未使用」に見える。この一覧は画面にも書く
+  （書かないと「未使用＝安全に消せる」と読まれる）。
+- **`UploadedImageReference`に外部キーを張らない。** `Issue.repository`は`onDelete: Cascade`で、
+  リポジトリの連携が外れると（`repository-sync.ts`の`deleteMany`）Issue行が全部消える。
+  FKを張ると参照も道連れになり、GitHub上では今も表示されている画像が一斉に「未使用」へ変わる。
+  **参照は消えずに古びる方が安全**。行を消すのは「その参照元をもう一度読んで、そこに画像が
+  無くなっていた」ときだけで、読まなかった参照元の行には触らない。
+- **コメントのカーソル（`Repository.imageCommentScanAt`）に巡回の開始時刻を書かない。**
+  ページ数の上限（1リポジトリ10ページ＝1,000件）で打ち切る作りなので、開始時刻を書くと
+  打ち切った残りを丸ごと飛ばす。書くのは**読み終えた最後のコメントの`updated_at`**で、
+  `since`の境界が仕様上`>`か`>=`か保証されていないぶん1分戻して重ねて読む
+  （`nextCommentScanCursor`）。並びを`sort=updated&direction=asc`で固定するのも同じ理由で、
+  `desc`にするとページングの最中に更新された項目を読み飛ばす。
+- **「全部読み終えた」は毎回計算する**（`isImageScanComplete`）。フラグを1つ持って立てっぱなしに
+  すると、マイグレーション直後やバックアップからの復元直後に「全件確認済み・参照0件」という
+  最悪の状態が成立し、次の巡回が全部消しにかかる。`AppSetting.imageScanCompletedAt`に
+  `@default(now())`を置いていないのも同じ理由。
+- **自動削除はいきなり消さず、`uploads/images/.trash/`へ`rename`する**
+  （[`lib/images/image-storage.ts`](../src/lib/images/image-storage.ts)）。ゴミ箱にある間に参照が
+  見つかれば巡回が自分で戻し（`decideTrashRestore`）、見つからないまま`IMAGE_TRASH_DAYS`
+  （既定30日）が過ぎたら完全に削除する。**猶予が二段（保持期間 → ゴミ箱）になっているのが
+  安全装置の本体**で、「参照0件を観測し続けた期間」をゴミ箱の滞在期間が兼ねている。
+  ゴミ箱は一覧に出さないが**容量には数える**（消したのに空き容量が増えていないように見えるため）。
+  **配信（`GET /api/issues/images/[filename]`）はゴミ箱も読む。** 移した瞬間に404になるのでは
+  猶予が表示の上で意味を持たず（貼り付け先の画像がその場で壊れる）、誤判定の被害を先送りに
+  できない。`Cache-Control: immutable`が効くのは既に取得済みのクライアントだけなので、
+  **ここを2か所読みにしない限り「戻せる」は人が気づいた場合の話にしかならない**。
+  移すときに`utimes`でmtimeを打ち直しているのは、`rename`がmtimeを引き継いでしまい古い画像が
+  移した瞬間に完全削除の条件を満たすため。
+- **削除の条件は5つ全部**（`decideImageCleanup`）。設定でON（既定OFF）／参照0件／保持期間
+  （`AppSetting.imageRetentionDays`・既定30日）を過ぎている／索引が一巡し終わったのが
+  画像のアップロードより後／この巡回で参照が急に減っていない。最後のものは連携解除の
+  カスケードやGitHubの一時障害で参照が一斉に消えたときに、削除を丸ごと見送るための保険。
+- 巡回はpollerから`POST /api/issues/images/cleanup-sweep`（既存の巡回4本と同じ形。間隔は
+  `IMAGE_CLEANUP_SWEEP_INTERVAL_MINUTES`・**既定60分**）。他より間隔が長いのは、初回の
+  バックログでリポジトリあたり最大1,000件のコメントを読むため。`{"full": true}`でカーソルを
+  捨てて全再スキャンできる（削除されたコメントの参照は`since`では拾えず残り続けるので、
+  溜まったら作り直す）。
+- **判定できていない画像は「未使用」ではなく「確認中」と出す。** 索引が一巡するまでは
+  `usage: "unknown"`で、自動削除の対象にも一括削除の対象にも数えない。
 - **セッションが公開したアーティファクトも同じ置き場**（`uploads/artifacts/`。#2154）。
   受け取りは`POST /api/dispatch/sessions/artifact`（`DISPATCH_SECRET`。フックから）、配信は
   `GET /api/issues/artifacts/[id]`（**ログイン必須**——画像と違い、GitHub.com側から表示する

@@ -1,5 +1,5 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { fetchAllPages } from "@/lib/github/pagination";
+import { fetchAllPages, fetchPagesUpTo } from "@/lib/github/pagination";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 export { GithubApiError } from "@/lib/github/github-api-error";
@@ -62,6 +62,52 @@ export async function fetchOpenIssuesForRepo(
     token,
   );
   return items.filter((item) => !item.pull_request);
+}
+
+/** リポジトリ単位のコメント一覧が返す1件（#2475） */
+export type GithubApiRepositoryComment = {
+  id: number;
+  body: string | null;
+  updated_at: string;
+  /** `https://api.github.com/repos/<owner>/<repo>/issues/<number>` */
+  issue_url: string;
+  /** `.../issues/<n>#issuecomment-...` か `.../pull/<n>#issuecomment-...` */
+  html_url: string;
+};
+
+/**
+ * リポジトリの全Issueコメントを`since`で差分取得する（#2475）。
+ *
+ * **Issueを1件ずつ引かない。** 添付画像の参照を集めるにはリポジトリの全コメント本文が要り、
+ * `/issues/{n}/comments`をIssueの数だけ叩くと数千リクエストになる。この受け口なら
+ * 1リクエストで100件、しかも`since`で前回の続きから取れる。
+ *
+ * **`sort=updated&direction=asc`で固定する。** ページングの最中に更新が入っても、昇順なら
+ * 更新された項目は末尾へ動くだけで、カーソル（読んだ最大の`updated_at`）が次の巡回で拾い直す。
+ * `desc`にすると先頭へ動いた項目が読み飛ばされる。
+ *
+ * **PRのコメントも返る**（GitHubではPRもIssueの一種）。参照が増える方向なので安全側。
+ * ただし差分（レビュー）コメントとレビュー本文は別の受け口で、ここには含まれない。
+ */
+export async function fetchRepositoryComments(
+  owner: string,
+  repo: string,
+  token: string,
+  options: { since: Date | null; maxPages: number },
+): Promise<{ comments: GithubApiRepositoryComment[]; hasMore: boolean }> {
+  const params = new URLSearchParams({
+    per_page: "100",
+    sort: "updated",
+    direction: "asc",
+  });
+  if (options.since) params.set("since", options.since.toISOString());
+
+  const { items, hasMore } = await fetchPagesUpTo<GithubApiRepositoryComment>(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/comments?${params.toString()}`,
+    token,
+    options.maxPages,
+  );
+  return { comments: items, hasMore };
 }
 
 export async function fetchCommentsForIssue(
