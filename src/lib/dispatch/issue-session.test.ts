@@ -343,7 +343,7 @@ describe("describeSessionReap", () => {
       session({ reapAt: "2026-08-16T12:03:10.000Z", reapReason: "PR_MERGED" }),
       NOW,
     );
-    expect(notice?.label).toBe("あと3分で自動終了");
+    expect(notice?.label).toBe("あと3分");
     expect(notice?.imminent).toBe(false);
     expect(notice?.detail).toContain("PRがマージ済みのため");
     // 畳まれた後どうなるかまで書く（続けたい場合に何をすればよいかが分かるように）
@@ -355,7 +355,7 @@ describe("describeSessionReap", () => {
       session({ reapAt: "2026-08-16T12:00:50.000Z", reapReason: "ISSUE_CLOSED" }),
       NOW,
     );
-    expect(notice?.label).toBe("まもなく自動終了");
+    expect(notice?.label).toBe("まもなく");
     expect(notice?.imminent).toBe(true);
   });
 
@@ -365,7 +365,7 @@ describe("describeSessionReap", () => {
         session({ reapAt: "2026-08-16T11:59:00.000Z", reapReason: "PR_MERGED" }),
         NOW,
       )?.label,
-    ).toBe("まもなく自動終了");
+    ).toBe("まもなく");
   });
 
   it("期限を大きく過ぎたら出さない（回収が止まっているときに残り続けさせない）", () => {

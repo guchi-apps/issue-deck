@@ -178,7 +178,7 @@ describe("DispatchHostPanel", () => {
         ]}
       />,
     );
-    expect(screen.getByText("あと3分で自動終了")).toBeTruthy();
+    expect(screen.getByText("あと3分")).toBeTruthy();
     expect(screen.queryByText(/引き渡し済みのため/)).toBeNull();
   });
 

@@ -128,3 +128,164 @@ describe("reap-sessions.sh: worktreeが消えているセッション（#2422）
     expect(result.stdout).toContain("worktreeの状態を確認できない");
   });
 });
+
+// ---------------------------------------------------------------------------
+// `11.local`をどの経路で見るか（#2474）
+//
+// 引き渡し時に`11.local`を外し忘れたセッションは、以前は期限もリトライも無い`hold`に落ちて
+// **PRがマージされても永久に残った**。畳む経路も猶予も決まらないので`.reap`が書かれず、画面に
+// 自動終了の残り時間も出ない。CLOSED・マージ済みの2経路では`11.local`を見ないようにしたが、
+// 引き渡し済みの経路（HANDOFF_*）は「`11.local`を外した＝もう作業しない」という宣言を前提に
+// 判定しているため、そちらでは従来どおり見る。この線引きが戻ると症状は画面から見えないので、
+// 境界を固定しておく。
+// ---------------------------------------------------------------------------
+
+const GH_SESSION = "issue-deck-issue-2474";
+const GH_ISSUE = 2474;
+
+const GIT_ENV = {
+  GIT_AUTHOR_NAME: "test",
+  GIT_AUTHOR_EMAIL: "test@example.com",
+  GIT_COMMITTER_NAME: "test",
+  GIT_COMMITTER_EMAIL: "test@example.com",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+
+function git(cwd, args) {
+  execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe", env: { ...process.env, ...GIT_ENV } });
+}
+
+/**
+ * cleanでpush済みのworktree（条件7を通る状態）と、応答内容を指定できる偽の`gh`を用意して
+ * 1巡ぶん実行する。
+ *
+ * - `issueState` … `gh issue view`が返すIssueの状態（`OPEN` / `CLOSED`）
+ * - `labels` … 同じく返すラベル名の配列
+ * - `mergedPr` / `openPr` … `gh pr list --state merged` / `--state open`が返すPR番号（空で無し）
+ */
+function runGh({ idleSeconds, issueState = "OPEN", labels = [], mergedPr = "", openPr = "" }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reap-sessions-label-"));
+  tempDirs.push(root);
+  const binDir = path.join(root, "bin");
+  const stateDir = path.join(root, "state");
+  const killLog = path.join(root, "kill.log");
+  const worktree = path.join(root, "worktree");
+  const origin = path.join(root, "origin.git");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(worktree, { recursive: true });
+
+  // 実物のgitは使う（`status --porcelain`と`branch -r --contains HEAD`の挙動を偽装しない）。
+  git(root, ["init", "--bare", "--initial-branch=develop", origin]);
+  git(worktree, ["init", "--initial-branch=develop"]);
+  fs.writeFileSync(path.join(worktree, "README.md"), "test\n");
+  git(worktree, ["add", "README.md"]);
+  git(worktree, ["commit", "-m", "test"]);
+  git(worktree, ["remote", "add", "origin", origin]);
+  git(worktree, ["push", "origin", `HEAD:refs/heads/issue-${GH_ISSUE}`]);
+  git(worktree, ["fetch", "origin"]);
+
+  fs.writeFileSync(
+    path.join(binDir, "tmux"),
+    [
+      "#!/usr/bin/env bash",
+      'case "$1" in',
+      `  list-sessions) printf '%s\\n' ${JSON.stringify(GH_SESSION)} ;;`,
+      "  list-panes) echo 0 ;;",
+      `  kill-session) printf '%s\\n' "$*" >>${JSON.stringify(killLog)} ;;`,
+      "  *) : ;;",
+      "esac",
+      "exit 0",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(binDir, "gh"),
+    [
+      "#!/usr/bin/env bash",
+      'args="$*"',
+      'if [[ "$1" == "issue" ]]; then',
+      `  printf '%s\\n' ${[issueState, ...labels].map((line) => JSON.stringify(line)).join(" ")}`,
+      "  exit 0",
+      "fi",
+      'case "$args" in',
+      `  *"--state merged"*) printf '%s' ${JSON.stringify(mergedPr)} ;;`,
+      `  *"--state open"*) printf '%s' ${JSON.stringify(openPr)} ;;`,
+      "esac",
+      "exit 0",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  fs.writeFileSync(
+    path.join(stateDir, `${GH_SESSION}.session`),
+    [
+      `session=${GH_SESSION}`,
+      `worktree=${worktree}`,
+      "repository=guchi-apps/issue-deck",
+      `issue=${GH_ISSUE}`,
+      "reapable=1",
+      "kind=implementation",
+      "startedAt=0",
+    ].join("\n") + "\n",
+  );
+  const eventAt = Math.floor(Date.now() / 1000) - idleSeconds;
+  fs.writeFileSync(path.join(stateDir, `${GH_SESSION}.event`), `${eventAt} Stop\n`);
+
+  const stdout = execFileSync("bash", [script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      TMUX: "",
+      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+    },
+  });
+
+  return {
+    stdout,
+    killed: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf8") : "",
+    reap: fs.existsSync(path.join(stateDir, `${GH_SESSION}.reap`))
+      ? fs.readFileSync(path.join(stateDir, `${GH_SESSION}.reap`), "utf8")
+      : "",
+  };
+}
+
+describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
+  it("11.local が付いていても、PRがマージ済みなら畳む", () => {
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local", "70.confirm"], mergedPr: "470" });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PR #470 がマージ済み");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+
+  it("11.local が付いていても、IssueがCLOSEDなら畳む", () => {
+    const result = runGh({ idleSeconds: 30 * 60, issueState: "CLOSED", labels: ["11.local"] });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain(`Issue #${GH_ISSUE} はCLOSED`);
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+
+  it("11.local が付いたマージ済みでも、猶予の内は畳む予定（PR_MERGED）を残す", () => {
+    // ここが`.reap`を書けるようになったことが#2474の主眼（画面の「あと◯分で自動終了」）
+    const result = runGh({ idleSeconds: 10, labels: ["11.local"], mergedPr: "470" });
+    expect(result.killed).toBe("");
+    expect(result.reap).toContain("PR_MERGED");
+  });
+
+  it("引き渡し済みの経路では、11.local が付いている間は残す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local"], openPr: "480" });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("11.local が付いている");
+    // 畳む経路が決まらないので終了予告も書かない（残り時間を出せる状態ではない）
+    expect(result.reap).toBe("");
+  });
+
+  it("11.local が外れていれば、従来どおり引き渡し済みの経路で畳む", () => {
+    const result = runGh({ idleSeconds: 30 * 60, openPr: "480" });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PR #480 を作成しレビューへ引き渡し済み");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+});

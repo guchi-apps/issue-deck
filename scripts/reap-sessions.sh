@@ -45,7 +45,7 @@
 #
 # 条件がすべて揃い、あとは猶予が経つのを待っているだけのセッションには、畳む予定
 # （`<セッション名>.reap` = `<期限のepoch> <理由コード>`）を書く。pollerがそれを読んで
-# issue-deckへ報告し、画面に「あと3分で自動終了」と出る。**判定はここにしか無い**
+# issue-deckへ報告し、画面に「あと3分」と出る。**判定はここにしか無い**
 # （worktreeがcleanか・push済みかはこのホストのファイルシステムにしか無く、画面側からは
 # 同じ判定を組み立てられない）。書くのは`hold_until_reap`の1か所だけで、条件を満たさない
 # セッションでは`reap_one`の入口で消える。
@@ -165,7 +165,7 @@ hold() {
 # 畳む条件は揃っているが、猶予がまだ経っていないセッション（#1817）。**残す動きはこれまでと
 # 同じで、加えて「いつ・なぜ畳むか」を状態ファイル（`.reap`）へ残す。**
 #
-# pollerがこれを読んでissue-deckへ報告し、画面に「あと3分で自動終了」と出る。残り時間を出せる
+# pollerがこれを読んでissue-deckへ報告し、画面に「あと3分」と出る。残り時間を出せる
 # のはここだけで、判定材料のうちworktreeがcleanか・push済みかはこのホストにしか無い。
 #
 # **`--dry-run`では書かない**（何も変えない道具という性質を保つ）。代わりに残り分数を表示に出す。
@@ -220,7 +220,7 @@ reap_one() {
   local alive_panes event_line event_at event_name idle_for
   local idle_minutes idle_seconds
   local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
-  local merged_pr open_pr handoff_reason handoff_hold handoff_code reason
+  local local_label merged_pr open_pr handoff_reason handoff_hold handoff_code reason
 
   # 記述子が無いセッションには触らない。**これが「巻き込んではいけないもの」への線引き**で、
   # 他リポジトリの作業用セッション・人が手で立てたセッション・この仕組みより前から動いている
@@ -404,8 +404,19 @@ reap_one() {
 
   # --- 作業が終わっているか（GitHub側の事実） ---
   # `11.local`はランチャーが起動時に付け、**実装エージェントが引き渡し時に自分で外す**ラベル
-  # （scripts/prompts/implementation-agent.md）。付いている間はローカルで作業中なので畳まない。
-  # 「巻き込んではいけないもの」であると同時に、ローカル作業の終了宣言そのものでもある。
+  # （scripts/prompts/implementation-agent.md）。ローカル作業の終了宣言そのものにあたる。
+  #
+  # **見るのは引き渡し済みの経路だけ**（#2474）。以前はここで無条件に残していたため、外し忘れた
+  # セッションはPRがマージされても永久に残り、しかも畳む経路も猶予も決まらないので`.reap`が
+  # 書かれず、**画面に自動終了の残り時間すら出なかった**（実例: guchi-apps/dayspan#467。
+  # IssueはOPEN・`11.local`付きのまま、ブランチのPRはマージ済みだった）。成果物が本流へ入って
+  # いる以上、そのworktreeでローカル作業を続ける理由は無い。人が触っている最中に消える心配は
+  # 他の条件が受け持つ（最後のイベントが`Stop`＝承認待ち・作業中は畳まない、worktreeがcleanで
+  # push済み）。畳んでもworktreeは残り、画面から起動し直せば前回の会話の続きから再開する。
+  #
+  # 代わりに、`11.local`付きでIssueがOPENのセッションでは毎巡`gh pr list`（マージ済み）を1回
+  # 余計に叩く。判定を安い順に並べる方針（この関数の冒頭）からは外れるが、この1回が無いと
+  # マージ済みかどうかが分からない。
   if ! issue_info="$(gh issue view "$issue_number" --repo "$repository" \
     --json state,labels --jq '.state, (.labels[].name)' 2>/dev/null)"; then
     hold "$session" "Issueの状態を取得できない（$repository #$issue_number）"
@@ -413,12 +424,15 @@ reap_one() {
   fi
   issue_state="$(printf '%s\n' "$issue_info" | head -1)"
   issue_labels="$(printf '%s\n' "$issue_info" | tail -n +2)"
+  local_label=0
   if printf '%s\n' "$issue_labels" | grep -Fxq "11.local"; then
-    hold "$session" "11.local が付いている（ローカルで作業中）"
-    return 0
+    local_label=1
   fi
 
   # 成果物が本流に入ったか、Issue自体が終わっているか。
+  # **この2経路は`11.local`を見ない**（#2474）。理由コードは従来どおり`ISSUE_CLOSED`・
+  # `PR_MERGED`なので、画面（`describeSessionReap`）側に増やすものは無い。
+  #
   # **`22.merge-confirm-required`の特別扱いは要らない。** 人がマージするまでPRはopenのままなので、
   # マージ済みの経路では自動的に残る（ラベルを見る箇所を増やさない）。
   #
@@ -443,7 +457,16 @@ reap_one() {
       fi
       reason="PR #$merged_pr がマージ済み"
     else
-      # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（条件5を通っている）＝
+      # **`11.local`を見るのはここだけ**（#2474）。この経路の判定は「`11.local`を外した＝この
+      # セッションでもう作業しない」という宣言を前提に組んであり、無視すると経路の意味そのものが
+      # 崩れる（PRを出しただけ・PRを作らずに終えただけで、まだローカルで続けているセッションが
+      # 猶予5分で畳まれる）。マージ済み・CLOSEDと違って、成果物が本流へ入った証拠がまだ無い。
+      if [[ "$local_label" -eq 1 ]]; then
+        hold "$session" "11.local が付いている（ローカルで作業中）"
+        return 0
+      fi
+
+      # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（すぐ上）＝
       # このセッションでもう作業しないという実装エージェント自身の宣言にあたる。ここから先は
       # PRを作ったか（#1541）・作らずに終わったか（#1600）で理由だけが分かれる。マージまで
       # 残すと、人の確認待ちのPRを抱えたセッションが本数の上限（#1361）を埋めて、後続の

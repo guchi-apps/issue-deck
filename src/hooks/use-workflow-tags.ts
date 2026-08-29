@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isPropagationRunning,
   type PropagationRun,
+  type SourceAhead,
   type WorkflowTagStatus,
 } from "@/lib/workflow-tags";
 
@@ -16,6 +17,8 @@ type Overview = {
   repairPropagation: PropagationRun | null;
   /** ワークフロー以外の配布物の更新（#2240）。これも別のrun */
   sharedFilePropagation: PropagationRun | null;
+  /** 配布元（`main`）が最新タグからどれだけ進んでいるか（#2476）。取れなければ null */
+  sourceAhead: SourceAhead | null;
 };
 
 /** 配布ワークフローが動いている間の再取得間隔。PRの作成は1リポジトリあたり数秒〜数十秒 */

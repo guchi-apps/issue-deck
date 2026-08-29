@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
-import type { PropagationRun, WorkflowTagStatus } from "@/lib/workflow-tags";
+import type { PropagationRun, SourceAhead, WorkflowTagStatus } from "@/lib/workflow-tags";
 
 /**
  * 「共有ワークフローのバージョン」パネルの表示と、連続押下の防止（#1602）。
@@ -38,6 +38,8 @@ function mockFetch(overview: {
   propagation: PropagationRun | null;
   repairPropagation?: PropagationRun | null;
   sharedFilePropagation?: PropagationRun | null;
+  /** 配布元（`main`）の進み具合（#2476）。省略すると取れなかった扱い */
+  sourceAhead?: SourceAhead | null;
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === "POST") {
@@ -54,6 +56,20 @@ function mockFetch(overview: {
                 files: [".github/scripts/signaly-notify.sh"],
               },
             ],
+          }),
+        } as Response;
+      }
+      // 新しいタグを切って配る（#1876）。`{ tag, propagation }`の形で返る
+      if (String(input).includes("workflow-tags/release")) {
+        return {
+          ok: true,
+          json: async () => ({
+            tag: { created: true, tag: "workflows/v20", sha: "abc1234" },
+            propagation: {
+              dispatched: true,
+              tag: "workflows/v20",
+              repositories: ["guchi-apps/car-care"],
+            },
           }),
         } as Response;
       }
@@ -77,7 +93,12 @@ function mockFetch(overview: {
     }
     return {
       ok: true,
-      json: async () => ({ repairPropagation: null, sharedFilePropagation: null, ...overview }),
+      json: async () => ({
+        repairPropagation: null,
+        sharedFilePropagation: null,
+        sourceAhead: null,
+        ...overview,
+      }),
     } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -181,6 +202,96 @@ describe("WorkflowTagStatusSection", () => {
     expect(await screen.findByText("最新（1）")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /へ更新する/ })).toBeNull();
     expect(screen.queryByText(repositoryNameMatcher("guchi-apps/car-care"))).toBeNull();
+  });
+
+  /** 「すべて最新」の1件。#2476のケースはどれもこの形から始まる */
+  function latestStatus() {
+    return status({
+      refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
+      outdated: false,
+    });
+  }
+
+  /** 進み具合の1行は`{n}`を挟んで分かれるため、spanの全文で引く */
+  function noteMatcher(text: string) {
+    return (_: string, element: Element | null) =>
+      element?.tagName === "SPAN" && element.textContent === text;
+  }
+
+  it("すべて最新でも「新しいタグを切って配る」は出す（#2476）", async () => {
+    // 全リポジトリが揃った＝配布が一巡した状態こそ、次のタグを切る場面。ここで導線が
+    // 消えると、issue-deck側の改善を他リポジトリへ届ける手段が画面から無くなる
+    const fetchMock = mockFetch({
+      latest: "workflows/v19",
+      repositories: [latestStatus()],
+      propagation: null,
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "新しいタグを切って配る" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            init?.method === "POST" && String(input).includes("/api/workflow-tags/release"),
+        ),
+      ).toBe(true);
+    });
+    // 自動マージの選択も一緒に残す（切ったタグを配るPRに効くため）
+    expect(screen.getByText("作成したPRを自動でマージする")).toBeTruthy();
+  });
+
+  it("mainが最新タグより進んでいれば、コミット数と差分へのリンクを出す（#2476）", async () => {
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [latestStatus()],
+      propagation: null,
+      sourceAhead: {
+        tag: "workflows/v19",
+        aheadBy: 3,
+        compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+      },
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText(noteMatcher("main は v19 より 3 コミット進んでいます"))).toBeTruthy();
+    expect(screen.getByText("差分を見る").getAttribute("href")).toBe(
+      "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+    );
+  });
+
+  it("mainが進んでいなければ、切っても中身が変わらないと出す（#2476）", async () => {
+    // **押せなくはしない。** 切り直したい場面はあるので、無駄打ちだと分かれば足りる
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [latestStatus()],
+      propagation: null,
+      sourceAhead: {
+        tag: "workflows/v19",
+        aheadBy: 0,
+        compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+      },
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(
+      await screen.findByText(
+        noteMatcher("main は v19 と同じ内容です。切っても配る中身は変わりません。"),
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("最新タグを取得できないときは、タグを切るボタンを出さない（#2476）", async () => {
+    // 次の版数を決められない。押しても`no_latest`で返るだけになる
+    mockFetch({ latest: null, repositories: [latestStatus()], propagation: null });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(await screen.findByText("最新（1）")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新しいタグを切って配る" })).toBeNull();
   });
 
   it("uses と prompts-ref の不一致は、結果と同じ段ではなく別の段へ出す（#1952）", async () => {

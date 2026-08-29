@@ -164,6 +164,48 @@ dev_server_wildcard_listening() {
   return 1
 }
 
+# ブラウザが接続を拒否するポート（#2466）。
+#
+# Chrome・Firefox・Safariは、他プロトコルの既定ポート（6000ならX11）へHTTPで繋ぐことを既定で
+# 拒否する（Chromeなら`ERR_UNSAFE_PORT`）。**開発サーバーがそのポートで正しく待ち受けていても
+# 画面は開けず、ホスト名がlocalhostでもtailnetのMagicDNS名でも同じ**なので、繋ぐ側では直せない。
+# 払い出す側で避けるしかない。
+#
+# 載せるのは**1000以上のものだけ**。ポート帯のベース値は1000以上（scripts/local-repo-ports.conf）で、
+# 実際のポートは「ベース値 + Issue番号」か「ベース値 + 0」なので、1000未満は出てこない。
+#
+# **この一覧はTypeScript側と二重に持っている**（src/lib/new-app/local-port-bands.ts の
+# `BROWSER_BLOCKED_PORTS`）。帯を払い出すのは画面側、実際に起動するのはこちらで、片方だけ直すと
+# 「払い出せた帯なのに確認環境が開けない」という形でずれる。突き合わせは
+# src/lib/new-app/local-port-bands.test.ts が行うので、**変えるときは両方を揃える**。
+DEV_SERVER_BROWSER_BLOCKED_PORTS="1719 1720 1723 2049 3659 4045 5060 5061 6000 6566 6665 6666 6667 6668 6669 6697 10080"
+
+# そのポートがブラウザにブロックされるなら0を返す。
+dev_server_browser_blocked_port() {
+  local port="$1" blocked
+  for blocked in $DEV_SERVER_BROWSER_BLOCKED_PORTS; do
+    [[ "$port" == "$blocked" ]] && return 0
+  done
+  return 1
+}
+
+# ブラウザで開けるポートを返す。ブロックされるポートなら、開けるものが見つかるまで1ずつ繰り上げる。
+#
+# **繰り上げる（下げない）のは、帯の中で先に使われるのが小さいIssue番号だから。** 6000で塞がれる
+# 確認環境（ベース値 + 0）は6001へ動くが、そこはIssue #1のセッションが使う値で、Issue番号は
+# 単調増加するため実際に取り合いになることはまず無い。逆に下げると隣の帯（前のリポジトリの
+# Issue #999）へはみ出す。
+#
+# Issueごとのセッション（ベース値 + Issue番号）もこれを通す（#2470。`dev_server_port_for_issue`）。
+dev_server_browser_safe_port() {
+  local port="$1"
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  while dev_server_browser_blocked_port "$port"; do
+    port=$((port + 1))
+  done
+  printf '%s' "$port"
+}
+
 # 対象Issueの開発サーバーが使うポート（#1524）。
 #
 # ポートは「ベース値 + Issue番号」で一意に決まる（scripts/local-repo-ports.conf・
@@ -171,11 +213,35 @@ dev_server_wildcard_listening() {
 # 持たない開発サーバー（後述の`dev_server_stop_by_port`）を引く唯一の手掛かりになる。
 #
 # ベース値は第2引数 → `ISSUE_DECK_DEV_PORT_BASE` → issue-deckの帯（4000）の順で決める。
+#
+# **ブラウザがブロックするポートに当たったら繰り上げる**（#2470）。「ベース値 + Issue番号」も
+# 6000以外のブロック対象に当たりうる（dayspan #566 → `6566`、dayspan #665〜#669 → IRCの
+# `6665`〜`6669`、clip-hive #80 → `10080`）。開発サーバーは正しく待ち受けるが、画面が案内する
+# URLをブラウザが開けない。
+#
+# **採番する側と止める側の計算をこの関数だけに置くのが前提**（#2470）。片側にだけ繰り上げを
+# 入れると、止める側が繰り上げ前のポートを探しに行って**起こしたセッションを止められなくなる**。
+# 呼び出し元は次の3か所で、いずれも自前で`base + 番号`を計算しない。
+#
+#   scripts/start-issue.sh          issue-deck自身のセッションの採番と、`--recreate`前の停止
+#   scripts/generic-start-issue.sh  汎用ランチャー（#1224）の採番
+#   scripts/cleanup-worktrees.sh    worktreeを消す前の停止（#1524）
+#
+# **繰り上げた先は同じ帯の別Issueのポートと重なる**（`6566`→`6567`は#567、`6665`〜`6669`は
+# まとめて`6670`で#670とも重なる）。これは避けようがない——帯の中のどのオフセットも別のIssue番号
+# でありうるため、「ベース値 + Issue番号」を保ったまま衝突しない写像は作れない（ブロック対象より
+# 後ろを全部1つずつずらす写像なら作れるが、今まで動いていたIssueのポートまで動く）。
+# **重なった2つが同時に起動していなければ実害は無い**ので、次の2つで受ける。
+#
+#   - 起動側: 掴めなかったことは`dev_server_wait_for_port`（#2464）が検出して警告する。
+#     そのポートを別のworktreeが掴んでいれば`dev_server_port_owner_worktrees`が相手を添える
+#   - 停止側: `dev_server_stop_by_port`はcwdで対象worktreeに絞るため、同じポートで待ち受けて
+#     いる別Issueの開発サーバーを巻き込むことはない
 dev_server_port_for_issue() {
   local issue_number="$1" base="${2:-${ISSUE_DECK_DEV_PORT_BASE:-4000}}"
   [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || return 1
   [[ "$base" =~ ^[0-9]+$ ]] || return 1
-  printf '%s' "$((base + issue_number))"
+  dev_server_browser_safe_port "$((base + issue_number))"
 }
 
 # そのポートで待ち受けているプロセスのPIDを列挙する（#1524）。
@@ -193,6 +259,79 @@ dev_server_port_listener_pids() {
   command -v ss >/dev/null 2>&1 || return 0
   ss -tlnpH "sport = :$port" 2>/dev/null |
     grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true
+}
+
+# そのポートを掴んでいるプロセスのworktree（cwd）のうち、自分以外を列挙する（#2470）。
+#
+# 「ベース値 + Issue番号」がブロック対象に当たって繰り上がると、繰り上げ先は同じ帯の別Issueの
+# ポートと重なる（`dev_server_port_for_issue`）。両方が同時に起動していると後から起こしたほうが
+# ポートを掴めないため、**掴めなかったときに誰が掴んでいるのか**を警告へ添えるために使う。
+#
+# `ss`が無い環境と、掴んでいるのが自分だけの場合は何も出力しない。`tailscale serve`はrootで
+# 動いていてPIDが見えないため、そもそもここには出てこない。
+dev_server_port_owner_worktrees() {
+  local port="$1" self="${2:-}" pid cwd
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
+  while read -r pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    cwd="$(dev_server_cwd_of "$pid" || true)"
+    [[ -n "$cwd" ]] || continue
+    [[ -n "$self" && "$cwd" == "$self" ]] && continue
+    printf '%s\n' "$cwd"
+  done < <(dev_server_port_listener_pids "$port") | sort -u
+  return 0
+}
+
+# そのworktreeで動いているプロセスが待ち受けているTCPポートを列挙する（#2464）。
+#
+# 「起動したはずのポートに誰も居ない」ときに、**実際にはどこで待ち受けているのか**を
+# 添えるために使う。ポートだけを見る`dev_server_port_listener_pids`とは向きが逆で、
+# worktreeを手掛かりにポートを引く。
+#
+# `ss`が無い環境では何も出力しない（判定できないので黙る）。
+dev_server_listening_ports_for_worktree() {
+  local worktree_dir="$1" local_addr pid port cwd
+  [[ -n "$worktree_dir" ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  while read -r local_addr pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    cwd="$(dev_server_cwd_of "$pid" || true)"
+    [[ "$cwd" == "$worktree_dir" ]] || continue
+    # IPv6は `[::1]:3000` の形なので、最後の `:` から後ろを取る
+    port="${local_addr##*:}"
+    [[ "$port" =~ ^[1-9][0-9]*$ ]] || continue
+    printf '%s\n' "$port"
+  done < <(ss -tlnpH 2>/dev/null |
+    awk '{ if (match($0, /pid=[0-9]+/)) print $4, substr($0, RSTART + 4, RLENGTH - 4) }') |
+    sort -un
+  return 0
+}
+
+# 起動した開発サーバーが、**意図したポートを実際に掴んだか**を待って確かめる（#2464）。
+#
+# PORTの受け渡しは環境変数とenvファイルの2経路あるが、**対象リポジトリの`dev`スクリプトが
+# どちらも見ない**ことがある（`next dev`をポート決め打ちで叩いている、独自の変数名を使って
+# いる等）。そのとき開発サーバー自体は起動するので「起動した」で先へ進んでしまい、待ち受けは
+# 既定の3000のまま、画面・状態ファイル・tailnetのURLだけが指定したポートを指し続ける。
+# #2464のguchi-apps/dayspanの確認環境がこれで、案内された6000には誰も居なかった。
+#
+# 掴めば0、猶予（既定30秒）の間に掴まなければ1を返す。**判定できない環境（`ss`が無い）では
+# 0を返す**（起動を止めない側＝静かな側に倒す）。第4引数にPIDを渡すと、そのプロセスが
+# 消えた時点で待つのをやめる（落ちた開発サーバーを猶予いっぱい待たない）。
+dev_server_wait_for_port() {
+  local port="$1" worktree_dir="$2" timeout_seconds="${3:-30}" pid="${4:-}" i found
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  for ((i = 0; i < timeout_seconds * 2; i++)); do
+    while read -r found; do
+      [[ "$found" == "$port" ]] && return 0
+    done < <(dev_server_listening_ports_for_worktree "$worktree_dir")
+    if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    sleep 0.5
+  done
+  return 1
 }
 
 # そのPIDが開発サーバーの構成要素に見えるか（#1524）。

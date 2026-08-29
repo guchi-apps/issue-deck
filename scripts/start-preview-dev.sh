@@ -41,7 +41,7 @@
 # 環境変数:
 #   ISSUE_DECK_PREVIEW_STATE_FILE 動いている確認環境の記録先
 #   ISSUE_DECK_WORKTREE_BASE      worktreeの置き場（既定: ~/apps/<repo>-worktrees）
-#   ISSUE_DECK_DEVELOP_DEV_PORT   使うポート（既定: 帯のベース値 + 0）
+#   ISSUE_DECK_DEVELOP_DEV_PORT   使うポート（既定: 帯のベース値 + 0。ブラウザがブロックするポートなら繰り上げる）
 #   ISSUE_DECK_DEV_PORT_BASE      ポートのベース値（既定: scripts/local-repo-ports.conf の帯）
 #   ISSUE_DECK_DEV_COMMAND        開発サーバーの起動コマンド（既定: 判定したパッケージマネージャ）
 #   PREVIEW_IDLE_MINUTES          何分アクセスが無ければ回収するか（既定60・表示にのみ使う）
@@ -205,7 +205,7 @@ resolve_base_branch() {
 
 # 対象リポジトリの置き場・ポート・起動コマンドを決める。解決できなければ1を返す。
 resolve_target() {
-  local full_name="$1" repo port_base package_manager worktree_base
+  local full_name="$1" repo port_base default_port package_manager worktree_base
 
   if ! REPO_PATH="$(local_repo_resolve_path "$full_name")"; then
     echo "Error: $full_name のチェックアウト先が ~/.config/issue-deck/local-repos.conf にありません。" >&2
@@ -224,8 +224,18 @@ resolve_target() {
 
   # Issue番号は1以上なので、帯のベース値そのもの（+0）はどのIssueのworktreeとも衝突しない。
   # 帯の一覧は scripts/local-repo-ports.conf を参照。
+  #
+  # **ベース値がブラウザのブロック対象なら繰り上げる**（#2466）。dayspanの帯は6000で、6000は
+  # X11用としてChrome・Firefox・Safariが既定で拒否する（`ERR_UNSAFE_PORT`）。待ち受けが正しくても
+  # 案内するURLを開けないので、ここで開けるポートへ寄せる（判定は scripts/lib/dev-server.sh）。
+  # Issueごとのセッション（ベース値 + Issue番号）も同じ判定を通る（#2470。
+  # `dev_server_port_for_issue`）。当たるのは6000だけではないため、そちらにも繰り上げが要る。
   port_base="${ISSUE_DECK_DEV_PORT_BASE:-$(local_repo_port_base "$full_name" || echo 3000)}"
-  DEV_PORT="${ISSUE_DECK_DEVELOP_DEV_PORT:-$((port_base + 0))}"
+  default_port="$(dev_server_browser_safe_port "$((port_base + 0))")"
+  DEV_PORT="${ISSUE_DECK_DEVELOP_DEV_PORT:-$default_port}"
+  if [[ -z "${ISSUE_DECK_DEVELOP_DEV_PORT:-}" && "$default_port" != "$((port_base + 0))" ]]; then
+    echo "注記: ポート $((port_base + 0)) はブラウザが接続を拒否するため、$default_port を使います（#2466）。"
+  fi
 
   # **開発サーバーを持たないリポジトリがある**（vps・subpc・docs・claude-config・ideas）。
   # 帯だけは確保してあるので、ポートは引けても起こすものが無い。ここで断ってしまう。
@@ -528,6 +538,17 @@ fi
 # セッション（run-issue-session.sh）と同じく「devサーバー → serve」の順で張る。
 export ISSUE_DECK_DEV_HOST="${ISSUE_DECK_DEV_HOST:-127.0.0.1}"
 
+# **ポートは環境変数で渡す（#2464）。** 上のenvファイルへの書き込みは`.env.local` / `.env`が
+# **既にある**ときしか動かない。`supply_env_files`は本体チェックアウトに無ければ何もしないので、
+# envファイルを使わないリポジトリ（dayspan・clip-hive・portfolio など）ではPORTがどこにも
+# 書かれず、リポジトリ側の既定（`PORT=${PORT:-3000}`）に落ちていた。状態ファイルと画面だけが
+# 6000を指し続け、利用者からは原因が全く見えない状態になる。
+#
+# envファイルへの書き込みは残す（手で`pnpm dev`を叩き直す経路のため）。envファイルを持つ
+# リポジトリではそちらが勝つ（`scripts/dev.sh`が`set -a; source .env.local`で読む）が、
+# 書いてある値は同じポートなので結果は変わらない。
+export PORT="$DEV_PORT"
+
 PREVIEW_REPOSITORY="$TARGET"
 PREVIEW_WORKTREE="$WORKTREE_DIR"
 PREVIEW_PORT="$DEV_PORT"
@@ -575,6 +596,31 @@ if [[ -z "$(preview_running)" ]]; then
   tail -n 20 "$DEV_LOG" >&2 || true
   rm -f "$DEV_PID_FILE"
   clear_state
+  exit 1
+fi
+
+# **指定したポートを本当に掴んだかを確かめる（#2464）。** 対象リポジトリの`dev`スクリプトが
+# `PORT`（環境変数・envファイルのどちらも）を見ない場合、プロセスは生きているのに待ち受けは
+# 別のポートになる。ここを見ずに先へ進むと、状態ファイル・issue-deckの画面・tailnetのURLの
+# すべてが**誰も居ないポート**を指したまま残り、「起動しました」と言われた側からは原因に
+# 辿り着けない（#2464で実際にそうなった）。
+#
+# **黙って実際のポートへ合わせない。** そのポートは他リポジトリの帯と衝突しうるうえ、
+# 対象リポジトリ側の直すべき不備が見えなくなる。止めて理由を出す。
+if ! dev_server_wait_for_port "$DEV_PORT" "$WORKTREE_DIR" 30 "$(cat "$DEV_PID_FILE" 2>/dev/null || true)"; then
+  ACTUAL_PORTS="$(dev_server_listening_ports_for_worktree "$WORKTREE_DIR" | tr '\n' ' ')"
+  ACTUAL_PORTS="${ACTUAL_PORTS% }"
+  if [[ -n "$ACTUAL_PORTS" ]]; then
+    MESSAGE="確認環境がポート $DEV_PORT ではなく $ACTUAL_PORTS で待ち受けています。$TARGET の dev スクリプトが環境変数 PORT を見ていません。"
+  else
+    MESSAGE="確認環境がポート $DEV_PORT を掴めませんでした（待ち受けが1つも見つかりません）。"
+  fi
+  echo "Error: $MESSAGE" >&2
+  echo "       案内するURLと実際の待ち受けが食い違うため、起動を取り消します。ログ: $DEV_LOG" >&2
+  dev_server_log_event "$DEV_LOG" "$MESSAGE 起動を取り消します。"
+  tail -n 20 "$DEV_LOG" >&2 || true
+  save_state
+  stop_preview "ポートの不一致による起動の取り消し" || true
   exit 1
 fi
 
