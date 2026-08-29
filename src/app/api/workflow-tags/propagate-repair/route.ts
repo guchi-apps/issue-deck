@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { dispatchRepairPropagation } from "@/lib/github/workflow-tags";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * 置かれていないcallerが有るリポジトリへ、それを追加するPRを一括作成する（#1948・#1475）。
@@ -15,6 +16,8 @@ import { dispatchRepairPropagation } from "@/lib/github/workflow-tags";
  * 機械的な置換（#1602の自動マージ例外）とは別物**のため、常にPRの作成までで止める。
  */
 export function POST() {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("workflow_tags", () => handlePOST());
 }
 

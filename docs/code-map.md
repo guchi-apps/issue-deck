@@ -569,6 +569,30 @@ Next.js 16 で `middleware.ts` は `proxy.ts` にリネームされた。Supabas
 [../src/proxy.ts](../src/proxy.ts) が `lib/supabase/middleware.ts` の `updateSession` を呼んでいる。
 `middleware.ts` を探しても見つからないのはこのため。
 
+## `PREVIEW_MODE`のガードはルートごとの手書き。追加したらテストで固定する（#2441）
+
+`proxy.ts`は書き込みを止めない。プレビュー環境で本番のGitHubへ書かせないための403は
+[../src/lib/preview-mode.ts](../src/lib/preview-mode.ts)の`previewModeGuard()`が返すが、**これは各
+ルートの`POST`/`PATCH`/`DELETE`の先頭で個別に呼ぶ約束**で、共通の入口は無い。呼び忘れても型もLintも
+何も言わないため、**新しい書き込み系ルートは既定で素通りする側から始まる**（#2441で配布系4ルートが
+1年以上その状態だった）。
+
+```ts
+export function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
+  return withGithubApiFeature("workflow_tags", () => handlePOST(request));
+}
+```
+
+- 置くのは`withGithubApiFeature`の**外側**。あのラッパーは計測だけを行い、内部に403分岐を挟めない
+- **見落としは画面から気付けない。** worktreeの`.env.local`には`PREVIEW_MODE=true`が入っているので、
+  塞げているルートは押しても何も起きず、塞げていないルートだけが本番へ通る（配布系は14リポジトリへ
+  PRが出る）。「押したら動いた」は、ガードが無いことの証拠
+- ルートごとの`route.test.ts`で、`process.env.PREVIEW_MODE = "true"`のとき403を返し**本体の関数が
+  呼ばれない**ことを1本ずつ固定する（`src/app/api/workflow-tags/*/route.test.ts`）。次に同じ系統の口が
+  増えたときに落ちる
+
 ## データの流れ
 
 - **Issueの一次情報源はGitHub、MySQLはキャッシュ。** `lib/github/sync-issues.ts` が取得結果を
