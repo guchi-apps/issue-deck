@@ -646,15 +646,16 @@ jobs:
                 REVIEW="$(printf '%s' "$MARKER" | sed -nE 's/.*review=([a-z-]+).*/\1/p')"
                 RISK="$(printf '%s' "$MARKER" | sed -nE 's/.*risk=([a-z-]+).*/\1/p')"
               fi
-              # レビュー本体が投稿したPRコメント(#2488)。総評の判定マーカーが末尾に付いている
-              # ものだけを拾う——同じPRには実装者・自動修復・fallbackのコメントも並ぶため、
+              # レビュー本体が投稿したPRコメント(#2488)。総評の判定マーカー(#2448)か、
+              # ワークフローが転記したときの印(`issue-deck-review-report`)が付いているものだけを
+              # 拾う——同じPRには実装者・自動修復・fallbackのコメントも並ぶため、
               # 「claude[bot]の最後のコメント」では別のものを引く。追いコミットで複数回
               # レビューされている場合は最後のものが今の中身に対する判定になる
               REVIEW_BODY="$(printf '%s' "$PR_JSON" | jq -r '
-                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) ")) ]
+                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
                 | last // empty | .body // ""')"
               REVIEW_URL="$(printf '%s' "$PR_JSON" | jq -r '
-                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) ")) ]
+                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
                 | last // empty | .url // ""')"
             fi
             # 文言はreusable-claude-review-develop.yml側と対。画面
@@ -680,13 +681,19 @@ jobs:
             [ -n "$REVIEW_BODY" ] || continue
             [ "$(wc -c < "$DETAILS")" -lt "$DETAIL_BUDGET_BYTES" ] || continue
             # マーカー行(`<!-- ... -->`)は読み手に見えないうえ、画面側の読み取りと紛れる
-            # (grepではなくsedなのは、全行がマーカーだったときに終了コード1で落とさないため)
+            # (grepではなくsedなのは、全行がマーカーだったときに終了コード1で落とさないため)。
+            #
+            # **引用(`> `)にして差し込む。** レビューコメントは自由記述のMarkdownで、`## 総評`の
+            # ような見出しも`- #123`のような箇条書きも入る。素のまま埋めると、リリースPR本文を
+            # 見出しで区切って読む側(`reusable-issue-labels.yml`の`## 対象issue`の切り出し・
+            # `release-verification.ts`の表)の相手が、レビューの書きぶりで変わってしまう。
+            # 引用にすると行頭が`> `になり、どの節の読み取りにも掛からない
             printf '%s\n' "$REVIEW_BODY" | tr -d '\r' | sed '/^[[:space:]]*<!--/d' \
               | awk -v maxlines="$DETAIL_MAX_LINES" -v maxchars="$DETAIL_MAX_CHARS" '
                   NR > maxlines || chars + length($0) + 1 > maxchars { truncated = 1; exit }
                   { chars += length($0) + 1; print }
                   END { if (truncated) print "\n（長いため以降を省略しました。全文は元のレビューコメントで読めます）" }
-                ' > /tmp/release-review-comment.md
+                ' | sed 's/^/> /; s/^> $/>/' > /tmp/release-review-comment.md
             {
               echo "<details>"
               echo "<summary>#${NUM} の自動レビュー（${REVIEW_CELL}）</summary>"

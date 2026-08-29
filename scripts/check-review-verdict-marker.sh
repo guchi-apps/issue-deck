@@ -48,6 +48,17 @@ if grep -q 'allowedTools .*Bash(gh issue edit' "$WORKFLOW"; then
   fail=1
 fi
 
+# 逆に、レビュー結果をPRへ投稿する道具は**必ず渡す**（#2488）。プロンプトは「PRへのコメントとして
+# 投稿する」ことと「末尾に総評の判定マーカーを付ける」ことを求めているのに、`gh pr comment`が
+# allowedToolsに無かったため、レビューは走っているのに結果が1件も残っていなかった
+# （PR本文の`## 検証結果`は`review=unavailable`、リリースPRの表は全行が「記録なし」）。
+# prompt modeのclaude-code-actionは結果を自分では投稿しないので、ここが唯一の投稿経路になる。
+if ! grep -q 'allowedTools .*Bash(gh pr comment' "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW のclaude-reviewに Bash(gh pr comment:*) が渡されていません。" >&2
+  echo "  レビュー結果の投稿経路が無くなり、判定も本文も残りません（#2488）。" >&2
+  fail=1
+fi
+
 # --- ここから、総評の判定マーカーと検証結果の節の契約（#2448）---
 #
 # 総評の判定マーカーは、レビューが**PRへ**投稿するコメントの末尾に必ず付く。

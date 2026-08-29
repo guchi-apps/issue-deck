@@ -622,8 +622,70 @@ jobs:
           # gh pr diff/view/checksは、レビューの起点となる差分の取得とCI結果の確認に使う(#906)。
           # **gh issue editは渡さない**(#2136)。このジョブはラベルを付けない役割になったため、
           # プロンプトの指示だけでなく道具の側でも付けられないようにしておく。
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
+          #
+          # **gh pr commentは必須**(#2488)。プロンプトは「レビュー結果をPRへのコメントとして
+          # 投稿する」ことと「末尾に総評の判定マーカーを付ける」ことを求めている(#2448)のに、
+          # ここに無かったため**レビュー結果がどこにも残っていなかった**。直近50件のマージ済み
+          # develop向けPRにレビューのコメントは1件も無く、PR本文の`## 検証結果`は
+          # `review=unavailable`（判定を取得できませんでした）、リリースPRの表も全行が
+          # 「記録なし」になっていた。prompt modeのclaude-code-actionは結果を自分では投稿しない。
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
           prompt: ${{ env.PROMPT_REVIEW }}
+
+      # レビュー結果がPRへ残らないまま終わるのを塞ぐ(#2488)。上でallowedToolsへ
+      # `gh pr comment`を足したので通常は本体が投稿するが、**投稿できていないことに誰も
+      # 気付けない**のがこの経路の弱点だった(道具が無いあいだ、PR本文には
+      # 「判定を取得できませんでした」とだけ書かれ、リリースPRの表は全行が「記録なし」に
+      # なっていた)。投稿が無ければ、実行ログ(execution_file)に残る最後の応答を転記する。
+      #
+      # - **判定マーカーは足さない。** 応答に含まれていればそのまま残るだけで、
+      #   こちらで`lgtm`等を書くと、レビューしていない判定を作ることになる
+      # - execution_fileのJSON構造はclaude-code-actionの内部実装で、変わりうる
+      #   (`summarize-claude-usage.sh`と同じ前提)。取り出せなければ何もしない
+      - name: レビュー結果がPRに無ければ転記する
+        if: always() && steps.claude_review.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXECUTION_FILE: ${{ steps.claude_review.outputs.execution_file }}
+        run: |
+          set -uo pipefail
+
+          POSTED="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+            | grep -cE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}|issue-deck-review-report sha=${HEAD_SHA}" || true)"
+          if [ "${POSTED:-0}" -gt 0 ]; then
+            echo "レビュー結果は既にPRへ投稿されています"
+            exit 0
+          fi
+
+          # 最後のassistantメッセージ＝投稿しようとしたレビュー本文
+          TEXT="$(jq -r '
+            [ .[] | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text ]
+            | last // ""' "$EXECUTION_FILE" 2>/dev/null || true)"
+          if [ -z "$TEXT" ]; then
+            echo "::warning::レビュー結果をPRから読めず、実行ログからも取り出せませんでした"
+            exit 0
+          fi
+
+          TMP="${RUNNER_TEMP:-/tmp}/review-report.md"
+          {
+            echo "🤖 **自動レビューの結果**（レビュー本体が投稿できなかったため、ワークフローが実行ログから転記しました）"
+            echo
+            # PRコメントの上限は65,536文字。転記は補助なので、長ければ切ってログへ誘導する
+            printf '%s\n' "$TEXT" | awk -v maxlines=400 -v maxchars=30000 '
+              NR > maxlines || chars + length($0) + 1 > maxchars { truncated = 1; exit }
+              { chars += length($0) + 1; print }
+              END { if (truncated) print "\n（長いため以降を省略しました。全文はActionsの実行ログにあります）" }
+            '
+            echo
+            echo "<!-- issue-deck-source:claude-review-develop -->"
+            echo "<!-- issue-deck-review-report sha=${HEAD_SHA} -->"
+          } > "$TMP"
+          gh pr comment "$PR_NUMBER" --body-file "$TMP"
+          echo "レビュー結果をPRへ転記しました"
 
       - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
