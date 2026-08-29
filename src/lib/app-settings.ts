@@ -31,6 +31,22 @@ export function parseDispatchConcurrency(value: unknown): number | null {
   return value;
 }
 
+// 参照されていない添付画像を自動でゴミ箱へ移すまでの日数（#2475）。
+//
+// 既定の30日は**下書きの猶予**として決めている。投稿前の下書きはブラウザのlocalStorageに
+// しか無く（`use-issue-draft.ts`）、サーバーからは「参照されていない画像」と区別が付かない。
+// 短くすると、書きかけのIssueに貼った画像が投稿前に消える。
+//
+// 選べる値を絞っているのは、ここが**取り消しの効かない処理の唯一のつまみ**だから。
+// 自由入力にして1日などを入れられるようにする必要が無い。
+export const IMAGE_RETENTION_DAYS_OPTIONS = [7, 30, 90, 180] as const;
+export const IMAGE_RETENTION_DAYS_DEFAULT = 30;
+
+export function parseImageRetentionDays(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (IMAGE_RETENTION_DAYS_OPTIONS as readonly number[]).includes(value) ? value : null;
+}
+
 // claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの候補値（#622）。
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない

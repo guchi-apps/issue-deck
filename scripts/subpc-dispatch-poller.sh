@@ -101,7 +101,8 @@
 #
 # コンフリクトしたPRの巡回検知（#2116）は毎巡issue-deckへ促すだけで、**間隔の設定はここには
 # 無い**。どれくらいの間隔で見に行くか（＝GitHub APIをどれだけ使うか）はissue-deck側の
-# `CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分）が決める。
+# `CONFLICT_SWEEP_INTERVAL_MINUTES`（既定5分）が決める。添付画像の巡回収集（#2475。
+# `IMAGE_CLEANUP_SWEEP_INTERVAL_MINUTES`・既定60分）も含め、他の巡回もすべて同じ形。
 #
 # 実行ログはjournaldに残る。`journalctl --user -u issue-deck-dispatch-poller -n 50` で読む。
 # 起動したセッションの中身は `tmux attach -t <セッション名>`（セッション名はジョブの結果として
@@ -1157,6 +1158,41 @@ sweep_release_merges() {
   # 鳴らしたときだけ出す（毎巡「異常なし」を積まない）。
   printf '%s' "$API_RESPONSE_BODY" |
     jq -r '.notified[] | "本番マージ待ちを通知しました: \(.repositoryFullName)#\(.pullRequestNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
+# --- 添付画像の参照の巡回収集と後始末 -------------------------------------------
+# Issueやコメントに添付した画像がどこに貼られているかをissue-deckに集めさせ、どこからも
+# 参照されていない画像をゴミ箱へ移させる（#2475）。
+#
+# **画像はVPSの`uploads/images/`に増え続け、消す手段が1枚ずつの手動しか無かった。**
+# 「未使用」を判定するにはIssueコメントの本文が要り、それはDBに無いのでGitHubから読む。
+#
+# 上の4つと同じ形で、**pollerがやるのは「呼ぶ」ことだけ**。実際に巡回するかどうかも、
+# どの画像をどうするかもissue-deck側が決める（間隔は`IMAGE_CLEANUP_SWEEP_INTERVAL_MINUTES`・
+# 既定60分）。失敗しても1巡を止めない。
+sweep_uploaded_images() {
+  if ! api_call POST /api/issues/images/cleanup-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+      404|000) return 0 ;;
+      *) report_api_failure "添付画像の巡回収集に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept moved
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  # ファイルを動かしたときだけ出す（毎巡「異常なし」を積まない）。
+  moved="$(printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '((.trashed.count // 0) + (.restored.count // 0) + (.purged.count // 0))' 2>/dev/null || echo 0)"
+  [[ "${moved:-0}" -gt 0 ]] || return 0
+
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '"添付画像を整理しました: ゴミ箱へ\(.trashed.count // 0)枚 ・ 復帰\(.restored.count // 0)枚 ・ 完全削除\(.purged.count // 0)枚"' 2>/dev/null ||
     true
   return 0
 }
@@ -2453,6 +2489,9 @@ run_once() {
     # 本番マージ待ちの巡回通知（#2376）。**dry-runでは呼ばない**（Push通知という
     # 外向きの副作用があるため）。
     sweep_release_merges
+    # 添付画像の参照の巡回収集と後始末（#2475）。**dry-runでは呼ばない**（ファイルの
+    # 移動・削除という取り消しの効かない副作用があるため）。
+    sweep_uploaded_images
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

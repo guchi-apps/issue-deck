@@ -4,9 +4,9 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
+import { previewModeGuard } from "@/lib/preview-mode";
 import { isUploadedImageFilename } from "@/lib/uploaded-images";
-
-const UPLOAD_DIR = path.join(process.cwd(), "uploads", "images");
 
 const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   png: "image/png",
@@ -29,7 +29,7 @@ export async function GET(
   const extension = filename.slice(filename.lastIndexOf(".") + 1);
 
   try {
-    const buffer = await readFile(path.join(UPLOAD_DIR, filename));
+    const buffer = await readFile(path.join(UPLOADED_IMAGE_DIR, filename));
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": CONTENT_TYPE_BY_EXTENSION[extension],
@@ -52,6 +52,11 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ filename: string }> },
 ) {
+  // 確認環境（`PREVIEW_MODE`）から本番の画像を消させない（#2475）。
+  // 画像は`uploads/`の実ファイルで、確認環境と本番が同じディレクトリを見ることがある。
+  const guard = previewModeGuard();
+  if (guard) return guard;
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -63,7 +68,7 @@ export async function DELETE(
   }
 
   try {
-    await unlink(path.join(UPLOAD_DIR, filename));
+    await unlink(path.join(UPLOADED_IMAGE_DIR, filename));
   } catch (error) {
     // すでに消えている場合は、一覧を取り直せば消えるので成功と区別しない
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
