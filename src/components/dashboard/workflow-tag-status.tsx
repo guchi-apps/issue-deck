@@ -274,6 +274,16 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   const upToDate = repositories.filter((status) => workflowTagGroup(status) === "latest");
   const latestLabel = overview?.latest ? shortWorkflowTag(overview.latest) : null;
   const run = overview?.propagation ?? null;
+  // 配布元（`main`）が最新タグからどれだけ進んでいるか（#2476）。取れなければ出さない
+  const sourceAhead = overview?.sourceAhead ?? null;
+  /**
+   * 「新しいタグを切って配る」を出してよいか（#2476）。
+   *
+   * **未更新の件数では出し分けない。** 全リポジトリが最新タグに揃っている＝配布が一巡した
+   * 状態こそ、次のタグを切る場面である。条件にするのは、切ったタグを配る先があること
+   * （リポジトリが1件以上）と、次の版数を決められること（最新タグが読めている）の2つだけ。
+   */
+  const canReleaseTag = repositories.length > 0 && overview?.latest != null;
   const repairRun = overview?.repairPropagation ?? null;
   // 不足しているリポジトリ。配布PRが既に出ているものは対象から外し、下に分けて出す（#1948）
   const repairTargets = repairPropagationTargets(repositories);
@@ -525,30 +535,37 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
       )}
 
       {targets.length > 0 && (
-        <>
-          <Button
-            variant="default"
-            size="sm"
-            className="mt-1 w-full"
-            onClick={() => void handlePropagate(false)}
-            disabled={isDispatching || isRunning}
-          >
-            {isDispatching || isRunning ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <GitPullRequestArrow />
-            )}
-            {isRunning
-              ? "更新を実行中..."
-              : `${targets.length}件を ${latestLabel ?? "最新"} へ更新する`}
-          </Button>
+        <Button
+          variant="default"
+          size="sm"
+          className="mt-1 w-full"
+          onClick={() => void handlePropagate(false)}
+          disabled={isDispatching || isRunning}
+        >
+          {isDispatching || isRunning ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            <GitPullRequestArrow />
+          )}
+          {isRunning
+            ? "更新を実行中..."
+            : `${targets.length}件を ${latestLabel ?? "最新"} へ更新する`}
+        </Button>
+      )}
 
-          {/* **配るタグを切るのも同じ並びに置く**（#1876）。切る操作だけが手作業Issueとして
-              残っていた。`main`に対して切るので、developの内容は配られない */}
+      {/* **配るタグを切るのも同じ並びに置く**（#1876）。切る操作だけが手作業Issueとして
+          残っていた。`main`に対して切るので、developの内容は配られない。
+
+          **こちらは未更新が0件でも出す**（#2476）。既存タグを配るボタンは配る先が無ければ
+          押す意味が無いが、タグを切るのは逆で、**全リポジトリが揃った＝配布が一巡した状態
+          こそ次のタグを切る場面**である。同じ条件に入れていたため、その状態でだけ導線が
+          消え、#1876で画面へ統合した手作業が元の行き止まりに戻っていた */}
+      {canReleaseTag && (
+        <>
           <Button
             variant="outline"
             size="sm"
-            className="w-full"
+            className={targets.length > 0 ? "w-full" : "mt-1 w-full"}
             onClick={() => void handlePropagate(true)}
             disabled={isDispatching || isRunning}
           >
@@ -556,15 +573,46 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
             新しいタグを切って配る
           </Button>
 
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Checkbox
-              checked={autoMerge}
-              onCheckedChange={(checked) => setAutoMerge(checked === true)}
-              disabled={isDispatching || isRunning}
-            />
-            作成したPRを自動でマージする
-          </label>
+          {/* 押す前の判断材料（#2476）。進んでいなければ、切っても配る中身は変わらない。
+              **押せなくはしない**——切り直したい場面はあるため、無駄打ちだと分かれば足りる */}
+          {sourceAhead && (
+            <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
+              {sourceAhead.aheadBy > 0 ? (
+                <>
+                  <span className="tabular-nums">
+                    main は {shortWorkflowTag(sourceAhead.tag)} より {sourceAhead.aheadBy}{" "}
+                    コミット進んでいます
+                  </span>
+                  <a
+                    className="inline-flex items-center gap-0.5 underline underline-offset-2"
+                    href={sourceAhead.compareUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    差分を見る
+                    <ExternalLink className="size-3" />
+                  </a>
+                </>
+              ) : (
+                <span>
+                  main は {shortWorkflowTag(sourceAhead.tag)}{" "}
+                  と同じ内容です。切っても配る中身は変わりません。
+                </span>
+              )}
+            </p>
+          )}
         </>
+      )}
+
+      {(targets.length > 0 || canReleaseTag) && (
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Checkbox
+            checked={autoMerge}
+            onCheckedChange={(checked) => setAutoMerge(checked === true)}
+            disabled={isDispatching || isRunning}
+          />
+          作成したPRを自動でマージする
+        </label>
       )}
 
       {isRunning && run && (

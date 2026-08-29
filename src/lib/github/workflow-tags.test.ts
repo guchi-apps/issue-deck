@@ -97,6 +97,11 @@ type RouteHandlers = {
   sharedFileSource?: string | null;
   /** リポジトリごとの共有ファイルの本文（#2240）。省略すると置かれていない扱い */
   sharedFiles?: Record<string, string | null>;
+  /**
+   * `main`が最新タグより進んでいるコミット数（#2476）。省略すると取得できなかった扱い
+   * （タグが無い・比較が返らない）
+   */
+  aheadBy?: number | null;
 };
 
 /**
@@ -119,6 +124,14 @@ function route(handlers: RouteHandlers) {
       if (handlers.tags === null) return Promise.resolve(ok({ errors: [{ message: "boom" }] }));
       const nodes = (handlers.tags ?? []).map((name) => ({ name }));
       return Promise.resolve(ok({ data: { repository: { refs: { nodes } } } }));
+    }
+
+    // 配布元の進み具合（#2476）。タグを基点に`main`と比べる
+    if (body?.query.includes("compare(headRef")) {
+      const aheadBy = handlers.aheadBy ?? null;
+      return Promise.resolve(
+        ok({ data: { repository: { ref: aheadBy === null ? null : { compare: { aheadBy } } } } }),
+      );
     }
 
     // 配布する共有ファイルの本文（#2240）。配布元1リポジトリぶんなので、変数は添字なしの
@@ -171,6 +184,40 @@ describe("collectWorkflowTags", () => {
       outdated: true,
       mismatched: false,
     });
+  });
+
+  it("mainが最新タグより進んでいるコミット数を返す（#2476）", async () => {
+    // 「新しいタグを切って配る」は未更新が0件でも押せるため、押す前の判断材料として出す
+    githubFetch.mockImplementation(route({ tags: ["workflows/v12"], aheadBy: 48 }));
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toEqual({
+      tag: "workflows/v12",
+      aheadBy: 48,
+      compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v12...main",
+    });
+    // 件数だけを取る。RESTの`/compare`は差分のコミットとファイルまで返す
+    const compare = graphqlCalls().find((call) => call.query.includes("compare(headRef"));
+    expect(compare?.variables).toMatchObject({ tag: "refs/tags/workflows/v12" });
+  });
+
+  it("進み具合を取得できなくても一覧は出す（#2476）", async () => {
+    githubFetch.mockImplementation(route({ tags: ["workflows/v12"] }));
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toBeNull();
+    expect(overview.repositories).toHaveLength(1);
+  });
+
+  it("最新タグが分からなければ進み具合を問い合わせない（#2476）", async () => {
+    githubFetch.mockImplementation(route({ tags: [] }));
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toBeNull();
+    expect(graphqlCalls().some((call) => call.query.includes("compare(headRef"))).toBe(false);
   });
 
   it("アーカイブ済みでない連携リポジトリすべてを対象にする", async () => {
@@ -310,12 +357,13 @@ describe("collectWorkflowTags", () => {
     const overview = await collectWorkflowTags("user-1");
 
     expect(overview.repositories).toHaveLength(3);
-    // 最新タグ用の1本、配布する共有ファイルの本文用の1本（#2240）、
-    // 3リポジトリぶんをまとめた1本だけ。**リポジトリが増えても増えるのは最後の1本の中身だけ**
-    expect(graphqlCalls()).toHaveLength(3);
-    // GraphQLの3本＋配布ワークフロー3種（タグ配布・不足callerの配布・共有ファイルの更新）の
+    // 最新タグ用の1本、配布する共有ファイルの本文用の1本（#2240）、配布元の進み具合用の
+    // 1本（#2476）、3リポジトリぶんをまとめた1本だけ。
+    // **リポジトリが増えても増えるのは最後の1本の中身だけ**
+    expect(graphqlCalls()).toHaveLength(4);
+    // GraphQLの4本＋配布ワークフロー3種（タグ配布・不足callerの配布・共有ファイルの更新）の
     // 最新run（REST・ETagの条件付きGET）の3本
-    expect(githubFetch.mock.calls).toHaveLength(6);
+    expect(githubFetch.mock.calls).toHaveLength(7);
   });
 
   it("タグ取得に失敗しても結果を返し、latest は null になる", async () => {
@@ -397,6 +445,7 @@ describe("collectWorkflowTags", () => {
       propagation: null,
       repairPropagation: null,
       sharedFilePropagation: null,
+      sourceAhead: null,
     });
     expect(githubFetch).not.toHaveBeenCalled();
   });
