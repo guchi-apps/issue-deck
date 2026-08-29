@@ -51,6 +51,13 @@
 # detachedにしておけばここで誤ってコミットしても`develop`は動かない。ディレクトリ名が
 # `issue-*`に一致しないため、scripts/cleanup-worktrees.sh の対象にもならない。
 #
+# ## 見られるのは読み取りの画面だけ（#2444）
+#
+# 確認環境が動かすのは**まだ本番へ出していないコード**なので、そこから実データへ書けてしまうと
+# 「確かめるつもりの操作」がそのまま本番の変更になる。envへ`PREVIEW_MODE=true`を立て直して
+# 書き込み系のAPI（POST/PATCH/DELETE）を403で塞ぐ（`src/lib/preview-mode.ts`）。DBも本体・各
+# Issueのworktreeと共有している開発用DBなので、見えるのは開発用のデータ。
+#
 # 前提:
 #   - 本体チェックアウトに `.env.local`（または `.env`）があること
 #   - DBを使うリポジトリでは、ローカルのMySQLが起動していること（DBは本体・各Issueのworktreeと共有する）
@@ -479,6 +486,14 @@ supply_env_files "preview" "$REPO_PATH" "$WORKTREE_DIR" .env.local .env
 for env_name in .env.local .env; do
   if [[ -f "$WORKTREE_DIR/$env_name" ]]; then
     bash "$SCRIPT_DIR/update-env-file.sh" "$WORKTREE_DIR/$env_name" PORT "$DEV_PORT"
+    # **書き込み系APIを塞いだまま動かす**（#2444）。確認環境が動かすのは「まだ本番へ出して
+    # いないコード」で、そこから実データのGitHubリポジトリ・外部サービスへ書けてしまうと、
+    # 確かめるつもりの操作が本番の変更になる。`PREVIEW_MODE`はまさにその形を防ぐためのガード
+    # （src/lib/preview-mode.ts）で、本体の`.env.local`からコピーされる値に任せず**ここで必ず
+    # 立て直す**（本体側で外した状態がそのまま確認環境へ伝播しないようにする）。
+    #
+    # このキーを知らないリポジトリでは未使用の環境変数が1つ増えるだけで、挙動は変わらない。
+    bash "$SCRIPT_DIR/update-env-file.sh" "$WORKTREE_DIR/$env_name" PREVIEW_MODE "true"
   fi
 done
 

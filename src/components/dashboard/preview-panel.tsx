@@ -269,6 +269,16 @@ function RunningPreview({
         <UrlRow label="このPC" url={`http://localhost:${preview.port}`} note="サブPCの中だけ" />
       </div>
 
+      {/*
+        **確かめられるのは読み取りの画面だけ**（#2444）。確認環境が動かすのはまだ本番へ出して
+        いないコードなので、書き込み系のAPIは`PREVIEW_MODE`で塞いである（開いた先で押しても
+        何も起きない）。開く前に言わないと、押しても反応しない画面を不具合として追うことになる
+      */}
+      <p className="border-t bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+        開けるのは見るための画面までです。ボタンからの書き込み（Issueの更新・マージなど）は
+        塞いであり、データも開発用のものです。
+      </p>
+
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/40 p-2">
         <Button
           type="button"
