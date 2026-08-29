@@ -2562,8 +2562,10 @@ export function POST(request: NextRequest) {
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・
   同時実行数）で足りる。取得は`hooks/use-dispatch-state.ts`で、**未完了ジョブがある間だけ5秒
-  間隔**（それ以外は60秒）。押してから起動が始まるまでポーリング間隔ぶん待つため、その間の
-  状態が見えないと「押しても何も起きていない」ようにしか見えない。画面とAPIで判定が分かれない
+  間隔**（それ以外は20秒。#1439でActionsの実行状況ポーリングと揃えた）。押してから起動が
+  始まるまでポーリング間隔ぶん待つため、その間の状態が見えないと「押しても何も起きていない」
+  ようにしか見えない。**押した本人の画面はポーリングを待たない**——`enqueue`が応答のジョブを
+  その場で状態へ足す。画面とAPIで判定が分かれない
   よう、選べない理由は`lib/dispatch/dispatch-job.ts`の純粋関数を両者が共有する（同ファイルは
   Prismaに触れないため、クライアントコンポーネントからimportできる。`lib/dispatch/jobs.ts`は
   できない）。
@@ -2574,6 +2576,18 @@ export function POST(request: NextRequest) {
   `owner/repo#番号`が入るunique列）を1本引いて`Issue.dispatchPendingAt`へ合流させ、
   振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
   **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
+  - **振り分けだけでは、行を見ても何が起きているか読めない**（#2449）。移した先で行の見た目は
+    押す前とまったく同じで、右上の円グラフ（`WorkflowStepBadge`）はStatusが`Ready`だと
+    `getWorkflowStepIndex`がnullを返して何も描かない。そこで**同じ位置・同じ18pxの円**で
+    「順番待ち ◯番目」「起動中」を出す（`components/dashboard/workflow-status-steps.tsx`の
+    `QueueStepBadge`。材料は`lib/dispatch/issue-queue-state.ts`が`GET /api/dispatch`の
+    ジョブから組み、DBもAPIも増やさない）。**番号の並びは払い出し・実行キューと同じ**
+    （`queuePriority`降順→`createdAt`昇順）で、ここだけ別にすると「先頭へ上げる」（#1541）を
+    押した結果が一覧に映らない。**回すのは起動中だけ**にして、順番待ちは破線をゆっくり
+    明滅させる——回すと`isWorkflowBadgeSpinning`が回している行（実際に作業が進んでいる行）と
+    見分けが付かなくなる。**円は2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
+    `queue`を渡して添える字（「サブPC・順番待ち 2番目」）にし、どちらを出すかは並べる側
+    （`issue-list.tsx`の`renderIssueRow`）が決める。
   同じく**質問Issueは「未着手」「実行中」ではなく専用の「質問」ビューに出す**（#1514）。質問Issueは
   Projectに載らずStatusが常に`Ready`扱いになり、回答を読んで承認した後は`00.check-user`も外れるため、
   ビューが無いとcloseするまで「未着手」に居座る。判定材料はタイトル接頭辞
