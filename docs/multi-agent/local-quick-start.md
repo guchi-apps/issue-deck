@@ -412,6 +412,20 @@ guchi-apps/dayspanの確認環境が実際にこうなった。
 判定は「そのworktreeをcwdに持つプロセスが待ち受けているポート」で行う（`ss`が無い環境では
 判定せず、静かな側＝続行に倒す）。`tailscale serve`自身の待ち受けはcwdが`/`なので混ざらない。
 
+### ランチャーを手で試すときは、既存のtmuxセッションの中で叩かない
+
+`scripts/run-issue-session.sh`を検証のために手で叩くと、**そのtmuxセッションが終了したと
+issue-deckへ報告される**（#2464で実際に起きた）。終了報告が使うセッション名は
+`tmux display-message -p '#S'`で**今いるセッションから読む**ため、Issue番号を別の値で渡しても
+関係なく、走っている実装セッションの名前がそのまま載る。issue-deck側は「セッションが終わったのに
+Issueへ記録が無い」というコメントを投稿する（#1119）。
+
+**報告先を`ISSUE_DECK_DISPATCH_ENV`で差し替えても止まらない。** `dispatch_env_value`は
+**環境変数を先に見る**ので、pollerが`set -a`でsourceして起動したセッションの中では
+`APP_BASE_URL`・`DISPATCH_SECRET`が既に環境に載っており、そちらが勝つ。止めるなら
+`APP_BASE_URL= DISPATCH_SECRET= bash scripts/run-issue-session.sh ...`のように空で上書きするか、
+`tmux`の外（別のSSHセッション）で叩く。
+
 ## 開発サーバーは終了時に止め、残った分は回収する
 
 サブPCは**常用3本・上限3本**（前述の目安）で、`pnpm dev`一式は使用中で0.45〜1.13GiB、アイドルでも
