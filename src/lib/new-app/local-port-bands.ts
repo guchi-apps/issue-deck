@@ -29,6 +29,32 @@ export const LOCAL_PORT_BAND_STEP = 1000;
  */
 export const MAX_LOCAL_PORT_BASE = 60000;
 
+/**
+ * ブラウザが接続を拒否するポート（#2466）。
+ *
+ * Chrome・Firefox・Safariは、他プロトコルの既定ポート（6000ならX11）へHTTPで繋ぐことを既定で
+ * 拒否する（Chromeなら`ERR_UNSAFE_PORT`）。**開発サーバーがそのポートで正しく待ち受けていても
+ * 画面は開けず、ホスト名がlocalhostでもtailnetのMagicDNS名でも同じ**なので、繋ぐ側では直せない。
+ * 払い出す側で避けるしかない。
+ *
+ * 載せるのは**1000以上のものだけ**。帯のベース値は1000以上で、実際のポートは「ベース値 +
+ * Issue番号」か「ベース値 + 0」なので、1000未満は出てこない。
+ *
+ * **シェル側と二重に持っている**（`scripts/lib/dev-server.sh`の
+ * `DEV_SERVER_BROWSER_BLOCKED_PORTS`）。帯を払い出すのはこちら、実際に起動するのはあちらで、
+ * 片方だけ直すと「払い出せた帯なのに確認環境が開けない」という形でずれる。突き合わせは
+ * `local-port-bands.test.ts`が行うので、**変えるときは両方を揃える**。
+ */
+export const BROWSER_BLOCKED_PORTS: readonly number[] = [
+  1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697,
+  10080,
+];
+
+/** そのポートがブラウザにブロックされるか。 */
+export function isBrowserBlockedPort(port: number): boolean {
+  return BROWSER_BLOCKED_PORTS.includes(port);
+}
+
 /** 対応表の1行。 */
 export type LocalPortBand = {
   /** `guchi-apps/issue-deck` */
@@ -65,10 +91,17 @@ export function findLocalPortBand(bands: LocalPortBand[], repository: string): n
  *
  * **空きを探して詰めない。** 帯を外したリポジトリの番号を再利用すると、古いチェックアウトが
  * 残っているサブPCで前の持ち主と衝突しうる。上限を超えたら`null`を返し、人に決めさせる。
+ *
+ * **ブラウザがブロックするポート（#2466）はベース値にしない。** 確認環境
+ * （`scripts/start-preview-dev.sh`）は「ベース値 + 0」で開くため、ベース値そのものが
+ * ブロック対象だと、待ち受けていても画面を開けない帯を配ることになる。
  */
 export function chooseNextLocalPortBase(bands: LocalPortBand[]): number | null {
   const max = bands.reduce((current, band) => Math.max(current, band.base), 0);
-  const next = max + LOCAL_PORT_BAND_STEP;
+  let next = max + LOCAL_PORT_BAND_STEP;
+  while (next <= MAX_LOCAL_PORT_BASE && isBrowserBlockedPort(next)) {
+    next += LOCAL_PORT_BAND_STEP;
+  }
   return next > MAX_LOCAL_PORT_BASE ? null : next;
 }
 

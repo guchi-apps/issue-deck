@@ -41,7 +41,7 @@
 # 環境変数:
 #   ISSUE_DECK_PREVIEW_STATE_FILE 動いている確認環境の記録先
 #   ISSUE_DECK_WORKTREE_BASE      worktreeの置き場（既定: ~/apps/<repo>-worktrees）
-#   ISSUE_DECK_DEVELOP_DEV_PORT   使うポート（既定: 帯のベース値 + 0）
+#   ISSUE_DECK_DEVELOP_DEV_PORT   使うポート（既定: 帯のベース値 + 0。ブラウザがブロックするポートなら繰り上げる）
 #   ISSUE_DECK_DEV_PORT_BASE      ポートのベース値（既定: scripts/local-repo-ports.conf の帯）
 #   ISSUE_DECK_DEV_COMMAND        開発サーバーの起動コマンド（既定: 判定したパッケージマネージャ）
 #   PREVIEW_IDLE_MINUTES          何分アクセスが無ければ回収するか（既定60・表示にのみ使う）
@@ -205,7 +205,7 @@ resolve_base_branch() {
 
 # 対象リポジトリの置き場・ポート・起動コマンドを決める。解決できなければ1を返す。
 resolve_target() {
-  local full_name="$1" repo port_base package_manager worktree_base
+  local full_name="$1" repo port_base default_port package_manager worktree_base
 
   if ! REPO_PATH="$(local_repo_resolve_path "$full_name")"; then
     echo "Error: $full_name のチェックアウト先が ~/.config/issue-deck/local-repos.conf にありません。" >&2
@@ -224,8 +224,17 @@ resolve_target() {
 
   # Issue番号は1以上なので、帯のベース値そのもの（+0）はどのIssueのworktreeとも衝突しない。
   # 帯の一覧は scripts/local-repo-ports.conf を参照。
+  #
+  # **ベース値がブラウザのブロック対象なら繰り上げる**（#2466）。dayspanの帯は6000で、6000は
+  # X11用としてChrome・Firefox・Safariが既定で拒否する（`ERR_UNSAFE_PORT`）。待ち受けが正しくても
+  # 案内するURLを開けないので、ここで開けるポートへ寄せる（判定は scripts/lib/dev-server.sh）。
+  # Issueごとのセッションは「ベース値 + Issue番号」で1以上ずれるため、この繰り上げには当たらない。
   port_base="${ISSUE_DECK_DEV_PORT_BASE:-$(local_repo_port_base "$full_name" || echo 3000)}"
-  DEV_PORT="${ISSUE_DECK_DEVELOP_DEV_PORT:-$((port_base + 0))}"
+  default_port="$(dev_server_browser_safe_port "$((port_base + 0))")"
+  DEV_PORT="${ISSUE_DECK_DEVELOP_DEV_PORT:-$default_port}"
+  if [[ -z "${ISSUE_DECK_DEVELOP_DEV_PORT:-}" && "$default_port" != "$((port_base + 0))" ]]; then
+    echo "注記: ポート $((port_base + 0)) はブラウザが接続を拒否するため、$default_port を使います（#2466）。"
+  fi
 
   # **開発サーバーを持たないリポジトリがある**（vps・subpc・docs・claude-config・ideas）。
   # 帯だけは確保してあるので、ポートは引けても起こすものが無い。ここで断ってしまう。

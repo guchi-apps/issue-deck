@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  BROWSER_BLOCKED_PORTS,
   LOCAL_PORT_BAND_CONF_PATH,
   MAX_LOCAL_PORT_BASE,
   appendLocalPortBand,
   chooseNextLocalPortBase,
   findLocalPortBand,
   formatLocalPortBandLine,
+  isBrowserBlockedPort,
   parseLocalPortBands,
 } from "@/lib/new-app/local-port-bands";
 
@@ -71,6 +73,24 @@ describe("chooseNextLocalPortBase", () => {
 
   it("上限を超えるならnull（人が帯を割り直す）", () => {
     expect(chooseNextLocalPortBase([{ repository: "a", base: MAX_LOCAL_PORT_BASE }])).toBeNull();
+  });
+
+  it("ブラウザがブロックするベース値は飛ばす（#2466）", () => {
+    // 5000の次は6000だが、6000はX11用としてブラウザが拒否する（確認環境はベース値+0で開く）
+    expect(chooseNextLocalPortBase([{ repository: "a", base: 5000 }])).toBe(7000);
+  });
+});
+
+describe("isBrowserBlockedPort", () => {
+  it("ブラウザがブロックするポートを見分ける", () => {
+    expect(isBrowserBlockedPort(6000)).toBe(true);
+    expect(isBrowserBlockedPort(10080)).toBe(true);
+    expect(isBrowserBlockedPort(6001)).toBe(false);
+    expect(isBrowserBlockedPort(4000)).toBe(false);
+  });
+
+  it("帯の範囲外（1000未満）は載せない", () => {
+    expect(BROWSER_BLOCKED_PORTS.every((port) => port >= 1000)).toBe(true);
   });
 });
 
@@ -158,5 +178,39 @@ describe("シェル側の local_repo_port_base との突き合わせ", () => {
     for (const band of parseLocalPortBands(conf)) {
       expect(portBaseFromShell(conf, band.repository)).toBe(String(band.base));
     }
+  });
+});
+
+/**
+ * **ブロック対象ポートの一覧は、TypeScriptとシェルで二重に持っている**（#2466）。帯を払い出すのは
+ * 画面側（`chooseNextLocalPortBase`）、実際に確認環境を起こすのはシェル側
+ * （`scripts/lib/dev-server.sh`の`dev_server_browser_safe_port`）で、片方だけ直すと
+ * 「払い出せた帯なのに確認環境が開けない」という、画面からは見えない形でずれる。
+ */
+describe("シェル側の dev_server_browser_safe_port との突き合わせ", () => {
+  function runDevServerLib(snippet: string): string {
+    return execFileSync(
+      "bash",
+      ["-c", `source "$1" && ${snippet}`, "bash", join(process.cwd(), "scripts/lib/dev-server.sh")],
+      { encoding: "utf8" },
+    ).trim();
+  }
+
+  it("一覧が同じ", () => {
+    const fromShell = runDevServerLib('printf "%s" "$DEV_SERVER_BROWSER_BLOCKED_PORTS"')
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10));
+    expect(fromShell).toEqual([...BROWSER_BLOCKED_PORTS]);
+  });
+
+  it("ブロックされるポートは開けるものまで繰り上げる", () => {
+    // 6000（X11）は6001へ。6665〜6669（IRC）は連続してブロックされるので6670まで進む
+    expect(runDevServerLib("dev_server_browser_safe_port 6000")).toBe("6001");
+    expect(runDevServerLib("dev_server_browser_safe_port 6665")).toBe("6670");
+  });
+
+  it("ブロックされないポートはそのまま", () => {
+    expect(runDevServerLib("dev_server_browser_safe_port 4000")).toBe("4000");
+    expect(runDevServerLib("dev_server_browser_safe_port 26000")).toBe("26000");
   });
 });

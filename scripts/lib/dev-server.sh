@@ -164,6 +164,46 @@ dev_server_wildcard_listening() {
   return 1
 }
 
+# ブラウザが接続を拒否するポート（#2466）。
+#
+# Chrome・Firefox・Safariは、他プロトコルの既定ポート（6000ならX11）へHTTPで繋ぐことを既定で
+# 拒否する（Chromeなら`ERR_UNSAFE_PORT`）。**開発サーバーがそのポートで正しく待ち受けていても
+# 画面は開けず、ホスト名がlocalhostでもtailnetのMagicDNS名でも同じ**なので、繋ぐ側では直せない。
+# 払い出す側で避けるしかない。
+#
+# 載せるのは**1000以上のものだけ**。ポート帯のベース値は1000以上（scripts/local-repo-ports.conf）で、
+# 実際のポートは「ベース値 + Issue番号」か「ベース値 + 0」なので、1000未満は出てこない。
+#
+# **この一覧はTypeScript側と二重に持っている**（src/lib/new-app/local-port-bands.ts の
+# `BROWSER_BLOCKED_PORTS`）。帯を払い出すのは画面側、実際に起動するのはこちらで、片方だけ直すと
+# 「払い出せた帯なのに確認環境が開けない」という形でずれる。突き合わせは
+# src/lib/new-app/local-port-bands.test.ts が行うので、**変えるときは両方を揃える**。
+DEV_SERVER_BROWSER_BLOCKED_PORTS="1719 1720 1723 2049 3659 4045 5060 5061 6000 6566 6665 6666 6667 6668 6669 6697 10080"
+
+# そのポートがブラウザにブロックされるなら0を返す。
+dev_server_browser_blocked_port() {
+  local port="$1" blocked
+  for blocked in $DEV_SERVER_BROWSER_BLOCKED_PORTS; do
+    [[ "$port" == "$blocked" ]] && return 0
+  done
+  return 1
+}
+
+# ブラウザで開けるポートを返す。ブロックされるポートなら、開けるものが見つかるまで1ずつ繰り上げる。
+#
+# **繰り上げる（下げない）のは、帯の中で先に使われるのが小さいIssue番号だから。** 6000で塞がれる
+# 確認環境（ベース値 + 0）は6001へ動くが、そこはIssue #1のセッションが使う値で、Issue番号は
+# 単調増加するため実際に取り合いになることはまず無い。逆に下げると隣の帯（前のリポジトリの
+# Issue #999）へはみ出す。
+dev_server_browser_safe_port() {
+  local port="$1"
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  while dev_server_browser_blocked_port "$port"; do
+    port=$((port + 1))
+  done
+  printf '%s' "$port"
+}
+
 # 対象Issueの開発サーバーが使うポート（#1524）。
 #
 # ポートは「ベース値 + Issue番号」で一意に決まる（scripts/local-repo-ports.conf・
