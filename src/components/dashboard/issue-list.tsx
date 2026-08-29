@@ -28,7 +28,10 @@ import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
-import { WorkflowStepBadge } from "@/components/dashboard/workflow-status-steps";
+import {
+  QueueStepBadge,
+  WorkflowStepBadge,
+} from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +49,12 @@ import {
 } from "@/lib/dispatch/issue-execution-target";
 import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
 import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import {
+  buildIssueQueueStates,
+  findIssueQueueState,
+  type IssueQueueState,
+} from "@/lib/dispatch/issue-queue-state";
+import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
@@ -495,6 +504,19 @@ export function IssueList({
     }
     return map;
   }, [issues, dispatch.sessions]);
+  // 実行が始まる前の状態（#2449）。積んだ直後のIssueは進捗Statusが`Ready`のままで右上の
+  // 円グラフが描かれず、行が押す前とまったく同じに見えていた。**Issueの件数に関わらず
+  // 組み立ては1回**で、行ごとにジョブ一覧を走査し直さない
+  const queueStateByIssueId = useMemo(() => {
+    const states = buildIssueQueueStates(dispatch.jobs);
+    const map = new Map<string, IssueQueueState>();
+    if (states.size === 0) return map;
+    for (const issue of issues) {
+      const state = findIssueQueueState(states, issue.repositoryFullName, issue.number);
+      if (state) map.set(issue.id, state);
+    }
+    return map;
+  }, [issues, dispatch.jobs]);
   // 計画への返事待ち（#2061）。**待っている行だけ「計画を承認」を出す**ための集合で、
   // 押した先はアプリの中（そのIssueを開くと上部に計画パネルが出る）
   const planPendingIssueIds = useMemo(() => {
@@ -743,6 +765,19 @@ export function IssueList({
     const stepBadgeShowsQaAnswerPending =
       getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null &&
       !isApprovalPending(issue.labels);
+    /**
+     * 実行が始まる前の状態（#2449）。**円を2つ並べない**ので、進捗の円グラフが描かれる行では
+     * `WorkflowStepBadge`へ渡して添える字にし、描かれない行（＝積んだ直後のStatusが`Ready`の
+     * まま）だけ`QueueStepBadge`を出す。どちらを出すかを知れるのは両方を並べているここだけ
+     * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+     */
+    const queueState = queueStateByIssueId.get(issue.id) ?? null;
+    const stepBadgeVisible = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
+    // 上限・メモリ逼迫で待ちが進まない理由（#1394）。判定は実行キュー・Issue詳細と同じ関数で、
+    // ここに条件を書き足さない
+    const queueWaitReason = queueState
+      ? describeDispatchJobWaitReason(queueState.job, dispatch.hosts)
+      : null;
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -820,7 +855,14 @@ export function IssueList({
                 // 確認待ちでもエージェントが動いている間は回し続ける（#2358）。判定は
                 // 左メニュー・ヘッダーの件数と同じ集合（#2174）を使い、材料を増やさない
                 checkUserRunning={checkUserRunningIssueIds?.has(issue.id) ?? false}
+                queue={queueState}
+                queueWaitReason={queueWaitReason}
               />
+              {/* 進捗の円グラフが描かれない行（積んだ直後のStatusが`Ready`のまま）だけ、
+                  実行が始まる前の状態を同じ位置・同じ大きさの円で出す（#2449） */}
+              {!stepBadgeVisible && queueState && (
+                <QueueStepBadge queue={queueState} waitReason={queueWaitReason} />
+              )}
               {/* 「いまは実施しない」（#2398）。**要対応の2ビューの行にだけ出す。**
                   行の当たり判定（カード全面の<button>）の上に重ねるので、
                   `pointer-events-auto`が要る（Remote Controlのリンクと同じ） */}

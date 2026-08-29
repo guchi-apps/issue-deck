@@ -456,10 +456,11 @@ function makePlanRequest(overrides: Record<string, unknown> = {}) {
 function makeDispatch(
   sessions: DispatchSessionView[],
   planRequests: unknown[] = [],
+  jobs: unknown[] = [],
 ): DispatchStateHandle {
   return {
     hosts: [],
-    jobs: [],
+    jobs,
     sessions,
     planRequests,
     concurrency: null,
@@ -955,5 +956,62 @@ describe("IssueListの保留（#2398）", () => {
       { kind: "issue", repositoryFullName: "guchi-apps/issue-deck", number: 2 },
       null,
     );
+  });
+});
+
+/**
+ * 実行が始まる前の状態を行に出す（#2449）。積んだ直後のIssueは進捗Statusが`Ready`のまま
+ * なので右上の円グラフが描かれず、行が押す前とまったく同じに見えていた。
+ */
+describe("順番待ちのバッジ（#2449）", () => {
+  function makeJob(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "job-1",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1,
+      targetHost: "subpc",
+      kind: "LAUNCH",
+      status: "QUEUED",
+      queuePriority: 0,
+      createdAt: "2026-08-29T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("積んだ順番と件数を行に出す", () => {
+    renderList({
+      dispatch: makeDispatch(
+        [],
+        [],
+        [
+          makeJob({ id: "a", issueNumber: 2, createdAt: "2026-08-29T00:00:00.000Z" }),
+          makeJob({ id: "b", issueNumber: 1, createdAt: "2026-08-29T00:01:00.000Z" }),
+        ],
+      ),
+    });
+
+    expect(screen.getByText("順番待ち 1番目")).toBeTruthy();
+    expect(screen.getByText("順番待ち 2番目")).toBeTruthy();
+    // 積んでいないIssueには出さない
+    expect(screen.queryByText("順番待ち 3番目")).toBeNull();
+  });
+
+  it("起動中は「起動中」を出す", () => {
+    renderList({
+      dispatch: makeDispatch([], [], [makeJob({ status: "RUNNING" })]),
+    });
+
+    expect(screen.getByText("起動中")).toBeTruthy();
+  });
+
+  it("進捗の円グラフが出る行では円を2つ並べず、添える字にする", () => {
+    renderList({
+      issues: [makeIssue({ number: 1, projectStatus: "Implementation" })],
+      dispatch: makeDispatch([], [], [makeJob()]),
+    });
+
+    // 単独のバッジ（「順番待ち」だけの行）は出さず、進捗の円グラフへ添える
+    expect(screen.queryByText("順番待ち")).toBeNull();
+    expect(screen.getByText("実装中（サブPC・順番待ち）")).toBeTruthy();
   });
 });
