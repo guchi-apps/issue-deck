@@ -262,8 +262,8 @@ export function IssueSessionStatus({
           <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
         </span>
         {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「サブPC・応答を
-            終えています・あと3分で自動終了」と1つのピルに詰まり、状態と予定のどちらが今の話
-            なのか読み取れない。配色は入力待ち（waiting）と同じ琥珀色で、**押す操作は無い** */}
+            終えています・あと3分」と1つのピルに詰まり、状態と予定のどちらが今の話なのか
+            読み取れない。配色は入力待ち（waiting）と同じ琥珀色で、**押す操作は無い** */}
         {reapNotice && (
           <span
             className={cn(

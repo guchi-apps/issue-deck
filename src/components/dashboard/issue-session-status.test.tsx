@@ -151,7 +151,7 @@ describe("IssueSessionStatus", () => {
       />,
     );
 
-    expect(screen.getByText("あと3分で自動終了")).toBeTruthy();
+    expect(screen.getByText("あと3分")).toBeTruthy();
     expect(screen.getByText(/PRがマージ済みのため/)).toBeTruthy();
   });
 
@@ -163,7 +163,8 @@ describe("IssueSessionStatus", () => {
       <IssueSessionStatus session={session({ activity: "RESPONDED" })} dispatch={makeDispatch()} />,
     );
 
-    expect(screen.queryByText(/自動終了/)).toBeNull();
+    expect(screen.queryByText(/^あと\d+分$/)).toBeNull();
+    expect(screen.queryByText("まもなく")).toBeNull();
   });
 
   it("入力待ちのときだけRemote Controlの導線を出す", () => {
