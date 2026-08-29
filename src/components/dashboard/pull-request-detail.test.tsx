@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
@@ -359,6 +359,21 @@ describe("PullRequestDetail", () => {
 - このPRはGitHub Actionsが自動作成しました
 `;
 
+    // #2488。ワークフローが表の下へ足すレビュー本文の折りたたみ
+    const DETAIL_SECTION = `<details>
+<summary>#2441 の自動レビュー（✅ 問題なし）</summary>
+
+<!-- issue-deck-review-detail:start issue=2441 -->
+
+LGTM。ゲートの条件は仕様どおりです。
+
+[元のレビューコメントを開く](https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-1)
+<!-- issue-deck-review-detail:end -->
+
+</details>
+
+`;
+
     // 同じ表は本文にもそのまま出る（Markdownとして描かれる）ので、パネルの中だけを見る
     function panel() {
       return within(screen.getByTestId("verification-summary"));
@@ -396,6 +411,27 @@ describe("PullRequestDetail", () => {
     it("検証結果を持たないPRではパネルを出さない", () => {
       renderDetail();
       expect(screen.queryByTestId("verification-summary")).toBeNull();
+    });
+
+    // #2488。判定だけでは何を指摘されたのかが読めず、develop向けPRのコメントを1件ずつ
+    // 開くことになっていた
+    it("レビュー本文が載っている行は、開くと本文を読める", () => {
+      const body = `${RELEASE_BODY.replace("## 注意点", DETAIL_SECTION + "## 注意点")}`;
+      renderDetail({ detail: makeDetail({ body }) });
+
+      // 既定は閉じたまま（10件以上のリリースで帯が本文と同じ長さになるため）
+      expect(panel().queryByText(/ゲートの条件は仕様どおりです/)).toBeNull();
+
+      fireEvent.click(panel().getByRole("button", { name: /レビュー内容/ }));
+
+      expect(panel().getByText(/ゲートの条件は仕様どおりです/)).toBeTruthy();
+      expect(panel().getByRole("link", { name: "元のレビューコメントを開く" })).toBeTruthy();
+    });
+
+    it("レビュー本文が無い行には開くボタンを出さない", () => {
+      renderDetail({ detail: makeDetail({ body: RELEASE_BODY }) });
+
+      expect(panel().queryByRole("button", { name: /レビュー内容/ })).toBeNull();
     });
   });
 });

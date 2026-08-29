@@ -121,9 +121,29 @@ for file in "$RELEASE_WORKFLOW" "$PARSER"; do
   fi
 done
 
+# レビューコメント本文の折りたたみ（#2488）も、書く側（リリースのワークフロー）と
+# 読む側（画面のパーサー）にまたがる契約。ずれても赤くならず、**判定の表だけが出て本文が
+# 出ない**（レビューが何を指摘したのかを読めないまま、mainへのマージを判断することになる）。
+DETAIL_START='<!-- issue-deck-review-detail:start'
+DETAIL_END='<!-- issue-deck-review-detail:end -->'
+
+for file in "$RELEASE_WORKFLOW" "$PARSER"; do
+  if ! grep -qF "$DETAIL_START" "$file"; then
+    echo "エラー: $file にレビュー本文の折りたたみの開始マーカーがありません。" >&2
+    echo "  期待する文字列: $DETAIL_START" >&2
+    fail=1
+  fi
+  if ! grep -qF "$DETAIL_END" "$file"; then
+    echo "エラー: $file にレビュー本文の折りたたみの終了マーカーがありません。" >&2
+    echo "  期待する文字列: $DETAIL_END" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
 echo "OK: claude-reviewの判定マーカーは $PROMPT と $WORKFLOW で一致しています"
 echo "OK: 総評の判定マーカーと検証結果の節の契約も揃っています（#2448）"
+echo "OK: レビュー本文の折りたたみのマーカーも揃っています（#2488）"

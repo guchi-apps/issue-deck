@@ -23,6 +23,36 @@ developへ入れる前に各PRで行った自動レビューの判定です（#2
 | #2438 | #2450 | — 実施なし | 該当なし |
 | #2432 | — | ? 記録なし | ? 記録なし |
 
+<details>
+<summary>#2441 の自動レビュー（✅ 問題なし）</summary>
+
+<!-- issue-deck-review-detail:start issue=2441 -->
+
+## 総評
+
+LGTM。ゲートの条件は仕様どおりです。
+
+| 観点 | 結果 |
+| --- | --- |
+| テスト | 追加あり |
+
+[元のレビューコメントを開く](https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-1)
+<!-- issue-deck-review-detail:end -->
+
+</details>
+
+<details>
+<summary>#2443 の自動レビュー（⚠️ 要確認）</summary>
+
+<!-- issue-deck-review-detail:start issue=2443 -->
+
+要確認。GitHub Actionsの設定に触れています。
+
+（長いため以降を省略しました。全文は元のレビューコメントで読めます）
+<!-- issue-deck-review-detail:end -->
+
+</details>
+
 ## 注意点
 - このPRはGitHub Actionsが自動作成しました
 `;
@@ -46,7 +76,7 @@ describe("parseReleaseVerification", () => {
   it("Issue番号・PR番号・判定・文言を取り出す", () => {
     const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
 
-    expect(rows[0]).toEqual({
+    expect(rows[0]).toMatchObject({
       issueNumber: 2441,
       // `## 対象issue`に載っているものはタイトルも添える
       issueTitle: "レビューのゲートを直す",
@@ -81,6 +111,48 @@ describe("parseReleaseVerification", () => {
       reviewLabel: "記録なし",
       riskKind: "unknown",
     });
+  });
+
+  it("折りたたみに入っているレビュー本文を、Issue番号ごとに行へ付ける（#2488）", () => {
+    const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
+
+    expect(rows[0].reviewBody).toContain("LGTM。ゲートの条件は仕様どおりです。");
+    // 見出しも表も本文の一部としてそのまま持つ（画面はMarkdownとして描く）
+    expect(rows[0].reviewBody).toContain("## 総評");
+    expect(rows[0].reviewBody).toContain("| テスト | 追加あり |");
+    expect(rows[0].reviewBody).toContain(
+      "[元のレビューコメントを開く](https://github.com/guchi-apps/issue-deck/pull/2446#issuecomment-1)",
+    );
+    // 打ち切られた回もそのまま出す（省略した旨はワークフローが本文へ書いている）
+    expect(rows[1].reviewBody).toContain("（長いため以降を省略しました。");
+    // レビューが走らなかった・記録が無い行は本文を持たない
+    expect(rows[2].reviewBody).toBeNull();
+    expect(rows[3].reviewBody).toBeNull();
+  });
+
+  it("レビュー本文の中の表を、検証結果の行として読み込まない（#2488）", () => {
+    // 折りたたみの開始マーカーで表の読み取りを打ち切る。打ち切らないと、本文に含まれる
+    // `| #99 | ... |`のような行まで検証結果の行になってしまう
+    const body = `## コードレビューの検証結果
+
+| Issue | PR | 自動レビュー | 機械的リスク判定 |
+| --- | --- | --- | --- |
+| #1 | #2 | ✅ 問題なし | 該当なし |
+
+<details>
+<summary>#1 の自動レビュー（✅ 問題なし）</summary>
+
+<!-- issue-deck-review-detail:start issue=1 -->
+
+| #99 | #98 | ✅ 問題なし | 該当なし |
+<!-- issue-deck-review-detail:end -->
+
+</details>
+`;
+
+    const parsed = parseReleaseVerification(body);
+    expect(parsed?.rows.map((row) => row.issueNumber)).toEqual([1]);
+    expect(parsed?.rows[0].reviewBody).toBe("| #99 | #98 | ✅ 問題なし | 該当なし |");
   });
 
   it("次の見出しより後の表は読まない", () => {
