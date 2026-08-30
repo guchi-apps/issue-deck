@@ -2422,10 +2422,13 @@ export function POST(request: NextRequest) {
   画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
   **CodexのセッションにはそのRemote ControlのURLが無い**（#2524）。Codexが出すのは
   `XXXX-XXXX`の**10分で切れるペアリングコード**で、繋がる先も`serverName`＝ホストごと
-  （そのホストのCodexセッション全部）。そのためセッションの行ではなく**実行キューの
-  ホストのカード**に「Codexに繋ぐ」を置き、押すと`CODEX_PAIRING`のジョブが積まれて
-  pollerが発行する（判定と表示は`lib/dispatch/codex-pairing.ts`、発行は
-  `subpc-dispatch-poller.sh`の`run_codex_pairing_job`）。**コードは資格情報**なので、
+  （そのホストのCodexセッション全部）。そのため**実行キューのホストのカード**と、
+  **Codexで動いているセッションの行**（#2537）の両方に「Codexに繋ぐ」を置き、押すと
+  `CODEX_PAIRING`のジョブが積まれてpollerが発行する（判定と表示は
+  `lib/dispatch/codex-pairing.ts`、ボタンは`components/dashboard/codex-pairing-control.tsx`を
+  2か所から呼ぶ、発行は`subpc-dispatch-poller.sh`の`run_codex_pairing_job`）。
+  **セッションの行に置いても、送るのはホスト名だけ**（Issueには紐づかない）で、
+  文言だけを「このIssueだけでなく」から始める形に変えている。**コードは資格情報**なので、
   `DispatchJob.codexPairingCode`はログイン必須の画面にだけ出し、期限を過ぎたら
   `expireStaleDispatchJobs`が列ごと空にする。
   **`21.plan-required`のセッションが提示した計画は、`ExitPlanMode`の`PreToolUse`フックから

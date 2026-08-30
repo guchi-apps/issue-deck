@@ -185,6 +185,9 @@ source "$SCRIPT_DIR/lib/launch-hold.sh"
 # （#2504）。**転記を開くのはこのlibだけ**で、読むのは`message.usage`と時刻・作業ディレクトリ。
 # shellcheck source=scripts/lib/session-usage.sh
 source "$SCRIPT_DIR/lib/session-usage.sh"
+# Codexのプラン枠の最新値を転記から抽出する（#2535）。会話本文は読まない。
+# shellcheck source=scripts/lib/codex-usage.sh
+source "$SCRIPT_DIR/lib/codex-usage.sh"
 # Codexのサンドボックスを組み立てられるかの下見（#2526）。**申告（`codex_capable`）と実際の
 # 起動（start-issue.sh）が同じ判定を使う**ようにここから読む。判定を二重に持つと、画面で
 # 選べるのにセッションが即死する状態（#2526で実際に起きた）に戻る。
@@ -1364,6 +1367,45 @@ report_session_usage() {
   if ((backfill)); then
     touch "$SESSION_USAGE_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
+  fi
+  return 0
+}
+
+# --- Codexプラン使用量の報告（#2535）-------------------------------------------
+# Codex自身が各ターンの`token_count.rate_limits`へ書いた値を使うため、使用量を見るための
+# 追加リクエストは発生しない。最新の1件だけを送り、受け口もホストごとの1行を上書きする。
+CODEX_USAGE_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/codex-usage.stamp"
+
+report_codex_usage() {
+  ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local sessions_dir="${CODEX_SESSIONS_DIR:-$HOME/.codex/sessions}"
+  [[ -d "$sessions_dir" ]] || return 0
+
+  local last=0 now
+  if [[ -f "$CODEX_USAGE_STAMP" ]]; then
+    last="$(date -r "$CODEX_USAGE_STAMP" +%s 2>/dev/null || echo 0)"
+  fi
+  now="$(date +%s)"
+  ((now - last >= SESSION_USAGE_INTERVAL_MINUTES * 60)) || return 0
+  mkdir -p "$(dirname "$CODEX_USAGE_STAMP")" 2>/dev/null || true
+  touch "$CODEX_USAGE_STAMP" 2>/dev/null || true
+
+  local usage payload
+  if ! usage="$(codex_usage_latest "$sessions_dir" 2>/dev/null)"; then
+    echo "Error: Codex使用量の集計に失敗しました。" >&2
+    return 0
+  fi
+  [[ -n "$usage" ]] || return 0
+  payload="$(printf '%s' "$usage" | jq -c --arg host "$HOST_NAME" '. + {host: $host}' 2>/dev/null)"
+  [[ -n "$payload" ]] || return 0
+
+  if ! api_call POST /api/dispatch/codex-usage "$payload"; then
+    case "$API_RESPONSE_STATUS" in
+      404 | 000) return 0 ;;
+      *) report_api_failure "Codex使用量の報告に失敗しました" ;;
+    esac
   fi
   return 0
 }
@@ -2985,6 +3027,8 @@ run_once() {
     # （画面に出る記録が増えるため）。毎巡ではなく SESSION_USAGE_INTERVAL_MINUTES の
     # 間隔でだけ実際に走る。
     report_session_usage
+    # Codexのプラン枠も同じ間隔で報告する（#2535）。Claudeの転記が無いホストでも独立して動く。
+    report_codex_usage
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

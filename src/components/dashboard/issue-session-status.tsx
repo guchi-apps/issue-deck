@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
@@ -49,6 +50,7 @@ import {
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
+import { selectHostCodexPairingJob } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -82,6 +84,7 @@ import { cn } from "@/lib/utils";
  * **畳むのは「押す気になったときだけ要るもの」に限る。** 次のものは畳まない。
  *
  * - Remote Controlで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
+ * - Codexに繋ぐ（#2537。CodexのセッションではURLが出ないため、ここが同じ役目を果たす）
  * - セッションの補足（`summary.detail`。「`tmux attach -t …`で答えてください」など次の操作そのもの）
  * - 押した操作の結果（`controlJob`の状態・pollerが見送った理由・送信の失敗）。届くまで最大1分
  *   あり、送り直してよいかの判断がここにしかない
@@ -190,6 +193,22 @@ export function IssueSessionStatus({
   // 送れる本文かどうかは受け口（`POST /api/dispatch`）と同じ関数で判定する。
   // 画面だけ緩いと、押せたのに400で弾かれる
   const instructionBody = parseSessionInstruction(instruction);
+  /**
+   * CodexのRemote Control相当（#2537）。**Codexのセッションでは`remoteControlUrl`が
+   * 空になる**——Claude Codeは`--remote-control`がURLを出すのに対し、Codexが出すのは
+   * 10分で切れるペアリングコードだけで、セッションの報告には載らない（#2524）。そのため
+   * ここが空欄になり、入力待ちのときに画面から答える出口が1つも無いように見えていた。
+   *
+   * **出すのは走っているCodexのセッションだけ。** 終わったセッションはCodexのデーモンにも
+   * 載っておらず、繋いでも見る相手がいない。
+   *
+   * **押せないホストでもボタンごと消さない**（ホストのカードとはここが違う）。あちらは
+   * Codexと関係の無いホストにも並ぶため申告のあるホストにだけ出すが、ここは既にCodexで
+   * 動いていると分かっている行で、押せない理由（standalone installのCodexが要る）を
+   * 出さずに消すと「Codexだけ対応していない」としか読めない（#1332の「停止」と同じ扱い）。
+   */
+  const showCodexPairing =
+    isCodexSession && session.state === "ALIVE" && host !== null;
   // 消えたセッションには操作する相手がいない。`EXITED`/`FAILED`（ペインが残っている）は
   // 「閉じる」で片付けられるため、そちらは出したままにする
   const canControl = session.state !== "GONE";
@@ -339,6 +358,17 @@ export function IssueSessionStatus({
             </Button>
           )}
         </div>
+      )}
+      {/* CodexのRemote Control相当（#2537）。**出口は畳まない**——入力待ちのCodexの
+          セッションでは、これが画面から答えるための唯一の出口になる */}
+      {showCodexPairing && host && (
+        <CodexPairingControl
+          host={host}
+          job={selectHostCodexPairingJob(dispatch.jobs, session.host)}
+          onRequestCodexPairing={dispatch.requestCodexPairing}
+          context="issue"
+          align={align}
+        />
       )}
       {hasControls && controlsExpanded && (
         <div

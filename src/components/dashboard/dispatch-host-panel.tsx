@@ -1,29 +1,13 @@
 "use client";
 
-import {
-  Check,
-  ChevronRight,
-  Copy,
-  ExternalLink,
-  Loader2,
-  Monitor,
-  Power,
-  RefreshCw,
-  Smartphone,
-} from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ChevronRight, ExternalLink, Loader2, Monitor, Power, RefreshCw } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
-import {
-  describeCodexPairingJob,
-  describeCodexPairingRejection,
-  formatCodexPairingCountdown,
-  resolveCodexPairingRejection,
-  type CodexPairingTone,
-} from "@/lib/dispatch/codex-pairing";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
@@ -282,7 +266,8 @@ function HostCard({
   // 出ていてほしいときそのもの（Codexのセッションが走っているかどうかは、押す前には
   // 画面から読み取れない——`codex agents`の一覧を機械可読で取る手段が無いため）。
   //
-  // **行の組み立ては`CodexPairingRow`の中で行う**（`RebootRow`とはここが違う）。
+  // **行の組み立ては`CodexPairingControl`の中で行う**（`RebootRow`とはここが違う）。
+  // 同じ部品をIssueのセッション表示からも呼ぶ（#2537）。
   // コードには10分の寿命があり、残り時間を1秒ごとに数え直す必要があるため
   const canCodexPairing =
     onRequestCodexPairing !== undefined && host.codexRemoteControlCapable === true;
@@ -347,10 +332,11 @@ function HostCard({
           下は計器と動いているセッション。Codexのセッションはホスト単位でしか指せないため、
           セッションの一覧の側ではなくこちらに属する */}
       {canCodexPairing && (
-        <CodexPairingRow
+        <CodexPairingControl
           host={host}
           job={codexPairingJob}
           onRequestCodexPairing={onRequestCodexPairing}
+          context="host"
         />
       )}
 
@@ -570,140 +556,6 @@ function RebootRow({
   );
 }
 
-
-/**
- * CodexのRemote Control相当（#2524）。ペアリングコードを発行するボタンと、出てきたコード。
- *
- * **`RebootRow`・`SelfUpdateRow`と同じ組み立て**（右寄せのボタン＋その下に結果の1行）に
- * してあるが、**出てくるものが違う**——ここに出るのは結果の文ではなく、押した人が別の端末へ
- * 打ち込む`XXXX-XXXX`のコードそのもの。そのため等幅で大きく出し、コピーのボタンと
- * 残り時間を添える。
- *
- * **コードは資格情報。** 期限（10分）を過ぎたものは`describeCodexPairingJob`が返さないので、
- * ここには出ない。押した人のブラウザの外（Issueコメント・通知・pollerのログ）へは出さない。
- *
- * **繋がる先はホストごと。** 1枚のコードで、そのホストで走っているCodexのセッションが
- * 全部見える（`serverName`はホスト名で、Issueごとには分かれない）。押す前にその旨を出しておく。
- */
-function CodexPairingRow({
-  host,
-  job,
-  onRequestCodexPairing,
-}: {
-  host: DispatchHostView;
-  job: DispatchJobView | null;
-  onRequestCodexPairing: (
-    hostName: string,
-  ) => Promise<{ ok: true } | { ok: false; message: string }>;
-}) {
-  const hostName = host.name;
-  const [sending, setSending] = useState(false);
-  // 積めなかった理由（`RebootRow`と同じ）。**次に押すまで残す**（消えると押した結果が無かったことになる）
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  // 残り時間を数え直すための現在時刻（#2524）。**ポーリングの間隔に任せない。**
-  // ジョブが終わるとキューのポーリングは20秒間隔（`IDLE_POLL_INTERVAL_MS`）へ落ちるため、
-  // そのままだとカウントダウンが20秒刻みで飛び、**切れたコードが最大20秒残る**
-  const [now, setNow] = useState(() => Date.now());
-
-  const result = describeCodexPairingJob(job, new Date(now));
-  const pending = sending || (result?.pending ?? false);
-  const rejection = resolveCodexPairingRejection({ host, hasQueuedJob: pending });
-  const disabled = pending || rejection !== null;
-  const code = result?.code ?? null;
-  const countdown = formatCodexPairingCountdown(result?.expiresInSeconds ?? null);
-  const notice = error
-    ? { label: error, tone: "critical" as CodexPairingTone }
-    : result
-      ? { label: result.label, tone: result.tone }
-      : rejection
-        ? { label: describeCodexPairingRejection(rejection, hostName), tone: "warn" as const }
-        : null;
-
-  // **コードが出ている間だけ回す。** 出ていなければ数えるものが無く、無駄に再描画するだけ
-  const counting = code !== null;
-  useEffect(() => {
-    if (!counting) return;
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, [counting]);
-
-  async function request() {
-    setSending(true);
-    setError(null);
-    setCopied(false);
-    try {
-      const res = await onRequestCodexPairing(hostName);
-      if (!res.ok) setError(res.message);
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function copy() {
-    if (!code) return;
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-    } catch {
-      // クリップボードが使えない環境（httpのLAN越しなど）では、コードは目で読める場所に
-      // 出ているので何もしない。押せなかったことを理由として出すほどのことではない
-    }
-  }
-
-  return (
-    <div className="mt-1.5 flex flex-col items-end gap-1">
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-[11px]"
-        disabled={disabled}
-        onClick={() => void request()}
-      >
-        {pending ? (
-          <Loader2 className="size-3 animate-spin" />
-        ) : (
-          <Smartphone className="size-3" />
-        )}
-        Codexに繋ぐ
-      </Button>
-
-      {/* 出てきたコード。**押した人がこれを別の端末へ打ち込む**ので、行の中で最も読みやすくする */}
-      {code && (
-        <div className="flex w-full items-center justify-between gap-2 rounded-md border bg-muted/40 px-2 py-1.5">
-          <span className="font-mono text-sm font-semibold tracking-widest tabular-nums">
-            {code}
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {countdown && <span className="text-[11px] text-muted-foreground">{countdown}</span>}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-1.5 text-[11px]"
-              onClick={() => void copy()}
-              aria-label="ペアリングコードをコピー"
-            >
-              {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-            </Button>
-          </span>
-        </div>
-      )}
-
-      {notice && (
-        <span className={cn("text-right text-[11px]", CHECKOUT_TONE_CLASS[notice.tone])}>
-          {notice.label}
-        </span>
-      )}
-
-      {/* **繋がる先を押す前に出す。** Issueごとに分かれないことは、コードを見てからでは分からない */}
-      {!code && !notice && (
-        <span className="text-right text-[11px] text-muted-foreground">
-          ChatGPTアプリから{formatDispatchHostName(hostName)}のCodexセッション全部に繋がります
-        </span>
-      )}
-    </div>
-  );
-}
 
 /**
  * カードの1行目（ホスト名とセッション本数）。**縮めた版と従来の版で同じものを出す**——

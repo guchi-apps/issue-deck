@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.56.0",
+    date: "2026-08-30",
+    changes: [
+      "状態画面にCodex CLIのプラン使用率を表示できるようになりました。また、Codexで動いているセッションのIssue詳細からも、スマホのChatGPTアプリと接続するためのペアリングコードを発行できるようになりました。",
+    ],
+    usage: [
+      "1. 画面右上などから設定ダイアログを開き、状態タブの「AI使用量」欄を確認する。CLAUDEの下にCODEXの使用率（プラン枠の残量）が表示されていれば成功",
+      "2. Codexで動作中のIssueの詳細画面を開く（スマホでも可）",
+      "3. セッション状態の表示から「Codexに繋ぐ」ボタンを押す",
+      "4. 表示されたペアリングコードをChatGPTアプリに入力する。10分以内のカウントダウンとともにコードが表示されれば成功",
+    ],
+  },
+  {
     version: "4.55.0",
     date: "2026-08-30",
     changes: [

@@ -68,7 +68,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
-| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。繋がるのはホスト単位。#2524） |
+| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。#2524・#2537） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
@@ -228,16 +228,23 @@ $ codex remote-control pair --json
 - 止めるのは`codex remote-control stop`（`{"status":"stopped",…}`）。止めた後は
   `codex app-server daemon version`がソケット無しのエラーに戻る。**確認のあとは止めてある**
 
-#### Remote Controlはペアリングコードで繋ぐ（#2524）
+#### Remote Controlはペアリングコードで繋ぐ（#2524・#2537）
 
-**実行キューのホストのカードに「Codexに繋ぐ」ボタンがある。** 押すとpollerが
+**「Codexに繋ぐ」ボタンは2か所にある**——実行キューのホストのカードと、**Codexで動いている
+Issueのセッション表示**（#2537。スマホのIssue詳細にも同じものが出る）。押すとpollerが
 `codex remote-control start`（デーモンの起動）と`pair --json`（コードの発行）を打ち、
 返ってきた`XXXX-XXXX`が画面へ出る。ChatGPTアプリの「Connect to Codex」へ打ち込むと繋がる。
 
 - **繋がるのはホスト単位。** `serverName`はホスト名（`subpc`）なので、1枚のコードで
   そのホストのCodexセッションが**全部**見える（`codex agents`に出るもの。tmuxで起こした
-  TUIも載る）。Claude Code側（#1219）のような「そのIssueを開くURL」にはならないため、
-  ボタンはIssue詳細ではなくホストのカードに置いてある
+  TUIも載る）。Claude Code側（#1219）のような「そのIssueを開くURL」にはならない
+- **Issueの画面にも置いたのは、そこが答える出口だから**（#2537）。Codexのセッションでは
+  `remoteControlUrl`が空になり、Claude Codeなら出る「Remote Controlで開く」が消える。
+  入力待ちのIssueを開いても画面から答える手段が1つも無いように見えていた。**押したIssueだけに
+  繋がると誤解させない**ため、Issue側の文言は「このIssueだけでなく」から始める
+- **Issue側は、申告の無いホストでもボタンを消さない。** 押せない理由（standalone installの
+  Codexが要る）を出して無効にする。ホストのカードはCodexと関係の無いホストにも並ぶので
+  申告のあるホストにだけ出すが、Issueの行は既にCodexで動いていると分かっている
 - **コードは10分で切れる。** 期限を過ぎた行は画面に出ず、DBの列も
   `expireStaleDispatchJobs`が空にする。**コードは資格情報**なので、Issueコメント・PR本文・
   Push通知・pollerのjournaldには出さない（画面はログイン必須）
@@ -249,7 +256,12 @@ $ codex remote-control pair --json
   `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい
 - 実装は`src/lib/dispatch/codex-pairing.ts`（判定と表示）・`enqueueCodexPairingJob`（積む）・
   pollerの`run_codex_pairing_job`（発行）。ジョブの種別は`CODEX_PAIRING`で、
-  `SELF_UPDATE`・`REBOOT`と同じ枠外のジョブ（キューの一覧には出ない）
+  `SELF_UPDATE`・`REBOOT`と同じ枠外のジョブ（キューの一覧には出ない）。ボタンと出てきた
+  コードの見せ方は`src/components/dashboard/codex-pairing-control.tsx`にまとめてあり、
+  **ホストのカードとIssueのセッション表示が同じ部品を呼ぶ**（#2537。送るものはどちらも
+  ホスト名だけ）
+- **Issue一覧の行には出していない**（#2537）。あの行のRemote Controlはリンク（#1915）で、
+  発行の往復と10分で切れるコードの表示は行に収まらない。一覧から辿るときはIssueを開く
 
 #### tmuxで普通に起こしたTUIは、デーモンに載る
 

@@ -151,6 +151,7 @@ export function SettingsDialog({
                   apiUsage={data.apiUsage}
                   actionsUsage={data.actionsUsage}
                   claudeUsage={data.claudeUsage}
+                  codexUsage={data.codexUsage}
                   claudeApiUsage={data.claudeApiUsage}
                   githubStatus={data.githubStatus}
                 />
