@@ -2482,6 +2482,14 @@ export function POST(request: NextRequest) {
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
   こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
+- **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。一覧は
+  `scripts/local-repo-pr-policy.conf`、判定は`scripts/lib/pr-policy.sh`で、**起動プロンプトを
+  組み立てる`generic-start-issue.sh`と回収の`reap-sessions.sh`が同じ関数を読む**（片方だけ
+  変えると、PRを作らない前提のセッションが「PRを作らずに終えた」と読まれて猶予5分で畳まれる）。
+  今の対象は`guchi-apps/ideas`だけで、構想を同じセッションで練り直す使い方に合わせている。
+  画面の「実装プロンプトをコピー」はブラウザで動きconfを読めないため、`lib/prompts/pr-policy.ts`が
+  一覧と文面の写しを持ち、ずれは`templates.test.ts`が実物のconfを読んで検出する。設計は
+  [supported-repositories.md](supported-repositories.md)「`guchi-apps/ideas`（構想の置き場）」。
 - **worktreeの掃除も同じ1巡に相乗りさせる**（#1716・#2123）。pollerは
   `WORKTREE_CLEANUP_INTERVAL_MINUTES`（既定60分・0で無効）の間隔で
   `scripts/cleanup-worktrees.sh --all-repos --yes`を呼ぶ。**足りなかったのは

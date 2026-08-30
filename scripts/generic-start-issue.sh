@@ -79,6 +79,9 @@ source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
 # 開発サーバーのポートの採番（ブラウザがブロックするポートの繰り上げを含む。#2470）。
 # shellcheck source=scripts/lib/dev-server.sh
 source "$SCRIPT_DIR/lib/dev-server.sh"
+# Pull Requestを人の指示で作るリポジトリかどうか（#2499）。回収（reap-sessions.sh）と共有する。
+# shellcheck source=scripts/lib/pr-policy.sh
+source "$SCRIPT_DIR/lib/pr-policy.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -437,11 +440,20 @@ if [[ "$PACKAGE_MANAGER" == "pnpm" || "$PACKAGE_MANAGER" == "bun" ]]; then
   DEV_COMMAND="$PACKAGE_MANAGER dev"
 fi
 
+# Pull Requestを人の指示で作るリポジトリか（#2499）。**回収側と同じ判定を使う**
+# （scripts/lib/pr-policy.sh）。ここだけを手動にすると、PRを作らないまま`11.local`を外した
+# セッションが猶予5分で畳まれてしまう。
+PR_POLICY="auto"
+if pr_policy_is_manual "$FULL_NAME"; then
+  PR_POLICY="manual"
+  echo "#$ISSUE_NUMBER: このリポジトリではPull Requestを人の指示で作ります（$(pr_policy_config_file)）。"
+fi
+
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$WORKTREE_DIR" "${BASE_BRANCH:-}" \
   "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" "$ISSUE_RELATIONS" "$CONCURRENT_WORK" \
-  "$SHARED_CONTEXT_DIR" "$ISSUE_DECK_SKIP_SHARED_CONTEXT" >"$PROMPT_FILE" <<'PY'
+  "$SHARED_CONTEXT_DIR" "$ISSUE_DECK_SKIP_SHARED_CONTEXT" "$PR_POLICY" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -458,7 +470,8 @@ import sys
     concurrent_work,
     shared_context_dir,
     skip_shared_context,
-) = sys.argv[1:13]
+    pr_policy,
+) = sys.argv[1:14]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -583,6 +596,44 @@ else:
         "取り込みます（#2200）。"
     )
 
+# Pull Requestの作り方（#2499）。一覧は scripts/local-repo-pr-policy.conf で、判定はシェル側
+# （scripts/lib/pr-policy.sh）が済ませて`pr_policy`として渡ってくる。
+#
+# **`{{BASE_BRANCH}}`・`{{ISSUE_NUMBER}}`をこの文面に残さないこと。** 差し込みは
+# `replacements`を1つずつ置換していく形で、後から入った値の中のプレースホルダが置換される
+# かどうかは辞書の並び順に依存する。ここで実値を埋めておけば並び順に左右されない。
+#
+# **同じ文面が src/lib/prompts/pr-policy.ts にもある**（画面の「実装プロンプトをコピー」用。
+# ブラウザからconfは読めないため一覧ごと写しで持つ）。変えるときは両方そろえる。
+if pr_policy == "manual":
+    pr_policy_instructions = (
+        f"- **Pull Requestは、ユーザーから指示されるまで作りません。** このリポジトリ"
+        f"（`{repository}`）は、成果物を一度で仕上げるのではなく同じセッションで何度も"
+        f"練り直す使い方をします。コミットとpush（`issue-{issue['number']}`ブランチ）は"
+        "いつでも行ってよいですが、`gh pr create`は「PRを作って」と言われてから実行します\n"
+        "- **`11.local`もPull Requestを作るまで外しません。** 外すと「ローカル作業を終えた」と"
+        "判定され、数分でこのセッションが自動終了します（`scripts/reap-sessions.sh`）。"
+        "PRを作らない限り畳まれないので、続きは同じ会話でやり取りできます\n"
+        "- 一区切りついたら、Pull Requestを作る代わりに**どこまで進んだかをIssueコメントへ"
+        "残し**、次に何をするかを`AskUserQuestion`でユーザーへ尋ねます（フックが"
+        "`00.check-user`と`01.check-input`を付け、issue-deckのPush通知が飛びます。"
+        "答えた時点で外れます）\n"
+        f"- 指示を受けてPull Requestを作るときは`{base_branch or '(判定できませんでした)'}`"
+        "向けに作成し（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）、"
+        "マージ時点ではissueをcloseしない運用のため`closes #番号`/`fixes #番号`は使わず"
+        f"`#{issue['number']}`のように番号のみ記載します。作成したら`11.local`を外します"
+    )
+else:
+    pr_policy_instructions = (
+        f"- `{base_branch or '(判定できませんでした)'}` 向けPull Requestを作成する"
+        "（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。マージ時点では"
+        "issueをcloseしない運用のため、PR本文に`closes #番号`/`fixes #番号`は使わず、"
+        f"`#{issue['number']}`のように番号のみ記載する\n"
+        "- Pull Requestを作成してレビューへ渡し、ローカルでの作業を終える時点で`11.local`を"
+        "外す。付けたままだと、無人実行（`claude-issue-dispatch.yml`を持つリポジトリの場合）が"
+        "このIssueへの追加対応を一切行えない。ローカルで作業を続けている間は付けたままにする"
+    )
+
 # 全アプリ共通の共有知識（#1741）。**実装対象が共有知識リポジトリ自身のときは文面ごと差し替える。**
 # 既定の文面は「共有知識は読み取り専用」と書いており、そのリポジトリを実装する回では指示が
 # 自己矛盾する。あわせて`--add-dir`も付けていない（本体チェックアウトを渡すと、worktreeではなく
@@ -645,6 +696,7 @@ replacements = {
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
     "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
+    "{{PR_POLICY_INSTRUCTIONS}}": pr_policy_instructions,
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": shared_context_instructions,
 }
 result = template

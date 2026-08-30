@@ -41,6 +41,12 @@
 # **判定できないときは必ず「畳まない」側へ倒す。** 畳むと文脈が失われ、取り返せない
 # （#1178 ではPRのマージ後に追加指示が来て同じセッションを再利用した実績がある）。
 #
+# **Pull Requestを人の指示で作るリポジトリ（scripts/local-repo-pr-policy.conf）では、
+# 引き渡し済みの2経路（#1541・#1600）をPRができるまで通さない**（#2499）。そこでは
+# 「PRが無い＝もう作業しない」が成り立たず、構想を同じセッションで練り直している最中に
+# あたる。判定は起動プロンプトを組み立てる generic-start-issue.sh と共有する
+# （scripts/lib/pr-policy.sh）。
+#
 # ## 畳む予定を画面へ出す（#1817）
 #
 # 条件がすべて揃い、あとは猶予が経つのを待っているだけのセッションには、畳む予定
@@ -57,6 +63,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 状態ファイルの置き場と読み書きは、書く側（run-issue-session.sh・session-notify.sh）と共有する。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
+
+# Pull Requestを人の指示で作るリポジトリかどうか（#2499）。起動プロンプトを組み立てる側
+# （generic-start-issue.sh）と同じ判定を使う。ここだけ従来のままだと、PRを作らない前提で
+# 動いているセッションが「PRを作らずに終えた」と読まれて畳まれる。
+# shellcheck source=scripts/lib/pr-policy.sh
+source "$SCRIPT_DIR/lib/pr-policy.sh"
 
 # IssueがCLOSED・PRがマージ済みの経路で使う猶予（#1256）。既定を60から5へ下げた（#1649）。
 # 畳めるセッションが残っている時間は、そのまま本数の上限（DISPATCH_MAX_SESSIONS・#1361）を
@@ -486,6 +498,20 @@ reap_one() {
       fi
       open_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
         --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+
+      # **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。
+      # `guchi-apps/ideas`のように成果物を同じセッションで何度も練り直す使い方では、
+      # 「PRが無い＝もう作業しない」が成り立たない。一覧は scripts/local-repo-pr-policy.conf。
+      #
+      # 期限もリトライも無い`hold`にするのは、**待っているのが人の指示だから**。ここで
+      # `hold_until_reap`を書くと画面に終了予告が出てしまい、指示を出せばまだ続けられる
+      # セッションが「まもなく終了」と見える。畳みたくなったら画面の「終了」を押すか、
+      # Issueをcloseする（どちらも上の経路で畳まれる）。
+      if [[ -z "$open_pr" ]] && pr_policy_is_manual "$repository"; then
+        hold "$session" "PRを人の指示で作るリポジトリで、issue-$issue_number のPRがまだ作られていない"
+        return 0
+      fi
+
       if [[ -n "$open_pr" ]]; then
         handoff_reason="PR #$open_pr を作成しレビューへ引き渡し済み"
         handoff_hold="PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"

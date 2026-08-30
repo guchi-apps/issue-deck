@@ -121,8 +121,7 @@ issue-deckから貼られた画像は\`.../api/issues/images/<UUID>\`形式のUR
 - Issueの要件を実装する
 - そのリポジトリが持っているテスト・Lint・型チェック・ビルドを実行する（\`package.json\`の\`scripts\`・CIの設定を見て、何があるかを確認してから実行する）
 - 変更をコミットしてpushする
-- \`{{BASE_BRANCH}}\` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。マージ時点ではissueをcloseしない運用のため、PR本文に\`closes #番号\`/\`fixes #番号\`は使わず、\`#{{ISSUE_NUMBER}}\`のように番号のみ記載する
-- Pull Requestを作成してレビューへ渡し、ローカルでの作業を終える時点で\`11.local\`を外す。付けたままだと、無人実行（\`claude-issue-dispatch.yml\`を持つリポジトリの場合）がこのIssueへの追加対応を一切行えない。ローカルで作業を続けている間は付けたままにする
+{{PR_POLICY_INSTRUCTIONS}}
 
 コミットメッセージ・PRタイトル・PR本文・Issueコメントは日本語で書きます。コミットのAuthorは\`Claude Code <claude-code@example.com>\`にします。リポジトリ側にこれと異なる規約がある場合はそちらに従ってください。
 

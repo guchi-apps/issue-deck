@@ -163,8 +163,19 @@ function git(cwd, args) {
  * - `issueState` … `gh issue view`が返すIssueの状態（`OPEN` / `CLOSED`）
  * - `labels` … 同じく返すラベル名の配列
  * - `mergedPr` / `openPr` … `gh pr list --state merged` / `--state open`が返すPR番号（空で無し）
+ * - `repository` … 状態ファイルに書くリポジトリ（手動PRの一覧に載っているかで挙動が変わる。#2499）
+ * - `pushedToBaseBranch` … HEADを`issue-<番号>`以外のリモートブランチにも載せるか
+ *   （＝このセッションのコミットが手元に残っていない状態。`HANDOFF_NO_PR`の前提）
  */
-function runGh({ idleSeconds, issueState = "OPEN", labels = [], mergedPr = "", openPr = "" }) {
+function runGh({
+  idleSeconds,
+  issueState = "OPEN",
+  labels = [],
+  mergedPr = "",
+  openPr = "",
+  repository = "guchi-apps/issue-deck",
+  pushedToBaseBranch = false,
+}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "reap-sessions-label-"));
   tempDirs.push(root);
   const binDir = path.join(root, "bin");
@@ -184,6 +195,7 @@ function runGh({ idleSeconds, issueState = "OPEN", labels = [], mergedPr = "", o
   git(worktree, ["commit", "-m", "test"]);
   git(worktree, ["remote", "add", "origin", origin]);
   git(worktree, ["push", "origin", `HEAD:refs/heads/issue-${GH_ISSUE}`]);
+  if (pushedToBaseBranch) git(worktree, ["push", "origin", "HEAD:refs/heads/develop"]);
   git(worktree, ["fetch", "origin"]);
 
   fs.writeFileSync(
@@ -223,7 +235,7 @@ function runGh({ idleSeconds, issueState = "OPEN", labels = [], mergedPr = "", o
     [
       `session=${GH_SESSION}`,
       `worktree=${worktree}`,
-      "repository=guchi-apps/issue-deck",
+      `repository=${repository}`,
       `issue=${GH_ISSUE}`,
       "reapable=1",
       "kind=implementation",
@@ -286,6 +298,41 @@ describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
     const result = runGh({ idleSeconds: 30 * 60, openPr: "480" });
     expect(result.stdout).toContain("セッションを畳みました");
     expect(result.stdout).toContain("PR #480 を作成しレビューへ引き渡し済み");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+});
+
+// #2499: 一覧（scripts/local-repo-pr-policy.conf）は実物を読む。写しを作ると、
+// 実物へ足したリポジトリがテストでは従来どおり畳まれるという最悪のずれ方をする。
+describe("reap-sessions.sh: PRを人の指示で作るリポジトリ（#2499）", () => {
+  it("PRが無ければ、コミットが本流へ入っていても畳まない", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      repository: "guchi-apps/ideas",
+      pushedToBaseBranch: true,
+    });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("PRを人の指示で作るリポジトリで");
+    // 指示を出せばまだ続けられるので、画面に「まもなく終了」を出さない
+    expect(result.reap).toBe("");
+  });
+
+  it("一覧に無いリポジトリなら、従来どおりPR無しでも畳む", () => {
+    const result = runGh({ idleSeconds: 30 * 60, pushedToBaseBranch: true });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PRを作らずにローカル作業を終えている");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+
+  it("PRができていれば、一覧に載っていても従来どおり畳む", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      repository: "guchi-apps/ideas",
+      pushedToBaseBranch: true,
+      openPr: "12",
+    });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PR #12 を作成しレビューへ引き渡し済み");
     expect(result.killed).toContain(`=${GH_SESSION}`);
   });
 });

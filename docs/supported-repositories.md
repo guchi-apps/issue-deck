@@ -162,6 +162,7 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 | CLAUDE.md | あり（新規作成）。「コードを持たない」「実装しない」「PRは`main`直行」を明記 |
 | デフォルトブランチ | `main`のみ（`develop`は作らない。`docs`・`claude-config`と同じ） |
 | 盤面（Projects Status） | 載る。ただし**`Implementation`で止まり、以降は手で`Done`にしてclose** |
+| Pull Request（[scripts/local-repo-pr-policy.conf](../scripts/local-repo-pr-policy.conf)） | `manual`。エージェントは自動で作らず、人の指示を待つ。PRができるまでセッションも畳まない（#2499） |
 | ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 26000 |
 | `~/.config/issue-deck/local-repos.conf` | `/home/guchi/apps/ideas` |
 | 公開範囲 | private（`question`・`docs`・`claude-config`と同じ） |
@@ -187,6 +188,32 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 - **`package.json`を持たない。** 依存インストールとenvの配置は不要
   （[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「envは既定では置かない」）。
   ポート帯だけは、上の4件と同じ理由（既定の`3000 + Issue番号`への相乗りを避ける）で確保する
+
+### Pull Requestは人の指示で作り、それまでセッションを畳まない（#2499）
+
+**構想は一度で仕上がらず、同じセッションで何度も練り直す。** ところが汎用ランチャーの既定は
+「一区切りついたらPull Requestを作り、`11.local`を外してレビューへ引き渡す」で、外した時点で
+`reap-sessions.sh`の引き渡し済みの経路に乗り、猶予5分でセッションが畳まれていた。**続きを
+相談しようとすると会話が消えている**——構想の置き場としてはこれが致命的だった。
+
+そこで`guchi-apps/ideas`を[scripts/local-repo-pr-policy.conf](../scripts/local-repo-pr-policy.conf)へ
+`manual`で載せ、次の2つを対で変えた。判定は[scripts/lib/pr-policy.sh](../scripts/lib/pr-policy.sh)が持つ。
+
+| 変わるもの | 既定（載っていないリポジトリ） | `manual`（`ideas`） |
+|---|---|---|
+| 起動プロンプトの「責務」 | PRを作り、`11.local`を外して引き渡す | コミットとpushまで。`gh pr create`は指示されてから。`11.local`もPRを作るまで外さない |
+| セッションの回収 | PRがopen・またはコミットが手元に残っていなければ猶予5分で畳む | `issue-<番号>`のPRができるまで畳まない（終了予告も出さない） |
+
+- **プロンプトと回収は必ず両方を見る。** 片方だけ変えると、PRを作らないまま`11.local`を外した
+  セッションが猶予5分で畳まれる（プロンプトだけ）か、自動で作られたPRで引き渡し済みと判定されて
+  結局畳まれる（回収だけ）。だからconfは1つで、両方が同じ関数で読む
+- **Issueのcloseとマージは従来どおり効く。** PRを作った後は引き渡し済みの経路へ戻り、Issueを
+  closeすれば`ISSUE_CLOSED`で畳まれる。**今すぐ畳みたいときは画面のセッション表示の「終了」**
+- **画面の「実装プロンプトをコピー」も同じ文面を出す。** ブラウザからconfは読めないため、
+  [`lib/prompts/pr-policy.ts`](../src/lib/prompts/pr-policy.ts)が一覧と文面の写しを持つ。
+  ずれは`templates.test.ts`が実物のconfを読んで検出するので、**片方だけ直さないこと**
+- 回収側の条件の並びは
+  [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「セッションの回収」を参照
 
 ### Obsidianで書く場合、追加の同期の仕組みは要らない
 
