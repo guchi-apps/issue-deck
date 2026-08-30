@@ -5,6 +5,9 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 // 型だけのimport（コンパイル時に消える）。`host-metrics.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない
 import type { DispatchHostLaunchHold, DispatchHostMetrics } from "@/lib/dispatch/host-metrics";
+// 型だけのimport（コンパイル時に消える）。`host-reboot.ts`側も`DispatchHostView`・
+// `DispatchJobView`を型としてしか使わないため、実行時の循環importにはならない
+import type { DispatchHostReboot } from "@/lib/dispatch/host-reboot";
 // 型だけのimport（コンパイル時に消える）。`preview-server.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-checkout.ts`と同じ）
 import type { DispatchHostPreview } from "@/lib/dispatch/preview-server";
@@ -59,6 +62,10 @@ export type DispatchJobStatus =
  * - `PREVIEW` … 確認環境（#2444）を起こす・最新へ入れ替える・止める。pollerが
  *   `scripts/start-preview-dev.sh`を実行する。**Issueに紐づかない**（対象はリポジトリ）ので
  *   `issueNumber`には埋め草の0が入り、セッションも立てない
+ * - `REBOOT` … ホストごと再起動する（#2496）。pollerがセッションが0本であることを実機で
+ *   確かめ直してから`sudo reboot`を打つ。**`SELF_UPDATE`とは別物**で、あちらが畳むのは
+ *   pollerのプロセスだけ（`exec`で入れ替わるためセッションは残る）なのに対し、こちらは
+ *   OSごと落ちるため走っているセッションは戻らない。対象はホストなので`issueNumber`は0
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -72,7 +79,8 @@ export type DispatchJobKind =
   | "PLAN_REVIEW"
   | "SELF_UPDATE"
   | "CODE_REVIEW"
-  | "PREVIEW";
+  | "PREVIEW"
+  | "REBOOT";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -153,6 +161,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "self_update") return "SELF_UPDATE";
   if (value === "code_review") return "CODE_REVIEW";
   if (value === "preview") return "PREVIEW";
+  if (value === "reboot") return "REBOOT";
   return null;
 }
 
@@ -199,7 +208,7 @@ export function buildPreviewActiveKey(hostName: string): string {
 
 /**
  * セッションを立てず、tmuxにも触らないジョブ（#1828）。手作業の代行実行と、その中断（#1882）、
- * チェックアウトの更新（#1875）。
+ * チェックアウトの更新（#1875）、確認環境（#2444）、ホストの再起動（#2496）。
  *
  * **払い出しは制御ジョブと同じ「枠外」**（`SESSION_LAUNCH_JOB_KINDS`に入れない）で、
  * `QUEUED`のまま5分で`TIMEOUT`にするのも制御ジョブと揃える——**待たせるほど危険になる**
@@ -213,6 +222,7 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "MANUAL_STEP_ABORT",
   "SELF_UPDATE",
   "PREVIEW",
+  "REBOOT",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -458,6 +468,22 @@ export type DispatchHostView = {
    */
   previewCapable: boolean | null;
   /**
+   * ホストごと再起動できるか（#2496）。**`null`（未申告）は「できない」として扱う**
+   * （他のCapableと同じ）。画面はこれを見て、押せない理由を押す前に出す。
+   *
+   * **`selfUpdateCapable`とは分けて持つ。** あちらが畳むのはpollerのプロセスだけで、
+   * こちらはOSごと落ちる。更新に対応したpollerでも、サブPCのsudoの許可が入っているとは
+   * 限らない（許可は`guchi-apps/subpc`の管理下）。
+   */
+  rebootCapable: boolean | null;
+  /**
+   * 再起動が要るか・いつから起動しているか（#2496）。**申告していなければ`null`**（古いpoller）。
+   *
+   * **`metrics`・`checkout`と同じく画面へ出すための写しで、判定には使わない。**
+   * 押せるかどうかに効くのはセッション本数だけで、落とすかどうかは人が決める。
+   */
+  reboot: DispatchHostReboot | null;
+  /**
    * 確認環境を起こせるリポジトリ（#2444）。**`repositories`の部分集合**で、開発サーバーを
    * 持たないリポジトリ（`package.json`が無いもの）が除かれている。
    *
@@ -641,6 +667,23 @@ export function buildSelfUpdateActiveKey(hostName: string): string {
   return `self_update:host:${hostName}`;
 }
 
+/**
+ * ホストごとの再起動（#2496）が使う`DispatchJob`の埋め草。**`SELF_UPDATE`と同じ理由**で、
+ * このジョブもIssueに紐づかない（相手はホスト）。
+ */
+export const REBOOT_REPOSITORY = SELF_UPDATE_REPOSITORY;
+export const REBOOT_ISSUE_NUMBER = 0;
+
+/**
+ * 再起動ジョブの活性キー。**Issueではなくホストで一意にする**（`buildSelfUpdateActiveKey`と同じ）。
+ *
+ * 同じホストへ再起動を二重に積むと、落ちて戻ってきた直後に2本目が届いて、もう一度落ちる。
+ * `buildDispatchActiveKey`が作る`reboot:owner/repo#0`と混ざらないよう`host:`を挟む。
+ */
+export function buildRebootActiveKey(hostName: string): string {
+  return `reboot:host:${hostName}`;
+}
+
 /** 申告が届いてから一定時間内なら生存とみなす */
 export function isDispatchHostOnline(lastSeenAt: Date, now: Date): boolean {
   return now.getTime() - lastSeenAt.getTime() <= DISPATCH_HOST_ONLINE_WINDOW_MS;
@@ -801,6 +844,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "チェックアウトの更新";
     case "PREVIEW":
       return "確認環境";
+    case "REBOOT":
+      return "ホストの再起動";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":

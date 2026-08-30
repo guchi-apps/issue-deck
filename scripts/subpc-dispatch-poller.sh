@@ -138,7 +138,8 @@ set -euo pipefail
 # 21: リポジトリ全体のコードレビュー（`CODE_REVIEW`）のセッションを起こす（#698）。
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
 # 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
-DISPATCH_POLLER_VERSION="23"
+# 24: ホストごとの再起動（`REBOOT`）を実行し、再起動が要るかを申告する（#2496）。
+DISPATCH_POLLER_VERSION="24"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -183,6 +184,10 @@ CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
 PREVIEW_LAUNCHER="$SCRIPT_DIR/start-preview-dev.sh"
+# ホストごとの再起動（#2496）で打つコマンド。**sudoersに書く許可と1文字も違えられない**
+# （`sudo -n -l <コマンド>`は許可された表記と突き合わせるため、`/sbin/reboot`のような別名では
+# 一致しない）。許可そのものは`guchi-apps/subpc`の`/etc/sudoers.d/`が持つ。
+REBOOT_COMMAND="/usr/sbin/reboot"
 # 開発サーバーの回収（#1223）。**新しい常駐プロセスは増やさず、この1巡に相乗りさせる。**
 REAPER="$SCRIPT_DIR/reap-dev-servers.sh"
 # 作業が終わったセッションの回収（#1256・#1223の第2段階）。同じく1巡に相乗りさせる。
@@ -598,6 +603,62 @@ self_update_capable() {
   fi
 }
 
+# ホストごと再起動できるか（#2496）。**`sudo -n -l`の一覧から`NOPASSWD`の行だけを取り出して
+# 突き合わせる**（`-l`は許可を引くだけで、対象のコマンドは実行しない）。
+#
+# **`sudo -n -l <コマンド>`では判定できない**（実機で確認済み）。あれは「そのコマンドが
+# 許可されているか」しか見ず、`(ALL : ALL) ALL`のような**パスワードを要する許可でも成功する**。
+# 実際このホストでは`sudo -n -l /usr/sbin/reboot`が0で返る一方、`sudo -n true`は
+# `sudo: a password is required`で落ちる。そちらで申告すると、対応していると言いながら
+# 実行時に必ず失敗する——この関数が防ごうとしているものそのものになる。
+#
+# **取りこぼす側へ倒してある。** `NOPASSWD: ALL`のような書き方ではコマンドの文字列が一覧に
+# 現れないため`false`になるが、そのときは画面にボタンが出ないだけで害が無い（逆に
+# 誤って`true`にすると、押した人には「押したのに落ちなかった」しか残らない）。
+# 出力はパイプへ流すのでsudoは行を折り返さない（実機で確認済み）。
+#
+# **`self_update_capable`とは分けて持つ。** あちらが畳むのはこのプロセスだけで、`exec`で
+# 入れ替わるため走っているセッションは残る。こちらはOSごと落ちる。加えて、更新できる
+# pollerでもサブPCのsudoの許可（`/etc/sudoers.d/`。`guchi-apps/subpc`の管理下）が入っている
+# とは限らない。
+reboot_capable() {
+  if sudo -n -l 2>/dev/null | grep -F 'NOPASSWD:' | grep -qF "$REBOOT_COMMAND"; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# 再起動が要るか・いつから起動しているか（#2496）。**画面へ出すためだけの申告**で、
+# issue-deck側は押せるかどうかの判定に使わない（効くのはセッション本数だけ）。
+#
+# `/var/run/reboot-required`はaptがカーネル等の更新で置くファイル。**中身は読まない**
+# （`reboot-required.pkgs`の一覧は画面で使わず、載せるほど申告の壊れ方が増える）。
+collect_reboot_state() {
+  local required=false required_since="" booted_at=""
+
+  if [[ -f /var/run/reboot-required ]]; then
+    required=true
+    required_since="$(date -u -r /var/run/reboot-required +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  fi
+
+  # 起動時刻。**`uptime -s`はローカルタイムで秒までしか出さない**ため、UTCで揃う
+  # `/proc/stat`の`btime`（epoch秒）から作る。読めなければ空のまま送る
+  local btime
+  btime="$(awk '/^btime /{print $2}' /proc/stat 2>/dev/null || true)"
+  if [[ "$btime" =~ ^[0-9]+$ ]]; then
+    booted_at="$(date -u -d "@$btime" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  fi
+
+  jq -n \
+    --argjson required "$required" \
+    --arg requiredSince "$required_since" \
+    --arg bootedAt "$booted_at" \
+    '{required: $required}
+      + (if $requiredSince == "" then {} else {requiredSince: $requiredSince} end)
+      + (if $bootedAt == "" then {} else {bootedAt: $bootedAt} end)'
+}
+
 # 確認環境（#2444）を起こせるか。**スクリプトがあることだけを見る。**
 #
 # どのリポジトリを起こせるかはスクリプト側が`local-repos.conf`・`local-repo-ports.conf`から
@@ -884,13 +945,15 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
+    --argjson reboot "$(reboot_capable)" \
+    --argjson rebootState "$(collect_reboot_state)" \
     --argjson preview "$(preview_capable)" \
     --argjson previewState "$(preview_state)" \
     --argjson previewRepositories "$(preview_repositories)" \
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -2002,6 +2065,64 @@ run_self_update_job() {
   exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
 }
 
+# ホストごと再起動する（#2496）。
+#
+# **`run_self_update_job`とは別物。** あちらが畳むのはこのプロセスだけで、`exec`で入れ替わる
+# ため走っているセッションは残る（#1927）。こちらはOSごと落ちるので、tmuxのセッションは全部
+# 消えて会話も戻らない。
+#
+# **セッションが0本であることをここで数え直す。** issue-deckが見ているのは最大30秒古い申告で、
+# 押してから届くまでの間に新しいセッションが立ちうる。`MANUAL_STEP`が本文の照合をissue-deckと
+# 独立に2回行うのと同じ作法で、**取り返しのつかない操作の最終的な判定は実機側に置く**。
+#
+# **報告してから落とす。** `sudo reboot`はシャットダウンを予約して即座に戻るが、その後は
+# ネットワークもプロセスも順次落ちていくため、後から報告しても届く保証が無い。
+# 打つ前に`sudo -n -l`で許可を確かめておき、そこを通れば`reboot`はまず失敗しない。
+run_reboot_job() {
+  local job_id="$1" live
+
+  # 許可の確認（申告と同じ判定）。**申告が真でもここで確かめ直す**——申告は最大30秒古く、
+  # sudoersが配り直された直後はずれうる
+  if [[ "$(reboot_capable)" != "true" ]]; then
+    report_job "$job_id" failed \
+      "パスワード無しで再起動できません（$REBOOT_COMMAND のsudoの許可が要ります）。"
+    return 0
+  fi
+
+  live="$(count_issue_sessions)"
+  if ((live > 0)); then
+    report_job "$job_id" failed \
+      "セッションが${live}本走っています。終わるのを待つか、実行キューから閉じてください。"
+    return 0
+  fi
+
+  # **計画レビュー・コードレビューのセッションも数える。** こちらは`-issue-`の規約から外して
+  # あるぶん`count_issue_sessions`に入らないが、落とせば同じように消える
+  local reviews
+  reviews=$(($(count_plan_review_sessions) + $(count_code_review_sessions)))
+  if ((reviews > 0)); then
+    report_job "$job_id" failed \
+      "レビューのセッションが${reviews}本走っています。終わるのを待ってください。"
+    return 0
+  fi
+
+  report_job "$job_id" succeeded "再起動を開始しました（セッション0本）。戻るまで数分かかります。"
+
+  echo "再起動します（$REBOOT_COMMAND）。"
+  if ! sudo -n "$REBOOT_COMMAND" >/dev/null 2>&1; then
+    # ここまで来て失敗するのは許可の確認を通った後なので稀。**ジョブは既に閉じている**ため
+    # 画面へは返せない。journaldへ残して、次の申告で「稼働時間が変わっていない」ことから辿る
+    echo "エラー: 再起動を開始できませんでした（$REBOOT_COMMAND）。" >&2
+    return 0
+  fi
+
+  # **シャットダウンが進む間、次のジョブを取りに行かない。** ここで抜けると1巡が続き、
+  # 落ちきる前に起動ジョブを取ってしまう（issue-deck側の見送りも、報告済みのジョブでは
+  # 解けている）。プロセスごとsystemdに畳まれるまで待つだけなので、上限は長めでよい
+  sleep 600
+  return 0
+}
+
 # 確認環境（#2444）を起こす・入れ替える・止める。
 #
 # **セッションは立てない。** `SELF_UPDATE`・`MANUAL_STEP`と同じ枠外のジョブで、tmuxの
@@ -2233,6 +2354,13 @@ run_job() {
   # 効いていないことに気付く手掛かりが無かった。
   if [[ "$kind" == "SELF_UPDATE" ]]; then
     run_self_update_job "$job_id"
+    return 0
+  fi
+
+  # ホストの再起動（#2496）。**`SELF_UPDATE`と同じくIssueに紐づかない**ため、
+  # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
+  if [[ "$kind" == "REBOOT" ]]; then
+    run_reboot_job "$job_id"
     return 0
   fi
 

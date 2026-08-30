@@ -157,11 +157,12 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 
 | 項目 | 内容 |
 |---|---|
-| ワークフロー | 無し（`.github/workflows/`を持たない） |
+| ワークフロー | `issue-labels.yml`（進捗報告のcaller。guchi-apps/ideas#5で追加）のみ。無人実行（`claude-issue-dispatch.yml`）とリリースフローは入れない |
 | ラベル | issue-deckと同一（`guchi-apps/docs`の`label-sync/sync-labels.sh`で配る） |
 | CLAUDE.md | あり（新規作成）。「コードを持たない」「実装しない」「PRは`main`直行」を明記 |
 | デフォルトブランチ | `main`のみ（`develop`は作らない。`docs`・`claude-config`と同じ） |
-| 盤面（Projects Status） | 載る。ただし**`Implementation`で止まり、以降は手で`Done`にしてclose** |
+| 盤面（Projects Status） | 載る。**`main`宛PRの作成で`Develop PR`、そのマージで`Done`＋closeまで自動で進む**（guchi-apps/ideas#5）。**ただしPRを作るまでは`Implementation`のまま**（下記） |
+| Pull Request（[scripts/local-repo-pr-policy.conf](../scripts/local-repo-pr-policy.conf)） | `manual`。エージェントは自動で作らず、人の指示を待つ。PRができるまでセッションも畳まない（#2499） |
 | ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 26000 |
 | `~/.config/issue-deck/local-repos.conf` | `/home/guchi/apps/ideas` |
 | 公開範囲 | private（`question`・`docs`・`claude-config`と同じ） |
@@ -177,16 +178,48 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
   `addMissingProjectItems`（[`lib/github/sync-project-status.ts`](../src/lib/github/sync-project-status.ts)）の
   自動追加の対象にはならない。盤面へ載るのはローカルセッションが起動時に進捗報告API
   （`POST /api/progress`）を叩いたIssueだけ
-- **進捗は`Implementation`で止まる。** `Develop PR`以降を報告するのは`issue-labels.yml`で、
-  このリポジトリには`.github/workflows/`自体が無い（`docs`#3・`subpc`#10・#14・#19・
-  `claude-config`と同じ状態）。**入れるまでは手で`Done`にしてcloseする。** 入れる場合は
-  `develop`を持たないため`workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`が
-  要る（#1901・#1917。`claude-config`は guchi-apps/claude-config#2 で分けた）
+- **進捗は当初`Implementation`で止まっていたが、guchi-apps/ideas#5で解消した**（#2497）。
+  `Develop PR`以降を報告するのは`issue-labels.yml`のcallerで、追加前はこのリポジトリに
+  `.github/workflows/`自体が無かった（`docs`#3・`subpc`#10・#14・#19と同じ状態で、
+  guchi-apps/ideas#3で実際に起きて手で`Done`にしてcloseした）。**`develop`を持たずPRが
+  `issue-<番号>` → `main`の形にしかならないため、callerを置くだけでは足りず
+  `workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`が要る**（#1901・#1917。
+  `claude-config`は guchi-apps/claude-config#2、`docs`は guchi-apps/docs#59 で同じ形にした）。
+  `main`宛PRの作成で`Develop PR`、そのマージで`Done`＋Issueのcloseまで自動で進み、
+  `Develop`・`Release`の2段は通らない。**ただしPRを作るまでは`Implementation`のまま**で、
+  Issueも自動ではcloseされない（下記「Pull Requestは人の指示で作り、それまでセッションを
+  畳まない」。PRを作らずに終える構想は、画面から`Closed`にするか手でcloseする）
 - **リリースフローも入れない。** `docs`・`claude-config`と同じく`develop`を持たず、デプロイも
   無い（構想はどこにもデプロイされない）ため、リリースという段階を挟む先が無い
 - **`package.json`を持たない。** 依存インストールとenvの配置は不要
   （[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)「envは既定では置かない」）。
   ポート帯だけは、上の4件と同じ理由（既定の`3000 + Issue番号`への相乗りを避ける）で確保する
+
+### Pull Requestは人の指示で作り、それまでセッションを畳まない（#2499）
+
+**構想は一度で仕上がらず、同じセッションで何度も練り直す。** ところが汎用ランチャーの既定は
+「一区切りついたらPull Requestを作り、`11.local`を外してレビューへ引き渡す」で、外した時点で
+`reap-sessions.sh`の引き渡し済みの経路に乗り、猶予5分でセッションが畳まれていた。**続きを
+相談しようとすると会話が消えている**——構想の置き場としてはこれが致命的だった。
+
+そこで`guchi-apps/ideas`を[scripts/local-repo-pr-policy.conf](../scripts/local-repo-pr-policy.conf)へ
+`manual`で載せ、次の2つを対で変えた。判定は[scripts/lib/pr-policy.sh](../scripts/lib/pr-policy.sh)が持つ。
+
+| 変わるもの | 既定（載っていないリポジトリ） | `manual`（`ideas`） |
+|---|---|---|
+| 起動プロンプトの「責務」 | PRを作り、`11.local`を外して引き渡す | コミットとpushまで。`gh pr create`は指示されてから。`11.local`もPRを作るまで外さない |
+| セッションの回収 | PRがopen・またはコミットが手元に残っていなければ猶予5分で畳む | `issue-<番号>`のPRができるまで畳まない（終了予告も出さない） |
+
+- **プロンプトと回収は必ず両方を見る。** 片方だけ変えると、PRを作らないまま`11.local`を外した
+  セッションが猶予5分で畳まれる（プロンプトだけ）か、自動で作られたPRで引き渡し済みと判定されて
+  結局畳まれる（回収だけ）。だからconfは1つで、両方が同じ関数で読む
+- **Issueのcloseとマージは従来どおり効く。** PRを作った後は引き渡し済みの経路へ戻り、Issueを
+  closeすれば`ISSUE_CLOSED`で畳まれる。**今すぐ畳みたいときは画面のセッション表示の「終了」**
+- **画面の「実装プロンプトをコピー」も同じ文面を出す。** ブラウザからconfは読めないため、
+  [`lib/prompts/pr-policy.ts`](../src/lib/prompts/pr-policy.ts)が一覧と文面の写しを持つ。
+  ずれは`templates.test.ts`が実物のconfを読んで検出するので、**片方だけ直さないこと**
+- 回収側の条件の並びは
+  [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「セッションの回収」を参照
 
 ### Obsidianで書く場合、追加の同期の仕組みは要らない
 
@@ -507,8 +540,22 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 | `version-tag-check.yml` | 対象外（`deploy.yml`に`tag`ジョブが無い） | 対象外（同左） | 対象外 |
 | `CLAUDE.md` | あり（新設） | あり（新設） | あり（自リポジトリ実装向けの節を追記） |
 | ラベル体系 | issue-deckと同一へ統一 | 同左 | 同左 |
-| `issue-labels.yml` | `@workflows/v25`（guchi-apps/subpc#32で2026-08-18に追加） | `@workflows/v25`（#1901の残課題だったが配置済み。2026-08-22に実測） | `@workflows/v23`（#1901。main直行の遷移ジョブが要る） |
+| `issue-labels.yml` | `@workflows/v29`（guchi-apps/subpc#32で2026-08-18に追加） | `@workflows/v29`（#1901の残課題だったが配置済み） | `@workflows/v29`（guchi-apps/docs#59。main直行の遷移ジョブが要る） |
 | `claude-review-develop.yml` | **#2103で配ると決定**（guchi-apps/subpc#45） | **#2103で配ると決定**（guchi-apps/vps#108） | 対象外（`develop`を持たない） |
+
+**`issue-labels.yml`のcallerは、この3件のほかに`claude-config`（guchi-apps/claude-config#2）と
+`ideas`（guchi-apps/ideas#5）も持つ**（2026-08-30時点で5件とも`@workflows/v29`）。この表は
+リリースフロー導入（#1706・#1727）の対象3件に限った記録なので列は増やさず、ここに併記する
+（`ideas`の詳細は上記「`guchi-apps/ideas`（構想の置き場）」）。**参照タグは画面から配る一括更新PR
+（#1602）で上がるため、この表の値はすぐ古くなる。正は各リポジトリの実物**で、次で読む。
+
+```bash
+for r in subpc vps docs claude-config ideas; do
+  echo -n "$r: "
+  gh api "repos/guchi-apps/$r/contents/.github/workflows/issue-labels.yml" --jq .content \
+    | base64 -d | grep -o 'reusable-issue-labels.yml@workflows/v[0-9]*'
+done
+```
 
 > **進捗を`Implementation`から先へ進める経路は`issue-labels.yml`が持っている。** 3件とも当初は
 > 持っておらず、ローカルセッションが起動時に付ける`Implementation`のまま、PRをマージしても
@@ -521,7 +568,8 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 > `issue-<番号>` → `main`の形になるため、`base.ref == 'develop'`か`head.ref == 'develop'`を
 > 見る既存ジョブがどれも発火しない。`workflows/v23`の`main-direct-pr-opened`・
 > `main-direct-merged`が要る（[cross-repo-setup-guide.md](cross-repo-setup-guide.md)の
-> 「`develop`を持たないリポジトリ（main直行）」）。
+> 「`develop`を持たないリポジトリ（main直行）」）。**`develop`を持たない`claude-config`・
+> `ideas`も同じ条件**で、3件とも`@workflows/v23`以降のcallerを置いて解消済み。
 
 **`vps`の`develop`は`main`から21コミット遅れ・3コミット先行で分岐していた**（guchi-apps/vps#79）。
 先行分は`main`側により新しい形で入っており固有の成果が無かったため、退避ブランチ
@@ -586,7 +634,7 @@ GitHub Actionsの実行環境には存在しないため、無人実行に実装
 | `~/.config/issue-deck/local-repos.conf` | 未記載 | `/home/guchi/apps/claude-config`を追記 |
 | ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 未確保 | 23000 |
 | フォルダの信頼確認（#1838） | 未承認 | 手作業として起票（#1994） |
-| `.github/workflows/` | 無し | 無し（`issue-labels.yml`は guchi-apps/claude-config#2 で別途） |
+| `.github/workflows/` | 無し | 無し（`issue-labels.yml`は guchi-apps/claude-config#2 で別途追加済み） |
 | ブランチ | `main`のみ（`develop`なし・`origin/HEAD`未設定） | 据え置き |
 
 - **対応表を足すだけで申告に載る。pollerの再起動は要らない**（#1988で実測。追記から次の巡回で
@@ -598,11 +646,12 @@ GitHub Actionsの実行環境には存在しないため、無人実行に実装
   守るべき自動マージ経路（`claude-review-develop.yml`）がそもそも走らない。
   `delete_branch_on_merge: true`のままでよいのも`docs`と同じ理由で、#1786が問題にしたのは
   **headが`develop`のリリースPR**であり、`develop`を持たないリポジトリでは起こらない
-- **進捗は`Implementation`で止まる。** ローカルセッションが起動時に`Implementation`を報告した後、
-  `Develop PR`以降を報告するのは`issue-labels.yml`で、このリポジトリには`.github/workflows/`自体が
-  無い（`docs`#3・`subpc`#10・#14・#19と同じ状態）。**入れるまでは手で`Done`にしてcloseする。**
-  導入は guchi-apps/claude-config#2 で分けた——`develop`を持たないため`workflows/v23`の
-  `main-direct-pr-opened`・`main-direct-merged`が要る（#1901・#1917）
+- **進捗は#1988の時点では`Implementation`で止まっていたが、guchi-apps/claude-config#2で解消した。**
+  ローカルセッションが起動時に`Implementation`を報告した後、`Develop PR`以降を報告するのは
+  `issue-labels.yml`で、当時はこのリポジトリに`.github/workflows/`自体が無かった
+  （`docs`#3・`subpc`#10・#14・#19と同じ状態で、入れるまでは手で`Done`にしてcloseしていた）。
+  導入を#1988から分けたのは、`develop`を持たないため`workflows/v23`の
+  `main-direct-pr-opened`・`main-direct-merged`が要るため（#1901・#1917）
 - **マージしただけでは実機に反映されない。** `~/.claude/CLAUDE.md`・`~/.claude/skills`は
   `~/apps/claude-config`（本体チェックアウト）へのsymlinkなので、`main`へマージしたあと両機で
   `git pull`するまで効かない。取り残しは`check-sync.sh`（[scripts/lib/personal-config-sync.sh](../scripts/lib/personal-config-sync.sh)が
@@ -1058,8 +1107,9 @@ done
 載らないインフラ設定・共有知識のリポジトリで、`claude-issue-dispatch.yml`を持たない。**
 そのため無人実行は回らず、**実行経路はこのローカルセッションだけ**になる
 （起動そのものは汎用ランチャーが行うので成立する）。**`issue-labels.yml`（進捗報告）は別の軸で、
-#1741の時点では3件とも持っていなかったが、その後`subpc`へ追加した**（guchi-apps/subpc#32。
-`docs`は#1901、`vps`は未配置）。実測した特徴と、載せるにあたっての判断は次のとおり。
+#1741の時点では3件とも持っていなかったが、その後3件とも配置済み**（`subpc`は
+guchi-apps/subpc#32、`docs`は#1901・guchi-apps/docs#59、`vps`は2026-08-22に実測）。
+実測した特徴と、載せるにあたっての判断は次のとおり。
 
 - **ラベル体系は2026-08-16に整備済み**（guchi-apps/vps#81・guchi-apps/subpc#15・guchi-apps/docs#13）。
   それ以前は3件ともラベルが未定義で、`11.local`の付与が`'11.local' not found`で落ちていた
@@ -1084,8 +1134,9 @@ done
   確保した。載っていないと既定の`3000 + Issue番号`に落ち、未登録のリポジトリ同士が相乗りするため
 
 ※5 `claude-config`（個人設定。private）は#1988で追加した。**※4の3件と同じ枠**で、
-`claude-issue-dispatch.yml`を持たず実行経路はローカルセッションだけ。**`issue-labels.yml`も
-持たないため進捗が`Implementation`で止まる**（導入は guchi-apps/claude-config#2）。
+`claude-issue-dispatch.yml`を持たず実行経路はローカルセッションだけ。**`issue-labels.yml`は
+#1988の時点では無く進捗が`Implementation`で止まっていたが、guchi-apps/claude-config#2で
+追加して解消した**（`@workflows/v29`）。
 `package.json`を持たないがポート帯（23000）は同じ理由で確保した。フォルダの信頼確認（#1838）だけは
 対話が要るので手作業として起票した（#1994）。実測と判断は上記「`claude-config`（個人設定）」を参照。
 
@@ -1098,9 +1149,11 @@ done
 帯の払い出しを足すかどうかは#2225で扱う。
 
 ※7 `ideas`（構想の置き場。private）は#2430で追加した。**※4・※5と同じ枠**で、
-`claude-issue-dispatch.yml`も`issue-labels.yml`も持たないため、実行経路はローカルセッション
-だけで進捗は`Implementation`で止まる。`package.json`を持たないがポート帯（26000）は同じ理由で
-確保した。**このリポジトリだけは`gh repo create`の時点でユーザーの手を借りている**——サブPCの
+`claude-issue-dispatch.yml`を持たないため実行経路はローカルセッションだけ。**進捗は当初
+`Implementation`で止まっていたが、`issue-labels.yml`（`@workflows/v29`）を入れて解消した**
+（guchi-apps/ideas#5・#2497。`main`宛PRの作成で`Develop PR`、マージで`Done`＋closeまで進む）。
+`package.json`を持たないがポート帯（26000）は同じ理由で確保した。**このリポジトリだけは
+`gh repo create`の時点でユーザーの手を借りている**——サブPCの
 セッションでは`gh repo create`がauto modeのクラシファイアに拒否されるため（#2430で実測）。
 フォルダの信頼確認（#1838）も`claude-config`と同じく対話が要るので手作業として起票した（#2433）。
 判断は上記「`guchi-apps/ideas`（構想の置き場）」を参照。

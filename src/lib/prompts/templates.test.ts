@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
+import {
+  LOCAL_REPO_PR_POLICY_CONF_PATH,
+  MANUAL_PR_REPOSITORIES,
+  parseManualPrRepositories,
+} from "@/lib/prompts/pr-policy";
 import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.generated";
 
 /**
@@ -215,5 +220,46 @@ describe("並行状況と親子Issue（#1267）", () => {
 
   it("画像はWebFetchで読むよう促す", () => {
     expect(buildImplementationPrompt(BASE)).toContain("`WebFetch`でそのURLを読んでください");
+  });
+
+  // #2499: 既定はこれまでどおり「作って引き渡して`11.local`を外す」
+  it("一覧に無いリポジトリではPRを作って引き渡す責務を渡す", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).toContain("向けPull Requestを作成する");
+    expect(prompt).toContain("ローカルでの作業を終える時点で`11.local`を外す");
+    expect(prompt).not.toContain("ユーザーから指示されるまで作りません");
+  });
+
+  it("手動PRのリポジトリではPRと`11.local`を指示待ちにする", () => {
+    const prompt = buildImplementationPrompt({
+      ...BASE,
+      repositoryFullName: MANUAL_PR_REPOSITORIES[0],
+    });
+    expect(prompt).toContain("ユーザーから指示されるまで作りません");
+    expect(prompt).toContain("**`11.local`もPull Requestを作るまで外しません。**");
+    // 畳まれない理由まで渡さないと、外してよいものと読まれる
+    expect(prompt).toContain("PRを作らない限り畳まれない");
+    // コミットとpushまでは止めない（成果物を手元に残したまま終わらせない）
+    expect(prompt).toContain("コミットとpush（`issue-1263`ブランチ）はいつでも行ってよい");
+  });
+});
+
+/**
+ * 一覧を2か所（confとTypeScript）に持たざるを得ないので（`pr-policy.ts`）、
+ * **実物のconfと突き合わせて写しが古くなるのを防ぐ**（#2499）。
+ * `local-port-bands.test.ts`が実物の対応表を読むのと同じ形。
+ */
+describe("手動PRのリポジトリ一覧", () => {
+  it("実物のconfとTypeScript側の写しが一致する", () => {
+    const conf = readFileSync(join(process.cwd(), LOCAL_REPO_PR_POLICY_CONF_PATH), "utf8");
+    expect(parseManualPrRepositories(conf)).toEqual([...MANUAL_PR_REPOSITORIES]);
+  });
+
+  it("行末コメントの付いた行は読まない（confの書式どおり）", () => {
+    expect(parseManualPrRepositories("guchi-apps/foo manual # メモ\n")).toEqual([]);
+  });
+
+  it("manual以外のポリシーは手動扱いしない", () => {
+    expect(parseManualPrRepositories("guchi-apps/foo auto\n")).toEqual([]);
   });
 });

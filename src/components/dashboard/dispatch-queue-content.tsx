@@ -114,6 +114,7 @@ export function DispatchQueueContent({
         jobs={dispatch.jobs}
         onOpenIssue={onOpenIssue}
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
+        onRequestReboot={dispatch.requestReboot}
       />
 
       {/* 順番待ちが進まない理由。無いと「押しても何も起きない」としか見えない（#1394） */}
