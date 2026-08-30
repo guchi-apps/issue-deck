@@ -68,7 +68,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
-| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。#2524・#2537） |
+| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
@@ -91,7 +91,7 @@ npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かな�
 | 差し込んだメッセージの届き方 | **次のターンの頭**。走っているターンは中断しない |
 | `codex agents`でセッションを一覧できるか | **○**（#2521でstandalone installへ入れ替えた） |
 | `codex remote-control start` / `pair` | **○**（同上）。取れるのは短命のペアリングコード（#2524で画面へ出した） |
-| セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
+| セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **△**。起動オプションには無いが、app-serverの`thread/name/set`で後から付けられる（#2540） |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
 **この表のものは実装済みになった。** 「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は
@@ -152,16 +152,45 @@ UUIDの対応をどこかへ残せば、`codex queue`の宛先はそこから引
 **答える前のセッションのUUIDは取れない**ので、その間は追加指示を送れない。画面には
 「まだ開始していません」が出ている状態なので、実装するなら送れないことを画面側でも表せる。
 
-### セッション名は付けられない
+### セッション名は起動オプションでは付けられないが、app-serverから付けられる（#2540）
 
-`--thread`は名前でも引けるが、**名前を決めるのはCodex側**だった。`~/.codex/session_index.jsonl`には
-最初に「プロンプトの先頭を切ったもの」が入り、数秒後にモデルが付け直した短い題名（例:
-`bashでsleep 90を実行`）へ置き換わる。**名前を指定する起動オプションは無い**（`codex --help`・
-`codex exec --help`のどちらにも無い）。改名は`codex agents`のTUI（`TuiAgentsKeymap`に
-`search` / `rename` / `toggle_grouping`）にあるが、その`codex agents`が動かない（次項）。
+**起動時には付けられない。** `--thread`は名前でも引けるが、名前を決めるのはCodex側で、
+`~/.codex/session_index.jsonl`には最初に「プロンプトの先頭を切ったもの」が入り、数秒後にモデルが
+付け直した短い題名（例: `bashでsleep 90を実行`）へ置き換わる。**名前を指定する起動オプションは
+無い**（`codex --help`・`codex exec --help`のどちらにも無い）。改名は`codex agents`のTUI
+（`TuiAgentsKeymap`に`search` / `rename` / `toggle_grouping`）にあるが、TTYが要るので外から
+呼べない。
 
-したがって`run-issue-session.sh`が付けている`<リポジトリ名> #<Issue番号>`に相当する名前を
-Codex側へ持ち込むことはできない。**宛先はUUIDで持つ**。
+**後から付けることはできる**（#2540）。app-serverのJSON-RPCに`thread/name/set`があり、
+`SessionStart`フックで取れるUUIDを宛先にして`<リポジトリ名> #<Issue番号>`を付けられる。
+**これがCodexにとってのRemote Control相当の要**——繋いだChatGPTアプリに出るのはホストの
+Codexセッション全部の一覧（#2524・#2537）で、名前が自動命名のままだと**どれがどのIssueか
+分からない**。
+
+```bash
+{ printf '%s\n' \
+  '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"issue-deck","version":"1"}}}' \
+  '{"method":"initialized","params":{}}' \
+  '{"id":2,"method":"thread/name/set","params":{"threadId":"<UUID>","name":"issue-deck #2540"}}'
+  sleep 3; } | codex app-server
+# → {"id":2,"result":{}} ＋ {"method":"thread/name/updated",…}
+```
+
+- **デーモンは要らない。** stdioの`codex app-server`を1回起こすだけでよい（`codex queue`と同じ）。
+  **`codex app-server proxy`（走っているデーモンの制御ソケットへの中継）では応答が返らなかった**
+  ——NDJSON・`Content-Length`の両方で無反応
+- **stdinを閉じるとリクエストを処理せずに終了する**（実測200ms）。応答を読み終えるまでstdinを
+  開けておく（実装は`coproc`。`scripts/lib/codex-thread-name.sh`）
+- **走っているセッションにも効き、モデルの自動命名に上書きされない。** tmuxで起こしたTUIの
+  スレッドへ付け替え、ターンをまたいで保たれることを実機で確認した（逆順ではない——モデルが
+  先に名付けた後から付け替えている）
+- 知らないスレッドIDには`no rollout found for thread id …`が返る。**セッション開始の直後は
+  転記がまだ無いことがある**ので、そのときだけ数回やり直す
+- 付けるのは`session-notify.sh`の`SessionStart`（`name_codex_thread`）。**切り離して走らせる**
+  ——名前が付くのを待つ価値は無く、付かなくてもセッションは動く（`codex queue`の宛先はUUIDのまま）
+
+**宛先は引き続きUUIDで持つ。** 名前は人が一覧で見分けるためのもので、`codex queue`が名前でも
+引けることには依存しない（名前は後から人が変えられる）。
 
 ### `codex agents`・`remote-control`はstandalone installが要る（#2521で入れ替えた）
 
@@ -242,6 +271,10 @@ Issueのセッション表示**（#2537。スマホのIssue詳細にも同じも
   `remoteControlUrl`が空になり、Claude Codeなら出る「Remote Controlで開く」が消える。
   入力待ちのIssueを開いても画面から答える手段が1つも無いように見えていた。**押したIssueだけに
   繋がると誤解させない**ため、Issue側の文言は「このIssueだけでなく」から始める
+- **繋いだ先でどれがどのIssueかは、セッション名で見分ける**（#2540）。名前はモデルの自動命名
+  だったため一覧から目的のセッションを選べなかった。`SessionStart`で`thread/name/set`を打ち、
+  Claude Codeの`--name`と同じ`<リポジトリ名> #<Issue番号>`に揃えている（前述の
+  「セッション名は起動オプションでは付けられないが、app-serverから付けられる」）
 - **Issue側は、申告の無いホストでもボタンを消さない。** 押せない理由（standalone installの
   Codexが要る）を出して無効にする。ホストのカードはCodexと関係の無いホストにも並ぶので
   申告のあるホストにだけ出すが、Issueの行は既にCodexで動いていると分かっている
