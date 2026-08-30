@@ -80,6 +80,16 @@ describe("実装プロンプトの生成", () => {
     expect(supplement).not.toContain("確認が必要なときは端末で質問し");
   });
 
+  it("Codexでは古いPlan mode・手動コメント投稿の指示を明示的に無効にする", () => {
+    const supplement = readFileSync(
+      path.join(repoRoot, "scripts/prompts/codex-supplement.md"),
+      "utf8",
+    );
+    expect(supplement).toContain("「計画を`gh issue comment`で手動投稿する」という指示は実行しないでください");
+    expect(supplement).toContain("subPCのセッションへ届きません");
+    expect(supplement).toContain("**必ず**`scripts/submit-plan.sh <計画ファイル>`を実行してください");
+  });
+
   it("Claude Codeでは質問送信コマンドを案内しない", () => {
     expect(render("claude")).not.toContain("scripts/submit-question.sh");
   });
