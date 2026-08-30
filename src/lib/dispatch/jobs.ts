@@ -2,6 +2,16 @@ import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
 import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
 import { db } from "@/lib/db";
+import {
+  buildCodexPairingActiveKey,
+  CODEX_PAIRING_ISSUE_NUMBER,
+  CODEX_PAIRING_REPOSITORY,
+  describeCodexPairingRejection,
+  isCodexPairingExpired,
+  parseCodexPairingCode,
+  resolveCodexPairingRejection,
+  type CodexPairingRejection,
+} from "@/lib/dispatch/codex-pairing";
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import {
   parseDispatchHostLaunchHold,
@@ -162,6 +172,15 @@ function toJobView(
     previewAction: parsePreviewAction(job.previewAction),
     exitCode: job.exitCode,
     commandOutput: job.commandOutput,
+    // 発行したペアリングコード（#2524）。**期限を過ぎたら返さない。**
+    // 列そのものは`expireStaleDispatchJobs`が空にするが、掃くのは次の巡（最大30秒後）なので、
+    // 読む側でも切る——切れたコードを画面へ出すと、押した人は効かないコードを打ち込むことになる
+    codexPairingCode: isCodexPairingExpired(job.codexPairingExpiresAt)
+      ? null
+      : parseCodexPairingCode(job.codexPairingCode),
+    codexPairingExpiresAt: isCodexPairingExpired(job.codexPairingExpiresAt)
+      ? null
+      : (job.codexPairingExpiresAt?.toISOString() ?? null),
     tmuxSessionName: job.tmuxSessionName,
     queuePriority: job.queuePriority,
     createdAt: job.createdAt.toISOString(),
@@ -204,6 +223,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     planReviewCapable: host.planReviewCapable,
     codeReviewCapable: host.codeReviewCapable,
     codexCapable: host.codexCapable,
+    codexRemoteControlCapable: host.codexRemoteControlCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -368,6 +388,16 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
     });
     expired += result.count;
   }
+
+  // **期限の切れたペアリングコードを列ごと空にする**（#2524）。ジョブの状態とは無関係に、
+  // 値そのものに10分の寿命がある。読む側（`toJobView`）でも切っているが、そちらは画面に
+  // 出さないだけで、行にはコードが残る——**資格情報を持ち続ける理由が無い**ので消す
+  // （`placeholderValues`を終了時に捨てるのと同じ立場）。
+  await db.dispatchJob.updateMany({
+    where: { codexPairingExpiresAt: { lt: now } },
+    data: { codexPairingCode: null, codexPairingExpiresAt: null },
+  });
+
   return expired;
 }
 
@@ -1242,6 +1272,63 @@ export async function enqueueRebootJob(params: {
   }
 }
 
+export type EnqueueCodexPairingJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: CodexPairingRejection; message: string };
+
+/**
+ * CodexのRemote Control相当（#2524）。ペアリングコードを1枚発行する。
+ *
+ * **判定は`resolveCodexPairingRejection`に寄せて、画面と同じ関数を使う**（`enqueueRebootJob`と
+ * 同じ形）。画面が押せると判断した操作だけが届く前提にはしない。
+ *
+ * **未処理は1件まで（ホスト単位）。** 連打しても増えるのは短命のコードだけで、押した人が
+ * 見るのは最後の1枚になる（`buildCodexPairingActiveKey`）。
+ */
+export async function enqueueCodexPairingJob(params: {
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueCodexPairingJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const rejection = resolveCodexPairingRejection({
+    host: host ? toHostView(host, now) : null,
+    // 未処理があるかはactiveKeyのunique制約が最終的に弾く（`enqueueRebootJob`と同じ）
+    hasQueuedJob: false,
+  });
+  if (rejection) {
+    return {
+      ok: false,
+      rejection,
+      message: describeCodexPairingRejection(rejection, params.hostName),
+    };
+  }
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: CODEX_PAIRING_REPOSITORY,
+        issueNumber: CODEX_PAIRING_ISSUE_NUMBER,
+        targetHost: params.hostName,
+        kind: "CODEX_PAIRING",
+        status: "QUEUED",
+        activeKey: buildCodexPairingActiveKey(params.hostName),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: describeCodexPairingRejection("already_queued", params.hostName),
+    };
+  }
+}
+
 export type EnqueuePreviewJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: PreviewRejection; message: string };
@@ -1506,6 +1593,14 @@ export async function reportDispatchJob(params: {
   exitCode?: number | null;
   /** 代行実行の出力。**受け口で長さを切ってから渡す**（`MANUAL_STEP_OUTPUT_MAX_LENGTH`） */
   output?: string | null;
+  /**
+   * 発行したCodexのペアリングコード（#2524）と、その期限。
+   *
+   * **受け口で形（`XXXX-XXXX`）と期限の範囲を通してから渡す**（`output`と同じ立場）。
+   * 期限が読めなければコードごと捨てる——切れているかどうかを判定できない資格情報は残さない。
+   */
+  codexPairingCode?: string | null;
+  codexPairingExpiresAt?: Date | null;
   now?: Date;
 }): Promise<ReportDispatchJobResult> {
   const now = params.now ?? new Date();
@@ -1523,6 +1618,13 @@ export async function reportDispatchJob(params: {
     exitCode: params.exitCode ?? job.exitCode,
     commandOutput: params.output ?? job.commandOutput,
   };
+
+  // ペアリングコード（#2524）。**コードと期限は必ず組で入れる。** 片方だけを更新すると、
+  // 期限の分からないコードか、コードの無い期限が残る（どちらも掃除の条件から外れる）
+  if (params.codexPairingCode && params.codexPairingExpiresAt) {
+    data.codexPairingCode = params.codexPairingCode;
+    data.codexPairingExpiresAt = params.codexPairingExpiresAt;
+  }
 
   if (params.status === "running") {
     data.status = "RUNNING";
@@ -1909,6 +2011,11 @@ export async function announceDispatchHost(params: {
   codeReviewCapable: boolean | null;
   /** Codex CLIでセッションを起こせるか（#2505）。申告していないpollerでは`null`＝非対応 */
   codexCapable: boolean | null;
+  /**
+   * Codexのペアリングコードを発行できるか（#2524）。申告していないpollerでは`null`＝非対応。
+   * **`codexCapable`とは別**（`remote-control`はstandalone installのCodexでしか動かない。#2521）
+   */
+  codexRemoteControlCapable: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -1975,6 +2082,7 @@ export async function announceDispatchHost(params: {
     planReviewCapable: params.planReviewCapable,
     codeReviewCapable: params.codeReviewCapable,
     codexCapable: params.codexCapable,
+    codexRemoteControlCapable: params.codexRemoteControlCapable,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

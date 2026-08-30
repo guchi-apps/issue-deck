@@ -26,6 +26,8 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     previewAction: null,
     exitCode: null,
     commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
     tmuxSessionName: "issue-deck-issue-1468",
     queuePriority: 0,
     createdAt: "2026-08-15T00:00:00Z",

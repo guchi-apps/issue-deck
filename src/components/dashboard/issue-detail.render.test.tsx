@@ -505,6 +505,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,

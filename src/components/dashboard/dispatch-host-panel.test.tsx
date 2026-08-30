@@ -28,6 +28,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -73,6 +74,8 @@ function makeSelfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJo
     previewAction: null,
     exitCode: null,
     commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
     tmuxSessionName: null,
     queuePriority: 0,
     createdAt: NOW.toISOString(),
@@ -889,6 +892,121 @@ describe("DispatchHostPanel", () => {
       render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} />);
 
       expect(screen.queryByText(/起動を見送っています/)).toBeNull();
+    });
+  });
+  // #2524。CodexにはClaude CodeのようなRemote ControlのURLが無く、押して発行する
+  // `XXXX-XXXX`のペアリングコードだけが出口になる
+  describe("CodexのRemote Control相当（#2524）", () => {
+    function pairingJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+      return makeSelfUpdateJob({ id: "pairing", kind: "CODEX_PAIRING", ...overrides });
+    }
+
+    it("standalone installを申告したホストにだけボタンを出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Codexに繋ぐ" })).toBeTruthy();
+    });
+
+    // `codex`コマンドがあるだけでは`remote-control`が動かない（#2521）。押せるように見せると、
+    // 押した人には「押しても失敗する」しか残らない
+    it("`codexCapable`だけのホストには出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexCapable: true, codexRemoteControlCapable: null })]}
+          sessions={[]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+    });
+
+    it("繋がる先がホストごとであることを、押す前に出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.getByText(/のCodexセッション全部に繋がります/)).toBeTruthy();
+    });
+
+    it("発行されたコードと残り時間を出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          jobs={[
+            pairingJob({
+              status: "SUCCEEDED",
+              finishedAt: NOW.toISOString(),
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(NOW.getTime() + 540_000).toISOString(),
+            }),
+          ]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.getByText("A1B2-C3D4")).toBeTruthy();
+      expect(screen.getByText("あと 9分00秒")).toBeTruthy();
+    });
+
+    // 期限（10分）を過ぎたコードを出し続けると、押した人は効かないコードを打ち込むことになる
+    it("切れたコードは出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          jobs={[
+            pairingJob({
+              status: "SUCCEEDED",
+              finishedAt: NOW.toISOString(),
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(NOW.getTime() - 1_000).toISOString(),
+            }),
+          ]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.queryByText("A1B2-C3D4")).toBeNull();
+    });
+
+    it("失敗の理由をボタンの下に出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          jobs={[
+            pairingJob({
+              status: "FAILED",
+              finishedAt: NOW.toISOString(),
+              message: "Codexのデーモンを起動できませんでした（終了コード 1）。",
+            }),
+          ]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.getByText(/Codexのデーモンを起動できませんでした/)).toBeTruthy();
+    });
+
+    // 渡さなければ出さない（`onRequestSelfUpdate`・`onRequestReboot`と同じ形）
+    it("受け取り手が無ければ出さない", () => {
+      render(
+        <DispatchHostPanel hosts={[makeHost({ codexRemoteControlCapable: true })]} sessions={[]} />,
+      );
+
+      expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
     });
   });
 });

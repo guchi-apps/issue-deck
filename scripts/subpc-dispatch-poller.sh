@@ -143,7 +143,8 @@ set -euo pipefail
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
 # 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
 # 24: ホストごとの再起動（`REBOOT`）を実行し、再起動が要るかを申告する（#2496）。
-DISPATCH_POLLER_VERSION="25"
+# 25: CodexのRemote Control相当（`CODEX_PAIRING`）を実行し、standalone installかを申告する（#2524）。
+DISPATCH_POLLER_VERSION="26"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -630,6 +631,30 @@ codex_capable() {
   fi
 }
 
+# Codexのペアリングコードを発行できるか（#2524）。**`codex_capable`とは別に持つ。**
+#
+# `codex remote-control`は共有のapp-serverデーモン越しに動くもので、**公式インストーラの
+# standalone installで入れたCodexでしか起動できない**（#2521）。npmで入れたCodexでも
+# サブコマンド自体は存在し`--help`も通るため、そこでは判定できない
+# （`managed codex path ... starts and updates app-server from that fixed path`で落ちる）。
+#
+# **実体のパスで見る。** standalone installはインストール先を
+# `~/.codex/packages/standalone/` 配下に置き、`~/.local/bin/codex`からそこへリンクを張る。
+# 判定材料としては間接的だが、**確かめるために副作用のあるコマンドを打たずに済む**
+# （`start`はデーモンを起こしてしまうため、申告のたびに打つわけにいかない）。
+#
+# **取りこぼす側へ倒してある。** 将来インストール先が変わればfalseになるが、そのときは画面に
+# ボタンが出ないだけ。逆に誤ってtrueにすると、押した人には「押しても失敗する」しか残らない。
+codex_remote_control_capable() {
+  local real
+  command -v codex >/dev/null 2>&1 || { printf 'false'; return; }
+  real="$(readlink -f "$(command -v codex)" 2>/dev/null || true)"
+  case "$real" in
+    */packages/standalone/*) printf 'true' ;;
+    *) printf 'false' ;;
+  esac
+}
+
 # チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
 #
 # 再起動はsystemdの`Restart=always`に任せる（自分で`systemctl restart`を打つと、結果を報告する
@@ -986,6 +1011,7 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
     --argjson codex "$(codex_capable)" \
+    --argjson codexRemoteControl "$(codex_remote_control_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson reboot "$(reboot_capable)" \
     --argjson rebootState "$(collect_reboot_state)" \
@@ -995,7 +1021,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, codex: $codex, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1449,7 +1475,7 @@ report_job() {
 # 報告の送出そのもの。**`report_job`と分けてあるのは、下の`skipped`→`failed`の読み替えで
 # 自分を呼び直すため**（ログはもう出しているので、そこから呼ぶとログだけ二重になる）。
 send_job_report() {
-  local job_id="$1" status="$2" message="${3:-}" session="${4:-}"
+  local job_id="$1" status="$2" message="${3:-}" session="${4:-}" extra="${5:-}"
   local payload
   payload="$(jq -n \
     --arg jobId "$job_id" \
@@ -1460,6 +1486,12 @@ send_job_report() {
     '{jobId: $jobId, host: $host, status: $status}
       + (if $message == "" then {} else {message: $message} end)
       + (if $tmuxSessionName == "" then {} else {tmuxSessionName: $tmuxSessionName} end)')"
+
+  # 種別ごとの追加フィールド（#2524のペアリングコードなど）。**`message`とは別に渡す。**
+  # `report_job`はmessageをjournaldへ書くため、資格情報をそこへ載せられない
+  if [[ -n "$extra" ]]; then
+    payload="$(jq -c --argjson extra "$extra" '. + $extra' <<<"$payload" 2>/dev/null || printf '%s' "$payload")"
+  fi
 
   local attempt
   for (( attempt = 1; attempt <= REPORT_RETRY_ATTEMPTS; attempt++ )); do
@@ -1485,7 +1517,7 @@ send_job_report() {
   # **見送りは失敗より軽い事実なので、失敗としてなら報告できる間はそちらで報告する。**
   if [[ "$status" == "skipped" && "$API_RESPONSE_STATUS" == "400" ]]; then
     echo "  受け口が skipped を受け付けないため failed で報告します（issue-deckの版数が古い）" >&2
-    send_job_report "$job_id" failed "$message" "$session"
+    send_job_report "$job_id" failed "$message" "$session" "$extra"
     return 0
   fi
 
@@ -2252,6 +2284,68 @@ run_reboot_job() {
   return 0
 }
 
+
+# CodexのRemote Control相当（#2524）。ペアリングコードを1枚発行して画面へ返す。
+#
+# **Claude Code側（#1219）と経路が違う。** あちらは`--remote-control`が出すURLを
+# `scripts/session-notify.sh`がセッションの報告に載せるが、Codexが出すのはURLではなく
+# `XXXX-XXXX`形式の**10分で切れるペアリングコード**なので、配り続けることができない。
+# 押されたときにここで発行して、報告に載せて返す。
+#
+# **コードはjournaldへ出さない。** `report_job`の`message`はログに出るため、コードは
+# `send_job_report`の追加フィールド（`pairingCode`）でだけ送る。失敗したときの理由も、
+# `pair`の出力そのものではなく固定の文言＋終了コードにする——jqが読めなかっただけで
+# 成功していた場合に、出力ごとログへ流れてしまうため。
+#
+# **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
+# `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい。
+run_codex_pairing_job() {
+  local job_id="$1"
+  local start_rc=0 pair_rc=0 pair_out code expires attempt
+
+  if [[ "$(codex_remote_control_capable)" != "true" ]]; then
+    report_job "$job_id" failed \
+      "Codexのremote-controlを使えません（公式インストーラのstandalone installが要ります）。"
+    return 0
+  fi
+
+  # デーモンを起こす。**出力は読まない**（`serverName`はホスト名で既に分かっており、
+  # 起きたかどうかは続く`pair`が通るかで分かる）
+  echo "Codexのapp-serverデーモンを起こします..."
+  timeout 120 codex remote-control start --json >/dev/null 2>&1 || start_rc=$?
+  if [[ "$start_rc" -ne 0 ]]; then
+    report_job "$job_id" failed \
+      "Codexのデーモンを起動できませんでした（終了コード $start_rc）。"
+    return 0
+  fi
+
+  # **`start`の直後は`pair`が`timed out waiting for remoteControl/pairing/start response`で
+  # 落ちることがある**（#2521の実機確認）。デーモンが上がりきるのを待って数回試す
+  for (( attempt = 1; attempt <= 3; attempt++ )); do
+    pair_rc=0
+    pair_out="$(timeout 60 codex remote-control pair --json 2>/dev/null)" || pair_rc=$?
+    code="$(printf '%s' "$pair_out" | jq -r '.manualPairingCode // ""' 2>/dev/null || printf '')"
+    [[ -n "$code" ]] && break
+    (( attempt < 3 )) && sleep 3
+  done
+
+  if [[ -z "$code" ]]; then
+    report_job "$job_id" failed \
+      "ペアリングコードを発行できませんでした（終了コード $pair_rc）。"
+    return 0
+  fi
+
+  # 期限（epoch秒）。**読めなくてもコードは返す**——issue-deck側が既定の10分を当てる
+  expires="$(printf '%s' "$pair_out" | jq -r '.expiresAt // ""' 2>/dev/null || printf '')"
+
+  # **`message`にコードを入れない**（journaldに出る）。画面へはこの追加フィールドで渡り、
+  # ログイン必須の画面にだけ出る
+  report_job "$job_id" succeeded "ペアリングコードを発行しました（10分で切れます）。" "" \
+    "$(jq -n --arg code "$code" --arg expires "$expires" \
+      '{pairingCode: $code} + (if $expires == "" then {} else {pairingExpiresAt: ($expires | tonumber? // $expires)} end)')"
+  return 0
+}
+
 # 確認環境（#2444）を起こす・入れ替える・止める。
 #
 # **セッションは立てない。** `SELF_UPDATE`・`MANUAL_STEP`と同じ枠外のジョブで、tmuxの
@@ -2493,6 +2587,13 @@ run_job() {
   # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
   if [[ "$kind" == "REBOOT" ]]; then
     run_reboot_job "$job_id"
+    return 0
+  fi
+
+  # Codexのペアリングコード（#2524）。**`REBOOT`と同じくIssueに紐づかない**ため、
+  # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
+  if [[ "$kind" == "CODEX_PAIRING" ]]; then
+    run_codex_pairing_job "$job_id"
     return 0
   fi
 

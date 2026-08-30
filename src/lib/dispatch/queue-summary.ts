@@ -254,6 +254,23 @@ export function selectHostRebootJob(
 }
 
 /**
+ * そのホストへ最後に積んだCodexのペアリング（#2524）。無ければ`null`。
+ *
+ * **`CODEX_PAIRING`もキューの一覧に出ない**（`REBOOT`・`SELF_UPDATE`と同じ枠外のジョブ）。
+ * 発行されたコードを出す場所がホストのカードしか無いため、そこへ出すために1件だけ引く。
+ */
+export function selectHostCodexPairingJob(
+  jobs: readonly DispatchJobView[],
+  hostName: string,
+): DispatchJobView | null {
+  return (
+    [...jobs]
+      .filter((job) => job.kind === "CODEX_PAIRING" && job.targetHost === hostName)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+  );
+}
+
+/**
  * 順番待ちが進まない理由（#1394）。理由が無ければ`null`。
  *
  * **応答しているホストだけを見る。** 落ちているホストは「上限で待っている」のではなく

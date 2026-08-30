@@ -2420,6 +2420,14 @@ export function POST(request: NextRequest) {
   `POST /api/dispatch/sessions/ended`へ即時に報告する**（#1321。pollerの巡回は最大75秒遅れ、
   #1311の起動抑止がそのぶん解けないため。trapを通らない経路はpollerが従来どおり拾う）。
   画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
+  **CodexのセッションにはそのRemote ControlのURLが無い**（#2524）。Codexが出すのは
+  `XXXX-XXXX`の**10分で切れるペアリングコード**で、繋がる先も`serverName`＝ホストごと
+  （そのホストのCodexセッション全部）。そのためセッションの行ではなく**実行キューの
+  ホストのカード**に「Codexに繋ぐ」を置き、押すと`CODEX_PAIRING`のジョブが積まれて
+  pollerが発行する（判定と表示は`lib/dispatch/codex-pairing.ts`、発行は
+  `subpc-dispatch-poller.sh`の`run_codex_pairing_job`）。**コードは資格情報**なので、
+  `DispatchJob.codexPairingCode`はログイン必須の画面にだけ出し、期限を過ぎたら
+  `expireStaleDispatchJobs`が列ごと空にする。
   **`21.plan-required`のセッションが提示した計画は、`ExitPlanMode`の`PreToolUse`フックから
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と

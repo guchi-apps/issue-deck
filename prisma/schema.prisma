@@ -499,6 +499,7 @@ enum DispatchJobKind {
   CODE_REVIEW
   PREVIEW
   REBOOT
+  CODEX_PAIRING
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -613,6 +614,20 @@ model DispatchJob {
   // 通知にもpollerのログにも出さない。ここに残ること自体は、実行した結果を後から確かめる
   // 唯一の手掛かりであるため受け入れている。
   commandOutput      String?           @db.Text
+  // Codexのペアリングコード（#2524。`kind`が`CODEX_PAIRING`のときだけ入る）。
+  //
+  // **これは資格情報。** 押した人のブラウザ（ログイン必須の画面）にだけ出し、Issueコメント・
+  // PR本文・通知・pollerのログには出さない（`commandOutput`と同じ扱い）。
+  //
+  // **`commandOutput`を流用せずに専用の列を持つ。** あちらは「後から原因を追うための出力」で
+  // 残ることに意味があるのに対し、こちらは**期限が切れたら消す値**（`placeholderValues`と
+  // 同じ立場）。同じ列に載せると、消す条件が種別ごとに枝分かれする。
+  codexPairingCode      String?        @db.VarChar(64)
+  // 上のコードが切れる時刻（#2524）。Codexが返す`expiresAt`（発行から10分）。
+  //
+  // **画面はこれを過ぎたコードを出さず、`expireStaleDispatchJobs`が列ごと空にする。**
+  // 期限を過ぎた値を持ち続ける理由が無く、残せば漏れる先だけが増える。
+  codexPairingExpiresAt DateTime?
   // 画面から失敗の表示を消した時刻（#1479）。入っている行は`GET /api/dispatch`が返さない。
   //
   // **行そのものは消さない。** 失敗理由（`message`）は後から原因を追うときの唯一の手掛かりで、
@@ -735,6 +750,11 @@ model DispatchHost {
   // 読まないため、**Codexを選んだのにClaude Codeが黙って立つ**（画面には「Codex CLI」と出たまま）。
   // 画面はこの申告が真のホストにだけエージェントの選択欄を出す。
   codexCapable             Boolean?
+  // Codexのペアリングコードを発行できるか（#2524）。**`codexCapable`とは別に持つ。**
+  // あちらは`codex`コマンドがあるかだけを見るが、`remote-control`が動くのは公式インストーラの
+  // standalone installで入れたCodexだけで、npmで入れたものはサブコマンドが存在しても
+  // 共有のapp-serverデーモンを起こせない（#2521）。
+  codexRemoteControlCapable Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
   // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。

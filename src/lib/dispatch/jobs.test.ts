@@ -116,6 +116,7 @@ const {
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
   enqueueCodeReviewJob,
+  enqueueCodexPairingJob,
   enqueuePlanReviewJob,
   enqueueSessionControlJob,
   expireStaleDispatchJobs,
@@ -144,6 +145,7 @@ function host(overrides: Record<string, unknown> = {}) {
     planReviewCapable: true,
     codeReviewCapable: true,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     // DBの行の形（`toHostView`が読む列名）。**Viewの`reboot`とは名前が違う**
@@ -1240,6 +1242,8 @@ describe("dismissDispatchJob", () => {
       previewAction: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       tmuxSessionName: null,
       createdAt: NOW,
       claimedAt: null,
@@ -1315,6 +1319,8 @@ describe("prioritizeDispatchJob", () => {
       previewAction: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: NOW,
@@ -1438,6 +1444,8 @@ describe("listDispatchState のIssueタイトル解決", () => {
       previewAction: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: NOW,
@@ -1909,6 +1917,8 @@ describe("reportDispatchJob の代行実行の結果", () => {
       tmuxSessionName: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       queuePriority: 0,
       createdAt: NOW,
       claimedAt: NOW,
@@ -1957,6 +1967,8 @@ describe("reportDispatchJob の代行実行の結果", () => {
       tmuxSessionName: null,
       exitCode: 1,
       commandOutput: "前回の出力",
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       queuePriority: 0,
       createdAt: NOW,
       claimedAt: NOW,
@@ -1971,6 +1983,154 @@ describe("reportDispatchJob の代行実行の結果", () => {
         data: expect.objectContaining({ exitCode: 1, commandOutput: "前回の出力" }),
       }),
     );
+  });
+});
+
+/**
+ * CodexのRemote Control相当（#2524）。**ホストに対する操作で、Issueには紐づかない**
+ * （`serverName`はホスト名で、Issueごとには分かれない）。
+ */
+describe("enqueueCodexPairingJob（#2524）", () => {
+  beforeEach(() => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchJobCreate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: "pairing-1",
+      repositoryFullName: data.repositoryFullName,
+      issueNumber: data.issueNumber,
+      targetHost: data.targetHost,
+      agent: "claude",
+      kind: data.kind,
+      status: "QUEUED",
+      message: null,
+      instruction: null,
+      command: null,
+      placeholderValues: null,
+      manualStepLine: null,
+      targetJobId: null,
+      previewAction: null,
+      exitCode: null,
+      commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
+      tmuxSessionName: null,
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+    }));
+  });
+
+  it("standalone installを申告したホストへ積める", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ codexRemoteControlCapable: true }),
+    );
+
+    const result = await enqueueCodexPairingJob({
+      hostName: "subpc",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "CODEX_PAIRING",
+          // Issueに紐づかないジョブなので、番号は埋め草の0（`REBOOT`と同じ）
+          issueNumber: 0,
+          activeKey: "codex_pairing:host:subpc",
+        }),
+      }),
+    );
+  });
+
+  // `codex`コマンドがあるだけでは`remote-control`が動かない（#2521）。**画面と同じ判定を
+  // ここでもやり直す**（申告は最大30秒古い）
+  it("申告していないホストへは積まず、理由を返す", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ codexCapable: true, codexRemoteControlCapable: null }),
+    );
+
+    const result = await enqueueCodexPairingJob({
+      hostName: "subpc",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection).toBe("not_capable");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("reportDispatchJob のペアリングコード（#2524）", () => {
+  beforeEach(() => {
+    dispatchJobFindUnique.mockResolvedValue({
+      id: "pairing-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 0,
+      targetHost: "subpc",
+      agent: "claude",
+      kind: "CODEX_PAIRING",
+      status: "RUNNING",
+      claimedByHost: "subpc",
+      message: null,
+      instruction: null,
+      command: null,
+      manualStepLine: null,
+      targetJobId: null,
+      previewAction: null,
+      tmuxSessionName: null,
+      exitCode: null,
+      commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
+      queuePriority: 0,
+      createdAt: NOW,
+      claimedAt: NOW,
+      startedAt: NOW,
+      finishedAt: null,
+    });
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("コードと期限を組で保存する", async () => {
+    const expiresAt = new Date(NOW.getTime() + 600_000);
+    await reportDispatchJob({
+      jobId: "pairing-1",
+      hostName: "subpc",
+      status: "succeeded",
+      message: "ペアリングコードを発行しました（10分で切れます）。",
+      codexPairingCode: "A1B2-C3D4",
+      codexPairingExpiresAt: expiresAt,
+      now: NOW,
+    });
+
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          codexPairingCode: "A1B2-C3D4",
+          codexPairingExpiresAt: expiresAt,
+        }),
+      }),
+    );
+  });
+
+  // 片方だけ入ると「期限の分からないコード」が残り、掃除（`expireStaleDispatchJobs`）の
+  // 条件から外れる
+  it("期限が無ければコードも保存しない", async () => {
+    await reportDispatchJob({
+      jobId: "pairing-1",
+      hostName: "subpc",
+      status: "succeeded",
+      codexPairingCode: "A1B2-C3D4",
+      codexPairingExpiresAt: null,
+      now: NOW,
+    });
+
+    const data = dispatchJobUpdateMany.mock.calls.at(-1)?.[0]?.data as Record<string, unknown>;
+    expect(data.codexPairingCode).toBeUndefined();
   });
 });
 

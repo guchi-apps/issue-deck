@@ -66,6 +66,10 @@ export type DispatchJobStatus =
  *   確かめ直してから`sudo reboot`を打つ。**`SELF_UPDATE`とは別物**で、あちらが畳むのは
  *   pollerのプロセスだけ（`exec`で入れ替わるためセッションは残る）なのに対し、こちらは
  *   OSごと落ちるため走っているセッションは戻らない。対象はホストなので`issueNumber`は0
+ * - `CODEX_PAIRING` … CodexのRemote Control相当（#2524）。pollerが
+ *   `codex remote-control start` / `pair`を打ち、**10分で切れるペアリングコードを画面へ返す**。
+ *   Claude Code側（#1219）がセッションごとのURLなのに対し、こちらは**ホストに紐づく**
+ *   （`serverName`はホスト名で、Issueごとには分かれない）ので`issueNumber`は0
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -80,7 +84,8 @@ export type DispatchJobKind =
   | "SELF_UPDATE"
   | "CODE_REVIEW"
   | "PREVIEW"
-  | "REBOOT";
+  | "REBOOT"
+  | "CODEX_PAIRING";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -162,6 +167,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "code_review") return "CODE_REVIEW";
   if (value === "preview") return "PREVIEW";
   if (value === "reboot") return "REBOOT";
+  if (value === "codex_pairing") return "CODEX_PAIRING";
   return null;
 }
 
@@ -218,7 +224,10 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
 export const CODEX_LIMITATIONS = [
   "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
   "計画の承認・質問への回答は画面に出ません（Issueコメントで受け取ります）",
-  "Remote Controlで覗けません。前回の会話も引き継ぎません",
+  // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
+  // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
+  "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
+  "前回の会話を引き継ぎません",
 ] as const;
 
 /**
@@ -305,6 +314,7 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "SELF_UPDATE",
   "PREVIEW",
   "REBOOT",
+  "CODEX_PAIRING",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -458,6 +468,20 @@ export type DispatchJobView = {
    * （GitHubのIssueにも通知にも載せない）。
    */
   commandOutput: string | null;
+  /**
+   * 発行されたCodexのペアリングコード（#2524。`kind`が`CODEX_PAIRING`のときだけ入る）。
+   *
+   * **これは資格情報。** `commandOutput`と同じくログイン必須のこの画面より外へは出さず、
+   * さらに**期限（`codexPairingExpiresAt`）を過ぎたら`null`で返す**——切れたコードを画面に
+   * 出し続けると、押した人は効かないコードを打ち込むことになる。
+   *
+   * **pollerが取りに来る`POST /api/dispatch/claim`には出てこない。** あちらが返すのは
+   * `QUEUED`のジョブだけで、コードが入るのはpollerが実行して報告した後だから
+   * （`placeholderValues`のように読む側で消す必要が無い）。
+   */
+  codexPairingCode: string | null;
+  /** 上のコードが切れる時刻（#2524）。コードが無ければ`null` */
+  codexPairingExpiresAt: string | null;
   tmuxSessionName: string | null;
   /**
    * 順番待ちの中で先に払い出す度合い（#1541。大きいほど先）。
@@ -556,6 +580,15 @@ export type DispatchHostView = {
    * `failed`で返る」では済まない種類の非対応にあたる（`manualStepValuesCapable`と同じ）。
    */
   codexCapable: boolean | null;
+  /**
+   * Codexのペアリングコードを発行できるか（#2524）。**`null`（未申告）は「できない」**。
+   *
+   * **`codexCapable`とは別に持つ。** あちらは`codex`コマンドがあるかだけを見るが、
+   * `remote-control`が動くのは公式インストーラのstandalone installで入れたCodexだけで、
+   * npmで入れたものはサブコマンドが存在しても共有のapp-serverデーモンを起こせない（#2521）。
+   * 画面はこれを見て「Codexに繋ぐ」を出すかどうかを決める。
+   */
+  codexRemoteControlCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -954,6 +987,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "確認環境";
     case "REBOOT":
       return "ホストの再起動";
+    case "CODEX_PAIRING":
+      return "Codexのペアリング";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
