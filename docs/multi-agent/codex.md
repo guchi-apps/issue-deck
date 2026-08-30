@@ -44,9 +44,14 @@ worktreeの作成・ブランチ・`11.local`の付与・進捗報告・開発�
 導入（サブPC側で1回だけ）。**未導入のまま起動しようとすると、worktreeを作る前にエラーで止まる。**
 
 ```bash
-npm install -g @openai/codex
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
 codex login
 ```
+
+**公式インストーラのstandalone installで入れる**（#2521）。`npm install -g @openai/codex`でも
+TUIのセッションは起こせるが、共有のapp-serverデーモンに載るもの（`codex agents`・
+`codex remote-control`）が1つも動かない（後述の「`codex agents`・`remote-control`はstandalone
+installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は**戻すこと**（同じ節に手順がある）。
 
 ## Claude Codeと揃わないもの
 
@@ -62,7 +67,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | **△**（`codex queue`で送れる。未実装。#2510） |
-| Remote Control | ○ | **×**（デーモンをnpm版では起動できない。#2510） |
+| Remote Control | ○ | **△**（デーモンは起動できる。ただし取れるのはURLではなく短命のペアリングコード。未実装。#2521） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | **△**（`codex resume <session_id>`で作れる。未実装。#2510） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
@@ -76,14 +81,15 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 
 上の表で「×」としていたもののうち、いくつかはCodex側が先に進んでいた。codex-cli 0.151.0の実機で
 確かめた結果を残す。**分かれ目は「共有のapp-serverデーモンが要るかどうか」**で、要るものは
-npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かない。
+npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かなかった。
+**そのためサブPCのCodexはstandalone installへ入れ替えた**（#2521。下の表はその後の結果）。
 
 | 確かめたこと | 結果 |
 |---|---|
 | `codex queue`で走っているセッションへ差し込めるか | **○**。デーモン不要。`send-keys`も要らない |
 | 差し込んだメッセージの届き方 | **次のターンの頭**。走っているターンは中断しない |
-| `codex agents`でセッションを一覧できるか | **×**。standalone installが要る |
-| `codex remote-control start` / `pair` | **×**。同上 |
+| `codex agents`でセッションを一覧できるか | **○**（#2521でstandalone installへ入れ替えた） |
+| `codex remote-control start` / `pair` | **○**（同上）。ただし取れるのは短命のペアリングコード |
 | セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
@@ -153,29 +159,81 @@ UUIDの対応をどこかへ残せば、`codex queue`の宛先はそこから引
 したがって`run-issue-session.sh`が付けている`<リポジトリ名> #<Issue番号>`に相当する名前を
 Codex側へ持ち込むことはできない。**宛先はUUIDで持つ**。
 
-### `codex agents`・`remote-control`はstandalone installが要る
+### `codex agents`・`remote-control`はstandalone installが要る（#2521で入れ替えた）
 
-どちらも共有のapp-serverデーモン越しに動くもので、npmで入れたCodexでは同じエラーで止まる。
+どちらも共有のapp-serverデーモン越しに動くもので、npmで入れたCodexでは同じエラーで止まっていた。
 
 ```
 $ codex remote-control start --json
 Error: managed standalone Codex install not found at /home/guchi/.codex/packages/standalone/current/codex
 This command requires the standalone install managed by the Codex installer, because the daemon
 starts and updates app-server from that fixed path.
-Install it with:
-  curl -fsSL https://chatgpt.com/codex/install.sh | sh
 ```
 
-`codex agents`・`codex app-server daemon start`・`codex app-server daemon version`も同じ。
-`codex remote-control stop`だけは応答し、`{"status":"notRunning","managedCodexPath":"…/packages/standalone/current/codex",…}`を返す。
-`codex remote-control pair`はソケット（`~/.codex/app-server-control/app-server-control.sock`）が
-無いという別のエラーになる。
+`codex agents`・`codex app-server daemon start` / `version`も同じだった。導入方法の変更＝依存関係の
+変更なので、[CLAUDE.md](../../CLAUDE.md)のとおりユーザーの判断を取ったうえで**サブPCのCodexを
+standalone installへ入れ替えた**（#2521）。以下はその結果。
 
-**つまり「1（tmuxのセッションが共有デーモンに載るか）」の答えは「デーモン自体が起動できない」。**
-`codex features list`の`remote_control  removed  false`とも整合する。Remote Controlに当たるものを
-issue-deckの画面へ出すには、**サブPCのCodexをnpmからstandalone installへ入れ替える**判断が先に要る
-（導入方法の変更＝依存関係の変更にあたるので、[CLAUDE.md](../../CLAUDE.md)のとおり無断では行わない）。
-入れ替えた先で何が取れるか（URLなのか短命のペアリングコードなのか）は、入れ替えるまで分からない。
+#### 入れ替えても、npm版は消さずに済む
+
+インストーラは`~/.codex/packages/standalone/releases/<版>-x86_64-unknown-linux-musl/`（約330MB）へ
+実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**サブPCの`~/.local/bin`はPATHの先頭**
+（`~/.profile`が置いている。miseのshimsより前）なので、npm版を消さなくても新しいシェルでは
+standalone版が優先される。
+
+- **戻すのは`rm ~/.local/bin/codex`の1回で済む**（消すとmiseのshim経由でnpm版に戻る）
+- **走っているセッションには影響しない。** 実行中のプロセスは起動時に解決した実体を握ったままで、
+  入れ替えの最中も2本のCodexセッションが動き続けていた
+- **`~/.bashrc`へ入る`# >>> Codex installer >>>`のPATH追記は戻すこと。** `~/.bashrc`は
+  `guchi-apps/subpc`（`configs/bash/bashrc`）の管理下にあり、手で足すとドリフト検知に出る。
+  そもそも`~/.profile`が同じPATHを置いており、subpcのREADMEも「PATHは`~/.bashrc`ではなく
+  `~/.profile`側に置く」としているため、この追記は要らない
+
+  ```bash
+  cp ~/apps/subpc/configs/bash/bashrc ~/.bashrc   # 管理下の内容へ戻す
+  ```
+
+- インストーラは既存のnpm版を見つけると「アンインストールするか」を対話で聞く。
+  `CODEX_NON_INTERACTIVE=1`を付ければ聞かずに「消さない」を選ぶ
+- **バージョンの追い方が変わる。** miseのnode配下から外れ、Codex自身の自動更新
+  （`autoUpdateEnabled: true`）に載る。上げ直すときは`npm install -g`ではなくインストーラを
+  もう一度流す。`codex --version`が見るのは`~/.local/bin/codex`の側なので、npm版が残っていても
+  表示は混ざらない
+
+#### 取れるのはURLではなく短命のペアリングコード
+
+Claude Code側のRemote Control（#1219）は`--remote-control`が出すURLを`scripts/session-notify.sh`が
+拾っている。**Codex側はURLを出さない。**
+
+```
+$ codex remote-control start --json
+{"mode":"daemon","status":"connected","serverName":"subpc","environmentId":"env_e_…",
+ "timedOut":false,"daemon":{"status":"bootstrapped","backend":"pid","autoUpdateEnabled":true,
+ "remoteControlEnabled":true,"managedCodexPath":"…/packages/standalone/current/codex",…}}
+
+$ codex remote-control pair --json
+{"pairingCode":"<数字の長い列>","manualPairingCode":"<XXXX-XXXX>","environmentId":"env_e_…",
+ "expiresAt":<epoch秒>}
+```
+
+- **`pair`が返すのは`XXXX-XXXX`形式の手動ペアリングコードで、有効期限は10分**（`expiresAt`と
+  実行時刻の差）。`serverName`はホスト名（`subpc`）で、Issueごとには分かれない
+- **これは資格情報。** 期限が短くてもIssueコメント・PR本文・ログへ値を書かない
+- **`start`の直後は`pair`が`timed out waiting for remoteControl/pairing/start response`で落ちる**
+  ことがある。デーモンが上がりきってから呼び直すと通る
+- 止めるのは`codex remote-control stop`（`{"status":"stopped",…}`）。止めた後は
+  `codex app-server daemon version`がソケット無しのエラーに戻る。**確認のあとは止めてある**
+
+#### tmuxで普通に起こしたTUIは、デーモンに載る
+
+「1（tmuxのセッションが共有デーモンに載るか）」の答えは**載る**。standalone版で
+`tmux new-session -d … codex …`と起こしたセッションは、別シェルの`codex agents`に
+`/home/guchi/apps/issue-deck  1 › ○ Untitled task  Ready`として現れた。
+**逆にnpm版で起動済みだった2本は現れない**——入れ替えより前に起こしたセッションは載らない。
+
+- **`codex agents`はTTYが要るTUI**で、`stdin is not a terminal`で終わる。一覧を機械可読で取る
+  サブコマンドは無い（画面へ出すなら`codex app-server`のプロトコルを直接叩くことになる）
+- 改名（`ctrl+r`）もこのTUIの中だけ。`<リポジトリ名> #<番号>`を外から付ける手段は増えていない
 
 ### `codex resume <session_id>`はピッカーを出さずに再開できる
 
@@ -349,6 +407,7 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - **「追加指示を送る」と「前回の会話の引き継ぎ」は可否を確かめただけ**（#2510）。`codex queue`と
   `codex resume <session_id>`で作れることは実機で確認したが、宛先にするセッションUUIDを
   Issue番号と結び付けて残す実装（`scripts/session-notify.sh`・pollerの受け口）はまだ無い
-- **Remote Controlはstandalone installへの入れ替えが前提**（#2510）。npmで入れたCodexでは
-  app-serverデーモンが起動できず、`codex agents`も動かない。入れ替えるかどうかは依存関係の
-  変更なので、ユーザーの判断が要る
+- **Remote Controlは画面へ出せていない**（#2521）。standalone installへの入れ替えは済み、
+  `codex remote-control start` / `pair`・`codex agents`は動くようになったが、取れるのはURLでは
+  なく10分で切れるペアリングコードなので、`scripts/session-notify.sh`のURL拾い（#1219）を
+  そのまま流用できない。issue-deckの画面にどう出すかの設計から要る
