@@ -84,11 +84,12 @@ describe("submit-plan.sh", () => {
     expect(requests[1].url).toBe("/api/dispatch/sessions/plan/decision?id=request-1");
   });
 
-  it("修正内容を終了コード2と標準出力へ返す", async () => {
+  it("修正内容を成功終了と標準出力へ返す", async () => {
     decisions = [{ status: "REVISION_REQUESTED", revisionText: "影響範囲を追記してください" }];
     const result = await run();
-    expect(result.code).toBe(2);
+    expect(result.code).toBe(0);
     expect(result.stdout).toContain("影響範囲を追記してください");
+    expect(result.stderr).not.toContain("影響範囲を追記してください");
   });
 
   it("WAITINGのあとに承認されるまでポーリングする", async () => {
