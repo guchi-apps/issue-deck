@@ -10,6 +10,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 
 const sendSessionControl = vi.fn();
+const requestCodexPairing = vi.fn();
 
 function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
   return {
@@ -79,6 +80,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
     isSubmitting: false,
     enqueue: vi.fn(),
     sendSessionControl,
+    requestCodexPairing,
     cancel: vi.fn(),
     ...overrides,
   } as DispatchStateHandle;
@@ -87,6 +89,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
 beforeEach(() => {
   vi.clearAllMocks();
   sendSessionControl.mockResolvedValue({ ok: true });
+  requestCodexPairing.mockResolvedValue({ ok: true });
 });
 
 /**
@@ -574,5 +577,152 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
     openControls();
     expect(screen.getByText(/\d時\d+分に起動|\d+:\d+に起動/)).not.toBeNull();
     expect(screen.getByRole("button", { name: /tmuxのコマンドをコピー/ })).not.toBeNull();
+  });
+});
+
+/**
+ * CodexのRemote Control相当（#2537）。**Codexのセッションでは`remoteControlUrl`が空**
+ * （Codexが出すのはURLではなく10分で切れるペアリングコード。#2524）で、その導線は
+ * 実行キューのホストのカードにしか無かった。入力待ちのCodexのセッションを開いても、
+ * 画面から答える出口が1つも無いように見えていた。
+ */
+describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
+  function pairingJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+    return {
+      id: "job-pairing",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 0,
+      issueTitle: null,
+      issueId: null,
+      targetHost: "subpc",
+      agent: "claude",
+      kind: "CODEX_PAIRING",
+      status: "SUCCEEDED",
+      queuePriority: 0,
+      message: null,
+      instruction: null,
+      command: null,
+      placeholderValues: null,
+      resolvedCommand: null,
+      manualStepLine: null,
+      targetJobId: null,
+      previewAction: null,
+      exitCode: null,
+      commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
+      tmuxSessionName: null,
+      createdAt: "2026-08-14T11:59:00.000Z",
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: "2026-08-14T11:59:30.000Z",
+      ...overrides,
+    };
+  }
+
+  // Claude Codeのセッションには`Remote Controlで開く`があり、ペアリングコードは使わない
+  it("Claude Codeのセッションには出さない", () => {
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: null })}
+        dispatch={makeDispatch({ hosts: [makeHost({ codexRemoteControlCapable: true })] })}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+  });
+
+  it("走っているCodexのセッションでは押せる", async () => {
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: true })}
+        dispatch={makeDispatch({ hosts: [makeHost({ codexRemoteControlCapable: true })] })}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Codexに繋ぐ" });
+    expect(button.hasAttribute("disabled")).toBe(false);
+    // **繋がる先はホスト単位。** 押したIssueだけに繋がると誤解させない
+    expect(screen.getByText(/このIssueだけでなく/)).not.toBeNull();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(requestCodexPairing).toHaveBeenCalledWith("subpc"));
+  });
+
+  /**
+   * ホストのカードとはここが違う（あちらは申告の無いホストには出さない）。Codexで
+   * 動いていると分かっている行で黙って消すと、「Codexだけ対応していない」としか読めない。
+   */
+  it("standalone installを申告していないホストでは、理由を出して無効にする", () => {
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: true })}
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexCapable: true, codexRemoteControlCapable: null })],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Codexに繋ぐ" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/standalone installのCodexが要ります/)).not.toBeNull();
+  });
+
+  // 終わったセッションはCodexのデーモンにも載っておらず、繋いでも見る相手がいない
+  it("終わったセッションには出さない", () => {
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: true, state: "EXITED" })}
+        dispatch={makeDispatch({ hosts: [makeHost({ codexRemoteControlCapable: true })] })}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+  });
+
+  // 発行されたコードは、押した人が別の端末へ打ち込むもの。残り時間も添える
+  it("同じホストへ発行されたコードを出す", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: true })}
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexRemoteControlCapable: true })],
+          jobs: [
+            pairingJob({
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(NOW.getTime() + 540_000).toISOString(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("A1B2-C3D4")).not.toBeNull();
+    expect(screen.getByText("あと 9分00秒")).not.toBeNull();
+  });
+
+  // **コードは資格情報。** 期限を過ぎたものは画面に出さない（打ち込んでも通らない）
+  it("期限の切れたコードは出さない", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    render(
+      <IssueSessionStatus
+        session={session({ codexThreadKnown: true })}
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexRemoteControlCapable: true })],
+          jobs: [
+            pairingJob({
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(NOW.getTime() - 1_000).toISOString(),
+            }),
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("A1B2-C3D4")).toBeNull();
   });
 });
