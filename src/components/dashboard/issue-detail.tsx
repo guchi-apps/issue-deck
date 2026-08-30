@@ -69,6 +69,7 @@ import {
 import {
   findSessionForIssue,
   isSessionWaitingInput,
+  resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
@@ -718,6 +719,9 @@ export function IssueDetail({
         <IssueDetailHeader
           issue={issue}
           onSelectRepository={onSelectRepository}
+          implementationAgent={
+            issueSession ? resolveIssueImplementationAgent(issueSession) : null
+          }
           actions={
             <>
               {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく

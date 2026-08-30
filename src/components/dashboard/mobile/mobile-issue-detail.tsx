@@ -26,6 +26,7 @@ import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
+import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
@@ -74,6 +75,7 @@ import {
 import {
   findSessionForIssue,
   isSessionWaitingInput,
+  resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
@@ -693,6 +695,9 @@ export function MobileIssueDetail({
         >
           #{issue.number} {issue.title}
         </button>
+        {issueSession && (
+          <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
+        )}
         {/* ヘッダーに残す操作は★と⋯だけにする（#1646）。以前は▶（実装を開始）と?（Claudeに
             質問する）も並べていたが、▶は本文の全幅ボタンと表示条件が同一（`canStartImplementation`）で
             必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
