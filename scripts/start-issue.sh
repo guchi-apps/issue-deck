@@ -194,7 +194,9 @@ if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$AGENT_COMMAND" >/dev/null 2>&1;
   echo "Error: $AGENT_COMMAND コマンドが見つかりません（$(agent_cli_display_name "$AGENT_KIND")）。" >&2
   # 未導入のまま起動すると、worktreeだけ作られてセッションが立たない。導入の入口をここで示す。
   if [[ "$AGENT_KIND" == "codex" ]]; then
-    echo "       導入: npm install -g @openai/codex && codex login（docs/multi-agent/codex.md）" >&2
+    # npm版でもTUIは起こせるが`codex agents`・`codex remote-control`が動かないため、
+    # standalone installを案内する（#2521。docs/multi-agent/codex.md）。
+    echo "       導入: curl -fsSL https://chatgpt.com/codex/install.sh | sh && codex login（docs/multi-agent/codex.md）" >&2
   fi
   exit 1
 fi
