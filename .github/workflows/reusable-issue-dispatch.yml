@@ -1885,12 +1885,17 @@ jobs:
       - name: Setup pnpm（実装ステップ用）
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
         uses: pnpm/action-setup@v4
+        with:
+          # 新規アプリの初期化Issueでは、Claudeが実装する前にはpackage.jsonがまだ無い。
+          # action側のpackageManager解決に任せると実装ステップへ到達する前に失敗するため、
+          # VPSとversion-tag-checkが対応しているpnpm 10を明示してコマンドだけ先に用意する。
+          version: 10
 
       - name: Setup Node.js（依存インストール用）
         # 上の「Setup Node.js（実装ステップ用）」とはキャッシュ設定が異なる。あちらは
         # node-versionの固定だけを目的にcache無しで呼ぶが、こちらは依存インストールの
         # キャッシュを効かせる。同じバージョンの再実行はキャッシュヒットで数秒。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal' && hashFiles('package.json') != ''
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version || '24' }}
@@ -1899,7 +1904,7 @@ jobs:
       - name: 依存関係をインストールする
         # 実装エージェントがlint・typecheck・test・buildを実行するために必要(#931)。
         # 撮影時のマイグレーション・シードもこれに依存する。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal' && hashFiles('package.json') != ''
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
@@ -2471,4 +2476,3 @@ jobs:
           BODY="$BODY"$'\n\n''復旧後、このIssueに改めて `@claude` とコメントすると再開します。'
           BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
-
