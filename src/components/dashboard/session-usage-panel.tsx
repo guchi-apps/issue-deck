@@ -374,7 +374,12 @@ export function SessionUsagePanel({
         <div className="mr-auto">
           <h2 className="text-sm font-bold">AI使用量</h2>
           <p className="text-[11px] text-muted-foreground">
+            {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
+                開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする） */}
             サブPCのローカルセッションが使ったトークン
+            {data?.reportedAt
+              ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`
+              : ""}
           </p>
         </div>
         <Segmented
@@ -411,11 +416,7 @@ export function SessionUsagePanel({
       <section className="flex flex-col gap-2 rounded-lg border p-3">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-xs font-semibold">プラン枠</span>
-          <span className="text-[11px] text-muted-foreground">
-            {data?.reportedAt
-              ? `${data.hosts.join("・") || "サブPC"} から ${formatRelativeDate(data.reportedAt)}`
-              : "報告待ち"}
-          </span>
+          <span className="text-[11px] text-muted-foreground">実測（下の「枠%」の逆算元）</span>
         </div>
         <ClaudeUsageCard
           data={data?.planUsage ?? null}
