@@ -357,6 +357,9 @@ const INTERACTIVE_COMMANDS = [
   // GitHub CLIの対話的なログイン・スコープの追加（ブラウザでコードを入力する）
   "gh auth login",
   "gh auth refresh",
+  // 引数なしのClaude Code起動。初めて開くリポジトリではフォルダ信頼の確認が出る。
+  // 手作業Issueではこの確認自体を人へ委ねるために使い、標準入力の無い代行実行へ流さない。
+  "claude",
 ] as const;
 
 /**

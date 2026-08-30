@@ -337,10 +337,15 @@ describe("findInteractiveCommand", () => {
     expect(findInteractiveCommand("gh auth refresh -s admin:org")).toBe("gh auth refresh");
   });
 
+  it("フォルダ信頼へ答えるためのClaude Code起動を対象にする", () => {
+    expect(findInteractiveCommand("cd ~/apps/new-app && claude")).toBe("claude");
+  });
+
   // **広げすぎない。** 1Passwordのサービスアカウントで動くコマンドは対話にならない
   it("対話にならないコマンドは対象にしない", () => {
     expect(findInteractiveCommand("op item get Server --fields host")).toBeNull();
     expect(findInteractiveCommand("gh issue view 2025 --json body")).toBeNull();
+    expect(findInteractiveCommand("claude_trust_is_trusted ~/apps/new-app")).toBeNull();
     expect(findInteractiveCommand("git pull --ff-only")).toBeNull();
     expect(findInteractiveCommand(null)).toBeNull();
   });
