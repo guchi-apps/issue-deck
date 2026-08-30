@@ -926,6 +926,23 @@ pnpm exec prisma migrate resolve --applied <失敗したマイグレーション
 pnpm exec prisma migrate status                     # "Database schema is up to date!" になる
 ```
 
+### 新しいマイグレーションのタイムスタンプは、他worktreeと衝突する（#2524）
+
+DBを共有しているということは、**並行して走っている他Issueのセッションが作ったマイグレーションが
+先に適用されている**ということでもある。`prisma migrate status`は、それを
+「ローカルに無いマイグレーションがDBにある」として出す（異常ではない）。
+
+**問題は、同じ日に複数のセッションがマイグレーションを足すとディレクトリ名が衝突すること。**
+2026-08-30には#2519と#2524が両方`20260830160000_...`を作り、片方が先にdevelopへマージされていた。
+ディレクトリ名が違えばPrismaは別物として扱うが、**適用の順序が不定になる**。
+
+作る前に次の2つを見て、どちらとも重ならない時刻を選ぶ（同日なら数時間後ろへ倒す）。
+
+```bash
+pnpm exec prisma migrate status                                  # DBに適用済みでローカルに無いもの
+git ls-tree origin/develop --name-only prisma/migrations/ | tail -5   # develop側の最後の数件
+```
+
 ## 作業が終わったセッションは自動で畳む（#1256）
 
 開発サーバーを止めてもセッション本体は残る。`claude`は対話プロセスで、作業が終わっても
