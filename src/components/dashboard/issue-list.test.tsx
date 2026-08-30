@@ -431,6 +431,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     firstSeenAt: "2026-08-18T00:00:00Z",
     lastReportedAt: "2026-08-18T00:00:00Z",
     ...overrides,
@@ -977,7 +978,7 @@ describe("IssueListの保留（#2398）", () => {
 
 /**
  * 実行が始まる前の状態を行に出す（#2449）。積んだ直後のIssueは進捗Statusが`Ready`のまま
- * なので右上の円グラフが描かれず、行が押す前とまったく同じに見えていた。
+ * なので右上の進捗バーが描かれず、行が押す前とまったく同じに見えていた。
  */
 describe("順番待ちのバッジ（#2449）", () => {
   function makeJob(overrides: Record<string, unknown> = {}) {
@@ -1021,13 +1022,13 @@ describe("順番待ちのバッジ（#2449）", () => {
     expect(screen.getByText("起動中")).toBeTruthy();
   });
 
-  it("進捗の円グラフが出る行では円を2つ並べず、添える字にする", () => {
+  it("進捗バーが出る行ではバーを2つ並べず、添える字にする", () => {
     renderList({
       issues: [makeIssue({ number: 1, projectStatus: "Implementation" })],
       dispatch: makeDispatch([], [], [makeJob()]),
     });
 
-    // 単独のバッジ（「順番待ち」だけの行）は出さず、進捗の円グラフへ添える
+    // 単独のバッジ（「順番待ち」だけの行）は出さず、進捗バーへ添える
     expect(screen.queryByText("順番待ち")).toBeNull();
     expect(screen.getByText("実装中（サブPC・順番待ち）")).toBeTruthy();
   });

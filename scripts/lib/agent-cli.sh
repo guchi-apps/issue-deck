@@ -64,8 +64,84 @@ agent_cli_display_name() {
   esac
 }
 
+# Codexに渡すサンドボックスの実効モード。**起動引数の組み立て（`agent_cli_build_codex_args`）と
+# 起動前の下見（`agent_cli_codex_sandbox_probe`）の両方がここを読む。** 別々に既定値を書くと、
+# 「下見は通ったのに起動で落ちる」（またはその逆）が起きる。
+agent_cli_codex_sandbox_mode() {
+  printf '%s' "${ISSUE_DECK_CODEX_SANDBOX:-workspace-write}"
+}
+
+# `child`が`parent`と同じか、その下にあれば0を返す。文字列だけで判定する（両方とも呼び出し側が
+# 絶対パスに解決してから渡す）。
+agent_cli_path_contains() {
+  local parent="${1%/}" child="${2%/}"
+  [[ -n "$parent" && -n "$child" ]] || return 1
+  [[ "$child" == "$parent" || "$child" == "$parent"/* ]]
+}
+
+# Codexへ`--add-dir`で渡す、**ワークスペースの外にある書き込み先**を1行ずつ出力する（#2529）。
+#
+# ## なぜ要るか
+#
+# git worktreeでは、作業ツリーの`.git`は`gitdir: <本体>/.git/worktrees/<名前>`と書かれた
+# **ただのファイル**で、インデックスもHEADもログも本体側のそのディレクトリにある。`workspace-write`の
+# サンドボックスが書けるのはcwd（＝worktree）だけなので、**`git add`が
+# `index.lock: Read-only file system`で落ちる**。実際に#2511のCodexセッションが、実装と検証を
+# 終えたあとコミットの直前で止まった。
+#
+# 出すのは次の2つのうち、ワークスペースの外にあるもの。
+#
+#   `--git-common-dir`   本体の`.git`。オブジェクト・`refs/heads/*`・`packed-refs`・`FETCH_HEAD`が
+#                        ここにあり、コミットとpushの両方が書く
+#   `--absolute-git-dir` このworktreeの管理領域（`…/.git/worktrees/<名前>`）。indexとHEADがある
+#
+# 通常は後者が前者の下にあるため、**出力は本体の`.git`1つだけ**になる。ふつうのクローン
+# （`.git`がワークスペースの中）では**何も出さない**——閉じ込めを緩める理由が無い。
+#
+# ## 閉じ込めがどこまで緩むか
+#
+# 本体の`.git`を開けると、他Issueのworktreeの管理領域と他ブランチのrefへも書けるようになる。
+# ただし`.git`の外——**本体チェックアウトと他Issueのworktreeの作業ファイル**——は従来どおり
+# 読み取り専用のままで、`danger-full-access`（逃げ道。docs/multi-agent/codex.md）とは違う。
+# gitはオブジェクトもrefも本体側へ書くため、これより狭くしてコミットとpushを通す方法は無い。
+agent_cli_codex_writable_dirs() {
+  local workspace="${1:-$PWD}"
+  local common_dir git_dir dir chosen
+  local -a picked=()
+
+  command -v git >/dev/null 2>&1 || return 0
+  [[ -n "$workspace" && -d "$workspace" ]] || return 0
+
+  # gitリポジトリでなければどちらも空になる（`|| true`で`set -e`の下でも止めない）。
+  common_dir="$(git -C "$workspace" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  git_dir="$(git -C "$workspace" rev-parse --absolute-git-dir 2>/dev/null || true)"
+
+  # 共通の`.git`を先に見る。linked worktreeの管理領域はその下にあるので、先に採れば2つ目は落ちる。
+  for dir in "$common_dir" "$git_dir"; do
+    [[ -n "$dir" && -d "$dir" ]] || continue
+    if agent_cli_path_contains "$workspace" "$dir"; then
+      continue
+    fi
+    local covered=0
+    for chosen in ${picked[@]+"${picked[@]}"}; do
+      if agent_cli_path_contains "$chosen" "$dir"; then
+        covered=1
+        break
+      fi
+    done
+    [[ "$covered" == "0" ]] || continue
+    picked+=("$dir")
+  done
+
+  for dir in ${picked[@]+"${picked[@]}"}; do
+    printf '%s\n' "$dir"
+  done
+}
+
 # Codexの起動引数を`AGENT_CLI_ARGS`配列へ組み立てる（プロンプト本文は含めない。呼び出し側が
-# 最後の位置引数として渡す）。フラグ名は`codex --help`（openai/codex の SharedCliOptions）に対応する。
+# 最後の位置引数として渡す）。第1引数にセッションUUIDがあれば、先頭へ
+# `resume <UUID>`を付ける（#2520）。フラグ名は`codex --help`と`codex resume --help`
+# （openai/codex の SharedCliOptions）に対応する。
 #
 # 既定は `--sandbox workspace-write` ＋ `--ask-for-approval never`。これは Claude Code の
 # `--permission-mode auto`（#1205）に相当する位置づけで、理由も同じ。
@@ -83,17 +159,35 @@ agent_cli_display_name() {
 # ネットワークを塞ぐため、開けないと`gh issue comment`・`git push`・`pnpm install`が軒並み失敗する。
 # 実装セッションはIssueへの報告とPR作成が仕事なので、塞いだままでは成立しない。
 #
-# **`--add-dir`は付けない。** Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
+# **`--add-dir`を渡すのはgitの管理領域だけ**（#2529。下の`agent_cli_codex_writable_dirs`）。
+# それ以外には渡さない。Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
 # 読み取りはサンドボックスの外でも可能。共有知識リポジトリ（`~/apps/_docs`）は**読み取り専用**として
 # 扱う決まり（CLAUDE.md）なので、渡すとその決まりを機械的に破れるようになってしまう。
+#
+# 第1引数は再開するスレッド（空なら新規。#2510）、第2引数はワークスペースの根（既定は`$PWD`）。
+# 第2引数は`--add-dir`の判定にだけ使う。
 agent_cli_build_codex_args() {
-  local sandbox="${ISSUE_DECK_CODEX_SANDBOX:-workspace-write}"
+  local resume_thread="${1:-}"
+  local workspace="${2:-$PWD}"
+  local sandbox
+  sandbox="$(agent_cli_codex_sandbox_mode)"
   local model="${ISSUE_DECK_CODEX_MODEL:-}"
+  local writable_dir
 
-  AGENT_CLI_ARGS=(--sandbox "$sandbox" --ask-for-approval never)
+  AGENT_CLI_ARGS=()
+  if [[ -n "$resume_thread" ]]; then
+    AGENT_CLI_ARGS+=(resume "$resume_thread")
+  fi
+  AGENT_CLI_ARGS+=(--sandbox "$sandbox" --ask-for-approval never)
 
   if [[ "$sandbox" == "workspace-write" ]]; then
     AGENT_CLI_ARGS+=(-c sandbox_workspace_write.network_access=true)
+    # `workspace-write`のときだけ足す。`read-only`は書けないのが目的で、
+    # `danger-full-access`は元から全部書けるので、どちらも足す意味がない。
+    while IFS= read -r writable_dir; do
+      [[ -n "$writable_dir" ]] || continue
+      AGENT_CLI_ARGS+=(--add-dir "$writable_dir")
+    done < <(agent_cli_codex_writable_dirs "$workspace")
   fi
 
   if [[ -n "$model" ]]; then
@@ -109,6 +203,80 @@ agent_cli_build_codex_args() {
   fi
 
   return 0
+}
+
+# 起動前にサンドボックスを組み立てられるか下見する（#2526）。判定結果を**1行目**に、
+# 判定の材料（codexが出したエラーの1行目）を**2行目以降**に出す。終了コードは常に0。
+#
+#   ok       そのモードでサンドボックスを組み立てられた
+#   broken   組み立てに失敗した。そのまま起こしてもコマンドを1本も実行できない
+#   unknown  判定できなかった（`codex`が無い・`codex sandbox`を持たない版）
+#
+# ## なぜ要るか
+#
+# Ubuntu 24.04の既定（`kernel.apparmor_restrict_unprivileged_userns = 1`）は、非特権の
+# user namespace の中でcapabilityを全部落とす。Codexが同梱するbubblewrapはそこでサンドボックスを
+# 組み立てられず、**`codex`コマンド自体は入っているのにセッションが即死する**（#2526。subpcで実際に
+# 起きた。ホスト側の恒久対処は guchi-apps/subpc#77）。`command -v codex`だけでは、この状態と
+# 正常なホストを区別できない。
+#
+# ## `--sandbox`ではなく`-c sandbox_mode=`で渡す
+#
+# `codex sandbox`サブコマンドは`--sandbox`も`--ask-for-approval`も受け取らない（`-c`の
+# オーバーライドだけ）。モードとネットワークの指定は`agent_cli_build_codex_args`と同じ値を使う。
+# **`ISSUE_DECK_CODEX_EXTRA_ARGS`は渡さない**——あれはTUIへの引数で、ここへ持ち込むと
+# 下見だけが不正な引数で落ちる。
+#
+# ## 判定できないときは`unknown`（＝塞がない）
+#
+# `codex sandbox`を持たない版では材料が無い。そこを`broken`にすると、動くかもしれないホストで
+# Codexを選べなくなる。**証拠があるときだけ塞ぐ。**
+agent_cli_codex_sandbox_probe() {
+  local mode output probe_args timeout_args=()
+
+  if ! command -v codex >/dev/null 2>&1; then
+    printf 'unknown'
+    return 0
+  fi
+
+  # 下見が固まるとpollerの1巡ごと止まる（`codex_capable`は申告のたびに呼ばれる）。
+  # `timeout`が無い環境では付けない（下見のために起動を諦めるほうが重い）。
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_args=(timeout 10)
+  fi
+
+  if ! "${timeout_args[@]}" codex sandbox --help >/dev/null 2>&1; then
+    printf 'unknown'
+    return 0
+  fi
+
+  mode="$(agent_cli_codex_sandbox_mode)"
+  probe_args=(-c "sandbox_mode=$mode")
+  if [[ "$mode" == "workspace-write" ]]; then
+    probe_args+=(-c sandbox_workspace_write.network_access=true)
+  fi
+
+  if output="$("${timeout_args[@]}" codex sandbox "${probe_args[@]}" -- /bin/true 2>&1)"; then
+    printf 'ok'
+    return 0
+  fi
+
+  # 材料として返すのは最初の非空行だけ。`bwrap: setting up uid map: Permission denied`のような
+  # 1行がそのまま「ホストのuserns制限」の目印になる（docs/multi-agent/codex.md）。
+  printf 'broken\n%s' "$(printf '%s\n' "$output" | grep -m1 -v '^[[:space:]]*$' || true)"
+  return 0
+}
+
+# 下見の結果（`agent_cli_codex_sandbox_probe`の出力）から判定だけを取り出す。
+agent_cli_codex_sandbox_probe_state() {
+  printf '%s' "${1%%$'\n'*}"
+}
+
+# 下見の結果から材料の行だけを取り出す（無ければ空）。
+agent_cli_codex_sandbox_probe_reason() {
+  local probe="${1:-}"
+  [[ "$probe" == *$'\n'* ]] || return 0
+  printf '%s' "${probe#*$'\n'}"
 }
 
 # ---------------------------------------------------------------------------

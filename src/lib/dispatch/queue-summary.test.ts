@@ -8,6 +8,7 @@ import {
   describeDispatchQueueLoad,
   describeDispatchQueueStall,
   describeDispatchSessionLoad,
+  selectHostCodexPairingJob,
   selectHostSelfUpdateJob,
   selectHostSessions,
   summarizeDispatchQueue,
@@ -36,6 +37,8 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     previewAction: null,
     exitCode: null,
     commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
     tmuxSessionName: null,
     queuePriority: 0,
     createdAt: "2026-08-14T00:00:00.000Z",
@@ -63,6 +66,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -96,6 +100,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     ...overrides,
   };
 }
@@ -547,5 +552,38 @@ describe("selectHostSelfUpdateJob", () => {
 
   it("そのホストの更新が無ければnull", () => {
     expect(selectHostSelfUpdateJob([job({ kind: "LAUNCH" })], "subpc")).toBeNull();
+  });
+});
+
+// #2524。`CODEX_PAIRING`も`SELF_UPDATE`・`REBOOT`と同じ枠外のジョブで、キューの一覧に出ない
+describe("selectHostCodexPairingJob", () => {
+  it("そのホストの最後のペアリングを返す", () => {
+    const jobs = [
+      job({ id: "old", kind: "CODEX_PAIRING", createdAt: "2026-08-30T00:00:00.000Z" }),
+      job({ id: "new", kind: "CODEX_PAIRING", createdAt: "2026-08-30T01:00:00.000Z" }),
+      job({ id: "reboot", kind: "REBOOT", createdAt: "2026-08-30T02:00:00.000Z" }),
+      job({
+        id: "other-host",
+        kind: "CODEX_PAIRING",
+        targetHost: "mainpc",
+        createdAt: "2026-08-30T03:00:00.000Z",
+      }),
+    ];
+    expect(selectHostCodexPairingJob(jobs, "subpc")?.id).toBe("new");
+    expect(selectHostCodexPairingJob(jobs, "mainpc")?.id).toBe("other-host");
+  });
+
+  it("キューの一覧（実行中・順番待ち・失敗）には出ない", () => {
+    const summary = summarizeDispatchQueue(
+      [job({ id: "pairing", kind: "CODEX_PAIRING", status: "QUEUED" })],
+      2,
+    );
+    expect(summary.running).toHaveLength(0);
+    expect(summary.queued).toHaveLength(0);
+    expect(summary.failed).toHaveLength(0);
+  });
+
+  it("そのホストのペアリングが無ければnull", () => {
+    expect(selectHostCodexPairingJob([job({ kind: "LAUNCH" })], "subpc")).toBeNull();
   });
 });

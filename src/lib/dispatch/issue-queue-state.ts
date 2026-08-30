@@ -4,7 +4,7 @@ import type { DispatchQueueSummary } from "@/lib/dispatch/queue-summary";
 /**
  * Issue一覧の行に出す「実行が始まる前」の状態（#2449）。
  *
- * サブPCへ積んだ直後のIssueは進捗Statusが`Ready`のままで、右上の円グラフ
+ * サブPCへ積んだ直後のIssueは進捗Statusが`Ready`のままで、右上の進捗バー
  * （`WorkflowStepBadge`）は`getWorkflowStepIndex`がnullを返して何も描かない。**押した後も
  * 行の見た目が押す前とまったく同じ**で、積めたのか・何番目で待っているのかを読む場所が
  * 一覧に無かった（振り分けだけは#1347で「実行中」ビューへ移している）。

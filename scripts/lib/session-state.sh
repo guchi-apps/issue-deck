@@ -8,7 +8,9 @@
 #                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
 #                                 **この印だけはセッションが終わっても消さない**（#1905。同じIssueで
 #                                 起こし直したセッションが引き継いで外せるようにするため）。
-#                                 `SessionStart`では`.starting`を消す（#1465）
+#                                 `SessionStart`では`.starting`を消し、Codexのセッションなら
+#                                 `codex queue`と`codex resume`の宛先
+#                                 （<セッション名>.codex-thread、#2519・#2520）を書く
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む。畳む条件が揃って
 #                                 猶予待ちになったセッションには、その予定（<セッション名>.reap、#1817）を書く
 #   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）。
@@ -135,6 +137,55 @@ session_state_clear_resume() {
   return 0
 }
 
+# Codexのセッションへ`codex queue`で追加指示を差し込み、次回の起動を`codex resume`で
+# 再開するための宛先（#2519・#2520）。
+#
+# 中身はセッションUUID1行。**書くのは`session-notify.sh`の`SessionStart`だけ**で、
+# フックのJSONに入っている`session_id`をそのまま置く。Codexは`--thread`にUUIDか
+# 完全一致のセッション名しか取らず、**名前を決めるのはCodex側**（モデルが自動で付け直す）
+# なので、ランチャーが付けた`<リポジトリ名> #<番号>`に当たるものは持ち込めない（#2510）。
+#
+# **ディレクトリの信頼確認（`Do you trust the contents of this directory?`）に答えるまで
+# フックは1つも飛ばない**ため、その間このファイルは無い＝宛先が分からない。追加指示は
+# 送れず、pollerはそのことを報告し、画面はボタンを無効にして理由を出す。
+session_state_codex_thread_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.codex-thread' "$(session_state_dir)" "$1"
+}
+
+# 宛先を書く。**UUIDの形だけは確かめる。** フックのJSONから取り出した値をそのまま
+# `codex queue --thread`へ渡すため、読む側ではなくここで形を固定しておく。
+session_state_write_codex_thread() {
+  local session="$1" thread="$2" file content
+  [[ "$thread" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
+    return 1
+  file="$(session_state_codex_thread_file "$session")" || return 1
+  printf -v content '%s\n' "$thread"
+  session_state_write_file "$file" "$content"
+}
+
+# 宛先を返す。無い・壊れている場合は非0で返る（**壊れた値は返さない**——そのまま
+# コマンドの引数になるため、読む側で形を確かめ直す）。
+session_state_read_codex_thread() {
+  local session="$1" file line
+  file="$(session_state_codex_thread_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  line="$(head -1 "$file" 2>/dev/null || true)"
+  [[ "$line" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
+    return 1
+  printf '%s' "$line"
+}
+
+# 新しい会話で起こす前に、前回の宛先を明示的に消す（#2520）。
+# `session_state_remove`では消さない。セッション終了後にもUUIDが残っていないと、次回の
+# `codex resume`が前回の会話を特定できないため。
+session_state_clear_codex_thread() {
+  local session="$1" file
+  file="$(session_state_codex_thread_file "$session")" || return 1
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Claude Codeがまだ開始していないことの印（#1465）。
 # `run-issue-session.sh`が`claude`を起動する直前に置き、`SessionStart`フックが消す。
 #
@@ -224,14 +275,38 @@ session_state_write_file() {
 # 横断質問セッション（`question`）はworktreeを持たないため、実装セッション向けの
 # 「worktreeがcleanでpush済み」という条件を当てるとどれにも当たらず、永久に残ってしまう。
 # **古い記述子には`kind`が無い**（読む側は空を`implementation`として扱う）。
+#
+# `agent`（第7引数・省略時は`claude`）は、そのセッションを動かしているエージェントCLI
+# （#2519）。**追加指示の送り方がここで変わる**——Claude Codeは`send-keys`の3段階プロトコル、
+# Codexは`codex queue`。起動したランチャー自身が書いた値だけが根拠で、画面（`capture-pane`）
+# からの推定はしない。**古い記述子には`agent`が無い**（読む側は空を`claude`として扱う）。
 session_state_write_descriptor() {
   local session="$1" worktree="$2" repository="$3" issue_number="$4" reapable="$5"
-  local kind="${6:-implementation}"
+  local kind="${6:-implementation}" agent="${7:-claude}"
   local file content
   file="$(session_state_descriptor_file "$session")" || return 1
-  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nkind=%s\nstartedAt=%s\n' \
-    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$kind" "$(date +%s)"
+  printf -v content 'session=%s\nworktree=%s\nrepository=%s\nissue=%s\nreapable=%s\nkind=%s\nagent=%s\nstartedAt=%s\n' \
+    "$session" "$worktree" "$repository" "$issue_number" "$reapable" "$kind" "$agent" "$(date +%s)"
   session_state_write_file "$file" "$content"
+}
+
+# そのセッションを動かしているエージェントCLIの種別（#2519）。
+#
+# **記述子が無い・`agent`が無い・知らない語のときは`claude`**。追加指示の送り方を決める値で、
+# 迷ったら従来どおりの経路（3段階プロトコル）へ倒す——`codex`へ倒すと、Claude Codeの
+# セッションに対して宛先の無い`codex queue`を打つことになる。
+session_state_agent_kind() {
+  local session="$1" file agent
+  file="$(session_state_descriptor_file "$session" 2>/dev/null || true)" || {
+    printf 'claude'
+    return 0
+  }
+  agent="$(session_state_field "$file" agent 2>/dev/null || true)"
+  if [[ "$agent" == "codex" ]]; then
+    printf 'codex'
+  else
+    printf 'claude'
+  fi
 }
 
 # 記述子から1つの値を取り出す。見つからなければ非0で返る。
@@ -317,11 +392,13 @@ session_state_reason_changed() {
   return 0
 }
 
-# そのセッションの状態ファイルを消す。**セッションを畳んだ後と、セッションが自然に
+# そのセッションの一時的な状態ファイルを消す。**セッションを畳んだ後と、セッションが自然に
 # 終わったときの両方で呼ぶ。** 残すと、次に同じ名前で立ったセッションが前回のイベントを
 # 引き継いだように見える。
 #
-# **`00.check-user`の印（`.check-user`・旧名`.plan`）だけは消さない**（#1905）。ここが
+# **`00.check-user`の印（`.check-user`・旧名`.plan`）とCodexのUUID（`.codex-thread`）は
+# 消さない**（#1905・#2520）。UUIDは次回の`codex resume`で前回の会話を特定するために必要で、
+# 新しい会話を起こす場合はランチャーが`session_state_clear_codex_thread`で先に消す。ここが
 # 消していたせいで、入力待ちのまま終わったセッションのIssueに`00.check-user`が付いたまま
 # 取り残されていた——ラベルはGitHubに残るのに、外す権利を表す印だけがホストから消えるため、
 # 同じIssueで起こし直したセッションはそれを外せない（#1893で発生。画面には「実行中なのに

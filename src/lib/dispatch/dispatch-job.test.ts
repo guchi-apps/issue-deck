@@ -341,6 +341,7 @@ describe("findBlockingSession", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }
@@ -436,6 +437,7 @@ describe("isIssueExecutionPending", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }
@@ -625,6 +627,8 @@ describe("findDispatchJobForIssue", () => {
       previewAction: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: "2026-08-14T00:00:00.000Z",
@@ -687,8 +691,11 @@ describe("セッションの操作（#1332）", () => {
     return { online: true, sessionControlCapable: true, instructionCapable: true, ...overrides };
   }
 
-  function sessionState(state: DispatchSessionView["state"]): Pick<DispatchSessionView, "state"> {
-    return { state };
+  function sessionState(
+    state: DispatchSessionView["state"],
+    codexThreadKnown: boolean | null = null,
+  ): Pick<DispatchSessionView, "state" | "codexThreadKnown"> {
+    return { state, codexThreadKnown };
   }
 
   describe("parseDispatchJobKind", () => {
@@ -708,6 +715,13 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
       expect(parseDispatchJobKind("restart")).toBeNull();
       expect(parseDispatchJobKind(1)).toBeNull();
+    });
+
+    // #2524。ホストに対する操作なので、Issueを持つ種別とは受け口が別（`REBOOT`の隣）
+    it("Codexのペアリング（#2524）を受け入れる", () => {
+      expect(parseDispatchJobKind("codex_pairing")).toBe("CODEX_PAIRING");
+      expect(parseDispatchJobKind("codex-pairing")).toBeNull();
+      expect(parseDispatchJobKind("CODEX_PAIRING")).toBeNull();
     });
   });
 
@@ -778,6 +792,51 @@ describe("セッションの操作（#1332）", () => {
         resolveSessionControlRejection({
           host: host(),
           session: sessionState("ALIVE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    /**
+     * #2519。Codexのセッションへは`codex queue --thread <UUID>`で送るが、そのUUIDは
+     * `SessionStart`フックからしか手に入らず、フックはディレクトリの信頼確認に答えるまで
+     * 飛ばない。**その間は押せないことを画面に出す**（押せてしまうと、pollerが見送るまで
+     * 何が起きたか分からない）。
+     */
+    it("Codexのセッションは宛先が分かるまで追加指示を送れない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("codex_thread_unknown");
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", true),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    // 停止・終了はtmux側の操作で、`codex queue`の宛先が要らない
+    it("宛先が分からなくても停止・終了はできる", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
+          kind: "INTERRUPT",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
           kind: "KILL",
           hasActiveControlJob: false,
         }),
@@ -945,6 +1004,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1016,6 +1076,7 @@ describe("横断質問（#1454）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1152,6 +1213,8 @@ describe("横断質問（#1454）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-15T00:00:00Z",
@@ -1198,6 +1261,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1344,6 +1408,8 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-17T00:00:00Z",
@@ -1390,6 +1456,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1510,6 +1577,8 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-22T00:00:00Z",
@@ -1674,6 +1743,7 @@ describe("resolveManualStepHost", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1749,6 +1819,7 @@ describe("エージェントの選択（#2505）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: true,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,

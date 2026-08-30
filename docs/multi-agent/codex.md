@@ -21,9 +21,10 @@ ISSUE_DECK_AGENT=codex scripts/start-issue.sh <Issue番号>
 印が付く（既定のClaude Codeには付けない）。
 
 - **欄が出るのは、そのホストが対応を申告しているときだけ**（`DispatchHost.codexCapable`）。
-  申告の条件は`codex`コマンドが入っていることで、判定は`scripts/subpc-dispatch-poller.sh`の
-  `codex_capable`。**古いpollerはジョブの`agent`を読まない**ため、申告が無いホストで選ばせると
-  Codexを選んだのにClaude Codeが黙って立つ
+  申告の条件は`codex`コマンドが入っていることと、**そのホストでサンドボックスを実際に
+  組み立てられること**（#2526。下の「サンドボックスを組み立てられないホスト」）。判定は
+  `scripts/subpc-dispatch-poller.sh`の`codex_capable`。**古いpollerはジョブの`agent`を読まない**
+  ため、申告が無いホストで選ばせるとCodexを選んだのにClaude Codeが黙って立つ
 - **選べるのは「実装を開始」ダイアログだけ。** ツールバーの「サブPCで開始」ボタンと
   「セッションを復旧」は従来どおりClaude Codeで起こす（同じ選択をメニューの階層にも持たない）
 - **GitHub Actions・「実装プロンプトをコピー」・「起動コマンドをコピー」には効かない**
@@ -37,16 +38,21 @@ worktreeの作成・ブランチ・`11.local`の付与・進捗報告・開発�
 | 環境変数 | 既定 | 何を変えるか |
 |---|---|---|
 | `ISSUE_DECK_AGENT` | `claude` | 起こすエージェント（`claude` / `codex`） |
-| `ISSUE_DECK_CODEX_SANDBOX` | `workspace-write` | Codexの`--sandbox` |
+| `ISSUE_DECK_CODEX_SANDBOX` | `workspace-write` | Codexの`--sandbox`。サンドボックスを組み立てられないホストでの逃げ道でもある（下の「サンドボックスを組み立てられないホスト」） |
 | `ISSUE_DECK_CODEX_MODEL` | （空） | Codexの`-m`。空なら`codex`側の既定 |
 | `ISSUE_DECK_CODEX_EXTRA_ARGS` | （空） | 追加の引数（空白区切り）。実機でしか分からない調整をスクリプトの修正なしで当てるための逃げ道 |
 
 導入（サブPC側で1回だけ）。**未導入のまま起動しようとすると、worktreeを作る前にエラーで止まる。**
 
 ```bash
-npm install -g @openai/codex
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
 codex login
 ```
+
+**公式インストーラのstandalone installで入れる**（#2521）。`npm install -g @openai/codex`でも
+TUIのセッションは起こせるが、共有のapp-serverデーモンに載るもの（`codex agents`・
+`codex remote-control`）が1つも動かない（後述の「`codex agents`・`remote-control`はstandalone
+installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は**戻すこと**（同じ節に手順がある）。
 
 ## Claude Codeと揃わないもの
 
@@ -61,8 +67,9 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | **×**（同名のツールが無い） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
-| Remote Control | ○ | **×** |
-| 前回の会話の引き継ぎ | ○（`--continue`） | **×**（`codex resume --last`を手で叩く） |
+| 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
+| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。繋がるのはホスト単位。#2524） |
+| 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
 **そのぶんIssueコメントに残す記録が重要になる。** 端末だけで完結させると、画面からは何も起きて
@@ -70,6 +77,258 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 
 `--disallowedTools`を使う経路（横断質問セッション・#1454）は、封じ込めが機械的に効かない状態で
 読み取り専用のセッションが立つのを避けるため、**Codexでは起動を断る**（`run-issue-session.sh`）。
+
+## queue・resume・remote-controlでどこまで揃うか（#2510）
+
+上の表で「×」としていたもののうち、いくつかはCodex側が先に進んでいた。codex-cli 0.151.0の実機で
+確かめた結果を残す。**分かれ目は「共有のapp-serverデーモンが要るかどうか」**で、要るものは
+npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かなかった。
+**そのためサブPCのCodexはstandalone installへ入れ替えた**（#2521。下の表はその後の結果）。
+
+| 確かめたこと | 結果 |
+|---|---|
+| `codex queue`で走っているセッションへ差し込めるか | **○**。デーモン不要。`send-keys`も要らない（#2519で実装） |
+| 差し込んだメッセージの届き方 | **次のターンの頭**。走っているターンは中断しない |
+| `codex agents`でセッションを一覧できるか | **○**（#2521でstandalone installへ入れ替えた） |
+| `codex remote-control start` / `pair` | **○**（同上）。取れるのは短命のペアリングコード（#2524で画面へ出した） |
+| セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
+| `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
+
+**この表のものは実装済みになった。** 「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は
+#2520、Remote Controlは#2524（下の「Remote Controlはペアリングコードで繋ぐ」）。
+ただしRemote Controlで繋がるのは**ホスト単位**で、Claude Codeのような
+「そのIssueを開くURL」にはならない。
+
+### `codex queue`は使える。しかも`send-keys`が要らない
+
+tmuxの中で普通に起こしたCodexのTUIセッションへ、**別のシェルから**メッセージを差し込めた。
+
+```bash
+codex queue --thread <セッションUUID または 完全一致のセッション名> --message '<本文>'
+# → Queued message <メッセージUUID> for thread <セッションUUID>.
+```
+
+**これがissue-deckにとって大きい。** Claude Code側の「追加指示を送る」（#1012）は、`tmux send-keys`
+での本文送出とEnterの別送を3段階プロトコルで囲って成立させている（`scripts/subpc-dispatch-poller.sh`の
+`INSTRUCTION_*`）。承認プロンプトや選択フォームの表示中に送ると既定の選択肢で勝手に答えてしまう
+事故があったため、[gates.md](gates.md)は`send-keys`そのものを禁じ、そこだけを例外として開けている。
+**`codex queue`はTUIのキー入力を経由しない**ので、この例外を開けずに同じことができる。
+
+- **デーモンは要らない。** `codex agents`や`codex remote-control`と違い、standalone installが
+  無くても動く。「走っているセッション」の判定は`~/.codex/thread-writer-locks/<session_id>.lock`で、
+  終了済み・存在しないセッションを指すと`Error: No active session found matching '<指定>'.`で
+  終了する（終了コードは0ではない）
+- **投げたシェルのカレントディレクトリは関係ない。** worktreeの外から`/tmp`配下のセッションへ
+  差し込めた
+- **アイドル中のセッションへ投げると、その場で新しいターンが始まる。** 「走っている間だけ使える」
+  ものではない
+- 差し込んだ本文は普通のユーザー発言としてTUIにも転記（rollout）にも残る
+
+### 差し込みは割り込みではなく「次のターン」
+
+120行の出力を求めるターンの実行中に2通目を投げたところ、**1通目の出力は最後まで流れ切り**、
+そのあとで2通目がユーザー発言として現れて処理された。走っているターンは止まらない。
+
+「追加指示」としてはこの届き方でよい（Claude Code側の3段階プロトコルも、処理中
+（`esc to interrupt`が出ている間）は送らずに待つ）。**逆に、走っている処理を止めたいときには使えない**
+——停止は従来どおり`C-c`（[gates.md](gates.md)の1つ目の例外）のままになる。
+
+### スレッドIDは`SessionStart`フックのJSONから取る
+
+`--thread`はセッションUUIDか**完全一致**のセッション名を取るが、名前は当てにできない（次項）。
+残るのはUUIDで、これは**#2509で繋いだ`SessionStart`フックのJSONにそのまま入っている**。
+
+```json
+{"session_id":"01a0510e-…","transcript_path":"/home/guchi/.codex/sessions/…jsonl",
+ "cwd":"…","hook_event_name":"SessionStart","model":"gpt-5.6-sol",
+ "permission_mode":"bypassPermissions","source":"startup"}
+```
+
+`Stop`にも同じ`session_id`が入る（加えて`turn_id`・`last_assistant_message`）。
+`scripts/session-notify.sh`はすでに`session_id`と`transcript_path`を読んでいるので、**Issue番号と
+UUIDの対応をどこかへ残せば、`codex queue`の宛先はそこから引ける**。
+
+**ただしフックはディレクトリの信頼確認に答えるまで飛ばない**（上の「信頼（trust）は2種類あり」）。
+**答える前のセッションのUUIDは取れない**ので、その間は追加指示を送れない。画面には
+「まだ開始していません」が出ている状態なので、実装するなら送れないことを画面側でも表せる。
+
+### セッション名は付けられない
+
+`--thread`は名前でも引けるが、**名前を決めるのはCodex側**だった。`~/.codex/session_index.jsonl`には
+最初に「プロンプトの先頭を切ったもの」が入り、数秒後にモデルが付け直した短い題名（例:
+`bashでsleep 90を実行`）へ置き換わる。**名前を指定する起動オプションは無い**（`codex --help`・
+`codex exec --help`のどちらにも無い）。改名は`codex agents`のTUI（`TuiAgentsKeymap`に
+`search` / `rename` / `toggle_grouping`）にあるが、その`codex agents`が動かない（次項）。
+
+したがって`run-issue-session.sh`が付けている`<リポジトリ名> #<Issue番号>`に相当する名前を
+Codex側へ持ち込むことはできない。**宛先はUUIDで持つ**。
+
+### `codex agents`・`remote-control`はstandalone installが要る（#2521で入れ替えた）
+
+どちらも共有のapp-serverデーモン越しに動くもので、npmで入れたCodexでは同じエラーで止まっていた。
+
+```
+$ codex remote-control start --json
+Error: managed standalone Codex install not found at /home/guchi/.codex/packages/standalone/current/codex
+This command requires the standalone install managed by the Codex installer, because the daemon
+starts and updates app-server from that fixed path.
+```
+
+`codex agents`・`codex app-server daemon start` / `version`も同じだった。導入方法の変更＝依存関係の
+変更なので、[CLAUDE.md](../../CLAUDE.md)のとおりユーザーの判断を取ったうえで**サブPCのCodexを
+standalone installへ入れ替えた**（#2521）。以下はその結果。
+
+#### 入れ替えても、npm版は消さずに済む
+
+インストーラは`~/.codex/packages/standalone/releases/<版>-x86_64-unknown-linux-musl/`（約330MB）へ
+実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**サブPCの`~/.local/bin`はPATHの先頭**
+（`~/.profile`が置いている。miseのshimsより前）なので、npm版を消さなくても新しいシェルでは
+standalone版が優先される。
+
+- **戻すのは`rm ~/.local/bin/codex`の1回で済む**（消すとmiseのshim経由でnpm版に戻る）
+- **走っているセッションには影響しない。** 実行中のプロセスは起動時に解決した実体を握ったままで、
+  入れ替えの最中も2本のCodexセッションが動き続けていた
+- **`~/.bashrc`へ入る`# >>> Codex installer >>>`のPATH追記は戻すこと。** `~/.bashrc`は
+  `guchi-apps/subpc`（`configs/bash/bashrc`）の管理下にあり、手で足すとドリフト検知に出る。
+  そもそも`~/.profile`が同じPATHを置いており、subpcのREADMEも「PATHは`~/.bashrc`ではなく
+  `~/.profile`側に置く」としているため、この追記は要らない
+
+  ```bash
+  cp ~/apps/subpc/configs/bash/bashrc ~/.bashrc   # 管理下の内容へ戻す
+  ```
+
+- インストーラは既存のnpm版を見つけると「アンインストールするか」を対話で聞く。
+  `CODEX_NON_INTERACTIVE=1`を付ければ聞かずに「消さない」を選ぶ
+- **バージョンの追い方が変わる。** miseのnode配下から外れ、Codex自身の自動更新
+  （`autoUpdateEnabled: true`）に載る。上げ直すときは`npm install -g`ではなくインストーラを
+  もう一度流す。`codex --version`が見るのは`~/.local/bin/codex`の側なので、npm版が残っていても
+  表示は混ざらない
+
+#### 取れるのはURLではなく短命のペアリングコード
+
+Claude Code側のRemote Control（#1219）は`--remote-control`が出すURLを`scripts/session-notify.sh`が
+拾っている。**Codex側はURLを出さない。**
+
+```
+$ codex remote-control start --json
+{"mode":"daemon","status":"connected","serverName":"subpc","environmentId":"env_e_…",
+ "timedOut":false,"daemon":{"status":"bootstrapped","backend":"pid","autoUpdateEnabled":true,
+ "remoteControlEnabled":true,"managedCodexPath":"…/packages/standalone/current/codex",…}}
+
+$ codex remote-control pair --json
+{"pairingCode":"<数字の長い列>","manualPairingCode":"<XXXX-XXXX>","environmentId":"env_e_…",
+ "expiresAt":<epoch秒>}
+```
+
+- **`pair`が返すのは`XXXX-XXXX`形式の手動ペアリングコードで、有効期限は10分**（`expiresAt`と
+  実行時刻の差）。`serverName`はホスト名（`subpc`）で、Issueごとには分かれない
+- **これは資格情報。** 期限が短くてもIssueコメント・PR本文・ログへ値を書かない
+- **`start`の直後は`pair`が`timed out waiting for remoteControl/pairing/start response`で落ちる**
+  ことがある。デーモンが上がりきってから呼び直すと通る
+- 止めるのは`codex remote-control stop`（`{"status":"stopped",…}`）。止めた後は
+  `codex app-server daemon version`がソケット無しのエラーに戻る。**確認のあとは止めてある**
+
+#### Remote Controlはペアリングコードで繋ぐ（#2524）
+
+**実行キューのホストのカードに「Codexに繋ぐ」ボタンがある。** 押すとpollerが
+`codex remote-control start`（デーモンの起動）と`pair --json`（コードの発行）を打ち、
+返ってきた`XXXX-XXXX`が画面へ出る。ChatGPTアプリの「Connect to Codex」へ打ち込むと繋がる。
+
+- **繋がるのはホスト単位。** `serverName`はホスト名（`subpc`）なので、1枚のコードで
+  そのホストのCodexセッションが**全部**見える（`codex agents`に出るもの。tmuxで起こした
+  TUIも載る）。Claude Code側（#1219）のような「そのIssueを開くURL」にはならないため、
+  ボタンはIssue詳細ではなくホストのカードに置いてある
+- **コードは10分で切れる。** 期限を過ぎた行は画面に出ず、DBの列も
+  `expireStaleDispatchJobs`が空にする。**コードは資格情報**なので、Issueコメント・PR本文・
+  Push通知・pollerのjournaldには出さない（画面はログイン必須）
+- **押せるのは`codexRemoteControl`を申告したホストだけ。** 申告の条件は`codex`の実体が
+  `~/.codex/packages/standalone/`配下にあること（`codex_remote_control_capable`）。
+  **`codexCapable`（`codex`コマンドがある）だけでは足りない**——npmで入れたCodexでも
+  サブコマンドは存在するが、共有のapp-serverデーモンを起こせない（#2521）
+- **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
+  `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい
+- 実装は`src/lib/dispatch/codex-pairing.ts`（判定と表示）・`enqueueCodexPairingJob`（積む）・
+  pollerの`run_codex_pairing_job`（発行）。ジョブの種別は`CODEX_PAIRING`で、
+  `SELF_UPDATE`・`REBOOT`と同じ枠外のジョブ（キューの一覧には出ない）
+
+#### tmuxで普通に起こしたTUIは、デーモンに載る
+
+「1（tmuxのセッションが共有デーモンに載るか）」の答えは**載る**。standalone版で
+`tmux new-session -d … codex …`と起こしたセッションは、別シェルの`codex agents`に
+`/home/guchi/apps/issue-deck  1 › ○ Untitled task  Ready`として現れた。
+**逆にnpm版で起動済みだった2本は現れない**——入れ替えより前に起こしたセッションは載らない。
+
+- **`codex agents`はTTYが要るTUI**で、`stdin is not a terminal`で終わる。一覧を機械可読で取る
+  サブコマンドは無い（画面へ出すなら`codex app-server`のプロトコルを直接叩くことになる）
+- 改名（`ctrl+r`）もこのTUIの中だけ。`<リポジトリ名> #<番号>`を外から付ける手段は増えていない
+
+### `codex resume <session_id>`はピッカーを出さずに再開できる
+
+`codex resume <セッションUUID> '<プロンプト>' --sandbox workspace-write --ask-for-approval never`で、
+**選択画面を出さずに前の会話を引き継いだ**（直前のやり取りを列挙させて確認）。UUIDは上と同じく
+`SessionStart`フックから取れるので、`ISSUE_DECK_CLAUDE_RESUME`（`--continue`）に当たるものを
+Codex側にも作れる。`--last`はホスト全体で最後のセッションを指すため、worktreeを並べる運用では
+使えない——**UUIDを覚えておくことが前提**になる。
+
+`run-issue-session.sh`は、同じworktreeを再利用して起こすときに
+`<セッション名>.codex-thread`（#2519）を読み、対応があればこのコマンドで再開する。UUIDは
+`SessionStart`フックが書き、セッション終了後も次回の再開用にホスト内だけへ残す。
+
+- **対応が無ければ新しい会話。** 初回や、ディレクトリの信頼確認に答える前に終了した場合は
+  `SessionStart`が飛ばずUUIDも無いため、従来の`codex <PROMPT> ...`で起こす
+- **新規作成・再作成では引き継がない。** 呼び出し元が`ISSUE_DECK_CLAUDE_RESUME=0`を渡すため、
+  古いUUIDを起動前に消して新しい会話にする。人が明示的に同じ環境変数を渡した場合も同じ
+- **`--last`は使わない。** ホスト全体の最後ではなく、tmuxセッション名
+  （`<リポジトリ名>-issue-<番号>`）に対応するUUIDだけを指定する
+
+## 追加指示は`codex queue`で送る（#2519）
+
+画面の「追加指示を送る」（#1012）は、Codexのセッションでも押せる。**送り方だけが違う。**
+
+| | Claude Code | Codex |
+|---|---|---|
+| 送り方 | `tmux send-keys`の3段階プロトコル | `codex queue --thread <UUID> --message '<本文>'` |
+| 宛先 | tmuxのセッション名 | セッションUUID（`SessionStart`フックの`session_id`） |
+| 送らない条件 | 承認プロンプト・選択フォームの表示中／処理中／入力欄に打ちかけ | **宛先がまだ分からないとき**だけ |
+| 届き方 | 入力欄へ入って即座に確定 | 次のターンの頭（走っているターンは止まらない） |
+
+**`send-keys`へ寄せていない。** [gates.md](gates.md)が`send-keys`そのものを禁じて追加指示だけを
+例外として開けているのは、TUIのキー入力に本文を流し込むことの危うさ（選択フォームの表示中に
+送ると勝手に回答済みになる）が理由で、`codex queue`はそこを通らない。**Codexでは例外を
+開けずに同じ機能が成り立つ。**
+
+### 宛先はIssueごとの状態ファイルに残す
+
+`codex queue --thread`が取るのはUUIDか完全一致のセッション名だけで、**名前はCodexが自動で
+付け直す**ため当てにできない（#2510）。残せるのはUUIDで、それが手に入るのは`SessionStart`
+フックのJSONの`session_id`だけ。
+
+1. `run-issue-session.sh`が起動時、記述子（`<セッション名>.session`）へ`agent=codex`を書く
+2. `session-notify.sh`が`SessionStart`で記述子を読み、Codexなら`session_id`を
+   `<セッション名>.codex-thread`へ書く（**Claude Codeのセッションでは何もしない**）
+3. pollerは追加指示のジョブを受けたとき、記述子の`agent`で送り方を選ぶ
+   （`deliver_session_instruction` → `deliver_codex_instruction`）
+
+**判定材料は記述子の`agent`だけ**で、転記のパスやJSONの形からエージェントを推定はしない。
+読めない・知らない語のときは`claude`へ倒す——`codex`へ倒すと、Claude Codeのセッションに対して
+宛先の無い`codex queue`を打つことになる。UUIDは次回の`codex resume`にも使うため、セッションを
+畳んでも残す（#2520）。新しい会話で起こす場合はランチャーが起動前に消し、前回の宛先へ追加指示を
+送らないようにする。
+
+### 信頼確認に答えるまでは送れないことを画面に出す
+
+**ディレクトリの信頼確認に答えるまでフックは1つも飛ばない**（下の「信頼（trust）は2種類あり」）。
+その間UUIDが手に入らないので追加指示も送れない。押せてしまうと、pollerが見送るまで（最大1分）
+何が起きたのか分からないため、**押す前に断る**。
+
+- pollerがセッションの報告に`codexThreadKnown`を載せる。**3値**で、`null`＝Codexのセッション
+  ではない（Claude Code）／`false`＝Codexだが宛先がまだ無い／`true`＝送れる
+- issue-deckは`DispatchSession.codexThreadKnown`へ写し、`false`のあいだは
+  `resolveSessionControlRejection`が`codex_thread_unknown`で断る（画面のボタンは無効になり、
+  理由が下に出る）。**停止・終了には効かない**——どちらもtmux側の操作で宛先が要らない
+- **項目そのものを送ってこない古いpollerでは`null`のまま**＝従来どおり送れる扱いになる
+  （`claudeStarting`・`reapAt`と同じ向き）。そのpollerはCodexを選ぶ経路（`codexCapable`）も
+  申告していないので、画面からCodexで起こすことはできない
 
 ## フック（#2509）
 
@@ -153,9 +412,103 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - **ネットワークは明示的に開ける。** Codexのサンドボックスは既定でネットワークを塞ぐため、
   開けないと`gh issue comment`・`git push`・`pnpm install`が軒並み失敗する。実装セッションは
   Issueへの報告とPR作成が仕事なので、塞いだままでは成立しない
-- **`--add-dir`は渡さない。** Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
+- **`--add-dir`で渡すのはgitの管理領域だけ**（#2529。下の「gitの管理領域だけは開ける」）。
+  それ以外には渡さない。Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
   読むだけならサンドボックスの外でもできる。共有知識リポジトリ（`~/apps/_docs`）は読み取り専用と
   して扱う決まり（[CLAUDE.md](../../CLAUDE.md)）なので、渡すと機械的に破れるようになるだけ
+
+### gitの管理領域だけは開ける（#2529）
+
+**worktreeだけを書けるようにすると、コミットできない。** git worktreeの`.git`は
+`gitdir: <本体>/.git/worktrees/<名前>`と書かれた**ただのファイル**で、インデックスもHEADもログも
+本体側にある。オブジェクトと`refs/heads/*`・`packed-refs`・`FETCH_HEAD`はさらに上の本体の`.git`
+にあるため、`workspace-write`のままでは`git add`が次のエラーで落ちる。
+
+```
+fatal: Unable to create '/home/guchi/apps/issue-deck/.git/worktrees/issue-2511/index.lock': Read-only file system
+```
+
+実例が#2511で、実装も検証（Lint・型チェック・テスト5,255件・ビルド）も終えたあと、
+**コミットの直前でセッションが止まった**。
+
+そこで`agent_cli_build_codex_args`が、`git rev-parse --git-common-dir`と`--absolute-git-dir`の
+うち**ワークスペースの外にあるもの**を`--add-dir`で渡す（`scripts/lib/agent-cli.sh`の
+`agent_cli_codex_writable_dirs`）。linked worktreeの管理領域は本体の`.git`の下にあるので、
+実際に渡るのは**本体の`.git`1つだけ**。**ふつうのクローン（`.git`がワークスペースの中）では
+1つも渡さない**——閉じ込めを緩める理由が無い。足すのは`workspace-write`のときだけで、
+`read-only`と`danger-full-access`には足さない。
+
+起動時の1行で確かめられる（`workdir`のほかに本体の`.git`が並ぶ）。
+
+```
+sandbox: workspace-write [workdir, /tmp, $TMPDIR, /home/guchi/apps/issue-deck/.git] (network access enabled)
+```
+
+**緩むのは`.git`の中だけ。** 他Issueのworktreeの管理領域と他ブランチのrefへは書けるようになるが、
+**本体チェックアウトと他Issueのworktreeの作業ファイル**は従来どおり読み取り専用で、下の逃げ道
+（`danger-full-access`）とは別物。gitはオブジェクトもrefも本体側へ書くため、これより狭くして
+コミットとpushを通す方法は無い。
+
+### サンドボックスを組み立てられないホスト（#2526）
+
+**`codex`コマンドが入っていても、セッションが1本もコマンドを実行できないホストがある。**
+Codexが同梱するbubblewrapが非特権のuser namespaceを組み立てられない場合で、出るのは
+**`bwrap:`で始まる行**（`codex`自身のエラーではないので、メッセージで検索しても何も出てこない）。
+
+```
+bwrap: setting up uid map: Permission denied
+bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+```
+
+**見分け方はこの1行だけでよい。** `bwrap:`が出ていればホスト側の制限で、Codexの設定・ログイン・
+プロンプトのどれとも関係がない。subpcで起きているのはUbuntu 24.04の既定
+（`kernel.apparmor_restrict_unprivileged_userns = 1`）がuser namespaceの中でcapabilityを
+全部落とすためで、**ホスト側の恒久対処は`guchi-apps/subpc#77`**。issue-deck側では直せない。
+
+手元で確かめるなら次の1行。`0`で返ればこのホストでCodexを起こせる。
+
+```bash
+codex sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- /bin/true
+```
+
+**`codex sandbox`は`--sandbox`も`--ask-for-approval`も受け取らない**（`-c`のオーバーライドだけ）
+ので、起動時と同じモードを確かめたいときは上のように`-c sandbox_mode=`で渡す。
+
+#### 起こす前に止める
+
+以前は「`codex`コマンドがあるか」しか見ていなかったため、**画面でCodexを選べるのにセッションが
+即死した**（実例: #2511。worktreeも指示ファイルも読めずに終了した）。今は同じ下見を2か所が使う。
+
+- `scripts/subpc-dispatch-poller.sh`の`codex_capable` — 組み立てられないホストは`codex`を
+  申告しない。画面の「実装を開始」にエージェント欄そのものが出なくなる。理由は画面へは送らず、
+  **可否が変わった巡だけjournaldへ出す**（`journalctl --user -u issue-deck-dispatch-poller`）
+- `scripts/start-issue.sh` — `--agent codex`で起動しようとしたとき、**worktreeを作る前に**
+  `bwrap:`の行と逃げ道を出して止まる
+
+判定は`scripts/lib/agent-cli.sh`の`agent_cli_codex_sandbox_probe`が1つだけ持つ。結果は
+`ok`／`broken`／`unknown`の3つで、**`unknown`（`codex sandbox`を持たない版）では塞がない**
+——証拠があるときだけ止める。
+
+#### 逃げ道: `danger-full-access`
+
+`ISSUE_DECK_CODEX_SANDBOX=danger-full-access`ならbwrapを通らないので、この制限のあるホストでも
+起こせる（実測で`codex sandbox -c sandbox_mode=danger-full-access -- /bin/echo hello`が成功する）。
+
+```bash
+ISSUE_DECK_CODEX_SANDBOX=danger-full-access scripts/start-issue.sh --agent codex <Issue番号>
+```
+
+**これは既定にしない。** `--ask-for-approval never`で走らせている前提の裏付けが「書き込みが
+worktree（cwd）と本体の`.git`に閉じている」ことで、`danger-full-access`はその層だけを外す。残るのは後段の防御
+（Pull Request必須・レビュー・自動マージ不可カテゴリ）で、**他のIssueのworktreeや本体
+チェックアウトへ手が届く状態**になる。急ぐときに自分で1回ずつ付けるものとして扱い、
+恒久対処は`guchi-apps/subpc#77`（ホスト側でuserns制限を緩める）を待つ。
+
+**画面から起こす経路でこれを効かせたい場合は、pollerの環境（`dispatch.env`）へ置くことになる。**
+pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外の環境変数はpollerのものが
+そのまま継承されるため、置けば申告（`codex_capable`）も起動もそろって`danger-full-access`で
+判定される。ただし上のとおり**そのホストの全Codexセッションから書き込みの閉じ込めが消える**ので、
+置くかどうかは人が決める。
 
 ## プロンプトは分岐させず、差分だけを足す
 
@@ -169,7 +522,7 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - 計画は`ExitPlanMode`ではなく`gh issue comment`＋`00.check-user`／`01.check-plan`の自分での付与
 - 確認は`AskUserQuestion`ではなく端末＋Issueコメント（**ラベルを外すのも自分**）
 - `Read`・`Grep`・`Glob`はシェルで代替する
-- 承認プロンプトは出ない・書き込みはworktreeに閉じている
+- 承認プロンプトは出ない・書き込みはworktreeと本体の`.git`に閉じている（`git`はそのまま使える）
 
 **読み替えが見つからない場合、Codexでの起動は失敗する**（`start-issue.sh`）。Claude Code前提の
 記述だけが残ったプロンプトを渡すと、存在しない手順を待って止まるため。
@@ -206,18 +559,23 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 
 | 何を | どこに |
 |---|---|
-| 種別の解決・Codexの引数の組み立て・フックの`-c`の組み立て | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
+| 種別の解決・Codexの通常／resume引数の組み立て・フックの`-c`の組み立て・サンドボックスの下見 | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
-| `--agent`の受け取り・存在チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
+| `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
-| ジョブの`agent`の読み取り・`codex`の申告 | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
+| 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |
 | 語の検証・表示名・選べるかの判定 | [`src/lib/dispatch/dispatch-job.ts`](../../src/lib/dispatch/dispatch-job.ts) |
 | 選択欄と注意の表示 | [`src/components/dashboard/start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx) |
-| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs) |
+| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs)・[`scripts/codex-queue.test.mjs`](../../scripts/codex-queue.test.mjs) |
 
 ## まだやっていないこと
 
+- **subpcでは今のところサンドボックスを組み立てられない**（#2526）。`guchi-apps/subpc#77`で
+  ホスト側のuserns制限が緩むまで、画面の「実装を開始」にエージェント欄は出ない（急ぐときの
+  逃げ道は上の「サンドボックスを組み立てられないホスト」）
 - **無人実行（GitHub Actions）は対象外。** `claude-issue-dispatch.yml`は`claude-code-action`の
   ままで、Codexで走らせるには`OPENAI_API_KEY`のSecrets追加と課金の判断が要る
 - **汎用ランチャー（`scripts/generic-start-issue.sh`）は未対応。** 他リポジトリのセッションは
@@ -232,3 +590,8 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）
+- **Remote Controlは繋げるようになったが、Issueごとのリンクではない**（#2524）。実行キューの
+  ホストのカードに出る「Codexに繋ぐ」を押すと、pollerが`codex remote-control start` / `pair`を
+  打ってペアリングコードを発行し、画面に出る（前述の「Remote Controlはペアリングコードで繋ぐ」）。
+  **`serverName`はホスト名なので、1枚のコードで繋がるのはそのホストのCodexセッション全部**で、
+  Claude Codeのような「そのIssueを開くURL」（#1219）にはならない

@@ -93,6 +93,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -411,6 +412,7 @@ describe("MobileHomeScreen（#1690）", () => {
           previewUrl: null,
           reapAt: null,
           reapReason: null,
+          codexThreadKnown: null,
         },
       ],
     });

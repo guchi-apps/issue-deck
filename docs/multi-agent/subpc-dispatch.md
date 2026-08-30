@@ -107,7 +107,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `INTERRUPT` | `tmux send-keys -t "=<名前>:" C-c` | 走っている処理を止める。セッションは残る |
 | `KILL` | `tmux kill-session -t "=<名前>"` | セッションごと畳む |
 | `QUESTION`（#1294） | （未実装） | 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する |
-| `INSTRUCTION`（#1012） | 3段階プロトコルで人が書いた1行を入力欄へ送る | 走っているセッションへ追加指示を流す |
+| `INSTRUCTION`（#1012） | 人が書いた1行を送る（Claude Codeは3段階プロトコルで入力欄へ、Codexは`codex queue`で積む。#2519） | 走っているセッションへ追加指示を流す |
 | `CROSS_REPO_QUESTION`（#1454） | `scripts/start-cross-repo-question.sh` | 複数リポジトリ横断の質問セッションを立てる |
 | `MANUAL_STEP`（#1828） | `scripts/run-manual-step.sh`（別プロセス） | 手作業アシスタントで承認された1手順ぶんのコマンドを実行する |
 | `MANUAL_STEP_ABORT`（#1882） | `systemctl --user stop issue-deck-manual-step-<対象ジョブID>` | 走っている代行実行を止める |
@@ -116,6 +116,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `SELF_UPDATE`（#1875） | チェックアウトの更新と自己再起動 | pollerが動かしているチェックアウトを`develop`に合わせる |
 | `PREVIEW`（#2444） | `scripts/start-preview-dev.sh` | 確認環境（developの最新を映す開発サーバー）を起こす・入れ替える・止める |
 | `REBOOT`（#2496） | `sudo -n /usr/sbin/reboot` | ホストをOSごと再起動する |
+| `CODEX_PAIRING`（#2524） | `codex remote-control start` / `pair --json` | CodexのRemote Control用のペアリングコードを1枚発行する |
 
 **`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`はセッションを立てる側**（`LAUNCH`と同じ枠・
 同じ払い出し経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものでは
@@ -135,6 +136,12 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 **結果として走っているセッションは全部消える**。`SELF_UPDATE`が`exec`でプロセスだけを入れ替えて
 セッションを残す（#1927）のとは、失うものが違う。詳細は
 [画面からホストごと再起動する](#画面からホストごと再起動する2496)。
+
+**`CODEX_PAIRING`もセッションにも tmux にも触らない**（#2524。`REBOOT`と同じ枠外）。
+Issueに紐づかない（`serverName`はホスト名で、Issueごとには分かれない）ため`issueNumber`には
+埋め草の`0`が入り、pollerへ渡るのはホスト名だけ。返ってくる`XXXX-XXXX`のコードは
+**資格情報で、10分で切れる**——`message`ではなく報告の追加フィールド（`pairingCode`）で運び、
+journaldにもIssueにも出さない。詳細は[codex.md](codex.md)「Remote Controlはペアリングコードで繋ぐ」。
 
 **押せない理由には、押すボタンの名前だけでなく置き場所も書く**（#2455）。確認環境が使えない
 理由（`describePreviewRejection`）は当初「「更新して再起動」で最新にしてください」だったが、
@@ -192,7 +199,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | 止まるもの | 今動いている処理（生成中の応答・実行中のツール）だけ | tmuxセッションごと。Claude Codeのプロセスも終わる |
 | 終わった後 | セッションは生きたまま入力待ちに戻る。**追加指示（#1012）で続けられる** | 操作する相手が居なくなる。画面からは消え、状態ファイルも消える |
 | worktree・ブランチ | 残る | 残る（畳むのはtmuxセッションだけ） |
-| もう一度起動したら | ― | worktreeを作り直していなければ`--continue`で**前回の会話の続き**から始まる。押す場所は終了したセッションの行に出る「セッションを復旧」（[畳んだセッションは画面から復旧する](#畳んだセッションは画面から復旧する1830)） |
+| もう一度起動したら | ― | worktreeを作り直していなければ**前回の会話の続き**から始まる（Claude Codeは`--continue`、Codexは`codex resume`）。押す場所は終了したセッションの行に出る「セッションを復旧」（[畳んだセッションは画面から復旧する](#畳んだセッションは画面から復旧する1830)） |
 | 確認ダイアログ | 無し（押すと即座に積む） | 有り |
 
 使い分けは「**間違った方向へ進んでいるので割り込んで直したい**」なら停止、「**このセッションはもう
@@ -317,6 +324,27 @@ pollerは`instruction: true`を別に申告し、`claim`はそれが真のホス
 `activeKey`は`instruction:owner/repo#番号`で、未処理の追加指示は1件まで。`QUEUED`のまま5分で
 `TIMEOUT`にするのも制御ジョブと同じ（何時間も後に届いた指示は、そのとき走っている別の作業への
 割り込みになる）。
+
+#### Codexのセッションへは`codex queue`で送る（#2519）
+
+**3段階プロトコルはClaude Code専用。** Codexには`codex queue --thread <セッションUUID>
+--message '<本文>'`があり、TUIのキー入力を経由せずに次のターンの頭へ本文を積める。
+`send-keys`を使わないので、段1（状態確認）・段3（反映の再確認）に当たるものが要らない。
+
+| | Claude Code | Codex |
+|---|---|---|
+| 段0（セッション名の照合） | 同じ | 同じ |
+| 本文の検証（改行・制御文字・500文字） | 同じ | 同じ |
+| 送出 | 段1〜4 | `codex queue`を1回。**画面も状態ファイルも読まない** |
+| 送らない条件 | 承認プロンプト・処理中・打ちかけ | 宛先（セッションUUID）がまだ分からないとき（`skipped`） |
+
+どちらへ送るかは、ランチャーが記述子（`<セッション名>.session`）へ書いた`agent`だけで決める
+（`session_state_agent_kind`。読めない・知らない語なら`claude`へ倒す）。宛先のUUIDは
+`session-notify.sh`が`SessionStart`フックから`<セッション名>.codex-thread`へ残す。詳細は
+[codex.md](codex.md)「追加指示は`codex queue`で送る」。
+
+**issue-deckはUUIDを持たない**（下の「session idは持たず…」と同じ立場）。画面へ運ぶのは
+「宛先が分かっているか」の3値（`codexThreadKnown`）だけで、UUIDはサブPCの状態ファイルに閉じる。
 
 #### session idは持たず、`--continue`で再開する（#1541）
 
@@ -1040,7 +1068,7 @@ pollerはsystemd unitの`ExecStart`で本体チェックアウトの`scripts/sub
 | 開発サーバー | ラベル次第で起動 | 起動しない |
 | 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件（＋気付いた別件があれば`70.confirm`付きの新規Issue。#1528） |
 | 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED、またはOPENのまま`QUESTION_SESSION_IDLE_MINUTES`（既定30）放置**（gitの判定は当てない。#1648） |
-| 畳んだ後の再起動 | 前回の会話の続きから再開する（`--continue`・#1541） | **引き継がない**（cwdが質問Issue間で共有されるため。#1648） |
+| 畳んだ後の再起動 | 前回の会話の続きから再開する（Claude Codeは`--continue`・#1541、Codexは`codex resume`・#2520） | **引き継がない**（cwdが質問Issue間で共有されるため。#1648） |
 
 **cwdをどれか1つのリポジトリにしない。** そのリポジトリの`CLAUDE.md`だけが最初から効いて
 横断の視点が偏るうえ、他セッションが編集中の作業ツリーへ書き込む余地を残すことになる。

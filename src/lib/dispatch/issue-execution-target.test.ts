@@ -28,6 +28,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     ...overrides,
   };
 }
@@ -53,6 +54,8 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     previewAction: null,
     exitCode: null,
     commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
     tmuxSessionName: null,
     queuePriority: 0,
     createdAt: "2026-08-14T00:00:00.000Z",

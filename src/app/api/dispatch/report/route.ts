@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  normalizeCodexPairingExpiry,
+  parseCodexPairingCode,
+} from "@/lib/dispatch/codex-pairing";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
@@ -61,6 +65,16 @@ export async function POST(request: NextRequest) {
       ? payload.output.slice(-MANUAL_STEP_OUTPUT_MAX_LENGTH)
       : null;
 
+  // Codexのペアリングコード（#2524）。**形（`XXXX-XXXX`）と期限の範囲をここで通す。**
+  // Codexの出力をそのまま保存すると、CLIの版が変わって別のものが返ったときに、それが何であれ
+  // 画面へ出る。**期限が読めない巡は10分後を当てる**（`normalizeCodexPairingExpiry`）——
+  // 期限の分からないコードを残すと、消す条件（`expireStaleDispatchJobs`）から外れる。
+  // **`null`が返るのは届いた期限が過去だったときだけ**で、そのときはコードごと捨てる
+  const codexPairingCode = parseCodexPairingCode(payload?.pairingCode);
+  const codexPairingExpiresAt = codexPairingCode
+    ? normalizeCodexPairingExpiry(payload?.pairingExpiresAt)
+    : null;
+
   const result = await reportDispatchJob({
     jobId,
     hostName,
@@ -69,6 +83,8 @@ export async function POST(request: NextRequest) {
     tmuxSessionName,
     exitCode,
     output,
+    codexPairingCode: codexPairingExpiresAt ? codexPairingCode : null,
+    codexPairingExpiresAt,
   });
 
   if (!result.ok) {

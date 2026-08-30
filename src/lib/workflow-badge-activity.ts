@@ -1,7 +1,7 @@
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
- * 一覧の進捗バッジ（`WorkflowStepBadge`）の外周リングを回すかどうかの判定（#1439）。
+ * 一覧の進捗バッジ（`WorkflowStepBadge`）を動かす（バーを光で掃く）かどうかの判定（#1439）。
  *
  * **回転が意味するのは「今この瞬間、エージェント側が動いている」の一点だけ。** 人の入力を
  * 待っている状態・終わった状態・報告が途絶えた状態では回さない。回転は一覧を流し見したときに

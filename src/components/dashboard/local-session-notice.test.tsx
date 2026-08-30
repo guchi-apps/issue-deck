@@ -27,6 +27,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     firstSeenAt: "2026-08-14T00:00:00.000Z",
     lastReportedAt: "2026-08-14T00:00:00.000Z",
     ...overrides,

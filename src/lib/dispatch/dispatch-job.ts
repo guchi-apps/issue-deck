@@ -44,7 +44,8 @@ export type DispatchJobStatus =
  * - `QUESTION` … 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する（#1294）。
  *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
  * - `INSTRUCTION` … 走っているセッションへ追加指示を1行流す（#1012）。pollerが3段階プロトコル
- *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る
+ *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る。**Codexのセッションへは
+ *   `codex queue`で積む**（#2519。`send-keys`を使わないので3段階プロトコルを通らない）
  * - `CROSS_REPO_QUESTION` … 複数リポジトリ横断の質問セッションを立てる（#1454）。**`QUESTION`とは
  *   別物**で、あちらは`claude -p`を1回走らせて終わる想定なのに対し、こちらは`LAUNCH`と同じく
  *   tmuxセッションを立てる（回答後もセッションが残り、追加指示で追い質問ができる）。参照する
@@ -66,6 +67,10 @@ export type DispatchJobStatus =
  *   確かめ直してから`sudo reboot`を打つ。**`SELF_UPDATE`とは別物**で、あちらが畳むのは
  *   pollerのプロセスだけ（`exec`で入れ替わるためセッションは残る）なのに対し、こちらは
  *   OSごと落ちるため走っているセッションは戻らない。対象はホストなので`issueNumber`は0
+ * - `CODEX_PAIRING` … CodexのRemote Control相当（#2524）。pollerが
+ *   `codex remote-control start` / `pair`を打ち、**10分で切れるペアリングコードを画面へ返す**。
+ *   Claude Code側（#1219）がセッションごとのURLなのに対し、こちらは**ホストに紐づく**
+ *   （`serverName`はホスト名で、Issueごとには分かれない）ので`issueNumber`は0
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -80,7 +85,8 @@ export type DispatchJobKind =
   | "SELF_UPDATE"
   | "CODE_REVIEW"
   | "PREVIEW"
-  | "REBOOT";
+  | "REBOOT"
+  | "CODEX_PAIRING";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -162,6 +168,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "code_review") return "CODE_REVIEW";
   if (value === "preview") return "PREVIEW";
   if (value === "reboot") return "REBOOT";
+  if (value === "codex_pairing") return "CODEX_PAIRING";
   return null;
 }
 
@@ -218,7 +225,10 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
 export const CODEX_LIMITATIONS = [
   "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
   "計画の承認・質問への回答は画面に出ません（Issueコメントで受け取ります）",
-  "Remote Controlで覗けません。前回の会話も引き継ぎません",
+  // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
+  // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
+  "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
+  "前回の会話を引き継ぎません",
 ] as const;
 
 /**
@@ -305,6 +315,7 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "SELF_UPDATE",
   "PREVIEW",
   "REBOOT",
+  "CODEX_PAIRING",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -458,6 +469,20 @@ export type DispatchJobView = {
    * （GitHubのIssueにも通知にも載せない）。
    */
   commandOutput: string | null;
+  /**
+   * 発行されたCodexのペアリングコード（#2524。`kind`が`CODEX_PAIRING`のときだけ入る）。
+   *
+   * **これは資格情報。** `commandOutput`と同じくログイン必須のこの画面より外へは出さず、
+   * さらに**期限（`codexPairingExpiresAt`）を過ぎたら`null`で返す**——切れたコードを画面に
+   * 出し続けると、押した人は効かないコードを打ち込むことになる。
+   *
+   * **pollerが取りに来る`POST /api/dispatch/claim`には出てこない。** あちらが返すのは
+   * `QUEUED`のジョブだけで、コードが入るのはpollerが実行して報告した後だから
+   * （`placeholderValues`のように読む側で消す必要が無い）。
+   */
+  codexPairingCode: string | null;
+  /** 上のコードが切れる時刻（#2524）。コードが無ければ`null` */
+  codexPairingExpiresAt: string | null;
   tmuxSessionName: string | null;
   /**
    * 順番待ちの中で先に払い出す度合い（#1541。大きいほど先）。
@@ -556,6 +581,15 @@ export type DispatchHostView = {
    * `failed`で返る」では済まない種類の非対応にあたる（`manualStepValuesCapable`と同じ）。
    */
   codexCapable: boolean | null;
+  /**
+   * Codexのペアリングコードを発行できるか（#2524）。**`null`（未申告）は「できない」**。
+   *
+   * **`codexCapable`とは別に持つ。** あちらは`codex`コマンドがあるかだけを見るが、
+   * `remote-control`が動くのは公式インストーラのstandalone installで入れたCodexだけで、
+   * npmで入れたものはサブコマンドが存在しても共有のapp-serverデーモンを起こせない（#2521）。
+   * 画面はこれを見て「Codexに繋ぐ」を出すかどうかを決める。
+   */
+  codexRemoteControlCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -954,6 +988,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "確認環境";
     case "REBOOT":
       return "ホストの再起動";
+    case "CODEX_PAIRING":
+      return "Codexのペアリング";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
@@ -1119,6 +1155,7 @@ export type SessionControlRejection =
   | "instruction_unsupported"
   | "session_not_found"
   | "session_not_alive"
+  | "codex_thread_unknown"
   | "already_queued";
 
 export function describeSessionControlRejection(
@@ -1143,6 +1180,12 @@ export function describeSessionControlRejection(
       return `${formatDispatchHostName(context.hostName)} にこのIssueのセッションが見当たりません。`;
     case "session_not_alive":
       return "このセッションは既に終了しています。";
+    case "codex_thread_unknown":
+      // **Codexのセッションだけに出る**（#2519）。`codex queue`の宛先はセッションUUIDで、
+      // それが手に入るのは`SessionStart`フックのJSONだけ。フックはディレクトリの信頼確認に
+      // 答えるまで1つも飛ばないため、答えるまでは送る相手を特定できない。
+      // **何をすれば送れるようになるかまで書く**（`instruction_unsupported`と同じ立場）
+      return "Codexのセッションの宛先がまだ分かりません（起動直後のディレクトリの信頼確認に答えると送れるようになります）。";
     case "already_queued":
       return `このIssueには未処理の${label.action}が既にあります。`;
   }
@@ -1159,7 +1202,7 @@ export function resolveSessionControlRejection(params: {
     | Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable">
     | null
     | undefined;
-  session: Pick<DispatchSessionView, "state"> | null | undefined;
+  session: Pick<DispatchSessionView, "state" | "codexThreadKnown"> | null | undefined;
   kind: SessionControlJobKind;
   hasActiveControlJob: boolean;
 }): SessionControlRejection | null {
@@ -1178,6 +1221,13 @@ export function resolveSessionControlRejection(params: {
   // セッションを片付ける用途があるので許す
   if (params.session.state === "GONE") return "session_not_found";
   if (params.kind !== "KILL" && params.session.state !== "ALIVE") return "session_not_alive";
+  // **Codexのセッションは宛先（スレッドUUID）が分かるまで送れない**（#2519）。`false`を送って
+  // くるのは、Codexで起きていてまだ`SessionStart`フックが飛んでいないセッションだけ。
+  // Claude Codeの行と、この項目を申告しない古いpollerでは`null`のまま＝従来どおり送れる。
+  // **停止・終了には効かない**（`C-c`も`kill-session`もtmux側の操作で、宛先が要らない）
+  if (params.kind === "INSTRUCTION" && params.session.codexThreadKnown === false) {
+    return "codex_thread_unknown";
+  }
   if (params.hasActiveControlJob) return "already_queued";
   return null;
 }

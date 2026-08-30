@@ -31,6 +31,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,
+    codexRemoteControlCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -67,6 +68,8 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     previewAction: null,
     exitCode: null,
     commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
     tmuxSessionName: null,
     queuePriority: 0,
     createdAt: NOW.toISOString(),
@@ -440,6 +443,7 @@ describe("DispatchQueueButton のホスト表示", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }
