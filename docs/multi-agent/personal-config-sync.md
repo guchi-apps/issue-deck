@@ -227,9 +227,9 @@ Tailscale SSHへ一本化しており、公開IPも持たないため（[subpc-d
 
 - **`main`直行になる。** `develop`を持たないので、PRは`issue-<番号>` → `main`。
   `main`のブランチ保護は入れておらず、マージするのは人だけ
-- **進捗は`Implementation`で止まる。** `issue-labels.yml`を持たないため、マージしても
-  盤面の「実行中」に残る。入れるまでは手で`Done`にしてcloseする
-  （導入は guchi-apps/claude-config#2）
+- **進捗は当初`Implementation`で止まっていたが、guchi-apps/claude-config#2で解消した。**
+  `issue-labels.yml`が無いあいだはマージしても盤面の「実行中」に残り、手で`Done`にして
+  closeしていた。現在は`main`宛PRのマージで`Done`＋closeまで自動で進む
 - **マージしただけでは実機に反映されない。** `~/.claude/CLAUDE.md`・`~/.claude/skills`は
   本体チェックアウトへのsymlinkなので、両機で`git pull`するまで効かない。取り残しは上記
   「取り残しの検知」の`check-sync.sh`が拾う
