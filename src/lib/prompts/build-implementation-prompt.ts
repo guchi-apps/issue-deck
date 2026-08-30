@@ -3,6 +3,7 @@ import {
   PREVIEW_REQUIRED_LABEL,
   SCREENSHOT_REQUIRED_LABEL,
 } from "@/lib/github/start-implementation";
+import { prPolicyInstructions } from "@/lib/prompts/pr-policy";
 import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.generated";
 
 /**
@@ -243,6 +244,13 @@ export function buildImplementationPrompt(params: {
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshotInstructions(labelNames),
     "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
+    // **ベースブランチはこの経路では決まらない**ので、他のプレースホルダと同じ但し書きを
+    // そのまま埋め込む（`{{BASE_BRANCH}}`を文面に残すと置換の順序に依存する）。
+    "{{PR_POLICY_INSTRUCTIONS}}": prPolicyInstructions({
+      repositoryFullName,
+      issueNumber,
+      baseBranch: PROVIDED_BY_SESSION,
+    }),
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": sharedContextInstructions(repositoryFullName),
   };
 
