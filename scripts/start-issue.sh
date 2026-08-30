@@ -737,6 +737,16 @@ else:
         "取り込みます（#2200）。"
     )
 
+if agent_kind == "codex":
+    artifact_instructions += (
+        "\n\nCodexで画面デザインをHTMLとして作った場合は、ローカルHTTPサーバーの"
+        "`localhost` URLを計画へ載せないでください。**次のコマンドでIssueDeckへ登録し、"
+        f"返された`https://issuedeck.gucchii.com/artifacts/<id>`形式のURLを計画へ記載してください**。"
+        f"\n\n`{scripts_dir}/lib/codex-artifact.sh <HTMLファイル>`\n\n"
+        "同じファイルパスで再実行すると既存のアーティファクトを更新できます。"
+        "登録に失敗した場合はエラー内容をIssueコメントへ残し、localhost URLだけを共有URLとして扱わないでください。"
+    )
+
 # 計画の出し方は**エージェントによって道具が違う**ので、ここで文面ごと差し替える（#2551）。
 # 読み替えを末尾の補足（scripts/prompts/codex-supplement.md）だけに置いていたときは、本文側の
 # 「フックが自動で投稿します／無ければ手で投稿します」に従ったCodexのセッションが計画を

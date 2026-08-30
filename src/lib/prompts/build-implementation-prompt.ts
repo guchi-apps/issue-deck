@@ -183,12 +183,14 @@ function artifactInstructions(labelNames: ReadonlySet<string>): string {
       "- アーティファクトは既定で非公開です。共有するかどうかを決めるのはユーザーです",
       "- 開発サーバーのURLと違い、セッションが終了した後も残ります。スマホなど別端末からの確認に向きます",
       "- アーティファクトを作れるのはローカルセッションだけです（無人実行では作成できません）",
+      "- CodexでHTMLを作った場合は、ローカルHTTPサーバーの`localhost` URLを計画へ載せず、`scripts/lib/codex-artifact.sh <HTMLファイル>`でIssueDeckへ登録し、返された`issuedeck.gucchii.com/artifacts/<id>`形式のURLを記載してください（#2597）",
     ].join("\n");
   }
   return [
     `このIssueには\`${ARTIFACT_REQUIRED_LABEL}\`ラベルが付いていないため、見た目のアーティファクトの作成は不要です。`,
     "ただし、ユーザーの求めなどで画面デザインをアーティファクトとして出す場合は、**PC（デスクトップ幅）・iPad（横向き = 幅1180px × 高さ820px）・スマホ（iPhone 15 = 幅393px × 高さ852px）の3画面を1つのアーティファクトに広い順で並べて提示してください**（#1632・#2460）。",
     "Plan modeの最中に見た目の直しを求められた場合も、計画ファイルの末尾へ`<!-- artifact: <HTMLファイルの絶対パス> -->`とHTML全文（バッククォート4つ＋`artifact`のフェンス）を置いて計画を出し直せば、issue-deckが「アーティファクト」カードへ取り込みます（#2200）。",
+    "CodexでHTMLを作った場合は、ローカルHTTPサーバーの`localhost` URLを計画へ載せず、`scripts/lib/codex-artifact.sh <HTMLファイル>`でIssueDeckへ登録し、返された`issuedeck.gucchii.com/artifacts/<id>`形式のURLを記載してください（#2597）。",
   ].join("");
 }
 

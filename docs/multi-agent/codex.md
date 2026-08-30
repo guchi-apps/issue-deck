@@ -72,6 +72,15 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
+### 画面デザインをIssueDeck配下で共有する（#2597）
+
+Codex CLIにはClaude Codeの`Artifact`ツールが無いため、画面デザインをローカルHTTPサーバーの
+`localhost` URLで公開すると、サブPC上のURLを別端末から開けない。Issue専用セッションでは
+`scripts/lib/codex-artifact.sh <HTMLファイル>`を使う。このコマンドはHTMLを既存の
+`POST /api/dispatch/sessions/artifact`へ登録し、ログインが必要な
+`https://issuedeck.gucchii.com/artifacts/<id>`を返す。計画コメントにはlocalhost URLではなく、
+返されたIssueDeck URLを記載する。
+
 **そのぶんIssueコメントに残す記録が重要になる。** 端末だけで完結させると、画面からは何も起きて
 いないように見える。この点は`scripts/prompts/codex-supplement.md`でエージェント自身にも伝えている。
 
