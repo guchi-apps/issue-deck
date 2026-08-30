@@ -469,6 +469,38 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * サブPCをホストごと再起動する（#2496）。
+   *
+   * **`requestSelfUpdate`とは別の操作。** あちらが畳むのはpollerのプロセスだけで、走っている
+   * 実装セッションは残る。こちらはOSごと落ちるため、セッションは全部消えて会話も戻らない。
+   *
+   * 送るのはホスト名だけで、失敗の理由は戻り値で返す（`requestSelfUpdate`と同じ形）。
+   */
+  const requestReboot = useCallback(
+    async (hostName: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ host: hostName, kind: "reboot" }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリングを待たずに状態を出す。**pull型で届くまで数秒〜30秒何も起きない**ため
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * 確認環境（#2444）を起こす・最新へ入れ替える・止める。
    *
    * **送るのはホスト名・リポジトリ・操作の3つだけ。** Issueに紐づく操作ではないので番号は
@@ -749,6 +781,7 @@ export function useDispatchState(enabled: boolean) {
     abortManualStep,
     controlManualStepRun,
     requestSelfUpdate,
+    requestReboot,
     requestPreview,
     cancel,
     dismiss,

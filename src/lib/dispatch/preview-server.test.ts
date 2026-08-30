@@ -33,6 +33,8 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     codeReviewCapable: true,
     selfUpdateCapable: true,
     previewCapable: true,
+    rebootCapable: null,
+    reboot: null,
     previewRepositories: ["guchi-apps/issue-deck", "guchi-apps/dayspan"],
     preview: null,
     maxSessions: 12,

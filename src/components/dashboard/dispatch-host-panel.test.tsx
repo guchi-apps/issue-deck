@@ -29,6 +29,8 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     codeReviewCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
+    rebootCapable: null,
+    reboot: null,
     previewRepositories: null,
     preview: null,
     maxSessions: 12,
@@ -466,6 +468,8 @@ describe("DispatchHostPanel", () => {
             makeHost({
               selfUpdateCapable: true,
               previewCapable: null,
+              rebootCapable: null,
+              reboot: null,
               previewRepositories: null,
               preview: null,
               checkout: {
@@ -547,6 +551,8 @@ describe("DispatchHostPanel", () => {
     const BEHIND = makeHost({
       selfUpdateCapable: true,
       previewCapable: null,
+      rebootCapable: null,
+      reboot: null,
       previewRepositories: null,
       preview: null,
       checkout: {
@@ -641,6 +647,8 @@ describe("DispatchHostPanel", () => {
             makeHost({
               selfUpdateCapable: true,
               previewCapable: null,
+              rebootCapable: null,
+              reboot: null,
               previewRepositories: null,
               preview: null,
               checkout: {
@@ -674,6 +682,8 @@ describe("DispatchHostPanel", () => {
             makeHost({
               selfUpdateCapable: true,
               previewCapable: null,
+              rebootCapable: null,
+              reboot: null,
               previewRepositories: null,
               preview: null,
               checkout: {
@@ -706,6 +716,152 @@ describe("DispatchHostPanel", () => {
       expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
     });
   });
+  describe("ホストごとの再起動（#2496）", () => {
+    /** 再起動が要る（`/var/run/reboot-required`が立っている）ホスト */
+    const NEEDS_REBOOT = makeHost({
+      rebootCapable: true,
+      liveSessions: 0,
+      reboot: {
+        required: true,
+        requiredSince: new Date(NOW.getTime() - 9 * 24 * 60 * 60 * 1000).toISOString(),
+        bootedAt: new Date(NOW.getTime() - 13 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+
+    function rebootJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+      return makeSelfUpdateJob({ id: "reboot-1", kind: "REBOOT", ...overrides });
+    }
+
+    it("確認を挟んでから、ホスト名を渡して積む", async () => {
+      const onRequestReboot = vi.fn().mockResolvedValue({ ok: true });
+      render(
+        <DispatchHostPanel
+          hosts={[NEEDS_REBOOT]}
+          sessions={[]}
+          onRequestReboot={onRequestReboot}
+        />,
+      );
+
+      // いつから落としていないか・なぜ落とすのかが行に出る
+      expect(screen.getByText("再起動 稼働 13日")).toBeTruthy();
+
+      await act(async () => {
+        screen.getByRole("button", { name: "再起動する" }).click();
+      });
+      // **押し間違えても戻せない操作なので、1回目の押下では積まない**
+      expect(onRequestReboot).not.toHaveBeenCalled();
+      expect(screen.getByText(/OSごと落とします/)).toBeTruthy();
+
+      await act(async () => {
+        screen.getByRole("button", { name: "再起動する" }).click();
+      });
+      expect(onRequestReboot).toHaveBeenCalledWith("subpc");
+    });
+
+    it("セッションが走っていれば押せず、理由をボタンの下に出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ ...NEEDS_REBOOT, liveSessions: 3 })]}
+          sessions={[]}
+          onRequestReboot={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "再起動する" }).disabled,
+      ).toBe(true);
+      expect(screen.getByText(/セッションが走っている間は押せません/)).toBeTruthy();
+    });
+
+    it("積めなかった理由をボタンの下に出す", async () => {
+      const onRequestReboot = vi
+        .fn()
+        .mockResolvedValue({ ok: false, message: "subpc の再起動は既に積まれています。" });
+      render(
+        <DispatchHostPanel
+          hosts={[NEEDS_REBOOT]}
+          sessions={[]}
+          onRequestReboot={onRequestReboot}
+        />,
+      );
+
+      await act(async () => {
+        screen.getByRole("button", { name: "再起動する" }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: "再起動する" }).click();
+      });
+      expect(screen.getByText("subpc の再起動は既に積まれています。")).toBeTruthy();
+    });
+
+    // **`REBOOT`は実行キューの一覧に出ない**（起動ジョブでも制御ジョブでもない）。
+    // ここに出さないと、pollerが返した失敗が画面のどこにも現れない（#1927と同じ罠）
+    it("pollerが返した失敗をボタンの下に出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[NEEDS_REBOOT]}
+          sessions={[]}
+          jobs={[
+            rebootJob({
+              status: "FAILED",
+              message: "セッションが2本走っています。",
+              finishedAt: NOW.toISOString(),
+            }),
+          ]}
+          onRequestReboot={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/セッションが2本走っています。/)).toBeTruthy();
+    });
+
+    it("積んだ後は押し直させず、起動を止めていることを出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[NEEDS_REBOOT]}
+          sessions={[]}
+          jobs={[rebootJob()]}
+          onRequestReboot={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "再起動する" }).disabled,
+      ).toBe(true);
+      expect(screen.getByText(/新しいセッションの起動を止めています/)).toBeTruthy();
+    });
+
+    // **落とす理由が無いときに、取り返しのつかないボタンを並べ続けない**（#52の結論とも揃う）
+    it("再起動が要らないホストにはボタンを出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[
+            makeHost({
+              ...NEEDS_REBOOT,
+              reboot: { required: false, requiredSince: null, bootedAt: NOW.toISOString() },
+            }),
+          ]}
+          sessions={[]}
+          onRequestReboot={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "再起動する" })).toBeNull();
+    });
+
+    it("対応していないpollerにはボタンを出さない", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ ...NEEDS_REBOOT, rebootCapable: null })]}
+          sessions={[]}
+          onRequestReboot={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: "再起動する" })).toBeNull();
+    });
+  });
+
   describe("メモリ・SWAPの逼迫による起動の見送り（#2095）", () => {
     const HOLD = { reason: "MEMORY", percent: 92.3, thresholdPercent: 85 } as const;
 

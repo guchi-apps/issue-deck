@@ -17,6 +17,7 @@ import {
   enqueueManualStepJob,
   enqueuePlanReviewJob,
   enqueuePreviewJob,
+  enqueueRebootJob,
   enqueueSessionControlJob,
   enqueueSelfUpdateJob,
   listDispatchState,
@@ -119,6 +120,20 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json({ job: result.job }, { status: 201 });
+  }
+
+  // ホストの再起動（#2496）。**Issueもリポジトリも持たない**ので`SELF_UPDATE`の隣に置く。
+  // 積めない理由（セッションが走っている・pollerが対応していない）は画面と同じ関数で判定し、
+  // 本文で返す（`resolveRebootRejection`）。**押せる前提にはしない**——画面の申告は最大30秒古い
+  if (kind === "REBOOT") {
+    const rebootResult = await enqueueRebootJob({ hostName, requestedByUserId: userId });
+    if (!rebootResult.ok) {
+      return NextResponse.json(
+        { error: rebootResult.rejection, message: rebootResult.message },
+        { status: rebootResult.rejection === "already_queued" ? 409 : 400 },
+      );
+    }
+    return NextResponse.json({ job: rebootResult.job }, { status: 201 });
   }
 
   // 確認環境（#2444）。**リポジトリは要るがIssueは持たない**ため、`target`の必須チェックより
