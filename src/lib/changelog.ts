@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.61.0",
+    date: "2026-08-30",
+    changes: [
+      "Issue一覧・Issue詳細画面に、そのIssueを実装中（または実装した）ローカルエージェントが「Claude」か「Codex」かを示すバッジが表示されるようになりました。また、Codexのローカルセッションからの確認質問も、これまでのClaude Codeと同じように画面から回答できるようになりました。",
+    ],
+    usage: [
+      "1. Issue一覧またはIssue詳細画面を開く",
+      "2. ローカルでClaude CodeまたはCodexのセッションが動いているIssueには、状態バッジの隣に緑色の「Codex」または橙色の「Claude」バッジが表示される",
+      "3. Codexのローカルセッションが確認を求めている場合、Issue詳細に選択肢と「その他」の入力欄を持つ質問パネルが表示されるので、回答を選ぶ（または入力する）",
+      "4. 回答を送信すると、待機していたCodexセッング側に回答が渡り作業が再開される。これが成功の目印になる",
+    ],
+  },
+  {
     version: "4.60.0",
     date: "2026-08-30",
     changes: [
