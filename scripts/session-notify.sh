@@ -24,7 +24,8 @@
 #                                               （＋`00.check-user`を解く。#1417）
 #   PostToolUse(Artifact)           アーティファクトの公開 → HTMLの原本をissue-deckへ送る（#2154）。
 #                                               上の間引きより前で扱う
-#   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
+#   SessionStart                    セッション開始 → 「まだ開始していない」印を消し、Codexなら
+#                                               `codex queue`の宛先（session_id）を残す（#2519）。
 #                                               **issue-deckへも送らない**
 #
 # **Codex CLIのフックからも同じスクリプトが呼ばれる**（#2509）。入力のフィールド名
@@ -192,10 +193,32 @@ if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_clear_starting >/
   session_state_clear_starting "$NOTIFY_TMUX_SESSION" || true
 fi
 
+# Codexのセッションの宛先（スレッドUUID）を残す（#2519）。
+#
+# `codex queue --thread <UUID> --message '<本文>'`は**TUIのキー入力を経由せずに**次のターンの
+# 頭へ本文を差し込める（#2510で実機確認）。宛先に使えるのはUUIDか完全一致のセッション名だけで、
+# **名前を決めるのはCodex側**（モデルが自動で付け直す）ため、残せるのはUUIDだけになる。
+# それが手に入る唯一の場所が、この`SessionStart`フックのJSONの`session_id`。
+#
+# **Claude Codeのセッションでは何もしない。** 判定材料はランチャーが記述子へ書いた`agent`だけで、
+# 転記のパスやJSONの形からエージェントを推定はしない（`session_state_agent_kind`）。
+#
+# **`jq`も`python3`も起こさない。** ここは全セッションの開始時に必ず通る場所で、下の分岐が
+# 「印を消して終わり」に留めているのと同じ理由（プロセスを1つ増やすだけの価値が無い）。
+record_codex_thread() {
+  [[ -n "$NOTIFY_TMUX_SESSION" ]] || return 0
+  declare -F session_state_agent_kind >/dev/null 2>&1 || return 0
+  [[ "$(session_state_agent_kind "$NOTIFY_TMUX_SESSION")" == "codex" ]] || return 0
+  [[ "$HOOK_JSON" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([0-9a-fA-F-]{36})\" ]] || return 0
+  session_state_write_codex_thread "$NOTIFY_TMUX_SESSION" "${BASH_REMATCH[1]}" || true
+  return 0
+}
+
 # セッションが始まった（#1465）。**印を消す以外にやることは無いので、ここで打ち切る。**
 # 開始したこと自体は人にとって新しい情報ではない（画面には既に起動の受付コメントが出ている）
 # ため、issue-deckへも送らない（python3もHTTPも起こさない）。
 if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"SessionStart\" ]]; then
+  record_codex_thread
   exit 0
 fi
 

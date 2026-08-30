@@ -617,9 +617,12 @@ REPO_SLUG="$(current_repo_slug)"
 # 直接起動したセッションには渡らない。issue-deck側にジョブとして残らないセッションを
 # 巻き込まないための線引きで、判定材料ではなく**起動経路そのもの**で切る。
 if [[ -n "$TMUX_SESSION_NAME" ]]; then
-  # 第6引数はセッションの種別（#1454）。横断質問セッションは`question`で、回収の条件が変わる
+  # 第6引数はセッションの種別（#1454）。横断質問セッションは`question`で、回収の条件が変わる。
+  # 第7引数はエージェントCLIの種別（#2519）。**追加指示の送り方がここで決まる**——pollerは
+  # この値を見て、Codexのセッションには`send-keys`ではなく`codex queue`を使う
   if ! session_state_write_descriptor "$TMUX_SESSION_NAME" "$PWD" "$REPO_SLUG" "$ISSUE_NUMBER" \
-    "${ISSUE_DECK_SESSION_REAPABLE:-0}" "${ISSUE_DECK_SESSION_KIND:-implementation}"; then
+    "${ISSUE_DECK_SESSION_REAPABLE:-0}" "${ISSUE_DECK_SESSION_KIND:-implementation}" \
+    "$AGENT_KIND"; then
     echo "#$ISSUE_NUMBER: 情報: セッションの状態ファイルを書けなかったため、このセッションは自動回収の対象になりません（$(session_state_dir)）。" >&2
   fi
 fi

@@ -66,7 +66,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | **×**（同名のツールが無い） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
-| 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | **△**（`codex queue`で送れる。未実装。#2510） |
+| 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
 | Remote Control | ○ | **△**（デーモンは起動できる。ただし取れるのはURLではなく短命のペアリングコード。未実装。#2521） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | **△**（`codex resume <session_id>`で作れる。未実装。#2510） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
@@ -86,14 +86,16 @@ npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かな�
 
 | 確かめたこと | 結果 |
 |---|---|
-| `codex queue`で走っているセッションへ差し込めるか | **○**。デーモン不要。`send-keys`も要らない |
+| `codex queue`で走っているセッションへ差し込めるか | **○**。デーモン不要。`send-keys`も要らない（#2519で実装） |
 | 差し込んだメッセージの届き方 | **次のターンの頭**。走っているターンは中断しない |
 | `codex agents`でセッションを一覧できるか | **○**（#2521でstandalone installへ入れ替えた） |
 | `codex remote-control start` / `pair` | **○**（同上）。ただし取れるのは短命のペアリングコード |
 | セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
-**どれもまだ実装していない**（この節は可否の記録）。
+**このうち実装したのは「追加指示を送る」だけ**（#2519。下の「追加指示は`codex queue`で送る」）。
+`resume`とRemote Controlはまだ可否の記録のまま（Remote Controlは#2521でデーモンが動くように
+なったが、画面へ出す設計から要る）。
 
 ### `codex queue`は使える。しかも`send-keys`が要らない
 
@@ -243,6 +245,54 @@ $ codex remote-control pair --json
 Codex側にも作れる。`--last`はホスト全体で最後のセッションを指すため、worktreeを並べる運用では
 使えない——**UUIDを覚えておくことが前提**になる。
 
+## 追加指示は`codex queue`で送る（#2519）
+
+画面の「追加指示を送る」（#1012）は、Codexのセッションでも押せる。**送り方だけが違う。**
+
+| | Claude Code | Codex |
+|---|---|---|
+| 送り方 | `tmux send-keys`の3段階プロトコル | `codex queue --thread <UUID> --message '<本文>'` |
+| 宛先 | tmuxのセッション名 | セッションUUID（`SessionStart`フックの`session_id`） |
+| 送らない条件 | 承認プロンプト・選択フォームの表示中／処理中／入力欄に打ちかけ | **宛先がまだ分からないとき**だけ |
+| 届き方 | 入力欄へ入って即座に確定 | 次のターンの頭（走っているターンは止まらない） |
+
+**`send-keys`へ寄せていない。** [gates.md](gates.md)が`send-keys`そのものを禁じて追加指示だけを
+例外として開けているのは、TUIのキー入力に本文を流し込むことの危うさ（選択フォームの表示中に
+送ると勝手に回答済みになる）が理由で、`codex queue`はそこを通らない。**Codexでは例外を
+開けずに同じ機能が成り立つ。**
+
+### 宛先はIssueごとの状態ファイルに残す
+
+`codex queue --thread`が取るのはUUIDか完全一致のセッション名だけで、**名前はCodexが自動で
+付け直す**ため当てにできない（#2510）。残せるのはUUIDで、それが手に入るのは`SessionStart`
+フックのJSONの`session_id`だけ。
+
+1. `run-issue-session.sh`が起動時、記述子（`<セッション名>.session`）へ`agent=codex`を書く
+2. `session-notify.sh`が`SessionStart`で記述子を読み、Codexなら`session_id`を
+   `<セッション名>.codex-thread`へ書く（**Claude Codeのセッションでは何もしない**）
+3. pollerは追加指示のジョブを受けたとき、記述子の`agent`で送り方を選ぶ
+   （`deliver_session_instruction` → `deliver_codex_instruction`）
+
+**判定材料は記述子の`agent`だけ**で、転記のパスやJSONの形からエージェントを推定はしない。
+読めない・知らない語のときは`claude`へ倒す——`codex`へ倒すと、Claude Codeのセッションに対して
+宛先の無い`codex queue`を打つことになる。セッションを畳むと宛先も消える
+（`session_state_remove`）。残すと、次に同じ名前で立ったセッションへ前回の宛先で送ってしまう。
+
+### 信頼確認に答えるまでは送れないことを画面に出す
+
+**ディレクトリの信頼確認に答えるまでフックは1つも飛ばない**（下の「信頼（trust）は2種類あり」）。
+その間UUIDが手に入らないので追加指示も送れない。押せてしまうと、pollerが見送るまで（最大1分）
+何が起きたのか分からないため、**押す前に断る**。
+
+- pollerがセッションの報告に`codexThreadKnown`を載せる。**3値**で、`null`＝Codexのセッション
+  ではない（Claude Code）／`false`＝Codexだが宛先がまだ無い／`true`＝送れる
+- issue-deckは`DispatchSession.codexThreadKnown`へ写し、`false`のあいだは
+  `resolveSessionControlRejection`が`codex_thread_unknown`で断る（画面のボタンは無効になり、
+  理由が下に出る）。**停止・終了には効かない**——どちらもtmux側の操作で宛先が要らない
+- **項目そのものを送ってこない古いpollerでは`null`のまま**＝従来どおり送れる扱いになる
+  （`claudeStarting`・`reapAt`と同じ向き）。そのpollerはCodexを選ぶ経路（`codexCapable`）も
+  申告していないので、画面からCodexで起こすことはできない
+
 ## フック（#2509）
 
 **Codexにもフックがある。** #2377の時点では「無い」としていたが、実機（codex-cli 0.151.0）では
@@ -383,10 +433,12 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
 | `--agent`の受け取り・存在チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
-| ジョブの`agent`の読み取り・`codex`の申告 | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
+| 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |
 | 語の検証・表示名・選べるかの判定 | [`src/lib/dispatch/dispatch-job.ts`](../../src/lib/dispatch/dispatch-job.ts) |
 | 選択欄と注意の表示 | [`src/components/dashboard/start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx) |
-| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs) |
+| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs)・[`scripts/codex-queue.test.mjs`](../../scripts/codex-queue.test.mjs) |
 
 ## まだやっていないこと
 
@@ -404,9 +456,9 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）
-- **「追加指示を送る」と「前回の会話の引き継ぎ」は可否を確かめただけ**（#2510）。`codex queue`と
-  `codex resume <session_id>`で作れることは実機で確認したが、宛先にするセッションUUIDを
-  Issue番号と結び付けて残す実装（`scripts/session-notify.sh`・pollerの受け口）はまだ無い
+- **「前回の会話の引き継ぎ」は可否を確かめただけ**（#2510）。`codex resume <session_id>`で
+  作れることは実機で確認したが、`ISSUE_DECK_CLAUDE_RESUME`（`--continue`）に当たる実装はまだ無い
+  （宛先のセッションUUIDは#2519で残すようになったので、材料は揃っている）
 - **Remote Controlは画面へ出せていない**（#2521）。standalone installへの入れ替えは済み、
   `codex remote-control start` / `pair`・`codex agents`は動くようになったが、取れるのはURLでは
   なく10分で切れるペアリングコードなので、`scripts/session-notify.sh`のURL拾い（#1219）を

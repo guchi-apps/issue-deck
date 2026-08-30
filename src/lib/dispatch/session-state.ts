@@ -207,6 +207,16 @@ export type DispatchSessionReport = {
   reapAt?: string | null;
   /** 畳む理由（#1817）。`reapAt`と対で扱う */
   reapReason?: DispatchSessionReapReason | null;
+  /**
+   * Codexのセッションで、`codex queue`の宛先（スレッドUUID）が分かっているか（#2519）。
+   *
+   * **3値ある。** `null`＝Codexのセッションではない（Claude Code）。`false`＝Codexだが、
+   * ディレクトリの信頼確認に答えるまでフックが飛ばず宛先が取れていない。`true`＝送れる。
+   *
+   * `claudeStarting`・`reapAt`と同じく、**`undefined`（項目そのものが無い）と`null`は別物**。
+   * 無いのは古いpollerで、そのホストについては何も判断できないため既存の値を触らない。
+   */
+  codexThreadKnown?: boolean | null;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -245,6 +255,13 @@ export type DispatchSessionView = {
    */
   reapAt: string | null;
   reapReason: DispatchSessionReapReason | null;
+  /**
+   * Codexのセッションで、追加指示の宛先（スレッドUUID）が分かっているか（#2519）。
+   * `null`はClaude Codeのセッション（または申告しない古いpoller）で、従来どおり送れる。
+   *
+   * **`false`のあいだは追加指示を送れない**（`resolveSessionControlRejection`が断る）。
+   */
+  codexThreadKnown: boolean | null;
 };
 
 /**
@@ -464,6 +481,14 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
   const reap =
     reapAt === null || reapReason === null ? { reapAt: null, reapReason: null } : { reapAt, reapReason };
 
+  // Codexのセッションの宛先（#2519）。**`null`（Codexではない）と`undefined`（古いpoller）を
+  // 分ける**。boolean・nullのどちらでもない値は、項目ごと無かったことにする（報告全体は通す）
+  const rawCodexThread = input.codexThreadKnown;
+  let codexThreadKnown: boolean | null | undefined;
+  if (rawCodexThread === null || typeof rawCodexThread === "boolean") {
+    codexThreadKnown = rawCodexThread;
+  }
+
   return {
     tmuxSessionName,
     repositoryFullName,
@@ -473,5 +498,6 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     ...(claudeStarting === undefined ? {} : { claudeStarting }),
     // 古いpollerは送ってこない。`undefined`のまま残すと既存の値を触らない
     ...(hasReapField ? reap : {}),
+    ...(codexThreadKnown === undefined ? {} : { codexThreadKnown }),
   };
 }

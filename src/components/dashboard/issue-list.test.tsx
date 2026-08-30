@@ -431,6 +431,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     firstSeenAt: "2026-08-18T00:00:00Z",
     lastReportedAt: "2026-08-18T00:00:00Z",
     ...overrides,

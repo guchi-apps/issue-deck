@@ -338,6 +338,27 @@ describe("reportDispatchSessions", () => {
       });
     });
 
+    it("Codexのセッションの宛先を、送ってきた巡の値で置き換える（#2519）", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ codexThreadKnown: false })],
+        now: NOW,
+      });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({ codexThreadKnown: false });
+    });
+
+    // 古いpollerはこの項目を送ってこない。**キーごと渡さない**ので既存の値が消えない
+    it("宛先を申告しない古いpollerでは、その列を書き換えない（#2519）", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+      expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("codexThreadKnown");
+    });
+
     it("項目を送ってこない古いpollerでは既存の値を触らない", async () => {
       findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
 
