@@ -412,9 +412,42 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 - **ネットワークは明示的に開ける。** Codexのサンドボックスは既定でネットワークを塞ぐため、
   開けないと`gh issue comment`・`git push`・`pnpm install`が軒並み失敗する。実装セッションは
   Issueへの報告とPR作成が仕事なので、塞いだままでは成立しない
-- **`--add-dir`は渡さない。** Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
+- **`--add-dir`で渡すのはgitの管理領域だけ**（#2529。下の「gitの管理領域だけは開ける」）。
+  それ以外には渡さない。Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
   読むだけならサンドボックスの外でもできる。共有知識リポジトリ（`~/apps/_docs`）は読み取り専用と
   して扱う決まり（[CLAUDE.md](../../CLAUDE.md)）なので、渡すと機械的に破れるようになるだけ
+
+### gitの管理領域だけは開ける（#2529）
+
+**worktreeだけを書けるようにすると、コミットできない。** git worktreeの`.git`は
+`gitdir: <本体>/.git/worktrees/<名前>`と書かれた**ただのファイル**で、インデックスもHEADもログも
+本体側にある。オブジェクトと`refs/heads/*`・`packed-refs`・`FETCH_HEAD`はさらに上の本体の`.git`
+にあるため、`workspace-write`のままでは`git add`が次のエラーで落ちる。
+
+```
+fatal: Unable to create '/home/guchi/apps/issue-deck/.git/worktrees/issue-2511/index.lock': Read-only file system
+```
+
+実例が#2511で、実装も検証（Lint・型チェック・テスト5,255件・ビルド）も終えたあと、
+**コミットの直前でセッションが止まった**。
+
+そこで`agent_cli_build_codex_args`が、`git rev-parse --git-common-dir`と`--absolute-git-dir`の
+うち**ワークスペースの外にあるもの**を`--add-dir`で渡す（`scripts/lib/agent-cli.sh`の
+`agent_cli_codex_writable_dirs`）。linked worktreeの管理領域は本体の`.git`の下にあるので、
+実際に渡るのは**本体の`.git`1つだけ**。**ふつうのクローン（`.git`がワークスペースの中）では
+1つも渡さない**——閉じ込めを緩める理由が無い。足すのは`workspace-write`のときだけで、
+`read-only`と`danger-full-access`には足さない。
+
+起動時の1行で確かめられる（`workdir`のほかに本体の`.git`が並ぶ）。
+
+```
+sandbox: workspace-write [workdir, /tmp, $TMPDIR, /home/guchi/apps/issue-deck/.git] (network access enabled)
+```
+
+**緩むのは`.git`の中だけ。** 他Issueのworktreeの管理領域と他ブランチのrefへは書けるようになるが、
+**本体チェックアウトと他Issueのworktreeの作業ファイル**は従来どおり読み取り専用で、下の逃げ道
+（`danger-full-access`）とは別物。gitはオブジェクトもrefも本体側へ書くため、これより狭くして
+コミットとpushを通す方法は無い。
 
 ### サンドボックスを組み立てられないホスト（#2526）
 
@@ -466,7 +499,7 @@ ISSUE_DECK_CODEX_SANDBOX=danger-full-access scripts/start-issue.sh --agent codex
 ```
 
 **これは既定にしない。** `--ask-for-approval never`で走らせている前提の裏付けが「書き込みが
-worktree（cwd）に閉じている」ことで、`danger-full-access`はその層だけを外す。残るのは後段の防御
+worktree（cwd）と本体の`.git`に閉じている」ことで、`danger-full-access`はその層だけを外す。残るのは後段の防御
 （Pull Request必須・レビュー・自動マージ不可カテゴリ）で、**他のIssueのworktreeや本体
 チェックアウトへ手が届く状態**になる。急ぐときに自分で1回ずつ付けるものとして扱い、
 恒久対処は`guchi-apps/subpc#77`（ホスト側でuserns制限を緩める）を待つ。
@@ -489,7 +522,7 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 - 計画は`ExitPlanMode`ではなく`gh issue comment`＋`00.check-user`／`01.check-plan`の自分での付与
 - 確認は`AskUserQuestion`ではなく端末＋Issueコメント（**ラベルを外すのも自分**）
 - `Read`・`Grep`・`Glob`はシェルで代替する
-- 承認プロンプトは出ない・書き込みはworktreeに閉じている
+- 承認プロンプトは出ない・書き込みはworktreeと本体の`.git`に閉じている（`git`はそのまま使える）
 
 **読み替えが見つからない場合、Codexでの起動は失敗する**（`start-issue.sh`）。Claude Code前提の
 記述だけが残ったプロンプトを渡すと、存在しない手順を待って止まるため。

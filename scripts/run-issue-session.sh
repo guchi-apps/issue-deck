@@ -910,7 +910,9 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   AGENT_LAUNCH_ARGS=(--permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"})
   echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 else
-  agent_cli_build_codex_args "$CODEX_RESUME_THREAD"
+  # 第2引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**
+  # （gitの管理領域を`--add-dir`で開ける判定に使うので、暗黙の`$PWD`に頼らない。#2529）。
+  agent_cli_build_codex_args "$CODEX_RESUME_THREAD" "$PWD"
   # フックの`-c`（#2509）はサンドボックスの設定より後ろに置く。**同じ`-c`でもキーが違うので
   # 順序は挙動に影響しない**が、起動ログに出す引数は素の分だけにして読めるようにしておく。
   AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"} ${CODEX_HOOK_ARGS[@]+"${CODEX_HOOK_ARGS[@]}"})

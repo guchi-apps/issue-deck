@@ -43,15 +43,21 @@ function resolve(raw) {
   return { kind: kind ?? "", command: command ?? "", displayName: displayName ?? "", status };
 }
 
-/** Codexの起動引数を組み立てて、1引数1行で返す */
-function codexArgs(env = {}, resumeThread = "") {
+/**
+ * Codexの起動引数を組み立てて、1引数1行で返す。
+ *
+ * **`workspace`の既定はgitリポジトリでないディレクトリ**。`--add-dir`（#2529）は
+ * ワークスペースの外にgitの管理領域があるときだけ付くため、ここを省くと**このテスト自身を
+ * 走らせているworktree**の本体`.git`が混ざり、実行場所で結果が変わる。
+ */
+function codexArgs(env = {}, resumeThread = "", workspace = os.tmpdir()) {
   const exports = Object.entries(env)
     .map(([key, value]) => `export ${key}=${JSON.stringify(value)}`)
     .join("\n");
   const { stdout } = run(
     [
       exports,
-      `agent_cli_build_codex_args ${JSON.stringify(resumeThread)}`,
+      `agent_cli_build_codex_args ${JSON.stringify(resumeThread)} ${JSON.stringify(workspace)}`,
       `printf '%s\\n' "\${AGENT_CLI_ARGS[@]}"`,
     ].join("\n"),
   );
@@ -120,6 +126,133 @@ describe("agent_cli_build_codex_args", () => {
       "--sandbox",
       "workspace-write",
     ]);
+  });
+});
+
+// `agent_cli_codex_writable_dirs`（#2529）。
+//
+// ここで一番効くのは「**開けすぎないこと**」。`--add-dir`はサンドボックスの閉じ込めを緩める
+// フラグで、`--ask-for-approval never`で走らせている前提の裏付けそのものを削る。逆に足りないと
+// git worktreeでは`git add`が`index.lock: Read-only file system`で落ち、実装が終わっていても
+// コミットできない（#2511で実際に止まった）。**ふつうのクローンでは1つも足さない**ことと、
+// **worktreeでは本体の`.git`だけを足す**ことの両方を固定する。
+describe("agent_cli_codex_writable_dirs", () => {
+  const tmpDirs = [];
+
+  function git(cwd, ...args) {
+    execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", ...args], {
+      cwd,
+      stdio: "ignore",
+    });
+  }
+
+  /** 本体のクローンと、そこから生やしたlinked worktreeを作る */
+  function makeRepoWithWorktree() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-git-"));
+    tmpDirs.push(root);
+    const main = path.join(root, "main");
+    const worktree = path.join(root, "wt");
+    fs.mkdirSync(main, { recursive: true });
+    git(main, "init", "--initial-branch=develop", ".");
+    fs.writeFileSync(path.join(main, "README.md"), "x\n");
+    git(main, "add", "README.md");
+    git(main, "commit", "-m", "初期化");
+    git(main, "worktree", "add", "-b", "issue-1", worktree);
+    return { main, worktree };
+  }
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function writableDirs(workspace) {
+    const { stdout } = run(`agent_cli_codex_writable_dirs ${JSON.stringify(workspace)}`);
+    return stdout.split("\n").filter((line) => line !== "");
+  }
+
+  it("ふつうのクローンでは何も出さない（`.git`がワークスペースの中にあるため）", () => {
+    expect(writableDirs(makeRepoWithWorktree().main)).toEqual([]);
+  });
+
+  // linked worktreeの管理領域（`…/.git/worktrees/<名前>`）は本体の`.git`の下にあるので重ねない。
+  it("worktreeでは本体の`.git`だけを出す", () => {
+    const { main, worktree } = makeRepoWithWorktree();
+    expect(writableDirs(worktree)).toEqual([fs.realpathSync(path.join(main, ".git"))]);
+  });
+
+  it("gitリポジトリでないディレクトリでは何も出さない", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-plain-"));
+    tmpDirs.push(dir);
+    expect(writableDirs(dir)).toEqual([]);
+  });
+
+  // 起動直前に呼ばれるので、ここで非0を返すと`set -euo pipefail`の呼び出し元ごと止まる。
+  it("存在しないディレクトリを渡しても何も出さない", () => {
+    expect(writableDirs(path.join(os.tmpdir(), "agent-cli-no-such-dir"))).toEqual([]);
+  });
+});
+
+describe("agent_cli_build_codex_args の --add-dir", () => {
+  const tmpDirs = [];
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function makeWorktree() {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-args-"));
+    tmpDirs.push(root);
+    const main = path.join(root, "main");
+    const worktree = path.join(root, "wt");
+    fs.mkdirSync(main, { recursive: true });
+    const git = (...args) =>
+      execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", ...args], {
+        cwd: main,
+        stdio: "ignore",
+      });
+    git("init", "--initial-branch=develop", ".");
+    fs.writeFileSync(path.join(main, "README.md"), "x\n");
+    git("add", "README.md");
+    git("commit", "-m", "初期化");
+    git("worktree", "add", "-b", "issue-1", worktree);
+    return { gitDir: fs.realpathSync(path.join(main, ".git")), worktree };
+  }
+
+  it("workspace-writeのworktreeでは本体の`.git`を開ける", () => {
+    const { gitDir, worktree } = makeWorktree();
+    expect(codexArgs({}, "", worktree)).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never",
+      "-c",
+      "sandbox_workspace_write.network_access=true",
+      "--add-dir",
+      gitDir,
+    ]);
+  });
+
+  // `read-only`は書けないのが目的、`danger-full-access`は元から全部書ける。どちらも足す意味がない。
+  it("workspace-write以外では付けない", () => {
+    const { worktree } = makeWorktree();
+    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "read-only" }, "", worktree)).toEqual([
+      "--sandbox",
+      "read-only",
+      "--ask-for-approval",
+      "never",
+    ]);
+    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }, "", worktree)).not.toContain("--add-dir");
+  });
+
+  it("モデル指定と逃げ道の追加引数は`--add-dir`より後ろに並ぶ", () => {
+    const { worktree } = makeWorktree();
+    const args = codexArgs({ ISSUE_DECK_CODEX_MODEL: "gpt-5-codex", ISSUE_DECK_CODEX_EXTRA_ARGS: "--search" }, "", worktree);
+    expect(args.slice(-3)).toEqual(["-m", "gpt-5-codex", "--search"]);
+    expect(args.indexOf("--add-dir")).toBeLessThan(args.indexOf("-m"));
   });
 });
 

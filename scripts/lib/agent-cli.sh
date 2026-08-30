@@ -71,6 +71,73 @@ agent_cli_codex_sandbox_mode() {
   printf '%s' "${ISSUE_DECK_CODEX_SANDBOX:-workspace-write}"
 }
 
+# `child`が`parent`と同じか、その下にあれば0を返す。文字列だけで判定する（両方とも呼び出し側が
+# 絶対パスに解決してから渡す）。
+agent_cli_path_contains() {
+  local parent="${1%/}" child="${2%/}"
+  [[ -n "$parent" && -n "$child" ]] || return 1
+  [[ "$child" == "$parent" || "$child" == "$parent"/* ]]
+}
+
+# Codexへ`--add-dir`で渡す、**ワークスペースの外にある書き込み先**を1行ずつ出力する（#2529）。
+#
+# ## なぜ要るか
+#
+# git worktreeでは、作業ツリーの`.git`は`gitdir: <本体>/.git/worktrees/<名前>`と書かれた
+# **ただのファイル**で、インデックスもHEADもログも本体側のそのディレクトリにある。`workspace-write`の
+# サンドボックスが書けるのはcwd（＝worktree）だけなので、**`git add`が
+# `index.lock: Read-only file system`で落ちる**。実際に#2511のCodexセッションが、実装と検証を
+# 終えたあとコミットの直前で止まった。
+#
+# 出すのは次の2つのうち、ワークスペースの外にあるもの。
+#
+#   `--git-common-dir`   本体の`.git`。オブジェクト・`refs/heads/*`・`packed-refs`・`FETCH_HEAD`が
+#                        ここにあり、コミットとpushの両方が書く
+#   `--absolute-git-dir` このworktreeの管理領域（`…/.git/worktrees/<名前>`）。indexとHEADがある
+#
+# 通常は後者が前者の下にあるため、**出力は本体の`.git`1つだけ**になる。ふつうのクローン
+# （`.git`がワークスペースの中）では**何も出さない**——閉じ込めを緩める理由が無い。
+#
+# ## 閉じ込めがどこまで緩むか
+#
+# 本体の`.git`を開けると、他Issueのworktreeの管理領域と他ブランチのrefへも書けるようになる。
+# ただし`.git`の外——**本体チェックアウトと他Issueのworktreeの作業ファイル**——は従来どおり
+# 読み取り専用のままで、`danger-full-access`（逃げ道。docs/multi-agent/codex.md）とは違う。
+# gitはオブジェクトもrefも本体側へ書くため、これより狭くしてコミットとpushを通す方法は無い。
+agent_cli_codex_writable_dirs() {
+  local workspace="${1:-$PWD}"
+  local common_dir git_dir dir chosen
+  local -a picked=()
+
+  command -v git >/dev/null 2>&1 || return 0
+  [[ -n "$workspace" && -d "$workspace" ]] || return 0
+
+  # gitリポジトリでなければどちらも空になる（`|| true`で`set -e`の下でも止めない）。
+  common_dir="$(git -C "$workspace" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  git_dir="$(git -C "$workspace" rev-parse --absolute-git-dir 2>/dev/null || true)"
+
+  # 共通の`.git`を先に見る。linked worktreeの管理領域はその下にあるので、先に採れば2つ目は落ちる。
+  for dir in "$common_dir" "$git_dir"; do
+    [[ -n "$dir" && -d "$dir" ]] || continue
+    if agent_cli_path_contains "$workspace" "$dir"; then
+      continue
+    fi
+    local covered=0
+    for chosen in ${picked[@]+"${picked[@]}"}; do
+      if agent_cli_path_contains "$chosen" "$dir"; then
+        covered=1
+        break
+      fi
+    done
+    [[ "$covered" == "0" ]] || continue
+    picked+=("$dir")
+  done
+
+  for dir in ${picked[@]+"${picked[@]}"}; do
+    printf '%s\n' "$dir"
+  done
+}
+
 # Codexの起動引数を`AGENT_CLI_ARGS`配列へ組み立てる（プロンプト本文は含めない。呼び出し側が
 # 最後の位置引数として渡す）。第1引数にセッションUUIDがあれば、先頭へ
 # `resume <UUID>`を付ける（#2520）。フラグ名は`codex --help`と`codex resume --help`
@@ -92,14 +159,20 @@ agent_cli_codex_sandbox_mode() {
 # ネットワークを塞ぐため、開けないと`gh issue comment`・`git push`・`pnpm install`が軒並み失敗する。
 # 実装セッションはIssueへの報告とPR作成が仕事なので、塞いだままでは成立しない。
 #
-# **`--add-dir`は付けない。** Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
+# **`--add-dir`を渡すのはgitの管理領域だけ**（#2529。下の`agent_cli_codex_writable_dirs`）。
+# それ以外には渡さない。Codexの`--add-dir`は「書き込み可能なディレクトリを増やす」もので、
 # 読み取りはサンドボックスの外でも可能。共有知識リポジトリ（`~/apps/_docs`）は**読み取り専用**として
 # 扱う決まり（CLAUDE.md）なので、渡すとその決まりを機械的に破れるようになってしまう。
+#
+# 第1引数は再開するスレッド（空なら新規。#2510）、第2引数はワークスペースの根（既定は`$PWD`）。
+# 第2引数は`--add-dir`の判定にだけ使う。
 agent_cli_build_codex_args() {
   local resume_thread="${1:-}"
+  local workspace="${2:-$PWD}"
   local sandbox
   sandbox="$(agent_cli_codex_sandbox_mode)"
   local model="${ISSUE_DECK_CODEX_MODEL:-}"
+  local writable_dir
 
   AGENT_CLI_ARGS=()
   if [[ -n "$resume_thread" ]]; then
@@ -109,6 +182,12 @@ agent_cli_build_codex_args() {
 
   if [[ "$sandbox" == "workspace-write" ]]; then
     AGENT_CLI_ARGS+=(-c sandbox_workspace_write.network_access=true)
+    # `workspace-write`のときだけ足す。`read-only`は書けないのが目的で、
+    # `danger-full-access`は元から全部書けるので、どちらも足す意味がない。
+    while IFS= read -r writable_dir; do
+      [[ -n "$writable_dir" ]] || continue
+      AGENT_CLI_ARGS+=(--add-dir "$writable_dir")
+    done < <(agent_cli_codex_writable_dirs "$workspace")
   fi
 
   if [[ -n "$model" ]]; then
