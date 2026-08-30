@@ -94,6 +94,29 @@ function sharedContextInstructions(repositoryFullName: string): string {
   ].join("\n");
 }
 
+/**
+ * 計画の出し方（#2551・#2590）。この経路（画面からのコピー）は常にClaude Codeの
+ * セッションへ貼る前提なので、`scripts/generic-start-issue.sh`・`scripts/start-issue.sh`の
+ * `agent_kind == "codex"`ではない側（既定のPlan mode前提）の文面をそのまま使う。
+ */
+const PLAN_INSTRUCTIONS = [
+  "ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・",
+  "懸念点をまとめて提示し、承認を得てから実装に入ってください",
+  "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。",
+  "含まれない場合はそのまま実装に進んでよいです。",
+].join("");
+
+function planCommentNote(repositoryFullName: string, issueNumber: number): string {
+  return [
+    "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容",
+    "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、",
+    "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。",
+    "その場合は同じ計画を手で投稿し直さないでください。",
+    `\`gh issue view ${issueNumber} --repo ${repositoryFullName} --comments\`で`,
+    "投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します",
+  ].join("");
+}
+
 function previewInstructions(labelNames: ReadonlySet<string>): string {
   if (labelNames.has(PREVIEW_REQUIRED_LABEL)) {
     return [
@@ -244,6 +267,8 @@ export function buildImplementationPrompt(params: {
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshotInstructions(labelNames),
     "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
+    "{{PLAN_INSTRUCTIONS}}": PLAN_INSTRUCTIONS,
+    "{{PLAN_COMMENT_NOTE}}": planCommentNote(repositoryFullName, issueNumber),
     // **ベースブランチはこの経路では決まらない**ので、他のプレースホルダと同じ但し書きを
     // そのまま埋め込む（`{{BASE_BRANCH}}`を文面に残すと置換の順序に依存する）。
     "{{PR_POLICY_INSTRUCTIONS}}": prPolicyInstructions({

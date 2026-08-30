@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.62.0",
+    date: "2026-08-30",
+    changes: [
+      "issue-deck以外のリポジトリのIssueを実装するとき、実装エージェントとして「Codex」を選んでも正しく起動しなかった不具合を修正しました。あわせて、終了したセッションを復旧するときに、元のセッションで使っていたエージェント（Claude Code / Codex）がそのまま引き継がれるようになりました。",
+    ],
+    usage: [
+      "1. Issue詳細画面で「実装を開始」を押す（issue-deck以外のリポジトリのIssueでも操作可能）",
+      "2. 実行先で「サブPC」を選び、Codexに対応しているホストであればエージェントの選択欄が表示されるので「Codex」を選ぶ",
+      "3. 「開始」を押すと、選んだ通りCodex CLIでセッションが起動する（成功すればIssueの表示上のエージェントバッジが「Codex」になる）",
+      "4. 終了したセッションがある場合は「セッションを復旧」を押すと、元がCodexセッションだったときはCodex CLIのまま復旧される",
+    ],
+  },
+  {
     version: "4.61.0",
     date: "2026-08-30",
     changes: [

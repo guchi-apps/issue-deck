@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 汎用ランチャー（#1224）。**対象リポジトリに何も追加せずに**、Issueごとの専用ブランチ・
-# git worktreeを作り、実装エージェント用のClaude Codeセッションを起動する。
+# git worktreeを作り、実装エージェントのセッションを起動する（既定はClaude Code。
+# `ISSUE_DECK_AGENT=codex`でCodex CLIも選べる。#2590）。
 #
 # 使い方:
 #   scripts/generic-start-issue.sh <owner> <repo> <issue番号>
@@ -49,6 +50,9 @@
 #   ISSUE_DECK_GENERIC_WORKTREE_BASE    worktreeの置き場（既定は ~/apps/<repo>-worktrees）
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto。#1205）
+#   ISSUE_DECK_AGENT                    起こすエージェントCLI（claude / codex。既定は claude。#2590）
+#   ISSUE_DECK_CODEX_MODEL              Codexのモデル（未指定ならCodex CLIの既定。#2550）
+#   ISSUE_DECK_CODEX_SANDBOX            Codexのサンドボックス（既定は workspace-write。#2377）
 #
 # 対象リポジトリの作業ツリー（ブランチ・uncommitted changes）には一切触れない。
 # ベースブランチの最新化は git fetch のみで行い、git worktree add で新しいブランチ・作業
@@ -82,6 +86,11 @@ source "$SCRIPT_DIR/lib/dev-server.sh"
 # Pull Requestを人の指示で作るリポジトリかどうか（#2499）。回収（reap-sessions.sh）と共有する。
 # shellcheck source=scripts/lib/pr-policy.sh
 source "$SCRIPT_DIR/lib/pr-policy.sh"
+# 起こすエージェントCLIの種別（#2377・#2590）。issue-deck自身のランチャー（start-issue.sh）と
+# 同じ関数で解決する。**判定を二重に持たない**——ここだけ`claude`固定にしていたため、
+# 汎用ランチャーで起動するリポジトリでは画面からCodexを選べなかった。
+# shellcheck source=scripts/lib/agent-cli.sh
+source "$SCRIPT_DIR/lib/agent-cli.sh"
 
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
@@ -143,15 +152,48 @@ else
   export ISSUE_DECK_SKIP_SHARED_CONTEXT=0
 fi
 
+# 起こすエージェントCLI（#2590）。**画面から選ばれた場合は受け口が`ISSUE_DECK_AGENT`で
+# 渡してくる**（scripts/start-local-session.sh）。指定が無ければ従来どおりClaude Code。
+# 不正な値はworktreeを作る前にここで止める（黙って既定へ落とさない）。
+agent_cli_resolve_kind "${ISSUE_DECK_AGENT:-}" || exit 1
+AGENT_KIND="$AGENT_CLI_KIND"
+AGENT_COMMAND="$(agent_cli_command_name "$AGENT_KIND")"
+AGENT_DISPLAY_NAME="$(agent_cli_display_name "$AGENT_KIND")"
+# tmuxの中（run-issue-session.sh）まで届かないと、Codexを選んでもClaude Codeが立つ。
+# 実際の受け渡しは下の`build_env_prefix`が行う。
+export ISSUE_DECK_AGENT="$AGENT_KIND"
+
 for required_command in git gh python3; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Error: $required_command コマンドが見つかりません。" >&2
     exit 1
   fi
 done
-if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
-  echo "Error: claude コマンドが見つかりません。" >&2
+# **エージェントのCLIは選ばれたものを見る**（#2590）。`claude`固定のままだと、Codexで起こす
+# ときに使いもしないCLIの有無で止まる。`--prepare-only`はCLIを起こさないので確かめない。
+if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$AGENT_COMMAND" >/dev/null 2>&1; then
+  echo "Error: $AGENT_COMMAND コマンドが見つかりません（$AGENT_DISPLAY_NAME）。" >&2
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    # npm版でもTUIは起こせるが`codex agents`・`codex remote-control`が動かないため、
+    # standalone installを案内する（#2521。docs/multi-agent/codex.md）。
+    echo "       導入: curl -fsSL https://chatgpt.com/codex/install.sh | sh && codex login（docs/multi-agent/codex.md）" >&2
+  fi
   exit 1
+fi
+
+# サンドボックスを組み立てられるかを、worktreeを作る前に下見する（#2526）。判定と文面は
+# issue-deck自身のランチャー（scripts/start-issue.sh）と同じものを使う。**`codex`が入っていても、
+# ホストが非特権user namespaceを制限していると即死する**ため、ここを見ないとworktreeと受付
+# コメントだけが残る。判定できないとき（`unknown`）は止めない。
+if [[ "$PREPARE_ONLY" -eq 0 && "$AGENT_KIND" == "codex" ]]; then
+  CODEX_SANDBOX_PROBE="$(agent_cli_codex_sandbox_probe)"
+  if [[ "$(agent_cli_codex_sandbox_probe_state "$CODEX_SANDBOX_PROBE")" == "broken" ]]; then
+    echo "Error: Codexのサンドボックス（$(agent_cli_codex_sandbox_mode)）をこのホストで組み立てられません。" >&2
+    echo "       $(agent_cli_codex_sandbox_probe_reason "$CODEX_SANDBOX_PROBE")" >&2
+    echo "       このまま起動しても、エージェントはコマンドを1本も実行できずに終わります。" >&2
+    echo "       ホスト側の対処（AppArmorのuserns制限を緩める）は guchi-apps/subpc#77。" >&2
+    exit 1
+  fi
 fi
 
 # フォルダの信頼確認が済んでいるか（#1838）。**worktreeを作る前にここで止める。**
@@ -159,9 +201,13 @@ fi
 # あることが多く、信頼確認に当たりやすい。当たると答えるまでセッションが始まらず、フックが
 # 1つも飛ばないまま止まる（#1465）。判定は`~/.claude.json`を読むだけで、書き換えはしない。
 # `--prepare-only`では`claude`を起こさないので確かめない。
+#
+# **Claude Codeで起こすときだけ確かめる**（#2590）。信頼確認はClaude Code固有の画面で、
+# Codexには無い（Codexの信頼確認はworktreeのパスごとに起動直後の画面で聞かれる。
+# docs/multi-agent/codex.md）。
 # shellcheck source=scripts/lib/claude-trust.sh
 source "$SCRIPT_DIR/lib/claude-trust.sh"
-if [[ "$PREPARE_ONLY" -eq 0 ]]; then
+if [[ "$PREPARE_ONLY" -eq 0 && "$AGENT_KIND" == "claude" ]]; then
   claude_trust_require "$REPO_PATH" "$FULL_NAME" || exit 1
 fi
 
@@ -188,6 +234,17 @@ warn_launcher_scripts_stale "$ROOT"
 
 if [[ -n "$LAUNCHER_SCRIPTS_SHA" ]]; then
   echo "情報: セッション側のスクリプトは $LAUNCHER_SYNC_REF の同期コピー（${LAUNCHER_SCRIPTS_SHA:0:7}）から実行します（#1438）。"
+fi
+
+# Codexで起こしたときだけプロンプトの末尾へ足す読み替え（#2377・#2590）。**issue-deck自身の
+# ランチャーと同じファイルを使う**——Codex専用の写しを作れば片方が必ず古くなる。
+# ひな形と同じく同期コピーから読む（#1438）。
+CODEX_SUPPLEMENT="$LAUNCHER_SCRIPTS_DIR/prompts/codex-supplement.md"
+# **読み替えが無いままCodexで起こさない**（#2377）。Claude Code前提の記述（Plan mode・承認
+# プロンプト・ツール名）だけが残ったプロンプトを渡すと、存在しない手順を待って止まる。
+if [[ "$AGENT_KIND" != "claude" && ! -f "$CODEX_SUPPLEMENT" ]]; then
+  echo "Error: $CODEX_SUPPLEMENT がありません（$AGENT_KIND で起動するには必要です）。" >&2
+  exit 1
 fi
 
 WORKTREE_BASE="${ISSUE_DECK_GENERIC_WORKTREE_BASE:-$HOME/apps/$REPO-worktrees}"
@@ -451,9 +508,11 @@ fi
 
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
+# prompt-render:start（scripts/implementation-prompt.test.mjs がこの範囲を切り出して実行する）
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$WORKTREE_DIR" "${BASE_BRANCH:-}" \
   "$PACKAGE_MANAGER" "$DEV_COMMAND" "$DEV_PORT" "$ISSUE_RELATIONS" "$CONCURRENT_WORK" \
-  "$SHARED_CONTEXT_DIR" "$ISSUE_DECK_SKIP_SHARED_CONTEXT" "$PR_POLICY" >"$PROMPT_FILE" <<'PY'
+  "$SHARED_CONTEXT_DIR" "$ISSUE_DECK_SKIP_SHARED_CONTEXT" "$PR_POLICY" \
+  "$AGENT_KIND" "$LAUNCHER_SCRIPTS_DIR" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -471,7 +530,12 @@ import sys
     shared_context_dir,
     skip_shared_context,
     pr_policy,
-) = sys.argv[1:14]
+    # 起こすエージェントCLIの種別（#2590）。計画の出し方だけはここで文面を差し替える（#2551）
+    agent_kind,
+    # 実際に走らせる`scripts/`の絶対パス（#1438・#2590）。Codexの計画の出し方で案内する
+    # `submit-plan.sh`はissue-deck側のスクリプトで、**このworktree（他リポジトリ）には無い**
+    scripts_dir,
+) = sys.argv[1:16]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -671,6 +735,52 @@ else:
         "内容が対象リポジトリの `CLAUDE.md` / `docs/` と矛盾する場合は、対象リポジトリ側を優先します。"
     )
 
+# 計画の出し方は**エージェントによって道具が違う**ので、ここで文面ごと差し替える（#2551・#2590）。
+# 読み替え（`codex-supplement.md`）を末尾に足すだけでは足りない——本文側に「Plan modeで提示する」
+# 「フックが自動で投稿します／無ければ手で投稿します」が残っていると、Codexのセッションはそちらに
+# 従い、計画を`gh issue comment`で自分で投稿して承認を待たずに実装へ進む（#2550）。
+# **差し替えるのは矛盾する2か所だけ**で、本文を丸ごと分岐させるわけではない。
+#
+# 対象リポジトリが自前のひな形（`scripts/prompts/implementation-agent.md`）を持つ場合も、
+# issue-deckの写しならこのプレースホルダを持っているので同じ差し替えが効く。
+if agent_kind == "codex":
+    plan_instructions = (
+        "ラベルに `21.plan-required` が含まれる場合は、実装前に計画を一時的なMarkdownファイルへ"
+        f"書き、`{scripts_dir}/submit-plan.sh <計画ファイル>`を実行してください"
+        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
+        "このコマンドが計画コメントの投稿・`00.check-user`の付与・issue-deckの画面への"
+        "承認パネルの表示までを行い、判断が届くまで待ちます。"
+        "**計画を`gh issue comment`で自分で投稿しないでください**——画面に承認パネルが出ず、"
+        "ユーザーは承認も修正もできません。"
+        "終了コードは`0`が承認（そのまま実装へ進む）、`2`が修正依頼"
+        "（表示された内容を反映して同じコマンドで出し直す）、"
+        "`3`が期限切れ・通信失敗（実装へ進まず、端末でユーザーへ確認する）です。"
+        "含まれない場合はそのまま実装に進んでよいです。"
+    )
+    plan_comment_note = (
+        f"  - **`{scripts_dir}/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
+        "`00.check-user`＋`01.check-plan`の付与まで行います**（#2545）。"
+        "同じ計画を`gh issue comment`で投稿し直さないでください。"
+        f"`gh issue view {issue['number']} --repo {repository} --comments`で"
+        "投稿されていることを確かめ、"
+        "**コマンドが失敗して投稿されていないときだけ**上記のとおり手で投稿します"
+    )
+else:
+    plan_instructions = (
+        "ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・"
+        "懸念点をまとめて提示し、承認を得てから実装に入ってください"
+        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
+        "含まれない場合はそのまま実装に進んでよいです。"
+    )
+    plan_comment_note = (
+        "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
+        "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、"
+        "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。"
+        "その場合は同じ計画を手で投稿し直さないでください。"
+        f"`gh issue view {issue['number']} --repo {repository} --comments`で"
+        "投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します"
+    )
+
 comments = issue.get("comments", [])
 if comments:
     comment_text = "\n\n".join(
@@ -701,23 +811,8 @@ replacements = {
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
     "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
-    # 計画の出し方（#2551）。**汎用ランチャーはClaude Codeでしか起動しない**ので、
-    # issue-deck側（scripts/start-issue.sh）が持つCodex向けの文面はここには要らない。
-    # 対象リポジトリがissue-deckのひな形を写している場合に、置換されずに残さないためのもの
-    "{{PLAN_INSTRUCTIONS}}": (
-        "ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・"
-        "懸念点をまとめて提示し、承認を得てから実装に入ってください"
-        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
-        "含まれない場合はそのまま実装に進んでよいです。"
-    ),
-    "{{PLAN_COMMENT_NOTE}}": (
-        "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
-        "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、"
-        "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。"
-        "その場合は同じ計画を手で投稿し直さないでください。"
-        f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
-        "**無ければ**上記のとおり手で投稿します"
-    ),
+    "{{PLAN_INSTRUCTIONS}}": plan_instructions,
+    "{{PLAN_COMMENT_NOTE}}": plan_comment_note,
     "{{PR_POLICY_INSTRUCTIONS}}": pr_policy_instructions,
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": shared_context_instructions,
 }
@@ -726,7 +821,18 @@ for placeholder, value in replacements.items():
     result = result.replace(placeholder, value)
 sys.stdout.write(result)
 PY
+# prompt-render:end
 rm -f "$ISSUE_JSON_FILE"
+
+# Codexで起こす場合だけ、読み替えの補足をプロンプトの末尾へ足す（#2377・#2590）。
+#
+# **プロンプト本体を分岐させない。** ひな形はClaude Code前提で書かれているが、共通の指示は
+# そのままにして、**道具の名前が変わる箇所の読み替え**（Plan mode・承認プロンプト・ツール名）だけを
+# 差分として追記する。手順そのものが変わる計画の出し方は、上の`{{PLAN_INSTRUCTIONS}}`で本文を
+# 差し替えてある（#2551）。
+if [[ "$AGENT_KIND" != "claude" && -f "$CODEX_SUPPLEMENT" ]]; then
+  agent_cli_append_codex_supplement "$CODEX_SUPPLEMENT" "$PROMPT_FILE" "$LAUNCHER_SCRIPTS_DIR"
+fi
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   echo "#$ISSUE_NUMBER: 準備が完了しました。"
@@ -769,9 +875,15 @@ build_env_prefix() {
   # 上で決めた値で、tmuxの中まで届かないと新規worktreeでも再開してしまう。
   # ISSUE_DECK_SKIP_SHARED_CONTEXT は実装対象が共有知識リポジトリ自身かどうか（#1741）。
   # tmuxの中まで届かないと `--add-dir` が付いてしまい、本体チェックアウトを渡すことになる。
+  # ISSUE_DECK_AGENT は起こすエージェントCLIの種別（#2590）。**tmuxの中まで届かないと、
+  # 画面でCodexを選んでもClaude Codeが立つ**（run-issue-session.sh はこの変数しか見ない）。
+  # ISSUE_DECK_CODEX_* はCodexのモデル・サンドボックス・逃げ道の引数（#2377）で、
+  # 届かないとホストの既定に落ちる。
   for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_SHARED_CONTEXT \
     ISSUE_DECK_CLAUDE_PERMISSION_MODE \
-    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_RESUME; do
+    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_RESUME \
+    ISSUE_DECK_AGENT ISSUE_DECK_CODEX_MODEL ISSUE_DECK_CODEX_SANDBOX \
+    ISSUE_DECK_CODEX_EXTRA_ARGS; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
@@ -810,9 +922,10 @@ if tmux has-session -t "=$SESSION_NAME" 2>/dev/null; then
   fi
 fi
 
-echo "#$ISSUE_NUMBER: tmuxセッション「$SESSION_NAME」でClaude Codeセッションを起動します..."
+echo "#$ISSUE_NUMBER: tmuxセッション「$SESSION_NAME」で${AGENT_DISPLAY_NAME}セッションを起動します..."
 # tmuxはコマンドを既定シェルで直接実行し、**ログインシェルとしては起動しない**。`~/.profile`系が
-# 読まれずPATHに`~/.local/bin`が乗らないため、そのままではclaudeが見つからず即死する（#1177）。
+# 読まれずPATHに`~/.local/bin`が乗らないため、そのままではエージェントのCLIが見つからず
+# 即死する（#1177）。
 if ! tmux new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" "bash -lc $(printf '%q' "$SESSION_CMD")"; then
   echo "Error: tmuxセッション「$SESSION_NAME」の起動に失敗しました。" >&2
   exit 1
