@@ -504,24 +504,13 @@ export function SessionUsagePanel({
         </div>
       </section>
 
-      <p className="rounded-lg border border-dashed p-2 text-[11px] text-muted-foreground">
-        <span className="font-semibold text-foreground">金額はAPI換算の目安です。</span>
-        Claude・Codexサブスクの実費ではありません。
-        {hasQuota ? (
-          <>「枠%」は各AIのプラン枠から別々に逆算し、表示上で合算した目安です。</>
-        ) : (
-          <>プラン枠を取得できていないため、枠への換算は出していません。</>
-        )}
-        集計に使うのは各応答のトークン数と作業ディレクトリだけで、やり取りの中身は読み取りません。
-      </p>
-
       {isLoading && !data && <p className="text-xs text-muted-foreground">読み込み中...</p>}
 
       {data && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile
-              label={effectiveUnit === "quota" ? "枠換算" : "API換算"}
+              label={effectiveUnit === "quota" ? "枠換算" : "重量課金"}
               value={formatCombinedAmount(data.totalsByAgent, effectiveUnit, quotas)}
               sub={agentCostSub}
             />

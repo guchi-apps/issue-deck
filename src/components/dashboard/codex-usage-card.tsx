@@ -23,7 +23,11 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
       )}
       {data && (
         <ul className="flex flex-col gap-2">
-          {data.windows.map((window) => {
+          {/* Claudeの5時間枠と同じ高さを確保するが、Codexにはその枠がないため中身は出さない。 */}
+          <li aria-hidden="true" className="invisible rounded-lg border p-2">
+            <div className="h-[52px]" />
+          </li>
+          {data.windows.filter((window) => window.key === "secondary").map((window) => {
             const hasReset = now !== null;
             return (
               <li key={window.key} className="rounded-lg border p-2">
@@ -42,9 +46,6 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
               </li>
             );
           })}
-          {data.stale && (
-            <li className="text-xs text-muted-foreground">最新の報告から15分以上経過しています</li>
-          )}
         </ul>
       )}
     </>

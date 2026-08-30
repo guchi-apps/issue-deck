@@ -660,6 +660,16 @@ else:
         "取り込みます（#2200）。"
     )
 
+if agent_kind == "codex":
+    artifact_instructions += (
+        "\n\nCodexで画面デザインをHTMLとして作った場合は、ローカルHTTPサーバーの"
+        "`localhost` URLを計画へ載せないでください。**次のコマンドでIssueDeckへ登録し、"
+        f"返された`https://issuedeck.gucchii.com/artifacts/<id>`形式のURLを計画へ記載してください**。"
+        f"\n\n`{scripts_dir}/lib/codex-artifact.sh <HTMLファイル>`\n\n"
+        "同じファイルパスで再実行すると既存のアーティファクトを更新できます。"
+        "登録に失敗した場合はエラー内容をIssueコメントへ残し、localhost URLだけを共有URLとして扱わないでください。"
+    )
+
 # Pull Requestの作り方（#2499）。一覧は scripts/local-repo-pr-policy.conf で、判定はシェル側
 # （scripts/lib/pr-policy.sh）が済ませて`pr_policy`として渡ってくる。
 #
