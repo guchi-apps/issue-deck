@@ -15,7 +15,10 @@ import {
   isActiveDispatchJobStatus,
   resolveDispatchTargetRejection,
 } from "@/lib/dispatch/dispatch-job";
-import { describeSessionRecovery } from "@/lib/dispatch/issue-session";
+import {
+  describeSessionRecovery,
+  resolveIssueImplementationAgent,
+} from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -134,7 +137,7 @@ export function SessionRecoveryButton({
         size="sm"
         className="w-full sm:w-auto"
         disabled={isSubmitting || rejection !== null || actionsRunning}
-        onClick={() => void launch(session.host)}
+        onClick={() => void launch(session.host, resolveIssueImplementationAgent(session))}
       >
         {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
         セッションを復旧
