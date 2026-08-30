@@ -69,7 +69,7 @@ import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import type { ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
 import {
   PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
@@ -155,6 +155,7 @@ type IssueDeckShellProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   codexModel: CodexModel;
+  appAiModel: AppAiModel;
   dispatchConcurrency: number;
   /** `issues`をサーバー側で取った時刻（#1797）。一覧のヘッダーの「HH:MM時点」の初期値になる */
   issuesFetchedAt: string;
@@ -169,6 +170,7 @@ export function IssueDeckShell({
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
   codexModel: initialCodexModel,
+  appAiModel: initialAppAiModel,
   dispatchConcurrency: initialDispatchConcurrency,
 }: IssueDeckShellProps) {
   const {
@@ -229,6 +231,7 @@ export function IssueDeckShell({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
+  const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -239,6 +242,7 @@ export function IssueDeckShell({
     setClaudeModel(next.claudeModel);
     setClaudeModelAssist(next.claudeModelAssist);
     setCodexModel(next.codexModel);
+    setAppAiModel(next.appAiModel);
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
@@ -1605,6 +1609,7 @@ export function IssueDeckShell({
                   claudeModel={claudeModel}
                   claudeModelAssist={claudeModelAssist}
                   codexModel={codexModel}
+                  appAiModel={appAiModel}
                   dispatchConcurrency={dispatchConcurrency}
                   repositories={repositories}
                   onSetRepositoryHidden={handleSetRepositoryHidden}
@@ -2002,6 +2007,7 @@ export function IssueDeckShell({
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
           codexModel={codexModel}
+          appAiModel={appAiModel}
           dispatchConcurrency={dispatchConcurrency}
           repositories={repositories}
           onSetRepositoryHidden={handleSetRepositoryHidden}

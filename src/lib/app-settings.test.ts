@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
+  parseAppAiModel,
   parseAutoRetryLimit,
   parseClaudeModel,
   parseCodexModel,
@@ -25,6 +26,20 @@ describe("parseAutoRetryLimit", () => {
     expect(parseAutoRetryLimit("3")).toBeNull();
     expect(parseAutoRetryLimit(null)).toBeNull();
     expect(parseAutoRetryLimit(undefined)).toBeNull();
+  });
+});
+
+describe("parseAppAiModel", () => {
+  it("許可された値はそのまま返す", () => {
+    expect(parseAppAiModel("claude-haiku-4-5")).toBe("claude-haiku-4-5");
+    expect(parseAppAiModel("claude-sonnet-5")).toBe("claude-sonnet-5");
+    expect(parseAppAiModel("claude-opus-5")).toBe("claude-opus-5");
+  });
+
+  it("許可されていない値はnullを返す", () => {
+    expect(parseAppAiModel("auto")).toBeNull();
+    expect(parseAppAiModel("gpt-5.6-sol")).toBeNull();
+    expect(parseAppAiModel(null)).toBeNull();
   });
 });
 

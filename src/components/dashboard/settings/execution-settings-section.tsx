@@ -16,10 +16,12 @@ import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
+  APP_AI_MODEL_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
+  type AppAiModel,
   type ClaudeModel,
   type CodexModel,
 } from "@/lib/app-settings";
@@ -29,6 +31,7 @@ export type AppSettingsValues = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   codexModel: CodexModel;
+  appAiModel: AppAiModel;
   dispatchConcurrency: number;
 };
 
@@ -37,6 +40,7 @@ type ExecutionSettingsSectionProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   codexModel: CodexModel;
+  appAiModel: AppAiModel;
   dispatchConcurrency: number;
   // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
   onUpdated: (values: AppSettingsValues) => void;
@@ -54,6 +58,7 @@ export function ExecutionSettingsSection({
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
   codexModel: initialCodexModel,
+  appAiModel: initialAppAiModel,
   dispatchConcurrency: initialDispatchConcurrency,
   onUpdated,
 }: ExecutionSettingsSectionProps) {
@@ -64,6 +69,7 @@ export function ExecutionSettingsSection({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
+  const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -85,17 +91,30 @@ export function ExecutionSettingsSection({
     claudeModel !== initialClaudeModel ||
     claudeModelAssist !== initialClaudeModelAssist ||
     codexModel !== initialCodexModel ||
+    appAiModel !== initialAppAiModel ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
   async function handleSubmit() {
     setIsSaved(false);
     const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
     if (!autoRetryOk) return;
-    const claudeModelOk = await updateClaudeModel(claudeModel, claudeModelAssist, codexModel);
+    const claudeModelOk = await updateClaudeModel(
+      claudeModel,
+      claudeModelAssist,
+      codexModel,
+      appAiModel,
+    );
     if (!claudeModelOk) return;
     const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
     if (!dispatchOk) return;
-    onUpdated({ autoRetryLimit, claudeModel, claudeModelAssist, codexModel, dispatchConcurrency });
+    onUpdated({
+      autoRetryLimit,
+      claudeModel,
+      claudeModelAssist,
+      codexModel,
+      appAiModel,
+      dispatchConcurrency,
+    });
     setIsSaved(true);
   }
 
@@ -184,6 +203,26 @@ export function ExecutionSettingsSection({
           サブPCで新しく起動するCodex
           CLIセッションのモデルです。「自動」の場合はモデルを指定せず、Codex
           CLI側のデフォルトモデルが使われます。全リポジトリ共通の設定です。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="app-ai-model">アプリ内AI機能で使用するモデル</Label>
+        <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
+          <SelectTrigger id="app-ai-model" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {APP_AI_MODEL_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Issueの要約・検索・文章整理・手作業の診断など、アプリが直接実行するAI機能で使います。
+          高性能なモデルほど応答品質が上がる一方、処理時間とAPI消費量が増える場合があります。
         </p>
       </div>
 

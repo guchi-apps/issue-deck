@@ -2,7 +2,6 @@ import { callClaudeMessages } from "@/lib/claude/request";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
 
 /** 提案生成に使うモデル。プラン枠消費を抑えるため軽量なモデルを使う。 */
-const MODEL = "claude-haiku-4-5";
 
 /** 本文が長大な場合に切り詰める上限文字数。 */
 const MAX_BODY_LENGTH = 4000;
@@ -113,7 +112,6 @@ export async function generateIssueSuggestion(
     feature: "issue_suggest",
     token,
     body: {
-      model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
     },

@@ -1,9 +1,11 @@
 import { IssueDeckShell } from "@/components/dashboard/issue-deck-shell";
 import {
   AUTO_RETRY_LIMIT_MIN,
+  APP_AI_MODEL_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
   parseCodexModel,
+  parseAppAiModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -26,6 +28,7 @@ export default async function DashboardPage() {
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
   const codexModel = parseCodexModel(appSetting?.codexModel) ?? "auto";
+  const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
 
   const hiddenRepositoryIds = currentUser
@@ -86,6 +89,7 @@ export default async function DashboardPage() {
       claudeModel={claudeModel}
       claudeModelAssist={claudeModelAssist}
       codexModel={codexModel}
+      appAiModel={appAiModel}
       dispatchConcurrency={dispatchConcurrency}
     />
   );

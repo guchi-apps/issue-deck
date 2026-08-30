@@ -39,6 +39,7 @@ beforeEach(() => {
     claudeModel: update.claudeModel ?? "auto",
     claudeModelAssist: update.claudeModelAssist ?? "auto",
     codexModel: update.codexModel ?? "auto",
+    appAiModel: update.appAiModel ?? "claude-haiku-4-5",
   }));
 });
 
@@ -49,6 +50,7 @@ describe("GET", () => {
       claudeModel: "auto",
       claudeModelAssist: "auto",
       codexModel: "auto",
+      appAiModel: "claude-haiku-4-5",
     });
   });
 
@@ -57,11 +59,13 @@ describe("GET", () => {
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
       codexModel: "gpt-5.6-terra",
+      appAiModel: "claude-sonnet-5",
     });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
       codexModel: "gpt-5.6-terra",
+      appAiModel: "claude-sonnet-5",
     });
   });
 });
@@ -73,6 +77,7 @@ describe("PATCH", () => {
         claudeModel: "opus",
         claudeModelAssist: "haiku",
         codexModel: "gpt-5.6-sol",
+        appAiModel: "claude-opus-5",
       }),
     );
 
@@ -83,6 +88,7 @@ describe("PATCH", () => {
           claudeModel: "opus",
           claudeModelAssist: "haiku",
           codexModel: "gpt-5.6-sol",
+          appAiModel: "claude-opus-5",
         },
       }),
     );
@@ -115,6 +121,15 @@ describe("PATCH", () => {
 
   it("codexModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(patchRequest({ claudeModel: "opus", codexModel: "gpt-5-codex" }));
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("appAiModelが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(
+      patchRequest({ claudeModel: "opus", appAiModel: "gpt-5.6-sol" }),
+    );
 
     expect(res.status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
