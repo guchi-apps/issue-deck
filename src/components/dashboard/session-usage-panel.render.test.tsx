@@ -65,11 +65,10 @@ function response(
       nowMs: NOW_MS,
       days: 7,
       reportedAt: "2026-08-30T02:55:00.000Z",
-      quota: scale,
+      quotaByAgent: { claude: scale, codex: scale },
     }),
-    agent: "claude",
-    planUsage: null,
-    planNotConfigured: true,
+    planUsage: { claude: null, codex: null },
+    planNotConfigured: { claude: true, codex: true },
   };
 }
 
@@ -80,8 +79,6 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
       isLoading={false}
       error={null}
       days={7}
-      agent={data.agent}
-      onChangeAgent={() => {}}
       onChangeDays={() => {}}
       onRefresh={() => {}}
       {...props}
@@ -92,17 +89,17 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
-  it("ClaudeとCodexを切り替えられる", () => {
-    const onChangeAgent = vi.fn();
-    renderPanel(response([]), { onChangeAgent });
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    expect(onChangeAgent).toHaveBeenCalledWith("codex");
+  it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
+    renderPanel(response([]));
+    expect(screen.getByText("Claude プラン枠")).toBeTruthy();
+    expect(screen.getByText("Codex プラン枠")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "表示するエージェント" })).toBeNull();
   });
   it("Issueの行を開くと、そのIssueで走った転記1本ごとの明細が出る", () => {
     renderPanel(
       response([
         entry({ sessionId: "impl", costUsd: 20, responses: 100 }),
-        entry({ sessionId: "plan", kind: "plan-review", costUsd: 1, responses: 3 }),
+        entry({ sessionId: "plan", agent: "codex", models: ["gpt-5.6"], kind: "plan-review", costUsd: 1, responses: 3 }),
       ]),
     );
 
@@ -119,6 +116,9 @@ describe("SessionUsagePanel", () => {
     // 開くと転記ごとの行が出る（実装・計画レビューの2本）。
     expect(within(detail).getByText("実装")).toBeTruthy();
     expect(within(detail).getByText("計画レビュー")).toBeTruthy();
+    expect(within(detail).getByText("Claude")).toBeTruthy();
+    expect(within(detail).getByText("Codex")).toBeTruthy();
+    expect(within(detail).getByText("gpt-5.6")).toBeTruthy();
     expect(within(detail).getByText("3応答")).toBeTruthy();
   });
 
