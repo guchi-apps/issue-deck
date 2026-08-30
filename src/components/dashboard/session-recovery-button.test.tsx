@@ -217,6 +217,20 @@ describe("SessionRecoveryButton", () => {
         repositoryFullName: "guchi-apps/issue-deck",
         issueNumber: 1830,
         hostName: "subpc",
+        agent: "claude",
+      });
+    });
+  });
+
+  it("Codexで実施したセッションは復旧時もCodex CLIを指定する", async () => {
+    renderButton({ session: makeSession({ codexThreadKnown: false }) });
+    fireEvent.click(recoveryButton()!);
+    await waitFor(() => {
+      expect(enqueue).toHaveBeenCalledWith({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1830,
+        hostName: "subpc",
+        agent: "codex",
       });
     });
   });
