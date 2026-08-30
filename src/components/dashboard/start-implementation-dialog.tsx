@@ -712,9 +712,10 @@ export function StartImplementationDialog({
                 />
               ))}
             </div>
-            {/* **選んだ時点で出す**（#2505）。Codexにはフックが無く、通知も承認パネルも
-                Remote Controlも動かない。起動してから気づくと、届かない通知を待ち続けるか
-                不具合として報告することになる。配色は確認待ちの表示（`CheckUserReasonNotice`）に
+            {/* **選んだ時点で出す**（#2505）。Codexでは入力待ちの通知・承認パネル・
+                Remote Controlが動かない（#2509で停止の通知だけは飛ぶようになった）。起動して
+                から気づくと、届かない通知を待ち続けるか不具合として報告することになる。文面の
+                正は`CODEX_LIMITATIONS`。配色は確認待ちの表示（`CheckUserReasonNotice`）に
                 合わせてamberで揃える */}
             {agent === "codex" ? (
               <div className="flex flex-col gap-1 rounded-md bg-amber-500/15 px-2.5 py-2 ring-1 ring-inset ring-amber-500/40">

@@ -436,6 +436,12 @@ autoは「Claudeが自分で判断してよいもの」を自動承認するだ�
 
 `SessionEnd`は使っていない。tmuxのウィンドウを閉じただけのイベントに報告の価値が薄い。
 
+**Codex CLIで起こしたセッションからも、同じスクリプトが呼ばれる**（#2509）。イベント名も
+フィールド名（`hook_event_name`・`tool_name`・`tool_input`）もClaude Codeと同じなので読み替えは
+無いが、**届くのは`SessionStart`と`Stop`の2つだけ**で、`session-notify.sh`にCodex用の分岐は無い
+（来ないイベントは既存の判定がそのまま`skip`にする）。残りが来ない理由と、`--ask-for-approval never`の
+Codexでは**このスクリプトが`00.check-user`を付けることが無い**ことは[codex.md](codex.md)を参照。
+
 **`SessionInterrupted`だけはフックではない**（#1971）。APIエラー（529等）でturnが打ち切られると
 Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限まで試したあとに同じ形のJSONを
 合成して`session-notify.sh`へ渡す。**#2280より前はSignalyへ通知するだけだった**が、通知先が
@@ -592,6 +598,12 @@ JSON文字列ではなくファイルで渡すのは、`ps`の出力にフック
 
 フック設定に書くのは「`session-notify.sh`を呼ぶ」ことだけで、どのイベントを送るかの判定は
 スクリプト側に置いている。判定を2箇所に分けると、必ずどちらかが古くなる。
+
+**Codexでは`--settings`に当たるものが無いので、`-c 'hooks.<イベント>=…'`のオーバーライドで
+渡す**（#2509）。ファイル（`~/.codex/hooks.json`はホスト全体、`<worktree>/.codex/hooks.json`は
+リポジトリの中）に置くとこの節の狙い——**このスクリプトから起こしたセッションにだけ効かせる**——が
+崩れるため、プロセスに閉じる`-c`を選んでいる。`ps`に出るのは`session-notify.sh`のパスと
+Issue番号・リポジトリ名だけ（[codex.md](codex.md)）。
 
 ## セッション側のスクリプトは`origin/develop`の同期コピーから走らせる（#1274・#1438）
 
@@ -817,6 +829,13 @@ issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions
   ディレクトリだったため毎回聞かれていた。cwdをリポジトリごとの固定名
   （`.questions/_session-<repo>`）にして、人が答えるのは初回の1回だけにしている
   （[subpc-dispatch.md](./subpc-dispatch.md)）。`~/.claude.json`は機械が書き換えない。
+- **Codexでも同じ仕組みが効く**（#2509）。あちらの確認は
+  `Do you trust the contents of this directory?`で、答えるまで`SessionStart`が飛ばないのも同じ。
+  ただし**信頼はworktreeのパスごとに記録される**（`~/.codex/config.toml`の
+  `[projects."<絶対パス>"]`）ため、Claude Codeのように「リポジトリにつき1回」では済まず、
+  **Issueごとに1回聞かれる**。事前に読んで止める判定（`claude-trust.sh`）は、まだ存在しない
+  worktreeのパスを見に行くことになるので置いていない——立ってから画面で気付く形になる。
+  `~/.codex/config.toml`も機械が書き換えない。
 
 ### 止まっていないのに「入力を待っています」と出ていた理由（#1353）
 

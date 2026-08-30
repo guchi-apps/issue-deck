@@ -637,21 +637,53 @@ fi
 #
 # 発火するイベントの選別（Notificationのidle_promptを捨てる等）は session-notify.sh 側が持つ。
 # フック設定には「呼ぶ」ことだけを書き、判断を2箇所に分けない。
+#
+# **Codexは同じ通知スクリプトを`-c`のオーバーライドで繋ぐ**（#2509）。渡し方（ファイルか`-c`か）と
+# 繋ぐイベントの数は違うが、呼ぶ先も`HOOK_COMMAND`も共通で、下の`HOOKS_ENABLED`から先は同じ。
 HOOKS_DIR="$WORKTREE_BASE/.claude-hooks"
 HOOK_SETTINGS_FILE="$HOOKS_DIR/issue-$ISSUE_NUMBER.settings.json"
 NOTIFY_SCRIPT="$SCRIPT_DIR/session-notify.sh"
-# **Codexにはこのフックの仕組みが無い**（#2377）。設定を書いても読む相手がいないので生成しない。
-# `HOOKS_ENABLED`が0のままになるため、「まだ開始していない」印（#1465）も置かれない——
-# 置いても消すフック（`SessionStart`）がおらず、画面に「まだ開始していません」が出続けるだけになる。
-if [[ "$AGENT_KIND" != "claude" ]]; then
+# 引数はシェルのシングルクォートで囲む。シングルクォートはJSONではただの文字なので、
+# `printf %q` のようにバックスラッシュを持ち込まずにスペースを含むパスを渡せる。
+# 値はいずれもこのスクリプトが組み立てた識別子（数字・リポジトリ名・パス）で、
+# 外部由来のテキストはここへ流さない。
+#
+# **Codexも同じ文字列をそのまま使う**（#2509）。あちらは`command`をシェルの規則で分割するため、
+# このクォートの付け方で引数3つとして届く（`scripts/lib/agent-cli.sh`）。
+HOOK_COMMAND="'$NOTIFY_SCRIPT' '$ISSUE_NUMBER' '$REPO_NAME' '$REPO_SLUG'"
+# Codexで渡すフックの起動引数（#2509）。Claudeでは空のままで、下の`--settings`が代わりを務める。
+CODEX_HOOK_ARGS=()
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  # **Codexにもフックがある**（#2509。#2377の時点では「無い」としていたが、0.151.0で
+  # stableとして入っている）。設定はファイルではなく`-c`のオーバーライドで渡す——ユーザー層
+  # （`~/.codex/hooks.json`）はホストの全セッションに効き、プロジェクト層（`<worktree>/.codex/`）は
+  # リポジトリの中なのでコミットの事故が起きうる。組み立ての詳細は`scripts/lib/agent-cli.sh`。
+  #
+  # 繋ぐのは`SessionStart`と`Stop`の2つ。`PostToolUse`を繋がない理由も`agent-cli.sh`にある。
+  if [[ ! -x "$NOTIFY_SCRIPT" ]]; then
+    echo "#$ISSUE_NUMBER: 情報: $NOTIFY_SCRIPT が無いため、セッションの状態通知は行いません。" >&2
+  elif CODEX_PROJECT_HOOK_FILE="$(agent_cli_codex_project_hook_file "$PWD")"; then
+    # **リポジトリ同梱のフックがあるときは有効にしない**（`agent-cli.sh`）。
+    # `--dangerously-bypass-hook-trust`はプロセス単位のフラグで、付けると同梱のフックまで
+    # レビュー無しで走る。画面連携を諦めるほうが軽い。
+    echo "#$ISSUE_NUMBER: 情報: worktreeにCodexのフック設定（$CODEX_PROJECT_HOOK_FILE）があるため、画面連携のフックは有効にしません（レビューしていないフックを一緒に走らせないため）。"
+    echo "     停止の通知と「まだ開始していません」の検知は出ません（セッションの開始・終了とプレビューURLの報告は行います）。"
+  elif agent_cli_build_codex_hook_args "$HOOK_COMMAND"; then
+    CODEX_HOOK_ARGS=(${AGENT_CLI_HOOK_ARGS[@]+"${AGENT_CLI_HOOK_ARGS[@]}"})
+    HOOKS_ENABLED=1
+    echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}のフック（SessionStart・Stop）で、停止の通知と起動確認を画面へ出します。"
+    # **ディレクトリの信頼を越えるまでフックは1つも飛ばない**（#2509）。Claude Codeと違って
+    # worktreeのパスごとに記録されるため、Issueごとに1回だけ聞かれる。答えるのは人（信頼確認
+    # そのものは自動化しない。docs/multi-agent/session-notify.md）。答えないまま猶予を過ぎると、
+    # 下で置く「まだ開始していない」印をpollerが拾って画面に出す（#1465）。
+    echo "     初回は起動直後に「Do you trust the contents of this directory?」が出ます。答えるまでフックは飛びません。"
+  fi
+elif [[ "$AGENT_KIND" != "claude" ]]; then
+  # 今の`AGENT_CLI_KINDS`は`claude`と`codex`だけなのでここには来ないが、**種別を増やしたときに
+  # 黙ってフック無しで立つのを避けるため**に残す。フックの繋ぎ方を書き足すまではこの案内が出る。
   echo "#$ISSUE_NUMBER: 情報: $AGENT_DISPLAY_NAME にはフックの仕組みが無いため、入力待ち・計画の承認・質問の通知は画面に出ません（セッションの開始・終了とプレビューURLの報告は行います）。"
 elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   mkdir -p "$HOOKS_DIR"
-  # 引数はシェルのシングルクォートで囲む。シングルクォートはJSONではただの文字なので、
-  # `printf %q` のようにバックスラッシュを持ち込まずにスペースを含むパスを渡せる。
-  # 値はいずれもこのスクリプトが組み立てた識別子（数字・リポジトリ名・パス）で、
-  # 外部由来のテキストはここへ流さない。
-  HOOK_COMMAND="'$NOTIFY_SCRIPT' '$ISSUE_NUMBER' '$REPO_NAME' '$REPO_SLUG'"
   # `PreToolUse`だけmatcherを付ける（#1342・#2189）。**計画本文（`tool_input.plan`）と
   # 質問の中身（`tool_input.questions`）が手に入るのはこのフックだけ**で、承認プロンプト・
   # 選択フォームの`Notification`には入っていない。matcherを付けずに全ツールで呼ぶと、
@@ -727,7 +759,9 @@ fi
 # 外部から操作可能になるのを避けたいときは ISSUE_DECK_CLAUDE_REMOTE_CONTROL=0 で無効化できる。
 #
 # **Codexでは使わない**（#2377）。同名のフラグはあるが、issue-deckが画面に出しているのは
-# Claude Codeが表示するURL（`session-notify.sh`が拾う）で、フックが飛ばない以上そこへは載らない。
+# Claude Codeが表示するURL（`session-notify.sh`が`~/.claude/sessions/<pid>.json`から拾う）で、
+# **フックを繋いだ後（#2509）もそこへは載らない**——Codexのremote-controlは別の仕組みで、
+# 対応するIDの置き場が無い。
 if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_CLAUDE_REMOTE_CONTROL:-1}" != "0" ]]; then
   if claude --help 2>/dev/null | grep -q -- "--remote-control"; then
     CLAUDE_EXTRA_ARGS+=(--remote-control "$SESSION_NAME")
@@ -857,8 +891,10 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 else
   agent_cli_build_codex_args
-  AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"})
-  echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を起動します（${AGENT_LAUNCH_ARGS[*]}）..."
+  # フックの`-c`（#2509）はサンドボックスの設定より後ろに置く。**同じ`-c`でもキーが違うので
+  # 順序は挙動に影響しない**が、起動ログに出す引数は素の分だけにして読めるようにしておく。
+  AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"} ${CODEX_HOOK_ARGS[@]+"${CODEX_HOOK_ARGS[@]}"})
+  echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を起動します（${AGENT_CLI_ARGS[*]}）..."
 fi
 # 受付コメント（#1119）は`claude`を起動する直前に投げる。**ここより後ろには置けない**
 # （`claude`はフォアグラウンドで走り、戻ってくるのはセッションが終わったとき）。
@@ -871,6 +907,11 @@ report_session_started_to_issue_deck
 # **この間はフックが1つも飛ばない**ため、フックを待つ仕組み（#1219・#1264）では画面に何も出ず、
 # 端末を見ていない人には「起動したはずなのに何も起きない」としか分からない（実測: 信頼確認の
 # 表示中は`SessionStart`が飛ばず、答えた直後に飛ぶ）。
+#
+# **Codexでも同じことが起きる**（#2509）。あちらの確認は
+# `Do you trust the contents of this directory?`で、**worktreeのパスごとに聞かれる**ぶん
+# 当たる頻度はClaude Codeより高い（Claudeは本体チェックアウトのパスに記録されるため
+# リポジトリにつき1回。`scripts/lib/claude-trust.sh`）。答えるまで`SessionStart`が飛ばないのも同じ。
 #
 # 印はpollerが読み、猶予を過ぎても残っていればissue-deckへ「まだ開始していない」と報告する。
 # 消すのは`SessionStart`フック（`session-notify.sh`）と、このスクリプトの`cleanup`。
