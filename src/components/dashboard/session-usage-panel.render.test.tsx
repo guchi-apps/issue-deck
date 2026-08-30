@@ -13,9 +13,8 @@ import {
 /**
  * 「AI使用量」画面（#2504）の描画。
  *
- * **確かめたいのは3つ。** (1) Issueの行を開くとtmuxセッション（転記）1本ごとの明細が出ること
- * ——一覧をIssue単位に畳んでいるので、開けなければ「セッションごとに見たい」という元の要求が
- * 満たせない。(2) 単位の切り替えでドルと枠%が入れ替わること。(3) 枠の物差しが無いときに
+ * **確かめたいのは3つ。** (1) セッションごとの行が初期状態から出ること、共通スケールの比率が
+ * 表示されること。(2) 単位の切り替えでドルと枠%が入れ替わること。(3) 枠の物差しが無いときに
  * 「枠%」を押しても金額が壊れないこと（`Infinity%`を出さない）。
  */
 
@@ -95,31 +94,25 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("Codex プラン枠")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "表示するエージェント" })).toBeNull();
   });
-  it("Issueの行を開くと、そのIssueで走った転記1本ごとの明細が出る", () => {
+  it("セッションごとの行を初期状態から表示し、最大セッション比を出す", () => {
     renderPanel(
       response([
         entry({ sessionId: "impl", costUsd: 20, responses: 100 }),
-        entry({ sessionId: "plan", agent: "codex", models: ["gpt-5.6"], kind: "plan-review", costUsd: 1, responses: 3 }),
+        entry({ sessionId: "plan", agent: "codex", models: ["gpt-5.6"], kind: "plan-review", costUsd: 1, responses: 3, contextTokens: 100, outputTokens: 50 }),
       ]),
     );
 
-    // 明細だけを見る（「種別別」の内訳にも同じ語が並ぶため）。
+    // 一覧だけを見る（「種別別」の内訳にも同じ語が並ぶため）。
     const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
 
-    // 畳まれている間は、そのIssueの合計だけが出ている。
-    expect(within(detail).getByText("#2504")).toBeTruthy();
-    expect(within(detail).getByText("2セッション")).toBeTruthy();
-    expect(within(detail).queryByText("計画レビュー")).toBeNull();
-
-    fireEvent.click(within(detail).getByRole("button", { expanded: false }));
-
-    // 開くと転記ごとの行が出る（実装・計画レビューの2本）。
-    expect(within(detail).getByText("実装")).toBeTruthy();
-    expect(within(detail).getByText("計画レビュー")).toBeTruthy();
-    expect(within(detail).getByText("Claude")).toBeTruthy();
-    expect(within(detail).getByText("Codex")).toBeTruthy();
-    expect(within(detail).getByText("gpt-5.6")).toBeTruthy();
-    expect(within(detail).getByText("3応答")).toBeTruthy();
+    // セッションごとの2行が最初から出る。
+    expect(within(detail).getAllByText("#2504 issue-deck")).toHaveLength(2);
+    expect(within(detail).getByText("実装", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("Claude", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("Codex", { exact: false })).toBeTruthy();
+    expect(within(detail).getAllByText("100%")).toHaveLength(1);
+    expect(within(detail).getByText("1%")).toBeTruthy();
   });
 
   it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
