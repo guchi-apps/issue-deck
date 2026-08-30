@@ -177,6 +177,11 @@ source "$SCRIPT_DIR/lib/launch-hold.sh"
 # （#2504）。**転記を開くのはこのlibだけ**で、読むのは`message.usage`と時刻・作業ディレクトリ。
 # shellcheck source=scripts/lib/session-usage.sh
 source "$SCRIPT_DIR/lib/session-usage.sh"
+# Codexのサンドボックスを組み立てられるかの下見（#2526）。**申告（`codex_capable`）と実際の
+# 起動（start-issue.sh）が同じ判定を使う**ようにここから読む。判定を二重に持つと、画面で
+# 選べるのにセッションが即死する状態（#2526で実際に起きた）に戻る。
+# shellcheck source=scripts/lib/agent-cli.sh
+source "$SCRIPT_DIR/lib/agent-cli.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
@@ -614,20 +619,40 @@ code_review_capable() {
   fi
 }
 
-# Codex CLIでセッションを起こせるか（#2505）。**`codex`コマンドがあるかだけを見る。**
+# Codex CLIでセッションを起こせるか（#2505・#2526）。**コマンドの有無に加えて、サンドボックスを
+# 実際に組み立てられるかまで見る。**
 #
 # ジョブの`agent`を読んで`ISSUE_DECK_AGENT`として受け口へ渡す実装はこのpollerが持っているので、
-# 申告が真になった時点で「渡せること」は保証されている。残る条件は実機にCLIが入っているかだけ。
+# 申告が真になった時点で「渡せること」は保証されている。残るのは実機の条件だけ。
+#
+# **コマンドが入っていても起こせないホストがある**（#2526）。Ubuntu 24.04の既定
+# （`kernel.apparmor_restrict_unprivileged_userns = 1`）では、Codexが同梱するbubblewrapが
+# サンドボックスを組み立てられず、セッションはコマンドを1本も実行できないまま終わる（実例: #2511）。
+# `command -v codex`だけを見ていた間は、**画面でCodexを選べるのに即死する**状態だった。
+# 判定は`scripts/lib/agent-cli.sh`が持ち、`start-issue.sh`の起動前チェックと同じものを使う。
+#
+# 下見が`unknown`（`codex sandbox`を持たない版）なら塞がない。証拠があるときだけ`false`にする。
 #
 # **申告しなければ画面に選択欄が出ない**（issue-deck側は`null`＝非対応として扱う）。古いpollerは
 # `agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ——「配ってから`failed`で
 # 返る」では済まない種類の非対応なので、判定材料が無いときは選ばせない側へ倒す。
+#
+# 出力は1行目が`true`/`false`、2行目が`false`のときの理由（画面には出さず、journaldへ出す用）。
 codex_capable() {
-  if command -v codex >/dev/null 2>&1; then
-    printf 'true'
-  else
-    printf 'false'
+  local probe
+  if ! command -v codex >/dev/null 2>&1; then
+    printf 'false\ncodexコマンドが入っていません'
+    return 0
   fi
+
+  probe="$(agent_cli_codex_sandbox_probe)"
+  if [[ "$(agent_cli_codex_sandbox_probe_state "$probe")" == "broken" ]]; then
+    printf 'false\nサンドボックス（%s）を組み立てられません: %s' \
+      "$(agent_cli_codex_sandbox_mode)" "$(agent_cli_codex_sandbox_probe_reason "$probe")"
+    return 0
+  fi
+
+  printf 'true'
 }
 
 # チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
@@ -917,8 +942,13 @@ describe_checkout_state() {
     + "）"' 2>/dev/null || true
 }
 
+# 最後にjournaldへ出したCodexの可否（#2526）。**変わった巡だけログへ出す**ための覚え。
+# 毎巡出すと30秒ごとに同じ行が積み上がり、他の報告が埋もれる。
+CODEX_CAPABLE_LOGGED=""
+
 announce() {
   local repositories payload live_sessions metrics checkout
+  local codex_probe codex_flag codex_reason
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
   # **申告するのは1巡の入口で数えた本数**（#1394）。この後の回収（reap_sessions）で減ったぶんは
   # 次の巡の申告に乗る。画面に出すのは「最後に申告した時点」の数字で、判定そのものは
@@ -937,6 +967,25 @@ announce() {
   # 動かしているチェックアウトの版（#1612）。取れなければ空にし、下で`null`として送る
   # （issue-deck側はそれを「申告なし」として5列をnullへ戻すため、古い版が残り続けない）
   checkout="$(collect_checkout_state)" || checkout=""
+
+  # Codexの可否（#2526）。**理由はここで拾う。** `--argjson codex "$(codex_capable)"`のように
+  # jqの引数として直に呼ぶと、`false`になった理由が`$( )`のサブシェルに閉じて外へ出せない。
+  # 理由は画面へは送らず（申告の形を増やすと古いpollerとの互換を1つ増やすことになる）、
+  # サブPCを直接見るときに読めるようjournaldへ出す。
+  codex_probe="$(codex_capable)"
+  codex_flag="${codex_probe%%$'\n'*}"
+  codex_reason=""
+  if [[ "$codex_probe" == *$'\n'* ]]; then
+    codex_reason="${codex_probe#*$'\n'}"
+  fi
+  if [[ "$codex_flag" != "$CODEX_CAPABLE_LOGGED" ]]; then
+    if [[ "$codex_flag" == "true" ]]; then
+      echo "Codex CLIで起こせます（画面の「実装を開始」にエージェント欄が出ます）"
+    else
+      echo "Codex CLIでは起こせないため申告しません: $codex_reason"
+    fi
+    CODEX_CAPABLE_LOGGED="$codex_flag"
+  fi
 
   # `sessionControl`は「セッションの停止・終了（#1332）を実行できる」という申告。
   # **issue-deck側はこれが真のホストにしか制御ジョブを配らない。** 古いpollerは`kind`を
@@ -985,7 +1034,7 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
-    --argjson codex "$(codex_capable)" \
+    --argjson codex "$codex_flag" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson reboot "$(reboot_capable)" \
     --argjson rebootState "$(collect_reboot_state)" \
