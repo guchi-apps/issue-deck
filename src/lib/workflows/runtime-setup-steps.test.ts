@@ -60,4 +60,23 @@ describe("ランタイム準備のステップ条件", () => {
       "inputs.runtime-setup != 'minimal'",
     );
   });
+
+  it.each(["Setup Node.js（依存インストール用）", "依存関係をインストールする"])(
+    "%s はpackage.json作成前の新規アプリでは実行しない",
+    (name) => {
+      // 新規アプリの初期化Issueでは、package.json自体をClaudeがこの後に作る。
+      // キャッシュ解決やinstallを先に走らせると、実装ステップへ到達できない。
+      expect(stepCondition(name)).toContain("hashFiles('package.json') != ''");
+    },
+  );
+
+  it("package.json作成前でもpnpmコマンドを用意する", () => {
+    const source = readFileSync(WORKFLOW, "utf8");
+    const start = source.indexOf("      - name: Setup pnpm（実装ステップ用）\n");
+    const next = source.indexOf("\n      - name: ", start + 1);
+    const block = source.slice(start, next);
+
+    expect(block).toContain("version: 10");
+    expect(block).not.toContain("hashFiles('package.json')");
+  });
 });
