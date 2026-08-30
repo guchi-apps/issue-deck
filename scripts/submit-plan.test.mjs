@@ -82,6 +82,10 @@ describe("submit-plan.sh", () => {
       plan: "## 要約\n\n**テスト計画**\n", waitSeconds: 3,
     });
     expect(requests[1].url).toBe("/api/dispatch/sessions/plan/decision?id=request-1");
+    expect(requests[2].url).toBe("/api/dispatch/sessions/plan/delivery");
+    expect(JSON.parse(requests[2].body)).toMatchObject({
+      id: "request-1", status: "PROCESSED", exitCode: 0,
+    });
   });
 
   it("修正内容を成功終了と標準出力へ返す", async () => {

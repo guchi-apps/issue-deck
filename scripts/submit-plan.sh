@@ -113,6 +113,23 @@ post_json() {
     "${APP_BASE_URL%/}$path" 2>/dev/null
 }
 
+report_delivery() {
+  local request_id="$1" status="$2" exit_code="$3" summary="$4"
+  # 結果本文は監査用の要約だけを保存し、計画や修正本文をDBへ複製しない
+  summary="${summary:0:500}"
+  python3 - "$request_id" "$status" "$exit_code" "$summary" <<'PY' | post_json /api/dispatch/sessions/plan/delivery >/dev/null
+import json
+import sys
+print(json.dumps({"id": sys.argv[1], "status": sys.argv[2], "exitCode": int(sys.argv[3]), "summary": sys.argv[4]}, ensure_ascii=False))
+PY
+}
+
+report_delivery_best_effort() {
+  if ! report_delivery "$@"; then
+    echo "Warning: 計画の処理結果をissue-deckへ報告できませんでした（id: $1）" >&2
+  fi
+}
+
 get_json() {
   curl -fsS --max-time 10 \
     -H "Authorization: Bearer $DISPATCH_SECRET" \
@@ -173,9 +190,17 @@ while ((SECONDS < DEADLINE)); do
   if RESPONSE="$(get_json "/api/dispatch/sessions/plan/decision?id=$REQUEST_ID")"; then
     FAILED_SINCE=-1
     set +e
-    handle_decision "$RESPONSE"
+    DECISION_OUTPUT="$(handle_decision "$RESPONSE")"
     OUTCOME=$?
     set -e
+    if ((OUTCOME != 1)); then
+      printf '%s\n' "$DECISION_OUTPUT"
+      if ((OUTCOME == 0)); then
+        report_delivery_best_effort "$REQUEST_ID" PROCESSED 0 "$DECISION_OUTPUT"
+      else
+        report_delivery_best_effort "$REQUEST_ID" PROCESS_FAILED "$OUTCOME" "$DECISION_OUTPUT"
+      fi
+    fi
     ((OUTCOME == 1)) || exit "$OUTCOME"
   else
     ((FAILED_SINCE < 0)) && FAILED_SINCE=$SECONDS
@@ -183,9 +208,16 @@ while ((SECONDS < DEADLINE)); do
       RESPONSE="$(release_request "$REQUEST_ID" 2>/dev/null || true)"
       if [[ -n "$RESPONSE" ]]; then
         set +e
-        handle_decision "$RESPONSE"
+        DECISION_OUTPUT="$(handle_decision "$RESPONSE")"
         OUTCOME=$?
         set -e
+        printf '%s\n' "$DECISION_OUTPUT"
+        if ((OUTCOME == 0)); then
+          report_delivery_best_effort "$REQUEST_ID" PROCESSED 0 "$DECISION_OUTPUT"
+        else
+          # GETが連続失敗した後の解除応答なので、セッション処理ではなく通信経路の失敗として残す
+          report_delivery_best_effort "$REQUEST_ID" COMMUNICATION_FAILED "$OUTCOME" "$DECISION_OUTPUT"
+        fi
         ((OUTCOME == 3)) || exit "$OUTCOME"
       fi
       echo "Error: issue-deckとの通信失敗が${POLL_GRACE_SECONDS}秒続いたため、画面待機を終了しました" >&2
@@ -198,9 +230,15 @@ done
 RESPONSE="$(release_request "$REQUEST_ID" 2>/dev/null || true)"
 if [[ -n "$RESPONSE" ]]; then
   set +e
-  handle_decision "$RESPONSE"
+  DECISION_OUTPUT="$(handle_decision "$RESPONSE")"
   OUTCOME=$?
   set -e
+  printf '%s\n' "$DECISION_OUTPUT"
+  if ((OUTCOME == 0)); then
+    report_delivery_best_effort "$REQUEST_ID" PROCESSED 0 "$DECISION_OUTPUT"
+  else
+    report_delivery_best_effort "$REQUEST_ID" PROCESS_FAILED "$OUTCOME" "$DECISION_OUTPUT"
+  fi
   ((OUTCOME == 3)) || exit "$OUTCOME"
 fi
 echo "計画の承認待ちが${WAIT_SECONDS}秒で期限切れになりました。端末で承認を確認してください。" >&2

@@ -164,6 +164,13 @@ export type SessionPlanRequestView = {
   decidedAt: string | null;
   /** フックが結論を受け取ったか。受け取る前でも押し直しはできない（決まった時点で確定） */
   delivered: boolean;
+  pollCount?: number;
+  lastPolledAt?: string | null;
+  decisionObservedAt?: string | null;
+  deliveryStatus?: string | null;
+  deliveryReportedAt?: string | null;
+  deliveryExitCode?: number | null;
+  deliverySummary?: string | null;
 };
 
 export function toSessionPlanRequestView(row: SessionPlanRequest): SessionPlanRequestView {
@@ -178,8 +185,23 @@ export function toSessionPlanRequestView(row: SessionPlanRequest): SessionPlanRe
     expiresAt: row.expiresAt.toISOString(),
     decidedAt: row.decidedAt?.toISOString() ?? null,
     delivered: row.deliveredAt !== null,
+    pollCount: row.pollCount ?? 0,
+    lastPolledAt: row.lastPolledAt?.toISOString() ?? null,
+    decisionObservedAt: row.decisionObservedAt?.toISOString() ?? null,
+    deliveryStatus: row.deliveryStatus ?? null,
+    deliveryReportedAt: row.deliveryReportedAt?.toISOString() ?? null,
+    deliveryExitCode: row.deliveryExitCode ?? null,
+    deliverySummary: row.deliverySummary ?? null,
   };
 }
+
+export const SESSION_PLAN_DELIVERY_STATUSES = [
+  "DECISION_OBSERVED",
+  "PROCESSED",
+  "PROCESS_FAILED",
+  "COMMUNICATION_FAILED",
+] as const;
+export type SessionPlanDeliveryStatus = (typeof SESSION_PLAN_DELIVERY_STATUSES)[number];
 
 /** 画面のボタンと`SessionPlanRequestStatus`の対応 */
 export const SESSION_PLAN_DECISION_STATUS: Record<SessionPlanDecision, SessionPlanRequestStatus> = {
