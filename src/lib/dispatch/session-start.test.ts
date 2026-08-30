@@ -30,6 +30,28 @@ describe("buildSessionStartedCommentBody", () => {
     );
   });
 
+  it("Claude Codeとモデルを案内する", () => {
+    const body = buildSessionStartedCommentBody({ ...params, agent: "claude", model: "sonnet" });
+    expect(body).toContain("- エージェント: Claude Code");
+    expect(body).toContain("- モデル: `sonnet`");
+    expect(body).toContain("Remote Controlか端末から伝えてください。");
+  });
+
+  it("CodexではRemote Controlを案内しない", () => {
+    const body = buildSessionStartedCommentBody({ ...params, agent: "codex", model: "gpt-5-codex" });
+    expect(body).toContain("- エージェント: Codex CLI");
+    expect(body).toContain("- モデル: `gpt-5-codex`");
+    expect(body).toContain("追加の指示は端末から伝えてください。");
+    expect(body).not.toContain("Remote Controlか端末から伝えてください。");
+  });
+
+  it("モデル未指定またはautoはCLIの既定と案内する", () => {
+    expect(buildSessionStartedCommentBody(params)).toContain("- モデル: `CLIの既定`");
+    expect(
+      buildSessionStartedCommentBody({ ...params, agent: "codex", model: "auto" }),
+    ).toContain("- モデル: `CLIの既定`");
+  });
+
   /**
    * マーカーが無いと`comment-source.ts`が役割を判別できず、画面でユーザー本人の発言として
    * 表示される（#1346）。役割はActionsの受付コメントと同じ`guide`で揃える（#860）。

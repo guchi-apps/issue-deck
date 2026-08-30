@@ -210,6 +210,31 @@ dispatch_host_name() {
   printf '%s' "$host_name"
 }
 
+# 受付コメントへ載せるモデルを解決する。**Codexは起動引数、Claude Codeは設定APIを優先する。**
+# `auto`はCLI側の選択に委ねる値なので、コメントでは「CLIの既定」と表示する。
+# 取得できなくても受付コメント自体は投稿するため、空を返して安全な表示へ倒す。
+session_agent_model() {
+  local model app_base_url response
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    printf '%s' "${ISSUE_DECK_CODEX_MODEL:-}"
+    return 0
+  fi
+
+  model="$(dispatch_env_value ISSUE_DECK_CLAUDE_MODEL)"
+  if [[ -n "$model" ]]; then
+    printf '%s' "$model"
+    return 0
+  fi
+
+  app_base_url="$(dispatch_env_value APP_BASE_URL)"
+  [[ -n "$app_base_url" ]] || return 0
+  response="$(curl -fsS --max-time 5 "${app_base_url%/}/api/settings/claude-model" 2>/dev/null || true)"
+  model="$(printf '%s' "$response" | jq -r '.claudeModel // empty' 2>/dev/null || true)"
+  case "$model" in
+    auto|opus|sonnet|haiku) printf '%s' "$model" ;;
+  esac
+}
+
 # 公開したURLをissue-deckの画面へ渡す（#1265）。**スマホから画面を見る唯一の出口**なので、
 # ターミナルのログだけに出しても届かない。宛先と鍵はpollerと同じ`dispatch.env`から読む。
 # 受け口は`session-notify.sh`と共有（`POST /api/dispatch/sessions/activity`）。
@@ -264,13 +289,15 @@ report_session_started_to_issue_deck() {
   [[ -n "$app_base_url" && -n "$dispatch_secret" && -n "$repo_slug" && -n "$host_name" ]] || return 0
 
   body="$(REPO_SLUG="$repo_slug" ISSUE_NUMBER="$ISSUE_NUMBER" HOST_NAME="$host_name" \
-    SESSION_NAME="$TMUX_SESSION_NAME" python3 -c '
+    SESSION_NAME="$TMUX_SESSION_NAME" AGENT_KIND="$AGENT_KIND" AGENT_MODEL="$(session_agent_model)" python3 -c '
 import json, os
 print(json.dumps({
     "repository": os.environ["REPO_SLUG"],
     "issue": int(os.environ["ISSUE_NUMBER"]),
     "host": os.environ["HOST_NAME"],
     "tmuxSessionName": os.environ["SESSION_NAME"],
+    "agent": os.environ["AGENT_KIND"],
+    "model": os.environ["AGENT_MODEL"] or None,
 }))' 2>/dev/null || true)"
   [[ -n "$body" ]] || return 0
 
