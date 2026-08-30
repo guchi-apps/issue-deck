@@ -8,7 +8,6 @@ const CACHE_TTL_MS = 5 * 60_000;
 
 /** ヘッダを得るためだけに送る最小の推論リクエスト。 */
 const PROBE_REQUEST_BODY = {
-  model: "claude-haiku-4-5",
   max_tokens: 1,
   messages: [{ role: "user", content: "ping" }],
 };

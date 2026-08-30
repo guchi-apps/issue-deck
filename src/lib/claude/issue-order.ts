@@ -5,7 +5,6 @@ import {
 import { callClaudeMessages } from "@/lib/claude/request";
 
 /** 着手順の判定に使うモデル。`issue-search.ts`と同じくプラン枠の消費を抑える軽量なもの。 */
-const MODEL = "claude-haiku-4-5";
 
 
 /** 着手順として返させるIssueの上限。これ以上並べても、上から順に着手する用途では読まれない。 */
@@ -210,7 +209,6 @@ export async function decideIssueOrder(
     feature: "issue_order",
     token,
     body: {
-      model: MODEL,
       max_tokens: 2048,
       messages: [{ role: "user", content: buildIssueOrderPrompt({ candidates }) }],
     },

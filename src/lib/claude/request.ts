@@ -2,6 +2,12 @@ import {
   type ClaudeApiFeature,
   recordClaudeApiCall,
 } from "@/lib/claude/api-usage";
+import {
+  APP_AI_MODEL_DEFAULT,
+  type AppAiModel,
+  parseAppAiModel,
+} from "@/lib/app-settings";
+import { db } from "@/lib/db";
 
 /**
  * Anthropic API（`/v1/messages`）を呼ぶ唯一の入口（#2347）。
@@ -45,8 +51,8 @@ function readTokenCount(value: number | undefined): number {
 /**
  * `/v1/messages`へPOSTし、消費したトークンを機能別に計上する。
  *
- * `body`は`model`・`max_tokens`・`messages`のほか、`system`や`output_config`など
- * 機能ごとの指定をそのまま渡してよい（中身には手を加えない）。
+ * `body`は`max_tokens`・`messages`のほか、`system`や`output_config`など
+ * 機能ごとの指定をそのまま渡してよい。`model`は保存済みの共通設定をここで加える。
  */
 export async function callClaudeMessages<T extends ClaudeMessagesResponse = ClaudeMessagesResponse>(
   options: {
@@ -55,6 +61,17 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     body: Record<string, unknown>;
   },
 ): Promise<ClaudeMessagesResult<T>> {
+  let model: AppAiModel = APP_AI_MODEL_DEFAULT;
+  try {
+    const setting = await db.appSetting.findUnique({
+      where: { id: 1 },
+      select: { appAiModel: true },
+    });
+    model = parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
+  } catch {
+    // DBが一時的に読めなくても、従来の固定モデルでAI機能を継続する。
+  }
+  const body = { ...options.body, model };
   const response = await fetch(`${ANTHROPIC_API}/v1/messages`, {
     method: "POST",
     headers: {
@@ -63,7 +80,7 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
       "anthropic-version": ANTHROPIC_VERSION,
       "content-type": "application/json",
     },
-    body: JSON.stringify(options.body),
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
@@ -82,7 +99,7 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
   recordClaudeApiCall({
     feature: options.feature,
     // モデルは応答が返す実際の値を優先する（別名を指定した場合に実体へ寄せるため）。
-    model: json?.model ?? String(options.body.model ?? "unknown"),
+    model: json?.model ?? model,
     tokens: {
       inputTokens: readTokenCount(usage?.input_tokens),
       outputTokens: readTokenCount(usage?.output_tokens),

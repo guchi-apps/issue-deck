@@ -33,7 +33,6 @@ import {
 } from "@/lib/new-app/spec";
 
 /** 相談に使うモデル。`lib/claude/`の他の機能と同じ軽量モデルに揃える。 */
-const MODEL = "claude-haiku-4-5";
 
 export type { ConsultMessage, ConsultRole } from "@/lib/claude/limits";
 
@@ -257,7 +256,6 @@ export async function continueNewAppConsult(
     feature: "new_app_consult",
     token,
     body: {
-      model: MODEL,
       // 返事＋仕様案で1024では足りないことがある。**途中で切れるとJSONが読めなくなる**ため余裕を持たせる
       max_tokens: 2048,
       system: SYSTEM_PROMPT,

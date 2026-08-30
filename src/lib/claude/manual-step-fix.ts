@@ -14,7 +14,6 @@ import {
  * 失敗した手作業の診断に使うモデル。他の機能（`issue-order.ts`など）と揃える。
  * 出すのは**提案まで**で、適用するかどうかは必ず人が決めるため、ここは軽量なもので足りる。
  */
-const MODEL = "claude-haiku-4-5";
 
 /**
  * 手作業アシスタントで想定外のことが起きたときに、原因と直し案を出す（#1869・#2299・#2310）。
@@ -434,7 +433,6 @@ export async function diagnoseManualStepFailure(
     feature: "manual_step_fix",
     token,
     body: {
-      model: MODEL,
       // `steps`（#2310）のぶんだけ応答が長くなる。途中で切れるとJSONとして読めず`manual`へ倒れる
       max_tokens: 1536,
       messages: [{ role: "user", content: buildManualStepFixPrompt(input) }],

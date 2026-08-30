@@ -2,7 +2,6 @@ import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/limits";
 import { callClaudeMessages } from "@/lib/claude/request";
 
 /** あいまい検索に使うモデル。プラン枠の消費を抑える軽量なもの。 */
-const MODEL = "claude-haiku-4-5";
 
 
 /** 1回の判定で残すIssueの上限。これを超えると絞り込みとして役に立たないため。 */
@@ -117,7 +116,6 @@ export async function searchIssues(token: string, input: IssueSearchInput): Prom
     feature: "issue_search",
     token,
     body: {
-      model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: buildIssueSearchPrompt({ ...input, candidates }) }],
     },

@@ -92,6 +92,7 @@ function renderScreen() {
       claudeModel="auto"
       claudeModelAssist="haiku"
       codexModel="auto"
+      appAiModel="claude-haiku-4-5"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}

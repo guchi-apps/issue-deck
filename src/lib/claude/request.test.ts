@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getClaudeApiUsageSummary, resetClaudeApiUsage } from "@/lib/claude/api-usage";
 import { callClaudeMessages } from "@/lib/claude/request";
 
+const { findUnique } = vi.hoisted(() => ({ findUnique: vi.fn() }));
+
+vi.mock("@/lib/db", () => ({
+  db: { appSetting: { findUnique } },
+}));
+
 const NOW = new Date(2026, 7, 4, 12, 0, 0).getTime();
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -14,6 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe("callClaudeMessages", () => {
   beforeEach(() => {
+    findUnique.mockResolvedValue({ appAiModel: "claude-haiku-4-5" });
     resetClaudeApiUsage();
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -118,5 +125,22 @@ describe("callClaudeMessages", () => {
       system: "sys",
       messages: [],
     });
+  });
+
+  it("保存済みのアプリ内AIモデルでbodyの指定を上書きする", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "claude-sonnet-5" });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({
+      feature: "issue_summary",
+      token: "test-token",
+      body: { model: "claude-haiku-4-5", max_tokens: 8, messages: [] },
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5");
   });
 });
