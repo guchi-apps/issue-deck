@@ -41,7 +41,7 @@ beforeEach(async () => {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   workDir = mkdtempSync(path.join(tmpdir(), "submit-plan-"));
-  configFile = path.join(workDir, "notify.env");
+  configFile = path.join(workDir, "dispatch.env");
   planFile = path.join(workDir, "plan.md");
   writeFileSync(configFile, `APP_BASE_URL=${baseUrl}\nDISPATCH_SECRET=test-secret\n`, "utf8");
   writeFileSync(planFile, "## 要約\n\n**テスト計画**\n", "utf8");
@@ -58,7 +58,7 @@ function run(env = {}) {
       cwd: repoRoot,
       env: {
         ...process.env,
-        ISSUE_DECK_NOTIFY_ENV: configFile,
+        ISSUE_DECK_DISPATCH_ENV: configFile,
         ISSUE_SESSION_REPOSITORY: "guchi-apps/issue-deck",
         ISSUE_SESSION_ISSUE_NUMBER: "2545",
         DISPATCH_HOST_NAME: "test-host",
@@ -125,10 +125,26 @@ describe("submit-plan.sh", () => {
     expect(result.stderr).toContain("返事待ちを作れませんでした");
   });
 
-  it("通知設定が無ければ送信しない", async () => {
-    const result = await run({ ISSUE_DECK_NOTIFY_ENV: path.join(workDir, "missing.env") });
+  // #2551: 宛先と鍵は`notify.env`ではなく`dispatch.env`から読む。ここを取り違えていたため、
+  // 実機では宛先が空のまま`exit 1`になり、画面に承認パネルが出なかった
+  it("dispatch.envが無くても環境変数から宛先を読む", async () => {
+    const result = await run({
+      ISSUE_DECK_DISPATCH_ENV: path.join(workDir, "missing.env"),
+      APP_BASE_URL: baseUrl,
+      DISPATCH_SECRET: "env-secret",
+    });
+    expect(result.code).toBe(0);
+    expect(requests[0].authorization).toBe("Bearer env-secret");
+  });
+
+  it("宛先も鍵も見つからなければ送信しない", async () => {
+    const result = await run({
+      ISSUE_DECK_DISPATCH_ENV: path.join(workDir, "missing.env"),
+      APP_BASE_URL: "",
+      DISPATCH_SECRET: "",
+    });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("通知設定がありません");
+    expect(result.stderr).toContain("APP_BASE_URL / DISPATCH_SECRET が見つかりません");
     expect(requests).toHaveLength(0);
   });
 });

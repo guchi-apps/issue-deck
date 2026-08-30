@@ -564,13 +564,40 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 読み替えに書いてあるのは、Claude Code前提の記述をどう置き換えるか。
 
 - `CLAUDE.md`を自分で読むこと（**Codexが自動で読むのは`AGENTS.md`**）
-- 計画は`ExitPlanMode`ではなく`scripts/submit-plan.sh <計画ファイル>`で登録・判断待ち
 - 確認は`AskUserQuestion`ではなく端末＋Issueコメント（**ラベルを外すのも自分**）
 - `Read`・`Grep`・`Glob`はシェルで代替する
 - 承認プロンプトは出ない・書き込みはworktreeと本体の`.git`に閉じている（`git`はそのまま使える）
 
 **読み替えが見つからない場合、Codexでの起動は失敗する**（`start-issue.sh`）。Claude Code前提の
 記述だけが残ったプロンプトを渡すと、存在しない手順を待って止まるため。
+
+### 手順が変わるものは、末尾の読み替えに書かず本文を差し替える（#2551）
+
+**「本文はこう書いてあるが、末尾でこう読み替える」が成立するのは、道具の名前が変わるときだけ。**
+やることの順序そのものが変わるものは、本文側を書き換える。
+
+#2545で計画の登録を`scripts/submit-plan.sh`へ寄せたとき、読み替えは末尾の補足にだけ置いた。
+本文（`## 最初にやること`・`## Issueに残す記録`）には「Plan modeで提示する」「フックが自動で
+投稿するので、**投稿されていなければ手で投稿する**」が残ったままで、Codexのセッションは
+そちらに従い、計画を`gh issue comment`で自分で投稿して承認を待たずに実装へ進んだ（#2550）。
+末尾の1行より、本文で2か所くり返される手順の方が強い。
+
+そのため計画の出し方だけは、生成時にエージェント別の文面へ差し替える。
+
+- ひな形の該当箇所は`{{PLAN_INSTRUCTIONS}}`・`{{PLAN_COMMENT_NOTE}}`のプレースホルダ
+- 埋めるのは`scripts/start-issue.sh`（`--agent`の値で分岐）。汎用ランチャー
+  （`scripts/generic-start-issue.sh`）はClaude Codeでしか起動しないので、Claude向けの文面で埋める
+- **43KBの本文を分岐させるわけではない。** 差し替えるのは矛盾する2か所だけで、残りは共通のまま
+
+### 宛先と鍵は`dispatch.env`から読む（#2551）
+
+`scripts/submit-plan.sh`が使う`APP_BASE_URL`・`DISPATCH_SECRET`は、`session-notify.sh`・
+pollerと同じ`~/.config/issue-deck/dispatch.env`にある。**`notify.env`には無い**——あちらが持つのは
+Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう書いてある。
+
+**環境変数だけを見るのも不可**。pollerは`dispatch.env`を`set -a`で読んでから起動するが、tmuxの
+セッションが引き継ぐのは**tmuxサーバー側の環境**で、サーバーをいつ・誰が起こしたかで届くか
+どうかが変わる（`build_env_prefix`が明示的に転送するのは`ISSUE_DECK_*`だけ）。
 
 ## 画面から選んだときに通る道（#2505）
 
@@ -607,7 +634,8 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 | 種別の解決・Codexの通常／resume引数の組み立て・フックの`-c`の組み立て・サンドボックスの下見 | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
-| `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
+| `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記・計画の出し方の差し替え | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
+| 計画の登録と判断待ち（Codex用） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
 | `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |

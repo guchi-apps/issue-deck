@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-CONFIG_FILE="${ISSUE_DECK_NOTIFY_ENV:-$HOME/.config/issue-deck/notify.env}"
+CONFIG_FILE="${ISSUE_DECK_DISPATCH_ENV:-$HOME/.config/issue-deck/dispatch.env}"
 WAIT_SECONDS="${SESSION_PLAN_WAIT_SECONDS:-1800}"
 POLL_INTERVAL="${SESSION_PLAN_POLL_INTERVAL_SECONDS:-3}"
 POLL_GRACE_SECONDS="${SESSION_PLAN_POLL_GRACE_SECONDS:-60}"
@@ -23,16 +23,34 @@ PLAN_FILE="$1"
 [[ "$WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]] || { echo "Error: SESSION_PLAN_WAIT_SECONDSは1以上の整数にしてください" >&2; exit 1; }
 [[ "$POLL_INTERVAL" =~ ^[1-9][0-9]*$ ]] || { echo "Error: SESSION_PLAN_POLL_INTERVAL_SECONDSは1以上の整数にしてください" >&2; exit 1; }
 [[ "$POLL_GRACE_SECONDS" =~ ^[0-9]+$ ]] || { echo "Error: SESSION_PLAN_POLL_GRACE_SECONDSは0以上の整数にしてください" >&2; exit 1; }
-[[ -f "$CONFIG_FILE" ]] || { echo "Error: 通知設定がありません: $CONFIG_FILE" >&2; exit 1; }
 
-set -a
-# shellcheck disable=SC1090
-source "$CONFIG_FILE"
-set +a
-APP_BASE_URL="${APP_BASE_URL:-}"
-DISPATCH_SECRET="${DISPATCH_SECRET:-}"
+# 宛先と鍵は`session-notify.sh`・pollerと同じ`dispatch.env`から読む（#1264・#2551）。
+#
+# **`notify.env`からは読めない**（#2551）。あちらが持つのはSignalyのwebhook URLだけで、
+# `deploy/subpc/notify.env.example`にも「報告先はdispatch.envから読む」と書いてある。
+# #2545はここを`notify.env`から読んでいたため、実機では宛先が空のまま`exit 1`になり、
+# Codexのセッションが計画の登録を諦めて`gh issue comment`へ落ちていた（＝画面に承認パネルが
+# 出ない）。
+#
+# **環境変数だけにも頼らない。** pollerは`dispatch.env`を`set -a`で読んでから起動するが、
+# tmuxのセッションが引き継ぐのはtmuxサーバー側の環境で、サーバーをいつ・誰が起こしたかで
+# 届くかどうかが変わる（`build_env_prefix`が転送するのは`ISSUE_DECK_*`だけ）。
+dispatch_env_value() {
+  local name="$1"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # ファイルが定義していない値は、subshellが引き継いだ環境変数がそのまま出る
+    # shellcheck disable=SC1090
+    (set +eu; source "$CONFIG_FILE" >/dev/null 2>&1; printf '%s' "${!name:-}")
+    return 0
+  fi
+  printf '%s' "${!name:-}"
+}
+
+APP_BASE_URL="$(dispatch_env_value APP_BASE_URL)"
+DISPATCH_SECRET="$(dispatch_env_value DISPATCH_SECRET)"
 [[ -n "$APP_BASE_URL" && -n "$DISPATCH_SECRET" ]] || {
-  echo "Error: APP_BASE_URL / DISPATCH_SECRET が未設定です（$CONFIG_FILE）" >&2
+  echo "Error: APP_BASE_URL / DISPATCH_SECRET が見つかりません（$CONFIG_FILE）" >&2
+  echo "       サブPCでは ~/.config/issue-deck/dispatch.env に両方を置いてください（deploy/subpc/dispatch.env.example 参照）。" >&2
   exit 1
 }
 
@@ -49,7 +67,8 @@ fi
 [[ "$REPOSITORY" =~ ^[^/]+/[^/]+$ ]] || { echo "Error: リポジトリを特定できません" >&2; exit 1; }
 [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Error: Issue番号を特定できません" >&2; exit 1; }
 
-HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || printf 'unknown')}"
+HOST_NAME="$(dispatch_env_value DISPATCH_HOST_NAME)"
+[[ -n "$HOST_NAME" ]] || HOST_NAME="$(hostname -s 2>/dev/null || printf 'unknown')"
 PLAN_BASE_SHA="$(git rev-parse origin/develop 2>/dev/null || git rev-parse origin/main 2>/dev/null || true)"
 
 build_payload() {
