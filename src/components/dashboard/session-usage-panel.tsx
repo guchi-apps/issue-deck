@@ -4,9 +4,11 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
@@ -51,6 +53,8 @@ type SessionUsagePanelProps = {
   isLoading: boolean;
   error: string | null;
   days: number;
+  agent: SessionUsageAgent;
+  onChangeAgent: (agent: SessionUsageAgent) => void;
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   /**
@@ -345,6 +349,8 @@ export function SessionUsagePanel({
   isLoading,
   error,
   days,
+  agent,
+  onChangeAgent,
   onChangeDays,
   onRefresh,
   onOpenIssue,
@@ -376,7 +382,7 @@ export function SessionUsagePanel({
           <p className="text-[11px] text-muted-foreground">
             {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
                 開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする） */}
-            サブPCのローカルセッションが使ったトークン
+            サブPCの{agent === "claude" ? "Claude" : "Codex"}セッションが使ったトークン
             {data?.reportedAt
               ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`
               : ""}
@@ -410,25 +416,46 @@ export function SessionUsagePanel({
         </Button>
       </header>
 
+      <Segmented
+        ariaLabel="表示するエージェント"
+        options={[
+          { value: "claude" as const, label: "Claude" },
+          { value: "codex" as const, label: "Codex" },
+        ]}
+        value={agent}
+        onChange={onChangeAgent}
+      />
+
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
       <section className="flex flex-col gap-2 rounded-lg border p-3">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs font-semibold">プラン枠</span>
+          <span className="text-xs font-semibold">
+            {agent === "claude" ? "Claude" : "Codex"} プラン枠
+          </span>
           <span className="text-[11px] text-muted-foreground">実測（下の「枠%」の逆算元）</span>
         </div>
-        <ClaudeUsageCard
-          data={data?.planUsage ?? null}
-          isLoading={isLoading && !data}
-          error={null}
-          notConfigured={data?.planNotConfigured ?? false}
-        />
+        {agent === "claude" ? (
+          <ClaudeUsageCard
+            data={data?.planUsage && !("host" in data.planUsage) ? data.planUsage : null}
+            isLoading={isLoading && !data}
+            error={null}
+            notConfigured={data?.planNotConfigured ?? false}
+          />
+        ) : (
+          <CodexUsageCard
+            data={data?.planUsage && "host" in data.planUsage ? data.planUsage : null}
+            isLoading={isLoading && !data}
+            error={null}
+            notConfigured={data?.planNotConfigured ?? false}
+          />
+        )}
       </section>
 
       <p className="rounded-lg border border-dashed p-2 text-[11px] text-muted-foreground">
         <span className="font-semibold text-foreground">金額はAPI換算の目安です。</span>
-        サブスクの実費ではありません。
+        {agent === "claude" ? "Claude" : "Codex"}サブスクの実費ではありません。
         {quota ? (
           <>
             「枠%」は、上の{quota.windowLabel}枠の実測（{Math.round(quota.usedPercent)}%）と

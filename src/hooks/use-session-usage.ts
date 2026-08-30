@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
+import type { CodexUsage } from "@/lib/dispatch/codex-usage";
+import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 import type { SessionUsageSummary } from "@/lib/session-usage-view";
 
 export type SessionUsageResponse = SessionUsageSummary & {
+  agent: SessionUsageAgent;
   /** プラン枠のメーター。取得できなければnull */
-  planUsage: ClaudeUsage | null;
+  planUsage: ClaudeUsage | CodexUsage | null;
   /** `CLAUDE_CODE_OAUTH_TOKEN`が未設定。エラーではないので理由を1行だけ出す */
   planNotConfigured: boolean;
 };
@@ -29,7 +32,11 @@ type UseSessionUsageResult = {
  * `enabled`がfalseの間は取得しない。**一度取得した内容は保持する**（画面を出入りするたびに
  * 取り直さない。`use-branch-flow.ts`と同じ扱い）。
  */
-export function useSessionUsage(enabled: boolean, days: number): UseSessionUsageResult {
+export function useSessionUsage(
+  enabled: boolean,
+  days: number,
+  agent: SessionUsageAgent,
+): UseSessionUsageResult {
   const [data, setData] = useState<SessionUsageResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +54,10 @@ export function useSessionUsage(enabled: boolean, days: number): UseSessionUsage
     // 起きない。
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
+    setData(null);
     setError(null);
 
-    fetch(`/api/session-usage?days=${days}`, { signal: controller.signal })
+    fetch(`/api/session-usage?days=${days}&agent=${agent}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
         return (await res.json()) as SessionUsageResponse;
@@ -69,7 +77,7 @@ export function useSessionUsage(enabled: boolean, days: number): UseSessionUsage
       cancelled = true;
       controller.abort();
     };
-  }, [enabled, days, reloadKey]);
+  }, [enabled, days, agent, reloadKey]);
 
   return { data, isLoading, error, refresh };
 }

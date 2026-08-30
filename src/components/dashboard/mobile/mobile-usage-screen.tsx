@@ -6,6 +6,7 @@ import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 
 /**
  * スマホの「AI使用量」画面（#2504）。
@@ -21,6 +22,8 @@ export function MobileUsageScreen({
   isLoading,
   error,
   days,
+  agent,
+  onChangeAgent,
   onChangeDays,
   onRefresh,
   onOpenIssue,
@@ -30,6 +33,8 @@ export function MobileUsageScreen({
   isLoading: boolean;
   error: string | null;
   days: number;
+  agent: SessionUsageAgent;
+  onChangeAgent: (agent: SessionUsageAgent) => void;
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   onOpenIssue?: (repository: string, issueNumber: number) => void;
@@ -58,6 +63,8 @@ export function MobileUsageScreen({
           isLoading={isLoading}
           error={error}
           days={days}
+          agent={agent}
+          onChangeAgent={onChangeAgent}
           onChangeDays={onChangeDays}
           onRefresh={onRefresh}
           onOpenIssue={onOpenIssue}

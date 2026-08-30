@@ -1444,7 +1444,9 @@ model SessionUsage {
 
   /// 報告してきたホスト名（DispatchHost.nameと対応）
   host String @db.VarChar(191)
-  /// 転記のファイル名から取ったセッションID（Claude CodeのUUID）。ホストと合わせて一意
+  /// 使用したローカルエージェント。既存行はClaudeとして移行する
+  agent String @default("claude") @db.VarChar(16)
+  /// 転記のファイル名から取ったセッションID。ホスト・エージェントと合わせて一意
   sessionId String @db.VarChar(191)
   /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
   transcript String @db.Text
@@ -1483,7 +1485,7 @@ model SessionUsage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([host, sessionId])
+  @@unique([host, agent, sessionId])
   @@index([endedAt])
   @@index([repository, issueNumber])
 }

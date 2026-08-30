@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { fetchClaudeUsage, type ClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
+import { getLatestCodexUsage, type CodexUsage } from "@/lib/dispatch/codex-usage";
+import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 import {
   buildQuotaScale,
   buildSessionUsageSummary,
@@ -37,8 +39,13 @@ function parseDays(value: string | null): number {
   return (ALLOWED_DAYS as readonly number[]).includes(parsed) ? parsed : DEFAULT_DAYS;
 }
 
+function parseAgent(value: string | null): SessionUsageAgent {
+  return value === "codex" ? "codex" : "claude";
+}
+
 /** DBの行（BigInt）を、そのままJSONにできる形へ落とす */
 function toEntry(row: {
+  agent: string;
   sessionId: string;
   host: string;
   kind: string;
@@ -69,6 +76,7 @@ function toEntry(row: {
   }
 
   return {
+    agent: row.agent === "codex" ? "codex" : "claude",
     sessionId: row.sessionId,
     host: row.host,
     kind: row.kind,
@@ -94,16 +102,18 @@ export async function GET(request: NextRequest) {
   }
 
   const days = parseDays(request.nextUrl.searchParams.get("days"));
+  const agent = parseAgent(request.nextUrl.searchParams.get("agent"));
   const nowMs = Date.now();
   const periodStartMs = sessionUsagePeriodStartMs(nowMs, days);
   const quotaStartMs = nowMs - QUOTA_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
   const sinceMs = Math.min(periodStartMs, quotaStartMs);
 
   const rows = await db.sessionUsage.findMany({
-    where: { endedAt: { gte: new Date(sinceMs) } },
+    where: { agent, endedAt: { gte: new Date(sinceMs) } },
     orderBy: { endedAt: "desc" },
     select: {
       sessionId: true,
+      agent: true,
       host: true,
       kind: true,
       repository: true,
@@ -129,11 +139,10 @@ export async function GET(request: NextRequest) {
 
   // **プラン枠の取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、
   // 取れない日があっても「枠換算が出ないだけ」で済ませる（設定画面と同じ扱い）。
-  let planUsage: ClaudeUsage | null = null;
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  if (token) {
-    planUsage = await fetchClaudeUsage(token).catch(() => null);
-  }
+  let planUsage: ClaudeUsage | CodexUsage | null = null;
+  const token = agent === "claude" ? process.env.CLAUDE_CODE_OAUTH_TOKEN : null;
+  if (agent === "claude" && token) planUsage = await fetchClaudeUsage(token).catch(() => null);
+  if (agent === "codex") planUsage = await getLatestCodexUsage().catch(() => null);
 
   const quota = planUsage
     ? buildQuotaScale({ windows: planUsage.windows, entries, nowMs })
@@ -142,7 +151,7 @@ export async function GET(request: NextRequest) {
   const summary = buildSessionUsageSummary({ entries, nowMs, days, reportedAt: reportedAt?.toISOString() ?? null, quota });
 
   return NextResponse.json(
-    { ...summary, planUsage, planNotConfigured: !token },
+    { ...summary, agent, planUsage, planNotConfigured: agent === "claude" ? !token : !planUsage },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

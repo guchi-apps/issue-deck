@@ -15,6 +15,7 @@ import { startOfJstDayMs, toJstParts } from "@/lib/format-date-time";
 
 /** APIが返す（＝画面が受け取る）セッション1本ぶん。DBのBigIntはここでnumberへ落とす */
 export type SessionUsageEntry = {
+  agent: "claude" | "codex";
   sessionId: string;
   host: string;
   kind: string;

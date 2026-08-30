@@ -1072,7 +1072,12 @@ export function IssueDeckShell({
   const usageDays = SESSION_USAGE_PERIODS.some((period) => period.days === storedUsageDays)
     ? storedUsageDays
     : 7;
-  const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays);
+  const [storedUsageAgent, setUsageAgent] = usePersistedState<"claude" | "codex">(
+    "issue-deck:usage-agent",
+    "claude",
+  );
+  const usageAgent = storedUsageAgent === "codex" ? "codex" : "claude";
+  const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays, usageAgent);
 
   /**
    * 使用量の明細からIssueを開く（#2504）。**記録はリポジトリ名（ownerを除く）しか持たない**
@@ -1449,6 +1454,8 @@ export function IssueDeckShell({
                   isLoading={sessionUsage.isLoading}
                   error={sessionUsage.error}
                   days={usageDays}
+                  agent={usageAgent}
+                  onChangeAgent={setUsageAgent}
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
@@ -1710,6 +1717,8 @@ export function IssueDeckShell({
                   isLoading={sessionUsage.isLoading}
                   error={sessionUsage.error}
                   days={usageDays}
+                  agent={usageAgent}
+                  onChangeAgent={setUsageAgent}
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
