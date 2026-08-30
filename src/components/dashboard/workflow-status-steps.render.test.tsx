@@ -37,6 +37,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     ...overrides,
   };
 }

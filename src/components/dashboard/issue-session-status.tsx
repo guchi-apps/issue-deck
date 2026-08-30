@@ -183,6 +183,10 @@ export function IssueSessionStatus({
     kind: "INSTRUCTION",
     hasActiveControlJob,
   });
+  // Codexで動いているセッションか（#2519）。**pollerが申告したときだけ分かる**（`null`は
+  // Claude Codeか、申告しない古いpoller）。追加指示の届き方の説明がここで変わる——Codexは
+  // `codex queue`で積むので、承認プロンプト・選択フォームの表示中かどうかに左右されない
+  const isCodexSession = session.codexThreadKnown !== null;
   // 送れる本文かどうかは受け口（`POST /api/dispatch`）と同じ関数で判定する。
   // 画面だけ緩いと、押せたのに400で弾かれる
   const instructionBody = parseSessionInstruction(instruction);
@@ -449,7 +453,10 @@ export function IssueSessionStatus({
               <p className="w-full break-words text-left text-xs text-muted-foreground">
                 改行は送れません（{SESSION_INSTRUCTION_MAX_LENGTH}
                 文字まで）。長い指示はIssueにコメントし、ここには「コメントを読んでから続けて」と送ってください。
-                届くまで最大1分ほどかかり、承認プロンプトや選択フォームが出ている間は送らずに見送ります。
+                届くまで最大1分ほどかかり、
+                {isCodexSession
+                  ? "いま走っているターンは止まらず、次のターンの頭に届きます。"
+                  : "承認プロンプトや選択フォームが出ている間は送らずに見送ります。"}
               </p>
             </div>
           )}

@@ -443,6 +443,7 @@ describe("DispatchQueueButton のホスト表示", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }

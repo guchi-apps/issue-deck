@@ -27,6 +27,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     previewUrl: null,
     reapAt: null,
     reapReason: null,
+    codexThreadKnown: null,
     firstSeenAt: "2026-08-14T09:00:00.000Z",
     // pollerが1巡ごとに更新するので、生きている限り常に「今」に近い
     lastReportedAt: NOW.toISOString(),
@@ -393,6 +394,42 @@ describe("IssueSessionStatus のセッション操作", () => {
       expect(screen.getByText(/pollerが追加指示の送信に対応していません/)).not.toBeNull();
       // 停止・終了はそのまま押せる（申告が独立している）
       expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(false);
+    });
+
+    /**
+     * #2519。Codexのセッションへは`codex queue --thread <UUID>`で送るが、UUIDは
+     * `SessionStart`フックからしか取れず、ディレクトリの信頼確認に答えるまで飛ばない。
+     * **押せてしまうと、pollerが見送るまで何が起きたか分からない。**
+     */
+    it("Codexのセッションは宛先が分かるまで押せず、理由が出る", () => {
+      render(
+        <IssueSessionStatus
+          session={session({ codexThreadKnown: false })}
+          dispatch={makeDispatch()}
+        />,
+      );
+      openControls();
+
+      expect(
+        screen.getByRole("button", { name: "追加指示を送る" }).hasAttribute("disabled"),
+      ).toBe(true);
+      expect(screen.getByText(/宛先がまだ分かりません/)).not.toBeNull();
+      // 停止・終了はtmux側の操作なので宛先が要らない
+      expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(false);
+    });
+
+    // 届き方がClaude Codeと違う（走っているターンは止まらず、次のターンの頭に入る）
+    it("Codexのセッションでは、届き方の説明が変わる", () => {
+      render(
+        <IssueSessionStatus
+          session={session({ codexThreadKnown: true })}
+          dispatch={makeDispatch()}
+        />,
+      );
+      openForm();
+
+      expect(screen.getByText(/次のターンの頭に届きます/)).not.toBeNull();
+      expect(screen.queryByText(/承認プロンプトや選択フォームが出ている間/)).toBeNull();
     });
 
     it("終了済みのセッションには出さない", () => {

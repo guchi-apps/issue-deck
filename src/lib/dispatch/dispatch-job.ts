@@ -44,7 +44,8 @@ export type DispatchJobStatus =
  * - `QUESTION` … 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する（#1294）。
  *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
  * - `INSTRUCTION` … 走っているセッションへ追加指示を1行流す（#1012）。pollerが3段階プロトコル
- *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る
+ *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る。**Codexのセッションへは
+ *   `codex queue`で積む**（#2519。`send-keys`を使わないので3段階プロトコルを通らない）
  * - `CROSS_REPO_QUESTION` … 複数リポジトリ横断の質問セッションを立てる（#1454）。**`QUESTION`とは
  *   別物**で、あちらは`claude -p`を1回走らせて終わる想定なのに対し、こちらは`LAUNCH`と同じく
  *   tmuxセッションを立てる（回答後もセッションが残り、追加指示で追い質問ができる）。参照する
@@ -1154,6 +1155,7 @@ export type SessionControlRejection =
   | "instruction_unsupported"
   | "session_not_found"
   | "session_not_alive"
+  | "codex_thread_unknown"
   | "already_queued";
 
 export function describeSessionControlRejection(
@@ -1178,6 +1180,12 @@ export function describeSessionControlRejection(
       return `${formatDispatchHostName(context.hostName)} にこのIssueのセッションが見当たりません。`;
     case "session_not_alive":
       return "このセッションは既に終了しています。";
+    case "codex_thread_unknown":
+      // **Codexのセッションだけに出る**（#2519）。`codex queue`の宛先はセッションUUIDで、
+      // それが手に入るのは`SessionStart`フックのJSONだけ。フックはディレクトリの信頼確認に
+      // 答えるまで1つも飛ばないため、答えるまでは送る相手を特定できない。
+      // **何をすれば送れるようになるかまで書く**（`instruction_unsupported`と同じ立場）
+      return "Codexのセッションの宛先がまだ分かりません（起動直後のディレクトリの信頼確認に答えると送れるようになります）。";
     case "already_queued":
       return `このIssueには未処理の${label.action}が既にあります。`;
   }
@@ -1194,7 +1202,7 @@ export function resolveSessionControlRejection(params: {
     | Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable">
     | null
     | undefined;
-  session: Pick<DispatchSessionView, "state"> | null | undefined;
+  session: Pick<DispatchSessionView, "state" | "codexThreadKnown"> | null | undefined;
   kind: SessionControlJobKind;
   hasActiveControlJob: boolean;
 }): SessionControlRejection | null {
@@ -1213,6 +1221,13 @@ export function resolveSessionControlRejection(params: {
   // セッションを片付ける用途があるので許す
   if (params.session.state === "GONE") return "session_not_found";
   if (params.kind !== "KILL" && params.session.state !== "ALIVE") return "session_not_alive";
+  // **Codexのセッションは宛先（スレッドUUID）が分かるまで送れない**（#2519）。`false`を送って
+  // くるのは、Codexで起きていてまだ`SessionStart`フックが飛んでいないセッションだけ。
+  // Claude Codeの行と、この項目を申告しない古いpollerでは`null`のまま＝従来どおり送れる。
+  // **停止・終了には効かない**（`C-c`も`kill-session`もtmux側の操作で、宛先が要らない）
+  if (params.kind === "INSTRUCTION" && params.session.codexThreadKnown === false) {
+    return "codex_thread_unknown";
+  }
   if (params.hasActiveControlJob) return "already_queued";
   return null;
 }

@@ -17,10 +17,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const libPath = path.join(repoRoot, "scripts/lib/agent-cli.sh");
 
 /** `agent-cli.sh`をsourceしたうえで`script`を実行し、標準出力と終了コードを返す */
-function run(script) {
+function run(script, env) {
   const body = [`source ${JSON.stringify(libPath)}`, script].join("\n");
   try {
-    const stdout = execFileSync("bash", ["-c", body], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = execFileSync("bash", ["-c", body], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
     return { stdout, status: 0 };
   } catch (error) {
     return { stdout: error.stdout ?? "", status: error.status ?? 1 };
@@ -184,5 +188,95 @@ describe("agent_cli_codex_project_hook_file", () => {
   it("`.codex/config.toml`があれば検出する", () => {
     const dir = makeDir({ ".codex/config.toml": "model = \"x\"\n" });
     expect(detect(dir)).toMatchObject({ stdout: path.join(dir, ".codex/config.toml"), status: 0 });
+  });
+});
+
+// `agent_cli_codex_sandbox_probe`（#2526）。
+//
+// ここが崩れると、**画面でCodexを選べるのにセッションが即死する**（`codex`コマンドは入って
+// いるのにbubblewrapがサンドボックスを組み立てられないホストがある。subpcで実際に起きた）か、
+// 逆に**動くホストでCodexを選べなくなる**かのどちらかになる。実機のカーネル設定に依存する
+// 判定なので、`codex`を偽物に差し替えて境界だけを固定する。
+describe("agent_cli_codex_sandbox_probe", () => {
+  const tmpDirs = [];
+
+  /** `codex`として振る舞うスクリプトを置いた PATH 用のディレクトリを作る */
+  function makeCodexBin(script) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-codex-"));
+    tmpDirs.push(dir);
+    if (script !== null) {
+      const target = path.join(dir, "codex");
+      fs.writeFileSync(target, script);
+      fs.chmodSync(target, 0o755);
+    }
+    return dir;
+  }
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  /** 偽の`codex`だけが見えるPATHで下見して、判定と材料の行を返す */
+  function probe(script, env = {}) {
+    const dir = makeCodexBin(script);
+    const { stdout } = run(
+      [
+        `probe="$(agent_cli_codex_sandbox_probe)"`,
+        `printf '%s\\n%s\\n' "$(agent_cli_codex_sandbox_probe_state "$probe")" "$(agent_cli_codex_sandbox_probe_reason "$probe")"`,
+      ].join("\n"),
+      { PATH: `${dir}:/usr/bin:/bin`, ...env },
+    );
+    const [state, reason] = stdout.split("\n");
+    return { state: state ?? "", reason: reason ?? "" };
+  }
+
+  it("`codex`が無ければ unknown（判定材料が無いので塞がない）", () => {
+    expect(probe(null).state).toBe("unknown");
+  });
+
+  // `codex sandbox`を持たない版では確かめようがない。ここを`broken`にすると、動くかもしれない
+  // ホストでCodexを選べなくなる。**証拠があるときだけ塞ぐ。**
+  it("`codex sandbox`を持たない版なら unknown", () => {
+    expect(probe("#!/bin/bash\nexit 1\n").state).toBe("unknown");
+  });
+
+  it("サンドボックスを組み立てられれば ok", () => {
+    expect(probe("#!/bin/bash\nexit 0\n")).toEqual({ state: "ok", reason: "" });
+  });
+
+  // 材料として返すのは最初の非空行だけ。この1行がそのまま「ホストのuserns制限」の目印になる。
+  it("組み立てに失敗すれば broken と、エラーの最初の行を返す", () => {
+    const script = [
+      "#!/bin/bash",
+      'if [[ "$2" == "--help" ]]; then exit 0; fi',
+      "echo >&2",
+      "echo 'bwrap: setting up uid map: Permission denied' >&2",
+      "echo '2行目は捨てる' >&2",
+      "exit 1",
+    ].join("\n");
+    expect(probe(script)).toEqual({
+      state: "broken",
+      reason: "bwrap: setting up uid map: Permission denied",
+    });
+  });
+
+  // 下見と起動で違うモードを見ていると、「下見は通ったのに起動で落ちる」が起きる。
+  // `codex sandbox`は`--sandbox`を受け取らないので`-c sandbox_mode=`で渡す。
+  it("起動と同じサンドボックスのモードで下見する", () => {
+    const script = ['#!/bin/bash', 'if [[ "$2" == "--help" ]]; then exit 0; fi', 'echo "$*" >&2', "exit 1"].join("\n");
+    expect(probe(script).reason).toBe(
+      "sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- /bin/true",
+    );
+    expect(probe(script, { ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }).reason).toBe(
+      "sandbox -c sandbox_mode=danger-full-access -- /bin/true",
+    );
+  });
+
+  // TUIへの引数をここへ持ち込むと、下見だけが不正な引数で落ちて`broken`になる。
+  it("`ISSUE_DECK_CODEX_EXTRA_ARGS`は下見に持ち込まない", () => {
+    const script = ['#!/bin/bash', 'if [[ "$2" == "--help" ]]; then exit 0; fi', 'echo "$*" >&2', "exit 1"].join("\n");
+    expect(probe(script, { ISSUE_DECK_CODEX_EXTRA_ARGS: "--search" }).reason).not.toContain("--search");
   });
 });
