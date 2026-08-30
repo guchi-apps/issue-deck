@@ -982,6 +982,39 @@ describe("DispatchHostPanel", () => {
       expect(screen.queryByText("A1B2-C3D4")).toBeNull();
     });
 
+    // ジョブが終わるとキューのポーリングは20秒間隔へ落ちる。残り時間をそれに任せると
+    // カウントダウンが20秒刻みで飛び、切れたコードが最大20秒残る
+    it("ポーリングを待たずに、残り時間を1秒ごとに数え直す", async () => {
+      render(
+        <DispatchHostPanel
+          hosts={[makeHost({ codexRemoteControlCapable: true })]}
+          sessions={[]}
+          jobs={[
+            pairingJob({
+              status: "SUCCEEDED",
+              finishedAt: NOW.toISOString(),
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(NOW.getTime() + 65_000).toISOString(),
+            }),
+          ]}
+          onRequestCodexPairing={async () => ({ ok: true })}
+        />,
+      );
+
+      expect(screen.getByText("あと 1分05秒")).toBeTruthy();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(screen.getByText("あと 55秒")).toBeTruthy();
+
+      // 期限が来たら、同じ props のまま行ごと消える
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(56_000);
+      });
+      expect(screen.queryByText("A1B2-C3D4")).toBeNull();
+    });
+
     it("失敗の理由をボタンの下に出す", () => {
       render(
         <DispatchHostPanel

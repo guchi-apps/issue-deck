@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Smartphone,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,7 +22,6 @@ import {
   describeCodexPairingRejection,
   formatCodexPairingCountdown,
   resolveCodexPairingRejection,
-  type DispatchHostCodexPairingRow,
   type CodexPairingTone,
 } from "@/lib/dispatch/codex-pairing";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
@@ -281,8 +280,10 @@ function HostCard({
   // CodexのRemote Control相当（#2524）。**`canReboot`と違って常に出す。**
   // あちらは「落とす理由があるときだけ」出せばよいが、こちらは押したいと思ったときが
   // 出ていてほしいときそのもの（Codexのセッションが走っているかどうかは、押す前には
-  // 画面から読み取れない——`codex agents`の一覧を機械可読で取る手段が無いため）
-  const codexPairing = describeCodexPairingJob(codexPairingJob);
+  // 画面から読み取れない——`codex agents`の一覧を機械可読で取る手段が無いため）。
+  //
+  // **行の組み立ては`CodexPairingRow`の中で行う**（`RebootRow`とはここが違う）。
+  // コードには10分の寿命があり、残り時間を1秒ごとに数え直す必要があるため
   const canCodexPairing =
     onRequestCodexPairing !== undefined && host.codexRemoteControlCapable === true;
 
@@ -347,12 +348,8 @@ function HostCard({
           セッションの一覧の側ではなくこちらに属する */}
       {canCodexPairing && (
         <CodexPairingRow
-          hostName={host.name}
-          result={codexPairing}
-          rejection={resolveCodexPairingRejection({
-            host,
-            hasQueuedJob: codexPairing?.pending === true,
-          })}
+          host={host}
+          job={codexPairingJob}
           onRequestCodexPairing={onRequestCodexPairing}
         />
       )}
@@ -589,24 +586,29 @@ function RebootRow({
  * 全部見える（`serverName`はホスト名で、Issueごとには分かれない）。押す前にその旨を出しておく。
  */
 function CodexPairingRow({
-  hostName,
-  result,
-  rejection,
+  host,
+  job,
   onRequestCodexPairing,
 }: {
-  hostName: string;
-  result: DispatchHostCodexPairingRow | null;
-  rejection: ReturnType<typeof resolveCodexPairingRejection>;
+  host: DispatchHostView;
+  job: DispatchJobView | null;
   onRequestCodexPairing: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
+  const hostName = host.name;
   const [sending, setSending] = useState(false);
   // 積めなかった理由（`RebootRow`と同じ）。**次に押すまで残す**（消えると押した結果が無かったことになる）
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 残り時間を数え直すための現在時刻（#2524）。**ポーリングの間隔に任せない。**
+  // ジョブが終わるとキューのポーリングは20秒間隔（`IDLE_POLL_INTERVAL_MS`）へ落ちるため、
+  // そのままだとカウントダウンが20秒刻みで飛び、**切れたコードが最大20秒残る**
+  const [now, setNow] = useState(() => Date.now());
 
+  const result = describeCodexPairingJob(job, new Date(now));
   const pending = sending || (result?.pending ?? false);
+  const rejection = resolveCodexPairingRejection({ host, hasQueuedJob: pending });
   const disabled = pending || rejection !== null;
   const code = result?.code ?? null;
   const countdown = formatCodexPairingCountdown(result?.expiresInSeconds ?? null);
@@ -617,6 +619,14 @@ function CodexPairingRow({
       : rejection
         ? { label: describeCodexPairingRejection(rejection, hostName), tone: "warn" as const }
         : null;
+
+  // **コードが出ている間だけ回す。** 出ていなければ数えるものが無く、無駄に再描画するだけ
+  const counting = code !== null;
+  useEffect(() => {
+    if (!counting) return;
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, [counting]);
 
   async function request() {
     setSending(true);
