@@ -76,22 +76,28 @@ export const CODEX_PAIRING_DEFAULT_TTL_MS = 10 * 60 * 1000;
 /**
  * 届いた期限を、保存してよい範囲へ収める。
  *
- * - 読めない・過去 … `null`（コードごと捨てる。切れたものを保存する意味が無い）
- * - 遠すぎる未来 … 今から`CODEX_PAIRING_DEFAULT_TTL_MS`後へ丸める
+ * - 過去 … `null`（本当に切れている。コードごと捨てる）
+ * - 読めない・届かない … 今から`CODEX_PAIRING_DEFAULT_TTL_MS`後
+ * - 遠すぎる未来 … 同じく今から`CODEX_PAIRING_DEFAULT_TTL_MS`後へ丸める
+ *
+ * **読めなかったからといってコードを捨てない。** 捨てるのは`expiresAt`が壊れていた場合で、
+ * `manualPairingCode`のほうは有効なまま——押した人は何も受け取れずに終わる。Codexの仕様
+ * （発行から10分）は実機で確かめてある（#2521）ので、読めない巡はそれを当てる。
+ * **どのみち期限は必ず入る**ので、掃除（`expireStaleDispatchJobs`）の条件から外れる行は生まれない。
  */
 export function normalizeCodexPairingExpiry(value: unknown, now: Date = new Date()): Date | null {
+  const fallback = new Date(now.getTime() + CODEX_PAIRING_DEFAULT_TTL_MS);
   const raw =
     typeof value === "number"
       ? // Codexが返すのはepoch秒（#2521の実機確認）。ミリ秒で来た場合も読めるようにしておく
         new Date(value > 1e11 ? value : value * 1000)
-      : typeof value === "string"
+      : typeof value === "string" && value !== ""
         ? new Date(value)
         : null;
-  if (!raw || Number.isNaN(raw.getTime())) return null;
+  if (!raw || Number.isNaN(raw.getTime())) return fallback;
+  // **過去だけは`null`。** 既に切れているものを、10分後まで有効だと言い直さない
   if (raw.getTime() <= now.getTime()) return null;
-  if (raw.getTime() - now.getTime() > CODEX_PAIRING_MAX_TTL_MS) {
-    return new Date(now.getTime() + CODEX_PAIRING_DEFAULT_TTL_MS);
-  }
+  if (raw.getTime() - now.getTime() > CODEX_PAIRING_MAX_TTL_MS) return fallback;
   return raw;
 }
 

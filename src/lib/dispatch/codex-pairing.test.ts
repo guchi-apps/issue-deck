@@ -101,10 +101,17 @@ describe("normalizeCodexPairingExpiry（#2524）", () => {
     expect(at?.toISOString()).toBe("2026-08-30T12:10:00.000Z");
   });
 
-  it("過去・読めない値は`null`（切れたものを保存しない）", () => {
+  it("過去だけ`null`（既に切れているものを有効だと言い直さない）", () => {
     expect(normalizeCodexPairingExpiry(NOW.getTime() / 1000 - 1, NOW)).toBeNull();
-    expect(normalizeCodexPairingExpiry("あした", NOW)).toBeNull();
-    expect(normalizeCodexPairingExpiry(null, NOW)).toBeNull();
+  });
+
+  // 捨てるとコード（`manualPairingCode`のほう）まで失われ、押した人は何も受け取れない
+  it("読めない・届かない場合は10分後を当てる", () => {
+    expect(normalizeCodexPairingExpiry("あした", NOW)?.toISOString()).toBe(
+      "2026-08-30T12:10:00.000Z",
+    );
+    expect(normalizeCodexPairingExpiry(null, NOW)?.toISOString()).toBe("2026-08-30T12:10:00.000Z");
+    expect(normalizeCodexPairingExpiry("", NOW)?.toISOString()).toBe("2026-08-30T12:10:00.000Z");
   });
 
   it("遠すぎる未来は10分後へ丸める（消えないコードを作らない）", () => {
