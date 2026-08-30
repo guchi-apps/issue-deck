@@ -148,16 +148,14 @@ done
 # 別のCLIが立つと「Codexを選んだのに通知が飛ばない仕組みが動いている」という読み方になる。
 # ここで`exit 1`すればpollerがジョブを`failed`にし、この文面が画面に出る。
 #
+# **確かめるのは契約適合（`contract`）の出口だけ**（#2590）。汎用ランチャー
+# （`scripts/generic-start-issue.sh`）はissue-deck自身のスクリプトで、`ISSUE_DECK_AGENT`を
+# 読んでエージェントを選ぶようになっている。対象リポジトリ側には何も要らない。
+#
 # **契約適合のリポジトリは、実際に走るファイルを見て判定する**（宣言された版数ではなく）。
 # ローカル起動プロトコルの版数はリポジトリ側が手で書くもので、`ISSUE_DECK_AGENT`を読むように
 # したかどうかとは連動しない。走るファイルそのものを見れば、版数の宣言が古いままでも正しく判定できる。
-if [[ "$AGENT_KIND" != "claude" ]]; then
-  if [[ "$LAUNCH_MODE" == "generic" ]]; then
-    echo "Error: 汎用ランチャーは $AGENT_KIND での起動に対応していません（$FULL_NAME）。" >&2
-    echo "  対象リポジトリが scripts/start-issue.sh を持つ場合だけ、エージェントを選べます。" >&2
-    echo "  （docs/multi-agent/codex.md「まだやっていないこと」）" >&2
-    exit 1
-  fi
+if [[ "$AGENT_KIND" != "claude" && "$LAUNCH_MODE" != "generic" ]]; then
   if ! grep -q 'ISSUE_DECK_AGENT' "$LAUNCHER"; then
     echo "Error: $FULL_NAME の scripts/start-issue.sh は ISSUE_DECK_AGENT を読みません。" >&2
     echo "  このまま起動すると $AGENT_KIND を選んでも Claude Code が立つため、ここで止めます。" >&2

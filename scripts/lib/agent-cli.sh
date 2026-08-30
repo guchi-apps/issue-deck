@@ -279,6 +279,40 @@ agent_cli_codex_sandbox_probe_reason() {
   printf '%s' "${probe#*$'\n'}"
 }
 
+# Codexの読み替え（`scripts/prompts/codex-supplement.md`）を、生成済みのプロンプトの末尾へ足す。
+#
+# 第1引数は読み替えのファイル、第2引数は追記先のプロンプト、第3引数は**実際に走らせる
+# `scripts/`の絶対パス**（`LAUNCHER_SCRIPTS_DIR`）。
+#
+# ## なぜパスを差し込むか（#2590）
+#
+# 読み替えは`submit-plan.sh`・`submit-question.sh`の実行を指示するが、**この2つはissue-deckの
+# スクリプトで、対象リポジトリのworktreeには無い。** 汎用ランチャー（#1224）で起こすセッションの
+# cwdは他リポジトリのworktreeなので、`scripts/submit-plan.sh`と相対で書くと必ず外れる。
+# そのため`{{ISSUE_DECK_SCRIPTS_DIR}}`を置いておき、ここで絶対パスへ直す。
+#
+# **issue-deck自身のセッションでも同じ絶対パスにする。** 走らせるのはworktree側の写しではなく、
+# セッション側のスクリプト（`run-issue-session.sh`・フック）と同じ同期コピー（#1438）で揃える。
+agent_cli_append_codex_supplement() {
+  local supplement="${1:-}" prompt_file="${2:-}" scripts_dir="${3:-}"
+
+  [[ -f "$supplement" && -f "$prompt_file" ]] || return 1
+
+  printf '\n' >>"$prompt_file"
+  AGENT_CLI_SUPPLEMENT_SCRIPTS_DIR="$scripts_dir" python3 - "$supplement" >>"$prompt_file" <<'PY'
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    body = f.read()
+sys.stdout.write(
+    body.replace(
+        "{{ISSUE_DECK_SCRIPTS_DIR}}", os.environ.get("AGENT_CLI_SUPPLEMENT_SCRIPTS_DIR", "scripts")
+    )
+)
+PY
+}
+
 # ---------------------------------------------------------------------------
 # Codexのフック（#2509）
 #

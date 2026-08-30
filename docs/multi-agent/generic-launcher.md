@@ -54,7 +54,7 @@ poller → scripts/start-local-session.sh <owner> <repo> <番号>
 6. 起動用プロンプトの生成
 7. tmuxセッションの起動（`<リポジトリ名>-issue-<番号>`）
 
-`scripts/run-issue-session.sh`（claudeの起動フラグ・共有知識の`--add-dir`・権限モード）は
+`scripts/run-issue-session.sh`（エージェントCLIの起動フラグ・共有知識の`--add-dir`・権限モード）は
 issue-deck自身の経路と共有している。**片方だけが直る状態を作らない。**
 
 ## リポジトリ固有の値の解決方法
@@ -124,6 +124,49 @@ issue-deckの画面へ渡す（`localhost`のURLでは外出先から届かな�
 
 実装は`run-issue-session.sh`の`ISSUE_DECK_DEV_SERVER`で、汎用ランチャーがラベルを見て
 `0`か`1`を渡す。issue-deck自身の経路（`start-issue.sh`）はこれまでどおり常に起動する。
+
+## エージェントは受け口から渡ってくる（Claude Code / Codex）
+
+汎用ランチャーで起こすセッションも、画面の「実装を開始」でCodexを選べる（#2590）。
+**対象リポジトリ側には何も要らない。** 種別は`ISSUE_DECK_AGENT`（`claude` / `codex`。既定は
+`claude`）として、ジョブ → poller → 受け口（`scripts/start-local-session.sh`）→ このランチャー →
+`scripts/run-issue-session.sh`と環境変数のまま渡っていく（経路の全体像は
+[codex.md](codex.md)「画面から選んだときに通る道」）。
+
+もともと出口の`run-issue-session.sh`は`scripts/lib/agent-cli.sh`で種別を解決してCodexを
+起こせたので、外したのは**汎用ランチャー側に残っていた`claude`固定の前提**だけ。
+
+| 何が固定だったか | どうしたか |
+| --- | --- |
+| `claude`コマンドの存在確認 | 解決した種別のCLI（`codex`）を見る。`--prepare-only`はCLIを起こさないので対象外 |
+| Claude Codeのフォルダ信頼確認（#1838） | `claude`のときだけ行う（Codexの信頼確認は起動直後の画面で、worktreeのパスごとに1回聞かれる） |
+| tmuxへ渡す環境変数 | `ISSUE_DECK_AGENT`・`ISSUE_DECK_CODEX_*`も転送する。**届かないと画面でCodexを選んでもClaude Codeが立つ** |
+| 受け口のガード | 「汎用ランチャーは対応していません」を廃止。`ISSUE_DECK_AGENT`を読むかの`grep`は契約適合の出口だけに掛ける |
+
+Codexで起こすときは、issue-deck自身のランチャーと同じ下見・追記も行う。
+
+- **サンドボックスの下見**（#2526）。組み立てられないホストではworktreeを作る前に止める
+- **読み替えの追記**（`scripts/prompts/codex-supplement.md`）。**Codex専用のひな形は作らない**
+  ——片方が必ず古くなるため、issue-deck自身のセッションと同じファイルを末尾へ足す
+- **計画の出し方だけは本文を差し替える**（#2551）。末尾の読み替えに書くだけでは、本文に残った
+  「Plan modeで提示する」に従って計画が手で投稿され、画面に承認パネルが出ない（#2550）。
+  ひな形（`scripts/prompts/generic-implementation-agent.md`）の`{{PLAN_INSTRUCTIONS}}`・
+  `{{PLAN_COMMENT_NOTE}}`がその2か所
+
+### `submit-plan.sh`・`submit-question.sh`は絶対パスで案内する
+
+Codexの読み替えは計画と質問をこの2つのコマンドで画面へ出させるが、**どちらもissue-deckの
+スクリプトで、対象リポジトリのworktreeには無い。** 汎用ランチャーで起こすセッションのcwdは
+他リポジトリのworktreeなので、`scripts/submit-plan.sh`と相対で書くと必ず外れる。
+
+そのため読み替えの中では`{{ISSUE_DECK_SCRIPTS_DIR}}`と書いておき、追記するときに
+**実際に走らせる`scripts/`の絶対パス**（`LAUNCHER_SCRIPTS_DIR`。同期コピーなら
+そちら・#1438）へ直す（`agent_cli_append_codex_supplement`）。issue-deck自身のセッションでも
+同じ絶対パスにしてある——セッション側のスクリプト（`run-issue-session.sh`・フック）と
+走らせる版を揃えるため。
+
+手で確かめるときは、下の`--prepare-only`のコマンドへ`ISSUE_DECK_AGENT=codex`を足す
+（生成されたプロンプトの末尾に読み替えが付き、計画の出し方が入れ替わる）。
 
 ## 「実行できるリポジトリ」の判定
 
@@ -401,3 +444,4 @@ worktreeだけで、本体チェックアウト（`~/apps/_docs`）は依然と�
 - [subpc-dispatch.md](subpc-dispatch.md) pull型のジョブキューと申告
 - [#1073](https://github.com/guchi-apps/issue-deck/issues/1073) ローカル起動プロトコル（マーカー行）
 - [#1178](https://github.com/guchi-apps/issue-deck/issues/1178) ヘッドレス（tmux）で起動する
+- [codex.md](codex.md) Codex CLIで起こすローカルセッション（#2590で汎用ランチャーからも選べる）

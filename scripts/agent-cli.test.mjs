@@ -428,3 +428,55 @@ describe("agent_cli_codex_sandbox_probe", () => {
     expect(probe(script, { ISSUE_DECK_CODEX_EXTRA_ARGS: "--search" }).reason).not.toContain("--search");
   });
 });
+
+// 読み替え（`scripts/prompts/codex-supplement.md`）の追記（#2590）。
+//
+// 汎用ランチャー（#1224）で起こすセッションのcwdは**他リポジトリのworktree**で、そこには
+// issue-deckの`scripts/`が無い。`submit-plan.sh`を相対で案内すると必ず外れるため、
+// `{{ISSUE_DECK_SCRIPTS_DIR}}`を絶対パスへ直してから足す。
+describe("agent_cli_append_codex_supplement", () => {
+  const tmpDirs = [];
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function appendSupplement(body, scriptsDir) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-supplement-"));
+    tmpDirs.push(dir);
+    const supplement = path.join(dir, "codex-supplement.md");
+    const prompt = path.join(dir, "prompt.md");
+    fs.writeFileSync(supplement, body, "utf8");
+    fs.writeFileSync(prompt, "本文\n", "utf8");
+    const { status } = run(
+      `agent_cli_append_codex_supplement ${JSON.stringify(supplement)} ${JSON.stringify(prompt)} ${JSON.stringify(scriptsDir)}`,
+    );
+    return { status, prompt: fs.readFileSync(prompt, "utf8") };
+  }
+
+  it("`{{ISSUE_DECK_SCRIPTS_DIR}}`を渡された絶対パスへ直して末尾へ足す", () => {
+    const { status, prompt } = appendSupplement(
+      "`{{ISSUE_DECK_SCRIPTS_DIR}}/submit-plan.sh`と`{{ISSUE_DECK_SCRIPTS_DIR}}/submit-question.sh`\n",
+      "/home/user/apps/issue-deck/scripts",
+    );
+    expect(status).toBe(0);
+    expect(prompt).toContain("本文\n");
+    expect(prompt).toContain("`/home/user/apps/issue-deck/scripts/submit-plan.sh`");
+    expect(prompt).toContain("`/home/user/apps/issue-deck/scripts/submit-question.sh`");
+    expect(prompt).not.toContain("{{ISSUE_DECK_SCRIPTS_DIR}}");
+  });
+
+  it("読み替えが無ければ1を返し、プロンプトを触らない", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-supplement-"));
+    tmpDirs.push(dir);
+    const prompt = path.join(dir, "prompt.md");
+    fs.writeFileSync(prompt, "本文\n", "utf8");
+    const { status } = run(
+      `agent_cli_append_codex_supplement ${JSON.stringify(path.join(dir, "missing.md"))} ${JSON.stringify(prompt)} /tmp/scripts`,
+    );
+    expect(status).toBe(1);
+    expect(fs.readFileSync(prompt, "utf8")).toBe("本文\n");
+  });
+});
