@@ -237,6 +237,23 @@ export function selectHostSelfUpdateJob(
 }
 
 /**
+ * そのホストへ最後に積んだ再起動（#2496）。無ければ`null`。
+ *
+ * **`REBOOT`もキューの一覧に出ない**（`SELF_UPDATE`と同じ枠外のジョブ）。押した結果を出す
+ * 場所が設定画面のカードしか無いため、そこへ出すために1件だけ引く。
+ */
+export function selectHostRebootJob(
+  jobs: readonly DispatchJobView[],
+  hostName: string,
+): DispatchJobView | null {
+  return (
+    [...jobs]
+      .filter((job) => job.kind === "REBOOT" && job.targetHost === hostName)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
+  );
+}
+
+/**
  * 順番待ちが進まない理由（#1394）。理由が無ければ`null`。
  *
  * **応答しているホストだけを見る。** 落ちているホストは「上限で待っている」のではなく

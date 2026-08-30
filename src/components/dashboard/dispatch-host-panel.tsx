@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, ExternalLink, Loader2, Monitor, RefreshCw } from "lucide-react";
+import { ChevronRight, ExternalLink, Loader2, Monitor, Power, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -25,11 +25,23 @@ import {
   type DispatchHostMetricTone,
 } from "@/lib/dispatch/host-metrics";
 import {
+  describeDispatchHostReboot,
+  describeDispatchHostRebootJob,
+  describeRebootRejection,
+  resolveRebootRejection,
+  type DispatchHostRebootJobRow,
+  type DispatchHostRebootRow,
+} from "@/lib/dispatch/host-reboot";
+import {
   describeSessionReap,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
-import { selectHostSelfUpdateJob, selectHostSessions } from "@/lib/dispatch/queue-summary";
+import {
+  selectHostRebootJob,
+  selectHostSelfUpdateJob,
+  selectHostSessions,
+} from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
@@ -100,6 +112,7 @@ export function DispatchHostPanel({
   jobs = [],
   onOpenIssue,
   onRequestSelfUpdate,
+  onRequestReboot,
   compact = false,
   onOpenDetail,
 }: {
@@ -126,6 +139,17 @@ export function DispatchHostPanel({
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
   /**
+   * ホストごと再起動する（#2496）。渡さなければボタンを出さない（`onRequestSelfUpdate`と同じ形）。
+   *
+   * **「更新して再起動」とは別物。** あちらが畳むのはpollerのプロセスだけで走っているセッションは
+   * 残るが、こちらはOSごと落ちる。これが無かった頃は、カーネル更新を当てるたびにsshして
+   * `tmux ls`でセッションの有無を数えてから`sudo reboot`する手作業が要っていた
+   * （guchi-apps/question#52・guchi-apps/subpc#68）。
+   */
+  onRequestReboot?: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
    * 縮めた版で出す（#1933）。スマホのホーム専用で、使用率を横並びにしてセッションの一覧・
    * スクリプトの版（遅れているときを除く）・「更新して再起動」を落とす。
    * **`jobs`・`onRequestSelfUpdate`は渡さなくてよい**——押した結果を出す先はシート側になる。
@@ -148,8 +172,10 @@ export function DispatchHostPanel({
           host={host}
           sessions={selectHostSessions(sessions, host.name)}
           selfUpdateJob={selectHostSelfUpdateJob(jobs, host.name)}
+          rebootJob={selectHostRebootJob(jobs, host.name)}
           onOpenIssue={onOpenIssue}
           onRequestSelfUpdate={onRequestSelfUpdate}
+          onRequestReboot={onRequestReboot}
           compact={compact}
           onOpenDetail={onOpenDetail}
         />
@@ -162,16 +188,22 @@ function HostCard({
   host,
   sessions,
   selfUpdateJob,
+  rebootJob,
   onOpenIssue,
   onRequestSelfUpdate,
+  onRequestReboot,
   compact,
   onOpenDetail,
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
   selfUpdateJob: DispatchJobView | null;
+  rebootJob: DispatchJobView | null;
   onOpenIssue?: (issueId: string) => void;
   onRequestSelfUpdate?: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  onRequestReboot?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
   compact?: boolean;
@@ -196,6 +228,16 @@ function HostCard({
     onRequestSelfUpdate !== undefined &&
     host.selfUpdateCapable === true &&
     ((host.checkout?.behindCount ?? 0) > 0 || selfUpdate !== null);
+  // ホストごと再起動できるか（#2496）。**「更新して再起動」とは別物**で、こちらはOSごと落ちる
+  const reboot = describeDispatchHostReboot(host);
+  const rebootResult = describeDispatchHostRebootJob(rebootJob);
+  // **出すのは「再起動が要る」ときと、押した結果がまだ読める間だけ**（`canSelfUpdate`と同じ形）。
+  // 常に置くと、落とす理由が無いときにも取り返しのつかないボタンがカードに並び続ける。
+  // 落とすのは`/var/run/reboot-required`があるときだけ、という#52の結論とも揃う
+  const canReboot =
+    onRequestReboot !== undefined &&
+    host.rebootCapable === true &&
+    (reboot?.tone === "warn" || rebootResult !== null);
 
   if (compact) {
     return (
@@ -234,6 +276,22 @@ function HostCard({
           hostName={host.name}
           selfUpdate={selfUpdate}
           onRequestSelfUpdate={onRequestSelfUpdate}
+        />
+      )}
+
+      {/* **スクリプトの版の下、使用率の上に置く。** 判断に使うのは「いつから落としていないか」と
+          「セッションが何本走っているか」で、後者は見出しに出ている。カードの中で
+          「ホストそのものの状態」を上へ、「いま動いているもの」を下へ並べる順に合わせる */}
+      {canReboot && reboot && (
+        <RebootRow
+          hostName={host.name}
+          reboot={reboot}
+          result={rebootResult}
+          rejection={resolveRebootRejection({
+            host,
+            hasQueuedJob: rebootResult?.pending === true,
+          })}
+          onRequestReboot={onRequestReboot}
         />
       )}
 
@@ -327,6 +385,129 @@ function SelfUpdateRow({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * ホストごと再起動するボタンと、その状態（#2496）。
+ *
+ * **`SelfUpdateRow`と同じ組み立てにしてある**（右寄せのボタン＋その下に1行）。隣り合う2つの
+ * 「再起動」が違う顔をしていると、押す前にどちらがどちらか読み取れない。
+ *
+ * **違うのは押せない理由を出すこと。** 「更新して再起動」は押せるかどうかがチェックアウトの
+ * 遅れだけで決まるが、こちらはセッションが0本であることが要る。理由を出さずに押せなくすると、
+ * 「なぜ押せないのか」が画面のどこにも無い状態になる。
+ *
+ * **押した結果もここに出す。** `REBOOT`は起動ジョブでも制御ジョブでもないため実行キューの
+ * 一覧に出ず、pollerが返した失敗（「セッションが3本走っています」）が画面に現れないまま
+ * 24時間で消える（#1927で`SELF_UPDATE`が踏んだのと同じ罠）。
+ */
+function RebootRow({
+  hostName,
+  reboot,
+  result,
+  rejection,
+  onRequestReboot,
+}: {
+  hostName: string;
+  reboot: DispatchHostRebootRow;
+  result: DispatchHostRebootJobRow | null;
+  rejection: ReturnType<typeof resolveRebootRejection>;
+  onRequestReboot: (
+    hostName: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+}) {
+  const [sending, setSending] = useState(false);
+  // 積めなかった理由（#1927と同じ）。**次に押すまで残す**（消えると押した結果が無かったことになる）
+  const [error, setError] = useState<string | null>(null);
+  // **確認を1枚挟む。** 押し間違えても戻せない（GUIが無いホストなので、上がってこなければ
+  // 物理コンソールが要る）操作で、ここだけは`C-c`のような取り消せる操作と同じ重さにしない
+  const [confirming, setConfirming] = useState(false);
+
+  const pending = sending || (result?.pending ?? false);
+  const disabled = pending || rejection !== null;
+  const notice = error
+    ? { label: error, tone: "critical" as DispatchHostCheckoutTone }
+    : result
+      ? { label: result.label, tone: result.tone }
+      : rejection
+        ? { label: describeRebootRejection(rejection, hostName), tone: "warn" as const }
+        : null;
+
+  async function request() {
+    setConfirming(false);
+    setSending(true);
+    setError(null);
+    try {
+      const res = await onRequestReboot(hostName);
+      if (!res.ok) setError(res.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="mt-1 flex items-baseline justify-between gap-2 text-[11px]">
+        <span className="truncate text-muted-foreground">再起動 {reboot.uptime}</span>
+        <span className={cn("shrink-0", CHECKOUT_TONE_CLASS[reboot.tone])}>
+          {reboot.status}
+          {reboot.detail ? `・${reboot.detail}` : ""}
+        </span>
+      </div>
+
+      <div className="mt-1.5 flex flex-col items-end gap-1">
+        {confirming ? (
+          // **確認はその場で出す。** ダイアログにすると、押した本人がどのホストのカードから
+          // 押したのかを確認の中でもう一度読み直すことになる
+          <div className="flex w-full flex-col items-end gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+            <span className="w-full text-left text-[11px] text-muted-foreground">
+              <span className="font-medium text-foreground">{hostName}</span>{" "}
+              をOSごと落とします。走っているセッションは戻らず、開発サーバーも止まります
+              （常駐サービスは起動後に自分で戻ります）。
+            </span>
+            <span className="flex gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => setConfirming(false)}
+              >
+                やめる
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => void request()}
+              >
+                再起動する
+              </Button>
+            </span>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px]"
+            disabled={disabled}
+            onClick={() => setConfirming(true)}
+          >
+            {pending ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Power className="size-3" />
+            )}
+            再起動する
+          </Button>
+        )}
+        {notice && (
+          <span className={cn("text-right text-[11px]", CHECKOUT_TONE_CLASS[notice.tone])}>
+            {notice.label}
+          </span>
+        )}
+      </div>
+    </>
   );
 }
 

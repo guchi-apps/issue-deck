@@ -482,6 +482,9 @@ enum DispatchJobStatus {
 // CODE_REVIEW（#698）はリポジトリ全体のコードレビューのセッションを立てるジョブ。PLAN_REVIEWと
 // 同じく`origin/develop`のスナップショットを読むだけで、指摘は**レビュー用に1件作ったIssueへの
 // コメント**として返す。対象リポジトリのcloneが要る点もPLAN_REVIEWと同じ。
+// REBOOT（#2496）はホストごと再起動するジョブ。**SELF_UPDATEとは別物**で、あちらが畳むのは
+// pollerのプロセスだけなのに対し、こちらはOSごと落ちる（走っているセッションは戻らない）。
+// pollerは`tmux ls`でセッションが0本であることを実機で確かめ直してから`sudo reboot`する。
 enum DispatchJobKind {
   LAUNCH
   INTERRUPT
@@ -495,6 +498,7 @@ enum DispatchJobKind {
   SELF_UPDATE
   CODE_REVIEW
   PREVIEW
+  REBOOT
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -728,6 +732,27 @@ model DispatchHost {
   // （`OUT_OF_BAND_JOB_KINDS`）だが、更新に対応した既存のpollerは確認環境のジョブを知らず、
   // まとめて配ると未知の種別として`failed`になる。
   previewCapable             Boolean?
+  // ホストごと再起動できるか（#2496）。`sudo -n -l /usr/sbin/reboot`が通るpollerだけが申告する。
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（他のCapableと同じ向き）。
+  //
+  // **`selfUpdateCapable`とは分けて持つ。** あちらが畳むのはpollerのプロセスだけで、こちらは
+  // OSごと落ちる。加えて、更新に対応したpollerでもサブPCのsudoの許可（`/etc/sudoers.d/`は
+  // `guchi-apps/subpc`の管理下）が入っているとは限らない——**申告が真でなければ画面も押させない**。
+  // 配ってから`failed`で返す形にすると、押した人には「押したのに落ちなかった」しか残らない。
+  rebootCapable              Boolean?
+  // 再起動が要るか（#2496）。`/var/run/reboot-required`の有無とそのmtime、およびホストの起動時刻。
+  //
+  // **`metrics`・`checkout`と同じく画面へ出すための写しで、判定には使わない**——再起動するか
+  // どうかを決めるのは人で、issue-deckは「セッションが0本か」しか押せる条件に使わない。
+  // カーネル更新が当たっているかは実機にしか分からないため、こちらで数え直すこともしない。
+  //
+  //   rebootRequired      `/var/run/reboot-required`があるか。**`null`は「申告していない」**
+  //                       （古いpoller）で、`false`（要らない）とは区別する
+  //   rebootRequiredSince そのファイルのmtime。いつから放置されているかを日数で読めるようにする
+  //   bootedAt            ホストの起動時刻。稼働日数として出す
+  rebootRequired             Boolean?
+  rebootRequiredSince        DateTime?
+  bootedAt                   DateTime?
   // 確認環境を起こせるリポジトリのJSON配列（#2444）。**`repositories`の部分集合。**
   //
   // あちらは「セッションを起こせるか」で、こちらは「開発サーバーがあるか」。vps・subpc・docs・
