@@ -627,6 +627,8 @@ describe("findDispatchJobForIssue", () => {
       previewAction: null,
       exitCode: null,
       commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
       tmuxSessionName: null,
       queuePriority: 0,
       createdAt: "2026-08-14T00:00:00.000Z",
@@ -713,6 +715,13 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
       expect(parseDispatchJobKind("restart")).toBeNull();
       expect(parseDispatchJobKind(1)).toBeNull();
+    });
+
+    // #2524。ホストに対する操作なので、Issueを持つ種別とは受け口が別（`REBOOT`の隣）
+    it("Codexのペアリング（#2524）を受け入れる", () => {
+      expect(parseDispatchJobKind("codex_pairing")).toBe("CODEX_PAIRING");
+      expect(parseDispatchJobKind("codex-pairing")).toBeNull();
+      expect(parseDispatchJobKind("CODEX_PAIRING")).toBeNull();
     });
   });
 
@@ -995,6 +1004,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1066,6 +1076,7 @@ describe("横断質問（#1454）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1202,6 +1213,8 @@ describe("横断質問（#1454）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-15T00:00:00Z",
@@ -1248,6 +1261,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1394,6 +1408,8 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-17T00:00:00Z",
@@ -1440,6 +1456,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1560,6 +1577,8 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         previewAction: null,
         exitCode: null,
         commandOutput: null,
+        codexPairingCode: null,
+        codexPairingExpiresAt: null,
         tmuxSessionName: null,
         queuePriority: 0,
         createdAt: "2026-08-22T00:00:00Z",
@@ -1724,6 +1743,7 @@ describe("resolveManualStepHost", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1799,6 +1819,7 @@ describe("エージェントの選択（#2505）", () => {
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: true,
+      codexRemoteControlCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,

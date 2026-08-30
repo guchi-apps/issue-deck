@@ -13,6 +13,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import {
   enqueueCodeReviewJob,
+  enqueueCodexPairingJob,
   enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
@@ -136,6 +137,21 @@ export async function POST(request: NextRequest) {
       );
     }
     return NextResponse.json({ job: rebootResult.job }, { status: 201 });
+  }
+
+  // CodexのRemote Control相当（#2524）。**`REBOOT`と同じくIssueもリポジトリも持たない**
+  // （`serverName`はホスト名で、Issueごとには分かれない）ので`target`の必須チェックより手前に置く。
+  // 発行したコードは報告（`POST /api/dispatch/report`）で戻ってきて、ログイン必須のこの画面に
+  // だけ出る
+  if (kind === "CODEX_PAIRING") {
+    const pairingResult = await enqueueCodexPairingJob({ hostName, requestedByUserId: userId });
+    if (!pairingResult.ok) {
+      return NextResponse.json(
+        { error: pairingResult.rejection, message: pairingResult.message },
+        { status: pairingResult.rejection === "already_queued" ? 409 : 400 },
+      );
+    }
+    return NextResponse.json({ job: pairingResult.job }, { status: 201 });
   }
 
   // 確認環境（#2444）。**リポジトリは要るがIssueは持たない**ため、`target`の必須チェックより

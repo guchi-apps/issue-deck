@@ -508,6 +508,39 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * CodexのRemote Control相当（#2524）。ペアリングコードを1枚発行させる。
+   *
+   * **`requestReboot`と同じくホスト名だけを送る。** 繋がる先はホストごとで、Issueには
+   * 紐づかない（`serverName`はホスト名で、そこに載るのはそのホストのCodexセッション全部）。
+   *
+   * 発行されたコードは次のポーリングでジョブの行に載って戻ってくる（**押した本人のブラウザに
+   * だけ出る資格情報**なので、ここでも共有の`error`へは入れず戻り値で返す）。
+   */
+  const requestCodexPairing = useCallback(
+    async (hostName: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ host: hostName, kind: "codex_pairing" }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリングを待たずに状態を出す。**pull型で届くまで数秒〜30秒何も起きない**ため
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * 確認環境（#2444）を起こす・最新へ入れ替える・止める。
    *
    * **送るのはホスト名・リポジトリ・操作の3つだけ。** Issueに紐づく操作ではないので番号は
@@ -789,6 +822,7 @@ export function useDispatchState(enabled: boolean) {
     controlManualStepRun,
     requestSelfUpdate,
     requestReboot,
+    requestCodexPairing,
     requestPreview,
     cancel,
     dismiss,

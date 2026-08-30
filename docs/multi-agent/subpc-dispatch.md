@@ -116,6 +116,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `SELF_UPDATE`（#1875） | チェックアウトの更新と自己再起動 | pollerが動かしているチェックアウトを`develop`に合わせる |
 | `PREVIEW`（#2444） | `scripts/start-preview-dev.sh` | 確認環境（developの最新を映す開発サーバー）を起こす・入れ替える・止める |
 | `REBOOT`（#2496） | `sudo -n /usr/sbin/reboot` | ホストをOSごと再起動する |
+| `CODEX_PAIRING`（#2524） | `codex remote-control start` / `pair --json` | CodexのRemote Control用のペアリングコードを1枚発行する |
 
 **`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`はセッションを立てる側**（`LAUNCH`と同じ枠・
 同じ払い出し経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものでは
@@ -135,6 +136,12 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 **結果として走っているセッションは全部消える**。`SELF_UPDATE`が`exec`でプロセスだけを入れ替えて
 セッションを残す（#1927）のとは、失うものが違う。詳細は
 [画面からホストごと再起動する](#画面からホストごと再起動する2496)。
+
+**`CODEX_PAIRING`もセッションにも tmux にも触らない**（#2524。`REBOOT`と同じ枠外）。
+Issueに紐づかない（`serverName`はホスト名で、Issueごとには分かれない）ため`issueNumber`には
+埋め草の`0`が入り、pollerへ渡るのはホスト名だけ。返ってくる`XXXX-XXXX`のコードは
+**資格情報で、10分で切れる**——`message`ではなく報告の追加フィールド（`pairingCode`）で運び、
+journaldにもIssueにも出さない。詳細は[codex.md](codex.md)「Remote Controlはペアリングコードで繋ぐ」。
 
 **押せない理由には、押すボタンの名前だけでなく置き場所も書く**（#2455）。確認環境が使えない
 理由（`describePreviewRejection`）は当初「「更新して再起動」で最新にしてください」だったが、

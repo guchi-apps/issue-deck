@@ -118,6 +118,12 @@ export async function POST(request: NextRequest) {
     // 古いpollerはジョブの`agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ
     // （`manualStepValues`と同じ、「配ってから`failed`で返る」では済まない種類の非対応）
     codexCapable: typeof payload?.codex === "boolean" ? payload.codex : null,
+    // Codexのペアリングコードを発行できるpollerだけが送ってくる（#2524）。**未申告はnull＝
+    // 非対応扱い**。`codex`とは別に持つのは、`remote-control`が動くのは公式インストーラの
+    // standalone installで入れたCodexだけで、npmで入れたものはサブコマンドが存在しても
+    // 共有のapp-serverデーモンを起こせないため（#2521）
+    codexRemoteControlCapable:
+      typeof payload?.codexRemoteControl === "boolean" ? payload.codexRemoteControl : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは

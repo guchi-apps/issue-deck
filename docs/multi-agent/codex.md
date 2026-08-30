@@ -68,7 +68,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
-| Remote Control | ○ | **△**（デーモンは起動できる。ただし取れるのはURLではなく短命のペアリングコード。未実装。#2521） |
+| Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。繋がるのはホスト単位。#2524） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
@@ -90,12 +90,14 @@ npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かな�
 | `codex queue`で走っているセッションへ差し込めるか | **○**。デーモン不要。`send-keys`も要らない（#2519で実装） |
 | 差し込んだメッセージの届き方 | **次のターンの頭**。走っているターンは中断しない |
 | `codex agents`でセッションを一覧できるか | **○**（#2521でstandalone installへ入れ替えた） |
-| `codex remote-control start` / `pair` | **○**（同上）。ただし取れるのは短命のペアリングコード |
+| `codex remote-control start` / `pair` | **○**（同上）。取れるのは短命のペアリングコード（#2524で画面へ出した） |
 | セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
-**「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は#2520で実装した。** Remote Controlは
-まだ可否の記録のまま（#2521でデーモンが動くようになったが、画面へ出す設計から要る）。
+**この表のものは実装済みになった。** 「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は
+#2520、Remote Controlは#2524（下の「Remote Controlはペアリングコードで繋ぐ」）。
+ただしRemote Controlで繋がるのは**ホスト単位**で、Claude Codeのような
+「そのIssueを開くURL」にはならない。
 
 ### `codex queue`は使える。しかも`send-keys`が要らない
 
@@ -225,6 +227,29 @@ $ codex remote-control pair --json
   ことがある。デーモンが上がりきってから呼び直すと通る
 - 止めるのは`codex remote-control stop`（`{"status":"stopped",…}`）。止めた後は
   `codex app-server daemon version`がソケット無しのエラーに戻る。**確認のあとは止めてある**
+
+#### Remote Controlはペアリングコードで繋ぐ（#2524）
+
+**実行キューのホストのカードに「Codexに繋ぐ」ボタンがある。** 押すとpollerが
+`codex remote-control start`（デーモンの起動）と`pair --json`（コードの発行）を打ち、
+返ってきた`XXXX-XXXX`が画面へ出る。ChatGPTアプリの「Connect to Codex」へ打ち込むと繋がる。
+
+- **繋がるのはホスト単位。** `serverName`はホスト名（`subpc`）なので、1枚のコードで
+  そのホストのCodexセッションが**全部**見える（`codex agents`に出るもの。tmuxで起こした
+  TUIも載る）。Claude Code側（#1219）のような「そのIssueを開くURL」にはならないため、
+  ボタンはIssue詳細ではなくホストのカードに置いてある
+- **コードは10分で切れる。** 期限を過ぎた行は画面に出ず、DBの列も
+  `expireStaleDispatchJobs`が空にする。**コードは資格情報**なので、Issueコメント・PR本文・
+  Push通知・pollerのjournaldには出さない（画面はログイン必須）
+- **押せるのは`codexRemoteControl`を申告したホストだけ。** 申告の条件は`codex`の実体が
+  `~/.codex/packages/standalone/`配下にあること（`codex_remote_control_capable`）。
+  **`codexCapable`（`codex`コマンドがある）だけでは足りない**——npmで入れたCodexでも
+  サブコマンドは存在するが、共有のapp-serverデーモンを起こせない（#2521）
+- **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
+  `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい
+- 実装は`src/lib/dispatch/codex-pairing.ts`（判定と表示）・`enqueueCodexPairingJob`（積む）・
+  pollerの`run_codex_pairing_job`（発行）。ジョブの種別は`CODEX_PAIRING`で、
+  `SELF_UPDATE`・`REBOOT`と同じ枠外のジョブ（キューの一覧には出ない）
 
 #### tmuxで普通に起こしたTUIは、デーモンに載る
 
@@ -532,7 +557,8 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）
-- **Remote Controlは画面へ出せていない**（#2521）。standalone installへの入れ替えは済み、
-  `codex remote-control start` / `pair`・`codex agents`は動くようになったが、取れるのはURLでは
-  なく10分で切れるペアリングコードなので、`scripts/session-notify.sh`のURL拾い（#1219）を
-  そのまま流用できない。issue-deckの画面にどう出すかの設計から要る
+- **Remote Controlは繋げるようになったが、Issueごとのリンクではない**（#2524）。実行キューの
+  ホストのカードに出る「Codexに繋ぐ」を押すと、pollerが`codex remote-control start` / `pair`を
+  打ってペアリングコードを発行し、画面に出る（前述の「Remote Controlはペアリングコードで繋ぐ」）。
+  **`serverName`はホスト名なので、1枚のコードで繋がるのはそのホストのCodexセッション全部**で、
+  Claude Codeのような「そのIssueを開くURL」（#1219）にはならない
