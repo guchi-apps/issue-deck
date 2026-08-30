@@ -1,0 +1,354 @@
+import { startOfJstDayMs, toJstParts } from "@/lib/format-date-time";
+
+/**
+ * 「AI使用量」画面（#2504）が読むかたちへ、`SessionUsage`の行を畳む純粋関数。
+ *
+ * **DBから読んだ行を渡すだけで組み立てられるようにしてある。** 期間の切り出し・日別の
+ * バケット・リポジトリ別／種別別／Issue別のまとめは、どれもここで完結する。
+ *
+ * **日付の境界は日本時間で切る**（`format-date-time.ts`）。本番VPSとCIはUTCで動くため、
+ * `getDate()`のようなローカルタイムの読み出しを使うと日別の棒が9時間ずれる。
+ *
+ * **金額はAPI換算の目安で、サブスクの実費ではない。** 単価は集計する
+ * `scripts/lib/session-usage.sh`の表が正で、ここでは再計算しない。
+ */
+
+/** APIが返す（＝画面が受け取る）セッション1本ぶん。DBのBigIntはここでnumberへ落とす */
+export type SessionUsageEntry = {
+  sessionId: string;
+  host: string;
+  kind: string;
+  repository: string | null;
+  issueNumber: number | null;
+  responses: number;
+  inputTokens: number;
+  cacheCreateTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  /** 入力・キャッシュ書き込み・キャッシュ読み出しの合計。「どれだけ読ませたか」の指標 */
+  contextTokens: number;
+  costUsd: number;
+  models: string[];
+  startedAt: string;
+  endedAt: string;
+};
+
+export type UsageTotals = {
+  sessions: number;
+  responses: number;
+  contextTokens: number;
+  outputTokens: number;
+  costUsd: number;
+};
+
+export type UsageDay = UsageTotals & { date: string };
+export type UsageGroup = UsageTotals & { key: string };
+
+export type UsageIssue = UsageTotals & {
+  repository: string | null;
+  issueNumber: number | null;
+  /** そのIssueで走った種別（金額の多い順） */
+  kinds: string[];
+  lastAt: string;
+  /** 転記1本ごとの明細（金額の多い順）。画面は行を開いたときだけ出す */
+  entries: SessionUsageEntry[];
+};
+
+/**
+ * プラン枠への換算（#2504の追加要望）。
+ *
+ * **Anthropicは枠の絶対量を出さない。** `anthropic-ratelimit-unified-*`ヘッダが返すのは
+ * 「その窓を何%使ったか」だけで、トークン数でもドルでもない（`lib/claude/usage.ts`）。
+ * そこで**同じ窓のあいだにローカルセッションが使ったAPI換算**を実測の%で割り、
+ * 「1%あたり何ドルぶん」を逆算して換算の物差しにする。
+ *
+ * **これは目安の上に立つ目安。** 同じ枠はGitHub Actionsの無人実行とissue-deck自身のAPI
+ * 呼び出しも使っており、それらはこの表に入らない。したがって逆算した「1%あたり」は本来より
+ * 小さく出て、**枠換算の%は実際よりやや大きめに出る。** 画面でそう断る。
+ */
+export type QuotaScale = {
+  /** 物差しに使った窓（`lib/claude/usage.ts`の`key`。`5h` / `7d`） */
+  windowKey: string;
+  windowLabel: string;
+  /** 窓の実測使用率(%) */
+  usedPercent: number;
+  /** 窓の開始・終了（ISO） */
+  windowStart: string;
+  windowEnd: string;
+  /** その窓のあいだにローカルセッションが使ったAPI換算(USD) */
+  windowCostUsd: number;
+  /** 枠1%あたりのAPI換算(USD)。これで割ると「枠の何%相当か」になる */
+  usdPerPercent: number;
+};
+
+export type SessionUsageSummary = {
+  /** 集計した期間（ISO）。`days`は日本時間の日数で、今日を含む */
+  since: string;
+  until: string;
+  days: number;
+  totals: UsageTotals;
+  byDay: UsageDay[];
+  byRepository: UsageGroup[];
+  byKind: UsageGroup[];
+  byIssue: UsageIssue[];
+  /** 報告してきたホスト名（重複なし） */
+  hosts: string[];
+  /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
+  reportedAt: string | null;
+  /** プラン枠への換算。材料が揃わなければnull */
+  quota: QuotaScale | null;
+};
+
+/** 画面に出す種別の名前。シェル側の`KIND_LABELS`と揃える */
+const KIND_LABELS: Record<string, string> = {
+  implementation: "実装",
+  "plan-review": "計画レビュー",
+  question: "横断質問",
+  other: "その他",
+};
+
+export function sessionUsageKindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
+}
+
+function emptyTotals(): UsageTotals {
+  return { sessions: 0, responses: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 };
+}
+
+function addEntry(totals: UsageTotals, entry: SessionUsageEntry): void {
+  totals.sessions += 1;
+  totals.responses += entry.responses;
+  totals.contextTokens += entry.contextTokens;
+  totals.outputTokens += entry.outputTokens;
+  totals.costUsd += entry.costUsd;
+}
+
+/** 日本時間の`YYYY-MM-DD`。解釈できない値は空文字 */
+function jstDateKey(iso: string): string {
+  const parts = toJstParts(iso);
+  if (parts === null) return "";
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/**
+ * 期間の開始（epoch ms）。**今日を含む`days`日**で、日本時間のその日の0:00に切る。
+ * `days`が1なら今日の0:00から。
+ */
+export function sessionUsagePeriodStartMs(nowMs: number, days: number): number {
+  const safeDays = Number.isFinite(days) && days > 0 ? Math.floor(days) : 1;
+  return startOfJstDayMs(nowMs, -(safeDays - 1)) ?? nowMs;
+}
+
+/**
+ * プラン枠の窓と、同じ窓のあいだの消費から換算の物差しを作る。
+ *
+ * **窓は「リセット時刻から窓の長さぶん遡ったところ」**として扱う。ヘッダはリセット時刻と
+ * 窓の長さしか返さないため、開始時刻はここで引き算する。
+ *
+ * 次のいずれかに当てはまれば`null`（画面は枠換算を出さない）。
+ * - 窓の情報が無い／リセット時刻が取れない
+ * - 使用率が0%（割れない）
+ * - その窓でローカルセッションの消費が記録されていない（物差しが立たない）
+ */
+export function buildQuotaScale({
+  windows,
+  entries,
+  nowMs,
+}: {
+  windows: {
+    key: string;
+    label: string;
+    usedPercent: number;
+    resetsAt: number | null;
+    durationMs: number;
+  }[];
+  entries: SessionUsageEntry[];
+  nowMs: number;
+}): QuotaScale | null {
+  // **長いほうの窓を優先する。** 5時間枠は走っているセッション1本で振り切れることがあり、
+  // 物差しとしては荒い。週間枠のほうが平均が効く。
+  const candidates = [...windows].sort((a, b) => b.durationMs - a.durationMs);
+
+  for (const window of candidates) {
+    if (!Number.isFinite(window.usedPercent) || window.usedPercent <= 0) continue;
+    if (window.resetsAt === null || !Number.isFinite(window.resetsAt)) continue;
+
+    const endMs = window.resetsAt * 1000;
+    const startMs = endMs - window.durationMs;
+    // リセット時刻が過去（＝取得が古い）ときは、その窓はもう当てにならない。
+    if (endMs < nowMs) continue;
+
+    let windowCostUsd = 0;
+    for (const entry of entries) {
+      const endedAt = new Date(entry.endedAt).getTime();
+      if (Number.isNaN(endedAt)) continue;
+      if (endedAt < startMs || endedAt > endMs) continue;
+      windowCostUsd += entry.costUsd;
+    }
+    if (windowCostUsd <= 0) continue;
+
+    return {
+      windowKey: window.key,
+      windowLabel: window.label,
+      usedPercent: window.usedPercent,
+      windowStart: new Date(startMs).toISOString(),
+      windowEnd: new Date(endMs).toISOString(),
+      windowCostUsd,
+      usdPerPercent: windowCostUsd / window.usedPercent,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * 期間で切ったうえで、画面が読むかたちへ畳む。
+ *
+ * `entries`は期間の外を含んでいてよい（`quota`の物差しは窓の全体を見るため、
+ * **絞り込みはここで行う**）。
+ */
+export function buildSessionUsageSummary({
+  entries,
+  nowMs,
+  days,
+  reportedAt,
+  quota,
+}: {
+  entries: SessionUsageEntry[];
+  nowMs: number;
+  days: number;
+  reportedAt: string | null;
+  quota: QuotaScale | null;
+}): SessionUsageSummary {
+  const startMs = sessionUsagePeriodStartMs(nowMs, days);
+  const inPeriod = entries.filter((entry) => {
+    const endedAt = new Date(entry.endedAt).getTime();
+    return !Number.isNaN(endedAt) && endedAt >= startMs;
+  });
+
+  const totals = emptyTotals();
+  const byDay = new Map<string, UsageDay>();
+  const byRepository = new Map<string, UsageGroup>();
+  const byKind = new Map<string, UsageGroup>();
+  const byIssue = new Map<string, UsageIssue>();
+  const hosts = new Set<string>();
+
+  for (const entry of inPeriod) {
+    addEntry(totals, entry);
+    hosts.add(entry.host);
+
+    const dateKey = jstDateKey(entry.endedAt);
+    if (dateKey) {
+      const day = byDay.get(dateKey) ?? { date: dateKey, ...emptyTotals() };
+      addEntry(day, entry);
+      byDay.set(dateKey, day);
+    }
+
+    // リポジトリを判定できなかったセッションは空文字のキーへまとめ、画面が「（不明）」と出す。
+    const repositoryKey = entry.repository ?? "";
+    const repository = byRepository.get(repositoryKey) ?? { key: repositoryKey, ...emptyTotals() };
+    addEntry(repository, entry);
+    byRepository.set(repositoryKey, repository);
+
+    const kind = byKind.get(entry.kind) ?? { key: entry.kind, ...emptyTotals() };
+    addEntry(kind, entry);
+    byKind.set(entry.kind, kind);
+
+    // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
+    // 作業ディレクトリにIssue番号を持たないことがあり、落とすと合計と明細が合わなくなる。
+    const issueKey = `${repositoryKey}#${entry.issueNumber ?? ""}`;
+    const issue =
+      byIssue.get(issueKey) ??
+      ({
+        repository: entry.repository,
+        issueNumber: entry.issueNumber,
+        kinds: [],
+        lastAt: entry.endedAt,
+        entries: [],
+        ...emptyTotals(),
+      } satisfies UsageIssue);
+    addEntry(issue, entry);
+    issue.entries.push(entry);
+    if (entry.endedAt > issue.lastAt) issue.lastAt = entry.endedAt;
+    byIssue.set(issueKey, issue);
+  }
+
+  const byCost = (a: { costUsd: number }, b: { costUsd: number }) => b.costUsd - a.costUsd;
+
+  const issues = [...byIssue.values()].map((issue) => {
+    issue.entries.sort(byCost);
+    // 種別は金額の多い順に並べ、同じ種別は1つにまとめる。
+    const kindCost = new Map<string, number>();
+    for (const entry of issue.entries) {
+      kindCost.set(entry.kind, (kindCost.get(entry.kind) ?? 0) + entry.costUsd);
+    }
+    issue.kinds = [...kindCost.entries()].sort((a, b) => b[1] - a[1]).map(([kind]) => kind);
+    return issue;
+  });
+  issues.sort(byCost);
+
+  return {
+    since: new Date(startMs).toISOString(),
+    until: new Date(nowMs).toISOString(),
+    days,
+    totals,
+    byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    byRepository: [...byRepository.values()].sort(byCost),
+    byKind: [...byKind.values()].sort(byCost),
+    byIssue: issues,
+    hosts: [...hosts].sort(),
+    reportedAt,
+    quota,
+  };
+}
+
+/** API換算(USD) → プラン枠の何%相当か。物差しが無ければnull */
+export function toQuotaPercent(costUsd: number, quota: QuotaScale | null): number | null {
+  if (!quota || quota.usdPerPercent <= 0) return null;
+  return costUsd / quota.usdPerPercent;
+}
+
+/**
+ * 画面に出す数値の整形。**単位の畳み方を1か所に置く**（`scripts/lib/session-usage.sh`の
+ * `render_table`が端末側で同じことをしているのと対応する）。
+ */
+
+/** API換算(USD)。桁が大きいほど小数を落とす（$10,029 / $995.3 / $0.24） */
+export function formatUsageUsd(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  if (value >= 1000) return `$${Math.round(value).toLocaleString()}`;
+  if (value >= 100) return `$${value.toFixed(1)}`;
+  if (value > 0 && value < 0.01) return "$0.01";
+  return `$${value.toFixed(2)}`;
+}
+
+/** プラン枠の何%相当か。1%未満は小数第2位まで出す（0%と区別が付かなくなるため） */
+export function formatQuotaPercent(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  if (value >= 10) return `${Math.round(value)}%`;
+  if (value >= 1) return `${value.toFixed(1)}%`;
+  if (value > 0 && value < 0.01) return "0.01%";
+  return `${value.toFixed(2)}%`;
+}
+
+/** トークン数。7桁の数字を並べても読めないので単位で畳む */
+export function formatUsageTokens(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}G`;
+  if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
+  if (value >= 1e3) return `${Math.round(value / 1e3).toLocaleString()}k`;
+  return String(Math.round(value));
+}
+
+/** 選んだ単位で金額を出す。`quota`が無ければ常にドル */
+export function formatUsageAmount(
+  costUsd: number,
+  unit: "usd" | "quota",
+  quota: QuotaScale | null,
+): string {
+  if (unit === "quota") {
+    const percent = toQuotaPercent(costUsd, quota);
+    if (percent !== null) return formatQuotaPercent(percent);
+  }
+  return formatUsageUsd(costUsd);
+}

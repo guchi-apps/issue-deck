@@ -340,6 +340,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
   **金額は出さない**——すべて`CLAUDE_CODE_OAUTH_TOKEN`（プラン契約）で動いており、
   従量課金の請求は発生しないため。
+- **ローカルセッション（Claude Code本体）の消費は、左メニューの「AI使用量」で見る**（#2504）。
+  上のカードに入らないぶんで、**転記からしか取れず、本番のissue-deck（VPS）は転記を持たない**
+  ため、サブPCのpollerが`scripts/lib/session-usage.sh`で集計して数値だけを押し込む
+  （`POST /api/dispatch/session-usage` → `SessionUsage`）。画面は
+  [`session-usage-panel.tsx`](../src/components/dashboard/session-usage-panel.tsx)で、
+  集計の畳み込みは[`lib/session-usage-view.ts`](../src/lib/session-usage-view.ts)。
+  **1行＝転記1本で毎回上書き**（`(host, sessionId)`で一意）にしてあり、期間の切り出しは
+  画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
+  同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
 - **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
   Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
   実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。

@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   FolderGit2,
+  Gauge,
   GitBranch,
   Loader2,
   Lock,
@@ -70,6 +71,8 @@ type SidebarNavProps = {
    * （自動停止はするが、それまでサブPCのメモリを占める）。
    */
   previewRunning?: boolean;
+  /** AI使用量（#2504）の画面を開く */
+  onSelectUsage: () => void;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
    * 使うのは年に数回で、状態を持たない入口のため。
@@ -147,6 +150,7 @@ export function SidebarNavView({
   onSelectFlow,
   onSelectPreview,
   previewRunning = false,
+  onSelectUsage,
   onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
@@ -344,6 +348,16 @@ export function SidebarNavView({
             title: previewRunning
               ? "確認環境が動いています"
               : "developの最新をサブPCで動かして画面で確かめる",
+          })}
+          {navRow({
+            key: "usage",
+            label: "AI使用量",
+            icon: Gauge,
+            active: activePane === "usage",
+            onClick: onSelectUsage,
+            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い
+            // （枠が逼迫していることは設定→「状態」のメーターが受け持つ）
+            title: "サブPCのローカルセッションが使ったトークンを見る",
           })}
         </ul>
       </div>

@@ -631,3 +631,87 @@ PY
   )"
   _session_usage_run_python "$script" "${1:-session}" "${2:-20}"
 }
+
+# 正規化JSON（stdin）を、issue-deckの受け口（`POST /api/dispatch/session-usage`）へ送る
+# 本文に畳む。
+#
+#   session_usage_report_payload <ホスト名> [1本あたりの最大セッション数]
+#
+# **本文は1行1つのJSONとして出す**（NDJSON）。過去ぶんの埋め戻しでは1,000件を超えるため、
+# 1回のPOSTへ全部載せるとVPS側で数十秒のupsertを1トランザクションで抱えることになる。
+# 呼び出し側は行ごとに送る（受け口は「送られてきた行を上書きする」だけで、全件置換ではない）。
+#
+# **送るのは数値と分類だけ。** 転記のパスは手元で元ファイルを辿るために残すが、やり取りの
+# 本文は集計の時点で読んでいない（このファイル冒頭の「作法」を参照）。
+#
+# **`sessionId`は転記のファイル名（Claude CodeのUUID）。** issue-deck側はこれとホスト名で
+# 一意にして上書きするため、走っている最中のセッションを何度送っても二重に積まれない。
+#
+# **期間で絞るのは呼び出し側の仕事**（`session_usage_transcripts`のしきい値）で、ここでは
+# 渡された行をそのまま畳む。**転記単位の集計は常にその転記の全期間ぶんにしておくこと**——
+# `session_usage_aggregate`へしきい値を渡すと行の中身が「期間内だけ」になり、上書きした
+# 時点でそれ以前の消費が消える。
+session_usage_report_payload() {
+  local script
+  script="$(
+    cat <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+HOST = sys.argv[1] if len(sys.argv) > 1 else ""
+try:
+    CHUNK = max(1, int(sys.argv[2]))
+except (IndexError, ValueError):
+    CHUNK = 200
+
+data = json.load(sys.stdin)
+sessions = []
+for row in data.get("sessions") or []:
+    transcript = row.get("transcript") or ""
+    session_id = os.path.splitext(os.path.basename(transcript))[0]
+    # 転記のパスからIDを取れないものは送らない（受け口が一意にできない）。
+    if not session_id:
+        continue
+    # 時刻が1つも無いセッションは期間の絞り込みに載せられないので送らない。
+    if not row.get("firstAt") or not row.get("lastAt"):
+        continue
+    sessions.append(
+        {
+            "sessionId": session_id,
+            "transcript": transcript,
+            "kind": row.get("kind") or "other",
+            "repository": row.get("repository"),
+            "issue": row.get("issue"),
+            "responses": row.get("responses") or 0,
+            "input": row.get("input") or 0,
+            "cacheCreate5m": row.get("cacheCreate5m") or 0,
+            "cacheCreate1h": row.get("cacheCreate1h") or 0,
+            "cacheRead": row.get("cacheRead") or 0,
+            "output": row.get("output") or 0,
+            "costUsd": row.get("costUsd") or 0.0,
+            "models": row.get("models") or [],
+            "startedAt": row.get("firstAt"),
+            "endedAt": row.get("lastAt"),
+        }
+    )
+
+reported_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+# 送るものが無くても1行は出す。呼び出し側が「呼んだのに何も起きなかった」と
+# 「送る対象が無かった」を区別できるようにするため。
+for start in range(0, max(len(sessions), 1), CHUNK):
+    json.dump(
+        {
+            "host": HOST,
+            "reportedAt": reported_at,
+            "sessions": sessions[start:start + CHUNK],
+        },
+        sys.stdout,
+        ensure_ascii=False,
+    )
+    print()
+PY
+  )"
+  _session_usage_run_python "$script" "${1:-}" "${2:-200}"
+}

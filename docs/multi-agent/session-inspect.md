@@ -132,6 +132,58 @@ scripts/session-usage.sh --all --json        # 全期間の正規化JSON
 `PRICES`）は手で持っているので、**モデルが増えたら足す**。表に無いモデルはAPI換算に含めず、
 表の末尾に警告として名前が出る。
 
+### 画面（左メニューの「AI使用量」）から見る
+
+**端末に入らなくても、issue-deckの画面で同じ集計を見られる**（#2504）。左メニューの
+「AI使用量」（スマホはホームのメニュー）で、合計 → 日別の推移 → リポジトリ別・種別別 →
+Issue別の明細の順に出る。**Issueの行を開くと、そのIssueで走った転記1本ごと**に種別・モデル・
+時間帯・応答数・コンテキスト・API換算が出る。
+
+**本番のissue-deck（VPS）は転記を読めない。** 転記はセッションが走るホスト（サブPC）にしか
+無く、集計する`scripts/lib/session-usage.sh`もそこにしか置けない。そのため**pollerが集計し、
+数値だけを押し込む**。
+
+```
+転記（サブPC）
+  → scripts/lib/session-usage.sh（集計・報告本文の組み立て）
+  → scripts/subpc-dispatch-poller.sh の report_session_usage（5分間隔）
+  → POST /api/dispatch/session-usage（src/lib/dispatch/session-usage.ts）
+  → SessionUsage（1行＝転記1本）
+  → GET /api/session-usage（src/lib/session-usage-view.ts で畳む）
+  → src/components/dashboard/session-usage-panel.tsx
+```
+
+守っている決まりは4つ。
+
+- **転記単位の集計は期間で切らない。** pollerが絞るのは「どの転記を開くか」（最終更新が
+  `SESSION_USAGE_WINDOW_DAYS`以内）だけで、開いた転記は常に全期間ぶんを数える。期間で切ると、
+  走っている最中のセッションを上書きした時点でそれ以前の消費が消える。期間の切り出しは
+  画面側（`endedAt`）が行う
+- **上書きであって全件置換ではない。** `(host, sessionId)`（＝転記のファイル名）で一意にして
+  毎回まるごと置き換える。`POST /api/dispatch/sessions`（走っているtmuxセッションの報告）は
+  「含まれない行は消えた」と扱うが、こちらは過去ぶんを溜める表なので同じ扱いにできない
+- **壊れた行は捨てて残りを受け入れる。** 転記の形はClaude Codeの内部仕様なので、想定外が
+  1件混ざっただけで報告全体を落とすと、その日の数字が丸ごと欠ける
+- **過去ぶんは初回に1度だけ埋める。** 印（`~/.local/state/issue-deck/session-usage-backfill.stamp`）は
+  **送り切れたときだけ**置く。間隔を測る印と分けてあるのは、初回が1度失敗しただけで過去ぶんが
+  永久に埋まらなくなるのを避けるため
+
+### プラン枠への換算は「目安の上に立つ目安」
+
+画面では金額の単位を「$（API換算）」と「枠%（プラン枠の何%相当か）」で切り替えられる。
+
+**Anthropicは枠の絶対量を出さない。** `anthropic-ratelimit-unified-*`ヘッダが返すのは
+「その窓を何%使ったか」だけ（`src/lib/claude/usage.ts`）。そこで**同じ窓のあいだに
+ローカルセッションが使ったAPI換算**を実測の%で割り、「1%あたり何ドルぶんか」を逆算して
+物差しにしている（`buildQuotaScale`）。
+
+- **やや大きめに出る。** 同じ枠はGitHub Actionsの無人実行とissue-deck自身のAPI呼び出しも
+  使っており、それらはこの表に入らない。逆算した「1%あたり」は本来より小さくなる
+- **物差しが立たないときは出さない**（使用率0%・その窓の記録が無い・リセット時刻が取れない・
+  取得が古い）。画面は黙ってドル表示のままにする
+- **実測の枠の消費そのものは、同じ画面の上に置いた「プラン枠」のメーターで見る**
+  （設定 →「状態」と同じ`ClaudeUsageCard`）。逆算した%と混同しないよう並べてある
+
 ## 見た内容をどう扱うか
 
 ### 出力は端末に留める
