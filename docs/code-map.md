@@ -439,6 +439,30 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     読み込み中の骨組みへ差し替わる）。
   - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
     左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
+- **Issue一覧の進捗は6分割の横棒で出す**（#2516。`components/dashboard/workflow-status-steps.tsx`の
+  `WorkflowStepBadge`）。**1マス＝1段**で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の
+  簡易版にあたる。以前は18pxの円グラフ（`conic-gradient`で角度を塗る）だったが、その大きさでは
+  3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが分からなかった。
+  - **段の母集団は`WORKFLOW_STEPS`（6段）のまま**で、バー側に段数を持たない。マスの数と詳細画面の
+    段の数がずれると、同じIssueを2画面で見たときに数が食い違う
+  - **実行中はバーを端から端まで光が掃く**（`.progress-live-sweep`）。**1マスの中に閉じ込めない**
+    ——#2358で「細い弧が1/4周だけでは回っているかどうかが分からない」と潰した問題へ戻る。
+    40pxを通れば動く距離は当時のリングと同等で、常時見える輪郭の役はバー自体が果たす。
+    **光は塗りの上を通るだけで、塗り（進捗）は動かさない。** 掃くかどうかの判定は円グラフ
+    だった頃と同じ`isWorkflowBadgeSpinning`（#1439）
+  - **確認待ち（amber）・回答待ち（blue）ではアイコンをバーの左隣に出し、未達のマスも濃く塗る**
+    （`emphasizeTrack`）。5px高のバーの中にアイコンは収まらない。そして**一覧の行では
+    `00.check-user`・`01.check-*`が下のラベル一覧から除外されている**（`listCardLabels`）ため、
+    このバッジが色で伝える唯一の場所になる。塗ったマスだけを色付けると`Planning`（1/6）の行で
+    5pxしか色が乗らないので、18pxの円が全面で色を帯びていた頃と同等の面積を確保する
+  - **バーは円より22px幅を取る。** Issue一覧カラムは最小280pxまで詰められるため、行の右側の
+    クラスタ（`issue-list.tsx`の`renderIssueRow`）を縮められるようにして、**添える字
+    （「実装中（サブPC）」）だけが切り詰められる**ようにしてある（アイコン・バー・アバターは
+    `shrink-0`）。ここを`shrink-0`へ戻すと、狭いカラムで行からはみ出す
+  - **一覧の行で横幅がいちばん厳しいのはPC・iPadで、スマホではない**（#2516）。PCの一覧カラムは
+    既定384px・最小280px（`issue-deck-shell.tsx`の`issueListWidth`）で、iPhone 15の393pxより
+    狭い。iPadは768pxを超えるのでスマホ用画面へ切り替わらず、同じ384pxのカラムが出る。
+    **行に何かを足すときはスマホ幅ではなく280pxで確かめる。**
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
@@ -1216,7 +1240,7 @@ export function POST(request: NextRequest) {
     一覧の行数が食い違う。だから**左メニューのスピナーも質問Issueだけを数える**
     （押した先に居ないものを数えない）。
   - **同じ行で回答待ちを2回言わせない**（#2309）。右上の進捗バッジ（`WorkflowStepBadge`）は
-    以前から`qaAnswerPending`を受け取って青いパイと「（Claudeの回答待ち）」を出しており、
+    以前から`qaAnswerPending`を受け取って青いバーと「（Claudeの回答待ち）」を出しており、
     ラベルを無条件に足すと左右に並ぶ。**どちらを出すかは行を組み立てる`issue-list.tsx`が決める**
     （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」・#2057）。
     バッジが何も描かない行（Project Statusを持たない＝`getWorkflowStepIndex`がnull。質問Issueは
@@ -2650,15 +2674,15 @@ export function POST(request: NextRequest) {
   振り分けは`lib/issue-stats.ts`の`filterIssuesByView`で行う（`qaAnswerPendingAt`と同じ形）。
   **Statusは書き換えない。変えるのは画面の振り分けだけ**で、進捗の唯一の正はProject Statusのまま。
   - **振り分けだけでは、行を見ても何が起きているか読めない**（#2449）。移した先で行の見た目は
-    押す前とまったく同じで、右上の円グラフ（`WorkflowStepBadge`）はStatusが`Ready`だと
-    `getWorkflowStepIndex`がnullを返して何も描かない。そこで**同じ位置・同じ18pxの円**で
+    押す前とまったく同じで、右上の進捗バー（`WorkflowStepBadge`）はStatusが`Ready`だと
+    `getWorkflowStepIndex`がnullを返して何も描かない。そこで**同じ位置・同じ寸法のバー**で
     「順番待ち ◯番目」「起動中」を出す（`components/dashboard/workflow-status-steps.tsx`の
     `QueueStepBadge`。材料は`lib/dispatch/issue-queue-state.ts`が`GET /api/dispatch`の
     ジョブから組み、DBもAPIも増やさない）。**番号の並びは払い出し・実行キューと同じ**
     （`queuePriority`降順→`createdAt`昇順）で、ここだけ別にすると「先頭へ上げる」（#1541）を
-    押した結果が一覧に映らない。**回すのは起動中だけ**にして、順番待ちは破線をゆっくり
-    明滅させる——回すと`isWorkflowBadgeSpinning`が回している行（実際に作業が進んでいる行）と
-    見分けが付かなくなる。**円は2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
+    押した結果が一覧に映らない。**光で掃くのは起動中だけ**にして、順番待ちはゆっくり
+    明滅させる——掃くと`isWorkflowBadgeSpinning`が動かしている行（実際に作業が進んでいる行）と
+    見分けが付かなくなる。**バーは2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
     `queue`を渡して添える字（「サブPC・順番待ち 2番目」）にし、どちらを出すかは並べる側
     （`issue-list.tsx`の`renderIssueRow`）が決める。
   同じく**質問Issueは「未着手」「実行中」ではなく専用の「質問」ビューに出す**（#1514）。質問Issueは

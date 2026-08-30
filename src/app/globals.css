@@ -219,3 +219,59 @@
     width: 60%;
   }
 }
+
+/* 一覧の進捗バー（#2516）で「いま動いている」を表す光（`WorkflowStepBadge`）。
+   円グラフだった頃は外周のリングを`animate-spin`で回していたが、横棒には回す外周が無い。
+
+   **掃くのはバー全体で、1マスの中だけに閉じ込めない**（#2358の反省）。細い弧が1/4周だけ
+   動いていた頃は「回っているかどうかが分からない」「スマホでは一瞬しか出ていない」と
+   報告された。40pxのバーを端から端まで動けば、動く距離は当時のリングと同等になる。
+   バー自体（塗り＋うっすらしたトラック）が常時見える輪郭の役を引き継ぐので、光がどこに
+   いても止まっているのか動いているのかを視線を止めずに読める。 */
+@keyframes progress-sweep {
+  from {
+    left: -45%;
+  }
+  to {
+    left: 105%;
+  }
+}
+
+/* 実行中（`WorkflowStepBadge`）。塗ったマスの上を**背景色寄りの光**が通る。
+   `--background`を混ぜるので、明るいテーマでは白く、暗いテーマでは黒く寄り、
+   どちらでも下の色との差が出る。塗りそのものは動かさない。 */
+.progress-live-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--background) 88%, transparent),
+    transparent
+  );
+  animation: progress-sweep 1.2s linear infinite;
+}
+
+/* 起動中（`QueueStepBadge`）はまだ1段も塗られておらず、上を通す塗りが無い。
+   うっすらしたトラックの上を**色の濃い帯**が通る形にする（`loading-bar-slide`と
+   同じ考え方で、進捗率は出さない）。 */
+.progress-bar-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 55%, transparent);
+  animation: progress-sweep 1.3s cubic-bezier(0.55, 0.1, 0.35, 0.9) infinite;
+}
+
+/* 動きを減らす設定では掃かせず、置いたままにする（状態は添える字とツールチップで伝わる） */
+@media (prefers-reduced-motion: reduce) {
+  .progress-live-sweep,
+  .progress-bar-sweep {
+    animation: none;
+    left: 30%;
+  }
+}
