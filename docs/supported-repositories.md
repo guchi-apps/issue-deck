@@ -157,11 +157,11 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 
 | 項目 | 内容 |
 |---|---|
-| ワークフロー | 無し（`.github/workflows/`を持たない） |
+| ワークフロー | `issue-labels.yml`（進捗報告のcaller）のみ。無人実行（`claude-issue-dispatch.yml`）とリリースフローは入れない |
 | ラベル | issue-deckと同一（`guchi-apps/docs`の`label-sync/sync-labels.sh`で配る） |
 | CLAUDE.md | あり（新規作成）。「コードを持たない」「実装しない」「PRは`main`直行」を明記 |
 | デフォルトブランチ | `main`のみ（`develop`は作らない。`docs`・`claude-config`と同じ） |
-| 盤面（Projects Status） | 載る。ただし**`Implementation`で止まり、以降は手で`Done`にしてclose** |
+| 盤面（Projects Status） | 載る。`main`宛PRの作成で`Develop PR`、そのマージで`Done`＋close。**PRを作るまでは`Implementation`のまま**（下記） |
 | Pull Request（[scripts/local-repo-pr-policy.conf](../scripts/local-repo-pr-policy.conf)） | `manual`。エージェントは自動で作らず、人の指示を待つ。PRができるまでセッションも畳まない（#2499） |
 | ポート帯（[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)） | 26000 |
 | `~/.config/issue-deck/local-repos.conf` | `/home/guchi/apps/ideas` |
@@ -178,11 +178,13 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
   `addMissingProjectItems`（[`lib/github/sync-project-status.ts`](../src/lib/github/sync-project-status.ts)）の
   自動追加の対象にはならない。盤面へ載るのはローカルセッションが起動時に進捗報告API
   （`POST /api/progress`）を叩いたIssueだけ
-- **進捗は`Implementation`で止まる。** `Develop PR`以降を報告するのは`issue-labels.yml`で、
-  このリポジトリには`.github/workflows/`自体が無い（`docs`#3・`subpc`#10・#14・#19・
-  `claude-config`と同じ状態）。**入れるまでは手で`Done`にしてcloseする。** 入れる場合は
-  `develop`を持たないため`workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`が
-  要る（#1901・#1917。`claude-config`は guchi-apps/claude-config#2 で分けた）
+- **進捗の報告は`issue-labels.yml`のcallerだけを置いた。** `develop`を持たないため、
+  `workflows/v23`以降の`main-direct-pr-opened`・`main-direct-merged`を使う（#1901・#1917。
+  `claude-config`は guchi-apps/claude-config#2 で分けた）。`main`宛PRの作成で`Develop PR`、
+  そのマージで`Done`＋Issueのcloseまで自動で進み、`Develop`・`Release`の2段は通らない。
+  **ただしPRを作るまでは`Implementation`のまま**で、Issueも自動ではcloseされない
+  （下記「Pull Requestは人の指示で作り、それまでセッションを畳まない」。PRを作らずに
+  終える構想は、画面から`Closed`にするか手でcloseする）
 - **リリースフローも入れない。** `docs`・`claude-config`と同じく`develop`を持たず、デプロイも
   無い（構想はどこにもデプロイされない）ため、リリースという段階を挟む先が無い
 - **`package.json`を持たない。** 依存インストールとenvの配置は不要

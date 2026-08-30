@@ -50,6 +50,7 @@ export function prPolicyInstructions(params: {
       `- **Pull Requestは、ユーザーから指示されるまで作りません。** このリポジトリ（\`${repositoryFullName}\`）は、成果物を一度で仕上げるのではなく同じセッションで何度も練り直す使い方をします。コミットとpush（\`issue-${issueNumber}\`ブランチ）はいつでも行ってよいですが、\`gh pr create\`は「PRを作って」と言われてから実行します`,
       "- **`11.local`もPull Requestを作るまで外しません。** 外すと「ローカル作業を終えた」と判定され、数分でこのセッションが自動終了します（`scripts/reap-sessions.sh`）。PRを作らない限り畳まれないので、続きは同じ会話でやり取りできます",
       "- 一区切りついたら、Pull Requestを作る代わりに**どこまで進んだかをIssueコメントへ残し**、次に何をするかを`AskUserQuestion`でユーザーへ尋ねます（フックが`00.check-user`と`01.check-input`を付け、issue-deckのPush通知が飛びます。答えた時点で外れます）",
+      `- **後述の「完了報告」は、PRを作らない回でも省きません。** 「作成したPull RequestのURL」の代わりに「どこまで進んだか・次に何をするか」を書いて投稿します。報告が無いと、issue-deckの画面からは進んだのか止まったのか分かりません（同じ理由で、一区切りの前に\`gh issue view ${issueNumber} --repo ${repositoryFullName} --comments\`で最新の指示を確認するのも、PRの有無によらず行います）`,
       `- 指示を受けてPull Requestを作るときは\`${baseBranch}\`向けに作成し（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）、マージ時点ではissueをcloseしない運用のため\`closes #番号\`/\`fixes #番号\`は使わず\`#${issueNumber}\`のように番号のみ記載します。作成したら\`11.local\`を外します`,
     ].join("\n");
   }
