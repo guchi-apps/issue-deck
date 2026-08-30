@@ -612,6 +612,21 @@ fi
 # ここにしか入らず、報告用の2つの関数が取り残された（#1530）。
 REPO_SLUG="$(current_repo_slug)"
 
+# Codexが見た目案をIssueDeck配下へ登録するための接続情報（#2597）。**共有シークレットは
+# プロンプト本文・Issueコメント・標準出力へ書かない。** 子プロセスの環境変数としてだけ渡し、
+# `scripts/lib/codex-artifact.sh`が登録時にAuthorizationヘッダーへ設定する。
+if [[ "$AGENT_KIND" == "codex" ]]; then
+  ISSUE_DECK_ARTIFACT_API_URL="$(dispatch_env_value APP_BASE_URL)"
+  if [[ -n "$ISSUE_DECK_ARTIFACT_API_URL" ]]; then
+    ISSUE_DECK_ARTIFACT_API_URL="${ISSUE_DECK_ARTIFACT_API_URL%/}/api/dispatch/sessions/artifact"
+  fi
+  export ISSUE_DECK_ARTIFACT_API_URL
+  export ISSUE_DECK_ARTIFACT_SECRET="$(dispatch_env_value DISPATCH_SECRET)"
+  export ISSUE_DECK_REPO_SLUG="$REPO_SLUG"
+  export ISSUE_DECK_ISSUE_NUMBER="$ISSUE_NUMBER"
+  export ISSUE_DECK_HOST_NAME="$(dispatch_host_name)"
+fi
+
 # セッションの回収（#1256）用の記述子。回収スクリプトはtmuxのセッション名しか手掛かりを
 # 持たないため、worktreeの場所と対応Issueをここで残しておく。
 #
