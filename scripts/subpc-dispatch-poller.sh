@@ -2706,7 +2706,7 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command
-  local placeholder_values resolved_command agent
+  local placeholder_values resolved_command agent codex_model
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2726,6 +2726,9 @@ run_job() {
   # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
   # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
   agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
+  # 設定画面で選んだCodexモデル（#2550）。古いissue-deckは返さないため、その場合はauto。
+  # `auto`はランチャーへ環境変数を渡さず、Codex CLI側の既定モデルに委ねる。
+  codex_model="$(printf '%s' "$job_json" | jq -r '.codexModel // "auto"')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -2884,6 +2887,13 @@ run_job() {
       return 0
       ;;
   esac
+  case "$codex_model" in
+    auto | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna | gpt-5.5 | gpt-5.4) ;;
+    *)
+      report_job "$job_id" failed "受け取ったCodexモデルが不正です: $codex_model"
+      return 0
+      ;;
+  esac
 
   # `set -e`下では`[[ … ]] && …`が偽のときにそこで止まるので、ifで書く
   local agent_label=""
@@ -2894,9 +2904,13 @@ run_job() {
   # `ISSUE_DECK_AGENT`は受け口（start-local-session.sh）と、その先の start-issue.sh が読む
   # （#2377）。**引数ではなく環境変数で渡す**のは、この指定を解釈しないリポジトリのランチャーへ
   # 届いても無害にするため（未知のフラグはissue番号として扱われて失敗する。#1076と同じ理由）。
+  local -a launch_env=(env "ISSUE_DECK_AGENT=$agent")
+  if [[ "$agent" == "codex" && "$codex_model" != "auto" ]]; then
+    launch_env+=("ISSUE_DECK_CODEX_MODEL=$codex_model")
+  fi
   launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
     "起動しています（$LOCAL_REPO_PATH$agent_label）" \
-    env "ISSUE_DECK_AGENT=$agent" bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
+    "${launch_env[@]}" bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
 }
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。

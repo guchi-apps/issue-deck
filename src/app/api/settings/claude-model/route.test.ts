@@ -38,34 +38,53 @@ beforeEach(() => {
   upsert.mockImplementation(async ({ update }) => ({
     claudeModel: update.claudeModel ?? "auto",
     claudeModelAssist: update.claudeModelAssist ?? "auto",
+    codexModel: update.codexModel ?? "auto",
   }));
 });
 
 describe("GET", () => {
-  it("設定が無い場合は両方autoを返す", async () => {
+  it("設定が無い場合はすべてautoを返す", async () => {
     findUnique.mockResolvedValue(null);
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "auto",
       claudeModelAssist: "auto",
+      codexModel: "auto",
     });
   });
 
   it("保存済みの値をそのまま返す", async () => {
-    findUnique.mockResolvedValue({ claudeModel: "opus", claudeModelAssist: "sonnet" });
+    findUnique.mockResolvedValue({
+      claudeModel: "opus",
+      claudeModelAssist: "sonnet",
+      codexModel: "gpt-5.6-terra",
+    });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
+      codexModel: "gpt-5.6-terra",
     });
   });
 });
 
 describe("PATCH", () => {
   it("両方指定された場合は両方を更新する", async () => {
-    const res = await PATCH(patchRequest({ claudeModel: "opus", claudeModelAssist: "haiku" }));
+    const res = await PATCH(
+      patchRequest({
+        claudeModel: "opus",
+        claudeModelAssist: "haiku",
+        codexModel: "gpt-5.6-sol",
+      }),
+    );
 
     expect(res.status).toBe(200);
     expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: { claudeModel: "opus", claudeModelAssist: "haiku" } }),
+      expect.objectContaining({
+        update: {
+          claudeModel: "opus",
+          claudeModelAssist: "haiku",
+          codexModel: "gpt-5.6-sol",
+        },
+      }),
     );
   });
 
@@ -89,6 +108,13 @@ describe("PATCH", () => {
 
   it("claudeModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(patchRequest({ claudeModel: "gpt" }));
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("codexModelが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "opus", codexModel: "gpt-5-codex" }));
 
     expect(res.status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
