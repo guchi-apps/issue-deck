@@ -459,6 +459,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     クラスタ（`issue-list.tsx`の`renderIssueRow`）を縮められるようにして、**添える字
     （「実装中（サブPC）」）だけが切り詰められる**ようにしてある（アイコン・バー・アバターは
     `shrink-0`）。ここを`shrink-0`へ戻すと、狭いカラムで行からはみ出す
+  - **一覧の行で横幅がいちばん厳しいのはPC・iPadで、スマホではない**（#2516）。PCの一覧カラムは
+    既定384px・最小280px（`issue-deck-shell.tsx`の`issueListWidth`）で、iPhone 15の393pxより
+    狭い。iPadは768pxを超えるのでスマホ用画面へ切り替わらず、同じ384pxのカラムが出る。
+    **行に何かを足すときはスマホ幅ではなく280pxで確かめる。**
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
