@@ -6,19 +6,20 @@ import { ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from "luc
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
-import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   formatUsageAmount,
+  formatQuotaPercent,
   formatUsageTokens,
   formatUsageUsd,
   sessionUsageKindLabel,
+  toQuotaPercent,
   type QuotaScale,
   type SessionUsageEntry,
+  type UsageByAgent,
   type UsageIssue,
 } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
@@ -53,8 +54,6 @@ type SessionUsagePanelProps = {
   isLoading: boolean;
   error: string | null;
   days: number;
-  agent: SessionUsageAgent;
-  onChangeAgent: (agent: SessionUsageAgent) => void;
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   /**
@@ -66,6 +65,24 @@ type SessionUsagePanelProps = {
   compact?: boolean;
   className?: string;
 };
+
+type QuotaByAgent = SessionUsageResponse["quotaByAgent"];
+
+function formatCombinedAmount(
+  byAgent: Pick<UsageByAgent, "claude" | "codex">,
+  unit: SessionUsageUnit,
+  quotas: QuotaByAgent,
+): string {
+  if (unit === "usd") {
+    return formatUsageUsd(byAgent.claude.costUsd + byAgent.codex.costUsd);
+  }
+  const claude = toQuotaPercent(byAgent.claude.costUsd, quotas.claude);
+  const codex = toQuotaPercent(byAgent.codex.costUsd, quotas.codex);
+  if (claude === null && codex === null) {
+    return formatUsageUsd(byAgent.claude.costUsd + byAgent.codex.costUsd);
+  }
+  return formatQuotaPercent((claude ?? 0) + (codex ?? 0));
+}
 
 /** 期間・単位の切り替えに使う小さなセグメント */
 function Segmented<T extends string | number>({
@@ -119,12 +136,12 @@ function Tile({ label, value, sub }: { label: string; value: string; sub: string
 function DailyChart({
   days,
   unit,
-  quota,
+  quotas,
   todayKey,
 }: {
-  days: { date: string; costUsd: number; responses: number }[];
+  days: SessionUsageResponse["byDay"];
   unit: SessionUsageUnit;
-  quota: QuotaScale | null;
+  quotas: QuotaByAgent;
   todayKey: string;
 }) {
   const max = days.reduce((peak, day) => Math.max(peak, day.costUsd), 0);
@@ -134,30 +151,41 @@ function DailyChart({
 
   return (
     <>
-      <div className="flex h-24 items-end gap-[3px]">
+      <div className="flex flex-col gap-2">
         {days.map((day) => {
-          const height = max > 0 ? Math.max(2, (day.costUsd / max) * 100) : 2;
+          const width = max > 0 ? (day.costUsd / max) * 100 : 0;
+          const claudeShare =
+            day.costUsd > 0 ? (day.byAgent.claude.costUsd / day.costUsd) * 100 : 0;
           const isToday = day.date === todayKey;
           return (
             <div
               key={day.date}
-              className="flex h-full flex-1 flex-col justify-end"
-              title={`${day.date}　${formatUsageAmount(day.costUsd, unit, quota)}　${day.responses.toLocaleString()}応答`}
+              className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-[10px]"
+              title={`${day.date}　${formatCombinedAmount(day.byAgent, unit, quotas)}　${day.responses.toLocaleString()}応答`}
             >
+              <span className="text-muted-foreground tabular-nums">
+                {formatMonthDay(`${day.date}T00:00:00+09:00`)}
+              </span>
               <div
                 className={cn(
-                  "w-full rounded-t-[3px]",
-                  isToday ? "border border-primary bg-primary/25" : "bg-primary",
+                  "h-2.5 overflow-hidden rounded-full bg-muted",
+                  isToday && "ring-1 ring-muted-foreground/40",
                 )}
-                style={{ height: `${height}%` }}
-              />
+              >
+                <div
+                  className="flex h-full overflow-hidden rounded-full"
+                  style={{ width: `${width}%` }}
+                >
+                  <span className="bg-[#d97757]" style={{ width: `${claudeShare}%` }} />
+                  <span className="flex-1 bg-[#4776e6]" />
+                </div>
+              </div>
+              <span className="text-right font-semibold tabular-nums">
+                {formatCombinedAmount(day.byAgent, unit, quotas)}
+              </span>
             </div>
           );
         })}
-      </div>
-      <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground tabular-nums">
-        <span>{formatMonthDay(`${days[0].date}T00:00:00+09:00`)}</span>
-        <span>{formatMonthDay(`${days[days.length - 1].date}T00:00:00+09:00`)}</span>
       </div>
     </>
   );
@@ -169,14 +197,14 @@ function Breakdown({
   hint,
   rows,
   unit,
-  quota,
+  quotas,
   colorOf,
 }: {
   title: string;
   hint: string;
-  rows: { key: string; label: string; sessions: number; costUsd: number }[];
+  rows: { key: string; label: string; sessions: number; costUsd: number; byAgent: UsageByAgent }[];
   unit: SessionUsageUnit;
-  quota: QuotaScale | null;
+  quotas: QuotaByAgent;
   colorOf?: (key: string) => string | undefined;
 }) {
   const max = rows[0]?.costUsd ?? 0;
@@ -210,10 +238,23 @@ function Breakdown({
                     {row.sessions}セッション
                   </span>
                   <span className="shrink-0 font-semibold tabular-nums">
-                    {formatUsageAmount(row.costUsd, unit, quota)}
+                    {formatCombinedAmount(row.byAgent, unit, quotas)}
                   </span>
                 </div>
-                <Progress value={max > 0 ? (row.costUsd / max) * 100 : 0} />
+                <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="flex h-full"
+                    style={{ width: `${max > 0 ? (row.costUsd / max) * 100 : 0}%` }}
+                  >
+                    <span
+                      className="bg-[#d97757]"
+                      style={{
+                        width: `${row.costUsd > 0 ? (row.byAgent.claude.costUsd / row.costUsd) * 100 : 0}%`,
+                      }}
+                    />
+                    <span className="flex-1 bg-[#4776e6]" />
+                  </div>
+                </div>
               </li>
             );
           })}
@@ -235,11 +276,22 @@ function SessionRow({
   quota: QuotaScale | null;
   compact: boolean;
 }) {
-  const models = entry.models.map((model) => model.replace(/^claude-/, "")).join(" / ");
+  const models =
+    entry.models.map((model) => model.replace(/^claude-/, "")).join(" / ") || "不明";
   return (
     <div className="flex items-baseline gap-2 py-0.5 pl-5 text-[11px] text-muted-foreground tabular-nums">
-      <span className="shrink-0 font-medium text-foreground">{sessionUsageKindLabel(entry.kind)}</span>
-      {!compact && <span className="shrink-0">{models || "-"}</span>}
+      <span
+        className={cn(
+          "shrink-0 rounded-full border px-1.5 text-[10px] font-semibold",
+          entry.agent === "claude"
+            ? "border-[#d97757] text-[#b45337]"
+            : "border-[#4776e6] text-[#355bc0]",
+        )}
+      >
+        {entry.agent === "claude" ? "Claude" : "Codex"}
+      </span>
+      <span className="shrink-0 font-medium text-foreground">{models}</span>
+      {!compact && <span className="shrink-0">{sessionUsageKindLabel(entry.kind)}</span>}
       <span className="truncate">
         {formatDateTime(entry.startedAt)} → {formatDateTime(entry.endedAt)}
       </span>
@@ -256,13 +308,13 @@ function SessionRow({
 function IssueRow({
   issue,
   unit,
-  quota,
+  quotas,
   compact,
   onOpenIssue,
 }: {
   issue: UsageIssue;
   unit: SessionUsageUnit;
-  quota: QuotaScale | null;
+  quotas: QuotaByAgent;
   compact: boolean;
   onOpenIssue?: (repository: string, issueNumber: number) => void;
 }) {
@@ -308,7 +360,7 @@ function IssueRow({
           </span>
         )}
         <span className="w-16 shrink-0 text-right font-semibold tabular-nums">
-          {formatUsageAmount(issue.costUsd, unit, quota)}
+          {formatCombinedAmount(issue.byAgent, unit, quotas)}
         </span>
         {canOpen && (
           <Button
@@ -331,7 +383,7 @@ function IssueRow({
               key={`${entry.host}:${entry.sessionId}`}
               entry={entry}
               unit={unit}
-              quota={quota}
+              quota={quotas[entry.agent]}
               compact={compact}
             />
           ))}
@@ -349,8 +401,6 @@ export function SessionUsagePanel({
   isLoading,
   error,
   days,
-  agent,
-  onChangeAgent,
   onChangeDays,
   onRefresh,
   onOpenIssue,
@@ -360,12 +410,11 @@ export function SessionUsagePanel({
   const [unit, setUnit] = useState<SessionUsageUnit>("usd");
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
 
-  const quota = data?.quota ?? null;
-  // 物差しが無いのに「枠換算」を選べると、押しても何も変わらない。
-  const effectiveUnit: SessionUsageUnit = quota ? unit : "usd";
+  const quotas = data?.quotaByAgent ?? { claude: null, codex: null };
+  const hasQuota = Boolean(quotas.claude || quotas.codex);
+  const effectiveUnit: SessionUsageUnit = hasQuota ? unit : "usd";
 
   const totals = data?.totals;
-  const perDayUsd = totals && days > 0 ? totals.costUsd / days : 0;
   const perResponseUsd = totals && totals.responses > 0 ? totals.costUsd / totals.responses : 0;
   const avgContext =
     totals && totals.responses > 0 ? Math.round(totals.contextTokens / totals.responses) : 0;
@@ -373,6 +422,9 @@ export function SessionUsagePanel({
   const planReview = data?.byKind.find((kind) => kind.key === "plan-review");
   const todayKey = data?.byDay.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
+  const agentCostSub = data
+    ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}`
+    : "";
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -382,7 +434,7 @@ export function SessionUsagePanel({
           <p className="text-[11px] text-muted-foreground">
             {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
                 開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする） */}
-            サブPCの{agent === "claude" ? "Claude" : "Codex"}セッションが使ったトークン
+            サブPCのClaude・Codexセッションが使ったトークン
             {data?.reportedAt
               ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`
               : ""}
@@ -416,52 +468,47 @@ export function SessionUsagePanel({
         </Button>
       </header>
 
-      <Segmented
-        ariaLabel="表示するエージェント"
-        options={[
-          { value: "claude" as const, label: "Claude" },
-          { value: "codex" as const, label: "Codex" },
-        ]}
-        value={agent}
-        onChange={onChangeAgent}
-      />
-
       {error && <p className="text-xs text-destructive">{error}</p>}
 
+      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+        <span>
+          <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#d97757]" aria-hidden />
+          Claude
+        </span>
+        <span>
+          <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#4776e6]" aria-hidden />
+          Codex
+        </span>
+        <span>棒の長さは合計、色はAI別の内訳</span>
+      </div>
+
       {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
-      <section className="flex flex-col gap-2 rounded-lg border p-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs font-semibold">
-            {agent === "claude" ? "Claude" : "Codex"} プラン枠
-          </span>
-          <span className="text-[11px] text-muted-foreground">実測（下の「枠%」の逆算元）</span>
-        </div>
-        {agent === "claude" ? (
+      <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+        <div>
+          <p className="mb-1 text-xs font-semibold">Claude プラン枠</p>
           <ClaudeUsageCard
-            data={data?.planUsage && !("host" in data.planUsage) ? data.planUsage : null}
+            data={data?.planUsage.claude ?? null}
             isLoading={isLoading && !data}
             error={null}
-            notConfigured={data?.planNotConfigured ?? false}
+            notConfigured={data?.planNotConfigured.claude ?? false}
           />
-        ) : (
+        </div>
+        <div>
+          <p className="mb-1 text-xs font-semibold">Codex プラン枠</p>
           <CodexUsageCard
-            data={data?.planUsage && "host" in data.planUsage ? data.planUsage : null}
+            data={data?.planUsage.codex ?? null}
             isLoading={isLoading && !data}
             error={null}
-            notConfigured={data?.planNotConfigured ?? false}
+            notConfigured={data?.planNotConfigured.codex ?? false}
           />
-        )}
+        </div>
       </section>
 
       <p className="rounded-lg border border-dashed p-2 text-[11px] text-muted-foreground">
         <span className="font-semibold text-foreground">金額はAPI換算の目安です。</span>
-        {agent === "claude" ? "Claude" : "Codex"}サブスクの実費ではありません。
-        {quota ? (
-          <>
-            「枠%」は、上の{quota.windowLabel}枠の実測（{Math.round(quota.usedPercent)}%）と
-            同じ期間のローカルセッションの消費から逆算した目安です。同じ枠はGitHub Actionsの
-            無人実行とissue-deck自身のAPI呼び出しも使うため、実際よりやや大きめに出ます。
-          </>
+        Claude・Codexサブスクの実費ではありません。
+        {hasQuota ? (
+          <>「枠%」は各AIのプラン枠から別々に逆算し、表示上で合算した目安です。</>
         ) : (
           <>プラン枠を取得できていないため、枠への換算は出していません。</>
         )}
@@ -475,8 +522,8 @@ export function SessionUsagePanel({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile
               label={effectiveUnit === "quota" ? "枠換算" : "API換算"}
-              value={formatUsageAmount(data.totals.costUsd, effectiveUnit, quota)}
-              sub={`1日あたり ${formatUsageAmount(perDayUsd, effectiveUnit, quota)}`}
+              value={formatCombinedAmount(data.totalsByAgent, effectiveUnit, quotas)}
+              sub={agentCostSub}
             />
             <Tile
               label="応答"
@@ -499,13 +546,13 @@ export function SessionUsagePanel({
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">日別</span>
               <span className="text-[11px] text-muted-foreground">
-                いちばん新しい日は集計中（薄い棒）
+                いちばん新しい日は集計中（枠線付き）
               </span>
             </div>
             <DailyChart
               days={data.byDay}
               unit={effectiveUnit}
-              quota={quota}
+              quotas={quotas}
               todayKey={todayKey}
             />
           </section>
@@ -519,9 +566,10 @@ export function SessionUsagePanel({
                 label: row.key || "(不明)",
                 sessions: row.sessions,
                 costUsd: row.costUsd,
+                byAgent: row.byAgent,
               }))}
               unit={effectiveUnit}
-              quota={quota}
+              quotas={quotas}
               colorOf={(key) => getRepoColor(key || "(不明)")}
             />
             <Breakdown
@@ -532,9 +580,10 @@ export function SessionUsagePanel({
                 label: sessionUsageKindLabel(row.key),
                 sessions: row.sessions,
                 costUsd: row.costUsd,
+                byAgent: row.byAgent,
               }))}
               unit={effectiveUnit}
-              quota={quota}
+              quotas={quotas}
             />
           </div>
 
@@ -557,7 +606,7 @@ export function SessionUsagePanel({
                       key={`${issue.repository ?? ""}#${issue.issueNumber ?? ""}`}
                       issue={issue}
                       unit={effectiveUnit}
-                      quota={quota}
+                      quotas={quotas}
                       compact={compact}
                       onOpenIssue={onOpenIssue}
                     />
@@ -578,7 +627,7 @@ export function SessionUsagePanel({
                 {data.omittedIssues > 0 && issues.length <= visibleIssues && (
                   <p className="pt-1 text-center text-[11px] text-muted-foreground">
                     ほか {data.omittedIssues.toLocaleString()} 件（合計{" "}
-                    {formatUsageAmount(data.omittedIssueCostUsd, effectiveUnit, quota)}
+                    {formatUsageUsd(data.omittedIssueCostUsd)}
                     ）は明細に出していません。上の合計・内訳には入っています。
                   </p>
                 )}

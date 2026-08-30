@@ -42,8 +42,9 @@ export type UsageTotals = {
   costUsd: number;
 };
 
-export type UsageDay = UsageTotals & { date: string };
-export type UsageGroup = UsageTotals & { key: string };
+export type UsageByAgent = Record<SessionUsageEntry["agent"], UsageTotals>;
+export type UsageDay = UsageTotals & { date: string; byAgent: UsageByAgent };
+export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent };
 
 export type UsageIssue = UsageTotals & {
   repository: string | null;
@@ -54,6 +55,7 @@ export type UsageIssue = UsageTotals & {
   latestStartedAt: string;
   /** 転記1本ごとの明細（開始日時の新しい順）。画面は行を開いたときだけ出す */
   entries: SessionUsageEntry[];
+  byAgent: UsageByAgent;
 };
 
 /**
@@ -89,6 +91,7 @@ export type SessionUsageSummary = {
   until: string;
   days: number;
   totals: UsageTotals;
+  totalsByAgent: UsageByAgent;
   byDay: UsageDay[];
   byRepository: UsageGroup[];
   byKind: UsageGroup[];
@@ -103,8 +106,8 @@ export type SessionUsageSummary = {
   hosts: string[];
   /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
   reportedAt: string | null;
-  /** プラン枠への換算。材料が揃わなければnull */
-  quota: QuotaScale | null;
+  /** AIごとのプラン枠への換算。材料が揃わなければnull */
+  quotaByAgent: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 };
 
 /**
@@ -130,6 +133,18 @@ export function sessionUsageKindLabel(kind: string): string {
 
 function emptyTotals(): UsageTotals {
   return { sessions: 0, responses: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 };
+}
+
+function emptyByAgent(): UsageByAgent {
+  return { claude: emptyTotals(), codex: emptyTotals() };
+}
+
+function addEntryWithAgent(
+  totals: UsageTotals & { byAgent: UsageByAgent },
+  entry: SessionUsageEntry,
+): void {
+  addEntry(totals, entry);
+  addEntry(totals.byAgent[entry.agent], entry);
 }
 
 function addEntry(totals: UsageTotals, entry: SessionUsageEntry): void {
@@ -229,13 +244,13 @@ export function buildSessionUsageSummary({
   nowMs,
   days,
   reportedAt,
-  quota,
+  quotaByAgent = { claude: null, codex: null },
 }: {
   entries: SessionUsageEntry[];
   nowMs: number;
   days: number;
   reportedAt: string | null;
-  quota: QuotaScale | null;
+  quotaByAgent?: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 }): SessionUsageSummary {
   const startMs = sessionUsagePeriodStartMs(nowMs, days);
   const inPeriod = entries.filter((entry) => {
@@ -244,6 +259,7 @@ export function buildSessionUsageSummary({
   });
 
   const totals = emptyTotals();
+  const totalsByAgent = emptyByAgent();
   const byDay = new Map<string, UsageDay>();
   const byRepository = new Map<string, UsageGroup>();
   const byKind = new Map<string, UsageGroup>();
@@ -252,23 +268,36 @@ export function buildSessionUsageSummary({
 
   for (const entry of inPeriod) {
     addEntry(totals, entry);
+    addEntry(totalsByAgent[entry.agent], entry);
     hosts.add(entry.host);
 
     const dateKey = jstDateKey(entry.endedAt);
     if (dateKey) {
-      const day = byDay.get(dateKey) ?? { date: dateKey, ...emptyTotals() };
-      addEntry(day, entry);
+      const day = byDay.get(dateKey) ?? {
+        date: dateKey,
+        ...emptyTotals(),
+        byAgent: emptyByAgent(),
+      };
+      addEntryWithAgent(day, entry);
       byDay.set(dateKey, day);
     }
 
     // リポジトリを判定できなかったセッションは空文字のキーへまとめ、画面が「（不明）」と出す。
     const repositoryKey = entry.repository ?? "";
-    const repository = byRepository.get(repositoryKey) ?? { key: repositoryKey, ...emptyTotals() };
-    addEntry(repository, entry);
+    const repository = byRepository.get(repositoryKey) ?? {
+      key: repositoryKey,
+      ...emptyTotals(),
+      byAgent: emptyByAgent(),
+    };
+    addEntryWithAgent(repository, entry);
     byRepository.set(repositoryKey, repository);
 
-    const kind = byKind.get(entry.kind) ?? { key: entry.kind, ...emptyTotals() };
-    addEntry(kind, entry);
+    const kind = byKind.get(entry.kind) ?? {
+      key: entry.kind,
+      ...emptyTotals(),
+      byAgent: emptyByAgent(),
+    };
+    addEntryWithAgent(kind, entry);
     byKind.set(entry.kind, kind);
 
     // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
@@ -282,9 +311,10 @@ export function buildSessionUsageSummary({
         kinds: [],
         latestStartedAt: entry.startedAt,
         entries: [],
+        byAgent: emptyByAgent(),
         ...emptyTotals(),
       } satisfies UsageIssue);
-    addEntry(issue, entry);
+    addEntryWithAgent(issue, entry);
     issue.entries.push(entry);
     if (entry.startedAt > issue.latestStartedAt) issue.latestStartedAt = entry.startedAt;
     byIssue.set(issueKey, issue);
@@ -312,6 +342,7 @@ export function buildSessionUsageSummary({
     until: new Date(nowMs).toISOString(),
     days,
     totals,
+    totalsByAgent,
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byRepository: [...byRepository.values()].sort(byCost),
     byKind: [...byKind.values()].sort(byCost),
@@ -320,7 +351,7 @@ export function buildSessionUsageSummary({
     omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),
     hosts: [...hosts].sort(),
     reportedAt,
-    quota,
+    quotaByAgent,
   };
 }
 

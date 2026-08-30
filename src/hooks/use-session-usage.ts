@@ -4,15 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
-import type { SessionUsageAgent } from "@/lib/dispatch/session-usage";
 import type { SessionUsageSummary } from "@/lib/session-usage-view";
 
 export type SessionUsageResponse = SessionUsageSummary & {
-  agent: SessionUsageAgent;
-  /** プラン枠のメーター。取得できなければnull */
-  planUsage: ClaudeUsage | CodexUsage | null;
+  /** AIごとのプラン枠メーター。取得できなければnull */
+  planUsage: { claude: ClaudeUsage | null; codex: CodexUsage | null };
   /** `CLAUDE_CODE_OAUTH_TOKEN`が未設定。エラーではないので理由を1行だけ出す */
-  planNotConfigured: boolean;
+  planNotConfigured: { claude: boolean; codex: boolean };
 };
 
 type UseSessionUsageResult = {
@@ -35,7 +33,6 @@ type UseSessionUsageResult = {
 export function useSessionUsage(
   enabled: boolean,
   days: number,
-  agent: SessionUsageAgent,
 ): UseSessionUsageResult {
   const [data, setData] = useState<SessionUsageResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -57,7 +54,7 @@ export function useSessionUsage(
     setData(null);
     setError(null);
 
-    fetch(`/api/session-usage?days=${days}&agent=${agent}`, { signal: controller.signal })
+    fetch(`/api/session-usage?days=${days}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
         return (await res.json()) as SessionUsageResponse;
@@ -77,7 +74,7 @@ export function useSessionUsage(
       cancelled = true;
       controller.abort();
     };
-  }, [enabled, days, agent, reloadKey]);
+  }, [enabled, days, reloadKey]);
 
   return { data, isLoading, error, refresh };
 }

@@ -71,7 +71,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.totals.sessions).toBe(1);
@@ -86,7 +86,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: Date.parse("2026-08-31T00:00:00.000Z"),
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byDay.map((day) => day.date)).toEqual(["2026-08-31"]);
@@ -113,7 +113,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue).toHaveLength(1);
@@ -142,7 +142,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([2, 1]);
@@ -164,7 +164,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     // 合計と明細が合っていること（落とすと合わなくなる）
@@ -183,7 +183,7 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.totals.sessions).toBe(210);
@@ -204,11 +204,30 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quota: null,
+      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byRepository.map((row) => row.key)).toEqual(["dayspan", "", "issue-deck"]);
     expect(summary.byKind.map((row) => row.key)).toEqual(["implementation", "other"]);
+  });
+
+  it("合計・日別・リポジトリ別・種別別をClaudeとCodexに分けて保持する", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "claude", agent: "claude", costUsd: 3 }),
+        entry({ sessionId: "codex", agent: "codex", models: ["gpt-5.6"], costUsd: 2 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+      quotaByAgent: { claude: null, codex: null },
+    });
+
+    expect(summary.totalsByAgent.claude.costUsd).toBe(3);
+    expect(summary.totalsByAgent.codex.costUsd).toBe(2);
+    expect(summary.byDay[0].byAgent.codex.sessions).toBe(1);
+    expect(summary.byRepository[0].byAgent.claude.sessions).toBe(1);
+    expect(summary.byKind[0].byAgent.codex.sessions).toBe(1);
   });
 });
 
