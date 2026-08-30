@@ -9,7 +9,7 @@ vi.mock("@/hooks/use-now", () => ({ useNow: () => Date.parse("2026-08-30T07:00:0
 afterEach(cleanup);
 
 describe("CodexUsageCard", () => {
-  it("5時間・週間の使用量と古い報告の警告を表示する", () => {
+  it("5時間枠は表示せず週間枠だけを表示する", () => {
     render(
       <CodexUsageCard
         data={{
@@ -27,10 +27,10 @@ describe("CodexUsageCard", () => {
         notConfigured={false}
       />,
     );
-    expect(screen.getByText("5時間")).toBeTruthy();
     expect(screen.getByText("週間")).toBeTruthy();
-    expect(screen.getByRole("meter", { name: "5時間の使用量" }).getAttribute("aria-valuenow")).toBe("45");
-    expect(screen.getByText("最新の報告から15分以上経過しています")).toBeTruthy();
+    expect(screen.queryByText("5時間")).toBeNull();
+    expect(screen.queryByRole("meter", { name: "5時間の使用量" })).toBeNull();
+    expect(screen.queryByText("最新の報告から15分以上経過しています")).toBeNull();
   });
 
   it("未報告を説明する", () => {
