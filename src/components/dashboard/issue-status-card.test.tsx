@@ -85,6 +85,7 @@ function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     issueTitle: null,
     issueId: null,
     targetHost: "subpc",
+    agent: "claude",
     kind: "LAUNCH",
     status: "SUCCEEDED",
     queuePriority: 0,

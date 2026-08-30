@@ -157,6 +157,7 @@ function run(overrides: Record<string, unknown> = {}) {
     repositoryFullName: REPOSITORY,
     issueNumber: 1876,
     targetHost: "subpc",
+    agent: "claude",
     status: "RUNNING",
     pausedReason: null,
     doneLines: "[]",

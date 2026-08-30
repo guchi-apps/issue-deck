@@ -114,6 +114,10 @@ export async function POST(request: NextRequest) {
     // 非対応扱い**。`planReview`と分けるのは、こちらは人が画面から押して起こすもので、非対応の
     // ホストへ配ると「押したのに`failed`だけが返る」ことになるため（選択肢の側で理由を出す）
     codeReviewCapable: typeof payload?.codeReview === "boolean" ? payload.codeReview : null,
+    // Codex CLIでセッションを起こせるpollerだけが送ってくる（#2505）。**未申告はnull＝非対応扱い**。
+    // 古いpollerはジョブの`agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ
+    // （`manualStepValues`と同じ、「配ってから`failed`で返る」では済まない種類の非対応）
+    codexCapable: typeof payload?.codex === "boolean" ? payload.codex : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは

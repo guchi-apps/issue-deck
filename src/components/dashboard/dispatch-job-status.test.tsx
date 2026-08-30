@@ -13,6 +13,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueTitle: null,
     issueId: null,
     targetHost: "subpc",
+    agent: "claude",
     kind: "LAUNCH",
     status: "SUCCEEDED",
     message: null,

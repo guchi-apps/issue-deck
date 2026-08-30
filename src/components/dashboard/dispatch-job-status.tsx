@@ -5,6 +5,8 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  DEFAULT_DISPATCH_AGENT,
+  describeDispatchAgent,
   describeDispatchJobStatus,
   isCancelableDispatchJobStatus,
   type DispatchJobTone,
@@ -133,6 +135,18 @@ export function DispatchJobStatus({
         </button>
       ) : (
         <span className={pillClassName}>{pillBody}</span>
+      )}
+      {/* 既定以外のエージェントで起こしたことを、ダイアログを閉じた後も出す（#2505）。
+          **既定（Claude Code）には印を付けない**——すべての行にラベルが付くと、どれが普通と
+          違うのかが読めなくなる。Codexにはフックが無く通知が飛ばないため、待っている人が
+          「動いていない」と取り違えないための手掛かりになる */}
+      {job.kind === "LAUNCH" && job.agent !== DEFAULT_DISPATCH_AGENT && (
+        <span
+          className="inline-flex w-fit items-center rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-inset ring-amber-500/40 dark:text-amber-400"
+          title="入力待ちの通知・計画の承認・Remote Controlは効きません"
+        >
+          {describeDispatchAgent(job.agent)}
+        </span>
       )}
       {copied && <span className="text-muted-foreground">コピーしました</span>}
       <span className="text-muted-foreground" title={formatDateTimeFull(timestamp)}>

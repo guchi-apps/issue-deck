@@ -2,6 +2,7 @@
 
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import type { Issue } from "@/types/issue";
 
@@ -45,12 +46,17 @@ export function useLocalSessionLaunch({
   /**
    * 起動ジョブを積み、積めたときだけ`11.local`を付ける。
    * **拒否されたのにラベルだけ残ると、無人実行までそのIssueに触れなくなる。**
+   *
+   * `agent`（#2505）を省略すると既定のClaude Codeで立つ。**「サブPCで開始」ボタンと
+   * 「セッションを復旧」は省略する**——エージェントを選ばせるのは「実装を開始」ダイアログ
+   * だけにして、同じ選択をメニューの階層でも持たない。
    */
-  async function launch(hostName: string): Promise<boolean> {
+  async function launch(hostName: string, agent?: DispatchAgent): Promise<boolean> {
     const enqueued = await dispatch.enqueue({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName,
+      agent,
     });
     if (enqueued) await ensureLocalLabel();
     return enqueued;
