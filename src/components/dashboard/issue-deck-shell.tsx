@@ -1355,6 +1355,7 @@ export function IssueDeckShell({
         pullRequests={crossRepositoryPullRequests}
         /* 実行中の確認待ちは「実行中」として弱く出す（#2174）。左メニューの件数と同じ集合 */
         checkUserRunningIssueIds={checkUserRunningIssueIds}
+        sessions={dispatch.sessions}
         /* 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398） */
         snoozes={snoozes}
         now={now}
