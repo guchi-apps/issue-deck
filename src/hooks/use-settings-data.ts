@@ -2,6 +2,7 @@
 
 import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { useCodexUsage } from "@/hooks/use-codex-usage";
 import { useFineGrainedTokens } from "@/hooks/use-fine-grained-tokens";
 import { useGithubActionsUsage } from "@/hooks/use-github-actions-usage";
 import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
@@ -52,6 +53,12 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
     notConfigured: claudeUsageNotConfigured,
   } = useClaudeUsage(enabled && statusActive);
   const {
+    data: codexUsage,
+    isLoading: codexUsageLoading,
+    error: codexUsageError,
+    notConfigured: codexUsageNotConfigured,
+  } = useCodexUsage(enabled && statusActive);
+  const {
     data: claudeApiUsage,
     isLoading: claudeApiUsageLoading,
     error: claudeApiUsageError,
@@ -95,6 +102,12 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
       isLoading: claudeUsageLoading,
       error: claudeUsageError,
       notConfigured: claudeUsageNotConfigured,
+    },
+    codexUsage: {
+      data: codexUsage,
+      isLoading: codexUsageLoading,
+      error: codexUsageError,
+      notConfigured: codexUsageNotConfigured,
     },
     claudeApiUsage: {
       data: claudeApiUsage,

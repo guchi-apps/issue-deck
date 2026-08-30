@@ -1487,3 +1487,27 @@ model SessionUsage {
   @@index([endedAt])
   @@index([repository, issueNumber])
 }
+
+/// Codex CLIが転記へ記録したプラン枠の最新スナップショット（#2535）。
+/// 本番VPSはホスト上の`~/.codex/sessions`を読めないため、pollerが使用率・窓・リセット時刻だけを
+/// 抽出して送る。会話本文・トークン数・クレジット残高・資格情報は保存しない。
+model CodexUsageSnapshot {
+  /// 報告元。1ホストにつき最新の1行だけを上書きする
+  host String @id @db.VarChar(191)
+
+  primaryUsedPercent     Float
+  primaryWindowMinutes   Int
+  primaryResetsAt        DateTime
+  secondaryUsedPercent   Float
+  secondaryWindowMinutes Int
+  secondaryResetsAt      DateTime
+  planType               String?  @db.VarChar(64)
+
+  /// Codexが転記へ書いた時刻と、pollerから受け取った時刻
+  observedAt DateTime
+  reportedAt DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([observedAt])
+}
