@@ -13,6 +13,7 @@ import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import { buildSnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -79,6 +80,29 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     repairRun: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
+  return {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    issueTitle: "サンプルIssue",
+    issueId: "issue-1",
+    state: "ALIVE",
+    exitStatus: null,
+    firstSeenAt: "2026-08-01T00:00:00.000Z",
+    lastReportedAt: "2026-08-01T00:05:00.000Z",
+    activity: "RESPONDED",
+    activityAt: "2026-08-01T00:05:00.000Z",
+    remoteControlUrl: null,
+    previewUrl: null,
+    reapAt: null,
+    reapReason: null,
+    codexThreadKnown: true,
     ...overrides,
   };
 }
@@ -162,6 +186,47 @@ describe("buildNotifications リリース", () => {
 });
 
 describe("buildNotifications 確認待ち・手作業待ち", () => {
+  it("応答終了したCodexセッションを内容確認のアクションとして出す", () => {
+    const items = build({
+      issues: [makeIssue({ id: "issue-1" })],
+      sessions: [makeSession()],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      group: "session",
+      tone: "action",
+      title: "#1 サンプルIssue",
+      badgeLabel: "内容を確認",
+      target: { kind: "issue", issueId: "issue-1" },
+    });
+  });
+
+  it("構造化された確認待ちがあるセッションは重複通知しない", () => {
+    const items = build({
+      issues: [
+        makeIssue({ id: "issue-1", labels: [label("00.check-user"), label("01.check-input")] }),
+      ],
+      sessions: [makeSession()],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].group).toBe("check-user");
+  });
+
+  it("通常のClaude Code・終了済み・応答中のセッションは出さない", () => {
+    const items = build({
+      issues: [makeIssue({ id: "issue-1" })],
+      sessions: [
+        makeSession({ codexThreadKnown: null }),
+        makeSession({ tmuxSessionName: "exited", state: "EXITED" }),
+        makeSession({ tmuxSessionName: "working", activity: "WORKING" }),
+      ],
+    });
+
+    expect(items).toEqual([]);
+  });
+
   it("00.check-userの理由ラベルをバッジの文言に出す", () => {
     const items = build({
       issues: [

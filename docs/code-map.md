@@ -2187,6 +2187,12 @@ export function POST(request: NextRequest) {
     確認待ち・マージ待ちPRの増減に気づけない。**一覧からは外さない**（横断で手作業待ちを見られる
     場所は他に無い）ので、差は開いたときの見出し（`describeNotificationCount`の
     `1件・手作業待ち1件`）で説明する。
+  - **Codexの応答終了は「セッション確認」としてアクション通知へ出す**（#2618）。Codexは
+    構造化された確認要求のフックを持たないため、ユーザーへの確認文を出したまま応答が止まっても
+    `00.check-user`や質問パネルが作られないことがある。`DispatchSessionView`の
+    `ALIVE`・`RESPONDED`・`codexThreadKnown === true`を使い、通知からIssue詳細へ進んで
+    既存の「追加指示」で続けられるようにする。`00.check-user`が既に付いているIssueは既存の
+    確認待ち通知へ任せて二重表示し、通常のClaude Codeセッションと終了済みセッションは出さない。
   - **追加のGitHub API消費は、閉じている間はゼロ**（開いている間だけ30秒ごとに取り直す。
     #1909。後述）。Issue・PRは`IssueDeckShell`が既に取得済みのものを受け取り、
     リリース状況はロケットが使っていた`useRepositoryReleaseStatuses`をそのまま引き継ぐ。

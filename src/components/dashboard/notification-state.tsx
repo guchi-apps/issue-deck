@@ -25,6 +25,7 @@ import type { SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
  * ベルを開いている間の再取得間隔（#1909）。
@@ -139,6 +140,7 @@ export function NotificationProvider({
   issues,
   pullRequests,
   checkUserRunningIssueIds,
+  sessions = [],
   snoozes,
   now = null,
   onRefreshIssues,
@@ -155,6 +157,8 @@ export function NotificationProvider({
    * 左メニューの件数と同じ集合を受け取り、その行を「実行中」として弱く出す。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /** 応答終了したCodexセッションをアクション通知へ載せるための状態 */
+  sessions?: readonly DispatchSessionView[];
   /** ユーザーが「いまは実施しない」として伏せた項目（#2398）。渡すとベルからも外れる */
   snoozes?: SnoozeMap;
   /** 保留の期限判定に使う現在時刻(epoch ms)。未取得(null)なら実時刻を使う */
@@ -226,6 +230,7 @@ export function NotificationProvider({
       pullRequests,
       releaseStatuses: visibleReleaseStatuses,
       checkUserRunningIssueIds,
+      sessions,
       // 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398）
       snoozes,
       now,
@@ -251,6 +256,7 @@ export function NotificationProvider({
     repositories,
     pullRequests,
     checkUserRunningIssueIds,
+    sessions,
     snoozes,
     now,
     releaseStatuses,
