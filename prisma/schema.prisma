@@ -1210,6 +1210,15 @@ model SessionPlanRequest {
   expiresAt          DateTime
   // フックが結論を受け取った時刻。**受け取ったあとに押しても届かない**ことを画面へ出す
   deliveredAt        DateTime?
+  // サブPCが判断を取得した時刻。画面でのdecidedAtとは別の経路の証跡
+  decisionObservedAt  DateTime?
+  pollCount           Int                      @default(0)
+  lastPolledAt        DateTime?
+  // セッション側からの完了報告。未報告なら、取得後にプロセスが継続できたか不明
+  deliveryStatus      String?
+  deliveryReportedAt  DateTime?
+  deliveryExitCode    Int?
+  deliverySummary     String?                  @db.VarChar(500)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
