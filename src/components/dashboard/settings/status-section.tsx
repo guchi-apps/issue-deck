@@ -2,6 +2,7 @@
 
 import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
+import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { GithubActionsUsage } from "@/components/dashboard/github-actions-usage";
 import { GithubApiUsageList } from "@/components/dashboard/github-api-usage-list";
 import { GithubRateLimitList } from "@/components/dashboard/github-rate-limit-list";
@@ -10,7 +11,13 @@ import type { SettingsData } from "@/hooks/use-settings-data";
 
 type StatusSectionProps = Pick<
   SettingsData,
-  "rateLimits" | "apiUsage" | "actionsUsage" | "claudeUsage" | "claudeApiUsage" | "githubStatus"
+  | "rateLimits"
+  | "apiUsage"
+  | "actionsUsage"
+  | "claudeUsage"
+  | "codexUsage"
+  | "claudeApiUsage"
+  | "githubStatus"
 >;
 
 /**
@@ -28,6 +35,7 @@ export function StatusSection({
   apiUsage,
   actionsUsage,
   claudeUsage,
+  codexUsage,
   claudeApiUsage,
   githubStatus,
 }: StatusSectionProps) {
@@ -65,13 +73,25 @@ export function StatusSection({
         <div className="flex flex-col gap-2 rounded-lg border p-3">
           <p className="text-xs font-medium text-muted-foreground">AI使用量</p>
 
-          <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">プラン枠</p>
+          <p className="text-[10px] font-semibold tracking-wide text-muted-foreground">CLAUDE</p>
           <ClaudeUsageCard
             data={claudeUsage.data}
             isLoading={claudeUsage.isLoading}
             error={claudeUsage.error}
             notConfigured={claudeUsage.notConfigured}
           />
+
+          <div className="border-t pt-2">
+            <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">
+              CODEX
+            </p>
+            <CodexUsageCard
+              data={codexUsage.data}
+              isLoading={codexUsage.isLoading}
+              error={codexUsage.error}
+              notConfigured={codexUsage.notConfigured}
+            />
+          </div>
 
           <div className="border-t pt-2">
             <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">
