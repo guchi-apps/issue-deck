@@ -570,7 +570,8 @@ prepare_issue() {
   issue_json_file="$(mktemp)"
   printf '%s' "$issue_json" >"$issue_json_file"
   local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" >"$PROMPT_FILE" <<'PY'
+  # prompt-render:start（scripts/implementation-prompt.test.mjs がこの範囲を切り出して実行する）
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" "$AGENT_KIND" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -581,6 +582,8 @@ prepare_only = sys.argv[6] == "1"
 worktree_dir = sys.argv[7]
 issue_relations = sys.argv[8]
 concurrent_work = sys.argv[9]
+# 起こすエージェントCLIの種別（#2377）。計画の出し方だけはここで文面を差し替える（#2551）
+agent_kind = sys.argv[10] if len(sys.argv) > 10 else "claude"
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -730,6 +733,48 @@ else:
         "取り込みます（#2200）。"
     )
 
+# 計画の出し方は**エージェントによって道具が違う**ので、ここで文面ごと差し替える（#2551）。
+# 読み替えを末尾の補足（scripts/prompts/codex-supplement.md）だけに置いていたときは、本文側の
+# 「フックが自動で投稿します／無ければ手で投稿します」に従ったCodexのセッションが計画を
+# `gh issue comment`で自分で投稿し、画面に承認パネルが出ないまま実装へ進んでいた（#2550）。
+# **矛盾する指示を残さないことが要点**で、43KBの本文を分岐させるわけではない。
+if agent_kind == "codex":
+    plan_instructions = (
+        "ラベルに `21.plan-required` が含まれる場合は、実装前に計画を一時的なMarkdownファイルへ"
+        "書き、`scripts/submit-plan.sh <計画ファイル>`を実行してください"
+        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
+        "このコマンドが計画コメントの投稿・`00.check-user`の付与・issue-deckの画面への"
+        "承認パネルの表示までを行い、判断が届くまで待ちます。"
+        "**計画を`gh issue comment`で自分で投稿しないでください**——画面に承認パネルが出ず、"
+        "ユーザーは承認も修正もできません。"
+        "終了コードは`0`が承認（そのまま実装へ進む）、`2`が修正依頼"
+        "（表示された内容を反映して同じコマンドで出し直す）、"
+        "`3`が期限切れ・通信失敗（実装へ進まず、端末でユーザーへ確認する）です。"
+        "含まれない場合はそのまま実装に進んでよいです。"
+    )
+    plan_comment_note = (
+        "  - **`scripts/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
+        "`00.check-user`＋`01.check-plan`の付与まで行います**（#2545）。"
+        "同じ計画を`gh issue comment`で投稿し直さないでください。"
+        f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
+        "**コマンドが失敗して投稿されていないときだけ**上記のとおり手で投稿します"
+    )
+else:
+    plan_instructions = (
+        "ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・"
+        "懸念点をまとめて提示し、承認を得てから実装に入ってください"
+        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
+        "含まれない場合はそのまま実装に進んでよいです。"
+    )
+    plan_comment_note = (
+        "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
+        "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、"
+        "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。"
+        "その場合は同じ計画を手で投稿し直さないでください。"
+        f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
+        "**無ければ**上記のとおり手で投稿します"
+    )
+
 comments = issue.get("comments", [])
 if comments:
     comment_text = "\n\n".join(
@@ -755,9 +800,12 @@ result = (
     .replace("{{PREVIEW_INSTRUCTIONS}}", preview_instructions)
     .replace("{{SCREENSHOT_INSTRUCTIONS}}", screenshot_instructions)
     .replace("{{ARTIFACT_INSTRUCTIONS}}", artifact_instructions)
+    .replace("{{PLAN_INSTRUCTIONS}}", plan_instructions)
+    .replace("{{PLAN_COMMENT_NOTE}}", plan_comment_note)
 )
 sys.stdout.write(result)
 PY
+  # prompt-render:end
   rm -f "$issue_json_file"
 
   # Codexで起こす場合だけ、読み替えの補足をプロンプトの末尾へ足す（#2377）。

@@ -68,3 +68,21 @@ export function parseClaudeModel(value: unknown): ClaudeModel | null {
   if (typeof value !== "string") return null;
   return (CLAUDE_MODEL_VALUES as readonly string[]).includes(value) ? (value as ClaudeModel) : null;
 }
+
+// Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
+export const CODEX_MODEL_OPTIONS = [
+  { value: "auto", label: "自動" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  { value: "gpt-5.5", label: "GPT-5.5" },
+  { value: "gpt-5.4", label: "GPT-5.4" },
+] as const;
+
+export const CODEX_MODEL_VALUES = CODEX_MODEL_OPTIONS.map((option) => option.value);
+export type CodexModel = (typeof CODEX_MODEL_VALUES)[number];
+
+export function parseCodexModel(value: unknown): CodexModel | null {
+  if (typeof value !== "string") return null;
+  return (CODEX_MODEL_VALUES as readonly string[]).includes(value) ? (value as CodexModel) : null;
+}

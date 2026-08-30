@@ -73,6 +73,16 @@ session_usage_transcripts() {
     cut -f2-
 }
 
+# Codex CLIの転記は年/月/日の3階層にある。Claude用とは置き場も深さも違うため入口を分ける。
+codex_session_usage_transcripts() {
+  local dir="$1" cutoff="${2:-0}"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -mindepth 4 -maxdepth 4 -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null |
+    awk -F'\t' -v cutoff="$cutoff" '$1 >= cutoff' |
+    sort -n |
+    cut -f2-
+}
+
 # 転記のパスの一覧（stdin）を正規化JSONへ畳む。
 #
 #   session_usage_aggregate [しきい値(epoch秒)] [Issue番号] [リポジトリ名]
@@ -107,6 +117,7 @@ PRICES = {
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
 }
+
 # キャッシュの倍率。書き込みはTTLで違い（5分1.25倍・1時間2.0倍）、読み出しは0.1倍。
 CACHE_WRITE_5M = 1.25
 CACHE_WRITE_1H = 2.0
@@ -421,6 +432,60 @@ PY
   _session_usage_run_python "$script" "${1:-0}" "${2:-}" "${3:-}"
 }
 
+# Codex CLIの転記をClaude側と同じ正規化JSONへ畳む。
+# token_countは累積値なので、セッション内の最後の値だけを使う。
+codex_session_usage_aggregate() {
+  local script
+  script="$(cat <<'PY'
+import json, os, re, sys
+PRICES={"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
+WORKTREE=re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
+LABELS={"implementation":"実装","plan-review":"計画レビュー","question":"横断質問","other":"その他"}
+def number(value):
+    try:return max(0,int(value))
+    except (TypeError,ValueError):return 0
+def classify(cwd):
+    matched=WORKTREE.search(cwd or "")
+    if matched:return "implementation",matched.group("repo"),int(matched.group("issue"))
+    if "/.plan-reviews/" in (cwd or ""):return "plan-review",os.path.basename(cwd).removeprefix("guchi-apps-"),None
+    if "/.questions/" in (cwd or ""):return "question",os.path.basename(cwd).removeprefix("guchi-apps-"),None
+    return "other",os.path.basename(cwd or "") or None,None
+def price_for(model):
+    matches=[(key,value) for key,value in PRICES.items() if model==key or model.startswith(key+"-")]
+    return max(matches,key=lambda pair:len(pair[0]))[1] if matches else None
+sessions=[];totals={"responses":0,"input":0,"cacheCreate5m":0,"cacheCreate1h":0,"cacheRead":0,"output":0,"costUsd":0.0};unknown=set();read_files=0;unreadable=0
+for raw_path in sys.stdin:
+    path=raw_path.strip()
+    if not path:continue
+    try:handle=open(path,encoding="utf-8",errors="replace")
+    except OSError:unreadable+=1;continue
+    read_files+=1;cwd=None;model="";first_at=None;last_at=None;latest=None;responses=0
+    with handle:
+        for line in handle:
+            if '"token_count"' not in line and '"session_meta"' not in line and '"turn_context"' not in line:continue
+            try:record=json.loads(line)
+            except ValueError:continue
+            payload=record.get("payload") or {};stamp=record.get("timestamp")
+            if record.get("type")=="session_meta":cwd=payload.get("cwd") or cwd
+            if record.get("type")=="turn_context":model=payload.get("model") or model;cwd=payload.get("cwd") or cwd
+            if payload.get("type")=="token_count":
+                usage=(payload.get("info") or {}).get("total_token_usage")
+                if isinstance(usage,dict):latest=usage;responses+=1
+            if stamp:first_at=stamp if first_at is None or stamp<first_at else first_at;last_at=stamp if last_at is None or stamp>last_at else last_at
+    if not latest or not first_at or not last_at:continue
+    total_input=number(latest.get("input_tokens"));cached=number(latest.get("cached_input_tokens"));created=number(latest.get("cache_write_input_tokens"));uncached=max(0,total_input-cached-created);output=number(latest.get("output_tokens"));price=price_for(model);cost=0.0
+    if price:cost=(uncached*price[0]+cached*price[1]+created*price[0]*1.25+output*price[2])/1_000_000
+    elif model:unknown.add(model)
+    kind,repo,issue=classify(cwd);row={"responses":responses,"input":uncached,"cacheCreate5m":created,"cacheCreate1h":0,"cacheRead":cached,"output":output,"costUsd":round(cost,4),"contextTokens":total_input,"avgContext":round(total_input/responses),"kind":kind,"kindLabel":LABELS[kind],"repository":repo,"issue":issue,"cwd":cwd,"transcript":path,"models":[model] if model else [],"firstAt":first_at,"lastAt":last_at};sessions.append(row)
+    for key in ("responses","input","cacheCreate5m","cacheCreate1h","cacheRead","output"):totals[key]+=row[key]
+    totals["costUsd"]+=cost
+sessions.sort(key=lambda row:(-row["costUsd"],row["transcript"]));totals.update({"costUsd":round(totals["costUsd"],4),"sessions":len(sessions),"transcripts":read_files,"unreadableTranscripts":unreadable,"duplicateRows":0})
+json.dump({"totals":totals,"sessions":sessions,"byDay":[],"byModel":[],"unknownModels":sorted(unknown)},sys.stdout,ensure_ascii=False);print()
+PY
+)"
+  _session_usage_run_python "$script"
+}
+
 # 正規化JSON（stdin）を人が読む表にする。
 #
 #   session_usage_render_table [まとめ方] [表示件数]
@@ -661,6 +726,7 @@ import sys
 from datetime import datetime, timezone
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else ""
+AGENT = sys.argv[3] if len(sys.argv) > 3 else "claude"
 try:
     CHUNK = max(1, int(sys.argv[2]))
 except (IndexError, ValueError):
@@ -680,6 +746,7 @@ for row in data.get("sessions") or []:
     sessions.append(
         {
             "sessionId": session_id,
+            "agent": AGENT,
             "transcript": transcript,
             "kind": row.get("kind") or "other",
             "repository": row.get("repository"),
@@ -713,5 +780,5 @@ for start in range(0, max(len(sessions), 1), CHUNK):
     print()
 PY
   )"
-  _session_usage_run_python "$script" "${1:-}" "${2:-200}"
+  _session_usage_run_python "$script" "${1:-}" "${2:-200}" "${3:-claude}"
 }

@@ -86,6 +86,10 @@ function aggregate(paths: string[], ...args: string[]) {
   return JSON.parse(callShell("session_usage_aggregate", paths.join("\n") + "\n", ...args));
 }
 
+function aggregateCodex(paths: string[]) {
+  return JSON.parse(callShell("codex_session_usage_aggregate", paths.join("\n") + "\n"));
+}
+
 describe("session_usage_aggregate", () => {
   it("同じmessage.idの行を1応答として数える（usageは全content行に重複して書かれる）", () => {
     // 同じ応答が3行に分かれて書かれている転記。除去しないと3応答・3倍のトークンになる。
@@ -242,6 +246,21 @@ describe("session_usage_aggregate", () => {
   });
 });
 
+describe("codex_session_usage_aggregate", () => {
+  it("最後の累積値を使い、キャッシュ入力と通常入力を分ける", () => {
+    const file = writeTranscript("codex.jsonl", [
+      { type: "session_meta", timestamp: "2026-08-30T01:00:00.000Z", payload: { cwd: "/home/u/apps/issue-deck-worktrees/issue-2544" } },
+      { type: "turn_context", timestamp: "2026-08-30T01:00:01.000Z", payload: { model: "gpt-5.6-sol" } },
+      { type: "event_msg", timestamp: "2026-08-30T01:01:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 1000, cached_input_tokens: 800, cache_write_input_tokens: 0, output_tokens: 50 } } } },
+      { type: "event_msg", timestamp: "2026-08-30T01:02:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 3000, cached_input_tokens: 2400, cache_write_input_tokens: 100, output_tokens: 200 } } } },
+    ]);
+    const result = aggregateCodex([file]);
+    expect(result.totals).toMatchObject({ responses: 2, input: 500, cacheRead: 2400, cacheCreate5m: 100, output: 200 });
+    expect(result.sessions[0]).toMatchObject({ repository: "issue-deck", issue: 2544, models: ["gpt-5.6-sol"] });
+    expect(result.totals.costUsd).toBeCloseTo(0.0075, 4);
+  });
+});
+
 describe("session_usage_render_table", () => {
   const sample = JSON.stringify({
     totals: {
@@ -362,6 +381,7 @@ describe("session_usage_report_payload", () => {
     expect(payload.host).toBe("subpc");
     expect(payload.sessions).toHaveLength(1);
     expect(payload.sessions[0]).toMatchObject({
+      agent: "claude",
       sessionId: "abc-123",
       kind: "implementation",
       repository: "issue-deck",
@@ -375,6 +395,7 @@ describe("session_usage_report_payload", () => {
     // やり取りの本文にあたるものを持ち出していないこと（持つのはパスまで）。
     expect(Object.keys(payload.sessions[0]).sort()).toEqual(
       [
+        "agent",
         "cacheCreate1h",
         "cacheCreate5m",
         "cacheRead",
@@ -392,6 +413,11 @@ describe("session_usage_report_payload", () => {
         "transcript",
       ].sort(),
     );
+  });
+
+  it("指定したエージェントを各セッションへ付ける", () => {
+    const [payload] = payloadLines({ sessions: [normalizedSession()] }, "subpc", "200", "codex");
+    expect(payload.sessions[0].agent).toBe("codex");
   });
 
   it("時刻を持たないセッションは送らない（期間で絞れないため）", () => {

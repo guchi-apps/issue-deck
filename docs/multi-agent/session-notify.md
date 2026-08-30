@@ -80,6 +80,17 @@ Codexが計画ファイルを作る → scripts/submit-plan.sh <計画ファイ�
 フェイルオープンでよいが、Codexにはそのプロンプトが無い。期限切れや通信失敗を終了コード0にすると、
 エージェントが承認済みと誤認して実装へ進みうるため、Codexのコマンドは非0で止める。
 
+**このコマンドは、フックと違って「エージェントが従うかどうか」に戻る**（#2551）。#2545では
+Codex向けの手順を末尾の読み替え（`scripts/prompts/codex-supplement.md`）にだけ置いたため、本文に
+残っていたClaude Code前提の手順（「フックが自動で投稿します／無ければ手で投稿します」）の方が
+強く読まれ、計画が`gh issue comment`で手投稿されて承認パネルが出なかった。手順が変わるものは
+本文側をエージェント別に差し替える（`{{PLAN_INSTRUCTIONS}}`・`{{PLAN_COMMENT_NOTE}}`。
+[codex.md](codex.md)「手順が変わるものは、末尾の読み替えに書かず本文を差し替える」）。
+
+**宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）は`dispatch.env`から読む。** `notify.env`には無い
+（そちらは待ち時間などの調整値だけ）。`session-notify.sh`・pollerと同じ場所で、環境変数は
+tmuxサーバーの起こされ方によって届かないことがあるためファイルを正とする。
+
 ```text
 ExitPlanMode（計画の提示）
   → PreToolUse フック → session-notify.sh

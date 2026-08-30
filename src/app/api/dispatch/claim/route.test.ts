@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const claimDispatchJobs = vi.fn();
 const sweepCheckUserPushNotifications = vi.fn();
+const appSettingFindUnique = vi.fn();
 
 vi.mock("@/lib/dispatch/jobs", () => ({
   get claimDispatchJobs() {
@@ -12,6 +13,16 @@ vi.mock("@/lib/dispatch/jobs", () => ({
 vi.mock("@/lib/notifications/check-user-push", () => ({
   get sweepCheckUserPushNotifications() {
     return sweepCheckUserPushNotifications;
+  },
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    appSetting: {
+      get findUnique() {
+        return appSettingFindUnique;
+      },
+    },
   },
 }));
 
@@ -30,6 +41,7 @@ beforeEach(() => {
   process.env.DISPATCH_SECRET = "secret-value";
   claimDispatchJobs.mockResolvedValue([]);
   sweepCheckUserPushNotifications.mockResolvedValue(undefined);
+  appSettingFindUnique.mockResolvedValue({ codexModel: "auto" });
 });
 
 describe("POST /api/dispatch/claim", () => {
@@ -67,6 +79,7 @@ describe("POST /api/dispatch/claim", () => {
     expect(res.status).toBe(200);
     expect(sweepCheckUserPushNotifications).not.toHaveBeenCalled();
     expect(claimDispatchJobs).toHaveBeenCalledWith({ hostName: "subpc", maxJobs: 0 });
+    expect(appSettingFindUnique).not.toHaveBeenCalled();
   });
 
   // 相乗りの巡回が落ちても払い出しは続ける（#838のときからの約束）
@@ -77,7 +90,22 @@ describe("POST /api/dispatch/claim", () => {
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, jobs: [{ id: "job-1" }] });
+    expect(await res.json()).toEqual({
+      ok: true,
+      jobs: [{ id: "job-1", codexModel: "auto" }],
+    });
     consoleError.mockRestore();
+  });
+
+  it("保存済みのCodexモデルを払い出すジョブへ付ける", async () => {
+    claimDispatchJobs.mockResolvedValue([{ id: "job-1" }]);
+    appSettingFindUnique.mockResolvedValue({ codexModel: "gpt-5.6-terra" });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      jobs: [{ id: "job-1", codexModel: "gpt-5.6-terra" }],
+    });
   });
 });

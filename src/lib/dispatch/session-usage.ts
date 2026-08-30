@@ -27,8 +27,11 @@ export const SESSION_USAGE_RETENTION_DAYS = 180;
 /** 種別。`scripts/lib/session-usage.sh`の`classify()`と対応する */
 export const SESSION_USAGE_KINDS = ["implementation", "plan-review", "question", "other"] as const;
 export type SessionUsageKind = (typeof SESSION_USAGE_KINDS)[number];
+export const SESSION_USAGE_AGENTS = ["claude", "codex"] as const;
+export type SessionUsageAgent = (typeof SESSION_USAGE_AGENTS)[number];
 
 export type SessionUsageReport = {
+  agent: SessionUsageAgent;
   sessionId: string;
   transcript: string;
   kind: SessionUsageKind;
@@ -72,6 +75,11 @@ function truncate(value: string, max = 191): string {
 export function parseSessionUsageReport(value: unknown): SessionUsageReport | null {
   if (typeof value !== "object" || value === null) return null;
   const input = value as Record<string, unknown>;
+
+  const agent = input.agent ?? "claude";
+  if (typeof agent !== "string" || !SESSION_USAGE_AGENTS.includes(agent as SessionUsageAgent)) {
+    return null;
+  }
 
   const sessionId = input.sessionId;
   if (typeof sessionId !== "string" || !sessionId || sessionId.length > 191) return null;
@@ -128,6 +136,7 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   if (!startedAt || !endedAt) return null;
 
   return {
+    agent: agent as SessionUsageAgent,
     sessionId,
     transcript,
     kind: kind as SessionUsageKind,
@@ -210,8 +219,14 @@ export async function storeSessionUsage({
       reportedAt,
     };
     await db.sessionUsage.upsert({
-      where: { host_sessionId: { host: hostName, sessionId: session.sessionId } },
-      create: { host: hostName, sessionId: session.sessionId, ...data },
+      where: {
+        host_agent_sessionId: {
+          host: hostName,
+          agent: session.agent,
+          sessionId: session.sessionId,
+        },
+      },
+      create: { host: hostName, agent: session.agent, sessionId: session.sessionId, ...data },
       update: data,
     });
   }

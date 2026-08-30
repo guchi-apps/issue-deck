@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { parseClaudeModel } from "@/lib/app-settings";
+import { parseClaudeModel, parseCodexModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 
@@ -9,6 +9,7 @@ async function getClaudeModels() {
   return {
     claudeModel: setting?.claudeModel ?? "auto",
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
+    codexModel: setting?.codexModel ?? "auto",
   };
 }
 
@@ -43,15 +44,30 @@ export async function PATCH(request: NextRequest) {
   if (hasAssist && claudeModelAssist === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasCodex = payload !== null && typeof payload === "object" && "codexModel" in payload;
+  const codexModel = hasCodex ? parseCodexModel(payload?.codexModel) : undefined;
+  if (hasCodex && codexModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
 
   const updated = await db.appSetting.upsert({
     where: { id: 1 },
-    create: { id: 1, claudeModel, ...(claudeModelAssist ? { claudeModelAssist } : {}) },
-    update: { claudeModel, ...(claudeModelAssist ? { claudeModelAssist } : {}) },
+    create: {
+      id: 1,
+      claudeModel,
+      ...(claudeModelAssist ? { claudeModelAssist } : {}),
+      ...(codexModel ? { codexModel } : {}),
+    },
+    update: {
+      claudeModel,
+      ...(claudeModelAssist ? { claudeModelAssist } : {}),
+      ...(codexModel ? { codexModel } : {}),
+    },
   });
 
   return NextResponse.json({
     claudeModel: updated.claudeModel,
     claudeModelAssist: updated.claudeModelAssist,
+    codexModel: updated.codexModel,
   });
 }

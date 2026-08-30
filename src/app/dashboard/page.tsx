@@ -3,6 +3,7 @@ import {
   AUTO_RETRY_LIMIT_MIN,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
+  parseCodexModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -24,6 +25,7 @@ export default async function DashboardPage() {
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
+  const codexModel = parseCodexModel(appSetting?.codexModel) ?? "auto";
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
 
   const hiddenRepositoryIds = currentUser
@@ -83,6 +85,7 @@ export default async function DashboardPage() {
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
       claudeModelAssist={claudeModelAssist}
+      codexModel={codexModel}
       dispatchConcurrency={dispatchConcurrency}
     />
   );

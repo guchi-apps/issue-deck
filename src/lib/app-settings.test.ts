@@ -4,6 +4,7 @@ import {
   DISPATCH_CONCURRENCY_MIN,
   parseAutoRetryLimit,
   parseClaudeModel,
+  parseCodexModel,
   parseDispatchConcurrency,
 } from "@/lib/app-settings";
 
@@ -62,5 +63,21 @@ describe("parseClaudeModel", () => {
     expect(parseClaudeModel(1)).toBeNull();
     expect(parseClaudeModel(null)).toBeNull();
     expect(parseClaudeModel(undefined)).toBeNull();
+  });
+});
+
+describe("parseCodexModel", () => {
+  it("許可された値はそのまま返す", () => {
+    expect(parseCodexModel("auto")).toBe("auto");
+    expect(parseCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(parseCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(parseCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(parseCodexModel("gpt-5.5")).toBe("gpt-5.5");
+    expect(parseCodexModel("gpt-5.4")).toBe("gpt-5.4");
+  });
+
+  it("許可されていない値はnullを返す", () => {
+    expect(parseCodexModel("gpt-5-codex")).toBeNull();
+    expect(parseCodexModel(5)).toBeNull();
   });
 });

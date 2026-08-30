@@ -46,9 +46,9 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 上記の本文・コメントはセッション起動時点のスナップショットです。着手前に必ず `gh issue view {{ISSUE_NUMBER}} --comments` で最新の内容を再確認し、起動後に追加された指示や懸念があれば反映してください。
 
-ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・懸念点をまとめて提示し、承認を得てから実装に入ってください（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。含まれない場合はそのまま実装に進んでよいです。
+{{PLAN_INSTRUCTIONS}}
 
-ラベルに `25.artifact-required` が含まれる場合は、コードを書き始める前に見た目のアーティファクトを公開して承認を得ます（後述の「見た目のアーティファクト」を参照。`21.plan-required` と併用しているときは、Plan modeに入る前に公開してURLを計画本文へ含めます）。
+ラベルに `25.artifact-required` が含まれる場合は、コードを書き始める前に見た目のアーティファクトを公開して承認を得ます（後述の「見た目のアーティファクト」を参照。`21.plan-required` と併用しているときは、計画を提示する前に公開してURLを計画本文へ含めます）。
 
 `11.local`ラベルの付与と進捗（Project Statusの`Planning`／`Implementation`）の報告は、このセッションの起動時に`scripts/start-issue.sh`が済ませています（#1096・#1097）。起動ログに報告をスキップした旨が出ていた場合だけ、issue-deckの画面（カンバンのカードを動かす・「実装を開始」ボタン）から進捗を進めてください。**進捗ラベルは#991 Phase 5（#1010）で廃止済みで、`gh issue edit`で進捗を進めることはできません。**
 
@@ -118,7 +118,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 計画は詳細の前に**要約から書き始めてください**（#1744）。承認する人は最初の十数行で可否を
 判断するため、対応方針や触るファイルの列挙が先に来ると、何をするのかを読み取れません。
-`ExitPlanMode`へ渡す計画本文の冒頭に`## 要約`の見出しを置き、次の順で書きます
+計画本文の冒頭に`## 要約`の見出しを置き、次の順で書きます
 （要約全体で20行程度に収める）。**この本文がそのままIssueコメントとして残ります。**
 
 1. **タイトル** — 「何をするか」を1行で。太字1行だけで置く
@@ -149,7 +149,7 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 次の内容は端末に出すだけでなく、`gh issue comment {{ISSUE_NUMBER}}`でIssueにも投稿してください。
 
 - **計画**（`21.plan-required`が付いている場合）: 端末で提示するのと同じ内容（アプローチ・変更範囲・懸念点）をIssueコメントにも投稿する。承認を受けて内容を修正した場合は、実装に着手するまでに修正後の計画も投稿する。**計画コメントの冒頭に、その計画が前提とした`origin/develop`のSHAを`<!-- plan-base: <SHA> -->`の形で残す**（`git rev-parse origin/develop`）。並行して走る他セッションのマージで計画の前提が無効になることが実際に起きているため、後から`git log <SHA>..origin/develop --oneline`で何が変わったかを辿れるようにする（[docs/multi-agent/gates.md](../../docs/multi-agent/gates.md)）
-  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。その場合は同じ計画を手で投稿し直さないでください。`gh issue view {{ISSUE_NUMBER}} --comments`で投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します
+{{PLAN_COMMENT_NOTE}}
 - **完了報告**（必須）: Pull Requestを作成したら、最後に`gh issue comment {{ISSUE_NUMBER}}`で完了報告を投稿する。**PRを作っただけで終えないでください。** 内容は次の3つで、粒度は無人実行の完了報告（`.github/prompts/implement.md`）に揃える
   - 作成したPull RequestのURL
   - どのような変更を行ったかの要約（触ったファイル・対応内容が使用者に伝わる程度の箇条書き）

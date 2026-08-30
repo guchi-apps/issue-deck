@@ -364,6 +364,9 @@ model AppSetting {
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist   String   @default("auto")
+  // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
+  // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
+  codexModel          String   @default("auto")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
@@ -1444,7 +1447,9 @@ model SessionUsage {
 
   /// 報告してきたホスト名（DispatchHost.nameと対応）
   host String @db.VarChar(191)
-  /// 転記のファイル名から取ったセッションID（Claude CodeのUUID）。ホストと合わせて一意
+  /// 使用したローカルエージェント。既存行はClaudeとして移行する
+  agent String @default("claude") @db.VarChar(16)
+  /// 転記のファイル名から取ったセッションID。ホスト・エージェントと合わせて一意
   sessionId String @db.VarChar(191)
   /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
   transcript String @db.Text
@@ -1483,7 +1488,7 @@ model SessionUsage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([host, sessionId])
+  @@unique([host, agent, sessionId])
   @@index([endedAt])
   @@index([repository, issueNumber])
 }

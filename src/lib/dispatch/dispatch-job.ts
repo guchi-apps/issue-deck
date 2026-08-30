@@ -219,16 +219,19 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
  *
  * **#2509でCodexにもフックを繋いだ**ので、停止（応答終了）の報告と「まだ開始していません」の
  * 検知は動く。効かないのは、Codexに対応するイベント・ツールが無いもの（入力待ちの`Notification`・
- * `ExitPlanMode`・`AskUserQuestion`）とRemote Control。**ここは動かないものだけを挙げる**——
+ * `AskUserQuestion`）とRemote Control。**ここは動かないものだけを挙げる**——
  * 動くものまで書くと、通知が来ないことを不具合だと受け取る側の判断材料にならない。
+ *
+ * **できるようになったものは消す**（#2551）。計画の承認・修正は#2545（`scripts/submit-plan.sh`）で
+ * 画面へ出るようになり、前回の会話の引き継ぎは#2520（`codex resume <UUID>`）で動く。
+ * ここに古い制限が残っていると、動いていないのはそういう仕様だと読まれ、不具合が報告されない。
  */
 export const CODEX_LIMITATIONS = [
   "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
-  "計画の承認・質問への回答は画面に出ません（Issueコメントで受け取ります）",
+  "質問への回答は画面に出ません（Issueコメントで受け取ります）",
   // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
   // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
   "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
-  "前回の会話を引き継ぎません",
 ] as const;
 
 /**

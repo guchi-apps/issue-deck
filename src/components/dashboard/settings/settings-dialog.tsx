@@ -23,7 +23,7 @@ import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSettingsData } from "@/hooks/use-settings-data";
 import { cn } from "@/lib/utils";
-import type { ClaudeModel } from "@/lib/app-settings";
+import type { ClaudeModel, CodexModel } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -34,6 +34,7 @@ type SettingsDialogProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  codexModel: CodexModel;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
@@ -55,6 +56,7 @@ export function SettingsDialog({
   autoRetryLimit,
   claudeModel,
   claudeModelAssist,
+  codexModel,
   dispatchConcurrency,
   repositories,
   onSetRepositoryHidden,
@@ -134,6 +136,7 @@ export function SettingsDialog({
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
                   claudeModelAssist={claudeModelAssist}
+                  codexModel={codexModel}
                   dispatchConcurrency={dispatchConcurrency}
                   onUpdated={onUpdated}
                 />

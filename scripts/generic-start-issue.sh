@@ -701,6 +701,23 @@ replacements = {
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
     "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
     "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
+    # 計画の出し方（#2551）。**汎用ランチャーはClaude Codeでしか起動しない**ので、
+    # issue-deck側（scripts/start-issue.sh）が持つCodex向けの文面はここには要らない。
+    # 対象リポジトリがissue-deckのひな形を写している場合に、置換されずに残さないためのもの
+    "{{PLAN_INSTRUCTIONS}}": (
+        "ラベルに `21.plan-required` が含まれる場合は、実装前にPlan modeでアプローチ・変更範囲・"
+        "懸念点をまとめて提示し、承認を得てから実装に入ってください"
+        "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
+        "含まれない場合はそのまま実装に進んでよいです。"
+    ),
+    "{{PLAN_COMMENT_NOTE}}": (
+        "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
+        "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、"
+        "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。"
+        "その場合は同じ計画を手で投稿し直さないでください。"
+        f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
+        "**無ければ**上記のとおり手で投稿します"
+    ),
     "{{PR_POLICY_INSTRUCTIONS}}": pr_policy_instructions,
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": shared_context_instructions,
 }
