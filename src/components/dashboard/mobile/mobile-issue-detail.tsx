@@ -453,6 +453,7 @@ export function MobileIssueDetail({
     planDecisionPending: planRequest?.status === "WAITING",
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
+    implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
   });
 
   async function toggleLabel(name: string) {

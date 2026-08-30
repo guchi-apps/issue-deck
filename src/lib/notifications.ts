@@ -17,6 +17,7 @@ import { filterPullRequestsByView } from "@/lib/pull-request-list";
 import { findActiveIssueSnooze, findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
  * ヘッダーの通知ベル（#1614）が集める「ユーザーの操作が必要なもの」。
@@ -40,7 +41,12 @@ import type { PullRequestSummary } from "@/types/pull-request";
 export type NotificationTone = "error" | "action" | "info";
 
 /** ポップオーバー内での区分。表示順もこの並び */
-export type NotificationGroup = "release" | "check-user" | "pull-request" | "manual-step";
+export type NotificationGroup =
+  | "release"
+  | "check-user"
+  | "session"
+  | "pull-request"
+  | "manual-step";
 
 /** 行を押したときの遷移先 */
 export type NotificationTarget =
@@ -69,6 +75,7 @@ export type NotificationItem = {
 export const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
   release: "リリース",
   "check-user": "確認待ち",
+  session: "セッション確認",
   "pull-request": "Pull Request",
   "manual-step": "手作業待ち",
 };
@@ -77,6 +84,7 @@ export const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
 export const NOTIFICATION_GROUP_ORDER: readonly NotificationGroup[] = [
   "release",
   "check-user",
+  "session",
   "pull-request",
   "manual-step",
 ];
@@ -96,6 +104,8 @@ export type BuildNotificationsInput = {
    * メニューからは消えているのにベルには「PRのマージ」と出ている状態になる。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /** Codexの応答終了セッション。構造化された確認要求が表示されない場合の導線に使う */
+  sessions?: readonly DispatchSessionView[];
   /**
    * ユーザーが「いまは実施しない」として伏せた項目（#2398。`lib/snooze.ts`）。
    *
@@ -221,6 +231,55 @@ function buildCheckUserNotifications(
 }
 
 /**
+ * 構造化された確認要求を経由せずに応答を終えたCodexセッションの通知。
+ *
+ * Codexは確認要求用の`Notification`フックを持たないため、質問を含む応答が止まっても
+ * `00.check-user`や質問パネルが作られないことがある。応答終了したCodexセッションを
+ * 「内容を確認してください」という弱い断定のアクションとして出し、Issue詳細の既存の
+ * 追加指示から続けられるようにする。Claude Codeの構造化された入力待ちは既存の通知へ委ねる。
+ */
+function buildSessionNotifications(
+  issues: Issue[],
+  sessions: readonly DispatchSessionView[] | undefined,
+): NotificationItem[] {
+  if (!sessions || sessions.length === 0) return [];
+  const issueByKey = new Map(
+    issues.map((issue) => [`${issue.repositoryFullName}#${issue.number}`, issue] as const),
+  );
+
+  return sessions.flatMap((session) => {
+    if (
+      session.state !== "ALIVE" ||
+      session.activity !== "RESPONDED" ||
+      session.codexThreadKnown !== true ||
+      session.issueId === null
+    ) {
+      return [];
+    }
+    const issue = issueByKey.get(`${session.repositoryFullName}#${session.issueNumber}`);
+    if (
+      !issue ||
+      issue.state !== "open" ||
+      issue.labels.some((label) => label.name === CHECK_USER_LABEL)
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: `session:${session.tmuxSessionName}:${session.lastReportedAt}`,
+        group: "session",
+        tone: "action",
+        title: `#${issue.number} ${issue.title}`,
+        badgeLabel: "内容を確認",
+        repositoryFullName: issue.repositoryFullName,
+        since: session.activityAt ?? session.lastReportedAt,
+        target: { kind: "issue", issueId: session.issueId },
+      } satisfies NotificationItem,
+    ];
+  });
+}
+
+/**
  * 手作業待ち（`71.manual-step`）の通知。openのまま残り続けるので、古いものほど上に出る。
  *
  * **並べるのは前提条件が満たされていて、いま実行できるものだけ**（#1801）。手作業Issueの多くは
@@ -302,7 +361,7 @@ function buildPullRequestNotifications(
  * `sort`の安定性で保つ。
  */
 export function buildNotifications(input: BuildNotificationsInput): NotificationItem[] {
-  const { releaseStatuses, checkUserRunningIssueIds, snoozes } = input;
+  const { releaseStatuses, checkUserRunningIssueIds, snoozes, sessions } = input;
 
   // 保留中（#2398）はここで母集団から落とす。**Issueもマージ待ちPRも同じ場所で落とす**ので、
   // 「確認待ちからは消えたのにマージ待ちPRとしてもう一度出る」という抜けが起きない
@@ -333,6 +392,7 @@ export function buildNotifications(input: BuildNotificationsInput): Notification
     pullRequests,
     checkUserRunningIssueIds,
   );
+  const sessionItems = buildSessionNotifications(issues, sessions);
   const manualStepItems = buildManualStepNotifications(issues);
 
   // PR側から落とす対象を集める。
@@ -356,6 +416,7 @@ export function buildNotifications(input: BuildNotificationsInput): Notification
   const items = [
     ...releaseItems,
     ...checkUserItems,
+    ...sessionItems,
     ...buildPullRequestNotifications(pullRequests, excludedPullRequestIds),
     ...manualStepItems,
   ];

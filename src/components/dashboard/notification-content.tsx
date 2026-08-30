@@ -1,6 +1,14 @@
 "use client";
 
-import { Bell, GitMerge, GitPullRequest, TriangleAlert, UserCheck, Wrench } from "lucide-react";
+import {
+  Bell,
+  GitMerge,
+  GitPullRequest,
+  MessageCircleQuestion,
+  TriangleAlert,
+  UserCheck,
+  Wrench,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +23,7 @@ import { cn } from "@/lib/utils";
 const GROUP_ICON: Record<NotificationGroup, LucideIcon> = {
   release: GitMerge,
   "check-user": UserCheck,
+  session: MessageCircleQuestion,
   "pull-request": GitPullRequest,
   "manual-step": Wrench,
 };

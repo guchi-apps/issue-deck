@@ -112,6 +112,7 @@ describe("POST /api/dispatch/sessions/plan", () => {
       remoteControlUrl: "https://claude.ai/code/session_01ABC",
       planBaseSha: "baf823f30a2ef7d8f80ff95665e7034e67d70171",
       hostName: "subpc",
+      agent: "claude",
       artifactUpdated: false,
     });
     expect(saveSessionArtifact).not.toHaveBeenCalled();

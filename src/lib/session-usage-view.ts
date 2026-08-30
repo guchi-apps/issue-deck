@@ -16,6 +16,7 @@ import { startOfJstDayMs, toJstParts } from "@/lib/format-date-time";
 /** APIが返す（＝画面が受け取る）セッション1本ぶん。DBのBigIntはここでnumberへ落とす */
 export type SessionUsageEntry = {
   agent: "claude" | "codex";
+  source?: "local" | "github-actions";
   sessionId: string;
   host: string;
   kind: string;
@@ -32,6 +33,8 @@ export type SessionUsageEntry = {
   models: string[];
   startedAt: string;
   endedAt: string;
+  workflowName?: string | null;
+  runUrl?: string | null;
 };
 
 export type UsageTotals = {
@@ -43,8 +46,9 @@ export type UsageTotals = {
 };
 
 export type UsageByAgent = Record<SessionUsageEntry["agent"], UsageTotals>;
-export type UsageDay = UsageTotals & { date: string; byAgent: UsageByAgent };
-export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent };
+export type UsageBySource = Record<"local" | "github-actions", UsageTotals>;
+export type UsageDay = UsageTotals & { date: string; byAgent: UsageByAgent; bySource: UsageBySource };
+export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent; bySource: UsageBySource };
 
 export type UsageIssue = UsageTotals & {
   repository: string | null;
@@ -56,6 +60,7 @@ export type UsageIssue = UsageTotals & {
   /** 転記1本ごとの明細（開始日時の新しい順）。画面は行を開いたときだけ出す */
   entries: SessionUsageEntry[];
   byAgent: UsageByAgent;
+  bySource: UsageBySource;
 };
 
 /**
@@ -92,6 +97,7 @@ export type SessionUsageSummary = {
   days: number;
   totals: UsageTotals;
   totalsByAgent: UsageByAgent;
+  totalsBySource: UsageBySource;
   byDay: UsageDay[];
   byRepository: UsageGroup[];
   byKind: UsageGroup[];
@@ -125,6 +131,7 @@ const KIND_LABELS: Record<string, string> = {
   "plan-review": "計画レビュー",
   question: "横断質問",
   other: "その他",
+  actions: "GitHub Actions",
 };
 
 export function sessionUsageKindLabel(kind: string): string {
@@ -139,12 +146,23 @@ function emptyByAgent(): UsageByAgent {
   return { claude: emptyTotals(), codex: emptyTotals() };
 }
 
+function emptyBySource(): UsageBySource {
+  return { local: emptyTotals(), "github-actions": emptyTotals() };
+}
+
 function addEntryWithAgent(
   totals: UsageTotals & { byAgent: UsageByAgent },
   entry: SessionUsageEntry,
 ): void {
   addEntry(totals, entry);
   addEntry(totals.byAgent[entry.agent], entry);
+}
+
+function addEntryWithSource(
+  totals: UsageTotals & { bySource: UsageBySource },
+  entry: SessionUsageEntry,
+): void {
+  addEntry(totals.bySource[entry.source === "github-actions" ? "github-actions" : "local"], entry);
 }
 
 function addEntry(totals: UsageTotals, entry: SessionUsageEntry): void {
@@ -260,6 +278,7 @@ export function buildSessionUsageSummary({
 
   const totals = emptyTotals();
   const totalsByAgent = emptyByAgent();
+  const totalsBySource = emptyBySource();
   const byDay = new Map<string, UsageDay>();
   const byRepository = new Map<string, UsageGroup>();
   const byKind = new Map<string, UsageGroup>();
@@ -269,6 +288,7 @@ export function buildSessionUsageSummary({
   for (const entry of inPeriod) {
     addEntry(totals, entry);
     addEntry(totalsByAgent[entry.agent], entry);
+    addEntry(totalsBySource[entry.source === "github-actions" ? "github-actions" : "local"], entry);
     hosts.add(entry.host);
 
     const dateKey = jstDateKey(entry.endedAt);
@@ -277,8 +297,10 @@ export function buildSessionUsageSummary({
         date: dateKey,
         ...emptyTotals(),
         byAgent: emptyByAgent(),
+        bySource: emptyBySource(),
       };
       addEntryWithAgent(day, entry);
+      addEntryWithSource(day, entry);
       byDay.set(dateKey, day);
     }
 
@@ -288,16 +310,20 @@ export function buildSessionUsageSummary({
       key: repositoryKey,
       ...emptyTotals(),
       byAgent: emptyByAgent(),
+      bySource: emptyBySource(),
     };
     addEntryWithAgent(repository, entry);
+    addEntryWithSource(repository, entry);
     byRepository.set(repositoryKey, repository);
 
     const kind = byKind.get(entry.kind) ?? {
       key: entry.kind,
       ...emptyTotals(),
       byAgent: emptyByAgent(),
+      bySource: emptyBySource(),
     };
     addEntryWithAgent(kind, entry);
+    addEntryWithSource(kind, entry);
     byKind.set(entry.kind, kind);
 
     // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
@@ -312,9 +338,11 @@ export function buildSessionUsageSummary({
         latestStartedAt: entry.startedAt,
         entries: [],
         byAgent: emptyByAgent(),
+        bySource: emptyBySource(),
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
+    addEntryWithSource(issue, entry);
     issue.entries.push(entry);
     if (entry.startedAt > issue.latestStartedAt) issue.latestStartedAt = entry.startedAt;
     byIssue.set(issueKey, issue);
@@ -343,6 +371,7 @@ export function buildSessionUsageSummary({
     days,
     totals,
     totalsByAgent,
+    totalsBySource,
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byRepository: [...byRepository.values()].sort(byCost),
     byKind: [...byKind.values()].sort(byCost),

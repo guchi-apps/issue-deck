@@ -82,6 +82,8 @@ export function buildSessionPlanCommentBody(params: {
   /** 計画が前提にした`origin/develop`のSHA。取れないこともある */
   planBaseSha: string | null;
   hostName: string | null;
+  /** 計画を提示した実装エージェント。CodexにはRemote Controlが無い */
+  agent?: "claude" | "codex";
   /** 計画に埋め込まれたアーティファクトを取り込んだか（#2200）。取り込んだ回だけ案内を足す */
   artifactUpdated?: boolean;
 }): string {
@@ -113,7 +115,7 @@ export function buildSessionPlanCommentBody(params: {
   // **リンクは計画本文とは別の段落に置く**（Issueの要件）。計画が長いほど、末尾に出口が
   // 無いと「読んだ後どうすればよいか」が画面から消える
   lines.push(
-    "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。**承認・修正はissue-deckのIssue詳細に出る「計画の承認を待っています」から送れます**（#2061）。待ち時間が切れた後はRemote Controlから伝えてください。",
+    `\`11.local\`が付いている間、このコメント欄へ書いても走っているセッションには届きません。**承認・修正はissue-deckのIssue詳細に出る「計画の承認を待っています」から送れます**（#2061）。待ち時間が切れた後は${params.agent === "codex" ? "端末から伝えてください" : "Remote Controlから伝えてください"}。`,
     "",
   );
   if (params.remoteControlUrl) {
@@ -144,6 +146,7 @@ export async function postSessionPlan(params: {
   remoteControlUrl: string | null;
   planBaseSha: string | null;
   hostName: string | null;
+  agent?: "claude" | "codex";
   /** 計画に埋め込まれたアーティファクトを取り込んだか（#2200） */
   artifactUpdated?: boolean;
 }): Promise<boolean> {
@@ -160,6 +163,7 @@ export async function postSessionPlan(params: {
         remoteControlUrl: params.remoteControlUrl,
         planBaseSha: params.planBaseSha,
         hostName: params.hostName,
+        agent: params.agent,
         artifactUpdated: params.artifactUpdated,
       }),
     });

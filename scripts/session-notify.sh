@@ -610,6 +610,7 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
         "planBaseSha": os.environ.get("NOTIFY_PLAN_BASE_SHA") or None,
         "hostName": host_name or None,
         "waitSeconds": int(os.environ.get("NOTIFY_PLAN_WAIT_SECONDS") or 0),
+        "agent": os.environ.get("ISSUE_DECK_AGENT") if os.environ.get("ISSUE_DECK_AGENT") in ("claude", "codex") else "claude",
     }))
     # 3行目は`ExitPlanMode`の引数そのまま（#2121）。承認を返すときに`updatedInput`として
     # 添え直すためだけに持ち出すので、**中身は一切変えない**（`plan_decision_output`を参照）。

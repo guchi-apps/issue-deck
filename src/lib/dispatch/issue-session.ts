@@ -93,10 +93,12 @@ export function findSessionForIssue(
  * `RESPONDED`への遷移）。
  */
 export function summarizeIssueSession(session: DispatchSessionView): IssueSessionSummary {
+  const isCodex = resolveIssueImplementationAgent(session) === "codex";
   const base = {
     session,
     at: session.lastReportedAt,
-    remoteControlUrl: session.remoteControlUrl,
+    // CodexはClaude CodeのRemote Control URLを出さない。古い値が残っていても表示しない
+    remoteControlUrl: isCodex ? null : session.remoteControlUrl,
     // セッションが終われば`tailscale serve`も撤去されている（cleanupとpollerの回収）。
     // 開いても繋がらないURLを残さない
     previewUrl: session.state === "ALIVE" ? session.previewUrl : null,
@@ -161,7 +163,9 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
       tone: "waiting",
       label: `${formatDispatchHostName(session.host)}のセッションが入力を待っています`,
       shortLabel: "入力を待っています",
-      detail: "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
+      detail: isCodex
+        ? "承認プロンプトか質問で止まっています。端末から答えてください"
+        : "承認プロンプトか質問で止まっています。Remote Controlから答えてください",
     };
   }
   // 承認プロンプトに答えて作業へ戻った直後（#1357）。**`RESPONDED`と混ぜない。**

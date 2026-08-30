@@ -619,6 +619,7 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
     activityAt: "2026-08-01T00:10:00.000Z",
     remoteControlUrl: "https://claude.ai/code/session_abc",
     previewUrl: null,
+    codexThreadKnown: null,
   };
 
   const checkUserIssue = () =>

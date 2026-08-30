@@ -5,7 +5,10 @@ import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import {
+  resolveIssueImplementationAgent,
+  summarizeIssueSession,
+} from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
@@ -88,6 +91,7 @@ export function LocalSessionApprovalNotice({
   session: DispatchSessionView | null;
 }) {
   const hostName = session ? formatDispatchHostName(session.host) : null;
+  const isCodex = session ? resolveIssueImplementationAgent(session) === "codex" : false;
 
   // セッションの記録そのものが無い（24時間で落ちた・pollerの外で起こした）。**終了したとは
   // 言い切らない。** 復旧ボタンもセッションの行が無ければ出ないので、そこへは送らない
@@ -118,13 +122,14 @@ export function LocalSessionApprovalNotice({
   return (
     <LocalSessionNotice
       session={session}
-      emphasizeRemoteControl
-      remoteControlLabel="Remote Controlで答える"
+      emphasizeRemoteControl={!isCodex}
+      remoteControlLabel={isCodex ? "端末で答える" : "Remote Controlで答える"}
     >
       {hostName}のセッションが担当中です。
       <strong className="font-medium">ここに書いた回答はセッションに届きません</strong>
       （`11.local`が付いている間、無人実行も反応しません）。「確認待ちを外す」を押しても、
-      コメントが記録として残り確認待ちの印が外れるだけです。答えるにはRemote Controlを開いてください。
+      コメントが記録として残り確認待ちの印が外れるだけです。
+      {isCodex ? "答えるには端末を操作してください。" : "答えるにはRemote Controlを開いてください。"}
     </LocalSessionNotice>
   );
 }
@@ -160,6 +165,8 @@ export function LocalSessionWaitingInputNotice({
    */
   questionAnswerPending?: boolean;
 }) {
+  const isCodex = session ? resolveIssueImplementationAgent(session) === "codex" : false;
+
   if (questionAnswerPending) {
     return (
       <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">
@@ -168,7 +175,7 @@ export function LocalSessionWaitingInputNotice({
           上の「質問の回答を待っています」から選択肢を選んで送れます
         </strong>
         （このコメント欄へ書いても走っているセッションには届きません）。待ち時間が切れた後は
-        Remote Controlか端末から答えてください。
+        {isCodex ? "端末から答えてください。" : "Remote Controlか端末から答えてください。"}
       </LocalSessionNotice>
     );
   }
@@ -181,7 +188,7 @@ export function LocalSessionWaitingInputNotice({
           上の「計画の承認を待っています」から承認・修正を送れます
         </strong>
         （このコメント欄へ書いても走っているセッションには届きません）。待ち時間が切れた後は
-        Remote Controlか端末から伝えてください。
+        {isCodex ? "端末から伝えてください。" : "Remote Controlか端末から伝えてください。"}
       </LocalSessionNotice>
     );
   }
@@ -189,7 +196,9 @@ export function LocalSessionWaitingInputNotice({
   return (
     <LocalSessionNotice session={session}>
       走っているセッションが入力を待っています。
-      <strong className="font-medium">承認・修正はRemote Controlから伝えてください</strong>
+      <strong className="font-medium">
+        {isCodex ? "承認・修正は端末から伝えてください" : "承認・修正はRemote Controlから伝えてください"}
+      </strong>
       （`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません）。
       答えると`00.check-user`は自動的に外れます。
     </LocalSessionNotice>
@@ -215,7 +224,10 @@ export function LocalSessionCommentNotice({
         ここへ書いたコメントは、走っているセッションには届きません
       </strong>
       （`11.local`が付いている間、無人実行は反応しません）。記録として残すだけなら
-      そのままで問題ありませんが、セッションへ指示を伝えるにはRemote Controlを開いてください。
+      そのままで問題ありませんが、セッションへ指示を伝えるには
+      {session && resolveIssueImplementationAgent(session) === "codex"
+        ? "端末を操作してください。"
+        : "Remote Controlを開いてください。"}
     </LocalSessionNotice>
   );
 }

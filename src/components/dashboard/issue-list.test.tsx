@@ -37,8 +37,10 @@ vi.mock("@/hooks/use-repository-label-names", () => ({
   useRepositoryLabelNames: () => ({ labelNamesByRepository: new Map(), isLoading: false }),
 }));
 
+let workflowRunningByIssueId: Record<string, { isRunning: boolean }> = {};
+
 vi.mock("@/hooks/use-issues-workflow-running", () => ({
-  useIssuesWorkflowRunning: () => ({}),
+  useIssuesWorkflowRunning: () => workflowRunningByIssueId,
 }));
 
 vi.mock("@/hooks/use-issue-list-scroll", () => ({
@@ -106,6 +108,7 @@ afterEach(() => {
   cleanup();
   dispatchState.hosts = [];
   dispatchState.manualStepRuns = [];
+  workflowRunningByIssueId = {};
 });
 
 /** 積める起動先の申告（`resolveDispatchTargetRejection`が見るぶんだけ） */
@@ -991,6 +994,32 @@ describe("IssueListの保留（#2398）", () => {
       { kind: "issue", repositoryFullName: "guchi-apps/issue-deck", number: 2 },
       null,
     );
+  });
+
+  it("GitHub Actionsの実行中は保留にするボタンを表示しない（#2610）", async () => {
+    workflowRunningByIssueId = { "1": { isRunning: true } };
+    renderList({
+      view: "all",
+      snoozes: buildSnoozeMap([]),
+      onSnooze: vi.fn(),
+    });
+    await act(async () => {});
+
+    expect(rowOf(1).querySelector('[aria-label="保留にする"]')).toBeNull();
+    expect(rowOf(2).querySelector('[aria-label="保留にする"]')).not.toBeNull();
+  });
+
+  it("ローカルエージェントの実行中は保留にするボタンを表示しない（#2610）", async () => {
+    renderList({
+      view: "all",
+      snoozes: buildSnoozeMap([]),
+      onSnooze: vi.fn(),
+      checkUserRunningIssueIds: new Set(["2"]),
+    });
+    await act(async () => {});
+
+    expect(rowOf(2).querySelector('[aria-label="保留にする"]')).toBeNull();
+    expect(rowOf(1).querySelector('[aria-label="保留にする"]')).not.toBeNull();
   });
 });
 
