@@ -1,4 +1,5 @@
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
@@ -36,14 +37,25 @@ const AGENT_ROLE_MARKER = "<!-- issue-deck-agent:guide -->";
 export function buildSessionStartedCommentBody(params: {
   hostName: string;
   tmuxSessionName: string;
+  agent?: DispatchAgent;
+  model?: string | null;
 }): string {
   const where = formatDispatchHostName(params.hostName);
+  const agent = params.agent ?? "claude";
+  const agentName = agent === "codex" ? "Codex CLI" : "Claude Code";
+  const model = !params.model || params.model === "auto" ? "CLIの既定" : params.model;
+  const instructionGuide =
+    agent === "codex"
+      ? "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。追加の指示は端末から伝えてください。"
+      : "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。追加の指示はRemote Controlか端末から伝えてください。";
 
   return [
     `🖥️ **${where}のローカルセッションで対応を開始します。**`,
     "",
     `- ホスト: \`${params.hostName}\``,
     `- tmuxセッション: \`${params.tmuxSessionName}\``,
+    `- エージェント: ${agentName}`,
+    `- モデル: \`${model}\``,
     "",
     // **Actions UIに相当するものがローカルには無い**（このIssueの出発点）。実行の様子を
     // 見に行ける先を、受付の時点で必ず書いておく。承認待ちになればRemote Controlのリンクが
@@ -54,7 +66,7 @@ export function buildSessionStartedCommentBody(params: {
     `tmux attach -t ${params.tmuxSessionName}`,
     "```",
     "",
-    "`11.local`が付いている間、このコメント欄へ書いても走っているセッションには届きません。追加の指示はRemote Controlか端末から伝えてください。",
+    instructionGuide,
     "",
     SESSION_STARTED_MARKER,
     AGENT_ROLE_MARKER,
@@ -75,6 +87,8 @@ export async function postSessionStartedComment(params: {
   issueNumber: number;
   hostName: string;
   tmuxSessionName: string;
+  agent?: DispatchAgent;
+  model?: string | null;
 }): Promise<boolean> {
   const parsed = parseRepositoryFullName(params.repositoryFullName);
   if (!parsed) return false;
@@ -87,6 +101,8 @@ export async function postSessionStartedComment(params: {
       body: buildSessionStartedCommentBody({
         hostName: params.hostName,
         tmuxSessionName: params.tmuxSessionName,
+        agent: params.agent,
+        model: params.model,
       }),
     });
     return true;

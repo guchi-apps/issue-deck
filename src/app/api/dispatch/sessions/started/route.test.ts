@@ -22,11 +22,13 @@ function postRequest(body: unknown, authorization?: string) {
   }) as unknown as Parameters<typeof POST>[0];
 }
 
-const validBody = {
+  const validBody = {
   repository: "guchi-apps/issue-deck",
   issue: 1119,
   host: "subpc",
-  tmuxSessionName: "issue-deck-issue-1119",
+    tmuxSessionName: "issue-deck-issue-1119",
+    agent: "codex",
+    model: "gpt-5-codex",
 };
 
 beforeEach(() => {
@@ -82,6 +84,8 @@ describe("POST /api/dispatch/sessions/started", () => {
       issueNumber: 1119,
       hostName: "subpc",
       tmuxSessionName: "issue-deck-issue-1119",
+      agent: "codex",
+      model: "gpt-5-codex",
     });
   });
 
