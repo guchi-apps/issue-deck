@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # 実装セッションの状態をissue-deckへ報告するフックスクリプト（#1219）。
 #
-# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`・`SessionStart`）から呼ばれ、
-# フックのstdinに来るJSONを読んで1件処理する。設定は run-issue-session.sh が生成する
-# settings JSON 側にあり、このスクリプトを直接叩くのは検証のときだけ。
+# Claude Codeのフック（`Notification`・`Stop`・`PreToolUse`・`PostToolUse`・`SessionStart`）と
+# Codex CLIのフック（`SessionStart`・`Stop`。#2509）から呼ばれ、フックのstdinに来るJSONを読んで
+# 1件処理する。設定は run-issue-session.sh が生成する settings JSON（Claude）または
+# `-c hooks.<イベント>`のオーバーライド（Codex）側にあり、このスクリプトを直接叩くのは検証のときだけ。
 #
 # **報告先はissue-deckだけ**（#2280）。かつてはここからSignalyのwebhookへも通知していたが、
 # issue-deck自身がPush通知（`00.check-user`が付いたIssueを鳴らす。`src/lib/notifications/`）を
@@ -25,6 +26,24 @@
 #                                               上の間引きより前で扱う
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消すだけ（#1465）。
 #                                               **issue-deckへも送らない**
+#
+# **Codex CLIのフックからも同じスクリプトが呼ばれる**（#2509）。入力のフィールド名
+# （`hook_event_name`・`tool_name`・`tool_input`）とイベント名がClaude Codeと同じなので、
+# 読み替えは要らない。ただし**Codexから来るのは`SessionStart`と`Stop`の2つだけ**で、残り4つは
+# 上の表のうち次の理由で来ない。**ここに分岐は足さない**——来ないイベントは下の判定が
+# そのまま`skip`にするため、Codexのために書くコードは1行も無い。
+#
+#   Notification            Codexに同じイベントが無い。承認プロンプトは`PermissionRequest`だが、
+#                           Codexは`--ask-for-approval never`で走らせるので発火しない
+#                           （`scripts/lib/agent-cli.sh`）。つまり**Codexでは`00.check-user`を
+#                           このスクリプトが付けることは無い**（付けるのはエージェント自身。
+#                           `scripts/prompts/codex-supplement.md`）
+#   PreToolUse(ExitPlanMode / AskUserQuestion)
+#                           Codexに同名のツールが無い（`update_plan`は意味論が違う）
+#   PostToolUse             同名のイベントはあるが、**`00.check-user`を付ける経路が無い以上、
+#                           必ず「直前が入力待ちではない」で捨てられる**。だから
+#                           `run-issue-session.sh`はCodexにこのフックを繋がない
+#   PostToolUse(Artifact)   `Artifact`はClaude Code固有のツール（#2154）
 #
 # **1つだけフック以外の入口がある**（#1971）。`SessionInterrupted`はClaude Codeのフックではなく、
 # pollerが合成して渡してくる合図で、「APIエラー（529等）でturnが打ち切られたまま止まっている」

@@ -6,10 +6,12 @@
 // `codex`が入っていないホスト（CI）では起動そのものを試せないため、境界だけを固定しておく。
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const libPath = path.join(repoRoot, "scripts/lib/agent-cli.sh");
@@ -99,5 +101,88 @@ describe("agent_cli_build_codex_args", () => {
       "--search",
       "--no-alt-screen",
     ]);
+  });
+});
+
+/** Codexのフック引数を組み立てて、1引数1行で返す（終了コードも返す） */
+function codexHookArgs(commandLine) {
+  const { stdout, status } = run(
+    [
+      `agent_cli_build_codex_hook_args ${JSON.stringify(commandLine)} || exit 1`,
+      `printf '%s\\n' "\${AGENT_CLI_HOOK_ARGS[@]}"`,
+    ].join("\n"),
+  );
+  return { args: stdout.split("\n").filter((line) => line !== ""), status };
+}
+
+describe("agent_cli_build_codex_hook_args", () => {
+  // 繋ぐのは`SessionStart`と`Stop`だけ（#2509）。`PostToolUse`はCodexでは必ず捨てられるので
+  // 繋がない——増やすとツール実行のたびにプロセスが起きる。
+  it("SessionStart と Stop を、フックの信頼を越えるフラグ付きで繋ぐ", () => {
+    const { args, status } = codexHookArgs("'/x/session-notify.sh' '12' 'repo' 'owner/repo'");
+    expect(status).toBe(0);
+    expect(args).toEqual([
+      "--dangerously-bypass-hook-trust",
+      "-c",
+      `hooks.SessionStart=[{hooks=[{type="command",command="'/x/session-notify.sh' '12' 'repo' 'owner/repo'"}]}]`,
+      "-c",
+      `hooks.Stop=[{hooks=[{type="command",command="'/x/session-notify.sh' '12' 'repo' 'owner/repo'"}]}]`,
+    ]);
+  });
+
+  // TOMLの基本文字列に入れるので、`"`と`\`だけは潰しておく。ここが崩れると
+  // Codexの設定パースが落ち、**フックどころか起動そのものが失敗する**。
+  it("コマンド行の二重引用符とバックスラッシュはエスケープする", () => {
+    const { args } = codexHookArgs('a"b\\c');
+    expect(args[2]).toBe(`hooks.SessionStart=[{hooks=[{type="command",command="a\\"b\\\\c"}]}]`);
+  });
+
+  it("コマンド行が空なら何も組み立てない", () => {
+    const { args, status } = codexHookArgs("");
+    expect(status).not.toBe(0);
+    expect(args).toEqual([]);
+  });
+});
+
+describe("agent_cli_codex_project_hook_file", () => {
+  const tmpDirs = [];
+
+  function makeDir(files = {}) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-hook-"));
+    tmpDirs.push(dir);
+    for (const [relative, content] of Object.entries(files)) {
+      const target = path.join(dir, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    }
+    return dir;
+  }
+
+  afterEach(() => {
+    while (tmpDirs.length > 0) {
+      fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function detect(dir) {
+    return run(`agent_cli_codex_project_hook_file ${JSON.stringify(dir)} || exit 1`);
+  }
+
+  it("プロジェクト層のフック設定が無ければ検出しない", () => {
+    expect(detect(makeDir()).status).not.toBe(0);
+  });
+
+  // ここで検出されたworktreeでは、呼び出し側がフックを丸ごと有効にしない（#2509）。
+  // `--dangerously-bypass-hook-trust`はプロセス単位のフラグで、付けるとリポジトリ同梱の
+  // フックまでレビュー無しで走るため。
+  it("`.codex/hooks.json`があれば検出する", () => {
+    const dir = makeDir({ ".codex/hooks.json": "{}" });
+    expect(detect(dir)).toMatchObject({ stdout: path.join(dir, ".codex/hooks.json"), status: 0 });
+  });
+
+  // `[hooks]`はconfig.toml側にも書けるので、中身は見ずに存在だけで降りる（安全側）。
+  it("`.codex/config.toml`があれば検出する", () => {
+    const dir = makeDir({ ".codex/config.toml": "model = \"x\"\n" });
+    expect(detect(dir)).toMatchObject({ stdout: path.join(dir, ".codex/config.toml"), status: 0 });
   });
 });
