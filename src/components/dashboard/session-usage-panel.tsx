@@ -199,6 +199,7 @@ function Breakdown({
   unit,
   quotas,
   colorOf,
+  maxVisibleRows,
 }: {
   title: string;
   hint: string;
@@ -206,8 +207,13 @@ function Breakdown({
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
   colorOf?: (key: string) => string | undefined;
+  maxVisibleRows?: number;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const max = rows[0]?.costUsd ?? 0;
+  const visibleRows =
+    maxVisibleRows !== undefined && !isExpanded ? rows.slice(0, maxVisibleRows) : rows;
+  const hiddenRows = maxVisibleRows !== undefined ? Math.max(rows.length - maxVisibleRows, 0) : 0;
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
@@ -219,7 +225,7 @@ function Breakdown({
         <p className="text-xs text-muted-foreground">記録がありません</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {rows.map((row) => {
+          {visibleRows.map((row) => {
             const color = colorOf?.(row.key);
             return (
               <li key={row.key} className="flex flex-col gap-1">
@@ -259,6 +265,19 @@ function Breakdown({
             );
           })}
         </ul>
+      )}
+      {hiddenRows > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          aria-expanded={isExpanded}
+        >
+          {isExpanded
+            ? `上位${maxVisibleRows}件のみ表示`
+            : `すべて表示（残り ${hiddenRows} リポジトリ）`}
+        </Button>
       )}
     </section>
   );
@@ -560,6 +579,7 @@ export function SessionUsagePanel({
               unit={effectiveUnit}
               quotas={quotas}
               colorOf={(key) => getRepoColor(key || "(不明)")}
+              maxVisibleRows={5}
             />
             <Breakdown
               title="種別別"

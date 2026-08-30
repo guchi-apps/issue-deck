@@ -161,6 +161,28 @@ describe("SessionUsagePanel", () => {
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 2504);
   });
 
+  it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {
+    const entries = Array.from({ length: 6 }, (_unused, index) =>
+      entry({
+        sessionId: `repo-${index}`,
+        repository: `repository-${index}`,
+        costUsd: 6 - index,
+      }),
+    );
+    renderPanel(response(entries));
+
+    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    expect(within(breakdown).getByText("repository-0")).toBeTruthy();
+    expect(within(breakdown).getByText("repository-4")).toBeTruthy();
+    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+
+    fireEvent.click(within(breakdown).getByRole("button", { name: "すべて表示（残り 1 リポジトリ）" }));
+    expect(within(breakdown).getByText("repository-5")).toBeTruthy();
+
+    fireEvent.click(within(breakdown).getByRole("button", { name: "上位5件のみ表示" }));
+    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+  });
+
   it("記録が無いときは、報告待ちであることを出す", () => {
     renderPanel(response([]));
     expect(screen.getByText(/記録がありません。サブPCのpollerが報告すると出ます/)).toBeTruthy();
