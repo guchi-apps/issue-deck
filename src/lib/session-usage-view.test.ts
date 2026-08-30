@@ -92,11 +92,23 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byDay.map((day) => day.date)).toEqual(["2026-08-31"]);
   });
 
-  it("Issue単位でまとめ、その中の転記を金額の多い順に並べる", () => {
+  it("Issue単位でまとめ、その中の転記を開始日時の新しい順に並べる", () => {
     const summary = buildSessionUsageSummary({
       entries: [
-        entry({ sessionId: "plan", kind: "plan-review", costUsd: 0.5, responses: 1 }),
-        entry({ sessionId: "impl", kind: "implementation", costUsd: 9, responses: 100 }),
+        entry({
+          sessionId: "plan",
+          kind: "plan-review",
+          costUsd: 0.5,
+          responses: 1,
+          startedAt: "2026-08-30T02:00:00.000Z",
+        }),
+        entry({
+          sessionId: "impl",
+          kind: "implementation",
+          costUsd: 9,
+          responses: 100,
+          startedAt: "2026-08-30T01:00:00.000Z",
+        }),
       ],
       nowMs: NOW_MS,
       days: 7,
@@ -109,16 +121,45 @@ describe("buildSessionUsageSummary", () => {
     expect(issue.issueNumber).toBe(2504);
     expect(issue.sessions).toBe(2);
     expect(issue.responses).toBe(101);
-    expect(issue.entries.map((item) => item.sessionId)).toEqual(["impl", "plan"]);
+    // 金額が小さくても、新しく始まったセッションが先頭になる。
+    expect(issue.entries.map((item) => item.sessionId)).toEqual(["plan", "impl"]);
     // 種別も金額の多い順
     expect(issue.kinds).toEqual(["implementation", "plan-review"]);
+  });
+
+  it("Issueを最新セッションの開始日時が新しい順に並べる", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ issueNumber: 1, sessionId: "older-expensive", costUsd: 100 }),
+        entry({
+          issueNumber: 2,
+          sessionId: "current-cheap",
+          costUsd: 0.01,
+          startedAt: "2026-08-30T02:30:00.000Z",
+          endedAt: "2026-08-30T02:31:00.000Z",
+        }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+      quota: null,
+    });
+
+    expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([2, 1]);
+    expect(summary.byIssue[0].latestStartedAt).toBe("2026-08-30T02:30:00.000Z");
   });
 
   it("Issue番号を持たないセッションも落とさず、リポジトリ単位でまとめる", () => {
     const summary = buildSessionUsageSummary({
       entries: [
         entry({ sessionId: "impl" }),
-        entry({ sessionId: "question", kind: "question", issueNumber: null, costUsd: 2 }),
+        entry({
+          sessionId: "question",
+          kind: "question",
+          issueNumber: null,
+          costUsd: 2,
+          startedAt: "2026-08-30T02:00:00.000Z",
+        }),
       ],
       nowMs: NOW_MS,
       days: 7,
