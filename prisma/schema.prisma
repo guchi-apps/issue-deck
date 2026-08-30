@@ -1392,3 +1392,68 @@ model ReleaseMergePushNotice {
   @@unique([repositoryFullName, pullRequestNumber])
   @@index([repositoryFullName])
 }
+
+/// サブPCのローカルセッション1本（＝転記ファイル1つ）が使ったトークン（#2504）。
+///
+/// **本番のissue-deck（VPS）は転記を読めない。** 転記（`~/.claude/projects/<スラッグ>/<セッション
+/// ID>.jsonl`）はセッションが走るホスト（サブPC）にしかなく、集計する`scripts/lib/session-usage.sh`
+/// もそこにしか置けない。そのためpollerが定期的に集計し、**結果の数値だけ**をここへ押し込む
+/// （`POST /api/dispatch/session-usage`）。画面はこの表だけを読む。
+///
+/// **1行＝転記1本で、上書きし続ける。** セッションは走っている間ずっと追記されるため、pollerは
+/// 同じ転記を何度も送ってくる。`(host, sessionId)`で一意にして毎回まるごと上書きすることで、
+/// 「途中まで」の行が二重に積まれない（集計は常にその転記の全期間ぶんで、期間の切り出しは
+/// 画面側が`endedAt`で行う）。
+///
+/// **保存するのは数値と分類だけで、やり取りの本文は入れない。** 集計元も`message.usage`と
+/// 時刻・作業ディレクトリしか読んでいない（`scripts/lib/session-usage.sh`の冒頭）。
+///
+/// 古い行は受け口が`SESSION_USAGE_RETENTION_DAYS`より古いものを落とす。
+model SessionUsage {
+  id String @id @default(cuid())
+
+  /// 報告してきたホスト名（DispatchHost.nameと対応）
+  host String @db.VarChar(191)
+  /// 転記のファイル名から取ったセッションID（Claude CodeのUUID）。ホストと合わせて一意
+  sessionId String @db.VarChar(191)
+  /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
+  transcript String @db.Text
+
+  /// セッションの種別。`implementation` / `plan-review` / `question` / `other`。
+  /// **enumにしない**——判定しているのはシェル側（作業ディレクトリのパス）で、種別が増えるたびに
+  /// マイグレーションを挟むと、報告する側と受ける側のデプロイ順に依存してしまう
+  kind String @db.VarChar(32)
+  /// 対象リポジトリ名（ownerを除く。例: `issue-deck`）。判定できなければnull
+  repository String? @db.VarChar(191)
+  /// 対象Issue番号。計画レビュー・横断質問など紐づかないセッションではnull
+  issueNumber Int?
+
+  /// 応答（assistantメッセージ）の数。`message.id`で重複除去済み
+  responses Int
+  /// キャッシュに載らなかった入力トークン
+  inputTokens BigInt
+  /// キャッシュ書き込み（5分TTL / 1時間TTL）。単価が違うので分けて持つ
+  cacheCreate5mTokens BigInt
+  cacheCreate1hTokens BigInt
+  /// キャッシュ読み出し
+  cacheReadTokens BigInt
+  outputTokens BigInt
+  /// API換算の目安（USD）。**サブスクの実費ではない。** 単価はシェル側の表を正とし、
+  /// 過去に報告された行の金額は再計算しない（当時の単価で残す）
+  costUsd Float
+  /// 使われたモデルIDのJSON配列（例: `["claude-opus-5"]`）
+  models String @db.Text
+
+  /// このセッションの最初／最後の応答の時刻。期間の絞り込みは`endedAt`で行う
+  startedAt DateTime
+  endedAt   DateTime
+  /// pollerがこの行を報告してきた時刻。画面の「◯分前」に使う
+  reportedAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([host, sessionId])
+  @@index([endedAt])
+  @@index([repository, issueNumber])
+}

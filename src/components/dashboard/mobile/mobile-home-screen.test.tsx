@@ -125,6 +125,7 @@ function renderHome(
       onSelectPullRequests={() => {}}
       onSelectFlow={() => {}}
       onSelectPreview={() => {}}
+      onSelectUsage={() => {}}
       previewRunning={false}
       onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
@@ -160,6 +161,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "コードレビュー",
       "ブランチ",
       "確認環境",
+      "AI使用量",
       "すべてのIssue",
       "お気に入り",
       "未着手",
@@ -238,6 +240,7 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
         onSelectPreview={() => {}}
+        onSelectUsage={() => {}}
         previewRunning={false}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
@@ -473,6 +476,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectPullRequests={() => {}}
         onSelectFlow={() => {}}
         onSelectPreview={() => {}}
+        onSelectUsage={() => {}}
         previewRunning={false}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
