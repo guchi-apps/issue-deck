@@ -5,6 +5,7 @@ import {
   diagnoseManualStepFailure,
   type ManualStepFixInput,
 } from "@/lib/claude/manual-step-fix";
+import { getAppAiToken } from "@/lib/claude/request";
 import { db } from "@/lib/db";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import {
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const token = await getAppAiToken();
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }

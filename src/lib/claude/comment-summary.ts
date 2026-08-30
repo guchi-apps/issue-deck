@@ -1,7 +1,6 @@
 import { callClaudeMessages } from "@/lib/claude/request";
 
 /** 要約生成に使うモデル。プラン枠消費を抑えるため軽量なモデルを使う。 */
-const MODEL = "claude-haiku-4-5";
 
 /** コメント本文が長大な場合に切り詰める上限文字数。 */
 const MAX_COMMENT_LENGTH = 4000;
@@ -42,19 +41,18 @@ export async function generateCommentSummary(token: string, body: string): Promi
     feature: "comment_summary",
     token,
     body: {
-      model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
     },
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeのコメント要約生成に失敗しました (${res.status})`);
+    throw new Error(`AIによるコメント要約生成に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から要約テキストを取得できませんでした");
+    throw new Error("AIの応答から要約テキストを取得できませんでした");
   }
   return text;
 }

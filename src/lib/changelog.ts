@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.60.0",
+    date: "2026-08-30",
+    changes: [
+      "アプリ内のAI機能（Issueの要約・検索・文章整理など）で使うAIモデルを、設定画面から選べるようになりました。ClaudeのHaiku・Sonnet・Opusに加えて、ChatGPT（GPT-5.6系）のモデルも選択できます。また、AI使用量の画面がClaudeとCodexをまとめて確認できる表示に変わりました。",
+    ],
+    usage: [
+      "1. 画面右上などから「設定」を開き、「実行設定」セクションを表示します。",
+      "2. 「アプリ内AI機能で使用するモデル」のプルダウンで、Claude系またはGPT系のモデルを選択します。",
+      "3. 「保存」を押し、保存完了の表示が出れば設定が反映されています。",
+      "4. 「AI使用量」画面を開くと、ClaudeとCodexの使用量が1つのグラフ・一覧にまとめて表示され、各セッションの行にどちらのAIかを示すラベルが付いていることを確認できます。",
+    ],
+  },
+  {
     version: "4.59.0",
     date: "2026-08-30",
     changes: [

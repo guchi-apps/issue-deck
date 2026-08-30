@@ -116,6 +116,7 @@ function renderDialog() {
       claudeModel="auto"
       claudeModelAssist="haiku"
       codexModel="auto"
+      appAiModel="claude-haiku-4-5"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
@@ -213,12 +214,18 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(save);
     await waitFor(() => expect(updateAutoRetryLimit).toHaveBeenCalledWith(5));
-    expect(updateClaudeModel).toHaveBeenCalledWith("auto", "haiku", "auto");
+    expect(updateClaudeModel).toHaveBeenCalledWith(
+      "auto",
+      "haiku",
+      "auto",
+      "claude-haiku-4-5",
+    );
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
       claudeModelAssist: "haiku",
       codexModel: "auto",
+      appAiModel: "claude-haiku-4-5",
       dispatchConcurrency: 2,
     });
   });

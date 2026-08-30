@@ -2,7 +2,6 @@ import { callClaudeMessages } from "@/lib/claude/request";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
 
 /** 提案生成に使うモデル。プラン枠消費を抑えるため軽量なモデルを使う。 */
-const MODEL = "claude-haiku-4-5";
 
 /** 本文が長大な場合に切り詰める上限文字数。 */
 const MAX_BODY_LENGTH = 4000;
@@ -113,19 +112,18 @@ export async function generateIssueSuggestion(
     feature: "issue_suggest",
     token,
     body: {
-      model: MODEL,
       max_tokens: 1024,
       messages: [{ role: "user", content: prompt }],
     },
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeの提案生成に失敗しました (${res.status})`);
+    throw new Error(`AIによる提案生成に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から提案テキストを取得できませんでした");
+    throw new Error("AIの応答から提案テキストを取得できませんでした");
   }
 
   let parsed: unknown;

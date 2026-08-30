@@ -33,7 +33,6 @@ import {
 } from "@/lib/new-app/spec";
 
 /** 相談に使うモデル。`lib/claude/`の他の機能と同じ軽量モデルに揃える。 */
-const MODEL = "claude-haiku-4-5";
 
 export type { ConsultMessage, ConsultRole } from "@/lib/claude/limits";
 
@@ -257,7 +256,6 @@ export async function continueNewAppConsult(
     feature: "new_app_consult",
     token,
     body: {
-      model: MODEL,
       // 返事＋仕様案で1024では足りないことがある。**途中で切れるとJSONが読めなくなる**ため余裕を持たせる
       max_tokens: 2048,
       system: SYSTEM_PROMPT,
@@ -267,12 +265,12 @@ export async function continueNewAppConsult(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeへの相談に失敗しました (${res.status})`);
+    throw new Error(`AIへの相談に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から本文を取得できませんでした");
+    throw new Error("AIの応答から本文を取得できませんでした");
   }
   // 打ち切られた応答は必ず壊れたJSONになる。「解析できませんでした」より原因の分かる文言で返す
   if (json?.stop_reason === "max_tokens") {

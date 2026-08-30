@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { parseClaudeModel, parseCodexModel } from "@/lib/app-settings";
+import {
+  APP_AI_MODEL_DEFAULT,
+  parseAppAiModel,
+  parseClaudeModel,
+  parseCodexModel,
+} from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 
@@ -10,6 +15,7 @@ async function getClaudeModels() {
     claudeModel: setting?.claudeModel ?? "auto",
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
     codexModel: setting?.codexModel ?? "auto",
+    appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
   };
 }
 
@@ -49,6 +55,11 @@ export async function PATCH(request: NextRequest) {
   if (hasCodex && codexModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasAppAi = payload !== null && typeof payload === "object" && "appAiModel" in payload;
+  const appAiModel = hasAppAi ? parseAppAiModel(payload?.appAiModel) : undefined;
+  if (hasAppAi && appAiModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
 
   const updated = await db.appSetting.upsert({
     where: { id: 1 },
@@ -57,11 +68,13 @@ export async function PATCH(request: NextRequest) {
       claudeModel,
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
+      ...(appAiModel ? { appAiModel } : {}),
     },
     update: {
       claudeModel,
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
+      ...(appAiModel ? { appAiModel } : {}),
     },
   });
 
@@ -69,5 +82,6 @@ export async function PATCH(request: NextRequest) {
     claudeModel: updated.claudeModel,
     claudeModelAssist: updated.claudeModelAssist,
     codexModel: updated.codexModel,
+    appAiModel: parseAppAiModel(updated.appAiModel) ?? APP_AI_MODEL_DEFAULT,
   });
 }

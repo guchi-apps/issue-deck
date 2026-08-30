@@ -12,7 +12,7 @@ import {
 } from "@/lib/claude/api-usage-totals";
 
 /**
- * issue-deck自身が投げたAnthropic API（`/v1/messages`）の呼び出しを、機能別・モデル別に
+ * issue-deck自身が投げたAnthropic／OpenAI APIの呼び出しを、機能別・モデル別に
  * 集計するためのプロセス内計測（#2347）。
  *
  * Anthropicはレート制限ヘッダで「プラン枠を何%使ったか」しか返さず（`usage.ts`）、
@@ -143,7 +143,7 @@ function bucketFor(now: number): Bucket {
   return bucket;
 }
 
-/** Anthropic APIの呼び出しを1件計上する */
+/** アプリ内AI APIの呼び出しを1件計上する */
 export function recordClaudeApiCall(options: {
   feature: ClaudeApiFeature;
   model: string;

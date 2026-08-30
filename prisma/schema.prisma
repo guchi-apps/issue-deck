@@ -367,6 +367,9 @@ model AppSetting {
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
   codexModel          String   @default("auto")
+  // アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
+  // 既存挙動を維持するため、既定値は従来固定していたHaikuとする。
+  appAiModel          String   @default("claude-haiku-4-5")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
