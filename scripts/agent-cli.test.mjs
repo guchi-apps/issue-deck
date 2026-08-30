@@ -44,11 +44,17 @@ function resolve(raw) {
 }
 
 /** Codexの起動引数を組み立てて、1引数1行で返す */
-function codexArgs(env = {}) {
+function codexArgs(env = {}, resumeThread = "") {
   const exports = Object.entries(env)
     .map(([key, value]) => `export ${key}=${JSON.stringify(value)}`)
     .join("\n");
-  const { stdout } = run([exports, `agent_cli_build_codex_args`, `printf '%s\\n' "\${AGENT_CLI_ARGS[@]}"`].join("\n"));
+  const { stdout } = run(
+    [
+      exports,
+      `agent_cli_build_codex_args ${JSON.stringify(resumeThread)}`,
+      `printf '%s\\n' "\${AGENT_CLI_ARGS[@]}"`,
+    ].join("\n"),
+  );
   return stdout.split("\n").filter((line) => line !== "");
 }
 
@@ -104,6 +110,15 @@ describe("agent_cli_build_codex_args", () => {
     expect(codexArgs({ ISSUE_DECK_CODEX_EXTRA_ARGS: "--search --no-alt-screen" }).slice(-2)).toEqual([
       "--search",
       "--no-alt-screen",
+    ]);
+  });
+
+  it("UUIDがあればピッカーを出さない resume サブコマンドを先頭へ付ける", () => {
+    expect(codexArgs({}, "01a0510e-1234-4abc-8def-0123456789ab").slice(0, 4)).toEqual([
+      "resume",
+      "01a0510e-1234-4abc-8def-0123456789ab",
+      "--sandbox",
+      "workspace-write",
     ]);
   });
 });

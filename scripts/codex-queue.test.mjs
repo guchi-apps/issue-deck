@@ -188,10 +188,16 @@ describe("session_state（Codexの宛先）", () => {
     expect(runBash(`session_state_agent_kind 'repo-issue-4'`).stdout).toBe("claude");
   });
 
-  // セッションを畳んだら宛先も消す。残すと、次に同じ名前で立ったセッションへ前回の宛先で送る
-  it("セッションの後始末で宛先も消える", () => {
+  // 次回の`codex resume`が前の会話を特定できるよう、通常の後始末ではUUIDを残す（#2520）。
+  it("セッションの後始末後もresume用の宛先を保持する", () => {
     runBash(`session_state_write_codex_thread 'repo-issue-5' ${JSON.stringify(THREAD)}`);
     runBash(`session_state_remove 'repo-issue-5'`);
-    expect(runBash(`session_state_read_codex_thread 'repo-issue-5'`).status).not.toBe(0);
+    expect(runBash(`session_state_read_codex_thread 'repo-issue-5'`).stdout).toBe(THREAD);
+  });
+
+  it("新しい会話で起こすときは前回の宛先を明示的に消せる", () => {
+    runBash(`session_state_write_codex_thread 'repo-issue-6' ${JSON.stringify(THREAD)}`);
+    runBash(`session_state_clear_codex_thread 'repo-issue-6'`);
+    expect(runBash(`session_state_read_codex_thread 'repo-issue-6'`).status).not.toBe(0);
   });
 });
