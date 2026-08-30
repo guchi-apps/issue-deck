@@ -571,7 +571,7 @@ prepare_issue() {
   printf '%s' "$issue_json" >"$issue_json_file"
   local dev_log="$WORKTREE_BASE/.dev-servers/issue-$n.log"
   # prompt-render:start（scripts/implementation-prompt.test.mjs がこの範囲を切り出して実行する）
-  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" "$AGENT_KIND" >"$PROMPT_FILE" <<'PY'
+  python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" "$AGENT_KIND" "$LAUNCHER_SCRIPTS_DIR" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -584,6 +584,10 @@ issue_relations = sys.argv[8]
 concurrent_work = sys.argv[9]
 # 起こすエージェントCLIの種別（#2377）。計画の出し方だけはここで文面を差し替える（#2551）
 agent_kind = sys.argv[10] if len(sys.argv) > 10 else "claude"
+# 実際に走らせる`scripts/`の絶対パス（#1438・#2590）。Codexの計画の出し方で案内する
+# `submit-plan.sh`の在り処で、汎用ランチャー（cwdが他リポジトリのworktree）と共有するため
+# 相対では書けない
+scripts_dir = sys.argv[11] if len(sys.argv) > 11 else "scripts"
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -741,7 +745,7 @@ else:
 if agent_kind == "codex":
     plan_instructions = (
         "ラベルに `21.plan-required` が含まれる場合は、実装前に計画を一時的なMarkdownファイルへ"
-        "書き、`scripts/submit-plan.sh <計画ファイル>`を実行してください"
+        f"書き、`{scripts_dir}/submit-plan.sh <計画ファイル>`を実行してください"
         "（書き方は後述の「計画は要約から書き、30〜40行に収める」に従います）。"
         "このコマンドが計画コメントの投稿・`00.check-user`の付与・issue-deckの画面への"
         "承認パネルの表示までを行い、判断が届くまで待ちます。"
@@ -753,7 +757,7 @@ if agent_kind == "codex":
         "含まれない場合はそのまま実装に進んでよいです。"
     )
     plan_comment_note = (
-        "  - **`scripts/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
+        f"  - **`{scripts_dir}/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
         "`00.check-user`＋`01.check-plan`の付与まで行います**（#2545）。"
         "同じ計画を`gh issue comment`で投稿し直さないでください。"
         f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
@@ -813,9 +817,11 @@ PY
   # **実装プロンプト本体を分岐させない。** ひな形は43KBあり、Codex専用の写しを作れば片方が
   # 必ず古くなる。共通の指示はそのままにして、**Claude Code前提で書かれている箇所の読み替え**
   # （Plan mode・承認プロンプト・ツール名）だけを差分として追記する。
+  #
+  # **`{{ISSUE_DECK_SCRIPTS_DIR}}`はここで絶対パスへ直す**（#2590）。汎用ランチャーと読み替えを
+  # 共有するため、`submit-plan.sh`・`submit-question.sh`の在り処をプレースホルダにしてある。
   if [[ "$AGENT_KIND" != "claude" && -f "$CODEX_SUPPLEMENT" ]]; then
-    printf '\n' >>"$PROMPT_FILE"
-    cat "$CODEX_SUPPLEMENT" >>"$PROMPT_FILE"
+    agent_cli_append_codex_supplement "$CODEX_SUPPLEMENT" "$PROMPT_FILE" "$LAUNCHER_SCRIPTS_DIR"
   fi
 }
 

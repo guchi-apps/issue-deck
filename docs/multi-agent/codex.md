@@ -585,8 +585,10 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 そのため計画の出し方だけは、生成時にエージェント別の文面へ差し替える。
 
 - ひな形の該当箇所は`{{PLAN_INSTRUCTIONS}}`・`{{PLAN_COMMENT_NOTE}}`のプレースホルダ
-- 埋めるのは`scripts/start-issue.sh`（`--agent`の値で分岐）。汎用ランチャー
-  （`scripts/generic-start-issue.sh`）はClaude Codeでしか起動しないので、Claude向けの文面で埋める
+- 埋めるのは`scripts/start-issue.sh`と`scripts/generic-start-issue.sh`（どちらも解決した種別で
+  分岐する。#2590）。**汎用ランチャーのひな形（`scripts/prompts/generic-implementation-agent.md`）にも
+  同じプレースホルダを置いてある**——そちらにClaude Code前提の手順が残っていると、#2550と同じことが
+  他リポジトリのセッションで起きる
 - **43KBの本文を分岐させるわけではない。** 差し替えるのは矛盾する2か所だけで、残りは共通のまま
 
 ### 宛先と鍵は`dispatch.env`から読む（#2551）
@@ -617,15 +619,17 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 
 ### 起動できない組み合わせは、worktreeを作る前に止まる
 
-`scripts/start-local-session.sh`が既定以外のエージェントを受け取ったとき、次の2つを先に確かめる。
-どちらも`exit 1`で、pollerがジョブを`failed`にするため**理由が画面に出る**。
+`scripts/start-local-session.sh`が既定以外のエージェントを受け取ったとき、次を先に確かめる。
+`exit 1`すればpollerがジョブを`failed`にするため**理由が画面に出る**。
 
-- **汎用ランチャー（`generic`）で起動するリポジトリ** — `scripts/generic-start-issue.sh`はCodexに
-  未対応なので断る
 - **`scripts/start-issue.sh`が`ISSUE_DECK_AGENT`を読まないリポジトリ** — 実際に走るファイルを
   `grep`で見る。**ローカル起動プロトコルの版数では判定しない**（版数はリポジトリ側が手で書く
   宣言で、`ISSUE_DECK_AGENT`を読むようにしたかどうかとは連動しない）。ここを通さないと、
   画面には「Codex CLI」と出たままClaude Codeが立つ
+
+**確かめるのは契約適合（`contract`）の出口だけ**（#2590）。汎用ランチャー（`generic`）で起こす
+リポジトリは、走るのがissue-deck自身の`scripts/generic-start-issue.sh`なので、対象リポジトリ側には
+何も要らない（[generic-launcher.md](generic-launcher.md)「エージェントは受け口から渡ってくる」）。
 
 ## 実装の在り処
 
@@ -637,6 +641,7 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 | `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記・計画の出し方の差し替え | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
 | 計画の登録と判断待ち（Codex用） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
+| 他リポジトリでの種別の受け取り・読み替えの追記・計画の出し方の差し替え（#2590） | [`scripts/generic-start-issue.sh`](../../scripts/generic-start-issue.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
 | `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
 | 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |
@@ -651,10 +656,9 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
   逃げ道は上の「サンドボックスを組み立てられないホスト」）
 - **無人実行（GitHub Actions）は対象外。** `claude-issue-dispatch.yml`は`claude-code-action`の
   ままで、Codexで走らせるには`OPENAI_API_KEY`のSecrets追加と課金の判断が要る
-- **汎用ランチャー（`scripts/generic-start-issue.sh`）は未対応。** 他リポジトリのセッションは
-  従来どおりClaude Codeで立つ（画面から選んでも、受け口が理由を出して止まる）
-- **他リポジトリの`start-issue.sh`は`ISSUE_DECK_AGENT`を読まない。** 揃えるまでは、画面から
-  Codexを選べるのはissue-deck自身のIssueだけになる（他は受け口が止める）
+- **契約適合の他リポジトリ（自前の`scripts/start-issue.sh`を持つもの）は`ISSUE_DECK_AGENT`を
+  読まない。** 揃えるまでは受け口が止める。**汎用ランチャーで起こすリポジトリは#2590で対応済み**
+  （むしろ`start-issue.sh`を持たない側が先に使えるようになった）
 - **質問の受け答えは画面へ出せていない**（#2509）。計画は#2545で専用コマンドから既存パネルへ
   出せるようにしたが、Codexに`AskUserQuestion`に当たる安定したツールは無い
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
