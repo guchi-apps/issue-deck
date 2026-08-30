@@ -39,6 +39,7 @@ describe("parseSessionUsageReport", () => {
   it("シェルが送る形をそのまま受け取れる", () => {
     const parsed = parseSessionUsageReport(reportInput());
     expect(parsed).toMatchObject({
+      agent: "claude",
       sessionId: "abc-123",
       kind: "implementation",
       repository: "issue-deck",
@@ -48,6 +49,11 @@ describe("parseSessionUsageReport", () => {
       costUsd: 1.25,
     });
     expect(parsed?.startedAt.toISOString()).toBe("2026-08-30T01:00:00.000Z");
+  });
+
+  it("Codexの報告を区別し、未知のエージェントは捨てる", () => {
+    expect(parseSessionUsageReport(reportInput({ agent: "codex" }))?.agent).toBe("codex");
+    expect(parseSessionUsageReport(reportInput({ agent: "other" }))).toBeNull();
   });
 
   it("Issue番号・リポジトリを持たないセッション（計画レビュー・横断質問）も受け取る", () => {

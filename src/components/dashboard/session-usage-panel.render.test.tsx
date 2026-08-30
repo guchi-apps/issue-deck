@@ -24,6 +24,7 @@ const NOW_MS = Date.parse("2026-08-30T03:00:00.000Z");
 
 function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
   return {
+    agent: "claude",
     sessionId: "s1",
     host: "subpc",
     kind: "implementation",
@@ -66,6 +67,7 @@ function response(
       reportedAt: "2026-08-30T02:55:00.000Z",
       quota: scale,
     }),
+    agent: "claude",
     planUsage: null,
     planNotConfigured: true,
   };
@@ -78,6 +80,8 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
       isLoading={false}
       error={null}
       days={7}
+      agent={data.agent}
+      onChangeAgent={() => {}}
       onChangeDays={() => {}}
       onRefresh={() => {}}
       {...props}
@@ -88,6 +92,12 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
+  it("ClaudeとCodexを切り替えられる", () => {
+    const onChangeAgent = vi.fn();
+    renderPanel(response([]), { onChangeAgent });
+    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
+    expect(onChangeAgent).toHaveBeenCalledWith("codex");
+  });
   it("Issueの行を開くと、そのIssueで走った転記1本ごとの明細が出る", () => {
     renderPanel(
       response([

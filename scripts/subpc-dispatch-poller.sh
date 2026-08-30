@@ -1304,13 +1304,16 @@ SESSION_USAGE_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-us
 # ためのもので走らせる前に置くため、それだけを見ると初回が1度失敗しただけで過去ぶんが
 # 永久に埋まらなくなる。
 SESSION_USAGE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-backfill.stamp"
+# Codex収集を追加する前からClaude側の印は存在するため、Codexの過去ぶんは別の印で一度だけ埋める。
+SESSION_USAGE_CODEX_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-codex-backfill.stamp"
 
 report_session_usage() {
   ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
   command -v python3 >/dev/null 2>&1 || return 0
 
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
-  [[ -d "$projects_dir" ]] || return 0
+  local codex_sessions_dir="${CODEX_SESSIONS_DIR:-$HOME/.codex/sessions}"
+  [[ -d "$projects_dir" || -d "$codex_sessions_dir" ]] || return 0
 
   local last now
   last=0
@@ -1326,7 +1329,7 @@ report_session_usage() {
   touch "$SESSION_USAGE_STAMP" 2>/dev/null || true
 
   local days backfill=0
-  if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" ]]; then
+  if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" ]]; then
     days="$SESSION_USAGE_WINDOW_DAYS"
   else
     days="$SESSION_USAGE_BACKFILL_DAYS"
@@ -1336,15 +1339,23 @@ report_session_usage() {
   local cutoff
   cutoff="$(date -d "$((days > 0 ? days - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
 
-  local payload
+  local payload claude_payload codex_payload codex_backfill_ok=1
   # **集計の失敗で1巡を止めない。** 転記の形はClaude Codeの内部仕様で、読めない日が
   # 来ても画面が1つ古くなるだけで済ませる。
-  if ! payload="$(session_usage_transcripts "$projects_dir" "$cutoff" |
+  if ! claude_payload="$(session_usage_transcripts "$projects_dir" "$cutoff" |
     session_usage_aggregate 0 |
-    session_usage_report_payload "$HOST_NAME" 2>/dev/null)"; then
+    session_usage_report_payload "$HOST_NAME" 200 claude 2>/dev/null)"; then
     echo "Error: トークン使用量の集計に失敗しました。" >&2
     return 0
   fi
+  if ! codex_payload="$(codex_session_usage_transcripts "$codex_sessions_dir" "$cutoff" |
+    codex_session_usage_aggregate |
+    session_usage_report_payload "$HOST_NAME" 200 codex 2>/dev/null)"; then
+    echo "Error: Codexトークン使用量の集計に失敗しました。" >&2
+    codex_payload=""
+    codex_backfill_ok=0
+  fi
+  payload="${claude_payload}${claude_payload:+$'\n'}${codex_payload}"
   [[ -n "$payload" ]] || return 0
 
   local line stored=0 sent=0
@@ -1366,6 +1377,7 @@ report_session_usage() {
   # 埋め戻しは全て送り切ってから印を置く（途中で落ちたら次の巡でもう一度やり直す）。
   if ((backfill)); then
     touch "$SESSION_USAGE_BACKFILL_STAMP" 2>/dev/null || true
+    ((codex_backfill_ok)) && touch "$SESSION_USAGE_CODEX_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
   return 0

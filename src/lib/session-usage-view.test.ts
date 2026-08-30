@@ -25,6 +25,7 @@ function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
     overrides.contextTokens ??
     (overrides.inputTokens ?? 100) + (overrides.cacheCreateTokens ?? 200) + (overrides.cacheReadTokens ?? 700);
   return {
+    agent: "claude",
     sessionId: "s1",
     host: "subpc",
     kind: "implementation",
