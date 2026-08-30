@@ -759,6 +759,11 @@ export function IssueList({
 
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
     const issueSession = sessionByIssueId.get(issue.id) ?? null;
+    // 実行中は一覧から保留にして処理を隠せないようにする（#2610）。GitHub Actionsと
+    // ローカルエージェントの判定は、それぞれ既存の一覧用の状態をそのまま使う。
+    const isRunning =
+      Boolean(runningByIssueId[issue.id]?.isRunning) ||
+      (checkUserRunningIssueIds?.has(issue.id) ?? false);
     // 一覧から直接開く出口（#1915）。**出す条件はIssue詳細（`IssueSessionStatus`）と同じ**で、
     // 判定は`summarizeIssueSession`に任せる。終了したセッション・まだ開始していないセッションの
     // URLは開いても意味が無く、そこで同じ分岐をここに書き足すと片方だけ古くなる
@@ -894,7 +899,7 @@ export function IssueList({
                   「気になったら下げる」という使い方にならない。
                   行の当たり判定（カード全面の<button>）の上に重ねるので、
                   `pointer-events-auto`が要る（Remote Controlのリンクと同じ） */}
-              {snoozeEnabled && onSnooze && (
+              {snoozeEnabled && onSnooze && !isRunning && (
                 <SnoozeMenu
                   target={{
                     kind: "issue",
