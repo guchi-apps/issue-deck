@@ -145,8 +145,9 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 `-c sandbox_workspace_write.network_access=true`。
 
 - **`--ask-for-approval never`はClaude Codeの`--permission-mode auto`（#1205）と同じ位置づけ。**
-  人が横にいない実行が前提で、承認を求めた時点でセッションが黙って止まる。**Codexにはフックが
-  無く入力待ちの通知も飛ばない**ため、`on-request`にすると誰も気づけないまま止まる
+  人が横にいない実行が前提で、承認を求めた時点でセッションが黙って止まる。**Codexには入力待ちを
+  知らせるイベントが無い**（フックは#2509で繋いだが、`Notification`に当たるものが無い）ため、
+  `on-request`にすると誰も気づけないまま止まる
 - 失われる「個々のコマンドを人が目視する機会」は、Claude側と同じ後段の防御で受ける（Pull Request
   必須・`claude-review-develop.yml`のレビュー・自動マージ不可カテゴリ・Issueごとのworktree分離）
 - **ネットワークは明示的に開ける。** Codexのサンドボックスは既定でネットワークを塞ぐため、

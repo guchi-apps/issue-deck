@@ -207,11 +207,16 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
 /**
  * Codexで効かなくなる画面連携（#2505・docs/multi-agent/codex.md の比較表）。
  *
- * **選んだ時点で出す。** Codexにはフックが無く、通知も承認パネルもRemote Controlも動かない。
- * 起動してから気づくと、届かない通知を待ち続けるか、不具合として報告することになる。
+ * **選んだ時点で出す。** 起動してから気づくと、届かない通知を待ち続けるか、不具合として
+ * 報告することになる。
+ *
+ * **#2509でCodexにもフックを繋いだ**ので、停止（応答終了）の報告と「まだ開始していません」の
+ * 検知は動く。効かないのは、Codexに対応するイベント・ツールが無いもの（入力待ちの`Notification`・
+ * `ExitPlanMode`・`AskUserQuestion`）とRemote Control。**ここは動かないものだけを挙げる**——
+ * 動くものまで書くと、通知が来ないことを不具合だと受け取る側の判断材料にならない。
  */
 export const CODEX_LIMITATIONS = [
-  "入力待ち・停止のPush通知が飛びません",
+  "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
   "計画の承認・質問への回答は画面に出ません（Issueコメントで受け取ります）",
   "Remote Controlで覗けません。前回の会話も引き継ぎません",
 ] as const;
@@ -388,7 +393,8 @@ export type DispatchJobView = {
    * 起こすエージェントCLI（#2505。`kind`が`LAUNCH`のときだけ意味がある）。
    *
    * **画面へ出すために返す。** ダイアログを閉じた後にどちらで起こしたのかが分からないと、
-   * 通知が来ないことを不具合と受け取ることになる（Codexにはフックが無い）。
+   * 通知が来ないことを不具合と受け取ることになる（Codexでは入力待ち・計画・質問の通知が
+   * 飛ばない。#2509で停止の通知だけは飛ぶようになった）。
    * pollerはこの値を`ISSUE_DECK_AGENT`として受け口へ渡す。
    */
   agent: DispatchAgent;
