@@ -501,6 +501,9 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_pr_repair.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
             echo "使用量出力スクリプトが無いためスキップします"

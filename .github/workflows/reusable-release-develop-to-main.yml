@@ -335,6 +335,9 @@ jobs:
         # （reusable-issue-dispatch.yml は prompts-ref 経由で共有側を使えるが、こちらは
         #   呼び出し元のcheckoutしか持たないため、無ければスキップする方針にする）
         if: always() && steps.version-decision.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           USAGE=.github/scripts/summarize-claude-usage.sh
           if [ -x "$USAGE" ]; then

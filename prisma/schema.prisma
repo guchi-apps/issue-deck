@@ -1452,6 +1452,8 @@ model SessionUsage {
   host String @db.VarChar(191)
   /// 使用したローカルエージェント。既存行はClaudeとして移行する
   agent String @default("claude") @db.VarChar(16)
+  /// 使用元。既存行とサブPCからの報告は`local`、GitHub Actionsは`github-actions`
+  source String @default("local") @db.VarChar(32)
   /// 転記のファイル名から取ったセッションID。ホスト・エージェントと合わせて一意
   sessionId String @db.VarChar(191)
   /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
@@ -1465,6 +1467,10 @@ model SessionUsage {
   repository String? @db.VarChar(191)
   /// 対象Issue番号。計画レビュー・横断質問など紐づかないセッションではnull
   issueNumber Int?
+  /// ActionsのJob Summaryに表示するワークフロー名。ローカル行はnull
+  workflowName String? @db.VarChar(191)
+  /// Actionsの実行URL。ローカル行はnull、画面の明細から開くために持つ
+  runUrl String? @db.VarChar(500)
 
   /// 応答（assistantメッセージ）の数。`message.id`で重複除去済み
   responses Int

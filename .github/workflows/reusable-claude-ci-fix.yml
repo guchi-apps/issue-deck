@@ -552,6 +552,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_ci_fix.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。

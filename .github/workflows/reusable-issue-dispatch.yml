@@ -1215,6 +1215,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_plan.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number || '' }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
@@ -1557,6 +1561,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_plan_review.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number || '' }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。
           if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
@@ -1630,6 +1638,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_split.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number || '' }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
@@ -1751,6 +1763,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_question.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number || '' }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
@@ -2112,6 +2128,10 @@ jobs:
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
         if: always() && steps.claude_implement.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.issue_number || github.event.issue.number || '' }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
