@@ -139,7 +139,9 @@ agent_cli_codex_writable_dirs() {
 }
 
 # Codexの起動引数を`AGENT_CLI_ARGS`配列へ組み立てる（プロンプト本文は含めない。呼び出し側が
-# 最後の位置引数として渡す）。フラグ名は`codex --help`（openai/codex の SharedCliOptions）に対応する。
+# 最後の位置引数として渡す）。第1引数にセッションUUIDがあれば、先頭へ
+# `resume <UUID>`を付ける（#2520）。フラグ名は`codex --help`と`codex resume --help`
+# （openai/codex の SharedCliOptions）に対応する。
 #
 # 既定は `--sandbox workspace-write` ＋ `--ask-for-approval never`。これは Claude Code の
 # `--permission-mode auto`（#1205）に相当する位置づけで、理由も同じ。
@@ -162,15 +164,21 @@ agent_cli_codex_writable_dirs() {
 # 読み取りはサンドボックスの外でも可能。共有知識リポジトリ（`~/apps/_docs`）は**読み取り専用**として
 # 扱う決まり（CLAUDE.md）なので、渡すとその決まりを機械的に破れるようになってしまう。
 #
-# 第1引数はワークスペースの根（既定は`$PWD`）。`--add-dir`の判定にだけ使う。
+# 第1引数は再開するスレッド（空なら新規。#2510）、第2引数はワークスペースの根（既定は`$PWD`）。
+# 第2引数は`--add-dir`の判定にだけ使う。
 agent_cli_build_codex_args() {
-  local workspace="${1:-$PWD}"
+  local resume_thread="${1:-}"
+  local workspace="${2:-$PWD}"
   local sandbox
   sandbox="$(agent_cli_codex_sandbox_mode)"
   local model="${ISSUE_DECK_CODEX_MODEL:-}"
   local writable_dir
 
-  AGENT_CLI_ARGS=(--sandbox "$sandbox" --ask-for-approval never)
+  AGENT_CLI_ARGS=()
+  if [[ -n "$resume_thread" ]]; then
+    AGENT_CLI_ARGS+=(resume "$resume_thread")
+  fi
+  AGENT_CLI_ARGS+=(--sandbox "$sandbox" --ask-for-approval never)
 
   if [[ "$sandbox" == "workspace-write" ]]; then
     AGENT_CLI_ARGS+=(-c sandbox_workspace_write.network_access=true)

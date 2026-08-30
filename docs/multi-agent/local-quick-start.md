@@ -1095,16 +1095,16 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 
 ### 畳んだ後に追加指示が来たら
 
-**畳まれた後は、画面から起動し直せば前回の会話の続きから再開する**（#1541。**横断質問セッションを
-除く**。上記のとおり質問セッションは常に新しい会話で始まる）。worktreeは残るので
-`claude --continue`がそのcwdの直前の会話を拾う。**session idはどこにも持たない**
-（判断はランチャーが「worktreeを再利用したか、新規に作ったか」だけで行う。詳細は
-[subpc-dispatch.md](subpc-dispatch.md#session-idは持たず--continueで再開する1541)）。
+**畳まれた後は、画面から起動し直せば前回の会話の続きから再開する**（Claude Codeは#1541、
+Codexは#2520。**横断質問セッションを除く**。上記のとおり質問セッションは常に新しい会話で始まる）。
+Claude Codeはworktreeのcwdを`--continue`で拾い、session idを持たない。Codexは
+`SessionStart`フックがホスト内へ残したIssueごとのUUIDを`codex resume`へ渡す。
 
 `--recreate`でworktreeを作り直した場合と、`ISSUE_DECK_CLAUDE_RESUME=0`を渡した場合は、
 **従来どおり新しい会話で始まる**（作り直したのに古い前提が戻ると、そちらの方が事故になる）。
 
-再開の目印は起動時の出力で、`前回の会話を引き継ぎます（--continue）`の行が出る。
+再開の目印は起動時の出力で、Claude Codeは`前回の会話を引き継ぎます（--continue）`、Codexは
+`前回の会話を引き継ぎます（codex resume）`の行が出る。
 
 猶予（条件4）と`11.local`（条件5）で「まだ触る可能性がある間」を残す設計は変えていない
 （`11.local`が効くのは引き渡し済みの経路だけになった。#2474）。#1178 ではPRのマージ後に追加指示が

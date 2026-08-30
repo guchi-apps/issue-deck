@@ -50,14 +50,14 @@ function resolve(raw) {
  * ワークスペースの外にgitの管理領域があるときだけ付くため、ここを省くと**このテスト自身を
  * 走らせているworktree**の本体`.git`が混ざり、実行場所で結果が変わる。
  */
-function codexArgs(env = {}, workspace = os.tmpdir()) {
+function codexArgs(env = {}, resumeThread = "", workspace = os.tmpdir()) {
   const exports = Object.entries(env)
     .map(([key, value]) => `export ${key}=${JSON.stringify(value)}`)
     .join("\n");
   const { stdout } = run(
     [
       exports,
-      `agent_cli_build_codex_args ${JSON.stringify(workspace)}`,
+      `agent_cli_build_codex_args ${JSON.stringify(resumeThread)} ${JSON.stringify(workspace)}`,
       `printf '%s\\n' "\${AGENT_CLI_ARGS[@]}"`,
     ].join("\n"),
   );
@@ -116,6 +116,15 @@ describe("agent_cli_build_codex_args", () => {
     expect(codexArgs({ ISSUE_DECK_CODEX_EXTRA_ARGS: "--search --no-alt-screen" }).slice(-2)).toEqual([
       "--search",
       "--no-alt-screen",
+    ]);
+  });
+
+  it("UUIDがあればピッカーを出さない resume サブコマンドを先頭へ付ける", () => {
+    expect(codexArgs({}, "01a0510e-1234-4abc-8def-0123456789ab").slice(0, 4)).toEqual([
+      "resume",
+      "01a0510e-1234-4abc-8def-0123456789ab",
+      "--sandbox",
+      "workspace-write",
     ]);
   });
 });
@@ -215,7 +224,7 @@ describe("agent_cli_build_codex_args の --add-dir", () => {
 
   it("workspace-writeのworktreeでは本体の`.git`を開ける", () => {
     const { gitDir, worktree } = makeWorktree();
-    expect(codexArgs({}, worktree)).toEqual([
+    expect(codexArgs({}, "", worktree)).toEqual([
       "--sandbox",
       "workspace-write",
       "--ask-for-approval",
@@ -230,18 +239,18 @@ describe("agent_cli_build_codex_args の --add-dir", () => {
   // `read-only`は書けないのが目的、`danger-full-access`は元から全部書ける。どちらも足す意味がない。
   it("workspace-write以外では付けない", () => {
     const { worktree } = makeWorktree();
-    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "read-only" }, worktree)).toEqual([
+    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "read-only" }, "", worktree)).toEqual([
       "--sandbox",
       "read-only",
       "--ask-for-approval",
       "never",
     ]);
-    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }, worktree)).not.toContain("--add-dir");
+    expect(codexArgs({ ISSUE_DECK_CODEX_SANDBOX: "danger-full-access" }, "", worktree)).not.toContain("--add-dir");
   });
 
   it("モデル指定と逃げ道の追加引数は`--add-dir`より後ろに並ぶ", () => {
     const { worktree } = makeWorktree();
-    const args = codexArgs({ ISSUE_DECK_CODEX_MODEL: "gpt-5-codex", ISSUE_DECK_CODEX_EXTRA_ARGS: "--search" }, worktree);
+    const args = codexArgs({ ISSUE_DECK_CODEX_MODEL: "gpt-5-codex", ISSUE_DECK_CODEX_EXTRA_ARGS: "--search" }, "", worktree);
     expect(args.slice(-3)).toEqual(["-m", "gpt-5-codex", "--search"]);
     expect(args.indexOf("--add-dir")).toBeLessThan(args.indexOf("-m"));
   });

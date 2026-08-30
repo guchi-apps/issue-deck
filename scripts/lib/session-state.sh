@@ -9,7 +9,8 @@
 #                                 **この印だけはセッションが終わっても消さない**（#1905。同じIssueで
 #                                 起こし直したセッションが引き継いで外せるようにするため）。
 #                                 `SessionStart`では`.starting`を消し、Codexのセッションなら
-#                                 `codex queue`の宛先（<セッション名>.codex-thread、#2519）を書く
+#                                 `codex queue`と`codex resume`の宛先
+#                                 （<セッション名>.codex-thread、#2519・#2520）を書く
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む。畳む条件が揃って
 #                                 猶予待ちになったセッションには、その予定（<セッション名>.reap、#1817）を書く
 #   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）。
@@ -136,7 +137,8 @@ session_state_clear_resume() {
   return 0
 }
 
-# Codexのセッションへ`codex queue`で追加指示を差し込むための宛先（#2519）。
+# Codexのセッションへ`codex queue`で追加指示を差し込み、次回の起動を`codex resume`で
+# 再開するための宛先（#2519・#2520）。
 #
 # 中身はセッションUUID1行。**書くのは`session-notify.sh`の`SessionStart`だけ**で、
 # フックのJSONに入っている`session_id`をそのまま置く。Codexは`--thread`にUUIDか
@@ -172,6 +174,16 @@ session_state_read_codex_thread() {
   [[ "$line" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
     return 1
   printf '%s' "$line"
+}
+
+# 新しい会話で起こす前に、前回の宛先を明示的に消す（#2520）。
+# `session_state_remove`では消さない。セッション終了後にもUUIDが残っていないと、次回の
+# `codex resume`が前回の会話を特定できないため。
+session_state_clear_codex_thread() {
+  local session="$1" file
+  file="$(session_state_codex_thread_file "$session")" || return 1
+  rm -f "$file" 2>/dev/null || true
+  return 0
 }
 
 # Claude Codeがまだ開始していないことの印（#1465）。
@@ -380,11 +392,13 @@ session_state_reason_changed() {
   return 0
 }
 
-# そのセッションの状態ファイルを消す。**セッションを畳んだ後と、セッションが自然に
+# そのセッションの一時的な状態ファイルを消す。**セッションを畳んだ後と、セッションが自然に
 # 終わったときの両方で呼ぶ。** 残すと、次に同じ名前で立ったセッションが前回のイベントを
 # 引き継いだように見える。
 #
-# **`00.check-user`の印（`.check-user`・旧名`.plan`）だけは消さない**（#1905）。ここが
+# **`00.check-user`の印（`.check-user`・旧名`.plan`）とCodexのUUID（`.codex-thread`）は
+# 消さない**（#1905・#2520）。UUIDは次回の`codex resume`で前回の会話を特定するために必要で、
+# 新しい会話を起こす場合はランチャーが`session_state_clear_codex_thread`で先に消す。ここが
 # 消していたせいで、入力待ちのまま終わったセッションのIssueに`00.check-user`が付いたまま
 # 取り残されていた——ラベルはGitHubに残るのに、外す権利を表す印だけがホストから消えるため、
 # 同じIssueで起こし直したセッションはそれを外せない（#1893で発生。画面には「実行中なのに
@@ -405,7 +419,6 @@ session_state_remove() {
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_reap_file "$session" 2>/dev/null || true)" \
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
-    "$(session_state_codex_thread_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true

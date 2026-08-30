@@ -15,11 +15,12 @@
 # 環境変数:
 #   ISSUE_DECK_DEV_SERVER=0     開発サーバーを起動しない（既定は起動する）
 #   ISSUE_DECK_DEV_COMMAND      開発サーバーの起動コマンド（既定は `pnpm dev`）
-#   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める（#1541。既定は引き継ぐ）
+#   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める
+#                                （Claude Code・Codex共通。#1541・#2520。既定は引き継ぐ）
 #   ISSUE_DECK_AGENT=codex      Claude Codeではなく Codex CLI を起こす（#2377。既定は claude）
 #
-# **Codexで起こした場合、Claude Code側の連携は一切効かない**（フック・Remote Control・
-# Plan modeの承認・前回会話の引き継ぎ）。何が揃わないかは docs/multi-agent/codex.md を参照。
+# **Codexで起こした場合、Claude Code側の連携の一部は効かない**（Remote Control・Plan modeの
+# 承認など）。何が揃わないかは docs/multi-agent/codex.md を参照。
 # 開発サーバー・tailnetへの公開・セッションの開始／終了報告・状態ファイルはこのスクリプトが
 # 持っている処理なので、どちらのエージェントでも同じように動く。
 #
@@ -813,9 +814,10 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 # へ残り、セッションを畳んでも消えない。worktreeも畳んでは消えないので、**同じworktreeで起動し直す
 # だけで前回の会話へ戻せる**。#1256の自動回収で畳まれたセッションを呼び戻す経路がこれになる。
 #
-# **session idはどこにも持たない。** 「issue-deck側にホストのローカルファイルの識別子を
-# 持ち込まない」という取り決め（docs/multi-agent/subpc-dispatch.md）はそのままで、判断材料は
-# ランチャーが既に知っている「worktreeを再利用したか、新規に作ったか」だけで足りる。
+# Claude Codeの**session idはどこにも持たない。** 「issue-deck側にホストのローカルファイルの
+# 識別子を持ち込まない」という取り決め（docs/multi-agent/subpc-dispatch.md）はそのままで、
+# 判断材料はランチャーが既に知っている「worktreeを再利用したか、新規に作ったか」だけで足りる。
+# Codexはcwdだけでは対象を選べないため、#2519がホスト内の状態ファイルへ残すUUIDを使う。
 #
 # 条件は2つとも満たすこと。**どちらか欠ければ従来どおり新規会話**（安全側）。
 #
@@ -826,16 +828,27 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 # 2. cwdに対応する会話履歴のディレクトリに `*.jsonl` が1つ以上ある。ディレクトリ名の導き方は
 #    Claude Code側の都合なので、**変わればヒットしなくなるだけ**で、壊れずに従来の挙動へ落ちる
 #
-# **Codexでは引き継がない**（#2377）。あちらの再開は`codex resume`という別のサブコマンドで、
-# 初回プロンプトの渡し方も変わる。畳んだセッションを続きから起こしたい場合は、worktreeで
-# `codex resume --last`を手で叩く（docs/multi-agent/codex.md）。
 RESUME_CONVERSATION=0
+CODEX_RESUME_THREAD=""
 if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
   if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
     RESUME_CONVERSATION=1
     CLAUDE_EXTRA_ARGS+=(--continue)
   fi
+elif [[ "$AGENT_KIND" == "codex" && "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" && -n "$TMUX_SESSION_NAME" ]]; then
+  # `--last`はホスト全体の最後を指すため使わない。Issueごとのtmuxセッション名をキーに、
+  # `SessionStart`フックが残したUUIDを明示してピッカー無しで再開する（#2520）。
+  CODEX_RESUME_THREAD="$(session_state_read_codex_thread "$TMUX_SESSION_NAME" 2>/dev/null || true)"
+  if [[ -n "$CODEX_RESUME_THREAD" ]]; then
+    RESUME_CONVERSATION=1
+  fi
+fi
+
+# 対応が無い初回、worktreeの新規作成・再作成、明示的にresumeを無効にした起動は新しい会話。
+# 古いUUIDを残すと、信頼確認前の新セッションを追加指示可能と誤判定するため起動前に消す。
+if [[ "$AGENT_KIND" == "codex" && "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
+  session_state_clear_codex_thread "$TMUX_SESSION_NAME" || true
 fi
 
 if [[ "$RESUME_CONVERSATION" == "1" ]]; then
@@ -865,7 +878,11 @@ fi
 # ここからコピーすれば実装を始められる。
 echo
 if [[ "$RESUME_CONVERSATION" == "1" ]]; then
-  echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（--continue）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
+  if [[ "$AGENT_KIND" == "codex" ]]; then
+    echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（codex resume）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
+  else
+    echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（--continue）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
+  fi
 fi
 echo "#$ISSUE_NUMBER: セッションへ次の文面を渡します。もし起動直後に何も始まらなければ、これを貼り付けてください。"
 # 概要・オプション・開発環境（#1559）を足したぶん複数行になる。**インデントを付けない。**
@@ -893,9 +910,9 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   AGENT_LAUNCH_ARGS=(--permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"})
   echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 else
-  # 第1引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**
+  # 第2引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**
   # （gitの管理領域を`--add-dir`で開ける判定に使うので、暗黙の`$PWD`に頼らない。#2529）。
-  agent_cli_build_codex_args "$PWD"
+  agent_cli_build_codex_args "$CODEX_RESUME_THREAD" "$PWD"
   # フックの`-c`（#2509）はサンドボックスの設定より後ろに置く。**同じ`-c`でもキーが違うので
   # 順序は挙動に影響しない**が、起動ログに出す引数は素の分だけにして読めるようにしておく。
   AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"} ${CODEX_HOOK_ARGS[@]+"${CODEX_HOOK_ARGS[@]}"})
