@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
@@ -17,8 +17,6 @@ import {
   formatUsageUsd,
   sessionUsageKindLabel,
   toQuotaPercent,
-  type QuotaScale,
-  type SessionUsageEntry,
   type UsageByAgent,
   type UsageIssue,
 } from "@/lib/session-usage-view";
@@ -26,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * 「AI使用量」画面（#2504）。**サブPCのローカルセッションが使ったトークン**を、合計 → 推移 →
- * 内訳（リポジトリ別・種別別）→ 明細（Issue別・その中のtmuxセッション別）の順に出す。
+ * 内訳（リポジトリ別・種別別）→ 明細（セッション別）の順に出す。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`preview-panel.tsx`と同じ切り分け）。
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
@@ -264,132 +262,82 @@ function Breakdown({
   );
 }
 
-/** 転記1本ぶんの明細（Issueの行を開いたときだけ出す） */
-function SessionRow({
-  entry,
-  unit,
-  quota,
-  compact,
-}: {
-  entry: SessionUsageEntry;
-  unit: SessionUsageUnit;
-  quota: QuotaScale | null;
-  compact: boolean;
-}) {
-  const models =
-    entry.models.map((model) => model.replace(/^claude-/, "")).join(" / ") || "不明";
-  return (
-    <div className="flex items-baseline gap-2 py-0.5 pl-5 text-[11px] text-muted-foreground tabular-nums">
-      <span
-        className={cn(
-          "shrink-0 rounded-full border px-1.5 text-[10px] font-semibold",
-          entry.agent === "claude"
-            ? "border-[#d97757] text-[#b45337]"
-            : "border-[#4776e6] text-[#355bc0]",
-        )}
-      >
-        {entry.agent === "claude" ? "Claude" : "Codex"}
-      </span>
-      <span className="shrink-0 font-medium text-foreground">{models}</span>
-      {!compact && <span className="shrink-0">{sessionUsageKindLabel(entry.kind)}</span>}
-      <span className="truncate">
-        {formatDateTime(entry.startedAt)} → {formatDateTime(entry.endedAt)}
-      </span>
-      <span className="ml-auto shrink-0">{entry.responses.toLocaleString()}応答</span>
-      {!compact && <span className="shrink-0">{formatUsageTokens(entry.contextTokens)}</span>}
-      <span className="shrink-0 font-semibold text-foreground">
-        {formatUsageAmount(entry.costUsd, unit, quota)}
-      </span>
-    </div>
-  );
-}
-
-/** Issue1件ぶんの行。押すと転記ごとの明細が開く */
-function IssueRow({
-  issue,
+/** セッションごとの一覧。棒の全長を最大セッションにそろえ、セッション間の差を見せる。 */
+function SessionTable({
+  issues,
   unit,
   quotas,
   compact,
   onOpenIssue,
 }: {
-  issue: UsageIssue;
+  issues: UsageIssue[];
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
   compact: boolean;
   onOpenIssue?: (repository: string, issueNumber: number) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const Chevron = isOpen ? ChevronDown : ChevronRight;
-  const repository = issue.repository ?? "(不明)";
-  const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
+  const sessions = issues.flatMap((issue) =>
+    issue.entries.map((entry) => ({ issue, entry })),
+  );
+  const maxTokens = sessions.reduce(
+    (max, { entry }) => Math.max(max, entry.contextTokens + entry.outputTokens),
+    0,
+  );
+
+  if (sessions.length === 0) {
+    return <p className="text-xs text-muted-foreground">記録がありません</p>;
+  }
 
   return (
-    <li className="border-b py-2 last:border-b-0">
-      <div className="flex items-center gap-2 text-xs">
-        <button
-          type="button"
-          onClick={() => setIsOpen((prev) => !prev)}
-          aria-expanded={isOpen}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Chevron className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-          <span
-            aria-hidden
-            className="size-[7px] shrink-0 rounded-[2px]"
-            style={{ backgroundColor: getRepoColor(repository) }}
-          />
-          <span className="shrink-0 font-semibold tabular-nums">
-            {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`}
-          </span>
-          <span className="truncate text-muted-foreground">{repository}</span>
-          <span className="shrink-0 rounded-full border px-1.5 text-[10px] text-muted-foreground">
-            {sessionUsageKindLabel(issue.kinds[0] ?? "other")}
-            {issue.kinds.length > 1 ? ` +${issue.kinds.length - 1}` : ""}
-          </span>
-        </button>
-
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-          {issue.sessions}セッション
-        </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-          {issue.responses.toLocaleString()}応答
-        </span>
-        {!compact && (
-          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
-            {formatUsageTokens(issue.contextTokens)}
-          </span>
-        )}
-        <span className="w-16 shrink-0 text-right font-semibold tabular-nums">
-          {formatCombinedAmount(issue.byAgent, unit, quotas)}
-        </span>
-        {canOpen && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 shrink-0"
-            title="Issueを開く"
-            onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}
-          >
-            <ExternalLink className="size-3" />
-            <span className="sr-only">Issueを開く</span>
-          </Button>
-        )}
-      </div>
-
-      {isOpen && (
-        <div className="mt-1 border-l pl-1">
-          {issue.entries.map((entry) => (
-            <SessionRow
-              key={`${entry.host}:${entry.sessionId}`}
-              entry={entry}
-              unit={unit}
-              quota={quotas[entry.agent]}
-              compact={compact}
-            />
-          ))}
-        </div>
-      )}
-    </li>
+    <div className="-mx-3 overflow-x-auto sm:mx-0">
+      <table className="w-full min-w-[46rem] border-collapse text-left text-[11px]">
+        <caption className="sr-only">セッションごとのAI使用量</caption>
+        <thead>
+          <tr className="border-b bg-muted/30 text-[10px] text-muted-foreground">
+            <th scope="col" className="px-3 py-2 font-semibold">セッション</th>
+            <th scope="col" className="w-[38%] px-3 py-2 font-semibold">トークン使用量（最大比）</th>
+            <th scope="col" className="px-3 py-2 font-semibold">料金</th>
+            {!compact && <th scope="col" className="px-3 py-2 font-semibold">内訳</th>}
+            <th scope="col" className="px-3 py-2 font-semibold">日時</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sessions.map(({ issue, entry }) => {
+            const totalTokens = entry.contextTokens + entry.outputTokens;
+            const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+            const inputWidth = totalTokens > 0 ? (entry.contextTokens / totalTokens) * 100 : 0;
+            const repository = issue.repository ?? "(不明)";
+            const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
+            return (
+              <tr key={`${entry.host}:${entry.sessionId}`} className="border-b last:border-b-0">
+                <td className="max-w-[15rem] px-3 py-3 align-top">
+                  <div className="flex items-start gap-1.5">
+                    <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-foreground">
+                        {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
+                      </div>
+                      <div className="truncate text-[10px] text-muted-foreground">{sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}</div>
+                    </div>
+                    {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
+                  </div>
+                </td>
+                <td className="px-3 py-3 align-middle">
+                  <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground"><span>{formatUsageTokens(totalTokens)}</span><span>{Math.round(totalWidth)}%</span></div>
+                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" title={`入力 ${formatUsageTokens(entry.contextTokens)} / 出力 ${formatUsageTokens(entry.outputTokens)}`}>
+                    <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${totalWidth}%` }}><span className="bg-[#d97757]" style={{ width: `${inputWidth}%` }} /><span className="flex-1 bg-[#4776e6]" /></div>
+                  </div>
+                  <div className="mt-1 flex gap-2 text-[10px] tabular-nums text-muted-foreground"><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#d97757]" aria-hidden />入力 {formatUsageTokens(entry.contextTokens)}</span><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#4776e6]" aria-hidden />出力 {formatUsageTokens(entry.outputTokens)}</span></div>
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">{formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}</td>
+                {!compact && <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">入力 {formatUsageUsd(entry.costUsd * (entry.contextTokens / Math.max(totalTokens, 1)))}<br />出力 {formatUsageUsd(entry.costUsd * (entry.outputTokens / Math.max(totalTokens, 1)))}</td>}
+                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -473,13 +421,13 @@ export function SessionUsagePanel({
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
         <span>
           <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#d97757]" aria-hidden />
-          Claude
+          入力（キャッシュ含む）
         </span>
         <span>
           <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#4776e6]" aria-hidden />
-          Codex
+          出力
         </span>
-        <span>棒の長さは合計、色はAI別の内訳</span>
+        <span>棒の長さは最大セッションとの比較</span>
       </div>
 
       {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
@@ -580,7 +528,7 @@ export function SessionUsagePanel({
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">Issue・セッション別</span>
               <span className="text-[11px] text-muted-foreground">
-                金額順・押すとセッションごとに開く
+                セッションごと・棒の長さは最大セッション比
               </span>
             </div>
             {issues.length === 0 ? (
@@ -589,18 +537,13 @@ export function SessionUsagePanel({
               </p>
             ) : (
               <>
-                <ul className="flex flex-col">
-                  {issues.slice(0, visibleIssues).map((issue) => (
-                    <IssueRow
-                      key={`${issue.repository ?? ""}#${issue.issueNumber ?? ""}`}
-                      issue={issue}
-                      unit={effectiveUnit}
-                      quotas={quotas}
-                      compact={compact}
-                      onOpenIssue={onOpenIssue}
-                    />
-                  ))}
-                </ul>
+                <SessionTable
+                  issues={issues.slice(0, visibleIssues)}
+                  unit={effectiveUnit}
+                  quotas={quotas}
+                  compact={compact}
+                  onOpenIssue={onOpenIssue}
+                />
                 {issues.length > visibleIssues && (
                   <Button
                     variant="ghost"
