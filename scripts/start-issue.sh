@@ -201,6 +201,29 @@ if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$AGENT_COMMAND" >/dev/null 2>&1;
   exit 1
 fi
 
+# サンドボックスを組み立てられるかを、worktreeを作る前に下見する（#2526）。
+#
+# **`codex`が入っていても、ホストが非特権user namespaceを制限していると即死する。**
+# Ubuntu 24.04の既定（`kernel.apparmor_restrict_unprivileged_userns = 1`）がそれで、Codexが
+# 同梱するbubblewrapがサンドボックスを組み立てられない。ここを見ないと、worktreeと開発サーバーを
+# 用意し受付コメントまで投げた後で、エージェントがコマンドを1本も実行できずに終わる
+# （実例: #2511。指示ファイルもworktreeも読めずに終了した）。
+#
+# **判定できないとき（`unknown`）は止めない。** `codex sandbox`を持たない版でも、TUIのセッション
+# 自体は起こせる可能性がある。証拠があるときだけ塞ぐ。
+if [[ "$PREPARE_ONLY" -eq 0 && "$AGENT_KIND" == "codex" ]]; then
+  CODEX_SANDBOX_PROBE="$(agent_cli_codex_sandbox_probe)"
+  if [[ "$(agent_cli_codex_sandbox_probe_state "$CODEX_SANDBOX_PROBE")" == "broken" ]]; then
+    echo "Error: Codexのサンドボックス（$(agent_cli_codex_sandbox_mode)）をこのホストで組み立てられません。" >&2
+    echo "       $(agent_cli_codex_sandbox_probe_reason "$CODEX_SANDBOX_PROBE")" >&2
+    echo "       このまま起動しても、エージェントはコマンドを1本も実行できずに終わります。" >&2
+    echo "       ホスト側の対処（AppArmorのuserns制限を緩める）は guchi-apps/subpc#77。" >&2
+    echo "       急ぐ場合の逃げ道: ISSUE_DECK_CODEX_SANDBOX=danger-full-access scripts/start-issue.sh --agent codex <番号>" >&2
+    echo "       ただし書き込みをworktreeに閉じる層が消えます（docs/multi-agent/codex.md「サンドボックスを組み立てられないホスト」）。" >&2
+    exit 1
+  fi
+fi
+
 # worktreeを作ってから落ちると中途半端な状態が残るため、先に確認する。ワンクリック起動の
 # タブは非対話シェルで始まり、nvmを ~/.bashrc に置いていると読まれない（#1085）。
 if ! command -v pnpm >/dev/null 2>&1; then

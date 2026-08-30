@@ -21,9 +21,10 @@ ISSUE_DECK_AGENT=codex scripts/start-issue.sh <Issue番号>
 印が付く（既定のClaude Codeには付けない）。
 
 - **欄が出るのは、そのホストが対応を申告しているときだけ**（`DispatchHost.codexCapable`）。
-  申告の条件は`codex`コマンドが入っていることで、判定は`scripts/subpc-dispatch-poller.sh`の
-  `codex_capable`。**古いpollerはジョブの`agent`を読まない**ため、申告が無いホストで選ばせると
-  Codexを選んだのにClaude Codeが黙って立つ
+  申告の条件は`codex`コマンドが入っていることと、**そのホストでサンドボックスを実際に
+  組み立てられること**（#2526。下の「サンドボックスを組み立てられないホスト」）。判定は
+  `scripts/subpc-dispatch-poller.sh`の`codex_capable`。**古いpollerはジョブの`agent`を読まない**
+  ため、申告が無いホストで選ばせるとCodexを選んだのにClaude Codeが黙って立つ
 - **選べるのは「実装を開始」ダイアログだけ。** ツールバーの「サブPCで開始」ボタンと
   「セッションを復旧」は従来どおりClaude Codeで起こす（同じ選択をメニューの階層にも持たない）
 - **GitHub Actions・「実装プロンプトをコピー」・「起動コマンドをコピー」には効かない**
@@ -37,7 +38,7 @@ worktreeの作成・ブランチ・`11.local`の付与・進捗報告・開発�
 | 環境変数 | 既定 | 何を変えるか |
 |---|---|---|
 | `ISSUE_DECK_AGENT` | `claude` | 起こすエージェント（`claude` / `codex`） |
-| `ISSUE_DECK_CODEX_SANDBOX` | `workspace-write` | Codexの`--sandbox` |
+| `ISSUE_DECK_CODEX_SANDBOX` | `workspace-write` | Codexの`--sandbox`。サンドボックスを組み立てられないホストでの逃げ道でもある（下の「サンドボックスを組み立てられないホスト」） |
 | `ISSUE_DECK_CODEX_MODEL` | （空） | Codexの`-m`。空なら`codex`側の既定 |
 | `ISSUE_DECK_CODEX_EXTRA_ARGS` | （空） | 追加の引数（空白区切り）。実機でしか分からない調整をスクリプトの修正なしで当てるための逃げ道 |
 
@@ -379,6 +380,67 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
   読むだけならサンドボックスの外でもできる。共有知識リポジトリ（`~/apps/_docs`）は読み取り専用と
   して扱う決まり（[CLAUDE.md](../../CLAUDE.md)）なので、渡すと機械的に破れるようになるだけ
 
+### サンドボックスを組み立てられないホスト（#2526）
+
+**`codex`コマンドが入っていても、セッションが1本もコマンドを実行できないホストがある。**
+Codexが同梱するbubblewrapが非特権のuser namespaceを組み立てられない場合で、出るのは
+**`bwrap:`で始まる行**（`codex`自身のエラーではないので、メッセージで検索しても何も出てこない）。
+
+```
+bwrap: setting up uid map: Permission denied
+bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+```
+
+**見分け方はこの1行だけでよい。** `bwrap:`が出ていればホスト側の制限で、Codexの設定・ログイン・
+プロンプトのどれとも関係がない。subpcで起きているのはUbuntu 24.04の既定
+（`kernel.apparmor_restrict_unprivileged_userns = 1`）がuser namespaceの中でcapabilityを
+全部落とすためで、**ホスト側の恒久対処は`guchi-apps/subpc#77`**。issue-deck側では直せない。
+
+手元で確かめるなら次の1行。`0`で返ればこのホストでCodexを起こせる。
+
+```bash
+codex sandbox -c sandbox_mode=workspace-write -c sandbox_workspace_write.network_access=true -- /bin/true
+```
+
+**`codex sandbox`は`--sandbox`も`--ask-for-approval`も受け取らない**（`-c`のオーバーライドだけ）
+ので、起動時と同じモードを確かめたいときは上のように`-c sandbox_mode=`で渡す。
+
+#### 起こす前に止める
+
+以前は「`codex`コマンドがあるか」しか見ていなかったため、**画面でCodexを選べるのにセッションが
+即死した**（実例: #2511。worktreeも指示ファイルも読めずに終了した）。今は同じ下見を2か所が使う。
+
+- `scripts/subpc-dispatch-poller.sh`の`codex_capable` — 組み立てられないホストは`codex`を
+  申告しない。画面の「実装を開始」にエージェント欄そのものが出なくなる。理由は画面へは送らず、
+  **可否が変わった巡だけjournaldへ出す**（`journalctl --user -u issue-deck-dispatch-poller`）
+- `scripts/start-issue.sh` — `--agent codex`で起動しようとしたとき、**worktreeを作る前に**
+  `bwrap:`の行と逃げ道を出して止まる
+
+判定は`scripts/lib/agent-cli.sh`の`agent_cli_codex_sandbox_probe`が1つだけ持つ。結果は
+`ok`／`broken`／`unknown`の3つで、**`unknown`（`codex sandbox`を持たない版）では塞がない**
+——証拠があるときだけ止める。
+
+#### 逃げ道: `danger-full-access`
+
+`ISSUE_DECK_CODEX_SANDBOX=danger-full-access`ならbwrapを通らないので、この制限のあるホストでも
+起こせる（実測で`codex sandbox -c sandbox_mode=danger-full-access -- /bin/echo hello`が成功する）。
+
+```bash
+ISSUE_DECK_CODEX_SANDBOX=danger-full-access scripts/start-issue.sh --agent codex <Issue番号>
+```
+
+**これは既定にしない。** `--ask-for-approval never`で走らせている前提の裏付けが「書き込みが
+worktree（cwd）に閉じている」ことで、`danger-full-access`はその層だけを外す。残るのは後段の防御
+（Pull Request必須・レビュー・自動マージ不可カテゴリ）で、**他のIssueのworktreeや本体
+チェックアウトへ手が届く状態**になる。急ぐときに自分で1回ずつ付けるものとして扱い、
+恒久対処は`guchi-apps/subpc#77`（ホスト側でuserns制限を緩める）を待つ。
+
+**画面から起こす経路でこれを効かせたい場合は、pollerの環境（`dispatch.env`）へ置くことになる。**
+pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外の環境変数はpollerのものが
+そのまま継承されるため、置けば申告（`codex_capable`）も起動もそろって`danger-full-access`で
+判定される。ただし上のとおり**そのホストの全Codexセッションから書き込みの閉じ込めが消える**ので、
+置くかどうかは人が決める。
+
 ## プロンプトは分岐させず、差分だけを足す
 
 実装プロンプトのひな形（`scripts/prompts/implementation-agent.md`）は43KBあり、Codex専用の写しを
@@ -428,10 +490,10 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 
 | 何を | どこに |
 |---|---|
-| 種別の解決・Codexの引数の組み立て・フックの`-c`の組み立て | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
+| 種別の解決・Codexの引数の組み立て・フックの`-c`の組み立て・サンドボックスの下見 | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
-| `--agent`の受け取り・存在チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
+| `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
 | `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
@@ -442,6 +504,9 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 
 ## まだやっていないこと
 
+- **subpcでは今のところサンドボックスを組み立てられない**（#2526）。`guchi-apps/subpc#77`で
+  ホスト側のuserns制限が緩むまで、画面の「実装を開始」にエージェント欄は出ない（急ぐときの
+  逃げ道は上の「サンドボックスを組み立てられないホスト」）
 - **無人実行（GitHub Actions）は対象外。** `claude-issue-dispatch.yml`は`claude-code-action`の
   ままで、Codexで走らせるには`OPENAI_API_KEY`のSecrets追加と課金の判断が要る
 - **汎用ランチャー（`scripts/generic-start-issue.sh`）は未対応。** 他リポジトリのセッションは
