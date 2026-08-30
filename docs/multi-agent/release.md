@@ -319,6 +319,16 @@ major/minor/patchのいずれでもない不正な場合はpatchにフォール�
 リリースで無理に手順を書かせると、読み手が毎回それを読んで空振りすることになるため。
 空のときはPR本文にセクションごと出さない。
 
+**画面に導線が無い変更は、`changelog`の段階で落とす**（#2508）。生成プロンプトには
+「端末のスクリプト・CLI・CI/CDからしか使えない変更はchangelogに書かない」「usageは画面に
+導線があると差分から確認できた操作だけを書き、書けない項目はchangelogごと落とす」を明記して
+ある。`usage`側の「空にしてよい」条件だけでは足りない。#2506では、端末の
+`scripts/start-issue.sh --agent codex`だけの経路（#2377）が4.44.0のchangelogへ載り、
+changelogに書かれた以上usageも書くしかなくなった生成側が、画面に存在しない選択肢の操作手順を
+推測で組み立てていた。
+手で直すときのルールは`src/lib/changelog.ts`の冒頭コメントにあるが、**自動生成はそのファイルを
+読まない**ため、同じ趣旨を生成プロンプト側にも置いている。**片方だけ直しても効かない。**
+
 **issue-deck自身もこの契約の受け取り側になった**（#1764）。`package.json`の`"version"`
 lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changelog.ts`の先頭へ
 エントリを足し、設定 →「更新履歴」に出る。`changelog`は`changes`、`usage`は同じエントリの

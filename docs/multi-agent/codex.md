@@ -15,6 +15,20 @@ scripts/start-issue.sh --agent codex <Issue番号>
 ISSUE_DECK_AGENT=codex scripts/start-issue.sh <Issue番号>
 ```
 
+**画面（issue-deck）からも選べる**（#2505）。Issueの「実装を開始」ダイアログで実行先にサブPCを
+選ぶと「エージェント」欄が出る。既定はClaude Codeで、Codex CLIを押すとその場で
+「効かなくなる連携」（下の比較表）が出る。起動した後は、積んだジョブの状態表示に`Codex CLI`の
+印が付く（既定のClaude Codeには付けない）。
+
+- **欄が出るのは、そのホストが対応を申告しているときだけ**（`DispatchHost.codexCapable`）。
+  申告の条件は`codex`コマンドが入っていることで、判定は`scripts/subpc-dispatch-poller.sh`の
+  `codex_capable`。**古いpollerはジョブの`agent`を読まない**ため、申告が無いホストで選ばせると
+  Codexを選んだのにClaude Codeが黙って立つ
+- **選べるのは「実装を開始」ダイアログだけ。** ツールバーの「サブPCで開始」ボタンと
+  「セッションを復旧」は従来どおりClaude Codeで起こす（同じ選択をメニューの階層にも持たない）
+- **GitHub Actions・「実装プロンプトをコピー」・「起動コマンドをコピー」には効かない**
+  （実行先をそちらへ切り替えると欄ごと消え、選択は既定へ戻る）
+
 worktreeの作成・ブランチ・`11.local`の付与・進捗報告・開発サーバー・tailnetへの公開・プロンプトの
 生成は**Claude Codeのときと同じ**。変わるのは、tmuxの中で最後に起こすコマンドだけ。
 
@@ -131,8 +145,9 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 `-c sandbox_workspace_write.network_access=true`。
 
 - **`--ask-for-approval never`はClaude Codeの`--permission-mode auto`（#1205）と同じ位置づけ。**
-  人が横にいない実行が前提で、承認を求めた時点でセッションが黙って止まる。**Codexにはフックが
-  無く入力待ちの通知も飛ばない**ため、`on-request`にすると誰も気づけないまま止まる
+  人が横にいない実行が前提で、承認を求めた時点でセッションが黙って止まる。**Codexには入力待ちを
+  知らせるイベントが無い**（フックは#2509で繋いだが、`Notification`に当たるものが無い）ため、
+  `on-request`にすると誰も気づけないまま止まる
 - 失われる「個々のコマンドを人が目視する機会」は、Claude側と同じ後段の防御で受ける（Pull Request
   必須・`claude-review-develop.yml`のレビュー・自動マージ不可カテゴリ・Issueごとのworktree分離）
 - **ネットワークは明示的に開ける。** Codexのサンドボックスは既定でネットワークを塞ぐため、
@@ -159,6 +174,34 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 **読み替えが見つからない場合、Codexでの起動は失敗する**（`start-issue.sh`）。Claude Code前提の
 記述だけが残ったプロンプトを渡すと、存在しない手順を待って止まるため。
 
+## 画面から選んだときに通る道（#2505）
+
+画面で選んだ種別は、ジョブの列 → pollerの環境変数 → 受け口 → `start-issue.sh` と渡っていく。
+**受け渡しの形はどこも`ISSUE_DECK_AGENT`（小文字の語）で、引数には積み替えない**——この指定を
+解釈しないリポジトリのランチャーへ届いても無害にするため（未知のフラグはIssue番号として扱われる）。
+
+1. 「実装を開始」ダイアログが`POST /api/dispatch`へ`agent`を載せる
+2. `enqueueDispatchJob`が`DispatchJob.agent`へ保存する（既定`claude`。既存行はすべてこの値）
+3. pollerが払い出されたジョブの`agent`を読み、`env ISSUE_DECK_AGENT=<種別>`で受け口を呼ぶ
+4. `scripts/start-local-session.sh`が種別を解決し、必要なCLIの有無を確かめて`start-issue.sh`へ渡す
+
+**既知の語（`claude` / `codex`）に絞る判定を、画面・API・pollerの3か所に置いている。**
+`previewAction`と同じ作法で、列を手で書き換えられても環境変数として届く語は変わらない。
+**黙って`claude`へ落とす経路はDBの値を読むときだけ**（`readDispatchAgent`）で、指定として
+受け取った値が未知なら断る——Codexを選んだつもりでClaude Codeが立つ方が分かりにくい。
+
+### 起動できない組み合わせは、worktreeを作る前に止まる
+
+`scripts/start-local-session.sh`が既定以外のエージェントを受け取ったとき、次の2つを先に確かめる。
+どちらも`exit 1`で、pollerがジョブを`failed`にするため**理由が画面に出る**。
+
+- **汎用ランチャー（`generic`）で起動するリポジトリ** — `scripts/generic-start-issue.sh`はCodexに
+  未対応なので断る
+- **`scripts/start-issue.sh`が`ISSUE_DECK_AGENT`を読まないリポジトリ** — 実際に走るファイルを
+  `grep`で見る。**ローカル起動プロトコルの版数では判定しない**（版数はリポジトリ側が手で書く
+  宣言で、`ISSUE_DECK_AGENT`を読むようにしたかどうかとは連動しない）。ここを通さないと、
+  画面には「Codex CLI」と出たままClaude Codeが立つ
+
 ## 実装の在り処
 
 | 何を | どこに |
@@ -167,17 +210,20 @@ Codexは`--ask-for-approval never`で走らせるため承認プロンプトが�
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
 | `--agent`の受け取り・存在チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
+| 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
+| ジョブの`agent`の読み取り・`codex`の申告 | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| 語の検証・表示名・選べるかの判定 | [`src/lib/dispatch/dispatch-job.ts`](../../src/lib/dispatch/dispatch-job.ts) |
+| 選択欄と注意の表示 | [`src/components/dashboard/start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx) |
 | 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs) |
 
 ## まだやっていないこと
 
-- **画面（issue-deck）から選べない。** 「ローカルで開始」はエージェントを選ばず、常にClaude Codeで
-  起動する。選べるようにするにはDBのカラム（`DispatchJob`）・起動オプションのUI・poller
-  （`scripts/subpc-dispatch-poller.sh`）の受け渡しが要る
 - **無人実行（GitHub Actions）は対象外。** `claude-issue-dispatch.yml`は`claude-code-action`の
   ままで、Codexで走らせるには`OPENAI_API_KEY`のSecrets追加と課金の判断が要る
 - **汎用ランチャー（`scripts/generic-start-issue.sh`）は未対応。** 他リポジトリのセッションは
-  従来どおりClaude Codeで立つ
+  従来どおりClaude Codeで立つ（画面から選んでも、受け口が理由を出して止まる）
+- **他リポジトリの`start-issue.sh`は`ISSUE_DECK_AGENT`を読まない。** 揃えるまでは、画面から
+  Codexを選べるのはissue-deck自身のIssueだけになる（他は受け口が止める）
 - **計画の承認と質問の受け答えは画面へ出せていない**（#2509）。Codexに`ExitPlanMode`・
   `AskUserQuestion`に当たるツールが無いため、フックを繋いでも中身が手に入らない
   （`update_plan`はTODOの更新で、承認待ちではない。`tools.experimental_request_user_input`は

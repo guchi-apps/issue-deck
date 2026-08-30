@@ -23,6 +23,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueTitle: null,
     issueId: null,
     targetHost: "subpc",
+    agent: "claude",
     kind: "LAUNCH",
     status: "QUEUED",
     message: null,
@@ -61,6 +62,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     manualStepValuesCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
+    codexCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -535,6 +537,7 @@ describe("selectHostSelfUpdateJob", () => {
         id: "other-host",
         kind: "SELF_UPDATE",
         targetHost: "mainpc",
+        agent: "claude",
         createdAt: "2026-08-14T03:00:00.000Z",
       }),
     ];

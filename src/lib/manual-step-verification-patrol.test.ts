@@ -126,6 +126,7 @@ function checkRow(overrides: Record<string, unknown> = {}) {
     repositoryFullName: REPOSITORY,
     issueNumber: 1994,
     targetHost: "subpc",
+    agent: "claude",
     status: "RUNNING",
     doneLines: "[]",
     currentJobId: null,
@@ -324,11 +325,13 @@ describe("recordManualStepVerificationPass（#2256）", () => {
       command: "cat /home/guchi/apps/issue-deck/README.md",
       finishedAt: LATER,
       targetHost: "subpc",
+      agent: "claude",
     },
     {
       command: "systemctl --user is-active issue-deck-dispatch-poller.service",
       finishedAt: EARLIER,
       targetHost: "subpc",
+      agent: "claude",
     },
   ];
 

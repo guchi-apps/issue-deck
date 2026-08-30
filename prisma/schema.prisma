@@ -516,6 +516,16 @@ model DispatchJob {
   targetHost         String
   // 何をするジョブか（#1332）。既存行はすべて起動ジョブなのでLAUNCHが既定
   kind               DispatchJobKind   @default(LAUNCH)
+  // 起こすエージェントCLI（#2505。`kind`が`LAUNCH`のときだけ意味がある）。
+  //
+  // **入るのは`ISSUE_DECK_AGENT`へそのまま渡せる小文字の語**（`claude` / `codex`）で、
+  // pollerは受け取った値を検証せずに環境変数へ入れる…のではなく、**画面・API・pollerの
+  // 3か所で既知の語だけを通す**（`previewAction`と同じ作法。列を手で書き換えられても、
+  // 受け口へ届く語は変わらない）。
+  //
+  // **既定は`claude`で、既存行はすべてこの値になる。** 種別を増やしたときに既存の起動が
+  // 黙って別のCLIへ移らないよう、`enum`ではなく既定値付きの文字列で持つ。
+  agent              String            @default("claude")
   status             DispatchJobStatus @default(QUEUED)
   // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
   // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは
@@ -716,6 +726,15 @@ model DispatchHost {
   // 起こすもので、対応していないホストへ配ると「押したのに`failed`だけが返る」ことになる。
   // 申告を見て、選べないホストは選択肢の側で理由を出す。
   codeReviewCapable        Boolean?
+  // Codex CLIでローカルセッションを起こせるか（#2505）。**2つを同時に満たすpollerだけが申告する**
+  // ——`codex`コマンドが入っていることと、払い出されたジョブの`agent`を読んで
+  // `ISSUE_DECK_AGENT`として受け口へ渡すこと。
+  //
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**（`planReviewCapable`と同じ向き）。
+  // ここは「配ってから`failed`で返る」では済まない種類の非対応で、古いpollerは`agent`を
+  // 読まないため、**Codexを選んだのにClaude Codeが黙って立つ**（画面には「Codex CLI」と出たまま）。
+  // 画面はこの申告が真のホストにだけエージェントの選択欄を出す。
+  codexCapable             Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
   // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。
