@@ -1,6 +1,15 @@
 "use client";
 
-import { ClipboardCopy, Cloud, Server, Terminal, type LucideIcon } from "lucide-react";
+import {
+  Asterisk,
+  ClipboardCopy,
+  Cloud,
+  Server,
+  SquareTerminal,
+  Terminal,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -26,13 +35,18 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
+  CODEX_LIMITATIONS,
+  DEFAULT_DISPATCH_AGENT,
+  describeDispatchAgent,
   describeDispatchEnqueueRejection,
   findBlockingSession,
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
+  isDispatchAgentSelectable,
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
   resolveScreenshotRejection,
+  type DispatchAgent,
   type DispatchEnqueueRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -89,6 +103,17 @@ type StartTargetEntry = {
   /** 選べない理由。`null`なら選べる */
   rejection: string | null;
 };
+
+/**
+ * エージェントの選択肢（#2505）。**並びは既定（Claude Code）が先。**
+ *
+ * アイコンは実行先タイルと重ならないものを選ぶ。`Terminal`は「起動コマンドをコピー」が
+ * 使っているため、Codexには`SquareTerminal`を当てている。
+ */
+const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
+  { agent: "claude", icon: Asterisk },
+  { agent: "codex", icon: SquareTerminal },
+];
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -194,6 +219,15 @@ export function StartImplementationDialog({
    * 既定として光った開始画面」が見えてしまい、どちらで起動したのか分からなくなる。
    */
   const [startedTarget, setStartedTarget] = useState<StartTarget | null>(null);
+  /**
+   * 起こすエージェントCLI（#2505）。**既定はClaude Codeで、選び直しはこのダイアログを
+   * 開いている間だけ持つ**（実行先と同じく、次に開いたときは既定へ戻す）。
+   *
+   * 選択欄を出すのは実行先がサブPCで、そのホストがCodexに対応していると申告しているときだけ。
+   * それ以外の実行先を選んだ状態のままでも値は残るが、**積むときに既定へ落とす**
+   * （`effectiveAgent`）ので、GitHub Actionsの起動へ漏れることはない。
+   */
+  const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -238,6 +272,7 @@ export function StartImplementationDialog({
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
     setStartedTarget(null);
+    setAgent(DEFAULT_DISPATCH_AGENT);
     setCopied(false);
   }, [open]);
 
@@ -336,6 +371,18 @@ export function StartImplementationDialog({
     (effectiveTarget.kind === "actions"
       ? resolveScreenshotRepositoryRejection(issue.repositoryFullName)
       : null);
+  /**
+   * エージェントを選ばせるか（#2505）。**サブPCを選んでいて、そのホストが対応を申告して
+   * いるときだけ。** 申告していないホスト（`codex`が未導入・pollerが古い）で選ばせると、
+   * 積んでから`agent_not_capable`で断られるか、古いpollerでは`agent`ごと無視されて
+   * Claude Codeが黙って立つ。
+   */
+  const showAgents = effectiveTarget.kind === "host" && isDispatchAgentSelectable(selectedHost);
+  /**
+   * 実際に積むエージェント。**選択欄を出していない実行先では既定へ落とす。**
+   * サブPCでCodexを選んだ後にGitHub Actionsへ切り替えても、選択が残ったまま付いていかない。
+   */
+  const effectiveAgent: DispatchAgent = showAgents ? agent : DEFAULT_DISPATCH_AGENT;
   // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
   const visibleOptions = visibleStartImplementationOptions({
     isActionsTarget: effectiveTarget.kind === "actions",
@@ -501,6 +548,7 @@ export function StartImplementationDialog({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName,
+      agent: effectiveAgent,
     });
     // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）。
     // ピン留めも解き、拒否された時点の状態で選択欄を出し直す（#1318）
@@ -646,6 +694,48 @@ export function StartImplementationDialog({
             ))}
           </div>
         )}
+        {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
+            実行先（サブPC）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
+            対応を申告していないホストでは欄ごと出さない */}
+        {!isTargetPending && showAgents && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">エージェント</p>
+            <div role="radiogroup" aria-label="エージェント" className="grid grid-cols-2 gap-2">
+              {AGENT_ENTRIES.map((entry) => (
+                <AgentChip
+                  key={entry.agent}
+                  icon={entry.icon}
+                  label={describeDispatchAgent(entry.agent)}
+                  isDefault={entry.agent === DEFAULT_DISPATCH_AGENT}
+                  selected={agent === entry.agent}
+                  onSelect={() => setAgent(entry.agent)}
+                />
+              ))}
+            </div>
+            {/* **選んだ時点で出す**（#2505）。Codexでは入力待ちの通知・承認パネル・
+                Remote Controlが動かない（#2509で停止の通知だけは飛ぶようになった）。起動して
+                から気づくと、届かない通知を待ち続けるか不具合として報告することになる。文面の
+                正は`CODEX_LIMITATIONS`。配色は確認待ちの表示（`CheckUserReasonNotice`）に
+                合わせてamberで揃える */}
+            {agent === "codex" ? (
+              <div className="flex flex-col gap-1 rounded-md bg-amber-500/15 px-2.5 py-2 ring-1 ring-inset ring-amber-500/40">
+                <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+                  Codex CLIでは画面からの連携が一部効きません
+                </p>
+                <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-400">
+                  {CODEX_LIMITATIONS.map((limitation) => (
+                    <li key={limitation}>{limitation}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                通知・計画の承認・質問への回答・Remote Controlがそのまま使えます。
+              </p>
+            )}
+          </div>
+        )}
         {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
         {!isTargetPending && (
           <div className="flex flex-col gap-2">
@@ -739,6 +829,49 @@ function StartChoicesSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * エージェントの選択肢1件（#2505）。**オプションのチップ（`StartOptionChip`）と同じ形にする。**
+ *
+ * 実行先（アイコン中心・正方形のタイル）とわざと形を変えているのは、実行先の並びと
+ * 見分けがつかなくなるのを避けるため。**押した結果は選択（ラジオ）で、オプションのような
+ * ON/OFFではない**ので、チェックの代わりに選択中の枠と背景で示す。
+ */
+function AgentChip({
+  icon: Icon,
+  label,
+  isDefault,
+  selected,
+  onSelect,
+}: {
+  icon: LucideIcon;
+  label: string;
+  /** 既定のエージェントか。選んでいないときだけ「既定」と添える */
+  isDefault: boolean;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className={cn(
+        "flex min-h-[46px] items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-left",
+        selected ? "border-primary bg-accent" : "hover:bg-accent",
+      )}
+    >
+      <Icon
+        className={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground")}
+      />
+      <span className="text-[11px] font-medium leading-tight">{label}</span>
+      {isDefault && !selected && (
+        <span className="ml-auto text-[10px] text-muted-foreground">既定</span>
+      )}
+    </button>
   );
 }
 

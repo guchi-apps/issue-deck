@@ -81,6 +81,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     manualStepValuesCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
+    codexCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -104,6 +105,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueTitle: null,
     issueId: null,
     targetHost: "subpc",
+    agent: "claude",
     kind: "LAUNCH",
     status: "QUEUED",
     message: null,
@@ -355,12 +357,75 @@ describe("StartImplementationDialog", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1248,
       hostName: "subpc",
+      // 選ばなければ既定のClaude Code（#2505）
+      agent: "claude",
     });
     await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
     expect(updateIssue.mock.calls[0][0].labels).toContain(LOCAL_LABEL_NAME);
     // 無人実行の入口は踏まない。進捗も起動したランチャーが報告する
     expect(createComment).not.toHaveBeenCalled();
     expect(setProgressStatus).not.toHaveBeenCalled();
+  });
+
+  describe("エージェントの選択（#2505）", () => {
+    it("Codexに対応していないホストでは選択欄を出さない", () => {
+      // **未申告（古いpoller）も出さない。** 配ると`agent`ごと無視されてClaude Codeが黙って立つ
+      dispatchState.hosts = [makeHost({ codexCapable: null })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.queryByRole("radiogroup", { name: "エージェント" })).toBeNull();
+    });
+
+    it("対応しているホストでは選択欄を出し、既定はClaude Code", () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.getByRole("radiogroup", { name: "エージェント" })).toBeTruthy();
+      expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      // 押していないうちは注意を出さない（縦に伸ばさない）
+      expect(screen.queryByText(/画面からの連携が一部効きません/)).toBeNull();
+    });
+
+    it("Codexを選ぶと、その場で効かなくなる連携を出す", () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+
+      expect(screen.getByText(/画面からの連携が一部効きません/)).toBeTruthy();
+      expect(screen.getByText(/Remote Control/)).toBeTruthy();
+    });
+
+    it("Codexを選んで開始するとジョブへ載る", async () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+      clickStart();
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(enqueue.mock.calls[0][0].agent).toBe("codex");
+    });
+
+    it("実行先をGitHub Actionsへ移すと既定へ戻る（選択が付いていかない）", async () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+
+      expect(screen.queryByRole("radiogroup", { name: "エージェント" })).toBeNull();
+      clickStart();
+      await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
+      expect(enqueue).not.toHaveBeenCalled();
+    });
   });
 
   it("積めなかった場合は11.localを付けない（無人実行まで触れなくなるため）", async () => {

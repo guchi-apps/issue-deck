@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   isActiveDispatchJobStatus,
+  type DispatchAgent,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -267,6 +268,11 @@ export function useDispatchState(enabled: boolean) {
        * **セッションを立てる種別に限る**（停止・終了・追加指示は`sendSessionControl`が扱う）
        */
       kind?: "cross_repo_question" | "plan_review" | "code_review";
+      /**
+       * 起こすエージェントCLI（#2505）。省略すると既定（`claude`）で、従来どおりの挙動。
+       * **実装セッション（`LAUNCH`）でだけ意味がある。**
+       */
+      agent?: DispatchAgent;
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);
@@ -279,6 +285,7 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             host: params.hostName,
             kind: params.kind,
+            agent: params.agent,
           }),
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));

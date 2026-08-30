@@ -42,6 +42,7 @@ import {
   describeManualStepExecutionRejection,
   describePlanReviewRejection,
   describeSessionControlRejection,
+  DEFAULT_DISPATCH_AGENT,
   DISPATCH_CLAIM_TIMEOUT_MS,
   DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
   DISPATCH_HEARTBEAT_TIMEOUT_MS,
@@ -54,9 +55,11 @@ import {
   parseDispatchHostRepositories,
   parsePreviewAction,
   PREVIEW_ISSUE_NUMBER,
+  readDispatchAgent,
   resolveCodeReviewRejection,
   resolveCrossRepoQuestionRejection,
   resolveDispatchConcurrency,
+  resolveDispatchAgentRejection,
   resolveManualStepAbortRejection,
   resolveManualStepExecutionRejection,
   resolvePlanReviewRejection,
@@ -69,6 +72,7 @@ import {
   SESSION_LAUNCH_JOB_KINDS,
   type CodeReviewRejection,
   type CrossRepoQuestionRejection,
+  type DispatchAgent,
   type DispatchEnqueueRejection,
   type DispatchHostView,
   type DispatchJobKind,
@@ -137,6 +141,9 @@ function toJobView(
     issueId: issue?.id ?? null,
     targetHost: job.targetHost,
     kind: job.kind,
+    // DBの値も信用せず、既知の語だけを通す（#2505。`previewAction`と同じ作法で、列を手で
+    // 書き換えられても`ISSUE_DECK_AGENT`へ届く語は変わらない）
+    agent: readDispatchAgent(job.agent),
     status: job.status,
     message: job.message,
     instruction: job.instruction,
@@ -196,6 +203,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepValuesCapable: host.manualStepValuesCapable,
     planReviewCapable: host.planReviewCapable,
     codeReviewCapable: host.codeReviewCapable,
+    codexCapable: host.codexCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -442,6 +450,15 @@ export async function enqueueDispatchJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
+  /**
+   * 起こすエージェントCLI（#2505）。省略すると既定（`claude`）＝従来どおりの挙動。
+   *
+   * **既定以外を指定できるのは、対応を申告しているホストだけ**（`agent_not_capable`）。
+   * 古いpollerはジョブの`agent`を読まないため、配るとCodexを選んだのにClaude Codeが
+   * 黙って立つ。画面側でも選択欄を出さないが、**判定はここにも置く**（一括投入のように
+   * 画面の判定を通らない経路があるため。`session_alive`と同じ理由）。
+   */
+  agent?: DispatchAgent;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueDispatchJobResult> {
@@ -466,6 +483,18 @@ export async function enqueueDispatchJob(params: {
   if (!isDispatchHostOnline(host.lastSeenAt, now)) return reject("host_offline");
   if (!parseDispatchHostRepositories(host.repositories).includes(params.repositoryFullName)) {
     return reject("repository_not_runnable");
+  }
+
+  // 既定以外のエージェント（#2505）は、対応を申告しているホストにしか配らない。
+  // **理由の文言は画面と同じ関数から取る**（`resolveDispatchAgentRejection`）。ここは
+  // ホストの行を持っているので`toHostView`を通さず、判定に要る2つだけを渡す
+  const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
+  const agentRejection = resolveDispatchAgentRejection(
+    { name: host.name, codexCapable: host.codexCapable } as DispatchHostView,
+    agent,
+  );
+  if (agentRejection) {
+    return { ok: false, rejection: "agent_not_capable", message: agentRejection };
   }
 
   // 既に動いているセッションがあれば積ませない（#1311）。**画面側の`findBlockingSession`と
@@ -501,6 +530,7 @@ export async function enqueueDispatchJob(params: {
         repositoryFullName: params.repositoryFullName,
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
+        agent,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,
@@ -1877,6 +1907,8 @@ export async function announceDispatchHost(params: {
   planReviewCapable: boolean | null;
   /** リポジトリ全体のコードレビューを起こせるか（#698）。申告していないpollerでは`null`＝非対応 */
   codeReviewCapable: boolean | null;
+  /** Codex CLIでセッションを起こせるか（#2505）。申告していないpollerでは`null`＝非対応 */
+  codexCapable: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -1942,6 +1974,7 @@ export async function announceDispatchHost(params: {
     manualStepValuesCapable: params.manualStepValuesCapable,
     planReviewCapable: params.planReviewCapable,
     codeReviewCapable: params.codeReviewCapable,
+    codexCapable: params.codexCapable,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

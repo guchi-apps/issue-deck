@@ -27,11 +27,15 @@ export type IssueStateFilter = "all" | "open" | "closed";
  *
  * `preview`は確認環境（#2444）。developの最新をサブPCで動かして画面で確かめる。`flow`と同じく
  * 1カラムで、Issueの絞り込み条件とは無関係。
+ *
+ * `usage`はAI使用量（#2504）。サブPCのローカルセッションが使ったトークンを見る。これも1カラム。
  */
-export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview";
+export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview" | "usage";
 
 function parsePane(value: string | null): DashboardPane {
-  if (value === "pull-requests" || value === "flow" || value === "preview") return value;
+  if (value === "pull-requests" || value === "flow" || value === "preview" || value === "usage") {
+    return value;
+  }
   return "issues";
 }
 
@@ -242,6 +246,11 @@ export function useIssueFilters() {
     setFilters({ pane: "preview", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「AI使用量」画面への遷移（#2504）。上の2つと同じくPRの選択状態を持たない。
+  const selectUsagePane = useCallback(() => {
+    setFilters({ pane: "usage", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -289,6 +298,7 @@ export function useIssueFilters() {
     selectPullRequestView,
     selectFlowPane,
     selectPreviewPane,
+    selectUsagePane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,

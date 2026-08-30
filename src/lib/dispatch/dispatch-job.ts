@@ -166,6 +166,88 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
 }
 
 /**
+ * ローカルセッションで起こすエージェントCLI（#2505）。**`scripts/lib/agent-cli.sh`の
+ * `AGENT_CLI_KINDS`と同じ語で、そのまま`ISSUE_DECK_AGENT`へ渡る。**
+ *
+ * 画面で選ばせるのは「起動ジョブ（`LAUNCH`）をどのCLIで立てるか」だけで、付けるラベル・
+ * 積むジョブの種類・進捗の報告は変わらない（変わるのはtmuxの中で立つコマンドだけ。
+ * [docs/multi-agent/codex.md](../../../docs/multi-agent/codex.md)）。
+ */
+export const DISPATCH_AGENTS = ["claude", "codex"] as const;
+
+export type DispatchAgent = (typeof DISPATCH_AGENTS)[number];
+
+/** 既定のエージェント。**選ばなかった経路はすべてこれで立つ**（従来どおりの挙動） */
+export const DEFAULT_DISPATCH_AGENT: DispatchAgent = "claude";
+
+/**
+ * 画面・APIから届いた値を既知の語だけに絞る。未知の値は`null`（400で弾く）。
+ *
+ * **黙って既定へ落とさない。** Codexを指定したつもりでClaude Codeが立つ方が、その場で
+ * 断られるより分かりにくい（`agent_cli_resolve_kind`と同じ向き）。
+ */
+export function parseDispatchAgent(value: unknown): DispatchAgent | null {
+  if (typeof value !== "string") return null;
+  return (DISPATCH_AGENTS as readonly string[]).includes(value) ? (value as DispatchAgent) : null;
+}
+
+/**
+ * DBに入っている値を読む。**こちらは既定へ落とす** — 列を手で書き換えられても、
+ * pollerへ届く語は`DISPATCH_AGENTS`のどれかにしかならない（`parsePreviewAction`と同じ作法）。
+ */
+export function readDispatchAgent(value: unknown): DispatchAgent {
+  return parseDispatchAgent(value) ?? DEFAULT_DISPATCH_AGENT;
+}
+
+/** 画面・ログに出す表示名（`agent_cli_display_name`と揃える） */
+export function describeDispatchAgent(agent: DispatchAgent): string {
+  return agent === "codex" ? "Codex CLI" : "Claude Code";
+}
+
+/**
+ * Codexで効かなくなる画面連携（#2505・docs/multi-agent/codex.md の比較表）。
+ *
+ * **選んだ時点で出す。** 起動してから気づくと、届かない通知を待ち続けるか、不具合として
+ * 報告することになる。
+ *
+ * **#2509でCodexにもフックを繋いだ**ので、停止（応答終了）の報告と「まだ開始していません」の
+ * 検知は動く。効かないのは、Codexに対応するイベント・ツールが無いもの（入力待ちの`Notification`・
+ * `ExitPlanMode`・`AskUserQuestion`）とRemote Control。**ここは動かないものだけを挙げる**——
+ * 動くものまで書くと、通知が来ないことを不具合だと受け取る側の判断材料にならない。
+ */
+export const CODEX_LIMITATIONS = [
+  "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
+  "計画の承認・質問への回答は画面に出ません（Issueコメントで受け取ります）",
+  "Remote Controlで覗けません。前回の会話も引き継ぎません",
+] as const;
+
+/**
+ * そのホストでエージェントを選べるか（#2505）。選べるなら`true`。
+ *
+ * **`null`（未申告＝古いpoller）は「できない」**（`planReviewCapable`と同じ向き）。古いpollerは
+ * ジョブの`agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ。
+ */
+export function isDispatchAgentSelectable(host: DispatchHostView | null): boolean {
+  return host?.codexCapable === true;
+}
+
+/**
+ * そのホストへそのエージェントで積めるか。積めない理由を返し、積めるなら`null`。
+ *
+ * **既定（`claude`）は常に積める。** 申告が無いホストでも従来どおり動く必要があるため、
+ * ここで塞ぐのは既定以外を選んだ場合だけにする。
+ */
+export function resolveDispatchAgentRejection(
+  host: DispatchHostView | null,
+  agent: DispatchAgent,
+): string | null {
+  if (agent === DEFAULT_DISPATCH_AGENT) return null;
+  if (!host) return null;
+  if (isDispatchAgentSelectable(host)) return null;
+  return `${formatDispatchHostName(host.name)}は${describeDispatchAgent(agent)}での起動に対応していません（codexが未導入か、pollerが古い可能性があります）。`;
+}
+
+/**
  * 確認環境（#2444）への操作。**pollerへ渡すのはこの3語だけ**で、コマンドもポートも渡さない。
  *
  * - `start` … そのリポジトリのdevelopで起こす（別のものが動いていれば止めてから）
@@ -307,6 +389,15 @@ export type DispatchJobView = {
   targetHost: string;
   /** 何をするジョブか（#1332）。省略しない（画面が起動ジョブと制御ジョブを取り違えないため） */
   kind: DispatchJobKind;
+  /**
+   * 起こすエージェントCLI（#2505。`kind`が`LAUNCH`のときだけ意味がある）。
+   *
+   * **画面へ出すために返す。** ダイアログを閉じた後にどちらで起こしたのかが分からないと、
+   * 通知が来ないことを不具合と受け取ることになる（Codexでは入力待ち・計画・質問の通知が
+   * 飛ばない。#2509で停止の通知だけは飛ぶようになった）。
+   * pollerはこの値を`ISSUE_DECK_AGENT`として受け口へ渡す。
+   */
+  agent: DispatchAgent;
   status: DispatchJobStatus;
   message: string | null;
   /**
@@ -456,6 +547,15 @@ export type DispatchHostView = {
    * 配ってから`failed`で返るより、選択肢の側で「pollerが対応していない」と言う方が早い。
    */
   codeReviewCapable: boolean | null;
+  /**
+   * Codex CLIでローカルセッションを起こせるか（#2505）。**`null`（未申告）は「できない」として
+   * 扱う**（`planReviewCapable`と同じ向き）。
+   *
+   * **画面はこれを見て、エージェントの選択欄を出すかどうかを決める。** 古いpollerはジョブの
+   * `agent`を読まないため、配ると**Codexを選んだのにClaude Codeが黙って立つ**——「配ってから
+   * `failed`で返る」では済まない種類の非対応にあたる（`manualStepValuesCapable`と同じ）。
+   */
+  codexCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -750,7 +850,11 @@ export type DispatchEnqueueRejection =
   | "host_offline"
   | "repository_not_runnable"
   | "already_queued"
-  | "session_alive";
+  | "session_alive"
+  // 既定以外のエージェントを、対応を申告していないホストへ積もうとした（#2505）。
+  // **理由の文言は`resolveDispatchAgentRejection`が持つ**（画面と同じものを使う）ので、
+  // ここでは受け取った文言をそのまま返す経路になる
+  | "agent_not_capable";
 
 export function describeDispatchEnqueueRejection(
   rejection: DispatchEnqueueRejection,
@@ -762,6 +866,10 @@ export function describeDispatchEnqueueRejection(
   },
 ): string {
   switch (rejection) {
+    case "agent_not_capable":
+      // 画面はこの分岐に来ない（選べないホストにはエージェントの選択欄自体を出さない）。
+      // ここへ来るのはAPIを直接叩いた場合で、ホスト名だけで書ける一般形を返す
+      return `${formatDispatchHostName(context.hostName)} は指定されたエージェントでの起動に対応していません。`;
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":

@@ -986,6 +986,7 @@ describe("順番待ちのバッジ（#2449）", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "QUEUED",
       queuePriority: 0,

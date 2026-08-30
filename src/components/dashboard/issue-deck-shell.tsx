@@ -27,6 +27,7 @@ import {
   type MobileBottomNavTab,
 } from "@/components/dashboard/mobile-bottom-nav";
 import { MobileFlowScreen } from "@/components/dashboard/mobile/mobile-flow-screen";
+import { MobileUsageScreen } from "@/components/dashboard/mobile/mobile-usage-screen";
 import { MobileHomeScreen } from "@/components/dashboard/mobile/mobile-home-screen";
 import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-detail";
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
@@ -41,9 +42,14 @@ import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
+import {
+  SESSION_USAGE_PERIODS,
+  SessionUsagePanel,
+} from "@/components/dashboard/session-usage-panel";
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
+import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSnoozes } from "@/hooks/use-snoozes";
@@ -171,6 +177,7 @@ export function IssueDeckShell({
     selectPullRequestView,
     selectFlowPane,
     selectPreviewPane,
+    selectUsagePane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -240,6 +247,7 @@ export function IssueDeckShell({
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
     selectPreview,
+    selectUsage,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -498,6 +506,9 @@ export function IssueDeckShell({
   // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
+  // 「AI使用量」画面（#2504）。開いている間だけ取得する（材料はサブPCのpollerが5分ごとに
+  // 押し込む記録で、開いていない間に取りに行っても新しくならない）。
+  const isUsagePaneActive = filters.pane === "usage" || mobileScreen.kind === "usage";
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「マージ待ち」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
@@ -1055,6 +1066,37 @@ export function IssueDeckShell({
   // 選んだときだけ回る（#1767。既定は自動更新しない）。
   const branchFlowStatus = useBranchFlow(isFlowPaneActive, flowAutoRefreshIntervalMs);
 
+  // AI使用量の期間（#2504）。選んだ期間は端末のlocalStorageに残す（画面を開き直すたびに
+  // 30日へ戻ると、毎回選び直すことになる）。
+  const [storedUsageDays, setUsageDays] = usePersistedState<number>("issue-deck:usage-days", 7);
+  const usageDays = SESSION_USAGE_PERIODS.some((period) => period.days === storedUsageDays)
+    ? storedUsageDays
+    : 7;
+  const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays);
+
+  /**
+   * 使用量の明細からIssueを開く（#2504）。**記録はリポジトリ名（ownerを除く）しか持たない**
+   * ので、接続済みリポジトリの一覧でフルネームへ戻す。
+   *
+   * 一覧に載っているIssueなら画面の詳細を開き、載っていなければ（既にcloseされて取得の
+   * 対象から外れているものなど）GitHubを開く。**使用量に出るIssueの多くは完了済み**なので、
+   * 画面で開けないものを押せないままにすると、明細から辿れない行のほうが多くなる。
+   */
+  function openUsageIssue(repositoryName: string, issueNumber: number) {
+    const repository = repositories.find(
+      (item) => item.fullName === repositoryName || item.fullName.endsWith(`/${repositoryName}`),
+    );
+    if (!repository) return;
+    const issue = allIssues.find(
+      (item) => item.repositoryFullName === repository.fullName && item.number === issueNumber,
+    );
+    if (issue) {
+      openIssueUrl(issue.id);
+      return;
+    }
+    window.open(`https://github.com/${repository.fullName}/issues/${issueNumber}`, "_blank", "noopener");
+  }
+
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。
   // まだ本番へ出ていないかの判定には直近のリリースのマージ時刻が要るので、PR一覧から
   // その1点だけを渡す（フック側が自分でポーリングの要否を決める）。
@@ -1381,6 +1423,7 @@ export function IssueDeckShell({
                   onSelectFlow={() => selectTab("flow")}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
+                  onSelectUsage={selectUsage}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onCreateIssue={() => openCreateDialog()}
@@ -1396,6 +1439,19 @@ export function IssueDeckShell({
                   jobs={dispatch.jobs}
                   isLoaded={dispatch.isLoaded}
                   onRequestPreview={dispatch.requestPreview}
+                  onBack={goBack}
+                />
+              )}
+
+              {mobileScreen.kind === "usage" && (
+                <MobileUsageScreen
+                  data={sessionUsage.data}
+                  isLoading={sessionUsage.isLoading}
+                  error={sessionUsage.error}
+                  days={usageDays}
+                  onChangeDays={setUsageDays}
+                  onRefresh={sessionUsage.refresh}
+                  onOpenIssue={openUsageIssue}
                   onBack={goBack}
                 />
               )}
@@ -1618,6 +1674,7 @@ export function IssueDeckShell({
                 onSelectFlow={selectFlowPane}
                 onSelectPreview={selectPreviewPane}
                 previewRunning={previewRunning}
+                onSelectUsage={selectUsagePane}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
@@ -1644,7 +1701,22 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "preview" ? (
+          {filters.pane === "usage" ? (
+            /* PC: AI使用量（#2504）。「確認環境」と同じく中央〜右を1カラムで使う */
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-4xl">
+                <SessionUsagePanel
+                  data={sessionUsage.data}
+                  isLoading={sessionUsage.isLoading}
+                  error={sessionUsage.error}
+                  days={usageDays}
+                  onChangeDays={setUsageDays}
+                  onRefresh={sessionUsage.refresh}
+                  onOpenIssue={openUsageIssue}
+                />
+              </div>
+            </div>
+          ) : filters.pane === "preview" ? (
             /* PC: 確認環境（#2444）。「ブランチ」と同じく中央〜右を1カラムで使う */
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
               <div className="mx-auto max-w-3xl">

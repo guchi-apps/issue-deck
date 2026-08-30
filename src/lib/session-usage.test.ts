@@ -321,3 +321,102 @@ describe("session_usage_render_table", () => {
     );
   });
 });
+
+/**
+ * issue-deckへの報告に畳む部分（#2504）。**転記のパスからセッションIDを取り、数値だけを送る**
+ * ところが要点で、ここが崩れると受け口が行を一意にできず、走っている最中のセッションが
+ * 報告のたびに二重に積まれる。
+ */
+describe("session_usage_report_payload", () => {
+  function payloadLines(normalized: unknown, ...args: string[]) {
+    return callShell("session_usage_report_payload", JSON.stringify(normalized), ...args)
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+  }
+
+  function normalizedSession(overrides: Record<string, unknown> = {}) {
+    return {
+      responses: 3,
+      input: 10,
+      cacheCreate5m: 20,
+      cacheCreate1h: 30,
+      cacheRead: 40,
+      output: 50,
+      costUsd: 1.25,
+      kind: "implementation",
+      repository: "issue-deck",
+      issue: 2504,
+      cwd: "/home/u/apps/issue-deck-worktrees/issue-2504",
+      transcript: "/home/u/.claude/projects/-slug/abc-123.jsonl",
+      models: ["claude-opus-5"],
+      firstAt: "2026-08-30T01:00:00.000Z",
+      lastAt: "2026-08-30T02:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("転記のファイル名をセッションIDにして、数値と分類だけを送る", () => {
+    const [payload] = payloadLines({ sessions: [normalizedSession()] }, "subpc");
+
+    expect(payload.host).toBe("subpc");
+    expect(payload.sessions).toHaveLength(1);
+    expect(payload.sessions[0]).toMatchObject({
+      sessionId: "abc-123",
+      kind: "implementation",
+      repository: "issue-deck",
+      issue: 2504,
+      responses: 3,
+      cacheCreate1h: 30,
+      costUsd: 1.25,
+      startedAt: "2026-08-30T01:00:00.000Z",
+      endedAt: "2026-08-30T02:00:00.000Z",
+    });
+    // やり取りの本文にあたるものを持ち出していないこと（持つのはパスまで）。
+    expect(Object.keys(payload.sessions[0]).sort()).toEqual(
+      [
+        "cacheCreate1h",
+        "cacheCreate5m",
+        "cacheRead",
+        "costUsd",
+        "endedAt",
+        "input",
+        "issue",
+        "kind",
+        "models",
+        "output",
+        "repository",
+        "responses",
+        "sessionId",
+        "startedAt",
+        "transcript",
+      ].sort(),
+    );
+  });
+
+  it("時刻を持たないセッションは送らない（期間で絞れないため）", () => {
+    const [payload] = payloadLines(
+      { sessions: [normalizedSession({ firstAt: null, lastAt: null })] },
+      "subpc",
+    );
+    expect(payload.sessions).toEqual([]);
+  });
+
+  it("件数が多いときは指定した数ごとに分けて出す（1回のPOSTで抱え込まない）", () => {
+    const sessions = [1, 2, 3, 4, 5].map((n) =>
+      normalizedSession({ transcript: `/home/u/.claude/projects/-slug/id-${n}.jsonl` }),
+    );
+    const lines = payloadLines({ sessions }, "subpc", "2");
+
+    expect(lines).toHaveLength(3);
+    expect(lines.map((line) => line.sessions.length)).toEqual([2, 2, 1]);
+    // 同じ報告として扱えるよう、時刻は全ての行で揃っている。
+    expect(new Set(lines.map((line) => line.reportedAt)).size).toBe(1);
+  });
+
+  it("送るものが無くても1行は出す（呼び出し側が空と失敗を区別できるように）", () => {
+    const lines = payloadLines({ sessions: [] }, "subpc");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].sessions).toEqual([]);
+  });
+});

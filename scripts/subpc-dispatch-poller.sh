@@ -98,6 +98,10 @@
 #                                   worktreeを掃除する間隔の分数（省略時は60・0で無効）
 #   NODE_MODULES_DEDUPE_INTERVAL_MINUTES
 #                                   node_modulesの重複を回収する間隔の分数（省略時は1440・0で無効）
+#   SESSION_USAGE_INTERVAL_MINUTES  トークン使用量を報告する間隔の分数（省略時は5・0で無効）
+#   SESSION_USAGE_WINDOW_DAYS       1回の報告で開く転記の範囲の日数（省略時は2）
+#   SESSION_USAGE_BACKFILL_DAYS     初回だけ遡って埋める日数（省略時は30）
+#   CLAUDE_PROJECTS_DIR             転記の置き場（省略時は ~/.claude/projects）
 #
 # コンフリクトしたPRの巡回検知（#2116）は毎巡issue-deckへ促すだけで、**間隔の設定はここには
 # 無い**。どれくらいの間隔で見に行くか（＝GitHub APIをどれだけ使うか）はissue-deck側の
@@ -139,7 +143,7 @@ set -euo pipefail
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
 # 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
 # 24: ホストごとの再起動（`REBOOT`）を実行し、再起動が要るかを申告する（#2496）。
-DISPATCH_POLLER_VERSION="24"
+DISPATCH_POLLER_VERSION="25"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -169,6 +173,10 @@ source "$SCRIPT_DIR/lib/session-resume.sh"
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
 # shellcheck source=scripts/lib/launch-hold.sh
 source "$SCRIPT_DIR/lib/launch-hold.sh"
+# ローカルセッションのトークン使用量の集計（#2350）。issue-deckの画面へ報告するために読む
+# （#2504）。**転記を開くのはこのlibだけ**で、読むのは`message.usage`と時刻・作業ディレクトリ。
+# shellcheck source=scripts/lib/session-usage.sh
+source "$SCRIPT_DIR/lib/session-usage.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
@@ -383,6 +391,23 @@ WORKTREE_CLEANUP_INTERVAL_MINUTES="$(require_non_negative_int \
 NODE_MODULES_DEDUPE_INTERVAL_MINUTES="$(require_non_negative_int \
   NODE_MODULES_DEDUPE_INTERVAL_MINUTES "${NODE_MODULES_DEDUPE_INTERVAL_MINUTES:-}" 1440)"
 
+# ローカルセッションのトークン使用量をissue-deckへ報告する間隔（分）。**0で無効**（#2504）。
+#
+# 既定の5分は「画面を開いたときに走っているセッションのぶんが載っている」と「毎巡（30秒ごと）
+# 転記を舐めない」の間を取った値。集計は転記の**最終更新**で前段を絞るため、平常時に開くのは
+# 数十ファイルで1秒前後で終わる。
+SESSION_USAGE_INTERVAL_MINUTES="$(require_non_negative_int \
+  SESSION_USAGE_INTERVAL_MINUTES "${SESSION_USAGE_INTERVAL_MINUTES:-}" 5)"
+# 1回の報告で開く転記の範囲（日）。**pollerが止まっていた間を埋められる長さにする。**
+# 転記単位の集計は常にその転記の全期間ぶんなので、範囲を広げても数字は二重にならない
+# （同じ行を上書きするだけ）。
+SESSION_USAGE_WINDOW_DAYS="$(require_positive_int \
+  SESSION_USAGE_WINDOW_DAYS "${SESSION_USAGE_WINDOW_DAYS:-}" 2)"
+# 初回だけ遡って埋める範囲（日）。**成功するまで何度でも初回として扱う**（下の
+# `SESSION_USAGE_BACKFILL_STAMP`）。転記自体の保持期間を超えて遡っても意味は無い。
+SESSION_USAGE_BACKFILL_DAYS="$(require_positive_int \
+  SESSION_USAGE_BACKFILL_DAYS "${SESSION_USAGE_BACKFILL_DAYS:-}" 30)"
+
 # APIを叩く。本文を標準出力へ、HTTPステータスを最終行へ出す形は扱いにくいため、
 # 一時ファイルへ本文を落としてステータスだけを返り値で見る。
 # **シークレットはコマンドライン引数に置かない**（`ps` で他プロセスから見えるため）。
@@ -583,6 +608,22 @@ plan_review_capable() {
 # ダイアログの選択肢に理由付きで出る（配ってから`failed`で返すより早い）。
 code_review_capable() {
   if [[ -f "$CODE_REVIEW_LAUNCHER" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# Codex CLIでセッションを起こせるか（#2505）。**`codex`コマンドがあるかだけを見る。**
+#
+# ジョブの`agent`を読んで`ISSUE_DECK_AGENT`として受け口へ渡す実装はこのpollerが持っているので、
+# 申告が真になった時点で「渡せること」は保証されている。残る条件は実機にCLIが入っているかだけ。
+#
+# **申告しなければ画面に選択欄が出ない**（issue-deck側は`null`＝非対応として扱う）。古いpollerは
+# `agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ——「配ってから`failed`で
+# 返る」では済まない種類の非対応なので、判定材料が無いときは選ばせない側へ倒す。
+codex_capable() {
+  if command -v codex >/dev/null 2>&1; then
     printf 'true'
   else
     printf 'false'
@@ -944,6 +985,7 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
+    --argjson codex "$(codex_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson reboot "$(reboot_capable)" \
     --argjson rebootState "$(collect_reboot_state)" \
@@ -953,7 +995,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, codex: $codex, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1154,6 +1196,93 @@ sweep_deploy_failures() {
   printf '%s' "$API_RESPONSE_BODY" |
     jq -r '.actions[] | "デプロイ失敗Issueを\(if .kind == "created" then "起票" elif .kind == "updated" then "更新" else "クローズ" end)しました: \(.repositoryFullName)#\(.issueNumber)"' 2>/dev/null ||
     true
+  return 0
+}
+
+# --- トークン使用量の報告（#2504）-----------------------------------------------
+# サブPCのローカルセッションが使ったトークンを集計し、issue-deckへ送る。
+#
+# **本番のissue-deck（VPS）は転記を読めない。** 転記（`~/.claude/projects`）はセッションが
+# 走るこのホストにしか無く、集計する`lib/session-usage.sh`もここにしか置けない。#2350で
+# 端末から見られるようにはなったが、Tailscale SSHで入って叩かないと見られなかった。
+#
+# **送るのは数値と分類だけ**（応答数・トークン・API換算・種別・リポジトリ・Issue番号）。
+# やり取りの本文は集計の時点で読んでいない（`lib/session-usage.sh`冒頭の「作法」）。
+#
+# **転記単位の集計は期間で切らない。** ここで絞るのは「どの転記を開くか」（最終更新）だけで、
+# 開いた転記は常に全期間ぶんを数える。期間で切ると、走っている最中のセッションを上書きした
+# 時点でそれ以前の消費が消える（issue-deck側は`endedAt`で期間を切り出す）。
+#
+# 失敗しても1巡を止めない（他の巡回と同じ扱い）。
+SESSION_USAGE_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage.stamp"
+# **埋め戻しが済んだ印は、成功したときだけ置く。** 上の`SESSION_USAGE_STAMP`は間隔を測る
+# ためのもので走らせる前に置くため、それだけを見ると初回が1度失敗しただけで過去ぶんが
+# 永久に埋まらなくなる。
+SESSION_USAGE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-backfill.stamp"
+
+report_session_usage() {
+  ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+  [[ -d "$projects_dir" ]] || return 0
+
+  local last now
+  last=0
+  if [[ -f "$SESSION_USAGE_STAMP" ]]; then
+    last="$(date -r "$SESSION_USAGE_STAMP" +%s 2>/dev/null || echo 0)"
+  fi
+  now="$(date +%s)"
+  ((now - last >= SESSION_USAGE_INTERVAL_MINUTES * 60)) || return 0
+
+  # **走らせる前に印を置く**（worktreeの掃除と同じ理由）。毎回失敗する状況で、5分ごとの
+  # 集計そのものを繰り返さないようにする。
+  mkdir -p "$(dirname "$SESSION_USAGE_STAMP")" 2>/dev/null || true
+  touch "$SESSION_USAGE_STAMP" 2>/dev/null || true
+
+  local days backfill=0
+  if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" ]]; then
+    days="$SESSION_USAGE_WINDOW_DAYS"
+  else
+    days="$SESSION_USAGE_BACKFILL_DAYS"
+    backfill=1
+  fi
+
+  local cutoff
+  cutoff="$(date -d "$((days > 0 ? days - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
+
+  local payload
+  # **集計の失敗で1巡を止めない。** 転記の形はClaude Codeの内部仕様で、読めない日が
+  # 来ても画面が1つ古くなるだけで済ませる。
+  if ! payload="$(session_usage_transcripts "$projects_dir" "$cutoff" |
+    session_usage_aggregate 0 |
+    session_usage_report_payload "$HOST_NAME" 2>/dev/null)"; then
+    echo "Error: トークン使用量の集計に失敗しました。" >&2
+    return 0
+  fi
+  [[ -n "$payload" ]] || return 0
+
+  local line stored=0 sent=0
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ! api_call POST /api/dispatch/session-usage "$line"; then
+      case "$API_RESPONSE_STATUS" in
+        # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+        404 | 000) return 0 ;;
+        *) report_api_failure "トークン使用量の報告に失敗しました" ;;
+      esac
+      return 0
+    fi
+    sent=$((sent + 1))
+    stored=$((stored + $(printf '%s' "$API_RESPONSE_BODY" | jq -r '.stored // 0' 2>/dev/null || echo 0)))
+  done <<<"$payload"
+
+  ((sent > 0)) || return 0
+  # 埋め戻しは全て送り切ってから印を置く（途中で落ちたら次の巡でもう一度やり直す）。
+  if ((backfill)); then
+    touch "$SESSION_USAGE_BACKFILL_STAMP" 2>/dev/null || true
+    echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
+  fi
   return 0
 }
 
@@ -2322,7 +2451,7 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command
-  local placeholder_values resolved_command
+  local placeholder_values resolved_command agent
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2339,6 +2468,9 @@ run_job() {
   # issue-deck側が値を差し込んだ結果（#2403）。実行するのはこちらではなく、pollerが自分で
   # 差し込み直したもの。これは突き合わせにだけ使う（`command`が照合専用なのと同じ立場）
   resolved_command="$(printf '%s' "$job_json" | jq -r '.resolvedCommand // ""')"
+  # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
+  # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
+  agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -2479,9 +2611,30 @@ run_job() {
     return 0
   fi
 
+  # 受け取ったエージェントをサブPC側でも既知の語に絞る（#2505）。issue-deck側でも絞っているが、
+  # **ここが環境変数として渡す最後の場所**なので改めて確かめる（`local_session_validate_target`と
+  # 同じ多層防御）。**黙って`claude`へ落とさない**——Codexを選んだのにClaude Codeが立つ方が、
+  # ジョブの失敗として返るより分かりにくい。
+  case "$agent" in
+    claude | codex) ;;
+    *)
+      report_job "$job_id" failed "受け取ったエージェントが不正です: $agent"
+      return 0
+      ;;
+  esac
+
+  # `set -e`下では`[[ … ]] && …`が偽のときにそこで止まるので、ifで書く
+  local agent_label=""
+  if [[ "$agent" == "codex" ]]; then
+    agent_label="・Codex CLI"
+  fi
+
+  # `ISSUE_DECK_AGENT`は受け口（start-local-session.sh）と、その先の start-issue.sh が読む
+  # （#2377）。**引数ではなく環境変数で渡す**のは、この指定を解釈しないリポジトリのランチャーへ
+  # 届いても無害にするため（未知のフラグはissue番号として扱われて失敗する。#1076と同じ理由）。
   launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
-    "起動しています（$LOCAL_REPO_PATH）" \
-    bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
+    "起動しています（$LOCAL_REPO_PATH$agent_label）" \
+    env "ISSUE_DECK_AGENT=$agent" bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
 }
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
@@ -2620,6 +2773,10 @@ run_once() {
     # 添付画像の参照の巡回収集と後始末（#2475）。**dry-runでは呼ばない**（ファイルの
     # 移動・削除という取り消しの効かない副作用があるため）。
     sweep_uploaded_images
+    # ローカルセッションのトークン使用量を報告する（#2504）。**dry-runでは呼ばない**
+    # （画面に出る記録が増えるため）。毎巡ではなく SESSION_USAGE_INTERVAL_MINUTES の
+    # 間隔でだけ実際に走る。
+    report_session_usage
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**

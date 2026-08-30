@@ -14,10 +14,14 @@
 #
 # ## Codexで揃わないもの（docs/multi-agent/codex.md）
 #
-# Claude Code側の連携（`--settings`で注入するフック・`--remote-control`・Plan modeの承認）は
-# Codexには無い。**無いものを無理に真似せず、呼び出し側が種別で分岐して素通りする**方針にしている。
+# Claude Code側の連携のうち`--remote-control`・Plan modeの承認はCodexには無い。
+# **無いものを無理に真似せず、呼び出し側が種別で分岐して素通りする**方針にしている。
 # セッションの開始・終了・プレビューURLの報告は`run-issue-session.sh`のラッパー側（フックではない）
 # で行っているため、Codexでもそのまま残る。
+#
+# **フックだけは#2509で揃った。** Codex 0.151.0はフック機能をstableとして持っており、
+# 入力のフィールド名（`hook_event_name`）も`session-notify.sh`が読んでいるものと同じ。
+# 組み立ては下の`agent_cli_build_codex_hook_args`が持つ。
 
 # 対応している種別。増やすときはここと agent_cli_command_name / agent_cli_display_name を揃える。
 AGENT_CLI_KINDS=(claude codex)
@@ -67,8 +71,8 @@ agent_cli_display_name() {
 # `--permission-mode auto`（#1205）に相当する位置づけで、理由も同じ。
 #
 # - **人が横にいない実行が前提**（サブPC・外出先からの起動）。`on-request`にすると、Codexが承認を
-#   求めた時点でセッションが黙って止まる。**Codexにはフックが無く、入力待ちの通知も飛ばない**ので、
-#   端末を見に来るまで誰も気づけない
+#   求めた時点でセッションが黙って止まる。**Codexには入力待ちを知らせるイベントが無い**ので
+#   （フックは#2509で繋いだが、`Notification`に当たるものが無い）、端末を見に来るまで誰も気づけない
 # - 代わりに失われる「個々のコマンドを人が目視する機会」は、Claude側と同じ後段の防御で受ける
 #   （Pull Request必須・`claude-review-develop.yml`のレビュー・自動マージ不可カテゴリ・
 #   Issueごとのworktree分離）
@@ -103,6 +107,104 @@ agent_cli_build_codex_args() {
     local extra=(${ISSUE_DECK_CODEX_EXTRA_ARGS})
     AGENT_CLI_ARGS+=("${extra[@]}")
   fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Codexのフック（#2509）
+#
+# Codexのフックは Claude Code とほぼ同じ形をしている。stdinに来るJSONの共通フィールドは
+# `session_id` / `transcript_path` / `cwd` / `hook_event_name` / `model` / `permission_mode`で、
+# `PostToolUse`には`tool_name` / `tool_input` / `tool_use_id` / `turn_id`が付く。
+# **`session-notify.sh`が読んでいる名前とそのまま一致する**ので、通知スクリプトは流用できる。
+#
+# ## 設定は`-c`のオーバーライドで渡す（ファイルには置かない）
+#
+# フック設定を置ける層は3つあるが、**このセッションにだけ効かせられるのは`-c`だけ**（実測。
+# 0.151.0）。
+#
+#   `~/.codex/hooks.json`     ユーザー層。**そのホストの全Codexセッション**に効いてしまう
+#   `<worktree>/.codex/…`     プロジェクト層。リポジトリの中なのでコミットの事故が起きうる
+#   `-c hooks.<イベント>=…`   このプロセスだけ。**worktree単位の分離がそのまま得られる**
+#
+# `ps`にフックのコマンドが出るのはClaude側（`--settings`でファイル渡し）と違う点だが、
+# 出るのは`session-notify.sh`のパスとIssue番号・リポジトリ名だけで、Codexの起動は元々
+# キックオフのプロンプト全文を位置引数に載せている。
+#
+# ## 信頼（trust）は2種類ある。両方を越えないとフックは1つも飛ばない
+#
+#   1. **フックの信頼**: 非管理フックは人がレビューして信頼するまで実行されない。信頼は
+#      フック定義のハッシュに紐づくため、Issueごとに変わる引数（番号）を含むこの用途では
+#      毎回「新しいフック」になる。`--dangerously-bypass-hook-trust`で越える（下記）
+#   2. **ディレクトリの信頼**: 初めて開くディレクトリでは起動直後に
+#      `Do you trust the contents of this directory?`が出て、答えるまで**`SessionStart`すら
+#      飛ばない**（実測）。Claude Codeと違い**worktreeのパスごとに記録される**ため
+#      （`~/.codex/config.toml`の`[projects."<絶対パス>"]`）、Issueごとに1回聞かれる。
+#      ここは自動化しない（docs/multi-agent/session-notify.md「信頼確認そのものは自動化しない」）
+#
+# ## `--dangerously-bypass-hook-trust`を選ぶ理由と、その代償の受け方
+#
+# 管理フック扱い（`requirements.toml`）にする道もあるが、あれはホスト全体へ効く管理設定で、
+# 置いた時点でCodexのフックの信頼レビューがこのホストから丸ごと消える。**このフラグなら
+# 効果はこの1プロセスに閉じる。**
+#
+# 代償は「そのプロセスで有効なフックが**全部**レビュー無しで走る」こと。ディレクトリを信頼すると
+# プロジェクト層（`<worktree>/.codex/`）のフックも読まれるため、リポジトリが同梱したフックが
+# 混ざりうる。そこで**worktreeがプロジェクト層のフック設定を持っているときはフックを有効にしない**
+# （`agent_cli_codex_project_hook_file`。呼び出し側が判定して素通りする）。
+# ---------------------------------------------------------------------------
+
+# 画面連携を繋ぐイベント（#2509）。
+#
+# **`PostToolUse`は繋がない。** `session-notify.sh`のあのイベントは「人が承認プロンプトに
+# 答えて作業へ戻った」ことを拾うためのもので、直前の状態が`permission_prompt`のときしか
+# 報告しない。Codexは`--ask-for-approval never`で走らせるため承認プロンプトが出ず、
+# `permission_prompt`を書き込む経路（Claudeの`Notification`・`ExitPlanMode`・`AskUserQuestion`）が
+# どれも無い。繋いでもツール実行のたびにプロセスを起こして必ず捨てるだけになる。
+AGENT_CLI_CODEX_HOOK_EVENTS=(SessionStart Stop)
+
+# TOMLの基本文字列（`"…"`）へ入れられる形に直す。エスケープが要るのは`\`と`"`だけ。
+agent_cli_toml_escape() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+# worktreeがプロジェクト層のフック設定を持っていれば、そのパスを出力して0を返す。
+#
+# **持っていたら呼び出し側はフックを有効にしない。** `--dangerously-bypass-hook-trust`は
+# 「このプロセスで有効なフックを全部レビュー無しで走らせる」フラグなので、リポジトリ同梱の
+# フックがある状態で付けると、それも一緒に無検査で走る。画面連携を諦めるほうが軽い。
+agent_cli_codex_project_hook_file() {
+  local dir="${1:-}" candidate
+  [[ -n "$dir" ]] || return 1
+  for candidate in "$dir/.codex/hooks.json" "$dir/.codex/config.toml"; do
+    if [[ -e "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# フックの起動引数を`AGENT_CLI_HOOK_ARGS`配列へ組み立てる。
+#
+# 第1引数は**シェルのコマンド行**（Codexは`command`の文字列をシェルの規則で分割する。実測で
+# `'…/session-notify.sh' '2509' 'issue-deck' 'guchi-apps/issue-deck'`が引数3つとして届く）。
+# コマンド行が空なら何も組み立てずに1を返す。
+agent_cli_build_codex_hook_args() {
+  local command_line="${1:-}" event escaped
+
+  AGENT_CLI_HOOK_ARGS=()
+  [[ -n "$command_line" ]] || return 1
+
+  escaped="$(agent_cli_toml_escape "$command_line")"
+  AGENT_CLI_HOOK_ARGS=(--dangerously-bypass-hook-trust)
+  for event in "${AGENT_CLI_CODEX_HOOK_EVENTS[@]}"; do
+    AGENT_CLI_HOOK_ARGS+=(-c "hooks.$event=[{hooks=[{type=\"command\",command=\"$escaped\"}]}]")
+  done
 
   return 0
 }

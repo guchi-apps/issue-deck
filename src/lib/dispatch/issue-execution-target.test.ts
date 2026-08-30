@@ -40,6 +40,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueTitle: null,
     issueId: null,
     targetHost: "subpc",
+    agent: "claude",
     kind: "LAUNCH",
     status: "QUEUED",
     message: null,
