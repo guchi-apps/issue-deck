@@ -99,6 +99,14 @@ describe("summarizeIssueSession", () => {
     expect(s.detail).toContain("Remote Control");
   });
 
+  it("Codexの入力待ちは端末から答える案内にする", () => {
+    const s = summarizeIssueSession(
+      session({ activity: "WAITING_INPUT", codexThreadKnown: false }),
+    );
+    expect(s.detail).toContain("端末から答えてください");
+    expect(s.detail).not.toContain("Remote Control");
+  });
+
   // #1357。承認に答えた直後をRESPONDEDで表すと「応答を終えています」と出てしまう
   it("入力に答えて作業へ戻った報告は、作業中として出す（入力待ちでも応答終了でもない）", () => {
     const s = summarizeIssueSession(session({ activity: "WORKING" }));

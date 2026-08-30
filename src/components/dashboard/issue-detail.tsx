@@ -700,6 +700,7 @@ export function IssueDetail({
     planDecisionPending: planRequest?.status === "WAITING",
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
+    implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
   });
 
   return (

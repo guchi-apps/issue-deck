@@ -33,6 +33,8 @@ export type CheckUserGuidance = {
   agentState: string;
 };
 
+export type CheckUserImplementationAgent = "claude" | "codex";
+
 type ReasonGuide = {
   description: string;
   /** 移動ボタンを出すとき（目的地が別の場所）の案内 */
@@ -124,6 +126,9 @@ const WAITING_INPUT_DESCRIPTION =
 const WAITING_INPUT_BUTTONS_REMOTE = "答えると確認待ちは自動で外れます。";
 const WAITING_INPUT_BUTTONS_FALLBACK =
   "コメント欄の案内からRemote Controlを開いて答えてください。";
+const CODEX_WAITING_INPUT_DESCRIPTION =
+  "走っているCodexセッションが入力を待っています。画面の「承認」「修正」は届かないため、端末から答えてください。";
+const CODEX_WAITING_INPUT_BUTTONS = "端末で答えると確認待ちは自動で外れます。";
 
 /**
  * ローカルセッションが担当しているIssueの案内（#1903）。
@@ -188,6 +193,8 @@ export type ResolveCheckUserGuidanceOptions = {
    * （`useDispatchState`の`isLoaded`を渡す。取得に失敗しても`true`になるので待ち続けない）。
    */
   sessionStatePending?: boolean;
+  /** セッションの実装エージェント。CodexにはClaude CodeのRemote Controlが無いため案内を分ける */
+  implementationAgent?: CheckUserImplementationAgent;
 };
 
 /**
@@ -212,6 +219,7 @@ export function resolveCheckUserGuidance({
   planDecisionPending = false,
   questionAnswerPending = false,
   sessionStatePending = false,
+  implementationAgent = "claude",
 }: ResolveCheckUserGuidanceOptions): CheckUserGuidance | null {
   if (reason === null) return null;
   // 行き先はローカルセッションが入力待ちかどうかで変わる（下の分岐）。**未確定のまま
@@ -253,12 +261,19 @@ export function resolveCheckUserGuidance({
   // マージはGitHub側の操作なので、`11.local`のセッションが入力待ちでも画面から実行できる
   // （`ApprovalActions`がマージ待ちを入力待ちより優先しているのと同じ理由）
   if (sessionWaitingInput && reason !== "merge") {
+    const isCodex = implementationAgent === "codex";
     return {
       reason,
       heading,
-      description: WAITING_INPUT_DESCRIPTION,
-      buttons: remoteControlUrl ? WAITING_INPUT_BUTTONS_REMOTE : WAITING_INPUT_BUTTONS_FALLBACK,
-      action: remoteControlUrl
+      description: isCodex ? CODEX_WAITING_INPUT_DESCRIPTION : WAITING_INPUT_DESCRIPTION,
+      buttons: isCodex
+        ? CODEX_WAITING_INPUT_BUTTONS
+        : remoteControlUrl
+          ? WAITING_INPUT_BUTTONS_REMOTE
+          : WAITING_INPUT_BUTTONS_FALLBACK,
+      action: isCodex
+        ? null
+        : remoteControlUrl
         ? { kind: "remote-control", url: remoteControlUrl }
         : placement === "approval"
           ? null

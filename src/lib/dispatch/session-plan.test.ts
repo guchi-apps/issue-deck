@@ -88,6 +88,18 @@ describe("buildSessionPlanCommentBody", () => {
     expect(body).toContain(SESSION_PLAN_MARKER);
   });
 
+  it("Codexでは待ち時間切れ後も端末から答えるよう案内する", () => {
+    const body = buildSessionPlanCommentBody({
+      plan: "計画",
+      remoteControlUrl: null,
+      planBaseSha: null,
+      hostName: "subpc",
+      agent: "codex",
+    });
+    expect(body).toContain("待ち時間が切れた後は端末から伝えてください。");
+    expect(body).not.toContain("待ち時間が切れた後はRemote Controlから伝えてください。");
+  });
+
   /**
    * GitHubのコメント本文は65536字が上限。**超えた場合に投稿ごと失敗する（計画がどこにも
    * 残らない）方が損失が大きい**ので切る。

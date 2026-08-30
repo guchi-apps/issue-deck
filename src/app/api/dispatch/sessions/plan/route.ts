@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
     remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
     planBaseSha: parsePlanBaseSha(payload?.planBaseSha),
     hostName,
+    agent: payload?.agent === "codex" ? "codex" : "claude",
     artifactUpdated,
   });
 
