@@ -19,6 +19,22 @@ import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 /** 画面に出すセッションの様子。状態（tmux）と様子（フック）を1つに畳んだもの */
 export type IssueSessionTone = "running" | "waiting" | "done" | "error";
 
+/** Issueの実装に使われたローカルエージェント。 */
+export type IssueImplementationAgent = "claude" | "codex";
+
+/**
+ * セッションの申告から実装エージェントを判定する（#2581）。
+ *
+ * `codexThreadKnown`はスレッドIDが取れたかを表す値だが、`false`も「Codexを起動したが、
+ * まだスレッドIDを取得できていない」という明示的な申告である。`null`だけがClaude Code
+ * （またはCodex対応前のpoller）なので、truthy判定にはしない。
+ */
+export function resolveIssueImplementationAgent(
+  session: DispatchSessionView,
+): IssueImplementationAgent {
+  return session.codexThreadKnown === null ? "claude" : "codex";
+}
+
 export type IssueSessionSummary = {
   session: DispatchSessionView;
   tone: IssueSessionTone;

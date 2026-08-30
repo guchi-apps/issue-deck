@@ -4,8 +4,10 @@ import type { ReactNode } from "react";
 
 import { Archive, Lock } from "lucide-react";
 
+import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Badge } from "@/components/ui/badge";
+import type { IssueImplementationAgent } from "@/lib/dispatch/issue-session";
 import { formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
@@ -16,6 +18,7 @@ type IssueDetailHeaderProps = {
   onSelectRepository: (repositoryFullName: string) => void;
   /** 操作ボタン列。中身（ダイアログ・状態）は親が持ち、ここは並べるだけ */
   actions: ReactNode;
+  implementationAgent: IssueImplementationAgent | null;
 };
 
 /**
@@ -28,7 +31,12 @@ type IssueDetailHeaderProps = {
  * **メタ情報は「状態・作成者・更新」だけに絞る**（#1577）。担当者・作成日は右のプロパティパネル
  * （`IssuePropertiesPanel`）にあり、両方へ出すと狭いペインで2行に折り返すだけの重複になる。
  */
-export function IssueDetailHeader({ issue, onSelectRepository, actions }: IssueDetailHeaderProps) {
+export function IssueDetailHeader({
+  issue,
+  onSelectRepository,
+  actions,
+  implementationAgent,
+}: IssueDetailHeaderProps) {
   return (
     <div className="sticky top-0 z-20 flex flex-col gap-2 border-b bg-background px-4 py-3">
       {/* 詳細ペインが狭いときやボタンが増えたときに「GitHubで開く」等が横へはみ出して
@@ -57,6 +65,7 @@ export function IssueDetailHeader({ issue, onSelectRepository, actions }: IssueD
         <Badge variant={issue.state === "open" ? "default" : "secondary"}>
           {issue.state === "open" ? "Open" : closedStateLabel(issue.stateReason)}
         </Badge>
+        {implementationAgent && <IssueAgentBadge agent={implementationAgent} />}
         <span className="flex items-center gap-1.5">
           <UserAvatar login={issue.author.login} className="size-5" />
           {issue.author.login}

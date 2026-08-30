@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
+import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
@@ -48,7 +49,11 @@ import {
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
-import { findSessionForIssue, summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import {
+  findSessionForIssue,
+  resolveIssueImplementationAgent,
+  summarizeIssueSession,
+} from "@/lib/dispatch/issue-session";
 import {
   buildIssueQueueStates,
   findIssueQueueState,
@@ -753,12 +758,12 @@ export function IssueList({
   }
 
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
+    const issueSession = sessionByIssueId.get(issue.id) ?? null;
     // 一覧から直接開く出口（#1915）。**出す条件はIssue詳細（`IssueSessionStatus`）と同じ**で、
     // 判定は`summarizeIssueSession`に任せる。終了したセッション・まだ開始していないセッションの
     // URLは開いても意味が無く、そこで同じ分岐をここに書き足すと片方だけ古くなる
     const remoteControlUrl = (() => {
-      const session = sessionByIssueId.get(issue.id);
-      return session ? summarizeIssueSession(session).remoteControlUrl : null;
+      return issueSession ? summarizeIssueSession(issueSession).remoteControlUrl : null;
     })();
     // 押さないと先へ進まない行を見分けられるようにする（#1964）。**出す条件とは別物**で、
     // 判定は`shouldEmphasizeRemoteControl`に置いてある
@@ -871,7 +876,7 @@ export function IssueList({
                 running={runningByIssueId[issue.id]}
                 qaAnswerPending={Boolean(issue.qaAnswerPendingAt)}
                 executionTarget={executionTargetByIssueId.get(issue.id)}
-                session={sessionByIssueId.get(issue.id) ?? null}
+                session={issueSession}
                 now={now}
                 // 確認待ちでもエージェントが動いている間は回し続ける（#2358）。判定は
                 // 左メニュー・ヘッダーの件数と同じ集合（#2174）を使い、材料を増やさない
@@ -927,6 +932,9 @@ export function IssueList({
           </p>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center gap-1">
+              {issueSession && (
+                <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
+              )}
               <QuestionStateBadge
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}

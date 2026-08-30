@@ -474,6 +474,24 @@ function makeDispatch(
   } as unknown as DispatchStateHandle;
 }
 
+describe("Issue一覧の実装エージェント表示（#2581）", () => {
+  it("CodexセッションのIssueにCodexバッジを表示する", () => {
+    renderList({ dispatch: makeDispatch([makeSession({ codexThreadKnown: false })]) });
+    expect(screen.getByText("Codex")).toBeTruthy();
+  });
+
+  it("Claude CodeセッションのIssueにClaudeバッジを表示する", () => {
+    renderList({ dispatch: makeDispatch([makeSession({ codexThreadKnown: null })]) });
+    expect(screen.getByText("Claude")).toBeTruthy();
+  });
+
+  it("セッションが無いIssueにはエージェントバッジを表示しない", () => {
+    renderList({ dispatch: makeDispatch([]) });
+    expect(screen.queryByText("Codex")).toBeNull();
+    expect(screen.queryByText("Claude")).toBeNull();
+  });
+});
+
 // #1915: 入力待ちに気づいてから答えるまで、Issueを開き直さずに済むようにする
 describe("一覧からRemote Controlを開く（#1915）", () => {
   it("Remote ControlのURLがあるセッションの行にだけボタンを出す", () => {
