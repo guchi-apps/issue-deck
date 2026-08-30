@@ -166,6 +166,12 @@ if DEV_PORT_BASE="$(local_repo_port_base "$FULL_NAME")"; then
   export ISSUE_DECK_DEV_PORT_BASE="$DEV_PORT_BASE"
 fi
 
+# 帯の幅（#2478）。「ベース値 + Issue番号」は帯の幅を超えたら帯の中で折り返すため、採番側は
+# ベース値だけでなく幅も要る。3列目が無いリポジトリには渡さず、原則の幅（1000）に任せる。
+if DEV_PORT_WIDTH="$(local_repo_port_width "$FULL_NAME")"; then
+  export ISSUE_DECK_DEV_PORT_WIDTH="$DEV_PORT_WIDTH"
+fi
+
 # execで置き換えるため、以降のtrapは起動先の挙動に委ねる。
 trap - EXIT
 

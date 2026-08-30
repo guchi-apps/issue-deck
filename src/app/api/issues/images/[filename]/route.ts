@@ -4,9 +4,9 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { UPLOADED_IMAGE_DIR, UPLOADED_IMAGE_TRASH_DIR } from "@/lib/images/image-storage";
+import { previewModeGuard } from "@/lib/preview-mode";
 import { isUploadedImageFilename } from "@/lib/uploaded-images";
-
-const UPLOAD_DIR = path.join(process.cwd(), "uploads", "images");
 
 const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   png: "image/png",
@@ -28,17 +28,23 @@ export async function GET(
 
   const extension = filename.slice(filename.lastIndexOf(".") + 1);
 
-  try {
-    const buffer = await readFile(path.join(UPLOAD_DIR, filename));
-    return new NextResponse(new Uint8Array(buffer), {
-      headers: {
-        "Content-Type": CONTENT_TYPE_BY_EXTENSION[extension],
-        "Cache-Control": "public, max-age=31536000, immutable",
-      },
-    });
-  } catch {
+  // **ゴミ箱の中も読む**（#2475）。自動削除は「いきなり消さずゴミ箱へ移す」形だが、移した瞬間に
+  // ここが404になるのでは、誤判定の被害が先送りにならない（貼り付け先の画像はその場で壊れる）。
+  // 読む場所を2か所にして、完全に削除されるまでは今までどおり表示できるようにしてある。
+  // ファイル名の検証（`isUploadedImageFilename`）は上で1回通っているので、防波堤は変わらない。
+  const buffer = await readFile(path.join(UPLOADED_IMAGE_DIR, filename))
+    .catch(() => readFile(path.join(UPLOADED_IMAGE_TRASH_DIR, filename)))
+    .catch(() => null);
+  if (!buffer) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+
+  return new NextResponse(new Uint8Array(buffer), {
+    headers: {
+      "Content-Type": CONTENT_TYPE_BY_EXTENSION[extension],
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
 }
 
 /**
@@ -52,6 +58,11 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ filename: string }> },
 ) {
+  // 確認環境（`PREVIEW_MODE`）から本番の画像を消させない（#2475）。
+  // 画像は`uploads/`の実ファイルで、確認環境と本番が同じディレクトリを見ることがある。
+  const guard = previewModeGuard();
+  if (guard) return guard;
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -63,7 +74,7 @@ export async function DELETE(
   }
 
   try {
-    await unlink(path.join(UPLOAD_DIR, filename));
+    await unlink(path.join(UPLOADED_IMAGE_DIR, filename));
   } catch (error) {
     // すでに消えている場合は、一覧を取り直せば消えるので成功と区別しない
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {

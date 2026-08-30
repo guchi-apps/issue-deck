@@ -170,6 +170,71 @@ develop→mainのマージは人が判断するのに、**その判断材料が�
 | 3. 集める | `reusable-release-develop-to-main.yml`の「対象issueの検証結果を集計する」 | **リリースPRの本文**の`## コードレビューの検証結果` |
 | 4. 出す | issue-deckのPR詳細 | 本文より前に置く検証サマリーのパネル |
 
+### レビュー結果は、まずPRに残っている必要がある（#2488）
+
+**この2段構えは、#2448を入れてから#2488まで一度も機能していなかった。** `claude-review`は
+成功しているのに、レビュー結果のコメントがどのPRにも1件も無い状態が続いていた（直近50件の
+マージ済みdevelop向けPRで0件。PR本文の`## 検証結果`はすべて`review=unavailable`、
+リリースPR #2484の表は6行すべてが「実施なし」「記録なし」）。
+
+原因は`reusable-claude-review-develop.yml`の`--allowedTools`に**`Bash(gh pr comment:*)`が
+無かった**こと。プロンプトは「PRへのコメントとして投稿する」ことを求めているのに、道具が
+無いので投稿できず、権限拒否として黙って落ちていた（実行ログには`permission_denials_count`が
+残るだけで、ジョブは成功で終わる）。**prompt modeのclaude-code-actionは、結果を自分では
+投稿しない。**
+
+対処は3つ。
+
+1. `--allowedTools`へ`Bash(gh pr comment:*)`を足す（`scripts/check-review-verdict-marker.sh`が
+   CIで存在を確かめる）
+2. **投稿が無ければワークフローが転記する**（ステップ「レビュー結果がPRに無ければ転記する」）。
+   実行ログ（`execution_file`）の最後の応答をPRコメントとして投稿し、末尾へ
+   `<!-- issue-deck-review-report sha=<head SHA> -->`を付ける。**判定マーカーは足さない**
+   ——応答に含まれていればそのまま残るだけで、こちらで`lgtm`と書くのは、していないレビューの
+   判定を作ることになる。集計側はこの印の付いたコメントも本文として拾う
+3. 失敗の見え方を変える。道具の欠落は「レビューが走っていない」ではなく「結果が残っていない」
+   として現れる。**`review=unavailable`が続いていたら、まずこの経路を疑う**
+
+判定の分岐は`scripts/reusable-review-report.test.mjs`が`gh`をスタブに差し替えて実行する。
+
+### 判定だけでなく、レビューの本文も載せる（#2488）
+
+**`✅ 問題なし`・`⚠️ 要確認`という判定だけでは、レビューが何を指摘したのかが読めない。** 読むには
+develop向けPRのコメントを1件ずつ開くことになり、10件を超えるリリースでは実質誰も開かない。
+そこで3段目（集計）が、判定の表に加えて**レビューコメントの本文そのもの**をIssueごとの
+折りたたみで表の下へ足す。
+
+```markdown
+<details>
+<summary>#2441 の自動レビュー（✅ 問題なし）</summary>
+
+<!-- issue-deck-review-detail:start issue=2441 -->
+
+（レビューコメント本文。長ければ打ち切る）
+
+[元のレビューコメントを開く](https://github.com/.../pull/2446#issuecomment-1)
+<!-- issue-deck-review-detail:end -->
+
+</details>
+```
+
+- **レビューは回し直さない。** 既に走った結果を、mainへ出すかを決める場所へ持ってくるだけ
+  （リリース時に回し直すと差分が全Issueの和になり、済んだレビューを二重に払う）
+- **拾うのは総評の判定マーカーが付いたPRコメントだけ。** 同じPRには実装者・自動修復・fallbackの
+  コメントも並ぶため、「`claude[bot]`の最後のコメント」では別のものを引く
+- **本文の長さには上限がある**（1件あたり60行・約4,000文字、全体20,000バイト）。GitHubのPR本文は
+  65,536文字までで、超えるとリリースPRの作成そのものが失敗する。打ち切ったぶんは元コメントへの
+  リンクに倒し、**表の行は必ず残す**（本文が載らないことと、検証されていないことは別）
+- **本文が無い行もある。** ローカルのレビュー・統合エージェントがマージしたPRにはレビュー
+  コメントが無く（`scripts/prompts/review-agent.md`はPR本文の節だけを書く）、従来どおり
+  判定の行だけになる
+- 画面（`VerificationSummaryPanel`）では行ごとの「レビュー内容」で開く。**既定は閉じたまま**——
+  全部開いて出すと、内訳を先に読むための帯が本文と同じ長さになる
+- 折りたたみのマーカーは書く側（リリースのワークフロー）と読む側（`release-verification.ts`）の
+  契約で、ずれると**表だけが出て本文が出ない**。`scripts/check-review-verdict-marker.sh`が
+  CIで突き合わせる。集計ステップのシェル自体は`scripts/reusable-release-verification.test.mjs`が
+  `gh`をスタブに差し替えて実行する
+
 ### 書式は3か所にまたがる契約
 
 ```markdown
@@ -200,8 +265,9 @@ develop→mainのマージは人が判断するのに、**その判断材料が�
 - **`merge-blocked`のマーカーは動かさない。** あちらは自動レビューが**対応Issue**へ投稿する
   理由コメントに付き、`auto-merge`がそこだけを読んで`00.check-user`を付ける（#2136）。
   総評の判定マーカーは**PRへのコメント**側に足す別の契約で、既存の読み取り経路は変えていない。
-  PRコメントへ載るのは、claude-code-action自身がレビューの出力を`claude[bot]`名義の
-  PRコメントとして投稿するため（`allowedTools`に`gh pr comment`は要らない）
+  **PRコメントを投稿するのはレビューエージェント自身**で、そのために`allowedTools`へ
+  `Bash(gh pr comment:*)`が要る（#2488。「claude-code-actionが自分で投稿するので要らない」と
+  書いていたのは誤りで、prompt modeのactionは結果を投稿しない）
 - **head refが`issue-<番号>`のPRにしか節を書かない。** バージョンバンプPRの本文にある
   `## 対象issue`はdevelop→mainのPRを作るrunが引き継ぐ唯一の入力（#2117）で、リリースの配管
   そのもの。集計側も`issue-<番号>`のPRしか引くので、そこへ足しても誰も読まない
@@ -223,7 +289,7 @@ develop→mainのマージは人が判断するのに、**その判断材料が�
 | `.github/workflows/reusable-claude-review-develop.yml` | マーカーを読み、PR本文へ節を書く |
 | `.github/workflows/reusable-release-develop-to-main.yml` | 節を集めてリリースPR本文の表にする |
 | `scripts/prompts/review-agent.md` | ローカルのレビュー・統合エージェントが同じ節を書く |
-| `src/lib/github/release-verification.ts` | 画面が表を読んでパネルにする |
+| `src/lib/github/release-verification.ts` | 画面が表とレビュー本文を読んでパネルにする |
 
 ## バージョンの上げ幅の判定
 

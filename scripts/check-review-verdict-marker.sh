@@ -48,6 +48,17 @@ if grep -q 'allowedTools .*Bash(gh issue edit' "$WORKFLOW"; then
   fail=1
 fi
 
+# 逆に、レビュー結果をPRへ投稿する道具は**必ず渡す**（#2488）。プロンプトは「PRへのコメントとして
+# 投稿する」ことと「末尾に総評の判定マーカーを付ける」ことを求めているのに、`gh pr comment`が
+# allowedToolsに無かったため、レビューは走っているのに結果が1件も残っていなかった
+# （PR本文の`## 検証結果`は`review=unavailable`、リリースPRの表は全行が「記録なし」）。
+# prompt modeのclaude-code-actionは結果を自分では投稿しないので、ここが唯一の投稿経路になる。
+if ! grep -q 'allowedTools .*Bash(gh pr comment' "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW のclaude-reviewに Bash(gh pr comment:*) が渡されていません。" >&2
+  echo "  レビュー結果の投稿経路が無くなり、判定も本文も残りません（#2488）。" >&2
+  fail=1
+fi
+
 # --- ここから、総評の判定マーカーと検証結果の節の契約（#2448）---
 #
 # 総評の判定マーカーは、レビューが**PRへ**投稿するコメントの末尾に必ず付く。
@@ -121,9 +132,29 @@ for file in "$RELEASE_WORKFLOW" "$PARSER"; do
   fi
 done
 
+# レビューコメント本文の折りたたみ（#2488）も、書く側（リリースのワークフロー）と
+# 読む側（画面のパーサー）にまたがる契約。ずれても赤くならず、**判定の表だけが出て本文が
+# 出ない**（レビューが何を指摘したのかを読めないまま、mainへのマージを判断することになる）。
+DETAIL_START='<!-- issue-deck-review-detail:start'
+DETAIL_END='<!-- issue-deck-review-detail:end -->'
+
+for file in "$RELEASE_WORKFLOW" "$PARSER"; do
+  if ! grep -qF "$DETAIL_START" "$file"; then
+    echo "エラー: $file にレビュー本文の折りたたみの開始マーカーがありません。" >&2
+    echo "  期待する文字列: $DETAIL_START" >&2
+    fail=1
+  fi
+  if ! grep -qF "$DETAIL_END" "$file"; then
+    echo "エラー: $file にレビュー本文の折りたたみの終了マーカーがありません。" >&2
+    echo "  期待する文字列: $DETAIL_END" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
 echo "OK: claude-reviewの判定マーカーは $PROMPT と $WORKFLOW で一致しています"
 echo "OK: 総評の判定マーカーと検証結果の節の契約も揃っています（#2448）"
+echo "OK: レビュー本文の折りたたみのマーカーも揃っています（#2488）"

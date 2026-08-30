@@ -584,6 +584,11 @@ jobs:
       # **記録が無くても表は作る。** 共有ワークフローの参照タグを配る前にマージされたPRや、
       # ブランチ名が`issue-<番号>`でないPRには節が無い。その行は「記録なし」と出す——
       # 表ごと消すと、検証されていないことも読めなくなる。
+      #
+      # **表に加えて、レビューコメントの本文そのものも折りたたみで載せる**(#2488)。判定
+      # (`✅ 問題なし`・`⚠️ 要確認`)だけでは「何を指摘されたのか」が読めず、mainへ出すかを
+      # 決める場からdevelop向けPRのコメントを1件ずつ開くことになっていた。**レビューを回し
+      # 直すわけではない**——既に走ったレビューの出力を、判断する場所へ持ってくるだけ。
       - name: 対象issueの検証結果を集計する
         if: steps.state.outputs.need_main_pr == 'true'
         # 記録は補助情報なので、集計に失敗してもリリースPRの作成は止めない
@@ -597,6 +602,17 @@ jobs:
           OUT=/tmp/release-verification.md
           : > "$OUT"
 
+          # 表の後ろへ足すレビューコメント本文の置き場(#2488)。
+          DETAILS=/tmp/release-verification-details.md
+          : > "$DETAILS"
+          # 本文の肥大を抑える上限。GitHubのPR本文は65,536文字までで、超えるとPRの作成そのものが
+          # 失敗する。1件あたりで打ち切り(行数と、おおよその文字数。runnerの既定のawkはmawkで
+          # `length`がバイト数になるため、日本語では目安として効く)、全体でも予算を持つ。溢れたぶんは
+          # 「元のコメントを開く」へ倒す——**表の行は必ず残す**ので、検証の有無は読める
+          DETAIL_MAX_LINES=60
+          DETAIL_MAX_CHARS=4000
+          DETAIL_BUDGET_BYTES=20000
+
           # 対象issue一覧は`- #<番号> <タイトル>`の行。取得できなかったときの注記
           # （`（issue-deckへ問い合わせできず…）`）はこの形にならないので拾わない。
           NUMBERS="$(sed -nE 's/^- #([0-9]+).*/\1/p' /tmp/release-issue-lines.txt || true)"
@@ -608,7 +624,7 @@ jobs:
           {
             echo "## コードレビューの検証結果"
             echo
-            echo "developへ入れる前に各PRで行った自動レビューの判定です（#2448）。判定の根拠は各PRのレビューコメントにあります。"
+            echo "developへ入れる前に各PRで行った自動レビューの判定です（#2448）。レビューの本文は表の下の折りたたみで読めます（#2488）。"
             echo
             echo "| Issue | PR | 自動レビュー | 機械的リスク判定 |"
             echo "| --- | --- | --- | --- |"
@@ -616,10 +632,12 @@ jobs:
 
           for NUM in $NUMBERS; do
             PR_JSON="$(gh pr list --state merged --base develop --head "issue-${NUM}" --limit 1 \
-              --json number,body --jq '.[0] // empty' 2>/dev/null || true)"
+              --json number,body,comments --jq '.[0] // empty' 2>/dev/null || true)"
             PR_CELL="—"
             REVIEW=""
             RISK=""
+            REVIEW_BODY=""
+            REVIEW_URL=""
             if [ -n "$PR_JSON" ]; then
               PR_CELL="#$(printf '%s' "$PR_JSON" | jq -r '.number')"
               MARKER="$(printf '%s' "$PR_JSON" | jq -r '.body // ""' \
@@ -628,6 +646,17 @@ jobs:
                 REVIEW="$(printf '%s' "$MARKER" | sed -nE 's/.*review=([a-z-]+).*/\1/p')"
                 RISK="$(printf '%s' "$MARKER" | sed -nE 's/.*risk=([a-z-]+).*/\1/p')"
               fi
+              # レビュー本体が投稿したPRコメント(#2488)。総評の判定マーカー(#2448)か、
+              # ワークフローが転記したときの印(`issue-deck-review-report`)が付いているものだけを
+              # 拾う——同じPRには実装者・自動修復・fallbackのコメントも並ぶため、
+              # 「claude[bot]の最後のコメント」では別のものを引く。追いコミットで複数回
+              # レビューされている場合は最後のものが今の中身に対する判定になる
+              REVIEW_BODY="$(printf '%s' "$PR_JSON" | jq -r '
+                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
+                | last // empty | .body // ""')"
+              REVIEW_URL="$(printf '%s' "$PR_JSON" | jq -r '
+                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
+                | last // empty | .url // ""')"
             fi
             # 文言はreusable-claude-review-develop.yml側と対。画面
             # (src/lib/github/release-verification.ts)はこの列の先頭の記号で判定を読む
@@ -645,7 +674,48 @@ jobs:
               *) RISK_CELL="? 記録なし" ;;
             esac
             echo "| #${NUM} | ${PR_CELL} | ${REVIEW_CELL} | ${RISK_CELL} |" >> "$OUT"
+
+            # レビューコメントの本文を折りたたみで足す(#2488)。**画面(src/lib/github/
+            # release-verification.ts)はこのマーカーで本文を取り出す**ので、書式を変えるときは
+            # 両方を揃える(scripts/check-review-verdict-marker.shがCIで突き合わせる)
+            [ -n "$REVIEW_BODY" ] || continue
+            [ "$(wc -c < "$DETAILS")" -lt "$DETAIL_BUDGET_BYTES" ] || continue
+            # マーカー行(`<!-- ... -->`)は読み手に見えないうえ、画面側の読み取りと紛れる
+            # (grepではなくsedなのは、全行がマーカーだったときに終了コード1で落とさないため)。
+            #
+            # **引用(`> `)にして差し込む。** レビューコメントは自由記述のMarkdownで、`## 総評`の
+            # ような見出しも`- #123`のような箇条書きも入る。素のまま埋めると、リリースPR本文を
+            # 見出しで区切って読む側(`reusable-issue-labels.yml`の`## 対象issue`の切り出し・
+            # `release-verification.ts`の表)の相手が、レビューの書きぶりで変わってしまう。
+            # 引用にすると行頭が`> `になり、どの節の読み取りにも掛からない
+            printf '%s\n' "$REVIEW_BODY" | tr -d '\r' | sed '/^[[:space:]]*<!--/d' \
+              | awk -v maxlines="$DETAIL_MAX_LINES" -v maxchars="$DETAIL_MAX_CHARS" '
+                  NR > maxlines || chars + length($0) + 1 > maxchars { truncated = 1; exit }
+                  { chars += length($0) + 1; print }
+                  END { if (truncated) print "\n（長いため以降を省略しました。全文は元のレビューコメントで読めます）" }
+                ' | sed 's/^/> /; s/^> $/>/' > /tmp/release-review-comment.md
+            {
+              echo "<details>"
+              echo "<summary>#${NUM} の自動レビュー（${REVIEW_CELL}）</summary>"
+              echo
+              echo "<!-- issue-deck-review-detail:start issue=${NUM} -->"
+              echo
+              cat /tmp/release-review-comment.md
+              if [ -n "$REVIEW_URL" ]; then
+                echo
+                echo "[元のレビューコメントを開く](${REVIEW_URL})"
+              fi
+              echo "<!-- issue-deck-review-detail:end -->"
+              echo
+              echo "</details>"
+              echo
+            } >> "$DETAILS"
           done
+
+          if [ -s "$DETAILS" ]; then
+            echo >> "$OUT"
+            cat "$DETAILS" >> "$OUT"
+          fi
 
           echo "検証結果の表:"
           cat "$OUT"

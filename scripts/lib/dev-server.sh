@@ -196,7 +196,8 @@ dev_server_browser_blocked_port() {
 # 単調増加するため実際に取り合いになることはまず無い。逆に下げると隣の帯（前のリポジトリの
 # Issue #999）へはみ出す。
 #
-# Issueごとのセッション（ベース値 + Issue番号）もこれを通す（#2470。`dev_server_port_for_issue`）。
+# 確認環境（ベース値 + 0）はこれを通る。Issueごとのセッションは帯の中で繰り上げる
+# `dev_server_band_safe_port`（#2478）を通る。
 dev_server_browser_safe_port() {
   local port="$1"
   [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
@@ -206,18 +207,58 @@ dev_server_browser_safe_port() {
   printf '%s' "$port"
 }
 
+# 帯（`base`から`width`ぶん）の中でブラウザが開けるポートを返す（#2478）。
+#
+# `dev_server_browser_safe_port`との違いは**帯からはみ出さない**こと。帯の末尾がブロック対象
+# だった場合、素朴に繰り上げると隣のリポジトリの帯へ食い込む（#2478でissue-deckの
+# `4000 + 2470 = 6470`がdayspanの6000帯へ入っていたのと同じ壊れ方になる）。帯の端まで来たら
+# ベース値 + 1へ折り返す（ベース値 + 0は確認環境が使うので飛ばす）。
+#
+# 帯が丸ごとブロック対象ということは起こらないが、無限ループを作らないよう1周で打ち切る。
+dev_server_band_safe_port() {
+  local port="$1" base="$2" width="$3" tried=0
+  [[ "$port" =~ ^[1-9][0-9]*$ ]] || return 1
+  while dev_server_browser_blocked_port "$port"; do
+    port=$((port + 1))
+    if ((port >= base + width)); then
+      port=$((base + 1))
+    fi
+    tried=$((tried + 1))
+    ((tried < width)) || return 1
+  done
+  printf '%s' "$port"
+}
+
 # 対象Issueの開発サーバーが使うポート（#1524）。
 #
-# ポートは「ベース値 + Issue番号」で一意に決まる（scripts/local-repo-ports.conf・
-# scripts/start-issue.sh）。**PIDファイルにはポートを書いていない**ため、PIDファイルを
-# 持たない開発サーバー（後述の`dev_server_stop_by_port`）を引く唯一の手掛かりになる。
+# ポートはIssue番号から一意に決まる（scripts/local-repo-ports.conf・scripts/start-issue.sh）。
+# **PIDファイルにはポートを書いていない**ため、PIDファイルを持たない開発サーバー
+# （後述の`dev_server_stop_by_port`）を引く唯一の手掛かりになる。
 #
 # ベース値は第2引数 → `ISSUE_DECK_DEV_PORT_BASE` → issue-deckの帯（4000）の順で決める。
+# 帯の幅は第3引数 → `ISSUE_DECK_DEV_PORT_WIDTH` → issue-deckの帯の幅（2000。ベース値を渡された
+# 場合は原則の幅1000）の順で決める。
 #
-# **ブラウザがブロックするポートに当たったら繰り上げる**（#2470）。「ベース値 + Issue番号」も
+# **「ベース値 + Issue番号」は帯の中で折り返す**（#2478）。Issue番号は単調増加するので、素朴に
+# 足すと必ずいつか帯の幅を超え、隣のリポジトリの帯へ食い込む（実際にissue-deckの
+# `4000 + 2470 = 6470`がdayspanの6000帯に入り、dayspan #470と同じポートになっていた）。
+# 折り返せば**どのIssue番号でも自分の帯から出ない**ため、帯の割り直しが要らなくなる。
+#
+#   オフセット = (Issue番号 - 1) mod (帯の幅 - 1) + 1     ポート = ベース値 + オフセット
+#
+# `- 1`が入るのは**ベース値 + 0を確認環境（`scripts/start-preview-dev.sh`）が使う**ため。
+# オフセットは1〜(幅 - 1)を巡回する。帯の幅より小さいIssue番号では「ベース値 + Issue番号」と
+# 一致するので、#1999までのissue-deckと他リポジトリのポートはこれまでと変わらない。
+#
+# **折り返した先は同じ帯の古いIssueのポートと重なる**（issue-deckなら1999番違い＝現在のペースで
+# 約42日ぶん離れたIssue）。避けようがないのは繰り上げ（後述）と同じで、**重なった2つが同時に
+# 起動していなければ実害は無い**。同時に起きた場合は`dev_server_wait_for_port`（#2464）が
+# 検出し、`dev_server_port_owner_worktrees`（#2470）が相手のworktreeを名指しする。
+#
+# **ブラウザがブロックするポートに当たったら繰り上げる**（#2470）。折り返した後のポートも
 # 6000以外のブロック対象に当たりうる（dayspan #566 → `6566`、dayspan #665〜#669 → IRCの
 # `6665`〜`6669`、clip-hive #80 → `10080`）。開発サーバーは正しく待ち受けるが、画面が案内する
-# URLをブラウザが開けない。
+# URLをブラウザが開けない。**繰り上げも帯の中で行う**（`dev_server_band_safe_port`。#2478）。
 #
 # **採番する側と止める側の計算をこの関数だけに置くのが前提**（#2470）。片側にだけ繰り上げを
 # 入れると、止める側が繰り上げ前のポートを探しに行って**起こしたセッションを止められなくなる**。
@@ -227,10 +268,9 @@ dev_server_browser_safe_port() {
 #   scripts/generic-start-issue.sh  汎用ランチャー（#1224）の採番
 #   scripts/cleanup-worktrees.sh    worktreeを消す前の停止（#1524）
 #
-# **繰り上げた先は同じ帯の別Issueのポートと重なる**（`6566`→`6567`は#567、`6665`〜`6669`は
-# まとめて`6670`で#670とも重なる）。これは避けようがない——帯の中のどのオフセットも別のIssue番号
-# でありうるため、「ベース値 + Issue番号」を保ったまま衝突しない写像は作れない（ブロック対象より
-# 後ろを全部1つずつずらす写像なら作れるが、今まで動いていたIssueのポートまで動く）。
+# **繰り上げた先・折り返した先は同じ帯の別Issueのポートと重なる**（`6566`→`6567`は#567、
+# `6665`〜`6669`はまとめて`6670`で#670とも重なる）。これは避けようがない——帯の中のどのオフセットも
+# 別のIssue番号でありうるため、帯の中に収まったまま衝突しない写像は作れない。
 # **重なった2つが同時に起動していなければ実害は無い**ので、次の2つで受ける。
 #
 #   - 起動側: 掴めなかったことは`dev_server_wait_for_port`（#2464）が検出して警告する。
@@ -238,10 +278,38 @@ dev_server_browser_safe_port() {
 #   - 停止側: `dev_server_stop_by_port`はcwdで対象worktreeに絞るため、同じポートで待ち受けて
 #     いる別Issueの開発サーバーを巻き込むことはない
 dev_server_port_for_issue() {
-  local issue_number="$1" base="${2:-${ISSUE_DECK_DEV_PORT_BASE:-4000}}"
+  local issue_number="$1" base="${2:-}" width="${3:-}"
+  if [[ -z "$base" ]]; then
+    # 渡されない経路（issue-deck自身のstart-issue.shをターミナルから叩く等）では、
+    # issue-deck自身の帯を既定値にする（#1178）。
+    base="${ISSUE_DECK_DEV_PORT_BASE:-4000}"
+    width="${width:-${ISSUE_DECK_DEV_PORT_WIDTH:-2000}}"
+  else
+    # ベース値を渡してくる経路（汎用ランチャー・cleanup-worktrees.sh）は対応表から引いている。
+    # 幅も渡してくるのが正で、渡ってこなければ原則の幅（1000）に落とす。
+    width="${width:-${ISSUE_DECK_DEV_PORT_WIDTH:-1000}}"
+  fi
   [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || return 1
   [[ "$base" =~ ^[0-9]+$ ]] || return 1
-  dev_server_browser_safe_port "$((base + issue_number))"
+  [[ "$width" =~ ^[1-9][0-9]*$ ]] || return 1
+  local span=$((width - 1))
+  ((span >= 1)) || return 1
+  dev_server_band_safe_port "$((base + (issue_number - 1) % span + 1))" "$base" "$width"
+}
+
+# 「ベース値 + Issue番号」と実際に使うポートが違うときに、その理由を1行で返す（#2478）。
+# 同じなら1を返す（呼び出し側は何も出さない）。**採番と同じ理由をどの起動経路でも同じ文言で
+# 出すため**、ここに置いて`start-issue.sh`・`generic-start-issue.sh`の両方から呼ぶ。
+dev_server_port_note() {
+  local issue_number="$1" base="$2" width="$3" port="$4"
+  local natural=$((base + issue_number))
+  [[ "$port" == "$natural" ]] && return 1
+  if ((issue_number >= width)); then
+    printf '%s' "Issue番号 $issue_number は帯の幅（$width）を超えるため、帯（$base〜$((base + width - 1))）の中で折り返して $port を使います（#2478）。"
+  else
+    printf '%s' "ポート $natural はブラウザが接続を拒否するため、$port を使います（#2470）。"
+  fi
+  return 0
 }
 
 # そのポートで待ち受けているプロセスのPIDを列挙する（#1524）。

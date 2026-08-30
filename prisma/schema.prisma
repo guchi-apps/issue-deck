@@ -101,6 +101,11 @@ model Repository {
   // なるため、片方だけ対応済みという状態が普通に起きる。
   hasLocalStartScript Boolean   @default(false)
   lastSyncedAt        DateTime?
+  // 添付画像の参照を集める巡回（#2475）が、このリポジトリのIssueコメントをどこまで読んだか。
+  // 値は**読み終えた最後のコメントの`updated_at`**（巡回の開始時刻ではない）。ページ数の上限で
+  // 打ち切るため、開始時刻を書くと打ち切った残りを丸ごと飛ばす。nullは「一度も読んでいない」で、
+  // 1つでもnullが残っている間は自動削除を始めない（UploadedImageReferenceのコメント参照）
+  imageCommentScanAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -363,7 +368,55 @@ model AppSetting {
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
   dispatchConcurrency Int      @default(3)
+
+  // 参照されていない添付画像の自動削除（#2475）。**既定はOFF**——「未使用」の判定は
+  // Issue本文とIssue／PRのコメントしか見ておらず、PR本文・リポジトリ内のファイル・
+  // GitHub外への貼り付けは原理的に検出できない。人が中身を見て納得してから有効にする。
+  imageCleanupEnabled Boolean  @default(false)
+  // アップロードから何日経ったものを自動削除の対象にするか。下書きに貼ったまま投稿していない
+  // 画像（localStorageにしか無く、サーバーからは見えない）を巻き込まないための猶予でもある
+  imageRetentionDays  Int      @default(30)
+  // 全リポジトリのIssueコメントを一度読み切った時刻。**列に既定値を持たせない**——
+  // `@default(now())`にすると、マイグレーション直後に「全件確認済み・参照0件」という
+  // 最悪の状態が成立する。nullの間は自動削除を一切行わない
+  imageScanCompletedAt DateTime?
+
   updatedAt           DateTime @updatedAt
+}
+
+/// 添付画像がどこに貼られているかの索引（#2475）。「未使用」を判定できるようにするための表。
+///
+/// **Repository・Issueへのリレーション（外部キー）を張らない。** `Issue.repository`は
+/// `onDelete: Cascade`で、リポジトリの連携が外れると（`repository-sync.ts`の`deleteMany`）
+/// そのリポジトリのIssue行が全部消える。ここにFKを張ると参照も道連れになり、GitHub上では
+/// 今も表示されている画像が一斉に「未使用」へ変わる。**参照は消えずに古びる方が安全**なので、
+/// 参照元を消したときに一緒に消えない形で持つ。
+///
+/// 行を消すのは「その参照元をもう一度読んで、そこに画像が無くなっていた」ときだけ。
+/// 削除されたコメントの参照は永久に残るが、それは「消えない」方向の誤りなので許容する
+/// （溜まったら`{"force":true,"full":true}`で全再スキャンして作り直す）。
+model UploadedImageReference {
+  id String @id @default(cuid())
+
+  /// `uploads/images/`のファイル名（UUID + 拡張子）
+  filename String
+  /// 参照元。`issue:<githubIssueId>`（本文）または`comment:<githubCommentId>`（コメント）。
+  /// 参照元ごとに「今そこに写っている画像の集合」へ置き換えるための鍵
+  sourceKey String
+
+  /// 画面のリンクを作るための情報。参照元が消えても引けるよう、ここに写しで持つ
+  repositoryFullName String
+  issueNumber        Int
+  /// 参照元がPull Requestか。リポジトリ単位のコメント一覧はPRのコメントも返す
+  isPullRequest      Boolean @default(false)
+
+  foundAt   DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([filename, sourceKey])
+  @@index([filename])
+  @@index([sourceKey])
 }
 
 // Fine-grained PAT（例: secrets.WORKFLOW_PAT）等、有効期限を追跡したいトークンの管理台帳。

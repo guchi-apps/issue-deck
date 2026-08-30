@@ -6,6 +6,10 @@
  * 残った`## 検証結果`の節（`reusable-claude-review-develop.yml`が書く）を集めたもの。
  * ここではその表をそのまま読む。
  *
+ * **表の下には、レビューコメントの本文そのものが折りたたみで載っている**（#2488）。判定だけ
+ * では何を指摘されたのかが読めず、mainへ出すかを決める場から各PRのコメントを1件ずつ開くことに
+ * なっていた。本文もここで拾い、画面のパネルから開けるようにする。
+ *
  * **JSONブロックは持たせない。** GitHubでそのまま読める表の中から読み取る方針は、
  * リポジトリ全体のコードレビュー（`code-review.ts`）と揃えてある。ずれると黙って
  * パネルが出なくなるため、見出しの文字列は`scripts/check-review-verdict-marker.sh`が
@@ -20,6 +24,17 @@ const HEADING_PATTERN = /^\s{0,3}#{1,6}\s/;
 
 /** `| --- | --- |`の区切り行 */
 const SEPARATOR_PATTERN = /^\|[\s:|-]+\|$/;
+
+/**
+ * 表の下に続くレビューコメント本文の折りたたみ（#2488）。ワークフロー側と対（CIで突き合わせる）。
+ *
+ * 書式は`<!-- issue-deck-review-detail:start issue=<番号> -->`から
+ * `<!-- issue-deck-review-detail:end -->`まで。開始マーカーで表の読み取りも打ち切る
+ * ——**レビュー本文の中に表が入っていることがある**ため、打ち切らないとそれを検証結果の
+ * 行として読み込みかねない。
+ */
+const DETAIL_START_PATTERN = /<!--\s*issue-deck-review-detail:start\s+issue=(\d+)[^>]*-->/;
+const DETAIL_END_MARKER = "<!-- issue-deck-review-detail:end -->";
 
 /**
  * 自動レビューの判定。**5つだけ**で、これ以上増やさない（色と判断が1対1で対応しなくなる）。
@@ -49,6 +64,12 @@ export type ReleaseVerificationRow = {
   reviewLabel: string;
   riskKind: RiskVerdictKind;
   riskLabel: string;
+  /**
+   * 自動レビューがdevelop向けPRへ投稿したコメントの本文（#2488）。長い場合はワークフローが
+   * 打ち切り、末尾に元コメントへのリンクを添えている。記録が無ければnull
+   * （ローカルのレビュー・統合エージェントがマージしたPRにはレビューコメントが無い）。
+   */
+  reviewBody: string | null;
 };
 
 export type ReleaseVerificationTally = {
@@ -133,6 +154,39 @@ function parseIssueTitles(lines: readonly string[]): Map<number, string> {
   return titles;
 }
 
+/**
+ * 折りたたみに入っているレビューコメント本文をIssue番号ごとに拾う（#2488）。
+ *
+ * **表の行とは独立に拾う。** 本文が長くて打ち切られた回・レビューが走らなかったPRでは
+ * 折りたたみそのものが無く、その場合は行に本文が付かないだけで表は従来どおり出る。
+ */
+function parseReviewBodies(lines: readonly string[]): Map<number, string> {
+  const bodies = new Map<number, string>();
+  let issueNumber: number | null = null;
+  let collected: string[] = [];
+
+  for (const line of lines) {
+    if (issueNumber === null) {
+      const matched = DETAIL_START_PATTERN.exec(line);
+      if (matched) {
+        issueNumber = Number(matched[1]);
+        collected = [];
+      }
+      continue;
+    }
+    if (line.includes(DETAIL_END_MARKER)) {
+      const body = collected.join("\n").trim();
+      if (body !== "") {
+        bodies.set(issueNumber, body);
+      }
+      issueNumber = null;
+      continue;
+    }
+    collected.push(line);
+  }
+  return bodies;
+}
+
 function tally(rows: readonly ReleaseVerificationRow[]): ReleaseVerificationTally {
   return {
     total: rows.length,
@@ -160,9 +214,10 @@ export function parseReleaseVerification(body: string | null | undefined): Relea
   }
 
   const titles = parseIssueTitles(lines);
+  const bodies = parseReviewBodies(lines);
   const rows: ReleaseVerificationRow[] = [];
   for (const line of lines.slice(start + 1)) {
-    if (HEADING_PATTERN.test(line)) {
+    if (HEADING_PATTERN.test(line) || DETAIL_START_PATTERN.test(line)) {
       break;
     }
     if (SEPARATOR_PATTERN.test(line.trim())) {
@@ -187,6 +242,7 @@ export function parseReleaseVerification(body: string | null | undefined): Relea
       reviewLabel: review.label,
       riskKind: risk.kind,
       riskLabel: risk.label,
+      reviewBody: bodies.get(issueNumber) ?? null,
     });
   }
 

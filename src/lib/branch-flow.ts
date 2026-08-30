@@ -5,6 +5,7 @@ import {
   classifyPullRequest,
   extractLinkedIssueNumber,
   isMergeJudgementPending,
+  RELEASE_BRANCH_PREFIX,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type {
@@ -611,10 +612,45 @@ function compareStartedIssues(a: BranchFlowStartedIssue, b: BranchFlowStartedIss
 /** マージ済みのリリースPR（develop→main）を、マージが古い順に並べたもの */
 type MergedRelease = {
   mergedAt: number;
+  /** この版が運ぶ内容が確定した時刻（ミリ秒）。`releaseContentFrozenAt`を参照 */
+  frozenAt: number;
   version: string | null;
   pullRequestNumber: number;
   pullRequest: PullRequestSummary;
 };
+
+/**
+ * リリースPRが「何を運ぶか」を確定させた時刻（#2489）。**マージ時刻ではない。**
+ *
+ * `release-main/vX.Y.Z`をheadにするリリースPR（#2117以降）は、**PRを作る時点でその内容を
+ * 固定ブランチへ凍結している**。PRを作った後にdevelopへ入った変更はそのリリースには含まれず、
+ * 次のリリースへ回る（PR本文にもそう書いてある）。にもかかわらずマージ時刻で突き合わせて
+ * いたため、**リリースPRが開いている間にdevelopへ入った作業が、その版で本番へ出たことに
+ * なっていた**（#2489。実例: PR #2485は17:58にdevelopへ入り、17:33に作られたv4.51.0の
+ * リリースPRが18:04にマージされたことで「v4.51.0で本番反映」と表示されていたが、
+ * `release-main/v4.51.0`にはそのコミットが入っていない）。develop→mainのマージは人が行う
+ * ため、この窓は数十分〜数日開く。
+ *
+ * **head が`develop`のリリースPR（#2117以前・共有ワークフローの参照タグが古いリポジトリ）は
+ * 従来どおりマージ時刻で判定する。** あちらはheadがブランチの先端を追い続けるので、
+ * 実際にmainへ入るのはマージ時点のdevelopであり、作成時刻で切ると「入っているのに未反映」と
+ * 逆向きに誤る。判定の材料はPR1件が既に持っている値だけなので、**GitHub APIの消費は増えない。**
+ *
+ * 凍結点そのものはバンプPRのhead（＝バンプPRを作った時点のdevelop）で、リリースPRの作成は
+ * その数十秒〜数分後になる。バンプPRのCIが走っている間にdevelopへ入った作業だけは、
+ * ここでも1つ前の版に数えてしまう。**それでも作成時刻を使う**——PR詳細のデプロイ表示
+ * （`lib/pull-request-deploy.ts`）はmain宛のPRしか取らずバンプPRを見られないため、
+ * バンプPRを使うと2つの画面で結論がずれる（#1814の「同じ計算を共有する」前提が崩れる）。
+ */
+export function releaseContentFrozenAt(release: {
+  headRef: string;
+  createdAt: string;
+  mergedAt: string | null;
+}): string {
+  return release.headRef.startsWith(RELEASE_BRANCH_PREFIX)
+    ? release.createdAt
+    : (release.mergedAt ?? release.createdAt);
+}
 
 /**
  * リポジトリごとの「直近でmainへ入ったリリースPRのマージ時刻」（#1579）。
@@ -642,6 +678,7 @@ function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
     .filter((pullRequest) => pullRequest.kind === "release" && pullRequest.mergedAt !== null)
     .map((pullRequest) => ({
       mergedAt: new Date(pullRequest.mergedAt as string).getTime(),
+      frozenAt: new Date(releaseContentFrozenAt(pullRequest)).getTime(),
       version: releaseVersionFromTitle(pullRequest.title),
       pullRequestNumber: pullRequest.number,
       pullRequest,
@@ -910,11 +947,15 @@ export function extractManualStepOrigin(body: string | null): number | null {
 }
 
 /**
- * マージ済みの作業が本番へ届いているかを判定する（#1455）。
+ * マージ済みの作業が本番へ届いているかを判定する（#1455・#2489）。
  *
- * develop→mainのリリースPRは、マージした時点のdevelopをそのままmainへ入れる。よって
- * **作業PRがdevelopへ入った後、最初にマージされたリリースPRがその変更を本番へ運んだ**ことになり、
+ * **作業PRがdevelopへ入った後、最初に内容を凍結したリリースPRがその変更を本番へ運ぶ**ので、
  * タイムスタンプの比較だけで版が決まる（追加のAPI呼び出しが要らない）。
+ *
+ * 比べる相手はリリースPRのマージ時刻ではなく**凍結時刻**（`releaseContentFrozenAt`）。
+ * `release-main/vX.Y.Z`をheadにするリリースPRは作成時点で内容が止まっており、その後に
+ * developへ入った作業は次のリリースへ回る（#2117）。マージ時刻で比べていたころは、
+ * リリースPRが開いている間にdevelopへ入った作業まで「その版で本番反映」と出ていた（#2489）。
  *
  * クローズ済みPRの取得は直近30件（更新が新しい順）で打ち切っているが、**作業PRが取得できて
  * いれば、その後にマージされたリリースPRも取得できている**——後からマージされたPRの方が
@@ -931,7 +972,7 @@ function resolveReleaseState(
   if (mergedAtIso === null || releases.length === 0) return { kind: "unknown" };
   const mergedAt = new Date(mergedAtIso).getTime();
 
-  const carrier = releases.find((release) => release.mergedAt > mergedAt);
+  const carrier = releases.find((release) => release.frozenAt > mergedAt);
   return carrier
     ? { kind: "released", version: carrier.version, pullRequestNumber: carrier.pullRequestNumber }
     : { kind: "pending" };
