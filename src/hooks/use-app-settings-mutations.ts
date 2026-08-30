@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { ClaudeModel } from "@/lib/app-settings";
+import type { ClaudeModel, CodexModel } from "@/lib/app-settings";
 
 export function useAppSettingsMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,6 +32,7 @@ export function useAppSettingsMutations() {
   async function updateClaudeModel(
     claudeModel: ClaudeModel,
     claudeModelAssist: ClaudeModel,
+    codexModel: CodexModel,
   ): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -39,7 +40,7 @@ export function useAppSettingsMutations() {
       const res = await fetch("/api/settings/claude-model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeModel, claudeModelAssist }),
+        body: JSON.stringify({ claudeModel, claudeModelAssist, codexModel }),
       });
       if (!res.ok) {
         throw new Error(`リクエストに失敗しました (${res.status})`);

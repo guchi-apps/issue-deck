@@ -4,6 +4,8 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs } from "@/lib/dispatch/jobs";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
+import { parseCodexModel } from "@/lib/app-settings";
+import { db } from "@/lib/db";
 
 /**
  * サブPCのpollerがジョブを取りに来る口（#1179）。
@@ -63,5 +65,13 @@ export async function POST(request: NextRequest) {
   }
 
   const jobs = await claimDispatchJobs({ hostName, maxJobs });
-  return NextResponse.json({ ok: true, jobs }, { headers: { "Cache-Control": "no-store" } });
+  if (jobs.length === 0) {
+    return NextResponse.json({ ok: true, jobs }, { headers: { "Cache-Control": "no-store" } });
+  }
+  const setting = await db.appSetting.findUnique({ where: { id: 1 }, select: { codexModel: true } });
+  const codexModel = parseCodexModel(setting?.codexModel) ?? "auto";
+  return NextResponse.json(
+    { ok: true, jobs: jobs.map((job) => ({ ...job, codexModel })) },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

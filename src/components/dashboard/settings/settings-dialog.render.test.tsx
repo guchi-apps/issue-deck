@@ -115,6 +115,7 @@ function renderDialog() {
       autoRetryLimit={2}
       claudeModel="auto"
       claudeModelAssist="haiku"
+      codexModel="auto"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
@@ -212,10 +213,12 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(save);
     await waitFor(() => expect(updateAutoRetryLimit).toHaveBeenCalledWith(5));
+    expect(updateClaudeModel).toHaveBeenCalledWith("auto", "haiku", "auto");
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
       claudeModelAssist: "haiku",
+      codexModel: "auto",
       dispatchConcurrency: 2,
     });
   });

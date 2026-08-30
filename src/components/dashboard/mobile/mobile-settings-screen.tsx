@@ -23,7 +23,7 @@ import {
 } from "@/components/dashboard/settings/settings-sections";
 import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { useSettingsData } from "@/hooks/use-settings-data";
-import type { ClaudeModel } from "@/lib/app-settings";
+import type { ClaudeModel, CodexModel } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -37,6 +37,7 @@ type MobileSettingsScreenProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  codexModel: CodexModel;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
@@ -55,6 +56,7 @@ export function MobileSettingsScreen({
   autoRetryLimit,
   claudeModel,
   claudeModelAssist,
+  codexModel,
   dispatchConcurrency,
   repositories,
   onSetRepositoryHidden,
@@ -156,6 +158,7 @@ export function MobileSettingsScreen({
             autoRetryLimit={autoRetryLimit}
             claudeModel={claudeModel}
             claudeModelAssist={claudeModelAssist}
+            codexModel={codexModel}
             dispatchConcurrency={dispatchConcurrency}
             onUpdated={onUpdated}
           />

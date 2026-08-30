@@ -17,15 +17,18 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   CLAUDE_MODEL_OPTIONS,
+  CODEX_MODEL_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
   type ClaudeModel,
+  type CodexModel,
 } from "@/lib/app-settings";
 
 export type AppSettingsValues = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  codexModel: CodexModel;
   dispatchConcurrency: number;
 };
 
@@ -33,6 +36,7 @@ type ExecutionSettingsSectionProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  codexModel: CodexModel;
   dispatchConcurrency: number;
   // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
   onUpdated: (values: AppSettingsValues) => void;
@@ -49,6 +53,7 @@ export function ExecutionSettingsSection({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  codexModel: initialCodexModel,
   dispatchConcurrency: initialDispatchConcurrency,
   onUpdated,
 }: ExecutionSettingsSectionProps) {
@@ -58,6 +63,7 @@ export function ExecutionSettingsSection({
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -78,17 +84,18 @@ export function ExecutionSettingsSection({
     autoRetryLimit !== initialAutoRetryLimit ||
     claudeModel !== initialClaudeModel ||
     claudeModelAssist !== initialClaudeModelAssist ||
+    codexModel !== initialCodexModel ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
   async function handleSubmit() {
     setIsSaved(false);
     const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
     if (!autoRetryOk) return;
-    const claudeModelOk = await updateClaudeModel(claudeModel, claudeModelAssist);
+    const claudeModelOk = await updateClaudeModel(claudeModel, claudeModelAssist, codexModel);
     if (!claudeModelOk) return;
     const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
     if (!dispatchOk) return;
-    onUpdated({ autoRetryLimit, claudeModel, claudeModelAssist, dispatchConcurrency });
+    onUpdated({ autoRetryLimit, claudeModel, claudeModelAssist, codexModel, dispatchConcurrency });
     setIsSaved(true);
   }
 
@@ -156,6 +163,27 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground">
           質問への回答とサブIssueへの分割で使用するモデルです。実装ほどの精度を必要としないため、
           より軽いモデルを選ぶとコストを抑えられます。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="codex-model">Codexで使用するモデル</Label>
+        <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModel)}>
+          <SelectTrigger id="codex-model" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CODEX_MODEL_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          サブPCで新しく起動するCodex
+          CLIセッションのモデルです。「自動」の場合はモデルを指定せず、Codex
+          CLI側のデフォルトモデルが使われます。全リポジトリ共通の設定です。
         </p>
       </div>
 
