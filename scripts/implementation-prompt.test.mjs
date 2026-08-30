@@ -70,6 +70,20 @@ describe("実装プロンプトの生成", () => {
     expect(prompt).not.toContain("Plan modeの`ExitPlanMode`で計画を提示した場合");
   });
 
+  it("Codexでは確認を`scripts/submit-question.sh`で画面へ出すよう書く", () => {
+    const supplement = readFileSync(
+      path.join(repoRoot, "scripts/prompts/codex-supplement.md"),
+      "utf8",
+    );
+    expect(supplement).toContain("`scripts/submit-question.sh <質問JSONファイル>`を実行してください");
+    expect(supplement).toContain("標準出力のanswers JSON");
+    expect(supplement).not.toContain("確認が必要なときは端末で質問し");
+  });
+
+  it("Claude Codeでは質問送信コマンドを案内しない", () => {
+    expect(render("claude")).not.toContain("scripts/submit-question.sh");
+  });
+
   it("Claude Codeでは従来どおりPlan modeで出すよう書く", () => {
     const prompt = render("claude");
     expect(prompt).toContain("実装前にPlan modeで");

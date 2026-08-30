@@ -289,7 +289,7 @@ as a parameter - it will read the plan from the file you wrote」とある。実
 なお人が画面の承認ボタンで先に外していることもあるが、`removeIssueLabel`が404を成功として
 扱うのでそのまま通る。
 
-## Claude Codeからの質問にも画面から答える（#2189）
+## Claude CodeとCodexからの質問にも画面から答える（#2189・#2579）
 
 **`AskUserQuestion`の選択肢は、端末とRemote Controlからしか選べなかった。** 画面に出るのは
 「入力を待っています」というバッジと「Remote Controlから答えてください」という案内だけで、
@@ -315,9 +315,16 @@ AskUserQuestion（質問）
        → PostToolUse → POST /api/dispatch/sessions/activity → 00.check-user を除去
 ```
 
-**回答が決まらなければ何も返さず、従来どおりの経路へ倒れる**（待ち時間切れ／「端末で答える」／
-issue-deckが応答しない）。フェイルオープン・60秒の猶予・待ちを畳ませる`POST`は計画とまったく
-同じ作りで、境界は`scripts/session-notify-question.test.mjs`が固定している。
+Codexには`AskUserQuestion`とそのフックが無いため、#2579では同じAPIを
+`scripts/submit-question.sh <質問JSONファイル>`から呼ぶ。質問ファイルは上と同じ`questions`配列で、
+画面・ラベル・Issueコメント・保存する状態はClaude Code経路と共通になる。回答はanswers JSONとして
+標準出力へ返し、エージェントがその内容を読んで作業を続ける。期限切れ・通信失敗は非0で止め、
+回答されていないのに作業を進めない。
+
+**Claude Code経路では、回答が決まらなければ何も返さず、従来どおりの経路へ倒れる**（待ち時間切れ／
+「端末で答える」／issue-deckが応答しない）。Codex経路は未回答を成功にせず、終了コード`2`または
+`3`で端末からの確認へ切り替える。60秒の通信猶予・待ちを畳ませる`POST`は計画と同じ作りで、
+境界は`scripts/session-notify-question.test.mjs`と`scripts/submit-question.test.mjs`が固定している。
 
 - **回答は`allow`＋`updatedInput.answers`で渡す。** `AskUserQuestion`は入力に`answers`
   （質問文 → 回答文字列。複数選択は`, `区切り）が入っていればそれをそのまま結果にするツールで、
