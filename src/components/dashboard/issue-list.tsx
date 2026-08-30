@@ -339,7 +339,7 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
  * （`isQaAnswerWaiting`）で受け取るのは、「質問する」ボタンが通常のIssueのコメント欄にも
  * あるため（`resolveQuestionState`の`waiting`はタイトルが質問Issueの形のものしか通さない）。
  * 回すのは待っているのが処理だから——**承認待ち（琥珀）は人を待っているので回さない**
- * （`WorkflowStepBadge`の外周リングと同じ使い分け）。未確認も回さない。
+ * （`WorkflowStepBadge`の掃く光と同じ使い分け）。未確認も回さない。
  */
 function QuestionStateBadge({
   state,
@@ -518,7 +518,7 @@ export function IssueList({
     return map;
   }, [issues, dispatch.sessions]);
   // 実行が始まる前の状態（#2449）。積んだ直後のIssueは進捗Statusが`Ready`のままで右上の
-  // 円グラフが描かれず、行が押す前とまったく同じに見えていた。**Issueの件数に関わらず
+  // 進捗バーが描かれず、行が押す前とまったく同じに見えていた。**Issueの件数に関わらず
   // 組み立ては1回**で、行ごとにジョブ一覧を走査し直さない
   const queueStateByIssueId = useMemo(() => {
     // 並べ替えは実行キューの要約に任せる（#2449）。同じ規則をここで書き直すと、
@@ -783,7 +783,7 @@ export function IssueList({
       getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null &&
       !isApprovalPending(issue.labels);
     /**
-     * 実行が始まる前の状態（#2449）。**円を2つ並べない**ので、進捗の円グラフが描かれる行では
+     * 実行が始まる前の状態（#2449）。**バーを2つ並べない**ので、進捗バーが描かれる行では
      * `WorkflowStepBadge`へ渡して添える字にし、描かれない行（＝積んだ直後のStatusが`Ready`の
      * まま）だけ`QueueStepBadge`を出す。どちらを出すかを知れるのは両方を並べているここだけ
      * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
@@ -858,7 +858,11 @@ export function IssueList({
                 </>
               )}
             </span>
-            <span className="flex shrink-0 items-center gap-1.5">
+            {/* 進捗が円（18px）から横棒（40px）になり、右側のクラスタが22px広くなった（#2516）。
+                `shrink-0`のままだと、一覧カラムを最小幅（280px）まで詰めたときに逃げ場が無く
+                行からはみ出す。縮められるようにして、**添える字（「実装中（サブPC）」）だけが
+                切り詰められる**ようにする（アイコン・バー・アバターは`shrink-0`のまま） */}
+            <span className="flex min-w-0 items-center gap-1.5">
               <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />
               <ManualStepReadinessIcon readiness={prerequisiteReadiness?.get(issue.id)} />
               <WorkflowStepBadge
@@ -875,8 +879,8 @@ export function IssueList({
                 queue={queueState}
                 queueWaitReason={queueWaitReason}
               />
-              {/* 進捗の円グラフが描かれない行（積んだ直後のStatusが`Ready`のまま）だけ、
-                  実行が始まる前の状態を同じ位置・同じ大きさの円で出す（#2449） */}
+              {/* 進捗バーが描かれない行（積んだ直後のStatusが`Ready`のまま）だけ、
+                  実行が始まる前の状態を同じ位置・同じ寸法のバーで出す（#2449） */}
               {!stepBadgeVisible && queueState && (
                 <QueueStepBadge queue={queueState} waitReason={queueWaitReason} />
               )}
@@ -898,7 +902,7 @@ export function IssueList({
               )}
               {issue.favorite && (
                 <Star
-                  className="size-3.5 fill-yellow-400 text-yellow-400"
+                  className="size-3.5 shrink-0 fill-yellow-400 text-yellow-400"
                   aria-label="お気に入り"
                 />
               )}

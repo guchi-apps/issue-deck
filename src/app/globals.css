@@ -219,3 +219,61 @@
     width: 60%;
   }
 }
+
+/* 一覧の進捗バー（#2516）で「いま動いている」を表す光（`WorkflowStepBadge`）。
+   円グラフだった頃は外周のリングを`animate-spin`で回していたが、横棒には回す外周が無い。
+   代わりに**現在の段のマスの中だけ**を光が左から右へ掃く。塗り（進捗）は動かさないので、
+   どこまで進んだかを読むのに動きが邪魔をしない。 */
+@keyframes progress-seg-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.progress-seg-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--background) 85%, transparent),
+    transparent
+  );
+  animation: progress-seg-sweep 1.2s linear infinite;
+}
+
+/* 起動中（`QueueStepBadge`）はまだ1段も進んでいないため掃く先のマスが無い。
+   トラック全体を光が1往復する（`loading-bar-slide`と同じ考え方で、進捗率は出さない）。 */
+@keyframes progress-bar-sweep {
+  from {
+    left: -42%;
+  }
+  to {
+    left: 102%;
+  }
+}
+
+.progress-bar-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 55%, transparent);
+  animation: progress-bar-sweep 1.3s cubic-bezier(0.55, 0.1, 0.35, 0.9) infinite;
+}
+
+/* 動きを減らす設定では掃かせず、置いたままにする（状態は添える字とツールチップで伝わる） */
+@media (prefers-reduced-motion: reduce) {
+  .progress-seg-sweep {
+    animation: none;
+  }
+
+  .progress-bar-sweep {
+    animation: none;
+    left: 30%;
+  }
+}

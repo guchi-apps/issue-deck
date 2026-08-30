@@ -12,9 +12,9 @@ import type { IssueQueueState } from "@/lib/dispatch/issue-queue-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
- * バッジの外周リング（`animate-spin`）が回る条件の配線を確認する（#1439）。
+ * バッジが動く（現在の段のマスを光が掃く。#2516）条件の配線を確認する（#1439）。
  * 条件そのもののケースは`src/lib/workflow-badge-activity.test.ts`にあり、ここでは
- * 「サブPCのセッションが実際にリングへ届いているか」だけを見る。
+ * 「サブPCのセッションが実際にバーへ届いているか」だけを見る。
  */
 
 const NOW = Date.parse("2026-08-14T12:00:00.000Z");
@@ -41,12 +41,23 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
   };
 }
 
-function spinner(container: HTMLElement): Element | null {
-  return container.querySelector(".animate-spin");
+/** 実行中の合図（現在の段のマスを掃く光。#2516） */
+function segSweep(container: HTMLElement): Element | null {
+  return container.querySelector(".progress-seg-sweep");
+}
+
+/** 起動中の合図（トラック全体を1往復する光。#2516） */
+function barSweep(container: HTMLElement): Element | null {
+  return container.querySelector(".progress-bar-sweep");
 }
 
 function pulse(container: HTMLElement): Element | null {
   return container.querySelector(".animate-pulse");
+}
+
+/** 塗られたマスの数（#2516）。進捗の段数と一致する */
+function filledSegments(container: HTMLElement): number {
+  return container.querySelectorAll(".bg-current").length;
 }
 
 function queueState(overrides: Partial<IssueQueueState> = {}): IssueQueueState {
@@ -62,7 +73,20 @@ function queueState(overrides: Partial<IssueQueueState> = {}): IssueQueueState {
 afterEach(cleanup);
 
 describe("WorkflowStepBadge", () => {
-  it("サブPCのセッションが動いている間はリングを回す", () => {
+  it("進んだ段までのマスを塗る（1マス＝1段。#2516）", () => {
+    const planning = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
+    expect(filledSegments(planning.container)).toBe(1);
+    cleanup();
+
+    const developPr = render(<WorkflowStepBadge labels={[]} projectStatus="Develop PR" />);
+    expect(filledSegments(developPr.container)).toBe(3);
+    cleanup();
+
+    const done = render(<WorkflowStepBadge labels={[]} projectStatus="Done" />);
+    expect(filledSegments(done.container)).toBe(6);
+  });
+
+  it("サブPCのセッションが動いている間はマスを掃く", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -72,10 +96,10 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(spinner(container)).not.toBeNull();
+    expect(segSweep(container)).not.toBeNull();
   });
 
-  it("入力待ちで止まっているセッションでは回さない", () => {
+  it("入力待ちで止まっているセッションでは掃かない", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -85,11 +109,11 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(spinner(container)).toBeNull();
+    expect(segSweep(container)).toBeNull();
     expect(container.textContent).toContain("入力待ち");
   });
 
-  it("GitHub Actionsの実行中は従来どおり回す", () => {
+  it("GitHub Actionsの実行中は従来どおり掃く", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -98,12 +122,12 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(spinner(container)).not.toBeNull();
+    expect(segSweep(container)).not.toBeNull();
   });
 
-  // #2358。確認待ちのまま処理が動いている間も回す。判定材料は一覧が持つ
+  // #2358。確認待ちのまま処理が動いている間も掃く。判定材料は一覧が持つ
   // `checkUserRunningIssueIds`（#2174）で、渡さなければ従来どおり止まる
-  it("確認待ちでもエージェントが動いていれば回す", () => {
+  it("確認待ちでもエージェントが動いていれば掃く", () => {
     const labels = [{ name: "00.check-user", color: "", description: null }];
     const props = {
       labels,
@@ -113,10 +137,10 @@ describe("WorkflowStepBadge", () => {
       now: NOW,
     };
     const running = render(<WorkflowStepBadge {...props} checkUserRunning />);
-    expect(spinner(running.container)).not.toBeNull();
+    expect(segSweep(running.container)).not.toBeNull();
     cleanup();
     const stopped = render(<WorkflowStepBadge {...props} />);
-    expect(spinner(stopped.container)).toBeNull();
+    expect(segSweep(stopped.container)).toBeNull();
   });
 
   it("サブPC実行では「起動待ち」を出さない（#1262の判定を壊していない）", () => {
@@ -131,7 +155,7 @@ describe("WorkflowStepBadge", () => {
       />,
     );
     expect(container.textContent).not.toContain("起動待ち");
-    expect(spinner(container)).not.toBeNull();
+    expect(segSweep(container)).not.toBeNull();
   });
 });
 
@@ -158,23 +182,27 @@ describe("WorkflowStatusSteps のスマホ用キャプション", () => {
 });
 
 /**
- * 実行が始まる前のバッジ（#2449）。**回すのは起動中だけ**で、順番待ちは破線の明滅にする
- * ——回すと、実際に作業が進んでいる行と一覧の上で区別が付かなくなる。
+ * 実行が始まる前のバッジ（#2449）。**掃くのは起動中だけ**で、順番待ちは明滅にする
+ * ——掃くと、実際に作業が進んでいる行と一覧の上で区別が付かなくなる。
  */
 describe("QueueStepBadge", () => {
-  it("順番待ちは番号を出し、回さずに明滅させる", () => {
+  it("順番待ちは番号を出し、掃かずに明滅させる", () => {
     const { container } = render(<QueueStepBadge queue={queueState()} />);
     expect(container.textContent).toContain("順番待ち 2番目");
-    expect(spinner(container)).toBeNull();
+    expect(barSweep(container)).toBeNull();
     expect(pulse(container)).not.toBeNull();
+    // まだ1段も進んでいないので1マスも塗らない（#2516）
+    expect(filledSegments(container)).toBe(0);
   });
 
-  it("起動中は「起動中」を出して回す", () => {
+  it("起動中は「起動中」を出してトラック全体を掃く", () => {
     const { container } = render(
       <QueueStepBadge queue={queueState({ phase: "starting", position: null })} />,
     );
     expect(container.textContent).toContain("起動中");
-    expect(spinner(container)).not.toBeNull();
+    expect(barSweep(container)).not.toBeNull();
+    expect(pulse(container)).toBeNull();
+    expect(filledSegments(container)).toBe(0);
   });
 
   it("待ちが進まない理由はツールチップに出す", () => {
@@ -188,7 +216,7 @@ describe("QueueStepBadge", () => {
 });
 
 /**
- * 進捗の円グラフが描かれる行では円を2つ並べず、添える字で待っていることを言う（#2449）。
+ * 進捗バーが描かれる行ではバーを2つ並べず、添える字で待っていることを言う（#2449）。
  */
 describe("WorkflowStepBadgeの順番待ち", () => {
   it("実行先と順番待ちを両方添える", () => {

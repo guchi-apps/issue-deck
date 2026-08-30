@@ -88,8 +88,8 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * そのIssueのサブPCセッション（#1264・`findSessionForIssue`の結果）。無ければnull。
    *
    * 添える文言（`shortIssueSessionLabel`。入力待ち・終了・異常終了のときだけ出す）と、
-   * 外周リングを回すかどうか（#1439）の**両方をここから決める**。別々に渡すと、片方だけ
-   * 更新された状態（例: 「入力待ち」と出ているのに回り続ける）が作れてしまう。
+   * バーを動かすかどうか（#1439）の**両方をここから決める**。別々に渡すと、片方だけ
+   * 更新された状態（例: 「入力待ち」と出ているのに動き続ける）が作れてしまう。
    */
   session?: DispatchSessionView | null;
   /**
@@ -100,14 +100,14 @@ type WorkflowStepBadgeProps = ProgressProps & {
   /**
    * 確認待ち（`00.check-user`）だが、まだエージェントが動いているか（#2358）。
    * 一覧が持っている`checkUserRunningIssueIds`（#2174の判定）をそのまま渡す。
-   * **省略時は従来どおり**、確認待ちの間は回さない。
+   * **省略時は従来どおり**、確認待ちの間は動かさない。
    */
   checkUserRunning?: boolean;
   /**
    * 実行が始まる前の状態（#2449。`buildIssueQueueStates`の結果）。無ければnull。
    *
-   * **円を2つ並べないための口**。進捗Statusが進んでいるIssueを積み直した場合、この円は
-   * すでに描かれているので、隣に`QueueStepBadge`をもう1つ出すと同じ行に円が2つ並ぶ。
+   * **バーを2つ並べないための口**。進捗Statusが進んでいるIssueを積み直した場合、このバーは
+   * すでに描かれているので、隣に`QueueStepBadge`をもう1つ出すと同じ行にバーが2つ並ぶ。
    * 待っていることは添える字（「サブPC・順番待ち 2番目」）で言う。
    */
   queue?: IssueQueueState | null;
@@ -128,7 +128,15 @@ type QueueStepBadgeProps = {
   waitReason?: string | null;
 };
 
-const BADGE_SIZE = 18;
+/**
+ * 一覧の進捗バーの寸法（#2516）。**1マス＝1段**で、Issue詳細の6段ステップ
+ * （`WorkflowStatusSteps`）と数が対応する。
+ *
+ * 以前は18pxの円グラフで、進捗を角度（`conic-gradient`）で表していた。18pxの円では
+ * 3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが分からなかった。
+ */
+const BAR_WIDTH = 40;
+const BAR_HEIGHT = 5;
 
 /** 計画フェーズ（`Planning`）の段の位置。スキップの判定に使う（#2069） */
 const PLANNING_STEP_INDEX = WORKFLOW_STEPS.findIndex((step) => step.key === "planning");
@@ -137,18 +145,80 @@ const PLANNING_STEP_INDEX = WORKFLOW_STEPS.findIndex((step) => step.key === "pla
 const SKIPPED_STEP_LABEL = "計画スキップ";
 const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りました";
 
+type ProgressBarProps = {
+  /** 塗るマス数（0〜`WORKFLOW_STEPS.length`）。0なら1マスも塗らない */
+  filled: number;
+  /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
+  colorClass: string;
+  /** 実行中（#1439）。現在の段のマスの中だけを光が掃く */
+  live?: boolean;
+  /** 起動中（#2449）。まだ0段なのでトラック全体を光が1往復する */
+  sweeping?: boolean;
+  /** 順番待ち（#2449）。動かさず、ゆっくり明滅させるだけ */
+  pulsing?: boolean;
+};
+
 /**
- * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを円グラフ（パイ）で示す。
- * ユーザーの確認待ち（00.check-user）の場合はamber色に切り替えたうえで中央にアラート
- * アイコンを重ね、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
- * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで中央に質問アイコンを重ねる
+ * 一覧の行に出す進捗の横棒（#2516）。`WorkflowStepBadge`（進捗Statusを持つ行）と
+ * `QueueStepBadge`（実行が始まる前の行）が**同じ寸法・同じ塗り分け**で共有する。
+ *
+ * 動きの使い分けは円グラフだった頃の外周リングをそのまま引き継ぐ。実行中だけを掃き、
+ * 順番待ちは明滅させるだけにする——掃くと、実際に作業が進んでいる行と一覧の上で
+ * 区別が付かなくなる（`docs/code-map.md`「同じ状態を2か所で言わせない」）。
+ */
+function ProgressBar({
+  filled,
+  colorClass,
+  live = false,
+  sweeping = false,
+  pulsing = false,
+}: ProgressBarProps) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative flex shrink-0 gap-[2px] overflow-hidden rounded-full",
+        colorClass,
+        pulsing && "animate-pulse",
+      )}
+      style={{ width: BAR_WIDTH, height: BAR_HEIGHT }}
+    >
+      {WORKFLOW_STEPS.map((step, index) => (
+        <span
+          key={step.key}
+          className={cn(
+            "relative flex-1 overflow-hidden rounded-[1px]",
+            index < filled
+              ? "bg-current"
+              : "bg-[color-mix(in_oklch,currentColor_15%,transparent)]",
+          )}
+        >
+          {/* 掃くのは現在の段（最後に塗ったマス）だけ。済んだ段まで光ると、どこが動いて
+              いるのかが読めなくなる */}
+          {live && index === filled - 1 && <span className="progress-seg-sweep" />}
+        </span>
+      ))}
+      {sweeping && <span className="progress-bar-sweep" />}
+    </span>
+  );
+}
+
+/**
+ * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを**6分割の横棒**で示す（#2516）。
+ * 1マス＝1段で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の簡易版にあたる。
+ * 以前は同じ位置に18pxの円グラフ（`conic-gradient`）を出していたが、小さな円の角度では
+ * 3/6と4/6を見分けられず、一覧を流し見しても何段目かが分からなかった。
+ *
+ * ユーザーの確認待ち（00.check-user）の場合はamber色に切り替えたうえでバーの左隣にアラート
+ * アイコンを添え、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
+ * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで質問アイコンを添える
  * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
- * 実行中は円の外周にスピン用のリングを重ねて回転させ、進捗（塗り分け）と実行中（回転）を
- * 同じ円で同時に表現する。**回すかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
+ * 実行中は現在の段のマスを光が掃き、進捗（塗り分け）と実行中（動き）を同じバーで同時に
+ * 表現する。**動かすかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
  * `isWorkflowBadgeSpinning`（#1439）に集約している。**
  *
- * リングは**常時見えるトラックの上を半周ぶんの弧が回る**形にしている（#2358）。細い弧だけを
- * 出していた頃は、18pxのバッジの周りで回っているかどうかが読み取れなかった。
+ * **掃くのは現在の段だけで、塗りそのものは動かさない**（#2516）。バー全体を光らせると、
+ * どこまで進んだかを読み取る手がかりまで動いてしまう。
  */
 export function WorkflowStepBadge({
   labels,
@@ -171,8 +241,6 @@ export function WorkflowStepBadge({
   const reason = checkUserReason(labels);
   const showQaAnswerPending = qaAnswerPending && !approvalPending;
   const step = WORKFLOW_STEPS[currentIndex];
-  const progress = (currentIndex + 1) / WORKFLOW_STEPS.length;
-  const progressDeg = progress * 360;
   const actionsRunning = running?.isRunning ?? false;
   // 外周を回すかどうか（#1439）。Actionsの実行中に加えて、サブPCのセッションが生きて動いている
   // 間も回す。人待ち（承認待ち・入力待ち）と、終わった・報告が途絶えたセッションでは回さない
@@ -235,87 +303,46 @@ export function WorkflowStepBadge({
                 ? `（${localSuffix}）`
                 : ""
       }${queueWaitReason ? ` ${queueWaitReason}` : ""}`}
-      className="flex min-w-0 shrink-0 items-center gap-1.5"
+      // 行の右端が溢れるより先に、添える字（「実装中（サブPC）」）が切り詰められるようにする
+      // （#2516）。バーは円より22px幅を取るため、一覧カラムを最小幅（280px）まで詰めた
+      // ときに`shrink-0`のままだと逃げ場が無くなる。バー・アイコン側は`shrink-0`のまま
+      className="flex min-w-0 items-center gap-1.5"
     >
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{stepText}</span>
-      <span
-        className="relative flex shrink-0 items-center justify-center"
-        style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
-      >
-        {/* 実行中の回転（#1439・#2358）。**常時見えるトラックの上を、半周ぶんの弧が回る。**
-            以前は2pxの弧が1/4周だけで、18pxのバッジの周りでは回っているかどうかが分からず、
-            スマホでは動きに気付けなかった（#2358の「一瞬だけしか出ていない」）。トラックが
-            あると弧の位置に関わらず輪郭が見えるので、止まっているのか回っているのかを
-            視線を止めずに読める。
-            色は円グラフと同じ系統に合わせる。**承認待ち（amber）のリングも出る**——確認待ちの
-            まま処理が動いている状態を回転で表すため（`isWorkflowBadgeSpinning`） */}
-        {isSpinning && (
-          <>
-            <span
-              aria-hidden="true"
-              className={cn(
-                "absolute rounded-full border-[2.5px]",
-                approvalPending
-                  ? "border-amber-500/25"
-                  : showQaAnswerPending
-                    ? "border-blue-500/25"
-                    : "border-primary/25",
-              )}
-              style={{ inset: -4 }}
-            />
-            <span
-              aria-hidden="true"
-              className={cn(
-                "absolute animate-spin rounded-full border-[2.5px] border-transparent",
-                approvalPending
-                  ? "border-t-amber-500 border-r-amber-500"
-                  : showQaAnswerPending
-                    ? "border-t-blue-500 border-r-blue-500"
-                    : "border-t-primary border-r-primary",
-              )}
-              style={{ inset: -4 }}
-            />
-          </>
-        )}
-        <span
+      {/* 円だった頃は中央に重ねていたアイコンを、バーの左隣へ出す（#2516）。5px高のバーの
+          中には収まらない。**色はバーと同じ系統**にして、同じことを言っていると分かるようにする */}
+      {approvalPending && (
+        <CircleAlert className={cn("size-3 shrink-0", accentColorClass)} aria-hidden="true" />
+      )}
+      {showQaAnswerPending && (
+        <MessageCircleQuestion
+          className={cn("size-3 shrink-0", accentColorClass)}
           aria-hidden="true"
-          className={cn("block rounded-full", accentColorClass)}
-          style={{
-            width: BADGE_SIZE,
-            height: BADGE_SIZE,
-            background: `conic-gradient(currentColor 0deg ${progressDeg}deg, color-mix(in oklch, currentColor ${approvalPending || showQaAnswerPending ? 20 : 15}%, transparent) ${progressDeg}deg 360deg)`,
-          }}
         />
-        {approvalPending && (
-          <span className="absolute inset-0 flex items-center justify-center">
-            <CircleAlert className="size-2.5 text-background" />
-          </span>
-        )}
-        {showQaAnswerPending && (
-          <span className="absolute inset-0 flex items-center justify-center">
-            <MessageCircleQuestion className="size-2.5 text-background" />
-          </span>
-        )}
-      </span>
+      )}
+      {/* 実行中は現在の段のマスを光が掃く（#1439・#2358・#2516）。**承認待ち（amber）でも
+          掃く**——確認待ちのまま処理が動いている状態を動きで表すため（`isWorkflowBadgeSpinning`） */}
+      <ProgressBar filled={currentIndex + 1} colorClass={accentColorClass} live={isSpinning} />
     </span>
   );
 }
 
 /**
- * 実行が始まる前（順番待ち・起動中）を、進捗の円グラフと同じ位置・同じ大きさで示す（#2449）。
+ * 実行が始まる前（順番待ち・起動中）を、進捗バーと同じ位置・同じ寸法で示す（#2449）。
  *
  * 積んだ直後のIssueは進捗Statusが`Ready`のままで`WorkflowStepBadge`が何も描かないため、
  * 一覧の行は押す前とまったく同じに見えていた（振り分けだけは#1347で「実行中」ビューへ
  * 移している）。**出すのはその穴を埋めるためだけ**で、Statusが進んだ行では
- * `WorkflowStepBadge`が添える字として言う（円を2つ並べない。
+ * `WorkflowStepBadge`が添える字として言う（バーを2つ並べない。
  * `docs/code-map.md`「同じ状態を2か所で言わせない」）。
  *
- * 見分け方は外周の動きに寄せてある。
+ * 見分け方は動きに寄せてある。
  *
- * - **順番待ちは回さない。** 破線の輪をゆっくり明滅させるだけにする。回すと、実際に作業が
+ * - **順番待ちは掃かない。** バーをゆっくり明滅させるだけにする。掃くと、実際に作業が
  *   進んでいる行（`isWorkflowBadgeSpinning`）と一覧の上で区別が付かなくなる
- * - **起動中は`WorkflowStepBadge`と同じ形で回す**（実線のトラック＋半周ぶんの弧。#2358）。
- *   中の円は塗らない——まだ1段も進んでいないので、進捗としては0
+ * - **起動中はトラック全体を光が1往復する**（#2516）。`WorkflowStepBadge`は現在の段の
+ *   マスだけを掃くが、こちらはまだ1段も進んでおらず掃く先のマスが無い
+ * - **どちらも1マスも塗らない**——進捗としては0
  */
 export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps) {
   const isStarting = queue.phase === "starting";
@@ -331,52 +358,21 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
       title={`${label}${
         waitReason ? `。${waitReason}` : isStarting ? "" : "。サブPCが順に起動します"
       }`}
-      className="flex min-w-0 shrink-0 items-center gap-1.5"
+      // `WorkflowStepBadge`と同じく、溢れるより先に添える字が切り詰められるようにする（#2516）
+      className="flex min-w-0 items-center gap-1.5"
     >
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{label}</span>
-      <span
-        className="relative flex shrink-0 items-center justify-center"
-        style={{ width: BADGE_SIZE, height: BADGE_SIZE }}
-      >
-        {isStarting ? (
-          <>
-            <span
-              aria-hidden="true"
-              className="absolute rounded-full border-[2.5px] border-primary/25"
-              style={{ inset: -4 }}
-            />
-            <span
-              aria-hidden="true"
-              className="absolute animate-spin rounded-full border-[2.5px] border-transparent border-t-primary border-r-primary"
-              style={{ inset: -4 }}
-            />
-          </>
-        ) : (
-          // 破線＋明滅。`animate-pulse`は既定で2秒周期のゆっくりした明滅で、回転と違って
-          // 「進んでいる」とは読めない
-          <span
-            aria-hidden="true"
-            className="absolute animate-pulse rounded-full border-[2.5px] border-dashed border-muted-foreground/55"
-            style={{ inset: -4 }}
-          />
-        )}
-        <span
-          aria-hidden="true"
-          className={cn("block rounded-full", accentColorClass)}
-          style={{
-            width: BADGE_SIZE,
-            height: BADGE_SIZE,
-            // 進捗は0段。`WorkflowStepBadge`の未達部分と同じ濃さで塗り、同じ円の仲間だと
-            // 分かるようにする
-            background: "color-mix(in oklch, currentColor 15%, transparent)",
-          }}
-        />
-        {!isStarting && (
-          <span className="absolute inset-0 flex items-center justify-center">
-            <Hourglass className="size-2.5 text-muted-foreground" />
-          </span>
-        )}
-      </span>
+      {/* 待っていることを形でも言う。起動中は動き（掃く光）が出るのでアイコンは添えない */}
+      {!isStarting && <Hourglass className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
+      {/* 進捗は0段。`WorkflowStepBadge`の未達部分と同じ濃さになり、同じバーの仲間だと分かる。
+          `animate-pulse`は既定で2秒周期のゆっくりした明滅で、掃く光と違って
+          「進んでいる」とは読めない */}
+      <ProgressBar
+        filled={0}
+        colorClass={accentColorClass}
+        sweeping={isStarting}
+        pulsing={!isStarting}
+      />
     </span>
   );
 }
