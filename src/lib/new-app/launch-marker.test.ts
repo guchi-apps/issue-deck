@@ -85,7 +85,9 @@ describe("マーカー", () => {
       host: { online: true, manualStepCapable: true, manualStepValuesCapable: true },
       isManualStepIssue: true,
     });
-    expect(plan.entries.every((entry) => entry.rejection === null)).toBe(true);
+    expect(plan.entries.filter((entry) => entry.rejection !== null)).toEqual([
+      expect.objectContaining({ interactiveCommand: "claude", rejection: "interactive_command" }),
+    ]);
     expect(plan.runnable).toBeGreaterThanOrEqual(3);
   });
 });

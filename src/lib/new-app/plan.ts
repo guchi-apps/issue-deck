@@ -1069,24 +1069,24 @@ function portBandPrerequisite(refs: NewAppIssueRefs): string {
 }
 
 export function buildSubpcManualIssueTitle(spec: NewAppSpec): string {
-  return `[手作業] サブPC: ${spec.repositoryName}のシークレットを投入する`;
+  return `[手作業] サブPC: ${spec.repositoryName}のローカル準備とシークレット投入を行う`;
 }
 
 /**
- * サブPCの手作業Issue。**代行実行の条件をすべて満たす形で書く。**
+ * サブPCの手作業Issue。フォルダ信頼だけは人が確認し、残りは代行実行できる形で書く。
  *
  * - 実行するデバイスは `サブPC` の1つだけ
  * - 1手順にコマンドブロックはちょうど1つ
- * - 対話が要るコマンド（`op signin` など）を含まない
+ * - フォルダ信頼の確認は対話が要るため、単独の手順にして「あなたが実行」へ分ける
  * - `<…>` のプレースホルダを含まない（値はすべて埋めて出す）
  *
- * 条件を1つでも崩すと、その手順は「あなたが実行」として並ぶだけになる。
+ * 信頼確認以外で条件を崩すと、その手順まで「あなたが実行」として並ぶため注意する。
  */
 export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRefs): string {
   const repo = repositoryFullName(spec);
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
-    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCで \`${spec.repositoryName}\` のローカルセッションも起こせるようになる`,
+    benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCでフォルダ信頼確認に止まらず、\`${spec.repositoryName}\` のローカルセッションを起こせるようになる`,
     blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（**無人実行は雛形のcallerで動くため、こちらは止まりません**）`,
     urgency: "初回の本番デプロイまで（初期化Issueは待ちません）",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
@@ -1106,6 +1106,12 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 
   \`\`\`bash
   printf '%s\\n' '${repo} ${path}' >> "$HOME/.config/issue-deck/local-repos.conf"
+  \`\`\`
+
+- [ ] （サブPC）Claude Codeを一度開き、「Yes, I trust this folder」を選んでから \`/exit\` で抜ける
+
+  \`\`\`bash
+  cd ${path} && claude
   \`\`\`
 
 - [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
@@ -1131,6 +1137,14 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 
   追記した1行がそのまま出れば完了です。pollerは申告のたびに読み直すので、再起動は要りません。
 
+- Claude Codeのフォルダ信頼確認が済んでいる
+
+  \`\`\`bash
+  bash -c 'source "$HOME/apps/issue-deck/scripts/lib/claude-trust.sh" && claude_trust_is_trusted "${path}"' && echo trusted
+  \`\`\`
+
+  \`trusted\` が出れば完了です。信頼確認そのものは自動化せず、人が対象リポジトリを確認して答えます。
+
 - 1Passwordのアイテムに値が入っている
 
   \`\`\`bash
@@ -1141,7 +1155,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 ${sharedSecretCheck(spec)}${wildcardDnsCheck(spec)}
 **GitHubのsecretへの同期もこの時点で終わります**——同期に要る \`.github/secrets-manifest.tsv\` は
 リポジトリの作成時に雛形としてコミット済みだからです（#2247）。`,
-    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。ただしこの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
+    why: "サブPCのファイルシステムと個人設定（`~/.config/issue-deck/local-repos.conf`）への書き込みで、GitHubからは行えないためです。フォルダ信頼は対象を人が確認して答える必要があるため自動化せず、その手順だけサブPCの端末で実行します。ほかの手順と`## 完了の確認方法`のコマンドは、手作業アシスタントの代行実行で流せます。",
     related: `- 起点Issue: ${refs.parent}`,
   });
 }

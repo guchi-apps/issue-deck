@@ -398,13 +398,15 @@ describe("buildSubpcManualIssueBody", () => {
     expect(guide?.where.defaultDevice).toBe("サブPC");
   });
 
-  it("すべての手順を手作業アシスタントが代行実行できる", () => {
+  it("フォルダ信頼だけを人が実行し、残りは手作業アシスタントが代行実行できる", () => {
     const plan = buildManualStepRunPlan(body, undefined, {
       host: READY_HOST,
       isManualStepIssue: true,
     });
-    expect(plan.entries.every((entry) => entry.rejection === null)).toBe(true);
-    expect(plan.blocked).toBe(0);
+    const blocked = plan.entries.filter((entry) => entry.rejection !== null);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatchObject({ interactiveCommand: "claude", rejection: "interactive_command" });
+    expect(plan.blocked).toBe(1);
     expect(plan.runnable).toBeGreaterThanOrEqual(3);
   });
 
@@ -431,25 +433,26 @@ describe("buildSubpcManualIssueBody", () => {
   // #2256。散文の確認では「登録されたか」を確かめられず、aide-botでは未実施のままcloseされた
   it("完了の確認方法を、手順ごとの検証コマンドにする（#2256）", () => {
     const commands = extractVerificationCommands(body).map((entry) => entry.command);
-    // 手順の3つに加えて、#2246で手順を外した2つ（共通secret・ホスト名）の確認だけを引き取る
-    expect(commands).toHaveLength(5);
+    // 手順の4つに加えて、#2246で手順を外した2つ（共通secret・ホスト名）の確認だけを引き取る
+    expect(commands).toHaveLength(6);
     expect(commands[0]).toContain("test -d /home/guchi/apps/kakei-report/.git");
     expect(commands[1]).toContain("grep -F 'guchi-apps/kakei-report /home/guchi/apps/kakei-report'");
+    expect(commands[2]).toContain("claude_trust_is_trusted");
     // 投入と同じ引数に`--check`を足しただけの形。ずれると確かめていないフィールドが生まれる
-    expect(commands[2]).toContain("--check");
-    expect(commands[2]).toContain("--db-name app_kakei_report");
-    expect(commands[2]).toContain("--copy-allowed-emails");
+    expect(commands[3]).toContain("--check");
+    expect(commands[3]).toContain("--db-name app_kakei_report");
+    expect(commands[3]).toContain("--copy-allowed-emails");
   });
 
   // #2246。登録の手順は外したが、`visibility`が`selected`へ戻されたときに黙って壊れないよう
   // 確認だけは残し、定期巡回が拾えるようにする
   it("登録を求めずに、共通secretとホスト名の確認だけを引き取る", () => {
     const commands = extractVerificationCommands(body).map((entry) => entry.command);
-    expect(commands[3]).toContain("actions/organization-secrets");
-    expect(commands[3]).toContain(
+    expect(commands[4]).toContain("actions/organization-secrets");
+    expect(commands[4]).toContain(
       "grep -cE '^(CLAUDE_CODE_OAUTH_TOKEN|OP_SERVICE_ACCOUNT_TOKEN|WORKFLOW_PAT)$'",
     );
-    expect(commands[4]).toContain("dig +short kakei-report.gucchii.com A");
+    expect(commands[5]).toContain("dig +short kakei-report.gucchii.com A");
     // リポジトリごとの登録画面は案内しない（organizationの設定だけ、足りないときの逃げ道に残す）
     expect(body).not.toContain("github.com/guchi-apps/kakei-report/settings/secrets");
     expect(body).not.toContain("Aレコードを追加");
@@ -458,7 +461,7 @@ describe("buildSubpcManualIssueBody", () => {
   it("マルチエージェント運用に対応させないと、数える共通secretも減る", () => {
     const single = buildSubpcManualIssueBody(spec({ multiAgent: false }), REFS);
     const commands = extractVerificationCommands(single).map((entry) => entry.command);
-    expect(commands[3]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
+    expect(commands[4]).toContain("grep -cE '^(OP_SERVICE_ACCOUNT_TOKEN)$'");
     expect(single).toContain("**`1` が出れば完了です。**");
   });
 
@@ -467,7 +470,7 @@ describe("buildSubpcManualIssueBody", () => {
       spec({ urlMode: "path", basePath: "kakei-report" }),
       REFS,
     );
-    expect(extractVerificationCommands(pathBody)).toHaveLength(4);
+    expect(extractVerificationCommands(pathBody)).toHaveLength(5);
   });
 
   it("確認コマンドまで手作業アシスタントが代行実行できる（#2256）", () => {
@@ -476,7 +479,7 @@ describe("buildSubpcManualIssueBody", () => {
       isManualStepIssue: true,
     });
     const verifications = plan.entries.filter((entry) => entry.kind === "verification");
-    expect(verifications).toHaveLength(5);
+    expect(verifications).toHaveLength(6);
     expect(verifications.every((entry) => entry.rejection === null)).toBe(true);
   });
 
