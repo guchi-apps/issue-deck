@@ -50,8 +50,9 @@ export type UsageIssue = UsageTotals & {
   issueNumber: number | null;
   /** そのIssueで走った種別（金額の多い順） */
   kinds: string[];
-  lastAt: string;
-  /** 転記1本ごとの明細（金額の多い順）。画面は行を開いたときだけ出す */
+  /** そのIssueで最も新しいセッションの開始日時。Issueの表示順に使う */
+  latestStartedAt: string;
+  /** 転記1本ごとの明細（開始日時の新しい順）。画面は行を開いたときだけ出す */
   entries: SessionUsageEntry[];
 };
 
@@ -279,20 +280,22 @@ export function buildSessionUsageSummary({
         repository: entry.repository,
         issueNumber: entry.issueNumber,
         kinds: [],
-        lastAt: entry.endedAt,
+        latestStartedAt: entry.startedAt,
         entries: [],
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntry(issue, entry);
     issue.entries.push(entry);
-    if (entry.endedAt > issue.lastAt) issue.lastAt = entry.endedAt;
+    if (entry.startedAt > issue.latestStartedAt) issue.latestStartedAt = entry.startedAt;
     byIssue.set(issueKey, issue);
   }
 
   const byCost = (a: { costUsd: number }, b: { costUsd: number }) => b.costUsd - a.costUsd;
 
   const issues = [...byIssue.values()].map((issue) => {
-    issue.entries.sort(byCost);
+    // **進行中のセッションほど上へ出す。** 使用量順では、開始直後で金額の小さいセッションが
+    // 下へ埋もれ、「今実装しているセッション」を見つけられない（#2560）。
+    issue.entries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     // 種別は金額の多い順に並べ、同じ種別は1つにまとめる。
     const kindCost = new Map<string, number>();
     for (const entry of issue.entries) {
@@ -301,7 +304,7 @@ export function buildSessionUsageSummary({
     issue.kinds = [...kindCost.entries()].sort((a, b) => b[1] - a[1]).map(([kind]) => kind);
     return issue;
   });
-  issues.sort(byCost);
+  issues.sort((a, b) => b.latestStartedAt.localeCompare(a.latestStartedAt));
   const omitted = issues.slice(MAX_DETAIL_ISSUES);
 
   return {
