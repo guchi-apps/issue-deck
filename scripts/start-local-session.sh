@@ -115,14 +115,57 @@ if [[ -n "$PACKAGE_MANAGER" ]] && ! command -v "$PACKAGE_MANAGER" >/dev/null 2>&
   exit 1
 fi
 
+# 起こすエージェントCLI（#2377・#2505）。**画面から選ばれた場合はpollerが`ISSUE_DECK_AGENT`で
+# 渡してくる**（`scripts/subpc-dispatch-poller.sh`）。指定が無ければ従来どおりClaude Code。
+#
+# ここで解決した種別は、下の存在チェックと、その先の start-issue.sh（`--agent`と同じ入口）で使う。
+AGENT_KIND="${ISSUE_DECK_AGENT:-claude}"
+case "$AGENT_KIND" in
+  claude) AGENT_COMMAND="claude" ;;
+  codex) AGENT_COMMAND="codex" ;;
+  *)
+    echo "Error: 対応していないエージェントです: $AGENT_KIND（指定できるのは claude codex）" >&2
+    exit 1
+    ;;
+esac
+export ISSUE_DECK_AGENT="$AGENT_KIND"
+
 # 起動に必要な外部コマンド。3リポジトリのstart-issue.shに同じ確認が重複していたため、
 # 経路の共通部分であるここへ寄せた（各リポジトリ側はターミナル直叩き用に残っている）。
-for required_command in git gh claude; do
+#
+# **エージェントのCLIは選ばれたものを見る**（#2505）。`claude`固定のままだと、Codexで起こす
+# ときに使いもしないCLIの有無で止まる。
+for required_command in git gh "$AGENT_COMMAND"; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Error: $required_command コマンドが見つかりません。" >&2
     exit 1
   fi
 done
+
+# 既定以外のエージェントで起こせる出口かを、worktreeを作る前に確かめる（#2505）。
+#
+# **黙ってClaude Codeで立てない。** 画面には選んだエージェントの名前が出ているので、
+# 別のCLIが立つと「Codexを選んだのに通知が飛ばない仕組みが動いている」という読み方になる。
+# ここで`exit 1`すればpollerがジョブを`failed`にし、この文面が画面に出る。
+#
+# **契約適合のリポジトリは、実際に走るファイルを見て判定する**（宣言された版数ではなく）。
+# ローカル起動プロトコルの版数はリポジトリ側が手で書くもので、`ISSUE_DECK_AGENT`を読むように
+# したかどうかとは連動しない。走るファイルそのものを見れば、版数の宣言が古いままでも正しく判定できる。
+if [[ "$AGENT_KIND" != "claude" ]]; then
+  if [[ "$LAUNCH_MODE" == "generic" ]]; then
+    echo "Error: 汎用ランチャーは $AGENT_KIND での起動に対応していません（$FULL_NAME）。" >&2
+    echo "  対象リポジトリが scripts/start-issue.sh を持つ場合だけ、エージェントを選べます。" >&2
+    echo "  （docs/multi-agent/codex.md「まだやっていないこと」）" >&2
+    exit 1
+  fi
+  if ! grep -q 'ISSUE_DECK_AGENT' "$LAUNCHER"; then
+    echo "Error: $FULL_NAME の scripts/start-issue.sh は ISSUE_DECK_AGENT を読みません。" >&2
+    echo "  このまま起動すると $AGENT_KIND を選んでも Claude Code が立つため、ここで止めます。" >&2
+    echo "  対象リポジトリの start-issue.sh を issue-deck と同じ形（scripts/lib/agent-cli.sh）へ" >&2
+    echo "  揃えてください（docs/multi-agent/codex.md）。" >&2
+    exit 1
+  fi
+fi
 
 # フォルダの信頼確認が済んでいるか（#1838）。**worktreeを作る前にここで止める。**
 #
@@ -140,7 +183,10 @@ done
 #
 # 古い複製には lib/claude-trust.sh が無い。**そのときは黙って通す**（判定できないだけで、
 # 起動を止める理由にはならない。local-repo-resolve.sh と違って無くても動く）。
-if [[ -f "$LIB_DIR/claude-trust.sh" ]]; then
+#
+# **Claude Codeで起こすときだけ確かめる**（#2505）。信頼確認はClaude Code固有の画面で、
+# Codexには無い（サンドボックスの設定は`--sandbox`で毎回渡している）。
+if [[ "$AGENT_KIND" == "claude" && -f "$LIB_DIR/claude-trust.sh" ]]; then
   # shellcheck source=scripts/lib/claude-trust.sh
   source "$LIB_DIR/claude-trust.sh"
   claude_trust_require "$REPO_PATH" "$FULL_NAME" || exit 1

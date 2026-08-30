@@ -143,6 +143,7 @@ function host(overrides: Record<string, unknown> = {}) {
     // 計画レビュー（#1855）に対応したpoller
     planReviewCapable: true,
     codeReviewCapable: true,
+    codexCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     // DBの行の形（`toHostView`が読む列名）。**Viewの`reboot`とは名前が違う**
@@ -168,11 +169,12 @@ function aliveSession(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function enqueue() {
+async function enqueue(agent?: "claude" | "codex") {
   return enqueueDispatchJob({
     repositoryFullName: REPOSITORY,
     issueNumber: 1311,
     hostName: "subpc",
+    agent,
     requestedByUserId: null,
     now: NOW,
   });
@@ -202,6 +204,39 @@ beforeEach(() => {
     createdAt: NOW,
     ...data,
   }));
+});
+
+/**
+ * #2505。**画面側だけに置くと、APIを直接叩く経路が素通りする。** 古いpollerは`agent`を
+ * 読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ。
+ */
+describe("enqueueDispatchJob のエージェント", () => {
+  it("指定しなければ既定（claude）で積む", async () => {
+    const result = await enqueue();
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate.mock.calls[0][0].data.agent).toBe("claude");
+  });
+
+  it("対応を申告しているホストならcodexで積める", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ codexCapable: true }));
+    const result = await enqueue("codex");
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate.mock.calls[0][0].data.agent).toBe("codex");
+  });
+
+  it("申告していないホストへはcodexで積ませない", async () => {
+    // 既定は`codexCapable: null`（未申告＝古いpoller）
+    const result = await enqueue("codex");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("agent_not_capable");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("既定のエージェントは申告が無くても積める", async () => {
+    const result = await enqueue("claude");
+    expect(result.ok).toBe(true);
+  });
 });
 
 /**
@@ -289,6 +324,7 @@ describe("reportDispatchJob の skipped", () => {
     repositoryFullName: REPOSITORY,
     issueNumber: 1229,
     targetHost: "subpc",
+    agent: "claude",
     status: "CLAIMED",
     claimedByHost: "subpc",
     message: null,
@@ -685,6 +721,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1332,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "QUEUED",
       message: null,
@@ -1010,6 +1047,7 @@ describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
       status: "RUNNING",
       kind: "LAUNCH",
       targetHost: "subpc",
+      agent: "claude",
       repositoryFullName: REPOSITORY,
       issueNumber: 1311,
       tmuxSessionName: null,
@@ -1191,6 +1229,7 @@ describe("dismissDispatchJob", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1311,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "FAILED",
       message: "tmuxの起動に失敗しました。",
@@ -1265,6 +1304,7 @@ describe("prioritizeDispatchJob", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1311,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "QUEUED",
       message: null,
@@ -1387,6 +1427,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1519,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "QUEUED",
       message: null,
@@ -1855,6 +1896,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1823,
       targetHost: "subpc",
+      agent: "claude",
       kind: "MANUAL_STEP",
       status: "RUNNING",
       claimedByHost: "subpc",
@@ -1902,6 +1944,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1823,
       targetHost: "subpc",
+      agent: "claude",
       kind: "MANUAL_STEP",
       status: "CLAIMED",
       claimedByHost: "subpc",

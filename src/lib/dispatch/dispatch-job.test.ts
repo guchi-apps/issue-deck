@@ -49,6 +49,13 @@ import {
   describeManualStepExecutionRejection,
   resolveManualStepExecutionRejection,
   resolveManualStepHost,
+  CODEX_LIMITATIONS,
+  DEFAULT_DISPATCH_AGENT,
+  describeDispatchAgent,
+  isDispatchAgentSelectable,
+  parseDispatchAgent,
+  readDispatchAgent,
+  resolveDispatchAgentRejection,
   resolveScreenshotRejection,
   resolveSessionControlRejection,
   type DispatchHostView,
@@ -605,6 +612,7 @@ describe("findDispatchJobForIssue", () => {
       issueTitle: null,
       issueId: null,
       targetHost: "subpc",
+      agent: "claude",
       kind: "LAUNCH",
       status: "QUEUED",
       message: null,
@@ -936,6 +944,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
+      codexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1006,6 +1015,7 @@ describe("横断質問（#1454）", () => {
       manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
+      codexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1129,6 +1139,7 @@ describe("横断質問（#1454）", () => {
         issueTitle: null,
         issueId: null,
         targetHost: "subpc",
+        agent: "claude",
         kind: "CROSS_REPO_QUESTION",
         status: "QUEUED",
         message: null,
@@ -1186,6 +1197,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       manualStepValuesCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
+      codexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1319,6 +1331,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         issueTitle: null,
         issueId: null,
         targetHost: "subpc",
+        agent: "claude",
         kind: "PLAN_REVIEW",
         status: "QUEUED",
         message: null,
@@ -1376,6 +1389,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       manualStepValuesCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
+      codexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1483,6 +1497,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         issueTitle: null,
         issueId: null,
         targetHost: "subpc",
+        agent: "claude",
         kind: "CODE_REVIEW",
         status: "QUEUED",
         message: null,
@@ -1658,6 +1673,7 @@ describe("resolveManualStepHost", () => {
       manualStepValuesCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
+      codexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1712,5 +1728,90 @@ describe("チェックアウトの更新（#1875）", () => {
 
   it("画面に出す名前を持つ", () => {
     expect(describeDispatchJobKind("SELF_UPDATE")).toBe("チェックアウトの更新");
+  });
+});
+
+describe("エージェントの選択（#2505）", () => {
+  function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
+    return {
+      name: "subpc",
+      repositories: ["guchi-apps/issue-deck"],
+      contractVersion: 2,
+      online: true,
+      lastSeenAt: "2026-08-14T00:00:00Z",
+      screenshotCapable: true,
+      sessionControlCapable: true,
+      instructionCapable: true,
+      crossRepoQuestionCapable: true,
+      manualStepCapable: null,
+      manualStepAbortCapable: null,
+      manualStepValuesCapable: null,
+      planReviewCapable: null,
+      codeReviewCapable: null,
+      codexCapable: true,
+      selfUpdateCapable: null,
+      previewCapable: null,
+      rebootCapable: null,
+      reboot: null,
+      previewRepositories: null,
+      preview: null,
+      maxSessions: 12,
+      liveSessions: 0,
+      metrics: null,
+      launchHold: null,
+      checkout: null,
+      ...overrides,
+    };
+  }
+
+  it("既知の語だけを通す", () => {
+    expect(parseDispatchAgent("claude")).toBe("claude");
+    expect(parseDispatchAgent("codex")).toBe("codex");
+    // **黙って既定へ落とさない。** 指定したつもりでClaude Codeが立つ方が分かりにくい
+    expect(parseDispatchAgent("gpt")).toBeNull();
+    expect(parseDispatchAgent("")).toBeNull();
+    expect(parseDispatchAgent(undefined)).toBeNull();
+  });
+
+  it("DBの値は既定へ落として読む", () => {
+    // 列を手で書き換えられても、`ISSUE_DECK_AGENT`へ届く語は既知のものだけになる
+    expect(readDispatchAgent("codex")).toBe("codex");
+    expect(readDispatchAgent("gpt")).toBe(DEFAULT_DISPATCH_AGENT);
+    expect(readDispatchAgent(null)).toBe(DEFAULT_DISPATCH_AGENT);
+  });
+
+  it("表示名は起動スクリプトの表記に揃える", () => {
+    expect(describeDispatchAgent("claude")).toBe("Claude Code");
+    expect(describeDispatchAgent("codex")).toBe("Codex CLI");
+  });
+
+  it("申告しているホストでだけ選択欄を出す", () => {
+    expect(isDispatchAgentSelectable(host())).toBe(true);
+    expect(isDispatchAgentSelectable(host({ codexCapable: false }))).toBe(false);
+    // **未申告（古いpoller）は「できない」。** 配ると`agent`ごと無視されてClaude Codeが立つ
+    expect(isDispatchAgentSelectable(host({ codexCapable: null }))).toBe(false);
+    expect(isDispatchAgentSelectable(null)).toBe(false);
+  });
+
+  it("既定のエージェントは申告が無くても積める", () => {
+    // 申告していないホストで従来どおりの起動まで塞ぐと、Codexの導入前に何も起動できなくなる
+    expect(resolveDispatchAgentRejection(host({ codexCapable: null }), "claude")).toBeNull();
+    expect(resolveDispatchAgentRejection(null, "claude")).toBeNull();
+  });
+
+  it("既定以外は申告しているホストにしか積ませない", () => {
+    expect(resolveDispatchAgentRejection(host(), "codex")).toBeNull();
+    expect(resolveDispatchAgentRejection(host({ codexCapable: false }), "codex")).toContain(
+      "Codex CLI",
+    );
+    expect(resolveDispatchAgentRejection(host({ codexCapable: null }), "codex")).toContain(
+      "対応していません",
+    );
+  });
+
+  it("効かなくなる連携を並べて持つ", () => {
+    // 選んだ時点で画面に出す文言。空にすると注意そのものが消える
+    expect(CODEX_LIMITATIONS.length).toBeGreaterThan(0);
+    expect(CODEX_LIMITATIONS.join("")).toContain("Remote Control");
   });
 });

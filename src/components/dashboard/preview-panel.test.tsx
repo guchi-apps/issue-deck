@@ -23,6 +23,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     manualStepValuesCapable: true,
     planReviewCapable: true,
     codeReviewCapable: true,
+    codexCapable: null,
     selfUpdateCapable: true,
     previewCapable: true,
     rebootCapable: null,

@@ -139,7 +139,7 @@ set -euo pipefail
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
 # 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
 # 24: ホストごとの再起動（`REBOOT`）を実行し、再起動が要るかを申告する（#2496）。
-DISPATCH_POLLER_VERSION="24"
+DISPATCH_POLLER_VERSION="25"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -589,6 +589,22 @@ code_review_capable() {
   fi
 }
 
+# Codex CLIでセッションを起こせるか（#2505）。**`codex`コマンドがあるかだけを見る。**
+#
+# ジョブの`agent`を読んで`ISSUE_DECK_AGENT`として受け口へ渡す実装はこのpollerが持っているので、
+# 申告が真になった時点で「渡せること」は保証されている。残る条件は実機にCLIが入っているかだけ。
+#
+# **申告しなければ画面に選択欄が出ない**（issue-deck側は`null`＝非対応として扱う）。古いpollerは
+# `agent`を読まないため、配るとCodexを選んだのにClaude Codeが黙って立つ——「配ってから`failed`で
+# 返る」では済まない種類の非対応なので、判定材料が無いときは選ばせない側へ倒す。
+codex_capable() {
+  if command -v codex >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
 #
 # 再起動はsystemdの`Restart=always`に任せる（自分で`systemctl restart`を打つと、結果を報告する
@@ -944,6 +960,7 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
+    --argjson codex "$(codex_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
     --argjson reboot "$(reboot_capable)" \
     --argjson rebootState "$(collect_reboot_state)" \
@@ -953,7 +970,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, codex: $codex, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -2322,7 +2339,7 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command
-  local placeholder_values resolved_command
+  local placeholder_values resolved_command agent
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2339,6 +2356,9 @@ run_job() {
   # issue-deck側が値を差し込んだ結果（#2403）。実行するのはこちらではなく、pollerが自分で
   # 差し込み直したもの。これは突き合わせにだけ使う（`command`が照合専用なのと同じ立場）
   resolved_command="$(printf '%s' "$job_json" | jq -r '.resolvedCommand // ""')"
+  # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
+  # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
+  agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -2479,9 +2499,30 @@ run_job() {
     return 0
   fi
 
+  # 受け取ったエージェントをサブPC側でも既知の語に絞る（#2505）。issue-deck側でも絞っているが、
+  # **ここが環境変数として渡す最後の場所**なので改めて確かめる（`local_session_validate_target`と
+  # 同じ多層防御）。**黙って`claude`へ落とさない**——Codexを選んだのにClaude Codeが立つ方が、
+  # ジョブの失敗として返るより分かりにくい。
+  case "$agent" in
+    claude | codex) ;;
+    *)
+      report_job "$job_id" failed "受け取ったエージェントが不正です: $agent"
+      return 0
+      ;;
+  esac
+
+  # `set -e`下では`[[ … ]] && …`が偽のときにそこで止まるので、ifで書く
+  local agent_label=""
+  if [[ "$agent" == "codex" ]]; then
+    agent_label="・Codex CLI"
+  fi
+
+  # `ISSUE_DECK_AGENT`は受け口（start-local-session.sh）と、その先の start-issue.sh が読む
+  # （#2377）。**引数ではなく環境変数で渡す**のは、この指定を解釈しないリポジトリのランチャーへ
+  # 届いても無害にするため（未知のフラグはissue番号として扱われて失敗する。#1076と同じ理由）。
   launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
-    "起動しています（$LOCAL_REPO_PATH）" \
-    bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
+    "起動しています（$LOCAL_REPO_PATH$agent_label）" \
+    env "ISSUE_DECK_AGENT=$agent" bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
 }
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。

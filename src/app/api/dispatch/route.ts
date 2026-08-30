@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import {
+  DEFAULT_DISPATCH_AGENT,
   isSessionControlJobKind,
+  parseDispatchAgent,
   parseDispatchHostName,
   parseDispatchJobKind,
   parseDispatchTarget,
@@ -343,10 +345,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 起こすエージェントCLI（#2505）。**省略は既定（`claude`）＝従来どおり**で、指定した場合だけ
+  // 既知の語に絞る。**未知の値は黙って既定へ落とさず400で断る**——Codexを指定したつもりで
+  // Claude Codeが立つ方が、その場で断られるより分かりにくい（`agent_cli_resolve_kind`と同じ向き）
+  const agent =
+    payload?.agent === undefined ? DEFAULT_DISPATCH_AGENT : parseDispatchAgent(payload.agent);
+  if (!agent) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
   const result = await enqueueDispatchJob({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
     hostName,
+    agent,
     requestedByUserId: userId,
   });
 
