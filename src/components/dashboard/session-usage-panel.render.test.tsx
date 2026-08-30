@@ -94,6 +94,14 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("Codex プラン枠")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "表示するエージェント" })).toBeNull();
   });
+
+  it("GitHub Actionsの使用量を合計と明細へ表示する", () => {
+    renderPanel(response([entry({ source: "github-actions", workflowName: "Claude Code Review", runUrl: "https://github.com/example/run/1", costUsd: 2 })]));
+    expect(screen.getAllByText("GitHub Actions").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Actions", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
+  });
   it("セッションごとの行を初期状態から表示し、最大セッション比を出す", () => {
     renderPanel(
       response([
@@ -178,7 +186,7 @@ describe("SessionUsagePanel", () => {
 
   it("記録が無いときは、報告待ちであることを出す", () => {
     renderPanel(response([]));
-    expect(screen.getByText(/記録がありません。サブPCのpollerが報告すると出ます/)).toBeTruthy();
+    expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
   it("金額は重量課金として表示し、API換算の注意書きを表示しない", () => {

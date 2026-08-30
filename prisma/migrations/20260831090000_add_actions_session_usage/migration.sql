@@ -1,0 +1,4 @@
+ALTER TABLE `SessionUsage`
+  ADD COLUMN `source` VARCHAR(32) NOT NULL DEFAULT 'local',
+  ADD COLUMN `workflowName` VARCHAR(191) NULL,
+  ADD COLUMN `runUrl` VARCHAR(500) NULL;

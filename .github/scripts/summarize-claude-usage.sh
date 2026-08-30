@@ -75,6 +75,55 @@ OUT_TOKENS="$(get '.usage.output_tokens')"
 CACHE_CREATE="$(get '.usage.cache_creation_input_tokens')"
 CACHE_READ="$(get '.usage.cache_read_input_tokens')"
 
+# IssueDeckへのActions使用量報告。環境変数が揃わない配布先では何もしない。
+# 計測は補助情報なので、認証・通信・スキーマの失敗でジョブを落とさない。
+report_to_issue_deck() {
+  [ -n "${AI_USAGE_REPORT_URL:-}" ] || return 0
+  [ -n "${PROGRESS_REPORT_SECRET:-}" ] || return 0
+  [ -n "${GITHUB_REPOSITORY:-}" ] || return 0
+  [ -n "${GITHUB_RUN_ID:-}" ] || return 0
+  [ -n "$COST" ] || return 0
+  REPORT_PAYLOAD="$({
+    STEP_LABEL="$STEP_LABEL" REPOSITORY="$GITHUB_REPOSITORY" RUN_ID="$GITHUB_RUN_ID" \
+      RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+      WORKFLOW_NAME="${GITHUB_WORKFLOW:-}" ISSUE_NUMBER="${ISSUE_NUMBER:-}" \
+      COST="$COST" TURNS="${TURNS:-0}" IN_TOKENS="${IN_TOKENS:-0}" CACHE_CREATE="${CACHE_CREATE:-0}" \
+      CACHE_READ="${CACHE_READ:-0}" OUT_TOKENS="${OUT_TOKENS:-0}" DURATION_MS="${DURATION_MS:-0}" \
+      python3 - <<'PY'
+import json, os
+from datetime import datetime, timedelta, timezone
+
+ended = datetime.now(timezone.utc)
+duration = max(float(os.environ.get("DURATION_MS", "0") or 0), 0)
+started = ended - timedelta(milliseconds=duration)
+issue = os.environ.get("ISSUE_NUMBER", "")
+payload = {
+    "repository": os.environ["REPOSITORY"],
+    "runId": os.environ["RUN_ID"],
+    "runUrl": os.environ["RUN_URL"],
+    "workflowName": os.environ.get("WORKFLOW_NAME") or None,
+    "issueNumber": int(issue) if issue.isdigit() and int(issue) > 0 else None,
+    "stepName": os.environ["STEP_LABEL"],
+    "responses": int(float(os.environ.get("TURNS", "0") or 0)),
+    "inputTokens": int(float(os.environ.get("IN_TOKENS", "0") or 0)),
+    "cacheCreateTokens": int(float(os.environ.get("CACHE_CREATE", "0") or 0)),
+    "cacheReadTokens": int(float(os.environ.get("CACHE_READ", "0") or 0)),
+    "outputTokens": int(float(os.environ.get("OUT_TOKENS", "0") or 0)),
+    "costUsd": float(os.environ["COST"]),
+    "models": [],
+    "startedAt": started.isoformat(),
+    "endedAt": ended.isoformat(),
+}
+print(json.dumps({"reports": [payload]}, ensure_ascii=False))
+PY
+  } 2>/dev/null)" || return 0
+  curl -sS -m 20 -o /dev/null \
+    -X POST "$AI_USAGE_REPORT_URL" \
+    -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+    -H "Content-Type: application/json" \
+    --data-binary "$REPORT_PAYLOAD" || echo "::warning::AI使用量の報告に失敗しました"
+}
+
 # 表示の整形。いずれも空文字を渡されたら "-" を返し、値が無いこと自体は異常として扱わない。
 
 # 秒に丸める（ミリ秒のままだと表が読みにくいため）。
@@ -139,5 +188,7 @@ row() {
     echo ""
   fi
 } >> "$SUMMARY_FILE"
+
+report_to_issue_deck
 
 exit 0

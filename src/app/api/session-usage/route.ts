@@ -41,6 +41,7 @@ function parseDays(value: string | null): number {
 /** DBの行（BigInt）を、そのままJSONにできる形へ落とす */
 function toEntry(row: {
   agent: string;
+  source: string;
   sessionId: string;
   host: string;
   kind: string;
@@ -56,6 +57,8 @@ function toEntry(row: {
   models: string;
   startedAt: Date;
   endedAt: Date;
+  workflowName: string | null;
+  runUrl: string | null;
 }): SessionUsageEntry {
   const inputTokens = Number(row.inputTokens);
   const cacheCreateTokens = Number(row.cacheCreate5mTokens) + Number(row.cacheCreate1hTokens);
@@ -72,6 +75,7 @@ function toEntry(row: {
 
   return {
     agent: row.agent === "codex" ? "codex" : "claude",
+    source: row.source === "github-actions" ? "github-actions" : "local",
     sessionId: row.sessionId,
     host: row.host,
     kind: row.kind,
@@ -87,6 +91,8 @@ function toEntry(row: {
     models,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
+    workflowName: row.workflowName,
+    runUrl: row.runUrl,
   };
 }
 
@@ -108,6 +114,7 @@ export async function GET(request: NextRequest) {
     select: {
       sessionId: true,
       agent: true,
+      source: true,
       host: true,
       kind: true,
       repository: true,
@@ -122,6 +129,8 @@ export async function GET(request: NextRequest) {
       models: true,
       startedAt: true,
       endedAt: true,
+      workflowName: true,
+      runUrl: true,
       reportedAt: true,
     },
   });
@@ -139,7 +148,7 @@ export async function GET(request: NextRequest) {
     getLatestCodexUsage().catch(() => null),
   ]);
   const entriesByAgent = {
-    claude: entries.filter((entry) => entry.agent === "claude"),
+    claude: entries.filter((entry) => entry.agent === "claude" && entry.source !== "github-actions"),
     codex: entries.filter((entry) => entry.agent === "codex"),
   };
   const quotaByAgent = {

@@ -152,8 +152,10 @@ function DailyChart({
       <div className="flex flex-col gap-2">
         {days.map((day) => {
           const width = max > 0 ? (day.costUsd / max) * 100 : 0;
+          const actionsShare = day.costUsd > 0 ? (day.bySource["github-actions"].costUsd / day.costUsd) * 100 : 0;
+          const localCost = day.bySource.local.costUsd;
           const claudeShare =
-            day.costUsd > 0 ? (day.byAgent.claude.costUsd / day.costUsd) * 100 : 0;
+            day.costUsd > 0 ? (localCost > 0 ? day.byAgent.claude.costUsd / localCost : 0) * (localCost / day.costUsd) * 100 : 0;
           const isToday = day.date === todayKey;
           return (
             <div
@@ -175,7 +177,8 @@ function DailyChart({
                   style={{ width: `${width}%` }}
                 >
                   <span className="bg-[#d97757]" style={{ width: `${claudeShare}%` }} />
-                  <span className="flex-1 bg-[#4776e6]" />
+                  <span className="bg-[#4776e6]" style={{ width: `${Math.max(0, 100 - claudeShare - actionsShare)}%` }} />
+                  <span className="bg-[#8b5cf6]" style={{ width: `${actionsShare}%` }} />
                 </div>
               </div>
               <span className="text-right font-semibold tabular-nums">
@@ -336,15 +339,16 @@ function SessionTable({
                       <div className="truncate font-semibold text-foreground">
                         {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
                       </div>
-                      <div className="truncate text-[10px] text-muted-foreground">{sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}</div>
+                      <div className="truncate text-[10px] text-muted-foreground">{entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}{entry.workflowName ? ` ・ ${entry.workflowName}` : ""}</div>
                     </div>
                     {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
+                    {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
                   </div>
                 </td>
                 <td className="px-3 py-3 align-middle">
                   <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground"><span>{formatUsageTokens(totalTokens)}</span><span>{Math.round(totalWidth)}%</span></div>
                   <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" title={`入力 ${formatUsageTokens(entry.contextTokens)} / 出力 ${formatUsageTokens(entry.outputTokens)}`}>
-                    <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${totalWidth}%` }}><span className="bg-[#d97757]" style={{ width: `${inputWidth}%` }} /><span className="flex-1 bg-[#4776e6]" /></div>
+                    <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${totalWidth}%` }}><span className={entry.source === "github-actions" ? "bg-[#8b5cf6]" : "bg-[#d97757]"} style={{ width: `${inputWidth}%` }} /><span className="flex-1 bg-[#4776e6]" /></div>
                   </div>
                   <div className="mt-1 flex gap-2 text-[10px] tabular-nums text-muted-foreground"><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#d97757]" aria-hidden />入力 {formatUsageTokens(entry.contextTokens)}</span><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#4776e6]" aria-hidden />出力 {formatUsageTokens(entry.outputTokens)}</span></div>
                 </td>
@@ -390,7 +394,7 @@ export function SessionUsagePanel({
   const todayKey = data?.byDay.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
   const agentCostSub = data
-    ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}`
+    ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
     : "";
 
   return (
@@ -401,7 +405,7 @@ export function SessionUsagePanel({
           <p className="text-[11px] text-muted-foreground">
             {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
                 開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする） */}
-            サブPCのClaude・Codexセッションが使ったトークン
+            サブPCのClaude・CodexセッションとGitHub Actionsが使ったトークン
             {data?.reportedAt
               ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`
               : ""}
@@ -447,6 +451,7 @@ export function SessionUsagePanel({
           出力
         </span>
         <span>棒の長さは最大セッションとの比較</span>
+        <span><i className="mr-1 inline-block size-2 rounded-[2px] bg-[#8b5cf6]" aria-hidden />GitHub Actions</span>
       </div>
 
       {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
@@ -475,11 +480,16 @@ export function SessionUsagePanel({
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Tile
               label={effectiveUnit === "quota" ? "枠換算" : "重量課金"}
               value={formatCombinedAmount(data.totalsByAgent, effectiveUnit, quotas)}
               sub={agentCostSub}
+            />
+            <Tile
+              label="GitHub Actions"
+              value={formatUsageAmount(data.totalsBySource["github-actions"].costUsd, effectiveUnit, quotas.claude)}
+              sub={`${data.totalsBySource["github-actions"].sessions.toLocaleString()}実行・Claude Code`}
             />
             <Tile
               label="応答"
@@ -494,7 +504,7 @@ export function SessionUsagePanel({
             <Tile
               label="セッション"
               value={data.totals.sessions.toLocaleString()}
-              sub={`実装 ${implementation?.sessions ?? 0}・計画レビュー ${planReview?.sessions ?? 0}`}
+              sub={`実装 ${implementation?.sessions ?? 0}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
             />
           </div>
 
@@ -553,7 +563,7 @@ export function SessionUsagePanel({
             </div>
             {issues.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                記録がありません。サブPCのpollerが報告すると出ます。
+                記録がありません。サブPCまたはGitHub Actionsから報告されると出ます。
               </p>
             ) : (
               <>
@@ -586,6 +596,9 @@ export function SessionUsagePanel({
               </>
             )}
           </section>
+          <p className="text-[10px] text-muted-foreground">
+            GitHub Actionsの使用量はClaude Code実行後に報告されます。反映に時間がかかる場合があり、料金はAPI換算の目安です。
+          </p>
         </>
       )}
     </div>
