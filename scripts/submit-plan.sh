@@ -74,6 +74,7 @@ PLAN_BASE_SHA="$(git rev-parse origin/develop 2>/dev/null || git rev-parse origi
 build_payload() {
   python3 - "$PLAN_FILE" "$REPOSITORY" "$ISSUE_NUMBER" "$HOST_NAME" "$WAIT_SECONDS" "$PLAN_BASE_SHA" <<'PY'
 import json
+import os
 import pathlib
 import sys
 
