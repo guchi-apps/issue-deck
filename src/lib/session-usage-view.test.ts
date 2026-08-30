@@ -131,6 +131,27 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([null, 2504]);
   });
 
+  it("明細は上位200件で切り、落としたぶんは件数と合計で返す（合計・内訳には入れたまま）", () => {
+    // 金額の違う210件のIssue。合計は全件から作り、明細だけが切られる。
+    const entries = Array.from({ length: 210 }, (_unused, index) =>
+      entry({ sessionId: `s${index}`, issueNumber: index + 1, costUsd: 210 - index }),
+    );
+    const summary = buildSessionUsageSummary({
+      entries,
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+      quota: null,
+    });
+
+    expect(summary.totals.sessions).toBe(210);
+    expect(summary.byIssue).toHaveLength(200);
+    // 落ちるのは金額の少ないほう（$10〜$1の10件）。
+    expect(summary.omittedIssues).toBe(10);
+    expect(summary.omittedIssueCostUsd).toBe(55);
+    expect(summary.byRepository[0].sessions).toBe(210);
+  });
+
   it("リポジトリ・種別ごとの内訳を金額の多い順に出す", () => {
     const summary = buildSessionUsageSummary({
       entries: [

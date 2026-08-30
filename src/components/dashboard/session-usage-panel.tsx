@@ -546,6 +546,15 @@ export function SessionUsagePanel({
                     もっと見る（残り {issues.length - visibleIssues} 件）
                   </Button>
                 )}
+                {/* 明細は上位200件で切ってある（応答の大きさを抑えるため）。
+                    **合計・内訳には入っている**ので、そこだけを断る */}
+                {data.omittedIssues > 0 && issues.length <= visibleIssues && (
+                  <p className="pt-1 text-center text-[11px] text-muted-foreground">
+                    ほか {data.omittedIssues.toLocaleString()} 件（合計{" "}
+                    {formatUsageAmount(data.omittedIssueCostUsd, effectiveUnit, quota)}
+                    ）は明細に出していません。上の合計・内訳には入っています。
+                  </p>
+                )}
               </>
             )}
           </section>

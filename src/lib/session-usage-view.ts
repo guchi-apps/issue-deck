@@ -91,6 +91,12 @@ export type SessionUsageSummary = {
   byRepository: UsageGroup[];
   byKind: UsageGroup[];
   byIssue: UsageIssue[];
+  /**
+   * 明細から落としたIssueの件数と、そのぶんの合計（#2504）。
+   * **合計・内訳には入っている**ので、画面は「明細に出していない」ことだけを言う。
+   */
+  omittedIssues: number;
+  omittedIssueCostUsd: number;
   /** 報告してきたホスト名（重複なし） */
   hosts: string[];
   /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
@@ -98,6 +104,15 @@ export type SessionUsageSummary = {
   /** プラン枠への換算。材料が揃わなければnull */
   quota: QuotaScale | null;
 };
+
+/**
+ * 明細（Issue別）に載せる上限。
+ *
+ * **応答そのものの大きさを抑えるために切る。** 30日ぶんはIssueが1,000件近くになり、転記1本ごとの
+ * 明細まで載せると応答が1MBを超える。スマホから開くこともある画面で、上位200件の先を
+ * 見たくなることは無い（金額順で、200件目は既に端数）。合計・内訳は全件から作る。
+ */
+const MAX_DETAIL_ISSUES = 200;
 
 /** 画面に出す種別の名前。シェル側の`KIND_LABELS`と揃える */
 const KIND_LABELS: Record<string, string> = {
@@ -286,6 +301,7 @@ export function buildSessionUsageSummary({
     return issue;
   });
   issues.sort(byCost);
+  const omitted = issues.slice(MAX_DETAIL_ISSUES);
 
   return {
     since: new Date(startMs).toISOString(),
@@ -295,7 +311,9 @@ export function buildSessionUsageSummary({
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byRepository: [...byRepository.values()].sort(byCost),
     byKind: [...byKind.values()].sort(byCost),
-    byIssue: issues,
+    byIssue: issues.slice(0, MAX_DETAIL_ISSUES),
+    omittedIssues: omitted.length,
+    omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),
     hosts: [...hosts].sort(),
     reportedAt,
     quota,
