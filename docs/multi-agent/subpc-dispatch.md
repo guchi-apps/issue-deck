@@ -107,7 +107,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `INTERRUPT` | `tmux send-keys -t "=<名前>:" C-c` | 走っている処理を止める。セッションは残る |
 | `KILL` | `tmux kill-session -t "=<名前>"` | セッションごと畳む |
 | `QUESTION`（#1294） | （未実装） | 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する |
-| `INSTRUCTION`（#1012） | 3段階プロトコルで人が書いた1行を入力欄へ送る | 走っているセッションへ追加指示を流す |
+| `INSTRUCTION`（#1012） | 人が書いた1行を送る（Claude Codeは3段階プロトコルで入力欄へ、Codexは`codex queue`で積む。#2519） | 走っているセッションへ追加指示を流す |
 | `CROSS_REPO_QUESTION`（#1454） | `scripts/start-cross-repo-question.sh` | 複数リポジトリ横断の質問セッションを立てる |
 | `MANUAL_STEP`（#1828） | `scripts/run-manual-step.sh`（別プロセス） | 手作業アシスタントで承認された1手順ぶんのコマンドを実行する |
 | `MANUAL_STEP_ABORT`（#1882） | `systemctl --user stop issue-deck-manual-step-<対象ジョブID>` | 走っている代行実行を止める |
@@ -317,6 +317,27 @@ pollerは`instruction: true`を別に申告し、`claim`はそれが真のホス
 `activeKey`は`instruction:owner/repo#番号`で、未処理の追加指示は1件まで。`QUEUED`のまま5分で
 `TIMEOUT`にするのも制御ジョブと同じ（何時間も後に届いた指示は、そのとき走っている別の作業への
 割り込みになる）。
+
+#### Codexのセッションへは`codex queue`で送る（#2519）
+
+**3段階プロトコルはClaude Code専用。** Codexには`codex queue --thread <セッションUUID>
+--message '<本文>'`があり、TUIのキー入力を経由せずに次のターンの頭へ本文を積める。
+`send-keys`を使わないので、段1（状態確認）・段3（反映の再確認）に当たるものが要らない。
+
+| | Claude Code | Codex |
+|---|---|---|
+| 段0（セッション名の照合） | 同じ | 同じ |
+| 本文の検証（改行・制御文字・500文字） | 同じ | 同じ |
+| 送出 | 段1〜4 | `codex queue`を1回。**画面も状態ファイルも読まない** |
+| 送らない条件 | 承認プロンプト・処理中・打ちかけ | 宛先（セッションUUID）がまだ分からないとき（`skipped`） |
+
+どちらへ送るかは、ランチャーが記述子（`<セッション名>.session`）へ書いた`agent`だけで決める
+（`session_state_agent_kind`。読めない・知らない語なら`claude`へ倒す）。宛先のUUIDは
+`session-notify.sh`が`SessionStart`フックから`<セッション名>.codex-thread`へ残す。詳細は
+[codex.md](codex.md)「追加指示は`codex queue`で送る」。
+
+**issue-deckはUUIDを持たない**（下の「session idは持たず…」と同じ立場）。画面へ運ぶのは
+「宛先が分かっているか」の3値（`codexThreadKnown`）だけで、UUIDはサブPCの状態ファイルに閉じる。
 
 #### session idは持たず、`--continue`で再開する（#1541）
 

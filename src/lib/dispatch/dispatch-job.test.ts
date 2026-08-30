@@ -341,6 +341,7 @@ describe("findBlockingSession", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }
@@ -436,6 +437,7 @@ describe("isIssueExecutionPending", () => {
       previewUrl: null,
       reapAt: null,
       reapReason: null,
+      codexThreadKnown: null,
       ...overrides,
     };
   }
@@ -687,8 +689,11 @@ describe("セッションの操作（#1332）", () => {
     return { online: true, sessionControlCapable: true, instructionCapable: true, ...overrides };
   }
 
-  function sessionState(state: DispatchSessionView["state"]): Pick<DispatchSessionView, "state"> {
-    return { state };
+  function sessionState(
+    state: DispatchSessionView["state"],
+    codexThreadKnown: boolean | null = null,
+  ): Pick<DispatchSessionView, "state" | "codexThreadKnown"> {
+    return { state, codexThreadKnown };
   }
 
   describe("parseDispatchJobKind", () => {
@@ -778,6 +783,51 @@ describe("セッションの操作（#1332）", () => {
         resolveSessionControlRejection({
           host: host(),
           session: sessionState("ALIVE"),
+          kind: "KILL",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    /**
+     * #2519。Codexのセッションへは`codex queue --thread <UUID>`で送るが、そのUUIDは
+     * `SessionStart`フックからしか手に入らず、フックはディレクトリの信頼確認に答えるまで
+     * 飛ばない。**その間は押せないことを画面に出す**（押せてしまうと、pollerが見送るまで
+     * 何が起きたか分からない）。
+     */
+    it("Codexのセッションは宛先が分かるまで追加指示を送れない", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBe("codex_thread_unknown");
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", true),
+          kind: "INSTRUCTION",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+    });
+
+    // 停止・終了はtmux側の操作で、`codex queue`の宛先が要らない
+    it("宛先が分からなくても停止・終了はできる", () => {
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
+          kind: "INTERRUPT",
+          hasActiveControlJob: false,
+        }),
+      ).toBeNull();
+      expect(
+        resolveSessionControlRejection({
+          host: host(),
+          session: sessionState("ALIVE", false),
           kind: "KILL",
           hasActiveControlJob: false,
         }),

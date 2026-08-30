@@ -243,6 +243,27 @@ describe("parseDispatchSessionReport", () => {
   });
 
   /**
+   * #2519。Codexのセッションの宛先は3値（null＝Codexではない／false＝宛先がまだ無い／
+   * true＝送れる）。**`null`と「項目が無い」を分ける**——無いのは古いpollerで、そのホストに
+   * ついては何も判断できないため既存の値を触らない。
+   */
+  it("codexThreadKnownは3値をそのまま受け取り、省略もできる", () => {
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed && "codexThreadKnown" in parsed).toBe(false);
+    for (const value of [true, false, null]) {
+      expect(parseDispatchSessionReport({ ...valid, codexThreadKnown: value })).toEqual({
+        ...valid,
+        codexThreadKnown: value,
+      });
+    }
+  });
+
+  // 壊れていても報告ごと弾かない（1件で弾くと、そのホストのセッションが全部「消えた」になる）
+  it("codexThreadKnownが真偽値でもnullでもなければ、その項目だけを落とす", () => {
+    expect(parseDispatchSessionReport({ ...valid, codexThreadKnown: "true" })).toEqual(valid);
+  });
+
+  /**
    * #1817。畳む予定は`claudeStarting`と同じく新しいpollerだけが送る。**壊れていても報告ごと
    * 弾かない**（1件でも弾くと、そのホストのセッションが全部「消えた」と判定される）。
    */

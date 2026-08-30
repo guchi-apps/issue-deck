@@ -937,6 +937,16 @@ model DispatchSession {
   reapAt     DateTime?
   reapReason String?
 
+  // Codexのセッションで、`codex queue`の宛先（スレッドUUID）が分かっているか（#2519）。
+  //
+  // **3値ある。** NULL＝Codexのセッションではない（Claude Code。従来どおり3段階プロトコルで
+  // 送る）／申告しない古いpoller。false＝Codexだが宛先がまだ無い（ディレクトリの信頼確認に
+  // 答えるまでフックが飛ばず、UUIDが手に入らない）。true＝送れる。
+  //
+  // **UUIDそのものは持たない。** 画面が要るのは「送れるかどうか」だけで、宛先を使うのは
+  // サブPCのpollerだけ（`~/.local/state/issue-deck/sessions/<セッション名>.codex-thread`）。
+  codexThreadKnown Boolean?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

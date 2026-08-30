@@ -18,7 +18,8 @@
 #
 #   INTERRUPT   … `tmux send-keys -t <セッション名> C-c`（走っている処理を止める。セッションは残る）
 #   KILL        … `tmux kill-session -t <セッション名>`（セッションごと畳む）
-#   INSTRUCTION … 人が書いた1行を入力欄へ送る（#1012）。**3段階プロトコル**（下記）で送る
+#   INSTRUCTION … 人が書いた1行をセッションへ送る（#1012）。Claude Codeへは入力欄へ
+#                 **3段階プロトコル**（下記）で送り、Codexへは`codex queue`で積む（#2519）
 #
 # セッションに触らないジョブもある（#1828）。
 #
@@ -143,7 +144,9 @@ set -euo pipefail
 # 22: 手作業の`<…>`へ人が埋めた値を、シェルの引用で包んで差し込んでから実行する（#2403）。
 # 23: 確認環境（`PREVIEW`）を起こし・更新し・止め、動いているものを申告する（#2444）。
 # 24: ホストごとの再起動（`REBOOT`）を実行し、再起動が要るかを申告する（#2496）。
-DISPATCH_POLLER_VERSION="25"
+# 25: 画面から選ばれたエージェントCLI（`agent`）を読み、Codex CLIでセッションを起こす（#2505）。
+# 26: Codexのセッションへの追加指示を`codex queue`で送り、宛先が分かっているかを申告する（#2519）。
+DISPATCH_POLLER_VERSION="26"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -168,6 +171,10 @@ source "$SCRIPT_DIR/lib/session-state.sh"
 source "$SCRIPT_DIR/lib/session-transcript.sh"
 # shellcheck source=scripts/lib/session-resume.sh
 source "$SCRIPT_DIR/lib/session-resume.sh"
+# Codexのセッションへの追加指示（#2519）。**`send-keys`を使わない**ので3段階プロトコルの
+# 外側に置いてある（`codex queue`はTUIのキー入力を経由しない）。
+# shellcheck source=scripts/lib/codex-queue.sh
+source "$SCRIPT_DIR/lib/codex-queue.sh"
 # メモリ・SWAPの逼迫で起動を見送るかの判定（#2095）。**判定だけを別に持つ**のは、
 # 壊れると「起動が永久に止まる」か「逼迫しても止まらない」のどちらかになる境界で、
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
@@ -1679,6 +1686,26 @@ session_reap_json() {
   jq -nc --arg at "$iso" --arg reason "$reason" '{reapAt: $at, reapReason: $reason}'
 }
 
+# Codexのセッションで、`codex queue`の宛先（スレッドUUID）が分かっているか（#2519）。
+#
+# **3値で返す。** `null`＝Codexのセッションではない（Claude Code）。`false`＝Codexだが宛先が
+# まだ無い（ディレクトリの信頼確認に答えていない）。`true`＝送れる。
+#
+# 画面はこの値だけで「追加指示を送れるか」を出し分ける。**項目そのものを送らない古いpollerでは
+# `undefined`になり、issue-deck側は既存の値を触らない**（`claudeStarting`・`reapAt`と同じ向き）。
+session_codex_thread_json() {
+  local session="$1"
+  if [[ "$(session_state_agent_kind "$session")" != "codex" ]]; then
+    printf 'null'
+    return 0
+  fi
+  if session_state_read_codex_thread "$session" >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
 #
 # **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
@@ -1715,10 +1742,11 @@ report_sessions() {
       --argjson paneDead "$dead_json" \
       --argjson paneDeadStatus "$status_json" \
       --argjson claudeStarting "$(claude_start_pending "$session_name")" \
+      --argjson codexThreadKnown "$(session_codex_thread_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
-        claudeStarting: $claudeStarting} + $reap')")
+        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown} + $reap')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
@@ -1879,6 +1907,20 @@ instruction_reflected() {
   return 1
 }
 
+# Codexのセッションへ`codex queue`で送る（#2519）。**3段階プロトコルは通さない。**
+#
+# あのプロトコルは「`send-keys`でTUIの入力欄へ打ち込む」ことの危うさ（選択フォームの表示中に
+# 送ると勝手に回答済みになる）を抑えるためのもので、`codex queue`はキー入力を経由しない。
+# したがって画面（`capture-pane`）も状態ファイルも読まない——処理中でも積めるし、届くのは
+# 次のターンの頭になる（#2510の実機検証）。
+#
+# 返り値は`deliver_session_instruction`と同じ規約（0=送った / 1=見送り / 2=送れなかった）。
+deliver_codex_instruction() {
+  local session="$1" body="$2" thread
+  thread="$(session_state_read_codex_thread "$session" 2>/dev/null || true)"
+  codex_queue_send "$thread" "$body"
+}
+
 # 追加指示を1件送る。**このプロトコルの全体がここに閉じている。**
 #
 # **ジョブに依らない**（#1971でAPIエラーからの自動再開も同じ経路を
@@ -1902,6 +1944,13 @@ deliver_session_instruction() {
   if ((${#body} > 500)); then
     echo "追加指示の本文が長すぎます（${#body}文字）"
     return 2
+  fi
+
+  # **エージェントで送り方が分かれる**（#2519）。本文の検証まではどちらも同じで、
+  # ここから先だけが違う。判定材料はランチャーが記述子へ書いた`agent`だけ。
+  if [[ "$(session_state_agent_kind "$session")" == "codex" ]]; then
+    deliver_codex_instruction "$session" "$body"
+    return $?
   fi
 
   # 段1: 状態確認
@@ -2085,8 +2134,17 @@ run_control_job() {
     echo "  --dry-run のため実行しません（$kind → $session）"
     # 追加指示は「いま送ってよい状態か」の判定こそが要なので、そこだけは確認して見せる
     # （送出はしない）。手元で判定を確かめるときの唯一の手段になる。
+    #
+    # **Codexのセッションには3段階プロトコルが無い**（#2519）ので、代わりに宛先が分かって
+    # いるかを見せる。ここで`instruction_ready`を呼ぶと、送り方と関係の無い理由が出る。
     if [[ "$kind" == "INSTRUCTION" ]]; then
-      if reason="$(instruction_ready "$session")"; then
+      if [[ "$(session_state_agent_kind "$session")" == "codex" ]]; then
+        if reason="$(session_state_read_codex_thread "$session" 2>/dev/null)"; then
+          echo "  Codexのセッションです（codex queue の宛先: $reason）"
+        else
+          echo "  Codexのセッションですが、宛先（スレッドUUID）がまだ分かりません"
+        fi
+      elif reason="$(instruction_ready "$session")"; then
         echo "  段1（状態確認）: 送ってよい状態です"
       else
         echo "  段1（状態確認）: $reason"

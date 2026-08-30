@@ -54,6 +54,9 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     // 古い版が書いた・知らないコードが残っていることがある）
     reapAt: session.reapAt?.toISOString() ?? null,
     reapReason: parseSessionReapReason(session.reapReason),
+    // Codexのセッションの宛先が分かっているか（#2519）。**Claude Codeの行では`null`**で、
+    // 追加指示の判定に効かない
+    codexThreadKnown: session.codexThreadKnown,
   };
 }
 
@@ -224,6 +227,11 @@ export async function reportDispatchSessions(params: {
             reapAt: report.reapAt === null ? null : new Date(report.reapAt),
             reapReason: report.reapReason ?? null,
           };
+    // Codexのセッションの宛先（#2519）。**送ってきた巡の値でそのまま置き換える**（畳む予定と
+    // 同じ扱い）。ディレクトリの信頼確認に人が答えれば`false` → `true`へ変わる値なので、
+    // 前の巡の値を残す意味が無い。古いpollerは項目そのものを送ってこない（`undefined`）
+    const codexThread =
+      report.codexThreadKnown === undefined ? {} : { codexThreadKnown: report.codexThreadKnown };
 
     await db.dispatchSession.upsert({
       where: {
@@ -246,6 +254,7 @@ export async function reportDispatchSessions(params: {
         // 1巡目の報告で既に止まっている場合（起動から猶予を過ぎてからpollerが最初に見た場合）
         ...(startingTransition === "enter" ? { activity: "NOT_STARTED", activityAt: now } : {}),
         ...reap,
+        ...codexThread,
       },
       update: {
         repositoryFullName: report.repositoryFullName,
@@ -279,6 +288,7 @@ export async function reportDispatchSessions(params: {
         ...(startingTransition === "leave" ? { activity: null, activityAt: null } : {}),
         // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡の値を入れる）
         ...reap,
+        ...codexThread,
       },
     });
 
