@@ -6,6 +6,7 @@ import {
   describeSessionRecovery,
   findSessionForIssue,
   isSessionWaitingInput,
+  resolveIssueImplementationAgent,
   shortIssueSessionLabel,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
@@ -35,6 +36,16 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     ...overrides,
   };
 }
+
+describe("resolveIssueImplementationAgent", () => {
+  it("nullだけをClaude Codeとして扱う", () => {
+    expect(resolveIssueImplementationAgent(session({ codexThreadKnown: null }))).toBe("claude");
+  });
+
+  it.each([false, true])("codexThreadKnown=%sをCodexとして扱う", (codexThreadKnown) => {
+    expect(resolveIssueImplementationAgent(session({ codexThreadKnown }))).toBe("codex");
+  });
+});
 
 describe("findSessionForIssue", () => {
   it("別Issue・別リポジトリは選ばない", () => {
