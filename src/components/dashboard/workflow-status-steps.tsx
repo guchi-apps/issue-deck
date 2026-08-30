@@ -150,21 +150,36 @@ type ProgressBarProps = {
   filled: number;
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
-  /** 実行中（#1439）。現在の段のマスの中だけを光が掃く */
+  /** 実行中（#1439）。塗ったマスの上を背景色寄りの光がバー全体にわたって掃く */
   live?: boolean;
-  /** 起動中（#2449）。まだ0段なのでトラック全体を光が1往復する */
+  /** 起動中（#2449）。まだ0段なので、トラックの上を色の濃い帯が掃く */
   sweeping?: boolean;
-  /** 順番待ち（#2449）。動かさず、ゆっくり明滅させるだけ */
+  /** 順番待ち（#2449）。掃かず、ゆっくり明滅させるだけ */
   pulsing?: boolean;
+  /**
+   * 未達のマス（トラック）を濃く塗るか（#2516）。
+   *
+   * **確認待ち・回答待ちの行で立てる。** 一覧の行では要対応ラベル（`00.check-user`・
+   * `01.check-*`）が下のラベル一覧から除外されており（`issue-list.tsx`の`listCardLabels`）、
+   * **このバッジが色で伝える唯一の手段**になる。塗ったマスだけを色付けると、`Planning`
+   * （1/6）の行では40×5pxのうち5pxしか色が乗らない。18pxの円だった頃は未達側も20%で
+   * 塗られていて円全体が色を帯びていたので、同等の面積を確保する。
+   */
+  emphasizeTrack?: boolean;
 };
 
 /**
  * 一覧の行に出す進捗の横棒（#2516）。`WorkflowStepBadge`（進捗Statusを持つ行）と
  * `QueueStepBadge`（実行が始まる前の行）が**同じ寸法・同じ塗り分け**で共有する。
  *
- * 動きの使い分けは円グラフだった頃の外周リングをそのまま引き継ぐ。実行中だけを掃き、
- * 順番待ちは明滅させるだけにする——掃くと、実際に作業が進んでいる行と一覧の上で
+ * 動きの使い分けは円グラフだった頃の外周リングをそのまま引き継ぐ。実行中・起動中だけを
+ * 掃き、順番待ちは明滅させるだけにする——掃くと、実際に作業が進んでいる行と一覧の上で
  * 区別が付かなくなる（`docs/code-map.md`「同じ状態を2か所で言わせない」）。
+ *
+ * **掃く範囲はバー全体で、1マスの中に閉じ込めない**（#2358）。細い弧が1/4周だけ動いて
+ * いた頃は「回っているかどうかが分からない」「スマホでは一瞬しか出ていない」と報告された。
+ * 40pxを端から端まで通れば動く距離は当時のリングと同等になり、バー自体（塗り＋トラック）が
+ * 常時見える輪郭の役を引き継ぐ。
  */
 function ProgressBar({
   filled,
@@ -172,6 +187,7 @@ function ProgressBar({
   live = false,
   sweeping = false,
   pulsing = false,
+  emphasizeTrack = false,
 }: ProgressBarProps) {
   return (
     <span
@@ -187,17 +203,16 @@ function ProgressBar({
         <span
           key={step.key}
           className={cn(
-            "relative flex-1 overflow-hidden rounded-[1px]",
+            "flex-1 rounded-[1px]",
             index < filled
               ? "bg-current"
-              : "bg-[color-mix(in_oklch,currentColor_15%,transparent)]",
+              : emphasizeTrack
+                ? "bg-[color-mix(in_oklch,currentColor_35%,transparent)]"
+                : "bg-[color-mix(in_oklch,currentColor_15%,transparent)]",
           )}
-        >
-          {/* 掃くのは現在の段（最後に塗ったマス）だけ。済んだ段まで光ると、どこが動いて
-              いるのかが読めなくなる */}
-          {live && index === filled - 1 && <span className="progress-seg-sweep" />}
-        </span>
+        />
       ))}
+      {live && <span className="progress-live-sweep" />}
       {sweeping && <span className="progress-bar-sweep" />}
     </span>
   );
@@ -213,12 +228,12 @@ function ProgressBar({
  * アイコンを添え、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
  * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで質問アイコンを添える
  * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
- * 実行中は現在の段のマスを光が掃き、進捗（塗り分け）と実行中（動き）を同じバーで同時に
+ * 実行中はバー全体を光が掃き、進捗（塗り分け）と実行中（動き）を同じバーで同時に
  * 表現する。**動かすかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
  * `isWorkflowBadgeSpinning`（#1439）に集約している。**
  *
- * **掃くのは現在の段だけで、塗りそのものは動かさない**（#2516）。バー全体を光らせると、
- * どこまで進んだかを読み取る手がかりまで動いてしまう。
+ * **掃く光は塗りの上を通るだけで、塗りそのものは動かさない**（#2516）。どこまで進んだかは
+ * 光が抜けた後も同じ位置に残る。
  */
 export function WorkflowStepBadge({
   labels,
@@ -320,9 +335,16 @@ export function WorkflowStepBadge({
           aria-hidden="true"
         />
       )}
-      {/* 実行中は現在の段のマスを光が掃く（#1439・#2358・#2516）。**承認待ち（amber）でも
-          掃く**——確認待ちのまま処理が動いている状態を動きで表すため（`isWorkflowBadgeSpinning`） */}
-      <ProgressBar filled={currentIndex + 1} colorClass={accentColorClass} live={isSpinning} />
+      {/* 実行中はバー全体を光が掃く（#1439・#2358・#2516）。**承認待ち（amber）でも
+          掃く**——確認待ちのまま処理が動いている状態を動きで表すため（`isWorkflowBadgeSpinning`）。
+          確認待ち・回答待ちの行では未達のマスも濃く塗り、行の中で色を伝える唯一の場所として
+          十分な面積を確保する */}
+      <ProgressBar
+        filled={currentIndex + 1}
+        colorClass={accentColorClass}
+        live={isSpinning}
+        emphasizeTrack={approvalPending || showQaAnswerPending}
+      />
     </span>
   );
 }
@@ -340,8 +362,8 @@ export function WorkflowStepBadge({
  *
  * - **順番待ちは掃かない。** バーをゆっくり明滅させるだけにする。掃くと、実際に作業が
  *   進んでいる行（`isWorkflowBadgeSpinning`）と一覧の上で区別が付かなくなる
- * - **起動中はトラック全体を光が1往復する**（#2516）。`WorkflowStepBadge`は現在の段の
- *   マスだけを掃くが、こちらはまだ1段も進んでおらず掃く先のマスが無い
+ * - **起動中はトラックの上を色の濃い帯が掃く**（#2516）。`WorkflowStepBadge`は塗ったマスの
+ *   上を背景色寄りの光で掃くが、こちらはまだ1段も塗られておらず、その光が乗る先が無い
  * - **どちらも1マスも塗らない**——進捗としては0
  */
 export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps) {

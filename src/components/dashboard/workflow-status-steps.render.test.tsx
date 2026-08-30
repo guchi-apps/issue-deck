@@ -41,14 +41,19 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
   };
 }
 
-/** 実行中の合図（現在の段のマスを掃く光。#2516） */
-function segSweep(container: HTMLElement): Element | null {
-  return container.querySelector(".progress-seg-sweep");
+/** 実行中の合図（塗ったマスの上をバー全体にわたって掃く光。#2516） */
+function liveSweep(container: HTMLElement): Element | null {
+  return container.querySelector(".progress-live-sweep");
 }
 
-/** 起動中の合図（トラック全体を1往復する光。#2516） */
+/** 起動中の合図（トラックの上を掃く濃い帯。#2516） */
 function barSweep(container: HTMLElement): Element | null {
   return container.querySelector(".progress-bar-sweep");
+}
+
+/** 未達のマスを濃く塗っているか（確認待ち・回答待ち。#2516） */
+function hasEmphasizedTrack(container: HTMLElement): boolean {
+  return container.querySelectorAll('[class*="currentColor_35%"]').length > 0;
 }
 
 function pulse(container: HTMLElement): Element | null {
@@ -86,7 +91,28 @@ describe("WorkflowStepBadge", () => {
     expect(filledSegments(done.container)).toBe(6);
   });
 
-  it("サブPCのセッションが動いている間はマスを掃く", () => {
+  // #2516。一覧の行では`00.check-user`・`01.check-*`が下のラベル一覧から除外されるため
+  // （`listCardLabels`）、色で伝えるのはこのバッジだけになる。塗ったマスだけでは
+  // `Planning`（1/6）の行で5pxしか色が乗らないので、未達のマスも濃く塗る
+  it("確認待ち・回答待ちでは未達のマスも濃く塗る", () => {
+    const plain = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
+    expect(hasEmphasizedTrack(plain.container)).toBe(false);
+    cleanup();
+
+    const checkUser = render(
+      <WorkflowStepBadge
+        labels={[{ name: "00.check-user", color: "", description: null }]}
+        projectStatus="Planning"
+      />,
+    );
+    expect(hasEmphasizedTrack(checkUser.container)).toBe(true);
+    cleanup();
+
+    const qa = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" qaAnswerPending />);
+    expect(hasEmphasizedTrack(qa.container)).toBe(true);
+  });
+
+  it("サブPCのセッションが動いている間はバーを掃く", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -96,7 +122,7 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(segSweep(container)).not.toBeNull();
+    expect(liveSweep(container)).not.toBeNull();
   });
 
   it("入力待ちで止まっているセッションでは掃かない", () => {
@@ -109,7 +135,7 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(segSweep(container)).toBeNull();
+    expect(liveSweep(container)).toBeNull();
     expect(container.textContent).toContain("入力待ち");
   });
 
@@ -122,7 +148,7 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(segSweep(container)).not.toBeNull();
+    expect(liveSweep(container)).not.toBeNull();
   });
 
   // #2358。確認待ちのまま処理が動いている間も掃く。判定材料は一覧が持つ
@@ -137,10 +163,10 @@ describe("WorkflowStepBadge", () => {
       now: NOW,
     };
     const running = render(<WorkflowStepBadge {...props} checkUserRunning />);
-    expect(segSweep(running.container)).not.toBeNull();
+    expect(liveSweep(running.container)).not.toBeNull();
     cleanup();
     const stopped = render(<WorkflowStepBadge {...props} />);
-    expect(segSweep(stopped.container)).toBeNull();
+    expect(liveSweep(stopped.container)).toBeNull();
   });
 
   it("サブPC実行では「起動待ち」を出さない（#1262の判定を壊していない）", () => {
@@ -155,7 +181,7 @@ describe("WorkflowStepBadge", () => {
       />,
     );
     expect(container.textContent).not.toContain("起動待ち");
-    expect(segSweep(container)).not.toBeNull();
+    expect(liveSweep(container)).not.toBeNull();
   });
 });
 
