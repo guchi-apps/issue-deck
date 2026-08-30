@@ -64,7 +64,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 停止（応答終了）の通知 | ○（`Stop`フック） | ○（同名のフック。#2509） |
 | 「まだ開始していません」の検知（#1465） | ○ | ○（`SessionStart`フック。#2509） |
 | 入力待ちの通知（Push通知） | ○（`Notification`フック） | **×**（同じイベントが無い。後述） |
-| 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | **×**（同名のツールが無い） |
+| 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | ○（`scripts/submit-plan.sh`。#2545） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | **×**（同名のツールが無い） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
@@ -564,7 +564,7 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 読み替えに書いてあるのは、Claude Code前提の記述をどう置き換えるか。
 
 - `CLAUDE.md`を自分で読むこと（**Codexが自動で読むのは`AGENTS.md`**）
-- 計画は`ExitPlanMode`ではなく`gh issue comment`＋`00.check-user`／`01.check-plan`の自分での付与
+- 計画は`ExitPlanMode`ではなく`scripts/submit-plan.sh <計画ファイル>`で登録・判断待ち
 - 確認は`AskUserQuestion`ではなく端末＋Issueコメント（**ラベルを外すのも自分**）
 - `Read`・`Grep`・`Glob`はシェルで代替する
 - 承認プロンプトは出ない・書き込みはworktreeと本体の`.git`に閉じている（`git`はそのまま使える）
@@ -627,11 +627,8 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
   従来どおりClaude Codeで立つ（画面から選んでも、受け口が理由を出して止まる）
 - **他リポジトリの`start-issue.sh`は`ISSUE_DECK_AGENT`を読まない。** 揃えるまでは、画面から
   Codexを選べるのはissue-deck自身のIssueだけになる（他は受け口が止める）
-- **計画の承認と質問の受け答えは画面へ出せていない**（#2509）。Codexに`ExitPlanMode`・
-  `AskUserQuestion`に当たるツールが無いため、フックを繋いでも中身が手に入らない
-  （`update_plan`はTODOの更新で、承認待ちではない。`tools.experimental_request_user_input`は
-  under development）。**MCPサーバとして専用のツールを提供し、`PreToolUse`のmatcherを
-  `mcp__…`に掛けるのが確実**だが、作るものが増えるので別途の判断が要る
+- **質問の受け答えは画面へ出せていない**（#2509）。計画は#2545で専用コマンドから既存パネルへ
+  出せるようにしたが、Codexに`AskUserQuestion`に当たる安定したツールは無い
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）

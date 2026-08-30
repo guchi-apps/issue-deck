@@ -65,6 +65,21 @@ claude.ai/code/<セッション> （--remote-control）→ その場で答える
 
 そこで`ExitPlanMode`の`PreToolUse`フックで計画本文を掴み、issue-deckを経由してIssueへ書く。
 
+Codexには`ExitPlanMode`が無いため、#2545では同じAPIを`scripts/submit-plan.sh`から呼ぶ。エージェントが
+計画ファイルを明示して実行し、`SessionPlanRequest`の判断を自分のコマンド結果として受け取る。
+画面・Issueコメント・ラベル・保存する状態はClaude Code経路と共通で、違うのは入口と結果の形だけ。
+
+```text
+Codexが計画ファイルを作る → scripts/submit-plan.sh <計画ファイル>
+  → POST /api/dispatch/sessions/plan → Issueコメント・待機ラベル・承認パネル
+  → GET /api/dispatch/sessions/plan/decision?id=… を引いて待つ
+  → 承認: 終了コード0 ／ 修正: 終了コード2＋修正本文 ／ 期限切れ・通信継続失敗: 終了コード3
+```
+
+**期待される未決定を成功にしない。** Claude Codeはフックを抜ければ端末の承認プロンプトへ倒れるため
+フェイルオープンでよいが、Codexにはそのプロンプトが無い。期限切れや通信失敗を終了コード0にすると、
+エージェントが承認済みと誤認して実装へ進みうるため、Codexのコマンドは非0で止める。
+
 ```text
 ExitPlanMode（計画の提示）
   → PreToolUse フック → session-notify.sh
