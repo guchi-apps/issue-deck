@@ -440,7 +440,7 @@ export async function diagnoseManualStepFailure(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeによる原因の調査に失敗しました (${res.status})`);
+    throw new Error(`AIによる原因の調査に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();

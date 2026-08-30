@@ -128,7 +128,7 @@ describe("PATCH", () => {
 
   it("appAiModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(
-      patchRequest({ claudeModel: "opus", appAiModel: "gpt-5.6-sol" }),
+      patchRequest({ claudeModel: "opus", appAiModel: "gpt-5.5" }),
     );
 
     expect(res.status).toBe(400);

@@ -55,7 +55,7 @@ export function CommentAiSummary({
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
 
       {!error && notConfigured && (
-        <p className="mt-1 text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>
+        <p className="mt-1 text-xs text-muted-foreground">選択したAIモデルの認証情報が設定されていません</p>
       )}
 
       {!error && !notConfigured && !summary && (

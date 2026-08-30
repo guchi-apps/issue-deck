@@ -50,7 +50,7 @@ export function BodyCleanupButton({
         音声入力を整理
       </Button>
       {notConfigured && (
-        <p className="text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>
+        <p className="text-xs text-muted-foreground">選択したAIモデルの認証情報が設定されていません</p>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

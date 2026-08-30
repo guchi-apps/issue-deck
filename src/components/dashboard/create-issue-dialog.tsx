@@ -1018,7 +1018,7 @@ export function CreateIssueDialog({
           )}
           {suggestNotConfigured && (
             <p className="text-xs text-muted-foreground">
-              Claudeのトークンが設定されていないため、自動では決められません。自分で入力してください。
+              選択したAIモデルの認証情報が設定されていないため、自動では決められません。自分で入力してください。
             </p>
           )}
           {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}

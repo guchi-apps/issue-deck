@@ -93,11 +93,19 @@ export const APP_AI_MODEL_OPTIONS = [
   { value: "claude-haiku-4-5", label: "Haiku 4.5" },
   { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-opus-5", label: "Opus 5" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
 export const APP_AI_MODEL_VALUES = APP_AI_MODEL_OPTIONS.map((option) => option.value);
 export type AppAiModel = (typeof APP_AI_MODEL_VALUES)[number];
+export type AppAiProvider = "anthropic" | "openai";
+
+export function appAiProvider(model: AppAiModel): AppAiProvider {
+  return model.startsWith("gpt-") ? "openai" : "anthropic";
+}
 
 export function parseAppAiModel(value: unknown): AppAiModel | null {
   if (typeof value !== "string") return null;

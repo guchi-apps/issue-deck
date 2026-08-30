@@ -289,6 +289,17 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 トークン使用量の削減施策全体は#910で管理している。効果測定なしに削ると、安くなったのか単に
 手を抜くようになったのかを区別できないため、この可視化を先に入れている。
 
+## アプリ内AIのモデルとプロバイダー（#2562・#2568）
+
+設定の「アプリ内AI機能で使用するモデル」は、Issue要約・検索・文章整理・手作業診断・新規アプリ相談など、
+issue-deck自身が外部AI APIを呼ぶ機能へ共通で適用する。`src/lib/claude/request.ts`が唯一の送信口で、
+`claude-`モデルはAnthropic Messages API、`gpt-`モデルはOpenAI Responses APIへ送る。
+
+Claudeモデルは`CLAUDE_CODE_OAUTH_TOKEN`、GPTモデルは`OPENAI_API_KEY`を使用する。選択中のモデルに
+対応する認証情報が無い場合だけ、各APIは`not_configured`を返す。OpenAIの応答は共通送信口で既存の
+テキスト・usage形式へ正規化するため、各AI機能はプロバイダーごとの分岐を持たない。モデル別の実測
+トークン数は、どちらのプロバイダーも設定の「AI使用量」へ同じ機能別集計として記録する。
+
 ## 自動投稿コメントへの実行ログリンク付与
 
 `claude-issue-dispatch.yml`・`issue-labels.yml`がGitHub Actions上で`gh issue comment`を使って

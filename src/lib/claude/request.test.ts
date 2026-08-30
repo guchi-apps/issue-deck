@@ -27,6 +27,7 @@ describe("callClaudeMessages", () => {
   });
 
   afterEach(() => {
+    delete process.env.OPENAI_API_KEY;
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -142,5 +143,75 @@ describe("callClaudeMessages", () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5");
+  });
+
+  it("GPTモデルはResponses APIへ変換し、応答を既存形式へ正規化する", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-terra" });
+    process.env.OPENAI_API_KEY = "openai-test-token";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        model: "gpt-5.6-terra-2026-08-01",
+        output: [{ type: "message", content: [{ type: "output_text", text: "回答" }] }],
+        usage: {
+          input_tokens: 90,
+          output_tokens: 20,
+          input_tokens_details: { cached_tokens: 30 },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { json } = await callClaudeMessages({
+      feature: "new_app_consult",
+      token: "anthropic-token",
+      body: {
+        max_tokens: 128,
+        system: "指示",
+        messages: [{ role: "user", content: "質問" }],
+        output_config: { format: { type: "json_schema", schema: { type: "object" } } },
+      },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.openai.com/v1/responses");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer openai-test-token");
+    expect(JSON.parse(String(init.body))).toEqual({
+      model: "gpt-5.6-terra",
+      input: [{ role: "user", content: "質問" }],
+      instructions: "指示",
+      max_output_tokens: 128,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "response",
+          strict: true,
+          schema: { type: "object" },
+        },
+      },
+    });
+    expect(json?.content?.[0]?.text).toBe("回答");
+    expect(getClaudeApiUsageSummary(NOW).totalLast24h).toEqual({
+      calls: 1,
+      inputTokens: 90,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  it("GPTモデル選択時にOpenAI APIキーが無ければ未設定を返す", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-luna" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { response, json } = await callClaudeMessages({
+      feature: "issue_summary",
+      token: "anthropic-token",
+      body: { max_tokens: 16, messages: [] },
+    });
+
+    expect(response.status).toBe(501);
+    expect(json).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -265,12 +265,12 @@ export async function continueNewAppConsult(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeへの相談に失敗しました (${res.status})`);
+    throw new Error(`AIへの相談に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から本文を取得できませんでした");
+    throw new Error("AIの応答から本文を取得できませんでした");
   }
   // 打ち切られた応答は必ず壊れたJSONになる。「解析できませんでした」より原因の分かる文言で返す
   if (json?.stop_reason === "max_tokens") {

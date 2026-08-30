@@ -47,7 +47,7 @@ describe("BodyCleanupButton", () => {
     fireEvent.click(screen.getByRole("button", { name: /音声入力を整理/ }));
 
     await waitFor(() =>
-      expect(screen.getByText("Claudeのトークンが設定されていません")).not.toBeNull(),
+      expect(screen.getByText("選択したAIモデルの認証情報が設定されていません")).not.toBeNull(),
     );
     expect(onCleaned).not.toHaveBeenCalled();
   });

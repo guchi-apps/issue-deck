@@ -118,7 +118,7 @@ export function useManualStepFix() {
 function describeFixError(code: string | undefined): string {
   switch (code) {
     case "not_configured":
-      return "Claudeの認証情報（CLAUDE_CODE_OAUTH_TOKEN）が設定されていないため、原因を調べられません。";
+      return "選択したAIモデルの認証情報が設定されていないため、原因を調べられません。";
     case "body_changed":
       return "本文が変わったため調べられませんでした。画面を更新してください。";
     case "not_found":

@@ -221,7 +221,8 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Issueの要約・検索・文章整理・手作業の診断など、アプリが直接実行するAI機能で使います。
+          Issueの要約・検索・文章整理・手作業の診断など、アプリが直接実行するAI機能で使います。GPTモデルはOpenAI
+          API、ClaudeモデルはAnthropic APIの認証情報を使用します。
           高性能なモデルほど応答品質が上がる一方、処理時間とAPI消費量が増える場合があります。
         </p>
       </div>

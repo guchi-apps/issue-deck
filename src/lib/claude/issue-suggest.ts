@@ -118,12 +118,12 @@ export async function generateIssueSuggestion(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeの提案生成に失敗しました (${res.status})`);
+    throw new Error(`AIによる提案生成に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から提案テキストを取得できませんでした");
+    throw new Error("AIの応答から提案テキストを取得できませんでした");
   }
 
   let parsed: unknown;
