@@ -69,7 +69,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
 | Remote Control | ○ | **△**（デーモンは起動できる。ただし取れるのはURLではなく短命のペアリングコード。未実装。#2521） |
-| 前回の会話の引き継ぎ | ○（`--continue`） | **△**（`codex resume <session_id>`で作れる。未実装。#2510） |
+| 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
 
 **そのぶんIssueコメントに残す記録が重要になる。** 端末だけで完結させると、画面からは何も起きて
@@ -94,9 +94,8 @@ npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かな�
 | セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **×**。名前はモデルが自動で付ける |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
-**このうち実装したのは「追加指示を送る」だけ**（#2519。下の「追加指示は`codex queue`で送る」）。
-`resume`とRemote Controlはまだ可否の記録のまま（Remote Controlは#2521でデーモンが動くように
-なったが、画面へ出す設計から要る）。
+**「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は#2520で実装した。** Remote Controlは
+まだ可否の記録のまま（#2521でデーモンが動くようになったが、画面へ出す設計から要る）。
 
 ### `codex queue`は使える。しかも`send-keys`が要らない
 
@@ -246,6 +245,17 @@ $ codex remote-control pair --json
 Codex側にも作れる。`--last`はホスト全体で最後のセッションを指すため、worktreeを並べる運用では
 使えない——**UUIDを覚えておくことが前提**になる。
 
+`run-issue-session.sh`は、同じworktreeを再利用して起こすときに
+`<セッション名>.codex-thread`（#2519）を読み、対応があればこのコマンドで再開する。UUIDは
+`SessionStart`フックが書き、セッション終了後も次回の再開用にホスト内だけへ残す。
+
+- **対応が無ければ新しい会話。** 初回や、ディレクトリの信頼確認に答える前に終了した場合は
+  `SessionStart`が飛ばずUUIDも無いため、従来の`codex <PROMPT> ...`で起こす
+- **新規作成・再作成では引き継がない。** 呼び出し元が`ISSUE_DECK_CLAUDE_RESUME=0`を渡すため、
+  古いUUIDを起動前に消して新しい会話にする。人が明示的に同じ環境変数を渡した場合も同じ
+- **`--last`は使わない。** ホスト全体の最後ではなく、tmuxセッション名
+  （`<リポジトリ名>-issue-<番号>`）に対応するUUIDだけを指定する
+
 ## 追加指示は`codex queue`で送る（#2519）
 
 画面の「追加指示を送る」（#1012）は、Codexのセッションでも押せる。**送り方だけが違う。**
@@ -276,8 +286,9 @@ Codex側にも作れる。`--last`はホスト全体で最後のセッション�
 
 **判定材料は記述子の`agent`だけ**で、転記のパスやJSONの形からエージェントを推定はしない。
 読めない・知らない語のときは`claude`へ倒す——`codex`へ倒すと、Claude Codeのセッションに対して
-宛先の無い`codex queue`を打つことになる。セッションを畳むと宛先も消える
-（`session_state_remove`）。残すと、次に同じ名前で立ったセッションへ前回の宛先で送ってしまう。
+宛先の無い`codex queue`を打つことになる。UUIDは次回の`codex resume`にも使うため、セッションを
+畳んでも残す（#2520）。新しい会話で起こす場合はランチャーが起動前に消し、前回の宛先へ追加指示を
+送らないようにする。
 
 ### 信頼確認に答えるまでは送れないことを画面に出す
 
@@ -490,7 +501,7 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 
 | 何を | どこに |
 |---|---|
-| 種別の解決・Codexの引数の組み立て・フックの`-c`の組み立て・サンドボックスの下見 | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
+| 種別の解決・Codexの通常／resume引数の組み立て・フックの`-c`の組み立て・サンドボックスの下見 | [`scripts/lib/agent-cli.sh`](../../scripts/lib/agent-cli.sh) |
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
 | `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記 | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
@@ -521,9 +532,6 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）
-- **「前回の会話の引き継ぎ」は可否を確かめただけ**（#2510）。`codex resume <session_id>`で
-  作れることは実機で確認したが、`ISSUE_DECK_CLAUDE_RESUME`（`--continue`）に当たる実装はまだ無い
-  （宛先のセッションUUIDは#2519で残すようになったので、材料は揃っている）
 - **Remote Controlは画面へ出せていない**（#2521）。standalone installへの入れ替えは済み、
   `codex remote-control start` / `pair`・`codex agents`は動くようになったが、取れるのはURLでは
   なく10分で切れるペアリングコードなので、`scripts/session-notify.sh`のURL拾い（#1219）を
