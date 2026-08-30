@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { decideIssueOrder, type IssueOrderCandidate } from "@/lib/claude/issue-order";
+import { getAppAiToken } from "@/lib/claude/request";
 
 function isCandidate(value: unknown): value is IssueOrderCandidate {
   const candidate = value as IssueOrderCandidate | null;
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const token = await getAppAiToken();
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }

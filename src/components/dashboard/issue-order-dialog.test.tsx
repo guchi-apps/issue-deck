@@ -117,7 +117,7 @@ describe("IssueOrderDialog", () => {
   it("トークン未設定の環境ではその理由を出す", () => {
     renderDialog(guideHandle({ notConfigured: true }));
 
-    expect(screen.getByText(/AIによる判定を使えません/)).toBeTruthy();
+    expect(screen.getByText(/選択したAIモデルの認証情報が設定されていない/)).toBeTruthy();
   });
 
   it("未着手が0件なら決める順番が無いことを出す", () => {

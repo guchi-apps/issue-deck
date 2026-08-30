@@ -10,6 +10,7 @@ import {
   MAX_CONSULT_MESSAGE_LENGTH,
   continueNewAppConsult,
 } from "@/lib/claude/new-app-consult";
+import { getAppAiToken } from "@/lib/claude/request";
 
 /**
  * 新規アプリの相談を1往復進める（#2188）。
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const token = await getAppAiToken();
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }

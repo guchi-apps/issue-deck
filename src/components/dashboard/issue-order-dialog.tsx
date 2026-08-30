@@ -222,7 +222,7 @@ function OrderBody({
     return (
       <div className="flex flex-col items-center gap-2 p-10 text-center">
         <p className="text-sm text-muted-foreground">
-          この環境ではAIによる判定を使えません（<code>CLAUDE_CODE_OAUTH_TOKEN</code>が未設定）。
+          選択したAIモデルの認証情報が設定されていないため、この環境では判定を使えません。
         </p>
       </div>
     );

@@ -43,7 +43,7 @@ function IssueAiSummaryBody({
   if (isLoading) return <Skeleton className="h-16 w-full" />;
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (notConfigured)
-    return <p className="text-sm text-muted-foreground">Claudeのトークンが設定されていません</p>;
+    return <p className="text-sm text-muted-foreground">選択したAIモデルの認証情報が設定されていません</p>;
 
   if (!state?.summary) {
     return (

@@ -122,7 +122,7 @@ export async function searchIssues(token: string, input: IssueSearchInput): Prom
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeのあいまい検索に失敗しました (${res.status})`);
+    throw new Error(`AIによるあいまい検索に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();

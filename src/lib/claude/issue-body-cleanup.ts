@@ -56,12 +56,12 @@ export async function generateIssueBodyCleanup(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeの本文整形に失敗しました (${res.status})`);
+    throw new Error(`AIによる本文整形に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から整形結果を取得できませんでした");
+    throw new Error("AIの応答から整形結果を取得できませんでした");
   }
 
   return { text };

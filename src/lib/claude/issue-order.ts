@@ -215,7 +215,7 @@ export async function decideIssueOrder(
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeによる着手順の判定に失敗しました (${res.status})`);
+    throw new Error(`AIによる着手順の判定に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();

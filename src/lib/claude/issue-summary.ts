@@ -79,12 +79,12 @@ export async function generateIssueSummary(token: string, input: IssueSummaryInp
   });
 
   if (!res.ok) {
-    throw new Error(`Claudeの要約生成に失敗しました (${res.status})`);
+    throw new Error(`AIによる要約生成に失敗しました (${res.status})`);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
   if (!text) {
-    throw new Error("Claudeの応答から要約テキストを取得できませんでした");
+    throw new Error("AIの応答から要約テキストを取得できませんでした");
   }
   return text;
 }
