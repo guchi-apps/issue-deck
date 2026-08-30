@@ -111,6 +111,19 @@ describe("resolveCheckUserGuidance", () => {
     expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
   });
 
+  it("Codexの入力待ちは端末から答える案内にする", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "input",
+      placement: "status",
+      sessionWaitingInput: true,
+      implementationAgent: "codex",
+    });
+    expect(guidance?.description).toContain("端末から答えてください");
+    expect(guidance?.description).not.toContain("Remote Control");
+    expect(guidance?.buttons).not.toContain("Remote Control");
+    expect(guidance?.action).toBeNull();
+  });
+
   // マージはGitHub側の操作なので、`11.local`のセッションが入力待ちでも画面から実行できる
   it("入力待ちでもマージだけはRemote Controlへ寄せない", () => {
     const guidance = resolveCheckUserGuidance({

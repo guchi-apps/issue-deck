@@ -86,6 +86,7 @@ print(json.dumps({
     "waitSeconds": int(wait_seconds),
     "planBaseSha": plan_base_sha or None,
     "remoteControlUrl": None,
+    "agent": os.environ.get("ISSUE_DECK_AGENT") if os.environ.get("ISSUE_DECK_AGENT") in ("claude", "codex") else "claude",
 }, ensure_ascii=False))
 PY
 }

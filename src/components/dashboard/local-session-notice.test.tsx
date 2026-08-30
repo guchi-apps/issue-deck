@@ -62,6 +62,12 @@ describe("LocalSessionCommentNotice", () => {
 });
 
 describe("LocalSessionApprovalNotice", () => {
+  it("Codexでは端末から答えるよう案内する", () => {
+    render(<LocalSessionApprovalNotice session={session({ codexThreadKnown: false })} />);
+    expect(screen.getByText(/答えるには端末を操作してください/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Remote Control/ })).toBeNull();
+  });
+
   it("生きているセッションでは、ここに書いても届かないことと答える場所を出す（#1264・#1903）", () => {
     render(<LocalSessionApprovalNotice session={session()} />);
     expect(screen.getByText(/ここに書いた回答はセッションに届きません/)).toBeTruthy();
@@ -109,5 +115,11 @@ describe("LocalSessionWaitingInputNotice", () => {
     render(<LocalSessionWaitingInputNotice session={session()} />);
 
     expect(screen.getByText(/承認・修正はRemote Controlから伝えてください/)).toBeTruthy();
+  });
+
+  it("Codexの入力待ちは端末から答えるよう案内する", () => {
+    render(<LocalSessionWaitingInputNotice session={session({ codexThreadKnown: false })} />);
+    expect(screen.getByText(/承認・修正は端末から伝えてください/)).toBeTruthy();
+    expect(screen.queryByText(/Remote Control/)).toBeNull();
   });
 });
