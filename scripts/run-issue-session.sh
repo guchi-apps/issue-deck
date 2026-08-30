@@ -592,7 +592,9 @@ if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]]; then
 fi
 SESSION_NAME="$REPO_NAME #$ISSUE_NUMBER"
 # --name を解釈しない古いClaude Codeへ渡すと起動自体が失敗するため、対応時のみ付ける。
-# **Codexでは付けない。** タブのタイトルは呼び出し元（start-issue.sh）が付けたものが残る。
+# **Codexには渡す口が無い**（起動オプションに名前が無い）。代わりに同じ文字列を、セッションが
+# 立った後に`session-notify.sh`の`SessionStart`が`thread/name/set`で付ける（#2540）。
+# タブのタイトルは呼び出し元（start-issue.sh）が付けたものが残る。
 if [[ "$AGENT_KIND" != "claude" ]]; then
   :
 elif claude --help 2>/dev/null | grep -q -- "--name"; then

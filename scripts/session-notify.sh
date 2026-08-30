@@ -91,6 +91,12 @@ ISSUE_NUMBER="${1:-}"
 # **引数の位置は変えない**——呼び出し側（run-issue-session.sh・pollerと、他リポジトリへ配った
 # 同じ形のランチャー）が3つ渡してくるため、詰めると第3引数の`owner/repo`がずれる。
 REPO_SLUG="${3:-}"
+# 第2引数のリポジトリ名（短い方）は、Codexのスレッドに付ける名前に使う（#2540）。
+# **Claude Codeの`--name`と同じ`<リポジトリ名> #<Issue番号>`**にするため、`owner/repo`ではなく
+# こちらを使う（`run-issue-session.sh`の`SESSION_NAME`）。渡ってこない古い呼び出し元では
+# `owner/repo`から作る。
+REPO_NAME="${2:-}"
+[[ -n "$REPO_NAME" ]] || REPO_NAME="${REPO_SLUG#*/}"
 
 # stdinのJSON。端末から直接叩かれたときにcatで待ち続けないよう、ttyなら何もせずに終わる。
 if [[ -t 0 ]]; then
@@ -155,6 +161,12 @@ if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-state.sh" ]]; then
   # shellcheck source=scripts/lib/session-state.sh
   source "$SCRIPT_DIR/lib/session-state.sh" || true
 fi
+# Codexのスレッドに名前を付ける（#2540）。**Codexのセッションでしか使わない**が、
+# sourceの費用は関数定義だけなのでここでまとめて読む。
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/codex-thread-name.sh" ]]; then
+  # shellcheck source=scripts/lib/codex-thread-name.sh
+  source "$SCRIPT_DIR/lib/codex-thread-name.sh" || true
+fi
 
 # tmuxのセッション名。状態ファイルのキーであり、`tmux attach -t <名前>` でそのまま繋げる。
 # tmuxの外で起動した場合は空になる。
@@ -210,7 +222,37 @@ record_codex_thread() {
   declare -F session_state_agent_kind >/dev/null 2>&1 || return 0
   [[ "$(session_state_agent_kind "$NOTIFY_TMUX_SESSION")" == "codex" ]] || return 0
   [[ "$HOOK_JSON" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([0-9a-fA-F-]{36})\" ]] || return 0
-  session_state_write_codex_thread "$NOTIFY_TMUX_SESSION" "${BASH_REMATCH[1]}" || true
+  # **UUIDは先に控える。** `BASH_REMATCH`は次に正規表現を通した時点で書き換わるため、
+  # 2回目の参照を関数呼び出しの後ろに置くと空になりうる
+  local thread="${BASH_REMATCH[1]}"
+  session_state_write_codex_thread "$NOTIFY_TMUX_SESSION" "$thread" || true
+  name_codex_thread "$thread"
+  return 0
+}
+
+# Codexのスレッドに`<リポジトリ名> #<Issue番号>`の名前を付ける（#2540）。
+#
+# **ChatGPTアプリから「そのIssueのセッション」を選べるようにするためのもの。** ペアリング
+# （#2524・#2537）で繋いだ先に出るのはホストのCodexセッション**全部**の一覧で、名前を決めるのは
+# Codex側（モデルが自動で付ける）ため、どれがどのIssueか分からない。Claude Codeが`--name`で
+# 付けているのと同じ文字列を、`thread/name/set`で後から付ける（`lib/codex-thread-name.sh`）。
+#
+# **切り離して走らせる。** `codex app-server`を1回起こすため実機で0.5秒ほど、転記がまだ無ければ
+# やり直しでさらに数秒かかる。ここはセッション開始のたびに必ず通る場所で、**名前が付くのを待つ
+# 価値は無い**（付かなくてもセッションは動き、`codex queue`の宛先はUUIDのまま）。そのため
+# `setsid`で切り離し、失敗しても黙って終わる。
+name_codex_thread() {
+  local thread="$1"
+  [[ -n "$thread" && -n "$ISSUE_NUMBER" && -n "$REPO_NAME" ]] || return 0
+  declare -F codex_thread_name_set >/dev/null 2>&1 || return 0
+
+  local runner=(setsid)
+  command -v setsid >/dev/null 2>&1 || runner=()
+  "${runner[@]}" bash -c '
+    source "$1/lib/codex-thread-name.sh" || exit 0
+    codex_thread_name_set "$2" "$3" >/dev/null 2>&1 || true
+  ' _ "$SCRIPT_DIR" "$thread" "$REPO_NAME #$ISSUE_NUMBER" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
   return 0
 }
 
