@@ -8,6 +8,12 @@ import {
   type DispatchHostLaunchHold,
   type DispatchHostMetrics,
 } from "@/lib/dispatch/host-metrics";
+import {
+  describeRebootRejection,
+  resolveRebootRejection,
+  type DispatchHostReboot,
+  type RebootRejection,
+} from "@/lib/dispatch/host-reboot";
 import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
 import {
   describePreviewRejection,
@@ -24,6 +30,7 @@ import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
   buildPreviewActiveKey,
+  buildRebootActiveKey,
   buildSelfUpdateActiveKey,
   describeDispatchControlTimeout,
   describeDispatchEnqueueRejection,
@@ -54,6 +61,8 @@ import {
   resolveManualStepExecutionRejection,
   resolvePlanReviewRejection,
   resolveSessionControlRejection,
+  REBOOT_ISSUE_NUMBER,
+  REBOOT_REPOSITORY,
   SELF_UPDATE_ISSUE_NUMBER,
   SELF_UPDATE_REPOSITORY,
   SESSION_CONTROL_JOB_KINDS,
@@ -233,6 +242,17 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             fetchedAt: host.checkoutFetchedAt?.toISOString() ?? null,
           },
     previewCapable: host.previewCapable,
+    rebootCapable: host.rebootCapable,
+    // 再起動まわりの申告（#2496）。**`rebootRequired`が無ければ申告そのものが無かった扱い**で、
+    // 残りの2列は「取れなかった項目」として個別にnullになりうる（チェックアウトと同じ向き）
+    reboot:
+      host.rebootRequired === null
+        ? null
+        : {
+            required: host.rebootRequired,
+            requiredSince: host.rebootRequiredSince?.toISOString() ?? null,
+            bootedAt: host.bootedAt?.toISOString() ?? null,
+          },
     // **申告が無ければ`null`**（絞り込めない）。空配列へ倒すと、対応していないpollerのホストで
     // 一覧が丸ごと消える。壊れたJSONも同じ扱いにする（`parseDispatchHostRepositories`は
     // 壊れていれば空配列を返すため、そこでは区別が付かない）
@@ -1131,6 +1151,67 @@ export async function enqueueSelfUpdateJob(params: {
   }
 }
 
+export type EnqueueRebootJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: RebootRejection; message: string };
+
+/**
+ * ホストごと再起動する（#2496）。
+ *
+ * **`SELF_UPDATE`（#1875）とは別のジョブにしてある。** あちらが畳むのはpollerのプロセスだけで、
+ * `exec`で入れ替わるため走っている実装セッションは残る（#1927）。こちらはOSごと落ちるので、
+ * tmuxのセッションは全部消えて会話も戻らない。同じ経路に相乗りさせると、pollerが
+ * 「更新のつもりで再起動する」ことになる。
+ *
+ * **判定は`resolveRebootRejection`に寄せて、画面と同じ関数を使う**（`enqueuePreviewJob`と同じ形）。
+ * 画面が押せると判断した操作だけが届く前提にはせず、ここでもやり直す。
+ *
+ * **ただし最後の砦はpoller側。** ここが見ているセッション本数は最大30秒古い申告で、押してから
+ * 届くまでの間に新しいセッションが立ちうる。pollerは受け取った時点で`tmux ls`を数え直し、
+ * 0本でなければ実行せずに失敗として返す（同じ判定を独立に2回行う、`MANUAL_STEP`と同じ作法）。
+ */
+export async function enqueueRebootJob(params: {
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueRebootJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const rejection = resolveRebootRejection({
+    host: host ? toHostView(host, now) : null,
+    // 未処理があるかはactiveKeyのunique制約が最終的に弾くので、ここでは見ない
+    // （見るなら追加のクエリが要るうえ、競合はどのみち制約でしか閉じられない）
+    hasQueuedJob: false,
+  });
+  if (rejection) {
+    return { ok: false, rejection, message: describeRebootRejection(rejection, params.hostName) };
+  }
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: REBOOT_REPOSITORY,
+        issueNumber: REBOOT_ISSUE_NUMBER,
+        targetHost: params.hostName,
+        kind: "REBOOT",
+        status: "QUEUED",
+        activeKey: buildRebootActiveKey(params.hostName),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    // activeKeyのunique制約。二重クリックや、前の再起動がまだ終わっていない場合
+    return {
+      ok: false,
+      rejection: "already_queued",
+      message: describeRebootRejection("already_queued", params.hostName),
+    };
+  }
+}
+
 export type EnqueuePreviewJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: PreviewRejection; message: string };
@@ -1267,6 +1348,9 @@ export async function claimDispatchJobs(params: {
   // 確認環境（#2444）も枠外。セッションを立てないので枠を消費しない。**申告していないpollerへは
   // 配らない**（未知の種別として`failed`になり、押した操作が失われる）
   if (host?.previewCapable === true) controlKinds.push("PREVIEW");
+  // ホストの再起動（#2496）も枠外。セッションを立てない点は確認環境と同じで、**申告していない
+  // pollerへは配らない**（未知の種別として`failed`になり、押した再起動が失われる）
+  if (host?.rebootCapable === true) controlKinds.push("REBOOT");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -1303,6 +1387,24 @@ export async function claimDispatchJobs(params: {
   });
   const available = Math.min(limit - running, params.maxJobs);
   if (available <= 0) return claimed;
+
+  // **再起動が積まれている間は起動ジョブを配らない**（#2496）。落とす前に入口を閉じないと、
+  // 押してから届くまでの数十秒に新しいセッションが立ち、pollerの側の「0本か」の確かめ直しに
+  // 引っかかって再起動そのものが失敗する（押した人からは「押したのに落ちない」に見える）。
+  //
+  // **止めるのは起動ジョブだけで、制御ジョブは上で既に配ってある。** 走っているセッションを
+  // 止める`C-c`や畳む操作は、むしろ再起動へ近づける操作なので塞ぐ理由が無い。
+  //
+  // 再起動が済んだ後は、pull型なのでホストが落ちている間に配られることは無い（誰も取りに
+  // 来ないだけ）。溜まった起動ジョブは戻ってきた最初の巡から順に流れる。
+  const pendingReboot = await db.dispatchJob.count({
+    where: {
+      targetHost: params.hostName,
+      kind: "REBOOT",
+      status: { in: ["QUEUED", "CLAIMED", "RUNNING"] },
+    },
+  });
+  if (pendingReboot > 0) return claimed;
 
   // **質問ジョブ（`QUESTION`、#1294）はどのpollerにも配らない。** 種別を明示して引くため
   // ここに混ざることは無いが、意図として書いておく。現行のpollerは未知の種別を
@@ -1803,6 +1905,14 @@ export async function announceDispatchHost(params: {
   checkout: DispatchHostCheckout | null;
   /** 確認環境を起こせるか（#2444）。申告していないpollerでは`null`＝非対応 */
   previewCapable: boolean | null;
+  /** ホストごと再起動できるか（#2496）。申告していないpollerでは`null`＝非対応 */
+  rebootCapable: boolean | null;
+  /**
+   * 再起動が要るか・いつから起動しているか（#2496）。**画面へ出すための写しで、割り当ての
+   * 判定には使わない**（`checkout`と同じ立場）。申告していない巡では`null`で、その場合は
+   * 3列すべてを`null`へ戻す（前回の値を残すと、再起動済みでも「適用待ち」が出続ける）。
+   */
+  reboot: DispatchHostReboot | null;
   /**
    * 確認環境を起こせるリポジトリ（#2444）。`repositories`の部分集合。
    * **申告していないpollerでは`null`＝「絞り込めない」**（`repositories`をそのまま使う）。
@@ -1859,6 +1969,12 @@ export async function announceDispatchHost(params: {
     checkoutBehind: params.checkout?.behindCount ?? null,
     checkoutFetchedAt: toDate(params.checkout?.fetchedAt),
     previewCapable: params.previewCapable,
+    rebootCapable: params.rebootCapable,
+    // 再起動まわりも毎回上書きする（#2496）。**前回の値を残さない。** 残すと、再起動して
+    // 適用が済んだ後も「カーネル更新の適用待ち」が出続ける
+    rebootRequired: params.reboot?.required ?? null,
+    rebootRequiredSince: toDate(params.reboot?.requiredSince),
+    bootedAt: toDate(params.reboot?.bootedAt),
     previewRepositories:
       params.previewRepositories === null ? null : JSON.stringify(params.previewRepositories),
     // 確認環境も毎回上書きする（#2444）。**前回の値を残さない。** 残すと、止まった確認環境が

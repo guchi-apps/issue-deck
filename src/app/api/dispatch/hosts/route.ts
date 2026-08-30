@@ -6,6 +6,7 @@ import {
   parseDispatchHostName,
 } from "@/lib/dispatch/dispatch-job";
 import { parseDispatchHostCheckout } from "@/lib/dispatch/host-checkout";
+import { parseDispatchHostReboot } from "@/lib/dispatch/host-reboot";
 import { parseDispatchHostPreview } from "@/lib/dispatch/preview-server";
 import {
   parseDispatchHostLaunchHold,
@@ -143,6 +144,12 @@ export async function POST(request: NextRequest) {
     // 「動いていない」として扱う（`parseDispatchHostPreview`）。止まっているものが画面で
     // 動いているように見えるのが、この写しでいちばん困る壊れ方
     preview: parseDispatchHostPreview(payload?.previewState),
+    // ホストごと再起動できるpollerだけが送ってくる（#2496）。**未申告はnull＝非対応扱い**
+    // （`selfUpdate`と同じ向き）。pollerは`sudo -n -l /usr/sbin/reboot`が通るときだけ真を送る
+    rebootCapable: typeof payload?.reboot === "boolean" ? payload.reboot : null,
+    // 再起動が要るか・いつから起動しているか（#2496）。**画面へ出すための写しで、判定には
+    // 使わない**（押せる条件に効くのはセッション本数だけ）。`required`が読めなければ全体をnull
+    reboot: parseDispatchHostReboot(payload?.rebootState),
   });
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });

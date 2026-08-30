@@ -145,6 +145,11 @@ function host(overrides: Record<string, unknown> = {}) {
     codeReviewCapable: true,
     selfUpdateCapable: null,
     previewCapable: null,
+    // DBの行の形（`toHostView`が読む列名）。**Viewの`reboot`とは名前が違う**
+    rebootCapable: null,
+    rebootRequired: null,
+    rebootRequiredSince: null,
+    bootedAt: null,
     previewRepositories: null,
     preview: null,
     maxConcurrency: null,
@@ -835,6 +840,54 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     dispatchHostFindUnique.mockResolvedValue(host());
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
     expect(claimedKinds()).toContainEqual({ in: ["INTERRUPT", "KILL", "INSTRUCTION"] });
+  });
+
+  // #2496。**落とす前に入口を閉じないと、押してから届くまでの数十秒に新しいセッションが立ち、
+  // pollerの「0本か」の確かめ直しに引っかかって再起動そのものが失敗する**
+  it("再起動が積まれている間は起動ジョブを配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ rebootCapable: true }));
+    dispatchJobCount.mockImplementation(async (args: { where?: Record<string, unknown> }) =>
+      args.where?.kind === "REBOOT" ? 1 : 0,
+    );
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    // 制御ジョブ（再起動を含む枠外の種別）は引きに行くが、起動ジョブの候補は引かない
+    const kinds = claimedKinds();
+    expect(kinds).toContainEqual(expect.objectContaining({ in: expect.arrayContaining(["REBOOT"]) }));
+    expect(kinds).not.toContainEqual({
+      in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"],
+    });
+  });
+
+  it("再起動が積まれていなければ従来どおり起動ジョブを配る", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ rebootCapable: true }));
+    dispatchJobCount.mockResolvedValue(0);
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    expect(claimedKinds()).toContainEqual({
+      in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"],
+    });
+  });
+
+  // **申告していないpollerへ配ると未知の種別として`failed`になり、押した再起動が失われる**
+  it("再起動に対応していないpollerには再起動ジョブを配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ rebootCapable: null }));
+    dispatchJobCount.mockResolvedValue(0);
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    for (const kind of claimedKinds()) {
+      const list =
+        typeof kind === "object" && kind !== null && "in" in kind
+          ? (kind as { in: string[] }).in
+          : [kind];
+      expect(list).not.toContain("REBOOT");
+    }
   });
 
   // 枠を消費させると、停止を1回押しただけで次の起動が詰まる
