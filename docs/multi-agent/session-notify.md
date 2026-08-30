@@ -73,7 +73,7 @@ Codexには`ExitPlanMode`が無いため、#2545では同じAPIを`scripts/submi
 Codexが計画ファイルを作る → scripts/submit-plan.sh <計画ファイル>
   → POST /api/dispatch/sessions/plan → Issueコメント・待機ラベル・承認パネル
   → GET /api/dispatch/sessions/plan/decision?id=… を引いて待つ
-  → 承認: 終了コード0 ／ 修正: 終了コード2＋修正本文 ／ 期限切れ・通信継続失敗: 終了コード3
+  → 承認: 終了コード0 ／ 修正: 終了コード0＋修正本文 ／ 期限切れ・通信継続失敗: 終了コード3
 ```
 
 **期待される未決定を成功にしない。** Claude Codeはフックを抜ければ端末の承認プロンプトへ倒れるため
