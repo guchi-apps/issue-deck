@@ -55,6 +55,10 @@ export type BranchComparison = {
    *
    * tree OIDの一致で判定するので、コミット数ではなく実際に出るものの有無を表す。
    * 取得できなかった場合はfalse（＝差分があるものとして扱い、リリースを止めない）。
+   *
+   * **`main`と`develop`の先端同士を見るため、`main`が`develop`より先行している
+   * リポジトリでは常にfalseになる**（#2678）。その場合の判定は`units`を使う
+   * （`unreleasedCommitCount`を参照）。
    */
   sameContent: boolean;
   /**
