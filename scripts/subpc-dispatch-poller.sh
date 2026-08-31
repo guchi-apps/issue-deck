@@ -91,6 +91,8 @@
 #   SESSION_RESUME_STALL_MINUTES    中断とみなすまでの停滞の分数（省略時は10）
 #   SESSION_RESUME_MAX_ATTEMPTS     1セッションあたりの再開の上限回数（省略時は3）
 #   SESSION_RESUME_INTERVAL_MINUTES 再開を試みる間隔の分数（省略時は5）
+#   SESSION_TOOL_CALL_STALL_ENABLED ツール呼び出しの空振り検知（#2655。省略時は1・0で無効）
+#   SESSION_TOOL_CALL_STALL_MINUTES 空振りとみなすまでの停滞の分数（省略時は10）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES

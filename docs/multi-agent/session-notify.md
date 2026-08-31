@@ -516,7 +516,8 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
 
 - **判定は`scripts/lib/session-tool-call-stall.sh`が持つ。** 転記の最後のやり取りが
   `assistant`のテキストのみ（`tool_use`を含まない）で、既知のツール名＋`({`という記法を含み、
-  かつ一定時間（既定15分）転記が更新されていない場合に検知する
+  かつ一定時間（既定10分。`SESSION_TOOL_CALL_STALL_MINUTES`）転記が更新されていない場合に
+  検知する
 - **自動での指示再送信はしない。** 研究デスク#41の実例で、「進めて」という再送信のあとも
   モデルが「自分は先にツールを呼び出した」という誤った過去発言を事実と誤認し、`ListAgents`で
   確認しても見つからないのに「まだバックグラウンドで動いている」と誤答して再び止まったことを
@@ -526,9 +527,14 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   Issueコメントの文言（原因の説明部分だけ）を出し分ける。ホスト・tmuxセッション・出口
   （`tmux attach`・Remote Control・`00.check-user`が自動で外れない旨）の構造は共通
 - 停滞時間の判定は`lib/session-resume.sh`の`session_resume_stalled_seconds`をそのまま使う
-  （転記のmtimeからの経過秒数という同じ性質のため）。APIエラー検知（既定10分）より長い
-  既定15分にしてあるのは、実際にAgent(fork)が起動できていて単に時間がかかっているだけの
-  正常なケースを早すぎる段階で誤検知しないため
+  （転記のmtimeからの経過秒数という同じ性質のため）。**実際にAgent(fork)が起動できていて
+  単に時間がかかっているだけの正常なケースは、転記の最後がtool_useを含む形になるため、この
+  閾値の長さに関わらず対象外になる**（`session_tool_call_stall_transcript_untriggered`が
+  tool_use有無で先に弾く）。当初はAPIエラー検知（既定10分）より長い既定15分にしていたが、
+  この現象に気づくまでの時間を縮めてほしいという要望（#2675）を受けて既定10分へ下げた。
+  APIエラー検知と同じ長さでも、判定条件そのものが排他（片方は転記末尾がAPIエラー、もう片方は
+  ツール呼び出し風のテキスト）なので競合しない。運用で調整したい場合は
+  `deploy/subpc/dispatch.env.example`の`SESSION_TOOL_CALL_STALL_MINUTES`を上書きする
 - 境界は`scripts/session-tool-call-stall.test.mjs`が固定している
 
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
