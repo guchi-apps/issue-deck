@@ -17,8 +17,8 @@
 #   scripts/provision-secret.sh --repo guchi-apps/subscription-lists --key INTERNAL_API_KEY --generate base64-32
 #   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_READ_SECRET --generate hex32 --dry-run
 #   printf '%s' "$値" | scripts/provision-secret.sh --repo guchi-apps/aide --key ZAIM_EMAIL --from-stdin
-#   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_OPS_DASHBOARD_TOKEN \
-#     --copy-from "op://apps/ops-dashboard/ops-api-token"
+#   # アプリ間で共有する値は、利用側のマニフェストのSOURCEを提供側の op:// にして同期だけ行う（#2624）
+#   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_OPS_DASHBOARD_TOKEN --sync-only
 #   # 1Passwordへ値を入れ済みで、同期だけを行う（organizationの共通値）
 #   scripts/provision-secret.sh --repo guchi-apps/issue-deck --key SIGNALY_RELEASE_WEBHOOK_URL \
 #     --manifest .github/org-secrets-manifest.tsv --sync-only
@@ -28,7 +28,8 @@
 #   --key <KEY>            マニフェスト上のキー名（必須）
 #   --generate <種別>      値を生成する。hex32 / hex64 / base64-32
 #   --from-stdin           標準入力から値を読む（外部サービスで発行した値を渡す用）
-#   --copy-from <op://…>   既存の値をコピーする
+#   --copy-from <op://…>   既存の値をコピーする（**既定で断る**。#2624。値が2か所に増えるため）
+#   --allow-duplicate      複製になると承知のうえで --copy-from を実行する
 #   --field-type <型>      1Password側のフィールド型。password（既定）/ text / url
 #   --manifest <パス>      対応表のパス（既定 .github/secrets-manifest.tsv）。organizationの
 #                          共通値は .github/org-secrets-manifest.tsv を指定する
@@ -71,6 +72,7 @@ DEPLOY=true
 WAIT=true
 FORCE=false
 SYNC_ONLY=false
+ALLOW_DUPLICATE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     --generate) GENERATE="$2"; shift 2 ;;
     --from-stdin) FROM_STDIN=true; shift ;;
     --copy-from) COPY_FROM="$2"; shift 2 ;;
+    --allow-duplicate) ALLOW_DUPLICATE=true; shift ;;
     --field-type) FIELD_TYPE="$2"; shift 2 ;;
     --manifest) MANIFEST_PATH="$2"; shift 2 ;;
     --ref) REF="$2"; shift 2 ;;
@@ -109,6 +112,30 @@ if [[ "$SYNC_ONLY" == true ]]; then
   fi
 elif ((sources != 1)); then
   echo "値の出どころを1つだけ指定してください（--generate / --from-stdin / --copy-from / --sync-only）" >&2
+  exit 1
+fi
+
+# **`--copy-from`は既定で断る**（#2624）。アプリ間で共有する認証値をここでコピーすると、
+# 同じ値が提供側と利用側の2つのフィールドに入り、片方だけ入れ替えた時点で連携が黙って止まる。
+# 実際にAIDEと5アプリの間で複製が起き、うち1組は利用側のフィールドが作られないまま参照だけが
+# 残って連携が未配線だった（#2624の調査）。正しい形は**利用側のマニフェストが提供側の`op://`を
+# 参照する**こと
+if [[ -n "$COPY_FROM" && "$ALLOW_DUPLICATE" != true ]]; then
+  cat >&2 <<MSG
+--copy-from は値を複製します。既定では実行しません（#2624）。
+
+アプリ間で共有する認証値は、値を検証する側（提供側）のアイテムを唯一の正にします。
+利用側の $MANIFEST_PATH の SOURCE 列を、提供側の op:// に書き換えてください。
+
+  $KEY	repo	secret	$KEY	$COPY_FROM
+
+そのうえで、このスクリプトは同期だけを行います。
+
+  scripts/provision-secret.sh --repo $REPO --key $KEY --sync-only
+
+値の性質上どうしても複製が要る場合だけ --allow-duplicate を付けてください。
+規約は docs/cross-repo-setup-guide.md「アプリ間で共有する認証値は提供側の op:// を参照する」。
+MSG
   exit 1
 fi
 
