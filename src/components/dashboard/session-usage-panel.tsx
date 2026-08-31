@@ -15,6 +15,7 @@ import {
   formatQuotaPercent,
   formatUsageTokens,
   formatUsageUsd,
+  sessionUsageCostSplit,
   sessionUsageKindLabel,
   toQuotaPercent,
   type SessionUsageEntry,
@@ -584,6 +585,8 @@ function SessionTable({
             const segments = tokenSegments(entry);
             const totalTokens = entry.contextTokens + entry.outputTokens;
             const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+            // 内訳は集計側が単価から割ったものを使う（#2626）。持っていない行だけ近似になる。
+            const costSplit = sessionUsageCostSplit(entry);
             return (
               <tr key={`${entry.host}:${entry.sessionId}`} className="border-b last:border-b-0">
                 <td className="max-w-[15rem] px-3 py-3 align-top">
@@ -597,7 +600,7 @@ function SessionTable({
                   <TokenBreakdown segments={segments} />
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">{formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}</td>
-                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">入力 {formatUsageUsd(entry.costUsd * (entry.contextTokens / Math.max(totalTokens, 1)))}<br />出力 {formatUsageUsd(entry.costUsd * (entry.outputTokens / Math.max(totalTokens, 1)))}</td>
+                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground" title={costSplit.approximate ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）" : undefined}>入力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.inputCostUsd)}<br />出力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.outputCostUsd)}</td>
                 <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
               </tr>
             );

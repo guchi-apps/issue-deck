@@ -44,6 +44,13 @@ export type SessionUsageReport = {
   cacheReadTokens: number;
   outputTokens: number;
   costUsd: number;
+  /**
+   * `costUsd`の入力側・出力側の内訳（#2626）。**片方でも欠けたら両方nullにする。**
+   * 内訳を出さない報告元（この列より前のpoller）から届くことがあり、片側だけ入れると
+   * 画面が「内訳の合計＝料金」を前提にできなくなる。
+   */
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
   models: string[];
   startedAt: Date;
   endedAt: Date;
@@ -51,6 +58,12 @@ export type SessionUsageReport = {
 
 function parseNonNegativeInteger(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return null;
+  return value;
+}
+
+/** 金額（USD）。数値でない・負・非有限はnull（＝内訳なしとして扱う） */
+function parseNonNegativeNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
   return value;
 }
 
@@ -128,6 +141,13 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   const costUsd = input.costUsd;
   if (typeof costUsd !== "number" || !Number.isFinite(costUsd) || costUsd < 0) return null;
 
+  // 内訳は無くても行そのものは受ける（古いpollerからの報告を落とさない）。
+  const parsedInputCostUsd = parseNonNegativeNumber(input.inputCostUsd);
+  const parsedOutputCostUsd = parseNonNegativeNumber(input.outputCostUsd);
+  const hasCostSplit = parsedInputCostUsd !== null && parsedOutputCostUsd !== null;
+  const inputCostUsd = hasCostSplit ? parsedInputCostUsd : null;
+  const outputCostUsd = hasCostSplit ? parsedOutputCostUsd : null;
+
   const rawModels = input.models;
   if (!Array.isArray(rawModels) || rawModels.some((model) => typeof model !== "string")) return null;
 
@@ -149,6 +169,8 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
     cacheReadTokens,
     outputTokens,
     costUsd,
+    inputCostUsd,
+    outputCostUsd,
     models: rawModels as string[],
     startedAt,
     endedAt,
@@ -213,6 +235,8 @@ export async function storeSessionUsage({
       cacheReadTokens: BigInt(session.cacheReadTokens),
       outputTokens: BigInt(session.outputTokens),
       costUsd: session.costUsd,
+      inputCostUsd: session.inputCostUsd,
+      outputCostUsd: session.outputCostUsd,
       models: JSON.stringify(session.models),
       startedAt: session.startedAt,
       endedAt: session.endedAt,

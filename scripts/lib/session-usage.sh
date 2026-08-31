@@ -230,13 +230,19 @@ def blank_bucket():
         "cacheRead": 0,
         "output": 0,
         "costUsd": 0.0,
+        # 入力側（素の入力＋キャッシュ書き込み＋キャッシュ読み出し）と出力側の内訳（#2626）。
+        # **表示側でトークン比から按分し直さないために、単価を持っているここで割っておく。**
+        # キャッシュ読み出しは入力単価の0.1倍なので、トークン比で割ると出力側が桁で過小に出る。
+        "inputCostUsd": 0.0,
+        "outputCostUsd": 0.0,
     }
 
 
 def add(bucket, delta):
     for key in ("responses", "input", "cacheCreate5m", "cacheCreate1h", "cacheRead", "output"):
         bucket[key] += delta[key]
-    bucket["costUsd"] += delta["costUsd"]
+    for key in ("costUsd", "inputCostUsd", "outputCostUsd"):
+        bucket[key] += delta[key]
 
 
 def finish(bucket):
@@ -245,6 +251,8 @@ def finish(bucket):
     bucket["contextTokens"] = context
     bucket["avgContext"] = round(context / bucket["responses"]) if bucket["responses"] else 0
     bucket["costUsd"] = round(bucket["costUsd"], 4)
+    bucket["inputCostUsd"] = round(bucket["inputCostUsd"], 4)
+    bucket["outputCostUsd"] = round(bucket["outputCostUsd"], 4)
     return bucket
 
 
@@ -351,16 +359,19 @@ for raw_path in sys.stdin:
                 "cacheRead": as_int(usage.get("cache_read_input_tokens")),
                 "output": as_int(usage.get("output_tokens")),
                 "costUsd": 0.0,
+                "inputCostUsd": 0.0,
+                "outputCostUsd": 0.0,
             }
             if price:
                 in_price, out_price = price
-                delta["costUsd"] = (
+                delta["inputCostUsd"] = (
                     delta["input"] * in_price
                     + delta["cacheCreate5m"] * in_price * CACHE_WRITE_5M
                     + delta["cacheCreate1h"] * in_price * CACHE_WRITE_1H
                     + delta["cacheRead"] * in_price * CACHE_READ
-                    + delta["output"] * out_price
                 ) / 1_000_000
+                delta["outputCostUsd"] = delta["output"] * out_price / 1_000_000
+                delta["costUsd"] = delta["inputCostUsd"] + delta["outputCostUsd"]
 
             add(bucket, delta)
             if model:
@@ -453,7 +464,7 @@ def classify(cwd):
 def price_for(model):
     matches=[(key,value) for key,value in PRICES.items() if model==key or model.startswith(key+"-")]
     return max(matches,key=lambda pair:len(pair[0]))[1] if matches else None
-sessions=[];totals={"responses":0,"input":0,"cacheCreate5m":0,"cacheCreate1h":0,"cacheRead":0,"output":0,"costUsd":0.0};unknown=set();read_files=0;unreadable=0
+sessions=[];totals={"responses":0,"input":0,"cacheCreate5m":0,"cacheCreate1h":0,"cacheRead":0,"output":0,"costUsd":0.0,"inputCostUsd":0.0,"outputCostUsd":0.0};unknown=set();read_files=0;unreadable=0
 for raw_path in sys.stdin:
     path=raw_path.strip()
     if not path:continue
@@ -473,13 +484,15 @@ for raw_path in sys.stdin:
                 if isinstance(usage,dict):latest=usage;responses+=1
             if stamp:first_at=stamp if first_at is None or stamp<first_at else first_at;last_at=stamp if last_at is None or stamp>last_at else last_at
     if not latest or not first_at or not last_at:continue
-    total_input=number(latest.get("input_tokens"));cached=number(latest.get("cached_input_tokens"));created=number(latest.get("cache_write_input_tokens"));uncached=max(0,total_input-cached-created);output=number(latest.get("output_tokens"));price=price_for(model);cost=0.0
-    if price:cost=(uncached*price[0]+cached*price[1]+created*price[0]*1.25+output*price[2])/1_000_000
+    total_input=number(latest.get("input_tokens"));cached=number(latest.get("cached_input_tokens"));created=number(latest.get("cache_write_input_tokens"));uncached=max(0,total_input-cached-created);output=number(latest.get("output_tokens"));price=price_for(model);in_cost=0.0;out_cost=0.0
+    # 入力側・出力側の内訳も出す（#2626）。表示側でトークン比から按分し直させないため。
+    if price:in_cost=(uncached*price[0]+cached*price[1]+created*price[0]*1.25)/1_000_000;out_cost=output*price[2]/1_000_000
     elif model:unknown.add(model)
-    kind,repo,issue=classify(cwd);row={"responses":responses,"input":uncached,"cacheCreate5m":created,"cacheCreate1h":0,"cacheRead":cached,"output":output,"costUsd":round(cost,4),"contextTokens":total_input,"avgContext":round(total_input/responses),"kind":kind,"kindLabel":LABELS[kind],"repository":repo,"issue":issue,"cwd":cwd,"transcript":path,"models":[model] if model else [],"firstAt":first_at,"lastAt":last_at};sessions.append(row)
+    cost=in_cost+out_cost
+    kind,repo,issue=classify(cwd);row={"responses":responses,"input":uncached,"cacheCreate5m":created,"cacheCreate1h":0,"cacheRead":cached,"output":output,"costUsd":round(cost,4),"inputCostUsd":round(in_cost,4),"outputCostUsd":round(out_cost,4),"contextTokens":total_input,"avgContext":round(total_input/responses),"kind":kind,"kindLabel":LABELS[kind],"repository":repo,"issue":issue,"cwd":cwd,"transcript":path,"models":[model] if model else [],"firstAt":first_at,"lastAt":last_at};sessions.append(row)
     for key in ("responses","input","cacheCreate5m","cacheCreate1h","cacheRead","output"):totals[key]+=row[key]
-    totals["costUsd"]+=cost
-sessions.sort(key=lambda row:(-row["costUsd"],row["transcript"]));totals.update({"costUsd":round(totals["costUsd"],4),"sessions":len(sessions),"transcripts":read_files,"unreadableTranscripts":unreadable,"duplicateRows":0})
+    totals["costUsd"]+=cost;totals["inputCostUsd"]+=in_cost;totals["outputCostUsd"]+=out_cost
+sessions.sort(key=lambda row:(-row["costUsd"],row["transcript"]));totals.update({"costUsd":round(totals["costUsd"],4),"inputCostUsd":round(totals["inputCostUsd"],4),"outputCostUsd":round(totals["outputCostUsd"],4),"sessions":len(sessions),"transcripts":read_files,"unreadableTranscripts":unreadable,"duplicateRows":0})
 json.dump({"totals":totals,"sessions":sessions,"byDay":[],"byModel":[],"unknownModels":sorted(unknown)},sys.stdout,ensure_ascii=False);print()
 PY
 )"
@@ -758,6 +771,10 @@ for row in data.get("sessions") or []:
             "cacheRead": row.get("cacheRead") or 0,
             "output": row.get("output") or 0,
             "costUsd": row.get("costUsd") or 0.0,
+            # 入力側・出力側の内訳（#2626）。**単価を知っているのはここだけ**なので、
+            # 画面がトークン比で按分し直さずに済むよう金額のまま送る。
+            "inputCostUsd": row.get("inputCostUsd"),
+            "outputCostUsd": row.get("outputCostUsd"),
             "models": row.get("models") or [],
             "startedAt": row.get("firstAt"),
             "endedAt": row.get("lastAt"),

@@ -54,6 +54,8 @@ function toEntry(row: {
   cacheReadTokens: bigint;
   outputTokens: bigint;
   costUsd: number;
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
   models: string;
   startedAt: Date;
   endedAt: Date;
@@ -88,6 +90,9 @@ function toEntry(row: {
     outputTokens: Number(row.outputTokens),
     contextTokens: inputTokens + cacheCreateTokens + cacheReadTokens,
     costUsd: row.costUsd,
+    // 内訳は集計側が単価から割ったものをそのまま渡す（#2626）。片方だけの行は内訳なしとして扱う。
+    inputCostUsd: row.inputCostUsd !== null && row.outputCostUsd !== null ? row.inputCostUsd : null,
+    outputCostUsd: row.inputCostUsd !== null && row.outputCostUsd !== null ? row.outputCostUsd : null,
     models,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
@@ -126,6 +131,8 @@ export async function GET(request: NextRequest) {
       cacheReadTokens: true,
       outputTokens: true,
       costUsd: true,
+      inputCostUsd: true,
+      outputCostUsd: true,
       models: true,
       startedAt: true,
       endedAt: true,
