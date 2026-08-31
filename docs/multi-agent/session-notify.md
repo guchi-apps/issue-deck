@@ -87,6 +87,14 @@ Codex向けの手順を末尾の読み替え（`scripts/prompts/codex-supplement
 本文側をエージェント別に差し替える（`{{PLAN_INSTRUCTIONS}}`・`{{PLAN_COMMENT_NOTE}}`。
 [codex.md](codex.md)「手順が変わるものは、末尾の読み替えに書かず本文を差し替える」）。
 
+**`ExitPlanMode`の直後に`gh issue view --comments`で確認すると、フックの投稿がまだ反映されて
+いないことがある**（#2670）。フック自体は`PreToolUse`で同期的に動くが、issue-deck側の
+`POST /api/dispatch/sessions/plan`がIssueコメントを投稿し終える前に確認すると「まだ無い」と
+誤判定し、実装エージェントが手で計画を投稿して二重投稿になる（承認・修正のやり取りを画面から
+行った場合、修正後の計画がフックから再投稿されるタイミングでも同様に起こり得る）。確認は
+数秒待ってから行うか、二重投稿が疑わしければ`created_at`で直近のコメントを見て、自分がこれから
+書こうとしている内容と同じ`plan-base`が既に載っていないかを見る。
+
 **宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）は`dispatch.env`から読む。** `notify.env`には無い
 （そちらは待ち時間などの調整値だけ）。`session-notify.sh`・pollerと同じ場所で、環境変数は
 tmuxサーバーの起こされ方によって届かないことがあるためファイルを正とする。
