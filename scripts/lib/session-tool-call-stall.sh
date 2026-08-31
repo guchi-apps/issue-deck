@@ -40,9 +40,14 @@
 # この検知そのものを止めるスイッチ（0で無効）。
 SESSION_TOOL_CALL_STALL_ENABLED="${SESSION_TOOL_CALL_STALL_ENABLED:-1}"
 # 転記が更新されないまま経ったら「止まっている」とみなす分数。
-# **APIエラー検知（10分）より長くしてあるのは、実際にAgent(fork)が起動できていて単に
-# 時間がかかっているだけの正常なケースを早すぎる段階で誤検知しないため。**
-SESSION_TOOL_CALL_STALL_MINUTES="${SESSION_TOOL_CALL_STALL_MINUTES:-15}"
+# **実際にAgent(fork)が起動できていて単に時間がかかっているだけの正常なケースは、
+# 転記の最後がtool_useを含む形になるため、この閾値の長さに関わらず対象外になる**
+# （`session_tool_call_stall_transcript_untriggered`がtool_use有無で先に弾く）。
+# 15分から10分へ下げたのは、この現象に気づくまでの時間を縮めてほしいという要望のため（#2675）。
+# APIエラー検知（10分）と同じ長さでも、判定条件そのものが排他（片方は転記末尾がAPIエラー、
+# もう片方はツール呼び出し風のテキスト）なので競合しない。運用で調整したい場合は環境変数
+# `SESSION_TOOL_CALL_STALL_MINUTES`（`deploy/subpc/dispatch.env.example`）で上書きする。
+SESSION_TOOL_CALL_STALL_MINUTES="${SESSION_TOOL_CALL_STALL_MINUTES:-10}"
 # 転記の末尾から読む量。
 SESSION_TOOL_CALL_STALL_TAIL_BYTES="${SESSION_TOOL_CALL_STALL_TAIL_BYTES:-65536}"
 # 「ツール呼び出し風」とみなす記法。既知のツール名だけに絞ることで、説明用にコード片を
