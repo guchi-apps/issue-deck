@@ -131,6 +131,7 @@ describe("lookupBranchRefs", () => {
       mergeCount: 2,
       directCount: 0,
       versionBumpCount: 1,
+      mergedHeadRefs: ["issue-2298", "issue-2298", "release/v4.41.0"],
     });
   });
 
@@ -163,6 +164,7 @@ describe("lookupBranchRefs", () => {
       mergeCount: 0,
       directCount: 2,
       versionBumpCount: 0,
+      mergedHeadRefs: [],
     });
   });
 
