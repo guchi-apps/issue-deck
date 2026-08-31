@@ -40,6 +40,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.72.0",
+    date: "2026-09-01",
+    changes: [
+      "「AI使用量」画面のIssue・PR別一覧に、各行のIssue・PRのタイトルを表示するようにしました。また、Issueが特定できない一覧行で棒グラフの表示位置がずれる不具合を修正しました。",
+    ],
+    usage: [
+      "1. サイドメニューから「AI使用量」画面を開く",
+      "2. 「Issue・PR別」の一覧を確認する",
+      "3. 各行の番号の下に、対応するIssueまたはPRのタイトルが表示されていれば成功（タイトルを取得できなかった行は番号のみの表示のまま)",
+    ],
+  },
+  {
     version: "4.71.1",
     date: "2026-09-01",
     changes: [
