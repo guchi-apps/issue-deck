@@ -142,7 +142,7 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
   });
-  it("セッションごとの行を初期状態から表示し、最大セッション比を出す", () => {
+  it("同じIssueのセッションは1つの行にまとめ、開いた状態から中の内訳を表示する（#2653）", () => {
     renderPanel(
       response([
         entry({ sessionId: "impl", costUsd: 20, responses: 100 }),
@@ -151,16 +151,35 @@ describe("SessionUsagePanel", () => {
     );
 
     // 一覧だけを見る（「種別別」の内訳にも同じ語が並ぶため）。
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
 
-    // セッションごとの2行が最初から出る。
-    expect(within(detail).getAllByText("#2504 issue-deck")).toHaveLength(2);
+    // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
+    expect(within(detail).getAllByText("#2504")).toHaveLength(1);
+    expect(within(detail).getByText("2セッション")).toBeTruthy();
     expect(within(detail).getByText("実装", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("Claude", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("Codex", { exact: false })).toBeTruthy();
     expect(within(detail).getAllByText("100%")).toHaveLength(1);
     expect(within(detail).getByText("1%")).toBeTruthy();
+  });
+
+  it("行をクリックすると開閉し、閉じている行は中のセッションを出さない（#2653）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "older", issueNumber: 1, costUsd: 5, startedAt: "2026-08-29T01:00:00.000Z", endedAt: "2026-08-29T02:00:00.000Z" }),
+        entry({ sessionId: "newer", issueNumber: 2, kind: "plan-review", costUsd: 1 }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+
+    // 一番新しい活動（#2）だけが既定で開いており、#1は閉じている。
+    expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
+    expect(within(detail).queryByText("実装", { exact: false })).toBeNull();
+
+    fireEvent.click(within(detail).getByRole("button", { name: /#1/ }));
+    expect(within(detail).getByText("実装", { exact: false })).toBeTruthy();
   });
 
   it("内訳は集計側の金額を出し、持たない行だけ「約」を付けた近似にする（#2626）", () => {
@@ -182,7 +201,7 @@ describe("SessionUsagePanel", () => {
       ]),
     );
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).getByText("$20.10", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$5.00", { exact: false })).toBeTruthy();
     expect(within(detail).queryByText("約", { exact: false })).toBeNull();
@@ -193,7 +212,7 @@ describe("SessionUsagePanel", () => {
       response([entry({ sessionId: "legacy", contextTokens: 9_000, outputTokens: 1_000, costUsd: 10 })]),
     );
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).getAllByText("約", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getByText("$9.00", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$1.00", { exact: false })).toBeTruthy();
@@ -204,7 +223,7 @@ describe("SessionUsagePanel", () => {
       response([entry({ sessionId: "multi-model", models: ["claude-opus-5", "claude-sonnet-5"] })]),
     );
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).getByText("Opus")).toBeTruthy();
     expect(within(detail).getByText("Sonnet")).toBeTruthy();
   });
@@ -217,7 +236,7 @@ describe("SessionUsagePanel", () => {
       ]),
     );
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).getByText("計画", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$1.20", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$3.80", { exact: false })).toBeTruthy();
@@ -312,10 +331,11 @@ describe("SessionUsagePanel", () => {
   it("明細の棒を、素の入力・キャッシュ書込・キャッシュ読出・出力の4つへ塗り分ける（#2628）", () => {
     renderPanel(response([entry()]));
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
 
-    // 棒のtitleに4区分ぶんの内訳が出る（キャッシュを1色へ潰さない）。
-    expect(within(detail).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+    // 棒のtitleに4区分ぶんの内訳が出る（キャッシュを1色へ潰さない）。1セッションだけのIssueは
+    // グループの帯とセッションの帯が同じ内訳になるため、複数本出ていてよい。
+    expect(within(detail).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
 
     // 棒の下の数値も4項目。
     expect(within(detail).getByText("入力 1k")).toBeTruthy();
@@ -371,15 +391,15 @@ describe("SessionUsagePanel", () => {
     expect(widths).toEqual(["25%", "25%", "50%"]);
   });
 
-  it("スマホ（compact）では明細を横スクロールの表ではなくカードで出す（#2628）", () => {
+  it("スマホ（compact）でもPCと同じ横棒グラフ・展開の一覧を出す（#2628・#2653）", () => {
     renderPanel(response([entry()]), { compact: true });
 
-    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
-    // 表は幅46remの横スクロールになるため、compactでは使わない。
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    // 表は幅46remの横スクロールになるため使わない（PC・スマホ共通で使わなくなった）。
     expect(within(detail).queryByRole("table")).toBeNull();
-    // カードでもセッション名・料金・内訳は落とさない。
-    expect(within(detail).getByText("#2504 issue-deck")).toBeTruthy();
-    expect(within(detail).getByText("$20.00")).toBeTruthy();
+    // グループ見出しと、展開済みのカードで料金・内訳を落とさず出す。
+    expect(within(detail).getByText("#2504")).toBeTruthy();
+    expect(within(detail).getAllByText("$20.00").length).toBeGreaterThan(0);
     expect(within(detail).getByText("読出 7k")).toBeTruthy();
   });
 
