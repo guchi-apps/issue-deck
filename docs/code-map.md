@@ -1983,6 +1983,18 @@ export function POST(request: NextRequest) {
   **数えられないときはコミット数へ落とす**（`BranchComparison.units`が`null`）。該当するのは
   比較のコミットが取得上限（100件）を超えているときと、`headTarget`のOIDが読めず幹をたどれないとき。
   数え落としたまま「◯件」と言い切るより害が小さい。
+  **`sameContent`はtree OIDの一致（`main`・`develop`の先端同士の内容比較）でしかなく、`main`が
+  `develop`より先行しているリポジトリでは常にfalseになる**（#2678。実例: guchi-apps/vps#209。
+  `main`だけが持つ19ファイルの差分で先端同士のtree OIDが永久に一致せず、バンプのマージしか
+  無い`develop`が「未リリース1件」のまま消えず、押すたびに中身ゼロのリリースが発行されていた）。
+  GitHubのGraphQL `Comparison`型（`Ref.compare`が返す型）には`mergeBaseCommit`・`files`に
+  相当するフィールドが無い（`gh api graphql`のintrospectionで確認済み。`aheadBy`・`baseTarget`・
+  `behindBy`・`commits`・`headTarget`・`id`・`status`のみ）ため、マージベース基準のtree比較は
+  取れない。そこで`unreleasedCommitCount`は`sameContent`に加え、`units`
+  （`main`の先行状況を見ずdevelopの先端からfirst-parentでたどるだけなので、`main`がどれだけ
+  先行していても影響を受けない）の`mergeCount + directCount`が0ならバンプのみとみなして0を返す。
+  `unreleasedSummary`もこの判定に揃え、「tree差分が残る場合だけバンプ件数を本体で数える」安全策
+  （#2333時点の判断）は削除した——その状態は「想定外」ではなく`main`先行の正常系だったため。
   **`canTriggerRelease`の判定は`unreleasedCommitCount`（コミット数）のままにしてある**——
   押してよいかは「出すものがあるか」で決まり、件数の数え方を変えたことでリリースの可否が
   動くべきではないため。

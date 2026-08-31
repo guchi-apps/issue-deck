@@ -17,6 +17,7 @@ import type {
   BranchFlowRepository,
   RepositoryBranchStatus,
   RepositoryDeployStatus,
+  UnreleasedUnits,
 } from "@/types/branch-flow";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -1051,6 +1052,7 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     /** ブランチ状況そのものが取得できていない場合 */
     branchStatusMissing?: boolean;
     sameContent?: boolean;
+    units?: UnreleasedUnits | null;
   }) {
     return buildBranchFlow({
       repositories,
@@ -1064,7 +1066,7 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
                 aheadBy: input.aheadBy ?? 3,
                 behindBy: 0,
                 sameContent: input.sameContent ?? false,
-                units: null,
+                units: input.units ?? null,
               },
               hasReleaseWorkflow: input.hasReleaseWorkflow ?? true,
             }),
@@ -1093,6 +1095,28 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
   // #2316。バンプPRのマージコミットだけが残った状態で押すと、中身ゼロのリリースが1本走る
   it("コミットは残っていても中身の差分が無ければ押せない", () => {
     expect(buildRelease({ aheadBy: 1, sameContent: true }).canTriggerRelease).toBe(false);
+  });
+
+  // #2678。mainがdevelopより先行しているとtree比較（sameContent）は常にfalseになるが、
+  // developの固有コミットがバンプのマージだけならunitsで判定して押せなくする
+  it("mainがdevelopより先行していて中身の差分がバンプのみなら押せない", () => {
+    const repository = buildRelease({
+      aheadBy: 1,
+      sameContent: false,
+      units: { mergeCount: 0, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] },
+    });
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  // #2678。同じくmain先行でsameContentがfalseでも、バンプ以外の実質的な作業コミットが
+  // 残っていれば従来どおり押せる
+  it("mainがdevelopより先行していても実質的な未リリースの変更があれば押せる", () => {
+    const repository = buildRelease({
+      aheadBy: 2,
+      sameContent: false,
+      units: { mergeCount: 1, directCount: 0, versionBumpCount: 1, mergedHeadRefs: ["issue-1"] },
+    });
+    expect(repository.canTriggerRelease).toBe(true);
   });
 
   it("openなリリースPRがあれば押せない", () => {
@@ -1753,13 +1777,17 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
     expect(formatUnreleasedSummary(summary)).toBe("3件");
   });
 
-  // バンプのマージしか残っていないのに差分がある、という想定外の状態で「0件」と言い切らない
-  it("バージョンバンプのマージだけが残っているときは本体で数える", () => {
+  // #2316時点では「sameContentがfalseなのにバンプのマージしか残っていない」を想定外として
+  // 安全側に倒し、バンプの件数を本体で数えていた。#2678で、これはmainがdevelopより先行して
+  // いるだけの正常な状態（tree比較が常に不一致になる）と判明したため、今は0件（未リリース
+  // の表示なし）として扱う。
+  it("mainが先行していてバージョンバンプのマージだけが残っているときは0件", () => {
     const summary = unreleasedSummary(
       comparison({ aheadBy: 1, units: { mergeCount: 0, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] } }),
     );
 
-    expect(formatUnreleasedSummary(summary)).toBe("1件");
+    expect(summary.count).toBe(0);
+    expect(formatUnreleasedSummary(summary)).toBe("");
   });
 
   // コミット一覧を取れなかったときは、数え落とした件数ではなくコミット数を出す
