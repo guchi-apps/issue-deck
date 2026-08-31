@@ -5,18 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
 import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
-import {
-  buildSessionUsageSummary,
-  type QuotaScale,
-  type SessionUsageEntry,
-} from "@/lib/session-usage-view";
+import { buildSessionUsageSummary, type SessionUsageEntry } from "@/lib/session-usage-view";
 
 /**
  * 「AI使用量」画面（#2504）の描画。
  *
- * **確かめたいのは3つ。** (1) セッションごとの行が初期状態から出ること、共通スケールの比率が
- * 表示されること。(2) 単位の切り替えでドルと枠%が入れ替わること。(3) 枠の物差しが無いときに
- * 「枠%」を押しても金額が壊れないこと（`Infinity%`を出さない）。
+ * **確かめたいのは2つ。** (1) セッションごとの行が初期状態から出ること、共通スケールの比率が
+ * 表示されること。(2) 金額が常にドルで出ること（#2666で枠%への切り替えは廃止した）。
  */
 
 /** 2026-08-30 12:00 JST */
@@ -45,28 +40,13 @@ function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
   };
 }
 
-const quota: QuotaScale = {
-  windowKey: "7d",
-  windowLabel: "週間",
-  usedPercent: 20,
-  windowStart: "2026-08-23T03:00:00.000Z",
-  windowEnd: "2026-08-30T03:00:00.000Z",
-  windowCostUsd: 40,
-  // 1%あたり$2 → $20 は枠の10%相当
-  usdPerPercent: 2,
-};
-
-function response(
-  entries: SessionUsageEntry[],
-  scale: QuotaScale | null = quota,
-): SessionUsageResponse {
+function response(entries: SessionUsageEntry[]): SessionUsageResponse {
   return {
     ...buildSessionUsageSummary({
       entries,
       nowMs: NOW_MS,
       days: 7,
       reportedAt: "2026-08-30T02:55:00.000Z",
-      quotaByAgent: { claude: scale, codex: scale },
     }),
     planUsage: { claude: null, codex: null },
     planNotConfigured: { claude: true, codex: true },
@@ -244,26 +224,12 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getAllByText("計画", { exact: false })).toHaveLength(1);
   });
 
-  it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
+  it("金額は常にドルで出し、単位を切り替える導線は無い", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 
-    // 既定は従量課金のドル。
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "枠%" }));
-
-    // 1%あたり$2の物差しなので、$20 は枠の10%相当。
-    expect(screen.getAllByText("10%").length).toBeGreaterThan(0);
-    expect(screen.queryByText("$20.00")).toBeNull();
-  });
-
-  it("枠の物差しが無ければ、枠%を押してもドルのまま出す", () => {
-    renderPanel(response([entry({ costUsd: 20 })], null));
-
-    fireEvent.click(screen.getByRole("button", { name: "枠%" }));
-
-    expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("従量課金")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "金額の単位" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "枠%" })).toBeNull();
   });
 
   it("Issueを開く導線は、リポジトリとIssue番号が揃っている行にだけ出す", () => {
@@ -408,9 +374,9 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
-  it("金額は従量課金として表示し、API換算の注意書きを表示しない", () => {
+  it("金額は従量課金相当として表示し、API換算の注意書きを表示しない", () => {
     const { container } = renderPanel(response([entry()]));
-    expect(within(container).getByText("従量課金")).toBeTruthy();
+    expect(within(container).getByText("従量課金相当")).toBeTruthy();
     expect(within(container).queryByText(/金額はAPI換算の目安です/)).toBeNull();
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });

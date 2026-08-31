@@ -5,7 +5,6 @@ import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
 import {
-  buildQuotaScale,
   buildSessionUsageSummary,
   sessionUsagePeriodStartMs,
   type SessionUsageEntry,
@@ -17,21 +16,14 @@ import {
  * **materialはサブPCのpollerが押し込んだ`SessionUsage`の行だけ**で、ここから転記を読みには
  * 行かない（本番のissue-deckは転記を持たない）。
  *
- * **プラン枠への換算のために、枠のメーターも一緒に返す。** 画面が`/api/claude/usage`を別に
- * 叩くと取得が2本走るうえ、換算の物差し（`buildQuotaScale`）はセッションの行と枠の両方を
- * 見ないと作れない。取得は`lib/claude/usage.ts`が5分キャッシュしているので、設定画面と
- * 同時に開いてもプラン枠を余分に消費しない。
+ * **プラン枠のメーターも一緒に返す。** 画面が`/api/claude/usage`を別に叩くと取得が2本走る。
+ * 取得は`lib/claude/usage.ts`が5分キャッシュしているので、設定画面と同時に開いても
+ * プラン枠を余分に消費しない。
  */
 
 /** 画面に出す期間の選択肢（日）。今日を含む */
 const ALLOWED_DAYS = [1, 7, 30] as const;
 const DEFAULT_DAYS = 7;
-
-/**
- * 枠の換算に使う窓は最長7日なので、期間より手前も少しだけ読む。
- * **期間の切り出しは`buildSessionUsageSummary`が行う**ので、ここで多めに取っても数字はずれない。
- */
-const QUOTA_LOOKBACK_DAYS = 8;
 
 function parseDays(value: string | null): number {
   const parsed = Number(value);
@@ -121,11 +113,9 @@ export async function GET(request: NextRequest) {
   const days = parseDays(request.nextUrl.searchParams.get("days"));
   const nowMs = Date.now();
   const periodStartMs = sessionUsagePeriodStartMs(nowMs, days);
-  const quotaStartMs = nowMs - QUOTA_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
-  const sinceMs = Math.min(periodStartMs, quotaStartMs);
 
   const rows = await db.sessionUsage.findMany({
-    where: { endedAt: { gte: new Date(sinceMs) } },
+    where: { endedAt: { gte: new Date(periodStartMs) } },
     orderBy: { endedAt: "desc" },
     select: {
       sessionId: true,
@@ -162,31 +152,18 @@ export async function GET(request: NextRequest) {
   }, null);
 
   // **プラン枠の取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、
-  // 取れない日があっても「枠換算が出ないだけ」で済ませる（設定画面と同じ扱い）。
+  // 取れない日があっても「メーターが出ないだけ」で済ませる（設定画面と同じ扱い）。
   const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   const [claudePlanUsage, codexPlanUsage] = await Promise.all([
     token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
     getLatestCodexUsage().catch(() => null),
   ]);
-  const entriesByAgent = {
-    claude: entries.filter((entry) => entry.agent === "claude" && entry.source !== "github-actions"),
-    codex: entries.filter((entry) => entry.agent === "codex"),
-  };
-  const quotaByAgent = {
-    claude: claudePlanUsage
-      ? buildQuotaScale({ windows: claudePlanUsage.windows, entries: entriesByAgent.claude, nowMs })
-      : null,
-    codex: codexPlanUsage
-      ? buildQuotaScale({ windows: codexPlanUsage.windows, entries: entriesByAgent.codex, nowMs })
-      : null,
-  };
 
   const summary = buildSessionUsageSummary({
     entries,
     nowMs,
     days,
     reportedAt: reportedAt?.toISOString() ?? null,
-    quotaByAgent,
   });
 
   return NextResponse.json(
