@@ -214,8 +214,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     暖色で表さない**——Issue一覧の行は確認待ちの表示とラベル行が同じカードに収まるため、
     10pxのチップで色相が30度しか離れていないと「要対応」の合図として読まれる。実装
     エージェントのチップ（[`issue-agent-badge.tsx`](../src/components/dashboard/issue-agent-badge.tsx)）は
-    この理由でorangeからindigoへ移した。手作業パネル（`manual-step-panel.tsx`）が
+    この理由でorangeからindigo/emeraldへ移し、#2667でさらにAI使用量画面（後述）の
+    `AGENT_COLORS`と揃えてrose/greenへ移した（indigo/emeraldは`session-usage-panel.tsx`側の
+    既存色と近すぎて転用できなかった）。手作業パネル（`manual-step-panel.tsx`）が
     amberを避けているのも同じ理由。
+  - **既存の「安全な識別色」を別の画面へ転用するときは、その画面の既存色と再検証する**
+    （#2667）。indigo/emeraldはamberから離すために選んだ色だったが、AI使用量画面へ
+    そのまま持ち込もうとすると`session-usage-panel.tsx`の`OUTPUT_COLOR`（青）・
+    `TOKEN_COLORS["github-actions"]`（紫）と色覚多様性シミュレーション（protanopia/
+    deuteranopia）でほぼ見分けが付かないことが分かった——狙いが違う場所で選んだ色は、
+    別の画面の別の固定色に対しては何も保証していない。**目視ではなく`dataviz`スキルの
+    `scripts/validate_palette.js`で計算して確かめる**（CVDシミュレーション下のΔE・通常視認下の
+    ΔEの両方が閾値を超えるか）。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
