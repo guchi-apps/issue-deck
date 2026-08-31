@@ -367,26 +367,30 @@ describe("SidebarNav", () => {
     }
   });
 
-  // 「まず人が動くもの」を上から順に並べる（#1613）
-  it("要対応・質問・コードレビュー・ブランチ・確認環境・AI使用量・Issue・PRの順に並べる", () => {
+  // 「まず人が動くもの」を上から順に並べる（#1613）。「コードレビュー」「確認環境」は
+  // Pull Requestの枠の下・リポジトリの枠の上に置く（#2674）
+  it("要対応・質問・ブランチ・AI使用量・Issue・PR・コードレビュー・確認環境の順に並べる", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 12)).toEqual([
+    expect(labels.slice(0, 15)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
-      "コードレビュー",
       "ブランチ",
-      "確認環境",
       "AI使用量",
       "すべてのIssue",
       "お気に入り",
       "未着手",
       "実行中",
       "本番反映待ち",
+      "すべてのPR",
+      "実行中",
+      "マージ待ち",
+      "コードレビュー",
+      "確認環境",
     ]);
   });
 

@@ -30,6 +30,7 @@ import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
+  sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
@@ -389,20 +390,6 @@ export function MobileHomeScreenView({
                 emphasis={(releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none"}
                 title={describeReleaseActivity(releaseActivity)}
               />
-              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
-                  ならない）。動いていることはオレンジの丸で出す */}
-              <MobileNavRow
-                label="確認環境"
-                icon={MonitorPlay}
-                onClick={onSelectPreview}
-                count={null}
-                emphasis={previewRunning ? "attention" : "none"}
-                title={
-                  previewRunning
-                    ? "確認環境が動いています"
-                    : "developの最新をサブPCで動かして画面で確かめる"
-                }
-              />
             </ul>
           </div>
 
@@ -447,6 +434,48 @@ export function MobileHomeScreenView({
                   }
                 />
               ))}
+            </ul>
+          </div>
+
+          {/*
+            「コードレビュー」「確認環境」（#2674）。Pull Requestの枠の下・お気に入りリポジトリの
+            枠の上に置く。見出しは付けない——PCの左メニュー（`sidebar-nav.tsx`）と同じ扱い
+          */}
+          <div className="px-4 pb-4">
+            <ul className="flex flex-col gap-1">
+              {sidebarCodeReviewNavViews.map((view) => {
+                const signals = resolveQuestionNavSignals(view.id, {
+                  total: navCounts.question,
+                  unconfirmed: unconfirmedQuestionCount,
+                  waiting: waitingQuestionCount,
+                });
+                return (
+                  <MobileNavRow
+                    key={view.id}
+                    label={view.label}
+                    icon={navViewIcons[view.id]}
+                    onClick={() => onSelectQuickView(view.id)}
+                    count={navCounts[view.id]}
+                    emphasis={signals.attention ? "attention" : "none"}
+                    busy={signals.busy}
+                    title={signals.title}
+                  />
+                );
+              })}
+              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
+                  ならない）。動いていることはオレンジの丸で出す */}
+              <MobileNavRow
+                label="確認環境"
+                icon={MonitorPlay}
+                onClick={onSelectPreview}
+                count={null}
+                emphasis={previewRunning ? "attention" : "none"}
+                title={
+                  previewRunning
+                    ? "確認環境が動いています"
+                    : "developの最新をサブPCで動かして画面で確かめる"
+                }
+              />
             </ul>
           </div>
 
