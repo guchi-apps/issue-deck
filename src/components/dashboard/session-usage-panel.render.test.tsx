@@ -126,7 +126,7 @@ describe("SessionUsagePanel", () => {
   it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 
-    // 既定は重量課金のドル。
+    // 既定は従量課金のドル。
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "枠%" }));
@@ -142,7 +142,7 @@ describe("SessionUsagePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "枠%" }));
 
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("重量課金")).toBeTruthy();
+    expect(screen.getByText("従量課金")).toBeTruthy();
   });
 
   it("Issueを開く導線は、リポジトリとIssue番号が揃っている行にだけ出す", () => {
@@ -189,9 +189,9 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
-  it("金額は重量課金として表示し、API換算の注意書きを表示しない", () => {
+  it("金額は従量課金として表示し、API換算の注意書きを表示しない", () => {
     const { container } = renderPanel(response([entry()]));
-    expect(within(container).getByText("重量課金")).toBeTruthy();
+    expect(within(container).getByText("従量課金")).toBeTruthy();
     expect(within(container).queryByText(/金額はAPI換算の目安です/)).toBeNull();
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });

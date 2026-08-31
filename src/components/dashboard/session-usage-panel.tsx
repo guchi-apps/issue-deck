@@ -482,7 +482,7 @@ export function SessionUsagePanel({
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Tile
-              label={effectiveUnit === "quota" ? "枠換算" : "重量課金"}
+              label={effectiveUnit === "quota" ? "枠換算" : "従量課金"}
               value={formatCombinedAmount(data.totalsByAgent, effectiveUnit, quotas)}
               sub={agentCostSub}
             />
