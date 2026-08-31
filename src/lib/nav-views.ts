@@ -190,12 +190,24 @@ export const sidebarAttentionNavViews: NavView[] = labelNavViews.filter((view) =
 /**
  * 要対応の枠とIssueの枠のあいだに置くビュー（#1613）。「質問」は人が読む先だが承認の待ちでは
  * ないため要対応には入れず、Issueの絞り込みとも性質が違うので独立させる。
- * 「コードレビュー」（#698）も同じ性質——エージェントに読ませて結果を人が読む場所で、
- * 実装フローには乗らない。
  * 「ブランチ」（`pane=flow`）はビューではないので、ここではなく画面側で並べる。
+ *
+ * 「コードレビュー」（#698）はここには入れない。#2674でPull Requestの枠の下・リポジトリの
+ * 枠の上へ移した——質問と違って承認Issueへ結果を残す先がリポジトリ単位の作業に近いため。
+ * 定義は`sidebarCodeReviewNavViews`。
  */
 export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter((view) =>
-  ["question", "code-review"].includes(view.id),
+  ["question"].includes(view.id),
+);
+
+/**
+ * Pull Requestの枠と、リポジトリ（お気に入りを含む）の枠のあいだに置くビュー（#2674）。
+ * 「コードレビュー」はエージェントに読ませて結果を人が読む場所で、実装フローには乗らない点は
+ * `sidebarQuestionNavViews`と同じだが、他のIssue由来のビューより下、リポジトリ操作に近い
+ * 位置へ置く。「確認環境」（ビューではなくpane）はここではなく画面側で並べる。
+ */
+export const sidebarCodeReviewNavViews: NavView[] = labelNavViews.filter((view) =>
+  ["code-review"].includes(view.id),
 );
 
 /**
