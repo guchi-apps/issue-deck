@@ -458,7 +458,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
 | `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述。Codexではここで`codex queue`の宛先を残し、スレッドに`<リポジトリ名> #<Issue番号>`の名前を付ける。#2519・#2540） |
-| （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
+| （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971）／ツール呼び出しが実行されないまま停滞（#2655） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を報告した約60秒後に同じ内容がもう1件飛ぶことになる。
@@ -491,6 +491,37 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
+
+### ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まることがある（#2655）
+
+**`Stop`が正常に発火していても、実質何も進んでいないことがある。** サブPCのキックオフ直後
+（Issueの実装を始めた最初のターン）で、Claude Codeが`Agent`ツール（大きな実装をforkへ委任する）を
+呼び出すつもりが、実際にはtool_useとして呼び出さず`Agent({ subagent_type: "fork", ... })`という
+**コード風のテキスト**を出力するだけで`stop_reason: end_turn`となりターンを終える、という誤動作を
+実地の転記（`~/.claude/projects/<スラッグ>/<セッションID>.jsonl`）で確認した。直近3日で調べた
+キックオフ4件全て（研究デスク#41・issue-deck#2646・#2653・aide#226）で同じ現象が起きており、
+再現性が高い。
+
+このターン終了でも`Stop`フックは正常に発火するため、上の`SessionInterrupted`（#1971）が対象にする
+「`Stop`が飛ばないAPIエラー」とは別の現象で、既存の自動再開の対象外になる。issue-deck側からは
+「正常に応答した」ように見えたまま、セッションが放置される。
+
+- **判定は`scripts/lib/session-tool-call-stall.sh`が持つ。** 転記の最後のやり取りが
+  `assistant`のテキストのみ（`tool_use`を含まない）で、既知のツール名＋`({`という記法を含み、
+  かつ一定時間（既定15分）転記が更新されていない場合に検知する
+- **自動での指示再送信はしない。** 研究デスク#41の実例で、「進めて」という再送信のあとも
+  モデルが「自分は先にツールを呼び出した」という誤った過去発言を事実と誤認し、`ListAgents`で
+  確認しても見つからないのに「まだバックグラウンドで動いている」と誤答して再び止まったことを
+  確認しており、固定文言の再送信では確実な復旧にならない（#1971の自動再開とはここが違う）
+- **既存の`/api/dispatch/sessions/interrupted`をそのまま使う。** pollerが送るJSONに
+  `interrupt_reason: "tool_call_stall"`を足し、`session-escalation.ts`側が原因ごとに
+  Issueコメントの文言（原因の説明部分だけ）を出し分ける。ホスト・tmuxセッション・出口
+  （`tmux attach`・Remote Control・`00.check-user`が自動で外れない旨）の構造は共通
+- 停滞時間の判定は`lib/session-resume.sh`の`session_resume_stalled_seconds`をそのまま使う
+  （転記のmtimeからの経過秒数という同じ性質のため）。APIエラー検知（既定10分）より長い
+  既定15分にしてあるのは、実際にAgent(fork)が起動できていて単に時間がかかっているだけの
+  正常なケースを早すぎる段階で誤検知しないため
+- 境界は`scripts/session-tool-call-stall.test.mjs`が固定している
 
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 

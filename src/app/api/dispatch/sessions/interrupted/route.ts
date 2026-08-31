@@ -9,12 +9,17 @@ import { parseDispatchSessionName, parseRemoteControlUrl } from "@/lib/dispatch/
 const MAX_DETAIL_LENGTH = 200;
 
 /**
- * APIエラーで中断したまま止まっているセッションの引き上げ（#1971・#2280）。
+ * 中断・停滞したまま止まっているセッションの引き上げ（#1971・#2280・#2655）。
  *
- * 送るのは`scripts/session-notify.sh`で、入口はpollerが合成する`SessionInterrupted`。
- * Claude CodeがAPIの一時エラーを再試行しきるとturnが打ち切られ、**`Stop`フックが飛ばない**ため、
- * フックだけを待っていると誰にも伝わらない。pollerが自動再開を上限まで試したあと、
- * **1セッションにつき1回**だけ叩く（送ったかどうかの記録はホスト側の`.resume`が持つ）。
+ * 送るのは`scripts/session-notify.sh`で、入口はpollerが合成する`SessionInterrupted`。原因は
+ * `reason`で2種類ある。
+ *   - `api_error`: Claude CodeがAPIの一時エラーを再試行しきるとturnが打ち切られ、
+ *     **`Stop`フックが飛ばない**ため、フックだけを待っていると誰にも伝わらない。pollerが
+ *     自動再開を上限まで試したあとに叩く
+ *   - `tool_call_stall`: ツールを呼び出したつもりでテキストに書いただけで実際には呼ばれず、
+ *     `Stop`は正常に発火するが実質何も進んでいないセッション。自動での再送信はしない
+ * どちらも**1セッションにつき1回**だけ叩く（送ったかどうかの記録はホスト側の`.resume`・
+ * `.tool-call-stall`が持つ）。
  *
  * **#2280より前はSignalyへ通知するだけだった。** webhookを消したので、異常終了（#1217）・
  * 起動確認での足止め（#1465）と同じ形——Issueコメント＋`00.check-user`＋`01.check-blocked`——へ
@@ -54,6 +59,9 @@ export async function POST(request: NextRequest) {
       ? payload.detail.trim().slice(0, MAX_DETAIL_LENGTH)
       : null;
   const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
+  // 未知の値・省略時は`api_error`（#1971からの後方互換）。原因ごとの文言分岐は
+  // `session-escalation.ts`が持つ（#2655で`tool_call_stall`を追加）。
+  const reason = payload?.reason === "tool_call_stall" ? "tool_call_stall" : "api_error";
 
   const escalated = await escalateInterruptedSession({
     repositoryFullName: target.repositoryFullName,
@@ -62,6 +70,7 @@ export async function POST(request: NextRequest) {
     tmuxSessionName,
     detail,
     remoteControlUrl,
+    reason,
   });
 
   // 引き上げられなくても200で返す。呼び出し側（フック）に再送の判断をさせる相手はいない

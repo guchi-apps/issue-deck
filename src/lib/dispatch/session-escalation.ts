@@ -205,30 +205,53 @@ export async function escalateFailedSession(params: {
 }
 
 /**
- * APIエラーで中断したまま止まっていることをIssueへ知らせる本文（#1971・#2280）。
+ * セッションが中断・停滞して止まっていることをIssueへ知らせる本文（#1971・#2280・#2655）。
  *
- * **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか）。セッションの画面も
- * 応答テキストも載せない——`escalateFailedSession`と同じ約束で、見に行く経路は`tmux attach`と
- * Remote Controlのリンクにする。
+ * **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
+ * 画面も応答テキストも載せない——`escalateFailedSession`と同じ約束で、見に行く経路は
+ * `tmux attach`とRemote Controlのリンクにする。
+ *
+ * `reason`は引き上げの原因（省略時`"api_error"`）。原因ごとに何が起きたかの説明だけを
+ * 出し分け、ホスト・tmuxセッション・状況・出口の構造は共通にする。
  */
 export function buildSessionInterruptedCommentBody(params: {
   hostName: string;
   tmuxSessionName: string;
   detail: string | null;
   remoteControlUrl: string | null;
+  reason?: "api_error" | "tool_call_stall";
 }): string {
-  const lines = [
-    "⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。",
+  const reason = params.reason ?? "api_error";
+  const lines =
+    reason === "tool_call_stall"
+      ? [
+          "⚠️ このIssueの実装セッションが、ツールを呼び出そうとした形跡はあるものの、実際には",
+          "呼び出されないまま停滞しています。",
+        ]
+      : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
+  lines.push(
     "",
     `- ホスト: \`${params.hostName}\``,
     `- tmuxセッション: \`${params.tmuxSessionName}\``,
-  ];
+  );
   if (params.detail) lines.push(`- 状況: ${params.detail}`);
+  lines.push("");
+  if (reason === "tool_call_stall") {
+    lines.push(
+      "Claude Codeが直前の応答でツール（`Agent`など）を呼び出すつもりで、実際にはtool_useとして",
+      "呼び出さずコード風の**テキスト**を出力するだけでターンを終える、という誤動作が起きた",
+      "可能性があります。この場合`Stop`フックは正常に発火するため、issue-deckの画面からは",
+      "「正常に応答した」ように見えます。固定文言の再送信では確実に復旧しないことを確認して",
+      "いるため、pollerは自動では再送信していません。",
+    );
+  } else {
+    lines.push(
+      "Claude CodeがAPIの一時エラー（529 Overloaded など）を再試行しきるとturnが打ち切られ、",
+      "**`Stop`フックが飛ばないまま**セッションが入力欄で止まります。pollerが固定の1行を送って",
+      "自動再開を試みましたが、上限回数まで復帰しませんでした（`scripts/lib/session-resume.sh`）。",
+    );
+  }
   lines.push(
-    "",
-    "Claude CodeがAPIの一時エラー（529 Overloaded など）を再試行しきるとturnが打ち切られ、",
-    "**`Stop`フックが飛ばないまま**セッションが入力欄で止まります。pollerが固定の1行を送って",
-    "自動再開を試みましたが、上限回数まで復帰しませんでした（`scripts/lib/session-resume.sh`）。",
     "",
     "続きは人が指示してください。端末から続けるか、",
     "",
@@ -259,7 +282,9 @@ export function buildSessionInterruptedCommentBody(params: {
  *
  * 呼ぶのはサブPCのpollerが合成する`SessionInterrupted`を受けた
  * `POST /api/dispatch/sessions/interrupted`で、**1セッションにつき1回**
- * （送ったかどうかの記録はホスト側の`.resume`が持つ）。
+ * （送ったかどうかの記録はホスト側の`.resume`・`.tool-call-stall`が持つ）。
+ *
+ * `reason`は引き上げの原因（省略時`"api_error"`。#2655で`"tool_call_stall"`を追加）。
  *
  * **失敗しても例外を投げない**（`escalateFailedSession`と同じ）。
  */
@@ -270,6 +295,7 @@ export async function escalateInterruptedSession(params: {
   tmuxSessionName: string;
   detail: string | null;
   remoteControlUrl: string | null;
+  reason?: "api_error" | "tool_call_stall";
 }): Promise<boolean> {
   const parsed = parseRepositoryFullName(params.repositoryFullName);
   if (!parsed) return false;
@@ -284,6 +310,7 @@ export async function escalateInterruptedSession(params: {
         tmuxSessionName: params.tmuxSessionName,
         detail: params.detail,
         remoteControlUrl: params.remoteControlUrl,
+        reason: params.reason,
       }),
     });
 

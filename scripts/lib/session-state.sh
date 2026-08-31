@@ -137,6 +137,42 @@ session_state_clear_resume() {
   return 0
 }
 
+# 「ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていない」まま止まって
+# いるセッションを引き上げ済みかの印（#2655）。
+#
+# `.resume`（APIエラーの自動再開）と状態を分けているのは、**この現象では自動での再送信を
+# 行わない**ため。試行回数を数える意味が無く、「もう引き上げたか」の1ビットで足りる。
+# 同じキー空間を共有すると、片方の原因で中断した回数がもう片方の判定に紛れ込む。
+#
+# 判定そのもの（何が「呼ばれていない」か）は`lib/session-tool-call-stall.sh`が持ち、
+# ここは置き場だけを持つ。**セッションが自力で動き出したら消す**
+# （`session_state_clear_tool_call_stall`）。
+session_state_tool_call_stall_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.tool-call-stall' "$(session_state_dir)" "$1"
+}
+
+session_state_tool_call_stall_notified() {
+  local session="$1" file
+  file="$(session_state_tool_call_stall_file "$session")" || return 1
+  [[ -f "$file" ]]
+}
+
+session_state_mark_tool_call_stall_notified() {
+  local session="$1" file content
+  file="$(session_state_tool_call_stall_file "$session")" || return 1
+  printf -v content '%s\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+session_state_clear_tool_call_stall() {
+  local session="$1" file
+  file="$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Codexのセッションへ`codex queue`で追加指示を差し込み、次回の起動を`codex resume`で
 # 再開するための宛先（#2519・#2520）。
 #
@@ -419,6 +455,7 @@ session_state_remove() {
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_reap_file "$session" 2>/dev/null || true)" \
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
+    "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
