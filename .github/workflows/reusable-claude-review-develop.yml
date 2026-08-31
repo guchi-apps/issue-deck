@@ -690,10 +690,17 @@ jobs:
       - name: Claude使用量をJob Summaryに出力する（Run Claude Code Review）
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        #
+        # ISSUE_NUMBER・PR_NUMBERはこれまで渡していなかったため、使用量の明細が常に
+        # 「（Issue未特定）」になっていた(#2650)。identify-issueはブランチ名issue-<番号>から
+        # 対応Issue番号を取れているので、それを渡す。取れない場合（変則的なブランチ名）は
+        # PR_NUMBERで代替する。
         if: always() && steps.claude_review.outputs.execution_file != ''
         env:
           AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。

@@ -86,7 +86,7 @@ report_to_issue_deck() {
   REPORT_PAYLOAD="$({
     STEP_LABEL="$STEP_LABEL" REPOSITORY="$GITHUB_REPOSITORY" RUN_ID="$GITHUB_RUN_ID" \
       RUN_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-      WORKFLOW_NAME="${GITHUB_WORKFLOW:-}" ISSUE_NUMBER="${ISSUE_NUMBER:-}" \
+      WORKFLOW_NAME="${GITHUB_WORKFLOW:-}" ISSUE_NUMBER="${ISSUE_NUMBER:-}" PR_NUMBER="${PR_NUMBER:-}" \
       COST="$COST" TURNS="${TURNS:-0}" IN_TOKENS="${IN_TOKENS:-0}" CACHE_CREATE="${CACHE_CREATE:-0}" \
       CACHE_READ="${CACHE_READ:-0}" OUT_TOKENS="${OUT_TOKENS:-0}" DURATION_MS="${DURATION_MS:-0}" \
       python3 - <<'PY'
@@ -97,12 +97,14 @@ ended = datetime.now(timezone.utc)
 duration = max(float(os.environ.get("DURATION_MS", "0") or 0), 0)
 started = ended - timedelta(milliseconds=duration)
 issue = os.environ.get("ISSUE_NUMBER", "")
+pr = os.environ.get("PR_NUMBER", "")
 payload = {
     "repository": os.environ["REPOSITORY"],
     "runId": os.environ["RUN_ID"],
     "runUrl": os.environ["RUN_URL"],
     "workflowName": os.environ.get("WORKFLOW_NAME") or None,
     "issueNumber": int(issue) if issue.isdigit() and int(issue) > 0 else None,
+    "prNumber": int(pr) if pr.isdigit() and int(pr) > 0 else None,
     "stepName": os.environ["STEP_LABEL"],
     "responses": int(float(os.environ.get("TURNS", "0") or 0)),
     "inputTokens": int(float(os.environ.get("IN_TOKENS", "0") or 0)),

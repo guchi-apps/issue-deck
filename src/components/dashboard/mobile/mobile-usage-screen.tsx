@@ -32,7 +32,7 @@ export function MobileUsageScreen({
   days: number;
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
-  onOpenIssue?: (repository: string, issueNumber: number) => void;
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
   claudeApiUsage?: {
     data: ClaudeApiUsageSummary | null;
     isLoading: boolean;

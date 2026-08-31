@@ -30,6 +30,7 @@ function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
     kind: "implementation",
     repository: "issue-deck",
     issueNumber: 2504,
+    prNumber: null,
     responses: 100,
     inputTokens: 1_000,
     cacheCreateTokens: 2_000,
@@ -260,7 +261,30 @@ describe("SessionUsagePanel", () => {
     expect(buttons).toHaveLength(1);
 
     fireEvent.click(buttons[0]);
-    expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 2504);
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 2504, null);
+  });
+
+  it("Issue番号が無くPR番号だけの行は「PR #番号」と表示し、PRを開く導線を出す（#2650）", () => {
+    const onOpenIssue = vi.fn();
+    renderPanel(
+      response([
+        entry({
+          sessionId: "pr",
+          kind: "other",
+          source: "github-actions",
+          issueNumber: null,
+          prNumber: 2648,
+          costUsd: 1,
+        }),
+      ]),
+      { onOpenIssue },
+    );
+
+    expect(screen.getByText(/PR #2648/)).toBeTruthy();
+    expect(screen.queryByText("（Issue未特定）")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "PRを開く" }));
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", null, 2648);
   });
 
   it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {
