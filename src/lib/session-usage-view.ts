@@ -22,6 +22,11 @@ export type SessionUsageEntry = {
   kind: string;
   repository: string | null;
   issueNumber: number | null;
+  /**
+   * 対象PR番号（#2650）。issueNumberが取れないPR起点の実行（developへのPRレビュー等）で使う。
+   * issueNumberがあるときはそちらを優先して表示するため、両方入ることは基本無い
+   */
+  prNumber: number | null;
   responses: number;
   inputTokens: number;
   cacheCreateTokens: number;
@@ -77,6 +82,7 @@ export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent; byS
 export type UsageIssue = UsageTotals & {
   repository: string | null;
   issueNumber: number | null;
+  prNumber: number | null;
   /** そのIssueで走った種別（金額の多い順） */
   kinds: string[];
   /** そのIssueで最も新しいセッションの開始日時。Issueの表示順に使う */
@@ -384,12 +390,15 @@ export function buildSessionUsageSummary({
 
     // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
     // 作業ディレクトリにIssue番号を持たないことがあり、落とすと合計と明細が合わなくなる。
-    const issueKey = `${repositoryKey}#${entry.issueNumber ?? ""}`;
+    // PR番号も含めてキーを作る（#2650）。issueNumberが無くprNumberだけ違う複数のPRを、
+    // 同じ「Issue未特定」行へ潰さないようにするため
+    const issueKey = `${repositoryKey}#${entry.issueNumber ?? ""}#${entry.prNumber ?? ""}`;
     const issue =
       byIssue.get(issueKey) ??
       ({
         repository: entry.repository,
         issueNumber: entry.issueNumber,
+        prNumber: entry.prNumber,
         kinds: [],
         latestStartedAt: entry.startedAt,
         entries: [],

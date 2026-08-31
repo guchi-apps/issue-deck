@@ -1098,26 +1098,34 @@ export function IssueDeckShell({
   const claudeApiUsage = useClaudeApiUsage(isUsagePaneActive);
 
   /**
-   * 使用量の明細からIssueを開く（#2504）。**記録はリポジトリ名（ownerを除く）しか持たない**
-   * ので、接続済みリポジトリの一覧でフルネームへ戻す。
+   * 使用量の明細からIssueまたはPRを開く（#2504・#2650）。**記録はリポジトリ名（ownerを除く）
+   * しか持たない**ので、接続済みリポジトリの一覧でフルネームへ戻す。
    *
-   * 一覧に載っているIssueなら画面の詳細を開き、載っていなければ（既にcloseされて取得の
-   * 対象から外れているものなど）GitHubを開く。**使用量に出るIssueの多くは完了済み**なので、
-   * 画面で開けないものを押せないままにすると、明細から辿れない行のほうが多くなる。
+   * issueNumberがあればIssueとして扱い、一覧に載っていれば画面の詳細を開き、載っていなければ
+   * （既にcloseされて取得の対象から外れているものなど）GitHubのIssueページを開く。**使用量に
+   * 出るIssueの多くは完了済み**なので、画面で開けないものを押せないままにすると、明細から
+   * 辿れない行のほうが多くなる。issueNumberが無くprNumberだけの行（developへのPRレビュー等、
+   * Issueに一意に紐づかない実行）はGitHubのPRページを直接開く。
    */
-  function openUsageIssue(repositoryName: string, issueNumber: number) {
+  function openUsageIssue(repositoryName: string, issueNumber: number | null, prNumber: number | null) {
     const repository = repositories.find(
       (item) => item.fullName === repositoryName || item.fullName.endsWith(`/${repositoryName}`),
     );
     if (!repository) return;
-    const issue = allIssues.find(
-      (item) => item.repositoryFullName === repository.fullName && item.number === issueNumber,
-    );
-    if (issue) {
-      openIssueUrl(issue.id);
+    if (issueNumber !== null) {
+      const issue = allIssues.find(
+        (item) => item.repositoryFullName === repository.fullName && item.number === issueNumber,
+      );
+      if (issue) {
+        openIssueUrl(issue.id);
+        return;
+      }
+      window.open(`https://github.com/${repository.fullName}/issues/${issueNumber}`, "_blank", "noopener");
       return;
     }
-    window.open(`https://github.com/${repository.fullName}/issues/${issueNumber}`, "_blank", "noopener");
+    if (prNumber !== null) {
+      window.open(`https://github.com/${repository.fullName}/pull/${prNumber}`, "_blank", "noopener");
+    }
   }
 
   // 本番デプロイ状況（#1579）。**デプロイが動いている間だけ**30秒ごとに取り直す。

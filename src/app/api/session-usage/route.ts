@@ -47,6 +47,7 @@ function toEntry(row: {
   kind: string;
   repository: string | null;
   issueNumber: number | null;
+  prNumber: number | null;
   responses: number;
   inputTokens: bigint;
   cacheCreate5mTokens: bigint;
@@ -85,6 +86,7 @@ function toEntry(row: {
     kind: row.kind,
     repository: row.repository,
     issueNumber: row.issueNumber,
+    prNumber: row.prNumber,
     responses: row.responses,
     inputTokens,
     cacheCreateTokens,
@@ -133,6 +135,7 @@ export async function GET(request: NextRequest) {
       kind: true,
       repository: true,
       issueNumber: true,
+      prNumber: true,
       responses: true,
       inputTokens: true,
       cacheCreate5mTokens: true,
