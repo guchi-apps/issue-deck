@@ -373,6 +373,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+- **「Issue・PR別」の計画／実装／Actionサマリー（`buildPhaseBreakdown`）は、計画・実装の
+  トークンを金額比で按分した概算**（#2670）。`SessionUsage`は`planCostUsd`/`implementationCostUsd`
+  （**金額**の内訳のみ、`scripts/lib/session-usage.sh`の`ExitPlanMode`呼び出し時刻を境に分けたもの）
+  を持つが、**トークンの計画/実装別内訳は保存していない**（同スクリプトの`plan_bucket`/
+  `implementation_bucket`は内部でトークンも計算済みだが、最終出力では`costUsd`だけを使い残りは
+  捨てている）。画面はこれを`plan.costUsd / entry.costUsd`の比でセッション全体のトークンへ
+  按分するが、**入力/キャッシュ/出力の構成比までは分からない**ため、その2行のバーはあえて
+  単色1本にして精度を誇張しない（4色に分けられる構成比の実測は、`source: "github-actions"`で
+  正確に分離できるActionだけ）。より正確にしたい場合は、上記スクリプトが持つバケットの
+  トークンをDBへ送るスキーマ拡張が必要（今回は往復・影響範囲を抑えるため見送った）。
 - **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
   Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
   実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
