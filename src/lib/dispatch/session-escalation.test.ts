@@ -72,4 +72,39 @@ describe("buildSessionInterruptedCommentBody", () => {
     expect(minimal).not.toContain("- 状況:");
     expect(minimal).not.toContain("Remote Controlから続けてください");
   });
+
+  it("reasonを省略するとAPIエラーの文言になる（#1971からの後方互換）", () => {
+    expect(body).toContain("APIエラーで中断したまま止まっています");
+  });
+});
+
+/**
+ * #2655。「ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていない」まま
+ * 停滞したときにIssueへ出す案内。文言だけが`api_error`と違い、出口の構造（tmux attach・
+ * Remote Control・00.check-userが自動で外れない旨）は共通にする。
+ */
+describe("buildSessionInterruptedCommentBody（reason: tool_call_stall）", () => {
+  const body = buildSessionInterruptedCommentBody({
+    hostName: "subpc",
+    tmuxSessionName: "research-desk-issue-41",
+    detail: "直前の応答でツールを呼び出そうとした形跡がありますが、実際には呼び出されていません。",
+    remoteControlUrl: "https://claude.ai/code/session_01XYZ",
+    reason: "tool_call_stall",
+  });
+
+  it("APIエラーではなく、テキストとして書かれただけという原因を説明する", () => {
+    expect(body).toContain("実際には");
+    expect(body).toContain("呼び出されないまま停滞しています");
+    expect(body).not.toContain("APIエラーで中断したまま止まっています");
+  });
+
+  it("自動での再送信をしていないことに触れる", () => {
+    expect(body).toContain("自動では再送信していません");
+  });
+
+  it("続きを人が引き取るための出口は共通のまま出す", () => {
+    expect(body).toContain("tmux attach -t research-desk-issue-41");
+    expect(body).toContain("https://claude.ai/code/session_01XYZ");
+    expect(body).toContain("自動では外れません");
+  });
 });

@@ -166,12 +166,16 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 # セッションを畳んだときの状態ファイルの後始末に使う（#1332。reap-sessions.shと同じ扱い）。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
-# APIエラーで中断したセッションの検知（#1971）。**転記を読むのはこの用途だけ**で、
-# 判定の中身は`lib/session-resume.sh`、転記の場所の解決は`lib/session-transcript.sh`が持つ。
+# APIエラーで中断したセッションの検知（#1971）と、ツール呼び出しが実行されないまま止まった
+# セッションの検知（#2655）。**転記を読むのはこの用途だけ**で、判定の中身は
+# `lib/session-resume.sh`・`lib/session-tool-call-stall.sh`、転記の場所の解決は
+# `lib/session-transcript.sh`が持つ。
 # shellcheck source=scripts/lib/session-transcript.sh
 source "$SCRIPT_DIR/lib/session-transcript.sh"
 # shellcheck source=scripts/lib/session-resume.sh
 source "$SCRIPT_DIR/lib/session-resume.sh"
+# shellcheck source=scripts/lib/session-tool-call-stall.sh
+source "$SCRIPT_DIR/lib/session-tool-call-stall.sh"
 # Codexのセッションへの追加指示（#2519）。**`send-keys`を使わない**ので3段階プロトコルの
 # 外側に置いてある（`codex queue`はTUIのキー入力を経由しない）。
 # shellcheck source=scripts/lib/codex-queue.sh
@@ -2159,19 +2163,22 @@ send_session_instruction() {
 #
 # 上限（既定3回）を使い切ったら送るのをやめ、issue-deckへ1度だけ引き上げて人へ渡す。
 
-# 中断したセッションをissue-deckへ引き上げる（#1971）。**報告先と組み立てを持つのは
+# 中断したセッションをissue-deckへ引き上げる（#1971・#2655）。**報告先と組み立てを持つのは
 # `session-notify.sh`1箇所**なので、pollerは合成したフックJSONを渡すだけにする。
 # `session_id`を載せるのは、向こうがRemote ControlのURLを引くのに使うため。
 #
 # 引き上げの中身はIssueコメント＋`00.check-user`＋`01.check-blocked`（#2280。以前はSignalyへの
 # 通知だった）。異常終了（`escalateFailedSession`）と同じ形で、issue-deckのPush通知が人へ届ける。
+#
+# `reason`は引き上げの原因（省略時`api_error`。#2655で`tool_call_stall`を追加）。
+# issue-deck側（`session-escalation.ts`）がこれでIssueコメントの文言を出し分ける。
 notify_session_interrupted() {
-  local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5"
+  local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5" reason="${6:-api_error}"
   local session_id hook_json
   [[ -x "$NOTIFY_SCRIPT" ]] || return 0
   session_id="$(session_transcript_record_field "$session" sessionId 2>/dev/null || true)"
-  hook_json="$(jq -nc --arg id "$session_id" --arg detail "$detail" \
-    '{hook_event_name: "SessionInterrupted", session_id: $id, interrupt_detail: $detail}')" || return 0
+  hook_json="$(jq -nc --arg id "$session_id" --arg detail "$detail" --arg reason "$reason" \
+    '{hook_event_name: "SessionInterrupted", session_id: $id, interrupt_detail: $detail, interrupt_reason: $reason}')" || return 0
   printf '%s' "$hook_json" |
     SESSION_NOTIFY_TMUX_SESSION="$session" "$NOTIFY_SCRIPT" "$issue_number" "$repo_name" "$full_name" ||
     true
@@ -2226,6 +2233,49 @@ resume_interrupted_sessions() {
       1) echo "APIエラーで中断していますが再開を見送りました: $session_name: $message" ;;
       *) echo "APIエラーで中断していますが再開できませんでした: $session_name: $message" ;;
     esac
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  return 0
+}
+
+# --- ツール呼び出しが実行されないまま止まったセッションの引き上げ（#2655）--------------
+# 判定は`lib/session-tool-call-stall.sh`。APIエラー（#1971）と違い**自動での指示再送信は
+# 行わない**——固定文言の再送信だけでは、モデルが「自分は先にツールを呼び出した」という
+# 誤った過去発言を事実と誤認し続け、確実に復旧できないことを実地で確認しているため。
+# 検知したら1回だけ`notify_session_interrupted`でissue-deckへ引き上げ、続きは人に委ねる。
+
+escalate_tool_call_stalled_sessions() {
+  local session_name repo_name issue_number full_name
+
+  [[ "${SESSION_TOOL_CALL_STALL_ENABLED:-1}" != "0" ]] || return 0
+
+  while IFS= read -r session_name; do
+    [[ -n "$session_name" ]] || continue
+    # 実装セッションだけを対象にする（`resume_interrupted_sessions`と同じ絞り込み）。
+    [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+
+    if ! session_tool_call_stall_detected "$session_name"; then
+      # 自力で動き出した（または最初から止まっていない）。次に同じ現象で止まったときに
+      # 「もう通知済み」を引きずらないよう、ここで消す。
+      session_state_clear_tool_call_stall "$session_name"
+      continue
+    fi
+
+    # 1セッションにつき1回だけ引き上げる（自動での再送信をしないため、再開の回数管理は無い）。
+    session_state_tool_call_stall_notified "$session_name" && continue
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "--dry-run のため引き上げません（ツール呼び出しが実行されないまま停滞: $session_name）"
+      continue
+    fi
+
+    full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
+    notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
+      "直前の応答でツールを呼び出そうとした形跡がありますが、実際には呼び出されていません。" \
+      "tool_call_stall"
+    session_state_mark_tool_call_stall_notified "$session_name"
+    echo "ツール呼び出しが実行されないまま停滞していたため引き上げました: $session_name"
   done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
   return 0
 }
@@ -3065,6 +3115,10 @@ run_once() {
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**
   # 畳まれたセッションへ送りに行かず、報告には再開前の状態が残る（前後関係が読める）。
   resume_interrupted_sessions
+
+  # ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まった
+  # セッションを引き上げる（#2655）。同じ理由で回収・報告の後に行う。
+  escalate_tool_call_stalled_sessions
 
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。

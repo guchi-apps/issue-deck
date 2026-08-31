@@ -676,21 +676,25 @@ if event == "PostToolUse":
 # 片方がホスト内の回収判定、もう片方が画面表示という別々の用途のため。
 if event == "SessionInterrupted":
     # APIエラー（529 Overloaded など）でturnが打ち切られ、止まったままのセッション（#1971）。
-    # **これはClaude Codeのフックではなく、pollerが合成して渡してくる合図。**
-    # このときClaude Codeは`Stop`を飛ばさないため、ここが人へ届く唯一の経路になる。
-    # pollerは自動再開を上限まで試したあとにだけ呼ぶ（1セッションにつき1回）。
+    # あるいは、ツールを呼び出したつもりでテキストに書いただけで実際には呼ばれていないまま
+    # 止まったセッション（#2655）。**これはClaude Codeのフックではなく、pollerが合成して
+    # 渡してくる合図。** 前者はClaude Codeが`Stop`を飛ばさないため、後者は`Stop`は飛ぶが
+    # 実質何も進んでいないため、どちらもここが人へ届く唯一の経路になる。pollerは自動再開・
+    # 停滞の検知を済ませたあとにだけ呼ぶ（1セッションにつき1回）。
     #
     # **状態（`state_event`）も様子（`activity`）も持たない**——`working`のまま止まっている、が
     # 最後に分かっている事実で、pollerから見て「今どうしているか」は言えない。そこで様子の
     # 受け口ではなく専用の受け口（`/sessions/interrupted`）へ送り、異常終了（#1217）と同じ形
     # ——Issueコメント＋`00.check-user`＋`01.check-blocked`——で引き上げる（#2280）。
     #
-    # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか）。セッションの画面も
-    # 応答テキストも載せない。
+    # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
+    # 画面も応答テキストも載せない。`reason`も同様に固定の種別（`api_error`・`tool_call_stall`）
+    # で、issue-deck側（`session-escalation.ts`）が原因ごとにIssueコメントの文言を出し分ける。
     if not repo_slug or not issue_number.isdigit() or not tmux_session:
         print("skip")
         sys.exit(0)
     detail = hook.get("interrupt_detail")
+    reason = hook.get("interrupt_reason")
     print("interrupted")
     print(json.dumps({
         "repository": repo_slug,
@@ -698,6 +702,7 @@ if event == "SessionInterrupted":
         "hostName": host_name,
         "tmuxSessionName": tmux_session,
         "detail": detail.strip() if isinstance(detail, str) and detail.strip() else None,
+        "reason": reason.strip() if isinstance(reason, str) and reason.strip() else None,
         "remoteControlUrl": resolve_remote_url() or None,
     }))
     sys.exit(0)
