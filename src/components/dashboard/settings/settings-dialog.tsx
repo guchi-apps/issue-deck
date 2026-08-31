@@ -34,8 +34,10 @@ type SettingsDialogProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  claudeLocalModel: ClaudeModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
+  appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
@@ -57,8 +59,10 @@ export function SettingsDialog({
   autoRetryLimit,
   claudeModel,
   claudeModelAssist,
+  claudeLocalModel,
   codexModel,
   appAiModel,
+  appAiModelReasoning,
   dispatchConcurrency,
   repositories,
   onSetRepositoryHidden,
@@ -138,8 +142,10 @@ export function SettingsDialog({
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
                   claudeModelAssist={claudeModelAssist}
+                  claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   appAiModel={appAiModel}
+                  appAiModelReasoning={appAiModelReasoning}
                   dispatchConcurrency={dispatchConcurrency}
                   onUpdated={onUpdated}
                 />
@@ -156,9 +162,6 @@ export function SettingsDialog({
                   rateLimits={data.rateLimits}
                   apiUsage={data.apiUsage}
                   actionsUsage={data.actionsUsage}
-                  claudeUsage={data.claudeUsage}
-                  codexUsage={data.codexUsage}
-                  claudeApiUsage={data.claudeApiUsage}
                   githubStatus={data.githubStatus}
                 />
               )}

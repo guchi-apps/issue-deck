@@ -146,6 +146,24 @@ describe("session_usage_aggregate", () => {
     expect(aggregate([file]).totals.costUsd).toBeCloseTo(30.5, 4);
   });
 
+  it("入力側・出力側の内訳を単価から割って出す（トークン比ではない・#2626）", () => {
+    // Opus 5。入力20k($0.1) + キャッシュ書き込み1h 1M($10) + キャッシュ読み出し20M($10) = $20.1、
+    // 出力200k = $5.0。トークン比で按分すると入力$24.86 / 出力$0.24になってしまう組み合わせ。
+    const file = writeTranscript("split.jsonl", [
+      assistantLine("msg_1", { input: 20_000, cache1h: 1_000_000, cacheRead: 20_000_000, output: 200_000 }),
+    ]);
+
+    const result = aggregate([file]);
+    expect(result.totals.inputCostUsd).toBeCloseTo(20.1, 4);
+    expect(result.totals.outputCostUsd).toBeCloseTo(5.0, 4);
+    // 内訳の合計は料金と一致する（画面が「料金＝入力＋出力」として読める）。
+    expect(result.totals.inputCostUsd + result.totals.outputCostUsd).toBeCloseTo(
+      result.totals.costUsd,
+      4,
+    );
+    expect(result.sessions[0]).toMatchObject({ inputCostUsd: 20.1, outputCostUsd: 5.0 });
+  });
+
   it("作業ディレクトリから種別・リポジトリ・Issue番号を決める", () => {
     const implementation = writeTranscript("impl.jsonl", [
       assistantLine("msg_1", { cwd: "/home/u/apps/dayspan-worktrees/issue-222", output: 1 }),
@@ -258,6 +276,9 @@ describe("codex_session_usage_aggregate", () => {
     expect(result.totals).toMatchObject({ responses: 2, input: 500, cacheRead: 2400, cacheCreate5m: 100, output: 200 });
     expect(result.sessions[0]).toMatchObject({ repository: "issue-deck", issue: 2544, models: ["gpt-5.6-sol"] });
     expect(result.totals.costUsd).toBeCloseTo(0.0075, 4);
+    // 入力側（非キャッシュ$4/1M・キャッシュ$0.4/1M・書き込み1.25倍）と出力側（$20/1M）を分けて出す。
+    expect(result.totals.inputCostUsd).toBeCloseTo(0.0035, 4);
+    expect(result.totals.outputCostUsd).toBeCloseTo(0.004, 4);
   });
 });
 
@@ -363,6 +384,8 @@ describe("session_usage_report_payload", () => {
       cacheRead: 40,
       output: 50,
       costUsd: 1.25,
+      inputCostUsd: 1.0,
+      outputCostUsd: 0.25,
       kind: "implementation",
       repository: "issue-deck",
       issue: 2504,
@@ -389,6 +412,8 @@ describe("session_usage_report_payload", () => {
       responses: 3,
       cacheCreate1h: 30,
       costUsd: 1.25,
+      inputCostUsd: 1.0,
+      outputCostUsd: 0.25,
       startedAt: "2026-08-30T01:00:00.000Z",
       endedAt: "2026-08-30T02:00:00.000Z",
     });
@@ -402,10 +427,12 @@ describe("session_usage_report_payload", () => {
         "costUsd",
         "endedAt",
         "input",
+        "inputCostUsd",
         "issue",
         "kind",
         "models",
         "output",
+        "outputCostUsd",
         "repository",
         "responses",
         "sessionId",

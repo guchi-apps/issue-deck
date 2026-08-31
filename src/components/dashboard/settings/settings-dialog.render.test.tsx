@@ -115,8 +115,10 @@ function renderDialog() {
       autoRetryLimit={2}
       claudeModel="auto"
       claudeModelAssist="haiku"
+      claudeLocalModel="sonnet"
       codexModel="auto"
       appAiModel="claude-haiku-4-5"
+      appAiModelReasoning="claude-sonnet-5"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
@@ -217,15 +219,19 @@ describe("SettingsDialog", () => {
     expect(updateClaudeModel).toHaveBeenCalledWith(
       "auto",
       "haiku",
+      "sonnet",
       "auto",
       "claude-haiku-4-5",
+      "claude-sonnet-5",
     );
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
       claudeModelAssist: "haiku",
+      claudeLocalModel: "sonnet",
       codexModel: "auto",
       appAiModel: "claude-haiku-4-5",
+      appAiModelReasoning: "claude-sonnet-5",
       dispatchConcurrency: 2,
     });
   });
@@ -275,13 +281,27 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
   });
 
-  it("状態の区分では使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {
+  it("状態の区分ではGitHubの使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /状態/ }));
 
     expect(screen.getByText("GitHub使用量")).toBeTruthy();
-    expect(screen.getByText("AI使用量")).toBeTruthy();
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
+  });
+
+  // #2631。プラン枠のメーターがAI使用量画面と丸ごと重複していたため、カードごと移した。
+  // 見出しの文字列だけを見張ると「AI使用量画面で見られます」の案内文にも当たるので、
+  // カードの見出しに使っている要素（`p.text-xs.font-medium`）に絞って見る。
+  it("状態の区分にAI使用量のカードは出さない（AI使用量画面へ移した）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /状態/ }));
+
+    // ダイアログはportalでbody直下へ描かれるので、renderのcontainerからは辿れない
+    const cardTitles = Array.from(
+      document.body.querySelectorAll("p.text-xs.font-medium"),
+    ).map((node) => node.textContent);
+    expect(cardTitles).toEqual(["GitHub使用量", "GitHub障害状況"]);
   });
 });

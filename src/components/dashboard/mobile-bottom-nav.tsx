@@ -1,6 +1,6 @@
 "use client";
 
-import { GitBranch, GitPullRequest, Home, ListChecks } from "lucide-react";
+import { Gauge, GitBranch, GitPullRequest, Home, ListChecks } from "lucide-react";
 
 import { NotificationBadge } from "@/components/dashboard/notification-content";
 import { useNotificationState } from "@/components/dashboard/notification-state";
@@ -19,13 +19,21 @@ import { cn } from "@/lib/utils";
 //
 // **4枠目は「設定」から「ブランチ」へ入れ替えた（#1638）。** ブランチ画面は日常的に開くのに
 // ホームの「フロー」から1段掘る必要があり（#1455）、逆に設定は毎日押すものではない。
-// 5つに増やすとタブの幅が1つあたり98px→78pxまで詰まるため、設定はホームのヘッダー右上
-// （`mobile-home-screen.tsx`の歯車）へ移した。`mscreen=settings`のURLはそのまま生きている。
+// 設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車）へ移した。
+// `mscreen=settings`のURLはそのまま生きている。
+//
+// **5枠目に「AI使用量」を足した（#2631）。** #1638の時点では「5つに増やすと1枠98px→78pxまで
+// 詰まる」ことを理由に4枠に保っていたが、AI使用量はスマホで一番見たいものがホームのメニューから
+// 1段掘らないと開けない状態だった。実測でiPhone 15（幅393px）の1枠78pxに「AI使用量」の5文字は
+// 収まるため、幅ではなく**押す回数**を優先した。あわせてホームのメニューからは外し（#2504で
+// 置いた行）、押す場所を1か所に保っている——2か所に置くと、どちらを押しても同じ画面が開くのに
+// 導線だけが増える。
 const items = [
   { id: "home", label: "ホーム", icon: Home },
   { id: "repos", label: "Issue", icon: ListChecks },
   { id: "pull-requests", label: "PR", icon: GitPullRequest },
   { id: "flow", label: "ブランチ", icon: GitBranch },
+  { id: "usage", label: "AI使用量", icon: Gauge },
 ] as const;
 
 export type MobileBottomNavTab = (typeof items)[number]["id"];
@@ -87,7 +95,10 @@ export function MobileBottomNavView({
             aria-label={showsBadge ? `${label}（${pendingLabel}）` : undefined}
             title={showsBadge ? pendingLabel : undefined}
             className={cn(
-              "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs text-muted-foreground",
+              // **ラベルは折り返させない**（#2631）。5枠になって1枠78pxまで詰まったため、
+              // 折り返すとその枠だけ2行になり、フッターの高さ（56px）が枠ごとに食い違う。
+              // 収まらない場合は横にはみ出させて、詰まっていることが見えるようにする。
+              "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs whitespace-nowrap text-muted-foreground",
               active === id && "text-foreground",
             )}
           >

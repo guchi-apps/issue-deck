@@ -1291,6 +1291,66 @@ op://apps/githubaction-sshkey/PRIVATE_KEY                       ← 1リポジ�
 `?ssh-format=openssh` の有無で取得される形式が変わる。organizationへ寄せる際、多数派かつ
 issue-deckで実績のある **openssh 付きに統一**した。
 
+### アプリ間で共有する認証値は提供側の`op://`を参照する（#2624）
+
+アプリ同士がAPIを呼び合うときの共有シークレット（AIDEが他アプリを叩くトークンなど）は、
+**値を検証する側＝提供側のアイテムを唯一の正とし、利用側のマニフェストがその`op://`を
+そのまま参照する**。利用側のアイテムへ同じ値を入れ直さない。
+
+```
+guchi-apps/dayspan  INTERNAL_API_KEY    op://apps/dayspan/internal-api-key   ← 正（受け取って照合する側）
+guchi-apps/aide     AIDE_DAYSPAN_TOKEN  op://apps/dayspan/internal-api-key   ← 利用側は同じ場所を指す
+```
+
+**複製すると、片方だけ入れ替えた時点で連携が黙って止まる。** #2624の時点でAIDEと5アプリの間で
+値が複製されており、`AIDE_RESEARCH_DESK_TOKEN`に至っては利用側のフィールドが作られないまま
+参照だけが残り、GitHubのsecretも未登録で連携が未配線だった（マニフェストのコメントには
+「Research Desk側の`INTERNAL_API_KEY`と同じ値にする」と、人が手で揃える前提が書かれていた）。
+
+**organization secretへは寄せない。** 上の「共通値はorganizationへ寄せる」が対象にしているのは
+フリート全体で使う接続情報（`SERVER_*`・`SHARED_DB_*`・`SIGNALY_*`）で、2アプリの間だけで使う
+認証値をorganizationへ置くと、関係の無いリポジトリのワークフローからも読めてしまう。
+**repository secretのまま、参照先だけを1か所にする**（GitHub側の名前は両者で違ってよい）。
+
+複製は`scripts/check-duplicate-secret-values.sh`で検出できる。ボールトの値をハッシュで
+突き合わせ、同じ値が2つ以上のフィールドに入っているものと、参照先が実在しないものを報告する
+（値もハッシュも出力しない）。
+
+```bash
+scripts/check-duplicate-secret-values.sh
+```
+
+値の性質上一致するもの（本人のメールアドレス・VAPIDの`subject`）は
+[`.github/duplicate-secret-allowlist.txt`](../.github/duplicate-secret-allowlist.txt)へ書いて
+報告から外す。**資格情報はここへ書かず、参照へ寄せる。**
+
+`scripts/provision-secret.sh --copy-from`はこの複製を作る操作なので、既定で断るようにしてある
+（値の性質上どうしても複製が要ると判断したときだけ`--allow-duplicate`）。
+
+#### 複製は構成の一覧では見つからない
+
+**マニフェストを読むだけでは検出できない。** 複製された値は`op://`が別々なので、参照の一覧として
+見るかぎり普通の1対1の参照に見える。共有知識の1Password台帳（`guchi-apps/docs`の
+`scripts/build-1password-inventory.py`）も、実値を持たない方針から**構成だけを取得して値を読まない**
+ため、この種の複製は出てこない。**値を読んで突き合わせるまで分からない**というのがこの問題の性質で、
+`check-duplicate-secret-values.sh`が値を読むのはそのため。
+
+読むときの落とし穴が2つある。
+
+- `op item get --format json`は、伏せ字のフィールド（`concealed`）の値を返さない。**`--reveal`が要る**
+- SSH鍵アイテムの`private_key`のような組み込みフィールドは`.fields[].label`に現れない。
+  **フィールド一覧に無い＝存在しない、ではない**（`op://apps/githubaction-sshkey/private_key`を
+  不在と誤検出した）。一覧に無いものだけを`op read`で確かめる形にしてある
+
+#### 不要になったフィールドの削除は手作業
+
+**サービスアカウントでは消せない。** 共有知識の`scripts/delete-1password-fields.sh`は、
+`op whoami`がサービスアカウントなら明示的に中断する。書き込み権限つきのトークン
+（`~/.config/issue-deck/op-writer.env`）を読み込んでも同じで、人の`op signin`が要る。
+参照の付け替えはPRで進められるが、**残ったフィールドの掃除は`71.manual-step`のIssueとして
+1Passwordアプリでの操作で残す**（#2417と同じ理由）。読み取りだけの確認コマンドは
+サービスアカウントで代行できるので、完了の確認は自動で回せる。
+
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 
 `deploy.yml`・`release.yml`・`ci.yml`が使う値は、以前は実行のたびに1Passwordから取得していた。

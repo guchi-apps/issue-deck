@@ -41,7 +41,7 @@ beforeEach(() => {
   process.env.DISPATCH_SECRET = "secret-value";
   claimDispatchJobs.mockResolvedValue([]);
   sweepCheckUserPushNotifications.mockResolvedValue(undefined);
-  appSettingFindUnique.mockResolvedValue({ codexModel: "auto" });
+  appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "auto" });
 });
 
 describe("POST /api/dispatch/claim", () => {
@@ -92,20 +92,23 @@ describe("POST /api/dispatch/claim", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       ok: true,
-      jobs: [{ id: "job-1", codexModel: "auto" }],
+      jobs: [{ id: "job-1", claudeLocalModel: "sonnet", codexModel: "auto" }],
     });
     consoleError.mockRestore();
   });
 
   it("保存済みのCodexモデルを払い出すジョブへ付ける", async () => {
     claimDispatchJobs.mockResolvedValue([{ id: "job-1" }]);
-    appSettingFindUnique.mockResolvedValue({ codexModel: "gpt-5.6-terra" });
+    appSettingFindUnique.mockResolvedValue({
+      claudeLocalModel: "opus",
+      codexModel: "gpt-5.6-terra",
+    });
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
     expect(await res.json()).toEqual({
       ok: true,
-      jobs: [{ id: "job-1", codexModel: "gpt-5.6-terra" }],
+      jobs: [{ id: "job-1", claudeLocalModel: "opus", codexModel: "gpt-5.6-terra" }],
     });
   });
 });

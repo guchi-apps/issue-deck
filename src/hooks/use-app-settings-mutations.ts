@@ -32,8 +32,10 @@ export function useAppSettingsMutations() {
   async function updateClaudeModel(
     claudeModel: ClaudeModel,
     claudeModelAssist: ClaudeModel,
+    claudeLocalModel: ClaudeModel,
     codexModel: CodexModel,
     appAiModel: AppAiModel,
+    appAiModelReasoning: AppAiModel,
   ): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -41,7 +43,14 @@ export function useAppSettingsMutations() {
       const res = await fetch("/api/settings/claude-model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeModel, claudeModelAssist, codexModel, appAiModel }),
+        body: JSON.stringify({
+          claudeModel,
+          claudeModelAssist,
+          claudeLocalModel,
+          codexModel,
+          appAiModel,
+          appAiModelReasoning,
+        }),
       });
       if (!res.ok) {
         throw new Error(`リクエストに失敗しました (${res.status})`);

@@ -28,6 +28,8 @@ function reportInput(overrides: Record<string, unknown> = {}) {
     cacheRead: 400,
     output: 50,
     costUsd: 1.25,
+    inputCostUsd: 1.0,
+    outputCostUsd: 0.25,
     models: ["claude-opus-5"],
     startedAt: "2026-08-30T01:00:00.000Z",
     endedAt: "2026-08-30T02:00:00.000Z",
@@ -49,6 +51,31 @@ describe("parseSessionUsageReport", () => {
       costUsd: 1.25,
     });
     expect(parsed?.startedAt.toISOString()).toBe("2026-08-30T01:00:00.000Z");
+  });
+
+  it("金額の内訳を受け取り、片方でも欠けたら両方nullにする（#2626）", () => {
+    expect(parseSessionUsageReport(reportInput())).toMatchObject({
+      inputCostUsd: 1.0,
+      outputCostUsd: 0.25,
+    });
+
+    // 内訳を送らない古いpollerからの報告も、行そのものは落とさない。
+    const legacy = reportInput();
+    delete (legacy as Record<string, unknown>).inputCostUsd;
+    delete (legacy as Record<string, unknown>).outputCostUsd;
+    expect(parseSessionUsageReport(legacy)).toMatchObject({
+      costUsd: 1.25,
+      inputCostUsd: null,
+      outputCostUsd: null,
+    });
+
+    // 片側だけ・壊れた値は内訳なしとして扱う（「料金＝入力＋出力」が崩れるため）。
+    for (const broken of [{ outputCostUsd: null }, { inputCostUsd: -1 }, { outputCostUsd: "0.25" }]) {
+      const parsed = parseSessionUsageReport(reportInput(broken));
+      expect(parsed?.costUsd).toBe(1.25);
+      expect(parsed?.inputCostUsd).toBeNull();
+      expect(parsed?.outputCostUsd).toBeNull();
+    }
   });
 
   it("Codexの報告を区別し、未知のエージェントは捨てる", () => {

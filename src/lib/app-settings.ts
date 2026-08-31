@@ -52,13 +52,14 @@ export function parseImageRetentionDays(value: unknown): number | null {
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない
 // （固定すると将来のモデル更新を自動で受けられなくなるため）。
 export const CLAUDE_MODEL_OPTIONS = [
-  { value: "auto", label: "自動" },
-  { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku" },
+  { value: "auto", label: "Claude Codeに任せる" },
+  { value: "opus", label: "Claude Opus（最高精度）" },
+  { value: "sonnet", label: "Claude Sonnet（標準）" },
+  { value: "haiku", label: "Claude Haiku（高速）" },
 ] as const;
 
 export const CLAUDE_MODEL_VALUES = CLAUDE_MODEL_OPTIONS.map((option) => option.value);
+export const CLAUDE_LOCAL_MODEL_DEFAULT = "sonnet" as const;
 
 export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
 
@@ -71,13 +72,15 @@ export function parseClaudeModel(value: unknown): ClaudeModel | null {
 
 // Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
 export const CODEX_MODEL_OPTIONS = [
-  { value: "auto", label: "自動" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-  { value: "gpt-5.5", label: "GPT-5.5" },
-  { value: "gpt-5.4", label: "GPT-5.4" },
+  { value: "auto", label: "Codexに任せる" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（最高精度）" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },
+  { value: "gpt-5.5", label: "GPT-5.5（旧世代）" },
+  { value: "gpt-5.4", label: "GPT-5.4（旧世代）" },
 ] as const;
+
+export const CODEX_MODEL_DEFAULT = "gpt-5.6-terra" as const;
 
 export const CODEX_MODEL_VALUES = CODEX_MODEL_OPTIONS.map((option) => option.value);
 export type CodexModel = (typeof CODEX_MODEL_VALUES)[number];
@@ -90,15 +93,16 @@ export function parseCodexModel(value: unknown): CodexModel | null {
 // アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
 // スナップショット日付を固定せず、同じモデル系列の更新を自動で受けられるエイリアスを使う。
 export const APP_AI_MODEL_OPTIONS = [
-  { value: "claude-haiku-4-5", label: "Haiku 4.5" },
-  { value: "claude-sonnet-5", label: "Sonnet 5" },
-  { value: "claude-opus-5", label: "Opus 5" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5（標準）" },
+  { value: "claude-opus-5", label: "Claude Opus 5（最高精度）" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（最高精度）" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
+  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
+export const APP_AI_MODEL_REASONING_DEFAULT = "claude-sonnet-5" as const;
 export const APP_AI_MODEL_VALUES = APP_AI_MODEL_OPTIONS.map((option) => option.value);
 export type AppAiModel = (typeof APP_AI_MODEL_VALUES)[number];
 export type AppAiProvider = "anthropic" | "openai";

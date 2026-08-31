@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
+import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import {
   buildSessionUsageSummary,
@@ -85,9 +86,47 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
   );
 }
 
+/** issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移した） */
+function apiUsageSummary(): ClaudeApiUsageSummary {
+  const totals = {
+    calls: 5,
+    inputTokens: 1_000,
+    outputTokens: 200,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  };
+  return {
+    measuringSince: NOW_MS - 86_400_000,
+    totalLast24h: totals,
+    totalLast7d: totals,
+    features: [
+      {
+        key: "issue_summary",
+        label: "Issueの要約",
+        last24h: totals,
+        last7d: totals,
+        models: [{ model: "claude-haiku-4-5", last24h: totals, last7d: totals }],
+      },
+    ],
+  };
+}
+
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
+  // #2631。設定の「状態」にあった機能別のAPI消費内訳をここへ移した。渡されなければ出さない
+  it("claudeApiUsageを渡したときだけAPI呼び出しの内訳を出す", () => {
+    const { unmount } = renderPanel(response([]));
+    expect(screen.queryByText("API呼び出し（issue-deck本体）")).toBeNull();
+    unmount();
+
+    renderPanel(response([]), {
+      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
+    });
+    expect(screen.getByText("API呼び出し（issue-deck本体）")).toBeTruthy();
+    expect(screen.getByText("Issueの要約", { exact: false })).toBeTruthy();
+  });
+
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
     renderPanel(response([]));
     expect(screen.getByText("Claude プラン枠")).toBeTruthy();
@@ -123,10 +162,46 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getByText("1%")).toBeTruthy();
   });
 
+  it("内訳は集計側の金額を出し、持たない行だけ「約」を付けた近似にする（#2626）", () => {
+    renderPanel(
+      response([
+        // キャッシュ読み出しがトークンの大半を占めるセッション。トークン比で按分すると
+        // 出力側が$0.24まで落ちるが、実際の内訳は入力$20.10 / 出力$5.00。
+        entry({
+          sessionId: "exact",
+          inputTokens: 20_000,
+          cacheCreateTokens: 1_000_000,
+          cacheReadTokens: 20_000_000,
+          contextTokens: 21_020_000,
+          outputTokens: 200_000,
+          costUsd: 25.1,
+          inputCostUsd: 20.1,
+          outputCostUsd: 5,
+        }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("$20.10", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$5.00", { exact: false })).toBeTruthy();
+    expect(within(detail).queryByText("約", { exact: false })).toBeNull();
+  });
+
+  it("内訳を持たない行はトークン比の近似を「約」付きで出す", () => {
+    renderPanel(
+      response([entry({ sessionId: "legacy", contextTokens: 9_000, outputTokens: 1_000, costUsd: 10 })]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getAllByText("約", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getByText("$9.00", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$1.00", { exact: false })).toBeTruthy();
+  });
+
   it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 
-    // 既定は重量課金のドル。
+    // 既定は従量課金のドル。
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "枠%" }));
@@ -142,7 +217,7 @@ describe("SessionUsagePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "枠%" }));
 
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("重量課金")).toBeTruthy();
+    expect(screen.getByText("従量課金")).toBeTruthy();
   });
 
   it("Issueを開く導線は、リポジトリとIssue番号が揃っている行にだけ出す", () => {
@@ -184,14 +259,88 @@ describe("SessionUsagePanel", () => {
     expect(within(breakdown).queryByText("repository-5")).toBeNull();
   });
 
+  it("明細の棒を、素の入力・キャッシュ書込・キャッシュ読出・出力の4つへ塗り分ける（#2628）", () => {
+    renderPanel(response([entry()]));
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+
+    // 棒のtitleに4区分ぶんの内訳が出る（キャッシュを1色へ潰さない）。
+    expect(within(detail).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // 棒の下の数値も4項目。
+    expect(within(detail).getByText("入力 1k")).toBeTruthy();
+    expect(within(detail).getByText("書込 2k")).toBeTruthy();
+    expect(within(detail).getByText("読出 7k")).toBeTruthy();
+    expect(within(detail).getByText("出力 500")).toBeTruthy();
+
+    // 凡例は単価の倍率を添える（薄い＝安いことを色だけに背負わせない）。
+    expect(screen.getByText("1.25〜2倍")).toBeTruthy();
+    expect(screen.getByText("0.1倍")).toBeTruthy();
+    expect(screen.queryByText("入力（キャッシュ含む）")).toBeNull();
+  });
+
+  it("合計の「コンテキスト」に、期間全体のキャッシュ内訳を出す（#2628）", () => {
+    renderPanel(response([entry()]));
+    expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
+  });
+
+  it("日別・内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）", () => {
+    renderPanel(response([entry()]));
+
+    // 太い棒は金額で、内側はエージェントの割合。棒には数値を書けないのでツールチップへ出す。
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    expect(within(daily).getByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeTruthy();
+    // 細い棒はトークンの4区分。長さもトークン量に比例させる。
+    expect(within(daily).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // リポジトリ別・種別別にも同じ二段を出す。
+    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    expect(within(breakdown).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // 凡例は「どちらの棒の色か」を先に言う。
+    expect(screen.getByText("太い棒＝金額")).toBeTruthy();
+    expect(screen.getByText("細い帯＝トークン")).toBeTruthy();
+  });
+
+  it("金額の棒でGitHub ActionsぶんをClaudeから引く（Codexが短く出ない。#2633）", () => {
+    // ActionsはClaude Codeなので`byAgent.claude`にも入っている。引かずに描くと、Claudeの帯が
+    // Actionsのぶんまで伸び、残りとして描いていたCodexが消える。
+    renderPanel(
+      response([
+        entry({ sessionId: "local-claude", costUsd: 10 }),
+        entry({ sessionId: "local-codex", agent: "codex", costUsd: 10 }),
+        entry({ sessionId: "actions", source: "github-actions", costUsd: 20 }),
+      ]),
+    );
+
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    const bar = within(daily).getByTitle(
+      "Claude $10.00 / Codex $10.00 / GitHub Actions $20.00",
+    );
+    const widths = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.width);
+    expect(widths).toEqual(["25%", "25%", "50%"]);
+  });
+
+  it("スマホ（compact）では明細を横スクロールの表ではなくカードで出す（#2628）", () => {
+    renderPanel(response([entry()]), { compact: true });
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    // 表は幅46remの横スクロールになるため、compactでは使わない。
+    expect(within(detail).queryByRole("table")).toBeNull();
+    // カードでもセッション名・料金・内訳は落とさない。
+    expect(within(detail).getByText("#2504 issue-deck")).toBeTruthy();
+    expect(within(detail).getByText("$20.00")).toBeTruthy();
+    expect(within(detail).getByText("読出 7k")).toBeTruthy();
+  });
+
   it("記録が無いときは、報告待ちであることを出す", () => {
     renderPanel(response([]));
     expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
-  it("金額は重量課金として表示し、API換算の注意書きを表示しない", () => {
+  it("金額は従量課金として表示し、API換算の注意書きを表示しない", () => {
     const { container } = renderPanel(response([entry()]));
-    expect(within(container).getByText("重量課金")).toBeTruthy();
+    expect(within(container).getByText("従量課金")).toBeTruthy();
     expect(within(container).queryByText(/金額はAPI換算の目安です/)).toBeNull();
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });

@@ -364,12 +364,15 @@ model AppSetting {
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist   String   @default("auto")
+  // サブPCでClaude Codeのローカルセッションを起動するときに`--model`へ渡すモデル。
+  claudeLocalModel    String   @default("sonnet")
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
-  codexModel          String   @default("auto")
-  // アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
-  // 既存挙動を維持するため、既定値は従来固定していたHaikuとする。
+  codexModel          String   @default("gpt-5.6-terra")
+  // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
   appAiModel          String   @default("claude-haiku-4-5")
+  // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。
+  appAiModelReasoning String   @default("claude-sonnet-5")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
@@ -1210,6 +1213,15 @@ model SessionPlanRequest {
   expiresAt          DateTime
   // フックが結論を受け取った時刻。**受け取ったあとに押しても届かない**ことを画面へ出す
   deliveredAt        DateTime?
+  // サブPCが判断を取得した時刻。画面でのdecidedAtとは別の経路の証跡
+  decisionObservedAt  DateTime?
+  pollCount           Int                      @default(0)
+  lastPolledAt        DateTime?
+  // セッション側からの完了報告。未報告なら、取得後にプロセスが継続できたか不明
+  deliveryStatus      String?
+  deliveryReportedAt  DateTime?
+  deliveryExitCode    Int?
+  deliverySummary     String?                  @db.VarChar(500)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
@@ -1485,6 +1497,14 @@ model SessionUsage {
   /// API換算の目安（USD）。**サブスクの実費ではない。** 単価はシェル側の表を正とし、
   /// 過去に報告された行の金額は再計算しない（当時の単価で残す）
   costUsd Float
+  /// `costUsd`の入力側・出力側の内訳（#2626）。**画面はここを読み、トークン比で按分しない。**
+  /// キャッシュ読み出しは入力単価の0.1倍・書き込みは1.25〜2.0倍で、トークン比の按分だと
+  /// 出力側が桁で過小に出る。**単価を持っているのは集計する`scripts/lib/session-usage.sh`だけ**
+  /// なので、そこで割った金額をそのまま受け取る。
+  /// 内訳を持たない行（この列より前に報告されたローカルセッション・内訳の出ないGitHub Actions）は
+  /// null。その行だけ画面がトークン比の近似を出し、「約」と断る
+  inputCostUsd  Float?
+  outputCostUsd Float?
   /// 使われたモデルIDのJSON配列（例: `["claude-opus-5"]`）
   models String @db.Text
 

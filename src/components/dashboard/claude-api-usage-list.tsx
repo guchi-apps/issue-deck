@@ -52,8 +52,9 @@ function formatBreakdown(totals: ClaudeApiTotals): string {
  * 機能別のAI API消費の内訳（#2347）。
  * Anthropicはプラン枠の使用率しか返さないため、アプリが自分で投げた呼び出しを数え、
  * 応答の`usage`が返す実測のトークン数を積んだ値を表示する。
- * 見出し「AI使用量」は呼び出し元（`settings/status-section.tsx`）がプラン枠のメーターと
- * 共通で表示するため、このコンポーネント自体は見出しを持たない。
+ * 見出しは呼び出し元（`session-usage-panel.tsx`の「API呼び出し（issue-deck本体）」）が
+ * 持つため、このコンポーネント自体は見出しを持たない。#2631までは設定の「状態」
+ * （`settings/status-section.tsx`）のAI使用量カードの中にあった。
  */
 export function ClaudeApiUsageList({ data, isLoading, error }: ClaudeApiUsageListProps) {
   const now = useNow();

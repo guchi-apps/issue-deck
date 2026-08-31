@@ -11,12 +11,12 @@ afterEach(() => {
   cleanup();
 });
 
-describe("MobileBottomNav（#1638でブランチと設定を入れ替えた）", () => {
-  it("フッターはホーム・Issue・PR・ブランチの4つで、設定は出さない", () => {
+describe("MobileBottomNav（#1638でブランチと設定を入れ替え、#2631でAI使用量を足した）", () => {
+  it("フッターはホーム・Issue・PR・ブランチ・AI使用量の5つで、設定は出さない", () => {
     render(<MobileBottomNav active="home" onSelect={vi.fn()} />);
 
     const labels = screen.getAllByRole("button").map((button) => button.textContent);
-    expect(labels).toEqual(["ホーム", "Issue", "PR", "ブランチ"]);
+    expect(labels).toEqual(["ホーム", "Issue", "PR", "ブランチ", "AI使用量"]);
   });
 
   it("activeがnullのときはどのタブも点灯させない（設定画面）", () => {

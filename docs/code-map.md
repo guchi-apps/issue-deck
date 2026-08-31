@@ -167,6 +167,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - ヘッダーの材料（`PullRequestSummary`）を一覧と詳細APIのどちらから採るかは
     `resolvePullRequestHeader`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）
     に集約してあり、PRペインと重ね表示で共用する。
+- **スマホのフッターは`flex-1`の均等割で、枠を増やすと1枠の幅がそのぶん縮む**（#2631）。
+  4枠のときは1枠98pxだったが、5枠目に「AI使用量」を足して78pxになった
+  （[`mobile-bottom-nav.tsx`](../src/components/dashboard/mobile-bottom-nav.tsx)）。
+  **ラベルには`whitespace-nowrap`を付ける**——収まらない枠だけが2行になると、`min-h-14`が
+  効いてその枠だけ背が伸び、フッターの高さ（56px）が枠ごとに食い違う。はみ出させておけば
+  「詰まっている」ことが見えるので、次に足すかどうかの判断材料になる。枠を足したときに
+  直すのは3か所（`items`・`resolveBottomNavTab`・その画面の戻るボタン）で、
+  **タブになった画面の戻るボタンは外す**（タブから直接開く画面には戻り先が無い）。
+- **同じ実測値を2つの画面に出さない**（#2631）。設定の「状態」とAI使用量画面が、どちらも
+  `ClaudeUsageCard`・`CodexUsageCard`で同じプラン枠のメーターを出していた。**値は同じでも
+  取得のタイミングが違う**ので、片方で枠の残りを見た後にもう片方を開くと数字が食い違って
+  見え、どちらが本当か分からなくなる。出す場所は1つに寄せ、消えた側には移った先を1行書く
+  （開いた人が「無くなった」で終わらないように）。**取得のフック（`useSettingsData`の
+  `enabled && statusActive`のような条件）も一緒に移す**——画面から消しただけだと、開いても
+  使われない取得だけが残る。
 - **Issue一覧の上に並ぶ「〜が n件あります。」の入口バーは、`issue-list.tsx`の
   `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」・「まとめて実行」の
   3本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの
@@ -193,6 +208,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     **強調は枠線と文字のamberだけで、中は塗らない**（同じ形の行が縦に続く一覧では、
     塗りつぶしたボタンが1つあるだけで視線を奪う）。色は右上のバッジ
     （`WorkflowStepBadge`）の確認待ちと同じamberを使い、同じ行の中で同じ意味に別の色を当てない。
+  - **暖色（amber・orange）は「人の対応待ち」専用に空けておく**（#2635）。amberは
+    確認待ち（`CheckUserReasonNotice`・`WorkflowStepBadge`・一覧の「計画を承認」ボタン・
+    左メニューの件数）に割り当て済みで、orangeはその隣の色相にあたる。**それ以外の意味を
+    暖色で表さない**——Issue一覧の行は確認待ちの表示とラベル行が同じカードに収まるため、
+    10pxのチップで色相が30度しか離れていないと「要対応」の合図として読まれる。実装
+    エージェントのチップ（[`issue-agent-badge.tsx`](../src/components/dashboard/issue-agent-badge.tsx)）は
+    この理由でorangeからindigoへ移した。手作業パネル（`manual-step-panel.tsx`）が
+    amberを避けているのも同じ理由。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
@@ -3118,6 +3141,11 @@ pnpm test:unit   # vitestのみ
 `deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
 マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
+
+**他のアプリと共有する認証値を足すときは、提供側の`op://`をそのまま参照する**（#2624）。
+利用側のアイテムへ同じ値を入れ直すと、片方だけ入れ替えた時点で連携が黙って止まる。
+複製と参照先の不在は`scripts/check-duplicate-secret-values.sh`が検出する（判断基準は
+[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「アプリ間で共有する認証値は提供側の`op://`を参照する」）。
 
 ワークフローが実行時に値を組み立てる経路は`.github/actions/load-secrets`（複合アクション）にある。
 マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、

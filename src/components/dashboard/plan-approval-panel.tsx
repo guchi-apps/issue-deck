@@ -123,6 +123,8 @@ export function PlanApprovalPanel({
         decision={decided}
         hostLabel={hostLabel}
         remoteControlUrl={remoteControlUrl}
+        deliveryStatus={request.deliveryStatus}
+        deliveryExitCode={request.deliveryExitCode}
       />
     );
   }
@@ -324,11 +326,15 @@ function PlanDecisionResult({
   decision,
   hostLabel,
   remoteControlUrl,
+  deliveryStatus,
+  deliveryExitCode,
 }: {
   decision: "approve" | "revise" | "defer" | "expired";
   hostLabel: string;
   /** 端末で答えることになったときの行き先。無ければリンクを出さない */
   remoteControlUrl: string | null;
+  deliveryStatus?: string | null;
+  deliveryExitCode?: number | null;
 }) {
   const tone =
     decision === "approve"
@@ -374,6 +380,20 @@ function PlanDecisionResult({
           )}
         </span>
       </div>
+      {(decision === "approve" || decision === "revise") && (
+        <p className="border-t border-current/15 pt-2 text-[11px] leading-relaxed">
+          {deliveryStatus === "PROCESSED"
+            ? "サブPCのセッション側から処理完了の報告を受けました。"
+            : deliveryStatus === "PROCESS_FAILED"
+              ? `サブPCは判断を取得しましたが、セッション処理が失敗しました（終了コード: ${deliveryExitCode ?? "不明"}）。`
+              : deliveryStatus === "COMMUNICATION_FAILED"
+                ? "サブPCとの通信に失敗したため、判断の処理結果を確認できません。"
+                : deliveryStatus === "DECISION_OBSERVED"
+                  ? "サブPCが判断を取得しました。セッション側の処理完了報告を待っています。"
+                  : "サブPCからの取得・処理完了報告を待っています。"
+          }
+        </p>
+      )}
       {answerElsewhere && remoteControlUrl && (
         <Button variant="outline" size="sm" className="self-start" asChild>
           <a href={remoteControlUrl} target="_blank" rel="noreferrer">

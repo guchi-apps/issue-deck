@@ -1,10 +1,9 @@
 "use client";
 
-import { ChevronLeft } from "lucide-react";
-
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
+import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 
 /**
@@ -13,8 +12,9 @@ import type { SessionUsageResponse } from "@/hooks/use-session-usage";
  * PC版と**同じ`SessionUsagePanel`**を`compact`で縮めて使う（`mobile-preview-screen.tsx`と
  * 同じ切り分け）。器（全画面かペインか）だけがPCと違う。
  *
- * ボトムナビのタブは持たない（枠は「ホーム」「Issue」「PR」「ブランチ」で埋まっている）ので、
- * ホームのメニューからのドリルダウンにして、ヘッダーに戻るボタンを出す。
+ * **#2631でボトムナビの5枠目を持つようになった。** それまではホームのメニューからの
+ * ドリルダウンだったのでヘッダーに戻るボタンを出していたが、タブから直接開く画面には
+ * 戻り先が無い（「ブランチ」画面と同じ）ため外した。
  */
 export function MobileUsageScreen({
   data,
@@ -24,7 +24,7 @@ export function MobileUsageScreen({
   onChangeDays,
   onRefresh,
   onOpenIssue,
-  onBack,
+  claudeApiUsage,
 }: {
   data: SessionUsageResponse | null;
   isLoading: boolean;
@@ -33,19 +33,15 @@ export function MobileUsageScreen({
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   onOpenIssue?: (repository: string, issueNumber: number) => void;
-  onBack: () => void;
+  claudeApiUsage?: {
+    data: ClaudeApiUsageSummary | null;
+    isLoading: boolean;
+    error: string | null;
+  };
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-center gap-2 border-b py-2 pr-2 pl-4">
-        <button
-          type="button"
-          onClick={onBack}
-          className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
-          aria-label="戻る"
-        >
-          <ChevronLeft className="size-5" />
-        </button>
         <h1 className="flex-1 text-base font-semibold">AI使用量</h1>
         <MobileDispatchStatusButton />
         <MobileNotificationButton />
@@ -61,6 +57,7 @@ export function MobileUsageScreen({
           onChangeDays={onChangeDays}
           onRefresh={onRefresh}
           onOpenIssue={onOpenIssue}
+          claudeApiUsage={claudeApiUsage}
           compact
         />
       </div>

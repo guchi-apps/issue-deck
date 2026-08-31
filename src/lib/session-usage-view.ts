@@ -30,6 +30,13 @@ export type SessionUsageEntry = {
   /** 入力・キャッシュ書き込み・キャッシュ読み出しの合計。「どれだけ読ませたか」の指標 */
   contextTokens: number;
   costUsd: number;
+  /**
+   * `costUsd`の入力側・出力側の内訳（#2626）。集計側が単価から割ったもので、**ここでは割り直さない。**
+   * 内訳を持たない行（列の追加より前に報告されたローカルセッション・内訳の出ないGitHub Actions）は
+   * null／undefined。その場合だけ`sessionUsageCostSplit`がトークン比の近似へ落とす。
+   */
+  inputCostUsd?: number | null;
+  outputCostUsd?: number | null;
   models: string[];
   startedAt: string;
   endedAt: string;
@@ -40,6 +47,14 @@ export type SessionUsageEntry = {
 export type UsageTotals = {
   sessions: number;
   responses: number;
+  /**
+   * 入力側の内訳（#2628）。**単価が区分ごとに違う**ので、合計の`contextTokens`だけでは
+   * 「量は多いが安い」キャッシュ読み出しが見分けられない。倍率は素の入力を1.0として
+   * キャッシュ書き込みが1.25〜2.0、読み出しが0.1（`scripts/lib/session-usage.sh`が正）。
+   */
+  inputTokens: number;
+  cacheCreateTokens: number;
+  cacheReadTokens: number;
   contextTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -139,7 +154,16 @@ export function sessionUsageKindLabel(kind: string): string {
 }
 
 function emptyTotals(): UsageTotals {
-  return { sessions: 0, responses: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 };
+  return {
+    sessions: 0,
+    responses: 0,
+    inputTokens: 0,
+    cacheCreateTokens: 0,
+    cacheReadTokens: 0,
+    contextTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+  };
 }
 
 function emptyByAgent(): UsageByAgent {
@@ -168,6 +192,9 @@ function addEntryWithSource(
 function addEntry(totals: UsageTotals, entry: SessionUsageEntry): void {
   totals.sessions += 1;
   totals.responses += entry.responses;
+  totals.inputTokens += entry.inputTokens;
+  totals.cacheCreateTokens += entry.cacheCreateTokens;
+  totals.cacheReadTokens += entry.cacheReadTokens;
   totals.contextTokens += entry.contextTokens;
   totals.outputTokens += entry.outputTokens;
   totals.costUsd += entry.costUsd;
@@ -381,6 +408,51 @@ export function buildSessionUsageSummary({
     hosts: [...hosts].sort(),
     reportedAt,
     quotaByAgent,
+  };
+}
+
+export type SessionUsageCostSplit = {
+  inputCostUsd: number;
+  outputCostUsd: number;
+  /** トークン比で按分した近似か。画面はこのとき「約」と断る */
+  approximate: boolean;
+};
+
+/**
+ * セッション1本の金額を入力側・出力側へ分ける（#2626）。
+ *
+ * **集計側が単価から割った内訳があればそれをそのまま使う。** ここで単価表を持たない方針
+ * （このファイル冒頭）に従い、金額を割り直すことはしない。
+ *
+ * **内訳を持たない行だけ、トークン比の按分へ落として`approximate`を立てる。** キャッシュ
+ * 読み出しは入力単価の0.1倍・書き込みは1.25〜2.0倍なので、トークン比の按分は入力側を大きく
+ * 見せる。Claude Codeのセッションはキャッシュ読み出しがトークンの大半を占めるため、
+ * 出力側が実際の1/20ほどに出ることもある。近似だと分かる形でしか出さない。
+ */
+export function sessionUsageCostSplit(
+  entry: Pick<
+    SessionUsageEntry,
+    "contextTokens" | "outputTokens" | "costUsd" | "inputCostUsd" | "outputCostUsd"
+  >,
+): SessionUsageCostSplit {
+  const { inputCostUsd, outputCostUsd } = entry;
+  if (
+    typeof inputCostUsd === "number" &&
+    Number.isFinite(inputCostUsd) &&
+    typeof outputCostUsd === "number" &&
+    Number.isFinite(outputCostUsd)
+  ) {
+    return { inputCostUsd, outputCostUsd, approximate: false };
+  }
+
+  const totalTokens = entry.contextTokens + entry.outputTokens;
+  if (totalTokens <= 0) {
+    return { inputCostUsd: entry.costUsd, outputCostUsd: 0, approximate: true };
+  }
+  return {
+    inputCostUsd: entry.costUsd * (entry.contextTokens / totalTokens),
+    outputCostUsd: entry.costUsd * (entry.outputTokens / totalTokens),
+    approximate: true,
   };
 }
 

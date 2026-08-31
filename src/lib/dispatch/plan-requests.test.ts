@@ -20,7 +20,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { releaseSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import { releaseSessionPlanRequest, reportSessionPlanDelivery } from "@/lib/dispatch/plan-requests";
 
 const NOW = new Date("2026-08-22T10:30:00.000Z");
 
@@ -79,5 +79,37 @@ describe("releaseSessionPlanRequest", () => {
     sessionPlanRequestFindUnique.mockResolvedValue(null);
 
     expect(await releaseSessionPlanRequest("req-1", NOW)).toBeNull();
+  });
+});
+
+describe("reportSessionPlanDelivery", () => {
+  beforeEach(() => {
+    sessionPlanRequestUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  it("判断取得後のセッション処理結果を一度だけ記録する", async () => {
+    const reported = await reportSessionPlanDelivery({
+      id: "req-1",
+      status: "PROCESS_FAILED",
+      exitCode: 3,
+      summary: "計画の画面待機が終了しました",
+      now: NOW,
+    });
+
+    expect(reported).toBe(true);
+    expect(sessionPlanRequestUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "req-1",
+        status: { not: "WAITING" },
+        decisionObservedAt: { not: null },
+        deliveryReportedAt: null,
+      },
+      data: {
+        deliveryStatus: "PROCESS_FAILED",
+        deliveryReportedAt: NOW,
+        deliveryExitCode: 3,
+        deliverySummary: "計画の画面待機が終了しました",
+      },
+    });
   });
 });

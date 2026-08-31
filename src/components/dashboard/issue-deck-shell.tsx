@@ -49,6 +49,7 @@ import {
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
+import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -154,8 +155,10 @@ type IssueDeckShellProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  claudeLocalModel: ClaudeModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
+  appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
   /** `issues`をサーバー側で取った時刻（#1797）。一覧のヘッダーの「HH:MM時点」の初期値になる */
   issuesFetchedAt: string;
@@ -169,8 +172,10 @@ export function IssueDeckShell({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
   appAiModel: initialAppAiModel,
+  appAiModelReasoning: initialAppAiModelReasoning,
   dispatchConcurrency: initialDispatchConcurrency,
 }: IssueDeckShellProps) {
   const {
@@ -230,8 +235,12 @@ export function IssueDeckShell({
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [claudeLocalModel, setClaudeLocalModel] =
+    useState<ClaudeModel>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
+  const [appAiModelReasoning, setAppAiModelReasoning] =
+    useState<AppAiModel>(initialAppAiModelReasoning);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -241,8 +250,10 @@ export function IssueDeckShell({
     setAutoRetryLimit(next.autoRetryLimit);
     setClaudeModel(next.claudeModel);
     setClaudeModelAssist(next.claudeModelAssist);
+    setClaudeLocalModel(next.claudeLocalModel);
     setCodexModel(next.codexModel);
     setAppAiModel(next.appAiModel);
+    setAppAiModelReasoning(next.appAiModelReasoning);
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
@@ -255,7 +266,6 @@ export function IssueDeckShell({
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
     selectPreview,
-    selectUsage,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -1081,6 +1091,11 @@ export function IssueDeckShell({
     ? storedUsageDays
     : 7;
   const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays);
+  // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
+  // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
+  // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
+  // 消費しない。
+  const claudeApiUsage = useClaudeApiUsage(isUsagePaneActive);
 
   /**
    * 使用量の明細からIssueを開く（#2504）。**記録はリポジトリ名（ownerを除く）しか持たない**
@@ -1432,7 +1447,6 @@ export function IssueDeckShell({
                   onSelectFlow={() => selectTab("flow")}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
-                  onSelectUsage={selectUsage}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onCreateIssue={() => openCreateDialog()}
@@ -1461,7 +1475,7 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
-                  onBack={goBack}
+                  claudeApiUsage={claudeApiUsage}
                 />
               )}
 
@@ -1602,8 +1616,10 @@ export function IssueDeckShell({
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
                   claudeModelAssist={claudeModelAssist}
+                  claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   appAiModel={appAiModel}
+                  appAiModelReasoning={appAiModelReasoning}
                   dispatchConcurrency={dispatchConcurrency}
                   repositories={repositories}
                   onSetRepositoryHidden={handleSetRepositoryHidden}
@@ -1724,6 +1740,7 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
+                  claudeApiUsage={claudeApiUsage}
                 />
               </div>
             </div>
@@ -1998,8 +2015,10 @@ export function IssueDeckShell({
           autoRetryLimit={autoRetryLimit}
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
+          claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
           appAiModel={appAiModel}
+          appAiModelReasoning={appAiModelReasoning}
           dispatchConcurrency={dispatchConcurrency}
           repositories={repositories}
           onSetRepositoryHidden={handleSetRepositoryHidden}

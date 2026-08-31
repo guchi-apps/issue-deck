@@ -76,20 +76,37 @@ export async function pollSessionPlanRequest(
   const row = await db.sessionPlanRequest.findUnique({ where: { id } });
   if (!row) return null;
 
+  await db.sessionPlanRequest.update({
+    where: { id },
+    data: { pollCount: { increment: 1 }, lastPolledAt: now },
+  });
+
   if (row.status === "WAITING") {
     if (row.expiresAt.getTime() > now.getTime()) {
       return { status: "WAITING", revisionText: null };
     }
     await db.sessionPlanRequest.updateMany({
       where: { id, status: "WAITING" },
-      data: { status: "EXPIRED", deliveredAt: now },
+      data: {
+        status: "EXPIRED",
+        deliveredAt: now,
+        decisionObservedAt: now,
+        deliveryStatus: "DECISION_OBSERVED",
+      },
     });
     return { status: "EXPIRED", revisionText: null };
   }
 
   // 決まっていた。**受け取ったことを残す**（画面が「もう届いた」と出せるようにする）
-  if (row.deliveredAt === null) {
-    await db.sessionPlanRequest.update({ where: { id }, data: { deliveredAt: now } });
+  if (row.deliveredAt == null || row.decisionObservedAt == null) {
+    await db.sessionPlanRequest.update({
+      where: { id },
+      data: {
+        deliveredAt: row.deliveredAt ?? now,
+        decisionObservedAt: row.decisionObservedAt ?? now,
+        deliveryStatus: row.deliveryStatus ?? "DECISION_OBSERVED",
+      },
+    });
   }
   // 画像を添付した修正には、取りに行き方を添えてから渡す（#2425）。**フックが運べるのは
   // 文字列だけ**なので、ここで書いておかないと画像はURLの文字列として素通りする
@@ -97,6 +114,31 @@ export async function pollSessionPlanRequest(
     status: row.status,
     revisionText: row.revisionText === null ? null : buildPlanRevisionReason(row.revisionText),
   };
+}
+
+/** セッション側が判断を処理した結果を申告する。判断そのものとは別の監査記録。 */
+export async function reportSessionPlanDelivery(params: {
+  id: string;
+  status: "PROCESSED" | "PROCESS_FAILED" | "COMMUNICATION_FAILED";
+  exitCode: number;
+  summary: string | null;
+  now?: Date;
+}): Promise<boolean> {
+  const result = await db.sessionPlanRequest.updateMany({
+    where: {
+      id: params.id,
+      status: { not: "WAITING" },
+      decisionObservedAt: { not: null },
+      deliveryReportedAt: null,
+    },
+    data: {
+      deliveryStatus: params.status,
+      deliveryReportedAt: params.now ?? new Date(),
+      deliveryExitCode: params.exitCode,
+      deliverySummary: params.summary?.slice(0, 500) ?? null,
+    },
+  });
+  return result.count > 0;
 }
 
 /**

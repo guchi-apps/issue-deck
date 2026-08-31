@@ -4,7 +4,12 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs } from "@/lib/dispatch/jobs";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
-import { parseCodexModel } from "@/lib/app-settings";
+import {
+  CLAUDE_LOCAL_MODEL_DEFAULT,
+  CODEX_MODEL_DEFAULT,
+  parseClaudeModel,
+  parseCodexModel,
+} from "@/lib/app-settings";
 import { db } from "@/lib/db";
 
 /**
@@ -68,10 +73,14 @@ export async function POST(request: NextRequest) {
   if (jobs.length === 0) {
     return NextResponse.json({ ok: true, jobs }, { headers: { "Cache-Control": "no-store" } });
   }
-  const setting = await db.appSetting.findUnique({ where: { id: 1 }, select: { codexModel: true } });
-  const codexModel = parseCodexModel(setting?.codexModel) ?? "auto";
+  const setting = (await db.appSetting.findUnique({ where: { id: 1 } })) as
+    | { claudeLocalModel?: string; codexModel?: string }
+    | null;
+  const claudeLocalModel =
+    parseClaudeModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+  const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   return NextResponse.json(
-    { ok: true, jobs: jobs.map((job) => ({ ...job, codexModel })) },
+    { ok: true, jobs: jobs.map((job) => ({ ...job, claudeLocalModel, codexModel })) },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

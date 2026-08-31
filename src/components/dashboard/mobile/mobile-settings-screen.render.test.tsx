@@ -91,8 +91,10 @@ function renderScreen() {
       autoRetryLimit={2}
       claudeModel="auto"
       claudeModelAssist="haiku"
+      claudeLocalModel="sonnet"
       codexModel="auto"
       appAiModel="claude-haiku-4-5"
+      appAiModelReasoning="claude-sonnet-5"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
