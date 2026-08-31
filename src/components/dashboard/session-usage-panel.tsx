@@ -15,6 +15,7 @@ import {
   formatQuotaPercent,
   formatUsageTokens,
   formatUsageUsd,
+  sessionUsageCostSplit,
   sessionUsageKindLabel,
   toQuotaPercent,
   type UsageByAgent,
@@ -330,6 +331,8 @@ function SessionTable({
             const inputWidth = totalTokens > 0 ? (entry.contextTokens / totalTokens) * 100 : 0;
             const repository = issue.repository ?? "(不明)";
             const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
+            // 内訳は集計側が単価から割ったものを使う（#2626）。持っていない行だけ近似になる。
+            const costSplit = sessionUsageCostSplit(entry);
             return (
               <tr key={`${entry.host}:${entry.sessionId}`} className="border-b last:border-b-0">
                 <td className="max-w-[15rem] px-3 py-3 align-top">
@@ -353,7 +356,7 @@ function SessionTable({
                   <div className="mt-1 flex gap-2 text-[10px] tabular-nums text-muted-foreground"><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#d97757]" aria-hidden />入力 {formatUsageTokens(entry.contextTokens)}</span><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#4776e6]" aria-hidden />出力 {formatUsageTokens(entry.outputTokens)}</span></div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">{formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}</td>
-                {!compact && <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">入力 {formatUsageUsd(entry.costUsd * (entry.contextTokens / Math.max(totalTokens, 1)))}<br />出力 {formatUsageUsd(entry.costUsd * (entry.outputTokens / Math.max(totalTokens, 1)))}</td>}
+                {!compact && <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground" title={costSplit.approximate ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）" : undefined}>入力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.inputCostUsd)}<br />出力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.outputCostUsd)}</td>}
                 <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
               </tr>
             );
