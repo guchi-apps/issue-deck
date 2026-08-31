@@ -917,6 +917,40 @@ GitHub Actionsは実行のたびにまっさらなプロセスが立ち、計画
 **GraphQLでProjectのフィールドを直接書き換えないこと。** Projectへの書き込みはissue-deckに
 一本化してあり（上記「中核の判断」）、直接書くとDBのキャッシュと画面がずれる。
 
+### 取り残しが本当に起きる原因は3パターンある（#2689）
+
+`Develop`/`Release`のまま本番反映済みのIssueが15件（`issue-deck`・`dayspan`・`aide-bot`・`aide`・
+`shopping-list`・`ops-dashboard`・`db-console`・`vps`の8リポジトリ）残っていたのを調査し、
+上記の手順で`done`報告→closeして解消した（2026-08-31）。原因は1つではなく、次の3パターンが
+確認できた。**共通するのは「Issueがcloseされた後は、`queryIssuesByProgressStatus`がcloseな
+Issueを除外するため、以後どのリリースの一括遷移にも二度と拾われない」という一点。**
+
+1. **`main-pr-in-progress`の一括スイープが、まだ凍結されていない変更まで`Release`へ進める
+   （race condition）。** バージョンバンプPR（`release/vX.Y.Z`）が本文の対象issue一覧を
+   凍結した**後**・リリースPR（`release-main/vX.Y.Z`）を開く**前**の数分間にdevelopへ
+   マージされたIssueは、対象issue一覧には載らない（正しい）のに、`main-pr-in-progress`は
+   「その時点で`Develop`にいる全issue」を無条件で`Release`へ進めてしまう（誤り）。
+   本来は次のリリースで自己修復するはずだが、**この誤った`Release`表示を見た人が
+   「もう終わった」と誤解して手でcloseする**と、`Release`は`closeStrandedProgress`の
+   救済対象（`Planning`・`Implementation`・`Develop PR`）に入っていないため、
+   二度と`Done`へ進まず永久に取り残される（`issue-deck#2255`で実際に発生）
+2. **古い共有ワークフロー参照タグ（`workflows/vN`）には#1861の再試行が無い。** `dayspan`は
+   `workflows/v19`のままで、`POST /api/progress`の一時的な5xxに対する再試行（#1861・
+   `workflows/v23`以降）を持たない。closeは成功したが`done`報告が単発の503で失敗し、
+   `Release`のまま取り残された（`dayspan#241`・`#247`）
+3. **issue-deck自体が一定時間まるごと不通になると、フォールバックの問い合わせも道連れで
+   失敗する。** リリースPR本文の対象issue取得（バンプ時点）と`main-pr-merged`の
+   フォールバック問い合わせ（`GET /api/progress?status=develop,release`）は同じ
+   `APP_BASE_URL`を叩くため、issue-deckが数分〜数十分単位で応答不能（`curl: (28) timeout`）に
+   なる間は**両方とも失敗し、対象issueを1件も特定できない。** ジョブ自体は成功扱いで終わり、
+   Issueはopenのまま`Release`に取り残される（`aide-bot#116`・`aide#230`。2026-08-31の
+   issuedeck.gucchii.com不通時に発生）
+
+**恒久対応は別Issueとして起票し、このIssueでは手動回収のみ行った。** `Develop`/`Release`に
+いるcloseなIssue・および`main-pr-merged`が0件のまま終わった直後のopenなIssueを、
+`develop-merge-sweep`／`progress-sweep.ts`と同じ要領で定期的に拾い直す仕組みが無いことが
+共通の欠落点で、対応は#2690を参照。
+
 ## 参考リンク
 
 - GitHub Docs: [Using the API to manage Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects)
