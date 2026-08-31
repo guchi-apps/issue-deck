@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -17,8 +17,10 @@ import {
   formatUsageUsd,
   sessionUsageKindLabel,
   toQuotaPercent,
+  type SessionUsageEntry,
   type UsageByAgent,
   type UsageIssue,
+  type UsageTotals,
 } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
 
@@ -117,12 +119,172 @@ function Segmented<T extends string | number>({
   );
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
+function Tile({
+  label,
+  value,
+  sub,
+  bar,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  /** 値と`sub`のあいだに挟む細い帯（コンテキストの内訳）。無ければ出さない */
+  bar?: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border p-3">
       <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</span>
       <span className="text-xl font-bold tabular-nums sm:text-2xl">{value}</span>
+      {bar}
       <span className="text-[11px] text-muted-foreground tabular-nums">{sub}</span>
+    </div>
+  );
+}
+
+/**
+ * 入力側の塗り分け（#2628）。**濃さは単価の順**で、いちばん薄いキャッシュ読み出しが
+ * 「量は多いが安い部分」だと見ただけで分かるようにする。倍率は素の入力を1.0として、
+ * キャッシュ書き込みが1.25倍（5分TTL）〜2.0倍（1時間TTL）、読み出しが0.1倍
+ * （`scripts/lib/session-usage.sh`の`CACHE_WRITE_5M`・`CACHE_WRITE_1H`・`CACHE_READ`が正）。
+ *
+ * **キャッシュ書き込みは素の入力より高いので薄くしない。**「キャッシュ＝薄い」と2段階に
+ * まとめると、単価が逆方向の書き込みまで安いものとして読めてしまう。
+ *
+ * GitHub Actionsの行は入力側を紫で描いているので、同じ濃さの並びを紫でも用意する。
+ */
+const TOKEN_COLORS = {
+  local: { input: "#d97757", cacheCreate: "#a8452a", cacheRead: "#f2cdbe" },
+  "github-actions": { input: "#8b5cf6", cacheCreate: "#5b21b6", cacheRead: "#d8ccf9" },
+} as const;
+
+/** 出力。入力側と系統を分けるため、入力側を塗り分けても1色のままにする */
+const OUTPUT_COLOR = "#4776e6";
+
+type TokenSegment = { key: string; label: string; value: number; color: string };
+
+/** 1セッションぶんの内訳。入力 → キャッシュ書込 → キャッシュ読出 → 出力の順で積む */
+function tokenSegments(entry: SessionUsageEntry): TokenSegment[] {
+  const ramp = TOKEN_COLORS[entry.source === "github-actions" ? "github-actions" : "local"];
+  return [
+    { key: "input", label: "入力", value: entry.inputTokens, color: ramp.input },
+    { key: "cacheCreate", label: "書込", value: entry.cacheCreateTokens, color: ramp.cacheCreate },
+    { key: "cacheRead", label: "読出", value: entry.cacheReadTokens, color: ramp.cacheRead },
+    { key: "output", label: "出力", value: entry.outputTokens, color: OUTPUT_COLOR },
+  ];
+}
+
+/**
+ * 積み上げの棒。**0でないセグメントには最小幅を与える**。素の入力はキャッシュ読み出しの
+ * 1/1000ほどしかないことがあり、比率のままだと1px未満になって存在ごと消える。
+ */
+function TokenBar({ segments, widthPercent }: { segments: TokenSegment[]; widthPercent: number }) {
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  return (
+    <div
+      className="h-2 overflow-hidden rounded-full bg-muted"
+      title={segments.map((segment) => `${segment.label} ${formatUsageTokens(segment.value)}`).join(" / ")}
+    >
+      <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${widthPercent}%` }}>
+        {segments
+          .filter((segment) => segment.value > 0)
+          .map((segment) => (
+            <span
+              key={segment.key}
+              className="min-w-[2px]"
+              style={{
+                width: `${total > 0 ? (segment.value / total) * 100 : 0}%`,
+                backgroundColor: segment.color,
+              }}
+            />
+          ))}
+      </div>
+    </div>
+  );
+}
+
+/** 棒の下に出す内訳の数値。カードでは幅が足りないので2列へ畳む */
+function TokenBreakdown({ segments, columns }: { segments: TokenSegment[]; columns?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "mt-1 text-[10px] tabular-nums text-muted-foreground",
+        columns ? "grid grid-cols-2 gap-x-2" : "flex flex-wrap gap-x-2.5 gap-y-0.5",
+      )}
+    >
+      {segments.map((segment) => (
+        <span key={segment.key}>
+          <i
+            aria-hidden
+            className="mr-1 inline-block size-1.5 rounded-full"
+            style={{ backgroundColor: segment.color }}
+          />
+          {segment.label} {formatUsageTokens(segment.value)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 画面上部の凡例。単価の倍率を添えて「なぜ薄いのか」を色だけに背負わせない */
+function TokenLegend() {
+  const items: { color: string; label: string; rate?: string }[] = [
+    { color: TOKEN_COLORS.local.input, label: "入力", rate: "1.0倍" },
+    { color: TOKEN_COLORS.local.cacheCreate, label: "キャッシュ書込", rate: "1.25〜2倍" },
+    { color: TOKEN_COLORS.local.cacheRead, label: "キャッシュ読出", rate: "0.1倍" },
+    { color: OUTPUT_COLOR, label: "出力" },
+    { color: TOKEN_COLORS["github-actions"].input, label: "GitHub Actions" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+      {items.map((item) => (
+        <span key={item.label}>
+          <i
+            aria-hidden
+            className="mr-1 inline-block size-2 rounded-[2px]"
+            style={{ backgroundColor: item.color }}
+          />
+          <span className="text-foreground">{item.label}</span>
+          {item.rate ? <span className="ml-1 tabular-nums">{item.rate}</span> : null}
+        </span>
+      ))}
+      <span>棒の長さは最大セッションとの比較</span>
+    </div>
+  );
+}
+
+/** 合計タイルに挟む、期間全体のコンテキストの内訳。入力側の3つだけを見せる */
+function ContextBar({ totals }: { totals: UsageTotals }) {
+  const segments: TokenSegment[] = [
+    { key: "input", label: "入力", value: totals.inputTokens, color: TOKEN_COLORS.local.input },
+    {
+      key: "cacheCreate",
+      label: "書込",
+      value: totals.cacheCreateTokens,
+      color: TOKEN_COLORS.local.cacheCreate,
+    },
+    {
+      key: "cacheRead",
+      label: "読出",
+      value: totals.cacheReadTokens,
+      color: TOKEN_COLORS.local.cacheRead,
+    },
+  ];
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  if (total <= 0) return null;
+  return (
+    <div
+      className="mt-0.5 mb-0.5 flex h-1.5 overflow-hidden rounded-full bg-muted"
+      title={segments.map((segment) => `${segment.label} ${formatUsageTokens(segment.value)}`).join(" / ")}
+    >
+      {segments
+        .filter((segment) => segment.value > 0)
+        .map((segment) => (
+          <span
+            key={segment.key}
+            className="min-w-[2px]"
+            style={{ width: `${(segment.value / total) * 100}%`, backgroundColor: segment.color }}
+          />
+        ))}
     </div>
   );
 }
@@ -284,6 +446,88 @@ function Breakdown({
   );
 }
 
+type SessionRow = { issue: UsageIssue; entry: SessionUsageEntry };
+
+/** セッション名（Issue番号・リポジトリ・種別）と、Issue／Actionsを開く導線 */
+function SessionName({
+  issue,
+  entry,
+  onOpenIssue,
+}: SessionRow & { onOpenIssue?: (repository: string, issueNumber: number) => void }) {
+  const repository = issue.repository ?? "(不明)";
+  const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
+  return (
+    <div className="flex items-start gap-1.5">
+      <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
+      <div className="min-w-0">
+        <div className="truncate font-semibold text-foreground">
+          {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
+        </div>
+        <div className="truncate text-[10px] text-muted-foreground">{entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}{entry.workflowName ? ` ・ ${entry.workflowName}` : ""}</div>
+      </div>
+      {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
+      {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
+    </div>
+  );
+}
+
+/**
+ * スマホ向けの明細（#2628）。**表を横スクロールさせない。**
+ * 表の最小幅は46remあり、スマホでは棒と料金を同時に見られなかった。1セッション＝1カードで
+ * 縦に積み、内訳の数値だけ2列へ畳む。
+ */
+function SessionCards({
+  sessions,
+  maxTokens,
+  unit,
+  quotas,
+  onOpenIssue,
+}: {
+  sessions: SessionRow[];
+  maxTokens: number;
+  unit: SessionUsageUnit;
+  quotas: QuotaByAgent;
+  onOpenIssue?: (repository: string, issueNumber: number) => void;
+}) {
+  return (
+    <ul className="flex flex-col gap-2">
+      {sessions.map(({ issue, entry }) => {
+        const segments = tokenSegments(entry);
+        const totalTokens = entry.contextTokens + entry.outputTokens;
+        const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+        return (
+          <li
+            key={`${entry.host}:${entry.sessionId}`}
+            className="flex flex-col gap-1.5 rounded-lg border p-2.5 text-[11px]"
+          >
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} />
+              </div>
+              <span className="shrink-0 font-semibold tabular-nums">
+                {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
+              </span>
+            </div>
+            <div>
+              <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground">
+                <span>{formatUsageTokens(totalTokens)}</span>
+                <span>{Math.round(totalWidth)}%</span>
+              </div>
+              <div className="mt-1">
+                <TokenBar segments={segments} widthPercent={totalWidth} />
+              </div>
+              <TokenBreakdown segments={segments} columns />
+            </div>
+            <div className="text-[10px] tabular-nums text-muted-foreground">
+              {formatDateTime(entry.startedAt)} 〜 {formatDateTime(entry.endedAt)}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** セッションごとの一覧。棒の全長を最大セッションにそろえ、セッション間の差を見せる。 */
 function SessionTable({
   issues,
@@ -310,6 +554,18 @@ function SessionTable({
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
 
+  if (compact) {
+    return (
+      <SessionCards
+        sessions={sessions}
+        maxTokens={maxTokens}
+        unit={unit}
+        quotas={quotas}
+        onOpenIssue={onOpenIssue}
+      />
+    );
+  }
+
   return (
     <div className="-mx-3 overflow-x-auto sm:mx-0">
       <table className="w-full min-w-[46rem] border-collapse text-left text-[11px]">
@@ -319,41 +575,29 @@ function SessionTable({
             <th scope="col" className="px-3 py-2 font-semibold">セッション</th>
             <th scope="col" className="w-[38%] px-3 py-2 font-semibold">トークン使用量（最大比）</th>
             <th scope="col" className="px-3 py-2 font-semibold">料金</th>
-            {!compact && <th scope="col" className="px-3 py-2 font-semibold">内訳</th>}
+            <th scope="col" className="px-3 py-2 font-semibold">内訳</th>
             <th scope="col" className="px-3 py-2 font-semibold">日時</th>
           </tr>
         </thead>
         <tbody>
           {sessions.map(({ issue, entry }) => {
+            const segments = tokenSegments(entry);
             const totalTokens = entry.contextTokens + entry.outputTokens;
             const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
-            const inputWidth = totalTokens > 0 ? (entry.contextTokens / totalTokens) * 100 : 0;
-            const repository = issue.repository ?? "(不明)";
-            const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
             return (
               <tr key={`${entry.host}:${entry.sessionId}`} className="border-b last:border-b-0">
                 <td className="max-w-[15rem] px-3 py-3 align-top">
-                  <div className="flex items-start gap-1.5">
-                    <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-foreground">
-                        {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
-                      </div>
-                      <div className="truncate text-[10px] text-muted-foreground">{entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}{entry.workflowName ? ` ・ ${entry.workflowName}` : ""}</div>
-                    </div>
-                    {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
-                    {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
-                  </div>
+                  <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} />
                 </td>
                 <td className="px-3 py-3 align-middle">
                   <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground"><span>{formatUsageTokens(totalTokens)}</span><span>{Math.round(totalWidth)}%</span></div>
-                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" title={`入力 ${formatUsageTokens(entry.contextTokens)} / 出力 ${formatUsageTokens(entry.outputTokens)}`}>
-                    <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${totalWidth}%` }}><span className={entry.source === "github-actions" ? "bg-[#8b5cf6]" : "bg-[#d97757]"} style={{ width: `${inputWidth}%` }} /><span className="flex-1 bg-[#4776e6]" /></div>
+                  <div className="mt-1">
+                    <TokenBar segments={segments} widthPercent={totalWidth} />
                   </div>
-                  <div className="mt-1 flex gap-2 text-[10px] tabular-nums text-muted-foreground"><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#d97757]" aria-hidden />入力 {formatUsageTokens(entry.contextTokens)}</span><span><i className="mr-1 inline-block size-1.5 rounded-full bg-[#4776e6]" aria-hidden />出力 {formatUsageTokens(entry.outputTokens)}</span></div>
+                  <TokenBreakdown segments={segments} />
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">{formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}</td>
-                {!compact && <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">入力 {formatUsageUsd(entry.costUsd * (entry.contextTokens / Math.max(totalTokens, 1)))}<br />出力 {formatUsageUsd(entry.costUsd * (entry.outputTokens / Math.max(totalTokens, 1)))}</td>}
+                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">入力 {formatUsageUsd(entry.costUsd * (entry.contextTokens / Math.max(totalTokens, 1)))}<br />出力 {formatUsageUsd(entry.costUsd * (entry.outputTokens / Math.max(totalTokens, 1)))}</td>
                 <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
               </tr>
             );
@@ -441,18 +685,7 @@ export function SessionUsagePanel({
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        <span>
-          <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#d97757]" aria-hidden />
-          入力（キャッシュ含む）
-        </span>
-        <span>
-          <i className="mr-1 inline-block size-2 rounded-[2px] bg-[#4776e6]" aria-hidden />
-          出力
-        </span>
-        <span>棒の長さは最大セッションとの比較</span>
-        <span><i className="mr-1 inline-block size-2 rounded-[2px] bg-[#8b5cf6]" aria-hidden />GitHub Actions</span>
-      </div>
+      <TokenLegend />
 
       {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
       <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
@@ -494,12 +727,14 @@ export function SessionUsagePanel({
             <Tile
               label="応答"
               value={data.totals.responses.toLocaleString()}
-              sub={`1応答 ${formatUsageUsd(perResponseUsd)}`}
+              /* コンテキストタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
+              sub={`1応答 ${formatUsageUsd(perResponseUsd)}・平均 ${formatUsageTokens(avgContext)}`}
             />
             <Tile
               label="コンテキスト"
               value={formatUsageTokens(data.totals.contextTokens)}
-              sub={`平均 ${formatUsageTokens(avgContext)} / 応答`}
+              bar={<ContextBar totals={data.totals} />}
+              sub={`入力 ${formatUsageTokens(data.totals.inputTokens)}・書込 ${formatUsageTokens(data.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(data.totals.cacheReadTokens)}`}
             />
             <Tile
               label="セッション"
