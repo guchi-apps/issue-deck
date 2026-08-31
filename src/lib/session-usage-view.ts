@@ -83,6 +83,13 @@ export type UsageIssue = UsageTotals & {
   repository: string | null;
   issueNumber: number | null;
   prNumber: number | null;
+  /**
+   * IssueまたはPRのタイトル（#2686）。**この純粋関数はDBを読まないためnull固定**——
+   * `/api/session-usage`が`buildSessionUsageSummary`の呼び出し後に、DBの`Issue`テーブルや
+   * GitHub APIから解決した値をここへ詰め直す。解決できなかった行もnullのまま返す
+   * （画面は番号のみの表示にフォールバックする）。
+   */
+  title: string | null;
   /** そのIssueで走った種別（金額の多い順） */
   kinds: string[];
   /** そのIssueで最も新しいセッションの開始日時。Issueの表示順に使う */
@@ -353,6 +360,7 @@ export function buildSessionUsageSummary({
         repository: entry.repository,
         issueNumber: entry.issueNumber,
         prNumber: entry.prNumber,
+        title: null,
         kinds: [],
         latestStartedAt: entry.startedAt,
         entries: [],
