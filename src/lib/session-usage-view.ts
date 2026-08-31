@@ -93,33 +93,6 @@ export type UsageIssue = UsageTotals & {
   bySource: UsageBySource;
 };
 
-/**
- * プラン枠への換算（#2504の追加要望）。
- *
- * **Anthropicは枠の絶対量を出さない。** `anthropic-ratelimit-unified-*`ヘッダが返すのは
- * 「その窓を何%使ったか」だけで、トークン数でもドルでもない（`lib/claude/usage.ts`）。
- * そこで**同じ窓のあいだにローカルセッションが使ったAPI換算**を実測の%で割り、
- * 「1%あたり何ドルぶん」を逆算して換算の物差しにする。
- *
- * **これは目安の上に立つ目安。** 同じ枠はGitHub Actionsの無人実行とissue-deck自身のAPI
- * 呼び出しも使っており、それらはこの表に入らない。したがって逆算した「1%あたり」は本来より
- * 小さく出て、**枠換算の%は実際よりやや大きめに出る。** 画面でそう断る。
- */
-export type QuotaScale = {
-  /** 物差しに使った窓（`lib/claude/usage.ts`の`key`。`5h` / `7d`） */
-  windowKey: string;
-  windowLabel: string;
-  /** 窓の実測使用率(%) */
-  usedPercent: number;
-  /** 窓の開始・終了（ISO） */
-  windowStart: string;
-  windowEnd: string;
-  /** その窓のあいだにローカルセッションが使ったAPI換算(USD) */
-  windowCostUsd: number;
-  /** 枠1%あたりのAPI換算(USD)。これで割ると「枠の何%相当か」になる */
-  usdPerPercent: number;
-};
-
 export type SessionUsageSummary = {
   /** 集計した期間（ISO）。`days`は日本時間の日数で、今日を含む */
   since: string;
@@ -142,8 +115,6 @@ export type SessionUsageSummary = {
   hosts: string[];
   /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
   reportedAt: string | null;
-  /** AIごとのプラン枠への換算。材料が揃わなければnull */
-  quotaByAgent: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 };
 
 /**
@@ -252,85 +223,18 @@ export function sessionUsagePeriodStartMs(nowMs: number, days: number): number {
 }
 
 /**
- * プラン枠の窓と、同じ窓のあいだの消費から換算の物差しを作る。
- *
- * **窓は「リセット時刻から窓の長さぶん遡ったところ」**として扱う。ヘッダはリセット時刻と
- * 窓の長さしか返さないため、開始時刻はここで引き算する。
- *
- * 次のいずれかに当てはまれば`null`（画面は枠換算を出さない）。
- * - 窓の情報が無い／リセット時刻が取れない
- * - 使用率が0%（割れない）
- * - その窓でローカルセッションの消費が記録されていない（物差しが立たない）
- */
-export function buildQuotaScale({
-  windows,
-  entries,
-  nowMs,
-}: {
-  windows: {
-    key: string;
-    label: string;
-    usedPercent: number;
-    resetsAt: number | null;
-    durationMs: number;
-  }[];
-  entries: SessionUsageEntry[];
-  nowMs: number;
-}): QuotaScale | null {
-  // **長いほうの窓を優先する。** 5時間枠は走っているセッション1本で振り切れることがあり、
-  // 物差しとしては荒い。週間枠のほうが平均が効く。
-  const candidates = [...windows].sort((a, b) => b.durationMs - a.durationMs);
-
-  for (const window of candidates) {
-    if (!Number.isFinite(window.usedPercent) || window.usedPercent <= 0) continue;
-    if (window.resetsAt === null || !Number.isFinite(window.resetsAt)) continue;
-
-    const endMs = window.resetsAt * 1000;
-    const startMs = endMs - window.durationMs;
-    // リセット時刻が過去（＝取得が古い）ときは、その窓はもう当てにならない。
-    if (endMs < nowMs) continue;
-
-    let windowCostUsd = 0;
-    for (const entry of entries) {
-      const endedAt = new Date(entry.endedAt).getTime();
-      if (Number.isNaN(endedAt)) continue;
-      if (endedAt < startMs || endedAt > endMs) continue;
-      windowCostUsd += entry.costUsd;
-    }
-    if (windowCostUsd <= 0) continue;
-
-    return {
-      windowKey: window.key,
-      windowLabel: window.label,
-      usedPercent: window.usedPercent,
-      windowStart: new Date(startMs).toISOString(),
-      windowEnd: new Date(endMs).toISOString(),
-      windowCostUsd,
-      usdPerPercent: windowCostUsd / window.usedPercent,
-    };
-  }
-
-  return null;
-}
-
-/**
  * 期間で切ったうえで、画面が読むかたちへ畳む。
- *
- * `entries`は期間の外を含んでいてよい（`quota`の物差しは窓の全体を見るため、
- * **絞り込みはここで行う**）。
  */
 export function buildSessionUsageSummary({
   entries,
   nowMs,
   days,
   reportedAt,
-  quotaByAgent = { claude: null, codex: null },
 }: {
   entries: SessionUsageEntry[];
   nowMs: number;
   days: number;
   reportedAt: string | null;
-  quotaByAgent?: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 }): SessionUsageSummary {
   const startMs = sessionUsagePeriodStartMs(nowMs, days);
   const inPeriod = entries.filter((entry) => {
@@ -451,7 +355,6 @@ export function buildSessionUsageSummary({
     omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),
     hosts: [...hosts].sort(),
     reportedAt,
-    quotaByAgent,
   };
 }
 
@@ -528,12 +431,6 @@ export function sessionUsagePhaseSplit(
   return { planCostUsd, implementationCostUsd };
 }
 
-/** API換算(USD) → プラン枠の何%相当か。物差しが無ければnull */
-export function toQuotaPercent(costUsd: number, quota: QuotaScale | null): number | null {
-  if (!quota || quota.usdPerPercent <= 0) return null;
-  return costUsd / quota.usdPerPercent;
-}
-
 /**
  * 画面に出す数値の整形。**単位の畳み方を1か所に置く**（`scripts/lib/session-usage.sh`の
  * `render_table`が端末側で同じことをしているのと対応する）。
@@ -548,15 +445,6 @@ export function formatUsageUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-/** プラン枠の何%相当か。1%未満は小数第2位まで出す（0%と区別が付かなくなるため） */
-export function formatQuotaPercent(value: number): string {
-  if (!Number.isFinite(value)) return "-";
-  if (value >= 10) return `${Math.round(value)}%`;
-  if (value >= 1) return `${value.toFixed(1)}%`;
-  if (value > 0 && value < 0.01) return "0.01%";
-  return `${value.toFixed(2)}%`;
-}
-
 /** トークン数。7桁の数字を並べても読めないので単位で畳む */
 export function formatUsageTokens(value: number): string {
   if (!Number.isFinite(value)) return "-";
@@ -564,17 +452,4 @@ export function formatUsageTokens(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
   if (value >= 1e3) return `${Math.round(value / 1e3).toLocaleString()}k`;
   return String(Math.round(value));
-}
-
-/** 選んだ単位で金額を出す。`quota`が無ければ常にドル */
-export function formatUsageAmount(
-  costUsd: number,
-  unit: "usd" | "quota",
-  quota: QuotaScale | null,
-): string {
-  if (unit === "quota") {
-    const percent = toQuotaPercent(costUsd, quota);
-    if (percent !== null) return formatQuotaPercent(percent);
-  }
-  return formatUsageUsd(costUsd);
 }
