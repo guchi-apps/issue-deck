@@ -14,9 +14,15 @@ type IssueAgentBadgeProps = {
  * 人が動かないと止まったままという意味に割り当てられており（`CheckUserReasonNotice`・
  * `WorkflowStepBadge`・一覧の「計画を承認」ボタン）、Issue一覧の行では同じ行にそれらと
  * 並ぶ。エージェントの種類を示すだけのこのバッジをorangeにすると、10pxのチップでは
- * amberと見分けが付かず「要対応」の合図に見えてしまう。Claude側はamberから最も遠い
- * 寒色帯のindigoにする——チップ・アイコンでの使用が無く、Codexのemeraldとも色相・明度の
- * 両方で離れ、「Claudeの回答待ち」がすでにblue系で描かれている点とも揃う。
+ * amberと見分けが付かず「要対応」の合図に見えてしまう。
+ *
+ * **Claude=rose・Codex=greenは、AI使用量画面（`session-usage-panel.tsx`の
+ * `AGENT_COLORS`）と揃えている**（#2667）。以前はindigo/emeraldだったが、#2667でAI使用量
+ * 画面の「誰が使ったか」の色を橙・青・紫（トークン区分の色と衝突していた）から
+ * rose/green/fuchsiaへ差し替えたのに合わせ、同じエージェントを指す色は画面をまたいでも
+ * 揃うようにした（indigo/emeraldは`session-usage-panel.tsx`側の`OUTPUT_COLOR`・
+ * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかったため、そちら側の新色に
+ * 合わせている）。
  */
 export function IssueAgentBadge({ agent, className }: IssueAgentBadgeProps) {
   return (
@@ -25,8 +31,8 @@ export function IssueAgentBadge({ agent, className }: IssueAgentBadgeProps) {
       className={cn(
         "h-5 shrink-0 px-1.5 text-[10px] font-medium",
         agent === "codex"
-          ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-          : "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300",
+          ? "border-green-300 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
+          : "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300",
         className,
       )}
     >

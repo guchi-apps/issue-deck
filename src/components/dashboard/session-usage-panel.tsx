@@ -161,10 +161,18 @@ const TOKEN_COLORS = {
 const OUTPUT_COLOR = "#4776e6";
 
 /**
- * 金額の棒の内側（#2633）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
+ * 金額の棒の内側（#2633・#2667）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
  * 日別・内訳の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す。
+ *
+ * **`TOKEN_COLORS`・`OUTPUT_COLOR`（橙・青・紫）とは別の色相に離す**（#2667）。以前はこの3色を
+ * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
+ * GitHub Actionsと Actionsの入力トークンが同じ紫で完全に一致していた。色覚多様性
+ * シミュレーション（protanopia/deuteranopia）と通常視認の両方で、`TOKEN_COLORS`・`OUTPUT_COLOR`・
+ * `PHASE_COLORS`のどの色とも離れることを確認して選んでいる（datavizスキルの
+ * `validate_palette.js`で検証。IssueAgentBadge（#2635）のindigo/emeraldは`OUTPUT_COLOR`・
+ * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかった）。
  */
-const AGENT_COLORS = { claude: "#d97757", codex: "#4776e6", actions: "#8b5cf6" } as const;
+const AGENT_COLORS = { claude: "#9f1239", codex: "#33cc4d", actions: "#86198f" } as const;
 
 /**
  * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_COLORS`）とは別軸**なので、
