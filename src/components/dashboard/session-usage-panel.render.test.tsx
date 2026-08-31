@@ -123,6 +123,42 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getByText("1%")).toBeTruthy();
   });
 
+  it("内訳は集計側の金額を出し、持たない行だけ「約」を付けた近似にする（#2626）", () => {
+    renderPanel(
+      response([
+        // キャッシュ読み出しがトークンの大半を占めるセッション。トークン比で按分すると
+        // 出力側が$0.24まで落ちるが、実際の内訳は入力$20.10 / 出力$5.00。
+        entry({
+          sessionId: "exact",
+          inputTokens: 20_000,
+          cacheCreateTokens: 1_000_000,
+          cacheReadTokens: 20_000_000,
+          contextTokens: 21_020_000,
+          outputTokens: 200_000,
+          costUsd: 25.1,
+          inputCostUsd: 20.1,
+          outputCostUsd: 5,
+        }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("$20.10", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$5.00", { exact: false })).toBeTruthy();
+    expect(within(detail).queryByText("約", { exact: false })).toBeNull();
+  });
+
+  it("内訳を持たない行はトークン比の近似を「約」付きで出す", () => {
+    renderPanel(
+      response([entry({ sessionId: "legacy", contextTokens: 9_000, outputTokens: 1_000, costUsd: 10 })]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getAllByText("約", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getByText("$9.00", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$1.00", { exact: false })).toBeTruthy();
+  });
+
   it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 

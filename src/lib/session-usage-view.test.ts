@@ -7,6 +7,7 @@ import {
   formatUsageAmount,
   formatUsageTokens,
   formatUsageUsd,
+  sessionUsageCostSplit,
   sessionUsagePeriodStartMs,
   toQuotaPercent,
   type SessionUsageEntry,
@@ -317,5 +318,36 @@ describe("整形", () => {
 
   it("物差しが無ければ「枠%」を選んでいてもドルで出す", () => {
     expect(formatUsageAmount(12.5, "quota", null)).toBe("$12.50");
+  });
+});
+
+describe("sessionUsageCostSplit", () => {
+  it("集計側の内訳があればそのまま使う（トークン比で割り直さない）", () => {
+    // 入力側のトークンが99%を占めるが、金額の内訳は入力$20.1 / 出力$5.0。
+    const split = sessionUsageCostSplit(
+      entry({
+        contextTokens: 21_020_000,
+        outputTokens: 200_000,
+        costUsd: 25.1,
+        inputCostUsd: 20.1,
+        outputCostUsd: 5.0,
+      }),
+    );
+    expect(split).toEqual({ inputCostUsd: 20.1, outputCostUsd: 5.0, approximate: false });
+  });
+
+  it("内訳を持たない行だけトークン比の近似へ落とし、近似だと分かるようにする", () => {
+    const split = sessionUsageCostSplit(
+      entry({ contextTokens: 900, outputTokens: 100, costUsd: 10, inputCostUsd: null, outputCostUsd: null }),
+    );
+    expect(split).toEqual({ inputCostUsd: 9, outputCostUsd: 1, approximate: true });
+  });
+
+  it("片方だけの行・トークンが0の行でも壊れない", () => {
+    // 片側しか無い行は内訳として使えない（合計が料金にならない）。
+    expect(sessionUsageCostSplit(entry({ contextTokens: 900, outputTokens: 100, costUsd: 10, inputCostUsd: 9 })))
+      .toMatchObject({ approximate: true });
+    expect(sessionUsageCostSplit(entry({ contextTokens: 0, outputTokens: 0, costUsd: 0 })))
+      .toEqual({ inputCostUsd: 0, outputCostUsd: 0, approximate: true });
   });
 });
