@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
+import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import {
   buildSessionUsageSummary,
@@ -85,9 +86,47 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
   );
 }
 
+/** issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移した） */
+function apiUsageSummary(): ClaudeApiUsageSummary {
+  const totals = {
+    calls: 5,
+    inputTokens: 1_000,
+    outputTokens: 200,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  };
+  return {
+    measuringSince: NOW_MS - 86_400_000,
+    totalLast24h: totals,
+    totalLast7d: totals,
+    features: [
+      {
+        key: "issue_summary",
+        label: "Issueの要約",
+        last24h: totals,
+        last7d: totals,
+        models: [{ model: "claude-haiku-4-5", last24h: totals, last7d: totals }],
+      },
+    ],
+  };
+}
+
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
+  // #2631。設定の「状態」にあった機能別のAPI消費内訳をここへ移した。渡されなければ出さない
+  it("claudeApiUsageを渡したときだけAPI呼び出しの内訳を出す", () => {
+    const { unmount } = renderPanel(response([]));
+    expect(screen.queryByText("API呼び出し（issue-deck本体）")).toBeNull();
+    unmount();
+
+    renderPanel(response([]), {
+      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
+    });
+    expect(screen.getByText("API呼び出し（issue-deck本体）")).toBeTruthy();
+    expect(screen.getByText("Issueの要約", { exact: false })).toBeTruthy();
+  });
+
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
     renderPanel(response([]));
     expect(screen.getByText("Claude プラン枠")).toBeTruthy();

@@ -2,7 +2,6 @@
 
 import {
   FolderGit2,
-  Gauge,
   GitBranch,
   Loader2,
   MessageCircleQuestion,
@@ -88,8 +87,6 @@ type MobileHomeScreenProps = {
   onSelectFlow: () => void;
   /** 「確認環境」画面を開く（#2444）。「ブランチ」と同じくメニューへ直接1行として置く */
   onSelectPreview: () => void;
-  /** AI使用量（#2504）の画面を開く */
-  onSelectUsage: () => void;
   /**
    * 確認環境が動いているか（#2444）。動いている間だけオレンジの丸を出す。
    * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
@@ -177,7 +174,6 @@ export function MobileHomeScreenView({
   onSelectFlow,
   onSelectPreview,
   previewRunning,
-  onSelectUsage,
   favoriteRepositories,
   onSelectRepository,
   onCreateIssue,
@@ -413,15 +409,6 @@ export function MobileHomeScreenView({
                     ? "確認環境が動いています"
                     : "developの最新をサブPCで動かして画面で確かめる"
                 }
-              />
-              {/* AI使用量（#2504）。見るだけの画面なので件数も丸も出さない */}
-              <MobileNavRow
-                label="AI使用量"
-                icon={Gauge}
-                onClick={onSelectUsage}
-                count={null}
-                emphasis="none"
-                title="サブPCのローカルセッションが使ったトークンを見る"
               />
             </ul>
           </div>

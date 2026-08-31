@@ -156,9 +156,6 @@ export function SettingsDialog({
                   rateLimits={data.rateLimits}
                   apiUsage={data.apiUsage}
                   actionsUsage={data.actionsUsage}
-                  claudeUsage={data.claudeUsage}
-                  codexUsage={data.codexUsage}
-                  claudeApiUsage={data.claudeApiUsage}
                   githubStatus={data.githubStatus}
                 />
               )}
