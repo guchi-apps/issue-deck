@@ -1015,8 +1015,10 @@ export function SessionUsagePanel({
           <section className="flex flex-col gap-1 rounded-lg border p-3">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">日別</span>
+              {/* 太い棒＝金額／細い帯＝トークンの説明は直上のTokenLegendと重複するため落とす
+                  （#2666）。枠線の意味（集計途中で必ず低く出る）はここにしか無いので残す */}
               <span className="text-[11px] text-muted-foreground">
-                太い棒＝金額／細い帯＝トークン・いちばん新しい日は集計中
+                いちばん新しい日は集計中
               </span>
             </div>
             <DailyChart
