@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode, TouchEvent } from "react";
-import { ArrowLeft, ChevronUp, MessageCircleQuestion, Plus, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, ChevronUp, SlidersHorizontal } from "lucide-react";
 
 import { IssueList } from "@/components/dashboard/issue-list";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
@@ -78,12 +78,6 @@ type MobileIssueListScreenProps = {
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
-  onCreateIssue: () => void;
-  /**
-   * 指定時は「複数リポジトリに質問する」FABをあわせて表示する（#1454）。
-   * 単一リポジトリへの質問は「＋」の新規作成（種別「質問」）へ統合済み（#1641）。
-   */
-  onAskCrossRepoQuestion?: () => void;
   /**
    * 特定のビューでだけ一覧の先頭に固定表示する要素と、その件数（#1713）。
    * 「ユーザーの確認待ち」でユーザーのマージを待っているPull Requestを出すのに使う。
@@ -160,8 +154,6 @@ export function MobileIssueListScreen({
   onChangeView,
   onChangeFilters,
   onSelectIssue,
-  onCreateIssue,
-  onAskCrossRepoQuestion,
   pinned,
   snoozes,
   onSnooze,
@@ -471,30 +463,6 @@ export function MobileIssueListScreen({
       />
 
       {children}
-
-      {/* 下端の絞り込み行（高さ約74px）と重ならない位置へ上げる（#1645）。
-          z-20は一覧の行より手前に浮かせるため（#1945）。一覧の行は中身の重なり順に
-          z-indexを使っており、指定が無いとスクロール中にこのボタンが行の後ろへ回る */}
-      <div className="absolute right-4 bottom-22 z-20 flex items-center gap-3">
-        {onAskCrossRepoQuestion && (
-          <button
-            type="button"
-            onClick={onAskCrossRepoQuestion}
-            aria-label="複数リポジトリに質問する"
-            className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
-          >
-            <MessageCircleQuestion className="size-6" />
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onCreateIssue}
-          aria-label="新しいIssueを作成"
-          className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
-        >
-          <Plus className="size-6" />
-        </button>
-      </div>
     </div>
   );
 }

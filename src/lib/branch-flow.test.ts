@@ -543,6 +543,66 @@ describe("buildBranchFlow", () => {
     ]);
   });
 
+  // #2661。リリース作業（バンプPRの作成〜main向けPRの作成）に時間がかかると、その間に
+  // developへ入った作業のマージ時刻がリリースPRの作成時刻より早くなり、タイムスタンプの
+  // 比較だけでは「その版で本番へ出た」と誤判定する（実例: developへ12:36にマージされた
+  // #2657が、12:42に作られたv4.69.0のリリースPRに「含まれる」と判定されたが、実際は
+  // バンプPRが12:12時点のdevelopから切られており#2657を運んでいない）。
+  it("developとmainの実差分でまだ本番へ出ていないと分かれば、タイムスタンプの判定より優先する", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 2659,
+          title: "v4.69.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "release-main/v4.69.0",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          // リリースPRの作成はdevelopへの#2657マージ（12:36）より後
+          createdAt: "2026-08-31T12:42:17Z",
+          mergedAt: "2026-08-31T12:56:40Z",
+        }),
+        // developへはリリースPRの作成より前に見えるがマージ済み → タイムスタンプだけでは
+        // 「released」と誤判定する
+        pullRequest({
+          number: 2657,
+          headRef: "issue-2653",
+          linkedIssueNumber: 2653,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-31T12:36:19Z",
+        }),
+      ],
+      branchStatuses: [
+        branchStatus({
+          developVsMain: {
+            aheadBy: 1,
+            behindBy: 0,
+            sameContent: false,
+            units: {
+              mergeCount: 1,
+              directCount: 0,
+              versionBumpCount: 0,
+              // developとmainの実差分に残っている＝まだ本番へ出ていない証拠
+              mergedHeadRefs: ["issue-2653"],
+            },
+          },
+        }),
+      ],
+    });
+
+    const byBranch = new Map(allLanes(flow.repositories[0]).map((lane) => [lane.branchName, lane]));
+    expect(byBranch.get("issue-2653")?.releaseState).toEqual({ kind: "pending" });
+    // v4.69.0の束には並ばず、未リリースの束（先頭）へ入る
+    expect(flow.repositories[0].releaseGroups[0]).toMatchObject({ key: "unreleased", mergedAt: null });
+    expect(flow.repositories[0].releaseGroups[0].lanes.map((lane) => lane.branchName)).toEqual([
+      "issue-2653",
+    ]);
+    expect(flow.repositories[0].releaseGroups).toHaveLength(1);
+  });
+
   // #2489。#2117以前・共有ワークフローの参照タグが古いリポジトリではheadが`develop`のままで、
   // PRのheadがブランチの先端を追い続ける（＝マージ時点のdevelopがmainへ入る）
   it("headがdevelopのリリースPRは、従来どおりマージ時刻で運び手を決める", () => {
@@ -1678,7 +1738,7 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
 
   it("マージコミット単位の件数を出し、バージョンバンプは別枠にする", () => {
     const summary = unreleasedSummary(
-      comparison({ units: { mergeCount: 2, directCount: 0, versionBumpCount: 1 } }),
+      comparison({ units: { mergeCount: 2, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] } }),
     );
 
     expect(summary).toEqual({ count: 2, unit: "件", versionBumpCount: 1 });
@@ -1687,7 +1747,7 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
 
   it("マージを経ないコミットも1件として数える", () => {
     const summary = unreleasedSummary(
-      comparison({ aheadBy: 3, units: { mergeCount: 1, directCount: 2, versionBumpCount: 0 } }),
+      comparison({ aheadBy: 3, units: { mergeCount: 1, directCount: 2, versionBumpCount: 0, mergedHeadRefs: [] } }),
     );
 
     expect(formatUnreleasedSummary(summary)).toBe("3件");
@@ -1696,7 +1756,7 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
   // バンプのマージしか残っていないのに差分がある、という想定外の状態で「0件」と言い切らない
   it("バージョンバンプのマージだけが残っているときは本体で数える", () => {
     const summary = unreleasedSummary(
-      comparison({ aheadBy: 1, units: { mergeCount: 0, directCount: 0, versionBumpCount: 1 } }),
+      comparison({ aheadBy: 1, units: { mergeCount: 0, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] } }),
     );
 
     expect(formatUnreleasedSummary(summary)).toBe("1件");
@@ -1716,7 +1776,7 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
       comparison({
         aheadBy: 1,
         sameContent: true,
-        units: { mergeCount: 0, directCount: 0, versionBumpCount: 1 },
+        units: { mergeCount: 0, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] },
       }),
     );
 

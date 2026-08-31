@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
@@ -13,20 +13,19 @@ import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
 import {
-  formatUsageAmount,
-  formatQuotaPercent,
   formatUsageTokens,
   formatUsageUsd,
   sessionUsageCostSplit,
   sessionUsageKindLabel,
   sessionUsageModelLabel,
   sessionUsagePhaseSplit,
-  toQuotaPercent,
   type SessionUsageEntry,
   type UsageByAgent,
   type UsageBySource,
   type UsageGroup,
   type UsageIssue,
+  type UsagePhaseKey,
+  type UsagePhaseTotals,
   type UsageTotals,
 } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
@@ -41,9 +40,9 @@ import { cn } from "@/lib/utils";
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
  * 残る。
  *
- * **金額の単位は2つある。** 既定はAPI換算のドルで、`quota`（プラン枠への換算）が取れていれば
- * 「枠の何%相当か」へ切り替えられる。**どちらも目安**で、実費でも実測の枠消費でもないことを
- * 画面の断り書きで言う。
+ * **金額は常にAPI換算のドルで出す。** サブスクの実費ではなく目安であることを画面の断り書きで
+ * 言う。プラン枠への逆算換算（枠%）は精度が低く、実測のプラン枠メーターと並べる利点が薄いため
+ * 廃止した（#2666）。
  *
  * **表示に使うのは数値と分類だけ。** 集計元（`scripts/lib/session-usage.sh`）がやり取りの本文を
  * 読んでおらず、ここにも本文は届かない。
@@ -55,8 +54,6 @@ export const SESSION_USAGE_PERIODS = [
   { days: 7, label: "7日" },
   { days: 30, label: "30日" },
 ] as const;
-
-export type SessionUsageUnit = "usd" | "quota";
 
 type SessionUsagePanelProps = {
   data: SessionUsageResponse | null;
@@ -87,25 +84,7 @@ type SessionUsagePanelProps = {
   className?: string;
 };
 
-type QuotaByAgent = SessionUsageResponse["quotaByAgent"];
-
-function formatCombinedAmount(
-  byAgent: Pick<UsageByAgent, "claude" | "codex">,
-  unit: SessionUsageUnit,
-  quotas: QuotaByAgent,
-): string {
-  if (unit === "usd") {
-    return formatUsageUsd(byAgent.claude.costUsd + byAgent.codex.costUsd);
-  }
-  const claude = toQuotaPercent(byAgent.claude.costUsd, quotas.claude);
-  const codex = toQuotaPercent(byAgent.codex.costUsd, quotas.codex);
-  if (claude === null && codex === null) {
-    return formatUsageUsd(byAgent.claude.costUsd + byAgent.codex.costUsd);
-  }
-  return formatQuotaPercent((claude ?? 0) + (codex ?? 0));
-}
-
-/** 期間・単位の切り替えに使う小さなセグメント */
+/** 期間の切り替えに使う小さなセグメント */
 function Segmented<T extends string | number>({
   options,
   value,
@@ -182,10 +161,18 @@ const TOKEN_COLORS = {
 const OUTPUT_COLOR = "#4776e6";
 
 /**
- * 金額の棒の内側（#2633）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
+ * 金額の棒の内側（#2633・#2667）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
  * 日別・内訳の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す。
+ *
+ * **`TOKEN_COLORS`・`OUTPUT_COLOR`（橙・青・紫）とは別の色相に離す**（#2667）。以前はこの3色を
+ * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
+ * GitHub Actionsと Actionsの入力トークンが同じ紫で完全に一致していた。色覚多様性
+ * シミュレーション（protanopia/deuteranopia）と通常視認の両方で、`TOKEN_COLORS`・`OUTPUT_COLOR`・
+ * `PHASE_COLORS`のどの色とも離れることを確認して選んでいる（datavizスキルの
+ * `validate_palette.js`で検証。IssueAgentBadge（#2635）のindigo/emeraldは`OUTPUT_COLOR`・
+ * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかった）。
  */
-const AGENT_COLORS = { claude: "#d97757", codex: "#4776e6", actions: "#8b5cf6" } as const;
+const AGENT_COLORS = { claude: "#9f1239", codex: "#33cc4d", actions: "#86198f" } as const;
 
 /**
  * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_COLORS`）とは別軸**なので、
@@ -373,24 +360,19 @@ type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource
 function CostBar({
   row,
   widthPercent,
-  unit,
-  quotas,
   highlighted,
 }: {
   row: CostRow;
   widthPercent: number;
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   /** いちばん新しい日（集計途中）だけ枠線を足す */
   highlighted?: boolean;
 }) {
   const split = costSplitByAgent(row);
   const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
-  // GitHub ActionsはClaude Codeなので、枠換算もClaudeの物差しで割る（合計タイルと揃える）。
   const parts = [
-    { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude, quota: quotas.claude },
-    { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex, quota: quotas.codex },
-    { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions, quota: quotas.claude },
+    { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude },
+    { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex },
+    { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions },
   ];
   return (
     <div
@@ -399,7 +381,7 @@ function CostBar({
         highlighted && "ring-1 ring-muted-foreground/40",
       )}
       title={parts
-        .map((part) => `${part.label} ${formatUsageAmount(part.value, unit, part.quota)}`)
+        .map((part) => `${part.label} ${formatUsageUsd(part.value)}`)
         .join(" / ")}
     >
       <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${widthPercent}%` }}>
@@ -477,13 +459,9 @@ function ContextBar({ totals }: { totals: UsageTotals }) {
  */
 function DailyChart({
   days,
-  unit,
-  quotas,
   todayKey,
 }: {
   days: SessionUsageResponse["byDay"];
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   todayKey: string;
 }) {
   const max = days.reduce((peak, day) => Math.max(peak, day.costUsd), 0);
@@ -503,7 +481,7 @@ function DailyChart({
           <div
             key={day.date}
             className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-[10px]"
-            title={`${day.date}　${formatCombinedAmount(day.byAgent, unit, quotas)}　${day.responses.toLocaleString()}応答　${formatUsageTokens(totalTokens)}`}
+            title={`${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　${formatUsageTokens(totalTokens)}`}
           >
             <span className="text-muted-foreground tabular-nums">
               {formatMonthDay(`${day.date}T00:00:00+09:00`)}
@@ -512,14 +490,12 @@ function DailyChart({
               <CostBar
                 row={day}
                 widthPercent={max > 0 ? (day.costUsd / max) * 100 : 0}
-                unit={unit}
-                quotas={quotas}
                 highlighted={day.date === todayKey}
               />
               <GroupTokenBar totals={day} maxTokens={maxTokens} />
             </div>
             <span className="text-right font-semibold tabular-nums">
-              {formatCombinedAmount(day.byAgent, unit, quotas)}
+              {formatUsageUsd(day.costUsd)}
             </span>
           </div>
         );
@@ -537,16 +513,12 @@ function Breakdown({
   title,
   hint,
   rows,
-  unit,
-  quotas,
   colorOf,
   maxVisibleRows,
 }: {
   title: string;
   hint: string;
   rows: (UsageGroup & { label: string })[];
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   colorOf?: (key: string) => string | undefined;
   maxVisibleRows?: number;
 }) {
@@ -589,15 +561,13 @@ function Breakdown({
                     {row.sessions}セッション
                   </span>
                   <span className="shrink-0 font-semibold tabular-nums">
-                    {formatCombinedAmount(row.byAgent, unit, quotas)}
+                    {formatUsageUsd(row.costUsd)}
                   </span>
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <CostBar
                     row={row}
                     widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
-                    unit={unit}
-                    quotas={quotas}
                   />
                   <GroupTokenBar totals={row} maxTokens={maxTokens} />
                 </div>
@@ -733,15 +703,11 @@ function SessionName({
 function SessionCards({
   sessions,
   maxTokens,
-  unit,
-  quotas,
   onOpenIssue,
   hideIssueLabel = false,
 }: {
   sessions: SessionRow[];
   maxTokens: number;
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
   hideIssueLabel?: boolean;
 }) {
@@ -764,7 +730,7 @@ function SessionCards({
               </div>
               <div className="shrink-0 text-right">
                 <span className="font-semibold tabular-nums">
-                  {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
+                  {formatUsageUsd(entry.costUsd)}
                 </span>
                 <PhaseSplitNote entry={entry} />
               </div>
@@ -807,12 +773,112 @@ function SessionCards({
  * `buildSessionUsageSummary`）。ここでは合算した1本の横棒グラフとして出し、クリックで
  * 中の各セッションを展開する。`Breakdown`の行（リポジトリ別・種別別）と同じ描き方に揃える。
  */
+const PHASE_META: Record<UsagePhaseKey, { label: string; dotColor: string }> = {
+  plan: { label: "計画", dotColor: PHASE_COLORS.plan },
+  implementation: { label: "実装", dotColor: PHASE_COLORS.implementation },
+  action: { label: "Action", dotColor: AGENT_COLORS.actions },
+};
+
+const PHASE_ORDER: UsagePhaseKey[] = ["plan", "implementation", "action"];
+
+/**
+ * 1フェーズぶんのトークンバー（#2670）。**Actionだけ実測なので、既存の4色積み上げ
+ * （入力／キャッシュ書込／キャッシュ読出／出力）を出せる。** 計画・実装は金額比で按分した
+ * 概算（`buildPhaseBreakdown`）で、入力/出力の構成比までは分からないため、単色1本に留める
+ * ——4色に分けると、按分では出せないはずの精度があるように見えてしまう。
+ */
+function PhaseTokenBar({
+  phaseKey,
+  totals,
+  widthPercent,
+}: {
+  phaseKey: UsagePhaseKey;
+  totals: UsagePhaseTotals;
+  widthPercent: number;
+}) {
+  if (phaseKey === "action") {
+    const segments: TokenSegment[] = [
+      { key: "input", label: "入力", value: totals.inputTokens, color: TOKEN_COLORS["github-actions"].input },
+      {
+        key: "cacheCreate",
+        label: "書込",
+        value: totals.cacheCreateTokens,
+        color: TOKEN_COLORS["github-actions"].cacheCreate,
+      },
+      {
+        key: "cacheRead",
+        label: "読出",
+        value: totals.cacheReadTokens,
+        color: TOKEN_COLORS["github-actions"].cacheRead,
+      },
+      { key: "output", label: "出力", value: totals.outputTokens, color: OUTPUT_COLOR },
+    ];
+    return <TokenBar segments={segments} widthPercent={widthPercent} />;
+  }
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full opacity-70"
+        style={{ width: `${widthPercent}%`, backgroundColor: PHASE_META[phaseKey].dotColor }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Issue1件ぶんの「計画・実装・Action」サマリー（#2670）。**実績が無いフェーズは行ごと出さない**
+ * （$0や0件を表示しない）。展開したセッション明細（`SessionCards`）の上に置く、Issue全体を
+ * 3分類へロールアップした集計行。
+ */
+function PhaseBreakdownRows({ phases }: { phases: UsageIssue["phases"] }) {
+  const rows = PHASE_ORDER.map((key) => ({ key, totals: phases[key] })).filter(
+    ({ totals }) => totals.sessions > 0,
+  );
+  if (rows.length === 0) return null;
+
+  const maxTokens = rows.reduce(
+    (max, { totals }) => Math.max(max, totals.contextTokens + totals.outputTokens),
+    0,
+  );
+
+  return (
+    <div className="mb-1.5 flex flex-col gap-1.5 border-b pb-2">
+      {rows.map(({ key, totals }) => {
+        const totalTokens = totals.contextTokens + totals.outputTokens;
+        const widthPercent = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+        const meta = PHASE_META[key];
+        return (
+          <div key={key} className="grid grid-cols-[3.5rem_1fr_auto] items-center gap-2 text-[11px]">
+            <span className="flex min-w-0 items-center gap-1 font-semibold">
+              <i aria-hidden className="size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: meta.dotColor }} />
+              {meta.label}
+            </span>
+            <div className="min-w-0">
+              <PhaseTokenBar phaseKey={key} totals={totals} widthPercent={widthPercent} />
+              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
+                <span className="truncate">
+                  {formatUsageTokens(totalTokens)} トークン
+                  {key === "action" ? `・${totals.sessions}実行` : ""}
+                </span>
+                {totals.models.length > 0 && (
+                  <span className="hidden shrink-0 truncate rounded border bg-muted px-1 py-px text-[9px] font-medium sm:inline">
+                    {totals.models.map(sessionUsageModelLabel).join("・")}
+                  </span>
+                )}
+              </div>
+            </div>
+            <span className="text-right font-semibold tabular-nums">{formatUsageUsd(totals.costUsd)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function IssueGroupRow({
   issue,
   maxCost,
   maxTokens,
-  unit,
-  quotas,
   isOpen,
   onToggle,
   onOpenIssue,
@@ -820,8 +886,6 @@ function IssueGroupRow({
   issue: UsageIssue;
   maxCost: number;
   maxTokens: number;
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   isOpen: boolean;
   onToggle: () => void;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
@@ -857,13 +921,13 @@ function IssueGroupRow({
               </span>
             </div>
             <div className="mt-1 flex flex-col gap-0.5">
-              <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} unit={unit} quotas={quotas} />
+              <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
               <GroupTokenBar totals={issue} maxTokens={maxTokens} />
             </div>
           </div>
         </button>
         <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
-          {formatCombinedAmount(issue.byAgent, unit, quotas)}
+          {formatUsageUsd(issue.costUsd)}
         </span>
         {canOpen && (
           <Button
@@ -880,11 +944,10 @@ function IssueGroupRow({
       </div>
       {isOpen && (
         <div className="py-1 pr-1 pl-8">
+          <PhaseBreakdownRows phases={issue.phases} />
           <SessionCards
             sessions={sessions}
             maxTokens={sessionMaxTokens}
-            unit={unit}
-            quotas={quotas}
             onOpenIssue={onOpenIssue}
             hideIssueLabel
           />
@@ -901,15 +964,11 @@ function IssueGroupRow({
  */
 function IssueGroupList({
   issues,
-  unit,
-  quotas,
   openKeys,
   onToggle,
   onOpenIssue,
 }: {
   issues: UsageIssue[];
-  unit: SessionUsageUnit;
-  quotas: QuotaByAgent;
   openKeys: Record<string, boolean>;
   /** 押された行の直前の開閉状態（既定値込み）を渡す。呼び出し側はこれを反転させるだけでよい */
   onToggle: (key: string, wasOpen: boolean) => void;
@@ -937,8 +996,6 @@ function IssueGroupList({
             issue={issue}
             maxCost={maxCost}
             maxTokens={maxTokens}
-            unit={unit}
-            quotas={quotas}
             isOpen={isOpen}
             onToggle={() => onToggle(key, isOpen)}
             onOpenIssue={onOpenIssue}
@@ -964,14 +1021,9 @@ export function SessionUsagePanel({
   compact = false,
   className,
 }: SessionUsagePanelProps) {
-  const [unit, setUnit] = useState<SessionUsageUnit>("usd");
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
   const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
-
-  const quotas = data?.quotaByAgent ?? { claude: null, codex: null };
-  const hasQuota = Boolean(quotas.claude || quotas.codex);
-  const effectiveUnit: SessionUsageUnit = hasQuota ? unit : "usd";
 
   const totals = data?.totals;
   const perResponseUsd = totals && totals.responses > 0 ? totals.costUsd / totals.responses : 0;
@@ -1008,15 +1060,6 @@ export function SessionUsagePanel({
           value={days}
           onChange={onChangeDays}
         />
-        <Segmented
-          ariaLabel="金額の単位"
-          options={[
-            { value: "usd" as const, label: "$" },
-            { value: "quota" as const, label: "枠%" },
-          ]}
-          value={effectiveUnit}
-          onChange={setUnit}
-        />
         <Button variant="outline" size="icon" className="size-7" onClick={onRefresh} title="更新">
           {isLoading ? (
             <Loader2 className="size-3.5 animate-spin" />
@@ -1029,9 +1072,7 @@ export function SessionUsagePanel({
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <TokenLegend />
-
-      {/* プラン枠そのもの。**逆算した「枠%」ではなく実測のメーター**で、両方を並べて置く */}
+      {/* プラン枠そのもの。**実測のメーター**で、Claude・Codexを並べて置く */}
       <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
         <div>
           <p className="mb-1 text-xs font-semibold">Claude プラン枠</p>
@@ -1057,16 +1098,11 @@ export function SessionUsagePanel({
 
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile
-              label={effectiveUnit === "quota" ? "枠換算" : "従量課金"}
-              value={formatCombinedAmount(data.totalsByAgent, effectiveUnit, quotas)}
+              label="従量課金相当"
+              value={formatUsageUsd(data.totalsByAgent.claude.costUsd + data.totalsByAgent.codex.costUsd)}
               sub={agentCostSub}
-            />
-            <Tile
-              label="GitHub Actions"
-              value={formatUsageAmount(data.totalsBySource["github-actions"].costUsd, effectiveUnit, quotas.claude)}
-              sub={`${data.totalsBySource["github-actions"].sessions.toLocaleString()}実行・Claude Code`}
             />
             <Tile
               label="応答"
@@ -1087,17 +1123,19 @@ export function SessionUsagePanel({
             />
           </div>
 
+          <TokenLegend />
+
           <section className="flex flex-col gap-1 rounded-lg border p-3">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">日別</span>
+              {/* 太い棒＝金額／細い帯＝トークンの説明は直上のTokenLegendと重複するため落とす
+                  （#2666）。枠線の意味（集計途中で必ず低く出る）はここにしか無いので残す */}
               <span className="text-[11px] text-muted-foreground">
-                太い棒＝金額／細い帯＝トークン・いちばん新しい日は集計中
+                いちばん新しい日は集計中
               </span>
             </div>
             <DailyChart
               days={data.byDay}
-              unit={effectiveUnit}
-              quotas={quotas}
               todayKey={todayKey}
             />
           </section>
@@ -1107,8 +1145,6 @@ export function SessionUsagePanel({
               title="リポジトリ別"
               hint={`${data.byRepository.length}リポジトリ`}
               rows={data.byRepository.map((row) => ({ ...row, label: row.key || "(不明)" }))}
-              unit={effectiveUnit}
-              quotas={quotas}
               colorOf={(key) => getRepoColor(key || "(不明)")}
               maxVisibleRows={5}
             />
@@ -1116,8 +1152,6 @@ export function SessionUsagePanel({
               title="種別別"
               hint="作業ディレクトリで判定"
               rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
-              unit={effectiveUnit}
-              quotas={quotas}
             />
           </div>
 
@@ -1136,8 +1170,6 @@ export function SessionUsagePanel({
               <>
                 <IssueGroupList
                   issues={issues.slice(0, visibleIssues)}
-                  unit={effectiveUnit}
-                  quotas={quotas}
                   openKeys={openIssueKeys}
                   onToggle={(key, wasOpen) =>
                     setOpenIssueKeys((prev) => ({ ...prev, [key]: !wasOpen }))

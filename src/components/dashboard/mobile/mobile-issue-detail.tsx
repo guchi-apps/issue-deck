@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   Pencil,
   Play,
-  Plus,
   RotateCcw,
   Star,
   Trash2,
@@ -175,7 +174,6 @@ type MobileIssueDetailProps = {
   onIssueUpdated: (issue: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
-  onCreateIssue: (repositoryFullName: string) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
   /**
    * 手作業の中の実機ファイル変更を、管理リポジトリ（`guchi-apps/vps`・`guchi-apps/subpc`）の
@@ -211,7 +209,6 @@ export function MobileIssueDetail({
   onIssueUpdated,
   onIssueDeleted,
   onToggleFavorite,
-  onCreateIssue,
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
@@ -1276,16 +1273,6 @@ export function MobileIssueDetail({
         hasUnread={hasUnread}
         className="left-1/2 bottom-4 -translate-x-1/2"
       />
-
-      {/* z-20は他のモバイル画面の丸ボタンと揃える（#1945）。本文より手前に浮かせる */}
-      <button
-        type="button"
-        onClick={() => onCreateIssue(issue.repositoryFullName)}
-        aria-label="新しいIssueを作成"
-        className="absolute right-4 bottom-4 z-20 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
-      >
-        <Plus className="size-6" />
-      </button>
 
       <DeleteIssueDialog
         open={isDeleteDialogOpen}

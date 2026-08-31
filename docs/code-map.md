@@ -214,8 +214,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     暖色で表さない**——Issue一覧の行は確認待ちの表示とラベル行が同じカードに収まるため、
     10pxのチップで色相が30度しか離れていないと「要対応」の合図として読まれる。実装
     エージェントのチップ（[`issue-agent-badge.tsx`](../src/components/dashboard/issue-agent-badge.tsx)）は
-    この理由でorangeからindigoへ移した。手作業パネル（`manual-step-panel.tsx`）が
+    この理由でorangeからindigo/emeraldへ移し、#2667でさらにAI使用量画面（後述）の
+    `AGENT_COLORS`と揃えてrose/greenへ移した（indigo/emeraldは`session-usage-panel.tsx`側の
+    既存色と近すぎて転用できなかった）。手作業パネル（`manual-step-panel.tsx`）が
     amberを避けているのも同じ理由。
+  - **既存の「安全な識別色」を別の画面へ転用するときは、その画面の既存色と再検証する**
+    （#2667）。indigo/emeraldはamberから離すために選んだ色だったが、AI使用量画面へ
+    そのまま持ち込もうとすると`session-usage-panel.tsx`の`OUTPUT_COLOR`（青）・
+    `TOKEN_COLORS["github-actions"]`（紫）と色覚多様性シミュレーション（protanopia/
+    deuteranopia）でほぼ見分けが付かないことが分かった——狙いが違う場所で選んだ色は、
+    別の画面の別の固定色に対しては何も保証していない。**目視ではなく`dataviz`スキルの
+    `scripts/validate_palette.js`で計算して確かめる**（CVDシミュレーション下のΔE・通常視認下の
+    ΔEの両方が閾値を超えるか）。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
@@ -373,6 +383,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+- **「Issue・PR別」の計画／実装／Actionサマリー（`buildPhaseBreakdown`）は、計画・実装の
+  トークンを金額比で按分した概算**（#2670）。`SessionUsage`は`planCostUsd`/`implementationCostUsd`
+  （**金額**の内訳のみ、`scripts/lib/session-usage.sh`の`ExitPlanMode`呼び出し時刻を境に分けたもの）
+  を持つが、**トークンの計画/実装別内訳は保存していない**（同スクリプトの`plan_bucket`/
+  `implementation_bucket`は内部でトークンも計算済みだが、最終出力では`costUsd`だけを使い残りは
+  捨てている）。画面はこれを`plan.costUsd / entry.costUsd`の比でセッション全体のトークンへ
+  按分するが、**入力/キャッシュ/出力の構成比までは分からない**ため、その2行のバーはあえて
+  単色1本にして精度を誇張しない（4色に分けられる構成比の実測は、`source: "github-actions"`で
+  正確に分離できるActionだけ）。より正確にしたい場合は、上記スクリプトが持つバケットの
+  トークンをDBへ送るスキーマ拡張が必要（今回は往復・影響範囲を抑えるため見送った）。
+- **`session-usage-panel.render.test.tsx`で、日本語ラベルの`getByText(..., { exact: false })`は
+  同じ文字列を出す要素が増えるたびに壊れる**（#2670）。「実装」という文字列は元々`kind`種別の
+  ラベル（`sessionUsageKindLabel`）にしか出なかったが、計画/実装/Actionサマリーの追加で同じ画面に
+  もう1箇所「実装」が増え、単数系の`getByText`が複数要素にマッチしてエラーになった
+  （`queryByText("実装", { exact: false })`で「出ていないこと」を確かめていたテストも同様に壊れる
+  ——別の場所の「実装」を拾って偽陰性になる）。**部分一致の`getByText`/`queryByText`で日本語の
+  短いラベルを使うテストは、将来同じラベルを出す要素が増える前提で書く**。件数だけを見るなら
+  `getAllByText(...).length`、特定の1箇所を狙うなら結合されたテキスト全体（例:
+  `"計画 $1.20・実装 $3.80"`）やその要素にしか出ない値（セッションの開始・終了日時など）で絞る。
 - **`instrumentation.ts`から登録したリスナーは、Route Handler側の同じモジュールからは見えない**（#2347）。
   Next.jsは`instrumentation.ts`とRoute Handlerを別のバンドルへ入れるため、**同じファイルの
   実体が2つでき**、モジュールスコープに置いた配列（リスナー・集計）が共有されない。
@@ -1863,6 +1892,23 @@ export function POST(request: NextRequest) {
   その数十秒〜数分後になる。**それでもバンプPRは見ない**——PR詳細は`base=main`のPRしか
   取らずバンプPRを持てないため、使うと2つの画面がその窓のぶんだけずれる。
   **判定に使う値はどちらもPR1件が既に持っているので、GitHub APIの消費は増えない。**
+  **それでも「凍結時刻」はあくまで近似で、リリース作業そのものが長引くと誤判定が残る**（#2661）。
+  バンプPRのコミット（`e11ea9a0`のような版バンプ）は**その作成に使ったチェックアウトの時点で
+  親が決まる**ため、ワークフローの実行に時間がかかると、コミット自体のタイムスタンプや
+  リリースPRの作成時刻より「実際の凍結点（親コミット）」がずっと古くなる。実例:
+  developへ12:36にマージされた#2657が、12:42に作られたv4.69.0のリリースPRの「作成時刻」
+  だけで比べると含まれるように見えたが、実際のバンプコミットの親は12:12時点のdevelop
+  （#2657が入るより前）で、`main`にそのコミットは無かった。**タイムスタンプの比較だけでは
+  この窓の広さを予測できない**（ワークフローの実行時間次第で数十秒にも数十分にもなる）ため、
+  `lib/branch-flow.ts`の`buildLane`は**発生源の一致するもう1つの材料で裏取りする**：
+  同じ1回のGraphQL取得で読んでいる`develop...main`の比較（`branches-api.ts`の
+  `toUnreleasedUnits`）から、実際にまだ`main`へ入っていないマージコミットのheadブランチ名
+  （`UnreleasedUnits.mergedHeadRefs`）を集めておき、レーンのブランチ名がそこに含まれていれば
+  タイムスタンプの判定結果を`pending`で上書きする。**GitHub APIの消費は増えない**
+  （既存の「未リリース ◯件」表示のために取っている応答を読み直すだけ）。**PR詳細のデプロイ
+  表示（`lib/pull-request-deploy.ts`）にはこの裏取りを足していない**——あちらは`develop`と
+  `main`の比較を取っておらず、追加すると#1814の「GitHub APIの消費を増やさない」前提が崩れる
+  ため、この画面（ブランチ画面）だけがタイムスタンプ判定より優先して正しい側へ倒る。
   **`behindBy`（mainにあってdevelopに無いコミット数）は出さない。** develop→mainをマージコミットで
   入れる運用ではリリースのたびに必ず1つ増え、中身は全部`Merge pull request … from guchi-apps/develop`
   になる（issue-deck本体で72件）。異常を示すバッジの形なのに行動につながらないため落とした。

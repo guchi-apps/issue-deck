@@ -47,8 +47,6 @@ type MobileRepoIssuesScreenProps = {
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onBack: () => void;
-  onCreateIssue: () => void;
-  onAskCrossRepoQuestion: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
   /** 最終取得時刻（ISO8601）。`MobileIssueListScreen`へそのまま渡す（#1797） */
@@ -79,8 +77,6 @@ export function MobileRepoIssuesScreen({
   onChangeFilters,
   onSelectIssue,
   onBack,
-  onCreateIssue,
-  onAskCrossRepoQuestion,
   onRefresh,
   fetchedAt,
   autoRefreshIntervalMs,
@@ -231,8 +227,6 @@ export function MobileRepoIssuesScreen({
       onChangeView={onChangeView}
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
-      onCreateIssue={onCreateIssue}
-      onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       scrollKey={scrollKey}
       onRefresh={onRefresh}
       fetchedAt={fetchedAt}

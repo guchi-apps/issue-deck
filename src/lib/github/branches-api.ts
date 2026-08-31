@@ -218,7 +218,12 @@ function toUnreleasedUnits(compare: NonNullable<CompareNode>): UnreleasedUnits |
   let cursor: string | null = compare.headTarget?.oid ?? null;
   if (!cursor || !byOid.has(cursor)) return null;
 
-  const units: UnreleasedUnits = { mergeCount: 0, directCount: 0, versionBumpCount: 0 };
+  const units: UnreleasedUnits = {
+    mergeCount: 0,
+    directCount: 0,
+    versionBumpCount: 0,
+    mergedHeadRefs: [],
+  };
   const visited = new Set<string>();
   while (cursor && byOid.has(cursor) && !visited.has(cursor)) {
     visited.add(cursor);
@@ -227,6 +232,7 @@ function toUnreleasedUnits(compare: NonNullable<CompareNode>): UnreleasedUnits |
     const parentCount = commit.parents?.totalCount ?? parents.length;
     if (parentCount >= 2) {
       const headRef = mergedHeadRefFromHeadline(commit.messageHeadline ?? "");
+      if (headRef !== null) units.mergedHeadRefs.push(headRef);
       if (headRef !== null && isVersionBumpHeadRef(headRef)) units.versionBumpCount += 1;
       else units.mergeCount += 1;
     } else {

@@ -5,18 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
 import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
-import {
-  buildSessionUsageSummary,
-  type QuotaScale,
-  type SessionUsageEntry,
-} from "@/lib/session-usage-view";
+import { formatDateTime } from "@/lib/format-date-time";
+import { buildSessionUsageSummary, type SessionUsageEntry } from "@/lib/session-usage-view";
 
 /**
  * 「AI使用量」画面（#2504）の描画。
  *
- * **確かめたいのは3つ。** (1) セッションごとの行が初期状態から出ること、共通スケールの比率が
- * 表示されること。(2) 単位の切り替えでドルと枠%が入れ替わること。(3) 枠の物差しが無いときに
- * 「枠%」を押しても金額が壊れないこと（`Infinity%`を出さない）。
+ * **確かめたいのは2つ。** (1) セッションごとの行が初期状態から出ること、共通スケールの比率が
+ * 表示されること。(2) 金額が常にドルで出ること（#2666で枠%への切り替えは廃止した）。
  */
 
 /** 2026-08-30 12:00 JST */
@@ -45,28 +41,13 @@ function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
   };
 }
 
-const quota: QuotaScale = {
-  windowKey: "7d",
-  windowLabel: "週間",
-  usedPercent: 20,
-  windowStart: "2026-08-23T03:00:00.000Z",
-  windowEnd: "2026-08-30T03:00:00.000Z",
-  windowCostUsd: 40,
-  // 1%あたり$2 → $20 は枠の10%相当
-  usdPerPercent: 2,
-};
-
-function response(
-  entries: SessionUsageEntry[],
-  scale: QuotaScale | null = quota,
-): SessionUsageResponse {
+function response(entries: SessionUsageEntry[]): SessionUsageResponse {
   return {
     ...buildSessionUsageSummary({
       entries,
       nowMs: NOW_MS,
       days: 7,
       reportedAt: "2026-08-30T02:55:00.000Z",
-      quotaByAgent: { claude: scale, codex: scale },
     }),
     planUsage: { claude: null, codex: null },
     planNotConfigured: { claude: true, codex: true },
@@ -156,7 +137,8 @@ describe("SessionUsagePanel", () => {
     // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
     expect(within(detail).getAllByText("#2504")).toHaveLength(1);
     expect(within(detail).getByText("2セッション")).toBeTruthy();
-    expect(within(detail).getByText("実装", { exact: false })).toBeTruthy();
+    // 「実装」は種別ラベルと計画/実装/Actionサマリー（#2670）の両方に出るため件数だけ見る。
+    expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("Claude", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("Codex", { exact: false })).toBeTruthy();
@@ -173,13 +155,16 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    // セッション明細（SessionCards）にだけ出る、#1のセッション固有の日時表示で判定する
+    // （「実装」は種別ラベルと計画/実装/Actionサマリーの両方に出て見分けが付かないため）。
+    const olderRange = `${formatDateTime("2026-08-29T01:00:00.000Z")} 〜 ${formatDateTime("2026-08-29T02:00:00.000Z")}`;
 
     // 一番新しい活動（#2）だけが既定で開いており、#1は閉じている。
     expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
-    expect(within(detail).queryByText("実装", { exact: false })).toBeNull();
+    expect(within(detail).queryByText(olderRange)).toBeNull();
 
     fireEvent.click(within(detail).getByRole("button", { name: /#1/ }));
-    expect(within(detail).getByText("実装", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText(olderRange)).toBeTruthy();
   });
 
   it("内訳は集計側の金額を出し、持たない行だけ「約」を付けた近似にする（#2626）", () => {
@@ -237,33 +222,18 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    expect(within(detail).getByText("計画", { exact: false })).toBeTruthy();
-    expect(within(detail).getByText("$1.20", { exact: false })).toBeTruthy();
-    expect(within(detail).getByText("$3.80", { exact: false })).toBeTruthy();
-    // 区分の無いセッションでは「計画」の文字列自体が出ない。
-    expect(within(detail).getAllByText("計画", { exact: false })).toHaveLength(1);
+    // セッション明細側の計画/実装の内訳（PhaseSplitNote）は、区分のあるセッションだけに出る
+    // （「計画」「$1.20」単体は計画/実装/Actionサマリー（#2670）にも出るため、結合済みの
+    // 一意な文字列で判定する）。
+    expect(within(detail).getByText("計画 $1.20・実装 $3.80", { exact: false })).toBeTruthy();
   });
 
-  it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
+  it("金額は常にドルで出し、単位を切り替える導線は無い", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 
-    // 既定は従量課金のドル。
     expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "枠%" }));
-
-    // 1%あたり$2の物差しなので、$20 は枠の10%相当。
-    expect(screen.getAllByText("10%").length).toBeGreaterThan(0);
-    expect(screen.queryByText("$20.00")).toBeNull();
-  });
-
-  it("枠の物差しが無ければ、枠%を押してもドルのまま出す", () => {
-    renderPanel(response([entry({ costUsd: 20 })], null));
-
-    fireEvent.click(screen.getByRole("button", { name: "枠%" }));
-
-    expect(screen.getAllByText("$20.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("従量課金")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "金額の単位" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "枠%" })).toBeNull();
   });
 
   it("Issueを開く導線は、リポジトリとIssue番号が揃っている行にだけ出す", () => {
@@ -408,9 +378,52 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
   });
 
-  it("金額は従量課金として表示し、API換算の注意書きを表示しない", () => {
+  it("Issueを開くと計画・実装・Actionのサマリーを出し、実績の無いフェーズは行を出さない（#2670）", () => {
+    renderPanel(
+      response([
+        // 計画（Plan mode）を含むローカルセッション。
+        entry({ sessionId: "with-plan", costUsd: 5, planCostUsd: 2, implementationCostUsd: 3, models: ["claude-sonnet-4-5"] }),
+        // GitHub Actions実行。Action行だけがここから出る（Issueには他にAction実行が無い）。
+        entry({
+          sessionId: "actions",
+          source: "github-actions",
+          costUsd: 1,
+          responses: 1,
+          inputTokens: 100,
+          cacheCreateTokens: 0,
+          cacheReadTokens: 0,
+          outputTokens: 20,
+          contextTokens: 100,
+          models: ["claude-haiku-4-5"],
+        }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(detail).getAllByText("計画", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
+    // "Action"は「GitHub Actions」にも部分一致するため件数だけ見る。金額もセッション明細側の
+    // PhaseSplitNote（結合テキスト）と部分一致し得るため、いずれも件数だけを見る。
+    expect(within(detail).getAllByText("Action", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("$2.00", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("$3.00", { exact: false }).length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("$1.00", { exact: false }).length).toBeGreaterThan(0);
+  });
+
+  it("計画やActionの実績が無いIssueでは、その行を出さない（#2670）", () => {
+    // Plan modeを使わず、GitHub Actionsの実行も無いローカル実装セッションのみ。
+    renderPanel(response([entry({ sessionId: "impl-only", costUsd: 4 })]));
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    // 「実装」は種別ラベルとサマリーの両方に出るが、「計画」「Action」はサマリーにしか出ない。
+    // 実績が無ければ出さない方針（ユーザー指示）なので、両方とも出現しない。
+    expect(within(detail).queryByText("計画", { exact: false })).toBeNull();
+    expect(within(detail).queryByText("Action", { exact: false })).toBeNull();
+  });
+
+  it("金額は従量課金相当として表示し、API換算の注意書きを表示しない", () => {
     const { container } = renderPanel(response([entry()]));
-    expect(within(container).getByText("従量課金")).toBeTruthy();
+    expect(within(container).getByText("従量課金相当")).toBeTruthy();
     expect(within(container).queryByText(/金額はAPI換算の目安です/)).toBeNull();
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });

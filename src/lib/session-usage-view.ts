@@ -91,34 +91,34 @@ export type UsageIssue = UsageTotals & {
   entries: SessionUsageEntry[];
   byAgent: UsageByAgent;
   bySource: UsageBySource;
+  /** 計画・実装・Actionの3分類サマリー（#2670）。 */
+  phases: UsagePhaseBreakdown;
 };
 
-/**
- * プラン枠への換算（#2504の追加要望）。
- *
- * **Anthropicは枠の絶対量を出さない。** `anthropic-ratelimit-unified-*`ヘッダが返すのは
- * 「その窓を何%使ったか」だけで、トークン数でもドルでもない（`lib/claude/usage.ts`）。
- * そこで**同じ窓のあいだにローカルセッションが使ったAPI換算**を実測の%で割り、
- * 「1%あたり何ドルぶん」を逆算して換算の物差しにする。
- *
- * **これは目安の上に立つ目安。** 同じ枠はGitHub Actionsの無人実行とissue-deck自身のAPI
- * 呼び出しも使っており、それらはこの表に入らない。したがって逆算した「1%あたり」は本来より
- * 小さく出て、**枠換算の%は実際よりやや大きめに出る。** 画面でそう断る。
- */
-export type QuotaScale = {
-  /** 物差しに使った窓（`lib/claude/usage.ts`の`key`。`5h` / `7d`） */
-  windowKey: string;
-  windowLabel: string;
-  /** 窓の実測使用率(%) */
-  usedPercent: number;
-  /** 窓の開始・終了（ISO） */
-  windowStart: string;
-  windowEnd: string;
-  /** その窓のあいだにローカルセッションが使ったAPI換算(USD) */
-  windowCostUsd: number;
-  /** 枠1%あたりのAPI換算(USD)。これで割ると「枠の何%相当か」になる */
-  usdPerPercent: number;
+export type UsagePhaseKey = "plan" | "implementation" | "action";
+
+export type UsagePhaseTotals = {
+  costUsd: number;
+  /**
+   * トークンの入力側内訳（#2628と同じ4区分）。**Actionは実測。計画・実装は按分の近似**で、
+   * 画面は計画・実装のバーをあえて単色にし、内訳（この4区分）までは出さない
+   * （`buildPhaseBreakdown`のコメント参照）。
+   */
+  inputTokens: number;
+  cacheCreateTokens: number;
+  cacheReadTokens: number;
+  contextTokens: number;
+  outputTokens: number;
+  sessions: number;
+  /**
+   * そのフェーズで使われたモデル（重複除去。出現順）。**フェーズ単位のモデル情報はDBに無い**ため、
+   * 按分元セッション（`entry.models`）をそのまま流用する。1セッション内でモデルが切り替わっていた
+   * 場合は、計画・実装の両方に同じモデルが出る
+   */
+  models: string[];
 };
+
+export type UsagePhaseBreakdown = Record<UsagePhaseKey, UsagePhaseTotals>;
 
 export type SessionUsageSummary = {
   /** 集計した期間（ISO）。`days`は日本時間の日数で、今日を含む */
@@ -142,8 +142,6 @@ export type SessionUsageSummary = {
   hosts: string[];
   /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
   reportedAt: string | null;
-  /** AIごとのプラン枠への換算。材料が揃わなければnull */
-  quotaByAgent: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 };
 
 /**
@@ -209,6 +207,23 @@ function emptyBySource(): UsageBySource {
   return { local: emptyTotals(), "github-actions": emptyTotals() };
 }
 
+function emptyPhaseTotals(): UsagePhaseTotals {
+  return {
+    costUsd: 0,
+    inputTokens: 0,
+    cacheCreateTokens: 0,
+    cacheReadTokens: 0,
+    contextTokens: 0,
+    outputTokens: 0,
+    sessions: 0,
+    models: [],
+  };
+}
+
+function emptyPhaseBreakdown(): UsagePhaseBreakdown {
+  return { plan: emptyPhaseTotals(), implementation: emptyPhaseTotals(), action: emptyPhaseTotals() };
+}
+
 function addEntryWithAgent(
   totals: UsageTotals & { byAgent: UsageByAgent },
   entry: SessionUsageEntry,
@@ -252,85 +267,18 @@ export function sessionUsagePeriodStartMs(nowMs: number, days: number): number {
 }
 
 /**
- * プラン枠の窓と、同じ窓のあいだの消費から換算の物差しを作る。
- *
- * **窓は「リセット時刻から窓の長さぶん遡ったところ」**として扱う。ヘッダはリセット時刻と
- * 窓の長さしか返さないため、開始時刻はここで引き算する。
- *
- * 次のいずれかに当てはまれば`null`（画面は枠換算を出さない）。
- * - 窓の情報が無い／リセット時刻が取れない
- * - 使用率が0%（割れない）
- * - その窓でローカルセッションの消費が記録されていない（物差しが立たない）
- */
-export function buildQuotaScale({
-  windows,
-  entries,
-  nowMs,
-}: {
-  windows: {
-    key: string;
-    label: string;
-    usedPercent: number;
-    resetsAt: number | null;
-    durationMs: number;
-  }[];
-  entries: SessionUsageEntry[];
-  nowMs: number;
-}): QuotaScale | null {
-  // **長いほうの窓を優先する。** 5時間枠は走っているセッション1本で振り切れることがあり、
-  // 物差しとしては荒い。週間枠のほうが平均が効く。
-  const candidates = [...windows].sort((a, b) => b.durationMs - a.durationMs);
-
-  for (const window of candidates) {
-    if (!Number.isFinite(window.usedPercent) || window.usedPercent <= 0) continue;
-    if (window.resetsAt === null || !Number.isFinite(window.resetsAt)) continue;
-
-    const endMs = window.resetsAt * 1000;
-    const startMs = endMs - window.durationMs;
-    // リセット時刻が過去（＝取得が古い）ときは、その窓はもう当てにならない。
-    if (endMs < nowMs) continue;
-
-    let windowCostUsd = 0;
-    for (const entry of entries) {
-      const endedAt = new Date(entry.endedAt).getTime();
-      if (Number.isNaN(endedAt)) continue;
-      if (endedAt < startMs || endedAt > endMs) continue;
-      windowCostUsd += entry.costUsd;
-    }
-    if (windowCostUsd <= 0) continue;
-
-    return {
-      windowKey: window.key,
-      windowLabel: window.label,
-      usedPercent: window.usedPercent,
-      windowStart: new Date(startMs).toISOString(),
-      windowEnd: new Date(endMs).toISOString(),
-      windowCostUsd,
-      usdPerPercent: windowCostUsd / window.usedPercent,
-    };
-  }
-
-  return null;
-}
-
-/**
  * 期間で切ったうえで、画面が読むかたちへ畳む。
- *
- * `entries`は期間の外を含んでいてよい（`quota`の物差しは窓の全体を見るため、
- * **絞り込みはここで行う**）。
  */
 export function buildSessionUsageSummary({
   entries,
   nowMs,
   days,
   reportedAt,
-  quotaByAgent = { claude: null, codex: null },
 }: {
   entries: SessionUsageEntry[];
   nowMs: number;
   days: number;
   reportedAt: string | null;
-  quotaByAgent?: Record<SessionUsageEntry["agent"], QuotaScale | null>;
 }): SessionUsageSummary {
   const startMs = sessionUsagePeriodStartMs(nowMs, days);
   const inPeriod = entries.filter((entry) => {
@@ -410,6 +358,7 @@ export function buildSessionUsageSummary({
         entries: [],
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        phases: emptyPhaseBreakdown(),
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
@@ -431,6 +380,7 @@ export function buildSessionUsageSummary({
       kindCost.set(entry.kind, (kindCost.get(entry.kind) ?? 0) + entry.costUsd);
     }
     issue.kinds = [...kindCost.entries()].sort((a, b) => b[1] - a[1]).map(([kind]) => kind);
+    issue.phases = buildPhaseBreakdown(issue.entries);
     return issue;
   });
   issues.sort((a, b) => b.latestStartedAt.localeCompare(a.latestStartedAt));
@@ -451,7 +401,6 @@ export function buildSessionUsageSummary({
     omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),
     hosts: [...hosts].sort(),
     reportedAt,
-    quotaByAgent,
   };
 }
 
@@ -528,10 +477,74 @@ export function sessionUsagePhaseSplit(
   return { planCostUsd, implementationCostUsd };
 }
 
-/** API換算(USD) → プラン枠の何%相当か。物差しが無ければnull */
-export function toQuotaPercent(costUsd: number, quota: QuotaScale | null): number | null {
-  if (!quota || quota.usdPerPercent <= 0) return null;
-  return costUsd / quota.usdPerPercent;
+function addPhaseModels(target: string[], models: string[]): void {
+  for (const model of models) {
+    if (!target.includes(model)) target.push(model);
+  }
+}
+
+/**
+ * Issue1件ぶんの明細（`UsageIssue["entries"]`）を、計画・実装・Actionの3分類へ畳む（#2670）。
+ *
+ * **Actionは`source`で正確に分離できる**（トークンも実測）。ローカル実行のうち
+ * `sessionUsagePhaseSplit`が区分を持つ行（Plan modeを使ったセッション）は、**金額は正確**
+ * （集計側が単価から割ったもの）だが、**トークンはDBに計画/実装別の内訳が無いため、
+ * 金額比でセッション全体のトークンを按分する**（近似）。区分を持たない行（Plan mode未使用）は
+ * 全額・全トークンをそのまま実装へ計上する（按分不要で正確）。
+ *
+ * モデルはフェーズ単位の記録が無いため、按分元セッションの`models`をそのまま両フェーズへ流用する。
+ */
+export function buildPhaseBreakdown(entries: SessionUsageEntry[]): UsagePhaseBreakdown {
+  const breakdown = emptyPhaseBreakdown();
+
+  for (const entry of entries) {
+    if (entry.source === "github-actions") {
+      const action = breakdown.action;
+      action.costUsd += entry.costUsd;
+      action.inputTokens += entry.inputTokens;
+      action.cacheCreateTokens += entry.cacheCreateTokens;
+      action.cacheReadTokens += entry.cacheReadTokens;
+      action.contextTokens += entry.contextTokens;
+      action.outputTokens += entry.outputTokens;
+      action.sessions += 1;
+      addPhaseModels(action.models, entry.models);
+      continue;
+    }
+
+    const split = sessionUsagePhaseSplit(entry);
+    if (split === null) {
+      const implementation = breakdown.implementation;
+      implementation.costUsd += entry.costUsd;
+      implementation.inputTokens += entry.inputTokens;
+      implementation.cacheCreateTokens += entry.cacheCreateTokens;
+      implementation.cacheReadTokens += entry.cacheReadTokens;
+      implementation.contextTokens += entry.contextTokens;
+      implementation.outputTokens += entry.outputTokens;
+      implementation.sessions += 1;
+      addPhaseModels(implementation.models, entry.models);
+      continue;
+    }
+
+    // トークンの按分は「概算」であることを画面が単色バーで示すだけで足りる
+    // （ユーザー判断・#2670）ため、入力/キャッシュ/出力の区分ごとには割らず、
+    // 合計（contextTokens／outputTokens）だけを金額比で按分する。
+    const planRatio = entry.costUsd > 0 ? split.planCostUsd / entry.costUsd : 0;
+    const plan = breakdown.plan;
+    plan.costUsd += split.planCostUsd;
+    plan.contextTokens += entry.contextTokens * planRatio;
+    plan.outputTokens += entry.outputTokens * planRatio;
+    plan.sessions += 1;
+    addPhaseModels(plan.models, entry.models);
+
+    const implementation = breakdown.implementation;
+    implementation.costUsd += split.implementationCostUsd;
+    implementation.contextTokens += entry.contextTokens * (1 - planRatio);
+    implementation.outputTokens += entry.outputTokens * (1 - planRatio);
+    implementation.sessions += 1;
+    addPhaseModels(implementation.models, entry.models);
+  }
+
+  return breakdown;
 }
 
 /**
@@ -548,15 +561,6 @@ export function formatUsageUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-/** プラン枠の何%相当か。1%未満は小数第2位まで出す（0%と区別が付かなくなるため） */
-export function formatQuotaPercent(value: number): string {
-  if (!Number.isFinite(value)) return "-";
-  if (value >= 10) return `${Math.round(value)}%`;
-  if (value >= 1) return `${value.toFixed(1)}%`;
-  if (value > 0 && value < 0.01) return "0.01%";
-  return `${value.toFixed(2)}%`;
-}
-
 /** トークン数。7桁の数字を並べても読めないので単位で畳む */
 export function formatUsageTokens(value: number): string {
   if (!Number.isFinite(value)) return "-";
@@ -564,17 +568,4 @@ export function formatUsageTokens(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
   if (value >= 1e3) return `${Math.round(value / 1e3).toLocaleString()}k`;
   return String(Math.round(value));
-}
-
-/** 選んだ単位で金額を出す。`quota`が無ければ常にドル */
-export function formatUsageAmount(
-  costUsd: number,
-  unit: "usd" | "quota",
-  quota: QuotaScale | null,
-): string {
-  if (unit === "quota") {
-    const percent = toQuotaPercent(costUsd, quota);
-    if (percent !== null) return formatQuotaPercent(percent);
-  }
-  return formatUsageUsd(costUsd);
 }

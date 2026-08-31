@@ -429,6 +429,9 @@ function buildRepository({
   const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
   const releases = collectReleases(pullRequests);
   const manualStepsByIssue = collectManualSteps(issues);
+  // developとmainの差分から実際に確認できた「まだ本番へ出ていないブランチ」（#2661）。
+  // タイムスタンプ頼みの`resolveReleaseState`より優先して使う。
+  const unreleasedHeadRefs = new Set(branchStatus?.developVsMain?.units?.mergedHeadRefs ?? []);
   const lanes = [...laneKeys].map((key) =>
     buildLane({
       branchName: key,
@@ -436,6 +439,7 @@ function buildRepository({
       issueByNumber,
       releases,
       manualStepsByIssue,
+      unreleasedHeadRefs,
     }),
   );
 
@@ -984,12 +988,15 @@ function buildLane({
   issueByNumber,
   releases,
   manualStepsByIssue,
+  unreleasedHeadRefs,
 }: {
   branchName: string;
   pullRequests: PullRequestSummary[];
   issueByNumber: Map<number, BranchFlowIssueSource>;
   releases: MergedRelease[];
   manualStepsByIssue: Map<number, BranchFlowManualStep[]>;
+  /** developとmainの差分から「まだ本番へ出ていない」と確認できたブランチ名（#2661） */
+  unreleasedHeadRefs: ReadonlySet<string>;
 }): BranchFlowLane {
   // openなPRを先頭に、あとは更新が新しい順。1本のブランチで作り直した2本目のPRがある場合に、
   // 「今生きているPR」が先に来るようにする。
@@ -1029,7 +1036,15 @@ function buildLane({
       toIssueRefOrNumber(number, issueByNumber.get(number) ?? null),
     ),
     status: resolveLaneStatus(sorted),
-    releaseState: mergedAt === undefined ? null : resolveReleaseState(mergedAt, releases),
+    releaseState:
+      mergedAt === undefined
+        ? null
+        : // developとmainの実差分で「まだ本番へ出ていない」と確認できた場合はそちらを優先する
+          // （#2661）。タイムスタンプの比較（`resolveReleaseState`）は、リリース作業に時間が
+          // かかるほど、間に合わせで割り込んだ変更を誤って「含まれる」と判定してしまうため。
+          unreleasedHeadRefs.has(branchName)
+          ? { kind: "pending" }
+          : resolveReleaseState(mergedAt, releases),
     // 手作業は「対応Issueから生まれたもの」なので、関連Issueぶんまでは拾わない
     manualSteps: issueNumber === null ? [] : (manualStepsByIssue.get(issueNumber) ?? []),
     updatedAt: sorted[0]?.updatedAt ?? null,

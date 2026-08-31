@@ -36,6 +36,7 @@ import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
+  sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
@@ -336,20 +337,6 @@ export function SidebarNavView({
             title: describeReleaseActivity(releaseActivity),
           })}
           {navRow({
-            key: "preview",
-            label: "確認環境",
-            icon: MonitorPlay,
-            active: activePane === "preview",
-            onClick: onSelectPreview,
-            // **数字は出さない**（同時に動かせるのは1つなので、常に0か1にしかならない）。
-            // 動いていることは緑ではなくオレンジの丸で出す——押し忘れて置きっぱなしになって
-            // いるのは「放っておくと片付く」ものではなく、サブPCのメモリを占め続ける
-            emphasis: previewRunning ? "attention" : "none",
-            title: previewRunning
-              ? "確認環境が動いています"
-              : "developの最新をサブPCで動かして画面で確かめる",
-          })}
-          {navRow({
             key: "usage",
             label: "AI使用量",
             icon: Gauge,
@@ -402,6 +389,48 @@ export function SidebarNavView({
                   : view.description,
             }),
           )}
+        </ul>
+      </div>
+
+      {/*
+        「コードレビュー」「確認環境」（#2674）。Pull Requestの枠の下・リポジトリの枠の上に
+        置く。見出しは付けない——上のブロック（質問・ブランチ・AI使用量）と同じく、Issueの
+        絞り込みでもリポジトリの一覧でもない性質の行のため
+      */}
+      <div>
+        <ul className="flex flex-col gap-0.5">
+          {sidebarCodeReviewNavViews.map((view) => {
+            const signals = resolveQuestionNavSignals(view.id, {
+              total: navCounts.question,
+              unconfirmed: unconfirmedQuestionCount,
+              waiting: waitingQuestionCount,
+            });
+            return navRow({
+              key: view.id,
+              label: view.label,
+              icon: navViewIcons[view.id],
+              active: activeView === view.id && activePane === "issues",
+              onClick: () => onSelectView(view.id),
+              count: navCounts[view.id],
+              emphasis: signals.attention ? "attention" : "none",
+              busy: signals.busy,
+              title: signals.title,
+            });
+          })}
+          {navRow({
+            key: "preview",
+            label: "確認環境",
+            icon: MonitorPlay,
+            active: activePane === "preview",
+            onClick: onSelectPreview,
+            // **数字は出さない**（同時に動かせるのは1つなので、常に0か1にしかならない）。
+            // 動いていることは緑ではなくオレンジの丸で出す——押し忘れて置きっぱなしになって
+            // いるのは「放っておくと片付く」ものではなく、サブPCのメモリを占め続ける
+            emphasis: previewRunning ? "attention" : "none",
+            title: previewRunning
+              ? "確認環境が動いています"
+              : "developの最新をサブPCで動かして画面で確かめる",
+          })}
         </ul>
       </div>
 

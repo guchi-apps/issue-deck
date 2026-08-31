@@ -69,8 +69,6 @@ type MobileIssuesScreenProps = {
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
-  onCreateIssue: () => void;
-  onAskCrossRepoQuestion: () => void;
   onBack?: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
@@ -119,8 +117,6 @@ export function MobileIssuesScreen({
   onChangeView,
   onChangeFilters,
   onSelectIssue,
-  onCreateIssue,
-  onAskCrossRepoQuestion,
   onBack,
   onRefresh,
   onRefreshPullRequests,
@@ -219,8 +215,6 @@ export function MobileIssuesScreen({
       onChangeView={onChangeView}
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}
-      onCreateIssue={onCreateIssue}
-      onAskCrossRepoQuestion={onAskCrossRepoQuestion}
       onBack={onBack}
       scrollKey={scrollKey}
       onRefresh={onRefresh ? handleRefresh : undefined}

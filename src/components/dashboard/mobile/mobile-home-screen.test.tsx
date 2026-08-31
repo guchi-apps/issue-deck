@@ -130,8 +130,6 @@ function renderHome(
       onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
-      onCreateIssue={() => {}}
-      onAskCrossRepoQuestion={() => {}}
       onOpenSettings={() => {}}
       {...props}
     />,
@@ -158,9 +156,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
-      "コードレビュー",
       "ブランチ",
-      "確認環境",
       // AI使用量は#2631でフッターのタブへ移したので、ここには並ばない
       "すべてのIssue",
       "お気に入り",
@@ -170,6 +166,10 @@ describe("MobileHomeScreen（#1690）", () => {
       "すべてのPR",
       "実行中",
       "マージ待ち",
+      // 「コードレビュー」「確認環境」はPull Requestの枠の下・お気に入りリポジトリの枠の
+      // 上に置く（#2674）
+      "コードレビュー",
+      "確認環境",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
     ]);
@@ -244,8 +244,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -424,17 +422,6 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(screen.getByRole("dialog", { name: "実行状況" })).toBeTruthy();
   });
 
-  it("右下の丸ボタンからIssueの作成と質問ができる", () => {
-    const onCreateIssue = vi.fn();
-    const onAskCrossRepoQuestion = vi.fn();
-    renderHome({ onCreateIssue, onAskCrossRepoQuestion });
-
-    fireEvent.click(screen.getByRole("button", { name: "新しいIssueを作成" }));
-    fireEvent.click(screen.getByRole("button", { name: "複数リポジトリに質問する" }));
-
-    expect(onCreateIssue).toHaveBeenCalledTimes(1);
-    expect(onAskCrossRepoQuestion).toHaveBeenCalledTimes(1);
-  });
 });
 
 // 引っ張って更新（#2182）。ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が見るので、
@@ -480,8 +467,6 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
         {...props}
       />,

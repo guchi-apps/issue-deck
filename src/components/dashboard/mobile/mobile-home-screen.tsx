@@ -4,9 +4,7 @@ import {
   FolderGit2,
   GitBranch,
   Loader2,
-  MessageCircleQuestion,
   MonitorPlay,
-  Plus,
   Rocket,
   Settings,
 } from "lucide-react";
@@ -32,6 +30,7 @@ import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
+  sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
   sidebarQuestionNavViews,
 } from "@/lib/nav-views";
@@ -94,9 +93,6 @@ type MobileHomeScreenProps = {
   previewRunning: boolean;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
-  /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
-  onCreateIssue: () => void;
-  onAskCrossRepoQuestion: () => void;
   /**
    * 新規アプリの立ち上げ（#2188）。**メニューの最後に1行だけ置き、丸ボタンは増やさない**——
    * 使うのは年に数回で、いちばん使うIssue作成の導線を1タップ遠くしないため。
@@ -176,8 +172,6 @@ export function MobileHomeScreenView({
   previewRunning,
   favoriteRepositories,
   onSelectRepository,
-  onCreateIssue,
-  onAskCrossRepoQuestion,
   onLaunchNewApp,
   onOpenSettings,
   onRefresh,
@@ -396,20 +390,6 @@ export function MobileHomeScreenView({
                 emphasis={(releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none"}
                 title={describeReleaseActivity(releaseActivity)}
               />
-              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
-                  ならない）。動いていることはオレンジの丸で出す */}
-              <MobileNavRow
-                label="確認環境"
-                icon={MonitorPlay}
-                onClick={onSelectPreview}
-                count={null}
-                emphasis={previewRunning ? "attention" : "none"}
-                title={
-                  previewRunning
-                    ? "確認環境が動いています"
-                    : "developの最新をサブPCで動かして画面で確かめる"
-                }
-              />
             </ul>
           </div>
 
@@ -454,6 +434,48 @@ export function MobileHomeScreenView({
                   }
                 />
               ))}
+            </ul>
+          </div>
+
+          {/*
+            「コードレビュー」「確認環境」（#2674）。Pull Requestの枠の下・お気に入りリポジトリの
+            枠の上に置く。見出しは付けない——PCの左メニュー（`sidebar-nav.tsx`）と同じ扱い
+          */}
+          <div className="px-4 pb-4">
+            <ul className="flex flex-col gap-1">
+              {sidebarCodeReviewNavViews.map((view) => {
+                const signals = resolveQuestionNavSignals(view.id, {
+                  total: navCounts.question,
+                  unconfirmed: unconfirmedQuestionCount,
+                  waiting: waitingQuestionCount,
+                });
+                return (
+                  <MobileNavRow
+                    key={view.id}
+                    label={view.label}
+                    icon={navViewIcons[view.id]}
+                    onClick={() => onSelectQuickView(view.id)}
+                    count={navCounts[view.id]}
+                    emphasis={signals.attention ? "attention" : "none"}
+                    busy={signals.busy}
+                    title={signals.title}
+                  />
+                );
+              })}
+              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
+                  ならない）。動いていることはオレンジの丸で出す */}
+              <MobileNavRow
+                label="確認環境"
+                icon={MonitorPlay}
+                onClick={onSelectPreview}
+                count={null}
+                emphasis={previewRunning ? "attention" : "none"}
+                title={
+                  previewRunning
+                    ? "確認環境が動いています"
+                    : "developの最新をサブPCで動かして画面で確かめる"
+                }
+              />
             </ul>
           </div>
 
@@ -502,31 +524,6 @@ export function MobileHomeScreenView({
             </ul>
           </div>
         </div>
-      </div>
-
-      {/*
-        Issue一覧画面（`mobile-issue-list-screen.tsx`）と**同じ形・同じ順**の丸ボタン（#1690）。
-        同じ動作のボタンが画面ごとに違う見た目・違う位置にあると探すことになる。位置だけは違い、
-        あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上。
-        z-20も揃える（#1945）。一覧に重ねたときに行の後ろへ回らないようにするため
-      */}
-      <div className="absolute right-4 bottom-4 z-20 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onAskCrossRepoQuestion}
-          aria-label="複数リポジトリに質問する"
-          className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
-        >
-          <MessageCircleQuestion className="size-6" />
-        </button>
-        <button
-          type="button"
-          onClick={onCreateIssue}
-          aria-label="新しいIssueを作成"
-          className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
-        >
-          <Plus className="size-6" />
-        </button>
       </div>
     </div>
   );

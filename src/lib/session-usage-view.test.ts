@@ -1,17 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildQuotaScale,
+  buildPhaseBreakdown,
   buildSessionUsageSummary,
-  formatQuotaPercent,
-  formatUsageAmount,
   formatUsageTokens,
   formatUsageUsd,
   sessionUsageCostSplit,
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
   sessionUsagePhaseSplit,
-  toQuotaPercent,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
 
@@ -20,7 +17,6 @@ import {
  *
  * ここで一番効くのは**日付の境界**と**期間の切り出し**。日別の棒は日本時間で切る決まりで
  * （本番VPS・CIはUTCで動く）、ずれると「深夜に走ったぶんが前日に付く」形で静かに間違える。
- * 次に効くのが枠換算の物差しで、割る相手が0のときに`Infinity`を画面へ出さないこと。
  */
 
 function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
@@ -75,7 +71,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.totals.sessions).toBe(1);
@@ -90,7 +85,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: Date.parse("2026-08-31T00:00:00.000Z"),
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byDay.map((day) => day.date)).toEqual(["2026-08-31"]);
@@ -117,7 +111,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue).toHaveLength(1);
@@ -148,7 +141,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue).toHaveLength(1);
@@ -166,7 +158,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue).toHaveLength(2);
@@ -188,7 +179,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([2, 1]);
@@ -210,7 +200,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     // 合計と明細が合っていること（落とすと合わなくなる）
@@ -229,7 +218,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.totals.sessions).toBe(210);
@@ -250,7 +238,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.byRepository.map((row) => row.key)).toEqual(["dayspan", "", "issue-deck"]);
@@ -266,7 +253,6 @@ describe("buildSessionUsageSummary", () => {
       nowMs: NOW_MS,
       days: 7,
       reportedAt: null,
-      quotaByAgent: { claude: null, codex: null },
     });
 
     expect(summary.totalsByAgent.claude.costUsd).toBe(3);
@@ -274,68 +260,6 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byDay[0].byAgent.codex.sessions).toBe(1);
     expect(summary.byRepository[0].byAgent.claude.sessions).toBe(1);
     expect(summary.byKind[0].byAgent.codex.sessions).toBe(1);
-  });
-});
-
-describe("buildQuotaScale", () => {
-  const windows = [
-    { key: "5h", label: "5時間", usedPercent: 50, resetsAt: (NOW_MS + 3_600_000) / 1000, durationMs: 5 * 3_600_000 },
-    { key: "7d", label: "週間", usedPercent: 20, resetsAt: (NOW_MS + 86_400_000) / 1000, durationMs: 7 * 86_400_000 },
-  ];
-
-  it("長いほうの窓で「1%あたり何ドルぶんか」を逆算する", () => {
-    const scale = buildQuotaScale({
-      windows,
-      entries: [entry({ costUsd: 40, endedAt: "2026-08-30T02:00:00.000Z" })],
-      nowMs: NOW_MS,
-    });
-
-    expect(scale?.windowKey).toBe("7d");
-    // 週間枠20%で$40使っていれば、1%あたり$2。
-    expect(scale?.usdPerPercent).toBeCloseTo(2, 6);
-    expect(toQuotaPercent(10, scale)).toBeCloseTo(5, 6);
-  });
-
-  it("窓の外の消費は物差しに入れない", () => {
-    const scale = buildQuotaScale({
-      windows,
-      entries: [
-        entry({ sessionId: "in", costUsd: 40, endedAt: "2026-08-30T02:00:00.000Z" }),
-        entry({ sessionId: "old", costUsd: 999, endedAt: "2026-07-01T00:00:00.000Z" }),
-      ],
-      nowMs: NOW_MS,
-    });
-
-    expect(scale?.windowCostUsd).toBe(40);
-  });
-
-  it("使用率が0%・消費が無い・リセット時刻が取れない窓では物差しを作らない", () => {
-    expect(
-      buildQuotaScale({
-        windows: [{ ...windows[1], usedPercent: 0 }],
-        entries: [entry({ costUsd: 40 })],
-        nowMs: NOW_MS,
-      }),
-    ).toBeNull();
-
-    expect(
-      buildQuotaScale({ windows: [windows[1]], entries: [], nowMs: NOW_MS }),
-    ).toBeNull();
-
-    expect(
-      buildQuotaScale({
-        windows: [{ ...windows[1], resetsAt: null }],
-        entries: [entry({ costUsd: 40 })],
-        nowMs: NOW_MS,
-      }),
-    ).toBeNull();
-  });
-
-  it("リセット時刻が過去（取得が古い）窓は使わない", () => {
-    const stale = { ...windows[1], resetsAt: (NOW_MS - 86_400_000) / 1000 };
-    expect(
-      buildQuotaScale({ windows: [stale], entries: [entry({ costUsd: 40 })], nowMs: NOW_MS }),
-    ).toBeNull();
   });
 });
 
@@ -348,21 +272,10 @@ describe("整形", () => {
     expect(formatUsageUsd(0.0004)).toBe("$0.01");
   });
 
-  it("枠換算は1%未満でも0%と区別できるように出す", () => {
-    expect(formatQuotaPercent(23.4)).toBe("23%");
-    expect(formatQuotaPercent(2.34)).toBe("2.3%");
-    expect(formatQuotaPercent(0.234)).toBe("0.23%");
-    expect(formatQuotaPercent(0.0001)).toBe("0.01%");
-  });
-
   it("トークン数は単位で畳む", () => {
     expect(formatUsageTokens(12_852_563_529)).toBe("12.85G");
     expect(formatUsageTokens(116_593_336)).toBe("117M");
     expect(formatUsageTokens(39_198)).toBe("39k");
-  });
-
-  it("物差しが無ければ「枠%」を選んでいてもドルで出す", () => {
-    expect(formatUsageAmount(12.5, "quota", null)).toBe("$12.50");
   });
 });
 
@@ -411,6 +324,97 @@ describe("sessionUsagePhaseSplit", () => {
 
   it("片方だけしか無い行もnullを返す（合算だけを信用する）", () => {
     expect(sessionUsagePhaseSplit(entry({ planCostUsd: 1.2, implementationCostUsd: null }))).toBeNull();
+  });
+});
+
+describe("buildPhaseBreakdown", () => {
+  it("GitHub Actionsの行は正確なトークンのままActionへ計上する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        source: "github-actions",
+        inputTokens: 1000,
+        cacheCreateTokens: 200,
+        cacheReadTokens: 800,
+        outputTokens: 100,
+        contextTokens: 2000,
+        costUsd: 4,
+        models: ["claude-haiku-4-5-20251001"],
+      }),
+    ]);
+
+    expect(breakdown.action).toMatchObject({
+      costUsd: 4,
+      inputTokens: 1000,
+      cacheCreateTokens: 200,
+      cacheReadTokens: 800,
+      outputTokens: 100,
+      sessions: 1,
+      models: ["claude-haiku-4-5-20251001"],
+    });
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation.sessions).toBe(0);
+  });
+
+  it("計画/実装の区分がある行は、金額はそのまま・トークンは金額比で按分する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        contextTokens: 1000,
+        outputTokens: 200,
+        costUsd: 10,
+        planCostUsd: 4,
+        implementationCostUsd: 6,
+        models: ["claude-sonnet-4-5"],
+      }),
+    ]);
+
+    // 金額は正確
+    expect(breakdown.plan.costUsd).toBe(4);
+    expect(breakdown.implementation.costUsd).toBe(6);
+    // トークンは金額比（0.4 / 0.6）で按分した近似
+    expect(breakdown.plan.contextTokens).toBeCloseTo(400);
+    expect(breakdown.plan.outputTokens).toBeCloseTo(80);
+    expect(breakdown.implementation.contextTokens).toBeCloseTo(600);
+    expect(breakdown.implementation.outputTokens).toBeCloseTo(120);
+    expect(breakdown.plan.models).toEqual(["claude-sonnet-4-5"]);
+    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5"]);
+  });
+
+  it("計画/実装の区分が無い行（Plan mode未使用）は、按分せず全額・全トークンを実装へ計上する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        contextTokens: 1000,
+        outputTokens: 200,
+        costUsd: 10,
+        planCostUsd: null,
+        implementationCostUsd: null,
+      }),
+    ]);
+
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation).toMatchObject({
+      costUsd: 10,
+      contextTokens: 1000,
+      outputTokens: 200,
+      sessions: 1,
+    });
+  });
+
+  it("複数セッションのモデルを重複除去して集約する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({ sessionId: "a", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
+      entry({ sessionId: "b", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
+      entry({ sessionId: "c", planCostUsd: null, implementationCostUsd: null, models: ["claude-opus-5"] }),
+    ]);
+
+    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5", "claude-opus-5"]);
+    expect(breakdown.implementation.sessions).toBe(3);
+  });
+
+  it("実績の無いフェーズはsessionsが0のまま返る（画面はここで行を出し分ける）", () => {
+    const breakdown = buildPhaseBreakdown([]);
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation.sessions).toBe(0);
+    expect(breakdown.action.sessions).toBe(0);
   });
 });
 

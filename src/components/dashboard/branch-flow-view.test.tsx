@@ -449,7 +449,7 @@ describe("BranchFlowView", () => {
               aheadBy: 5,
               behindBy: 0,
               sameContent: false,
-              units: { mergeCount: 2, directCount: 0, versionBumpCount: 1 },
+              units: { mergeCount: 2, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] },
             },
           }),
         ],
