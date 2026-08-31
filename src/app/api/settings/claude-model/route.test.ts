@@ -38,8 +38,10 @@ beforeEach(() => {
   upsert.mockImplementation(async ({ update }) => ({
     claudeModel: update.claudeModel ?? "auto",
     claudeModelAssist: update.claudeModelAssist ?? "auto",
+    claudeLocalModel: update.claudeLocalModel ?? "sonnet",
     codexModel: update.codexModel ?? "auto",
     appAiModel: update.appAiModel ?? "claude-haiku-4-5",
+    appAiModelReasoning: update.appAiModelReasoning ?? "claude-sonnet-5",
   }));
 });
 
@@ -49,8 +51,10 @@ describe("GET", () => {
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "auto",
       claudeModelAssist: "auto",
-      codexModel: "auto",
+      claudeLocalModel: "sonnet",
+      codexModel: "gpt-5.6-terra",
       appAiModel: "claude-haiku-4-5",
+      appAiModelReasoning: "claude-sonnet-5",
     });
   });
 
@@ -58,14 +62,18 @@ describe("GET", () => {
     findUnique.mockResolvedValue({
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
+      claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-sonnet-5",
+      appAiModelReasoning: "claude-opus-5",
     });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
       claudeModelAssist: "sonnet",
+      claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-sonnet-5",
+      appAiModelReasoning: "claude-opus-5",
     });
   });
 });
@@ -76,8 +84,10 @@ describe("PATCH", () => {
       patchRequest({
         claudeModel: "opus",
         claudeModelAssist: "haiku",
+        claudeLocalModel: "sonnet",
         codexModel: "gpt-5.6-sol",
         appAiModel: "claude-opus-5",
+        appAiModelReasoning: "claude-sonnet-5",
       }),
     );
 
@@ -87,8 +97,10 @@ describe("PATCH", () => {
         update: {
           claudeModel: "opus",
           claudeModelAssist: "haiku",
+          claudeLocalModel: "sonnet",
           codexModel: "gpt-5.6-sol",
           appAiModel: "claude-opus-5",
+          appAiModelReasoning: "claude-sonnet-5",
         },
       }),
     );
@@ -126,9 +138,27 @@ describe("PATCH", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  it("claudeLocalModelが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(
+      patchRequest({ claudeModel: "opus", claudeLocalModel: "gpt-5.6-terra" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("appAiModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(
       patchRequest({ claudeModel: "opus", appAiModel: "gpt-5.5" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("appAiModelReasoningが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(
+      patchRequest({ claudeModel: "opus", appAiModelReasoning: "gpt-5.5" }),
     );
 
     expect(res.status).toBe(400);

@@ -259,6 +259,16 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 `release-develop-to-main.yml`も同様に`--model`を指定していない
 （そもそもこの設定を参照していない）。
 
+### サブPCのClaude Codeモデル
+
+設定の「サブPC（Claude）：計画・実装」は、サブPCで新しく起動するClaude Codeセッションだけに
+適用する。既定はSonnet。1つのローカルセッションが計画から実装・PR作成まで続けて行うため、
+GitHub Actionsのように計画用と補助用には分けない。
+
+払い出しAPIが`claudeLocalModel`をジョブへ付け、pollerが`ISSUE_DECK_CLAUDE_MODEL`として
+ランチャーへ渡し、`run-issue-session.sh`が`claude --model <値>`へ反映する。`auto`の場合は
+環境変数を渡さず、Claude Code側の既定モデルへ委ねる。
+
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
 品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
 
@@ -291,9 +301,16 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 
 ## アプリ内AIのモデルとプロバイダー（#2562・#2568）
 
-設定の「アプリ内AI機能で使用するモデル」は、Issue要約・検索・文章整理・手作業診断・新規アプリ相談など、
-issue-deck自身が外部AI APIを呼ぶ機能へ共通で適用する。`src/lib/claude/request.ts`が唯一の送信口で、
-`claude-`モデルはAnthropic Messages API、`gpt-`モデルはOpenAI Responses APIへ送る。
+issue-deck自身が外部AI APIを呼ぶ機能は、必要な判断力に合わせて2系統のモデル設定へ分ける。
+
+| 設定画面の表記 | 対象機能 | 既定モデル |
+|---|---|---|
+| アプリ内AI：要約・検索・文章整理 | Issue・コメント要約、類似Issue検索、本文整理、並び替え、Issue作成補助 | Claude Haiku 4.5（高速） |
+| アプリ内AI：原因診断・新規アプリ相談 | 手作業失敗の原因診断、新規アプリの構成相談 | Claude Sonnet 5（標準） |
+
+定型的な抽出・整形に上位モデルを使わず、誤った判断の影響が大きい診断・相談にはSonnetを使う。
+`src/lib/claude/request.ts`が機能名から設定を選ぶ唯一の送信口で、`claude-`モデルはAnthropic
+Messages API、`gpt-`モデルはOpenAI Responses APIへ送る。
 
 Claudeモデルは`CLAUDE_CODE_OAUTH_TOKEN`、GPTモデルは`OPENAI_API_KEY`を使用する。選択中のモデルに
 対応する認証情報が無い場合だけ、各APIは`not_configured`を返す。OpenAIの応答は共通送信口で既存の

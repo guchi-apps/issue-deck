@@ -2,6 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import {
   APP_AI_MODEL_DEFAULT,
+  APP_AI_MODEL_REASONING_DEFAULT,
+  CLAUDE_LOCAL_MODEL_DEFAULT,
+  CODEX_MODEL_DEFAULT,
   parseAppAiModel,
   parseClaudeModel,
   parseCodexModel,
@@ -10,12 +13,17 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 
 async function getClaudeModels() {
-  const setting = await db.appSetting.findUnique({ where: { id: 1 } });
+  const setting = (await db.appSetting.findUnique({ where: { id: 1 } })) as
+    | ({ claudeLocalModel?: string } & Awaited<ReturnType<typeof db.appSetting.findUnique>>)
+    | null;
   return {
     claudeModel: setting?.claudeModel ?? "auto",
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
-    codexModel: setting?.codexModel ?? "auto",
+    claudeLocalModel: parseClaudeModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
+    codexModel: setting?.codexModel ?? CODEX_MODEL_DEFAULT,
     appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
+    appAiModelReasoning:
+      parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
   };
 }
 
@@ -55,33 +63,57 @@ export async function PATCH(request: NextRequest) {
   if (hasCodex && codexModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasClaudeLocal =
+    payload !== null && typeof payload === "object" && "claudeLocalModel" in payload;
+  const claudeLocalModel = hasClaudeLocal
+    ? parseClaudeModel(payload?.claudeLocalModel)
+    : undefined;
+  if (hasClaudeLocal && claudeLocalModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
   const hasAppAi = payload !== null && typeof payload === "object" && "appAiModel" in payload;
   const appAiModel = hasAppAi ? parseAppAiModel(payload?.appAiModel) : undefined;
   if (hasAppAi && appAiModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasAppAiReasoning =
+    payload !== null && typeof payload === "object" && "appAiModelReasoning" in payload;
+  const appAiModelReasoning = hasAppAiReasoning
+    ? parseAppAiModel(payload?.appAiModelReasoning)
+    : undefined;
+  if (hasAppAiReasoning && appAiModelReasoning === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
 
-  const updated = await db.appSetting.upsert({
+  const updated = (await db.appSetting.upsert({
     where: { id: 1 },
     create: {
       id: 1,
       claudeModel,
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
+      ...(claudeLocalModel ? { claudeLocalModel } : {}),
       ...(appAiModel ? { appAiModel } : {}),
+      ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
     },
     update: {
       claudeModel,
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
+      ...(claudeLocalModel ? { claudeLocalModel } : {}),
       ...(appAiModel ? { appAiModel } : {}),
+      ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
     },
-  });
+  })) as Awaited<ReturnType<typeof db.appSetting.upsert>> & { claudeLocalModel?: string };
 
   return NextResponse.json({
     claudeModel: updated.claudeModel,
     claudeModelAssist: updated.claudeModelAssist,
     codexModel: updated.codexModel,
+    claudeLocalModel:
+      parseClaudeModel(updated.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
     appAiModel: parseAppAiModel(updated.appAiModel) ?? APP_AI_MODEL_DEFAULT,
+    appAiModelReasoning:
+      parseAppAiModel(updated.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
   });
 }

@@ -364,12 +364,15 @@ model AppSetting {
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist   String   @default("auto")
+  // サブPCでClaude Codeのローカルセッションを起動するときに`--model`へ渡すモデル。
+  claudeLocalModel    String   @default("sonnet")
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
-  codexModel          String   @default("auto")
-  // アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
-  // 既存挙動を維持するため、既定値は従来固定していたHaikuとする。
+  codexModel          String   @default("gpt-5.6-terra")
+  // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
   appAiModel          String   @default("claude-haiku-4-5")
+  // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。
+  appAiModelReasoning String   @default("claude-sonnet-5")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。

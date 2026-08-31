@@ -2,6 +2,9 @@ import { IssueDeckShell } from "@/components/dashboard/issue-deck-shell";
 import {
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_DEFAULT,
+  APP_AI_MODEL_REASONING_DEFAULT,
+  CLAUDE_LOCAL_MODEL_DEFAULT,
+  CODEX_MODEL_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
   parseCodexModel,
@@ -23,12 +26,20 @@ export default async function DashboardPage() {
       })
     : [];
 
-  const appSetting = currentUser ? await db.appSetting.findUnique({ where: { id: 1 } }) : null;
+  const appSetting = (currentUser
+    ? await db.appSetting.findUnique({ where: { id: 1 } })
+    : null) as
+    | ({ claudeLocalModel?: string } & Awaited<ReturnType<typeof db.appSetting.findUnique>>)
+    | null;
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
-  const codexModel = parseCodexModel(appSetting?.codexModel) ?? "auto";
+  const claudeLocalModel =
+    parseClaudeModel(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+  const codexModel = parseCodexModel(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
+  const appAiModelReasoning =
+    parseAppAiModel(appSetting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT;
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
 
   const hiddenRepositoryIds = currentUser
@@ -88,8 +99,10 @@ export default async function DashboardPage() {
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
       claudeModelAssist={claudeModelAssist}
+      claudeLocalModel={claudeLocalModel}
       codexModel={codexModel}
       appAiModel={appAiModel}
+      appAiModelReasoning={appAiModelReasoning}
       dispatchConcurrency={dispatchConcurrency}
     />
   );

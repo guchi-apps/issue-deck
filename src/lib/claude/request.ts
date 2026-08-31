@@ -4,6 +4,7 @@ import {
 } from "@/lib/claude/api-usage";
 import {
   APP_AI_MODEL_DEFAULT,
+  APP_AI_MODEL_REASONING_DEFAULT,
   appAiProvider,
   type AppAiModel,
   parseAppAiModel,
@@ -61,22 +62,25 @@ function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-async function getAppAiModel(): Promise<AppAiModel> {
+const REASONING_FEATURES = new Set<ClaudeApiFeature>(["manual_step_fix", "new_app_consult"]);
+
+async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
   try {
     const setting = await db.appSetting.findUnique({
       where: { id: 1 },
-      select: { appAiModel: true },
+      select: { appAiModel: true, appAiModelReasoning: true },
     });
-    return parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
+    return REASONING_FEATURES.has(feature)
+      ? parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT
+      : parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   } catch {
-    // DBが一時的に読めなくても、従来の固定モデルでAI機能を継続する。
-    return APP_AI_MODEL_DEFAULT;
+    return REASONING_FEATURES.has(feature) ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT;
   }
 }
 
 /** 選択中のアプリ内AIモデルに対応する認証情報を返す。 */
-export async function getAppAiToken(): Promise<string | null> {
-  const model = await getAppAiModel();
+export async function getAppAiToken(feature: ClaudeApiFeature): Promise<string | null> {
+  const model = await getAppAiModel(feature);
   return appAiProvider(model) === "openai"
     ? process.env.OPENAI_API_KEY ?? null
     : process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
@@ -140,7 +144,7 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     body: Record<string, unknown>;
   },
 ): Promise<ClaudeMessagesResult<T>> {
-  const model = await getAppAiModel();
+  const model = await getAppAiModel(options.feature);
   const provider = appAiProvider(model);
   const openAiToken = process.env.OPENAI_API_KEY;
   if (provider === "openai" && !openAiToken) {
