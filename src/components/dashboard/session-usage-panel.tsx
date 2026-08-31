@@ -22,6 +22,8 @@ import {
   toQuotaPercent,
   type SessionUsageEntry,
   type UsageByAgent,
+  type UsageBySource,
+  type UsageGroup,
   type UsageIssue,
   type UsageTotals,
 } from "@/lib/session-usage-view";
@@ -176,6 +178,12 @@ const TOKEN_COLORS = {
 /** 出力。入力側と系統を分けるため、入力側を塗り分けても1色のままにする */
 const OUTPUT_COLOR = "#4776e6";
 
+/**
+ * 金額の棒の内側（#2633）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
+ * 日別・内訳の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す。
+ */
+const AGENT_COLORS = { claude: "#d97757", codex: "#4776e6", actions: "#8b5cf6" } as const;
+
 type TokenSegment = { key: string; label: string; value: number; color: string };
 
 /** 1セッションぶんの内訳。入力 → キャッシュ書込 → キャッシュ読出 → 出力の順で積む */
@@ -241,36 +249,80 @@ function TokenBreakdown({ segments, columns }: { segments: TokenSegment[]; colum
   );
 }
 
-/** 画面上部の凡例。単価の倍率を添えて「なぜ薄いのか」を色だけに背負わせない */
+/**
+ * 画面上部の凡例。**太い棒（金額）と細い帯（トークン）で2段に分ける**（#2633）。
+ * 同じ橙・青が「Claude／Codex」と「入力／出力」の両方に出るため、色を並べる前に
+ * どちらの棒の話なのかを言う。単価の倍率は「なぜ薄いのか」を色だけに背負わせないため。
+ */
 function TokenLegend() {
-  const items: { color: string; label: string; rate?: string }[] = [
-    { color: TOKEN_COLORS.local.input, label: "入力", rate: "1.0倍" },
-    { color: TOKEN_COLORS.local.cacheCreate, label: "キャッシュ書込", rate: "1.25〜2倍" },
-    { color: TOKEN_COLORS.local.cacheRead, label: "キャッシュ読出", rate: "0.1倍" },
-    { color: OUTPUT_COLOR, label: "出力" },
-    { color: TOKEN_COLORS["github-actions"].input, label: "GitHub Actions" },
+  const groups: {
+    lead: string;
+    /** 見出しに添える棒の形。太い棒か細い帯かを色より先に示す */
+    glyph: "thick" | "thin";
+    items: { color: string; label: string; rate?: string }[];
+    tail?: string;
+  }[] = [
+    {
+      lead: "太い棒＝金額",
+      glyph: "thick",
+      items: [
+        { color: AGENT_COLORS.claude, label: "Claude" },
+        { color: AGENT_COLORS.codex, label: "Codex" },
+        { color: AGENT_COLORS.actions, label: "GitHub Actions" },
+      ],
+      tail: "長さは同じ表の最大との比較",
+    },
+    {
+      lead: "細い帯＝トークン",
+      glyph: "thin",
+      items: [
+        { color: TOKEN_COLORS.local.input, label: "入力", rate: "1.0倍" },
+        { color: TOKEN_COLORS.local.cacheCreate, label: "キャッシュ書込", rate: "1.25〜2倍" },
+        { color: TOKEN_COLORS.local.cacheRead, label: "キャッシュ読出", rate: "0.1倍" },
+        { color: OUTPUT_COLOR, label: "出力" },
+        { color: TOKEN_COLORS["github-actions"].input, label: "GitHub Actionsの入力" },
+      ],
+    },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-      {items.map((item) => (
-        <span key={item.label}>
-          <i
-            aria-hidden
-            className="mr-1 inline-block size-2 rounded-[2px]"
-            style={{ backgroundColor: item.color }}
-          />
-          <span className="text-foreground">{item.label}</span>
-          {item.rate ? <span className="ml-1 tabular-nums">{item.rate}</span> : null}
-        </span>
+    <div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+      {groups.map((group) => (
+        <div key={group.lead} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="font-semibold text-foreground">
+            <i
+              aria-hidden
+              className={cn(
+                "mr-1.5 inline-block rounded-full bg-muted-foreground align-middle",
+                group.glyph === "thick" ? "h-2 w-3.5" : "h-1 w-3.5",
+              )}
+            />
+            {group.lead}
+          </span>
+          {group.items.map((item) => (
+            <span key={item.label}>
+              <i
+                aria-hidden
+                className="mr-1 inline-block size-2 rounded-[2px]"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="text-foreground">{item.label}</span>
+              {item.rate ? <span className="ml-1 tabular-nums">{item.rate}</span> : null}
+            </span>
+          ))}
+          {group.tail ? <span>{group.tail}</span> : null}
+        </div>
       ))}
-      <span>棒の長さは最大セッションとの比較</span>
     </div>
   );
 }
 
-/** 合計タイルに挟む、期間全体のコンテキストの内訳。入力側の3つだけを見せる */
-function ContextBar({ totals }: { totals: UsageTotals }) {
-  const segments: TokenSegment[] = [
+/**
+ * 合計行（日別・リポジトリ別・種別別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
+ * この行はGitHub Actionsぶんも足し込んだ合計で、実行経路別に色を変えると1本の帯へ
+ * 「区分」と「実行経路」の2つの軸が混ざる（それを避けるのが#2633）。
+ */
+function groupTokenSegments(totals: UsageTotals): TokenSegment[] {
+  return [
     { key: "input", label: "入力", value: totals.inputTokens, color: TOKEN_COLORS.local.input },
     {
       key: "cacheCreate",
@@ -284,7 +336,110 @@ function ContextBar({ totals }: { totals: UsageTotals }) {
       value: totals.cacheReadTokens,
       color: TOKEN_COLORS.local.cacheRead,
     },
+    { key: "output", label: "出力", value: totals.outputTokens, color: OUTPUT_COLOR },
   ];
+}
+
+/**
+ * 金額の棒の内側の割合（#2633）。**GitHub ActionsはClaude Codeなので`byAgent.claude`にも
+ * 入っている**（`session-usage-view.ts`が`agent`と`source`の両方へ同じ行を足す）。
+ * 引かずに使うと、Claudeの帯がActionsのぶんまで伸びたうえで、残りとして描いていたCodexが
+ * Actionsのぶんだけ短くなる。
+ */
+function costSplitByAgent(row: CostRow) {
+  const actions = row.bySource["github-actions"].costUsd;
+  return {
+    claude: Math.max(0, row.byAgent.claude.costUsd - actions),
+    codex: row.byAgent.codex.costUsd,
+    actions,
+  };
+}
+
+type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource };
+
+/**
+ * 日別・内訳の太い棒。長さが金額、内側がClaude／Codex／GitHub Actionsの割合。
+ * **割合そのものは棒に数値を書けないので、ツールチップへ金額で出す。**
+ */
+function CostBar({
+  row,
+  widthPercent,
+  unit,
+  quotas,
+  highlighted,
+}: {
+  row: CostRow;
+  widthPercent: number;
+  unit: SessionUsageUnit;
+  quotas: QuotaByAgent;
+  /** いちばん新しい日（集計途中）だけ枠線を足す */
+  highlighted?: boolean;
+}) {
+  const split = costSplitByAgent(row);
+  const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
+  // GitHub ActionsはClaude Codeなので、枠換算もClaudeの物差しで割る（合計タイルと揃える）。
+  const parts = [
+    { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude, quota: quotas.claude },
+    { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex, quota: quotas.codex },
+    { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions, quota: quotas.claude },
+  ];
+  return (
+    <div
+      className={cn(
+        "h-2.5 overflow-hidden rounded-full bg-muted",
+        highlighted && "ring-1 ring-muted-foreground/40",
+      )}
+      title={parts
+        .map((part) => `${part.label} ${formatUsageAmount(part.value, unit, part.quota)}`)
+        .join(" / ")}
+    >
+      <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${widthPercent}%` }}>
+        {parts.map((part) => (
+          <span
+            key={part.key}
+            style={{ width: `${toPercent(part.value)}%`, backgroundColor: part.color }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 太い棒の下に置く細い帯（#2633）。**長さもトークン量に比例させる**——比率だけの帯にすると
+ * どの行も同じ長さになり、金額の棒とのズレ（キャッシュ読出に寄った「量は多いが安い」行）が
+ * 消えてしまう。
+ */
+function GroupTokenBar({ totals, maxTokens }: { totals: UsageTotals; maxTokens: number }) {
+  const segments = groupTokenSegments(totals);
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  if (total <= 0) return null;
+  return (
+    <div
+      className="h-1.5 overflow-hidden rounded-full bg-muted"
+      title={segments.map((segment) => `${segment.label} ${formatUsageTokens(segment.value)}`).join(" / ")}
+    >
+      <div
+        className="flex h-full overflow-hidden rounded-full"
+        style={{ width: `${maxTokens > 0 ? (total / maxTokens) * 100 : 0}%` }}
+      >
+        {segments
+          .filter((segment) => segment.value > 0)
+          .map((segment) => (
+            <span
+              key={segment.key}
+              className="min-w-[2px]"
+              style={{ width: `${(segment.value / total) * 100}%`, backgroundColor: segment.color }}
+            />
+          ))}
+      </div>
+    </div>
+  );
+}
+
+/** 合計タイルに挟む、期間全体のコンテキストの内訳。入力側の3つだけを見せる */
+function ContextBar({ totals }: { totals: UsageTotals }) {
+  const segments = groupTokenSegments(totals).slice(0, 3);
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
   if (total <= 0) return null;
   return (
@@ -306,7 +461,9 @@ function ContextBar({ totals }: { totals: UsageTotals }) {
 }
 
 /**
- * 日別の棒。**いちばん新しい日だけ塗りを変える**（集計の途中で必ず低く出るため、同じ塗りだと
+ * 日別の棒。**1行に太い棒（金額）と細い帯（トークン）を積む**（#2633）。金額とトークンは
+ * 比例しない——キャッシュ読出に寄った日は帯が長いのに棒が短く出る——ので、1本へ混ぜずに
+ * 軸ごとに分ける。**いちばん新しい日だけ枠線を足す**（集計の途中で必ず低く出るため、同じ塗りだと
  * 「減った」と読めてしまう）。ライブラリを足さずCSSだけで描く。
  */
 function DailyChart({
@@ -321,56 +478,52 @@ function DailyChart({
   todayKey: string;
 }) {
   const max = days.reduce((peak, day) => Math.max(peak, day.costUsd), 0);
+  const maxTokens = days.reduce(
+    (peak, day) => Math.max(peak, day.contextTokens + day.outputTokens),
+    0,
+  );
   if (days.length === 0) {
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
 
   return (
-    <>
-      <div className="flex flex-col gap-2">
-        {days.map((day) => {
-          const width = max > 0 ? (day.costUsd / max) * 100 : 0;
-          const actionsShare = day.costUsd > 0 ? (day.bySource["github-actions"].costUsd / day.costUsd) * 100 : 0;
-          const localCost = day.bySource.local.costUsd;
-          const claudeShare =
-            day.costUsd > 0 ? (localCost > 0 ? day.byAgent.claude.costUsd / localCost : 0) * (localCost / day.costUsd) * 100 : 0;
-          const isToday = day.date === todayKey;
-          return (
-            <div
-              key={day.date}
-              className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-[10px]"
-              title={`${day.date}　${formatCombinedAmount(day.byAgent, unit, quotas)}　${day.responses.toLocaleString()}応答`}
-            >
-              <span className="text-muted-foreground tabular-nums">
-                {formatMonthDay(`${day.date}T00:00:00+09:00`)}
-              </span>
-              <div
-                className={cn(
-                  "h-2.5 overflow-hidden rounded-full bg-muted",
-                  isToday && "ring-1 ring-muted-foreground/40",
-                )}
-              >
-                <div
-                  className="flex h-full overflow-hidden rounded-full"
-                  style={{ width: `${width}%` }}
-                >
-                  <span className="bg-[#d97757]" style={{ width: `${claudeShare}%` }} />
-                  <span className="bg-[#4776e6]" style={{ width: `${Math.max(0, 100 - claudeShare - actionsShare)}%` }} />
-                  <span className="bg-[#8b5cf6]" style={{ width: `${actionsShare}%` }} />
-                </div>
-              </div>
-              <span className="text-right font-semibold tabular-nums">
-                {formatCombinedAmount(day.byAgent, unit, quotas)}
-              </span>
+    <div className="flex flex-col gap-2">
+      {days.map((day) => {
+        const totalTokens = day.contextTokens + day.outputTokens;
+        return (
+          <div
+            key={day.date}
+            className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-[10px]"
+            title={`${day.date}　${formatCombinedAmount(day.byAgent, unit, quotas)}　${day.responses.toLocaleString()}応答　${formatUsageTokens(totalTokens)}`}
+          >
+            <span className="text-muted-foreground tabular-nums">
+              {formatMonthDay(`${day.date}T00:00:00+09:00`)}
+            </span>
+            <div className="flex flex-col gap-0.5">
+              <CostBar
+                row={day}
+                widthPercent={max > 0 ? (day.costUsd / max) * 100 : 0}
+                unit={unit}
+                quotas={quotas}
+                highlighted={day.date === todayKey}
+              />
+              <GroupTokenBar totals={day} maxTokens={maxTokens} />
             </div>
-          );
-        })}
-      </div>
-    </>
+            <span className="text-right font-semibold tabular-nums">
+              {formatCombinedAmount(day.byAgent, unit, quotas)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-/** リポジトリ別・種別別の内訳。`github-actions-usage.tsx`のバーと同じ形にしてある */
+/**
+ * リポジトリ別・種別別の内訳。日別と同じ二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * **太い棒の内側も日別と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
+ * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
+ */
 function Breakdown({
   title,
   hint,
@@ -382,7 +535,7 @@ function Breakdown({
 }: {
   title: string;
   hint: string;
-  rows: { key: string; label: string; sessions: number; costUsd: number; byAgent: UsageByAgent }[];
+  rows: (UsageGroup & { label: string })[];
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
   colorOf?: (key: string) => string | undefined;
@@ -390,6 +543,10 @@ function Breakdown({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const max = rows[0]?.costUsd ?? 0;
+  const maxTokens = rows.reduce(
+    (peak, row) => Math.max(peak, row.contextTokens + row.outputTokens),
+    0,
+  );
   const visibleRows =
     maxVisibleRows !== undefined && !isExpanded ? rows.slice(0, maxVisibleRows) : rows;
   const hiddenRows = maxVisibleRows !== undefined ? Math.max(rows.length - maxVisibleRows, 0) : 0;
@@ -426,19 +583,14 @@ function Breakdown({
                     {formatCombinedAmount(row.byAgent, unit, quotas)}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="flex h-full"
-                    style={{ width: `${max > 0 ? (row.costUsd / max) * 100 : 0}%` }}
-                  >
-                    <span
-                      className="bg-[#d97757]"
-                      style={{
-                        width: `${row.costUsd > 0 ? (row.byAgent.claude.costUsd / row.costUsd) * 100 : 0}%`,
-                      }}
-                    />
-                    <span className="flex-1 bg-[#4776e6]" />
-                  </div>
+                <div className="flex flex-col gap-0.5">
+                  <CostBar
+                    row={row}
+                    widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
+                    unit={unit}
+                    quotas={quotas}
+                  />
+                  <GroupTokenBar totals={row} maxTokens={maxTokens} />
                 </div>
               </li>
             );
@@ -766,7 +918,7 @@ export function SessionUsagePanel({
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">日別</span>
               <span className="text-[11px] text-muted-foreground">
-                いちばん新しい日は集計中（枠線付き）
+                太い棒＝金額／細い帯＝トークン・いちばん新しい日は集計中
               </span>
             </div>
             <DailyChart
@@ -781,13 +933,7 @@ export function SessionUsagePanel({
             <Breakdown
               title="リポジトリ別"
               hint={`${data.byRepository.length}リポジトリ`}
-              rows={data.byRepository.map((row) => ({
-                key: row.key,
-                label: row.key || "(不明)",
-                sessions: row.sessions,
-                costUsd: row.costUsd,
-                byAgent: row.byAgent,
-              }))}
+              rows={data.byRepository.map((row) => ({ ...row, label: row.key || "(不明)" }))}
               unit={effectiveUnit}
               quotas={quotas}
               colorOf={(key) => getRepoColor(key || "(不明)")}
@@ -796,13 +942,7 @@ export function SessionUsagePanel({
             <Breakdown
               title="種別別"
               hint="作業ディレクトリで判定"
-              rows={data.byKind.map((row) => ({
-                key: row.key,
-                label: sessionUsageKindLabel(row.key),
-                sessions: row.sessions,
-                costUsd: row.costUsd,
-                byAgent: row.byAgent,
-              }))}
+              rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
               unit={effectiveUnit}
               quotas={quotas}
             />

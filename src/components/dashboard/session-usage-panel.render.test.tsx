@@ -284,6 +284,43 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
+  it("日別・内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）", () => {
+    renderPanel(response([entry()]));
+
+    // 太い棒は金額で、内側はエージェントの割合。棒には数値を書けないのでツールチップへ出す。
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    expect(within(daily).getByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeTruthy();
+    // 細い棒はトークンの4区分。長さもトークン量に比例させる。
+    expect(within(daily).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // リポジトリ別・種別別にも同じ二段を出す。
+    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    expect(within(breakdown).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // 凡例は「どちらの棒の色か」を先に言う。
+    expect(screen.getByText("太い棒＝金額")).toBeTruthy();
+    expect(screen.getByText("細い帯＝トークン")).toBeTruthy();
+  });
+
+  it("金額の棒でGitHub ActionsぶんをClaudeから引く（Codexが短く出ない。#2633）", () => {
+    // ActionsはClaude Codeなので`byAgent.claude`にも入っている。引かずに描くと、Claudeの帯が
+    // Actionsのぶんまで伸び、残りとして描いていたCodexが消える。
+    renderPanel(
+      response([
+        entry({ sessionId: "local-claude", costUsd: 10 }),
+        entry({ sessionId: "local-codex", agent: "codex", costUsd: 10 }),
+        entry({ sessionId: "actions", source: "github-actions", costUsd: 20 }),
+      ]),
+    );
+
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    const bar = within(daily).getByTitle(
+      "Claude $10.00 / Codex $10.00 / GitHub Actions $20.00",
+    );
+    const widths = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.width);
+    expect(widths).toEqual(["25%", "25%", "50%"]);
+  });
+
   it("スマホ（compact）では明細を横スクロールの表ではなくカードで出す（#2628）", () => {
     renderPanel(response([entry()]), { compact: true });
 
