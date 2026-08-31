@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -651,30 +651,46 @@ function PhaseSplitNote({ entry }: { entry: SessionUsageEntry }) {
 
 type SessionRow = { issue: UsageIssue; entry: SessionUsageEntry };
 
-/** セッション名（Issue番号・リポジトリ・種別）と、Issue／Actionsを開く導線 */
+/** issueNumberがあればIssue表示、無くprNumberがあればPR表示。両方無ければ未特定（#2650） */
+function issueGroupLabel(issue: Pick<UsageIssue, "issueNumber" | "prNumber">): string {
+  if (issue.issueNumber !== null) return `#${issue.issueNumber}`;
+  if (issue.prNumber !== null) return `PR #${issue.prNumber}`;
+  return "（Issue未特定）";
+}
+
+/** Issue・PRのグループを一意に識別するキー。表示の開閉状態を保持するのに使う（#2653） */
+function issueGroupKey(issue: Pick<UsageIssue, "repository" | "issueNumber" | "prNumber">): string {
+  return `${issue.repository ?? ""}#${issue.issueNumber ?? ""}#${issue.prNumber ?? ""}`;
+}
+
+/**
+ * セッション名（種別・エージェント・モデル）と、Actionsの実行を開く導線。
+ * **Issue番号・リポジトリの表示は`hideIssueLabel`で消せる**（#2653）。展開したIssueグループの
+ * 中では見出しに同じラベル・導線がすでに出ているため、セッションごとに繰り返さない。
+ */
 function SessionName({
   issue,
   entry,
   onOpenIssue,
+  hideIssueLabel = false,
 }: SessionRow & {
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+  hideIssueLabel?: boolean;
 }) {
   const repository = issue.repository ?? "(不明)";
   const canOpen = Boolean(onOpenIssue && issue.repository && (issue.issueNumber || issue.prNumber));
-  // issueNumberがあればIssue表示、無くprNumberがあればPR表示。両方無ければ未特定（#2650）
-  const label =
-    issue.issueNumber !== null
-      ? `#${issue.issueNumber}`
-      : issue.prNumber !== null
-        ? `PR #${issue.prNumber}`
-        : "（Issue未特定）";
+  const label = issueGroupLabel(issue);
   return (
     <div className="flex items-start gap-1.5">
-      <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
-      <div className="min-w-0">
-        <div className="truncate font-semibold text-foreground">
-          {label} {repository}
-        </div>
+      {!hideIssueLabel && (
+        <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
+      )}
+      <div className="min-w-0 flex-1">
+        {!hideIssueLabel && (
+          <div className="truncate font-semibold text-foreground">
+            {label} {repository}
+          </div>
+        )}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
           <span className="truncate">
             {entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・{" "}
@@ -692,7 +708,7 @@ function SessionName({
           ))}
         </div>
       </div>
-      {canOpen && (
+      {!hideIssueLabel && canOpen && (
         <Button
           variant="ghost"
           size="icon"
@@ -720,12 +736,14 @@ function SessionCards({
   unit,
   quotas,
   onOpenIssue,
+  hideIssueLabel = false,
 }: {
   sessions: SessionRow[];
   maxTokens: number;
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+  hideIssueLabel?: boolean;
 }) {
   return (
     <ul className="flex flex-col gap-2">
@@ -733,6 +751,8 @@ function SessionCards({
         const segments = tokenSegments(entry);
         const totalTokens = entry.contextTokens + entry.outputTokens;
         const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+        // 内訳は集計側が単価から割ったものを使う（#2626）。持っていない行だけ近似になる。
+        const costSplit = sessionUsageCostSplit(entry);
         return (
           <li
             key={`${entry.host}:${entry.sessionId}`}
@@ -740,7 +760,7 @@ function SessionCards({
           >
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} />
+                <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} hideIssueLabel={hideIssueLabel} />
               </div>
               <div className="shrink-0 text-right">
                 <span className="font-semibold tabular-nums">
@@ -759,6 +779,18 @@ function SessionCards({
               </div>
               <TokenBreakdown segments={segments} columns />
             </div>
+            <div
+              className="text-[10px] tabular-nums text-muted-foreground"
+              title={
+                costSplit.approximate
+                  ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）"
+                  : undefined
+              }
+            >
+              入力 {costSplit.approximate ? "約" : ""}
+              {formatUsageUsd(costSplit.inputCostUsd)}・出力 {costSplit.approximate ? "約" : ""}
+              {formatUsageUsd(costSplit.outputCostUsd)}
+            </div>
             <div className="text-[10px] tabular-nums text-muted-foreground">
               {formatDateTime(entry.startedAt)} 〜 {formatDateTime(entry.endedAt)}
             </div>
@@ -769,88 +801,151 @@ function SessionCards({
   );
 }
 
-/** セッションごとの一覧。棒の全長を最大セッションにそろえ、セッション間の差を見せる。 */
-function SessionTable({
+/**
+ * Issue（またはIssue未特定のPR）1件ぶんの行（#2653）。**同じIssue番号を持つセッションは、
+ * そこから派生したPRのGitHub Actions実行も含めて`issue`に合算済み**（`session-usage-view.ts`の
+ * `buildSessionUsageSummary`）。ここでは合算した1本の横棒グラフとして出し、クリックで
+ * 中の各セッションを展開する。`Breakdown`の行（リポジトリ別・種別別）と同じ描き方に揃える。
+ */
+function IssueGroupRow({
+  issue,
+  maxCost,
+  maxTokens,
+  unit,
+  quotas,
+  isOpen,
+  onToggle,
+  onOpenIssue,
+}: {
+  issue: UsageIssue;
+  maxCost: number;
+  maxTokens: number;
+  unit: SessionUsageUnit;
+  quotas: QuotaByAgent;
+  isOpen: boolean;
+  onToggle: () => void;
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+}) {
+  const repository = issue.repository ?? "(不明)";
+  const canOpen = Boolean(onOpenIssue && issue.repository && (issue.issueNumber || issue.prNumber));
+  const sessions: SessionRow[] = issue.entries.map((entry) => ({ issue, entry }));
+  const sessionMaxTokens = sessions.reduce(
+    (max, { entry }) => Math.max(max, entry.contextTokens + entry.outputTokens),
+    0,
+  );
+
+  return (
+    <li className={cn("rounded-lg", isOpen && "bg-muted/40")}>
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg px-1.5 py-1.5 text-left hover:bg-accent"
+          onClick={onToggle}
+          aria-expanded={isOpen}
+        >
+          <ChevronRight
+            aria-hidden
+            className={cn("mt-1 size-3.5 shrink-0 text-muted-foreground transition-transform", isOpen && "rotate-90")}
+          />
+          <span aria-hidden className="mt-1.5 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5 text-[11px]">
+              <span className="shrink-0 font-semibold text-foreground">{issueGroupLabel(issue)}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{repository}</span>
+              <span className="ml-auto shrink-0 pl-2 text-muted-foreground tabular-nums">
+                {issue.sessions}セッション
+              </span>
+            </div>
+            <div className="mt-1 flex flex-col gap-0.5">
+              <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} unit={unit} quotas={quotas} />
+              <GroupTokenBar totals={issue} maxTokens={maxTokens} />
+            </div>
+          </div>
+        </button>
+        <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
+          {formatCombinedAmount(issue.byAgent, unit, quotas)}
+        </span>
+        {canOpen && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="mt-1 size-5 shrink-0"
+            title={issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}
+            onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber, issue.prNumber)}
+          >
+            <ExternalLink className="size-3" />
+            <span className="sr-only">{issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}</span>
+          </Button>
+        )}
+      </div>
+      {isOpen && (
+        <div className="py-1 pr-1 pl-8">
+          <SessionCards
+            sessions={sessions}
+            maxTokens={sessionMaxTokens}
+            unit={unit}
+            quotas={quotas}
+            onOpenIssue={onOpenIssue}
+            hideIssueLabel
+          />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Issue・PR別の一覧。**横棒グラフが縦に複数並ぶ**（#2653）。PC・スマホで同じ土台を使う
+ * ——以前はデスクトップだけ表（`<table>`）だったが、Issue単位で合算した行を並べる今の形は
+ * どちらの幅でも同じ見え方でよく、分ける理由が無くなった。
+ */
+function IssueGroupList({
   issues,
   unit,
   quotas,
-  compact,
+  openKeys,
+  onToggle,
   onOpenIssue,
 }: {
   issues: UsageIssue[];
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
-  compact: boolean;
+  openKeys: Record<string, boolean>;
+  /** 押された行の直前の開閉状態（既定値込み）を渡す。呼び出し側はこれを反転させるだけでよい */
+  onToggle: (key: string, wasOpen: boolean) => void;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 }) {
-  const sessions = issues.flatMap((issue) =>
-    issue.entries.map((entry) => ({ issue, entry })),
-  );
-  const maxTokens = sessions.reduce(
-    (max, { entry }) => Math.max(max, entry.contextTokens + entry.outputTokens),
-    0,
-  );
-
-  if (sessions.length === 0) {
+  if (issues.length === 0) {
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
 
-  if (compact) {
-    return (
-      <SessionCards
-        sessions={sessions}
-        maxTokens={maxTokens}
-        unit={unit}
-        quotas={quotas}
-        onOpenIssue={onOpenIssue}
-      />
-    );
-  }
+  const maxCost = issues.reduce((peak, issue) => Math.max(peak, issue.costUsd), 0);
+  const maxTokens = issues.reduce(
+    (peak, issue) => Math.max(peak, issue.contextTokens + issue.outputTokens),
+    0,
+  );
 
   return (
-    <div className="-mx-3 overflow-x-auto sm:mx-0">
-      <table className="w-full min-w-[46rem] border-collapse text-left text-[11px]">
-        <caption className="sr-only">セッションごとのAI使用量</caption>
-        <thead>
-          <tr className="border-b bg-muted/30 text-[10px] text-muted-foreground">
-            <th scope="col" className="px-3 py-2 font-semibold">セッション</th>
-            <th scope="col" className="w-[38%] px-3 py-2 font-semibold">トークン使用量（最大比）</th>
-            <th scope="col" className="px-3 py-2 font-semibold">料金</th>
-            <th scope="col" className="px-3 py-2 font-semibold">内訳</th>
-            <th scope="col" className="px-3 py-2 font-semibold">日時</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map(({ issue, entry }) => {
-            const segments = tokenSegments(entry);
-            const totalTokens = entry.contextTokens + entry.outputTokens;
-            const totalWidth = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
-            // 内訳は集計側が単価から割ったものを使う（#2626）。持っていない行だけ近似になる。
-            const costSplit = sessionUsageCostSplit(entry);
-            return (
-              <tr key={`${entry.host}:${entry.sessionId}`} className="border-b last:border-b-0">
-                <td className="max-w-[15rem] px-3 py-3 align-top">
-                  <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} />
-                </td>
-                <td className="px-3 py-3 align-middle">
-                  <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground"><span>{formatUsageTokens(totalTokens)}</span><span>{Math.round(totalWidth)}%</span></div>
-                  <div className="mt-1">
-                    <TokenBar segments={segments} widthPercent={totalWidth} />
-                  </div>
-                  <TokenBreakdown segments={segments} />
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">
-                  {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
-                  <PhaseSplitNote entry={entry} />
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground" title={costSplit.approximate ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）" : undefined}>入力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.inputCostUsd)}<br />出力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.outputCostUsd)}</td>
-                <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <ul className="flex flex-col gap-1">
+      {issues.map((issue, index) => {
+        const key = issueGroupKey(issue);
+        // 既定では一番新しい活動のIssueだけ開く。それ以外はユーザーが押した分だけ開閉する（#2653）。
+        const isOpen = openKeys[key] ?? index === 0;
+        return (
+          <IssueGroupRow
+            key={key}
+            issue={issue}
+            maxCost={maxCost}
+            maxTokens={maxTokens}
+            unit={unit}
+            quotas={quotas}
+            isOpen={isOpen}
+            onToggle={() => onToggle(key, isOpen)}
+            onOpenIssue={onOpenIssue}
+          />
+        );
+      })}
+    </ul>
   );
 }
 
@@ -871,6 +966,8 @@ export function SessionUsagePanel({
 }: SessionUsagePanelProps) {
   const [unit, setUnit] = useState<SessionUsageUnit>("usd");
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
+  // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
+  const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
 
   const quotas = data?.quotaByAgent ?? { claude: null, codex: null };
   const hasQuota = Boolean(quotas.claude || quotas.codex);
@@ -1026,9 +1123,9 @@ export function SessionUsagePanel({
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold">Issue・セッション別</span>
+              <span className="text-xs font-semibold">Issue・PR別</span>
               <span className="text-[11px] text-muted-foreground">
-                セッションごと・棒の長さは最大セッション比
+                同じIssueと派生PRの実行をまとめて集計・棒はIssue間の金額比較
               </span>
             </div>
             {issues.length === 0 ? (
@@ -1037,11 +1134,14 @@ export function SessionUsagePanel({
               </p>
             ) : (
               <>
-                <SessionTable
+                <IssueGroupList
                   issues={issues.slice(0, visibleIssues)}
                   unit={effectiveUnit}
                   quotas={quotas}
-                  compact={compact}
+                  openKeys={openIssueKeys}
+                  onToggle={(key, wasOpen) =>
+                    setOpenIssueKeys((prev) => ({ ...prev, [key]: !wasOpen }))
+                  }
                   onOpenIssue={onOpenIssue}
                 />
                 {issues.length > visibleIssues && (
