@@ -51,6 +51,13 @@ export type SessionUsageReport = {
    */
   inputCostUsd: number | null;
   outputCostUsd: number | null;
+  /**
+   * `costUsd`の計画（Plan mode）・実装の内訳（#2646）。**片方でも欠けたら両方nullにする**
+   * （上のinputCostUsd/outputCostUsdと同じ理由）。Plan modeを使っていないセッション・
+   * Codexの行は常にnull
+   */
+  planCostUsd: number | null;
+  implementationCostUsd: number | null;
   models: string[];
   startedAt: Date;
   endedAt: Date;
@@ -148,6 +155,13 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   const inputCostUsd = hasCostSplit ? parsedInputCostUsd : null;
   const outputCostUsd = hasCostSplit ? parsedOutputCostUsd : null;
 
+  // 計画/実装の内訳（#2646）。Plan modeを使っていないセッションは両方nullで届く。
+  const parsedPlanCostUsd = parseNonNegativeNumber(input.planCostUsd);
+  const parsedImplementationCostUsd = parseNonNegativeNumber(input.implementationCostUsd);
+  const hasPlanSplit = parsedPlanCostUsd !== null && parsedImplementationCostUsd !== null;
+  const planCostUsd = hasPlanSplit ? parsedPlanCostUsd : null;
+  const implementationCostUsd = hasPlanSplit ? parsedImplementationCostUsd : null;
+
   const rawModels = input.models;
   if (!Array.isArray(rawModels) || rawModels.some((model) => typeof model !== "string")) return null;
 
@@ -171,6 +185,8 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
     costUsd,
     inputCostUsd,
     outputCostUsd,
+    planCostUsd,
+    implementationCostUsd,
     models: rawModels as string[],
     startedAt,
     endedAt,
@@ -237,6 +253,8 @@ export async function storeSessionUsage({
       costUsd: session.costUsd,
       inputCostUsd: session.inputCostUsd,
       outputCostUsd: session.outputCostUsd,
+      planCostUsd: session.planCostUsd,
+      implementationCostUsd: session.implementationCostUsd,
       models: JSON.stringify(session.models),
       startedAt: session.startedAt,
       endedAt: session.endedAt,
