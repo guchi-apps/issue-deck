@@ -1505,6 +1505,11 @@ model SessionUsage {
   /// null。その行だけ画面がトークン比の近似を出し、「約」と断る
   inputCostUsd  Float?
   outputCostUsd Float?
+  /// `costUsd`の計画（Plan mode）・実装の内訳（#2646）。転記に残る`ExitPlanMode`の最後の
+  /// 呼び出し時刻を境に、集計側（`scripts/lib/session-usage.sh`）が振り分けたもの。
+  /// Plan modeを使っていないセッション・Codexの行はnull（画面は「区分なし」として合算のみ出す）
+  planCostUsd           Float?
+  implementationCostUsd Float?
   /// 使われたモデルIDのJSON配列（例: `["claude-opus-5"]`）
   models String @db.Text
 

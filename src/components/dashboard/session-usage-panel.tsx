@@ -19,6 +19,8 @@ import {
   formatUsageUsd,
   sessionUsageCostSplit,
   sessionUsageKindLabel,
+  sessionUsageModelLabel,
+  sessionUsagePhaseSplit,
   toQuotaPercent,
   type SessionUsageEntry,
   type UsageByAgent,
@@ -183,6 +185,12 @@ const OUTPUT_COLOR = "#4776e6";
  * 日別・内訳の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す。
  */
 const AGENT_COLORS = { claude: "#d97757", codex: "#4776e6", actions: "#8b5cf6" } as const;
+
+/**
+ * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_COLORS`）とは別軸**なので、
+ * 既存のオレンジ／青を再利用せず、計画だけ目立たせるティール1色＋残りは中立色にする。
+ */
+const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
 
 type TokenSegment = { key: string; label: string; value: number; color: string };
 
@@ -614,6 +622,32 @@ function Breakdown({
   );
 }
 
+/**
+ * 料金の下に添える計画/実装の内訳（#2646）。`sessionUsagePhaseSplit`が値を返すセッション
+ * （Plan modeを使った実装セッション）だけ出す。**常にドル表示**——`内訳`列の入力/出力と同じく、
+ * 枠%のときも金額のまま出す（按分し直さないため）。
+ */
+function PhaseSplitNote({ entry }: { entry: SessionUsageEntry }) {
+  const split = sessionUsagePhaseSplit(entry);
+  if (!split) return null;
+  const total = split.planCostUsd + split.implementationCostUsd;
+  const planPercent = total > 0 ? (split.planCostUsd / total) * 100 : 0;
+  return (
+    <div className="mt-1">
+      <div className="flex h-1 overflow-hidden rounded-full bg-muted">
+        <span className="min-w-[2px]" style={{ width: `${planPercent}%`, backgroundColor: PHASE_COLORS.plan }} />
+        <span
+          className="min-w-[2px]"
+          style={{ width: `${100 - planPercent}%`, backgroundColor: PHASE_COLORS.implementation }}
+        />
+      </div>
+      <p className="mt-0.5 text-[9px] font-normal whitespace-nowrap text-muted-foreground">
+        計画 {formatUsageUsd(split.planCostUsd)}・実装 {formatUsageUsd(split.implementationCostUsd)}
+      </p>
+    </div>
+  );
+}
+
 type SessionRow = { issue: UsageIssue; entry: SessionUsageEntry };
 
 /** セッション名（Issue番号・リポジトリ・種別）と、Issue／Actionsを開く導線 */
@@ -631,7 +665,22 @@ function SessionName({
         <div className="truncate font-semibold text-foreground">
           {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
         </div>
-        <div className="truncate text-[10px] text-muted-foreground">{entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・ {entry.agent === "claude" ? "Claude" : "Codex"}{entry.workflowName ? ` ・ ${entry.workflowName}` : ""}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+          <span className="truncate">
+            {entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・{" "}
+            {entry.agent === "claude" ? "Claude" : "Codex"}
+            {entry.workflowName ? ` ・ ${entry.workflowName}` : ""}
+          </span>
+          {/* 使ったモデル（#2646）。集計側は`models`を持っているが、これまで画面に出していなかった */}
+          {entry.models.map((model) => (
+            <span
+              key={model}
+              className="shrink-0 rounded border bg-muted px-1 py-px text-[9px] font-medium text-foreground"
+            >
+              {sessionUsageModelLabel(model)}
+            </span>
+          ))}
+        </div>
       </div>
       {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
       {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
@@ -672,9 +721,12 @@ function SessionCards({
               <div className="min-w-0 flex-1">
                 <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} />
               </div>
-              <span className="shrink-0 font-semibold tabular-nums">
-                {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
-              </span>
+              <div className="shrink-0 text-right">
+                <span className="font-semibold tabular-nums">
+                  {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
+                </span>
+                <PhaseSplitNote entry={entry} />
+              </div>
             </div>
             <div>
               <div className="flex items-center justify-between gap-2 text-[10px] tabular-nums text-muted-foreground">
@@ -766,7 +818,10 @@ function SessionTable({
                   </div>
                   <TokenBreakdown segments={segments} />
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">{formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}</td>
+                <td className="whitespace-nowrap px-3 py-3 align-top font-semibold tabular-nums">
+                  {formatUsageAmount(entry.costUsd, unit, quotas[entry.agent])}
+                  <PhaseSplitNote entry={entry} />
+                </td>
                 <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground" title={costSplit.approximate ? "このセッションは金額の内訳を記録していないため、トークン数の比で按分した概算です（キャッシュの単価差を反映できていません）" : undefined}>入力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.inputCostUsd)}<br />出力 {costSplit.approximate ? "約" : ""}{formatUsageUsd(costSplit.outputCostUsd)}</td>
                 <td className="whitespace-nowrap px-3 py-3 align-top tabular-nums text-muted-foreground">{formatDateTime(entry.startedAt)}<br />〜 {formatDateTime(entry.endedAt)}</td>
               </tr>

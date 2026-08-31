@@ -278,6 +278,12 @@ for raw_path in sys.stdin:
     models = set()
     first_at = None
     last_at = None
+    # 計画（Plan mode）と実装の境界（#2646）。**最後の`ExitPlanMode`呼び出しの時刻**を境に、
+    # それ以前を「計画」、以降を「実装」とする。計画の修正で複数回呼ばれても、最後の1回だけを
+    # 境に使う（それより前の往復はやり取りごと「計画」に含める）。1度も呼ばれていなければ
+    # `None`のままで、画面は「区分なし」として扱う。
+    plan_exit_ts = None
+    responses_log = []
 
     try:
         handle = open(path, "r", encoding="utf-8", errors="replace")
@@ -322,6 +328,21 @@ for raw_path in sys.stdin:
             usage = message.get("usage")
             if not isinstance(usage, dict):
                 continue
+
+            # `ExitPlanMode`のtool_use呼び出し（#2646）。重複行でも同じ内容なので、
+            # dedupより前で見ておく。
+            if record.get("type") == "assistant":
+                content = message.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if (
+                            isinstance(block, dict)
+                            and block.get("type") == "tool_use"
+                            and block.get("name") == "ExitPlanMode"
+                        ):
+                            ts = record.get("timestamp")
+                            if isinstance(ts, str) and (plan_exit_ts is None or ts > plan_exit_ts):
+                                plan_exit_ts = ts
 
             # **同じ`message.id`は同じ応答の重複行**。最初の1行だけを数える。
             message_id = message.get("id")
@@ -374,6 +395,7 @@ for raw_path in sys.stdin:
                 delta["costUsd"] = delta["inputCostUsd"] + delta["outputCostUsd"]
 
             add(bucket, delta)
+            responses_log.append((stamp, delta))
             if model:
                 models.add(model)
             if local is not None:
@@ -389,6 +411,24 @@ for raw_path in sys.stdin:
 
     if not bucket["responses"]:
         continue
+
+    # 計画/実装のコスト内訳（#2646）。`ExitPlanMode`が1度も無ければ区分不明としてnullのまま
+    # 出す（画面は「区分なし」として合算のみを見せる）。
+    if plan_exit_ts is not None:
+        plan_bucket = blank_bucket()
+        implementation_bucket = blank_bucket()
+        for response_stamp, response_delta in responses_log:
+            target = (
+                plan_bucket
+                if isinstance(response_stamp, str) and response_stamp <= plan_exit_ts
+                else implementation_bucket
+            )
+            add(target, response_delta)
+        plan_cost_usd = round(plan_bucket["costUsd"], 4)
+        implementation_cost_usd = round(implementation_bucket["costUsd"], 4)
+    else:
+        plan_cost_usd = None
+        implementation_cost_usd = None
 
     kind, repository, issue = classify(cwd)
     if issue is None:
@@ -413,6 +453,8 @@ for raw_path in sys.stdin:
             models=sorted(models),
             firstAt=first_at,
             lastAt=last_at,
+            planCostUsd=plan_cost_usd,
+            implementationCostUsd=implementation_cost_usd,
         )
     )
 
@@ -775,6 +817,10 @@ for row in data.get("sessions") or []:
             # 画面がトークン比で按分し直さずに済むよう金額のまま送る。
             "inputCostUsd": row.get("inputCostUsd"),
             "outputCostUsd": row.get("outputCostUsd"),
+            # 計画/実装の内訳（#2646）。`ExitPlanMode`が無いセッション・Codexの行は無いので
+            # `.get`はNoneのまま送る（画面は「区分なし」として扱う）。
+            "planCostUsd": row.get("planCostUsd"),
+            "implementationCostUsd": row.get("implementationCostUsd"),
             "models": row.get("models") or [],
             "startedAt": row.get("firstAt"),
             "endedAt": row.get("lastAt"),

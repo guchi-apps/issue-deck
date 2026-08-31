@@ -55,10 +55,19 @@ type UsageOverrides = {
   output?: number;
 };
 
-/** 転記のassistant行。`cacheFlat` を渡すと `cache_creation` の内訳を持たない古い形になる */
+/**
+ * 転記のassistant行。`cacheFlat` を渡すと `cache_creation` の内訳を持たない古い形になる。
+ * `exitPlanMode: true` で、計画/実装の境界（#2646）に使う`ExitPlanMode`のtool_use呼び出しを
+ * 同じ行に載せる（実物のtranscriptでも同じ行にusageとtool_useが同居している）。
+ */
 function assistantLine(
   id: string,
-  options: UsageOverrides & { cwd?: string; model?: string; timestamp?: string } = {},
+  options: UsageOverrides & {
+    cwd?: string;
+    model?: string;
+    timestamp?: string;
+    exitPlanMode?: boolean;
+  } = {},
 ) {
   const usage: Record<string, unknown> = {
     input_tokens: options.input ?? 0,
@@ -74,11 +83,15 @@ function assistantLine(
       ephemeral_1h_input_tokens: options.cache1h ?? 0,
     };
   }
+  const message: Record<string, unknown> = { id, model: options.model ?? "claude-opus-5", usage };
+  if (options.exitPlanMode) {
+    message.content = [{ type: "tool_use", name: "ExitPlanMode", input: {} }];
+  }
   return {
     type: "assistant",
     cwd: options.cwd ?? "/home/u/apps/issue-deck-worktrees/issue-2350",
     timestamp: options.timestamp ?? "2026-08-25T03:00:00.000Z",
-    message: { id, model: options.model ?? "claude-opus-5", usage },
+    message,
   };
 }
 
@@ -262,6 +275,63 @@ describe("session_usage_aggregate", () => {
     expect(result.totals.output).toBe(42);
     expect(result.totals.unreadableTranscripts).toBe(1);
   });
+
+  describe("計画/実装のコスト内訳（#2646）", () => {
+    it("ExitPlanModeが無いセッションは区分なし（null）を返す", () => {
+      const file = writeTranscript("no-plan.jsonl", [
+        assistantLine("msg_1", { output: 1000, timestamp: "2026-08-25T03:00:00.000Z" }),
+        assistantLine("msg_2", { output: 1000, timestamp: "2026-08-25T03:05:00.000Z" }),
+      ]);
+      const result = aggregate([file]);
+      expect(result.sessions[0].planCostUsd).toBeNull();
+      expect(result.sessions[0].implementationCostUsd).toBeNull();
+    });
+
+    it("最後のExitPlanMode呼び出しを境に、計画と実装へ振り分ける", () => {
+      const file = writeTranscript("plan.jsonl", [
+        // 計画（承認前のやり取り）。ExitPlanMode自体もここに含める。
+        assistantLine("msg_1", { output: 1000, timestamp: "2026-08-25T03:00:00.000Z" }),
+        assistantLine("msg_2", {
+          output: 1000,
+          timestamp: "2026-08-25T03:05:00.000Z",
+          exitPlanMode: true,
+        }),
+        // 実装（承認後）。
+        assistantLine("msg_3", { output: 2000, timestamp: "2026-08-25T03:10:00.000Z" }),
+        assistantLine("msg_4", { output: 2000, timestamp: "2026-08-25T03:15:00.000Z" }),
+      ]);
+      const result = aggregate([file]);
+      const session = result.sessions[0];
+      expect(session.planCostUsd).toBeGreaterThan(0);
+      expect(session.implementationCostUsd).toBeGreaterThan(0);
+      // 出力トークンが実装側で2倍なので、金額もおおむね2倍になるはず。
+      expect(session.implementationCostUsd).toBeCloseTo(session.planCostUsd * 2, 3);
+      expect(session.planCostUsd + session.implementationCostUsd).toBeCloseTo(session.costUsd, 3);
+    });
+
+    it("計画の修正でExitPlanModeが複数回呼ばれても、最後の1回だけを境に使う", () => {
+      const file = writeTranscript("replan.jsonl", [
+        assistantLine("msg_1", {
+          output: 500,
+          timestamp: "2026-08-25T03:00:00.000Z",
+          exitPlanMode: true,
+        }),
+        // 修正を求められて計画をやり直す区間。ここも「計画」に含まれるべき。
+        assistantLine("msg_2", { output: 500, timestamp: "2026-08-25T03:05:00.000Z" }),
+        assistantLine("msg_3", {
+          output: 500,
+          timestamp: "2026-08-25T03:10:00.000Z",
+          exitPlanMode: true,
+        }),
+        // 最終承認後の実装。
+        assistantLine("msg_4", { output: 500, timestamp: "2026-08-25T03:15:00.000Z" }),
+      ]);
+      const result = aggregate([file]);
+      const session = result.sessions[0];
+      // 計画3応答・実装1応答ぶんの出力トークンなので、計画側が実装側の3倍になるはず。
+      expect(session.planCostUsd).toBeCloseTo(session.implementationCostUsd * 3, 3);
+    });
+  });
 });
 
 describe("codex_session_usage_aggregate", () => {
@@ -426,6 +496,7 @@ describe("session_usage_report_payload", () => {
         "cacheRead",
         "costUsd",
         "endedAt",
+        "implementationCostUsd",
         "input",
         "inputCostUsd",
         "issue",
@@ -433,6 +504,7 @@ describe("session_usage_report_payload", () => {
         "models",
         "output",
         "outputCostUsd",
+        "planCostUsd",
         "repository",
         "responses",
         "sessionId",
