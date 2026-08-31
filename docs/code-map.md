@@ -2883,6 +2883,29 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
   `fireEvent.pointerMove(..., { pointerType: "mouse" })`を送るとRadixが`focus()`を呼び、
   直す前のコードでは選択肢が消える（`issue-detail.render.test.tsx`）
 
+## 条件付きで消えるアイコンボタンは、隣の`flex-1`要素の幅を変えてしまう（#2685）
+
+**幅%ベースの棒グラフ・進捗バーを`flex-1`要素の中に置き、その隣に条件付きレンダリング
+（`{condition && <Button/>}`）のアイコンボタンを並べると、ボタンが消える行だけ`flex-1`要素が
+広がり、中の棒グラフの見た目の長さが他の行とそろわなくなる。** 「AI使用量」画面の
+「Issue・PR別」一覧（[`session-usage-panel.tsx`](../src/components/dashboard/session-usage-panel.tsx)の
+`IssueGroupRow`）で、Issue番号もPR番号も特定できない行だけ「Issueを開く」ボタンがDOMごと
+無く、棒グラフのレールだけ右へ伸びていた。
+
+- **直し方はボタンをDOMごと消さず、常に同じ寸法で描画したうえで`disabled`・
+  `aria-hidden`・`invisible`クラスで見た目とキーボード操作だけを消す。** 同じパターンは
+  [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
+  Chevronなど他にもある
+- **jsdomのテストで`invisible`クラス自体は検証できない**（テスト環境にTailwindのCSSは
+  適用されないため）。存在確認とインタラクション不能の確認は`aria-hidden="true"`・
+  `disabled`属性で行う。デフォルトの`getByRole("button", ...)`は`aria-hidden`要素を
+  自動で除外するため、見えるボタンだけを数える既存の書き方はそのまま通る
+- **`Button`の`size="icon"`（`size-11 md:size-8`）に`className="size-N"`を渡すと、
+  ブレークポイントによって実際の寸法が変わりうる**（`tailwind-merge`は`md:`付きクラスと
+  無印クラスを別グループとして扱うため、無印側だけ上書きされ`md:`側は残る）。
+  プレースホルダーを別要素で用意せず**実ボタンと同じ`<Button>`をそのまま常時描画**すれば、
+  この挙動があっても寸法は常に一致する
+
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
 **複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから
