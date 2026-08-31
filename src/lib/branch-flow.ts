@@ -132,7 +132,7 @@ export function isClosedLane(lane: BranchFlowLane): boolean {
 }
 
 /**
- * 画面に出す「未リリース ◯コミット」の数（#2316）。**コミット数をそのまま出さない。**
+ * 画面に出す「未リリース ◯コミット」の数（#2316・#2678）。**コミット数をそのまま出さない。**
  *
  * リリースフローはバンプPR（`release/vX.Y.Z`→develop）のheadを`release-main/vX.Y.Z`として
  * 凍結してmainへ出す（#2117）ため、バンプPRを`develop`へマージしたときにできる
@@ -141,13 +141,29 @@ export function isClosedLane(lane: BranchFlowLane): boolean {
  * なく、`canTriggerRelease`が`aheadBy > 0`で決まるため、**出すものが無くても
  * 「リリースする」が押せて中身ゼロのリリースが1本走る**状態だった。
  *
- * そこで`main`と`develop`のtreeが一致するときは0を返す。**中身が同じなら出すものは無い**、
+ * `main`と`develop`のtreeが一致するときは0を返す。**中身が同じなら出すものは無い**、
  * という判定なので、バンプのマージコミット以外の「差分ゼロで残るコミット」にも同じく効く。
+ *
+ * **tree一致だけでは判定しきれない場合がある（#2678）。** tree比較は`main`・`develop`
+ * 双方の**先端同士**を見るため、`main`が`develop`より先行している（`develop`にしかない
+ * 差分だけでなく、`main`にしかない差分もある）リポジトリでは、`develop`が空でも
+ * 先端同士のtreeが永久に一致しない。そこで`units`（`main..develop`をfirst-parentで
+ * たどった内訳）が取れている場合は、**バンプ以外の実質的な作業コミット
+ * （`mergeCount + directCount`）が0かどうか**で判定する。この内訳は`develop`の先端から
+ * たどるだけで`main`の先行状況を見ないため、`main`がどれだけ先行していても影響を受けない
+ * （実例: guchi-apps/vps#209。`main`だけが持つ19ファイルの差分により`sameContent`が
+ * 常にfalseになり、バンプのマージコミットしか無い`develop`が「未リリース 1件」のまま
+ * 消えず、押すたびに中身ゼロのリリースが発行されていた）。
+ *
+ * `units`が取れない（比較のコミットが取得上限を超えている等）場合は、従来どおり
+ * `sameContent`とaheadByだけで判定する。
  *
  * `comparison`が取れていない（ブランチが無い・取得に失敗した）ときは0。
  */
 export function unreleasedCommitCount(comparison: BranchComparison | null | undefined): number {
   if (!comparison || comparison.sameContent) return 0;
+  const { units } = comparison;
+  if (units !== null && units.mergeCount + units.directCount === 0) return 0;
   return comparison.aheadBy;
 }
 
@@ -172,9 +188,8 @@ export type UnreleasedSummary = {
  *
  * **バージョンバンプのマージは件数の本体から外す。** リリースの配管であって出す中身では
  * ないため、他に未リリースの作業があるときだけ「（+バージョンバンプ1件）」として添える。
- * バンプのマージしか残っていない（＝出すものが無い）状態は`sameContent`が0へ落とすので
- * （#2316）、ここで別枠にしても「未リリース」が消えることはない。ただし何らかの理由で
- * tree差分が残っている場合だけは0件と言い切らず、バンプのぶんを本体で数える。
+ * バンプのマージしか残っていない（＝出すものが無い）状態は`unreleasedCommitCount`が0へ
+ * 落とすので、ここで別枠にしても「未リリース」が消えることはない（#2316・#2678）。
  *
  * コミット一覧を取れなかったとき（取得上限超え・head OIDが読めない）は従来どおりコミット数。
  */
@@ -187,9 +202,6 @@ export function unreleasedSummary(
     return { count: commits, unit: "コミット", versionBumpCount: 0 };
   }
   const work = units.mergeCount + units.directCount;
-  if (work === 0) {
-    return { count: units.versionBumpCount, unit: "件", versionBumpCount: 0 };
-  }
   return { count: work, unit: "件", versionBumpCount: units.versionBumpCount };
 }
 

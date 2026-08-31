@@ -102,6 +102,11 @@ describe("buildSessionInterruptedCommentBody（reason: tool_call_stall）", () =
     expect(body).toContain("自動では再送信していません");
   });
 
+  it("曖昧な継続指示を避け、事実を明言した具体的な文言を提示する（#2675）", () => {
+    expect(body).toContain("「進めて」のような曖昧な継続指示は避けてください");
+    expect(body).toContain("実際にはツールは呼ばれていません");
+  });
+
   it("続きを人が引き取るための出口は共通のまま出す", () => {
     expect(body).toContain("tmux attach -t research-desk-issue-41");
     expect(body).toContain("https://claude.ai/code/session_01XYZ");
