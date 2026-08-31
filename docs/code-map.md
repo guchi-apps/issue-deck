@@ -193,6 +193,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     **強調は枠線と文字のamberだけで、中は塗らない**（同じ形の行が縦に続く一覧では、
     塗りつぶしたボタンが1つあるだけで視線を奪う）。色は右上のバッジ
     （`WorkflowStepBadge`）の確認待ちと同じamberを使い、同じ行の中で同じ意味に別の色を当てない。
+  - **暖色（amber・orange）は「人の対応待ち」専用に空けておく**（#2635）。amberは
+    確認待ち（`CheckUserReasonNotice`・`WorkflowStepBadge`・一覧の「計画を承認」ボタン・
+    左メニューの件数）に割り当て済みで、orangeはその隣の色相にあたる。**それ以外の意味を
+    暖色で表さない**——Issue一覧の行は確認待ちの表示とラベル行が同じカードに収まるため、
+    10pxのチップで色相が30度しか離れていないと「要対応」の合図として読まれる。実装
+    エージェントのチップ（[`issue-agent-badge.tsx`](../src/components/dashboard/issue-agent-badge.tsx)）は
+    この理由でorangeからindigoへ移した。手作業パネル（`manual-step-panel.tsx`）が
+    amberを避けているのも同じ理由。
 - `components/ui/` はshadcnの生成物なので、変更したい場合は生成物を直接編集せず
   ラップするコンポーネント側で対応する。
 - **Issueの作成フォームは、ダイアログでも別ウィンドウでも
