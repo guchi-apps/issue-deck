@@ -246,20 +246,31 @@ describe("signaly-notify.sh", () => {
       expect(payload.message).not.toContain("# v4.45.0");
     });
 
-    it("見出しのバージョンが違えば本文を載せない", async () => {
-      // 古い文面を新しいバージョンの通知に貼るより、本文なしで送るほうがまし
+    it("見出しのバージョンが違えば、古い文面の代わりにフォールバック文言を載せる", async () => {
+      // 古い文面を新しいバージョンの通知に貼るより、「更新内容なし」と伝えるほうがまし
       const notes = writeNotes("# v4.44.0\n\n前のリリースの文面\n");
 
       await runRelease({ NOTIFY_NOTES_FILE: notes });
 
-      expect(JSON.parse(received[0]).message).toBeUndefined();
+      expect(JSON.parse(received[0]).message).toBe("今回のリリースでは、表示できる更新内容がありません。");
     });
 
-    it("変更内容のファイルが無くても通知は送る", async () => {
+    it("変更内容のファイルが無くても通知は送り、フォールバック文言を載せる", async () => {
       const result = await runRelease({ NOTIFY_NOTES_FILE: path.join(workDir, "missing.md") });
 
       expect(result.code).toBe(0);
-      expect(JSON.parse(received[0]).message).toBeUndefined();
+      expect(JSON.parse(received[0]).message).toBe("今回のリリースでは、表示できる更新内容がありません。");
+    });
+
+    it("本文が空のリリース通知には、空欄ではなくフォールバック文言を表示する", async () => {
+      // #2683: 本文欄そのものが消えると「更新内容が無かった」のか「通知が壊れている」のか
+      // 区別できない。理由(見出し不一致・ファイル不在など)を問わず一律でこの文言にする。
+      const notes = writeNotes("<!-- 断り書き -->\n\n\n");
+
+      await runRelease({ NOTIFY_NOTES_FILE: notes });
+
+      const payload = JSON.parse(received[0]);
+      expect(payload.message).toBe("今回のリリースでは、表示できる更新内容がありません。");
     });
 
     it("長すぎる変更内容は切り詰める", async () => {
