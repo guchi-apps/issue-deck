@@ -220,6 +220,43 @@ describe("SessionUsagePanel", () => {
     expect(within(breakdown).queryByText("repository-5")).toBeNull();
   });
 
+  it("明細の棒を、素の入力・キャッシュ書込・キャッシュ読出・出力の4つへ塗り分ける（#2628）", () => {
+    renderPanel(response([entry()]));
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+
+    // 棒のtitleに4区分ぶんの内訳が出る（キャッシュを1色へ潰さない）。
+    expect(within(detail).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+
+    // 棒の下の数値も4項目。
+    expect(within(detail).getByText("入力 1k")).toBeTruthy();
+    expect(within(detail).getByText("書込 2k")).toBeTruthy();
+    expect(within(detail).getByText("読出 7k")).toBeTruthy();
+    expect(within(detail).getByText("出力 500")).toBeTruthy();
+
+    // 凡例は単価の倍率を添える（薄い＝安いことを色だけに背負わせない）。
+    expect(screen.getByText("1.25〜2倍")).toBeTruthy();
+    expect(screen.getByText("0.1倍")).toBeTruthy();
+    expect(screen.queryByText("入力（キャッシュ含む）")).toBeNull();
+  });
+
+  it("合計の「コンテキスト」に、期間全体のキャッシュ内訳を出す（#2628）", () => {
+    renderPanel(response([entry()]));
+    expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
+  });
+
+  it("スマホ（compact）では明細を横スクロールの表ではなくカードで出す（#2628）", () => {
+    renderPanel(response([entry()]), { compact: true });
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    // 表は幅46remの横スクロールになるため、compactでは使わない。
+    expect(within(detail).queryByRole("table")).toBeNull();
+    // カードでもセッション名・料金・内訳は落とさない。
+    expect(within(detail).getByText("#2504 issue-deck")).toBeTruthy();
+    expect(within(detail).getByText("$20.00")).toBeTruthy();
+    expect(within(detail).getByText("読出 7k")).toBeTruthy();
+  });
+
   it("記録が無いときは、報告待ちであることを出す", () => {
     renderPanel(response([]));
     expect(screen.getByText(/記録がありません。サブPCまたはGitHub Actionsから報告されると出ます/)).toBeTruthy();
