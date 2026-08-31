@@ -131,6 +131,48 @@ describe("buildSessionUsageSummary", () => {
     expect(issue.kinds).toEqual(["implementation", "plan-review"]);
   });
 
+  it("同じIssue番号なら、PR番号の有無・値が違うセッションも1つにまとめる（#2653）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "impl", issueNumber: 2650, prNumber: null, costUsd: 2 }),
+        // そのIssueのPR（#2651）へのGitHub Actionsレビュー実行。ブランチ名issue-2650から
+        // issueNumberは解決できているが、prNumberも一緒に付いている。
+        entry({
+          sessionId: "actions",
+          issueNumber: 2650,
+          prNumber: 2651,
+          source: "github-actions",
+          costUsd: 1,
+        }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+      quotaByAgent: { claude: null, codex: null },
+    });
+
+    expect(summary.byIssue).toHaveLength(1);
+    expect(summary.byIssue[0].issueNumber).toBe(2650);
+    expect(summary.byIssue[0].sessions).toBe(2);
+    expect(summary.byIssue[0].costUsd).toBe(3);
+  });
+
+  it("Issue番号が無いPR起点の実行は、PR番号が違えば別の行のままにする（#2650）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "release-a", issueNumber: null, prNumber: 100, costUsd: 1 }),
+        entry({ sessionId: "release-b", issueNumber: null, prNumber: 200, costUsd: 1 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+      quotaByAgent: { claude: null, codex: null },
+    });
+
+    expect(summary.byIssue).toHaveLength(2);
+    expect(summary.byIssue.map((issue) => issue.prNumber).sort()).toEqual([100, 200]);
+  });
+
   it("Issueを最新セッションの開始日時が新しい順に並べる", () => {
     const summary = buildSessionUsageSummary({
       entries: [

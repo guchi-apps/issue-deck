@@ -390,9 +390,15 @@ export function buildSessionUsageSummary({
 
     // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
     // 作業ディレクトリにIssue番号を持たないことがあり、落とすと合計と明細が合わなくなる。
-    // PR番号も含めてキーを作る（#2650）。issueNumberが無くprNumberだけ違う複数のPRを、
-    // 同じ「Issue未特定」行へ潰さないようにするため
-    const issueKey = `${repositoryKey}#${entry.issueNumber ?? ""}#${entry.prNumber ?? ""}`;
+    // **issueNumberがあればそれだけでキーを作る**（#2653）。同じIssueのローカルセッションと、
+    // そこから派生したPRのGitHub Actions実行（ブランチ名`issue-<N>`から`identify-issue`ジョブが
+    // issueNumberを解決できたもの）は、prNumberの有無・値が違っても同じIssueの活動としてまとめる。
+    // **issueNumberが無いときだけprNumberを使う**（#2650）。Issueへ紐付かないPR起点の実行
+    // （developへのPRレビュー等）を、複数のPRが1つの「Issue未特定」行へ潰れないよう区別するため
+    const issueKey =
+      entry.issueNumber !== null
+        ? `${repositoryKey}#${entry.issueNumber}`
+        : `${repositoryKey}##${entry.prNumber ?? ""}`;
     const issue =
       byIssue.get(issueKey) ??
       ({

@@ -136,8 +136,19 @@ scripts/session-usage.sh --all --json        # 全期間の正規化JSON
 
 **端末に入らなくても、issue-deckの画面で同じ集計を見られる**（#2504）。左メニューの
 「AI使用量」（スマホはホームのメニュー）で、合計 → 日別の推移 → リポジトリ別・種別別 →
-Issue別の明細の順に出る。**Issueの行を開くと、そのIssueで走った転記1本ごと**に種別・モデル・
+Issue・PR別の明細の順に出る。**Issueの行を開くと、そのIssueで走った転記1本ごと**に種別・モデル・
 時間帯・応答数・コンテキスト・API換算が出る。
+
+**同じIssue番号を持つ転記は、PR番号の有無・値が違っても1つの行にまとめる**（#2653）。
+そのIssueのブランチ（`issue-<番号>`）から作ったPRへのGitHub Actionsレビュー実行は、
+`identify-issue`ジョブがブランチ名からissueNumberを解決できていればprNumberも同時に持つ
+ことがあるが、`session-usage-view.ts`の`buildSessionUsageSummary`はissueNumberがあれば
+それだけでグルーピングキーを作る（`repo#issueNumber`）。**issueNumberが無いPR起点の実行
+（release PR等、#2650）だけprNumberでグルーピングする**（`repo##prNumber`）。ブランチ名が
+`issue-<番号>`の形でないPR（＝Issueへ紐付かないPR）は、この画面の集計だけからは元のIssueへ
+逆引きできない——GitHub側のクロスリファレンス（`fetchCrossReferencedPullRequestLinks`）を
+その場で呼べば分かるが、明細は多数のセッションにまたがる一覧のため、都度APIを呼ぶコストが
+見合わないと判断し見送った。
 
 **本番のissue-deck（VPS）は転記を読めない。** 転記はセッションが走るホスト（サブPC）にしか
 無く、集計する`scripts/lib/session-usage.sh`もそこにしか置けない。そのため**pollerが集計し、
@@ -191,7 +202,7 @@ Claude Codeのセッションはトークンの大半がキャッシュ読み出
 
 ### 入力側の棒は、キャッシュの読み書きで塗り分ける
 
-明細（Issue・セッション別）の棒は、**素の入力 / キャッシュ書き込み / キャッシュ読み出し / 出力**の
+明細（Issue・PR別）の棒は、**素の入力 / キャッシュ書き込み / キャッシュ読み出し / 出力**の
 4つに塗り分けている（#2628）。ローカルセッションはトークン数の9割超がキャッシュ読み出しなので、
 入力側を1色にすると「量は多いが単価は1/10」の部分が棒のほとんどを占めたまま区別が付かない。
 
