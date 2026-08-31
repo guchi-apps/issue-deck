@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.68.0",
+    date: "2026-08-31",
+    changes: [
+      "「AI使用量」画面で、Issueに紐づかない実行（developへのPull Requestのレビューなど）も内訳に表示され、対応するPull Requestを直接開けるようになりました。",
+    ],
+    usage: [
+      "1. 画面下部（スマホ）またはサイドメニュー（PC）の「AI使用量」を開く",
+      "2. 明細一覧で、Issue番号の代わりに「PR #番号」と表示されている行を確認する",
+      "3. その行のリンクアイコン（開くボタン）を押す",
+      "4. 対応するGitHubのPull Requestページが新しいタブで開けば成功",
+    ],
+  },
+  {
     version: "4.67.0",
     date: "2026-08-31",
     changes: [
