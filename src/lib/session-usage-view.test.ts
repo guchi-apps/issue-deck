@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPhaseBreakdown,
   buildSessionUsageSummary,
   formatUsageTokens,
   formatUsageUsd,
@@ -323,6 +324,97 @@ describe("sessionUsagePhaseSplit", () => {
 
   it("片方だけしか無い行もnullを返す（合算だけを信用する）", () => {
     expect(sessionUsagePhaseSplit(entry({ planCostUsd: 1.2, implementationCostUsd: null }))).toBeNull();
+  });
+});
+
+describe("buildPhaseBreakdown", () => {
+  it("GitHub Actionsの行は正確なトークンのままActionへ計上する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        source: "github-actions",
+        inputTokens: 1000,
+        cacheCreateTokens: 200,
+        cacheReadTokens: 800,
+        outputTokens: 100,
+        contextTokens: 2000,
+        costUsd: 4,
+        models: ["claude-haiku-4-5-20251001"],
+      }),
+    ]);
+
+    expect(breakdown.action).toMatchObject({
+      costUsd: 4,
+      inputTokens: 1000,
+      cacheCreateTokens: 200,
+      cacheReadTokens: 800,
+      outputTokens: 100,
+      sessions: 1,
+      models: ["claude-haiku-4-5-20251001"],
+    });
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation.sessions).toBe(0);
+  });
+
+  it("計画/実装の区分がある行は、金額はそのまま・トークンは金額比で按分する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        contextTokens: 1000,
+        outputTokens: 200,
+        costUsd: 10,
+        planCostUsd: 4,
+        implementationCostUsd: 6,
+        models: ["claude-sonnet-4-5"],
+      }),
+    ]);
+
+    // 金額は正確
+    expect(breakdown.plan.costUsd).toBe(4);
+    expect(breakdown.implementation.costUsd).toBe(6);
+    // トークンは金額比（0.4 / 0.6）で按分した近似
+    expect(breakdown.plan.contextTokens).toBeCloseTo(400);
+    expect(breakdown.plan.outputTokens).toBeCloseTo(80);
+    expect(breakdown.implementation.contextTokens).toBeCloseTo(600);
+    expect(breakdown.implementation.outputTokens).toBeCloseTo(120);
+    expect(breakdown.plan.models).toEqual(["claude-sonnet-4-5"]);
+    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5"]);
+  });
+
+  it("計画/実装の区分が無い行（Plan mode未使用）は、按分せず全額・全トークンを実装へ計上する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({
+        contextTokens: 1000,
+        outputTokens: 200,
+        costUsd: 10,
+        planCostUsd: null,
+        implementationCostUsd: null,
+      }),
+    ]);
+
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation).toMatchObject({
+      costUsd: 10,
+      contextTokens: 1000,
+      outputTokens: 200,
+      sessions: 1,
+    });
+  });
+
+  it("複数セッションのモデルを重複除去して集約する", () => {
+    const breakdown = buildPhaseBreakdown([
+      entry({ sessionId: "a", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
+      entry({ sessionId: "b", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
+      entry({ sessionId: "c", planCostUsd: null, implementationCostUsd: null, models: ["claude-opus-5"] }),
+    ]);
+
+    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5", "claude-opus-5"]);
+    expect(breakdown.implementation.sessions).toBe(3);
+  });
+
+  it("実績の無いフェーズはsessionsが0のまま返る（画面はここで行を出し分ける）", () => {
+    const breakdown = buildPhaseBreakdown([]);
+    expect(breakdown.plan.sessions).toBe(0);
+    expect(breakdown.implementation.sessions).toBe(0);
+    expect(breakdown.action.sessions).toBe(0);
   });
 });
 

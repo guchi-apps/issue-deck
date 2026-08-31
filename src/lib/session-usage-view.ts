@@ -91,7 +91,34 @@ export type UsageIssue = UsageTotals & {
   entries: SessionUsageEntry[];
   byAgent: UsageByAgent;
   bySource: UsageBySource;
+  /** 計画・実装・Actionの3分類サマリー（#2670）。 */
+  phases: UsagePhaseBreakdown;
 };
+
+export type UsagePhaseKey = "plan" | "implementation" | "action";
+
+export type UsagePhaseTotals = {
+  costUsd: number;
+  /**
+   * トークンの入力側内訳（#2628と同じ4区分）。**Actionは実測。計画・実装は按分の近似**で、
+   * 画面は計画・実装のバーをあえて単色にし、内訳（この4区分）までは出さない
+   * （`buildPhaseBreakdown`のコメント参照）。
+   */
+  inputTokens: number;
+  cacheCreateTokens: number;
+  cacheReadTokens: number;
+  contextTokens: number;
+  outputTokens: number;
+  sessions: number;
+  /**
+   * そのフェーズで使われたモデル（重複除去。出現順）。**フェーズ単位のモデル情報はDBに無い**ため、
+   * 按分元セッション（`entry.models`）をそのまま流用する。1セッション内でモデルが切り替わっていた
+   * 場合は、計画・実装の両方に同じモデルが出る
+   */
+  models: string[];
+};
+
+export type UsagePhaseBreakdown = Record<UsagePhaseKey, UsagePhaseTotals>;
 
 export type SessionUsageSummary = {
   /** 集計した期間（ISO）。`days`は日本時間の日数で、今日を含む */
@@ -178,6 +205,23 @@ function emptyByAgent(): UsageByAgent {
 
 function emptyBySource(): UsageBySource {
   return { local: emptyTotals(), "github-actions": emptyTotals() };
+}
+
+function emptyPhaseTotals(): UsagePhaseTotals {
+  return {
+    costUsd: 0,
+    inputTokens: 0,
+    cacheCreateTokens: 0,
+    cacheReadTokens: 0,
+    contextTokens: 0,
+    outputTokens: 0,
+    sessions: 0,
+    models: [],
+  };
+}
+
+function emptyPhaseBreakdown(): UsagePhaseBreakdown {
+  return { plan: emptyPhaseTotals(), implementation: emptyPhaseTotals(), action: emptyPhaseTotals() };
 }
 
 function addEntryWithAgent(
@@ -314,6 +358,7 @@ export function buildSessionUsageSummary({
         entries: [],
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        phases: emptyPhaseBreakdown(),
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
@@ -335,6 +380,7 @@ export function buildSessionUsageSummary({
       kindCost.set(entry.kind, (kindCost.get(entry.kind) ?? 0) + entry.costUsd);
     }
     issue.kinds = [...kindCost.entries()].sort((a, b) => b[1] - a[1]).map(([kind]) => kind);
+    issue.phases = buildPhaseBreakdown(issue.entries);
     return issue;
   });
   issues.sort((a, b) => b.latestStartedAt.localeCompare(a.latestStartedAt));
@@ -429,6 +475,76 @@ export function sessionUsagePhaseSplit(
     return null;
   }
   return { planCostUsd, implementationCostUsd };
+}
+
+function addPhaseModels(target: string[], models: string[]): void {
+  for (const model of models) {
+    if (!target.includes(model)) target.push(model);
+  }
+}
+
+/**
+ * Issue1件ぶんの明細（`UsageIssue["entries"]`）を、計画・実装・Actionの3分類へ畳む（#2670）。
+ *
+ * **Actionは`source`で正確に分離できる**（トークンも実測）。ローカル実行のうち
+ * `sessionUsagePhaseSplit`が区分を持つ行（Plan modeを使ったセッション）は、**金額は正確**
+ * （集計側が単価から割ったもの）だが、**トークンはDBに計画/実装別の内訳が無いため、
+ * 金額比でセッション全体のトークンを按分する**（近似）。区分を持たない行（Plan mode未使用）は
+ * 全額・全トークンをそのまま実装へ計上する（按分不要で正確）。
+ *
+ * モデルはフェーズ単位の記録が無いため、按分元セッションの`models`をそのまま両フェーズへ流用する。
+ */
+export function buildPhaseBreakdown(entries: SessionUsageEntry[]): UsagePhaseBreakdown {
+  const breakdown = emptyPhaseBreakdown();
+
+  for (const entry of entries) {
+    if (entry.source === "github-actions") {
+      const action = breakdown.action;
+      action.costUsd += entry.costUsd;
+      action.inputTokens += entry.inputTokens;
+      action.cacheCreateTokens += entry.cacheCreateTokens;
+      action.cacheReadTokens += entry.cacheReadTokens;
+      action.contextTokens += entry.contextTokens;
+      action.outputTokens += entry.outputTokens;
+      action.sessions += 1;
+      addPhaseModels(action.models, entry.models);
+      continue;
+    }
+
+    const split = sessionUsagePhaseSplit(entry);
+    if (split === null) {
+      const implementation = breakdown.implementation;
+      implementation.costUsd += entry.costUsd;
+      implementation.inputTokens += entry.inputTokens;
+      implementation.cacheCreateTokens += entry.cacheCreateTokens;
+      implementation.cacheReadTokens += entry.cacheReadTokens;
+      implementation.contextTokens += entry.contextTokens;
+      implementation.outputTokens += entry.outputTokens;
+      implementation.sessions += 1;
+      addPhaseModels(implementation.models, entry.models);
+      continue;
+    }
+
+    // トークンの按分は「概算」であることを画面が単色バーで示すだけで足りる
+    // （ユーザー判断・#2670）ため、入力/キャッシュ/出力の区分ごとには割らず、
+    // 合計（contextTokens／outputTokens）だけを金額比で按分する。
+    const planRatio = entry.costUsd > 0 ? split.planCostUsd / entry.costUsd : 0;
+    const plan = breakdown.plan;
+    plan.costUsd += split.planCostUsd;
+    plan.contextTokens += entry.contextTokens * planRatio;
+    plan.outputTokens += entry.outputTokens * planRatio;
+    plan.sessions += 1;
+    addPhaseModels(plan.models, entry.models);
+
+    const implementation = breakdown.implementation;
+    implementation.costUsd += split.implementationCostUsd;
+    implementation.contextTokens += entry.contextTokens * (1 - planRatio);
+    implementation.outputTokens += entry.outputTokens * (1 - planRatio);
+    implementation.sessions += 1;
+    addPhaseModels(implementation.models, entry.models);
+  }
+
+  return breakdown;
 }
 
 /**

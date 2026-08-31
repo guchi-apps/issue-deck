@@ -24,6 +24,8 @@ import {
   type UsageBySource,
   type UsageGroup,
   type UsageIssue,
+  type UsagePhaseKey,
+  type UsagePhaseTotals,
   type UsageTotals,
 } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
@@ -771,6 +773,108 @@ function SessionCards({
  * `buildSessionUsageSummary`）。ここでは合算した1本の横棒グラフとして出し、クリックで
  * 中の各セッションを展開する。`Breakdown`の行（リポジトリ別・種別別）と同じ描き方に揃える。
  */
+const PHASE_META: Record<UsagePhaseKey, { label: string; dotColor: string }> = {
+  plan: { label: "計画", dotColor: PHASE_COLORS.plan },
+  implementation: { label: "実装", dotColor: PHASE_COLORS.implementation },
+  action: { label: "Action", dotColor: AGENT_COLORS.actions },
+};
+
+const PHASE_ORDER: UsagePhaseKey[] = ["plan", "implementation", "action"];
+
+/**
+ * 1フェーズぶんのトークンバー（#2670）。**Actionだけ実測なので、既存の4色積み上げ
+ * （入力／キャッシュ書込／キャッシュ読出／出力）を出せる。** 計画・実装は金額比で按分した
+ * 概算（`buildPhaseBreakdown`）で、入力/出力の構成比までは分からないため、単色1本に留める
+ * ——4色に分けると、按分では出せないはずの精度があるように見えてしまう。
+ */
+function PhaseTokenBar({
+  phaseKey,
+  totals,
+  widthPercent,
+}: {
+  phaseKey: UsagePhaseKey;
+  totals: UsagePhaseTotals;
+  widthPercent: number;
+}) {
+  if (phaseKey === "action") {
+    const segments: TokenSegment[] = [
+      { key: "input", label: "入力", value: totals.inputTokens, color: TOKEN_COLORS["github-actions"].input },
+      {
+        key: "cacheCreate",
+        label: "書込",
+        value: totals.cacheCreateTokens,
+        color: TOKEN_COLORS["github-actions"].cacheCreate,
+      },
+      {
+        key: "cacheRead",
+        label: "読出",
+        value: totals.cacheReadTokens,
+        color: TOKEN_COLORS["github-actions"].cacheRead,
+      },
+      { key: "output", label: "出力", value: totals.outputTokens, color: OUTPUT_COLOR },
+    ];
+    return <TokenBar segments={segments} widthPercent={widthPercent} />;
+  }
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full opacity-70"
+        style={{ width: `${widthPercent}%`, backgroundColor: PHASE_META[phaseKey].dotColor }}
+      />
+    </div>
+  );
+}
+
+/**
+ * Issue1件ぶんの「計画・実装・Action」サマリー（#2670）。**実績が無いフェーズは行ごと出さない**
+ * （$0や0件を表示しない）。展開したセッション明細（`SessionCards`）の上に置く、Issue全体を
+ * 3分類へロールアップした集計行。
+ */
+function PhaseBreakdownRows({ phases }: { phases: UsageIssue["phases"] }) {
+  const rows = PHASE_ORDER.map((key) => ({ key, totals: phases[key] })).filter(
+    ({ totals }) => totals.sessions > 0,
+  );
+  if (rows.length === 0) return null;
+
+  const maxTokens = rows.reduce(
+    (max, { totals }) => Math.max(max, totals.contextTokens + totals.outputTokens),
+    0,
+  );
+
+  return (
+    <div className="mb-1.5 flex flex-col gap-1.5 border-b pb-2">
+      {rows.map(({ key, totals }) => {
+        const totalTokens = totals.contextTokens + totals.outputTokens;
+        const widthPercent = maxTokens > 0 ? (totalTokens / maxTokens) * 100 : 0;
+        const meta = PHASE_META[key];
+        return (
+          <div key={key} className="grid grid-cols-[3.5rem_1fr_auto] items-center gap-2 text-[11px]">
+            <span className="flex min-w-0 items-center gap-1 font-semibold">
+              <i aria-hidden className="size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: meta.dotColor }} />
+              {meta.label}
+            </span>
+            <div className="min-w-0">
+              <PhaseTokenBar phaseKey={key} totals={totals} widthPercent={widthPercent} />
+              <div className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground tabular-nums">
+                <span className="truncate">
+                  {formatUsageTokens(totalTokens)} トークン
+                  {key === "action" ? `・${totals.sessions}実行` : ""}
+                </span>
+                {totals.models.length > 0 && (
+                  <span className="hidden shrink-0 truncate rounded border bg-muted px-1 py-px text-[9px] font-medium sm:inline">
+                    {totals.models.map(sessionUsageModelLabel).join("・")}
+                  </span>
+                )}
+              </div>
+            </div>
+            <span className="text-right font-semibold tabular-nums">{formatUsageUsd(totals.costUsd)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function IssueGroupRow({
   issue,
   maxCost,
@@ -840,6 +944,7 @@ function IssueGroupRow({
       </div>
       {isOpen && (
         <div className="py-1 pr-1 pl-8">
+          <PhaseBreakdownRows phases={issue.phases} />
           <SessionCards
             sessions={sessions}
             maxTokens={sessionMaxTokens}
