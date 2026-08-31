@@ -920,6 +920,12 @@ function IssueGroupRow({
                 {issue.sessions}セッション
               </span>
             </div>
+            {/* Issue・PRのタイトル（#2686）。取得できなかった行は出さず番号のみのままにする */}
+            {issue.title && (
+              <p className="mt-0.5 truncate text-[11px] text-foreground" title={issue.title}>
+                {issue.title}
+              </p>
+            )}
             <div className="mt-1 flex flex-col gap-0.5">
               <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
               <GroupTokenBar totals={issue} maxTokens={maxTokens} />
@@ -929,18 +935,22 @@ function IssueGroupRow({
         <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
           {formatUsageUsd(issue.costUsd)}
         </span>
-        {canOpen && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="mt-1 size-5 shrink-0"
-            title={issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}
-            onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber, issue.prNumber)}
-          >
-            <ExternalLink className="size-3" />
-            <span className="sr-only">{issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}</span>
-          </Button>
-        )}
+        {/* 開けない行（Issue番号もPR番号も無い「Issue未特定」）でも同じ寸法で描き、
+            見た目とキーボード操作だけを消す（#2685）。**条件付きでDOMごと消すと**、
+            隣の`flex-1`ボタン（棒グラフを含む）がそのぶん右へ広がり、棒グラフのレールだけ
+            他の行より右に長く見えてしまう。 */}
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!canOpen}
+          aria-hidden={!canOpen}
+          className={cn("mt-1 size-5 shrink-0", !canOpen && "invisible")}
+          title={issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}
+          onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber, issue.prNumber)}
+        >
+          <ExternalLink className="size-3" />
+          <span className="sr-only">{issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}</span>
+        </Button>
       </div>
       {isOpen && (
         <div className="py-1 pr-1 pl-8">

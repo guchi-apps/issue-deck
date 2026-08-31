@@ -383,6 +383,19 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+- **「Issue・PR別」の各行が持つタイトル（`UsageIssue.title`）は、`session-usage-view.ts`の
+  純粋関数（`buildSessionUsageSummary`）では解決しない**（#2686）。この関数はDBを読まない方針
+  （ファイル冒頭のコメント）を保つため常に`null`を返し、`/api/session-usage`の`resolveIssueTitles`が
+  集計後に詰め直す。issueNumberを持つ行はDBの`Issue`テーブル（Issue一覧画面向けに既に同期済み）
+  から引くだけで追加のAPI消費が無いが、**issueNumberを持たないPR単体の行（developへのPRレビュー
+  等）だけ**GitHub API（`fetchPullRequest`）へ都度問い合わせる。この画面は自動更新を持たず
+  手動更新のみ（`use-session-usage.ts`）なので許容している。**リポジトリの突き合わせは
+  `SessionUsage.repository`が持つ「ownerを除いた短い名前」でしか行えない**
+  （`issue-deck-shell.tsx`の`openUsageIssue`と同じ前提）。
+  **開発DBのGitHub同期テーブル（Repository/Issue）は`db:seed:dev`が作るダミーデータ
+  （`ci-dummy-org/sample-repo-*`）で、実際の`SessionUsage`が持つ実リポジトリ名とは一致しない**
+  ため、通常のシードではタイトル解決を画面上で再現できない。実地確認するには開発DBへ
+  実リポジトリ名に対応するRepository・Issueレコードを一時的に作り、確認後に削除する必要がある。
 - **「Issue・PR別」の計画／実装／Actionサマリー（`buildPhaseBreakdown`）は、計画・実装の
   トークンを金額比で按分した概算**（#2670）。`SessionUsage`は`planCostUsd`/`implementationCostUsd`
   （**金額**の内訳のみ、`scripts/lib/session-usage.sh`の`ExitPlanMode`呼び出し時刻を境に分けたもの）
@@ -2882,6 +2895,29 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
 - **jsdomで再現できる。** `hasPointerCapture`等を補ったうえで、メニュー項目へ
   `fireEvent.pointerMove(..., { pointerType: "mouse" })`を送るとRadixが`focus()`を呼び、
   直す前のコードでは選択肢が消える（`issue-detail.render.test.tsx`）
+
+## 条件付きで消えるアイコンボタンは、隣の`flex-1`要素の幅を変えてしまう（#2685）
+
+**幅%ベースの棒グラフ・進捗バーを`flex-1`要素の中に置き、その隣に条件付きレンダリング
+（`{condition && <Button/>}`）のアイコンボタンを並べると、ボタンが消える行だけ`flex-1`要素が
+広がり、中の棒グラフの見た目の長さが他の行とそろわなくなる。** 「AI使用量」画面の
+「Issue・PR別」一覧（[`session-usage-panel.tsx`](../src/components/dashboard/session-usage-panel.tsx)の
+`IssueGroupRow`）で、Issue番号もPR番号も特定できない行だけ「Issueを開く」ボタンがDOMごと
+無く、棒グラフのレールだけ右へ伸びていた。
+
+- **直し方はボタンをDOMごと消さず、常に同じ寸法で描画したうえで`disabled`・
+  `aria-hidden`・`invisible`クラスで見た目とキーボード操作だけを消す。** 同じパターンは
+  [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
+  Chevronなど他にもある
+- **jsdomのテストで`invisible`クラス自体は検証できない**（テスト環境にTailwindのCSSは
+  適用されないため）。存在確認とインタラクション不能の確認は`aria-hidden="true"`・
+  `disabled`属性で行う。デフォルトの`getByRole("button", ...)`は`aria-hidden`要素を
+  自動で除外するため、見えるボタンだけを数える既存の書き方はそのまま通る
+- **`Button`の`size="icon"`（`size-11 md:size-8`）に`className="size-N"`を渡すと、
+  ブレークポイントによって実際の寸法が変わりうる**（`tailwind-merge`は`md:`付きクラスと
+  無印クラスを別グループとして扱うため、無印側だけ上書きされ`md:`側は残る）。
+  プレースホルダーを別要素で用意せず**実ボタンと同じ`<Button>`をそのまま常時描画**すれば、
+  この挙動があっても寸法は常に一致する
 
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 

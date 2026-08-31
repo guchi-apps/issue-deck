@@ -253,6 +253,30 @@ describe("SessionUsagePanel", () => {
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 2504, null);
   });
 
+  it("Issueを開けない行にも、他の行と棒グラフの右端をそろえる同じ寸法のプレースホルダーを描く（#2685）", () => {
+    const onOpenIssue = vi.fn();
+    renderPanel(
+      response([
+        entry({ sessionId: "impl" }),
+        entry({ sessionId: "q", kind: "question", repository: null, issueNumber: null, costUsd: 1 }),
+      ]),
+      { onOpenIssue },
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    // 見えるボタンは開ける行の1つだけだが（既存テストのとおり）、開けない行にも
+    // 同じ`<Button>`がDOMには存在し、`aria-hidden`で隠れているだけ（＝棒グラフの
+    // 右端をそろえるための幅を確保している）。`title`属性はaria-hiddenでも
+    // DOMに残るため、これで両方の行のボタンを拾う。
+    const allOpenButtons = within(detail).getAllByTitle(/を開く/);
+    expect(allOpenButtons).toHaveLength(2);
+    const hiddenButton = allOpenButtons.find(
+      (button) => button.getAttribute("aria-hidden") === "true",
+    );
+    expect(hiddenButton).toBeTruthy();
+    expect((hiddenButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("Issue番号が無くPR番号だけの行は「PR #番号」と表示し、PRを開く導線を出す（#2650）", () => {
     const onOpenIssue = vi.fn();
     renderPanel(
@@ -274,6 +298,21 @@ describe("SessionUsagePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "PRを開く" }));
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", null, 2648);
+  });
+
+  it("タイトルを解決できた行は番号の下に表示し、解決できない行は出さない（#2686）", () => {
+    const data = response([entry({ sessionId: "impl" })]);
+    data.byIssue[0].title = "AI使用量画面にissue・PR別のタイトル表示機能を追加";
+
+    renderPanel(data);
+
+    expect(screen.getByText("AI使用量画面にissue・PR別のタイトル表示機能を追加")).toBeTruthy();
+  });
+
+  it("タイトルを解決できていない行はタイトルの表示を出さない（#2686）", () => {
+    const { container } = renderPanel(response([entry({ sessionId: "impl" })]));
+
+    expect(container.querySelector("p.truncate")).toBeNull();
   });
 
   it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {

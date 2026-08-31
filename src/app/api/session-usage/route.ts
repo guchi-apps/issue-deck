@@ -4,10 +4,13 @@ import { requireUserId } from "@/lib/auth-user";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
+import { getInstallationToken } from "@/lib/github/app-auth";
+import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
   buildSessionUsageSummary,
   sessionUsagePeriodStartMs,
   type SessionUsageEntry,
+  type UsageIssue,
 } from "@/lib/session-usage-view";
 
 /**
@@ -104,6 +107,97 @@ function toEntry(row: {
   };
 }
 
+/**
+ * 「Issue・PR別」一覧のタイトル解決（#2686）。**この関数だけがDBの`Issue`テーブル・GitHub APIを
+ * 読む**——`buildSessionUsageSummary`はDBを読まない純粋関数のままにするため、集計後にここで
+ * `issue.title`を詰め直す。
+ *
+ * issueNumberを持つ行はDBの`Issue`テーブル（Issue一覧画面向けに既に同期済み）から引くだけで、
+ * 追加のAPI消費が無い。**issueNumberを持たないPR単体の行（developへのPRレビュー等）だけ**
+ * GitHub APIへ都度問い合わせる——この画面は自動更新を持たず手動更新のみ（`use-session-usage.ts`）
+ * なので、都度取得でもレート制限への影響は小さい。
+ *
+ * **リポジトリの突き合わせは`SessionUsage.repository`が持つ「ownerを除いた短い名前」でしか
+ * 行えない**（`issue-deck-shell.tsx`の`openUsageIssue`と同じ前提）。取得できなかった行は
+ * `title`をnullのままにし、画面は番号のみの表示にフォールバックする。
+ */
+async function resolveIssueTitles(issues: UsageIssue[]): Promise<void> {
+  const repositoryNames = [
+    ...new Set(issues.flatMap((issue) => (issue.repository ? [issue.repository] : []))),
+  ];
+  if (repositoryNames.length === 0) return;
+
+  const repositories = await db.repository.findMany({
+    where: { name: { in: repositoryNames } },
+    select: {
+      id: true,
+      name: true,
+      ownerLogin: true,
+      installation: { select: { installationId: true } },
+    },
+  });
+  const repositoryByName = new Map(repositories.map((repository) => [repository.name, repository]));
+
+  // issueNumberを持つ行はDBの同期済みIssueテーブルから引く（追加のAPI消費なし）。
+  const repositoryIds = repositories.map((repository) => repository.id);
+  const issueNumbers = issues.flatMap((issue) => (issue.issueNumber !== null ? [issue.issueNumber] : []));
+  const dbIssues =
+    repositoryIds.length > 0 && issueNumbers.length > 0
+      ? await db.issue.findMany({
+          where: { repositoryId: { in: repositoryIds }, number: { in: issueNumbers } },
+          select: { repositoryId: true, number: true, title: true },
+        })
+      : [];
+  const titleByRepoIdAndNumber = new Map(
+    dbIssues.map((row) => [`${row.repositoryId}#${row.number}`, row.title]),
+  );
+
+  for (const issue of issues) {
+    if (issue.issueNumber === null || !issue.repository) continue;
+    const repository = repositoryByName.get(issue.repository);
+    if (!repository) continue;
+    issue.title = titleByRepoIdAndNumber.get(`${repository.id}#${issue.issueNumber}`) ?? null;
+  }
+
+  // issueNumberを持たないPR単体の行だけ、GitHub APIへ都度問い合わせる。
+  // 同一installationのリポジトリ間でトークン取得を使い回す（`conflict-sweep-run.ts`と同じ）。
+  const tokenPromises = new Map<number, Promise<string>>();
+  function tokenFor(installationId: number): Promise<string> {
+    let token = tokenPromises.get(installationId);
+    if (!token) {
+      token = getInstallationToken(installationId);
+      tokenPromises.set(installationId, token);
+    }
+    return token;
+  }
+
+  const prIssues = issues.filter(
+    (issue) => issue.issueNumber === null && issue.prNumber !== null && issue.repository,
+  );
+  await Promise.all(
+    prIssues.map(async (issue) => {
+      const repository = repositoryByName.get(issue.repository as string);
+      if (!repository) return;
+      try {
+        const token = await tokenFor(repository.installation.installationId);
+        const pullRequest = await fetchPullRequest(
+          repository.ownerLogin,
+          repository.name,
+          issue.prNumber as number,
+          token,
+        );
+        issue.title = pullRequest.title;
+      } catch (error) {
+        // タイトルが無くても使用量本体（金額・トークン）の表示は止めない（#2686）。
+        console.error(
+          `[session-usage] PRタイトルの取得に失敗: ${issue.repository}#${issue.prNumber}`,
+          error,
+        );
+      }
+    }),
+  );
+}
+
 export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
@@ -165,6 +259,8 @@ export async function GET(request: NextRequest) {
     days,
     reportedAt: reportedAt?.toISOString() ?? null,
   });
+
+  await resolveIssueTitles(summary.byIssue);
 
   return NextResponse.json(
     {
