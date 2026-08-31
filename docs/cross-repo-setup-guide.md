@@ -1327,6 +1327,30 @@ scripts/check-duplicate-secret-values.sh
 `scripts/provision-secret.sh --copy-from`はこの複製を作る操作なので、既定で断るようにしてある
 （値の性質上どうしても複製が要ると判断したときだけ`--allow-duplicate`）。
 
+#### 複製は構成の一覧では見つからない
+
+**マニフェストを読むだけでは検出できない。** 複製された値は`op://`が別々なので、参照の一覧として
+見るかぎり普通の1対1の参照に見える。共有知識の1Password台帳（`guchi-apps/docs`の
+`scripts/build-1password-inventory.py`）も、実値を持たない方針から**構成だけを取得して値を読まない**
+ため、この種の複製は出てこない。**値を読んで突き合わせるまで分からない**というのがこの問題の性質で、
+`check-duplicate-secret-values.sh`が値を読むのはそのため。
+
+読むときの落とし穴が2つある。
+
+- `op item get --format json`は、伏せ字のフィールド（`concealed`）の値を返さない。**`--reveal`が要る**
+- SSH鍵アイテムの`private_key`のような組み込みフィールドは`.fields[].label`に現れない。
+  **フィールド一覧に無い＝存在しない、ではない**（`op://apps/githubaction-sshkey/private_key`を
+  不在と誤検出した）。一覧に無いものだけを`op read`で確かめる形にしてある
+
+#### 不要になったフィールドの削除は手作業
+
+**サービスアカウントでは消せない。** 共有知識の`scripts/delete-1password-fields.sh`は、
+`op whoami`がサービスアカウントなら明示的に中断する。書き込み権限つきのトークン
+（`~/.config/issue-deck/op-writer.env`）を読み込んでも同じで、人の`op signin`が要る。
+参照の付け替えはPRで進められるが、**残ったフィールドの掃除は`71.manual-step`のIssueとして
+1Passwordアプリでの操作で残す**（#2417と同じ理由）。読み取りだけの確認コマンドは
+サービスアカウントで代行できるので、完了の確認は自動で回せる。
+
 ### issue-deck固有: デプロイ用のSecrets・Variables（#1302）
 
 `deploy.yml`・`release.yml`・`ci.yml`が使う値は、以前は実行のたびに1Passwordから取得していた。
