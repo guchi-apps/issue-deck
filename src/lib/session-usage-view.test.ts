@@ -34,6 +34,7 @@ function entry(overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry {
     kind: "implementation",
     repository: "issue-deck",
     issueNumber: 2504,
+    prNumber: null,
     responses: 10,
     inputTokens: 100,
     cacheCreateTokens: 200,

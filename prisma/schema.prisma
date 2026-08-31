@@ -1479,6 +1479,9 @@ model SessionUsage {
   repository String? @db.VarChar(191)
   /// 対象Issue番号。計画レビュー・横断質問など紐づかないセッションではnull
   issueNumber Int?
+  /// 対象PR番号。issueに紐づかないPR起点の実行（developへのPRレビュー等）で、
+  /// issueNumberが取れない・特定できない場合に使う。両方nullのこともある
+  prNumber Int?
   /// ActionsのJob Summaryに表示するワークフロー名。ローカル行はnull
   workflowName String? @db.VarChar(191)
   /// Actionsの実行URL。ローカル行はnull、画面の明細から開くために持つ

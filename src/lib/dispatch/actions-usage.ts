@@ -9,6 +9,7 @@ export type ActionsUsageReport = {
   runUrl: string | null;
   workflowName: string | null;
   issueNumber: number | null;
+  prNumber: number | null;
   stepName: string;
   responses: number;
   inputTokens: number;
@@ -54,12 +55,16 @@ export function parseActionsUsageReport(value: unknown): ActionsUsageReport | nu
   const rawIssue = input.issueNumber;
   const issueNumber = rawIssue === null || rawIssue === undefined ? null : nonNegativeInteger(rawIssue);
   if (rawIssue !== null && rawIssue !== undefined && (!issueNumber || issueNumber <= 0)) return null;
+  const rawPr = input.prNumber;
+  const prNumber = rawPr === null || rawPr === undefined ? null : nonNegativeInteger(rawPr);
+  if (rawPr !== null && rawPr !== undefined && (!prNumber || prNumber <= 0)) return null;
   return {
     repository,
     runId,
     runUrl: stringValue(input.runUrl, 500),
     workflowName: stringValue(input.workflowName, 191),
     issueNumber,
+    prNumber,
     stepName,
     responses,
     inputTokens,
@@ -89,7 +94,7 @@ export async function storeActionsUsage(reports: ActionsUsageReport[], reportedA
         host: "github-actions", agent: "claude", source: "github-actions", sessionId,
         transcript: report.runUrl ?? "github-actions", kind: "actions",
         repository: report.repository.split("/").at(-1) ?? report.repository,
-        issueNumber: report.issueNumber, workflowName: report.workflowName, runUrl: report.runUrl,
+        issueNumber: report.issueNumber, prNumber: report.prNumber, workflowName: report.workflowName, runUrl: report.runUrl,
         responses: report.responses, inputTokens: BigInt(report.inputTokens),
         cacheCreate5mTokens: BigInt(report.cacheCreateTokens), cacheCreate1hTokens: BigInt(0),
         cacheReadTokens: BigInt(report.cacheReadTokens), outputTokens: BigInt(report.outputTokens),
@@ -98,7 +103,7 @@ export async function storeActionsUsage(reports: ActionsUsageReport[], reportedA
       },
       update: {
         transcript: report.runUrl ?? "github-actions", workflowName: report.workflowName, runUrl: report.runUrl,
-        issueNumber: report.issueNumber, responses: report.responses, inputTokens: BigInt(report.inputTokens),
+        issueNumber: report.issueNumber, prNumber: report.prNumber, responses: report.responses, inputTokens: BigInt(report.inputTokens),
         cacheCreate5mTokens: BigInt(report.cacheCreateTokens), cacheReadTokens: BigInt(report.cacheReadTokens),
         outputTokens: BigInt(report.outputTokens), costUsd: report.costUsd, models: JSON.stringify(report.models),
         startedAt: report.startedAt, endedAt: report.endedAt, reportedAt,

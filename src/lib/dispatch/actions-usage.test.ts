@@ -42,6 +42,17 @@ describe("GitHub ActionsのAI使用量報告", () => {
     expect(parseActionsUsageReport(report(overrides))).toBeNull();
   });
 
+  it("PR番号も受け取る（#2650。issueNumberが取れないPR起点の実行用）", () => {
+    expect(
+      parseActionsUsageReport(report({ issueNumber: null, prNumber: 2648 })),
+    ).toMatchObject({ issueNumber: null, prNumber: 2648 });
+  });
+
+  it("PR番号が0以下・数値以外なら破棄する", () => {
+    expect(parseActionsUsageReport(report({ prNumber: 0 }))).toBeNull();
+    expect(parseActionsUsageReport(report({ prNumber: "2648" }))).toBeNull();
+  });
+
   it("1回の報告上限を超えた本文は受け付けない", () => {
     const reports = Array.from({ length: 21 }, (_unused, index) => report({ runId: String(index) }));
     expect(parseActionsUsagePayload({ reports })).toBeNull();

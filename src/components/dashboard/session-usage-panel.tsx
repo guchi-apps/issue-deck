@@ -66,10 +66,11 @@ type SessionUsagePanelProps = {
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   /**
-   * Issueを開く。リポジトリ名（ownerを除く）とIssue番号を渡す。
+   * IssueまたはPRを開く。リポジトリ名（ownerを除く）と、Issue番号・PR番号を渡す
+   * （#2650。issueNumberがあればそちらを優先し、無ければprNumberでPRを開く。両方nullでは呼ばれない）。
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
-  onOpenIssue?: (repository: string, issueNumber: number) => void;
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
   /**
    * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
    * **セッションの使用量とは出どころが違う**——上の集計はサブPCのpollerが押し込む記録だが、
@@ -655,15 +656,24 @@ function SessionName({
   issue,
   entry,
   onOpenIssue,
-}: SessionRow & { onOpenIssue?: (repository: string, issueNumber: number) => void }) {
+}: SessionRow & {
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+}) {
   const repository = issue.repository ?? "(不明)";
-  const canOpen = Boolean(onOpenIssue && issue.repository && issue.issueNumber);
+  const canOpen = Boolean(onOpenIssue && issue.repository && (issue.issueNumber || issue.prNumber));
+  // issueNumberがあればIssue表示、無くprNumberがあればPR表示。両方無ければ未特定（#2650）
+  const label =
+    issue.issueNumber !== null
+      ? `#${issue.issueNumber}`
+      : issue.prNumber !== null
+        ? `PR #${issue.prNumber}`
+        : "（Issue未特定）";
   return (
     <div className="flex items-start gap-1.5">
       <span aria-hidden className="mt-1 size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: getRepoColor(repository) }} />
       <div className="min-w-0">
         <div className="truncate font-semibold text-foreground">
-          {issue.issueNumber === null ? "（Issue未特定）" : `#${issue.issueNumber}`} {repository}
+          {label} {repository}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
           <span className="truncate">
@@ -682,7 +692,18 @@ function SessionName({
           ))}
         </div>
       </div>
-      {canOpen && <Button variant="ghost" size="icon" className="size-5 shrink-0" title="Issueを開く" onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber as number)}><ExternalLink className="size-3" /><span className="sr-only">Issueを開く</span></Button>}
+      {canOpen && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-5 shrink-0"
+          title={issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}
+          onClick={() => onOpenIssue?.(issue.repository as string, issue.issueNumber, issue.prNumber)}
+        >
+          <ExternalLink className="size-3" />
+          <span className="sr-only">{issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}</span>
+        </Button>
+      )}
       {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
     </div>
   );
@@ -704,7 +725,7 @@ function SessionCards({
   maxTokens: number;
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
-  onOpenIssue?: (repository: string, issueNumber: number) => void;
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 }) {
   return (
     <ul className="flex flex-col gap-2">
@@ -760,7 +781,7 @@ function SessionTable({
   unit: SessionUsageUnit;
   quotas: QuotaByAgent;
   compact: boolean;
-  onOpenIssue?: (repository: string, issueNumber: number) => void;
+  onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 }) {
   const sessions = issues.flatMap((issue) =>
     issue.entries.map((entry) => ({ issue, entry })),

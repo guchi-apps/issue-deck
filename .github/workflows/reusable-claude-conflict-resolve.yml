@@ -514,10 +514,16 @@ jobs:
       - name: Claude使用量をJob Summaryに出力する（Claude Code（コンフリクト解消））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        #
+        # ISSUE_NUMBER・PR_NUMBERはこれまで渡していなかったため、使用量の明細が常に
+        # 「（Issue未特定）」になっていた(#2650)。matrix.issue・steps.state.outputs.pr_numberは
+        # このジョブが既に持っている値をそのまま渡す。
         if: always() && steps.claude_conflict.outputs.execution_file != ''
         env:
           AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ matrix.issue }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
         run: |
           # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
           # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
