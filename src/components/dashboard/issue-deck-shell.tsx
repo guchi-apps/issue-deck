@@ -155,8 +155,10 @@ type IssueDeckShellProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  claudeLocalModel: ClaudeModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
+  appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
   /** `issues`をサーバー側で取った時刻（#1797）。一覧のヘッダーの「HH:MM時点」の初期値になる */
   issuesFetchedAt: string;
@@ -170,8 +172,10 @@ export function IssueDeckShell({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
   appAiModel: initialAppAiModel,
+  appAiModelReasoning: initialAppAiModelReasoning,
   dispatchConcurrency: initialDispatchConcurrency,
 }: IssueDeckShellProps) {
   const {
@@ -231,8 +235,12 @@ export function IssueDeckShell({
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [claudeLocalModel, setClaudeLocalModel] =
+    useState<ClaudeModel>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
+  const [appAiModelReasoning, setAppAiModelReasoning] =
+    useState<AppAiModel>(initialAppAiModelReasoning);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -242,8 +250,10 @@ export function IssueDeckShell({
     setAutoRetryLimit(next.autoRetryLimit);
     setClaudeModel(next.claudeModel);
     setClaudeModelAssist(next.claudeModelAssist);
+    setClaudeLocalModel(next.claudeLocalModel);
     setCodexModel(next.codexModel);
     setAppAiModel(next.appAiModel);
+    setAppAiModelReasoning(next.appAiModelReasoning);
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
@@ -1606,8 +1616,10 @@ export function IssueDeckShell({
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
                   claudeModelAssist={claudeModelAssist}
+                  claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   appAiModel={appAiModel}
+                  appAiModelReasoning={appAiModelReasoning}
                   dispatchConcurrency={dispatchConcurrency}
                   repositories={repositories}
                   onSetRepositoryHidden={handleSetRepositoryHidden}
@@ -2003,8 +2015,10 @@ export function IssueDeckShell({
           autoRetryLimit={autoRetryLimit}
           claudeModel={claudeModel}
           claudeModelAssist={claudeModelAssist}
+          claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
           appAiModel={appAiModel}
+          appAiModelReasoning={appAiModelReasoning}
           dispatchConcurrency={dispatchConcurrency}
           repositories={repositories}
           onSetRepositoryHidden={handleSetRepositoryHidden}

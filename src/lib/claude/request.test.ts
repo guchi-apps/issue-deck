@@ -20,7 +20,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe("callClaudeMessages", () => {
   beforeEach(() => {
-    findUnique.mockResolvedValue({ appAiModel: "claude-haiku-4-5" });
+    findUnique.mockResolvedValue({
+      appAiModel: "claude-haiku-4-5",
+      appAiModelReasoning: "claude-haiku-4-5",
+    });
     resetClaudeApiUsage();
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -145,8 +148,33 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5");
   });
 
+  it("原因診断・新規アプリ相談だけ判断用モデルを使う", async () => {
+    findUnique.mockResolvedValue({
+      appAiModel: "claude-haiku-4-5",
+      appAiModelReasoning: "claude-sonnet-5",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({
+      feature: "new_app_consult",
+      token: "test-token",
+      body: { max_tokens: 8, messages: [] },
+    });
+    await callClaudeMessages({
+      feature: "issue_summary",
+      token: "test-token",
+      body: { max_tokens: 8, messages: [] },
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-sonnet-5");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
+  });
+
   it("GPTモデルはResponses APIへ変換し、応答を既存形式へ正規化する", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-terra" });
+    findUnique.mockResolvedValue({ appAiModelReasoning: "gpt-5.6-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

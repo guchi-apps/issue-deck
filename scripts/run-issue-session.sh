@@ -952,6 +952,9 @@ AGENT_LAUNCH_ARGS=()
 if [[ "$AGENT_KIND" == "claude" ]]; then
   PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
   AGENT_LAUNCH_ARGS=(--permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"})
+  if [[ -n "${ISSUE_DECK_CLAUDE_MODEL:-}" ]]; then
+    AGENT_LAUNCH_ARGS+=(--model "$ISSUE_DECK_CLAUDE_MODEL")
+  fi
   echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 else
   # 第2引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**

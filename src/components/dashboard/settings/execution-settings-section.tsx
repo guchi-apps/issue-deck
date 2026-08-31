@@ -30,8 +30,10 @@ export type AppSettingsValues = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  claudeLocalModel: ClaudeModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
+  appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
 };
 
@@ -39,8 +41,10 @@ type ExecutionSettingsSectionProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
+  claudeLocalModel: ClaudeModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
+  appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
   // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
   onUpdated: (values: AppSettingsValues) => void;
@@ -57,8 +61,10 @@ export function ExecutionSettingsSection({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   claudeModelAssist: initialClaudeModelAssist,
+  claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
   appAiModel: initialAppAiModel,
+  appAiModelReasoning: initialAppAiModelReasoning,
   dispatchConcurrency: initialDispatchConcurrency,
   onUpdated,
 }: ExecutionSettingsSectionProps) {
@@ -68,8 +74,12 @@ export function ExecutionSettingsSection({
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
+  const [claudeLocalModel, setClaudeLocalModel] =
+    useState<ClaudeModel>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
+  const [appAiModelReasoning, setAppAiModelReasoning] =
+    useState<AppAiModel>(initialAppAiModelReasoning);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -90,8 +100,10 @@ export function ExecutionSettingsSection({
     autoRetryLimit !== initialAutoRetryLimit ||
     claudeModel !== initialClaudeModel ||
     claudeModelAssist !== initialClaudeModelAssist ||
+    claudeLocalModel !== initialClaudeLocalModel ||
     codexModel !== initialCodexModel ||
     appAiModel !== initialAppAiModel ||
+    appAiModelReasoning !== initialAppAiModelReasoning ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
   async function handleSubmit() {
@@ -101,8 +113,10 @@ export function ExecutionSettingsSection({
     const claudeModelOk = await updateClaudeModel(
       claudeModel,
       claudeModelAssist,
+      claudeLocalModel,
       codexModel,
       appAiModel,
+      appAiModelReasoning,
     );
     if (!claudeModelOk) return;
     const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
@@ -111,8 +125,10 @@ export function ExecutionSettingsSection({
       autoRetryLimit,
       claudeModel,
       claudeModelAssist,
+      claudeLocalModel,
       codexModel,
       appAiModel,
+      appAiModelReasoning,
       dispatchConcurrency,
     });
     setIsSaved(true);
@@ -143,7 +159,7 @@ export function ExecutionSettingsSection({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="claude-model">使用するモデル（実装・計画）</Label>
+        <Label htmlFor="claude-model">GitHub Actions（Claude）：計画・実装・レビュー</Label>
         <Select value={claudeModel} onValueChange={(value) => setClaudeModel(value as ClaudeModel)}>
           <SelectTrigger id="claude-model" className="w-full">
             <SelectValue />
@@ -157,13 +173,13 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          計画の立案と実装・PR作成で使用するモデルです。「自動」の場合はモデルを指定せず、Claude
-          Code Action側のデフォルトモデルが使われます。全リポジトリ共通の設定です。
+          GitHub Actionsで計画を作り、計画をレビューし、実装してPRを作る処理に使います。
+          通常はSonnet、難しい設計を優先する場合はOpusが適しています。全リポジトリ共通です。
         </p>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="claude-model-assist">使用するモデル（補助処理）</Label>
+        <Label htmlFor="claude-model-assist">GitHub Actions（Claude）：質問回答・Issue分割</Label>
         <Select
           value={claudeModelAssist}
           onValueChange={(value) => setClaudeModelAssist(value as ClaudeModel)}
@@ -180,13 +196,35 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          質問への回答とサブIssueへの分割で使用するモデルです。実装ほどの精度を必要としないため、
-          より軽いモデルを選ぶとコストを抑えられます。
+          GitHub Actionsで質問へ回答し、大きなIssueを分割する処理に使います。通常はHaikuで十分です。
         </p>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="codex-model">Codexで使用するモデル</Label>
+        <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
+        <Select
+          value={claudeLocalModel}
+          onValueChange={(value) => setClaudeLocalModel(value as ClaudeModel)}
+        >
+          <SelectTrigger id="claude-local-model" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CLAUDE_MODEL_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          サブPCで新しく起動するClaude Codeセッションに使います。1つのセッションで計画から実装まで
+          進めるため、通常はSonnetが適しています。全リポジトリ共通です。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="codex-model">Codex：サブPCでの計画・実装</Label>
         <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModel)}>
           <SelectTrigger id="codex-model" className="w-full">
             <SelectValue />
@@ -200,14 +238,13 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          サブPCで新しく起動するCodex
-          CLIセッションのモデルです。「自動」の場合はモデルを指定せず、Codex
-          CLI側のデフォルトモデルが使われます。全リポジトリ共通の設定です。
+          サブPCで新しく起動するCodex CLIセッションに使います。通常はTerra、難しいIssueはSol、
+          単純な修正を優先する場合はLunaが適しています。全リポジトリ共通です。
         </p>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="app-ai-model">アプリ内AI機能で使用するモデル</Label>
+        <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
           <SelectTrigger id="app-ai-model" className="w-full">
             <SelectValue />
@@ -221,9 +258,31 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          Issueの要約・検索・文章整理・手作業の診断など、アプリが直接実行するAI機能で使います。GPTモデルはOpenAI
-          API、ClaudeモデルはAnthropic APIの認証情報を使用します。
-          高性能なモデルほど応答品質が上がる一方、処理時間とAPI消費量が増える場合があります。
+          Issueとコメントの要約、類似Issue検索、本文整理、並び替え、Issue作成補助に使います。
+          定型処理が中心のため、通常はHaikuが適しています。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
+        <Select
+          value={appAiModelReasoning}
+          onValueChange={(value) => setAppAiModelReasoning(value as AppAiModel)}
+        >
+          <SelectTrigger id="app-ai-model-reasoning" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {APP_AI_MODEL_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
+          通常はSonnetが適しています。GPTを選ぶとOpenAI API、Claudeを選ぶとAnthropic APIを使います。
         </p>
       </div>
 

@@ -2706,7 +2706,7 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command
-  local placeholder_values resolved_command agent codex_model
+  local placeholder_values resolved_command agent claude_local_model codex_model
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2726,6 +2726,8 @@ run_job() {
   # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
   # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
   agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
+  # 設定画面で選んだサブPCのClaudeモデル。古いissue-deckは返さないため、その場合はauto。
+  claude_local_model="$(printf '%s' "$job_json" | jq -r '.claudeLocalModel // "auto"')"
   # 設定画面で選んだCodexモデル（#2550）。古いissue-deckは返さないため、その場合はauto。
   # `auto`はランチャーへ環境変数を渡さず、Codex CLI側の既定モデルに委ねる。
   codex_model="$(printf '%s' "$job_json" | jq -r '.codexModel // "auto"')"
@@ -2905,6 +2907,9 @@ run_job() {
   # （#2377）。**引数ではなく環境変数で渡す**のは、この指定を解釈しないリポジトリのランチャーへ
   # 届いても無害にするため（未知のフラグはissue番号として扱われて失敗する。#1076と同じ理由）。
   local -a launch_env=(env "ISSUE_DECK_AGENT=$agent")
+  if [[ "$agent" == "claude" && "$claude_local_model" != "auto" ]]; then
+    launch_env+=("ISSUE_DECK_CLAUDE_MODEL=$claude_local_model")
+  fi
   if [[ "$agent" == "codex" && "$codex_model" != "auto" ]]; then
     launch_env+=("ISSUE_DECK_CODEX_MODEL=$codex_model")
   fi

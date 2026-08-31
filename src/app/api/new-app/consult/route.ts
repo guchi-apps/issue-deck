@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const token = await getAppAiToken();
+  const token = await getAppAiToken("new_app_consult");
   if (!token) {
     return NextResponse.json({ error: "not_configured" }, { status: 501 });
   }
