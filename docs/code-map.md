@@ -3142,6 +3142,11 @@ pnpm test:unit   # vitestのみ
 マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
 
+**他のアプリと共有する認証値を足すときは、提供側の`op://`をそのまま参照する**（#2624）。
+利用側のアイテムへ同じ値を入れ直すと、片方だけ入れ替えた時点で連携が黙って止まる。
+複製と参照先の不在は`scripts/check-duplicate-secret-values.sh`が検出する（判断基準は
+[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「アプリ間で共有する認証値は提供側の`op://`を参照する」）。
+
 ワークフローが実行時に値を組み立てる経路は`.github/actions/load-secrets`（複合アクション）にある。
 マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
