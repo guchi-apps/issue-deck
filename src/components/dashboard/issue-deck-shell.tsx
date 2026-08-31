@@ -33,6 +33,7 @@ import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-de
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
 import { MobileRepoIssuesScreen } from "@/components/dashboard/mobile/mobile-repo-issues-screen";
 import { MobileReposScreen } from "@/components/dashboard/mobile/mobile-repos-screen";
+import { MobileScreenFab } from "@/components/dashboard/mobile/mobile-screen-fab";
 import { MobilePullRequestDetailScreen } from "@/components/dashboard/mobile/mobile-pull-request-detail-screen";
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
@@ -1366,6 +1367,21 @@ export function IssueDeckShell({
   // 設定画面のように、フッターに対応するタブが無い画面ではnullになる（#1638）
   const activeBottomNavTab: MobileBottomNavTab | null = resolveBottomNavTab(mobileScreen);
 
+  // 右下の操作ボタン（`MobileScreenFab`、#2660）。リポジトリ別Issue一覧・Issue詳細では
+  // そのリポジトリへの質問・作成にする（PC/一覧と同じ挙動）。それ以外はリポジトリ横断
+  const mobileFabRepositoryFullName =
+    mobileScreen.kind === "repo-detail"
+      ? mobileScreen.repository.fullName
+      : mobileScreen.kind === "issue-detail"
+        ? mobileScreen.issue.repositoryFullName
+        : undefined;
+  // 下端に絞り込み行・ビュー切り替え行がある画面は、その帯を避けてボタンを上げる（#1645）。
+  // PR一覧は`filters.pr`が無いとき（一覧そのもの）だけ帯があり、詳細ドリルダウン中は無い
+  const mobileFabRaised =
+    mobileScreen.kind === "issues" ||
+    mobileScreen.kind === "repo-detail" ||
+    (mobileScreen.kind === "pull-requests" && !filters.pr);
+
   return (
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
@@ -1439,7 +1455,7 @@ export function IssueDeckShell({
         <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
           {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
           <div className="flex flex-1 flex-col overflow-hidden md:hidden">
-            <div className="flex-1 overflow-hidden">
+            <div className="relative flex-1 overflow-hidden">
               {mobileScreen.kind === "home" && (
                 <MobileHomeScreen
                   overviewStats={overviewStats}
@@ -1457,8 +1473,6 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
-                  onCreateIssue={() => openCreateDialog()}
-                  onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   onLaunchNewApp={() => setNewAppDialogOpen(true)}
                   onOpenSettings={selectMobileSettings}
                 />
@@ -1583,8 +1597,6 @@ export function IssueDeckShell({
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
-                  onCreateIssue={() => openCreateDialog()}
-                  onAskCrossRepoQuestion={() => openCrossRepoQuestionDialog()}
                   /* タブから直接開いたとき以外は戻る導線を出す（#525・#1951） */
                   onBack={mobileScreen.origin === "tab" ? undefined : goBack}
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
@@ -1653,10 +1665,6 @@ export function IssueDeckShell({
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
                   onBack={goBack}
-                  onCreateIssue={() => openCreateDialog(mobileScreen.repository.fullName)}
-                  onAskCrossRepoQuestion={() =>
-                    openCrossRepoQuestionDialog(mobileScreen.repository.fullName)
-                  }
                   onRefresh={issuePolling.refresh}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
@@ -1679,7 +1687,6 @@ export function IssueDeckShell({
                   onIssueUpdated={handleIssueUpdated}
                   onIssueDeleted={handleIssueDeleted}
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
-                  onCreateIssue={(repositoryFullName) => openCreateDialog(repositoryFullName)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
@@ -1690,6 +1697,16 @@ export function IssueDeckShell({
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
                   onStartManualStepGuide={manualStepGuide.start}
+                />
+              )}
+
+              {mobileScreen.kind !== "settings" && (
+                <MobileScreenFab
+                  raised={mobileFabRaised}
+                  onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
+                  onAskCrossRepoQuestion={() =>
+                    openCrossRepoQuestionDialog(mobileFabRepositoryFullName)
+                  }
                 />
               )}
             </div>

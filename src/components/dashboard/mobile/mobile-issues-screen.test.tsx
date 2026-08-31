@@ -122,8 +122,6 @@ function renderScreen(
       onChangeView={vi.fn()}
       onChangeFilters={vi.fn()}
       onSelectIssue={vi.fn()}
-      onCreateIssue={vi.fn()}
-      onAskCrossRepoQuestion={vi.fn()}
       onStartManualStepGuide={vi.fn()}
       onRefresh={options.onRefresh}
       onRefreshPullRequests={options.onRefreshPullRequests}
