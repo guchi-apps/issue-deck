@@ -4,9 +4,7 @@ import {
   FolderGit2,
   GitBranch,
   Loader2,
-  MessageCircleQuestion,
   MonitorPlay,
-  Plus,
   Rocket,
   Settings,
 } from "lucide-react";
@@ -94,9 +92,6 @@ type MobileHomeScreenProps = {
   previewRunning: boolean;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
-  /** 右下の丸ボタン（#1690）。Issue一覧画面と同じ2つを置く */
-  onCreateIssue: () => void;
-  onAskCrossRepoQuestion: () => void;
   /**
    * 新規アプリの立ち上げ（#2188）。**メニューの最後に1行だけ置き、丸ボタンは増やさない**——
    * 使うのは年に数回で、いちばん使うIssue作成の導線を1タップ遠くしないため。
@@ -176,8 +171,6 @@ export function MobileHomeScreenView({
   previewRunning,
   favoriteRepositories,
   onSelectRepository,
-  onCreateIssue,
-  onAskCrossRepoQuestion,
   onLaunchNewApp,
   onOpenSettings,
   onRefresh,
@@ -502,31 +495,6 @@ export function MobileHomeScreenView({
             </ul>
           </div>
         </div>
-      </div>
-
-      {/*
-        Issue一覧画面（`mobile-issue-list-screen.tsx`）と**同じ形・同じ順**の丸ボタン（#1690）。
-        同じ動作のボタンが画面ごとに違う見た目・違う位置にあると探すことになる。位置だけは違い、
-        あちらは下端の絞り込み行を避けて上げているが、ホームにその行は無いのでフッターのすぐ上。
-        z-20も揃える（#1945）。一覧に重ねたときに行の後ろへ回らないようにするため
-      */}
-      <div className="absolute right-4 bottom-4 z-20 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onAskCrossRepoQuestion}
-          aria-label="複数リポジトリに質問する"
-          className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
-        >
-          <MessageCircleQuestion className="size-6" />
-        </button>
-        <button
-          type="button"
-          onClick={onCreateIssue}
-          aria-label="新しいIssueを作成"
-          className="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg"
-        >
-          <Plus className="size-6" />
-        </button>
       </div>
     </div>
   );

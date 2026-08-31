@@ -130,8 +130,6 @@ function renderHome(
       onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
-      onCreateIssue={() => {}}
-      onAskCrossRepoQuestion={() => {}}
       onOpenSettings={() => {}}
       {...props}
     />,
@@ -244,8 +242,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -424,17 +420,6 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(screen.getByRole("dialog", { name: "実行状況" })).toBeTruthy();
   });
 
-  it("右下の丸ボタンからIssueの作成と質問ができる", () => {
-    const onCreateIssue = vi.fn();
-    const onAskCrossRepoQuestion = vi.fn();
-    renderHome({ onCreateIssue, onAskCrossRepoQuestion });
-
-    fireEvent.click(screen.getByRole("button", { name: "新しいIssueを作成" }));
-    fireEvent.click(screen.getByRole("button", { name: "複数リポジトリに質問する" }));
-
-    expect(onCreateIssue).toHaveBeenCalledTimes(1);
-    expect(onAskCrossRepoQuestion).toHaveBeenCalledTimes(1);
-  });
 });
 
 // 引っ張って更新（#2182）。ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が見るので、
@@ -480,8 +465,6 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
-        onCreateIssue={() => {}}
-        onAskCrossRepoQuestion={() => {}}
         onOpenSettings={() => {}}
         {...props}
       />,

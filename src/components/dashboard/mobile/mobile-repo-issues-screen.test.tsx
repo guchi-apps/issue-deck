@@ -84,8 +84,6 @@ function renderScreen(issues: Issue[]) {
       onChangeFilters={vi.fn()}
       onSelectIssue={vi.fn()}
       onBack={vi.fn()}
-      onCreateIssue={vi.fn()}
-      onAskCrossRepoQuestion={vi.fn()}
     />,
   );
 }

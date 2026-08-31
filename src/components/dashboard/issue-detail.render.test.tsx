@@ -229,7 +229,6 @@ function renderMobileDetail(issue: Issue) {
       onIssueUpdated={vi.fn()}
       onIssueDeleted={vi.fn()}
       onToggleFavorite={vi.fn()}
-      onCreateIssue={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
       onCreateCodeReviewFindingIssue={vi.fn()}
