@@ -30,6 +30,8 @@ function reportInput(overrides: Record<string, unknown> = {}) {
     costUsd: 1.25,
     inputCostUsd: 1.0,
     outputCostUsd: 0.25,
+    planCostUsd: 0.3,
+    implementationCostUsd: 0.95,
     models: ["claude-opus-5"],
     startedAt: "2026-08-30T01:00:00.000Z",
     endedAt: "2026-08-30T02:00:00.000Z",
@@ -75,6 +77,31 @@ describe("parseSessionUsageReport", () => {
       expect(parsed?.costUsd).toBe(1.25);
       expect(parsed?.inputCostUsd).toBeNull();
       expect(parsed?.outputCostUsd).toBeNull();
+    }
+  });
+
+  it("計画/実装の内訳を受け取り、片方でも欠けたら両方nullにする（#2646）", () => {
+    expect(parseSessionUsageReport(reportInput())).toMatchObject({
+      planCostUsd: 0.3,
+      implementationCostUsd: 0.95,
+    });
+
+    // Plan modeを使っていないセッションは両方送られてこない（集計側がnullのまま送る）。
+    const noPlan = reportInput();
+    delete (noPlan as Record<string, unknown>).planCostUsd;
+    delete (noPlan as Record<string, unknown>).implementationCostUsd;
+    expect(parseSessionUsageReport(noPlan)).toMatchObject({
+      costUsd: 1.25,
+      planCostUsd: null,
+      implementationCostUsd: null,
+    });
+
+    // 片側だけ・壊れた値は区分なしとして扱う。
+    for (const broken of [{ implementationCostUsd: null }, { planCostUsd: -1 }]) {
+      const parsed = parseSessionUsageReport(reportInput(broken));
+      expect(parsed?.costUsd).toBe(1.25);
+      expect(parsed?.planCostUsd).toBeNull();
+      expect(parsed?.implementationCostUsd).toBeNull();
     }
   });
 

@@ -8,7 +8,9 @@ import {
   formatUsageTokens,
   formatUsageUsd,
   sessionUsageCostSplit,
+  sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
+  sessionUsagePhaseSplit,
   toQuotaPercent,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
@@ -349,5 +351,34 @@ describe("sessionUsageCostSplit", () => {
       .toMatchObject({ approximate: true });
     expect(sessionUsageCostSplit(entry({ contextTokens: 0, outputTokens: 0, costUsd: 0 })))
       .toEqual({ inputCostUsd: 0, outputCostUsd: 0, approximate: true });
+  });
+});
+
+describe("sessionUsagePhaseSplit", () => {
+  it("計画/実装の内訳があればそのまま返す", () => {
+    const split = sessionUsagePhaseSplit(
+      entry({ costUsd: 5, planCostUsd: 1.2, implementationCostUsd: 3.8 }),
+    );
+    expect(split).toEqual({ planCostUsd: 1.2, implementationCostUsd: 3.8 });
+  });
+
+  it("Plan modeを使っていないセッション（両方null）は近似せずnullを返す", () => {
+    expect(sessionUsagePhaseSplit(entry({ planCostUsd: null, implementationCostUsd: null }))).toBeNull();
+  });
+
+  it("片方だけしか無い行もnullを返す（合算だけを信用する）", () => {
+    expect(sessionUsagePhaseSplit(entry({ planCostUsd: 1.2, implementationCostUsd: null }))).toBeNull();
+  });
+});
+
+describe("sessionUsageModelLabel", () => {
+  it("Claudeのモデルは世代・日付サフィックスを落として短縮表示する", () => {
+    expect(sessionUsageModelLabel("claude-opus-5")).toBe("Opus");
+    expect(sessionUsageModelLabel("claude-sonnet-4-5")).toBe("Sonnet");
+    expect(sessionUsageModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku");
+  });
+
+  it("Codexなど対応表に無いモデルはそのまま出す", () => {
+    expect(sessionUsageModelLabel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
   });
 });

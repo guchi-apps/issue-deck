@@ -198,6 +198,32 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getByText("$1.00", { exact: false })).toBeTruthy();
   });
 
+  it("使ったモデルをセッション名の下にチップで出す（#2646）", () => {
+    renderPanel(
+      response([entry({ sessionId: "multi-model", models: ["claude-opus-5", "claude-sonnet-5"] })]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("Opus")).toBeTruthy();
+    expect(within(detail).getByText("Sonnet")).toBeTruthy();
+  });
+
+  it("Plan modeの内訳があるセッションだけ、料金の下に計画/実装を分けて出す（#2646）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "with-plan", costUsd: 5, planCostUsd: 1.2, implementationCostUsd: 3.8 }),
+        entry({ sessionId: "without-plan", costUsd: 2 }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・セッション別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("計画", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$1.20", { exact: false })).toBeTruthy();
+    expect(within(detail).getByText("$3.80", { exact: false })).toBeTruthy();
+    // 区分の無いセッションでは「計画」の文字列自体が出ない。
+    expect(within(detail).getAllByText("計画", { exact: false })).toHaveLength(1);
+  });
+
   it("単位を「枠%」へ切り替えると、金額がプラン枠の割合になる", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 

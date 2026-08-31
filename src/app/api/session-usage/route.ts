@@ -56,6 +56,8 @@ function toEntry(row: {
   costUsd: number;
   inputCostUsd: number | null;
   outputCostUsd: number | null;
+  planCostUsd: number | null;
+  implementationCostUsd: number | null;
   models: string;
   startedAt: Date;
   endedAt: Date;
@@ -93,6 +95,13 @@ function toEntry(row: {
     // 内訳は集計側が単価から割ったものをそのまま渡す（#2626）。片方だけの行は内訳なしとして扱う。
     inputCostUsd: row.inputCostUsd !== null && row.outputCostUsd !== null ? row.inputCostUsd : null,
     outputCostUsd: row.inputCostUsd !== null && row.outputCostUsd !== null ? row.outputCostUsd : null,
+    // 計画/実装の内訳（#2646）。片方だけの行は区分なしとして扱う。
+    planCostUsd:
+      row.planCostUsd !== null && row.implementationCostUsd !== null ? row.planCostUsd : null,
+    implementationCostUsd:
+      row.planCostUsd !== null && row.implementationCostUsd !== null
+        ? row.implementationCostUsd
+        : null,
     models,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
@@ -133,6 +142,8 @@ export async function GET(request: NextRequest) {
       costUsd: true,
       inputCostUsd: true,
       outputCostUsd: true,
+      planCostUsd: true,
+      implementationCostUsd: true,
       models: true,
       startedAt: true,
       endedAt: true,

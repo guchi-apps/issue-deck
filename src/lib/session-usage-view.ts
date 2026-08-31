@@ -37,6 +37,15 @@ export type SessionUsageEntry = {
    */
   inputCostUsd?: number | null;
   outputCostUsd?: number | null;
+  /**
+   * `costUsd`の計画（Plan mode）・実装の内訳（#2646）。転記に残る`ExitPlanMode`の最後の
+   * 呼び出し時刻を境に、集計側（`scripts/lib/session-usage.sh`）が振り分けたもの。
+   * Plan modeを使っていないセッション・Codexの行はnull（`sessionUsagePhaseSplit`が
+   * 「区分なし」として扱う）。**近似は行わない**——入力/出力の内訳と違い、境界が分からない
+   * セッションを他の数値から按分する手立てが無いため
+   */
+  planCostUsd?: number | null;
+  implementationCostUsd?: number | null;
   models: string[];
   startedAt: string;
   endedAt: string;
@@ -151,6 +160,26 @@ const KIND_LABELS: Record<string, string> = {
 
 export function sessionUsageKindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
+}
+
+/**
+ * モデルIDの短縮表示（#2646）。前方一致で拾う（`scripts/lib/session-usage.sh`の`price_for`と
+ * 同じ考え方）。日付・世代のサフィックスは画面では要らないので落とす。
+ */
+const MODEL_LABEL_PATTERNS: [pattern: string, label: string][] = [
+  ["claude-opus", "Opus"],
+  ["claude-sonnet", "Sonnet"],
+  ["claude-haiku", "Haiku"],
+  ["claude-fable", "Fable"],
+  ["claude-mythos", "Mythos"],
+];
+
+export function sessionUsageModelLabel(model: string): string {
+  for (const [pattern, label] of MODEL_LABEL_PATTERNS) {
+    if (model.startsWith(pattern)) return label;
+  }
+  // Codexのモデル名（`gpt-5.6-sol`等）はすでに短い名前なのでそのまま出す。
+  return model;
 }
 
 function emptyTotals(): UsageTotals {
@@ -454,6 +483,34 @@ export function sessionUsageCostSplit(
     outputCostUsd: entry.costUsd * (entry.outputTokens / totalTokens),
     approximate: true,
   };
+}
+
+export type SessionUsagePhaseSplit = {
+  planCostUsd: number;
+  implementationCostUsd: number;
+};
+
+/**
+ * セッション1本の金額を計画（Plan mode）・実装へ分ける（#2646）。
+ *
+ * **`sessionUsageCostSplit`と違い、内訳が無いときの近似は行わない。** 入力/出力はトークン比
+ * から按分できるが、計画/実装の境界はトークン量からは分からない（Plan modeを使ったかどうか
+ * 自体が転記を読まないと分からない）。区分が無ければnullを返し、画面は「区分なし」として
+ * 合算のみ出す。
+ */
+export function sessionUsagePhaseSplit(
+  entry: Pick<SessionUsageEntry, "planCostUsd" | "implementationCostUsd">,
+): SessionUsagePhaseSplit | null {
+  const { planCostUsd, implementationCostUsd } = entry;
+  if (
+    typeof planCostUsd !== "number" ||
+    !Number.isFinite(planCostUsd) ||
+    typeof implementationCostUsd !== "number" ||
+    !Number.isFinite(implementationCostUsd)
+  ) {
+    return null;
+  }
+  return { planCostUsd, implementationCostUsd };
 }
 
 /** API換算(USD) → プラン枠の何%相当か。物差しが無ければnull */

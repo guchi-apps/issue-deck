@@ -2654,6 +2654,14 @@ export function POST(request: NextRequest) {
   （#1541。`claude --continue`を付けるかの判定で、**中身は開かない**）。名前の導き方が変われば
   ヒットしなくなり、新規会話で始まるだけなので、上のルールの主旨（内部仕様への依存を広げない）は
   守れている。
+- **セッション別のAPI換算は、計画（Plan mode）・実装の内訳とモデル名も持つ**（#2646）。
+  転記に残る`ExitPlanMode`のtool_use呼び出し（`PreToolUse`フックが飛ぶのと同じ行に、
+  `message.usage`も同居している）の**最後の出現時刻**を境に、それ以前を「計画」・以降を
+  「実装」として振り分ける（計画の修正で複数回呼ばれても最後の1回だけを境に使う）。
+  Plan modeを使っていないセッション・Codexの行は`planCostUsd`/`implementationCostUsd`が
+  両方nullになり、画面は「区分なし」として合算のみ出す（`inputCostUsd`/`outputCostUsd`の
+  内訳・#2626と同じ「集計側で割ってnullable列で運ぶ」形）。モデル名（`models`列）は
+  以前から集計・保存されていたが、画面（`session-usage-panel.tsx`）には出していなかった。
 - **ブランチの掃除はローカルとリモートで担当スクリプトが違う**（#1478）。ローカルのworktreeと
   ブランチは`scripts/cleanup-worktrees.sh`（#1100）が、GitHub上のリモートブランチは
   `scripts/cleanup-merged-branches.sh`が扱う。後者は「最新PRがマージ済み」かつ
