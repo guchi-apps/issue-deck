@@ -276,6 +276,21 @@ describe("SessionUsagePanel", () => {
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", null, 2648);
   });
 
+  it("タイトルを解決できた行は番号の下に表示し、解決できない行は出さない（#2686）", () => {
+    const data = response([entry({ sessionId: "impl" })]);
+    data.byIssue[0].title = "AI使用量画面にissue・PR別のタイトル表示機能を追加";
+
+    renderPanel(data);
+
+    expect(screen.getByText("AI使用量画面にissue・PR別のタイトル表示機能を追加")).toBeTruthy();
+  });
+
+  it("タイトルを解決できていない行はタイトルの表示を出さない（#2686）", () => {
+    const { container } = renderPanel(response([entry({ sessionId: "impl" })]));
+
+    expect(container.querySelector("p.truncate")).toBeNull();
+  });
+
   it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {
     const entries = Array.from({ length: 6 }, (_unused, index) =>
       entry({

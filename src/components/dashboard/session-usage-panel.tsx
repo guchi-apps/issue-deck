@@ -920,6 +920,12 @@ function IssueGroupRow({
                 {issue.sessions}セッション
               </span>
             </div>
+            {/* Issue・PRのタイトル（#2686）。取得できなかった行は出さず番号のみのままにする */}
+            {issue.title && (
+              <p className="mt-0.5 truncate text-[11px] text-foreground" title={issue.title}>
+                {issue.title}
+              </p>
+            )}
             <div className="mt-1 flex flex-col gap-0.5">
               <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
               <GroupTokenBar totals={issue} maxTokens={maxTokens} />
