@@ -54,7 +54,8 @@ export type MobileScreen =
   // 確認環境（#2444）。ボトムナビの枠は埋まっているので、ホームのメニューからの
   // ドリルダウンだけで開く（設定と同じ形。戻る導線はヘッダーの戻るボタンが受け持つ）
   | { kind: "preview" }
-  // AI使用量（#2504）。確認環境と同じく、ホームのメニューからのドリルダウンだけで開く
+  // AI使用量（#2504）。当初は確認環境と同じくホームのメニューからのドリルダウンだけで開く
+  // 画面だったが、#2631でボトムナビの5枠目を持ち、タブから直接開く画面になった
   | { kind: "usage" }
   | {
       kind: "repo-detail";
@@ -213,14 +214,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
         // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）。
         // `settings`も#1638でタブから外れ、ホームのヘッダーから開く画面になった
+        // （`usage`は逆に#2631でタブになったので、`MobileBottomNavTab`の側に含まれる）
         screen:
           | MobileBottomNavTab
           | "issues"
           | "issue-detail"
           | "repo-detail"
           | "settings"
-          | "preview"
-          | "usage";
+          | "preview";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -368,9 +369,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   // ホームのメニューから確認環境の画面へ遷移する（#2444）。設定と同じくフッターにタブが
   // 無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの戻るボタン（goBack）が持つ。
   const selectPreview = useCallback(() => navigate({ screen: "preview" }), [navigate]);
-
-  // ホームのメニューからAI使用量の画面へ遷移する（#2504）。確認環境と同じ形。
-  const selectUsage = useCallback(() => navigate({ screen: "usage" }), [navigate]);
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -542,7 +540,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPullRequestView,
     selectSettings,
     selectPreview,
-    selectUsage,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

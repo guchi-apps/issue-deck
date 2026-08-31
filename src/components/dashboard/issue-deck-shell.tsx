@@ -49,6 +49,7 @@ import {
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
+import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -255,7 +256,6 @@ export function IssueDeckShell({
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
     selectPreview,
-    selectUsage,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -1081,6 +1081,11 @@ export function IssueDeckShell({
     ? storedUsageDays
     : 7;
   const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays);
+  // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
+  // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
+  // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
+  // 消費しない。
+  const claudeApiUsage = useClaudeApiUsage(isUsagePaneActive);
 
   /**
    * 使用量の明細からIssueを開く（#2504）。**記録はリポジトリ名（ownerを除く）しか持たない**
@@ -1432,7 +1437,6 @@ export function IssueDeckShell({
                   onSelectFlow={() => selectTab("flow")}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
-                  onSelectUsage={selectUsage}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onCreateIssue={() => openCreateDialog()}
@@ -1461,7 +1465,7 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
-                  onBack={goBack}
+                  claudeApiUsage={claudeApiUsage}
                 />
               )}
 
@@ -1724,6 +1728,7 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
+                  claudeApiUsage={claudeApiUsage}
                 />
               </div>
             </div>

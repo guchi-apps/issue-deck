@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
+import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { Button } from "@/components/ui/button";
+import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -25,7 +27,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * 「AI使用量」画面（#2504）。**サブPCのローカルセッションが使ったトークン**を、合計 → 推移 →
- * 内訳（リポジトリ別・種別別）→ 明細（セッション別）の順に出す。
+ * 内訳（リポジトリ別・種別別）→ 明細（セッション別）の順に出す。最後に、issue-deck本体の
+ * AI機能が使ったAPIの内訳を置く（#2631で設定の「状態」から移設。`claudeApiUsage`を
+ * 渡したときだけ出る）。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`preview-panel.tsx`と同じ切り分け）。
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
@@ -60,6 +64,17 @@ type SessionUsagePanelProps = {
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
   onOpenIssue?: (repository: string, issueNumber: number) => void;
+  /**
+   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
+   * **セッションの使用量とは出どころが違う**——上の集計はサブPCのpollerが押し込む記録だが、
+   * これはこのアプリ自身が投げた呼び出しをメモリ上で数えたもの。渡さなければ出さない
+   * （試験・スマホの一部経路）。
+   */
+  claudeApiUsage?: {
+    data: ClaudeApiUsageSummary | null;
+    isLoading: boolean;
+    error: string | null;
+  };
   /** スマホ向けに縮める。表をカードへ畳み、コンテキスト列を落とす */
   compact?: boolean;
   className?: string;
@@ -378,6 +393,7 @@ export function SessionUsagePanel({
   onChangeDays,
   onRefresh,
   onOpenIssue,
+  claudeApiUsage,
   compact = false,
   className,
 }: SessionUsagePanelProps) {
@@ -603,6 +619,25 @@ export function SessionUsagePanel({
             GitHub Actionsの使用量はClaude Code実行後に報告されます。反映に時間がかかる場合があり、料金はAPI換算の目安です。
           </p>
         </>
+      )}
+
+      {/* issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。
+          **`data`の外に置く**——セッションの記録がまだ届いていなくても、このアプリ自身の
+          消費は数えられているので出せる */}
+      {claudeApiUsage && (
+        <section className="flex flex-col gap-2 rounded-lg border p-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-xs font-semibold">API呼び出し（issue-deck本体）</span>
+            <span className="text-[11px] text-muted-foreground">
+              Issueの要約・検索・文章整理などで使った量
+            </span>
+          </div>
+          <ClaudeApiUsageList
+            data={claudeApiUsage.data}
+            isLoading={claudeApiUsage.isLoading}
+            error={claudeApiUsage.error}
+          />
+        </section>
       )}
     </div>
   );

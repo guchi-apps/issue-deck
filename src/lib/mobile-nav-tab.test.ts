@@ -40,9 +40,16 @@ describe("resolveBottomNavTab", () => {
     expect(resolveBottomNavTab({ kind: "flow" })).toBe("flow");
   });
 
-  // 設定はフッターから外し、ホームのヘッダーの歯車から開く画面になった（#1638）
-  it("設定画面ではどのタブも点灯させない", () => {
+  // 設定はフッターから外し、ホームのヘッダーの歯車から開く画面になった（#1638）。
+  // 確認環境（#2444）も同じくタブを持たない
+  it("設定・確認環境ではどのタブも点灯させない", () => {
     expect(resolveBottomNavTab({ kind: "settings" })).toBeNull();
+    expect(resolveBottomNavTab({ kind: "preview" })).toBeNull();
+  });
+
+  // AI使用量は#2504ではドリルダウンだったが、#2631でフッターの5枠目になった
+  it("AI使用量では「AI使用量」タブを点灯させる", () => {
+    expect(resolveBottomNavTab({ kind: "usage" })).toBe("usage");
   });
 
   it("リポジトリ別Issue一覧では「Issue」タブ（repos）を返す", () => {
