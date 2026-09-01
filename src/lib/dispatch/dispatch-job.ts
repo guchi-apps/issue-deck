@@ -1,3 +1,4 @@
+import type { ClaudeModel } from "@/lib/app-settings";
 // 型だけのimport（コンパイル時に消える）。`host-checkout.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-metrics.ts`と同じ）
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
@@ -412,6 +413,16 @@ export type DispatchJobView = {
    * pollerはこの値を`ISSUE_DECK_AGENT`として受け口へ渡す。
    */
   agent: DispatchAgent;
+  /**
+   * このIssueだけに使うClaudeのモデル（#2717。`kind`が`LAUNCH`・`agent`が`claude`のときだけ）。
+   *
+   * **`null`は「設定の既定に従う」**（`AppSetting.claudeLocalModel`）。払い出し
+   * （`POST /api/dispatch/claim`）が、この値があればジョブごとの`claudeLocalModel`として載せる。
+   *
+   * **画面へ出すために返す。** 起動してからどのモデルで立ったのかが分からないと、
+   * 金額の見積りと突き合わせられない。
+   */
+  claudeModel: ClaudeModel | null;
   status: DispatchJobStatus;
   message: string | null;
   /**

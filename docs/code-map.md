@@ -381,8 +381,13 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
   からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
-  **金額は出さない**——すべて`CLAUDE_CODE_OAUTH_TOKEN`（プラン契約）で動いており、
-  従量課金の請求は発生しないため。
+  **金額はAPI換算の目安として出す**（#2717。#2347の時点では「プラン契約なので出さない」と
+  していたが、#2568でOpenAI（従量課金）が候補に入り、モデルをIssueごとに選べるようになって
+  「どのモデルがどれだけ高いか」を比べる必要が出たため方針を変えた）。単価は
+  [`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)から引き、**表示側では必ず
+  「プランの実費ではない」と断る**（`session-usage-panel.tsx`と同じ扱い）。
+  **単価を知らないモデルが1つでも混じっている機能には金額を出さない**——足りない分を0として
+  足すと、実際より安い金額になる。
 - **ローカルセッション（Claude Code本体）の消費は、左メニューの「AI使用量」で見る**（#2504）。
   上のカードに入らないぶんで、**転記からしか取れず、本番のissue-deck（VPS）は転記を持たない**
   ため、サブPCのpollerが`scripts/lib/session-usage.sh`で集計して数値だけを押し込む
@@ -2577,6 +2582,15 @@ export function POST(request: NextRequest) {
   `POST /api/dispatch/sessions/ended`へ即時に報告する**（#1321。pollerの巡回は最大75秒遅れ、
   #1311の起動抑止がそのぶん解けないため。trapを通らない経路はpollerが従来どおり拾う）。
   画面は状態を様子より優先する（`lib/dispatch/issue-session.ts`）。
+  **エージェント（`DispatchJob.agent`）とClaudeのモデル（`DispatchJob.claudeModel`）は
+  ジョブごとに選べる**（#2505・#2717。どちらも「実装を開始」ダイアログで、実行先がサブPCの
+  ときだけ欄が出る）。**モデルは`null`が「設定の既定に従う」**で、
+  `POST /api/dispatch/claim`が`job.claudeModel ?? 設定`を`claudeLocalModel`として載せる
+  ——**pollerは従来どおり`claudeLocalModel`しか読まない**ので、Issueごとの指定を足すのに
+  poller側の変更は要らない。GitHub Actionsは設定を全体で読む別経路（`reusable-issue-dispatch.yml`）
+  なので、ジョブに積んだ値は届かない。判断の根拠と単価は
+  [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「重いIssueだけ
+  モデルを上げる」を参照。
   **CodexのセッションにはそのRemote ControlのURLが無い**（#2524）。Codexが出すのは
   `XXXX-XXXX`の**10分で切れるペアリングコード**で、繋がる先も`serverName`＝ホストごと
   （そのホストのCodexセッション全部）。そのため**実行キューのホストのカード**と、
