@@ -1931,7 +1931,25 @@ export function POST(request: NextRequest) {
   （既存の「未リリース ◯件」表示のために取っている応答を読み直すだけ）。**PR詳細のデプロイ
   表示（`lib/pull-request-deploy.ts`）にはこの裏取りを足していない**——あちらは`develop`と
   `main`の比較を取っておらず、追加すると#1814の「GitHub APIの消費を増やさない」前提が崩れる
-  ため、この画面（ブランチ画面）だけがタイムスタンプ判定より優先して正しい側へ倒る。
+  ため、この画面（ブランチ画面）だけがタイムスタンプ判定より優先して正しい側へ倒る
+  （後述の#2704で、「本番未反映」と判定したときだけ比較を1回取る例外だけを足した）。
+  **どちらの裏取りも「コミットがmainへ到達したか」しか見ておらず、back-mergeでは中身と食い違う**
+  （#2704）。`main`の内容へ`develop`を揃え直すPRをdevelopへマージすると、**マージコミットは
+  developにしか無いのにファイルの中身はすべてmainにある**——`resolveReleaseState`は後続の
+  リリースが無いので`pending`を返し、`mergedHeadRefs`にもそのブランチ名が残るため、レーンは
+  「次のリリース（本番未反映）」に居座る。一方「リリースする」ボタンは中身（tree）で決まる
+  `unreleasedCommitCount`が0を返して出ない。**画面が「次のリリースに1件乗る」と言いながら、
+  リリースを起こす手段を出さない**状態になっていた（実例: guchi-apps/vps#211。`main`と
+  `develop`のtree OIDはどちらも`d5de5b6e`で、compareの変更ファイルは0件）。#2316・#2678は
+  ボタン側だけを直してレーン側を直していなかったのが原因なので、**両方を同じ材料で決める**：
+  `isDevelopContentInMain`（＝`unreleasedCommitCount`が0）がtrueのときはレーンを`pending`に
+  せず、`unknown`（「どの版で本番へ出たか特定できない変更」）へ落とす。**`released`と言い切ら
+  ない**のは、中身がmainにあることは分かっても、それを運んだ版までは決められないため。
+  **PR一覧・PR詳細の「本番未反映（developまで）」バッジも同じ扱いにした**（`lib/pull-request-deploy.ts`
+  の`developContentInMain`）。ただし**この判定が要るときにしか比較を取りに行かない**——
+  `resolvePullRequestDeployStatus`が`develop-only`を返したときだけ`lookupBranchRefs`を
+  ブランチ名なしで1回呼ぶ（`api/pull-requests/deploy-status/route.ts`）。すでに版が決まっている
+  PRでは消費が増えず、取得に失敗しても従来どおり「本番未反映」を出すだけでバッジは落とさない。
   **`behindBy`（mainにあってdevelopに無いコミット数）は出さない。** develop→mainをマージコミットで
   入れる運用ではリリースのたびに必ず1つ増え、中身は全部`Merge pull request … from guchi-apps/develop`
   になる（issue-deck本体で72件）。異常を示すバッジの形なのに行動につながらないため落とした。

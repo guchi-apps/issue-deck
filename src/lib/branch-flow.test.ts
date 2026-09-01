@@ -5,6 +5,7 @@ import {
   extractManualStepOrigin,
   formatUnreleasedSummary,
   isClosedLane,
+  isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
   unreleasedSummary,
@@ -604,6 +605,105 @@ describe("buildBranchFlow", () => {
     expect(flow.repositories[0].releaseGroups).toHaveLength(1);
   });
 
+  // #2704。back-merge（`main`の内容へ`develop`を揃え直すPR）はコミットがdevelopにしか
+  // 残らないため、コミットの到達だけを見る判定（`resolveReleaseState`・`mergedHeadRefs`）が
+  // 「まだ本番へ出ていない」と読む。実例: guchi-apps/vps#211が「次のリリース・1件」と出続け、
+  // 一方で「リリースする」は`sameContent`で押せない（＝出す手段が無いのに未反映と言う）状態。
+  it("mainとdevelopの中身が一致していれば、developにしか無いマージを未リリース扱いしない", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 200,
+          title: "v1.5.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "release-main/v1.5.0",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          createdAt: "2026-08-30T10:00:00Z",
+          mergedAt: "2026-08-30T10:20:00Z",
+        }),
+        // リリースより後にdevelopへ入ったback-merge。中身はmainから来ているので出すものは無い
+        pullRequest({
+          number: 211,
+          title: "developをmainの内容へ揃え直す",
+          headRef: "issue-210",
+          linkedIssueNumber: 210,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-31T15:13:36Z",
+        }),
+      ],
+      branchStatuses: [
+        branchStatus({
+          hasReleaseWorkflow: true,
+          developVsMain: {
+            aheadBy: 1,
+            behindBy: 0,
+            // tree OIDが一致＝mainとdevelopの中身は同じ
+            sameContent: true,
+            units: {
+              mergeCount: 1,
+              directCount: 0,
+              versionBumpCount: 0,
+              mergedHeadRefs: ["issue-210"],
+            },
+          },
+        }),
+      ],
+    });
+
+    const [repository] = flow.repositories;
+    const byBranch = new Map(allLanes(repository).map((lane) => [lane.branchName, lane]));
+    // 「どの版で本番へ出たか特定できない」へ落とす（`released`と言い切ると出ていない版を名乗る）
+    expect(byBranch.get("issue-210")?.releaseState).toEqual({ kind: "unknown" });
+    expect(repository.unassignedLanes.map((lane) => lane.branchName)).toEqual(["issue-210"]);
+    // 「次のリリース」の束を作らない。ボタン（`canTriggerRelease`）と結論が揃う
+    expect(repository.releaseGroups.some((group) => group.key === "unreleased")).toBe(false);
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  // #2704。中身が一致していても、その版で本番へ出たと分かっているレーンの版までは消さない
+  it("中身が一致していても、運び手が特定できたレーンは版を出し続ける", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({
+          number: 200,
+          title: "v1.5.0をmainへリリースする",
+          baseRef: "main",
+          headRef: "release-main/v1.5.0",
+          kind: "release",
+          linkedIssueNumber: null,
+          state: "closed",
+          merged: true,
+          createdAt: "2026-08-30T10:00:00Z",
+          mergedAt: "2026-08-30T10:20:00Z",
+        }),
+        pullRequest({
+          number: 190,
+          headRef: "issue-189",
+          linkedIssueNumber: 189,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-30T09:00:00Z",
+        }),
+      ],
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: 1, behindBy: 0, sameContent: true, units: null },
+        }),
+      ],
+    });
+
+    const byBranch = new Map(allLanes(flow.repositories[0]).map((lane) => [lane.branchName, lane]));
+    expect(byBranch.get("issue-189")?.releaseState).toEqual({
+      kind: "released",
+      version: "1.5.0",
+      pullRequestNumber: 200,
+    });
+  });
+
   // #2489。#2117以前・共有ワークフローの参照タグが古いリポジトリではheadが`develop`のままで、
   // PRのheadがブランチの先端を追い続ける（＝マージ時点のdevelopがmainへ入る）
   it("headがdevelopのリリースPRは、従来どおりマージ時刻で運び手を決める", () => {
@@ -1095,6 +1195,26 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
   // #2316。バンプPRのマージコミットだけが残った状態で押すと、中身ゼロのリリースが1本走る
   it("コミットは残っていても中身の差分が無ければ押せない", () => {
     expect(buildRelease({ aheadBy: 1, sameContent: true }).canTriggerRelease).toBe(false);
+  });
+
+  // #2704。レーンの版判定とボタンの可否を同じ材料で決めるための判定
+  it("isDevelopContentInMainは、出すものが無いときだけtrue（取得できていなければfalse）", () => {
+    expect(isDevelopContentInMain({ aheadBy: 1, behindBy: 0, sameContent: true, units: null })).toBe(
+      true,
+    );
+    expect(
+      isDevelopContentInMain({
+        aheadBy: 1,
+        behindBy: 0,
+        sameContent: false,
+        units: { mergeCount: 0, directCount: 0, versionBumpCount: 1, mergedHeadRefs: [] },
+      }),
+    ).toBe(true);
+    expect(
+      isDevelopContentInMain({ aheadBy: 2, behindBy: 0, sameContent: false, units: null }),
+    ).toBe(false);
+    // ブランチ状況を取得できていない状態を「出すものは無い」と読まない
+    expect(isDevelopContentInMain(null)).toBe(false);
   });
 
   // #2678。mainがdevelopより先行しているとtree比較（sameContent）は常にfalseになるが、
