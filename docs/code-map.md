@@ -2056,6 +2056,18 @@ export function POST(request: NextRequest) {
   **この画面からリリースworkflowを起動できる**（#1510）。押してよいかの判定は
   `BranchFlowRepository.canTriggerRelease`（リリース用workflowがある・openなリリースPRが無い・
   openなバンプPRが無い・未リリースの変更がある）で決まる。
+  **押せないときもボタンを消さず、無効のボタンと理由を出す**（#2711）。以前は
+  `canTriggerRelease`がfalseだとボタンごと描画しなかったため、「次のリリース（本番未反映）」と
+  出ている束から本番へ出す手段が画面のどこにも無く、**押せないのか操作がそもそも無いのかを
+  区別できなかった**。**レーンの束はPR一覧だけからでも組み立てられる**のに対し、
+  `canTriggerRelease`はブランチ状況（`GET /api/branch-flow`）が要る——この非対称のせいで、
+  ブランチ状況がまだ返っていない・そのリポジトリだけ取得に失敗した状態では、束は
+  「本番未反映」と出ているのにボタンだけが無い、という画面になる（#2711の報告がこの形）。
+  理由は`lib/branch-flow.ts`の`resolveReleaseBlockedReason`が`canTriggerRelease`と同じ材料・同じ
+  順で決め（`branches-unloaded`／`no-workflow`／`release-in-progress`／`nothing-to-release`）、
+  文言は`repository-release-button.tsx`の`BLOCKED_REASON_LABEL`が持つ。
+  **リリースPR・バンプPRが出ている間は無効のボタンも出さない**——その行が「mainへマージ」
+  （`ReleaseMergeButton`）を持っているため、押せる操作の隣に押せない操作を並べることになる。
   **「リリース用workflowがある」は`release-develop-to-main.yml`の実在で判定する**（#1538）。
   当初は`claude-issue-dispatch.yml`の有無（`Repository.hasClaudeWorkflow`）で代用していたが、
   この2つは一致しない——Claude運用には載っていてもリリースフローを持たないリポジトリ

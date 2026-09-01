@@ -1262,6 +1262,37 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     });
     expect(repository.canTriggerRelease).toBe(false);
   });
+
+  // #2711。押せないときにボタンごと消すと、「次のリリース（本番未反映）」の束から本番へ出す
+  // 手段が画面から無くなるため、理由を持たせて無効のボタンを出せるようにする
+  describe("押せない理由（releaseBlockedReason）", () => {
+    it("押せるときはnull", () => {
+      expect(buildRelease({}).releaseBlockedReason).toBeNull();
+    });
+
+    it("ブランチ状況を取得できていなければbranches-unloaded", () => {
+      expect(buildRelease({ branchStatusMissing: true }).releaseBlockedReason).toBe(
+        "branches-unloaded",
+      );
+    });
+
+    it("リリース用workflowを持たなければno-workflow", () => {
+      expect(buildRelease({ hasReleaseWorkflow: false }).releaseBlockedReason).toBe("no-workflow");
+    });
+
+    it("openなリリースPRがあればrelease-in-progress", () => {
+      const repository = buildRelease({
+        pullRequests: [
+          releasePullRequest({ number: 183, title: "v3.8.6をmainへリリースする", state: "open" }),
+        ],
+      });
+      expect(repository.releaseBlockedReason).toBe("release-in-progress");
+    });
+
+    it("出すものが無ければnothing-to-release", () => {
+      expect(buildRelease({ aheadBy: 0 }).releaseBlockedReason).toBe("nothing-to-release");
+    });
+  });
 });
 
 describe("バージョンバンプPRの扱い（#1548）", () => {

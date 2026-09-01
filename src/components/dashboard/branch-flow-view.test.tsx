@@ -951,12 +951,44 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("リリースする")).toBeTruthy();
     });
 
-    it("リリース用workflowが無ければ出さない（#1538）", () => {
+    // #2711。押せない状態でもボタンは残し、理由を添える（消すと「次のリリース（本番未反映）」
+    // の束から本番へ出す手段が画面のどこにも無くなる）
+    it("リリース用workflowが無ければ、無効のボタンと理由を出す（#1538・#2711）", () => {
       renderFlow({
         branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
       });
       openRepository();
-      expect(screen.queryByText("リリースする")).toBeNull();
+      expect(screen.getByText("リリースする").closest("button")?.disabled).toBe(true);
+      expect(screen.getByText("リリース用ワークフローがありません")).toBeTruthy();
+    });
+
+    // #2711のスクリーンショットの状態。レーンの束はPR一覧だけからも組み立てられるため、
+    // ブランチ状況が取れていなくても「次のリリース（本番未反映）」は出る
+    it("ブランチ状況を取得できていなければ、無効のボタンと理由を出す（#2711）", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({
+            number: 2700,
+            headRef: "issue-2700",
+            linkedIssueNumber: 2700,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-20T00:00:00Z",
+          }),
+          makeReleasePullRequest({
+            number: 1452,
+            title: "v3.17.0をmainへリリースする",
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-08-01T00:00:00Z",
+          }),
+        ],
+        branchStatuses: [],
+      });
+      openRepository();
+      expect(screen.getByText("本番未反映")).toBeTruthy();
+      expect(screen.getByText("リリースする").closest("button")?.disabled).toBe(true);
+      expect(screen.getByText("ブランチ状況を取得できず")).toBeTruthy();
     });
 
     it("未リリースの変更が無ければ出さない", () => {

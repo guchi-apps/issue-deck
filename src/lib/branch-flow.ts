@@ -23,6 +23,7 @@ import type {
   BranchFlowRepositorySummary,
   BranchFlowStartedIssue,
   DeployFailureIssueRef,
+  ReleaseBlockedReason,
   RepositoryBranchStatus,
   RepositoryDeployStatus,
 } from "@/types/branch-flow";
@@ -413,6 +414,33 @@ export function orderRepositoriesBySelection<T extends { fullName: string }>(
   return [...selected, ...rest];
 }
 
+/**
+ * 「リリースする」を押せない理由（#2711）。押せるとき（`canTriggerRelease`）はnull。
+ *
+ * **押せない状態をボタンごと消さないために持つ。** 「次のリリース」の束はPR一覧だけからも
+ * 組み立てられるのに対し、`canTriggerRelease`はブランチ状況（`/api/branch-flow`）が要る。
+ * そのため取得が済んでいないリポジトリでは、画面が「本番未反映」と言いながら本番へ出す手段を
+ * 1つも出さない状態になっていた（Issue #2711のスクリーンショットがこれにあたる）。
+ *
+ * 並びは`canTriggerRelease`の判定と同じ順で、**先に決まったものを返す**。ブランチ状況が
+ * 無い間は他の判定材料も無いため`branches-unloaded`が最優先になる。
+ */
+export function resolveReleaseBlockedReason({
+  branchStatus,
+  releasePullRequest,
+  bumpPullRequest,
+}: {
+  branchStatus: RepositoryBranchStatus | null;
+  releasePullRequest: PullRequestSummary | null;
+  bumpPullRequest: PullRequestSummary | null;
+}): ReleaseBlockedReason | null {
+  if (branchStatus === null) return "branches-unloaded";
+  if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
+  if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
+  if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
+  return null;
+}
+
 function buildRepository({
   repository,
   pullRequests,
@@ -580,6 +608,13 @@ function buildRepository({
       releasePullRequest === null &&
       bumpPullRequest === null &&
       unreleasedCommitCount(branchStatus?.developVsMain) > 0,
+    // 押せないときも「なぜ押せないか」を画面へ渡す（#2711）。ボタンごと消すと、
+    // 「次のリリース（本番未反映）」の束から本番へ出す手段が画面のどこにも無くなる。
+    releaseBlockedReason: resolveReleaseBlockedReason({
+      branchStatus,
+      releasePullRequest,
+      bumpPullRequest,
+    }),
     // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
     // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
     // デプロイが動いている間だけ押させない（`deploy.yml`の`concurrency`は

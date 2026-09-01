@@ -18,7 +18,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
-import type { BranchFlowIssueRef } from "@/types/branch-flow";
+import type { BranchFlowIssueRef, ReleaseBlockedReason } from "@/types/branch-flow";
+
+/**
+ * 押せないときにボタンへ添える文言（#2711）。**「押せない」と「操作が無い」を区別させる**ため、
+ * ボタンを消さずに理由だけを添える。
+ */
+const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
+  "branches-unloaded": "ブランチ状況を取得できず",
+  "no-workflow": "リリース用ワークフローがありません",
+  "release-in-progress": "リリース中",
+  "nothing-to-release": "出す変更がありません",
+};
 
 type RepositoryReleaseButtonProps = {
   repositoryFullName: string;
@@ -28,6 +39,11 @@ type RepositoryReleaseButtonProps = {
   currentVersion?: string | null;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   isPending: boolean;
+  /**
+   * 押せない理由（#2711）。渡すと、無効のボタンと理由だけを出す（確認ダイアログは持たない）。
+   * nullなら今までどおり押せるボタン。
+   */
+  blockedReason?: ReleaseBlockedReason | null;
   /** 起動に成功したあと。起動中の記録とバンプPRの出現を反映させるための再取得を親が行う */
   onTriggered: () => void;
 };
@@ -44,6 +60,11 @@ type RepositoryReleaseButtonProps = {
  * そのぶん、状態取得のポーリングを持つ`useReleaseStatus`ではなく`requestRelease`だけを使う。
  * 押してよいかの判定（`canTriggerRelease`）は`lib/branch-flow.ts`が済ませている。
  *
+ * **押せない状態でもボタンを消さない**（#2711）。`blockedReason`を受け取ったときは、無効の
+ * ボタンと理由（「出す変更がありません」など）だけを出す。以前は押せないときに親が描画ごと
+ * 落としていたため、「次のリリース（本番未反映）」の束から本番へ出す手段が画面のどこにも
+ * 無くなり、押せないのか操作が存在しないのかを見分けられなかった。
+ *
  * **一度起動したら、バンプPRが現れるまで押せない**（#1548）。起動からPRが現れるまでの数十秒は
  * `canTriggerRelease`がtrueのまま残るため、その間の連打がそのままworkflowの多重起動になっていた。
  * 起動時刻は端末のlocalStorageへ置き、判定は`useReleaseTriggerPending`が持つ——**同じ状態を
@@ -54,6 +75,7 @@ export function RepositoryReleaseButton({
   pendingIssues,
   currentVersion = null,
   isPending,
+  blockedReason = null,
   onTriggered,
 }: RepositoryReleaseButtonProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -77,6 +99,21 @@ export function RepositoryReleaseButton({
     } finally {
       setIsTriggering(false);
     }
+  }
+
+  // 押せないときは、無効のボタンと理由だけを出す（#2711）。**ボタンごと消さない**——
+  // 「次のリリース（本番未反映）」と出ている束から本番へ出す手段が画面から無くなり、
+  // 押せないのか操作が存在しないのかを区別できなくなるため。
+  if (blockedReason) {
+    return (
+      <span className="flex items-center gap-1.5" title={BLOCKED_REASON_LABEL[blockedReason]}>
+        <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs" disabled>
+          <Rocket className="size-3" />
+          リリースする
+        </Button>
+        <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>
+      </span>
+    );
   }
 
   return (
