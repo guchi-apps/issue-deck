@@ -2217,6 +2217,23 @@ export function POST(request: NextRequest) {
   **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
   ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
+- **mainへマージしたのにデプロイが起動しなかったときは、issue-deckが起動し直す**
+  （#2703。判定は[`lib/deploy-launch.ts`](../src/lib/deploy-launch.ts)、IOは
+  [`lib/github/deploy-launch-sweep-run.ts`](../src/lib/github/deploy-launch-sweep-run.ts)）。
+  **GitHubはmainへのマージに対してワークフローを1件も作らないことがある**（実測でmainへの
+  マージ55件中1件。guchi-apps/myroom#315では本番が20分間古い版のまま残った）。落ちているのは
+  ワークフローの定義ではなく**イベントの配送**なので、`on:`の書き方でも`deploy-retry.yml`でも
+  直らない。マージした主体だけがマージコミットのSHAを知っているため、`POST
+  /api/issues/pull-request-merge`がmainへのマージを成功させた時点で`DeployLaunchWatch`へ1行置き、
+  pollerが1巡ごとに`POST /api/repositories/deploy-launch-sweep`を叩いて照合する。
+  **この巡回だけは間隔で間引かない**（遅れがそのまま本番が古いままの時間になる）代わりに、
+  見張っている行が無ければGitHubを1回も叩かない。猶予（`DEPLOY_LAUNCH_GRACE_SECONDS`・既定90秒・
+  0で無効）を過ぎても実行が無ければ`deploy.yml`を**`main`から**起動し直し（リリースブランチの
+  refから起動すると`tag`ジョブが`v<version>`をmain上に無いコミットへ付けてしまう）、マージ済みPRへ
+  コメントを残してPush通知を鳴らす。照合は`head_sha`・`head_commit.tree_id`・「mainでマージより
+  後に作られた実行があるか」の3つで、treeの取得は起動し直す直前にだけ行う。
+  **GitHubの画面から直接マージした場合は見張りが立たない**（SHAを知る側を経由しないため）。
+  設計は[multi-agent/release.md](multi-agent/release.md)「mainへマージしてもデプロイが起動しないことがある」。
 - **developへのマージ後に取り残された進捗も、issue-deckが巡回して回収する**
   （#2294。判定は[`lib/github/progress-sweep.ts`](../src/lib/github/progress-sweep.ts)、IOは
   [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)）。上の2本と同じ形で、

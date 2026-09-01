@@ -926,6 +926,31 @@ pnpm exec prisma migrate resolve --applied <失敗したマイグレーション
 pnpm exec prisma migrate status                     # "Database schema is up to date!" になる
 ```
 
+### worktreeでは`prisma migrate dev`が通らない。リセットを受け入れない（#2703）
+
+上と同じ理由（DBの共有）で、**worktreeで`prisma migrate dev`を叩くとほぼ必ず
+「We need to reset the MySQL database」と言われる。** ローカルの`prisma/migrations/`に無い
+マイグレーションがDBに当たっている（他worktreeが先に足した）ことと、既にマージ済みの
+マイグレーションファイルが後から編集されていることの両方が、Prismaからは「履歴がずれている」に
+見えるため。
+
+**`prisma migrate reset`を実行してはいけない。** 開発用DBは本体・全worktree共有で、
+他のセッションが画面確認に使っているデータごと消える。代わりに、マイグレーションを手で作る。
+
+```bash
+mkdir -p prisma/migrations/<タイムスタンプ>_<名前>
+# migration.sql を手で書く（既存のマイグレーションの書き方に合わせる）
+pnpm exec prisma migrate resolve --applied <タイムスタンプ>_<名前>   # 履歴へ「適用済み」として記録
+printf '%s' "$(cat prisma/migrations/<タイムスタンプ>_<名前>/migration.sql)" |
+  pnpm exec prisma db execute --stdin --schema prisma/schema.prisma  # 実物を当てる
+pnpm exec prisma generate
+pnpm exec prisma migrate status                                       # "Database schema is up to date!"
+```
+
+**`migrate resolve`は履歴に印を付けるだけで、SQLを実行しない。** 印だけ付けて実物を当て忘れると、
+型は通るのに実行時だけ`Table doesn't exist`で落ちる（本番では`deploy.yml`の`migrate`が
+ファイルを実行するので、そちらは正しく当たる）。**必ず両方**行う。
+
 ### 新しいマイグレーションのタイムスタンプは、他worktreeと衝突する（#2524）
 
 DBを共有しているということは、**並行して走っている他Issueのセッションが作ったマイグレーションが
