@@ -98,17 +98,31 @@ export async function fetchPullRequest(
   return res.json();
 }
 
+/**
+ * マージの結果。**`sha`（マージコミットのSHA）を捨てない**（#2703）。
+ *
+ * mainへのマージでは、この値が「GitHubが本当にこのマージのイベントを配送したか」を
+ * 後から照合するための唯一の鍵になる（`deploy.yml`の実行の`head_sha`と突き合わせる）。
+ * 取れなかったときはnull——照合できないだけで、マージ自体は成功している。
+ */
+export type MergePullRequestResult = {
+  /** マージコミットのSHA。レスポンスから読めなければnull */
+  sha: string | null;
+};
+
 export async function mergePullRequest(
   owner: string,
   repo: string,
   number: number,
   token: string,
-): Promise<void> {
+): Promise<MergePullRequestResult> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/merge`;
   const res = await githubFetch(url, token, { method: "PUT", body: { merge_method: "merge" } });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
+  const data: { sha?: unknown } = await res.json().catch(() => ({}));
+  return { sha: typeof data.sha === "string" ? data.sha : null };
 }
 
