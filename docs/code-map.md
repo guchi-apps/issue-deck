@@ -167,6 +167,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - ヘッダーの材料（`PullRequestSummary`）を一覧と詳細APIのどちらから採るかは
     `resolvePullRequestHeader`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）
     に集約してあり、PRペインと重ね表示で共用する。
+- **スマホのPR一覧とPR詳細は同じ`mscreen=pull-requests`を共有し、どちらを出すかは`pr`クエリ
+  だけが決める**（#1087・#1260。判定は[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)）。
+  そのため**画面を移る遷移では`prmodal`と一緒に`pr`も落とす**——落とし忘れると`pr`がURLに残り、
+  「PR」タブを押した瞬間に`mscreen`だけが戻って直前に見たPRの詳細が復活し、一覧へ辿り着けなく
+  なる（#2700）。落とすのは[`use-mobile-screen.ts`](../src/hooks/use-mobile-screen.ts)の
+  `navigate`で、PC側は`use-issue-filters.ts`の`selectView`・`selectPullRequestView`・
+  `selectFlowPane`・`selectPreviewPane`・`selectUsagePane`が`pr: null`で同じことをしている。
+  **`mrepo`・`missue`のようにスマホ専用の現在地だけを畳んで済ませない**——`pr`はPCと共有の
+  クエリなので、スマホ側の畳み忘れに気付きにくい。詳細を開く経路（一覧のタップ・本文中の
+  参照リンク）は`navigate`を通らないため、ここで一律に消して構わない。
 - **スマホのフッターは`flex-1`の均等割で、枠を増やすと1枠の幅がそのぶん縮む**（#2631）。
   4枠のときは1枠98pxだったが、5枠目に「AI使用量」を足して78pxになった
   （[`mobile-bottom-nav.tsx`](../src/components/dashboard/mobile-bottom-nav.tsx)）。
