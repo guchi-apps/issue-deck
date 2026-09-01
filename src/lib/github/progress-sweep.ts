@@ -437,3 +437,108 @@ export function buildClosedStrandedRecoveredComment(pullRequestUrl: string): str
     COMMENT_SOURCE_MARKER,
   ].join("\n");
 }
+
+/**
+ * 本番（`main`）へ出たのにopenのまま残っているIssueの判定に使う事実（#2715）。
+ *
+ * `Done`のままopenなIssueが13件、`Develop`のままだが実物は既に`main`へ入っているIssueが
+ * 10件、2026-09-01時点でフリート全体に残っていた。closeするのは
+ * `reusable-issue-labels.yml`の`main-pr-merged`だけで、**対象を1件も特定できないまま
+ * 成功して終わる経路がある**——リリースPR本文の`## 対象issue`が
+ * 「issue-deckへ問い合わせできず…」の注記になり、フォールバックの
+ * `GET /api/progress`も同じ不通に巻き込まれる形（#2689のパターン3）。v4.73.0（PR #2713）が
+ * まさにこれで、issue-deck#2700・#2703・#2704・#2705がopenのまま残った。
+ *
+ * #2690で入れた`decideClosedStrandedIssue`はcloseされたIssueしか見ないため、この形は
+ * どの経路にも拾われない。ここが最後の受け皿になる。
+ */
+export type MergedOpenFacts = {
+  /**
+   * ProjectのStatus。`done`は「本番反映済み」の定義そのものなので、それ以上確かめずに
+   * closeしてよい（GitHubへの問い合わせが1回も要らない）。`develop`・`release`は
+   * 「次のリリース待ち」と見分けが付かないため、`main`との比較で確かめる。
+   */
+  status: "develop" | "release" | "done";
+  /** `issue-<番号>`→developの直近マージ済みPR。無ければ`null`。`status`が`done`なら参照しない */
+  mergedPullRequest: { url: string; headSha: string } | null;
+  /** `main...headSha`の二点比較。取得できなければ`null`。`status`が`done`なら参照しない */
+  compareWithMain: { aheadBy: number } | null;
+};
+
+export type MergedOpenSkipReason =
+  /** `issue-<番号>`からdevelopへのマージ済みPRが無い（`Develop`へ手で動かしたIssueなど） */
+  | "open_no_merged_pr"
+  /** `main`との比較を取得できなかった。次の巡回で再判定する */
+  | "open_compare_unavailable"
+  /** developへは入っているが、まだ`main`の祖先になっていない（次のリリース待ち＝正常） */
+  | "open_not_in_main_yet"
+  /**
+   * 一度closeされた後に人がreopenしている。**IO側が決める**（判定の直前に1回だけ引くため）。
+   * 追加対応のために開け直したIssueを巡回が閉じ直さないための歯止め。
+   */
+  | "open_reopened"
+  /** reopenの有無を確かめられなかった。**IO側が決める**。確かめられないものは閉じない */
+  | "open_reopen_unknown"
+  /**
+   * そのIssueのローカルセッションが今も生きている。**IO側が決める**（issue-deckのDBを引く）。
+   * `Done`のままopenなIssueから追加対応を始めることがあり、作業中に閉じると驚かせるため。
+   */
+  | "open_session_alive";
+
+export type MergedOpenDecision =
+  /** closeしてよい。`reportDone`なら`done`の報告を先に行う */
+  | { action: "close"; pullRequestUrl: string | null; reportDone: boolean }
+  | { action: "skip"; reason: MergedOpenSkipReason };
+
+/**
+ * openなIssueをcloseしてよいか判定する（#2715）。
+ *
+ * `develop`・`release`の判定は`decideClosedStrandedIssue`と同じ
+ * 「`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先か」
+ * （`GET /repos/{repo}/compare/main...{head}`の`aheadBy === 0`）。developへのマージは常に
+ * マージコミット方式なので、PRのhead SHA自体がdevelopのマージコミットの親であり、
+ * develop→mainも同じ方式なので祖先関係で「本番へ出たか」を正確に判定できる。
+ *
+ * **reopenの確認はここでは行わない。** GitHubへの問い合わせが1回増えるため、
+ * `notify_stranded`が`hasStrandedNotice`をIO側で確かめるのと同じく、**closeすると決めてから**
+ * IOが確かめる。見送るだけの巡回でイベント一覧を引かないため。
+ */
+export function decideMergedOpenIssue(facts: MergedOpenFacts): MergedOpenDecision {
+  if (facts.status === "done") {
+    // `Done`は`main-pr-merged`・`main-direct-merged`・この巡回しか付けない
+    // （画面のセレクトで人が付けることもできるが、その場合も意味は「本番反映済み」）。
+    // close漏れだけが残っている状態なので、`done`の再報告は要らない。
+    return {
+      action: "close",
+      pullRequestUrl: facts.mergedPullRequest?.url ?? null,
+      reportDone: false,
+    };
+  }
+
+  const merged = facts.mergedPullRequest;
+  if (!merged) return { action: "skip", reason: "open_no_merged_pr" };
+
+  const compare = facts.compareWithMain;
+  if (!compare) return { action: "skip", reason: "open_compare_unavailable" };
+
+  if (compare.aheadBy !== 0) return { action: "skip", reason: "open_not_in_main_yet" };
+
+  return { action: "close", pullRequestUrl: merged.url, reportDone: true };
+}
+
+/** 本番反映済みのIssueをcloseしたことを伝えるコメント本文（#2715） */
+export function buildMergedOpenClosedComment(params: {
+  pullRequestUrl: string | null;
+  reportedDone: boolean;
+}): string {
+  const head = params.reportedDone
+    ? "✅ 本番（`main`）への反映を確認し、進捗を Done へ進めてIssueをcloseしました。"
+    : "✅ 進捗が Done（本番反映済み）のままopenで残っていたため、Issueをcloseしました。";
+  return [
+    params.pullRequestUrl ? `${head} ${params.pullRequestUrl}` : head,
+    "",
+    "リリース時のcloseが行われないまま残っていたため、定期巡回が回収しました。",
+    "",
+    COMMENT_SOURCE_MARKER,
+  ].join("\n");
+}

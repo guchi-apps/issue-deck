@@ -968,15 +968,55 @@ Issueを除外するため、以後どのリリースの一括遷移にも二度
   なので、PRのhead SHA自体がdevelopのマージコミットの親であり、develop→mainも同じ方式で
   祖先関係が保たれる。祖先なら本番へ既に出ているということなので`done`を報告する
   （Issueは既にcloseされているため`close`は行わない）
-- **openなIssueは対象にしない。** パターン3（issue-deck不通で`main-pr-merged`が対象を
-  1件も特定できなかった場合）はopenなIssueのまま`Release`に残る形で発生するが、この巡回
-  では拾わない。`Develop`には次のリリースを待っているだけの**正常な**openなIssueが常に
-  一定数いるため、それら全部を巡回のたびに`compare`APIへ問い合わせるとGitHub APIの消費が
-  跳ね上がる（closedはこの巡回対象になること自体が異常で、定常状態ではほぼ0件）。**役割分担**
-  として、openな取りこぼしは従来どおりissue-deck復旧後に`main-pr-merged`のrunを再実行する
-  経路に委ね、この巡回はcloseされて二度と拾われなくなったものだけを相手にする
+- **openなIssueは対象にしなかった**（この判断は#2715で覆した。次節を参照）。パターン3
+  （issue-deck不通で`main-pr-merged`が対象を1件も特定できなかった場合）はopenなIssueのまま
+  `Release`に残る形で発生するが、この巡回では拾わないことにしていた。`Develop`には次の
+  リリースを待っているだけの**正常な**openなIssueが常に一定数いるため、それら全部を巡回の
+  たびに`compare`APIへ問い合わせるとGitHub APIの消費が跳ね上がる、という理由。openな
+  取りこぼしはissue-deck復旧後に`main-pr-merged`のrunを再実行する経路に委ねていた
 - 進める際、developへのマージ時に外しそこねた`00.check-user`（#2335）もついでに外し、
   回収した旨をコメントで知らせる（発信元マーカーは既存の巡回と同じ`progress-sweep`）
+
+### 本番反映済みなのにopenのまま残るIssueも巡回でcloseする（#2715）
+
+#2690が委ねた「issue-deck復旧後に`main-pr-merged`のrunを再実行する」経路は、**誰も実行しない
+まま溜まり続けた。** 2026-09-01時点でフリート全体に次の2種類が残っていた。
+
+- **`Done`のままopenなIssueが13件**（`aide-bot`・`asset-manager`・`dayspan`・`issue-deck`・
+  `meisai-lab`・`myroom`・`vps`）。全件がclose・reopenのイベントを1つも持たず、`done`は
+  報告されたのにcloseだけが行われていない
+- **`Develop`のままだが実物は既に`main`へ入っているIssueが10件**。v4.73.0のリリースPR
+  （issue-deck#2713）の本文は`## 対象issue`が「issue-deckへ問い合わせできず…HTTP 000」の
+  注記になっており、`main-pr-merged`のフォールバック問い合わせも同じ不通に巻き込まれて
+  **対象0件のまま成功で終わった**。#2700・#2703・#2704・#2705がその場で増えた分
+
+`progress-sweep`にopenなIssue向けの経路を足して回収する。判定は
+[`decideMergedOpenIssue`](../src/lib/github/progress-sweep.ts)、IOは
+[`sweepMergedOpenIssue`](../src/lib/github/progress-sweep-run.ts)。
+
+- **`Done`でopenなものはGitHubへ1回も問い合わせずにcloseする。** `Done`は「mainへマージ完了」
+  の定義そのもので、盤面のスナップショットだけで判定が閉じる。`done`の再報告も行わない
+- **`Develop`・`Release`でopenなものは`decideClosedStrandedIssue`と同じ判定**
+  （`issue-<番号>`の直近マージ済みPRのheadが`main`の祖先か＝`compare/main...head`の
+  `aheadBy === 0`）で確かめ、**`done`を報告してからclose**する。順序が意味を持つ——
+  先にcloseすると`closeStrandedProgress`（#1856）の救済対象に当たって終端`Closed`へ
+  落ちうる
+- **一度でもreopenされたIssueは閉じ直さない。** `Done`でopenには「closeし忘れ」と
+  「closeした後に追加対応のため人が開け直した」の2通りがあり、closedなIssueは`Done`より
+  手前へ戻さない運用（#1348）なのでStatusでは見分けられない。`issues/{n}/events`に
+  `reopened`があるかを見て、**確かめられなければ閉じない**（`hasReopenedEvent`）
+- **走っているローカルセッションが担当しているIssueにも触らない。** `Done`のままopenな
+  Issueから追加対応を始めることがあるため（2026-09-01時点の`myroom#302`が実例）。判定は
+  issue-deckのDB（`DispatchSession`が`ALIVE`）で、GitHubへの問い合わせは増やさない
+- **問い合わせは「closeすると決めてから」の1回だけ。** 見送るだけの巡回でイベント一覧を
+  引かない（`notify_stranded`が`hasStrandedNotice`を書く直前に確かめるのと同じ形）
+- **#2690が挙げたAPI消費の懸念は実測で否定できる。** `compare`を投げるのは`Develop`・
+  `Release`でopenなものだけで、フリート全体で13件（2026-09-01実測）。PR一覧は条件付きGETで
+  304になりレート制限を消費せず、closeしたIssueは次の巡回の対象から外れる
+
+**根本原因（リリース時にissue-deck本体へ到達できずHTTP 000になる）はこの安全網では直らない。**
+`main-pr-merged`が対象0件で成功して終わる構造そのものは残るので、この巡回は最後の受け皿として
+扱う。
 
 ## 参考リンク
 

@@ -12,15 +12,19 @@ import {
   createComment,
   fetchCommentsForIssue,
   fetchRepositoryLabelNames,
+  hasReopenedEvent,
   removeIssueLabel,
+  updateIssue,
 } from "@/lib/github/issues-api";
 import { getProjectLocation } from "@/lib/github/project-location";
 import { fetchProjectItems } from "@/lib/github/projects-api";
 import {
   buildClosedStrandedRecoveredComment,
   buildDevelopMergedComment,
+  buildMergedOpenClosedComment,
   buildStrandedComment,
   decideClosedStrandedIssue,
+  decideMergedOpenIssue,
   decideProgressSweep,
   decideStaleCheckUser,
   hasDevelopMergedNotice,
@@ -28,6 +32,8 @@ import {
   needsStrandedCheck,
   progressSweepIntervalMinutes,
   type ClosedStrandedSkipReason,
+  type MergedOpenFacts,
+  type MergedOpenSkipReason,
   type ProgressSweepCompare,
   type ProgressSweepSkipReason,
 } from "@/lib/github/progress-sweep";
@@ -82,12 +88,24 @@ import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress
  * - **判定は`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先か**
  *   （`compare/main...head`の`aheadBy === 0`）だけ。祖先なら`done`を報告する
  *   （Issueは既にcloseされているため`close`は行わない）
- * - **openなIssueは対象にしない。** #2689のパターン3（issue-deck不通で`main-pr-merged`が
- *   対象を1件も特定できなかった場合）はopenなIssueのまま`Release`に残る形で発生するが、
- *   ここでは拾わない。`Develop`には次のリリースを待っているだけの**正常な**openなIssueが
- *   常に一定数いるため、それら全部を巡回のたびに`compare`APIへ問い合わせるとGitHub APIの
- *   消費が跳ね上がる（closedはこの巡回対象になること自体が異常で、定常状態ではほぼ0件）。
- *   openな取りこぼしは、issue-deck復旧後に`main-pr-merged`のrunを再実行する既存の経路に委ねる
+ *
+ * ## openなIssueのclose漏れ回収（#2715）
+ *
+ * #2690では「openなIssueは対象にしない。`Develop`には次のリリースを待っているだけの正常な
+ * openなIssueが常にいるため、それら全部を巡回のたびに`compare`APIへ問い合わせるとGitHub
+ * APIの消費が跳ね上がる。openな取りこぼしは`main-pr-merged`のrunを再実行する経路に委ねる」
+ * としたが、**その経路は誰も実行しないまま溜まり続けた。** 2026-09-01時点で`Done`のまま
+ * openなIssueが13件、`Develop`のままだが実物は既に`main`へ入っているIssueが10件残っており、
+ * 直近のv4.73.0（PR #2713）でも4件が同じ形で増えている。判断を覆してここで拾う。
+ *
+ * 消費が跳ね上がらないことは実測で確かめてある。
+ *
+ * - **`Done`でopenなものはGitHubへ1回も問い合わせない。** `Done`＝本番反映済みの定義そのもの
+ *   なので、盤面のスナップショットだけで判定が閉じる
+ * - **`compare`を投げるのは`Develop`・`Release`でopenなものだけ**で、フリート全体で13件
+ *   （2026-09-01の実測）。PR一覧は条件付きGETで304になり、レート制限を消費しない
+ * - **reopenの確認（イベント一覧）はcloseすると決めてからの1回だけ。** closeすれば次の巡回の
+ *   対象から外れるので、同じIssueへ2回投げることはない
  */
 
 /** 巡回が実際に行ったこと1件ぶん */
@@ -100,7 +118,9 @@ export type ProgressSweepAction = {
     | "manual_step_labeled"
     | "check_user_cleared"
     /** closedなIssueの取り残しをdoneへ回収した（#2690） */
-    | "closed_advanced";
+    | "closed_advanced"
+    /** 本番反映済みなのにopenのまま残っていたIssueをcloseした（#2715） */
+    | "open_closed";
 };
 
 export type ProgressSweepResult = {
@@ -114,11 +134,20 @@ export type ProgressSweepResult = {
   candidates: number;
   /** `Develop`・`Release`にいて実際に見たclosedなIssue数（#2690） */
   closedCandidates: number;
+  /** `Develop`・`Release`・`Done`にいて実際に見たopenなIssue数（#2715） */
+  mergedOpenCandidates: number;
   /** 進めた・通知した・ラベルを付けたもの */
   actions: ProgressSweepAction[];
   /** 見送った理由ごとの件数 */
   skipped: Partial<
-    Record<ProgressSweepSkipReason | ClosedStrandedSkipReason | "fetch_failed" | "action_failed", number>
+    Record<
+      | ProgressSweepSkipReason
+      | ClosedStrandedSkipReason
+      | MergedOpenSkipReason
+      | "fetch_failed"
+      | "action_failed",
+      number
+    >
   >;
   /** 状況を取得できなかったリポジトリ */
   failedRepositories: string[];
@@ -135,6 +164,18 @@ const ADVANCE_TO: ProgressStatusKey = "develop";
  * closeなIssueを除外するため、この2段だけは`fetchProjectItems`のスナップショットを直接読む。
  */
 const CLOSED_TARGET_STATUSES: readonly ProgressStatusKey[] = ["develop", "release"];
+
+/**
+ * 本番反映済みのclose漏れを疑って拾うopenなIssueの進捗（#2715）。`done`を含めるのが要で、
+ * 「`done`は報告されたがcloseだけ落ちた」形（フリートに13件）はここでしか拾えない。
+ */
+const MERGED_OPEN_TARGET_STATUSES: readonly ProgressStatusKey[] = ["develop", "release", "done"];
+
+/** `MergedOpenFacts["status"]`と`ProgressStatusKey`の重なり。集合は上の定数と一致する */
+type MergedOpenStatus = MergedOpenFacts["status"];
+
+/** `done`を報告するときの`onlyFrom`。`done`にいるものは報告せずcloseだけ行う */
+const MERGED_OPEN_ADVANCE_FROM: readonly ProgressStatusKey[] = ["develop", "release"];
 
 /** Issue用ブランチが向く先。この運用ではdevelop固定（`develop`を持たないリポジトリでは対象0件） */
 const BASE_BRANCH = "develop";
@@ -167,6 +208,7 @@ function emptyResult(overrides: Partial<ProgressSweepResult>): ProgressSweepResu
     repositories: 0,
     candidates: 0,
     closedCandidates: 0,
+    mergedOpenCandidates: 0,
     actions: [],
     skipped: {},
     failedRepositories: [],
@@ -216,7 +258,7 @@ export async function runProgressSweep(
   const actions: ProgressSweepAction[] = [];
   const failedRepositories: string[] = [];
 
-  const { openCandidates, closedCandidates } = await collectCandidates({
+  const { openCandidates, closedCandidates, mergedOpenCandidates } = await collectCandidates({
     repositories,
     tokenFor,
     failedRepositories,
@@ -250,6 +292,24 @@ export async function runProgressSweep(
     }
   }
 
+  // 作業中のローカルセッションが付いているIssueは閉じない（#2715）。DBを1回引くだけで、
+  // GitHubへの問い合わせは増やさない。対象が無ければクエリ自体を出さない。
+  const liveSessions = mergedOpenCandidates.length > 0 ? await fetchLiveSessionKeys() : new Set<string>();
+
+  for (const candidate of mergedOpenCandidates) {
+    try {
+      const action = await sweepMergedOpenIssue({ ...candidate, liveSessions, countSkip });
+      if (action) actions.push(action);
+    } catch (error) {
+      // 1件の失敗で巡回全体を止めない。次の巡回で拾い直せる。
+      console.error(
+        `[progress-sweep] ${candidate.repositoryFullName}#${candidate.issueNumber}（close漏れ）:`,
+        error,
+      );
+      countSkip("fetch_failed");
+    }
+  }
+
   actions.push(...(await sweepStaleCheckUser({ tokenFor, countSkip })));
   actions.push(...(await sweepManualStepLabels({ tokenFor, countSkip })));
 
@@ -259,6 +319,7 @@ export async function runProgressSweep(
     repositories: repositories.length,
     candidates: openCandidates.length,
     closedCandidates: closedCandidates.length,
+    mergedOpenCandidates: mergedOpenCandidates.length,
     actions,
     skipped,
     failedRepositories,
@@ -282,12 +343,14 @@ type Candidate = {
   token: string;
 };
 
-/** `collectCandidates`が返す、open向け・closed向けそれぞれの対象一覧 */
+/** `collectCandidates`が返す、経路ごとの対象一覧 */
 type CandidateGroups = {
   /** `Develop PR`・`Implementation`にいるopenなIssue */
   openCandidates: Candidate[];
   /** `Develop`・`Release`にいるclosedなIssue（#2690） */
   closedCandidates: Candidate[];
+  /** `Develop`・`Release`・`Done`にいるopenなIssue（#2715）。判定に進捗そのものを使う */
+  mergedOpenCandidates: (Candidate & { status: MergedOpenStatus })[];
 };
 
 /**
@@ -305,7 +368,7 @@ async function collectCandidates(params: {
 }): Promise<CandidateGroups> {
   const location = getProjectLocation();
   // Project連携が無効なら進捗そのものが無い。手作業ラベルの埋め直しだけを行う。
-  if (!location) return { openCandidates: [], closedCandidates: [] };
+  if (!location) return { openCandidates: [], closedCandidates: [], mergedOpenCandidates: [] };
 
   const byInstallation = new Map<string, RepositoryRow[]>();
   for (const repository of params.repositories) {
@@ -316,8 +379,10 @@ async function collectCandidates(params: {
 
   const wantedOpen = new Set<ProgressStatusKey>(TARGET_STATUSES);
   const wantedClosed = new Set<ProgressStatusKey>(CLOSED_TARGET_STATUSES);
+  const wantedMergedOpen = new Set<ProgressStatusKey>(MERGED_OPEN_TARGET_STATUSES);
   const openCandidates: Candidate[] = [];
   const closedCandidates: Candidate[] = [];
+  const mergedOpenCandidates: CandidateGroups["mergedOpenCandidates"] = [];
 
   for (const [installationKey, rows] of byInstallation) {
     let token: string;
@@ -337,6 +402,7 @@ async function collectCandidates(params: {
     );
     const seenOpen = new Set<string>();
     const seenClosed = new Set<string>();
+    const seenMergedOpen = new Set<string>();
     for (const item of items) {
       const repository = byRepositoryId.get(item.repositoryDatabaseId);
       if (!repository) continue;
@@ -351,6 +417,14 @@ async function collectCandidates(params: {
         token,
       };
       if (item.issueOpen) {
+        // `Develop PR`・`Implementation`（進める側）と`Develop`・`Release`・`Done`
+        // （close漏れ側）は重ならないので、同じ走査で振り分けてよい。
+        if (wantedMergedOpen.has(status)) {
+          if (seenMergedOpen.has(key)) continue;
+          seenMergedOpen.add(key);
+          mergedOpenCandidates.push({ ...candidate, status: status as MergedOpenStatus });
+          continue;
+        }
         if (!wantedOpen.has(status) || seenOpen.has(key)) continue;
         seenOpen.add(key);
         openCandidates.push(candidate);
@@ -362,7 +436,7 @@ async function collectCandidates(params: {
     }
   }
 
-  return { openCandidates, closedCandidates };
+  return { openCandidates, closedCandidates, mergedOpenCandidates };
 }
 
 /** 1つのIssueを見て、進める・通知する・見送るのいずれかを行う */
@@ -531,6 +605,137 @@ async function sweepClosedIssue(params: {
   });
 
   return { repositoryFullName: params.repositoryFullName, issueNumber, kind: "closed_advanced" };
+}
+
+/** 生きているローカルセッションが担当しているIssueの`<repo>#<番号>`（#2715） */
+async function fetchLiveSessionKeys(): Promise<ReadonlySet<string>> {
+  const sessions = await db.dispatchSession.findMany({
+    where: { state: "ALIVE" },
+    select: { repositoryFullName: true, issueNumber: true },
+  });
+  return new Set(
+    sessions.map((session) => `${session.repositoryFullName}#${session.issueNumber}`),
+  );
+}
+
+/**
+ * 本番（`main`）へ出たのにopenのまま残っているIssueをcloseする（#2715）。
+ *
+ * `sweepClosedIssue`と対になる経路。あちらは「closeはされたが`done`が報告されなかった」もの、
+ * こちらは「本番へ出たのにcloseされなかった」もの——`main-pr-merged`が対象を1件も特定
+ * できずに成功して終わると、後者だけが残る（#2689のパターン3。v4.73.0のPR #2713で再発）。
+ *
+ * **`done`の報告を`gh issue close`相当より先に行う（順序が意味を持つ）。** issue-deckは
+ * Issueのcloseを受け取ると、Statusが`Planning`・`Implementation`・`Develop PR`のときに限り
+ * 終端`Closed`へ送る（#1856。`closeStrandedProgress`）。先にcloseすると、盤面の同期が
+ * 遅れている状況で`Done`ではなく`Closed`（対応終了）へ落ちうる。`reusable-issue-labels.yml`の
+ * `main-direct-merged`が`done`報告を先に置いているのと同じ理由。
+ *
+ * **closeすると決めてからreopenを確かめる。** 追加対応のために人が開け直したIssueを閉じ直さない
+ * ための歯止めで、GitHubへの問い合わせを見送るだけの巡回で増やさないため直前に1回だけ引く
+ * （`notify_stranded`が`hasStrandedNotice`を書く直前に確かめるのと同じ形）。
+ */
+async function sweepMergedOpenIssue(params: {
+  repositoryFullName: string;
+  ownerLogin: string;
+  name: string;
+  issueNumber: number;
+  token: string;
+  status: MergedOpenStatus;
+  /** 生きているローカルセッションの`<repo>#<番号>` */
+  liveSessions: ReadonlySet<string>;
+  countSkip: (reason: keyof ProgressSweepResult["skipped"]) => void;
+}): Promise<ProgressSweepAction | null> {
+  const { repositoryFullName, ownerLogin, name, issueNumber, token, status, countSkip } = params;
+
+  // 進捗が`Done`のままopenなIssueから追加対応を始めることがある。走っているセッションの
+  // 担当Issueを巡回が閉じると、画面のセッション表示と噛み合わなくなるので触らない。
+  if (params.liveSessions.has(`${repositoryFullName}#${issueNumber}`)) {
+    countSkip("open_session_alive");
+    return null;
+  }
+
+  // `Done`は「本番反映済み」の定義そのものなので、確かめるための問い合わせを一切行わない。
+  let mergedPullRequest: MergedOpenFacts["mergedPullRequest"] = null;
+  let compareWithMain: MergedOpenFacts["compareWithMain"] = null;
+  if (status !== "done") {
+    const branch = `issue-${issueNumber}`;
+    const closed = await fetchPullRequestsForHead(
+      ownerLogin,
+      name,
+      BASE_BRANCH,
+      branch,
+      "closed",
+      token,
+    );
+    const merged = closed
+      .filter((pullRequest) => pullRequest.merged_at !== null)
+      .sort((a, b) => Date.parse(a.merged_at ?? "") - Date.parse(b.merged_at ?? ""))
+      .at(-1);
+    mergedPullRequest = merged ? { url: merged.html_url, headSha: merged.head.sha } : null;
+    compareWithMain = mergedPullRequest
+      ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
+      : null;
+  }
+
+  const decision = decideMergedOpenIssue({ status, mergedPullRequest, compareWithMain });
+  if (decision.action === "skip") {
+    countSkip(decision.reason);
+    return null;
+  }
+
+  const reopened = await hasReopenedEvent(ownerLogin, name, issueNumber, token);
+  // 確かめられなかったものは閉じない（次の巡回で引き直す）。
+  if (reopened === null) {
+    countSkip("open_reopen_unknown");
+    return null;
+  }
+  if (reopened) {
+    countSkip("open_reopened");
+    return null;
+  }
+
+  if (decision.reportDone) {
+    const reported = await reportProgressStatus({
+      repositoryFullName,
+      issueNumber,
+      status: "done",
+      onlyFrom: MERGED_OPEN_ADVANCE_FROM,
+    });
+    if (!reported.applied) {
+      console.warn(
+        `[progress-sweep] ${repositoryFullName}#${issueNumber}の進捗をdoneへ進められませんでした（${reported.reason}）`,
+      );
+      countSkip("action_failed");
+      return null;
+    }
+  }
+
+  // developへのマージ時に外しそこねた確認待ちが残っていれば、ここでもついでに外す
+  // （`sweepIssue`の「進める」経路と同じ扱い）。
+  await clearCheckUser(ownerLogin, name, issueNumber, token);
+
+  try {
+    await updateIssue(ownerLogin, name, issueNumber, token, {
+      state: "closed",
+      state_reason: "completed",
+    });
+  } catch (error) {
+    // closeできなければ「closeしました」と書けない。進捗の報告はそのままでよく、
+    // 次の巡回では`done`側の経路として拾い直される。
+    console.error(`[progress-sweep] ${repositoryFullName}#${issueNumber}のclose:`, error);
+    countSkip("action_failed");
+    return null;
+  }
+
+  await createComment(ownerLogin, name, issueNumber, token, {
+    body: buildMergedOpenClosedComment({
+      pullRequestUrl: decision.pullRequestUrl,
+      reportedDone: decision.reportDone,
+    }),
+  });
+
+  return { repositoryFullName, issueNumber, kind: "open_closed" };
 }
 
 /**

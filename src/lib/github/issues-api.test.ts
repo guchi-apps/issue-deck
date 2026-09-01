@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchRepositoryComments,
+  hasReopenedEvent,
   IssueTransferPartialError,
   transferIssue,
 } from "@/lib/github/issues-api";
@@ -150,5 +151,51 @@ describe("fetchRepositoryComments", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.comments.map((comment) => comment.id)).toEqual([1, 2]);
     expect(result.hasMore).toBe(true);
+  });
+});
+
+describe("hasReopenedEvent", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function eventsResponse(events: { event: string }[]) {
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => events,
+      text: async () => JSON.stringify(events),
+    };
+  }
+
+  it("reopenイベントがあればtrue", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(eventsResponse([{ event: "closed" }, { event: "reopened" }])),
+    );
+
+    await expect(hasReopenedEvent("guchi-apps", "issue-deck", 1, "token")).resolves.toBe(true);
+  });
+
+  it("一度もcloseされていなければfalse", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(eventsResponse([{ event: "labeled" }])));
+
+    await expect(hasReopenedEvent("guchi-apps", "issue-deck", 1, "token")).resolves.toBe(false);
+  });
+
+  it("取得に失敗したらnull（確かめられないものは閉じない）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: { get: () => null },
+        json: async () => ({}),
+        text: async () => "not found",
+      }),
+    );
+
+    await expect(hasReopenedEvent("guchi-apps", "issue-deck", 1, "token")).resolves.toBeNull();
   });
 });
