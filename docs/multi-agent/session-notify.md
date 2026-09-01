@@ -465,6 +465,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
 | `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
+| `PreToolUse` / `PostToolUse` | すべて | いま何をしているか（#2705） | **送らない**（ホスト側の`.step`へ書き、pollerが運ぶ。後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述。Codexではここで`codex queue`の宛先を残し、スレッドに`<リポジトリ名> #<Issue番号>`の名前を付ける。#2519・#2540） |
 | （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971）／ツール呼び出しが実行されないまま停滞（#2655） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
 
@@ -848,6 +849,55 @@ issue-deckの画面には何も出ず（`00.check-user`を付けるのはActions
 宛先と鍵（`APP_BASE_URL`・`DISPATCH_SECRET`）はpollerと同じ`~/.config/issue-deck/dispatch.env`
 から読む。**未設定でも失敗しても実装は止めない**（このスクリプトの約束）。設定していない
 ホストでは通知だけが飛び、画面に出ないだけになる。
+
+### いま何をしているかを出す（#2705）
+
+**`activity`の4値では「実行中」までしか言えなかった。** 動いているのは分かっても、テストで
+詰まっているのか、まだ調べているだけなのかは`tmux attach`しないと分からず、画面のIssue一覧に
+至っては「サブPC」としか出ていなかった。そこで**フックが渡してくるツール名とコマンド**から、
+13語の固定語彙（`SESSION_STEPS`）へ畳んだステップを別に持つ。
+
+```
+Pre/PostToolUse（フック）
+  → scripts/lib/session-step.sh（tool_name・tool_input.command → ステップコード）
+  → <セッション名>.step（scripts/lib/session-state.sh）
+  → scripts/subpc-dispatch-poller.sh の session_step_json（既存の報告へ相乗り）
+  → POST /api/dispatch/sessions
+  → DispatchSession.step / stepAt / stepSeenAt
+  → describeSessionStep（src/lib/dispatch/issue-session.ts）
+  → Issue詳細のピルと、Issue一覧の行（shortIssueSessionLabel）
+```
+
+守っている決まりは5つ。
+
+- **画面（`capture-pane`）も転記も読まない。** 判定材料はフックのJSONだけで、
+  [gates.md](gates.md)「計器の担当範囲は『フックが飛ぶか』で切る」の内側に収まっている。
+  `activity`と同じ経路で、新しい依存も増えない
+- **コマンドの原文は運ばない。** `--token=…`のような行がDBと画面へ出るのを避けるため、分類は
+  ホスト側で済ませて**コードだけ**を書く。文言はissue-deck側に1つだけ置く（`.reap`の理由コードと
+  同じ分け方）。語彙は`SESSION_STEP_CODES`と`SESSION_STEPS`の2箇所にあり、
+  `scripts/session-step.test.mjs`が突き合わせる
+- **HTTPは1本も増えない。** フックはホスト側のファイルへ1行書くだけで、画面へ運ぶのはpollerの
+  既存の報告（`reapAt`と同じ相乗り）。ツールの実行ごとに往復すると実装セッションが目に見えて遅くなる
+- **`PreToolUse`に`Bash`のmatcherを足している。** `PostToolUse`だけだと`pnpm build`のような長い
+  コマンドの**終わったあと**に「ビルド中」と出ることになり、一番出したい時間帯に出ない。
+  `Read`・`Edit`は速いので足していない
+- **時刻を2つ持つ。** `stepAt`は「そのステップに入った時刻」（画面の「実装中・2分」）、
+  `stepSeenAt`は「最後にそのステップのツールが走った時刻」。後者が**`activityAt`より新しいことが
+  「いま走っているか」の唯一の手掛かり**で、これが無いと次節の担保が裏目に出る——`Stop`のあと
+  次のturnが始まってもフックは飛ばないため、走っている最中のセッションが「応答を終えています」と
+  出続けていた（`isSessionStepFresh`がこれを直す）
+
+**知らないコードは画面側が落とす。** サブPCのスクリプトはissue-deck本体より新しいことも古いことも
+あるため、語彙が増えた側で報告ごと弾かず、その項目だけを落とす（`parseSessionStep`。`.reap`の
+理由コードと同じ扱い）。ステップが出ないだけで、他の報告は通る。
+
+**エージェント自身が書いたTODOは使えない。** 「実装中」「lintチェック」のような文章を本人に
+書かせる`TodoWrite`があれば分類は要らないが、**サブPCのセッションはこれを1度も呼んでいない**
+（直近の実装セッション10本の転記を`grep`して0件。ツール一覧にも無い）。使えるのは`tool_name`と
+`tool_input.command`だけなので、細かさの上限は語彙の粒度になる。**語彙に無いコマンドは
+「コマンド実行中」へ落ちる**のが仕様で、そこを埋めたくなったら`SESSION_STEPS`と
+`SESSION_STEP_CODES`の両方へ足す。
 
 ### 古い「入力待ち」が残らない担保
 

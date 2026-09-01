@@ -215,6 +215,9 @@ describe("enqueueIssueToDefaultHost", () => {
         reapAt: null,
         reapReason: null,
         codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
       },
     ];
 

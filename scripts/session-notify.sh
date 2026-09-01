@@ -24,6 +24,9 @@
 #                                               （＋`00.check-user`を解く。#1417）
 #   PostToolUse(Artifact)           アーティファクトの公開 → HTMLの原本をissue-deckへ送る（#2154）。
 #                                               上の間引きより前で扱う
+#   Pre/PostToolUse（すべて）        いま何をしているか → ホスト側の`.step`へコードを書く（#2705）。
+#                                               上の間引きより前で扱う。issue-deckへは
+#                                               pollerが次の巡で運ぶので、ここからは送らない
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消し、Codexなら
 #                                               `codex queue`の宛先（session_id）を残す（#2519）。
 #                                               **issue-deckへも送らない**
@@ -160,6 +163,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || true)"
 if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-state.sh" ]]; then
   # shellcheck source=scripts/lib/session-state.sh
   source "$SCRIPT_DIR/lib/session-state.sh" || true
+fi
+# いま何をしているかの分類（#2705）。**語彙と判定はここには持たない。**
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/lib/session-step.sh" ]]; then
+  # shellcheck source=scripts/lib/session-step.sh
+  source "$SCRIPT_DIR/lib/session-step.sh" || true
 fi
 # Codexのスレッドに名前を付ける（#2540）。**Codexのセッションでしか使わない**が、
 # sourceの費用は関数定義だけなのでここでまとめて読む。
@@ -401,6 +409,49 @@ PY
 # 外れてもpython側が同じ判定で落とすので、結果は変わらない。
 if [[ "$HOOK_JSON" == *'"tool_name"'*'"Artifact"'* ]]; then
   report_artifact_to_issue_deck
+fi
+
+# ---------------------------------------------------------------------------
+# いま何をしているかを記録する（#2705）
+#
+# **下の`PostToolUse`の間引きより前に置く。** 間引きは「直前が入力待ちのとき」しか通さないので、
+# 任せるとほとんどのツール実行が捨てられ、ステップが更新されない。
+#
+# **`PreToolUse`と`PostToolUse`の両方で書く。** `PostToolUse`だけだと`pnpm build`のような長い
+# コマンドの**終わったあと**に「ビルド中」と出ることになり、一番出したい時間帯に出ない。
+# ランチャーが`PreToolUse`へ`Bash`のmatcherを足しているのはこのため（`Read`・`Edit`は速いので
+# `PostToolUse`だけで足りる）。
+#
+# **HTTPもpython3も起こさない。** ホスト側のファイルへ1行書くだけで、画面へ運ぶのはpollerが
+# 次の巡で行う（`.reap`と同じ経路）。ここでネットワークへ出ると、ツールの実行ごとに往復が増える。
+record_session_step() {
+  local tool command step json_head
+  [[ -n "$NOTIFY_TMUX_SESSION" ]] || return 0
+  declare -F session_step_classify >/dev/null 2>&1 || return 0
+  declare -F session_state_write_step >/dev/null 2>&1 || return 0
+
+  # **先頭だけを見る。** `PostToolUse`のJSONはツールの応答を丸ごと抱えて数MBになることがあり、
+  # 全体へ正規表現を掛けるとツールの実行ごとに目に見えて遅くなる。`tool_name`と
+  # `tool_input.command`はどちらもその手前に来る
+  json_head="${HOOK_JSON:0:4000}"
+  tool="$(session_step_hook_tool_name "$json_head")" || return 0
+  command="$(session_step_hook_command "$json_head" 2>/dev/null || true)"
+  step="$(session_step_classify "$tool" "$command")" || return 0
+  session_state_write_step "$NOTIFY_TMUX_SESSION" "$step" || true
+  return 0
+}
+
+if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"(Pre|Post)ToolUse\" ]]; then
+  record_session_step
+fi
+
+# `PreToolUse`のうち、計画（`ExitPlanMode`）と質問（`AskUserQuestion`）以外はここで打ち切る（#2705）。
+# ランチャーが足した`Bash`のmatcherはステップの記録だけが目的で、この先に用は無い
+# （python3を起こしても、下の判定が同じ理由で何も出さずに終わる）。
+if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PreToolUse\" ]] &&
+  [[ "$HOOK_JSON" != *'"tool_name"'*'"ExitPlanMode"'* ]] &&
+  [[ "$HOOK_JSON" != *'"tool_name"'*'"AskUserQuestion"'* ]]; then
+  exit 0
 fi
 
 # **`PostToolUse`のほとんどをここで捨てる**（#1357）。ツールの実行ごとに飛ぶイベントなので、

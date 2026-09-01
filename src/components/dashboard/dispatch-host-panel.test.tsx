@@ -105,6 +105,9 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
     ...overrides,
   };
 }

@@ -107,6 +107,9 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
     ...overrides,
   } as DispatchSessionView;
 }
