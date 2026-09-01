@@ -44,6 +44,11 @@
  * まま残った）。developへ入っていないコミットの有無を比較で確かめ、猶予時間を過ぎても
  * develop向けPRが開かれないものへ`00.check-user`＋`01.check-blocked`を付けて通知する。
  *
+ * **closedなIssueは別経路で拾う**（#2690）。上のopenなIssue向けの巡回とは対象も判定も異なる
+ * ——`queryIssuesByProgressStatus`はcloseなIssueを常に除外するため、一度closeされた
+ * `Develop`・`Release`のIssueはどのリリースの一括遷移にも二度と拾われない。`decideClosedStrandedIssue`が
+ * 「`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先か」だけを見て`done`を判定する。
+ *
  * あわせて、**developへのマージ時に外しそこねた`00.check-user`も外す**（#2335）。外す役は
  * PRのマージを受け取るワークフローだけで再試行が無く、GitHubの一時的な5xxに当たると、
  * 次のmainリリース（`main-pr-merged`）かIssueのcloseまで確認待ちが残る。
@@ -370,4 +375,65 @@ export function hasStrandedNotice(
  */
 export function isManualStepTitle(title: string): boolean {
   return title.startsWith("[手作業]");
+}
+
+/**
+ * closedなIssueが`Develop`・`Release`に取り残されているかの判定に使う事実（#2690）。
+ *
+ * `queryIssuesByProgressStatus`（`GET /api/progress?...`）はcloseなIssueを常に除外するため、
+ * 一度closeされるとどのリリースの一括遷移（`main-pr-in-progress`・`main-pr-merged`）にも
+ * 二度と拾われない。原因は#2689で3パターン確認できている
+ * （`docs/progress-status-architecture.md`「取り残しが本当に起きる原因は3パターンある」）。
+ */
+export type ClosedStrandedFacts = {
+  /** `issue-<番号>`→developの直近マージ済みPR。無ければ`null`（developへ一度も入っていない） */
+  mergedPullRequest: { url: string; headSha: string } | null;
+  /** `main...headSha`の二点比較。取得できなければ`null` */
+  compareWithMain: { aheadBy: number } | null;
+};
+
+export type ClosedStrandedSkipReason =
+  /** `issue-<番号>`からdevelopへのマージ済みPRが無い */
+  | "closed_no_merged_pr"
+  /** `main`との比較を取得できなかった。次の巡回で再判定する */
+  | "closed_compare_unavailable"
+  /** developへは入っているが、まだ`main`の祖先になっていない（次のリリース待ち） */
+  | "closed_not_in_main_yet";
+
+export type ClosedStrandedDecision =
+  /** `done`を報告する。Issueは既にcloseされているため`close`は行わない */
+  | { action: "advance_done"; pullRequestUrl: string }
+  | { action: "skip"; reason: ClosedStrandedSkipReason };
+
+/**
+ * closedなIssueを`done`へ進めてよいか判定する（#2690）。
+ *
+ * 見るのは「`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先になっているか」
+ * だけ。`GET /repos/{repo}/compare/main...{head}`は`aheadBy`（headにあってmainに無い
+ * コミット数）が0なら`identical`か`behind`——つまりheadの内容は既にmainに取り込み済みという
+ * 意味になる。developへのマージは常にマージコミット方式（`gh pr merge --merge`）を使うため、
+ * PRのhead SHA自体がdevelopのマージコミットの親であり、develop→mainも同じ方式なので
+ * このSHAがmainの祖先かどうかで「本番へ出たか」を正確に判定できる。
+ */
+export function decideClosedStrandedIssue(facts: ClosedStrandedFacts): ClosedStrandedDecision {
+  const merged = facts.mergedPullRequest;
+  if (!merged) return { action: "skip", reason: "closed_no_merged_pr" };
+
+  const compare = facts.compareWithMain;
+  if (!compare) return { action: "skip", reason: "closed_compare_unavailable" };
+
+  if (compare.aheadBy !== 0) return { action: "skip", reason: "closed_not_in_main_yet" };
+
+  return { action: "advance_done", pullRequestUrl: merged.url };
+}
+
+/** closedなIssueの取り残しをdoneへ回収したことを伝えるコメント本文（#2690） */
+export function buildClosedStrandedRecoveredComment(pullRequestUrl: string): string {
+  return [
+    `✅ 本番（\`main\`）への反映を確認し、進捗を Done へ進めました: ${pullRequestUrl}`,
+    "",
+    "close済みのまま`Develop`・`Release`に取り残されていたため、定期巡回が回収しました。",
+    "",
+    COMMENT_SOURCE_MARKER,
+  ].join("\n");
 }
