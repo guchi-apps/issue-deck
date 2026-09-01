@@ -976,6 +976,28 @@ model DispatchSession {
   // サブPCのpollerだけ（`~/.local/state/issue-deck/sessions/<セッション名>.codex-thread`）。
   codexThreadKnown Boolean?
 
+  // いま何をしているか（#2705）。**Claude Codeのフックが渡してきたツール名とコマンドを、
+  // サブPC側（`scripts/lib/session-step.sh`）が固定語彙のコードへ畳んだもの。**
+  //
+  // activityが「人を待っているか・応答が終わったか」の4値なのに対し、こちらは作業の中身
+  // （EDITING・LINTING・TESTING…）を表す。**コマンドの原文は運ばない**（シークレットを含む行を
+  // 画面とDBへ出さないため）。理由コードと同じく、画面に出す文言はissue-deck側に置く。
+  //
+  // **時刻を2つ持つ。** stepAtは「そのステップに入った時刻」で、同じコードが続く間は動かない
+  // （画面の「実装中・2分」がここから出る）。stepSeenAtは「最後にそのステップのツールが走った
+  // 時刻」で、ツールの実行ごとに動く。
+  //
+  // 2つ要るのは、**stepSeenAtがactivityAtより新しいかどうかが「いま走っているか」の唯一の
+  // 手掛かり**だから。activityは`Stop`のたびにRESPONDEDへ戻る一方、次のturnが始まったことを
+  // 知らせるフックは無く（`WORKING`は承認に答えた直後しか飛ばない）、そのままだと走っている
+  // 最中のセッションが「応答を終えています」と出る。stepAtだけで代用すると、同じ作業が続く
+  // turnをまたいだときに時刻が動かず、動いているのに止まって見える。
+  //
+  // NULLは「申告が無い」で、pollerが古い場合と、フックがまだ1つも飛んでいない場合の両方がある
+  step       String?
+  stepAt     DateTime?
+  stepSeenAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1552,4 +1574,55 @@ model CodexUsageSnapshot {
   updatedAt  DateTime @updatedAt
 
   @@index([observedAt])
+}
+
+/// issue-deckがmainへマージしたPRについて、本番デプロイ（`deploy.yml`）が実際に起動したかを
+/// 見張る記録（#2703）。
+///
+/// **GitHubはmainへのマージに対してワークフローを1件も作らないことがある。** `guchi-apps/myroom`
+/// のv4.8.0では、マージコミットのcheck-suiteが0件のまま`push`も`pull_request(closed)`も起動せず、
+/// 本番が20分間古い版のまま残った（実測でmainへのマージ55件中1件・約2%）。**アプリ側の
+/// トリガー設定では直せない**——設定できるのは「届いたイベントにどう反応するか」だけで、
+/// 今回はイベント自体が届いていない。
+///
+/// マージした側だけがマージコミットのSHAを知っており、イベント配送に依存せず照合できる。
+/// だからマージの瞬間にここへ1行置き、pollerの巡回
+/// （`POST /api/repositories/deploy-launch-sweep`）が猶予のあいだ起動を確かめ、
+/// 作られていなければ`deploy.yml`を`main`から起動し直す。
+///
+/// **プロセス内には置けない。** 本番はPM2の`max_memory_restart`で落ちることがあり
+/// （#2331）、`setTimeout`で待つと再起動でその見張りごと消える。`ReleaseMergePushNotice`が
+/// 「鳴らしたか」をDBに持つのと同じ理由。
+///
+/// 鍵は`repositoryFullName` + `pullRequestNumber`（1本のPRがマージされるのは1回だけ）。
+/// 決着した行は保持期間を過ぎた時点で巡回が消すので、平常時は数行しか残らない。
+model DeployLaunchWatch {
+  id                 String @id @default(cuid())
+  repositoryFullName String
+  /// mainへマージしたPRの番号。起動し直したことを書き戻す先でもある
+  pullRequestNumber  Int
+  /// PRのタイトル。通知の本文に出す（後から引き直さずに済ませる）
+  pullRequestTitle   String @db.Text
+  /// マージコミットのSHA。**`deploy.yml`の実行と照合するための鍵**
+  mergeCommitSha     String
+  /// マージした時刻。ここから猶予を測る
+  mergedAt           DateTime
+
+  /// `pending`（見張り中） / `covered`（実行を確認できた） / `dispatched`（起動し直した） /
+  /// `unsupported`（`deploy.yml`が無い・`workflow_dispatch`に未対応） / `failed`（起動に失敗した）
+  state              String    @default("pending")
+  /// 決着した時刻（`pending`以外になった時刻）
+  resolvedAt         DateTime?
+  /// 確認できた、または起動し直した`deploy.yml`実行のURL。特定できなければnull
+  runUrl             String?   @db.Text
+  /// 起動し直しを試みて失敗した回数。上限に達したら`failed`にして諦める
+  attempts           Int       @default(0)
+  /// 最後に見た時刻。巡回が動いているかを画面・ログから読むためだけに持つ
+  checkedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber])
+  @@index([state, mergedAt])
 }

@@ -246,6 +246,16 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // 閉じた先が押したときの画面ではなくなる。
         params.delete("prmodal");
 
+        // 選択中のPRも畳む（#2700）。**スマホのPR一覧と詳細は同じ`mscreen=pull-requests`で、
+        // どちらを出すかは`pr`クエリだけが決める**（`issue-deck-shell.tsx`・#1087）。畳まずに
+        // 他のタブへ移ると`pr`がURLに残り続け、「PR」タブを押した瞬間に`mscreen`だけが戻って
+        // 直前に見ていたPRの詳細が復活する（一覧に辿り着けなくなる）。PC側も画面が変わる
+        // 遷移では`pr: null`を渡している（`use-issue-filters.ts`の`selectView`ほか）。
+        // 詳細を開く経路（一覧のタップ・本文内のPRリンク）はこの`navigate`を通らないため、
+        // ここで一律に消してよい（`use-issue-filters.ts`の`selectPullRequest`・
+        // `use-reference-navigation.ts`の`openPullRequest`）。
+        params.delete("pr");
+
         if (next.repo) {
           params.set("mrepo", next.repo);
         } else {

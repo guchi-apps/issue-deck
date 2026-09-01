@@ -342,6 +342,9 @@ describe("findBlockingSession", () => {
       reapAt: null,
       reapReason: null,
       codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
       ...overrides,
     };
   }
@@ -438,6 +441,9 @@ describe("isIssueExecutionPending", () => {
       reapAt: null,
       reapReason: null,
       codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
       ...overrides,
     };
   }

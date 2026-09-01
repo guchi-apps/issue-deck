@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Copy,
   ExternalLink,
+  Hammer,
   HandHelping,
   Loader2,
   MessageSquarePlus,
@@ -47,6 +48,7 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   compactIssueSessionLabel,
   describeSessionReap,
+  describeSessionStep,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
@@ -145,6 +147,9 @@ export function IssueSessionStatus({
   // 自動終了までの残り時間（#1817）。**猶予待ちのセッションでだけ返る。**
   // 画面の更新（`use-dispatch-state`のポーリング）のたびに計算し直す
   const reapNotice = describeSessionReap(session);
+  // いま何をしているか（#2705）。走っていて、かつ申告があるときだけ返る。
+  // 経過時間は残り時間と同じくポーリングのたびに計算し直す
+  const stepNotice = describeSessionStep(session);
   const [confirmingKill, setConfirmingKill] = useState(false);
   // 停止の失敗は押した場所に出す（`dispatch.error`は起動ボタンの下に出るため、そちらへ流さない）
   const [controlError, setControlError] = useState<string | null>(null);
@@ -284,6 +289,19 @@ export function IssueSessionStatus({
               入力待ちに添えると、何時間前の入力待ちでも「たった今」に見える */}
           <span className="opacity-70">{formatRelativeDate(summary.at)}</span>
         </span>
+        {/* いま何をしているか（#2705）。**状態ピルと分けて出す。** 状態（実行中・入力待ち）と
+            作業の中身（実装中・Lintチェック中）は別のことを言っており、1つのピルに詰めると
+            どちらが今の話なのか読み取れない（終了予告を分けているのと同じ理由）。
+            **塗らずに輪郭だけにする**——状態ピルと同じ塗りにすると、色の意味が2通りになる */}
+        {stepNotice && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
+            <Hammer className="size-3.5" />
+            {stepNotice.label}
+            {stepNotice.since && (
+              <span className="tabular-nums opacity-70">{stepNotice.since}</span>
+            )}
+          </span>
+        )}
         {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「サブPC・応答を
             終えています・あと3分」と1つのピルに詰まり、状態と予定のどちらが今の話なのか
             読み取れない。配色は入力待ち（waiting）と同じ琥珀色で、**押す操作は無い** */}

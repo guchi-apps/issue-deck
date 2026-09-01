@@ -214,6 +214,97 @@ export async function fetchLatestDeployWorkflowRun(
 }
 
 /**
+ * `deploy.yml`の直近の実行を、どのコミットに対して走ったのかまで含めて取得する（#2703）。
+ *
+ * **`fetchLatestWorkflowRun`では足りない。** あちらは「最新1件が成功したか」を見るための
+ * 取得で、`head_sha`も`head_branch`も落としている。こちらが答えたいのは
+ * **「このマージコミットに対する実行が作られたか」**——GitHubがマージのイベントを配送し損ね、
+ * 実行が1件も作られなかったことを検知するため（myroom#315）。
+ *
+ * **ETagの条件付きGETは通さない。** 見たいのは「増えたかどうか」そのもので、304で
+ * 「変わっていない」と返ってくるのは待っている間ずっと続く（それが検知したい状態）。
+ * 呼ぶのはマージ直後の見張りが残っている間だけなので、消費するのはその数回に限られる。
+ *
+ * `branch`で絞らないのは、手動デプロイがmain以外のrefから起動されていることがあるため。
+ * どのrefで走ったかは`headBranch`で呼び出し側が判定する。
+ */
+export type DeployWorkflowRunRef = {
+  id: number;
+  htmlUrl: string;
+  createdAt: string;
+  /** push | workflow_dispatch など */
+  event: string;
+  /** この実行が対象にしたコミットのSHA */
+  headSha: string;
+  /** この実行が走ったブランチ。取れなければnull */
+  headBranch: string | null;
+  /**
+   * `headSha`のコミットが指すtreeのSHA。取れなければnull。
+   *
+   * **別のrefから起動された手動デプロイは`headSha`が一致しない**（マージコミットではなく
+   * そのrefの先端を指すため）が、中身が同じならtreeは一致する。SHAだけで照合すると、
+   * 既に同じ内容が出ているのに起動し直すことになる。
+   */
+  headTreeSha: string | null;
+};
+
+export async function fetchRecentDeployWorkflowRuns(
+  owner: string,
+  repo: string,
+  token: string,
+  perPage = 10,
+): Promise<DeployWorkflowRunRef[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${DEPLOY_WORKFLOW_FILE}/runs?per_page=${perPage}`;
+  const res = await githubFetch(url, token);
+  // ワークフローそのものが無いリポジトリは「実行が1件も無い」ではなく呼び出し側で
+  // 対象外にするが、ここまで来てしまったら空で返す（起動し直しの判断は別途行う）。
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: {
+    workflow_runs?: Array<{
+      id?: number;
+      html_url?: string;
+      created_at?: string;
+      event?: string;
+      head_sha?: string;
+      head_branch?: string | null;
+      head_commit?: { tree_id?: string | null } | null;
+    }>;
+  } = await res.json().catch(() => ({}));
+  return (data.workflow_runs ?? []).map((run) => ({
+    id: run.id ?? 0,
+    htmlUrl: run.html_url ?? "",
+    createdAt: run.created_at ?? "",
+    event: run.event ?? "",
+    headSha: run.head_sha ?? "",
+    headBranch: run.head_branch ?? null,
+    headTreeSha: run.head_commit?.tree_id ?? null,
+  }));
+}
+
+/**
+ * コミットが指すtreeのSHAを返す。取れなければnull（#2703）。
+ *
+ * 起動し直す直前の最後の照合にしか使わない。**「実行が作られていない」と判断してから
+ * 1回だけ**呼ぶので、平常時はまったく消費しない。
+ */
+export async function fetchCommitTreeSha(
+  owner: string,
+  repo: string,
+  sha: string,
+  token: string,
+): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/commits/${encodeURIComponent(sha)}`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return null;
+  const data: { commit?: { tree?: { sha?: string } } } = await res.json().catch(() => ({}));
+  return data.commit?.tree?.sha ?? null;
+}
+
+/**
  * 1つのrunで失敗したジョブの名前を返す（#2236）。
  *
  * デプロイ失敗のIssueに「どこで落ちたか」を書くためだけに使う。**起票する直前にしか

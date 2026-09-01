@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compactIssueSessionLabel,
   describeSessionReap,
+  describeSessionStep,
   describeSessionRecovery,
   findSessionForIssue,
   isSessionWaitingInput,
@@ -33,6 +34,25 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
+    ...overrides,
+  };
+}
+
+/**
+ * ステップを申告している（＝走っている）セッションの追加分（#2705）。**`stepSeenAt`は
+ * `activityAt`より新しくする**——そこが「いま走っているか」の判定材料。
+ */
+function working(
+  step: NonNullable<DispatchSessionView["step"]>,
+  overrides: Partial<DispatchSessionView> = {},
+): Partial<DispatchSessionView> {
+  return {
+    step,
+    stepAt: "2026-08-14T00:00:00.000Z",
+    stepSeenAt: "2026-08-14T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -256,10 +276,16 @@ describe("compactIssueSessionLabel", () => {
 });
 
 describe("shortIssueSessionLabel", () => {
-  it("通常の実行中は出さない（一覧が情報で埋まる）", () => {
+  it("ステップの申告が無ければ出さない（古いpoller・フックがまだ飛んでいない）", () => {
     expect(shortIssueSessionLabel(session())).toBeNull();
     expect(shortIssueSessionLabel(session({ activity: "RESPONDED" }))).toBeNull();
     expect(shortIssueSessionLabel(session({ activity: "WORKING" }))).toBeNull();
+  });
+
+  // #2705。一覧の行が「サブPC」だけだと、動いているのは分かってもテストで詰まっているのか
+  // 調べているだけなのかが分からなかった
+  it("いま何をしているかが分かれば、それを出す", () => {
+    expect(shortIssueSessionLabel(session(working("TESTING")))).toBe("テスト中");
   });
 
   it("入力待ち・終了・異常終了だけを出す", () => {
@@ -434,5 +460,88 @@ describe("describeSessionReap", () => {
     expect(describeSessionReap(session(), NOW)).toBeNull();
     expect(describeSessionReap(session({ reapReason: "PR_MERGED" }), NOW)).toBeNull();
     expect(describeSessionReap(session({ reapAt: "2026-08-16T12:03:00.000Z" }), NOW)).toBeNull();
+  });
+});
+
+
+/**
+ * #2705。ステップはフックが書いた`.step`をpollerが運んでくるもので、`activity`（人を待って
+ * いるか）とは別物。**`stepSeenAt`が`activityAt`より新しいことが「いま走っている」の唯一の
+ * 手掛かり**で、次のturnが始まったことを知らせるフックが無いぶんをここで補っている。
+ */
+describe("describeSessionStep（#2705）", () => {
+  it("いま何をしているかと、そのステップに入ってからの経過を出す", () => {
+    const notice = describeSessionStep(
+      session(working("EDITING", { stepAt: "2026-08-14T00:00:00.000Z" })),
+      new Date("2026-08-14T00:02:30.000Z"),
+    );
+    expect(notice).toEqual({ step: "EDITING", label: "実装中", since: "2分" });
+  });
+
+  it("1分未満のあいだは経過を添えない（0分と出さない）", () => {
+    expect(
+      describeSessionStep(session(working("LINTING")), new Date("2026-08-14T00:00:30.000Z"))?.since,
+    ).toBeNull();
+  });
+
+  it("時・日の単位で動かないステップには経過を添えない（フックが飛ばなくなった側を疑う場面）", () => {
+    const notice = describeSessionStep(
+      session(working("BUILDING")),
+      new Date("2026-08-14T05:00:00.000Z"),
+    );
+    expect(notice?.label).toBe("ビルド中");
+    expect(notice?.since).toBeNull();
+  });
+
+  it("人を待っている間は出さない（次に何をすればよいかが読み取れなくなる）", () => {
+    expect(describeSessionStep(session(working("EDITING", { activity: "WAITING_INPUT" })))).toBeNull();
+    expect(describeSessionStep(session(working("EDITING", { activity: "NOT_STARTED" })))).toBeNull();
+  });
+
+  it("終わったセッションには出さない", () => {
+    expect(describeSessionStep(session(working("EDITING", { state: "GONE" })))).toBeNull();
+    expect(describeSessionStep(session(working("EDITING", { state: "FAILED" })))).toBeNull();
+  });
+
+  it("最後のフックより古い申告は出さない（応答を終えたあと何も動いていない）", () => {
+    expect(
+      describeSessionStep(
+        session({
+          activity: "RESPONDED",
+          activityAt: "2026-08-14T00:10:00.000Z",
+          step: "EDITING",
+          stepAt: "2026-08-14T00:00:00.000Z",
+          stepSeenAt: "2026-08-14T00:05:00.000Z",
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+/**
+ * #2705。`Stop`のあとに次のturnが始まってもフックは飛ばないため、走っている最中のセッションが
+ * ずっと「応答を終えています」と出ていた。
+ */
+describe("応答終了のあとにツールが走っている場合（#2705）", () => {
+  it("作業中として出す", () => {
+    const summary = summarizeIssueSession(
+      session(
+        working("TESTING", {
+          activity: "RESPONDED",
+          activityAt: "2026-08-14T00:00:00.000Z",
+          stepSeenAt: "2026-08-14T00:03:00.000Z",
+        }),
+      ),
+    );
+    expect(summary.shortLabel).toBe("作業中");
+    expect(summary.at).toBe("2026-08-14T00:03:00.000Z");
+  });
+
+  it("ツールが走っていなければ従来どおり応答終了のまま", () => {
+    expect(
+      summarizeIssueSession(
+        session({ activity: "RESPONDED", activityAt: "2026-08-14T00:00:00.000Z" }),
+      ).shortLabel,
+    ).toBe("応答を終えています");
   });
 });

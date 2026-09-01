@@ -29,6 +29,9 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
     firstSeenAt: "2026-08-14T09:00:00.000Z",
     // pollerが1巡ごとに更新するので、生きている限り常に「今」に近い
     lastReportedAt: NOW.toISOString(),
@@ -173,6 +176,51 @@ describe("IssueSessionStatus", () => {
 
     expect(screen.queryByText(/^あと\d+分$/)).toBeNull();
     expect(screen.queryByText("まもなく")).toBeNull();
+  });
+
+  /**
+   * #2705。それまでこの行は「サブPC・実行中」までしか言えず、テストで詰まっているのか
+   * 調べているだけなのかが分からなかった。**状態ピルとは分けて出す**（状態と作業の中身は
+   * 別のことを言っており、1つのピルに詰めるとどちらが今の話なのか読み取れない）。
+   */
+  it("いま何をしているかを、状態ピルとは別のピルで出す", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    render(
+      <IssueSessionStatus
+        session={session({
+          activity: "RESPONDED",
+          activityAt: "2026-08-14T11:50:00.000Z",
+          step: "LINTING",
+          stepAt: "2026-08-14T11:58:00.000Z",
+          stepSeenAt: "2026-08-14T11:59:00.000Z",
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.getByText("Lintチェック中")).toBeTruthy();
+    expect(screen.getByText("2分")).toBeTruthy();
+    // 最後の`Stop`のあとにツールが走っているので「応答を終えています」にはしない（#2705）
+    expect(screen.getByText(/サブPC・作業中/)).toBeTruthy();
+  });
+
+  it("入力待ちのあいだはステップを出さない（次にやることが読み取れなくなる）", () => {
+    render(
+      <IssueSessionStatus
+        session={session({
+          activity: "WAITING_INPUT",
+          activityAt: NOW.toISOString(),
+          step: "EDITING",
+          stepAt: NOW.toISOString(),
+          stepSeenAt: NOW.toISOString(),
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.queryByText("実装中")).toBeNull();
   });
 
   it("入力待ちのときだけRemote Controlの導線を出す", () => {

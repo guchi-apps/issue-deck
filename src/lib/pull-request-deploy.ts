@@ -64,6 +64,7 @@ export function resolvePullRequestDeployStatus({
   pullRequest,
   releases,
   deployRun,
+  developContentInMain = false,
   now,
 }: {
   pullRequest: DeployTargetPullRequest;
@@ -71,6 +72,11 @@ export function resolvePullRequestDeployStatus({
   releases: MainMergedPullRequest[];
   /** mainブランチの`deploy.yml`の最新実行。取得できなければnull */
   deployRun: BranchFlowDeployRun | null;
+  /**
+   * `develop`の中身が`main`に入りきっているか（#2704。`isDevelopContentInMain`）。
+   * 分からない場合はfalse（＝従来どおりの判定）。
+   */
+  developContentInMain?: boolean;
   now: number;
 }): PullRequestDeployStatus | null {
   if (!pullRequest.merged || pullRequest.mergedAt === null) return null;
@@ -89,6 +95,19 @@ export function resolvePullRequestDeployStatus({
     // mainへのマージを1件も取れていない場合は、developで止まっているのか、取得範囲より
     // 古いだけなのかを区別できない。
     if (sorted.length === 0) return null;
+    // 運び手が見つからなくても、developの中身がmainに入りきっているなら「本番未反映」ではない
+    // （#2704）。back-merge（`main`の内容へ`develop`を揃え直すPR）は、コミットがdevelopに
+    // しか無いのに中身はすべてmainにある。**どの版が運んだかは言えない**ので版は出さず、
+    // 本番へ届いていることだけを言う（ブランチ画面の`unknown`＝「どの版で本番へ出たか特定
+    // できない変更」と同じ扱い）。
+    if (developContentInMain) {
+      return {
+        kind: "deployed",
+        version: null,
+        releasePullRequestNumber: null,
+        deployRunUrl: null,
+      };
+    }
     return {
       kind: "develop-only",
       version: null,

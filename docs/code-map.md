@@ -167,6 +167,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - ヘッダーの材料（`PullRequestSummary`）を一覧と詳細APIのどちらから採るかは
     `resolvePullRequestHeader`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）
     に集約してあり、PRペインと重ね表示で共用する。
+- **スマホのPR一覧とPR詳細は同じ`mscreen=pull-requests`を共有し、どちらを出すかは`pr`クエリ
+  だけが決める**（#1087・#1260。判定は[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)）。
+  そのため**画面を移る遷移では`prmodal`と一緒に`pr`も落とす**——落とし忘れると`pr`がURLに残り、
+  「PR」タブを押した瞬間に`mscreen`だけが戻って直前に見たPRの詳細が復活し、一覧へ辿り着けなく
+  なる（#2700）。落とすのは[`use-mobile-screen.ts`](../src/hooks/use-mobile-screen.ts)の
+  `navigate`で、PC側は`use-issue-filters.ts`の`selectView`・`selectPullRequestView`・
+  `selectFlowPane`・`selectPreviewPane`・`selectUsagePane`が`pr: null`で同じことをしている。
+  **`mrepo`・`missue`のようにスマホ専用の現在地だけを畳んで済ませない**——`pr`はPCと共有の
+  クエリなので、スマホ側の畳み忘れに気付きにくい。詳細を開く経路（一覧のタップ・本文中の
+  参照リンク）は`navigate`を通らないため、ここで一律に消して構わない。
 - **スマホのフッターは`flex-1`の均等割で、枠を増やすと1枠の幅がそのぶん縮む**（#2631）。
   4枠のときは1枠98pxだったが、5枠目に「AI使用量」を足して78pxになった
   （[`mobile-bottom-nav.tsx`](../src/components/dashboard/mobile-bottom-nav.tsx)）。
@@ -1921,7 +1931,25 @@ export function POST(request: NextRequest) {
   （既存の「未リリース ◯件」表示のために取っている応答を読み直すだけ）。**PR詳細のデプロイ
   表示（`lib/pull-request-deploy.ts`）にはこの裏取りを足していない**——あちらは`develop`と
   `main`の比較を取っておらず、追加すると#1814の「GitHub APIの消費を増やさない」前提が崩れる
-  ため、この画面（ブランチ画面）だけがタイムスタンプ判定より優先して正しい側へ倒る。
+  ため、この画面（ブランチ画面）だけがタイムスタンプ判定より優先して正しい側へ倒る
+  （後述の#2704で、「本番未反映」と判定したときだけ比較を1回取る例外だけを足した）。
+  **どちらの裏取りも「コミットがmainへ到達したか」しか見ておらず、back-mergeでは中身と食い違う**
+  （#2704）。`main`の内容へ`develop`を揃え直すPRをdevelopへマージすると、**マージコミットは
+  developにしか無いのにファイルの中身はすべてmainにある**——`resolveReleaseState`は後続の
+  リリースが無いので`pending`を返し、`mergedHeadRefs`にもそのブランチ名が残るため、レーンは
+  「次のリリース（本番未反映）」に居座る。一方「リリースする」ボタンは中身（tree）で決まる
+  `unreleasedCommitCount`が0を返して出ない。**画面が「次のリリースに1件乗る」と言いながら、
+  リリースを起こす手段を出さない**状態になっていた（実例: guchi-apps/vps#211。`main`と
+  `develop`のtree OIDはどちらも`d5de5b6e`で、compareの変更ファイルは0件）。#2316・#2678は
+  ボタン側だけを直してレーン側を直していなかったのが原因なので、**両方を同じ材料で決める**：
+  `isDevelopContentInMain`（＝`unreleasedCommitCount`が0）がtrueのときはレーンを`pending`に
+  せず、`unknown`（「どの版で本番へ出たか特定できない変更」）へ落とす。**`released`と言い切ら
+  ない**のは、中身がmainにあることは分かっても、それを運んだ版までは決められないため。
+  **PR一覧・PR詳細の「本番未反映（developまで）」バッジも同じ扱いにした**（`lib/pull-request-deploy.ts`
+  の`developContentInMain`）。ただし**この判定が要るときにしか比較を取りに行かない**——
+  `resolvePullRequestDeployStatus`が`develop-only`を返したときだけ`lookupBranchRefs`を
+  ブランチ名なしで1回呼ぶ（`api/pull-requests/deploy-status/route.ts`）。すでに版が決まっている
+  PRでは消費が増えず、取得に失敗しても従来どおり「本番未反映」を出すだけでバッジは落とさない。
   **`behindBy`（mainにあってdevelopに無いコミット数）は出さない。** develop→mainをマージコミットで
   入れる運用ではリリースのたびに必ず1つ増え、中身は全部`Merge pull request … from guchi-apps/develop`
   になる（issue-deck本体で72件）。異常を示すバッジの形なのに行動につながらないため落とした。
@@ -2207,6 +2235,23 @@ export function POST(request: NextRequest) {
   **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
   ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
+- **mainへマージしたのにデプロイが起動しなかったときは、issue-deckが起動し直す**
+  （#2703。判定は[`lib/deploy-launch.ts`](../src/lib/deploy-launch.ts)、IOは
+  [`lib/github/deploy-launch-sweep-run.ts`](../src/lib/github/deploy-launch-sweep-run.ts)）。
+  **GitHubはmainへのマージに対してワークフローを1件も作らないことがある**（実測でmainへの
+  マージ55件中1件。guchi-apps/myroom#315では本番が20分間古い版のまま残った）。落ちているのは
+  ワークフローの定義ではなく**イベントの配送**なので、`on:`の書き方でも`deploy-retry.yml`でも
+  直らない。マージした主体だけがマージコミットのSHAを知っているため、`POST
+  /api/issues/pull-request-merge`がmainへのマージを成功させた時点で`DeployLaunchWatch`へ1行置き、
+  pollerが1巡ごとに`POST /api/repositories/deploy-launch-sweep`を叩いて照合する。
+  **この巡回だけは間隔で間引かない**（遅れがそのまま本番が古いままの時間になる）代わりに、
+  見張っている行が無ければGitHubを1回も叩かない。猶予（`DEPLOY_LAUNCH_GRACE_SECONDS`・既定90秒・
+  0で無効）を過ぎても実行が無ければ`deploy.yml`を**`main`から**起動し直し（リリースブランチの
+  refから起動すると`tag`ジョブが`v<version>`をmain上に無いコミットへ付けてしまう）、マージ済みPRへ
+  コメントを残してPush通知を鳴らす。照合は`head_sha`・`head_commit.tree_id`・「mainでマージより
+  後に作られた実行があるか」の3つで、treeの取得は起動し直す直前にだけ行う。
+  **GitHubの画面から直接マージした場合は見張りが立たない**（SHAを知る側を経由しないため）。
+  設計は[multi-agent/release.md](multi-agent/release.md)「mainへマージしてもデプロイが起動しないことがある」。
 - **developへのマージ後に取り残された進捗も、issue-deckが巡回して回収する**
   （#2294。判定は[`lib/github/progress-sweep.ts`](../src/lib/github/progress-sweep.ts)、IOは
   [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)）。上の2本と同じ形で、

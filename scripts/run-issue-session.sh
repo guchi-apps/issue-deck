@@ -737,6 +737,12 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 選択フォームの`Notification`には入っていない。matcherを付けずに全ツールで呼ぶと、
   # `Read`・`Bash`のたびにスクリプトが起動する。
   #
+  # **`Bash`だけは2つ目の項目として足す**（#2705。タイムアウトは既定のまま）。画面へ出す
+  # 「いま何をしているか」を`PostToolUse`だけで作ると、`pnpm build`のような長いコマンドでは
+  # **終わったあと**に「ビルド中」と出ることになり、一番出したい時間帯に出ない。`Read`・`Edit`は
+  # 速いので`PostToolUse`だけで足り、ここへは足さない（起動回数を増やす価値が無い）。
+  # `session-notify.sh`はこの経路をステップの記録だけで打ち切る。
+  #
   # **`PostToolUse`はmatcherを付けず全ツールで呼ぶ**（#1357）。これは「人が承認プロンプトに
   # 答えた」ことを知る唯一の手掛かりで、承認が要るツールは`Bash`・`Write`・`WebFetch`・
   # `AskUserQuestion`・MCPのツールと広く、絞ると答えたのに入力待ちのままになる組み合わせが残る。
@@ -779,6 +785,10 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
       {
         "matcher": "ExitPlanMode|AskUserQuestion",
         "hooks": [{ "type": "command", "command": "$HOOK_COMMAND", "timeout": $WAIT_HOOK_TIMEOUT }]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
       }
     ],
     "PostToolUse": [

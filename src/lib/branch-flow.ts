@@ -167,6 +167,29 @@ export function unreleasedCommitCount(comparison: BranchComparison | null | unde
   return comparison.aheadBy;
 }
 
+/**
+ * `develop`の中身が`main`に入りきっているか（＝本番へ出すものが残っていないか。#2704）。
+ *
+ * **コミットがmainへ到達したかと、中身がmainにあるかは別物。** back-merge
+ * （`main`の内容へ`develop`を揃え直すPR）をdevelopへマージすると、そのマージコミットは
+ * developにしか無いのにファイルの中身はすべてmainにある、という状態になる。コミットの
+ * 到達だけを見る判定（`resolveReleaseState`・`unreleasedHeadRefs`）はこれを「未反映」と
+ * 読むため、画面が「次のリリースに1件乗る」と言いながら`canTriggerRelease`はfalseで
+ * 「リリースする」を出さない、という食い違いが起きていた（実例: guchi-apps/vps#211）。
+ *
+ * 判定は`unreleasedCommitCount`をそのまま使う。「リリースする」を押させるかどうかと
+ * 同じ材料で決まるので、**ボタンとレーンの結論がずれない**（#2316・#2678）。
+ *
+ * `comparison`が取れていない（ブランチが無い・取得に失敗した）ときはfalse。
+ * **何も分かっていない状態を「出すものは無い」と読まない。**
+ */
+export function isDevelopContentInMain(
+  comparison: BranchComparison | null | undefined,
+): boolean {
+  if (!comparison) return false;
+  return unreleasedCommitCount(comparison) === 0;
+}
+
 /** 画面に出す「未リリース ◯」の数と単位（#2333） */
 export type UnreleasedSummary = {
   /** 出す数字。0なら何も出さない */
@@ -444,6 +467,8 @@ function buildRepository({
   // developとmainの差分から実際に確認できた「まだ本番へ出ていないブランチ」（#2661）。
   // タイムスタンプ頼みの`resolveReleaseState`より優先して使う。
   const unreleasedHeadRefs = new Set(branchStatus?.developVsMain?.units?.mergedHeadRefs ?? []);
+  // 中身がmainに入りきっているなら、mainへ到達していない変更は1件も無い（#2704）。
+  const developContentInMain = isDevelopContentInMain(branchStatus?.developVsMain);
   const lanes = [...laneKeys].map((key) =>
     buildLane({
       branchName: key,
@@ -452,6 +477,7 @@ function buildRepository({
       releases,
       manualStepsByIssue,
       unreleasedHeadRefs,
+      developContentInMain,
     }),
   );
 
@@ -994,6 +1020,39 @@ function resolveReleaseState(
     : { kind: "pending" };
 }
 
+/**
+ * レーン1本の版を、3つの材料をこの優先順で突き合わせて決める（#2661・#2704）。
+ *
+ * 1. **`develop`の中身が`main`に入りきっているなら`pending`にしない**（#2704）。
+ *    「出すものが無い」ことは`unreleasedCommitCount`が実差分から確認済みなので、
+ *    そこにコミットの到達だけを見る判定を重ねると「次のリリースに乗る変更」が消えなくなる。
+ *    ただし**どの版が運んだかまでは言えない**ので`unknown`（「どの版で本番へ出たか特定
+ *    できない変更」）へ落とす——`released`と言い切ると、実際には出ていない版を名乗る。
+ * 2. developとmainの実差分で「まだ出ていない」と確認できたブランチは`pending`（#2661）
+ * 3. どちらでもなければタイムスタンプの比較（`resolveReleaseState`）
+ */
+function resolveLaneReleaseState({
+  branchName,
+  mergedAt,
+  releases,
+  unreleasedHeadRefs,
+  developContentInMain,
+}: {
+  branchName: string;
+  mergedAt: string;
+  releases: MergedRelease[];
+  unreleasedHeadRefs: ReadonlySet<string>;
+  developContentInMain: boolean;
+}): BranchFlowReleaseState {
+  if (developContentInMain) {
+    const state = resolveReleaseState(mergedAt, releases);
+    return state.kind === "pending" ? { kind: "unknown" } : state;
+  }
+  return unreleasedHeadRefs.has(branchName)
+    ? { kind: "pending" }
+    : resolveReleaseState(mergedAt, releases);
+}
+
 function buildLane({
   branchName,
   pullRequests,
@@ -1001,6 +1060,7 @@ function buildLane({
   releases,
   manualStepsByIssue,
   unreleasedHeadRefs,
+  developContentInMain,
 }: {
   branchName: string;
   pullRequests: PullRequestSummary[];
@@ -1009,6 +1069,8 @@ function buildLane({
   manualStepsByIssue: Map<number, BranchFlowManualStep[]>;
   /** developとmainの差分から「まだ本番へ出ていない」と確認できたブランチ名（#2661） */
   unreleasedHeadRefs: ReadonlySet<string>;
+  /** developの中身がmainに入りきっているか（#2704。`isDevelopContentInMain`） */
+  developContentInMain: boolean;
 }): BranchFlowLane {
   // openなPRを先頭に、あとは更新が新しい順。1本のブランチで作り直した2本目のPRがある場合に、
   // 「今生きているPR」が先に来るようにする。
@@ -1051,12 +1113,13 @@ function buildLane({
     releaseState:
       mergedAt === undefined
         ? null
-        : // developとmainの実差分で「まだ本番へ出ていない」と確認できた場合はそちらを優先する
-          // （#2661）。タイムスタンプの比較（`resolveReleaseState`）は、リリース作業に時間が
-          // かかるほど、間に合わせで割り込んだ変更を誤って「含まれる」と判定してしまうため。
-          unreleasedHeadRefs.has(branchName)
-          ? { kind: "pending" }
-          : resolveReleaseState(mergedAt, releases),
+        : resolveLaneReleaseState({
+            branchName,
+            mergedAt,
+            releases,
+            unreleasedHeadRefs,
+            developContentInMain,
+          }),
     // 手作業は「対応Issueから生まれたもの」なので、関連Issueぶんまでは拾わない
     manualSteps: issueNumber === null ? [] : (manualStepsByIssue.get(issueNumber) ?? []),
     updatedAt: sorted[0]?.updatedAt ?? null,

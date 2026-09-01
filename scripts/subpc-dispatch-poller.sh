@@ -1290,6 +1290,43 @@ sweep_deploy_failures() {
   return 0
 }
 
+# --- デプロイ起動漏れの巡回検知と起動し直し ------------------------------------
+# mainへマージしたのに本番デプロイ（`deploy.yml`）が起動していないものをissue-deckに巡回して
+# 見つけさせ、`main`から起動し直させる（#2703）。
+#
+# **GitHubはマージのイベントを配送し損ねることがある。** `guchi-apps/myroom`のv4.8.0では
+# マージコミットのcheck-suiteが0件のまま`deploy.yml`が1件も起動せず、本番が20分間古い版の
+# ままだった（実測でmainへのマージ55件中1件）。ワークフローの`on:`では直せない——設定
+# できるのは「届いたイベントにどう反応するか」だけで、今回はイベント自体が届いていない。
+#
+# **上の巡回と違って間隔で間引かれない。** 遅れがそのまま本番が古いままの時間になるため、
+# issue-deck側も毎回そのまま走らせる（見張っているマージが無ければGitHubを1回も叩かない）。
+# ここでも**pollerがやるのは「呼ぶ」ことだけ**で、起動し直すかどうかはissue-deck側が決める。
+sweep_deploy_launches() {
+  if ! api_call POST /api/repositories/deploy-launch-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
+      404|000) return 0 ;;
+      *) report_api_failure "デプロイ起動漏れの巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept actions
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  actions="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.actions | length' 2>/dev/null || echo 0)"
+  [[ "${actions:-0}" -gt 0 ]] || return 0
+
+  # 起動し直した・諦めたときだけ出す（毎巡「異常なし」を積まない）。**正常に起動していた
+  # ことを確認して畳んだ（covered）ぶんも出さない**——それが平常時だから。
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[] | select(.kind != "covered") | "本番デプロイを\(if .kind == "dispatched" then "起動し直しました" elif .kind == "unsupported" then "起動できません（手動起動に未対応）" else "起動できませんでした" end): \(.repositoryFullName)#\(.pullRequestNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- トークン使用量の報告（#2504）-----------------------------------------------
 # サブPCのローカルセッションが使ったトークンを集計し、issue-deckへ送る。
 #
@@ -1827,6 +1864,32 @@ session_reap_json() {
   jq -nc --arg at "$iso" --arg reason "$reason" '{reapAt: $at, reapReason: $reason}'
 }
 
+# セッションがいま何をしているか（#2705）。**フックが書いた`.step`を運ぶだけ。**
+#
+# `session_reap_json`と同じで、**ここでは判定をしない**（何のツールを呼んだかはフックにしか
+# 分からず、pollerが見ているtmuxのメタデータには出ない。`docs/multi-agent/gates.md`「計器」）。
+# 読めない・無い場合は両方nullで、画面には何も出ない。
+session_step_json() {
+  local session="$1" line at step seen iso seen_iso
+  local empty='{"step":null,"stepAt":null,"stepSeenAt":null}'
+  line="$(session_state_read_step "$session" 2>/dev/null || true)"
+  if [[ ! "$line" =~ ^([0-9]+)[[:space:]]+([A-Z_]+)[[:space:]]+([0-9]+)$ ]]; then
+    printf '%s' "$empty"
+    return 0
+  fi
+  at="${BASH_REMATCH[1]}"
+  step="${BASH_REMATCH[2]}"
+  seen="${BASH_REMATCH[3]}"
+  iso="$(date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  seen_iso="$(date -u -d "@$seen" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if [[ -z "$iso" || -z "$seen_iso" ]]; then
+    printf '%s' "$empty"
+    return 0
+  fi
+  jq -nc --arg at "$iso" --arg seen "$seen_iso" --arg step "$step" \
+    '{step: $step, stepAt: $at, stepSeenAt: $seen}'
+}
+
 # Codexのセッションで、`codex queue`の宛先（スレッドUUID）が分かっているか（#2519）。
 #
 # **3値で返す。** `null`＝Codexのセッションではない（Claude Code）。`false`＝Codexだが宛先が
@@ -1885,9 +1948,11 @@ report_sessions() {
       --argjson claudeStarting "$(claude_start_pending "$session_name")" \
       --argjson codexThreadKnown "$(session_codex_thread_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
+      --argjson step "$(session_step_json "$session_name")" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
-        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown} + $reap')")
+        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown}
+         + $reap + $step')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
@@ -3097,6 +3162,9 @@ run_once() {
     # 本番デプロイ失敗の巡回検知（#2236）。**dry-runでは呼ばない**（Issueの起票という
     # 外向きの副作用があるため）。
     sweep_deploy_failures
+    # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
+    # （本番デプロイの起動という外向きの副作用があるため）。
+    sweep_deploy_launches
     # 進捗の取り残しの巡回回収（#2294）。**dry-runでは呼ばない**（進捗の書き換えと
     # コメント投稿という外向きの副作用があるため）。
     sweep_progress

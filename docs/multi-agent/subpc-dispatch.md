@@ -1468,6 +1468,16 @@ workflowを持つリポジトリごとにGitHub APIを叩くため。ログに�
 `--dry-run`では呼ばない（Push通知という外向きの副作用があるため）。設計は
 [../code-map.md](../code-map.md)「本番へのマージ待ちもPush通知で届く」。
 
+**デプロイ起動漏れの巡回検知（#2703）も同じ1巡に相乗りしている。**
+`POST /api/repositories/deploy-launch-sweep`を毎巡そのまま呼ぶ。**この巡回だけは間隔で
+間引かれない**——issue-deckがmainへマージしたのに`deploy.yml`が起動しなかったとき、遅れが
+そのまま本番が古いままの時間になるため。代わりに、見張っているマージが1件も無ければGitHubを
+1回も叩かない（DBの`SELECT`が1回増えるだけ）。猶予（`DEPLOY_LAUNCH_GRACE_SECONDS`・既定90秒・
+0で無効）を過ぎても実行が作られていなければ、issue-deckが`deploy.yml`を`main`から起動し直す。
+ログに出すのは起動し直した・起動できなかったときだけで、`--dry-run`では呼ばない（本番デプロイの
+起動という外向きの副作用があるため）。設計は
+[release.md](release.md)「mainへマージしてもデプロイが起動しないことがある」。
+
 **添付画像の参照の巡回収集（#2475）も同じ1巡に相乗りしている。**
 `POST /api/issues/images/cleanup-sweep`を毎巡そのまま呼び、間隔
 （`IMAGE_CLEANUP_SWEEP_INTERVAL_MINUTES`・**既定60分**・0で無効）も、どの画像をゴミ箱へ移すか・
@@ -2390,6 +2400,7 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 | `POST /api/repositories/deploy-failure-sweep` | `DISPATCH_SECRET` | 本番デプロイ失敗の巡回検知を促す（#2236）。巡回するかどうかも、起票するかどうかもissue-deck側が決める |
 | `POST /api/issues/progress-sweep` | `DISPATCH_SECRET` | 進捗の取り残しの巡回回収を促す（#2294）。巡回するかどうかも、どのIssueをどう扱うかもissue-deck側が決める |
 | `POST /api/repositories/release-merge-push-sweep` | `DISPATCH_SECRET` | 本番へのマージ待ちの巡回通知を促す（#2376）。巡回するかどうかも、鳴らすかどうかもissue-deck側が決める |
+| `POST /api/repositories/deploy-launch-sweep` | `DISPATCH_SECRET` | mainへマージしたのにデプロイが起動していないものの巡回検知と起動し直しを促す（#2703）。**間隔で間引かない**（遅れがそのまま本番が古いままの時間になる） |
 
 ### シークレットは`PROGRESS_REPORT_SECRET`と分ける
 

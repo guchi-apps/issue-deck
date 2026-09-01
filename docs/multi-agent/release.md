@@ -435,3 +435,63 @@ URL付きの警告コメントを投稿し、`00.check-user`を付与する。�
 （issue-deckへ疎通できない場合を含む）は通知できず、Actionsの実行ログでしか気づけない制約が残る。
 **対象の特定はissue-deckの進捗問い合わせAPI（`GET /api/progress`）に依存する**（#991 Phase 5で
 ラベル検索から置き換えた）。
+
+## mainへマージしてもデプロイが起動しないことがある（#2703）
+
+**GitHubはmainへのマージに対してワークフローを1件も作らないことがある。**
+`guchi-apps/myroom`のv4.8.0では、リリースPR #312（`release-main/v4.8.0` → `main`）を
+issue-deckがマージしたのに`deploy.yml`（Deploy to Production）が**1件も起動せず**、本番が
+約20分間v4.7.0のまま残った（guchi-apps/myroom#315）。
+
+- マージコミット`db53cd2`のcheck-suiteは**0件**（正常時はマージの2〜5秒後に2件作られる）
+- `push`だけでなく、`issue-labels.yml`が購読している`pull_request(closed)`も同時に起動していない
+- 発生頻度は実測で**mainへのマージ55件中1件（約2%）**
+
+つまり落ちていたのはワークフローの定義ではなく**イベントの配送**で、`on:`の書き方では直せない
+（設定できるのは「届いたイベントにどう反応するか」だけ）。`deploy-retry.yml`
+（`reusable-deploy-retry.yml`）も、*起動したデプロイが失敗したとき*の再実行なのでこの状態には
+効かない。
+
+### 直せるのはマージした側だけ
+
+マージした主体（issue-deck）だけが**マージコミットのSHAを知っている**。イベントの配送に依存せず
+ポーリングで「このコミットに対する`deploy.yml`の実行が作られたか」を確かめられるのはここだけで、
+だから唯一「即時に」直せる。仕組みは次のとおり。
+
+1. `POST /api/issues/pull-request-merge`が**mainへのマージ**を成功させた時点で、
+   `DeployLaunchWatch`へ1行置く（リポジトリ・PR番号・マージコミットのSHA・マージ時刻）。
+   **リクエストの中では待たない**——ブラウザを握り続けることになり、本番の再起動
+   （PM2の`max_memory_restart`・#2331）でその待ちごと消える
+2. サブPCのpollerが1巡（30秒）ごとに`POST /api/repositories/deploy-launch-sweep`を呼び、
+   `deploy.yml`の直近の実行を引いて照合する。**この巡回だけは間隔で間引かない**（遅れが
+   そのまま本番が古いままの時間になる）。見張っている行が無ければGitHubを1回も叩かない
+3. 猶予（`DEPLOY_LAUNCH_GRACE_SECONDS`・既定90秒・0で無効）を過ぎても実行が無ければ、
+   issue-deckが`deploy.yml`を起動し直し、マージ済みPRへコメントを残してPush通知を鳴らす
+
+照合は次のどれかを満たせば「出している」と見なす。
+
+- 実行の`head_sha`がマージコミットと一致する（mainへのpushで起動した本来の実行）
+- 実行の`head_commit.tree_id`がマージコミットのtreeと一致する（**手動デプロイが別のrefから
+  起動されていた場合**。SHAは一致しないが中身は同じ）。この取得は起動し直す直前にだけ行う
+- mainブランチで、マージより後に作られた実行がある（後続のマージ・手動デプロイがmain先端を
+  出しており、そこにこのマージも含まれている）
+
+### 起動し直すときは必ず`--ref main`
+
+**リリースブランチのrefから起動してはいけない。** `deploy.yml`の`tag`ジョブが`v<version>`を
+**main上に無いコミットへ付けてしまい**、以後mainから起動したデプロイがタグ検証で必ず失敗する
+（guchi-apps/myroom#315で実際に起きた）。issue-deck側の起動は`dispatchDeployWorkflow`
+（`ref: "main"`固定）を通す。手で起動する場合も
+`gh workflow run deploy.yml --repo <owner>/<repo> --ref main`にする。
+
+### 直せない範囲
+
+- **GitHubの画面から直接マージした場合は見張りが立たない。** 見張りを置けるのはマージコミットの
+  SHAを知っている側だけで、issue-deckを経由しないマージはそれを知らない。この場合は従来どおり、
+  デプロイ失敗の巡回（#2236）とブランチ画面の表示（`resolveDeployState`）で拾う
+- **`deploy.yml`に`workflow_dispatch`を書いていないリポジトリでは起動し直せない**
+  （`guchi-apps/portfolio`）。dispatchが422で落ちた時点で見張りを`unsupported`として畳み、
+  鳴らさない（押し直しても直らないため）
+
+実装は[`src/lib/deploy-launch.ts`](../../src/lib/deploy-launch.ts)（判定）と
+[`src/lib/github/deploy-launch-sweep-run.ts`](../../src/lib/github/deploy-launch-sweep-run.ts)（IO）。

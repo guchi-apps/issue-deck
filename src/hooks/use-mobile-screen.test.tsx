@@ -132,3 +132,42 @@ describe("フッターの「PR」タブが開くビュー（#2176）", () => {
     expect(urlOf(push.mock.calls[0])).toContain("prview=completed");
   });
 });
+
+// PR一覧と詳細は同じ`mscreen=pull-requests`を共有し、どちらを出すかは`pr`クエリだけが決める
+// （#1087）。畳み忘れると「PR」タブが直前に見たPRの詳細を開き続け、一覧へ辿り着けない（#2700）。
+describe("画面遷移で選択中のPRを畳む（#2700）", () => {
+  beforeEach(() => {
+    push.mockClear();
+    replace.mockClear();
+    back.mockClear();
+    resetHistoryStack();
+  });
+
+  it("PR詳細を開いたまま「PR」タブを押すと一覧へ戻る", () => {
+    const { result } = renderMobileScreen("mscreen=pull-requests&pr=owner%2Frepo%2312");
+
+    act(() => result.current.selectTab("pull-requests"));
+
+    const url = urlOf(push.mock.calls[0]);
+    expect(url).toContain("mscreen=pull-requests");
+    expect(url).not.toContain("pr=");
+  });
+
+  it("PR詳細から他のタブへ移ると、URLに選択中PRが残らない", () => {
+    const { result } = renderMobileScreen("mscreen=pull-requests&pr=owner%2Frepo%2312");
+
+    act(() => result.current.selectTab("home"));
+
+    expect(urlOf(push.mock.calls[0])).not.toContain("pr=");
+  });
+
+  it("ホームの「Pull Request」から開く一覧にも、前に見たPRの詳細を持ち込まない", () => {
+    const { result } = renderMobileScreen("mscreen=pull-requests&pr=owner%2Frepo%2312");
+
+    act(() => result.current.selectPullRequests("in-progress"));
+
+    const url = urlOf(push.mock.calls[0]);
+    expect(url).toContain("prview=in-progress");
+    expect(url).not.toContain("pr=owner");
+  });
+});
