@@ -951,6 +951,33 @@ Issueを除外するため、以後どのリリースの一括遷移にも二度
 `develop-merge-sweep`／`progress-sweep.ts`と同じ要領で定期的に拾い直す仕組みが無いことが
 共通の欠落点で、対応は#2690を参照。
 
+### closedなIssueの取り残しをissue-deck側の巡回で回収する（#2690）
+
+上記3パターンに共通する欠落点（closeされた後は`queryIssuesByProgressStatus`がcloseな
+Issueを除外するため、以後どのリリースの一括遷移にも二度と拾われない）を塞ぐため、
+`progress-sweep-run.ts`の巡回に**closedなIssue専用の経路**を足した。判定は
+[`decideClosedStrandedIssue`](../src/lib/github/progress-sweep.ts)、IOは
+[`sweepClosedIssue`](../src/lib/github/progress-sweep-run.ts)。
+
+- **対象は`fetchProjectItems`のスナップショットで拾う。** `queryIssuesByProgressStatus`は
+  設計上closeを除外するため使えず、ここだけは`item.issueOpen === false`かつ
+  `Develop`・`Release`のアイテムを直接見る
+- **判定は`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先か**
+  （`GET /repos/{repo}/compare/main...{head}`の`aheadBy === 0`、すなわち`identical`／
+  `behind`）だけを見る。developへのマージは常にマージコミット方式（`gh pr merge --merge`）
+  なので、PRのhead SHA自体がdevelopのマージコミットの親であり、develop→mainも同じ方式で
+  祖先関係が保たれる。祖先なら本番へ既に出ているということなので`done`を報告する
+  （Issueは既にcloseされているため`close`は行わない）
+- **openなIssueは対象にしない。** パターン3（issue-deck不通で`main-pr-merged`が対象を
+  1件も特定できなかった場合）はopenなIssueのまま`Release`に残る形で発生するが、この巡回
+  では拾わない。`Develop`には次のリリースを待っているだけの**正常な**openなIssueが常に
+  一定数いるため、それら全部を巡回のたびに`compare`APIへ問い合わせるとGitHub APIの消費が
+  跳ね上がる（closedはこの巡回対象になること自体が異常で、定常状態ではほぼ0件）。**役割分担**
+  として、openな取りこぼしは従来どおりissue-deck復旧後に`main-pr-merged`のrunを再実行する
+  経路に委ね、この巡回はcloseされて二度と拾われなくなったものだけを相手にする
+- 進める際、developへのマージ時に外しそこねた`00.check-user`（#2335）もついでに外し、
+  回収した旨をコメントで知らせる（発信元マーカーは既存の巡回と同じ`progress-sweep`）
+
 ## 参考リンク
 
 - GitHub Docs: [Using the API to manage Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects)

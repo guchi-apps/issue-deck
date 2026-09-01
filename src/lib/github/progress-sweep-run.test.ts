@@ -501,4 +501,86 @@ describe("runProgressSweep", () => {
     expect(result.candidates).toBe(0);
     expect(result.actions).toHaveLength(1);
   });
+
+  describe("closedなIssueの取り残し回収（#2690）", () => {
+    function closedProjectItem(overrides: Record<string, unknown> = {}) {
+      return {
+        itemId: "item-2",
+        repositoryDatabaseId: 555,
+        issueNumber: 3000,
+        issueOpen: false,
+        status: "Release",
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      // openなIssue向けの既定候補と混ざらないよう、closed専用のアイテムだけにする
+      fetchProjectItems.mockResolvedValue([closedProjectItem()]);
+      compareBranches.mockResolvedValue({ aheadBy: 0, changedFiles: null, lastCommitAt: null });
+    });
+
+    it("mainの祖先になっていればdoneを報告し、確認待ちも外してコメントする", async () => {
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.closedCandidates).toBe(1);
+      expect(compareBranches).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        "main",
+        "aaa111",
+        "token",
+      );
+      expect(reportProgressStatus).toHaveBeenCalledWith({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 3000,
+        status: "done",
+        onlyFrom: ["develop", "release"],
+      });
+      expect(removeIssueLabel).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        3000,
+        "token",
+        "00.check-user",
+      );
+      expect(createComment.mock.calls.at(-1)?.[4].body).toContain("Done へ進めました");
+      expect(result.actions).toContainEqual({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 3000,
+        kind: "closed_advanced",
+      });
+    });
+
+    it("まだmainの祖先になっていなければ見送る（次のリリース待ち）", async () => {
+      compareBranches.mockResolvedValue({ aheadBy: 2, changedFiles: 3, lastCommitAt: null });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ closed_not_in_main_yet: 1 });
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(createComment).not.toHaveBeenCalled();
+    });
+
+    it("developへのマージ済みPRが無ければ見送り、mainとの比較もしない", async () => {
+      fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([]));
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ closed_no_merged_pr: 1 });
+      expect(compareBranches).not.toHaveBeenCalled();
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+    });
+
+    it("進捗の報告が反映されなければ通知もラベル除去も行わない", async () => {
+      reportProgressStatus.mockResolvedValue({ applied: false, reason: "status_mismatch" });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ action_failed: 1 });
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+      expect(createComment).not.toHaveBeenCalled();
+      expect(result.actions).toEqual([]);
+    });
+  });
 });

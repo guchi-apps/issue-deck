@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildClosedStrandedRecoveredComment,
   buildDevelopMergedComment,
   buildStrandedComment,
+  decideClosedStrandedIssue,
   decideProgressSweep,
   decideStaleCheckUser,
   hasDevelopMergedNotice,
@@ -13,6 +15,7 @@ import {
   PROGRESS_SWEEP_DEFAULT_INTERVAL_MINUTES,
   PROGRESS_SWEEP_STRANDED_GRACE_MINUTES,
   strandedCommentMarker,
+  type ClosedStrandedFacts,
   type ProgressSweepFacts,
 } from "@/lib/github/progress-sweep";
 
@@ -307,5 +310,51 @@ describe("decideStaleCheckUser", () => {
         checkUserLabeledAt: null,
       }),
     ).toEqual({ action: "skip", reason: "check_user_after_merge" });
+  });
+});
+
+describe("decideClosedStrandedIssue", () => {
+  function closedFacts(overrides: Partial<ClosedStrandedFacts> = {}): ClosedStrandedFacts {
+    return {
+      mergedPullRequest: MERGED,
+      compareWithMain: { aheadBy: 0 },
+      ...overrides,
+    };
+  }
+
+  it("developへのマージ済みPRが無ければ見送る", () => {
+    expect(decideClosedStrandedIssue(closedFacts({ mergedPullRequest: null }))).toEqual({
+      action: "skip",
+      reason: "closed_no_merged_pr",
+    });
+  });
+
+  it("mainとの比較を取得できなければ次の巡回へ回す", () => {
+    expect(decideClosedStrandedIssue(closedFacts({ compareWithMain: null }))).toEqual({
+      action: "skip",
+      reason: "closed_compare_unavailable",
+    });
+  });
+
+  it("まだmainの祖先になっていなければ見送る（次のリリース待ち）", () => {
+    expect(
+      decideClosedStrandedIssue(closedFacts({ compareWithMain: { aheadBy: 3 } })),
+    ).toEqual({ action: "skip", reason: "closed_not_in_main_yet" });
+  });
+
+  it("mainの祖先になっていればdoneへ進める", () => {
+    expect(decideClosedStrandedIssue(closedFacts())).toEqual({
+      action: "advance_done",
+      pullRequestUrl: MERGED.url,
+    });
+  });
+});
+
+describe("buildClosedStrandedRecoveredComment", () => {
+  it("PRのURLと発信元マーカーを含む", () => {
+    const body = buildClosedStrandedRecoveredComment(MERGED.url);
+
+    expect(body).toContain(MERGED.url);
+    expect(body).toContain("<!-- issue-deck-source:progress-sweep -->");
   });
 });
