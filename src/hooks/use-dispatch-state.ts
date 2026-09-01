@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import type { ClaudeModel } from "@/lib/app-settings";
 import {
   isActiveDispatchJobStatus,
   type DispatchAgent,
@@ -273,6 +274,11 @@ export function useDispatchState(enabled: boolean) {
        * **実装セッション（`LAUNCH`）でだけ意味がある。**
        */
       agent?: DispatchAgent;
+      /**
+       * このIssueだけに使うClaudeのモデル（#2717）。省略・`null`は「設定の既定に従う」。
+       * **実装セッション（`LAUNCH`）でエージェントがClaudeのときだけ意味がある。**
+       */
+      model?: ClaudeModel | null;
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);
@@ -286,6 +292,9 @@ export function useDispatchState(enabled: boolean) {
             host: params.hostName,
             kind: params.kind,
             agent: params.agent,
+            // 「設定に従う」（null）はキーごと送らない。APIは`model`の有無で
+            // 「指定なし」と「未知の値」を区別する（未知は400）
+            ...(params.model ? { model: params.model } : {}),
           }),
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));

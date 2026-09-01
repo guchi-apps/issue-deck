@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { parseClaudeModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import {
   DEFAULT_DISPATCH_AGENT,
@@ -370,11 +371,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  // このIssueだけに使うClaudeのモデル（#2717）。**省略は「設定の既定に従う」**で従来どおり。
+  // `agent`と同じく**未知の値は黙って既定へ落とさず400で断る**——Fableを指定したつもりで
+  // Sonnetが立つ方が、その場で断られるより分かりにくい
+  const claudeModel = payload?.model === undefined ? null : parseClaudeModel(payload.model);
+  if (payload?.model !== undefined && !claudeModel) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
   const result = await enqueueDispatchJob({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
     hostName,
     agent,
+    claudeModel,
     requestedByUserId: userId,
   });
 

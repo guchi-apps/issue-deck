@@ -1,6 +1,10 @@
 import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
-import { DISPATCH_CONCURRENCY_DEFAULT } from "@/lib/app-settings";
+import {
+  DISPATCH_CONCURRENCY_DEFAULT,
+  parseClaudeModel,
+  type ClaudeModel,
+} from "@/lib/app-settings";
 import { db } from "@/lib/db";
 import {
   buildCodexPairingActiveKey,
@@ -154,6 +158,10 @@ function toJobView(
     // DBの値も信用せず、既知の語だけを通す（#2505。`previewAction`と同じ作法で、列を手で
     // 書き換えられても`ISSUE_DECK_AGENT`へ届く語は変わらない）
     agent: readDispatchAgent(job.agent),
+    // DBの値も信用せず、既知の語だけを通す（#2717。未知の語・null はどちらも
+    // 「設定の既定に従う」= null になる。`agent`と同じ作法だが、既定へ落とすのではなく
+    // **落とし先が「指定なし」**である点だけが違う）
+    claudeModel: parseClaudeModel(job.claudeModel),
     status: job.status,
     message: job.message,
     instruction: job.instruction,
@@ -489,6 +497,15 @@ export async function enqueueDispatchJob(params: {
    * 画面の判定を通らない経路があるため。`session_alive`と同じ理由）。
    */
   agent?: DispatchAgent;
+  /**
+   * このIssueだけに使うClaudeのモデル（#2717）。**省略・`null`は「設定の既定に従う」**で、
+   * 従来どおりの挙動になる。
+   *
+   * **ホストの申告では塞がない**（`agent`と違う点）。`--model`はどのバージョンのClaude Codeでも
+   * 受け付ける引数で、古いpollerに当たった場合はジョブの値が読まれず設定の既定で立つだけ
+   * ——選んだのに別のCLIが立つ`agent`と違い、黙って壊れる方向が無い。
+   */
+  claudeModel?: ClaudeModel | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueDispatchJobResult> {
@@ -561,6 +578,9 @@ export async function enqueueDispatchJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         agent,
+        // 「設定に従う」はnullで持つ（#2717）。エイリアスの実体を書き込むと、
+        // 後で設定を変えても積み置きのジョブだけ古い既定のまま立つ
+        claudeModel: params.claudeModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,

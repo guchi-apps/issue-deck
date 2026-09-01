@@ -536,6 +536,18 @@ model DispatchJob {
   // **既定は`claude`で、既存行はすべてこの値になる。** 種別を増やしたときに既存の起動が
   // 黙って別のCLIへ移らないよう、`enum`ではなく既定値付きの文字列で持つ。
   agent              String            @default("claude")
+  // このIssueだけに使うClaudeのモデル（#2717。`kind`が`LAUNCH`・`agent`が`claude`のときだけ意味がある）。
+  //
+  // **nullは「設定の既定に従う」**（`AppSetting.claudeLocalModel`）で、既存行はすべてnullになる。
+  // 入るのは`CLAUDE_MODEL_VALUES`のエイリアス（`auto` / `fable` / `opus` / `sonnet` / `haiku`）で、
+  // `agent`と同じく**画面・API・払い出しの3か所で既知の語だけを通す**（列を手で書き換えられても、
+  // `--model`へ届く語は変わらない）。
+  //
+  // **Issueごとに選べるようにしたのは、割高さが対話の長さで変わるから。** 長い実装セッションは
+  // 費用の6割がキャッシュ読み出しで、そこが半額のFable 5.1はOpus 5比1.03倍にしかならない。
+  // 数往復で終わるIssueではその相殺が効かず素の単価差（2倍）に近づく。だから全体の既定ではなく
+  // 起動のたびに選ぶ（docs/multi-agent/prompts-and-models.md）。
+  claudeModel        String?
   status             DispatchJobStatus @default(QUEUED)
   // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
   // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは

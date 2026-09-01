@@ -107,6 +107,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueId: null,
     targetHost: "subpc",
     agent: "claude",
+    claudeModel: null,
     kind: "LAUNCH",
     status: "QUEUED",
     message: null,
@@ -362,6 +363,8 @@ describe("StartImplementationDialog", () => {
       hostName: "subpc",
       // 選ばなければ既定のClaude Code（#2505）
       agent: "claude",
+      // 選ばなければ「設定に従う」（#2717）
+      model: null,
     });
     await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
     expect(updateIssue.mock.calls[0][0].labels).toContain(LOCAL_LABEL_NAME);
@@ -426,6 +429,67 @@ describe("StartImplementationDialog", () => {
 
       expect(screen.queryByRole("radiogroup", { name: "エージェント" })).toBeNull();
       clickStart();
+      await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #2717。**重いIssueだけモデルを上げるための欄**なので、既定（設定に従う）から動かさない。
+   * GitHub Actionsは設定を全体で読む別経路で、ジョブに積んだ値は届かない。
+   */
+  describe("モデルの選択（#2717）", () => {
+    it("サブPCを選ぶと選択欄を出し、既定は「設定に従う」", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.getByRole("radiogroup", { name: "モデル" })).toBeTruthy();
+      expect(screen.getByRole("radio", { name: /設定に従う/ }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+    });
+
+    it("GitHub Actionsでは選択欄を出さない（設定の既定でしか起動しないため）", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
+    });
+
+    it("Codexを選ぶと選択欄が消える（Codexのモデルは別の設定のため）", () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.getByRole("radiogroup", { name: "モデル" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+      expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
+    });
+
+    it("Fableを選ぶと1件あたりの目安を出し、ジョブへ載る", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
+      expect(screen.getByText(/実装セッション1件あたりの目安/)).toBeTruthy();
+
+      clickStart();
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(enqueue.mock.calls[0][0].model).toBe("fable");
+    });
+
+    it("実行先をGitHub Actionsへ移すと選択が付いていかない", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
+      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      clickStart();
+
       await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
       expect(enqueue).not.toHaveBeenCalled();
     });
