@@ -434,7 +434,11 @@ reap_one() {
     hold "$session" "Issueの状態を取得できない（$repository #$issue_number）"
     return 0
   fi
-  issue_state="$(printf '%s\n' "$issue_info" | head -1)"
+  # `head -1`は1行読めば入力を最後まで消費せず終了するため、`printf`側が書き込み中に
+  # パイプを閉じられてSIGPIPE（141）を受けることがある。`set -o pipefail`下ではその
+  # 141がパイプ全体の終了ステータスになり`set -e`でスクリプトごと落ちるため、`|| true`で拾う
+  # （`issue_state`自体は`head`が出力済みなので取得できる。他箇所と同じ防御。#2710のCI失敗）。
+  issue_state="$(printf '%s\n' "$issue_info" | head -1 || true)"
   issue_labels="$(printf '%s\n' "$issue_info" | tail -n +2)"
   local_label=0
   if printf '%s\n' "$issue_labels" | grep -Fxq "11.local"; then
