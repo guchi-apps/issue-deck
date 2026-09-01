@@ -429,6 +429,22 @@ export type BranchFlowRelease = {
   latestVersion: string | null;
 };
 
+/**
+ * 「リリースする」を押せない理由（#2711）。画面はこれを無効のボタンへ添える文言にする。
+ *
+ * - `branches-unloaded`: ブランチ状況（`/api/branch-flow`）をまだ取得できていない。
+ *   **レーンの束はPR一覧だけからも組み立てられる**ため、この状態でも「次のリリース
+ *   （本番未反映）」は出る。判定の材料が無いだけで、出すものが無いとは限らない
+ * - `no-workflow`: `release-develop-to-main.yml`を持たないリポジトリ（#1538）
+ * - `release-in-progress`: openなリリースPR・バンプPRがある（起こし直すと二重に走る）
+ * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
+ */
+export type ReleaseBlockedReason =
+  | "branches-unloaded"
+  | "no-workflow"
+  | "release-in-progress"
+  | "nothing-to-release";
+
 export type BranchFlowRepository = {
   repositoryFullName: string;
   repositoryPrivate: boolean;
@@ -456,6 +472,14 @@ export type BranchFlowRepository = {
    * openなリリースPRもバンプPRも無く、未リリースの変更が1つ以上ある場合だけtrue。
    */
   canTriggerRelease: boolean;
+  /**
+   * 「リリースする」を押せない理由（#2711）。`canTriggerRelease`がtrueのときはnull。
+   *
+   * 押せないときにボタンごと消すと、「次のリリース（本番未反映）」と出ている束から本番へ出す
+   * 手段が画面のどこにも無くなり、**押せないのか、そもそも操作が無いのかを区別できない**。
+   * 無効のボタンへ添える文言の材料として持つ。
+   */
+  releaseBlockedReason: ReleaseBlockedReason | null;
   /**
    * いま「本番へ再デプロイ」を押してよいか（#2020）。`deploy.yml`があり、デプロイが
    * 動いていない（`summary.deploy`が`waiting`・`running`でない）場合だけtrue。

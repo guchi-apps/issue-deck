@@ -1187,19 +1187,29 @@ function ReleaseFlowGraph({
           />
         ))}
 
-        {visibleGroups.map((group, index) => (
+        {visibleGroups.map((group) => (
           <ReleaseGroupHeaderWithLanes
             key={group.key}
             repositoryFullName={repository.repositoryFullName}
             group={group}
             onMerged={onMerged}
             releaseButton={
-              index === 0 && repository.canTriggerRelease ? (
+              /* **未リリースの束には必ずリリースの導線を置く**（#2711）。以前は
+                 `canTriggerRelease`のときだけ出していたため、押せない状態では「次のリリース
+                 （本番未反映）」と言いながら本番へ出す手段が画面のどこにも無かった。押せない
+                 ときは無効のボタンと理由（`releaseBlockedReason`）を出す。
+                 **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
+                 （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
+                 押せる操作の隣に押せない操作が並ぶだけになる */
+              group.mergedAt === null &&
+              group.pullRequest === null &&
+              group.bumpPullRequest === null ? (
                 <RepositoryReleaseButton
                   repositoryFullName={repository.repositoryFullName}
                   pendingIssues={pendingIssues}
                   currentVersion={repository.release.latestVersion}
                   isPending={releaseTriggerPending}
+                  blockedReason={repository.releaseBlockedReason}
                   onTriggered={onReleaseTriggered}
                 />
               ) : undefined
