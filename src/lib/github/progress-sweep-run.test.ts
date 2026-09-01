@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const repositoryFindMany = vi.fn();
 const issueFindMany = vi.fn();
+const dispatchSessionFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectItems = vi.fn();
 const fetchPullRequestsForHead = vi.fn();
@@ -9,6 +10,8 @@ const fetchBranchHeadSha = vi.fn();
 const compareBranches = vi.fn();
 const fetchCommentsForIssue = vi.fn();
 const createComment = vi.fn();
+const hasReopenedEvent = vi.fn();
+const updateIssue = vi.fn();
 const removeIssueLabel = vi.fn();
 const addIssueLabels = vi.fn();
 const fetchRepositoryLabelNames = vi.fn();
@@ -25,6 +28,11 @@ vi.mock("@/lib/db", () => ({
     issue: {
       get findMany() {
         return issueFindMany;
+      },
+    },
+    dispatchSession: {
+      get findMany() {
+        return dispatchSessionFindMany;
       },
     },
   },
@@ -72,6 +80,12 @@ vi.mock("@/lib/github/issues-api", () => ({
   },
   get fetchRepositoryLabelNames() {
     return fetchRepositoryLabelNames;
+  },
+  get hasReopenedEvent() {
+    return hasReopenedEvent;
+  },
+  get updateIssue() {
+    return updateIssue;
   },
 }));
 
@@ -181,6 +195,7 @@ describe("runProgressSweep", () => {
 
     repositoryFindMany.mockResolvedValue([REPO]);
     issueFindMany.mockImplementation(issueRowsFor({}));
+    dispatchSessionFindMany.mockResolvedValue([]);
     getInstallationToken.mockResolvedValue("token");
     fetchProjectItems.mockResolvedValue([projectItem()]);
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
@@ -188,6 +203,8 @@ describe("runProgressSweep", () => {
     compareBranches.mockResolvedValue(null);
     fetchCommentsForIssue.mockResolvedValue([]);
     createComment.mockResolvedValue({});
+    hasReopenedEvent.mockResolvedValue(false);
+    updateIssue.mockResolvedValue({});
     removeIssueLabel.mockResolvedValue([]);
     addIssueLabels.mockResolvedValue([]);
     fetchRepositoryLabelNames.mockResolvedValue(new Set(["71.manual-step"]));
@@ -579,6 +596,155 @@ describe("runProgressSweep", () => {
 
       expect(result.skipped).toMatchObject({ action_failed: 1 });
       expect(removeIssueLabel).not.toHaveBeenCalled();
+      expect(createComment).not.toHaveBeenCalled();
+      expect(result.actions).toEqual([]);
+    });
+  });
+
+  describe("本番反映済みなのにopenのまま残ったIssueのclose（#2715）", () => {
+    function mergedOpenItem(overrides: Record<string, unknown> = {}) {
+      return {
+        itemId: "item-3",
+        repositoryDatabaseId: 555,
+        issueNumber: 2700,
+        issueOpen: true,
+        status: "Develop",
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      fetchProjectItems.mockResolvedValue([mergedOpenItem()]);
+      compareBranches.mockResolvedValue({ aheadBy: 0, changedFiles: null, lastCommitAt: null });
+      reportProgressStatus.mockResolvedValue({ applied: true, from: "Develop", to: "Done" });
+    });
+
+    it("Developのままmainへ入っていればdoneを報告してからcloseし、コメントを残す", async () => {
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.mergedOpenCandidates).toBe(1);
+      expect(compareBranches).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        "main",
+        "aaa111",
+        "token",
+      );
+      expect(reportProgressStatus).toHaveBeenCalledWith({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2700,
+        status: "done",
+        onlyFrom: ["develop", "release"],
+      });
+      expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "issue-deck", 2700, "token", {
+        state: "closed",
+        state_reason: "completed",
+      });
+      expect(removeIssueLabel).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        2700,
+        "token",
+        "00.check-user",
+      );
+      expect(createComment.mock.calls.at(-1)?.[4].body).toContain("Done へ進めて");
+      expect(result.actions).toContainEqual({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2700,
+        kind: "open_closed",
+      });
+    });
+
+    it("報告はcloseより先に行う（closeが先だと終端Closedへ落ちうる）", async () => {
+      const order: string[] = [];
+      reportProgressStatus.mockImplementation(async () => {
+        order.push("report");
+        return { applied: true, from: "Develop", to: "Done" };
+      });
+      updateIssue.mockImplementation(async () => {
+        order.push("close");
+        return {};
+      });
+
+      await runProgressSweep({ now: NOW });
+
+      expect(order).toEqual(["report", "close"]);
+    });
+
+    it("Doneのままopenなものは、PR・比較を1回も引かずにcloseする", async () => {
+      fetchProjectItems.mockResolvedValue([mergedOpenItem({ status: "Done", issueNumber: 2690 })]);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(fetchPullRequestsForHead).not.toHaveBeenCalled();
+      expect(compareBranches).not.toHaveBeenCalled();
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "issue-deck", 2690, "token", {
+        state: "closed",
+        state_reason: "completed",
+      });
+      expect(result.actions).toContainEqual({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2690,
+        kind: "open_closed",
+      });
+    });
+
+    it("まだmainへ入っていなければ見送る（次のリリース待ち＝正常）", async () => {
+      compareBranches.mockResolvedValue({ aheadBy: 2, changedFiles: 3, lastCommitAt: null });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ open_not_in_main_yet: 1 });
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(createComment).not.toHaveBeenCalled();
+    });
+
+    it("人がreopenしたIssueは閉じ直さない", async () => {
+      hasReopenedEvent.mockResolvedValue(true);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ open_reopened: 1 });
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("reopenの有無を確かめられなければ閉じない", async () => {
+      hasReopenedEvent.mockResolvedValue(null);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ open_reopen_unknown: 1 });
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("見送るだけの巡回ではreopenの確認を行わない", async () => {
+      compareBranches.mockResolvedValue({ aheadBy: 2, changedFiles: 3, lastCommitAt: null });
+
+      await runProgressSweep({ now: NOW });
+
+      expect(hasReopenedEvent).not.toHaveBeenCalled();
+    });
+
+    it("ローカルセッションが走っているIssueは閉じない（追加対応の途中で驚かせない）", async () => {
+      dispatchSessionFindMany.mockResolvedValue([
+        { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2700 },
+      ]);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ open_session_alive: 1 });
+      expect(fetchPullRequestsForHead).not.toHaveBeenCalled();
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("closeに失敗したらコメントは残さない", async () => {
+      updateIssue.mockRejectedValue(new Error("boom"));
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ action_failed: 1 });
       expect(createComment).not.toHaveBeenCalled();
       expect(result.actions).toEqual([]);
     });
