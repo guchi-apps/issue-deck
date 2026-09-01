@@ -8,13 +8,15 @@
 #                                 `00.check-user`を付けた印（<セッション名>.check-user、#1342・#1417）を書く。
 #                                 **この印だけはセッションが終わっても消さない**（#1905。同じIssueで
 #                                 起こし直したセッションが引き継いで外せるようにするため）。
+#                                 いま何をしているか（<セッション名>.step、#2705）も書く。
 #                                 `SessionStart`では`.starting`を消し、Codexのセッションなら
 #                                 `codex queue`と`codex resume`の宛先
 #                                 （<セッション名>.codex-thread、#2519・#2520）を書く
 #   scripts/reap-sessions.sh      両方を読み、作業が終わったセッションを畳む。畳む条件が揃って
 #                                 猶予待ちになったセッションには、その予定（<セッション名>.reap、#1817）を書く
 #   scripts/subpc-dispatch-poller.sh  `.starting`を読み、起動確認で止まっているセッションを報告する（#1465）。
-#                                 `.reap`も読み、畳む予定を報告する（#1817）
+#                                 `.reap`も読み、畳む予定を報告する（#1817）。`.step`も読み、
+#                                 いま何をしているかを報告する（#2705）
 #
 # **キーはtmuxのセッション名。** 回収側がtmuxから得られる唯一の識別子で、worktreeの置き場は
 # リポジトリごとに違い（`~/apps/<リポジトリ名>-worktrees`）、Issue番号はリポジトリごとに振られるため
@@ -99,6 +101,49 @@ session_state_clear_reap() {
   [[ -n "$file" ]] || return 0
   rm -f "$file" 2>/dev/null || true
   return 0
+}
+
+# いま何をしているか（#2705）。**フックが書き、pollerが読んで画面へ運ぶ。**
+#
+# 中身は`.event`・`.reap`に倣った`<入った時刻のepoch> <ステップコード> <最後に見た時刻のepoch>`の
+# 1行。コードの語彙と判定は`lib/session-step.sh`が持ち、**画面に出す文言はissue-deck側**
+# （`.reap`の理由コードと同じ分け方）。
+#
+# **時刻を2つ持つ。** 入った時刻は同じコードが続く間は動かさない（画面の「実装中・2分」がここから
+# 出る）。最後に見た時刻はツールの実行ごとに動かす。**後者が「いま走っているか」の唯一の
+# 手掛かり**で、これが無いと、同じ作業が続くturnをまたいだときに時刻が動かず、動いているのに
+# 止まって見える（issue-deck側の`isSessionStepFresh`）。
+#
+# **`.event`とは別に持つ。** あちらは`PostToolUse`を間引くための「直前が入力待ちだったか」で、
+# 記録される値は3種類しかなく、間引きの都合で1回書いたら以降のツール実行では更新されない。
+# 同じファイルへ相乗りさせると、その間引きが壊れる。
+session_state_step_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.step' "$(session_state_dir)" "$1"
+}
+
+# ステップを書く。**コードが同じなら「入った時刻」は据え置き、「最後に見た時刻」だけ進める。**
+session_state_write_step() {
+  local session="$1" step="$2" file content previous now entered
+  [[ -n "$step" ]] || return 1
+  file="$(session_state_step_file "$session")" || return 1
+  now="$(date +%s)"
+  entered="$now"
+  previous="$(session_state_read_step "$session" 2>/dev/null || true)"
+  if [[ "$previous" =~ ^([0-9]+)[[:space:]]+([A-Z_]+)([[:space:]]|$) ]] &&
+    [[ "${BASH_REMATCH[2]}" == "$step" ]]; then
+    entered="${BASH_REMATCH[1]}"
+  fi
+  printf -v content '%s %s %s\n' "$entered" "$step" "$now"
+  session_state_write_file "$file" "$content"
+}
+
+# ステップを`<入った時刻> <ステップコード> <最後に見た時刻>`の形で返す。無ければ非0で返る。
+session_state_read_step() {
+  local session="$1" file
+  file="$(session_state_step_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  head -1 "$file" 2>/dev/null
 }
 
 # APIエラーで中断したセッションを自動再開した記録（#1971）。
@@ -454,6 +499,7 @@ session_state_remove() {
     "$(session_state_event_file "$session" 2>/dev/null || true)" \
     "$(session_state_reason_file "$session" 2>/dev/null || true)" \
     "$(session_state_reap_file "$session" 2>/dev/null || true)" \
+    "$(session_state_step_file "$session" 2>/dev/null || true)" \
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
     "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do

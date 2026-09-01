@@ -5,6 +5,7 @@ import {
   isRevivedSession,
   nextEscalatedState,
   parseSessionReapReason,
+  parseSessionStep,
   resolveSessionState,
   resolveStartingActivityTransition,
   shouldEscalateSession,
@@ -33,6 +34,9 @@ import { postSessionWrapupComment } from "@/lib/dispatch/session-wrapup";
 export type { DispatchSessionView };
 
 function toSessionView(session: DispatchSession): DispatchSessionView {
+  // いま何をしているか（#2705）。**保存されているコードも読み直しで検証する**（畳む理由と同じで、
+  // 列はStringなので古い版が書いた・知らないコードが残っていることがある）
+  const step = parseSessionStep(session.step);
   return {
     host: session.host,
     tmuxSessionName: session.tmuxSessionName,
@@ -57,6 +61,10 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     // Codexのセッションの宛先が分かっているか（#2519）。**Claude Codeの行では`null`**で、
     // 追加指示の判定に効かない
     codexThreadKnown: session.codexThreadKnown,
+    // コードが読めなければ時刻も出さない（経過時間だけが宙に浮くのを防ぐ）
+    step,
+    stepAt: step === null ? null : (session.stepAt?.toISOString() ?? null),
+    stepSeenAt: step === null ? null : (session.stepSeenAt?.toISOString() ?? null),
   };
 }
 
@@ -232,6 +240,17 @@ export async function reportDispatchSessions(params: {
     // 前の巡の値を残す意味が無い。古いpollerは項目そのものを送ってこない（`undefined`）
     const codexThread =
       report.codexThreadKnown === undefined ? {} : { codexThreadKnown: report.codexThreadKnown };
+    // いま何をしているか（#2705）。**送ってきた巡の値でそのまま置き換える**（畳む予定と同じ扱い）。
+    // 時刻は「そのステップに入った時刻」で、ホスト側が同じコードの間は書き換えないため、
+    // 毎巡上書きしても経過時間は伸び続ける。古いpollerは項目そのものを送ってこない（`undefined`）
+    const step =
+      report.step === undefined
+        ? {}
+        : {
+            step: report.step,
+            stepAt: report.stepAt == null ? null : new Date(report.stepAt),
+            stepSeenAt: report.stepSeenAt == null ? null : new Date(report.stepSeenAt),
+          };
 
     await db.dispatchSession.upsert({
       where: {
@@ -255,6 +274,7 @@ export async function reportDispatchSessions(params: {
         ...(startingTransition === "enter" ? { activity: "NOT_STARTED", activityAt: now } : {}),
         ...reap,
         ...codexThread,
+        ...step,
       },
       update: {
         repositoryFullName: report.repositoryFullName,
@@ -278,6 +298,11 @@ export async function reportDispatchSessions(params: {
               firstSeenAt: now,
               reapAt: null,
               reapReason: null,
+              // ステップも捨てる（#2705）。前のセッションの「テスト中」が、起動し直した
+              // 直後のセッションにそのまま出るのを防ぐ（古いpollerで`step`が空のときも）
+              step: null,
+              stepAt: null,
+              stepSeenAt: null,
             }
           : {}),
         // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**
@@ -289,6 +314,7 @@ export async function reportDispatchSessions(params: {
         // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡の値を入れる）
         ...reap,
         ...codexThread,
+        ...step,
       },
     });
 

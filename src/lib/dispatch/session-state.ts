@@ -155,6 +155,76 @@ export const SESSION_REAP_REASONS = [
 export type DispatchSessionReapReason = (typeof SESSION_REAP_REASONS)[number];
 
 /**
+ * セッションがいま何をしているか（#2705）。**サブPCの`scripts/lib/session-step.sh`が
+ * Claude Codeのフックから受け取ったツール名とコマンドを畳んだ結果**で、値そのものはあちらが書く。
+ *
+ * `DispatchSessionActivity`とは別物。あちらは「人を待っているか・応答が終わったか」で、
+ * こちらは作業の中身。**両方を並べて初めて「サブPC・実行中／実装中」になる。**
+ *
+ * **文言は運ばず、コードだけを運ぶ**（`SESSION_REAP_REASONS`と同じ理由）。画面に出す言い方を
+ * スクリプト側に持たせると、同じ状態がログと画面で2通りの言い方になる。
+ *
+ * **コマンドの原文は運ばない。** `--token=…`のような行がそのままDBと画面へ出るのを避けるため、
+ * 分類はホスト側で済ませてある。ここに自由文字列は入らない。
+ */
+export const SESSION_STEPS = [
+  /** 計画を書いている（`ExitPlanMode`） */
+  "PLANNING",
+  /** 読んで調べている（`Read`・`Grep`・`git log`など） */
+  "EXPLORING",
+  /** ファイルを書き換えている（`Edit`・`Write`） */
+  "EDITING",
+  /** Lint（`pnpm lint`・`eslint`など） */
+  "LINTING",
+  /** 型チェック（`tsc`・`pnpm typecheck`） */
+  "TYPECHECKING",
+  /** テスト（`pnpm test`・`vitest`など） */
+  "TESTING",
+  /** ビルド（`pnpm build`など） */
+  "BUILDING",
+  /** コミット（`git add`・`git commit`） */
+  "COMMITTING",
+  /** push（`git push`） */
+  "PUSHING",
+  /** Pull Requestの作成・更新（`gh pr create`など） */
+  "PR",
+  /** Issueへの記録（`gh issue comment`など） */
+  "ISSUE",
+  /** アーティファクトの公開（`Artifact`） */
+  "ARTIFACT",
+  /** 上のどれにも当たらないコマンド */
+  "RUNNING",
+] as const;
+
+export type DispatchSessionStep = (typeof SESSION_STEPS)[number];
+
+/**
+ * ステップとして受け入れる値。**知らないコードはnullへ落とす。**
+ *
+ * `parseSessionReapReason`と同じ扱いで、報告全体は通す。サブPCのスクリプトはissue-deck本体より
+ * 新しいことも古いこともあるため、語彙が増えた側で報告ごと弾くと、そのホストのセッションが
+ * 全部「消えた」と判定される。
+ */
+export function parseSessionStep(value: unknown): DispatchSessionStep | null {
+  if (typeof value !== "string") return null;
+  return (SESSION_STEPS as readonly string[]).includes(value)
+    ? (value as DispatchSessionStep)
+    : null;
+}
+
+/**
+ * ステップに入った時刻として受け入れる値（ISO8601）。パースできなければnull。
+ *
+ * `parseSessionReapAt`と同じく、**壊れていてもこの項目だけを落とす**（報告全体は通す）。
+ */
+export function parseSessionStepAt(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > 40) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+/**
  * 畳む理由として受け入れる値。**知らないコードはnullへ落とす。**
  *
  * サブPCのスクリプトは`~/apps/issue-deck`のチェックアウトから走り、issue-deck本体より
@@ -217,6 +287,17 @@ export type DispatchSessionReport = {
    * 無いのは古いpollerで、そのホストについては何も判断できないため既存の値を触らない。
    */
   codexThreadKnown?: boolean | null;
+  /**
+   * いま何をしているか（#2705）。**フックが書いた印をpollerが運ぶだけ**で、issue-deck側は
+   * 判定に加わらない。
+   *
+   * `reapAt`・`reapReason`と同じく、**`undefined`（項目そのものが無い）と`null`は別物**。
+   * 無いのは古いpollerで、そのホストについては何も判断できないため既存の値を触らない。
+   * `null`は「新しいpollerが見たうえで、まだ何も申告が無い」。
+   */
+  step?: DispatchSessionStep | null;
+  stepAt?: string | null;
+  stepSeenAt?: string | null;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -262,6 +343,14 @@ export type DispatchSessionView = {
    * **`false`のあいだは追加指示を送れない**（`resolveSessionControlRejection`が断る）。
    */
   codexThreadKnown: boolean | null;
+  /**
+   * いま何をしているか（#2705）と、そのステップに入った時刻。申告が無ければ`null`。
+   * 画面に出す形にするのは`describeSessionStep`（`issue-session.ts`）。
+   */
+  step: DispatchSessionStep | null;
+  stepAt: string | null;
+  /** 最後にそのステップのツールが走った時刻。`activityAt`との比較で「いま走っているか」を出す */
+  stepSeenAt: string | null;
 };
 
 /**
@@ -489,6 +578,18 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     codexThreadKnown = rawCodexThread;
   }
 
+  // いま何をしているか（#2705）。**`reap`と同じ扱い**——壊れていても報告全体は通し、コードと
+  // 時刻は揃って初めて意味を持つので、片方でも読めなければ両方nullにする（経過時間を出せない
+  // ステップを画面へ出さない）
+  const hasStepField = "step" in input || "stepAt" in input;
+  const stepCode = parseSessionStep(input.step);
+  const stepAt = parseSessionStepAt(input.stepAt);
+  const stepSeenAt = parseSessionStepAt(input.stepSeenAt);
+  const step =
+    stepCode === null || stepAt === null || stepSeenAt === null
+      ? { step: null, stepAt: null, stepSeenAt: null }
+      : { step: stepCode, stepAt, stepSeenAt };
+
   return {
     tmuxSessionName,
     repositoryFullName,
@@ -499,5 +600,6 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     // 古いpollerは送ってこない。`undefined`のまま残すと既存の値を触らない
     ...(hasReapField ? reap : {}),
     ...(codexThreadKnown === undefined ? {} : { codexThreadKnown }),
+    ...(hasStepField ? step : {}),
   };
 }

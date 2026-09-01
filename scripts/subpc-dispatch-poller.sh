@@ -1827,6 +1827,32 @@ session_reap_json() {
   jq -nc --arg at "$iso" --arg reason "$reason" '{reapAt: $at, reapReason: $reason}'
 }
 
+# セッションがいま何をしているか（#2705）。**フックが書いた`.step`を運ぶだけ。**
+#
+# `session_reap_json`と同じで、**ここでは判定をしない**（何のツールを呼んだかはフックにしか
+# 分からず、pollerが見ているtmuxのメタデータには出ない。`docs/multi-agent/gates.md`「計器」）。
+# 読めない・無い場合は両方nullで、画面には何も出ない。
+session_step_json() {
+  local session="$1" line at step seen iso seen_iso
+  local empty='{"step":null,"stepAt":null,"stepSeenAt":null}'
+  line="$(session_state_read_step "$session" 2>/dev/null || true)"
+  if [[ ! "$line" =~ ^([0-9]+)[[:space:]]+([A-Z_]+)[[:space:]]+([0-9]+)$ ]]; then
+    printf '%s' "$empty"
+    return 0
+  fi
+  at="${BASH_REMATCH[1]}"
+  step="${BASH_REMATCH[2]}"
+  seen="${BASH_REMATCH[3]}"
+  iso="$(date -u -d "@$at" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  seen_iso="$(date -u -d "@$seen" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if [[ -z "$iso" || -z "$seen_iso" ]]; then
+    printf '%s' "$empty"
+    return 0
+  fi
+  jq -nc --arg at "$iso" --arg seen "$seen_iso" --arg step "$step" \
+    '{step: $step, stepAt: $at, stepSeenAt: $seen}'
+}
+
 # Codexのセッションで、`codex queue`の宛先（スレッドUUID）が分かっているか（#2519）。
 #
 # **3値で返す。** `null`＝Codexのセッションではない（Claude Code）。`false`＝Codexだが宛先が
@@ -1885,9 +1911,11 @@ report_sessions() {
       --argjson claudeStarting "$(claude_start_pending "$session_name")" \
       --argjson codexThreadKnown "$(session_codex_thread_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
+      --argjson step "$(session_step_json "$session_name")" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
-        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown} + $reap')")
+        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown}
+         + $reap + $step')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**

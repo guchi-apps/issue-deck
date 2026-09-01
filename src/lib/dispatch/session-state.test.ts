@@ -304,6 +304,46 @@ describe("parseDispatchSessionReport", () => {
       reapReason: null,
     });
   });
+
+  /**
+   * #2705。いま何をしているかも`reapAt`と同じ向きで扱う——新しいpollerだけが送り、壊れていても
+   * その項目だけを落として報告は通す。
+   */
+  it("ステップを受け取る", () => {
+    expect(
+      parseDispatchSessionReport({
+        ...valid,
+        step: "LINTING",
+        stepAt: "2026-08-16T12:03:00Z",
+        stepSeenAt: "2026-08-16T12:04:00Z",
+      }),
+    ).toEqual({
+      ...valid,
+      step: "LINTING",
+      stepAt: "2026-08-16T12:03:00.000Z",
+      stepSeenAt: "2026-08-16T12:04:00.000Z",
+    });
+  });
+
+  it("ステップは省略できる（古いpollerでは項目そのものを増やさない）", () => {
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed && "step" in parsed).toBe(false);
+  });
+
+  it("知らないステップ・欠けた時刻は、その項目だけを落として報告は通す", () => {
+    for (const broken of [
+      { step: "REFACTORING", stepAt: "2026-08-16T12:03:00Z", stepSeenAt: "2026-08-16T12:04:00Z" },
+      { step: "LINTING", stepAt: "さっき", stepSeenAt: "2026-08-16T12:04:00Z" },
+      { step: "LINTING", stepAt: "2026-08-16T12:03:00Z" },
+    ]) {
+      expect(parseDispatchSessionReport({ ...valid, ...broken })).toEqual({
+        ...valid,
+        step: null,
+        stepAt: null,
+        stepSeenAt: null,
+      });
+    }
+  });
 });
 
 /**

@@ -444,6 +444,9 @@ describe("DispatchQueueButton のホスト表示", () => {
       reapAt: null,
       reapReason: null,
       codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
       ...overrides,
     };
   }

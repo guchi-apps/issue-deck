@@ -1,6 +1,7 @@
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type {
   DispatchSessionReapReason,
+  DispatchSessionStep,
   DispatchSessionView,
 } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
@@ -82,6 +83,83 @@ export function findSessionForIssue(
   const alive = mine.find((session) => session.state === "ALIVE");
   if (alive) return alive;
   return [...mine].sort((a, b) => b.lastReportedAt.localeCompare(a.lastReportedAt))[0];
+}
+
+/** ステップコード（`session-step.sh`が決めた値）から、画面の言い方へ（#2705） */
+const SESSION_STEP_TEXT: Record<DispatchSessionStep, string> = {
+  PLANNING: "計画作成中",
+  EXPLORING: "調査中",
+  EDITING: "実装中",
+  LINTING: "Lintチェック中",
+  TYPECHECKING: "型チェック中",
+  TESTING: "テスト中",
+  BUILDING: "ビルド中",
+  COMMITTING: "コミット中",
+  PUSHING: "push中",
+  PR: "PRを作成中",
+  ISSUE: "Issueへ記録中",
+  ARTIFACT: "アーティファクト公開中",
+  RUNNING: "コマンド実行中",
+};
+
+/**
+ * ステップの申告が「いまも走っている」ことを表しているか（#2705）。
+ *
+ * **判定は`stepSeenAt`と`activityAt`の前後だけ。** `activity`は`Stop`のたびに`RESPONDED`へ戻る
+ * 一方、次のturnが始まったことを知らせるフックは無い（`WORKING`は承認に答えた直後しか飛ばない）。
+ * そのため「最後のフックのあとにツールが走ったか」が、走っているかどうかの唯一の手掛かりになる。
+ *
+ * **人を待っている間は出さない。** 入力待ち・未開始のときに直前の作業を並べると、次に何を
+ * すればよいのかが読み取れなくなる（`summarizeIssueSession`が`state`を優先するのと同じ立場）。
+ */
+export function isSessionStepFresh(session: DispatchSessionView): boolean {
+  if (session.state !== "ALIVE") return false;
+  if (session.step === null || session.stepSeenAt === null) return false;
+  if (session.activity === "WAITING_INPUT" || session.activity === "NOT_STARTED") return false;
+  if (session.activityAt === null) return true;
+  const seen = new Date(session.stepSeenAt).getTime();
+  const activity = new Date(session.activityAt).getTime();
+  if (Number.isNaN(seen) || Number.isNaN(activity)) return false;
+  return seen >= activity;
+}
+
+/** 画面に出すステップ（#2705） */
+export type SessionStepNotice = {
+  step: DispatchSessionStep;
+  /** ピル・一覧行に出す言い方。例:「実装中」 */
+  label: string;
+  /** そのステップに入ってからの経過。例:「2分」。1分未満はnull（0分と出さない） */
+  since: string | null;
+};
+
+/**
+ * 経過時間を出す上限（ミリ秒）。これを超えたら経過を添えない。
+ *
+ * 長く同じステップに留まること自体はあり得る（`pnpm build`の待ちなど）が、**時・日の単位で
+ * 動かないのは、フックが飛ばなくなった側を疑う場面**で、そこに「12時間」と出しても
+ * 読む人の助けにならない。ステップそのものは出したまま、経過だけ黙る。
+ */
+const STEP_SINCE_MAX_MS = 60 * 60 * 1000;
+
+export function describeSessionStep(
+  session: DispatchSessionView,
+  now: Date = new Date(),
+): SessionStepNotice | null {
+  if (!isSessionStepFresh(session) || session.step === null) return null;
+  const label = SESSION_STEP_TEXT[session.step];
+
+  let since: string | null = null;
+  if (session.stepAt) {
+    const enteredAt = new Date(session.stepAt).getTime();
+    if (!Number.isNaN(enteredAt)) {
+      const elapsedMs = now.getTime() - enteredAt;
+      // 切り捨て。まだ1分経っていないものを「1分」と出さない
+      const minutes = Math.floor(elapsedMs / 60_000);
+      if (minutes >= 1 && elapsedMs <= STEP_SINCE_MAX_MS) since = `${minutes}分`;
+    }
+  }
+
+  return { step: session.step, label, since };
 }
 
 /**
@@ -181,6 +259,20 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     };
   }
   if (session.activity === "RESPONDED") {
+    // **最後の`Stop`のあとにツールが走っていれば、それは新しいturnが始まっている**（#2705）。
+    // 次のturnの開始を知らせるフックは無いため、これが無いと走っている最中のセッションが
+    // ずっと「応答を終えています」と出る（実際にそう見えていた）。何をしているかはステップの
+    // ピルが別に出すので、ここでは`WORKING`と同じ言い方に揃える
+    if (isSessionStepFresh(session)) {
+      return {
+        ...base,
+        at: session.stepSeenAt ?? session.lastReportedAt,
+        tone: "running",
+        label: `${formatDispatchHostName(session.host)}のセッションが作業中です`,
+        shortLabel: "作業中",
+        detail: null,
+      };
+    }
     return {
       ...base,
       at: session.activityAt ?? session.lastReportedAt,
@@ -348,7 +440,14 @@ export function describeSessionRecovery(session: DispatchSessionView): SessionRe
   };
 }
 
-/** 一覧のバッジなど、1語で出したい場所向けの短い表現。通常の実行中はnull（出さない） */
+/**
+ * 一覧のバッジなど、1語で出したい場所向けの短い表現。
+ *
+ * **実行中は、分かっていればいま何をしているかを出す**（#2705）。それまでは実行中のセッションで
+ * nullを返しており、一覧の行には「サブPC」としか出ていなかった——動いているのは分かるが、
+ * テストで詰まっているのかまだ調べているだけなのかが、Issueを開いても分からなかった。
+ * 申告が無い（古いpoller・フックがまだ飛んでいない）ときは従来どおりnull。
+ */
 export function shortIssueSessionLabel(session: DispatchSessionView): string | null {
   if (session.state === "FAILED") return "異常終了";
   // 終了の言い分けは`summarizeIssueSession`と同じ分岐にする（#1830）。片方だけ増やすと、
@@ -359,5 +458,7 @@ export function shortIssueSessionLabel(session: DispatchSessionView): string | n
   if (session.activity === "WAITING_INPUT") return "入力待ち";
   // 人が端末で答えるまで進まない点は入力待ちと同じなので、一覧にも出す（#1465）
   if (session.activity === "NOT_STARTED") return "未開始";
-  return null;
+  // **経過時間は添えない。** 一覧の行は狭く、`describeSessionStep`の`since`まで並べると
+  // ステップ名が折り返す。時間が要る場面（長すぎるビルドを疑うとき）はIssue詳細で見る
+  return describeSessionStep(session)?.label ?? null;
 }

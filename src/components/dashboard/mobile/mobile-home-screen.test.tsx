@@ -409,6 +409,9 @@ describe("MobileHomeScreen（#1690）", () => {
           reapAt: null,
           reapReason: null,
           codexThreadKnown: null,
+    step: null,
+    stepAt: null,
+    stepSeenAt: null,
         },
       ],
     });

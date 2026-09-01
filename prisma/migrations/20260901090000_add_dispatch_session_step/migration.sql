@@ -1,0 +1,4 @@
+ALTER TABLE `DispatchSession`
+  ADD COLUMN `step` VARCHAR(191) NULL,
+  ADD COLUMN `stepAt` DATETIME(3) NULL,
+  ADD COLUMN `stepSeenAt` DATETIME(3) NULL;

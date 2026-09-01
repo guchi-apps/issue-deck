@@ -976,6 +976,28 @@ model DispatchSession {
   // サブPCのpollerだけ（`~/.local/state/issue-deck/sessions/<セッション名>.codex-thread`）。
   codexThreadKnown Boolean?
 
+  // いま何をしているか（#2705）。**Claude Codeのフックが渡してきたツール名とコマンドを、
+  // サブPC側（`scripts/lib/session-step.sh`）が固定語彙のコードへ畳んだもの。**
+  //
+  // activityが「人を待っているか・応答が終わったか」の4値なのに対し、こちらは作業の中身
+  // （EDITING・LINTING・TESTING…）を表す。**コマンドの原文は運ばない**（シークレットを含む行を
+  // 画面とDBへ出さないため）。理由コードと同じく、画面に出す文言はissue-deck側に置く。
+  //
+  // **時刻を2つ持つ。** stepAtは「そのステップに入った時刻」で、同じコードが続く間は動かない
+  // （画面の「実装中・2分」がここから出る）。stepSeenAtは「最後にそのステップのツールが走った
+  // 時刻」で、ツールの実行ごとに動く。
+  //
+  // 2つ要るのは、**stepSeenAtがactivityAtより新しいかどうかが「いま走っているか」の唯一の
+  // 手掛かり**だから。activityは`Stop`のたびにRESPONDEDへ戻る一方、次のturnが始まったことを
+  // 知らせるフックは無く（`WORKING`は承認に答えた直後しか飛ばない）、そのままだと走っている
+  // 最中のセッションが「応答を終えています」と出る。stepAtだけで代用すると、同じ作業が続く
+  // turnをまたいだときに時刻が動かず、動いているのに止まって見える。
+  //
+  // NULLは「申告が無い」で、pollerが古い場合と、フックがまだ1つも飛んでいない場合の両方がある
+  step       String?
+  stepAt     DateTime?
+  stepSeenAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
