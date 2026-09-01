@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { MAIN_BRANCH } from "@/lib/branch-flow";
+import { isDevelopContentInMain, MAIN_BRANCH } from "@/lib/branch-flow";
 import { db } from "@/lib/db";
 import { findOpenDeployFailureIssue } from "@/lib/deploy-failure-store";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { lookupBranchRefs } from "@/lib/github/branches-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import {
   fetchClosedPullRequestsForBase,
@@ -29,7 +30,8 @@ export function GET(request: NextRequest) {
  * 取り直す**ため（`hooks/use-pull-request-deploy-status.ts`）。詳細に相乗りさせると、その
  * 取り直しのたびに本文・コメント・レビューまで取り直すことになる。
  *
- * 消費するのはGitHub REST 3回（PR単体・mainへのクローズ済みPR一覧・`deploy.yml`の最新実行）。
+ * 消費するのはGitHub REST 3回（PR単体・mainへのクローズ済みPR一覧・`deploy.yml`の最新実行）と、
+ * 「本番未反映」と判定したときだけのGraphQL 1回（`main...develop`の比較。#2704）。
  * **マージ済みのPRでなければPR単体の1回で打ち切る**（未マージのPRに出す状態が無いため）。
  * 後ろ2つはETagの条件付きGETを通すので、状況が動いていない間はレート制限を消費しない。
  */
@@ -85,21 +87,35 @@ async function handleGET(request: NextRequest) {
         mergedAt: item.merged_at,
       }));
 
+    const input = {
+      pullRequest: {
+        number: pullRequest.number,
+        title: pullRequest.title,
+        baseRef: pullRequest.base.ref,
+        merged: pullRequest.merged,
+        mergedAt: pullRequest.merged_at,
+      },
+      releases,
+      deployRun,
+      now: Date.now(),
+    };
+    let status = resolvePullRequestDeployStatus(input);
+
+    // 「本番未反映」と言い切る前に、developの中身がmainに入りきっていないかだけ確かめる
+    // （#2704）。back-mergeのように、コミットはdevelopにしか無いが中身はmainにある状態が
+    // あるため。**この判定が要るときにしか取りに行かない**（GraphQL 1回・ブランチの存在確認は
+    // 空で呼ぶ）ので、既に版が決まっているPRでは消費が増えない。
+    if (
+      status?.kind === "develop-only" &&
+      (await isDevelopContentAlreadyInMain(owner, repo, token))
+    ) {
+      status = resolvePullRequestDeployStatus({ ...input, developContentInMain: true });
+    }
+
     const response: PullRequestDeployStatusResponse = {
       // 失敗しているときにだけ画面が使う（#2236）。DBを1回引くだけでGitHub APIは増えない。
       failureIssue: await findOpenDeployFailureIssue(repository.fullName),
-      status: resolvePullRequestDeployStatus({
-        pullRequest: {
-          number: pullRequest.number,
-          title: pullRequest.title,
-          baseRef: pullRequest.base.ref,
-          merged: pullRequest.merged,
-          mergedAt: pullRequest.merged_at,
-        },
-        releases,
-        deployRun,
-        now: Date.now(),
-      }),
+      status,
       fetchedAt: new Date().toISOString(),
     };
     return NextResponse.json(response);
@@ -109,6 +125,26 @@ async function handleGET(request: NextRequest) {
       { error: "github_api_error", message: githubApiErrorMessage(error) },
       { status: 502 },
     );
+  }
+}
+
+/**
+ * `develop`の中身が`main`に入りきっているか（#2704）。取得に失敗したらfalse。
+ *
+ * **ここで落ちてもバッジ全体を落とさない。** 判定できなければ従来どおり「本番未反映」を
+ * 出せばよく、この確認のために502を返す方が害が大きい。
+ */
+async function isDevelopContentAlreadyInMain(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<boolean> {
+  try {
+    const { developVsMain } = await lookupBranchRefs(owner, repo, [], token);
+    return isDevelopContentInMain(developVsMain);
+  } catch (error) {
+    console.warn(`[GET /api/pull-requests/deploy-status] compare ${owner}/${repo}:`, error);
+    return false;
   }
 }
 

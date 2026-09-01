@@ -74,6 +74,24 @@ describe("resolvePullRequestDeployStatus", () => {
     });
   });
 
+  // #2704。back-merge（`main`の内容へ`develop`を揃え直すPR）は、コミットがdevelopにしか
+  // 無いのに中身はすべてmainにある。運び手が見つからないだけで「本番未反映」と言わない
+  it("developの中身がmainに入りきっていれば、運び手が無くてもdeployed（版は出さない）", () => {
+    const status = resolvePullRequestDeployStatus({
+      pullRequest: target({ mergedAt: "2026-08-16T11:30:00Z" }),
+      releases: [release()],
+      deployRun: deployRun(),
+      developContentInMain: true,
+      now: NOW,
+    });
+    expect(status).toEqual({
+      kind: "deployed",
+      version: null,
+      releasePullRequestNumber: null,
+      deployRunUrl: null,
+    });
+  });
+
   it("マージ後の最初のリリースが運び、そのデプロイが成功していればdeployed（版とログURL付き）", () => {
     const status = resolvePullRequestDeployStatus({
       pullRequest: target(),
