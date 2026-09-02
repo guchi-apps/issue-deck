@@ -7,7 +7,9 @@ import {
   medianMs,
   resolveJobState,
   summarizeWorkflowRunProgress,
+  toCiRunProgress,
   toWorkflowRunJobView,
+  type RollupCiCheckLike,
   type WorkflowRunJobView,
   type WorkflowRunProgress,
 } from "@/lib/workflow-run-progress";
@@ -209,6 +211,93 @@ describe("summarizeWorkflowRunProgress", () => {
       start,
     );
     expect(summary.failed).toBe(true);
+  });
+});
+
+describe("toCiRunProgress", () => {
+  const start = Date.parse("2026-09-02T00:00:00.000Z");
+
+  function check(overrides: Partial<RollupCiCheckLike> = {}): RollupCiCheckLike {
+    return {
+      name: "lint-and-build",
+      status: "completed",
+      conclusion: "success",
+      startedAt: "2026-09-02T00:00:00.000Z",
+      completedAt: "2026-09-02T00:01:00.000Z",
+      htmlUrl: "https://github.com/o/r/actions/runs/10/job/1",
+      runId: 10,
+      ...overrides,
+    };
+  }
+
+  it("チェックが1件も無ければ内訳を作らない", () => {
+    expect(toCiRunProgress([], null, start)).toBeNull();
+  });
+
+  it("行はチェック一覧（＝CIバッジと同じ母集団）から作る", () => {
+    const result = toCiRunProgress(
+      [
+        check(),
+        check({
+          name: "version-tag-check",
+          status: "in_progress",
+          conclusion: null,
+          completedAt: null,
+          runId: 20,
+          htmlUrl: "https://github.com/o/r/actions/runs/20/job/2",
+        }),
+      ],
+      null,
+      start,
+    );
+    expect(result?.jobs.map((job) => [job.name, job.state])).toEqual([
+      ["lint-and-build", "success"],
+      ["version-tag-check", "running"],
+    ]);
+    expect(result?.status).toBe("in_progress");
+  });
+
+  it("複数のワークフローにまたがるときは見込みを出さない（1本ぶんでは必ず短く出る）", () => {
+    const run = progress({ runId: 10, estimateMs: 300_000 });
+    const spanning = toCiRunProgress(
+      [check(), check({ name: "version-tag-check", runId: 20 })],
+      run,
+      start,
+    );
+    expect(spanning?.estimateMs).toBeNull();
+
+    const single = toCiRunProgress([check(), check({ name: "docs-sync-check" })], run, start);
+    expect(single?.estimateMs).toBe(300_000);
+  });
+
+  it("実行中のジョブの現在ステップは、取得したrunのジョブから補う", () => {
+    const run = progress({
+      runId: 10,
+      jobs: [
+        {
+          name: "lint-and-build",
+          state: "running",
+          currentStep: "Unit tests",
+          startedAt: "2026-09-02T00:00:00.000Z",
+          completedAt: null,
+          baselineMs: 260_000,
+          htmlUrl: null,
+        },
+      ],
+    });
+    const result = toCiRunProgress(
+      [check({ status: "in_progress", conclusion: null, completedAt: null })],
+      run,
+      start,
+    );
+    expect(result?.jobs[0].currentStep).toBe("Unit tests");
+    expect(result?.jobs[0].baselineMs).toBe(260_000);
+  });
+
+  it("失敗したチェックがあれば全体を失敗として扱う", () => {
+    const result = toCiRunProgress([check({ conclusion: "failure" })], null, start);
+    expect(result?.status).toBe("completed");
+    expect(result?.conclusion).toBe("failure");
   });
 });
 

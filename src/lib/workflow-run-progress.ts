@@ -204,6 +204,91 @@ export function summarizeWorkflowRunProgress(
 }
 
 /**
+ * CIのチェック一覧から、内訳パネルが読める形（`WorkflowRunProgress`）を組み立てる（#2777）。
+ *
+ * **CIの内訳は、run 1本のジョブではなくチェック一覧から作る。** `CiStateBadge`が表しているのは
+ * `ci.yml`単体ではなく運用自動化を除いた全チェックの集約で、mainへのリリースPRでは
+ * `version-tag-check.yml`のジョブも入る。run 1本だけを開くと「バッジは失敗・内訳は全部成功」
+ * という食い違いを作れるため、**バッジと同じ母集団**をそのまま行にする。
+ *
+ * `run`（`GET /api/workflow-runs`の結果）は補助で、2つだけ足す。
+ * - 実行中のジョブの**現在ステップ名**（チェックの側からは分からない）
+ * - 全体の**見込み時間**。ただし**チェックが1本のrunに収まっているときだけ**——複数の
+ *   ワークフローにまたがっているのに1本ぶんの見込みを出すと、必ず短く出る。
+ */
+export function toCiRunProgress(
+  checks: readonly RollupCiCheckLike[],
+  run: WorkflowRunProgress | null,
+  now: number,
+): WorkflowRunProgress | null {
+  if (checks.length === 0) return null;
+
+  const jobByName = new Map((run?.jobs ?? []).map((job) => [job.name, job]));
+  const jobs: WorkflowRunJobView[] = checks.map((check) => {
+    const job = jobByName.get(check.name);
+    return {
+      name: check.name,
+      state: resolveCheckState(check),
+      currentStep: job?.currentStep ?? null,
+      startedAt: check.startedAt,
+      completedAt: check.completedAt,
+      baselineMs: job?.baselineMs ?? null,
+      htmlUrl: check.htmlUrl,
+    };
+  });
+
+  const isRunning = jobs.some((job) => job.state === "queued" || job.state === "running");
+  const failed = jobs.some((job) => job.state === "failure");
+  const startedAtMs = Math.min(
+    ...jobs.map((job) => (job.startedAt ? Date.parse(job.startedAt) : Number.POSITIVE_INFINITY)),
+  );
+  const completedAtMs = Math.max(
+    ...jobs.map((job) => (job.completedAt ? Date.parse(job.completedAt) : Number.NEGATIVE_INFINITY)),
+  );
+
+  // 見込みを出せるのは、チェックが1本のrunに収まっていて、そのrunの実績を取れているときだけ
+  const runIds = new Set(checks.map((check) => check.runId));
+  const singleRunId = runIds.size === 1 ? [...runIds][0] : null;
+  const estimateMs = singleRunId !== null && run?.runId === singleRunId ? run.estimateMs : null;
+
+  return {
+    runId: run?.runId ?? singleRunId ?? 0,
+    htmlUrl: run?.htmlUrl ?? checks.find((check) => check.htmlUrl)?.htmlUrl ?? null,
+    workflowName: runIds.size === 1 ? (run?.workflowName ?? null) : null,
+    status: isRunning ? "in_progress" : "completed",
+    conclusion: isRunning ? null : failed ? "failure" : "success",
+    startedAt: new Date(Number.isFinite(startedAtMs) ? startedAtMs : now).toISOString(),
+    updatedAt: new Date(Number.isFinite(completedAtMs) ? completedAtMs : now).toISOString(),
+    runAttempt: 1,
+    jobs,
+    estimateMs,
+  };
+}
+
+/** 内訳の行にできるチェック（`RollupCiCheck`。循環importを避けるため構造で受ける） */
+export type RollupCiCheckLike = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  htmlUrl: string | null;
+  runId: number | null;
+};
+
+/** チェックのstatus・conclusionを、ジョブと同じ語彙へ畳む */
+function resolveCheckState(check: RollupCiCheckLike): WorkflowRunJobState {
+  if (check.status === "queued" || check.status === "waiting" || check.status === "requested") {
+    return "queued";
+  }
+  if (check.status !== "completed") return "running";
+  if (check.conclusion === "success") return "success";
+  if (check.conclusion === "skipped" || check.conclusion === "neutral") return "skipped";
+  if (check.conclusion === "cancelled") return "cancelled";
+  return "failure";
+}
+
+/**
  * GitHubの実行ログURL（`https://github.com/o/r/actions/runs/123` や
  * `.../runs/123/job/456`）からrun idを取り出す（#2777）。
  *

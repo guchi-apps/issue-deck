@@ -116,6 +116,48 @@ describe("WorkflowRunProgressPanel", () => {
     ).toBeTruthy();
   });
 
+  it("CIのチェック一覧を渡すと、runではなくチェックを行として並べる（#2777）", async () => {
+    // 取得したrunは`ci.yml`ぶんだけでも、行はCIバッジと同じ母集団（`version-tag-check`も）になる
+    stubFetch({ progress: progress({ runId: 10, workflowName: "CI" }) });
+    render(
+      <WorkflowRunProgressPanel
+        repositoryFullName="guchi-apps/issue-deck"
+        runId={10}
+        open
+        title="CIの内訳"
+        checks={[
+          {
+            name: "lint-and-build",
+            status: "completed",
+            conclusion: "success",
+            startedAt: "2026-09-02T00:00:00.000Z",
+            completedAt: "2026-09-02T00:03:00.000Z",
+            htmlUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/10/job/1",
+            runId: 10,
+          },
+          {
+            name: "version-tag-check",
+            status: "in_progress",
+            conclusion: null,
+            startedAt: "2026-09-02T00:00:30.000Z",
+            completedAt: null,
+            htmlUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/20/job/2",
+            runId: 20,
+          },
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("lint-and-build")).toBeTruthy());
+    expect(screen.getByText("version-tag-check")).toBeTruthy();
+    // runの`build`・`deploy`（`ci.yml`のジョブ）は行として出さない
+    expect(screen.queryByText("deploy")).toBeNull();
+    // 複数のワークフローにまたがるので見込みは出さない
+    expect(
+      screen.getByText("成功した実行の実績が足りないため、見込みは出していません。"),
+    ).toBeTruthy();
+  });
+
   it("見込みを超えたら、残り時間ではなく超過として出す", async () => {
     stubFetch({ progress: progress({ estimateMs: 120_000 }) });
     render(

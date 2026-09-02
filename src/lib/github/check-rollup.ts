@@ -22,6 +22,33 @@ import { extractRunIdFromDetailsUrl } from "@/lib/workflow-run-progress";
 export type RollupCheck = { status: string; conclusion: string | null };
 
 /**
+ * CIの内訳に並べるチェック1件（#2777）。
+ *
+ * **`RollupCheck`（状態の集約用）とは別に持つ。** あちらは「CIが通ったか」を決めるための
+ * 最小限で、名前も時刻も捨てている。こちらは画面に並べるためのもので、
+ * **CIバッジ（`CiStateBadge`）が数えているのと同じ母集団**をそのまま運ぶ。
+ *
+ * **run 1本のジョブで代用しない。** mainへのリリースPRでは`ci.yml`のほかに
+ * `version-tag-check.yml`のジョブも集約に入る（`NON_CI_WORKFLOW_FILES`が外すのは運用自動化
+ * だけ）ため、1本のrunだけを開くと、バッジは「CI失敗」なのに内訳は全部成功、という
+ * 食い違いを作れる。
+ */
+export type RollupCiCheck = {
+  /** ジョブ名（`review / claude-review`の右側だけ。`jobNameOf`と同じ切り出し） */
+  name: string;
+  /** queued | in_progress | completed など（小文字） */
+  status: string;
+  /** success | failure | skipped など（小文字）。未完了ならnull */
+  conclusion: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  /** 実行ログのURL。取れなければnull */
+  htmlUrl: string | null;
+  /** そのチェックが属するrunのid。`htmlUrl`から読めなければnull */
+  runId: number | null;
+};
+
+/**
  * CI状態の集約から外すワークフローのファイル名（#1799）。
  *
  * **これらはCIではなく、issue-deck自身が各リポジトリへ配っている運用自動化**（ラベル付け・
@@ -206,6 +233,11 @@ export type CheckRollup = {
    * 読めなかったときはnullにし、**内訳を出さない側へ倒す**（従来どおりバッジだけになる）。
    */
   ciRunId: number | null;
+  /**
+   * CIの内訳に並べるチェック一覧（#2777）。CI状態と同じ母集団で、同じ1回のGraphQLから作る。
+   * 1件ずつ見られない（`CONTEXTS_PAGE_SIZE`超え）ときは空。
+   */
+  ciChecks: RollupCiCheck[];
 };
 
 /** 1回のクエリで引くチェックの上限。GraphQLの`first`の上限値でもある */
@@ -230,6 +262,8 @@ const ROLLUP_FIELDS = `
         detailsUrl
         status
         conclusion
+        startedAt
+        completedAt
         checkSuite {
           workflowRun {
             workflow {
@@ -320,6 +354,10 @@ type RollupContextNode = {
   status?: string | null;
   /** CheckRun。`SUCCESS` / `FAILURE` / `CANCELLED` / `SKIPPED`など */
   conclusion?: string | null;
+  /** CheckRun。開始時刻（ISO8601）。#2777で所要時間を出すために取る */
+  startedAt?: string | null;
+  /** CheckRun。完了時刻（ISO8601）。未完了ならnull（#2777） */
+  completedAt?: string | null;
   /** StatusContext（外部CIのcommit status）。`SUCCESS` / `PENDING` / `FAILURE`など */
   state?: string | null;
   /** CheckRun。GitHub Actions発なら`/owner/repo/actions/workflows/ci.yml`が入る（#1799） */
@@ -502,6 +540,27 @@ function toCiRunId(nodes: RollupContextNode[]): number | null {
   return extractRunIdFromDetailsUrl((failed ?? running ?? checkRuns[0])?.detailsUrl);
 }
 
+/**
+ * 画面へ並べるチェック一覧を作る（#2777）。**GitHub Actions発のcheck-runだけ**を並べる。
+ *
+ * 外部CIのcommit status（`StatusContext`）は名前も時刻も持たないため行として出せない。
+ * CI状態の集約（`checks`）からは外さないので、**バッジは通っていないのに内訳の行は全部成功**
+ * に見えることがありうる。それを避けるため、`StatusContext`が混ざっているときは
+ * 内訳そのものを出さない（空を返す）。
+ */
+function toRollupCiChecks(nodes: RollupContextNode[]): RollupCiCheck[] {
+  if (nodes.some((node) => node.__typename !== "CheckRun")) return [];
+  return nodes.map((node) => ({
+    name: jobNameOf(node) || (node.name ?? "(名前なし)"),
+    status: (node.status ?? "").toLowerCase(),
+    conclusion: node.conclusion ? node.conclusion.toLowerCase() : null,
+    startedAt: node.startedAt ?? null,
+    completedAt: node.completedAt ?? null,
+    htmlUrl: node.detailsUrl ?? null,
+    runId: extractRunIdFromDetailsUrl(node.detailsUrl),
+  }));
+}
+
 function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
   return nodes.map(toRollupCheck).filter((check): check is RollupCheck => check !== null);
 }
@@ -517,14 +576,26 @@ function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
  */
 function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
   if (!rollup) {
-    return { state: null, checks: [], mergeJudgement: MERGE_JUDGEMENT_UNKNOWN, ciRunId: null };
+    return {
+      state: null,
+      checks: [],
+      mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+      ciRunId: null,
+      ciChecks: [],
+    };
   }
 
   const state = rollup.state ? rollup.state.toLowerCase() : null;
   if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
     // 1件ずつ見られないためGitHubの集約値（＝運用自動化も含む）へ縮退する。
     // 判定の進み具合も1件ずつ見ないと分からないため`unknown`にする（#1968）。
-    return { state, checks: null, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN, ciRunId: null };
+    return {
+      state,
+      checks: null,
+      mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+      ciRunId: null,
+      ciChecks: [],
+    };
   }
   const ciNodes = rollup.contexts.nodes.filter(isCiCheck);
   const ciChecks = toRollupChecks(ciNodes);
@@ -534,6 +605,7 @@ function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
     checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(rollup.contexts.nodes),
     mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
     ciRunId: toCiRunId(countedNodes),
+    ciChecks: toRollupCiChecks(countedNodes),
   };
 }
 

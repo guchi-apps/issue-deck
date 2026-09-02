@@ -3031,9 +3031,18 @@ function during render`）。「期限を過ぎたら元に戻す」のような
 - **キュー待ちのジョブの`started_at`は開始前の時刻**（GitHubがキュー投入時刻を入れる）。そのまま
   経過時間にすると、待っているだけのジョブが何分も走っているように見える（`jobElapsedMs`が
   `queued`を除いているのはこのため）。
-- **CIの内訳のrun idは`statusCheckRollup`の`detailsUrl`から取る**（`extractRunIdFromDetailsUrl`）。
-  CI状態と同じ1回のGraphQLに既に含まれている値なので、**内訳のためにGitHub APIは増えない**。
-  読めなければnullにし、内訳を出さない側（従来どおりバッジだけ）へ倒す。
+- **CIの内訳の行は、run 1本のジョブではなく`statusCheckRollup`のチェック一覧から作る**
+  （`ciChecks` → `toCiRunProgress`）。`CiStateBadge`が表しているのは`ci.yml`単体ではなく
+  **運用自動化を除いた全チェックの集約**で、mainへのリリースPRでは`version-tag-check.yml`の
+  ジョブも入る。run 1本だけを開くと「バッジは失敗・内訳は全部成功」という食い違いを作れる。
+  チェックの`name`・`detailsUrl`・`startedAt`・`completedAt`は**CI状態と同じ1回のGraphQL**で
+  取れるので、内訳のためにGitHub APIは増えない（run側は現在ステップと見込みを足すためだけに使う）。
+- **外部CIのcommit status（`StatusContext`）が混ざるときは内訳を出さない。** 名前も時刻も
+  持たないため行にできず、並べると「バッジは失敗なのに行は全部成功」に見える。
+- **見込みを出せるのは、チェックが1本のrunに収まっているときだけ。** 複数のワークフローに
+  またがっているのに1本ぶんの中央値を出すと、必ず短く出る。
+- **run idは`detailsUrl`から取る**（`extractRunIdFromDetailsUrl`）。読めなければnullにし、
+  内訳を出さない側（従来どおりバッジだけ）へ倒す。
 - **内訳の取得はパネルを開いている間だけ。** 閉じている間は1回も呼ばない。過去の実績は
   ワークフロー単位で10分キャッシュする（[`lib/github/workflow-run-baseline.ts`](../src/lib/github/workflow-run-baseline.ts)）。
 

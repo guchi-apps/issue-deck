@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import {
   jobElapsedMs,
   summarizeWorkflowRunProgress,
+  toCiRunProgress,
+  type RollupCiCheckLike,
   type WorkflowRunJobState,
   type WorkflowRunJobView,
 } from "@/lib/workflow-run-progress";
@@ -26,11 +28,17 @@ import {
 type WorkflowRunProgressPanelProps = {
   /** `owner/repo` */
   repositoryFullName: string;
-  runId: number;
+  /** 内訳を取りにいく実行。読めていなければnull（`checks`だけで描く） */
+  runId: number | null;
   /** パネルが開いているか。falseの間は取得もしない */
   open: boolean;
   /** 見出し（「本番デプロイの内訳」「CIの内訳」） */
   title: string;
+  /**
+   * CIのチェック一覧（#2777）。渡すと**行はこちらを正とし**、`runId`の実行は
+   * 現在ステップと見込み時間を足すためだけに使う。理由は`toCiRunProgress`を参照。
+   */
+  checks?: readonly RollupCiCheckLike[];
   className?: string;
 };
 
@@ -98,26 +106,31 @@ export function WorkflowRunProgressPanel({
   runId,
   open,
   title,
+  checks,
   className,
 }: WorkflowRunProgressPanelProps) {
-  const { progress, isLoading, error } = useWorkflowRunProgress(repositoryFullName, runId, open);
-  const isRunning = progress !== null && progress.status !== "completed";
-  // 実行中だけ1秒ごとの時計を回す（終わった実行では時間が動かないので止める）
-  const tickedNow = useNow(TICK_INTERVAL_MS, open && isRunning);
+  const { progress: run, isLoading, error } = useWorkflowRunProgress(repositoryFullName, runId, open);
+  // 描画中に`Date.now()`を呼ばず、時計から受け取る（docs/code-map.md「時刻を見る判定は`now`を
+  // 引数で受け取る」）。**開いている間は実行が終わっていても回す**——止めると、完了済みの実行を
+  // 開いたときに時刻が来ないまま何も出せなくなる。
+  const tickedNow = useNow(TICK_INTERVAL_MS, open);
 
   if (!open) return null;
 
-  if (!progress) {
+  const progress =
+    checks && checks.length > 0 ? toCiRunProgress(checks, run, tickedNow ?? 0) : run;
+
+  if (!progress || tickedNow === null) {
     return (
       <div
         className={cn("rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground", className)}
       >
-        {error ?? (isLoading ? "実行の内訳を取得しています…" : "実行の内訳がありません")}
+        {error ?? (isLoading || tickedNow === null ? "実行の内訳を取得しています…" : "実行の内訳がありません")}
       </div>
     );
   }
 
-  const now = tickedNow ?? Date.parse(progress.updatedAt);
+  const now = tickedNow;
   const summary = summarizeWorkflowRunProgress(progress, now);
 
   return (

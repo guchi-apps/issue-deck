@@ -343,8 +343,6 @@ function DeployStateBadge({
   deploy,
   compact = false,
   linkToRun = true,
-  expanded,
-  onToggle,
 }: {
   deploy: BranchFlowDeployState | null;
   /** 畳んだ1行向けの短い文言にする */
@@ -354,16 +352,6 @@ function DeployStateBadge({
    * （ボタンの中にリンクを入れられない）。
    */
   linkToRun?: boolean;
-  /** 内訳パネルが開いているか（#2777）。`onToggle`を渡したときだけ意味を持つ */
-  expanded?: boolean;
-  /**
-   * 押したときに内訳パネルを開閉する（#2777）。渡すとリンクではなく開閉ボタンになる。
-   *
-   * **リンクを潰してよいのは、開いたパネルが「GitHubで実行ログを開く」を必ず持つから。**
-   * 行き先を1つ減らしているわけではなく、1回押す手数と引き換えに、GitHubへ移らなくても
-   * どのジョブで止まっているかが読めるようになる。
-   */
-  onToggle?: () => void;
 }) {
   if (!deploy) return null;
 
@@ -389,25 +377,6 @@ function DeployStateBadge({
     </span>
   );
 
-  if (onToggle) {
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="inline-flex shrink-0 items-center gap-0.5 rounded-full hover:opacity-80"
-        title={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
-      >
-        {content}
-        {expanded ? (
-          <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
-        ) : (
-          <ChevronRight className="size-3 text-muted-foreground" aria-hidden="true" />
-        )}
-      </button>
-    );
-  }
-
   // 実行ログはアプリ内に対応する画面が無いので別タブで開く（`release-progress.tsx`と同じ）
   return deploy.htmlUrl && linkToRun ? (
     <a
@@ -421,6 +390,32 @@ function DeployStateBadge({
     </a>
   ) : (
     content
+  );
+}
+
+/**
+ * 実行の内訳を開閉する小さなトリガー（#2777）。
+ *
+ * **状態のピル自体は実行ログへのリンクのまま残す。** ピルの押下を開閉へ置き換えると、
+ * これまで1回で開けていたGitHubの実行ログが開けなくなる。行き先を減らさずに内訳を足すため、
+ * 開閉は隣の独立したボタンが持つ。
+ */
+function RunDetailToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
+      title={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+      aria-label={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+    >
+      {expanded ? (
+        <ChevronDown className="size-3.5" aria-hidden="true" />
+      ) : (
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+      )}
+    </button>
   );
 }
 
@@ -976,11 +971,12 @@ function ReleaseGroupHeader({
           {released ? (
             <>
               {!inProduction && (
-                <DeployStateBadge
-                  deploy={group.deploy}
-                  expanded={runDetailOpen}
-                  onToggle={toggleRunDetail}
-                />
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
               )}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
@@ -988,11 +984,12 @@ function ReleaseGroupHeader({
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && (
-                <DeployStateBadge
-                  deploy={group.deploy}
-                  expanded={runDetailOpen}
-                  onToggle={toggleRunDetail}
-                />
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
               )}
             </>
           ) : waitingUserMerge ? (

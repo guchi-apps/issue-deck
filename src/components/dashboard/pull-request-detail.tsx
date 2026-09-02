@@ -186,11 +186,11 @@ export function PullRequestDetail({
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
-  // CIの内訳を開けるのは、run idが読めていて、CI状態のバッジを出しているPRだけ（#2777）
-  const ciRunId =
-    !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft
-      ? pullRequest.ciRunId
-      : null;
+  // CIの内訳を開けるのは、CI状態のバッジを出しているPR（＝チェックを取っているPR）だけ（#2777）。
+  // 行の元はチェック一覧で、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
+  const showsCiBadge = !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft;
+  const ciChecks = showsCiBadge ? pullRequest.ciChecks : [];
+  const ciRunId = showsCiBadge ? pullRequest.ciRunId : null;
   const ciDetailOpen = ciDetailPullRequestId === pullRequest.id;
 
   return (
@@ -260,7 +260,7 @@ export function PullRequestDetail({
               </span>
             ) : pullRequest.draft ? (
               <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
-            ) : ciRunId !== null ? (
+            ) : ciChecks.length > 0 ? (
               // 押すとジョブ単位の内訳が開く（#2777）。「CI実行中」の1語から、どのジョブで
               // 止まっているか・あと何分かまで、この画面のまま辿れるようにする
               <button
@@ -317,12 +317,13 @@ export function PullRequestDetail({
           </div>
 
           {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
-          {ciRunId !== null && (
+          {ciChecks.length > 0 && (
             <WorkflowRunProgressPanel
               repositoryFullName={pullRequest.repositoryFullName}
               runId={ciRunId}
               open={ciDetailOpen}
               title="CIの内訳"
+              checks={ciChecks}
             />
           )}
 

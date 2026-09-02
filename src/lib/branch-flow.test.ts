@@ -42,6 +42,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
   const baseRef = overrides.baseRef ?? "develop";
   return {
     ciRunId: null,
+    ciChecks: [],
     id: `${REPO}#${overrides.number ?? 1}`,
     repositoryFullName: REPO,
     repositoryPrivate: false,

@@ -11,6 +11,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
   const number = overrides.number ?? 1;
   return {
     ciRunId: null,
+    ciChecks: [],
     id: `${repositoryFullName}#${number}`,
     repositoryFullName,
     repositoryPrivate: false,

@@ -9,6 +9,7 @@ import type { PullRequestSummary } from "@/types/pull-request";
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
     ciRunId: null,
+    ciChecks: [],
     id: "guchi-apps/issue-deck#2075",
     repositoryFullName: "guchi-apps/issue-deck",
     repositoryPrivate: false,

@@ -286,7 +286,7 @@ function toOpenPullRequest(
   // CI状態・コンフリクト有無（#1742）・自動マージ可否の判定の進み具合（#1968）は前段で
   // まとめて取ってある（#1962）。draftと、取得できなかったPRはここに無いため未取得
   // （`unknown` / `null`）のままになる。
-  const { ciState, mergeable, mergeJudgement, ciRunId } =
+  const { ciState, mergeable, mergeJudgement, ciRunId, ciChecks } =
     ciStates.get(pullRequestRollupKey(repository.ownerLogin, repository.name, pullRequest.number)) ??
     UNKNOWN_PULL_REQUEST_CI_STATE;
 
@@ -297,6 +297,7 @@ function toOpenPullRequest(
     mergeable,
     mergeJudgement,
     ciRunId,
+    ciChecks,
   });
 }
 

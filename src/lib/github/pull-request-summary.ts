@@ -6,7 +6,7 @@ import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repa
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
 import { classifyPullRequest, extractLinkedIssueNumbers } from "@/lib/pull-request-list";
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestCiCheck, PullRequestSummary } from "@/types/pull-request";
 
 /**
  * GitHub APIのPRを画面用の`PullRequestSummary`へ変換する。
@@ -38,6 +38,8 @@ export function toPullRequestSummary(
     ciState: CiState;
     /** CIの内訳を開くためのrun id（#2777）。取得していない経路では省略＝`null` */
     ciRunId?: number | null;
+    /** CIの内訳に並べるチェック一覧（#2777）。取得していない経路では省略＝空 */
+    ciChecks?: PullRequestCiCheck[];
     /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
     mergeable?: boolean | null;
     /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
@@ -82,6 +84,7 @@ export function toPullRequestSummary(
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
     ciRunId: options.ciRunId ?? null,
+    ciChecks: options.ciChecks ?? [],
     mergeJudgement: options.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
