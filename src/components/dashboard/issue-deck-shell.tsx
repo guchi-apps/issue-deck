@@ -42,7 +42,9 @@ import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-det
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
+import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
+import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
   SESSION_USAGE_PERIODS,
   SessionUsagePanel,
@@ -52,6 +54,7 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useSessionUsage } from "@/hooks/use-session-usage";
+import { useReleaseHistory } from "@/hooks/use-release-history";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useSnoozes } from "@/hooks/use-snoozes";
@@ -131,6 +134,7 @@ import {
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
+import { selectVisibleReleaseHistory } from "@/lib/release-history";
 import {
   applyOptimisticMerges,
   computePullRequestNavCounts,
@@ -188,6 +192,7 @@ export function IssueDeckShell({
     selectFlowPane,
     selectPreviewPane,
     selectUsagePane,
+    selectReleaseHistoryPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -268,6 +273,7 @@ export function IssueDeckShell({
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
     selectPreview,
+    selectReleaseHistory,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -529,6 +535,9 @@ export function IssueDeckShell({
   // 「AI使用量」画面（#2504）。開いている間だけ取得する（材料はサブPCのpollerが5分ごとに
   // 押し込む記録で、開いていない間に取りに行っても新しくならない）。
   const isUsagePaneActive = filters.pane === "usage" || mobileScreen.kind === "usage";
+  // 「リリース履歴」画面（#2726）。開いている間だけ取得する（GitHub Releaseは頻繁に増えない）。
+  const isReleaseHistoryPaneActive =
+    filters.pane === "releases" || mobileScreen.kind === "release-history";
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「マージ待ち」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
@@ -1093,6 +1102,15 @@ export function IssueDeckShell({
     ? storedUsageDays
     : 7;
   const sessionUsage = useSessionUsage(isUsagePaneActive, usageDays);
+
+  // リリース履歴（#2726）。取得はこの画面を開いている間だけ。非表示リポジトリぶんは
+  // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
+  const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
+  const visibleReleaseHistoryEntries = useMemo(
+    () =>
+      releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
+    [releaseHistory.entries, repositories],
+  );
   // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
   // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
   // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
@@ -1471,6 +1489,7 @@ export function IssueDeckShell({
                   onSelectPullRequests={selectPullRequests}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
+                  onSelectReleaseHistory={selectReleaseHistory}
                   onSelectRepos={selectRepos}
                   /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
                      ——開いた先の一覧が既定で非表示ぶんを畳むため、含めるとホームの数字と
@@ -1489,6 +1508,16 @@ export function IssueDeckShell({
                   jobs={dispatch.jobs}
                   isLoaded={dispatch.isLoaded}
                   onRequestPreview={dispatch.requestPreview}
+                  onBack={goBack}
+                />
+              )}
+
+              {mobileScreen.kind === "release-history" && (
+                <MobileReleaseHistoryScreen
+                  entries={visibleReleaseHistoryEntries}
+                  isLoading={releaseHistory.isLoading}
+                  error={releaseHistory.error}
+                  onRefresh={releaseHistory.refresh}
                   onBack={goBack}
                 />
               )}
@@ -1733,6 +1762,7 @@ export function IssueDeckShell({
                 onSelectPreview={selectPreviewPane}
                 previewRunning={previewRunning}
                 onSelectUsage={selectUsagePane}
+                onSelectReleaseHistory={selectReleaseHistoryPane}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
@@ -1772,6 +1802,18 @@ export function IssueDeckShell({
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
                   claudeApiUsage={claudeApiUsage}
+                />
+              </div>
+            </div>
+          ) : filters.pane === "releases" ? (
+            /* PC: リリース履歴（#2726）。「AI使用量」と同じく中央〜右を1カラムで使う */
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-3xl">
+                <ReleaseHistoryPanel
+                  entries={visibleReleaseHistoryEntries}
+                  isLoading={releaseHistory.isLoading}
+                  error={releaseHistory.error}
+                  onRefresh={releaseHistory.refresh}
                 />
               </div>
             </div>

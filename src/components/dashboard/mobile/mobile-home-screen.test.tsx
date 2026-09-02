@@ -125,6 +125,7 @@ function renderHome(
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
       onSelectPreview={() => {}}
+      onSelectReleaseHistory={() => {}}
       previewRunning={false}
       onSelectRepos={() => {}}
       repositoryCount={0}
@@ -174,6 +175,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "リポジトリ",
       "コードレビュー",
       "確認環境",
+      "リリース履歴",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
     ]);
@@ -256,6 +258,7 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
+        onSelectReleaseHistory={() => {}}
         previewRunning={false}
         onSelectRepos={() => {}}
         repositoryCount={0}
@@ -483,6 +486,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
+        onSelectReleaseHistory={() => {}}
         previewRunning={false}
         onSelectRepos={() => {}}
         repositoryCount={0}

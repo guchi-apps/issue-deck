@@ -1,6 +1,13 @@
 "use client";
 
-import { FolderGit2, Loader2, MonitorPlay, Rocket, Settings } from "lucide-react";
+import {
+  FolderGit2,
+  History,
+  Loader2,
+  MonitorPlay,
+  Rocket,
+  Settings,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -76,6 +83,8 @@ type MobileHomeScreenProps = {
    * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
    */
   previewRunning: boolean;
+  /** 「リリース履歴」画面を開く（#2726）。「ブランチ」「確認環境」と同じくメニューへ直接1行として置く */
+  onSelectReleaseHistory: () => void;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -160,6 +169,7 @@ export function MobileHomeScreenView({
   onSelectPullRequests,
   onSelectPreview,
   previewRunning,
+  onSelectReleaseHistory,
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -469,6 +479,15 @@ export function MobileHomeScreenView({
                     ? "確認環境が動いています"
                     : "developの最新をサブPCで動かして画面で確かめる"
                 }
+              />
+              {/* リリース履歴（#2726）。**数字も丸も出さない**（確認環境・AI使用量と同じく
+                  見るだけの画面） */}
+              <MobileNavRow
+                label="リリース履歴"
+                icon={History}
+                onClick={onSelectReleaseHistory}
+                count={null}
+                title="全リポジトリのGitHub Releaseを時系列で見る"
               />
             </ul>
           </div>

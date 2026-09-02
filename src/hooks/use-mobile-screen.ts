@@ -60,6 +60,8 @@ export type MobileScreen =
   // AI使用量（#2504）。当初は確認環境と同じくホームのメニューからのドリルダウンだけで開く
   // 画面だったが、#2631でボトムナビの5枠目を持ち、タブから直接開く画面になった
   | { kind: "usage" }
+  // リリース履歴（#2726）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
+  | { kind: "release-history" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -201,6 +203,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: "usage" };
     }
 
+    if (screenParam === "release-history") {
+      return { kind: "release-history" };
+    }
+
     return { kind: "home" };
   }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
 
@@ -221,7 +227,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           | "repo-detail"
           | "pull-requests"
           | "settings"
-          | "preview";
+          | "preview"
+          | "release-history";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -376,6 +383,14 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   // ホームのメニューから確認環境の画面へ遷移する（#2444）。設定と同じくフッターにタブが
   // 無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの戻るボタン（goBack）が持つ。
   const selectPreview = useCallback(() => navigate({ screen: "preview" }), [navigate]);
+
+  // ホームのメニューからリリース履歴の画面へ遷移する（#2726）。確認環境と同じく
+  // フッターにタブが無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの
+  // 戻るボタン（goBack）が持つ。
+  const selectReleaseHistory = useCallback(
+    () => navigate({ screen: "release-history" }),
+    [navigate],
+  );
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -548,6 +563,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPullRequestView,
     selectSettings,
     selectPreview,
+    selectReleaseHistory,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,

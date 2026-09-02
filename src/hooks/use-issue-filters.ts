@@ -29,11 +29,20 @@ export type IssueStateFilter = "all" | "open" | "closed";
  * 1カラムで、Issueの絞り込み条件とは無関係。
  *
  * `usage`はAI使用量（#2504）。サブPCのローカルセッションが使ったトークンを見る。これも1カラム。
+ *
+ * `releases`はリリース履歴（#2726）。全リポジトリのGitHub Releaseを時系列で見る。
+ * `preview`と同じくホームのメニューからのドリルダウンだけで開き、ボトムナビのタブは持たない。
  */
-export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview" | "usage";
+export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview" | "usage" | "releases";
 
 function parsePane(value: string | null): DashboardPane {
-  if (value === "pull-requests" || value === "flow" || value === "preview" || value === "usage") {
+  if (
+    value === "pull-requests" ||
+    value === "flow" ||
+    value === "preview" ||
+    value === "usage" ||
+    value === "releases"
+  ) {
     return value;
   }
   return "issues";
@@ -251,6 +260,11 @@ export function useIssueFilters() {
     setFilters({ pane: "usage", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「リリース履歴」画面への遷移（#2726）。上と同じくPRの選択状態を持たない。
+  const selectReleaseHistoryPane = useCallback(() => {
+    setFilters({ pane: "releases", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -299,6 +313,7 @@ export function useIssueFilters() {
     selectFlowPane,
     selectPreviewPane,
     selectUsagePane,
+    selectReleaseHistoryPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,

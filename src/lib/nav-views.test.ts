@@ -29,8 +29,17 @@ describe("navViews", () => {
 });
 
 describe("スマホの一覧に並べるビュー（#1645）", () => {
-  it("先頭は「すべてのIssue」で、その次がユーザーの確認待ち（#714）", () => {
-    expect(mobileListNavViews.slice(0, 2).map((view) => view.id)).toEqual(["all", "check-user"]);
+  it("進捗順→要対応→参考の順に並ぶ（#2736）", () => {
+    expect(mobileListNavViews.map((view) => view.id)).toEqual([
+      "all",
+      "not-started",
+      "in-progress",
+      "release-pending",
+      "check-user",
+      "manual-step",
+      "question",
+      "code-review",
+    ]);
   });
 
   it("お気に入り・最近追加した・直近本番に反映したは出さない", () => {
@@ -38,11 +47,6 @@ describe("スマホの一覧に並べるビュー（#1645）", () => {
     expect(ids).not.toContain("favorites");
     expect(ids).not.toContain("recently-added");
     expect(ids).not.toContain("recently-merged");
-  });
-
-  // 左メニューへ足したので、揃える側のここにも出す（#1743）
-  it("本番反映待ちは末尾に出す", () => {
-    expect(mobileListNavViews.at(-1)?.id).toBe("release-pending");
   });
 
   it("一覧に無いビューで開かれたときだけ、そのビューを末尾へ足す", () => {
@@ -56,7 +60,7 @@ describe("スマホの一覧に並べるビュー（#1645）", () => {
   it("足したビューからも左右のスワイプで隣のビューへ移動できる", () => {
     const resolved = resolveMobileListNavViews("recently-merged");
 
-    expect(getAdjacentNavViewId("recently-merged", "prev", resolved)).toBe("release-pending");
+    expect(getAdjacentNavViewId("recently-merged", "prev", resolved)).toBe("code-review");
     expect(getAdjacentNavViewId("recently-merged", "next", resolved)).toBeNull();
   });
 });
