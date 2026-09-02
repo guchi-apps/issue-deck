@@ -31,9 +31,6 @@ export const START_OPTION_ICONS: Record<StartImplementationOptionKey, LucideIcon
  * 実行先（アイコン中心・中央揃え）とわざと形を変えている。同じ見た目のグリッドが上下に続くと、
  * 「どちらが実行先でどちらがオプションか」が一目で分からなくなるため。説明は`title`と
  * グリッド下のリストに出す。
- *
- * **「実装を開始」ダイアログと「まとめて実行」バーで共有する**（#1993）。どちらも同じ
- * `START_IMPLEMENTATION_OPTIONS`を並べるもので、片方だけ見た目が変わる理由が無い。
  */
 export function StartOptionChip({
   icon: Icon,

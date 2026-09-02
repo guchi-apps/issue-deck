@@ -198,8 +198,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `enabled && statusActive`のような条件）も一緒に移す**——画面から消しただけだと、開いても
   使われない取得だけが残る。
 - **Issue一覧の上に並ぶ「〜が n件あります。」の入口バーは、`issue-list.tsx`の
-  `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」・「まとめて実行」の
-  3本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの
+  `COUNT_BAR_*`定数を使う**（#2107）。手作業アシスタント・「次にやること」の
+  2本が同じ作りで、**入りきらない幅ではボタン側が次の行へ落ちる**（`flex-wrap`＋テキストの
   `basis-48`＋ボタン側の`ml-auto`）。**1行固定の`flex`へ戻さない**——中央カラムは手で狭められる
   （#381）ため、縮められるものが`flex-1`のテキストしか無くなると幅0まで潰れ、1文字ずつ縦に
   並ぶ。右が「自動実行 n / m」バッジとボタンの2つになる手作業のバーで最初に起きる。
@@ -973,16 +973,6 @@ export function POST(request: NextRequest) {
     押した瞬間に実装が積まれることが、押す前に読めないといけない。
   - **見送り候補をクローズもラベル付けもしない。** 重複・陳腐化の判定はタイトルと本文の冒頭からの
     推測でしかなく外れる。挙げるところまでを機械が担い、押せるのは開くことだけにする。
-- **選んだIssueをまとめて実行する入口は一覧の上のバー**（#1266・#1993。
-  [`bulk-dispatch-bar.tsx`](../src/components/dashboard/bulk-dispatch-bar.tsx)）。
-  手作業アシスタント・「次にやること」と同じ位置に置くのは、**スマホの一覧が`IssueList`の
-  ヘッダーを出さない**（`showHeader={false}`）ためで、ヘッダーに置くとPCからしか押せない。
-  出すのは積めるIssueが2件以上あるときだけ（[`lib/dispatch/bulk-dispatch.ts`](../src/lib/dispatch/bulk-dispatch.ts)）。
-  - **オプションは1回だけ選び、選んだIssueすべてへ同じように付ける。** チップは「実装を開始」
-    ダイアログと共有し（[`start-option-chip.tsx`](../src/components/dashboard/start-option-chip.tsx)）、
-    出すのは**選んだIssueで共通して選べるもの**だけ（`commonStartImplementationOptions`）。
-    既定は全部OFFで、既に付いているラベルは外さない。設計と理由は
-    [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)を参照。
 - **「ユーザーの確認待ち」「ユーザーの作業待ち」「質問」「ブランチ」は、ユーザーの絞り込みを
   適用しない**（#1750）。左メニューの最上段2つと質問はビューの性質として
   [`lib/nav-views.ts`](../src/lib/nav-views.ts)の`ignoresIssueFilters`に持ち、判定は

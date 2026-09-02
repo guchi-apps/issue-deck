@@ -293,8 +293,8 @@ describe("enqueueDispatchJob のモデル", () => {
 });
 
 /**
- * #1311。**画面側（`resolveDispatchTargetRejection`）だけに置くと、一括投入
- * （`bulk-dispatch-bar.tsx`）が素通りする。** あちらは個々のIssueの判定をAPI側へ委ねている。
+ * #1311。**画面側（`resolveDispatchTargetRejection`）だけに置くと、「次にやること」の
+ * 自動開始（`issue-order-dialog.tsx`）が素通りする。** あちらは判定をAPI側へ委ねている。
  */
 describe("enqueueDispatchJob のセッション生存ガード", () => {
   it("セッションが動いていなければ積める", async () => {
