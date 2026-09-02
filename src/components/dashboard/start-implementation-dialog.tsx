@@ -18,6 +18,7 @@ import {
   CLAUDE_MODEL_FIT_DESCRIPTIONS,
   CLAUDE_MODEL_FIT_LABELS,
   describeClaudeModel,
+  type ClaudeLocalModel,
   type ClaudeModel,
 } from "@/lib/app-settings";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -137,25 +138,25 @@ const AUTO_PICK = "pick" as const;
 type ModelChoice = ClaudeModel | null | typeof AUTO_PICK;
 
 /**
- * モデルの選択肢（#2717・#2723）。**先頭は「設定に従う」（`null`）で、これが既定。**
+ * モデルの選択肢（#2717・#2723・#2776）。**先頭は「設定に従う」（`null`）で、これが既定。**
  *
  * 「おまかせ」（`AUTO_PICK`）はここに入れない——**全幅のチップとしてグリッドの上に置く**ので、
- * 並びの都合が違う。ここに並ぶのは「自分で決めない2つ」と「自分で決める4つ」で、
+ * 並びの都合が違う。ここに並ぶのは「自分で決めない1つ」と「自分で決める3つ」で、
  * 決める側は重い順。
  *
  * **チップには短い名前と向いている作業を出す**（#2723で金額を外した）。2列に並べると
  * 1枚あたり172px前後で、`CLAUDE_MODEL_OPTIONS`のラベルは入らない。
  *
- * 「設定に従う」と`auto`（CLIの既定）は別物。前者は設定の既定で立ち、後者は
- * `--model`そのものを付けない。
+ * **`auto`（CLIの既定。`--model`を付けない起動）は選択肢に含めない**（#2776）。
+ * 「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により、
+ * `CLAUDE_LOCAL_MODEL_OPTIONS`（`src/lib/app-settings.ts`）からも同時に外した。
  *
- * **`haiku`は入れない**（#2756）。ここで選んだモデルはサブPCのローカルセッション
+ * **`haiku`も入れない**（#2756）。ここで選んだモデルはサブPCのローカルセッション
  * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
  * （https://github.com/anthropics/claude-code/issues/43235）。
  */
-const MODEL_ENTRIES: readonly { model: ClaudeModel | null }[] = [
+const MODEL_ENTRIES: readonly { model: ClaudeLocalModel | null }[] = [
   { model: null },
-  { model: "auto" },
   { model: "fable" },
   { model: "opus" },
   { model: "sonnet" },
@@ -167,22 +168,29 @@ function modelChipLabel(model: ClaudeModel | null): string {
 }
 
 /**
- * チップの2行目に出す「向いている作業」（#2723）。**以前ここには金額が出ていた。**
- * 「設定に従う」だけはどのモデルになるかをこのダイアログが知らないので、設定を指す。
+ * チップの2行目に出す「向いている作業」（#2723・#2776）。**以前ここには金額が出ていた。**
+ * 「設定に従う」は、アプリ設定（設定 ＞ 実行）の現在値（`claudeLocalModel`）が分かっていれば
+ * そのモデル名を添える。まだ届いていなければ従来どおりの固定文言のままにする。
  */
-function modelChipFit(model: ClaudeModel | null): string {
-  return model === null ? "設定の既定で起動" : CLAUDE_MODEL_FIT_LABELS[model];
+function modelChipFit(model: ClaudeModel | null, claudeLocalModel: ClaudeLocalModel): string {
+  return model === null
+    ? `設定の既定（${describeClaudeModel(claudeLocalModel)}）で起動`
+    : CLAUDE_MODEL_FIT_LABELS[model];
 }
 
 /**
- * 選んだモデルの説明（#2723）。**金額ではなく、どんな作業に向くかを1行で述べる。**
+ * 選んだモデルの説明（#2723・#2776）。**金額ではなく、どんな作業に向くかを1行で述べる。**
  *
  * 金額（1件あたりの目安）はここに出していたが、1回ぶんなのか実費なのかが画面から決まらず、
  * FableとOpusがほぼ並ぶため見比べても選べなかった（#2723）。実績は「AI使用量」の画面で見る。
+ *
+ * 「設定に従う」を選んだときに実際どのモデルで立つのかが分からない、という指摘（#2776）を
+ * 受け、`claudeLocalModel`（アプリ設定の現在値。`issue-deck-shell.tsx`が保持し、設定ダイアログ
+ * での保存にあわせて更新される）をそのまま文中へ差し込む。
  */
-function describeModelChoice(model: ClaudeModel | null): string {
+function describeModelChoice(model: ClaudeModel | null, claudeLocalModel: ClaudeLocalModel): string {
   if (model === null) {
-    return "設定（設定 ＞ 実行）で選んだモデルで起動します。";
+    return `設定（設定 ＞ 実行）で選んだ${describeClaudeModel(claudeLocalModel)}で起動します。`;
   }
   return CLAUDE_MODEL_FIT_DESCRIPTIONS[model];
 }
@@ -232,6 +240,14 @@ type StartImplementationDialogProps = {
    * `null`・省略ならその選択肢を出さない（ローカル起動プロトコルに適合していないリポジトリ・#1073）。
    */
   localSessionCommand?: string | null;
+  /**
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。**「設定に従う」を選んだときに
+   * 実際どのモデルで立つのかを表示するためだけに使う**（`modelChipFit`・`describeModelChoice`）。
+   * `issue-deck-shell.tsx`がトップレベルで保持している値をそのまま渡す（設定の保存にあわせて
+   * 更新される）——ダイアログ自身は取りに行かない。子が各自取得するとポーリング・取得口が
+   * 画面あたり何本も増えるのを避ける、という既存の判断（`dispatch`propと同じ理由）に揃えた。
+   */
+  claudeLocalModel: ClaudeLocalModel;
 };
 
 /**
@@ -271,6 +287,7 @@ export function StartImplementationDialog({
   comments = [],
   localSessionCommand = null,
   subIssueRelations,
+  claudeLocalModel,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -875,9 +892,8 @@ export function StartImplementationDialog({
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">モデル</p>
             <div role="radiogroup" aria-label="モデル" className="flex flex-col gap-2">
-              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の6枚
-                  （自分で決めるか、決めずに委ねるか）とは性質が違う。7枚を2列に並べると
-                  最後の1枚が余るため、並びの都合としても外に出す */}
+              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の4枚
+                  （自分で決めるか、決めずに委ねるか）とは性質が違う。並びの都合としても外に出す */}
               <ModelChip
                 icon={Sparkles}
                 label="おまかせ"
@@ -890,7 +906,7 @@ export function StartImplementationDialog({
                   <ModelChip
                     key={entry.model ?? "inherit"}
                     label={modelChipLabel(entry.model)}
-                    fit={modelChipFit(entry.model)}
+                    fit={modelChipFit(entry.model, claudeLocalModel)}
                     selected={model === entry.model}
                     onSelect={() => selectModel(entry.model)}
                   />
@@ -906,7 +922,9 @@ export function StartImplementationDialog({
                 error={modelPick.error}
               />
             ) : (
-              <p className="text-xs text-muted-foreground">{describeModelChoice(model)}</p>
+              <p className="text-xs text-muted-foreground">
+                {describeModelChoice(model, claudeLocalModel)}
+              </p>
             )}
           </div>
         )}

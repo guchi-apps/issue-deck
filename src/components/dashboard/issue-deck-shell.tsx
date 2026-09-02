@@ -74,7 +74,7 @@ import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import type { AppAiModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
 import {
   PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
@@ -160,7 +160,7 @@ type IssueDeckShellProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeModel;
+  claudeLocalModel: ClaudeLocalModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -242,7 +242,7 @@ export function IssueDeckShell({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
-    useState<ClaudeModel>(initialClaudeLocalModel);
+    useState<ClaudeLocalModel>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
@@ -1775,6 +1775,7 @@ export function IssueDeckShell({
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
                   onStartManualStepGuide={manualStepGuide.start}
+                  claudeLocalModel={claudeLocalModel}
                 />
               )}
 
@@ -2047,6 +2048,7 @@ export function IssueDeckShell({
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
                   onStartManualStepGuide={manualStepGuide.start}
+                  claudeLocalModel={claudeLocalModel}
                 />
               </div>
               {selectedIssue && (
@@ -2107,6 +2109,7 @@ export function IssueDeckShell({
           bodyPrefix={createDialogBodyPrefix}
           issues={allIssues}
           onCreated={handleIssueCreated}
+          claudeLocalModel={claudeLocalModel}
         />
         <CodeReviewDialog
           open={codeReviewDialogOpen}

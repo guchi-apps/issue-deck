@@ -147,6 +147,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
@@ -193,6 +194,11 @@ type IssueDetailProps = {
   onUnsnooze?: (target: SnoozeTarget) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
+  /**
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。「実装を開始」ダイアログの
+   * 「設定に従う」チップに実際のモデル名を出すためだけに`StartImplementationDialog`へ渡す。
+   */
+  claudeLocalModel: ClaudeLocalModel;
 };
 
 export function IssueDetail({
@@ -213,6 +219,7 @@ export function IssueDetail({
   onSnooze,
   onUnsnooze,
   onStartManualStepGuide,
+  claudeLocalModel,
 }: IssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。**Issueがnullでも呼ぶ**ため、他のフックと同じ
   // 位置（早期returnより前）に置く
@@ -743,6 +750,7 @@ export function IssueDetail({
                   comments={comments}
                   localSessionCommand={localSessionCommand}
                   subIssueRelations={subIssueRelations}
+                  claudeLocalModel={claudeLocalModel}
                   renderTrigger={(isSubmitting) => (
                     <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}

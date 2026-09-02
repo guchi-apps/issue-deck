@@ -23,6 +23,7 @@ import {
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
   type AppAiModel,
+  type ClaudeLocalModel,
   type ClaudeModel,
   type CodexModel,
 } from "@/lib/app-settings";
@@ -31,7 +32,7 @@ export type AppSettingsValues = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeModel;
+  claudeLocalModel: ClaudeLocalModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -42,7 +43,7 @@ type ExecutionSettingsSectionProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeModel;
+  claudeLocalModel: ClaudeLocalModel;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -76,7 +77,7 @@ export function ExecutionSettingsSection({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
-    useState<ClaudeModel>(initialClaudeLocalModel);
+    useState<ClaudeLocalModel>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
@@ -205,7 +206,7 @@ export function ExecutionSettingsSection({
         <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
         <Select
           value={claudeLocalModel}
-          onValueChange={(value) => setClaudeLocalModel(value as ClaudeModel)}
+          onValueChange={(value) => setClaudeLocalModel(value as ClaudeLocalModel)}
         >
           <SelectTrigger id="claude-local-model" className="w-full">
             <SelectValue />
@@ -230,7 +231,8 @@ export function ExecutionSettingsSection({
           >
             anthropics/claude-code#43235
           </a>
-          ）。
+          ）。「Claude Codeに任せる」（`--model`を付けない起動）も、実際に動くモデルが分からなく
+          なるため選べません（#2776）。
         </p>
       </div>
 

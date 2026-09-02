@@ -189,6 +189,7 @@ function Harness({
       defaultRepositoryFullName={defaultRepositoryFullName}
       issues={[]}
       onCreated={onCreated}
+      claudeLocalModel="sonnet"
     />
   );
 }
@@ -848,6 +849,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         repositories={[makeRepository()]}
         issues={[]}
         onCreated={vi.fn()}
+        claudeLocalModel="sonnet"
         initialHandoff={{
           kind: "issue",
           repositoryFullName: REPOSITORY_FULL_NAME,
@@ -879,6 +881,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         issues={[]}
         onCreated={vi.fn()}
         cancelLabel="デッキへ戻る"
+        claudeLocalModel="sonnet"
       />,
     );
 
@@ -926,6 +929,7 @@ describe("CreateIssueDialog の選んだリポジトリの保持", () => {
           defaultRepositoryFullName={defaultRepositoryFullName}
           issues={[]}
           onCreated={vi.fn()}
+          claudeLocalModel="sonnet"
         />
       </>
     );

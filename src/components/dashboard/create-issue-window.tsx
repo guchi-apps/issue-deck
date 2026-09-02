@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { broadcastIssueCreated } from "@/lib/issue-broadcast";
 import { takeIssueCreateHandoff, type IssueCreateHandoff } from "@/lib/issue-create-window";
 import type { Issue } from "@/types/issue";
@@ -12,6 +13,11 @@ import type { ConnectedRepository } from "@/types/repository";
 type CreateIssueWindowProps = {
   repositories: ConnectedRepository[];
   issues: Issue[];
+  /**
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。`CreateIssueDialog`の
+   * 「作成+実装開始」へそのまま渡す。
+   */
+  claudeLocalModel: ClaudeLocalModel;
 };
 
 /**
@@ -21,7 +27,11 @@ type CreateIssueWindowProps = {
  * **ウィンドウとしての振る舞い**——移してきた入力内容の受け取り、閉じ方、
  * 作ったことを元のデッキへ伝えることの3つだけ。
  */
-export function CreateIssueWindow({ repositories, issues }: CreateIssueWindowProps) {
+export function CreateIssueWindow({
+  repositories,
+  issues,
+  claudeLocalModel,
+}: CreateIssueWindowProps) {
   /**
    * 受け渡しの読み取りはlocalStorageに触るため、マウント後に行う（サーバー側では読めない）。
    * 読み終わるまで描画しないのは、**空のフォームが一瞬出てから値が入るのを避ける**ため。
@@ -79,6 +89,7 @@ export function CreateIssueWindow({ repositories, issues }: CreateIssueWindowPro
       // 作ったIssueは元のデッキの一覧へその場で加える。伝わらなくても一覧のポーリングで
       // 10秒以内に現れるため、ここでは失敗しても止めない
       onCreated={broadcastIssueCreated}
+      claudeLocalModel={claudeLocalModel}
     />
   );
 }
