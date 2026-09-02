@@ -621,13 +621,23 @@ fi
 # **Codexでは何もしない。** あちらは`--ask-for-approval never`で走らせるため個々の許可規則が無く、
 # コマンドが権限で弾かれること自体が起きない（#2377）。
 #
-# **起動時に読むworktree外のファイルも一緒に渡す**（#2778）。キックオフ文面が読ませる指示ファイル
-# （`.prompts/issue-<番号>.md`）と、開発サーバーの様子を見るログ（`.dev-servers/issue-<番号>.log`）は
-# どちらもworktreeの外にあり、**`Read`は作業ディレクトリの外だと1件ずつ承認を求める。** 起動直後に
-# 必ず「Readが次へのアクセスを要求しています」が出て、無人に近い起動ではそこで止まっていた。
-# 許可するのはこの2ファイルの絶対パスだけで、`.prompts`ディレクトリごとは開けない
-# （他Issueの指示ファイルは従来どおり承認が要る）。
-SESSION_ALLOWED_TOOLS="$(agent_allowed_tools "$PROMPT_FILE" "$DEV_LOG")"
+# **worktreeの外にあって、このセッションが読むファイルも一緒に渡す**（#2778）。
+# **`Read`は作業ディレクトリの外だと1件ずつ承認を求める。** 渡すのは次の2つで、性質が違う。
+#
+#   - 指示ファイル（`.prompts/issue-<番号>.md`）——**起動直後に必ず読む。** キックオフ文面が
+#     「あなたへの指示はこのファイルにあります」と読ませるため、承認プロンプトが必ず1件出て、
+#     無人に近い起動ではそこで止まっていた。今回直したかったのはこれ
+#   - 開発サーバーのログ（`.dev-servers/issue-<番号>.log`）——**繋がらないときだけ見る。**
+#     キックオフ文面と指示ファイルには場所が載るだけで、読めという指示は無い。ついでに許可して
+#     おくもので、**開発サーバーを使わない起動（ポート0の横断質問セッション）では渡さない**
+#
+# 許可するのは渡した絶対パスだけで、`.prompts`ディレクトリごとは開けない（他Issueの指示
+# ファイルは従来どおり承認が要る）。
+SESSION_EXTRA_READ_FILES=("$PROMPT_FILE")
+if [[ -n "$DEV_PORT" && "$DEV_PORT" != "0" ]]; then
+  SESSION_EXTRA_READ_FILES+=("$DEV_LOG")
+fi
+SESSION_ALLOWED_TOOLS="$(agent_allowed_tools "${SESSION_EXTRA_READ_FILES[@]}")"
 if [[ "$AGENT_KIND" == "claude" ]]; then
   CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
   # **何を無条件に通したかを起動ログに残す**（`--disallowedTools`側と揃える）。承認プロンプトが

@@ -113,14 +113,31 @@ describe("agent_allowed_tools", () => {
       expect(withFiles).toEqual(expect.arrayContaining(rules));
     });
 
+    it("Read規則は1ファイルずつで、グロブを含まない", () => {
+      // **`Read(//…/**)`のようなディレクトリごとの許可を入れない。** 他Issueの指示ファイルまで
+      // 開くことになる。`Bash`側で`*`を禁じているのと同じ理由で、こちらも形で固定する。
+      const withFiles = allowedTools(
+        "/home/guchi/apps/issue-deck-worktrees/.prompts/issue-2778.md",
+      ).split(",");
+      for (const rule of withFiles.filter((r) => r.startsWith("Read("))) {
+        expect(rule).toMatch(/^Read\(\/\/[^()*]+\)$/);
+      }
+    });
+
     it("ファイルを渡さなければRead規則は増えない", () => {
       expect(rules.filter((rule) => rule.startsWith("Read("))).toEqual([]);
     });
 
-    it("規則として当たらないパス・区切りを壊すパスは落とす", () => {
-      // 相対パスは設定ファイルからの相対になり、意図した場所に当たらない。
-      // カンマを含むパスは、規則の区切り（カンマ）を割って別の規則に化ける。
-      const dropped = allowedTools(".prompts/issue-2778.md", "/tmp/a,b/issue-2778.md").split(",");
+    it("規則として当たらないパス・区切りを壊すパス・広すぎるパスは落とす", () => {
+      // 相対パスは設定ファイルからの相対になり、意図した場所に当たらない。空白とカンマは
+      // `--allowedTools`の区切り（"Comma or space-separated list"）なので1つの規則が割れる。
+      // `*`はグロブとして解釈され、渡した1ファイルより広い範囲を通す。
+      const dropped = allowedTools(
+        ".prompts/issue-2778.md",
+        "/tmp/a,b/issue-2778.md",
+        "/tmp/a b/issue-2778.md",
+        "/tmp/issue-*.md",
+      ).split(",");
       expect(dropped).toEqual(rules);
     });
   });
