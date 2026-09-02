@@ -16,7 +16,11 @@ name: Reusable Claude Code Review (develop向けPR)
 #   付与の有無を確認する(#94, #366)。**判定するだけで、00.check-userの付与と理由コメントの
 #   投稿は行わない**(#1406。実際に反映するのは最後のauto-mergeジョブ)。判定結果は
 #   risky・reasons・already-check-userの各outputで渡す。
-#   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)
+#   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)。
+#   **変更カテゴリ(パス・依存関係)でマージを止めるかどうかはmerge-policy入力で切り替わる**
+#   (#2775。strict=既定・止める / relaxed=止めない)。relaxedでも該当自体は検出し、
+#   needs-reviewの側にだけ反映するため、レビューの実行条件は変わらない。
+#   ラベルによる明示的指定と.shared-context/の混入は、relaxedでも従来どおり止める
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
 #   該当時は判定理由をissueにコメント投稿する(#94)。**00.check-userの付与はここでは
 #   行わない**(#2136)。理由コメントの末尾に
@@ -140,6 +144,18 @@ on:
         required: false
         type: string
         default: "pnpm-lock.yaml package-lock.json"
+      merge-policy:
+        description: >-
+          変更カテゴリ(DBマイグレーション・ワークフロー・.env・認証・依存のメジャー更新・
+          risk-pathsの追加分)を「自動マージを止める理由」として扱うか(#2775)。
+          strict(既定・従来どおり止める) / relaxed(止めずに自動マージへ進む)。
+          relaxedでも、Issueのラベル(22.merge-confirm-required・23.preview-required・
+          24.screenshot-required)・.shared-context/の混入・claude-reviewの意味的判定は
+          従来どおりマージを止める。**カテゴリ該当時にclaude-reviewを実行する条件は
+          relaxedでも変わらない**(止めるのをやめるだけで、レビューは省かない)。
+        required: false
+        type: string
+        default: strict
       prompts-ref:
         description: >-
           プロンプト(.github/prompts/)の取得元とするissue-deckのref。
@@ -238,38 +254,75 @@ jobs:
           RISK_PATHS: ${{ inputs.risk-paths }}
           DEPENDENCY_CHECK: ${{ inputs.dependency-check }}
           LOCK_FILES: ${{ inputs.lock-files }}
+          MERGE_POLICY: ${{ inputs.merge-policy }}
         run: |
           set -e
           CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
           RISKY=false
           REASONS=""
+          # merge-policy: relaxed で「マージは止めないが、レビューは実行する」に回した
+          # カテゴリ該当の理由(#2775)。auto-mergeへは渡さず、この下のレビュー実行ゲートと
+          # ログにだけ使う。
+          RELAXED_REASONS=""
+
+          MERGE_POLICY="${MERGE_POLICY:-strict}"
+          case "$MERGE_POLICY" in
+            strict|relaxed) ;;
+            *)
+              echo "::error::merge-policy は strict か relaxed のどちらかです: $MERGE_POLICY"
+              exit 1
+              ;;
+          esac
+          echo "マージ方針: ${MERGE_POLICY}"
 
           add_reason() {
             RISKY=true
             REASONS="${REASONS}${REASONS:+$'\n'}- $1"
           }
 
+          # 変更カテゴリ(パス・依存関係)による該当(#2775)。
+          #
+          # **strictでは従来どおりマージを止め、relaxedでは止めない。** relaxedにしたのは
+          # 「この種類のファイルを触った」こと自体は、developへ入れてよいかの判断材料として
+          # 弱いため。developはリリース前の統合先で、本番へ出るには develop -> main の
+          # リリースPR(自動マージ不可カテゴリのまま・人がマージする)をもう1回通る。
+          #
+          # 止めないだけで、**レビューを省くことはしない**。relaxedで拾った理由は
+          # RELAXED_REASONSへ入れ、下のレビュー実行ゲートが従来と同じようにレビューを走らせる。
+          add_category_reason() {
+            if [ "$MERGE_POLICY" = "relaxed" ]; then
+              RELAXED_REASONS="${RELAXED_REASONS}${RELAXED_REASONS:+$'\n'}- $1"
+            else
+              add_reason "$1"
+            fi
+          }
+
           if echo "$CHANGED_FILES" | grep -q '^prisma/migrations/'; then
-            add_reason "DBマイグレーションの変更 (prisma/migrations/**)"
+            add_category_reason "DBマイグレーションの変更 (prisma/migrations/**)"
           fi
           if echo "$CHANGED_FILES" | grep -qE '(^|/)\.env'; then
-            add_reason "環境変数ファイルの変更 (.env*)"
+            add_category_reason "環境変数ファイルの変更 (.env*)"
           fi
           if echo "$CHANGED_FILES" | grep -q '^\.github/workflows/'; then
-            add_reason "GitHub Actionsワークフローの変更 (.github/workflows/**)"
+            add_category_reason "GitHub Actionsワークフローの変更 (.github/workflows/**)"
           fi
           if echo "$CHANGED_FILES" | grep -qE '(^|/)auth(/|\.[^/]*$)'; then
-            add_reason "認証・認可関連ファイルの変更 (**/auth/**)"
+            add_category_reason "認証・認可関連ファイルの変更 (**/auth/**)"
           fi
           # 共有知識リポジトリのcheckout先(.gitignore済み)がコミットされていないかを機械的に確認する。
           # 従来はclaude-reviewのプロンプトだけがこれを見ていたが、claude-reviewは
           # 低リスクPRではskipされるようになった(#992)ため、機械判定側にも同じ確認を置く。
+          #
+          # **これはmerge-policyで緩めない**(add_category_reasonではなくadd_reason)。
+          # 変更カテゴリではなく「入ってはいけないものが入っている」誤りの検知で、
+          # 緩めるとdevelopへ読み取り専用のcheckout先がそのまま入る(#2775)。
           if echo "$CHANGED_FILES" | grep -q '^\.shared-context/'; then
             add_reason "共有知識リポジトリのcheckout先が差分に混入している (.shared-context/**)。読み取り専用のため、コミットから除外する必要がある"
           fi
 
           # ここまでが全リポジトリ共通の内蔵パターン。以降は呼び出し元が宣言した
-          # リポジトリ固有のリスクパスを評価する。入力はリスクを追加できるが削減はできない。
+          # リポジトリ固有のリスクパスを評価する。入力はリスクを追加できるが削減はできない
+          # (merge-policy: relaxed では内蔵パターンと同じく「止めない」側へ回る)。
           if [ -n "${RISK_PATHS:-}" ]; then
             while IFS= read -r line; do
               [ -z "$line" ] && continue
@@ -284,7 +337,7 @@ jobs:
               PATTERN="${line%% :: *}"
               REASON="${line#* :: }"
               if echo "$CHANGED_FILES" | grep -qE "$PATTERN"; then
-                add_reason "$REASON"
+                add_category_reason "$REASON"
               fi
             done <<< "$RISK_PATHS"
           fi
@@ -320,13 +373,13 @@ jobs:
                 process.exit(risky ? 1 : 0);
               '; then
                 if [ "$DEPENDENCY_CHECK" = "any" ]; then
-                  add_reason "依存関係の新規追加またはメジャーバージョン更新 (package.json)"
+                  add_category_reason "依存関係の新規追加またはメジャーバージョン更新 (package.json)"
                 else
-                  add_reason "依存関係のメジャーバージョン更新 (package.json)"
+                  add_category_reason "依存関係のメジャーバージョン更新 (package.json)"
                 fi
               fi
             else
-              add_reason "package.jsonの変更（比較元の取得に失敗したため安全側で判定）"
+              add_category_reason "package.jsonの変更（比較元の取得に失敗したため安全側で判定）"
             fi
           fi
 
@@ -352,6 +405,10 @@ jobs:
             echo "$REASONS"
           else
             echo "機械的リスク判定: 該当なし"
+          fi
+          if [ -n "$RELAXED_REASONS" ]; then
+            echo "変更カテゴリに該当したが、merge-policy: relaxed のためマージは止めない(#2775):"
+            echo "$RELAXED_REASONS"
           fi
 
           # 判定結果を後続ジョブへ渡す。理由は複数行になるためヒアドキュメント記法を使う。
@@ -412,6 +469,12 @@ jobs:
             add_review_reason "機械的リスク判定に該当したため"
           fi
 
+          # merge-policy: relaxed で「止めない」側へ回した該当も、レビューは従来どおり実行する
+          # (#2775)。マージを止めなくなるぶん、意味的レビューだけが最後の判断材料になる。
+          if [ -n "$RELAXED_REASONS" ]; then
+            add_review_reason "変更カテゴリに該当したため（merge-policy: relaxed のためマージは止めない）"
+          fi
+
           if [ "$CHANGED_COUNT" -ge "$REVIEW_FILE_THRESHOLD" ] || [ "$CHANGED_LINES" -ge "$REVIEW_LINE_THRESHOLD" ]; then
             add_review_reason "差分が大きいため（${CHANGED_COUNT}ファイル / ${CHANGED_LINES}行。閾値: ${REVIEW_FILE_THRESHOLD}ファイル または ${REVIEW_LINE_THRESHOLD}行）"
           fi
@@ -451,6 +514,13 @@ jobs:
             echo ""
             echo "- 変更ファイル数: ${CHANGED_COUNT}（閾値: ${REVIEW_FILE_THRESHOLD}）"
             echo "- 変更行数: ${CHANGED_LINES}（閾値: ${REVIEW_LINE_THRESHOLD}）"
+            echo "- マージ方針: \`${MERGE_POLICY}\`"
+            if [ -n "$RELAXED_REASONS" ]; then
+              echo ""
+              echo "変更カテゴリに該当しましたが、\`merge-policy: relaxed\` のため自動マージは止めません（#2775）。"
+              echo ""
+              echo "$RELAXED_REASONS"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   claude-review:
@@ -583,6 +653,9 @@ jobs:
           # 埋め込むhead SHA(#2136)。auto-mergeジョブは今回レビューしたコミットの
           # マーカーだけを見るため、過去のpushで投稿されたマーカーを拾わない
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # 意味的判定の基準を切り替える(#2775)。プロンプト側がstrict/relaxedの両方の
+          # 振る舞いを持っており、ここで渡した値の側だけを適用する。
+          MERGE_POLICY: ${{ inputs.merge-policy }}
         run: |
           set -euo pipefail
           PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/review-develop.md"
@@ -594,7 +667,8 @@ jobs:
           fi
           {
             echo 'PROMPT_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
-            envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY} ${HEAD_SHA}' < "$PROMPT_FILE"
+            MERGE_POLICY="${MERGE_POLICY:-strict}" \
+              envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY} ${HEAD_SHA} ${MERGE_POLICY}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
