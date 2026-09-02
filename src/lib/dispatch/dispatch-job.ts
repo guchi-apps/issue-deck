@@ -155,7 +155,7 @@ export function isSessionReportedJobKind(kind: DispatchJobKind): kind is Session
 
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
 export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
-  // **省略時は`LAUNCH`。** 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
+  // **省略時は`LAUNCH`。** 既存の呼び出し元（「次にやること」の自動開始・実装開始ダイアログ）は`kind`を送らない
   if (value === undefined || value === null || value === "launch") return "LAUNCH";
   if (value === "interrupt") return "INTERRUPT";
   if (value === "kill") return "KILL";
@@ -1597,7 +1597,7 @@ export function isActionsRunInProgress(
  * 持っていない（画面のポーリング結果が判定材料）。そこへ混ぜると「画面にしか無い拒否理由」が
  * 拒否一覧に並び、対応が崩れる。
  *
- * 積む導線が複数ある（「まとめて実行」・「セッションを復旧」）ので、文言だけはここで揃える。
+ * 積む導線が複数ある（「次にやること」の自動開始・「セッションを復旧」）ので、文言だけはここで揃える。
  */
 export const ACTIONS_RUNNING_ENQUEUE_REASON =
   "GitHub Actionsの実行が進行中です。同じブランチを2つの経路が進めることになるため、実行が終わるまでサブPCへは積めません。";

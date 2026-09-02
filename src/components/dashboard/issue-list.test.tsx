@@ -9,10 +9,6 @@ import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 import { buildSnoozeMap } from "@/lib/snooze";
 import type { Issue, IssueLabel } from "@/types/issue";
 
-/**
- * 「まとめて実行」の入口は積める起動先の申告があるときだけ出る（#1993）ため、
- * テストごとにホストを差し替えられるようにしておく。
- */
 const dispatchState: {
   hosts: { name: string; online: boolean; repositories: string[] }[];
   jobs: unknown[];
@@ -30,11 +26,6 @@ vi.mock("@/hooks/use-dispatch-state", () => ({
     enqueue: vi.fn(),
     cancel: vi.fn(),
   }),
-}));
-
-// 選択モードのバーはリポジトリのラベル定義を取りに行く（#1993）。jsdomでは通信しない
-vi.mock("@/hooks/use-repository-label-names", () => ({
-  useRepositoryLabelNames: () => ({ labelNamesByRepository: new Map(), isLoading: false }),
 }));
 
 let workflowRunningByIssueId: Record<string, { isRunning: boolean }> = {};
@@ -111,13 +102,6 @@ afterEach(() => {
   workflowRunningByIssueId = {};
 });
 
-/** 積める起動先の申告（`resolveDispatchTargetRejection`が見るぶんだけ） */
-function useDispatchHost() {
-  dispatchState.hosts = [
-    { name: "subpc", online: true, repositories: ["guchi-apps/issue-deck"] },
-  ];
-}
-
 describe("IssueListの選択ハイライト（#1597）", () => {
   it("押した行は、親から選択中Issueが渡ってくる前にハイライトされる", () => {
     // 選択の正はURLクエリで、その反映はトランジション（低優先度）で入るため、
@@ -146,52 +130,6 @@ describe("IssueListの選択ハイライト（#1597）", () => {
 
     expect(rowOf(3).className).toContain("border-l-primary");
     expect(rowOf(2).className).not.toContain("border-l-primary");
-  });
-
-  it("まとめて選択モードでは、行のクリックで選択ハイライトを動かさない", () => {
-    useDispatchHost();
-    const onSelectIssue = vi.fn();
-    renderList({ onSelectIssue, selectedIssueId: "1" });
-
-    fireEvent.click(screen.getByRole("button", { name: "まとめて実行" }));
-    fireEvent.click(selectButtonOf(2));
-
-    expect(onSelectIssue).not.toHaveBeenCalled();
-    expect(rowOf(1).className).not.toContain("border-l-primary");
-  });
-});
-
-describe("まとめて実行の入口（#1993）", () => {
-  // ヘッダーに置くとスマホ（`showHeader={false}`）からは押せない。一覧の上に出す
-  it("ヘッダーを出さないスマホの一覧にも出る", () => {
-    useDispatchHost();
-    renderList({ showHeader: false });
-
-    expect(screen.getByRole("button", { name: "まとめて実行" })).toBeTruthy();
-    expect(screen.getByText("3件")).toBeTruthy();
-  });
-
-  it("積める起動先の申告が無ければ出さない", () => {
-    renderList();
-
-    expect(screen.queryByRole("button", { name: "まとめて実行" })).toBeNull();
-  });
-
-  // 1件しか積めないなら個別の「実装を開始」で足りる
-  it("積めるIssueが1件しか無ければ出さない", () => {
-    useDispatchHost();
-    renderList({ issues: [makeIssue({ number: 1 })] });
-
-    expect(screen.queryByRole("button", { name: "まとめて実行" })).toBeNull();
-  });
-
-  it("closeしたIssueは数えない", () => {
-    useDispatchHost();
-    renderList({
-      issues: [makeIssue({ number: 1 }), makeIssue({ number: 2, state: "closed" })],
-    });
-
-    expect(screen.queryByRole("button", { name: "まとめて実行" })).toBeNull();
   });
 });
 
@@ -760,14 +698,6 @@ describe("件数バーの折り返し（#2107）", () => {
     renderList({ view: "all", onStartCodeReview: vi.fn() });
 
     expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
-  });
-
-  it("「まとめて実行」の入口バーも折り返せる", () => {
-    useDispatchHost();
-    renderList();
-
-    expect(barOf(/まとめて実行できるIssueが/).className).toContain("flex-wrap");
-    expect(screen.getByText(/まとめて実行できるIssueが/).className).toContain("basis-48");
   });
 });
 

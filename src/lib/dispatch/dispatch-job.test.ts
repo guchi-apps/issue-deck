@@ -708,7 +708,7 @@ describe("セッションの操作（#1332）", () => {
   }
 
   describe("parseDispatchJobKind", () => {
-    // 既存の呼び出し元（一括投入・実装開始ダイアログ）は`kind`を送らない
+    // 既存の呼び出し元（「次にやること」の自動開始・実装開始ダイアログ）は`kind`を送らない
     it("省略時は起動ジョブ", () => {
       expect(parseDispatchJobKind(undefined)).toBe("LAUNCH");
       expect(parseDispatchJobKind(null)).toBe("LAUNCH");
