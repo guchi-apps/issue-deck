@@ -19,10 +19,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = path.join(repoRoot, ".github/workflows/reusable-release-develop-to-main.yml");
 const workflowYaml = readFileSync(workflowPath, "utf8");
+const labelsWorkflowYaml = readFileSync(
+  path.join(repoRoot, ".github/workflows/reusable-issue-labels.yml"),
+  "utf8",
+);
 
 /** ステップ名から`run: |`の本文を取り出す（`reusable-issue-labels.test.mjs`と同じ最小実装） */
-function extractRunScript(stepName) {
-  const lines = workflowYaml.split("\n");
+function extractRunScript(stepName, yaml = workflowYaml) {
+  const lines = yaml.split("\n");
   const start = lines.findIndex((line) => line.trim() === `- name: ${stepName}`);
   if (start < 0) throw new Error(`ステップが見つかりません: ${stepName}`);
 
@@ -295,5 +299,96 @@ describe("リリース対象のプルリクエストとissueを特定する", ()
     expect(result.prLines).toBe("- #160 リリースに入る変更（Issue #461）\n");
     expect(result.issueLines).toBe("- #461 リリースに入る依頼\n");
     expect(result.prLines).not.toContain("#162");
+  });
+});
+
+/**
+ * `reusable-issue-labels.yml`の`main-pr-merged`（`issue を close する`）へ、この一覧から作った
+ * PR本文を通す（#2774の計画レビューG1・指摘2）。
+ *
+ * **`## 対象プルリクエスト`の行は`- #<PR番号>`で始まる。** あちらが`## 対象issue`と同じ
+ * 「行頭の`- #<数字>`」で読むと、**PR番号をIssue番号としてcloseしに行く**。書式を分けている
+ * ことをワークフローをまたいで固定する。
+ */
+function runCloseStep(prBody, { labels = ["00.check-user"] } = {}) {
+  const closed = path.join(workDir, "closed.txt");
+  const ghPath = path.join(workDir, "gh");
+  writeFileSync(
+    ghPath,
+    `#!/usr/bin/env bash
+set -u
+if [ "\${1:-}" = "label" ]; then printf '%s\\n' ${labels.map((l) => `'${l}'`).join(" ")}; exit 0; fi
+if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "close" ]; then echo "\${3}" >> "${closed}"; exit 0; fi
+exit 0
+`,
+  );
+  chmodSync(ghPath, 0o755);
+  writeFileSync(closed, "");
+
+  const script = extractRunScript("issue を close する", labelsWorkflowYaml);
+  const stdout = execFileSync("bash", ["-e", "-c", script], {
+    cwd: workDir,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${workDir}:${process.env.PATH}`,
+      GITHUB_OUTPUT: path.join(workDir, "labels-output.txt"),
+      PR_BODY: prBody,
+      REPO: "guchi-apps/asset-manager",
+      GH_REPO: "guchi-apps/asset-manager",
+      // 未設定にしておくと、本文から番号を拾えなかったときにその場で分かる
+      APP_BASE_URL: "",
+      PROGRESS_REPORT_SECRET: "",
+    },
+  });
+  return { stdout, closed: readFileSync(closed, "utf8").trim().split("\n").filter(Boolean) };
+}
+
+describe("リリースPR本文をmain-pr-mergedへ通す（ワークフローをまたぐ書式の契約）", () => {
+  const prSection = [
+    "## 対象プルリクエスト",
+    "- #123 進捗バッジを直す（Issue #456）",
+    "- #130 v1.2.0をリリースする（バージョンバンプ）",
+    "",
+  ].join("\n");
+
+  it("PR番号ではなくIssue番号をcloseする", () => {
+    writeFileSync(path.join(workDir, "labels-output.txt"), "");
+    const body = [
+      "developの内容をv1.2.0としてmainへリリースします。",
+      "",
+      prSection,
+      "## 対象issue",
+      "- #456 進捗バッジの表示を整理する",
+      "",
+      "## 注意点",
+      "- なにか",
+    ].join("\n");
+
+    const { closed } = runCloseStep(body);
+
+    expect(closed).toEqual(["456"]);
+    // PR番号（#123・#130）をIssueとしてcloseしない
+    expect(closed).not.toContain("123");
+    expect(closed).not.toContain("130");
+  });
+
+  it("`## 対象issue`が注記だけなら、対象プルリクエストの（Issue #番号）から拾う", () => {
+    writeFileSync(path.join(workDir, "labels-output.txt"), "");
+    const body = [
+      prSection,
+      "## 対象issue",
+      "（プルリクエストに対応するopenなissueはありませんでした）",
+      "",
+      "## 注意点",
+      "- なにか",
+    ].join("\n");
+
+    const { stdout, closed } = runCloseStep(body);
+
+    expect(closed).toEqual(["456"]);
+    expect(stdout).toContain("対象プルリクエストから対応issueを拾いました");
+    // バンプPRの行はIssue番号を持たないので拾われない
+    expect(closed).not.toContain("130");
   });
 });
