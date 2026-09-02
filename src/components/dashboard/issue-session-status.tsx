@@ -86,7 +86,7 @@ import { cn } from "@/lib/utils";
  *
  * **畳むのは「押す気になったときだけ要るもの」に限る。** 次のものは畳まない。
  *
- * - Remote Controlで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
+ * - Claude Codeアプリで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
  * - Codexに繋ぐ（#2537。CodexのセッションではURLが出ないため、ここが同じ役目を果たす）
  * - セッションの補足（`summary.detail`。「`tmux attach -t …`で答えてください」など次の操作そのもの）
  * - 押した操作の結果（`controlJob`の状態・pollerが見送った理由・送信の失敗）。届くまで最大1分
@@ -385,7 +385,7 @@ export function IssueSessionStatus({
           {summary.remoteControlUrl && (
             <Button variant="outline" size="sm" asChild>
               <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
-                Remote Controlで開く
+                Claude Codeアプリで開く
                 <ExternalLink />
               </a>
             </Button>

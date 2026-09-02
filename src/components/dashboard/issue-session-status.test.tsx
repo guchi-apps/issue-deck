@@ -58,6 +58,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     codeReviewCapable: null,
     codexCapable: null,
     codexRemoteControlCapable: null,
+    manualStepSessionCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -269,7 +270,7 @@ describe("IssueSessionStatus", () => {
     );
 
     expect(
-      screen.getByRole("link", { name: /Remote Controlで開く/ }).getAttribute("href"),
+      screen.getByRole("link", { name: /Claude Codeアプリで開く/ }).getAttribute("href"),
     ).toBe("https://claude.ai/code/session_01ABC");
   });
 });
@@ -633,7 +634,7 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /Remote Controlで開く/ })).not.toBeNull();
+    expect(screen.getByRole("link", { name: /Claude Codeアプリで開く/ })).not.toBeNull();
     expect(screen.getByRole("link", { name: /開発環境を開く/ })).not.toBeNull();
     expect(screen.getByText(/Remote Controlから答えてください/)).not.toBeNull();
   });
@@ -705,7 +706,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
     };
   }
 
-  // Claude Codeのセッションには`Remote Controlで開く`があり、ペアリングコードは使わない
+  // Claude Codeのセッションには`Claude Codeアプリで開く`があり、ペアリングコードは使わない
   it("Claude Codeのセッションには出さない", () => {
     render(
       <IssueSessionStatus

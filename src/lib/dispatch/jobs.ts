@@ -51,6 +51,7 @@ import {
   describeCodeReviewRejection,
   describeManualStepAbortRejection,
   describeCrossRepoQuestionRejection,
+  describeManualStepSessionRejection,
   describeDispatchReportLost,
   describeDispatchTimeout,
   describeManualStepExecutionRejection,
@@ -72,6 +73,7 @@ import {
   readDispatchAgent,
   resolveCodeReviewRejection,
   resolveCrossRepoQuestionRejection,
+  resolveManualStepSessionRejection,
   resolveDispatchConcurrency,
   resolveDispatchAgentRejection,
   resolveManualStepAbortRejection,
@@ -86,6 +88,7 @@ import {
   SESSION_LAUNCH_JOB_KINDS,
   type CodeReviewRejection,
   type CrossRepoQuestionRejection,
+  type ManualStepSessionRejection,
   type DispatchAgent,
   type DispatchEnqueueRejection,
   type DispatchHostView,
@@ -232,6 +235,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     codeReviewCapable: host.codeReviewCapable,
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
+    manualStepSessionCapable: host.manualStepSessionCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -673,6 +677,92 @@ export async function enqueueCrossRepoQuestionJob(params: {
           params.repositoryFullName,
           params.issueNumber,
           "CROSS_REPO_QUESTION",
+        ),
+        requestedByUserId: params.requestedByUserId,
+      },
+    });
+    return { ok: true, job: toJobView(job) };
+  } catch {
+    return reject("already_queued");
+  }
+}
+
+export type EnqueueManualStepSessionJobResult =
+  | { ok: true; job: DispatchJobView }
+  | { ok: false; rejection: ManualStepSessionRejection; message: string };
+
+/**
+ * 手作業Issueを実施するClaude Codeセッション（#2771）を積む。
+ *
+ * 横断質問（`enqueueCrossRepoQuestionJob`）と同じ作法で、**動いているセッションがあれば弾く**
+ * （同じIssueにセッションは1本）。対象が`71.manual-step`のIssueかどうかは**DBのIssueキャッシュの
+ * ラベル**で確かめる——代行実行（`enqueueManualStepJob`）と同じ材料で、画面が送ってきた値は
+ * 信用しない。`activeKey`は`manual_step_session:owner/repo#番号`で、代行実行（`manual_step:…`）
+ * や完了確認の巡回とは名前空間を分ける（互いに弾き合わない）。
+ */
+export async function enqueueManualStepSessionJob(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  hostName: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueManualStepSessionJobResult> {
+  const now = params.now ?? new Date();
+  await expireStaleDispatchJobs(now);
+
+  const reject = (rejection: ManualStepSessionRejection): EnqueueManualStepSessionJobResult => ({
+    ok: false,
+    rejection,
+    message: describeManualStepSessionRejection(rejection, { hostName: params.hostName }),
+  });
+
+  const issue = await findIssueForManualStep(params.repositoryFullName, params.issueNumber);
+  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+
+  const aliveSession = await db.dispatchSession.findFirst({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      state: "ALIVE",
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+  const sessionHost = aliveSession
+    ? aliveSession.host === host?.name
+      ? host
+      : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } })
+    : null;
+  const blockingSession =
+    aliveSession && sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)
+      ? aliveSession
+      : null;
+
+  const rejection = resolveManualStepSessionRejection({
+    host: host
+      ? {
+          online: isDispatchHostOnline(host.lastSeenAt, now),
+          manualStepSessionCapable: host.manualStepSessionCapable,
+        }
+      : null,
+    isManualStepIssue: issue !== null && issue.labels.some((l) => l.name === "71.manual-step"),
+    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）
+    hasActiveJob: false,
+    blockingSession,
+  });
+  if (rejection) return reject(rejection);
+
+  try {
+    const job = await db.dispatchJob.create({
+      data: {
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+        targetHost: params.hostName,
+        kind: "MANUAL_STEP_SESSION",
+        status: "QUEUED",
+        activeKey: buildDispatchActiveKey(
+          params.repositoryFullName,
+          params.issueNumber,
+          "MANUAL_STEP_SESSION",
         ),
         requestedByUserId: params.requestedByUserId,
       },
@@ -1512,6 +1602,9 @@ export async function claimDispatchJobs(params: {
   // **コードレビュー（#698）も同じ枠。** レビュー1本で終わるが、走っている間はtmuxセッションを
   // 1本占めるため、枠外へ出すと本数の見積もりが崩れる（計画レビューと同じ扱い）
   if (host?.codeReviewCapable === true) launchKinds.push("CODE_REVIEW");
+  // **手作業セッション（#2771）も同じ枠。** tmuxセッションを1本立てる点は横断質問と同じで、
+  // 対応を申告していないpollerに配ると未知の種別として`failed`になり、押した起動が失われる
+  if (host?.manualStepSessionCapable === true) launchKinds.push("MANUAL_STEP_SESSION");
 
   const running = await db.dispatchJob.count({
     where: {
@@ -2036,6 +2129,8 @@ export async function announceDispatchHost(params: {
    * **`codexCapable`とは別**（`remote-control`はstandalone installのCodexでしか動かない。#2521）
    */
   codexRemoteControlCapable: boolean | null;
+  /** 手作業セッション（#2771）を起こせるか。申告していないpollerでは`null`＝非対応 */
+  manualStepSessionCapable: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -2103,6 +2198,7 @@ export async function announceDispatchHost(params: {
     codeReviewCapable: params.codeReviewCapable,
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,
+    manualStepSessionCapable: params.manualStepSessionCapable,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

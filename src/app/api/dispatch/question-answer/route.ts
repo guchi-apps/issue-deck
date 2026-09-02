@@ -17,6 +17,8 @@ import {
 } from "@/lib/dispatch/session-question-request";
 import { createComment } from "@/lib/github/issues-api";
 import { posterMarker } from "@/lib/github/project-status-dispatch";
+import { db } from "@/lib/db";
+import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -87,14 +89,20 @@ export async function POST(request: NextRequest) {
   // **押したことをIssueへ残す**（誰がいつ何を選んだのかが残らないと、仕様が決まった経緯を
   // 追えない）。**失敗しても成功として返す**——回答はもうDBに入っていてセッションへ届くので、
   // ここで失敗を返すと「効かなかった」と誤解して押し直すことになる
-  await recordAnswerComment({
-    repositoryFullName: result.request.repositoryFullName,
-    issueNumber: result.request.issueNumber,
-    decision,
-    questions: questions ?? result.request.questions,
-    answers,
-    login: user.githubLogin,
-  });
+  //
+  // **手作業Issue（`71.manual-step`）には残さない**（#2771）。手作業セッションは手順を1つ実行する
+  // たびに「次へ進みますか」と聞くため、手順の数だけコメントが増える。代行実行が「手順ごとに
+  // Issueへコメントはしない」（#1828）としているのと揃える。回答自体はDBに残り、セッションへ届く
+  if (!(await isManualStepIssueInCache(result.request.repositoryFullName, result.request.issueNumber))) {
+    await recordAnswerComment({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+      decision,
+      questions: questions ?? result.request.questions,
+      answers,
+      login: user.githubLogin,
+    });
+  }
 
   // **答えた時点で確認待ちを解く**（#2341。計画への返事と同じ理由・同じ作法）。画面から
   // 答えた回は選択フォームが出ないため、フックの「答えた合図」（`PostToolUse`）が飛ばず、
@@ -107,6 +115,30 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ request: result.request });
+}
+
+/**
+ * DBのIssueキャッシュのラベルで、手作業Issueかどうかを見る。**読めなければ「手作業ではない」へ倒す**
+ * （コメントを残す側。残さないことより、残るべき回答が残らないことの方が困る）。
+ */
+async function isManualStepIssueInCache(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<boolean> {
+  try {
+    const repository = await db.repository.findFirst({
+      where: { fullName: repositoryFullName },
+      select: { id: true },
+    });
+    if (!repository) return false;
+    const issue = await db.issue.findFirst({
+      where: { repositoryId: repository.id, number: issueNumber },
+      select: { labels: { select: { name: true } } },
+    });
+    return issue ? issue.labels.some((label) => label.name === MANUAL_STEP_LABEL) : false;
+  } catch {
+    return false;
+  }
 }
 
 async function recordAnswerComment(params: {

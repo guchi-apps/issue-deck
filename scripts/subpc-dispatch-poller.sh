@@ -39,6 +39,8 @@
 # 立てるセッションにも2種類ある（#1454）。
 #
 #   LAUNCH              … 実装セッション。scripts/start-local-session.sh 経由でworktreeを作る
+#   MANUAL_STEP_SESSION … 手作業Issueを対話しながら実施するセッション（#2771）。worktreeを作らず、
+#                         セッション名は実装セッションと同じ（scripts/start-manual-step-session.sh）
 #   CROSS_REPO_QUESTION … 複数リポジトリ横断の質問セッション。worktreeを作らず、このホストが
 #                         実行できる全リポジトリを読み取り用に参照させる
 #                         （scripts/start-cross-repo-question.sh）
@@ -204,6 +206,9 @@ LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
 # worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
 QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
+# 手作業Issueを対話しながら実施するセッション（#2771）。**代行実行（`MANUAL_STEP`）とは別**で、
+# worktreeを作らずにtmuxセッションを1本立て、手順ごとに結果を示して人に聞きながら進める。
+MANUAL_STEP_SESSION_LAUNCHER="$SCRIPT_DIR/start-manual-step-session.sh"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
 MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
@@ -566,6 +571,17 @@ count_code_review_sessions() {
 # 新しくしてランチャーが同期されていない、という状態がありうる）。
 cross_repo_question_capable() {
   if [[ -f "$QUESTION_LAUNCHER" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# 手作業セッション（#2771）を起こせるか。**ランチャーが手元にあるかで判定する**
+# （`cross_repo_question_capable`と同じ）。申告しないと画面の「セッションを起動」が押せず、
+# 押せない理由に「pollerが対応していない」と出る。
+manual_step_session_capable() {
+  if [[ -f "$MANUAL_STEP_SESSION_LAUNCHER" ]]; then
     printf 'true'
   else
     printf 'false'
@@ -1073,6 +1089,7 @@ announce() {
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson manualStepValues "$(manual_step_values_capable)" \
+    --argjson manualStepSession "$(manual_step_session_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
     --argjson codex "$codex_flag" \
@@ -1086,7 +1103,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, screenshotCapable: $screenshotCapable, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepSession: $manualStepSession, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1989,10 +2006,12 @@ report_sessions() {
       --argjson codexThreadKnown "$(session_codex_thread_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
       --argjson step "$(session_step_json "$session_name")" \
+      --arg remoteControlUrl "$(session_transcript_remote_control_url "$session_name" 2>/dev/null || true)" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
         claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown}
-         + $reap + $step')")
+         + $reap + $step
+         + (if $remoteControlUrl == "" then {} else {remoteControlUrl: $remoteControlUrl} end)')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
 
   # 同じセッションに複数ペインがあると同名の項目が並ぶ。**死んでいる方を優先して1件に畳む**
@@ -2947,6 +2966,20 @@ run_job() {
     launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
       "横断質問セッションを起動しています" \
       bash "$QUESTION_LAUNCHER" "$owner" "$repo" "$issue_number"
+    return 0
+  fi
+
+  # 手作業セッション（#2771）。**`local_repo_check`は通さない。** worktreeを作らず、cwdは本体
+  # チェックアウト（無ければ固定ディレクトリ）で、cloneが無くてもランチャーが動く。セッション名は
+  # 実装セッションと同じ規約（`<repo>-issue-<番号>`）なので、重複起動の判定もそのまま効く。
+  if [[ "$kind" == "MANUAL_STEP_SESSION" ]]; then
+    if [[ ! -f "$MANUAL_STEP_SESSION_LAUNCHER" ]]; then
+      report_job "$job_id" failed "手作業セッションのランチャーがありません（$MANUAL_STEP_SESSION_LAUNCHER）。"
+      return 0
+    fi
+    launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
+      "手作業セッションを起動しています" \
+      bash "$MANUAL_STEP_SESSION_LAUNCHER" "$owner" "$repo" "$issue_number"
     return 0
   fi
 
