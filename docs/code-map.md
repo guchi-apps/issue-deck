@@ -2516,6 +2516,36 @@ export function POST(request: NextRequest) {
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
+- **リリース（本番反映）の完了もPush通知で届く**（#2725。
+  [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
+  リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
+  `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを
+  画面で扱っているissue-deck自身のPWAには届かなかった。** 巡回で新しいリリースを見つけ、
+  確認待ち・本番マージ待ち・デプロイ起動漏れと同じ経路に載せる。**Signalyへの通知は
+  そのまま残す**（宛先が1つ増えるだけ）。
+  - **判定はGitHub Releaseそのものを見る**（`fetchLatestRelease`。issue-deckがReleaseのAPIを
+    呼ぶのはここだけで、他は全部PRとworkflow runを見ている）。「本番へ出た版」を一意に指す
+    値はタグしか無く、`releases/latest`は**draftとprereleaseを除く**ので欲しい絞り込みが
+    そのまま得られる。取得はETagの条件付きGETを通すため、**リリースが増えない間は
+    レート制限を消費しない**。
+  - **鳴らした記録は`ReleasePushNotice`（リポジトリごとに1行）。** `releases/latest`は
+    「新しいかどうか」を教えないので、記録したタグと違うものが返ったときだけ鳴らす、という
+    形でしか判定できない。**記録の無いリポジトリは鳴らさずタグだけ入れる（種まき）**——
+    入れずに始めると導入直後の1巡で連携済みリポジトリぶんが一斉に鳴る。あわせて
+    `RELEASE_PUSH_MAX_AGE_HOURS`（既定24時間）より古いリリースも鳴らさない。
+  - **既存3種と違い「報せるだけ」の通知なので、鳴らし直しを持たない。** 代わりに
+    `RELEASE_PUSH_SWEEP_INTERVAL_MINUTES=0`で丸ごと止められるようにしてある。種別ごとの
+    ON/OFFのUIはまだ無い（設定は購読の有無だけ）。
+  - **本文はSignalyと同じ`.github/release-notes.md`を読む**（`parseReleaseNotes`）。
+    **見出し`# vX.Y.Z`がタグと一致したときだけ載せる**のも`signaly-notify.sh`と同じで、
+    リリースの流れの外でファイルが取り残されたとき、**古い文面を新しいバージョンの通知へ
+    貼るほうが本文が無いことより悪い**ため。取得に失敗しても通知そのものは出す。
+  - `POST /api/dispatch/claim`へ相乗りさせない理由・専用の受け口
+    （`POST /api/repositories/release-push-sweep`）を持つ理由は#2376と同じ。
+  - **タップ先はブランチ画面**（`pane=flow`・`mscreen=flow`）。押す操作は無いが、本番へ
+    出ている版と次に乗るIssueがそこに揃っている。`tag`はリポジトリ＋バージョンで一意に
+    する（**マージ待ちと違い1件ずつが別の出来事**で、同じ`tag`にすると前のリリースの
+    通知を置き換えてしまう）。
 - **用の済んだPush通知は、画面を開いた時点で閉じる**（#2407。
   [`hooks/use-push-notification-cleanup.ts`](../src/hooks/use-push-notification-cleanup.ts)・
   [`lib/notifications/stale-push.ts`](../src/lib/notifications/stale-push.ts)）。`public/sw.js`が

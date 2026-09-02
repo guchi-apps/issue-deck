@@ -1475,6 +1475,32 @@ model ReleaseMergePushNotice {
   @@index([repositoryFullName])
 }
 
+/// リリース（本番反映）の完了をPush通知した記録（#2725）。
+///
+/// **リポジトリごとに1行だけ持ち、「どのリリースまで鳴らしたか」を覚える。** 巡回は
+/// GitHubの`releases/latest`を見るだけで、そこには「新しいかどうか」が無い——記録した
+/// タグと違うものが返ってきたときだけ鳴らす、という形でしか判定できない。
+///
+/// **記録の無いリポジトリは鳴らさずに現在のタグだけ入れる（種まき）。** 入れずに始めると、
+/// 導入直後の1巡で連携済みリポジトリぶんの通知が一斉に鳴る。
+///
+/// マージ待ちの`ReleaseMergePushNotice`と違い、鳴らし直しはしない。リリースは
+/// 「人が動かないと止まるもの」ではなく、済んだことを報せるだけの通知のため。
+model ReleasePushNotice {
+  id                 String @id @default(cuid())
+  /// `guchi-apps/issue-deck`。リポジトリごとに1行
+  repositoryFullName String @unique
+  /// 最後に鳴らした（または種まきで記録した）リリースのタグ。例: `v4.74.0`
+  tagName            String
+  /// そのリリースの公開時刻。取れなかった場合はnull
+  publishedAt        DateTime?
+  /// 最後に鳴らした時刻。種まきで記録しただけの行はnull
+  notifiedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// サブPCのローカルセッション1本（＝転記ファイル1つ）が使ったトークン（#2504）。
 ///
 /// **本番のissue-deck（VPS）は転記を読めない。** 転記（`~/.claude/projects/<スラッグ>/<セッション
