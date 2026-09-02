@@ -91,6 +91,13 @@ type MobileHomeScreenProps = {
    * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
    */
   previewRunning: boolean;
+  /**
+   * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
+   * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
+   */
+  onSelectRepos: () => void;
+  /** 連携しているリポジトリの数（#2724）。「リポジトリ」の行に出す */
+  repositoryCount: number;
   favoriteRepositories: ConnectedRepository[];
   onSelectRepository: (repository: ConnectedRepository) => void;
   /**
@@ -124,9 +131,10 @@ type MobileHomeScreenProps = {
  * 出す項目を決めているのは`lib/nav-views.ts`・`lib/pull-request-views.ts`の`sidebar*`で、
  * 片方を足せば両方に出る。
  *
- * **PCにある「リポジトリ（全件）」「ラベル」は置かない。** リポジトリはフッターの「Issue」タブ
- * （リポジトリ一覧）、ラベルは一覧の絞り込みシートが既に担っており、ホームに3つ目の入口を
- * 作ると押す場所が割れる。
+ * **リポジトリは1行だけ置き、ラベルは置かない**（#2724）。リポジトリ一覧はフッターの「Issue」
+ * タブが担っていたが、そのタブを外したのでここが唯一の入口になった（PCの左メニューのように
+ * 全リポジトリを展開はせず、一覧画面へ渡す1行にとどめる）。ラベルは一覧の絞り込みシートが
+ * 既に担っており、ホームに2つ目の入口を作ると押す場所が割れる。
  *
  * **「ブランチ」行の件数はProviderから自分で読む**（#2167。`MobileBottomNav`・PCの左メニューと
  * 同じ形）。材料はベルと同じ1本のポーリングで、この画面を描いている`issue-deck-shell.tsx`は
@@ -170,6 +178,8 @@ export function MobileHomeScreenView({
   onSelectFlow,
   onSelectPreview,
   previewRunning,
+  onSelectRepos,
+  repositoryCount,
   favoriteRepositories,
   onSelectRepository,
   onLaunchNewApp,
@@ -405,6 +415,17 @@ export function MobileHomeScreenView({
                   count={navCounts[view.id]}
                 />
               ))}
+              {/* リポジトリ一覧（#2724）。**フッターの「Issue」タブを外した代わりの入口**で、
+                  ここを置かないと、お気に入りに入れていないリポジトリはURLを直に打つしか
+                  開く方法が無くなる（下の「お気に入りリポジトリ」はお気に入りだけの一覧で、
+                  1件も無ければ枠ごと出ない）。件数は連携しているリポジトリの数 */}
+              <MobileNavRow
+                label="リポジトリ"
+                icon={FolderGit2}
+                onClick={onSelectRepos}
+                count={repositoryCount}
+                title="リポジトリを選んで、そのリポジトリのIssue一覧を開く"
+              />
             </ul>
           </div>
 

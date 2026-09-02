@@ -34,8 +34,6 @@ const issuesScreen: MobileScreen = {
 describe("resolveBottomNavTab", () => {
   it("タブ画面はそのままのタブを返す", () => {
     expect(resolveBottomNavTab({ kind: "home" })).toBe("home");
-    expect(resolveBottomNavTab({ kind: "repos" })).toBe("repos");
-    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "tab" })).toBe("pull-requests");
     // ブランチは#1638でタブになった（旧「設定」の枠）
     expect(resolveBottomNavTab({ kind: "flow" })).toBe("flow");
   });
@@ -52,34 +50,27 @@ describe("resolveBottomNavTab", () => {
     expect(resolveBottomNavTab({ kind: "usage" })).toBe("usage");
   });
 
-  it("リポジトリ別Issue一覧では「Issue」タブ（repos）を返す", () => {
-    expect(resolveBottomNavTab(repoDetail)).toBe("repos");
+  // #2724でフッターの「Issue」（リポジトリ一覧）・「PR」タブを外したため、Issue・PRに関わる
+  // 画面はどれもホームからのドリルダウンになった（遷移元がどこでも「ホーム」を点灯させる）
+  it("リポジトリ一覧・リポジトリ別Issue一覧・PR一覧ではホームタブを返す", () => {
+    expect(resolveBottomNavTab({ kind: "repos" })).toBe("home");
+    expect(resolveBottomNavTab(repoDetail)).toBe("home");
+    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "tab" })).toBe("home");
+    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "home" })).toBe("home");
   });
 
   // 全リポジトリ横断のIssue一覧はフッターから外し、ホームからのドリルダウンにした（#1436）
-  it("全リポジトリ横断のIssue一覧ではホームタブを返す", () => {
+  it("全リポジトリ横断のIssue一覧では、遷移元によらずホームタブを返す", () => {
     expect(resolveBottomNavTab(issuesScreen)).toBe("home");
     expect(resolveBottomNavTab({ ...issuesScreen, origin: "home" })).toBe("home");
-  });
-
-  // 「Issue」タブのリポジトリ一覧から開いた場合だけ「Issue」タブを点灯させる（#1951）
-  it("リポジトリ一覧から開いた横断のIssue一覧では「Issue」タブ（repos）を返す", () => {
-    expect(resolveBottomNavTab({ ...issuesScreen, origin: "repos" })).toBe("repos");
-    expect(
-      resolveBottomNavTab({
-        kind: "issue-detail",
-        issue,
-        back: { ...issuesScreen, origin: "repos" },
-      }),
-    ).toBe("repos");
-  });
-
-  it("ホームから開いたPR一覧でもPRタブを返す", () => {
-    expect(resolveBottomNavTab({ kind: "pull-requests", origin: "home" })).toBe("pull-requests");
+    expect(resolveBottomNavTab({ ...issuesScreen, origin: "repos" })).toBe("home");
   });
 
   it("Issue詳細では戻り先の画面に応じたタブを返す", () => {
     expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: issuesScreen })).toBe("home");
-    expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: repoDetail })).toBe("repos");
+    expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: repoDetail })).toBe("home");
+    expect(resolveBottomNavTab({ kind: "issue-detail", issue, back: { kind: "flow" } })).toBe(
+      "flow",
+    );
   });
 });

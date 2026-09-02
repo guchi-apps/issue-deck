@@ -170,15 +170,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **スマホのPR一覧とPR詳細は同じ`mscreen=pull-requests`を共有し、どちらを出すかは`pr`クエリ
   だけが決める**（#1087・#1260。判定は[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)）。
   そのため**画面を移る遷移では`prmodal`と一緒に`pr`も落とす**——落とし忘れると`pr`がURLに残り、
-  「PR」タブを押した瞬間に`mscreen`だけが戻って直前に見たPRの詳細が復活し、一覧へ辿り着けなく
-  なる（#2700）。落とすのは[`use-mobile-screen.ts`](../src/hooks/use-mobile-screen.ts)の
+  ホームの「Pull Request」から一覧を開いた瞬間に`mscreen`だけが戻って直前に見たPRの詳細が
+  復活し、一覧へ辿り着けなくなる（#2700）。落とすのは[`use-mobile-screen.ts`](../src/hooks/use-mobile-screen.ts)の
   `navigate`で、PC側は`use-issue-filters.ts`の`selectView`・`selectPullRequestView`・
   `selectFlowPane`・`selectPreviewPane`・`selectUsagePane`が`pr: null`で同じことをしている。
   **`mrepo`・`missue`のようにスマホ専用の現在地だけを畳んで済ませない**——`pr`はPCと共有の
   クエリなので、スマホ側の畳み忘れに気付きにくい。詳細を開く経路（一覧のタップ・本文中の
   参照リンク）は`navigate`を通らないため、ここで一律に消して構わない。
 - **スマホのフッターは`flex-1`の均等割で、枠を増やすと1枠の幅がそのぶん縮む**（#2631）。
-  4枠のときは1枠98pxだったが、5枠目に「AI使用量」を足して78pxになった
+  iPhone 15（幅393px）で4枠なら1枠98px、5枠なら78px、いまの3枠なら131px
   （[`mobile-bottom-nav.tsx`](../src/components/dashboard/mobile-bottom-nav.tsx)）。
   **ラベルには`whitespace-nowrap`を付ける**——収まらない枠だけが2行になると、`min-h-14`が
   効いてその枠だけ背が伸び、フッターの高さ（56px）が枠ごとに食い違う。はみ出させておけば
@@ -901,8 +901,8 @@ export function POST(request: NextRequest) {
   [`mobile/mobile-home-screen.tsx`](../src/components/dashboard/mobile/mobile-home-screen.tsx)）。
   以前はホームだけ`navViews`から機械的に作った9項目の平坦な一覧で、PCとどちらが正なのか
   分からない状態だった。**片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは
-  「リポジトリ（全件）」「ラベル」の2節だけ（スマホではそれぞれフッターの「Issue」タブと
-  一覧の絞り込みシートが担う）。左メニュー下部にあった「よく使うフィルター」（保存した検索条件を
+  「リポジトリ（全件）」「ラベル」の2節だけ（スマホでは、リポジトリはホームの「リポジトリ」の
+  行が渡すリポジトリ一覧の画面、ラベルは一覧の絞り込みシートが担う。#2724）。左メニュー下部にあった「よく使うフィルター」（保存した検索条件を
   並べる節）は、スマホから外した後もPCで使われていなかったため#1754で画面・API・
   `QuickFilter`テーブルごと削除した。
   「本番反映待ち」は#1613でIssueの節から外していたが、#1743で戻した（PC・スマホのホーム・
@@ -1606,32 +1606,39 @@ export function POST(request: NextRequest) {
   （0を出すと「PRが無い」と読めてしまう。`lib/pull-request-list.ts`）。
   **戻るスワイプは`origin === "home"`のときだけ**有効にする——PR一覧は経路によらず`onBack`が
   渡ってくるので、Issue一覧のように`onBack`の有無で分けるとタブから開いたときもホームへ抜ける。
-- **スマホのフッターは「ホーム／Issue／PR／ブランチ」で、タブのidは`mscreen`の値そのもの**
-  （#1436・#1638）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
-  （→リポジトリ別Issue一覧）。
-  全リポジトリ横断のIssue一覧（`mscreen=issues`）はフッターから外し、ホームの「いまの状況」の
-  カードとメニューからのドリルダウンだけにした（#1690。点灯するタブはホーム。判定は
-  [`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。
-  **#1951で入口をもう1つ足し、「Issue」タブのリポジトリ一覧（検索窓の直下）からも開ける。**
-  どちらから来たかは`mfrom`＝`MobileIssuesOrigin`（`tab` / `home` / `repos`）が持ち、
-  **戻り先（`goBack`のフォールバック）・戻る導線の有無・点灯するタブの3つがこの1つの値で決まる**
-  （`repos`から来たときだけ「Issue」タブが点いたままリポジトリ一覧へ戻る）。
-  **`home`と`repos`をまとめない**——まとめると、リポジトリ一覧から開いたのにホームへ戻る。
+- **スマホのフッターは「ホーム／ブランチ／AI使用量」の3枠で、タブのidは`mscreen`の値そのもの**
+  （#1436・#1638・#2631・#2724）。
+  **Issue・Pull Requestに関わる画面はどれもフッターから外し、ホームからのドリルダウンにした。**
+  全リポジトリ横断のIssue一覧（`mscreen=issues`）が#1690から、リポジトリ一覧（`mscreen=repos`。
+  かつての「Issue」タブ。idが`repos`なのは`mscreen`の値だから）とPR一覧（`mscreen=pull-requests`）が
+  #2724から。押す頻度が低いわりに、5枠で1枠78pxまで詰まっていた。**どの画面でも点灯するのは
+  「ホーム」**（判定は[`lib/mobile-nav-tab.ts`](../src/lib/mobile-nav-tab.ts)）。設定・確認環境と
+  同じ`null`（どのタブも点灯させない）にはしない——いま自分がどの枝にいるのかが画面から消える。
+  **入口はホームのメニューに1か所ずつ置く**（[`mobile/mobile-home-screen.tsx`](../src/components/dashboard/mobile/mobile-home-screen.tsx)）。
+  「Issue」の節の末尾に「リポジトリ」の行、「Pull Request」の節に状態別ビューの行。
+  **「リポジトリ」の行を消さない**——お気に入りリポジトリの枠はお気に入りだけの一覧で、1件も
+  無ければ枠ごと出ないため、消すと非お気に入りのリポジトリはURLを直に打つしか開けなくなる。
+  横断Issue一覧には**#1951で足したもう1つの入口**（リポジトリ一覧の検索窓の直下）もあり、
+  どちらから来たかは`mfrom`＝`MobileIssuesOrigin`（`tab` / `home` / `repos`）が持つ。
+  **これは戻り先（`goBack`のフォールバック）と戻る導線の有無を決める**（点灯するタブは
+  #2724以降どれも「ホーム」なので、この値では変わらない）。**`home`と`repos`をまとめない**
+  ——まとめると、リポジトリ一覧から開いたのにホームへ戻る。
   行に出す件数は`navCounts.all`をそのまま渡す（左メニュー・ホームと同じ数え方。
   #2279以降は**非表示リポジトリのIssueを含まない**——遷移先の横断Issue一覧も同じ集合なので、
   ここで数え直さない限り件数と中身はずれない）。
-  **4枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
-  1段掘る必要があり（#1455）、設定は毎日押すものではない。**5つに増やさない**のは1タブあたりが
-  98px→78pxまで詰まるためで、設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車→
-  `selectSettings`）へ移した。`mscreen=settings`のURLはそのまま生きており、その画面では
-  `resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。
+  **2枠目は#1638で「設定」から「ブランチ」へ入れ替えた。** ブランチは日常的に開くのにホームから
+  1段掘る必要があり（#1455）、設定は毎日押すものではない。設定はホームのヘッダー右上
+  （`mobile-home-screen.tsx`の歯車→`selectSettings`）へ移した。`mscreen=settings`のURLはそのまま
+  生きており、その画面では`resolveBottomNavTab`が`null`を返して**どのタブも点灯させない**。
+  **フッターから外した画面には戻るボタンを置く**（設定・確認環境・リポジトリ一覧）。逆にタブへ
+  昇格させた画面では外す——タブから直接開く画面には戻り先が無い。
 - **「ブランチ」タブのアイコンには反映待ちの件数を重ねる**（#2055。
   [`lib/release-merge-pending.ts`](../src/lib/release-merge-pending.ts)）。
   数えるのは**PRの本数**で、developへ（バージョンバンプPR `release/v…`）と
   mainへ（リリースPR `develop`）のマージ待ちの合計。**Issueの件数ではない**——進捗Statusの
   `Develop`・`Release`を数える「本番反映待ち」（左メニュー・ホームのカード）とは母集団が違う。
-  **出すのは合計だけで、内訳は`title`・`aria-label`に入れる。** 1タブ98pxに内訳2つを並べると
-  フッターを56px→68pxへ伸ばすことになり、5枠に増やせないのと同じ制約に当たる。
+  **出すのは合計だけで、内訳は`title`・`aria-label`に入れる。** 1タブに内訳2つを並べると
+  フッターを56px→68pxへ伸ばすことになる。
   材料は`NotificationProvider`が持つ`releaseStatuses`（`releaseMergePending`として配る）で、
   **新しく`useRepositoryReleaseStatuses`を呼ばない**——呼ぶと
   `/api/repositories/release-pending-merges`のポーリングが2本走る（#1772）。
@@ -1645,10 +1652,11 @@ export function POST(request: NextRequest) {
   その親でフックを呼べないため、**件数はpropで配らず`MobileBottomNav`が自分で読む**。
   描画だけの`MobileBottomNavView`を別に出してあるのは、Providerを立てずに件数を渡して
   試験するため。
-- **PRタブから開くときの
-  ビューは`in-progress`で、`DEFAULT_PULL_REQUEST_VIEW`（`all`）は変えていない。** 既定を`all`に
-  しているのは画面内リンクからマージ済みPRを直接開く経路（#1260）のためで、そこを`in-progress`に
-  すると開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
+- **スマホのPR一覧は、押したビューでそのまま開く**（#2724）。フッターの「PR」タブが持っていた
+  既定ビュー（`PULL_REQUEST_TAB_DEFAULT_VIEW`。#1436で`in-progress`、#2176で`completed`）は
+  タブごと無くなった。**`DEFAULT_PULL_REQUEST_VIEW`（`all`）はこれとは別物で、変えていない**——
+  画面内リンクからマージ済みPRを直接開く経路（#1260）のための既定で、`in-progress`にすると
+  開いたPRが一覧の母集団から外れる。画面内のタブでのビュー切り替えはIssue一覧のタブと
   同じく履歴を積まない（`selectPullRequestView`）。
 - **PRの状態別ビューは3つで、左メニューにも3つとも出す**（#1312・#1613・#2120）。ビュー定義は[`lib/pull-request-views.ts`](../src/lib/pull-request-views.ts)、判定は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`filterPullRequestsByView`。
