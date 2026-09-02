@@ -130,6 +130,69 @@ export async function fetchLatestRelease(
   };
 }
 
+/** リリース履歴（#2726）の1件ぶん */
+export type ReleaseHistoryItem = {
+  repoFullName: string;
+  /** `v4.75.0` */
+  tagName: string;
+  name: string | null;
+  htmlUrl: string;
+  /** 公開時刻（ISO8601）。取れないもの（draftの取りこぼれ等）は呼び出し側で除く */
+  publishedAt: string | null;
+  /**
+   * リリース本文。`deploy.yml`が`generate_release_notes: true`で作るため、GitHubが
+   * 自動生成した「マージ済みPRタイトルの箇条書き＋Full Changelogリンク」が入る
+   * （issue-deckの`更新履歴`画面が持つような日本語の要約ではない）。
+   */
+  body: string | null;
+};
+
+/**
+ * そのリポジトリの直近のGitHub Releaseを新しい順に最大`perPage`件取得する（#2726）。
+ *
+ * **`releases/latest`（`fetchLatestRelease`）と違い、draft・prereleaseも含めて返す。**
+ * 呼び出し側（`selectVisibleReleaseHistory`等）でフィルタする。
+ *
+ * **ETagの条件付きGETを通す**（`fetchLatestRelease`と同じ）。リリースは月に数回しか増えない
+ * ため、巡回の大半は304になりレート制限を消費しない。
+ */
+export async function fetchRecentReleases(
+  owner: string,
+  repo: string,
+  token: string,
+  perPage = 20,
+): Promise<ReleaseHistoryItem[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/releases?per_page=${perPage}`;
+  const result = await githubFetchJsonWithEtag<
+    Array<{
+      tag_name?: string;
+      name?: string | null;
+      html_url?: string;
+      published_at?: string | null;
+      draft?: boolean;
+      body?: string | null;
+    }>
+  >(url, token);
+  if (!result.ok) {
+    // 404はリリースが1件も無いリポジトリ（`vps`・`subpc`のように`tag`ジョブを持たないもの）。
+    if (result.status === 404) return [];
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  return result.data
+    .filter((release) => !release.draft && release.tag_name)
+    .map((release) => ({
+      repoFullName: `${owner}/${repo}`,
+      tagName: release.tag_name as string,
+      name: release.name ?? null,
+      htmlUrl: release.html_url ?? `https://github.com/${owner}/${repo}/releases/tag/${release.tag_name}`,
+      publishedAt: release.published_at ?? null,
+      body: release.body ?? null,
+    }));
+}
+
 /**
  * 指定したref時点の`.github/release-notes.md`をそのまま読む。無ければnull（#2725）。
  *
