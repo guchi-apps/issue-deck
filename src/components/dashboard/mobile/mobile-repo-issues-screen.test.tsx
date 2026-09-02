@@ -33,6 +33,7 @@ const REPOSITORY: ConnectedRepository = {
   dispatchRunnable: false,
   hidden: false,
   favorite: false,
+  excludedFromIssueCreation: false,
 };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {

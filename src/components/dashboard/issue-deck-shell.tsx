@@ -932,6 +932,14 @@ export function IssueDeckShell({
     [repositories],
   );
 
+  // 「Issueを作成」ダイアログのリポジトリ選択肢は、上の`visibleRepositories`からさらに
+  // `excludedFromIssueCreation`を除いたもの（#2760）。左メニュー等の表示（`visibleRepositories`）
+  // には影響させない、Issue作成の選択欄だけを絞るための独立した集合。
+  const creatableRepositories = useMemo(
+    () => visibleRepositories.filter((repo) => !repo.excludedFromIssueCreation),
+    [visibleRepositories],
+  );
+
   // マージ直後はGitHub側の反映を待たずにマージ済みとして描く（#1756）。反映するのは
   // 「マージした時点の取得結果」に対してだけで、再取得（fetchedAtの更新）後は取得できた内容を
   // 正とする（マージできていなければまた一覧に現れる）。
@@ -1361,6 +1369,40 @@ export function IssueDeckShell({
     }
   }
 
+  /**
+   * 「Issueを作成」ダイアログのリポジトリ選択欄からの除外（#2760）。`hidden`とは独立の設定で、
+   * 左メニュー・Issue一覧などの表示には影響しない。
+   */
+  async function handleSetRepositoryIssueCreationExcluded(
+    repository: ConnectedRepository,
+    excluded: boolean,
+  ) {
+    setRepositories((prev) =>
+      prev.map((repo) =>
+        repo.id === repository.id ? { ...repo, excludedFromIssueCreation: excluded } : repo,
+      ),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/issue-creation-excluded", {
+        method: excluded ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id }),
+      });
+      if (!response.ok) throw new Error("failed to update issue-creation-excluded repository");
+    } catch (error) {
+      console.error(
+        "[issue-deck-shell] failed to update issue-creation-excluded repository",
+        error,
+      );
+      setRepositories((prev) =>
+        prev.map((repo) =>
+          repo.id === repository.id ? { ...repo, excludedFromIssueCreation: !excluded } : repo,
+        ),
+      );
+    }
+  }
+
   async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
     function applyFavorite(target: boolean) {
       setAllIssues((prev) =>
@@ -1679,6 +1721,7 @@ export function IssueDeckShell({
                   repositories={repositories}
                   onSetRepositoryHidden={handleSetRepositoryHidden}
                   onSetRepositoriesHidden={handleSetRepositoriesHidden}
+                  onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
                   onUpdated={handleAppSettingsUpdated}
                 />
               )}
@@ -2057,7 +2100,7 @@ export function IssueDeckShell({
         <CreateIssueDialog
           open={createDialogOpen}
           onOpenChange={setCreateDialogOpen}
-          repositories={visibleRepositories}
+          repositories={creatableRepositories}
           defaultRepositoryFullName={createDialogRepo}
           defaultTitle={createDialogTitle}
           defaultBody={createDialogBody}
@@ -2096,6 +2139,7 @@ export function IssueDeckShell({
           repositories={repositories}
           onSetRepositoryHidden={handleSetRepositoryHidden}
           onSetRepositoriesHidden={handleSetRepositoriesHidden}
+          onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
           onUpdated={handleAppSettingsUpdated}
         />
         <EditIssueDialog
