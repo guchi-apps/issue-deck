@@ -2211,6 +2211,30 @@ export function POST(request: NextRequest) {
   （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
   無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
   「バージョン不明」を出す（誤った版を出さないため）。
+- **複数リポジトリを一括でリリースするボタンは「ブランチ」画面のヘッダーに置く**（#2770）。
+  [`release-bulk-button.tsx`](../src/components/dashboard/release-bulk-button.tsx)。対象は
+  個別の「リリースする」ボタンと同じ`canTriggerRelease`（developがmainより進んでいる・
+  リリースworkflowを持つ・進行中でない）で絞り込むだけで、**新規のGitHub API問い合わせは
+  増やさない**——「ブランチ」画面は開いた時点で全リポジトリぶんこの判定を既に持っているため。
+  対象0件ならボタンごと出さない（「デプロイするものが無い場合は実行しない」という要求をUI側で
+  も満たす）。
+  **専用の一括起動APIは持たない。** 当初`POST /api/repositories/release-bulk`のような新規
+  ルートを計画したが、計画レビューで「`POST /api/repositories/release`が持つ前処理
+  （`previewModeGuard`・`releaseWorkflowExists`確認）とエラー整形
+  （[`lib/release-request.ts`](../src/lib/release-request.ts)の`releaseErrorMessage`）を
+  二重に持つ」と指摘され、対象ぶん既存の`requestRelease`を`Promise.allSettled`でループする
+  `requestReleaseBulk`に落とした。1件ずつ独立して成否が決まるため、一部のリポジトリが
+  失敗しても他は起動できる。
+  **起動できたリポジトリの「起動中」表示は、個別ボタンと同じ`useTriggerPending`を通す。**
+  このhookはリポジトリ1件ぶんで1インスタンスだけを持つ設計（#1955。上の「起動中は畳んだ1行にも
+  〜」参照）のため、ヘッダー側から直接は呼べない。`BranchFlowView`が
+  `releaseMarkTriggeredRegistry`（`useRef<Map<string, () => void>>`）を持ち、各
+  `RepositorySection`が自分の`markTriggered`をマウント中だけ登録する形でブリッジしている——
+  同じコンポーネントツリーの中にあるからこそ、外部（例えば設定画面）から書くのではなくrefで
+  直接呼べる。計画レビューでは当初「設定→フリート運用」への配置も検討したが、その場合は
+  この登録が別ツリーになり「起動中」が個別ボタンへ伝わらない（localStorageへの外部書き込みは
+  既にマウント済みの`usePersistedState`インスタンスには伝わらない）ため、Issue本文が名指しした
+  「ブランチ」画面への配置を選んだ。
 - **ブランチ状況とPR一覧の自動更新は、ユーザーが間隔を選んだときだけ回る**（#1767。
   更新ボタンの右のメニューで「自動更新しない（既定）／1分／5分／10分」。選択は端末の
   localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
