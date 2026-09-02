@@ -447,8 +447,18 @@ export function describeSessionRecovery(session: DispatchSessionView): SessionRe
  * nullを返しており、一覧の行には「サブPC」としか出ていなかった——動いているのは分かるが、
  * テストで詰まっているのかまだ調べているだけなのかが、Issueを開いても分からなかった。
  * 申告が無い（古いpoller・フックがまだ飛んでいない）ときは従来どおりnull。
+ *
+ * **`now`を渡すと、活動中は`調査中(2分)`のように経過時間を添える**（#2782で#2705の判断を
+ * 覆した。元は「一覧の行は狭く、`since`まで並べるとステップ名が折り返す」だったが、呼び出し側
+ * （`WorkflowStepBadge`）がこの短い表現だけを見せ、進捗Status・実行先の表記を削る形に変えた
+ * ことで、活動＋経過だけなら幅に収まるようになった）。`now`を渡さない（省略・null）ときは
+ * 経過を出さず活動名だけ返す——ラベル自体は`now`に依存しないので、マウント前でも短い表記を
+ * 出せる。
  */
-export function shortIssueSessionLabel(session: DispatchSessionView): string | null {
+export function shortIssueSessionLabel(
+  session: DispatchSessionView,
+  now: Date | null = null,
+): string | null {
   if (session.state === "FAILED") return "異常終了";
   // 終了の言い分けは`summarizeIssueSession`と同じ分岐にする（#1830）。片方だけ増やすと、
   // 同じ状態が一覧とIssue詳細で2通りの言い方になる
@@ -458,7 +468,7 @@ export function shortIssueSessionLabel(session: DispatchSessionView): string | n
   if (session.activity === "WAITING_INPUT") return "入力待ち";
   // 人が端末で答えるまで進まない点は入力待ちと同じなので、一覧にも出す（#1465）
   if (session.activity === "NOT_STARTED") return "未開始";
-  // **経過時間は添えない。** 一覧の行は狭く、`describeSessionStep`の`since`まで並べると
-  // ステップ名が折り返す。時間が要る場面（長すぎるビルドを疑うとき）はIssue詳細で見る
-  return describeSessionStep(session)?.label ?? null;
+  const notice = describeSessionStep(session, now ?? undefined);
+  if (!notice) return null;
+  return now && notice.since ? `${notice.label}(${notice.since})` : notice.label;
 }

@@ -188,6 +188,67 @@ describe("WorkflowStepBadge", () => {
     expect(container.textContent).not.toContain("起動待ち");
     expect(liveSweep(container)).not.toBeNull();
   });
+
+  /**
+   * #2782。「計画検討中（サブPC・調査中）」が`max-w-[7rem]`（112px）の箱に収まらず、
+   * 見たい後半の「調査中」が省略記号で切れていた。セッションの様子が分かるときは、
+   * 進捗Status・実行先を省いてそれだけを見せる。
+   */
+  it("セッションが活動中のときは、進捗Status・実行先を省いて活動と経過時間だけを出す", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Planning"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({
+          step: "EXPLORING",
+          stepAt: new Date(NOW - 2 * 60_000).toISOString(),
+          stepSeenAt: new Date(NOW - 2 * 60_000).toISOString(),
+        })}
+        now={NOW}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("調査中(2分)");
+    expect(stepText).not.toContain("計画検討中");
+    expect(stepText).not.toContain("サブPC");
+    // 省いた情報はツールチップ（title）にそのまま残す
+    expect(container.querySelector("[title]")?.getAttribute("title")).toContain(
+      "計画検討中（サブPC・調査中(2分)）",
+    );
+  });
+
+  it("入力待ちも同じ箱に収まる短い表現だけを出す（活動中に限らない。#2782）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Planning"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({ activity: "WAITING_INPUT" })}
+        now={NOW}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("入力待ち");
+    expect(stepText).not.toContain("計画検討中");
+  });
+
+  it("nowが無い（マウント前）ときも、短い表現のまま出す（経過時間だけ省く）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Planning"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({
+          step: "EXPLORING",
+          stepAt: new Date(NOW - 2 * 60_000).toISOString(),
+          stepSeenAt: new Date(NOW - 2 * 60_000).toISOString(),
+        })}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("調査中");
+  });
 });
 
 /**
