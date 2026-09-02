@@ -32,9 +32,12 @@ import { cn } from "@/lib/utils";
 
 /**
  * 「AI使用量」画面（#2504）。**サブPCのローカルセッションが使ったトークン**を、合計 → 推移 →
- * 内訳（リポジトリ別・種別別）→ 明細（セッション別）の順に出す。最後に、issue-deck本体の
- * AI機能が使ったAPIの内訳を置く（#2631で設定の「状態」から移設。`claudeApiUsage`を
- * 渡したときだけ出る）。
+ * 内訳（リポジトリ別・セッション種別別・アプリ内AI機能別）→ 明細（セッション別）の順に出す。
+ *
+ * **「アプリ内AI機能別」（issue-deck本体のAI機能が使ったAPIの内訳）は内訳の3枚目**で、
+ * セッション種別別の真下に並ぶ（#2631で設定の「状態」から移設し、#2752で画面のいちばん下から
+ * ここへ移した）。`claudeApiUsage`を渡したときだけ出る。**期間はこの画面のセレクタ1つに従い**、
+ * カード自前の切り替えは持たない（同じ画面に期間の指定が2つあると読み違える）。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`preview-panel.tsx`と同じ切り分け）。
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
@@ -535,8 +538,12 @@ function Breakdown({
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-semibold">{title}</span>
-        <span className="text-[11px] text-muted-foreground tabular-nums">{hint}</span>
+        {/* **見出しは折り返さない**（#2752）。スマホ幅では見出しと補足が2行ずつに割れて
+            カードの上半分が文字で埋まっていた。あふれたときに省略記号へ落ちるのは補足だけ */}
+        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">{title}</span>
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
+          {hint}
+        </span>
       </div>
       {rows.length === 0 ? (
         <p className="text-xs text-muted-foreground">記録がありません</p>
@@ -1047,6 +1054,28 @@ export function SessionUsagePanel({
     ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
     : "";
 
+  /**
+   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
+   * **置き場が2つある**（#2752）。ふだんはセッション種別別の真下だが、セッションの記録が
+   * まだ1件も無いときは上の内訳ごと描かれないため、単独でここへ出す。
+   */
+  const apiUsageSection = claudeApiUsage ? (
+    <section className="flex flex-col gap-2 rounded-lg border p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">アプリ内AI機能別</span>
+        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+          Issueの要約・AI検索など
+        </span>
+      </div>
+      <ClaudeApiUsageList
+        data={claudeApiUsage.data}
+        isLoading={claudeApiUsage.isLoading}
+        error={claudeApiUsage.error}
+        days={days}
+      />
+    </section>
+  ) : null;
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       <header className="flex flex-wrap items-center gap-2">
@@ -1150,7 +1179,9 @@ export function SessionUsagePanel({
             />
           </section>
 
-          <div className={cn("grid gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
+          <div
+            className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}
+          >
             <Breakdown
               title="リポジトリ別"
               hint={`${data.byRepository.length}リポジトリ`}
@@ -1158,11 +1189,16 @@ export function SessionUsagePanel({
               colorOf={(key) => getRepoColor(key || "(不明)")}
               maxVisibleRows={5}
             />
-            <Breakdown
-              title="種別別"
-              hint="作業ディレクトリで判定"
-              rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
-            />
+            {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
+                使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
+            <div className="flex flex-col gap-2">
+              <Breakdown
+                title="セッション種別別"
+                hint="作業ディレクトリで判定"
+                rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
+              />
+              {apiUsageSection}
+            </div>
           </div>
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
@@ -1209,24 +1245,10 @@ export function SessionUsagePanel({
         </>
       )}
 
-      {/* issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。
-          **`data`の外に置く**——セッションの記録がまだ届いていなくても、このアプリ自身の
-          消費は数えられているので出せる */}
-      {claudeApiUsage && (
-        <section className="flex flex-col gap-2 rounded-lg border p-3">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-xs font-semibold">API呼び出し（issue-deck本体）</span>
-            <span className="text-[11px] text-muted-foreground">
-              Issueの要約・検索・文章整理などで使った量
-            </span>
-          </div>
-          <ClaudeApiUsageList
-            data={claudeApiUsage.data}
-            isLoading={claudeApiUsage.isLoading}
-            error={claudeApiUsage.error}
-          />
-        </section>
-      )}
+      {/* **セッションの記録がまだ届いていないときの置き場**（#2752）。届いていれば上の
+          内訳（セッション種別別の下）へ出る。このアプリ自身の消費はセッションと無関係に
+          数えられているので、`data`が無くても出せる状態を保つ */}
+      {!data && apiUsageSection}
     </div>
   );
 }
