@@ -1166,12 +1166,7 @@ export function SessionUsagePanel({
           </div>
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold">Issue・PR別</span>
-              <span className="text-[11px] text-muted-foreground">
-                同じIssueと派生PRの実行をまとめて集計・棒はIssue間の金額比較
-              </span>
-            </div>
+            <span className="text-xs font-semibold">Issue・PR別</span>
             {issues.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 記録がありません。サブPCまたはGitHub Actionsから報告されると出ます。
