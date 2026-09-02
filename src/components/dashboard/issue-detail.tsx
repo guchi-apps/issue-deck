@@ -301,8 +301,10 @@ export function IssueDetail({
   );
   const {
     mergePullRequest,
+    closePullRequest,
     isSubmitting: isMergingPullRequest,
     error: mergePullRequestError,
+    setError: setMergePullRequestError,
   } = usePullRequestMergeMutation();
   // マージ済みの表示は、対応PR一覧を出している2箇所（本文の上・コメント欄のマージ待ちカード）で
   // 共有する。GitHub側の反映を待つ間だけの楽観表示なので、どのIssueで押したかを一緒に持ち、
@@ -312,9 +314,18 @@ export function IssueDetail({
     numbers: ReadonlySet<number>;
   } | null>(null);
   const [mergeTargetNumber, setMergeTargetNumber] = useState<number | null>(null);
+  // 「マージしない」（#2780）も同じ考え方で持つ。busy状態は`mergePullRequest`と共有するため
+  // （`usePullRequestMergeMutation`）、行を特定するのはこのtarget numberの役目になる
+  const [declinedPullRequests, setDeclinedPullRequests] = useState<{
+    issueKey: string;
+    numbers: ReadonlySet<number>;
+  } | null>(null);
+  const [declineTargetNumber, setDeclineTargetNumber] = useState<number | null>(null);
   const issueKey = issue ? `${issue.repositoryFullName}#${issue.number}` : "";
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
+  const declinedPullRequestNumbers =
+    declinedPullRequests?.issueKey === issueKey ? declinedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
 
   async function handleClose(stateReason: "completed" | "not_planned", closeReasonLabel?: string) {
     if (!issue) return;
@@ -524,6 +535,7 @@ export function IssueDetail({
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
     if (!issue) return false;
+    setDeclineTargetNumber(null);
     setMergeTargetNumber(pullRequestNumber);
     const [owner, repo] = issue.repositoryFullName.split("/");
     return mergePullRequest({ owner, repo, number: pullRequestNumber });
@@ -538,6 +550,47 @@ export function IssueDetail({
       ]),
     }));
     // 楽観表示のあと、GitHub側の状態（マージ済み・CI）を取り直して実データへ寄せる
+    refreshPullRequests();
+  }
+
+  /**
+   * 「マージしない」（#2780）。PRをマージせずにクローズし、Issueも「対応終了」として
+   * クローズする。closeは終端`Closed`への遷移として扱われる既存の仕組み（issues Webhook）に
+   * そのまま乗る。
+   */
+  async function handleDeclinePullRequest(pullRequestNumber: number): Promise<boolean> {
+    if (!issue) return false;
+    setMergeTargetNumber(null);
+    setDeclineTargetNumber(pullRequestNumber);
+    const [owner, repo] = issue.repositoryFullName.split("/");
+    const closed = await closePullRequest({ owner, repo, number: pullRequestNumber });
+    if (!closed) return false;
+
+    const updated = await updateIssue({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      state: "closed",
+      stateReason: "not_planned",
+      labels: labelsAfterApproval(issue.labels),
+    });
+    if (updated) {
+      onIssueUpdated(updated);
+    } else {
+      setMergePullRequestError(
+        "PRはクローズしましたが、Issueのクローズに失敗しました。手動でクローズしてください。",
+      );
+    }
+    return true;
+  }
+
+  function handlePullRequestDeclined(pullRequestNumber: number) {
+    setDeclinedPullRequests((prev) => ({
+      issueKey,
+      numbers: new Set([
+        ...(prev?.issueKey === issueKey ? prev.numbers : []),
+        pullRequestNumber,
+      ]),
+    }));
     refreshPullRequests();
   }
 
@@ -1022,10 +1075,16 @@ export function IssueDetail({
                 mergeApprovalPending={mergeApprovalPending}
                 onMerge={handleMergePullRequest}
                 onMerged={handlePullRequestMerged}
+                onDecline={handleDeclinePullRequest}
+                onDeclined={handlePullRequestDeclined}
                 mergedNumbers={mergedPullRequestNumbers}
+                declinedNumbers={declinedPullRequestNumbers}
                 mergeTargetNumber={mergeTargetNumber}
                 isMerging={isMergingPullRequest}
+                declineTargetNumber={declineTargetNumber}
+                isDeclining={isMergingPullRequest}
                 mergeError={mergePullRequestError}
+                declineError={mergePullRequestError}
               />
             </IssueDetailSection>
           )}
@@ -1205,6 +1264,7 @@ export function IssueDetail({
               onRequestContinuation={handleRequestContinuation}
               onRequestPrFix={handleRequestPrFix}
               onMergePullRequest={handleMergePullRequest}
+              onDeclinePullRequest={handleDeclinePullRequest}
               isApproving={isSubmitting}
               isRejecting={isCommentSubmitting}
               isWithdrawing={isSubmitting}
@@ -1215,6 +1275,11 @@ export function IssueDetail({
               mergeTargetNumber={mergeTargetNumber}
               mergedPullRequestNumbers={mergedPullRequestNumbers}
               onPullRequestMerged={handlePullRequestMerged}
+              isDecliningPullRequest={isMergingPullRequest}
+              declinePullRequestError={mergePullRequestError}
+              declineTargetNumber={declineTargetNumber}
+              declinedPullRequestNumbers={declinedPullRequestNumbers}
+              onPullRequestDeclined={handlePullRequestDeclined}
               targetCommentIndex={targetCommentIndex}
               targetCommentRef={targetCommentRef}
               commentSummary={commentSummary}

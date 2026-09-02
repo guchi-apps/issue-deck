@@ -47,6 +47,8 @@ export const GITHUB_API_FEATURES = [
   { key: "comment_write", label: "コメントの投稿・編集・削除" },
   { key: "workflow_cancel", label: "実行のキャンセル" },
   { key: "pull_request_merge", label: "PRのマージ" },
+  // 「マージしない」（#2780）。マージせずにPRをクローズするときだけ消費する。
+  { key: "pull_request_close", label: "PRのクローズ（マージしない）" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   // コンフリクトしたPRの巡回検知（#2116）。PR一覧のRESTはETagが効くので、実際に消費するのは
   // コンフリクトしているPRがあるときのGraphQLと起動だけ。
