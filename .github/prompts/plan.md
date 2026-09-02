@@ -193,10 +193,20 @@ GitHub純正の画像CDNではないため自動では読み込めません。�
 - 元Issue自体の実装はまだ承認待ちのままで構いません。承認フローを経ずに、この計画提示ステップの
   中でそのまま `gh issue create --title "..." --body "..."` を実行してよいです
 - **起票の前に、同じ対象のopenなIssueが既に無いかを引いてください**（#2250）。あれば起票せず、
-  そのIssueへコメントします。探す語は**対象の固有名**（アプリ名・ホスト名・サービス名）にします
-  （`gh issue list --repo <owner/repo> --state open --search "<固有名>" --json number,title`）。
+  そのIssueへコメントします。探す語は**対象の固有名**（アプリ名・ホスト名・サービス名）にします。
+  **このステップの許可リストに`gh issue list`は含まれていないため、`--search`付きの`gh issue list`
+  は使わず、必ず次の`gh api`の形で引いてください**（#2720。`gh issue list --search`は無人実行だと
+  承認待ちで止まり、誰も承認できず失敗します）
+
+  ```
+  gh api search/issues --method GET -f q='repo:<owner>/<repo> is:issue is:open <固有名>' --jq '.items[] | {number, title}'
+  ```
+
   `aide-bot`の立ち上げでは、同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件
   立ちました。**後から調査に入ったエージェントが既存のIssueを探さなかったことが原因です**
+- **重複確認のコマンド自体が拒否される・失敗する等でどうしても実行できなかった場合、起票を諦めて
+  終わらせない。** 気づいた別件の内容と「重複確認ができなかったため起票を見送った」旨を計画
+  コメントに明記し、人間が拾って判断できるようにする（#2720）
 - 新規Issueの本文には、元Issueへのトレーサビリティのため「起点: #${ISSUE_NUMBER}」を
   含め、元Issueを読み返さなくても単独で内容が伝わる程度に背景・要件を書いてください
 - Issue本文を `@claude` から書き始めないでください（`claude-issue-dispatch.yml`の
