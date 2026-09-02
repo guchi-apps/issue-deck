@@ -27,6 +27,8 @@ import type { PullRequestSummary } from "@/types/pull-request";
 
 function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: "guchi-apps/issue-deck#1",
     repositoryFullName: "guchi-apps/issue-deck",
     repositoryPrivate: false,

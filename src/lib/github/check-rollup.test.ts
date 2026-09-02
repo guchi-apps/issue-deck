@@ -94,6 +94,8 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "cancelled" },
       ],
       mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: null,
+      ciChecks: expect.any(Array),
     });
   });
 
@@ -120,6 +122,8 @@ describe("fetchCheckRollup", () => {
         { status: "pending", conclusion: null },
       ],
       mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: null,
+      ciChecks: expect.any(Array),
     });
   });
 
@@ -142,6 +146,8 @@ describe("fetchCheckRollup", () => {
     await expect(fetchCheckRollup("owner", "repo", "develop", "token")).resolves.toEqual({
       state: "pending",
       checks: [{ status: "completed", conclusion: "success" }],
+      ciRunId: 1,
+      ciChecks: expect.any(Array),
       mergeJudgement: {
         state: "pending",
         step: null,
@@ -149,6 +155,107 @@ describe("fetchCheckRollup", () => {
         aiReview: AI_REVIEW_NONE,
       },
     });
+  });
+
+  it("CIの内訳を開くrunは「失敗 → 実行中 → 先頭」の順で選ぶ（#2777）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "FAILURE",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            {
+              ...checkRun("COMPLETED", "SUCCESS", "ci.yml", "docs"),
+              detailsUrl: "https://github.com/owner/repo/actions/runs/11/job/1",
+            },
+            {
+              ...checkRun("IN_PROGRESS", null, "ci.yml", "build"),
+              detailsUrl: "https://github.com/owner/repo/actions/runs/22/job/2",
+            },
+            {
+              ...checkRun("COMPLETED", "FAILURE", "ci.yml", "test"),
+              detailsUrl: "https://github.com/owner/repo/actions/runs/33/job/3",
+            },
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.ciRunId).toBe(33);
+  });
+
+  it("実行ログのURLが読めなければ内訳を出さない（#2777）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 1,
+          nodes: [{ ...checkRun("IN_PROGRESS", null, "ci.yml"), detailsUrl: null }],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.ciRunId).toBeNull();
+  });
+
+  it("内訳の行は、CI状態と同じ母集団（運用自動化を除いた全チェック）になる（#2777）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 3,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
+            // mainへのリリースPRでは`ci.yml`以外の検査系もCI状態に入る
+            checkRun("IN_PROGRESS", null, "version-tag-check.yml", "version-tag-check"),
+            // 運用自動化はCI状態から外れるので、内訳にも出さない
+            checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.ciChecks.map((check) => check.name)).toEqual([
+      "lint-and-build",
+      "version-tag-check",
+    ]);
+  });
+
+  it("外部CI（commit status）が混ざるときは内訳を出さない（#2777）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
+            { __typename: "StatusContext", state: "FAILURE" },
+          ],
+        },
+      }),
+    );
+
+    // 行にできないチェックがある状態で並べると、バッジは失敗なのに内訳は全部成功に見える
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.ciChecks).toEqual([]);
+  });
+
+  it("チェックが100件を超えるときは内訳を出さない（1件ずつ見ていないため）（#2777）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "SUCCESS",
+        contexts: {
+          totalCount: 218,
+          nodes: [checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build")],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.ciChecks).toEqual([]);
   });
 
   it("ワークフローが分からないチェック（外部CI・他のアプリ）は数える", async () => {
@@ -172,6 +279,8 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "pending", conclusion: null },
       ],
+      ciRunId: 1,
+      ciChecks: expect.any(Array),
       mergeJudgement: {
         state: "pending",
         step: null,
@@ -202,6 +311,8 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "skipped" },
       ],
       mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: 1,
+      ciChecks: expect.any(Array),
     });
   });
 
@@ -475,6 +586,8 @@ describe("fetchCheckRollup", () => {
       state: "success",
       checks: null,
       mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: null,
+      ciChecks: expect.any(Array),
     });
   });
 
@@ -485,6 +598,8 @@ describe("fetchCheckRollup", () => {
       state: null,
       checks: [],
       mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: null,
+      ciChecks: expect.any(Array),
     });
   });
 
@@ -535,6 +650,8 @@ describe("fetchPullRequestRollup", () => {
         state: "success",
         checks: [{ status: "completed", conclusion: "success" }],
         mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        ciRunId: null,
+        ciChecks: expect.any(Array),
       },
       mergeable: false,
     });
@@ -554,6 +671,8 @@ describe("fetchPullRequestRollup", () => {
         state: null,
         checks: [],
         mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        ciRunId: null,
+        ciChecks: expect.any(Array),
       },
       mergeable: true,
     });
@@ -564,6 +683,8 @@ describe("fetchPullRequestRollup", () => {
         state: null,
         checks: [],
         mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        ciRunId: null,
+        ciChecks: expect.any(Array),
       },
       mergeable: null,
     });
@@ -577,6 +698,8 @@ describe("fetchPullRequestRollup", () => {
         state: null,
         checks: [],
         mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        ciRunId: null,
+        ciChecks: expect.any(Array),
       },
       mergeable: true,
     });
@@ -679,6 +802,8 @@ describe("fetchPullRequestRollups", () => {
       state: "success",
       checks: [],
       mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      ciRunId: null,
+      ciChecks: expect.any(Array),
     });
   });
 

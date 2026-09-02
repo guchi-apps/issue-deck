@@ -52,6 +52,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: "guchi-apps/shopping-list#146",
     repositoryFullName: "guchi-apps/shopping-list",
     repositoryPrivate: false,

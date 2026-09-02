@@ -37,6 +37,7 @@ function release(overrides: Partial<MainMergedPullRequest> = {}): MainMergedPull
 
 function deployRun(overrides: Partial<BranchFlowDeployRun> = {}): BranchFlowDeployRun {
   return {
+    id: 1,
     status: "completed",
     conclusion: "success",
     runAttempt: 1,

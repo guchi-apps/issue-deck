@@ -42,6 +42,7 @@ import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-i
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
+import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
@@ -392,6 +393,32 @@ function DeployStateBadge({
     </a>
   ) : (
     content
+  );
+}
+
+/**
+ * 実行の内訳を開閉する小さなトリガー（#2777）。
+ *
+ * **状態のピル自体は実行ログへのリンクのまま残す。** ピルの押下を開閉へ置き換えると、
+ * これまで1回で開けていたGitHubの実行ログが開けなくなる。行き先を減らさずに内訳を足すため、
+ * 開閉は隣の独立したボタンが持つ。
+ */
+function RunDetailToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
+      title={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+      aria-label={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+    >
+      {expanded ? (
+        <ChevronDown className="size-3.5" aria-hidden="true" />
+      ) : (
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+      )}
+    </button>
   );
 }
 
@@ -875,14 +902,20 @@ function ReleaseProgressPill({
  * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
  */
 function ReleaseGroupHeader({
+  repositoryFullName,
   group,
   releaseButton,
   onMerged,
 }: {
+  repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const deployRunId = group.deploy?.runId ?? null;
+  const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
@@ -940,13 +973,27 @@ function ReleaseGroupHeader({
           </span>
           {released ? (
             <>
-              {!inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {!inProduction && (
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
+              )}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
                   `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
-              {inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {inProduction && (
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
+              )}
             </>
           ) : waitingUserMerge ? (
             // mainへのマージだけは人が行う。待っているのが人の操作であることを、
@@ -973,6 +1020,17 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
+
+        {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+        {deployRunId !== null && (
+          <WorkflowRunProgressPanel
+            repositoryFullName={repositoryFullName}
+            runId={deployRunId}
+            open={runDetailOpen}
+            title="本番デプロイの内訳"
+            className="mt-0.5 max-w-2xl"
+          />
+        )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
@@ -1321,7 +1379,12 @@ function ReleaseGroupHeaderWithLanes({
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
+      <ReleaseGroupHeader
+        repositoryFullName={repositoryFullName}
+        group={group}
+        releaseButton={releaseButton}
+        onMerged={onMerged}
+      />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow

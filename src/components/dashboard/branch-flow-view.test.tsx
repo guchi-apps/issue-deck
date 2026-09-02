@@ -15,6 +15,8 @@ const REPO_SHORT = "issue-deck";
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const number = overrides.number ?? 1;
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: `${REPO}#${number}`,
     repositoryFullName: REPO,
     repositoryPrivate: false,
@@ -1451,6 +1453,7 @@ describe("BranchFlowView", () => {
           repositoryFullName: REPO,
           failureIssue: null,
           deployRun: {
+            id: 1,
             status: "completed",
             conclusion: "success",
             htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
@@ -1482,7 +1485,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("デプロイ中")).toBeTruthy();
     });
 
-    it("デプロイ失敗は実行ログへのリンク付きで出す", () => {
+    it("デプロイ失敗は実行ログへのリンク付きで出し、隣に内訳の開閉を置く（#2777）", () => {
       renderFlow({
         pullRequests: released,
         branchStatuses: [branchStatus()],
@@ -1499,6 +1502,8 @@ describe("BranchFlowView", () => {
       expect(
         badges.map((badge) => badge.closest("a")?.getAttribute("href")),
       ).toContain(`https://github.com/${REPO}/actions/runs/1`);
+      // ピルの押下は実行ログのまま。内訳は隣の独立したトリガーで開く（#2777）
+      expect(screen.getByRole("button", { name: "実行の内訳を開く" })).toBeTruthy();
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
     });
 
@@ -1862,6 +1867,7 @@ describe("BranchFlowView", () => {
             repositoryFullName: REPO,
             failureIssue: null,
             deployRun: {
+              id: 1,
               status: "in_progress",
               conclusion: null,
               htmlUrl: `https://github.com/${REPO}/actions/runs/1`,

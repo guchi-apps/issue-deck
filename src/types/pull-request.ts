@@ -1,10 +1,13 @@
 import type { CheckUserReason } from "@/lib/github/approval-labels";
-import type { MergeJudgement } from "@/lib/github/check-rollup";
+import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { CiState } from "@/lib/github/release-api";
 import type { DeployFailureIssueRef } from "@/types/branch-flow";
+
+/** CIの内訳に並べるチェック1件（#2777）。中身は`RollupCiCheck`そのもの */
+export type PullRequestCiCheck = RollupCiCheck;
 
 /** マージ待ちPRの種別。リポジトリ横断の一覧で「何を待っているPRか」を一目で区別するために使う */
 export type PullRequestKind =
@@ -79,6 +82,23 @@ export type PullRequestSummary = {
   linkedIssueCheckReason: CheckUserReason | null;
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
+  /**
+   * CIの内訳（ジョブ単位の進み具合・所要時間）を開くためのrun id（#2777）。読めなければnull。
+   *
+   * **CI状態と同じ1回のGraphQLに含まれる`detailsUrl`から取り出しているだけ**なので、
+   * これを持ってもGitHub APIの消費は増えない。nullのときは内訳を出さず、従来どおり
+   * CI状態のバッジだけを出す。
+   */
+  ciRunId: number | null;
+  /**
+   * CIの内訳に並べるチェック一覧（#2777）。CI状態のバッジと**同じ母集団**で、
+   * CI状態と同じ1回のGraphQLから作っているためGitHub APIの消費は増えない。
+   *
+   * **`ciRunId`の実行のジョブで代用しない。** mainへのリリースPRでは`ci.yml`のほかに
+   * `version-tag-check.yml`のジョブもCI状態に入るため、run 1本ぶんだけを並べると
+   * 「バッジは失敗・内訳は全部成功」という食い違いを作れる。
+   */
+  ciChecks: PullRequestCiCheck[];
   /**
    * 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968）。
    *

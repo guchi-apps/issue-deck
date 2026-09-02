@@ -3046,6 +3046,41 @@ function during render`）。「期限を過ぎたら元に戻す」のような
   （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
   9時間ずれる
 
+## GitHub Actionsの実行の「進み具合」と「所要時間」（#2777）
+
+デプロイ・CIの内訳（[`lib/workflow-run-progress.ts`](../src/lib/workflow-run-progress.ts)・
+`GET /api/workflow-runs`・[`WorkflowRunProgressPanel`](../src/components/dashboard/workflow-run-progress-panel.tsx)）
+を触るときに要る前提。
+
+- **runには完了時刻のフィールドが無い。** 所要時間は`updated_at - run_started_at`で求める
+  （`WorkflowRunStatus`も同じ求め方）。`updated_at`は完了で止まるので、これが実質の終了時刻になる。
+- **見込みは「成功した実行だけ」の中央値**（`fetchRecentSuccessfulRuns` → `medianMs`）。失敗・
+  キャンセルは途中で打ち切られた時間なので、混ぜると見込みが実際より短くなる。**平均にしない**
+  ——ランナーの待ちが長かった1回に引きずられ、いつまで待っても「あと少し」にならない見込みになる。
+  実績が3件に満たないときは**見込みを出さない**（外れた数字を出すと、以後その数字ごと信用されなくなる）。
+- **ジョブ単位の実績を全体の見込みに足し込まない。** CIのジョブは並列に走るため、合計すると実際の
+  倍以上になる。ジョブの実績は待ちの行へ「通常 ◯分」と添える目安にだけ使い、全体はrun単位の中央値で見る。
+- **`/actions/runs/{id}/jobs`の`steps`は、キューに入っただけのジョブでは返らないことがある。**
+  `job.steps.find(...)`はそこで落ちるので、`GithubApiWorkflowJob.steps`は任意にしてある
+  （`workflow-run-jobs.ts`が`?? []`で受ける）。
+- **キュー待ちのジョブの`started_at`は開始前の時刻**（GitHubがキュー投入時刻を入れる）。そのまま
+  経過時間にすると、待っているだけのジョブが何分も走っているように見える（`jobElapsedMs`が
+  `queued`を除いているのはこのため）。
+- **CIの内訳の行は、run 1本のジョブではなく`statusCheckRollup`のチェック一覧から作る**
+  （`ciChecks` → `toCiRunProgress`）。`CiStateBadge`が表しているのは`ci.yml`単体ではなく
+  **運用自動化を除いた全チェックの集約**で、mainへのリリースPRでは`version-tag-check.yml`の
+  ジョブも入る。run 1本だけを開くと「バッジは失敗・内訳は全部成功」という食い違いを作れる。
+  チェックの`name`・`detailsUrl`・`startedAt`・`completedAt`は**CI状態と同じ1回のGraphQL**で
+  取れるので、内訳のためにGitHub APIは増えない（run側は現在ステップと見込みを足すためだけに使う）。
+- **外部CIのcommit status（`StatusContext`）が混ざるときは内訳を出さない。** 名前も時刻も
+  持たないため行にできず、並べると「バッジは失敗なのに行は全部成功」に見える。
+- **見込みを出せるのは、チェックが1本のrunに収まっているときだけ。** 複数のワークフローに
+  またがっているのに1本ぶんの中央値を出すと、必ず短く出る。
+- **run idは`detailsUrl`から取る**（`extractRunIdFromDetailsUrl`）。読めなければnullにし、
+  内訳を出さない側（従来どおりバッジだけ）へ倒す。
+- **内訳の取得はパネルを開いている間だけ。** 閉じている間は1回も呼ばない。過去の実績は
+  ワークフロー単位で10分キャッシュする（[`lib/github/workflow-run-baseline.ts`](../src/lib/github/workflow-run-baseline.ts)）。
+
 ## Radixのポップオーバーをドロップダウンメニューの中に置くと、マウスを動かしただけで閉じる（#2458）
 
 **Radixのメニューは、マウスが乗った項目へフォーカスを移す**（`MenuItem`の`onPointerMove`が

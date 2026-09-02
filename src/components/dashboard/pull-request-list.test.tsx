@@ -10,6 +10,8 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
   const repositoryFullName = overrides.repositoryFullName ?? "guchi-apps/issue-deck";
   const number = overrides.number ?? 1;
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: `${repositoryFullName}#${number}`,
     repositoryFullName,
     repositoryPrivate: false,

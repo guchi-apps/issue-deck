@@ -6,6 +6,15 @@ export type GithubApiWorkflowRun = {
   conclusion: string | null;
   run_started_at: string;
   updated_at: string;
+  /**
+   * このrunを作ったワークフローの定義ID（#2777）。**見込み時間の材料を引くための鍵。**
+   * 同じワークフローの過去の実行を`/actions/workflows/{id}/runs`で引くのに使う
+   * （ファイル名でも引けるが、runからはIDしか取れない）。
+   */
+  workflow_id?: number;
+  name?: string | null;
+  html_url?: string;
+  run_attempt?: number;
 };
 
 export async function fetchWorkflowRun(
@@ -30,9 +39,20 @@ export type GithubApiWorkflowJobStep = {
 };
 
 export type GithubApiWorkflowJob = {
+  /** ジョブ名（`build`・`lint-and-build`など）。#2777で内訳を出すために使う */
+  name?: string;
   status: "queued" | "in_progress" | "completed" | string;
   conclusion: string | null;
-  steps: GithubApiWorkflowJobStep[];
+  /** 実行開始時刻（ISO8601）。キューに入っただけのジョブでは開始前の時刻が入ることがある */
+  started_at?: string | null;
+  /** 完了時刻（ISO8601）。未完了ならnull */
+  completed_at?: string | null;
+  html_url?: string | null;
+  /**
+   * ステップ。**キューに入っただけのジョブでは配列ごと返らないことがある**ため任意にしている
+   * （#2777。`getCurrentStepName`は空配列として扱う）。
+   */
+  steps?: GithubApiWorkflowJobStep[];
 };
 
 export async function fetchWorkflowRunJobs(
@@ -141,3 +161,56 @@ export async function closePullRequest(
   }
 }
 
+/** 過去の成功した実行1件。見込み時間の材料（#2777） */
+export type SuccessfulWorkflowRunRef = {
+  id: number;
+  /** 所要時間（ミリ秒） */
+  durationMs: number;
+};
+
+/**
+ * 同じワークフローの、直近の成功した実行を新しい順に返す（#2777）。
+ *
+ * **「あと何分待てばよいか」の材料。** GitHubは見込み時間を返してくれないため、過去の実測から
+ * 自前で見積もる。所要時間は`updated_at - run_started_at`で求める——runには完了時刻の
+ * フィールドが無く、`updated_at`が完了で止まるのが実質の終了時刻（`WorkflowRunStatus`が
+ * 既に同じ求め方をしている）。
+ *
+ * **成功した実行だけを見る。** 失敗・キャンセルは途中で打ち切られた時間なので、混ぜると
+ * 見込みが実際より短くなる。
+ *
+ * `workflowId`はrun側から取れる定義ID（`fetchWorkflowRun`の`workflow_id`）。ファイル名を
+ * 使わないのは、runから分かるのがIDだけで、CI・デプロイのどちらからも同じ手順で引けるため。
+ */
+export async function fetchRecentSuccessfulRuns(
+  owner: string,
+  repo: string,
+  workflowId: number,
+  token: string,
+  perPage = 20,
+): Promise<SuccessfulWorkflowRunRef[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${workflowId}/runs?status=success&per_page=${perPage}`;
+  const res = await githubFetch(url, token);
+  // 実行履歴が引けないこと自体は異常ではない（権限・ワークフローの削除）。見込みを出さない側へ倒す。
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: {
+    workflow_runs?: Array<{
+      id?: number;
+      run_started_at?: string;
+      created_at?: string;
+      updated_at?: string;
+    }>;
+  } = await res.json();
+  const runs: SuccessfulWorkflowRunRef[] = [];
+  for (const run of data.workflow_runs ?? []) {
+    const startedAt = run.run_started_at ?? run.created_at;
+    if (!run.id || !startedAt || !run.updated_at) continue;
+    const durationMs = Date.parse(run.updated_at) - Date.parse(startedAt);
+    if (Number.isFinite(durationMs) && durationMs > 0) runs.push({ id: run.id, durationMs });
+  }
+  return runs;
+}
