@@ -18,7 +18,8 @@ import type { ConnectedRepository } from "@/types/repository";
 
 /**
  * 全リポジトリ横断のIssue一覧（`mscreen=issues`）をどこから開いたか。URLの`mfrom`が正で、
- * 未指定は`tab`。戻り先（`goBack`）とフッターの点灯（`resolveBottomNavTab`）に効く。
+ * 未指定は`tab`。戻り先（`goBack`）と戻る導線の有無に効く。**フッターの点灯には効かない**
+ * ——#2724でIssue・PRのタブを外して以降、`resolveBottomNavTab`はどの遷移元でも「ホーム」を返す。
  */
 export type MobileIssuesOrigin = "tab" | "home" | "repos";
 
@@ -32,27 +33,29 @@ export type MobileScreen =
       assignee: string | null;
       sort: IssueSort;
       returnToIssueId: string | null;
-      // ボトムナビの「Issue」タブから直接開いたか（"tab"）、ホームの「よくつかう
-      // フィルター」「保存したフィルター」からのドリルダウンか（"home"）、「Issue」タブの
+      // かつてのボトムナビの「Issue」タブから直接開いたか（"tab"。#2724でそのタブは無くなり、
+      // いまは既定値としてだけ残る）、ホームのメニューからのドリルダウンか（"home"）、
       // リポジトリ一覧にある「すべてのリポジトリのIssue」からか（"repos"、#1951）。
       // "tab"以外は戻る導線（ヘッダーの戻るボタン・右スワイプ）を表示する（#525）。
-      // **戻り先とフッターの点灯（`mobile-nav-tab.ts`）はこの値だけで決まる。**
-      // "home"と"repos"を一緒くたにすると、リポジトリ一覧から開いたのにホームへ戻る。
+      // **戻り先はこの値だけで決まる。** "home"と"repos"を一緒くたにすると、リポジトリ一覧から
+      // 開いたのにホームへ戻る。
       origin: MobileIssuesOrigin;
     }
+  // リポジトリ一覧（#2724でボトムナビの「Issue」タブから外し、ホームのメニューの
+  // 「リポジトリ」の行から開く画面になった）。`mscreen=repos`のURLはそのまま生きている
   | { kind: "repos" }
   // 設定（#1638でボトムナビから外し、ホームのヘッダー右上の歯車から開く画面になった）。
   // `mscreen=settings`のURLはそのまま生きている
   | { kind: "settings" }
   // PR一覧（#1058）。どの状態別ビューを見ているかは`prview`クエリ（PCと共有）が持つ（#1312）。
-  // #1436でボトムナビのタブを持つようになったため、Issue一覧と同じく遷移元（`origin`）で
-  // 戻る導線の有無を切り替える（ホームの「Pull Request」からのドリルダウンでのみ出す）
+  // #1436でボトムナビのタブを持ったが#2724で外し、ホームの「Pull Request」の節から開く画面に
+  // 戻った。遷移元（`origin`）は戻る導線の有無に効き、`tab`は既存URL（`mfrom`なし）の既定値
   | { kind: "pull-requests"; origin: "tab" | "home" }
   // ブランチ（#1455）。当初はホームからのドリルダウンだけで開く画面だったが、
   // #1638でボトムナビの4枠目（旧「設定」）を受け取り、タブから直接開く画面になった
   | { kind: "flow" }
-  // 確認環境（#2444）。ボトムナビの枠は埋まっているので、ホームのメニューからの
-  // ドリルダウンだけで開く（設定と同じ形。戻る導線はヘッダーの戻るボタンが受け持つ）
+  // 確認環境（#2444）。ホームのメニューからのドリルダウンだけで開く（設定と同じ形。
+  // 戻る導線はヘッダーの戻るボタンが受け持つ）
   | { kind: "preview" }
   // AI使用量（#2504）。当初は確認環境と同じくホームのメニューからのドリルダウンだけで開く
   // 画面だったが、#2631でボトムナビの5枠目を持ち、タブから直接開く画面になった
@@ -70,18 +73,11 @@ export type MobileScreen =
     }
   | { kind: "issue-detail"; issue: Issue; back: MobileScreen };
 
-/**
- * フッターの「PR」タブから開くときのビュー（#1436・#2176）。
- *
- * **元は「実行中」だったが「マージ待ち」へ変えた（#2176）。** 実行中のPRはCIの結果を待つ
- * しかなく、タブを押した直後に手を動かせるのは「あとはマージするだけ」のPRの方。取得する
- * PRの母集団（`usePullRequests`の`scope`）はビューに依存しないので、どちらでも通信は増えない。
- *
- * 切り替えたいときは画面下端のビュー行・左右スワイプで1タップ・1スワイプで移れる
- * （`mobile-pull-requests-screen.tsx`）。`DEFAULT_PULL_REQUEST_VIEW`（`all`）は画面内のリンクから
- * マージ済みPRを直接開く経路（#1260）のための既定なので、そちらは変えない。
- */
-const PULL_REQUEST_TAB_DEFAULT_VIEW: PullRequestViewId = "completed";
+// フッターの「PR」タブから開くときの既定ビュー（`PULL_REQUEST_TAB_DEFAULT_VIEW` = 「マージ待ち」。
+// #1436・#2176）は、#2724でそのタブごと外したため無くなった。ホームの「Pull Request」の節から
+// 開く経路（`selectPullRequests`）は押した行のビューをそのまま開くので、既定値は要らない。
+// `DEFAULT_PULL_REQUEST_VIEW`（`all`）は画面内のリンクからマージ済みPRを直接開く経路（#1260）
+// のための既定で、そちらは別物として残っている。
 
 // スマホ画面の現在地をURLクエリ（mscreen/mrepo/missue/mview/mlabels/mstate/massignee/msort）に保持する。
 // ステートのみで管理するとページ更新時に必ずホーム画面へ戻ってしまい、Issue詳細から一覧へ
@@ -214,12 +210,16 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // `issues`（全リポジトリ横断のIssue一覧）はフッターのタブから外れたが、ホームからの
         // ドリルダウン先としては残るため、タブの集合とは別に列挙する（#1436）。
         // `settings`も#1638でタブから外れ、ホームのヘッダーから開く画面になった
-        // （`usage`は逆に#2631でタブになったので、`MobileBottomNavTab`の側に含まれる）
+        // （`usage`は逆に#2631でタブになったので、`MobileBottomNavTab`の側に含まれる）。
+        // `repos`（リポジトリ一覧）と`pull-requests`は#2724でタブから外れ、同じくホームの
+        // メニューからのドリルダウンになったため、ここへ移した
         screen:
           | MobileBottomNavTab
           | "issues"
           | "issue-detail"
+          | "repos"
           | "repo-detail"
+          | "pull-requests"
           | "settings"
           | "preview";
         repo?: string | null;
@@ -248,8 +248,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
         // 選択中のPRも畳む（#2700）。**スマホのPR一覧と詳細は同じ`mscreen=pull-requests`で、
         // どちらを出すかは`pr`クエリだけが決める**（`issue-deck-shell.tsx`・#1087）。畳まずに
-        // 他のタブへ移ると`pr`がURLに残り続け、「PR」タブを押した瞬間に`mscreen`だけが戻って
-        // 直前に見ていたPRの詳細が復活する（一覧に辿り着けなくなる）。PC側も画面が変わる
+        // 他の画面へ移ると`pr`がURLに残り続け、ホームの「Pull Request」から一覧を開いた瞬間に
+        // `mscreen`だけが戻って直前に見ていたPRの詳細が復活する（一覧に辿り着けなくなる）。PC側も画面が変わる
         // 遷移では`pr: null`を渡している（`use-issue-filters.ts`の`selectView`ほか）。
         // 詳細を開く経路（一覧のタップ・本文内のPRリンク）はこの`navigate`を通らないため、
         // ここで一律に消してよい（`use-issue-filters.ts`の`selectPullRequest`・
@@ -337,15 +337,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigateParams],
   );
 
-  const selectTab = useCallback(
-    (tab: MobileBottomNavTab) =>
-      navigate(
-        tab === "pull-requests"
-          ? { screen: tab, prview: PULL_REQUEST_TAB_DEFAULT_VIEW }
-          : { screen: tab },
-      ),
-    [navigate],
-  );
+  const selectTab = useCallback((tab: MobileBottomNavTab) => navigate({ screen: tab }), [navigate]);
+
+  // ホームのメニューからリポジトリ一覧へ遷移する（#2724）。「Issue」タブを外したため、
+  // `selectTab`ではなくこちらを使う。設定・確認環境と同じく、戻る導線はヘッダーの
+  // 戻るボタン（goBack）が受け持つ。
+  const selectRepos = useCallback(() => navigate({ screen: "repos" }), [navigate]);
 
   // ホームからPR一覧へ遷移する（#1058）。Issueの絞り込み条件は引き継がない。
   // どの状態別ビューを開くかはホームで選んだ項目が決める（#1312）。
@@ -410,7 +407,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     [navigate, mobileScreen, view, state, isStateExplicit],
   );
 
-  // 「Issue」タブのリポジトリ一覧から、全リポジトリ横断のIssue一覧を開く（#1951）。
+  // リポジトリ一覧から、全リポジトリ横断のIssue一覧を開く（#1951）。
   // ホームの「よくつかうフィルター」（selectQuickView）と違い、絞り込み条件は引き継がずに
   // 「すべてのIssue」の既定の状態で開く——リポジトリ一覧には引き継ぐ条件が無い。
   const selectAllIssues = useCallback(
@@ -546,6 +543,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   return {
     mobileScreen,
     selectTab,
+    selectRepos,
     selectPullRequests,
     selectPullRequestView,
     selectSettings,

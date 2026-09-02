@@ -261,6 +261,7 @@ export function IssueDeckShell({
   const {
     mobileScreen,
     selectTab,
+    selectRepos,
     selectPullRequests,
     // PC側（useIssueFilters）にも同名の関数があるため別名にする。こちらはスマホのPR画面内の
     // タブ切り替えで、履歴を積まない（#1436）
@@ -1471,6 +1472,11 @@ export function IssueDeckShell({
                   onSelectFlow={() => selectTab("flow")}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
+                  onSelectRepos={selectRepos}
+                  /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
+                     ——開いた先の一覧が既定で非表示ぶんを畳むため、含めるとホームの数字と
+                     並んでいる行数が食い違う */
+                  repositoryCount={repositories.filter((repo) => !repo.hidden).length}
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onLaunchNewApp={() => setNewAppDialogOpen(true)}
@@ -1626,6 +1632,7 @@ export function IssueDeckShell({
                   onSelectRepository={selectRepository}
                   onSelectAllIssues={selectAllIssues}
                   onSetRepositoryFavorite={handleSetRepositoryFavorite}
+                  onBack={goBack}
                 />
               )}
 

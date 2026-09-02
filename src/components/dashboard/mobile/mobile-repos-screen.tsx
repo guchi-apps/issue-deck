@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   Archive,
+  ChevronLeft,
   ChevronRight,
   CircleSlash,
   FolderGit2,
@@ -55,6 +56,8 @@ type MobileReposScreenProps = {
   /** 全リポジトリ横断のIssue一覧を開く（#1951） */
   onSelectAllIssues: () => void;
   onSetRepositoryFavorite: (repository: ConnectedRepository, favorite: boolean) => void;
+  /** 1つ前の画面へ戻る（#2724）。ホームのメニューからのドリルダウンになったため足した */
+  onBack: () => void;
 };
 
 /** 「すべてのIssue」ビューのアイコン。遷移先の一覧で選ばれるビューと同じものを出す（#1951） */
@@ -66,6 +69,7 @@ export function MobileReposScreen({
   onSelectRepository,
   onSelectAllIssues,
   onSetRepositoryFavorite,
+  onBack,
 }: MobileReposScreenProps) {
   const [query, setQuery] = useState("");
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
@@ -101,9 +105,20 @@ export function MobileReposScreen({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-center gap-1 border-b py-2 pr-2 pl-4">
-        {/* フッターの「Issue」タブが開く画面なので、見出しもラベルに揃える（#1436）。
+        {/* 戻る（#2724）。設定・確認環境と同じく、ホームのメニューからのドリルダウンに
+            なったため置く。戻り先の判断は`goBack`に任せる */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
+          aria-label="戻る"
+        >
+          <ChevronLeft className="size-5" />
+        </button>
+        {/* 見出しは押した行のラベルに揃える（#1436の考え方のまま）。#2724でフッターの
+            「Issue」タブを外し、ホームの「リポジトリ」の行が入口になったので「リポジトリ」。
             中身はリポジトリ一覧のままで、リポジトリを選ぶとそのIssue一覧へ進む */}
-        <h1 className="flex-1 text-base font-semibold">Issue</h1>
+        <h1 className="flex-1 text-base font-semibold">リポジトリ</h1>
         {/* リポジトリの表示・非表示を切り替える口は設定画面に同じものがあるため、
             ここのアイコンは置かない（#1685） */}
         {/* 実行状況（#1638）。画面固有の操作の右隣＝ヘッダーの右端に固定する */}

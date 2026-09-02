@@ -49,9 +49,48 @@ function renderScreen(releaseStatuses: RepositoryReleaseStatus[] | null) {
       onSelectRepository={vi.fn()}
       onSelectAllIssues={vi.fn()}
       onSetRepositoryFavorite={vi.fn()}
+      onBack={vi.fn()}
     />,
   );
 }
+
+// #2724でフッターの「Issue」タブを外し、ホームのメニューの「リポジトリ」の行からの
+// ドリルダウンになった。見出しは押した行のラベルに揃え、戻る導線を置く
+describe("MobileReposScreen のヘッダー（#2724）", () => {
+  beforeEach(() => {
+    useRepositoryReleaseStatuses.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("見出しは「リポジトリ」で、戻るボタンから1つ前の画面へ戻る", () => {
+    const onBack = vi.fn();
+    useRepositoryReleaseStatuses.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(async () => []),
+    });
+
+    render(
+      <MobileReposScreen
+        repositories={[REPO_A, REPO_B]}
+        allIssueCount={12}
+        onSelectRepository={vi.fn()}
+        onSelectAllIssues={vi.fn()}
+        onSetRepositoryFavorite={vi.fn()}
+        onBack={onBack}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("リポジトリ");
+
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("MobileReposScreen のリリース状況バッジ（#1117）", () => {
   beforeEach(() => {
@@ -160,6 +199,7 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
         onSelectRepository={vi.fn()}
         onSelectAllIssues={vi.fn()}
         onSetRepositoryFavorite={vi.fn()}
+        onBack={vi.fn()}
       />,
     );
   }
@@ -206,6 +246,7 @@ describe("MobileReposScreen の全リポジトリのIssueへの入口（#1951）
         onSelectRepository={vi.fn()}
         onSelectAllIssues={onSelectAllIssues}
         onSetRepositoryFavorite={vi.fn()}
+        onBack={vi.fn()}
       />,
     );
   }
