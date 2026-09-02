@@ -789,6 +789,17 @@ Status報告の両方を行う。新しいタグ（`workflows/v9`）を切って
 - **issue-deckへ届かない間、リリース時の一括遷移が止まる。** `main-pr-merged`は対象issueを
   1件も見つけられず、issueがcloseされない。Phase 4まではラベルで探しており、issue-deckに
   依存せず完結していた。取りこぼした場合はissue-deckの復旧後にrunを再実行する
+  - **このリスクは実際に踏んだ。** 「届かない」の中身はサービス断ではなく**遅さ**で、
+    `GET /api/progress?status=...`が盤面の全アイテムを100件ずつページングしていたため、
+    フリート全体が1,600件を超えた時点で1回の問い合わせが約40秒になり、呼び出し側の
+    `curl -m 20`が必ず時間切れになった（#2715・#2689のパターン3）。**規模で壊れる作りは、
+    壊れるまで正常に見える。** #2774で`fetchRepositoryOpenIssueStatuses`
+    （[src/lib/github/projects-api.ts](../src/lib/github/projects-api.ts)）を足し、
+    リポジトリ側から辿る1クエリ（実測1秒未満）に変えた。盤面の全走査が要るのは定期巡回
+    （`progress-sweep-run.ts`）だけで、そちらは`fetchProjectItems`のまま
+  - あわせて、リリースPR本文の対象一覧はこのAPIを使わずgitのマージコミットから作るようにした
+    （[docs/multi-agent/release.md](multi-agent/release.md)「対象一覧はプルリクエストが主、
+    issueは従」）。**判断材料をissue-deckの外で完結させられる場面では、そうする**
 - **盤面に載っていないリポジトリのIssueは一律「未着手」に見える。** ラベルという代替の表示元が
   無いため。#1047 の展開が終わるまで続く
 - **ローカルセッション（`scripts/start-issue.sh`・`scripts/generic-start-issue.sh`）は
