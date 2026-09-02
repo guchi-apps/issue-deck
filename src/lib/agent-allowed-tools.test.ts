@@ -15,10 +15,14 @@ import { describe, expect, it } from "vitest";
  */
 const SCRIPT_PATH = path.resolve(__dirname, "../../scripts/lib/agent-allowed-tools.sh");
 
-function allowedTools(): string {
-  return execFileSync("bash", ["-c", 'source "$0"; agent_allowed_tools', SCRIPT_PATH], {
-    encoding: "utf-8",
-  });
+function allowedTools(...extraReadPaths: string[]): string {
+  return execFileSync(
+    "bash",
+    // `bash -c <本文> <$0> <$1…>`。スクリプトのパスは`$0`に入るので、`"$@"`はそのまま
+    // 追加の絶対パスだけを指す（`shift`は要らない）。
+    ["-c", 'source "$0"; agent_allowed_tools "$@"', SCRIPT_PATH, ...extraReadPaths],
+    { encoding: "utf-8" },
+  );
 }
 
 const rules = allowedTools().split(",");
@@ -88,5 +92,53 @@ describe("agent_allowed_tools", () => {
 
   it("重複が無い", () => {
     expect(new Set(rules).size).toBe(rules.length);
+  });
+
+  describe("起動時に読むworktree外のファイル（#2778）", () => {
+    it("渡した絶対パスをRead規則として足す", () => {
+      const withFiles = allowedTools(
+        "/home/guchi/apps/issue-deck-worktrees/.prompts/issue-2778.md",
+        "/home/guchi/apps/issue-deck-worktrees/.dev-servers/issue-2778.log",
+      ).split(",");
+
+      // **スラッシュ2つで始める。** 1つだと設定ファイルからの相対として扱われ、規則が当たらない
+      // （`--permission-mode default`で実測）。
+      expect(withFiles).toContain(
+        "Read(//home/guchi/apps/issue-deck-worktrees/.prompts/issue-2778.md)",
+      );
+      expect(withFiles).toContain(
+        "Read(//home/guchi/apps/issue-deck-worktrees/.dev-servers/issue-2778.log)",
+      );
+      // 既存の規則は消えない（追加であって置き換えではない）。
+      expect(withFiles).toEqual(expect.arrayContaining(rules));
+    });
+
+    it("Read規則は1ファイルずつで、グロブを含まない", () => {
+      // **`Read(//…/**)`のようなディレクトリごとの許可を入れない。** 他Issueの指示ファイルまで
+      // 開くことになる。`Bash`側で`*`を禁じているのと同じ理由で、こちらも形で固定する。
+      const withFiles = allowedTools(
+        "/home/guchi/apps/issue-deck-worktrees/.prompts/issue-2778.md",
+      ).split(",");
+      for (const rule of withFiles.filter((r) => r.startsWith("Read("))) {
+        expect(rule).toMatch(/^Read\(\/\/[^()*]+\)$/);
+      }
+    });
+
+    it("ファイルを渡さなければRead規則は増えない", () => {
+      expect(rules.filter((rule) => rule.startsWith("Read("))).toEqual([]);
+    });
+
+    it("規則として当たらないパス・区切りを壊すパス・広すぎるパスは落とす", () => {
+      // 相対パスは設定ファイルからの相対になり、意図した場所に当たらない。空白とカンマは
+      // `--allowedTools`の区切り（"Comma or space-separated list"）なので1つの規則が割れる。
+      // `*`はグロブとして解釈され、渡した1ファイルより広い範囲を通す。
+      const dropped = allowedTools(
+        ".prompts/issue-2778.md",
+        "/tmp/a,b/issue-2778.md",
+        "/tmp/a b/issue-2778.md",
+        "/tmp/issue-*.md",
+      ).split(",");
+      expect(dropped).toEqual(rules);
+    });
   });
 });
