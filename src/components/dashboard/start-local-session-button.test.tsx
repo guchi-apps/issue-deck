@@ -55,6 +55,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     codeReviewCapable: null,
     codexCapable: null,
     codexRemoteControlCapable: null,
+    manualStepSessionCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,

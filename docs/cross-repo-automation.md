@@ -61,6 +61,11 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   issue-deckのCLAUDE.mdが定める自動マージ不可カテゴリ（認証・認可、DBマイグレーション、
   GitHub Actions/デプロイ設定等）を、issue-deckのディレクトリ構成（`prisma/migrations/**`等）に
   合わせたパターンで機械判定している。
+  （現在はパターンを`reusable-claude-review-develop.yml`へ内蔵し、リポジトリ固有の追加は
+  `risk-paths`入力で行う。**カテゴリ該当でマージを止めるかどうかは`merge-policy`入力で
+  切り替えられ、issue-deckだけが`relaxed`＝止めない**。#2775。
+  詳細は[docs/multi-agent/labels.md](multi-agent/labels.md)「変更カテゴリで止めるかは
+  `merge-policy`で切り替える」）
 - **ラベル体系**: `21.plan-required`〜`24.screenshot-required`・`00.check-user`はissue-deck
   リポジトリ側で個別に作成したカスタムラベルであり、他リポジトリには存在しない。
   （調査当時は`01.planning`〜`09.main`の進捗ラベルも同じ扱いだったが、#991 Phase 5・#1010で

@@ -71,7 +71,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
     key: "mergeConfirmRequired",
     label: "マージ前に確認が必要",
     description:
-      "内容によらず、developへのマージ前に必ず自分で差分を確認します（認証・DB・本番設定・Actions・Secrets・課金の変更は指定しなくても自動で止まります）",
+      "developへのマージ前に必ず自分で差分を確認します（認証・DB・Actions・Secretsといった変更の種類では止まらないので、自分の目で通したいときはここで指定します）",
     githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
   },
   {

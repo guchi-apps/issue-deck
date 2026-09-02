@@ -278,6 +278,9 @@ export async function reportDispatchSessions(params: {
         ...reap,
         ...codexThread,
         ...step,
+        // Remote ControlのURL（#2771）。pollerが引けた巡だけ載る。フックの報告より先に行を
+        // 作る1巡目でも、ここで入れば起動直後から「Claude Codeアプリで開く」が出る
+        ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
       },
       update: {
         repositoryFullName: report.repositoryFullName,
@@ -318,6 +321,9 @@ export async function reportDispatchSessions(params: {
         ...reap,
         ...codexThread,
         ...step,
+        // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡のURLを入れる。
+        // 引くのは同じtmux名を持つ最新の記録なので、前のセッションのURLは載らない）
+        ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
       },
     });
 

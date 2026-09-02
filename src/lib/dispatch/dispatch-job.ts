@@ -57,6 +57,12 @@ export type DispatchJobStatus =
  * - `CODE_REVIEW` … リポジトリ全体のコードレビューのセッションを立てる（#698）。`PLAN_REVIEW`と
  *   同じく`origin/develop`のスナップショットを読むだけで、指摘は**レビュー用に1件作ったIssueへの
  *   コメント**として返す。人が画面から押して起こす
+ * - `MANUAL_STEP_SESSION` … 手作業Issueを実施するClaude Codeセッションを立てる（#2771）。
+ *   手作業アシスタントの代行実行（`MANUAL_STEP`）が本文のコマンドをpollerが1件ずつ実行するのに
+ *   対し、こちらは`LAUNCH`と同じくtmuxセッションを1本立て、人が手順ごとに結果を見て
+ *   「次へ進む」を答えながら進める（`AskUserQuestion`の回答パネル・Claude Codeアプリの両方から
+ *   答えられる）。**worktreeは作らず**、cwdはリポジトリごとの固定ディレクトリ。実装セッションと
+ *   同じ枠を使う（`SESSION_LAUNCH_JOB_KINDS`）
  * - `MANUAL_STEP_ABORT` … 走っている代行実行を止める（#1882）。pollerが
  *   `systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。**セッションを
  *   操作するジョブではない**（相手はtmuxではなくtransient unit）ので`SESSION_CONTROL_JOB_KINDS`
@@ -87,7 +93,8 @@ export type DispatchJobKind =
   | "CODE_REVIEW"
   | "PREVIEW"
   | "REBOOT"
-  | "CODEX_PAIRING";
+  | "CODEX_PAIRING"
+  | "MANUAL_STEP_SESSION";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -121,6 +128,7 @@ export const SESSION_LAUNCH_JOB_KINDS = [
   "CROSS_REPO_QUESTION",
   "PLAN_REVIEW",
   "CODE_REVIEW",
+  "MANUAL_STEP_SESSION",
 ] as const;
 
 export type SessionLaunchJobKind = (typeof SESSION_LAUNCH_JOB_KINDS)[number];
@@ -145,6 +153,7 @@ export function isSessionLaunchJobKind(kind: DispatchJobKind): kind is SessionLa
 export const SESSION_REPORTED_JOB_KINDS = [
   "LAUNCH",
   "CROSS_REPO_QUESTION",
+  "MANUAL_STEP_SESSION",
 ] as const satisfies readonly SessionLaunchJobKind[];
 
 export type SessionReportedJobKind = (typeof SESSION_REPORTED_JOB_KINDS)[number];
@@ -170,6 +179,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "preview") return "PREVIEW";
   if (value === "reboot") return "REBOOT";
   if (value === "codex_pairing") return "CODEX_PAIRING";
+  if (value === "manual_step_session") return "MANUAL_STEP_SESSION";
   return null;
 }
 
@@ -604,6 +614,12 @@ export type DispatchHostView = {
    * 画面はこれを見て「Codexに繋ぐ」を出すかどうかを決める。
    */
   codexRemoteControlCapable: boolean | null;
+  /**
+   * 手作業Issueを実施するClaude Codeセッション（#2771）を起こせるか。**`null`（未申告）は
+   * 「できない」として扱う**（`crossRepoQuestionCapable`と同じ向き）。古いpollerは未知の種別を
+   * `failed`で返すため、配ると押した起動が失われる。
+   */
+  manualStepSessionCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -1004,6 +1020,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "ホストの再起動";
     case "CODEX_PAIRING":
       return "Codexのペアリング";
+    case "MANUAL_STEP_SESSION":
+      return "手作業セッション";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
@@ -1335,6 +1353,85 @@ export function resolveCrossRepoQuestionRejection(params: {
 }
 
 /**
+ * 手作業セッション（#2771）を起こせない理由。**画面にそのまま出す前提**で、判定の並びと文言は
+ * `enqueueManualStepSessionJob`（`jobs.ts`）と同じものを使う（横断質問と同じ作法）。
+ */
+export type ManualStepSessionRejection =
+  | "host_unknown"
+  | "host_offline"
+  | "manual_step_session_unsupported"
+  | "not_manual_step"
+  | "already_queued"
+  | "session_alive";
+
+export function describeManualStepSessionRejection(
+  rejection: ManualStepSessionRejection,
+  context: { hostName: string },
+): string {
+  switch (rejection) {
+    case "host_unknown":
+      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
+    case "host_offline":
+      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
+    case "manual_step_session_unsupported":
+      return `${formatDispatchHostName(context.hostName)} のpollerが手作業セッションに対応していません（issue-deckを更新して再起動してください）。`;
+    case "not_manual_step":
+      return "手作業Issue（`71.manual-step`）ではないため、手作業セッションは起こせません。";
+    case "already_queued":
+      return "この手作業Issueには実行中または待機中の起動ジョブが既にあります。";
+    case "session_alive":
+      return "この手作業Issueのセッションは既に動いています。続きはそのセッションへ追加指示を送るか、Claude Codeアプリから伝えてください。";
+  }
+}
+
+/**
+ * 手作業セッションを起こせない理由を、**押される前に**判定する（#2771）。
+ * `resolveCrossRepoQuestionRejection`と同じ立場で、片方だけで持つと「画面では押せるのにAPIが
+ * 断る」状態が生まれるため、投入側（`jobs.ts`）もこの関数を通す。
+ */
+export function resolveManualStepSessionRejection(params: {
+  host: Pick<DispatchHostView, "online" | "manualStepSessionCapable"> | null | undefined;
+  isManualStepIssue: boolean;
+  hasActiveJob: boolean;
+  blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+}): ManualStepSessionRejection | null {
+  if (!params.isManualStepIssue) return "not_manual_step";
+  if (!params.host) return "host_unknown";
+  if (!params.host.online) return "host_offline";
+  if (params.host.manualStepSessionCapable !== true) return "manual_step_session_unsupported";
+  if (params.hasActiveJob) return "already_queued";
+  if (params.blockingSession) return "session_alive";
+  return null;
+}
+
+/**
+ * 手作業セッションの既定の起動先を決める（#2771）。対応を申告しているオンラインのホストが
+ * 無ければ`null`（横断質問と同じくGitHub Actionsへのフォールバックは無い）。
+ */
+export function resolveDefaultManualStepSessionHost(
+  hosts: readonly DispatchHostView[],
+): DispatchHostView | null {
+  return hosts.find((host) => host.online && host.manualStepSessionCapable === true) ?? null;
+}
+
+/**
+ * ある手作業Issueについて画面に出す手作業セッションの起動ジョブ（#2771）を1件選ぶ。
+ * **起動ジョブ（`LAUNCH`）とは別に返す**（`findCrossRepoQuestionJobForIssue`と同じ理由）。
+ */
+export function findManualStepSessionJobForIssue(
+  jobs: readonly DispatchJobView[],
+  repositoryFullName: string,
+  issueNumber: number,
+): DispatchJobView | null {
+  return findJobForIssue(
+    jobs,
+    repositoryFullName,
+    issueNumber,
+    (job) => job.kind === "MANUAL_STEP_SESSION",
+  );
+}
+
+/**
  * 横断質問の既定の起動先を決める（#1454）。選べるホストが1台も無ければ`null`。
  *
  * 起動ジョブの`resolveDefaultDispatchHost`と同じ立場だが、**GitHub Actionsへのフォールバックは
@@ -1658,6 +1755,7 @@ export function describeDispatchJobStatus(
 } {
   if (kind === "QUESTION") return describeQuestionJobStatus(status);
   if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
+  if (kind === "MANUAL_STEP_SESSION") return describeManualStepSessionJobStatus(status);
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
   if (kind === "CODE_REVIEW") return describeCodeReviewJobStatus(status);
@@ -1742,6 +1840,34 @@ function describeCrossRepoQuestionJobStatus(status: DispatchJobStatus): {
       return { label: "質問セッションを起動中", tone: "running" };
     case "SUCCEEDED":
       return { label: "質問セッションを起動しました", tone: "success" };
+    case "FAILED":
+      return { label: "失敗", tone: "error" };
+    case "SKIPPED":
+      return { label: "起動済みのため見送り", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "応答なし", tone: "error" };
+    case "CANCELED":
+      return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * 手作業セッション（#2771）の状態の見せ方。**`succeeded`は「セッションが立った」まで**で、
+ * 手順が進んだことではない（横断質問と同じ立場）。以降の様子は`IssueSessionStatus`が出す。
+ */
+function describeManualStepSessionJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "順番待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "起動先が受け取りました", tone: "pending" };
+    case "RUNNING":
+      return { label: "手作業セッションを起動中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "手作業セッションを起動しました", tone: "success" };
     case "FAILED":
       return { label: "失敗", tone: "error" };
     case "SKIPPED":

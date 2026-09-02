@@ -154,6 +154,7 @@ function host(overrides: Record<string, unknown> = {}) {
     codeReviewCapable: true,
     codexCapable: null,
     codexRemoteControlCapable: null,
+    manualStepSessionCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     // DBの行の形（`toHostView`が読む列名）。**Viewの`reboot`とは名前が違う**
@@ -989,7 +990,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"] },
         }),
       }),
     );
@@ -1022,6 +1023,24 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(dispatchJobFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: "QUEUED", kind: { in: ["LAUNCH"] } }),
+      }),
+    );
+  });
+
+  // 手作業セッション（#2771）も横断質問と同じく、申告したホストにだけ配る（古いpollerは
+  // 未知の種別として`failed`で返し、押した起動が失われる）
+  it("手作業セッションは申告したホストにだけ払い出す", async () => {
+    dispatchJobFindMany.mockResolvedValue([]);
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepSessionCapable: true }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(dispatchJobFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "QUEUED",
+          kind: {
+            in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"],
+          },
+        }),
       }),
     );
   });
@@ -2207,7 +2226,7 @@ describe("claimDispatchJobs の代行実行", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"] },
         }),
       }),
     );

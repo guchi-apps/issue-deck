@@ -591,7 +591,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「セッションが無い＝入力待ちではない」と区別が付かない。区別せずに描くと、開いた直後だけ
   必ず「無い側」の表示が出てからフェッチ完了で書き換わる。実際に、
   実装開始ボタンが「GitHub Actionsで開始」→「サブPCで開始」へ変わり（#1666）、確認待ちの案内と
-  承認欄が「承認欄へ移動」「承認」「修正」→「Remote Controlで開く」へ変わっていた（#1810）。
+  承認欄が「承認欄へ移動」「承認」「修正」→「Claude Codeアプリで開く」へ変わっていた（#1810）。
   **`isLoaded`は取得に失敗しても`true`になる**ので、待ち続けて何も出ない状態にはならない。
   判定を持つ`resolveCheckUserGuidance`（`sessionStatePending`）と`ApprovalActions`
   （同名のprop）は、確定するまで**どちらの形も出さない**（推測で片方を出すより、一拍遅れて
@@ -629,10 +629,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容で種別を
   切り替えてはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
   Issueとして無人実行に乗る（逆もある）ため、決めるのは押した人にする。
-  **判定して「質問に切り替えますか」と提案するところまでは行う**（#1890）。「タイトル・ラベルを
-  付与」が呼ぶ`POST /api/issues/suggest`の応答に`kind`（`issue` / `question`）が乗っており、
-  `question`のときだけ種別の下に提案を出す。押さなければ従来どおりIssueとして作られ、
-  押したときだけ`selectKind("question")`が走る（戻す口も同じ場所に残す）。判定の実体は
+  **判定して「質問に切り替えますか」と提案するところまでは行う**（#1890）。タイトルが空のまま
+  「作成」「作成+実装開始」を押した送信の直前（または「付け直す」）に呼ぶ
+  `POST /api/issues/suggest`の応答に`kind`（`issue` / `question`）が乗っており、
+  `question`のときは種別の下に提案を出したうえで作成を中断する（#2773）。押さなければ
+  従来どおりIssueとして作られ、押したときだけ`selectKind("question")`が走る（戻す口も同じ場所に残す）。判定の実体は
   [`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)で、**タイトル・ラベルの
   生成と同じ1回の呼び出しに相乗りさせる**——質問かどうかだけのために往復を増やさない。
   `kind`が欠けた・知らない値だった応答は`issue`扱い（`normalizeSuggestedKind`）で、
@@ -651,16 +652,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `表示中のリポジトリ`バッジを添え、人が選び直した時点で外す——リポジトリ別の画面から開くと内容を
   読まずにその値が入るため、出どころを書かないと「Claudeが内容から決めた」と誤解される。
   推定していた`POST /api/issues/quick-suggest`と`lib/claude/repository-suggest.ts`は削除済み。
-  **タイトル・ラベルは押したときだけ決まる**（`POST /api/issues/suggest`）。タイトルが空のあいだは
-  主ボタンが「タイトル・ラベルを付与」になり、押すと**同じ画面の**欄が埋まる。埋まると主ボタンは
-  「作成」へ戻り、やり直しはラベル欄の横の「付け直す」へ移る——**同じことをする口を2つ同時に
-  出さない**。生成に失敗しても作成は止めない（空欄のまま自分で書ける）。
+  **タイトル・ラベルは、空欄のまま送信したときだけ自動で決まる**（`POST /api/issues/suggest`。
+  専用の付与ボタンは#2773で廃止）。「作成」「作成+実装開始」を押した送信の直前に、タイトルが
+  空なら判定してから作成し、すでに書いていれば判定をスキップしてそのまま作成する
+  （`ensureTitleAndLabels`）。判定だけをその場で試したい場合はラベル欄の横の「付け直す」を使う
+  （タイトルが空でも押せる）。**生成に失敗すると作成を中断する**（空欄のまま自分で書ける状態を保つ）。
   Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
   （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
   **ラベルが1つも決まらなかったときは、その旨を画面に出す**（#1710）。空欄と「決められなかった」
   は見分けが付かず、ラベルの付かないIssueがそのまま作られていた。
   **種別（Issue／質問）が自動で切り替わることはない**（上のとおり。判定して提案するところまで・#1890）。
-  質問はタイトルを`buildAskRepoQuestionTitle`で機械生成するため、付与ボタンも付け直すボタンも出さない。
+  質問はタイトルを`buildAskRepoQuestionTitle`で機械生成するため、「付け直す」ボタンは出さない。
   **操作ボタンは「キャンセル → 作成+実装開始 → 作成」の順にDOMへ置く。** フッター
   （`DialogFooter`・`WindowFooter`）はスマホで`flex-col-reverse`になるため、この順に置くと
   縦積みの一番上が主ボタン、**一番下がキャンセル**になる（#1884）。先頭に`sm:mr-auto`付きの
@@ -1219,6 +1221,15 @@ export function POST(request: NextRequest) {
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **手作業Issueをセッションと対話しながら実施する**（#2771。
+    [`manual-step-session-panel.tsx`](../src/components/dashboard/manual-step-session-panel.tsx)・
+    [`scripts/start-manual-step-session.sh`](../scripts/start-manual-step-session.sh)・
+    [`scripts/prompts/manual-step-agent.md`](../scripts/prompts/manual-step-agent.md)）。
+    アシスタントの最初の画面とIssue詳細の手作業パネルの「Claude Codeセッションで進める」から、
+    `DispatchJob`の`MANUAL_STEP_SESSION`を積み、pollerがworktree無しのtmuxセッションを立てる。
+    手順ごとにコマンド全文を`AskUserQuestion`で示して「実行する」→実行→終了コードを示して
+    「次へ進む」を聞く。押せない理由は`resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
+    設計は[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業issueをセッションと対話しながら実施する2771)。
   - **下端の操作はスマホで1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みの
     ままだと手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが
     その上の狭い窓に押し込まれていた。並びは**左に「戻る」（アイコンのみ）・`⋯`・右に主ボタン**で、
@@ -3211,8 +3222,8 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 人が選べる範囲そのものは`lib/github/start-implementation.ts`の`isSelectableLabelName`が
 実装オプション用ラベルも足して決める）、`isAutoAssignableLabelName`＝**Claudeがタイトルと
 一緒に推定してよい範囲**（30〜89番台。71番台と番号プレフィックスの無いラベルを除く。#1662）。
-推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを付与」（＝タイトルが入っていれば
-「付け直す」。#1884）が呼ぶ`POST /api/issues/suggest`だけで、
+推定の経路は「新しいIssueを作成」ダイアログの「作成」「作成+実装開始」（タイトルが空のときだけ
+送信前に自動で。すでに入っていれば「付け直す」。#1884・#2773）が呼ぶ`POST /api/issues/suggest`だけで、
 プロンプトの候補一覧・応答の後処理（[`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)）と
 画面側のリセット範囲（`create-issue-dialog.tsx`の`mergeSuggestedLabels`）が同じ判定を通る。
 どれか1つでもずれると、範囲外のラベルが付くか、人が選んだラベルが黙って消える。

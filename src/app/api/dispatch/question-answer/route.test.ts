@@ -33,6 +33,16 @@ vi.mock("@/lib/dispatch/session-plan", () => ({
   },
 }));
 
+// 手作業Issue（`71.manual-step`）かどうかはDBのIssueキャッシュのラベルで見る（#2771）。
+// 既定は「手作業ではない」（従来どおりコメントが残る）
+const issueLabels = vi.fn<() => { name: string }[]>(() => []);
+vi.mock("@/lib/db", () => ({
+  db: {
+    repository: { findFirst: async () => ({ id: "repo-1" }) },
+    issue: { findFirst: async () => ({ labels: issueLabels() }) },
+  },
+}));
+
 vi.mock("@/lib/github/issues-api", () => ({
   get createComment() {
     return createComment;
@@ -67,6 +77,7 @@ const answerBody = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  issueLabels.mockReturnValue([]);
   getCurrentUser.mockResolvedValue({ id: "user-1", githubLogin: "m-guchi" });
   findSessionQuestionRequestQuestions.mockResolvedValue(questions);
   decideSessionQuestionRequest.mockResolvedValue({ ok: true, request });
@@ -109,5 +120,22 @@ describe("POST /api/dispatch/question-answer", () => {
     resolveSessionPlanCheckUser.mockResolvedValue(false);
     const res = await POST(postRequest(answerBody));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("手作業Issueへの回答（#2771）", () => {
+  // 手作業セッションは手順ごとに「次へ進みますか」と聞くため、残すと手順の数だけコメントが増える
+  it("71.manual-stepのIssueではIssueコメントを残さない（回答はDBに残る）", async () => {
+    issueLabels.mockReturnValue([{ name: "71.manual-step" }]);
+    const res = await POST(postRequest(answerBody));
+    expect(res.status).toBe(200);
+    expect(decideSessionQuestionRequest).toHaveBeenCalledTimes(1);
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("手作業Issueでなければ従来どおりコメントを残す", async () => {
+    const res = await POST(postRequest(answerBody));
+    expect(res.status).toBe(200);
+    expect(createComment).toHaveBeenCalledTimes(1);
   });
 });

@@ -174,6 +174,18 @@ describe("parseDispatchSessionReport", () => {
     expect(parseDispatchSessionReport(valid)).toEqual(valid);
   });
 
+  // Remote ControlのURL（#2771）。pollerが引けた巡だけ載り、それ以外は既存の値を触らない
+  it("remoteControlUrlはclaude.ai配下だけ受け、読めない値は項目ごと落とす", () => {
+    expect(
+      parseDispatchSessionReport({ ...valid, remoteControlUrl: "https://claude.ai/code/session_1" }),
+    ).toEqual({ ...valid, remoteControlUrl: "https://claude.ai/code/session_1" });
+    expect(parseDispatchSessionReport({ ...valid, remoteControlUrl: "https://example.com/x" })).toEqual(
+      valid,
+    );
+    expect(parseDispatchSessionReport({ ...valid, remoteControlUrl: "" })).toEqual(valid);
+    expect(parseDispatchSessionReport({ ...valid, remoteControlUrl: null })).toEqual(valid);
+  });
+
   it("paneDeadStatusは省略できる", () => {
     const { paneDeadStatus: _omitted, ...withoutStatus } = valid;
     expect(parseDispatchSessionReport(withoutStatus)).toEqual(valid);

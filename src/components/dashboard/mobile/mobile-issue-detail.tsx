@@ -1059,6 +1059,8 @@ export function MobileIssueDetail({
             configTargets={infraConfigTargets}
             onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
             repositoryFullName={issue.repositoryFullName}
+            sessionIssue={issue}
+            dispatch={dispatch}
           />
         )}
 

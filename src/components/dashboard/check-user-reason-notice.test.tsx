@@ -65,7 +65,7 @@ describe("CheckUserReasonNotice", () => {
         })}
       />,
     );
-    const link = screen.getByRole("link", { name: /Remote Controlで開く/ });
+    const link = screen.getByRole("link", { name: /Claude Codeアプリで開く/ });
     expect(link.getAttribute("href")).toBe("https://claude.ai/code/session_abc");
   });
 

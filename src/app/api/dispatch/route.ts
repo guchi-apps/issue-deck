@@ -19,6 +19,7 @@ import {
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
+  enqueueManualStepSessionJob,
   enqueuePlanReviewJob,
   enqueuePreviewJob,
   enqueueRebootJob,
@@ -208,6 +209,28 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(
       { ok: true, job: questionResult.job },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // 手作業セッション（#2771）。横断質問と同じく`enqueueDispatchJob`とは別の判定（対象が手作業Issueで
+  // あること・pollerの対応・同じIssueのセッションが動いていないこと）を通す
+  if (kind === "MANUAL_STEP_SESSION") {
+    const sessionResult = await enqueueManualStepSessionJob({
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      hostName,
+      requestedByUserId: userId,
+    });
+    if (!sessionResult.ok) {
+      const status = sessionResult.rejection === "already_queued" ? 409 : 400;
+      return NextResponse.json(
+        { error: sessionResult.rejection, message: sessionResult.message },
+        { status, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    return NextResponse.json(
+      { ok: true, job: sessionResult.job },
       { headers: { "Cache-Control": "no-store" } },
     );
   }

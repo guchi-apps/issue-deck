@@ -28,6 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { ManualStepAutoRunPanel } from "@/components/dashboard/manual-step-autorun-panel";
+import { ManualStepSessionPanel } from "@/components/dashboard/manual-step-session-panel";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { ManualStepRunPanel } from "@/components/dashboard/manual-step-run-panel";
 import {
@@ -921,6 +922,13 @@ function ManualStepGuideContent({
                   }}
                   isSubmitting={autorun.isSubmitting || dispatch.isSubmitting}
                 />
+              )}
+              {/* 手作業セッション（#2771）。代行実行の承認パネルの下に置く——上から「本文どおりに
+                  流す」「セッションと対話しながら進める」の順で、後者は前者で足りないとき
+                  （結果を見ながら相談したい）に選ぶもの。自動実行中は出さない（実行の入口を
+                  2つ同時に開かない） */}
+              {!autorun.active && (
+                <ManualStepSessionPanel issue={issue} dispatch={dispatch} showSessionStatus />
               )}
             </>
           )}
