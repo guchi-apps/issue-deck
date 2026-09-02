@@ -223,6 +223,46 @@ describe("QuestionAnswerPanel", () => {
     expect(screen.getByText(/端末に選択フォームを出しました/)).toBeTruthy();
   });
 
+  /**
+   * #2742。「上記の計画で実装を進めてよいですか？」の“上記”はコメント欄のずっと下にあり、
+   * 読みに行くと選択肢が画面外へ出る（スマホで顕著）。畳んだ形で選択肢の上に置く。
+   */
+  it("前提のコメントを、役割・投稿時刻とともに畳んで出す", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        premise={{
+          body: "## 要約\n\n**内訳を直せるようにする**",
+          role: "planner",
+          roleLabel: "計画ボット",
+          createdAtLabel: "3分前",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("この質問の前提")).toBeTruthy();
+    expect(screen.getByText("計画ボット")).toBeTruthy();
+    expect(screen.getByText("3分前のコメント")).toBeTruthy();
+    expect(screen.getByText("内訳を直せるようにする")).toBeTruthy();
+    // 開いたまま置くと選択肢が画面外へ出る。畳んだ状態から始める
+    expect(screen.getByRole("button", { name: /全文を表示/ })).toBeTruthy();
+  });
+
+  it("前提にできるコメントが無ければカードごと出さない", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        premise={null}
+      />,
+    );
+
+    expect(screen.queryByText("この質問の前提")).toBeNull();
+  });
+
   it("セッションが終了していたら、届かないことを出して押させない", () => {
     render(
       <QuestionAnswerPanel

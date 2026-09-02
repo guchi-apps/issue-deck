@@ -68,4 +68,13 @@ describe("質問の回答パネルの置き場所（#2189）", () => {
     const source = readFileSync(path, "utf8");
     expect(source).toContain("key={questionRequest.id}");
   });
+
+  /**
+   * #2742。前提のコメントはコメント欄からしか求められず、渡すのは詳細側の仕事になる。
+   * 片方へ足し忘れると、そちらでは「上記の計画」がどこにも無いままになる。
+   */
+  it.each(DETAIL_SOURCES)("%s が質問の前提をパネルへ渡す", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("premise={questionPremise}");
+  });
 });

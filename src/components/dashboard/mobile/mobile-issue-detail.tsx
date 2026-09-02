@@ -136,6 +136,7 @@ import {
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
+import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
@@ -339,6 +340,10 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 質問の前提として見せるコメント（#2742）。「上記の計画で〜」の“上記”はコメント欄の
+  // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
+  // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
+  const questionPremise = questionRequest ? findQuestionPremise(comments) : null;
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -913,6 +918,7 @@ export function MobileIssueDetail({
               request={questionRequest}
               session={issueSession}
               dispatch={dispatch}
+              premise={questionPremise}
               onCheckUserResolved={handleCheckUserResolved}
             />
           </div>

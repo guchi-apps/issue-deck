@@ -57,6 +57,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+- **画面が持つコメント（`IssueComment`）に絶対時刻は無い**（#2742）。`GET /api/issues/comments`が
+  返すのは`createdAtLabel`（`formatRelativeDate`で整形済みの「3分前」）だけで、ISO文字列は
+  `issue-mapper.ts`の時点で捨てられている。**他のデータとの前後比較はできない**ので、
+  「このコメントは質問より前か」のような判定は諦めて**取得順（古い→新しい）**で代用するか、
+  必要なら`issue-mapper.ts`とその型から足すこと。
 - **画面に出す絶対時刻の整形は
   [`lib/format-date-time.ts`](../src/lib/format-date-time.ts)だけを通し、日本時間で出す**（#1977）。
   `toLocaleString("ja-JP")`や`getHours()`は**実行環境のタイムゾーン**で整形するため、UTCで動く
