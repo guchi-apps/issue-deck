@@ -15,6 +15,7 @@ function makeRepo(overrides: Partial<ConnectedRepository>): ConnectedRepository 
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
     ...overrides,
   };
 }

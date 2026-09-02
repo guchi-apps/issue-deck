@@ -78,6 +78,7 @@ vi.mock("@/hooks/use-account-actions", () => ({
 const onUpdated = vi.fn();
 const onSetRepositoryHidden = vi.fn();
 const onSetRepositoriesHidden = vi.fn();
+const onSetRepositoryIssueCreationExcluded = vi.fn();
 
 const repositories = [
   {
@@ -91,6 +92,7 @@ const repositories = [
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   },
   {
     id: "repo-2",
@@ -103,6 +105,7 @@ const repositories = [
     dispatchRunnable: false,
     hidden: true,
     favorite: false,
+    excludedFromIssueCreation: false,
   },
 ];
 
@@ -123,6 +126,7 @@ function renderDialog() {
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
       onSetRepositoriesHidden={onSetRepositoriesHidden}
+      onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
       onUpdated={onUpdated}
     />,
   );
@@ -279,6 +283,19 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "すべて非表示" }));
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
+  });
+
+  it("表示の区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+
+    // 非表示（car-care）には出さず、表示中（issue-deck）にだけ「作成候補」を出す
+    const switches = screen.getAllByRole("switch");
+    expect(switches).toHaveLength(1);
+
+    fireEvent.click(switches[0]);
+    expect(onSetRepositoryIssueCreationExcluded).toHaveBeenCalledWith(repositories[0], true);
   });
 
   it("状態の区分ではGitHubの使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, CircleSlash, FolderGit2, Lock } from "lucide-react";
+import { Archive, CircleSlash, FolderGit2, Lock, SquareX } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,6 +21,7 @@ type RepositoryVisibilitySectionProps = {
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
+  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
 };
 
 /**
@@ -38,6 +39,7 @@ export function RepositoryVisibilitySection({
   repositories,
   onSetRepositoryHidden,
   onSetRepositoriesHidden,
+  onSetRepositoryIssueCreationExcluded,
 }: RepositoryVisibilitySectionProps) {
   const summary = summarizeRepositoryVisibility(repositories);
   const toShow = selectRepositoriesToToggle(repositories, false);
@@ -62,11 +64,16 @@ export function RepositoryVisibilitySection({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        チェックを外したリポジトリは、左メニューのリポジトリ一覧・Issue一覧・各ビューの件数・
+        <strong className="font-medium text-foreground">表示</strong>
+        のチェックを外したリポジトリは、左メニューのリポジトリ一覧・Issue一覧・各ビューの件数・
         Pull Request一覧・「ブランチ」画面・通知・Issue作成時のリポジトリ選択肢に出なくなります。
         <span className="font-medium">
           左メニューの「すべて表示する」でそのリポジトリを選べば、Issueは一覧に出せます。
         </span>
+        {" "}
+        <strong className="font-medium text-foreground">作成候補</strong>
+        のチェックを外すと、一覧などには残したまま「Issueを作成」ダイアログの選択肢からだけ
+        そのリポジトリを除きます。
       </p>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -131,6 +138,39 @@ export function RepositoryVisibilitySection({
                 >
                   {repository.name}
                 </span>
+                {!repository.hidden && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!repository.excludedFromIssueCreation}
+                    aria-label={
+                      repository.excludedFromIssueCreation
+                        ? `${repository.name}をIssue作成の選択肢に含める`
+                        : `${repository.name}をIssue作成の選択肢から除外する`
+                    }
+                    title={
+                      repository.excludedFromIssueCreation
+                        ? "Issue作成の選択肢から除外中"
+                        : "Issue作成の選択肢に含めています"
+                    }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSetRepositoryIssueCreationExcluded(
+                        repository,
+                        !repository.excludedFromIssueCreation,
+                      );
+                    }}
+                    className={cn(
+                      "flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                      repository.excludedFromIssueCreation
+                        ? "border-primary/30 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {repository.excludedFromIssueCreation && <SquareX className="size-3" />}
+                    {repository.excludedFromIssueCreation ? "除外中" : "作成候補"}
+                  </button>
+                )}
                 {(repository.archived || repository.private || isRepositoryAutomationUnsupported(repository)) && (
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     {repository.archived && (

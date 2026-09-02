@@ -85,6 +85,7 @@ function repository(name: string, overrides: Partial<ConnectedRepository> = {}):
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
     ...overrides,
   };
 }

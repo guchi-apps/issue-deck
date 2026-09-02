@@ -45,6 +45,7 @@ function repository(fullName: string): ConnectedRepository {
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   };
 }
 

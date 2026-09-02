@@ -80,6 +80,7 @@ const repositories = [
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   },
 ];
 
@@ -99,6 +100,7 @@ function renderScreen() {
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
       onSetRepositoriesHidden={onSetRepositoriesHidden}
+      onSetRepositoryIssueCreationExcluded={vi.fn()}
       onUpdated={vi.fn()}
     />,
   );

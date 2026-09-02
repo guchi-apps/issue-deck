@@ -91,6 +91,7 @@ function makeRepository(): ConnectedRepository {
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   };
 }
 
@@ -151,6 +152,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     projectStatus: null,
     htmlUrl: `https://github.com/${REPOSITORY_FULL_NAME}/issues/1434`,
     favorite: false,
+    excludedFromIssueCreation: false,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,

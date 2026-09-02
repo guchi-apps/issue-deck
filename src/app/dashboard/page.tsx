@@ -64,6 +64,17 @@ export default async function DashboardPage() {
       )
     : new Set<string>();
 
+  const issueCreationExcludedRepositoryIds = currentUser
+    ? new Set(
+        (
+          await db.issueCreationExcludedRepository.findMany({
+            where: { userId: currentUser.id },
+            select: { repositoryId: true },
+          })
+        ).map((row) => row.repositoryId),
+      )
+    : new Set<string>();
+
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
   // 一覧の「どちらの実行経路にも対応していない」印（#1888）に使う。無人実行の有無
@@ -91,6 +102,7 @@ export default async function DashboardPage() {
         dispatchRunnable: dispatchRunnableRepositories.has(repo.fullName),
         hidden: hiddenRepositoryIds.has(repo.id),
         favorite: favoriteRepositoryIds.has(repo.id),
+        excludedFromIssueCreation: issueCreationExcludedRepositoryIds.has(repo.id),
       }))}
       issues={issues}
       /* 一覧のヘッダーに出す「HH:MM時点」の初期値（#1797）。クライアント側で現在時刻を

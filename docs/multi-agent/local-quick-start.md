@@ -951,6 +951,14 @@ pnpm exec prisma migrate status                                       # "Databas
 型は通るのに実行時だけ`Table doesn't exist`で落ちる（本番では`deploy.yml`の`migrate`が
 ファイルを実行するので、そちらは正しく当たる）。**必ず両方**行う。
 
+**新規テーブルの追加など、既存のマイグレーションと競合しない変更なら`prisma migrate deploy`
+1回で済むことがある**（#2760で実測）。`migrate dev`がリセットを要求するのは差分検出に
+shadow DBを使う（履歴のずれをそこで検出する）ためで、`migrate deploy`はローカルの
+`prisma/migrations/`にあってDBの`_prisma_migrations`に無いものを適用するだけでこの比較を
+行わない。手で`migration.sql`を書いた後、`resolve --applied`＋`db execute --stdin`の代わりに
+`pnpm exec prisma migrate deploy`を試し、`Database schema is up to date!`まで進まなければ
+上の2段階（`resolve`＋`db execute`）へ切り替える。
+
 ### 新しいマイグレーションのタイムスタンプは、他worktreeと衝突する（#2524）
 
 DBを共有しているということは、**並行して走っている他Issueのセッションが作ったマイグレーションが
