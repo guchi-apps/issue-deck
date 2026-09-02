@@ -80,7 +80,17 @@ export async function POST(request: NextRequest) {
     parseClaudeModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   return NextResponse.json(
-    { ok: true, jobs: jobs.map((job) => ({ ...job, claudeLocalModel, codexModel })) },
+    {
+      ok: true,
+      // **ジョブに指定があればそれを`claudeLocalModel`として載せる**（#2717）。pollerは
+      // 従来どおりこのキーだけを読むので、Issueごとの指定を届けるのに**poller側の変更は要らない**。
+      // 指定が無いジョブ（従来の積み方・「設定に従う」）は設定の既定がそのまま載る。
+      jobs: jobs.map((job) => ({
+        ...job,
+        claudeLocalModel: job.claudeModel ?? claudeLocalModel,
+        codexModel,
+      })),
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

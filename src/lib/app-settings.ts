@@ -53,7 +53,8 @@ export function parseImageRetentionDays(value: unknown): number | null {
 // （固定すると将来のモデル更新を自動で受けられなくなるため）。
 export const CLAUDE_MODEL_OPTIONS = [
   { value: "auto", label: "Claude Codeに任せる" },
-  { value: "opus", label: "Claude Opus（最高精度）" },
+  { value: "fable", label: "Claude Fable（最高精度）" },
+  { value: "opus", label: "Claude Opus（高精度）" },
   { value: "sonnet", label: "Claude Sonnet（標準）" },
   { value: "haiku", label: "Claude Haiku（高速）" },
 ] as const;
@@ -62,6 +63,37 @@ export const CLAUDE_MODEL_VALUES = CLAUDE_MODEL_OPTIONS.map((option) => option.v
 export const CLAUDE_LOCAL_MODEL_DEFAULT = "sonnet" as const;
 
 export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
+
+/**
+ * エイリアス → 金額の見積りに使うモデルID（#2717）。**`auto`は解決しない。**
+ *
+ * `--model`へ渡すのは上のエイリアスのままで、ここで解決したIDは**画面に出す目安の金額**
+ * （`estimateSessionCostUsd`）にしか使わない。エイリアスが将来別の世代へ解決されると
+ * 実際の金額とずれるが、ずれるのは目安の表示だけで、起動するモデルは変わらない。
+ */
+/**
+ * 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前（#2717）。
+ * `CLAUDE_MODEL_OPTIONS`のラベルはセレクト向けで、3列に並べると入らない。
+ */
+export const CLAUDE_MODEL_SHORT_LABELS: Readonly<Record<ClaudeModel, string>> = {
+  auto: "おまかせ",
+  fable: "Fable",
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+};
+
+export function describeClaudeModel(model: ClaudeModel): string {
+  return CLAUDE_MODEL_SHORT_LABELS[model];
+}
+
+export const CLAUDE_MODEL_IDS: Readonly<Record<ClaudeModel, string | null>> = {
+  auto: null,
+  fable: "claude-fable-5-1",
+  opus: "claude-opus-5",
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5",
+};
 
 // APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。
 // 不正な値は例外を投げず null にフォールバックし、呼び出し側でバリデーションエラーとして扱う。
@@ -95,7 +127,11 @@ export function parseCodexModel(value: unknown): CodexModel | null {
 export const APP_AI_MODEL_OPTIONS = [
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）" },
   { value: "claude-sonnet-5", label: "Claude Sonnet 5（標準）" },
-  { value: "claude-opus-5", label: "Claude Opus 5（最高精度）" },
+  { value: "claude-opus-5", label: "Claude Opus 5（高精度）" },
+  // Fable 5.1は単価がSonnet 5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
+  // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
+  // 新規アプリの相談）に限る想定（#2717）
+  { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）" },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（最高精度）" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },

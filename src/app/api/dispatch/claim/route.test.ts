@@ -111,4 +111,37 @@ describe("POST /api/dispatch/claim", () => {
       jobs: [{ id: "job-1", claudeLocalModel: "opus", codexModel: "gpt-5.6-terra" }],
     });
   });
+
+  // #2717。**pollerは`claudeLocalModel`しか読まない**ので、Issueごとの指定はここで
+  // 差し替えて届ける（poller側の変更が要らないのがこの持たせ方の要点）
+  it("ジョブにモデルの指定があれば、設定の既定より優先して払い出す", async () => {
+    claimDispatchJobs.mockResolvedValue([
+      { id: "job-1", claudeModel: "fable" },
+      { id: "job-2", claudeModel: null },
+    ]);
+    appSettingFindUnique.mockResolvedValue({
+      claudeLocalModel: "sonnet",
+      codexModel: "gpt-5.6-terra",
+    });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 2 }));
+
+    expect(await res.json()).toEqual({
+      ok: true,
+      jobs: [
+        {
+          id: "job-1",
+          claudeModel: "fable",
+          claudeLocalModel: "fable",
+          codexModel: "gpt-5.6-terra",
+        },
+        {
+          id: "job-2",
+          claudeModel: null,
+          claudeLocalModel: "sonnet",
+          codexModel: "gpt-5.6-terra",
+        },
+      ],
+    });
+  });
 });

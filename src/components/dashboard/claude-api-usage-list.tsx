@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type {
   ClaudeApiTotals,
+  ClaudeApiUsageModel,
   ClaudeApiUsageSummary,
   ClaudeApiUsageWindows,
 } from "@/hooks/use-claude-api-usage";
+import { estimateCostUsd, formatCostUsd } from "@/lib/ai-model-pricing";
 import { useNow } from "@/hooks/use-now";
 import { totalTokens } from "@/lib/claude/api-usage-totals";
 import { formatDuration } from "@/lib/format-duration";
@@ -46,6 +48,23 @@ function formatBreakdown(totals: ClaudeApiTotals): string {
   const cache = totals.cacheReadTokens + totals.cacheCreationTokens;
   const base = `入力 ${totals.inputTokens.toLocaleString()} / 出力 ${totals.outputTokens.toLocaleString()}`;
   return cache > 0 ? `${base} / キャッシュ ${cache.toLocaleString()}` : base;
+}
+
+/**
+ * 機能1件ぶんの概算コスト（#2717）。**モデル別の金額を足して出す。**
+ *
+ * 機能の行にはモデルが複数並ぶ（設定を切り替えた前後）ため、機能単位の単価というものが無い。
+ * **1つでも単価を知らないモデルが混じっていたら`null`**——足りない分を黙って0として
+ * 足すと、実際より安い金額が出る。
+ */
+function featureCostUsd(models: readonly ClaudeApiUsageModel[], mode: UsageMode): number | null {
+  let sum = 0;
+  for (const model of models) {
+    const cost = estimateCostUsd(model.model, pick(model, mode));
+    if (cost === null) return null;
+    sum += cost;
+  }
+  return sum;
 }
 
 /**
@@ -126,36 +145,47 @@ export function ClaudeApiUsageList({ data, isLoading, error }: ClaudeApiUsageLis
               const totals = pick(feature, mode);
               const tokens = totalTokens(totals);
               const sharePercent = totalTokenCount > 0 ? (tokens / totalTokenCount) * 100 : 0;
+              const cost = formatCostUsd(featureCostUsd(feature.models, mode));
               return (
                 <li key={feature.key} className="rounded-lg border p-2">
                   <div className="mb-1 flex items-center justify-between gap-2 text-xs">
                     <span className="truncate font-medium">{feature.label}</span>
                     <span className="shrink-0 text-muted-foreground tabular-nums">
                       {formatTotals(totals)}
+                      {/* 金額は単価を知っているモデルだけで出す（#2717）。知らないモデルが
+                          混じっていたら出さない——足りない分を0として足すと安く見える */}
+                      {cost && <span className="text-foreground">{` / ${cost}`}</span>}
                     </span>
                   </div>
                   <Progress value={sharePercent} />
                   <ul className="mt-1 flex flex-col gap-0.5">
-                    {feature.models.slice(0, MODELS_PER_FEATURE).map((model) => (
-                      <li
-                        key={model.model}
-                        className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
-                      >
-                        <span className="truncate" title={model.model}>
-                          {model.model}
-                        </span>
-                        <span className="shrink-0 tabular-nums">
-                          {formatBreakdown(pick(model, mode))}
-                        </span>
-                      </li>
-                    ))}
+                    {feature.models.slice(0, MODELS_PER_FEATURE).map((model) => {
+                      const modelCost = formatCostUsd(
+                        estimateCostUsd(model.model, pick(model, mode)),
+                      );
+                      return (
+                        <li
+                          key={model.model}
+                          className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground"
+                        >
+                          <span className="truncate" title={model.model}>
+                            {model.model}
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            {formatBreakdown(pick(model, mode))}
+                            {modelCost && ` / ${modelCost}`}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </li>
               );
             })}
           </ul>
           <p className="text-[10px] text-muted-foreground">
-            「{modeLabel}」の回数とトークン数（入力・出力・キャッシュの合計）。
+            「{modeLabel}」の回数とトークン数（入力・出力・キャッシュの合計）と、
+            そのトークン数から割ったAPI換算の目安金額（プランの実費ではありません）。
             {measuredMs !== null && `計測期間は直近${formatDuration(measuredMs)}。`}
             直近7日分をDBへ保存しており、アプリの再起動をまたいでも記録を引き継ぎます。
           </p>

@@ -12,6 +12,12 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
+import { estimateSessionCostUsd, formatCostUsd } from "@/lib/ai-model-pricing";
+import {
+  CLAUDE_MODEL_IDS,
+  describeClaudeModel,
+  type ClaudeModel,
+} from "@/lib/app-settings";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
   StartOptionChip,
@@ -114,6 +120,61 @@ const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
   { agent: "claude", icon: Asterisk },
   { agent: "codex", icon: SquareTerminal },
 ];
+
+/**
+ * モデルの選択肢（#2717）。**先頭は「設定に従う」（`null`）で、これが既定。**
+ *
+ * 精度の高い順に並べる。**チップには短い名前と1件あたりの目安金額だけを出す**——
+ * 3列に並べると1枚あたり110px前後しかなく、`CLAUDE_MODEL_OPTIONS`のラベルは入らない。
+ *
+ * 「設定に従う」と`auto`（Claude Codeに任せる）は別物。前者は設定の既定で立ち、後者は
+ * `--model`そのものを付けない。
+ */
+const MODEL_ENTRIES: readonly { model: ClaudeModel | null }[] = [
+  { model: null },
+  { model: "fable" },
+  { model: "opus" },
+  { model: "sonnet" },
+  { model: "haiku" },
+  { model: "auto" },
+];
+
+/** チップに出す短い名前。「設定に従う」だけ`null`なのでここで補う */
+function modelChipLabel(model: ClaudeModel | null): string {
+  return model === null ? "設定に従う" : describeClaudeModel(model);
+}
+
+/**
+ * チップの右端に出す1件あたりの目安（#2717）。**目安が出せない選択肢は空にする。**
+ * 「設定に従う」はどのモデルになるかをこのダイアログが知らず、`auto`はClaude Codeが決める。
+ */
+function modelChipCost(model: ClaudeModel | null): string | null {
+  if (model === null) return null;
+  return formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS[model]));
+}
+
+/**
+ * 選んだモデルの説明（#2717）。**金額の根拠と、なぜ差が小さいのかを1行で添える。**
+ *
+ * 単価だけを見るとFableはOpus 5の2倍だが、長い実装セッションは費用の6割がキャッシュ
+ * 読み出しで、そこがFable 5.1は半額なので実測ベースでは1.03倍にしかならない。
+ * 倍率だけ出すと「2倍のはずでは」となるため、目安の金額そのものを出す。
+ */
+function describeModelChoice(model: ClaudeModel | null): string {
+  if (model === null) {
+    return "設定（設定 ＞ 実行）で選んだモデルで起動します。";
+  }
+  if (model === "auto") {
+    return "Claude Codeの既定に任せます（--modelを付けません）。";
+  }
+  const cost = formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS[model]));
+  const base = formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS.opus));
+  const suffix =
+    model === "fable"
+      ? `Opus（${base}）とほとんど変わりません。長い対話ほど費用の大半がキャッシュ読み出しになり、そこがFable 5.1は半額のためです。`
+      : "";
+  return `実装セッション1件あたりの目安は${cost}です（API換算の目安で、サブスクの実費ではありません）。${suffix}`;
+}
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -228,6 +289,14 @@ export function StartImplementationDialog({
    * （`effectiveAgent`）ので、GitHub Actionsの起動へ漏れることはない。
    */
   const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
+  /**
+   * このIssueだけに使うモデル（#2717）。**`null`は「設定に従う」で、これが既定。**
+   *
+   * エージェントと同じく、このダイアログを開いている間だけ持つ（次に開いたときは既定へ戻す）。
+   * **1回きりの選択で、Issueにも設定にも残さない**——ラベルにすると14リポジトリへの配布が要り、
+   * 設定に残すと次のIssueまで高いモデルのままになる。
+   */
+  const [model, setModel] = useState<ClaudeModel | null>(null);
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -273,6 +342,7 @@ export function StartImplementationDialog({
     setTarget(undefined);
     setStartedTarget(null);
     setAgent(DEFAULT_DISPATCH_AGENT);
+    setModel(null);
     setCopied(false);
   }, [open]);
 
@@ -383,6 +453,19 @@ export function StartImplementationDialog({
    * サブPCでCodexを選んだ後にGitHub Actionsへ切り替えても、選択が残ったまま付いていかない。
    */
   const effectiveAgent: DispatchAgent = showAgents ? agent : DEFAULT_DISPATCH_AGENT;
+  /**
+   * モデルを選ばせるか（#2717）。**サブPCを選んでいて、Claude Codeで立てるときだけ。**
+   *
+   * GitHub Actionsは設定を全体で読む別経路（`reusable-issue-dispatch.yml`）で、ジョブに
+   * 積んだ値は届かない。Codexのモデルは別の設定（`CODEX_MODEL_OPTIONS`）で、ここでは扱わない。
+   * 「コピー」の2つは起動そのものを人が行うため、選ばせても反映しようがない。
+   */
+  const showModels = effectiveTarget.kind === "host" && effectiveAgent === DEFAULT_DISPATCH_AGENT;
+  /**
+   * 実際に積むモデル。**選択欄を出していないときは「設定に従う」へ落とす。**
+   * サブPCでFableを選んだ後にCodexやGitHub Actionsへ切り替えても、選択が付いていかない。
+   */
+  const effectiveModel: ClaudeModel | null = showModels ? model : null;
   // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
   const visibleOptions = visibleStartImplementationOptions({
     isActionsTarget: effectiveTarget.kind === "actions",
@@ -549,6 +632,7 @@ export function StartImplementationDialog({
       issueNumber: issue.number,
       hostName,
       agent: effectiveAgent,
+      model: effectiveModel,
     });
     // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）。
     // ピン留めも解き、拒否された時点の状態で選択欄を出し直す（#1318）
@@ -737,6 +821,27 @@ export function StartImplementationDialog({
             )}
           </div>
         )}
+        {/* モデル（#2717）。**エージェントとオプションの間に置く。** どのモデルで立てるかは
+            エージェントの下位の選択（Claude Codeで立てるときだけ意味がある）で、
+            オプション（Issueにラベルとして残る選択）とは別の軸。
+            **重いIssueだけ上げるための欄**なので、既定は「設定に従う」から動かさない */}
+        {!isTargetPending && showModels && (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium">モデル</p>
+            <div role="radiogroup" aria-label="モデル" className="grid grid-cols-3 gap-2">
+              {MODEL_ENTRIES.map((entry) => (
+                <ModelChip
+                  key={entry.model ?? "inherit"}
+                  label={modelChipLabel(entry.model)}
+                  cost={modelChipCost(entry.model)}
+                  selected={model === entry.model}
+                  onSelect={() => setModel(entry.model)}
+                />
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">{describeModelChoice(model)}</p>
+          </div>
+        )}
         {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
         {!isTargetPending && (
           <div className="flex flex-col gap-2">
@@ -871,6 +976,43 @@ function AgentChip({
       <span className="text-[11px] font-medium leading-tight">{label}</span>
       {isDefault && !selected && (
         <span className="ml-auto text-[10px] text-muted-foreground">既定</span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * モデルの選択肢1件（#2717）。**エージェントのチップ（`AgentChip`）と同じ形で、3列に並べる。**
+ *
+ * アイコンを置かないのは、6枚を3列に収めると1枚110px前後しかなく、短い名前と金額で
+ * 幅を使い切るため。**金額は右端に小さく置く**——押す理由（どれが高いか）はここでしか分からない。
+ */
+function ModelChip({
+  label,
+  cost,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  /** 1件あたりの目安。出せない選択肢（設定に従う・おまかせ）は`null` */
+  cost: string | null;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className={cn(
+        "flex min-h-[46px] items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-left",
+        selected ? "border-primary bg-accent" : "hover:bg-accent",
+      )}
+    >
+      <span className="text-[11px] leading-tight font-medium">{label}</span>
+      {cost && (
+        <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{cost}</span>
       )}
     </button>
   );

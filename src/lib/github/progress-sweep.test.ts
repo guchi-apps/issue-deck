@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildClosedStrandedRecoveredComment,
   buildDevelopMergedComment,
+  buildMergedOpenClosedComment,
   buildStrandedComment,
   decideClosedStrandedIssue,
+  decideMergedOpenIssue,
   decideProgressSweep,
   decideStaleCheckUser,
   hasDevelopMergedNotice,
@@ -16,6 +18,7 @@ import {
   PROGRESS_SWEEP_STRANDED_GRACE_MINUTES,
   strandedCommentMarker,
   type ClosedStrandedFacts,
+  type MergedOpenFacts,
   type ProgressSweepFacts,
 } from "@/lib/github/progress-sweep";
 
@@ -355,6 +358,87 @@ describe("buildClosedStrandedRecoveredComment", () => {
     const body = buildClosedStrandedRecoveredComment(MERGED.url);
 
     expect(body).toContain(MERGED.url);
+    expect(body).toContain("<!-- issue-deck-source:progress-sweep -->");
+  });
+});
+
+describe("decideMergedOpenIssue", () => {
+  function openFacts(overrides: Partial<MergedOpenFacts> = {}): MergedOpenFacts {
+    return {
+      status: "develop",
+      mergedPullRequest: MERGED,
+      compareWithMain: { aheadBy: 0 },
+      ...overrides,
+    };
+  }
+
+  it("Doneのままopenなら、GitHubへ確かめずにcloseする（doneの再報告はしない）", () => {
+    expect(
+      decideMergedOpenIssue({
+        status: "done",
+        mergedPullRequest: null,
+        compareWithMain: null,
+      }),
+    ).toEqual({ action: "close", pullRequestUrl: null, reportDone: false });
+  });
+
+  it("Doneでマージ済みPRが分かっていればコメントへ載せる", () => {
+    expect(decideMergedOpenIssue(openFacts({ status: "done" }))).toEqual({
+      action: "close",
+      pullRequestUrl: MERGED.url,
+      reportDone: false,
+    });
+  });
+
+  it("Develop・Releaseでmainの祖先になっていればdoneを報告してcloseする", () => {
+    expect(decideMergedOpenIssue(openFacts())).toEqual({
+      action: "close",
+      pullRequestUrl: MERGED.url,
+      reportDone: true,
+    });
+    expect(decideMergedOpenIssue(openFacts({ status: "release" }))).toEqual({
+      action: "close",
+      pullRequestUrl: MERGED.url,
+      reportDone: true,
+    });
+  });
+
+  it("まだmainの祖先になっていなければ見送る（次のリリース待ち＝正常）", () => {
+    expect(decideMergedOpenIssue(openFacts({ compareWithMain: { aheadBy: 2 } }))).toEqual({
+      action: "skip",
+      reason: "open_not_in_main_yet",
+    });
+  });
+
+  it("developへのマージ済みPRが無ければ見送る", () => {
+    expect(decideMergedOpenIssue(openFacts({ mergedPullRequest: null }))).toEqual({
+      action: "skip",
+      reason: "open_no_merged_pr",
+    });
+  });
+
+  it("mainとの比較を取得できなければ次の巡回へ回す", () => {
+    expect(decideMergedOpenIssue(openFacts({ compareWithMain: null }))).toEqual({
+      action: "skip",
+      reason: "open_compare_unavailable",
+    });
+  });
+});
+
+describe("buildMergedOpenClosedComment", () => {
+  it("doneを報告した場合はPRのURLと発信元マーカーを含む", () => {
+    const body = buildMergedOpenClosedComment({ pullRequestUrl: MERGED.url, reportedDone: true });
+
+    expect(body).toContain(MERGED.url);
+    expect(body).toContain("進捗を Done へ進めて");
+    expect(body).toContain("<!-- issue-deck-source:progress-sweep -->");
+  });
+
+  it("Doneのままだった場合はURLが無くても本文が成立する", () => {
+    const body = buildMergedOpenClosedComment({ pullRequestUrl: null, reportedDone: false });
+
+    expect(body).toContain("Done（本番反映済み）のままopenで残っていた");
+    expect(body).not.toContain("undefined");
     expect(body).toContain("<!-- issue-deck-source:progress-sweep -->");
   });
 });

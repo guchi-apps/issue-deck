@@ -176,6 +176,7 @@ describe("describeDispatchHostSelfUpdate（#1927）", () => {
       issueId: null,
       targetHost: "subpc",
       agent: "claude",
+      claudeModel: null,
       kind: "SELF_UPDATE",
       status: "QUEUED",
       message: null,

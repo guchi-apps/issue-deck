@@ -312,6 +312,37 @@ export async function fetchIssueState(
 }
 
 /**
+ * Issueが一度でもreopenされているか（#2715）。**取得できなければ`null`。**
+ *
+ * 本番反映済みのIssueを巡回がcloseする（`sweepMergedOpenIssue`）前の歯止め。進捗が`Done`の
+ * ままopenなIssueには「closeし忘れ」と「closeした後に追加対応のため人が開け直した」の
+ * 2通りがあり、Statusはどちらも`Done`のまま（closedなIssueは`Done`より手前へ戻さない運用。
+ * #1348・`reopened`では何も戻さない）なので、Statusだけでは見分けられない。
+ *
+ * **`state_reason`ではなくイベントを見る。** openなIssueの`state_reason`は理屈のうえでは
+ * `reopened`になるはずだが、実物のフリートに例が1件も無く裏を取れなかった。イベント一覧の
+ * `reopened`は曖昧さが無い。**取得に失敗したら`null`を返してcloseを見送る**（確かめられない
+ * ものを閉じない）。
+ */
+export async function hasReopenedEvent(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<boolean | null> {
+  try {
+    const events = await fetchAllPages<{ event?: unknown }>(
+      `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/events?per_page=100`,
+      token,
+    );
+    return events.some((event) => event.event === "reopened");
+  } catch (error) {
+    if (error instanceof GithubApiError) return null;
+    throw error;
+  }
+}
+
+/**
  * Issueに**いま付いている**ラベル名を返す（#1905）。
  *
  * 使うのは「外してよいか」を外す前に確かめたいときだけ（`src/lib/dispatch/check-user-labels.ts`）。

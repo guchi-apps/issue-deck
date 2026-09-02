@@ -82,6 +82,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueId: null,
     targetHost: "subpc",
     agent: "claude",
+    claudeModel: null,
     kind: "PLAN_REVIEW",
     status: "QUEUED",
     message: null,

@@ -103,25 +103,32 @@ import re
 import sys
 from datetime import datetime, timezone
 
-# 1Mトークンあたりの単価（USD）。claude-apiスキルの料金表（2026-08時点）。
+# 1Mトークンあたりの単価（USD）。(入力, 出力, キャッシュ読み出し)。
+# claude-apiスキルの料金表（2026-08時点）。
 # **サブスクの実費ではなく、規模を掴むためのAPI換算の目安**であることを表示側で断る。
+#
+# **キャッシュ読み出しは倍率ではなく単価で持つ**（#2717）。多くのモデルは入力の0.1倍だが、
+# **Claude Fable 5.1だけ$0.25/MTok（入力の0.025倍）**で、倍率で数えると4倍に膨らむ。
+# 実装セッションは費用の6割がキャッシュ読み出しなので、1件$10.9が$21.1として記録されていた。
+#
+# 同じ単価表が`src/lib/ai-model-pricing.ts`（画面が読む側）にもある。**料金が変わったら両方直す。**
 PRICES = {
-    "claude-fable-5": (10.0, 50.0),
-    "claude-mythos-5": (10.0, 50.0),
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-opus-4-7": (5.0, 25.0),
-    "claude-opus-4-6": (5.0, 25.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-sonnet-4-5": (3.0, 15.0),
-    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-fable-5-1": (10.0, 50.0, 0.25),
+    "claude-fable-5": (10.0, 50.0, 1.0),
+    "claude-mythos-5": (10.0, 50.0, 1.0),
+    "claude-opus-5": (5.0, 25.0, 0.5),
+    "claude-opus-4-8": (5.0, 25.0, 0.5),
+    "claude-opus-4-7": (5.0, 25.0, 0.5),
+    "claude-opus-4-6": (5.0, 25.0, 0.5),
+    "claude-sonnet-5": (2.0, 10.0, 0.2),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.3),
+    "claude-sonnet-4-5": (3.0, 15.0, 0.3),
+    "claude-haiku-4-5": (1.0, 5.0, 0.1),
 }
 
-# キャッシュの倍率。書き込みはTTLで違い（5分1.25倍・1時間2.0倍）、読み出しは0.1倍。
+# キャッシュ書き込みの倍率（入力単価に対して）。TTLで違う（5分1.25倍・1時間2.0倍）。
 CACHE_WRITE_5M = 1.25
 CACHE_WRITE_1H = 2.0
-CACHE_READ = 0.1
 
 # 作業ディレクトリ → セッションの種別。**転記の中身ではなくパスで決める**。
 WORKTREE = re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
@@ -164,14 +171,19 @@ REPO_FILTER = arg(3)
 
 
 def price_for(model):
-    """モデルID → (入力単価, 出力単価)。日付サフィックス付きは前方一致で拾う"""
+    """モデルID → (入力単価, 出力単価, キャッシュ読み出し単価)。日付サフィックス付きは前方一致で拾う
+
+    **区切りの`-`まで含めて一致を見る**（#2717）。`claude-fable-5-1`が`claude-fable-5`の
+    行に当たると、キャッシュ読み出しの単価が4倍で数えられる（いちばん長い一致を採るので
+    両方の行がある限り正しく引けるが、境界を見ないと似た名前のモデルが増えたときに再発する）。
+    """
     if not model:
         return None
     if model in PRICES:
         return PRICES[model]
     best = None
     for known, price in PRICES.items():
-        if model.startswith(known) and (best is None or len(known) > len(best[0])):
+        if model.startswith(known + "-") and (best is None or len(known) > len(best[0])):
             best = (known, price)
     return best[1] if best else None
 
@@ -384,12 +396,12 @@ for raw_path in sys.stdin:
                 "outputCostUsd": 0.0,
             }
             if price:
-                in_price, out_price = price
+                in_price, out_price, read_price = price
                 delta["inputCostUsd"] = (
                     delta["input"] * in_price
                     + delta["cacheCreate5m"] * in_price * CACHE_WRITE_5M
                     + delta["cacheCreate1h"] * in_price * CACHE_WRITE_1H
-                    + delta["cacheRead"] * in_price * CACHE_READ
+                    + delta["cacheRead"] * read_price
                 ) / 1_000_000
                 delta["outputCostUsd"] = delta["output"] * out_price / 1_000_000
                 delta["costUsd"] = delta["inputCostUsd"] + delta["outputCostUsd"]

@@ -62,6 +62,7 @@ function makeSelfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJo
     issueId: null,
     targetHost: "subpc",
     agent: "claude",
+    claudeModel: null,
     kind: "SELF_UPDATE",
     status: "QUEUED",
     message: null,

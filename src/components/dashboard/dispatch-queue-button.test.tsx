@@ -56,6 +56,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     issueId: null,
     targetHost: "subpc",
     agent: "claude",
+    claudeModel: null,
     kind: "LAUNCH",
     status: "FAILED",
     message: "tmuxの起動に失敗しました。",

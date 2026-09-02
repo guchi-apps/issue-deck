@@ -242,6 +242,47 @@ describe("enqueueDispatchJob のエージェント", () => {
 });
 
 /**
+ * #2717。**「設定に従う」はnullで持つ。** エイリアスの実体を書き込むと、後で設定を
+ * 変えても積み置きのジョブだけ古い既定のまま立つ。
+ */
+describe("enqueueDispatchJob のモデル", () => {
+  it("指定しなければnull（設定の既定に従う）で積む", async () => {
+    const result = await enqueue();
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate.mock.calls[0][0].data.claudeModel).toBeNull();
+  });
+
+  it("指定したモデルをジョブへ保存する", async () => {
+    const result = await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      claudeModel: "fable",
+      requestedByUserId: null,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate.mock.calls[0][0].data.claudeModel).toBe("fable");
+    if (!result.ok) return;
+    expect(result.job.claudeModel).toBe("fable");
+  });
+
+  // `agent`と違い、ホストの申告では塞がない。`--model`はどのバージョンのClaude Codeでも
+  // 受け付ける引数で、古いpollerに当たっても設定の既定で立つだけ（黙って壊れる方向が無い）
+  it("Codex非対応のホストでもモデルの指定は通る", async () => {
+    const result = await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      claudeModel: "opus",
+      requestedByUserId: null,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+/**
  * #1311。**画面側（`resolveDispatchTargetRejection`）だけに置くと、一括投入
  * （`bulk-dispatch-bar.tsx`）が素通りする。** あちらは個々のIssueの判定をAPI側へ委ねている。
  */
