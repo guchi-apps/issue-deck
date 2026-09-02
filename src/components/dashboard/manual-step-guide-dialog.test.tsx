@@ -257,6 +257,38 @@ describe("ManualStepGuideDialog", () => {
     expect(screen.getByRole("button", { name: "コードをコピー" })).toBeTruthy();
   });
 
+  /**
+   * 1Password登録手順のキー名を個別にコピーでき、同じ本文の同期コマンドから対象キーを
+   * 拾って「シークレット同期」画面でも実行できる旨を案内する（#2753。実例: #2572）。
+   */
+  it("1Password登録手順では、フィールド名がコピーでき、同期ボタンでの代替も案内する", async () => {
+    copyText.mockClear().mockResolvedValue(true);
+    taskList.body = `## やること
+
+- [ ] （ブラウザ）OpenAI Platformでissue-deck用のAPIキーを作成し、1Passwordの\`apps\`ボールトにある\`issue-deck\`アイテムの\`openai-api-key\`フィールドへ登録する
+
+- [ ] （サブPC）1Passwordの値をGitHub Actionsの\`OPENAI_API_KEY\` secretへ同期する
+
+  \`\`\`bash
+  cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/issue-deck --key OPENAI_API_KEY --sync-only
+  \`\`\`
+`;
+    renderDialog([issue({ body: taskList.body })]);
+    fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /openai-api-key をコピー/ }));
+    expect(copyText).toHaveBeenCalledWith("openai-api-key");
+
+    expect(
+      screen.getByText(/設定 ▸ フリート運用 ▸ シークレット同期/),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /OPENAI_API_KEY をコピー/ })).toBeTruthy();
+
+    // 同期コマンド自体の手順（1Password登録手順ではない）には出ない
+    fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+    expect(screen.queryByText(/設定 ▸ フリート運用 ▸ シークレット同期/)).toBeNull();
+  });
+
   it("「実行した・次へ」でその手順の行にチェックを付ける", () => {
     renderDialog([issue()]);
     fireEvent.click(screen.getByRole("button", { name: "はじめる" }));

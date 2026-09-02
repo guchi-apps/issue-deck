@@ -259,6 +259,61 @@ describe("MarkdownBody のコードブロック", () => {
   });
 });
 
+// 手作業アシスタント画面で、1Passwordのボールト名・アイテム名・フィールド名のような
+// バッククォート表記を個別にコピーできるようにする（#2753）。既定では出さない
+// （Issue本文・コメント等、他の画面の見た目を変えないため）。
+describe("MarkdownBody のインラインコード（#2753）", () => {
+  function mockClipboard(writeText: () => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+  }
+
+  it("copyableInlineCodeを渡さない場合は今までどおりコピーボタンにならない", () => {
+    render(<MarkdownBody content="1Passwordの`apps`ボールトを開く。" />);
+
+    expect(screen.queryByRole("button", { name: /apps/ })).toBeNull();
+    expect(screen.getByText("apps").tagName).toBe("CODE");
+  });
+
+  it("copyableInlineCodeを渡すと、インラインコードごとにコピーできる", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    render(
+      <MarkdownBody
+        content="1Passwordの`apps`ボールトの`issue-deck`アイテムへ登録する。"
+        copyableInlineCode
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /apps をコピー/ }));
+    expect(writeText).toHaveBeenCalledWith("apps");
+
+    fireEvent.click(screen.getByRole("button", { name: /issue-deck をコピー/ }));
+    expect(writeText).toHaveBeenCalledWith("issue-deck");
+
+    // 2つとも押したので、それぞれ独立に「コピーしました」へ切り替わる
+    expect(await screen.findAllByRole("button", { name: "コピーしました" })).toHaveLength(2);
+  });
+
+  it("copyableInlineCodeを渡してもフェンス付きコードブロックは従来の全体コピーのまま", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    render(
+      <MarkdownBody
+        content={["`apps`ボールト。", "", "```bash", "op signin", "```"].join("\n")}
+        copyableInlineCode
+      />,
+    );
+
+    // インラインコードのチップ1つ＋コードブロックの全体コピー1つ。ブロックの中身が
+    // インラインとして二重にボタン化されない
+    expect(screen.getAllByRole("button", { name: /コピー/ })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "コードをコピー" })).toBeTruthy();
+  });
+});
+
 // react-markdownは各コンポーネントへhastのノード（node）も渡してくる。DOMへ流すと
 // `node="[object Object]"`という無効な属性になるので、どの要素でも落としておく（#1499）。
 describe("MarkdownBody のDOM属性", () => {
