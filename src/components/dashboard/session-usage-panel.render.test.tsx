@@ -97,16 +97,48 @@ afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
   // #2631。設定の「状態」にあった機能別のAPI消費内訳をここへ移した。渡されなければ出さない
-  it("claudeApiUsageを渡したときだけAPI呼び出しの内訳を出す", () => {
+  it("claudeApiUsageを渡したときだけアプリ内AI機能別を出す", () => {
     const { unmount } = renderPanel(response([]));
-    expect(screen.queryByText("API呼び出し（issue-deck本体）")).toBeNull();
+    expect(screen.queryByText("アプリ内AI機能別")).toBeNull();
     unmount();
 
     renderPanel(response([]), {
       claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
     });
-    expect(screen.getByText("API呼び出し（issue-deck本体）")).toBeTruthy();
+    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
     expect(screen.getByText("Issueの要約", { exact: false })).toBeTruthy();
+  });
+
+  /**
+   * #2752。以前は明細を挟んだ画面のいちばん下にあった。同じ「何にAIを使ったか」の内訳なので
+   * セッション種別別の真下へ置く。
+   */
+  it("アプリ内AI機能別をセッション種別別の直後に置く", () => {
+    renderPanel(response([entry()]), {
+      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
+    });
+
+    const headings = screen
+      .getAllByText(/^(リポジトリ別|セッション種別別|アプリ内AI機能別|Issue・PR別)$/)
+      .map((node) => node.textContent);
+    expect(headings).toEqual([
+      "リポジトリ別",
+      "セッション種別別",
+      "アプリ内AI機能別",
+      "Issue・PR別",
+    ]);
+  });
+
+  /**
+   * #2752。セッションの記録がまだ届いていないと上の内訳ごと描かれない。このアプリ自身の消費は
+   * セッションと無関係に数えられているので、**そのときは単独で出す**。
+   */
+  it("セッションの記録がまだ無くてもアプリ内AI機能別は出す", () => {
+    renderPanel(null as unknown as SessionUsageResponse, {
+      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
+    });
+    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
+    expect(screen.queryByText("セッション種別別")).toBeNull();
   });
 
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
