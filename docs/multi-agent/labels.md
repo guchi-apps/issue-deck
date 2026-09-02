@@ -1940,6 +1940,8 @@ issue-deckを`relaxed`にしたのは、**`develop`はリリース前の統合�
 
 **`relaxed`は「レビューを省く」ことではない。** `risk-check`はカテゴリ該当を今までどおり検出し、`risky`（マージを止めるか）ではなく`needs-review`（レビューを実行するか）の側にだけ反映する。したがってマイグレーションやワークフローを触ったPRでは従来どおり`claude-review`が走り、止めるかどうかだけがそのレビューの判定に委ねられる。実装は`reusable-claude-review-develop.yml`の`add_category_reason`（`strict`なら`add_reason`と同じ、`relaxed`なら`RELAXED_REASONS`へ回す）で、境界は`scripts/reusable-risk-check.test.mjs`が`run:`本文を直接実行して固定している。
 
+**`merge-policy`の変更は、それを入れるPR自身に効く**（#2775の実測）。issue-deckのcallerは共有ワークフローを`uses: ./.github/workflows/reusable-claude-review-develop.yml`とローカルパスで参照しており、`pull_request`イベントではcallerも呼び出し先も**PRのmerge ref**（`refs/pull/<番号>/merge`）から解決される。そのため`merge-policy: relaxed`を足したPR #2789は、`develop`へ入る前の時点で既に`relaxed`として判定され、`risk-check`のログに「マージ方針: relaxed」「機械的リスク判定: 該当なし」を残して自動マージされた（`.github/workflows/**`の変更を含むにもかかわらず）。**判定を厳しくする変更でも緩める変更でも、developへ入る前に自分自身へ適用されるものとして扱う。** 段階的に確かめたい場合は、先に入力だけを足したPRと、callerで値を切り替えるPRに分ける。
+
 **ただし`.github/workflows/**`を変更するPRには穴が残る。** claude-code-actionの検証機構により、そのPRでは`claude-review`がClaudeを実行しないまま`success`で終わる（後述「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。`strict`では`risk-check`が止めていたので実害が無かったが、`relaxed`では**機械判定も意味的判定も無いままdevelopへ入る**（CIは通る）。ワークフローの変更を人の目で通したいときは`22.merge-confirm-required`を付ける。
 
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
