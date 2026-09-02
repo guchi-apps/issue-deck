@@ -620,12 +620,19 @@ fi
 #
 # **Codexでは何もしない。** あちらは`--ask-for-approval never`で走らせるため個々の許可規則が無く、
 # コマンドが権限で弾かれること自体が起きない（#2377）。
-SESSION_ALLOWED_TOOLS="$(agent_allowed_tools)"
+#
+# **起動時に読むworktree外のファイルも一緒に渡す**（#2778）。キックオフ文面が読ませる指示ファイル
+# （`.prompts/issue-<番号>.md`）と、開発サーバーの様子を見るログ（`.dev-servers/issue-<番号>.log`）は
+# どちらもworktreeの外にあり、**`Read`は作業ディレクトリの外だと1件ずつ承認を求める。** 起動直後に
+# 必ず「Readが次へのアクセスを要求しています」が出て、無人に近い起動ではそこで止まっていた。
+# 許可するのはこの2ファイルの絶対パスだけで、`.prompts`ディレクトリごとは開けない
+# （他Issueの指示ファイルは従来どおり承認が要る）。
+SESSION_ALLOWED_TOOLS="$(agent_allowed_tools "$PROMPT_FILE" "$DEV_LOG")"
 if [[ "$AGENT_KIND" == "claude" ]]; then
   CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
   # **何を無条件に通したかを起動ログに残す**（`--disallowedTools`側と揃える）。承認プロンプトが
   # 出ない理由を後から追えるようにしておく。
-  echo "#$ISSUE_NUMBER: 次のコマンドは承認なしで実行できます: $SESSION_ALLOWED_TOOLS"
+  echo "#$ISSUE_NUMBER: 次の操作は承認なしで実行できます: $SESSION_ALLOWED_TOOLS"
 fi
 
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに
