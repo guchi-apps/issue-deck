@@ -289,6 +289,19 @@ describe("shortIssueSessionLabel", () => {
     expect(shortIssueSessionLabel(session(working("TESTING")))).toBe("テスト中");
   });
 
+  // #2782。#2705当時は「一覧の行は狭く、経過時間まで並べるとステップ名が折り返す」として
+  // 経過時間を捨てていたが、呼び出し側（`WorkflowStepBadge`）がこの短い表現だけを見せる形に
+  // 変わったことで、活動＋経過だけなら幅に収まるようになった
+  it("nowを渡すと、活動中は経過時間を添える", () => {
+    expect(
+      shortIssueSessionLabel(session(working("EXPLORING")), new Date("2026-08-14T00:02:30.000Z")),
+    ).toBe("調査中(2分)");
+  });
+
+  it("nowを渡さなければ、活動中でも経過時間は添えない（マウント前に実時計へフォールバックしない）", () => {
+    expect(shortIssueSessionLabel(session(working("EXPLORING")))).toBe("調査中");
+  });
+
   it("入力待ち・終了・異常終了だけを出す", () => {
     expect(shortIssueSessionLabel(session({ activity: "WAITING_INPUT" }))).toBe("入力待ち");
     expect(shortIssueSessionLabel(session({ state: "EXITED" }))).toBe("終了");

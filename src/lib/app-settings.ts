@@ -121,16 +121,25 @@ export function parseClaudeModel(value: unknown): ClaudeModel | null {
 }
 
 /**
- * ローカルセッション（サブPCで新しく起動するClaude Codeセッション）で使えるモデルの候補（#2756）。
- * **`haiku`を含まない。** ローカルセッションは`--permission-mode auto`で起動しており
- * （`run-issue-session.sh`・`start-issue.sh`）、Haikuはauto modeで動作しないため選ばせない
- * （https://github.com/anthropics/claude-code/issues/43235）。
+ * ローカルセッション（サブPCで新しく起動するClaude Codeセッション）で使えるモデルの候補（#2756・#2776）。
+ * **`haiku`と`auto`を含まない。**
+ *
+ * - `haiku`: ローカルセッションは`--permission-mode auto`で起動しており
+ *   （`run-issue-session.sh`・`start-issue.sh`）、Haikuはauto modeで動作しないため選ばせない
+ *   （https://github.com/anthropics/claude-code/issues/43235）。
+ * - `auto`（CLIの既定。`--model`を付けずClaude Code側の設定・アカウントの既定に委ねる）は
+ *   #2776で選択肢から外した。「どのモデルで動くか分からない」まま起動できる方式自体が不要
+ *   というIssueの要求に加え、`auto`を選べる状態を残すと、`scripts/run-issue-session.sh`の
+ *   受付コメント用フォールバック（`ISSUE_DECK_CLAUDE_MODEL`が空のときだけGitHub Actions向け
+ *   設定`claudeModel`を代わりに読む処理）との食い違いが表に出やすかった。**この関数の戻り値が
+ *   常にfable/opus/sonnetのいずれかになったことで、その食い違いも実質発生しなくなる**
+ *   （その処理自体は今回変更していない）。
  *
  * GitHub Actions向け（`claudeModel`・`claudeModelAssist`）は`--allowedTools`での許可制で
- * auto modeを使わないため対象外——`CLAUDE_MODEL_OPTIONS`のまま`haiku`を選べる。
+ * auto modeを使わないため対象外——`CLAUDE_MODEL_OPTIONS`のまま`auto`・`haiku`を選べる。
  */
 export const CLAUDE_LOCAL_MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS.filter(
-  (option) => option.value !== "haiku",
+  (option) => option.value !== "haiku" && option.value !== "auto",
 );
 
 export const CLAUDE_LOCAL_MODEL_VALUES = CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => option.value);

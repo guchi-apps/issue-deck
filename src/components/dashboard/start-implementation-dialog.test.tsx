@@ -174,6 +174,7 @@ function renderDialog(
     actionsDisabledReason?: string | null;
     localSessionCommand?: string | null;
     onOpenChange?: (open: boolean) => void;
+    claudeLocalModel?: "fable" | "opus" | "sonnet";
   } = {},
 ) {
   const issue = props.issue ?? makeIssue();
@@ -190,6 +191,7 @@ function renderDialog(
       includeDispatchTargets={props.includeDispatchTargets}
       actionsDisabledReason={props.actionsDisabledReason ?? null}
       localSessionCommand={props.localSessionCommand ?? null}
+      claudeLocalModel={props.claudeLocalModel ?? "sonnet"}
     />
   );
   const result = render(element());
@@ -458,6 +460,25 @@ describe("StartImplementationDialog", () => {
       expect(screen.getByRole("radio", { name: /設定に従う/ }).getAttribute("aria-checked")).toBe(
         "true",
       );
+    });
+
+    // #2776。「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により削除
+    it("「CLIの既定」は選択肢に出さない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.queryByRole("radio", { name: /CLIの既定/ })).toBeNull();
+    });
+
+    // #2776。「設定に従う」を選んでも実際どのモデルで立つのか分からない、という指摘への対応
+    it("「設定に従う」に実際のモデル名を出す", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(screen.getByText("設定の既定（Opus）で起動")).toBeTruthy();
+      expect(screen.getByText("設定（設定 ＞ 実行）で選んだOpusで起動します。")).toBeTruthy();
     });
 
     it("GitHub Actionsでは選択欄を出さない（設定の既定でしか起動しないため）", () => {

@@ -95,9 +95,10 @@ describe("parseClaudeModel", () => {
 
 // haikuはauto mode（--permission-mode auto）で動作しないため（#2756・
 // https://github.com/anthropics/claude-code/issues/43235）、ローカルセッション用の候補には含めない。
+// autoは「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により
+// 候補から外した（#2776）。
 describe("parseClaudeLocalModel", () => {
-  it("haiku以外の許可された値はそのまま返す", () => {
-    expect(parseClaudeLocalModel("auto")).toBe("auto");
+  it("haiku・auto以外の許可された値はそのまま返す", () => {
     expect(parseClaudeLocalModel("opus")).toBe("opus");
     expect(parseClaudeLocalModel("sonnet")).toBe("sonnet");
     expect(parseClaudeLocalModel("fable")).toBe("fable");
@@ -105,6 +106,10 @@ describe("parseClaudeLocalModel", () => {
 
   it("haikuはnullを返す（auto modeで動作しないため）", () => {
     expect(parseClaudeLocalModel("haiku")).toBeNull();
+  });
+
+  it("autoはnullを返す（#2776）", () => {
+    expect(parseClaudeLocalModel("auto")).toBeNull();
   });
 
   it("許可されていない値はnullを返す", () => {

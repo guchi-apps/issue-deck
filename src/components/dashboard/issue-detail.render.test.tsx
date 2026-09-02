@@ -213,6 +213,7 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
+      claudeLocalModel="sonnet"
       {...overrides}
     />,
   );
@@ -225,6 +226,7 @@ function renderMobileDetail(issue: Issue) {
       issues={[issue]}
       repositories={[repository]}
       currentUserLogin="guchi"
+      claudeLocalModel="sonnet"
       onBack={vi.fn()}
       onEdit={vi.fn()}
       onIssueUpdated={vi.fn()}

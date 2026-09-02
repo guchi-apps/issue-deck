@@ -5,7 +5,6 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   Archive,
   BadgeCheck,
-  CheckSquare,
   CircleCheck,
   CircleCheckBig,
   CircleDot,
@@ -23,7 +22,6 @@ import {
   Star,
 } from "lucide-react";
 
-import { BulkDispatchBar } from "@/components/dashboard/bulk-dispatch-bar";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
@@ -35,7 +33,6 @@ import {
 } from "@/components/dashboard/workflow-status-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
@@ -48,7 +45,6 @@ import {
   resolveIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
-import { bulkDispatchableIssues as listBulkDispatchableIssues } from "@/lib/dispatch/bulk-dispatch";
 import {
   findSessionForIssue,
   resolveIssueImplementationAgent,
@@ -388,8 +384,8 @@ function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
 }
 
 /**
- * 一覧の上に並ぶ「〜が n件あります。」の入口バー（手作業アシスタント・「次にやること」・
- * まとめて実行）で共有する見た目。
+ * 一覧の上に並ぶ「〜が n件あります。」の入口バー（手作業アシスタント・「次にやること」）で
+ * 共有する見た目。
  *
  * **入りきらないときは折り返す**（#2107）。以前は1行固定の`flex`で、右のバッジ・ボタンだけに
  * `shrink-0`が付いていた。中央カラムは手で狭められる（#381）ため、縮められるものが左の
@@ -595,31 +591,6 @@ export function IssueList({
   }
   const highlightedIssueId = optimisticSelectedId ?? selectedIssueId;
 
-  // まとめてサブPCへ積むための選択（#1266）。**既定はオフ**で、行のクリックは従来どおり
-  // Issueを開く。選択モードのときだけチェックボックスを出す
-  const [isSelecting, setIsSelecting] = useState(false);
-  // 入口のバーを出すかどうかの判定（#1993）。**押しても何も起きない件数を出さない**ため、
-  // closeしたIssueと既に走っている（積んである）Issueは数えない
-  // GitHub Actionsで走っている最中のIssueも数えない（#2032）。材料はこの一覧が既に
-  // ポーリングしている実行状況（`runningByIssueId`）で、GitHub APIは追加で叩かない
-  const actionsRunningIssueIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const [id, state] of Object.entries(runningByIssueId)) {
-      if (state?.isRunning) ids.add(id);
-    }
-    return ids;
-  }, [runningByIssueId]);
-  const bulkDispatchableIssues = useMemo(
-    () =>
-      listBulkDispatchableIssues(issues, {
-        hosts: dispatch.hosts,
-        jobs: dispatch.jobs,
-        sessions: dispatch.sessions,
-        actionsRunningIssueIds,
-      }),
-    [issues, dispatch.hosts, dispatch.jobs, dispatch.sessions, actionsRunningIssueIds],
-  );
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLLIElement>());
   const listRef = useRef<HTMLUListElement>(null);
   // 引っ張って更新（#1893）。タッチを受けるのは一覧を包む枠で、スクロール位置は<ul>から見る
@@ -693,20 +664,6 @@ export function IssueList({
           ),
         )
       : [];
-
-  function toggleSelected(issueId: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(issueId)) next.delete(issueId);
-      else next.add(issueId);
-      return next;
-    });
-  }
-
-  function exitSelecting() {
-    setIsSelecting(false);
-    setSelectedIds(new Set());
-  }
 
   /**
    * 保留中の行（#2398）。**通常の行より情報を削る**——ここに来るのは解除するときだけで、
@@ -822,8 +779,7 @@ export function IssueList({
           // 前後だけを決めたいもので、これが無いと一覧の外にある要素（右下の丸ボタンなど）と
           // 同じ土俵で比較され、z-indexを持たない側が一覧の後ろへ回ってしまう
           "relative isolate border-b border-l-4 border-l-transparent hover:bg-accent",
-          highlightedIssueId === issue.id && !isSelecting && "border-l-primary bg-accent",
-          isSelecting && selectedIds.has(issue.id) && "border-l-primary bg-accent",
+          highlightedIssueId === issue.id && "border-l-primary bg-accent",
         )}
       >
         {/* 行を選ぶ当たり判定（#1915）。**本文を包む`<button>`にしない。** ラベル行へ足した
@@ -834,10 +790,6 @@ export function IssueList({
           type="button"
           aria-label={`#${issue.number} ${issue.title}`}
           onClick={() => {
-            if (isSelecting) {
-              toggleSelected(issue.id);
-              return;
-            }
             setOptimisticSelectedId(issue.id);
             onSelectIssue(issue);
           }}
@@ -846,15 +798,6 @@ export function IssueList({
         <div className="pointer-events-none relative z-10 flex w-full flex-col gap-1.5 px-4 py-3 text-left">
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              {isSelecting && (
-                <Checkbox
-                  checked={selectedIds.has(issue.id)}
-                  aria-label={`#${issue.number}を選択`}
-                  className="mr-1"
-                  // 行のonClickが選択を切り替えるので、二重に反応させない
-                  onClick={(event) => event.preventDefault()}
-                />
-              )}
               <IssueStateIcon issue={issue} />
               {showRepoName && (
                 <>
@@ -1157,42 +1100,6 @@ export function IssueList({
             </Button>
           </div>
         </div>
-      )}
-
-      {/* 選んだIssueをまとめて実行する入口（#1266・#1993）。**ヘッダーではなく一覧の上に置く**——
-          スマホの一覧はこのコンポーネントのヘッダーを出さない（`showHeader={false}`）ため、
-          ヘッダーに置くとPCからしか押せない（手作業アシスタント・「次にやること」と同じ理由）。
-          **出すのは積めるIssueが2件以上あるときだけ**で、1件しか無いなら個別の「実装を開始」で足りる */}
-      {isSelecting ? (
-        <BulkDispatchBar
-          issues={issues.filter((issue) => selectedIds.has(issue.id))}
-          dispatch={dispatch}
-          actionsRunningIssueIds={actionsRunningIssueIds}
-          onClose={exitSelecting}
-        />
-      ) : (
-        bulkDispatchableIssues.length >= 2 && (
-          <div className={cn(COUNT_BAR_CLASS, "bg-muted/40")}>
-            <p className={COUNT_BAR_TEXT_CLASS}>
-              まとめて実行できるIssueが
-              <span className="font-medium text-foreground tabular-nums">
-                {bulkDispatchableIssues.length}件
-              </span>
-              あります。
-            </p>
-            <div className={COUNT_BAR_ACTIONS_CLASS}>
-              <Button
-                size="xs"
-                variant="outline"
-                className="shrink-0"
-                onClick={() => setIsSelecting(true)}
-              >
-                <CheckSquare />
-                まとめて実行
-              </Button>
-            </div>
-          </div>
-        )
       )}
 
       {/* 一覧のoverscroll-containは、端まで到達したあとの慣性スクロールが

@@ -57,14 +57,14 @@ describe("CreateIssueWindow", () => {
   it("移してきた内容を受け取り、保存を残さない（開き直しで書きかけが復活しない）", () => {
     window.localStorage.setItem(HANDOFF_KEY, makeStoredHandoff());
 
-    render(<CreateIssueWindow repositories={[]} issues={[]} />);
+    render(<CreateIssueWindow repositories={[]} issues={[]} claudeLocalModel="sonnet" />);
 
     expect(screen.getByTestId("handoff-title").textContent).toBe("移してきたタイトル");
     expect(window.localStorage.getItem(HANDOFF_KEY)).toBeNull();
   });
 
   it("URLを直接開いた場合は空のフォームとして始まり、戻り先をデッキにする", () => {
-    render(<CreateIssueWindow repositories={[]} issues={[]} />);
+    render(<CreateIssueWindow repositories={[]} issues={[]} claudeLocalModel="sonnet" />);
 
     expect(screen.getByTestId("handoff-title").textContent).toBe("（受け渡し無し）");
     // jsdomでは`window.opener`はnull＝このウィンドウを開いた相手がいない
@@ -78,7 +78,7 @@ describe("CreateIssueWindow", () => {
     const location = { href: "http://localhost/issues/new" };
     vi.spyOn(window, "location", "get").mockReturnValue(location as unknown as Location);
 
-    render(<CreateIssueWindow repositories={[]} issues={[]} />);
+    render(<CreateIssueWindow repositories={[]} issues={[]} claudeLocalModel="sonnet" />);
     fireEvent.click(screen.getByRole("button", { name: "閉じる操作" }));
 
     expect(close).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe("CreateIssueWindow", () => {
   });
 
   it("作成したIssueは元のデッキへ伝える", () => {
-    render(<CreateIssueWindow repositories={[]} issues={[]} />);
+    render(<CreateIssueWindow repositories={[]} issues={[]} claudeLocalModel="sonnet" />);
     fireEvent.click(screen.getByRole("button", { name: "作成した" }));
 
     expect(broadcastIssueCreated).toHaveBeenCalledWith({ id: "1" });

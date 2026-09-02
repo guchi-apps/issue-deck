@@ -1592,6 +1592,14 @@ model SessionUsage {
   /// Plan modeを使っていないセッション・Codexの行はnull（画面は「区分なし」として合算のみ出す）
   planCostUsd           Float?
   implementationCostUsd Float?
+  /// `implementationCostUsd`をさらに割った内訳（#2779）。境界はどれも転記のツール呼び出しで、
+  /// 調査＝最初のファイル編集まで／実装＝最初の`git commit`まで／仕上げ＝それ以降。
+  /// **`researchCostUsd + codingCostUsd + wrapupCostUsd = implementationCostUsd`**（計画を除く全部）。
+  /// 書き込みもコミットも1度も無いセッション・Codexの行は3つともnull
+  /// （画面は「実装（フェーズ未集計）」の1行へまとめる）
+  researchCostUsd Float?
+  codingCostUsd   Float?
+  wrapupCostUsd   Float?
   /// 使われたモデルIDのJSON配列（例: `["claude-opus-5"]`）
   models String @db.Text
 

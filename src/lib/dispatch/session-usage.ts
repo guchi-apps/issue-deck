@@ -58,6 +58,14 @@ export type SessionUsageReport = {
    */
   planCostUsd: number | null;
   implementationCostUsd: number | null;
+  /**
+   * `implementationCostUsd`をさらに割った内訳（#2779）。調査＝最初のファイル編集まで、
+   * 実装＝最初の`git commit`まで、仕上げ＝それ以降。**3つ揃っていなければ3つともnull**
+   * （上のplanCostUsd/implementationCostUsdと同じ理由）
+   */
+  researchCostUsd: number | null;
+  codingCostUsd: number | null;
+  wrapupCostUsd: number | null;
   models: string[];
   startedAt: Date;
   endedAt: Date;
@@ -162,6 +170,17 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   const planCostUsd = hasPlanSplit ? parsedPlanCostUsd : null;
   const implementationCostUsd = hasPlanSplit ? parsedImplementationCostUsd : null;
 
+  // 実装の中の4区分（#2779）。**3つ揃っていなければ3つともnull**——欠けたまま入れると
+  // 画面が「調査＋実装＋仕上げ＝実装の合計」を前提にできなくなる。
+  const parsedResearchCostUsd = parseNonNegativeNumber(input.researchCostUsd);
+  const parsedCodingCostUsd = parseNonNegativeNumber(input.codingCostUsd);
+  const parsedWrapupCostUsd = parseNonNegativeNumber(input.wrapupCostUsd);
+  const hasPhaseSplit =
+    parsedResearchCostUsd !== null && parsedCodingCostUsd !== null && parsedWrapupCostUsd !== null;
+  const researchCostUsd = hasPhaseSplit ? parsedResearchCostUsd : null;
+  const codingCostUsd = hasPhaseSplit ? parsedCodingCostUsd : null;
+  const wrapupCostUsd = hasPhaseSplit ? parsedWrapupCostUsd : null;
+
   const rawModels = input.models;
   if (!Array.isArray(rawModels) || rawModels.some((model) => typeof model !== "string")) return null;
 
@@ -187,6 +206,9 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
     outputCostUsd,
     planCostUsd,
     implementationCostUsd,
+    researchCostUsd,
+    codingCostUsd,
+    wrapupCostUsd,
     models: rawModels as string[],
     startedAt,
     endedAt,
@@ -255,6 +277,9 @@ export async function storeSessionUsage({
       outputCostUsd: session.outputCostUsd,
       planCostUsd: session.planCostUsd,
       implementationCostUsd: session.implementationCostUsd,
+      researchCostUsd: session.researchCostUsd,
+      codingCostUsd: session.codingCostUsd,
+      wrapupCostUsd: session.wrapupCostUsd,
       models: JSON.stringify(session.models),
       startedAt: session.startedAt,
       endedAt: session.endedAt,

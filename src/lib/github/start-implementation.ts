@@ -177,32 +177,6 @@ export function visibleStartImplementationOptions({
   });
 }
 
-/**
- * 選んだ複数のIssueへ**まとめて**付けられるオプションを絞る（#1993）。
- *
- * 「まとめて実行」バーは1回選んだ条件を選択中の全Issueへ同じように付けるため、**選んだIssueで
- * 共通して選べるものだけを出す**。判断材料は2つ。
- *
- * 1. **実行先はサブPCで固定**（`visibleStartImplementationOptions`の`isActionsTarget: false`）。
- *    撮影はGitHub Actions専用なので出ない
- * 2. **そのラベルが、選んだIssueのリポジトリすべてに定義されていること。** ラベルの付与は
- *    存在しない名前を渡すと**その場で作ってしまう**（`artifactRequiredDefaultForLabels`の注記・
- *    #1490）。リポジトリをまたいで選べる以上、片方にしか無いラベルを一括で配ると、押した覚えの
- *    無いラベルが増える
- *
- * `labelNamesByRepository`に**入っていないリポジトリは判定しない**（取得前・取得に失敗した状態）。
- * 判定材料が無いことと「定義が無い」ことは違うため、絞り込みは分かっているぶんだけで行う。
- */
-export function commonStartImplementationOptions(
-  labelNamesByRepository: ReadonlyMap<string, readonly string[]>,
-): typeof START_IMPLEMENTATION_OPTIONS {
-  const known = [...labelNamesByRepository.values()];
-  return visibleStartImplementationOptions({
-    isActionsTarget: false,
-    options: START_IMPLEMENTATION_DEFAULT_OPTIONS,
-  }).filter((option) => known.every((names) => names.includes(option.githubLabel)));
-}
-
 /** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
 const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
   START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel),

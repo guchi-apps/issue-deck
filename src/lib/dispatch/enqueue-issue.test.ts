@@ -104,7 +104,7 @@ describe("enqueueIssueToDefaultHost", () => {
     });
   });
 
-  // まとめて実行（#1993）で選んだオプションは、**積むより先に**付ける。ランチャーは起動直後に
+  // 渡したオプションのラベルは、**積むより先に**付ける。ランチャーは起動直後に
   // ラベルを読むため（`scripts/start-issue.sh`）、積んだ後に付けると読まれないことがある
   it("渡したラベルは積む前に付け、11.localは積んだ後に付ける", async () => {
     const order: string[] = [];
@@ -245,7 +245,7 @@ describe("enqueueIssueToDefaultHost", () => {
   });
 
   // #2032。Actionsで走っているIssueはジョブにもセッションにも現れないため、これが無いと
-  // 「まとめて実行」がそのまま積み、同じブランチを2つの経路が進める
+  // そのまま積み、同じブランチを2つの経路が進める
   it("GitHub Actionsで走っているIssueは積まず、ラベルも付けない（#2032）", async () => {
     const enqueue = vi.fn().mockResolvedValue(true);
     const updateIssue = vi.fn().mockResolvedValue(null);

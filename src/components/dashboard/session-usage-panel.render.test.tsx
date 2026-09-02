@@ -130,6 +130,41 @@ describe("SessionUsagePanel", () => {
   });
 
   /**
+   * #2779。実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
+   */
+  it("セッション種別別で、実装をフェーズの4行に分けて出す", () => {
+    renderPanel(
+      response([
+        entry({
+          costUsd: 20,
+          planCostUsd: 2,
+          implementationCostUsd: 18,
+          researchCostUsd: 4,
+          codingCostUsd: 10,
+          wrapupCostUsd: 4,
+        }),
+      ]),
+    );
+
+    const card = screen.getByText("セッション種別別").closest("section");
+    expect(card).not.toBeNull();
+    const rows = within(card as HTMLElement);
+    expect(rows.getByText("計画（Plan mode）")).toBeTruthy();
+    expect(rows.getByText("調査")).toBeTruthy();
+    expect(rows.getByText("実装")).toBeTruthy();
+    expect(rows.getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
+    // 割る前の1行は残さない（フェーズ未集計の行も出ない）。
+    expect(rows.queryByText("実装（フェーズ未集計）")).toBeNull();
+  });
+
+  it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {
+    renderPanel(response([entry({ costUsd: 20 })]));
+
+    const card = screen.getByText("セッション種別別").closest("section");
+    expect(within(card as HTMLElement).getByText("実装（フェーズ未集計）")).toBeTruthy();
+  });
+
+  /**
    * #2752。セッションの記録がまだ届いていないと上の内訳ごと描かれない。このアプリ自身の消費は
    * セッションと無関係に数えられているので、**そのときは単独で出す**。
    */
