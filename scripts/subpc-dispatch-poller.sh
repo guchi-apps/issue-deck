@@ -1349,6 +1349,11 @@ SESSION_USAGE_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-us
 SESSION_USAGE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-backfill.stamp"
 # Codex収集を追加する前からClaude側の印は存在するため、Codexの過去ぶんは別の印で一度だけ埋める。
 SESSION_USAGE_CODEX_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-codex-backfill.stamp"
+# **集計に項目が増えたときも、過去ぶんを一度だけ埋め直す**（#2779でフェーズ別の内訳を足した）。
+# 平常時に開くのは最終更新が2日以内の転記だけなので、印を足さないと**入れ替えた時点で
+# 3日以上前に終わったセッションには二度と内訳が入らない**（画面は最大30日を出すため、
+# ひと月ぶんが「フェーズ未集計」のまま残る）。項目を増やすたびにこの名前を変える。
+SESSION_USAGE_PHASE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-phase-backfill.stamp"
 
 report_session_usage() {
   ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
@@ -1372,7 +1377,8 @@ report_session_usage() {
   touch "$SESSION_USAGE_STAMP" 2>/dev/null || true
 
   local days backfill=0
-  if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" ]]; then
+  if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" &&
+    -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" ]]; then
     days="$SESSION_USAGE_WINDOW_DAYS"
   else
     days="$SESSION_USAGE_BACKFILL_DAYS"
@@ -1421,6 +1427,7 @@ report_session_usage() {
   if ((backfill)); then
     touch "$SESSION_USAGE_BACKFILL_STAMP" 2>/dev/null || true
     ((codex_backfill_ok)) && touch "$SESSION_USAGE_CODEX_BACKFILL_STAMP" 2>/dev/null || true
+    touch "$SESSION_USAGE_PHASE_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
   return 0
