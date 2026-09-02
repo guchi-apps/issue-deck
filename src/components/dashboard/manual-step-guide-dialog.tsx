@@ -104,6 +104,7 @@ import {
   type ManualStepTroubleRecord,
   type ManualStepTroubleReport,
 } from "@/lib/manual-step-trouble";
+import { findManualStepSyncKeys, isOnePasswordRegistrationStep } from "@/lib/manual-step-1password";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -1254,6 +1255,42 @@ function OverviewStage({
   );
 }
 
+/**
+ * 1Password登録手順のすぐ下に、GitHub secretへの同期はアプリの「シークレット同期」画面
+ * からでもできる旨を案内する（#2753）。
+ *
+ * 手作業Issueの「やること」には、1Passwordへの登録（ブラウザ）の後に、登録した値を
+ * GitHub secretへ同期するコマンド（`provision-secret.sh`等。サブPCで代行実行できる）が
+ * 続くことが多い（実例: #2572）。サブPCの端末に触れない状況（スマホからの利用等）でも、
+ * 1Passwordアプリでの登録と`SecretsSyncSection`の「同期」ボタンだけで完結できることを示す。
+ *
+ * **同じ本文に同期コマンドが無ければ何も出さない。** 1Password絡みでも同期を伴わない
+ * 手順（重複フィールドの削除等）があり、そこで案内しても実行する先が無い。
+ */
+function ManualStepOnePasswordSyncNote({
+  step,
+  guide,
+}: {
+  step: ManualStepGuideStep;
+  guide: ManualStepGuide;
+}) {
+  if (!isOnePasswordRegistrationStep(step)) return null;
+  const keys = findManualStepSyncKeys(guide);
+  if (keys.length === 0) return null;
+
+  const keyList = keys.map((key) => `\`${key}\``).join("・");
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-dashed bg-muted/40 p-2.5 text-muted-foreground">
+      <Info className="mt-0.5 size-3.5 shrink-0" />
+      <MarkdownBody
+        content={`登録した後は、サブPCでの同期コマンドの代わりに、アプリの**設定 ▸ フリート運用 ▸ シークレット同期**の「同期」ボタンでも実行できます（対象キー: ${keyList}）。`}
+        className="text-xs [&_p]:mb-0"
+        copyableInlineCode
+      />
+    </div>
+  );
+}
+
 function StepStage({
   step,
   values,
@@ -1331,11 +1368,16 @@ function StepStage({
       </div>
       {/* コードブロックのコピーボタン（#1726）と`#123`のリンクをそのまま使うため、
           手順もMarkdownとして描く。チェックボックスは`- [ ]`ごと外してあるので、
-          この中には出ない（付けるのはフッターの「実行した・次へ」） */}
+          この中には出ない（付けるのはフッターの「実行した・次へ」）。
+          `copyableInlineCode`（#2753）で、`` `apps` ``のようなバッククォート表記も
+          個別にコピーできるようにする——1Passwordのボールト名・アイテム名・フィールド名を
+          スマホから範囲選択なしで拾えるようにするため */}
       <MarkdownBody
         content={foldCommand ? stripCodeBlocks(step.markdown) : step.markdown}
         repositoryFullName={issue.repositoryFullName}
+        copyableInlineCode
       />
+      <ManualStepOnePasswordSyncNote step={step} guide={guide} />
       {/* サブPCで実行する手順は、承認1回で代行できる（#1828）。できない場合も理由を出す */}
       {entry !== null && (
         <ManualStepRunPanel

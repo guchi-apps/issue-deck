@@ -1312,6 +1312,15 @@ export function POST(request: NextRequest) {
     だけなので、本文をそのまま1画面で出してクローズの出口だけ付ける。
   - **コマンドのコピーボタンを作らない。** 手順をMarkdownとして描けば、既存の
     `MarkdownBody`のコードブロック（#1726）がそのまま付く。
+  - **インラインコード（`` `apps` ``）も、`copyableInlineCode`を渡せば個別にコピーできる**
+    （#2753）。1Passwordのボールト名・アイテム名・フィールド名のように、文中の語だけを
+    スマホから範囲選択せずに拾いたい場面で使う。既定は`false`（Issue本文・コメント等、
+    他の画面の見た目は変えない）。フェンス付きコードブロックの中身も同じ`code`要素として
+    描かれる（`<pre><code>`）ため、`lib/rehype-mark-inline-code.ts`が**`pre`の外にある
+    `code`だけ**へ印を付けて見分けている——`react-markdown`はv9以降`code`コンポーネントへ
+    `inline`真偽値を渡さなくなっており、インラインかどうかは自前で判定する必要がある。
+    「1Passwordへ登録した後は`SecretsSyncSection`（設定 ▸ フリート運用 ▸ シークレット同期）
+    の「同期」ボタンでも実行できる」という案内は`lib/manual-step-1password.ts`が持つ。
 - **質問Issueの状態（回答待ち・未確認・確認済み）の判定は
   [`lib/question-attention.ts`](../src/lib/question-attention.ts)の`resolveQuestionState`だけが持つ**
   （#1796）。一覧の行のラベル（`issue-list.tsx`の`QuestionStateBadge`）・ヘッダーの内訳
