@@ -135,6 +135,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
+import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
@@ -195,6 +196,11 @@ type MobileIssueDetailProps = {
   onUnsnooze?: (target: SnoozeTarget) => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
+  /**
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。「実装を開始」ダイアログの
+   * 「設定に従う」チップに実際のモデル名を出すためだけに`StartImplementationDialog`へ渡す。
+   */
+  claudeLocalModel: ClaudeLocalModel;
 };
 
 /** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
@@ -219,6 +225,7 @@ export function MobileIssueDetail({
   onSnooze,
   onUnsnooze,
   onStartManualStepGuide,
+  claudeLocalModel,
 }: MobileIssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。PCの詳細と同じく、早期returnより前で呼ぶ
   const snoozeNow = useNow();
@@ -952,6 +959,7 @@ export function MobileIssueDetail({
             actionsDisabledReason={actionsDisabledReason}
             comments={comments}
             subIssueRelations={subIssueRelations}
+            claudeLocalModel={claudeLocalModel}
             renderTrigger={(isSubmitting) => (
               <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}

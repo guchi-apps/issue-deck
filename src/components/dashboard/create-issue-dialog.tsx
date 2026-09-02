@@ -47,6 +47,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
+import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
@@ -266,6 +267,12 @@ type CreateIssueDialogProps = {
   initialHandoff?: IssueCreateHandoff | null;
   /** 取り消しボタンの文言。別ウィンドウでは閉じ方が変わるため差し替える */
   cancelLabel?: string;
+  /**
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。作成直後の
+   * 「作成+実装開始」（`StartImplementationDialog`）の「設定に従う」チップに
+   * 実際のモデル名を出すためだけに渡す。
+   */
+  claudeLocalModel: ClaudeLocalModel;
 };
 
 /**
@@ -315,6 +322,7 @@ export function CreateIssueDialog({
   presentation = "dialog",
   initialHandoff = null,
   cancelLabel,
+  claudeLocalModel,
 }: CreateIssueDialogProps) {
   const isWindow = presentation === "window";
   const Chrome = isWindow ? WINDOW_CHROME : DIALOG_CHROME;
@@ -1175,6 +1183,7 @@ export function CreateIssueDialog({
           }
           // 作成した直後なのでコメントも親子関係も無い。「取得していません」と書かせないよう空で渡す
           subIssueRelations={{ parent: null, children: [], childCount: 0 }}
+          claudeLocalModel={claudeLocalModel}
         />
       )}
     </>

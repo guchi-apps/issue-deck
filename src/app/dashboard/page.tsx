@@ -6,6 +6,7 @@ import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
+  parseClaudeLocalModel,
   parseClaudeModel,
   parseCodexModel,
   parseAppAiModel,
@@ -34,8 +35,11 @@ export default async function DashboardPage() {
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
+  // `claudeLocalModel`は#2776で`auto`を選べなくした。既存値が`auto`のまま残っていても
+  // `parseClaudeLocalModel`が弾いて既定（sonnet）へ倒す（`parseClaudeModel`だと`auto`を
+  // 通してしまい、選べないはずの値がshellのstateへ入ってしまう）
   const claudeLocalModel =
-    parseClaudeModel(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+    parseClaudeLocalModel(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModel(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   const appAiModelReasoning =

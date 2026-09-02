@@ -266,19 +266,22 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 GitHub Actionsのように計画用と補助用には分けない。
 
 払い出しAPIが`claudeLocalModel`をジョブへ付け、pollerが`ISSUE_DECK_CLAUDE_MODEL`として
-ランチャーへ渡し、`run-issue-session.sh`が`claude --model <値>`へ反映する。`auto`の場合は
-環境変数を渡さず、Claude Code側の既定モデルへ委ねる。
+ランチャーへ渡し、`run-issue-session.sh`が`claude --model <値>`へ反映する。
 
-**選べる候補にHaikuは無い**（#2756）。ローカルセッションは前述のとおりauto mode
-（`--permission-mode auto`）で起動しており、Haikuはauto modeで動作しない
-（[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)）。
-候補の一覧は`CLAUDE_MODEL_OPTIONS`から`haiku`を除いた`CLAUDE_LOCAL_MODEL_OPTIONS`
-（`src/lib/app-settings.ts`）で、設定画面の「サブPC（Claude）：計画・実装」、「実装を開始」
-ダイアログのモデル欄（次項）、「おまかせ」の判定候補（`MODEL_PICK_CANDIDATES`）の3か所が
-これを参照する。値の検証も`parseClaudeLocalModel`に分け、既存の値がHaikuのままでも
-既定（Sonnet）へフォールバックする。**GitHub Actions向け（`claudeModel`・
-`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——引き続きHaikuを
-選べる（前掲「使用するモデルの設定」）。
+**選べる候補にHaiku・`auto`（CLIの既定）は無い**（#2756・#2776）。ローカルセッションは
+前述のとおりauto mode（`--permission-mode auto`）で起動しており、Haikuはauto modeで
+動作しない（[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)）。
+`auto`（`--model`を付けずClaude Code側の設定・アカウントの既定に委ねる方式）は、
+「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により外した。
+候補の一覧は`CLAUDE_MODEL_OPTIONS`から`haiku`・`auto`を除いた`CLAUDE_LOCAL_MODEL_OPTIONS`
+（`src/lib/app-settings.ts`）で、設定画面の「サブPC（Claude）：計画・実装」と、「おまかせ」の
+判定候補（`MODEL_PICK_CANDIDATES`）が参照する。**「実装を開始」ダイアログのモデル欄
+（次項）はこれを参照せず、`start-implementation-dialog.tsx`の`MODEL_ENTRIES`に直書きしている**
+——「設定に従う」（`null`）というこの欄だけの選択肢を混ぜているため。両者は`haiku`・`auto`を
+含まない、という制約だけを共有する。値の検証も`parseClaudeLocalModel`に分け、既存の値が
+Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。**GitHub Actions向け
+（`claudeModel`・`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——
+引き続きHaiku・`auto`を選べる（前掲「使用するモデルの設定」）。
 
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
 品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
@@ -336,12 +339,15 @@ Fable 5.1は入力・出力がOpus 5の2倍だが、**キャッシュ読み出�
 `CLAUDE_MODEL_FIT_DESCRIPTIONS`。どちらも`src/lib/app-settings.ts`）。
 見積りを出していた`estimateSessionCostUsd`と、その元の平均トークン数の定数は消した。
 
-### 「おまかせ」はissue-deckが選ぶ（#2723）
+### 「おまかせ」はissue-deckが選ぶ（#2723・#2776）
 
-**旧「おまかせ」は「CLIの既定」へ改名した。** 実体は`--model`を付けないことで、どのモデルで
-立つかはClaude Code側の設定・アカウントの既定で決まる——**作業の内容に応じて選ばれるわけでは
-ない**のに、「おまかせ」は賢く選ぶように読める。受付コメント（`lib/dispatch/session-start.ts`）が
-先に使っていた呼び方へ揃えた。
+**旧「おまかせ」は「CLIの既定」へ改名し、#2776で選択肢自体を削除した。** 実体は`--model`を
+付けないことで、どのモデルで立つかはClaude Code側の設定・アカウントの既定で決まる——
+**作業の内容に応じて選ばれるわけではない**のに、「おまかせ」は賢く選ぶように読める。まず
+受付コメント（`lib/dispatch/session-start.ts`）が先に使っていた呼び方（「CLIの既定」）へ
+揃え（#2723）、その後「どのモデルで動くか分からないまま起動できる方式」自体が不要という
+Issueの要求により、ダイアログの選択肢（`MODEL_ENTRIES`）・設定画面の選択肢
+（`CLAUDE_LOCAL_MODEL_OPTIONS`）の両方から`auto`を外した（#2776。前項）。
 
 新しい「おまかせ」（全幅のチップ）は、**Issueの内容からissue-deckがモデルを選ぶ**。
 
@@ -356,11 +362,27 @@ Fable 5.1は入力・出力がOpus 5の2倍だが、**キャッシュ読み出�
 - 積むのは**決まった具体的なモデル名**で、`auto`ではない。実行キューの印にも受付コメントにも
   そのモデルが出る（APIへ送る値の集合は#2717から変えていない）
 
+### 「設定に従う」を選んだときに実際のモデル名を出す（#2776）
+
+「実装を開始」ダイアログの「設定に従う」チップは、選んでも**そのIssueがどのモデルで
+立つのか画面から分からない**という指摘を受け、アプリ設定「サブPC（Claude）：計画・実装」の
+現在値（`claudeLocalModel`）をチップの2行目・選択時の説明文へ差し込むようにした
+（`modelChipFit`・`describeModelChoice`。`start-implementation-dialog.tsx`）。
+
+値は`issue-deck-shell.tsx`がトップレベルで保持しているものをそのままpropで渡す
+（`StartImplementationDialog`は自分では取りに行かない）。**取得口をダイアログ側に増やすと
+既存の判断（`dispatch`propと同じ理由。#1262）と食い違うため**、呼び出し元（`issue-detail.tsx`・
+`mobile-issue-detail.tsx`・`create-issue-dialog.tsx`）を経由してバケツリレーする形にした。
+`/issues/new`（別ウィンドウ）は`issue-deck-shell.tsx`を経由しないため、`dashboard/page.tsx`と
+同じくページ側でDBから直接読む。
+
 ### 実際に動いているモデルをセッションに出す（#2723）
 
 Issue詳細のセッション表示（`issue-session-status.tsx`）に「モデル Opus」の印が出る。
 **起動時に指定した値ではなく、転記の集計（`SessionUsage.models`）から引いた実物。**
-「CLIの既定」「設定に従う」で立てたときに何で動いているかは、これでしか分からない。
+「設定に従う」で立てたときに実際どのモデルになるかはダイアログの説明文（前項）でも
+分かるが、**そのセッションで実際に動いたモデル**が知りたいときはこちらを見る
+（設定の変更前に積まれたジョブでは両者がずれることがある）。
 
 **出どころが転記の集計しか無いため、遅れがある。** pollerが5分ごとに報告するので、
 **最初の応答が集計されるまで印は出ない**（そのときは欄ごと出さない）。突き合わせは
