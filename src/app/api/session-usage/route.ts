@@ -54,6 +54,9 @@ function toEntry(row: {
   outputCostUsd: number | null;
   planCostUsd: number | null;
   implementationCostUsd: number | null;
+  researchCostUsd: number | null;
+  codingCostUsd: number | null;
+  wrapupCostUsd: number | null;
   models: string;
   startedAt: Date;
   endedAt: Date;
@@ -72,6 +75,9 @@ function toEntry(row: {
   } catch {
     models = [];
   }
+
+  const hasPhaseCosts =
+    row.researchCostUsd !== null && row.codingCostUsd !== null && row.wrapupCostUsd !== null;
 
   return {
     agent: row.agent === "codex" ? "codex" : "claude",
@@ -99,6 +105,10 @@ function toEntry(row: {
       row.planCostUsd !== null && row.implementationCostUsd !== null
         ? row.implementationCostUsd
         : null,
+    // 実装の中の4区分（#2779）。**3つ揃っている行だけ**を内訳ありとして渡す。
+    researchCostUsd: hasPhaseCosts ? row.researchCostUsd : null,
+    codingCostUsd: hasPhaseCosts ? row.codingCostUsd : null,
+    wrapupCostUsd: hasPhaseCosts ? row.wrapupCostUsd : null,
     models,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
@@ -235,6 +245,9 @@ export async function GET(request: NextRequest) {
       startedAt: true,
       endedAt: true,
       workflowName: true,
+      researchCostUsd: true,
+      codingCostUsd: true,
+      wrapupCostUsd: true,
       runUrl: true,
       reportedAt: true,
     },

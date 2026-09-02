@@ -19,6 +19,8 @@ import {
   sessionUsageKindLabel,
   sessionUsageModelLabel,
   sessionUsagePhaseSplit,
+  usagePhaseKindKey,
+  IMPLEMENTATION_UNSPLIT_KIND_KEY,
   type SessionUsageEntry,
   type UsageByAgent,
   type UsageBySource,
@@ -182,6 +184,20 @@ const AGENT_COLORS = { claude: "#9f1239", codex: "#33cc4d", actions: "#86198f" }
  * 既存のオレンジ／青を再利用せず、計画だけ目立たせるティール1色＋残りは中立色にする。
  */
 const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
+
+/**
+ * 「セッション種別別」でフェーズの行に付ける点の色（#2779）。**棒の色分け（誰が使ったか）とは
+ * 別の軸**なので、行頭の小さな点だけで示す。計画だけティールで目立たせ、残りは調査 → 実装 →
+ * 仕上げの順に薄くなる中立色にして、並びが工程の順序に見えるようにする
+ * （`PHASE_COLORS`の考え方をそのまま4段へ伸ばしたもの）。
+ */
+const KIND_ROW_COLORS: Record<string, string> = {
+  [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
+  [usagePhaseKindKey("research")]: "#78716c",
+  [usagePhaseKindKey("coding")]: PHASE_COLORS.implementation,
+  [usagePhaseKindKey("wrapup")]: "#d6d3d1",
+  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#52525b",
+};
 
 type TokenSegment = { key: string; label: string; value: number; color: string };
 
@@ -1046,7 +1062,6 @@ export function SessionUsagePanel({
   const perResponseUsd = totals && totals.responses > 0 ? totals.costUsd / totals.responses : 0;
   const avgContext =
     totals && totals.responses > 0 ? Math.round(totals.contextTokens / totals.responses) : 0;
-  const implementation = data?.byKind.find((kind) => kind.key === "implementation");
   const planReview = data?.byKind.find((kind) => kind.key === "plan-review");
   const todayKey = data?.byDay.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
@@ -1158,7 +1173,9 @@ export function SessionUsagePanel({
             <Tile
               label="セッション"
               value={data.totals.sessions.toLocaleString()}
-              sub={`実装 ${implementation?.sessions ?? 0}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
+              /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
+                 1本が最大4行に現れる）ため、集計側が数えた本数を使う（#2779） */
+              sub={`実装 ${data.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
             />
           </div>
 
@@ -1192,10 +1209,13 @@ export function SessionUsagePanel({
             {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
                 使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
             <div className="flex flex-col gap-2">
+              {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
+                  実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない */}
               <Breakdown
                 title="セッション種別別"
-                hint="作業ディレクトリで判定"
+                hint="実装はフェーズで分割（転記から推定）"
                 rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
+                colorOf={(key) => KIND_ROW_COLORS[key]}
               />
               {apiUsageSection}
             </div>

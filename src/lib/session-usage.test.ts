@@ -59,6 +59,7 @@ type UsageOverrides = {
  * 転記のassistant行。`cacheFlat` を渡すと `cache_creation` の内訳を持たない古い形になる。
  * `exitPlanMode: true` で、計画/実装の境界（#2646）に使う`ExitPlanMode`のtool_use呼び出しを
  * 同じ行に載せる（実物のtranscriptでも同じ行にusageとtool_useが同居している）。
+ * `editTool: true` / `bash: "..."` は、調査/実装/仕上げの境界（#2779）に使うtool_use呼び出し。
  */
 function assistantLine(
   id: string,
@@ -67,6 +68,8 @@ function assistantLine(
     model?: string;
     timestamp?: string;
     exitPlanMode?: boolean;
+    editTool?: boolean;
+    bash?: string;
   } = {},
 ) {
   const usage: Record<string, unknown> = {
@@ -84,9 +87,13 @@ function assistantLine(
     };
   }
   const message: Record<string, unknown> = { id, model: options.model ?? "claude-opus-5", usage };
-  if (options.exitPlanMode) {
-    message.content = [{ type: "tool_use", name: "ExitPlanMode", input: {} }];
+  const content: unknown[] = [];
+  if (options.exitPlanMode) content.push({ type: "tool_use", name: "ExitPlanMode", input: {} });
+  if (options.editTool) {
+    content.push({ type: "tool_use", name: "Edit", input: { file_path: "/tmp/a.ts" } });
   }
+  if (options.bash) content.push({ type: "tool_use", name: "Bash", input: { command: options.bash } });
+  if (content.length) message.content = content;
   return {
     type: "assistant",
     cwd: options.cwd ?? "/home/u/apps/issue-deck-worktrees/issue-2350",
@@ -332,6 +339,84 @@ describe("session_usage_aggregate", () => {
       expect(session.planCostUsd).toBeCloseTo(session.implementationCostUsd * 3, 3);
     });
   });
+
+  describe("実装の4区分（#2779）", () => {
+    it("書き込みもコミットも無いセッションは、3つともnull（フェーズ未集計）にする", () => {
+      // 全額が「調査」へ寄ると、実際には実装していたセッションまで調査として数えてしまう。
+      const file = writeTranscript("no-phase.jsonl", [
+        assistantLine("msg_1", { output: 1000, timestamp: "2026-08-25T03:00:00.000Z" }),
+        assistantLine("msg_2", { output: 1000, timestamp: "2026-08-25T03:05:00.000Z" }),
+      ]);
+      const session = aggregate([file]).sessions[0];
+      expect(session.researchCostUsd).toBeNull();
+      expect(session.codingCostUsd).toBeNull();
+      expect(session.wrapupCostUsd).toBeNull();
+    });
+
+    it("最初のファイル編集・最初のコミットを境に、調査・実装・仕上げへ振り分ける", () => {
+      const file = writeTranscript("phases.jsonl", [
+        // 調査（最初の編集より前）。
+        assistantLine("msg_1", { output: 1000, timestamp: "2026-08-25T03:00:00.000Z" }),
+        // 実装（最初の編集から最初のコミットまで）。編集した応答自体は実装に入る。
+        assistantLine("msg_2", {
+          output: 2000,
+          timestamp: "2026-08-25T03:05:00.000Z",
+          editTool: true,
+        }),
+        // 仕上げ（コミット以降）。コミットした応答自体は仕上げに入る。
+        assistantLine("msg_3", {
+          output: 3000,
+          timestamp: "2026-08-25T03:10:00.000Z",
+          bash: 'git add -A && git commit -m "x"',
+        }),
+      ]);
+      const session = aggregate([file]).sessions[0];
+      // 出力トークンが1:2:3なので、金額もその比になる。
+      expect(session.codingCostUsd).toBeCloseTo(session.researchCostUsd * 2, 3);
+      expect(session.wrapupCostUsd).toBeCloseTo(session.researchCostUsd * 3, 3);
+      // 計画を使っていないセッションなので、3つの合計がそのまま全額になる。
+      expect(
+        session.researchCostUsd + session.codingCostUsd + session.wrapupCostUsd,
+      ).toBeCloseTo(session.costUsd, 3);
+    });
+
+    it("`git -c user.name=\"Claude Code\" ... commit`のように値に空白が入っても境界として拾う", () => {
+      // このフリートのコミットはこの形で、「`-`で始まる語の繰り返し」では拾えない。
+      const file = writeTranscript("commit-with-config.jsonl", [
+        assistantLine("msg_1", {
+          output: 1000,
+          timestamp: "2026-08-25T03:00:00.000Z",
+          editTool: true,
+        }),
+        assistantLine("msg_2", {
+          output: 1000,
+          timestamp: "2026-08-25T03:05:00.000Z",
+          bash: 'git add -A && git -c user.name="Claude Code" -c user.email="c@example.com" commit -q -m "x"',
+        }),
+      ]);
+      const session = aggregate([file]).sessions[0];
+      expect(session.wrapupCostUsd).toBeGreaterThan(0);
+      expect(session.wrapupCostUsd).toBeCloseTo(session.codingCostUsd, 3);
+    });
+
+    it("ヒアドキュメントの本文に出てくる「commit」は境界にしない", () => {
+      const file = writeTranscript("heredoc.jsonl", [
+        assistantLine("msg_1", {
+          output: 1000,
+          timestamp: "2026-08-25T03:00:00.000Z",
+          editTool: true,
+        }),
+        assistantLine("msg_2", {
+          output: 1000,
+          timestamp: "2026-08-25T03:05:00.000Z",
+          bash: "python3 - <<'PY'\nprint('git history and commit messages')\nPY",
+        }),
+      ]);
+      const session = aggregate([file]).sessions[0];
+      expect(session.wrapupCostUsd).toBe(0);
+      expect(session.codingCostUsd).toBeCloseTo(session.costUsd, 3);
+    });
+  });
 });
 
 describe("codex_session_usage_aggregate", () => {
@@ -494,6 +579,7 @@ describe("session_usage_report_payload", () => {
         "cacheCreate1h",
         "cacheCreate5m",
         "cacheRead",
+        "codingCostUsd",
         "costUsd",
         "endedAt",
         "implementationCostUsd",
@@ -506,10 +592,12 @@ describe("session_usage_report_payload", () => {
         "outputCostUsd",
         "planCostUsd",
         "repository",
+        "researchCostUsd",
         "responses",
         "sessionId",
         "startedAt",
         "transcript",
+        "wrapupCostUsd",
       ].sort(),
     );
   });
