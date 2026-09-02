@@ -154,6 +154,11 @@ type CommentThreadProps = {
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
   onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
+  /**
+   * PRマージ待ち画面（mergeApprovalPending）で「マージしない」ボタン押下時の処理（#2780）。
+   * PRをマージせずにクローズし、Issueも「対応終了」としてクローズする
+   */
+  onDeclinePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
@@ -168,6 +173,16 @@ type CommentThreadProps = {
   mergedPullRequestNumbers?: ReadonlySet<number>;
   /** この欄のマージボタンからマージが成功したときに呼ばれる（本文の上の一覧と状態を揃えるため） */
   onPullRequestMerged?: (pullRequestNumber: number) => void;
+  /** 「マージしない」の実行中か（#2780） */
+  isDecliningPullRequest?: boolean;
+  /** 「マージしない」失敗時のエラーメッセージ */
+  declinePullRequestError?: string | null;
+  /** 直近に「マージしない」を実行したPR番号 */
+  declineTargetNumber?: number | null;
+  /** 「マージしない」済みとして扱うPR番号（本文の上のボタンから押された場合も含む） */
+  declinedPullRequestNumbers?: ReadonlySet<number>;
+  /** この欄の「マージしない」から成功したときに呼ばれる */
+  onPullRequestDeclined?: (pullRequestNumber: number) => void;
   /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
   targetCommentIndex?: number;
   /** targetCommentIndexが指すコメントの要素に設定するref */
@@ -220,6 +235,7 @@ function ApprovalActions({
   onRequestContinuation,
   onRequestPrFix,
   onMergePullRequest,
+  onDeclinePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
@@ -230,6 +246,11 @@ function ApprovalActions({
   mergeTargetNumber,
   mergedPullRequestNumbers,
   onPullRequestMerged,
+  isDecliningPullRequest,
+  declinePullRequestError,
+  declineTargetNumber,
+  declinedPullRequestNumbers,
+  onPullRequestDeclined,
   isFallbackNotice,
   mergeApprovalPending,
   mergeCheckReasons = null,
@@ -256,6 +277,7 @@ function ApprovalActions({
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
+  onDeclinePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
@@ -266,6 +288,11 @@ function ApprovalActions({
   mergeTargetNumber?: number | null;
   mergedPullRequestNumbers?: ReadonlySet<number>;
   onPullRequestMerged?: (pullRequestNumber: number) => void;
+  isDecliningPullRequest?: boolean;
+  declinePullRequestError?: string | null;
+  declineTargetNumber?: number | null;
+  declinedPullRequestNumbers?: ReadonlySet<number>;
+  onPullRequestDeclined?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   /**
@@ -306,6 +333,9 @@ function ApprovalActions({
   // この欄の押下は自前の状態にも残す。
   const [mergedHere, setMergedHere] = useState<ReadonlySet<number>>(EMPTY_MERGED_NUMBERS);
   const mergedNumbers = new Set([...mergedHere, ...(mergedPullRequestNumbers ?? [])]);
+  // 「マージしない」も同じく上の一覧と状態を共有する（#2780）
+  const [declinedHere, setDeclinedHere] = useState<ReadonlySet<number>>(EMPTY_MERGED_NUMBERS);
+  const declinedNumbers = new Set([...declinedHere, ...(declinedPullRequestNumbers ?? [])]);
   const isMerged =
     mergedNumbers.size > 0 &&
     (pullRequestLinks ?? []).every((link) => mergedNumbers.has(link.number));
@@ -394,6 +424,11 @@ function ApprovalActions({
     onPullRequestMerged?.(pullRequestNumber);
   }
 
+  function handleDeclined(pullRequestNumber: number) {
+    setDeclinedHere((prev) => new Set([...prev, pullRequestNumber]));
+    onPullRequestDeclined?.(pullRequestNumber);
+  }
+
   // セッションの状態が届くまでは、承認カードをどちらの形にも決めない（#1810）。取得前は
   // `sessionWaitingInput`が必ずfalseになるため、そのまま描くと「承認」「修正」を一瞬出して
   // からRemote Controlの案内（下の分岐）へ差し替わる。**マージ待ちだけは別**で、判定材料が
@@ -469,10 +504,16 @@ function ApprovalActions({
           mergeApprovalPending
           onMerge={onMergePullRequest}
           onMerged={handleMerged}
+          onDecline={onDeclinePullRequest}
+          onDeclined={handleDeclined}
           mergedNumbers={mergedNumbers}
+          declinedNumbers={declinedNumbers}
           mergeTargetNumber={mergeTargetNumber}
           isMerging={isMergingPullRequest}
+          declineTargetNumber={declineTargetNumber}
+          isDeclining={isDecliningPullRequest}
           mergeError={mergePullRequestError}
+          declineError={declinePullRequestError}
         />
         {onRequestPrFix && !isMerged && (
           <>
@@ -736,6 +777,7 @@ export function CommentThread({
   onRequestContinuation,
   onRequestPrFix,
   onMergePullRequest,
+  onDeclinePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
@@ -746,6 +788,11 @@ export function CommentThread({
   mergeTargetNumber,
   mergedPullRequestNumbers,
   onPullRequestMerged,
+  isDecliningPullRequest,
+  declinePullRequestError,
+  declineTargetNumber,
+  declinedPullRequestNumbers,
+  onPullRequestDeclined,
   targetCommentIndex,
   targetCommentRef,
   commentSummary,
@@ -794,6 +841,7 @@ export function CommentThread({
         onRequestContinuation={onRequestContinuation}
         onRequestPrFix={onRequestPrFix}
         onMergePullRequest={onMergePullRequest}
+        onDeclinePullRequest={onDeclinePullRequest}
         isApproving={isApproving}
         isRejecting={isRejecting}
         isWithdrawing={isWithdrawing}
@@ -804,6 +852,11 @@ export function CommentThread({
         mergeTargetNumber={mergeTargetNumber}
         mergedPullRequestNumbers={mergedPullRequestNumbers}
         onPullRequestMerged={onPullRequestMerged}
+        isDecliningPullRequest={isDecliningPullRequest}
+        declinePullRequestError={declinePullRequestError}
+        declineTargetNumber={declineTargetNumber}
+        declinedPullRequestNumbers={declinedPullRequestNumbers}
+        onPullRequestDeclined={onPullRequestDeclined}
         isFallbackNotice={isFallbackNotice}
         mergeApprovalPending={mergeApprovalPending}
         mergeCheckReasons={mergeCheckReasons}
