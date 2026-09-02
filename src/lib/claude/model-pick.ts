@@ -2,7 +2,7 @@
  * 「実装を開始」ダイアログの「おまかせ」（#2723）。**Issueの内容から使うモデルを選ぶ。**
  *
  * 選ぶのは起動する前で、**決まった時点で具体的なモデル名になる**——ジョブへ積むのは
- * `haiku`・`sonnet`・`opus`・`fable`のいずれかで、`auto`（`--model`を付けない）ではない。
+ * `sonnet`・`opus`・`fable`のいずれかで、`auto`（`--model`を付けない）ではない。
  * そのため実行キューの印にも受付コメントにも、選ばれたモデルがそのまま出る。
  *
  * **判定は当たり外れのあるもので、押した人が上書きできることが前提。** 画面は選んだ理由を
@@ -17,8 +17,12 @@ import { callClaudeMessages } from "@/lib/claude/request";
 /**
  * 自動選択が選べるモデル。`auto`（CLIの既定）は「選ばない」という選択なのでここには入れない。
  * **値は`ClaudeModel`の部分集合**なので、選ばれたものはそのままジョブへ積める。
+ *
+ * **`haiku`は入れない**（#2756）。ここで選んだモデルはサブPCのローカルセッション
+ * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
+ * （https://github.com/anthropics/claude-code/issues/43235）。
  */
-export const MODEL_PICK_CANDIDATES = ["haiku", "sonnet", "opus", "fable"] as const;
+export const MODEL_PICK_CANDIDATES = ["sonnet", "opus", "fable"] as const;
 
 export type ModelPickCandidate = (typeof MODEL_PICK_CANDIDATES)[number];
 
@@ -87,9 +91,6 @@ export function pickModelByRule(input: ModelPickInput): {
       reason: "計画や長いやり取りがあり、決めることが多いIssueだと読めるためです。",
     };
   }
-  if (bodyLength <= 200 && (has("docs") || has("improvement") || has("chore"))) {
-    return { model: "haiku", reason: "短く書かれた改善・整備のIssueで、判断が少ないためです。" };
-  }
   return { model: "sonnet", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
@@ -107,7 +108,6 @@ export function buildModelPickPrompt(input: ModelPickInput): string {
 
 # 選択肢
 
-- \`haiku\`: 文言の修正・定型的な追記など、**判断がほとんど要らない**作業向け
 - \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
 - \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
 - \`fable\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け
@@ -124,7 +124,7 @@ export function buildModelPickPrompt(input: ModelPickInput): string {
 
 {"model": "sonnet", "reason": "そのモデルを選んだ理由"}
 
-- \`model\`は\`haiku\`・\`sonnet\`・\`opus\`・\`fable\`のいずれか
+- \`model\`は\`sonnet\`・\`opus\`・\`fable\`のいずれか
 - \`reason\`は日本語で1〜2文。**Issueの何を見てそう判断したのか**が伝わるように書いてください
 
 # Issue

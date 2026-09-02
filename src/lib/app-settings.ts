@@ -120,6 +120,34 @@ export function parseClaudeModel(value: unknown): ClaudeModel | null {
   return (CLAUDE_MODEL_VALUES as readonly string[]).includes(value) ? (value as ClaudeModel) : null;
 }
 
+/**
+ * ローカルセッション（サブPCで新しく起動するClaude Codeセッション）で使えるモデルの候補（#2756）。
+ * **`haiku`を含まない。** ローカルセッションは`--permission-mode auto`で起動しており
+ * （`run-issue-session.sh`・`start-issue.sh`）、Haikuはauto modeで動作しないため選ばせない
+ * （https://github.com/anthropics/claude-code/issues/43235）。
+ *
+ * GitHub Actions向け（`claudeModel`・`claudeModelAssist`）は`--allowedTools`での許可制で
+ * auto modeを使わないため対象外——`CLAUDE_MODEL_OPTIONS`のまま`haiku`を選べる。
+ */
+export const CLAUDE_LOCAL_MODEL_OPTIONS = CLAUDE_MODEL_OPTIONS.filter(
+  (option) => option.value !== "haiku",
+);
+
+export const CLAUDE_LOCAL_MODEL_VALUES = CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => option.value);
+
+export type ClaudeLocalModel = (typeof CLAUDE_LOCAL_MODEL_VALUES)[number];
+
+// APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。
+// `claudeLocalModel`設定・Issueごとのローカル起動モデル指定（`POST /api/dispatch`）の
+// バリデーションに使う。`haiku`はここで弾かれ、既存にHaikuが保存されていてもnullへ落ちて
+// 呼び出し側の既定（`CLAUDE_LOCAL_MODEL_DEFAULT`）へフォールバックする。
+export function parseClaudeLocalModel(value: unknown): ClaudeLocalModel | null {
+  if (typeof value !== "string") return null;
+  return (CLAUDE_LOCAL_MODEL_VALUES as readonly string[]).includes(value)
+    ? (value as ClaudeLocalModel)
+    : null;
+}
+
 // Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
 export const CODEX_MODEL_OPTIONS = [
   { value: "auto", label: "Codexに任せる" },
