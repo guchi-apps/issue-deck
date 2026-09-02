@@ -3340,6 +3340,21 @@ pnpm test:unit   # vitestのみ
   `curl -I https://<host>/`）と、新しいリポジトリへ立てる「初回デプロイ前チェックと公開確認」
   Issue（`buildDeployCheckIssueBody`）の2つで担保する。
 
+## 「リリース履歴」画面はGitHubの自動生成本文に依存する（#2726）
+
+全リポジトリのGitHub Releaseを時系列で見る画面（`pane=releases`・PC左メニュー／スマホは
+ホームのメニューから開く「確認環境」と同じ形のドリルダウン）。材料は
+`fetchRecentReleases`（[`lib/github/release-api.ts`](../src/lib/github/release-api.ts)）が
+`GET /repos/{owner}/{repo}/releases`で取る生のGitHub Releaseで、**issue-deckの`更新履歴`画面
+（`APP_CHANGELOG`）のような日本語の利用者向け要約ではない。** 各リポジトリの`deploy.yml`が
+`softprops/action-gh-release`を`generate_release_notes: true`で呼んでいるため、本文は
+GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Full Changelogリンク」になる。
+
+[`lib/release-history.ts`](../src/lib/release-history.ts)の`extractReleaseHighlights`は、
+この決まった書式（`* タイトル by @user in owner/repo#123`）だけを前提に箇条書きを抜き出している。
+**`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
+この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
+
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub App・Push通知の4系統に分かれる。
