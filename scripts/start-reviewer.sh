@@ -68,6 +68,9 @@ source "$ROOT/scripts/lib/claude-retries.sh"
 
 # shellcheck source=scripts/lib/claude-auto-mode-setup.sh
 source "$ROOT/scripts/lib/claude-auto-mode-setup.sh"
+# auto modeへ渡す許可規則（#2762）。実装セッション（scripts/run-issue-session.sh）と共有する。
+# shellcheck source=scripts/lib/agent-allowed-tools.sh
+source "$ROOT/scripts/lib/agent-allowed-tools.sh"
 
 # このスクリプトが見るリポジトリ。G2のPR一覧の取得先と、G1のプロンプトへ埋める`{{REPOSITORY}}`。
 REVIEW_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
@@ -225,6 +228,13 @@ ensure_claude_auto_mode_default
 
 claude_export_max_retries
 
+# 定型のコマンドを明示的に許可する（#2762）。実装セッションと同じ理由・同じ規則
+# （`scripts/lib/agent-allowed-tools.sh`）。レビュー・統合セッションも`gh pr view`・`git log`・
+# `gh run view`を絶え間なく叩くため、クラシファイアの判断がブレると同じところで止まる。
+REVIEWER_ALLOWED_TOOLS="$(agent_allowed_tools)"
+CLAUDE_EXTRA_ARGS+=(--allowedTools "$REVIEWER_ALLOWED_TOOLS")
+
 echo "Claude Codeセッションを権限モード $PERMISSION_MODE で起動します（このターミナルで実行）..."
+echo "次のコマンドは承認なしで実行できます: $REVIEWER_ALLOWED_TOOLS"
 # set -u 下で空配列の展開がエラーにならないよう ${arr[@]+...} で囲む
 exec claude --permission-mode "$PERMISSION_MODE" ${CLAUDE_EXTRA_ARGS[@]+"${CLAUDE_EXTRA_ARGS[@]}"} "$PROMPT_CONTENT"

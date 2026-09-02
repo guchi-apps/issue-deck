@@ -13,9 +13,10 @@ import { getIssuesForUser } from "@/lib/issues-for-user";
  * デッキ（`/dashboard`）を見ながらIssueを書けるようにするためのもので、開く口は作成
  * ダイアログの「別ウィンドウで開く」だけ。URLを直接開いても空のフォームとして成立する。
  *
- * リポジトリの選択肢は**サイドメニューで非表示にしたものを除く**（#367）。ダイアログが
- * `visibleRepositories`を受け取っているのと同じ範囲にしないと、こちらでだけ選べるリポジトリが
- * 現れる。Issue一覧は本文の`#123`補完（`getRepoIssueSuggestions`）にだけ使う。
+ * リポジトリの選択肢は**サイドメニューで非表示にしたもの**と**「Issueを作成」の選択肢から
+ * 除外したもの**（#2760）を除く。ダイアログが受け取っている一覧と同じ範囲にしないと、
+ * こちらでだけ選べるリポジトリが現れる。Issue一覧は本文の`#123`補完
+ * （`getRepoIssueSuggestions`）にだけ使う。
  */
 // 別ウィンドウとして並ぶため、タイトルバー・タスクバーでデッキ本体と見分けが付く名前にする
 export const metadata: Metadata = { title: "新しいIssueを作成 | IssueDeck" };
@@ -25,12 +26,22 @@ export default async function NewIssuePage() {
   // 未ログインはproxy（middleware）が/loginへ送るが、Cookieが無効な場合等の保険として塞ぐ
   if (!currentUser) redirect("/login?callbackUrl=/issues/new");
 
-  const [repositories, hiddenRepositories, issues, dispatchRunnableRepositories] = await Promise.all([
+  const [
+    repositories,
+    hiddenRepositories,
+    issueCreationExcludedRepositories,
+    issues,
+    dispatchRunnableRepositories,
+  ] = await Promise.all([
     db.repository.findMany({
       where: { installation: { userInstallations: { some: { userId: currentUser.id } } } },
       orderBy: { fullName: "asc" },
     }),
     db.hiddenRepository.findMany({
+      where: { userId: currentUser.id },
+      select: { repositoryId: true },
+    }),
+    db.issueCreationExcludedRepository.findMany({
       where: { userId: currentUser.id },
       select: { repositoryId: true },
     }),
@@ -40,12 +51,18 @@ export default async function NewIssuePage() {
   ]);
 
   const hiddenRepositoryIds = new Set(hiddenRepositories.map((row) => row.repositoryId));
+  const issueCreationExcludedRepositoryIds = new Set(
+    issueCreationExcludedRepositories.map((row) => row.repositoryId),
+  );
 
   return (
     <main className="flex min-h-0 flex-1 flex-col">
       <CreateIssueWindow
         repositories={repositories
-          .filter((repo) => !hiddenRepositoryIds.has(repo.id))
+          .filter(
+            (repo) =>
+              !hiddenRepositoryIds.has(repo.id) && !issueCreationExcludedRepositoryIds.has(repo.id),
+          )
           .map((repo) => ({
             id: repo.id,
             name: repo.name,
@@ -57,6 +74,7 @@ export default async function NewIssuePage() {
             dispatchRunnable: dispatchRunnableRepositories.has(repo.fullName),
             hidden: false,
             favorite: false,
+            excludedFromIssueCreation: false,
           }))}
         issues={issues}
       />

@@ -160,6 +160,7 @@ const repository: ConnectedRepository = {
   dispatchRunnable: false,
   hidden: false,
   favorite: false,
+  excludedFromIssueCreation: false,
 };
 
 function buildIssue(overrides: Partial<Issue> = {}): Issue {

@@ -78,6 +78,10 @@ source "$SCRIPT_DIR/lib/claude-retries.sh"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$SCRIPT_DIR/lib/agent-cli.sh"
 
+# auto modeへ渡す許可規則（#2762）。レビューセッション（scripts/start-reviewer.sh）と共有する。
+# shellcheck source=scripts/lib/agent-allowed-tools.sh
+source "$SCRIPT_DIR/lib/agent-allowed-tools.sh"
+
 # **不正な値はここで止める。** 起動直前まで進んでから落ちると、開発サーバーだけが立った状態で
 # セッションが無いという分かりにくい形になる。
 agent_cli_resolve_kind "${ISSUE_DECK_AGENT:-}" || exit 1
@@ -581,7 +585,8 @@ else
   echo "#$ISSUE_NUMBER: 情報: $AGENT_DISPLAY_NAME では使わせないツールを強制できません（$SESSION_BASE_DISALLOWED_TOOLS はプロンプトの指示のみで効きます）。" >&2
 fi
 
-# 起票（`gh issue create`）を明示的に許可する（#2017）。
+# 定型のコマンドを明示的に許可する（#2017・#2762）。**規則の中身は
+# [scripts/lib/agent-allowed-tools.sh](lib/agent-allowed-tools.sh)が持つ**（レビューセッションと共有）。
 #
 # 質問セッションは「調べる過程で見つけた別件を`70.confirm`付きで起票してよい」運用（#1528）だが、
 # `--permission-mode auto`（#1205）の権限クラシファイアが判断を持っているため、**同じコマンドでも
@@ -590,9 +595,16 @@ fi
 # 許可規則はクラシファイアより先に評価されるため（拒否メッセージ自身が「add a Bash permission
 # rule to their settings」と案内する）、ここで規則として渡してブレを無くす。
 #
-# **許可するのは起票だけ**にする。`gh issue edit`・`gh issue close`は質問セッションの禁止事項で、
-# 実装セッションでも進捗の付け替えは画面側の役目（`gh issue edit`で進捗は動かせない）。
-# 暴発の歯止め（`70.confirm`を付ける・1回に目安3件まで・起票しても実装しない）はプロンプト側にある。
+# **同じことが起票以外でも起きていた**（#2762）。権限モードは`auto`のまま（会話転記の
+# `permission-mode`レコードで確認できる）なのに、`gh issue view`・`git log`のような読み取りだけの
+# コマンドが**セッション開始直後から**1件ずつ承認待ちになる、という報告があった。原因は同じ
+# クラシファイアの判断のブレなので、対処も同じ——定型のコマンドを規則として渡す。
+#
+# **許可するのは読む・検証する・Issueへ書き残すコマンドだけ。** `gh issue edit`・`gh issue close`は
+# 質問セッションの禁止事項で、実装セッションでも進捗の付け替えは画面側の役目（`gh issue edit`で
+# 進捗は動かせない）。`git push`・`gh pr merge`のような書き込み・本番へ出る操作も入れない
+# （入れない理由の一覧は`lib/agent-allowed-tools.sh`）。暴発の歯止め（`70.confirm`を付ける・
+# 1回に目安3件まで・起票しても実装しない）はプロンプト側にある。
 #
 # **質問セッションだけに絞らない。** 実装セッションも、残るユーザーの手作業を`71.manual-step`の
 # Issueとして起票する運用（#1486・#2009）で同じコマンドを使う。同じ理由の許可を経路ごとに
@@ -607,10 +619,13 @@ fi
 # （禁止は上の`--disallowedTools`が持つ）。
 #
 # **Codexでは何もしない。** あちらは`--ask-for-approval never`で走らせるため個々の許可規則が無く、
-# 起票が権限で弾かれること自体が起きない（#2377）。
-SESSION_ALLOWED_TOOLS="Bash(gh issue create:*)"
+# コマンドが権限で弾かれること自体が起きない（#2377）。
+SESSION_ALLOWED_TOOLS="$(agent_allowed_tools)"
 if [[ "$AGENT_KIND" == "claude" ]]; then
   CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
+  # **何を無条件に通したかを起動ログに残す**（`--disallowedTools`側と揃える）。承認プロンプトが
+  # 出ない理由を後から追えるようにしておく。
+  echo "#$ISSUE_NUMBER: 次のコマンドは承認なしで実行できます: $SESSION_ALLOWED_TOOLS"
 fi
 
 # 出力言語（#1395）。個人設定（`~/.claude/CLAUDE.md`）の同期状態や対象リポジトリのCLAUDE.mdに

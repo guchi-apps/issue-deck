@@ -951,6 +951,14 @@ pnpm exec prisma migrate status                                       # "Databas
 型は通るのに実行時だけ`Table doesn't exist`で落ちる（本番では`deploy.yml`の`migrate`が
 ファイルを実行するので、そちらは正しく当たる）。**必ず両方**行う。
 
+**新規テーブルの追加など、既存のマイグレーションと競合しない変更なら`prisma migrate deploy`
+1回で済むことがある**（#2760で実測）。`migrate dev`がリセットを要求するのは差分検出に
+shadow DBを使う（履歴のずれをそこで検出する）ためで、`migrate deploy`はローカルの
+`prisma/migrations/`にあってDBの`_prisma_migrations`に無いものを適用するだけでこの比較を
+行わない。手で`migration.sql`を書いた後、`resolve --applied`＋`db execute --stdin`の代わりに
+`pnpm exec prisma migrate deploy`を試し、`Database schema is up to date!`まで進まなければ
+上の2段階（`resolve`＋`db execute`）へ切り替える。
+
 ### 新しいマイグレーションのタイムスタンプは、他worktreeと衝突する（#2524）
 
 DBを共有しているということは、**並行して走っている他Issueのセッションが作ったマイグレーションが
@@ -1886,17 +1894,44 @@ auto modeの同意（`skipAutoPermissionPrompt`）を打ち消すマイグレー
 変わりうる（現に一度リセットが走っている）。効かなくなったら、まず`~/.claude/settings.json`と
 `~/.claude.json`の実物を見て、ここに書いた前提が残っているか確かめる。
 
-### 起票（`gh issue create`）だけは許可規則として渡す（#2017）
+### 定型のコマンドは許可規則として渡す（#2017・#2762）
 
 `auto`の権限クラシファイアは**同じコマンドでも実行のたびに判断が変わる**。`gh issue create`は
 通ることも拒否されることもあり、拒否された側は「弾かれました」と書き残して終えるしかない。
 guchi-apps/dayspan#292 では実際に起票が拒否され、質問への回答で挙がった改善が**Issueとして
 残らないまま、質問Issue自身で実装されてPRが作られた**。
 
-そこで`run-issue-session.sh`は`--allowedTools "Bash(gh issue create:*)"`を常に渡す。許可規則は
+そこで`run-issue-session.sh`は`--allowedTools`を常に渡す。許可規則は
 クラシファイアより先に評価される（拒否メッセージ自身が「add a Bash permission rule to their
 settings」と案内する）ため、これでブレが無くなる。**この経路を通るセッション全て**——横断質問
 セッションと、汎用ランチャーで起こす各リポジトリの実装セッション——に効く。
+
+**同じことが起票以外でも起きていた**（#2762）。「haiku以外のモデルでも読み書きに承認が必要」と
+いう報告を追ったところ、**権限モードは`auto`のままだった**——会話転記
+（`~/.claude/projects/<cwd>/<session-id>.jsonl`）には`{"type":"permission-mode","permissionMode":…}`が
+残っており、報告のあったセッションは全ターンが`auto`だった（`default`へ落ちていたのは
+#2756で候補から外したhaikuのセッションだけ）。それでも`gh issue view`・`git log`のような
+読み取りだけのコマンドが**セッション開始直後から**1件ずつ承認待ちになる。原因は上と同じ
+クラシファイアの判断のブレなので、対処も同じ——定型のコマンドを規則として渡す。
+
+**規則の中身は[scripts/lib/agent-allowed-tools.sh](../../scripts/lib/agent-allowed-tools.sh)が
+1か所で持ち**、実装セッション（`run-issue-session.sh`）とレビュー・統合セッション
+（`start-reviewer.sh`）が共有する。入れるのは次の3種類だけで、**書き込み・破壊・本番へ出る操作・
+シークレットに触れる操作は入れない**（`git push`・`gh pr merge`・`gh issue edit`・`gh api`・
+`rm`・`sudo`・`op`など。入れると、Pull Request必須・`claude-review-develop.yml`のレビュー・
+自動マージ不可カテゴリという後段の防御より手前で無条件に通る）。
+
+- 読み取りだけのgit・ghの副コマンド（`git log`・`git diff`・`gh pr view`など）
+- 検証コマンド（lint・型チェック・テスト・ビルド）
+- Issueへの起票とコメント
+
+**ファイルの読み取りは規則に入れない。** `cat`・`grep`のような規則は前方一致で当たるため、
+`cat > file`のようなリダイレクトによる書き込みまで通してしまう。読む・探すのは`Read`・`Grep`・
+`Glob`を使う方針（各実装プロンプトの「調査は往復を減らす形で行う」）で、この3つは読み取り専用
+なので承認を挟まない。
+
+禁止側は`src/lib/agent-allowed-tools.test.ts`が固定している。**足したことに気付かないまま
+規則が増えていくのがいちばん危ない**ので、書き込み系のコマンドを通す規則が入るとテストが落ちる。
 
 **効くのは静的解析できる形のコマンドだけ**（#2017で実測）。規則の当たり判定だけを見るため、
 クラシファイアを外した`--permission-mode default`（規則に無いものは即座に承認待ち）で
@@ -1914,7 +1949,7 @@ settings」と案内する）ため、これでブレが無くなる。**この�
 [scripts/prompts/cross-repo-question-agent.md](../../scripts/prompts/cross-repo-question-agent.md)）
 には、**起票の`--body`は複数行のままそのまま渡す**と書いてある。
 
-- **許可するのは起票だけ。** `gh issue edit`・`gh issue close`は質問セッションの禁止事項であり、
+- **書き込み系のghは許可しない。** `gh issue edit`・`gh issue close`は質問セッションの禁止事項であり、
   進捗の付け替えはそもそも`gh issue edit`では動かない（Project Statusが正）
 - **質問セッションだけに絞らない。** 実装セッションも`71.manual-step`の起票で同じコマンドを使う
   （#1486・#2009）。同じ理由の許可を経路ごとに書き分けると、拒否されたときに原因を探し直すことになる

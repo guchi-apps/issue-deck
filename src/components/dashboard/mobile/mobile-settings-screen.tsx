@@ -45,6 +45,7 @@ type MobileSettingsScreenProps = {
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
+  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
   onUpdated: (values: AppSettingsValues) => void;
 };
 
@@ -67,6 +68,7 @@ export function MobileSettingsScreen({
   repositories,
   onSetRepositoryHidden,
   onSetRepositoriesHidden,
+  onSetRepositoryIssueCreationExcluded,
   onUpdated,
 }: MobileSettingsScreenProps) {
   const [section, setSection] = useState<SettingsSectionKey | null>(null);
@@ -156,6 +158,7 @@ export function MobileSettingsScreen({
             repositories={repositories}
             onSetRepositoryHidden={onSetRepositoryHidden}
             onSetRepositoriesHidden={onSetRepositoriesHidden}
+            onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
           />
         )}
         {section === "notification" && <NotificationSettingsSection />}

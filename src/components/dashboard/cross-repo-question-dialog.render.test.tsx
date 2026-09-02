@@ -98,6 +98,7 @@ function makeQuestionRepository(): ConnectedRepository {
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   };
 }
 
@@ -113,6 +114,7 @@ function makeRepository(): ConnectedRepository {
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
   };
 }
 

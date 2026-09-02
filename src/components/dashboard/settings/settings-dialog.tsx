@@ -42,6 +42,7 @@ type SettingsDialogProps = {
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
+  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
   onUpdated: (values: AppSettingsValues) => void;
 };
 
@@ -67,6 +68,7 @@ export function SettingsDialog({
   repositories,
   onSetRepositoryHidden,
   onSetRepositoriesHidden,
+  onSetRepositoryIssueCreationExcluded,
   onUpdated,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
@@ -134,6 +136,7 @@ export function SettingsDialog({
                   repositories={repositories}
                   onSetRepositoryHidden={onSetRepositoryHidden}
                   onSetRepositoriesHidden={onSetRepositoriesHidden}
+                  onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
                 />
               )}
               {section === "notification" && <NotificationSettingsSection />}

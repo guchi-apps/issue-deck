@@ -43,6 +43,7 @@ function repository(
     dispatchRunnable: false,
     hidden: false,
     favorite: false,
+    excludedFromIssueCreation: false,
     ...overrides,
   };
 }

@@ -22,4 +22,9 @@ export type ConnectedRepository = {
   dispatchRunnable: boolean;
   hidden: boolean;
   favorite: boolean;
+  /**
+   * ユーザーが「Issueを作成」ダイアログのリポジトリ選択欄から除外したか（#2760）。
+   * `hidden`とは独立の設定で、左メニュー・Issue一覧などには影響しない。
+   */
+  excludedFromIssueCreation: boolean;
 };
