@@ -87,9 +87,10 @@ type WorkflowStepBadgeProps = ProgressProps & {
   /**
    * そのIssueのサブPCセッション（#1264・`findSessionForIssue`の結果）。無ければnull。
    *
-   * 添える文言（`shortIssueSessionLabel`。入力待ち・終了・異常終了のときだけ出す）と、
-   * バーを動かすかどうか（#1439）の**両方をここから決める**。別々に渡すと、片方だけ
-   * 更新された状態（例: 「入力待ち」と出ているのに動き続ける）が作れてしまう。
+   * 添える文言（`shortIssueSessionLabel`。入力待ち・終了・異常終了・活動中で出す。#2782で
+   * 活動中は経過時間つきの短い表現がそのまま表示文字列になった）と、バーを動かすかどうか
+   * （#1439）の**両方をここから決める**。別々に渡すと、片方だけ更新された状態
+   * （例: 「入力待ち」と出ているのに動き続ける）が作れてしまう。
    */
   session?: DispatchSessionView | null;
   /**
@@ -270,8 +271,10 @@ export function WorkflowStepBadge({
     qaAnswerPending: showQaAnswerPending,
     now,
   });
-  // セッションの様子の短い表現（#1264）。入力待ち・終了・異常終了のときだけ出す
-  const sessionLabel = session ? shortIssueSessionLabel(session) : null;
+  // セッションの様子の短い表現（#1264）。入力待ち・終了・異常終了・活動中（経過時間つき）で出す
+  const sessionLabel = session
+    ? shortIssueSessionLabel(session, now != null ? new Date(now) : null)
+    : null;
   // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
   // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
   // ポーリング結果が未取得（running未定義）のうちは判定しない
@@ -298,7 +301,14 @@ export function WorkflowStepBadge({
   // 実行先とセッションの様子は両方出す（例:「サブPC・入力待ち」）。どちらが欠けても意味が変わる
   const localSuffix = [targetLabel, queueLabel ?? sessionLabel].filter(Boolean).join("・") || null;
   const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
-  const stepText = `${step.label}${suffix ? `（${suffix}）` : ""}`;
+  // セッションの様子（`sessionLabel`。活動中の「調査中(2分)」、待ちの「入力待ち」等）が
+  // 分かっているときは、進捗Status（「計画検討中」）と実行先（「サブPC」）を省いてそれだけを
+  // 見せる（#2782）。両方を並べると`max-w-[7rem]`（326行目）の箱に収まりきらず、見たい
+  // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す
+  const stepText =
+    sessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
+      ? sessionLabel
+      : `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"
     : showQaAnswerPending
