@@ -70,6 +70,90 @@ export async function fetchPackageVersion(
   return parsed.version ?? null;
 }
 
+/**
+ * リリース通知の本文を持つファイル（#2725）。
+ *
+ * `reusable-release-develop-to-main.yml`がバージョンbumpのたびに書き出し、Signalyへの
+ * リリース通知（`.github/scripts/signaly-notify.sh`）が読むのと同じファイル。**更新履歴画面を
+ * 持たないアプリでも変更内容が載る唯一の置き場**なので、Push通知もここを読む（#2391）。
+ */
+export const RELEASE_NOTES_FILE = ".github/release-notes.md";
+
+/** GitHub Releaseのうち、リリース通知に使う項目だけ（#2725） */
+export type LatestRelease = {
+  /** `v4.74.0`。**「どのリリースまで鳴らしたか」の鍵**になる */
+  tagName: string;
+  /** リリース名。`softprops/action-gh-release`はタグ名と同じものを入れる */
+  name: string | null;
+  htmlUrl: string;
+  /** 公開時刻（ISO8601）。古いリリースを鳴らし直さないための判定に使う */
+  publishedAt: string | null;
+};
+
+/**
+ * そのリポジトリの最新リリースを1件取得する。1件も無ければnull。
+ *
+ * **`releases/latest`はdraftとprereleaseを除く。** リリース通知で鳴らしたいのは本番へ出た版
+ * だけなので、この絞り込みがそのまま欲しい条件になる（`deploy.yml`はタグに`-`が入るときだけ
+ * prereleaseとして作る）。
+ *
+ * **ETagの条件付きGETを通す**（`fetchLatestWorkflowRun`と同じ）。リリースは月に数回しか
+ * 増えないため、巡回の大半は304になり**レート制限を消費しない**。
+ */
+export async function fetchLatestRelease(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<LatestRelease | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/releases/latest`;
+  const result = await githubFetchJsonWithEtag<{
+    tag_name?: string;
+    name?: string | null;
+    html_url?: string;
+    published_at?: string | null;
+  }>(url, token);
+  if (!result.ok) {
+    // 404はリリースが1件も無いリポジトリ（`vps`・`subpc`のように`tag`ジョブを持たないもの）。
+    if (result.status === 404) return null;
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  const tagName = result.data.tag_name;
+  if (!tagName) return null;
+  return {
+    tagName,
+    name: result.data.name ?? null,
+    htmlUrl: result.data.html_url ?? `https://github.com/${owner}/${repo}/releases/tag/${tagName}`,
+    publishedAt: result.data.published_at ?? null,
+  };
+}
+
+/**
+ * 指定したref時点の`.github/release-notes.md`をそのまま読む。無ければnull（#2725）。
+ *
+ * **リリースのタグを`ref`に渡す。** そのリリースで出た版の文面が要るので、`main`の先端を
+ * 読むと次のバージョンの文面を混ぜてしまう。
+ */
+export async function fetchReleaseNotesFile(
+  owner: string,
+  repo: string,
+  ref: string,
+  token: string,
+): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${RELEASE_NOTES_FILE}?ref=${encodeURIComponent(ref)}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { content?: string; encoding?: string } = await res.json();
+  if (!data.content) return null;
+  return Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+}
+
 export type GithubApiPullRequest = {
   number: number;
   html_url: string;

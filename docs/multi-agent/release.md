@@ -342,6 +342,22 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 載る**（[auto-repair.md](auto-repair.md)「リリースだけ宛先と見た目を変える」）。最新
 リリースぶんだけを持ち毎回上書きするので、履歴の置き場は従来どおり各アプリの更新履歴ファイル。
 
+### リリースの完了はissue-deckのPush通知でも届く（#2725）
+
+リリース通知の宛先はSignalyだけだった（`deploy.yml`の`notify-release`が
+`.github/scripts/signaly-notify.sh`を呼ぶ）。**フリート全体のリリースを画面で扱っている
+issue-deck自身のPWAには届かない**ため、サブPCのpollerが叩く巡回
+（`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけてPush通知を出す。
+**Signalyへの通知はそのまま残す**（宛先が1つ増えるだけ）。
+
+- 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した
+  タグと違うものが返ったときだけ鳴らす**。記録の無いリポジトリは鳴らさずタグだけ入れる
+- 本文はSignalyと同じ`.github/release-notes.md`から取り、**見出しがタグと一致したときだけ
+  載せる**（照合できなければ「表示できる更新内容がありません」）
+- 「人が動かないと止まるもの」ではないため鳴らし直しはしない。止めたいときは
+  `RELEASE_PUSH_SWEEP_INTERVAL_MINUTES=0`
+- 設計は[../code-map.md](../code-map.md)の「リリース（本番反映）の完了もPush通知で届く」
+
 ### 画面から上げ幅を指定する（#1548）
 
 **「生成されたPR上でバージョンを直接修正する」は実際には間に合わない。** バンプPRはCI通過後に
