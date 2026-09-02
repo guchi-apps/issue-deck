@@ -141,6 +141,12 @@ kickoff_prompt_options() {
 #
 # 第3引数は開発サーバーを起動したか（1で起動済み）。第2引数のtailnetのURL（#1265）は
 # あれば添える。**スマホから画面を見る唯一の出口**なので、画面の文面にも載せておく。
+#
+# **ここに実行可能なコマンドの文字列を書かない**（#2744）。この文面は`claude`の引数として
+# 渡るため、セッションのargvにそのまま残る。以前は「worktreeで pnpm dev を実行すると
+# 起動します」と書いており、別のセッションが打った`pkill -f "pnpm dev"`が
+# 開発サーバー未起動のセッション3本を巻き添えでSIGTERMし、異常終了として引き上げられた。
+# 起こし方は指示ファイル（`.prompts/issue-<番号>.md`）の「開発サーバー」の節に書いてある。
 kickoff_prompt_dev_environment() {
   local port="$1" preview_url="${2:-}" started="${3:-0}"
   [[ -n "$port" && "$port" != "0" ]] || return 0
@@ -149,7 +155,7 @@ kickoff_prompt_dev_environment() {
   if [[ "$started" == "1" ]]; then
     note="起動済み"
   else
-    note="未起動・worktreeで pnpm dev を実行すると起動します"
+    note="未起動・起こし方は指示ファイルに書いてあります"
   fi
   if [[ -n "$preview_url" ]]; then
     note+=" / tailnet: $preview_url"
