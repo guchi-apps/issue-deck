@@ -448,6 +448,7 @@ describe("DispatchQueueButton のホスト表示", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
       ...overrides,
     };
   }

@@ -126,6 +126,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
     ...overrides,
   };
 }

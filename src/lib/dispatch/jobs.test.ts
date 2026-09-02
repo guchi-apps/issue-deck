@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dispatchHostFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
 const dispatchSessionFindMany = vi.fn();
+// セッションの行に出す「実際に動いているモデル」の引き当て（#2723）。
+// 既定では行が無い＝モデル未確定として扱う
+const sessionUsageFindMany = vi.fn().mockResolvedValue([]);
 // 計画への返事待ち（#2061）。`listDispatchState`が同じ応答へ載せるので、行が無くても
 // クエリ自体は必ず走る
 const sessionPlanRequestFindMany = vi.fn();
@@ -61,6 +64,11 @@ vi.mock("@/lib/db", () => ({
       },
       get findMany() {
         return dispatchSessionFindMany;
+      },
+    },
+    sessionUsage: {
+      get findMany() {
+        return sessionUsageFindMany;
       },
     },
     sessionPlanRequest: {
@@ -190,6 +198,8 @@ beforeEach(() => {
   appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
   dispatchHostFindUnique.mockResolvedValue(host());
   dispatchSessionFindFirst.mockResolvedValue(null);
+  // 実際に動いているモデル（#2723）は、転記の集計が届くまで空
+  sessionUsageFindMany.mockResolvedValue([]);
   sessionPlanRequestFindMany.mockResolvedValue([]);
   sessionPlanRequestUpdateMany.mockResolvedValue({ count: 0 });
   sessionQuestionRequestFindMany.mockResolvedValue([]);

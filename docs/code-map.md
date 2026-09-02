@@ -2599,6 +2599,13 @@ export function POST(request: NextRequest) {
   なので、ジョブに積んだ値は届かない。判断の根拠と単価は
   [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「重いIssueだけ
   モデルを上げる」を参照。
+  **「おまかせ」はissue-deckがIssueを読んで選ぶ**（#2723。`lib/claude/model-pick.ts`と
+  `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければラベルと分量からの
+  ルールへ倒す）。**積むのは決まった具体的なモデル名**で、`auto`（`--model`を付けない＝
+  画面の表記は「CLIの既定」）ではない。**そのセッションが実際に使っているモデル**は
+  `DispatchSessionView.models`に載り、セッションの行に印として出る——出どころは転記の集計
+  （`SessionUsage.models`）しか無く、pollerの報告は5分ごとなので**最初の応答が集計される
+  までは空**（`lib/dispatch/sessions.ts`の`resolveSessionModels`）。
   **CodexのセッションにはそのRemote ControlのURLが無い**（#2524）。Codexが出すのは
   `XXXX-XXXX`の**10分で切れるペアリングコード**で、繋がる先も`serverName`＝ホストごと
   （そのホストのCodexセッション全部）。そのため**実行キューのホストのカード**と、

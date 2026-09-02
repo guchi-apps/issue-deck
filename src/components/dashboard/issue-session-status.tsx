@@ -56,6 +56,7 @@ import { selectHostCodexPairingJob } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { sessionUsageModelLabel } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
 
 /**
@@ -214,6 +215,15 @@ export function IssueSessionStatus({
    */
   const showCodexPairing =
     isCodexSession && session.state === "ALIVE" && host !== null;
+  /**
+   * 実際に動いているモデル（#2723）。**転記の集計（`SessionUsage.models`）から来る実物で、
+   * 起動時に指定した値ではない。** 空なら何も出さない（最初の応答が集計されるまでは分からない）。
+   *
+   * 複数あるのは、Claude Codeが小さな処理で別のモデルを使ったとき。「AI使用量」の画面と
+   * 同じく全部を並べる——どれが主かはここでは分からないので、選んで出すと嘘になりうる。
+   */
+  const modelLabel =
+    session.models.length > 0 ? session.models.map(sessionUsageModelLabel).join("・") : null;
   // 消えたセッションには操作する相手がいない。`EXITED`/`FAILED`（ペインが残っている）は
   // 「閉じる」で片付けられるため、そちらは出したままにする
   const canControl = session.state !== "GONE";
@@ -300,6 +310,20 @@ export function IssueSessionStatus({
             {stepNotice.since && (
               <span className="tabular-nums opacity-70">{stepNotice.since}</span>
             )}
+          </span>
+        )}
+        {/* 実際に動いているモデル（#2723）。**指定した値ではなく、転記の集計から引いた実物。**
+            「おまかせ」「CLIの既定」で立てたときに何で動いているのかは、これでしか分からない。
+            **最初の応答が集計されるまでは出ない**（pollerの報告は5分ごと）ので、空なら欄ごと消す
+            ——「不明」と出しても読み手にできることが無い。**塗らずに輪郭だけ**にするのは
+            ステップの印と同じ理由（状態ピルの色の意味を1つに保つ） */}
+        {modelLabel && (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs"
+            title="このセッションが実際に使っているモデルです（起動時の指定ではありません）"
+          >
+            <span className="opacity-70">モデル</span>
+            {modelLabel}
           </span>
         )}
         {/* 自動終了までの残り時間（#1817）。**状態ピルと分けて出す。** 畳むと「サブPC・応答を

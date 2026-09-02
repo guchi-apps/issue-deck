@@ -100,49 +100,16 @@ export function estimateCostUsd(
 }
 
 /**
- * サブPCの実装セッション1件あたりの平均トークン数（#2717）。
+ * 起動ダイアログのモデル欄に「実装セッション1件あたりの目安」を出していた
+ * （`estimateSessionCostUsd`と、その元になる実測の平均トークン数）が、**#2723で消した。**
  *
- * **実測値**（`SessionUsage`の直近90日・`kind='implementation'`・619件、2026-09-01時点）。
- * この平均にOpus 5の単価を掛けた金額は、記録済みの合計（$6,532）と一致することを確かめてある。
+ * 1回ぶんなのか月額なのか、実費なのかAPI換算なのかが画面から決まらず、しかも費用の6割強が
+ * キャッシュ読み出しのため FableとOpusがほぼ並び、数字を見比べても選べなかった。モデル欄は
+ * 「向いている作業」で選ばせる形にし、**実績の金額は「AI使用量」の画面（実測のトークンから
+ * `estimateCostUsd`で出す）に一本化**した。
  *
- * 起動時のモデル選択に「1件あたりの目安」を出すためだけに持つ定数で、**古くなっても
- * 表示が桁で外れるだけ**（判定や課金には使わない）。次のSQLで測り直せる。
- *
- * ```sql
- * SELECT AVG(inputTokens), AVG(cacheCreate5mTokens), AVG(cacheCreate1hTokens),
- *        AVG(cacheReadTokens), AVG(outputTokens)
- *   FROM SessionUsage
- *  WHERE kind = 'implementation' AND endedAt > NOW() - INTERVAL 90 DAY;
- * ```
- *
- * **キャッシュ読み出しが桁違いに大きい**のがこの数字の要点で、モデル間の金額差が
- * 素の単価比（Fable 5.1はOpus 5の2倍）どおりにならない理由もここにある。
+ * 単価表（`MODEL_RATES`）はそちらが使い続けるので残る。
  */
-export const AVERAGE_IMPLEMENTATION_SESSION_TOKENS = {
-  inputTokens: 164,
-  cacheCreate5mTokens: 739,
-  cacheCreate1hTokens: 234_496,
-  cacheReadTokens: 13_584_854,
-  outputTokens: 56_414,
-} as const;
-
-/**
- * 実装セッション1件あたりの目安（USD）。**知らないモデルは`null`。**
- * キャッシュ書き込みはTTLごとの倍率で分けて数える。
- */
-export function estimateSessionCostUsd(model: string | null | undefined): number | null {
-  const rate = resolveModelRate(model);
-  if (!rate) return null;
-  const t = AVERAGE_IMPLEMENTATION_SESSION_TOKENS;
-  return (
-    (t.inputTokens * rate.input +
-      t.cacheCreate5mTokens * rate.input * CACHE_WRITE_5M_MULTIPLIER +
-      t.cacheCreate1hTokens * rate.input * CACHE_WRITE_1H_MULTIPLIER +
-      t.cacheReadTokens * rate.cacheRead +
-      t.outputTokens * rate.output) /
-    1_000_000
-  );
-}
 
 /**
  * 画面に出す金額の書き方。**小さすぎて`$0.00`になる額は桁を増やす**——
