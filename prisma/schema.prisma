@@ -528,6 +528,7 @@ enum DispatchJobKind {
   PREVIEW
   REBOOT
   CODEX_PAIRING
+  MANUAL_STEP_SESSION
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -795,6 +796,7 @@ model DispatchHost {
   // standalone installで入れたCodexだけで、npmで入れたものはサブコマンドが存在しても
   // 共有のapp-serverデーモンを起こせない（#2521）。
   codexRemoteControlCapable Boolean?
+  manualStepSessionCapable  Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
   // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。

@@ -442,9 +442,9 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
   it("Remote ControlのURLがあるセッションの行にだけボタンを出す", () => {
     renderList({ dispatch: makeDispatch([makeSession()]) });
 
-    expect(screen.getByRole("link", { name: "#1のRemote Controlで開く" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "#1のClaude Codeアプリで開く" })).toBeTruthy();
     // セッションが無い行には出さない
-    expect(screen.queryByRole("link", { name: "#2のRemote Controlで開く" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "#2のClaude Codeアプリで開く" })).toBeNull();
   });
 
   // 開いても意味が無いURLを残さない（判定はsummarizeIssueSessionと共通）
@@ -453,7 +453,7 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
       dispatch: makeDispatch([makeSession({ state: "EXITED" })]),
     });
 
-    expect(screen.queryByRole("link", { name: "#1のRemote Controlで開く" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "#1のClaude Codeアプリで開く" })).toBeNull();
   });
 
   it("まだ開始していないセッションには出さない", () => {
@@ -461,7 +461,7 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
       dispatch: makeDispatch([makeSession({ activity: "NOT_STARTED" })]),
     });
 
-    expect(screen.queryByRole("link", { name: "#1のRemote Controlで開く" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "#1のClaude Codeアプリで開く" })).toBeNull();
   });
 
   // リンクを選択用ボタンの中に置くと、押したときにIssueの選択まで走る（不正なHTMLでもある）
@@ -469,7 +469,7 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
     const onSelectIssue = vi.fn();
     renderList({ onSelectIssue, dispatch: makeDispatch([makeSession()]) });
 
-    const link = screen.getByRole("link", { name: "#1のRemote Controlで開く" });
+    const link = screen.getByRole("link", { name: "#1のClaude Codeアプリで開く" });
     expect(selectButtonOf(1).contains(link)).toBe(false);
 
     fireEvent.click(link);
@@ -481,7 +481,7 @@ describe("一覧からRemote Controlを開く（#1915）", () => {
 // #1964: 押さないと先へ進まない行を、一覧のまま見分けられるようにする
 describe("Remoteボタンの強調（#1964）", () => {
   function remoteLinkOf(issueNumber: number): HTMLElement {
-    return screen.getByRole("link", { name: `#${issueNumber}のRemote Controlで開く` });
+    return screen.getByRole("link", { name: `#${issueNumber}のClaude Codeアプリで開く` });
   }
 
   it("セッションが入力待ちの行は枠線がamberになる", () => {
@@ -560,7 +560,7 @@ describe("計画の承認への入口（#2061）", () => {
     });
 
     expect(
-      screen.getByRole("link", { name: "#1のRemote Controlで開く" }).className,
+      screen.getByRole("link", { name: "#1のClaude Codeアプリで開く" }).className,
     ).not.toContain("border-amber-500");
   });
 

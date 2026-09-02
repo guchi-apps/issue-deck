@@ -119,7 +119,7 @@ export function buildSessionPlanCommentBody(params: {
     "",
   );
   if (params.remoteControlUrl) {
-    lines.push(`[Remote Controlで開く](${params.remoteControlUrl})`, "");
+    lines.push(`[Claude Codeアプリで開く](${params.remoteControlUrl})`, "");
   } else {
     // URLが取れないのは異常ではない（`--remote-control`無しで起動した場合など）。
     // 計画そのものは載せる価値があるので、リンクだけを落とす

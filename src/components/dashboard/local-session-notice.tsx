@@ -41,7 +41,7 @@ function LocalSessionNotice({
    */
   emphasizeRemoteControl = false,
   /** Remote Controlボタンの文言。承認欄では「答える」ことが用件なので言い換える */
-  remoteControlLabel = "Remote Controlで開く",
+  remoteControlLabel = "Claude Codeアプリで開く",
 }: {
   session: DispatchSessionView | null;
   children: ReactNode;
@@ -169,7 +169,7 @@ export function LocalSessionWaitingInputNotice({
 
   if (questionAnswerPending) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">
+      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
         質問の回答を待っています。
         <strong className="font-medium">
           上の「質問の回答を待っています」から選択肢を選んで送れます
@@ -182,7 +182,7 @@ export function LocalSessionWaitingInputNotice({
 
   if (planDecisionPending) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Remote Controlで開く">
+      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
         計画の承認を待っています。
         <strong className="font-medium">
           上の「計画の承認を待っています」から承認・修正を送れます

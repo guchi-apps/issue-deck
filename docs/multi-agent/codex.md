@@ -277,7 +277,7 @@ Issueのセッション表示**（#2537。スマホのIssue詳細にも同じも
   そのホストのCodexセッションが**全部**見える（`codex agents`に出るもの。tmuxで起こした
   TUIも載る）。Claude Code側（#1219）のような「そのIssueを開くURL」にはならない
 - **Issueの画面にも置いたのは、そこが答える出口だから**（#2537）。Codexのセッションでは
-  `remoteControlUrl`が空になり、Claude Codeなら出る「Remote Controlで開く」が消える。
+  `remoteControlUrl`が空になり、Claude Codeなら出る「Claude Codeアプリで開く」が消える。
   入力待ちのIssueを開いても画面から答える手段が1つも無いように見えていた。**押したIssueだけに
   繋がると誤解させない**ため、Issue側の文言は「このIssueだけでなく」から始める
 - **繋いだ先でどれがどのIssueかは、セッション名で見分ける**（#2540）。名前はモデルの自動命名

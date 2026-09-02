@@ -506,6 +506,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     codeReviewCapable: null,
     codexCapable: null,
     codexRemoteControlCapable: null,
+    manualStepSessionCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -708,7 +709,7 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
   it("PCは、届いた時点でRemote Controlの案内を出す", () => {
     withSessions([waitingSession], true, () => {
       renderDetail(checkUserIssue());
-      expect(within(guidancePanel()).getByRole("link", { name: /Remote Controlで開く/ })).toBeTruthy();
+      expect(within(guidancePanel()).getByRole("link", { name: /Claude Codeアプリで開く/ })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /承認欄へ移動/ })).toBeNull();
     });
   });
@@ -721,7 +722,7 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
     cleanup();
     withSessions([waitingSession], true, () => {
       renderMobileDetail(checkUserIssue());
-      expect(within(guidancePanel()).getByRole("link", { name: /Remote Controlで開く/ })).toBeTruthy();
+      expect(within(guidancePanel()).getByRole("link", { name: /Claude Codeアプリで開く/ })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /承認欄へ移動/ })).toBeNull();
     });
   });

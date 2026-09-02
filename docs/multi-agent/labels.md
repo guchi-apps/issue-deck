@@ -593,7 +593,7 @@ issue-deckのIssue詳細は、マージ待ちのときこのコメントを読�
   - コメント欄の承認カード（`CommentThread`の`ApprovalActions`）… 押す直前に読める位置
 - **行き先ボタンは1つだけ出す。** 判定は次の順で、`01.check-merge`の「なぜ」（上記#1631）は
   この案内の内側へ入れる。
-  - セッションが入力待ち（`isSessionWaitingInput`）で理由が`merge`以外 … 「Remote Controlで開く」。
+  - セッションが入力待ち（`isSessionWaitingInput`）で理由が`merge`以外 … 「Claude Codeアプリで開く」。
     画面のボタンは`11.local`の間どこにも届かないため（`LocalSessionWaitingInputNotice`と同じ理由）。
     **マージだけ例外なのは、GitHub側の操作でセッションの状態に関係なく効くため**
   - 理由が`merge` … 「対応PRへ移動」。対応PRのセクションが描かれていないIssueでは承認欄へ送る
@@ -1216,6 +1216,11 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 - **`00.check-user`とは併用しない。** 併用するとissue-deckのIssue詳細に「承認」「修正」
   ボタンが出るが、手作業Issueには承認して再開させる実装フローが無く、押しても宛先が無い。
   「ユーザーの確認待ち」ビューにも混ざり、承認待ちの優先順位付けが崩れる。
+  **例外は手作業セッション（#2771）が質問を出している間。** 「Claude Codeセッションで進める」で
+  起こしたセッションが`AskUserQuestion`で「次へ進みますか」と聞くと、フックが`00.check-user`＋
+  `01.check-input`を付ける（Push通知で気付くため）。このときは答える相手（セッション）が居るので
+  併用の前提が成り立ち、答えると外れる（[subpc-dispatch.md](subpc-dispatch.md)
+  「手作業Issueをセッションと対話しながら実施する」）。
 - **00番台にしない。** `^00\.`のラベルは`isAttentionLabel`により一覧カードのラベル表示から
   除外される（`src/lib/issue-status.ts`・`src/components/dashboard/issue-list.tsx`）ため、
   盤面で手作業Issueだと見分けられなくなる。

@@ -68,7 +68,7 @@ export function CheckUserReasonNotice({
         {action?.kind === "remote-control" && (
           <Button size="sm" variant="outline" className="bg-background" asChild>
             <a href={action.url} target="_blank" rel="noreferrer">
-              Remote Controlで開く
+              Claude Codeアプリで開く
               <ExternalLink />
             </a>
           </Button>

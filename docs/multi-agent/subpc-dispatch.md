@@ -221,7 +221,7 @@ Issue詳細の実行中カード（`IssueStatusCard`）では、**停止・追�
 
 **畳んでよいのは「押す気になったときだけ要るもの」に限る。** 次の3つは畳まない。
 
-- **Remote Controlで開く・開発環境を開く。** 入力待ちのときRemote Controlが答える唯一の出口で、
+- **Claude Codeアプリで開く・開発環境を開く。** 入力待ちのときRemote Controlが答える唯一の出口で、
   畳むと画面から`00.check-user`を外せなくなる
 - **セッションの補足**（「`tmux attach -t …`で答えてください」など）。次にやることそのもの
 - **押した操作の結果**（送信済み・pollerが見送った理由・失敗）。pull型で届くまで最大1分あり、
@@ -915,6 +915,54 @@ GET /api/dispatch（画面が20秒ごとに読む）
 前提の手順（`git pull` → `systemctl restart`）が入れ替わるのを防ぐ。`QUEUED`のまま5分で
 `TIMEOUT`にするのは制御ジョブと同じで（`DISPATCH_CONTROL_QUEUE_TIMEOUT_MS`）、**承認した時点の
 ホストの状態に対する実行**を何時間も後に届けない。
+
+### 手作業Issueをセッションと対話しながら実施する（#2771）
+
+代行実行（#1828）は本文のコマンドをpollerが1件ずつ流す経路で、**結果を見ながら相談する
+相手がいない**。失敗したときの診断も「出力を貼って`POST /api/manual-steps/fix`へ送る」往復に
+なる。そこで、手作業Issue専用のClaude Codeセッションをサブ PCに1本立て、手順の実行・結果の
+確認・失敗時の相談を**そのセッションと直接**やり取りできるようにした。
+
+```text
+手作業アシスタントの最初の画面／Issue詳細の手作業パネル「Claude Codeセッションで進める」
+  ↓ POST /api/dispatch（kind=manual_step_session）→ enqueueManualStepSessionJob
+（キュー: DispatchJob。activeKeyは manual_step_session:owner/repo#番号）
+  ↑ claim（manualStepSessionCapable を申告したホストにだけ。枠は実装セッションと同じ）
+scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
+  ↓ tmuxセッション <repo>-issue-<番号>（worktree無し・開発サーバー無し・--remote-control付き）
+  ↓ プロンプト scripts/prompts/manual-step-agent.md
+  手順ごとに AskUserQuestion（コマンド全文を示して「実行する」→ 実行 → 終了コードを示して「次へ進む」）
+  ↓ 画面の「質問の回答を待っています」パネル／Claude Codeアプリ（Remote Control）から答える
+  成功した手順は本文の - [ ] にチェック（gh issue edit）→ 完了の確認方法 → クローズは人が選ぶ
+```
+
+- **セッション名は実装セッションと同じ規約。** pollerの重複起動ガード・停止／追加指示の
+  突き合わせ・フックの通知（承認待ち・質問）・Remote Controlの取得がそのまま効く。
+  cwdはリポジトリの本体チェックアウト（対応表で解決できないときは
+  `~/apps/issue-deck-worktrees/.manual-steps/_session-<repo>`）で、**前回の会話は引き継がない**
+  （cwdがIssueごとではないため。横断質問と同じ）。回収は`kind=manual-step`として
+  質問セッションと同じ放置の猶予で畳む（`scripts/reap-sessions.sh`）
+- **「自動で最後まで」は持たない。** このセッションは実装セッションと同じ`auto`モードの実行体で、
+  代行実行が持つ「本文に書かれたコマンドしか実行しない（照合2回）」の歯止めを持たない。
+  自動で流す形にすると、人が押す1回の射程が「本文から抽出済みのコマンド列」から「実行体が
+  実行する任意のコマンド」へ広がる（計画レビューの指摘）。代わりに**コマンドは実行する前に必ず
+  全文を`AskUserQuestion`で示し、人が「実行する」と答えたものだけを実行する**ことをプロンプトで
+  求めている。本文に無いコマンド（調査・修正案）も同じ。手順を自動で流したいときは既存の
+  「承認してN件を自動実行」を使う（[gates.md](gates.md)「やらせないこと」の例外5）
+- **出力はIssueへ載せない。** `AskUserQuestion`の質問文に入れるのは手順番号・手順名・終了コード
+  まで（回答は記録として残るため）。**手作業Issueへの質問の回答は、Issueコメントを残さない**
+  （`POST /api/dispatch/question-answer`。手順の数だけコメントが増えるのを避ける。代行実行が
+  「手順ごとにコメントしない」としているのと揃える。回答自体は`SessionQuestionRequest`に残る）
+- **質問の待ちで手作業Issueにも`00.check-user`＋`01.check-input`が付く**（Push通知が鳴る）。
+  従来「手作業Issueには付けない」としていたのは承認して再開させる相手が居なかったためで、
+  セッションが待っている間はその相手が居る。答えると外れる（[labels.md](labels.md)）
+- **Remote ControlのURLは起動直後から画面に出す。** フックの報告（`/activity`）を待つと最初の
+  turnが終わるまで「Claude Codeアプリで開く」が出ない。pollerが`report_sessions`で
+  `~/.claude/sessions/*.json`（`tmux`名で引く。`session_transcript_remote_control_url`）から
+  URLを載せ、issue-deckは`https://claude.ai/`配下のものだけを受ける（`parseRemoteControlUrl`。
+  引けなかった巡は既存の値を触らない）。手作業セッションに限らず全セッションに効く
+- 画面の入口は`manual-step-session-panel.tsx`（PC・スマホ共用）。押せない理由の判定は
+  `resolveManualStepSessionRejection`（`dispatch-job.ts`）で、投入側の`jobs.ts`も同じ関数を通す
 
 ### 質問をサブPCで実行するための土台（#1294）
 

@@ -977,7 +977,12 @@ if [[ "$RESUME_CONVERSATION" == "1" ]]; then
   # レビュー指摘）を読ませてから続きへ入らせる。
   KICKOFF_PROMPT="${ISSUE_LABEL}のセッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --comments で前回以降に追加されたコメント・レビュー指摘を確認し、$PROMPT_FILE を読み直したうえで、残っている作業を続けてください。"
 else
-  KICKOFF_PROMPT="${ISSUE_LABEL}の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+  # 手作業セッション（#2771）は実装ではないので、最初の1行だけ言い換える（指示ファイルの読み方は同じ）
+  if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ]]; then
+    KICKOFF_PROMPT="${ISSUE_LABEL}の手作業の実施を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+  else
+    KICKOFF_PROMPT="${ISSUE_LABEL}の実装を開始してください。あなたへの指示は $PROMPT_FILE にあります。まずこのファイルを読み、確認を待たずにそのまま指示に従って着手してください。"
+  fi
 fi
 
 # 3行は**どちらの文面にも同じものを足す**。再開したセッションでも、画面を見たときに分かる

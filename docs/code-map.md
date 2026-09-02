@@ -591,7 +591,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「セッションが無い＝入力待ちではない」と区別が付かない。区別せずに描くと、開いた直後だけ
   必ず「無い側」の表示が出てからフェッチ完了で書き換わる。実際に、
   実装開始ボタンが「GitHub Actionsで開始」→「サブPCで開始」へ変わり（#1666）、確認待ちの案内と
-  承認欄が「承認欄へ移動」「承認」「修正」→「Remote Controlで開く」へ変わっていた（#1810）。
+  承認欄が「承認欄へ移動」「承認」「修正」→「Claude Codeアプリで開く」へ変わっていた（#1810）。
   **`isLoaded`は取得に失敗しても`true`になる**ので、待ち続けて何も出ない状態にはならない。
   判定を持つ`resolveCheckUserGuidance`（`sessionStatePending`）と`ApprovalActions`
   （同名のprop）は、確定するまで**どちらの形も出さない**（推測で片方を出すより、一拍遅れて
@@ -1219,6 +1219,15 @@ export function POST(request: NextRequest) {
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **手作業Issueをセッションと対話しながら実施する**（#2771。
+    [`manual-step-session-panel.tsx`](../src/components/dashboard/manual-step-session-panel.tsx)・
+    [`scripts/start-manual-step-session.sh`](../scripts/start-manual-step-session.sh)・
+    [`scripts/prompts/manual-step-agent.md`](../scripts/prompts/manual-step-agent.md)）。
+    アシスタントの最初の画面とIssue詳細の手作業パネルの「Claude Codeセッションで進める」から、
+    `DispatchJob`の`MANUAL_STEP_SESSION`を積み、pollerがworktree無しのtmuxセッションを立てる。
+    手順ごとにコマンド全文を`AskUserQuestion`で示して「実行する」→実行→終了コードを示して
+    「次へ進む」を聞く。押せない理由は`resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
+    設計は[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業issueをセッションと対話しながら実施する2771)。
   - **下端の操作はスマホで1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みの
     ままだと手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが
     その上の狭い窓に押し込まれていた。並びは**左に「戻る」（アイコンのみ）・`⋯`・右に主ボタン**で、
