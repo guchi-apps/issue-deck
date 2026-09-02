@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  FolderGit2,
-  GitBranch,
-  Loader2,
-  MonitorPlay,
-  Rocket,
-  Settings,
-} from "lucide-react";
+import { FolderGit2, Loader2, MonitorPlay, Rocket, Settings } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -41,7 +34,6 @@ import {
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
-import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -68,11 +60,6 @@ type MobileHomeScreenProps = {
    * スピナーを回すかどうかと、吹き出しの内訳に使う。行に出す数字はこれまでどおり`navCounts`。**
    */
   waitingQuestionCount: number;
-  /**
-   * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
-   * 使う。**nullは未取得**で、そのときは件数を出さない。PCの左メニューと同じ数え方。
-   */
-  releaseActivity: ReleaseActivityCounts | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   /**
@@ -82,9 +69,7 @@ type MobileHomeScreenProps = {
   mergePendingAttention: MergePendingAttention | null;
   onSelectQuickView: (view: NavViewId) => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
-  /** 「ブランチ」画面を開く（#1455）。ビューではないのでメニューへ直接1行として置く */
-  onSelectFlow: () => void;
-  /** 「確認環境」画面を開く（#2444）。「ブランチ」と同じくメニューへ直接1行として置く */
+  /** 「確認環境」画面を開く（#2444）。ビューではないのでメニューへ直接1行として置く */
   onSelectPreview: () => void;
   /**
    * 確認環境が動いているか（#2444）。動いている間だけオレンジの丸を出す。
@@ -134,26 +119,25 @@ type MobileHomeScreenProps = {
  * **リポジトリは1行だけ置き、ラベルは置かない**（#2724）。リポジトリ一覧はフッターの「Issue」
  * タブが担っていたが、そのタブを外したのでここが唯一の入口になった（PCの左メニューのように
  * 全リポジトリを展開はせず、一覧画面へ渡す1行にとどめる）。ラベルは一覧の絞り込みシートが
- * 既に担っており、ホームに2つ目の入口を作ると押す場所が割れる。
+ * 既に担っており、ホームに2つ目の入口を作ると押す場所が割れる。置く位置は「コードレビュー」の
+ * 直上（#2737。下記参照）。
  *
- * **「ブランチ」行の件数はProviderから自分で読む**（#2167。`MobileBottomNav`・PCの左メニューと
- * 同じ形）。材料はベルと同じ1本のポーリングで、この画面を描いている`issue-deck-shell.tsx`は
- * `NotificationProvider`の親なのでフックを呼べず、propで配れない。
+ * **「ブランチ」行はここには置かない**（#2737）。フッターに常設の「ブランチ」タブ
+ * （`mobile-bottom-nav.tsx`）があり同じ画面を開けるため、ホームのメニューには重複して出さない。
+ * **PCの左メニュー（`sidebar-nav.tsx`）にはフッターが無く「ブランチ」の唯一の入口なので、
+ * そちらには残す**——このためスマホとPCのメニューはこの1行分だけ並びが一致しない。
  */
-export function MobileHomeScreen(
-  props: Omit<MobileHomeScreenProps, "releaseActivity" | "onRefresh" | "isRefreshing">,
-) {
+export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "onRefresh" | "isRefreshing">) {
   /*
     引っ張って更新（#2182）もここから配る。**ベル右上の「更新」ボタンと同じ`refresh`**で、
     ホームに出ている数字の材料（リリース状況・Issue一覧・PR一覧）をまとめて取り直せるのは
     ここだけ。取り直しの完了は待てない同期関数なので、`isFetching`を併せて渡す
   */
-  const { releaseActivity, refresh, isFetching } = useNotificationState();
+  const { refresh, isFetching } = useNotificationState();
 
   return (
     <MobileHomeScreenView
       {...props}
-      releaseActivity={releaseActivity}
       onRefresh={refresh}
       isRefreshing={isFetching}
     />
@@ -170,12 +154,10 @@ export function MobileHomeScreenView({
   manualStepAttention,
   unconfirmedQuestionCount,
   waitingQuestionCount,
-  releaseActivity,
   pullRequestNavCounts,
   mergePendingAttention,
   onSelectQuickView,
   onSelectPullRequests,
-  onSelectFlow,
   onSelectPreview,
   previewRunning,
   onSelectRepos,
@@ -389,17 +371,6 @@ export function MobileHomeScreenView({
                   />
                 );
               })}
-              {/* 件数の意味と数え方はPCの左メニュー（`sidebar-nav.tsx`）と同じ（#2167）。
-                  リリース・デプロイが動いているプロジェクト数を出し、人が操作するまで進まない
-                  ものがあるときだけオレンジの丸にする。手作業は含めない */}
-              <MobileNavRow
-                label="ブランチ"
-                icon={GitBranch}
-                onClick={onSelectFlow}
-                count={releaseActivity?.total ?? null}
-                emphasis={(releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none"}
-                title={describeReleaseActivity(releaseActivity)}
-              />
             </ul>
           </div>
 
@@ -415,17 +386,6 @@ export function MobileHomeScreenView({
                   count={navCounts[view.id]}
                 />
               ))}
-              {/* リポジトリ一覧（#2724）。**フッターの「Issue」タブを外した代わりの入口**で、
-                  ここを置かないと、お気に入りに入れていないリポジトリはURLを直に打つしか
-                  開く方法が無くなる（下の「お気に入りリポジトリ」はお気に入りだけの一覧で、
-                  1件も無ければ枠ごと出ない）。件数は連携しているリポジトリの数 */}
-              <MobileNavRow
-                label="リポジトリ"
-                icon={FolderGit2}
-                onClick={onSelectRepos}
-                count={repositoryCount}
-                title="リポジトリを選んで、そのリポジトリのIssue一覧を開く"
-              />
             </ul>
           </div>
 
@@ -459,11 +419,24 @@ export function MobileHomeScreenView({
           </div>
 
           {/*
-            「コードレビュー」「確認環境」（#2674）。Pull Requestの枠の下・お気に入りリポジトリの
-            枠の上に置く。見出しは付けない——PCの左メニュー（`sidebar-nav.tsx`）と同じ扱い
+            「リポジトリ」「コードレビュー」「確認環境」。Pull Requestの枠の下・お気に入り
+            リポジトリの枠の上に置く。見出しは付けない——PCの左メニュー（`sidebar-nav.tsx`）と
+            同じ扱い
           */}
           <div className="px-4 pb-4">
             <ul className="flex flex-col gap-1">
+              {/* リポジトリ一覧（#2724）。**フッターの「Issue」タブを外した代わりの入口**で、
+                  ここを置かないと、お気に入りに入れていないリポジトリはURLを直に打つしか
+                  開く方法が無くなる（下の「お気に入りリポジトリ」はお気に入りだけの一覧で、
+                  1件も無ければ枠ごと出ない）。件数は連携しているリポジトリの数。
+                  「コードレビュー」の直上に置く（#2737。以前はIssueの枠の末尾にあった） */}
+              <MobileNavRow
+                label="リポジトリ"
+                icon={FolderGit2}
+                onClick={onSelectRepos}
+                count={repositoryCount}
+                title="リポジトリを選んで、そのリポジトリのIssue一覧を開く"
+              />
               {sidebarCodeReviewNavViews.map((view) => {
                 const signals = resolveQuestionNavSignals(view.id, {
                   total: navCounts.question,

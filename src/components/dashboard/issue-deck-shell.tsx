@@ -1469,7 +1469,6 @@ export function IssueDeckShell({
                   mergePendingAttention={mergePendingAttention}
                   onSelectQuickView={selectQuickView}
                   onSelectPullRequests={selectPullRequests}
-                  onSelectFlow={() => selectTab("flow")}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
                   onSelectRepos={selectRepos}
