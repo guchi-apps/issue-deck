@@ -8,6 +8,7 @@ import {
   sessionUsageCostSplit,
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
+  sessionUsageImplementationPhases,
   sessionUsagePhaseSplit,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
@@ -241,7 +242,41 @@ describe("buildSessionUsageSummary", () => {
     });
 
     expect(summary.byRepository.map((row) => row.key)).toEqual(["dayspan", "", "issue-deck"]);
-    expect(summary.byKind.map((row) => row.key)).toEqual(["implementation", "other"]);
+    // 実装はフェーズごとの行へ割る（#2779）。この3件はフェーズを持たないので「未集計」へ入る。
+    expect(summary.byKind.map((row) => row.key)).toEqual(["implementation-unsplit", "other"]);
+  });
+
+  it("実装はフェーズごとの行へ割り、合計は変わらない（#2779）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({
+          sessionId: "a",
+          costUsd: 10,
+          planCostUsd: 1,
+          implementationCostUsd: 9,
+          researchCostUsd: 2,
+          codingCostUsd: 5,
+          wrapupCostUsd: 2,
+        }),
+        // フェーズを持たない行（pollerを入れ替える前の報告）は1行にまとめる。
+        entry({ sessionId: "b", costUsd: 4 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    expect(summary.byKind.map((row) => row.key)).toEqual([
+      "phase-coding",
+      "implementation-unsplit",
+      "phase-research",
+      "phase-wrapup",
+      "phase-plan",
+    ]);
+    // 割ったあとの合計が、割る前の合計と一致すること（カードの合計が動かない）。
+    expect(summary.byKind.reduce((sum, row) => sum + row.costUsd, 0)).toBeCloseTo(14, 6);
+    // 本数は`byKind`から数えられない（1本が最大4行に現れる）ので、別に持つ。
+    expect(summary.implementationSessions).toBe(2);
   });
 
   it("合計・日別・リポジトリ別・種別別をClaudeとCodexに分けて保持する", () => {
@@ -307,6 +342,42 @@ describe("sessionUsageCostSplit", () => {
       .toMatchObject({ approximate: true });
     expect(sessionUsageCostSplit(entry({ contextTokens: 0, outputTokens: 0, costUsd: 0 })))
       .toEqual({ inputCostUsd: 0, outputCostUsd: 0, approximate: true });
+  });
+});
+
+describe("sessionUsageImplementationPhases", () => {
+  it("計画は引き算で出し、4つの合計が必ず金額と一致する（#2779）", () => {
+    // 集計側は`ExitPlanMode`が無いセッションのplanCostUsdをnullで送る（#2646の意味を変えない）。
+    // その場合の計画は0であって不明ではないので、残り3つとの差から出す。
+    expect(
+      sessionUsageImplementationPhases(
+        entry({ costUsd: 10, planCostUsd: null, researchCostUsd: 2, codingCostUsd: 6, wrapupCostUsd: 2 }),
+      ),
+    ).toEqual({ plan: 0, research: 2, coding: 6, wrapup: 2 });
+
+    expect(
+      sessionUsageImplementationPhases(
+        entry({ costUsd: 10, planCostUsd: 1, researchCostUsd: 2, codingCostUsd: 5, wrapupCostUsd: 2 }),
+      ),
+    ).toEqual({ plan: 1, research: 2, coding: 5, wrapup: 2 });
+  });
+
+  it("3つの合計が金額を超えていたら、その比のまま金額へ収める", () => {
+    // 走っている途中のセッションは、内訳のほうが先に書かれた金額より新しいことがある。
+    expect(
+      sessionUsageImplementationPhases(
+        entry({ costUsd: 10, researchCostUsd: 4, codingCostUsd: 12, wrapupCostUsd: 4 }),
+      ),
+    ).toEqual({ plan: 0, research: 2, coding: 6, wrapup: 2 });
+  });
+
+  it("3つ揃っていない行はnullを返す（フェーズ未集計として扱う）", () => {
+    expect(sessionUsageImplementationPhases(entry({ costUsd: 10 }))).toBeNull();
+    expect(
+      sessionUsageImplementationPhases(
+        entry({ costUsd: 10, researchCostUsd: 2, codingCostUsd: 6, wrapupCostUsd: null }),
+      ),
+    ).toBeNull();
   });
 });
 

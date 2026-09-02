@@ -51,6 +51,15 @@ export type SessionUsageEntry = {
    */
   planCostUsd?: number | null;
   implementationCostUsd?: number | null;
+  /**
+   * `implementationCostUsd`をさらに割った内訳（#2779）。境界はどれも転記のツール呼び出しで、
+   * 調査＝最初のファイル編集まで／実装＝最初の`git commit`まで／仕上げ＝それ以降。
+   * **3つ揃っていなければ3つともnull**（境界を1つも拾えなかったセッション・Codexの行）。
+   * `sessionUsageImplementationPhases`が「フェーズ未集計」として扱う
+   */
+  researchCostUsd?: number | null;
+  codingCostUsd?: number | null;
+  wrapupCostUsd?: number | null;
   models: string[];
   startedAt: string;
   endedAt: string;
@@ -137,7 +146,13 @@ export type SessionUsageSummary = {
   totalsBySource: UsageBySource;
   byDay: UsageDay[];
   byRepository: UsageGroup[];
+  /**
+   * 種別別。**実装だけはフェーズごとの行へ割ってある**（#2779）ので、`implementation`の
+   * キーは入っていない（`phase-*`と`implementation-unsplit`に分かれる）
+   */
   byKind: UsageGroup[];
+  /** 実装セッションの本数（#2779）。`byKind`はフェーズへ割れて数えられないので別に持つ */
+  implementationSessions: number;
   byIssue: UsageIssue[];
   /**
    * 明細から落としたIssueの件数と、そのぶんの合計（#2504）。
@@ -160,6 +175,25 @@ export type SessionUsageSummary = {
  */
 const MAX_DETAIL_ISSUES = 200;
 
+/**
+ * 実装セッションのフェーズ（#2779）。**「セッション種別別」では実装の行をこの4つへ置き換える。**
+ * 実装は全体の9割を占める1行になっていて、そのままでは「実装が多い」以上のことが読めない。
+ */
+export const USAGE_PHASE_ORDER = ["plan", "research", "coding", "wrapup"] as const;
+export type UsageImplementationPhase = (typeof USAGE_PHASE_ORDER)[number];
+
+/** フェーズ1つぶんの行のキー。種別のキー（`implementation`など）と混ざらないよう接頭辞を付ける */
+export function usagePhaseKindKey(phase: UsageImplementationPhase): string {
+  return `phase-${phase}`;
+}
+
+/**
+ * フェーズを拾えなかった実装セッションの行（#2779）。**合計を変えないために置く。**
+ * pollerを入れ替える前に集計された行はフェーズを持たず、落とすとカードの合計が
+ * 「従量課金相当」タイルと合わなくなる。数日で保持期間の外へ出て消える。
+ */
+export const IMPLEMENTATION_UNSPLIT_KIND_KEY = "implementation-unsplit";
+
 /** 画面に出す種別の名前。シェル側の`KIND_LABELS`と揃える */
 const KIND_LABELS: Record<string, string> = {
   implementation: "実装",
@@ -167,6 +201,11 @@ const KIND_LABELS: Record<string, string> = {
   question: "横断質問",
   other: "その他",
   actions: "GitHub Actions",
+  "phase-plan": "計画（Plan mode）",
+  "phase-research": "調査",
+  "phase-coding": "実装",
+  "phase-wrapup": "仕上げ（コミット・PR・報告）",
+  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "実装（フェーズ未集計）",
 };
 
 export function sessionUsageKindLabel(kind: string): string {
@@ -229,6 +268,79 @@ function emptyPhaseTotals(): UsagePhaseTotals {
 
 function emptyPhaseBreakdown(): UsagePhaseBreakdown {
   return { plan: emptyPhaseTotals(), implementation: emptyPhaseTotals(), action: emptyPhaseTotals() };
+}
+
+/**
+ * セッション1本の金額を、実装の4フェーズへ割る（#2779）。フェーズを拾えなかった行はnull。
+ *
+ * **計画は引き算で出す。** 集計側は`ExitPlanMode`が無いセッションの`planCostUsd`をnullで送る
+ * （#2646の「区分なし」の意味を変えないため）が、その場合の計画は0であって不明ではない。
+ * 残り3つとの差から出すと、**4つの合計が必ず`costUsd`と一致する**ので、カードの合計が動かない。
+ */
+export function sessionUsageImplementationPhases(
+  entry: Pick<
+    SessionUsageEntry,
+    "costUsd" | "planCostUsd" | "researchCostUsd" | "codingCostUsd" | "wrapupCostUsd"
+  >,
+): Record<UsageImplementationPhase, number> | null {
+  const { researchCostUsd, codingCostUsd, wrapupCostUsd } = entry;
+  if (
+    typeof researchCostUsd !== "number" ||
+    !Number.isFinite(researchCostUsd) ||
+    typeof codingCostUsd !== "number" ||
+    !Number.isFinite(codingCostUsd) ||
+    typeof wrapupCostUsd !== "number" ||
+    !Number.isFinite(wrapupCostUsd)
+  ) {
+    return null;
+  }
+  // **3つの合計が金額を超えていたら、その比のまま金額へ収める。** 集計し直した内訳が、
+  // 先に書き込まれた金額（走っている途中のセッションの行）より新しいことがあり、そのままだと
+  // カードの合計が「従量課金相当」タイルを上回る。
+  const rest = researchCostUsd + codingCostUsd + wrapupCostUsd;
+  const scale = rest > entry.costUsd && rest > 0 ? entry.costUsd / rest : 1;
+  return {
+    plan: Math.max(0, entry.costUsd - rest * scale),
+    research: researchCostUsd * scale,
+    coding: codingCostUsd * scale,
+    wrapup: wrapupCostUsd * scale,
+  };
+}
+
+/**
+ * セッション1本を、そのフェーズぶんの大きさへ縮めた行として作り直す（#2779）。
+ *
+ * **トークン・応答数は金額比の按分**（#2670のフェーズ内訳と同じ扱い）。DBに持っているのは
+ * フェーズ別の金額だけで、トークンは分かれていない。金額だけは按分ではなく実測値を入れる。
+ */
+function scaleEntryToPhase(entry: SessionUsageEntry, costUsd: number): SessionUsageEntry {
+  const ratio = entry.costUsd > 0 ? costUsd / entry.costUsd : 0;
+  return {
+    ...entry,
+    responses: Math.round(entry.responses * ratio),
+    inputTokens: entry.inputTokens * ratio,
+    cacheCreateTokens: entry.cacheCreateTokens * ratio,
+    cacheReadTokens: entry.cacheReadTokens * ratio,
+    contextTokens: entry.contextTokens * ratio,
+    outputTokens: entry.outputTokens * ratio,
+    costUsd,
+  };
+}
+
+/**
+ * セッション1本が「セッション種別別」のどの行へ入るか（#2779）。
+ * **実装だけは1本が最大4行へ分かれる**。ほかの種別は今までどおり1行。
+ */
+function kindRowsForEntry(entry: SessionUsageEntry): { key: string; entry: SessionUsageEntry }[] {
+  if (entry.kind !== "implementation") return [{ key: entry.kind, entry }];
+  const phases = sessionUsageImplementationPhases(entry);
+  if (phases === null) return [{ key: IMPLEMENTATION_UNSPLIT_KIND_KEY, entry }];
+  const rows = USAGE_PHASE_ORDER.filter((phase) => phases[phase] > 0).map((phase) => ({
+    key: usagePhaseKindKey(phase),
+    entry: scaleEntryToPhase(entry, phases[phase]),
+  }));
+  // 金額が全て0のセッション（`<synthetic>`だけの行など）は、按分しても意味が無いのでまとめて出す。
+  return rows.length > 0 ? rows : [{ key: IMPLEMENTATION_UNSPLIT_KIND_KEY, entry }];
 }
 
 function addEntryWithAgent(
@@ -301,6 +413,7 @@ export function buildSessionUsageSummary({
   const byKind = new Map<string, UsageGroup>();
   const byIssue = new Map<string, UsageIssue>();
   const hosts = new Set<string>();
+  let implementationSessions = 0;
 
   for (const entry of inPeriod) {
     addEntry(totals, entry);
@@ -333,15 +446,19 @@ export function buildSessionUsageSummary({
     addEntryWithSource(repository, entry);
     byRepository.set(repositoryKey, repository);
 
-    const kind = byKind.get(entry.kind) ?? {
-      key: entry.kind,
-      ...emptyTotals(),
-      byAgent: emptyByAgent(),
-      bySource: emptyBySource(),
-    };
-    addEntryWithAgent(kind, entry);
-    addEntryWithSource(kind, entry);
-    byKind.set(entry.kind, kind);
+    // **実装はフェーズごとの行へ割る**（#2779）。ほかの種別は1本＝1行のまま。
+    if (entry.kind === "implementation") implementationSessions += 1;
+    for (const row of kindRowsForEntry(entry)) {
+      const kind = byKind.get(row.key) ?? {
+        key: row.key,
+        ...emptyTotals(),
+        byAgent: emptyByAgent(),
+        bySource: emptyBySource(),
+      };
+      addEntryWithAgent(kind, row.entry);
+      addEntryWithSource(kind, row.entry);
+      byKind.set(row.key, kind);
+    }
 
     // **Issue番号を持たないセッションもリポジトリ単位でまとめて出す。** 計画レビュー・横断質問は
     // 作業ディレクトリにIssue番号を持たないことがあり、落とすと合計と明細が合わなくなる。
@@ -404,6 +521,7 @@ export function buildSessionUsageSummary({
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byRepository: [...byRepository.values()].sort(byCost),
     byKind: [...byKind.values()].sort(byCost),
+    implementationSessions,
     byIssue: issues.slice(0, MAX_DETAIL_ISSUES),
     omittedIssues: omitted.length,
     omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),

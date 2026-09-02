@@ -146,6 +146,25 @@ ISSUE_IN_PROMPT = re.compile(r"Issue #([1-9][0-9]*)")
 # 種別の解決に使う行は転記の先頭に固まっている。全行を舐めないための上限。
 META_SCAN_LINES = 200
 
+# フェーズの境界に使うツール呼び出し（#2779）。「計画 → 調査 → 実装 → 仕上げ」の
+# 3つの境目を、転記に残るtool_useの時刻から拾う。
+#
+# **ファイルを書き換えるツール**（調査 → 実装の境目）。
+WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+# auto modeではファイルの編集がBash経由になる（`sed -i`・ヒアドキュメント・リダイレクト）。
+# ツール名だけを見ると、その種のセッションが「調査だけで終わった」ことになってしまうため、
+# Bashのコマンド文字列も見る。`>/dev/null`・`2>&1`のような読み取りだけの記法は除く。
+BASH_WRITE = re.compile(
+    r"(?:^|[\s;&|(])(?:sed\s+-i|tee\s|patch\s|git\s+apply|dd\s+if=)"
+    r"|>>?\s*(?!/dev/null|&)[^\s;&|)]"
+)
+# **最初のコミット**（実装 → 仕上げの境目）。これ以降をPR作成・CI確認・完了報告とみなす。
+# **`git`と`commit`のあいだは何が来てもよい**——このフリートのコミットは
+# `git -c user.name="Claude Code" -c user.email=... commit` の形で、オプションの値に空白が
+# 入るため「`-`で始まる語の繰り返し」では拾えない。区切り（改行・`;`・`&`・`|`）をまたがない
+# ことだけを条件にして、ヒアドキュメントの本文中の「commit」を巻き込まないようにする。
+BASH_COMMIT = re.compile(r"(?:^|[\s;&|(])git\s(?:[^\n;&|]*\s)?commit(?:\s|$)")
+
 KIND_LABELS = {
     "implementation": "実装",
     "plan-review": "計画レビュー",
@@ -295,6 +314,9 @@ for raw_path in sys.stdin:
     # 境に使う（それより前の往復はやり取りごと「計画」に含める）。1度も呼ばれていなければ
     # `None`のままで、画面は「区分なし」として扱う。
     plan_exit_ts = None
+    # 調査 → 実装、実装 → 仕上げの境界（#2779）。**どちらも最初の1回**を境に使う。
+    first_write_ts = None
+    first_commit_ts = None
     responses_log = []
 
     try:
@@ -341,20 +363,37 @@ for raw_path in sys.stdin:
             if not isinstance(usage, dict):
                 continue
 
-            # `ExitPlanMode`のtool_use呼び出し（#2646）。重複行でも同じ内容なので、
+            # フェーズの境界に使うtool_use呼び出し（#2646・#2779）。重複行でも同じ内容なので、
             # dedupより前で見ておく。
             if record.get("type") == "assistant":
                 content = message.get("content")
-                if isinstance(content, list):
+                ts = record.get("timestamp")
+                if isinstance(content, list) and isinstance(ts, str):
                     for block in content:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("type") == "tool_use"
-                            and block.get("name") == "ExitPlanMode"
-                        ):
-                            ts = record.get("timestamp")
-                            if isinstance(ts, str) and (plan_exit_ts is None or ts > plan_exit_ts):
+                        if not isinstance(block, dict) or block.get("type") != "tool_use":
+                            continue
+                        name = block.get("name")
+                        if name == "ExitPlanMode":
+                            # 計画の修正で複数回呼ばれても、**最後の1回**だけを境に使う。
+                            if plan_exit_ts is None or ts > plan_exit_ts:
                                 plan_exit_ts = ts
+                            continue
+                        if name in WRITE_TOOLS:
+                            if first_write_ts is None or ts < first_write_ts:
+                                first_write_ts = ts
+                            continue
+                        if name != "Bash":
+                            continue
+                        tool_input = block.get("input")
+                        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+                        if not isinstance(command, str):
+                            continue
+                        if BASH_COMMIT.search(command):
+                            if first_commit_ts is None or ts < first_commit_ts:
+                                first_commit_ts = ts
+                        elif BASH_WRITE.search(command):
+                            if first_write_ts is None or ts < first_write_ts:
+                                first_write_ts = ts
 
             # **同じ`message.id`は同じ応答の重複行**。最初の1行だけを数える。
             message_id = message.get("id")
@@ -424,23 +463,54 @@ for raw_path in sys.stdin:
     if not bucket["responses"]:
         continue
 
-    # 計画/実装のコスト内訳（#2646）。`ExitPlanMode`が1度も無ければ区分不明としてnullのまま
-    # 出す（画面は「区分なし」として合算のみを見せる）。
+    # フェーズ別のコスト内訳（#2646・#2779）。境界は転記のツール呼び出しで、
+    # **時刻が前後しても「計画 → 調査 → 実装 → 仕上げ」の順になるよう後ろへ寄せる**
+    # （ヒアドキュメントでの編集など、拾えなかった書き込みの後にコミットが来ることがある）。
+    plan_end = plan_exit_ts
+    research_end = first_write_ts
+    if plan_end is not None and research_end is not None and research_end < plan_end:
+        research_end = plan_end
+    coding_end = first_commit_ts
+    for boundary in (plan_end, research_end):
+        if coding_end is not None and boundary is not None and coding_end < boundary:
+            coding_end = boundary
+
+    def phase_of(stamp):
+        """応答1回の時刻 → フェーズ名。**境界がNoneのフェーズは前後のフェーズへ吸収される**"""
+        value = stamp if isinstance(stamp, str) else ""
+        if plan_end is not None and value <= plan_end:
+            return "plan"
+        if coding_end is not None and value >= coding_end:
+            return "wrapup"
+        if research_end is not None and value >= research_end:
+            return "coding"
+        return "research"
+
+    phase_buckets = {key: blank_bucket() for key in ("plan", "research", "coding", "wrapup")}
+    for response_stamp, response_delta in responses_log:
+        add(phase_buckets[phase_of(response_stamp)], response_delta)
+
+    # 計画/実装の2区分（#2646）。`ExitPlanMode`が1度も無ければ区分不明としてnullのまま出す
+    # （画面は「区分なし」として合算のみを見せる）。**意味は#2646のままで、実装＝計画以外の全部。**
     if plan_exit_ts is not None:
-        plan_bucket = blank_bucket()
-        implementation_bucket = blank_bucket()
-        for response_stamp, response_delta in responses_log:
-            target = (
-                plan_bucket
-                if isinstance(response_stamp, str) and response_stamp <= plan_exit_ts
-                else implementation_bucket
-            )
-            add(target, response_delta)
-        plan_cost_usd = round(plan_bucket["costUsd"], 4)
-        implementation_cost_usd = round(implementation_bucket["costUsd"], 4)
+        plan_cost_usd = round(phase_buckets["plan"]["costUsd"], 4)
+        implementation_cost_usd = round(
+            sum(phase_buckets[key]["costUsd"] for key in ("research", "coding", "wrapup")), 4
+        )
     else:
         plan_cost_usd = None
         implementation_cost_usd = None
+
+    # 4区分（#2779）。**書き込みもコミットも1度も無いセッションは区分なしにする**——
+    # 全額が「調査」に寄って、実際には実装していたセッションまで調査として数えてしまうため。
+    if first_write_ts is None and first_commit_ts is None:
+        research_cost_usd = None
+        coding_cost_usd = None
+        wrapup_cost_usd = None
+    else:
+        research_cost_usd = round(phase_buckets["research"]["costUsd"], 4)
+        coding_cost_usd = round(phase_buckets["coding"]["costUsd"], 4)
+        wrapup_cost_usd = round(phase_buckets["wrapup"]["costUsd"], 4)
 
     kind, repository, issue = classify(cwd)
     if issue is None:
@@ -467,6 +537,9 @@ for raw_path in sys.stdin:
             lastAt=last_at,
             planCostUsd=plan_cost_usd,
             implementationCostUsd=implementation_cost_usd,
+            researchCostUsd=research_cost_usd,
+            codingCostUsd=coding_cost_usd,
+            wrapupCostUsd=wrapup_cost_usd,
         )
     )
 
@@ -833,6 +906,11 @@ for row in data.get("sessions") or []:
             # `.get`はNoneのまま送る（画面は「区分なし」として扱う）。
             "planCostUsd": row.get("planCostUsd"),
             "implementationCostUsd": row.get("implementationCostUsd"),
+            # 実装の中の4区分（#2779）。`調査 + 実装 + 仕上げ = implementationCostUsd`で、
+            # 境界を1つも拾えなかったセッションは3つともNone（画面は「フェーズ未集計」）。
+            "researchCostUsd": row.get("researchCostUsd"),
+            "codingCostUsd": row.get("codingCostUsd"),
+            "wrapupCostUsd": row.get("wrapupCostUsd"),
             "models": row.get("models") or [],
             "startedAt": row.get("firstAt"),
             "endedAt": row.get("lastAt"),
