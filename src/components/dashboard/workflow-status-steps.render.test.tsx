@@ -233,6 +233,54 @@ describe("WorkflowStepBadge", () => {
     expect(stepText).not.toContain("計画検討中");
   });
 
+  /**
+   * #2795。developへPRを作成した後はローカルセッションが終了していてもIssueの対応が
+   * 終わったわけではなく、レビュー・統合エージェントによるマージ待ち。「終了」とだけ
+   * 出すと対応不要に見えてしまうため、developPR段階では「PR待ち」に言い換える。
+   */
+  it("developPR段階でセッションが終了していれば「PR待ち」と出す（#2795）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Develop PR"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({ state: "EXITED" })}
+        now={NOW}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("PR待ち");
+    expect(container.textContent).not.toContain("終了");
+  });
+
+  it("回答を待ったまま終了した場合はdevelopPR段階でも言い換えない（#2795）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Develop PR"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({ state: "EXITED", activity: "WAITING_INPUT" })}
+        now={NOW}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("回答前に終了");
+  });
+
+  it("developPR段階以外ではセッションの終了表示を従来どおり「終了」のまま出す（#2795）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Implementation"
+        executionTarget={{ host: "subpc", expectsActionsRun: false }}
+        session={session({ state: "EXITED" })}
+        now={NOW}
+      />,
+    );
+    const stepText = container.querySelector(".truncate")?.textContent;
+    expect(stepText).toBe("終了");
+  });
+
   it("nowが無い（マウント前）ときも、短い表現のまま出す（経過時間だけ省く）", () => {
     const { container } = render(
       <WorkflowStepBadge
