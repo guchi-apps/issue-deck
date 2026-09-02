@@ -1048,6 +1048,26 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
 
+### `provision-secret.sh --from-stdin`はパイプ経由だと必ず失敗していた（#2728）
+
+**`op item edit` / `op item create` は、自分の標準入力がパイプ（FIFO）だと中身をJSONの
+アイテムテンプレートとして読もうとし、`invalid JSON provided`で落ちる。** `op read` /
+`op item get`はstdinを読まないため影響を受けない。
+
+`scripts/provision-secret.sh --from-stdin`は`value="$(cat)"`で値を読み終えるが、**スクリプト
+自身の標準入力はパイプのまま**であり、後段の`op item edit`/`op item create`へそのまま
+引き継がれていた。そのため`printf '...' | scripts/provision-secret.sh ... --from-stdin`の形
+（`--generate`ではなく値を渡す用途そのもの）は必ず失敗し、失敗時のメッセージが無条件で
+「トークンに write_items があるかを疑ってください」だったため、原因調査が権限側へ誤誘導
+されていた（トークン自体は`op whoami`で正常と確認できるのに、権限を疑って足踏みする）。
+
+**stdinが通常ファイル・端末・`/dev/null`なら発生しない。** 端末から`--generate`で実行すると
+成功するのはこのため。回避策は`op`呼び出しに`</dev/null`を付けてstdinを切り離すことで、
+`provision-secret.sh`・`provision-app-secrets.sh`はこの形で修正済み。**新しく`op item edit`/
+`op item create`を呼ぶスクリプトを書くときは、値をパイプ経由で受け取るかどうかによらず
+`</dev/null`を付けておく**と、呼び出し元の起動経路（ローカル端末・CI・手作業アシスタントの
+代行実行）を問わず同じ落とし穴を踏まない。
+
 ### シークレットの供給元を切り替える（#1306）
 
 `.github/actions/load-secrets` は、`.github/secrets-manifest.tsv` に従って**GitHubのsecret/variable

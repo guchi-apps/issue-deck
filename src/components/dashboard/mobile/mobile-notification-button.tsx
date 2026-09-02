@@ -70,10 +70,12 @@ export function MobileNotificationButton() {
       */}
       <SheetContent side="bottom" className="max-h-[85svh] gap-2 overflow-y-auto p-0 pb-8">
         <SheetHeader className="p-3 pb-0">
-          {/* 1段目の右端はシートの閉じるボタン（`sheet.tsx`の`absolute top-3 right-3`）が
-              占めているので、更新ボタンは件数と同じ2段目の右端へ置く（#1909） */}
+          {/* シートの閉じるボタン（`sheet.tsx`の`absolute top-3 right-3`、44×44px）は
+              ヘッダーの上から56px（top: 12px + size: 44px）の高さを占有する。タイトル・件数・
+              更新ボタンはすべてこの高さの範囲に収まるため、重なりを避けるにはすべての行が
+              右側に余白を取る必要がある（#1909、mobile-issue-filter-sheet.tx のパターン参照） */}
           <SheetTitle className="pr-8 text-sm">対応が必要なもの</SheetTitle>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 pr-8">
             {/* バッジに数えていない手作業待ちがあれば内訳が付く（#1936） */}
             <SheetDescription className="text-xs">{countLabel}</SheetDescription>
             <NotificationRefreshButton />

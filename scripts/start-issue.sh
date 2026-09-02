@@ -88,6 +88,9 @@ source "$ROOT/scripts/lib/progress-report.sh"
 # 個人設定・共有知識がメインPCとサブPCで取り残されていないかの警告（#1190）。
 # shellcheck source=scripts/lib/personal-config-sync.sh
 source "$ROOT/scripts/lib/personal-config-sync.sh"
+
+# shellcheck source=scripts/lib/claude-auto-mode-setup.sh
+source "$ROOT/scripts/lib/claude-auto-mode-setup.sh"
 # 本体の作業ツリーの scripts/ が origin/develop より古いままになっていないかの警告（#1274）。
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$ROOT/scripts/lib/launcher-scripts-sync.sh"
@@ -253,6 +256,11 @@ done
 # 個人設定（`~/.claude/CLAUDE.md`・個人skill）と共有知識が、もう一方のマシンの更新を
 # 取り込めていない場合に警告する（#1190）。起動は止めない。
 warn_personal_config_drift
+
+# `~/.claude/settings.json`の`permissions.defaultMode`を`auto`に揃える（#2733）。
+# CLI引数の`--permission-mode auto`だけではauto modeの同意が打ち消され、読み取り専用の
+# コマンドまで1件ずつ承認を求められる。書けなくても起動は止めない。
+ensure_claude_auto_mode_default
 
 # 起動スクリプト・フックの実体は本体の作業ツリーにあり、worktreeを作り直しても新しくならない。
 # developへ入った修正が反映されていない場合に警告する（#1274）。起動は止めない。

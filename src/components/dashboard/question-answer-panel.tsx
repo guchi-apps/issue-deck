@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Check,
+  ChevronDown,
   ExternalLink,
   Keyboard,
   Loader2,
@@ -10,12 +11,14 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
+import type { QuestionPremise } from "@/lib/dispatch/question-premise";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   SESSION_QUESTION_FREE_TEXT_MAX_LENGTH,
@@ -24,6 +27,7 @@ import {
   type SessionQuestionRequestView,
 } from "@/lib/dispatch/session-question-request";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { COMMENT_AGENT_PROFILES } from "@/lib/github/comment-source";
 
 /**
  * ローカルセッションが`AskUserQuestion`で聞いた質問に、その場で答えるパネル（#2189）。
@@ -45,16 +49,25 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 /** 1問ぶんの選択状態。`options`は選んだラベル、`text`は「その他」の自由記述 */
 type Selection = { options: string[]; text: string };
 
+/** 前提のコメントを畳んだときに見せる高さ。計画の`## 要約`の頭が読み切れるくらいに取る */
+const COLLAPSED_PREMISE_CLASS = "max-h-36 overflow-hidden";
+
 export function QuestionAnswerPanel({
   request,
   session,
   dispatch,
+  premise,
   onCheckUserResolved,
 }: {
   request: SessionQuestionRequestView;
   /** 質問したセッション。見つかっていなければ`null` */
   session: DispatchSessionView | null;
   dispatch: DispatchStateHandle;
+  /**
+   * 質問の前提として見せるコメント（#2742）。無ければ`null`でカードごと描かない。
+   * 選び方は`findQuestionPremise`（`src/lib/dispatch/question-premise.ts`）。
+   */
+  premise?: QuestionPremise | null;
   /**
    * 回答を送って確認待ちが解けたときに呼ぶ（#2341。計画の承認パネルと同じ）。サーバーが
    * `00.check-user`と理由ラベルを外すのと同じことを、手元のIssueにも先に反映させる。
@@ -177,6 +190,10 @@ export function QuestionAnswerPanel({
       </header>
 
       <div className="flex flex-col gap-4 p-3">
+        {/* 質問の前提（#2742）。**選択肢の真上に置く**——「上記の計画で〜」の“上記”は
+            コメント欄のずっと下にあり、読みに行くと選択肢が画面外へ出る（スマホで顕著） */}
+        {premise && <QuestionPremiseCard premise={premise} request={request} />}
+
         {unreadable ? (
           <p className="text-xs text-muted-foreground">
             質問の内容を読み取れませんでした。Remote Controlか端末から答えてください。
@@ -239,6 +256,58 @@ export function QuestionAnswerPanel({
         </p>
       </div>
     </section>
+  );
+}
+
+/**
+ * 質問の直前にセッションが投稿したコメント（#2742）。
+ *
+ * **断定はしない。** 質問とコメントを結ぶデータは無く、選んでいるのは「エージェントが書いた
+ * 最新の1件」でしかない（`findQuestionPremise`）。役割（計画ボットなど）と投稿時刻を必ず
+ * 添えて、読む側が今の質問と関係のある発言かを判断できるようにする。
+ *
+ * **既定では畳む。** 計画は30〜40行が目安で、開いたまま置くと選択肢が画面外へ出る——
+ * それは前提を読みに行くのと同じことになる。
+ */
+function QuestionPremiseCard({
+  premise,
+  request,
+}: {
+  premise: QuestionPremise;
+  request: SessionQuestionRequestView;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const profile = COMMENT_AGENT_PROFILES[premise.role];
+  const RoleIcon = profile.icon;
+
+  return (
+    <div className="overflow-hidden rounded-md border bg-muted/60">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b px-2.5 py-1.5">
+        <span
+          className={`flex items-center gap-1 text-[11px] font-semibold ${profile.textClassName}`}
+        >
+          <RoleIcon className="size-3" aria-hidden />
+          {premise.roleLabel}
+        </span>
+        <span className="text-xs font-semibold">この質問の前提</span>
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          {premise.createdAtLabel}のコメント
+        </span>
+      </div>
+      <div className="relative px-3 pt-2">
+        <div className={isExpanded ? "pb-2" : COLLAPSED_PREMISE_CLASS}>
+          <MarkdownBody content={premise.body} repositoryFullName={request.repositoryFullName} />
+        </div>
+        {!isExpanded && (
+          <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">
+            <Button variant="outline" size="sm" onClick={() => setIsExpanded(true)}>
+              <ChevronDown />
+              全文を表示
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

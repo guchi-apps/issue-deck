@@ -10,6 +10,7 @@ import {
   FolderGit2,
   Gauge,
   GitBranch,
+  History,
   Loader2,
   Lock,
   MonitorPlay,
@@ -74,6 +75,8 @@ type SidebarNavProps = {
   previewRunning?: boolean;
   /** AI使用量（#2504）の画面を開く */
   onSelectUsage: () => void;
+  /** リリース履歴（#2726）の画面を開く */
+  onSelectReleaseHistory: () => void;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
    * 使うのは年に数回で、状態を持たない入口のため。
@@ -152,6 +155,7 @@ export function SidebarNavView({
   onSelectPreview,
   previewRunning = false,
   onSelectUsage,
+  onSelectReleaseHistory,
   onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
@@ -345,6 +349,15 @@ export function SidebarNavView({
             // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い
             // （枠が逼迫していることは設定→「状態」のメーターが受け持つ）
             title: "サブPCのローカルセッションが使ったトークンを見る",
+          })}
+          {navRow({
+            key: "releases",
+            label: "リリース履歴",
+            icon: History,
+            active: activePane === "releases",
+            onClick: onSelectReleaseHistory,
+            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い（#2726）
+            title: "全リポジトリのGitHub Releaseを時系列で見る",
           })}
         </ul>
       </div>

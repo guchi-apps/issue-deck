@@ -211,20 +211,27 @@ export const sidebarCodeReviewNavViews: NavView[] = labelNavViews.filter((view) 
 );
 
 /**
- * スマホのIssue一覧で選べるビュー（#1645）。「すべてのIssue」の次にユーザーの確認待ちを置き、
- * 対応が必要なIssueを最初に見つけられるようにする（#714）。
+ * スマホのIssue一覧で選べるビュー（#1645）。並びは進捗順（未着手→実行中→本番反映待ち）を
+ * 先に、要対応（ユーザーの確認待ち→ユーザーの作業待ち）・参考（質問→コードレビュー）を
+ * 後ろにまとめる（#2736。左メニュー`sidebarIssueNavViews`の進捗順と揃えつつ、対応が必要な
+ * ものを見失わないよう要対応の2つを間に挟む）。
  *
  * 「お気に入り」「最近追加した」は出さない（#873）。「直近本番に反映した」も、左メニュー
  * （`sidebarIssueNavViews`）と揃えて外す（#1645）。viewクエリとしては生きており、既存リンクからは
  * 今までどおり開ける。
- *
- * **「本番反映待ち」は#1645でここから外していたが、#1743で戻した。** 左メニュー側へ足したので、
- * 「左メニューと揃える」という#1645の判断はここでも足す向きに働く。
  */
 export const mobileListNavViews: NavView[] = [
-  baseNavViews[0],
-  ...labelNavViews.filter((view) => !["recently-merged"].includes(view.id)),
-];
+  "all",
+  "not-started",
+  "in-progress",
+  "release-pending",
+  "check-user",
+  "manual-step",
+  "question",
+  "code-review",
+]
+  .map((id) => navViews.find((view) => view.id === id))
+  .filter((view): view is NavView => view !== undefined);
 
 /**
  * スマホのIssue一覧に並べるビュー（#1645）。`mobileListNavViews`に無いビュー
@@ -313,10 +320,9 @@ export function navViewIsUserActionList(id: NavViewId): boolean {
  * （スマホ一覧のスワイプ切り替え用、#706）。先頭/末尾でそれ以上進められない場合や、
  * idがorderに存在しない場合はnullを返す（ループはしない）。
  *
- * orderを引数で受け取れるようにしているのは、スマホのタブ表示順（#714で
- * 「すべてのIssue」の右隣にユーザーの確認待ちを固定表示するようnavViewsとは
- * 異なる順序に変更済み）とスワイプの前後判定がズレていると、タブ上は隣り合って
- * 見えるビューにスワイプしても切り替わらず順番がおかしく感じられるため（#734）。
+ * orderを引数で受け取れるようにしているのは、スマホのタブ表示順（#714・#2736で
+ * navViewsとは異なる順序に並べ替え済み）とスワイプの前後判定がズレていると、タブ上は
+ * 隣り合って見えるビューにスワイプしても切り替わらず順番がおかしく感じられるため（#734）。
  */
 export function getAdjacentNavViewId(
   id: NavViewId,

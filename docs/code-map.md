@@ -57,6 +57,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+- **画面が持つコメント（`IssueComment`）に絶対時刻は無い**（#2742）。`GET /api/issues/comments`が
+  返すのは`createdAtLabel`（`formatRelativeDate`で整形済みの「3分前」）だけで、ISO文字列は
+  `issue-mapper.ts`の時点で捨てられている。**他のデータとの前後比較はできない**ので、
+  「このコメントは質問より前か」のような判定は諦めて**取得順（古い→新しい）**で代用するか、
+  必要なら`issue-mapper.ts`とその型から足すこと。
 - **画面に出す絶対時刻の整形は
   [`lib/format-date-time.ts`](../src/lib/format-date-time.ts)だけを通し、日本時間で出す**（#1977）。
   `toLocaleString("ja-JP")`や`getHours()`は**実行環境のタイムゾーン**で整形するため、UTCで動く
@@ -3339,6 +3344,21 @@ pnpm test:unit   # vitestのみ
   「デプロイが通った＝公開できた」にはならない。親Issueの`## 完了条件`（先頭が
   `curl -I https://<host>/`）と、新しいリポジトリへ立てる「初回デプロイ前チェックと公開確認」
   Issue（`buildDeployCheckIssueBody`）の2つで担保する。
+
+## 「リリース履歴」画面はGitHubの自動生成本文に依存する（#2726）
+
+全リポジトリのGitHub Releaseを時系列で見る画面（`pane=releases`・PC左メニュー／スマホは
+ホームのメニューから開く「確認環境」と同じ形のドリルダウン）。材料は
+`fetchRecentReleases`（[`lib/github/release-api.ts`](../src/lib/github/release-api.ts)）が
+`GET /repos/{owner}/{repo}/releases`で取る生のGitHub Releaseで、**issue-deckの`更新履歴`画面
+（`APP_CHANGELOG`）のような日本語の利用者向け要約ではない。** 各リポジトリの`deploy.yml`が
+`softprops/action-gh-release`を`generate_release_notes: true`で呼んでいるため、本文は
+GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Full Changelogリンク」になる。
+
+[`lib/release-history.ts`](../src/lib/release-history.ts)の`extractReleaseHighlights`は、
+この決まった書式（`* タイトル by @user in owner/repo#123`）だけを前提に箇条書きを抜き出している。
+**`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
+この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
 
 ## 環境変数
 

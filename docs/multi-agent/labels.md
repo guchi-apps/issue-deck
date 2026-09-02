@@ -1116,6 +1116,28 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
   `guchi-apps/issue-deck`の実装は別々に起票する。CLAUDE.md「複数リポジトリに影響する変更は、
   リポジトリごとにIssueを分ける」）
 
+### 重複確認コマンドは実行環境ごとの許可リストに合わせる（#2720）
+
+上記の重複確認コマンドは、実行する場所によって使えるコマンドが違う。`gh issue list --repo ...
+--search "..."`は**質問応答ステップ（`.github/prompts/question.md`）・計画提示ステップ
+（`.github/prompts/plan.md`）が無人実行で使う`reusable-issue-dispatch.yml`の許可リストには
+含まれていない**（`Bash(gh issue view:*)`等の個別サブコマンド単位の許可で、`gh issue list`は
+無い）。無人実行では承認できる人がいないため、このコマンドは承認待ちのまま失敗する。
+
+この2ステップの許可リストには`Bash(gh api:*)`が含まれているため、代わりに次の形を使う。
+
+```bash
+gh api search/issues --method GET -f q='repo:<owner>/<repo> is:issue is:open <固有名>' --jq '.items[] | {number, title}'
+```
+
+**`--method GET`を省略しない。** `gh api`は`-f`でパラメータを渡すと既定のHTTPメソッドが自動的に
+`POST`へ切り替わるが、検索エンドポイント（`search/issues`）は`GET`しか受け付けず、`POST`だと
+`404 Not Found`になる（`405`ではないため、エンドポイント自体が無いように見えて気付きにくい）。
+
+`71.manual-step`の重複確認や他リポジトリへの起票前確認（`gh issue list --search`）は、実装ステップ
+（`implement`ジョブ）やローカルセッションの`gh`呼び出しで使われており、そちらの許可リストは
+`Bash(gh:*)`でサブコマンドを絞っていないため、そのまま使ってよい。
+
 ### 実機の設定ファイル変更は、管理リポジトリのIssueへ切り出す（#2021）
 
 VPS・サブPCの設定ファイルは**Gitで管理されていて、`main`へマージすれば実機へ自動で反映される**。
