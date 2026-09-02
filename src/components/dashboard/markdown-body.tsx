@@ -17,6 +17,7 @@ import { copyText } from "@/lib/copy-text";
 import { hastToCopyText } from "@/lib/hast-text";
 import { rehypeAbsolutizeRelativeUrls } from "@/lib/rehype-absolutize-relative-urls";
 import { rehypeLinkifyIssueRefs } from "@/lib/rehype-linkify-issue-refs";
+import { INLINE_CODE_ATTRIBUTE, rehypeMarkInlineCode } from "@/lib/rehype-mark-inline-code";
 import {
   rehypeTaskListItems,
   TASK_ITEM_ATTRIBUTE,
@@ -261,6 +262,67 @@ function CodeBlock({ node, children }: ComponentProps<"pre"> & { node?: unknown 
   );
 }
 
+/**
+ * インラインコード（`` `apps` ``）を、タップ1つでコピーできる小さなチップとして描く（#2753）。
+ *
+ * 手作業アシスタント画面の「1Passwordの`apps`ボールトの`issue-deck`アイテムの`openai-api-key`
+ * フィールドへ登録する」のような手順で、ボールト名・アイテム名・フィールド名をスマホから
+ * 範囲選択なしでコピーできるようにするために追加した。`CodeBlock`（#1726）と同じ
+ * コピー成否の表示方式（アイコンの一時的な切り替え）を使う。
+ *
+ * **既定では使わない。** `MarkdownBody`の`copyableInlineCode`が`true`のときだけ、この
+ * コンポーネントへ差し替わる（`code`の既定の描画はIssue本文・コメント・PR説明など他の画面にも
+ * 使われており、そこまで一律でボタン化すると見た目が変わってしまう）。
+ */
+function InlineCodeChip({ node, className, children }: ComponentProps<"code"> & { node?: unknown }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  const text = hastToCopyText(node as Parameters<typeof hastToCopyText>[0]);
+
+  async function handleCopy() {
+    const ok = await copyText(text);
+    setState(ok ? "copied" : "failed");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1500);
+  }
+
+  // 中身が空なら押しても何もコピーできないので、ふつうのインラインコードのまま出す
+  if (text === "") {
+    return <code className={cn("rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem]", className)}>{children}</code>;
+  }
+
+  const label = state === "copied" ? "コピーしました" : state === "failed" ? "コピーできませんでした" : `${text} をコピー`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      title={label}
+      aria-label={label}
+      className={cn(
+        "mx-0.5 inline-flex cursor-pointer items-center gap-1 rounded border bg-muted px-1 py-0.5 align-baseline font-mono text-[0.8125rem]",
+        "text-foreground transition hover:bg-accent",
+        state === "copied" && "border-primary text-primary",
+        state === "failed" && "border-destructive text-destructive",
+        className,
+      )}
+    >
+      <span>{children}</span>
+      {state === "copied" ? <Check className="size-3" /> : <Copy className="size-3" />}
+      <span role="status" aria-live="polite" className="sr-only">
+        {state === "idle" ? "" : label}
+      </span>
+    </button>
+  );
+}
+
 const components: Components = {
   a: (props) => <MarkdownLink {...props} />,
   // `node`を捨てているのは、react-markdownがhastのノードも渡してくるため。そのままDOMへ
@@ -321,6 +383,12 @@ type MarkdownBodyProps = {
   onToggleTask?: TaskToggleHandler;
   /** トグルの送信中。連打で本文の更新が競合しないよう、その間はチェックを受け付けない */
   isTaskToggling?: boolean;
+  /**
+   * インラインコード（`` `apps` ``）を、タップでコピーできるチップとして描く（#2753）。
+   * 既定は`false`（従来どおりの見た目）。手作業アシスタント画面のように、本文中の語を
+   * 個別にコピーする必要がある場面だけで有効にする。
+   */
+  copyableInlineCode?: boolean;
 };
 
 export function MarkdownBody({
@@ -329,25 +397,38 @@ export function MarkdownBody({
   repositoryFullName,
   onToggleTask,
   isTaskToggling = false,
+  copyableInlineCode = false,
 }: MarkdownBodyProps) {
   const mergedComponents = useMemo<Components>(() => {
-    if (!onToggleTask) return components;
+    if (!onToggleTask && !copyableInlineCode) return components;
     return {
       ...components,
-      input: ({ node, ...props }) => {
-        const line = node?.properties?.[TASK_LINE_ATTRIBUTE];
-        if (typeof line !== "number") return <input {...props} />;
-        return (
-          <TaskCheckbox
-            line={line}
-            checked={props.checked === true}
-            disabled={isTaskToggling}
-            onToggle={onToggleTask}
-          />
-        );
-      },
+      ...(onToggleTask && {
+        input: ({ node, ...props }: ComponentProps<"input"> & { node?: { properties?: Record<string, unknown> } }) => {
+          const line = node?.properties?.[TASK_LINE_ATTRIBUTE];
+          if (typeof line !== "number") return <input {...props} />;
+          return (
+            <TaskCheckbox
+              line={line}
+              checked={props.checked === true}
+              disabled={isTaskToggling}
+              onToggle={onToggleTask}
+            />
+          );
+        },
+      }),
+      ...(copyableInlineCode && {
+        code: ({ node, className: codeClassName, children, ...props }: ComponentProps<"code"> & { node?: { properties?: Record<string, unknown> } }) =>
+          node?.properties?.[INLINE_CODE_ATTRIBUTE] === true ? (
+            <InlineCodeChip node={node}>{children}</InlineCodeChip>
+          ) : (
+            <code {...props} className={cn("rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem]", codeClassName)}>
+              {children}
+            </code>
+          ),
+      }),
     };
-  }, [onToggleTask, isTaskToggling]);
+  }, [onToggleTask, isTaskToggling, copyableInlineCode]);
 
   return (
     <div className={cn("font-body text-[0.9375rem] leading-[1.9] break-words", className)}>
@@ -359,8 +440,9 @@ export function MarkdownBody({
           rehypeAbsolutizeRelativeUrls,
           [rehypeSanitize, sanitizeSchema],
           // sanitizeの後に置く。`hast-util-sanitize`は`position`を保つので行番号を取れ、
-          // 後から付けるのでスキーマへ`data-task-line`の許可を足さずに済む（#1486）
+          // 後から付けるのでスキーマへ属性の許可を足さずに済む（#1486・#2753）
           rehypeTaskListItems,
+          rehypeMarkInlineCode,
         ]}
         components={mergedComponents}
       >

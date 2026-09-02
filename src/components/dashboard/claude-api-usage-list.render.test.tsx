@@ -39,8 +39,8 @@ function summary(overrides: Partial<ClaudeApiUsageSummary> = {}): ClaudeApiUsage
   };
 }
 
-function render1(data: ClaudeApiUsageSummary | null) {
-  return render(<ClaudeApiUsageList data={data} isLoading={false} error={null} />);
+function render1(data: ClaudeApiUsageSummary | null, days = 1) {
+  return render(<ClaudeApiUsageList data={data} isLoading={false} error={null} days={days} />);
 }
 
 describe("ClaudeApiUsageList", () => {
@@ -54,15 +54,65 @@ describe("ClaudeApiUsageList", () => {
     vi.useRealTimers();
   });
 
-  it("既定では過去1日の呼び出し回数とトークン数を出す", () => {
+  it("1日を選んでいるときは過去1日の呼び出し回数とトークン数を出す", () => {
     render1(summary());
     expect(screen.getByText("過去1日 2回・1,200トークン")).not.toBeNull();
   });
 
-  it("「過去7日」へ切り替えると7日間の集計に変わる", () => {
-    render1(summary());
-    fireEvent.click(screen.getByRole("button", { name: "過去7日" }));
+  // #2752。カード自前の「過去1日／過去7日」ボタンは廃し、画面上部の期間セレクタに従う。
+  it("7日を選ぶと7日間の集計に変わり、カード自前の切り替えは持たない", () => {
+    render1(summary(), 7);
     expect(screen.getByText("過去7日 5回・4,800トークン")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "過去7日" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "過去1日" })).toBeNull();
+  });
+
+  /**
+   * #2752。集計は直近7日ぶんしか無い（`api-usage.ts`の`USAGE_WINDOW_MS`）ので、
+   * **30日を選んでも7日の値を出す。黙って出すと期間の指定と食い違う**ため断りを添える。
+   */
+  it("30日を選んだときは7日の値を出し、そのことを断る", () => {
+    render1(summary(), 30);
+    expect(screen.getByText("直近7日 5回・4,800トークン")).not.toBeNull();
+    expect(
+      screen.getByText("この内訳は直近7日ぶんです（それより前は保存していません）。"),
+    ).not.toBeNull();
+  });
+
+  /**
+   * #2752。11機能のうち呼ばれるのは数件で、0回のカードが並ぶとスマホでは合計へ辿り着く前に
+   * 画面が尽きていた。**件数は残す**ので、畳んだままでも機能の存在は分かる。
+   */
+  it("その期間に0回だった機能は畳み、押すと名前を出す", () => {
+    const used = totals();
+    const zero = totals({ calls: 0, inputTokens: 0, outputTokens: 0 });
+    render1(
+      summary({
+        features: [
+          {
+            key: "issue_summary",
+            label: "Issueの要約",
+            last24h: used,
+            last7d: used,
+            models: [{ model: "claude-haiku-4-5", last24h: used, last7d: used }],
+          },
+          {
+            key: "issue_order",
+            label: "着手順の提案",
+            last24h: zero,
+            last7d: zero,
+            models: [{ model: "claude-haiku-4-5", last24h: zero, last7d: zero }],
+          },
+        ],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(screen.getByText("Issueの要約")).not.toBeNull();
+    expect(screen.queryByText("着手順の提案")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /0回の機能 1件/ }));
+    expect(screen.getByText("着手順の提案")).not.toBeNull();
   });
 
   it("内訳に入らない消費があることを、畳んだ状態でも書いておく", () => {

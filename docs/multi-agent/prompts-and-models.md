@@ -269,6 +269,17 @@ GitHub Actionsのように計画用と補助用には分けない。
 ランチャーへ渡し、`run-issue-session.sh`が`claude --model <値>`へ反映する。`auto`の場合は
 環境変数を渡さず、Claude Code側の既定モデルへ委ねる。
 
+**選べる候補にHaikuは無い**（#2756）。ローカルセッションは前述のとおりauto mode
+（`--permission-mode auto`）で起動しており、Haikuはauto modeで動作しない
+（[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)）。
+候補の一覧は`CLAUDE_MODEL_OPTIONS`から`haiku`を除いた`CLAUDE_LOCAL_MODEL_OPTIONS`
+（`src/lib/app-settings.ts`）で、設定画面の「サブPC（Claude）：計画・実装」、「実装を開始」
+ダイアログのモデル欄（次項）、「おまかせ」の判定候補（`MODEL_PICK_CANDIDATES`）の3か所が
+これを参照する。値の検証も`parseClaudeLocalModel`に分け、既存の値がHaikuのままでも
+既定（Sonnet）へフォールバックする。**GitHub Actions向け（`claudeModel`・
+`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——引き続きHaikuを
+選べる（前掲「使用するモデルの設定」）。
+
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
 品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
 

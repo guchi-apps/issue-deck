@@ -148,6 +148,10 @@ type ModelChoice = ClaudeModel | null | typeof AUTO_PICK;
  *
  * 「設定に従う」と`auto`（CLIの既定）は別物。前者は設定の既定で立ち、後者は
  * `--model`そのものを付けない。
+ *
+ * **`haiku`は入れない**（#2756）。ここで選んだモデルはサブPCのローカルセッション
+ * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
+ * （https://github.com/anthropics/claude-code/issues/43235）。
  */
 const MODEL_ENTRIES: readonly { model: ClaudeModel | null }[] = [
   { model: null },
@@ -155,7 +159,6 @@ const MODEL_ENTRIES: readonly { model: ClaudeModel | null }[] = [
   { model: "fable" },
   { model: "opus" },
   { model: "sonnet" },
-  { model: "haiku" },
 ];
 
 /** チップに出す短い名前。「設定に従う」だけ`null`なのでここで補う */

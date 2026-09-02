@@ -5,6 +5,7 @@ import {
   DISPATCH_CONCURRENCY_MIN,
   parseAppAiModel,
   parseAutoRetryLimit,
+  parseClaudeLocalModel,
   parseClaudeModel,
   parseCodexModel,
   parseDispatchConcurrency,
@@ -89,6 +90,29 @@ describe("parseClaudeModel", () => {
     expect(parseClaudeModel(1)).toBeNull();
     expect(parseClaudeModel(null)).toBeNull();
     expect(parseClaudeModel(undefined)).toBeNull();
+  });
+});
+
+// haikuはauto mode（--permission-mode auto）で動作しないため（#2756・
+// https://github.com/anthropics/claude-code/issues/43235）、ローカルセッション用の候補には含めない。
+describe("parseClaudeLocalModel", () => {
+  it("haiku以外の許可された値はそのまま返す", () => {
+    expect(parseClaudeLocalModel("auto")).toBe("auto");
+    expect(parseClaudeLocalModel("opus")).toBe("opus");
+    expect(parseClaudeLocalModel("sonnet")).toBe("sonnet");
+    expect(parseClaudeLocalModel("fable")).toBe("fable");
+  });
+
+  it("haikuはnullを返す（auto modeで動作しないため）", () => {
+    expect(parseClaudeLocalModel("haiku")).toBeNull();
+  });
+
+  it("許可されていない値はnullを返す", () => {
+    expect(parseClaudeLocalModel("claude-opus-4-1-20250805")).toBeNull();
+    expect(parseClaudeLocalModel("")).toBeNull();
+    expect(parseClaudeLocalModel(1)).toBeNull();
+    expect(parseClaudeLocalModel(null)).toBeNull();
+    expect(parseClaudeLocalModel(undefined)).toBeNull();
   });
 });
 
