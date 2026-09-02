@@ -551,16 +551,34 @@ fi
 # 使わせないツール（#1454）。横断質問セッションは読み取り専用なので、
 # `Edit,Write,NotebookEdit`を封じたうえで起動する（回答の投稿に`gh issue comment`が要るため
 # Bashは残す）。**プロンプトの指示だけに頼らず、機械的にも塞ぐ。**
-if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
-  # **Codexには相当するフラグが無いので、指定されていたら起動を断る**（#2377）。
-  # ここを黙って素通りさせると、「機械的にも塞ぐ」という前提が外れたまま読み取り専用のはずの
-  # セッションが編集できる状態で立つ。プロンプトの指示だけが残るのは、いちばん危ない落ち方。
-  if [[ "$AGENT_KIND" != "claude" ]]; then
-    echo "Error: #$ISSUE_NUMBER: ISSUE_DECK_DISALLOWED_TOOLS は $AGENT_DISPLAY_NAME では強制できません（この経路は Claude Code で起動してください）。" >&2
-    exit 1
+#
+# **基本セットはどのセッションにも常に効かせる**（#2744）。`pkill`・`killall`は名前や
+# コマンドラインで相手を選ぶため、撃つ相手が**このホストで走っている他Issueのセッション**に
+# まで及ぶ。実際に、あるセッションの`pkill -f "pnpm dev"`が3セッション（myroom #302・#343、
+# asset-manager #329）の`claude`をSIGTERMで落とし、終了コード`143`の異常終了として
+# 引き上げられた。**キックオフ文面は`claude`の引数として渡る**ので、セッションのargvは
+# `-f`（コマンドライン全体の照合）に一致しうる（docs/multi-agent/subpc-dispatch.md）。
+# 自分の開発サーバーを止めたいだけなら、ポートから引いたPIDを指定すれば足りる。
+SESSION_BASE_DISALLOWED_TOOLS="Bash(pkill:*),Bash(killall:*)"
+
+# **Codexには相当するフラグが無いので、指定されていたら起動を断る**（#2377）。
+# ここを黙って素通りさせると、「機械的にも塞ぐ」という前提が外れたまま読み取り専用のはずの
+# セッションが編集できる状態で立つ。プロンプトの指示だけが残るのは、いちばん危ない落ち方。
+if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" && "$AGENT_KIND" != "claude" ]]; then
+  echo "Error: #$ISSUE_NUMBER: ISSUE_DECK_DISALLOWED_TOOLS は $AGENT_DISPLAY_NAME では強制できません（この経路は Claude Code で起動してください）。" >&2
+  exit 1
+fi
+
+if [[ "$AGENT_KIND" == "claude" ]]; then
+  SESSION_DISALLOWED_TOOLS="$SESSION_BASE_DISALLOWED_TOOLS"
+  if [[ -n "${ISSUE_DECK_DISALLOWED_TOOLS:-}" ]]; then
+    SESSION_DISALLOWED_TOOLS+=",${ISSUE_DECK_DISALLOWED_TOOLS}"
   fi
-  CLAUDE_EXTRA_ARGS+=(--disallowedTools "${ISSUE_DECK_DISALLOWED_TOOLS}")
-  echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: ${ISSUE_DECK_DISALLOWED_TOOLS}"
+  CLAUDE_EXTRA_ARGS+=(--disallowedTools "$SESSION_DISALLOWED_TOOLS")
+  echo "#$ISSUE_NUMBER: 次のツールを使わせずに起動します: $SESSION_DISALLOWED_TOOLS"
+else
+  # 基本セットも強制できない。**黙って落とさず、効いていないことを起動ログに残す**
+  echo "#$ISSUE_NUMBER: 情報: $AGENT_DISPLAY_NAME では使わせないツールを強制できません（$SESSION_BASE_DISALLOWED_TOOLS はプロンプトの指示のみで効きます）。" >&2
 fi
 
 # 起票（`gh issue create`）を明示的に許可する（#2017）。

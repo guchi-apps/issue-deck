@@ -444,6 +444,7 @@ PR作成の前後で改めて `gh issue view {{ISSUE_NUMBER}} --comments` を実
 
 - `main` / `develop` への直接コミット・push
 - 他Issueのブランチ・worktreeの編集
+- **`pkill`・`killall`のような、名前やコマンドラインで相手を選ぶプロセスの停止**（#2744）。このホストでは他Issueのセッションが同時に走っており、`claude`の引数にはキックオフ文面がそのまま入っているため、`pkill -f "pnpm dev"`のような広い照合は**別セッションのClaude Code本体をSIGTERMで落とします**（実際に3セッションが終了コード`143`の異常終了になりました）。起動時のツール権限でも禁止しています。自分の開発サーバーを止めたいときは、ポートからPIDを引いて（`lsof -ti :<ポート>`）そのPIDだけを止めてください
 - **担当Issue以外の実装。** 作業中に見つけた別件を新規Issueとして起票するのは構いませんが、**起票したIssueをこのセッション・このブランチで実装しないでください**。進捗の遷移とcloseはブランチ名`issue-<番号>`だけを見ており、無人実行の停止フラグ（`11.local`）と画面のセッション表示は起動時に渡されたIssue番号にしか付きません。混ぜると起票したIssueは`Ready`のまま取り残され、同時にそのIssueへの無人実行を止めるものが無くなります。実施するなら別セッション（`scripts/start-issue.sh <番号>`か画面の「ローカルで開始」）を起こしてください（[docs/multi-agent/branching.md](../../docs/multi-agent/branching.md)「セッション中に作った新しいIssueは、そのセッションで実施しない」）
 - 不要なforce push
 - 自分が作成したPull Requestの自己マージ
