@@ -124,7 +124,6 @@ function renderHome(
       mergePendingAttention={NO_MERGE_PENDING}
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
-      onSelectFlow={() => {}}
       onSelectPreview={() => {}}
       onSelectReleaseHistory={() => {}}
       previewRunning={false}
@@ -148,7 +147,10 @@ afterEach(() => {
 });
 
 describe("MobileHomeScreen（#1690）", () => {
-  it("メニューにPCの左メニューと同じ項目を同じ順で並べる", () => {
+  // PCの左メニュー（`sidebar-nav.tsx`）とはこの1行だけ並びが一致しない。フッターに常設の
+  // 「ブランチ」タブがあり同じ画面を開けるため、ホームのメニューには重複して出さない（#2737）。
+  // PCにはフッターが無く「ブランチ」の唯一の入口なので、そちらには残っている
+  it("メニューにPCの左メニューと同じ項目を同じ順で並べる（「ブランチ」を除く）", () => {
     renderHome();
 
     const labels = screen
@@ -159,21 +161,18 @@ describe("MobileHomeScreen（#1690）", () => {
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
-      "ブランチ",
       // AI使用量は#2631でフッターのタブへ移したので、ここには並ばない
       "すべてのIssue",
       "お気に入り",
       "未着手",
       "実行中",
       "本番反映待ち",
-      // リポジトリ一覧は#2724でフッターの「Issue」タブを外した代わりにここへ置いた。
-      // Issueの絞り込みの並びの末尾＝リポジトリを選んでIssueへ降りる入口
-      "リポジトリ",
       "すべてのPR",
       "実行中",
       "マージ待ち",
-      // 「コードレビュー」「確認環境」はPull Requestの枠の下・お気に入りリポジトリの枠の
-      // 上に置く（#2674）
+      // リポジトリ一覧は#2724でフッターの「Issue」タブを外した代わりに足した入口。
+      // 「コードレビュー」「確認環境」の直上に置く（#2674・#2737）
+      "リポジトリ",
       "コードレビュー",
       "確認環境",
       "リリース履歴",
@@ -258,7 +257,6 @@ describe("MobileHomeScreen（#1690）", () => {
       mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
-        onSelectFlow={() => {}}
         onSelectPreview={() => {}}
         onSelectReleaseHistory={() => {}}
         previewRunning={false}
@@ -483,12 +481,10 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         manualStepAttention={NO_MANUAL_STEP}
         unconfirmedQuestionCount={0}
         waitingQuestionCount={0}
-        releaseActivity={null}
         pullRequestNavCounts={PR_NAV_COUNTS}
       mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
-        onSelectFlow={() => {}}
         onSelectPreview={() => {}}
         onSelectReleaseHistory={() => {}}
         previewRunning={false}
