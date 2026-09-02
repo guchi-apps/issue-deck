@@ -1856,6 +1856,36 @@ claude --permission-mode "$PERMISSION_MODE" ...
 「心当たりのないタブが開いたら閉じる」で受けている。`auto`ではその開いてしまったセッションが
 コマンドを確認なしで実行できるため、**閉じる判断は早いほどよい**。
 
+### CLI引数だけでは足りず、設定ファイルにも`defaultMode`を書く（#2733）
+
+**`--permission-mode auto`をCLI引数で渡すだけでは、auto modeの同意状態が保たれない。**
+Claude Code本体には、`settings.json`側に`permissions.defaultMode: "auto"`が書かれていない状態だと
+auto modeの同意（`skipAutoPermissionPrompt`）を打ち消すマイグレーションがある（v2.1.258で確認）。
+打ち消されるとクラシファイアの自動承認が働かず、**`grep`のような読み取り専用のコマンドまで
+1件ずつ承認を求められる**。サブPCの無人に近い起動では誰も答えられず、セッションが進まない。
+
+実際に#2733の報告時点で、サブPCの`~/.claude.json`には実行済みの印（`hasResetAutoModeOptInForDefaultOffer`）が
+立っている一方、`~/.claude/settings.json`には`permissions`セクションが無かった。症状は
+`gh issue view --comments`や`grep`で実機確認している。**gh固有ではなくコマンドの種類を問わない**ため、
+`--allowedTools`へ個別のコマンドを足す形（下の#2017）では追いつかない。
+
+そこで2か所に同じ意図を残す。どちらも「既定は`auto`」で、CLI引数と矛盾しない。
+
+- `~/.claude/settings.json`の`permissions.defaultMode` — `start-issue.sh`・`start-reviewer.sh`が
+  起動時に揃える（[scripts/lib/claude-auto-mode-setup.sh](../../scripts/lib/claude-auto-mode-setup.sh)）
+- `--settings`で渡すフック設定ファイル — `run-issue-session.sh`が生成時に含める。画面のボタン以外の
+  経路（ターミナル直叩き・pollerからの起動）でも効かせるための二重の備え
+
+書き換えるのは`permissions.defaultMode`の1キーだけで、**既に何か入っていれば上書きしない**
+（人が選んだ値かもしれない）。`ISSUE_DECK_CLAUDE_PERMISSION_MODE`で`auto`以外を選んでいるときは
+どちらも書かない。python3が無い・設定が壊れている・書き込めないときは何もせず起動を続ける
+（fail open。理由は[claude-trust.sh](../../scripts/lib/claude-trust.sh)と同じで、ここで止めると
+症状が元の不具合より重くなる）。`ISSUE_DECK_SKIP_AUTO_MODE_SETUP=1`で丸ごと飛ばせる。
+
+**根拠がClaude Code本体の内部実装である点は割り引いて読む。** キー名も挙動もバージョンで
+変わりうる（現に一度リセットが走っている）。効かなくなったら、まず`~/.claude/settings.json`と
+`~/.claude.json`の実物を見て、ここに書いた前提が残っているか確かめる。
+
 ### 起票（`gh issue create`）だけは許可規則として渡す（#2017）
 
 `auto`の権限クラシファイアは**同じコマンドでも実行のたびに判断が変わる**。`gh issue create`は

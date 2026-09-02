@@ -66,6 +66,9 @@ source "$ROOT/scripts/lib/plan-review-prompt.sh"
 # shellcheck source=scripts/lib/claude-retries.sh
 source "$ROOT/scripts/lib/claude-retries.sh"
 
+# shellcheck source=scripts/lib/claude-auto-mode-setup.sh
+source "$ROOT/scripts/lib/claude-auto-mode-setup.sh"
+
 # このスクリプトが見るリポジトリ。G2のPR一覧の取得先と、G1のプロンプトへ埋める`{{REPOSITORY}}`。
 REVIEW_REPO="${ISSUE_DECK_REPO:-guchi-apps/issue-deck}"
 
@@ -215,6 +218,10 @@ append_language_system_prompt
 # 環境変数で切り替える。レビュー・統合エージェントも`gh pr view`・`gh pr merge`等のBashコマンドを
 # 多用するため、`acceptEdits`のままでは都度停止する。
 PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
+
+# `~/.claude/settings.json`側にも同じ意図を残す（#2733）。上のCLI引数だけでは、Claude Code本体の
+# マイグレーションがauto modeの同意を打ち消し、読み取り専用のコマンドまで承認を求められる。
+ensure_claude_auto_mode_default
 
 claude_export_max_retries
 

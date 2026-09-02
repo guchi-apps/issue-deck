@@ -772,9 +772,25 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   # **matcherは正規表現で2つのツールに掛ける。** 片方だけに付けると、付いていない方は
   # 既定の10分で打ち切られる（打ち切られても壊れないが、画面から答えられる時間が縮む）。
   WAIT_HOOK_TIMEOUT=3660
+  # **`permissions.defaultMode`も一緒に置く**（#2733）。下の`--permission-mode auto`はCLI引数で、
+  # Claude Code本体が持つマイグレーション（設定ファイル側が`auto`でないとauto modeの同意
+  # `skipAutoPermissionPrompt`を打ち消す）の判定材料にならない。打ち消されると`grep`のような
+  # 読み取り専用のコマンドまで1件ずつ承認を求められ、無人に近い起動では誰も答えられない。
+  #
+  # `~/.claude/settings.json`側は`start-issue.sh`が揃える（`scripts/lib/claude-auto-mode-setup.sh`）。
+  # **こちらは画面のボタン以外の経路——ターミナル直叩き・pollerからの起動——でも効かせるための
+  # 二重の備え。** `--settings`はユーザー設定・プロジェクト設定に加算されるだけで既存を壊さない。
+  #
+  # 人が`ISSUE_DECK_CLAUDE_PERMISSION_MODE`で別のモードを選んでいるときは書かない。ここだけ
+  # `auto`を残すと、CLI引数と設定ファイルで食い違ったまま起動する。
+  HOOK_PERMISSIONS_JSON=""
+  if [[ "${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}" == "auto" ]]; then
+    HOOK_PERMISSIONS_JSON='  "permissions": { "defaultMode": "auto" },'
+  fi
   cat >"$HOOK_SETTINGS_FILE" <<JSON
 {
-  "hooks": {
+${HOOK_PERMISSIONS_JSON:+$HOOK_PERMISSIONS_JSON
+}  "hooks": {
     "Notification": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ],
