@@ -964,8 +964,8 @@ export function IssueList({
                     href={remoteControlUrl}
                     target="_blank"
                     rel="noreferrer"
-                    title="Remote Controlで開く"
-                    aria-label={`#${issue.number}のRemote Controlで開く`}
+                    title="Claude Codeアプリで開く"
+                    aria-label={`#${issue.number}のClaude Codeアプリで開く`}
                   >
                     <ExternalLink />
                     Remote

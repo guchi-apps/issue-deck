@@ -298,6 +298,13 @@ export type DispatchSessionReport = {
   step?: DispatchSessionStep | null;
   stepAt?: string | null;
   stepSeenAt?: string | null;
+  /**
+   * Remote ControlのURL（#2771）。**pollerが`~/.claude/sessions/*.json`から引けたときだけ載せる。**
+   * フックの報告（`/activity`）を待たずに、起動直後から画面へ「Claude Codeアプリで開く」を
+   * 出すためのもの。載っていない（`undefined`）・読めない値は既存の値を触らない
+   * （フックが先に載せたURLを消さない）。
+   */
+  remoteControlUrl?: string;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -601,12 +608,17 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
       ? { step: null, stepAt: null, stepSeenAt: null }
       : { step: stepCode, stepAt, stepSeenAt };
 
+  // Remote ControlのURL（#2771）。**`https://claude.ai/`配下のものだけ**を受ける（`/activity`と同じ
+  // 検証）。読めなければ項目ごと無かったことにする（報告全体は通し、既存の値も触らない）
+  const remoteControlUrl = parseRemoteControlUrl(input.remoteControlUrl);
+
   return {
     tmuxSessionName,
     repositoryFullName,
     issueNumber,
     paneDead: input.paneDead,
     paneDeadStatus,
+    ...(remoteControlUrl === null ? {} : { remoteControlUrl }),
     ...(claudeStarting === undefined ? {} : { claudeStarting }),
     // 古いpollerは送ってこない。`undefined`のまま残すと既存の値を触らない
     ...(hasReapField ? reap : {}),

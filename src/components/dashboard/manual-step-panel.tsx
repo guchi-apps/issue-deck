@@ -16,7 +16,10 @@ import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
+import { ManualStepSessionPanel } from "@/components/dashboard/manual-step-session-panel";
+import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { IssueDependent } from "@/lib/issue-dependents";
+import type { Issue } from "@/types/issue";
 import type { InfraConfigTarget } from "@/lib/infra-config-repos";
 import {
   resolveManualStepCloseWarning,
@@ -63,6 +66,8 @@ export function ManualStepPanel({
   configTargets,
   onCreateConfigIssue,
   repositoryFullName,
+  sessionIssue,
+  dispatch,
   className,
 }: {
   /** 手作業を実行し終えた場合（完了としてクローズ） */
@@ -106,6 +111,12 @@ export function ManualStepPanel({
   /** 上記を対象リポジトリのIssueとして切り出す。渡さない場合は案内ごと出さない */
   onCreateConfigIssue?: (target: InfraConfigTarget) => void;
   repositoryFullName?: string;
+  /**
+   * 手作業セッション（#2771）の入口を出すためのIssueとディスパッチの状態。**両方揃ったときだけ出す**
+   * （アシスタントを置いていない画面から使われたとき、押せない導線を残さないため。`onStartGuide`と同じ）
+   */
+  sessionIssue?: Pick<Issue, "repositoryFullName" | "number" | "labels">;
+  dispatch?: DispatchStateHandle;
   className?: string;
 }) {
   // 確認が通った記録が無いまま閉じようとしていないか（#2256）。**押す前ではなく押した後に出す**
@@ -158,6 +169,8 @@ export function ManualStepPanel({
       )}
       {verifiedAt && <ManualStepVerifiedNotice verifiedAt={verifiedAt} />}
       {asking && <ManualStepCloseWarningNotice warning={closeWarning} />}
+      {/* 手作業セッション（#2771）。セッションの行は`IssueStatusCard`が出すので、ここは入口だけ */}
+      {sessionIssue && dispatch && <ManualStepSessionPanel issue={sessionIssue} dispatch={dispatch} />}
       <div className="flex flex-wrap gap-2">
         {/* 手順を1つずつ案内する入口（#1826）。**実行の前に押すもの**なので、
             終わった後に押すクローズの2つより前に置く */}
