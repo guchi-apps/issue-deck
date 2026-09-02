@@ -649,6 +649,10 @@ jobs:
     # ため、実際にmainへ出たissueと一致する。Project Statusで探すと、リリースPRの作成後に
     # developへ入った(＝mainへ出ていない)issueまで`Develop`として拾ってcloseしてしまう。
     #
+    # `## 対象issue`が空なら`## 対象プルリクエスト`の`（Issue #<番号>）`から拾い直す(#2774)。
+    # リリースPR本文の2つの節はどちらも凍結範囲のマージコミットから作られており、
+    # Project Statusより先に見てよい。
+    #
     # **本文から1件も取れなかった場合だけ、`Develop`/`Release`のProject Statusで探す**
     # (#2117以前のPR・手で作ったPR・PR作成時にissue-deckへ問い合わせできず一覧が注記に
     # なっていた場合)。両方を対象にするのは、main-pr-in-progressの掃き寄せが拾いきれて
@@ -688,6 +692,19 @@ jobs:
           numbers="$(printf '%s\n' "$PR_BODY" | tr -d '\r' \
             | awk '/^## 対象issue[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f' \
             | sed -n 's/^- #\([0-9][0-9]*\).*$/\1/p' || true)"
+          # `## 対象issue`が空（対応するopenなissueが無かった・注記だけ）だった場合は、
+          # `## 対象プルリクエスト`の`（Issue #<番号>）`から拾い直す(#2774)。**Project Statusへ
+          # 落ちる前にここを見る。** あちらはマージ時点で`Develop`にいるissueを返すため、
+          # リリースPRの作成後にdevelopへ入った（＝mainへ出ていない）issueまで混ざる。
+          if [ -z "$numbers" ]; then
+            numbers="$(printf '%s\n' "$PR_BODY" | tr -d '\r' \
+              | awk '/^## 対象プルリクエスト[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f' \
+              | sed -n 's/^.*（Issue #\([0-9][0-9]*\)）.*$/\1/p' || true)"
+            if [ -n "$numbers" ]; then
+              echo "リリースPR本文の対象プルリクエストから対応issueを拾いました"
+            fi
+          fi
+
           if [ -n "$numbers" ]; then
             echo "リリースPR本文の対象issueを使います: $(echo "$numbers" | tr '\n' ' ')"
           else

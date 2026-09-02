@@ -54,3 +54,38 @@ export async function requestRelease(repoFullName: string, bumpKind?: BumpKind):
   const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
 }
+
+export type ReleaseBulkResult = {
+  /** 起動できたリポジトリのフル名 */
+  succeeded: string[];
+  /** 起動に失敗したリポジトリと、その理由（{@link releaseErrorMessage}の文言） */
+  failed: { repoFullName: string; message: string }[];
+};
+
+/**
+ * 複数リポジトリのリリースworkflowをまとめて起動する（#2770）。
+ *
+ * **専用の一括起動APIは持たない。** {@link requestRelease}を対象ぶんループするだけにして、
+ * `POST /api/repositories/release`が持つ前処理（`previewModeGuard`・workflow存在確認）と
+ * エラー整形を二重に持たない（計画レビューの指摘を受けた判断。1件ずつ`Promise.allSettled`で
+ * 呼ぶため、一部のリポジトリが失敗しても他は起動できる）。
+ */
+export async function requestReleaseBulk(repoFullNames: string[]): Promise<ReleaseBulkResult> {
+  const results = await Promise.allSettled(
+    repoFullNames.map((repoFullName) => requestRelease(repoFullName)),
+  );
+  const succeeded: string[] = [];
+  const failed: { repoFullName: string; message: string }[] = [];
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      succeeded.push(repoFullNames[index]);
+    } else {
+      const reason = result.reason;
+      failed.push({
+        repoFullName: repoFullNames[index],
+        message: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
+  });
+  return { succeeded, failed };
+}

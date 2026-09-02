@@ -275,6 +275,12 @@ export function WorkflowStepBadge({
   const sessionLabel = session
     ? shortIssueSessionLabel(session, now != null ? new Date(now) : null)
     : null;
+  // developへのPRを作成した後はローカルセッションが終了していてもIssueの対応が終わった
+  // わけではなく、レビュー・統合エージェントによるマージ待ち（#2795）。「終了」とだけ出すと
+  // 対応不要に見えてしまうため、developPR段階に限って言い方を変える。「回答前に終了」
+  // （セッションが答えを待ったまま消えた状態）はそのまま——対応が要ることを薄めない
+  const displaySessionLabel =
+    step.key === "develop-pr" && sessionLabel === "終了" ? "PR待ち" : sessionLabel;
   // Statusは起動後の段階なのに実行が1つも紐づいていない状態（#991 Phase 3）。カンバンの
   // ドラッグ起点の起動はWebhookの到達に依存するため、届かなかったことを画面から見えるようにする。
   // ポーリング結果が未取得（running未定義）のうちは判定しない
@@ -299,15 +305,16 @@ export function WorkflowStepBadge({
   // いるのかが読めない
   const queueLabel = queue ? describeIssueQueueState(queue) : null;
   // 実行先とセッションの様子は両方出す（例:「サブPC・入力待ち」）。どちらが欠けても意味が変わる
-  const localSuffix = [targetLabel, queueLabel ?? sessionLabel].filter(Boolean).join("・") || null;
+  const localSuffix =
+    [targetLabel, queueLabel ?? displaySessionLabel].filter(Boolean).join("・") || null;
   const suffix = simpleStep ?? (awaitingDispatch ? "起動待ち" : localSuffix);
-  // セッションの様子（`sessionLabel`。活動中の「調査中(2分)」、待ちの「入力待ち」等）が
+  // セッションの様子（`displaySessionLabel`。活動中の「調査中(2分)」、待ちの「入力待ち」等）が
   // 分かっているときは、進捗Status（「計画検討中」）と実行先（「サブPC」）を省いてそれだけを
   // 見せる（#2782）。両方を並べると`max-w-[7rem]`（326行目）の箱に収まりきらず、見たい
   // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す
   const stepText =
-    sessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
-      ? sessionLabel
+    displaySessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
+      ? displaySessionLabel
       : `${step.label}${suffix ? `（${suffix}）` : ""}`;
   const accentColorClass = approvalPending
     ? "text-amber-500"

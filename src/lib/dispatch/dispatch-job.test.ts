@@ -20,6 +20,7 @@ import {
   isSessionControlJobKind,
   isSessionLaunchJobKind,
   isSessionReportedJobKind,
+  resolveManualStepSessionRejection,
   isIssueExecutionPending,
   isDispatchHostOnline,
   normalizeDispatchHostRepositories,
@@ -550,6 +551,18 @@ describe("describeDispatchJobKind", () => {
     );
     expect(describeDispatchJobKind("LAUNCH")).toBe("実装");
     expect(describeDispatchJobKind("CROSS_REPO_QUESTION")).toBe("横断質問");
+    expect(describeDispatchJobKind("MANUAL_STEP_SESSION")).toBe("手作業セッション");
+  });
+
+  // 手作業セッション（#2771）は横断質問と同じく「セッションが立った」までが成功
+  it("手作業セッションの状態は起動の言葉で出す", () => {
+    expect(describeDispatchJobStatus("RUNNING", "MANUAL_STEP_SESSION").label).toBe(
+      "手作業セッションを起動中",
+    );
+    expect(describeDispatchJobStatus("SUCCEEDED", "MANUAL_STEP_SESSION")).toEqual({
+      label: "手作業セッションを起動しました",
+      tone: "success",
+    });
   });
 
   // 押したボタンとキューに出る言葉が違うと、それが自分の押したものか分からなくなる
@@ -713,6 +726,10 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind(undefined)).toBe("LAUNCH");
       expect(parseDispatchJobKind(null)).toBe("LAUNCH");
       expect(parseDispatchJobKind("launch")).toBe("LAUNCH");
+    });
+
+    it("手作業セッション（#2771）を読める", () => {
+      expect(parseDispatchJobKind("manual_step_session")).toBe("MANUAL_STEP_SESSION");
     });
 
     it("停止・終了・質問・追加指示を受け入れ、それ以外は弾く", () => {
@@ -1014,6 +1031,7 @@ describe("resolveScreenshotRejection（#1268）", () => {
       codeReviewCapable: null,
       codexCapable: null,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1086,6 +1104,7 @@ describe("横断質問（#1454）", () => {
       codeReviewCapable: null,
       codexCapable: null,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1272,6 +1291,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       codeReviewCapable: true,
       codexCapable: null,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1468,6 +1488,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       codeReviewCapable: true,
       codexCapable: null,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1756,6 +1777,7 @@ describe("resolveManualStepHost", () => {
       codeReviewCapable: null,
       codexCapable: null,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1832,6 +1854,7 @@ describe("エージェントの選択（#2505）", () => {
       codeReviewCapable: null,
       codexCapable: true,
       codexRemoteControlCapable: null,
+      manualStepSessionCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1896,5 +1919,48 @@ describe("エージェントの選択（#2505）", () => {
     // 選んだ時点で画面に出す文言。空にすると注意そのものが消える
     expect(CODEX_LIMITATIONS.length).toBeGreaterThan(0);
     expect(CODEX_LIMITATIONS.join("")).toContain("Remote Control");
+  });
+});
+
+describe("resolveManualStepSessionRejection（#2771）", () => {
+  const host = { online: true, manualStepSessionCapable: true as boolean | null };
+  const base = { host, isManualStepIssue: true, hasActiveJob: false, blockingSession: null };
+
+  it("手作業Issueで、対応したオンラインのホストがあり、動いているセッションが無ければ押せる", () => {
+    expect(resolveManualStepSessionRejection(base)).toBeNull();
+  });
+
+  // 手作業Issueでなければ、ホストの状態より先に断る（何を起こすのかが決まらない）
+  it("手作業Issueでなければnot_manual_step", () => {
+    expect(resolveManualStepSessionRejection({ ...base, isManualStepIssue: false })).toBe(
+      "not_manual_step",
+    );
+  });
+
+  it("申告の無いpoller・オフライン・不在のホストは配らない側へ倒す", () => {
+    expect(resolveManualStepSessionRejection({ ...base, host: null })).toBe("host_unknown");
+    expect(
+      resolveManualStepSessionRejection({ ...base, host: { ...host, online: false } }),
+    ).toBe("host_offline");
+    expect(
+      resolveManualStepSessionRejection({
+        ...base,
+        host: { ...host, manualStepSessionCapable: null },
+      }),
+    ).toBe("manual_step_session_unsupported");
+  });
+
+  it("同じIssueのセッションが動いていればsession_alive", () => {
+    expect(
+      resolveManualStepSessionRejection({
+        ...base,
+        blockingSession: { host: "subpc", tmuxSessionName: "issue-deck-issue-1" },
+      }),
+    ).toBe("session_alive");
+  });
+
+  it("SESSION_LAUNCH_JOB_KINDS・SESSION_REPORTED_JOB_KINDSに含まれる（枠を使い、セッションが報告される）", () => {
+    expect(isSessionLaunchJobKind("MANUAL_STEP_SESSION")).toBe(true);
+    expect(isSessionReportedJobKind("MANUAL_STEP_SESSION")).toBe(true);
   });
 });

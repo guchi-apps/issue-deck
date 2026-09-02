@@ -146,6 +146,21 @@ export async function mergePullRequest(
   return { sha: typeof data.sha === "string" ? data.sha : null };
 }
 
+/** マージせずにPRをクローズする（#2780「マージしない」）。PRはIssueとは別オブジェクトなので`issues`ではなく`pulls`のPATCHを使う */
+export async function closePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
+  const res = await githubFetch(url, token, { method: "PATCH", body: { state: "closed" } });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
 /** 過去の成功した実行1件。見込み時間の材料（#2777） */
 export type SuccessfulWorkflowRunRef = {
   id: number;

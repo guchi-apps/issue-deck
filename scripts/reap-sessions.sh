@@ -305,7 +305,7 @@ reap_one() {
   # 共通の猶予で判定する（下の質問ブロックがCLOSEDのときだけ畳む）。
   idle_minutes="$IDLE_MINUTES"
   idle_seconds="$IDLE_SECONDS"
-  if [[ "$kind" == "question" && "$QUESTION_IDLE_MINUTES" -gt 0 ]]; then
+  if [[ ("$kind" == "question" || "$kind" == "manual-step") && "$QUESTION_IDLE_MINUTES" -gt 0 ]]; then
     idle_minutes="$QUESTION_IDLE_MINUTES"
     idle_seconds="$QUESTION_IDLE_SECONDS"
   fi
@@ -320,41 +320,54 @@ reap_one() {
   # **worktreeを持たず、コミットもpushもしない**（読み取り専用で、成果物は質問Issueへ投稿した
   # 回答コメントだけ）。実装セッション向けの「worktreeがcleanでpush済み」を当てると必ず
   # 「確認できない」に落ちて永久に残るため、質問Issueの状態と放置の猶予だけで決める。
-  if [[ "$kind" == "question" ]]; then
+  # 手作業セッション（#2771・`kind=manual-step`）も質問セッションと同じ条件で畳む。worktreeも
+  # コミットも持たず、失うのは会話の文脈だけ（起こし直せば本文のチェックから続きが分かる）。
+  # 文言だけを分ける（畳んだ理由が画面に出るため、「質問Issue」と書くと読み違える）
+  if [[ "$kind" == "question" || "$kind" == "manual-step" ]]; then
+    local issue_label restart_hint restart_hint_idle
+    if [[ "$kind" == "manual-step" ]]; then
+      issue_label="手作業Issue"
+      restart_hint="続ける場合は、issue-deckの「Claude Codeセッションで進める」から起動し直してください（本文のチェックから続きます）。"
+      restart_hint_idle="$restart_hint"
+    else
+      issue_label="質問Issue"
+      restart_hint="もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
+      restart_hint_idle="続きを聞く場合は、issue-deckの「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
+    fi
     if ! issue_state="$(gh issue view "$issue_number" --repo "$repository" \
       --json state --jq '.state' 2>/dev/null)"; then
-      hold "$session" "質問Issueの状態を取得できない（$repository #$issue_number）"
+      hold "$session" "${issue_label}の状態を取得できない（$repository #$issue_number）"
       return 0
     fi
     if [[ "$issue_state" == "CLOSED" ]]; then
       if [[ "$idle_for" -lt "$idle_seconds" ]]; then
         # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
         hold_until_reap "$session" "$((event_at + idle_seconds))" "QUESTION_CLOSED" \
-          "質問Issue #$issue_number はCLOSEDだが、猶予（${idle_minutes}分）が経っていない"
+          "${issue_label} #$issue_number はCLOSEDだが、猶予（${idle_minutes}分）が経っていない"
         return 0
       fi
       fold_session "$session" "$repository" "$issue_number" \
-        "質問Issue #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
-        "もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
+        "${issue_label} #$issue_number はCLOSED・最後の応答終了から$((idle_for / 60))分" \
+        "$restart_hint"
       return 0
     fi
     if [[ "$QUESTION_IDLE_MINUTES" -eq 0 ]]; then
-      # 放置の猶予を無効にしている場合だけ、従来どおり質問Issueのcloseを待つ。
-      hold "$session" "質問Issue #$issue_number がまだOPEN（閉じると畳みます）"
+      # 放置の猶予を無効にしている場合だけ、従来どおり${issue_label}のcloseを待つ。
+      hold "$session" "${issue_label} #$issue_number がまだOPEN（閉じると畳みます）"
       return 0
     fi
     # **OPENでも畳む**（#1648）。追い質問はこのセッションへ追加指示として送れる（#1012）が、
-    # 送られないまま忘れられると、質問Issueを閉じる人がいない限り永久に残る。畳んでも失うのは
-    # 会話の文脈だけ（worktreeもコミットも持たない）で、回答コメントは質問Issueに残っている。
+    # 送られないまま忘れられると、${issue_label}を閉じる人がいない限り永久に残る。畳んでも失うのは
+    # 会話の文脈だけ（worktreeもコミットも持たない）で、回答コメントは${issue_label}に残っている。
     # 今すぐ畳みたいときは、画面のセッション表示の「終了」を押せば猶予を待たずに済む。
     if [[ "$idle_for" -lt "$idle_seconds" ]]; then
       hold_until_reap "$session" "$((event_at + idle_seconds))" "QUESTION_IDLE" \
-        "質問Issue #$issue_number はOPENだが、放置の猶予（${idle_minutes}分）が経っていない"
+        "${issue_label} #$issue_number はOPENだが、放置の猶予（${idle_minutes}分）が経っていない"
       return 0
     fi
     fold_session "$session" "$repository" "$issue_number" \
-      "質問Issue #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${QUESTION_IDLE_MINUTES}分）" \
-      "続きを聞く場合は、issue-deckの「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
+      "${issue_label} #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${QUESTION_IDLE_MINUTES}分）" \
+      "$restart_hint_idle"
     return 0
   fi
 

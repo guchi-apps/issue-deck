@@ -59,6 +59,8 @@ function makeReleasePullRequest(overrides: Partial<PullRequestSummary>): PullReq
 }
 
 function renderFlow(input: {
+  /** 複数リポジトリのテスト（一括リリース、#2770）だけが上書きする。既定は{@link REPO}の1件 */
+  repositories?: { fullName: string; private: boolean }[];
   pullRequests?: PullRequestSummary[];
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
@@ -83,7 +85,7 @@ function renderFlow(input: {
   refreshIconOnly?: boolean;
 }) {
   const flow = buildBranchFlow({
-    repositories: [{ fullName: REPO, private: false }],
+    repositories: input.repositories ?? [{ fullName: REPO, private: false }],
     pullRequests: input.pullRequests ?? [],
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
@@ -2331,5 +2333,163 @@ describe("BranchFlowView の引っ張って更新（#1958）", () => {
   it("PCでは更新ボタンに文字を出す", () => {
     renderFlow({});
     expect(screen.getByRole("button", { name: "更新" }).textContent).toBe("更新");
+  });
+});
+
+describe("一括リリース（#2770）", () => {
+  const REPO2 = "guchi-apps/other-app";
+  const REPO2_SHORT = "other-app";
+
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  /** developがmainより進んでいて、リリース用workflowも持つ2リポジトリ（＝一括リリースの対象） */
+  function twoUnreleasedRepos() {
+    return {
+      repositories: [
+        { fullName: REPO, private: false },
+        { fullName: REPO2, private: false },
+      ],
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+        branchStatus({
+          repositoryFullName: REPO2,
+          developVsMain: { aheadBy: 1, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+      ],
+    };
+  }
+
+  it("対象が2件あるとき、まとめてリリースするボタンを出す", () => {
+    renderFlow(twoUnreleasedRepos());
+    expect(screen.getByText("未リリース2件をまとめてリリース")).toBeTruthy();
+  });
+
+  // 計画レビュー指摘1。起動してからバンプPRが現れてこの画面が取り直すまでの数十秒は
+  // canTriggerReleaseがtrueのまま残るため、端末に残る起動記録でも二重に除く
+  it("端末に起動記録が残っているリポジトリは対象から除く（二重dispatch防止）", () => {
+    window.localStorage.setItem(
+      `issue-deck:release-triggered-at:${REPO}`,
+      JSON.stringify(new Date().toISOString()),
+    );
+    renderFlow(twoUnreleasedRepos());
+
+    // REPOはこの端末で起動済み扱いのため対象から外れ、対象はREPO2の1件だけになる
+    expect(screen.getByText("未リリース1件をまとめてリリース")).toBeTruthy();
+    fireEvent.click(screen.getByText("未リリース1件をまとめてリリース"));
+    expect(screen.queryByText(REPO)).toBeNull();
+    expect(screen.getByText(REPO2)).toBeTruthy();
+  });
+
+  it("両方とも起動記録が残っていれば、ボタンごと出さない", () => {
+    window.localStorage.setItem(
+      `issue-deck:release-triggered-at:${REPO}`,
+      JSON.stringify(new Date().toISOString()),
+    );
+    window.localStorage.setItem(
+      `issue-deck:release-triggered-at:${REPO2}`,
+      JSON.stringify(new Date().toISOString()),
+    );
+    renderFlow(twoUnreleasedRepos());
+    expect(screen.queryByText(/まとめてリリース/)).toBeNull();
+  });
+
+  it("対象が無ければ出さない（デプロイするものが無い場合は実行しない、#2770）", () => {
+    renderFlow({
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+      ],
+    });
+    expect(screen.queryByText(/まとめてリリース/)).toBeNull();
+  });
+
+  it("押すと対象一覧（リポジトリ名・未リリース件数）を確認ダイアログに出す", () => {
+    renderFlow(twoUnreleasedRepos());
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+
+    expect(screen.getByText("2件のリポジトリでリリースworkflowを起動しますか？")).toBeTruthy();
+    expect(screen.getByText(REPO)).toBeTruthy();
+    expect(screen.getByText(REPO2)).toBeTruthy();
+    expect(screen.getByText("3コミット")).toBeTruthy();
+    expect(screen.getByText("1コミット")).toBeTruthy();
+    // mainへの実マージは含まれないことを明記している
+    expect(screen.getByText(/mainへの実際のマージは含まれません/)).toBeTruthy();
+  });
+
+  // 計画レビュー指摘3。ブランチ状況を取得できなかったリポジトリは対象からも件数からも
+  // 黙って抜けるため、確認ダイアログでその旨を添える
+  it("ブランチ状況を取得できなかったリポジトリがあるとき、確認ダイアログにその旨を出す", () => {
+    renderFlow({ ...twoUnreleasedRepos(), failedRepositories: ["guchi-apps/unreachable"] });
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    expect(screen.getByText(/ブランチ状況を取得できていないリポジトリが1件あり/)).toBeTruthy();
+  });
+
+  it("取得に失敗したリポジトリが無ければ、その注記を出さない", () => {
+    renderFlow(twoUnreleasedRepos());
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    expect(screen.queryByText(/ブランチ状況を取得できていない/)).toBeNull();
+  });
+
+  it("起動すると対象ぶんPOSTし、成功した各リポジトリの個別ボタンも起動中表示になる", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    renderFlow(twoUnreleasedRepos());
+    fireEvent.click(screen.getByText(REPO_SHORT));
+    fireEvent.click(screen.getByText(REPO2_SHORT));
+
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    fireEvent.click(screen.getByText("起動する"));
+
+    await screen.findAllByText("リリース起動中…");
+    // 両方の個別ボタンが起動中へ切り替わる（畳んでいたリポジトリの節が持つmarkTriggeredを、
+    // ヘッダーのボタンからも呼べていることの確認。計画レビュー指摘3への対応）
+    expect(screen.getAllByText("リリース起動中…").length).toBe(2);
+    expect(screen.queryByText("リリースする")).toBeNull();
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    const bodies = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string),
+    );
+    expect(bodies).toEqual(
+      expect.arrayContaining([
+        { owner: "guchi-apps", repo: "issue-deck" },
+        { owner: "guchi-apps", repo: "other-app" },
+      ]),
+    );
+  });
+
+  it("一部の起動が失敗しても、成功した分は起動中表示になりエラーを添える", async () => {
+    let callCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      callCount += 1;
+      if (callCount === 1) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response(
+        JSON.stringify({ error: "github_api_error", message: "起動できませんでした" }),
+        { status: 502 },
+      );
+    });
+    renderFlow(twoUnreleasedRepos());
+    fireEvent.click(screen.getByText(REPO_SHORT));
+    fireEvent.click(screen.getByText(REPO2_SHORT));
+
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    fireEvent.click(screen.getByText("起動する"));
+
+    await screen.findByText("リリース起動中…");
+    // 成功した1件だけが起動中表示になり、失敗した側は「リリースする」のまま押し直せる
+    expect(screen.getAllByText("リリース起動中…").length).toBe(1);
+    expect(screen.getByText("リリースする")).toBeTruthy();
+    expect(screen.getByText(/1件の起動に失敗しました/)).toBeTruthy();
   });
 });

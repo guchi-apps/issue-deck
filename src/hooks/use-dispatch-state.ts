@@ -366,6 +366,43 @@ export function useDispatchState(enabled: boolean) {
    * 失敗の理由は`error`（共有）へ入れず戻り値で返す（`sendSessionControl`と同じ理由。
    * 押した場所と表示が離れると話が通じない）。
    */
+  /**
+   * 手作業Issueを実施するClaude Codeセッション（#2771）を積む。**失敗の理由は戻り値で返す**
+   * （`sendSessionControl`と同じ。押した場所の下に出す）。
+   */
+  const startManualStepSession = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            host: params.hostName,
+            kind: "manual_step_session",
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { job: DispatchJobView };
+        // 次のポーリングを待たずに「順番待ち」を出す（起動ジョブと同じ）
+        setState((prev) => (prev ? { ...prev, jobs: [json.job, ...prev.jobs] } : prev));
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   const runManualStep = useCallback(
     async (params: {
       repositoryFullName: string;
@@ -826,6 +863,7 @@ export function useDispatchState(enabled: boolean) {
     isSubmitting,
     enqueue,
     sendSessionControl,
+    startManualStepSession,
     runManualStep,
     abortManualStep,
     controlManualStepRun,

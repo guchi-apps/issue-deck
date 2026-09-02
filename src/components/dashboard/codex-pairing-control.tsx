@@ -133,7 +133,7 @@ export function CodexPairingControl({
       className={cn(
         "flex flex-col gap-1",
         // ホストのカードでは従来の見た目を変えない（#2524のまま）。Issueの画面では
-        // 隣の「Remote Controlで開く」と同じ幅で並べる
+        // 隣の「Claude Codeアプリで開く」と同じ幅で並べる
         compact ? "mt-1.5" : "w-full",
         alignEnd ? "items-end" : "items-start",
         className,

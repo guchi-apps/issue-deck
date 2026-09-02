@@ -158,14 +158,21 @@ jobs:
           echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
           echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION"
 
-      - name: リリース対象issueの一覧を取得する
+      - name: リリース対象のプルリクエストとissueを特定する
         id: issues
-        # 対象は「developへ入ったがmainへ未反映」のissue、すなわち進捗が`Develop`または`Release`
-        # にあるもの。Phase 4までは`gh issue list --label <進捗ラベル>`でラベルから探して
-        # いたが、進捗ラベルの廃止（#991 Phase 5・#1010）で判断材料がProject Statusだけに
-        # なったため、issue-deckの進捗問い合わせAPIから引く。
-        # **issue-deckへ疎通できない場合は0件として扱い、リリース自体は続行する**（PR本文の
-        # 対象issue一覧が空になるだけで、バージョンbumpとPR作成は成立するため）。
+        # **主はプルリクエスト、issueはそこから導出する**（#2774）。リリースに入る中身の単位は
+        # 「developへマージされたPR」そのもので、それは`origin/main..<凍結点>`のマージコミットから
+        # gitだけで確定できる。以前はissue-deckの進捗問い合わせAPIで`Develop`・`Release`にいる
+        # issueを引いていたが、盤面が1,600件を超えて1回の問い合わせが約40秒かかるようになり、
+        # `curl -m 20`が必ず時間切れになって一覧が丸ごと落ちていた（#2715・#2689のパターン3）。
+        # gitから作れば外部への問い合わせが1回も要らず、この落ち方自体が無くなる。
+        #
+        # **書式は変えない。** `## 対象issue`の`- #<番号> <タイトル>`は
+        # `reusable-issue-labels.yml`の`main-pr-merged`・`release-verification.ts`・issue-deckの
+        # 定期巡回が読む。増やすのは`## 対象プルリクエスト`の節だけ。
+        #
+        # マージコミットが1件も無いリポジトリ（squashマージ運用）では件名の`(#番号)`から拾い、
+        # それでも拾えなければ従来どおりissue-deckへ問い合わせる。
         if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
@@ -174,9 +181,121 @@ jobs:
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
           NEED_MAIN_PR: ${{ steps.state.outputs.need_main_pr }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSHED_SHA: ${{ github.sha }}
         run: |
           set -e
 
+          : > /tmp/release-pr-lines.txt
+          : > /tmp/release-issue-lines.txt
+          echo "[]" > /tmp/release-issues.json
+
+          # **リリースの範囲を先に決める。** develop→mainのPRを作るrun（T1）では、mainへ出る
+          # 中身は`release-main/vX.Y.Z`として凍結する一点で決まる。凍結点の求め方はPR作成
+          # ステップと同じで、両方で計算すると食い違うため**ここで求めて後段へ渡す**。
+          # バンプPRを作るrun（T0）ではまだ凍結していないので`origin/develop`を終端にする。
+          FREEZE_SHA=""
+          if [ "$NEED_MAIN_PR" = "true" ]; then
+            # 凍結点はバンプPRのhead（`$GITHUB_SHA^2`）。このrunはバンプPRがdevelopへマージ
+            # されたpushで起きており、`$GITHUB_SHA`はそのマージコミット、第2親がバンプPRの
+            # 先端＝**更新履歴・上げ幅を判定したときのdevelop（T0）＋版上げ**にあたる。
+            # マージコミットそのもの（第1親側）にはT0以降にdevelopへ入った変更が含まれるため、
+            # 更新履歴と食い違う。
+            #
+            # 第2親が無い場合（squashマージ・workflow_dispatchでの手動起動）と、そのコミットの
+            # バージョンが`dev_version`と一致しない場合（package.jsonを変えた別のpushで起動した
+            # 場合）は`origin/develop`へフォールバックする。
+            if [ "$EVENT_NAME" = "push" ]; then
+              FREEZE_SHA="$(git rev-parse --verify --quiet "${PUSHED_SHA}^2" || true)"
+              if [ -n "$FREEZE_SHA" ]; then
+                FREEZE_VERSION="$(git show "$FREEZE_SHA:$VERSION_FILE" | jq -r "$VERSION_QUERY" || true)"
+                if [ "$FREEZE_VERSION" != "$DEV_VERSION" ]; then
+                  echo "::warning::${PUSHED_SHA}^2 のバージョン($FREEZE_VERSION)が develop($DEV_VERSION) と一致しないため、origin/develop を凍結点にします"
+                  FREEZE_SHA=""
+                fi
+              fi
+            fi
+            if [ -z "$FREEZE_SHA" ]; then
+              FREEZE_SHA="$(git rev-parse origin/develop)"
+            fi
+            echo "freeze_sha=$FREEZE_SHA" >> "$GITHUB_OUTPUT"
+            RANGE_END="$FREEZE_SHA"
+          else
+            RANGE_END="$(git rev-parse origin/develop)"
+          fi
+          echo "リリース範囲: origin/main..$RANGE_END"
+
+          # **`--first-parent`でdevelopの本流だけを辿る。** 付けないと、作業ブランチ側で
+          # developを取り込んだマージコミットまで「今回入ったPR」として並ぶ。
+          ISSUE_NUMBERS=""
+          for SHA in $(git log --first-parent --merges --format='%H' "origin/main..$RANGE_END"); do
+            SUBJECT="$(git log -1 --format='%s' "$SHA")"
+            case "$SUBJECT" in
+              "Merge pull request #"*) ;;
+              *) continue ;;
+            esac
+            PR_NUM="$(printf '%s' "$SUBJECT" | sed -nE 's/^Merge pull request #([0-9]+) from .*/\1/p')"
+            [ -n "$PR_NUM" ] || continue
+            # `Merge pull request #123 from guchi-apps/issue-456` のブランチ名部分
+            BRANCH="$(printf '%s' "$SUBJECT" | sed -nE 's|^Merge pull request #[0-9]+ from [^/]+/([^ ]+).*|\1|p')"
+            # マージコミットの本文1行目にはGitHubが既定でPRのタイトルを入れる。空なら件名で代替する
+            TITLE="$(git log -1 --format='%b' "$SHA" | sed -n '1p')"
+            [ -n "$TITLE" ] || TITLE="$SUBJECT"
+
+            case "$BRANCH" in
+              issue-*)
+                NUM="${BRANCH#issue-}"
+                case "$NUM" in
+                  ''|*[!0-9]*) SUFFIX="" ;;
+                  *) SUFFIX="（Issue #$NUM）"; ISSUE_NUMBERS="$ISSUE_NUMBERS $NUM" ;;
+                esac
+                ;;
+              release/v*) SUFFIX="（バージョンバンプ）" ;;
+              *) SUFFIX="" ;;
+            esac
+            echo "- #$PR_NUM $TITLE$SUFFIX" >> /tmp/release-pr-lines.txt
+          done
+
+          # squashマージ運用のリポジトリにはマージコミットが無い。GitHubのsquash既定の件名
+          # （`タイトル (#123)`）からPR番号だけを拾う。対応issueまでは辿れない。
+          if [ ! -s /tmp/release-pr-lines.txt ]; then
+            git log --first-parent --no-merges --format='%s' "origin/main..$RANGE_END" \
+              | sed -nE 's/^(.*) \(#([0-9]+)\)$/- #\2 \1/p' > /tmp/release-pr-lines.txt || true
+          fi
+
+          # PR番号の昇順に並べる（マージされた順とほぼ一致し、読み手にとって安定する）
+          if [ -s /tmp/release-pr-lines.txt ]; then
+            sort -t'#' -k2 -n -u -o /tmp/release-pr-lines.txt /tmp/release-pr-lines.txt
+            echo "対象プルリクエスト:"
+            cat /tmp/release-pr-lines.txt
+          fi
+
+          # **issueはPRから導出する。** openなものだけを残すのは、以前の
+          # 「`Develop`・`Release`にいるopenなissue」と揃えるため。closedのまま残っているものを
+          # 混ぜると、`main-pr-merged`が閉じたissueを閉じ直すだけになる。
+          if [ -n "$ISSUE_NUMBERS" ]; then
+            for NUM in $ISSUE_NUMBERS; do
+              gh issue view "$NUM" --json number,title,state 2>/dev/null || true
+            done | jq -s '[.[] | select(.state == "OPEN")] | unique_by(.number) | sort_by(.number)' \
+              > /tmp/release-issues.json
+            jq -r '.[] | "- #\(.number) \(.title)"' /tmp/release-issues.json > /tmp/release-issue-lines.txt
+          fi
+
+          if [ -s /tmp/release-pr-lines.txt ]; then
+            if [ ! -s /tmp/release-issue-lines.txt ]; then
+              echo "（プルリクエストに対応するopenなissueはありませんでした）" > /tmp/release-issue-lines.txt
+            fi
+            echo "対象issue:"
+            cat /tmp/release-issue-lines.txt
+            exit 0
+          fi
+
+          echo "マージコミットからリリース対象を組み立てられなかったため、従来どおりissue-deckへ問い合わせます"
+
+          # 以下は#2774以前の経路。squashマージ運用でPR番号も拾えなかったリポジトリ向けに残す。
+          #
           # develop→mainのPRを作るrunでは、対象issueの一覧を**バンプPR本文から引き継ぐ**（#2117）。
           # バンプPRを作ったrun（T0）と、そのマージのpushで起きる今のrun（T1）は別のrunで、
           # 更新履歴・上げ幅・リリースの凍結点はいずれもT0のdevelopから作られる。T1でその場の
@@ -569,6 +688,14 @@ jobs:
               echo "$RELEASE_USAGE"
               echo
             fi
+            # **プルリクエストが主、issueは従**（#2774）。本番へ出る中身の単位はPRで、
+            # issueはそのPRのブランチ名（`issue-<番号>`）から導出している。
+            # 拾えなかった場合（squashマージ運用など）は節ごと出さない。
+            if [ -s /tmp/release-pr-lines.txt ]; then
+              echo "## 対象プルリクエスト"
+              cat /tmp/release-pr-lines.txt
+              echo
+            fi
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt
             echo
@@ -740,10 +867,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
-          VERSION_FILE: ${{ inputs.version-file }}
-          VERSION_QUERY: ${{ inputs.version-query }}
-          EVENT_NAME: ${{ github.event_name }}
-          PUSHED_SHA: ${{ github.sha }}
+          FREEZE_SHA_INPUT: ${{ steps.issues.outputs.freeze_sha }}
         run: |
           set -e
 
@@ -752,27 +876,13 @@ jobs:
           # 後にdevelopへ入った変更まで同じリリースでmainへ出る（更新履歴にも対象issueにも
           # 載らないまま出る）。内容を止めるには固定したrefが要る。
           #
-          # 凍結点はバンプPRのhead（`$GITHUB_SHA^2`）。このrunはバンプPRがdevelopへマージ
-          # されたpushで起きており、`$GITHUB_SHA`はそのマージコミット、第2親がバンプPRの
-          # 先端＝**更新履歴・上げ幅を判定したときのdevelop（T0）＋版上げ**にあたる。
-          # マージコミットそのもの（第1親側）にはT0以降にdevelopへ入った変更が含まれるため、
-          # 更新履歴と食い違う。
-          #
-          # 第2親が無い場合（squashマージ・workflow_dispatchでの手動起動）と、そのコミットの
-          # バージョンが`dev_version`と一致しない場合（package.jsonを変えた別のpushで起動した
-          # 場合）は`origin/develop`へフォールバックする。
-          FREEZE_SHA=""
-          if [ "$EVENT_NAME" = "push" ]; then
-            FREEZE_SHA="$(git rev-parse --verify --quiet "${PUSHED_SHA}^2" || true)"
-            if [ -n "$FREEZE_SHA" ]; then
-              FREEZE_VERSION="$(git show "$FREEZE_SHA:$VERSION_FILE" | jq -r "$VERSION_QUERY" || true)"
-              if [ "$FREEZE_VERSION" != "$DEV_VERSION" ]; then
-                echo "::warning::${PUSHED_SHA}^2 のバージョン($FREEZE_VERSION)が develop($DEV_VERSION) と一致しないため、origin/develop を凍結点にします"
-                FREEZE_SHA=""
-              fi
-            fi
-          fi
+          # **凍結点は「リリース対象のプルリクエストとissueを特定する」ステップが決めている**
+          # （#2774）。対象一覧をこの凍結点の範囲から作るようになったため、2か所で同じ計算を
+          # すると一覧と凍結内容が食い違いうる。求め方（`$GITHUB_SHA^2`とフォールバック）の
+          # 説明はそちらのステップにある。
+          FREEZE_SHA="$FREEZE_SHA_INPUT"
           if [ -z "$FREEZE_SHA" ]; then
+            echo "::warning::凍結点を受け取れなかったため、origin/develop を凍結点にします"
             FREEZE_SHA="$(git rev-parse origin/develop)"
           fi
 
@@ -787,6 +897,14 @@ jobs:
             echo
             echo "リリースする内容は \`${RELEASE_BRANCH}\`（\`${FREEZE_SHA}\`）で凍結しています。このPRを作った後にdevelopへ入った変更は、このリリースには含まれず次のリリースへ回ります（#2117）。"
             echo
+            # **プルリクエストが主、issueは従**（#2774）。本番へ出る中身の単位はPRで、
+            # issueはそのPRのブランチ名（`issue-<番号>`）から導出している。
+            # 拾えなかった場合（squashマージ運用など）は節ごと出さない。
+            if [ -s /tmp/release-pr-lines.txt ]; then
+              echo "## 対象プルリクエスト"
+              cat /tmp/release-pr-lines.txt
+              echo
+            fi
             echo "## 対象issue"
             cat /tmp/release-issue-lines.txt
             echo
@@ -814,9 +932,10 @@ jobs:
   # 失敗の痕跡が残らなかった。
   #
   # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
-  # で失敗しても対象issueを特定できるよう、releaseジョブの「リリース対象issueの一覧を取得する」
-  # ステップの出力には依存せず、このジョブでも`Develop`・`Release`にいるissueの一覧を
-  # 独立に取得する（#991 Phase 5でラベル検索からissue-deckへの問い合わせに変わった）。
+  # で失敗しても対象issueを特定できるよう、releaseジョブの
+  # 「リリース対象のプルリクエストとissueを特定する」ステップの出力には依存せず、このジョブでも
+  # `Develop`・`Release`にいるissueの一覧を独立に取得する（#991 Phase 5でラベル検索から
+  # issue-deckへの問い合わせに変わった）。
   notify-failure:
     needs: [release]
     if: always() && needs.release.result == 'failure'

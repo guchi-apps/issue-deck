@@ -124,6 +124,10 @@ export async function POST(request: NextRequest) {
     // 共有のapp-serverデーモンを起こせないため（#2521）
     codexRemoteControlCapable:
       typeof payload?.codexRemoteControl === "boolean" ? payload.codexRemoteControl : null,
+    // 手作業セッション（#2771）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**
+    // （`crossRepoQuestion`と同じ向き。配ると未知の種別として`failed`になり、押した起動が失われる）
+    manualStepSessionCapable:
+      typeof payload?.manualStepSession === "boolean" ? payload.manualStepSession : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
