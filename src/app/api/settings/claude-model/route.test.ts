@@ -147,6 +147,16 @@ describe("PATCH", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  // haikuはauto mode（--permission-mode auto）で動作しないため、ローカルセッション用の
+  // claudeLocalModelでは受け付けない（#2756・https://github.com/anthropics/claude-code/issues/43235）。
+  // claudeModel（GitHub Actions向け）はauto modeを使わないので引き続きhaikuを許可する。
+  it("claudeLocalModelにhaikuを指定した場合は400を返す", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "opus", claudeLocalModel: "haiku" }));
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
   it("appAiModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(
       patchRequest({ claudeModel: "opus", appAiModel: "gpt-5.5" }),

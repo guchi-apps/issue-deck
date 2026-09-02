@@ -17,6 +17,7 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_OPTIONS,
+  CLAUDE_LOCAL_MODEL_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
@@ -210,7 +211,7 @@ export function ExecutionSettingsSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CLAUDE_MODEL_OPTIONS.map((option) => (
+            {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -219,7 +220,17 @@ export function ExecutionSettingsSection({
         </Select>
         <p className="text-xs text-muted-foreground">
           サブPCで新しく起動するClaude Codeセッションに使います。1つのセッションで計画から実装まで
-          進めるため、通常はSonnetが適しています。全リポジトリ共通です。
+          進めるため、通常はSonnetが適しています。全リポジトリ共通です。Haikuはauto
+          modeが動作しないため選べません（
+          <a
+            href="https://github.com/anthropics/claude-code/issues/43235"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            anthropics/claude-code#43235
+          </a>
+          ）。
         </p>
       </div>
 

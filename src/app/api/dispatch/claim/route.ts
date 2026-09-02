@@ -7,7 +7,7 @@ import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
-  parseClaudeModel,
+  parseClaudeLocalModel,
   parseCodexModel,
 } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     | { claudeLocalModel?: string; codexModel?: string }
     | null;
   const claudeLocalModel =
-    parseClaudeModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+    parseClaudeLocalModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   return NextResponse.json(
     {

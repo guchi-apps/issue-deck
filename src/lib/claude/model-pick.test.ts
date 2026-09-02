@@ -26,8 +26,8 @@ describe("parseModelPick", () => {
   });
 
   it("コードフェンスで囲まれていても読む", () => {
-    expect(parseModelPick('```json\n{"model":"haiku","reason":"短いためです。"}\n```')?.model).toBe(
-      "haiku",
+    expect(parseModelPick('```json\n{"model":"opus","reason":"調査が要るためです。"}\n```')?.model).toBe(
+      "opus",
     );
   });
 
@@ -35,6 +35,12 @@ describe("parseModelPick", () => {
   it("候補に無いモデルは採らない", () => {
     expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"速いためです。"}')).toBeNull();
     expect(parseModelPick('{"model":"auto","reason":"任せます。"}')).toBeNull();
+  });
+
+  // haikuはauto mode（--permission-mode auto）で動作しないため候補から外している
+  // （#2756・https://github.com/anthropics/claude-code/issues/43235）
+  it("haikuは採らない", () => {
+    expect(parseModelPick('{"model":"haiku","reason":"短いためです。"}')).toBeNull();
   });
 
   it("JSONとして読めなければnull", () => {
@@ -63,8 +69,10 @@ describe("pickModelByRule", () => {
     expect(pickModelByRule(input({ commentCount: 12 })).model).toBe("opus");
   });
 
-  it("短く書かれた改善はHaikuへ倒す", () => {
-    expect(pickModelByRule(input()).model).toBe("haiku");
+  // 以前はHaikuへ倒していたが、auto mode（--permission-mode auto）で動作しないため
+  // 候補から外し、Sonnetへ倒すようにした（#2756・https://github.com/anthropics/claude-code/issues/43235）
+  it("短く書かれた改善もSonnet", () => {
+    expect(pickModelByRule(input()).model).toBe("sonnet");
   });
 
   it("判断が付かなければSonnet", () => {

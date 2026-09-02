@@ -6,6 +6,7 @@ import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   parseAppAiModel,
+  parseClaudeLocalModel,
   parseClaudeModel,
   parseCodexModel,
 } from "@/lib/app-settings";
@@ -19,7 +20,8 @@ async function getClaudeModels() {
   return {
     claudeModel: setting?.claudeModel ?? "auto",
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
-    claudeLocalModel: parseClaudeModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
+    claudeLocalModel:
+      parseClaudeLocalModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
     codexModel: setting?.codexModel ?? CODEX_MODEL_DEFAULT,
     appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
     appAiModelReasoning:
@@ -66,7 +68,7 @@ export async function PATCH(request: NextRequest) {
   const hasClaudeLocal =
     payload !== null && typeof payload === "object" && "claudeLocalModel" in payload;
   const claudeLocalModel = hasClaudeLocal
-    ? parseClaudeModel(payload?.claudeLocalModel)
+    ? parseClaudeLocalModel(payload?.claudeLocalModel)
     : undefined;
   if (hasClaudeLocal && claudeLocalModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -111,7 +113,7 @@ export async function PATCH(request: NextRequest) {
     claudeModelAssist: updated.claudeModelAssist,
     codexModel: updated.codexModel,
     claudeLocalModel:
-      parseClaudeModel(updated.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
+      parseClaudeLocalModel(updated.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
     appAiModel: parseAppAiModel(updated.appAiModel) ?? APP_AI_MODEL_DEFAULT,
     appAiModelReasoning:
       parseAppAiModel(updated.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
