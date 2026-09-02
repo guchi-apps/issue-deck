@@ -9,6 +9,8 @@ const escalateFailedSession = vi.fn();
 const escalateNotStartedSession = vi.fn();
 const resolveNotStartedSession = vi.fn();
 const postSessionWrapupComment = vi.fn();
+// 実際に動いているモデルの引き当て（#2723）
+const sessionUsageFindMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -27,6 +29,11 @@ vi.mock("@/lib/db", () => ({
       },
       get deleteMany() {
         return deleteMany;
+      },
+    },
+    sessionUsage: {
+      get findMany() {
+        return sessionUsageFindMany;
       },
     },
   },
@@ -50,7 +57,8 @@ vi.mock("@/lib/dispatch/session-wrapup", () => ({
   },
 }));
 
-const { markDispatchSessionEnded, reportDispatchSessions } = await import("./sessions");
+const { listDispatchSessions, markDispatchSessionEnded, reportDispatchSessions } =
+  await import("./sessions");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 
@@ -91,6 +99,7 @@ beforeEach(() => {
   escalateNotStartedSession.mockResolvedValue(true);
   resolveNotStartedSession.mockResolvedValue(true);
   postSessionWrapupComment.mockResolvedValue(false);
+  sessionUsageFindMany.mockResolvedValue([]);
 });
 
 describe("reportDispatchSessions", () => {
@@ -537,5 +546,77 @@ describe("markDispatchSessionEnded", () => {
     updateMany.mockResolvedValue({ count: 0 });
     await markDispatchSessionEnded({ hostName: "subpc", tmuxSessionName: "s", now: NOW });
     expect(postSessionWrapupComment).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * セッションが実際に使っているモデル（#2723）。**転記の集計（`SessionUsage`）から引く。**
+ * 指定した値ではないので、「おまかせ」「CLIの既定」で立てたセッションでも実物が出る。
+ */
+describe("listDispatchSessions のモデル引き当て", () => {
+  function usageRow(overrides: Record<string, unknown> = {}) {
+    return {
+      host: "subpc",
+      repository: "issue-deck",
+      issueNumber: 1217,
+      models: JSON.stringify(["claude-opus-5"]),
+      endedAt: new Date("2026-08-14T11:00:00.000Z"),
+      ...overrides,
+    };
+  }
+
+  it("同じホスト・リポジトリ・Issueの行からモデルを載せる", async () => {
+    findMany.mockResolvedValue([existingRow({ firstSeenAt: new Date("2026-08-14T10:00:00.000Z") })]);
+    sessionUsageFindMany.mockResolvedValue([usageRow()]);
+
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual(["claude-opus-5"]);
+  });
+
+  // 最初の応答が集計されるまでは何も分からない。「不明」と出さず、欄ごと消すために空で返す
+  it("報告がまだ無ければ空", async () => {
+    findMany.mockResolvedValue([existingRow()]);
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual([]);
+  });
+
+  // 同じIssueで前に走ったセッションの値を出すと、いま動いているモデルを取り違える
+  it("セッションが始まる前に終わった行は拾わない", async () => {
+    findMany.mockResolvedValue([existingRow({ firstSeenAt: new Date("2026-08-14T11:30:00.000Z") })]);
+    sessionUsageFindMany.mockResolvedValue([
+      usageRow({ endedAt: new Date("2026-08-14T11:00:00.000Z"), models: '["claude-haiku-4-5"]' }),
+    ]);
+
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual([]);
+  });
+
+  it("転記が複数あれば新しい方を採る", async () => {
+    findMany.mockResolvedValue([existingRow({ firstSeenAt: new Date("2026-08-14T10:00:00.000Z") })]);
+    // 呼び出し側は endedAt の降順で受け取る
+    sessionUsageFindMany.mockResolvedValue([
+      usageRow({ endedAt: new Date("2026-08-14T11:30:00.000Z"), models: '["claude-sonnet-5"]' }),
+      usageRow({ endedAt: new Date("2026-08-14T11:00:00.000Z") }),
+    ]);
+
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual(["claude-sonnet-5"]);
+  });
+
+  it("別のIssueの行は当てない", async () => {
+    findMany.mockResolvedValue([existingRow({ firstSeenAt: new Date("2026-08-14T10:00:00.000Z") })]);
+    sessionUsageFindMany.mockResolvedValue([usageRow({ issueNumber: 9999 })]);
+
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual([]);
+  });
+
+  // 列はTextなので、壊れた値・古い形が入っていることがある
+  it("JSONとして読めない値は無かったことにする", async () => {
+    findMany.mockResolvedValue([existingRow({ firstSeenAt: new Date("2026-08-14T10:00:00.000Z") })]);
+    sessionUsageFindMany.mockResolvedValue([usageRow({ models: "claude-opus-5" })]);
+
+    const [session] = await listDispatchSessions(NOW);
+    expect(session.models).toEqual([]);
   });
 });

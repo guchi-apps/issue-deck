@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  estimateCostUsd,
-  estimateSessionCostUsd,
-  formatCostUsd,
-  resolveModelRate,
-} from "@/lib/ai-model-pricing";
+import { estimateCostUsd, formatCostUsd, resolveModelRate } from "@/lib/ai-model-pricing";
 
 describe("resolveModelRate", () => {
   it("モデルIDが一致すればその単価を返す", () => {
@@ -59,34 +54,6 @@ describe("estimateCostUsd", () => {
         cacheCreationTokens: 0,
       }),
     ).toBeNull();
-  });
-});
-
-describe("estimateSessionCostUsd", () => {
-  // 実測（SessionUsage・直近90日・実装619件）の平均トークンから割った金額。
-  // Opus 5の値が記録済みの平均（$10.55）と一致することが、この定数が正しいことの根拠になる
-  it("Opus 5は実測の平均（約$10.55）と一致する", () => {
-    expect(estimateSessionCostUsd("claude-opus-5")).toBeCloseTo(10.55, 1);
-  });
-
-  // #2717の要点。単価はOpus 5の2倍なのに、金額は1.03倍にしかならない
-  it("Fable 5.1はOpus 5の1.1倍以内に収まる（キャッシュ読み出しが半額のため）", () => {
-    const fable = estimateSessionCostUsd("claude-fable-5-1");
-    const opus = estimateSessionCostUsd("claude-opus-5");
-    expect(fable).not.toBeNull();
-    expect(opus).not.toBeNull();
-    expect(fable! / opus!).toBeGreaterThan(1);
-    expect(fable! / opus!).toBeLessThan(1.1);
-  });
-
-  it("Sonnet 5はOpus 5より安い", () => {
-    expect(estimateSessionCostUsd("claude-sonnet-5")!).toBeLessThan(
-      estimateSessionCostUsd("claude-opus-5")!,
-    );
-  });
-
-  it("モデルを解決できない場合（auto）はnull", () => {
-    expect(estimateSessionCostUsd(null)).toBeNull();
   });
 });
 

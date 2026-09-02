@@ -40,6 +40,22 @@ function isPlanComment(comment: Pick<IssueComment, "body" | "author">): boolean 
 }
 
 /**
+ * 直近の計画コメントの本文（#2723）。無ければ`undefined`。
+ *
+ * モデルの自動選択（`lib/claude/model-pick.ts`）が判断材料に使う。**新しい方を採る**——
+ * 計画は指摘を受けて出し直されることがあり、古い版を読ませると差し替えた内容が反映されない。
+ */
+export function findLatestPlanCommentBody(
+  comments: readonly Pick<IssueComment, "body" | "author">[],
+): string | undefined {
+  for (let index = comments.length - 1; index >= 0; index -= 1) {
+    const comment = comments[index];
+    if (isPlanComment(comment)) return comment.body;
+  }
+  return undefined;
+}
+
+/**
  * 計画フェーズを通ったかどうかを、ラベルとコメントから判定する（#2069）。
  *
  * **ラベル（`21.plan-required`）だけでは判定できない。** 計画の承認時に外れる

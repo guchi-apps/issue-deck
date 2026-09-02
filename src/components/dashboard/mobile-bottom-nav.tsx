@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge, GitBranch, GitPullRequest, Home, ListChecks } from "lucide-react";
+import { Gauge, GitBranch, Home } from "lucide-react";
 
 import { NotificationBadge } from "@/components/dashboard/notification-content";
 import { useNotificationState } from "@/components/dashboard/notification-state";
@@ -11,27 +11,26 @@ import {
 import { cn } from "@/lib/utils";
 
 // タブのidは`mscreen`クエリの値そのもの（`selectTab`が`navigate({ screen: tab })`へ
-// そのまま渡す）。「Issue」タブのidが`repos`なのはそのためで、開くのはリポジトリ一覧
-// （→リポジトリを選ぶとそのリポジトリのIssue一覧）になる（#1436）。idを`issues`にすると
-// 全リポジトリ横断のIssue一覧（`mscreen=issues`）と衝突し、既存URLの意味が変わってしまう。
-// その横断一覧はフッターから外し、ホームの「いまの状況」のカードとメニューからのドリルダウン
-// だけで開く（#1690）。
+// そのまま渡す）。
 //
-// **4枠目は「設定」から「ブランチ」へ入れ替えた（#1638）。** ブランチ画面は日常的に開くのに
+// **「設定」は#1638で「ブランチ」へ入れ替えた。** ブランチ画面は日常的に開くのに
 // ホームの「フロー」から1段掘る必要があり（#1455）、逆に設定は毎日押すものではない。
 // 設定はホームのヘッダー右上（`mobile-home-screen.tsx`の歯車）へ移した。
 // `mscreen=settings`のURLはそのまま生きている。
 //
-// **5枠目に「AI使用量」を足した（#2631）。** #1638の時点では「5つに増やすと1枠98px→78pxまで
-// 詰まる」ことを理由に4枠に保っていたが、AI使用量はスマホで一番見たいものがホームのメニューから
-// 1段掘らないと開けない状態だった。実測でiPhone 15（幅393px）の1枠78pxに「AI使用量」の5文字は
-// 収まるため、幅ではなく**押す回数**を優先した。あわせてホームのメニューからは外し（#2504で
-// 置いた行）、押す場所を1か所に保っている——2か所に置くと、どちらを押しても同じ画面が開くのに
-// 導線だけが増える。
+// **「AI使用量」は#2631で足した。** AI使用量はスマホで一番見たいものが、ホームのメニューから
+// 1段掘らないと開けない状態だった。あわせてホームのメニューからは外し（#2504で置いた行）、
+// 押す場所を1か所に保っている——2か所に置くと、どちらを押しても同じ画面が開くのに導線だけが
+// 増える。
+//
+// **「Issue」（id=`repos`。リポジトリ一覧）と「PR」は#2724で外した。** どちらも押す頻度が
+// 低く、5枠で1枠78pxまで詰まっていた枠を3枠＝131pxへ戻す。**開く先の画面は消していない**——
+// Pull Requestはホームの「Pull Request」の節から、リポジトリ一覧は同じくホームの「Issue」の
+// 節に足した「リポジトリ」の行から開く（`mobile-home-screen.tsx`）。`mscreen=repos`・
+// `mscreen=pull-requests`のURLもそのまま生きている。**フッターから外した画面ではどのタブを
+// 点灯させるか**は`mobile-nav-tab.ts`が持つ（ホームからのドリルダウンとして「ホーム」）。
 const items = [
   { id: "home", label: "ホーム", icon: Home },
-  { id: "repos", label: "Issue", icon: ListChecks },
-  { id: "pull-requests", label: "PR", icon: GitPullRequest },
   { id: "flow", label: "ブランチ", icon: GitBranch },
   { id: "usage", label: "AI使用量", icon: Gauge },
 ] as const;
@@ -53,7 +52,7 @@ type MobileBottomNavViewProps = {
 };
 
 /**
- * スマホのフッター（#1436・#1638）。
+ * スマホのフッター（#1436・#1638・#2724）。
  *
  * **反映待ちの件数はProviderから自分で読む。** フッターは`NotificationProvider`の内側に
  * 置かれており、Providerを描いている`issue-deck-shell.tsx`はその親なのでフックを呼べず、
@@ -74,7 +73,7 @@ export function MobileBottomNavView({
   onSelect,
   mergePending = null,
 }: MobileBottomNavViewProps) {
-  // アイコンに重ねるのは合計だけ（#2055）。1枠98pxに内訳2つは収まらず、収めるには
+  // アイコンに重ねるのは合計だけ（#2055）。1枠に内訳2つは収まらず、収めるには
   // フッターを56px→68pxへ伸ばすことになる。内訳はタブを開いた「ブランチ」画面が持ち、
   // 開かずに読めるようにtitle・aria-labelへ入れる。
   const pendingCount = mergePending?.total ?? 0;
@@ -95,15 +94,16 @@ export function MobileBottomNavView({
             aria-label={showsBadge ? `${label}（${pendingLabel}）` : undefined}
             title={showsBadge ? pendingLabel : undefined}
             className={cn(
-              // **ラベルは折り返させない**（#2631）。5枠になって1枠78pxまで詰まったため、
-              // 折り返すとその枠だけ2行になり、フッターの高さ（56px）が枠ごとに食い違う。
-              // 収まらない場合は横にはみ出させて、詰まっていることが見えるようにする。
+              // **ラベルは折り返させない**（#2631）。折り返すとその枠だけ2行になり、
+              // フッターの高さ（56px）が枠ごとに食い違う。収まらない場合は横にはみ出させて、
+              // 詰まっていることが見えるようにする（#2724で3枠に戻して余裕はできたが、
+              // 枠が増えたときに静かに崩れないよう指定は残す）。
               "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs whitespace-nowrap text-muted-foreground",
               active === id && "text-foreground",
             )}
           >
             {/* バッジはアイコンの角に重ねるので、基準になる箱をアイコンだけに絞る。
-                ボタン全体を基準にすると、幅98pxの枠の右上（＝隣のタブとの境目）へ飛ぶ */}
+                ボタン全体を基準にすると、枠の右上（＝隣のタブとの境目）へ飛ぶ */}
             <span className="relative inline-flex">
               <Icon className="size-5" />
               {showsBadge && (

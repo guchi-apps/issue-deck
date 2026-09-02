@@ -351,6 +351,17 @@ export type DispatchSessionView = {
   stepAt: string | null;
   /** 最後にそのステップのツールが走った時刻。`activityAt`との比較で「いま走っているか」を出す */
   stepSeenAt: string | null;
+  /**
+   * そのセッションが**実際に使っているモデル**のID（#2723）。例: `["claude-opus-5"]`。
+   *
+   * 起動時に指定した値（`DispatchJob.claudeModel`）ではなく、転記の集計
+   * （`SessionUsage.models`）から引いた実物。「おまかせ」「CLIの既定」で立てたときに
+   * 何で動いているのかが、これでしか分からない。
+   *
+   * **空配列は「まだ分からない」**（最初の応答が集計されるまでは出ない。pollerの報告は5分ごと）。
+   * Claude Codeが小さな処理で別のモデルを使うと2つ以上並ぶ。
+   */
+  models: string[];
 };
 
 /**

@@ -127,6 +127,8 @@ function renderHome(
       onSelectFlow={() => {}}
       onSelectPreview={() => {}}
       previewRunning={false}
+      onSelectRepos={() => {}}
+      repositoryCount={0}
       onLaunchNewApp={() => {}}
       favoriteRepositories={[]}
       onSelectRepository={() => {}}
@@ -163,6 +165,9 @@ describe("MobileHomeScreen（#1690）", () => {
       "未着手",
       "実行中",
       "本番反映待ち",
+      // リポジトリ一覧は#2724でフッターの「Issue」タブを外した代わりにここへ置いた。
+      // Issueの絞り込みの並びの末尾＝リポジトリを選んでIssueへ降りる入口
+      "リポジトリ",
       "すべてのPR",
       "実行中",
       "マージ待ち",
@@ -173,6 +178,19 @@ describe("MobileHomeScreen（#1690）", () => {
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
     ]);
+  });
+
+  // #2724でフッターの「Issue」タブ（リポジトリ一覧）を外した代わりの入口。無くなると、
+  // お気に入りに入れていないリポジトリはURLを直に打つしか開く方法が無くなる
+  it("「リポジトリ」の行からリポジトリ一覧を開き、連携数を出す", () => {
+    const onSelectRepos = vi.fn();
+    renderHome({ onSelectRepos, repositoryCount: 7 });
+
+    const row = screen.getByRole("button", { name: /^リポジトリ/ });
+    expect(row.textContent).toContain("7");
+
+    row.click();
+    expect(onSelectRepos).toHaveBeenCalledTimes(1);
   });
 
   it("「保存したフィルター」を出さない", () => {
@@ -241,6 +259,8 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectFlow={() => {}}
         onSelectPreview={() => {}}
         previewRunning={false}
+        onSelectRepos={() => {}}
+        repositoryCount={0}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}
@@ -412,6 +432,7 @@ describe("MobileHomeScreen（#1690）", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
         },
       ],
     });
@@ -467,6 +488,8 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectFlow={() => {}}
         onSelectPreview={() => {}}
         previewRunning={false}
+        onSelectRepos={() => {}}
+        repositoryCount={0}
         onLaunchNewApp={() => {}}
         favoriteRepositories={[]}
         onSelectRepository={() => {}}

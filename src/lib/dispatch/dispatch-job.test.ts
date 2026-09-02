@@ -345,6 +345,7 @@ describe("findBlockingSession", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
       ...overrides,
     };
   }
@@ -444,6 +445,7 @@ describe("isIssueExecutionPending", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
       ...overrides,
     };
   }

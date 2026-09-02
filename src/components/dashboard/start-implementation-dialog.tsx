@@ -4,7 +4,9 @@ import {
   Asterisk,
   ClipboardCopy,
   Cloud,
+  Loader2,
   Server,
+  Sparkles,
   SquareTerminal,
   Terminal,
   TriangleAlert,
@@ -12,9 +14,9 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import { estimateSessionCostUsd, formatCostUsd } from "@/lib/ai-model-pricing";
 import {
-  CLAUDE_MODEL_IDS,
+  CLAUDE_MODEL_FIT_DESCRIPTIONS,
+  CLAUDE_MODEL_FIT_LABELS,
   describeClaudeModel,
   type ClaudeModel,
 } from "@/lib/app-settings";
@@ -39,6 +41,7 @@ import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useModelPick } from "@/hooks/use-model-pick";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   CODEX_LIMITATIONS,
@@ -55,7 +58,9 @@ import {
   type DispatchAgent,
   type DispatchEnqueueRejection,
 } from "@/lib/dispatch/dispatch-job";
+import type { ModelPickResult } from "@/lib/claude/model-pick";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { findLatestPlanCommentBody } from "@/lib/github/planning-phase";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
 import { resolveScreenshotRepositoryRejection } from "@/lib/github/screenshot-support";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
@@ -122,21 +127,35 @@ const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
 ];
 
 /**
- * モデルの選択肢（#2717）。**先頭は「設定に従う」（`null`）で、これが既定。**
+ * 「Issueの内容から選ぶ」を表す値（#2723）。**`ClaudeModel`ではない。**
  *
- * 精度の高い順に並べる。**チップには短い名前と1件あたりの目安金額だけを出す**——
- * 3列に並べると1枚あたり110px前後しかなく、`CLAUDE_MODEL_OPTIONS`のラベルは入らない。
+ * これを選んだ状態のまま積むことはなく、判定が終わった時点で具体的なモデル名へ解決する
+ * （`effectiveModel`）。APIへ送る値の集合は#2717のときから変えていない。
+ */
+const AUTO_PICK = "pick" as const;
+
+type ModelChoice = ClaudeModel | null | typeof AUTO_PICK;
+
+/**
+ * モデルの選択肢（#2717・#2723）。**先頭は「設定に従う」（`null`）で、これが既定。**
  *
- * 「設定に従う」と`auto`（Claude Codeに任せる）は別物。前者は設定の既定で立ち、後者は
+ * 「おまかせ」（`AUTO_PICK`）はここに入れない——**全幅のチップとしてグリッドの上に置く**ので、
+ * 並びの都合が違う。ここに並ぶのは「自分で決めない2つ」と「自分で決める4つ」で、
+ * 決める側は重い順。
+ *
+ * **チップには短い名前と向いている作業を出す**（#2723で金額を外した）。2列に並べると
+ * 1枚あたり172px前後で、`CLAUDE_MODEL_OPTIONS`のラベルは入らない。
+ *
+ * 「設定に従う」と`auto`（CLIの既定）は別物。前者は設定の既定で立ち、後者は
  * `--model`そのものを付けない。
  */
 const MODEL_ENTRIES: readonly { model: ClaudeModel | null }[] = [
   { model: null },
+  { model: "auto" },
   { model: "fable" },
   { model: "opus" },
   { model: "sonnet" },
   { model: "haiku" },
-  { model: "auto" },
 ];
 
 /** チップに出す短い名前。「設定に従う」だけ`null`なのでここで補う */
@@ -145,35 +164,24 @@ function modelChipLabel(model: ClaudeModel | null): string {
 }
 
 /**
- * チップの右端に出す1件あたりの目安（#2717）。**目安が出せない選択肢は空にする。**
- * 「設定に従う」はどのモデルになるかをこのダイアログが知らず、`auto`はClaude Codeが決める。
+ * チップの2行目に出す「向いている作業」（#2723）。**以前ここには金額が出ていた。**
+ * 「設定に従う」だけはどのモデルになるかをこのダイアログが知らないので、設定を指す。
  */
-function modelChipCost(model: ClaudeModel | null): string | null {
-  if (model === null) return null;
-  return formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS[model]));
+function modelChipFit(model: ClaudeModel | null): string {
+  return model === null ? "設定の既定で起動" : CLAUDE_MODEL_FIT_LABELS[model];
 }
 
 /**
- * 選んだモデルの説明（#2717）。**金額の根拠と、なぜ差が小さいのかを1行で添える。**
+ * 選んだモデルの説明（#2723）。**金額ではなく、どんな作業に向くかを1行で述べる。**
  *
- * 単価だけを見るとFableはOpus 5の2倍だが、長い実装セッションは費用の6割がキャッシュ
- * 読み出しで、そこがFable 5.1は半額なので実測ベースでは1.03倍にしかならない。
- * 倍率だけ出すと「2倍のはずでは」となるため、目安の金額そのものを出す。
+ * 金額（1件あたりの目安）はここに出していたが、1回ぶんなのか実費なのかが画面から決まらず、
+ * FableとOpusがほぼ並ぶため見比べても選べなかった（#2723）。実績は「AI使用量」の画面で見る。
  */
 function describeModelChoice(model: ClaudeModel | null): string {
   if (model === null) {
     return "設定（設定 ＞ 実行）で選んだモデルで起動します。";
   }
-  if (model === "auto") {
-    return "Claude Codeの既定に任せます（--modelを付けません）。";
-  }
-  const cost = formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS[model]));
-  const base = formatCostUsd(estimateSessionCostUsd(CLAUDE_MODEL_IDS.opus));
-  const suffix =
-    model === "fable"
-      ? `Opus（${base}）とほとんど変わりません。長い対話ほど費用の大半がキャッシュ読み出しになり、そこがFable 5.1は半額のためです。`
-      : "";
-  return `実装セッション1件あたりの目安は${cost}です（API換算の目安で、サブスクの実費ではありません）。${suffix}`;
+  return CLAUDE_MODEL_FIT_DESCRIPTIONS[model];
 }
 
 type StartImplementationDialogProps = {
@@ -296,7 +304,14 @@ export function StartImplementationDialog({
    * **1回きりの選択で、Issueにも設定にも残さない**——ラベルにすると14リポジトリへの配布が要り、
    * 設定に残すと次のIssueまで高いモデルのままになる。
    */
-  const [model, setModel] = useState<ClaudeModel | null>(null);
+  const [model, setModel] = useState<ModelChoice>(null);
+  /**
+   * 「おまかせ」の判定（#2723）。**押したときだけ走り、結果は開いている間だけ持つ。**
+   * 走っている間は「開始する」を押させない——決まる前に押すと、選んだつもりのない
+   * 「設定に従う」で立ってしまう。
+   */
+  const modelPick = useModelPick();
+  const { reset: resetModelPick } = modelPick;
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -343,8 +358,10 @@ export function StartImplementationDialog({
     setStartedTarget(null);
     setAgent(DEFAULT_DISPATCH_AGENT);
     setModel(null);
+    // 前に開いたときの判定結果は持ち越さない。Issueの内容もラベルも変わっているかもしれない
+    resetModelPick();
     setCopied(false);
-  }, [open]);
+  }, [open, resetModelPick]);
 
   /**
    * リポジトリのラベル一覧は非同期で届くため、開いた直後の同期では間に合わないことがある（#1956）。
@@ -464,8 +481,18 @@ export function StartImplementationDialog({
   /**
    * 実際に積むモデル。**選択欄を出していないときは「設定に従う」へ落とす。**
    * サブPCでFableを選んだ後にCodexやGitHub Actionsへ切り替えても、選択が付いていかない。
+   *
+   * 「おまかせ」（#2723）は**判定結果の具体的なモデル名へ解決する。** 決まっていなければ
+   * 「設定に従う」で、その状態では開始そのものを押させない（`isPickPending`）。
    */
-  const effectiveModel: ClaudeModel | null = showModels ? model : null;
+  const pickedModel: ClaudeModel | null = modelPick.result?.model ?? null;
+  const effectiveModel: ClaudeModel | null = !showModels
+    ? null
+    : model === AUTO_PICK
+      ? pickedModel
+      : model;
+  /** 「おまかせ」を選んだのに、まだ何で立つか決まっていない状態 */
+  const isPickPending = showModels && model === AUTO_PICK && pickedModel === null;
   // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
   const visibleOptions = visibleStartImplementationOptions({
     isActionsTarget: effectiveTarget.kind === "actions",
@@ -571,6 +598,22 @@ export function StartImplementationDialog({
 
   function toggleOption(key: StartImplementationOptionKey) {
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  /**
+   * モデルを選ぶ（#2723）。**「おまかせ」を押したときだけ、その場で判定を走らせる。**
+   *
+   * 承認済みの計画は**既に取得してあるコメントからだけ**拾う（取りに行かない）。押した人を
+   * 待たせないためで、計画が無ければタイトル・本文・ラベルだけで判定する。
+   */
+  function selectModel(next: ModelChoice) {
+    setModel(next);
+    if (next !== AUTO_PICK) return;
+    void modelPick.pick({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      planComment: findLatestPlanCommentBody(comments),
+    });
   }
 
   /**
@@ -828,18 +871,40 @@ export function StartImplementationDialog({
         {!isTargetPending && showModels && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">モデル</p>
-            <div role="radiogroup" aria-label="モデル" className="grid grid-cols-3 gap-2">
-              {MODEL_ENTRIES.map((entry) => (
-                <ModelChip
-                  key={entry.model ?? "inherit"}
-                  label={modelChipLabel(entry.model)}
-                  cost={modelChipCost(entry.model)}
-                  selected={model === entry.model}
-                  onSelect={() => setModel(entry.model)}
-                />
-              ))}
+            <div role="radiogroup" aria-label="モデル" className="flex flex-col gap-2">
+              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の6枚
+                  （自分で決めるか、決めずに委ねるか）とは性質が違う。7枚を2列に並べると
+                  最後の1枚が余るため、並びの都合としても外に出す */}
+              <ModelChip
+                icon={Sparkles}
+                label="おまかせ"
+                fit="Issueの内容から選ぶ"
+                selected={model === AUTO_PICK}
+                onSelect={() => selectModel(AUTO_PICK)}
+              />
+              <div className="grid grid-cols-2 gap-2">
+                {MODEL_ENTRIES.map((entry) => (
+                  <ModelChip
+                    key={entry.model ?? "inherit"}
+                    label={modelChipLabel(entry.model)}
+                    fit={modelChipFit(entry.model)}
+                    selected={model === entry.model}
+                    onSelect={() => selectModel(entry.model)}
+                  />
+                ))}
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">{describeModelChoice(model)}</p>
+            {/* 「おまかせ」のときは判定の結果（と理由）を出す。**理由を必ず添える**——
+                当たり外れのある判定なので、納得できなければ別のチップを押せることが前提 */}
+            {model === AUTO_PICK ? (
+              <ModelPickNotice
+                isPicking={modelPick.isPicking}
+                result={modelPick.result}
+                error={modelPick.error}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">{describeModelChoice(model)}</p>
+            )}
           </div>
         )}
         {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
@@ -897,7 +962,13 @@ export function StartImplementationDialog({
           <Button
             onClick={handleStart}
             disabled={
-              isSubmitting || isTargetPending || selectedRejection !== null || blockedReason !== null
+              isSubmitting ||
+              isTargetPending ||
+              // 「おまかせ」の判定が終わるまで押させない（#2723）。決まる前に押すと、
+              // 選んだつもりのない「設定に従う」で立つ
+              isPickPending ||
+              selectedRejection !== null ||
+              blockedReason !== null
             }
           >
             {isCopyTarget ? (copied ? "コピーしました" : "コピーする") : "開始する"}
@@ -982,20 +1053,26 @@ function AgentChip({
 }
 
 /**
- * モデルの選択肢1件（#2717）。**エージェントのチップ（`AgentChip`）と同じ形で、3列に並べる。**
+ * モデルの選択肢1件（#2717・#2723）。**2行で、名前の下に「向いている作業」を出す。**
  *
- * アイコンを置かないのは、6枚を3列に収めると1枚110px前後しかなく、短い名前と金額で
- * 幅を使い切るため。**金額は右端に小さく置く**——押す理由（どれが高いか）はここでしか分からない。
+ * 以前は名前と1件あたりの目安金額を3列で並べていたが、金額は何の金額か画面から決まらず、
+ * FableとOpusがほぼ同額のため見比べても選べなかった（#2723）。**押す理由は用途**なので
+ * そちらを出し、幅を確保するために3列→2列にした（1枚110px→172px前後）。
+ *
+ * 角を`rounded-full`にしないのは2行になったため。アイコンを取るのは「おまかせ」（全幅）だけで、
+ * ここが**issue-deckが選ぶ唯一の選択肢**であることを他の6枚と見分けるために付ける。
  */
 function ModelChip({
+  icon: Icon,
   label,
-  cost,
+  fit,
   selected,
   onSelect,
 }: {
+  icon?: LucideIcon;
   label: string;
-  /** 1件あたりの目安。出せない選択肢（設定に従う・おまかせ）は`null` */
-  cost: string | null;
+  /** 2行目に出す「向いている作業」 */
+  fit: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -1006,15 +1083,73 @@ function ModelChip({
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        "flex min-h-[46px] items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-left",
+        "flex min-h-[46px] items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left",
         selected ? "border-primary bg-accent" : "hover:bg-accent",
       )}
     >
-      <span className="text-[11px] leading-tight font-medium">{label}</span>
-      {cost && (
-        <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{cost}</span>
+      {Icon && (
+        <Icon
+          aria-hidden
+          className={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground")}
+        />
       )}
+      <span className="flex flex-col gap-0.5">
+        <span className="text-[11px] leading-tight font-semibold">{label}</span>
+        <span
+          className={cn(
+            "text-[10px] leading-tight",
+            selected ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {fit}
+        </span>
+      </span>
     </button>
+  );
+}
+
+/**
+ * 「おまかせ」の判定の様子（#2723）。**判定中・結果・失敗の3つを同じ場所に出す。**
+ *
+ * 結果には**必ず理由を添える。** 選んだのはissue-deckで、押した人はまだ何も知らない状態から
+ * 「Opusで起動します」とだけ言われても、妥当なのか判断できない。
+ *
+ * ルールへ倒れた場合（AIを呼べなかった・応答を読めなかった）はその旨も出す。同じ「選ばれた」
+ * でも、AIが内容を読んだのか、ラベルと分量だけで決めたのかで、結果の重みが違う。
+ */
+function ModelPickNotice({
+  isPicking,
+  result,
+  error,
+}: {
+  isPicking: boolean;
+  result: ModelPickResult | null;
+  error: string | null;
+}) {
+  if (isPicking) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin" />
+        Issueの内容からモデルを選んでいます…
+      </p>
+    );
+  }
+  if (result) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{describeClaudeModel(result.model)}</span>
+        {result.reason ? ` — ${result.reason}` : "で起動します。"}
+        {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
+      </p>
+    );
+  }
+  if (error) {
+    return <p className="text-xs text-muted-foreground">{error}。別のモデルを選んでください。</p>;
+  }
+  return (
+    <p className="text-xs text-muted-foreground">
+      Issueのタイトル・本文・ラベル・承認済みの計画から、issue-deckがモデルを選びます。
+    </p>
   );
 }
 

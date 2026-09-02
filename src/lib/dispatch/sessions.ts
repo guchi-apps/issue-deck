@@ -65,6 +65,9 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     step,
     stepAt: step === null ? null : (session.stepAt?.toISOString() ?? null),
     stepSeenAt: step === null ? null : (session.stepSeenAt?.toISOString() ?? null),
+    // 実際に使っているモデル（#2723）の引き当ては`listDispatchSessions`が一括で行う
+    // （タイトルの引き当てと同じ理由で、ここで引くとセッション1件ごとにクエリが増える）
+    models: [],
   };
 }
 
@@ -425,6 +428,84 @@ export async function reportDispatchSessions(params: {
   return { sessions: saved.map(toSessionView), escalated };
 }
 
+/** `SessionUsage`の行とセッションを突き合わせるキー。ホスト・リポジトリ名・Issue番号で決まる */
+function sessionUsageKey(host: string, repositoryName: string, issueNumber: number): string {
+  return `${host}\n${repositoryName}\n${issueNumber}`;
+}
+
+/** `SessionUsage.models`はモデルIDのJSON配列。壊れていれば無かったことにする */
+function parseUsageModels(models: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(models);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((model): model is string => typeof model === "string");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * そのセッションが**実際に使っているモデル**を引き当てる（#2723）。
+ *
+ * 「おまかせ」でも「設定に従う」でも、起動したモデルは画面から見えなかった。指定した値
+ * （`DispatchJob.claudeModel`）は残っているが、`auto`（CLIの既定）では何で立ったのか分からず、
+ * ジョブの行はしばらくすると消える。
+ *
+ * **出どころは転記の集計（`SessionUsage.models`）しか無い。** サブPCのpollerが5分ごとに
+ * 報告しているもので、**最初の応答が集計されるまでは空**になる（起動直後は出ない）。
+ *
+ * 突き合わせはホスト・リポジトリ名・Issue番号で行う（`SessionUsage`は転記のファイル名と
+ * 作業ディレクトリから作られるので、tmuxのセッション名を持っていない）。**同じIssueの前回の
+ * セッションを拾わないよう、`endedAt`がそのセッションの`firstSeenAt`以降の行だけを見る。**
+ */
+async function resolveSessionModels(
+  sessions: readonly DispatchSession[],
+): Promise<Map<string, string[]>> {
+  const resolved = new Map<string, string[]>();
+  if (sessions.length === 0) return resolved;
+
+  // いちばん古いセッションの開始時刻より前の行は、どのセッションにも当たらない
+  const earliest = sessions.reduce(
+    (oldest, session) => (session.firstSeenAt < oldest ? session.firstSeenAt : oldest),
+    sessions[0].firstSeenAt,
+  );
+  const rows = await db.sessionUsage.findMany({
+    where: {
+      agent: "claude",
+      endedAt: { gte: earliest },
+      OR: sessions.map((session) => ({
+        host: session.host,
+        repository: session.repositoryFullName.split("/")[1] ?? session.repositoryFullName,
+        issueNumber: session.issueNumber,
+      })),
+    },
+    select: { host: true, repository: true, issueNumber: true, models: true, endedAt: true },
+    // 同じセッションに複数の転記が当たる（再開したセッション）ことがあるので、
+    // 新しい順に読んで最初に当たったものを採る
+    orderBy: { endedAt: "desc" },
+  });
+
+  for (const session of sessions) {
+    const repositoryName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+    const latest = rows.find(
+      (row) =>
+        row.host === session.host &&
+        row.repository === repositoryName &&
+        row.issueNumber === session.issueNumber &&
+        row.endedAt >= session.firstSeenAt,
+    );
+    if (!latest) continue;
+    const models = parseUsageModels(latest.models);
+    if (models.length > 0) {
+      resolved.set(
+        sessionUsageKey(session.host, repositoryName, session.issueNumber),
+        models,
+      );
+    }
+  }
+  return resolved;
+}
+
 /** 画面へ返すセッション一覧。`listDispatchState`から呼ぶ */
 export async function listDispatchSessions(now: Date = new Date()): Promise<DispatchSessionView[]> {
   const sessions = await db.dispatchSession.findMany({
@@ -437,5 +518,18 @@ export async function listDispatchSessions(now: Date = new Date()): Promise<Disp
     orderBy: { lastReportedAt: "desc" },
     take: 100,
   });
-  return sessions.map(toSessionView);
+  // 実際に動いているモデル（#2723）は1クエリでまとめて引く。Issueのタイトルを
+  // `listDispatchState`が一括で引いているのと同じ理由で、1件ずつ引かない
+  const models = await resolveSessionModels(sessions);
+  return sessions.map((session) => ({
+    ...toSessionView(session),
+    models:
+      models.get(
+        sessionUsageKey(
+          session.host,
+          session.repositoryFullName.split("/")[1] ?? session.repositoryFullName,
+          session.issueNumber,
+        ),
+      ) ?? [],
+  }));
 }

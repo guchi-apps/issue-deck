@@ -32,6 +32,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
     firstSeenAt: "2026-08-14T09:00:00.000Z",
     // pollerが1巡ごとに更新するので、生きている限り常に「今」に近い
     lastReportedAt: NOW.toISOString(),
@@ -204,6 +205,38 @@ describe("IssueSessionStatus", () => {
     expect(screen.getByText("2分")).toBeTruthy();
     // 最後の`Stop`のあとにツールが走っているので「応答を終えています」にはしない（#2705）
     expect(screen.getByText(/サブPC・作業中/)).toBeTruthy();
+  });
+
+  /**
+   * #2723。**起動時に指定した値ではなく、転記の集計から引いた実物を出す。**
+   * 「おまかせ」「CLIの既定」で立てたセッションが何で動いているかは、ここでしか分からない。
+   */
+  it("実際に動いているモデルを出す", () => {
+    render(
+      <IssueSessionStatus session={session({ models: ["claude-opus-5"] })} dispatch={makeDispatch()} />,
+    );
+
+    expect(screen.getByText("モデル")).toBeTruthy();
+    expect(screen.getByText("Opus")).toBeTruthy();
+  });
+
+  // Claude Codeが小さな処理で別のモデルを使うと2つ以上並ぶ。どれが主かは分からないので全部出す
+  it("複数のモデルが載っていれば並べる", () => {
+    render(
+      <IssueSessionStatus
+        session={session({ models: ["claude-opus-5", "claude-haiku-4-5"] })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.getByText("Opus・Haiku")).toBeTruthy();
+  });
+
+  // 最初の応答が集計されるまでは分からない。「不明」と出しても読み手にできることが無い
+  it("まだ分からなければ欄ごと出さない", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+
+    expect(screen.queryByText("モデル")).toBeNull();
   });
 
   it("入力待ちのあいだはステップを出さない（次にやることが読み取れなくなる）", () => {

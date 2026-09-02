@@ -37,6 +37,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
     ...overrides,
   };
 }
