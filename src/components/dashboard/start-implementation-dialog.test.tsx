@@ -31,6 +31,10 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
   useProgressStatusMutation: () => ({ setProgressStatus }),
 }));
 
+// モデルの自動選択（#2723）。**押したときだけ呼ばれる**ことも検証したいので、フックごと
+// 差し替えず`fetch`の口を差し替える
+const modelPickFetch = vi.fn();
+
 // リポジトリに定義されているラベル（#1956）。アーティファクトの既定を当ててよいかの判定に使う。
 // 既定は「25.artifact-requiredを配ってあるリポジトリ」とする
 let repositoryLabelNames: string[] = [ARTIFACT_REQUIRED_LABEL];
@@ -213,9 +217,15 @@ describe("StartImplementationDialog", () => {
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
     enqueue.mockResolvedValue(true);
+    modelPickFetch.mockReset().mockResolvedValue({
+      ok: true,
+      json: async () => ({ model: "opus", reason: "調査から始まるためです。", source: "ai" }),
+    });
+    vi.stubGlobal("fetch", modelPickFetch);
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     cleanup();
     updateIssue.mockReset();
     createComment.mockReset();
@@ -468,17 +478,85 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
     });
 
-    it("Fableを選ぶと1件あたりの目安を出し、ジョブへ載る", async () => {
+    // #2723。金額（1件あたりの目安）は何の金額か画面から決まらず、FableとOpusがほぼ並ぶため
+    // 見比べても選べなかった。出すのは「向いている作業」で、実績は「AI使用量」の画面で見る
+    it("Fableを選ぶと向いている作業を出し、金額は出さない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
-      expect(screen.getByText(/実装セッション1件あたりの目安/)).toBeTruthy();
+      expect(screen.getByText(/原因が読めない不具合/)).toBeTruthy();
+      expect(screen.queryByText(/\$/)).toBeNull();
 
       clickStart();
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(enqueue.mock.calls[0][0].model).toBe("fable");
+    });
+
+    /**
+     * #2723。「おまかせ」はissue-deckがIssueを読んで選ぶ。**押したときだけ判定を呼び**、
+     * 積むのは決まった具体的なモデル名（`auto`ではない）。
+     */
+    it("おまかせを押すと判定し、選ばれたモデルと理由を出してそのモデルで積む", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      // 開いただけでは呼ばない（枠を消費しないため）
+      expect(modelPickFetch).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+      await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+      expect(modelPickFetch.mock.calls[0][0]).toBe("/api/issues/model-pick");
+
+      clickStart();
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(enqueue.mock.calls[0][0].model).toBe("opus");
+    });
+
+    // 決まる前に押せてしまうと、選んだつもりのない「設定に従う」で立つ
+    it("判定が終わるまで開始を押させない", async () => {
+      dispatchState.hosts = [makeHost()];
+      let resolvePick: (value: unknown) => void = () => {};
+      modelPickFetch.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePick = resolve;
+        }),
+      );
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+          true,
+        ),
+      );
+
+      resolvePick({
+        ok: true,
+        json: async () => ({ model: "haiku", reason: "定型的な追記のためです。", source: "ai" }),
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+          false,
+        ),
+      );
+    });
+
+    // AIを呼べなくても起動そのものは塞がない（ラベルと分量からのルールへ倒れる）
+    it("ルールで選ばれた場合はその旨も出す", async () => {
+      dispatchState.hosts = [makeHost()];
+      modelPickFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ model: "sonnet", reason: "通常の実装だからです。", source: "rule" }),
+      });
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+      await waitFor(() => expect(screen.getByText(/ラベルと分量から選びました/)).toBeTruthy());
     });
 
     it("実行先をGitHub Actionsへ移すと選択が付いていかない", async () => {

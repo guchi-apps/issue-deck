@@ -65,18 +65,17 @@ export const CLAUDE_LOCAL_MODEL_DEFAULT = "sonnet" as const;
 export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
 
 /**
- * エイリアス → 金額の見積りに使うモデルID（#2717）。**`auto`は解決しない。**
- *
- * `--model`へ渡すのは上のエイリアスのままで、ここで解決したIDは**画面に出す目安の金額**
- * （`estimateSessionCostUsd`）にしか使わない。エイリアスが将来別の世代へ解決されると
- * 実際の金額とずれるが、ずれるのは目安の表示だけで、起動するモデルは変わらない。
- */
-/**
  * 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前（#2717）。
  * `CLAUDE_MODEL_OPTIONS`のラベルはセレクト向けで、3列に並べると入らない。
+ *
+ * **`auto`は「おまかせ」ではなく「CLIの既定」**（#2723）。実体は`--model`を付けないことで、
+ * どのモデルで立つかはClaude Code側の設定・アカウントの既定で決まる——**作業の内容に応じて
+ * 選ばれるわけではない**のに「おまかせ」は賢く選ぶように読める。受付コメント
+ * （`lib/dispatch/session-start.ts`）が先に使っていた呼び方へ揃えた。「おまかせ」の名前は、
+ * issue-deckがIssueを読んで選ぶ起動ダイアログの選択肢（`lib/claude/model-pick.ts`）が引き継ぐ。
  */
 export const CLAUDE_MODEL_SHORT_LABELS: Readonly<Record<ClaudeModel, string>> = {
-  auto: "おまかせ",
+  auto: "CLIの既定",
   fable: "Fable",
   opus: "Opus",
   sonnet: "Sonnet",
@@ -87,12 +86,31 @@ export function describeClaudeModel(model: ClaudeModel): string {
   return CLAUDE_MODEL_SHORT_LABELS[model];
 }
 
-export const CLAUDE_MODEL_IDS: Readonly<Record<ClaudeModel, string | null>> = {
-  auto: null,
-  fable: "claude-fable-5-1",
-  opus: "claude-opus-5",
-  sonnet: "claude-sonnet-5",
-  haiku: "claude-haiku-4-5",
+/**
+ * モデルごとの「向いている作業」（#2723）。**起動ダイアログのチップの2行目に出す。**
+ *
+ * 以前はここに1件あたりの目安金額を出していたが、1回ぶんなのか実費なのかが画面から決まらず、
+ * しかも費用の6割強がキャッシュ読み出しのため FableとOpusがほぼ並び、見比べても選べなかった。
+ * **選ぶ基準は作業の重さ**なので、そちらを持たせる。実績の金額は「AI使用量」の画面で見る。
+ *
+ * 短いのはチップの幅が2列で172px前後しかないため。**判断の背景は`CLAUDE_MODEL_FIT_DESCRIPTIONS`**
+ * （選んだときにグリッドの下へ出す一行）に置く。
+ */
+export const CLAUDE_MODEL_FIT_LABELS: Readonly<Record<ClaudeModel, string>> = {
+  auto: "Claude Codeに任せる",
+  fable: "難しい調査・設計から",
+  opus: "調査・設計判断あり",
+  sonnet: "仕様が決まった実装",
+  haiku: "文言修正・定型作業",
+};
+
+/** 選んだモデルの説明（#2723）。グリッドの下に1行で出す */
+export const CLAUDE_MODEL_FIT_DESCRIPTIONS: Readonly<Record<ClaudeModel, string>> = {
+  auto: "モデルを指定せずに起動します（--modelを付けません）。どのモデルで立つかはClaude Code側の設定・アカウントの既定で決まり、作業の内容では選ばれません。実際に動いたモデルはセッションの表示に出ます。",
+  fable: "原因が読めない不具合や、設計から考える実装に向きます。",
+  opus: "既存の作りを調べたうえで判断が要る実装に向きます。",
+  sonnet: "やることがはっきりしている実装に向きます。",
+  haiku: "判断の少ない小さな修正や、決まった形の追記に向きます。",
 };
 
 // APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。

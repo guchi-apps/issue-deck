@@ -412,6 +412,7 @@ describe("MobileHomeScreen（#1690）", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
         },
       ],
     });

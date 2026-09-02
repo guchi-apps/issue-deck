@@ -16,6 +16,7 @@ export const CLAUDE_API_FEATURES = [
   { key: "issue_suggest", label: "Issueの下書き提案" },
   { key: "issue_body_cleanup", label: "本文の整形" },
   { key: "manual_step_fix", label: "手作業の修正提案" },
+  { key: "model_pick", label: "モデルの自動選択" },
   { key: "new_app_consult", label: "新規アプリの相談" },
   // プラン枠の取得（`usage.ts`）自体もわずかにプラン枠を消費する。見えないところで減るのを
   // 避けるため、他の機能と同じように数える。

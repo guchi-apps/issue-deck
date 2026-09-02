@@ -31,6 +31,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    models: [],
     firstSeenAt: "2026-08-14T00:00:00.000Z",
     lastReportedAt: "2026-08-14T00:00:00.000Z",
     ...overrides,

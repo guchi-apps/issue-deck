@@ -73,6 +73,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     previewUrl: null,
     firstSeenAt: NOW,
     lastReportedAt: NOW,
+    // 実際に動いているモデル（#2723）。転記の集計が届くまでは空
+    models: [],
     ...overrides,
   } as DispatchSessionView;
 }
