@@ -15,6 +15,7 @@ const REPO_SHORT = "issue-deck";
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const number = overrides.number ?? 1;
   return {
+    ciRunId: null,
     id: `${REPO}#${number}`,
     repositoryFullName: REPO,
     repositoryPrivate: false,
@@ -1449,6 +1450,7 @@ describe("BranchFlowView", () => {
           repositoryFullName: REPO,
           failureIssue: null,
           deployRun: {
+            id: 1,
             status: "completed",
             conclusion: "success",
             htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
@@ -1480,7 +1482,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("デプロイ中")).toBeTruthy();
     });
 
-    it("デプロイ失敗は実行ログへのリンク付きで出す", () => {
+    it("デプロイ失敗は、押すと内訳が開くボタンとして出す（#2777）", () => {
       renderFlow({
         pullRequests: released,
         branchStatuses: [branchStatus()],
@@ -1490,13 +1492,14 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // 次のリリースに乗る分が無いので、いちばん新しい版の束が既定で開いている（#1711）
-      // 畳んだ1行（ボタンなのでリンクにしない）と束の見出しの2か所に出る
+      // 畳んだ1行（それ自体がボタンなので開閉にしない）と束の見出しの2か所に出る
       const badges = screen.getAllByText("デプロイ失敗");
       expect(badges).toHaveLength(2);
-      expect(badges.some((badge) => badge.closest("a") === null)).toBe(true);
-      expect(
-        badges.map((badge) => badge.closest("a")?.getAttribute("href")),
-      ).toContain(`https://github.com/${REPO}/actions/runs/1`);
+      // 束の見出しだけが開閉ボタン。実行ログへのリンクは開いた内訳の中に移った（#2777）
+      const toggles = badges.filter(
+        (badge) => badge.closest('button[title="実行の内訳を開く"]') !== null,
+      );
+      expect(toggles).toHaveLength(1);
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
     });
 
@@ -1860,6 +1863,7 @@ describe("BranchFlowView", () => {
             repositoryFullName: REPO,
             failureIssue: null,
             deployRun: {
+              id: 1,
               status: "in_progress",
               conclusion: null,
               htmlUrl: `https://github.com/${REPO}/actions/runs/1`,

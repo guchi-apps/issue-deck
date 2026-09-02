@@ -80,6 +80,14 @@ export type PullRequestSummary = {
   /** headコミットのcheck-runsを集約したCI状態。closedなPRでは取得せず`unknown` */
   ciState: CiState;
   /**
+   * CIの内訳（ジョブ単位の進み具合・所要時間）を開くためのrun id（#2777）。読めなければnull。
+   *
+   * **CI状態と同じ1回のGraphQLに含まれる`detailsUrl`から取り出しているだけ**なので、
+   * これを持ってもGitHub APIの消費は増えない。nullのときは内訳を出さず、従来どおり
+   * CI状態のバッジだけを出す。
+   */
+  ciRunId: number | null;
+  /**
    * 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968）。
    *
    * **CI状態（`ciState`）とは別の軸。** 判定のcheck-runは#1799でCI状態の集約から外して

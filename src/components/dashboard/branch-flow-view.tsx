@@ -41,6 +41,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
+import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
@@ -342,6 +343,8 @@ function DeployStateBadge({
   deploy,
   compact = false,
   linkToRun = true,
+  expanded,
+  onToggle,
 }: {
   deploy: BranchFlowDeployState | null;
   /** 畳んだ1行向けの短い文言にする */
@@ -351,6 +354,16 @@ function DeployStateBadge({
    * （ボタンの中にリンクを入れられない）。
    */
   linkToRun?: boolean;
+  /** 内訳パネルが開いているか（#2777）。`onToggle`を渡したときだけ意味を持つ */
+  expanded?: boolean;
+  /**
+   * 押したときに内訳パネルを開閉する（#2777）。渡すとリンクではなく開閉ボタンになる。
+   *
+   * **リンクを潰してよいのは、開いたパネルが「GitHubで実行ログを開く」を必ず持つから。**
+   * 行き先を1つ減らしているわけではなく、1回押す手数と引き換えに、GitHubへ移らなくても
+   * どのジョブで止まっているかが読めるようになる。
+   */
+  onToggle?: () => void;
 }) {
   if (!deploy) return null;
 
@@ -375,6 +388,25 @@ function DeployStateBadge({
       {label}
     </span>
   );
+
+  if (onToggle) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-full hover:opacity-80"
+        title={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+      >
+        {content}
+        {expanded ? (
+          <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-3 text-muted-foreground" aria-hidden="true" />
+        )}
+      </button>
+    );
+  }
 
   // 実行ログはアプリ内に対応する画面が無いので別タブで開く（`release-progress.tsx`と同じ）
   return deploy.htmlUrl && linkToRun ? (
@@ -872,14 +904,20 @@ function ReleaseProgressPill({
  * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
  */
 function ReleaseGroupHeader({
+  repositoryFullName,
   group,
   releaseButton,
   onMerged,
 }: {
+  repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const deployRunId = group.deploy?.runId ?? null;
+  const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
@@ -937,13 +975,25 @@ function ReleaseGroupHeader({
           </span>
           {released ? (
             <>
-              {!inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {!inProduction && (
+                <DeployStateBadge
+                  deploy={group.deploy}
+                  expanded={runDetailOpen}
+                  onToggle={toggleRunDetail}
+                />
+              )}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
                   `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
-              {inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {inProduction && (
+                <DeployStateBadge
+                  deploy={group.deploy}
+                  expanded={runDetailOpen}
+                  onToggle={toggleRunDetail}
+                />
+              )}
             </>
           ) : waitingUserMerge ? (
             // mainへのマージだけは人が行う。待っているのが人の操作であることを、
@@ -970,6 +1020,17 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
+
+        {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+        {deployRunId !== null && (
+          <WorkflowRunProgressPanel
+            repositoryFullName={repositoryFullName}
+            runId={deployRunId}
+            open={runDetailOpen}
+            title="本番デプロイの内訳"
+            className="mt-0.5 max-w-2xl"
+          />
+        )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
@@ -1318,7 +1379,12 @@ function ReleaseGroupHeaderWithLanes({
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
+      <ReleaseGroupHeader
+        repositoryFullName={repositoryFullName}
+        group={group}
+        releaseButton={releaseButton}
+        onMerged={onMerged}
+      />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow

@@ -1,4 +1,5 @@
 import { githubGraphql } from "@/lib/github/graphql";
+import { extractRunIdFromDetailsUrl } from "@/lib/workflow-run-progress";
 
 /**
  * コミットの「GitHubがPRのChecksとして数えるチェック」を取得する（#1578）。
@@ -197,6 +198,14 @@ export type CheckRollup = {
    * `claude-review-develop.yml`のcheck-runだけを見て決める。
    */
   mergeJudgement: MergeJudgement;
+  /**
+   * CIの内訳（`GET /api/workflow-runs`）を開くためのrun id（#2777）。読めなければnull。
+   *
+   * **`detailsUrl`から取り出しているだけで、GitHub APIは増えていない。** CI状態と同じ1回の
+   * GraphQLに既に含まれている値で、そこから「どのジョブがどこまで進んだか」へ辿れる。
+   * 読めなかったときはnullにし、**内訳を出さない側へ倒す**（従来どおりバッジだけになる）。
+   */
+  ciRunId: number | null;
 };
 
 /** 1回のクエリで引くチェックの上限。GraphQLの`first`の上限値でもある */
@@ -476,6 +485,23 @@ function toAiReview(judgementChecks: RollupContextNode[]): AiReview {
   return { state: "failed", runUrl };
 }
 
+/**
+ * CIの内訳を開くrunを1つ選ぶ（#2777）。
+ *
+ * **選ぶ順は「失敗 → 実行中 → 先頭」。** 開いた人が見たいのは落ちたジョブか、いま動いている
+ * ジョブで、成功して久しいrunではない。ワークフローが複数走っているPRでも、この順なら
+ * 手が要るものへ最初に辿り着く。
+ */
+function toCiRunId(nodes: RollupContextNode[]): number | null {
+  const checkRuns = nodes.filter((node) => node.__typename === "CheckRun");
+  const failed = checkRuns.find((node) => {
+    const conclusion = (node.conclusion ?? "").toLowerCase();
+    return conclusion !== "" && conclusion !== "success" && conclusion !== "skipped" && conclusion !== "neutral";
+  });
+  const running = checkRuns.find((node) => (node.status ?? "").toLowerCase() !== "completed");
+  return extractRunIdFromDetailsUrl((failed ?? running ?? checkRuns[0])?.detailsUrl);
+}
+
 function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
   return nodes.map(toRollupCheck).filter((check): check is RollupCheck => check !== null);
 }
@@ -490,19 +516,24 @@ function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
  * （そこでの表示はこの変更の前と同じままになる）。
  */
 function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
-  if (!rollup) return { state: null, checks: [], mergeJudgement: MERGE_JUDGEMENT_UNKNOWN };
+  if (!rollup) {
+    return { state: null, checks: [], mergeJudgement: MERGE_JUDGEMENT_UNKNOWN, ciRunId: null };
+  }
 
   const state = rollup.state ? rollup.state.toLowerCase() : null;
   if (rollup.contexts.totalCount > CONTEXTS_PAGE_SIZE) {
     // 1件ずつ見られないためGitHubの集約値（＝運用自動化も含む）へ縮退する。
     // 判定の進み具合も1件ずつ見ないと分からないため`unknown`にする（#1968）。
-    return { state, checks: null, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN };
+    return { state, checks: null, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN, ciRunId: null };
   }
-  const ciChecks = toRollupChecks(rollup.contexts.nodes.filter(isCiCheck));
+  const ciNodes = rollup.contexts.nodes.filter(isCiCheck);
+  const ciChecks = toRollupChecks(ciNodes);
+  const countedNodes = ciChecks.length > 0 ? ciNodes : rollup.contexts.nodes;
   return {
     state,
     checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(rollup.contexts.nodes),
     mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
+    ciRunId: toCiRunId(countedNodes),
   };
 }
 

@@ -36,6 +36,8 @@ export function toPullRequestSummary(
   options: {
     merged: boolean;
     ciState: CiState;
+    /** CIの内訳を開くためのrun id（#2777）。取得していない経路では省略＝`null` */
+    ciRunId?: number | null;
     /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
     mergeable?: boolean | null;
     /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
@@ -79,6 +81,7 @@ export function toPullRequestSummary(
     linkedIssueCheckUser: options.linkedIssueCheckUser ?? false,
     linkedIssueCheckReason: options.linkedIssueCheckReason ?? null,
     ciState: options.ciState,
+    ciRunId: options.ciRunId ?? null,
     mergeJudgement: options.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},

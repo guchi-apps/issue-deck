@@ -37,6 +37,9 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },
+  // デプロイ・CIの実行の内訳（#2777）。**パネルを開いている間だけ**消費する。1回につき
+  // run・jobsの2リクエストで、過去の実績は10分キャッシュされるため初回だけ2回増える。
+  { key: "workflow_run_progress", label: "実行の内訳の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "pull_request_files", label: "PR詳細の変更ファイル一覧の取得" },
   { key: "pull_request_changes", label: "マージ確認の変更点の取得" },

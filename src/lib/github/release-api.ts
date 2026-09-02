@@ -570,6 +570,8 @@ export type PullRequestCiState = {
   mergeable: boolean | null;
   /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968） */
   mergeJudgement: MergeJudgement;
+  /** CIの内訳を開くためのrun id（#2777）。読めなければnull */
+  ciRunId: number | null;
 };
 
 /**
@@ -593,6 +595,7 @@ export async function fetchPullRequestCiState(
     ciState: toCiState(rollup),
     mergeable,
     mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+    ciRunId: rollup?.ciRunId ?? null,
   };
 }
 
@@ -601,6 +604,7 @@ export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
   ciState: "unknown",
   mergeable: null,
   mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+  ciRunId: null,
 };
 
 /**
@@ -626,6 +630,7 @@ export async function fetchPullRequestCiStates(
         ciState: toCiState(rollup),
         mergeable,
         mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+        ciRunId: rollup?.ciRunId ?? null,
       },
     ]),
   );
