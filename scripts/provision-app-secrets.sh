@@ -176,7 +176,7 @@ done
 #
 # **入っている値は触らない。** 立ち上げの手順は順序を選ばず何度も実行されうるので、
 # 上書きを既定にすると、後から人が直した値を機械的な既定値へ戻してしまう。
-if ( load_writer; op item get "$ITEM" --vault "$VAULT" --format json >/dev/null 2>&1 ); then
+if ( load_writer; op item get "$ITEM" --vault "$VAULT" --format json >/dev/null 2>&1 </dev/null ); then
   ITEM_EXISTS=true
 else
   ITEM_EXISTS=false
@@ -241,15 +241,19 @@ if ((${#WRITE_INDEXES[@]} > 0)); then
   done
 
   echo
+  # **stdinがパイプだと `op item edit`/`op item create` が中身をJSONのアイテムテンプレートとして
+  # 読み `invalid JSON provided` で落ちる**（#2728。`provision-secret.sh` と同じ原因）。
+  # このスクリプト自体は値をCLI引数で受け取りstdinを読まないが、呼び出し元がパイプ経由で
+  # 起動した場合に備えて`</dev/null`で切り離す。
   if [[ "$ITEM_EXISTS" == true ]]; then
     echo "1Passwordのアイテムへ書き込みます..."
-    ( load_writer; op item edit "$ITEM" --vault "$VAULT" "${assignments[@]}" >/dev/null ) || {
+    ( load_writer; op item edit "$ITEM" --vault "$VAULT" "${assignments[@]}" >/dev/null </dev/null ) || {
       echo "1Passwordへの書き込みに失敗しました。トークンに write_items があるか確認してください。" >&2
       exit 1; }
   else
     echo "1Passwordへアイテムを作ります..."
     ( load_writer; op item create --vault "$VAULT" --category "$CATEGORY" --title "$ITEM" \
-      "${assignments[@]}" >/dev/null ) || {
+      "${assignments[@]}" >/dev/null </dev/null ) || {
       echo "1Passwordでのアイテム作成に失敗しました。トークンに write_items があるか確認してください。" >&2
       exit 1; }
   fi

@@ -263,7 +263,7 @@ if [[ "$DRY_RUN" == true ]]; then
   echo
   echo "dry-run のためここで終了します。実行時は次を行います:"
   if [[ "$SYNC_ONLY" != true ]]; then
-    if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 ); then
+    if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 </dev/null ); then
       echo "  1. op item edit \"$op_item\" --vault $op_vault \"$op_field[$FIELD_TYPE]=***\""
     else
       echo "  1. op item create --category \"Secure Note\" --vault $op_vault --title \"$op_item\" \"$op_field[$FIELD_TYPE]=***\"（アイテムが無いため新規作成）"
@@ -288,29 +288,38 @@ echo
 write_log="$WORK/op-write.log"
 
 # 失敗したopの出力を出す。**値が混ざりうるので必ず伏せてから出す**（usageエラーは引数を
-# そのまま echo することがある）。この関数以外から write_log を読まないこと
+# そのまま echo することがある）。この関数以外から write_log を読まないこと。
+#
+# **文言は`op whoami`の結果で出し分ける**（#2728）。以前はここで無条件に
+# 「トークンに write_items があるかを疑ってください」と出していたため、トークンが正常な
+# ケース（原因は本文冒頭のstdinがパイプの問題だった）でも調査が権限側へ誤誘導されていた。
 op_write_detail() {
   local detail
   detail="$(cat "$write_log" 2>/dev/null)"
   [[ -n "$value" ]] && detail="${detail//"$value"/***}"
   [[ -n "$detail" ]] && echo "  op: ${detail%%$'\n'*}" >&2
-  echo "  書き込み用トークンが効いているかは次で確かめられます（Integration IDが出ます）:" >&2
-  echo "    set -a; . $WRITER_ENV; set +a; op whoami" >&2
+  if ( load_writer; op whoami >/dev/null 2>&1 </dev/null ); then
+    echo "  トークンは有効です（op whoami に成功）。write_items 権限か、ボールト・アイテム・フィールド名を確認してください。" >&2
+  else
+    echo "  トークンが無効です。次で確かめられます（Integration IDが出るはずです）:" >&2
+    echo "    set -a; . $WRITER_ENV; set +a; op whoami" >&2
+  fi
 }
 
-if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 ); then
+# **`op item edit` / `op item create` はstdinがパイプだとJSONのアイテムテンプレートとして
+# 読もうとし、`invalid JSON provided`で落ちる**（#2728）。`--from-stdin`で値を読んだ後も
+# このスクリプト自身のstdinはパイプのままここへ引き継がれるため、`</dev/null`で切り離す。
+if ( load_writer; op item get "$op_item" --vault "$op_vault" >/dev/null 2>&1 </dev/null ); then
   echo "1Passwordへ書き込みます..."
-  ( load_writer; op item edit "$op_item" --vault "$op_vault" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" ) || {
+  ( load_writer; op item edit "$op_item" --vault "$op_vault" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" </dev/null ) || {
     echo "1Passwordへの書き込みに失敗しました（$op_vault / $op_item / $op_field）。" >&2
-    echo "  アイテムはあるので、トークンに write_items があるかを疑ってください。" >&2
     op_write_detail
     exit 1; }
 else
   echo "1Passwordに $op_item がまだ無いため、新規に作成します..."
   ( load_writer; op item create --category "Secure Note" --vault "$op_vault" \
-    --title "$op_item" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" ) || {
+    --title "$op_item" "$op_field[$FIELD_TYPE]=$value" >/dev/null 2>"$write_log" </dev/null ) || {
     echo "1Passwordへのアイテム作成に失敗しました（$op_vault / $op_item）。" >&2
-    echo "  トークンに write_items があるか、ボールト名が合っているかを確認してください。" >&2
     op_write_detail
     exit 1; }
 fi
