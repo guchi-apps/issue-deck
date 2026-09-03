@@ -89,7 +89,9 @@ afterEach(() => {
  *
  * @param changedFiles 変更ファイル一覧（改行区切り）
  * @param labels 対応Issueに付いているラベル（改行区切り）
- * @param mergePolicy `merge-policy`入力の値。未指定なら既定のstrict
+ * @param mergePolicy `merge-policy`入力の値。ここでの既定はstrictだが、これは
+ *   「従来どおりの側を明示しなくても書けるように」という**このヘルパーの都合**である。
+ *   ワークフローが宣言している入力の既定はrelaxed（#2790。下の「宣言された既定」のテスト）
  */
 function runRiskCheck({
   changedFiles = "src/app/page.tsx",
@@ -211,6 +213,24 @@ describe("merge-policy: relaxed（#2775）", () => {
 
     expect(result.risky).toBe("false");
     expect(result.needsReview).toBe("false");
+  });
+});
+
+describe("merge-policy の既定（#2790）", () => {
+  // 既定の反転は、**参照タグを上げた全リポジトリの自動マージの挙動をまとめて変える**。
+  // それでいてワークフローは赤くならないため、宣言そのものをここで固定しておく。
+  it("入力の宣言された既定はrelaxed", () => {
+    const declaration = workflowYaml.match(/^ {6}merge-policy:\n([\s\S]*?)^ {6}\S/m)?.[1] ?? "";
+
+    expect(declaration).toMatch(/^ {8}default: relaxed$/m);
+  });
+
+  it("フォールバックはstrictのまま（env:の渡し忘れ・空文字への安全弁）", () => {
+    // 入力の既定（relaxed）とは役割が違う。ここが緩むと、MERGE_POLICYを渡し忘れた
+    // 改修が「黙って緩い側」で走り出す。
+    const script = extractRunScript("パスパターンによる機械的リスク判定とレビュー実行ゲート判定");
+
+    expect(script).toContain('MERGE_POLICY="${MERGE_POLICY:-strict}"');
   });
 });
 

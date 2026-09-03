@@ -282,9 +282,37 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 持っていなかった。** #1475で12件すべてへ配ると決め、#2103で`vps`・`subpc`も配ると決めた
 結果、2026-08-25時点では下の「対象外」を除く全リポジトリへ行き渡っている。
 
-| 配布済み | `issue-deck`（ローカルパス参照）・`aide`・`aide-bot`・`asset-manager`・`car-care`・`clip-hive`・`dayspan`・`db-console`・`meisai-lab`・`myroom`・`ops-dashboard`・`portfolio`・`shopping-list`・`signaly`・`solitaire`・`subscription-lists`・**`vps`・`subpc`**（#2103。callerの新規配布は画面のボタンの対象外なので手で配った。参照タグの配布は#2303で対象に入った。下記「`vps`・`subpc`（#2103）」） |
+| 配布済み | `issue-deck`（ローカルパス参照）・`aide`・`aide-bot`・`asset-manager`・`car-care`・`clip-hive`・`dayspan`・`db-console`・`meisai-lab`・`myroom`・`ops-dashboard`・`portfolio`・`research-desk`・`shopping-list`（アーカイブ済み）・`signaly`・`solitaire`・`subscription-lists`・`trainroute`・**`vps`・`subpc`**
 |---|---|
 | **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
+
+**2026-09-03の実測**（#2790）。`gh repo list guchi-apps --no-archived`を母集団に全リポジトリの
+`.github/workflows/claude-review-develop.yml`を引き直したところ、**callerを持つのは19リポジトリ**で、
+`issue-deck`だけがローカルパス参照、**残る18はすべて`@workflows/v31`**だった。上の一覧に
+`research-desk`・`trainroute`が抜けていたので足してある（上の表の`trainroute`の行が「10個とも
+`@workflows/v26`」としているのも実測とは違う。**参照タグの正はcallerファイル**）。
+`shopping-list`は`archived: true`のため配布・タグ更新の母集団に入らない。
+
+### `merge-policy`の既定を`relaxed`へ反転した（#2790）
+
+#2775で入れた緩和（変更カテゴリではdevelopへの自動マージを止めない）は、issue-deckのcallerだけが
+`merge-policy: relaxed`と書いて有効にしていた。#2790で**再利用ワークフロー側の既定そのものを
+`relaxed`へ反転**し、callerを持つ全リポジトリへ一律に効かせることにした（判断の根拠と挙動は
+[multi-agent/labels.md](multi-agent/labels.md)「変更カテゴリで止めるかは`merge-policy`で切り替える」）。
+
+- **callerは1行も変更しない。** 参照タグ更新PRは`@workflows/vN`と`prompts-ref`しか運べず、しかも
+  配布先が参照する`workflows/v31`には`merge-policy`入力が存在しない（書き足すと未定義入力で
+  ワークフローが起動しなくなる）。既定の反転なら、画面の「新しいタグを切って配る」でタグを
+  上げるだけで届く
+- **効き始めるのはタグを配ってから。** タグは`main`の先端から切られるので、この変更が`develop`へ
+  入っただけでは配れない。`develop`→`main`のリリースを1回通す必要がある
+- **配布先の`CLAUDE.md`／`AGENTS.md`は未追従。** 2026-09-03時点で15リポジトリが「自動マージ不可
+  カテゴリ」の節を反転前の文面で持っている（`vps`・`subpc`にはこの節が無い）。**全アプリ共通の正は
+  共有知識**（`guchi-apps/docs`の`agent-rules/review.md`「自動マージ不可カテゴリ」・
+  `guides/new-app-checklist.md`）にあり、リポジトリごとの写しを15回直すのではなく、そちらの更新で
+  揃える。**食い違ったらcallerの実物を正とする**（この扱いは`scripts/prompts/review-agent.md`にも
+  書いてある）
+
 
 **`aide-bot`は立ち上げ（#2213）の時点から配布済み。** 初期化Issue（guchi-apps/aide-bot#1）で
 callerを8つまとめて置いたため、この配布経路の後追いが要らなかった。同じことが下の
