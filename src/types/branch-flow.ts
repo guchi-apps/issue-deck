@@ -107,6 +107,11 @@ export type RepositoryBranchStatus = {
  * `GET /api/branch-flow/deploy`が返す。取得できなければnull（`deploy.yml`が無い・権限が無い等）。
  */
 export type BranchFlowDeployRun = {
+  /**
+   * runのid（#2777）。**実行の内訳（`GET /api/workflow-runs`）を開くための鍵。**
+   * `htmlUrl`からも取り出せるが、URLの形に依存させないためここまで運ぶ。
+   */
+  id: number;
   /** queued | in_progress | completed など */
   status: string;
   /** success | failure | cancelled | null（未完了時） */
@@ -167,6 +172,13 @@ export type BranchFlowDeployState = {
   kind: BranchFlowDeployStateKind;
   /** 実行ログのURL。`waiting`（実行がまだ現れていない）ではnull */
   htmlUrl: string | null;
+  /**
+   * この状態が指しているrunのid（#2777）。`waiting`（実行がまだ現れていない）ではnull。
+   *
+   * **ジョブ単位の内訳を開くために持つ。** これが無いと、画面は「デプロイ中」の1語から先へ
+   * 進めない（どのジョブで止まっているのか・あと何分かを問い合わせる先が無い）。
+   */
+  runId: number | null;
   /**
    * 画面から手動で起こした出し直しの実行か（#2020）。
    *

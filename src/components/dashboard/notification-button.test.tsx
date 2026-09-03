@@ -87,6 +87,8 @@ function label(name: string) {
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: "guchi-apps/issue-deck#100",
     repositoryFullName: "guchi-apps/issue-deck",
     repositoryPrivate: false,

@@ -591,7 +591,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「セッションが無い＝入力待ちではない」と区別が付かない。区別せずに描くと、開いた直後だけ
   必ず「無い側」の表示が出てからフェッチ完了で書き換わる。実際に、
   実装開始ボタンが「GitHub Actionsで開始」→「サブPCで開始」へ変わり（#1666）、確認待ちの案内と
-  承認欄が「承認欄へ移動」「承認」「修正」→「Remote Controlで開く」へ変わっていた（#1810）。
+  承認欄が「承認欄へ移動」「承認」「修正」→「Claude Codeアプリで開く」へ変わっていた（#1810）。
   **`isLoaded`は取得に失敗しても`true`になる**ので、待ち続けて何も出ない状態にはならない。
   判定を持つ`resolveCheckUserGuidance`（`sessionStatePending`）と`ApprovalActions`
   （同名のprop）は、確定するまで**どちらの形も出さない**（推測で片方を出すより、一拍遅れて
@@ -629,10 +629,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （質問はIssue作成に続けて`@claude 質問: `コメントを投稿）だけ。**本文の内容で種別を
   切り替えてはいけない。** 誤判定は押した本人から見えないまま、質問のつもりの本文が実装
   Issueとして無人実行に乗る（逆もある）ため、決めるのは押した人にする。
-  **判定して「質問に切り替えますか」と提案するところまでは行う**（#1890）。「タイトル・ラベルを
-  付与」が呼ぶ`POST /api/issues/suggest`の応答に`kind`（`issue` / `question`）が乗っており、
-  `question`のときだけ種別の下に提案を出す。押さなければ従来どおりIssueとして作られ、
-  押したときだけ`selectKind("question")`が走る（戻す口も同じ場所に残す）。判定の実体は
+  **判定して「質問に切り替えますか」と提案するところまでは行う**（#1890）。タイトルが空のまま
+  「作成」「作成+実装開始」を押した送信の直前（または「付け直す」）に呼ぶ
+  `POST /api/issues/suggest`の応答に`kind`（`issue` / `question`）が乗っており、
+  `question`のときは種別の下に提案を出したうえで作成を中断する（#2773）。押さなければ
+  従来どおりIssueとして作られ、押したときだけ`selectKind("question")`が走る（戻す口も同じ場所に残す）。判定の実体は
   [`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)で、**タイトル・ラベルの
   生成と同じ1回の呼び出しに相乗りさせる**——質問かどうかだけのために往復を増やさない。
   `kind`が欠けた・知らない値だった応答は`issue`扱い（`normalizeSuggestedKind`）で、
@@ -651,16 +652,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `表示中のリポジトリ`バッジを添え、人が選び直した時点で外す——リポジトリ別の画面から開くと内容を
   読まずにその値が入るため、出どころを書かないと「Claudeが内容から決めた」と誤解される。
   推定していた`POST /api/issues/quick-suggest`と`lib/claude/repository-suggest.ts`は削除済み。
-  **タイトル・ラベルは押したときだけ決まる**（`POST /api/issues/suggest`）。タイトルが空のあいだは
-  主ボタンが「タイトル・ラベルを付与」になり、押すと**同じ画面の**欄が埋まる。埋まると主ボタンは
-  「作成」へ戻り、やり直しはラベル欄の横の「付け直す」へ移る——**同じことをする口を2つ同時に
-  出さない**。生成に失敗しても作成は止めない（空欄のまま自分で書ける）。
+  **タイトル・ラベルは、空欄のまま送信したときだけ自動で決まる**（`POST /api/issues/suggest`。
+  専用の付与ボタンは#2773で廃止）。「作成」「作成+実装開始」を押した送信の直前に、タイトルが
+  空なら判定してから作成し、すでに書いていれば判定をスキップしてそのまま作成する
+  （`ensureTitleAndLabels`）。判定だけをその場で試したい場合はラベル欄の横の「付け直す」を使う
+  （タイトルが空でも押せる）。**生成に失敗すると作成を中断する**（空欄のまま自分で書ける状態を保つ）。
   Claudeが入れた値には`自動`バッジを出し、人が触った項目からは外す。**バッジは`Label`の外に置く**
   （中に入れるとアクセシブルネームが「タイトル自動」になり、項目名で引けなくなる）。
   **ラベルが1つも決まらなかったときは、その旨を画面に出す**（#1710）。空欄と「決められなかった」
   は見分けが付かず、ラベルの付かないIssueがそのまま作られていた。
   **種別（Issue／質問）が自動で切り替わることはない**（上のとおり。判定して提案するところまで・#1890）。
-  質問はタイトルを`buildAskRepoQuestionTitle`で機械生成するため、付与ボタンも付け直すボタンも出さない。
+  質問はタイトルを`buildAskRepoQuestionTitle`で機械生成するため、「付け直す」ボタンは出さない。
   **操作ボタンは「キャンセル → 作成+実装開始 → 作成」の順にDOMへ置く。** フッター
   （`DialogFooter`・`WindowFooter`）はスマホで`flex-col-reverse`になるため、この順に置くと
   縦積みの一番上が主ボタン、**一番下がキャンセル**になる（#1884）。先頭に`sm:mr-auto`付きの
@@ -1219,6 +1221,15 @@ export function POST(request: NextRequest) {
       という歯止めを崩さないため
     - **出力をClaudeへ送る同意は承認パネルのチェック1か所**（既定オン）。外すと自動では調べず、
       失敗の表示の「原因を調べる」を押したときだけ送る
+  - **手作業Issueをセッションと対話しながら実施する**（#2771。
+    [`manual-step-session-panel.tsx`](../src/components/dashboard/manual-step-session-panel.tsx)・
+    [`scripts/start-manual-step-session.sh`](../scripts/start-manual-step-session.sh)・
+    [`scripts/prompts/manual-step-agent.md`](../scripts/prompts/manual-step-agent.md)）。
+    アシスタントの最初の画面とIssue詳細の手作業パネルの「Claude Codeセッションで進める」から、
+    `DispatchJob`の`MANUAL_STEP_SESSION`を積み、pollerがworktree無しのtmuxセッションを立てる。
+    手順ごとにコマンド全文を`AskUserQuestion`で示して「実行する」→実行→終了コードを示して
+    「次へ進む」を聞く。押せない理由は`resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
+    設計は[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業issueをセッションと対話しながら実施する2771)。
   - **下端の操作はスマホで1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みの
     ままだと手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが
     その上の狭い窓に押し込まれていた。並びは**左に「戻る」（アイコンのみ）・`⋯`・右に主ボタン**で、
@@ -2211,6 +2222,30 @@ export function POST(request: NextRequest) {
   （後からマージされたPRの方が更新が新しく、先に切り捨てられない）ため、「後続のリリースが
   無い＝本番未反映」と読んでよい。リリースPRを1件も取得できていないときだけ判定不能として
   「バージョン不明」を出す（誤った版を出さないため）。
+- **複数リポジトリを一括でリリースするボタンは「ブランチ」画面のヘッダーに置く**（#2770）。
+  [`release-bulk-button.tsx`](../src/components/dashboard/release-bulk-button.tsx)。対象は
+  個別の「リリースする」ボタンと同じ`canTriggerRelease`（developがmainより進んでいる・
+  リリースworkflowを持つ・進行中でない）で絞り込むだけで、**新規のGitHub API問い合わせは
+  増やさない**——「ブランチ」画面は開いた時点で全リポジトリぶんこの判定を既に持っているため。
+  対象0件ならボタンごと出さない（「デプロイするものが無い場合は実行しない」という要求をUI側で
+  も満たす）。
+  **専用の一括起動APIは持たない。** 当初`POST /api/repositories/release-bulk`のような新規
+  ルートを計画したが、計画レビューで「`POST /api/repositories/release`が持つ前処理
+  （`previewModeGuard`・`releaseWorkflowExists`確認）とエラー整形
+  （[`lib/release-request.ts`](../src/lib/release-request.ts)の`releaseErrorMessage`）を
+  二重に持つ」と指摘され、対象ぶん既存の`requestRelease`を`Promise.allSettled`でループする
+  `requestReleaseBulk`に落とした。1件ずつ独立して成否が決まるため、一部のリポジトリが
+  失敗しても他は起動できる。
+  **起動できたリポジトリの「起動中」表示は、個別ボタンと同じ`useTriggerPending`を通す。**
+  このhookはリポジトリ1件ぶんで1インスタンスだけを持つ設計（#1955。上の「起動中は畳んだ1行にも
+  〜」参照）のため、ヘッダー側から直接は呼べない。`BranchFlowView`が
+  `releaseMarkTriggeredRegistry`（`useRef<Map<string, () => void>>`）を持ち、各
+  `RepositorySection`が自分の`markTriggered`をマウント中だけ登録する形でブリッジしている——
+  同じコンポーネントツリーの中にあるからこそ、外部（例えば設定画面）から書くのではなくrefで
+  直接呼べる。計画レビューでは当初「設定→フリート運用」への配置も検討したが、その場合は
+  この登録が別ツリーになり「起動中」が個別ボタンへ伝わらない（localStorageへの外部書き込みは
+  既にマウント済みの`usePersistedState`インスタンスには伝わらない）ため、Issue本文が名指しした
+  「ブランチ」画面への配置を選んだ。
 - **ブランチ状況とPR一覧の自動更新は、ユーザーが間隔を選んだときだけ回る**（#1767。
   更新ボタンの右のメニューで「自動更新しない（既定）／1分／5分／10分」。選択は端末の
   localStorage（`issue-deck:flow-auto-refresh-interval`）に残り、間隔は
@@ -3011,6 +3046,41 @@ function during render`）。「期限を過ぎたら元に戻す」のような
   （`startOfJstDayMs`）。`getDate()`で「明日の0:00」を作ると、UTCで動く本番・CIでは境界が
   9時間ずれる
 
+## GitHub Actionsの実行の「進み具合」と「所要時間」（#2777）
+
+デプロイ・CIの内訳（[`lib/workflow-run-progress.ts`](../src/lib/workflow-run-progress.ts)・
+`GET /api/workflow-runs`・[`WorkflowRunProgressPanel`](../src/components/dashboard/workflow-run-progress-panel.tsx)）
+を触るときに要る前提。
+
+- **runには完了時刻のフィールドが無い。** 所要時間は`updated_at - run_started_at`で求める
+  （`WorkflowRunStatus`も同じ求め方）。`updated_at`は完了で止まるので、これが実質の終了時刻になる。
+- **見込みは「成功した実行だけ」の中央値**（`fetchRecentSuccessfulRuns` → `medianMs`）。失敗・
+  キャンセルは途中で打ち切られた時間なので、混ぜると見込みが実際より短くなる。**平均にしない**
+  ——ランナーの待ちが長かった1回に引きずられ、いつまで待っても「あと少し」にならない見込みになる。
+  実績が3件に満たないときは**見込みを出さない**（外れた数字を出すと、以後その数字ごと信用されなくなる）。
+- **ジョブ単位の実績を全体の見込みに足し込まない。** CIのジョブは並列に走るため、合計すると実際の
+  倍以上になる。ジョブの実績は待ちの行へ「通常 ◯分」と添える目安にだけ使い、全体はrun単位の中央値で見る。
+- **`/actions/runs/{id}/jobs`の`steps`は、キューに入っただけのジョブでは返らないことがある。**
+  `job.steps.find(...)`はそこで落ちるので、`GithubApiWorkflowJob.steps`は任意にしてある
+  （`workflow-run-jobs.ts`が`?? []`で受ける）。
+- **キュー待ちのジョブの`started_at`は開始前の時刻**（GitHubがキュー投入時刻を入れる）。そのまま
+  経過時間にすると、待っているだけのジョブが何分も走っているように見える（`jobElapsedMs`が
+  `queued`を除いているのはこのため）。
+- **CIの内訳の行は、run 1本のジョブではなく`statusCheckRollup`のチェック一覧から作る**
+  （`ciChecks` → `toCiRunProgress`）。`CiStateBadge`が表しているのは`ci.yml`単体ではなく
+  **運用自動化を除いた全チェックの集約**で、mainへのリリースPRでは`version-tag-check.yml`の
+  ジョブも入る。run 1本だけを開くと「バッジは失敗・内訳は全部成功」という食い違いを作れる。
+  チェックの`name`・`detailsUrl`・`startedAt`・`completedAt`は**CI状態と同じ1回のGraphQL**で
+  取れるので、内訳のためにGitHub APIは増えない（run側は現在ステップと見込みを足すためだけに使う）。
+- **外部CIのcommit status（`StatusContext`）が混ざるときは内訳を出さない。** 名前も時刻も
+  持たないため行にできず、並べると「バッジは失敗なのに行は全部成功」に見える。
+- **見込みを出せるのは、チェックが1本のrunに収まっているときだけ。** 複数のワークフローに
+  またがっているのに1本ぶんの中央値を出すと、必ず短く出る。
+- **run idは`detailsUrl`から取る**（`extractRunIdFromDetailsUrl`）。読めなければnullにし、
+  内訳を出さない側（従来どおりバッジだけ）へ倒す。
+- **内訳の取得はパネルを開いている間だけ。** 閉じている間は1回も呼ばない。過去の実績は
+  ワークフロー単位で10分キャッシュする（[`lib/github/workflow-run-baseline.ts`](../src/lib/github/workflow-run-baseline.ts)）。
+
 ## Radixのポップオーバーをドロップダウンメニューの中に置くと、マウスを動かしただけで閉じる（#2458）
 
 **Radixのメニューは、マウスが乗った項目へフォーカスを移す**（`MenuItem`の`onPointerMove`が
@@ -3211,8 +3281,8 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 人が選べる範囲そのものは`lib/github/start-implementation.ts`の`isSelectableLabelName`が
 実装オプション用ラベルも足して決める）、`isAutoAssignableLabelName`＝**Claudeがタイトルと
 一緒に推定してよい範囲**（30〜89番台。71番台と番号プレフィックスの無いラベルを除く。#1662）。
-推定の経路は「新しいIssueを作成」ダイアログの「タイトル・ラベルを付与」（＝タイトルが入っていれば
-「付け直す」。#1884）が呼ぶ`POST /api/issues/suggest`だけで、
+推定の経路は「新しいIssueを作成」ダイアログの「作成」「作成+実装開始」（タイトルが空のときだけ
+送信前に自動で。すでに入っていれば「付け直す」。#1884・#2773）が呼ぶ`POST /api/issues/suggest`だけで、
 プロンプトの候補一覧・応答の後処理（[`lib/claude/issue-suggest.ts`](../src/lib/claude/issue-suggest.ts)）と
 画面側のリセット範囲（`create-issue-dialog.tsx`の`mergeSuggestedLabels`）が同じ判定を通る。
 どれか1つでもずれると、範囲外のラベルが付くか、人が選んだラベルが黙って消える。

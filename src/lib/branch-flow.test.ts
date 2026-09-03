@@ -41,6 +41,8 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
   const headRef = overrides.headRef ?? "issue-100";
   const baseRef = overrides.baseRef ?? "develop";
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: `${REPO}#${overrides.number ?? 1}`,
     repositoryFullName: REPO,
     repositoryPrivate: false,
@@ -1032,6 +1034,7 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
               repositoryFullName: REPO,
               failureIssue: null,
               deployRun: {
+                id: 1,
                 status: "completed",
                 conclusion: "success",
                 htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
@@ -1411,6 +1414,7 @@ describe("本番デプロイの状態（#1579）", () => {
         repositoryFullName: REPO,
         failureIssue: null,
         deployRun: {
+          id: 1,
           status: "completed",
           conclusion: "success",
           htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
@@ -1441,6 +1445,8 @@ describe("本番デプロイの状態（#1579）", () => {
       manual: false,
       autoRetried: false,
       htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+      // 内訳（ジョブ単位の進み具合）を開くための鍵（#2777）
+      runId: 1,
     });
     // 畳んだ1行にも同じ状態を出す
     expect(repository.summary.deploy?.kind).toBe("running");
@@ -1464,6 +1470,8 @@ describe("本番デプロイの状態（#1579）", () => {
     expect(repository.releaseGroups[0].deploy).toEqual({
       kind: "waiting",
       htmlUrl: null,
+      // 実行がまだ現れていないので、開ける内訳も無い（#2777）
+      runId: null,
       manual: false,
       autoRetried: false,
     });

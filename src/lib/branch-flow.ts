@@ -814,16 +814,17 @@ export function resolveDeployState({
       // 今回のマージに対する実行がまだ現れていない。上限を過ぎたら判定を諦める
       // まだ現れていない実行に試行回数は無い
       return now - mergedAt < DEPLOY_WAIT_LIMIT_MS
-        ? { kind: "waiting", htmlUrl: null, manual: false, autoRetried: false }
+        ? { kind: "waiting", htmlUrl: null, runId: null, manual: false, autoRetried: false }
         : null;
     }
   }
 
+  const runId = deployRun.id > 0 ? deployRun.id : null;
   if (deployRun.status !== "completed")
-    return { kind: "running", htmlUrl: deployRun.htmlUrl, manual, autoRetried };
+    return { kind: "running", htmlUrl: deployRun.htmlUrl, runId, manual, autoRetried };
   return deployRun.conclusion === "success"
-    ? { kind: "success", htmlUrl: deployRun.htmlUrl, manual, autoRetried }
-    : { kind: "failure", htmlUrl: deployRun.htmlUrl, manual, autoRetried };
+    ? { kind: "success", htmlUrl: deployRun.htmlUrl, runId, manual, autoRetried }
+    : { kind: "failure", htmlUrl: deployRun.htmlUrl, runId, manual, autoRetried };
 }
 
 /**

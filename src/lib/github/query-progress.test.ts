@@ -4,7 +4,7 @@ const findFirst = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectStatusField = vi.fn();
 const findIssueProjectState = vi.fn();
-const fetchProjectItems = vi.fn();
+const fetchRepositoryOpenIssueStatuses = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -29,8 +29,8 @@ vi.mock("@/lib/github/projects-api", () => ({
   get findIssueProjectState() {
     return findIssueProjectState;
   },
-  get fetchProjectItems() {
-    return fetchProjectItems;
+  get fetchRepositoryOpenIssueStatuses() {
+    return fetchRepositoryOpenIssueStatuses;
   },
 }));
 
@@ -49,14 +49,19 @@ const REPOSITORY = {
 
 const STATUS_FIELD = { projectId: "PVT_1", fieldId: "PVTSSF_1", optionIdByName: new Map() };
 
-function item(issueNumber: number, status: string | null, extra?: Partial<{ issueOpen: boolean; repositoryDatabaseId: number }>) {
+function item(issueNumber: number, status: string | null) {
   return {
     itemId: `item-${issueNumber}`,
-    repositoryDatabaseId: extra?.repositoryDatabaseId ?? 100,
+    repositoryDatabaseId: 100,
     issueNumber,
-    issueOpen: extra?.issueOpen ?? true,
+    issueOpen: true,
     status,
   };
+}
+
+/** `fetchRepositoryOpenIssueStatuses`が返す形（リポジトリ側から辿るので既にopen・自分のリポジトリだけ） */
+function issue(issueNumber: number, status: string | null) {
+  return { issueNumber, status };
 }
 
 beforeEach(() => {
@@ -66,7 +71,7 @@ beforeEach(() => {
   getInstallationToken.mockReset().mockResolvedValue("token");
   fetchProjectStatusField.mockReset().mockResolvedValue(STATUS_FIELD);
   findIssueProjectState.mockReset();
-  fetchProjectItems.mockReset();
+  fetchRepositoryOpenIssueStatuses.mockReset();
 });
 
 afterEach(() => {
@@ -122,14 +127,12 @@ describe("queryIssueProgressStatus", () => {
 });
 
 describe("queryIssuesByProgressStatus", () => {
-  it("指定した進捗にあるopenなIssueだけを昇順で返す", async () => {
-    fetchProjectItems.mockResolvedValue([
-      item(30, "Develop"),
-      item(10, "Release"),
-      item(20, "Implementation"),
-      item(40, "Develop", { issueOpen: false }),
-      item(50, "Develop", { repositoryDatabaseId: 999 }),
-      item(60, null),
+  it("指定した進捗にあるIssueだけを昇順で返す", async () => {
+    fetchRepositoryOpenIssueStatuses.mockResolvedValue([
+      issue(30, "Develop"),
+      issue(10, "Release"),
+      issue(20, "Implementation"),
+      issue(60, null),
     ]);
 
     await expect(
@@ -140,8 +143,25 @@ describe("queryIssuesByProgressStatus", () => {
     ).resolves.toEqual({ available: true, issues: [10, 30] });
   });
 
+  it("盤面ではなく対象リポジトリを指して問い合わせる（全走査しない・#2774）", async () => {
+    fetchRepositoryOpenIssueStatuses.mockResolvedValue([]);
+
+    await queryIssuesByProgressStatus({
+      repositoryFullName: "guchi-apps/issue-deck",
+      statuses: ["develop"],
+    });
+
+    expect(fetchRepositoryOpenIssueStatuses).toHaveBeenCalledWith({
+      projectOwner: "guchi-apps",
+      projectNumber: 1,
+      repositoryOwner: "guchi-apps",
+      repositoryName: "issue-deck",
+      token: "token",
+    });
+  });
+
   it("該当が無ければ空配列を返す", async () => {
-    fetchProjectItems.mockResolvedValue([item(10, "Implementation")]);
+    fetchRepositoryOpenIssueStatuses.mockResolvedValue([issue(10, "Implementation")]);
     await expect(
       queryIssuesByProgressStatus({
         repositoryFullName: "guchi-apps/issue-deck",

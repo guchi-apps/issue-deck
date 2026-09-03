@@ -19,9 +19,9 @@ describe("buildSessionPlanCommentBody", () => {
     });
 
     expect(body).toContain("## アプローチ\n- あれをする");
-    expect(body).toContain("[Remote Controlで開く](https://claude.ai/code/session_01ABC)");
+    expect(body).toContain("[Claude Codeアプリで開く](https://claude.ai/code/session_01ABC)");
     // **リンクは計画本文より後ろに置く**（Issue #1342 の「その下にも別途」）
-    expect(body.indexOf("- あれをする")).toBeLessThan(body.indexOf("Remote Controlで開く"));
+    expect(body.indexOf("- あれをする")).toBeLessThan(body.indexOf("Claude Codeアプリで開く"));
     expect(body).toContain(SESSION_PLAN_MARKER);
     expect(body).toContain("サブPCのセッションが承認を待っています");
   });
@@ -83,7 +83,7 @@ describe("buildSessionPlanCommentBody", () => {
     });
 
     expect(body).toContain("計画の中身");
-    expect(body).not.toContain("Remote Controlで開く](");
+    expect(body).not.toContain("Claude Codeアプリで開く](");
     expect(body).toContain("Remote ControlのURLを取得できませんでした");
     expect(body).toContain(SESSION_PLAN_MARKER);
   });

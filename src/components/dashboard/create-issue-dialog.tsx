@@ -76,11 +76,11 @@ export function groupRepositoriesByWorkflowStatus(
 }
 
 /**
- * 「タイトル・ラベルを付与」実行時の選択ラベルを算出する。
+ * AI判定（タイトル・ラベルの自動生成）実行時の選択ラベルを算出する。
  *
  * **リセットするのは自動付与の対象になるラベル（30〜89番台。71番台を除く。#1662）だけ。**
  * 生成結果に出てこないラベル——進捗管理用・実装オプション用に加えて、人が手で選んだ
- * `11.local`や`90.Close: *`——までリセットすると、付与のたびに黙って消え、
+ * `11.local`や`90.Close: *`——までリセットすると、判定のたびに黙って消え、
  * 生成結果からは二度と復活しない。
  */
 export function mergeSuggestedLabels(prev: string[], suggested: string[]): string[] {
@@ -291,10 +291,11 @@ type CreateIssueDialogProps = {
  * 種別・リポジトリ・内容・タイトル・ラベル・担当者を**すべて1画面に並べる**。#1605で入れた
  * 2ステップ（内容だけを書く`input` → 推定結果を確かめる`confirm`）は廃止した。
  *
- * **自動で決めるのはタイトルとラベルだけで、それも押したときにしか動かない。** タイトルが
- * 空のあいだは主ボタンが「タイトル・ラベルを付与」になり、押すと同じ画面の欄が埋まる
- * （`POST /api/issues/suggest`）。埋まったら主ボタンは「作成」へ戻り、付け直しはラベル欄の
- * 横に出る——同じことをする口を2つ同時に出さない。
+ * **自動で決まるのはタイトルとラベルだけ。** タイトルが空のまま「作成」「作成+実装開始」を
+ * 押すと、送信の直前に自動で判定してから作成する（`POST /api/issues/suggest`。#2773）。
+ * タイトルをすでに書いていれば判定はスキップする。**専用の付与ボタンは無い**——押した後に
+ * 直すことがほぼ無い実運用に合わせ、確認のステップを挟まない。判定だけをその場で試したい
+ * 場合はラベル欄の横の「付け直す」を使う。
  *
  * **リポジトリは人が決める**（#1884）。初期値になるのは「開いていた画面のリポジトリ」だけで、
  * 分からなければ未選択のまま選ばせる。内容からの推定（`/api/issues/quick-suggest`）は廃止した。
@@ -333,7 +334,6 @@ export function CreateIssueDialog({
     error: commentError,
     setError: setCommentError,
   } = useIssueCommentMutations();
-  const isSubmitting = isCreatingIssue || isCreatingComment;
 
   const [kind, setKind] = useState<IssueDraftKind>("issue");
   /**
@@ -363,7 +363,7 @@ export function CreateIssueDialog({
   /**
    * 提案を出したときに、そこまで画面を寄せるための参照（#1890）。
    *
-   * **判定を起こすボタン（「タイトル・ラベルを付与」）はフッターにあり、提案を出す種別欄は
+   * **判定を起こすのはフッターの「作成」「作成+実装開始」（#2773）で、提案を出す種別欄は
    * フォームの先頭にある。** ダイアログは中身ごとスクロールする（`DialogContent`の
    * `overflow-y-auto`）ため、本文が長いときやスマホ幅では、押した時点で種別欄は画面外にある。
    * 提案が見えないまま作成まで進めると、#1641が避けたかった「押した本人から見えない」に戻る。
@@ -431,12 +431,10 @@ export function CreateIssueDialog({
     notConfigured: suggestNotConfigured,
     generate: generateSuggestion,
   } = useIssueSuggest();
-  /**
-   * タイトルが空か（#1884）。**主ボタンが「付与」か「作成」かを決める唯一の材料。**
-   * 質問はタイトルを質問文から機械生成するため、この分岐に入らない。
-   */
-  const needsTitle = !isQuestion && !title.trim();
-  /** 「タイトル・ラベルを付与」を押せるか。材料（本文）と付け先（リポジトリのラベル一覧）が要る */
+  // タイトルが空のまま作成系ボタンが押されたときの自動判定（#2773）もこの状態に含める。
+  // 判定中も「作成中...」の表示・ボタンの無効化がそのまま効く
+  const isSubmitting = isCreatingIssue || isCreatingComment || isSuggesting;
+  /** AI判定（自動判定・「付け直す」共通）を実行できるか。材料（本文）と付け先（リポジトリのラベル一覧）が要る */
   const canSuggest =
     Boolean(body.trim()) && Boolean(repositoryFullName) && !isMetaLoading && !isSuggesting;
 
@@ -637,25 +635,49 @@ export function CreateIssueDialog({
   }
 
   /**
-   * 「タイトル・ラベルを付与」（#1884）。タイトルが空のあいだは主ボタン、入っていれば
-   * ラベル欄の横の「付け直す」から呼ばれる。**画面は切り替わらず、同じ欄が埋まるだけ。**
+   * AI判定を実行し、結果を画面へ反映する（#2773で「タイトル・ラベルを付与」の専用ボタンを
+   * 廃止した後の共通処理）。**画面は切り替わらず、同じ欄が埋まるだけ。**
    *
    * 失敗しても作成は止めない——値が空のまま自分で書ける状態が残る。
+   *
+   * 判定結果が「質問のようです」だった場合は種別を変えず提案（`questionHint`）だけを出す
+   * （#1890）。**ここで自動的にIssueへ進めると、質問のつもりの内容が実装Issueとして
+   * 無人実行に乗ってしまう取り返しの付きにくい間違いになる**ため、呼び出し元には
+   * 「続けてはいけない」ことをnullで伝える。
    */
-  async function handleGenerateSuggestion() {
+  async function runSuggestion(): Promise<{ title: string; labels: string[] } | null> {
     const result = await generateSuggestion(
       body,
       labels.map((label) => ({ name: label.name, description: label.description })),
     );
-    if (!result) return;
+    if (!result) return null;
+    const mergedLabels = mergeSuggestedLabels(selectedLabels, result.labels);
     setTitle(result.title);
-    setSelectedLabels((prev) => mergeSuggestedLabels(prev, result.labels));
+    setSelectedLabels(mergedLabels);
     setAutoFilled({ title: true, labels: result.labels.length > 0 });
     setLabelSuggestionMissed(result.labels.length === 0);
-    // 内容が質問だと判定されたときだけ提案を出す（#1890）。**ここでは種別を変えない。**
-    // この関数はタイトルが空のIssue（主ボタン）か「付け直す」からしか呼ばれないので、
-    // 種別が「質問」の状態で通ることはない
-    if (result.kind === "question") setQuestionHint({ phase: "suggested" });
+    if (result.kind === "question") {
+      setQuestionHint({ phase: "suggested" });
+      return null;
+    }
+    return { title: result.title, labels: mergedLabels };
+  }
+
+  /** ラベル欄横の「付け直す」（#1884・#2773）。すでにあるタイトルでも強制的に判定し直す。 */
+  async function handleGenerateSuggestion() {
+    await runSuggestion();
+  }
+
+  /**
+   * 「作成」「作成+実装開始」共通の前処理（#2773）。**タイトルが空のときだけ**送信の直前に
+   * AI判定を行い、その結果を使う。すでに書いていれば判定をスキップしてそのまま使う。
+   *
+   * @returns 作成処理を続けてよければ確定したタイトル・ラベル、続けてはいけない場合はnull
+   *   （判定に失敗した・質問だと判定されて提案を出した、のいずれか。呼び出し元は静かに中断する）
+   */
+  async function ensureTitleAndLabels(): Promise<{ title: string; labels: string[] } | null> {
+    if (title.trim()) return { title, labels: selectedLabels };
+    return runSuggestion();
   }
 
   async function handleSubmit() {
@@ -663,12 +685,14 @@ export function CreateIssueDialog({
       await handleAskQuestion();
       return;
     }
-    if (!repositoryFullName || !title.trim()) return;
+    if (!repositoryFullName) return;
+    const resolved = await ensureTitleAndLabels();
+    if (!resolved) return;
     const issue = await createIssue({
       repositoryFullName,
-      title,
+      title: resolved.title,
       body: composeIssueBody(bodyPrefix, body),
-      labels: selectedLabels,
+      labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
     });
     if (issue) {
@@ -724,12 +748,14 @@ export function CreateIssueDialog({
    * 起動そのもの（`@claude`コメント・ジョブの積み込み・進捗の報告）はダイアログ側が行う。
    */
   async function handleCreateAndStart() {
-    if (!repositoryFullName || !title.trim()) return;
+    if (!repositoryFullName) return;
+    const resolved = await ensureTitleAndLabels();
+    if (!resolved) return;
     const issue = await createIssue({
       repositoryFullName,
-      title,
+      title: resolved.title,
       body: composeIssueBody(bodyPrefix, body),
-      labels: selectedLabels,
+      labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
     });
     if (!issue) return;
@@ -744,16 +770,12 @@ export function CreateIssueDialog({
   }
 
   /**
-   * Cmd/Ctrl+Enterでの確定（#1884）。**タイトルが空のときは付与を走らせる。**
-   * 画面の主ボタンと同じものが動く形にしておかないと、押した結果が予想できない。
+   * Cmd/Ctrl+Enterでの確定（#1884）。フッターの主ボタンが常に「作成」（質問は「質問する」）
+   * なので、そのまま`handleSubmit`を呼べばよい（#2773でタイトル空時の分岐を廃止）。
    */
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
     e.preventDefault();
-    if (needsTitle) {
-      if (canSuggest) void handleGenerateSuggestion();
-      return;
-    }
     void handleSubmit();
   }
 
@@ -771,7 +793,7 @@ export function CreateIssueDialog({
       <Chrome.Description className={isQuestion ? undefined : "sr-only"}>
         {isQuestion
           ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
-          : "内容を書いて作成します。タイトル・ラベルは押したときだけ自動で付きます。"}
+          : "内容を書いて作成します。タイトル・ラベルが空欄なら、作成時に自動で決まります。"}
       </Chrome.Description>
     </Chrome.Header>
   );
@@ -929,7 +951,7 @@ export function CreateIssueDialog({
               id="create-issue-title"
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
-              placeholder="空欄なら「タイトル・ラベルを付与」で作れます"
+              placeholder="空欄のまま作成すると自動でタイトル・ラベルが決まります"
               className="md:text-sm"
             />
           </div>
@@ -991,9 +1013,10 @@ export function CreateIssueDialog({
                 </Button>
               }
             />
-            {/* 付け直す口（#1884）。**主ボタンが「付与」になっている間は出さない**——
-                同じことをする口が2つ並ぶと、どちらを押すのが正しいのか読めなくなる */}
-            {!isQuestion && !needsTitle && (
+            {/* 付け直す口（#1884・#2773）。タイトルが空でも押せる——作成前に判定結果だけ
+                その場で確かめたい場合に使う。専用の付与ボタンは無いため、押した結果は
+                常にこの1つの口に集まる */}
+            {!isQuestion && (
               <Button
                 variant="outline"
                 size="xs"
@@ -1071,40 +1094,37 @@ export function CreateIssueDialog({
           Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
           実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
           理由はダイアログのGitHub Actionsの選択肢の説明として出す。
-          タイトルが空のあいだは主ボタンが「付与」なので、こちらも出さない（#1884） */}
-      {!isQuestion && !needsTitle && (
+          タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
+      {!isQuestion && (
         <Button
           variant="secondary"
           onClick={handleCreateAndStart}
-          disabled={isSubmitting || !repositoryFullName || !title.trim() || isImageUploading}
+          disabled={
+            isSubmitting || !repositoryFullName || isImageUploading || (!title.trim() && !body.trim())
+          }
         >
           {isSubmitting ? "作成中..." : "作成+実装開始"}
         </Button>
       )}
-      {needsTitle ? (
-        <Button onClick={handleGenerateSuggestion} disabled={!canSuggest || isImageUploading}>
-          {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
-          タイトル・ラベルを付与
-        </Button>
-      ) : (
-        <Button
-          onClick={handleSubmit}
-          disabled={
-            isSubmitting ||
-            !repositoryFullName ||
-            isImageUploading ||
-            (isQuestion ? !body.trim() : !title.trim())
-          }
-        >
-          {isQuestion
-            ? isSubmitting
-              ? "送信中..."
-              : "質問する"
-            : isSubmitting
-              ? "作成中..."
-              : "作成"}
-        </Button>
-      )}
+      {/* 「タイトル・ラベルを付与」の専用ボタンは廃止（#2773）。タイトルが空のまま押すと、
+          `handleSubmit`/`handleCreateAndStart`が送信前に自動で判定してから作成する */}
+      <Button
+        onClick={handleSubmit}
+        disabled={
+          isSubmitting ||
+          !repositoryFullName ||
+          isImageUploading ||
+          (isQuestion ? !body.trim() : !title.trim() && !body.trim())
+        }
+      >
+        {isQuestion
+          ? isSubmitting
+            ? "送信中..."
+            : "質問する"
+          : isSubmitting
+            ? "作成中..."
+            : "作成"}
+      </Button>
     </Chrome.Footer>
   );
 

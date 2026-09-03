@@ -1,7 +1,7 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { useState, type CSSProperties } from "react";
+import { ChevronDown, ChevronRight, ExternalLink, RefreshCw } from "lucide-react";
 
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -24,6 +24,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
+import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
@@ -145,6 +146,10 @@ export function PullRequestDetail({
     detail?.fetchedAt ?? null,
   );
 
+  // CIの内訳（#2777）。**開いたPRのidで持つ**——真偽値だけで持つと、PRを切り替えたときに
+  // 前のPRで開いた状態が引き継がれ、別のPRの内訳が開いたまま出る。
+  const [ciDetailPullRequestId, setCiDetailPullRequestId] = useState<string | null>(null);
+
   // 画面内のリンクから一覧に無いPRを開いた場合、ヘッダーの材料（summary）が届くまで
   // 選択中PRはnullのまま。「PRを選ぶと〜」ではなく読み込み中・失敗として見せる（#1260）。
   if (!pullRequest) {
@@ -181,6 +186,12 @@ export function PullRequestDetail({
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
+  // CIの内訳を開けるのは、CI状態のバッジを出しているPR（＝チェックを取っているPR）だけ（#2777）。
+  // 行の元はチェック一覧で、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
+  const showsCiBadge = !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft;
+  const ciChecks = showsCiBadge ? pullRequest.ciChecks : [];
+  const ciRunId = showsCiBadge ? pullRequest.ciRunId : null;
+  const ciDetailOpen = ciDetailPullRequestId === pullRequest.id;
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -249,6 +260,23 @@ export function PullRequestDetail({
               </span>
             ) : pullRequest.draft ? (
               <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
+            ) : ciChecks.length > 0 ? (
+              // 押すとジョブ単位の内訳が開く（#2777）。「CI実行中」の1語から、どのジョブで
+              // 止まっているか・あと何分かまで、この画面のまま辿れるようにする
+              <button
+                type="button"
+                onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
+                aria-expanded={ciDetailOpen}
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-full hover:opacity-80"
+                title={ciDetailOpen ? "CIの内訳を閉じる" : "CIの内訳を開く"}
+              >
+                <CiStateBadge ciState={pullRequest.ciState} />
+                {ciDetailOpen ? (
+                  <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
+                ) : (
+                  <ChevronRight className="size-3 text-muted-foreground" aria-hidden="true" />
+                )}
+              </button>
             ) : (
               <CiStateBadge ciState={pullRequest.ciState} />
             )}
@@ -287,6 +315,17 @@ export function PullRequestDetail({
               />
             )}
           </div>
+
+          {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+          {ciChecks.length > 0 && (
+            <WorkflowRunProgressPanel
+              repositoryFullName={pullRequest.repositoryFullName}
+              runId={ciRunId}
+              open={ciDetailOpen}
+              title="CIの内訳"
+              checks={ciChecks}
+            />
+          )}
 
           {/* このPRの変更が本番へ出ていないとき、押せる場所をその場に出す（#2236）。
               ピルは実行ログへのリンクにしかならず、出し直すには別画面へ移る必要があった。

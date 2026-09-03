@@ -54,6 +54,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
+    ciRunId: null,
+    ciChecks: [],
     id: `${REPO}#146`,
     repositoryFullName: REPO,
     repositoryPrivate: false,

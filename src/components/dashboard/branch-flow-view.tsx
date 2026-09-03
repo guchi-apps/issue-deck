@@ -40,7 +40,9 @@ import {
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
+import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
+import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
@@ -51,6 +53,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useNow } from "@/hooks/use-now";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
@@ -61,7 +64,7 @@ import {
   describeRefreshButtonHint,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
-import { useTriggerPending } from "@/hooks/use-trigger-pending";
+import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
@@ -79,6 +82,7 @@ import {
   isMergeJudgementPending,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
+import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
@@ -389,6 +393,32 @@ function DeployStateBadge({
     </a>
   ) : (
     content
+  );
+}
+
+/**
+ * 実行の内訳を開閉する小さなトリガー（#2777）。
+ *
+ * **状態のピル自体は実行ログへのリンクのまま残す。** ピルの押下を開閉へ置き換えると、
+ * これまで1回で開けていたGitHubの実行ログが開けなくなる。行き先を減らさずに内訳を足すため、
+ * 開閉は隣の独立したボタンが持つ。
+ */
+function RunDetailToggle({ expanded, onToggle }: { expanded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
+      title={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+      aria-label={expanded ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+    >
+      {expanded ? (
+        <ChevronDown className="size-3.5" aria-hidden="true" />
+      ) : (
+        <ChevronRight className="size-3.5" aria-hidden="true" />
+      )}
+    </button>
   );
 }
 
@@ -872,14 +902,20 @@ function ReleaseProgressPill({
  * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
  */
 function ReleaseGroupHeader({
+  repositoryFullName,
   group,
   releaseButton,
   onMerged,
 }: {
+  repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const deployRunId = group.deploy?.runId ?? null;
+  const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
@@ -937,13 +973,27 @@ function ReleaseGroupHeader({
           </span>
           {released ? (
             <>
-              {!inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {!inProduction && (
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
+              )}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
                   `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
-              {inProduction && <DeployStateBadge deploy={group.deploy} />}
+              {inProduction && (
+                <>
+                  <DeployStateBadge deploy={group.deploy} />
+                  {toggleRunDetail && (
+                    <RunDetailToggle expanded={runDetailOpen} onToggle={toggleRunDetail} />
+                  )}
+                </>
+              )}
             </>
           ) : waitingUserMerge ? (
             // mainへのマージだけは人が行う。待っているのが人の操作であることを、
@@ -970,6 +1020,17 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
+
+        {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+        {deployRunId !== null && (
+          <WorkflowRunProgressPanel
+            repositoryFullName={repositoryFullName}
+            runId={deployRunId}
+            open={runDetailOpen}
+            title="本番デプロイの内訳"
+            className="mt-0.5 max-w-2xl"
+          />
+        )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
@@ -1318,7 +1379,12 @@ function ReleaseGroupHeaderWithLanes({
 }) {
   return (
     <>
-      <ReleaseGroupHeader group={group} releaseButton={releaseButton} onMerged={onMerged} />
+      <ReleaseGroupHeader
+        repositoryFullName={repositoryFullName}
+        group={group}
+        releaseButton={releaseButton}
+        onMerged={onMerged}
+      />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
       {group.lanes.map((lane) => (
         <LaneRow
@@ -1564,6 +1630,7 @@ function RepositorySection({
   onShowAllVersions,
   onRefresh,
   onMerged,
+  releaseMarkTriggeredRegistry,
 }: {
   repository: BranchFlowRepository;
   branchesFailed: boolean;
@@ -1587,9 +1654,28 @@ function RepositorySection({
   /** リリースworkflowを起こした後の取り直し */
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
+  /**
+   * 一括リリースボタン（#2770）が、このリポジトリぶんの`markTriggered`を呼べるようにする
+   * 登録先。`useTriggerPending`はリポジトリごとに1インスタンスだけをここで持つため
+   * （上のコメント参照）、一括ボタン側からは直接呼べない。ヘッダーとリポジトリの節は
+   * 同じ`BranchFlowView`の中にあるので、refのMapへ登録するだけで済ませる。
+   */
+  releaseMarkTriggeredRegistry?: RefObject<Map<string, () => void>>;
 }) {
   const { isPending, markTriggered } = useTriggerPending("release", repository.repositoryFullName);
   const deployTrigger = useTriggerPending("deploy", repository.repositoryFullName);
+
+  useEffect(() => {
+    const registry = releaseMarkTriggeredRegistry?.current;
+    registry?.set(repository.repositoryFullName, markTriggered);
+    return () => {
+      // 登録した本人のときだけ外す。unmount中に別のRepositorySectionが同じキーへ
+      // 登録し直している（並び替え等）ケースで、後勝ちの登録を消さないため
+      if (registry?.get(repository.repositoryFullName) === markTriggered) {
+        registry.delete(repository.repositoryFullName);
+      }
+    };
+  }, [releaseMarkTriggeredRegistry, repository.repositoryFullName, markTriggered]);
 
   const graph = (
     <ReleaseFlowGraph
@@ -1794,6 +1880,41 @@ export function BranchFlowView({
   const [showClosed, setShowClosed] = useState(false);
   const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
+  // 一括リリース（#2770）の対象。個別の「リリースする」ボタンと同じ判定（`canTriggerRelease`）を
+  // 通ったものだけで、この画面が既に持っているデータから絞り込む——新規のGitHub API問い合わせは
+  // 増やさない。0件なら`ReleaseBulkButton`がボタンごと出さない。
+  //
+  // **端末に残る起動記録（`readTriggeredAt`）でも二重に除く**（計画レビュー指摘1）。起動してから
+  // バンプPRが現れてこの画面が取り直すまでの数十秒は`canTriggerRelease`がtrueのまま残り、その間に
+  // もう一度押すと同じ対象へ二重にdispatchされる。個別ボタンは自分の`useTriggerPending`（同じ
+  // レンダーで`markTriggered`と`isPending`を共有する1インスタンス）でこれを防いでいるが、一括
+  // ボタンはヘッダーにあり同じ仕組みの外側になるため、対象の絞り込みそのものに同じ記録を混ぜる。
+  //
+  // 時刻は`useNow`から取る（描画中に`Date.now()`を呼ばないため。`useTriggerPending`と同じ理由）。
+  // ティックさせるのは対象になり得るリポジトリが1件以上あるときだけにして、動きの無い普段は
+  // このためだけの再描画を起こさない。マウント直後（`now === null`）は除外条件を掛けない
+  // ——`useTriggerPending`の`isPending`も同じ間はfalse（＝押せる）として振る舞うのと揃えている。
+  const hasReleasableRepository = flow.repositories.some((repository) => repository.canTriggerRelease);
+  const now = useNow(30_000, hasReleasableRepository);
+  const releaseBulkTargets = flow.repositories
+    .filter((repository) => repository.canTriggerRelease)
+    .filter(
+      (repository) =>
+        now === null ||
+        !isTriggerPending(
+          readTriggeredAt("release", repository.repositoryFullName),
+          now,
+          RELEASE_TRIGGER_PENDING_MS,
+        ),
+    )
+    .map((repository) => ({
+      repositoryFullName: repository.repositoryFullName,
+      unreleasedLabel: formatUnreleasedSummary(unreleasedSummary(repository.release.comparison)),
+    }));
+  // 一括リリースが起動できたリポジトリぶん、各`RepositorySection`の`markTriggered`を
+  // 呼べるようにする登録先（#2770）。`useTriggerPending`はリポジトリごとに1インスタンスだけを
+  // 持つ設計（#1955）のため、ヘッダー側から直接は呼べない。
+  const releaseMarkTriggeredRegistry = useRef<Map<string, () => void>>(new Map());
   // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
   const progressingRepositories = flow.repositories.filter(
     (repository) => !needsAttention(repository) && isProgressing(repository),
@@ -1930,6 +2051,18 @@ export function BranchFlowView({
           {/* 見出しと同じ段に置く（#1638）。実行状況はどの画面でも1段目の右端で揃える */}
           {headerActions}
         </div>
+        {/* 一括リリース（#2770）。対象0件ならボタンごと出ない。2ペインでも隠さない——
+            「すべて開く」と違い、押した結果が展開状態に影響しないため */}
+        <ReleaseBulkButton
+          targets={releaseBulkTargets}
+          unknownRepositoryCount={failedRepositories.length}
+          onTriggered={(succeededFullNames) => {
+            succeededFullNames.forEach((fullName) =>
+              releaseMarkTriggeredRegistry.current.get(fullName)?.(),
+            );
+            onRefresh();
+          }}
+        />
         {/* 2ペインでは同時に1件しか出せないので出さない（#2157） */}
         {!isSplit && (
           <Button
@@ -2055,6 +2188,7 @@ export function BranchFlowView({
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}
+              releaseMarkTriggeredRegistry={releaseMarkTriggeredRegistry}
               onToggle={() => handleRowClick(repository.repositoryFullName)}
               onShowAllVersions={() =>
                 setAllVersionsRepositories(

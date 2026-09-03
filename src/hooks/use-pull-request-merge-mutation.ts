@@ -45,5 +45,28 @@ export function usePullRequestMergeMutation() {
     }
   }
 
-  return { mergePullRequest, isSubmitting, error, setError };
+  /** マージせずにPRをクローズする（#2780「マージしない」）。状態は`mergePullRequest`と共有する（同時に両方は押せないため） */
+  async function closePullRequest(input: MergePullRequestInput): Promise<boolean> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/issues/pull-request-close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
+        throw new Error(errorMessageForResponse(res.status, data.error, data.message));
+      }
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return { mergePullRequest, closePullRequest, isSubmitting, error, setError };
 }

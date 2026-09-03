@@ -37,6 +37,9 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },
+  // デプロイ・CIの実行の内訳（#2777）。**パネルを開いている間だけ**消費する。1回につき
+  // run・jobsの2リクエストで、過去の実績は10分キャッシュされるため初回だけ2回増える。
+  { key: "workflow_run_progress", label: "実行の内訳の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "pull_request_files", label: "PR詳細の変更ファイル一覧の取得" },
   { key: "pull_request_changes", label: "マージ確認の変更点の取得" },
@@ -47,6 +50,8 @@ export const GITHUB_API_FEATURES = [
   { key: "comment_write", label: "コメントの投稿・編集・削除" },
   { key: "workflow_cancel", label: "実行のキャンセル" },
   { key: "pull_request_merge", label: "PRのマージ" },
+  // 「マージしない」（#2780）。マージせずにPRをクローズするときだけ消費する。
+  { key: "pull_request_close", label: "PRのクローズ（マージしない）" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   // コンフリクトしたPRの巡回検知（#2116）。PR一覧のRESTはETagが効くので、実際に消費するのは
   // コンフリクトしているPRがあるときのGraphQLと起動だけ。

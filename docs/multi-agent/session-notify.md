@@ -830,6 +830,15 @@ pollerは作業ツリーのままなので、警告が要らなくなったわ�
 **これはClaude Codeの非公開の内部ファイルなので、更新で形が変わりうる。** 読めなくても
 通知自体は落とさず、URLだけが載らなくなる設計にしてある。
 
+**フックを待たずに、pollerも同じURLを運ぶ**（#2771）。フックの報告だけだと、最初の
+`Notification`か`Stop`が飛ぶまで（実装セッションでは最初のturnが終わるまで）画面に
+「Claude Codeアプリで開く」が出なかった。`report_sessions`（`POST /api/dispatch/sessions`）が
+`session_transcript_remote_control_url`（`scripts/lib/session-transcript.sh`。同じファイルを
+`tmux`名で引く）でURLを載せ、issue-deck側は`parseRemoteControlUrl`で`https://claude.ai/`配下の
+ものだけを受ける。引けなかった巡は項目を送らず、既存の値を触らない。画面のボタンの文言は
+「Remote Controlで開く」から**「Claude Codeアプリで開く」**へ変えた（開く先がClaude Codeアプリ・
+claude.ai/codeであることを、Remote Controlという機能名を知らなくても読めるようにするため）。
+
 ## #1179 のジョブキューとの切り分け
 
 **この通知は`POST /api/dispatch/report`にも`POST /api/progress`にも何も足さない。**
@@ -1006,7 +1015,7 @@ Pre/PostToolUse（フック）
 対処は`reportDispatchSessions`（`isRevivedSession`）で、`ALIVE`でなくなった行が`ALIVE`へ戻る
 瞬間だけ`activity`・`activityAt`・`remoteControlUrl`を捨て、`firstSeenAt`を打ち直す。
 `remoteControlUrl`を一緒に捨てるのは、あれが**セッションごとに変わる**（`bridgeSessionId`）ため。
-残すと「Remote Controlで開く」が死んだセッションを開く。
+残すと「Claude Codeアプリで開く」が死んだセッションを開く。
 
 **`previewUrl`だけは残す。** あれはworktreeに固定のポートを指すので次のセッションでも繋がる
 一方、報告は起動時の1回だけで（`run-issue-session.sh`）、その時点の行がまだ`GONE`だと
@@ -1073,7 +1082,7 @@ pollerが作るので、取りこぼしても次のフックで載る。
 多く、そちらは何の合図も無いまま埋もれる。そこでコメント入力欄にも同じ案内を置く
 （`LocalSessionCommentNotice`）。
 
-- 枠と「Remote Controlで開く」の導線は`local-session-notice.tsx`の内部コンポーネントで共有し、
+- 枠と「Claude Codeアプリで開く」の導線は`local-session-notice.tsx`の内部コンポーネントで共有し、
   **文面だけを分ける**。片方だけ直して食い違うのを防ぐ
 - 出す条件は承認欄と同じ`executionTarget.expectsActionsRun === false`。Actionsで走っている
   Issueではコメントが実際に効くので出さない

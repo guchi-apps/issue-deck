@@ -352,8 +352,8 @@ const REAP_REASON_TEXT: Record<DispatchSessionReapReason, string> = {
   PR_MERGED: "PRがマージ済みのため",
   HANDOFF_PR_OPEN: "PRを作成しレビューへ引き渡し済みのため",
   HANDOFF_NO_PR: "PRを作らずにローカル作業を終えているため",
-  QUESTION_CLOSED: "質問Issueがcloseされているため",
-  QUESTION_IDLE: "質問セッションが放置されているため",
+  QUESTION_CLOSED: "対象のIssue（質問・手作業）がcloseされているため",
+  QUESTION_IDLE: "セッション（質問・手作業）が放置されているため",
   WORKTREE_GONE: "worktreeが削除されているため",
 };
 

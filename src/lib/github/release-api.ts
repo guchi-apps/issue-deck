@@ -6,6 +6,7 @@ import {
   MERGE_JUDGEMENT_UNKNOWN,
   type MergeJudgement,
   type PullRequestRollupTarget,
+  type RollupCiCheck,
 } from "@/lib/github/check-rollup";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
@@ -570,6 +571,10 @@ export type PullRequestCiState = {
   mergeable: boolean | null;
   /** 自動マージ可否の判定（`claude-review-develop.yml`）の進み具合（#1968） */
   mergeJudgement: MergeJudgement;
+  /** CIの内訳を開くためのrun id（#2777）。読めなければnull */
+  ciRunId: number | null;
+  /** CIの内訳に並べるチェック一覧（#2777）。CI状態と同じ母集団 */
+  ciChecks: RollupCiCheck[];
 };
 
 /**
@@ -593,6 +598,8 @@ export async function fetchPullRequestCiState(
     ciState: toCiState(rollup),
     mergeable,
     mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+    ciRunId: rollup?.ciRunId ?? null,
+    ciChecks: rollup?.ciChecks ?? [],
   };
 }
 
@@ -601,6 +608,8 @@ export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
   ciState: "unknown",
   mergeable: null,
   mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+  ciRunId: null,
+  ciChecks: [],
 };
 
 /**
@@ -626,6 +635,8 @@ export async function fetchPullRequestCiStates(
         ciState: toCiState(rollup),
         mergeable,
         mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+        ciRunId: rollup?.ciRunId ?? null,
+        ciChecks: rollup?.ciChecks ?? [],
       },
     ]),
   );

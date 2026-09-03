@@ -113,6 +113,7 @@ function makeHost(): DispatchHostView {
     codeReviewCapable: null,
     codexCapable: null,
     codexRemoteControlCapable: null,
+    manualStepSessionCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
@@ -319,12 +320,11 @@ describe("CreateIssueDialog の種別「質問」", () => {
     expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
   });
 
-  /** 質問のタイトルは質問文から機械生成する。付与ボタンを出す意味が無い（#1884） */
-  it("質問では「タイトル・ラベルを付与」を出さない", () => {
+  /** 質問のタイトルは質問文から機械生成する。判定し直す「付け直す」を出す意味が無い（#1884） */
+  it("質問では「付け直す」を出さない", () => {
     render(<Harness onCreated={vi.fn()} />);
     selectQuestion();
 
-    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
     expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
   });
 
@@ -373,9 +373,9 @@ describe("CreateIssueDialog の種別「質問」", () => {
 });
 
 /**
- * #1884。項目をすべて1画面に並べ、リポジトリは人が選び、タイトル・ラベルは
- * 「タイトル・ラベルを付与」を押したときだけ決まる。2ステップ（#1605）と
- * 内容からのリポジトリ推定（#1710・#1733）は廃止した。
+ * #1884。項目をすべて1画面に並べ、リポジトリは人が選ぶ。タイトル・ラベルは、空欄のまま
+ * 「作成」系ボタンを押した送信の直前に自動で決まる（#2773。専用の付与ボタンは廃止）。
+ * 2ステップ（#1605）と内容からのリポジトリ推定（#1710・#1733）も廃止した。
  */
 describe("CreateIssueDialog の1画面フォーム", () => {
   beforeEach(() => {
@@ -536,16 +536,16 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(suggestGenerate).not.toHaveBeenCalled();
   });
 
-  it("タイトルが空のあいだは、主ボタンが「タイトル・ラベルを付与」になる", () => {
+  /** #2773。「タイトル・ラベルを付与」の専用ステップを廃止し、常に「作成」系ボタンを出す */
+  it("タイトルが空でも、最初から「作成」「作成+実装開始」「付け直す」が出ている", () => {
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
 
-    expect(screen.getByRole("button", { name: "タイトル・ラベルを付与" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "作成" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
-    // 同じことをする口を2つ同時に出さない
-    expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
+    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "作成+実装開始" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "付け直す" })).not.toBeNull();
   });
 
   /**
@@ -567,50 +567,55 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(cancelFirst()).toBe("キャンセル");
   });
 
-  it("本文が空・リポジトリ未選択のあいだは付与を押せない", () => {
+  it("本文もタイトルも空・リポジトリ未選択のあいだは作成系ボタンを押せない", () => {
     render(<Harness onCreated={vi.fn()} defaultRepositoryFullName={null} />);
 
-    const button = () => screen.getByRole("button", { name: "タイトル・ラベルを付与" });
-    expect((button() as HTMLButtonElement).disabled).toBe(true);
+    const createButton = () => screen.getByRole("button", { name: "作成" });
+    const createAndStartButton = () => screen.getByRole("button", { name: "作成+実装開始" });
+    expect((createButton() as HTMLButtonElement).disabled).toBe(true);
+    expect((createAndStartButton() as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    // 本文が入ってもリポジトリが決まらなければ押せない（ラベルの取得先が無い）
-    expect((button() as HTMLButtonElement).disabled).toBe(true);
+    // 本文があれば送信時に自動判定できるが、リポジトリが決まらなければ押せない
+    expect((createButton() as HTMLButtonElement).disabled).toBe(true);
 
     pickRepository(REPOSITORY_FULL_NAME);
-    expect((button() as HTMLButtonElement).disabled).toBe(false);
+    expect((createButton() as HTMLButtonElement).disabled).toBe(false);
+    expect((createAndStartButton() as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("付与を押すと、同じ画面のタイトル・ラベルが埋まって主ボタンが「作成」に変わる", async () => {
+  /** #2773。タイトルが空のまま「作成」を押すと、送信前に自動でタイトル・ラベルを判定してから作成する */
+  it("タイトルが空のまま「作成」を押すと、自動判定してから作成する", async () => {
     suggestGenerate.mockResolvedValue({ title: "タイトル案", labels: ["51.improvement"] });
-    render(<Harness onCreated={vi.fn()} />);
+    const onCreated = vi.fn();
+    render(<Harness onCreated={onCreated} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
-    await waitFor(() =>
-      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    expect(createIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "タイトル案", labels: ["51.improvement"] }),
     );
-    expect(screen.queryByText("51.improvement")).not.toBeNull();
-    expect(screen.getAllByText("自動")).toHaveLength(2);
-    // 画面は切り替わらない（本文の入力欄が出たまま）
-    expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("本文");
-    expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
   });
 
-  it("タイトルを自分で書いた場合は、付与ではなく「作成」を出す", () => {
+  it("タイトルを自分で書いていれば、作成時に自動判定を呼ばない", async () => {
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
 
-    expect(screen.queryByRole("button", { name: "タイトル・ラベルを付与" })).toBeNull();
     expect(screen.getByRole("button", { name: "作成" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "作成+実装開始" })).not.toBeNull();
-    // 付け直しはこちらへ移る
+    // 付け直しは変わらずこちらから
     expect(screen.getByRole("button", { name: "付け直す" })).not.toBeNull();
     expect(screen.queryByText("自動")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    expect(suggestGenerate).not.toHaveBeenCalled();
+    expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ title: "自分で書いた" }));
   });
 
   it("「付け直す」でも同じ生成を呼ぶ", async () => {
@@ -629,13 +634,17 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     );
   });
 
-  /** #1710。空欄と「決められなかった」は見分けが付かない */
+  /**
+   * #1710。空欄と「決められなかった」は見分けが付かない。作成が即進む「作成」経由では
+   * 見る間もなく閉じてしまうため、その場に留まる「付け直す」経由で確認する（#2773）。
+   */
   it("ラベルが1つも決まらなかったときは、その旨を出す", async () => {
     suggestGenerate.mockResolvedValue({ title: "タイトル案", labels: [] });
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    fireEvent.click(screen.getByRole("button", { name: "付け直す" }));
 
     await waitFor(() =>
       expect(
@@ -644,13 +653,27 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     );
   });
 
+  /** #2773。判定に失敗したら作成を中断し、タイトルは空のまま自分で書ける状態を保つ */
+  it("生成に失敗したら作成を中断する", async () => {
+    suggestState.notConfigured = true;
+    suggestGenerate.mockResolvedValue(null);
+    render(<Harness onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(suggestGenerate).toHaveBeenCalledTimes(1));
+    expect(createIssue).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("");
+  });
+
   it("生成できなくても、自分で書いて作成できる", async () => {
     suggestState.notConfigured = true;
     suggestGenerate.mockResolvedValue(null);
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
     await waitFor(() => expect(suggestGenerate).toHaveBeenCalledTimes(1));
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
@@ -668,7 +691,7 @@ describe("CreateIssueDialog の1画面フォーム", () => {
  * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
  */
 /**
- * #1890。「タイトル・ラベルを付与」の応答に種別が乗る。質問だと判定されても**種別は変えず**、
+ * #1890。AI判定の応答に種別が乗る。質問だと判定されても**種別は変えず**、
  * 切り替えるかどうかは押した人が決める。
  */
 describe("CreateIssueDialog の質問への切り替え提案", () => {
@@ -684,6 +707,10 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     window.localStorage.clear();
   });
 
+  /**
+   * #2773。タイトルが空のまま「作成」を押させて自動判定を起こす。判定結果が「質問のようです」
+   * のときは`createIssue`まで進まず、その場で止まって提案を出す（`ensureTitleAndLabels`）。
+   */
   async function generateAsQuestion() {
     suggestGenerate.mockResolvedValue({
       kind: "question",
@@ -693,9 +720,10 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
     await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
+    expect(createIssue).not.toHaveBeenCalled();
   }
 
   it("質問だと判定されても種別は変えず、提案だけを出す", async () => {
@@ -710,8 +738,10 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     suggestGenerate.mockResolvedValue({ kind: "issue", title: "タイトル案", labels: [] });
     render(<Harness onCreated={vi.fn()} />);
 
+    // 「作成」を押すと生成成功時にそのまま作成まで進んでしまうため、その場に留まる
+    // 「付け直す」で判定結果だけを確かめる（タイトルは空のままでも押せる・#2773）
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "並び順を変えたい" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.click(screen.getByRole("button", { name: "付け直す" }));
 
     await waitFor(() =>
       expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),
@@ -761,7 +791,7 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     );
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
     await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
@@ -772,7 +802,7 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
   });
 
   /**
-   * #1890。判定を起こす「タイトル・ラベルを付与」はフッターにあり、提案は先頭の種別欄の下に出る。
+   * #1890。判定を起こす「作成」はフッターにあり、提案は先頭の種別欄の下に出る。
    * ダイアログは中身ごとスクロールするため、寄せないと押した位置からは見えないことがある。
    */
   it("提案を出したら、その位置まで画面を寄せる", async () => {
@@ -945,7 +975,7 @@ describe("CreateIssueDialog の選んだリポジトリの保持", () => {
     expect((screen.getByLabelText("内容") as HTMLTextAreaElement).value).toBe("書きかけの本文");
   });
 
-  it("「タイトル・ラベルを付与」を押しても、選び直したリポジトリは変わらない", async () => {
+  it("自動判定（付け直す）を実行しても、選び直したリポジトリは変わらない", async () => {
     suggestGenerate.mockResolvedValue({ kind: "issue", title: "タイトル案", labels: [] });
     render(
       <Harness onCreated={vi.fn()} repositories={[makeRepository(), makeOtherRepository()]} />,
@@ -953,7 +983,8 @@ describe("CreateIssueDialog の選んだリポジトリの保持", () => {
     pickRepository(OTHER_REPOSITORY_FULL_NAME);
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "タイトル・ラベルを付与" }));
+    // 「作成」だと生成成功時に即作成へ進むため、その場に留まる「付け直す」で確かめる（#2773）
+    fireEvent.click(screen.getByRole("button", { name: "付け直す" }));
 
     await waitFor(() =>
       expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案"),

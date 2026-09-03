@@ -242,7 +242,16 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - 大規模な依存関係の更新
 - `develop`→`main`のマージ
 
-上記カテゴリに該当するかどうかによらず、Issueに`22.merge-confirm-required`ラベルが付いている場合も、develop向けPRへのpushのたびに常に`00.check-user`が付与され自動マージがスキップされる（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
+**ただしissue-deck自身のdevelop向けPRでは、`develop`→`main`を除く上記カテゴリで自動マージを止めない**（#2775）。`develop`はリリース前の統合先で、本番へ出るには`develop`→`main`のリリースPR（このカテゴリのまま・人がマージする）をもう1回通るため、develop向けPRの側で毎回「確認待ち」の札を積む価値が薄かった。切り替えは共有ワークフロー`reusable-claude-review-develop.yml`の`merge-policy`入力（`strict`＝既定・従来どおり／`relaxed`）で、issue-deckのcaller（`.github/workflows/claude-review-develop.yml`）だけが`relaxed`を指定している。**他リポジトリは`strict`のままなので、上のカテゴリがそのまま効く。**
+
+`relaxed`でもdevelop向けPRのマージが止まるのは次の4つ。
+
+- Issueに`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`のいずれかが付いている
+- `.shared-context/`（共有知識リポジトリのcheckout先）が差分に混入している
+- Claudeの自動レビューが「実際に直すべき問題がある」と判定した
+- `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）
+
+**`relaxed`は「レビューを省く」ことではない。** カテゴリに該当したPRでは従来どおりClaudeの自動レビューが走り、止めるかどうかだけがレビューの判定に委ねられる。したがって、マージ前に必ず自分の目で通したい変更には`22.merge-confirm-required`を明示的に付ける（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
 
 **「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 

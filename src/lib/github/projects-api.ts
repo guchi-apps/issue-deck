@@ -148,6 +148,117 @@ export async function fetchProjectItems(
   }
 }
 
+/** リポジトリ1件ぶんのopenなIssueと、盤面でのStatus（#2774） */
+export type RepositoryIssueStatus = {
+  issueNumber: number;
+  /** Statusフィールドの選択肢名（例: "Develop"）。盤面へ未登録・Status未設定ならnull */
+  status: string | null;
+};
+
+/** 1回のクエリで取得するIssue数。GraphQLのconnectionは最大100 */
+const REPOSITORY_ISSUES_PAGE_SIZE = 100;
+
+/**
+ * 1つのIssueについて見るProjectアイテムの数。フリートの盤面は1つだが、
+ * 他のProjectにも載っているIssueで取りこぼさない程度の余裕を持たせる。
+ */
+const ISSUE_PROJECT_ITEMS = 10;
+
+/**
+ * **1リポジトリぶんのopenなIssueとStatusを、盤面を全走査せずに引く（#2774）。**
+ *
+ * `fetchProjectItems`は盤面の全アイテムをページングするため、フリート全体で1,600件を超えた
+ * 時点で1回の呼び出しに約40秒かかるようになった。`GET /api/progress?status=...`の呼び出し側は
+ * `curl -m 20`で待つため、リリースPRの対象一覧が丸ごと落ちる形の事故（#2715・#2689）が
+ * 起きていた。**欲しいのは1リポジトリぶんなので、リポジトリ側から辿れば1クエリで済む。**
+ *
+ * 盤面の全走査が要るのは定期巡回（`progress-sweep-run.ts`）のようにフリート全体を見る処理
+ * だけで、そちらは`fetchProjectItems`のまま。
+ *
+ * `states: OPEN`で絞るため、closedなIssueは返らない（`queryIssuesByProgressStatus`が
+ * `issueOpen`で落としていたのと同じ結果になる）。
+ */
+export async function fetchRepositoryOpenIssueStatuses(params: {
+  /** 盤面の所有organization */
+  projectOwner: string;
+  /** 盤面の番号 */
+  projectNumber: number;
+  repositoryOwner: string;
+  repositoryName: string;
+  token: string;
+}): Promise<RepositoryIssueStatus[]> {
+  type RawIssue = {
+    number: number;
+    projectItems: {
+      nodes: {
+        project: { number?: number; owner?: { login?: string } | null } | null;
+        fieldValueByName: { name?: string } | null;
+      }[];
+    };
+  };
+
+  const results: RepositoryIssueStatus[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const data: {
+      repository: {
+        issues: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: RawIssue[] };
+      } | null;
+    } = await graphql(
+      params.token,
+      `query($owner: String!, $name: String!, $first: Int!, $after: String, $items: Int!) {
+        repository(owner: $owner, name: $name) {
+          issues(states: OPEN, first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              number
+              projectItems(first: $items) {
+                nodes {
+                  project {
+                    number
+                    owner {
+                      ... on Organization { login }
+                      ... on User { login }
+                    }
+                  }
+                  fieldValueByName(name: "Status") {
+                    ... on ProjectV2ItemFieldSingleSelectValue { name }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        owner: params.repositoryOwner,
+        name: params.repositoryName,
+        first: REPOSITORY_ISSUES_PAGE_SIZE,
+        after: cursor,
+        items: ISSUE_PROJECT_ITEMS,
+      },
+      "fetchRepositoryOpenIssueStatuses",
+    );
+
+    const issues = data.repository?.issues;
+    if (!issues) return results;
+
+    for (const node of issues.nodes) {
+      // 同じIssueが複数のProjectに載っていることがあるため、対象の盤面のアイテムだけを見る
+      const item = node.projectItems?.nodes?.find(
+        (candidate) =>
+          candidate.project?.number === params.projectNumber &&
+          candidate.project?.owner?.login === params.projectOwner,
+      );
+      results.push({ issueNumber: node.number, status: item?.fieldValueByName?.name ?? null });
+    }
+
+    if (!issues.pageInfo.hasNextPage) return results;
+    cursor = issues.pageInfo.endCursor;
+  }
+}
+
 /** StatusフィールドのidとProject自身のid。Statusの書き込みに必要な識別子一式 */
 export type ProjectStatusField = {
   /** ProjectV2 の node ID */

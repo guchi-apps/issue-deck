@@ -40,13 +40,26 @@ type IssuePullRequestListProps = {
   /** マージを実行する。成功したらtrueを返す。省略するとマージボタンを出さない */
   onMerge?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   onMerged?: (pullRequestNumber: number) => void;
+  /**
+   * PRをマージせずにクローズし、Issueも「対応終了」としてクローズする（#2780「マージしない」）。
+   * 成功したらtrueを返す。省略すると「マージしない」ボタンを出さない
+   */
+  onDecline?: (pullRequestNumber: number) => Promise<boolean> | boolean;
+  onDeclined?: (pullRequestNumber: number) => void;
   /** この画面でマージ済みにしたPR番号。GitHub側の反映を待たずに「マージ済み」を出すため */
   mergedNumbers?: ReadonlySet<number>;
+  /** この画面で「マージしない」を実行したPR番号（#2780）。マージ済みと同じく楽観表示に使う */
+  declinedNumbers?: ReadonlySet<number>;
   /** 直近にマージを実行したPR番号。実行中の表示とエラーの表示先を決める */
   mergeTargetNumber?: number | null;
   isMerging?: boolean;
+  /** 直近に「マージしない」を実行したPR番号（#2780） */
+  declineTargetNumber?: number | null;
+  isDeclining?: boolean;
   /** マージ失敗時のエラーメッセージ。`mergeTargetNumber`の行に出す */
   mergeError?: string | null;
+  /** 「マージしない」失敗時のエラーメッセージ。`declineTargetNumber`の行に出す（#2780） */
+  declineError?: string | null;
   /**
    * `card`（既定）は枠と「対応PR」の見出しを付ける。Issue本文の上に単独で置くときの形。
    * `plain`は行だけを出す。コメント欄のマージ待ちカードのように、既に枠と見出しを持つ
@@ -140,10 +153,16 @@ export function IssuePullRequestList({
   mergeApprovalPending,
   onMerge,
   onMerged,
+  onDecline,
+  onDeclined,
   mergedNumbers,
+  declinedNumbers,
   mergeTargetNumber,
   isMerging,
+  declineTargetNumber,
+  isDeclining,
   mergeError,
+  declineError,
   variant = "card",
   notice,
   className,
@@ -174,9 +193,10 @@ export function IssuePullRequestList({
           // 取得が終わるまでは押せなくする。終わったのに詳細が無い行（取得失敗）は従来どおり
           const detailPending = !detail && isLoadingDetails;
           const merged = Boolean(mergedNumbers?.has(link.number)) || Boolean(detail?.merged);
+          const declined = Boolean(declinedNumbers?.has(link.number));
           // 詳細が取れていない行では判断材料が無いので、マージできる前提で出す
           const canMerge = detail ? canMergeIssuePullRequest(detail) : true;
-          const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (canMerge || merged);
+          const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (canMerge || merged || declined);
 
           return (
             <li key={link.number} className="flex min-w-0 flex-wrap items-center gap-2">
@@ -203,13 +223,23 @@ export function IssuePullRequestList({
                   className="ml-auto"
                   onMerge={() => onMerge(link.number)}
                   onMerged={() => onMerged?.(link.number)}
+                  onDecline={onDecline ? () => onDecline(link.number) : undefined}
+                  onDeclined={() => onDeclined?.(link.number)}
                   pullRequestNumber={link.number}
                   ciStatus={detail?.ciStatus ?? null}
                   mergeJudgement={detail?.mergeJudgement ?? null}
                   isDetailPending={detailPending}
                   isMerging={Boolean(isMerging) && mergeTargetNumber === link.number}
                   isMerged={merged}
-                  error={mergeTargetNumber === link.number ? mergeError : null}
+                  isDeclining={Boolean(isDeclining) && declineTargetNumber === link.number}
+                  isDeclined={declined}
+                  error={
+                    mergeTargetNumber === link.number
+                      ? mergeError
+                      : declineTargetNumber === link.number
+                        ? declineError
+                        : null
+                  }
                 />
               )}
             </li>

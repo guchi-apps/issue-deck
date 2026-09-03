@@ -2,8 +2,8 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { getProjectLocation } from "@/lib/github/project-location";
 import {
-  fetchProjectItems,
   fetchProjectStatusField,
+  fetchRepositoryOpenIssueStatuses,
   findIssueProjectState,
 } from "@/lib/github/projects-api";
 import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress";
@@ -91,6 +91,11 @@ export type IssueListQueryResult =
  * **closedなIssueは返さない。** 元のラベル検索が`--state open`で絞っていたのと揃える。
  * closedのまま`Done`以外のStatusで盤面に残っているIssue（人が直接closeした等）を
  * リリースの対象に含めると、閉じたIssueを閉じ直すだけの無駄な操作になる。
+ *
+ * **探し方はリポジトリ側から辿る**（#2774）。盤面の全アイテムをページングしていた頃は、
+ * フリート全体が1,600件を超えた時点で1回の問い合わせに約40秒かかるようになり、
+ * 呼び出し側の`curl -m 20`が必ず時間切れになっていた。欲しいのは1リポジトリぶんなので、
+ * `fetchRepositoryOpenIssueStatuses`でそのリポジトリのopenなIssueだけを引く。
  */
 export async function queryIssuesByProgressStatus(params: {
   repositoryFullName: string;
@@ -106,15 +111,19 @@ export async function queryIssuesByProgressStatus(params: {
   const { location, repository, token } = context;
 
   const wanted = new Set(params.statuses);
-  const items = await fetchProjectItems(location.owner, location.number, token);
-  const numbers = items
-    .filter((item) => item.repositoryDatabaseId === repository.githubRepositoryId)
-    .filter((item) => item.issueOpen)
-    .filter((item) => {
-      const key = item.status ? matchProjectStatus(item.status) : null;
+  const issues = await fetchRepositoryOpenIssueStatuses({
+    projectOwner: location.owner,
+    projectNumber: location.number,
+    repositoryOwner: repository.ownerLogin,
+    repositoryName: repository.name,
+    token,
+  });
+  const numbers = issues
+    .filter((issue) => {
+      const key = issue.status ? matchProjectStatus(issue.status) : null;
       return key !== null && wanted.has(key);
     })
-    .map((item) => item.issueNumber);
+    .map((issue) => issue.issueNumber);
 
   return { available: true, issues: [...new Set(numbers)].sort((a, b) => a - b) };
 }
