@@ -18,6 +18,12 @@ vi.mock("@/lib/notifications/push", () => ({
   isPushConfigured: vi.fn(() => false),
   sendPushNotification: vi.fn(),
 }));
+// 夜間実行の保留（#2772）はDBを読むので、ここでは「止めるものは無い」に固定する
+vi.mock("@/lib/nightly-run-db", () => ({
+  selectNightlyRunPushHold: vi.fn(async () => null),
+  nightlyRunIssueKey: (repositoryFullName: string, issueNumber: number) =>
+    `${repositoryFullName}#${issueNumber}`,
+}));
 
 const NOW = new Date("2026-08-22T12:00:00.000Z");
 
@@ -32,6 +38,21 @@ describe("decideCheckUserPush", () => {
     expect(
       decideCheckUserPush({ labels: [CHECK_USER], checkUserLabeledAt: at(5_000), now: NOW }),
     ).toBe("wait");
+  });
+
+  it("夜間実行の保留（holdUntil）が未来なら、待ちが生きていても送らない（#2772）", () => {
+    const input = {
+      labels: [CHECK_USER, { name: "01.check-plan" }],
+      checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
+      hasPendingSessionRequest: true,
+      now: NOW,
+    };
+    expect(decideCheckUserPush({ ...input, holdUntil: new Date(NOW.getTime() + 60_000) })).toBe(
+      "wait",
+    );
+    // 保留が明けていれば従来どおり（待ちがあるので待たずに送る）
+    expect(decideCheckUserPush({ ...input, holdUntil: at(1) })).toBe("send");
+    expect(decideCheckUserPush({ ...input, holdUntil: null })).toBe("send");
   });
 
   it("既定の待ち時間を過ぎたら送る", () => {

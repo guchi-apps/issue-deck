@@ -5,6 +5,7 @@ import {
   History,
   Loader2,
   MonitorPlay,
+  Moon,
   Rocket,
   Settings,
 } from "lucide-react";
@@ -85,6 +86,10 @@ type MobileHomeScreenProps = {
   previewRunning: boolean;
   /** 「リリース履歴」画面を開く（#2726）。「ブランチ」「確認環境」と同じくメニューへ直接1行として置く */
   onSelectReleaseHistory: () => void;
+  /** 「夜間実行」画面を開く（#2772）。「確認環境」「リリース履歴」と同じくメニューへ直接1行として置く */
+  onSelectNightlyRun: () => void;
+  /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す */
+  nightlyRunQueuedCount: number | null;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -170,6 +175,8 @@ export function MobileHomeScreenView({
   onSelectPreview,
   previewRunning,
   onSelectReleaseHistory,
+  onSelectNightlyRun,
+  nightlyRunQueuedCount,
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -488,6 +495,14 @@ export function MobileHomeScreenView({
                 onClick={onSelectReleaseHistory}
                 count={null}
                 title="全リポジトリのGitHub Releaseを時系列で見る"
+              />
+              {/* 夜間実行（#2772）。数字は今夜の予定の件数（PCの左メニューと同じ） */}
+              <MobileNavRow
+                label="夜間実行"
+                icon={Moon}
+                onClick={onSelectNightlyRun}
+                count={nightlyRunQueuedCount}
+                title="今夜の予定と、前の夜の結果を見る"
               />
             </ul>
           </div>

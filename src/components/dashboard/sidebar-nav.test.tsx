@@ -58,6 +58,7 @@ function renderSidebar(
       onSelectPreview={() => {}}
       onSelectUsage={() => {}}
       onSelectReleaseHistory={() => {}}
+      onSelectNightlyRun={() => {}}
       onLaunchNewApp={() => {}}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
@@ -105,6 +106,7 @@ function renderSidebarWithRepositories(
       onSelectPreview={() => {}}
       onSelectUsage={() => {}}
       onSelectReleaseHistory={() => {}}
+      onSelectNightlyRun={() => {}}
       onLaunchNewApp={() => {}}
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
@@ -378,11 +380,12 @@ describe("SidebarNav", () => {
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 16)).toEqual([
+    expect(labels.slice(0, 17)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
       "ブランチ",
+      "夜間実行",
       "AI使用量",
       "リリース履歴",
       "すべてのIssue",
