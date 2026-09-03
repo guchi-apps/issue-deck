@@ -47,6 +47,18 @@ export function parseImageRetentionDays(value: unknown): number | null {
   return (IMAGE_RETENTION_DAYS_OPTIONS as readonly number[]).includes(value) ? value : null;
 }
 
+// 夜間実行（#2772）の開始時刻として選べる「時」（日本時間）。**夜のあいだに限る**——
+// 昼の時刻を選べる形にすると「夜間実行」という名前と挙動が食い違い、人が席にいる時間帯に
+// 無人の実装が走り出す。22時から翌5時までの1時間刻みで、並びは夜の順（22 → 5）。
+// 窓の判定（開始から3時間）とJSTへの変換は`src/lib/nightly-run.ts`が持つ。
+export const NIGHTLY_RUN_START_HOUR_OPTIONS = [22, 23, 0, 1, 2, 3, 4, 5] as const;
+export const NIGHTLY_RUN_START_HOUR_DEFAULT = 1;
+
+export function parseNightlyRunStartHour(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (NIGHTLY_RUN_START_HOUR_OPTIONS as readonly number[]).includes(value) ? value : null;
+}
+
 // claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの候補値（#622）。
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない

@@ -18,7 +18,7 @@ name: Reusable Claude Code Review (develop向けPR)
 #   risky・reasons・already-check-userの各outputで渡す。
 #   あわせて、後続のclaude-reviewを実行するかどうかのゲート判定(needs-review出力)も行う(#992)。
 #   **変更カテゴリ(パス・依存関係)でマージを止めるかどうかはmerge-policy入力で切り替わる**
-#   (#2775。strict=既定・止める / relaxed=止めない)。relaxedでも該当自体は検出し、
+#   (#2775。relaxed=既定・止めない / strict=止める。既定の反転は#2790)。relaxedでも該当自体は検出し、
 #   needs-reviewの側にだけ反映するため、レビューの実行条件は変わらない。
 #   ラベルによる明示的指定と.shared-context/の混入は、relaxedでも従来どおり止める
 # - claude-review: Claude Codeによる意味的なレビュー・自動マージ不可カテゴリ判定。
@@ -148,14 +148,19 @@ on:
         description: >-
           変更カテゴリ(DBマイグレーション・ワークフロー・.env・認証・依存のメジャー更新・
           risk-pathsの追加分)を「自動マージを止める理由」として扱うか(#2775)。
-          strict(既定・従来どおり止める) / relaxed(止めずに自動マージへ進む)。
+          relaxed(既定・止めずに自動マージへ進む) / strict(従来どおり止める)。
+          **既定はrelaxedで、callerを持つ全リポジトリへ一律に効く**(#2790)。
+          developはリリース前の統合先で、本番へ出るには develop -> main のリリースPR
+          (自動マージ不可カテゴリのまま・人がマージする)をもう1回通るため、
+          develop向けPRの側で毎回「確認待ち」の札を積む価値が薄い。
+          カテゴリで止めたいリポジトリだけが caller に strict と書く(オプトアウト)。
           relaxedでも、Issueのラベル(22.merge-confirm-required・23.preview-required・
           24.screenshot-required)・.shared-context/の混入・claude-reviewの意味的判定は
           従来どおりマージを止める。**カテゴリ該当時にclaude-reviewを実行する条件は
           relaxedでも変わらない**(止めるのをやめるだけで、レビューは省かない)。
         required: false
         type: string
-        default: strict
+        default: relaxed
       prompts-ref:
         description: >-
           プロンプト(.github/prompts/)の取得元とするissue-deckのref。
@@ -265,6 +270,9 @@ jobs:
           # ログにだけ使う。
           RELAXED_REASONS=""
 
+          # **入力の既定はrelaxed**(#2790)。ここのフォールバックが効くのは
+          # env:の渡し忘れ・空文字を明示的に渡した場合だけで、そのときは安全側のstrictへ倒す。
+          # 「既定」の正は上のinputsのdefault:で、ここは事故に備えた安全弁。役割が違う。
           MERGE_POLICY="${MERGE_POLICY:-strict}"
           case "$MERGE_POLICY" in
             strict|relaxed) ;;
@@ -282,13 +290,16 @@ jobs:
 
           # 変更カテゴリ(パス・依存関係)による該当(#2775)。
           #
-          # **strictでは従来どおりマージを止め、relaxedでは止めない。** relaxedにしたのは
+          # **relaxed(既定)では止めず、strictでは従来どおりマージを止める。** relaxedを既定にしたのは
           # 「この種類のファイルを触った」こと自体は、developへ入れてよいかの判断材料として
           # 弱いため。developはリリース前の統合先で、本番へ出るには develop -> main の
           # リリースPR(自動マージ不可カテゴリのまま・人がマージする)をもう1回通る。
           #
           # 止めないだけで、**レビューを省くことはしない**。relaxedで拾った理由は
           # RELAXED_REASONSへ入れ、下のレビュー実行ゲートが従来と同じようにレビューを走らせる。
+          #
+          # #2790でこれをcallerを持つ全リポジトリの既定にした。カテゴリで止めたい
+          # リポジトリだけがcallerに merge-policy: strict と書く(オプトアウト)。
           add_category_reason() {
             if [ "$MERGE_POLICY" = "relaxed" ]; then
               RELAXED_REASONS="${RELAXED_REASONS}${RELAXED_REASONS:+$'\n'}- $1"

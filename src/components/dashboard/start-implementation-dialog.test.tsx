@@ -31,6 +31,12 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
   useProgressStatusMutation: () => ({ setProgressStatus }),
 }));
 
+// 夜間実行（#2772）の設定。タイルの説明に時刻を出すためだけの取得で、ここでは`fetch`の
+// 呼び出し回数を数えるテスト（おまかせ）に混ざらないようフックごと差し替える
+vi.mock("@/hooks/use-nightly-run", () => ({
+  useNightlyRunSettings: () => null,
+}));
+
 // モデルの自動選択（#2723）。**押したときだけ呼ばれる**ことも検証したいので、フックごと
 // 差し替えず`fetch`の口を差し替える
 const modelPickFetch = vi.fn();

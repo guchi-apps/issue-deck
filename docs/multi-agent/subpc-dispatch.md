@@ -2405,6 +2405,67 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 判定を持っているのはpollerで、アプリ設定をpollerへ届ける経路が無く、「割り当ての判定はpoller側の
 まま」（#1394）を崩す。
 
+> **#2772で「時刻が来たら起動する」仕組み自体は入れた**（次節「夜間実行」）。#1541の時点で
+> 断った理由は「VPSにcronやワーカーを増やす」ことで、その後に入った巡回の作法（#2294。
+> **pollerが30秒ごとに叩き、時刻・間隔の判定はサーバー側の純関数が持つ**）ではその前提が
+> 消えている。**同時実行数を時間帯で切り替える**ことは引き続き持たず、夜間実行も
+> `dispatchConcurrency`にそのまま従う。
+
+### 夜間実行（#2772）
+
+「今夜の夜間実行」に積んだIssueを、開始時刻（既定01:00・日本時間）から3時間の窓のあいだに
+サブPCへ順に起動する。起動後はいつもの経路（PR作成→自動レビュー→developへ自動マージ）で
+「本番反映待ち」まで進み、朝は左メニュー「夜間実行」（スマホはホームのメニュー）で結果を5つ
+（本番反映待ち／確認が必要／実行中／止まった／見送り）に分けて見る。
+
+```text
+「実装を開始」→ 実行先「今夜の夜間実行」   POST /api/nightly-run（NightlyRunEntry・QUEUED）
+  ↓ 時刻が来る
+poller の POST /api/dispatch/claim（非fast）  → launchNightlyRunEntries（そのホストの予定だけ）
+  ↓ 実ラベルを読んで判定 → enqueueDispatchJob → 11.local   （enqueue-issue.ts と同じ順）
+DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降はいつもの経路
+```
+
+- **予定は`DispatchJob`と別の表（`NightlyRunEntry`）に持つ。** ジョブは積んだ瞬間から払い出しの
+  対象で、予定は時刻が来るまで払い出されてはいけない。時刻が来た時点で`enqueueDispatchJob`を
+  **通して**変換する（積めない組み合わせの判定を2か所に持たない）。`activeKey`（未処理の間だけ
+  `owner/repo#番号`）で同じIssueの二重投入を防ぐ形もジョブと同じ
+- **契機は`POST /api/dispatch/claim`への相乗り**（確認待ちPushの巡回と同じ）。ブラウザを開いて
+  いなくても回る唯一の定期経路で、pollerの変更は要らない。**時刻の判定はサーバー側の純関数**
+  （`src/lib/nightly-run.ts`の`resolveNightlyRunWindow`）で、`toJstParts`を通してJSTへ明示的に
+  変換する——本番のVPSもサブPCもUTCで動いており、`getHours()`では9時間ずれる
+- **窓を過ぎた予定は翌夜へ持ち越さず「見送り」にする。** サブPCが窓のあいだ応答していなければ、
+  朝に「実行時間のあいだに起動できませんでした」と出る。黙って翌夜に走る方が怖い
+- **承認・回答を代わりに押す経路は持たない**（[gates.md](gates.md)）。「計画が必要」のIssueは
+  計画の投稿で止まり、朝に人が承認する。**画面の承認パネルは30分で閉じる**ので、朝の承認は
+  Remote Control／端末から行う（画面から承認し直せるようにするのは別Issue）
+- **人が居ないと進まないオプションは積ませない**（計画レビューG1の指摘）。`23.preview-required`・
+  `25.artifact-required`が付いているIssueは、積む時点（ダイアログ・API）と起動する時点（夜のあいだに
+  付いたもの）の両方で弾く。判定は**Issueの実ラベル**で、ダイアログのチェックの状態ではない
+  （`applyOptionLabels`は足すだけで、外しても残るため）。`22.merge-confirm-required`（朝に自分の目で
+  通す札）と`24.screenshot-required`（セッションだけで完了できる）は積める
+- **深夜に鳴らさない。** 計画の投稿は`00.check-user`＋`01.check-plan`を付け、確認待ちのPushは
+  待ちがあれば待ち時間ゼロで送る。夜間実行で起動したIssueについては翌朝7:00（`NIGHTLY_RUN_MORNING_HOUR`）
+  まで送らない（`decideCheckUserPush`の`holdUntil`）。朝7:00に届く通知が、そのまま「手で対応が
+  要るもの」の合図になる
+- **GitHubへの読み書きは積んだ人のトークン**（`withUserGithubToken`）。ラベルの付与を人の操作として
+  残すためで、インストールトークンにすると`issue-deck[bot]`が着手したように見える。切れていれば
+  見送りとして朝に出す
+- **既定はOFF。** 無人で実装が進む処理なので、画像の自動削除と同じく人が納得してから有効にする。
+  設定（有効／無効・開始時刻22〜5時）は「夜間実行」画面の右上で**切り替えた時点で保存**し、
+  設定ダイアログの「実行設定」には載せない（あちらは保存を押すまで効かない値の区分）
+- **起動先はサブPCのみ。** GitHub Actionsは、botが投稿した`@claude`コメントが権限チェックを通るか
+  未確認のため今回は見送った（必要なら別Issue）
+
+| 場所 | 役割 |
+|---|---|
+| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類の純関数。`now`は引数で受ける |
+| `src/lib/nightly-run-db.ts` | 設定の読み出し・Pushの保留対象（DBだけ。GitHub Appの認証を引きずらない） |
+| `src/lib/nightly-run-launch.ts` | 予定をジョブへ変換する（claimから呼ぶ） |
+| `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ） |
+| `src/app/api/nightly-run/` | 一覧・積む・取り消す・設定 |
+| `src/components/dashboard/nightly-run-panel.tsx` | 画面（PC・スマホ共用） |
+
 ## API
 
 | ルート | 認証 | 用途 |

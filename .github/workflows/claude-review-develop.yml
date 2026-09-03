@@ -41,15 +41,13 @@ jobs:
     with:
       review-file-threshold: "10"
       review-line-threshold: "500"
-      # 変更カテゴリ(DBマイグレーション・ワークフロー・.env・認証・依存のメジャー更新)では
-      # developへのマージを止めない(#2775)。developはリリース前の統合先で、本番へ出るには
-      # develop -> main のリリースPR(自動マージ不可カテゴリのまま・人がマージする)をもう1回
-      # 通るため、ここで毎回「確認待ち」の札を積む価値が薄かった。
-      # **レビューは従来どおり実行する。** 止めるのをやめるだけで、省いてはいない。
+      # **merge-policyは指定しない。** 変更カテゴリ(DBマイグレーション・ワークフロー・.env・
+      # 認証・依存のメジャー更新)でdevelopへのマージを止めないのは#2775で決めたとおりだが、
+      # #2790でその relaxed を再利用ワークフロー側の**既定**にしたため、ここで明示する必要が
+      # 無くなった(明示を残すと「issue-deckだけが特別」と読めてしまう)。
+      # カテゴリで止めたいリポジトリだけが merge-policy: strict と書く(オプトアウト)。
       # relaxedでも止まるのは、22.merge-confirm-required・23.preview-required・
       # 24.screenshot-required・.shared-context/の混入・claude-reviewが要修正と判定した場合。
-      # 他リポジトリはstrict(既定)のまま。配布は別Issueで行う。
-      merge-policy: relaxed
     secrets: inherit
     permissions:
       contents: write

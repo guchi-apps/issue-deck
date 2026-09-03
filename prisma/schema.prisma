@@ -409,7 +409,74 @@ model AppSetting {
   // 最悪の状態が成立する。nullの間は自動削除を一切行わない
   imageScanCompletedAt DateTime?
 
+  // 夜間実行（#2772）。「今夜の夜間実行」に積んだIssueを、開始時刻にサブPCへ順に起動する。
+  // **既定はOFF**——無人で実装が進む処理なので、画像の自動削除と同じく人が納得してから有効にする。
+  // OFFの間は積んであるIssueも起動しない（予定は残る）
+  nightlyRunEnabled   Boolean  @default(false)
+  // 夜間実行の開始時刻（日本時間の「時」。22〜5のいずれか。判定は`src/lib/nightly-run.ts`）。
+  // 開始から3時間の窓で起動を試み、窓を過ぎても起動できなかった分は翌夜へ持ち越さない
+  nightlyRunStartHour Int      @default(1)
+
   updatedAt           DateTime @updatedAt
+}
+
+/// 夜間実行の予定と結果（#2772）。
+///
+/// QUEUED=今夜の予定（人が積んだ）／LAUNCHED=起動ジョブへ変換した／SKIPPED=起動する時点で
+/// 条件を満たさず見送った（理由は`skipReason`）／CANCELED=人が取り消した。
+enum NightlyRunEntryStatus {
+  QUEUED
+  LAUNCHED
+  SKIPPED
+  CANCELED
+}
+
+/// 「今夜の夜間実行」に積んだIssue（#2772）。
+///
+/// **`DispatchJob`とは別の表にする。** ジョブは「サブPCが取りに来たら起動する」記録で、
+/// 積んだ瞬間から払い出しの対象になる。予定は時刻が来るまで払い出されてはいけないので、
+/// 同じ表に混ぜると`claimDispatchJobs`の並びと`activeKey`の意味（未完了ジョブは1件）が崩れる。
+/// 時刻が来た時点で`enqueueDispatchJob`を通してジョブへ変換し、`dispatchJobId`で結ぶ。
+///
+/// **`RepositoryやIssueへの外部キーは張らない`**（`DispatchJob`と同じ理由）。
+///
+/// `optionLabels`はダイアログで選んだオプション（`21.plan-required`等）の写しで、**画面に
+/// チップを出すためだけ**に持つ。ラベルそのものは積んだ時点でIssueへ付けており、起動時に
+/// 読むのはGitHub上の実ラベル（G1の指摘1。夜のあいだに付いたものも拾う）。
+model NightlyRunEntry {
+  id                 String                @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  // 起動先のホスト名（DispatchHost.name）。積んだ時点で決める
+  targetHost         String
+  // 起こすエージェントCLI（`DispatchJob.agent`と同じ語）
+  agent              String                @default("claude")
+  // このIssueだけに使うClaudeのモデル（`DispatchJob.claudeModel`と同じ扱い。nullは設定に従う）
+  claudeModel        String?
+  // 積むときに付けたオプションのラベル名の配列（表示用）
+  optionLabels       Json
+  status             NightlyRunEntryStatus @default(QUEUED)
+  // 未処理（QUEUED）の間だけ`owner/repo#番号`が入るunique列。同じIssueを二重に積めないようにする
+  // （`DispatchJob.activeKey`と同じ形）。処理が終わるとnullへ戻す
+  activeKey          String?               @unique
+  // 起動した・見送った夜の日付（日本時間・`YYYY-MM-DD`。窓の開始日）。
+  // **起動処理がその予定を掴んだ時点で入れる**（同時に走る巡回の取り合いを避ける席取り。
+  // `reserveCheckUserPush`と同じ考え方）。QUEUEDのままnullへ戻すのは、起動先が応答して
+  // いなくて次の巡回でやり直すときだけ
+  nightKey           String?
+  // 見送った理由（人が読む文）。SKIPPEDのときだけ入る
+  skipReason         String?               @db.Text
+  // 起動ジョブへ変換したときのDispatchJob.id
+  dispatchJobId      String?
+  requestedByUserId  String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  // LAUNCHED・SKIPPED・CANCELEDになった日時
+  resolvedAt         DateTime?
+
+  @@index([status, targetHost, createdAt])
+  @@index([nightKey])
+  @@index([repositoryFullName, issueNumber])
 }
 
 /// 添付画像がどこに貼られているかの索引（#2475）。「未使用」を判定できるようにするための表。

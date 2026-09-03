@@ -153,6 +153,15 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
   Claude Codeが聞き直すため、二重承認になっていた。
   [docs/multi-agent/session-notify.md](docs/multi-agent/session-notify.md)「承認・修正は画面から送れる」）
 
+### 夜間実行（#2772）
+
+「実装を開始」ダイアログの実行先「今夜の夜間実行」に積んだIssueは、設定した時刻（既定01:00・日本時間、既定はOFF）から3時間のあいだにサブPCへ順に起動され、いつもの経路（PR→自動レビュー→developへ自動マージ）で「本番反映待ち」まで進む。朝は左メニュー「夜間実行」で結果を5つ（本番反映待ち／確認が必要／実行中／止まった／見送り）に分けて見る。契機はpollerの`POST /api/dispatch/claim`への相乗りで、時刻の判定はサーバー側の純関数（`src/lib/nightly-run.ts`）がJSTで持つ（設計は[docs/multi-agent/subpc-dispatch.md](docs/multi-agent/subpc-dispatch.md)「夜間実行」）。
+
+- **承認・回答を代わりに押す経路は作らない。** 「計画が必要」のIssueは計画の投稿で止まり、朝に人が承認する（上の「監視・計画レビューを行う実行体の禁止事項」と同じ線）
+- **人が居ないと進まないオプション（`23.preview-required`・`25.artifact-required`）が付いたIssueは積めない。** 判定は積む時点と起動する時点の両方で、Issueの実ラベルを見る
+- **夜間実行で起動したIssueの確認待ちPushは翌朝7:00まで送らない**（`decideCheckUserPush`の`holdUntil`）
+- **窓を過ぎた予定は翌夜へ持ち越さず「見送り」にする**
+
 ### Issueの進捗の状態遷移
 
 **進捗はGitHub ProjectsのStatusで管理する。唯一の正はStatusで、進捗ラベルは存在しない**（#991 Phase 5・#1010で`01.planning`〜`09.main`を廃止した。設計は[docs/progress-status-architecture.md](docs/progress-status-architecture.md)）。マルチエージェント運用で進めるIssueは、原則として以下の順でStatusが遷移する。
@@ -242,7 +251,9 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - 大規模な依存関係の更新
 - `develop`→`main`のマージ
 
-**ただしissue-deck自身のdevelop向けPRでは、`develop`→`main`を除く上記カテゴリで自動マージを止めない**（#2775）。`develop`はリリース前の統合先で、本番へ出るには`develop`→`main`のリリースPR（このカテゴリのまま・人がマージする）をもう1回通るため、develop向けPRの側で毎回「確認待ち」の札を積む価値が薄かった。切り替えは共有ワークフロー`reusable-claude-review-develop.yml`の`merge-policy`入力（`strict`＝既定・従来どおり／`relaxed`）で、issue-deckのcaller（`.github/workflows/claude-review-develop.yml`）だけが`relaxed`を指定している。**他リポジトリは`strict`のままなので、上のカテゴリがそのまま効く。**
+**ただしdevelop向けPRでは、`develop`→`main`を除く上記カテゴリで自動マージを止めない**（#2775・#2790）。`develop`はリリース前の統合先で、本番へ出るには`develop`→`main`のリリースPR（このカテゴリのまま・人がマージする）をもう1回通るため、develop向けPRの側で毎回「確認待ち」の札を積む価値が薄かった。切り替えは共有ワークフロー`reusable-claude-review-develop.yml`の`merge-policy`入力（`relaxed`＝既定・止めない／`strict`＝従来どおり止める）で、**既定が`relaxed`なのでcallerを持つ全リポジトリに効く**（#2790。#2775の時点ではissue-deckのcallerだけが指定していた）。カテゴリで止めたいリポジトリだけが、そのcallerの`with:`へ`merge-policy: strict`と書く。
+
+**配布先へ届くのはタグを配ってから。** 各リポジトリのcallerは`@workflows/vN`でタグ固定しており、既定の反転は参照タグを上げた時点で効き始める。タグは`main`の先端から切られるため、`develop`→`main`のリリースを1回通し、画面（設定＞フリート運用）の「新しいタグを切って配る」を押すまでは従来どおり`strict`の挙動になる。issue-deck自身はローカルパス参照なのでdevelopへ入った時点で効く。
 
 `relaxed`でもdevelop向けPRのマージが止まるのは次の4つ。
 
@@ -252,6 +263,8 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）
 
 **`relaxed`は「レビューを省く」ことではない。** カテゴリに該当したPRでは従来どおりClaudeの自動レビューが走り、止めるかどうかだけがレビューの判定に委ねられる。したがって、マージ前に必ず自分の目で通したい変更には`22.merge-confirm-required`を明示的に付ける（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
+
+**ただし`.github/workflows/**`を変更するPRだけは、レビュー自体が行われない。** claude-code-actionの検証機構により、そのPRでは自動レビューがClaudeを実行しないまま`success`で終わるため、`relaxed`では機械判定も意味的判定も無いままdevelopへ入る（CIは通る）。#2790で配布先も含めて許容すると決めており、**ワークフローの変更を人の目で通したいときは`22.merge-confirm-required`を付ける**（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。
 
 **「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 
