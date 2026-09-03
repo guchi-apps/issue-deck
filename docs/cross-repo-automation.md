@@ -63,7 +63,8 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
   合わせたパターンで機械判定している。
   （現在はパターンを`reusable-claude-review-develop.yml`へ内蔵し、リポジトリ固有の追加は
   `risk-paths`入力で行う。**カテゴリ該当でマージを止めるかどうかは`merge-policy`入力で
-  切り替えられ、issue-deckだけが`relaxed`＝止めない**。#2775。
+  切り替えられ、既定の`relaxed`＝止めないがcallerを持つ全リポジトリに効く**。#2775・#2790。
+  止めたいリポジトリだけがcallerへ`merge-policy: strict`と書く。
   詳細は[docs/multi-agent/labels.md](multi-agent/labels.md)「変更カテゴリで止めるかは
   `merge-policy`で切り替える」）
 - **ラベル体系**: `21.plan-required`〜`24.screenshot-required`・`00.check-user`はissue-deck

@@ -52,13 +52,16 @@
    - 逆に、**画面から実行できる操作（サブPCのチェックアウト更新・poller再起動）・繰り返し発生する作業・openな同内容が既にあるもの**を手作業Issueにしていないか。これらは起票しない決まりなので、該当する場合は起票を取り下げて既存Issueか画面の操作へ寄せるよう指摘する（[docs/multi-agent/labels.md](../../docs/multi-agent/labels.md)「起票しない条件」・#2009）
    - 手作業Issueが起票されている場合も、`## この作業でできるようになること`（できるようになること・実行するまでできないこと）が本文の先頭にあるか、`## 前提条件`（実行するデバイス・カレントディレクトリ・Gitブランチ・先に完了している必要があるIssue／PR）と`## 完了の確認方法`が埋まっているか。空欄や「動作を確認する」だけで終わっているものは、実行する人が実行してよいか・いま急ぐべきかを判断できないため指摘する
 3. 自動マージ不可に該当するか判定する
-   - **issue-deckのdevelop向けPRは`merge-policy: relaxed`で運用している**（#2775。`.github/workflows/claude-review-develop.yml`）。「認証まわりを触っている」「マイグレーションがある」といった**変更カテゴリだけでは止めない。** developはリリース前の統合先で、本番へ出るには`develop`→`main`のリリースPR（自動マージ不可カテゴリのまま・人がマージする）をもう1回通る
+   - **develop向けPRは`merge-policy: relaxed`で運用している**（#2775・#2790。既定が`relaxed`で、`.github/workflows/reusable-claude-review-develop.yml`の`merge-policy`入力に宣言してある）。「認証まわりを触っている」「マイグレーションがある」といった**変更カテゴリだけでは止めない。** developはリリース前の統合先で、本番へ出るには`develop`→`main`のリリースPR（自動マージ不可カテゴリのまま・人がマージする）をもう1回通る
    - マージを止めるのは次のいずれかに当てはまるときだけ
      - レビューで実際に直すべき問題を見つけた（総評が要修正。不具合・退行・設計上の重大な誤り・Issueの要件を満たしていない、など）
      - `.shared-context/`配下が差分に混入している
      - 対応Issueに`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`のいずれかが付いている
    - 判断に迷ったとき（触っている領域は重いが、差分自体に問題は見当たらない）は**止めずに「気になった点」として指摘する**
-   - **他リポジトリをレビューする場合は`strict`（従来どおり）が既定**。そのリポジトリの`.github/workflows/claude-review-develop.yml`の`merge-policy`を見て、`relaxed`が無ければ従来のカテゴリ（認証・認可／DBスキーマ変更・マイグレーション／本番環境の設定／GitHub Actionsやデプロイ設定／Secretsや環境変数／課金・決済／大規模な依存関係の更新）で判定する
+   - **他リポジトリをレビューする場合も同じ`relaxed`が既定**（#2790で全リポジトリの既定を反転した）。ただし**そのリポジトリの`.github/workflows/claude-review-develop.yml`を必ず見る**。次の2つのどちらかに当てはまるリポジトリは、従来のカテゴリ（認証・認可／DBスキーマ変更・マイグレーション／本番環境の設定／GitHub Actionsやデプロイ設定／Secretsや環境変数／課金・決済／大規模な依存関係の更新）で判定する
+     - `with:`に`merge-policy: strict`と書いてある（明示的にカテゴリで止める側を選んでいる）
+     - `uses:`の参照タグが、`merge-policy`入力が入る前のもの（`workflows/v31`以前）。この入力自体が無い版なので、反転は届いていない
+   - **配布先の`CLAUDE.md`／`AGENTS.md`の「自動マージ不可カテゴリ」の節は、まだ反転前の文面で残っている**（#2790。全アプリ共通の正は共有知識の`agent-rules/review.md`側で、反映はそちらの更新を待つ）。callerの実物と食い違ったら**callerを正とする**
 4. **検証結果をPR本文へ記録する**（#2448。該当・非該当のどちらでも行う）
    - `gh pr view <PR番号> --json body --jq .body`で本文を取り出し、`<!-- issue-deck-verification:start`
      から`<!-- issue-deck-verification:end -->`までの節が既にあれば取り除いたうえで、末尾へ下の節を

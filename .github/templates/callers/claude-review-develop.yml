@@ -15,9 +15,17 @@ name: Claude Code Review (develop向けPR)
 # `prisma/migrations/**`・`**/auth/**`）は再利用ワークフロー側が常に判定するため書かない。
 # **入力はリスクを追加できるが削減はできない。**
 #
-# 変更カテゴリでdevelopへのマージを止めるかどうかは`merge-policy`で切り替えられる
-# （guchi-apps/issue-deck#2775。`strict`＝既定・従来どおり止める／`relaxed`＝止めない）。
-# **この雛形は既定の`strict`のまま**で、現在`relaxed`にしているのはissue-deck自身だけ。
+# 変更カテゴリ（DBマイグレーション・ワークフロー・`.env`・認証・依存のメジャー更新）で
+# developへのマージを止めるかどうかは`merge-policy`で切り替えられる
+# （guchi-apps/issue-deck#2775）。**既定は`relaxed`＝止めない**で、callerを持つ全リポジトリに
+# 一律で効く（guchi-apps/issue-deck#2790）。`develop`はリリース前の統合先で、本番へ出るには
+# `develop`→`main`のリリースPR（自動マージ不可カテゴリのまま・人がマージする）をもう1回通るため。
+# **止めるのをやめるだけで、レビューは従来どおり実行する。** カテゴリで止めたいリポジトリだけが
+# `with:`へ`merge-policy: strict`と書く（オプトアウト）。この雛形は既定のまま何も書かない。
+#
+# **`merge-policy`を書けるのは、この入力が入ったタグ（`workflows/v31`の次に切ったもの）以降を
+# 参照している場合だけ。** それより前のタグにはこの入力が存在せず、書くと未定義入力で
+# ワークフローが起動しなくなる。
 #
 # 参照はタグ固定にする。@developを参照するとissue-deck側の不具合が即座に波及するため。
 #
