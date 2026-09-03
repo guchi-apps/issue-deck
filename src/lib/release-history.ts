@@ -44,13 +44,23 @@ export function selectVisibleReleaseHistory(
 const GENERATED_BULLET_LINE = /^\*\s+(.+?)\s+by\s+@\S+\s+in\s+\S+\s*$/;
 
 /**
+ * バージョンバンプだけを行うPRのタイトル。`reusable-release-develop-to-main.yml`が作る
+ * 「v${NEW_VERSION}をリリースする」（release/vX.Y.Z→develop）と
+ * 「v${DEV_VERSION}をmainへリリースする」（develop→main）の2パターンに一致する（#2807）。
+ * develop→mainはマージコミット方式のため、これらのPRタイトルもWhat's Changedの箇条書きに
+ * そのまま混ざるが、その回のリリースで何が変わったかを示す情報としては無価値なので、
+ * ハイライトの抽出時点で取り除く。
+ */
+const VERSION_BUMP_TITLE = /^v\d+(?:\.\d+){2}を(?:mainへ)?リリースする$/;
+
+/**
  * GitHubが自動生成したリリース本文（`generate_release_notes: true`）から、
  * 「マージ済みPRタイトルの箇条書き」だけを取り出す。
  *
  * 生の本文は`## What's Changed`の見出しと`**Full Changelog**: <compare URL>`を含み、
  * そのまま出すと「タイムラインで何がリリースされたか」を一目で追えない。**箇条書きの行
  * （`* タイトル by @user in owner/repo#123`）だけを拾い、`by @user in ...`を落として
- * タイトルだけに縮める。**
+ * タイトルだけに縮め、バージョンバンプだけのPRタイトルは除く。**
  *
  * `max`件を超えるぶんは`moreCount`に残す（画面側は「ほかN件」として出す）。
  */
@@ -68,7 +78,8 @@ export function extractReleaseHighlights(
       const match = GENERATED_BULLET_LINE.exec(line);
       return (match ? match[1] : line.slice(2)).trim();
     })
-    .filter((line) => line.length > 0);
+    .filter((line) => line.length > 0)
+    .filter((line) => !VERSION_BUMP_TITLE.test(line));
 
   return {
     lines: bulletLines.slice(0, max),

@@ -1,7 +1,7 @@
 "use client";
 
-import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronDown, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -100,9 +100,15 @@ export function ReleaseHistoryPanel({
   );
 }
 
+/** 折りたたみ時に表示する行数。`extractReleaseHighlights`の既定`max`と揃える */
+const PREVIEW_LINE_COUNT = 3;
+
 function ReleaseHistoryCard({ entry }: { entry: ReleaseHistoryItem }) {
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
-  const { lines, moreCount } = extractReleaseHighlights(entry.body);
+  const [expanded, setExpanded] = useState(false);
+  const { lines: allLines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
+  const lines = expanded ? allLines : allLines.slice(0, PREVIEW_LINE_COUNT);
+  const hiddenCount = allLines.length - lines.length;
 
   return (
     <li className="relative -ml-[18.5px] list-none rounded-md border bg-card p-2.5 pl-3">
@@ -137,10 +143,18 @@ function ReleaseHistoryCard({ entry }: { entry: ReleaseHistoryItem }) {
               {line}
             </li>
           ))}
-          {moreCount > 0 && (
-            <li className="pl-3 text-[11px] text-muted-foreground">ほか{moreCount}件</li>
-          )}
         </ul>
+      )}
+
+      {(hiddenCount > 0 || (expanded && allLines.length > PREVIEW_LINE_COUNT)) && (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-1 inline-flex items-center gap-0.5 pl-3 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {expanded ? "折りたたむ" : `ほか${hiddenCount}件を見る`}
+          <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
+        </button>
       )}
 
       <a
