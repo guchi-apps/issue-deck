@@ -14,6 +14,7 @@ import {
   Loader2,
   Lock,
   MonitorPlay,
+  Moon,
   Plus,
   Rocket,
   Settings2,
@@ -77,6 +78,10 @@ type SidebarNavProps = {
   onSelectUsage: () => void;
   /** リリース履歴（#2726）の画面を開く */
   onSelectReleaseHistory: () => void;
+  /** 夜間実行（#2772）の画面を開く */
+  onSelectNightlyRun: () => void;
+  /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す。nullなら出さない */
+  nightlyRunQueuedCount?: number | null;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
    * 使うのは年に数回で、状態を持たない入口のため。
@@ -156,6 +161,8 @@ export function SidebarNavView({
   previewRunning = false,
   onSelectUsage,
   onSelectReleaseHistory,
+  onSelectNightlyRun,
+  nightlyRunQueuedCount = null,
   onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
@@ -339,6 +346,18 @@ export function SidebarNavView({
             emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
             // 数字（動いている数）と丸（操作待ち）で意味が違うため、内訳を吹き出しで補う
             title: describeReleaseActivity(releaseActivity),
+          })}
+          {navRow({
+            key: "nightly",
+            label: "夜間実行",
+            icon: Moon,
+            active: activePane === "nightly",
+            onClick: onSelectNightlyRun,
+            // 数えるのは**今夜の予定の件数**（#2772）。結果に「確認が必要」があっても丸は
+            // 出さない——確認待ちそのものは上の「ユーザーの確認待ち」が数えており、
+            // 両方に出すとどちらを押せば片付くのか分からなくなる
+            count: nightlyRunQueuedCount,
+            title: "今夜の予定と、前の夜の結果を見る",
           })}
           {navRow({
             key: "usage",

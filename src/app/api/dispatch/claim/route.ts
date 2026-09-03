@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs } from "@/lib/dispatch/jobs";
+import { launchNightlyRunEntries } from "@/lib/nightly-run-launch";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -62,6 +63,22 @@ export async function POST(request: NextRequest) {
   // （画面のポーリングに載せると、アプリを閉じているときのための通知が閉じている間だけ止まる）。
   // **失敗してもジョブの払い出しは続ける。**
   if (!fast) {
+    // 夜間実行（#2772）。時刻が来ていれば、このホストへ積んである予定を起動ジョブへ変換する。
+    // **Pushの巡回より先に回す**——変換したIssueの確認待ちは朝まで止める判定
+    // （`selectNightlyRunPushHold`）が`LAUNCHED`の行を見るため、同じ巡回で順序が逆だと
+    // 計画の投稿が先に鳴りうる。失敗しても払い出しは続ける
+    try {
+      const nightly = await launchNightlyRunEntries({ hostName });
+      if (nightly.actions.length > 0) {
+        console.info(
+          `[nightly-run] ${hostName}: ${nightly.actions
+            .map((action) => `${action.repositoryFullName}#${action.issueNumber}=${action.result}`)
+            .join(", ")}`,
+        );
+      }
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 夜間実行の予定を起動できませんでした:", error);
+    }
     try {
       await sweepCheckUserPushNotifications();
     } catch (error) {

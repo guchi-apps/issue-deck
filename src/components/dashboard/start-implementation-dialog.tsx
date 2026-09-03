@@ -5,6 +5,7 @@ import {
   ClipboardCopy,
   Cloud,
   Loader2,
+  Moon,
   Server,
   Sparkles,
   SquareTerminal,
@@ -43,6 +44,7 @@ import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useModelPick } from "@/hooks/use-model-pick";
+import { useNightlyRunSettings } from "@/hooks/use-nightly-run";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import {
   CODEX_LIMITATIONS,
@@ -63,6 +65,11 @@ import type { ModelPickResult } from "@/lib/claude/model-pick";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { findLatestPlanCommentBody } from "@/lib/github/planning-phase";
 import { labelNamesWithLocal } from "@/lib/github/project-status-dispatch";
+import {
+  formatNightlyRunHour,
+  resolveNightlyRunLabelRejection,
+  type NightlyRunSettings,
+} from "@/lib/nightly-run";
 import { resolveScreenshotRepositoryRejection } from "@/lib/github/screenshot-support";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
@@ -89,13 +96,37 @@ export type StartTarget =
   | { kind: "host"; host: string }
   | { kind: "actions" }
   | { kind: "copy-prompt" }
-  | { kind: "copy-command" };
+  | { kind: "copy-command" }
+  /** 今夜の夜間実行（#2772）。いまは起動せず、`host`で起動する予定に積む */
+  | { kind: "nightly"; host: string };
 
 /** 同じ実行先を指しているか（選択中の判定に使う） */
 function isSameTarget(a: StartTarget, b: StartTarget): boolean {
   if (a.kind !== b.kind) return false;
-  return a.kind === "host" && b.kind === "host" ? a.host === b.host : true;
+  if (a.kind === "host" && b.kind === "host") return a.host === b.host;
+  if (a.kind === "nightly" && b.kind === "nightly") return a.host === b.host;
+  return true;
 }
+
+/**
+ * 「今夜の夜間実行」タイルの説明（#2772）。時刻はいまの設定から、起動先は積む先のサブPCから。
+ * 設定が取れていなくても積めるので、時刻だけ「開始時刻」と出す。
+ */
+function describeNightlyTarget(settings: NightlyRunSettings | null, hostName: string | null): string {
+  const when = settings ? formatNightlyRunHour(settings.startHour) : "開始時刻";
+  const where = hostName ? formatDispatchHostName(hostName) : "サブPC";
+  const tail =
+    settings && !settings.enabled
+      ? "夜間実行はOFFなので、「夜間実行」画面でONにするまで起動しません"
+      : "「計画が必要」なら計画の投稿で止まり、朝に承認します";
+  return `${when}に${where}で起動する予定に積みます（いまは起動しません）。${tail}`;
+}
+
+/** 夜間実行では選べないオプション（承認・確認を待つ人がいない）。判定の正は`NIGHTLY_RUN_BLOCKING_LABELS` */
+const NIGHTLY_UNAVAILABLE_OPTION_KEYS: readonly StartImplementationOptionKey[] = [
+  "artifactRequired",
+  "previewRequired",
+];
 
 /**
  * 実行先1件ぶんの表示材料（#1623）。**タイルには短い名前しか出さない。**
@@ -347,6 +378,10 @@ export function StartImplementationDialog({
     injectedDispatch === undefined && includeDispatchTargets === true && open,
   );
   const dispatch = injectedDispatch ?? ownDispatch;
+  /** 夜間実行の設定（#2772）。タイルの説明に時刻とON/OFFを出すためだけに、開いている間取る */
+  const nightlySettings = useNightlyRunSettings(open && includeDispatchTargets === true);
+  const [nightlyError, setNightlyError] = useState<string | null>(null);
+  const [isQueuingNightly, setIsQueuingNightly] = useState(false);
   /**
    * そのリポジトリに**定義されている**ラベル名（#1956）。アーティファクトの既定を当ててよいかの
    * 判定にだけ使う。開いている間だけ取りに行く（閉じているダイアログのために取得を増やさない）。
@@ -354,8 +389,9 @@ export function StartImplementationDialog({
   const { labels: repositoryLabels } = useIssueRepoMeta(open ? issue.repositoryFullName : null);
   const repositoryLabelNames = repositoryLabels.map((label) => label.name);
   const hasArtifactLabelDefinition = repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL);
-  const isSubmitting = isUpdatingIssue || isCreatingComment || dispatch.isSubmitting;
-  const error = labelMutationError ?? commentMutationError ?? dispatch.error;
+  const isSubmitting =
+    isUpdatingIssue || isCreatingComment || dispatch.isSubmitting || isQueuingNightly;
+  const error = labelMutationError ?? commentMutationError ?? dispatch.error ?? nightlyError;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
   // 巻き戻さないよう、下のuseEffectの依存配列には含めずrefで最新値だけ参照する。
   const issueLabelsRef = useRef(issue.labels);
@@ -381,6 +417,7 @@ export function StartImplementationDialog({
     // 前に開いたときの判定結果は持ち越さない。Issueの内容もラベルも変わっているかもしれない
     resetModelPick();
     setCopied(false);
+    setNightlyError(null);
   }, [open, resetModelPick]);
 
   /**
@@ -452,10 +489,35 @@ export function StartImplementationDialog({
   // 押した後の表示が別の実行先へ移らない（#1318）
   const effectiveTarget = startedTarget ?? target ?? defaultTarget;
   const isCopyTarget = effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command";
+  const isNightlyTarget = effectiveTarget.kind === "nightly";
 
+  /**
+   * 夜間実行（#2772）の起動先。**いま応答しているか・未完了ジョブがあるかは見ない**——積むのは
+   * 日中で起動は夜なので、いまの状態で塞ぐ意味が無い。そのリポジトリをcloneしているホストの先頭
+   */
+  const nightlyHost =
+    dispatch.hosts.find((host) => host.repositories.includes(issue.repositoryFullName))?.name ?? null;
+  /**
+   * 夜間実行へ積めない理由。**Issueの実ラベルで判定する**（G1の指摘1）。`23.preview-required`・
+   * `25.artifact-required`は承認・確認を待つ人がいないと進まないので、付いているうちは積ませない
+   */
+  const nightlyRejection =
+    nightlyHost === null
+      ? "このリポジトリを実行できるサブPCが登録されていません"
+      : resolveNightlyRunLabelRejection(issue.labels);
+  /** 同じ理由で、ダイアログでONにしたままでも積めない（積む前にラベルとして付くため） */
+  const nightlyOptionRejection =
+    isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.some((key) => options[key])
+      ? "「アーティファクトで見た目を出す」「開発環境を起動する」をONにしたままでは夜間実行に積めません（承認・確認を待つ人がいない）"
+      : null;
+
+  const targetHostName =
+    effectiveTarget.kind === "host" || effectiveTarget.kind === "nightly"
+      ? effectiveTarget.host
+      : null;
   const selectedHost =
-    effectiveTarget.kind === "host"
-      ? (dispatch.hosts.find((host) => host.name === effectiveTarget.host) ?? null)
+    targetHostName !== null
+      ? (dispatch.hosts.find((host) => host.name === targetHostName) ?? null)
       : null;
   const selectedRejection: DispatchEnqueueRejection | null =
     effectiveTarget.kind === "host"
@@ -484,7 +546,8 @@ export function StartImplementationDialog({
    * 積んでから`agent_not_capable`で断られるか、古いpollerでは`agent`ごと無視されて
    * Claude Codeが黙って立つ。
    */
-  const showAgents = effectiveTarget.kind === "host" && isDispatchAgentSelectable(selectedHost);
+  const showAgents =
+    (effectiveTarget.kind === "host" || isNightlyTarget) && isDispatchAgentSelectable(selectedHost);
   /**
    * 実際に積むエージェント。**選択欄を出していない実行先では既定へ落とす。**
    * サブPCでCodexを選んだ後にGitHub Actionsへ切り替えても、選択が残ったまま付いていかない。
@@ -497,7 +560,8 @@ export function StartImplementationDialog({
    * 積んだ値は届かない。Codexのモデルは別の設定（`CODEX_MODEL_OPTIONS`）で、ここでは扱わない。
    * 「コピー」の2つは起動そのものを人が行うため、選ばせても反映しようがない。
    */
-  const showModels = effectiveTarget.kind === "host" && effectiveAgent === DEFAULT_DISPATCH_AGENT;
+  const showModels =
+    (effectiveTarget.kind === "host" || isNightlyTarget) && effectiveAgent === DEFAULT_DISPATCH_AGENT;
   /**
    * 実際に積むモデル。**選択欄を出していないときは「設定に従う」へ落とす。**
    * サブPCでFableを選んだ後にCodexやGitHub Actionsへ切り替えても、選択が付いていかない。
@@ -549,6 +613,16 @@ export function StartImplementationDialog({
               : null,
           };
         }),
+        // 今夜の夜間実行（#2772）。サブPCの隣に置く（起動する場所は同じで、時刻だけが違う）
+        {
+          key: "nightly",
+          target: { kind: "nightly", host: nightlyHost ?? "" },
+          icon: Moon,
+          name: "今夜の夜間実行",
+          shortName: "夜間",
+          description: describeNightlyTarget(nightlySettings, nightlyHost),
+          rejection: nightlyRejection,
+        },
         {
           key: "actions",
           target: { kind: "actions" },
@@ -593,6 +667,18 @@ export function StartImplementationDialog({
   const optionHints = visibleOptions.flatMap((option) => {
     const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
     if (unavailable) return [{ key: option.key, label: option.label, text: screenshotRejection }];
+    // 夜間実行では選べないもの（#2772）。ONのままなら積めない理由、OFFなら選べない理由を出す
+    if (isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key)) {
+      return [
+        {
+          key: option.key,
+          label: option.label,
+          text: options[option.key]
+            ? "ONのままでは夜間実行に積めません（承認・確認を待つ人がいない）。OFFにしてください"
+            : "夜間実行では選べません（承認・確認を待つ人がいない）",
+        },
+      ];
+    }
     if (!options[option.key]) return [];
     return [{ key: option.key, label: option.label, text: option.description }];
   });
@@ -781,6 +867,42 @@ export function StartImplementationDialog({
     }
   }
 
+  /**
+   * 今夜の夜間実行に積む（#2772）。**いまは起動しない。** オプションのラベルは上の
+   * `applyOptionLabels`で先に付けてあり、`11.local`は夜に起動できたときにサーバーが付ける
+   * （`nightly-run-launch.ts`）。ここで付けると、起動していないのに無人実行まで止めてしまう。
+   */
+  async function startOnNightly(hostName: string) {
+    setIsQueuingNightly(true);
+    setNightlyError(null);
+    try {
+      const res = await fetch("/api/nightly-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repository: issue.repositoryFullName,
+          issue: issue.number,
+          host: hostName,
+          agent: effectiveAgent,
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          optionLabels: startImplementationLabelsToAdd(options),
+        }),
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { message?: string };
+        setNightlyError(json.message ?? `今夜の予定に積めませんでした (${res.status})`);
+        setStartedTarget(null);
+        return;
+      }
+      handleOpenChange(false);
+    } catch (err) {
+      setNightlyError(err instanceof Error ? err.message : String(err));
+      setStartedTarget(null);
+    } finally {
+      setIsQueuingNightly(false);
+    }
+  }
+
   async function handleStart() {
     // 押した時点の実行先を固定する（#1318）。以降の再描画（オプションのラベル付与・
     // ジョブの追加・ポーリングでのホストの入れ替わり）で選択が動かないようにする
@@ -794,6 +916,10 @@ export function StartImplementationDialog({
 
     if (effectiveTarget.kind === "host") {
       await startOnHost(currentIssue, effectiveTarget.host);
+      return;
+    }
+    if (effectiveTarget.kind === "nightly") {
+      await startOnNightly(effectiveTarget.host);
       return;
     }
     if (effectiveTarget.kind === "copy-prompt" || effectiveTarget.kind === "copy-command") {
@@ -839,6 +965,9 @@ export function StartImplementationDialog({
                 <span className="font-medium text-foreground">{entry.name}</span>: {entry.rejection}
               </p>
             ))}
+            {nightlyOptionRejection && (
+              <p className="text-xs text-destructive">{nightlyOptionRejection}</p>
+            )}
           </div>
         )}
         {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
@@ -940,14 +1069,24 @@ export function StartImplementationDialog({
                 // チェック済みなら塞がない**
                 const unavailable =
                   option.key === "screenshotRequired" && screenshotRejection !== null;
+                // 夜間実行では承認・確認を待つ人がいないものを選ばせない（#2772）。
+                // **既に付いているものは外せるよう、チェック済みなら塞がない**（撮影と同じ）
+                const nightlyUnavailable =
+                  isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key);
                 return (
                   <StartOptionChip
                     key={option.key}
                     icon={START_OPTION_ICONS[option.key]}
                     label={option.label}
-                    description={unavailable ? (screenshotRejection ?? "") : option.description}
+                    description={
+                      unavailable
+                        ? (screenshotRejection ?? "")
+                        : nightlyUnavailable
+                          ? "夜間実行では選べません（承認・確認を待つ人がいない）"
+                          : option.description
+                    }
                     checked={options[option.key]}
-                    disabled={unavailable && !options[option.key]}
+                    disabled={(unavailable || nightlyUnavailable) && !options[option.key]}
                     onToggle={() => toggleOption(option.key)}
                   />
                 );
@@ -989,10 +1128,18 @@ export function StartImplementationDialog({
               // 選んだつもりのない「設定に従う」で立つ
               isPickPending ||
               selectedRejection !== null ||
-              blockedReason !== null
+              blockedReason !== null ||
+              // 夜間実行に積めない理由があるうちは押させない（#2772）
+              (isNightlyTarget && (nightlyRejection !== null || nightlyOptionRejection !== null))
             }
           >
-            {isCopyTarget ? (copied ? "コピーしました" : "コピーする") : "開始する"}
+            {isCopyTarget
+              ? copied
+                ? "コピーしました"
+                : "コピーする"
+              : isNightlyTarget
+                ? "今夜の予定に積む"
+                : "開始する"}
           </Button>
         </DialogFooter>
       </DialogContent>

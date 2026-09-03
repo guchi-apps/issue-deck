@@ -42,8 +42,10 @@ import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-det
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
+import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nightly-run-screen";
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
+import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
   SESSION_USAGE_PERIODS,
@@ -54,6 +56,7 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useSessionUsage } from "@/hooks/use-session-usage";
+import { useNightlyRun } from "@/hooks/use-nightly-run";
 import { useReleaseHistory } from "@/hooks/use-release-history";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -193,6 +196,7 @@ export function IssueDeckShell({
     selectPreviewPane,
     selectUsagePane,
     selectReleaseHistoryPane,
+    selectNightlyRunPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -274,6 +278,7 @@ export function IssueDeckShell({
     selectSettings: selectMobileSettings,
     selectPreview,
     selectReleaseHistory,
+    selectNightlyRun,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -538,6 +543,9 @@ export function IssueDeckShell({
   // 「リリース履歴」画面（#2726）。開いている間だけ取得する（GitHub Releaseは頻繁に増えない）。
   const isReleaseHistoryPaneActive =
     filters.pane === "releases" || mobileScreen.kind === "release-history";
+  // 「夜間実行」画面（#2772）。開いている間は巡回の間隔で、閉じている間は左メニューの件数の
+  // ためにゆっくり取り直す（フック側が間隔を切り替える）
+  const isNightlyRunPaneActive = filters.pane === "nightly" || mobileScreen.kind === "nightly-run";
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「マージ待ち」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
@@ -1114,6 +1122,7 @@ export function IssueDeckShell({
   // リリース履歴（#2726）。取得はこの画面を開いている間だけ。非表示リポジトリぶんは
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
+  const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -1532,6 +1541,8 @@ export function IssueDeckShell({
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
                   onSelectReleaseHistory={selectReleaseHistory}
+                  onSelectNightlyRun={selectNightlyRun}
+                  nightlyRunQueuedCount={nightlyRun.state?.queued.length ?? null}
                   onSelectRepos={selectRepos}
                   /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
                      ——開いた先の一覧が既定で非表示ぶんを畳むため、含めるとホームの数字と
@@ -1560,6 +1571,16 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
+                  onBack={goBack}
+                />
+              )}
+
+              {mobileScreen.kind === "nightly-run" && (
+                <MobileNightlyRunScreen
+                  nightlyRun={nightlyRun}
+                  onOpenIssue={(repositoryFullName, issueNumber) =>
+                    openUsageIssue(repositoryFullName, issueNumber, null)
+                  }
                   onBack={goBack}
                 />
               )}
@@ -1807,6 +1828,8 @@ export function IssueDeckShell({
                 previewRunning={previewRunning}
                 onSelectUsage={selectUsagePane}
                 onSelectReleaseHistory={selectReleaseHistoryPane}
+                onSelectNightlyRun={selectNightlyRunPane}
+                nightlyRunQueuedCount={nightlyRun.state?.queued.length ?? null}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
@@ -1846,6 +1869,24 @@ export function IssueDeckShell({
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
                   claudeApiUsage={claudeApiUsage}
+                />
+              </div>
+            </div>
+          ) : filters.pane === "nightly" ? (
+            /* PC: 夜間実行（#2772）。「AI使用量」と同じく中央〜右を1カラムで使う */
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-3xl">
+                <NightlyRunPanel
+                  state={nightlyRun.state}
+                  isLoading={nightlyRun.isLoading}
+                  error={nightlyRun.error}
+                  isSubmitting={nightlyRun.isSubmitting}
+                  onRefresh={nightlyRun.refresh}
+                  onCancel={(id) => void nightlyRun.cancel(id)}
+                  onUpdateSettings={(patch) => void nightlyRun.updateSettings(patch)}
+                  onOpenIssue={(repositoryFullName, issueNumber) =>
+                    openUsageIssue(repositoryFullName, issueNumber, null)
+                  }
                 />
               </div>
             </div>

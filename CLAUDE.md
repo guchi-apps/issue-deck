@@ -153,6 +153,15 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
   Claude Codeが聞き直すため、二重承認になっていた。
   [docs/multi-agent/session-notify.md](docs/multi-agent/session-notify.md)「承認・修正は画面から送れる」）
 
+### 夜間実行（#2772）
+
+「実装を開始」ダイアログの実行先「今夜の夜間実行」に積んだIssueは、設定した時刻（既定01:00・日本時間、既定はOFF）から3時間のあいだにサブPCへ順に起動され、いつもの経路（PR→自動レビュー→developへ自動マージ）で「本番反映待ち」まで進む。朝は左メニュー「夜間実行」で結果を5つ（本番反映待ち／確認が必要／実行中／止まった／見送り）に分けて見る。契機はpollerの`POST /api/dispatch/claim`への相乗りで、時刻の判定はサーバー側の純関数（`src/lib/nightly-run.ts`）がJSTで持つ（設計は[docs/multi-agent/subpc-dispatch.md](docs/multi-agent/subpc-dispatch.md)「夜間実行」）。
+
+- **承認・回答を代わりに押す経路は作らない。** 「計画が必要」のIssueは計画の投稿で止まり、朝に人が承認する（上の「監視・計画レビューを行う実行体の禁止事項」と同じ線）
+- **人が居ないと進まないオプション（`23.preview-required`・`25.artifact-required`）が付いたIssueは積めない。** 判定は積む時点と起動する時点の両方で、Issueの実ラベルを見る
+- **夜間実行で起動したIssueの確認待ちPushは翌朝7:00まで送らない**（`decideCheckUserPush`の`holdUntil`）
+- **窓を過ぎた予定は翌夜へ持ち越さず「見送り」にする**
+
 ### Issueの進捗の状態遷移
 
 **進捗はGitHub ProjectsのStatusで管理する。唯一の正はStatusで、進捗ラベルは存在しない**（#991 Phase 5・#1010で`01.planning`〜`09.main`を廃止した。設計は[docs/progress-status-architecture.md](docs/progress-status-architecture.md)）。マルチエージェント運用で進めるIssueは、原則として以下の順でStatusが遷移する。

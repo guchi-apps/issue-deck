@@ -33,7 +33,14 @@ export type IssueStateFilter = "all" | "open" | "closed";
  * `releases`はリリース履歴（#2726）。全リポジトリのGitHub Releaseを時系列で見る。
  * `preview`と同じくホームのメニューからのドリルダウンだけで開き、ボトムナビのタブは持たない。
  */
-export type DashboardPane = "issues" | "pull-requests" | "flow" | "preview" | "usage" | "releases";
+export type DashboardPane =
+  | "issues"
+  | "pull-requests"
+  | "flow"
+  | "preview"
+  | "usage"
+  | "releases"
+  | "nightly";
 
 function parsePane(value: string | null): DashboardPane {
   if (
@@ -41,7 +48,8 @@ function parsePane(value: string | null): DashboardPane {
     value === "flow" ||
     value === "preview" ||
     value === "usage" ||
-    value === "releases"
+    value === "releases" ||
+    value === "nightly"
   ) {
     return value;
   }
@@ -265,6 +273,11 @@ export function useIssueFilters() {
     setFilters({ pane: "releases", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「夜間実行」画面への遷移（#2772）。上と同じくPRの選択状態を持たない。
+  const selectNightlyRunPane = useCallback(() => {
+    setFilters({ pane: "nightly", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -314,6 +327,7 @@ export function useIssueFilters() {
     selectPreviewPane,
     selectUsagePane,
     selectReleaseHistoryPane,
+    selectNightlyRunPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
