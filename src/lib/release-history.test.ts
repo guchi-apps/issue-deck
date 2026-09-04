@@ -78,6 +78,18 @@ describe("extractReleaseHighlights", () => {
   it("本文が無ければ空を返す", () => {
     expect(extractReleaseHighlights(null)).toEqual({ lines: [], moreCount: 0 });
   });
+
+  it("バージョンバンプだけのPRタイトルは除外する（#2807）", () => {
+    const body = [
+      "* v4.80.0をリリースする by @issue-deck[bot] in guchi-apps/issue-deck#2801",
+      "* 夜間実行を追加する by @m-guchi in guchi-apps/issue-deck#2803",
+      "* v4.81.0をmainへリリースする by @issue-deck[bot] in guchi-apps/issue-deck#2806",
+    ].join("\n");
+    expect(extractReleaseHighlights(body)).toEqual({
+      lines: ["夜間実行を追加する"],
+      moreCount: 0,
+    });
+  });
 });
 
 describe("groupReleaseHistoryByJstDate", () => {
