@@ -777,6 +777,29 @@ LLMも人への問い合わせも通らない（[関門と計器](gates.md)の�
 「一定時間アクセスが無いと自動で停止される」ことを書いてあるため、画面確認で繋がらないことを
 事故と受け取って調査に入ることはない。
 
+### 手で起こし直したときは、PIDファイルへ**プロセスグループリーダーのPID**を書く（#2811）
+
+止めて`pnpm dev`で起こし直すと、`.dev-servers/issue-<番号>.pid`は前の（もう居ない）PIDを
+指したままになる。回収スクリプトはそれを「別人」と見なして**PIDファイルだけ消す**ので、
+起こし直した2本目はどこからも追えない孤児になる（上の#1524と同じループ）。書き戻して
+おけばセッション終了時の後始末にも定期回収にも載る。
+
+**書くのは`$!`ではない。** `setsid nohup pnpm dev &`の`$!`は`setsid`自身のPIDで、実際に
+走るのはその子（別のPID）なので、そのまま書くと死んだPIDを指す。`dev_server_pid_matches`が
+求めるのは**`pgid == pid`（プロセスグループリーダー）かつcwdがworktree**の2つなので、
+起動後に実物から引く。
+
+```bash
+# 起こし直し（新しいプロセスグループにする）
+PORT=<採番したポート> setsid nohup pnpm dev >> ~/apps/issue-deck-worktrees/.dev-servers/issue-<番号>.log 2>&1 < /dev/null &
+
+# 待ち受けているnext-serverからPGID（＝リーダーのPID）を引いて書き戻す
+PID="$(ss -ltnp 2>/dev/null | awk -F'pid=' '/:<採番したポート> /{split($2, a, ","); print a[1]; exit}')"
+ps -o pgid= -p "$PID" | tr -d ' ' > ~/apps/issue-deck-worktrees/.dev-servers/issue-<番号>.pid
+```
+
+ログは**必ず`>>`（追記）で開く**——`>`で開くと停止理由の行を上書きして壊す（#1679）。
+
 ### 走っている開発サーバーへ`.env.local`の追加は効かない（#2190）
 
 `pnpm db:seed:dev`が`CI_LOGIN_BYPASS_SECRET`を生成しても、**すでに走っている開発サーバーでは

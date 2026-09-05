@@ -29,13 +29,15 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
     // 5枠目を持つようになった
     case "usage":
       return "usage";
+    // リリース履歴は#2726ではホームのメニューからのドリルダウンだったが、#2811でフッターの
+    // 3枠目（「リリース」）を持つようになった。AI使用量（#2631）と同じ経緯・同じ形
+    case "release-history":
+      return screen.kind;
     // 設定はフッターから外し、ホームのヘッダー右上から開く画面になった（#1638）。
     // 確認環境（#2444）も同じくホームのメニューからのドリルダウンで、タブを持たない。
-    // どちらも対応するタブが無いので点灯させない。リリース履歴（#2726）も同じくホームの
-    // メニューからのドリルダウンだけで開き、タブを持たない。夜間実行（#2772）も同じ。
+    // どちらも対応するタブが無いので点灯させない。夜間実行（#2772）も同じ。
     case "settings":
     case "preview":
-    case "release-history":
     case "nightly-run":
       return null;
     case "issue-detail":

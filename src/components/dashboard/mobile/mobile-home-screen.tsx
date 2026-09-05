@@ -2,7 +2,6 @@
 
 import {
   FolderGit2,
-  History,
   Loader2,
   MonitorPlay,
   Moon,
@@ -84,9 +83,7 @@ type MobileHomeScreenProps = {
    * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
    */
   previewRunning: boolean;
-  /** 「リリース履歴」画面を開く（#2726）。「ブランチ」「確認環境」と同じくメニューへ直接1行として置く */
-  onSelectReleaseHistory: () => void;
-  /** 「夜間実行」画面を開く（#2772）。「確認環境」「リリース履歴」と同じくメニューへ直接1行として置く */
+  /** 「夜間実行」画面を開く（#2772）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectNightlyRun: () => void;
   /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す */
   nightlyRunQueuedCount: number | null;
@@ -174,7 +171,6 @@ export function MobileHomeScreenView({
   onSelectPullRequests,
   onSelectPreview,
   previewRunning,
-  onSelectReleaseHistory,
   onSelectNightlyRun,
   nightlyRunQueuedCount,
   onSelectRepos,
@@ -487,16 +483,9 @@ export function MobileHomeScreenView({
                     : "developの最新をサブPCで動かして画面で確かめる"
                 }
               />
-              {/* リリース履歴（#2726）。**数字も丸も出さない**（確認環境・AI使用量と同じく
-                  見るだけの画面） */}
-              <MobileNavRow
-                label="リリース履歴"
-                icon={History}
-                onClick={onSelectReleaseHistory}
-                count={null}
-                title="全リポジトリのGitHub Releaseを時系列で見る"
-              />
-              {/* 夜間実行（#2772）。数字は今夜の予定の件数（PCの左メニューと同じ） */}
+              {/* 夜間実行（#2772）。数字は今夜の予定の件数（PCの左メニューと同じ）。
+                  **「リリース履歴」の行は#2811でフッターのタブ（「リリース」）へ移した**——
+                  AI使用量（#2631）と同じで、同じ画面への入口を2か所に持たない */}
               <MobileNavRow
                 label="夜間実行"
                 icon={Moon}
