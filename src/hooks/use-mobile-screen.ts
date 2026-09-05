@@ -224,7 +224,9 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // `settings`も#1638でタブから外れ、ホームのヘッダーから開く画面になった
         // （`usage`は逆に#2631でタブになったので、`MobileBottomNavTab`の側に含まれる）。
         // `repos`（リポジトリ一覧）と`pull-requests`は#2724でタブから外れ、同じくホームの
-        // メニューからのドリルダウンになったため、ここへ移した
+        // メニューからのドリルダウンになったため、ここへ移した。
+        // `release-history`は逆に#2811でタブになったので、`usage`と同じく
+        // `MobileBottomNavTab`の側に含まれる。
         screen:
           | MobileBottomNavTab
           | "issues"
@@ -234,7 +236,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           | "pull-requests"
           | "settings"
           | "preview"
-          | "release-history"
           | "nightly-run";
         repo?: string | null;
         issue?: string | null;
@@ -391,15 +392,10 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   // 無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの戻るボタン（goBack）が持つ。
   const selectPreview = useCallback(() => navigate({ screen: "preview" }), [navigate]);
 
-  // ホームのメニューからリリース履歴の画面へ遷移する（#2726）。確認環境と同じく
-  // フッターにタブが無いため`selectTab`ではなくこちらを使い、戻る導線はヘッダーの
-  // 戻るボタン（goBack）が持つ。
-  const selectReleaseHistory = useCallback(
-    () => navigate({ screen: "release-history" }),
-    [navigate],
-  );
+  // リリース履歴は#2811でフッターのタブになったため、専用の遷移関数は持たない
+  // （`selectTab("release-history")`で開く）。AI使用量（#2631）と同じ。
 
-  // ホームのメニューから夜間実行の画面へ遷移する（#2772）。リリース履歴と同じ形
+  // ホームのメニューから夜間実行の画面へ遷移する（#2772）。確認環境と同じ形
   const selectNightlyRun = useCallback(() => navigate({ screen: "nightly-run" }), [navigate]);
 
   const selectRepository = useCallback(
@@ -573,7 +569,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPullRequestView,
     selectSettings,
     selectPreview,
-    selectReleaseHistory,
     selectNightlyRun,
     selectRepository,
     selectRepositoryByFullName,

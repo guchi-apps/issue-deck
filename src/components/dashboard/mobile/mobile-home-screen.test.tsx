@@ -126,7 +126,6 @@ function renderHome(
       onSelectQuickView={() => {}}
       onSelectPullRequests={() => {}}
       onSelectPreview={() => {}}
-      onSelectReleaseHistory={() => {}}
         onSelectNightlyRun={() => {}}
         nightlyRunQueuedCount={null}
       previewRunning={false}
@@ -178,7 +177,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "リポジトリ",
       "コードレビュー",
       "確認環境",
-      "リリース履歴",
+      // リリース履歴も#2811でフッターのタブ（「リリース」）へ移したので、ここには並ばない
       "夜間実行",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
@@ -262,7 +261,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
-        onSelectReleaseHistory={() => {}}
         onSelectNightlyRun={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}
@@ -492,7 +490,6 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectQuickView={() => {}}
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
-        onSelectReleaseHistory={() => {}}
         onSelectNightlyRun={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}

@@ -50,6 +50,16 @@ describe("resolveBottomNavTab", () => {
     expect(resolveBottomNavTab({ kind: "usage" })).toBe("usage");
   });
 
+  // リリース履歴は#2726ではドリルダウンだったが、#2811でフッターの3枠目になった
+  it("リリース履歴では「リリース」タブを点灯させる", () => {
+    expect(resolveBottomNavTab({ kind: "release-history" })).toBe("release-history");
+  });
+
+  // 夜間実行（#2772）はタブを持たないまま
+  it("夜間実行ではどのタブも点灯させない", () => {
+    expect(resolveBottomNavTab({ kind: "nightly-run" })).toBeNull();
+  });
+
   // #2724でフッターの「Issue」（リポジトリ一覧）・「PR」タブを外したため、Issue・PRに関わる
   // 画面はどれもホームからのドリルダウンになった（遷移元がどこでも「ホーム」を点灯させる）
   it("リポジトリ一覧・リポジトリ別Issue一覧・PR一覧ではホームタブを返す", () => {
