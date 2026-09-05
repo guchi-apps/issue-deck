@@ -277,7 +277,6 @@ export function IssueDeckShell({
     selectPullRequestView: selectMobilePullRequestView,
     selectSettings: selectMobileSettings,
     selectPreview,
-    selectReleaseHistory,
     selectNightlyRun,
     selectRepository,
     selectRepositoryByFullName,
@@ -1540,7 +1539,6 @@ export function IssueDeckShell({
                   onSelectPullRequests={selectPullRequests}
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
-                  onSelectReleaseHistory={selectReleaseHistory}
                   onSelectNightlyRun={selectNightlyRun}
                   nightlyRunQueuedCount={nightlyRun.state?.queued.length ?? null}
                   onSelectRepos={selectRepos}
@@ -1571,7 +1569,6 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
-                  onBack={goBack}
                 />
               )}
 

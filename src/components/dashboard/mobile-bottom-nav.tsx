@@ -1,6 +1,6 @@
 "use client";
 
-import { Gauge, GitBranch, Home } from "lucide-react";
+import { Gauge, GitBranch, History, Home } from "lucide-react";
 
 import { NotificationBadge } from "@/components/dashboard/notification-content";
 import { useNotificationState } from "@/components/dashboard/notification-state";
@@ -29,9 +29,18 @@ import { cn } from "@/lib/utils";
 // 節に足した「リポジトリ」の行から開く（`mobile-home-screen.tsx`）。`mscreen=repos`・
 // `mscreen=pull-requests`のURLもそのまま生きている。**フッターから外した画面ではどのタブを
 // 点灯させるか**は`mobile-nav-tab.ts`が持つ（ホームからのドリルダウンとして「ホーム」）。
+//
+// **「リリース」（id=`release-history`）は#2811で足した。** AI使用量と同じ経緯で、スマホから
+// 見たいものがホームのメニューを1段掘らないと開けなかった。置き場所は「ブランチ」の隣＝3枠目
+// で、developへのマージ待ち→本番へ出た結果、というリリース周りの導線を隣り合わせにする。
+// **ラベルは画面名（「リリース履歴」）ではなく「リリース」**——4枠になって1枠98pxまで詰まり、
+// 6文字だと枠いっぱいで隣と接する。画面のタイトルとPCの左メニューは「リリース履歴」のまま。
+// AI使用量と同じく、ホームのメニューからは外して押す場所を1か所に保っている
+// （`mobile-home-screen.tsx`）。
 const items = [
   { id: "home", label: "ホーム", icon: Home },
   { id: "flow", label: "ブランチ", icon: GitBranch },
+  { id: "release-history", label: "リリース", icon: History },
   { id: "usage", label: "AI使用量", icon: Gauge },
 ] as const;
 
@@ -52,7 +61,7 @@ type MobileBottomNavViewProps = {
 };
 
 /**
- * スマホのフッター（#1436・#1638・#2724）。
+ * スマホのフッター（#1436・#1638・#2724・#2811）。
  *
  * **反映待ちの件数はProviderから自分で読む。** フッターは`NotificationProvider`の内側に
  * 置かれており、Providerを描いている`issue-deck-shell.tsx`はその親なのでフックを呼べず、

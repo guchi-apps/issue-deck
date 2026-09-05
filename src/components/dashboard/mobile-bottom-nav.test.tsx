@@ -11,12 +11,22 @@ afterEach(() => {
   cleanup();
 });
 
-describe("MobileBottomNav（#1638でブランチと設定を入れ替え、#2631でAI使用量を足し、#2724でIssueとPRを外した）", () => {
-  it("フッターはホーム・ブランチ・AI使用量の3つで、設定は出さない", () => {
+describe("MobileBottomNav（#1638でブランチと設定を入れ替え、#2631でAI使用量を足し、#2724でIssueとPRを外し、#2811でリリースを足した）", () => {
+  it("フッターはホーム・ブランチ・リリース・AI使用量の4つで、設定は出さない", () => {
     render(<MobileBottomNav active="home" onSelect={vi.fn()} />);
 
     const labels = screen.getAllByRole("button").map((button) => button.textContent);
-    expect(labels).toEqual(["ホーム", "ブランチ", "AI使用量"]);
+    expect(labels).toEqual(["ホーム", "ブランチ", "リリース", "AI使用量"]);
+  });
+
+  // ラベルは画面名（「リリース履歴」）ではなく「リリース」（#2811）。1枠98pxに6文字は
+  // 収まらず、隣の枠と接する
+  it("「リリース」タブを押すとリリース履歴画面のidを返す", () => {
+    const onSelect = vi.fn();
+    render(<MobileBottomNav active="home" onSelect={onSelect} />);
+
+    screen.getByRole("button", { name: "リリース" }).click();
+    expect(onSelect).toHaveBeenCalledWith("release-history");
   });
 
   // 外した2つはホームのメニューから開く（`mobile-home-screen.tsx`）。ここへ戻すと、
