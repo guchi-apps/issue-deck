@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
+  Copy,
   ExternalLink,
   Keyboard,
   Loader2,
@@ -16,6 +17,7 @@ import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-rema
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { copyText } from "@/lib/copy-text";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { QuestionPremise } from "@/lib/dispatch/question-premise";
@@ -28,6 +30,8 @@ import {
 } from "@/lib/dispatch/session-question-request";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { COMMENT_AGENT_PROFILES } from "@/lib/github/comment-source";
+import { extractQuestionCommandBlocks } from "@/lib/session-question-commands";
+import { cn } from "@/lib/utils";
 
 /**
  * ローカルセッションが`AskUserQuestion`で聞いた質問に、その場で答えるパネル（#2189）。
@@ -330,6 +334,13 @@ function QuestionBlock({
     (option) => selection.options.includes(option.label) && option.preview,
   )?.preview;
 
+  // 質問文に埋め込まれたコマンド（``` bash ``` フェンス）は、地の文から切り離して
+  // 独立表示する（#2818）。プレーンテキストのまま`<p>`へ出すと、バッククォートが
+  // 文字どおり表示され複数コマンドが1行に潰れる（Issue添付のスクリーンショットの実例）
+  const { text: questionText, commands: questionCommands } = extractQuestionCommandBlocks(
+    question.question,
+  );
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -344,7 +355,8 @@ function QuestionBlock({
           </span>
         )}
       </div>
-      <p className="text-sm font-semibold leading-relaxed">{question.question}</p>
+      <p className="text-sm font-semibold leading-relaxed">{questionText}</p>
+      {questionCommands.length > 0 && <QuestionCommandList commands={questionCommands} />}
 
       <div className="flex flex-col gap-1.5">
         {question.options.map((option) => {
@@ -403,6 +415,130 @@ function QuestionBlock({
         className="text-[12.5px]"
       />
     </div>
+  );
+}
+
+/**
+ * 質問文に埋め込まれたコマンドの一覧（#2818）。`extractQuestionCommandBlocks`が
+ * `&&`・改行で分けた単位ごとに、個別のコピーボタンを付けて独立表示する。
+ *
+ * **1件だけなら番号を振らない。** 選ぶ余地の無い1件に「1/1」と出しても情報が増えないため、
+ * `MarkdownBody`の`CodeBlock`（#1726）と同じ、コード欄1つ＋コピーボタンの見た目にする。
+ */
+function QuestionCommandList({ commands }: { commands: string[] }) {
+  if (commands.length === 1) {
+    return (
+      <div className="flex min-w-0 items-start gap-1.5 rounded-md border bg-muted/60 p-2">
+        <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-xs leading-relaxed">
+          {commands[0]}
+        </pre>
+        <QuestionCommandCopyButton command={commands[0]} label="コードをコピー" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border bg-muted/60 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10.5px] font-semibold text-muted-foreground">
+          コマンド・{commands.length}件
+        </span>
+        <QuestionCommandCopyAllButton commands={commands} />
+      </div>
+      <ol className="flex flex-col gap-1.5">
+        {commands.map((command, order) => (
+          <li key={`${order}-${command}`} className="flex min-w-0 items-start gap-1.5">
+            <span
+              className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border bg-background font-mono text-[10px] text-muted-foreground"
+              aria-hidden
+            >
+              {order + 1}
+            </span>
+            <pre className="min-w-0 flex-1 overflow-x-auto rounded border bg-background p-2 font-mono text-xs leading-relaxed">
+              {command}
+            </pre>
+            <QuestionCommandCopyButton command={command} label="この行をコピー" />
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** 1件だけをコピーする（成否の表示は`markdown-body`の`CodeBlock`と同じ方針） */
+function QuestionCommandCopyButton({ command, label: idleLabel }: { command: string; label: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    const ok = await copyText(command);
+    setState(ok ? "copied" : "failed");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1500);
+  }
+
+  const label = state === "copied" ? "コピーしました" : state === "failed" ? "コピーできませんでした" : idleLabel;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "mt-0.5 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-background text-muted-foreground transition hover:text-foreground",
+        state === "copied" && "text-primary",
+        state === "failed" && "text-destructive",
+      )}
+    >
+      {state === "copied" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
+
+/** 並び全体を1回でコピーする（`manual-step-where-to-run`の`CopyAllButton`と同じ方針） */
+function QuestionCommandCopyAllButton({ commands }: { commands: string[] }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    const ok = await copyText(commands.join("\n"));
+    setState(ok ? "copied" : "failed");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1500);
+  }
+
+  const label =
+    state === "copied"
+      ? "コピーしました"
+      : state === "failed"
+        ? "コピーできませんでした"
+        : `${commands.length}件まとめてコピー`;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      className={cn(
+        "shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground transition hover:text-foreground",
+        state === "copied" && "text-primary",
+        state === "failed" && "text-destructive",
+      )}
+    >
+      {label}
+    </button>
   );
 }
 

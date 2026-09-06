@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ManualStepWhereToRun,
@@ -55,9 +55,30 @@ describe("buildWhereToRunLines", () => {
       { label: "実行する（本文に書かれたコマンド）", command: "vi .env" },
     ]);
   });
+
+  // #2818: &&で繋がった確認コマンドを1つずつコピー・実行できるように分ける
+  it("&&で繋がったコマンドは実行する行を複数に分ける", () => {
+    const guide = parseManualStepGuide(BODY);
+
+    expect(
+      buildWhereToRunLines(guide.where, "git fetch origin develop --quiet && git status"),
+    ).toEqual([
+      { label: "つなぐ", command: "ssh subpc" },
+      { label: "移動する", command: "cd ~/apps/issue-deck" },
+      { label: "実行する（1/2）", command: "git fetch origin develop --quiet" },
+      { label: "実行する（2/2）", command: "git status" },
+    ]);
+  });
 });
 
 describe("ManualStepWhereToRun", () => {
+  function mockClipboard(writeText: () => Promise<void>) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+  }
+
   it("実行するデバイスと3行をまとめてコピーできる形で出す", () => {
     const guide = parseManualStepGuide(BODY);
     render(
@@ -72,6 +93,26 @@ describe("ManualStepWhereToRun", () => {
     expect(screen.getByText("ssh subpc")).toBeTruthy();
     expect(screen.getByText("cd ~/apps/issue-deck")).toBeTruthy();
     expect(screen.getByRole("button", { name: "3行まとめてコピー" })).toBeTruthy();
+  });
+
+  // #2818: まとめてコピーだけでなく、1行だけをコピーしたいこともある
+  it("行ごとに個別のコピーボタンを出す", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    const guide = parseManualStepGuide(BODY);
+    render(
+      <ManualStepWhereToRun
+        where={guide.where}
+        device={guide.where.defaultDevice}
+        command="git fetch origin develop --quiet && git status"
+      />,
+    );
+
+    expect(screen.getByText("実行する（1/2）")).toBeTruthy();
+    expect(screen.getByText("実行する（2/2）")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "この行をコピー" })[0]);
+    expect(writeText).toHaveBeenCalledWith("ssh subpc");
   });
 
   it("案内できることが無ければ何も出さない", () => {
