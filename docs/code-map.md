@@ -2773,6 +2773,18 @@ export function POST(request: NextRequest) {
   まで動かず、`ALIVE`のまま立ち上がり直した行では動かない）。**Codexのセッションでは切り替え
   られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
   Controlが無いため答える出口が消える）。
+  **`question.question`はMarkdownとして描画しないプレーンテキスト**（`QuestionBlock`の
+  `<p>`）。`AskUserQuestion`の質問文にコマンド確認のため```bash```フェンスを埋め込むと、
+  バッククォートが文字どおり表示され複数コマンドが1行に潰れていた（#2818）。埋め込まれた
+  フェンスだけは`lib/session-question-commands.ts`の`extractQuestionCommandBlocks`が
+  取り出し、`&&`・改行の分割（`lib/shell-command-lines.ts`）を経て独立したコマンド一覧
+  として描く——地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は
+  従来どおり素通りする。
+  **手作業Issue（`71.manual-step`）では、質問が指している手順の中身も同じパネルに出す**
+  （#2820。当て方は`lib/manual-step-question.ts`＝引用された手順名で本文の手順を引き、
+  質問文の`手順N`は食い違いを弾くのにだけ使う。描くのは手順のMarkdown・実行する端末・
+  `manual-step-where-to-run.tsx`の「手元で実行する」で、**当たらなければカードごと出さない**。
+  代行できない理由は`describeManualStepExecutionRejection`から取り、アシスタントと同じ文にする）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
