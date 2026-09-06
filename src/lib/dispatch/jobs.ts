@@ -276,6 +276,9 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
         ? null
         : {
             commit: host.checkoutCommit,
+            // 起動時のコミット（#2815）。`commit`と食い違っていれば、pollerは古いコードのまま
+            // 走っている。申告していないpollerでは`null`
+            startedCommit: host.checkoutStartedCommit,
             branch: host.checkoutBranch,
             committedAt: host.checkoutCommittedAt?.toISOString() ?? null,
             behindCount: host.checkoutBehind,
@@ -2221,6 +2224,7 @@ export async function announceDispatchHost(params: {
     // チェックアウトの版も毎回上書きする（#1612）。**前回の値を残さない。**
     // 残すと、取り込む前の版が現在の版として出続ける（この仕組みが防ぎたいことそのもの）
     checkoutCommit: params.checkout?.commit ?? null,
+    checkoutStartedCommit: params.checkout?.startedCommit ?? null,
     checkoutBranch: params.checkout?.branch ?? null,
     checkoutCommittedAt: toDate(params.checkout?.committedAt),
     checkoutBehind: params.checkout?.behindCount ?? null,
