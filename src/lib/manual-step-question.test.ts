@@ -81,8 +81,10 @@ describe("findManualStepForQuestion", () => {
     expect(found?.order).toBe(2);
     expect(found?.device).toBe("VPS");
     expect(found?.command).toContain("GOOGLE_REFRESH_TOKEN");
-    // 埋める値が残っている手順は代行できない。その理由を画面へ出せる形で返す
-    expect(found?.reason).toContain("値を埋める");
+    // 代行できない理由は`describeManualStepExecutionRejection`の文言をそのまま返す
+    // （手作業アシスタントの`ManualStepRunPanel`と同じ文になる）。サブPC以外はその判定が先に
+    // 出るので、埋める値より端末が理由になる——順序も既存の判定に従う
+    expect(found?.reason).toContain("VPSで実行するため");
   });
 
   it("手順に結び付かない質問では当てない（関係のない手順を出さない）", () => {
@@ -100,14 +102,43 @@ describe("findManualStepForQuestion", () => {
     expect(found).toBeNull();
   });
 
-  it("本文の手順数を超える番号では当てない", () => {
+  it("手順名が引用されていなければ、番号だけでは当てない", () => {
     const found = findManualStepForQuestion({
       labels: MANUAL_STEP_LABELS,
       body: BODY,
-      questions: [question({ question: "手順5を実行しますか？", header: "手順5" })],
+      questions: [question({ question: "手順2を実行しますか？", header: "手順2" })],
     });
 
     expect(found).toBeNull();
+  });
+
+  /**
+   * プロンプトは「未チェックのものだけ進める」とも書いているため、モデルが残りの手順を
+   * 1から数え直すと番号だけが当たる。番号と手順名が食い違うときは出さない（計画レビューの指摘2）。
+   */
+  it("番号と手順名が別の手順を指していたら当てない", () => {
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body: BODY,
+      questions: [
+        question({
+          question: "手順1「`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する」は実施されましたか？",
+          header: "手順1",
+        }),
+      ],
+    });
+
+    expect(found).toBeNull();
+  });
+
+  it("ブラウザの手順では、代行できない理由も手作業アシスタントと同じ文言で返す", () => {
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body: BODY,
+      questions: [question()],
+    });
+
+    expect(found?.reason).toContain("ブラウザで実行するため");
   });
 
   it("手作業Issueでなければ当てない", () => {
@@ -118,6 +149,32 @@ describe("findManualStepForQuestion", () => {
     });
 
     expect(found).toBeNull();
+  });
+
+  it("サブPCの手順に埋める値が残っていれば、その表記を添えて理由にする", () => {
+    const body = [
+      "## 前提条件",
+      "",
+      "- 実行するデバイス: サブPC",
+      "",
+      "## やること",
+      "",
+      "- [ ] `.env`にトークンを追記する",
+      "",
+      "  ```bash",
+      '  echo "TOKEN=<控えたkey>" >> .env',
+      "  ```",
+      "",
+    ].join("\n");
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body,
+      questions: [
+        question({ question: "手順1「`.env`にトークンを追記する」は実施されましたか？", header: "手順1" }),
+      ],
+    });
+
+    expect(found?.reason).toContain("<控えたkey>");
   });
 
   it("テンプレートに沿っていない本文では当てない", () => {

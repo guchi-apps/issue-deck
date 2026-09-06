@@ -1,9 +1,15 @@
+import {
+  describeManualStepExecutionRejection,
+  resolveManualStepExecutionRejection,
+  type ManualStepExecutionRejection,
+} from "@/lib/dispatch/dispatch-job";
 import type { SessionQuestion } from "@/lib/dispatch/session-question-request";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import {
   extractShellBlock,
   findInteractiveCommand,
   findPlaceholder,
+  isSubpcManualStepDevice,
 } from "@/lib/manual-step-command";
 import {
   parseManualStepGuide,
@@ -30,7 +36,11 @@ import type { IssueLabel } from "@/types/issue";
  * （読んだ人はその手順を実行してしまう）。
  *
  * 照合しやすい質問文の形は`scripts/prompts/manual-step-agent.md`が指定している。
- * それでも書き方が揺れることはあるので、**手順番号と手順名の2通りで当てる**。
+ *
+ * **当てる軸は手順名で、手順番号は食い違いを弾くためだけに使う**（計画レビューの指摘2）。
+ * プロンプトは「未チェックのものだけ進める」とも書いているため、モデルが残りの手順を1から
+ * 数え直すと**番号だけが当たって中身は別の手順**になる。番号だけで確定させると、
+ * 「当たらなければ出さない」では防げない取り違えが残る。
  */
 
 /** 質問が指している手順。パネルへ渡す形 */
@@ -49,8 +59,13 @@ export type ManualStepQuestionGuide = {
   /** 本文に書かれたコマンド（`<…>`が入ったまま）。ちょうど1つのときだけ。無ければ`null` */
   command: string | null;
   /**
-   * このコマンドを代行できない理由（対話が要る・値を埋める箇所がある）。無ければ`null`。
-   * **プレーンな文章**で返す（`ManualStepWhereToRun`の`reason`はMarkdownとして描かない）。
+   * この手順を代行できない理由（サブPC以外・コマンドが1つでない・対話が要る・値を埋める）。
+   * 代行できる手順では`null`。
+   *
+   * **文言は`describeManualStepExecutionRejection`から取る**（計画レビューの指摘3）。
+   * 手作業アシスタントの`ManualStepRunPanel`が出すものと同じで、同じ手順について画面ごとに
+   * 違う理由が出ないようにする。**プレーンな文章**で返す
+   * （`ManualStepWhereToRun`の`reason`はMarkdownとして描かない）。
    */
   reason: string | null;
 };
@@ -82,38 +97,45 @@ export function findManualStepForQuestion({
 
     const step = guide.steps[index];
     const command = extractShellBlock(step.markdown);
+    const device = resolveManualStepDevice(guide.where, step);
     return {
       order: index + 1,
       total: guide.steps.length,
       step,
       where: guide.where,
-      device: resolveManualStepDevice(guide.where, step),
+      device,
       command,
-      reason: describeReason(command),
+      reason: describeReason(device, command),
     };
   }
   return null;
 }
 
-/** 質問文（と`header`）から手順の位置を当てる。番号 → 手順名の順で見る */
+/**
+ * 質問文（と`header`）から手順の位置を当てる。
+ *
+ * **手順名で当て、番号が書かれていればそれが一致することまで求める。** どちらか一方しか
+ * 一致しないものは当たらなかったものとして扱う（計画レビューの指摘2）。
+ */
 function findStepIndex(steps: ManualStepGuideStep[], question: SessionQuestion): number | null {
-  const byNumber = matchStepNumber(`${question.header} ${question.question}`, steps.length);
-  if (byNumber !== null) return byNumber;
-  return matchStepTitle(steps, question.question);
+  const byTitle = matchStepTitle(steps, question.question);
+  if (byTitle === null) return null;
+
+  const order = readStepNumber(`${question.header} ${question.question}`);
+  if (order !== null && order - 1 !== byTitle) return null;
+  return byTitle;
 }
 
 /**
- * 「手順3」のような番号で当てる。**最初に現れたものだけ**を見る。
+ * 「手順3」のような番号を読む。**最初に現れたものだけ**を見る。無ければ`null`。
  *
- * 手順の総数を超える番号は当たらないものとして扱う（`## 完了の確認方法`を「手順5」と
- * 呼んだ質問で、末尾の手順を出してしまわないようにする）。
+ * 範囲の検査はしない——読めた番号が手順名と食い違うかどうかだけを`findStepIndex`が見る。
  */
-function matchStepNumber(text: string, total: number): number | null {
+function readStepNumber(text: string): number | null {
   const found = /手順\s*([0-9０-９]{1,2})/.exec(text);
   if (!found) return null;
   const order = Number(toHalfWidthDigits(found[1]));
-  if (!Number.isInteger(order) || order < 1 || order > total) return null;
-  return order - 1;
+  return Number.isInteger(order) && order >= 1 ? order : null;
 }
 
 /**
@@ -151,17 +173,42 @@ function toHalfWidthDigits(value: string): string {
 }
 
 /**
- * 代行できない理由を1行で返す。**判定は既存の関数をそのまま呼ぶ**——ここに条件を書き足すと、
- * 手作業アシスタントが「代行できる」と言っている手順に、質問パネルだけが理由を出すことになる。
+ * 手順そのものが理由で代行できない場合だけを見る（計画レビューの指摘3）。
+ *
+ * `resolveManualStepExecutionRejection`はホストの都合（未申告・オフライン・古いpoller）も
+ * 返すが、**ここにはホストが無い**（質問パネルはホストの一覧を持たない）。ホストの理由は
+ * 手順の理由より後に判定されるので、この4つだけを拾えば`host`が`null`でも取りこぼさない。
  */
-function describeReason(command: string | null): string | null {
-  const interactive = findInteractiveCommand(command);
-  if (interactive !== null) {
-    return `「${interactive}」のように対話が要るコマンドを含むため代行できません。このブロックはまとめて手元で実行してください。`;
-  }
+const STEP_LEVEL_REJECTIONS: ManualStepExecutionRejection[] = [
+  "device_not_subpc",
+  "no_command",
+  "interactive_command",
+  "placeholder_command",
+];
+
+/**
+ * 代行できない理由を1行で返す。**判定も文言も既存の関数をそのまま呼ぶ**——ここに条件や
+ * 言い回しを書き足すと、同じ手順について手作業アシスタントと質問パネルで違う理由が出る。
+ */
+function describeReason(device: string | null, command: string | null): string | null {
+  const interactiveCommand = findInteractiveCommand(command);
   const placeholder = findPlaceholder(command);
-  if (placeholder !== null) {
-    return `「${placeholder}」のように値を埋める箇所があるため代行できません。値を埋めてから実行してください。`;
-  }
-  return null;
+  const rejection = resolveManualStepExecutionRejection({
+    host: null,
+    isManualStepIssue: true,
+    isSubpcDevice: isSubpcManualStepDevice(device),
+    hasCommand: command !== null,
+    interactiveCommand,
+    placeholder,
+    hasActiveJob: false,
+  });
+  if (rejection === null || !STEP_LEVEL_REJECTIONS.includes(rejection)) return null;
+
+  // `hostName`はこの4つの理由では読まれない（ホストの都合を説明する理由でだけ使う）
+  return describeManualStepExecutionRejection(rejection, {
+    hostName: "",
+    device,
+    interactiveCommand,
+    placeholder,
+  });
 }
