@@ -118,6 +118,15 @@ describe("parseSessionUsageReport", () => {
     expect(parsed?.issueNumber).toBeNull();
   });
 
+  it("コードレビューの種別を受け取る（#2832）", () => {
+    // シェル側が`code-review`を送るようになったので、ここが知らないと行ごと捨てられる。
+    const parsed = parseSessionUsageReport(
+      reportInput({ kind: "code-review", repository: "asset-manager", issue: 310 }),
+    );
+    expect(parsed?.kind).toBe("code-review");
+    expect(parsed?.repository).toBe("asset-manager");
+  });
+
   it.each([
     ["セッションIDが空", { sessionId: "" }],
     ["知らない種別", { kind: "unknown-kind" }],

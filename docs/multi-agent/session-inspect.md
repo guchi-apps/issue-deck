@@ -182,6 +182,39 @@ Issue・PR別の明細の順に出る。**Issueの行を開くと、そのIssue�
   転記だけなので、印を足さずにpollerを入れ替えると**その時点で3日以上前に終わったセッションには
   二度と新しい項目が入らない**。画面は最大30日を出すため、ひと月ぶんが古い形のまま残る。
   `SESSION_USAGE_PHASE_BACKFILL_STAMP`がその例で、印が無ければ1度だけ30日ぶんを開き直す
+- **`classify()`に作業場を足したときも印を足す**（#2832）。分類が変わっても既に報告済みの行は
+  古い`repository`・`kind`のまま残り、再送しない限り画面から消えない
+  （`SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP`がその例）
+
+### 作業場を新しく作ったら、`classify()`にも足す（#2832）
+
+種別とリポジトリ名は**作業ディレクトリのパスだけ**で決まる（`scripts/lib/session-usage.sh`の
+`classify()`）。パターンに当たらない作業場は`("other", basename(cwd))`へ落ちるため、
+`.code-reviews/_refs/guchi-apps-asset-manager`のような`<owner>-<repo>`形の作業場は、
+**`guchi-apps-asset-manager`という別のリポジトリとして「リポジトリ別」に並ぶ**。ownerが付いた
+名前はどのリポジトリとも一致しないので、明細の行をクリックしてもIssueが開かない
+（`issue-deck-shell.tsx`の`openUsageIssue`はownerを除いた短い名前で突き合わせる）。
+
+`scripts/start-*.sh`が新しい置き場を作るときは、同じPRで`classify()`のパターンと`KIND_LABELS`、
+`src/lib/dispatch/session-usage.ts`の`SESSION_USAGE_KINDS`、`session-usage-view.ts`の
+`KIND_LABELS`の4つを揃える。**`SESSION_USAGE_KINDS`に無い種別の行は取り込みが丸ごと捨てる**ので、
+シェル側だけ直すと画面から消える。
+
+### GitHub Actionsの行は、共有ワークフローの配布タグを配ってから届く（#2832）
+
+Actionsぶんの報告は`.github/scripts/summarize-claude-usage.sh`の`report_to_issue_deck`が行い、
+必要な`AI_USAGE_REPORT_URL`（`vars.APP_BASE_URL`）・`PROGRESS_REPORT_SECRET`は
+**共有ワークフロー側（`reusable-*.yml`）で渡している**。他リポジトリのcallerは`@workflows/vN`で
+タグ固定なので、**報告を足した時点では配布先に何も起きない**——issue-deckだけが
+`uses: ./.github/workflows/...`のローカルパス参照で即座に効くため、
+「AI使用量にissue-deckのActions実行しか出ない」状態になる。
+
+- 直し方は画面（設定＞フリート運用）の「新しいタグを切って配る」。タグは`main`の先端から
+  切られるので、**その変更が`main`へ入っていれば押せる**（リリースを待つ必要はない）
+- 環境変数のどれかが空なら`report_to_issue_deck`は**黙って`return 0`する**（計測でジョブを
+  落とさないため）。届かないときはActionsのログではなく、まず配布タグと`secrets: inherit`を見る
+- 一方**ローカルセッションぶんは全リポジトリぶんが最初から届く**。pollerが`~/.claude/projects`を
+  丸ごと読み、リポジトリ名は作業ディレクトリから決まるため、配布タグに依存しない
 
 ### 入力側・出力側の内訳は、集計側が単価から割ったものを渡す
 

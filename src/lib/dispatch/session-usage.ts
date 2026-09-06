@@ -25,7 +25,15 @@ const MAX_SESSIONS_PER_REPORT = 500;
 export const SESSION_USAGE_RETENTION_DAYS = 180;
 
 /** 種別。`scripts/lib/session-usage.sh`の`classify()`と対応する */
-export const SESSION_USAGE_KINDS = ["implementation", "plan-review", "question", "other"] as const;
+export const SESSION_USAGE_KINDS = [
+  "implementation",
+  "plan-review",
+  // コードレビュー（#2832）。**シェル側の`KIND_LABELS`に足したら必ずここにも足す**——
+  // 知らない種別の行は`parseSessionUsageReport`が丸ごと落とすため、報告しても画面に出ない。
+  "code-review",
+  "question",
+  "other",
+] as const;
 export type SessionUsageKind = (typeof SESSION_USAGE_KINDS)[number];
 export const SESSION_USAGE_AGENTS = ["claude", "codex"] as const;
 export type SessionUsageAgent = (typeof SESSION_USAGE_AGENTS)[number];

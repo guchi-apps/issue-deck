@@ -219,6 +219,23 @@ describe("session_usage_aggregate", () => {
     expect(row).toMatchObject({ kind: "plan-review", repository: "dayspan", issue: 222 });
   });
 
+  it("コードレビューの作業場も、ownerを落として対象リポジトリの行へ寄せる（#2832）", () => {
+    // 置き場が`.code-reviews`なだけで、形は計画レビューと同じ。ここを分類できないと
+    // `guchi-apps-asset-manager`という別リポジトリがリポジトリ別の内訳に並ぶ。
+    const cwd = "/home/u/apps/issue-deck-worktrees/.code-reviews/_refs/guchi-apps-asset-manager";
+    const codeReview = writeTranscript("code-review.jsonl", [
+      {
+        type: "user",
+        cwd,
+        message: { content: [{ type: "text", text: "あなたはコードレビュー担当です。Issue #310 のコードを…" }] },
+      },
+      assistantLine("msg_1", { cwd, output: 1 }),
+    ]);
+
+    const [row] = aggregate([codeReview]).sessions;
+    expect(row).toMatchObject({ kind: "code-review", repository: "asset-manager", issue: 310 });
+  });
+
   it("しきい値より古い行は数えず、1行も残らない転記は行にしない", () => {
     // 2026-08-25T00:00:00Z = 1787616000
     const file = writeTranscript("old.jsonl", [
