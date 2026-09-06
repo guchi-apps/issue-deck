@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseReleaseVerification } from "@/lib/github/release-verification";
+import {
+  buildReleaseVerificationFixIssueDraft,
+  parseReleaseVerification,
+} from "@/lib/github/release-verification";
 
 /**
  * `reusable-release-develop-to-main.yml`の「対象issueの検証結果を集計する」ステップが
@@ -183,5 +186,62 @@ describe("parseReleaseVerification", () => {
     const parsed = parseReleaseVerification(RELEASE_BODY.replace(/\n/g, "\r\n"));
 
     expect(parsed?.rows).toHaveLength(4);
+  });
+});
+
+describe("buildReleaseVerificationFixIssueDraft", () => {
+  it("起票先はリリース対象と同じリポジトリで、本文に元Issue・対応PR・指摘本文・関連リンクが残る", () => {
+    const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
+    const draft = buildReleaseVerificationFixIssueDraft({
+      row: rows[1], // #2443 要確認、issueTitleはnull
+      repositoryFullName: "guchi-apps/issue-deck",
+      releasePullRequestNumber: 2452,
+    });
+
+    expect(draft.repositoryFullName).toBe("guchi-apps/issue-deck");
+    expect(draft.title).toBe("#2443 の修正（レビュー指摘）");
+    expect(draft.body).toContain("- 元Issue: #2443");
+    expect(draft.body).toContain("- 対応PR: #2445");
+    expect(draft.body).toContain("- 自動レビュー: 要確認");
+    expect(draft.body).toContain("- 機械的リスク判定: 該当あり");
+    expect(draft.body).toContain("要確認。GitHub Actionsの設定に触れています。");
+    expect(draft.body).toContain("- リリースPR: #2452");
+    // Actionsの`@claude`トリガーを誤爆させない
+    expect(draft.body.startsWith("@claude")).toBe(false);
+  });
+
+  it("issueTitleが取れている行はタイトルに含める", () => {
+    const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
+    const draft = buildReleaseVerificationFixIssueDraft({
+      row: rows[0], // #2441 問題なし、issueTitleあり
+      repositoryFullName: "guchi-apps/issue-deck",
+      releasePullRequestNumber: 2452,
+    });
+
+    expect(draft.title).toBe("レビューのゲートを直す の修正（レビュー指摘）");
+  });
+
+  it("reviewBodyが無い行はフォールバック文を入れる", () => {
+    const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
+    const draft = buildReleaseVerificationFixIssueDraft({
+      row: rows[2], // #2438 skipped、reviewBodyはnull
+      repositoryFullName: "guchi-apps/issue-deck",
+      releasePullRequestNumber: 2452,
+    });
+
+    expect(draft.body).toContain(
+      "レビューコメントの本文は記録されていません。対応PRでのレビュー内容を直接確認してください。",
+    );
+  });
+
+  it("対応PRが見つからない行は「（記録なし）」と表す", () => {
+    const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];
+    const draft = buildReleaseVerificationFixIssueDraft({
+      row: rows[3], // #2432 pullRequestNumberはnull
+      repositoryFullName: "guchi-apps/issue-deck",
+      releasePullRequestNumber: 2452,
+    });
+
+    expect(draft.body).toContain("- 対応PR: （記録なし）");
   });
 });

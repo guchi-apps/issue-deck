@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.86.0",
+    date: "2026-09-06",
+    changes: [
+      "リリースPR（develop→main）の検証結果一覧に、「要修正」「要確認」となった指摘をそのまま新規Issueの下書きとして起票できるボタンを追加しました。あわせて、セッション操作の「Claude Codeアプリで開く」ボタンの表示名を「アプリで開く」に短縮しました。",
+    ],
+    usage: [
+      "1. リリースPR（develop→mainのバージョンアップPR）の詳細画面を開く",
+      "2. 検証結果一覧で「要修正」または「要確認」となっている行を探す",
+      "3. その行の「修正をIssueにする」ボタンを押す",
+      "4. 新規Issue作成ダイアログが、指摘内容を反映したタイトル・本文であらかじめ入力された状態で開けば成功",
+    ],
+  },
+  {
     version: "4.85.0",
     date: "2026-09-06",
     changes: [

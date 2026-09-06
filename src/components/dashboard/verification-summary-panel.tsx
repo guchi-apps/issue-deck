@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, FilePlus2 } from "lucide-react";
 import { useState } from "react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { Button } from "@/components/ui/button";
 import type {
   ReleaseVerification,
   ReleaseVerificationRow,
@@ -64,14 +65,23 @@ function TallyItem({ kind, label, count }: { kind: ReviewVerdictKind; label: str
  * **既定は閉じたまま。** リリースには10件以上のIssueが載ることがあり、全部を開いて出すと
  * 「何件のうち何件が問題なしか」を先に読むためのこの帯が、本文と同じ長さになってしまう。
  */
+/** 「修正をIssueにする」ボタンを出す判定（#2838）。それ以外の判定では現状の見た目を変えない */
+function canRequestFixIssue(kind: ReviewVerdictKind): boolean {
+  return kind === "changes-requested" || kind === "needs-check";
+}
+
 function Row({
   row,
   repositoryFullName,
+  onCreateFixIssue,
 }: {
   row: ReleaseVerificationRow;
   repositoryFullName: string;
+  /** 指摘を新規Issueの下書きにして開く（#2838）。渡さない画面ではボタンを出さない */
+  onCreateFixIssue?: (row: ReleaseVerificationRow) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const showFixButton = onCreateFixIssue !== undefined && canRequestFixIssue(row.reviewKind);
 
   return (
     <li className="border-b px-4 py-2 text-xs last:border-b-0">
@@ -106,20 +116,38 @@ function Row({
         >
           リスク{row.riskLabel}
         </span>
-        {row.reviewBody && (
-          <button
-            type="button"
-            onClick={() => setIsOpen((open) => !open)}
-            aria-expanded={isOpen}
-            className="ml-auto flex shrink-0 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground"
-          >
-            {isOpen ? (
-              <ChevronDown className="size-3.5" />
-            ) : (
-              <ChevronRight className="size-3.5" />
+        {(showFixButton || row.reviewBody) && (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {showFixButton && (
+              <Button
+                size="xs"
+                variant={row.reviewKind === "changes-requested" ? "destructive" : "outline"}
+                className={cn(
+                  row.reviewKind === "needs-check" &&
+                    "border-amber-600/30 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400",
+                )}
+                onClick={() => onCreateFixIssue?.(row)}
+              >
+                <FilePlus2 />
+                修正をIssueにする
+              </Button>
             )}
-            レビュー内容
-          </button>
+            {row.reviewBody && (
+              <button
+                type="button"
+                onClick={() => setIsOpen((open) => !open)}
+                aria-expanded={isOpen}
+                className="flex shrink-0 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground"
+              >
+                {isOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+                レビュー内容
+              </button>
+            )}
+          </div>
         )}
       </div>
       {row.reviewBody && isOpen && (
@@ -149,9 +177,15 @@ function Row({
 export function VerificationSummaryPanel({
   verification,
   repositoryFullName,
+  onCreateFixIssue,
 }: {
   verification: ReleaseVerification;
   repositoryFullName: string;
+  /**
+   * 「要修正」「要確認」の行から、指摘を新規Issueの下書きにして開く（#2838）。
+   * 渡さない画面ではボタンを出さない。
+   */
+  onCreateFixIssue?: (row: ReleaseVerificationRow) => void;
 }) {
   const { rows, tally } = verification;
 
@@ -177,7 +211,12 @@ export function VerificationSummaryPanel({
       </div>
       <ul>
         {rows.map((row) => (
-          <Row key={row.issueNumber} row={row} repositoryFullName={repositoryFullName} />
+          <Row
+            key={row.issueNumber}
+            row={row}
+            repositoryFullName={repositoryFullName}
+            onCreateFixIssue={onCreateFixIssue}
+          />
         ))}
       </ul>
     </section>
