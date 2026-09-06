@@ -35,7 +35,10 @@ import {
 } from "@/lib/dispatch/session-question-request";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { stripCodeBlocks } from "@/lib/manual-step-guide";
-import type { ManualStepQuestionGuide } from "@/lib/manual-step-question";
+import type {
+  ManualStepQuestionGuide,
+  ManualStepQuestionProgress,
+} from "@/lib/manual-step-question";
 import { COMMENT_AGENT_PROFILES } from "@/lib/github/comment-source";
 import { extractQuestionCommandBlocks } from "@/lib/session-question-commands";
 import { cn } from "@/lib/utils";
@@ -214,10 +217,15 @@ export function QuestionAnswerPanel({
         {/* 質問が指している手順の中身（#2820）。**前提コメントの下・選択肢の真上**に置く——
             「実施されましたか？」に答えるには、まずその手順を実施する必要がある */}
         {manualStep && (
-          <ManualStepQuestionCard
-            guide={manualStep}
-            repositoryFullName={request.repositoryFullName}
-          />
+          <>
+            {/* ここまでの進み具合（#2830）。セッションは手順を聞かずに流すので、
+                止まった時点の「どこまで終わって、残りに自分の作業がいくつあるか」を先に出す */}
+            <ManualStepProgressRow progress={manualStep.progress} />
+            <ManualStepQuestionCard
+              guide={manualStep}
+              repositoryFullName={request.repositoryFullName}
+            />
+          </>
         )}
 
         {unreadable ? (
@@ -354,6 +362,61 @@ function QuestionPremiseCard({
  * 配色はvioletで、`71.manual-step`ラベルの色・手作業アシスタントの部品と揃える。amberは
  * 「ユーザーの確認待ち」（このパネルの外枠）の色なので、中で重ねない。
  */
+/**
+ * ここまでの進み具合（#2830）。**数えているのは本文のチェック**で、セッションの実況ではない。
+ *
+ * 自動で流すようになると、人が呼ばれるのは「自分にしかできない手順」に来たときだけになる。
+ * そのとき効くのは、その手順の中身（下のカード）と、**残りに自分の作業がいくつあるか**——
+ * 1件なら片付けてしまえるし、3件なら腰を据える、という判断が変わる。
+ */
+function ManualStepProgressRow({ progress }: { progress: ManualStepQuestionProgress }) {
+  if (progress.total === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-1.5 rounded-md border bg-muted/40 px-2.5 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
+        <span className="font-semibold">
+          {progress.done === 0
+            ? "最初の手順です"
+            : `手順${progress.done}まで自動で実行しました`}
+        </span>
+        <span className="ml-auto text-muted-foreground">
+          残り{progress.remaining}件
+          {progress.remainingByUser > 0 && `（うちあなたが実行 ${progress.remainingByUser}件）`}
+        </span>
+      </div>
+      {/* 手順ごとの点。**済み・いま・これから**の3つだけを見分けられればよいので、
+          細かい状態（失敗・飛ばした）は持たせない */}
+      <div
+        className="flex flex-wrap gap-1"
+        role="img"
+        aria-label={`全${progress.total}手順のうち${progress.done}件が完了`}
+      >
+        {Array.from({ length: progress.total }, (_, index) => (
+          <span
+            key={index}
+            className={cn(
+              "h-1.5 w-6 rounded-full",
+              index < progress.done
+                ? "bg-emerald-500"
+                : index === progress.done
+                  ? "bg-amber-500"
+                  : "bg-border",
+            )}
+          />
+        ))}
+      </div>
+      {/* **答えた後に何が起きるかまで書く。** 止まっているのは自動実行の途中なので、
+          「答えたら終わり」なのか「続きが流れる」のかで、いま片付けるかどうかが変わる */}
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        {progress.remaining > 1
+          ? "この手順を実施して答えると、残りは止まるところまで自動で流れます。"
+          : "これが最後の手順です。答えると完了の確認まで流れ、クローズは改めて聞かれます。"}
+      </p>
+    </section>
+  );
+}
+
 function ManualStepQuestionCard({
   guide,
   repositoryFullName,

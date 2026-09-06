@@ -928,7 +928,13 @@ function ManualStepGuideContent({
                   （結果を見ながら相談したい）に選ぶもの。自動実行中は出さない（実行の入口を
                   2つ同時に開かない） */}
               {!autorun.active && (
-                <ManualStepSessionPanel issue={issue} dispatch={dispatch} showSessionStatus />
+                <ManualStepSessionPanel
+                  issue={issue}
+                  dispatch={dispatch}
+                  showSessionStatus
+                  // 実行計画はすぐ上の承認パネルが並べている（#2830）
+                  showRunPlan={false}
+                />
               )}
             </>
           )}

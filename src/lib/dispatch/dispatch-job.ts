@@ -59,8 +59,9 @@ export type DispatchJobStatus =
  *   コメント**として返す。人が画面から押して起こす
  * - `MANUAL_STEP_SESSION` … 手作業Issueを実施するClaude Codeセッションを立てる（#2771）。
  *   手作業アシスタントの代行実行（`MANUAL_STEP`）が本文のコマンドをpollerが1件ずつ実行するのに
- *   対し、こちらは`LAUNCH`と同じくtmuxセッションを1本立て、人が手順ごとに結果を見て
- *   「次へ進む」を答えながら進める（`AskUserQuestion`の回答パネル・Claude Codeアプリの両方から
+ *   対し、こちらは`LAUNCH`と同じくtmuxセッションを1本立て、本文の手順を止まるところまで
+ *   流す（#2830。人が呼ばれるのは代行できない手順・失敗・クローズの可否のときだけで、
+ *   答える先は`AskUserQuestion`の回答パネル・Claude Codeアプリの両方から
  *   答えられる）。**worktreeは作らず**、cwdはリポジトリごとの固定ディレクトリ。実装セッションと
  *   同じ枠を使う（`SESSION_LAUNCH_JOB_KINDS`）
  * - `MANUAL_STEP_ABORT` … 走っている代行実行を止める（#1882）。pollerが

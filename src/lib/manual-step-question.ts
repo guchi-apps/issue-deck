@@ -68,6 +68,26 @@ export type ManualStepQuestionGuide = {
    * （`ManualStepWhereToRun`の`reason`はMarkdownとして描かない）。
    */
   reason: string | null;
+  /**
+   * ここまでの進み具合（#2830）。
+   *
+   * セッションは本文の手順を**聞かずに流す**ようになったので、止まって聞かれた側は
+   * 「どこまで自動で終わっていて、残りに自分の作業がいくつあるのか」が分からないまま
+   * 答えることになる。数えるのは本文のチェックと、残りの手順の代行可否だけ——
+   * **セッションの実況は読まない**（質問と実行を結ぶデータが無いのは`#2820`と同じ）。
+   */
+  progress: ManualStepQuestionProgress;
+};
+
+export type ManualStepQuestionProgress = {
+  /** 済んだ手順の数（本文の`- [x]`） */
+  done: number;
+  /** 本文の手順の総数 */
+  total: number;
+  /** 残っている手順の数（いま聞かれている手順を含む） */
+  remaining: number;
+  /** 残りのうち、人が実行する手順の数（いま聞かれている手順を含む） */
+  remainingByUser: number;
 };
 
 /**
@@ -105,7 +125,8 @@ export function findManualStepForQuestion({
       where: guide.where,
       device,
       command,
-      reason: describeReason(device, command),
+      reason: describeReason(rejectionOf(guide, step)),
+      progress: countProgress(guide),
     };
   }
   return null;
@@ -186,11 +207,17 @@ const STEP_LEVEL_REJECTIONS: ManualStepExecutionRejection[] = [
   "placeholder_command",
 ];
 
-/**
- * 代行できない理由を1行で返す。**判定も文言も既存の関数をそのまま呼ぶ**——ここに条件や
- * 言い回しを書き足すと、同じ手順について手作業アシスタントと質問パネルで違う理由が出る。
- */
-function describeReason(device: string | null, command: string | null): string | null {
+/** その手順を代行できない理由。**判定は既存の関数をそのまま呼ぶ**（条件を書き足さない） */
+type StepRejection = {
+  rejection: ManualStepExecutionRejection | null;
+  device: string | null;
+  interactiveCommand: string | null;
+  placeholder: string | null;
+};
+
+function rejectionOf(guide: ManualStepGuide, step: ManualStepGuideStep): StepRejection {
+  const command = extractShellBlock(step.markdown);
+  const device = resolveManualStepDevice(guide.where, step);
   const interactiveCommand = findInteractiveCommand(command);
   const placeholder = findPlaceholder(command);
   const rejection = resolveManualStepExecutionRejection({
@@ -202,13 +229,37 @@ function describeReason(device: string | null, command: string | null): string |
     placeholder,
     hasActiveJob: false,
   });
-  if (rejection === null || !STEP_LEVEL_REJECTIONS.includes(rejection)) return null;
-
-  // `hostName`はこの4つの理由では読まれない（ホストの都合を説明する理由でだけ使う）
-  return describeManualStepExecutionRejection(rejection, {
-    hostName: "",
+  return {
+    // ホストの都合（未申告・オフライン）はここでは意味を持たないので落とす
+    rejection: rejection !== null && STEP_LEVEL_REJECTIONS.includes(rejection) ? rejection : null,
     device,
     interactiveCommand,
     placeholder,
+  };
+}
+
+/**
+ * 代行できない理由を1行で返す。**文言も既存の関数をそのまま呼ぶ**——ここに言い回しを
+ * 書き足すと、同じ手順について手作業アシスタントと質問パネルで違う理由が出る。
+ */
+function describeReason(found: StepRejection): string | null {
+  if (found.rejection === null) return null;
+  // `hostName`はこの4つの理由では読まれない（ホストの都合を説明する理由でだけ使う）
+  return describeManualStepExecutionRejection(found.rejection, {
+    hostName: "",
+    device: found.device,
+    interactiveCommand: found.interactiveCommand,
+    placeholder: found.placeholder,
   });
+}
+
+/** 進み具合を数える。**残りは「いま聞かれている手順を含む」**（答える前の状態を出す） */
+function countProgress(guide: ManualStepGuide): ManualStepQuestionProgress {
+  const pending = guide.steps.filter((step) => !step.checked);
+  return {
+    done: guide.steps.length - pending.length,
+    total: guide.steps.length,
+    remaining: pending.length,
+    remainingByUser: pending.filter((step) => rejectionOf(guide, step).rejection !== null).length,
+  };
 }
