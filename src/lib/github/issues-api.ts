@@ -30,6 +30,8 @@ export type GithubApiComment = {
   user: { login: string } | null;
   body: string | null;
   created_at: string;
+  /** GitHub上でそのコメントを開くURL。「GitHubで読む」の行き先に使う（#2849） */
+  html_url?: string;
   reactions?: { "+1"?: number };
 };
 

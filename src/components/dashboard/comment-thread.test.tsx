@@ -584,6 +584,73 @@ describe("CommentThread PRマージ待ちの修正を依頼するテキスト入
     fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
     expect(onRequestPrFix).toHaveBeenCalledWith("CIが失敗しています");
   });
+
+  /**
+   * #2849。マージを押す直前に、自動レビューが何を指摘したのかを読み、そのまま修正依頼へ
+   * 渡せるようにする。**取り込みはGitHubへ何も送らない**——入るのは入力欄までで、
+   * 送るのは「修正を依頼する」を押したとき。
+   */
+  describe("レビュー指摘の取り込み", () => {
+    const review = {
+      verdictKind: "changes-requested" as const,
+      verdictLabel: "要修正",
+      body: "- `a.ts:1` を直す",
+      createdAt: new Date().toISOString(),
+      htmlUrl: null,
+      reviewedSha: "0123456",
+      isStale: false,
+    };
+
+    function renderWithReview(onRequestPrFix: (reason: string) => void) {
+      return render(
+        <CommentThread
+          comments={[]}
+          repositoryFullName="m-guchi/issue-deck"
+          issueSuggestions={[]}
+          onUpdate={async () => true}
+          onDelete={async () => true}
+          commentSummary={commentSummary}
+          approvalPending
+          mergeApprovalPending
+          onApprove={async () => {}}
+          onReject={async () => {}}
+          onWithdraw={async () => {}}
+          onRequestPrFix={onRequestPrFix}
+          onMergePullRequest={async () => true}
+          reviewFindings={review}
+          reviewPullRequestNumber={2851}
+        />,
+      );
+    }
+
+    it("対象PRが分からなければパネルを出さない", () => {
+      renderMergePending(() => {});
+      expect(screen.queryByText("コードレビュー")).toBeNull();
+    });
+
+    it("取り込むと入力欄が引用で埋まり、その内容がそのまま送られる", () => {
+      const onRequestPrFix = vi.fn();
+      renderWithReview(onRequestPrFix);
+
+      fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
+      const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("修正依頼を入力（必須）");
+      expect(textarea.value).toContain("自動レビュー（PR #2851・要修正）");
+      expect(textarea.value).toContain("> - `a.ts:1` を直す");
+
+      fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
+      expect(onRequestPrFix).toHaveBeenCalledWith(textarea.value);
+    });
+
+    it("書きかけの依頼は消さず、後ろへ足す", () => {
+      renderWithReview(() => {});
+      const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("修正依頼を入力（必須）");
+      fireEvent.change(textarea, { target: { value: "ついでにテストも足してください" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
+      expect(textarea.value).toContain("ついでにテストも足してください");
+      expect(textarea.value).toContain("自動レビュー（PR #2851・要修正）");
+    });
+  });
 });
 
 /**

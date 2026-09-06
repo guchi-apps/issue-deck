@@ -57,6 +57,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+  - **テストの中の`console.log`は`vitest run`の出力に出ない。** 実データを流して読みたい
+    ときは`node:fs`の`appendFileSync`でファイルへ書き、後から`cat`する（`--silent=false`でも
+    出ず、`--reporter=basic`はこのバージョンでは解決できない）。
 - **画面が持つコメント（`IssueComment`）に絶対時刻は無い**（#2742）。`GET /api/issues/comments`が
   返すのは`createdAtLabel`（`formatRelativeDate`で整形済みの「3分前」）だけで、ISO文字列は
   `issue-mapper.ts`の時点で捨てられている。**他のデータとの前後比較はできない**ので、
@@ -1875,6 +1878,41 @@ export function POST(request: NextRequest) {
   置き、PR詳細の検証結果パネルと共有する（同じ判定が場所によって違う色で出ると、盤面の色が
   意味を持たなくなる）。節のマーカーは`scripts/check-review-verdict-marker.sh`が
   ワークフローと突き合わせる**読み側の1つ**としてこのパーサーも見ている。
+- **developへマージする直前は、判定だけでなく指摘の本文も出し、そのまま修正依頼へ渡せる**
+  （#2849。[`lib/github/pull-request-review-comment.ts`](../src/lib/github/pull-request-review-comment.ts)・
+  [`pull-request-review-findings.tsx`](../src/components/dashboard/pull-request-review-findings.tsx)）。
+  マージ待ちの承認カード（`CommentThread`の`mergeApprovalPending`）に、対応PRへ投稿された
+  レビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
+  `## 検証結果`の判定だけ（#2843）で、何を指摘されたのかはコメントにしか無い。読むのは
+  総評の判定マーカー（`issue-deck-review-verdict:… sha=…`）か転記の印
+  （`issue-deck-review-report`。#2488）が付いたコメントで、**headと同じコミットへの最後のもの**を
+  選ぶ。同じPRには実装者・自動修復・fallbackのコメントも並ぶため投稿者では絞れない（ローカルの
+  レビュー・統合エージェントはユーザー本人のトークンで投稿する）。**headと一致するものが無ければ
+  隠さず`isStale`で出す**——隠すと「レビューが無い」と区別が付かない。この読み取りも
+  `scripts/check-review-verdict-marker.sh`が契約として見張る。
+  **レビュー本文が引けないPRでも、パネルは出して「記録がありません」と書く。** ローカルの
+  レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
+  付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
+  出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
+  **取得はマージ待ちの承認カードを出すときだけ**（`usePullRequestReview`・
+  `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
+  20秒ごとに回る`/api/issues/pull-requests`へ相乗りさせていない——あちらは全PRぶんの応答が
+  膨らむうえ、本文は画面の上部では使わない。**同じ材料を返す`/api/pull-requests/detail`も
+  使わない**——あちらは1回4〜5リクエストで、ここで要るのはレビューコメント1件だけ。
+  **指摘の本文はアプリ内のPR詳細（`prmodal`）でも読める**ので、塞いだ穴は「読めない」ことでは
+  なく「マージを押すのと同じカードの中で読めず、そのまま修正依頼へ渡せない」こと。
+  **「指摘を修正依頼に取り込む」はGitHubへ何も送らない**（`buildReviewFixRequestText`）。
+  既存の修正依頼欄が引用で埋まるだけで、どの指摘を直させるかは引用から削って決め、送るのは
+  「修正を依頼する」を押したとき（＝`@claude`コメント→`mode=additional`。#376）。
+  **取り込むのは「気になった点」以降だけ**（`extractReviewConcerns`）。実物のレビューは前半に
+  「確認した範囲」「良かった点」を数十行書くため、全部を渡すと修正依頼の大半が直す必要の無い
+  文章になる（判定は引用の前の1行に書いてあるので、総評を落としても文脈は残る）。見出しの記法は
+  揃っていない（`## 気になった点`・`**気になった点**`）ので語の有無だけを見て、読めなければ
+  本文全部を渡す。**パネルに出す本文は絞らない**——読むのと直させるのは別で、
+  絞るのは渡す文面だけ。
+  **リリース前の「修正をIssueにする」（#2838）とは行き先が違う**。あちらの対応PRは
+  developへマージ済みで`issue-<番号>`ブランチも消えているため新規Issueへ切り出すしかないが、
+  こちらはPRがまだopenなので同じPRへ修正コミットを積める。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、

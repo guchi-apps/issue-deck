@@ -24,6 +24,7 @@ import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
+import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import {
@@ -61,6 +62,10 @@ import {
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
+import {
+  buildReviewFixRequestText,
+  type PullRequestReviewCommentContent,
+} from "@/lib/github/pull-request-review-comment";
 import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
@@ -152,6 +157,19 @@ type CommentThreadProps = {
   onRequestContinuation?: () => Promise<void> | void;
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  /**
+   * 対応PRへ投稿された自動レビューの本文（#2849）。`mergeApprovalPending`のときだけ描く。
+   * 取得は親（Issue詳細）が`usePullRequestReview`で行う。記録が無い・取得前はnull
+   */
+  reviewFindings?: PullRequestReviewCommentContent | null;
+  /** `reviewFindings`が付いているPR番号。取り込む文面と見出しに使う */
+  reviewPullRequestNumber?: number | null;
+  /**
+   * レビュー本文の取得がまだ終わっていないか。**終わるまでパネルを描かない**——取得前は
+   * `reviewFindings`が必ずnullになるため、そのまま描くと「記録がありません」を一瞬出してから
+   * 本文へ差し替わる（`sessionStatePending`と同じ考え方）
+   */
+  isLoadingReviewFindings?: boolean;
   /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
   onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   /**
@@ -234,6 +252,9 @@ function ApprovalActions({
   onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
+  reviewFindings = null,
+  reviewPullRequestNumber = null,
+  isLoadingReviewFindings = false,
   onMergePullRequest,
   onDeclinePullRequest,
   isApproving,
@@ -276,6 +297,12 @@ function ApprovalActions({
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  /** 対応PRの自動レビュー本文（#2849）。記録が無い・取得前はnull */
+  reviewFindings?: PullRequestReviewCommentContent | null;
+  /** `reviewFindings`が付いているPR番号 */
+  reviewPullRequestNumber?: number | null;
+  /** レビュー本文の取得中か。取得が終わるまでパネルを描かない */
+  isLoadingReviewFindings?: boolean;
   onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   onDeclinePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
@@ -327,6 +354,9 @@ function ApprovalActions({
   const [prFixReason, setPrFixReason] = useState("");
   const [prFixValidationError, setPrFixValidationError] = useState<string | null>(null);
   const [isPrFixTextUploading, setIsPrFixTextUploading] = useState(false);
+  // レビューの指摘を取り込んだか（#2849）。ボタンの文言を「もう一度取り込む」へ変えるだけで、
+  // 取り込みを1回に制限はしない（書きかけを消して入れ直したい場合がある）
+  const [hasImportedReview, setHasImportedReview] = useState(false);
   // マージ済みかどうかは本文の上の対応PR一覧（#1288・#1339）と共有する。上の一覧から
   // 押されたときは親から`mergedPullRequestNumbers`で伝わり、この欄から押したときは
   // `onPullRequestMerged`で親へ伝える。親を持たない使い方でも表示が切り替わるよう、
@@ -406,6 +436,24 @@ function ApprovalActions({
   function changePrFixReason(value: string) {
     setPrFixReason(value);
     setPrFixValidationError(null);
+  }
+
+  /**
+   * レビューの指摘を修正依頼欄へ取り込む（#2849）。**GitHubへは何も送らない。**
+   * 入るのはこの欄までで、どの指摘を直させるかは引用から削って決める。
+   *
+   * **既に書いてあるものは消さずに後ろへ足す。** 自分で書きかけた依頼が消えると、
+   * 打ち直しになる（入力中のフォームを初期化し直さない、と同じ考え方）。
+   */
+  function importReviewFindings() {
+    if (!reviewFindings || reviewPullRequestNumber === null) return;
+    const imported = buildReviewFixRequestText({
+      review: reviewFindings,
+      pullRequestNumber: reviewPullRequestNumber,
+    });
+    setPrFixReason((prev) => (prev.trim() === "" ? imported : `${prev.trimEnd()}\n\n${imported}`));
+    setPrFixValidationError(null);
+    setHasImportedReview(true);
   }
 
   async function submitPrFix() {
@@ -515,6 +563,21 @@ function ApprovalActions({
           mergeError={mergePullRequestError}
           declineError={declinePullRequestError}
         />
+        {/* 自動レビューが何を指摘したのかを、マージを押す前に読める位置へ出す（#2849）。
+            **PRの行の下・修正依頼欄の上**に置く——読んでから「マージする」「修正を依頼する」の
+            どちらを押すかを決める場所なので、判断材料が2つのボタンの間に来る */}
+        {reviewPullRequestNumber !== null && !isLoadingReviewFindings && !isMerged && (
+          <PullRequestReviewFindings
+            className="mt-2"
+            review={reviewFindings ?? null}
+            pullRequestNumber={reviewPullRequestNumber}
+            pullRequestUrl={
+              pullRequestLinks?.find((link) => link.number === reviewPullRequestNumber)?.url
+            }
+            onImport={onRequestPrFix ? importReviewFindings : undefined}
+            isImported={hasImportedReview}
+          />
+        )}
         {onRequestPrFix && !isMerged && (
           <>
             <Separator className="my-3" />
@@ -531,16 +594,24 @@ function ApprovalActions({
               {prFixValidationError && (
                 <p className="text-sm text-destructive">{prFixValidationError}</p>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="self-end"
-                onClick={submitPrFix}
-                disabled={prFixBusy || isPrFixTextUploading}
-              >
-                <Pencil />
-                修正を依頼する
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* 取り込んだ内容がそのまま送られることを、送る直前に一度言う（#2849） */}
+                {hasImportedReview && (
+                  <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    レビュー指摘を取り込みました。この内容がそのままエージェントへ渡ります。
+                  </p>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto shrink-0"
+                  onClick={submitPrFix}
+                  disabled={prFixBusy || isPrFixTextUploading}
+                >
+                  <Pencil />
+                  修正を依頼する
+                </Button>
+              </div>
             </div>
           </>
         )}
@@ -776,6 +847,9 @@ export function CommentThread({
   onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
+  reviewFindings,
+  reviewPullRequestNumber,
+  isLoadingReviewFindings,
   onMergePullRequest,
   onDeclinePullRequest,
   isApproving,
@@ -840,6 +914,9 @@ export function CommentThread({
         onDismissCheckUser={onDismissCheckUser}
         onRequestContinuation={onRequestContinuation}
         onRequestPrFix={onRequestPrFix}
+        reviewFindings={reviewFindings}
+        reviewPullRequestNumber={reviewPullRequestNumber}
+        isLoadingReviewFindings={isLoadingReviewFindings}
         onMergePullRequest={onMergePullRequest}
         onDeclinePullRequest={onDeclinePullRequest}
         isApproving={isApproving}
