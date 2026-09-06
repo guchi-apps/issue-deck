@@ -3,6 +3,7 @@
 import { ChevronLeft } from "lucide-react";
 
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
+import type { ReleaseVerificationRow } from "@/lib/github/release-verification";
 import type { PullRequestSummary, PullRequestDetail as PullRequestDetailData } from "@/types/pull-request";
 
 type MobilePullRequestDetailScreenProps = {
@@ -14,6 +15,8 @@ type MobilePullRequestDetailScreenProps = {
   onRefresh: () => void;
   onMerged: () => void;
   onBack: () => void;
+  /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
+  onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
 };
 
 /**
@@ -28,6 +31,7 @@ export function MobilePullRequestDetailScreen({
   onRefresh,
   onMerged,
   onBack,
+  onCreateFixIssue,
 }: MobilePullRequestDetailScreenProps) {
   return (
     <PullRequestDetail
@@ -37,6 +41,7 @@ export function MobilePullRequestDetailScreen({
       error={error}
       onRefresh={onRefresh}
       onMerged={onMerged}
+      onCreateFixIssue={onCreateFixIssue}
       className="h-full"
       footerSpacing
       headerLeading={
