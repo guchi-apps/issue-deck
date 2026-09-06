@@ -1637,9 +1637,10 @@ model SessionUsage {
   /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
   transcript String @db.Text
 
-  /// セッションの種別。`implementation` / `plan-review` / `question` / `other`。
+  /// セッションの種別。`implementation` / `plan-review` / `code-review` / `question` / `other`。
   /// **enumにしない**——判定しているのはシェル側（作業ディレクトリのパス）で、種別が増えるたびに
-  /// マイグレーションを挟むと、報告する側と受ける側のデプロイ順に依存してしまう
+  /// マイグレーションを挟むと、報告する側と受ける側のデプロイ順に依存してしまう。
+  /// 同じ理由で、受け取り側も一覧との一致では見ない（`SESSION_USAGE_KIND_PATTERN`。#2832）
   kind String @db.VarChar(32)
   /// 対象リポジトリ名（ownerを除く。例: `issue-deck`）。判定できなければnull
   repository String? @db.VarChar(191)

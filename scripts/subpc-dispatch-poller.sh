@@ -209,7 +209,7 @@ LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
 QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 手作業Issueを対話しながら実施するセッション（#2771）。**代行実行（`MANUAL_STEP`）とは別**で、
-# worktreeを作らずにtmuxセッションを1本立て、手順ごとに結果を示して人に聞きながら進める。
+# worktreeを作らずにtmuxセッションを1本立て、本文の手順を止まるところまで流す（#2830）。
 MANUAL_STEP_SESSION_LAUNCHER="$SCRIPT_DIR/start-manual-step-session.sh"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
@@ -1404,6 +1404,10 @@ SESSION_USAGE_CODEX_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-
 # 3日以上前に終わったセッションには二度と内訳が入らない**（画面は最大30日を出すため、
 # ひと月ぶんが「フェーズ未集計」のまま残る）。項目を増やすたびにこの名前を変える。
 SESSION_USAGE_PHASE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-phase-backfill.stamp"
+# **分類の直しも同じ扱い**（#2832でコードレビューの作業場を`classify()`へ足した）。既に
+# 報告済みの行は`guchi-apps-<repo>`という別リポジトリとして残っているため、印を足して
+# 30日ぶんを一度だけ開き直し、正しいリポジトリ名・種別で上書きする。
+SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-code-review-backfill.stamp"
 
 report_session_usage() {
   ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
@@ -1428,7 +1432,7 @@ report_session_usage() {
 
   local days backfill=0
   if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" &&
-    -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" ]]; then
+    -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" ]]; then
     days="$SESSION_USAGE_WINDOW_DAYS"
   else
     days="$SESSION_USAGE_BACKFILL_DAYS"
@@ -1478,6 +1482,7 @@ report_session_usage() {
     touch "$SESSION_USAGE_BACKFILL_STAMP" 2>/dev/null || true
     ((codex_backfill_ok)) && touch "$SESSION_USAGE_CODEX_BACKFILL_STAMP" 2>/dev/null || true
     touch "$SESSION_USAGE_PHASE_BACKFILL_STAMP" 2>/dev/null || true
+    touch "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
   return 0

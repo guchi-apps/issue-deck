@@ -50,6 +50,55 @@ function question(overrides: Partial<SessionQuestion> = {}): SessionQuestion {
   };
 }
 
+describe("進み具合（#2830）", () => {
+  it("済んだ手順と、残りのうち人が実行する手順を数える", () => {
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body: BODY,
+      questions: [question()],
+    });
+
+    // どちらの手順も代行できない（ブラウザ／`<控えたrefresh_token>`を含む）
+    expect(found?.progress).toEqual({ done: 0, total: 2, remaining: 2, remainingByUser: 2 });
+  });
+
+  it("チェック済みの手順は済んだ側へ数え、残りから外す", () => {
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body: BODY.replace(
+        "- [ ] （ブラウザ）Google Cloud Console",
+        "- [x] （ブラウザ）Google Cloud Console",
+      ),
+      questions: [
+        question({
+          question:
+            "手順2「`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する」は埋める値を含むため代行できません。実施されましたか？",
+          header: "手順2",
+        }),
+      ],
+    });
+
+    expect(found?.progress).toEqual({ done: 1, total: 2, remaining: 1, remainingByUser: 1 });
+  });
+
+  it("サブPCで流せる手順は「あなたが実行」に数えない", () => {
+    const body = BODY.replace(
+      "- [ ] （VPS）`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する",
+      "- [ ] （サブPC）pollerを再起動する",
+    ).replace(
+      'echo "GOOGLE_REFRESH_TOKEN=<控えたrefresh_token>" >> /apps/issue-deck/.env',
+      "systemctl --user restart issue-deck-dispatch-poller.service",
+    );
+    const found = findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body,
+      questions: [question()],
+    });
+
+    expect(found?.progress).toEqual({ done: 0, total: 2, remaining: 2, remainingByUser: 1 });
+  });
+});
+
 describe("findManualStepForQuestion", () => {
   it("質問文の手順番号でその手順を当て、実行する端末まで返す", () => {
     const found = findManualStepForQuestion({

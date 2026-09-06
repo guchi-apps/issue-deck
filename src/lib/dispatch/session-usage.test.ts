@@ -118,9 +118,24 @@ describe("parseSessionUsageReport", () => {
     expect(parsed?.issueNumber).toBeNull();
   });
 
+  it("コードレビューの種別を受け取る（#2832）", () => {
+    const parsed = parseSessionUsageReport(
+      reportInput({ kind: "code-review", repository: "asset-manager", issue: 310 }),
+    );
+    expect(parsed?.kind).toBe("code-review");
+    expect(parsed?.repository).toBe("asset-manager");
+  });
+
+  it("一覧に無い種別も、形が合っていれば受け取る（#2832）", () => {
+    // 集計するpollerは`develop`から走り、報告先は本番（`main`）。一覧で弾くと、シェル側が
+    // 新しい種別を送り始めてからリリースが届くまで、その種別のセッションが丸ごと消える。
+    expect(parseSessionUsageReport(reportInput({ kind: "future-kind" }))?.kind).toBe("future-kind");
+  });
+
   it.each([
     ["セッションIDが空", { sessionId: "" }],
-    ["知らない種別", { kind: "unknown-kind" }],
+    ["種別が種別の形をしていない", { kind: "Code Review!" }],
+    ["種別がカラムに入らない長さ", { kind: "a".repeat(33) }],
     ["トークン数が負", { cacheRead: -1 }],
     ["金額が数値でない", { costUsd: "1.25" }],
     ["時刻が壊れている", { endedAt: "きのう" }],

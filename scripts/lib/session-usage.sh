@@ -19,7 +19,7 @@
 # トークン・API換算）だけを出す。常駐せず、人が叩いたときに1回読んで終わる。
 #
 # **読むのは`message.usage`と時刻・作業ディレクトリだけで、やり取りの中身は読まない。**
-# 例外は計画レビュー・横断質問セッションのIssue番号で、これは転記の最初のユーザー発言に
+# 例外は計画レビュー・コードレビュー・横断質問セッションのIssue番号で、これは転記の最初のユーザー発言に
 # しか出てこない（`Issue #<番号>`の1箇所だけを正規表現で拾う）。**出力に本文は載せない。**
 #
 # **`fleet-status.sh`の相棒だが、こちらは外部の状態（転記ファイル）を読む。**
@@ -133,14 +133,18 @@ CACHE_WRITE_1H = 2.0
 # 作業ディレクトリ → セッションの種別。**転記の中身ではなくパスで決める**。
 WORKTREE = re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
 PLAN_REVIEW = re.compile(r"/\.plan-reviews/_refs/(?P<target>[^/]+)$")
+# コードレビュー（`scripts/start-code-review.sh`）は`.questions`の仕組みを流用しつつ、置き場だけ
+# `.code-reviews`へ分けている。**ここに書き足さないと`other`へ落ち、`guchi-apps-<repo>`という
+# ownerが付いたままの名前が、リポジトリ別の内訳に別リポジトリとして並ぶ**（#2832）。
+CODE_REVIEW = re.compile(r"/\.code-reviews/_refs/(?P<target>[^/]+)$")
 QUESTION_NUMBERED = re.compile(r"/\.questions/question-(?P<issue>[1-9][0-9]*)$")
 QUESTION_SESSION = re.compile(r"/\.questions/_session-(?P<target>[^/]+)$")
 QUESTION_REFS = re.compile(r"/\.questions/_refs/(?P<target>[^/]+)$")
-# 計画レビュー・横断質問の作業場は`<owner>-<repo>`の1階層で、機械的にはownerとrepoを割れない。
+# 計画レビュー・コードレビュー・横断質問の作業場は`<owner>-<repo>`の1階層で、機械的にはownerとrepoを割れない。
 # このフリートのownerは1つなので、その前置きだけを落として実装セッションと同じ名前へ揃える
 # （`scripts/fleet-status.sh`が`guchi-apps/issue-deck`を既定値に持っているのと同じ前提）。
 OWNER_PREFIX = "guchi-apps-"
-# 計画レビュー・横断質問はパスにIssue番号を持たない（対象リポジトリごとの作業場を使い回す）。
+# 計画レビュー・コードレビュー・横断質問はパスにIssue番号を持たない（対象リポジトリごとの作業場を使い回す）。
 # 番号は起動プロンプトの冒頭にしか出てこないので、そこだけを見る。
 ISSUE_IN_PROMPT = re.compile(r"Issue #([1-9][0-9]*)")
 # 種別の解決に使う行は転記の先頭に固まっている。全行を舐めないための上限。
@@ -168,6 +172,7 @@ BASH_COMMIT = re.compile(r"(?:^|[\s;&|(])git\s(?:[^\n;&|]*\s)?commit(?:\s|$)")
 KIND_LABELS = {
     "implementation": "実装",
     "plan-review": "計画レビュー",
+    "code-review": "コードレビュー",
     "question": "横断質問",
     "other": "その他",
 }
@@ -221,6 +226,9 @@ def classify(cwd):
     matched = PLAN_REVIEW.search(cwd)
     if matched:
         return ("plan-review", strip_owner(matched.group("target")), None)
+    matched = CODE_REVIEW.search(cwd)
+    if matched:
+        return ("code-review", strip_owner(matched.group("target")), None)
     matched = QUESTION_NUMBERED.search(cwd)
     if matched:
         return ("question", "question", int(matched.group("issue")))
@@ -518,7 +526,7 @@ for raw_path in sys.stdin:
     if ISSUE_FILTER and issue != ISSUE_FILTER:
         continue
     if REPO_FILTER and repository != REPO_FILTER:
-        # 計画レビュー・横断質問の作業場は`<owner>-<repo>`の形なので、末尾でも突き合わせる。
+        # 計画レビュー・コードレビュー・横断質問の作業場は`<owner>-<repo>`の形なので、末尾でも突き合わせる。
         if not (repository or "").endswith("-" + REPO_FILTER):
             continue
 
@@ -578,7 +586,7 @@ codex_session_usage_aggregate() {
 import json, os, re, sys
 PRICES={"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
 WORKTREE=re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
-LABELS={"implementation":"実装","plan-review":"計画レビュー","question":"横断質問","other":"その他"}
+LABELS={"implementation":"実装","plan-review":"計画レビュー","code-review":"コードレビュー","question":"横断質問","other":"その他"}
 def number(value):
     try:return max(0,int(value))
     except (TypeError,ValueError):return 0
@@ -586,6 +594,7 @@ def classify(cwd):
     matched=WORKTREE.search(cwd or "")
     if matched:return "implementation",matched.group("repo"),int(matched.group("issue"))
     if "/.plan-reviews/" in (cwd or ""):return "plan-review",os.path.basename(cwd).removeprefix("guchi-apps-"),None
+    if "/.code-reviews/" in (cwd or ""):return "code-review",os.path.basename(cwd).removeprefix("guchi-apps-"),None
     if "/.questions/" in (cwd or ""):return "question",os.path.basename(cwd).removeprefix("guchi-apps-"),None
     return "other",os.path.basename(cwd or "") or None,None
 def price_for(model):

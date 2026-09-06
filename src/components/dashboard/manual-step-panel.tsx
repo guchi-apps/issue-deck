@@ -115,7 +115,7 @@ export function ManualStepPanel({
    * 手作業セッション（#2771）の入口を出すためのIssueとディスパッチの状態。**両方揃ったときだけ出す**
    * （アシスタントを置いていない画面から使われたとき、押せない導線を残さないため。`onStartGuide`と同じ）
    */
-  sessionIssue?: Pick<Issue, "repositoryFullName" | "number" | "labels">;
+  sessionIssue?: Pick<Issue, "repositoryFullName" | "number" | "labels" | "body">;
   dispatch?: DispatchStateHandle;
   className?: string;
 }) {
