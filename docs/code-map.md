@@ -1832,6 +1832,16 @@ export function POST(request: NextRequest) {
   またがる契約で、`scripts/check-review-verdict-marker.sh`がCIで突き合わせる
   （[docs/multi-agent/release.md](multi-agent/release.md)「「何がどこまで検証されたか」を
   リリースPRに載せる」）。
+  **「要修正」「要確認」の行には「修正をIssueにする」ボタンを出す**（#2838。
+  `buildReleaseVerificationFixIssueDraft`）。ここに載る行の対応PRは必ずdevelopへマージ済みで、
+  このリポジトリは`delete_branch_on_merge=true`のため`issue-<番号>`ブランチも既に削除済み。
+  対象issueへ直接`@claude`コメントを送っても無人実行（`reusable-issue-dispatch.yml`）は
+  `mode=additional`（既存ブランチへの追加コミット）にはならず、`mode=implement`として元Issue
+  本文から実装し直してしまう（レビュー指摘の修正としては成立しない）。代わりに、リポジトリ
+  全体のコードレビュー（`buildCodeReviewFindingIssueDraft`）と同じ立場で、指摘内容を差し込んだ
+  新規Issue作成ダイアログを開くだけにしてある（**ここでは起票しない**。立てるかは読んだ人が
+  決める。ダイアログの「作成+実装開始」で起票の先まで一続きに進められる）。
+  同じ指摘の二重起票防止（`buildCodeReviewFindingIssueIndex`相当の索引）は持たせていない。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、

@@ -251,3 +251,52 @@ export function parseReleaseVerification(body: string | null | undefined): Relea
   }
   return { rows, tally: tally(rows) };
 }
+
+/**
+ * 検証結果の行から起票する修正Issueの下書き（#2838）。**ここでは起票しない。**
+ * 埋めた新規作成ダイアログを開くだけで、実際に立てるかどうかは指摘を読んだ人が決める
+ * （リポジトリ全体のコードレビュー`buildCodeReviewFindingIssueDraft`と同じ立場）。
+ * ダイアログには「作成+実装開始」もあるため、起票の先で実装まで一続きに進められる。
+ *
+ * **元Issueへの`@claude`コメントで再開する形にはしない。** ここに載る行の対応PRは develop へ
+ * マージ済みで、このリポジトリは`delete_branch_on_merge=true`のため`issue-<番号>`ブランチは
+ * 既に削除されている。無人実行（`reusable-issue-dispatch.yml`）はブランチが無い状態だと
+ * `mode=additional`（既存ブランチへの追加コミット）にはならず、元Issue本文から`mode=implement`
+ * として最初から実装し直してしまう（レビュー指摘の修正としては成立しない）。そのため、
+ * 指摘内容を引き継いだ新規Issueとして切り出す。
+ */
+export function buildReleaseVerificationFixIssueDraft(params: {
+  row: ReleaseVerificationRow;
+  /** 起票先＝リリース対象と同じリポジトリ */
+  repositoryFullName: string;
+  /** 起点になったリリースPR（develop→main） */
+  releasePullRequestNumber: number;
+}): { repositoryFullName: string; title: string; body: string } {
+  const { row, releasePullRequestNumber } = params;
+
+  const bodyLines = [
+    `${params.repositoryFullName} のリリース前レビュー（#${releasePullRequestNumber}）で` +
+      `${row.reviewLabel}となった指摘です。`,
+    "",
+    `- 元Issue: #${row.issueNumber}${row.issueTitle ? ` ${row.issueTitle}` : ""}`,
+    `- 対応PR: ${row.pullRequestNumber !== null ? `#${row.pullRequestNumber}` : "（記録なし）"}`,
+    `- 自動レビュー: ${row.reviewLabel}`,
+    `- 機械的リスク判定: ${row.riskLabel}`,
+    "",
+    "## 指摘",
+    "",
+    row.reviewBody?.trim() ||
+      "レビューコメントの本文は記録されていません。対応PRでのレビュー内容を直接確認してください。",
+    "",
+    "## 関連",
+    "",
+    `- 元Issue: #${row.issueNumber}`,
+    `- リリースPR: #${releasePullRequestNumber}`,
+  ];
+
+  return {
+    repositoryFullName: params.repositoryFullName,
+    title: row.issueTitle ? `${row.issueTitle} の修正（レビュー指摘）` : `#${row.issueNumber} の修正（レビュー指摘）`,
+    body: bodyLines.join("\n"),
+  };
+}

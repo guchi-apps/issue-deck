@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { parseReleaseVerification } from "@/lib/github/release-verification";
+import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
@@ -49,6 +49,11 @@ type PullRequestDetailProps = {
   error: string | null;
   onRefresh: () => void;
   onMerged: () => void;
+  /**
+   * 検証結果の「要修正」「要確認」の行から、指摘を新規Issueの下書きにして開く（#2838）。
+   * 渡さない画面ではボタンを出さない。起点のリリースPRは表示中の`pullRequest`から渡す。
+   */
+  onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -132,6 +137,7 @@ export function PullRequestDetail({
   error,
   onRefresh,
   onMerged,
+  onCreateFixIssue,
   headerLeading,
   className,
   style,
@@ -369,6 +375,9 @@ export function PullRequestDetail({
               <VerificationSummaryPanel
                 verification={verification}
                 repositoryFullName={pullRequest.repositoryFullName}
+                onCreateFixIssue={
+                  onCreateFixIssue && ((row) => onCreateFixIssue(row, pullRequest))
+                }
               />
             )}
 

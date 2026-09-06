@@ -105,6 +105,10 @@ import {
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
+  buildReleaseVerificationFixIssueDraft,
+  type ReleaseVerificationRow,
+} from "@/lib/github/release-verification";
+import {
   buildInfraConfigIssueDraft,
   type InfraConfigTarget,
 } from "@/lib/infra-config-repos";
@@ -413,6 +417,32 @@ export function IssueDeckShell({
       finding,
       repositoryFullName: issue.repositoryFullName,
       reviewNumber: issue.number,
+    });
+    setCreateDialogRepo(draft.repositoryFullName);
+    setCreateDialogTitle(draft.title);
+    setCreateDialogBody(draft.body);
+    setCreateDialogBodyPrefix(null);
+    setConfigIssueOrigin(null);
+    setCreateDialogOpen(true);
+  }
+
+  /**
+   * リリースPRの検証結果で「要修正」「要確認」となった指摘を、対象リポジトリのIssueとして
+   * 起票する（#2838）。対象issueへ直接`@claude`コメントで再開する形にはできない
+   * （`delete_branch_on_merge=true`によりブランチは既に削除済みで、無人実行は
+   * `mode=implement`として元Issue本文から実装し直してしまう。詳細は
+   * `buildReleaseVerificationFixIssueDraft`のコメントを参照）。**ここでも起票しない**
+   * （`openCodeReviewFindingIssueDialog`と同じ立場。新規作成ダイアログの「作成+実装開始」で
+   * 起票の先まで一続きに進められる）。
+   */
+  function openReleaseVerificationFixIssueDialog(
+    row: ReleaseVerificationRow,
+    pullRequest: PullRequestSummary,
+  ) {
+    const draft = buildReleaseVerificationFixIssueDraft({
+      row,
+      repositoryFullName: pullRequest.repositoryFullName,
+      releasePullRequestNumber: pullRequest.number,
     });
     setCreateDialogRepo(draft.repositoryFullName);
     setCreateDialogTitle(draft.title);
@@ -1664,6 +1694,7 @@ export function IssueDeckShell({
                     onMerged={() =>
                       selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                     }
+                    onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                     // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
                     onBack={() => goBackOrFallback(() => selectPullRequest(null))}
                   />
@@ -2007,6 +2038,7 @@ export function IssueDeckShell({
                 onMerged={() =>
                   selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                 }
+                onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                 className="hidden flex-1 md:flex"
               />
             </>
@@ -2156,6 +2188,7 @@ export function IssueDeckShell({
           error={modalPullRequestDetail.error}
           onRefresh={modalPullRequestDetail.refresh}
           onMerged={() => modalPullRequest && handlePullRequestMerged(modalPullRequest)}
+          onCreateFixIssue={openReleaseVerificationFixIssueDialog}
           /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
              クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
