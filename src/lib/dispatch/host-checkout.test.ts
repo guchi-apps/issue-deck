@@ -4,6 +4,7 @@ import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-
 import {
   describeDispatchHostCheckout,
   describeDispatchHostSelfUpdate,
+  isDispatchHostPollerRestartPending,
   parseDispatchHostCheckout,
   type DispatchHostCheckout,
 } from "@/lib/dispatch/host-checkout";
@@ -12,6 +13,7 @@ const NOW = new Date("2026-08-16T12:00:00.000Z");
 
 const CHECKOUT: DispatchHostCheckout = {
   commit: "fbb809d",
+  startedCommit: "fbb809d",
   branch: "develop",
   committedAt: "2026-08-16T09:00:00.000Z",
   behindCount: 0,
@@ -57,6 +59,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
     expect(
       parseDispatchHostCheckout({
         commit: "fbb809d",
+        startedCommit: "6E4A38E",
         branch: "develop",
         committedAt: "2026-08-16T09:00:00Z",
         behindCount: 97,
@@ -64,6 +67,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
       }),
     ).toEqual({
       commit: "fbb809d",
+      startedCommit: "6e4a38e",
       branch: "develop",
       committedAt: "2026-08-16T09:00:00.000Z",
       behindCount: 97,
@@ -88,6 +92,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
   it("commit以外は欠けていても全体を落とさず、その項目だけnullにする", () => {
     expect(parseDispatchHostCheckout({ commit: "FBB809D" })).toEqual({
       commit: "fbb809d",
+      startedCommit: null,
       branch: null,
       committedAt: null,
       behindCount: null,
@@ -96,6 +101,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
     expect(
       parseDispatchHostCheckout({
         commit: "fbb809d",
+        startedCommit: "not-a-sha",
         branch: "de velop",
         committedAt: "壊れた日付",
         behindCount: -1,
@@ -103,6 +109,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
       }),
     ).toEqual({
       commit: "fbb809d",
+      startedCommit: null,
       branch: null,
       committedAt: null,
       behindCount: null,
@@ -154,6 +161,60 @@ describe("describeDispatchHostCheckout（#1612）", () => {
     expect(
       describeDispatchHostCheckout(host({ checkout: { ...CHECKOUT, branch: null } }), NOW),
     ).toMatchObject({ version: "fbb809d（detached）" });
+  });
+
+  /**
+   * #2815。`git pull`だけではプロセスの中身が入れ替わらないため、チェックアウトが
+   * origin/developへ追い付いた時点で「最新」に戻り、古いコードが走っていることが消えていた。
+   */
+  it("起動時のコミットがHEADと違えば、遅れ0でも「再起動待ち」として橙で出す", () => {
+    expect(
+      describeDispatchHostCheckout(
+        host({ checkout: { ...CHECKOUT, startedCommit: "6e4a38e", behindCount: 0 } }),
+        NOW,
+      ),
+    ).toEqual({
+      version: "develop fbb809d",
+      status: "再起動待ち",
+      // 走っている実物がどれかは`version`（HEAD）からは読めないので、ここに出す
+      detail: "起動時 6e4a38e で動作中・3時間前",
+      tone: "warn",
+    });
+  });
+
+  // 押すボタンは1つ（「更新して再起動」）なので、2つの状態は1行にまとめて出す
+  it("遅れているうえに再起動待ちなら、両方を1行に出す", () => {
+    expect(
+      describeDispatchHostCheckout(
+        host({ checkout: { ...CHECKOUT, startedCommit: "6e4a38e", behindCount: 5 } }),
+        NOW,
+      ),
+    ).toMatchObject({ status: "5コミット遅れ・再起動待ち", tone: "warn" });
+    expect(
+      describeDispatchHostCheckout(
+        host({ checkout: { ...CHECKOUT, startedCommit: "6e4a38e", behindCount: null } }),
+        NOW,
+      ),
+    ).toMatchObject({ status: "遅れ不明・再起動待ち", tone: "warn" });
+  });
+
+  // 短縮SHAの桁数は`git rev-parse --short`が状況に応じて決める。桁の違いだけで再起動を促さない
+  it("短縮SHAの桁が違うだけなら同じコミットとして扱う", () => {
+    expect(
+      describeDispatchHostCheckout(
+        host({ checkout: { ...CHECKOUT, startedCommit: "fbb809df1a2" } }),
+        NOW,
+      ),
+    ).toMatchObject({ status: "最新", tone: "normal" });
+  });
+
+  // #2815より前のpollerは申告しない。「食い違っていない」と同じ扱いにする（偽の警告を出さない）
+  it("起動時のコミットを申告しないpollerでは、これまでどおりの表示にする", () => {
+    expect(
+      describeDispatchHostCheckout(host({ checkout: { ...CHECKOUT, startedCommit: null } }), NOW),
+    ).toMatchObject({ status: "最新", tone: "normal" });
+    expect(isDispatchHostPollerRestartPending({ ...CHECKOUT, startedCommit: null })).toBe(false);
+    expect(isDispatchHostPollerRestartPending(null)).toBe(false);
   });
 
   // 古い申告を今の姿として見せない（使用率と同じ扱い）

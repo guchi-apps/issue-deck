@@ -974,6 +974,11 @@ model DispatchHost {
   // `checkoutBehind`だけは別に`null`になりうる（fetchできず、遅れを数えられなかった場合）。
   // 数えた遅れがいつ時点のものかは`checkoutFetchedAt`（最後にoriginを見た時刻）で分かる
   checkoutCommit             String?
+  // pollerが**起動した時点**でチェックアウトが指していたコミット（#2815）。**いま走っている
+  // コードはこの版**で、`checkoutCommit`（毎巡取り直すHEAD）とは食い違いうる。bashは実行中の
+  // スクリプトのファイルを開いたまま持つため、`git pull`だけではプロセスの中身が
+  // 入れ替わらない。**`null`は「申告していない」**（#2815より前のpoller）
+  checkoutStartedCommit      String?
   checkoutBranch             String?
   checkoutCommittedAt        DateTime?
   checkoutBehind             Int?

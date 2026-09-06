@@ -151,7 +151,9 @@ set -euo pipefail
 # 25: 画面から選ばれたエージェントCLI（`agent`）を読み、Codex CLIでセッションを起こす（#2505）。
 # 26: Codexのセッションへの追加指示を`codex queue`で送り、宛先が分かっているかを申告する（#2519）。
 # 27: CodexのRemote Control相当（`CODEX_PAIRING`）を実行し、standalone installかを申告する（#2524）。
-DISPATCH_POLLER_VERSION="27"
+# 28: 起動した時点のコミット（`startedCommit`）を申告し、チェックアウトだけが進んで再起動されて
+#     いない状態を画面から見えるようにする（#2815）。
+DISPATCH_POLLER_VERSION="28"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -909,6 +911,21 @@ CHECKOUT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # fetchが固まっても1巡を止めないための上限（秒）。起動の`timeout`と同じ考え方。
 CHECKOUT_FETCH_TIMEOUT_SECONDS=60
 
+# **起動した時点でチェックアウトが指していたコミット**（#2815）。いま走っているのはこの版の
+# コードで、後から`git pull`されてもプロセスの中身は入れ替わらない——bashは実行中のスクリプトの
+# ファイルを開いたまま持ち、gitは新しいファイルを作ってrenameするため。sourceした
+# `scripts/lib/*.sh`も同じで、読み込み済みの関数定義がそのまま残る。
+#
+# **`collect_checkout_state`の`commit`（毎巡取り直すHEAD）とは別物。** チェックアウトだけが
+# 進んで再起動されていない間、この2つは食い違う。2026-09-02から2026-09-04のサブPCがその状態で、
+# #2779の集計側の変更が一度も動かないまま「AI使用量」のフェーズ内訳が空で並んでいた。
+# HEADとorigin/developしか比べていない「遅れ」の表示は、チェックアウトが追い付いた瞬間に
+# 「最新」へ戻るため、この食い違いを申告しない限り画面から気付く手掛かりが無くなる。
+#
+# **毎巡取り直さない。** 取り直すと必ずHEADと一致し、「走っているのは古い版」という事実が消える。
+# `SELF_UPDATE`は`exec`で新しいスクリプトへ入れ替わる（#1927）ので、そこを通れば取り直される。
+POLLER_STARTED_COMMIT="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+
 # 最後にoriginを見た時刻（epoch秒）。**`.git/FETCH_HEAD`のmtimeで見る。**
 # gitがfetch・pullのたびに書き直すファイルなので、pollerが打ったfetchも人が手で打ったpullも
 # 同じように反映される（poller専用の印を別に持つと、人がpullした直後に「古い」と出る）。
@@ -979,23 +996,37 @@ collect_checkout_state() {
     --arg branch "$branch" \
     --arg committedAt "$committed_at" \
     --arg fetchedAt "$fetched_at" \
+    --arg startedCommit "$POLLER_STARTED_COMMIT" \
     --argjson behindCount "${behind:-null}" \
     '{commit: $commit, behindCount: $behindCount}
       + (if $branch == "" then {} else {branch: $branch} end)
       + (if $committedAt == "" then {} else {committedAt: $committedAt} end)
-      + (if $fetchedAt == "" then {} else {fetchedAt: $fetchedAt} end)'
+      + (if $fetchedAt == "" then {} else {fetchedAt: $fetchedAt} end)
+      + (if $startedCommit == "" then {} else {startedCommit: $startedCommit} end)'
 }
 
 # journaldの1行に載せる版の要約。**画面を開かなくても分かるようにする**（サブPCを直接見る
 # ときは、まずここを読むため）。
+#
+# **起動時のコミットとHEADが食い違っていれば「再起動待ち」を添える**（#2815）。ここが
+# 「最新」としか出ないと、`journalctl`を追ってもチェックアウトだけが進んだ状態を見分けられない。
+# 短縮SHAの桁数は`git rev-parse --short`が状況に応じて決めるため、**片方がもう片方の前置なら
+# 同じコミット**として扱う（issue-deck側の`isDispatchHostPollerRestartPending`と同じ判定）。
 describe_checkout_state() {
   local checkout="$1"
   [[ -n "$checkout" ]] || return 0
   printf '%s' "$checkout" | jq -r '
-    "・スクリプト " + (.branch // "detached") + " " + .commit + "（"
-    + (if .behindCount == null then "遅れ不明"
-       elif .behindCount == 0 then "最新"
-       else "\(.behindCount)コミット遅れ" end)
+    . as $c
+    | ($c.startedCommit // "") as $started
+    | (($started != "")
+        and (($c.commit | startswith($started)) | not)
+        and (($started | startswith($c.commit)) | not)) as $restart
+    | (if $c.behindCount == null then "遅れ不明"
+       elif $c.behindCount == 0 then (if $restart then "" else "最新" end)
+       else "\($c.behindCount)コミット遅れ" end) as $behind
+    | (if $restart then "再起動待ち（起動時 \($started) で動作中）" else "" end) as $restartText
+    | "・スクリプト " + ($c.branch // "detached") + " " + $c.commit + "（"
+    + ([$behind, $restartText] | map(select(. != "")) | join("・"))
     + "）"' 2>/dev/null || true
 }
 
@@ -1077,6 +1108,8 @@ announce() {
   # `checkout`も同じく**画面へ出すためだけの申告**（#1612）。**`agentVersion`とは別物**で、
   # あちらは約束を変えたときに手で上げるプロトコル版数、こちらは実際に動いているスクリプトが
   # どのコミットのものかという事実（版数が同じまま97コミット遅れていた、が起きている）。
+  # **`startedCommit`（起動時のコミット）も一緒に載せる**（#2815）。チェックアウトだけが進んで
+  # 再起動されていない状態は、HEADとorigin/developの比較だけでは見えない。
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \

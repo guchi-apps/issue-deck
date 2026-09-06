@@ -21,6 +21,13 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
  * **`agentVersion`とは別物。** あちらは約束を変えたときに手で上げるプロトコル版数で、
  * チェックアウトの鮮度とは無関係（実際、版数が同じまま97コミット遅れていた）。
  *
+ * **チェックアウトが最新でも、走っているコードが最新とは限らない**（#2815）。bashは実行中の
+ * スクリプトのファイルを開いたまま持つため、`git pull`だけではプロセスの中身が入れ替わらない。
+ * `behindCount`はHEADとorigin/developしか比べていないので、チェックアウトが追い付いた時点で
+ * 「最新」に戻り、古いコードが走り続けていることは画面のどこにも出なくなっていた。
+ * pollerが**起動時のコミット**（`startedCommit`）も申告するようにして、
+ * `isDispatchHostPollerRestartPending`でその食い違いを見る。
+ *
  * Prismaに触れないため、クライアントコンポーネントからimportできる
  * （`host-metrics.ts`・`issue-session.ts`と同じ形）。
  */
@@ -35,6 +42,23 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 export type DispatchHostCheckout = {
   /** 短縮SHA（`git rev-parse --short HEAD`） */
   commit: string;
+  /**
+   * pollerが**起動した時点**でチェックアウトが指していたコミット（#2815）。
+   * **いま走っているコードはこの版**で、`commit`（毎巡取り直すHEAD）とは別物。
+   *
+   * bashは実行中のスクリプトのファイルを開いたまま持ち、`git pull`は新しいファイルを作って
+   * renameするため、**チェックアウトだけが進んでもプロセスの中身は入れ替わらない**。
+   * `SELF_UPDATE`（画面の「更新して再起動」）はpullと入れ替えを1組で行うので食い違わないが、
+   * 手元での`git pull`や他のセッションによる更新では、`behindCount`が0に戻った時点で
+   * 画面から「古いコードが走っている」ことを読み取る手掛かりが消える。
+   *
+   * 2026-09-02から2026-09-04のサブPCがその状態で、#2779（AI使用量のフェーズ分割）の集計側が
+   * 一度も動かないまま、画面には表示だけが入って材料が来ない状態になっていた。
+   *
+   * **`null`は「申告していない」**（#2815より前のpoller・gitが読めなかった巡）で、
+   * 「食い違っていない」とは区別する。
+   */
+  startedCommit: string | null;
   /** チェックアウトしているブランチ。detached HEADでは`null` */
   branch: string | null;
   /** HEADのコミット日時。版の古さを「日数」でも読めるようにするためのもの */
@@ -82,15 +106,43 @@ export function parseDispatchHostCheckout(value: unknown): DispatchHostCheckout 
 
   const branch = typeof input.branch === "string" ? input.branch.trim() : "";
   const behind = input.behindCount;
+  const startedCommit =
+    typeof input.startedCommit === "string" ? input.startedCommit.trim().toLowerCase() : "";
 
   return {
     commit,
+    // 読めなければ`null`＝「申告していない」。`commit`と違って全体は落とさない
+    // （起動時のコミットが分からなくても、HEADの遅れは今までどおり出せる）
+    startedCommit: COMMIT_PATTERN.test(startedCommit) ? startedCommit : null,
     branch: BRANCH_PATTERN.test(branch) ? branch : null,
     committedAt: parseIsoDate(input.committedAt),
     behindCount:
       typeof behind === "number" && Number.isInteger(behind) && behind >= 0 ? behind : null,
     fetchedAt: parseIsoDate(input.fetchedAt),
   };
+}
+
+/**
+ * pollerが**古いコードのまま走っている**か（#2815）。
+ *
+ * 起動時のコミットと、いまチェックアウトが指しているコミットが違えば真。
+ * `git pull`しただけではプロセスの中身が入れ替わらないため、この2つは食い違いうる。
+ *
+ * **短縮SHAの桁数は`git rev-parse --short`が状況に応じて決める**ので、起動時と今とで桁が
+ * 違うことがある。**片方がもう片方の前置なら同じコミット**として扱い、桁の違いだけで
+ * 「再起動待ち」と言わない（journaldの1行を組み立てるpoller側も同じ判定にしてある）。
+ *
+ * **申告していないpollerでは常に偽**（`startedCommit`が`null`）。#2815より前のpollerが
+ * 走っている間はこの検知そのものが効かないが、そこは「更新して再起動」を1回押せば入れ替わる。
+ */
+export function isDispatchHostPollerRestartPending(
+  checkout: DispatchHostCheckout | null | undefined,
+): boolean {
+  if (!checkout?.startedCommit) return false;
+  return (
+    !checkout.commit.startsWith(checkout.startedCommit) &&
+    !checkout.startedCommit.startsWith(checkout.commit)
+  );
 }
 
 /**
@@ -146,12 +198,25 @@ export function describeDispatchHostCheckout(
     : // detached HEADはそれ自体が異常な状態なので、ブランチ名の代わりに事実を出す
       `${checkout.commit}（detached）`;
 
+  // **走っているのが古いコードなら、まずそれを出す**（#2815）。`version`はチェックアウトの
+  // HEADなので、これが無いと「動いているのはこの版」と読めてしまう
+  const restartPending = isDispatchHostPollerRestartPending(checkout);
   const details: string[] = [];
+  if (restartPending) details.push(`起動時 ${checkout.startedCommit} で動作中`);
   if (checkout.committedAt) details.push(formatRelativeDate(checkout.committedAt, now.getTime()));
+
+  // 遅れの状態に添える。**遅れ0でも消えない**——チェックアウトが追い付いた瞬間に
+  // 「最新」へ戻って気付けなくなる、というのが#2815で起きたことそのもの
+  const restartSuffix = restartPending ? "・再起動待ち" : "";
 
   if (checkout.behindCount === null) {
     // fetchできていない。**「遅れていない」とは言えない**ので、遅れ0と同じ顔にはしない
-    return { version, status: "遅れ不明", detail: details.join("・") || null, tone: "warn" };
+    return {
+      version,
+      status: `遅れ不明${restartSuffix}`,
+      detail: details.join("・") || null,
+      tone: "warn",
+    };
   }
 
   // 数えた時点が古ければ、そのぶんは数字に含まれていないことを明示する
@@ -161,11 +226,15 @@ export function describeDispatchHostCheckout(
   const detail = details.join("・") || null;
 
   if (checkout.behindCount === 0) {
-    return { version, status: "最新", detail, tone: "normal" };
+    // **チェックアウトが追い付いていても、走っているのが古ければ「最新」とは言わない**（#2815）。
+    // 橙にしておくと、縮めた版のカード（スマホのホーム）にも出る（`tone !== "normal"`が条件）
+    return restartPending
+      ? { version, status: "再起動待ち", detail, tone: "warn" }
+      : { version, status: "最新", detail, tone: "normal" };
   }
   return {
     version,
-    status: `${checkout.behindCount}コミット遅れ`,
+    status: `${checkout.behindCount}コミット遅れ${restartSuffix}`,
     detail,
     tone: checkout.behindCount >= CRITICAL_BEHIND_COUNT ? "critical" : "warn",
   };
