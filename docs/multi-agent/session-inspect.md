@@ -195,10 +195,17 @@ Issue・PR別の明細の順に出る。**Issueの行を開くと、そのIssue�
 名前はどのリポジトリとも一致しないので、明細の行をクリックしてもIssueが開かない
 （`issue-deck-shell.tsx`の`openUsageIssue`はownerを除いた短い名前で突き合わせる）。
 
-`scripts/start-*.sh`が新しい置き場を作るときは、同じPRで`classify()`のパターンと`KIND_LABELS`、
-`src/lib/dispatch/session-usage.ts`の`SESSION_USAGE_KINDS`、`session-usage-view.ts`の
-`KIND_LABELS`の4つを揃える。**`SESSION_USAGE_KINDS`に無い種別の行は取り込みが丸ごと捨てる**ので、
-シェル側だけ直すと画面から消える。
+`scripts/start-*.sh`が新しい置き場を作るときは、同じPRで`classify()`のパターンとシェル側の
+`KIND_LABELS`、画面側（`session-usage-view.ts`）の`KIND_LABELS`を揃える。
+
+**受け取り側は種別の一覧では弾かない**（#2832）。集計するシェルはサブPCの本体チェックアウト
+（`develop`）から走り、報告先は本番（`main`）なので、一覧との一致で見ると
+**シェル側が新しい種別を送り始めてからリリースが本番へ届くまで、その種別のセッションが
+丸ごと記録されない**。埋め戻しの印は送れたかどうかだけを見て置かれるため、リリース後に
+戻ってくるのは直近2日ぶんだけになり、残りは最大30日ぶん欠けたままになる。そこで
+`SESSION_USAGE_KIND_PATTERN`が形（小文字のスラッグ・32文字まで）だけを見て受け取り、
+画面が知らない種別はラベルを引けずに文字列のまま出す（`sessionUsageKindLabel`のフォールバック）。
+`kind`をenumにしていないのと同じ理由で、**報告する側と受ける側のデプロイ順に依存させない**。
 
 ### GitHub Actionsの行は、共有ワークフローの配布タグを配ってから届く（#2832）
 
