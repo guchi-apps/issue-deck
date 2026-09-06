@@ -62,6 +62,7 @@ function makePullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRe
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: null,
+    reviewVerdict: null,
     ...overrides,
   };
 }

@@ -24,6 +24,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: 600,
+    reviewVerdict: null,
     ...overrides,
   };
 }

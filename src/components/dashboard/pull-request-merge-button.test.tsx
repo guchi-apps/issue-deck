@@ -34,6 +34,8 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeable: true,
     repairWorkflowAvailability: {},
     repairRun: null,
+    reviewVerdict: null,
+    releaseVerification: null,
     createdAt: "2026-08-22T00:00:00.000Z",
     updatedAt: "2026-08-22T00:00:00.000Z",
     ...overrides,
@@ -86,6 +88,36 @@ describe("PullRequestMergeButton", () => {
 
     expect(screen.getByText("CIが失敗しています。")).toBeTruthy();
     expect(screen.queryByText("このリリースに含まれる変更")).toBeNull();
+    // 代わりにそのPR1本ぶんのレビュー判定を出す（#2843）
+    expect(screen.getByText("コードレビュー")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("自動レビューが要修正なら、CIが通っていても確認ダイアログを通る（#2843）", () => {
+    stubChanges();
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({
+          baseRef: "develop",
+          headRef: "issue-2843",
+          kind: "issue",
+          ciState: "success",
+          reviewVerdict: {
+            reviewKind: "changes-requested",
+            reviewLabel: "要修正",
+            riskKind: "hit",
+            riskLabel: "該当あり",
+            riskReasons: ["認証・認可に関わる変更"],
+            confirmLabel: "必要（自動マージはスキップされます）",
+          },
+        })}
+        onMerged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    expect(screen.getByText("自動レビューが「要修正」と判定しています。")).toBeTruthy();
+    expect(screen.getByText("認証・認可に関わる変更")).toBeTruthy();
   });
 });

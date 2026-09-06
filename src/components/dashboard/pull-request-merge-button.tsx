@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
+import { PullRequestMergeReview } from "@/components/dashboard/pull-request-merge-review";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +49,11 @@ type PullRequestMergeButtonProps = {
  * **mainへのPRでは、確認ダイアログに「このリリースに含まれる変更」を並べる**（#2080。
  * `PullRequestMergeChanges`）。本番デプロイが走るマージなのに、ダイアログにはPR番号と
  * ブランチ名しか出ておらず、何を出そうとしているのかがその場では分からなかった。
+ * その一覧はPR基準で、各行にそのPRの自動レビュー判定が付く（#2843）。
+ *
+ * **mainへのPR以外では、そのPR1本ぶんのレビュー判定を出す**（#2843。`PullRequestMergeReview`）。
+ * `mergeWarnings`が「要修正」「要確認」でも警告を返すようになったため、CIが通っていて待ちの
+ * 無いPRでも、指摘が残っていればここを通る。
  *
  * **自動マージ可否の判定中は「判定中」で無効にする**（#1968。`isMergeJudgementPending`）。
  * 判定のcheck-runはCI状態の集約から外れている（#1799）ため、そこを塞がないと判定より先に
@@ -98,8 +104,11 @@ export function PullRequestMergeButton({
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        {/* 変更点を並べるぶん、mainへのPRのときだけ広げる */}
-        <AlertDialogContent className={cn(productionMerge && "sm:max-w-lg")}>
+        {/* 変更点を並べるぶん、mainへのPRのときだけ広げる。中身が増えても画面からはみ出さない
+            よう、高さの上限とスクロールはどちらの幅でも付ける（スマホで下端が切れる） */}
+        <AlertDialogContent
+          className={cn("max-h-[90dvh] overflow-y-auto", productionMerge && "sm:max-w-lg")}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle>このPRをマージしますか？</AlertDialogTitle>
             <AlertDialogDescription>
@@ -112,8 +121,13 @@ export function PullRequestMergeButton({
               <li key={warning}>{warning}</li>
             ))}
           </ul>
-          {productionMerge && (
+          {productionMerge ? (
             <PullRequestMergeChanges pullRequest={pullRequest} open={confirmOpen} />
+          ) : (
+            <PullRequestMergeReview
+              verdict={pullRequest.reviewVerdict}
+              htmlUrl={pullRequest.htmlUrl}
+            />
           )}
           <ApiErrorMessage message={error} />
           <AlertDialogFooter>

@@ -22,6 +22,7 @@ import {
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { buildSnoozeMap } from "@/lib/snooze";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -53,6 +54,8 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
+    reviewVerdict: null,
+    releaseVerification: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -66,6 +69,7 @@ function releasePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRe
     baseRef: "main",
     headRef: "develop",
     linkedIssueNumber: null,
+    reviewVerdict: null,
     ...overrides,
   });
 }
@@ -636,6 +640,20 @@ describe("isMergeJudgementPending", () => {
   });
 });
 
+function reviewVerdict(
+  reviewKind: PullRequestReviewVerdict["reviewKind"],
+  reviewLabel: string,
+): PullRequestReviewVerdict {
+  return {
+    reviewKind,
+    reviewLabel,
+    riskKind: "none",
+    riskLabel: "該当なし",
+    riskReasons: [],
+    confirmLabel: null,
+  };
+}
+
 describe("mergeWarnings", () => {
   it("CI通過済み・Auto-merge無効なら確認は不要", () => {
     expect(mergeWarnings(pullRequest({ ciState: "success" }))).toEqual([]);
@@ -679,6 +697,27 @@ describe("mergeWarnings", () => {
       "CIがまだ実行中です。",
       "Auto-mergeが有効です。待てばCI通過後に自動でマージされます。",
     ]);
+  });
+
+  it("自動レビューが要修正・要確認のPRは、CIが通っていても確認を挟む（#2843）", () => {
+    expect(
+      mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("changes-requested", "要修正") })),
+    ).toEqual(["自動レビューが「要修正」と判定しています。"]);
+    expect(
+      mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("needs-check", "要確認") })),
+    ).toEqual(["自動レビューが「要確認」と判定しています。"]);
+  });
+
+  it("問題なし・実施なし・記録なしでは確認を挟まない（本当の指摘が埋もれる）", () => {
+    expect(
+      mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("ok", "問題なし（LGTM）") })),
+    ).toEqual([]);
+    expect(mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("skipped", "実施なし") }))).toEqual(
+      [],
+    );
+    expect(mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("unknown", "記録なし") }))).toEqual(
+      [],
+    );
   });
 });
 

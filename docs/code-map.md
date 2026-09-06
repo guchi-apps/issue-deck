@@ -1842,6 +1842,39 @@ export function POST(request: NextRequest) {
   新規Issue作成ダイアログを開くだけにしてある（**ここでは起票しない**。立てるかは読んだ人が
   決める。ダイアログの「作成+実装開始」で起票の先まで一続きに進められる）。
   同じ指摘の二重起票防止（`buildCodeReviewFindingIssueIndex`相当の索引）は持たせていない。
+- **マージ確認ダイアログは、押す直前にそのPRのレビュー判定を出す**（#2843。
+  [`pull-request-merge-review.tsx`](../src/components/dashboard/pull-request-merge-review.tsx)・
+  [`lib/github/pull-request-review-verdict.ts`](../src/lib/github/pull-request-review-verdict.ts)）。
+  **判定はPR本文に文字として残っており、一覧・詳細のどちらの経路も本文を既に受け取っている**
+  （`GithubApiOpenPullRequest.body`）ので、読み取りは`toPullRequestSummary`で済ませ、画面へは
+  判定だけを渡す。**GitHub APIの消費は増えず、ダイアログを開いた瞬間に出る**——開いてから
+  取りに行く「このリリースに含まれる変更」（`/api/pull-requests/changes`）との違いはここ。
+  develop向けPRは自分ひとつぶんの`## 検証結果`（`parsePullRequestReviewVerdict`）、リリースPRは
+  対象issueぶんを集めた表（`parseReleaseVerification`）を読む。Issue詳細のマージ確認
+  （`IssueMergeButton`）にも同じパネルを出しており、材料は`/api/issues/pull-requests`が
+  同じ本文から読んだもの。
+  **一覧の応答へ載せるとき、指摘の本文（`reviewBody`）は落とす**（`withoutReviewBodies`）。
+  PR一覧は全リポジトリぶんを1つの応答で返すため、本文まで載せると数十KB膨らむ。本文を読むのは
+  PR詳細のパネルの役割で、そちらは詳細APIの`body`から読み直している。
+  **リリースの一覧の行はPR基準**（`pullRequestChangeLabel`はPR番号を先に返す）。レビューが走る
+  単位はPull Requestで判定もPRに紐づくため、行頭がIssue番号だと「この判定はどのPRのものか」を
+  読み替えることになる。突き合わせの鍵はPR番号で、表の行にPR番号が無いものだけIssue番号で拾う
+  （`applyReviewVerdicts`）。内訳の帯は表の集計ではなく**並べた行から数える**
+  （`tallyChangeReviews`）——表はIssueを数えたもので、画面に並ぶ行（PR）とは母数が違う。
+  **表に載るのは、リリースを凍結した時点でopenだった`issue-<番号>`ブランチのPRだけ**
+  （`reusable-release-develop-to-main.yml`が対象issueの番号でループし、`select(.state == "OPEN")`で
+  絞る）。つまり**バージョンバンプPRは必ず表に無い**ので、「記録を辿れなかった」ではなく
+  「レビューの対象ではない」として`skipped`（`–` レビューなし）で出し、内訳の母数からも外す。
+  対応Issueが先にcloseされていたPR・`issue-<番号>`以外のブランチのPRは`unknown`（`?` 記録なし）で、
+  こちらは母数に入れて「行数と分母が合わない理由」を読めるようにする。
+  **`mergeWarnings`は「要修正」「要確認」でも警告を返す**ので、CIが通っていて待ちの無いPRでも
+  指摘が残っていれば確認ダイアログを通る。**「実施なし」「記録なし」では止めない**——
+  レビューを省くのは設計どおりの動きで（#992のゲート）、そこで止めるとほぼ全てのPRで
+  ダイアログが出て本当の指摘が埋もれる（`needsReviewAttention`）。
+  色と記号の対応表は[`review-verdict.tsx`](../src/components/dashboard/review-verdict.tsx)の1か所に
+  置き、PR詳細の検証結果パネルと共有する（同じ判定が場所によって違う色で出ると、盤面の色が
+  意味を持たなくなる）。節のマーカーは`scripts/check-review-verdict-marker.sh`が
+  ワークフローと突き合わせる**読み側の1つ**としてこのパーサーも見ている。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、

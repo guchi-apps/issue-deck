@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { VerdictText } from "@/components/dashboard/review-verdict";
 import { Button } from "@/components/ui/button";
 import type {
   ReleaseVerification,
@@ -12,52 +13,6 @@ import type {
   ReviewVerdictKind,
 } from "@/lib/github/release-verification";
 import { cn } from "@/lib/utils";
-
-/**
- * 判定ごとの色。**`skipped`と`unknown`は灰色で、赤やamberにしない**（#2448）。
- * 低リスクかつ小規模なPRでレビューを省くのは設計どおりの動きで（#992のゲート）、
- * 危険信号と同じ色にすると、本当に見るべき`要確認`が埋もれる。
- */
-const REVIEW_TONE: Record<ReviewVerdictKind, string> = {
-  ok: "text-green-700 dark:text-green-400",
-  "needs-check": "text-amber-700 dark:text-amber-400",
-  "changes-requested": "text-destructive",
-  skipped: "text-muted-foreground",
-  unknown: "text-muted-foreground",
-};
-
-/** 判定の印。色だけに頼らず、記号でも区別できるようにする */
-const REVIEW_MARK: Record<ReviewVerdictKind, string> = {
-  ok: "●",
-  "needs-check": "▲",
-  "changes-requested": "■",
-  skipped: "–",
-  unknown: "?",
-};
-
-function VerdictText({ kind, label }: { kind: ReviewVerdictKind; label: string }) {
-  return (
-    <span className={cn("flex items-center gap-1.5 whitespace-nowrap", REVIEW_TONE[kind])}>
-      <span aria-hidden="true" className="text-[10px] leading-none">
-        {REVIEW_MARK[kind]}
-      </span>
-      {label}
-    </span>
-  );
-}
-
-function TallyItem({ kind, label, count }: { kind: ReviewVerdictKind; label: string; count: number }) {
-  if (count === 0) return null;
-  return (
-    <span className={cn("flex items-center gap-1.5 whitespace-nowrap", REVIEW_TONE[kind])}>
-      <span aria-hidden="true" className="text-[10px] leading-none">
-        {REVIEW_MARK[kind]}
-      </span>
-      <span className="font-semibold tabular-nums">{count}</span>
-      {label}
-    </span>
-  );
-}
 
 /**
  * 1件ぶんの行。レビュー本文が載っている場合（#2488）は開いて読めるようにする。
@@ -203,11 +158,11 @@ export function VerificationSummaryPanel({
           <span className="font-semibold tabular-nums">{tally.total}</span>
           <span className="text-muted-foreground"> 件のIssue</span>
         </span>
-        <TallyItem kind="ok" label="問題なし" count={tally.ok} />
-        <TallyItem kind="needs-check" label="要確認" count={tally.needsCheck} />
-        <TallyItem kind="changes-requested" label="要修正" count={tally.changesRequested} />
-        <TallyItem kind="skipped" label="レビューなし" count={tally.skipped} />
-        <TallyItem kind="unknown" label="記録なし" count={tally.unknown} />
+        <VerdictText kind="ok" label="問題なし" count={tally.ok} />
+        <VerdictText kind="needs-check" label="要確認" count={tally.needsCheck} />
+        <VerdictText kind="changes-requested" label="要修正" count={tally.changesRequested} />
+        <VerdictText kind="skipped" label="レビューなし" count={tally.skipped} />
+        <VerdictText kind="unknown" label="記録なし" count={tally.unknown} />
       </div>
       <ul>
         {rows.map((row) => (

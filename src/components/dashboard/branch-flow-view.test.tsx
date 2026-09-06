@@ -41,6 +41,8 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeable: null,
     repairWorkflowAvailability: {},
     repairRun: null,
+    reviewVerdict: null,
+    releaseVerification: null,
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
     ...overrides,
@@ -54,6 +56,7 @@ function makeReleasePullRequest(overrides: Partial<PullRequestSummary>): PullReq
     headRef: "develop",
     kind: "release",
     linkedIssueNumber: null,
+    reviewVerdict: null,
     ...overrides,
   });
 }

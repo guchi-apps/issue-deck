@@ -91,3 +91,69 @@ describe("toPullRequestSummary", () => {
     expect(summary.authorLogin).toBe("unknown");
   });
 });
+
+describe("toPullRequestSummary（レビュー判定。#2843）", () => {
+  const VERIFICATION_SECTION = [
+    "<!-- issue-deck-verification:start review=changes-requested risk=none -->",
+    "## 検証結果",
+    "",
+    "- 自動レビュー: ❌ 要修正",
+    "- 機械的リスク判定: 該当なし",
+    "<!-- issue-deck-verification:end -->",
+  ].join("\n");
+
+  const RELEASE_TABLE = [
+    "## コードレビューの検証結果",
+    "",
+    "| issue | PR | 自動レビュー | 機械的リスク判定 |",
+    "| --- | --- | --- | --- |",
+    "| #2062 | #2077 | ✅ 問題なし | 該当なし |",
+    "",
+    "<!-- issue-deck-review-detail:start issue=2062 -->",
+    "指摘の本文",
+    "<!-- issue-deck-review-detail:end -->",
+  ].join("\n");
+
+  it("PR本文の`## 検証結果`から自分ひとつぶんの判定を読む", () => {
+    const summary = toPullRequestSummary(apiPullRequest({ body: VERIFICATION_SECTION }), repository, {
+      merged: false,
+      ciState: "success",
+    });
+
+    expect(summary.reviewVerdict?.reviewKind).toBe("changes-requested");
+    expect(summary.reviewVerdict?.reviewLabel).toBe("要修正");
+    // main宛ではないので、リリースPRの表は読みに行かない
+    expect(summary.releaseVerification).toBeNull();
+  });
+
+  it("記録が無い本文ではnull", () => {
+    const summary = toPullRequestSummary(apiPullRequest({ body: "実装しました。" }), repository, {
+      merged: false,
+      ciState: "success",
+    });
+
+    expect(summary.reviewVerdict).toBeNull();
+  });
+
+  it("main宛では検証結果の表も読み、レビュー本文だけを落とす", () => {
+    const summary = toPullRequestSummary(
+      apiPullRequest({ base: { ref: "main" }, head: { ref: "release-main/v4.19.0", sha: "abc" }, body: RELEASE_TABLE }),
+      repository,
+      { merged: false, ciState: "success" },
+    );
+
+    expect(summary.releaseVerification?.rows).toEqual([
+      {
+        issueNumber: 2062,
+        issueTitle: null,
+        pullRequestNumber: 2077,
+        reviewKind: "ok",
+        reviewLabel: "問題なし",
+        riskKind: "none",
+        riskLabel: "該当なし",
+        // 一覧の応答を膨らませないため、指摘の本文は画面へ渡さない
+        reviewBody: null,
+      },
+    ]);
+  });
+});

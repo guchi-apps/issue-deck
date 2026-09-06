@@ -34,6 +34,8 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergeable: true,
     repairWorkflowAvailability: {},
     repairRun: null,
+    reviewVerdict: null,
+    releaseVerification: null,
     createdAt: "2026-08-22T00:00:00.000Z",
     updatedAt: "2026-08-22T00:00:00.000Z",
     ...overrides,
@@ -70,7 +72,7 @@ describe("PullRequestMergeChanges", () => {
     vi.unstubAllGlobals();
   });
 
-  it("開いているあいだに取得し、対応Issueの番号とタイトルを並べる", async () => {
+  it("開いているあいだに取得し、PR番号とタイトルを並べる", async () => {
     const { requestedUrls } = mockChanges([
       makeChange(),
       makeChange({
@@ -85,13 +87,72 @@ describe("PullRequestMergeChanges", () => {
     render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
 
     expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
-    expect(screen.getByText("#2062")).toBeTruthy();
-    // 対応Issueが取れないバンプPRはPR番号で出し、利用者向けの変更ではない印を添える
+    // 行頭はPR番号で、対応Issue番号は行の中に添える（#2843）
+    expect(screen.getByText("#2077")).toBeTruthy();
+    expect(screen.getByText("Issue #2062")).toBeTruthy();
+    // 対応Issueが取れないバンプPRは番号だけを出し、利用者向けの変更ではない印を添える
     expect(screen.getByText("#2074")).toBeTruthy();
     expect(screen.getByText("バンプ")).toBeTruthy();
     expect(requestedUrls[0]).toContain(
       "/api/pull-requests/changes?owner=guchi-apps&repo=issue-deck&number=2075",
     );
+  });
+
+  it("PRごとの自動レビュー判定と内訳を出す（#2843）", async () => {
+    mockChanges([
+      makeChange(),
+      makeChange({ id: "a2", pullRequestNumber: 2078, issueNumber: 2063, title: "別の変更" }),
+    ]);
+
+    render(
+      <PullRequestMergeChanges
+        pullRequest={makePullRequest({
+          releaseVerification: {
+            rows: [
+              {
+                issueNumber: 2062,
+                issueTitle: null,
+                pullRequestNumber: 2077,
+                reviewKind: "changes-requested",
+                reviewLabel: "要修正",
+                riskKind: "none",
+                riskLabel: "該当なし",
+                reviewBody: null,
+              },
+              {
+                issueNumber: 2063,
+                issueTitle: null,
+                pullRequestNumber: 2078,
+                reviewKind: "ok",
+                reviewLabel: "問題なし（LGTM）",
+                riskKind: "none",
+                riskLabel: "該当なし",
+                reviewBody: null,
+              },
+            ],
+            tally: { total: 2, ok: 1, needsCheck: 0, changesRequested: 1, skipped: 0, unknown: 0 },
+          },
+        })}
+        open
+      />,
+    );
+
+    expect(await screen.findByText("問題なし（LGTM）")).toBeTruthy();
+    // 内訳の帯と行の両方に出るので2件（帯は「要修正 1」、行は「要修正」）
+    expect(screen.getAllByText("要修正")).toHaveLength(2);
+    // 内訳の帯。行を1つずつ読む前に「何本のうち何本が要修正か」を出す
+    expect(screen.getByText("問題なし")).toBeTruthy();
+  });
+
+  it("判定の記録が無いリリースでは内訳の帯を出さない", async () => {
+    mockChanges([makeChange()]);
+
+    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+
+    expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
+    // 行の判定は灰色の「記録なし」だけになり、内訳の帯そのものを出さない
+    expect(screen.getByText("記録なし")).toBeTruthy();
+    expect(screen.queryByText("問題なし")).toBeNull();
   });
 
   it("PRのタイトルから版を出す", async () => {

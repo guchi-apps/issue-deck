@@ -4,6 +4,7 @@ import type {
   MergeJudgement,
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
+import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type {
@@ -632,6 +633,13 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   }
   if (pullRequest.autoMergeEnabled) {
     warnings.push("Auto-mergeが有効です。待てばCI通過後に自動でマージされます。");
+  }
+  // 自動レビューが指摘を残しているPRは、必ず確認ダイアログを通す（#2843）。CIが通っていれば
+  // 1クリックでマージできてしまい、判定を読む場所がどこにも無かった。**「実施なし」「記録なし」
+  // では止めない**——レビューを省くのは設計どおりの動きで、そこで止めるとほぼ全てのPRで
+  // ダイアログが出ることになり、本当に読むべき指摘が埋もれる（`needsReviewAttention`）。
+  if (pullRequest.reviewVerdict && needsReviewAttention(pullRequest.reviewVerdict.reviewKind)) {
+    warnings.push(`自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定しています。`);
   }
   return warnings;
 }
