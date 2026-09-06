@@ -265,6 +265,49 @@ describe("QuestionAnswerPanel", () => {
     expect(screen.queryByText("この質問の前提")).toBeNull();
   });
 
+  // #2818: 質問文に埋め込まれたコマンドは、地の文から切り離して独立表示・個別コピーできる
+  it("質問文に埋め込まれたコマンドを地の文から切り離し、個別にコピーできる", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    const questionWithCommand =
+      "次の読み取り専用コマンドを実行してよいですか？ ```bash\n" +
+      "gh api repos/guchi-apps/aide/pulls/231 --jq '.number'\n" +
+      "git fetch origin develop --quiet && git status\n" +
+      "```";
+    render(
+      <QuestionAnswerPanel
+        request={request({
+          questions: [
+            {
+              question: questionWithCommand,
+              header: "前提確認",
+              options: [
+                { label: "実行する", description: "" },
+                { label: "ここで止める", description: "" },
+              ],
+              multiSelect: false,
+            },
+          ],
+        })}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    // 地の文にはバッククォート・フェンスが残らない
+    expect(screen.getByText("次の読み取り専用コマンドを実行してよいですか？")).toBeTruthy();
+    expect(screen.queryByText(/```/)).toBeNull();
+
+    // &&で繋がっていたコマンドも1行ずつ表示される
+    expect(screen.getByText("gh api repos/guchi-apps/aide/pulls/231 --jq '.number'")).toBeTruthy();
+    expect(screen.getByText("git fetch origin develop --quiet")).toBeTruthy();
+    expect(screen.getByText("git status")).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "この行をコピー" })[0]);
+    expect(writeText).toHaveBeenCalledWith("gh api repos/guchi-apps/aide/pulls/231 --jq '.number'");
+  });
+
   it("セッションが終了していたら、届かないことを出して押させない", () => {
     render(
       <QuestionAnswerPanel

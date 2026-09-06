@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { copyText } from "@/lib/copy-text";
 import { matchManualStepDeviceNames, type ManualStepGuide } from "@/lib/manual-step-guide";
+import { splitShellCommandLines } from "@/lib/shell-command-lines";
+import { cn } from "@/lib/utils";
 
 /**
  * 手作業を自分で実行するときの「どこから実行するか」（#1882）。
@@ -59,7 +61,7 @@ export function ManualStepWhereToRun({
       )}
       <ol className="flex flex-col gap-2">
         {lines.map((line, order) => (
-          <li key={line.command} className="flex gap-2">
+          <li key={`${order}-${line.label}`} className="flex gap-2">
             <span
               className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-violet-500/40 bg-violet-500/10 font-mono text-[10px] text-violet-700 dark:text-violet-300"
               aria-hidden
@@ -68,9 +70,14 @@ export function ManualStepWhereToRun({
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-1">
               <span className="text-[11px] text-muted-foreground">{line.label}</span>
-              <pre className="overflow-x-auto rounded border bg-background p-2 font-mono text-xs leading-relaxed">
-                {line.command}
-              </pre>
+              <span className="flex min-w-0 items-start gap-1.5">
+                <pre className="min-w-0 flex-1 overflow-x-auto rounded border bg-background p-2 font-mono text-xs leading-relaxed">
+                  {line.command}
+                </pre>
+                {/* &&や改行で複数コマンドに分かれているときも、この1行だけをコピーできるように
+                    する（#2818。まとめてコピーはこのすぐ下にある） */}
+                <LineCopyButton command={line.command} />
+              </span>
             </span>
           </li>
         ))}
@@ -119,10 +126,57 @@ export function buildWhereToRunLines(
     lines.push({ label: "移動する", command: `cd ${where.directory}` });
   }
   if (command !== null && command.trim() !== "") {
-    lines.push({ label: "実行する（本文に書かれたコマンド）", command });
+    // &&や改行で複数コマンドが繋がっていれば、実行する行を1コマンドずつに分ける（#2818）。
+    // 1件しか無ければ従来どおり元の文字列をそのまま出す（前後の空白まで揃えて崩さない）
+    const commands = splitShellCommandLines(command);
+    if (commands.length > 1) {
+      commands.forEach((sub, subOrder) => {
+        lines.push({ label: `実行する（${subOrder + 1}/${commands.length}）`, command: sub });
+      });
+    } else {
+      lines.push({ label: "実行する（本文に書かれたコマンド）", command });
+    }
   }
   // 実行するコマンドだけが分かっていて、接続も移動も無いなら案内する値が無い
   return lines.length <= 1 && connect === null ? [] : lines;
+}
+
+/** 1行だけを個別にコピーする（#2818）。「まとめてコピー」はこの並び全体を対象にする */
+function LineCopyButton({ command }: { command: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    const ok = await copyText(command);
+    setState(ok ? "copied" : "failed");
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1500);
+  }
+
+  const label =
+    state === "copied" ? "コピーしました" : state === "failed" ? "コピーできませんでした" : "この行をコピー";
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "mt-0.5 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border bg-background text-muted-foreground transition hover:text-foreground",
+        state === "copied" && "text-primary",
+        state === "failed" && "text-destructive",
+      )}
+    >
+      {state === "copied" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </button>
+  );
 }
 
 /** 並び全体を1回でコピーする。**コピーできたときだけ成功表示を出す**（`markdown-body`と同じ） */
