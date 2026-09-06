@@ -86,7 +86,7 @@ import { cn } from "@/lib/utils";
  *
  * **畳むのは「押す気になったときだけ要るもの」に限る。** 次のものは畳まない。
  *
- * - Claude Codeアプリで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
+ * - アプリで開く・開発環境を開く（入力待ちのときの唯一の出口。畳むと画面から承認できない）
  * - Codexに繋ぐ（#2537。CodexのセッションではURLが出ないため、ここが同じ役目を果たす）
  * - セッションの補足（`summary.detail`。「`tmux attach -t …`で答えてください」など次の操作そのもの）
  * - 押した操作の結果（`controlJob`の状態・pollerが見送った理由・送信の失敗）。届くまで最大1分
@@ -239,7 +239,7 @@ export function IssueSessionStatus({
    * **Codexには出さない。** `AskUserQuestion`のフックが無く（待ちを作るのは
    * `scripts/submit-question.sh`）、Remote Controlも無いので、切り替えた先が存在しない。
    *
-   * **出口（「Claude Codeアプリで開く」）と同じ行に置き、畳まない**（#1676の「押す気に
+   * **出口（「アプリで開く」）と同じ行に置き、畳まない**（#1676の「押す気に
    * なったときだけ要るものを畳む」の例外）。押した直後に開くのがその隣のボタンで、
    * 離すと「アプリで答えられること自体」が画面から読み取れなくなる。
    */
@@ -414,7 +414,7 @@ export function IssueSessionStatus({
           {summary.remoteControlUrl && (
             <Button variant="outline" size="sm" asChild>
               <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
-                Claude Codeアプリで開く
+                アプリで開く
                 <ExternalLink />
               </a>
             </Button>
