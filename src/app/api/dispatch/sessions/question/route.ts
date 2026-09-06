@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
 import { createSessionQuestionRequest } from "@/lib/dispatch/question-requests";
+import { isSessionAnswerInApp } from "@/lib/dispatch/session-answer-mode";
 import { parseSessionHostName, requestSessionCheckUser } from "@/lib/dispatch/session-plan";
 import {
   parseSessionQuestionWaitSeconds,
@@ -49,9 +50,17 @@ export async function POST(request: NextRequest) {
 
   // **待ち時間が`0`（ホスト側で無効にしている）なら作らない。** 作ると、フックは待たないのに
   // 画面には押しても誰も受け取らないパネルが残る。
+  //
+  // **「アプリで答える」がONのセッションでも作らない**（#2822）。作らなければフックはすぐ
+  // 降り、Claude Codeが端末へ出した選択フォームがそのままClaude Codeアプリにも見える。
   const waitSeconds = parseSessionQuestionWaitSeconds(payload?.waitSeconds);
+  const answerInApp = await isSessionAnswerInApp({
+    repositoryFullName: target.repositoryFullName,
+    issueNumber: target.issueNumber,
+    hostName,
+  });
   let questionRequestId: string | null = null;
-  if (waitSeconds > 0) {
+  if (waitSeconds > 0 && !answerInApp) {
     try {
       const created = await createSessionQuestionRequest({
         repositoryFullName: target.repositoryFullName,
@@ -82,7 +91,7 @@ export async function POST(request: NextRequest) {
   // 付けられなくても200で返す。呼び出し側（フック）は再送の判断ができる相手ではなく、
   // 非0を返してもセッションのログにエラーが増えるだけになる
   return NextResponse.json(
-    { ok: true, labeled, questionRequestId },
+    { ok: true, labeled, questionRequestId, answerInApp },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

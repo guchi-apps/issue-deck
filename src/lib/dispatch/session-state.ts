@@ -338,6 +338,15 @@ export type DispatchSessionView = {
   /** tailnetへ出した開発サーバーのURL（#1265）。`23.preview-required`のセッションでだけ埋まる */
   previewUrl: string | null;
   /**
+   * 質問・計画の返事をClaude Codeアプリ（端末）側で受け取るか（#2822）。**既定は`false`**で、
+   * 従来どおりissue-deckの画面のパネルが受け取る。
+   *
+   * `true`のあいだ、受け口（`/sessions/question`・`/sessions/plan`）は待ちを作らず、
+   * Claude Codeが端末へ出したフォームがRemote Control（Claude Codeアプリ）にも見える。
+   * 切り替えは`POST /api/dispatch/sessions/answer-mode`で、判定は`session-answer-mode.ts`。
+   */
+  answerInApp: boolean;
+  /**
    * 自動で畳む予定（#1817）。畳む条件が揃い、猶予が経つのを待っているセッションでだけ埋まる。
    * 画面に出す形にするのは`describeSessionReap`（`issue-session.ts`）。
    */

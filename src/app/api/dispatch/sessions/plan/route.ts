@@ -11,6 +11,7 @@ import {
   postSessionPlan,
 } from "@/lib/dispatch/session-plan";
 import { createSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import { isSessionAnswerInApp } from "@/lib/dispatch/session-answer-mode";
 import { parseSessionPlanWaitSeconds } from "@/lib/dispatch/session-plan-request";
 import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 
@@ -104,9 +105,17 @@ export async function POST(request: NextRequest) {
   //
   // **待ち時間が`0`（ホスト側で無効にしている）なら作らない。** 作ると、フックは待たないのに
   // 画面には押しても誰も受け取らないパネルが残る。
+  //
+  // **「アプリで答える」がONのセッションでも作らない**（#2822）。**計画コメントの投稿は
+  // 止めない**——変えるのは「どこで承認するか」だけで、計画がIssueに残ることは変わらない。
   const waitSeconds = parseSessionPlanWaitSeconds(payload?.waitSeconds);
+  const answerInApp = await isSessionAnswerInApp({
+    repositoryFullName: target.repositoryFullName,
+    issueNumber: target.issueNumber,
+    hostName,
+  });
   let planRequestId: string | null = null;
-  if (waitSeconds > 0) {
+  if (waitSeconds > 0 && !answerInApp) {
     try {
       const request = await createSessionPlanRequest({
         repositoryFullName: target.repositoryFullName,
@@ -129,7 +138,7 @@ export async function POST(request: NextRequest) {
   // 投稿できなくても200で返す。呼び出し側（フック）は再送の判断ができる相手ではなく、
   // 非0を返してもセッションのログにエラーが増えるだけになる
   return NextResponse.json(
-    { ok: true, posted, planRequestId },
+    { ok: true, posted, planRequestId, answerInApp },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

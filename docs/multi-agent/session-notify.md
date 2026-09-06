@@ -393,6 +393,52 @@ Codexには`AskUserQuestion`とそのフックが無いため、#2579では同�
   `src/lib/dispatch/question-requests.ts`（DB）。画面は`question-answer-panel.tsx`、
   前提の選び方は`question-premise.ts`、一覧の導線は`issue-list.tsx`
 
+## Claude Codeアプリ側で答えるセッションに切り替える（#2822）
+
+**画面から答えられるようにしたことの裏返しで、待っているあいだはClaude Codeアプリに何も
+出なくなった。** 計画（#2061）も質問（#2189）もフックが返ってからでないと端末へフォームが
+出ないため、待ちを作っている数分〜30分のあいだ、Remote Controlを開いても選択肢が現れない。
+手作業Issueのセッション（#2771）をアプリ側でそのまま進めたい場面では、これが
+「アプリに何も出てこない」として出る。
+
+そこで**セッション1本ごとのトグル**（Issue詳細のセッションの行の「アプリで答える」）を置き、
+ONのあいだは受け口が待ちを作らない。
+
+```text
+「アプリで答える」をON（Issue詳細のセッションの行）
+  → POST /api/dispatch/sessions/answer-mode
+       → DispatchSession.answerInApp = true
+       → いま待っている計画・質問を `defer` で畳む（＝フックがその場で降りる）
+… 次の AskUserQuestion / ExitPlanMode …
+  → PreToolUse フック → /sessions/question ・ /sessions/plan
+       → 計画コメントの投稿・00.check-user の付与は**従来どおり**
+       → 待ちを作らず questionRequestId / planRequestId に null を返す
+  → フックは何も出力せずに終える
+  → Claude Codeが端末へ選択フォーム・承認プロンプトを出す（＝Claude Codeアプリにも見える）
+```
+
+- **変えるのは「どこで答えるか」だけ。** Issueコメント（計画本文）・`00.check-user`・
+  Push通知はONでも出す。**記録と気付ける経路まで一緒に消すと**、答え先が変わっただけのはずが
+  「何も起きていない」ように見える（#2108で計画について学んだのと同じ線）
+- **ONにした瞬間に、待っているパネルを畳む。** 畳まないと、押した本人の目の前に
+  「押しても行き先が変わらないパネル」が待ち時間いっぱい残る。畳む経路は画面の
+  「端末・Remote Controlで答える」と同じ`defer`で、フックはそれを読んで待ちを降りる
+- **フック（`session-notify.sh`）は変えていない。** `json_field`は文字列以外を空にするので、
+  `questionRequestId: null`を受け取ると`wait_for_question_answer`が即座に返る。したがって
+  **サブPCのチェックアウトが古いままでも効く**
+- **全体設定（`AppSetting`）にはしない。** 別のIssueをスマホから答える経路まで一緒に切って
+  しまう。効くのは切り替えたセッションだけで、**同じ名前で立ち上がり直した行では捨てる**
+  （`isRevivedSession`。前のセッションの設定を引き継がない）
+- **Codexのセッションには出さない。** `AskUserQuestion`のフックもRemote Controlも無く
+  （待ちを作るのは`scripts/submit-question.sh`）、切り替えた先が存在しない
+- **効くのは`DispatchSession`の行がある間だけ。** pollerが1巡する前に質問が出ると行がまだ
+  無く、そのときは既定（画面で受け取る）に倒れる——待ちが1回できるだけで詰まらない
+- サーバー側は`src/lib/dispatch/session-answer-mode.ts`（判定・切り替え・待ちの畳み）と
+  `POST /api/dispatch/sessions/answer-mode`（Supabase認証）。画面は
+  `issue-session-status.tsx`で、**出口（「Claude Codeアプリで開く」）と同じ行に置いて畳まない**
+  ——押した直後に開くのがその隣のボタンで、離すと「アプリで答えられること自体」が画面から
+  読み取れなくなる
+
 ## 受付と締めもIssueのコメントへ残す（#1119）
 
 計画（#1342）を自動で載せるようにしても、**Issueのコメント欄だけを見て追える範囲はActionsに

@@ -232,6 +232,18 @@ export function IssueSessionStatus({
   // ボタンは出したまま無効にし、理由を下に出す**（#1332の「停止」と同じ扱い。導線ごと
   // 消すと、なぜ送れないのかが画面から分からなくなる）
   const showInstruction = canControl && session.state === "ALIVE";
+  /**
+   * 質問・計画をClaude Codeアプリ側で受け取るトグル（#2822）。**生きているClaude Codeの
+   * セッションにだけ出す。**
+   *
+   * **Codexには出さない。** `AskUserQuestion`のフックが無く（待ちを作るのは
+   * `scripts/submit-question.sh`）、Remote Controlも無いので、切り替えた先が存在しない。
+   *
+   * **出口（「Claude Codeアプリで開く」）と同じ行に置き、畳まない**（#1676の「押す気に
+   * なったときだけ要るものを畳む」の例外）。押した直後に開くのがその隣のボタンで、
+   * 離すと「アプリで答えられること自体」が画面から読み取れなくなる。
+   */
+  const showAnswerModeToggle = session.state === "ALIVE" && !isCodexSession;
   // 起動できたセッションの中身を見る唯一の手掛かり（#1468）。畳んだ行のピルはセッションの
   // 状態を表すものに変わったため、コピーは展開側の明示的なボタンにする
   const attachCommand =
@@ -250,6 +262,18 @@ export function IssueSessionStatus({
     }
     setCopiedAttach(true);
     window.setTimeout(() => setCopiedAttach(false), 1500);
+  }
+
+  async function toggleAnswerMode() {
+    setControlError(null);
+    const result = await dispatch.setSessionAnswerMode({
+      repositoryFullName: session.repositoryFullName,
+      issueNumber: session.issueNumber,
+      hostName: session.host,
+      tmuxSessionName: session.tmuxSessionName,
+      answerInApp: !session.answerInApp,
+    });
+    if (!result.ok) setControlError(result.message);
   }
 
   async function send(kind: "interrupt" | "kill" | "instruction", body?: string) {
@@ -380,8 +404,13 @@ export function IssueSessionStatus({
       )}
       {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、
           畳むと画面から`00.check-user`を外せなくなる */}
-      {(summary.remoteControlUrl || summary.previewUrl) && (
-        <div className="flex flex-wrap gap-2">
+      {(summary.remoteControlUrl || summary.previewUrl || showAnswerModeToggle) && (
+        <div
+          className={cn(
+            "flex w-full flex-wrap gap-2",
+            align === "end" ? "justify-end" : "justify-start",
+          )}
+        >
           {summary.remoteControlUrl && (
             <Button variant="outline" size="sm" asChild>
               <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
@@ -399,7 +428,62 @@ export function IssueSessionStatus({
               </a>
             </Button>
           )}
+          {/* 質問・計画をどちらで受け取るか（#2822）。**押した見た目を先に変えない**——
+              効いたかどうかの正はサーバー側で、次の取得で`session.answerInApp`が変わる */}
+          {showAnswerModeToggle && (
+            <Button
+              variant={session.answerInApp ? "default" : "outline"}
+              size="sm"
+              aria-pressed={session.answerInApp}
+              disabled={dispatch.isSubmitting}
+              onClick={() => void toggleAnswerMode()}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "relative h-[15px] w-[26px] shrink-0 rounded-full transition-colors",
+                  session.answerInApp ? "bg-primary-foreground/60" : "bg-muted-foreground/45",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 size-[11px] rounded-full transition-all",
+                    session.answerInApp ? "left-[13px] bg-primary" : "left-0.5 bg-background",
+                  )}
+                />
+              </span>
+              アプリで答える
+            </Button>
+          )}
         </div>
+      )}
+      {/* いまどちらで答えるのかを本文として出す（#2822）。ホバーではなく本文なのは、他の
+          理由・案内と同じ立場（主な用途が外出先のスマホでホバーが無い）。**ONのときだけ
+          言い切らない**——OFF（既定）でも「アプリには出ない」ことが分からないと、
+          アプリを開いて何も無いときに何が起きているのか読み取れない */}
+      {showAnswerModeToggle && (
+        <p
+          className={cn(
+            "w-full break-words text-xs text-muted-foreground",
+            align === "end" ? "text-right" : "text-left",
+          )}
+        >
+          {session.answerInApp ? (
+            <>
+              質問と計画の承認は
+              <strong className="font-medium text-foreground">
+                Claude Codeアプリ（端末）に出します
+              </strong>
+              。この画面にはパネルを出しません（Issueコメントと確認待ちの印はこれまでどおりです）。
+            </>
+          ) : (
+            <>
+              質問と計画の承認は
+              <strong className="font-medium text-foreground">この画面のパネル</strong>
+              に出ます。Claude Codeアプリで続けるなら「アプリで答える」をONにしてください。
+            </>
+          )}
+        </p>
       )}
       {/* CodexのRemote Control相当（#2537）。**出口は畳まない**——入力待ちのCodexの
           セッションでは、これが画面から答えるための唯一の出口になる */}

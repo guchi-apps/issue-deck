@@ -2764,6 +2764,11 @@ export function POST(request: NextRequest) {
   `components/dashboard/question-answer-panel.tsx`。**画面から届いたラベルはDBの質問と
   突き合わせてから回答に載せる**——`updatedInput`はツールのスキーマ検証を通るため、質問に
   無い値を載せると回答ごと弾かれる。Issueコメントは**答えたときに1件だけ**書く）。
+  **どちらもセッション単位で降ろせる**（#2822。Issue詳細のセッションの行の「アプリで答える」
+  ＝`DispatchSession.answerInApp`。ONのあいだ受け口が待ちを作らないので、フックはすぐ降りて
+  Claude Codeが端末へ出したフォームがClaude Codeアプリにも見える。判定と切り替えは
+  `lib/dispatch/session-answer-mode.ts`、押す側は`POST /api/dispatch/sessions/answer-mode`。
+  **Issueコメント・`00.check-user`・Push通知は変えない**——変わるのは答え先だけ）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

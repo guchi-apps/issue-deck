@@ -357,6 +357,47 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * 質問・計画の返事をClaude Codeアプリ（端末）側で受け取るかを切り替える（#2822）。
+   *
+   * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ。押した場所の下に出す）。
+   * 送信の直後に画面を書き換えず、次の取得で`sessions`の値が変わるのを待つ——切り替えが
+   * 効いたかどうかの正はサーバー側で、押した見た目だけ先に変えると効かなかったときに嘘になる。
+   */
+  const setSessionAnswerMode = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+      tmuxSessionName: string;
+      answerInApp: boolean;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/sessions/answer-mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            host: params.hostName,
+            tmuxSessionName: params.tmuxSessionName,
+            answerInApp: params.answerInApp,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        refresh();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged, refresh],
+  );
+
+  /**
    * 手作業アシスタントの手順をサブPCで代行実行する（#1828）。
    *
    * **送るのは「どの手順か」と「画面に出ていて人が承認したコマンド」だけ。** 実行するのは
@@ -863,6 +904,7 @@ export function useDispatchState(enabled: boolean) {
     isSubmitting,
     enqueue,
     sendSessionControl,
+    setSessionAnswerMode,
     startManualStepSession,
     runManualStep,
     abortManualStep,
