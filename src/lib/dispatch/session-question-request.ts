@@ -30,20 +30,16 @@ import type { SessionQuestionRequest, SessionQuestionRequestStatus } from "@pris
 /**
  * 回答を待つ既定の長さ（秒）。
  *
- * **計画の承認（30分）より短くしてある**（#2189の計画レビューG1・指摘1）。理由は2つ。
- *
- * - **`AskUserQuestion`は常用経路。** `ExitPlanMode`は1セッションに1回の関門なので長く待たせても
- *   実害が小さいが、質問はturnの途中で何度も起きる
- * - **待っている間、端末で答える手段が実質的に無い。** 端末に選択フォームは出ず、`Esc`を押すと
- *   待ちを抜けてフォームへ戻るのではなく**turnごと打ち切られる**（Claude Code 2.1.241で実測。
- *   ツールの結果は「User declined to answer questions」になり、作業の続きは指示し直しになる）。
- *   残る出口は画面の「端末・Remote Controlで答える」だけで、それを押すにはアプリを開く必要がある
- *
- * 短くしても失うのは「気づくのが遅れたときにパネルではなくRemote Controlで答えることになる」
- * だけで、それは#2189より前の状態と同じ。長くすると端末側の作業が壊れる方に倒れる。
+ * **計画の承認（30分）と同じ既定値**（#2850）。以前は#2189の理由（`AskUserQuestion`は
+ * turnの途中で何度も起きる常用経路であること、待っている間は端末で`Esc`を押しても
+ * 待ちを抜けられずturnごと打ち切られること）から30分より短くしていたが、#2822で
+ * Issue詳細のセッション行に「アプリで答える」トグルが追加され、**画面待ちに入るかどうか
+ * 自体を人が明示的に選べる**ようになった。トグルをONにした時点で画面で答えるつもりが
+ * あるので、選んだ以上は計画と同じ長さ待ってよい。トグルがOFFなら待ちは作られず、
+ * 従来どおり端末の選択フォームに任される。
  * ホスト側の`SESSION_QUESTION_WAIT_SECONDS`（`~/.config/issue-deck/notify.env`）で変えられる。
  */
-export const SESSION_QUESTION_WAIT_SECONDS_DEFAULT = 300;
+export const SESSION_QUESTION_WAIT_SECONDS_DEFAULT = 1800;
 
 /** 受け取ってよい待ち時間の範囲。フックが壊れた値を送ってきても、ここで常識的な幅へ丸める */
 export const SESSION_QUESTION_WAIT_SECONDS_MIN = 60;
