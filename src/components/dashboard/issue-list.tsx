@@ -22,6 +22,7 @@ import {
   Star,
 } from "lucide-react";
 
+import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
@@ -34,6 +35,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  codeReviewSummaryKey,
+  useCodeReviewReports,
+} from "@/hooks/use-code-review-reports";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
@@ -71,6 +76,7 @@ import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isApprovalPending } from "@/lib/github/approval-labels";
+import { formatCodeReviewListCount } from "@/lib/github/code-review";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
@@ -625,6 +631,14 @@ export function IssueList({
     return ids;
   }, [executionTargetByIssueId]);
   const runningByIssueId = useIssuesWorkflowRunning(issues, actionsUnexpectedIssueIds);
+  /**
+   * 行に出すレビュー結果（#2855）。**「コードレビュー」ビューを開いている間だけ**引く。
+   *
+   * 結果はレビューIssueのコメントにしか無く、行のバッジのためだけに他のビューでも引くと、
+   * 並んでいるIssueの数だけGitHubを叩くことになる。ここでフックを呼んでいるのは、PC・スマホの
+   * どちらの一覧もこのコンポーネントを通るため（`useIssuesWorkflowRunning`と同じ理由）。
+   */
+  const codeReviewSummaries = useCodeReviewReports(issues, view === "code-review");
   // 押した行を即座にハイライトするための楽観表示（#1597）。選択の正はURLクエリ
   // （`?issue=`）で、その更新はReactのトランジション＝低優先度の更新として入るため、
   // 右カラム（IssueDetail・プロパティパネル）の再描画が終わるまでハイライトが動かない。
@@ -683,6 +697,10 @@ export function IssueList({
       ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
+    // 「コードレビュー」はclose済みも並ぶので、まだ読み終えていない件数を添える（#2855）
+    (view === "code-review"
+      ? formatCodeReviewListCount(issues, listedCount, snoozedTotal)
+      : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 
@@ -811,6 +829,8 @@ export function IssueList({
     const queueWaitReason = queueState
       ? describeDispatchJobWaitReason(queueState.job, dispatch.hosts)
       : null;
+    // 一覧に出すレビュー結果（#2855）。取れていないIssueはundefinedで、行にバッジが出ないだけ
+    const codeReviewSummary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -939,6 +959,9 @@ export function IssueList({
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}
               />
+              {/* レビューの結果（#2855）。**ラベルより前に置く**——この行を開くかどうかは
+                  重い指摘が何件あるかで決めるもので、レビューIssueに付くラベルはそれより後 */}
+              {codeReviewSummary && <CodeReviewResultBadges summary={codeReviewSummary} />}
               {listCardLabels(issue.labels).map((label) => (
                 <span
                   key={label.name}

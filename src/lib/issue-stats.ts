@@ -50,6 +50,41 @@ function filterLatestReleaseIssues(issues: Issue[], referenceIssues: Issue[]): I
   });
 }
 
+/**
+ * 「コードレビュー」ビューに残すclose済みレビューの上限（#2855）。
+ *
+ * このビューは過去のレビュー結果を読み返す場所なのでclose済みも並べる
+ * （`LABEL_FILTER_PRESETS`の`code-review`が`state: "all"`）が、**窓が無いと
+ * 一覧・左メニューの件数・行のバッジのためのコメント取得の3つが同時に上限を失う。**
+ * 過去を含める他のビューはどちらも窓を持っている（「最近追加した」は24時間、
+ * 「直近本番に反映した」は最新リリース）ので、ここにも1つ置く。
+ *
+ * 日数ではなく件数にしてあるのは、レビューを回す間隔がまちまちで、しばらく回して
+ * いない期間に一覧が空になるため。
+ */
+const CODE_REVIEW_HISTORY_LIMIT = 20;
+
+/**
+ * 「コードレビュー」ビューに並べるレビューを、**未完了（open）は全部＋完了した新しい
+ * 20件**に切り詰める（#2855）。
+ *
+ * openを常に残すのは、まだ読み終えていないレビューが件数の上限で画面から消えると、
+ * このビューが「対応するもの」を見る場所として成立しなくなるため。切り詰めたぶんは
+ * 「すべてのIssue」（状態=すべて）とGitHub側からは今までどおり読める。
+ */
+function limitCodeReviewHistory(issues: Issue[]): Issue[] {
+  const closed = issues.filter((issue) => issue.state !== "open");
+  if (closed.length <= CODE_REVIEW_HISTORY_LIMIT) return issues;
+  // 一覧の並べ替え（`sortIssues`）はこの後なので、ここでは自前に新しい順で選ぶ
+  const kept = new Set(
+    [...closed]
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .slice(0, CODE_REVIEW_HISTORY_LIMIT)
+      .map((issue) => issue.id),
+  );
+  return issues.filter((issue) => issue.state === "open" || kept.has(issue.id));
+}
+
 export function filterIssuesByView(
   issues: Issue[],
   view: NavViewId,
@@ -120,6 +155,9 @@ export function filterIssuesByView(
         return true;
       };
       const matched = issues.filter(matchesView);
+      // 過去のレビューは新しい方から一定件数までにする（#2855）。一覧・左メニューの件数・
+      // 行のバッジのためのコメント取得が、同じ1か所で頭打ちになる
+      if (navView.codeReviewOnly) return limitCodeReviewHistory(matched);
       if (!navView.latestReleaseOnly) return matched;
       return filterLatestReleaseIssues(matched, referenceIssues.filter(matchesView));
     }

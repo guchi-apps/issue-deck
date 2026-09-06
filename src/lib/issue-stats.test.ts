@@ -1036,3 +1036,40 @@ describe("time-dependent stats", () => {
     });
   });
 });
+
+describe("filterIssuesByView（コードレビュー・#2855）", () => {
+  function review(id: string, state: "open" | "closed", updatedAt: string): Issue {
+    return makeIssue({
+      id,
+      title: `[レビュー] repo（${updatedAt.slice(0, 10)}）`,
+      state,
+      updatedAt,
+    });
+  }
+
+  it("close済みのレビューも並べる", () => {
+    const issues = [
+      review("a", "open", "2026-09-07T00:00:00.000Z"),
+      review("b", "closed", "2026-09-03T00:00:00.000Z"),
+      makeIssue({ id: "c", title: "ただのIssue" }),
+    ];
+    expect(
+      filterIssuesByView(issues, "code-review", null).map((issue) => issue.id),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("過去のレビューは新しい方から20件までにし、未完了は全部残す", () => {
+    const closed = Array.from({ length: 25 }, (_, index) =>
+      review(`c${index}`, "closed", `2026-08-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`),
+    );
+    const issues = [...closed, review("open-1", "open", "2026-07-01T00:00:00.000Z")];
+
+    const filtered = filterIssuesByView(issues, "code-review", null);
+    expect(filtered).toHaveLength(21);
+    // 未完了は更新が古くても残る
+    expect(filtered.map((issue) => issue.id)).toContain("open-1");
+    // 残るclose済みは新しい方から20件（＝8/6〜8/25。8/1〜8/5は落ちる）
+    expect(filtered.map((issue) => issue.id)).toContain("c24");
+    expect(filtered.map((issue) => issue.id)).not.toContain("c0");
+  });
+});

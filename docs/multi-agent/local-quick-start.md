@@ -1494,6 +1494,21 @@ pnpm db:seed:dev
 無い実行は「人が実行する手順で待っている」と解釈するため。走っている見た目まで作りたいなら
 `DispatchJob`も併せて要る。確かめ終えたら入れた行は消す（開発DBは全worktreeで共通）。
 
+**Issueコメントから組み立てる表示も、シードでは出ない**（#2855）。ダミーリポジトリ
+（`githubRepositoryId: 900000001`）には実インストールが無くGitHubからコメントを取れないため、
+レビュー結果のバッジ（`GET /api/issues/code-review-reports`）のような**コメント由来の表示は
+開発サーバーでは空のまま**になる（取得口自体は200と空配列を返すので、エラーとしては現れない）。
+一覧に並ぶかどうか・件数表記・レイアウトはダミーのIssue行を入れれば確かめられるので、
+**「並び」と「中身」を分けて確かめる**とよい。
+
+- 並び・件数: 開発DBへ該当するタイトルのIssue行を直接入れ、`curl`で取った画面を`grep`する
+  （確かめ終えたら消す。開発DBは全worktreeで共通）
+- 中身: **実データを`gh api`で取って純粋関数へ流す。**
+  `gh api repos/<owner>/<repo>/issues/<番号>/comments --jq '[.[]|{body}]' > /tmp/comments.json`で
+  保存し、一時的なvitestから読み込んで結果をファイルへ書く（テスト中の`console.log`は
+  `vitest run`の出力に出ない。`docs/code-map.md`）。画面を経由せずに、実物の書式で
+  読めているかを確かめられる
+
 **アーティファクト（#2154・#2210）もシードだけでは出ない**（#2210）。`db:seed:dev`は
 `SessionArtifact`の行を作らず、受け口の`POST /api/dispatch/sessions/artifact`は`DISPATCH_SECRET`で
 認証するが、**worktreeの`.env.local`にはこの値が無い**（本体チェックアウトからコピーされない）ので

@@ -273,8 +273,12 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   // 完了の合図はcloseなので、openな質問Issueが全部ここに並ぶ（既定のstate=openのまま）。
   { key: "question", label: "質問", labels: [], questionOnly: true },
   // 「コードレビューを実行」で作られたレビューIssueの置き場（#698）。質問と同じく実装フローに
-  // 乗らず、完了の合図はcloseなので、openなレビューIssueが全部ここに並ぶ。
-  { key: "code-review", label: "コードレビュー", labels: [], codeReviewOnly: true },
+  // 乗らない。
+  //
+  // **状態で絞らない（#2855）。** 完了の合図はcloseなので、openだけに絞ると読み終えた
+  // レビューが画面から消える。ここは「いま対応するもの」ではなく**過去のレビュー結果を
+  // 読み返す場所**なので、close済みも新しい順に並べる（「直近本番に反映した」と同じ扱い）。
+  { key: "code-review", label: "コードレビュー", labels: [], codeReviewOnly: true, state: "all" },
   {
     key: "not-started",
     label: "未着手",

@@ -10,10 +10,12 @@ import {
   codeReviewRequestCommentBody,
   countCodeReviewFindings,
   findLatestCodeReviewReport,
+  formatCodeReviewListCount,
   isCodeReviewIssue,
   isCodeReviewPending,
   isCodeReviewReportComment,
   parseCodeReviewReport,
+  summarizeCodeReviewComments,
 } from "@/lib/github/code-review";
 
 const REPORT = `${CODE_REVIEW_REPORT_MARKER}
@@ -201,5 +203,65 @@ describe("buildCodeReviewFindingIssueDraft", () => {
     expect(draft.body).toContain("- 起点のレビュー: #2163");
     // Actionsの`@claude`トリガーを誤爆させない
     expect(draft.body.startsWith("@claude")).toBe(false);
+  });
+});
+
+describe("summarizeCodeReviewComments", () => {
+  it("結果が返っていれば重要度ごとの件数を返す", () => {
+    const summary = summarizeCodeReviewComments([
+      { body: codeReviewRequestCommentBody("") },
+      { body: REPORT },
+    ]);
+    expect(summary.state).toBe("reported");
+    expect(summary.counts).toEqual({ high: 1, medium: 0, low: 1 });
+    expect(summary.findingCount).toBe(2);
+  });
+
+  it("指摘が1件も無い結果は、件数0のreportedとして返す（＝一覧では「指摘なし」）", () => {
+    const summary = summarizeCodeReviewComments([
+      { body: codeReviewRequestCommentBody("") },
+      { body: `${CODE_REVIEW_REPORT_MARKER}\n読んだコード: x\n\n直すべき点はありません。` },
+    ]);
+    expect(summary.state).toBe("reported");
+    expect(summary.findingCount).toBe(0);
+  });
+
+  it("依頼だけで結果が返っていなければpending", () => {
+    const summary = summarizeCodeReviewComments([{ body: codeReviewRequestCommentBody("観点") }]);
+    expect(summary.state).toBe("pending");
+    expect(summary.findingCount).toBe(0);
+  });
+
+  it("依頼も結果も無ければmissing", () => {
+    expect(summarizeCodeReviewComments([]).state).toBe("missing");
+    expect(summarizeCodeReviewComments([{ body: "ただのコメント" }]).state).toBe("missing");
+  });
+
+  it("何度もレビューした場合はいちばん新しい結果を見る（詳細パネルと同じ）", () => {
+    const older = `${CODE_REVIEW_REPORT_MARKER}\n\n### [重大] 古い指摘\n\n本文`;
+    const summary = summarizeCodeReviewComments([{ body: older }, { body: REPORT }]);
+    expect(summary.counts).toEqual({ high: 1, medium: 0, low: 1 });
+  });
+});
+
+describe("formatCodeReviewListCount", () => {
+  const open = { state: "open" as const };
+  const closed = { state: "closed" as const };
+
+  it("close済みが混ざっていれば未完了の件数を添える", () => {
+    expect(formatCodeReviewListCount([open, closed, closed], 3)).toBe("3件・未完了1件");
+  });
+
+  it("全部openなら添えるものが無いのでnull（呼び出し側が「N件」に落とす）", () => {
+    expect(formatCodeReviewListCount([open, open], 2)).toBeNull();
+  });
+
+  it("全部close済みでも未完了は出さない", () => {
+    expect(formatCodeReviewListCount([closed, closed], 2)).toBeNull();
+  });
+
+  it("保留中は他のビューと同じ形で添える", () => {
+    expect(formatCodeReviewListCount([open, closed], 2, 1)).toBe("2件・未完了1件・保留中1件");
+    expect(formatCodeReviewListCount([open], 1, 2)).toBe("1件・保留中2件");
   });
 });
