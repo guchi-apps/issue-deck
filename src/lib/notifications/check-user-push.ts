@@ -83,8 +83,8 @@ export type CheckUserPushDecision = "send" | "wait" | "skip";
  * 待ち時間の意味は「理由ラベルが揃うのを待つ」「早すぎる`00.check-user`が自動で消えるのを
  * 待つ」の2つだが、待ちがあるならどちらも当てはまらない——理由は既に確定していて
  * （`01.check-plan`・`01.check-input`）、その待ちは人が答えるまで消えない。
- * **質問の待ち時間は既定5分**（`SESSION_QUESTION_WAIT_SECONDS_DEFAULT`）なので、3分待って
- * から送ると残り2分で届くか、期限切れに間に合わないことになる。
+ * **質問の待ち時間は既定30分**（`SESSION_QUESTION_WAIT_SECONDS_DEFAULT`。#2850で計画と
+ * 統一した）。3分待ってから送っても届くのに十分な余裕が残る。
  */
 export function decideCheckUserPush(input: {
   labels: readonly { name: string }[];

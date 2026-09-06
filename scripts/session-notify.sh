@@ -154,19 +154,19 @@ PLAN_POLL_INTERVAL_SECONDS="${SESSION_PLAN_POLL_INTERVAL_SECONDS:-3}"
 PLAN_POLL_GRACE_SECONDS="${SESSION_PLAN_POLL_GRACE_SECONDS:-60}"
 [[ "$PLAN_POLL_GRACE_SECONDS" =~ ^[0-9]+$ ]] || PLAN_POLL_GRACE_SECONDS=60
 
-# `AskUserQuestion`で聞いたあと、issue-deckの画面からの回答を何秒まで待つか（#2189）。
+# `AskUserQuestion`で聞いたあと、issue-deckの画面からの回答を何秒まで待つか（#2189・#2850）。
 #
-# **計画の待ち時間（既定30分）と別に持ち、既定を短くする**（計画レビューG1・指摘1）。
-# `ExitPlanMode`は1セッションに1回の関門だが、質問はturnの途中で何度も起きる常用経路で、
-# **待っている間は端末で答える手段が実質的に無い**——端末に選択フォームは出ず、`Esc`は
-# 待ちを抜けるのではなく**turnごと打ち切る**（実測。結果は「User declined to answer
-# questions」になる）。短くして失うのは「気づくのが遅れたときにRemote Controlで答えることに
-# なる」だけで、それは#2189より前の状態と同じ。
+# **計画の待ち時間と同じ既定値（30分）**。以前は「`ExitPlanMode`は1セッションに1回の関門だが
+# 質問はturnの途中で何度も起きる常用経路」「待っている間は端末で答える手段が実質的に無い
+# （`Esc`は待ちを抜けるのではなくturnごと打ち切る。結果は「User declined to answer
+# questions」になる）」という理由で計画より短くしていたが（計画レビューG1・指摘1）、#2822で
+# Issue詳細のセッション行に「アプリで答える」トグルが追加され、画面待ちに入るかどうか自体を
+# 人が選べるようになった。選んだ以上は計画と同じ長さ待ってよい。
 #
 # **間隔と猶予は計画と共有する**——どちらも「issue-deckへ何秒おきに引き、届かない状態が
 # 何秒続いたら降りるか」という同じ性質の値で、2つに分けても片方だけ調整する理由が無い。
-QUESTION_WAIT_SECONDS="${SESSION_QUESTION_WAIT_SECONDS:-300}"
-[[ "$QUESTION_WAIT_SECONDS" =~ ^[0-9]+$ ]] || QUESTION_WAIT_SECONDS=300
+QUESTION_WAIT_SECONDS="${SESSION_QUESTION_WAIT_SECONDS:-1800}"
+[[ "$QUESTION_WAIT_SECONDS" =~ ^[0-9]+$ ]] || QUESTION_WAIT_SECONDS=1800
 export NOTIFY_QUESTION_WAIT_SECONDS="$QUESTION_WAIT_SECONDS"
 
 # セッションの状態ファイル（#1256）。読み書きの作法は回収スクリプトと共有する。
