@@ -57,6 +57,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
+  - **テストの中の`console.log`は`vitest run`の出力に出ない。** 実データを流して読みたい
+    ときは`node:fs`の`appendFileSync`でファイルへ書き、後から`cat`する（`--silent=false`でも
+    出ず、`--reporter=basic`はこのバージョンでは解決できない）。
 - **画面が持つコメント（`IssueComment`）に絶対時刻は無い**（#2742）。`GET /api/issues/comments`が
   返すのは`createdAtLabel`（`formatRelativeDate`で整形済みの「3分前」）だけで、ISO文字列は
   `issue-mapper.ts`の時点で捨てられている。**他のデータとの前後比較はできない**ので、
