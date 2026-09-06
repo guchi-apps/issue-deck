@@ -31,6 +31,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,

@@ -138,8 +138,15 @@ import { checkUserTargetProps } from "@/lib/check-user-focus";
 import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
+import { findManualStepForQuestion } from "@/lib/manual-step-question";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  resolveIssuePullRequestProgress,
+  toIssuePullRequestProgressSource,
+} from "@/lib/issue-pull-request-progress";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -351,6 +358,15 @@ export function MobileIssueDetail({
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
   const questionPremise = questionRequest ? findQuestionPremise(comments) : null;
+  // 質問が指している手作業の手順（#2820）。代行できない手順で「実施されましたか？」と
+  // 聞かれたとき、答えるのに必要な「何をどこで実行するのか」は本文の中にしか無かった
+  const questionManualStep = questionRequest
+    ? findManualStepForQuestion({
+        labels: issue.labels,
+        body: issue.body,
+        questions: questionRequest.questions,
+      })
+    : null;
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -421,8 +437,14 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
     pullRequestLinks,
-    mergeApprovalPending,
+    // PCの詳細と同じ条件（#2816）。PRを待っている段のあいだは取り直しを続け、CIと
+    // Claudeのレビューの進み具合が開いた時点で固まらないようにする
+    mergeApprovalPending || isPullRequestWaitingStatus(resolveProgressStatus(issue)),
   );
+  // 「developへマージ」段の内訳（#2816）。PCの詳細と同じく、取得済みの対応PRから導くだけ
+  const pullRequestProgress = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   const {
     mergePullRequest,
     closePullRequest,
@@ -958,6 +980,7 @@ export function MobileIssueDetail({
           qaAnswerPending={qaAnswerPending}
           checkUserGuidance={checkUserGuidance}
           planningSkipped={planningSkipped}
+          pullRequestProgress={pullRequestProgress}
         />
 
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で計画パネルの上に置く */}
@@ -970,6 +993,7 @@ export function MobileIssueDetail({
               session={issueSession}
               dispatch={dispatch}
               premise={questionPremise}
+              manualStep={questionManualStep}
               onCheckUserResolved={handleCheckUserResolved}
             />
           </div>

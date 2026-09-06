@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Hourglass, MessageCircleQuestion, Minus } from "lucide-react";
+import { Check, CircleAlert, Hourglass, Loader2, MessageCircleQuestion, Minus } from "lucide-react";
 
 import {
   describeIssueExecutionTarget,
@@ -19,6 +19,11 @@ import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  type IssuePullRequestProgress,
+  type IssuePullRequestStepState,
+} from "@/lib/issue-pull-request-progress";
 import { cn } from "@/lib/utils";
 import { isWorkflowBadgeSpinning } from "@/lib/workflow-badge-activity";
 import type { IssueLabel } from "@/types/issue";
@@ -64,6 +69,13 @@ type WorkflowStatusStepsProps = ProgressProps & {
    * 「スキップ」と言い切ると、計画を通したIssueにまで出てしまう。
    */
   planningSkipped?: boolean;
+  /**
+   * 「developへマージ」段の内訳（#2816。`resolveIssuePullRequestProgress`の結果）。無ければnull。
+   *
+   * **描くのはPRを待っている段（`isPullRequestWaitingStatus`）にいるときだけ。** 判定材料が
+   * 対応PRなので、PRがまだ無い段・マージが済んだ段では意味を持たない。
+   */
+  pullRequestProgress?: IssuePullRequestProgress | null;
 };
 
 type WorkflowStepBadgeProps = ProgressProps & {
@@ -117,6 +129,14 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * 上限にもメモリにも掛かっていない普通の待ちではnull。
    */
   queueWaitReason?: string | null;
+  /**
+   * 「developへマージ」段の内訳（#2816）。一覧の行では**添える字の1語だけ**を使う。
+   *
+   * 「developへマージ」はPRを作った瞬間からマージされるまで表示が変わらず、CIを待って
+   * いるのかClaudeのレビューを待っているのかが一覧から読めなかった。4段のチップとしての
+   * 内訳はIssue詳細の`WorkflowStatusSteps`が出す。
+   */
+  pullRequestProgress?: IssuePullRequestProgress | null;
 };
 
 /**
@@ -247,6 +267,7 @@ export function WorkflowStepBadge({
   checkUserRunning = false,
   queue = null,
   queueWaitReason = null,
+  pullRequestProgress = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -257,6 +278,9 @@ export function WorkflowStepBadge({
   const reason = checkUserReason(labels);
   const showQaAnswerPending = qaAnswerPending && !approvalPending;
   const step = WORKFLOW_STEPS[currentIndex];
+  // 内訳を読むのはPRを待っている段だけ（#2816）。段が進んだ後も渡ってくることがあるので、
+  // 呼び出し側の絞り込みには頼らずここでも確かめる
+  const prProgress = isPullRequestWaitingStatus(step.key) ? pullRequestProgress : null;
   const actionsRunning = running?.isRunning ?? false;
   // 外周を回すかどうか（#1439）。Actionsの実行中に加えて、サブPCのセッションが生きて動いている
   // 間も回す。人待ち（承認待ち・入力待ち）と、終わった・報告が途絶えたセッションでは回さない
@@ -270,7 +294,11 @@ export function WorkflowStepBadge({
     // でも待ち時間は数十秒〜数分あり、回さないと一覧では止まって見える
     qaAnswerPending: showQaAnswerPending,
     now,
-  });
+  }) ||
+    // PRのCI・Claudeのレビューが動いている間も掃く（#2816）。ローカルセッションはPRを作った
+    // 時点で終わるため、ここを足さないと**いちばん待つ数分〜十数分だけバーが止まって見える**。
+    // 承認待ち（人待ち）のときは足さない——`isWorkflowBadgeSpinning`が人待ちを回さないのと同じ線
+    (prProgress?.tone === "running" && !approvalPending);
   // セッションの様子の短い表現（#1264）。入力待ち・終了・異常終了・活動中（経過時間つき）で出す
   const sessionLabel = session
     ? shortIssueSessionLabel(session, now != null ? new Date(now) : null)
@@ -311,16 +339,24 @@ export function WorkflowStepBadge({
   // セッションの様子（`displaySessionLabel`。活動中の「調査中(2分)」、待ちの「入力待ち」等）が
   // 分かっているときは、進捗Status（「計画検討中」）と実行先（「サブPC」）を省いてそれだけを
   // 見せる（#2782）。両方を並べると`max-w-[7rem]`（326行目）の箱に収まりきらず、見たい
-  // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す
-  const stepText =
-    displaySessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
+  // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す。
+  // **PRの内訳（「Claudeがレビュー中」）はそれらより優先する**（#2816）。この段で待っている
+  // のはPR側の処理で、そこでのローカルセッションは既に役目を終えている
+  const stepText = prProgress
+    ? prProgress.label
+    : displaySessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
       ? displaySessionLabel
       : `${step.label}${suffix ? `（${suffix}）` : ""}`;
+  // 止まっているPR（CI失敗・レビュー失敗・コンフリクト）は赤に倒す（#2816）。承認待ち・
+  // 回答待ちが立っているときはそちらを優先する——押す先があるのはあちらで、こちらは状態の報告
+  const prAttention = prProgress?.tone === "attention";
   const accentColorClass = approvalPending
     ? "text-amber-500"
     : showQaAnswerPending
       ? "text-blue-500"
-      : "text-primary";
+      : prAttention
+        ? "text-destructive"
+        : "text-primary";
 
   return (
     <span
@@ -329,11 +365,13 @@ export function WorkflowStepBadge({
           ? `（ユーザーの確認待ち${reason ? `・${CHECK_USER_REASON_TEXT[reason]}` : ""}）`
           : showQaAnswerPending
             ? "（Claudeの回答待ち）"
-            : awaitingDispatch
-              ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
-              : localSuffix
-                ? `（${localSuffix}）`
-                : ""
+            : prProgress
+              ? `（PR #${prProgress.pullRequestNumber}・${prProgress.label}）`
+              : awaitingDispatch
+                ? "（起動待ち。Statusは進んでいますがGitHub Actionsの実行がまだ紐づいていません）"
+                : localSuffix
+                  ? `（${localSuffix}）`
+                  : ""
       }${queueWaitReason ? ` ${queueWaitReason}` : ""}`}
       // 行の右端が溢れるより先に、添える字（「実装中（サブPC）」）が切り詰められるようにする
       // （#2516）。バーは円より22px幅を取るため、一覧カラムを最小幅（280px）まで詰めた
@@ -343,7 +381,9 @@ export function WorkflowStepBadge({
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{stepText}</span>
       {/* 円だった頃は中央に重ねていたアイコンを、バーの左隣へ出す（#2516）。5px高のバーの
           中には収まらない。**色はバーと同じ系統**にして、同じことを言っていると分かるようにする */}
-      {approvalPending && (
+      {/* 止まっているPRにも同じアイコンを添える（#2816）。承認待ちと同時に立つことがあるので
+          どちらか一方だけを描く */}
+      {(approvalPending || prAttention) && (
         <CircleAlert className={cn("size-3 shrink-0", accentColorClass)} aria-hidden="true" />
       )}
       {showQaAnswerPending && (
@@ -360,7 +400,7 @@ export function WorkflowStepBadge({
         filled={currentIndex + 1}
         colorClass={accentColorClass}
         live={isSpinning}
-        emphasizeTrack={approvalPending || showQaAnswerPending}
+        emphasizeTrack={approvalPending || showQaAnswerPending || prAttention}
       />
     </span>
   );
@@ -416,6 +456,80 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
   );
 }
 
+/** 内訳の段の見た目（#2816）。`pending`はまだ来ていない段なので、輪郭だけにして目を引かない */
+const PR_STEP_CLASS: Record<IssuePullRequestStepState, string> = {
+  done: "border-foreground/25 text-foreground",
+  current: "border-primary bg-primary/10 text-primary font-semibold",
+  failed: "border-destructive bg-destructive/10 text-destructive font-semibold",
+  pending: "border-border text-muted-foreground",
+};
+
+/**
+ * 「developへマージ」段の内訳（#2816）。**実装完了 → CI → Claudeのレビュー → マージ**を
+ * 1行のチップとして並べ、その上に「いま何を待っているか」を1語で出す。
+ *
+ * ここを足すまで、Issue詳細でCI・レビューの進み具合を見るには対応PRのセクション（既定で
+ * 畳んである）を開くしかなかった。**セクション側は消さない**——あちらはPRごとの内訳と
+ * マージボタンを持っており、こちらはIssueとして何を待っているかの要約という別の役
+ * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+ */
+function PullRequestProgressSteps({ progress }: { progress: IssuePullRequestProgress }) {
+  const running = progress.tone === "running";
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t pt-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span className="font-medium text-muted-foreground tabular-nums">
+          PR #{progress.pullRequestNumber}
+        </span>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 font-semibold",
+            progress.tone === "attention"
+              ? "text-destructive"
+              : progress.tone === "waiting"
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-foreground",
+          )}
+        >
+          {/* 待っているのが処理なら回す。人待ち（マージ待ち）は回さない——一覧の進捗バーと
+              同じ使い分けで、動きが「放っておけば進む」ことの合図になっている */}
+          {running && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
+          {progress.label}
+        </span>
+      </div>
+      <ul className="flex flex-wrap gap-1.5" aria-label="developへマージの内訳">
+        {progress.steps.map((step) => {
+          // マージの段だけは、現在地でも動いているのは機械ではなく順番待ち（#2816）。
+          // 回すと「あと少しで終わる」に読めるので、砂時計＋人待ちの琥珀にする
+          const waiting = step.key === "merge" && step.state === "current";
+          return (
+            <li
+              key={step.key}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+                waiting
+                  ? "border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400"
+                  : PR_STEP_CLASS[step.state],
+              )}
+            >
+              {step.state === "done" && <Check className="size-3" aria-hidden="true" />}
+              {step.state === "current" &&
+                (waiting ? (
+                  <Hourglass className="size-3" aria-hidden="true" />
+                ) : (
+                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+                ))}
+              {step.state === "failed" && <CircleAlert className="size-3" aria-hidden="true" />}
+              {step.label}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Planning〜Doneの実装状況（Project Status）をstep形式で可視化する。Statusを持たないissueでは何も表示しない。
  * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
@@ -435,6 +549,7 @@ export function WorkflowStatusSteps({
   showApprovalBadge = true,
   showExecutionTarget = true,
   planningSkipped = false,
+  pullRequestProgress = null,
 }: WorkflowStatusStepsProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -449,6 +564,8 @@ export function WorkflowStatusSteps({
   // バッジを出すかどうか（#2057）。状態そのもの（`approvalPending`）は色の判定に使い続ける
   const showBadge = approvalPending && showApprovalBadge;
   const currentStep = WORKFLOW_STEPS[currentIndex];
+  // 内訳を描くのはPRを待っている段だけ（#2816）。`WorkflowStepBadge`と同じ確かめ方にする
+  const prProgress = isPullRequestWaitingStatus(currentStep.key) ? pullRequestProgress : null;
   // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
   // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
   const targetLabel =
@@ -572,6 +689,10 @@ export function WorkflowStatusSteps({
           </span>
         )}
       </div>
+      {/* 「developへマージ」の中で何が終わって何を待っているか（#2816）。PC・スマホの
+          どちらでも同じものを出す——スマホは段のラベルすら出ないので、内訳が無いと
+          この画面から読めるのは「3/6」だけになる */}
+      {prProgress && <PullRequestProgressSteps progress={prProgress} />}
     </div>
   );
 }

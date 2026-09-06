@@ -101,8 +101,20 @@ export function ManualStepSessionPanel({
       {aliveSession ? (
         <>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            この手作業のセッションが動いています。手順の結果は「質問の回答を待っています」から答え、
-            相談は「Claude Codeアプリで開く」からそのまま送れます。
+            {aliveSession.answerInApp ? (
+              <>
+                この手作業のセッションが動いています。
+                <strong className="font-medium text-foreground">
+                  手順の結果と質問はClaude Codeアプリで受け取ります
+                </strong>
+                。この画面で答えたいときは「アプリで答える」をOFFに戻してください。
+              </>
+            ) : (
+              <>
+                この手作業のセッションが動いています。手順の結果は「質問の回答を待っています」から答え、
+                相談は「Claude Codeアプリで開く」からそのまま送れます。
+              </>
+            )}
             {!showSessionStatus && "操作は上のセッションの行にあります。"}
           </p>
           {showSessionStatus && (

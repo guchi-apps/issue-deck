@@ -104,6 +104,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
@@ -261,6 +262,7 @@ describe("DispatchHostPanel", () => {
           makeHost({
             checkout: {
               commit: "fbb809d",
+              startedCommit: "fbb809d",
               branch: "develop",
               committedAt: NOW.toISOString(),
               behindCount: 97,
@@ -422,6 +424,7 @@ describe("DispatchHostPanel", () => {
             makeHost({
               checkout: {
                 commit: "fbb809d",
+                startedCommit: "fbb809d",
                 branch: "develop",
                 committedAt: NOW.toISOString(),
                 behindCount: 0,
@@ -442,6 +445,7 @@ describe("DispatchHostPanel", () => {
             makeHost({
               checkout: {
                 commit: "fbb809d",
+                startedCommit: "fbb809d",
                 branch: "develop",
                 committedAt: NOW.toISOString(),
                 behindCount: 97,
@@ -486,6 +490,7 @@ describe("DispatchHostPanel", () => {
               preview: null,
               checkout: {
                 commit: "7b71764",
+                startedCommit: "7b71764",
                 branch: "develop",
                 committedAt: NOW.toISOString(),
                 behindCount: 31,
@@ -569,6 +574,7 @@ describe("DispatchHostPanel", () => {
       preview: null,
       checkout: {
         commit: "7b71764",
+        startedCommit: "7b71764",
         branch: "develop",
         committedAt: NOW.toISOString(),
         behindCount: 31,
@@ -665,6 +671,7 @@ describe("DispatchHostPanel", () => {
               preview: null,
               checkout: {
                 commit: "fbb809d",
+                startedCommit: "fbb809d",
                 branch: "develop",
                 committedAt: NOW.toISOString(),
                 behindCount: 0,
@@ -700,6 +707,7 @@ describe("DispatchHostPanel", () => {
               preview: null,
               checkout: {
                 commit: "fbb809d",
+                startedCommit: "fbb809d",
                 branch: "develop",
                 committedAt: NOW.toISOString(),
                 behindCount: 0,
@@ -713,6 +721,42 @@ describe("DispatchHostPanel", () => {
       );
 
       expect(screen.queryByRole("button", { name: "更新して再起動" })).toBeNull();
+    });
+
+    /**
+     * #2815。`git pull`だけではプロセスの中身が入れ替わらないので、遅れが0に戻っても古い
+     * コードが走り続ける。`SELF_UPDATE`は追い付いていても`exec`で入れ替わるため、
+     * この状態もこのボタン1つで解ける。
+     */
+    it("遅れていなくても、pollerが古いコードのまま走っていれば出す", () => {
+      render(
+        <DispatchHostPanel
+          hosts={[
+            makeHost({
+              selfUpdateCapable: true,
+              previewCapable: null,
+              rebootCapable: null,
+              reboot: null,
+              previewRepositories: null,
+              preview: null,
+              checkout: {
+                commit: "6f54ae5",
+                startedCommit: "6e4a38e",
+                branch: "develop",
+                committedAt: NOW.toISOString(),
+                behindCount: 0,
+                fetchedAt: NOW.toISOString(),
+              },
+            }),
+          ]}
+          sessions={[]}
+          onRequestSelfUpdate={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("スクリプト develop 6f54ae5")).toBeTruthy();
+      expect(screen.getByText("再起動待ち・起動時 6e4a38e で動作中・たった今")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "更新して再起動" })).toBeTruthy();
     });
 
     // 申告していないpollerへ配っても、未知の種別として失敗するだけ

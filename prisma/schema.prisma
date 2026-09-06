@@ -974,6 +974,11 @@ model DispatchHost {
   // `checkoutBehind`だけは別に`null`になりうる（fetchできず、遅れを数えられなかった場合）。
   // 数えた遅れがいつ時点のものかは`checkoutFetchedAt`（最後にoriginを見た時刻）で分かる
   checkoutCommit             String?
+  // pollerが**起動した時点**でチェックアウトが指していたコミット（#2815）。**いま走っている
+  // コードはこの版**で、`checkoutCommit`（毎巡取り直すHEAD）とは食い違いうる。bashは実行中の
+  // スクリプトのファイルを開いたまま持つため、`git pull`だけではプロセスの中身が
+  // 入れ替わらない。**`null`は「申告していない」**（#2815より前のpoller）
+  checkoutStartedCommit      String?
   checkoutBranch             String?
   checkoutCommittedAt        DateTime?
   checkoutBehind             Int?
@@ -1053,6 +1058,19 @@ model DispatchSession {
   // tailscale serveでtailnetへ出した開発サーバーのURL（#1265）。スマホから画面を見る唯一の
   // 出口なので画面へ出す。`23.preview-required`が付いたセッションでだけ埋まる
   previewUrl       String?                  @db.Text
+
+  // 質問・計画の返事をClaude Codeアプリ（端末）側で受け取るか（#2822）。**既定はfalse**で、
+  // 従来どおりissue-deckの画面（質問パネル・計画パネル）が受け取る。
+  //
+  // trueのあいだ、`/sessions/question`・`/sessions/plan`は**待ちを作らない**。フックは何も
+  // 出力せずに終えるため、Claude Codeが端末へ選択フォーム・承認プロンプトを出し、それが
+  // Remote Control（Claude Codeアプリ）にも見える。**Issueコメント・`00.check-user`・Push通知は
+  // 変えない**——記録と気付ける経路まで一緒に消すと、答え先が変わっただけのはずが
+  // 「何も起きていない」ように見える。
+  //
+  // **セッション1本ぶんの設定。** 同じ名前で立ち上がり直した行では捨てる（`isRevivedSession`）。
+  // 全体設定にしないのは、別のIssueをスマホから答える経路まで一緒に切ってしまうため。
+  answerInApp      Boolean                  @default(false)
 
   // このセッションを自動で畳む予定（#1817）。**サブPCの`scripts/reap-sessions.sh`が
   // 「畳む条件はすべて揃っていて、あとは猶予が経つのを待っているだけ」と判定したときだけ埋まる。**

@@ -571,6 +571,29 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     既定384px・最小280px（`issue-deck-shell.tsx`の`issueListWidth`）で、iPhone 15の393pxより
     狭い。iPadは768pxを超えるのでスマホ用画面へ切り替わらず、同じ384pxのカラムが出る。
     **行に何かを足すときはスマホ幅ではなく280pxで確かめる。**
+- **「developへマージ」の中の進み具合は`lib/issue-pull-request-progress.ts`が1か所で決める**
+  （#2816）。進捗Statusの`Develop PR`は、PRを作った瞬間からマージされるまで表示が変わらず、
+  CIを待っているのかClaudeのレビューを待っているのかが読めなかった。導出は
+  [`issue-pull-request-progress.ts`](../src/lib/issue-pull-request-progress.ts)に置き、
+  Issue一覧の行（添える字）とIssue詳細のステータスカード（**実装完了 → CI → Claudeの
+  レビュー → マージ**の4チップ）が同じ結果を読む。
+  - **材料は既に取っているものだけ**（`ciState`・`mergeJudgement`・`aiReview`）。PR一覧
+    （`PullRequestSummary`）はそのまま材料の形をしていて、変換が要るのは`PullRequestCiStatus`を
+    持つIssue側だけ（`toIssuePullRequestProgressSource`）。**GitHub APIは1回も増えない**
+  - **文言は増やさない。** 「Claudeがレビュー中」「CI通過」はPR画面の`MERGE_JUDGEMENT_STEP_LABEL`・
+    `AI_REVIEW_SETTLED_LABEL`と同じ言い方に揃える。同じ状態が画面ごとに違う名前で出ると、
+    どちらが新しいのかを読む側が判断できない（#2150で一度そうなっている）
+  - **待っているものの優先順は「止まっている > 動いている > 人待ち」。** コンフリクト・CI失敗・
+    レビュー失敗を先に出さないと、放っておけば進むもので隠れる。動いているもののうち判定
+    （`mergeJudgement`）をCIより先に見るのは`JUDGEMENT_STEP_ORDER`（#2066）と同じ理由で、
+    実行順で選ぶとレビュー中もずっと「CI実行中」になる
+  - **出すのは`isPullRequestWaitingStatus`が真の段（`Develop PR`・`Release`）だけ。** PRがまだ
+    無い段・マージが済んだ段では待っているものが無く、空の内訳は「まだ来ていない」と読める
+  - **一覧のためにPR一覧を取り直す間隔は1分**（`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`）で、
+    **Issueペインを開いている AND 「PR待ち」の行がある**ときだけ回す。`useAutoRefresh`が
+    止めるのは裏に回ったタブだけで、行の有無だけを条件にするとAI使用量や設定を開いている
+    間も回り続ける。PR画面の10秒より粗いのは、PRを見に来ていない人の画面で回るものだから
+    （止まったIssueは何時間でも`Develop PR`に居座る）
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・
@@ -2741,6 +2764,27 @@ export function POST(request: NextRequest) {
   `components/dashboard/question-answer-panel.tsx`。**画面から届いたラベルはDBの質問と
   突き合わせてから回答に載せる**——`updatedInput`はツールのスキーマ検証を通るため、質問に
   無い値を載せると回答ごと弾かれる。Issueコメントは**答えたときに1件だけ**書く）。
+  **どちらもセッション単位で降ろせる**（#2822。Issue詳細のセッションの行の「アプリで答える」
+  ＝`DispatchSession.answerInApp`。ONのあいだ受け口が待ちを作らないので、フックはすぐ降りて
+  Claude Codeが端末へ出したフォームがClaude Codeアプリにも見える。判定と切り替えは
+  `lib/dispatch/session-answer-mode.ts`、押す側は`POST /api/dispatch/sessions/answer-mode`。
+  **Issueコメント・`00.check-user`・Push通知は変えない**——変わるのは答え先だけ。
+  **既定へ戻すのは`POST /api/dispatch/sessions/started`**（pollerの`isRevivedSession`は次の巡回
+  まで動かず、`ALIVE`のまま立ち上がり直した行では動かない）。**Codexのセッションでは切り替え
+  られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
+  Controlが無いため答える出口が消える）。
+  **`question.question`はMarkdownとして描画しないプレーンテキスト**（`QuestionBlock`の
+  `<p>`）。`AskUserQuestion`の質問文にコマンド確認のため```bash```フェンスを埋め込むと、
+  バッククォートが文字どおり表示され複数コマンドが1行に潰れていた（#2818）。埋め込まれた
+  フェンスだけは`lib/session-question-commands.ts`の`extractQuestionCommandBlocks`が
+  取り出し、`&&`・改行の分割（`lib/shell-command-lines.ts`）を経て独立したコマンド一覧
+  として描く——地の文そのものをMarkdown化したわけではないので、太字・リンク等の他の記法は
+  従来どおり素通りする。
+  **手作業Issue（`71.manual-step`）では、質問が指している手順の中身も同じパネルに出す**
+  （#2820。当て方は`lib/manual-step-question.ts`＝引用された手順名で本文の手順を引き、
+  質問文の`手順N`は食い違いを弾くのにだけ使う。描くのは手順のMarkdown・実行する端末・
+  `manual-step-where-to-run.tsx`の「手元で実行する」で、**当たらなければカードごと出さない**。
+  代行できない理由は`describeManualStepExecutionRejection`から取り、アシスタントと同じ文にする）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には
@@ -3360,6 +3404,13 @@ pnpm test:unit   # vitestのみ
 （**失敗するのは足したテストではなく、既存のテスト全部**）。画面へ取得フックを足すときは、
 そのフックごと`vi.mock`で差し込む。URLで振り分ける形にすると、`fetchMock.mock.calls[0]`を
 見ている既存の検証が呼び出し順のずれで壊れる。
+
+**「今日を含むN日」で切る集計のテストは、時計を止めないとある日を境に落ちる**（#2816）。
+`api/session-usage`のテストは固定日時のフィクスチャ（2026-08-30）を`days=7`の窓へ入れる
+前提で書かれていたため、**日本時間2026-09-06 00:00を回った瞬間**にコード変更ゼロで3件とも
+落ちた（`sessionUsagePeriodStartMs`はJSTの日境で切る）。**発覚するのは無関係のPRのCIで**、
+直すまでどのPRも自動マージまで進めない。期間で切る集計を検証するテストは
+`vi.useFakeTimers()` + `vi.setSystemTime(...)`で時刻を固定し、`afterEach`で戻す。
 
 **`@testing-library/jest-dom`のマッチャは使えない**（#838）。パッケージは`devDependencies`に
 入っているが、読み込むsetupファイルが無いため`toBeInTheDocument`・`toBeDisabled`は

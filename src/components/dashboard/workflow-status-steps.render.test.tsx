@@ -10,6 +10,7 @@ import {
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { IssueQueueState } from "@/lib/dispatch/issue-queue-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type { IssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
 
 /**
  * バッジが動く（現在の段のマスを光が掃く。#2516）条件の配線を確認する（#1439）。
@@ -35,6 +36,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
@@ -385,5 +387,100 @@ describe("WorkflowStepBadgeの順番待ち", () => {
     );
     expect(container.textContent).toContain("起動中");
     expect(container.textContent).not.toContain("終了");
+  });
+});
+
+/**
+ * 「developへマージ」段の内訳（#2816）。導出そのもののケースは
+ * `src/lib/issue-pull-request-progress.test.ts`にあり、ここでは**画面へ届いているか**だけを見る。
+ */
+function progress(
+  overrides: Partial<IssuePullRequestProgress> = {},
+): IssuePullRequestProgress {
+  return {
+    pullRequestNumber: 2822,
+    label: "Claudeがレビュー中",
+    tone: "running",
+    steps: [
+      { key: "opened", label: "実装完了", state: "done" },
+      { key: "ci", label: "CI通過", state: "done" },
+      { key: "ai-review", label: "Claudeがレビュー中", state: "current" },
+      { key: "merge", label: "マージ", state: "pending" },
+    ],
+    ...overrides,
+  };
+}
+
+describe("PRを待っている段の内訳（#2816）", () => {
+  it("一覧の行は、段の名前ではなく待っているものを添える", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Develop PR"
+        session={session({ state: "EXITED" })}
+        pullRequestProgress={progress()}
+        now={NOW}
+      />,
+    );
+    expect(container.textContent).toContain("Claudeがレビュー中");
+    // セッションが終わっているだけの「PR待ち」には戻さない
+    expect(container.textContent).not.toContain("PR待ち");
+  });
+
+  it("PRの処理が動いている間は、セッションが終わっていてもバーを掃く", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Develop PR"
+        session={session({ state: "EXITED" })}
+        pullRequestProgress={progress()}
+        now={NOW}
+      />,
+    );
+    expect(liveSweep(container)).not.toBeNull();
+  });
+
+  it("止まっているPR（CI失敗）は赤に倒し、未達のマスも濃く塗る", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Develop PR"
+        pullRequestProgress={progress({ label: "CI失敗", tone: "attention" })}
+        now={NOW}
+      />,
+    );
+    expect(container.textContent).toContain("CI失敗");
+    expect(container.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
+    expect(hasEmphasizedTrack(container)).toBe(true);
+  });
+
+  it("PRを待っていない段では内訳を読まない", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Implementation"
+        pullRequestProgress={progress()}
+        now={NOW}
+      />,
+    );
+    expect(container.textContent).not.toContain("Claudeがレビュー中");
+    expect(container.textContent).toContain("実装中");
+  });
+
+  it("詳細のステップは、4段の内訳と対応PRの番号を並べる", () => {
+    const { container } = render(
+      <WorkflowStatusSteps labels={[]} projectStatus="Develop PR" pullRequestProgress={progress()} />,
+    );
+    expect(container.textContent).toContain("PR #2822");
+    for (const label of ["実装完了", "CI通過", "Claudeがレビュー中", "マージ"]) {
+      expect(container.textContent).toContain(label);
+    }
+  });
+
+  it("詳細でも、PRを待っていない段では内訳を描かない", () => {
+    const { container } = render(
+      <WorkflowStatusSteps labels={[]} projectStatus="Develop" pullRequestProgress={progress()} />,
+    );
+    expect(container.textContent).not.toContain("PR #2822");
   });
 });

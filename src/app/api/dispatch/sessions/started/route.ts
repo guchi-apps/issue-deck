@@ -6,6 +6,7 @@ import {
   parseDispatchHostName,
   parseDispatchTarget,
 } from "@/lib/dispatch/dispatch-job";
+import { resetSessionAnswerInApp } from "@/lib/dispatch/session-answer-mode";
 import { postSessionStartedComment } from "@/lib/dispatch/session-start";
 import { parseDispatchSessionName } from "@/lib/dispatch/session-state";
 
@@ -52,6 +53,20 @@ export async function POST(request: NextRequest) {
   // 「押したのに何も起きていない」の解消にならない
   if (!target || !hostName || !tmuxSessionName || !agent || model === undefined) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // 「アプリで答える」（#2822）を既定へ戻す。**pollerの巡回（`isRevivedSession`）では
+  // 間に合わない**——動くのは次の一括報告（既定60秒ごと）で、`ALIVE`のまま立ち上がり直した
+  // 行では一度も動かない。手作業セッションは起動から数秒で`AskUserQuestion`を出すため、
+  // ここで戻さないと前のセッションのONが効いて画面に回答パネルが出ない。
+  // **失敗しても受付コメントは投稿する**（記録が残らない方が損失が大きい）
+  try {
+    await resetSessionAnswerInApp({ host: hostName, tmuxSessionName });
+  } catch (error) {
+    console.error(
+      `[dispatch] 「アプリで答える」を既定へ戻せませんでした（${hostName}/${tmuxSessionName}）`,
+      error,
+    );
   }
 
   const posted = await postSessionStartedComment({

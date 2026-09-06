@@ -370,6 +370,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: "2026-08-18T00:00:00Z",
     remoteControlUrl: "https://claude.ai/remote/abc",
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,

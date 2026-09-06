@@ -21,6 +21,7 @@ import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { CheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
+import type { IssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
 import type { Issue } from "@/types/issue";
 
 type IssueStatusCardProps = {
@@ -53,6 +54,13 @@ type IssueStatusCardProps = {
    * コメントを持っておらず、ここで取り直すと同じ取得が2本走る。
    */
   planningSkipped?: boolean;
+  /**
+   * 「developへマージ」段の内訳（#2816・`resolveIssuePullRequestProgress`の結果）。
+   *
+   * 判定材料が対応PRの取得結果なので、解決は親（Issue詳細）に任せている。このカードは
+   * 対応PRを持っておらず、ここで取り直すと同じ取得が2本走る（`planningSkipped`と同じ形）。
+   */
+  pullRequestProgress?: IssuePullRequestProgress | null;
 };
 
 /**
@@ -76,6 +84,7 @@ export function IssueStatusCard({
   qaAnswerPending,
   checkUserGuidance = null,
   planningSkipped = false,
+  pullRequestProgress = null,
 }: IssueStatusCardProps) {
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
@@ -132,6 +141,7 @@ export function IssueStatusCard({
           showApprovalBadge={checkUserGuidance === null}
           showExecutionTarget={issueSession === null}
           planningSkipped={planningSkipped}
+          pullRequestProgress={pullRequestProgress}
         />
       )}
 

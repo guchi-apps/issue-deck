@@ -54,6 +54,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
+import { findManualStepForQuestion } from "@/lib/manual-step-question";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import {
   LocalSessionApprovalNotice,
@@ -142,6 +143,12 @@ import {
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  resolveIssuePullRequestProgress,
+  toIssuePullRequestProgressSource,
+} from "@/lib/issue-pull-request-progress";
 import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
@@ -297,7 +304,13 @@ export function IssueDetail({
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
     pullRequestLinks,
-    issue ? isMergeApprovalPending(issue, comments) : false,
+    // マージ待ちに加えて、PRを待っている段（`Develop PR`・`Release`）でも取り直しを続ける
+    // （#2816）。ここを広げないと、CIとClaudeのレビューが動いているあいだ内訳が開いた時点で
+    // 固まる。状態が確定すれば`useIssuePullRequests`が自分でポーリングを止める
+    issue
+      ? isMergeApprovalPending(issue, comments) ||
+        isPullRequestWaitingStatus(resolveProgressStatus(issue))
+      : false,
   );
   const {
     mergePullRequest,
@@ -604,6 +617,13 @@ export function IssueDetail({
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 「developへマージ」段の内訳（#2816）。取得済みの対応PRから導くだけなのでGitHub APIは
+  // 増えない。**PRを待っている段でだけ**作る（`WorkflowStatusSteps`も同じ確かめ方をするが、
+  // 材料を組み立てる手間そのものをここで省く）
+  const pullRequestProgress =
+    isPullRequestWaitingStatus(resolveProgressStatus(issue))
+      ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
+      : null;
   // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
   // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
@@ -712,6 +732,15 @@ export function IssueDetail({
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
   const questionPremise = questionRequest ? findQuestionPremise(comments) : null;
+  // 質問が指している手作業の手順（#2820）。代行できない手順で「実施されましたか？」と
+  // 聞かれたとき、答えるのに必要な「何をどこで実行するのか」は本文の中にしか無かった
+  const questionManualStep = questionRequest
+    ? findManualStepForQuestion({
+        labels: issue.labels,
+        body: issue.body,
+        questions: questionRequest.questions,
+      })
+    : null;
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -1005,6 +1034,7 @@ export function IssueDetail({
             qaAnswerPending={qaAnswerPending}
             checkUserGuidance={checkUserGuidance}
             planningSkipped={planningSkipped}
+            pullRequestProgress={pullRequestProgress}
           />
 
           {/* 質問の回答（#2189）。**計画パネルのすぐ上**に置く——計画を出したあとに質問する
@@ -1019,6 +1049,7 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 premise={questionPremise}
+                manualStep={questionManualStep}
                 onCheckUserResolved={handleCheckUserResolved}
               />
             </div>

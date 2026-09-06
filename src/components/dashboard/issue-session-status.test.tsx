@@ -11,6 +11,7 @@ const NOW = new Date("2026-08-14T12:00:00.000Z");
 
 const sendSessionControl = vi.fn();
 const requestCodexPairing = vi.fn();
+const setSessionAnswerMode = vi.fn();
 
 function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionView {
   return {
@@ -26,6 +27,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,
@@ -86,6 +88,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
     enqueue: vi.fn(),
     sendSessionControl,
     requestCodexPairing,
+    setSessionAnswerMode,
     cancel: vi.fn(),
     ...overrides,
   } as DispatchStateHandle;
@@ -95,6 +98,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sendSessionControl.mockResolvedValue({ ok: true });
   requestCodexPairing.mockResolvedValue({ ok: true });
+  setSessionAnswerMode.mockResolvedValue({ ok: true });
 });
 
 /**
@@ -629,6 +633,7 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
           activityAt: NOW.toISOString(),
           remoteControlUrl: "https://claude.ai/code/session_01ABC",
           previewUrl: "http://subpc.example.ts.net:5676",
+          answerInApp: false,
         })}
         dispatch={makeDispatch()}
       />,
@@ -810,5 +815,74 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
     );
 
     expect(screen.queryByText("A1B2-C3D4")).toBeNull();
+  });
+});
+
+/**
+ * 質問・計画をClaude Codeアプリ側で受け取るトグル（#2822）。
+ *
+ * **畳まない**（出口と同じ行に置く）。押した見た目を先に変えないので、状態は
+ * `session.answerInApp`だけが決める。
+ */
+describe("アプリで答える（#2822）", () => {
+  it("生きているセッションでは、操作を開かなくても出る", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+
+    const toggle = screen.getByRole("button", { name: /アプリで答える/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText(/この画面のパネル/)).toBeTruthy();
+  });
+
+  it("押すとセッション名つきで切り替えを送る", async () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /アプリで答える/ }));
+
+    await waitFor(() => {
+      expect(setSessionAnswerMode).toHaveBeenCalledWith({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1353,
+        hostName: "subpc",
+        tmuxSessionName: "issue-deck-issue-1353",
+        answerInApp: true,
+      });
+    });
+  });
+
+  it("ONのときは、答え先がアプリであることを本文で出す", () => {
+    render(
+      <IssueSessionStatus session={session({ answerInApp: true })} dispatch={makeDispatch()} />,
+    );
+
+    const toggle = screen.getByRole("button", { name: /アプリで答える/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(/Claude Codeアプリ（端末）に出します/)).toBeTruthy();
+  });
+
+  // Codexには`AskUserQuestion`のフックもRemote Controlも無く、切り替えた先が存在しない
+  it("Codexのセッションには出さない", () => {
+    render(
+      <IssueSessionStatus session={session({ codexThreadKnown: true })} dispatch={makeDispatch()} />,
+    );
+
+    expect(screen.queryByRole("button", { name: /アプリで答える/ })).toBeNull();
+  });
+
+  // 終わったセッションに書いても、次に立ち上がった行では捨てられる
+  it("終了したセッションには出さない", () => {
+    render(<IssueSessionStatus session={session({ state: "GONE" })} dispatch={makeDispatch()} />);
+
+    expect(screen.queryByRole("button", { name: /アプリで答える/ })).toBeNull();
+  });
+
+  it("切り替えに失敗したら理由を押した場所に出す", async () => {
+    setSessionAnswerMode.mockResolvedValue({ ok: false, message: "このセッションは終了しています。" });
+
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    fireEvent.click(screen.getByRole("button", { name: /アプリで答える/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("このセッションは終了しています。")).toBeTruthy();
+    });
   });
 });

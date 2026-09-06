@@ -53,6 +53,21 @@ export const PULL_REQUEST_POLL_INTERVAL_MS = 10_000;
  */
 export const ISSUE_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * Issue一覧に「PR待ち」の行（進捗Statusが`Develop PR`・`Release`）が並んでいる間だけ、
+ * PR一覧を取り直す間隔（#2816）。
+ *
+ * その行に出す添える字（「CI実行中」「Claudeがレビュー中」）はPR一覧の`ciState`・
+ * `mergeJudgement`から作るため、取り直さないと開いた時点の状態で固まる。
+ *
+ * **PR画面（`PULL_REQUEST_POLL_INTERVAL_MS`＝10秒）より粗くする。** こちらはPRを見に来て
+ * いない人の画面で回り続けるもので、しかもPRがマージされずに止まったIssueは何時間でも
+ * `Develop PR`に居座る。1巡でリポジトリ数ぶんのREST（ETagで304なら消費0）とCI状態の
+ * GraphQLを使うため、冒頭の「1回の取得コストが重い画面ほど間隔を長くする」に従って
+ * 1分に置く。CIもClaudeのレビューも数分かかるもので、1分あれば段の移り変わりは追える。
+ */
+export const ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS = 60_000;
+
 /** 「1分間隔」のように画面へ出す文言にする。分で割り切れない値は秒で出す */
 export function autoRefreshIntervalLabel(intervalMs: number): string {
   if (intervalMs % 60_000 === 0) return `${intervalMs / 60_000}分間隔`;

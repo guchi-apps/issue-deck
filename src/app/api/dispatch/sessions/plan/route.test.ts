@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const postSessionPlan = vi.fn();
 const createSessionPlanRequest = vi.fn();
 const saveSessionArtifact = vi.fn();
+const isSessionAnswerInApp = vi.fn();
 
 vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/dispatch/session-plan")>();
@@ -27,6 +28,13 @@ vi.mock("@/lib/dispatch/plan-requests", () => ({
 vi.mock("@/lib/dispatch/session-artifacts", () => ({
   get saveSessionArtifact() {
     return saveSessionArtifact;
+  },
+}));
+
+// 「アプリで答える」（#2822）。DBを引かずに、ONとOFFの分岐だけを確かめる
+vi.mock("@/lib/dispatch/session-answer-mode", () => ({
+  get isSessionAnswerInApp() {
+    return isSessionAnswerInApp;
   },
 }));
 
@@ -55,6 +63,7 @@ beforeEach(() => {
   postSessionPlan.mockResolvedValue(true);
   createSessionPlanRequest.mockResolvedValue({ id: "plan-request-1" });
   saveSessionArtifact.mockResolvedValue({ id: "artifact-1" });
+  isSessionAnswerInApp.mockResolvedValue(false);
 });
 
 /** 計画ファイルへ埋め込まれたアーティファクト（#2200）の書式を組み立てる */
@@ -104,7 +113,12 @@ describe("POST /api/dispatch/sessions/plan", () => {
   it("受け付けた計画をそのまま渡す", async () => {
     const res = await POST(postRequest(validBody, "Bearer secret-value"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, posted: true, planRequestId: "plan-request-1" });
+    expect(await res.json()).toEqual({
+      ok: true,
+      posted: true,
+      planRequestId: "plan-request-1",
+      answerInApp: false,
+    });
     expect(postSessionPlan).toHaveBeenCalledWith({
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1342,
@@ -202,7 +216,12 @@ describe("POST /api/dispatch/sessions/plan", () => {
     // **コメントを書けたかどうかと返事待ちは切り離す**（#2108）。パネルが描いているのは
     // ここで保存する計画本文で、コメントの取得には依存していない。作らないと、端末には
     // 計画が出ているのに画面からは承認も修正もできない状態になる
-    expect(await res.json()).toEqual({ ok: true, posted: false, planRequestId: "plan-request-1" });
+    expect(await res.json()).toEqual({
+      ok: true,
+      posted: false,
+      planRequestId: "plan-request-1",
+      answerInApp: false,
+    });
     expect(createSessionPlanRequest).toHaveBeenCalled();
   });
 
@@ -214,6 +233,34 @@ describe("POST /api/dispatch/sessions/plan", () => {
     createSessionPlanRequest.mockRejectedValue(new Error("db down"));
     const res = await POST(postRequest(validBody, "Bearer secret-value"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, posted: true, planRequestId: null });
+    expect(await res.json()).toEqual({
+      ok: true,
+      posted: true,
+      planRequestId: null,
+      answerInApp: false,
+    });
+  });
+});
+
+/**
+ * 「アプリで答える」がONのセッション（#2822）。
+ *
+ * **計画コメントの投稿は止めない。** 変えるのは「どこで承認するか」だけで、計画がIssueに
+ * 残ることは変わらない。承認待ちを作らないので、フックはすぐ降りて端末へ承認プロンプトが出る。
+ */
+describe("アプリで答えるがONのとき", () => {
+  it("計画は投稿するが、承認待ちは作らない", async () => {
+    isSessionAnswerInApp.mockResolvedValue(true);
+
+    const res = await POST(postRequest(validBody, "Bearer secret-value"));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      posted: true,
+      planRequestId: null,
+      answerInApp: true,
+    });
+    expect(postSessionPlan).toHaveBeenCalledTimes(1);
+    expect(createSessionPlanRequest).not.toHaveBeenCalled();
   });
 });
