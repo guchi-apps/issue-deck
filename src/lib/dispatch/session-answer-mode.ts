@@ -31,7 +31,7 @@ export function parseSessionAnswerInApp(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-export type SessionAnswerModeRejection = "not_found" | "not_alive";
+export type SessionAnswerModeRejection = "not_found" | "not_alive" | "codex";
 
 export function describeSessionAnswerModeRejection(
   rejection: SessionAnswerModeRejection,
@@ -41,6 +41,8 @@ export function describeSessionAnswerModeRejection(
       return "セッションの記録が見つかりません（畳まれた可能性があります）。";
     case "not_alive":
       return "このセッションは終了しています。起動し直してから切り替えてください。";
+    case "codex":
+      return "Codexのセッションでは切り替えられません（Claude Codeアプリに相当する出口がありません）。";
   }
 }
 
@@ -59,10 +61,17 @@ export async function setSessionAnswerInApp(params: {
     where: {
       host_tmuxSessionName: { host: params.host, tmuxSessionName: params.tmuxSessionName },
     },
-    select: { state: true, repositoryFullName: true, issueNumber: true },
+    select: { state: true, codexThreadKnown: true },
   });
   if (!row) return { ok: false, rejection: "not_found" };
   if (row.state !== "ALIVE") return { ok: false, rejection: "not_alive" };
+  // **Codexのセッションでは断る**（計画レビューの指摘1）。**画面で出し分けるだけにしない。**
+  // Codexの質問も同じ受け口（`/sessions/question`）へ登録し、`questionRequestId`が返らないと
+  // `scripts/submit-question.sh`は終了コード3で「端末での確認へ」倒れる。ところがCodexには
+  // `remoteControlUrl`が無い（出るのは10分で切れるペアリングコードだけ。#2524）ので、
+  // ONにすると**画面からもアプリからも答えられない質問**ができる。
+  // 判定は画面と同じ「`codexThreadKnown`が`null`ならClaude Code」
+  if (row.codexThreadKnown !== null) return { ok: false, rejection: "codex" };
 
   await db.dispatchSession.update({
     where: {
@@ -71,6 +80,29 @@ export async function setSessionAnswerInApp(params: {
     data: { answerInApp: params.answerInApp },
   });
   return { ok: true };
+}
+
+/**
+ * セッションの起動時にOFFへ戻す（計画レビューの指摘2）。**`POST /api/dispatch/sessions/started`
+ * から、`claude`が立つ直前に1回だけ呼ぶ。**
+ *
+ * `isRevivedSession`（`sessions.ts`）の破棄では間に合わない。あちらが動くのは**pollerが次に
+ * 一括報告した時**（既定60秒ごと）で、しかも`ALIVE`のまま立ち上がり直した行では
+ * `ALIVE` → `ALIVE`になるため一度も動かない。手作業セッションは起動から数秒で
+ * `AskUserQuestion`を出す（コマンドを実行する前に必ず全文を示して聞く）ので、前のセッションの
+ * ONがそのまま効いて**画面に回答パネルが出ない**。
+ *
+ * **`updateMany`で、行が無くても静かに終える。** 起動報告は行の有無と無関係に成立させる
+ * 受け口で（受付コメントと同じ）、ここで落とすと受付コメントごと落ちる。
+ */
+export async function resetSessionAnswerInApp(params: {
+  host: string;
+  tmuxSessionName: string;
+}): Promise<void> {
+  await db.dispatchSession.updateMany({
+    where: { host: params.host, tmuxSessionName: params.tmuxSessionName },
+    data: { answerInApp: false },
+  });
 }
 
 /**

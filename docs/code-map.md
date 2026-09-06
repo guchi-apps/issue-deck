@@ -2768,7 +2768,11 @@ export function POST(request: NextRequest) {
   ＝`DispatchSession.answerInApp`。ONのあいだ受け口が待ちを作らないので、フックはすぐ降りて
   Claude Codeが端末へ出したフォームがClaude Codeアプリにも見える。判定と切り替えは
   `lib/dispatch/session-answer-mode.ts`、押す側は`POST /api/dispatch/sessions/answer-mode`。
-  **Issueコメント・`00.check-user`・Push通知は変えない**——変わるのは答え先だけ）。
+  **Issueコメント・`00.check-user`・Push通知は変えない**——変わるのは答え先だけ。
+  **既定へ戻すのは`POST /api/dispatch/sessions/started`**（pollerの`isRevivedSession`は次の巡回
+  まで動かず、`ALIVE`のまま立ち上がり直した行では動かない）。**Codexのセッションでは切り替え
+  られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
+  Controlが無いため答える出口が消える）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dispatchSessionFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
 const dispatchSessionUpdate = vi.fn();
+const dispatchSessionUpdateMany = vi.fn();
 const planRequestFindFirst = vi.fn();
 const questionRequestFindFirst = vi.fn();
 
@@ -17,6 +18,9 @@ vi.mock("@/lib/db", () => ({
       },
       get update() {
         return dispatchSessionUpdate;
+      },
+      get updateMany() {
+        return dispatchSessionUpdateMany;
       },
     },
     sessionPlanRequest: {
@@ -50,6 +54,7 @@ import {
   deferPendingSessionRequests,
   isSessionAnswerInApp,
   parseSessionAnswerInApp,
+  resetSessionAnswerInApp,
   setSessionAnswerInApp,
 } from "@/lib/dispatch/session-answer-mode";
 
@@ -75,11 +80,7 @@ describe("parseSessionAnswerInApp", () => {
 
 describe("setSessionAnswerInApp", () => {
   it("生きているセッションには書き込める", async () => {
-    dispatchSessionFindUnique.mockResolvedValue({
-      state: "ALIVE",
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 2822,
-    });
+    dispatchSessionFindUnique.mockResolvedValue({ state: "ALIVE", codexThreadKnown: null });
 
     const result = await setSessionAnswerInApp({
       host: "subpc",
@@ -95,11 +96,7 @@ describe("setSessionAnswerInApp", () => {
 
   // 終わったセッションに書いても、次に同じ名前で立ち上がった行では捨てられる
   it("終了したセッションは断る", async () => {
-    dispatchSessionFindUnique.mockResolvedValue({
-      state: "GONE",
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 2822,
-    });
+    dispatchSessionFindUnique.mockResolvedValue({ state: "GONE", codexThreadKnown: null });
 
     const result = await setSessionAnswerInApp({
       host: "subpc",
@@ -108,6 +105,24 @@ describe("setSessionAnswerInApp", () => {
     });
 
     expect(result).toEqual({ ok: false, rejection: "not_alive" });
+    expect(dispatchSessionUpdate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Codexのセッションでは断る（計画レビューの指摘1）。**画面で出し分けるだけにしない。**
+   * Codexの質問も同じ受け口へ登録し、`questionRequestId`が返らないと`submit-question.sh`は
+   * 終了コード3で端末へ倒れるが、CodexにはRemote Controlが無い＝答える出口が消える
+   */
+  it("Codexのセッションは断る", async () => {
+    dispatchSessionFindUnique.mockResolvedValue({ state: "ALIVE", codexThreadKnown: true });
+
+    const result = await setSessionAnswerInApp({
+      host: "subpc",
+      tmuxSessionName: "issue-deck-issue-2822",
+      answerInApp: true,
+    });
+
+    expect(result).toEqual({ ok: false, rejection: "codex" });
     expect(dispatchSessionUpdate).not.toHaveBeenCalled();
   });
 
@@ -208,5 +223,20 @@ describe("deferPendingSessionRequests", () => {
     });
 
     expect(result).toEqual({ plan: false, question: false });
+  });
+});
+
+/**
+ * 起動時のリセット（計画レビューの指摘2）。**pollerの巡回（`isRevivedSession`）では間に合わない**
+ * ——動くのは次の一括報告で、`ALIVE`のまま立ち上がり直した行では一度も動かない。
+ */
+describe("resetSessionAnswerInApp", () => {
+  it("そのセッションの行だけをOFFへ戻す", async () => {
+    await resetSessionAnswerInApp({ host: "subpc", tmuxSessionName: "issue-deck-issue-2822" });
+
+    expect(dispatchSessionUpdateMany).toHaveBeenCalledWith({
+      where: { host: "subpc", tmuxSessionName: "issue-deck-issue-2822" },
+      data: { answerInApp: false },
+    });
   });
 });

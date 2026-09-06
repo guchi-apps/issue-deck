@@ -405,9 +405,12 @@ Codexには`AskUserQuestion`とそのフックが無いため、#2579では同�
 ONのあいだは受け口が待ちを作らない。
 
 ```text
+セッションの起動（run-issue-session.sh）
+  → POST /api/dispatch/sessions/started → answerInApp を false へ戻す（＝毎回OFFから始まる）
+
 「アプリで答える」をON（Issue詳細のセッションの行）
   → POST /api/dispatch/sessions/answer-mode
-       → DispatchSession.answerInApp = true
+       → DispatchSession.answerInApp = true（Codex・終了済みのセッションは断る）
        → いま待っている計画・質問を `defer` で畳む（＝フックがその場で降りる）
 … 次の AskUserQuestion / ExitPlanMode …
   → PreToolUse フック → /sessions/question ・ /sessions/plan
@@ -427,10 +430,19 @@ ONのあいだは受け口が待ちを作らない。
   `questionRequestId: null`を受け取ると`wait_for_question_answer`が即座に返る。したがって
   **サブPCのチェックアウトが古いままでも効く**
 - **全体設定（`AppSetting`）にはしない。** 別のIssueをスマホから答える経路まで一緒に切って
-  しまう。効くのは切り替えたセッションだけで、**同じ名前で立ち上がり直した行では捨てる**
-  （`isRevivedSession`。前のセッションの設定を引き継がない）
-- **Codexのセッションには出さない。** `AskUserQuestion`のフックもRemote Controlも無く
-  （待ちを作るのは`scripts/submit-question.sh`）、切り替えた先が存在しない
+  しまう。効くのは切り替えたセッションだけ
+- **既定へ戻すのは起動報告（`POST /api/dispatch/sessions/started`）でやる。** pollerの巡回
+  （`isRevivedSession`）任せにすると2つ取りこぼす——動くのは**次の一括報告**（既定60秒ごと）で、
+  しかも`ALIVE`のまま立ち上がり直した行では`ALIVE` → `ALIVE`なので**一度も動かない**。
+  手作業セッションは起動から数秒で`AskUserQuestion`を出す（コマンドを実行する前に必ず全文を
+  示して聞く）ため、前のセッションのONがそのまま効いて画面に回答パネルが出なくなる。
+  `isRevivedSession`側の破棄も残してあるが、あれは保険
+- **Codexのセッションでは切り替えられない。** `AskUserQuestion`のフックが無く（待ちを作るのは
+  `scripts/submit-question.sh`）、Remote Controlも無い（出るのは10分で切れるペアリングコード
+  だけ。#2524）ので、切り替えた先が存在しない。**画面で出し分けるだけにしない**——Codexの質問も
+  同じ受け口へ登録し、`questionRequestId`が返らないと`submit-question.sh`は終了コード3で端末へ
+  倒れるため、UIだけの出し分けが緩んだ瞬間に**画面からもアプリからも答えられない質問**ができる。
+  受け口（`setSessionAnswerInApp`）も`codexThreadKnown`で断る
 - **効くのは`DispatchSession`の行がある間だけ。** pollerが1巡する前に質問が出ると行がまだ
   無く、そのときは既定（画面で受け取る）に倒れる——待ちが1回できるだけで詰まらない
 - サーバー側は`src/lib/dispatch/session-answer-mode.ts`（判定・切り替え・待ちの畳み）と
