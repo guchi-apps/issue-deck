@@ -121,6 +121,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: null,
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: null,

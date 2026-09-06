@@ -2764,6 +2764,15 @@ export function POST(request: NextRequest) {
   `components/dashboard/question-answer-panel.tsx`。**画面から届いたラベルはDBの質問と
   突き合わせてから回答に載せる**——`updatedInput`はツールのスキーマ検証を通るため、質問に
   無い値を載せると回答ごと弾かれる。Issueコメントは**答えたときに1件だけ**書く）。
+  **どちらもセッション単位で降ろせる**（#2822。Issue詳細のセッションの行の「アプリで答える」
+  ＝`DispatchSession.answerInApp`。ONのあいだ受け口が待ちを作らないので、フックはすぐ降りて
+  Claude Codeが端末へ出したフォームがClaude Codeアプリにも見える。判定と切り替えは
+  `lib/dispatch/session-answer-mode.ts`、押す側は`POST /api/dispatch/sessions/answer-mode`。
+  **Issueコメント・`00.check-user`・Push通知は変えない**——変わるのは答え先だけ。
+  **既定へ戻すのは`POST /api/dispatch/sessions/started`**（pollerの`isRevivedSession`は次の巡回
+  まで動かず、`ALIVE`のまま立ち上がり直した行では動かない）。**Codexのセッションでは切り替え
+  られない**——同じ受け口を`scripts/submit-question.sh`が共有しているのに、CodexにはRemote
+  Controlが無いため答える出口が消える）。
   **`question.question`はMarkdownとして描画しないプレーンテキスト**（`QuestionBlock`の
   `<p>`）。`AskUserQuestion`の質問文にコマンド確認のため```bash```フェンスを埋め込むと、
   バッククォートが文字どおり表示され複数コマンドが1行に潰れていた（#2818）。埋め込まれた

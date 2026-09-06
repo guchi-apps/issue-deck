@@ -393,6 +393,64 @@ Codexには`AskUserQuestion`とそのフックが無いため、#2579では同�
   `src/lib/dispatch/question-requests.ts`（DB）。画面は`question-answer-panel.tsx`、
   前提の選び方は`question-premise.ts`、一覧の導線は`issue-list.tsx`
 
+## Claude Codeアプリ側で答えるセッションに切り替える（#2822）
+
+**画面から答えられるようにしたことの裏返しで、待っているあいだはClaude Codeアプリに何も
+出なくなった。** 計画（#2061）も質問（#2189）もフックが返ってからでないと端末へフォームが
+出ないため、待ちを作っている数分〜30分のあいだ、Remote Controlを開いても選択肢が現れない。
+手作業Issueのセッション（#2771）をアプリ側でそのまま進めたい場面では、これが
+「アプリに何も出てこない」として出る。
+
+そこで**セッション1本ごとのトグル**（Issue詳細のセッションの行の「アプリで答える」）を置き、
+ONのあいだは受け口が待ちを作らない。
+
+```text
+セッションの起動（run-issue-session.sh）
+  → POST /api/dispatch/sessions/started → answerInApp を false へ戻す（＝毎回OFFから始まる）
+
+「アプリで答える」をON（Issue詳細のセッションの行）
+  → POST /api/dispatch/sessions/answer-mode
+       → DispatchSession.answerInApp = true（Codex・終了済みのセッションは断る）
+       → いま待っている計画・質問を `defer` で畳む（＝フックがその場で降りる）
+… 次の AskUserQuestion / ExitPlanMode …
+  → PreToolUse フック → /sessions/question ・ /sessions/plan
+       → 計画コメントの投稿・00.check-user の付与は**従来どおり**
+       → 待ちを作らず questionRequestId / planRequestId に null を返す
+  → フックは何も出力せずに終える
+  → Claude Codeが端末へ選択フォーム・承認プロンプトを出す（＝Claude Codeアプリにも見える）
+```
+
+- **変えるのは「どこで答えるか」だけ。** Issueコメント（計画本文）・`00.check-user`・
+  Push通知はONでも出す。**記録と気付ける経路まで一緒に消すと**、答え先が変わっただけのはずが
+  「何も起きていない」ように見える（#2108で計画について学んだのと同じ線）
+- **ONにした瞬間に、待っているパネルを畳む。** 畳まないと、押した本人の目の前に
+  「押しても行き先が変わらないパネル」が待ち時間いっぱい残る。畳む経路は画面の
+  「端末・Remote Controlで答える」と同じ`defer`で、フックはそれを読んで待ちを降りる
+- **フック（`session-notify.sh`）は変えていない。** `json_field`は文字列以外を空にするので、
+  `questionRequestId: null`を受け取ると`wait_for_question_answer`が即座に返る。したがって
+  **サブPCのチェックアウトが古いままでも効く**
+- **全体設定（`AppSetting`）にはしない。** 別のIssueをスマホから答える経路まで一緒に切って
+  しまう。効くのは切り替えたセッションだけ
+- **既定へ戻すのは起動報告（`POST /api/dispatch/sessions/started`）でやる。** pollerの巡回
+  （`isRevivedSession`）任せにすると2つ取りこぼす——動くのは**次の一括報告**（既定60秒ごと）で、
+  しかも`ALIVE`のまま立ち上がり直した行では`ALIVE` → `ALIVE`なので**一度も動かない**。
+  手作業セッションは起動から数秒で`AskUserQuestion`を出す（コマンドを実行する前に必ず全文を
+  示して聞く）ため、前のセッションのONがそのまま効いて画面に回答パネルが出なくなる。
+  `isRevivedSession`側の破棄も残してあるが、あれは保険
+- **Codexのセッションでは切り替えられない。** `AskUserQuestion`のフックが無く（待ちを作るのは
+  `scripts/submit-question.sh`）、Remote Controlも無い（出るのは10分で切れるペアリングコード
+  だけ。#2524）ので、切り替えた先が存在しない。**画面で出し分けるだけにしない**——Codexの質問も
+  同じ受け口へ登録し、`questionRequestId`が返らないと`submit-question.sh`は終了コード3で端末へ
+  倒れるため、UIだけの出し分けが緩んだ瞬間に**画面からもアプリからも答えられない質問**ができる。
+  受け口（`setSessionAnswerInApp`）も`codexThreadKnown`で断る
+- **効くのは`DispatchSession`の行がある間だけ。** pollerが1巡する前に質問が出ると行がまだ
+  無く、そのときは既定（画面で受け取る）に倒れる——待ちが1回できるだけで詰まらない
+- サーバー側は`src/lib/dispatch/session-answer-mode.ts`（判定・切り替え・待ちの畳み）と
+  `POST /api/dispatch/sessions/answer-mode`（Supabase認証）。画面は
+  `issue-session-status.tsx`で、**出口（「Claude Codeアプリで開く」）と同じ行に置いて畳まない**
+  ——押した直後に開くのがその隣のボタンで、離すと「アプリで答えられること自体」が画面から
+  読み取れなくなる
+
 ## 受付と締めもIssueのコメントへ残す（#1119）
 
 計画（#1342）を自動で載せるようにしても、**Issueのコメント欄だけを見て追える範囲はActionsに

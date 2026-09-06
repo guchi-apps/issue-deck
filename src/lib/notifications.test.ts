@@ -102,6 +102,7 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     activityAt: "2026-08-01T00:05:00.000Z",
     remoteControlUrl: null,
     previewUrl: null,
+    answerInApp: false,
     reapAt: null,
     reapReason: null,
     codexThreadKnown: true,

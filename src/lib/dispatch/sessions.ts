@@ -54,6 +54,8 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     activityAt: session.activityAt?.toISOString() ?? null,
     remoteControlUrl: session.remoteControlUrl,
     previewUrl: session.previewUrl,
+    // 質問・計画をClaude Codeアプリ側で受け取るか（#2822）。押した向きがそのまま画面に出る
+    answerInApp: session.answerInApp,
     // 畳む予定（#1817）。**保存されている理由コードも読み直しで検証する**（列はStringなので、
     // 古い版が書いた・知らないコードが残っていることがある）
     reapAt: session.reapAt?.toISOString() ?? null,
@@ -309,6 +311,9 @@ export async function reportDispatchSessions(params: {
               step: null,
               stepAt: null,
               stepSeenAt: null,
+              // 「アプリで答える」も捨てる（#2822）。**セッション1本ぶんの設定**なので、
+              // 起動し直した直後は既定（画面で受け取る）から始める
+              answerInApp: false,
             }
           : {}),
         // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**
