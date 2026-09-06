@@ -4,6 +4,7 @@ import type {
   MergeJudgement,
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
+import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type {
   PullRequestKind,
@@ -476,6 +477,22 @@ export function splitSnoozedPullRequests(
   }
   return { listed, snoozed };
 }
+
+/**
+ * CI状態の呼び名（#2150・#2816）。**CI状態の言葉を持つのはここ1か所だけ。**
+ *
+ * 元は`components/dashboard/pull-request-badges.tsx`のモジュール私有定数で、`CiStateBadge`
+ * だけが読んでいた。進捗表示の内訳（`lib/issue-pull-request-progress.ts`）も同じ言葉で
+ * 呼ぶ必要が出たため、判定の文言（`MERGE_JUDGEMENT_STEP_LABEL`・`AI_REVIEW_SETTLED_LABEL`）と
+ * 同じ場所へ移してある。**コンポーネント側に写しを作らない**——「CI通過」と「CI成功」が
+ * 画面によって食い違った#2145・#2150へ戻る。
+ */
+export const CI_STATE_LABEL: Record<CiState, string> = {
+  pending: "CI実行中",
+  success: "CI通過",
+  failure: "CI失敗",
+  unknown: "CI状態は不明",
+};
 
 /** 判定中でマージボタンを押せないときに、ボタンへ出す短い表示（#1968） */
 export const MERGE_JUDGEMENT_PENDING_LABEL = "判定中";

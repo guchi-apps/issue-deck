@@ -539,6 +539,10 @@ export function IssueDeckShell({
   // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
+  // Issue一覧を見ているか（#2816）。行に出すPR待ちの内訳のためにPR一覧を取り直す条件で、
+  // **ペインを見ていない間は回さない**——`useAutoRefresh`が止めるのは裏に回ったタブだけで、
+  // 「PR待ちのIssueがある」だけを条件にすると、AI使用量や設定を開いている間も回り続ける
+  const isIssuePaneActive = filters.pane === "issues" || mobileScreen.kind === "issues";
   // 「AI使用量」画面（#2504）。開いている間だけ取得する（材料はサブPCのpollerが5分ごとに
   // 押し込む記録で、開いていない間に取りに行っても新しくならない）。
   const isUsagePaneActive = filters.pane === "usage" || mobileScreen.kind === "usage";
@@ -592,9 +596,12 @@ export function IssueDeckShell({
   const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
     shorterAutoRefreshInterval(
       autoRefreshPullRequests ? PULL_REQUEST_POLL_INTERVAL_MS : null,
-      // Issue一覧に「PR待ち」の行がある間だけ、そちらの添える字（「CI実行中」
-      // 「Claudeがレビュー中」）のために粗く取り直す（#2816）。行が無ければ従来どおり止める
-      hasPullRequestWaitingIssues ? ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS : null,
+      // Issue一覧を開いていて、そこに「PR待ち」の行がある間だけ、添える字（「CI実行中」
+      // 「Claudeがレビュー中」）のために粗く取り直す（#2816）。どちらか一方でも
+      // 欠けていれば従来どおり止める
+      isIssuePaneActive && hasPullRequestWaitingIssues
+        ? ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS
+        : null,
     ),
     isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
   );

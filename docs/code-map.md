@@ -590,8 +590,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **出すのは`isPullRequestWaitingStatus`が真の段（`Develop PR`・`Release`）だけ。** PRがまだ
     無い段・マージが済んだ段では待っているものが無く、空の内訳は「まだ来ていない」と読める
   - **一覧のためにPR一覧を取り直す間隔は1分**（`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`）で、
-    「PR待ち」の行が1つも無ければ回さない。PR画面の10秒より粗いのは、PRを見に来ていない人の
-    画面で回り続けるものだから（止まったIssueは何時間でも`Develop PR`に居座る）
+    **Issueペインを開いている AND 「PR待ち」の行がある**ときだけ回す。`useAutoRefresh`が
+    止めるのは裏に回ったタブだけで、行の有無だけを条件にするとAI使用量や設定を開いている
+    間も回り続ける。PR画面の10秒より粗いのは、PRを見に来ていない人の画面で回るものだから
+    （止まったIssueは何時間でも`Develop PR`に居座る）
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・

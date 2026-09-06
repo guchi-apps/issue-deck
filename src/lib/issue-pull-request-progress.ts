@@ -2,7 +2,7 @@ import type { AiReviewState, MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { CiState } from "@/lib/github/release-api";
 import { type ProgressStatusKey } from "@/lib/issue-progress";
-import { mergeJudgementLabel } from "@/lib/pull-request-list";
+import { CI_STATE_LABEL, mergeJudgementLabel } from "@/lib/pull-request-list";
 
 /**
  * 「developへマージ」段の中で、いま何が終わっていて何を待っているか（#2816）。
@@ -13,8 +13,8 @@ import { mergeJudgementLabel } from "@/lib/pull-request-list";
  * （`ciState`・`mergeJudgement`・`aiReview`）はPR画面が既に取っているものをそのまま使い、
  * **GitHub APIは1回も増やさない。**
  *
- * 文言も新しく作らず、PR画面のもの（`mergeJudgementLabel`・`CI_STEP_LABEL`・
- * `AI_REVIEW_STEP_LABEL`）に揃える。同じ状態が画面によって違う名前で出ると、
+ * 文言も新しく作らず、PR画面のもの（`mergeJudgementLabel`・`CI_STATE_LABEL`・
+ * `AI_REVIEW_SETTLED_LABEL`と同じ言い方）に揃える。同じ状態が画面によって違う名前で出ると、
  * どちらが新しいのかを読む側が判断できなくなる（#2150で一度そうなっている）。
  */
 
@@ -72,14 +72,6 @@ export type IssuePullRequestProgressSource = {
   /** `false`＝コンフリクトあり。`null`（判定中・未取得）は「なし」として扱わない */
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
-};
-
-/** CIの段に出す文言。`unknown`（取れていない）は状態を名乗らせない */
-const CI_STEP_LABEL: Record<CiState, string> = {
-  pending: "CI実行中",
-  success: "CI通過",
-  failure: "CI失敗",
-  unknown: "CI",
 };
 
 /** Claudeのレビューの段に出す文言。`none`（check-runが無い）は段ごと落とすので入っていない */
@@ -178,7 +170,7 @@ export function buildIssuePullRequestProgress(
     { key: "opened", label: OPENED_STEP_LABEL, state: "done" },
     {
       key: "ci",
-      label: CI_STEP_LABEL[ciState],
+      label: CI_STATE_LABEL[ciState],
       state:
         ciState === "failure"
           ? "failed"
@@ -219,7 +211,7 @@ export function buildIssuePullRequestProgress(
 
   function resolveWaiting(): { label: string; tone: IssuePullRequestProgressTone } {
     if (mergeable === false) return { label: "コンフリクトあり", tone: "attention" };
-    if (ciState === "failure") return { label: CI_STEP_LABEL.failure, tone: "attention" };
+    if (ciState === "failure") return { label: CI_STATE_LABEL.failure, tone: "attention" };
     if (aiReviewState === "failed") {
       return { label: AI_REVIEW_STEP_LABEL.failed, tone: "attention" };
     }
@@ -228,7 +220,7 @@ export function buildIssuePullRequestProgress(
     if (judgementPending) {
       return { label: mergeJudgementLabel(mergeJudgement.step), tone: "running" };
     }
-    if (ciState === "pending") return { label: CI_STEP_LABEL.pending, tone: "running" };
+    if (ciState === "pending") return { label: CI_STATE_LABEL.pending, tone: "running" };
     return { label: "マージ待ち", tone: "waiting" };
   }
 }

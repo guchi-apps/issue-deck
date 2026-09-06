@@ -25,6 +25,7 @@ import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repa
 import type { CiState } from "@/lib/github/release-api";
 import {
   AI_REVIEW_SETTLED_LABEL,
+  CI_STATE_LABEL,
   AI_REVIEW_SETTLED_REASON,
   aiReviewSettledState,
   mergeJudgementLabel,
@@ -38,13 +39,6 @@ import type {
   PullRequestKind,
   PullRequestSummary,
 } from "@/types/pull-request";
-
-const CI_STATE_LABEL: Record<CiState, string> = {
-  pending: "CI実行中",
-  success: "CI通過",
-  failure: "CI失敗",
-  unknown: "CI状態は不明",
-};
 
 const KIND_LABEL: Record<Exclude<PullRequestKind, "other">, string> = {
   release: "リリース（develop→main）",
