@@ -348,6 +348,15 @@ export function SidebarNavView({
             title: describeReleaseActivity(releaseActivity),
           })}
           {navRow({
+            key: "releases",
+            label: "リリース履歴",
+            icon: History,
+            active: activePane === "releases",
+            onClick: onSelectReleaseHistory,
+            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い（#2726）
+            title: "全リポジトリのGitHub Releaseを時系列で見る",
+          })}
+          {navRow({
             key: "nightly",
             label: "夜間実行",
             icon: Moon,
@@ -368,15 +377,6 @@ export function SidebarNavView({
             // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い
             // （枠が逼迫していることは設定→「状態」のメーターが受け持つ）
             title: "サブPCのローカルセッションが使ったトークンを見る",
-          })}
-          {navRow({
-            key: "releases",
-            label: "リリース履歴",
-            icon: History,
-            active: activePane === "releases",
-            onClick: onSelectReleaseHistory,
-            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い（#2726）
-            title: "全リポジトリのGitHub Releaseを時系列で見る",
           })}
         </ul>
       </div>
