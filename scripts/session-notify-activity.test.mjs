@@ -11,6 +11,9 @@
 //      ——`activity`を持たない合図なので、様子の報告に相乗りさせると理由ラベルが`input`になり、
 //      何が起きたのかもIssueに残らない
 //   3. 応答終了（`Stop`）では立たない——毎ターン確認待ちにしない
+//   4. ただし**auto modeのクラシファイアに拒否されたまま終わった`Stop`**は、様子ではなく
+//      引き上げの受け口へ送る（#2844）——この形は`Notification`が飛ばないので、ここを通さないと
+//      「応答が終わった」として`00.check-user`まで外れ、人を待っていることが画面から消える
 //
 // 実物のissue-deckは立てられないので、受け取った本文を記録するだけのHTTPサーバーを置く
 // （`session-notify-plan.test.mjs`と同じ形）。
@@ -98,6 +101,49 @@ function runHook(hookJson) {
   return done;
 }
 
+/**
+ * 転記（JSONL）を作ってパスを返す（#2844）。
+ *
+ * 判定は**行単位の文字列一致**（`"type":"tool_use"` と拒否の決まり文句の、最後の出現位置の
+ * 前後関係）なので、テストもレコードの最小形だけを置く。
+ */
+function writeTranscript(lines) {
+  const file = path.join(workDir, `transcript-${received.length}-${Math.random()}.jsonl`);
+  writeFileSync(file, lines.map((line) => `${line}\n`).join(""));
+  return file;
+}
+
+/** ツールを実際に呼び出したassistantレコード。 */
+const toolUse = JSON.stringify({
+  type: "assistant",
+  message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
+});
+
+/** auto modeのクラシファイアが拒否したときのtool_result（`Notification`は飛ばない）。 */
+const classifierDenial = JSON.stringify({
+  type: "user",
+  message: {
+    role: "user",
+    content: [
+      {
+        type: "tool_result",
+        content:
+          "Permission for this action was denied by the Claude Code auto mode classifier. Reason: Blocked by classifier.",
+      },
+    ],
+  },
+});
+
+/** 拒否のあと、説明のテキストだけを出してターンを終えたassistantレコード。 */
+const assistantText = JSON.stringify({
+  type: "assistant",
+  message: { role: "assistant", content: [{ type: "text", text: "ブロックされました" }] },
+});
+
+function escalations() {
+  return received.filter((entry) => entry.path === "/api/dispatch/sessions/interrupted");
+}
+
 function activityReports() {
   return received.filter((entry) => entry.path === "/api/dispatch/sessions/activity");
 }
@@ -140,11 +186,8 @@ describe("session-notify.sh の様子の報告", () => {
     });
 
     expect(activityReports()).toEqual([]);
-    const escalations = received.filter(
-      (entry) => entry.path === "/api/dispatch/sessions/interrupted",
-    );
-    expect(escalations).toHaveLength(1);
-    expect(escalations[0].body).toMatchObject({
+    expect(escalations()).toHaveLength(1);
+    expect(escalations()[0].body).toMatchObject({
       repository: "guchi-apps/issue-deck",
       issue: 2280,
       hostName: expect.any(String),
@@ -158,5 +201,95 @@ describe("session-notify.sh の様子の報告", () => {
     await runHook({ hook_event_name: "SessionStart", session_id: "sess-1" });
 
     expect(received).toEqual([]);
+  });
+
+  // #2844。クラシファイアの拒否には承認プロンプトが伴わず`Notification`が飛ばないため、
+  // `Stop`をそのまま様子として報告すると、人を待っていること自体が画面から消える。
+  it("クラシファイアに拒否されたまま終わった応答は、引き上げの受け口へ送る", async () => {
+    const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+    expect(escalations()).toHaveLength(1);
+    expect(escalations()[0].body).toMatchObject({
+      repository: "guchi-apps/issue-deck",
+      issue: 2280,
+      tmuxSessionName: "issue-deck-issue-2280",
+      reason: "classifier_blocked",
+    });
+  });
+
+  // 様子を送らないと「生きていて入力待ちでもない」＝まだ動いている、と判定され、確認待ちの
+  // 件数から外れてトーストも最大10分保留される（`lib/workflow-badge-activity.ts`）。
+  // Push通知だけが鳴る形になり、「画面に出ない」という元の症状が半分残る。
+  it("画面の様子も入力待ちにする。ただしラベルの付け外しはこの往復に載せない", async () => {
+    const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+    expect(activityReports()).toHaveLength(1);
+    expect(activityReports()[0].body).toMatchObject({
+      activity: "waiting_input",
+      checkUserRequested: false,
+      planResolved: false,
+    });
+  });
+
+  // 拒否されたコマンドにはシークレットが混ざりうるうえ、Issueコメントは公開リポジトリに残る。
+  it("引き上げの本文に転記の中身を載せない", async () => {
+    const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+    expect(escalations()[0].body.detail).not.toContain("Blocked by classifier");
+    expect(escalations()[0].body.detail).toContain("auto modeのクラシファイア");
+  });
+
+  it("拒否のあとにツールが走っていれば（迂回できていれば）これまでどおり応答終了として報告する", async () => {
+    const transcript = writeTranscript([classifierDenial, toolUse, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+    expect(escalations()).toEqual([]);
+    expect(activityReports()).toHaveLength(1);
+    expect(activityReports()[0].body).toMatchObject({ activity: "responded" });
+  });
+
+  // `Stop`はターンごとに飛ぶので、印が無いと拒否が続くあいだIssueコメントが増え続ける。
+  it("同じ停止で二度は引き上げない", async () => {
+    const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+    expect(escalations()).toHaveLength(1);
+    // 2回目は引き上げず、これまでどおり応答終了として報告するだけ
+    expect(activityReports().map((entry) => entry.body.activity)).toEqual([
+      "waiting_input",
+      "responded",
+    ]);
+  });
+
+  // 印が消えないと、一度引き上げたセッションが次に同じ形で止まったとき誰にも伝わらない。
+  it("拒否のまま終わらなかった応答があれば、次の拒否をまた引き上げる", async () => {
+    const blocked = writeTranscript([toolUse, classifierDenial, assistantText]);
+    const recovered = writeTranscript([classifierDenial, toolUse, assistantText]);
+
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: blocked });
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: recovered });
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: blocked });
+
+    expect(escalations()).toHaveLength(2);
+  });
+
+  it("転記が渡らない・読めない場合はこれまでどおり応答終了として報告する", async () => {
+    await runHook({
+      hook_event_name: "Stop",
+      session_id: "sess-1",
+      transcript_path: path.join(workDir, "missing.jsonl"),
+    });
+
+    expect(escalations()).toEqual([]);
+    expect(activityReports()).toHaveLength(1);
   });
 });

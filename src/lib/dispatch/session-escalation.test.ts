@@ -113,3 +113,42 @@ describe("buildSessionInterruptedCommentBody（reason: tool_call_stall）", () =
     expect(body).toContain("自動では外れません");
   });
 });
+
+/**
+ * #2844。auto modeのクラシファイアにコマンドを拒否されたまま応答を終えたときにIssueへ出す案内。
+ *
+ * **この形は`Notification`が飛ばず`Stop`だけが飛ぶ**ので、案内が無いと画面からは「正常に応答
+ * した」ようにしか見えない（guchi-apps/aide#253で`gh pr create`が拒否され、無音のまま放置された）。
+ * 守るのは「原因の説明」と「続け方の選択肢」の2つで、出口の構造は他の理由と共通にする。
+ */
+describe("buildSessionInterruptedCommentBody（reason: classifier_blocked）", () => {
+  const body = buildSessionInterruptedCommentBody({
+    hostName: "subpc",
+    tmuxSessionName: "aide-issue-253",
+    detail: "auto modeのクラシファイアがコマンドを拒否したまま応答が終わりました。",
+    remoteControlUrl: "https://claude.ai/code/session_01ABC",
+    reason: "classifier_blocked",
+  });
+
+  it("クラシファイアの拒否で終わったという原因を説明する", () => {
+    expect(body).toContain("auto modeのクラシファイアにコマンドを拒否されたまま");
+    expect(body).not.toContain("APIエラーで中断したまま止まっています");
+    expect(body).not.toContain("呼び出されないまま停滞しています");
+  });
+
+  it("Notificationが飛ばないため画面からは応答済みに見えることに触れる", () => {
+    expect(body).toContain("`Notification`フックは飛ばず");
+  });
+
+  it("継続指示だけでは解除されないことと、続け方の選択肢を出す", () => {
+    expect(body).toContain("継続指示だけでは解除されません");
+    expect(body).toContain("承認プロンプトで許可する");
+    expect(body).toContain("人が代わりに実行");
+  });
+
+  it("続きを人が引き取るための出口は共通のまま出す", () => {
+    expect(body).toContain("tmux attach -t aide-issue-253");
+    expect(body).toContain("https://claude.ai/code/session_01ABC");
+    expect(body).toContain("自動では外れません");
+  });
+});

@@ -534,6 +534,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Notification` | `notification_type` が `permission_prompt` | 承認プロンプト・`AskUserQuestion`の質問 | 様子（`waiting_input`）＋`00.check-user`（＝Push通知） |
 | `Notification` | `notification_type` が `idle_prompt` | 応答終了から60秒アイドル | **送らない** |
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | 様子（`responded`）＋`00.check-user`を解く保険 |
+| `Stop` | 転記の末尾が「クラシファイアの拒否のあと一度もtool_useが無い」形 | 拒否されたまま応答を終えた（#2844） | Issueコメント＋`00.check-user`＋`01.check-blocked`＋様子（`waiting_input`）（後述） |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | 計画を送り、画面の返事を待つ |
 | `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
@@ -613,6 +614,55 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   ツール呼び出し風のテキスト）なので競合しない。運用で調整したい場合は
   `deploy/subpc/dispatch.env.example`の`SESSION_TOOL_CALL_STALL_MINUTES`を上書きする
 - 境界は`scripts/session-tool-call-stall.test.mjs`が固定している
+
+### auto modeのクラシファイアに拒否されたまま応答を終えることがある（#2844）
+
+**`Stop`が正常に発火していても、人を待って止まっていることがある。** `--permission-mode auto`の
+クラシファイアは、**承認プロンプトを出さずに**ツールを拒否し、
+`Permission for this action was denied by the Claude Code auto mode classifier`という
+tool_resultだけを返すことがある（実測では3回連続で拒否されて初めて承認プロンプトへ昇格する）。
+拒否されたエージェントが説明のテキストだけを出してターンを終えると、`Notification`は飛ばず
+`Stop`だけが飛ぶため、**画面からは「正常に応答した」ようにしか見えない。**
+
+guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55:59）、セッションは説明を
+出してターンを終え（11:56:08）、issue-deckには`activity: responded`が載って`00.check-user`まで
+外れた。端末を覗いた人が「進めて」と打つ11:59まで、3分間どこにも何も出ていない。
+
+`gh pr create`のような書き込み・外部へ出る操作をクラシファイアの判断に委ねること自体は意図した
+設計で（`scripts/lib/agent-allowed-tools.sh`の「何を入れて、何を入れないか」）、**直すのは
+伝え方の方**。プロンプトは「拒否されたら`AskUserQuestion`で聞く」と指示しているが、それは
+エージェントが従うかどうかに依存していて担保が無い（計画の投稿をフックへ移した#1342と同じ形）。
+
+- **判定は`Stop`の時点で行う**（pollerではない）。転記の末尾を行単位で見て、
+  `"type":"tool_use"`を含む行と拒否の決まり文句を含む行の**最後の出現位置**を比べ、拒否の方が
+  後ろなら「拒否されたきり何も動いていない」とみなす。**判定材料はその時点で揃っている**ので、
+  #2655の停滞検知のように時間を待つ理由が無い（待つと、その分だけ人が気づくのが遅れる）
+- **自力で迂回した場合・`AskUserQuestion`へ進んだ場合は対象外。** どちらも拒否の後ろに
+  tool_useが来るので、位置の比較で落ちる
+- **既存の`/api/dispatch/sessions/interrupted`をそのまま使う**（`reason: "classifier_blocked"`）。
+  Issueコメントの原因説明と続け方だけを出し分け、出口の構造は共通
+- **`detail`に拒否されたコマンドを載せない。** コマンドにはシークレットが混ざりうるうえ、
+  Issueコメントは公開リポジトリに残る（`SessionInterrupted`と同じ約束）
+- **状態は`Stop`ではなく`permission_prompt`として記録する。** `Stop`として記録すると回収
+  （`reap-sessions.sh`）が猶予（既定5分）で畳みに来て、人を待っているセッションを閉じてしまう
+- **引き上げと合わせて、様子（`waiting_input`）も送る。** ここだけは他の引き上げと違う——
+  pollerが合成する`SessionInterrupted`は「今どうしているか」を言えないが、こちらは
+  **人を待っていると言い切れる**。送らないとそのセッションは「生きていて入力待ちでもない」＝
+  **まだ動いている**と判定され（`lib/workflow-badge-activity.ts`の`isSessionActivelyWorking`）、
+  左メニュー・ヘッダー・ベルの「確認が必要」の件数から外れ、アプリ内トーストも最大10分保留
+  される（`lib/check-user-notification.ts`の`CHECK_USER_TOAST_MAX_HOLD_MS`）。Push通知だけが
+  鳴る形になり、「画面に出ない」という元の症状が半分残る。**ラベルの付け外し
+  （`checkUserRequested`・`planResolved`）はこの往復に載せない**——付けるのは引き上げの受け口で、
+  外すのは人の操作、という約束をここで崩さないため
+- **理由ラベルは`01.check-blocked`**（`01.check-input`ではない）。ターンは既に終わっており、
+  人が新しい指示を入れるまでセッションは動き出さないため、やることは「回答」ではなく
+  **続け方の指示**にあたる。「拒否されたら`AskUserQuestion`で聞く」を守れたセッションの方は
+  そちらが`01.check-input`を付けるので、ここが拾うのは**守れなかった場合**だけになる
+- **同じ停止で二度は引き上げない**（印はホスト側の`<セッション名>.classifier-block`）。
+  `Stop`はターンごとに飛ぶため、印が無いと拒否が続くあいだコメントが増え続ける。印を消すのは
+  「拒否のまま終わらなかった`Stop`」と「人が答えて作業へ戻った`working`」の2つ
+- 境界は`scripts/session-notify-activity.test.mjs`と
+  `src/lib/dispatch/session-escalation.test.ts`が固定している
 
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 
