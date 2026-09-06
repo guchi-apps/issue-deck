@@ -116,10 +116,13 @@ export function toPullRequestSummary(
     // 自動レビューの判定はPR本文に文字として残っている（#2843）。本文はこの層まで来ているので、
     // 読み取りもここで済ませ、画面へは判定だけを渡す（`linkedIssueNumbers`と同じ扱い）。
     reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
-    // 表があるのはリリースPRの本文だけ。それ以外で毎回パースしないよう、base側で先に絞る
-    releaseVerification: isProductionMerge({ baseRef })
-      ? withoutReviewBodies(parseReleaseVerification(pullRequest.body))
-      : null,
+    // 表があるのはリリースPRの本文だけ。**closedなPRでは組み立てない**——「全てのPR」ビューは
+    // 1リポジトリあたり30件のclosedを載せるが、closedでは`canMergeFromDeck`がfalseで
+    // マージ確認ダイアログ自体が開かないため、行を詰めても応答が太るだけになる
+    releaseVerification:
+      isProductionMerge({ baseRef }) && pullRequest.state !== "closed"
+        ? withoutReviewBodies(parseReleaseVerification(pullRequest.body))
+        : null,
     createdAt: pullRequest.created_at,
     updatedAt: pullRequest.updated_at,
   };

@@ -89,7 +89,9 @@ export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeC
   // 変更点の取得を待つのは一覧の行だけで、判定の突き合わせは行が揃った時点で済む。
   const reviewed = changes === null ? null : applyReviewVerdicts(changes, pullRequest.releaseVerification);
   const tally = reviewed === null ? null : tallyChangeReviews(reviewed);
-  // 判定が1件も取れていないリリースでは内訳の帯を出さない（「記録なし 5件」だけの帯になる）
+  // 判定が1件も取れていないリリース（自動レビューを持たないリポジトリ）では内訳の帯を出さない
+  // ——「記録なし 5件」だけの帯になるため。1件でも判定があれば「記録なし」も並べて、
+  // 行数と分母が合わない理由を読めるようにする（母数からバンプPRは外れている）
   const hasVerdicts = tally !== null && tally.total > tally.unknown;
 
   return (

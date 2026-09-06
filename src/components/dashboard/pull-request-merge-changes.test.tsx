@@ -150,9 +150,9 @@ describe("PullRequestMergeChanges", () => {
     render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
 
     expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
-    // 行の判定は灰色の「レビューなし」だけになり、「記録なし 1」の帯は出さない
-    expect(screen.getByText("レビューなし")).toBeTruthy();
-    expect(screen.queryByText("記録なし")).toBeNull();
+    // 行の判定は灰色の「記録なし」だけになり、内訳の帯そのものを出さない
+    expect(screen.getByText("記録なし")).toBeTruthy();
+    expect(screen.queryByText("問題なし")).toBeNull();
   });
 
   it("PRのタイトルから版を出す", async () => {

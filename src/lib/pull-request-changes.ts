@@ -129,12 +129,19 @@ export function pullRequestChangeIssueLabel(change: PullRequestChange): string |
 /** 変更1件と、そのPRの自動レビュー判定（#2843） */
 export type PullRequestChangeReview = PullRequestChange & {
   reviewKind: ReviewVerdictKind;
-  /** 表のセルにあった文言。記録が無い行は「レビューなし」 */
+  /** 表のセルにあった文言。行が無いバンプPRは「レビューなし」、それ以外は「記録なし」 */
   reviewLabel: string;
 };
 
-/** 判定の記録が無い行の文言。**灰色で出す**——危険信号ではない */
-const NO_REVIEW_LABEL = "レビューなし";
+/**
+ * 表に行が無かったときの文言。**どちらも灰色で出す**——危険信号ではない。
+ *
+ * バンプPRと、それ以外（対応Issueが凍結時点でcloseされていた・`issue-<番号>`以外のブランチ）を
+ * 分けているのは、前者が「レビューの対象ではない」・後者が「対象だが記録を辿れない」で意味が
+ * 違うため。記号も`–`と`?`で変わる。
+ */
+const NOT_REVIEWED_LABEL = "レビューなし";
+const NO_RECORD_LABEL = "記録なし";
 
 /**
  * リリースPR本文の検証結果を、含まれる変更の各行へ突き合わせる（#2843）。
@@ -143,9 +150,13 @@ const NO_REVIEW_LABEL = "レビューなし";
  * いる（`ReleaseVerificationRow.pullRequestNumber`）ので、レビューが走った単位そのもので
  * 結び付けられる。PR番号が空の行だけIssue番号で拾う。
  *
- * **見つからない行は落とさず「レビューなし」にする。** 表そのものが無いリリース（古いPR・
- * 自動レビューを持たないリポジトリ）でも変更一覧は今までどおり出す必要があり、
- * 判定の欄だけが灰色になる。
+ * **見つからない行は落とさず灰色にする。** 表そのものが無いリリース（古いPR・自動レビューを
+ * 持たないリポジトリ）でも変更一覧は今までどおり出す必要があり、判定の欄だけが灰色になる。
+ *
+ * **バージョンバンプPRは必ず表に無い。** 表を作るループが回すのは対象issueの番号で
+ * （`reusable-release-develop-to-main.yml`）、バンプPRのブランチは`release/v*`のため
+ * Issue番号を持たない。「記録を辿れなかった」のではなく「レビューの対象ではない」ので、
+ * `skipped`（実施なし）として扱い、内訳の数からも外す（`tallyChangeReviews`）。
  */
 export function applyReviewVerdicts(
   changes: readonly PullRequestChange[],
@@ -162,11 +173,12 @@ export function applyReviewVerdicts(
     const row =
       (change.pullRequestNumber !== null ? byPullRequest.get(change.pullRequestNumber) : undefined) ??
       (change.issueNumber !== null ? byIssue.get(change.issueNumber) : undefined);
-    return {
-      ...change,
-      reviewKind: row?.reviewKind ?? "unknown",
-      reviewLabel: row?.reviewLabel ?? NO_REVIEW_LABEL,
-    };
+    if (row) {
+      return { ...change, reviewKind: row.reviewKind, reviewLabel: row.reviewLabel };
+    }
+    return change.kind === "version-bump"
+      ? { ...change, reviewKind: "skipped" as const, reviewLabel: NOT_REVIEWED_LABEL }
+      : { ...change, reviewKind: "unknown" as const, reviewLabel: NO_RECORD_LABEL };
   });
 }
 
@@ -174,14 +186,18 @@ export function applyReviewVerdicts(
  * 並べた行の判定を数える（#2843）。**表そのものの集計（`ReleaseVerification.tally`）は使わない**
  * ——あちらはIssueを数えたもので、画面に並ぶ行（PR）とは母数が違う。「5本のうち1本が要修正」を
  * 出すための数なので、出している行から数える。
+ *
+ * **バージョンバンプPRは数えない。** レビューの対象ではないため、毎リリースで必ず1件の
+ * 「実施なし」が積まれ、分母が実態とずれる。
  */
 export function tallyChangeReviews(
   changes: readonly PullRequestChangeReview[],
 ): ReleaseVerificationTally {
+  const reviewable = changes.filter((change) => change.kind !== "version-bump");
   const count = (kind: ReviewVerdictKind) =>
-    changes.filter((change) => change.reviewKind === kind).length;
+    reviewable.filter((change) => change.reviewKind === kind).length;
   return {
-    total: changes.length,
+    total: reviewable.length,
     ok: count("ok"),
     needsCheck: count("needs-check"),
     changesRequested: count("changes-requested"),

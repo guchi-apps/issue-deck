@@ -206,14 +206,23 @@ describe("applyReviewVerdicts", () => {
     expect(applied.reviewKind).toBe("needs-check");
   });
 
-  it("見つからない行・表そのものが無い場合は落とさず「レビューなし」にする", () => {
+  it("見つからない行・表そのものが無い場合は落とさず「記録なし」にする", () => {
     const changes = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
 
     expect(applyReviewVerdicts(changes, null)).toEqual([
-      { ...changes[0], reviewKind: "unknown", reviewLabel: "レビューなし" },
+      { ...changes[0], reviewKind: "unknown", reviewLabel: "記録なし" },
     ]);
     expect(applyReviewVerdicts(changes, verification([row({ pullRequestNumber: 9999, issueNumber: 9999 })]))[0]
       .reviewKind).toBe("unknown");
+  });
+
+  it("バンプPRは必ず表に無いので、記録なしではなく「レビューなし」（実施なし）にする", () => {
+    const changes = toPullRequestChanges([mergeCommit("a1", 2079, "release/v4.19.0", "v4.19.0をリリースする")]);
+
+    const [applied] = applyReviewVerdicts(changes, null);
+    // `skipped`は灰色で記号が`–`。危険信号ではなく「レビューの対象ではない」ことを表す
+    expect(applied.reviewKind).toBe("skipped");
+    expect(applied.reviewLabel).toBe("レビューなし");
   });
 });
 
@@ -251,13 +260,14 @@ describe("tallyChangeReviews", () => {
       tally: { total: 2, ok: 1, needsCheck: 0, changesRequested: 1, skipped: 0, unknown: 0 },
     });
 
+    // バンプPRは母数から外す（毎リリース必ず1件の「実施なし」が積まれ、分母が実態とずれる）
     expect(tallyChangeReviews(applied)).toEqual({
-      total: 3,
+      total: 2,
       ok: 1,
       needsCheck: 0,
       changesRequested: 1,
       skipped: 0,
-      unknown: 1,
+      unknown: 0,
     });
   });
 });
