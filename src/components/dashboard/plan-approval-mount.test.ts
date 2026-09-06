@@ -77,4 +77,13 @@ describe("質問の回答パネルの置き場所（#2189）", () => {
     const source = readFileSync(path, "utf8");
     expect(source).toContain("premise={questionPremise}");
   });
+
+  /**
+   * #2820。手作業の手順も前提と同じくIssue（本文とラベル）からしか求められない。
+   * 片方へ足し忘れると、そちらでは「実施されましたか？」だけが出て何をすればよいか分からない。
+   */
+  it.each(DETAIL_SOURCES)("%s が質問の指す手順をパネルへ渡す", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("manualStep={questionManualStep}");
+  });
 });

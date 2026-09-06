@@ -13,6 +13,7 @@ import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
   describeDispatchHostSelfUpdate,
+  isDispatchHostPollerRestartPending,
   type DispatchHostCheckoutRow,
   type DispatchHostCheckoutTone,
   type DispatchHostSelfUpdateRow,
@@ -247,10 +248,15 @@ function HostCard({
   // （成功すれば`behindCount`は0になるが、そこでボタンごと消すと「押しても何も起きなかった」
   // ままに見える）
   const selfUpdate = describeDispatchHostSelfUpdate(selfUpdateJob);
+  // **チェックアウトが最新でも、走っているコードが古ければ出す**（#2815）。`git pull`だけでは
+  // プロセスの中身が入れ替わらないため、`behindCount`が0に戻った後も古い版が走り続ける。
+  // `SELF_UPDATE`は追い付いていても`exec`で入れ替わるので、そのまま押せばこの状態も解ける
   const canSelfUpdate =
     onRequestSelfUpdate !== undefined &&
     host.selfUpdateCapable === true &&
-    ((host.checkout?.behindCount ?? 0) > 0 || selfUpdate !== null);
+    ((host.checkout?.behindCount ?? 0) > 0 ||
+      isDispatchHostPollerRestartPending(host.checkout) ||
+      selfUpdate !== null);
   // ホストごと再起動できるか（#2496）。**「更新して再起動」とは別物**で、こちらはOSごと落ちる
   const reboot = describeDispatchHostReboot(host);
   const rebootResult = describeDispatchHostRebootJob(rebootJob);
@@ -301,9 +307,10 @@ function HostCard({
         </div>
       )}
 
-      {/* **遅れているときと、押した更新の結果がまだ読める間だけ出す。** 常に置くと、押す意味が
-          無い状態でも再起動だけが走り、そのぶんジョブの払い出しが止まる。対応していない
-          pollerにも出さない（配っても未知の種別として失敗するだけ） */}
+      {/* **遅れているとき・pollerが古いコードのまま走っているとき（#2815）と、押した更新の
+          結果がまだ読める間だけ出す。** 常に置くと、押す意味が無い状態でも再起動だけが走り、
+          そのぶんジョブの払い出しが止まる。対応していないpollerにも出さない
+          （配っても未知の種別として失敗するだけ） */}
       {canSelfUpdate && (
         <SelfUpdateRow
           hostName={host.name}
@@ -440,8 +447,8 @@ function SelfUpdateRow({
  * 「再起動」が違う顔をしていると、押す前にどちらがどちらか読み取れない。
  *
  * **違うのは押せない理由を出すこと。** 「更新して再起動」は押せるかどうかがチェックアウトの
- * 遅れだけで決まるが、こちらはセッションが0本であることが要る。理由を出さずに押せなくすると、
- * 「なぜ押せないのか」が画面のどこにも無い状態になる。
+ * 状態（遅れ・pollerの再起動待ち）だけで決まるが、こちらはセッションが0本であることが要る。
+ * 理由を出さずに押せなくすると、「なぜ押せないのか」が画面のどこにも無い状態になる。
  *
  * **押した結果もここに出す。** `REBOOT`は起動ジョブでも制御ジョブでもないため実行キューの
  * 一覧に出ず、pollerが返した失敗（「セッションが3本走っています」）が画面に現れないまま
@@ -745,9 +752,10 @@ function LaunchHoldRow({ message }: { message: string }) {
  * いちばん高い状態に合わせることになり、普通の状態のカードに常に空きができる）。
  *
  * - 応答していて最新: 見出し＋使用率。**ここに合わせている**（ずれ0）
- * - 応答していて遅れている・遅れ不明: 上にスクリプトの版が1行増える（`mt-1`＋16.5px＝約21px
- *   ぶん下へ動く）。`describeDispatchHostCheckout`は`behindCount`が0以外か`null`なら
- *   `tone`を`normal`以外にするため、developが進んで「更新して再起動」を押すまでの間はこちら
+ * - 応答していて遅れている・遅れ不明・pollerが再起動待ち（#2815）: 上にスクリプトの版が1行
+ *   増える（`mt-1`＋16.5px＝約21pxぶん下へ動く）。`describeDispatchHostCheckout`は
+ *   `behindCount`が0以外か`null`なら`tone`を`normal`以外にするため、developが進んで
+ *   「更新して再起動」を押すまでの間はこちら
  * - 応答していない: `describeDispatchHostMetrics`が`null`を返して使用率ごと消え、見出しだけの
  *   カードになる（約51px縮む）。pollerが止まっているときだけなので、そのときは縮むに任せる
  * - メモリ・SWAPの逼迫で起動を見送っている（#2095）: 使用率の下に1行増える。逼迫している

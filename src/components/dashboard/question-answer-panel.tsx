@@ -7,12 +7,17 @@ import {
   Copy,
   ExternalLink,
   Keyboard,
+  ListChecks,
   Loader2,
   MessageCircleQuestion,
   TriangleAlert,
 } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import {
+  buildWhereToRunLines,
+  ManualStepWhereToRun,
+} from "@/components/dashboard/manual-step-where-to-run";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +34,8 @@ import {
   type SessionQuestionRequestView,
 } from "@/lib/dispatch/session-question-request";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { stripCodeBlocks } from "@/lib/manual-step-guide";
+import type { ManualStepQuestionGuide } from "@/lib/manual-step-question";
 import { COMMENT_AGENT_PROFILES } from "@/lib/github/comment-source";
 import { extractQuestionCommandBlocks } from "@/lib/session-question-commands";
 import { cn } from "@/lib/utils";
@@ -61,6 +68,7 @@ export function QuestionAnswerPanel({
   session,
   dispatch,
   premise,
+  manualStep,
   onCheckUserResolved,
 }: {
   request: SessionQuestionRequestView;
@@ -72,6 +80,11 @@ export function QuestionAnswerPanel({
    * 選び方は`findQuestionPremise`（`src/lib/dispatch/question-premise.ts`）。
    */
   premise?: QuestionPremise | null;
+  /**
+   * 質問が指している手作業の手順（#2820）。無ければ`null`でカードごと描かない。
+   * 当て方は`findManualStepForQuestion`（`src/lib/manual-step-question.ts`）。
+   */
+  manualStep?: ManualStepQuestionGuide | null;
   /**
    * 回答を送って確認待ちが解けたときに呼ぶ（#2341。計画の承認パネルと同じ）。サーバーが
    * `00.check-user`と理由ラベルを外すのと同じことを、手元のIssueにも先に反映させる。
@@ -198,6 +211,15 @@ export function QuestionAnswerPanel({
             コメント欄のずっと下にあり、読みに行くと選択肢が画面外へ出る（スマホで顕著） */}
         {premise && <QuestionPremiseCard premise={premise} request={request} />}
 
+        {/* 質問が指している手順の中身（#2820）。**前提コメントの下・選択肢の真上**に置く——
+            「実施されましたか？」に答えるには、まずその手順を実施する必要がある */}
+        {manualStep && (
+          <ManualStepQuestionCard
+            guide={manualStep}
+            repositoryFullName={request.repositoryFullName}
+          />
+        )}
+
         {unreadable ? (
           <p className="text-xs text-muted-foreground">
             質問の内容を読み取れませんでした。Remote Controlか端末から答えてください。
@@ -312,6 +334,78 @@ function QuestionPremiseCard({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 質問が指している手作業の手順（#2820）。
+ *
+ * 代行できない手順で「実施されましたか？」と聞かれたとき、**答えるのに必要なのは
+ * 手順の中身**（何を・どこで・どのコマンドで）で、それは本文にしか無かった。Issue詳細は
+ * 手順を並べない方針（`manual-step-panel.tsx`）なので、読むには画面の下まで下がることになる。
+ *
+ * **出すのは本文から解析したものだけ**で、推測で補わない（手作業アシスタントと同じ立場）。
+ * 手順のMarkdown・コマンド・実行する端末・接続先は、すべて`findManualStepForQuestion`が
+ * 返したものをそのまま描く。
+ *
+ * **既定で開いたまま**にする（前提コメントのように畳まない）。前提は「読み返せると助かる」
+ * ものだが、こちらは読まずに答えると手順を飛ばすことになる。
+ *
+ * 配色はvioletで、`71.manual-step`ラベルの色・手作業アシスタントの部品と揃える。amberは
+ * 「ユーザーの確認待ち」（このパネルの外枠）の色なので、中で重ねない。
+ */
+function ManualStepQuestionCard({
+  guide,
+  repositoryFullName,
+}: {
+  guide: ManualStepQuestionGuide;
+  repositoryFullName: string;
+}) {
+  // 「手元で実行する」が出るときだけ本文のコードブロックを畳む（#2403と同じ判定）。
+  // 接続先もカレントディレクトリも本文に無い手順ではその並びごと出ないので、
+  // そのまま畳むとコマンドが画面から消える
+  const whereLines = buildWhereToRunLines(guide.where, guide.command, guide.device);
+
+  return (
+    <section className="overflow-hidden rounded-md border border-violet-500/40 bg-violet-500/5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-violet-500/40 px-2.5 py-1.5">
+        <span className="flex items-center gap-1 text-xs font-semibold text-violet-700 dark:text-violet-300">
+          <ListChecks className="size-3" aria-hidden />
+          この手順でやること
+        </span>
+        <span className="rounded border bg-card px-1.5 py-px text-[10.5px] font-semibold tabular-nums text-muted-foreground">
+          手順 {guide.order} / {guide.total}
+        </span>
+        {guide.device !== null && (
+          <span className="rounded border border-violet-500/40 bg-card px-1.5 py-px text-[10.5px] font-semibold text-violet-700 dark:text-violet-300">
+            {guide.device}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-col gap-2 p-2.5">
+        {/* `copyableInlineCode`（#2753）で、`` `apps` ``のようなバッククォート表記を
+            スマホから範囲選択なしで拾えるようにする（手作業アシスタントと同じ） */}
+        <MarkdownBody
+          content={
+            whereLines.length > 0 ? stripCodeBlocks(guide.step.markdown) : guide.step.markdown
+          }
+          repositoryFullName={repositoryFullName}
+          copyableInlineCode
+        />
+        {whereLines.length > 0 ? (
+          <ManualStepWhereToRun
+            where={guide.where}
+            device={guide.device}
+            command={guide.command}
+            reason={guide.reason}
+          />
+        ) : (
+          guide.reason !== null && (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">{guide.reason}</p>
+          )
+        )}
+      </div>
+    </section>
   );
 }
 

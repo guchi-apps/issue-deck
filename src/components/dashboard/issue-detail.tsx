@@ -54,6 +54,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
+import { findManualStepForQuestion } from "@/lib/manual-step-question";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import {
   LocalSessionApprovalNotice,
@@ -731,6 +732,15 @@ export function IssueDetail({
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
   const questionPremise = questionRequest ? findQuestionPremise(comments) : null;
+  // 質問が指している手作業の手順（#2820）。代行できない手順で「実施されましたか？」と
+  // 聞かれたとき、答えるのに必要な「何をどこで実行するのか」は本文の中にしか無かった
+  const questionManualStep = questionRequest
+    ? findManualStepForQuestion({
+        labels: issue.labels,
+        body: issue.body,
+        questions: questionRequest.questions,
+      })
+    : null;
   // 走っているセッションが入力待ちのときは、承認・修正ボタンを出さずRemote Controlへ寄せる（#1417）。
   // 入力待ちでは`00.check-user`が自動で付き、人が答えた時点で自動で外れる（`session-notify.sh`）
   const sessionWaitingInput = isSessionWaitingInput(issueSession);
@@ -1039,6 +1049,7 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 premise={questionPremise}
+                manualStep={questionManualStep}
                 onCheckUserResolved={handleCheckUserResolved}
               />
             </div>
