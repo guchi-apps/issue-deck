@@ -1,3 +1,9 @@
+import type {
+  ReleaseVerification,
+  ReleaseVerificationRow,
+  ReleaseVerificationTally,
+  ReviewVerdictKind,
+} from "@/lib/github/release-verification";
 import type { PullRequestChange } from "@/types/pull-request";
 
 /** 解析に使うコミット1件。GitHubの応答（`GithubApiPullRequestCommit`）から必要な2つだけを抜いたもの */
@@ -98,9 +104,104 @@ export function applyIssueTitles(
   });
 }
 
-/** 一覧の行頭に出す番号。対応Issueが分かればIssue番号、分からなければPR番号（#2080） */
+/**
+ * 一覧の行頭に出す番号。**Pull Requestの番号を先に出す**（#2843）。
+ *
+ * 以前は対応Issueの番号を先に出していた（#2080）が、コードレビューが走る単位はPull Requestで、
+ * 判定もPRに紐づく。行頭がIssue番号のままだと「この判定はどのPRのものか」を読み替えることに
+ * なるため、行の主語をPRへ移した。対応Issue番号は`pullRequestChangeIssueLabel`で行の中に残す。
+ */
 export function pullRequestChangeLabel(change: PullRequestChange): string | null {
-  if (change.issueNumber !== null) return `#${change.issueNumber}`;
   if (change.pullRequestNumber !== null) return `#${change.pullRequestNumber}`;
+  if (change.issueNumber !== null) return `#${change.issueNumber}`;
   return null;
+}
+
+/**
+ * 行頭のPR番号に添える対応Issue番号（#2843）。行頭がPR番号になっていない行（PR番号を
+ * 特定できずIssue番号を出している行）では二重に出さないためnullを返す。
+ */
+export function pullRequestChangeIssueLabel(change: PullRequestChange): string | null {
+  if (change.pullRequestNumber === null || change.issueNumber === null) return null;
+  return `Issue #${change.issueNumber}`;
+}
+
+/** 変更1件と、そのPRの自動レビュー判定（#2843） */
+export type PullRequestChangeReview = PullRequestChange & {
+  reviewKind: ReviewVerdictKind;
+  /** 表のセルにあった文言。行が無いバンプPRは「レビューなし」、それ以外は「記録なし」 */
+  reviewLabel: string;
+};
+
+/**
+ * 表に行が無かったときの文言。**どちらも灰色で出す**——危険信号ではない。
+ *
+ * バンプPRと、それ以外（対応Issueが凍結時点でcloseされていた・`issue-<番号>`以外のブランチ）を
+ * 分けているのは、前者が「レビューの対象ではない」・後者が「対象だが記録を辿れない」で意味が
+ * 違うため。記号も`–`と`?`で変わる。
+ */
+const NOT_REVIEWED_LABEL = "レビューなし";
+const NO_RECORD_LABEL = "記録なし";
+
+/**
+ * リリースPR本文の検証結果を、含まれる変更の各行へ突き合わせる（#2843）。
+ *
+ * **突き合わせの鍵はPR番号。** 表の行はIssue番号を主語に作られているが、PR番号の列も持って
+ * いる（`ReleaseVerificationRow.pullRequestNumber`）ので、レビューが走った単位そのもので
+ * 結び付けられる。PR番号が空の行だけIssue番号で拾う。
+ *
+ * **見つからない行は落とさず灰色にする。** 表そのものが無いリリース（古いPR・自動レビューを
+ * 持たないリポジトリ）でも変更一覧は今までどおり出す必要があり、判定の欄だけが灰色になる。
+ *
+ * **バージョンバンプPRは必ず表に無い。** 表を作るループが回すのは対象issueの番号で
+ * （`reusable-release-develop-to-main.yml`）、バンプPRのブランチは`release/v*`のため
+ * Issue番号を持たない。「記録を辿れなかった」のではなく「レビューの対象ではない」ので、
+ * `skipped`（実施なし）として扱い、内訳の数からも外す（`tallyChangeReviews`）。
+ */
+export function applyReviewVerdicts(
+  changes: readonly PullRequestChange[],
+  verification: ReleaseVerification | null,
+): PullRequestChangeReview[] {
+  const byPullRequest = new Map<number, ReleaseVerificationRow>();
+  const byIssue = new Map<number, ReleaseVerificationRow>();
+  for (const row of verification?.rows ?? []) {
+    if (row.pullRequestNumber !== null) byPullRequest.set(row.pullRequestNumber, row);
+    byIssue.set(row.issueNumber, row);
+  }
+
+  return changes.map((change) => {
+    const row =
+      (change.pullRequestNumber !== null ? byPullRequest.get(change.pullRequestNumber) : undefined) ??
+      (change.issueNumber !== null ? byIssue.get(change.issueNumber) : undefined);
+    if (row) {
+      return { ...change, reviewKind: row.reviewKind, reviewLabel: row.reviewLabel };
+    }
+    return change.kind === "version-bump"
+      ? { ...change, reviewKind: "skipped" as const, reviewLabel: NOT_REVIEWED_LABEL }
+      : { ...change, reviewKind: "unknown" as const, reviewLabel: NO_RECORD_LABEL };
+  });
+}
+
+/**
+ * 並べた行の判定を数える（#2843）。**表そのものの集計（`ReleaseVerification.tally`）は使わない**
+ * ——あちらはIssueを数えたもので、画面に並ぶ行（PR）とは母数が違う。「5本のうち1本が要修正」を
+ * 出すための数なので、出している行から数える。
+ *
+ * **バージョンバンプPRは数えない。** レビューの対象ではないため、毎リリースで必ず1件の
+ * 「実施なし」が積まれ、分母が実態とずれる。
+ */
+export function tallyChangeReviews(
+  changes: readonly PullRequestChangeReview[],
+): ReleaseVerificationTally {
+  const reviewable = changes.filter((change) => change.kind !== "version-bump");
+  const count = (kind: ReviewVerdictKind) =>
+    reviewable.filter((change) => change.reviewKind === kind).length;
+  return {
+    total: reviewable.length,
+    ok: count("ok"),
+    needsCheck: count("needs-check"),
+    changesRequested: count("changes-requested"),
+    skipped: count("skipped"),
+    unknown: count("unknown"),
+  };
 }

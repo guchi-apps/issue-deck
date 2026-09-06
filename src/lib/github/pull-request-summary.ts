@@ -3,10 +3,34 @@ import type { CheckUserReason } from "@/lib/github/approval-labels";
 import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
+import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
-import { classifyPullRequest, extractLinkedIssueNumbers } from "@/lib/pull-request-list";
+import {
+  parseReleaseVerification,
+  type ReleaseVerification,
+} from "@/lib/github/release-verification";
+import {
+  classifyPullRequest,
+  extractLinkedIssueNumbers,
+  isProductionMerge,
+} from "@/lib/pull-request-list";
 import type { PullRequestCiCheck, PullRequestSummary } from "@/types/pull-request";
+
+/**
+ * リリースPRの検証結果から、レビューコメントの本文だけを落とす（#2843）。
+ *
+ * 表そのものはマージ確認ダイアログで判定を出すのに要るが、指摘の本文まで一覧の応答へ載せると
+ * 全リポジトリぶんで数十KB膨らむ。本文を読むのはPR詳細のパネルの役割で、そちらは詳細APIの
+ * 本文から読み直している。
+ */
+function withoutReviewBodies(verification: ReleaseVerification | null): ReleaseVerification | null {
+  if (!verification) return null;
+  return {
+    tally: verification.tally,
+    rows: verification.rows.map((row) => ({ ...row, reviewBody: null })),
+  };
+}
 
 /**
  * GitHub APIのPRを画面用の`PullRequestSummary`へ変換する。
@@ -89,6 +113,16 @@ export function toPullRequestSummary(
     mergeable: options.mergeable ?? null,
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     repairRun: options.repairRun ?? null,
+    // 自動レビューの判定はPR本文に文字として残っている（#2843）。本文はこの層まで来ているので、
+    // 読み取りもここで済ませ、画面へは判定だけを渡す（`linkedIssueNumbers`と同じ扱い）。
+    reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
+    // 表があるのはリリースPRの本文だけ。**closedなPRでは組み立てない**——「全てのPR」ビューは
+    // 1リポジトリあたり30件のclosedを載せるが、closedでは`canMergeFromDeck`がfalseで
+    // マージ確認ダイアログ自体が開かないため、行を詰めても応答が太るだけになる
+    releaseVerification:
+      isProductionMerge({ baseRef }) && pullRequest.state !== "closed"
+        ? withoutReviewBodies(parseReleaseVerification(pullRequest.body))
+        : null,
     createdAt: pullRequest.created_at,
     updatedAt: pullRequest.updated_at,
   };

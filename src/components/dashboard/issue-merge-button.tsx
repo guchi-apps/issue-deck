@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { GitMerge, GitPullRequestClosed, Loader2 } from "lucide-react";
 
+import { PullRequestMergeReview } from "@/components/dashboard/pull-request-merge-review";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import {
   isMergeJudgementPending,
   MERGE_JUDGEMENT_PENDING_LABEL,
@@ -45,6 +47,13 @@ type IssueMergeButtonProps = {
   onDeclined?: () => void;
   /** 対応PR番号。確認ダイアログの文面に使う。取得できない場合はnull */
   pullRequestNumber?: number | null;
+  /**
+   * 対応PRの自動レビュー判定（#2843）。確認ダイアログに出す。取得前・記録が無い場合はnull。
+   * PR画面のマージ確認と同じものを出し、Issue画面から押すときだけ判定が見えないのを無くす。
+   */
+  reviewVerdict?: PullRequestReviewVerdict | null;
+  /** 対応PRのURL。レビューコメントを読みに行く導線に使う */
+  pullRequestUrl?: string;
   /** 対応PRの最新コミットのCI状態。実行中はマージさせない */
   ciStatus?: PullRequestCiStatus | null;
   /**
@@ -86,6 +95,9 @@ type IssueMergeButtonProps = {
  * PR番号とは別のリクエストで後から届くため、届くまでのあいだ`ciStatus`も`mergeJudgement`も
  * nullになる。nullを「待つものが無い」と読むと、押せる「マージする」を先に出したうえで
  * 数秒後に「判定中」へ変わることになり、その窓で誤って押せてしまう。
+ *
+ * **確認ダイアログには対応PRの自動レビュー判定を出す**（#2843。`PullRequestMergeReview`）。
+ * PR画面のマージ確認と同じもので、押す前に「そのPRがちゃんとOKなのか」を読めるようにする。
  */
 export function IssueMergeButton({
   onMerge,
@@ -93,6 +105,8 @@ export function IssueMergeButton({
   onDecline,
   onDeclined,
   pullRequestNumber,
+  reviewVerdict,
+  pullRequestUrl,
   ciStatus,
   mergeJudgement,
   isDetailPending,
@@ -183,6 +197,7 @@ export function IssueMergeButton({
               マージコミットでdevelopへマージします。この操作は取り消せません。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <PullRequestMergeReview verdict={reviewVerdict ?? null} htmlUrl={pullRequestUrl} />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={confirmMerge} disabled={busy}>

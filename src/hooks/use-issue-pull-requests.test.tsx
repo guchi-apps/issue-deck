@@ -31,6 +31,7 @@ function pullRequest(number: number): IssuePullRequest {
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: 2352,
+    reviewVerdict: null,
   };
 }
 

@@ -104,8 +104,12 @@ for verdict in lgtm needs-check changes-requested; do
 done
 
 # 検証結果の節のマーカーは、書く側（レビューのワークフロー・ローカルのレビューエージェント）と
-# 読む側（リリースPRの集計）にまたがる。
-for file in "$WORKFLOW" "$RELEASE_WORKFLOW" "$REVIEW_AGENT_PROMPT"; do
+# 読む側（リリースPRの集計・マージ確認ダイアログのパーサー。#2843）にまたがる。
+# 画面側がずれると、マージを押す直前の判定が黙って「記録がありません」になる。
+VERDICT_PARSER="src/lib/github/pull-request-review-verdict.ts"
+[ -f "$VERDICT_PARSER" ] || { echo "エラー: $VERDICT_PARSER が見つかりません" >&2; exit 1; }
+
+for file in "$WORKFLOW" "$RELEASE_WORKFLOW" "$REVIEW_AGENT_PROMPT" "$VERDICT_PARSER"; do
   if ! grep -qF "$SECTION_START" "$file"; then
     echo "エラー: $file に検証結果の節の開始マーカーがありません。" >&2
     echo "  期待する文字列: $SECTION_START" >&2
@@ -113,8 +117,9 @@ for file in "$WORKFLOW" "$RELEASE_WORKFLOW" "$REVIEW_AGENT_PROMPT"; do
   fi
 done
 
-# 終了マーカーは、節を置き換える側だけが要る。集計側は開始マーカーの属性しか読まない。
-for file in "$WORKFLOW" "$REVIEW_AGENT_PROMPT"; do
+# 終了マーカーは、節を置き換える側と、節の範囲を切り出して読む側が要る。リリースPRの集計は
+# 開始マーカーの属性しか読まないので対象外。
+for file in "$WORKFLOW" "$REVIEW_AGENT_PROMPT" "$VERDICT_PARSER"; do
   if ! grep -qF "$SECTION_END" "$file"; then
     echo "エラー: $file に検証結果の節の終了マーカーがありません。" >&2
     echo "  期待する文字列: $SECTION_END" >&2

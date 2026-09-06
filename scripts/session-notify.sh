@@ -16,7 +16,10 @@
 #
 #   Notification(permission_prompt) 入力待ち  → issue-deckへ様子を報告
 #                                               （＋`00.check-user`を付ける。#1417）
-#   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）
+#   Stop                            応答終了  → 同上（＋`00.check-user`を解く保険。#1342）。
+#                                               ただし**auto modeのクラシファイアにコマンドを
+#                                               拒否されたまま終わった応答**は、様子ではなく
+#                                               引き上げの受け口へ送る（#2844）
 #   PreToolUse(ExitPlanMode)        計画の提示 → issue-deckへ計画を送る（#1342）
 #   PreToolUse(AskUserQuestion)     質問 → issue-deckへ質問を送り、画面からの回答を待つ（#2189）
 #                                               （＋この時点で「入力待ち」として記録する。#1438）
@@ -48,6 +51,15 @@
 #                           必ず「直前が入力待ちではない」で捨てられる**。だから
 #                           `run-issue-session.sh`はCodexにこのフックを繋がない
 #   PostToolUse(Artifact)   `Artifact`はClaude Code固有のツール（#2154）
+#
+# **`Stop`には、応答終了なのに人を待っている形がある**（#2844）。`--permission-mode auto`の
+# クラシファイアは、承認プロンプトを出さずにツールを拒否して`Permission for this action was
+# denied by the Claude Code auto mode classifier`というtool_resultだけを返すことがある
+# （実測では3回連続で拒否されて初めて承認プロンプトへ昇格する）。拒否された側が説明のテキスト
+# だけを出してターンを終えると、`Stop`は正常に飛ぶため画面からは「応答が終わった」ようにしか
+# 見えず、`00.check-user`もPush通知も出ないまま人を待ち続ける（guchi-apps/aide#253で実際に
+# 3分間放置された）。**判定材料は`Stop`の時点で転記に揃っている**ので、pollerの停滞検知
+# （#2655）のように待たず、ここで`SessionInterrupted`と同じ受け口へ倒す。
 #
 # **1つだけフック以外の入口がある**（#1971）。`SessionInterrupted`はClaude Codeのフックではなく、
 # pollerが合成して渡してくる合図で、「APIエラー（529等）でturnが打ち切られたまま止まっている」
@@ -201,6 +213,17 @@ if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_read_event >/dev/
   unset _last_event_line
 fi
 export NOTIFY_LAST_STATE_EVENT
+
+# クラシファイアの拒否での引き上げを、すでに1回送ったか（#2844）。**判定材料は下の判定へ渡す。**
+# 送ったかどうかの記録はホスト側（`lib/session-state.sh`の`.classifier-block`）が持ち、
+# 印があるあいだは同じ停止で二重に引き上げない。
+NOTIFY_CLASSIFIER_BLOCK_NOTIFIED=0
+if [[ -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_classifier_block_notified >/dev/null 2>&1 &&
+  session_state_classifier_block_notified "$NOTIFY_TMUX_SESSION"; then
+  NOTIFY_CLASSIFIER_BLOCK_NOTIFIED=1
+fi
+export NOTIFY_CLASSIFIER_BLOCK_NOTIFIED
 
 # 「まだ開始していない」印（`lib/session-state.sh`の`.starting`）を消す（#1465）。
 #
@@ -561,6 +584,50 @@ def resolve_remote_url():
     return ""
 
 
+# auto modeのクラシファイアが拒否したときにtool_resultへ入る決まり文句（#2844）。
+# **承認プロンプトを伴わない拒否**で、`Notification`は飛ばない。
+CLASSIFIER_DENIAL_MARKER = "denied by the Claude Code auto mode classifier"
+# 拒否のまま終わったかを見るために転記の末尾から読む量。判定に要るのは直近のやり取りだけ。
+CLASSIFIER_BLOCK_TAIL_BYTES = 256 * 1024
+
+
+def classifier_blocked_at_end(transcript):
+    """クラシファイアの拒否のあと、一度もツールが走らないまま応答が終わっているか（#2844）。
+
+    転記の末尾を**行単位**で見て、次の2つの最後の出現位置を比べる。
+
+      A: `"type":"tool_use"` を含む行（＝実際にツールを呼び出した）
+      B: クラシファイアの拒否の決まり文句を含む行（＝tool_resultとして拒否が返った）
+
+    Bの方が後ろにあれば「拒否されたきり何も動いていない」。**Aの方が後ろなら対象外**で、
+    自力で別の手段へ迂回した場合も、`AskUserQuestion`（それ自体が人へ届く）へ進んだ場合も、
+    拒否の後ろにtool_useが来るのでここで落ちる。
+
+    判定材料はClaude Codeの転記フォーマットという内部仕様なので、**読めなければ「止まって
+    いない」を返す**（＝これまでどおり応答終了として報告するだけ）。
+    """
+    if not transcript:
+        return False
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            if size > CLASSIFIER_BLOCK_TAIL_BYTES:
+                f.seek(size - CLASSIFIER_BLOCK_TAIL_BYTES)
+                f.readline()  # 途中から読み始めた1行目は壊れているので捨てる
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return False
+
+    last_tool_use = -1
+    last_denial = -1
+    for index, line in enumerate(lines):
+        if '"type":"tool_use"' in line or '"type": "tool_use"' in line:
+            last_tool_use = index
+        if CLASSIFIER_DENIAL_MARKER in line:
+            last_denial = index
+    return last_denial >= 0 and last_denial > last_tool_use
+
+
 def resolve_plan_text(tool_input):
     """提示された計画の本文を取り出す。
 
@@ -759,6 +826,34 @@ if event == "SessionInterrupted":
     sys.exit(0)
 
 if event == "Stop":
+    # **クラシファイアに拒否されたまま終わった応答は、様子ではなく引き上げへ倒す**（#2844）。
+    # 拒否そのものには`Notification`が飛ばないので、ここを通さないと「応答が終わった」として
+    # `00.check-user`まで外れ、人を待っていること自体が画面から消える。
+    #
+    # 送る形は`SessionInterrupted`と同じ（Issueコメント＋`00.check-user`＋`01.check-blocked`）。
+    # **`detail`は固定の文言だけで、拒否されたコマンドは載せない**——コマンドにはシークレットが
+    # 混ざりうるうえ、Issueコメントは公開リポジトリに残る（`SessionInterrupted`と同じ約束）。
+    #
+    # 2回目以降は送らない（印はホスト側の`.classifier-block`）。宛先が分からないときも送らず、
+    # これまでどおり応答終了として報告する。
+    if (
+        os.environ.get("NOTIFY_CLASSIFIER_BLOCK_NOTIFIED", "") != "1"
+        and repo_slug
+        and issue_number.isdigit()
+        and tmux_session
+        and classifier_blocked_at_end(hook.get("transcript_path") or "")
+    ):
+        print("interrupted", "classifier_blocked")
+        print(json.dumps({
+            "repository": repo_slug,
+            "issue": int(issue_number),
+            "hostName": host_name,
+            "tmuxSessionName": tmux_session,
+            "detail": "auto modeのクラシファイアがコマンドを拒否したまま応答が終わりました。",
+            "reason": "classifier_blocked",
+            "remoteControlUrl": resolve_remote_url() or None,
+        }))
+        sys.exit(0)
     state_event = "Stop"
     activity = "responded"
 elif event == "Notification" and notification_type == "permission_prompt":
@@ -802,6 +897,47 @@ post_to_issue_deck() {
     -H "Authorization: Bearer $dispatch_secret" \
     -d "$body" \
     "${app_base_url%/}$path" >/dev/null 2>&1
+}
+
+# クラシファイアの拒否での引き上げに合わせて、画面の様子も「入力待ち」にする（#2844）。
+#
+# **引き上げのコメントとラベルだけでは画面で気づけない。** 様子を送らないと、そのセッションは
+# 「生きていて、入力待ちでもない」＝**まだ動いている**と判定され（`lib/workflow-badge-activity.ts`の
+# `isSessionActivelyWorking`）、左メニュー・ヘッダー・ベルの「確認が必要」の件数から外れ、
+# アプリ内トーストも最大10分保留される（`lib/check-user-notification.ts`）。**Push通知だけが
+# 鳴る形**になり、「画面に出ない」という元の症状が半分残る。
+#
+# **`00.check-user`の付け外しはこの往復に載せない**（`checkUserRequested`・`planResolved`は
+# どちらもfalse）。ラベルを付けるのは引き上げの受け口で、外すのは人の操作に任せるという
+# 引き上げ全体の約束をここで崩さないため。
+report_classifier_block_activity() {
+  local escalation="$1" body
+  [[ -n "$escalation" ]] || return 0
+  body="$(ESCALATION="$escalation" python3 -c '
+import json, os
+
+try:
+    data = json.loads(os.environ.get("ESCALATION") or "{}")
+except Exception:
+    raise SystemExit(0)
+if not isinstance(data, dict):
+    raise SystemExit(0)
+repository = data.get("repository")
+issue = data.get("issue")
+if not repository or not isinstance(issue, int):
+    raise SystemExit(0)
+print(json.dumps({
+    "repository": repository,
+    "issue": issue,
+    "activity": "waiting_input",
+    "remoteControlUrl": data.get("remoteControlUrl") or None,
+    "planResolved": False,
+    "checkUserRequested": False,
+}))' 2>/dev/null || true)"
+  [[ -n "$body" ]] || return 0
+  post_to_issue_deck /api/dispatch/sessions/activity "$body" ||
+    echo "session-notify: issue-deckへの様子の報告に失敗しました（実装は続行します）" >&2
+  return 0
 }
 
 # issue-deckのAPIへJSONを1件投げ、**応答本文を標準出力へ返す**（#2061）。
@@ -1214,6 +1350,33 @@ if [[ "$decision" == "interrupted" ]]; then
   if ! post_to_issue_deck /api/dispatch/sessions/interrupted \
     "$(printf '%s' "$result" | sed -n '2p')"; then
     echo "session-notify: セッションの中断をissue-deckへ引き上げられませんでした" >&2
+    exit 0
+  fi
+  # クラシファイアの拒否での引き上げ（#2844）は、pollerから来る合図と違って**このセッションの
+  # 中で起きている**ので、後始末が2つ要る。
+  #
+  #   - 状態を`permission_prompt`にする。`Stop`として記録すると、回収（`reap-sessions.sh`）が
+  #     猶予（既定5分）で畳みに来る——人を待っているセッションを畳んでしまう。人が答えた直後の
+  #     `PostToolUse`を`working`として拾えるようにもなる（#1357の間引き）
+  #   - 引き上げ済みの印を置く。`Stop`はターンごとに飛ぶので、置かないと拒否が続くあいだ
+  #     Issueコメントが増え続ける
+  #   - 画面の様子を「入力待ち」にする。送らないと「まだ動いている」と判定され、確認待ちの
+  #     件数から外れる（`report_classifier_block_activity`のコメントを参照）
+  #
+  # **`00.check-user`の印（`.check-user`）は置かない**——外すのは人の操作に任せる、という
+  # 引き上げ全体の約束に合わせる（この分岐の上のコメントを参照）。
+  if [[ "$decision_line" == "interrupted classifier_blocked" ]]; then
+    if [[ -n "$NOTIFY_TMUX_SESSION" ]]; then
+      if declare -F session_state_record_event >/dev/null 2>&1; then
+        session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
+          echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+      fi
+      if declare -F session_state_mark_classifier_block_notified >/dev/null 2>&1; then
+        session_state_mark_classifier_block_notified "$NOTIFY_TMUX_SESSION" ||
+          echo "session-notify: 引き上げ済みの印を残せませんでした（実装は続行します）" >&2
+      fi
+    fi
+    report_classifier_block_activity "$(printf '%s' "$result" | sed -n '2p')"
   fi
   exit 0
 fi
@@ -1243,6 +1406,15 @@ if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_T
   declare -F session_state_check_user_pending >/dev/null 2>&1 &&
   session_state_check_user_pending "$NOTIFY_TMUX_SESSION"; then
   CHECK_USER_RESOLVED=1
+fi
+
+# クラシファイアの拒否での引き上げ済みの印を消す（#2844）。**消す契機は2つ。**
+# 拒否のまま終わらなかった`Stop`（＝迂回できた・普通に応答が終わった）と、人が答えて作業へ
+# 戻った`working`。ここで消しておかないと、一度引き上げたセッションが次に同じ形で止まったとき
+# 誰にも伝わらないまま放置される。
+if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_clear_classifier_block >/dev/null 2>&1; then
+  session_state_clear_classifier_block "$NOTIFY_TMUX_SESSION" || true
 fi
 
 # セッションの状態を記録する（#1256）。**報告より先に行う。**

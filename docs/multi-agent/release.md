@@ -305,7 +305,7 @@ develop向けPRのコメントを1件ずつ開くことになり、10件を超�
 ### 変更したときに一緒に見る場所
 
 判定マーカーと節のマーカーは**書く側と読む側でずれても赤くならない**（黙って「記録なし」に
-倒れる）。そのため`scripts/check-review-verdict-marker.sh`がCI（`docs-sync-check`）で次の5ファイルを
+倒れる）。そのため`scripts/check-review-verdict-marker.sh`がCI（`docs-sync-check`）で次の6ファイルを
 突き合わせる。**文字列を変えるときは全部を揃える。**
 
 | 場所 | 何をしているか |
@@ -315,6 +315,7 @@ develop向けPRのコメントを1件ずつ開くことになり、10件を超�
 | `.github/workflows/reusable-release-develop-to-main.yml` | 節を集めてリリースPR本文の表にする |
 | `scripts/prompts/review-agent.md` | ローカルのレビュー・統合エージェントが同じ節を書く |
 | `src/lib/github/release-verification.ts` | 画面が表とレビュー本文を読んでパネルにする |
+| `src/lib/github/pull-request-review-verdict.ts` | マージ確認ダイアログが節から判定1本ぶんを読む（#2843） |
 
 ## バージョンの上げ幅の判定
 
