@@ -273,9 +273,9 @@ describe("IssueSessionStatus", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("link", { name: /Claude Codeアプリで開く/ }).getAttribute("href"),
-    ).toBe("https://claude.ai/code/session_01ABC");
+    expect(screen.getByRole("link", { name: /アプリで開く/ }).getAttribute("href")).toBe(
+      "https://claude.ai/code/session_01ABC",
+    );
   });
 });
 
@@ -639,7 +639,7 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /Claude Codeアプリで開く/ })).not.toBeNull();
+    expect(screen.getByRole("link", { name: /アプリで開く/ })).not.toBeNull();
     expect(screen.getByRole("link", { name: /開発環境を開く/ })).not.toBeNull();
     expect(screen.getByText(/Remote Controlから答えてください/)).not.toBeNull();
   });
@@ -711,7 +711,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
     };
   }
 
-  // Claude Codeのセッションには`Claude Codeアプリで開く`があり、ペアリングコードは使わない
+  // Claude Codeのセッションには`アプリで開く`があり、ペアリングコードは使わない
   it("Claude Codeのセッションには出さない", () => {
     render(
       <IssueSessionStatus
