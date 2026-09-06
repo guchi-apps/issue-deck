@@ -18,8 +18,13 @@ const MAX_DETAIL_LENGTH = 200;
  *     自動再開を上限まで試したあとに叩く
  *   - `tool_call_stall`: ツールを呼び出したつもりでテキストに書いただけで実際には呼ばれず、
  *     `Stop`は正常に発火するが実質何も進んでいないセッション。自動での再送信はしない
- * どちらも**1セッションにつき1回**だけ叩く（送ったかどうかの記録はホスト側の`.resume`・
- * `.tool-call-stall`が持つ）。
+ *   - `classifier_blocked`（#2844）: auto modeのクラシファイアがコマンドを拒否し、拒否された
+ *     エージェントが説明のテキストだけを出してターンを終えたセッション。**拒否には承認
+ *     プロンプトが伴わないので`Notification`が飛ばず**、`Stop`は正常に発火するため画面からは
+ *     「応答が終わった」ようにしか見えない。**入口だけpollerではなく`Stop`フック**で、
+ *     判定材料がその時点で転記に揃っているぶん待たずに引き上げる
+ * どれも**1回の停止につき1回**だけ叩く（送ったかどうかの記録はホスト側の`.resume`・
+ * `.tool-call-stall`・`.classifier-block`が持つ）。
  *
  * **#2280より前はSignalyへ通知するだけだった。** webhookを消したので、異常終了（#1217）・
  * 起動確認での足止め（#1465）と同じ形——Issueコメント＋`00.check-user`＋`01.check-blocked`——へ
@@ -60,8 +65,11 @@ export async function POST(request: NextRequest) {
       : null;
   const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
   // 未知の値・省略時は`api_error`（#1971からの後方互換）。原因ごとの文言分岐は
-  // `session-escalation.ts`が持つ（#2655で`tool_call_stall`を追加）。
-  const reason = payload?.reason === "tool_call_stall" ? "tool_call_stall" : "api_error";
+  // `session-escalation.ts`が持つ（#2655で`tool_call_stall`・#2844で`classifier_blocked`を追加）。
+  const reason =
+    payload?.reason === "tool_call_stall" || payload?.reason === "classifier_blocked"
+      ? payload.reason
+      : "api_error";
 
   const escalated = await escalateInterruptedSession({
     repositoryFullName: target.repositoryFullName,

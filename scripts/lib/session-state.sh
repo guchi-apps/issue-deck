@@ -218,6 +218,42 @@ session_state_clear_tool_call_stall() {
   return 0
 }
 
+# auto modeのクラシファイアにコマンドを拒否されたまま応答を終えたセッションを、引き上げ済みかの
+# 印（#2844）。
+#
+# `.tool-call-stall`と同じく「もう引き上げたか」の1ビットで足りる（この現象でも自動での
+# 再送信はしない）。**違うのは消す契機で、こちらはpollerではなくフックが消す**——拒否のまま
+# 終わらなかった`Stop`と、人が答えて作業へ戻った`working`の2つ
+# （`session_state_clear_classifier_block`）。
+#
+# 判定そのもの（何が「拒否されたまま終わった」か）は`session-notify.sh`が持ち、ここは置き場
+# だけを持つ。
+session_state_classifier_block_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.classifier-block' "$(session_state_dir)" "$1"
+}
+
+session_state_classifier_block_notified() {
+  local session="$1" file
+  file="$(session_state_classifier_block_file "$session")" || return 1
+  [[ -f "$file" ]]
+}
+
+session_state_mark_classifier_block_notified() {
+  local session="$1" file content
+  file="$(session_state_classifier_block_file "$session")" || return 1
+  printf -v content '%s\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+session_state_clear_classifier_block() {
+  local session="$1" file
+  file="$(session_state_classifier_block_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Codexのセッションへ`codex queue`で追加指示を差し込み、次回の起動を`codex resume`で
 # 再開するための宛先（#2519・#2520）。
 #
@@ -502,6 +538,7 @@ session_state_remove() {
     "$(session_state_step_file "$session" 2>/dev/null || true)" \
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
     "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
+    "$(session_state_classifier_block_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true

@@ -205,13 +205,20 @@ export async function escalateFailedSession(params: {
 }
 
 /**
- * セッションが中断・停滞して止まっていることをIssueへ知らせる本文（#1971・#2280・#2655）。
+ * 引き上げの原因（#1971・#2655・#2844）。`api_error`はAPIエラーでturnが打ち切られたまま
+ * `Stop`が飛ばない形、`tool_call_stall`はツール呼び出し風のテキストを出しただけで止まった形、
+ * `classifier_blocked`はauto modeのクラシファイアにコマンドを拒否されたまま応答を終えた形。
+ */
+export type SessionInterruptedReason = "api_error" | "tool_call_stall" | "classifier_blocked";
+
+/**
+ * セッションが中断・停滞して止まっていることをIssueへ知らせる本文（#1971・#2280・#2655・#2844）。
  *
- * **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
+ * **`detail`は呼び出し側が組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
  * 画面も応答テキストも載せない——`escalateFailedSession`と同じ約束で、見に行く経路は
  * `tmux attach`とRemote Controlのリンクにする。
  *
- * `reason`は引き上げの原因（省略時`"api_error"`）。原因ごとに何が起きたかの説明だけを
+ * `reason`は引き上げの原因（省略時`"api_error"`）。原因ごとに何が起きたかの説明と続け方だけを
  * 出し分け、ホスト・tmuxセッション・状況・出口の構造は共通にする。
  */
 export function buildSessionInterruptedCommentBody(params: {
@@ -219,7 +226,7 @@ export function buildSessionInterruptedCommentBody(params: {
   tmuxSessionName: string;
   detail: string | null;
   remoteControlUrl: string | null;
-  reason?: "api_error" | "tool_call_stall";
+  reason?: SessionInterruptedReason;
 }): string {
   const reason = params.reason ?? "api_error";
   const lines =
@@ -228,7 +235,12 @@ export function buildSessionInterruptedCommentBody(params: {
           "⚠️ このIssueの実装セッションが、ツールを呼び出そうとした形跡はあるものの、実際には",
           "呼び出されないまま停滞しています。",
         ]
-      : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
+      : reason === "classifier_blocked"
+        ? [
+            "⚠️ このIssueの実装セッションが、auto modeのクラシファイアにコマンドを拒否されたまま",
+            "応答を終えています。",
+          ]
+        : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
   lines.push(
     "",
     `- ホスト: \`${params.hostName}\``,
@@ -254,6 +266,20 @@ export function buildSessionInterruptedCommentBody(params: {
       "バックグラウンドで動いているものは何もありません。もう一度、実際にツールを呼び出して",
       "進めてください。",
       "```",
+    );
+  } else if (reason === "classifier_blocked") {
+    lines.push(
+      "`--permission-mode auto`のクラシファイアは、承認プロンプトを出さずにコマンドを拒否する",
+      "ことがあります（`gh pr create`のような書き込み・外部へ出る操作は、意図してクラシファイアの",
+      "判断に委ねています）。**このとき`Notification`フックは飛ばず、`Stop`だけが正常に発火する**",
+      "ため、画面からは「正常に応答した」ようにしか見えません。",
+      "",
+      "続け方は次のどれかです。**「進めて」のような継続指示だけでは解除されません**（同じコマンドが",
+      "もう一度拒否されるだけです）。",
+      "",
+      "- 端末の承認プロンプトで許可する（3回連続で拒否されると承認プロンプトへ昇格します）",
+      "- 拒否されたコマンドを人が代わりに実行し、結果をセッションへ伝える",
+      "- 別の手段で進めるよう指示する",
     );
   } else {
     lines.push(
@@ -295,7 +321,8 @@ export function buildSessionInterruptedCommentBody(params: {
  * `POST /api/dispatch/sessions/interrupted`で、**1セッションにつき1回**
  * （送ったかどうかの記録はホスト側の`.resume`・`.tool-call-stall`が持つ）。
  *
- * `reason`は引き上げの原因（省略時`"api_error"`。#2655で`"tool_call_stall"`を追加）。
+ * `reason`は引き上げの原因（省略時`"api_error"`。#2655で`"tool_call_stall"`、#2844で
+ * `"classifier_blocked"`を追加）。
  *
  * **失敗しても例外を投げない**（`escalateFailedSession`と同じ）。
  */
@@ -306,7 +333,7 @@ export async function escalateInterruptedSession(params: {
   tmuxSessionName: string;
   detail: string | null;
   remoteControlUrl: string | null;
-  reason?: "api_error" | "tool_call_stall";
+  reason?: SessionInterruptedReason;
 }): Promise<boolean> {
   const parsed = parseRepositoryFullName(params.repositoryFullName);
   if (!parsed) return false;
