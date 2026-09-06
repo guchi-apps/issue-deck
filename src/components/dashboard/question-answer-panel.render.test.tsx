@@ -9,6 +9,8 @@ import type {
   SessionQuestionRequestView,
 } from "@/lib/dispatch/session-question-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { findManualStepForQuestion } from "@/lib/manual-step-question";
+import type { IssueLabel } from "@/types/issue";
 
 const REPO = "guchi-apps/issue-deck";
 
@@ -276,5 +278,88 @@ describe("QuestionAnswerPanel", () => {
     expect((screen.getByRole("button", { name: /回答を送る/ }) as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+});
+
+
+/**
+ * 手作業の手順カード（#2820）。**当てるところは`findManualStepForQuestion`のテストが見る**ので、
+ * ここでは「渡したものが読める形で出るか」「渡さなければ出ないか」だけを見る。
+ */
+describe("QuestionAnswerPanel（手作業の手順）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const MANUAL_STEP_LABELS: IssueLabel[] = [{ name: "71.manual-step", color: "d876e3", description: null }];
+
+  const MANUAL_STEP_BODY = [
+    "## 前提条件",
+    "",
+    "- 実行するデバイス: サブPC（`ssh subpc`）",
+    "- カレントディレクトリ: `~/apps/issue-deck`",
+    "",
+    "## やること",
+    "",
+    "- [ ] （VPS）`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する",
+    "",
+    "  ```bash",
+    "  pm2 restart issue-deck",
+    "  ```",
+    "",
+  ].join("\n");
+
+  const MANUAL_STEP_QUESTIONS: SessionQuestion[] = [
+    {
+      question: "手順1「`.env`に`GOOGLE_REFRESH_TOKEN`を追加してPM2を再起動する」はVPSでの作業のため代行できません。実施されましたか？",
+      header: "手順1",
+      options: [
+        { label: "実行した・次へ", description: "本文のチェックを付けて次へ進みます" },
+        { label: "ここで止める", description: "ここで作業を中断します" },
+      ],
+      multiSelect: false,
+    },
+  ];
+
+  function manualStepGuide() {
+    return findManualStepForQuestion({
+      labels: MANUAL_STEP_LABELS,
+      body: MANUAL_STEP_BODY,
+      questions: MANUAL_STEP_QUESTIONS,
+    });
+  }
+
+  it("その手順の中身と、どこで実行するかを選択肢の上に出す", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request({ questions: MANUAL_STEP_QUESTIONS })}
+        session={session()}
+        dispatch={dispatchHandle()}
+        manualStep={manualStepGuide()}
+      />,
+    );
+
+    expect(screen.getByText("この手順でやること")).toBeTruthy();
+    expect(screen.getByText("手順 1 / 1")).toBeTruthy();
+    // 端末は手順の文頭の`（VPS）`から取る（`## 前提条件`の既定値はサブPC）
+    expect(screen.getByText("VPS")).toBeTruthy();
+    // 「手元で実行する」に接続・移動・コマンドが並ぶ
+    expect(screen.getByText(/手元で実行する/)).toBeTruthy();
+    expect(screen.getByText("ssh subpc")).toBeTruthy();
+    expect(screen.getByText("cd ~/apps/issue-deck")).toBeTruthy();
+    expect(screen.getByText("pm2 restart issue-deck")).toBeTruthy();
+  });
+
+  it("手順に結び付かない質問ではカードごと出さない", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        manualStep={null}
+      />,
+    );
+
+    expect(screen.queryByText("この手順でやること")).toBeNull();
   });
 });

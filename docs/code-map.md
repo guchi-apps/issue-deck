@@ -2764,6 +2764,10 @@ export function POST(request: NextRequest) {
   `components/dashboard/question-answer-panel.tsx`。**画面から届いたラベルはDBの質問と
   突き合わせてから回答に載せる**——`updatedInput`はツールのスキーマ検証を通るため、質問に
   無い値を載せると回答ごと弾かれる。Issueコメントは**答えたときに1件だけ**書く）。
+  **手作業Issue（`71.manual-step`）では、質問が指している手順の中身も同じパネルに出す**
+  （#2820。当て方は`lib/manual-step-question.ts`＝質問文の`手順N`と引用された手順名で
+  本文の手順を引く。描くのは手順のMarkdown・実行する端末・`manual-step-where-to-run.tsx`の
+  「手元で実行する」で、**当たらなければカードごと出さない**）。
   **ローカル実行のコメントをActions同等にする残り2件も同じ経路で書く**（#1119）。起動直後の
   受付コメントは`run-issue-session.sh`が`POST /api/dispatch/sessions/started`へ投げ
   （`lib/dispatch/session-start.ts`）、**Issueに何も記録が残らないまま終わったセッション**には

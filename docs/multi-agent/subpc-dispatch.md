@@ -953,6 +953,17 @@ scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
   まで（回答は記録として残るため）。**手作業Issueへの質問の回答は、Issueコメントを残さない**
   （`POST /api/dispatch/question-answer`。手順の数だけコメントが増えるのを避ける。代行実行が
   「手順ごとにコメントしない」としているのと揃える。回答自体は`SessionQuestionRequest`に残る）
+- **代行できない手順では、質問パネルにその手順の中身を出す**（#2820）。
+  代行しない手順（ブラウザ・メインPC・VPS、`<…>`を含むもの、対話が要るコマンド）では
+  「手順1「…」は代行できません。実施されましたか？」と聞かれるが、**答えるのに必要な
+  「何をどこで実行するのか」は本文にしか無く**、Issue詳細は手順を並べない方針
+  （`components/dashboard/manual-step-panel.tsx`）なので画面の下まで下がることになっていた。
+  質問文の`手順N`と引用された手順名から本文の手順を当て（`lib/manual-step-question.ts`）、
+  手順のMarkdown・実行する端末・「手元で実行する」（つなぐ → 移動する → 実行する）を
+  選択肢の真上に出す。**質問と手順を結ぶデータは無い**ので照合は文字列で、
+  **当たらなければカードごと出さない**（関係のない手順を出すと、読んだ人がそれを実行する）。
+  当てやすい質問文の形は`scripts/prompts/manual-step-agent.md`が指定している
+  （`header`は`手順N`、`question`は`手順N「<手順名>」`で始める）
 - **質問の待ちで手作業Issueにも`00.check-user`＋`01.check-input`が付く**（Push通知が鳴る）。
   従来「手作業Issueには付けない」としていたのは承認して再開させる相手が居なかったためで、
   セッションが待っている間はその相手が居る。答えると外れる（[labels.md](labels.md)）
