@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  ReleaseVerification,
+  ReleaseVerificationRow,
+} from "@/lib/github/release-verification";
 import {
   applyIssueTitles,
+  applyReviewVerdicts,
+  pullRequestChangeIssueLabel,
   pullRequestChangeLabel,
+  tallyChangeReviews,
   toPullRequestChanges,
   type PullRequestCommitSource,
 } from "@/lib/pull-request-changes";
@@ -117,17 +124,140 @@ describe("applyIssueTitles", () => {
 });
 
 describe("pullRequestChangeLabel", () => {
-  it("対応Issueが分かればIssue番号、分からなければPR番号を出す", () => {
+  it("行頭にはPR番号を出す（対応Issueが分かっていても主語はPR。#2843）", () => {
     const [withIssue] = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
     const [withoutIssue] = toPullRequestChanges([mergeCommit("a2", 2100, "hotfix", "タイトル")]);
 
-    expect(pullRequestChangeLabel(withIssue)).toBe("#2062");
+    expect(pullRequestChangeLabel(withIssue)).toBe("#2077");
     expect(pullRequestChangeLabel(withoutIssue)).toBe("#2100");
+  });
+
+  it("PR番号を特定できない行だけIssue番号へ落とす", () => {
+    const [commitOnly] = toPullRequestChanges([{ sha: "a1", message: "テストを足す" }]);
+
+    expect(pullRequestChangeLabel({ ...commitOnly, issueNumber: 2062 })).toBe("#2062");
   });
 
   it("どちらも分からなければnull（行頭の番号を出さない）", () => {
     const [commitOnly] = toPullRequestChanges([{ sha: "a1", message: "テストを足す" }]);
 
     expect(pullRequestChangeLabel(commitOnly)).toBeNull();
+  });
+});
+
+describe("pullRequestChangeIssueLabel", () => {
+  it("行頭のPR番号に添える対応Issue番号を返す", () => {
+    const [change] = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
+
+    expect(pullRequestChangeIssueLabel(change)).toBe("Issue #2062");
+  });
+
+  it("行頭がIssue番号になっている行では二重に出さない", () => {
+    const [commitOnly] = toPullRequestChanges([{ sha: "a1", message: "テストを足す" }]);
+
+    expect(pullRequestChangeIssueLabel({ ...commitOnly, issueNumber: 2062 })).toBeNull();
+  });
+});
+
+describe("applyReviewVerdicts", () => {
+  function row(overrides: Partial<ReleaseVerificationRow> = {}): ReleaseVerificationRow {
+    return {
+      issueNumber: 2062,
+      issueTitle: null,
+      pullRequestNumber: 2077,
+      reviewKind: "ok",
+      reviewLabel: "問題なし（LGTM）",
+      riskKind: "none",
+      riskLabel: "該当なし",
+      reviewBody: null,
+      ...overrides,
+    };
+  }
+
+  function verification(rows: ReleaseVerificationRow[]): ReleaseVerification {
+    return {
+      rows,
+      tally: {
+        total: rows.length,
+        ok: 0,
+        needsCheck: 0,
+        changesRequested: 0,
+        skipped: 0,
+        unknown: 0,
+      },
+    };
+  }
+
+  it("PR番号で突き合わせる", () => {
+    const changes = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
+
+    const [applied] = applyReviewVerdicts(changes, verification([row()]));
+    expect(applied.reviewKind).toBe("ok");
+    expect(applied.reviewLabel).toBe("問題なし（LGTM）");
+  });
+
+  it("表の行にPR番号が無ければIssue番号で拾う", () => {
+    const changes = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
+
+    const [applied] = applyReviewVerdicts(
+      changes,
+      verification([row({ pullRequestNumber: null, reviewKind: "needs-check", reviewLabel: "要確認" })]),
+    );
+    expect(applied.reviewKind).toBe("needs-check");
+  });
+
+  it("見つからない行・表そのものが無い場合は落とさず「レビューなし」にする", () => {
+    const changes = toPullRequestChanges([mergeCommit("a1", 2077, "issue-2062", "タイトル")]);
+
+    expect(applyReviewVerdicts(changes, null)).toEqual([
+      { ...changes[0], reviewKind: "unknown", reviewLabel: "レビューなし" },
+    ]);
+    expect(applyReviewVerdicts(changes, verification([row({ pullRequestNumber: 9999, issueNumber: 9999 })]))[0]
+      .reviewKind).toBe("unknown");
+  });
+});
+
+describe("tallyChangeReviews", () => {
+  it("表の集計ではなく、並べた行から数える", () => {
+    const changes = toPullRequestChanges([
+      mergeCommit("a1", 2077, "issue-2062", "タイトル"),
+      mergeCommit("a2", 2078, "issue-2063", "タイトル"),
+      mergeCommit("a3", 2079, "release/v4.19.0", "バンプ"),
+    ]);
+    const applied = applyReviewVerdicts(changes, {
+      rows: [
+        {
+          issueNumber: 2062,
+          issueTitle: null,
+          pullRequestNumber: 2077,
+          reviewKind: "changes-requested",
+          reviewLabel: "要修正",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          reviewBody: null,
+        },
+        {
+          issueNumber: 2063,
+          issueTitle: null,
+          pullRequestNumber: 2078,
+          reviewKind: "ok",
+          reviewLabel: "問題なし",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          reviewBody: null,
+        },
+      ],
+      // 表の集計はIssueを数えたもので、並べた行（PR）とは母数が違う
+      tally: { total: 2, ok: 1, needsCheck: 0, changesRequested: 1, skipped: 0, unknown: 0 },
+    });
+
+    expect(tallyChangeReviews(applied)).toEqual({
+      total: 3,
+      ok: 1,
+      needsCheck: 0,
+      changesRequested: 1,
+      skipped: 0,
+      unknown: 1,
+    });
   });
 });

@@ -2,12 +2,19 @@
 
 import { ExternalLink } from "lucide-react";
 
+import { VerdictText } from "@/components/dashboard/review-verdict";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestChanges } from "@/hooks/use-pull-request-changes";
 import { releaseVersionFromTitle } from "@/lib/branch-flow";
-import { pullRequestChangeLabel } from "@/lib/pull-request-changes";
+import {
+  applyReviewVerdicts,
+  pullRequestChangeIssueLabel,
+  pullRequestChangeLabel,
+  tallyChangeReviews,
+  type PullRequestChangeReview,
+} from "@/lib/pull-request-changes";
 import { cn } from "@/lib/utils";
-import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type PullRequestMergeChangesProps = {
   pullRequest: PullRequestSummary;
@@ -15,23 +22,19 @@ type PullRequestMergeChangesProps = {
   open: boolean;
 };
 
-function ChangeRow({ change }: { change: PullRequestChange }) {
+function ChangeRow({ change }: { change: PullRequestChangeReview }) {
   const label = pullRequestChangeLabel(change);
+  const issueLabel = pullRequestChangeIssueLabel(change);
   const bump = change.kind === "version-bump";
 
   return (
-    <li className="flex items-start gap-2 border-b px-3 py-1.5 last:border-b-0">
+    <li className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
       {label && (
-        <span className="w-11 shrink-0 text-right font-mono text-[11px] leading-6 text-muted-foreground tabular-nums">
+        <span className="w-11 shrink-0 text-right font-mono text-[11px] leading-6 text-primary tabular-nums">
           {label}
         </span>
       )}
-      <span
-        className={cn(
-          "min-w-0 flex-1 line-clamp-2 text-xs leading-6",
-          bump && "text-muted-foreground",
-        )}
-      >
+      <span className={cn("min-w-0 flex-1 truncate text-xs leading-6", bump && "text-muted-foreground")}>
         {change.title}
       </span>
       {bump && (
@@ -39,6 +42,18 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
           バンプ
         </span>
       )}
+      {/* 対応Issue番号は主語ではなくなったが、Issueから探す読み方も残す。幅が足りない
+          画面では畳む（判定より先に落とすものはここしかない） */}
+      {issueLabel && (
+        <span className="hidden shrink-0 font-mono text-[11px] leading-6 text-muted-foreground tabular-nums sm:inline">
+          {issueLabel}
+        </span>
+      )}
+      <VerdictText
+        kind={change.reviewKind}
+        label={change.reviewLabel}
+        className="w-[5.25rem] shrink-0 text-[11px]"
+      />
     </li>
   );
 }
@@ -57,6 +72,12 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
  *
  * **取得できなくてもマージは止めない。** 変更点は判断材料であって、マージの前提条件ではない。
  * 取得中は骨組みだけを出し、失敗したときは理由とGitHubへの導線を出す。
+ *
+ * **行の主語はPull Requestで、各行にそのPRの自動レビュー判定を出す**（#2843）。コードレビューが
+ * 走る単位はPRで、判定もPRに紐づくため、行頭がIssue番号のままだと「この判定はどのPRのものか」を
+ * 読み替えることになっていた。判定はリリースPR本文の検証結果の表にPR番号つきで残っており
+ * （`pullRequest.releaseVerification`）、番号で突き合わせるだけなのでGitHub APIの消費は増えない。
+ * 見出しの下の帯は、行を1つずつ読む前に「何本のうち何本が要修正か」を出すためのもの。
  */
 export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeChangesProps) {
   const { changes, commitCount, truncated, isLoading, error } = usePullRequestChanges(
@@ -64,6 +85,12 @@ export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeC
     open,
   );
   const version = releaseVersionFromTitle(pullRequest.title);
+  // 判定はリリースPRの本文に載っていて、一覧の取得時点で読み終わっている（#2843）。
+  // 変更点の取得を待つのは一覧の行だけで、判定の突き合わせは行が揃った時点で済む。
+  const reviewed = changes === null ? null : applyReviewVerdicts(changes, pullRequest.releaseVerification);
+  const tally = reviewed === null ? null : tallyChangeReviews(reviewed);
+  // 判定が1件も取れていないリリースでは内訳の帯を出さない（「記録なし 5件」だけの帯になる）
+  const hasVerdicts = tally !== null && tally.total > tally.unknown;
 
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -81,6 +108,17 @@ export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeC
           </span>
         )}
       </div>
+
+      {/* 「5本のうち1本が要修正」を、行を1つずつ読む前に出す（#2843） */}
+      {hasVerdicts && tally && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1.5 text-[11px]">
+          <VerdictText kind="ok" label="問題なし" count={tally.ok} />
+          <VerdictText kind="needs-check" label="要確認" count={tally.needsCheck} />
+          <VerdictText kind="changes-requested" label="要修正" count={tally.changesRequested} />
+          <VerdictText kind="skipped" label="レビューなし" count={tally.skipped} />
+          <VerdictText kind="unknown" label="記録なし" count={tally.unknown} />
+        </div>
+      )}
 
       {isLoading && (
         <div className="space-y-2 px-3 py-2.5">
@@ -103,9 +141,9 @@ export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeC
         </p>
       )}
 
-      {changes !== null && changes.length > 0 && (
+      {reviewed !== null && reviewed.length > 0 && (
         <ul className="max-h-[min(13.5rem,40vh)] overflow-y-auto">
-          {changes.map((change) => (
+          {reviewed.map((change) => (
             <ChangeRow key={change.id} change={change} />
           ))}
         </ul>
@@ -115,7 +153,7 @@ export function PullRequestMergeChanges({ pullRequest, open }: PullRequestMergeC
         {truncated ? (
           <span>コミットが多いため一部だけを出しています</span>
         ) : (
-          <span>番号は対応Issue（特定できないものはPR番号）</span>
+          <span>番号はPull Request。判定は自動レビューの結果</span>
         )}
         <a
           href={`${pullRequest.htmlUrl}/files`}

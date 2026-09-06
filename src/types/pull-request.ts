@@ -3,7 +3,9 @@ import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { CiState } from "@/lib/github/release-api";
+import type { ReleaseVerification } from "@/lib/github/release-verification";
 import type { DeployFailureIssueRef } from "@/types/branch-flow";
 
 /** CIの内訳に並べるチェック1件（#2777）。中身は`RollupCiCheck`そのもの */
@@ -139,6 +141,23 @@ export type PullRequestSummary = {
    * [`lib/github/pull-request-repair-run.ts`](../lib/github/pull-request-repair-run.ts)を参照。
    */
   repairRun: PullRequestRepairRunSummary | null;
+  /**
+   * このPR1本ぶんの自動レビュー判定（#2843）。PR本文の`## 検証結果`から読む。記録が無ければnull。
+   *
+   * **本文は一覧・詳細のどちらの経路も既に受け取っている**ので、これを持ってもGitHub APIの
+   * 消費は増えない（`lib/github/pull-request-review-verdict.ts`）。マージ確認ダイアログで
+   * 「押す前に判定を読む」ために使う。
+   */
+  reviewVerdict: PullRequestReviewVerdict | null;
+  /**
+   * リリースPR（develop→main）の本文に載っている検証結果の表（#2843）。main宛以外ではnull。
+   *
+   * **レビューコメントの本文（`reviewBody`）は落として渡す。** PR一覧は全リポジトリぶんを
+   * 1つの応答で返すため、指摘の本文まで載せると応答が数十KB膨らむ。本文を読むのは
+   * PR詳細のパネル（`VerificationSummaryPanel`）の役割で、そちらは詳細APIの本文から
+   * 読み直している。
+   */
+  releaseVerification: ReleaseVerification | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -233,6 +252,11 @@ export type IssuePullRequest = {
   repairRun: PullRequestRepairRunSummary | null;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
+  /**
+   * このPRの自動レビュー判定（#2843）。意味は`PullRequestSummary.reviewVerdict`と同じで、
+   * 材料も同じPR本文。Issue画面のマージ確認にも同じ判定を出すために持つ。
+   */
+  reviewVerdict: PullRequestReviewVerdict | null;
 };
 
 export type IssuePullRequestListResponse = {

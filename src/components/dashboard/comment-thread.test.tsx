@@ -415,6 +415,7 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
             mergeable: true,
             repairRun: null,
             linkedIssueNumber: 1288,
+            reviewVerdict: null,
           },
         ]}
         onApprove={async () => {}}
