@@ -105,6 +105,7 @@ import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
+import { usePullRequestReview } from "@/hooks/use-pull-request-review";
 import {
   approveCommentBody,
   canCompleteManualStep,
@@ -123,6 +124,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import { selectReviewTargetPullRequestNumber } from "@/lib/github/pull-request-review-comment";
 import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
@@ -311,6 +313,14 @@ export function IssueDetail({
       ? isMergeApprovalPending(issue, comments) ||
         isPullRequestWaitingStatus(resolveProgressStatus(issue))
       : false,
+  );
+  // マージ待ちのときだけ、対応PRの自動レビュー本文を1回取りに行く（#2849）。判定（#2843）は
+  // PR本文から読めるが、**何を指摘されたのか**はPRのコメントにしか無い
+  const reviewPullRequestNumber = selectReviewTargetPullRequestNumber(pullRequests);
+  const { review: reviewFindings, isLoading: isLoadingReviewFindings } = usePullRequestReview(
+    issue?.repositoryFullName ?? null,
+    reviewPullRequestNumber,
+    issue ? isMergeApprovalPending(issue, comments) : false,
   );
   const {
     mergePullRequest,
@@ -1296,6 +1306,9 @@ export function IssueDetail({
               onWithdraw={handleWithdraw}
               onRequestContinuation={handleRequestContinuation}
               onRequestPrFix={handleRequestPrFix}
+              reviewFindings={reviewFindings}
+              reviewPullRequestNumber={reviewPullRequestNumber}
+              isLoadingReviewFindings={isLoadingReviewFindings}
               onMergePullRequest={handleMergePullRequest}
               onDeclinePullRequest={handleDeclinePullRequest}
               isApproving={isSubmitting}
