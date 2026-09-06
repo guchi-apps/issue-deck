@@ -393,6 +393,23 @@ describe("QuestionAnswerPanel（手作業の手順）", () => {
     expect(screen.getByText("pm2 restart issue-deck")).toBeTruthy();
   });
 
+  // 自動で流すようになったぶん、止まった時点の位置が分からないまま答えることになる（#2830）
+  it("ここまでの進み具合を手順カードの上に出す", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request({ questions: MANUAL_STEP_QUESTIONS })}
+        session={session()}
+        dispatch={dispatchHandle()}
+        manualStep={manualStepGuide()}
+      />,
+    );
+
+    expect(screen.getByText("最初の手順です")).toBeTruthy();
+    expect(screen.getByText("残り1件（うちあなたが実行 1件）")).toBeTruthy();
+    // 答えた後に何が起きるかまで出す（止まっているのは自動実行の途中）
+    expect(screen.getByText(/これが最後の手順です/)).toBeTruthy();
+  });
+
   it("手順に結び付かない質問ではカードごと出さない", () => {
     render(
       <QuestionAnswerPanel

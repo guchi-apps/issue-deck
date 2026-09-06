@@ -10,10 +10,36 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 const NOW = new Date("2026-09-02T12:00:00.000Z");
 const startManualStepSession = vi.fn();
 
+/** テンプレートどおりの本文（サブPCの手順1件・ブラウザの手順1件・完了の確認1件） */
+const BODY = `## 前提条件
+
+- 実行するデバイス: **サブPC**
+- カレントディレクトリ: \`~/apps/issue-deck\`
+
+## やること
+
+- [ ] pollerを再起動する
+
+    \`\`\`bash
+    systemctl --user restart issue-deck-dispatch-poller.service
+    \`\`\`
+
+- [ ] （ブラウザ）1Passwordで\`apps\`ボールトの値を登録する
+
+## 完了の確認方法
+
+- 動いていること
+
+    \`\`\`bash
+    systemctl --user is-active issue-deck-dispatch-poller.service
+    \`\`\`
+`;
+
 const issue = {
   repositoryFullName: "guchi-apps/issue-deck",
   number: 2790,
   labels: [{ name: "71.manual-step", color: "ffffff", description: null }],
+  body: BODY,
 };
 
 function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
@@ -105,10 +131,13 @@ afterEach(() => {
   cleanup();
 });
 
+/** 自動で流せるのはサブPCの手順1件と完了の確認1件（#2830） */
+const START_BUTTON = "セッションを起動して2件を自動実行";
+
 describe("ManualStepSessionPanel（#2771）", () => {
   it("対応したホストがあれば「セッションを起動」を押せ、押すとそのホストへ積む", async () => {
     render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
-    const button = screen.getByRole("button", { name: "セッションを起動" });
+    const button = screen.getByRole("button", { name: START_BUTTON });
     expect(button).toHaveProperty("disabled", false);
     fireEvent.click(button);
     await waitFor(() => expect(startManualStepSession).toHaveBeenCalledTimes(1));
@@ -127,7 +156,7 @@ describe("ManualStepSessionPanel（#2771）", () => {
         dispatch={makeDispatch({ hosts: [makeHost({ manualStepSessionCapable: null })] })}
       />,
     );
-    expect(screen.getByRole("button", { name: "セッションを起動" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: START_BUTTON })).toHaveProperty("disabled", true);
     expect(screen.getByText(/pollerが手作業セッションに対応していません/)).toBeTruthy();
   });
 
@@ -138,7 +167,10 @@ describe("ManualStepSessionPanel（#2771）", () => {
         dispatch={makeDispatch()}
       />,
     );
-    expect(screen.getByRole("button", { name: "セッションを起動" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "セッションを起動" })).toHaveProperty(
+      "disabled",
+      true,
+    );
     expect(screen.getByText(/手作業Issue（`71.manual-step`）ではないため/)).toBeTruthy();
   });
 
@@ -150,14 +182,27 @@ describe("ManualStepSessionPanel（#2771）", () => {
         dispatch={makeDispatch({ sessions: [makeSession()] })}
       />,
     );
-    expect(screen.queryByRole("button", { name: "セッションを起動" })).toBeNull();
+    expect(screen.queryByRole("button", { name: START_BUTTON })).toBeNull();
     expect(screen.getByText(/この手作業のセッションが動いています/)).toBeTruthy();
+  });
+
+  // 押した1回で何が流れるのかを押す前に並べる（#2830。承認パネル＝#1869と同じ立場）
+  it("自動で流す手順と、人に頼む手順を起動前に並べる", () => {
+    render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
+    expect(screen.getByText("自動で実行 2件")).toBeTruthy();
+    expect(screen.getByText("あなたが実行 1件")).toBeTruthy();
+    expect(
+      screen.getByText("systemctl --user restart issue-deck-dispatch-poller.service"),
+    ).toBeTruthy();
+    expect(screen.getByText("ブラウザ")).toBeTruthy();
+    // 代行しない理由は手作業アシスタントと同じ文言で出す
+    expect(screen.getByText(/ブラウザで実行するため/)).toBeTruthy();
   });
 
   it("失敗した理由は押した場所の下に出す", async () => {
     startManualStepSession.mockResolvedValue({ ok: false, message: "積めませんでした" });
     render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
-    fireEvent.click(screen.getByRole("button", { name: "セッションを起動" }));
+    fireEvent.click(screen.getByRole("button", { name: START_BUTTON }));
     await waitFor(() => expect(screen.getByText("積めませんでした")).toBeTruthy());
   });
 });

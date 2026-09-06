@@ -209,7 +209,7 @@ LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
 # worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
 QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 手作業Issueを対話しながら実施するセッション（#2771）。**代行実行（`MANUAL_STEP`）とは別**で、
-# worktreeを作らずにtmuxセッションを1本立て、手順ごとに結果を示して人に聞きながら進める。
+# worktreeを作らずにtmuxセッションを1本立て、本文の手順を止まるところまで流す（#2830）。
 MANUAL_STEP_SESSION_LAUNCHER="$SCRIPT_DIR/start-manual-step-session.sh"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
