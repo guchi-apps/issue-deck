@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireUserId = vi.fn();
 const sessionUsageFindMany = vi.fn();
@@ -99,9 +99,18 @@ function sessionUsageRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // 集計は「今日を含むN日」で切るため（`sessionUsagePeriodStartMs`）、時計を止めないと
+  // フィクスチャの日付（2026-08-30）が窓から外れた日に、変更が無くても落ちる。実際に
+  // 日本時間2026-09-06 00:00を回った時点で3件とも落ちた（#2816で気付いた）
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-30T03:00:00.000Z"));
   requireUserId.mockResolvedValue("user-1");
   repositoryFindMany.mockResolvedValue([]);
   issueFindMany.mockResolvedValue([]);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("GET /api/session-usage", () => {

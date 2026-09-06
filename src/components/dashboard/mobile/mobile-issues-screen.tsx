@@ -65,6 +65,11 @@ type MobileIssuesScreenProps = {
   snoozedMergePendingPullRequests?: PullRequestSummary[];
   /** そのPRの期限（#2398）。「最短でいつ戻るか」の1行に使う */
   snoozedMergePendingEntries?: SnoozeEntry[];
+  /**
+   * 取得済みのopenなPull Request（#2816）。`IssueList`へそのまま渡し、「developへマージ」の
+   * 行に「CI実行中」「Claudeがレビュー中」といった添える字を出すために使う。
+   */
+  pullRequests?: PullRequestSummary[];
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
@@ -113,6 +118,7 @@ export function MobileIssuesScreen({
   onUnsnooze,
   snoozedMergePendingPullRequests,
   snoozedMergePendingEntries,
+  pullRequests,
   onSelectPullRequest,
   onChangeView,
   onChangeFilters,
@@ -222,6 +228,7 @@ export function MobileIssuesScreen({
       autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
       checkUserRunningIssueIds={checkUserRunningIssueIds}
+      pullRequests={pullRequests}
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}
       onStartCodeReview={onStartCodeReview}

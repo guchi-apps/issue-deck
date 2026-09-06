@@ -142,6 +142,12 @@ import {
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  resolveIssuePullRequestProgress,
+  toIssuePullRequestProgressSource,
+} from "@/lib/issue-pull-request-progress";
 import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
@@ -297,7 +303,13 @@ export function IssueDetail({
     issue?.repositoryFullName ?? null,
     issue?.number ?? null,
     pullRequestLinks,
-    issue ? isMergeApprovalPending(issue, comments) : false,
+    // マージ待ちに加えて、PRを待っている段（`Develop PR`・`Release`）でも取り直しを続ける
+    // （#2816）。ここを広げないと、CIとClaudeのレビューが動いているあいだ内訳が開いた時点で
+    // 固まる。状態が確定すれば`useIssuePullRequests`が自分でポーリングを止める
+    issue
+      ? isMergeApprovalPending(issue, comments) ||
+        isPullRequestWaitingStatus(resolveProgressStatus(issue))
+      : false,
   );
   const {
     mergePullRequest,
@@ -604,6 +616,13 @@ export function IssueDetail({
 
   const currentRepository = repositories.find((repo) => repo.fullName === issue.repositoryFullName);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 「developへマージ」段の内訳（#2816）。取得済みの対応PRから導くだけなのでGitHub APIは
+  // 増えない。**PRを待っている段でだけ**作る（`WorkflowStatusSteps`も同じ確かめ方をするが、
+  // 材料を組み立てる手間そのものをここで省く）
+  const pullRequestProgress =
+    isPullRequestWaitingStatus(resolveProgressStatus(issue))
+      ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
+      : null;
   // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
   // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
@@ -1005,6 +1024,7 @@ export function IssueDetail({
             qaAnswerPending={qaAnswerPending}
             checkUserGuidance={checkUserGuidance}
             planningSkipped={planningSkipped}
+            pullRequestProgress={pullRequestProgress}
           />
 
           {/* 質問の回答（#2189）。**計画パネルのすぐ上**に置く——計画を出したあとに質問する

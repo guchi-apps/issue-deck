@@ -571,6 +571,27 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     既定384px・最小280px（`issue-deck-shell.tsx`の`issueListWidth`）で、iPhone 15の393pxより
     狭い。iPadは768pxを超えるのでスマホ用画面へ切り替わらず、同じ384pxのカラムが出る。
     **行に何かを足すときはスマホ幅ではなく280pxで確かめる。**
+- **「developへマージ」の中の進み具合は`lib/issue-pull-request-progress.ts`が1か所で決める**
+  （#2816）。進捗Statusの`Develop PR`は、PRを作った瞬間からマージされるまで表示が変わらず、
+  CIを待っているのかClaudeのレビューを待っているのかが読めなかった。導出は
+  [`issue-pull-request-progress.ts`](../src/lib/issue-pull-request-progress.ts)に置き、
+  Issue一覧の行（添える字）とIssue詳細のステータスカード（**実装完了 → CI → Claudeの
+  レビュー → マージ**の4チップ）が同じ結果を読む。
+  - **材料は既に取っているものだけ**（`ciState`・`mergeJudgement`・`aiReview`）。PR一覧
+    （`PullRequestSummary`）はそのまま材料の形をしていて、変換が要るのは`PullRequestCiStatus`を
+    持つIssue側だけ（`toIssuePullRequestProgressSource`）。**GitHub APIは1回も増えない**
+  - **文言は増やさない。** 「Claudeがレビュー中」「CI通過」はPR画面の`MERGE_JUDGEMENT_STEP_LABEL`・
+    `AI_REVIEW_SETTLED_LABEL`と同じ言い方に揃える。同じ状態が画面ごとに違う名前で出ると、
+    どちらが新しいのかを読む側が判断できない（#2150で一度そうなっている）
+  - **待っているものの優先順は「止まっている > 動いている > 人待ち」。** コンフリクト・CI失敗・
+    レビュー失敗を先に出さないと、放っておけば進むもので隠れる。動いているもののうち判定
+    （`mergeJudgement`）をCIより先に見るのは`JUDGEMENT_STEP_ORDER`（#2066）と同じ理由で、
+    実行順で選ぶとレビュー中もずっと「CI実行中」になる
+  - **出すのは`isPullRequestWaitingStatus`が真の段（`Develop PR`・`Release`）だけ。** PRがまだ
+    無い段・マージが済んだ段では待っているものが無く、空の内訳は「まだ来ていない」と読める
+  - **一覧のためにPR一覧を取り直す間隔は1分**（`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`）で、
+    「PR待ち」の行が1つも無ければ回さない。PR画面の10秒より粗いのは、PRを見に来ていない人の
+    画面で回り続けるものだから（止まったIssueは何時間でも`Develop PR`に居座る）
 - **同じ状態を2か所で言わせない。誰が言うかは並べる側（`IssueStatusCard`）が決める**（#2057）。
   `WorkflowStatusSteps`・`CheckUserReasonNotice`・`IssueSessionStatus`・
   `MobileIssueSummaryCard`は、**どれも同じ材料（`00.check-user`＋`01.check-*`・

@@ -44,6 +44,7 @@ import {
 } from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobileIssueListScreenProps = {
   /**
@@ -107,6 +108,11 @@ type MobileIssueListScreenProps = {
    * ヘッダーの件数の内訳（`2件・実行中1件`）にだけ使い、行は今までどおり並べる。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
+  /**
+   * 取得済みのopenなPull Request（#2816）。`IssueList`へそのまま渡す。
+   * 「developへマージ」の行に、いまPRの何を待っているかを出すために使う。
+   */
+  pullRequests?: PullRequestSummary[];
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
   onStartManualStepGuide?: (startIssueId?: string) => void;
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
@@ -161,6 +167,7 @@ export function MobileIssueListScreen({
   snoozedPinned,
   prerequisiteReadiness,
   checkUserRunningIssueIds,
+  pullRequests,
   onStartManualStepGuide,
   onStartIssueOrder,
   onStartCodeReview,
@@ -352,6 +359,7 @@ export function MobileIssueListScreen({
         snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
         checkUserRunningIssueIds={checkUserRunningIssueIds}
+        pullRequests={pullRequests}
         onStartManualStepGuide={onStartManualStepGuide}
         onStartIssueOrder={onStartIssueOrder}
         onStartCodeReview={onStartCodeReview}
