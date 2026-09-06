@@ -103,6 +103,26 @@ for verdict in lgtm needs-check changes-requested; do
   fi
 done
 
+# 総評の判定マーカーは、PRのレビューコメントを読む側にもまたがる（#2849）。マージ待ちの
+# 承認カードは、このマーカーが付いたコメントを「いま読むべきレビュー」として選び、指摘を
+# 修正依頼へ取り込ませる。ずれると**パネルごと出なくなり**（＝レビューが無いのと同じ見た目）、
+# 指摘を読まないままマージを押せてしまう。
+COMMENT_PARSER="src/lib/github/pull-request-review-comment.ts"
+[ -f "$COMMENT_PARSER" ] || { echo "エラー: $COMMENT_PARSER が見つかりません" >&2; exit 1; }
+
+if ! grep -qF "issue-deck-review-verdict:(lgtm|needs-check|changes-requested)" "$COMMENT_PARSER"; then
+  echo "エラー: $COMMENT_PARSER に総評の判定マーカーの読み取りが見つかりません。" >&2
+  echo "  期待する文字列: issue-deck-review-verdict:(lgtm|needs-check|changes-requested)" >&2
+  fail=1
+fi
+
+# 転記されたレビュー（#2488）の印も同じ扱い。判定は無いが本文は読めるので、こちらも拾う
+if ! grep -qF "issue-deck-review-report" "$COMMENT_PARSER"; then
+  echo "エラー: $COMMENT_PARSER に転記されたレビューの印の読み取りが見つかりません。" >&2
+  echo "  期待する文字列: issue-deck-review-report" >&2
+  fail=1
+fi
+
 # 検証結果の節のマーカーは、書く側（レビューのワークフロー・ローカルのレビューエージェント）と
 # 読む側（リリースPRの集計・マージ確認ダイアログのパーサー。#2843）にまたがる。
 # 画面側がずれると、マージを押す直前の判定が黙って「記録がありません」になる。
@@ -163,3 +183,4 @@ fi
 echo "OK: claude-reviewの判定マーカーは $PROMPT と $WORKFLOW で一致しています"
 echo "OK: 総評の判定マーカーと検証結果の節の契約も揃っています（#2448）"
 echo "OK: レビュー本文の折りたたみのマーカーも揃っています（#2488）"
+echo "OK: マージ待ちのレビュー指摘パネルの読み取りも揃っています（#2849）"
