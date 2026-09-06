@@ -951,10 +951,14 @@ scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
   コマンド」へ広がる（#2771の計画レビューの指摘は、この一点として残っている）。
   詳細は[gates.md](gates.md)「やらせないこと」の例外5
 - **押す前に、何が流れるのかを画面に並べる**（`lib/manual-step-session-plan.ts`・
-  `components/dashboard/manual-step-session-panel.tsx`）。承認パネル（#1869）と同じ立場で、
+  `components/dashboard/manual-step-session-panel.tsx`）。ただし**代行実行の照合2回・
+  `body_changed`・5分の失効に当たるものは無く**、セッションは起動後に自分で本文を読み直す。
+  一覧は押す前に射程を見せるためのもので、同じ担保を移したものではない（[gates.md](gates.md)）。
   **振り分けの判定は`buildManualStepRunPlan`をそのまま通す**（ホストの申告だけ「実行できる」で
   差し替える。セッションは`MANUAL_STEP`ジョブを使わず自分の`Bash`で実行するため、
-  `manualStepCapable`を理由に「あなたが実行」へ倒すと、起動できるのに全件が人の作業になる）
+  `manualStepCapable`を理由に「あなたが実行」へ倒すと、起動できるのに全件が人の作業になる）。
+  **並べるのはIssue詳細の手作業パネルだけ**（`showRunPlan`）——手作業アシスタントの最初の画面では
+  すぐ上の承認パネル（#1869）が同じコマンド列を同じ形で出しており、重ねると2回並ぶ
 - **止まる条件は4つだけ。** 代行できない手順（サブPC以外・`<…>`・対話が要るコマンド・コマンドが
   1つに定まらない）／実行の失敗／本文に無いコマンドが要るとき／クローズの可否。答えると
   そのまま残りが流れる
