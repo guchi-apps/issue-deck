@@ -79,6 +79,7 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import type { AppAiModel, ClaudeLocalModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
 import {
+  ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS,
   PULL_REQUEST_POLL_INTERVAL_MS,
   normalizeAutoRefreshInterval,
   shorterAutoRefreshInterval,
@@ -110,6 +111,8 @@ import {
 import { appendPrerequisiteReference } from "@/lib/manual-step-prerequisites";
 import { ISSUE_SEARCH_CANDIDATE_LIMIT } from "@/lib/claude/limits";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import { isPullRequestWaitingStatus } from "@/lib/issue-pull-request-progress";
 import type { NotificationTarget } from "@/lib/notifications";
 import {
   applyIssueFilters,
@@ -536,6 +539,10 @@ export function IssueDeckShell({
   // 「ブランチ」画面（#1455）。マージ済みPRとブランチの突き合わせ（削除漏れの検出）に
   // クローズ済みまで要るため、この画面を開いている間はPR一覧の母集団を`all`にする。
   const isFlowPaneActive = filters.pane === "flow" || mobileScreen.kind === "flow";
+  // Issue一覧を見ているか（#2816）。行に出すPR待ちの内訳のためにPR一覧を取り直す条件で、
+  // **ペインを見ていない間は回さない**——`useAutoRefresh`が止めるのは裏に回ったタブだけで、
+  // 「PR待ちのIssueがある」だけを条件にすると、AI使用量や設定を開いている間も回り続ける
+  const isIssuePaneActive = filters.pane === "issues" || mobileScreen.kind === "issues";
   // 「AI使用量」画面（#2504）。開いている間だけ取得する（材料はサブPCのpollerが5分ごとに
   // 押し込む記録で、開いていない間に取りに行っても新しくならない）。
   const isUsagePaneActive = filters.pane === "usage" || mobileScreen.kind === "usage";
@@ -560,6 +567,21 @@ export function IssueDeckShell({
   // 保留中の確認待ちトーストがある間も自動更新する（#1709）。CIが確定したかどうかは
   // PR一覧の`ciState`でしか分からないため、取り直さないと保留を解けない。
   const autoRefreshPullRequests = isPullRequestPaneActive || pendingCheckUserToasts.length > 0;
+  /**
+   * Issue一覧に「PR待ち」の行（`Develop PR`・`Release`）が並んでいるか（#2816）。
+   *
+   * その行の添える字はPR一覧から作るため、取り直さないと開いた時点で固まる。**行が1つも
+   * 無ければ取り直さない**——PRを待っているIssueが無い状態でPR一覧を回しても、増えるのは
+   * GitHub APIの消費だけになる。
+   */
+  const hasPullRequestWaitingIssues = useMemo(
+    () =>
+      allIssues.some(
+        (issue) =>
+          issue.state === "open" && isPullRequestWaitingStatus(resolveProgressStatus(issue)),
+      ),
+    [allIssues],
+  );
   // ブランチ画面の自動更新の間隔（#1767）。**既定は「自動更新しない」**で、選んだ間隔は
   // 端末のlocalStorageに残す。1巡でリポジトリ数ぶんのGraphQL（ブランチ状況）とPR一覧の
   // 取得をまとめて使うため、既定で回すとレート制限の消費が常時上がる。
@@ -572,7 +594,15 @@ export function IssueDeckShell({
   // 自動更新の間隔は「PR画面（10秒）」と「ブランチ画面（ユーザーが選んだ間隔）」の
   // 短い方（#1767）。どちらの要求も無ければnull＝自動更新しない。
   const pullRequestAutoRefreshIntervalMs = shorterAutoRefreshInterval(
-    autoRefreshPullRequests ? PULL_REQUEST_POLL_INTERVAL_MS : null,
+    shorterAutoRefreshInterval(
+      autoRefreshPullRequests ? PULL_REQUEST_POLL_INTERVAL_MS : null,
+      // Issue一覧を開いていて、そこに「PR待ち」の行がある間だけ、添える字（「CI実行中」
+      // 「Claudeがレビュー中」）のために粗く取り直す（#2816）。どちらか一方でも
+      // 欠けていれば従来どおり止める
+      isIssuePaneActive && hasPullRequestWaitingIssues
+        ? ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS
+        : null,
+    ),
     isFlowPaneActive ? flowAutoRefreshIntervalMs : null,
   );
   const openPullRequests = usePullRequests(
@@ -1677,6 +1707,9 @@ export function IssueDeckShell({
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
+                  /* 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
+                     PCの一覧と同じ集合を渡す */
+                  pullRequests={crossRepositoryPullRequests}
                   /* 「いまは実施しない」（#2398）。PCの一覧と同じ集合・同じ導線 */
                   snoozes={snoozes}
                   onSnooze={snooze}
@@ -2041,6 +2074,9 @@ export function IssueDeckShell({
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
+                // 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
+                // 取得は左メニューの件数のために既に走っているものへ相乗りする
+                pullRequests={crossRepositoryPullRequests}
                 // 確認待ちのうちエージェントがまだ動いているもの（#2174）。左メニューの件数から
                 // 外したぶんを、ヘッダーの内訳（`2件・実行中1件`）で説明する
                 checkUserRunningIssueIds={checkUserRunningIssueIds}

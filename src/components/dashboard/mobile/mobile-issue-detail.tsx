@@ -140,6 +140,12 @@ import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  resolveIssuePullRequestProgress,
+  toIssuePullRequestProgressSource,
+} from "@/lib/issue-pull-request-progress";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
 import { summarizeSubIssueProgress } from "@/lib/sub-issue-progress";
@@ -421,8 +427,14 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
     pullRequestLinks,
-    mergeApprovalPending,
+    // PCの詳細と同じ条件（#2816）。PRを待っている段のあいだは取り直しを続け、CIと
+    // Claudeのレビューの進み具合が開いた時点で固まらないようにする
+    mergeApprovalPending || isPullRequestWaitingStatus(resolveProgressStatus(issue)),
   );
+  // 「developへマージ」段の内訳（#2816）。PCの詳細と同じく、取得済みの対応PRから導くだけ
+  const pullRequestProgress = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   const {
     mergePullRequest,
     closePullRequest,
@@ -958,6 +970,7 @@ export function MobileIssueDetail({
           qaAnswerPending={qaAnswerPending}
           checkUserGuidance={checkUserGuidance}
           planningSkipped={planningSkipped}
+          pullRequestProgress={pullRequestProgress}
         />
 
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で計画パネルの上に置く */}

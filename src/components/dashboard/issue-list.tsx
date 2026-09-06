@@ -73,6 +73,12 @@ import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
+import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  isPullRequestWaitingStatus,
+  resolveIssuePullRequestProgress,
+  type IssuePullRequestProgress,
+} from "@/lib/issue-pull-request-progress";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
 import { isProgressLabel } from "@/lib/issue-status";
 import {
@@ -98,6 +104,7 @@ import {
 } from "@/lib/snooze";
 import { cn } from "@/lib/utils";
 import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
+import type { PullRequestSummary } from "@/types/pull-request";
 
 type IssueListProps = {
   title: string;
@@ -246,6 +253,15 @@ type IssueListProps = {
    * 出しても、押す手段が無いことしか伝わらない。
    */
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
+  /**
+   * 取得済みのopenなPull Request（#2816）。**この一覧は自分で取りに行かない。**
+   *
+   * 「developへマージ」段の行に「CI実行中」「Claudeがレビュー中」といった添える字を出すために
+   * 使う。同じものを画面側（`issue-deck-shell.tsx`）が左メニューの件数のために既に取って
+   * いるので、そこから配る（`dispatch`と同じ取り決め。#1262）。渡さなければ従来どおり
+   * 「developへマージ」とだけ出る。
+   */
+  pullRequests?: PullRequestSummary[];
 };
 
 // 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
@@ -438,6 +454,7 @@ export function IssueList({
   onPullToRefresh,
   fetchedAt = null,
   autoRefreshIntervalMs,
+  pullRequests,
 }: IssueListProps) {
   // 現在時刻(epoch ms)。保留の期限判定と相対時刻の表示が同じ値を見る（#2398・#1891）
   const now = useNow();
@@ -568,6 +585,38 @@ export function IssueList({
     }
     return ids;
   }, [issues, dispatch.questionRequests]);
+  /**
+   * 「developへマージ」段の内訳（#2816）。**PRを待っている段のIssueだけ**引き当てる。
+   *
+   * PR一覧は`linkedIssueNumbers`（headブランチ名・タイトル・本文から推定した対応Issue）を
+   * 持っているので、そこから逆に引く。1件のIssueに複数のPRがぶら下がることがあるため、
+   * どれを見るかの判定は`resolveIssuePullRequestProgress`に任せる。
+   */
+  const pullRequestProgressByIssueId = useMemo(() => {
+    const map = new Map<string, IssuePullRequestProgress>();
+    if (!pullRequests || pullRequests.length === 0) return map;
+    const waiting = issues.filter((issue) =>
+      isPullRequestWaitingStatus(resolveProgressStatus(issue)),
+    );
+    if (waiting.length === 0) return map;
+    // 行ごとにPR一覧を走査し直さないよう、対応Issueごとの索引を1回だけ作る
+    const byIssueKey = new Map<string, PullRequestSummary[]>();
+    for (const pullRequest of pullRequests) {
+      for (const number of pullRequest.linkedIssueNumbers) {
+        const key = `${pullRequest.repositoryFullName}#${number}`;
+        const bucket = byIssueKey.get(key);
+        if (bucket) bucket.push(pullRequest);
+        else byIssueKey.set(key, [pullRequest]);
+      }
+    }
+    for (const issue of waiting) {
+      const linked = byIssueKey.get(`${issue.repositoryFullName}#${issue.number}`);
+      if (!linked) continue;
+      const progress = resolveIssuePullRequestProgress(linked);
+      if (progress) map.set(issue.id, progress);
+    }
+    return map;
+  }, [issues, pullRequests]);
   const actionsUnexpectedIssueIds = useMemo(() => {
     const ids = new Set<string>();
     for (const [id, target] of executionTargetByIssueId) {
@@ -831,6 +880,9 @@ export function IssueList({
                 checkUserRunning={checkUserRunningIssueIds?.has(issue.id) ?? false}
                 queue={queueState}
                 queueWaitReason={queueWaitReason}
+                // 「developへマージ」の中で何を待っているか（#2816）。PR一覧を渡していない
+                // 画面ではundefinedのままで、従来どおり段の名前だけが出る
+                pullRequestProgress={pullRequestProgressByIssueId.get(issue.id) ?? null}
               />
               {/* 進捗バーが描かれない行（積んだ直後のStatusが`Ready`のまま）だけ、
                   実行が始まる前の状態を同じ位置・同じ寸法のバーで出す（#2449） */}
