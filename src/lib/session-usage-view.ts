@@ -198,6 +198,7 @@ export const IMPLEMENTATION_UNSPLIT_KIND_KEY = "implementation-unsplit";
 const KIND_LABELS: Record<string, string> = {
   implementation: "実装",
   "plan-review": "計画レビュー",
+  "code-review": "コードレビュー",
   question: "横断質問",
   other: "その他",
   actions: "GitHub Actions",

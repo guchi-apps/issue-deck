@@ -7,7 +7,7 @@
 #   scripts/session-usage.sh issue-deck-issue-2350   tmuxセッション名で絞る
 #   scripts/session-usage.sh --days 21           集計する日数（既定7・今日を含む）
 #   scripts/session-usage.sh --all               期間で絞らない
-#   scripts/session-usage.sh --by kind           種別別（実装／計画レビュー／横断質問／その他）
+#   scripts/session-usage.sh --by kind           種別別（実装／計画レビュー／コードレビュー／横断質問／その他）
 #   scripts/session-usage.sh --by repo|day|model 別のまとめ方
 #   scripts/session-usage.sh --limit 50          表に出す行数（既定20・0で全件）
 #   scripts/session-usage.sh --json              正規化JSONをそのまま出す

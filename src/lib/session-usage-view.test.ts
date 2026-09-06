@@ -9,6 +9,7 @@ import {
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
   sessionUsageImplementationPhases,
+  sessionUsageKindLabel,
   sessionUsagePhaseSplit,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
@@ -311,6 +312,13 @@ describe("整形", () => {
     expect(formatUsageTokens(12_852_563_529)).toBe("12.85G");
     expect(formatUsageTokens(116_593_336)).toBe("117M");
     expect(formatUsageTokens(39_198)).toBe("39k");
+  });
+
+  it("種別は日本語のラベルにする（知らない種別はそのまま出す）", () => {
+    expect(sessionUsageKindLabel("plan-review")).toBe("計画レビュー");
+    // #2832でシェル側が送り始めた種別。ラベルが無いと画面に`code-review`が生で出る。
+    expect(sessionUsageKindLabel("code-review")).toBe("コードレビュー");
+    expect(sessionUsageKindLabel("unknown")).toBe("unknown");
   });
 });
 

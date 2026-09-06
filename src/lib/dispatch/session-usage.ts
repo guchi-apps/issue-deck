@@ -24,9 +24,35 @@ const MAX_SESSIONS_PER_REPORT = 500;
  */
 export const SESSION_USAGE_RETENTION_DAYS = 180;
 
-/** 種別。`scripts/lib/session-usage.sh`の`classify()`と対応する */
-export const SESSION_USAGE_KINDS = ["implementation", "plan-review", "question", "other"] as const;
+/**
+ * 種別。`scripts/lib/session-usage.sh`の`classify()`と対応する。
+ *
+ * **これは検証の関門ではなく、いま存在する種別の一覧**（#2832）。受け取りの判定は
+ * `SESSION_USAGE_KIND_PATTERN`が形だけを見る。
+ */
+export const SESSION_USAGE_KINDS = [
+  "implementation",
+  "plan-review",
+  "code-review",
+  "question",
+  "other",
+] as const;
 export type SessionUsageKind = (typeof SESSION_USAGE_KINDS)[number];
+
+/**
+ * 受け取ってよい種別の形。**一覧との一致では見ない**（#2832）。
+ *
+ * 集計する`scripts/lib/session-usage.sh`はサブPCの本体チェックアウト（`develop`）から走り、
+ * 報告先は本番（`main`）なので、一覧で弾くと**シェル側が新しい種別を送り始めてから
+ * リリースが本番へ届くまで、その種別のセッションが丸ごと記録されない**。しかも埋め戻しの印は
+ * 送れたかどうかだけを見て置かれるため、リリース後に戻ってくるのは直近2日ぶんだけになる。
+ *
+ * `kind`をenumにしなかったのと同じ理由（`prisma/schema.prisma`の`SessionUsage.kind`）で、
+ * ここは形だけを見て受け取る。知らない種別は画面がそのまま文字列で出す
+ * （`session-usage-view.ts`の`sessionUsageKindLabel`はフォールバックを持つ）。
+ * 列は`VarChar(32)`なので長さもここで抑える。
+ */
+export const SESSION_USAGE_KIND_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 export const SESSION_USAGE_AGENTS = ["claude", "codex"] as const;
 export type SessionUsageAgent = (typeof SESSION_USAGE_AGENTS)[number];
 
@@ -34,7 +60,8 @@ export type SessionUsageReport = {
   agent: SessionUsageAgent;
   sessionId: string;
   transcript: string;
-  kind: SessionUsageKind;
+  /** `SESSION_USAGE_KINDS`のどれか、またはシェル側が先に足した新しい種別（#2832） */
+  kind: string;
   repository: string | null;
   issueNumber: number | null;
   responses: number;
@@ -116,9 +143,7 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   if (typeof transcript !== "string" || !transcript) return null;
 
   const kind = input.kind;
-  if (typeof kind !== "string" || !SESSION_USAGE_KINDS.includes(kind as SessionUsageKind)) {
-    return null;
-  }
+  if (typeof kind !== "string" || !SESSION_USAGE_KIND_PATTERN.test(kind)) return null;
 
   const rawRepository = input.repository;
   let repository: string | null = null;
@@ -192,7 +217,7 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
     agent: agent as SessionUsageAgent,
     sessionId,
     transcript,
-    kind: kind as SessionUsageKind,
+    kind,
     repository,
     issueNumber,
     responses,
