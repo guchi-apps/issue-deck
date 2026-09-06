@@ -3384,6 +3384,13 @@ pnpm test:unit   # vitestのみ
 そのフックごと`vi.mock`で差し込む。URLで振り分ける形にすると、`fetchMock.mock.calls[0]`を
 見ている既存の検証が呼び出し順のずれで壊れる。
 
+**「今日を含むN日」で切る集計のテストは、時計を止めないとある日を境に落ちる**（#2816）。
+`api/session-usage`のテストは固定日時のフィクスチャ（2026-08-30）を`days=7`の窓へ入れる
+前提で書かれていたため、**日本時間2026-09-06 00:00を回った瞬間**にコード変更ゼロで3件とも
+落ちた（`sessionUsagePeriodStartMs`はJSTの日境で切る）。**発覚するのは無関係のPRのCIで**、
+直すまでどのPRも自動マージまで進めない。期間で切る集計を検証するテストは
+`vi.useFakeTimers()` + `vi.setSystemTime(...)`で時刻を固定し、`afterEach`で戻す。
+
 **`@testing-library/jest-dom`のマッチャは使えない**（#838）。パッケージは`devDependencies`に
 入っているが、読み込むsetupファイルが無いため`toBeInTheDocument`・`toBeDisabled`は
 `Invalid Chai property`で落ちる。存在は`toBeTruthy()`／`queryBy...`が`toBeNull()`、
