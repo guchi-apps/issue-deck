@@ -283,6 +283,79 @@ export function isCodeReviewPending(comments: readonly Pick<IssueComment, "body"
 }
 
 /**
+ * 一覧の行に出すレビュー結果の状態（#2855）。
+ *
+ * - `reported`: 結果が返っている（指摘0件も含む。件数は`counts`で見分ける）
+ * - `pending`: 依頼したが結果がまだ返っていない（`isCodeReviewPending`と同じ判定）
+ * - `missing`: 依頼コメントも結果コメントも見当たらない（手で立てたレビューIssueなど）
+ */
+export type CodeReviewSummaryState = "reported" | "pending" | "missing";
+
+/**
+ * レビュー1件を一覧の行に出すための要約（#2855）。
+ *
+ * **指摘の本文は持たせない。** 行に出すのは「重いものが何件あるか」だけで、中身を読むのは
+ * 今までどおりIssue詳細の`CodeReviewPanel`。ここに本文まで載せると、一覧を開くたびに
+ * レビュー全文が画面へ運ばれる。
+ */
+export type CodeReviewSummary = {
+  state: CodeReviewSummaryState;
+  /** 重要度ごとの指摘件数。`state`が`reported`以外はすべて0 */
+  counts: Record<CodeReviewSeverity, number>;
+  /** 指摘の総数。`reported`かつ0なら「指摘なし」 */
+  findingCount: number;
+};
+
+/**
+ * コメント配列（時系列順）から、一覧の行に出す要約を組み立てる（#2855）。
+ *
+ * 判定はIssue詳細と同じ関数（`findLatestCodeReviewReport`・`isCodeReviewPending`）を通す。
+ * 一覧と詳細で別の判定を書くと、行では「レビュー中」なのに開くと結果が出ている、という
+ * 食い違いが起きる。
+ */
+export function summarizeCodeReviewComments(
+  comments: readonly Pick<IssueComment, "body">[],
+): CodeReviewSummary {
+  const report = findLatestCodeReviewReport(comments);
+  if (report) {
+    return {
+      state: "reported",
+      counts: countCodeReviewFindings(report.findings),
+      findingCount: report.findings.length,
+    };
+  }
+  return {
+    state: isCodeReviewPending(comments) ? "pending" : "missing",
+    counts: { high: 0, medium: 0, low: 0 },
+    findingCount: 0,
+  };
+}
+
+/**
+ * 「コードレビュー」ビューの一覧ヘッダーに出す件数表記（#2855）。
+ *
+ * このビューにはclose済みのレビューも並ぶ（＝過去の結果を読み返す場所）ため、行数だけでは
+ * 「まだ読み終えていないレビューが何件あるか」が分からない。openのぶんを内訳として添える。
+ * 添えるものが何も無ければnullを返し、呼び出し側は従来どおりの「N件」に落とす
+ * （`formatQuestionListCount`と同じ形・同じ区切り）。
+ *
+ * @param listedCount 一覧に並んでいる行数（保留中は含まない）
+ * @param snoozedCount 保留中で一覧から外したもの（#2456）
+ */
+export function formatCodeReviewListCount(
+  issues: readonly Pick<Issue, "state">[],
+  listedCount: number,
+  snoozedCount = 0,
+): string | null {
+  const open = issues.filter((issue) => issue.state === "open").length;
+  const parts = [`${listedCount}件`];
+  // 全部openなら内訳は行数と同じ数字になるので添えない
+  if (open > 0 && open < listedCount) parts.push(`未完了${open}件`);
+  if (snoozedCount > 0) parts.push(`保留中${snoozedCount}件`);
+  return parts.length === 1 ? null : parts.join("・");
+}
+
+/**
  * 既にIssueにした指摘を引くための索引（見出し → Issue番号）。
  *
  * **同じリポジトリの、タイトルが完全一致するIssue**だけを拾う。指摘から起票するIssueの

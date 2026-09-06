@@ -7,6 +7,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 import { buildSnoozeMap } from "@/lib/snooze";
+import type { CodeReviewSummary } from "@/lib/github/code-review";
 import type { Issue, IssueLabel } from "@/types/issue";
 
 const dispatchState: {
@@ -29,6 +30,15 @@ vi.mock("@/hooks/use-dispatch-state", () => ({
 }));
 
 let workflowRunningByIssueId: Record<string, { isRunning: boolean }> = {};
+
+// レビュー結果の取得（#2855）はGitHubのコメントを引くので、行の描画だけを見るここでは差し込む
+let codeReviewSummaries = new Map<string, CodeReviewSummary>();
+
+vi.mock("@/hooks/use-code-review-reports", () => ({
+  useCodeReviewReports: () => codeReviewSummaries,
+  codeReviewSummaryKey: (issue: { repositoryFullName: string; number: number }) =>
+    `${issue.repositoryFullName}#${issue.number}`,
+}));
 
 vi.mock("@/hooks/use-issues-workflow-running", () => ({
   useIssuesWorkflowRunning: () => workflowRunningByIssueId,
@@ -100,6 +110,7 @@ afterEach(() => {
   dispatchState.hosts = [];
   dispatchState.manualStepRuns = [];
   workflowRunningByIssueId = {};
+  codeReviewSummaries = new Map();
 });
 
 describe("IssueListの選択ハイライト（#1597）", () => {
@@ -1013,5 +1024,64 @@ describe("順番待ちのバッジ（#2449）", () => {
     // 単独のバッジ（「順番待ち」だけの行）は出さず、進捗バーへ添える
     expect(screen.queryByText("順番待ち")).toBeNull();
     expect(screen.getByText("実装中（サブPC・順番待ち）")).toBeTruthy();
+  });
+});
+
+describe("コードレビュービューの行に出す結果（#2855）", () => {
+  const reviews = [
+    makeIssue({ number: 30, title: "[レビュー] issue-deck（2026-09-03）" }),
+    makeIssue({
+      number: 31,
+      title: "[レビュー] myroom（2026-08-29）",
+      state: "closed",
+      closedAt: "2026-08-30T00:00:00Z",
+    }),
+  ];
+
+  function reviewRow(number: number): HTMLElement {
+    const issue = reviews.find((item) => item.number === number)!;
+    return screen.getByText(`#${issue.number} ${issue.title}`).closest("li")!;
+  }
+
+  it("結果が取れている行には重要度ごとの件数を出す", () => {
+    codeReviewSummaries = new Map([
+      [
+        "guchi-apps/issue-deck#30",
+        {
+          state: "reported",
+          counts: { high: 1, medium: 2, low: 0 },
+          findingCount: 3,
+        } satisfies CodeReviewSummary,
+      ],
+    ]);
+    renderList({ issues: reviews, view: "code-review", showHeader: true });
+
+    expect(reviewRow(30).textContent).toContain("重大 1");
+    expect(reviewRow(30).textContent).toContain("中 2");
+    // 取れていない行はバッジを出さないだけで、行そのものは並ぶ
+    expect(reviewRow(31).textContent).not.toContain("重大");
+  });
+
+  it("結果がまだ返っていない行は「レビュー中」", () => {
+    codeReviewSummaries = new Map([
+      [
+        "guchi-apps/issue-deck#30",
+        {
+          state: "pending",
+          counts: { high: 0, medium: 0, low: 0 },
+          findingCount: 0,
+        } satisfies CodeReviewSummary,
+      ],
+    ]);
+    renderList({ issues: reviews, view: "code-review", showHeader: true });
+
+    expect(reviewRow(30).textContent).toContain("レビュー中");
+    expect(reviewRow(30).querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("close済みが混ざるヘッダーには未完了の件数を添える", () => {
+    renderList({ issues: reviews, view: "code-review", showHeader: true });
+
+    expect(screen.getByText("2件・未完了1件")).toBeTruthy();
   });
 });

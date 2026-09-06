@@ -2,15 +2,14 @@
 
 import { FilePlus2, Loader2, RotateCw, ScanSearch } from "lucide-react";
 
+import { CodeReviewSeverityBadge } from "@/components/dashboard/code-review-result-badges";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
 import {
   CODE_REVIEW_SEVERITIES,
   countCodeReviewFindings,
-  describeCodeReviewSeverity,
   type CodeReviewFinding,
   type CodeReviewReport,
-  type CodeReviewSeverity,
 } from "@/lib/github/code-review";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +77,11 @@ export function CodeReviewPanel({
           findings.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {CODE_REVIEW_SEVERITIES.filter((severity) => counts[severity] > 0).map((severity) => (
-                <SeverityBadge key={severity} severity={severity} count={counts[severity]} />
+                <CodeReviewSeverityBadge
+                  key={severity}
+                  severity={severity}
+                  count={counts[severity]}
+                />
               ))}
             </div>
           ) : (
@@ -124,7 +127,7 @@ export function CodeReviewPanel({
               className="flex flex-col gap-1.5 border-t px-3 py-2.5"
             >
               <div className="flex flex-wrap items-center gap-1.5">
-                <SeverityBadge severity={finding.severity} />
+                <CodeReviewSeverityBadge severity={finding.severity} />
                 {finding.category && (
                   <span className="rounded-full border bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
                     {finding.category}
@@ -166,29 +169,5 @@ export function CodeReviewPanel({
         </ul>
       )}
     </section>
-  );
-}
-
-/**
- * 重要度のバッジ。**重大はdestructive、中は`00.check-user`と同じamber、軽微はニュートラル**で、
- * 盤面で既に意味を持っている色から外れないようにする（`ManualStepPanel`が
- * amberを避けたのと同じ考え方の裏返しで、こちらは「人が見て判断するもの」なので同じ色に寄せる）。
- */
-function SeverityBadge({ severity, count }: { severity: CodeReviewSeverity; count?: number }) {
-  const tone: Record<CodeReviewSeverity, string> = {
-    high: "border-destructive/30 bg-destructive/10 text-destructive",
-    medium: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
-    low: "border-border bg-muted text-muted-foreground",
-  };
-  return (
-    <span
-      className={cn(
-        "rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums",
-        tone[severity],
-      )}
-    >
-      {describeCodeReviewSeverity(severity)}
-      {count !== undefined && ` ${count}`}
-    </span>
   );
 }

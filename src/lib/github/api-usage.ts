@@ -48,6 +48,10 @@ export const GITHUB_API_FEATURES = [
   // ポーリングはせず、Issueを開き直したときに取り直す
   { key: "pull_request_review_comment", label: "マージ確認のレビュー指摘の取得" },
   { key: "issue_comments", label: "コメント取得" },
+  // 「コードレビュー」ビューの一覧に出す結果の要約（#2855）。**並んでいるレビューIssueの数
+  // だけ**コメントを取る（ポーリングはしない）。結果が返った後の要約は動かないので、
+  // コメント件数が変わらない間はプロセス内キャッシュで返し、GitHubへは行かない
+  { key: "code_review_summary", label: "レビュー結果の一覧表示" },
   { key: "sub_issues", label: "子Issueの取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
   { key: "issue_write", label: "Issueの作成・更新・削除・移動" },
