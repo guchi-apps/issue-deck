@@ -39,6 +39,7 @@ import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reaso
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
+import { SessionStallPanel } from "@/components/dashboard/session-stall-panel";
 import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
@@ -1084,6 +1085,11 @@ export function IssueDetail({
             planningSkipped={planningSkipped}
             pullRequestProgress={pullRequestProgress}
           />
+
+          {/* 停滞したセッションの復旧（#2886）。**質問・計画より上**に置く——停滞している間は
+              質問も計画も進まないので、このIssueで最初に片付ける必要がある操作になる。
+              停滞していなければ`SessionStallPanel`自身が何も描かない */}
+          <SessionStallPanel session={issueSession} dispatch={dispatch} />
 
           {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——アーティファクト・計画の
               どちらよりも上（#2860でアーティファクトを計画の上へ移した後も変わらない）。

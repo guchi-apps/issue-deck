@@ -168,6 +168,9 @@ function toJobView(
     status: job.status,
     message: job.message,
     instruction: job.instruction,
+    // 停滞からの復旧として送った追加指示か（#2886）。pollerが許可する状態イベントを
+    // 広げる判断材料でもあり、`succeeded`の報告で確認待ちを外す条件でもある
+    recovery: job.recovery,
     command: job.command,
     placeholderValues: manualStepValues,
     // **サーバー側で差し込んだ結果も渡す**（#2403）。pollerは自分でも差し込み直し、
@@ -945,6 +948,12 @@ export async function enqueueSessionControlJob(params: {
    * `parseSessionInstruction`を通した値を渡す（検証はpoller側でも重ねて行う）。
    */
   instruction?: string | null;
+  /**
+   * その追加指示が「停滞からの復旧」か（#2886。`kind`が`INSTRUCTION`のときだけ意味がある）。
+   * 立てられるのは`POST /api/dispatch/session-recovery`だけで、そちらが本文が固定文面の
+   * どれかであることと、セッションが今も停滞していることを確かめてから渡す。
+   */
+  recovery?: boolean;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueSessionControlJobResult> {
@@ -1003,6 +1012,8 @@ export async function enqueueSessionControlJob(params: {
         requestedByUserId: params.requestedByUserId,
         // 追加指示の本文（#1012）。それ以外の種別ではnullのまま
         instruction: params.kind === "INSTRUCTION" ? (params.instruction ?? null) : null,
+        // 停滞からの復旧（#2886）。それ以外の種別ではfalseのまま
+        recovery: params.kind === "INSTRUCTION" ? (params.recovery ?? false) : false,
         // どのセッションを指した操作かを残す。**pollerはこの名前をそのまま使わず突き合わせる**
         tmuxSessionName: session?.tmuxSessionName ?? null,
       },

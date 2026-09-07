@@ -153,7 +153,11 @@ set -euo pipefail
 # 27: CodexのRemote Control相当（`CODEX_PAIRING`）を実行し、standalone installかを申告する（#2524）。
 # 28: 起動した時点のコミット（`startedCommit`）を申告し、チェックアウトだけが進んで再起動されて
 #     いない状態を画面から見えるようにする（#2815）。
-DISPATCH_POLLER_VERSION="28"
+# 29: 停滞からの復旧（`recovery`が立った`INSTRUCTION`）で、許可する状態イベントに`working`を
+#     足す（#2886）。28以前は既定の`Stop`だけを許可するため、APIエラーで中断して`working`の
+#     まま止まったセッションへは、画面のボタンを押しても毎回「作業中のため送りませんでした」で
+#     見送られていた。
+DISPATCH_POLLER_VERSION="29"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -2311,10 +2315,20 @@ deliver_session_instruction() {
 }
 
 # 画面から積まれた追加指示（`INSTRUCTION`）を1件送り、結果をジョブとして報告する。
+#
+# 第4引数は「停滞からの復旧か」（#2886）。`true`のときだけ許可する状態イベントに`working`を
+# 足す。**APIエラーで中断したセッションは`Stop`が飛ばないまま`working`で止まる**ため、
+# 既定のままでは、いちばん困る原因に対してだけ画面のボタンが毎回見送られる。広げる根拠は
+# 自動再開（#1971）と同じで、そちらが転記の末尾で中断を確かめてから来るのに対し、こちらは
+# **issue-deckが停滞と判定した状態で人がボタンを押した**ことを確かめてから来る
+# （受け口`POST /api/dispatch/session-recovery`が本文と停滞をサーバー側で検証する）。
+# **`permission_prompt`はここでも許可しない**（事故が起きたのはまさにこの状態）。
 send_session_instruction() {
-  local job_id="$1" session="$2" body="$3" message status=0
+  local job_id="$1" session="$2" body="$3" recovery="${4:-false}" message status=0 allowed="Stop"
 
-  message="$(deliver_session_instruction "$session" "$body")" || status=$?
+  [[ "$recovery" == "true" ]] && allowed='Stop|working'
+
+  message="$(deliver_session_instruction "$session" "$body" "$allowed")" || status=$?
   case "$status" in
     0)
       report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
@@ -2481,6 +2495,8 @@ escalate_tool_call_stalled_sessions() {
 run_control_job() {
   local job_id="$1" kind="$2" repo="$3" issue_number="$4" requested_session="$5"
   local instruction="${6:-}"
+  # 停滞からの復旧か（#2886）。`INSTRUCTION`のときだけ意味がある
+  local recovery="${7:-false}"
   local session action reason
 
   session="$(expected_session_name "$repo" "$issue_number")"
@@ -2528,7 +2544,7 @@ run_control_job() {
 
   case "$kind" in
     INSTRUCTION)
-      send_session_instruction "$job_id" "$session" "$instruction"
+      send_session_instruction "$job_id" "$session" "$instruction" "$recovery"
       return 0
       ;;
     INTERRUPT)
@@ -2943,7 +2959,7 @@ abort_manual_step_job() {
 # 組み立てると規約がずれた瞬間に「起動したのに失敗と報告する」誤判定になる。
 run_job() {
   local job_json="$1"
-  local job_id owner repo full_name issue_number kind requested_session instruction command
+  local job_id owner repo full_name issue_number kind requested_session instruction command recovery
   local placeholder_values resolved_command agent claude_local_model codex_model
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
@@ -2953,6 +2969,9 @@ run_job() {
   requested_session="$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')"
   # 追加指示の本文（#1012）。`INSTRUCTION`以外では空
   instruction="$(printf '%s' "$job_json" | jq -r '.instruction // ""')"
+  # その追加指示が「停滞からの復旧」か（#2886）。**古いissue-deckは返さない**ので既定はfalse。
+  # 立っているときだけ、送ってよい状態イベントに`working`を足す（下の`send_session_instruction`）
+  recovery="$(printf '%s' "$job_json" | jq -r 'if .recovery == true then "true" else "false" end')"
   # 代行実行するコマンド（#1828）。`MANUAL_STEP`以外では空。
   # **`<…>`が入ったままのテンプレート**（#2403）で、本文との照合はこれで行う
   command="$(printf '%s' "$job_json" | jq -r '.command // ""')"
@@ -3119,7 +3138,7 @@ run_job() {
   # 起動しないジョブ（#1332）はここで終わる。**cloneの有無や版数は問わない**
   # （既に立っているセッションを操作するだけで、リポジトリには触らない）。
   if [[ "$kind" != "LAUNCH" ]]; then
-    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session" "$instruction"
+    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session" "$instruction" "$recovery"
     return 0
   fi
 

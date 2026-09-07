@@ -253,7 +253,9 @@ export function MobileHomeScreenView({
 
       {/* 引っ張って更新（#2182）のタッチを受ける枠。スクロールするのは中の要素で、この枠は
           動かない（インジケーターを上端に重ねる基準にもなる） */}
-      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+      {/* `overflow-hidden`は引っ張ったぶんのはみ出しを切り抜くため（#2885。理由は
+          `issue-list.tsx`の同じ枠のコメントを参照） */}
+      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <PullToRefreshIndicator pull={pull} />
 
         {/* 最終行が右下の丸ボタンの裏へ入らないよう、下に余白を足す */}

@@ -9,6 +9,7 @@ import {
   resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
+import { describeSessionStall } from "@/lib/dispatch/session-stall";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 /**
@@ -79,6 +80,10 @@ function LocalSessionNotice({
  * **承認コメントを投稿しても、`11.local`が付いている間は無人実行が反応しない。** そのため
  * 「計画を承認」を押しても何も起きない（コメントだけが残る）。
  *
+ * #2886で、停滞していると引き上げられたセッション（`supervisor:session-*`）を別扱いにした。
+ * そちらの出口は上部の停滞パネルで、ここが「Remote Controlで答えてください」と言い続けると
+ * 画面から復旧できること自体が読み取れない。
+ *
  * #1903で、セッションが生きているかどうかで言い方を分けた。「動きません」だけでは、
  * 答える先がまだあるのか（Remote Control）、もう居ないのか（復旧が要る）が読み取れない。
  * あわせて、承認欄のボタンから「承認」「修正」を外して「コメント」「質問する」
@@ -115,6 +120,22 @@ export function LocalSessionApprovalNotice({
         <strong className="font-medium">終了しています</strong>
         。ここでの操作では作業は再開しません（コメントは記録として残ります）。続きを頼むには
         「セッションを復旧」から起こし直してください。
+      </LocalSessionNotice>
+    );
+  }
+
+  // 停滞していると引き上げられたセッション（#2886）。**「Remote Controlで答えてください」と
+  // 言わない。** 出口はこの画面の上部（停滞パネル）にあり、そちらを案内しないと
+  // **アプリを開かずに復旧できること自体が画面から読み取れない**（計画パネルと同じ扱い）
+  if (describeSessionStall(session)) {
+    return (
+      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+        {hostName}のセッションが停滞しています。
+        <strong className="font-medium">
+          上の「セッションが停滞しています」から復旧の文面を送れます
+        </strong>
+        （このコメント欄へ書いても走っているセッションには届きません）。文面がセッションへ
+        届くと、確認待ちの印も自動で外れます。
       </LocalSessionNotice>
     );
   }

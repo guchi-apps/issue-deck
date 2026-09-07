@@ -389,6 +389,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     firstSeenAt: "2026-08-18T00:00:00Z",
     lastReportedAt: "2026-08-18T00:00:00Z",
@@ -826,6 +828,27 @@ describe("先頭に固定したセクションの引っ張って更新（#2175�
     });
 
     expect(onPullToRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("引っ張って下がった中身は、切り抜く枠の中に収まっている（#2885）", async () => {
+    // 引っ張った量だけ中身を`translateY`で下げるが、`translateY`はレイアウトを動かさない。
+    // 包む枠が切り抜かないと、下がったぶんが枠の外へはみ出して下の兄弟（スマホなら下端の
+    // 絞り込み行）へ重なり、Issueの行がフッターに透けて見える。
+    const onPullToRefresh = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderList({ onPullToRefresh });
+
+    const list = container.querySelector("ul");
+    await act(async () => {
+      list!.dispatchEvent(touchEvent("touchstart", 100, 100));
+      list!.dispatchEvent(touchEvent("touchmove", 100, 140));
+      list!.dispatchEvent(touchEvent("touchmove", 100, 200));
+    });
+
+    // 実際に下がっている要素から、それを包む枠が切り抜く指定を持つことを確かめる
+    const shifted = container.querySelector<HTMLElement>('[style*="translateY"]');
+    expect(shifted).not.toBeNull();
+    expect(shifted!.style.transform).not.toBe("");
+    expect(shifted!.parentElement!.className).toContain("overflow-hidden");
   });
 });
 

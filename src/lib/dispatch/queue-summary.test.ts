@@ -30,6 +30,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     status: "QUEUED",
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,
@@ -107,6 +108,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     ...overrides,
   };

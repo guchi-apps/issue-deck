@@ -357,6 +357,49 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * 停滞したセッションへ、原因ごとの固定文面を送る（#2886）。
+   *
+   * **`sendSessionControl`の`instruction`と経路を分けているのは、こちらだけが確認待ちを
+   * 外すから。** 受け口は本文が固定文面のどれかであることと、セッションが今も停滞して
+   * いることを確かめてから積む（`session-stall.ts`）。任意の本文は従来どおり
+   * 「追加指示を送る」で送る。
+   *
+   * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ。押した場所の下に出す）。
+   * 積んだジョブは次の取得で`jobs`へ現れ、そちらが「送信しました」を出す。
+   */
+  const sendSessionRecovery = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+      /** 送る固定文面。`session-stall.ts`が持つプリセットの`body`そのまま */
+      body: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/session-recovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            hostName: params.hostName,
+            body: params.body,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * 質問・計画の返事をClaude Codeアプリ（端末）側で受け取るかを切り替える（#2822）。
    *
    * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ。押した場所の下に出す）。
@@ -904,6 +947,7 @@ export function useDispatchState(enabled: boolean) {
     isSubmitting,
     enqueue,
     sendSessionControl,
+    sendSessionRecovery,
     setSessionAnswerMode,
     startManualStepSession,
     runManualStep,

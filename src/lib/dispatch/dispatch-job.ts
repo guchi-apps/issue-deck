@@ -444,6 +444,14 @@ export type DispatchJobView = {
    */
   instruction: string | null;
   /**
+   * その追加指示が「停滞からの復旧」か（#2886。`kind`が`INSTRUCTION`のときだけ意味がある）。
+   *
+   * **pollerが許可する状態イベントと、確認待ちを外す時点がここで変わる**（`DispatchJob.recovery`の
+   * コメントを参照）。画面へ返すのは、報告の`message`と並べて「復旧として送ったもの」だと
+   * 分かるようにするため。
+   */
+  recovery: boolean;
+  /**
    * 代行実行したコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
    *
    * **サーバーが手作業Issueの本文から抽出し直したものが入る。** 画面はこれを「承認したものと
