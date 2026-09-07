@@ -2673,6 +2673,42 @@ gitは新しいファイルを作ってrenameするため、**プロセスは起
 **`DISPATCH_POLLER_VERSION`（`agentVersion`）を上げただけでは検知にならない。** あれは手で上げる
 プロトコル版数で、版数が同じまま97コミット遅れていた実績がある（#1612）。見ているのはgitの事実。
 
+### 大きな本文を`curl`の引数で渡すと、`E2BIG`で静かに送信できなくなる（#2870）
+
+「AI使用量」画面の直近日だけがGitHub Actionsばかりになり、Claude・Codexのローカル実装が
+反映されない不具合を追った（#2870）。**原因は表示側でも送信順序でもなく、`api_call`
+（`scripts/subpc-dispatch-poller.sh`）が本文を`curl`の1コマンドライン引数（`--data`）
+として渡していたこと**だった。
+
+- Linuxカーネルには1コマンドライン引数の長さに`MAX_ARG_STRLEN`（32ページ＝131,072バイト）
+  という上限があり、超えると`curl`プロセス自体が`execve`の`E2BIG`で起動できない。
+  `curl`のエラーハンドリングを一切経由しないため、`api_call`が受け取る`API_RESPONSE_STATUS`は
+  `000`（＝接続不可と同じ扱い）になり、journaldには
+  `/usr/bin/curl: Argument list too long`とだけ残る（`report_api_failure`の日本語ログには
+  この文字列が出ないため、日本語キーワードでは検索に引っかからない）
+- ローカルセッションのトークン使用量報告（`report_session_usage`）は、
+  `session-usage-phase-backfill.stamp`・`session-usage-code-review-backfill.stamp`
+  （`$HOME/.local/state/issue-deck/`）が無い＝**埋め戻しが1度も完走していない**ホストでは
+  毎巡「埋め戻しモード」（既定30日ぶん）のままになる。#2779・#2832で埋め戻し印が
+  増えて以降、このホストでは1セッションあたり約700バイト×チャンク200件＝約140KBの本文を
+  送ろうとしており、上限を確実に超えて先頭チャンクから送信できていなかった
+- `report_session_usage`は`000`を`404`（受け口がまだ無い旧デプロイへの後方互換）と
+  同じ扱いで黙って見送っていたため、この状態が2026-09-03から4日間・約1,070回続いても
+  気付けなかった
+
+対策は`api_call`が本文を一時ファイルへ書き、`--data-binary @file`で渡すよう変更した
+（`--data`のままだと改行が除去されるため`--data-binary`にする）。これは`api_call`を
+使う全経路に効く。あわせて`000`は`404`と分けてログへ残すようにし（`report_api_failure`）、
+`session_usage_report_payload`がチャンク化する直前に終了時刻の新しい順へ並べ替える
+保険も入れた（送信順だけの変更で、`session_usage_aggregate`側の重複除去の基準＝転記を
+読む順は変えていない）——本文の長さを直した後でも、何らかの理由でチャンクの途中が
+失敗した場合に、新しいセッションだけは先に届くようにするため。
+
+**この種の不具合はサブPCの本体チェックアウト（`~/apps/issue-deck`）を更新して
+pollerを再起動するまで効かない。** 画面の「更新して再起動」を押した後、
+`journalctl --user -u issue-deck-dispatch-poller --since "10 min ago" | grep "Argument list too long"`
+で再発していないことを確認する。
+
 ### 画面から更新して再起動する（#1875）
 
 遅れている行の下に「更新して再起動」を出し、押すと`SELF_UPDATE`のジョブが積まれる。受け取った
