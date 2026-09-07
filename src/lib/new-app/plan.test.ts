@@ -648,19 +648,19 @@ describe("体裁と運用の決めごと（#2254）", () => {
     expect(body).toContain("| 表示名 | 家計レポート（`title` / `applicationName` / `appleWebApp.title`） |");
     expect(body).toContain("| PWA | 対応する（オフラインは対応しない） |");
     expect(body).toContain("| 更新履歴 | 持つ |");
-    expect(body).toContain("| CI撮影の認証バイパス | 用意する |");
+    expect(body).toContain("| 開発用ログイン | 用意する |");
     expect(buildInitIssueBody(spec(), REFS)).toContain("| アイコン・テーマカラー | 暫定で始める（`#0f172a`） |");
+  });
+
+  it("認証が無ければ開発用ログインは「不要」になり、初期化Issueにも項目が出ない", () => {
+    const noAuth = spec({ auth: "none" });
+    expect(buildParentIssueBody(noAuth)).toContain("| 開発用ログイン | 不要（認証なし） |");
+    expect(buildInitIssueBody(noAuth, REFS)).not.toContain("開発用ログインを用意する");
   });
 
   it("VirtualHostと疎通確認のIssueには体裁の行を出さない", () => {
     expect(buildVpsIssueBody(spec(), REFS)).not.toContain("| PWA |");
     expect(buildDeployCheckIssueBody(spec(), REFS)).not.toContain("| 更新履歴 |");
-  });
-
-  it("認証が無ければ撮影バイパスは「不要」になり、初期化Issueにも項目が出ない", () => {
-    const noAuth = spec({ auth: "none" });
-    expect(buildParentIssueBody(noAuth)).toContain("| CI撮影の認証バイパス | 不要（認証なし） |");
-    expect(buildInitIssueBody(noAuth, REFS)).not.toContain("CI撮影の認証バイパスを用意する");
   });
 
   it("初期化Issueの「やること」に体裁の項目が入る", () => {
@@ -669,17 +669,17 @@ describe("体裁と運用の決めごと（#2254）", () => {
     expect(body).toContain("**オフライン対応（Service Worker）は入れない**");
     expect(body).toContain("- [ ] アイコンは暫定（テーマカラー1色）で置いて始める");
     expect(body).toContain("`RELEASE_CHANGELOG`");
-    expect(body).toContain("- [ ] CI撮影の認証バイパスを用意する");
+    expect(body).toContain("- [ ] 開発用ログインを用意する");
   });
 
   it("やらないと決めたものは「やること」に並べない", () => {
     const body = buildInitIssueBody(
-      spec({ pwa: false, changelog: false, screenshotBypass: false }),
+      spec({ pwa: false, changelog: false, devLoginBypass: false }),
       REFS,
     );
     expect(body).not.toContain("PWA対応の一式を置く");
     expect(body).not.toContain("更新履歴（changelog）を持たせる");
-    expect(body).not.toContain("CI撮影の認証バイパスを用意する");
+    expect(body).not.toContain("開発用ログインを用意する");
     // 決めた事実そのものは表に残る
     expect(body).toContain("| PWA | 対応しない |");
     expect(body).toContain("| 更新履歴 | 持たない（バージョンだけが上がる） |");
@@ -698,19 +698,6 @@ describe("体裁と運用の決めごと（#2254）", () => {
     const body = buildParentIssueBody(spec());
     const conditions = body.slice(body.indexOf("## 完了条件"), body.indexOf("## 後で決めること"));
     expect(conditions).not.toContain("アイコン");
-  });
-
-  it("`runtime-setup: minimal` では無人撮影が成立しないことを断って書く", () => {
-    const fastapi = spec({ kind: "fastapi", port: 8003, auth: "fastapi-google" });
-    expect(buildParentIssueBody(fastapi)).toContain(
-      "| CI撮影の認証バイパス | 用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用） |",
-    );
-    const init = buildInitIssueBody(fastapi, REFS);
-    expect(init).toContain("`24.screenshot-required` は無人実行では成立しない");
-    // Next.js（`node-db`）ではこれまでどおり成立する
-    expect(buildInitIssueBody(spec(), REFS)).toContain(
-      "**これが無いと `24.screenshot-required` が成立しない**",
-    );
   });
 
   it("Python系では npm の lifecycle ではなく bump_version.py を案内する", () => {

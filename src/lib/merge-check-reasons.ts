@@ -1,9 +1,5 @@
 import { extractCommentSourceId } from "@/lib/github/comment-source";
-import {
-  MERGE_CONFIRM_REQUIRED_LABEL,
-  PREVIEW_REQUIRED_LABEL,
-  SCREENSHOT_REQUIRED_LABEL,
-} from "@/lib/github/start-implementation";
+import { MERGE_CONFIRM_REQUIRED_LABEL, PREVIEW_REQUIRED_LABEL } from "@/lib/github/start-implementation";
 import type { IssueComment, IssueLabel } from "@/types/issue";
 
 /**
@@ -64,10 +60,6 @@ const LABEL_REASONS: readonly { label: string; text: string }[] = [
   {
     label: PREVIEW_REQUIRED_LABEL,
     text: `開発環境での確認待ちです（\`${PREVIEW_REQUIRED_LABEL}\`）`,
-  },
-  {
-    label: SCREENSHOT_REQUIRED_LABEL,
-    text: `スクリーンショットの確認待ちです（\`${SCREENSHOT_REQUIRED_LABEL}\`）`,
   },
 ];
 

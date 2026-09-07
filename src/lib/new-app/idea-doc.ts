@@ -57,7 +57,7 @@ export type IdeaFieldKey =
   | "iconPlan"
   | "themeColor"
   | "changelog"
-  | "screenshotBypass";
+  | "devLoginBypass";
 
 /** 読み取れた1項目。画面の「構想から読み込んだ項目」に出す。 */
 export type IdeaFilledField = {
@@ -127,7 +127,7 @@ const FIELD_LABELS: Record<IdeaFieldKey, string> = {
   iconPlan: "アイコンとテーマカラー",
   themeColor: "テーマカラー",
   changelog: "更新履歴",
-  screenshotBypass: "CI撮影の認証バイパス",
+  devLoginBypass: "開発用ログイン",
 };
 
 /**
@@ -154,7 +154,9 @@ const FIELD_KEYWORDS: { key: IdeaFieldKey; keyword: string }[] = [
   { key: "pwa", keyword: "PWA" },
   { key: "offline", keyword: "オフライン" },
   { key: "changelog", keyword: "更新履歴" },
-  { key: "screenshotBypass", keyword: "認証バイパス" },
+  // keywordは`guchi-apps/ideas`のテンプレート文言（「CI撮影の認証バイパスを用意するか」）に
+  // 合わせている。表示ラベルだけ一般化しても、テンプレート側の文言と部分一致すれば拾える
+  { key: "devLoginBypass", keyword: "認証バイパス" },
 ];
 
 /** 空欄と同じ扱いにする値。 */
@@ -500,8 +502,8 @@ export function parseIdeaDoc(markdown: string): IdeaImport {
     values.changelog = value;
     return value ? "持つ" : "持たない";
   });
-  readChoice("screenshotBypass", YES_NO_ALIASES, (value) => {
-    values.screenshotBypass = value;
+  readChoice("devLoginBypass", YES_NO_ALIASES, (value) => {
+    values.devLoginBypass = value;
     return value ? "用意する" : "用意しない";
   });
 

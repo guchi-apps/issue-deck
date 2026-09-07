@@ -82,7 +82,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     contractVersion: 2,
     online: true,
     lastSeenAt: "2026-08-14T00:00:00Z",
-    screenshotCapable: true,
     sessionControlCapable: true,
     instructionCapable: true,
     crossRepoQuestionCapable: true,
@@ -665,28 +664,6 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByRole("checkbox", { name: /開発環境を起動する/ })).not.toBeNull();
     });
 
-    it("GitHub Actionsを選ぶとスクリーンショットのオプションが出る", () => {
-      dispatchState.hosts = [makeHost()];
-      renderDialog({ includeDispatchTargets: true });
-
-      fireEvent.click(screen.getByRole("radio", { name: /GitHub Actions/ }));
-
-      expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).not.toBeNull();
-    });
-
-    // 隠すと、付いてしまったラベルをこのダイアログから外せなくなる
-    it("既に24.screenshot-requiredが付いていればサブPCでも出す", () => {
-      dispatchState.hosts = [makeHost()];
-      renderDialog({
-        includeDispatchTargets: true,
-        issue: makeIssue({
-          labels: [{ name: "24.screenshot-required", color: "d4c5f9", description: null }],
-        }),
-      });
-
-      expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).not.toBeNull();
-    });
-
     it("新機能のIssueでは「計画が必要」にチェックが入った状態で開き、そのままラベルが付く", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({
@@ -955,46 +932,4 @@ describe("StartImplementationDialog", () => {
     ).not.toBeNull();
   });
 
-  /**
-   * 撮る仕組みを持たないリポジトリでは、実装だけ進んで画像が出ないまま完了する（#1118）。
-   * ホスト由来の理由（#1268）と同じ見せ方で、押す前に理由を出す。
-   */
-  describe("撮影に対応しないリポジトリ（#1118）", () => {
-    it("GitHub Actionsでは理由を出して選べなくする", () => {
-      dispatchState.hosts = [];
-      renderDialog({
-        includeDispatchTargets: true,
-        issue: makeIssue({ repositoryFullName: "guchi-apps/dayspan" }),
-      });
-
-      const option = screen.getByRole("checkbox", { name: /スクリーンショットが必要/ });
-      expect(option.hasAttribute("disabled")).toBe(true);
-      expect(screen.getByText(/無人実行での撮影に対応していない/)).not.toBeNull();
-    });
-
-    it("対応しているリポジトリでは塞がない", () => {
-      dispatchState.hosts = [];
-      renderDialog({ includeDispatchTargets: true });
-
-      const option = screen.getByRole("checkbox", { name: /スクリーンショットが必要/ });
-      expect(option.hasAttribute("disabled")).toBe(false);
-      expect(screen.queryByText(/無人実行での撮影に対応していない/)).toBeNull();
-    });
-
-    // 塞ぐと、付いてしまったラベルをこのダイアログから外せなくなる
-    it("既に24.screenshot-requiredが付いていれば外せる", () => {
-      dispatchState.hosts = [];
-      renderDialog({
-        includeDispatchTargets: true,
-        issue: makeIssue({
-          repositoryFullName: "guchi-apps/dayspan",
-          labels: [{ name: "24.screenshot-required", color: "d4c5f9", description: null }],
-        }),
-      });
-
-      const option = screen.getByRole("checkbox", { name: /スクリーンショットが必要/ });
-      expect(option.hasAttribute("disabled")).toBe(false);
-      expect(screen.getByText(/無人実行での撮影に対応していない/)).not.toBeNull();
-    });
-  });
 });

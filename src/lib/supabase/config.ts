@@ -11,7 +11,7 @@
 
 /**
  * CIワークフローがビルドを通すためだけに入れているダミー値の目印。
- * `.github/workflows/ci.yml`・`claude-*.yml`・`scripts/capture-issue-screenshots.sh`が
+ * `.github/workflows/ci.yml`・`claude-*.yml`が
  * `https://ci-placeholder.supabase.co` / `ci-placeholder` を渡しており、**同じ値がサブPCの
  * `.env.local`にも入っていた**（#1419の原因）。値を変えるときは上記もあわせて変える。
  */

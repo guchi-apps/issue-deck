@@ -47,7 +47,7 @@ jobs:
       # 無くなった(明示を残すと「issue-deckだけが特別」と読めてしまう)。
       # カテゴリで止めたいリポジトリだけが merge-policy: strict と書く(オプトアウト)。
       # relaxedでも止まるのは、22.merge-confirm-required・23.preview-required・
-      # 24.screenshot-required・.shared-context/の混入・claude-reviewが要修正と判定した場合。
+      # .shared-context/の混入・claude-reviewが要修正と判定した場合。
     secrets: inherit
     permissions:
       contents: write

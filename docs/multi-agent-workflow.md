@@ -40,12 +40,11 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | ファイル | 内容 |
 |---|---|
 | [ブランチ・worktree運用とエージェントの役割](multi-agent/branching.md) | Issueごとのブランチ・worktree分離、エージェントの責務、共有知識層、ブランチ保護 |
-| [Issueラベルによる状態管理とトグル](multi-agent/labels.md) | ラベルの状態遷移、計画フェーズ・プレビュー・スクリーンショット・マージ前確認の各トグル、サブIssue分割、自動マージ可否の判定、ユーザーの手作業のIssue化（`71.manual-step`） |
+| [Issueラベルによる状態管理とトグル](multi-agent/labels.md) | ラベルの状態遷移、計画フェーズ・プレビュー・マージ前確認の各トグル、サブIssue分割、自動マージ可否の判定、ユーザーの手作業のIssue化（`71.manual-step`） |
 | [Phase 5: @claudeコメント起点の完全自動化](multi-agent/dispatch.md) | `claude-issue-dispatch.yml`の全体。トリガー、詰まりからの再開、通知コメント、権限モード、既知の制約 |
 | [計画フェーズの信頼性と実装runへの引き継ぎ](multi-agent/dispatch-plan.md) | 計画提示ステップのフォールバック・自己リトライ、計画runの調査結果を実装runへ渡す仕組み |
 | [プロンプトの配置・使用モデル・使用量の可視化](multi-agent/prompts-and-models.md) | `.github/prompts/`の構成と式テンプレート長上限、実装用／補助用モデルの設定、Job Summaryへの使用量出力 |
 | [Phase 6: develop→mainのリリースフロー自動化](multi-agent/release.md) | バージョンbump PR・リリースPR作成の自動化 |
-| [Phase 7: 無人実行でのスクリーンショット撮影・画像埋め込み](multi-agent/screenshots.md) | Playwrightによる撮影とIssueコメントへの埋め込み |
 | [PRコンフリクト・CI失敗の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`（Issueに紐づかないPR向け）と画面のボタンからの起動 |
 | [ローカルセッションの起動](multi-agent/local-quick-start.md) | ローカル起動プロトコル、ヘッドレス（tmux）起動、開発サーバーのポート帯と回収、手元へ貼るプロンプト・起動コマンドのコピー |
 | [Codex CLIでローカルセッションを起こす](multi-agent/codex.md) | `--agent codex`での起動、Claude Codeと揃わないもの（フック・Remote Control・Plan modeの承認）、サンドボックスとネットワークの設定 |
@@ -84,7 +83,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 
 手動セットアップ項目:
 - GitHubラベル`21.plan-required`の新規作成
-- GitHubラベル`23.preview-required`・`24.screenshot-required`の新規作成
+- GitHubラベル`23.preview-required`の新規作成
 - GitHubラベル`22.merge-confirm-required`の新規作成（#366、作成済み）
 - `main`のBranch protection設定（未設定のため）
 - リポジトリ設定でAuto-merge機能を有効化（Phase4、`gh repo edit --enable-auto-merge`で設定済み）

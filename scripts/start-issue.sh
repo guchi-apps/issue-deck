@@ -659,24 +659,6 @@ else:
         "承認待ちで止まる必要はなく、そのままPR作成まで進めてよいです。"
     ).format(port=dev_port, sslip_note=sslip_note, dev_server_state=dev_server_state)
 
-if "24.screenshot-required" in label_names:
-    screenshot_instructions = (
-        "このIssueには`24.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
-        "PRを作成する**前**に次の手順を行ってください。\n\n"
-        f"1. `run`スキル等を使って開発サーバー（ポート`{dev_port}`）上で変更箇所のスクリーンショットを取得する"
-        "（Playwright等の新規依存関係の追加が必要な場合は、追加前に必ずユーザーに確認する）\n"
-        "2. 取得したスクリーンショットをユーザーに提示し、問題ないか明示的な承認を得る。"
-        "**承認可否は`AskUserQuestion`で尋ねること。** そうするとフックが自動で`00.check-user`を付け、"
-        "issue-deckの画面の「ユーザーの確認待ち」に出ます（答えた時点で自動的に外れます。#1417）\n"
-        "3. 承認が得られてから初めてPRを作成する（ローカル実行では、承認が得られるまで応答を止めて待つ。"
-        "無人実行の場合は`00.check-user`を付与して停止し、承認後に再開する）"
-    )
-else:
-    screenshot_instructions = (
-        "このIssueには`24.screenshot-required`ラベルが付いていないため、"
-        "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
-    )
-
 # 見た目のアーティファクト（#1473・#1540）。**出すのは実装着手前**（#1540）。実装が済んでから
 # 見せる形だと、見た目がNGだったときに実装がまるごとやり直しになるため、ゲートをPR作成前から
 # 実装着手前へ移した。実装後の見た目は23.preview-required（実物）が受け持つ。
@@ -821,7 +803,6 @@ result = (
     .replace("{{CONCURRENT_WORK}}", concurrent_work or "（取得できませんでした）")
     .replace("{{DEV_PORT}}", dev_port)
     .replace("{{PREVIEW_INSTRUCTIONS}}", preview_instructions)
-    .replace("{{SCREENSHOT_INSTRUCTIONS}}", screenshot_instructions)
     .replace("{{ARTIFACT_INSTRUCTIONS}}", artifact_instructions)
     .replace("{{PLAN_INSTRUCTIONS}}", plan_instructions)
     .replace("{{PLAN_COMMENT_NOTE}}", plan_comment_note)

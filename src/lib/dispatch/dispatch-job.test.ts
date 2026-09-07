@@ -57,7 +57,6 @@ import {
   parseDispatchAgent,
   readDispatchAgent,
   resolveDispatchAgentRejection,
-  resolveScreenshotRejection,
   resolveSessionControlRejection,
   type DispatchHostView,
   type DispatchJobKind,
@@ -1014,61 +1013,6 @@ describe("セッションの操作（#1332）", () => {
   });
 });
 
-describe("resolveScreenshotRejection（#1268）", () => {
-  function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
-    return {
-      name: "subpc",
-      repositories: ["guchi-apps/issue-deck"],
-      contractVersion: 2,
-      online: true,
-      lastSeenAt: "2026-08-14T00:00:00Z",
-      screenshotCapable: true,
-      sessionControlCapable: true,
-      instructionCapable: true,
-      crossRepoQuestionCapable: true,
-      manualStepCapable: null,
-      manualStepAbortCapable: null,
-      manualStepValuesCapable: null,
-      planReviewCapable: null,
-      codeReviewCapable: null,
-      codexCapable: null,
-      codexRemoteControlCapable: null,
-      manualStepSessionCapable: null,
-      selfUpdateCapable: null,
-      previewCapable: null,
-      rebootCapable: null,
-      reboot: null,
-      previewRepositories: null,
-      preview: null,
-      maxSessions: 12,
-      liveSessions: 0,
-      metrics: null,
-      launchHold: null,
-      checkout: null,
-      ...overrides,
-    };
-  }
-
-  it("撮れるホストでは塞がない", () => {
-    expect(resolveScreenshotRejection(host())).toBeNull();
-  });
-
-  it("撮れないと申告しているホストでは理由を返す", () => {
-    expect(resolveScreenshotRejection(host({ screenshotCapable: false }))).toContain(
-      "Playwright",
-    );
-  });
-
-  // 判定材料が無いことと「撮れない」ことは違う
-  it("申告していないホスト（古いpoller）は塞がない", () => {
-    expect(resolveScreenshotRejection(host({ screenshotCapable: null }))).toBeNull();
-  });
-
-  it("ホストを選んでいない（GitHub Actions等）なら塞がない", () => {
-    expect(resolveScreenshotRejection(null)).toBeNull();
-  });
-});
-
 /**
  * #1454。**起動ジョブ（`resolveDispatchTargetRejection`）とは判定が違う。** 横断質問セッションは
  * worktreeを作らず、記録先リポジトリへは`gh issue comment`で書くだけなので、記録先が
@@ -1095,7 +1039,6 @@ describe("横断質問（#1454）", () => {
       contractVersion: 1,
       online: true,
       lastSeenAt: "2026-08-15T00:00:00Z",
-      screenshotCapable: true,
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,
@@ -1282,7 +1225,6 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       contractVersion: 1,
       online: true,
       lastSeenAt: "2026-08-17T00:00:00Z",
-      screenshotCapable: true,
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,
@@ -1479,7 +1421,6 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       contractVersion: 1,
       online: true,
       lastSeenAt: "2026-08-22T00:00:00Z",
-      screenshotCapable: true,
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,
@@ -1845,7 +1786,6 @@ describe("エージェントの選択（#2505）", () => {
       contractVersion: 2,
       online: true,
       lastSeenAt: "2026-08-14T00:00:00Z",
-      screenshotCapable: true,
       sessionControlCapable: true,
       instructionCapable: true,
       crossRepoQuestionCapable: true,

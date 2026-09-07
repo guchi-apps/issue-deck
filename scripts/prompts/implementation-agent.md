@@ -232,10 +232,6 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 {{PREVIEW_INSTRUCTIONS}}
 
-## スクリーンショット取得
-
-{{SCREENSHOT_INSTRUCTIONS}}
-
 ## 見た目のアーティファクト
 
 {{ARTIFACT_INSTRUCTIONS}}

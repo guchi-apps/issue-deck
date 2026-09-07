@@ -504,7 +504,6 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     contractVersion: 2,
     online: true,
     lastSeenAt: "2026-08-20T00:00:00.000Z",
-    screenshotCapable: true,
     sessionControlCapable: true,
     instructionCapable: true,
     crossRepoQuestionCapable: true,
@@ -586,9 +585,8 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
  * クラスの有無で規約を固定する。
  */
 describe("Issue詳細の下端の余白（#1793）", () => {
-  /** スクロール領域の目印は撮影用の`data-capture-scroll-bottom`を借りる */
   function scrollContainer(): HTMLElement {
-    const container = document.querySelector("[data-capture-scroll-bottom]");
+    const container = document.querySelector("[data-scroll-container]");
     if (!container) throw new Error("スクロール領域が見つからない");
     return container as HTMLElement;
   }

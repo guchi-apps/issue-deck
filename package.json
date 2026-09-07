@@ -22,7 +22,6 @@
     "db:studio": "prisma studio",
     "db:seed:ci": "node scripts/seed-ci-db.mjs",
     "db:seed:dev": "bash scripts/seed-dev-db.sh",
-    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh",
     "check:workflows": "node scripts/check-workflow-expression-length.mjs && node scripts/check-workflow-expression-syntax.mjs"
   },
   "dependencies": {
@@ -63,7 +62,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^30.0.1",
-    "playwright": "^1.62.1",
     "smee-client": "^5.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",

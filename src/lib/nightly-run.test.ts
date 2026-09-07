@@ -77,7 +77,6 @@ describe("resolveNightlyRunLabelRejection", () => {
   it("開発環境・アーティファクトのラベルだけを塞ぐ", () => {
     expect(resolveNightlyRunLabelRejection([{ name: "21.plan-required" }])).toBeNull();
     expect(resolveNightlyRunLabelRejection([{ name: "22.merge-confirm-required" }])).toBeNull();
-    expect(resolveNightlyRunLabelRejection([{ name: "24.screenshot-required" }])).toBeNull();
     expect(resolveNightlyRunLabelRejection([{ name: "25.artifact-required" }])).toContain(
       "アーティファクトで見た目を出す",
     );

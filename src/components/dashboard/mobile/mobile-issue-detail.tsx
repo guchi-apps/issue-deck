@@ -961,9 +961,6 @@ export function MobileIssueDetail({
         </DropdownMenu>
       </header>
 
-      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
-          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
-          スクロールして写すための目印 */}
       {/* flex-1を外さない（#1664）。付けないと`flex: 0 1 auto`のまま＝この領域の高さが
           「中身の高さから縮んだ結果」として決まる。見た目の高さは同じでも、ポーリングの
           更新・画像やコメントの読み込みで中身の高さが変わるたびにflexの縮小計算が走り、
@@ -992,7 +989,7 @@ export function MobileIssueDetail({
 
       <div
         ref={scrollContainerRef}
-        data-capture-scroll-bottom
+        data-scroll-container
         className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-20"
       >
         {/* リポジトリ・タイトル・状態・進捗・担当者・コメント数・更新・ラベルを1枚へ畳む（#1646）。

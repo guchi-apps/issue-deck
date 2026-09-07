@@ -57,7 +57,6 @@ import {
   isDispatchAgentSelectable,
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
-  resolveScreenshotRejection,
   type DispatchAgent,
   type DispatchEnqueueRejection,
 } from "@/lib/dispatch/dispatch-job";
@@ -70,7 +69,6 @@ import {
   resolveNightlyRunLabelRejection,
   type NightlyRunSettings,
 } from "@/lib/nightly-run";
-import { resolveScreenshotRepositoryRejection } from "@/lib/github/screenshot-support";
 import { buildImplementationPrompt } from "@/lib/prompts/build-implementation-prompt";
 import {
   ARTIFACT_REQUIRED_LABEL,
@@ -540,15 +538,6 @@ export function StartImplementationDialog({
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
   // **トリガーではなくここで止める**（#1262）
   const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
-  // スクリーンショットを撮れない場合の理由。**軸が2つある。**
-  // - 選んだホストにPlaywrightが入っていない（#1268）。**申告していないホストは塞がない**
-  // - リポジトリが無人実行での撮影に対応していない（#1118）。**GitHub Actionsを選んだときだけ**
-  //   （サブPC・ローカルは実行中の画面をそのまま確認できるため当てはまらない）
-  const screenshotRejection =
-    resolveScreenshotRejection(selectedHost) ??
-    (effectiveTarget.kind === "actions"
-      ? resolveScreenshotRepositoryRejection(issue.repositoryFullName)
-      : null);
   /**
    * エージェントを選ばせるか（#2505）。**サブPCを選んでいて、そのホストが対応を申告して
    * いるときだけ。** 申告していないホスト（`codex`が未導入・pollerが古い）で選ばせると、
@@ -674,8 +663,6 @@ export function StartImplementationDialog({
    * 全部の説明を常に出すと縦に伸びてしまうため、ONにした内容の確認と、押せない理由の提示に絞る。
    */
   const optionHints = visibleOptions.flatMap((option) => {
-    const unavailable = option.key === "screenshotRequired" && screenshotRejection !== null;
-    if (unavailable) return [{ key: option.key, label: option.label, text: screenshotRejection }];
     // 夜間実行では選べないもの（#2772）。ONのままなら積めない理由、OFFなら選べない理由を出す
     if (isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key)) {
       return [
@@ -1073,14 +1060,8 @@ export function StartImplementationDialog({
             <p className="text-sm font-medium">オプション</p>
             <div className="grid grid-cols-2 gap-2">
               {visibleOptions.map((option) => {
-                // 撮れないホストで選ばせると、無人実行では依存の追加を確認する相手がいないまま
-                // 止まる（#1268）。撮影に対応していないリポジトリでは、実装だけ進んで画像が
-                // 出ないまま完了する（#1118）。**既に付いているものは外せるよう、
-                // チェック済みなら塞がない**
-                const unavailable =
-                  option.key === "screenshotRequired" && screenshotRejection !== null;
                 // 夜間実行では承認・確認を待つ人がいないものを選ばせない（#2772）。
-                // **既に付いているものは外せるよう、チェック済みなら塞がない**（撮影と同じ）
+                // **既に付いているものは外せるよう、チェック済みなら塞がない**
                 const nightlyUnavailable =
                   isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key);
                 return (
@@ -1089,14 +1070,12 @@ export function StartImplementationDialog({
                     icon={START_OPTION_ICONS[option.key]}
                     label={option.label}
                     description={
-                      unavailable
-                        ? (screenshotRejection ?? "")
-                        : nightlyUnavailable
-                          ? "夜間実行では選べません（承認・確認を待つ人がいない）"
-                          : option.description
+                      nightlyUnavailable
+                        ? "夜間実行では選べません（承認・確認を待つ人がいない）"
+                        : option.description
                     }
                     checked={options[option.key]}
-                    disabled={(unavailable || nightlyUnavailable) && !options[option.key]}
+                    disabled={nightlyUnavailable && !options[option.key]}
                     onToggle={() => toggleOption(option.key)}
                   />
                 );

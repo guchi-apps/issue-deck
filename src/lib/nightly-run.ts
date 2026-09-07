@@ -113,9 +113,8 @@ export function describeNightlyRunWindowHours(startHour: number): string {
  *   `merge-policy: relaxed`でも自動マージが止まる
  * - `25.artifact-required`: 見た目の承認を待つ工程で止まる
  *
- * `22.merge-confirm-required`（朝に自分の目で通すための札）と`24.screenshot-required`
- * （セッションだけで完了できる）は入れない。`21.plan-required`も入れない——計画の投稿で
- * 止まって朝に承認する、という使い方は夜間実行の想定に含まれる。
+ * `22.merge-confirm-required`（朝に自分の目で通すための札）は入れない。`21.plan-required`も
+ * 入れない——計画の投稿で止まって朝に承認する、という使い方は夜間実行の想定に含まれる。
  */
 export const NIGHTLY_RUN_BLOCKING_LABELS: readonly string[] = [
   PREVIEW_REQUIRED_LABEL,

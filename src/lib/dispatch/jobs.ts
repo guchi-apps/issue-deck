@@ -224,7 +224,6 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     contractVersion: host.contractVersion,
     online: isDispatchHostOnline(host.lastSeenAt, now),
     lastSeenAt: host.lastSeenAt.toISOString(),
-    screenshotCapable: host.screenshotCapable,
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
@@ -2107,8 +2106,6 @@ export async function announceDispatchHost(params: {
   contractVersion: number | null;
   maxConcurrency: number | null;
   agentVersion: string | null;
-  /** スクリーンショットを撮れるか（#1268）。申告していない古いpollerでは`null` */
-  screenshotCapable: boolean | null;
   /** 走っているセッションを操作できるか（#1332）。申告していない古いpollerでは`null`＝非対応 */
   sessionControlCapable: boolean | null;
   /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
@@ -2190,7 +2187,6 @@ export async function announceDispatchHost(params: {
     contractVersion: params.contractVersion,
     maxConcurrency: params.maxConcurrency,
     agentVersion: params.agentVersion,
-    screenshotCapable: params.screenshotCapable,
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,

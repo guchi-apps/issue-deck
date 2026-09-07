@@ -788,13 +788,8 @@ model DispatchHost {
   maxConcurrency           Int?
   // pollerのバージョン。受け口が古いまま動いているかの手掛かり
   agentVersion             String?
-  // スクリーンショットを撮れるか（#1268）。Playwrightのブラウザ本体が入っているかで判定する。
-  // **`null`は「申告していない」**（古いpoller）で、`false`（撮れない）とは区別する。
-  // 無人実行では依存の追加をその場で確認する相手がいないため、撮れないホストで
-  // `24.screenshot-required`を選ばせると必ず詰まる
-  screenshotCapable        Boolean?
   // 走っているセッションを画面から操作できるか（#1332）。pollerが対応版で申告する。
-  // **`null`（未申告＝古いpoller）は「できない」として扱う**。`screenshotCapable`とは逆で、
+  // **`null`（未申告＝古いpoller）は「できない」として扱う**。
   // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
   // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
   sessionControlCapable    Boolean?

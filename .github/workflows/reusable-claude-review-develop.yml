@@ -12,7 +12,7 @@ name: Reusable Claude Code Review (develop向けPR)
 #   判定とレビューまで直列に並べる必要は無くなっている。ポーリングがタイムアウトした
 #   場合もジョブ自体は失敗させず後続へ進める(fail-open)
 # - risk-check: パスパターンによる機械的リスク判定、および対応Issueへの
-#   22.merge-confirm-required・24.screenshot-required・23.preview-requiredラベル
+#   22.merge-confirm-required・23.preview-requiredラベル
 #   付与の有無を確認する(#94, #366)。**判定するだけで、00.check-userの付与と理由コメントの
 #   投稿は行わない**(#1406。実際に反映するのは最後のauto-mergeジョブ)。判定結果は
 #   risky・reasons・already-check-userの各outputで渡す。
@@ -154,8 +154,8 @@ on:
           (自動マージ不可カテゴリのまま・人がマージする)をもう1回通るため、
           develop向けPRの側で毎回「確認待ち」の札を積む価値が薄い。
           カテゴリで止めたいリポジトリだけが caller に strict と書く(オプトアウト)。
-          relaxedでも、Issueのラベル(22.merge-confirm-required・23.preview-required・
-          24.screenshot-required)・.shared-context/の混入・claude-reviewの意味的判定は
+          relaxedでも、Issueのラベル(22.merge-confirm-required・23.preview-required)・
+          .shared-context/の混入・claude-reviewの意味的判定は
           従来どおりマージを止める。**カテゴリ該当時にclaude-reviewを実行する条件は
           relaxedでも変わらない**(止めるのをやめるだけで、レビューは省かない)。
         required: false
@@ -398,9 +398,6 @@ jobs:
             ISSUE_LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
             if echo "$ISSUE_LABELS" | grep -qx "22.merge-confirm-required"; then
               add_reason "Issueに \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
-            fi
-            if echo "$ISSUE_LABELS" | grep -qx "24.screenshot-required"; then
-              add_reason "Issueに \`24.screenshot-required\` ラベルが付与されているため（スクリーンショット確認のため、developへのマージ前に必ずユーザー確認を行う設定。このコメントはPR作成・push直後に自動投稿されるため、この時点ではまだスクリーンショットは添付されていません。実装エージェントが撮影まで完了すると、この後に別コメントとして画像が追加投稿されるので、催促する前に少し待って最新コメントをご確認ください）"
             fi
             if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
               add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"

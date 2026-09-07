@@ -837,12 +837,9 @@ export function IssueDetail({
     // 本文・コメントの中のclaude.aiリンクもプレビューへ差し替えるので、詳細の全体を包む（#2154）
     <ArtifactPreviewProvider artifacts={artifacts}>
     <div className="relative flex h-full flex-col overflow-hidden">
-      {/* data-capture-scroll-bottomは、外側のページがoverflow-hiddenのためfullPage撮影に
-          写らないこの内部スクロール領域の下端を、scripts/capture-screenshots.mjsが撮影前に
-          スクロールして写すための目印 */}
       <div
         ref={scrollContainerRef}
-        data-capture-scroll-bottom
+        data-scroll-container
         className="flex-1 overflow-y-auto overscroll-contain"
       >
         {/* ヘッダーはスクロールしても残る（#1577）。中身の状態はここでは持たず、

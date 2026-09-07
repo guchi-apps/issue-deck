@@ -92,18 +92,6 @@ describe("buildImplementationPrompt", () => {
     expect(prompt).toContain("明示的な承認を得る");
   });
 
-  it("24.screenshot-requiredが無ければ撮影不要と明記する", () => {
-    expect(buildImplementationPrompt(BASE)).toContain("スクリーンショットの自動取得は不要です");
-  });
-
-  it("24.screenshot-requiredが付いていれば撮影と承認を求める", () => {
-    const prompt = buildImplementationPrompt({
-      ...BASE,
-      labels: [{ name: "24.screenshot-required" }],
-    });
-    expect(prompt).toContain("スクリーンショットを取得し、ユーザーの承認を得てから");
-  });
-
   // #1540: 実装が済んでから見せると、見た目がNGだったときに実装がやり直しになる
   it("25.artifact-requiredが無ければアーティファクトは不要と明記する", () => {
     expect(buildImplementationPrompt(BASE)).toContain("アーティファクトの作成は不要です");

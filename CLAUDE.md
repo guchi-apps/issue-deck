@@ -255,9 +255,9 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 
 **配布先へ届くのはタグを配ってから。** 各リポジトリのcallerは`@workflows/vN`でタグ固定しており、既定の反転は参照タグを上げた時点で効き始める。タグは`main`の先端から切られるため、`develop`→`main`のリリースを1回通し、画面（設定＞フリート運用）の「新しいタグを切って配る」を押すまでは従来どおり`strict`の挙動になる。issue-deck自身はローカルパス参照なのでdevelopへ入った時点で効く。
 
-`relaxed`でもdevelop向けPRのマージが止まるのは次の4つ。
+`relaxed`でもdevelop向けPRのマージが止まるのは次の3つ。
 
-- Issueに`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`のいずれかが付いている
+- Issueに`22.merge-confirm-required`・`23.preview-required`のいずれかが付いている
 - `.shared-context/`（共有知識リポジトリのcheckout先）が差分に混入している
 - Claudeの自動レビューが「実際に直すべき問題がある」と判定した
 - `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）

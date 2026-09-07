@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  Camera,
-  Check,
-  ClipboardList,
-  GitMerge,
-  MonitorPlay,
-  Palette,
-  type LucideIcon,
-} from "lucide-react";
+import { Check, ClipboardList, GitMerge, MonitorPlay, Palette, type LucideIcon } from "lucide-react";
 
 import type { StartImplementationOptionKey } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
@@ -22,7 +14,6 @@ export const START_OPTION_ICONS: Record<StartImplementationOptionKey, LucideIcon
   artifactRequired: Palette,
   mergeConfirmRequired: GitMerge,
   previewRequired: MonitorPlay,
-  screenshotRequired: Camera,
 };
 
 /**
