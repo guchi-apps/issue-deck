@@ -2456,9 +2456,12 @@ recover_tool_call_stalled_sessions() {
     issue_number="${BASH_REMATCH[2]}"
 
     if ! session_tool_call_stall_detected "$session_name"; then
-      # 自力で動き出した（または最初から止まっていない）。次に同じ現象で止まったときに
-      # 前回の回数・「もう通知済み」を引きずらないよう、ここで消す。
-      session_state_clear_tool_call_stall "$session_name"
+      # 次に同じ現象で止まったときに前回の回数・「もう通知済み」を引きずらないよう消す。
+      # **ただし消してよいのは、送ったあと実際にツールが呼ばれたときだけ**（#2896）。
+      # 送出そのものが転記のmtimeを更新するため、「検知しなくなったら消す」にすると回数が
+      # 毎回0へ戻り、上限が一度も効かない（`session_tool_call_stall_recovered`の説明）。
+      session_tool_call_stall_recovered "$session_name" &&
+        session_state_clear_tool_call_stall "$session_name"
       continue
     fi
 

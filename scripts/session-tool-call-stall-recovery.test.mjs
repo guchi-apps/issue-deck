@@ -106,9 +106,32 @@ describe("recover_tool_call_stalled_sessions", () => {
     expect(out[0]).toMatch(/^STATE \d+ 2 1$/);
   });
 
-  it("セッションが自力で動き出したら記録を消す", () => {
-    const out = runRecovery({ detected: false, before: backdate(1) });
+  it("送ったあと実際にツールが呼ばれていれば記録を消す", () => {
+    const out = runRecovery({
+      detected: false,
+      before: [
+        backdate(1),
+        // `.step`の「最後に見た時刻」が前回の送出より後＝ツールが動いた。
+        `session_state_write_step ${session} RUNNING`,
+      ].join("\n"),
+    });
     expect(out[0]).toBe("STATE 0 0 0");
+  });
+
+  it("送った直後で検知しなくなっただけなら記録を消さない", () => {
+    // 送出そのものが転記のmtimeを更新するため、次の巡回は必ず「検知せず」になる。
+    // ここで消すと回数が毎回0へ戻り、上限が一度も効かない（計画レビューの指摘1）。
+    const out = runRecovery({ detected: false, before: backdate(1) });
+    expect(out[0]).toMatch(/^STATE \d+ 1 0$/);
+  });
+
+  it("`.step`が`Stop`で進むだけの`.event`と混ざらない（読めなければ消さない）", () => {
+    // この現象のターンは`Stop`が正常に発火するので、`Stop`を「動き出した」と読むと必ず消える。
+    const out = runRecovery({
+      detected: false,
+      before: [backdate(1), `session_state_record_event ${session} Stop`].join("\n"),
+    });
+    expect(out[0]).toMatch(/^STATE \d+ 1 0$/);
   });
 
   it("見送られた（承認プロンプト表示中など）場合も試行として数える", () => {
