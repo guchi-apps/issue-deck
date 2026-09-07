@@ -10,6 +10,13 @@ issue #354 に対応する調査ドキュメント。IssueDeck本体（Webアプ
 調査結果のドキュメント化のみを行う。** 実際に他リポジトリへ導入する際の実務手順は
 [docs/cross-repo-setup-guide.md](cross-repo-setup-guide.md)（issue #723）を参照。
 
+> **2026-09-07 追記（#2883・#2892）**: 本ドキュメントは調査時点（2026-08時点）のissue-deckの
+> 実装をそのまま記録したものだが、その後スクリーンショット撮影機能（`24.screenshot-required`
+> ラベルによる無人Playwright撮影）は廃止された（#2883）。本文中の撮影関連の記述（ラベル・
+> ワークフローステップ・shopping-list向けの検討）は、廃止前の調査記録として当時のまま残す。
+> 現在のissue-deckに撮影機能は存在しない。また調査対象だった`m-guchi/shopping-list`自体も
+> 運用終了している（#2435。[docs/supported-repositories.md](supported-repositories.md)参照）。
+
 ## 現状把握
 
 ### IssueDeckアプリ側（汎用化済みの部分）

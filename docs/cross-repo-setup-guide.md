@@ -182,16 +182,21 @@ jobs:
 
 | 値 | 対象 | 実行される準備 |
 |---|---|---|
-| `node-db` | Next.js + DB（Prisma等） | Node・依存インストール・DBマイグレーション・シード・Playwright |
-| `node` | Next.js（DBなし） | Node・依存インストール・Playwright |
+| `node-db` | Next.js + DB（Prisma等） | Node・依存インストール |
+| `node` | Next.js（DBなし） | Node・依存インストール |
 | `minimal` | 素のJS・依存パッケージなし | なし |
 
-DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を `--if-present` で呼ぶため、対象リポジトリにそのスクリプトが無ければ何もせず成功する。`scripts/ci-seed-user.mjs` も存在する場合のみ実行される。`inputs` を増やさずスタック差を吸収するための割り切り。
+**`node-db`と`node`の準備内容は同じ。** 差は`database-name`を指定するかどうかだけで、
+`services: mysql`（DB名は`database-name`）自体は`mode=skip`以外なら`runtime-setup`の値に
+関わらず常に起動する（後述）。DBマイグレーション・シード・Playwrightブラウザのインストールは
+スクリーンショット撮影機能（`24.screenshot-required`）専用のステップだったため、
+撮影機能の廃止（#2883）にあわせて削除した。実装エージェントが必要なマイグレーション・
+シードはプロンプトの指示に従って自分で実行する。
 
 **判定は`prisma/`の有無で足りる。** `portfolio`（#1047の5周目）はNext.jsだが`prisma/`が無く、
-`node`を選んだ。`--if-present`があるので`node-db`にしても壊れはしないが、MySQLサービス
-コンテナの起動とマイグレーションの待ち時間が毎回乗るため、DBを使わないなら`node`にする。
-**`node`では`database-name`は使われない**ので、指定せずに省く。
+`node`を選んだ。動作は`node-db`と変わらないが、DBを使わないリポジトリで`database-name`を
+指定する意味が無いため、`node`にして省く。**`node`では`database-name`は使われない**ので、
+指定せずに省く。
 
 ### 実装ステップが実行できるコマンド（許可リスト）
 
@@ -227,13 +232,14 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 **検証手段がPythonのテストしか無い**リポジトリでは、タグを下げると検証が一切できなくなる。
 
 **Node系の依存は実装ステップの前にインストールされる（#931）。** `runtime-setup`が
-`minimal`以外なら、撮影の有無によらず`npm ci`（または`pnpm install --frozen-lockfile`）が
+`minimal`以外なら、常に`npm ci`（または`pnpm install --frozen-lockfile`）が
 走る。パッケージマネージャもPATHに通った状態で実装ステップが始まる。
 
-以前は`24.screenshot-required`が付いているときだけ走っていた。**その結果、pnpmの
-リポジトリで詰んだ。** `pnpm`自体がランナーに無く、入れるには`corepack`か`npm`が要るが
-どちらも許可リストに無いため、エージェントが10回試して全部拒否され、76ターン・10分を
-費やしてコード変更ゼロで停止した（issue-deck#1115のrunで実測）。
+以前はスクリーンショット撮影機能（`24.screenshot-required`。#2883で廃止済み）でのみ
+使うという前提で絞っていた。**その結果、pnpmのリポジトリで詰んだ。** `pnpm`自体が
+ランナーに無く、入れるには`corepack`か`npm`が要るがどちらも許可リストに無いため、
+エージェントが10回試して全部拒否され、76ターン・10分を費やしてコード変更ゼロで
+停止した（issue-deck#1115のrunで実測）。
 
 **Python・その他の言語の依存はインストールされない。** プリセットが無いため、
 `pip install -r requirements.txt`は実装エージェント自身が実行する。CLAUDE.mdに
@@ -273,9 +279,6 @@ DBマイグレーションとシードは `db:migrate:deploy` / `db:seed:ci` を
 呼ぶだけなので、**ロックファイルが無くても`minimal`と併用できる**。CIとNodeのバージョンを
 揃えたいだけなら`node`へ格上げする必要はない。
 
-なお`minimal`ではPlaywrightがインストールされないため、**`24.screenshot-required`は無人実行では
-成立しない**。ラベル自体は残しつつ、ローカル実行専用として扱う旨をCLAUDE.mdへ書いておく。
-
 ### 素の Claude Code ワークフローがある場合は削除する
 
 `/install-github-app` を実行したことのあるリポジトリには、`claude.yml`・`claude-code-review.yml`
@@ -314,12 +317,11 @@ gh api repos/guchi-apps/my-app/contents/.github/workflows --jq '.[].name'
 ### npm scriptが揃っていなくても導入できる
 
 **「共有ワークフローが期待するnpm scriptを持たないリポジトリは導入が難しい」と考えなくてよい。**
-実際にワークフローが呼ぶのは上記2つだけで、しかも次の二重の条件が付く。
+ワークフロー自身はどのnpm scriptも呼ばない。かつてはスクリーンショット撮影機能向けに
+`db:migrate:deploy`・`db:seed:ci`を`--if-present`（無ければ何もせず成功する）で呼ぶステップが
+あったが、撮影機能の廃止（#2883）にあわせて削除済み。
 
-- `24.screenshot-required` が付いたIssueの実行でのみ走る（通常の実装では呼ばれない）
-- `--if-present` で保護されている（無ければ何もせず成功する）
-
-`test`・`typecheck`・`lint` はワークフローからは呼ばれない。プロンプト（`implement.md`）が
+`test`・`typecheck`・`lint`・`build`もワークフローからは呼ばれない。プロンプト（`implement.md`）が
 「テスト・Lint・型チェック・ビルドを実行する」と指示するだけなので、**実行するコマンドは
 そのリポジトリの実態に合わせればよい。**
 
@@ -390,9 +392,9 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 
 指定した場合のみ、実装（`mode=implement|additional`）の前に `actions/setup-node` でバージョンを固定する。未指定ならランナー既定のNodeが使われる（issue-deck自身は未指定）。
 
-ランタイム準備側（`runtime-setup: node`/`node-db`）のSetup Nodeとは**目的が異なる**。あちらは撮影・DB準備のためのもので `24.screenshot-required` に紐づくが、こちらは撮影の有無によらず実装のたびに効く。プリセットに混ぜると、撮影を使わないリポジトリがバージョン固定のためだけに `node` プリセットを選ばざるを得ず、不要な依存インストールとPlaywrightのダウンロードまで走ってしまうため、直交する軸として独立させている。
+ランタイム準備側（`runtime-setup: node`/`node-db`）のSetup Nodeとは**目的が異なる**。あちらは依存インストールのためのもので`runtime-setup`に紐づくが、こちらは`runtime-setup`の有無によらず実装のたびに効く。プリセットに混ぜると、バージョン固定だけのためにリポジトリが`node`/`node-db`プリセットを選ばざるを得ず、不要な依存インストールまで走ってしまうため、直交する軸として独立させている。
 
-なお `node-version` を指定しつつ `runtime-setup` が `node`/`node-db` で、かつ `24.screenshot-required` も付いている場合は `actions/setup-node` が2回走るが、同じバージョンの再実行はキャッシュヒットで数秒であり実害は無い。
+なお `node-version` を指定しつつ `runtime-setup` が `node`/`node-db` の場合は `actions/setup-node` が2回走るが、同じバージョンの再実行はキャッシュヒットで数秒であり実害は無い。
 
 #### リポジトリ固有の後処理（`post-implement-script`）
 
@@ -413,13 +415,12 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
   | `ISSUE_NUMBER` | 対象Issue番号 |
   | `BRANCH` | 実装ブランチ名（`issue-<番号>`） |
   | `MODE` | `implement` / `additional` |
-  | `SCREENSHOT_REQUIRED` | `24.screenshot-required` の有無 |
   | `PREVIEW_REQUIRED` | `23.preview-required` の有無 |
   | `GH_TOKEN` / `GH_REPO` | `gh` コマンド用 |
 
-ワークフロー側の `if:` に用途固有の条件（`SCREENSHOT_REQUIRED` など）を書いていないのは、そうするとこのフックが特定用途専用になり、他の後処理に使えなくなるため。
+ワークフロー側の `if:` に用途固有の条件を書いていないのは、そうするとこのフックが特定用途専用になり、他の後処理に使えなくなるため。絞り込みはスクリプト側に委ねる。
 
-最初の利用者は shopping-list のスクリーンショット撮影。撮影の作法は「そのアプリをどう起動するか」に強く依存する（shopping-listは自前バックエンドを`NOTION_STUB`付きで起動し`/healthz`を待つ必要がある）ため、issue-deck方式（Claudeがプロンプト指示でスクリプトを実行し、スクリプト自身がサーバーを起動する）へ寄せるより、差し込み口を用意する方針とした。
+（この拡張点の最初の利用者はshopping-listのスクリーンショット撮影だったが、撮影機能自体が廃止された（#2883）ため、この用途は無くなった。）
 
 - **参照はタグ固定とする。** `@develop`を参照するとissue-deck側の不具合が全アプリへ同時に波及する。issue-deck自身だけがローカルパス（`./.github/workflows/reusable-*.yml`）で常に最新を参照し、カナリアとして先に問題を検知する。
 - **タグ名は `workflows/vN` 形式**（`v1`のような形にしない）。理由は2つある。
@@ -650,7 +651,6 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `21.plan-required` | `d4c5f9` | 計画の確認・承認が必要 | 実装前にPlan modeでの計画提示を必須にする |
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
-| `24.screenshot-required` | `d4c5f9` | スクリーンショットでの視覚確認・承認が必要 | PR作成前にスクリーンショット取得・承認を必須にする |
 | `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | **実装着手前**に見た目のアーティファクト公開・承認を必須にする（ローカル実行専用。#1473・#1540。配布先は限られる。**配っていないリポジトリでは`62.design`による既定ONも効かない**——存在しないラベル名を付与するとその場で作られてしまうため。#1956） |
 | `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップ・質問応答ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする（#735・#1528） |
 | `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「ユーザーの作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
@@ -996,7 +996,7 @@ gh label create "11.local" --color e99695 --description "ローカル(VSCode等)
 gh label create "21.plan-required" --color d4c5f9 --description "計画の確認・承認が必要"
 gh label create "22.merge-confirm-required" --color d4c5f9 --description "developへのマージ前に人間の確認・承認が必要"
 gh label create "23.preview-required" --color d4c5f9 --description "画面プレビューでの確認・承認が必要"
-gh label create "24.screenshot-required" --color d4c5f9 --description "スクリーンショットでの視覚確認・承認が必要"
+# 24.screenshot-requiredはスクリーンショット撮影機能の廃止（#2883）により削除済み。番号は欠番のまま。
 # 25.artifact-requiredはローカルセッション専用（無人実行では作れない）のため、他リポジトリへはまだ配っていない（#1473）
 gh label create "25.artifact-required" --color d4c5f9 --description "アーティファクトでの視覚確認・承認が必要"
 gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
@@ -1666,17 +1666,20 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
 - [ ] **パッケージマネージャ・依存関係インストールコマンド**（pnpm/npm/yarn、Node.js以外のスタックを
       含むか）
 - [ ] **lint・型チェック・テスト・ビルドコマンド**
-- [ ] **DBマイグレーション・シードの要否とコマンド**（DBを使わないリポジトリではステップごと削除）
 - [ ] **`postinstall`が環境変数を要求しないか**（参照方式でも必要）。共有ワークフローの
       「依存関係をインストールする」ステップは`npm ci`を**環境変数なしで**実行する。Prisma 7 の
       `prisma.config.ts`で`datasource.url`を`env("DATABASE_URL")`にしていると、未設定の時点で
       configの読み込みが失敗し、`postinstall`の`prisma generate`ごと`npm ci`が落ちる。
       **無人実行の実装モードが依存インストールで必ず止まる**ので、対象リポジトリ側で未設定時の
       フォールバックを持たせる（`db-console`で実際に踏んだ。#1378。`car-care`・`clip-hive`・
-      `dayspan`は元から未設定でも通る作り）。`DATABASE_URL`が渡るのは
-      `24.screenshot-required`付きの実行のマイグレーション・シードのステップだけである点に注意する
-- [ ] **画面確認・スクリーンショット撮影の要否**（対象がWebアプリでない場合はそもそも不要。Webアプリ
-      でも、CIバイパス用の認証機構が無いと`24.screenshot-required`は成立しない）
+      `dayspan`は元から未設定でも通る作り）。共有ワークフロー（`reusable-issue-dispatch.yml`）の
+      「依存関係をインストールする」ステップは`DATABASE_URL`を一切渡さないため、フォールバックが
+      無いとこのステップで必ず落ちる点に注意する（かつてはスクリーンショット撮影機能向けの
+      マイグレーション・シードのステップにだけ`DATABASE_URL`を渡していたが、撮影機能の廃止
+      （#2883）にあわせてそのステップ自体を削除したため、現在は依存インストールを含めどのステップにも
+      渡らない）
+- [ ] **DBマイグレーション・シードの要否とコマンド**（共有ワークフロー自身はマイグレーション・シードを
+      呼ばない。実装エージェントがプロンプトの指示に従って自分で実行する）
 - [ ] **`risk-check`ジョブの自動マージ不可判定パターン**（ディレクトリ構成に応じたパスパターンの
       置き換え）
 - [ ] **バージョン管理方式**（`release-develop-to-main.yml`のバージョンbump処理が前提にする
@@ -1871,7 +1874,6 @@ gh api -X PATCH repos/guchi-apps/my-app -f default_branch=develop
 | 2 | 読み取り専用の質問応答 | Issueに`@claude 質問: ...`とコメントし、回答が投稿されること。**ブランチも進捗も変更されない**ため最も安全 |
 | 3 | 実装フロー | `@claude`とコメントし、ブランチ作成・PR作成まで通ること |
 | 4 | カンバン起点の起動 | `Ready`のIssueを`Planning`へドラッグし、**1回目で**計画提示が始まること（#1022の`allowed_bots`未設定を検知できる。載せた直後の初回ドラッグが無反応になる不具合は #1132 で解消済み） |
-| 5 | 撮影（該当する場合） | `24.screenshot-required`付きIssueで実装し、画像が投稿されること |
 
 **初回実行は`claude-code-action`のBunダウンロードで落ちることがある。** キャッシュが無いため
 必ずダウンロードが走り、そこが不安定。ログに`Downloading a new version of Bun` →

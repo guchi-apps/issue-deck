@@ -29,7 +29,7 @@ Projects v2を読み書きできるようになったため前提が整った（
 4. **privateアプリを統合する段階でGitHub Team（$4/月）へ上げる**
 
 `00.check-user`・`21.plan-required`・`22.merge-confirm-required`・`23.preview-required`・
-`24.screenshot-required`・`70.confirm`・`11.local`・Priority系は**ラベルのまま残す**。
+`70.confirm`・`11.local`・Priority系は**ラベルのまま残す**。
 Status = 今どこにいるか、Label = どんな性質・条件があるか、という役割分担にする。
 
 ### StatusとProgressStatusKeyの対応
@@ -729,7 +729,7 @@ Webhookの再配信・同時配信に対しては、**遷移前のStatusを条�
 外し、Statusだけを判断材料にする段階である。
 
 `00.check-user`・`21.plan-required`・`22.merge-confirm-required`・`23.preview-required`・
-`24.screenshot-required`・`70.confirm`・`11.local`・Priority系は**ラベルのまま残る**。
+`70.confirm`・`11.local`・Priority系は**ラベルのまま残る**。
 Status = 今どこにいるか、Label = どんな性質・条件があるか、という役割分担は変わらない。
 
 #### 変わったこと
