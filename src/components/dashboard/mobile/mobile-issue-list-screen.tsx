@@ -383,8 +383,13 @@ export function MobileIssueListScreen({
           元は上部の横スクロールタブだったが、片手で持ったときに親指が届かないうえ、
           押して開くシートは下から出るため視線と指が上下に往復していた。
           shrink-0がないと、IssueList（flex-1でflex-basisが0のため縮小分を負担しない）の
-          分まで縮小配分がこの行に集中し、表示件数が多いときに高さが潰れてしまう（#584） */}
-      <div className="flex shrink-0 flex-col gap-1.5 border-t px-3 pt-1.5 pb-3">
+          分まで縮小配分がこの行に集中し、表示件数が多いときに高さが潰れてしまう（#584）。
+
+          **`bg-background`を外さないこと**（#2885）。この行は塗りが無く、ビューのボタンも
+          `bg-primary/10`（10%）なので、何かがこの行と重なると背後がそのまま透けて読める。
+          はみ出しの元（引っ張って更新のtranslate）は`issue-list.tsx`側で切り抜いたが、
+          フッターに塗りがある状態を保っておく（`MobileBottomNav`も`bg-background`） */}
+      <div className="flex shrink-0 flex-col gap-1.5 border-t bg-background px-3 pt-1.5 pb-3">
         {/* いくつのビューの何番目にいるかを示す。左右スワイプで移動できることの合図も兼ねる */}
         <div className="flex items-center justify-center gap-1" aria-hidden>
           {navViewsForList.map((navView) => (

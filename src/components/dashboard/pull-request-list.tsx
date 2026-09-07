@@ -251,9 +251,11 @@ export function PullRequestList({
       {/* 引っ張って更新（#1947）のタッチを受ける枠。**左右スワイプ（`listStyle`）は外側の枠、
           縦の引っ張りは内側のスクロール領域**と、transformを掛ける要素を分ける——同じ要素へ
           両方書くと、ビュー切り替えの追従と引っ張りの追従が互いを打ち消してしまう */}
+      {/* `overflow-hidden`は引っ張ったぶんのはみ出しを切り抜くため（#2885。理由は
+          `issue-list.tsx`の同じ枠のコメントを参照） */}
       <div
         ref={pullContainerRef}
-        className="relative flex min-h-0 flex-1 flex-col"
+        className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
         style={listStyle}
       >
         <PullToRefreshIndicator pull={pull} />
