@@ -995,7 +995,8 @@ export function MobileIssueDetail({
           pullRequestProgress={pullRequestProgress}
         />
 
-        {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で計画パネルの上に置く */}
+        {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の
+            どちらよりも上に置く（#2860でアーティファクトを計画の上へ移した後も変わらない） */}
         {questionRequest && (
           <div {...checkUserTargetProps("question")}>
             {/* **質問が変われば作り直す**（#2158。PCの詳細と同じ理由） */}
