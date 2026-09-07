@@ -16,6 +16,7 @@ import {
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
 import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
+import { PostCreateDestinationSection } from "@/components/dashboard/settings/post-create-destination-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   SETTINGS_SECTIONS,
@@ -154,12 +155,15 @@ export function MobileSettingsScreen({
 
         {section === "account" && <AccountSection currentUser={currentUser} />}
         {section === "display" && (
-          <RepositoryVisibilitySection
-            repositories={repositories}
-            onSetRepositoryHidden={onSetRepositoryHidden}
-            onSetRepositoriesHidden={onSetRepositoriesHidden}
-            onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
-          />
+          <div className="flex flex-col gap-5">
+            <PostCreateDestinationSection />
+            <RepositoryVisibilitySection
+              repositories={repositories}
+              onSetRepositoryHidden={onSetRepositoryHidden}
+              onSetRepositoriesHidden={onSetRepositoriesHidden}
+              onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
+            />
+          </div>
         )}
         {section === "notification" && <NotificationSettingsSection />}
         {section === "execution" && (

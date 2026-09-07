@@ -36,6 +36,7 @@ import {
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
+import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
@@ -147,6 +148,10 @@ import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-sess
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
+  findNightlyRunQueuedMark,
+  type NightlyRunQueuedMap,
+} from "@/lib/nightly-run";
+import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   toIssuePullRequestProgressSource,
@@ -191,6 +196,8 @@ type IssueDetailProps = {
   onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
   /** コードレビューの指摘（#698）を、対象リポジトリのIssueとして起票する下書きを開く */
   onCreateCodeReviewFindingIssue: (issue: Issue, finding: CodeReviewFinding) => void;
+  /** 未起票の指摘をまとめて選び、一括で起票する確認ダイアログを開く（#2859） */
+  onBulkCreateCodeReviewFindingIssues: (issue: Issue, findings: CodeReviewFinding[]) => void;
   /** 同じリポジトリのコードレビュー（#698）をもう一度実行するダイアログを開く */
   onStartCodeReview: (repositoryFullName: string) => void;
   onSelectRepository: (repositoryFullName: string) => void;
@@ -201,6 +208,17 @@ type IssueDetailProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866。`selectNightlyRunQueuedMarks`）。
+   * 一覧の行のチップと同じ表を受け取り、こちらは開始ボタンの下の注釈に使う。
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
+  /** 「夜間実行」画面へ移る。省略すると注釈にその導線を出さない */
+  onOpenNightlyRun?: () => void;
+  /** 今夜の予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
+  onCancelNightlyRun?: (entryId: string) => void;
+  /** 「実装を開始」で今夜の予定へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
+  onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
   /**
@@ -222,11 +240,16 @@ export function IssueDetail({
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
+  onBulkCreateCodeReviewFindingIssues,
   onStartCodeReview,
   onSelectRepository,
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
+  onOpenNightlyRun,
+  onCancelNightlyRun,
+  onNightlyRunQueued,
   onStartManualStepGuide,
   claudeLocalModel,
 }: IssueDetailProps) {
@@ -776,6 +799,9 @@ export function IssueDetail({
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
   });
+  // 「今夜の夜間実行」に積まれているか（#2866）。**判定は一覧のチップと同じ引き当て表**で、
+  // 一覧では今夜と出ているのに詳細では何も出ない、という食い違いが起きないようにする
+  const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
   // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
@@ -827,6 +853,17 @@ export function IssueDetail({
           implementationAgent={
             issueSession ? resolveIssueImplementationAgent(issueSession) : null
           }
+          /* 「今夜の夜間実行」に積まれている注釈（#2866）。開始ボタンと同じヘッダーの中に
+             置き、押す直前に読めるようにする。積まれていなければ何も描かない */
+          notice={
+            nightlyRunMark ? (
+              <NightlyRunNotice
+                mark={nightlyRunMark}
+                onOpenNightlyRun={onOpenNightlyRun}
+                onCancel={onCancelNightlyRun}
+              />
+            ) : null
+          }
           actions={
             <>
               {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
@@ -836,6 +873,7 @@ export function IssueDetail({
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
                   onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  onNightlyRunQueued={onNightlyRunQueued}
                   includeDispatchTargets
                   dispatch={dispatch}
                   actionsDisabledReason={actionsDisabledReason}
@@ -1047,8 +1085,10 @@ export function IssueDetail({
             pullRequestProgress={pullRequestProgress}
           />
 
-          {/* 質問の回答（#2189）。**計画パネルのすぐ上**に置く——計画を出したあとに質問する
-              ことはあり、そのとき待たれているのは新しい方（質問）になる */}
+          {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——アーティファクト・計画の
+              どちらよりも上（#2860でアーティファクトを計画の上へ移した後も変わらない）。
+              計画やアーティファクトを出した後に質問することはあり、そのとき待たれているのは
+              新しい方（質問）になる */}
           {questionRequest && (
             <div {...checkUserTargetProps("question")}>
               {/* **質問が変われば作り直す**（#2158と同じ理由。Issue詳細はIssueを切り替えても
@@ -1064,6 +1104,12 @@ export function IssueDetail({
               />
             </div>
           )}
+
+          {/* アーティファクト（#2154・#2860）。**計画パネルのすぐ上**に置く——`25.artifact-required`の
+              基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
+              見た目への入口が要る。承認するかどうかを判断する材料（見た目）が、判断そのもの
+              （計画の承認）より先に目に入るようにする。畳めるセクションではなく独立したカード（#2190） */}
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
           {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
               待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1081,11 +1127,6 @@ export function IssueDetail({
               />
             </div>
           )}
-
-          {/* アーティファクト（#2154）。**計画パネルのすぐ下**に置く——`25.artifact-required`の
-              基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
-              見た目への入口が要る。畳めるセクションではなく独立したカード（#2190） */}
-          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
               コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
@@ -1139,6 +1180,9 @@ export function IssueDetail({
               createdFindingIssues={codeReview.createdFindingIssues}
               onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
               onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
+              onBulkCreateFindingIssues={(findings) =>
+                onBulkCreateCodeReviewFindingIssues(issue, findings)
+              }
             />
           )}
 

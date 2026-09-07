@@ -649,4 +649,37 @@ describe("session_usage_report_payload", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].sessions).toEqual([]);
   });
+
+  /**
+   * 終了時刻の新しい順に並べ替えてから送る（#2870）。**送信順が古い順のままだと**、
+   * チャンクの前半で失敗したときに後半（＝新しいセッション）が一度も送られない。
+   * 呼び出し側（`report_session_usage`）は先頭チャンクから順にPOSTし、途中で1件でも
+   * 失敗したら残りを諦めるため、新しいセッションを先に送る必要がある。
+   */
+  it("終了時刻の新しい順に並べ替えてから送る", () => {
+    const sessions = [
+      normalizedSession({ transcript: "/home/u/.claude/projects/-slug/old.jsonl", lastAt: "2026-08-28T00:00:00.000Z" }),
+      normalizedSession({ transcript: "/home/u/.claude/projects/-slug/newest.jsonl", lastAt: "2026-08-30T00:00:00.000Z" }),
+      normalizedSession({ transcript: "/home/u/.claude/projects/-slug/middle.jsonl", lastAt: "2026-08-29T00:00:00.000Z" }),
+    ];
+    const [payload] = payloadLines({ sessions }, "subpc");
+    expect(payload.sessions.map((s: { sessionId: string }) => s.sessionId)).toEqual([
+      "newest",
+      "middle",
+      "old",
+    ]);
+  });
+
+  it("並べ替えた後にチャンクへ分けるので、先頭チャンクに新しいセッションが集まる", () => {
+    const sessions = [1, 2, 3, 4].map((n) =>
+      normalizedSession({
+        transcript: `/home/u/.claude/projects/-slug/id-${n}.jsonl`,
+        lastAt: `2026-08-2${n}T00:00:00.000Z`,
+      }),
+    );
+    const lines = payloadLines({ sessions }, "subpc", "2");
+    expect(lines).toHaveLength(2);
+    expect(lines[0].sessions.map((s: { sessionId: string }) => s.sessionId)).toEqual(["id-4", "id-3"]);
+    expect(lines[1].sessions.map((s: { sessionId: string }) => s.sessionId)).toEqual(["id-2", "id-1"]);
+  });
 });

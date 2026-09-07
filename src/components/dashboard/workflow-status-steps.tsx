@@ -8,7 +8,10 @@ import {
   describeIssueQueueState,
   type IssueQueueState,
 } from "@/lib/dispatch/issue-queue-state";
-import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
+import {
+  resolveImplementationPosition,
+  shortIssueSessionLabel,
+} from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   checkUserReason,
@@ -16,11 +19,21 @@ import {
   isApprovalPending,
 } from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
-import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
-import { getWorkflowStepIndex, WORKFLOW_STEPS } from "@/lib/github/workflow-status";
-import { resolveProgressStatus } from "@/lib/issue-progress";
+import {
+  getSimpleStepLabel,
+  isImplementationRunStep,
+} from "@/lib/github/workflow-step-label";
+import {
+  allocateSegmentWidths,
+  getWorkflowStepIndex,
+  resolveProgressSegments,
+  WORKFLOW_STEPS,
+  type ProgressSegmentView,
+} from "@/lib/github/workflow-status";
+import { PROGRESS_SEGMENTS, resolveProgressStatus } from "@/lib/issue-progress";
 import {
   isPullRequestWaitingStatus,
+  resolvePullRequestPosition,
   type IssuePullRequestProgress,
   type IssuePullRequestStepState,
 } from "@/lib/issue-pull-request-progress";
@@ -150,14 +163,51 @@ type QueueStepBadgeProps = {
 };
 
 /**
- * 一覧の進捗バーの寸法（#2516）。**1マス＝1段**で、Issue詳細の6段ステップ
- * （`WorkflowStatusSteps`）と数が対応する。
+ * 一覧の進捗バーの寸法（#2516）。以前は18pxの円グラフで、進捗を角度（`conic-gradient`）で
+ * 表していた。18pxの円では3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
+ * 分からなかった。
  *
- * 以前は18pxの円グラフで、進捗を角度（`conic-gradient`）で表していた。18pxの円では
- * 3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが分からなかった。
+ * マスは`PROGRESS_SEGMENTS`の9つ（#2867）。#2516の時点では1マス＝1段（6マス）だったが、
+ * 長く待つ計画・実装のあいだに動くのが1〜2マスで、develop反映後の短い区間に同じ3マスが
+ * 割り当てられていたため、実装の中を3マス・developへマージの中を2マスに分け、各マスが
+ * だいたい同じくらいの時間になるようにした。**Issue詳細の6段（`WorkflowStatusSteps`）との
+ * 対応は段の境目のすき間（`STAGE_GAP`）で示す。**
  */
 const BAR_WIDTH = 40;
 const BAR_HEIGHT = 5;
+/** 同じ段の中のマスのすき間 */
+const SEGMENT_GAP = 1;
+/** 段の境目のすき間。同じ段の中より広く取り、6段のまとまりを読めるようにする */
+const STAGE_GAP = 2;
+/** マスの最小幅。これより細いと塗りの濃さの違いが読めない */
+const SEGMENT_MIN_WIDTH = 2;
+
+/** 各マスの幅（px）。重み比で整数に配り、すき間を除いた合計が`BAR_WIDTH`に一致する */
+const SEGMENT_WIDTHS: readonly number[] = (() => {
+  const gaps = PROGRESS_SEGMENTS.reduce((sum, segment, index) => {
+    const next = PROGRESS_SEGMENTS[index + 1];
+    if (next === undefined) return sum;
+    return sum + (next.status === segment.status ? SEGMENT_GAP : STAGE_GAP);
+  }, 0);
+  return allocateSegmentWidths(
+    PROGRESS_SEGMENTS.map((segment) => segment.weight),
+    BAR_WIDTH - gaps,
+    SEGMENT_MIN_WIDTH,
+  );
+})();
+
+/** 1マスも進んでいないバー（`QueueStepBadge`用） */
+const EMPTY_SEGMENTS: readonly ProgressSegmentView[] = PROGRESS_SEGMENTS.map(
+  (segment, index) => {
+    const next = PROGRESS_SEGMENTS[index + 1];
+    return {
+      key: segment.key,
+      label: segment.label,
+      state: "pending",
+      stageEnd: next !== undefined && next.status !== segment.status,
+    };
+  },
+);
 
 /** 計画フェーズ（`Planning`）の段の位置。スキップの判定に使う（#2069） */
 const PLANNING_STEP_INDEX = WORKFLOW_STEPS.findIndex((step) => step.key === "planning");
@@ -167,8 +217,8 @@ const SKIPPED_STEP_LABEL = "計画スキップ";
 const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りました";
 
 type ProgressBarProps = {
-  /** 塗るマス数（0〜`WORKFLOW_STEPS.length`）。0なら1マスも塗らない */
-  filled: number;
+  /** 9マスそれぞれの状態（`resolveProgressSegments`の結果。#2867） */
+  segments: readonly ProgressSegmentView[];
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
   /** 実行中（#1439）。塗ったマスの上を背景色寄りの光がバー全体にわたって掃く */
@@ -183,11 +233,24 @@ type ProgressBarProps = {
    * **確認待ち・回答待ちの行で立てる。** 一覧の行では要対応ラベル（`00.check-user`・
    * `01.check-*`）が下のラベル一覧から除外されており（`issue-list.tsx`の`listCardLabels`）、
    * **このバッジが色で伝える唯一の手段**になる。塗ったマスだけを色付けると、`Planning`
-   * （1/6）の行では40×5pxのうち5pxしか色が乗らない。18pxの円だった頃は未達側も20%で
+   * の行では40×5pxのうち数pxしか色が乗らない。18pxの円だった頃は未達側も20%で
    * 塗られていて円全体が色を帯びていたので、同等の面積を確保する。
    */
   emphasizeTrack?: boolean;
 };
+
+/**
+ * マスの塗り（#2867）。済んだマスは濃く、いまのマスは半分、まだのマスは薄く。
+ * 確認待ち（`emphasizeTrack`）ではまだのマスが35%になるため、いまのマスは50%ではなく
+ * 55%にして差を保つ。
+ */
+function segmentFillClass(state: ProgressSegmentView["state"], emphasizeTrack: boolean): string {
+  if (state === "done") return "bg-current";
+  if (state === "current") return "bg-[color-mix(in_oklch,currentColor_55%,transparent)]";
+  return emphasizeTrack
+    ? "bg-[color-mix(in_oklch,currentColor_35%,transparent)]"
+    : "bg-[color-mix(in_oklch,currentColor_15%,transparent)]";
+}
 
 /**
  * 一覧の行に出す進捗の横棒（#2516）。`WorkflowStepBadge`（進捗Statusを持つ行）と
@@ -203,7 +266,7 @@ type ProgressBarProps = {
  * 常時見える輪郭の役を引き継ぐ。
  */
 function ProgressBar({
-  filled,
+  segments,
   colorClass,
   live = false,
   sweeping = false,
@@ -214,23 +277,25 @@ function ProgressBar({
     <span
       aria-hidden="true"
       className={cn(
-        "relative flex shrink-0 gap-[2px] overflow-hidden rounded-full",
+        "relative flex shrink-0 overflow-hidden rounded-full",
         colorClass,
         pulsing && "animate-pulse",
       )}
       style={{ width: BAR_WIDTH, height: BAR_HEIGHT }}
     >
-      {WORKFLOW_STEPS.map((step, index) => (
+      {/* 幅は整数px（`SEGMENT_WIDTHS`）で固定し、`flex`の伸縮に任せない（#2867）。下限を
+          当てたマスのぶん全体が縮むと、`overflow-hidden`で末尾のマスが切れる */}
+      {segments.map((segment, index) => (
         <span
-          key={step.key}
-          className={cn(
-            "flex-1 rounded-[1px]",
-            index < filled
-              ? "bg-current"
-              : emphasizeTrack
-                ? "bg-[color-mix(in_oklch,currentColor_35%,transparent)]"
-                : "bg-[color-mix(in_oklch,currentColor_15%,transparent)]",
-          )}
+          key={segment.key}
+          data-segment={segment.key}
+          data-state={segment.state}
+          className={cn("shrink-0 rounded-[1px]", segmentFillClass(segment.state, emphasizeTrack))}
+          style={{
+            width: SEGMENT_WIDTHS[index],
+            marginRight:
+              index === segments.length - 1 ? 0 : segment.stageEnd ? STAGE_GAP : SEGMENT_GAP,
+          }}
         />
       ))}
       {live && <span className="progress-live-sweep" />}
@@ -240,8 +305,9 @@ function ProgressBar({
 }
 
 /**
- * 一覧などの省スペースな箇所向けに、現在の実装状況ステップを**6分割の横棒**で示す（#2516）。
- * 1マス＝1段で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の簡易版にあたる。
+ * 一覧などの省スペースな箇所向けに、現在の実装状況を**9マスの横棒**で示す（#2516・#2867）。
+ * マスは`PROGRESS_SEGMENTS`で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の実装と
+ * developへマージの中を分けたもの。済んだマスを濃く・いまのマスを半分の濃さで塗る。
  * 以前は同じ位置に18pxの円グラフ（`conic-gradient`）を出していたが、小さな円の角度では
  * 3/6と4/6を見分けられず、一覧を流し見しても何段目かが分からなかった。
  *
@@ -282,6 +348,21 @@ export function WorkflowStepBadge({
   // 呼び出し側の絞り込みには頼らずここでも確かめる
   const prProgress = isPullRequestWaitingStatus(step.key) ? pullRequestProgress : null;
   const actionsRunning = running?.isRunning ?? false;
+  // 9マスの塗り（#2867）。実装の中の位置はサブPCのセッションが報告する作業から、
+  // developへマージの中の位置はPRの内訳から決める。GitHub Actionsの実装ステップが
+  // 走っていれば「実装」のマスまで進める（Actionsは作業の内訳を報告しないため、それ以上は
+  // 分けられない）
+  const progress = resolveProgressSegments(
+    { projectStatus },
+    {
+      implementation:
+        actionsRunning && isImplementationRunStep(running?.currentStep ?? null)
+          ? "editing"
+          : resolveImplementationPosition(session),
+      developPr: resolvePullRequestPosition(prProgress),
+    },
+  );
+  if (progress === null) return null;
   // 外周を回すかどうか（#1439）。Actionsの実行中に加えて、サブPCのセッションが生きて動いている
   // 間も回す。人待ち（承認待ち・入力待ち）と、終わった・報告が途絶えたセッションでは回さない
   const isSpinning = isWorkflowBadgeSpinning({
@@ -372,7 +453,7 @@ export function WorkflowStepBadge({
                 : localSuffix
                   ? `（${localSuffix}）`
                   : ""
-      }${queueWaitReason ? ` ${queueWaitReason}` : ""}`}
+      }${queueWaitReason ? ` ${queueWaitReason}` : ""}・目安 ${progress.ratio}%`}
       // 行の右端が溢れるより先に、添える字（「実装中（サブPC）」）が切り詰められるようにする
       // （#2516）。バーは円より22px幅を取るため、一覧カラムを最小幅（280px）まで詰めた
       // ときに`shrink-0`のままだと逃げ場が無くなる。バー・アイコン側は`shrink-0`のまま
@@ -397,7 +478,7 @@ export function WorkflowStepBadge({
           確認待ち・回答待ちの行では未達のマスも濃く塗り、行の中で色を伝える唯一の場所として
           十分な面積を確保する */}
       <ProgressBar
-        filled={currentIndex + 1}
+        segments={progress.segments}
         colorClass={accentColorClass}
         live={isSpinning}
         emphasizeTrack={approvalPending || showQaAnswerPending || prAttention}
@@ -447,7 +528,7 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
           `animate-pulse`は既定で2秒周期のゆっくりした明滅で、掃く光と違って
           「進んでいる」とは読めない */}
       <ProgressBar
-        filled={0}
+        segments={EMPTY_SEGMENTS}
         colorClass={accentColorClass}
         sweeping={isStarting}
         pulsing={!isStarting}

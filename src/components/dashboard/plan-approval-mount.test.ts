@@ -87,3 +87,21 @@ describe("質問の回答パネルの置き場所（#2189）", () => {
     expect(source).toContain("manualStep={questionManualStep}");
   });
 });
+
+/**
+ * アーティファクトカードは計画カードより上（#2860）。
+ *
+ * **PC・スマホの2ファイルへ同じ並び替えを入れる作業では、片方だけ直った状態でも
+ * 既存のテスト（「両方に`<PlanApprovalPanel`がある」等）は通ってしまう。** 順序そのものが
+ * 要望なので、`indexOf`で実際のソース上の出現順を確かめる。
+ */
+describe("アーティファクトと計画の表示順（#2860）", () => {
+  it.each(DETAIL_SOURCES)("%s でアーティファクトが計画より前に出る", (path) => {
+    const source = readFileSync(path, "utf8");
+    const artifactIndex = source.indexOf("<IssueArtifactPanel");
+    const planIndex = source.indexOf('<div {...checkUserTargetProps("plan")}>');
+    expect(artifactIndex).toBeGreaterThan(-1);
+    expect(planIndex).toBeGreaterThan(-1);
+    expect(artifactIndex).toBeLessThan(planIndex);
+  });
+});

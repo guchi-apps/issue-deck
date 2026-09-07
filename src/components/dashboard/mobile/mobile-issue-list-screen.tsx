@@ -42,6 +42,7 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
+import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -96,6 +97,10 @@ type MobileIssueListScreenProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
   /** 保留中で`pinned`から外したもの（#2398）。`IssueList`へそのまま渡す */
   snoozedPinned?: { count: number; entries: SnoozeEntry[]; section: ReactNode };
   /**
@@ -103,6 +108,8 @@ type MobileIssueListScreenProps = {
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /** 指摘の対応状況（#2868）の引き当て先。`IssueList`へそのまま渡す */
+  codeReviewFindingIssues?: Issue[];
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
    * ヘッダーの件数の内訳（`2件・実行中1件`）にだけ使い、行は今までどおり並べる。
@@ -164,8 +171,10 @@ export function MobileIssueListScreen({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
   snoozedPinned,
   prerequisiteReadiness,
+  codeReviewFindingIssues,
   checkUserRunningIssueIds,
   pullRequests,
   onStartManualStepGuide,
@@ -356,8 +365,10 @@ export function MobileIssueListScreen({
         snoozes={snoozes}
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
+        nightlyRunQueued={nightlyRunQueued}
         snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
+        codeReviewFindingIssues={codeReviewFindingIssues}
         checkUserRunningIssueIds={checkUserRunningIssueIds}
         pullRequests={pullRequests}
         onStartManualStepGuide={onStartManualStepGuide}

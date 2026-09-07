@@ -2490,10 +2490,24 @@ DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降は�
   設定ダイアログの「実行設定」には載せない（あちらは保存を押すまで効かない値の区分）
 - **起動先はサブPCのみ。** GitHub Actionsは、botが投稿した`@claude`コメントが権限チェックを通るか
   未確認のため今回は見送った（必要なら別Issue）
+- **積まれていることはIssue一覧・Issue詳細でも分かる**（#2866）。積んでも**ラベル・ジョブ・
+  セッションのどれも付かない**ため、積んだIssueはそれまで、まだ何も指示していないIssueと同じ姿で
+  並んでいた。一覧の行は進捗バーの左に「今夜 01:00」のチップ、Issue詳細は「実装を開始」と同じ
+  ヘッダーの中に注釈（起動する時間帯・「夜間実行を見る」・「予定を取り消す」）を出す。
+  **目印を出すのは`QUEUED`の予定だけ**で、夜に起動した後は従来どおり進捗バー・セッションの表示が
+  受け持つ（[code-map.md](../code-map.md)「同じ状態を2か所で言わせない」）。夜間実行がOFFのときは
+  積んであっても走らないので、チップの字を「夜間実行OFF」に変え、色も確認待ちと同じamberにする
+  ——人が設定を戻すまで進まない状態で、この行のamberの意味（人の対応待ち）と一致する。
+  材料は左メニューの件数と同じ`useNightlyRun`の結果（`selectNightlyRunQueuedMarks`）で、
+  取得口は増やしていない。**引き当ての鍵は`Issue.id`**で、`owner/repo#番号`の鍵を3つ目として
+  作らない（`NightlyRunEntry.activeKey`と`issue-queue-state.ts`に既にある）。積んだ直後に目印を
+  出すため、「実装を開始」と「作成+実装開始」の成功時に`useNightlyRun`を取り直す（別ウィンドウ
+  `/issues/new`から積んだぶんだけは、デッキ側の次の取り直しで出る）
 
 | 場所 | 役割 |
 |---|---|
-| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類の純関数。`now`は引数で受ける |
+| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類・画面の目印（#2866）の純関数。`now`は引数で受ける |
+| `src/components/dashboard/nightly-run-marks.tsx` | 一覧のチップ・詳細の注釈（#2866）。PC・スマホで共有する |
 | `src/lib/nightly-run-db.ts` | 設定の読み出し・Pushの保留対象（DBだけ。GitHub Appの認証を引きずらない） |
 | `src/lib/nightly-run-launch.ts` | 予定をジョブへ変換する（claimから呼ぶ） |
 | `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ） |
@@ -2658,6 +2672,42 @@ gitは新しいファイルを作ってrenameするため、**プロセスは起
 
 **`DISPATCH_POLLER_VERSION`（`agentVersion`）を上げただけでは検知にならない。** あれは手で上げる
 プロトコル版数で、版数が同じまま97コミット遅れていた実績がある（#1612）。見ているのはgitの事実。
+
+### 大きな本文を`curl`の引数で渡すと、`E2BIG`で静かに送信できなくなる（#2870）
+
+「AI使用量」画面の直近日だけがGitHub Actionsばかりになり、Claude・Codexのローカル実装が
+反映されない不具合を追った（#2870）。**原因は表示側でも送信順序でもなく、`api_call`
+（`scripts/subpc-dispatch-poller.sh`）が本文を`curl`の1コマンドライン引数（`--data`）
+として渡していたこと**だった。
+
+- Linuxカーネルには1コマンドライン引数の長さに`MAX_ARG_STRLEN`（32ページ＝131,072バイト）
+  という上限があり、超えると`curl`プロセス自体が`execve`の`E2BIG`で起動できない。
+  `curl`のエラーハンドリングを一切経由しないため、`api_call`が受け取る`API_RESPONSE_STATUS`は
+  `000`（＝接続不可と同じ扱い）になり、journaldには
+  `/usr/bin/curl: Argument list too long`とだけ残る（`report_api_failure`の日本語ログには
+  この文字列が出ないため、日本語キーワードでは検索に引っかからない）
+- ローカルセッションのトークン使用量報告（`report_session_usage`）は、
+  `session-usage-phase-backfill.stamp`・`session-usage-code-review-backfill.stamp`
+  （`$HOME/.local/state/issue-deck/`）が無い＝**埋め戻しが1度も完走していない**ホストでは
+  毎巡「埋め戻しモード」（既定30日ぶん）のままになる。#2779・#2832で埋め戻し印が
+  増えて以降、このホストでは1セッションあたり約700バイト×チャンク200件＝約140KBの本文を
+  送ろうとしており、上限を確実に超えて先頭チャンクから送信できていなかった
+- `report_session_usage`は`000`を`404`（受け口がまだ無い旧デプロイへの後方互換）と
+  同じ扱いで黙って見送っていたため、この状態が2026-09-03から4日間・約1,070回続いても
+  気付けなかった
+
+対策は`api_call`が本文を一時ファイルへ書き、`--data-binary @file`で渡すよう変更した
+（`--data`のままだと改行が除去されるため`--data-binary`にする）。これは`api_call`を
+使う全経路に効く。あわせて`000`は`404`と分けてログへ残すようにし（`report_api_failure`）、
+`session_usage_report_payload`がチャンク化する直前に終了時刻の新しい順へ並べ替える
+保険も入れた（送信順だけの変更で、`session_usage_aggregate`側の重複除去の基準＝転記を
+読む順は変えていない）——本文の長さを直した後でも、何らかの理由でチャンクの途中が
+失敗した場合に、新しいセッションだけは先に届くようにするため。
+
+**この種の不具合はサブPCの本体チェックアウト（`~/apps/issue-deck`）を更新して
+pollerを再起動するまで効かない。** 画面の「更新して再起動」を押した後、
+`journalctl --user -u issue-deck-dispatch-poller --since "10 min ago" | grep "Argument list too long"`
+で再発していないことを確認する。
 
 ### 画面から更新して再起動する（#1875）
 

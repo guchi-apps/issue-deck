@@ -447,10 +447,23 @@ API_RESPONSE_URL=""
 
 api_call() {
   local method="$1" path="$2" body="${3:-}"
-  local response_file status
+  local response_file body_file="" status
   response_file="$(mktemp)"
+  # **本文は`--data`の引数ではなく一時ファイルへ書いて`--data-binary @file`で渡す**（#2870）。
+  # 1コマンドライン引数にはLinuxカーネルの`MAX_ARG_STRLEN`（32ページ＝131,072バイト）という
+  # 上限があり、超えると`curl`自体が`execve`の`E2BIG`で起動できない（`journalctl`に
+  # `Argument list too long`とだけ残り、curlのエラーハンドリングを一切経由しないため
+  # `API_RESPONSE_STATUS`は`000`＝接続不可と区別が付かなくなる）。ローカルセッションの
+  # トークン使用量報告（`report_session_usage`）は1チャンク200件で約140KBになり、実際に
+  # このホストで送信のたびに毎回ここで落ちていた。`--data`のままだと改行が除去されるため
+  # `--data-binary`にする。Authorizationヘッダーは`--header @-`で標準入力を使っているので、
+  # 本文をそちらへ載せることはできない。
+  if [[ -n "$body" ]]; then
+    body_file="$(mktemp)"
+    printf '%s' "$body" >"$body_file"
+  fi
   # shellcheck disable=SC2064
-  trap "rm -f '$response_file'" RETURN
+  trap "rm -f '$response_file' '$body_file'" RETURN
 
   local curl_args=(
     --silent --show-error
@@ -460,8 +473,8 @@ api_call() {
     --output "$response_file"
     --write-out '%{http_code}'
   )
-  if [[ -n "$body" ]]; then
-    curl_args+=(--data "$body")
+  if [[ -n "$body_file" ]]; then
+    curl_args+=(--data-binary "@$body_file")
   fi
 
   status="$(printf 'Authorization: Bearer %s\n' "$DISPATCH_SECRET" |
@@ -512,7 +525,11 @@ report_api_failure() {
       echo "Error: $label: DISPATCH_SECRET の値が一致しません（401 $target）。$DISPATCH_ENV_FILE を確認してください。" >&2
       ;;
     000)
-      echo "Error: $label: $target へ接続できませんでした。" >&2
+      # **「接続不可」とは限らない**（#2870）。`curl`自体がタイムアウトした場合だけでなく、
+      # 本文が長すぎて`curl`プロセスが`execve`の`E2BIG`で起動できなかった場合も、
+      # curlのエラーハンドリングを一切経由しないため同じ`000`になる（後者は
+      # `journalctl`に`Argument list too long`として残るので、疑うときはそちらも見る）。
+      echo "Error: $label: $target へ接続できないか、リクエストを送信できませんでした（000）。" >&2
       ;;
     *)
       echo "Error: $label: HTTP $API_RESPONSE_STATUS $target $(summarize_response_body "$API_RESPONSE_BODY")" >&2
@@ -1466,8 +1483,15 @@ report_session_usage() {
     [[ -n "$line" ]] || continue
     if ! api_call POST /api/dispatch/session-usage "$line"; then
       case "$API_RESPONSE_STATUS" in
-        # 404と接続不可を黙って見送る理由はコンフリクトの巡回検知と同じ。
-        404 | 000) return 0 ;;
+        # 404を黙って見送る理由はコンフリクトの巡回検知と同じ（本番がまだこの受け口を
+        # 持たない旧デプロイへの後方互換）。
+        404) ;;
+        # **000（接続不可・送信不可）だけは黙らない**（#2870）。以前はここも404と一緒に
+        # 黙って見送っていたが、埋め戻し（直近30日ぶん・チャンクあたり200件）の本文は
+        # `api_call`が`curl`へ渡す1コマンドライン引数としては長すぎ、`execve`が
+        # `E2BIG`で落ちて`curl`自体が起動できていなかった（`api_call`側は
+        # `--data-binary @file`へ直したので今後は起きない想定だが、他の原因で000に
+        # なる可能性は残るため、ログにだけは残す）。
         *) report_api_failure "トークン使用量の報告に失敗しました" ;;
       esac
       return 0

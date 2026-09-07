@@ -7,6 +7,7 @@ import {
   describeSessionRecovery,
   findSessionForIssue,
   isSessionWaitingInput,
+  resolveImplementationPosition,
   resolveIssueImplementationAgent,
   shortIssueSessionLabel,
   summarizeIssueSession,
@@ -558,5 +559,39 @@ describe("応答終了のあとにツールが走っている場合（#2705）",
         session({ activity: "RESPONDED", activityAt: "2026-08-14T00:00:00.000Z" }),
       ).shortLabel,
     ).toBe("応答を終えています");
+  });
+});
+
+describe("resolveImplementationPosition（#2867）", () => {
+  it("ファイルを書き換えていれば「実装」、検証・仕上げの作業なら「検証・仕上げ」", () => {
+    expect(resolveImplementationPosition(session({ step: "EDITING" }))).toBe("editing");
+    for (const step of [
+      "LINTING",
+      "TYPECHECKING",
+      "TESTING",
+      "BUILDING",
+      "COMMITTING",
+      "PUSHING",
+      "PR",
+    ] as const) {
+      expect(resolveImplementationPosition(session({ step }))).toBe("verifying");
+    }
+  });
+
+  it("読んでいる・計画中・記録中・分類できないコマンド・報告なしは「調査」", () => {
+    for (const step of ["PLANNING", "EXPLORING", "ISSUE", "ARTIFACT", "RUNNING"] as const) {
+      expect(resolveImplementationPosition(session({ step }))).toBe("exploring");
+    }
+    expect(resolveImplementationPosition(session({ step: null }))).toBe("exploring");
+    expect(resolveImplementationPosition(null)).toBe("exploring");
+  });
+
+  it("鮮度は見ない。終了・入力待ちでも最後に報告した作業が到達点", () => {
+    expect(
+      resolveImplementationPosition(session({ state: "EXITED", step: "TESTING", stepSeenAt: null })),
+    ).toBe("verifying");
+    expect(
+      resolveImplementationPosition(session({ activity: "WAITING_INPUT", step: "EDITING" })),
+    ).toBe("editing");
   });
 });

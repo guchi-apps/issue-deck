@@ -9,6 +9,8 @@ import {
   CODE_REVIEW_REQUEST_MARKER,
   codeReviewRequestCommentBody,
   countCodeReviewFindings,
+  describeCodeReviewFindingProgress,
+  filterUncreatedCodeReviewFindings,
   findLatestCodeReviewReport,
   formatCodeReviewListCount,
   isCodeReviewIssue,
@@ -16,6 +18,7 @@ import {
   isCodeReviewReportComment,
   parseCodeReviewReport,
   summarizeCodeReviewComments,
+  summarizeCodeReviewFindingProgress,
 } from "@/lib/github/code-review";
 
 const REPORT = `${CODE_REVIEW_REPORT_MARKER}
@@ -188,6 +191,23 @@ describe("buildCodeReviewFindingIssueIndex", () => {
   });
 });
 
+describe("filterUncreatedCodeReviewFindings（#2859）", () => {
+  it("索引が無ければすべて残す", () => {
+    const report = parseCodeReviewReport(REPORT);
+    expect(filterUncreatedCodeReviewFindings(report!.findings, undefined)).toEqual(
+      report!.findings,
+    );
+  });
+
+  it("起票済みのタイトルだけを除く", () => {
+    const report = parseCodeReviewReport(REPORT);
+    const createdFindingIssues = new Map([["未完了ジョブの判定が種別を見ていない", 2170]]);
+    const remaining = filterUncreatedCodeReviewFindings(report!.findings, createdFindingIssues);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].title).toBe("同じ絞り込みを2か所で組み立てている");
+  });
+});
+
 describe("buildCodeReviewFindingIssueDraft", () => {
   it("起票先はレビュー対象のリポジトリで、本文に起点と場所が残る", () => {
     const report = parseCodeReviewReport(REPORT);
@@ -215,6 +235,11 @@ describe("summarizeCodeReviewComments", () => {
     expect(summary.state).toBe("reported");
     expect(summary.counts).toEqual({ high: 1, medium: 0, low: 1 });
     expect(summary.findingCount).toBe(2);
+    // 対応状況（#2868）を数えるのに使う。行には出さない
+    expect(summary.findingTitles).toEqual([
+      "未完了ジョブの判定が種別を見ていない",
+      "同じ絞り込みを2か所で組み立てている",
+    ]);
   });
 
   it("指摘が1件も無い結果は、件数0のreportedとして返す（＝一覧では「指摘なし」）", () => {
@@ -263,5 +288,69 @@ describe("formatCodeReviewListCount", () => {
   it("保留中は他のビューと同じ形で添える", () => {
     expect(formatCodeReviewListCount([open, closed], 2, 1)).toBe("2件・未完了1件・保留中1件");
     expect(formatCodeReviewListCount([open], 1, 2)).toBe("1件・保留中2件");
+  });
+});
+
+describe("summarizeCodeReviewFindingProgress", () => {
+  const titles = ["指摘A", "指摘B", "指摘C"];
+  const issue = (number: number, title: string, state: "open" | "closed") => ({
+    repositoryFullName: "guchi-apps/issue-deck",
+    title,
+    number,
+    state,
+  });
+
+  it("見出しと同じタイトルのIssueを起票済み、closeされていれば対応済みとして数える", () => {
+    expect(
+      summarizeCodeReviewFindingProgress({
+        findingTitles: titles,
+        issues: [issue(10, "指摘A", "closed"), issue(11, "指摘B", "open")],
+        repositoryFullName: "guchi-apps/issue-deck",
+      }),
+    ).toEqual({ total: 3, created: 2, resolved: 1 });
+  });
+
+  it("別リポジトリの同名Issueは数えない（起票先はレビュー対象のリポジトリ）", () => {
+    expect(
+      summarizeCodeReviewFindingProgress({
+        findingTitles: ["指摘A"],
+        issues: [{ ...issue(10, "指摘A", "closed"), repositoryFullName: "guchi-apps/car-care" }],
+        repositoryFullName: "guchi-apps/issue-deck",
+      }),
+    ).toEqual({ total: 1, created: 0, resolved: 0 });
+  });
+
+  it("同じタイトルが複数あれば先に立てた方（番号の小さい方）を見る", () => {
+    expect(
+      summarizeCodeReviewFindingProgress({
+        findingTitles: ["指摘A"],
+        issues: [issue(20, "指摘A", "open"), issue(10, "指摘A", "closed")],
+        repositoryFullName: "guchi-apps/issue-deck",
+      }),
+    ).toEqual({ total: 1, created: 1, resolved: 1 });
+  });
+
+  it("指摘が無ければnull（一覧はチップを出さない）", () => {
+    expect(
+      summarizeCodeReviewFindingProgress({
+        findingTitles: [],
+        issues: [issue(10, "指摘A", "closed")],
+        repositoryFullName: "guchi-apps/issue-deck",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("describeCodeReviewFindingProgress", () => {
+  it("0件の内訳は落として1行にする", () => {
+    expect(describeCodeReviewFindingProgress({ total: 6, created: 4, resolved: 2 })).toBe(
+      "指摘6件：対応済み2件・起票済み2件・未起票2件",
+    );
+    expect(describeCodeReviewFindingProgress({ total: 3, created: 0, resolved: 0 })).toBe(
+      "指摘3件：未起票3件",
+    );
+    expect(describeCodeReviewFindingProgress({ total: 2, created: 2, resolved: 2 })).toBe(
+      "指摘2件：対応済み2件",
+    );
   });
 });

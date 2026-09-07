@@ -18,6 +18,13 @@ type IssueDetailHeaderProps = {
   onSelectRepository: (repositoryFullName: string) => void;
   /** 操作ボタン列。中身（ダイアログ・状態）は親が持ち、ここは並べるだけ */
   actions: ReactNode;
+  /**
+   * 操作の前に読ませたい注釈（#2866）。いまは「今夜の夜間実行に積まれています」だけが使う。
+   *
+   * **ヘッダーの中に置く**——押す直前に読めないと意味が無く、本文側へ置くとスクロールで
+   * 流れてしまう。無ければ何も描かず、ヘッダーの高さも変わらない。
+   */
+  notice?: ReactNode;
   implementationAgent: IssueImplementationAgent | null;
 };
 
@@ -35,6 +42,7 @@ export function IssueDetailHeader({
   issue,
   onSelectRepository,
   actions,
+  notice,
   implementationAgent,
 }: IssueDetailHeaderProps) {
   return (
@@ -75,6 +83,8 @@ export function IssueDetailHeader({
           更新 {formatRelativeDate(issue.updatedAt)}
         </span>
       </div>
+
+      {notice}
     </div>
   );
 }

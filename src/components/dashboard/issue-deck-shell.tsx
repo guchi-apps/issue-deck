@@ -11,6 +11,7 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-create-code-review-issues-dialog";
 import { IssueOrderDialog } from "@/components/dashboard/issue-order-dialog";
 import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
@@ -91,6 +92,7 @@ import {
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
+import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
   isMergeCheckUser,
@@ -299,6 +301,14 @@ export function IssueDeckShell({
   const [createDialogTitle, setCreateDialogTitle] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
   /**
+   * コードレビューの指摘をまとめて起票する確認ダイアログの対象（#2859）。
+   * 起点のレビューIssueと、未起票の指摘（呼び出し時点のスナップショット）を持つ。
+   */
+  const [bulkCreateCodeReviewState, setBulkCreateCodeReviewState] = useState<{
+    reviewIssue: Issue;
+    findings: CodeReviewFinding[];
+  } | null>(null);
+  /**
    * 設定変更Issueの切り出し元（#2021）。作成できた時点で、この手作業Issueの`## 前提条件`へ
    * 「作った方が先」と書き足すために覚えておく
    */
@@ -427,6 +437,17 @@ export function IssueDeckShell({
   }
 
   /**
+   * レビューの指摘を、選んだ分だけまとめて起票する確認ダイアログを開く（#2859）。
+   *
+   * **ここでも起票しない。** 開くのは選択用のダイアログ（`BulkCreateCodeReviewIssuesDialog`）で、
+   * 実際にIssueを作るのはその中で「作成」を押した時点。渡す指摘は呼び出し時点の未起票分の
+   * スナップショットで、ダイアログを開いている間にレビューを回し直しても中身は変わらない。
+   */
+  function openBulkCreateCodeReviewIssuesDialog(issue: Issue, findings: CodeReviewFinding[]) {
+    setBulkCreateCodeReviewState({ reviewIssue: issue, findings });
+  }
+
+  /**
    * リリースPRの検証結果で「要修正」「要確認」となった指摘を、対象リポジトリのIssueとして
    * 起票する（#2838）。対象issueへ直接`@claude`コメントで再開する形にはできない
    * （`delete_branch_on_merge=true`によりブランチは既に削除済みで、無人実行は
@@ -462,7 +483,13 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
-  function handleIssueCreated(issue: Issue) {
+  /**
+   * 作れたIssueを一覧へ反映する（#2862でここから遷移を切り離した）。**画面は動かさない。**
+   *
+   * 新規作成ダイアログは、作った直後にどこへ進むかを選ばせるようになったため
+   * （`PostCreateNavigationDialog`）、反映と遷移を別々に呼べる必要がある。
+   */
+  function registerCreatedIssue(issue: Issue) {
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
     setAllIssues((prev) => upsertIssue(prev, issue));
@@ -471,6 +498,15 @@ export function IssueDeckShell({
       void linkConfigIssueToManualStep(configIssueOrigin, issue);
       clearConfigIssuePrefill();
     }
+  }
+
+  /**
+   * 作れたIssueを一覧へ反映し、そのまま詳細画面へ進む。**行き先を選ばせない入口**
+   * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
+   * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
+   */
+  function handleIssueCreated(issue: Issue) {
+    registerCreatedIssue(issue);
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
   }
@@ -1182,6 +1218,17 @@ export function IssueDeckShell({
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
   const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。**取得口は増やさず、
+   * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
+   *
+   * 夜間実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
+   * 最大5分遅れる。積んだ端末では「実装を開始」の成功時に`refresh`を呼んで即時に出す。
+   */
+  const nightlyRunQueued = useMemo(
+    () => selectNightlyRunQueuedMarks(nightlyRun.state),
+    [nightlyRun.state],
+  );
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -1745,6 +1792,8 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  nightlyRunQueued={nightlyRunQueued}
                   snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
                   snoozedMergePendingEntries={snoozedMergePendingEntries}
                   /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
@@ -1833,6 +1882,8 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  nightlyRunQueued={nightlyRunQueued}
                 />
               )}
 
@@ -1850,12 +1901,18 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onBulkCreateCodeReviewFindingIssues={openBulkCreateCodeReviewIssuesDialog}
                   onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={selectRepositoryByFullName}
                   /* 「いまは実施しない」（#2398）。一覧と同じ引き当て表・同じ操作 */
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  nightlyRunQueued={nightlyRunQueued}
+                  onOpenNightlyRun={selectNightlyRun}
+                  onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
+                  onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                 />
@@ -2101,11 +2158,14 @@ export function IssueDeckShell({
                 snoozes={snoozes}
                 onSnooze={snooze}
                 onUnsnooze={unsnooze}
+                /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                nightlyRunQueued={nightlyRunQueued}
                 // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
                 fetchedAt={issuePolling.fetchedAt}
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
+                codeReviewFindingIssues={allIssues}
                 // 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
                 // 取得は左メニューの件数のために既に走っているものへ相乗りする
                 pullRequests={crossRepositoryPullRequests}
@@ -2145,6 +2205,7 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onBulkCreateCodeReviewFindingIssues={openBulkCreateCodeReviewIssuesDialog}
                   onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
@@ -2153,6 +2214,11 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  nightlyRunQueued={nightlyRunQueued}
+                  onOpenNightlyRun={selectNightlyRunPane}
+                  onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
+                  onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                 />
@@ -2215,8 +2281,23 @@ export function IssueDeckShell({
           defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
           issues={allIssues}
-          onCreated={handleIssueCreated}
+          // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
+          onCreated={registerCreatedIssue}
+          onNavigateToIssue={selectIssue}
+          /* 「作成+実装開始」から今夜の予定へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
+             別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
+          onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}
+        />
+        <BulkCreateCodeReviewIssuesDialog
+          open={bulkCreateCodeReviewState !== null}
+          onOpenChange={(open) => {
+            if (!open) setBulkCreateCodeReviewState(null);
+          }}
+          findings={bulkCreateCodeReviewState?.findings ?? []}
+          repositoryFullName={bulkCreateCodeReviewState?.reviewIssue.repositoryFullName ?? ""}
+          reviewNumber={bulkCreateCodeReviewState?.reviewIssue.number ?? 0}
+          onCreated={handleIssueCreated}
         />
         <CodeReviewDialog
           open={codeReviewDialogOpen}

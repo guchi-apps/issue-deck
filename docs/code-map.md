@@ -277,6 +277,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
+- **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
+  以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
+  移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
+  まとめて起票しているときに毎回一覧へ戻る操作が要ったため、作成の直後に
+  [`post-create-navigation-dialog.tsx`](../src/components/dashboard/post-create-navigation-dialog.tsx)
+  を出し、「Issueを開く」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  - **一覧への反映（`registerCreatedIssue`）と遷移（`selectIssue`）を分けてある。**
+    作成フォームには`onCreated`（反映）と`onNavigateToIssue`（遷移）を別々に渡し、
+    **`onNavigateToIssue`を渡さない呼び出しでは選択画面自体を出さない**。別ウィンドウ
+    （`/issues/new`）はもともと詳細へ移動しないため、これに当たる。行き先を選ばせない
+    ほかの入口（一括作成・コードレビュー・横断質問）は従来どおり`handleIssueCreated`を使う。
+  - **「作成+実装開始」では実行先の選択（`StartImplementationDialog`）を閉じた後に出す。**
+    キャンセルで閉じた場合も出す——起動しなくてもIssueは残っている。
+  - **選んだ行き先を覚えるのはチェックを入れて押したときだけ**で、×・Escapeでは覚えない。
+    保存先は端末のlocalStorage（`issue-deck:post-create-destination`。判定は
+    [`lib/post-create-destination.ts`](../src/lib/post-create-destination.ts)の純粋関数、
+    読み書きは[`hooks/use-post-create-destination.ts`](../src/hooks/use-post-create-destination.ts)）。
+    **覚えると選択画面ごと出なくなるため、設定＞表示に戻し口を必ず置く**
+    （[`settings/post-create-destination-section.tsx`](../src/components/dashboard/settings/post-create-destination-section.tsx)）。
 - **画像を拡大して見せるのは[`image-preview-dialog.tsx`](../src/components/dashboard/image-preview-dialog.tsx)だけで、`target="_blank"`で別タブに開かない**（#2065）。
   このアプリはホーム画面へ追加して使う（`app/manifest.ts`の`display: "standalone"`）。
   **その起動のしかたではタブもアドレスバーも無く、別タブで開いた画像を閉じて元の画面へ戻る
@@ -550,12 +569,35 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     読み込み中の骨組みへ差し替わる）。
   - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
     左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
-- **Issue一覧の進捗は6分割の横棒で出す**（#2516。`components/dashboard/workflow-status-steps.tsx`の
-  `WorkflowStepBadge`）。**1マス＝1段**で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の
-  簡易版にあたる。以前は18pxの円グラフ（`conic-gradient`で角度を塗る）だったが、その大きさでは
-  3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが分からなかった。
-  - **段の母集団は`WORKFLOW_STEPS`（6段）のまま**で、バー側に段数を持たない。マスの数と詳細画面の
-    段の数がずれると、同じIssueを2画面で見たときに数が食い違う
+- **Issue一覧の進捗は9マスの横棒で出す**（#2516・#2867。`components/dashboard/workflow-status-steps.tsx`の
+  `WorkflowStepBadge`）。マスは`lib/issue-progress.ts`の`PROGRESS_SEGMENTS`で、Issue詳細の
+  6段ステップ（`WorkflowStatusSteps`）のうち**実装を調査／実装／検証・仕上げの3マス、developへ
+  マージをCI・レビュー／マージ待ちの2マスに分けた**もの。以前は18pxの円グラフ（`conic-gradient`で
+  角度を塗る）だったが、その大きさでは3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
+  分からなかった（#2516で6等分の横棒に）。さらに6等分では、長く待つ計画・実装のあいだに動くのが
+  1〜2マスで、develop反映後の短い区間に同じ3マスが割り当てられていた（#2867で9マスに）。
+  - **マスの幅は「作業が動いている時間」の目安の重み**（`PROGRESS_SEGMENTS.weight`。合計100）で、
+    済んだマスの重みの合計をツールチップに「目安 xx%」と出す。実測（直近12本のPR）は計画7〜24分・
+    実装12〜25分・developへマージ4〜9分・本番へマージ3〜17分。**develop反映済（マージ→リリース）
+    だけは16分〜4.6時間と長いが、人がリリースを押すまでの待ちで作業は動いていないため実測どおりに
+    割り当てない**——作業が全部終わった行のバーが何時間も40%で止まって見えるのは、このIssueが
+    直したい状態そのもの。Status遷移の時刻はDBに無く、重みは実測から手で置いた固定値
+  - **塗りは3段階。済んだマス＝濃く、いまのマス＝半分（55%）、まだのマス＝薄く（15%）。**
+    終端（本番反映済）に着いたら全部塗る。6等分の頃は現在の段まで塗っていたが、それだと残りの
+    長さが「あとどれくらいか」を表さない。マスの状態は`resolveProgressSegments`
+    （`lib/github/workflow-status.ts`）が決め、`ready`・未知のStatusではnull（バー自体を出さない）
+  - **段の中の位置の材料は2つ。** 実装の中はサブPCのセッションが報告する作業（`DispatchSession.step`。
+    #2705）を`resolveImplementationPosition`（`lib/dispatch/issue-session.ts`）で調査／実装／
+    検証・仕上げへ畳む。**鮮度は見ず、「いまの作業」の位置なのでテスト後に直しへ戻れば1マス戻る**
+    （最高到達点はDBに無く、記録するにはマイグレーションが要る）。GitHub Actionsは内訳を報告
+    しないため、実装ステップが走っていれば「実装」のマスまで。developへマージの中はPR内訳（#2816）
+    の「マージ」の段が`current`/`done`かだけで`resolvePullRequestPosition`が決める。**済んだ段の数を
+    分母で割らない**——`ai-review`の段はcheck-runが現れてから増えるので、割ると後退する
+  - **幅は整数pxで固定し、`flex`の伸縮に任せない**（`allocateSegmentWidths`。最大剰余法・下限2px・
+    合計がすき間を除いた幅に一致）。40pxから段の境目2px×5＋段の中1px×3を引いた27pxを9マスへ配る。
+    下限を当てたマスのぶん`flex`で全体が縮むと、`overflow-hidden`で末尾のマスが切れる
+  - **6段（`WORKFLOW_STEPS`）との対応は段の境目のすき間で示す。** Issue詳細のスマホ用キャプション
+    「実装中（2/6）」は段の数のままで、バーのマス数とは一致しない
   - **実行中はバーを端から端まで光が掃く**（`.progress-live-sweep`）。**1マスの中に閉じ込めない**
     ——#2358で「細い弧が1/4周だけでは回っているかどうかが分からない」と潰した問題へ戻る。
     40pxを通れば動く距離は当時のリングと同等で、常時見える輪郭の役はバー自体が果たす。
@@ -564,8 +606,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **確認待ち（amber）・回答待ち（blue）ではアイコンをバーの左隣に出し、未達のマスも濃く塗る**
     （`emphasizeTrack`）。5px高のバーの中にアイコンは収まらない。そして**一覧の行では
     `00.check-user`・`01.check-*`が下のラベル一覧から除外されている**（`listCardLabels`）ため、
-    このバッジが色で伝える唯一の場所になる。塗ったマスだけを色付けると`Planning`（1/6）の行で
-    5pxしか色が乗らないので、18pxの円が全面で色を帯びていた頃と同等の面積を確保する
+    このバッジが色で伝える唯一の場所になる。塗ったマスだけを色付けると`Planning`の行で
+    数pxしか色が乗らないので、18pxの円が全面で色を帯びていた頃と同等の面積を確保する
   - **バーは円より22px幅を取る。** Issue一覧カラムは最小280pxまで詰められるため、行の右側の
     クラスタ（`issue-list.tsx`の`renderIssueRow`）を縮められるようにして、**添える字
     （「実装中（サブPC）」）だけが切り詰められる**ようにしてある（アイコン・バー・アバターは

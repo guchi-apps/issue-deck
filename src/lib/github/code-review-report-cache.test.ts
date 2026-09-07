@@ -14,11 +14,13 @@ const reported: CodeReviewSummary = {
   state: "reported",
   counts: { high: 1, medium: 2, low: 0 },
   findingCount: 3,
+  findingTitles: ["未完了ジョブの判定が種別を見ていない", "起票済みの判定が重複する", "命名が揺れている"],
 };
 const pending: CodeReviewSummary = {
   state: "pending",
   counts: { high: 0, medium: 0, low: 0 },
   findingCount: 0,
+  findingTitles: [],
 };
 
 const key = codeReviewSummaryCacheKey("guchi-apps", "issue-deck", 2440);

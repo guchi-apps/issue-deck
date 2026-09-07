@@ -364,3 +364,85 @@ export function parseNightlyRunOptionLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
 }
+
+/**
+ * Issue一覧・Issue詳細に出す「今夜の予定に積まれている」の目印（#2866）。
+ *
+ * 積んでも**ラベル・ジョブ・セッションのどれも付かない**（`nightly-run-launch.ts`。付けると
+ * 起動していないのに無人実行まで止まる）ため、積んだIssueは一覧でも詳細でも、まだ何も指示して
+ * いないIssueとまったく同じ姿で並んでいた。目印だけをここから配る。
+ *
+ * **出すのは`QUEUED`の予定だけ。** 夜に起動した後は進捗バー・セッションの表示が受け持つので、
+ * 目印を重ねると同じことを2か所で言うことになる
+ * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+ */
+export type NightlyRunQueuedMark = {
+  /** 取り消し（`DELETE /api/nightly-run/:id`）に使う予定の識別子 */
+  entryId: string;
+  /** 起動を試み始める時刻（日本時間の「時」） */
+  startHour: number;
+  /** 夜間実行そのものが有効か。OFFなら積んであっても起動しない */
+  enabled: boolean;
+};
+
+/**
+ * `Issue.id`（＝`String(githubIssueId)`）で引く表。
+ *
+ * **`owner/repo#番号`の鍵を新しく作らない**（計画レビューG1の指摘）。同じ形式は
+ * `NightlyRunEntry.activeKey`（`nightly-run-db.ts`）と`issue-queue-state.ts`に既にあり、
+ * ここへ3つ目を足すと定義が散る。`NightlyRunEntryView.issueId`は画面の`Issue.id`と同じ
+ * 識別子なので（`issue-mapper.ts`）、そのまま鍵に使える。
+ */
+export type NightlyRunQueuedMap = ReadonlyMap<string, NightlyRunQueuedMark>;
+
+/**
+ * 今夜の予定から引き当て表を作る。取得前（`state`が`null`）は空の表になり、目印は出ない。
+ *
+ * 同期できていないIssue（`issueId`が`null`）は表へ入れない。そのIssueはそもそも一覧にも
+ * 詳細にも出ないので、目印を引く相手がいない。
+ */
+export function selectNightlyRunQueuedMarks(state: NightlyRunState | null): NightlyRunQueuedMap {
+  const marks = new Map<string, NightlyRunQueuedMark>();
+  if (!state) return marks;
+  for (const entry of state.queued) {
+    if (entry.status !== "QUEUED" || !entry.issueId) continue;
+    marks.set(entry.issueId, {
+      entryId: entry.id,
+      startHour: state.settings.startHour,
+      enabled: state.settings.enabled,
+    });
+  }
+  return marks;
+}
+
+export function findNightlyRunQueuedMark(
+  marks: NightlyRunQueuedMap | undefined,
+  issueId: string,
+): NightlyRunQueuedMark | null {
+  return marks?.get(issueId) ?? null;
+}
+
+/**
+ * 一覧の行に出すチップの文言（#2866）。**開始時刻まで入れる**——「今夜」だけだと、
+ * 積んだ覚えのある夜なのか、設定を変えた後の夜なのかを行から読めない。
+ *
+ * OFFのときは「今夜」ではなく**止まっている対象の名前**を出す（計画レビューG1の指摘3）。
+ * 「今夜 OFF」だと予定の時間帯の話に読め、人が設定を戻すまで走らないことが伝わらない。
+ */
+export function describeNightlyRunMarkChip(mark: NightlyRunQueuedMark): string {
+  return mark.enabled ? `今夜 ${formatNightlyRunHour(mark.startHour)}` : "夜間実行OFF";
+}
+
+/** チップのツールチップ・詳細の注釈で使う1行 */
+export function describeNightlyRunMarkTitle(mark: NightlyRunQueuedMark): string {
+  return mark.enabled
+    ? `今夜の夜間実行に積まれています（${describeNightlyRunWindowHours(mark.startHour)}に順に起動）`
+    : "今夜の夜間実行に積まれていますが、夜間実行はOFFです";
+}
+
+/** 詳細の注釈に添える説明。何が起きるか・いま開始したいときはどうするか */
+export function describeNightlyRunMarkDetail(mark: NightlyRunQueuedMark): string {
+  return mark.enabled
+    ? `${describeNightlyRunWindowHours(mark.startHour)}のあいだに順に起動します。いま開始する場合は先に予定を取り消してください。`
+    : "このままでは起動しません。夜間実行をONにするか、予定を取り消してください。";
+}

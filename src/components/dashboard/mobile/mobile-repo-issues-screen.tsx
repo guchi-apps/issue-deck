@@ -23,6 +23,7 @@ import {
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
 import { selectSnoozedIssueIds, type SnoozeMap, type SnoozeTarget } from "@/lib/snooze";
+import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -61,6 +62,10 @@ type MobileRepoIssuesScreenProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
 };
 
 export function MobileRepoIssuesScreen({
@@ -83,6 +88,7 @@ export function MobileRepoIssuesScreen({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
   const {
@@ -219,6 +225,7 @@ export function MobileRepoIssuesScreen({
       issues={displayedIssues}
       navCounts={navCounts}
       prerequisiteReadiness={prerequisiteReadiness}
+      codeReviewFindingIssues={issues}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}
@@ -235,6 +242,7 @@ export function MobileRepoIssuesScreen({
       snoozes={snoozes}
       onSnooze={onSnooze}
       onUnsnooze={onUnsnooze}
+      nightlyRunQueued={nightlyRunQueued}
     >
       <MobileReleaseSheet
         open={releaseSheetOpen}
