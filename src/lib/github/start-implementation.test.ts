@@ -13,6 +13,7 @@ import {
   startImplementationCommentBody,
   startImplementationDisabledReason,
   startImplementationLabelsToAdd,
+  startImplementationLabelsToRemove,
   startImplementationOptionsFromLabels,
   visibleStartImplementationOptions,
 } from "@/lib/github/start-implementation";
@@ -52,6 +53,33 @@ describe("startImplementationLabelsToAdd", () => {
         mergeConfirmRequired: false,
       }),
     ).toEqual([PLAN_REQUIRED_LABEL]);
+  });
+});
+
+describe("startImplementationLabelsToRemove", () => {
+  // 選んだオプションどおりにラベルが付き、その内容で実行されるようにする（#2884）
+  it("すべて選ばれていれば外すラベルは無い", () => {
+    expect(
+      startImplementationLabelsToRemove({
+        planRequired: true,
+        previewRequired: true,
+        screenshotRequired: true,
+        artifactRequired: true,
+        mergeConfirmRequired: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("チェックを外したオプションに対応するラベルだけを返す", () => {
+    expect(
+      startImplementationLabelsToRemove({
+        planRequired: false,
+        previewRequired: true,
+        screenshotRequired: false,
+        artifactRequired: true,
+        mergeConfirmRequired: true,
+      }),
+    ).toEqual([PLAN_REQUIRED_LABEL, "24.screenshot-required"]);
   });
 });
 
