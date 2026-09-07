@@ -68,6 +68,7 @@ function makeSelfUpdateJob(overrides: Partial<DispatchJobView> = {}): DispatchJo
     status: "QUEUED",
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,
@@ -111,6 +112,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     ...overrides,
   };

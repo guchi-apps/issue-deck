@@ -62,6 +62,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     status: "RUNNING",
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,

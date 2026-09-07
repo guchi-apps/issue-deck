@@ -225,6 +225,39 @@ export function parseSessionStepAt(value: unknown): string | null {
 }
 
 /**
+ * セッションが中断・停滞したまま止まっている原因（#1971・#2655・#2844）。
+ *
+ * **`session-escalation.ts`から移してきた**（#2886）。あちらはPrismaとGitHub APIを読み込む
+ * サーバー専用モジュールで、画面（`session-stall.ts`・停滞パネル）から同じ語彙を参照できない。
+ * `SESSION_REAP_REASONS`・`SESSION_STEPS`と同じく、**コードだけを運び、画面に出す文言は
+ * issue-deck側**（`session-stall.ts`）に置く。
+ */
+export const SESSION_INTERRUPTED_REASONS = [
+  /** APIの一時エラーを再試行しきってturnが打ち切られ、`Stop`が飛ばないまま止まった（#1971） */
+  "api_error",
+  /** ツールを呼び出すつもりでテキストを出しただけで、実際には呼ばれずに終えた（#2655） */
+  "tool_call_stall",
+  /** auto modeのクラシファイアにコマンドを拒否されたまま応答を終えた（#2844） */
+  "classifier_blocked",
+] as const;
+
+export type SessionInterruptedReason = (typeof SESSION_INTERRUPTED_REASONS)[number];
+
+/**
+ * 引き上げの原因として受け入れる値。**知らないコードはnullへ落とす**
+ * （`parseSessionReapReason`と同じ扱い）。
+ *
+ * DBのカラムは`String`なので、**新しい版が書いた・こちらが知らない値**が読み出されうる。
+ * 停滞パネルは原因ごとに文面を出し分けるため、知らない値のまま画面へ流すと空欄のパネルが出る。
+ */
+export function parseSessionInterruptedReason(value: unknown): SessionInterruptedReason | null {
+  if (typeof value !== "string") return null;
+  return (SESSION_INTERRUPTED_REASONS as readonly string[]).includes(value)
+    ? (value as SessionInterruptedReason)
+    : null;
+}
+
+/**
  * 畳む理由として受け入れる値。**知らないコードはnullへ落とす。**
  *
  * サブPCのスクリプトは`~/apps/issue-deck`のチェックアウトから走り、issue-deck本体より
@@ -367,6 +400,15 @@ export type DispatchSessionView = {
   stepAt: string | null;
   /** 最後にそのステップのツールが走った時刻。`activityAt`との比較で「いま走っているか」を出す */
   stepSeenAt: string | null;
+  /**
+   * 中断・停滞していると引き上げたときの原因と時刻（#2886）。引き上げが無ければ`null`。
+   *
+   * **「今も停滞しているか」はこの2つだけでは決まらない。** セッションが動き出せば
+   * `activityAt`・`stepSeenAt`がこの時刻を追い越すので、その判定は`describeSessionStall`
+   * （`session-stall.ts`）が持つ。
+   */
+  interruptedReason: SessionInterruptedReason | null;
+  interruptedAt: string | null;
   /**
    * そのセッションが**実際に使っているモデル**のID（#2723）。例: `["claude-opus-5"]`。
    *

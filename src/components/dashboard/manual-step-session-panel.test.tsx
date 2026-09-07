@@ -97,6 +97,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     firstSeenAt: NOW.toISOString(),
     lastReportedAt: NOW.toISOString(),

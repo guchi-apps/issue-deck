@@ -7,6 +7,7 @@ import {
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
+import { resolveInterruptedSessionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
 import {
@@ -128,6 +129,20 @@ export async function POST(request: NextRequest) {
       // （画面から続きを流し直せる）
       console.error(`[POST /api/dispatch/report] 自動実行を進められませんでした ${jobId}:`, error);
     }
+  }
+
+  // 停滞からの復旧が**実際に届いた**ら、引き上げのときに付いた`00.check-user`を理由ラベルごと
+  // 外す（#2886）。**積んだ時点では外さない**——送出は非同期で、承認プロンプトの表示中・
+  // 作業中・入力欄に打ちかけがある場合はpollerが見送るため、押した時点で外すと「何も届いて
+  // いないのに札だけ消える」。押したこと自体は「人が続け方を決めた」合図だが、**その指示が
+  // セッションへ入ったことまで確かめてから**印を片付ける。
+  if (result.job.kind === "INSTRUCTION" && result.job.recovery && status === "succeeded") {
+    // **失敗しても報告そのものは受け付ける**（自動実行を進める処理と同じ扱い）。
+    // `resolveInterruptedSessionCheckUser`は内部で握り潰して真偽値を返す
+    await resolveInterruptedSessionCheckUser({
+      repositoryFullName: result.job.repositoryFullName,
+      issueNumber: result.job.issueNumber,
+    });
   }
 
   return NextResponse.json(

@@ -243,6 +243,7 @@ describe("describeDispatchHostSelfUpdate（#1927）", () => {
       status: "QUEUED",
       message: null,
       instruction: null,
+      recovery: false,
       command: null,
       placeholderValues: null,
       resolvedCommand: null,

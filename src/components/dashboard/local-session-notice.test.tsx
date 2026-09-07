@@ -32,6 +32,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     firstSeenAt: "2026-08-14T00:00:00.000Z",
     lastReportedAt: "2026-08-14T00:00:00.000Z",
@@ -91,6 +93,21 @@ describe("LocalSessionApprovalNotice", () => {
     expect(screen.getByText(/終了しています/)).toBeTruthy();
     expect(screen.getByText(/セッションを復旧/)).toBeTruthy();
     expect(screen.queryByRole("link", { name: /Remote Control/ })).toBeNull();
+  });
+
+  // #2886: 停滞の出口は上部の停滞パネル。ここで「Remote Controlで答えて」と言い続けると、
+  // アプリを開かずに復旧できることが画面から読み取れない
+  it("停滞しているセッションでは、上の停滞パネルへ案内する", () => {
+    render(
+      <LocalSessionApprovalNotice
+        session={session({
+          interruptedReason: "api_error",
+          interruptedAt: "2026-08-14T00:00:00.000Z",
+        })}
+      />,
+    );
+    expect(screen.getByText(/から復旧の文面を送れます/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Remote Controlで答える/ })).toBeNull();
   });
 
   // 記録が無いだけで、終了したとは限らない（24時間で落ちる・pollerの外で起こした場合）

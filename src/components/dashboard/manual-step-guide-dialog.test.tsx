@@ -1111,6 +1111,7 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
           cause: "ZaimGenreテーブルがありません。",
           command: null,
           instruction: null,
+          recovery: false,
           advice: null,
           steps: [
             { text: "（サブPC）マイグレーションを流す", command: "pnpm prisma migrate deploy" },
@@ -1143,6 +1144,7 @@ describe("ManualStepGuideDialog のつまずきの報告", () => {
           cause: "情報が足りず原因を特定できません。",
           command: null,
           instruction: null,
+          recovery: false,
           advice: null,
           steps: [],
         },

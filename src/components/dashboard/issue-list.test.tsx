@@ -389,6 +389,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     firstSeenAt: "2026-08-18T00:00:00Z",
     lastReportedAt: "2026-08-18T00:00:00Z",

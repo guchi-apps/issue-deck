@@ -672,6 +672,22 @@ model DispatchJob {
   // **組み立てるのは人だけで、実行体が状況から本文を決めて自動送信する経路は作らない**
   // （docs/multi-agent/gates.md）。画面のプリセットも、押すのは人という点は変わらない。
   instruction        String?           @db.Text
+  // その追加指示が「停滞からの復旧」か（#2886。`kind`が`INSTRUCTION`のときだけ意味がある）。
+  //
+  // **本文は`src/lib/dispatch/session-stall.ts`が持つ固定文面のどれか**で、受け口
+  // （`POST /api/dispatch/session-recovery`）がそれを確かめてから立てる。ここが立っていると
+  // 2つのことが変わる。
+  //
+  // - **pollerが許可する状態イベントに`working`を足す**（`Stop|working`）。APIエラーで
+  //   中断したセッションは`Stop`が飛ばないまま`working`で止まるため、既定のままでは
+  //   いちばん困る原因に対してだけ送信が毎回見送られる（自動再開・#1971と同じ理由で広げる。
+  //   `permission_prompt`はここでも許可しない）
+  // - **`succeeded`の報告を受けた時点で`00.check-user`と理由ラベルを外す**。送出は非同期で
+  //   見送られることがあり、積んだ時点で外すと「何も届いていないのに札だけ消える」
+  //
+  // **古いpollerはこの項目を読まない。** その場合は従来どおり`Stop`だけが許可され、
+  // APIエラーの復旧は「セッションが作業中のため送りませんでした」として見送られる（札は残る）。
+  recovery           Boolean           @default(false)
   // 手作業アシスタントから代行実行するコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
   //
   // **入るのはサーバーが手作業Issueの本文から抽出し直したものだけ。** 画面から届いた文字列は
@@ -1115,6 +1131,22 @@ model DispatchSession {
   step       String?
   stepAt     DateTime?
   stepSeenAt DateTime?
+
+  // 中断・停滞したまま止まっていると引き上げたときの原因と時刻（#2886）。
+  //
+  // **`POST /api/dispatch/sessions/interrupted`が書く**（#1971・#2655・#2844で足した引き上げは、
+  // それまでIssueコメントとラベルにしか残らず、画面はセッションが停滞していることを知らなかった）。
+  // 値は`SessionInterruptedReason`（`api_error`・`tool_call_stall`・`classifier_blocked`）で、
+  // 理由コード・ステップと同じく**画面に出す文言はissue-deck側**に置く。
+  //
+  // **解除は書き戻さない。** 「まだ停滞しているか」は`activityAt`・`stepSeenAt`が
+  // `interruptedAt`より新しいかで決まり（`session-stall.ts`）、セッションが動き出せば
+  // フックの報告が自然に追い越す。解除の受け口を別に作ると、それが飛ばなかったときに
+  // 「復旧済みなのに停滞パネルが出たまま」が残る。
+  //
+  // **セッション1本ぶんの記録。** 同じ名前で立ち上がり直した行では捨てる（`isRevivedSession`）
+  interruptedReason String?
+  interruptedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

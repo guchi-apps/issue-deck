@@ -61,6 +61,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     message: null,
     tmuxSessionName: null,
     instruction: null,
+    recovery: false,
     command: null,
     resolvedCommand: null,
     manualStepLine: null,
