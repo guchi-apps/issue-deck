@@ -92,6 +92,10 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
   行に出すのは「重いものが何件あるか」だけ
 - バッジの見た目は`code-review-result-badges.tsx`に1つだけ置き、詳細のパネルも同じものを使う。
   片方に書くと、同じ「重大」が場所によって違う色で出る
+- **重要度の隣に指摘の対応状況を出す**（#2868。`CodeReviewProgressBadge`）。件数だけでは
+  「その指摘を起案し終えたのか」が行から読めないため、`未起票 6件`／`対応 2/6`＋バー／
+  `対応済み 2/2`の3通りで進み具合を出す。色は前提条件の進み具合（`manual-step-prerequisites.tsx`）
+  と同じ使い分け（完了=emerald・進行中=amber・未着手=border）
 
 ```text
 一覧（CodeReviewビュー・IssueList）
@@ -99,11 +103,28 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
   → GET /api/issues/code-review-reports?issues=owner/repo%23370,...
         プロセス内キャッシュ（code-review-report-cache.ts）にあればGitHubへ行かない
         無ければコメントを取り、summarizeCodeReviewComments で要約だけ返す
+        要約には指摘の見出しも入る（本文は入らない）——対応状況の引き当てキー
+  → 対応状況は一覧（IssueList）が手元のIssueから数える
+        summarizeCodeReviewFindingProgress（引き当て先は絞り込み前の全Issue）
 ```
 
 **要約の判定はIssue詳細と同じ関数**（`findLatestCodeReviewReport`・`isCodeReviewPending`）を
 通す。一覧と詳細で別の判定を書くと、行では「レビュー中」なのに開くと結果が出ている、という
 食い違いが起きる。
+
+**対応状況（#2868）の判定は「同じリポジトリに、指摘の見出しと完全一致するタイトルのIssueが
+あるか」**で、詳細パネルの「#123 として起票済み」（`buildCodeReviewFindingIssueIndex`）と同じ規則を
+使う。closeされていれば「対応済み」で、closeの理由（`not planned`＝見送り）は区別しない。
+**タイトルを書き換えたIssueや、起票せず直接直した指摘は「未起票」のまま**で、正はGitHub側の
+Issue——ここは表示のための当て推量。
+
+**数えるのはサーバーではなく一覧（`IssueList`）で、引き当て先は絞り込み前の全Issue**
+（`codeReviewFindingIssues`。母集団を渡す理由は`prerequisiteReadiness`と同じで、この一覧には
+レビューIssueしか並ばない）。**サーバーで数えると、起票・closeしても行が古いまま残る**——
+一覧が要約を取り直す合図はレビューIssueのコメント件数の変化だけで、指摘から起票したIssueの
+作成・closeでは動かないため、いちばん効いてほしい「まとめてIssueを作成した直後」に効かない。
+そのぶん**要約には指摘の見出しを載せる**（本文は載せない）。`allIssues`はclose済みも含む全件
+（`getIssuesForUser`は状態で絞らない）なので、一覧の自動更新がそのまま行の数字に出る。
 
 **取得はレビューIssueの数だけGitHubを叩く。** ポーリングはせず、`Issue.commentCount`
 （webhookで更新される）が変わらない間はキャッシュから返す。結果が返るとコメントが1件増えるので、

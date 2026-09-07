@@ -292,11 +292,27 @@ export function isCodeReviewPending(comments: readonly Pick<IssueComment, "body"
 export type CodeReviewSummaryState = "reported" | "pending" | "missing";
 
 /**
+ * 指摘の対応状況（#2868）。**「重大n・中n・軽微n」だけでは、その指摘を起案し終えたのか、
+ * まだ手つかずなのかが行から読めない**ため、件数と一緒に進み具合を出すための数字。
+ *
+ * 数え方は`summarizeCodeReviewFindingProgress`を参照（起票済みかどうかの判定は
+ * `buildCodeReviewFindingIssueIndex`と同じ規則）。
+ */
+export type CodeReviewFindingProgress = {
+  /** 指摘の総数 */
+  total: number;
+  /** うち、Issueとして起票済みのもの（closeされたものも含む） */
+  created: number;
+  /** うち、起票したIssueがcloseされているもの（＝対応済み） */
+  resolved: number;
+};
+
+/**
  * レビュー1件を一覧の行に出すための要約（#2855）。
  *
- * **指摘の本文は持たせない。** 行に出すのは「重いものが何件あるか」だけで、中身を読むのは
- * 今までどおりIssue詳細の`CodeReviewPanel`。ここに本文まで載せると、一覧を開くたびに
- * レビュー全文が画面へ運ばれる。
+ * **指摘の本文は持たせない。** 行に出すのは「重いものが何件あるか」「どこまで片付いたか」だけで、
+ * 中身を読むのは今までどおりIssue詳細の`CodeReviewPanel`。ここに本文まで載せると、一覧を
+ * 開くたびにレビュー全文が画面へ運ばれる。
  */
 export type CodeReviewSummary = {
   state: CodeReviewSummaryState;
@@ -304,6 +320,17 @@ export type CodeReviewSummary = {
   counts: Record<CodeReviewSeverity, number>;
   /** 指摘の総数。`reported`かつ0なら「指摘なし」 */
   findingCount: number;
+  /**
+   * 指摘の見出し（結果コメントに並んでいる順）。**行に文字としては出さない。**
+   * 対応状況（#2868）を数えるための引き当てキーで、画面側が
+   * `summarizeCodeReviewFindingProgress`へ渡す。
+   *
+   * **本文ではなく見出しだけを運ぶ**のは、対応状況が動くのが「指摘から起票したIssue」の
+   * 作成・closeで、レビューIssueのコメント件数は変わらないため。数え上げをサーバーへ置くと、
+   * 一覧は取り直す合図を持たず、いちばん効いてほしい「まとめてIssueを作成した直後」に
+   * 古い数字が残る。手元のIssue（`allIssues`）で数えれば、起票・closeがそのまま行に出る。
+   */
+  findingTitles: string[];
 };
 
 /**
@@ -322,12 +349,14 @@ export function summarizeCodeReviewComments(
       state: "reported",
       counts: countCodeReviewFindings(report.findings),
       findingCount: report.findings.length,
+      findingTitles: report.findings.map((finding) => finding.title),
     };
   }
   return {
     state: isCodeReviewPending(comments) ? "pending" : "missing",
     counts: { high: 0, medium: 0, low: 0 },
     findingCount: 0,
+    findingTitles: [],
   };
 }
 
@@ -371,12 +400,75 @@ export function buildCodeReviewFindingIssueIndex(
   repositoryFullName: string,
 ): Map<string, number> {
   const index = new Map<string, number>();
+  for (const issue of buildCodeReviewFindingIssueRowIndex(issues, repositoryFullName).values()) {
+    index.set(issue.title, issue.number);
+  }
+  return index;
+}
+
+/**
+ * 上の索引の中身（Issueの行そのもの）を引く版。**起票済みかどうかの規則を1か所に保つため**に
+ * 分けてある（#2868）。対応状況（`summarizeCodeReviewFindingProgress`）はIssueのstateまで要る。
+ */
+function buildCodeReviewFindingIssueRowIndex<
+  T extends Pick<Issue, "repositoryFullName" | "title" | "number">,
+>(issues: readonly T[], repositoryFullName: string): Map<string, T> {
+  const index = new Map<string, T>();
   for (const issue of issues) {
     if (issue.repositoryFullName !== repositoryFullName) continue;
     const known = index.get(issue.title);
-    if (known === undefined || issue.number < known) index.set(issue.title, issue.number);
+    if (!known || issue.number < known.number) index.set(issue.title, issue);
   }
   return index;
+}
+
+/**
+ * 指摘の対応状況を数える（#2868）。指摘が1件も無ければ`null`。
+ *
+ * **「起票済み」は同じリポジトリに見出しと完全一致するタイトルのIssueがあるか**で見る
+ * （詳細パネルの「#123 として起票済み」と同じ規則）。**「対応済み」はそのIssueがcloseされているか**で、
+ * closeの理由（`not planned`＝見送り）は区別しない——読み終えて盤面から下ろした、という意味では同じ。
+ *
+ * ここも`buildCodeReviewFindingIssueIndex`と同じく**表示のための当て推量**で、正はGitHub側のIssue。
+ * 見出しを書き換えたIssueや、起票せず直接直した指摘は「未起票」のまま数える。
+ *
+ * **数えるのは画面側**（一覧の行）で、渡す`issues`は絞り込み前の全Issue。close済みも含めて
+ * 手元にあり（`getIssuesForUser`は状態で絞らない）、起票・closeが一覧の自動更新でそのまま反映される。
+ */
+export function summarizeCodeReviewFindingProgress(params: {
+  /** 指摘の見出し（`CodeReviewSummary.findingTitles`） */
+  findingTitles: readonly string[];
+  /** 引き当て先のIssue。レビュー対象リポジトリのぶんが入っていればよい */
+  issues: readonly Pick<Issue, "repositoryFullName" | "title" | "number" | "state">[];
+  /** レビュー対象＝指摘の起票先のリポジトリ */
+  repositoryFullName: string;
+}): CodeReviewFindingProgress | null {
+  if (params.findingTitles.length === 0) return null;
+
+  const index = buildCodeReviewFindingIssueRowIndex(params.issues, params.repositoryFullName);
+  let created = 0;
+  let resolved = 0;
+  // 同じ見出しの指摘が2件返ることがあるため、見出しではなく指摘の件数で数える
+  for (const title of params.findingTitles) {
+    const issue = index.get(title);
+    if (!issue) continue;
+    created++;
+    if (issue.state === "closed") resolved++;
+  }
+  return { total: params.findingTitles.length, created, resolved };
+}
+
+/** 対応状況の内訳を1行にする（#2868）。行のチップのツールチップ・読み上げに使う */
+export function describeCodeReviewFindingProgress(progress: CodeReviewFindingProgress): string {
+  const parts: string[] = [];
+  if (progress.resolved > 0) parts.push(`対応済み${progress.resolved}件`);
+  if (progress.created - progress.resolved > 0) {
+    parts.push(`起票済み${progress.created - progress.resolved}件`);
+  }
+  if (progress.total - progress.created > 0) {
+    parts.push(`未起票${progress.total - progress.created}件`);
+  }
+  return `指摘${progress.total}件：${parts.join("・")}`;
 }
 
 /**

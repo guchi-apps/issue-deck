@@ -219,6 +219,7 @@ export function MobileRepoIssuesScreen({
       issues={displayedIssues}
       navCounts={navCounts}
       prerequisiteReadiness={prerequisiteReadiness}
+      codeReviewFindingIssues={issues}
       selectedIssueId={selectedIssueId}
       view={view}
       filters={{ state, labels, assignee, sort }}
