@@ -17,3 +17,12 @@ export function getSimpleStepLabel(stepName: string | null): string | null {
   if (stepName === null) return null;
   return SIMPLE_STEP_LABELS[stepName] ?? null;
 }
+
+/**
+ * GitHub Actionsの実装ステップ（Claude Codeがコードを書いている段）か（#2867）。
+ * 一覧の進捗バーで、実装の中の位置を「実装」のマスへ進めるのに使う。サブPCの
+ * セッションと違って作業の内訳は報告されないため、これ以上細かくは分けられない。
+ */
+export function isImplementationRunStep(stepName: string | null): boolean {
+  return stepName === "Claude Code（実装・PR作成）";
+}

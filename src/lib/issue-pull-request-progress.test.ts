@@ -7,6 +7,7 @@ import {
   ciStateFromPullRequestCiStatus,
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
+  resolvePullRequestPosition,
   selectProgressPullRequest,
   type IssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
@@ -210,5 +211,44 @@ describe("resolveIssuePullRequestProgress", () => {
       pullRequest({ number: 12, ciState: "pending", mergeJudgement: judgement({ state: "unknown", aiReview: "none" }) }),
     ]);
     expect(progress).toMatchObject({ pullRequestNumber: 12, label: "CI実行中" });
+  });
+});
+
+describe("resolvePullRequestPosition（#2867）", () => {
+  it("マージの段が来ていれば「マージ待ち」、それまでは「CI・レビュー」", () => {
+    // CI成功・レビュー済み・判定済み → マージだけが残っている
+    expect(resolvePullRequestPosition(buildIssuePullRequestProgress(pullRequest()))).toBe("merge");
+    expect(
+      resolvePullRequestPosition(buildIssuePullRequestProgress(pullRequest({ merged: true }))),
+    ).toBe("merge");
+    expect(
+      resolvePullRequestPosition(
+        buildIssuePullRequestProgress(pullRequest({ ciState: "pending" })),
+      ),
+    ).toBe("checks");
+    expect(
+      resolvePullRequestPosition(
+        buildIssuePullRequestProgress(
+          pullRequest({ mergeJudgement: judgement({ state: "pending", aiReview: "pending" }) }),
+        ),
+      ),
+    ).toBe("checks");
+  });
+
+  it("レビューのcheck-runが後から現れても、判定が動いている間は「CI・レビュー」のまま（分母で割らない）", () => {
+    const before = buildIssuePullRequestProgress(
+      pullRequest({ mergeJudgement: judgement({ state: "pending", aiReview: "none" }) }),
+    );
+    const after = buildIssuePullRequestProgress(
+      pullRequest({ mergeJudgement: judgement({ state: "pending", aiReview: "pending" }) }),
+    );
+    expect(before.steps).toHaveLength(3);
+    expect(after.steps).toHaveLength(4);
+    expect(resolvePullRequestPosition(before)).toBe("checks");
+    expect(resolvePullRequestPosition(after)).toBe("checks");
+  });
+
+  it("内訳が無ければ最初のマス", () => {
+    expect(resolvePullRequestPosition(null)).toBe("checks");
   });
 });
