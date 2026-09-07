@@ -172,9 +172,9 @@ describe("findEphemeralRangeLocalPortBands", () => {
 });
 
 describe("countRemainingLocalPortBases", () => {
-  it("実物の対応表の残り枠は飛び地の合計（28000〜31000と61000〜64000）", () => {
+  it("実物の対応表の残り枠は飛び地の合計（29000〜31000と61000〜64000）", () => {
     const conf = readFileSync(join(process.cwd(), LOCAL_PORT_BAND_CONF_PATH), "utf8");
-    expect(countRemainingLocalPortBases(parseLocalPortBands(conf))).toBe(8);
+    expect(countRemainingLocalPortBases(parseLocalPortBands(conf))).toBe(7);
   });
 
   it("配れる帯が無ければ0", () => {
