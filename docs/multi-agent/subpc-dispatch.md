@@ -1908,27 +1908,6 @@ issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](gener
 信頼確認に当たりやすく、フックが1つも飛ばないまま止まる**ので、この経路が効かないと止まっている
 こと自体に気づけない。
 
-## スクリーンショットの可否も申告する（#1268）
-
-`24.screenshot-required`は「PR作成前にスクリーンショットを撮って承認を得る」ラベルだが、
-**Playwrightのブラウザ本体が入っていないホストでは実行できない。** 無人実行では依存の追加を
-その場で確認する相手がいない（CLAUDE.md）ため、選ばせると必ず止まる。
-
-そこでpollerが申告に`screenshotCapable`を載せ、**撮れないホストを選んでいるときはその
-オプションを理由付きで無効化する**（`resolveScreenshotRejection`）。「実行できないリポジトリを
-ディスパッチ前に弾く」のと同じ考え方で、押す前に理由を出す。
-
-判定は`~/.cache/ms-playwright`（`PLAYWRIGHT_BROWSERS_PATH`があればそちら）にブラウザ本体が
-あるかで見る。リポジトリごとの`node_modules`ではなくここを見るのは、**ブラウザ本体の置き場が
-共通で、どのリポジトリが入れたかに依存しない**ため。
-
-**`null`（申告していない）と`false`（撮れない）は区別する。** 古いpollerが動いているホストでは
-`null`になり、そのときは塞がない。判定材料が無いことを理由に選択肢を消すと、実際には撮れる
-ホストで使えなくなる。
-
-**既にラベルが付いているIssueでは、撮れないホストでもチェックを外せる**ようにしてある
-（塞ぐのは新たに付ける操作だけ）。
-
 ## 同時実行数の上限
 
 `AppSetting.dispatchConcurrency`（既定**3**・範囲1〜8）。**定数で埋め込まない**という決めごと
@@ -2142,9 +2121,9 @@ issue-deckへ問い合わせる経路も無い（通知は起動先が落ちて�
 - **サブPCを選んだときは`@claude`コメントを投稿しない。** 無人実行と同じ入口を踏ませると、
   `11.local`が付くまでの隙間で二重起動になりうるうえ、Issueには「実装を開始してください」と
   残るのに動くのはサブPC、という食い違いが生まれる。
-- **オプションのラベルは実行先によらず起動前に付ける。** `21.plan-required`・
-  `24.screenshot-required`はサブPC側のランチャーが読むため、積んだ後では間に合わない
-  （ジョブは最大ポーリング間隔ぶん後に取られる）。
+- **オプションのラベルは実行先によらず起動前に付ける。** `21.plan-required`等は
+  サブPC側のランチャーが読むため、積んだ後では間に合わない（ジョブは最大ポーリング間隔ぶん後に
+  取られる）。
 - 積んだ後の状態（順番待ち・起動中・失敗）は従来どおり本文の`StartLocalSessionButton`が出す。
   ダイアログは閉じてしまうため、そちらを消すと押した結果を見る場所が無くなる。
 
@@ -2477,7 +2456,7 @@ DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降は�
   `25.artifact-required`が付いているIssueは、積む時点（ダイアログ・API）と起動する時点（夜のあいだに
   付いたもの）の両方で弾く。判定は**Issueの実ラベル**で、ダイアログのチェックの状態ではない
   （`applyOptionLabels`は足すだけで、外しても残るため）。`22.merge-confirm-required`（朝に自分の目で
-  通す札）と`24.screenshot-required`（セッションだけで完了できる）は積める
+  通す札）は積める
 - **深夜に鳴らさない。** 計画の投稿は`00.check-user`＋`01.check-plan`を付け、確認待ちのPushは
   待ちがあれば待ち時間ゼロで送る。夜間実行で起動したIssueについては翌朝7:00（`NIGHTLY_RUN_MORNING_HOUR`）
   まで送らない（`decideCheckUserPush`の`holdUntil`）。朝7:00に届く通知が、そのまま「手で対応が
@@ -2524,7 +2503,7 @@ DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降は�
 | `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`の起動ジョブ・横断質問のみ。#1541） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（スクリーンショットの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 | `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |

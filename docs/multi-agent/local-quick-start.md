@@ -1481,8 +1481,9 @@ pnpm db:seed:dev
 - `CI_LOGIN_BYPASS_SECRET`が空なら生成して`.env.local`へ書き込む。**書き込まれた場合は開発サーバーを
   起こし直す**（`next dev`は起動時にしか`.env.local`を読まない）。
 - 起こし直すと、ログイン画面に「開発用ダミーユーザーでログイン」ボタンが出る。Supabase Authを経由せず、
-  ダミーデータに紐づくバイパス用ユーザー（`ci-screenshot-bot`）で入る。仕組みはCIのスクリーンショット撮影と
-  同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
+  ダミーデータに紐づくバイパス用ユーザー（`ci-screenshot-bot`。無人実行のCIログインバイパス用に
+  導入された名残の識別子で、スクリーンショット撮影機能自体は廃止済み・#2883）で入る。仕組みは
+  CIの無人実行と同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
 - 接続先がローカル（`localhost`/`127.0.0.1`）でなければ投入せず中止する。既存行を書き換える処理を含むため。
 
 **自動実行（#1869・#1882）の見た目はシードだけでは出ない**（#2119）。`db:seed:dev`が入れるのは
@@ -1557,8 +1558,7 @@ SHA-256（`<64桁>.html`）の名前で書き、同じ名前を`storedFilename`�
 
 **subpcにGUIは無く、SupabaseのOAuth（GitHub/Google）は外部サイトでの同意を必ず経由する。**
 エージェントはログインを完了できないので、画面検証は上の「開発用ダミーユーザーでログイン」から
-入る。ブラウザを開かなくても、Cookieを持ち回れば`curl`だけでログイン後の画面まで取得できる
-（Playwrightは`24.screenshot-required`のときだけでよい）。
+入る。ブラウザを開かなくても、Cookieを持ち回れば`curl`だけでログイン後の画面まで取得できる。
 
 ```bash
 # 未ログインの挙動（保護ページはログイン画面へ戻る）
