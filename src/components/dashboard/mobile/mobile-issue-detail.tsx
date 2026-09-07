@@ -1008,6 +1008,9 @@ export function MobileIssueDetail({
           </div>
         )}
 
+        {/* アーティファクト（#2154・#2860）。PC版と同じく計画パネルのすぐ上に置く（#2190） */}
+        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+
         {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
         {planRequest && (
@@ -1022,9 +1025,6 @@ export function MobileIssueDetail({
             />
           </div>
         )}
-
-        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く（#2190） */}
-        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
         {showStartDialog && (
           <StartImplementationDialog
