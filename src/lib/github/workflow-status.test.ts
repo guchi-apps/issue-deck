@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allocateSegmentWidths,
   canCreateFollowupFromComment,
   getWorkflowStepIndex,
   hasActiveWorkflowStep,
+  resolveProgressSegments,
   WORKFLOW_STEPS,
 } from "@/lib/github/workflow-status";
 
@@ -74,5 +76,121 @@ describe("canCreateFollowupFromComment", () => {
     expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Develop" })).toBe(true);
     expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Release" })).toBe(true);
     expect(canCreateFollowupFromComment({ state: "open", projectStatus: "Done" })).toBe(true);
+  });
+});
+
+describe("resolveProgressSegments（#2867）", () => {
+  const states = (result: ReturnType<typeof resolveProgressSegments>) =>
+    result?.segments.map((segment) => `${segment.key}:${segment.state}`);
+
+  it("いまの段より前のマスは済み、後のマスはまだ。段に1マスならそれがいま", () => {
+    const planning = resolveProgressSegments({ projectStatus: "Planning" });
+    expect(states(planning)).toEqual([
+      "planning:current",
+      "exploring:pending",
+      "editing:pending",
+      "verifying:pending",
+      "pr-checks:pending",
+      "pr-merge:pending",
+      "develop:pending",
+      "release:pending",
+      "done:pending",
+    ]);
+    expect(planning?.ratio).toBe(0);
+
+    const develop = resolveProgressSegments({ projectStatus: "Develop" });
+    expect(states(develop)?.slice(5, 8)).toEqual(["pr-merge:done", "develop:current", "release:pending"]);
+    // 計画12＋調査16＋実装20＋検証14＋CI8＋マージ4
+    expect(develop?.ratio).toBe(74);
+  });
+
+  it("実装の中は位置で決める。位置が無ければ最初のマス（調査）", () => {
+    expect(states(resolveProgressSegments({ projectStatus: "Implementation" }))?.slice(0, 4)).toEqual([
+      "planning:done",
+      "exploring:current",
+      "editing:pending",
+      "verifying:pending",
+    ]);
+    const verifying = resolveProgressSegments(
+      { projectStatus: "Implementation" },
+      { implementation: "verifying" },
+    );
+    expect(states(verifying)?.slice(0, 5)).toEqual([
+      "planning:done",
+      "exploring:done",
+      "editing:done",
+      "verifying:current",
+      "pr-checks:pending",
+    ]);
+    expect(verifying?.ratio).toBe(48);
+  });
+
+  it("developへマージの中はPRの位置で決める", () => {
+    const merge = resolveProgressSegments({ projectStatus: "Develop PR" }, { developPr: "merge" });
+    expect(states(merge)?.slice(4, 7)).toEqual(["pr-checks:done", "pr-merge:current", "develop:pending"]);
+    // 実装の位置を渡していても、段が進んでいれば実装のマスは全部済み
+    const checks = resolveProgressSegments(
+      { projectStatus: "Develop PR" },
+      { implementation: "exploring", developPr: "checks" },
+    );
+    expect(states(checks)?.slice(1, 5)).toEqual([
+      "exploring:done",
+      "editing:done",
+      "verifying:done",
+      "pr-checks:current",
+    ]);
+  });
+
+  it("終端（Done）は全部済みにして目安100%", () => {
+    const done = resolveProgressSegments({ projectStatus: "Done" });
+    expect(done?.segments.every((segment) => segment.state === "done")).toBe(true);
+    expect(done?.ratio).toBe(100);
+  });
+
+  it("段の境目に印を付ける（6段のまとまりをすき間で示す）", () => {
+    const result = resolveProgressSegments({ projectStatus: "Planning" });
+    expect(result?.segments.map((segment) => segment.stageEnd)).toEqual([
+      true, // 計画｜調査
+      false,
+      false,
+      true, // 検証・仕上げ｜CI・レビュー
+      false,
+      true, // マージ待ち｜develop反映済
+      true,
+      true,
+      false, // 末尾
+    ]);
+  });
+
+  it("未着手・Statusなし・未知の名前ではnull（バー自体を出さない）", () => {
+    expect(resolveProgressSegments({ projectStatus: "Ready" })).toBeNull();
+    expect(resolveProgressSegments({ projectStatus: null })).toBeNull();
+    expect(resolveProgressSegments({ projectStatus: "Blocked" })).toBeNull();
+  });
+});
+
+describe("allocateSegmentWidths（#2867）", () => {
+  it("重み比で整数pxに配り、合計は必ず使える幅に一致する", () => {
+    const widths = allocateSegmentWidths([12, 16, 20, 14, 8, 4, 12, 10, 4], 27, 2);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(27);
+    expect(widths.every((width) => width >= 2)).toBe(true);
+    // 重みの順序が幅の順序として保たれる（同じ重みは同じ幅）
+    expect(widths[2]).toBeGreaterThan(widths[0]);
+    expect(widths[0]).toBe(widths[6]);
+    expect(widths[5]).toBe(widths[8]);
+  });
+
+  it("下限で膨らんだぶんは大きいマスから削って幅を超えない", () => {
+    // 0.42/0.42/0.42/13.6 → 下限で3/3/3/13＝22 → 大きいマスから8px削る
+    const widths = allocateSegmentWidths([1, 1, 1, 97], 14, 3);
+    expect(widths).toEqual([3, 3, 3, 5]);
+    // 下限×マス数が幅を超えるときは下限を守る（合計は超える。呼び出し側の寸法の誤り）
+    expect(allocateSegmentWidths([1, 1, 1, 97], 10, 3)).toEqual([3, 3, 3, 3]);
+  });
+
+  it("端数は切り捨てた余りの大きい順に1pxずつ足す", () => {
+    // 10:5 で 8px → 5.33:2.67 → 5:2 に余り1を端数の大きい2番目へ
+    expect(allocateSegmentWidths([10, 5], 8, 1)).toEqual([5, 3]);
+    expect(allocateSegmentWidths([], 8, 1)).toEqual([]);
   });
 });

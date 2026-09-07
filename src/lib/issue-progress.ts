@@ -236,3 +236,57 @@ export function getProgressStatusIndex(key: ProgressStatusKey): number {
 export function hasActiveProgress(issue: ProgressSource): boolean {
   return getProgressStatusDef(resolveProgressStatus(issue)).active;
 }
+
+/** 一覧の進捗バーのマス（#2867）。`status`はそのマスが属する段 */
+export type ProgressSegmentKey =
+  | "planning"
+  | "exploring"
+  | "editing"
+  | "verifying"
+  | "pr-checks"
+  | "pr-merge"
+  | "develop"
+  | "release"
+  | "done";
+
+export type ProgressSegmentDef = {
+  key: ProgressSegmentKey;
+  /** 属する段（`ADVANCED_PROGRESS_STATUSES`のキー） */
+  status: ProgressStatusKey;
+  /** ツールチップ・テスト用の短い名前 */
+  label: string;
+  /**
+   * そのマスにかかる時間の目安（合計100）。バーのマス幅と、ツールチップの「目安 xx%」の
+   * 両方をここから出す。
+   */
+  weight: number;
+};
+
+/**
+ * Issue一覧の進捗バーの9マス（#2867）。
+ *
+ * 6段（`ADVANCED_PROGRESS_STATUSES`）を等分すると、長く待つ計画・実装のあいだに動くのが
+ * 1〜2マスで、develop反映後の短い区間に同じ3マスが割り当てられていた。**実装の中を
+ * 調査／実装／検証・仕上げ、developへマージの中をCI・レビュー／マージ待ちに分け**、
+ * 各マスがだいたい同じくらいの時間になるようにする。属する段は`status`で持ち、
+ * `WorkflowStatusSteps`（Issue詳細の6段）との対応はそこから引く。
+ *
+ * **重みは「作業が動いている時間」の目安で、人の操作を待つ時間は含めない。** 直近12本の
+ * PR（issue-2837〜2866）の実測は、計画（開始→承認）7〜24分・実装（承認→PR作成）12〜25分・
+ * developへマージ（PR作成→マージ）4〜9分・本番へマージ（リリースPR→mainマージ）3〜17分。
+ * develop反映済（マージ→リリース）だけは16分〜4.6時間と長いが、人がリリースを押すまでの
+ * 待ちで作業は何も動いていないため、実測どおりに半分近くを割り当てると**作業が全部終わった
+ * 行のバーが何時間も40%で止まって見える**（このIssueが直したい状態そのもの）。
+ * Status遷移の時刻はDBに無く、この値は実測から手で置いた固定値。変えるならここだけ。
+ */
+export const PROGRESS_SEGMENTS: readonly ProgressSegmentDef[] = [
+  { key: "planning", status: "planning", label: "計画", weight: 12 },
+  { key: "exploring", status: "implementation", label: "調査", weight: 16 },
+  { key: "editing", status: "implementation", label: "実装", weight: 20 },
+  { key: "verifying", status: "implementation", label: "検証・仕上げ", weight: 14 },
+  { key: "pr-checks", status: "develop-pr", label: "CI・レビュー", weight: 8 },
+  { key: "pr-merge", status: "develop-pr", label: "マージ待ち", weight: 4 },
+  { key: "develop", status: "develop", label: "develop反映済", weight: 12 },
+  { key: "release", status: "release", label: "本番へマージ", weight: 10 },
+  { key: "done", status: "done", label: "本番反映済", weight: 4 },
+];

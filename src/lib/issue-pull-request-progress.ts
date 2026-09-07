@@ -235,3 +235,22 @@ export function resolveIssuePullRequestProgress(
   const target = selectProgressPullRequest(pullRequests);
   return target === null ? null : buildIssuePullRequestProgress(target);
 }
+
+/**
+ * developへマージ（`Develop PR`）の中でどこまで来ているか（#2867）。一覧の進捗バーの
+ * CI・レビュー／マージ待ちの2マスを内訳から決める。
+ *
+ * **見るのは「マージ」の段が`current`か`done`かだけ。** `buildIssuePullRequestProgress`は
+ * 判定・CI・レビューのどれかが動いている間はマージを`pending`に保つので、レビューの
+ * check-runが後から現れても「マージ待ち」から戻らない（済んだ段の数を分母で割ると、
+ * `ai-review`の段が後から増えた時点で下がる）。内訳が無い（PRがまだ無い・取れていない）
+ * ときは最初のマス。
+ */
+export type PullRequestPosition = "checks" | "merge";
+
+export function resolvePullRequestPosition(
+  progress: IssuePullRequestProgress | null,
+): PullRequestPosition {
+  const merge = progress?.steps.find((step) => step.key === "merge");
+  return merge && (merge.state === "current" || merge.state === "done") ? "merge" : "checks";
+}

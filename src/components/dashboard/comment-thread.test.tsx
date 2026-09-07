@@ -184,6 +184,36 @@ describe("CommentThread 左右の吹き出し", () => {
     expect(screen.getByText("実装ボット")).not.toBeNull();
   });
 
+  // 計画レビュー（G1）の指摘に応えたコメント。実装セッションが本人名義で投稿するため、
+  // 専用マーカーが無かった間は右寄せの本人の発言として並んでいた（#2864）
+  it("plan-reviserマーカー付きのコメントはレビュー反映ボットとして左寄せになる", () => {
+    render(
+      <CommentThread
+        comments={[
+          makeComment({
+            author: { login: "m-guchi" },
+            body: "計画レビューの指摘を反映しました\n\n<!-- issue-deck-agent:plan-reviser -->",
+          }),
+        ]}
+        currentUserLogin="m-guchi"
+        repositoryFullName="m-guchi/issue-deck"
+        issueSuggestions={[]}
+        onUpdate={async () => true}
+        onDelete={async () => true}
+        commentSummary={commentSummary}
+      />,
+    );
+    const row = screen
+      .getByText("計画レビューの指摘を反映しました")
+      .closest("li")
+      ?.querySelector(":scope > div");
+    expect(row?.className).not.toContain("flex-row-reverse");
+    expect(screen.getByText("レビュー反映ボット")).not.toBeNull();
+    // 計画ボット（琥珀）・レビューボット（藍）と並んだときに見分けられること
+    const bubble = screen.getByText("計画レビューの指摘を反映しました").closest("div.rounded-lg");
+    expect(bubble?.className).toContain("border-pink-500/30");
+  });
+
   it("currentUserLoginと一致し書き出しが絵文字なだけのコメントは右寄せのままになる", () => {
     render(
       <CommentThread

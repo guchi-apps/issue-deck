@@ -472,3 +472,37 @@ export function shortIssueSessionLabel(
   if (!notice) return null;
   return now && notice.since ? `${notice.label}(${notice.since})` : notice.label;
 }
+
+/**
+ * 実装（`Implementation`）の中でセッションがどこまで来ているか（#2867）。一覧の進捗バーの
+ * 調査／実装／検証・仕上げの3マスを、サブPCのフックが報告する作業（`step`。#2705）から決める。
+ *
+ * **鮮度（`isSessionStepFresh`）は見ない。** 入力待ちで止まっていても、終了していても、
+ * 最後に報告した作業がそのセッションの到達点。**「いまの作業」の位置なので、テスト後に
+ * 直しへ戻れば1マス戻る**——最高到達点はDBに無く、記録するにはマイグレーションが要るため
+ * 今回は持たない（添える字「実装中(3分)」も同じ性質）。
+ *
+ * 分け方は、ファイルを書き換えていれば「実装」、Lint・型チェック・テスト・ビルド・コミット・
+ * push・PR作成なら「検証・仕上げ」、それ以外（読んでいる・計画を書いている・Issueへ記録して
+ * いる・アーティファクトを公開している・分類できないコマンド）は「調査」。
+ */
+export type ImplementationPosition = "exploring" | "editing" | "verifying";
+
+export function resolveImplementationPosition(
+  session: Pick<DispatchSessionView, "step"> | null,
+): ImplementationPosition {
+  switch (session?.step) {
+    case "EDITING":
+      return "editing";
+    case "LINTING":
+    case "TYPECHECKING":
+    case "TESTING":
+    case "BUILDING":
+    case "COMMITTING":
+    case "PUSHING":
+    case "PR":
+      return "verifying";
+    default:
+      return "exploring";
+  }
+}

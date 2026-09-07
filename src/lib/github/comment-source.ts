@@ -1,5 +1,6 @@
 import {
   BellRing,
+  ClipboardCheck,
   ClipboardList,
   GitFork,
   GitMerge,
@@ -73,6 +74,11 @@ export function extractCommentSourceId(
  * `gh`がユーザー本人のトークンで動くためlogin名が人間と同じになり、マーカーが無いと画面上
  * ボットの発言と本人の発言を区別できないため（#1346）、計画は`planner`、レビュー・統合は
  * `reviewer`を明示的に付ける（`scripts/prompts/`の各プロンプト）。
+ *
+ * `plan-reviser`は計画レビュー（G1）の指摘に応えたコメント専用（#2864）。書いているのは実装
+ * セッションだが、**`planner`は使えない**——`planning-phase.ts`の`findLatestPlanCommentBody()`が
+ * 反映コメントを最新の計画本文として拾ってしまう。`implementer`だと画面に「実装ボット」と出て
+ * 何のコメントか分からないため、独立した役割にしている。
  */
 export const COMMENT_AGENT_MARKER_ROLES = [
   "planner",
@@ -80,6 +86,7 @@ export const COMMENT_AGENT_MARKER_ROLES = [
   "splitter",
   "guide",
   "reviewer",
+  "plan-reviser",
 ] as const;
 
 export type CommentAgentMarkerRole = (typeof COMMENT_AGENT_MARKER_ROLES)[number];
@@ -155,6 +162,7 @@ export type CommentAgentRole =
   | "responder"
   | "guide"
   | "reviewer"
+  | "plan-reviser"
   | "conflict-resolver"
   | "ci-fixer"
   | "notifier"
@@ -282,6 +290,13 @@ export const COMMENT_AGENT_PROFILES: Record<CommentAgentRole, CommentAgentProfil
     avatarColor: "#6366f1",
     textClassName: "text-indigo-600 dark:text-indigo-400",
     bubbleClassName: "border-indigo-500/30 bg-indigo-500/5",
+  },
+  "plan-reviser": {
+    label: "レビュー反映ボット",
+    icon: ClipboardCheck,
+    avatarColor: "#ec4899",
+    textClassName: "text-pink-600 dark:text-pink-400",
+    bubbleClassName: "border-pink-500/30 bg-pink-500/5",
   },
   "conflict-resolver": {
     label: "コンフリクト解消ボット",
