@@ -230,6 +230,14 @@ type StartImplementationDialogProps = {
   issue: Issue;
   onIssueUpdated: (issue: Issue) => void;
   onCommentCreated: (comment: IssueComment) => void;
+  /**
+   * 「今夜の夜間実行」へ積めたときに親へ知らせる（#2866）。
+   *
+   * 積んでもラベル・ジョブ・セッションは付かないため、この合図が無いと画面の目印
+   * （一覧のチップ・詳細の注釈）は`useNightlyRun`の次の取り直しまで出ない。押したのに
+   * 何も変わらないように見えるので、積んだ端末だけは即時に取り直す。省略可。
+   */
+  onNightlyRunQueued?: () => void;
   /** トリガーボタンを自前で描画したい場合に指定する（Issue詳細画面での利用を想定） */
   renderTrigger?: (isSubmitting: boolean) => ReactNode;
   /** 呼び出し側で開閉状態を制御したい場合に指定する（Issue作成画面での利用を想定） */
@@ -309,6 +317,7 @@ export function StartImplementationDialog({
   issue,
   onIssueUpdated,
   onCommentCreated,
+  onNightlyRunQueued,
   renderTrigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
@@ -894,6 +903,7 @@ export function StartImplementationDialog({
         setStartedTarget(null);
         return;
       }
+      onNightlyRunQueued?.();
       handleOpenChange(false);
     } catch (err) {
       setNightlyError(err instanceof Error ? err.message : String(err));

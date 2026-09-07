@@ -12,6 +12,7 @@ import {
   QA_ANSWER_MARKER,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
+import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -220,7 +221,10 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
   );
 }
 
-function renderMobileDetail(issue: Issue) {
+function renderMobileDetail(
+  issue: Issue,
+  overrides: Partial<ComponentProps<typeof MobileIssueDetail>> = {},
+) {
   return render(
     <MobileIssueDetail
       issue={issue}
@@ -240,6 +244,7 @@ function renderMobileDetail(issue: Issue) {
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
+      {...overrides}
     />,
   );
 }
@@ -816,5 +821,71 @@ describe("⋯メニューの「いまは実施しない」（#2458）", () => {
     openSnoozeMenu();
     fireEvent.click(screen.getByRole("button", { name: /明日まで/ }));
     expect(screen.queryByRole("menuitem", { name: "編集" })).toBeNull();
+  });
+});
+
+// 「今夜の夜間実行」に積まれているIssueの注釈（#2866）
+describe("夜間実行に積まれているIssueの注釈", () => {
+  function marksFor(enabled: boolean) {
+    return selectNightlyRunQueuedMarks({
+      settings: { enabled, startHour: 1 },
+      window: {
+        nightKey: "2026-09-07",
+        startsAt: "2026-09-06T16:00:00.000Z",
+        endsAt: "2026-09-06T19:00:00.000Z",
+        isOpen: false,
+        nextStartsAt: "2026-09-07T16:00:00.000Z",
+      },
+      queued: [
+        {
+          id: "entry-1",
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1,
+          issueId: "issue-1",
+          issueTitle: null,
+          targetHost: "subpc",
+          agent: "claude",
+          claudeModel: null,
+          optionLabels: [],
+          status: "QUEUED",
+          nightKey: null,
+          createdAt: "2026-09-07T10:00:00.000Z",
+          resolvedAt: null,
+          outcome: null,
+        },
+      ],
+      results: null,
+    });
+  }
+
+  it("開始時間帯を出し、その場で予定を取り消せる", () => {
+    const onCancelNightlyRun = vi.fn();
+    renderDetail(buildIssue(), {
+      nightlyRunQueued: marksFor(true),
+      onCancelNightlyRun,
+      onOpenNightlyRun: vi.fn(),
+    });
+
+    expect(screen.getByText(/今夜の夜間実行に積まれています（01:00〜04:00に順に起動）/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "予定を取り消す" }));
+    expect(onCancelNightlyRun).toHaveBeenCalledWith("entry-1");
+  });
+
+  it("夜間実行がOFFなら、このままでは起動しないことを言う", () => {
+    renderDetail(buildIssue(), { nightlyRunQueued: marksFor(false) });
+
+    expect(screen.getByText(/夜間実行はOFFです/)).toBeTruthy();
+  });
+
+  it("積まれていなければ何も出さない", () => {
+    renderDetail(buildIssue());
+
+    expect(screen.queryByText(/夜間実行に積まれています/)).toBeNull();
+  });
+
+  it("スマホの詳細でも同じ注釈を出す", () => {
+    renderMobileDetail(buildIssue(), { nightlyRunQueued: marksFor(true) });
+
+    expect(screen.getByText(/今夜の夜間実行に積まれています/)).toBeTruthy();
   });
 });

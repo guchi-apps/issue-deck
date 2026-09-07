@@ -26,6 +26,7 @@ import { CodeReviewResultBadges } from "@/components/dashboard/code-review-resul
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { NightlyRunChip } from "@/components/dashboard/nightly-run-marks";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import {
@@ -93,6 +94,10 @@ import {
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
 import { getLabelBadgeStyle } from "@/lib/label-color";
+import {
+  findNightlyRunQueuedMark,
+  type NightlyRunQueuedMap,
+} from "@/lib/nightly-run";
 import {
   formatQuestionListCount,
   isQaAnswerWaiting,
@@ -183,6 +188,13 @@ type IssueListProps = {
    * 保留中の行も今までどおり並び、時計ボタンも出さない。省略時は保留の仕組みごと出さない。
    */
   snoozes?: SnoozeMap;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866。`selectNightlyRunQueuedMarks`）。
+   *
+   * 積んでもラベル・ジョブ・セッションは付かないため、この表が無いと積んだ行はまだ何も指示して
+   * いない行と見分けが付かない。省略時はチップを出さない。
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
   /** 保留にする・期限を付け替える（`useSnoozes`の`snooze`）。省略時は時計ボタンを出さない */
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   /** 保留を解除する（`useSnoozes`の`unsnooze`）。省略時は解除ボタンを出さない */
@@ -447,6 +459,7 @@ export function IssueList({
   snoozedPinned,
   prerequisiteReadiness,
   snoozes,
+  nightlyRunQueued,
   onSnooze,
   onUnsnooze,
   checkUserRunningIssueIds,
@@ -831,6 +844,9 @@ export function IssueList({
       : null;
     // 一覧に出すレビュー結果（#2855）。取れていないIssueはundefinedで、行にバッジが出ないだけ
     const codeReviewSummary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
+    // 「今夜の夜間実行」に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
+    // ので、この引き当て表だけが手がかりになる。渡されていない画面ではnullでチップも出ない
+    const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -887,6 +903,11 @@ export function IssueList({
             <span className="flex min-w-0 items-center gap-1.5">
               <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />
               <ManualStepReadinessIcon readiness={prerequisiteReadiness?.get(issue.id)} />
+              {/* 「今夜の夜間実行」に積まれている行（#2866）。**進捗バーの左に置く**——
+                  積んだだけの行は進捗もセッションも無く、この右クラスタで唯一の手がかりに
+                  なる。バーの右（保留ボタン・アバターの側）は押せるものの並びなので、
+                  押せない目印はバーより外へ出さない */}
+              {nightlyRunMark && <NightlyRunChip mark={nightlyRunMark} />}
               <WorkflowStepBadge
                 labels={issue.labels}
                 projectStatus={issue.projectStatus}

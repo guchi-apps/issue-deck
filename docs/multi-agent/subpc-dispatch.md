@@ -2490,10 +2490,24 @@ DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降は�
   設定ダイアログの「実行設定」には載せない（あちらは保存を押すまで効かない値の区分）
 - **起動先はサブPCのみ。** GitHub Actionsは、botが投稿した`@claude`コメントが権限チェックを通るか
   未確認のため今回は見送った（必要なら別Issue）
+- **積まれていることはIssue一覧・Issue詳細でも分かる**（#2866）。積んでも**ラベル・ジョブ・
+  セッションのどれも付かない**ため、積んだIssueはそれまで、まだ何も指示していないIssueと同じ姿で
+  並んでいた。一覧の行は進捗バーの左に「今夜 01:00」のチップ、Issue詳細は「実装を開始」と同じ
+  ヘッダーの中に注釈（起動する時間帯・「夜間実行を見る」・「予定を取り消す」）を出す。
+  **目印を出すのは`QUEUED`の予定だけ**で、夜に起動した後は従来どおり進捗バー・セッションの表示が
+  受け持つ（[code-map.md](../code-map.md)「同じ状態を2か所で言わせない」）。夜間実行がOFFのときは
+  積んであっても走らないので、チップの字を「夜間実行OFF」に変え、色も確認待ちと同じamberにする
+  ——人が設定を戻すまで進まない状態で、この行のamberの意味（人の対応待ち）と一致する。
+  材料は左メニューの件数と同じ`useNightlyRun`の結果（`selectNightlyRunQueuedMarks`）で、
+  取得口は増やしていない。**引き当ての鍵は`Issue.id`**で、`owner/repo#番号`の鍵を3つ目として
+  作らない（`NightlyRunEntry.activeKey`と`issue-queue-state.ts`に既にある）。積んだ直後に目印を
+  出すため、「実装を開始」と「作成+実装開始」の成功時に`useNightlyRun`を取り直す（別ウィンドウ
+  `/issues/new`から積んだぶんだけは、デッキ側の次の取り直しで出る）
 
 | 場所 | 役割 |
 |---|---|
-| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類の純関数。`now`は引数で受ける |
+| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類・画面の目印（#2866）の純関数。`now`は引数で受ける |
+| `src/components/dashboard/nightly-run-marks.tsx` | 一覧のチップ・詳細の注釈（#2866）。PC・スマホで共有する |
 | `src/lib/nightly-run-db.ts` | 設定の読み出し・Pushの保留対象（DBだけ。GitHub Appの認証を引きずらない） |
 | `src/lib/nightly-run-launch.ts` | 予定をジョブへ変換する（claimから呼ぶ） |
 | `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ） |
