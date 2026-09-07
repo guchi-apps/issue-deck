@@ -2165,6 +2165,7 @@ export function IssueDeckShell({
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                 // 前提条件がそろっているかを行に出す（#1763・#2003）
                 prerequisiteReadiness={prerequisiteReadiness}
+                codeReviewFindingIssues={allIssues}
                 // 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
                 // 取得は左メニューの件数のために既に走っているものへ相乗りする
                 pullRequests={crossRepositoryPullRequests}

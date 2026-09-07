@@ -233,6 +233,7 @@ export function MobileIssuesScreen({
       fetchedAt={fetchedAt}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
+      codeReviewFindingIssues={issues}
       checkUserRunningIssueIds={checkUserRunningIssueIds}
       pullRequests={pullRequests}
       onStartManualStepGuide={onStartManualStepGuide}

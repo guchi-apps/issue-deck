@@ -77,7 +77,11 @@ import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { isApprovalPending } from "@/lib/github/approval-labels";
-import { formatCodeReviewListCount } from "@/lib/github/code-review";
+import {
+  formatCodeReviewListCount,
+  summarizeCodeReviewFindingProgress,
+  type CodeReviewFindingProgress,
+} from "@/lib/github/code-review";
 import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
@@ -181,6 +185,16 @@ type IssueListProps = {
    * 「状態不明＝実行できる」になる。省略した場合はアイコンを出さない。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /**
+   * 指摘の対応状況（#2868）を数えるための引き当て先。**絞り込み前の全Issueを渡す。**
+   *
+   * 「コードレビュー」ビューに並ぶのはレビューIssueだけで、指摘から起票したIssueは
+   * この一覧の`issues`に入っていない。母集団が要る理由は`prerequisiteReadiness`と同じ。
+   * **サーバーで数えない**のは、対応状況が動くのが起票・closeで、レビューIssueの
+   * コメント件数（＝要約を取り直す合図）が変わらないため。手元のIssueで数えれば、
+   * 一覧の自動更新がそのまま行の数字へ出る。省略した場合は対応状況を出さない。
+   */
+  codeReviewFindingIssues?: Issue[];
   /**
    * ユーザーが「いまは実施しない」として伏せた項目の引き当て表（#2398。`lib/snooze.ts`）。
    *
@@ -458,6 +472,7 @@ export function IssueList({
   pinnedCount = 0,
   snoozedPinned,
   prerequisiteReadiness,
+  codeReviewFindingIssues,
   snoozes,
   nightlyRunQueued,
   onSnooze,
@@ -652,6 +667,26 @@ export function IssueList({
    * どちらの一覧もこのコンポーネントを通るため（`useIssuesWorkflowRunning`と同じ理由）。
    */
   const codeReviewSummaries = useCodeReviewReports(issues, view === "code-review");
+  /**
+   * 指摘の対応状況（#2868）。**要約に入っているのは指摘の見出しだけ**で、それが
+   * Issueになったか・closeされたかは手元のIssueから数える（`summarizeCodeReviewFindingProgress`）。
+   * 起票済みの判定はIssue詳細のパネル（「#123 として起票済み」）と同じ規則。
+   */
+  const codeReviewProgress = useMemo(() => {
+    const progressByKey = new Map<string, CodeReviewFindingProgress>();
+    if (!codeReviewFindingIssues || codeReviewSummaries.size === 0) return progressByKey;
+    for (const issue of issues) {
+      const summary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
+      if (!summary) continue;
+      const progress = summarizeCodeReviewFindingProgress({
+        findingTitles: summary.findingTitles,
+        issues: codeReviewFindingIssues,
+        repositoryFullName: issue.repositoryFullName,
+      });
+      if (progress) progressByKey.set(codeReviewSummaryKey(issue), progress);
+    }
+    return progressByKey;
+  }, [issues, codeReviewSummaries, codeReviewFindingIssues]);
   // 押した行を即座にハイライトするための楽観表示（#1597）。選択の正はURLクエリ
   // （`?issue=`）で、その更新はReactのトランジション＝低優先度の更新として入るため、
   // 右カラム（IssueDetail・プロパティパネル）の再描画が終わるまでハイライトが動かない。
@@ -982,7 +1017,12 @@ export function IssueList({
               />
               {/* レビューの結果（#2855）。**ラベルより前に置く**——この行を開くかどうかは
                   重い指摘が何件あるかで決めるもので、レビューIssueに付くラベルはそれより後 */}
-              {codeReviewSummary && <CodeReviewResultBadges summary={codeReviewSummary} />}
+              {codeReviewSummary && (
+                <CodeReviewResultBadges
+                  summary={codeReviewSummary}
+                  progress={codeReviewProgress.get(codeReviewSummaryKey(issue))}
+                />
+              )}
               {listCardLabels(issue.labels).map((label) => (
                 <span
                   key={label.name}

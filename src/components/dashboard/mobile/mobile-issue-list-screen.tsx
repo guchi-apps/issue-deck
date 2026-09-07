@@ -108,6 +108,8 @@ type MobileIssueListScreenProps = {
    * ヘッダーの件数と一覧の行のアイコンに使う。母集団は絞り込み前の全Issue。
    */
   prerequisiteReadiness?: ManualStepReadinessMap;
+  /** 指摘の対応状況（#2868）の引き当て先。`IssueList`へそのまま渡す */
+  codeReviewFindingIssues?: Issue[];
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
    * ヘッダーの件数の内訳（`2件・実行中1件`）にだけ使い、行は今までどおり並べる。
@@ -172,6 +174,7 @@ export function MobileIssueListScreen({
   nightlyRunQueued,
   snoozedPinned,
   prerequisiteReadiness,
+  codeReviewFindingIssues,
   checkUserRunningIssueIds,
   pullRequests,
   onStartManualStepGuide,
@@ -365,6 +368,7 @@ export function MobileIssueListScreen({
         nightlyRunQueued={nightlyRunQueued}
         snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
+        codeReviewFindingIssues={codeReviewFindingIssues}
         checkUserRunningIssueIds={checkUserRunningIssueIds}
         pullRequests={pullRequests}
         onStartManualStepGuide={onStartManualStepGuide}

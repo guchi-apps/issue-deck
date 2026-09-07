@@ -1039,6 +1039,18 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
     }),
   ];
 
+  // 指摘から起票したIssue。一覧（レビューIssueだけ）には並ばないので、母集団として別に渡す
+  const findingIssues = [
+    ...reviews,
+    makeIssue({ number: 40, title: "起票済みの指摘" }),
+    makeIssue({
+      number: 41,
+      title: "close済みの指摘",
+      state: "closed",
+      closedAt: "2026-09-05T00:00:00Z",
+    }),
+  ];
+
   function reviewRow(number: number): HTMLElement {
     const issue = reviews.find((item) => item.number === number)!;
     return screen.getByText(`#${issue.number} ${issue.title}`).closest("li")!;
@@ -1052,15 +1064,42 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
           state: "reported",
           counts: { high: 1, medium: 2, low: 0 },
           findingCount: 3,
+          findingTitles: ["起票済みの指摘", "close済みの指摘", "まだIssueにしていない指摘"],
+        } satisfies CodeReviewSummary,
+      ],
+    ]);
+    renderList({
+      issues: reviews,
+      view: "code-review",
+      showHeader: true,
+      codeReviewFindingIssues: findingIssues,
+    });
+
+    expect(reviewRow(30).textContent).toContain("重大 1");
+    expect(reviewRow(30).textContent).toContain("中 2");
+    // 指摘から起票したIssueの対応状況（#2868）も同じ行に出す
+    expect(reviewRow(30).textContent).toContain("対応 1/3");
+    // 取れていない行はバッジを出さないだけで、行そのものは並ぶ
+    expect(reviewRow(31).textContent).not.toContain("重大");
+  });
+
+  it("母集団（絞り込み前の全Issue）が渡らなければ対応状況は出さない", () => {
+    codeReviewSummaries = new Map([
+      [
+        "guchi-apps/issue-deck#30",
+        {
+          state: "reported",
+          counts: { high: 1, medium: 0, low: 0 },
+          findingCount: 1,
+          findingTitles: ["起票済みの指摘"],
         } satisfies CodeReviewSummary,
       ],
     ]);
     renderList({ issues: reviews, view: "code-review", showHeader: true });
 
     expect(reviewRow(30).textContent).toContain("重大 1");
-    expect(reviewRow(30).textContent).toContain("中 2");
-    // 取れていない行はバッジを出さないだけで、行そのものは並ぶ
-    expect(reviewRow(31).textContent).not.toContain("重大");
+    expect(reviewRow(30).textContent).not.toContain("対応");
+    expect(reviewRow(30).textContent).not.toContain("未起票");
   });
 
   it("結果がまだ返っていない行は「レビュー中」", () => {
@@ -1071,6 +1110,7 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
           state: "pending",
           counts: { high: 0, medium: 0, low: 0 },
           findingCount: 0,
+          findingTitles: [],
         } satisfies CodeReviewSummary,
       ],
     ]);
