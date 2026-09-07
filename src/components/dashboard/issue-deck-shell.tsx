@@ -92,6 +92,7 @@ import {
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
+import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
   isMergeCheckUser,
@@ -1217,6 +1218,17 @@ export function IssueDeckShell({
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
   const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。**取得口は増やさず、
+   * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
+   *
+   * 夜間実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
+   * 最大5分遅れる。積んだ端末では「実装を開始」の成功時に`refresh`を呼んで即時に出す。
+   */
+  const nightlyRunQueued = useMemo(
+    () => selectNightlyRunQueuedMarks(nightlyRun.state),
+    [nightlyRun.state],
+  );
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -1780,6 +1792,8 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  nightlyRunQueued={nightlyRunQueued}
                   snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
                   snoozedMergePendingEntries={snoozedMergePendingEntries}
                   /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
@@ -1868,6 +1882,8 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  nightlyRunQueued={nightlyRunQueued}
                 />
               )}
 
@@ -1892,6 +1908,11 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  nightlyRunQueued={nightlyRunQueued}
+                  onOpenNightlyRun={selectNightlyRun}
+                  onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
+                  onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                 />
@@ -2137,6 +2158,8 @@ export function IssueDeckShell({
                 snoozes={snoozes}
                 onSnooze={snooze}
                 onUnsnooze={unsnooze}
+                /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                nightlyRunQueued={nightlyRunQueued}
                 // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
                 fetchedAt={issuePolling.fetchedAt}
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
@@ -2191,6 +2214,11 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
+                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  nightlyRunQueued={nightlyRunQueued}
+                  onOpenNightlyRun={selectNightlyRunPane}
+                  onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
+                  onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                 />
@@ -2256,6 +2284,9 @@ export function IssueDeckShell({
           // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
           onCreated={registerCreatedIssue}
           onNavigateToIssue={selectIssue}
+          /* 「作成+実装開始」から今夜の予定へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
+             別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
+          onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}
         />
         <BulkCreateCodeReviewIssuesDialog

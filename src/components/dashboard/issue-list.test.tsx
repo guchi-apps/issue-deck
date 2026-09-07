@@ -6,6 +6,7 @@ import { IssueList } from "@/components/dashboard/issue-list";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
+import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
 import { buildSnoozeMap } from "@/lib/snooze";
 import type { CodeReviewSummary } from "@/lib/github/code-review";
 import type { Issue, IssueLabel } from "@/types/issue";
@@ -1123,5 +1124,58 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
     renderList({ issues: reviews, view: "code-review", showHeader: true });
 
     expect(screen.getByText("2件・未完了1件")).toBeTruthy();
+  });
+});
+
+describe("IssueListの夜間実行の目印（#2866）", () => {
+  function marksFor(enabled: boolean) {
+    return selectNightlyRunQueuedMarks({
+      settings: { enabled, startHour: 1 },
+      window: {
+        nightKey: "2026-09-07",
+        startsAt: "2026-09-06T16:00:00.000Z",
+        endsAt: "2026-09-06T19:00:00.000Z",
+        isOpen: false,
+        nextStartsAt: "2026-09-07T16:00:00.000Z",
+      },
+      queued: [
+        {
+          id: "e1",
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 2,
+          issueId: "2",
+          issueTitle: null,
+          targetHost: "subpc",
+          agent: "claude",
+          claudeModel: null,
+          optionLabels: [],
+          status: "QUEUED",
+          nightKey: null,
+          createdAt: "2026-09-07T10:00:00.000Z",
+          resolvedAt: null,
+          outcome: null,
+        },
+      ],
+      results: null,
+    });
+  }
+
+  it("積まれている行にだけチップを出す", () => {
+    renderList({ nightlyRunQueued: marksFor(true) });
+
+    expect(rowOf(2).textContent).toContain("今夜 01:00");
+    expect(rowOf(1).textContent).not.toContain("今夜");
+  });
+
+  it("夜間実行がOFFなら、止まっている対象の名前を出す", () => {
+    renderList({ nightlyRunQueued: marksFor(false) });
+
+    expect(rowOf(2).textContent).toContain("夜間実行OFF");
+  });
+
+  it("渡されていない画面では何も出さない", () => {
+    renderList();
+
+    expect(rowOf(2).textContent).not.toContain("今夜");
   });
 });

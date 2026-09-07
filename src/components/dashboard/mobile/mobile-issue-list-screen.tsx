@@ -42,6 +42,7 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
+import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -96,6 +97,10 @@ type MobileIssueListScreenProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
   /** 保留中で`pinned`から外したもの（#2398）。`IssueList`へそのまま渡す */
   snoozedPinned?: { count: number; entries: SnoozeEntry[]; section: ReactNode };
   /**
@@ -166,6 +171,7 @@ export function MobileIssueListScreen({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
   snoozedPinned,
   prerequisiteReadiness,
   codeReviewFindingIssues,
@@ -359,6 +365,7 @@ export function MobileIssueListScreen({
         snoozes={snoozes}
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
+        nightlyRunQueued={nightlyRunQueued}
         snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
         codeReviewFindingIssues={codeReviewFindingIssues}

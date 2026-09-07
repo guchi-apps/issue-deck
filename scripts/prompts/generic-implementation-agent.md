@@ -201,12 +201,16 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 `gh issue comment`で投稿する本文の**末尾に、必ず**次のいずれかの不可視マーカーを付けてください。
 
 - 計画コメント: `<!-- issue-deck-agent:planner -->`
+- **計画レビューの指摘への応答**（反映した・反論した、の記録）: `<!-- issue-deck-agent:plan-reviser -->`
 - それ以外（実装完了の報告・判断の記録・中断の報告など）: `<!-- issue-deck-agent:implementer -->`
 
 このセッションの`gh`はユーザー本人のトークンで動くため、GitHub上の投稿者はあなたではなく
 ユーザー本人になります。マーカーが無いと、issue-deckの画面であなたの報告がユーザー自身の発言
-（右寄せの吹き出し）として表示されます。マーカーを付けると「計画ボット」「実装ボット」として
-左側の吹き出しで表示されます。
+（右寄せの吹き出し）として表示されます。マーカーを付けると「計画ボット」「実装ボット」
+「レビュー反映ボット」として左側の吹き出しで表示されます。
+
+計画レビューへの応答に`planner`を使わないでください。issue-deckは計画コメントを`planner`
+マーカーで探すため、応答コメントが**最新の計画本文として扱われます**。
 
 ## ユーザー自身にコマンドを実行してもらう場合
 
@@ -450,7 +454,29 @@ gh issue create --repo {{REPOSITORY}} --title "[手作業] <実行する場所>:
 
 ## 実装完了直前にやること
 
-PR作成の前後で改めて `gh issue view {{ISSUE_NUMBER}} --repo {{REPOSITORY}} --comments` を実行し、作業中に新規コメントが追加されていないか確認してください。追加の指示や懸念があれば、実装内容やPRに反映してください。
+Issueに`21.plan-required`が付いている場合、**`gh pr create`の直前に計画レビュー
+（`<!-- supervisor:plan-review -->`マーカー付きのコメント）が届いているかを必ず確かめてください**。
+develop向けPRは作成から**約90秒**で自動マージされるため、出してから気付いても同じPRには入れられず、
+指摘の反映だけの2本目のPRになります。次のコマンドで、届いていれば本文が出て、届いていなければ
+最大6分待ちます。
+
+```bash
+for i in $(seq 1 12); do
+  body=$(gh issue view {{ISSUE_NUMBER}} --repo {{REPOSITORY}} --json comments \
+    --jq '[.comments[] | select(.body | contains("<!-- supervisor:plan-review -->")) | .body] | last // ""')
+  [ -n "$body" ] && { printf '%s\n' "$body"; break; }
+  sleep 30
+done
+```
+
+**指摘は根拠付きの提案であって命令ではありません。** 示されたファイル・行を自分で確かめ、正しければ
+反映し、誤っていれば反論してください。どちらの場合も判断と理由を
+`gh issue comment {{ISSUE_NUMBER}} --repo {{REPOSITORY}}`でIssueへ残します
+（末尾に`<!-- issue-deck-agent:plan-reviser -->`）。**待っても届かなければそのまま進んでかまいません**
+——計画レビューは積まれても見送られることがあり、Issueの側から「来ない」と「まだ来ていない」は
+区別できないためです。
+
+あわせて `gh issue view {{ISSUE_NUMBER}} --repo {{REPOSITORY}} --comments` を実行し、作業中に新規コメントが追加されていないか確認してください。追加の指示や懸念があれば、実装内容やPRに反映してください。
 
 ## 禁止事項
 
