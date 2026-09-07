@@ -14,6 +14,7 @@ import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { PostCreateNavigationDialog } from "@/components/dashboard/post-create-navigation-dialog";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +48,7 @@ import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
+import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
 import type { ClaudeLocalModel } from "@/lib/app-settings";
 import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
@@ -58,6 +60,11 @@ import { openIssueCreateWindow, type IssueCreateHandoff } from "@/lib/issue-crea
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
+import {
+  resolvePostCreateDestination,
+  shouldAskPostCreateDestination,
+  type PostCreateDestination,
+} from "@/lib/post-create-destination";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -258,6 +265,15 @@ type CreateIssueDialogProps = {
   bodyPrefix?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
+  /**
+   * 作ったIssueの詳細画面へ移動する（#2862）。**作成の直後に移動するかどうかはここで決めない。**
+   * 「次に開く画面」の選択（`PostCreateNavigationDialog`）で詳細が選ばれたときだけ呼ぶ。
+   *
+   * 渡さない呼び出し（別ウィンドウ`/issues/new`）では選択画面自体を出さない——あちらは
+   * もともと詳細へ移動せず（`broadcastIssueCreated`）、作成後はウィンドウを閉じるだけなので、
+   * 選ぶものが無い。
+   */
+  onNavigateToIssue?: (issue: Issue) => void;
   /** 出し方（#1728）。既定はダイアログ */
   presentation?: CreateIssuePresentation;
   /**
@@ -320,6 +336,7 @@ export function CreateIssueDialog({
   bodyPrefix,
   issues,
   onCreated,
+  onNavigateToIssue,
   presentation = "dialog",
   initialHandoff = null,
   cancelLabel,
@@ -396,6 +413,13 @@ export function CreateIssueDialog({
    * このダイアログ自体は閉じているので、そちらはDialogの外側に並べて描画する。
    */
   const [startTargetIssue, setStartTargetIssue] = useState<Issue | null>(null);
+  /**
+   * 「次に開く画面」を選ばせているIssue（#2862）。**入っている間だけ選択画面を出す。**
+   * `startTargetIssue`と同じく、表示するIssueと開閉状態を兼ねている。
+   */
+  const [postCreateIssue, setPostCreateIssue] = useState<Issue | null>(null);
+  const { setting: postCreateSetting, setSetting: setPostCreateSetting } =
+    usePostCreateDestination();
 
   const { labels, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -680,6 +704,26 @@ export function CreateIssueDialog({
     return runSuggestion();
   }
 
+  /**
+   * 作り終わった後の行き先を決める（#2862）。**作成したどの経路からも最後にここを通す。**
+   *
+   * 記憶した行き先があればそのまま進み、無ければ選択画面を出す。**別ウィンドウでは何もしない**
+   * ——あちらはもともと詳細へ移動せず、この時点でウィンドウ自体が閉じている。
+   */
+  function askOrApplyPostCreateDestination(issue: Issue) {
+    if (isWindow || !onNavigateToIssue) return;
+    if (shouldAskPostCreateDestination(postCreateSetting)) {
+      setPostCreateIssue(issue);
+      return;
+    }
+    applyPostCreateDestination(issue, resolvePostCreateDestination(postCreateSetting));
+  }
+
+  /** 行き先を実行する。「元の画面に戻る」は**何もしない**のが実装（画面はもう戻っている） */
+  function applyPostCreateDestination(issue: Issue, destination: PostCreateDestination) {
+    if (destination === "detail") onNavigateToIssue?.(issue);
+  }
+
   async function handleSubmit() {
     if (isQuestion) {
       await handleAskQuestion();
@@ -700,6 +744,7 @@ export function CreateIssueDialog({
       clearIssueDraft();
       onCreated(issue);
       onOpenChange(false);
+      askOrApplyPostCreateDestination(issue);
     }
   }
 
@@ -733,6 +778,9 @@ export function CreateIssueDialog({
     clearIssueDraft();
     onOpenChange(false);
     onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
+    // 質問もIssueを1件作る以上、行き先の扱いは作成と同じにする（#2862）。ここだけ必ず詳細へ
+    // 移動させると、記憶した行き先と食い違う
+    askOrApplyPostCreateDestination(issue);
   }
 
   /**
@@ -1171,10 +1219,18 @@ export function CreateIssueDialog({
           open
           onOpenChange={(nextOpen) => {
             if (nextOpen) return;
+            // 閉じる直前の値を取っておく（`setStartTargetIssue(null)`の後では読めない）。
+            // **キャンセルで閉じた場合も行き先は選ばせる**（#2862）——起動しなくてもIssueは
+            // 残っており、そのまま一覧へ戻りたいことも詳細を開きたいこともある
+            const created = startTargetIssue;
             setStartTargetIssue(null);
             // 別ウィンドウでは、実行先を選び終えた（または閉じた）時点でウィンドウごと閉じる
             // （#1728）。作り終わったフォームだけが残っても、そこからできることは無い
-            if (isWindow) onOpenChange(false);
+            if (isWindow) {
+              onOpenChange(false);
+              return;
+            }
+            if (created) askOrApplyPostCreateDestination(created);
           }}
           // ラベル・コメント数の変化は、作成時と同じ経路（onCreated）で呼び出し側へ渡す。
           // 既存分があれば更新されるため、同じIssueが二重に並ぶことはない
@@ -1204,6 +1260,19 @@ export function CreateIssueDialog({
           // 作成した直後なのでコメントも親子関係も無い。「取得していません」と書かせないよう空で渡す
           subIssueRelations={{ parent: null, children: [], childCount: 0 }}
           claudeLocalModel={claudeLocalModel}
+        />
+      )}
+      {/* 作り終わった後の行き先（#2862）。実行先の選択と同じく、作成フォームは閉じているので
+          Dialogの外側に並べて描画する */}
+      {postCreateIssue && (
+        <PostCreateNavigationDialog
+          issue={postCreateIssue}
+          onSelect={(destination, remember) => {
+            setPostCreateIssue(null);
+            if (remember) setPostCreateSetting(destination);
+            applyPostCreateDestination(postCreateIssue, destination);
+          }}
+          onDismiss={() => setPostCreateIssue(null)}
         />
       )}
     </>
