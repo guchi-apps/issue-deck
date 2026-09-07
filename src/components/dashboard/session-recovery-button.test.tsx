@@ -77,6 +77,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
     models: [],
     ...overrides,
   };
@@ -131,6 +133,7 @@ function makeJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     status: "QUEUED",
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,

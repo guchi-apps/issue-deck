@@ -4,6 +4,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
 import { escalateInterruptedSession } from "@/lib/dispatch/session-escalation";
 import { parseDispatchSessionName, parseRemoteControlUrl } from "@/lib/dispatch/session-state";
+import { recordDispatchSessionInterruption } from "@/lib/dispatch/sessions";
 
 /** コメントに載せる`detail`の上限。pollerが持つ固定の文言しか来ないので短くてよい */
 const MAX_DETAIL_LENGTH = 200;
@@ -70,6 +71,12 @@ export async function POST(request: NextRequest) {
     payload?.reason === "tool_call_stall" || payload?.reason === "classifier_blocked"
       ? payload.reason
       : "api_error";
+
+  // **画面が停滞を知るための記録**（#2886）。引き上げがIssueコメントとラベルにしか残らないと、
+  // 復旧文面はコメント本文の中のコードブロックのままで、送るには`tmux attach`かRemote Controlを
+  // 開くしかない。ここに残しておくとIssue詳細が停滞パネルを出し、固定文面を1クリックで送れる。
+  // **引き上げより先に書く**（コメントの投稿はGitHubのAPI越しで、失敗しても記録は残したい）
+  await recordDispatchSessionInterruption({ hostName, tmuxSessionName, reason });
 
   const escalated = await escalateInterruptedSession({
     repositoryFullName: target.repositoryFullName,

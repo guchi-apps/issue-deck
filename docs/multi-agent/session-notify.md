@@ -665,6 +665,44 @@ guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
 
+### 停滞からの復旧は画面から送れる（#2886）
+
+**引き上げ（`supervisor:session-interrupted`）はIssueコメントと`00.check-user`にしか残って
+いなかった。** 送るべき復旧文面はコメント本文のコードブロックとして書かれているだけで、
+それを送る導線が画面に無く、`tmux attach`かRemote Control（Claude Codeアプリ）を人が開く
+必要があった（guchi-apps/research-desk#118で実際に足止めされた）。
+
+引き上げの受け口（`POST /api/dispatch/sessions/interrupted`）が`DispatchSession`へ
+`interruptedReason`・`interruptedAt`を書き、Issue詳細が「セッションが停滞しています」パネル
+（`src/components/dashboard/session-stall-panel.tsx`）を出す。
+
+- **送るのは原因ごとの固定文面で、押すのは人**（文面の正は`src/lib/dispatch/session-stall.ts`）。
+  状況を読んで文面を組み立てる実行体はどこにも無い。[gates.md](gates.md)の例外2（追加指示）の
+  内側で、**違うのは定型文が原因ごとに決まっていることだけ**
+- **送出は既存の`INSTRUCTION`ジョブ**（#1012）。pollerの3段階プロトコルをそのまま通るので、
+  承認プロンプト・選択フォームの表示中は従来どおり見送られる
+- **受け口は`POST /api/dispatch/session-recovery`と分けてある。** ここだけが`00.check-user`を
+  外すため、**本文が固定文面のどれかであること**と**セッションが今も停滞していること**を
+  サーバー側で確かめ直す。任意の本文は従来どおり「追加指示を送る」で送る（そちらは印を外さない）
+- **ジョブに`recovery`を立てる。** 立っていると2つ変わる。
+  - **pollerが許可する状態イベントに`working`を足す**（`Stop|working`。poller v29以降）。
+    **APIエラーで中断したセッションは`Stop`が飛ばないまま`working`で止まる**ため、既定の`Stop`
+    だけでは「セッションが作業中のため送りませんでした」で毎回見送られ、いちばん困る原因に
+    対してだけボタンが効かない。`permission_prompt`はここでも許可しない
+  - **`00.check-user`を外すのは`succeeded`の報告が届いてから**（`POST /api/dispatch/report`）。
+    送出は非同期で見送られることがあり、積んだ時点で外すと**何も届いていないのに札だけ消え、
+    Push通知も一覧の印も無いまま放置される**
+- **古いpoller（v28以前）では`recovery`が読まれない。** APIエラーの復旧だけが見送られ、
+  その理由がジョブの`message`として画面に出る（札は残る）。マージ後は画面の
+  「更新して再起動」でサブPCのチェックアウトとpollerを更新する
+- **停滞かどうかは書き戻しではなく追い越しで判定する**（`describeSessionStall`）。
+  `activityAt`・`stepSeenAt`が`interruptedAt`より新しくなればパネルは消える。解除の受け口を
+  作ると、それが飛ばなかったときに「復旧済みなのにパネルが出たまま」が残る
+- **`classifier_blocked`だけは「これを送れば直る」文面が無い**（拒否そのものが妥当な挙動）。
+  並べるのは人が選ぶ続け方（別の手段へ振る／人が代わりに実行すると伝える）の2つ
+- 境界は`src/lib/dispatch/session-stall.test.ts`と
+  `src/components/dashboard/session-stall-panel.test.tsx`が固定している
+
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 
 **claude.aiのアーティファクトページはiframeに入らない。** `https://claude.ai/code/artifact/<id>`は

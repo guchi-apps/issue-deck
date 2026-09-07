@@ -22,6 +22,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     status: "QUEUED",
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,

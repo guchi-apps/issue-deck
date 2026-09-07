@@ -5,6 +5,7 @@ import {
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
+import type { SessionInterruptedReason } from "@/lib/dispatch/session-state";
 
 /**
  * 実装セッションの異常終了を人へ引き上げる（#1217）。
@@ -208,8 +209,11 @@ export async function escalateFailedSession(params: {
  * 引き上げの原因（#1971・#2655・#2844）。`api_error`はAPIエラーでturnが打ち切られたまま
  * `Stop`が飛ばない形、`tool_call_stall`はツール呼び出し風のテキストを出しただけで止まった形、
  * `classifier_blocked`はauto modeのクラシファイアにコマンドを拒否されたまま応答を終えた形。
+ *
+ * **定義は`session-state.ts`へ移した**（#2886）。このモジュールはPrismaとGitHub APIを
+ * 読み込むサーバー専用で、画面（停滞パネル）から同じ語彙を参照できなかった。
  */
-export type SessionInterruptedReason = "api_error" | "tool_call_stall" | "classifier_blocked";
+export type { SessionInterruptedReason };
 
 /**
  * セッションが中断・停滞して止まっていることをIssueへ知らせる本文（#1971・#2280・#2655・#2844）。
@@ -290,7 +294,10 @@ export function buildSessionInterruptedCommentBody(params: {
   }
   lines.push(
     "",
-    "続きは人が指示してください。端末から続けるか、",
+    "**続きはIssue Duckの画面から送れます**（#2886）。Issue詳細の「セッションが停滞しています」",
+    "パネルに、この原因用の固定文面を送るボタンが出ています。押すと`00.check-user`も外れます。",
+    "",
+    "画面から解けない場合は端末から続けるか、",
     "",
     "```bash",
     `tmux attach -t ${params.tmuxSessionName}`,
@@ -301,12 +308,74 @@ export function buildSessionInterruptedCommentBody(params: {
   }
   lines.push(
     "",
-    "セッションが動き出しても、この`00.check-user`は自動では外れません（人が続け方を決めたこと",
-    "自体が合図なので、画面の承認ボタンか`gh issue edit`で外してください）。",
+    "端末・Remote Controlから続けた場合、この`00.check-user`は自動では外れません（人が続け方を",
+    "決めたこと自体が合図なので、画面の承認ボタンか`gh issue edit`で外してください）。",
     "",
     SESSION_INTERRUPTED_MARKER,
   );
   return lines.join("\n");
+}
+
+/**
+ * 画面から復旧文面を送ったことをIssueへ残す本文（#2886）。
+ *
+ * **押した内容が残らないと、後から「なぜ動き出したのか」を辿れない。** 引き上げのコメントと
+ * 対になる記録で、`plan-decision`が承認・修正を残しているのと同じ立場。
+ *
+ * `posterMarker`を末尾に置くのも同じ理由（画面から押したのは人なので、その人の投稿として
+ * 表示させる）。**送った本文をそのまま載せる**——固定文面とはいえ、原因ごとに違うものが
+ * 送られるので、どれを送ったかが分からないと届いたかどうかも確かめられない。
+ */
+export function buildSessionRecoveryCommentBody(params: {
+  body: string;
+  posterMarker: string;
+}): string {
+  return [
+    "▶️ 停滞していたセッションへ、画面から復旧の文面を送りました。",
+    "",
+    "```text",
+    params.body,
+    "```",
+    "",
+    "届くまで最大1分ほどかかります。承認プロンプト・選択フォームが出ている間は送らずに見送られるため、",
+    "動き出さない場合はもう一度押すか、`tmux attach`・Remote Controlから続けてください。",
+    "",
+    params.posterMarker,
+  ].join("\n");
+}
+
+/**
+ * 画面から復旧文面を送ったので、引き上げのときに付けた`00.check-user`を理由ラベルごと外す
+ * （#2886）。
+ *
+ * **押したこと自体が「人が続け方を決めた」合図**なので、引き上げコメントが言っていた
+ * 「セッションが動き出してもこの`00.check-user`は自動では外れません」の条件はここで満たされる。
+ * 画面から答えた回は承認プロンプトが出ずフックの合図が飛ばないため、外さないと押したのに
+ * 「確認が必要です」の印が居座る（`resolveSessionPlanCheckUser`と同じ理由。#2341）。
+ *
+ * **失敗しても例外を投げない。** 復旧の指示はもうキューに入っておりセッションへ届くので、
+ * ここで失敗を返すと「効かなかった」と誤解して押し直すことになる。
+ */
+export async function resolveInterruptedSessionCheckUser(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<boolean> {
+  const parsed = parseRepositoryFullName(params.repositoryFullName);
+  if (!parsed) return false;
+
+  try {
+    const token = await resolveInstallationToken(params.repositoryFullName);
+    if (!token) return false;
+
+    await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token);
+    return true;
+  } catch (error) {
+    console.error(
+      `[dispatch] 停滞の確認待ちを解けませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+    return false;
+  }
 }
 
 /**

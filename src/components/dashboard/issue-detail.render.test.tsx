@@ -633,6 +633,8 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
     step: null,
     stepAt: null,
     stepSeenAt: null,
+    interruptedReason: null,
+    interruptedAt: null,
   };
 
   const checkUserIssue = () =>

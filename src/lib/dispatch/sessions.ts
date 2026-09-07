@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import {
   isRevivedSession,
   nextEscalatedState,
+  parseSessionInterruptedReason,
   parseSessionReapReason,
   parseSessionStep,
   resolveSessionState,
@@ -13,6 +14,7 @@ import {
   type DispatchSessionReport,
   type DispatchSessionState,
   type DispatchSessionView,
+  type SessionInterruptedReason,
 } from "@/lib/dispatch/session-state";
 import {
   escalateFailedSession,
@@ -37,6 +39,8 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
   // いま何をしているか（#2705）。**保存されているコードも読み直しで検証する**（畳む理由と同じで、
   // 列はStringなので古い版が書いた・知らないコードが残っていることがある）
   const step = parseSessionStep(session.step);
+  // 中断・停滞の引き上げ（#2886）。ステップと同じ理由で保存されているコードも読み直す
+  const interruptedReason = parseSessionInterruptedReason(session.interruptedReason);
   return {
     host: session.host,
     tmuxSessionName: session.tmuxSessionName,
@@ -67,6 +71,11 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     step,
     stepAt: step === null ? null : (session.stepAt?.toISOString() ?? null),
     stepSeenAt: step === null ? null : (session.stepSeenAt?.toISOString() ?? null),
+    // 中断・停滞の引き上げ（#2886）。**理由コードは読み直しで検証する**（ステップ・畳む理由と
+    // 同じで、列はStringなので新しい版が書いた・知らないコードが残っていることがある）。
+    // コードが読めなければ時刻も出さない——原因が分からないと停滞パネルは文面を選べない
+    interruptedReason,
+    interruptedAt: interruptedReason === null ? null : (session.interruptedAt?.toISOString() ?? null),
     // 実際に使っているモデル（#2723）の引き当ては`listDispatchSessions`が一括で行う
     // （タイトルの引き当てと同じ理由で、ここで引くとセッション1件ごとにクエリが増える）
     models: [],
@@ -110,6 +119,73 @@ export async function recordDispatchSessionActivity(params: {
     },
   });
   return { updated: result.count };
+}
+
+/**
+ * 中断・停滞したまま止まっていると引き上げたことを記録する（#2886）。
+ *
+ * **これまで引き上げはIssueコメントと`00.check-user`にしか残っていなかった**（#1971・#2655・
+ * #2844）。そのため画面はセッションが停滞していることを知らず、復旧文面がコメントの中の
+ * コードブロックとして書かれているだけで、送るにはRemote Controlか`tmux attach`が要った。
+ * ここに残しておくと、Issue詳細が停滞パネル（`session-stall.ts`）を出せる。
+ *
+ * **`ALIVE`の行だけへ書く。** 中断は「セッションは生きているのに進んでいない」状態で、
+ * 終わった行に書いても停滞パネルは出ない（出す相手＝送る先がいない）。
+ *
+ * **解除の受け口は作らない。** 動き出したかどうかは`activityAt`・`stepSeenAt`が
+ * `interruptedAt`を追い越したかで決まる（`describeSessionStall`）。
+ *
+ * **失敗しても例外を投げない。** 呼び出し元（`POST /api/dispatch/sessions/interrupted`）は
+ * Issueコメントとラベルを先に出しており、記録できなくても引き上げ自体は成立している。
+ */
+export async function recordDispatchSessionInterruption(params: {
+  hostName: string;
+  tmuxSessionName: string;
+  reason: SessionInterruptedReason;
+  now?: Date;
+}): Promise<{ updated: number }> {
+  const now = params.now ?? new Date();
+  try {
+    const result = await db.dispatchSession.updateMany({
+      where: {
+        host: params.hostName,
+        tmuxSessionName: params.tmuxSessionName,
+        state: "ALIVE",
+      },
+      data: { interruptedReason: params.reason, interruptedAt: now },
+    });
+    return { updated: result.count };
+  } catch (error) {
+    console.error(
+      `[dispatch] セッションの中断を記録できませんでした（${params.hostName}/${params.tmuxSessionName}）`,
+      error,
+    );
+    return { updated: 0 };
+  }
+}
+
+/**
+ * そのIssueを担当しているセッションを1件だけ引く（#2886）。
+ *
+ * **停滞パネルの受け口（`POST /api/dispatch/session-recovery`）が、押された内容を実行して
+ * よいかを確かめるために使う。** 画面が言ってきた「停滞している」をそのまま信じると、
+ * 停滞していないセッションへ固定文面を送りつつ`00.check-user`まで外せてしまう。
+ *
+ * 引くのは`enqueueSessionControlJob`と同じ形（ホストを問わず、最後に報告された1件）。
+ * **`models`は空のまま**で、停滞の判定には使わない。
+ */
+export async function findDispatchSessionForIssue(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<DispatchSessionView | null> {
+  const session = await db.dispatchSession.findFirst({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+    },
+    orderBy: { lastReportedAt: "desc" },
+  });
+  return session ? toSessionView(session) : null;
 }
 
 /**
@@ -314,6 +390,10 @@ export async function reportDispatchSessions(params: {
               // 「アプリで答える」も捨てる（#2822）。**セッション1本ぶんの設定**なので、
               // 起動し直した直後は既定（画面で受け取る）から始める
               answerInApp: false,
+              // 中断・停滞の引き上げも捨てる（#2886）。前のセッションで出ていた停滞パネルが、
+              // 起動し直した直後のセッションにそのまま出るのを防ぐ
+              interruptedReason: null,
+              interruptedAt: null,
             }
           : {}),
         // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**

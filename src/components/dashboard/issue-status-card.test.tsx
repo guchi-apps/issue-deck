@@ -94,6 +94,7 @@ function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     queuePriority: 0,
     message: null,
     instruction: null,
+    recovery: false,
     command: null,
     placeholderValues: null,
     resolvedCommand: null,
