@@ -538,14 +538,9 @@ export type DispatchHostView = {
   online: boolean;
   lastSeenAt: string;
   /**
-   * スクリーンショットを撮れるか（#1268）。**`null`は「申告していない」**（古いpoller）で、
-   * `false`（撮れない）とは区別する。判定材料が無いことを理由に選択肢を塞がないため。
-   */
-  screenshotCapable: boolean | null;
-  /**
    * 走っているセッションを画面から操作できるか（#1332）。**`null`（未申告＝古いpoller）は
-   * 「できない」として扱う**。`screenshotCapable`とは逆で、判定材料が無いまま制御ジョブを
-   * 配ると、古いpollerは`kind`を読まないため起動ジョブとして解釈してしまう。
+   * 「できない」として扱う**。判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を
+   * 読まないため起動ジョブとして解釈してしまう。
    */
   sessionControlCapable: boolean | null;
   /**
@@ -1653,7 +1648,7 @@ export function canCodeReviewRepository(
  *   前回の終了の痕跡で、`start-issue.sh`は畳んで作り直す。ここで止めると**二度と起動できなくなる**
  * - **所属ホストが応答している場合だけ止める。** pollerが落ちている間、行は`ALIVE`のまま
  *   古びる（`GONE`へ倒すのは「報告に含まれなかった」ときだけ）。判定材料が無いことと
- *   「動いている」ことは違う（`resolveScreenshotRejection`と同じ立場）
+ *   「動いている」ことは違う
  * - **ホストは問わない。** ホストAで動いているIssueをホストBへ積むのは、各pollerが自分の
  *   tmuxしか見ないため向こう側では防げない
  *
@@ -2245,23 +2240,6 @@ export function resolveManualStepHost(
   hosts: readonly DispatchHostView[],
 ): DispatchHostView | null {
   return hosts.find((host) => host.online && host.manualStepCapable === true) ?? hosts[0] ?? null;
-}
-
-/**
- * そのホストで`24.screenshot-required`を選べるか（#1268）。
- *
- * 選べない理由を返す。選べるなら`null`。**申告していないホスト（古いpoller）は塞がない** —
- * 判定材料が無いことと「撮れない」ことは違う。
- *
- * 無人実行では依存の追加をその場で確認する相手がいないため（CLAUDE.md）、撮れないホストで
- * このラベルを付けると**実行できないまま止まる**。押す前に理由を出す。
- */
-export function resolveScreenshotRejection(host: DispatchHostView | null): string | null {
-  if (!host) return null;
-  if (host.screenshotCapable === false) {
-    return `${formatDispatchHostName(host.name)}にPlaywrightのブラウザが入っていないため、スクリーンショットを取得できません。`;
-  }
-  return null;
 }
 
 /**

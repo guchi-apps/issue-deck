@@ -21,7 +21,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     contractVersion: 2,
     online: true,
     lastSeenAt: NOW.toISOString(),
-    screenshotCapable: true,
     sessionControlCapable: true,
     instructionCapable: true,
     crossRepoQuestionCapable: true,

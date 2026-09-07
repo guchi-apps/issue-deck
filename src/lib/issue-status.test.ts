@@ -88,7 +88,6 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
       "21.plan-required",
       "22.merge-confirm-required",
       "23.preview-required",
-      "24.screenshot-required",
       "25.artifact-required",
       "90.Close: duplicate",
       "99.something",

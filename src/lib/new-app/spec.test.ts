@@ -5,14 +5,13 @@ import {
   appearanceSummary,
   databaseNameFor,
   defaultsForKind,
+  devLoginBypassEnabled,
   emptyNewAppSpec,
   hostnameFor,
   isAppearanceDefault,
   isValidRepositoryName,
   isValidThemeColor,
   offlineEnabled,
-  screenshotBypassEnabled,
-  supportsUnattendedScreenshot,
   isValidSubdomain,
   publicUrlFor,
   slugifyRepositoryName,
@@ -145,13 +144,13 @@ describe("validateNewAppSpec", () => {
 });
 
 describe("体裁と運用（#2254）", () => {
-  it("既定は「PWA対応・オフラインなし・アイコン暫定・更新履歴あり・撮影バイパスあり」", () => {
+  it("既定は「PWA対応・オフラインなし・アイコン暫定・更新履歴あり・開発用ログインあり」", () => {
     const base = emptyNewAppSpec();
     expect(base.pwa).toBe(true);
     expect(base.offline).toBe(false);
     expect(base.iconPlan).toBe("provisional");
     expect(base.changelog).toBe(true);
-    expect(base.screenshotBypass).toBe(true);
+    expect(base.devLoginBypass).toBe(true);
     expect(isAppearanceDefault(base)).toBe(true);
   });
 
@@ -165,18 +164,9 @@ describe("体裁と運用（#2254）", () => {
     expect(offlineEnabled(spec({ pwa: true, offline: true }))).toBe(true);
   });
 
-  it("認証が無いアプリでは撮影バイパスを不要にする", () => {
-    expect(screenshotBypassEnabled(spec({ auth: "none", screenshotBypass: true }))).toBe(false);
-    expect(screenshotBypassEnabled(spec({ auth: "supabase-google" }))).toBe(true);
-  });
-
-  it("`runtime-setup: minimal` の種別では無人撮影が成立しない（要約にも断りを出す）", () => {
-    expect(supportsUnattendedScreenshot("next-db")).toBe(true);
-    expect(supportsUnattendedScreenshot("fastapi")).toBe(false);
-    expect(supportsUnattendedScreenshot("static")).toBe(false);
-    expect(appearanceSummary(spec({ kind: "fastapi", auth: "fastapi-google" }))).toContain(
-      "CI撮影の認証バイパスあり（ローカル実行専用）",
-    );
+  it("認証が無いアプリでは開発用ログインを不要にする", () => {
+    expect(devLoginBypassEnabled(spec({ auth: "none", devLoginBypass: true }))).toBe(false);
+    expect(devLoginBypassEnabled(spec({ auth: "supabase-google" }))).toBe(true);
   });
 
   it("標準から外すと「標準どおり」ではなくなる（表示名は判定に含めない）", () => {
@@ -190,7 +180,7 @@ describe("体裁と運用（#2254）", () => {
     expect(summary).toContain("表示名「家計レポート」");
     expect(summary).toContain("PWA対応・オフラインなし");
     expect(summary).toContain("更新履歴あり");
-    expect(summary).toContain("CI撮影の認証バイパスあり");
+    expect(summary).toContain("開発用ログインあり");
     expect(appearanceSummary(spec({ auth: "none" }))).toContain("不要（認証なし）");
   });
 

@@ -36,7 +36,6 @@ describe("startImplementationLabelsToAdd", () => {
       startImplementationLabelsToAdd({
         planRequired: false,
         previewRequired: false,
-        screenshotRequired: false,
         artifactRequired: false,
         mergeConfirmRequired: false,
       }),
@@ -48,7 +47,6 @@ describe("startImplementationLabelsToAdd", () => {
       startImplementationLabelsToAdd({
         planRequired: true,
         previewRequired: false,
-        screenshotRequired: false,
         artifactRequired: false,
         mergeConfirmRequired: false,
       }),
@@ -63,7 +61,6 @@ describe("startImplementationLabelsToRemove", () => {
       startImplementationLabelsToRemove({
         planRequired: true,
         previewRequired: true,
-        screenshotRequired: true,
         artifactRequired: true,
         mergeConfirmRequired: true,
       }),
@@ -75,11 +72,10 @@ describe("startImplementationLabelsToRemove", () => {
       startImplementationLabelsToRemove({
         planRequired: false,
         previewRequired: true,
-        screenshotRequired: false,
         artifactRequired: true,
         mergeConfirmRequired: true,
       }),
-    ).toEqual([PLAN_REQUIRED_LABEL, "24.screenshot-required"]);
+    ).toEqual([PLAN_REQUIRED_LABEL]);
   });
 });
 
@@ -161,9 +157,9 @@ describe("startImplementationOptionsFromLabels", () => {
   }
 
   it("付与済みのオプションラベルをそのまま初期選択にする", () => {
-    expect(startImplementationOptionsFromLabels(makeLabels(["24.screenshot-required"]))).toEqual({
+    expect(startImplementationOptionsFromLabels(makeLabels(["23.preview-required"]))).toEqual({
       ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
-      screenshotRequired: true,
+      previewRequired: true,
     });
   });
 
@@ -223,30 +219,8 @@ describe("startImplementationOptionsFromLabels", () => {
 });
 
 describe("visibleStartImplementationOptions", () => {
-  function keysFor(isActionsTarget: boolean, screenshotRequired: boolean) {
-    return visibleStartImplementationOptions({
-      isActionsTarget,
-      options: { ...START_IMPLEMENTATION_DEFAULT_OPTIONS, screenshotRequired },
-    }).map((option) => option.key);
-  }
-
-  // サブPC・ローカル実行はtailscale serveで実物の画面を見られるため撮影は不要（#1265・#1317）
-  it("GitHub Actions以外を選んでいる場合、スクリーンショットのオプションを出さない", () => {
-    expect(keysFor(false, false)).not.toContain("screenshotRequired");
-    expect(keysFor(false, false)).toContain("previewRequired");
-  });
-
-  it("GitHub Actionsを選んでいる場合はスクリーンショットのオプションを出す", () => {
-    expect(keysFor(true, false)).toContain("screenshotRequired");
-  });
-
-  // 隠すと、既に付いてしまったラベルをこのダイアログから外せなくなる
-  it("既にチェックが入っている場合は実行先によらず出す", () => {
-    expect(keysFor(false, true)).toContain("screenshotRequired");
-  });
-
   // アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない（#1473）
-  describe("アーティファクト（撮影とは逆向きの出し分け）", () => {
+  describe("アーティファクト", () => {
     function artifactKeysFor(isActionsTarget: boolean, artifactRequired: boolean) {
       return visibleStartImplementationOptions({
         isActionsTarget,
@@ -291,7 +265,6 @@ describe("isSelectableLabelName", () => {
     expect(isSelectableLabelName("21.plan-required")).toBe(false);
     expect(isSelectableLabelName("22.merge-confirm-required")).toBe(false);
     expect(isSelectableLabelName("23.preview-required")).toBe(false);
-    expect(isSelectableLabelName("24.screenshot-required")).toBe(false);
   });
 
   it("進捗管理用ラベル（00〜09番台）は選択不可と判定する", () => {
@@ -335,7 +308,6 @@ describe("isStartImplementationOptionLabel", () => {
     expect(isStartImplementationOptionLabel("21.plan-required")).toBe(true);
     expect(isStartImplementationOptionLabel("22.merge-confirm-required")).toBe(true);
     expect(isStartImplementationOptionLabel("23.preview-required")).toBe(true);
-    expect(isStartImplementationOptionLabel("24.screenshot-required")).toBe(true);
     expect(isStartImplementationOptionLabel("25.artifact-required")).toBe(true);
   });
 

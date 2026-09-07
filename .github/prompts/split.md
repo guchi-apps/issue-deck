@@ -20,7 +20,7 @@
     単独で着手できる程度に、対応するスコープの背景・要件を書く
   - 計画コメントでそのサブIssueにも`21.plan-required`が必要と書かれている場合は
     `--label "21.plan-required"`を付ける
-  - 元Issueに`23.preview-required`または`24.screenshot-required`が付いており、かつそのサブIssue
+  - 元Issueに`23.preview-required`が付いており、かつそのサブIssue
     が画面に関わる変更を含む場合は、該当するラベルを引き継ぐ
   - **作成したら、GitHubネイティブのサブIssueとして元Issueへ紐付ける。** 次の2コマンドを使う。
 

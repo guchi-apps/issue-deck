@@ -239,8 +239,7 @@ export function IssueDeckShell({
   // 表示するIssueはそこからの派生値（#1396）。stateで持つとIssueを開く操作が履歴に載らず、
   // 戻る操作でアプリの外へ出てしまうため移した。ポーリングや編集でissuesが更新されれば
   // ここも自動で追従する。
-  // `?issue=<id>`付きで直接開けるのは以前から（#688。無人実行のスクリーンショット撮影
-  // scripts/capture-issue-screenshots.shが承認待ち等のIssueをPC版で開くのに使う）。
+  // `?issue=<id>`付きで直接開けるのは以前から（#688）。
   const selectedIssue = useMemo<Issue | null>(
     () => (filters.issue ? (allIssues.find((item) => item.id === filters.issue) ?? null) : null),
     [allIssues, filters.issue],

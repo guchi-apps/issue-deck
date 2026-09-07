@@ -56,7 +56,7 @@
    - マージを止めるのは次のいずれかに当てはまるときだけ
      - レビューで実際に直すべき問題を見つけた（総評が要修正。不具合・退行・設計上の重大な誤り・Issueの要件を満たしていない、など）
      - `.shared-context/`配下が差分に混入している
-     - 対応Issueに`22.merge-confirm-required`・`23.preview-required`・`24.screenshot-required`のいずれかが付いている
+     - 対応Issueに`22.merge-confirm-required`・`23.preview-required`のいずれかが付いている
    - 判断に迷ったとき（触っている領域は重いが、差分自体に問題は見当たらない）は**止めずに「気になった点」として指摘する**
    - **他リポジトリをレビューする場合も同じ`relaxed`が既定**（#2790で全リポジトリの既定を反転した）。ただし**そのリポジトリの`.github/workflows/claude-review-develop.yml`を必ず見る**。次の2つのどちらかに当てはまるリポジトリは、従来のカテゴリ（認証・認可／DBスキーマ変更・マイグレーション／本番環境の設定／GitHub Actionsやデプロイ設定／Secretsや環境変数／課金・決済／大規模な依存関係の更新）で判定する
      - `with:`に`merge-policy: strict`と書いてある（明示的にカテゴリで止める側を選んでいる）

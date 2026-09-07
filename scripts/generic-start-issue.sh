@@ -579,20 +579,6 @@ if "23.preview-required" in label_names:
         "3. 承認が得られてから初めてPRを作成する。PR本文の「確認方法」にも同じURLを書く"
     )
 
-if "24.screenshot-required" in label_names:
-    screenshot_instructions = (
-        "このIssueには`24.screenshot-required`ラベルが付いています。実装・テストが完了したら、"
-        "PRを作成する**前**に変更箇所のスクリーンショットを取得し、ユーザーの承認を得てから"
-        "PRを作成してください（新規依存関係の追加が必要な場合は、追加前に必ず確認する）。"
-        "**承認可否は`AskUserQuestion`で尋ねること。** そうするとフックが自動で`00.check-user`を付け、"
-        "issue-deckの画面の「ユーザーの確認待ち」に出ます（答えた時点で自動的に外れます。#1417）"
-    )
-else:
-    screenshot_instructions = (
-        "このIssueには`24.screenshot-required`ラベルが付いていないため、"
-        "Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。"
-    )
-
 # 見た目のアーティファクト（#1473・#1540）。**出すのは実装着手前**（#1540）。実装が済んでから
 # 見せる形だと、見た目がNGだったときに実装がまるごとやり直しになるため、ゲートをPR作成前から
 # 実装着手前へ移した。実装後の見た目は23.preview-required（実物）が受け持つ。
@@ -821,7 +807,6 @@ replacements = {
     "{{DEV_COMMAND}}": dev_command,
     "{{DEV_PORT}}": dev_port,
     "{{PREVIEW_INSTRUCTIONS}}": preview_instructions,
-    "{{SCREENSHOT_INSTRUCTIONS}}": screenshot_instructions,
     "{{ARTIFACT_INSTRUCTIONS}}": artifact_instructions,
     "{{PLAN_INSTRUCTIONS}}": plan_instructions,
     "{{PLAN_COMMENT_NOTE}}": plan_comment_note,
