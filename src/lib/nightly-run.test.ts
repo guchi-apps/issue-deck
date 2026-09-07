@@ -3,13 +3,19 @@ import { describe, expect, it } from "vitest";
 import {
   classifyNightlyRunOutcome,
   decideNightlyRunLaunch,
+  describeNightlyRunMarkChip,
+  describeNightlyRunMarkDetail,
+  describeNightlyRunMarkTitle,
   describeNightlyRunWindowHours,
+  findNightlyRunQueuedMark,
   formatNightlyRunHour,
   resolveNightlyRunLabelRejection,
   resolveNightlyRunWindow,
   selectLatestNightKey,
+  selectNightlyRunQueuedMarks,
   summarizeNightlyRunOutcomes,
   type NightlyRunEntryView,
+  type NightlyRunState,
 } from "@/lib/nightly-run";
 
 /** UTCで動く環境（本番のVPS・サブPC・CI）を前提に、日本時間の値はUTC文字列から作る */
@@ -240,5 +246,80 @@ describe("summarizeNightlyRunOutcomes / selectLatestNightKey", () => {
       ]),
     ).toBe("2026-09-02");
     expect(selectLatestNightKey([{ status: "QUEUED", nightKey: null }])).toBeNull();
+  });
+});
+
+describe("夜間実行の目印（#2866）", () => {
+  function entry(overrides: Partial<NightlyRunEntryView>): NightlyRunEntryView {
+    return {
+      id: "e1",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2866,
+      issueId: null,
+      issueTitle: null,
+      targetHost: "subpc",
+      agent: "claude",
+      claudeModel: null,
+      optionLabels: [],
+      status: "QUEUED",
+      nightKey: null,
+      createdAt: "2026-09-07T10:00:00.000Z",
+      resolvedAt: null,
+      outcome: null,
+      ...overrides,
+    };
+  }
+
+  function state(overrides: Partial<NightlyRunState> = {}): NightlyRunState {
+    return {
+      settings: { enabled: true, startHour: 1 },
+      window: {
+        nightKey: "2026-09-07",
+        startsAt: "2026-09-06T16:00:00.000Z",
+        endsAt: "2026-09-06T19:00:00.000Z",
+        isOpen: false,
+        nextStartsAt: "2026-09-07T16:00:00.000Z",
+      },
+      queued: [entry({})],
+      results: null,
+      ...overrides,
+    };
+  }
+
+  it("リポジトリと番号で引ける表を作る", () => {
+    const marks = selectNightlyRunQueuedMarks(state());
+    expect(findNightlyRunQueuedMark(marks, "guchi-apps/issue-deck", 2866)).toEqual({
+      entryId: "e1",
+      startHour: 1,
+      enabled: true,
+    });
+    // 別のIssue・取得前（表そのものが無い）は目印を出さない
+    expect(findNightlyRunQueuedMark(marks, "guchi-apps/issue-deck", 2865)).toBeNull();
+    expect(findNightlyRunQueuedMark(undefined, "guchi-apps/issue-deck", 2866)).toBeNull();
+  });
+
+  it("目印を出すのは`QUEUED`だけ（起動後は進捗の表示が受け持つ）", () => {
+    const marks = selectNightlyRunQueuedMarks(
+      state({ queued: [entry({ status: "LAUNCHED" }), entry({ id: "e2", status: "CANCELED", issueNumber: 2 })] }),
+    );
+    expect(marks.size).toBe(0);
+  });
+
+  it("取得前（stateがnull）は空の表になる", () => {
+    expect(selectNightlyRunQueuedMarks(null).size).toBe(0);
+  });
+
+  it("文言に開始時刻と時間帯が入る", () => {
+    const mark = { entryId: "e1", startHour: 1, enabled: true };
+    expect(describeNightlyRunMarkChip(mark)).toBe("今夜 01:00");
+    expect(describeNightlyRunMarkTitle(mark)).toContain("01:00〜04:00");
+    expect(describeNightlyRunMarkDetail(mark)).toContain("01:00〜04:00");
+  });
+
+  it("夜間実行がOFFなら、走らないことを言う", () => {
+    const mark = { entryId: "e1", startHour: 1, enabled: false };
+    expect(describeNightlyRunMarkChip(mark)).toBe("今夜 OFF");
+    expect(describeNightlyRunMarkTitle(mark)).toContain("OFF");
+    expect(describeNightlyRunMarkDetail(mark)).toContain("起動しません");
   });
 });

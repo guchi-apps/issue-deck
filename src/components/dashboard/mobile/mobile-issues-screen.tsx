@@ -24,6 +24,7 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
+import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -61,6 +62,10 @@ type MobileIssuesScreenProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
   /** 保留中で上の配列から外したマージ待ちPR（#2398）。「保留中N件」を開くと並ぶ */
   snoozedMergePendingPullRequests?: PullRequestSummary[];
   /** そのPRの期限（#2398）。「最短でいつ戻るか」の1行に使う */
@@ -116,6 +121,7 @@ export function MobileIssuesScreen({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
   snoozedMergePendingPullRequests,
   snoozedMergePendingEntries,
   pullRequests,
@@ -252,6 +258,7 @@ export function MobileIssuesScreen({
       snoozes={snoozes}
       onSnooze={onSnooze}
       onUnsnooze={onUnsnooze}
+      nightlyRunQueued={nightlyRunQueued}
       snoozedPinned={
         view === "check-user" && snoozes && onUnsnooze
           ? {

@@ -46,6 +46,7 @@ import {
   MoveIssueDialog,
 } from "@/components/dashboard/move-issue-dialog";
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
+import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
@@ -144,6 +145,10 @@ import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-req
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
+  findNightlyRunQueuedMark,
+  type NightlyRunQueuedMap,
+} from "@/lib/nightly-run";
+import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   toIssuePullRequestProgressSource,
@@ -205,6 +210,17 @@ type MobileIssueDetailProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。PCの詳細・一覧の行と同じ表で、
+   * こちらは全幅の開始ボタンの上に出す注釈に使う。
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
+  /** 「夜間実行」画面へ移る。省略すると注釈にその導線を出さない */
+  onOpenNightlyRun?: () => void;
+  /** 今夜の予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
+  onCancelNightlyRun?: (entryId: string) => void;
+  /** 「実装を開始」で今夜の予定へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
+  onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
   /**
@@ -236,6 +252,10 @@ export function MobileIssueDetail({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
+  onOpenNightlyRun,
+  onCancelNightlyRun,
+  onNightlyRunQueued,
   onStartManualStepGuide,
   claudeLocalModel,
 }: MobileIssueDetailProps) {
@@ -388,6 +408,12 @@ export function MobileIssueDetail({
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
   });
+  // 「今夜の夜間実行」に積まれているか（#2866）。判定はPCの詳細・一覧の行と同じ引き当て表
+  const nightlyRunMark = findNightlyRunQueuedMark(
+    nightlyRunQueued,
+    issue.repositoryFullName,
+    issue.number,
+  );
   const {
     createComment,
     updateComment,
@@ -1030,11 +1056,22 @@ export function MobileIssueDetail({
           </div>
         )}
 
+        {/* 「今夜の夜間実行」に積まれている注釈（#2866）。**開始ボタンのすぐ上に置く**——
+            スマホでは全幅のボタンが視線の終点になるので、そこへ届く前に読ませる */}
+        {nightlyRunMark && (
+          <NightlyRunNotice
+            mark={nightlyRunMark}
+            onOpenNightlyRun={onOpenNightlyRun}
+            onCancel={onCancelNightlyRun}
+          />
+        )}
+
         {showStartDialog && (
           <StartImplementationDialog
             issue={issue}
             onIssueUpdated={onIssueUpdated}
             onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+            onNightlyRunQueued={onNightlyRunQueued}
             includeDispatchTargets
             dispatch={dispatch}
             actionsDisabledReason={actionsDisabledReason}

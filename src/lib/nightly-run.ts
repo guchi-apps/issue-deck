@@ -364,3 +364,82 @@ export function parseNightlyRunOptionLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
 }
+
+/**
+ * Issue一覧・Issue詳細に出す「今夜の予定に積まれている」の目印（#2866）。
+ *
+ * 積んでも**ラベル・ジョブ・セッションのどれも付かない**（`nightly-run-launch.ts`。付けると
+ * 起動していないのに無人実行まで止まる）ため、積んだIssueは一覧でも詳細でも、まだ何も指示して
+ * いないIssueとまったく同じ姿で並んでいた。目印だけをここから配る。
+ *
+ * **出すのは`QUEUED`の予定だけ。** 夜に起動した後は進捗バー・セッションの表示が受け持つので、
+ * 目印を重ねると同じことを2か所で言うことになる
+ * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+ */
+export type NightlyRunQueuedMark = {
+  /** 取り消し（`DELETE /api/nightly-run/:id`）に使う予定の識別子 */
+  entryId: string;
+  /** 起動を試み始める時刻（日本時間の「時」） */
+  startHour: number;
+  /** 夜間実行そのものが有効か。OFFなら積んであっても起動しない */
+  enabled: boolean;
+};
+
+/** `repositoryFullName#issueNumber`の引き当て表。Issueの同期状態に依存しない鍵にする */
+export type NightlyRunQueuedMap = ReadonlyMap<string, NightlyRunQueuedMark>;
+
+export function nightlyRunIssueKey(repositoryFullName: string, issueNumber: number): string {
+  return `${repositoryFullName}#${issueNumber}`;
+}
+
+/**
+ * 今夜の予定から引き当て表を作る。取得前（`state`が`null`）は空の表になり、目印は出ない。
+ *
+ * **`issueId`ではなく「リポジトリ＋番号」で引く。** 予定はIssueが未同期でも積めるため
+ * （`NightlyRunEntryView.issueId`は`null`になりうる）、同期済みかどうかで目印が出たり出なかったり
+ * しないようにする。
+ */
+export function selectNightlyRunQueuedMarks(state: NightlyRunState | null): NightlyRunQueuedMap {
+  const marks = new Map<string, NightlyRunQueuedMark>();
+  if (!state) return marks;
+  for (const entry of state.queued) {
+    if (entry.status !== "QUEUED") continue;
+    marks.set(nightlyRunIssueKey(entry.repositoryFullName, entry.issueNumber), {
+      entryId: entry.id,
+      startHour: state.settings.startHour,
+      enabled: state.settings.enabled,
+    });
+  }
+  return marks;
+}
+
+export function findNightlyRunQueuedMark(
+  marks: NightlyRunQueuedMap | undefined,
+  repositoryFullName: string,
+  issueNumber: number,
+): NightlyRunQueuedMark | null {
+  if (!marks) return null;
+  return marks.get(nightlyRunIssueKey(repositoryFullName, issueNumber)) ?? null;
+}
+
+/**
+ * 一覧の行に出すチップの文言（#2866）。**開始時刻まで入れる**——「今夜」だけだと、
+ * 積んだ覚えのある夜なのか、設定を変えた後の夜なのかを行から読めない。
+ */
+export function describeNightlyRunMarkChip(mark: NightlyRunQueuedMark): string {
+  return mark.enabled ? `今夜 ${formatNightlyRunHour(mark.startHour)}` : "今夜 OFF";
+}
+
+/** チップのツールチップ・詳細の注釈で使う1行 */
+export function describeNightlyRunMarkTitle(mark: NightlyRunQueuedMark): string {
+  return mark.enabled
+    ? `今夜の夜間実行に積まれています（${describeNightlyRunWindowHours(mark.startHour)}に順に起動）`
+    : "今夜の夜間実行に積まれていますが、夜間実行はOFFです";
+}
+
+/** 詳細の注釈に添える説明。何が起きるか・いま開始したいときはどうするか */
+export function describeNightlyRunMarkDetail(mark: NightlyRunQueuedMark): string {
+  return mark.enabled
+    ? `${describeNightlyRunWindowHours(mark.startHour)}のあいだに順に起動します。いま開始する場合は先に予定を取り消してください。`
+    : "このままでは起動しません。夜間実行をONにするか、予定を取り消してください。";
+}

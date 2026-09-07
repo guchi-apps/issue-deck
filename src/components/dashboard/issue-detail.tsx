@@ -36,6 +36,7 @@ import {
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
+import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { PlanReviewButton } from "@/components/dashboard/plan-review-button";
@@ -147,6 +148,10 @@ import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-sess
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
+  findNightlyRunQueuedMark,
+  type NightlyRunQueuedMap,
+} from "@/lib/nightly-run";
+import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   toIssuePullRequestProgressSource,
@@ -203,6 +208,17 @@ type IssueDetailProps = {
   snoozes?: SnoozeMap;
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
+  /**
+   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866。`selectNightlyRunQueuedMarks`）。
+   * 一覧の行のチップと同じ表を受け取り、こちらは開始ボタンの下の注釈に使う。
+   */
+  nightlyRunQueued?: NightlyRunQueuedMap;
+  /** 「夜間実行」画面へ移る。省略すると注釈にその導線を出さない */
+  onOpenNightlyRun?: () => void;
+  /** 今夜の予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
+  onCancelNightlyRun?: (entryId: string) => void;
+  /** 「実装を開始」で今夜の予定へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
+  onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
   /**
@@ -230,6 +246,10 @@ export function IssueDetail({
   snoozes,
   onSnooze,
   onUnsnooze,
+  nightlyRunQueued,
+  onOpenNightlyRun,
+  onCancelNightlyRun,
+  onNightlyRunQueued,
   onStartManualStepGuide,
   claudeLocalModel,
 }: IssueDetailProps) {
@@ -779,6 +799,13 @@ export function IssueDetail({
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
   });
+  // 「今夜の夜間実行」に積まれているか（#2866）。**判定は一覧のチップと同じ引き当て表**で、
+  // 一覧では今夜と出ているのに詳細では何も出ない、という食い違いが起きないようにする
+  const nightlyRunMark = findNightlyRunQueuedMark(
+    nightlyRunQueued,
+    issue.repositoryFullName,
+    issue.number,
+  );
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
   // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
@@ -830,6 +857,17 @@ export function IssueDetail({
           implementationAgent={
             issueSession ? resolveIssueImplementationAgent(issueSession) : null
           }
+          /* 「今夜の夜間実行」に積まれている注釈（#2866）。開始ボタンと同じヘッダーの中に
+             置き、押す直前に読めるようにする。積まれていなければ何も描かない */
+          notice={
+            nightlyRunMark ? (
+              <NightlyRunNotice
+                mark={nightlyRunMark}
+                onOpenNightlyRun={onOpenNightlyRun}
+                onCancel={onCancelNightlyRun}
+              />
+            ) : null
+          }
           actions={
             <>
               {/* マージボタンはIssue単位ではなくPR単位の操作なので、この操作列ではなく
@@ -839,6 +877,7 @@ export function IssueDetail({
                   issue={issue}
                   onIssueUpdated={onIssueUpdated}
                   onCommentCreated={(comment) => setComments((prev) => [...prev, comment])}
+                  onNightlyRunQueued={onNightlyRunQueued}
                   includeDispatchTargets
                   dispatch={dispatch}
                   actionsDisabledReason={actionsDisabledReason}
