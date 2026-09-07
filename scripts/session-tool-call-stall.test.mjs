@@ -5,7 +5,7 @@
 // 外すと「動いているセッションへ誤って引き上げる」か「止まったまま気づかない」のどちらかになる。
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,3 +123,80 @@ describe("session_tool_call_stall_transcript_untriggered", () => {
 // `session_resume_interrupted`と同じくここではテストしない。停滞時間の判定は
 // `session_resume_stalled_seconds`をそのまま使っており、その境界は`session-resume.test.mjs`が
 // 固定している。
+
+// 自動再送信の回数管理（#2896）。**ここが緩むと、直らないセッションへ固定文面を送り続ける**
+// （上限を守れているか）か、逆に1回も送らないまま人へ渡す（`due`が最初から偽）ことになる。
+describe("自動再送信の回数管理", () => {
+  const session = "issue-deck-issue-2896";
+
+  it("記録が無ければ1回目をすぐ送ってよい", () => {
+    expect(runBash(`session_tool_call_stall_read_state ${session}`).stdout).toBe("0 0 0");
+    expect(runBash(`session_tool_call_stall_due ${session}`).status).toBe(0);
+    expect(runBash(`session_tool_call_stall_exhausted ${session}`).status).not.toBe(0);
+  });
+
+  it("送った直後は間隔が空くまで次を送らない", () => {
+    runBash(`session_tool_call_stall_record_attempt ${session}`);
+    expect(runBash(`session_tool_call_stall_read_state ${session}`).stdout).toMatch(/^\d+ 1 0$/);
+    expect(runBash(`session_tool_call_stall_due ${session}`).status).not.toBe(0);
+  });
+
+  it("間隔が空けば2回目を送ってよい", () => {
+    // 前回の試行を間隔ぶんより前にしておく（`record_attempt`は現在時刻で書くため直接置く）。
+    const past = Math.floor(Date.now() / 1000) - 60 * 60;
+    runBash(`session_state_write_tool_call_stall ${session} ${past} 1 0`);
+    expect(runBash(`session_tool_call_stall_due ${session}`).status).toBe(0);
+  });
+
+  it("上限まで送ったら送るのをやめ、人へ渡す段になる", () => {
+    const past = Math.floor(Date.now() / 1000) - 60 * 60;
+    runBash(`session_state_write_tool_call_stall ${session} ${past} 2 0`);
+    expect(runBash(`session_tool_call_stall_due ${session}`).status).not.toBe(0);
+    expect(runBash(`session_tool_call_stall_exhausted ${session}`).status).toBe(0);
+    expect(runBash(`session_tool_call_stall_notified ${session}`).status).not.toBe(0);
+    runBash(`session_tool_call_stall_record_notified ${session}`);
+    expect(runBash(`session_tool_call_stall_notified ${session}`).status).toBe(0);
+  });
+
+  it("上限を環境変数で変えられる", () => {
+    const past = Math.floor(Date.now() / 1000) - 60 * 60;
+    runBash(`session_state_write_tool_call_stall ${session} ${past} 2 0`);
+    expect(
+      runBash(`session_tool_call_stall_due ${session}`, {
+        SESSION_TOOL_CALL_STALL_MAX_ATTEMPTS: "3",
+      }).status,
+    ).toBe(0);
+  });
+
+  it("#2896より前の形式（epochだけの1行）は未実施として読む", () => {
+    // 入れ替え直後に引き上げ済みだったセッションは、同じ固定文面を1回受け直すだけで済む。
+    writeFileSync(path.join(workDir, "state", `${session}.tool-call-stall`), "1757000000\n");
+    expect(runBash(`session_tool_call_stall_read_state ${session}`).stdout).toBe("0 0 0");
+    expect(runBash(`session_tool_call_stall_due ${session}`).status).toBe(0);
+  });
+
+  it("セッションが動き出したら記録を消す", () => {
+    runBash(`session_tool_call_stall_record_attempt ${session}`);
+    runBash(`session_state_clear_tool_call_stall ${session}`);
+    expect(runBash(`session_tool_call_stall_read_state ${session}`).stdout).toBe("0 0 0");
+  });
+});
+
+// 送る本文は画面（`src/lib/dispatch/session-stall.ts`）と同じ1行でなければならない（#2896）。
+// **食い違うと、自動で送ったものと人が押して送ったものの区別が後から付かない。**
+describe("SESSION_TOOL_CALL_STALL_BODY", () => {
+  it("画面の停滞パネルが送る固定文面と一致する", () => {
+    const source = readFileSync(path.join(repoRoot, "src/lib/dispatch/session-stall.ts"), "utf8");
+    const match = source.match(/const TOOL_CALL_STALL_BODY\s*=\s*\n?\s*"([^"]+)";/);
+    expect(match).not.toBeNull();
+    expect(runBash('printf "%s" "$SESSION_TOOL_CALL_STALL_BODY"').stdout).toBe(match[1]);
+  });
+
+  it("追加指示として送れる形（1行・500文字以内）である", () => {
+    const body = runBash('printf "%s" "$SESSION_TOOL_CALL_STALL_BODY"').stdout;
+    expect(body).not.toMatch(/[\n\r]/);
+    expect(body.length).toBeLessThanOrEqual(500);
+    expect(body.startsWith("/")).toBe(false);
+    expect(body.startsWith("!")).toBe(false);
+  });
+});
