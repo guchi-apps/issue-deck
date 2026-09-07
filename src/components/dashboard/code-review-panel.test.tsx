@@ -83,6 +83,45 @@ describe("CodeReviewPanel（#698）", () => {
     );
   });
 
+  // 未起票の指摘だけをまとめて渡す。件数表示も未起票分だけを数える
+  it("「まとめてIssueを作成」は未起票の指摘だけを渡す", () => {
+    const onBulkCreateFindingIssues = vi.fn();
+    render(
+      <CodeReviewPanel
+        report={report()}
+        isPending={false}
+        createdFindingIssues={new Map([["未完了ジョブの判定が種別を見ていない", 2170]])}
+        onBulkCreateFindingIssues={onBulkCreateFindingIssues}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "まとめてIssueを作成 (1件)" });
+    fireEvent.click(button);
+    expect(onBulkCreateFindingIssues).toHaveBeenCalledTimes(1);
+    const passed = onBulkCreateFindingIssues.mock.calls[0][0];
+    expect(passed).toHaveLength(1);
+    expect(passed[0].title).toBe("同じ絞り込みを2か所で組み立てている");
+  });
+
+  // 未起票の指摘が1件も無ければ、選ぶものが無いのでボタンごと出さない
+  it("未起票の指摘が無ければ「まとめてIssueを作成」を出さない", () => {
+    render(
+      <CodeReviewPanel
+        report={report()}
+        isPending={false}
+        createdFindingIssues={
+          new Map([
+            ["未完了ジョブの判定が種別を見ていない", 2170],
+            ["同じ絞り込みを2か所で組み立てている", 2171],
+          ])
+        }
+        onBulkCreateFindingIssues={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/まとめてIssueを作成/)).toBeNull();
+  });
+
   // レビューを回し直すと同じ指摘が返るので、これが無いと同じIssueが何件も立つ
   it("起票済みの指摘にはボタンを出さず、Issue番号を出す", () => {
     render(

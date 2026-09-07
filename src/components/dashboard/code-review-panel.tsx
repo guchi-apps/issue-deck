@@ -1,6 +1,6 @@
 "use client";
 
-import { FilePlus2, Loader2, RotateCw, ScanSearch } from "lucide-react";
+import { FilePlus2, ListChecks, Loader2, RotateCw, ScanSearch } from "lucide-react";
 
 import { CodeReviewSeverityBadge } from "@/components/dashboard/code-review-result-badges";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   CODE_REVIEW_SEVERITIES,
   countCodeReviewFindings,
+  filterUncreatedCodeReviewFindings,
   type CodeReviewFinding,
   type CodeReviewReport,
 } from "@/lib/github/code-review";
@@ -28,12 +29,19 @@ import { cn } from "@/lib/utils";
  * **書式を読めなかった結果は隠さない。** 指摘が1件も取れなかった場合は総評だけを出し、
  * 詳細はコメント欄で読んでもらう（パネルを作れないことを理由に、投稿された結果そのものを
  * 画面から消さない）。
+ *
+ * **「まとめてIssueを作成」は選んだ分だけ直接起票する（#2859）。** 1件ずつの「Issueを作成」
+ * とは違い、確認ダイアログ（`BulkCreateCodeReviewIssuesDialog`）を経由してタイトル・本文を
+ * そのまま作成する。人の判断を消しているわけではなく、**「どれを起票するか選ぶ」判断は
+ * チェックボックスの選択に残す**——数十件が無条件で自動生成される事態は変わらず避けている。
+ * 個別のタイトル・本文を直したい場合は従来どおり1件ずつの「Issueを作成」を使う。
  */
 export function CodeReviewPanel({
   report,
   isPending,
   createdFindingIssues,
   onCreateFindingIssue,
+  onBulkCreateFindingIssues,
   onRestartReview,
   className,
 }: {
@@ -52,6 +60,13 @@ export function CodeReviewPanel({
   /** 指摘をIssueにする。渡さない画面ではボタンを出さない */
   onCreateFindingIssue?: (finding: CodeReviewFinding) => void;
   /**
+   * 未起票の指摘をまとめて選び、一括でIssueにする確認ダイアログを開く（#2859）。
+   * 渡さない画面ではボタンを出さない。渡す指摘は呼び出し側ではなくここで
+   * `filterUncreatedCodeReviewFindings`により絞り込む（一覧に出ている件数とボタンが
+   * 起票する候補件数をずらさないため）。
+   */
+  onBulkCreateFindingIssues?: (findings: CodeReviewFinding[]) => void;
+  /**
    * 同じリポジトリをもう一度レビューする（実行ダイアログを開く）。
    *
    * **結果を読んだ場所から起こし直せるようにする。** 直したあとに効いたかを見たくなるのは
@@ -65,6 +80,7 @@ export function CodeReviewPanel({
 
   const findings = report?.findings ?? [];
   const counts = countCodeReviewFindings(findings);
+  const uncreatedFindings = filterUncreatedCodeReviewFindings(findings, createdFindingIssues);
 
   return (
     <section className={cn("rounded-lg border", className)}>
@@ -93,11 +109,24 @@ export function CodeReviewPanel({
             レビュー中
           </span>
         )}
-        {report && onRestartReview && (
-          <Button size="xs" variant="outline" className="ml-auto" onClick={onRestartReview}>
-            <RotateCw />
-            もう一度レビュー
-          </Button>
+        {report && (onBulkCreateFindingIssues || onRestartReview) && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {onBulkCreateFindingIssues && uncreatedFindings.length > 0 && (
+              <Button
+                size="xs"
+                onClick={() => onBulkCreateFindingIssues(uncreatedFindings)}
+              >
+                <ListChecks />
+                まとめてIssueを作成 ({uncreatedFindings.length}件)
+              </Button>
+            )}
+            {onRestartReview && (
+              <Button size="xs" variant="outline" onClick={onRestartReview}>
+                <RotateCw />
+                もう一度レビュー
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
