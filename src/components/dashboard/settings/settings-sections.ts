@@ -38,7 +38,7 @@ export const SETTINGS_SECTIONS = [
     key: "display",
     label: "表示",
     icon: Eye,
-    description: "画面に出すリポジトリ",
+    description: "画面に出すリポジトリと、Issueを作った後に開く画面",
   },
   {
     key: "notification",

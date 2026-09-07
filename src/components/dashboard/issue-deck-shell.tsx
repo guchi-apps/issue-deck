@@ -482,7 +482,13 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
-  function handleIssueCreated(issue: Issue) {
+  /**
+   * 作れたIssueを一覧へ反映する（#2862でここから遷移を切り離した）。**画面は動かさない。**
+   *
+   * 新規作成ダイアログは、作った直後にどこへ進むかを選ばせるようになったため
+   * （`PostCreateNavigationDialog`）、反映と遷移を別々に呼べる必要がある。
+   */
+  function registerCreatedIssue(issue: Issue) {
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
     setAllIssues((prev) => upsertIssue(prev, issue));
@@ -491,6 +497,15 @@ export function IssueDeckShell({
       void linkConfigIssueToManualStep(configIssueOrigin, issue);
       clearConfigIssuePrefill();
     }
+  }
+
+  /**
+   * 作れたIssueを一覧へ反映し、そのまま詳細画面へ進む。**行き先を選ばせない入口**
+   * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
+   * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
+   */
+  function handleIssueCreated(issue: Issue) {
+    registerCreatedIssue(issue);
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
     selectIssue(issue);
   }
@@ -2237,7 +2252,9 @@ export function IssueDeckShell({
           defaultBody={createDialogBody}
           bodyPrefix={createDialogBodyPrefix}
           issues={allIssues}
-          onCreated={handleIssueCreated}
+          // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
+          onCreated={registerCreatedIssue}
+          onNavigateToIssue={selectIssue}
           claudeLocalModel={claudeLocalModel}
         />
         <BulkCreateCodeReviewIssuesDialog

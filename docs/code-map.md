@@ -277,6 +277,25 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
+- **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
+  以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
+  移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
+  まとめて起票しているときに毎回一覧へ戻る操作が要ったため、作成の直後に
+  [`post-create-navigation-dialog.tsx`](../src/components/dashboard/post-create-navigation-dialog.tsx)
+  を出し、「Issueを開く」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  - **一覧への反映（`registerCreatedIssue`）と遷移（`selectIssue`）を分けてある。**
+    作成フォームには`onCreated`（反映）と`onNavigateToIssue`（遷移）を別々に渡し、
+    **`onNavigateToIssue`を渡さない呼び出しでは選択画面自体を出さない**。別ウィンドウ
+    （`/issues/new`）はもともと詳細へ移動しないため、これに当たる。行き先を選ばせない
+    ほかの入口（一括作成・コードレビュー・横断質問）は従来どおり`handleIssueCreated`を使う。
+  - **「作成+実装開始」では実行先の選択（`StartImplementationDialog`）を閉じた後に出す。**
+    キャンセルで閉じた場合も出す——起動しなくてもIssueは残っている。
+  - **選んだ行き先を覚えるのはチェックを入れて押したときだけ**で、×・Escapeでは覚えない。
+    保存先は端末のlocalStorage（`issue-deck:post-create-destination`。判定は
+    [`lib/post-create-destination.ts`](../src/lib/post-create-destination.ts)の純粋関数、
+    読み書きは[`hooks/use-post-create-destination.ts`](../src/hooks/use-post-create-destination.ts)）。
+    **覚えると選択画面ごと出なくなるため、設定＞表示に戻し口を必ず置く**
+    （[`settings/post-create-destination-section.tsx`](../src/components/dashboard/settings/post-create-destination-section.tsx)）。
 - **画像を拡大して見せるのは[`image-preview-dialog.tsx`](../src/components/dashboard/image-preview-dialog.tsx)だけで、`target="_blank"`で別タブに開かない**（#2065）。
   このアプリはホーム画面へ追加して使う（`app/manifest.ts`の`display: "standalone"`）。
   **その起動のしかたではタブもアドレスバーも無く、別タブで開いた画像を閉じて元の画面へ戻る
