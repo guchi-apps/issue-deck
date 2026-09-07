@@ -174,10 +174,13 @@ function makeOtherRepository(): ConnectedRepository {
 /** 実際の利用と同じく、開閉状態を呼び出し側（issue-deck-shell）が持つ形で描画する */
 function Harness({
   onCreated,
+  onNavigateToIssue,
   repositories = [makeRepository()],
   defaultRepositoryFullName = REPOSITORY_FULL_NAME,
 }: {
   onCreated: (issue: Issue) => void;
+  /** 渡したときだけ「次に開く画面」の選択が出る（#2862） */
+  onNavigateToIssue?: (issue: Issue) => void;
   repositories?: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
 }) {
@@ -190,6 +193,7 @@ function Harness({
       defaultRepositoryFullName={defaultRepositoryFullName}
       issues={[]}
       onCreated={onCreated}
+      onNavigateToIssue={onNavigateToIssue}
       claudeLocalModel="sonnet"
     />
   );
@@ -285,6 +289,95 @@ describe("CreateIssueDialog の「作成+実装開始」", () => {
     resolveUpdate?.(updated);
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(updated));
     expect(screen.queryByText("実装を開始")).toBeNull();
+  });
+});
+
+/**
+ * #2862。作成の直後は必ずIssue詳細へ移動していたのをやめ、進む先をその場で選ばせる。
+ * 記憶した行き先があれば選択画面は出さず、そのまま進む（`usePostCreateDestination`）。
+ */
+describe("CreateIssueDialog の「次に開く画面」", () => {
+  beforeEach(() => {
+    dispatchState.hosts = [makeHost()];
+    createIssue.mockResolvedValue(makeIssue());
+    enqueue.mockResolvedValue(true);
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    createIssue.mockReset();
+    updateIssue.mockReset();
+    enqueue.mockReset();
+    resetSuggest();
+    window.localStorage.clear();
+  });
+
+  it("「作成」の後は、詳細へ移動せずに行き先を選ばせる", async () => {
+    const onNavigateToIssue = vi.fn();
+    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await screen.findByText("Issueを作成しました");
+    expect(onNavigateToIssue).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Issueを開く/ }));
+    expect(onNavigateToIssue).toHaveBeenCalledWith(makeIssue());
+  });
+
+  it("「元の画面に戻る」を押したときは移動しない", async () => {
+    const onNavigateToIssue = vi.fn();
+    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await screen.findByText("Issueを作成しました");
+    fireEvent.click(screen.getByRole("button", { name: /元の画面に戻る/ }));
+
+    await waitFor(() => expect(screen.queryByText("Issueを作成しました")).toBeNull());
+    expect(onNavigateToIssue).not.toHaveBeenCalled();
+  });
+
+  it("行き先を記憶させると、次の作成では選択画面を出さずにそのまま進む", async () => {
+    const onNavigateToIssue = vi.fn();
+    const { unmount } = render(
+      <Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await screen.findByText("Issueを作成しました");
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Issueを開く/ }));
+    await waitFor(() => expect(onNavigateToIssue).toHaveBeenCalledTimes(1));
+    unmount();
+
+    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト2" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(onNavigateToIssue).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Issueを作成しました")).toBeNull();
+  });
+
+  it("「作成+実装開始」では、実装を開始した後に行き先を選ばせる", async () => {
+    const onNavigateToIssue = vi.fn();
+    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
+
+    // 実行先を選んでいるあいだは行き先を聞かない
+    await screen.findByText("実装を開始");
+    expect(screen.queryByText("Issueを作成しました")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "開始する" }));
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    await screen.findByText("Issueを作成しました");
   });
 });
 
