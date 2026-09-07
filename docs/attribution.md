@@ -95,7 +95,8 @@ Claude Codeへの指示文で本文を組み立てるコメント（計画提示
 
 - ローカルセッションのプロンプト（`scripts/prompts/implementation-agent.md`・
   `generic-implementation-agent.md`・`review-agent.md`）が、投稿するコメントの末尾に
-  `<!-- issue-deck-agent:planner|implementer|reviewer -->`を付けるよう指示している
+  `<!-- issue-deck-agent:planner|implementer|plan-reviser|reviewer -->`を付けるよう指示している
+  （`plan-reviser`は計画レビューの指摘への応答専用。画面には「レビュー反映ボット」と出る。#2864）
 - 判定に使うのは**マーカーが明示された種別だけ**。書き出しの絵文字による推測（`emoji-fallback`）は
   含めない。含めるとユーザー本人が🔧などで書き始めたコメントまでボット扱いになる
 - 役割を持たない`<!-- issue-deck-source:project-status-dispatch -->`は対象外。カンバンのドラッグ

@@ -66,6 +66,12 @@ describe("extractAgentMarker", () => {
     );
   });
 
+  it("計画レビューの反映コメント向けのplan-reviserを読み取る（#2864）", () => {
+    expect(
+      extractAgentMarker({ body: "指摘を反映しました\n\n<!-- issue-deck-agent:plan-reviser -->" }),
+    ).toBe("plan-reviser");
+  });
+
   it("マーカーが無いコメントはnullを返す", () => {
     expect(extractAgentMarker({ body: "通常のコメント" })).toBeNull();
   });
@@ -217,6 +223,10 @@ describe("isMarkedAutomationComment", () => {
     expect(isMarkedAutomationComment({ kind: "emoji-fallback", role: "implementer" })).toBe(false);
   });
 
+  it("plan-reviserも自動投稿と断定する（ユーザー本人名義で投稿されるため・#2864）", () => {
+    expect(isMarkedAutomationComment({ kind: "agent", role: "plan-reviser" })).toBe(true);
+  });
+
   it("login名に依存するunknown-automationでは断定しない", () => {
     expect(isMarkedAutomationComment({ kind: "unknown-automation" })).toBe(false);
   });
@@ -239,6 +249,7 @@ describe("COMMENT_AGENT_PROFILES", () => {
       "responder",
       "guide",
       "reviewer",
+      "plan-reviser",
       "conflict-resolver",
       "ci-fixer",
       "notifier",
