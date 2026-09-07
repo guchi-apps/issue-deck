@@ -1245,7 +1245,11 @@ export function IssueList({
       {/* **`pinnedSection`もこの枠の中に入れる**（#2175）。確認待ちの先頭に固定している
           マージ待ちPull Request（#1613）は画面の上半分を占めることがあり、枠の外に置くと
           そこを下へなぞってもタッチが届かず「引っ張っても何も起きない」ことになる */}
-      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col">
+      {/* **`overflow-hidden`を外さないこと**（#2885）。中身は引っ張った量だけ`translateY`で
+          下がるが、この枠が切り抜かないと下がったぶんがそのまま枠の外へはみ出し、下に並ぶ
+          兄弟（スマホなら下端の絞り込み行）の上に重なって描かれる。絞り込み行は塗りが無い
+          （ビューのボタンも`bg-primary/10`＝10%）ため、Issueの行が透けて二重に見えた */}
+      <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <PullToRefreshIndicator pull={pull} />
 
         {/* 引っ張りに追従して下がるのは<ul>だけでなく固定セクションも含めた中身全体。

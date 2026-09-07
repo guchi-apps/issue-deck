@@ -19,6 +19,12 @@ import { cn } from "@/lib/utils";
  * 一覧を下げる動き（枠の中身をずらす`translateY`）はスクロール領域側が持つ——下げる対象は
  * 画面ごとに違う（Issue一覧は`<ul>`、ブランチ画面はスクロールする`<div>`）ため。
  *
+ * **その枠には`overflow-hidden`も必ず付ける**（#2885）。`translateY`はレイアウトを動かさず
+ * 見た目だけを下げるので、切り抜かないと下がったぶんが枠の外へはみ出し、下に並ぶ兄弟の上に
+ * 重なって描かれる。スマホのIssue一覧では、引っ張るたびに下端の絞り込み行へIssueの行が
+ * 重なって見えていた。この部品自体は枠の内側（`top-0`＋高さ＝引っ張り量）に収まるので、
+ * `overflow-hidden`で切られることはない。
+ *
  * `idle`（引っ張っていない）ときは`label`がnullで、何も描かない。
  */
 export function PullToRefreshIndicator({ pull }: { pull: PullToRefreshHandle }) {

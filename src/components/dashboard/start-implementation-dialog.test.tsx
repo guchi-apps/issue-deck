@@ -744,6 +744,71 @@ describe("StartImplementationDialog", () => {
     });
   });
 
+  // #2884計画レビュー（G1）の指摘1: チェックを外して外す予定のラベルは、外れた後の状態で
+  // 夜間実行の可否を判定する。生の実ラベルのままだと、外したいのにボタンがdisabledのままになり
+  // 削除処理（applyOptionLabels）へ到達できない
+  describe("夜間実行とオプションの整合（#2884）", () => {
+    it("25.artifact-requiredが付いたままだと夜間実行は選べない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({
+          labels: [{ name: ARTIFACT_REQUIRED_LABEL, color: "d4c5f9", description: null }],
+        }),
+      });
+
+      expect(
+        screen.getByRole("radio", { name: "今夜の夜間実行" }).hasAttribute("disabled"),
+      ).toBe(true);
+    });
+
+    it("チェックを外すと、実ラベルが残っていても夜間実行を選べるようになる", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({
+          labels: [{ name: ARTIFACT_REQUIRED_LABEL, color: "d4c5f9", description: null }],
+        }),
+      });
+
+      fireEvent.click(screen.getByRole("checkbox", { name: /アーティファクトで見た目を出す/ }));
+
+      expect(
+        screen.getByRole("radio", { name: "今夜の夜間実行" }).hasAttribute("disabled"),
+      ).toBe(false);
+    });
+  });
+
+  // #2884計画レビュー（G1）の指摘2: リポジトリのラベル一覧が遅れて届くと、アーティファクトの
+  // 既定ON再適用effectがもう一度走る。ユーザーが既にOFFへ押し戻していた場合、それを巻き戻さない
+  describe("アーティファクトの既定再適用とチェックの整合（#2884）", () => {
+    it("外した後にリポジトリのラベル一覧が遅れて届いても、チェックは戻らない", () => {
+      dispatchState.hosts = [makeHost()];
+      // リポジトリのラベル一覧はまだ届いていない状態で開く
+      repositoryLabelNames = [];
+      const { rerenderSame } = renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({
+          labels: [
+            { name: ARTIFACT_REQUIRED_LABEL, color: "d4c5f9", description: null },
+            { name: "62.design", color: "bfdadc", description: null },
+          ],
+        }),
+      });
+
+      const chip = screen.getByRole("checkbox", { name: /アーティファクトで見た目を出す/ });
+      expect(chip.getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-checked")).toBe("false");
+
+      // リポジトリのラベル一覧が遅れて届く
+      repositoryLabelNames = [ARTIFACT_REQUIRED_LABEL];
+      rerenderSame();
+
+      expect(chip.getAttribute("aria-checked")).toBe("false");
+    });
+  });
+
   // 実行先を上・オプションを下に置き、オプションはアイコン付きのチップで選ばせる（#1623）
   describe("実行先とオプションの並び（#1623）", () => {
     it("実行先がオプションより前に描画される", () => {
@@ -809,6 +874,26 @@ describe("StartImplementationDialog", () => {
       clickStart();
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(updateIssue.mock.calls[0][0].labels).not.toContain(MERGE_CONFIRM_REQUIRED_LABEL);
+    });
+
+    // 選んだオプションどおりにラベルが付き、その内容で実行されるようにする（#2884）
+    it("既に付いているラベルのチェックを外すと、実行開始時にラベルも外れる", async () => {
+      renderDialog({
+        includeDispatchTargets: true,
+        issue: makeIssue({
+          labels: [{ name: MERGE_CONFIRM_REQUIRED_LABEL, color: "d93f0b" }] as Issue["labels"],
+        }),
+      });
+
+      const chip = screen.getByRole("checkbox", { name: /マージ前に確認が必要/ });
+      expect(chip.getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(chip);
+      expect(chip.getAttribute("aria-checked")).toBe("false");
+
+      clickStart();
+
+      await waitFor(() => expect(updateIssue).toHaveBeenCalled());
       expect(updateIssue.mock.calls[0][0].labels).not.toContain(MERGE_CONFIRM_REQUIRED_LABEL);
     });
   });

@@ -2153,7 +2153,12 @@ export function BranchFlowView({
           この枠は動かさない（インジケーターを上端に重ねる基準にもなる） */}
       <div
         ref={pullContainerRef}
-        className={cn("relative flex min-h-0 flex-1", isSplit ? "flex-row" : "flex-col")}
+        // `overflow-hidden`は引っ張ったぶんのはみ出しを切り抜くため（#2885。理由は
+        // `issue-list.tsx`の同じ枠のコメントを参照）
+        className={cn(
+          "relative flex min-h-0 flex-1 overflow-hidden",
+          isSplit ? "flex-row" : "flex-col",
+        )}
       >
         <PullToRefreshIndicator pull={pull} />
 

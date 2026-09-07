@@ -199,6 +199,20 @@ export function startImplementationLabelsToAdd(options: StartImplementationOptio
 }
 
 /**
+ * チェックを外したオプションに対応するGitHubラベル名の配列を返す（#2884）。
+ *
+ * **選んだオプションどおりにラベルが付き、その内容で実行される**ようにするため、
+ * `startImplementationLabelsToAdd`と対になる。実際に外すかどうか（現にラベルが付いているか）の
+ * 判定は呼び出し側（`applyOptionLabels`）が行う——ここは「外すべきラベル名」を返すだけで、
+ * 既定でチェックが入っただけ（実ラベルは無い）の状態と区別しない。
+ */
+export function startImplementationLabelsToRemove(options: StartImplementationOptions): string[] {
+  return START_IMPLEMENTATION_OPTIONS.filter((option) => !options[option.key]).map(
+    (option) => option.githubLabel,
+  );
+}
+
+/**
  * issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める。
  *
  * 「計画が必要」（#1317）と「アーティファクトで見た目を出す」（#1956）だけは種別ラベルからの既定も

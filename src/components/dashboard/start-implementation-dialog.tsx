@@ -76,6 +76,7 @@ import {
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   startImplementationCommentBody,
   startImplementationLabelsToAdd,
+  startImplementationLabelsToRemove,
   startImplementationOptionsFromLabels,
   visibleStartImplementationOptions,
   type StartImplementationOptionKey,
@@ -408,6 +409,15 @@ export function StartImplementationDialog({
     issueLabelsRef.current = issue.labels;
     repositoryLabelNamesRef.current = repositoryLabelNames;
   });
+  /**
+   * 「アーティファクトで見た目を出す」を**ユーザー自身が触ったか**（#2884計画レビューG1の指摘2）。
+   *
+   * 下の既定再適用effectはリポジトリのラベル一覧が遅れて届いた時点でもう一度走るため、
+   * 触っていなければOFF→ONへ寄せてよいが、**ユーザーが自分でOFFにした後だと巻き戻ってしまう**。
+   * チェックを外すと実ラベルも外れる仕様（#2884）になった今、この巻き戻りは
+   * 「外したのに削除が効かない」という実害になるため、一度でも触ったら以後は再適用しない。
+   */
+  const artifactRequiredTouchedRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -416,6 +426,8 @@ export function StartImplementationDialog({
     // を経由しないため、この効果で同期する。open自体の変化にのみ紐づく一度きりの処理であり、
     // ループや連鎖的な再レンダリングは発生しない。
     setOptions(startImplementationOptionsFromLabels(issueLabelsRef.current, repositoryLabelNamesRef.current));
+    // 「触った」フラグも開くたびにリセットする（前回開いたときの操作を持ち越さない）
+    artifactRequiredTouchedRef.current = false;
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
     setStartedTarget(null);
@@ -431,12 +443,16 @@ export function StartImplementationDialog({
    * リポジトリのラベル一覧は非同期で届くため、開いた直後の同期では間に合わないことがある（#1956）。
    * 届いた時点でアーティファクトの既定をもう一度当てる。
    *
-   * **既定はOFF→ONの一方向にしか動かさない**ので、先にユーザーが押した選択を打ち消すことはない
-   * （初期値がOFFである以上、この間にユーザーができるのはONにする操作だけ）。上の同期のように
-   * `setOptions`ごと置き換えると、他のチップの選択まで巻き戻る。
+   * **ユーザーがまだ一度も触っていないときだけ当てる**（#2884計画レビューG1の指摘2）。
+   * 「初期値がOFFなので、この間にユーザーができるのはONにする操作だけ」という以前の前提は、
+   * 実ラベルが既に付いている（初期値がON）Issueでは成り立たない。そこでユーザーがOFFへ
+   * 押し戻した場合、この再適用がそれをまたONへ巻き戻し、チェックを外しても実ラベルの削除に
+   * 到達できなくなる。上の同期のように`setOptions`ごと置き換えないのは変わらず、
+   * 他のチップの選択まで巻き戻さないため。
    */
   useEffect(() => {
     if (!open) return;
+    if (artifactRequiredTouchedRef.current) return;
     const shouldTurnOn = artifactRequiredDefaultForLabels({
       issueLabelNames: issueLabelsRef.current.map((label) => label.name),
       repositoryLabelNames: repositoryLabelNamesRef.current,
@@ -506,12 +522,20 @@ export function StartImplementationDialog({
     dispatch.hosts.find((host) => host.repositories.includes(issue.repositoryFullName))?.name ?? null;
   /**
    * 夜間実行へ積めない理由。**Issueの実ラベルで判定する**（G1の指摘1）。`23.preview-required`・
-   * `25.artifact-required`は承認・確認を待つ人がいないと進まないので、付いているうちは積ませない
+   * `25.artifact-required`は承認・確認を待つ人がいないと進まないので、付いているうちは積ませない。
+   *
+   * ただし**チェックを外して外れる予定のラベルは、外れた後の状態で判定する**
+   * （#2884計画レビューG1の指摘1）。`applyOptionLabels`はこのボタンを押した時点で実ラベルを
+   * 実際に外すが、それより前の判定がここで生の`issue.labels`を見ていると、チェックを外しても
+   * ボタンが`disabled`のままになり`applyOptionLabels`へ到達できず、外す手段が無くなってしまう。
    */
+  const nightlyProjectedLabelNames = new Set(startImplementationLabelsToRemove(options));
   const nightlyRejection =
     nightlyHost === null
       ? "このリポジトリを実行できるサブPCが登録されていません"
-      : resolveNightlyRunLabelRejection(issue.labels);
+      : resolveNightlyRunLabelRejection(
+          issue.labels.filter((label) => !nightlyProjectedLabelNames.has(label.name)),
+        );
   /** 同じ理由で、ダイアログでONにしたままでも積めない（積む前にラベルとして付くため） */
   const nightlyOptionRejection =
     isNightlyTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.some((key) => options[key])
@@ -699,6 +723,7 @@ export function StartImplementationDialog({
   }
 
   function toggleOption(key: StartImplementationOptionKey) {
+    if (key === "artifactRequired") artifactRequiredTouchedRef.current = true;
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
@@ -719,19 +744,25 @@ export function StartImplementationDialog({
   }
 
   /**
-   * 選択されたオプションに対応するラベルを付ける。**どちらの実行先でも先に行う**
-   * （`21.plan-required`等はサブPCのランチャーも読むため、起動前に付いている必要がある）。
-   * 付けるものが無ければ何もせず、そのままのissueを返す。失敗時は`null`。
+   * 選択されたオプションに対応するラベルを付け、チェックを外したオプションのラベルは
+   * 外す（#2884）。**どちらの実行先でも先に行う**（`21.plan-required`等はサブPCの
+   * ランチャーも読むため、起動前に付いている必要がある）。変化が無ければ何もせず、
+   * そのままのissueを返す。失敗時は`null`。
    */
   async function applyOptionLabels(): Promise<Issue | null> {
     const labelsToAdd = startImplementationLabelsToAdd(options);
-    if (labelsToAdd.length === 0) return issue;
+    const labelsToRemove = new Set(startImplementationLabelsToRemove(options));
 
     const currentNames = issue.labels.map((label) => label.name);
-    const nextNames = [...new Set([...currentNames, ...labelsToAdd])];
-    // 既に全部付いているなら書き込まない。Issue作成画面から来た場合（#1323）は作成時に
-    // 付与済みで毎回ここに当たるため、増えないPATCHを投げないようにする
-    if (nextNames.length === currentNames.length) return issue;
+    const nextNames = [
+      ...new Set([...currentNames.filter((name) => !labelsToRemove.has(name)), ...labelsToAdd]),
+    ];
+    // 追加も除去も無いなら書き込まない。Issue作成画面から来た場合（#1323）は作成時に
+    // 付与済みで毎回ここに当たるため、変化の無いPATCHを投げないようにする
+    const currentSet = new Set(currentNames);
+    const unchanged =
+      nextNames.length === currentNames.length && nextNames.every((name) => currentSet.has(name));
+    if (unchanged) return issue;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
