@@ -1103,7 +1103,7 @@ describe("IssueListの夜間実行の目印（#2866）", () => {
           id: "e1",
           repositoryFullName: "guchi-apps/issue-deck",
           issueNumber: 2,
-          issueId: null,
+          issueId: "2",
           issueTitle: null,
           targetHost: "subpc",
           agent: "claude",
@@ -1127,10 +1127,10 @@ describe("IssueListの夜間実行の目印（#2866）", () => {
     expect(rowOf(1).textContent).not.toContain("今夜");
   });
 
-  it("夜間実行がOFFならOFFと出す", () => {
+  it("夜間実行がOFFなら、止まっている対象の名前を出す", () => {
     renderList({ nightlyRunQueued: marksFor(false) });
 
-    expect(rowOf(2).textContent).toContain("今夜 OFF");
+    expect(rowOf(2).textContent).toContain("夜間実行OFF");
   });
 
   it("渡されていない画面では何も出さない", () => {

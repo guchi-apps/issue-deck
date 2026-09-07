@@ -409,11 +409,7 @@ export function MobileIssueDetail({
     sessions: dispatch.sessions,
   });
   // 「今夜の夜間実行」に積まれているか（#2866）。判定はPCの詳細・一覧の行と同じ引き当て表
-  const nightlyRunMark = findNightlyRunQueuedMark(
-    nightlyRunQueued,
-    issue.repositoryFullName,
-    issue.number,
-  );
+  const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
   const {
     createComment,
     updateComment,

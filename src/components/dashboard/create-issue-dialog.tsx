@@ -258,6 +258,13 @@ type CreateIssueDialogProps = {
   bodyPrefix?: string | null;
   issues: Issue[];
   onCreated: (issue: Issue) => void;
+  /**
+   * 「作成+実装開始」から今夜の夜間実行へ積めたときに呼ぶ（#2866）。
+   *
+   * **ここも実行先に「今夜の夜間実行」を出す**（`includeDispatchTargets`）ので、
+   * Issue詳細と同じく積んだ直後に目印（一覧のチップ）を出すには、この合図が要る。省略可。
+   */
+  onNightlyRunQueued?: () => void;
   /** 出し方（#1728）。既定はダイアログ */
   presentation?: CreateIssuePresentation;
   /**
@@ -320,6 +327,7 @@ export function CreateIssueDialog({
   bodyPrefix,
   issues,
   onCreated,
+  onNightlyRunQueued,
   presentation = "dialog",
   initialHandoff = null,
   cancelLabel,
@@ -1189,6 +1197,7 @@ export function CreateIssueDialog({
             onCreated(updated);
           }}
           onCommentCreated={() => {}}
+          onNightlyRunQueued={onNightlyRunQueued}
           includeDispatchTargets
           actionsDisabledReason={startImplementationDisabledReason(
             startTargetRepository?.hasClaudeWorkflow,

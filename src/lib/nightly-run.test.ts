@@ -255,7 +255,7 @@ describe("夜間実行の目印（#2866）", () => {
       id: "e1",
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 2866,
-      issueId: null,
+      issueId: "9001",
       issueTitle: null,
       targetHost: "subpc",
       agent: "claude",
@@ -286,21 +286,27 @@ describe("夜間実行の目印（#2866）", () => {
     };
   }
 
-  it("リポジトリと番号で引ける表を作る", () => {
+  it("`Issue.id`で引ける表を作る（`owner/repo#番号`の鍵は作らない）", () => {
     const marks = selectNightlyRunQueuedMarks(state());
-    expect(findNightlyRunQueuedMark(marks, "guchi-apps/issue-deck", 2866)).toEqual({
+    expect(findNightlyRunQueuedMark(marks, "9001")).toEqual({
       entryId: "e1",
       startHour: 1,
       enabled: true,
     });
     // 別のIssue・取得前（表そのものが無い）は目印を出さない
-    expect(findNightlyRunQueuedMark(marks, "guchi-apps/issue-deck", 2865)).toBeNull();
-    expect(findNightlyRunQueuedMark(undefined, "guchi-apps/issue-deck", 2866)).toBeNull();
+    expect(findNightlyRunQueuedMark(marks, "9002")).toBeNull();
+    expect(findNightlyRunQueuedMark(undefined, "9001")).toBeNull();
+  });
+
+  it("同期できていないIssue（issueIdがnull）は表へ入れない", () => {
+    expect(selectNightlyRunQueuedMarks(state({ queued: [entry({ issueId: null })] })).size).toBe(0);
   });
 
   it("目印を出すのは`QUEUED`だけ（起動後は進捗の表示が受け持つ）", () => {
     const marks = selectNightlyRunQueuedMarks(
-      state({ queued: [entry({ status: "LAUNCHED" }), entry({ id: "e2", status: "CANCELED", issueNumber: 2 })] }),
+      state({
+        queued: [entry({ status: "LAUNCHED" }), entry({ id: "e2", status: "CANCELED", issueId: "9002" })],
+      }),
     );
     expect(marks.size).toBe(0);
   });
@@ -318,7 +324,7 @@ describe("夜間実行の目印（#2866）", () => {
 
   it("夜間実行がOFFなら、走らないことを言う", () => {
     const mark = { entryId: "e1", startHour: 1, enabled: false };
-    expect(describeNightlyRunMarkChip(mark)).toBe("今夜 OFF");
+    expect(describeNightlyRunMarkChip(mark)).toBe("夜間実行OFF");
     expect(describeNightlyRunMarkTitle(mark)).toContain("OFF");
     expect(describeNightlyRunMarkDetail(mark)).toContain("起動しません");
   });

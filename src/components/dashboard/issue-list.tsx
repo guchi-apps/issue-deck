@@ -846,11 +846,7 @@ export function IssueList({
     const codeReviewSummary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
     // 「今夜の夜間実行」に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
     // ので、この引き当て表だけが手がかりになる。渡されていない画面ではnullでチップも出ない
-    const nightlyRunMark = findNightlyRunQueuedMark(
-      nightlyRunQueued,
-      issue.repositoryFullName,
-      issue.number,
-    );
+    const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,

@@ -2266,6 +2266,9 @@ export function IssueDeckShell({
           bodyPrefix={createDialogBodyPrefix}
           issues={allIssues}
           onCreated={handleIssueCreated}
+          /* 「作成+実装開始」から今夜の予定へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
+             別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
+          onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}
         />
         <BulkCreateCodeReviewIssuesDialog

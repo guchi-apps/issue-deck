@@ -801,11 +801,7 @@ export function IssueDetail({
   });
   // 「今夜の夜間実行」に積まれているか（#2866）。**判定は一覧のチップと同じ引き当て表**で、
   // 一覧では今夜と出ているのに詳細では何も出ない、という食い違いが起きないようにする
-  const nightlyRunMark = findNightlyRunQueuedMark(
-    nightlyRunQueued,
-    issue.repositoryFullName,
-    issue.number,
-  );
+  const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
   // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
