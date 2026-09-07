@@ -995,7 +995,8 @@ export function MobileIssueDetail({
           pullRequestProgress={pullRequestProgress}
         />
 
-        {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で計画パネルの上に置く */}
+        {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の
+            どちらよりも上に置く（#2860でアーティファクトを計画の上へ移した後も変わらない） */}
         {questionRequest && (
           <div {...checkUserTargetProps("question")}>
             {/* **質問が変われば作り直す**（#2158。PCの詳細と同じ理由） */}
@@ -1011,6 +1012,9 @@ export function MobileIssueDetail({
           </div>
         )}
 
+        {/* アーティファクト（#2154・#2860）。PC版と同じく計画パネルのすぐ上に置く（#2190） */}
+        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+
         {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
         {planRequest && (
@@ -1025,9 +1029,6 @@ export function MobileIssueDetail({
             />
           </div>
         )}
-
-        {/* アーティファクト（#2154）。PC版と同じく計画パネルのすぐ下に置く（#2190） */}
-        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
 
         {showStartDialog && (
           <StartImplementationDialog
