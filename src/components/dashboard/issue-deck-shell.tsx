@@ -11,6 +11,7 @@ import {
   type CheckUserToastItem,
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
+import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-create-code-review-issues-dialog";
 import { IssueOrderDialog } from "@/components/dashboard/issue-order-dialog";
 import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
@@ -299,6 +300,14 @@ export function IssueDeckShell({
   const [createDialogTitle, setCreateDialogTitle] = useState<string | null>(null);
   const [createDialogBody, setCreateDialogBody] = useState<string | null>(null);
   /**
+   * コードレビューの指摘をまとめて起票する確認ダイアログの対象（#2859）。
+   * 起点のレビューIssueと、未起票の指摘（呼び出し時点のスナップショット）を持つ。
+   */
+  const [bulkCreateCodeReviewState, setBulkCreateCodeReviewState] = useState<{
+    reviewIssue: Issue;
+    findings: CodeReviewFinding[];
+  } | null>(null);
+  /**
    * 設定変更Issueの切り出し元（#2021）。作成できた時点で、この手作業Issueの`## 前提条件`へ
    * 「作った方が先」と書き足すために覚えておく
    */
@@ -424,6 +433,17 @@ export function IssueDeckShell({
     setCreateDialogBodyPrefix(null);
     setConfigIssueOrigin(null);
     setCreateDialogOpen(true);
+  }
+
+  /**
+   * レビューの指摘を、選んだ分だけまとめて起票する確認ダイアログを開く（#2859）。
+   *
+   * **ここでも起票しない。** 開くのは選択用のダイアログ（`BulkCreateCodeReviewIssuesDialog`）で、
+   * 実際にIssueを作るのはその中で「作成」を押した時点。渡す指摘は呼び出し時点の未起票分の
+   * スナップショットで、ダイアログを開いている間にレビューを回し直しても中身は変わらない。
+   */
+  function openBulkCreateCodeReviewIssuesDialog(issue: Issue, findings: CodeReviewFinding[]) {
+    setBulkCreateCodeReviewState({ reviewIssue: issue, findings });
   }
 
   /**
@@ -1850,6 +1870,7 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onBulkCreateCodeReviewFindingIssues={openBulkCreateCodeReviewIssuesDialog}
                   onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={selectRepositoryByFullName}
                   /* 「いまは実施しない」（#2398）。一覧と同じ引き当て表・同じ操作 */
@@ -2145,6 +2166,7 @@ export function IssueDeckShell({
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
+                  onBulkCreateCodeReviewFindingIssues={openBulkCreateCodeReviewIssuesDialog}
                   onStartCodeReview={openCodeReviewDialog}
                   onSelectRepository={(repositoryFullName) =>
                     setFilters({ repos: [repositoryFullName] })
@@ -2217,6 +2239,16 @@ export function IssueDeckShell({
           issues={allIssues}
           onCreated={handleIssueCreated}
           claudeLocalModel={claudeLocalModel}
+        />
+        <BulkCreateCodeReviewIssuesDialog
+          open={bulkCreateCodeReviewState !== null}
+          onOpenChange={(open) => {
+            if (!open) setBulkCreateCodeReviewState(null);
+          }}
+          findings={bulkCreateCodeReviewState?.findings ?? []}
+          repositoryFullName={bulkCreateCodeReviewState?.reviewIssue.repositoryFullName ?? ""}
+          reviewNumber={bulkCreateCodeReviewState?.reviewIssue.number ?? 0}
+          onCreated={handleIssueCreated}
         />
         <CodeReviewDialog
           open={codeReviewDialogOpen}

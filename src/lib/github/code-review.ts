@@ -380,6 +380,21 @@ export function buildCodeReviewFindingIssueIndex(
 }
 
 /**
+ * まだIssueにしていない指摘だけを残す（#2859）。
+ *
+ * `buildCodeReviewFindingIssueIndex`が返す索引をそのまま使い、判定を1か所にまとめる。
+ * 「まとめてIssueを作成」ボタンの活性・件数表示と、確認ダイアログに並べる指摘の両方が
+ * これを通ることで、一覧に出ている指摘と実際に作られる指摘がずれない。
+ */
+export function filterUncreatedCodeReviewFindings(
+  findings: readonly CodeReviewFinding[],
+  createdFindingIssues: ReadonlyMap<string, number> | undefined,
+): CodeReviewFinding[] {
+  if (!createdFindingIssues || createdFindingIssues.size === 0) return [...findings];
+  return findings.filter((finding) => !createdFindingIssues.has(finding.title));
+}
+
+/**
  * 指摘から起票するIssueの下書き（#698）。**ここでは起票しない。**
  * 埋めた新規作成ダイアログを開くだけで、実際に立てるかどうかは指摘を読んだ人が決める
  * （実機設定の切り出し`buildInfraConfigIssueDraft`と同じ立場）。

@@ -193,6 +193,8 @@ type MobileIssueDetailProps = {
   onCreateConfigIssue: (issue: Issue, target: InfraConfigTarget) => void;
   /** コードレビューの指摘（#698）を、対象リポジトリのIssueとして起票する下書きを開く */
   onCreateCodeReviewFindingIssue: (issue: Issue, finding: CodeReviewFinding) => void;
+  /** 未起票の指摘をまとめて選び、一括で起票する確認ダイアログを開く（#2859） */
+  onBulkCreateCodeReviewFindingIssues: (issue: Issue, findings: CodeReviewFinding[]) => void;
   /** 同じリポジトリのコードレビュー（#698）をもう一度実行するダイアログを開く */
   onStartCodeReview: (repositoryFullName: string) => void;
   onSelectRepository: (repositoryFullName: string) => void;
@@ -228,6 +230,7 @@ export function MobileIssueDetail({
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
+  onBulkCreateCodeReviewFindingIssues,
   onStartCodeReview,
   onSelectRepository,
   snoozes,
@@ -1071,6 +1074,9 @@ export function MobileIssueDetail({
             createdFindingIssues={codeReview.createdFindingIssues}
             onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
             onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
+            onBulkCreateFindingIssues={(findings) =>
+              onBulkCreateCodeReviewFindingIssues(issue, findings)
+            }
           />
         )}
 

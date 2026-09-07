@@ -9,6 +9,7 @@ import {
   CODE_REVIEW_REQUEST_MARKER,
   codeReviewRequestCommentBody,
   countCodeReviewFindings,
+  filterUncreatedCodeReviewFindings,
   findLatestCodeReviewReport,
   formatCodeReviewListCount,
   isCodeReviewIssue,
@@ -185,6 +186,23 @@ describe("buildCodeReviewFindingIssueIndex", () => {
     const index = buildCodeReviewFindingIssueIndex(issues, "guchi-apps/issue-deck");
     expect(index.get("同じ指摘")).toBe(2170);
     expect(index.has("別リポジトリの同名")).toBe(false);
+  });
+});
+
+describe("filterUncreatedCodeReviewFindings（#2859）", () => {
+  it("索引が無ければすべて残す", () => {
+    const report = parseCodeReviewReport(REPORT);
+    expect(filterUncreatedCodeReviewFindings(report!.findings, undefined)).toEqual(
+      report!.findings,
+    );
+  });
+
+  it("起票済みのタイトルだけを除く", () => {
+    const report = parseCodeReviewReport(REPORT);
+    const createdFindingIssues = new Map([["未完了ジョブの判定が種別を見ていない", 2170]]);
+    const remaining = filterUncreatedCodeReviewFindings(report!.findings, createdFindingIssues);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].title).toBe("同じ絞り込みを2か所で組み立てている");
   });
 });
 
