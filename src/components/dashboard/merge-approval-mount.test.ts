@@ -48,3 +48,33 @@ describe("マージ待ちの操作一式の置き場所（#2914）", () => {
     expect(source).not.toContain("<IssuePullRequestList");
   });
 });
+
+/**
+ * 修正依頼の送り先を、PC版とスマホ版で同じに保つ（#2919）。
+ *
+ * 送り先の判定そのものは`resolvePrFixRequestRoute`が持ち、そちらは単体テストで押さえてある。
+ * ここが捕まえるのは**片方の画面だけ判定を通していない／結果を渡し忘れている**形で、
+ * 上の置き忘れと同じ種類の事故（同じIssueをスマホから開いたときだけ挙動が違う）。
+ */
+describe("修正依頼の送り先（#2919）", () => {
+  it.each(DETAIL_SOURCES)("%s は送り先の判定を`resolvePrFixRequestRoute`に任せる", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("resolvePrFixRequestRoute({");
+  });
+
+  it.each(DETAIL_SOURCES)("%s は送り先とその状態を修正依頼欄へ渡す", (path) => {
+    const source = readFileSync(path, "utf8");
+    for (const prop of ["prFixRoute={prFixRoute}", "prFixSessionRejection=", "prFixSessionError="]) {
+      expect(source).toContain(prop);
+    }
+  });
+
+  /**
+   * **呼び戻すときのCLIを渡し忘れない。** `POST /api/dispatch`は`agent`が無いと既定
+   * （Claude Code）へ落とすため、書き忘れるとCodexで進んでいたIssueが黙って別のCLIで立ち上がる。
+   */
+  it.each(DETAIL_SOURCES)("%s は呼び戻すときに`agent`を引き継ぐ", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("agent: prFixRoute.agent");
+  });
+});

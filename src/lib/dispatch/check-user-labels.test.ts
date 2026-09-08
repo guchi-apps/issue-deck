@@ -172,6 +172,32 @@ describe("removeCheckUserWithReason", () => {
     expect(removeIssueLabel.mock.calls.map((call) => call[4])).toEqual(["00.check-user"]);
   });
 
+  it("allowMergeReasonを渡したときだけ01.check-mergeも外す（#2919）", async () => {
+    // マージ待ちの「修正を依頼する」を押したのは、その札の持ち主である人自身。
+    // 押した内容がセッションへ届いた（`succeeded`）ので、印を片付ける
+    fetchIssueLabelNames.mockResolvedValue(["00.check-user", "01.check-merge"]);
+    removeIssueLabel.mockResolvedValueOnce(["01.check-merge", "11.local"]);
+
+    await removeCheckUserWithReason("guchi-apps", "issue-deck", 10, "token", {
+      allowMergeReason: true,
+    });
+
+    expect(removeIssueLabel.mock.calls.map((call) => call[4])).toEqual([
+      "00.check-user",
+      "01.check-merge",
+    ]);
+  });
+
+  it("allowMergeReasonを渡しても01.check-answeredは外さない（#2919）", async () => {
+    fetchIssueLabelNames.mockResolvedValue(["00.check-user", "01.check-answered"]);
+
+    await removeCheckUserWithReason("guchi-apps", "issue-deck", 11, "token", {
+      allowMergeReason: true,
+    });
+
+    expect(removeIssueLabel).not.toHaveBeenCalled();
+  });
+
   it("ラベルを読めなくても外す側に倒す（確認待ちが解けないままになるのを避ける。#1905）", async () => {
     fetchIssueLabelNames.mockRejectedValue(new Error("boom"));
     removeIssueLabel.mockResolvedValueOnce(["01.check-input"]);

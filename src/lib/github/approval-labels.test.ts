@@ -5,6 +5,7 @@ import {
   canCompleteManualStep,
   checkUserReason,
   isCheckUserReasonLabel,
+  isFixedInstructionRemovableCheckUserReason,
   isSessionRemovableCheckUserReason,
   labelsWithCheckUserReason,
   isLabelFilterPresetActive,
@@ -377,6 +378,37 @@ describe("isSessionRemovableCheckUserReason（#1905）", () => {
 
   it("理由が読めない（ラベル未配布）ときは従来どおり外す", () => {
     expect(isSessionRemovableCheckUserReason(null)).toBe(true);
+  });
+});
+
+describe("isFixedInstructionRemovableCheckUserReason（#2919）", () => {
+  it("セッションが外してよい理由はそのまま外してよい", () => {
+    for (const reason of ["plan", "input", "blocked"] as const) {
+      expect(isFixedInstructionRemovableCheckUserReason(reason)).toBe(true);
+    }
+    expect(isFixedInstructionRemovableCheckUserReason(null)).toBe(true);
+  });
+
+  it("既定では#1905のガードそのままで、mergeは外さない", () => {
+    // 停滞からの復旧（#2886）が通る道。同じIssueにマージ待ちの札が乗っていても落とさない
+    expect(isFixedInstructionRemovableCheckUserReason("merge")).toBe(false);
+    expect(isFixedInstructionRemovableCheckUserReason("merge", {})).toBe(false);
+    expect(isFixedInstructionRemovableCheckUserReason("merge", { allowMergeReason: false })).toBe(
+      false,
+    );
+  });
+
+  it("allowMergeReasonを渡したときだけmergeも外す", () => {
+    // マージ待ちの「修正を依頼する」を押したのは、その札の持ち主である人自身
+    expect(isFixedInstructionRemovableCheckUserReason("merge", { allowMergeReason: true })).toBe(
+      true,
+    );
+  });
+
+  it("allowMergeReasonを渡してもansweredは外さない（無人実行の合図のため）", () => {
+    expect(isFixedInstructionRemovableCheckUserReason("answered", { allowMergeReason: true })).toBe(
+      false,
+    );
   });
 });
 

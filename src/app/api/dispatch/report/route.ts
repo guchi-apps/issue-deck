@@ -7,7 +7,8 @@ import {
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
-import { resolveInterruptedSessionCheckUser } from "@/lib/dispatch/session-escalation";
+import { PR_FIX_SESSION_INSTRUCTION } from "@/lib/dispatch/pr-fix-request";
+import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
 import {
@@ -131,17 +132,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 停滞からの復旧が**実際に届いた**ら、引き上げのときに付いた`00.check-user`を理由ラベルごと
-  // 外す（#2886）。**積んだ時点では外さない**——送出は非同期で、承認プロンプトの表示中・
+  // 固定文面の追加指示が**実際に届いた**ら、`00.check-user`を理由ラベルごと外す（#2886・#2919）。
+  // 対象は`recovery`を立てて積まれた2つの経路——停滞からの復旧（引き上げで付いた札）と、
+  // マージ待ちの修正依頼をローカルセッションへ知らせるもの（マージ待ちで付いた札）。
+  // **積んだ時点では外さない**——送出は非同期で、承認プロンプトの表示中・
   // 作業中・入力欄に打ちかけがある場合はpollerが見送るため、押した時点で外すと「何も届いて
   // いないのに札だけ消える」。押したこと自体は「人が続け方を決めた」合図だが、**その指示が
   // セッションへ入ったことまで確かめてから**印を片付ける。
   if (result.job.kind === "INSTRUCTION" && result.job.recovery && status === "succeeded") {
     // **失敗しても報告そのものは受け付ける**（自動実行を進める処理と同じ扱い）。
-    // `resolveInterruptedSessionCheckUser`は内部で握り潰して真偽値を返す
-    await resolveInterruptedSessionCheckUser({
+    // `resolveFixedInstructionCheckUser`は内部で握り潰して真偽値を返す
+    await resolveFixedInstructionCheckUser({
       repositoryFullName: result.job.repositoryFullName,
       issueNumber: result.job.issueNumber,
+      // **`01.check-merge`まで外すのはマージ待ちの修正依頼だけ**（#2919）。どちらの経路も
+      // `recovery`で積まれるため、送った本文で見分ける——受け口が本文をその1行に限っている
+      // ので、これが立つのは`POST /api/dispatch/pr-fix-notify`を通ったジョブだけになる。
+      // 停滞からの復旧（#2886）で広げると、同じIssueに乗っているマージ待ちの札まで落ちる
+      allowMergeReason: result.job.instruction === PR_FIX_SESSION_INSTRUCTION,
     });
   }
 

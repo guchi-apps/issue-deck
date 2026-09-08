@@ -48,13 +48,19 @@ import { StartImplementationDialog } from "@/components/dashboard/start-implemen
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import {
+  describeDispatchEnqueueRejection,
+  describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
+  findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
+  resolveDispatchTargetRejection,
+  resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { prFixRequestLabels, resolvePrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -370,6 +376,9 @@ export function IssueDetail({
     numbers: ReadonlySet<number>;
   } | null>(null);
   const [declineTargetNumber, setDeclineTargetNumber] = useState<number | null>(null);
+  // 修正依頼をセッションへ流せなかった理由（#2919）。**コメントは投稿できている**ので、
+  // ここを黙って落とすと「コメントは増えたのにセッションは知らない」が残る
+  const [prFixSessionError, setPrFixSessionError] = useState<string | null>(null);
   const issueKey = issue ? `${issue.repositoryFullName}#${issue.number}` : "";
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
@@ -518,15 +527,18 @@ export function IssueDetail({
    * issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
    * 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
    */
-  async function updateLabelsAndComment(newLabels: string[], commentBody: string) {
-    if (!issue) return;
+  async function updateLabelsAndComment(
+    newLabels: string[],
+    commentBody: string,
+  ): Promise<boolean> {
+    if (!issue) return false;
     const originalLabels = issue.labels.map((label) => label.name);
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       labels: newLabels,
     });
-    if (!updated) return;
+    if (!updated) return false;
     onIssueUpdated(updated);
 
     const [owner, repo] = issue.repositoryFullName.split("/");
@@ -539,7 +551,7 @@ export function IssueDetail({
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-      return;
+      return true;
     }
 
     const rolledBack = await updateIssue({
@@ -551,6 +563,7 @@ export function IssueDetail({
     setCommentMutationError((prev) =>
       rolledBack ? withRollbackNotice(prev ?? "") : withRollbackFailureNotice(prev ?? ""),
     );
+    return false;
   }
 
   async function handleApprove(text?: string) {
@@ -583,9 +596,50 @@ export function IssueDetail({
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestContinuationCommentBody());
   }
 
+  /**
+   * マージ待ちの「修正を依頼する」（#2919）。**依頼をIssueコメントとして残すのは4通りとも同じで、
+   * 変わるのはラベルと「誰に知らせるか」だけ。**
+   *
+   * - 無人実行が担当: 今までどおり。`@claude …`のコメントが`claude-issue-dispatch.yml`を起こす
+   * - ローカルセッションが担当: コメントを残したうえで、そのセッションへ固定の1行を流す
+   * - セッションが終了: コメントを残したうえで、既存の復旧と同じ起動ジョブで呼び戻す
+   * - セッションの記録も無い: `11.local`を外してから投稿し、無人実行が拾える状態にする
+   *
+   * **サブPCへ積むのはコメントが残ってから。** 先に積むと、読みに行った先にまだ依頼が無い。
+   */
   async function handleRequestPrFix(reason: string) {
     if (!issue) return;
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
+    setPrFixSessionError(null);
+    const body = requestPrFixCommentBody(reason);
+    const labels = prFixRequestLabels(prFixRoute, issue.labels);
+    // ラベルを変えない送り先ではPATCHを投げない（`00.check-user`は届いてから外す）
+    const posted = labels ? await updateLabelsAndComment(labels, body) : await postComment(body);
+    if (!posted) return;
+
+    if (prFixRoute.kind === "session") {
+      const result = await dispatch.sendPrFixNotify({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!result.ok) setPrFixSessionError(result.message);
+      return;
+    }
+    if (prFixRoute.kind === "resume") {
+      // 呼び戻すのは「セッションを復旧」とまったく同じ起動ジョブ（#1830）。`11.local`は
+      // 付いたままなので、`useLocalSessionLaunch`の`ensureLocalLabel`に当たる処理は要らない
+      const enqueued = await dispatch.enqueue({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+        // **呼び戻すCLIを引き継ぐ**（`SessionRecoveryButton`と同じ）。省くと受け口が既定の
+        // Claude Codeへ落とし、Codexで進んでいたIssueが黙って別のCLIで立ち上がる
+        agent: prFixRoute.agent,
+      });
+      if (!enqueued) {
+        setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
+      }
+    }
   }
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
@@ -754,6 +808,50 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // マージ待ちの「修正を依頼する」をどこへ送るか（#2919）。`11.local`が付いている間、
+  // `@claude`コメントを投稿しても無人実行は断るだけなので、担当先で送り方を変える
+  const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
+  // サブPCへ積めない理由は、押す前に出して押せなくする（`SessionRecoveryButton`と同じ立場）。
+  // **判定は送り先ごとに既存のものをそのまま使う**——生きているセッションへ送るのは追加指示
+  // （#1012）と同じ判定、呼び戻すのは起動ジョブ（#1830）と同じ判定。ここで別の判定を書くと、
+  // 押せる条件が場所によってずれる
+  const prFixSessionRejection = (() => {
+    if (prFixRoute.kind === "session") {
+      const controlJob = findSessionControlJobForIssue(
+        dispatch.jobs,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const rejection = resolveSessionControlRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        session: issueSession,
+        kind: "INSTRUCTION",
+        hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+      });
+      return rejection
+        ? describeSessionControlRejection(rejection, {
+            hostName: prFixRoute.host,
+            kind: "INSTRUCTION",
+          })
+        : null;
+    }
+    if (prFixRoute.kind === "resume") {
+      const rejection = resolveDispatchTargetRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+        blockingSession,
+      });
+      return rejection
+        ? describeDispatchEnqueueRejection(rejection, {
+            hostName: prFixRoute.host,
+            repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
+          })
+        : null;
+    }
+    return null;
+  })();
   // 計画への返事待ち（#2061）。**待っている間、端末には承認プロンプトが出ていない**ので、
   // ここが唯一の答える場所になる（切れると従来どおり端末のプロンプトへ戻る）
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
@@ -1208,6 +1306,9 @@ export function IssueDetail({
                   issueSuggestions={issueSuggestions}
                   onRequestPrFix={handleRequestPrFix}
                   isRequestingPrFix={isCommentSubmitting}
+                  prFixRoute={prFixRoute}
+                  prFixSessionRejection={prFixSessionRejection}
+                  prFixSessionError={prFixSessionError}
                 />
               )}
             </IssueDetailSection>
@@ -1390,6 +1491,9 @@ export function IssueDetail({
               onWithdraw={handleWithdraw}
               onRequestContinuation={handleRequestContinuation}
               onRequestPrFix={handleRequestPrFix}
+              prFixRoute={prFixRoute}
+              prFixSessionRejection={prFixSessionRejection}
+              prFixSessionError={prFixSessionError}
               reviewFindings={reviewFindings}
               reviewPullRequestNumber={reviewPullRequestNumber}
               isLoadingReviewFindings={isLoadingReviewFindings}

@@ -952,9 +952,15 @@ export async function enqueueSessionControlJob(params: {
    */
   instruction?: string | null;
   /**
-   * その追加指示が「停滞からの復旧」か（#2886。`kind`が`INSTRUCTION`のときだけ意味がある）。
-   * 立てられるのは`POST /api/dispatch/session-recovery`だけで、そちらが本文が固定文面の
-   * どれかであることと、セッションが今も停滞していることを確かめてから渡す。
+   * その追加指示が**届いたことを確かめてから確認待ちを外す**ものか（#2886。`kind`が
+   * `INSTRUCTION`のときだけ意味がある）。立てられるのは画面が用意した固定文面を送る2つの
+   * 受け口だけで、どちらも**本文がその固定文面であること**と**送ってよい状態であること**を
+   * サーバー側で確かめてから渡す。
+   *
+   * - `POST /api/dispatch/session-recovery`（#2886）: 停滞からの復旧。セッションが今も
+   *   停滞していることを確かめる
+   * - `POST /api/dispatch/pr-fix-notify`（#2919）: マージ待ちの修正依頼をローカルセッションへ
+   *   知らせる。セッションが今も生きていることを確かめる
    */
   recovery?: boolean;
   requestedByUserId: string | null;
