@@ -861,6 +861,9 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
+  // （`checkUserGuidance`へ渡す同名の式と同じ判定）
+  const planDecisionPending = planRequest?.status === "WAITING";
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
@@ -1214,11 +1217,15 @@ export function IssueDetail({
             </div>
           )}
 
-          {/* アーティファクト（#2154・#2860）。**計画パネルのすぐ上**に置く——`25.artifact-required`の
-              基本形は「計画と見た目を1回のやり取りで承認する」なので、承認する場所の隣に
-              見た目への入口が要る。承認するかどうかを判断する材料（見た目）が、判断そのもの
-              （計画の承認）より先に目に入るようにする。畳めるセクションではなく独立したカード（#2190） */}
-          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+          {/* アーティファクト（#2154・#2860・#2926）。**計画承認待ちの間だけ計画パネルのすぐ上**に
+              置く——`25.artifact-required`の基本形は「計画と見た目を1回のやり取りで承認する」
+              なので、承認する場所の隣に見た目への入口が要る。承認するかどうかを判断する材料
+              （見た目）が、判断そのもの（計画の承認）より先に目に入るようにする。承認後の本来の
+              置き場所は対応PRの並びの上側（下記）で、ここに出すのは初めて見るときに見逃されない
+              ようにするための一時的な位置。畳めるセクションではなく独立したカード（#2190） */}
+          {planDecisionPending && (
+            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+          )}
 
           {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
               待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1235,6 +1242,13 @@ export function IssueDetail({
                 onCheckUserResolved={handleCheckUserResolved}
               />
             </div>
+          )}
+
+          {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
+              上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
+              承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
+          {!planDecisionPending && (
+            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
           )}
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、

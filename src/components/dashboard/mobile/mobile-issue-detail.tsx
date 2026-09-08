@@ -420,6 +420,9 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
+  // （PCの詳細と同じ判定）
+  const planDecisionPending = planRequest?.status === "WAITING";
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
@@ -1119,8 +1122,12 @@ export function MobileIssueDetail({
           </div>
         )}
 
-        {/* アーティファクト（#2154・#2860）。PC版と同じく計画パネルのすぐ上に置く（#2190） */}
-        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+        {/* アーティファクト（#2154・#2860・#2926）。PC版と同じく、計画承認待ちの間だけ
+            計画パネルのすぐ上に置く（#2190）。承認後の本来の置き場所は対応PRの並びの上側
+            （下記）で、ここに出すのは初めて見るときに見逃されないようにするための一時的な位置 */}
+        {planDecisionPending && (
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+        )}
 
         {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1232,6 +1239,13 @@ export function MobileIssueDetail({
             repositoryFullName={issue.repositoryFullName}
             idPrefix="mobile"
           />
+        )}
+
+        {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
+            上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
+            承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
+        {!planDecisionPending && (
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
         )}
 
         {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
