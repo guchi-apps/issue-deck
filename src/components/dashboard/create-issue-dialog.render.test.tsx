@@ -108,6 +108,7 @@ function makeHost(): DispatchHostView {
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,
+    manualStepVpsCapable: null,
     planReviewCapable: null,
     codeReviewCapable: null,
     codexCapable: null,

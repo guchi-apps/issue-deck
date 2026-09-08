@@ -9,7 +9,7 @@ import {
   extractShellBlock,
   findInteractiveCommand,
   findPlaceholder,
-  isSubpcManualStepDevice,
+  resolveManualStepRunTarget,
 } from "@/lib/manual-step-command";
 import {
   parseManualStepGuide,
@@ -59,7 +59,7 @@ export type ManualStepQuestionGuide = {
   /** 本文に書かれたコマンド（`<…>`が入ったまま）。ちょうど1つのときだけ。無ければ`null` */
   command: string | null;
   /**
-   * この手順を代行できない理由（サブPC以外・コマンドが1つでない・対話が要る・値を埋める）。
+   * この手順を代行できない理由（サブPC・VPS以外・コマンドが1つでない・対話が要る・値を埋める）。
    * 代行できる手順では`null`。
    *
    * **文言は`describeManualStepExecutionRejection`から取る**（計画レビューの指摘3）。
@@ -201,7 +201,7 @@ function toHalfWidthDigits(value: string): string {
  * 手順の理由より後に判定されるので、この4つだけを拾えば`host`が`null`でも取りこぼさない。
  */
 const STEP_LEVEL_REJECTIONS: ManualStepExecutionRejection[] = [
-  "device_not_subpc",
+  "device_not_runnable",
   "no_command",
   "interactive_command",
   "placeholder_command",
@@ -218,12 +218,13 @@ type StepRejection = {
 function rejectionOf(guide: ManualStepGuide, step: ManualStepGuideStep): StepRejection {
   const command = extractShellBlock(step.markdown);
   const device = resolveManualStepDevice(guide.where, step);
-  const interactiveCommand = findInteractiveCommand(command);
+  const runTarget = resolveManualStepRunTarget(device);
+  const interactiveCommand = findInteractiveCommand(command, runTarget);
   const placeholder = findPlaceholder(command);
   const rejection = resolveManualStepExecutionRejection({
     host: null,
     isManualStepIssue: true,
-    isSubpcDevice: isSubpcManualStepDevice(device),
+    runTarget,
     hasCommand: command !== null,
     interactiveCommand,
     placeholder,

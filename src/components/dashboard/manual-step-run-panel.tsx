@@ -36,7 +36,10 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import type { ManualStepRunEntry } from "@/lib/manual-step-autorun";
-import { isSubpcManualStepDevice, MANUAL_STEP_TIMEOUT_SECONDS } from "@/lib/manual-step-command";
+import {
+  resolveManualStepRunTarget,
+  MANUAL_STEP_TIMEOUT_SECONDS,
+} from "@/lib/manual-step-command";
 import type { ManualStepGuide } from "@/lib/manual-step-guide";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -50,7 +53,7 @@ import type { Issue } from "@/types/issue";
  * 変わっていれば実行されず、理由が返る。
  *
  * **代行できないときもボタンを消さずに理由を出す**（起動ボタン・セッション復旧と同じ作法）。
- * サブPC以外で実行する手作業・コマンドが1つに定まらない手順・pollerが未対応、のどれなのかが
+ * サブPC・VPS以外で実行する手作業・コマンドが1つに定まらない手順・pollerが未対応、のどれなのかが
  * 分からないと、人は手元で実行してよいのかを判断できない。
  *
  * **失敗したら原因を調べられる**（#1869）。自動実行中で同意がある場合は自動で調べ、
@@ -138,7 +141,7 @@ export function ManualStepRunPanel({
     host,
     isManualStepIssue: isManualStepIssue(issue.labels),
     // デバイスは**この項目のもの**（#2052）。実行計画が解決済みなので、ここで引き直さない
-    isSubpcDevice: isSubpcManualStepDevice(entry.device),
+    runTarget: resolveManualStepRunTarget(entry.device),
     hasCommand: command !== null,
     // 対話が要るコマンド（#2025）・プレースホルダ（#2051）かどうかは実行計画が判定済み。
     // ここで見直さない
@@ -277,6 +280,15 @@ export function ManualStepRunPanel({
     if (!result.ok) setError(result.message);
   }
 
+  // **VPSの実行は、中断してもVPS側が即座に止まるとは限らない**（#2901）。PTYを取らないSSHでは
+  // サブPC側の`ssh`を消してもリモートのコマンドは走り続けるので、止まるのはVPS側に掛けた
+  // 打ち切り（`MANUAL_STEP_TIMEOUT_SECONDS`）のとき。押す前にそう書いておく——
+  // 「止めました」だけを出すと、本番サーバーで走り続けていることが画面のどこにも出ない
+  const vpsAbortNote =
+    resolveManualStepRunTarget(entry.device) === "vps"
+      ? `VPSで走っているコマンドは、サブPC側を止めてもVPS側の打ち切り（${MANUAL_STEP_TIMEOUT_SECONDS / 60}分）まで走り続けることがあります。`
+      : "";
+
   // 実行中・実行済みは、押せない理由よりそちらを出す（押した結果の方が直近の事実）
   if (job && (isRunning || job.status !== "QUEUED")) {
     // 走り出した後は取り消せない（#1179）。**代わりに中断ジョブで止める**（#1882）。
@@ -305,9 +317,9 @@ export function ManualStepRunPanel({
             job.status !== "RUNNING"
               ? null
               : abortJob !== null
-                ? "中断を送りました（届くまで数秒〜30秒かかります）。"
+                ? `中断を送りました（届くまで数秒〜30秒かかります）。${vpsAbortNote}`
                 : abortRejection === null
-                  ? null
+                  ? (vpsAbortNote || null)
                   : describeManualStepAbortRejection(abortRejection, {
                       hostName: host?.name ?? "サブPC",
                       timeoutMinutes: MANUAL_STEP_TIMEOUT_SECONDS / 60,

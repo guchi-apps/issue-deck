@@ -1309,6 +1309,7 @@ describe("dismissDispatchJob", () => {
       recovery: false,
       command: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       exitCode: null,
@@ -1387,6 +1388,7 @@ describe("prioritizeDispatchJob", () => {
       recovery: false,
       command: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       exitCode: null,
@@ -1513,6 +1515,7 @@ describe("listDispatchState のIssueタイトル解決", () => {
       recovery: false,
       command: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       exitCode: null,
@@ -1748,6 +1751,7 @@ describe("enqueueManualStepJob", () => {
           kind: "MANUAL_STEP",
           command: COMMAND,
           manualStepLine: STEP_LINE,
+          manualStepRunTarget: "subpc",
           // Issue単位で1件まで（順番に実行する前提の手順が入れ替わらないようにする）
           activeKey: `manual_step:${REPOSITORY}#1823`,
           requestedByUserId: "user-1",
@@ -1873,14 +1877,31 @@ describe("enqueueManualStepJob", () => {
     expect(dispatchJobCreate).not.toHaveBeenCalled();
   });
 
-  // VPS・1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
-  it("実行するデバイスがサブPCでなければ積まない", async () => {
-    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**VPS**") });
+  // 1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
+  it("実行するデバイスがサブPC・VPSでなければ積まない", async () => {
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**ブラウザ**") });
     const result = await run();
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.rejection).toBe("device_not_subpc");
+    expect(result.rejection).toBe("device_not_runnable");
+  });
+
+  // #2901。VPSの手順はサブPCからSSHで実行する。**ジョブに実行先を載せる**ので、
+  // pollerは接続先を自分の設定から引ける（issue-deckは接続先を知らない）
+  it("VPSの手順は実行先をジョブに載せて積む", async () => {
+    setUpIssue({ body: MANUAL_STEP_BODY.replace("**サブPC**", "**VPS**") });
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ manualStepCapable: true, manualStepVpsCapable: true }),
+    );
+    const result = await run();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ manualStepRunTarget: "vps" }),
+      }),
+    );
   });
 
   it("コマンドを1つに定められない手順は積まない", async () => {
@@ -1947,6 +1968,7 @@ describe("enqueueManualStepJob", () => {
             kind: "MANUAL_STEP",
             command: VERIFICATION_COMMAND,
             manualStepLine: VERIFICATION_LINE,
+            manualStepRunTarget: "subpc",
           }),
         }),
       );
@@ -1986,6 +2008,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       recovery: false,
       command: "git pull --ff-only",
       manualStepLine: 12,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       tmuxSessionName: null,
@@ -2037,6 +2060,7 @@ describe("reportDispatchJob の代行実行の結果", () => {
       recovery: false,
       command: "git pull --ff-only",
       manualStepLine: 12,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       tmuxSessionName: null,
@@ -2082,6 +2106,7 @@ describe("enqueueCodexPairingJob（#2524）", () => {
       command: null,
       placeholderValues: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       exitCode: null,
@@ -2156,6 +2181,7 @@ describe("reportDispatchJob のペアリングコード（#2524）", () => {
       recovery: false,
       command: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       tmuxSessionName: null,

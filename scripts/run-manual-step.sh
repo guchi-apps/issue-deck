@@ -17,8 +17,12 @@
 # 使い方（pollerが呼ぶ。人が直接叩くことは想定していない）:
 #   scripts/run-manual-step.sh <ペイロードのファイル>
 #
-# ペイロードは `{"jobId": "...", "command": "..."}` のJSON。
+# ペイロードは `{"jobId": "...", "command": "...", "runTarget": "subpc|vps"}` のJSON。
 # **argvにコマンドを載せない**（`ps`で他のユーザーからも見えるため）。読み終えたら消す。
+#
+# `runTarget`が`vps`なら、コマンドはこのホストではなく**VPSへSSHして**実行する（#2901）。
+# 接続先は`dispatch.env`の`MANUAL_STEP_VPS_SSH_TARGET`（例: `github-user@<tailnetのホスト名>`）。
+# **issue-deckは接続先を知らない**——ジョブに載るのは`subpc`／`vps`の2語だけ。
 #
 # 実行するコマンドの正当性（手作業Issueの本文に書かれたものか）は**呼び出し側で確かめてある**。
 # ここは受け取ったものを実行して結果を返すことに徹する。
@@ -43,6 +47,15 @@ MANUAL_STEP_TIMEOUT_SECONDS="${MANUAL_STEP_TIMEOUT_SECONDS:-300}"
 # issue-deck側の受け口（`MANUAL_STEP_OUTPUT_MAX_LENGTH`）でも同じ長さで切る。
 MANUAL_STEP_OUTPUT_MAX_CHARS="${MANUAL_STEP_OUTPUT_MAX_CHARS:-8000}"
 
+# VPSの手順（#2901）をどこへ繋いで実行するか（`github-user@<tailnetのホスト名>`）。
+# **リポジトリには置かない**（issue-deckはPUBLICで、接続先は単体では資格情報でなくとも
+# 接続先の構成情報にあたる）。未設定ならVPSの手順は実行しない——pollerも同じ値を見て
+# `manualStepVpsCapable`を申告するので、通常はここへ届く前に配られない。
+MANUAL_STEP_VPS_SSH_TARGET="${MANUAL_STEP_VPS_SSH_TARGET:-}"
+# SSHの接続待ち。**打ち切り（5分）より十分に短くする**——繋がらないことが分かるまでに
+# 打ち切りまで待つと、画面には「時間切れ」しか残らず理由が分からない。
+MANUAL_STEP_VPS_SSH_CONNECT_TIMEOUT="${MANUAL_STEP_VPS_SSH_CONNECT_TIMEOUT:-15}"
+
 REPORT_RETRY_ATTEMPTS=3
 REPORT_RETRY_INTERVAL=5
 
@@ -59,6 +72,10 @@ fi
 
 JOB_ID="$(jq -r '.jobId // ""' "$PAYLOAD_FILE")"
 COMMAND="$(jq -r '.command // ""' "$PAYLOAD_FILE")"
+# **未知の語・空はサブPC扱い**（#2901）。この経路は#1828からずっとサブPCで実行するもので、
+# 実行先を読み取れなかったときに向こう側へ倒すと、意図しないホストでコマンドが走る
+RUN_TARGET="$(jq -r '.runTarget // "subpc"' "$PAYLOAD_FILE")"
+[[ "$RUN_TARGET" == "vps" ]] || RUN_TARGET="subpc"
 rm -f "$PAYLOAD_FILE"
 
 if [[ -z "$JOB_ID" || -z "$COMMAND" ]]; then
@@ -122,9 +139,38 @@ trap cleanup EXIT
 #
 # **標準入力は閉じる。** 対話を求めるコマンドがあっても、答える相手がいないまま待ち続けない。
 cd "$HOME" || exit 1
-timeout --signal=TERM --kill-after=10s "$MANUAL_STEP_TIMEOUT_SECONDS" \
-  bash -c "$COMMAND" </dev/null >"$OUTPUT_FILE" 2>&1
-EXIT_CODE=$?
+
+if [[ "$RUN_TARGET" == "vps" ]]; then
+  if [[ -z "$MANUAL_STEP_VPS_SSH_TARGET" ]]; then
+    : >"$TRIMMED_FILE"
+    report failed \
+      "VPSへの接続先（MANUAL_STEP_VPS_SSH_TARGET）が設定されていません（$CONFIG_FILE）。" \
+      1 "$TRIMMED_FILE"
+    exit 0
+  fi
+  # **コマンドはargvに載せず標準入力で渡す**（ローカル実行と同じ理由。VPS側の`ps`にも出さない）。
+  # 向こうの`bash -s`はこの標準入力をスクリプトとして読むので、**手順の側から見た標準入力は
+  # 実質的に閉じている**（対話を求めるコマンドは代行の対象から外してある）。
+  # cwdは接続先のホーム——ローカル実行と同じで、手順はテンプレートどおり自分で`cd`する。
+  #
+  # **`timeout`はVPS側にも掛ける**（#2901の計画レビューG1・指摘1）。PTYを取らないSSHでは、
+  # ローカルの`ssh`をTERMで殺しても**リモートのコマンドは走り続ける**（実測で確認した）。
+  # ローカルだけに掛けると、5分の打ち切りも「中断する」（`systemctl --user stop`）も
+  # サブPC側の`ssh`を消すだけになり、本番サーバーでコマンドが走り続ける。
+  # ローカル側は接続の分だけ長くしておき、**先に切れるのは必ずVPS側**にする。
+  timeout --signal=TERM --kill-after=10s \
+    $(( MANUAL_STEP_TIMEOUT_SECONDS + MANUAL_STEP_VPS_SSH_CONNECT_TIMEOUT + 15 )) \
+    ssh -o BatchMode=yes \
+      -o ConnectTimeout="$MANUAL_STEP_VPS_SSH_CONNECT_TIMEOUT" \
+      "$MANUAL_STEP_VPS_SSH_TARGET" \
+      "timeout --signal=TERM --kill-after=10s $MANUAL_STEP_TIMEOUT_SECONDS bash -s" \
+    <<<"$COMMAND" >"$OUTPUT_FILE" 2>&1
+  EXIT_CODE=$?
+else
+  timeout --signal=TERM --kill-after=10s "$MANUAL_STEP_TIMEOUT_SECONDS" \
+    bash -c "$COMMAND" </dev/null >"$OUTPUT_FILE" 2>&1
+  EXIT_CODE=$?
+fi
 
 # 末尾を残して切る（先頭ではなく末尾なのは、エラーが最後に出るため）。
 #
@@ -134,14 +180,23 @@ EXIT_CODE=$?
 tail -c $(( MANUAL_STEP_OUTPUT_MAX_CHARS * 3 )) "$OUTPUT_FILE" 2>/dev/null |
   iconv -c -f UTF-8 -t UTF-8 >"$TRIMMED_FILE" 2>/dev/null || true
 
+# **どこで実行したのかを結果にも書く**（#2901）。画面には手順のデバイスも出ているが、
+# 実行がSSH越しだったかどうかは、失敗を読むときにいちばん先に知りたい。
+if [[ "$RUN_TARGET" == "vps" ]]; then
+  WHERE="VPSで"
+else
+  WHERE=""
+fi
+
 if (( EXIT_CODE == 0 )); then
-  report succeeded "実行しました（終了コード 0）" "$EXIT_CODE" "$TRIMMED_FILE"
+  report succeeded "${WHERE}実行しました（終了コード 0）" "$EXIT_CODE" "$TRIMMED_FILE"
 elif (( EXIT_CODE == 124 || EXIT_CODE == 137 )); then
   # `timeout`が打ち切った（124はTERM、137はKILLまで至った場合）
   report failed "${MANUAL_STEP_TIMEOUT_SECONDS}秒を過ぎたため打ち切りました。" \
     "$EXIT_CODE" "$TRIMMED_FILE"
 else
-  report failed "コマンドが終了コード $EXIT_CODE で終わりました。" "$EXIT_CODE" "$TRIMMED_FILE"
+  report failed "${WHERE}コマンドが終了コード $EXIT_CODE で終わりました。" \
+    "$EXIT_CODE" "$TRIMMED_FILE"
 fi
 
 # **実行そのものの成否はジョブの結果として返している。** このスクリプト自身は、報告できたか

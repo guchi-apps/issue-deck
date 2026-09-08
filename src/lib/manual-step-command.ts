@@ -363,14 +363,31 @@ const INTERACTIVE_COMMANDS = [
 ] as const;
 
 /**
+ * VPSの手順でだけ対話が要るコマンド（#2901）。
+ *
+ * VPSには**NOPASSWDの設定が無い**（`github-user`・`guchi`のどちらでも`sudo -n`はパスワードを
+ * 求める）。SSH越しの代行実行には端末も標準入力も無いので、`sudo`を含む手順は必ず
+ * `sudo: a password is required`で落ちる。サブPCの手順は事情が違う（NOPASSWDが効く）ので、
+ * **実行先がVPSのときだけ**この語を足す。
+ */
+const VPS_INTERACTIVE_COMMANDS = ["sudo"] as const;
+
+/**
  * コマンドの中に対話が要るコマンドがあれば、その表記を返す（無ければ`null`）。
  *
  * 見るのは**コマンドの文字列だけ**で、実行してみて判断することはしない。行頭が`#`の行は
  * コメントなので見ない。`eval "$(op signin)"`のように括弧・パイプの内側にあるものは拾う。
  * 文字列リテラルの中（`echo "op signin してください"`）まで見分けはしないが、**誤検知しても
  * 「あなたが実行」になるだけ**で、人が実行すればそのまま先へ進める。
+ *
+ * `target`はその手順の実行先（`resolveManualStepRunTarget`の結果）。**渡さなければ従来どおり
+ * 実行先に依らない判定**になるので、本文の書式検査のように実行先を持たない呼び出し側は
+ * 省略してよい。
  */
-export function findInteractiveCommand(command: string | null): string | null {
+export function findInteractiveCommand(
+  command: string | null,
+  target?: ManualStepRunTarget | null,
+): string | null {
   if (!command) return null;
   const lines = command
     .split("\n")
@@ -378,7 +395,11 @@ export function findInteractiveCommand(command: string | null): string | null {
   if (lines.length === 0) return null;
 
   const body = lines.join("\n");
-  return INTERACTIVE_COMMANDS.find((entry) => interactivePattern(entry).test(body)) ?? null;
+  const candidates =
+    target === "vps"
+      ? [...INTERACTIVE_COMMANDS, ...VPS_INTERACTIVE_COMMANDS]
+      : INTERACTIVE_COMMANDS;
+  return candidates.find((entry) => interactivePattern(entry).test(body)) ?? null;
 }
 
 /** `op signin`のような語の並びを、コマンドの位置に現れたときだけ当たる正規表現にする */
@@ -394,17 +415,55 @@ function interactivePattern(command: string): RegExp {
 /**
  * その手順を実行する端末がサブPCか。
  *
- * **サブPC以外は一律で代行しない。** VPS・1Password・GitHub App・ブラウザでの設定は
- * issue-deckから到達できず、pollerが居るのはサブPCだけ。表記の揺れ（`サブPC`・`sub pc`・
- * `subpc`）は吸収するが、**読み取れなければ代行しない側へ倒す**（`null`はfalse）。
- *
- * **端末名の定義は`manual-step-guide.ts`の1か所から引く**（#2052）。ここに独自の文字列一致を
- * 持っていたために「ブラウザとサブPC」で真になり、ブラウザ作業まで代行対象になっていた。
- * 1つに絞れないものはfalseにするので、**渡すのは`resolveManualStepDevice`で解決済みの値**。
+ * **代行の可否そのものは`resolveManualStepRunTarget`が持つ**（#2901でVPSが加わった）。
+ * ここは「サブPCで走るか」だけを見たい呼び出し側のための薄い判定で、表記の揺れ
+ * （`サブPC`・`sub pc`・`subpc`）の吸収も端末名の定義（#2052）もあちらから引く。
  */
 export function isSubpcManualStepDevice(device: string | null): boolean {
+  return resolveManualStepRunTarget(device) === "subpc";
+}
+
+/**
+ * 代行実行をどこで走らせるか（#2901）。
+ *
+ * - `"subpc"` … サブPC上の`scripts/run-manual-step.sh`がそのまま実行する（#1828からの経路）
+ * - `"vps"` … 同じスクリプトが、サブPCからVPSへSSHして実行する
+ * - `null` … 代行しない（メインPC・ブラウザ・端末が1つに決まらない本文）
+ *
+ * **1つに絞れないものは`null`**（読み取れなければ代行しない側へ倒す）。渡すのは
+ * `resolveManualStepDevice`で解決済みの値で、端末名の定義は`manual-step-guide.ts`の1か所から引く。
+ *
+ * VPSを足せたのは、VPSがtailnetへ参加してサブPCからTailscale SSHで到達できるようになったため。
+ * **実行の口は増やしていない**——ジョブも照合もpollerも#1828のままで、最後の1歩の走らせ先だけが
+ * 変わる。到達できるかはpollerが申告し（`manualStepVpsCapable`）、申告が無いホストへは配らない。
+ */
+export type ManualStepRunTarget = "subpc" | "vps";
+
+export function resolveManualStepRunTarget(
+  device: string | null,
+): ManualStepRunTarget | null {
   const names = matchManualStepDeviceNames(device);
-  return names.length === 1 && names[0] === "サブPC";
+  if (names.length !== 1) return null;
+  if (names[0] === "サブPC") return "subpc";
+  if (names[0] === "VPS") return "vps";
+  return null;
+}
+
+/** 実行先を画面・ログに出すときの表記 */
+export function describeManualStepRunTarget(target: ManualStepRunTarget): string {
+  return target === "vps" ? "VPS" : "サブPC";
+}
+
+/**
+ * ジョブの列・pollerからの入力を実行先として読む。**既知の2語だけを通し、それ以外は
+ * `"subpc"`にする**（`previewAction`と同じ作法。列を手で書き換えても、pollerが受け取る
+ * 実行先は`subpc`か`vps`のどちらかにしかならない）。
+ *
+ * `null`（この列より前に積まれたジョブ）も`"subpc"`。#2901より前のジョブはすべてサブPCで
+ * 実行するものだった。
+ */
+export function parseManualStepRunTarget(value: string | null): ManualStepRunTarget {
+  return value === "vps" ? "vps" : "subpc";
 }
 
 /**

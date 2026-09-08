@@ -37,8 +37,9 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * サブPCへのディスパッチ（#1179）の、画面側から使う入口。
  *
  * 方式はpull型で、ここはジョブを**置くだけ**。サブPCのpollerが
- * `POST /api/dispatch/claim`で取りに来る（VPSがtailnetに参加しておらず、Tailscale SSHに
- * forced commandが無いためpush型は採れない。#1176）。
+ * `POST /api/dispatch/claim`で取りに来る（Tailscale SSHにforced commandが無く、push型は
+ * 採れない。#1176。VPSはその後tailnetへ参加したが、**逆向き＝サブPCからVPSへ**の
+ * 代行実行にだけ使っている。#2901）。
  *
  * 認証はSupabaseのログインセッション。サブPC側の3本（claim・report・hosts）だけが
  * 共有シークレット認証で、そちらとは値も経路も分けている。

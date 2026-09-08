@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { describeManualStepExecutionRejection } from "@/lib/dispatch/dispatch-job";
 import { describeManualStepRunPlan, type ManualStepRunPlan } from "@/lib/manual-step-autorun";
-import { MANUAL_STEP_TIMEOUT_SECONDS } from "@/lib/manual-step-command";
+import {
+  resolveManualStepRunTarget,
+  MANUAL_STEP_TIMEOUT_SECONDS,
+} from "@/lib/manual-step-command";
 import { cn } from "@/lib/utils";
 
 /**
@@ -87,7 +90,13 @@ export function ManualStepAutoRunPanel({
                     実行済み
                   </span>
                 ) : entry.rejection === null ? (
-                  "代行できる"
+                  // **VPSで走るものは、承認する前にそう分かるようにする**（#2901）。
+                  // 実行はサブPCからのSSH越しで、cwdもVPS側のホームになる
+                  resolveManualStepRunTarget(entry.device) === "vps" ? (
+                    "VPSで代行できる"
+                  ) : (
+                    "代行できる"
+                  )
                 ) : (
                   "あなたが実行"
                 )}

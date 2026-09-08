@@ -27,6 +27,7 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     placeholderValues: null,
     resolvedCommand: null,
     manualStepLine: null,
+    manualStepRunTarget: "subpc",
     targetJobId: null,
     previewAction: null,
     exitCode: null,

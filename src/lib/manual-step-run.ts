@@ -513,7 +513,7 @@ function describeFailedJob(
 function pauseReasonFor(rejection: ManualStepExecutionRejection): "USER" | "ENQUEUE_FAILED" {
   switch (rejection) {
     case "no_command":
-    case "device_not_subpc":
+    case "device_not_runnable":
     case "not_manual_step":
     // 対話が要るコマンド（#2025）。**人が実行するしかない**ので、ホスト側の事情と混ぜない
     case "interactive_command":
@@ -650,6 +650,7 @@ async function loadRunContext(run: ManualStepRun, now: Date): Promise<RunContext
             online: isDispatchHostOnline(host.lastSeenAt, now),
             manualStepCapable: host.manualStepCapable,
             manualStepValuesCapable: host.manualStepValuesCapable,
+            manualStepVpsCapable: host.manualStepVpsCapable,
           }
         : null,
       isManualStepIssue: issue.labels.some((label) => label.name === MANUAL_STEP_LABEL),

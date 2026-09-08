@@ -106,12 +106,22 @@ describe("resolveManualStepPatrolTarget", () => {
     });
   });
 
-  it("サブPC以外のデバイスは対象外", () => {
-    const body = BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "VPS");
+  it("サブPC・VPS以外のデバイスは対象外", () => {
+    const body = BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "ブラウザ");
     expect(resolveManualStepPatrolTarget(body, true)).toEqual({
       patrollable: false,
-      rejection: "device_not_subpc",
+      rejection: "device_not_runnable",
     });
+  });
+
+  // #2901。VPSの確認コマンドも巡回できる。**どこで流すかを返す**ので、
+  // 呼び出し側はSSHへ到達できるホストが居るときだけ積める
+  it("VPSのデバイスは実行先つきで対象にする", () => {
+    const body = BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "VPS");
+    const target = resolveManualStepPatrolTarget(body, true);
+    expect(target.patrollable).toBe(true);
+    if (!target.patrollable) return;
+    expect(target.runTarget).toBe("vps");
   });
 
   it("確認コマンドが無ければ対象外", () => {
