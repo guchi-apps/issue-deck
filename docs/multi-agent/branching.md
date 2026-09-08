@@ -51,6 +51,35 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - 掃除を`run-issue-session.sh`のtrap（セッション終了時）で自動化はしない。「あとで見返したい」「PRにコメントが付いたら直す」という用途を壊すため、セッションの終了とは切り離した定期実行にしている（下記「掃除を回す起点」）。
 - 放置すると効くのはディスクだけではない。#1076でworktreeを再利用するようにしたため、**マージ済みIssueで再開すると、developから分岐し直されていない古いブランチのまま作業を始めてしまう**（以前は「既に存在します」で止まっていた）。そのため`start-issue.sh`は再開時にマージ済みPRの有無を確認し、見つかったら警告する。詳細は[local-quick-start.md](local-quick-start.md)の「マージ済みIssueで再開したときの扱い」。
 
+### `main`へ直接マージするリポジトリ（#2911）
+
+**作業ブランチのベースを決めるのは`CLAUDE.md`ではなく、GitHubのデフォルトブランチ。**
+汎用ランチャー（`scripts/generic-start-issue.sh`の`resolve_base_branch()`）は`origin/HEAD`を
+正としてベースを選ぶため、デフォルトブランチが`main`のリポジトリでは`issue-<番号>`が`main`から
+切られ、PRも`main`宛になる。そのリポジトリの`CLAUDE.md`に「`develop`→`main`運用」と書いてあっても
+起動側はそこを読まないので、宣言と実運用が静かにずれる。
+
+- 実例は`guchi-apps/vps`と`guchi-apps/subpc`。どちらも`develop`ブランチが残ったままデフォルトが
+  `main`で、2026-09-08時点で`develop`はvpsが16コミット・subpcが49コミット遅れていた。
+  **フリートでこの組み合わせ（`develop`があるのにデフォルトが`main`）はこの2つだけ**で、
+  他は`develop`運用・単一ブランチ運用のどちらかに揃っている
+- 確かめ方は次の2つ。ブランチ画面の表示が実態と合わないときは、まずここを見る
+
+  ```bash
+  gh api repos/guchi-apps/vps --jq .default_branch
+  gh api repos/guchi-apps/vps/compare/main...develop --jq '{ahead_by,behind_by,status}'
+  ```
+
+- **ブランチ画面（`/api/branch-flow`）は`main...develop`だけを見る。** developを通らない変更は
+  「未リリース」に数えられず、運んだリリースPRも無いので版を決められない。以前はこの状態の
+  レーンが`unassignedLanes`（「すべての版を表示」を押すまで非表示）へ落ちていたため、
+  vpsの直近の作業が画面から丸ごと消えていた。現在は**最後にマージされたPRのbaseが`main`なら
+  `merged-to-main`の束**（`src/lib/branch-flow.ts`の`MERGED_TO_MAIN_GROUP_KEY`）へまとめ、
+  「mainへマージ済み」として既定で表示する。版もリリースPRも持たないため、
+  デプロイの状態（`deploy`）は判定せずnullのままにする
+- デフォルトブランチと`CLAUDE.md`の記述を揃えるのは各リポジトリ側の作業で、issue-deckの
+  セッションからは実装しない（「担当Issue以外の実装」にあたる）。対象リポジトリへIssueを起票する
+
 ### 掃除を回す起点（#1716）
 
 **判定するスクリプトがあっても、実行の起点が無ければ何も掃除されない。** `cleanup-worktrees.sh`は

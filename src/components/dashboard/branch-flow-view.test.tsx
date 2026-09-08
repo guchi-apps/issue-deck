@@ -533,6 +533,45 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("v3.17.0で本番反映")).toBeNull();
     });
 
+    it("mainへ直接マージされた作業は「mainへマージ済み」の束として既定で出す（#2911）", () => {
+      renderFlow({
+        pullRequests: [
+          makePullRequest({
+            number: 228,
+            baseRef: "main",
+            headRef: "issue-227",
+            linkedIssueNumber: 227,
+            state: "closed",
+            merged: true,
+            mergedAt: "2026-09-08T14:13:16Z",
+          }),
+        ],
+        // developはバージョンバンプのマージ1件ぶんだけ先行している＝出すものは無い
+        branchStatuses: [
+          branchStatus({
+            developVsMain: {
+              aheadBy: 1,
+              behindBy: 16,
+              sameContent: false,
+              units: {
+                mergeCount: 0,
+                directCount: 0,
+                versionBumpCount: 1,
+                mergedHeadRefs: ["release/v4.0.1"],
+              },
+            },
+          }),
+        ],
+      });
+
+      openRepository();
+      expect(screen.getByText("mainへマージ済み")).toBeTruthy();
+      // 「すべての版を表示」を押さなくてもレーンが出る
+      expect(screen.getByText("issue-227")).toBeTruthy();
+      // デプロイまで届いたかは判定していないので「本番反映」とは言わない
+      expect(screen.getByText("9/8にマージ")).toBeTruthy();
+    });
+
     it("本番未反映の束は「リリース中」または「本番未反映」として先頭に出す", () => {
       renderFlow({
         pullRequests: [

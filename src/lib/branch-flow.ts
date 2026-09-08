@@ -34,6 +34,14 @@ export const MAIN_BRANCH = "main";
 export const DEVELOP_BRANCH = "develop";
 
 /**
+ * `main`へ直接マージされた作業をまとめる束のkey（#2911）。
+ *
+ * リリースPRが運んだ束（`release-<番号>`）とは違い、**版を持たない**。画面はこのkeyを見て
+ * 見出しを「mainへマージ済み」にする（`v◯`とも「リリース済み」とも言えないため）。
+ */
+export const MERGED_TO_MAIN_GROUP_KEY = "merged-to-main";
+
+/**
  * まだdevelopへ入っていない＝作業ブランチが生きているはずの進捗（#1455）。
  *
  * `ready`・`planning`はまだブランチが無くて当然、`develop`以降はマージ済みなので、
@@ -835,6 +843,7 @@ export function resolveDeployState({
  *
  * - まだdevelopへ入っていないレーン（マージ待ち・PR未作成・未マージのクローズ）は`activeLanes`
  * - developへ入ったが本番未反映のレーンは、先頭の束（未リリース）
+ * - `main`へ直接マージされたレーンは`merged-to-main`の束（#2911）
  * - 本番へ出たレーンは、それを運んだリリースPRごとの束
  * - どの版か特定できないレーン（取得したPRの範囲より古い）は`unassignedLanes`
  *
@@ -864,6 +873,7 @@ function groupLanesByRelease({
 } {
   const activeLanes: BranchFlowLane[] = [];
   const pendingLanes: BranchFlowLane[] = [];
+  const mergedToMainLanes: BranchFlowLane[] = [];
   const unassignedLanes: BranchFlowLane[] = [];
   const lanesByRelease = new Map<number, BranchFlowLane[]>();
 
@@ -875,6 +885,8 @@ function groupLanesByRelease({
     // マージ時刻が無い（`releaseState`がnull）レーンも、版を決められない点は`unknown`と同じ
     if (lane.releaseState === null || lane.releaseState.kind === "unknown") {
       unassignedLanes.push(lane);
+    } else if (lane.releaseState.kind === "merged-to-main") {
+      mergedToMainLanes.push(lane);
     } else if (lane.releaseState.kind === "pending") {
       pendingLanes.push(lane);
     } else {
@@ -909,6 +921,29 @@ function groupLanesByRelease({
     );
   }
 
+  // `main`へ直接マージされた作業の束（#2911）。**未リリースの束の直後・版ごとの束の前に置く。**
+  // developを経由しないリポジトリ（vps・subpc・docs等）ではリリースPRが1件も無く、
+  // 版ごとの束もできないため、ここに置かないと直近の作業が「すべての版を表示」を押すまで
+  // 画面に出ない（既定で出すのは配列の先頭からの連続した並びだけ。#1586・#1711）。
+  if (mergedToMainLanes.length > 0) {
+    const sortedLanes = mergedToMainLanes.sort(compareLanes);
+    releaseGroups.push(
+      toReleaseGroup({
+        key: MERGED_TO_MAIN_GROUP_KEY,
+        // 版もリリースPRも無い。見出しは画面がkeyから決める
+        version: null,
+        pullRequest: null,
+        bumpPullRequest: null,
+        // 束の日付は、この束に入っている作業のうち最後にmainへ入った時刻
+        mergedAt: laneMergedAts(sortedLanes).at(-1) ?? null,
+        // デプロイの状態はリリースPRのマージ時刻と突き合わせて決まる（#1579）ため、
+        // リリースPRを持たないこの束については何も言えない
+        deploy: null,
+        lanes: sortedLanes,
+      }),
+    );
+  }
+
   const latestReleaseNumber = releases.at(-1)?.pullRequestNumber ?? null;
 
   // 本番へ出た束は新しい順。中身が1本も無い版は、画面に出しても線が増えるだけなので作らない
@@ -935,6 +970,17 @@ function groupLanesByRelease({
     releaseGroups,
     unassignedLanes: unassignedLanes.sort(compareLanes),
   };
+}
+
+/** レーン群がマージされた時刻を古い順に並べたもの（#2911） */
+function laneMergedAts(lanes: BranchFlowLane[]): string[] {
+  return lanes
+    .flatMap((lane) =>
+      lane.pullRequests
+        .filter((pullRequest) => pullRequest.merged && pullRequest.mergedAt !== null)
+        .map((pullRequest) => pullRequest.mergedAt as string),
+    )
+    .sort();
 }
 
 function toReleaseGroup(
@@ -1057,8 +1103,11 @@ function resolveReleaseState(
 }
 
 /**
- * レーン1本の版を、3つの材料をこの優先順で突き合わせて決める（#2661・#2704）。
+ * レーン1本の版を、4つの材料をこの優先順で突き合わせて決める（#2661・#2704・#2911）。
  *
+ * 0. **作業PRが`main`へ直接マージされているなら`merged-to-main`**（#2911）。以降の判定は
+ *    どれも「作業はdevelopへ入り、リリースPRがmainへ運ぶ」前提で組んであり、developを
+ *    通らない変更に当てると必ず答えを外す。
  * 1. **`develop`の中身が`main`に入りきっているなら`pending`にしない**（#2704）。
  *    「出すものが無い」ことは`unreleasedCommitCount`が実差分から確認済みなので、
  *    そこにコミットの到達だけを見る判定を重ねると「次のリリースに乗る変更」が消えなくなる。
@@ -1070,16 +1119,20 @@ function resolveReleaseState(
 function resolveLaneReleaseState({
   branchName,
   mergedAt,
+  mergedBaseRef,
   releases,
   unreleasedHeadRefs,
   developContentInMain,
 }: {
   branchName: string;
   mergedAt: string;
+  /** そのレーンで最後にマージされたPRのbase。`main`ならdevelopを経由していない（#2911） */
+  mergedBaseRef: string | null;
   releases: MergedRelease[];
   unreleasedHeadRefs: ReadonlySet<string>;
   developContentInMain: boolean;
 }): BranchFlowReleaseState {
+  if (mergedBaseRef === MAIN_BRANCH) return { kind: "merged-to-main" };
   if (developContentInMain) {
     const state = resolveReleaseState(mergedAt, releases);
     return state.kind === "pending" ? { kind: "unknown" } : state;
@@ -1130,11 +1183,13 @@ function buildLane({
 
   // 版が意味を持つのは「マージされた変更」だけ。複数PRがぶら下がるレーンでは、
   // 実際にdevelopへ入ったマージ（最後にマージされたもの）を基準にする。
-  const mergedAt = pullRequests
+  // **baseもここから取る**（#2911）。`main`へ直接マージされたレーンは、リリースPRとの
+  // 突き合わせでは版を決められない（そもそも運んだリリースPRが存在しない）。
+  const lastMerged = pullRequests
     .filter((pullRequest) => pullRequest.merged && pullRequest.mergedAt !== null)
-    .map((pullRequest) => pullRequest.mergedAt as string)
-    .sort()
+    .sort((a, b) => (a.mergedAt as string).localeCompare(b.mergedAt as string))
     .at(-1);
+  const mergedAt = lastMerged?.mergedAt ?? undefined;
 
   return {
     key: branchName,
@@ -1147,11 +1202,12 @@ function buildLane({
     ),
     status: resolveLaneStatus(sorted),
     releaseState:
-      mergedAt === undefined
+      mergedAt === undefined || mergedAt === null
         ? null
         : resolveLaneReleaseState({
             branchName,
             mergedAt,
+            mergedBaseRef: lastMerged?.baseRef ?? null,
             releases,
             unreleasedHeadRefs,
             developContentInMain,
