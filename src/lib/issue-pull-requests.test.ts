@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   canMergeIssuePullRequest,
-  isIssuePullRequestSettling,
+  ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS,
+  ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+  issuePullRequestPollIntervalMs,
   issuePullRequestStateLabel,
   selectIssuePullRequests,
   summarizeIssuePullRequestStates,
@@ -79,32 +81,73 @@ describe("canMergeIssuePullRequest", () => {
   });
 });
 
-describe("isIssuePullRequestSettling", () => {
-  it("CI実行中はまだ動いている", () => {
-    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "in_progress" }))).toBe(true);
+describe("issuePullRequestPollIntervalMs", () => {
+  it("CI実行中は20秒で追う", () => {
+    expect(issuePullRequestPollIntervalMs([pullRequest({ ciStatus: "in_progress" })])).toBe(
+      ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+    );
   });
 
-  it("自動マージ可否の判定中はまだ動いている", () => {
+  it("自動マージ可否の判定中は20秒で追う", () => {
     expect(
-      isIssuePullRequestSettling(
-        pullRequest({ mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE } }),
-      ),
-    ).toBe(true);
+      issuePullRequestPollIntervalMs([
+        pullRequest({
+          mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
   });
 
-  it("CIが通っていても自動修復が走っていればまだ動いている（#2145）", () => {
+  it("CIが通っていても自動修復が走っていれば20秒で追う（#2145）", () => {
     expect(
-      isIssuePullRequestSettling(
+      issuePullRequestPollIntervalMs([
         pullRequest({
           ciStatus: "success",
           repairRun: { kind: "conflict", startedAt: "2026-08-22T00:00:00.000Z", runUrl: null },
         }),
-      ),
-    ).toBe(true);
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
   });
 
-  it("CIが確定して判定も修復も無ければ動いていない", () => {
-    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "failure" }))).toBe(false);
+  it("コンフリクトだけが理由なら1分へ落とす（誰かが直すまで残るため。#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: false }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS);
+  });
+
+  it("コンフリクトと数分で確定するものが混ざれば短い方を採る（#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ number: 1, ciStatus: "success", mergeable: false }),
+        pullRequest({ number: 2, ciStatus: "in_progress" }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
+  });
+
+  it("コンフリクトが解消されれば取り直さない（#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: true }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("コンフリクト有無が未判定（null）なら取り直さない（判定前をコンフリクトとして扱わない）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: null }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("CIが確定して判定も修復もコンフリクトも無ければ取り直さない", () => {
+    expect(issuePullRequestPollIntervalMs([pullRequest({ ciStatus: "failure" })])).toBeNull();
+  });
+
+  it("対応PRが1件も無ければ取り直さない", () => {
+    expect(issuePullRequestPollIntervalMs([])).toBeNull();
   });
 });
 

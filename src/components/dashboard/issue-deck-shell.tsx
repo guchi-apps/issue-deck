@@ -682,6 +682,16 @@ export function IssueDeckShell({
   const openPullRequests = usePullRequests(
     isFlowPaneActive ? "all" : "open",
     pullRequestAutoRefreshIntervalMs,
+    // **コンフリクト表示が出る画面を開いている間は、コンフリクトが残っているあいだ粗く
+    // 取り直す**（#2915）。「コンフリクトあり」はこの一覧の`mergeable`だけを見て描いており、
+    // Issue一覧の行の添え字（`issue-pull-request-progress.ts`）・確認待ちのマージ待ちカード・
+    // Issueから重ねて開くPR詳細（#2149。`filters.pane`は`issues`のままなので上の10秒には
+    // 掛からない）が同じ材料を使う。**コンフリクトが残っているかはフック側が判断する**ので、
+    // ここで渡すのは「その画面を開いているか」だけ。間隔をIssue一覧向けと同じ1分にするのは、
+    // 解消は自動でも数分かかるもので、それより細かく見ても消費が増えるだけのため
+    isIssuePaneActive || isPullRequestPaneActive
+      ? ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS
+      : null,
   );
 
   // 用の済んだPush通知を、この端末の通知センターから閉じる（#2407）。`public/sw.js`が

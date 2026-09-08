@@ -1648,12 +1648,29 @@ export function POST(request: NextRequest) {
   2回言うことになる。**肩代わりジョブ（`claude-review-fallback`）は数えない**（`00.check-user`を
   付けるだけでレビューをやり直さないため）。取得は既存のGraphQLの応答から読むだけで、
   **GitHub APIの消費は増えない**。
-- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145。
-  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)の
-  `isIssuePullRequestSettling`）。コンフリクトの自動解消と自動マージ可否の判定は**CIが通過した
-  まま**動くため、CI実行中だけを見て止めると、解消が終わってもバッジが「自動解消中」で固まり、
-  マージボタンも出てこない（Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものが
-  あるか**で判断する。
+- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145・#2915。
+  [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の
+  `issuePullRequestPollIntervalMs`が間隔を決め、
+  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)が回す）。
+  コンフリクトの自動解消と自動マージ可否の判定は**CIが通過したまま**動くため、CI実行中だけを
+  見て止めると、解消が終わってもバッジが「自動解消中」で固まり、マージボタンも出てこない
+  （Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものがあるか**で判断する。
+  - **コンフリクト（`mergeable === false`）も「まだ動くもの」に数える**（#2915）。
+    数えていなかった頃は、CIもレビューも終わったコンフリクト中のPRで取り直しが止まり、
+    裏で解消されても「コンフリクトあり」の赤いピルがIssueを開き直すまで残っていた。
+    **修復run（`repairRun`）では代用できない**——行が立つのはissue-deckから起動した経路
+    （画面のボタン・コンフリクト巡回）だけで、`claude-conflict-resolve.yml`がGitHub側の
+    イベントで自分から動いたときはDBに何も残らない。
+  - **ただし間隔は2段に分ける**（#2915）。CI・判定・自動修復は数分で確定するので20秒、
+    コンフリクトだけが理由のときは1分。**回数・時間での打ち切りは置かない**——諦めた後に
+    解消されると、直そうとしている「消えない表示」がそのまま戻ってくるため。
+  - **「コンフリクトあり」が出るのはIssue詳細だけではない**（#2915）。Issue一覧の行の添え字
+    （[`lib/issue-pull-request-progress.ts`](../src/lib/issue-pull-request-progress.ts)）・
+    確認待ちのマージ待ちカード・Issueから重ねて開くPR詳細（#2149）は、材料が
+    [`hooks/use-pull-requests.ts`](../src/hooks/use-pull-requests.ts)のPR一覧のほうにある。
+    そこにも**コンフリクトが残っている間だけ有効になる間隔**（`conflictAutoRefreshIntervalMs`）を
+    渡している。条件を「画面を開いているか」（呼び出し側）と「コンフリクトが残っているか」
+    （取得結果）に割っているのは、片方だけでは決められないため。どちらかが欠ければ回さない。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が

@@ -394,6 +394,37 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
   コンフリクトの巡回（`conflict-sweep-run.ts`）はコンフリクト有無を毎回取っているので、
   そのついでに解消済みのPRの行を`finished`へ倒す
 
+### コンフリクト表示が消えるのは、画面が取り直したときだけ（#2915）
+
+「コンフリクトあり」（`ConflictBadge`）と「コンフリクトを自動解消」（`repairKindsFor`）は
+**`mergeable === false`だけを条件に描いており、コンフリクト状態をDBに持っていない**（PRそのものを
+保存するテーブルが無く、毎回GitHubから取り直している）。したがって**表示が古いままになる原因は
+値のクリア漏れではなく、その画面が取り直していないこと**に限られる。原因を探すときはまず
+「その画面はいま自動更新しているか」を見る。
+
+| 画面 | 取り直しの間隔 | 条件 |
+| --- | --- | --- |
+| PR一覧・PR詳細（PRペイン） | 10秒 | PR画面（ペイン・スマホの画面）を開いている間 |
+| Issue一覧の添え字・確認待ちのカード・Issueから重ねて開くPR詳細 | 60秒 | Issueペイン／PRペインを開いていて、コンフリクトしているopen PRが1件以上ある（#2915）。または`Develop PR`・`Release`のIssueが1件以上ある（#2816） |
+| Issue詳細の対応PR | コンフリクトだけが理由なら60秒、CI・判定・自動修復が動いていれば20秒 | 状態が確定していない対応PRが1件以上ある |
+
+**取り直す条件と間隔の正は[docs/code-map.md](../code-map.md)の「対応PRのポーリングを止める条件は
+「CI実行中か」だけにしない」**（`issuePullRequestPollIntervalMs`・`conflictAutoRefreshIntervalMs`の
+設計理由もそこにある）。ここでは重複して書かない。
+
+**「解消しました」の報告と画面が食い違ったら、画面を疑う前にGitHubの実状を引く**（#2915）。
+自動解消は着手時点のdevelopをマージするため、**その最中にdevelopが進むと、成功として報告した
+直後から本当にコンフリクトしている。** この状態では画面の「コンフリクトあり」は正しい。
+
+```bash
+gh api repos/<owner>/<repo>/compare/develop...<headブランチ> --jq '{status,ahead_by,behind_by}'
+gh api repos/<owner>/<repo>/pulls/<番号> --jq '{mergeable,mergeable_state}'
+```
+
+`behind_by`が0でなく`mergeable_state`が`dirty`なら、直すべきなのは表示ではない。#2915では
+guchi-apps/stockly#41がこれで、解消コミットは13:44時点のdevelopをマージしていたが、その時点で
+developは既に4コミット先へ進んでいた（次の巡回・イベントで解消し直されるまで残る）。
+
 ## 本番デプロイの一時的な失敗の再実行（#2134）
 
 mainへマージした後の本番デプロイ（`deploy.yml`）が失敗したとき、これを自動で拾う仕組みが
