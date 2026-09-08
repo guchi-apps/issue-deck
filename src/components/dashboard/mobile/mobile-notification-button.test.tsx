@@ -46,6 +46,7 @@ function repository(fullName: string): ConnectedRepository {
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   };
 }
 

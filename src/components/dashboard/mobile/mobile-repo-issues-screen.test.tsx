@@ -34,6 +34,7 @@ const REPOSITORY: ConnectedRepository = {
   hidden: false,
   favorite: false,
   excludedFromIssueCreation: false,
+  releaseCheckSince: null,
 };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {

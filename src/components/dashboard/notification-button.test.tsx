@@ -44,6 +44,7 @@ function repository(
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
     ...overrides,
   };
 }

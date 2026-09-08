@@ -1270,6 +1270,18 @@ export function IssueDeckShell({
         })),
     [repositories],
   );
+  // 対象の材料は`ConnectedRepository`（サーバーが描いた時点で入っている）から作る。
+  // リリース履歴APIの応答に相乗りさせると、選択欄が重い取得の完了まで全部オフに見える。
+  const releaseCheckTargets = useMemo(
+    () =>
+      repositories
+        .filter((repository) => repository.releaseCheckSince !== null)
+        .map((repository) => ({
+          repoFullName: repository.fullName,
+          since: repository.releaseCheckSince as string,
+        })),
+    [repositories],
+  );
   // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
   // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
   // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
@@ -1449,6 +1461,55 @@ export function IssueDeckShell({
       return;
     }
     selectFlowPane();
+  }
+
+  /**
+   * リリース後の動作確認の対象リポジトリを切り替える（#2930）。
+   *
+   * **表示・非表示のトグルと同じ形**（楽観的に`repositories`を書き換え、失敗したら戻す）。
+   * 基準時刻（`releaseCheckSince`）はサーバーが持つ値が正で、すでに対象なら押し直しても
+   * 動かない——動かすと、未確認のまま残っていたリリースが黙って対象外になる。
+   */
+  async function handleSetReleaseCheckTarget(
+    repository: { id: string; fullName: string },
+    targeted: boolean,
+  ) {
+    const optimisticSince = targeted ? new Date().toISOString() : null;
+    setRepositories((prev) =>
+      prev.map((repo) =>
+        repo.id === repository.id ? { ...repo, releaseCheckSince: optimisticSince } : repo,
+      ),
+    );
+
+    const previousSince =
+      repositories.find((repo) => repo.id === repository.id)?.releaseCheckSince ?? null;
+
+    try {
+      const response = await fetch("/api/repositories/release-checks/targets", {
+        method: targeted ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id }),
+      });
+      if (!response.ok) throw new Error("failed to update release check target");
+      const json = (await response.json()) as { since?: string };
+      if (targeted && json.since) {
+        setRepositories((prev) =>
+          prev.map((repo) =>
+            repo.id === repository.id ? { ...repo, releaseCheckSince: json.since ?? null } : repo,
+          ),
+        );
+      }
+      // 対象を増やすと、まだ取っていない古いリリースまで未確認の対象になりうるので取り直す
+      // （APIは対象リポジトリだけ`since`まで遡ってページを足す）。
+      releaseHistory.refresh();
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update release check target", error);
+      setRepositories((prev) =>
+        prev.map((repo) =>
+          repo.id === repository.id ? { ...repo, releaseCheckSince: previousSince } : repo,
+        ),
+      );
+    }
   }
 
   async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
@@ -1713,11 +1774,11 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
-                  checkTargets={releaseHistory.checkTargets}
+                  checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}
                   checkRepositoryOptions={releaseCheckRepositoryOptions}
                   onToggleChecked={releaseHistory.setReleaseChecked}
-                  onToggleCheckTarget={releaseHistory.setCheckTarget}
+                  onToggleCheckTarget={handleSetReleaseCheckTarget}
                 />
               )}
 
@@ -2082,11 +2143,11 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
-                  checkTargets={releaseHistory.checkTargets}
+                  checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}
                   checkRepositoryOptions={releaseCheckRepositoryOptions}
                   onToggleChecked={releaseHistory.setReleaseChecked}
-                  onToggleCheckTarget={releaseHistory.setCheckTarget}
+                  onToggleCheckTarget={handleSetReleaseCheckTarget}
                 />
               </div>
             </div>

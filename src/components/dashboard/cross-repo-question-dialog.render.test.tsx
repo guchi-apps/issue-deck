@@ -100,6 +100,7 @@ function makeQuestionRepository(): ConnectedRepository {
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   };
 }
 
@@ -116,6 +117,7 @@ function makeRepository(): ConnectedRepository {
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   };
 }
 

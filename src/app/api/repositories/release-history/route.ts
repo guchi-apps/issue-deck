@@ -5,11 +5,26 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchRecentReleases, type ReleaseHistoryItem } from "@/lib/github/release-api";
-import type { ReleaseCheckRecord, ReleaseCheckTargetSummary } from "@/lib/release-check";
+import { hasReachedReleaseCheckSince, type ReleaseCheckRecord } from "@/lib/release-check";
 import { mergeReleaseHistory } from "@/lib/release-history";
 
 /** リポジトリ1件あたりの取得件数（#2726）。フリート全体でも数百件程度に収まる想定 */
 const PER_REPOSITORY_LIMIT = 20;
+
+/**
+ * 動作確認の対象リポジトリで、基準時刻（`ReleaseCheckTarget.createdAt`）へ届くまで
+ * 遡ってよいページ数の上限（#2930）。
+ *
+ * **1ページ（20件）は、リリースの多いリポジトリでは数日ぶりにしかならない。** issue-deck自身は
+ * 直近7日で22件リリースしており、1ページだと約6日ぶんしか見えない。確認を1週間サボると、
+ * 未確認のカードが一覧から静かに落ち、「未確認 N件」からも消える——いちばん漏れやすい
+ * ケース（放置したリリース）で機能しなくなる。
+ *
+ * 遡るのは対象リポジトリだけで、しかも**基準時刻より古いリリースが1件出た時点で止める**ので、
+ * 対象に加えた直後は1ページで済む。ページが伸びるのは確認を溜めているあいだだけ。
+ * この上限（5ページ＝100件）はissue-deckの実測で約1か月ぶんにあたる。
+ */
+const MAX_PAGES_FOR_CHECK_TARGET = 5;
 
 export function GET() {
   return withGithubApiFeature("release_history", handleGET);
@@ -51,10 +66,10 @@ async function handleGET() {
     }),
   ]);
 
-  const checkTargets: ReleaseCheckTargetSummary[] = checkTargetRows.map((row) => ({
-    repoFullName: row.repository.fullName,
-    since: row.createdAt.toISOString(),
-  }));
+  // repoFullName → 対象に加えた時刻（この時点まで遡って取る）
+  const checkSinceMsByFullName = new Map(
+    checkTargetRows.map((row) => [row.repository.fullName, row.createdAt.getTime()]),
+  );
   const checkRecords: ReleaseCheckRecord[] = checkRecordRows.map((row) => ({
     repoFullName: row.repository.fullName,
     tagName: row.tagName,
@@ -76,12 +91,8 @@ async function handleGET() {
     repositories.map(async (repository): Promise<ReleaseHistoryItem[]> => {
       try {
         const token = await tokenFor(repository.installation.installationId);
-        return await fetchRecentReleases(
-          repository.ownerLogin,
-          repository.name,
-          token,
-          PER_REPOSITORY_LIMIT,
-        );
+        const sinceMs = checkSinceMsByFullName.get(repository.fullName);
+        return await fetchReleasesBackTo(repository.ownerLogin, repository.name, token, sinceMs);
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
         console.error(`[GET /api/repositories/release-history] ${repository.fullName}:`, error);
@@ -90,9 +101,34 @@ async function handleGET() {
     }),
   );
 
-  return NextResponse.json({
-    entries: mergeReleaseHistory(perRepository),
-    checkTargets,
-    checkRecords,
-  });
+  return NextResponse.json({ entries: mergeReleaseHistory(perRepository), checkRecords });
 }
+
+/**
+ * 1リポジトリぶんのリリースを取る。`sinceMs`（動作確認の基準時刻）が渡されたときだけ、
+ * それより古いリリースへ届くまでページを足す（上限`MAX_PAGES_FOR_CHECK_TARGET`）。
+ *
+ * **対象でないリポジトリは従来どおり1ページ。** 未確認のフラグが付かないので、遡っても
+ * GitHub APIを余計に叩くだけになる。
+ */
+async function fetchReleasesBackTo(
+  owner: string,
+  repo: string,
+  token: string,
+  sinceMs: number | undefined,
+): Promise<ReleaseHistoryItem[]> {
+  const first = await fetchRecentReleases(owner, repo, token, PER_REPOSITORY_LIMIT);
+  if (sinceMs === undefined || first.length < PER_REPOSITORY_LIMIT) return first;
+
+  const collected = [...first];
+  for (let page = 2; page <= MAX_PAGES_FOR_CHECK_TARGET; page += 1) {
+    // 一覧は公開日時の新しい順なので、末尾が基準より古ければその先はすべて対象外。
+    if (hasReachedReleaseCheckSince(collected, sinceMs)) break;
+    const next = await fetchRecentReleases(owner, repo, token, PER_REPOSITORY_LIMIT, page);
+    if (next.length === 0) break;
+    collected.push(...next);
+    if (next.length < PER_REPOSITORY_LIMIT) break;
+  }
+  return collected;
+}
+

@@ -81,6 +81,7 @@ export default async function NewIssuePage() {
             hidden: false,
             favorite: false,
             excludedFromIssueCreation: false,
+            releaseCheckSince: null,
           }))}
         issues={issues}
         claudeLocalModel={claudeLocalModel}

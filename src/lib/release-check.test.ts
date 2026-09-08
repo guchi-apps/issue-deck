@@ -5,6 +5,7 @@ import {
   applyReleaseCheckToggle,
   buildReleaseCheckIndex,
   countUncheckedReleases,
+  hasReachedReleaseCheckSince,
   resolveReleaseCheckStatus,
   selectUncheckedReleases,
 } from "@/lib/release-check";
@@ -137,6 +138,28 @@ describe("selectUncheckedReleases / countUncheckedReleases", () => {
 
   it("件数は未確認の数と一致する", () => {
     expect(countUncheckedReleases(entries, index)).toBe(1);
+  });
+});
+
+describe("hasReachedReleaseCheckSince", () => {
+  const sinceMs = Date.parse(SINCE);
+
+  it("基準より新しいリリースしか無ければ、まだ遡り足りない", () => {
+    const entries = [makeEntry({ publishedAt: "2026-09-05T00:00:00Z" }), makeEntry()];
+    expect(hasReachedReleaseCheckSince(entries, sinceMs)).toBe(false);
+  });
+
+  it("基準より前のリリースが1件出たら、そこで止めてよい", () => {
+    const entries = [makeEntry(), makeEntry({ publishedAt: "2026-08-31T23:59:59Z" })];
+    expect(hasReachedReleaseCheckSince(entries, sinceMs)).toBe(true);
+  });
+
+  it("公開時刻が無いリリースは判断材料にしない", () => {
+    expect(hasReachedReleaseCheckSince([makeEntry({ publishedAt: null })], sinceMs)).toBe(false);
+  });
+
+  it("1件も取れていなければ、まだ遡り足りない扱いにする", () => {
+    expect(hasReachedReleaseCheckSince([], sinceMs)).toBe(false);
   });
 });
 

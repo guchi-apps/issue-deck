@@ -3,22 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
-import {
-  applyReleaseCheckToggle,
-  type ReleaseCheckRecord,
-  type ReleaseCheckTargetSummary,
-} from "@/lib/release-check";
+import { applyReleaseCheckToggle, type ReleaseCheckRecord } from "@/lib/release-check";
 
 type ReleaseHistoryResponse = {
   entries: ReleaseHistoryItem[];
-  checkTargets?: ReleaseCheckTargetSummary[];
   checkRecords?: ReleaseCheckRecord[];
 };
 
 type UseReleaseHistoryResult = {
   entries: ReleaseHistoryItem[] | null;
-  /** 動作確認の対象に選んだリポジトリ（#2930） */
-  checkTargets: ReleaseCheckTargetSummary[];
   /** 確認済みの記録（#2930） */
   checkRecords: ReleaseCheckRecord[];
   isLoading: boolean;
@@ -28,11 +21,6 @@ type UseReleaseHistoryResult = {
   setReleaseChecked: (
     target: { repoFullName: string; tagName: string },
     checked: boolean,
-  ) => Promise<void>;
-  /** リポジトリを動作確認の対象に加える／外す */
-  setCheckTarget: (
-    repository: { id: string; fullName: string },
-    targeted: boolean,
   ) => Promise<void>;
 };
 
@@ -44,14 +32,14 @@ type UseReleaseHistoryResult = {
  *
  * `enabled`がfalseの間は取得しない（ペインを開いていないときにフェッチしない）。
  *
- * 動作確認のフラグ（#2930）は、**状態へ畳まれていない材料**（対象リポジトリと確認済みの記録）
- * として受け取り、切り替えは楽観的更新にする。畳むのは`lib/release-check.ts`の純粋関数で、
- * 描き直しにサーバーの応答を待たない。失敗したら手元の値を元へ戻す
- * （`issue-deck-shell.tsx`のリポジトリ表示トグルと同じ形）。
+ * 動作確認のフラグ（#2930）のうち**ここが持つのは確認済みの記録だけ**で、対象リポジトリは
+ * `ConnectedRepository.releaseCheckSince`（サーバーが描いた時点で入っている）から来る。
+ * 記録は状態へ畳まれていない材料のまま受け取り、切り替えは楽観的更新にする。畳むのは
+ * `lib/release-check.ts`の純粋関数で、描き直しにサーバーの応答を待たない。失敗したら
+ * 手元の値を元へ戻す（`issue-deck-shell.tsx`のリポジトリ表示トグルと同じ形）。
  */
 export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
   const [entries, setEntries] = useState<ReleaseHistoryItem[] | null>(null);
-  const [checkTargets, setCheckTargets] = useState<ReleaseCheckTargetSummary[]>([]);
   const [checkRecords, setCheckRecords] = useState<ReleaseCheckRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +65,6 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       .then((json) => {
         if (cancelled) return;
         setEntries(json.entries);
-        setCheckTargets(json.checkTargets ?? []);
         setCheckRecords(json.checkRecords ?? []);
       })
       .catch((err) => {
@@ -115,45 +102,5 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     [checkRecords],
   );
 
-  const setCheckTarget = useCallback(
-    async (repository: { id: string; fullName: string }, targeted: boolean) => {
-      const previous = checkTargets;
-      const rest = previous.filter((entry) => entry.repoFullName !== repository.fullName);
-      setCheckTargets(
-        targeted
-          ? [...rest, { repoFullName: repository.fullName, since: new Date().toISOString() }]
-          : rest,
-      );
-      setError(null);
-
-      try {
-        const res = await fetch("/api/repositories/release-checks/targets", {
-          method: targeted ? "POST" : "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repositoryId: repository.id }),
-        });
-        if (!res.ok) throw new Error(`保存に失敗しました (${res.status})`);
-        // 基準時刻はサーバーが持つ値が正（押し直しても既存行の時刻は動かない）。
-        const json = (await res.json()) as { since?: string };
-        if (targeted && json.since) {
-          setCheckTargets([...rest, { repoFullName: repository.fullName, since: json.since }]);
-        }
-      } catch (err) {
-        setCheckTargets(previous);
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    },
-    [checkTargets],
-  );
-
-  return {
-    entries,
-    checkTargets,
-    checkRecords,
-    isLoading,
-    error,
-    refresh,
-    setReleaseChecked,
-    setCheckTarget,
-  };
+  return { entries, checkRecords, isLoading, error, refresh, setReleaseChecked };
 }
