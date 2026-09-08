@@ -162,6 +162,7 @@ const repository: ConnectedRepository = {
   hidden: false,
   favorite: false,
   excludedFromIssueCreation: false,
+  releaseCheckSince: null,
 };
 
 function buildIssue(overrides: Partial<Issue> = {}): Issue {

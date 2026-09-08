@@ -156,14 +156,19 @@ export type ReleaseHistoryItem = {
  *
  * **ETagの条件付きGETを通す**（`fetchLatestRelease`と同じ）。リリースは月に数回しか増えない
  * ため、巡回の大半は304になりレート制限を消費しない。
+ *
+ * `page`は動作確認のフラグ（#2930）が使う。**リリースの多いリポジトリでは1ページ（20件）が
+ * 数日ぶんにしかならない**（issue-deckは直近7日で22件）。対象リポジトリだけ、確認の基準時刻へ
+ * 届くまでページを足して遡る（`api/repositories/release-history`）。
  */
 export async function fetchRecentReleases(
   owner: string,
   repo: string,
   token: string,
   perPage = 20,
+  page = 1,
 ): Promise<ReleaseHistoryItem[]> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/releases?per_page=${perPage}`;
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/releases?per_page=${perPage}&page=${page}`;
   const result = await githubFetchJsonWithEtag<
     Array<{
       tag_name?: string;

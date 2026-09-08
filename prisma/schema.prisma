@@ -35,6 +35,8 @@ model User {
   pushSubscriptions    PushSubscription[]
   snoozedItems         SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
+  releaseCheckTargets  ReleaseCheckTarget[]
+  releaseChecks        ReleaseCheck[]
 }
 
 // --- GitHub App 連携 ---
@@ -117,6 +119,8 @@ model Repository {
   favoritedBy  FavoriteRepository[]
   snoozedItems SnoozedItem[]
   issueCreationExcludedBy IssueCreationExcludedRepository[]
+  releaseCheckTargetedBy  ReleaseCheckTarget[]
+  releaseChecks           ReleaseCheck[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -166,6 +170,52 @@ model IssueCreationExcludedRepository {
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@unique([userId, repositoryId])
+  @@index([repositoryId])
+}
+
+// ユーザーごとに「リリース後の動作確認を追いたい」と選んだリポジトリ（#2930）。
+//
+// **リリース履歴に並ぶ全リポジトリを対象にしない。** 画面は全リポジトリ×最大20件の
+// GitHub Releaseを並べるので、無条件に「未確認」を立てると初回に数百件立つ。
+// `vps`・`subpc`のようにリリースを持たないリポジトリや、動作を目で確かめる意味が薄い
+// 管理用リポジトリを外せるよう、明示的なオプトインにしてある（既定はどれも対象外）。
+//
+// **`createdAt`は「いつから対象か」を表す基準時刻でもある。** これより前に公開された
+// リリースには「未確認」を立てない（過去分は確認済みとして扱う）。オンにした瞬間に
+// 未確認が大量に湧くのを防ぐためで、判定は`src/lib/release-check.ts`の純粋関数が行う。
+model ReleaseCheckTarget {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+
+  createdAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
+}
+
+// ユーザーごとに「このリリースの動作確認は済んだ」と記録した1件（#2930）。
+//
+// **行があれば確認済み、無ければ未確認。** GitHub Release自体はDBに持たない
+// （リリース履歴は都度GitHub APIから取る）ため、`ReleaseHistoryItem`と同じ
+// リポジトリ＋タグ名の組で指す。タグ名にFKは張れないので、リポジトリだけをFKにする
+// （`SnoozedItem`がマージ待ちPRを指すときと同じ形）。
+model ReleaseCheck {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+  /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
+  tagName      String
+
+  checkedAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId, tagName])
   @@index([repositoryId])
 }
 
