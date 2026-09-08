@@ -412,6 +412,19 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
 「CI実行中か」だけにしない」**（`issuePullRequestPollIntervalMs`・`conflictAutoRefreshIntervalMs`の
 設計理由もそこにある）。ここでは重複して書かない。
 
+**「解消しました」の報告と画面が食い違ったら、画面を疑う前にGitHubの実状を引く**（#2915）。
+自動解消は着手時点のdevelopをマージするため、**その最中にdevelopが進むと、成功として報告した
+直後から本当にコンフリクトしている。** この状態では画面の「コンフリクトあり」は正しい。
+
+```bash
+gh api repos/<owner>/<repo>/compare/develop...<headブランチ> --jq '{status,ahead_by,behind_by}'
+gh api repos/<owner>/<repo>/pulls/<番号> --jq '{mergeable,mergeable_state}'
+```
+
+`behind_by`が0でなく`mergeable_state`が`dirty`なら、直すべきなのは表示ではない。#2915では
+guchi-apps/stockly#41がこれで、解消コミットは13:44時点のdevelopをマージしていたが、その時点で
+developは既に4コミット先へ進んでいた（次の巡回・イベントで解消し直されるまで残る）。
+
 ## 本番デプロイの一時的な失敗の再実行（#2134）
 
 mainへマージした後の本番デプロイ（`deploy.yml`）が失敗したとき、これを自動で拾う仕組みが
