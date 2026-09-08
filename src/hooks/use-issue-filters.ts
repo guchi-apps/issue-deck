@@ -32,6 +32,9 @@ export type IssueStateFilter = "all" | "open" | "closed";
  *
  * `releases`はリリース履歴（#2726）。全リポジトリのGitHub Releaseを時系列で見る。
  * `preview`と同じくホームのメニューからのドリルダウンだけで開き、ボトムナビのタブは持たない。
+ *
+ * `knowledge`は共通知識（#2912）。フリートの知見メモと`guchi-apps/docs`にたまった共通知識を
+ * 見る。これも1カラムで、Issueの絞り込み条件とは無関係。
  */
 export type DashboardPane =
   | "issues"
@@ -40,7 +43,8 @@ export type DashboardPane =
   | "preview"
   | "usage"
   | "releases"
-  | "nightly";
+  | "nightly"
+  | "knowledge";
 
 function parsePane(value: string | null): DashboardPane {
   if (
@@ -49,7 +53,8 @@ function parsePane(value: string | null): DashboardPane {
     value === "preview" ||
     value === "usage" ||
     value === "releases" ||
-    value === "nightly"
+    value === "nightly" ||
+    value === "knowledge"
   ) {
     return value;
   }
@@ -278,6 +283,11 @@ export function useIssueFilters() {
     setFilters({ pane: "nightly", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「共通知識」画面への遷移（#2912）。上と同じくPRの選択状態を持たない。
+  const selectKnowledgePane = useCallback(() => {
+    setFilters({ pane: "knowledge", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -328,6 +338,7 @@ export function useIssueFilters() {
     selectUsagePane,
     selectReleaseHistoryPane,
     selectNightlyRunPane,
+    selectKnowledgePane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,

@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Archive,
+  BookOpen,
   CircleSlash,
   Eye,
   EyeOff,
@@ -80,6 +81,8 @@ type SidebarNavProps = {
   onSelectReleaseHistory: () => void;
   /** 夜間実行（#2772）の画面を開く */
   onSelectNightlyRun: () => void;
+  /** 共通知識（#2912）の画面を開く */
+  onSelectKnowledge: () => void;
   /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
   /**
@@ -162,6 +165,7 @@ export function SidebarNavView({
   onSelectUsage,
   onSelectReleaseHistory,
   onSelectNightlyRun,
+  onSelectKnowledge,
   nightlyRunQueuedCount = null,
   onLaunchNewApp,
   navCounts,
@@ -367,6 +371,17 @@ export function SidebarNavView({
             // 両方に出すとどちらを押せば片付くのか分からなくなる
             count: nightlyRunQueuedCount,
             title: "今夜の予定と、前の夜の結果を見る",
+          })}
+          {navRow({
+            key: "knowledge",
+            label: "共通知識",
+            icon: BookOpen,
+            active: activePane === "knowledge",
+            onClick: onSelectKnowledge,
+            // **数字も丸も出さない**（#2912）。未判定が溜まっていることは開いた先の警告が
+            // 受け持つ。左メニューに数字を出すと「片付けると減るもの」に見えるが、判定するのは
+            // `guchi-apps/docs`側のワークフローで、ここから押せる操作は何も無い
+            title: "フリートの知見メモと、共有知識にたまった知見を見る",
           })}
           {navRow({
             key: "usage",

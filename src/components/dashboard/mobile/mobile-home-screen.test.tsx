@@ -127,6 +127,7 @@ function renderHome(
       onSelectPullRequests={() => {}}
       onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
+        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
       previewRunning={false}
       onSelectRepos={() => {}}
@@ -179,6 +180,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "確認環境",
       // リリース履歴も#2811でフッターのタブ（「リリース」）へ移したので、ここには並ばない
       "夜間実行",
+      "共通知識",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
     ]);
@@ -262,6 +264,7 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
+        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}
         onSelectRepos={() => {}}
@@ -494,6 +497,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
+        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}
         onSelectRepos={() => {}}

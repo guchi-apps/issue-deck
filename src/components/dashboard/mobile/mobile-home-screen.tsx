@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpen,
   FolderGit2,
   Loader2,
   MonitorPlay,
@@ -87,6 +88,8 @@ type MobileHomeScreenProps = {
   onSelectNightlyRun: () => void;
   /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す */
   nightlyRunQueuedCount: number | null;
+  /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
+  onSelectKnowledge: () => void;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -173,6 +176,7 @@ export function MobileHomeScreenView({
   previewRunning,
   onSelectNightlyRun,
   nightlyRunQueuedCount,
+  onSelectKnowledge,
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -494,6 +498,15 @@ export function MobileHomeScreenView({
                 onClick={onSelectNightlyRun}
                 count={nightlyRunQueuedCount}
                 title="今夜の予定と、前の夜の結果を見る"
+              />
+              {/* 共通知識（#2912）。**件数は出さない**（PCの左メニューと同じ理由。ここから
+                  押せる操作が無いものに数字を出すと、片付けると減るものに見える） */}
+              <MobileNavRow
+                label="共通知識"
+                icon={BookOpen}
+                onClick={onSelectKnowledge}
+                count={null}
+                title="フリートの知見メモと、共有知識にたまった知見を見る"
               />
             </ul>
           </div>
