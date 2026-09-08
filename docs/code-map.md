@@ -923,6 +923,15 @@ export function POST(request: NextRequest) {
     **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
     （`getWorkflowStepIndex`・`findDispatchJobForIssue`・`findCrossRepoQuestionJobForIssue`など）を使う。
     片方だけ条件が変わると空の枠が残る。
+    **確認待ち（`00.check-user`）の案内パネル（`CheckUserReasonNotice`）は、行き先が
+    「承認欄」（コメント欄末尾）のときだけここに出す**（#2924）。行き先がこのカードの
+    すぐ下にある本体パネル（計画パネル・質問パネル・対応PRセクション）を指す場合は、
+    その本体パネルが既に視界に入っているため、そこへの移動ボタンだけの案内は出さず、
+    `WorkflowStatusSteps`のバッジだけにする。`01.check-plan`が付いていても計画パネルの
+    待ち（`SessionPlanRequest`）が期限切れなら行き先は承認欄に戻るため、**この出し分けは
+    理由ラベル単体ではなく`resolveCheckUserGuidance`が返す`action`のtargetで判定する**
+    （`plan`・`question`・`pull-requests`なら出さない。`null`＝承認欄自身、または
+    `remote-control`なら出す）。
   - **対応PR・親子Issue・AI要約は既定で畳む**
     （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
@@ -3523,7 +3532,11 @@ Remote Controlを開くのか・対応PRをマージするのか・コメント�
 [`lib/check-user-focus.ts`](../src/lib/check-user-focus.ts)。**idを使わないのは、PC版と
 スマホ版の詳細が同時にDOMへ乗り、非表示側が選ばれてしまうため。**
 Issue詳細の上部（`IssueStatusCard`）とコメント欄の承認カードの2か所へ**同じ内容を同じ体裁で**出す
-（PC・スマホ共通）。
+（PC・スマホ共通）。**上部側は、`action`のtargetが承認欄自身（`null`）かRemote Controlのときだけ
+出す**（#2924）。targetが`plan`・`question`・`pull-requests`のとき（行き先がこのカードのすぐ下の
+本体パネルを指すとき）は、その本体パネルが既に視界に入っているため出さない。`01.check-plan`が
+付いていても計画パネルの待ち（`SessionPlanRequest`）が期限切れならtargetは承認欄に戻るため、
+判定は理由ラベル単体ではなく`action`のtargetで行う。
 
 定型文やマーカーコメントを変更するときは、ワークフロー側のトリガー条件と対になっているため
 両方を確認する。

@@ -45,6 +45,10 @@ type IssueStatusCardProps = {
    * 解決を親（Issue詳細）に任せているのは、行き先の判定に**このカードが持っていない材料**
    * （マージ待ちかどうか・対応PRのセクションが描かれているか）が要るため。理由ラベルが
    * 読めないリポジトリではnullで、従来どおり進捗ステッパーのバッジだけになる。
+   *
+   * **表示するのは行き先が「承認欄」（コメント欄末尾）のときだけ**（#2924）。行き先が
+   * このカードのすぐ下にある本体パネル（計画パネル・質問パネル・対応PRセクション）を
+   * 指す場合は、案内は「もう1段上から下を指すだけ」になるため出さない。
    */
   checkUserGuidance?: CheckUserGuidance | null;
   /**
@@ -125,8 +129,25 @@ export function IssueStatusCard({
    */
   const foldedLaunchJob =
     issueSession !== null && dispatchJob?.status === "SUCCEEDED" ? dispatchJob : null;
+  /**
+   * 案内パネル（`CheckUserReasonNotice`）を出すか（#2924）。
+   *
+   * 行き先が「承認欄」（コメント欄末尾）のときだけ出す。行き先がこのカードのすぐ下にある
+   * 本体パネル（計画パネル・質問パネル・対応PRセクション）を指す場合は、その本体パネルが
+   * 既に視界に入っているので、そこへの移動ボタンだけの案内は「もう1段上から下を指す」
+   * だけになる。**Remote Controlへ誘導するケース（`action.kind === "remote-control"`）は
+   * このカードが唯一の出口なので出す。**
+   *
+   * `checkUserGuidance.action`がplacement="status"から来る限りnullにはならない
+   * （`resolveCheckUserGuidance`のnull分岐は`placement === "approval"`のときだけ）。
+   */
+  const guidanceTarget =
+    checkUserGuidance?.action?.kind === "scroll" ? checkUserGuidance.action.target : null;
+  const showGuidanceNotice =
+    checkUserGuidance !== null && guidanceTarget !== "plan" && guidanceTarget !== "question" &&
+    guidanceTarget !== "pull-requests";
 
-  if (!hasSteps && !hasActivity && !checkUserGuidance) return null;
+  if (!hasSteps && !hasActivity && !showGuidanceNotice) return null;
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3">
@@ -138,16 +159,19 @@ export function IssueStatusCard({
           labels={issue.labels}
           projectStatus={issue.projectStatus}
           executionTarget={executionTarget}
-          showApprovalBadge={checkUserGuidance === null}
+          showApprovalBadge={!showGuidanceNotice}
           showExecutionTarget={issueSession === null}
           planningSkipped={planningSkipped}
           pullRequestProgress={pullRequestProgress}
         />
       )}
 
-      {/* 確認待ちのIssueを開いた直後に、次に押すものが分かるようにする（#1663）。承認カードは
-          コメント欄の末尾にあり、開いた時点では画面に入っていない */}
-      {checkUserGuidance && <CheckUserReasonNotice guidance={checkUserGuidance} />}
+      {/* 確認待ちのIssueを開いた直後に、次に押すものが分かるようにする（#1663）。行き先が
+          このカードのすぐ下（計画・質問・対応PR）ならその本体パネルが既に見えているので
+          出さず、行き先がコメント欄末尾（承認欄）やRemote Controlのときだけ出す（#2924） */}
+      {showGuidanceNotice && checkUserGuidance && (
+        <CheckUserReasonNotice guidance={checkUserGuidance} />
+      )}
 
       {hasActivity && (
         <div className="flex flex-col gap-2 border-t pt-3 empty:hidden">
