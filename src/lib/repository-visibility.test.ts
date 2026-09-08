@@ -20,6 +20,7 @@ function repository(overrides: Partial<ConnectedRepository> = {}): ConnectedRepo
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
     ...overrides,
   };
 }

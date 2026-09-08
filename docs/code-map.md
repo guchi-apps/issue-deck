@@ -581,22 +581,28 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     読み込み中の骨組みへ差し替わる）。
   - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
     左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
-- **Issue一覧の進捗は9マスの横棒で出す**（#2516・#2867。`components/dashboard/workflow-status-steps.tsx`の
-  `WorkflowStepBadge`）。マスは`lib/issue-progress.ts`の`PROGRESS_SEGMENTS`で、Issue詳細の
+- **Issue一覧の進捗は、developへのマージが完了するまでを7マスの横棒で・本番マージ（release・done）は
+  別デザインの2点トラッカーで出す**（#2516・#2867・#2927。`components/dashboard/workflow-status-steps.tsx`の
+  `WorkflowStepBadge`）。7マスは`lib/issue-progress.ts`の`PROGRESS_SEGMENTS`で、Issue詳細の
   6段ステップ（`WorkflowStatusSteps`）のうち**実装を調査／実装／検証・仕上げの3マス、developへ
   マージをCI・レビュー／マージ待ちの2マスに分けた**もの。以前は18pxの円グラフ（`conic-gradient`で
   角度を塗る）だったが、その大きさでは3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
   分からなかった（#2516で6等分の横棒に）。さらに6等分では、長く待つ計画・実装のあいだに動くのが
   1〜2マスで、develop反映後の短い区間に同じ3マスが割り当てられていた（#2867で9マスに）。
-  - **マスの幅は「作業が動いている時間」の目安の重み**（`PROGRESS_SEGMENTS.weight`。合計100）で、
-    済んだマスの重みの合計をツールチップに「目安 xx%」と出す。実測（直近12本のPR）は計画7〜24分・
-    実装12〜25分・developへマージ4〜9分・本番へマージ3〜17分。**develop反映済（マージ→リリース）
-    だけは16分〜4.6時間と長いが、人がリリースを押すまでの待ちで作業は動いていないため実測どおりに
-    割り当てない**——作業が全部終わった行のバーが何時間も40%で止まって見えるのは、このIssueが
-    直したい状態そのもの。Status遷移の時刻はDBに無く、重みは実測から手で置いた固定値
+  - **マスの重みは均等**（`PROGRESS_SEGMENTS.weight`）。#2867では実測PR時間ベースの重み付け
+    （実装20・develop反映済12・本番反映済4など）だったが、develop到達時点でもバーが74%止まりで
+    満タンにならず、`done`になって初めて強制的に100%へ飛ぶ見た目のバグがあった。develop
+    までの7マスを等間隔にし、**developへのマージが完了した時点（Status: Develop）で常に
+    満タン（目安100%）にする**ことで直した（#2927）。ツールチップの「目安 xx%」は
+    済んだマスの重みの合計を全マスの重みの合計で正規化した値
+  - **release・done（本番マージ）はこの7マスに含まれない**（#2927）。一覧では本番マージの
+    状況をほぼ確認しないため、同じ横棒の続きにはせず、バー右の小さな2点トラッカー
+    （`ProductionTracker`。○─○、Issue詳細の丸＋接続線の意匠を縮小して踏襲）へ分離した。
+    develop未到達では表示せず、develop到達で両方輪郭・release中は1つ目が塗り＋点滅・doneは
+    両方塗りになる。色は新しい色を増やさず`currentColor`のまま、形の違いで「別デザイン」を表す
   - **塗りは3段階。済んだマス＝濃く、いまのマス＝半分（55%）、まだのマス＝薄く（15%）。**
-    終端（本番反映済）に着いたら全部塗る。6等分の頃は現在の段まで塗っていたが、それだと残りの
-    長さが「あとどれくらいか」を表さない。マスの状態は`resolveProgressSegments`
+    develop到達以降は全部塗る。6等分の頃は現在の段まで塗っていたが、それだと残りの長さが
+    「あとどれくらいか」を表さない。マスの状態は`resolveProgressSegments`
     （`lib/github/workflow-status.ts`）が決め、`ready`・未知のStatusではnull（バー自体を出さない）
   - **段の中の位置の材料は2つ。** 実装の中はサブPCのセッションが報告する作業（`DispatchSession.step`。
     #2705）を`resolveImplementationPosition`（`lib/dispatch/issue-session.ts`）で調査／実装／
@@ -606,7 +612,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     の「マージ」の段が`current`/`done`かだけで`resolvePullRequestPosition`が決める。**済んだ段の数を
     分母で割らない**——`ai-review`の段はcheck-runが現れてから増えるので、割ると後退する
   - **幅は整数pxで固定し、`flex`の伸縮に任せない**（`allocateSegmentWidths`。最大剰余法・下限2px・
-    合計がすき間を除いた幅に一致）。40pxから段の境目2px×5＋段の中1px×3を引いた27pxを9マスへ配る。
+    合計がすき間を除いた幅に一致）。バー全体は37px（#2516〜#2867の頃は40pxだったが#2927で変更）
+    で、段の境目2px×3＋段の中1px×3のすき間9pxを引いた28pxを7マスへ配る。**7マス均等の
+    重みで28pxがちょうど4pxずつに割り切れる値へ`BAR_WIDTH`を選んである**（計画レビューの
+    指摘。重みを揃えただけでは`allocateSegmentWidths`の端数処理で1px差の不揃いが残るため）。
     下限を当てたマスのぶん`flex`で全体が縮むと、`overflow-hidden`で末尾のマスが切れる
   - **6段（`WORKFLOW_STEPS`）との対応は段の境目のすき間で示す。** Issue詳細のスマホ用キャプション
     「実装中（2/6）」は段の数のままで、バーのマス数とは一致しない
@@ -923,6 +932,15 @@ export function POST(request: NextRequest) {
     **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
     （`getWorkflowStepIndex`・`findDispatchJobForIssue`・`findCrossRepoQuestionJobForIssue`など）を使う。
     片方だけ条件が変わると空の枠が残る。
+    **確認待ち（`00.check-user`）の案内パネル（`CheckUserReasonNotice`）は、行き先が
+    「承認欄」（コメント欄末尾）のときだけここに出す**（#2924）。行き先がこのカードの
+    すぐ下にある本体パネル（計画パネル・質問パネル・対応PRセクション）を指す場合は、
+    その本体パネルが既に視界に入っているため、そこへの移動ボタンだけの案内は出さず、
+    `WorkflowStatusSteps`のバッジだけにする。`01.check-plan`が付いていても計画パネルの
+    待ち（`SessionPlanRequest`）が期限切れなら行き先は承認欄に戻るため、**この出し分けは
+    理由ラベル単体ではなく`resolveCheckUserGuidance`が返す`action`のtargetで判定する**
+    （`plan`・`question`・`pull-requests`なら出さない。`null`＝承認欄自身、または
+    `remote-control`なら出す）。
   - **対応PR・親子Issue・AI要約は既定で畳む**
     （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
@@ -1993,6 +2011,15 @@ export function POST(request: NextRequest) {
   **リリース前の「修正をIssueにする」（#2838）とは行き先が違う**。あちらの対応PRは
   developへマージ済みで`issue-<番号>`ブランチも消えているため新規Issueへ切り出すしかないが、
   こちらはPRがまだopenなので同じPRへ修正コミットを積める。
+  **「修正を依頼する」の送り先はIssueの担当先で変わる**（#2919。
+  [`lib/dispatch/pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）。`@claude`コメントで
+  起こせるのは`11.local`が付いていないIssueだけで、付いている間は
+  `reusable-issue-dispatch.yml`が`mode=skip`へ倒し案内コメントを返して終わる。生きている
+  セッションがあればそこへ固定の1行を流し（`POST /api/dispatch/pr-fix-notify`。本文とセッションの
+  生死をサーバー側で確かめ、`00.check-user`は`succeeded`が届いてから外す）、終わっていれば
+  起動ジョブで呼び戻し、記録も無ければ`11.local`を外して無人実行へ渡す。判定に
+  `resolveIssueExecutionTarget`を使わない理由と4通りの内訳は
+  [multi-agent/labels.md](multi-agent/labels.md)「マージ待ちの「修正を依頼する」は送り先を切り替える」。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、
@@ -3514,7 +3541,11 @@ Remote Controlを開くのか・対応PRをマージするのか・コメント�
 [`lib/check-user-focus.ts`](../src/lib/check-user-focus.ts)。**idを使わないのは、PC版と
 スマホ版の詳細が同時にDOMへ乗り、非表示側が選ばれてしまうため。**
 Issue詳細の上部（`IssueStatusCard`）とコメント欄の承認カードの2か所へ**同じ内容を同じ体裁で**出す
-（PC・スマホ共通）。
+（PC・スマホ共通）。**上部側は、`action`のtargetが承認欄自身（`null`）かRemote Controlのときだけ
+出す**（#2924）。targetが`plan`・`question`・`pull-requests`のとき（行き先がこのカードのすぐ下の
+本体パネルを指すとき）は、その本体パネルが既に視界に入っているため出さない。`01.check-plan`が
+付いていても計画パネルの待ち（`SessionPlanRequest`）が期限切れならtargetは承認欄に戻るため、
+判定は理由ラベル単体ではなく`action`のtargetで行う。
 
 定型文やマーカーコメントを変更するときは、ワークフロー側のトリガー条件と対になっているため
 両方を確認する。
@@ -3668,6 +3699,47 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 この決まった書式（`* タイトル by @user in owner/repo#123`）だけを前提に箇条書きを抜き出している。
 **`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
 この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
+
+### 動作確認のフラグは「対象を選ぶ」ことでしか絞れない（#2930）
+
+リリースした機能が本番で動いているかを確かめたかどうかを、カードの「未確認」「確認済み」で
+追う。**フラグを立てる母集団は、リポジトリとリリースの2軸で絞る**——この画面は
+全リポジトリ×最大20件（`PER_REPOSITORY_LIMIT`）を並べるので、無条件に立てると初回に数百件の
+未確認が湧き、消し込みが終わらない。
+
+- **リポジトリは明示的なオプトイン**（`ReleaseCheckTarget`。既定はどれも対象外）。
+  **リポジトリ側の属性からは決められない**——`Repository`が持つのは`hasClaudeWorkflow`・
+  `hasLocalStartScript`のような自動化の対応状況だけで、「本番で人が触るアプリか」を表す列は
+  無い。「リリースを持つか」で代用すると`vps`・`subpc`は落ちるが、`db-console`・
+  `ops-dashboard`のような管理用も残るため、結局選ぶ操作が要る
+- **リリースは対象に加えた時点（`ReleaseCheckTarget.createdAt`）より後に公開されたものだけ。**
+  過去分は確認済みとして扱う。そのため`POST /api/repositories/release-checks/targets`は
+  `upsert`の`update: {}`で**既存行の時刻を動かさない**——押し直すたびに基準が今へ動くと、
+  未確認のまま残っていたリリースが黙って対象外になる
+- **判定は[`lib/release-check.ts`](../src/lib/release-check.ts)の純粋関数に閉じる。**
+  APIは状態へ畳まず材料（確認済みの記録）をそのまま返し、画面が畳む。「確認済みにする」を
+  押した直後の楽観的更新が、サーバーと同じ判定で描き直せるようにするため
+- **対象フラグは`ConnectedRepository.releaseCheckSince`で配る**（`hidden`・`favorite`・
+  `excludedFromIssueCreation`と同じく`dashboard/page.tsx`が読む）。リリース履歴APIの応答へ
+  相乗りさせると、**対象の選択欄が「全リポジトリぶんのGitHub APIを叩く重い取得」の完了まで
+  全部オフに見える**（#2930の計画レビューの指摘）。値は真偽ではなく「いつから対象か」で、
+  日付の判定にそのまま使う
+- **対象リポジトリは、基準時刻へ届くまでページを足して取る**（`MAX_PAGES_FOR_CHECK_TARGET`＝5）。
+  1ページ（`PER_REPOSITORY_LIMIT`＝20件）は**リリースの多いリポジトリでは数日ぶんにしか
+  ならない**——issue-deck自身は直近7日で22件リリースしており、1ページだと約6日ぶん。確認を
+  1週間サボると未確認のカードが一覧から静かに落ち、「未確認 N件」からも消える（#2930の計画
+  レビューの指摘）。止まる条件は`hasReachedReleaseCheckSince`（基準より前のリリースが1件
+  出たら、一覧は新しい順なのでその先は全部対象外）なので、**対象に加えた直後は1ページで済み、
+  伸びるのは確認を溜めているあいだだけ**。対象でないリポジトリは従来どおり1ページ
+- **対象かどうかを、記録の有無より先に見る。** 対象から外したリポジトリの`ReleaseCheck`は
+  消さない（また戻したときのために残す）ので、記録を先に見ると外したはずのカードに
+  「確認済み」が出る
+- **「対象外」の印は、対象を1つ以上選んでいて、かつそのリポジトリを選んでいないときだけ出す。**
+  既定はどれも対象外なので、無条件に出すと最初は全カードがこの印で埋まる。対象リポジトリの
+  古いリリース（加えた時点より前）にも出さない——1リポジトリにつき最大20件あり、印だけが並ぶ
+- **左メニュー・ボトムナビの未確認バッジは持たない。** 件数を出すには画面を開いていない間も
+  全リポジトリぶんのGitHub APIを叩き続けることになる（`useReleaseHistory`は
+  `enabled`のときだけ取りに行く設計）
 
 ## 「共通知識」画面は書式の揺れを前提に、best-effortで読む（#2912）
 

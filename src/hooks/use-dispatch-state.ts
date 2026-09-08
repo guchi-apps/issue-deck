@@ -9,6 +9,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import { PR_FIX_SESSION_INSTRUCTION } from "@/lib/dispatch/pr-fix-request";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type {
   SessionQuestionAnswerInput,
@@ -385,6 +386,46 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             hostName: params.hostName,
             body: params.body,
+          }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
+  /**
+   * マージ待ちの修正依頼を、走っているローカルセッションへ知らせる（#2919）。
+   *
+   * **`sendSessionRecovery`と同じ形で、違うのは受け口と固定文面だけ。** どちらも
+   * 「画面が用意した固定文面を人が1回押して送る」もので、確認待ちを外すのは`succeeded`の
+   * 報告が届いてから（`POST /api/dispatch/report`）。本文は渡さない——送れるものが1つしか
+   * 無いので、受け口の`PR_FIX_SESSION_INSTRUCTION`と突き合わせるだけでよい。
+   *
+   * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ。押した場所の下に出す）。
+   */
+  const sendPrFixNotify = useCallback(
+    async (params: {
+      repositoryFullName: string;
+      issueNumber: number;
+      hostName: string;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/pr-fix-notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repository: params.repositoryFullName,
+            issue: params.issueNumber,
+            hostName: params.hostName,
+            body: PR_FIX_SESSION_INSTRUCTION,
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
@@ -948,6 +989,7 @@ export function useDispatchState(enabled: boolean) {
     enqueue,
     sendSessionControl,
     sendSessionRecovery,
+    sendPrFixNotify,
     setSessionAnswerMode,
     startManualStepSession,
     runManualStep,

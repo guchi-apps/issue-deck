@@ -168,3 +168,32 @@ describe("IssueArtifactPanel", () => {
     expect(document.querySelectorAll('iframe[title$="のサムネイル"]').length).toBe(6);
   });
 });
+
+describe("IssueArtifactPanel（variant=\"section\"、#2926）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("承認材料としての役目を終えた後は、対応PRと同じ畳めるセクションにする", () => {
+    render(
+      <ArtifactPreviewProvider artifacts={[artifact()]}>
+        <IssueArtifactPanel artifacts={[artifact()]} onReload={() => {}} variant="section" />
+      </ArtifactPreviewProvider>,
+    );
+    // 対応PR等の`IssueDetailSection`と同じトリガー（見出し・件数の押せる行）が出る
+    const trigger = screen.getByRole("button", { name: /アーティファクト/ });
+    expect(trigger.textContent).toContain("1");
+    // 既定は畳んでいるので、カード本体はまだ見えない
+    expect(screen.queryByText(/見た目案/)).toBeNull();
+  });
+
+  it("トリガーを押すと開き、カードが見える", () => {
+    render(
+      <ArtifactPreviewProvider artifacts={[artifact()]}>
+        <IssueArtifactPanel artifacts={[artifact()]} onReload={() => {}} variant="section" />
+      </ArtifactPreviewProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /アーティファクト/ }));
+    expect(screen.getByText(/見た目案/)).not.toBeNull();
+  });
+});

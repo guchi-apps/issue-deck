@@ -61,6 +61,7 @@ import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
 import { areIssuePullRequestsAllMerged } from "@/lib/issue-pull-requests";
+import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
 
@@ -156,6 +157,16 @@ type CommentThreadProps = {
   /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   /**
+   * 修正依頼の送り先（#2919）。**対応PRセクションが出ていないときの控え**として、
+   * ここでも`MergeApprovalActions`を描くため同じものを受け取る。渡さないと、
+   * ラベルを外す送り先なのにボタンだけ「修正を依頼する」のまま残る
+   */
+  prFixRoute?: PrFixRequestRoute;
+  /** セッションへ送れない理由（`prFixRoute.kind === "session"`のときだけ意味がある） */
+  prFixSessionRejection?: string | null;
+  /** セッションへの送信そのものが失敗した理由 */
+  prFixSessionError?: string | null;
+  /**
    * 対応PRへ投稿された自動レビューの本文（#2849）。`mergeApprovalPending`のときだけ描く。
    * 取得は親（Issue詳細）が`usePullRequestReview`で行う。記録が無い・取得前はnull
    */
@@ -192,6 +203,9 @@ function ApprovalActions({
   onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
+  prFixRoute,
+  prFixSessionRejection,
+  prFixSessionError,
   reviewFindings = null,
   reviewPullRequestNumber = null,
   isLoadingReviewFindings = false,
@@ -224,6 +238,9 @@ function ApprovalActions({
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   onRequestPrFix?: (reason: string) => Promise<void> | void;
+  prFixRoute?: PrFixRequestRoute;
+  prFixSessionRejection?: string | null;
+  prFixSessionError?: string | null;
   /** 対応PRの自動レビュー本文（#2849）。記録が無い・取得前はnull */
   reviewFindings?: PullRequestReviewCommentContent | null;
   /** `reviewFindings`が付いているPR番号 */
@@ -409,6 +426,9 @@ function ApprovalActions({
             repositoryFullName={repositoryFullName}
             issueSuggestions={issueSuggestions}
             onRequestPrFix={onRequestPrFix}
+            prFixRoute={prFixRoute}
+            prFixSessionRejection={prFixSessionRejection}
+            prFixSessionError={prFixSessionError}
             isRequestingPrFix={isRequestingPrFix}
           />
         )}
@@ -642,6 +662,9 @@ export function CommentThread({
   onDismissCheckUser,
   onRequestContinuation,
   onRequestPrFix,
+  prFixRoute,
+  prFixSessionRejection,
+  prFixSessionError,
   reviewFindings,
   reviewPullRequestNumber,
   isLoadingReviewFindings,
@@ -698,6 +721,9 @@ export function CommentThread({
         onDismissCheckUser={onDismissCheckUser}
         onRequestContinuation={onRequestContinuation}
         onRequestPrFix={onRequestPrFix}
+        prFixRoute={prFixRoute}
+        prFixSessionRejection={prFixSessionRejection}
+        prFixSessionError={prFixSessionError}
         reviewFindings={reviewFindings}
         reviewPullRequestNumber={reviewPullRequestNumber}
         isLoadingReviewFindings={isLoadingReviewFindings}

@@ -33,6 +33,11 @@ const SCROLL_BUTTON_LABEL = {
  * 置き場所はPC・スマホ共通で2か所（Issue詳細上部の`IssueStatusCard`と、コメント欄の承認カード）。
  * **同じ内容を同じ体裁で出す**のは、読む場所によって次の操作が違って見えないようにするため
  * （#1631の`MergeCheckReasonNotice`と同じ考え方）。色も確認待ちの表示に合わせてamberで揃える。
+ *
+ * **`IssueStatusCard`側は、行き先が「承認欄」（コメント欄末尾）のときだけ出す**（#2924）。
+ * 行き先がこのカードのすぐ下にある本体パネル（計画パネル・質問パネル・対応PRセクション）を
+ * 指す場合は、その本体パネルが既に視界に入っているため、そこへの移動ボタンだけの案内は
+ * 「もう1段上から下を指す」だけになる。
  */
 export function CheckUserReasonNotice({
   guidance,

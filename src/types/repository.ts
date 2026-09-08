@@ -27,4 +27,10 @@ export type ConnectedRepository = {
    * `hidden`とは独立の設定で、左メニュー・Issue一覧などには影響しない。
    */
   excludedFromIssueCreation: boolean;
+  /**
+   * リリース後の動作確認の対象に選んでいるか（#2930）。**いつから対象かを持つ**——
+   * nullなら対象外で、日時が入っていればその時刻より**後**に公開されたリリースにだけ
+   * 「未確認」が付く（過去分は確認済みとして扱う。判定は`lib/release-check.ts`）。
+   */
+  releaseCheckSince: string | null;
 };

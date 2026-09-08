@@ -79,6 +79,21 @@ export default async function DashboardPage() {
       )
     : new Set<string>();
 
+  // リリース後の動作確認の対象リポジトリ（#2930）。**他の3つと同じくここで読む**——
+  // リリース履歴APIの応答へ相乗りさせると、対象の選択欄が「全リポジトリぶんのGitHub APIを
+  // 叩く重い取得」が返るまで全部オフに見える。値は真偽ではなく**いつから対象か**で、
+  // これより前に公開されたリリースには未確認を立てない（`lib/release-check.ts`）。
+  const releaseCheckSinceByRepositoryId = currentUser
+    ? new Map(
+        (
+          await db.releaseCheckTarget.findMany({
+            where: { userId: currentUser.id },
+            select: { repositoryId: true, createdAt: true },
+          })
+        ).map((row) => [row.repositoryId, row.createdAt.toISOString()]),
+      )
+    : new Map<string, string>();
+
   const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
 
   // 一覧の「どちらの実行経路にも対応していない」印（#1888）に使う。無人実行の有無
@@ -107,6 +122,7 @@ export default async function DashboardPage() {
         hidden: hiddenRepositoryIds.has(repo.id),
         favorite: favoriteRepositoryIds.has(repo.id),
         excludedFromIssueCreation: issueCreationExcludedRepositoryIds.has(repo.id),
+        releaseCheckSince: releaseCheckSinceByRepositoryId.get(repo.id) ?? null,
       }))}
       issues={issues}
       /* 一覧のヘッダーに出す「HH:MM時点」の初期値（#1797）。クライアント側で現在時刻を

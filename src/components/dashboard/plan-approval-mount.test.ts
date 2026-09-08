@@ -89,19 +89,41 @@ describe("質問の回答パネルの置き場所（#2189）", () => {
 });
 
 /**
- * アーティファクトカードは計画カードより上（#2860）。
+ * アーティファクトカードの表示位置（#2860・#2926）。
  *
  * **PC・スマホの2ファイルへ同じ並び替えを入れる作業では、片方だけ直った状態でも
  * 既存のテスト（「両方に`<PlanApprovalPanel`がある」等）は通ってしまう。** 順序そのものが
  * 要望なので、`indexOf`で実際のソース上の出現順を確かめる。
+ *
+ * #2926で「計画承認待ちの間だけ計画パネルの上、それ以外は対応PRの上」という出し分けに
+ * なったため、`<IssueArtifactPanel`はソース上に2箇所出現する。1つ目（承認待ち版）が
+ * 計画パネルより前、2つ目（通常版）が対応PRセクションより前であることをそれぞれ確かめる。
  */
-describe("アーティファクトと計画の表示順（#2860）", () => {
-  it.each(DETAIL_SOURCES)("%s でアーティファクトが計画より前に出る", (path) => {
+describe("アーティファクトの表示位置（#2860・#2926）", () => {
+  it.each(DETAIL_SOURCES)("%s で承認待ち版のアーティファクトが計画より前に出る", (path) => {
     const source = readFileSync(path, "utf8");
     const artifactIndex = source.indexOf("<IssueArtifactPanel");
     const planIndex = source.indexOf('<div {...checkUserTargetProps("plan")}>');
     expect(artifactIndex).toBeGreaterThan(-1);
     expect(planIndex).toBeGreaterThan(-1);
     expect(artifactIndex).toBeLessThan(planIndex);
+  });
+
+  it.each(DETAIL_SOURCES)("%s で通常版のアーティファクトが対応PRより前に出る", (path) => {
+    const source = readFileSync(path, "utf8");
+    const secondArtifactIndex = source.indexOf(
+      "<IssueArtifactPanel",
+      source.indexOf("<IssueArtifactPanel") + 1,
+    );
+    const pullRequestsIndex = source.indexOf('id="pull-requests"');
+    expect(secondArtifactIndex).toBeGreaterThan(-1);
+    expect(pullRequestsIndex).toBeGreaterThan(-1);
+    expect(secondArtifactIndex).toBeLessThan(pullRequestsIndex);
+  });
+
+  it.each(DETAIL_SOURCES)("%s がアーティファクトを計画承認待ちの有無で出し分ける", (path) => {
+    const source = readFileSync(path, "utf8");
+    expect(source).toContain("{planDecisionPending && (");
+    expect(source).toContain("{!planDecisionPending && (");
   });
 });

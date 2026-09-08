@@ -31,7 +31,9 @@ export type IssueImplementationAgent = "claude" | "codex";
  * （またはCodex対応前のpoller）なので、truthy判定にはしない。
  */
 export function resolveIssueImplementationAgent(
-  session: DispatchSessionView,
+  // **読むのは`codexThreadKnown`だけ。** 送り先の判定（#2919）のように、セッションの一部しか
+  // 持たない値からも同じ判定を使えるようにしておく
+  session: Pick<DispatchSessionView, "codexThreadKnown">,
 ): IssueImplementationAgent {
   return session.codexThreadKnown === null ? "claude" : "codex";
 }

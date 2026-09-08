@@ -3,7 +3,7 @@ import {
   CHECK_USER_REASON_LABELS,
   checkUserReason,
   isCheckUserReasonLabel,
-  isSessionRemovableCheckUserReason,
+  isFixedInstructionRemovableCheckUserReason,
   type CheckUserReason,
 } from "@/lib/github/approval-labels";
 import {
@@ -98,8 +98,14 @@ export async function removeCheckUserWithReason(
   repo: string,
   issueNumber: number,
   token: string,
+  /**
+   * `01.check-merge`も外してよいか（#2919）。**既定は`false`＝#1905のガードそのまま。**
+   * 真を渡せるのは、マージ待ちの「修正を依頼する」を人が押したことが起点になっている
+   * 経路だけ（`resolveFixedInstructionCheckUser`）。
+   */
+  options: { allowMergeReason?: boolean } = {},
 ): Promise<void> {
-  if (!(await isRemovableBySession(owner, repo, issueNumber, token))) return;
+  if (!(await isRemovableBySession(owner, repo, issueNumber, token, options))) return;
 
   const remaining = await removeIssueLabel(owner, repo, issueNumber, token, CHECK_USER_LABEL);
   if (remaining === null) return;
@@ -120,6 +126,7 @@ async function isRemovableBySession(
   repo: string,
   issueNumber: number,
   token: string,
+  options: { allowMergeReason?: boolean } = {},
 ): Promise<boolean> {
   let names: string[];
   try {
@@ -131,5 +138,8 @@ async function isRemovableBySession(
     );
     return true;
   }
-  return isSessionRemovableCheckUserReason(checkUserReason(names.map((name) => ({ name }))));
+  return isFixedInstructionRemovableCheckUserReason(
+    checkUserReason(names.map((name) => ({ name }))),
+    options,
+  );
 }

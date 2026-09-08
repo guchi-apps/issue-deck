@@ -192,20 +192,76 @@ describe("IssueStatusCard", () => {
   });
 
   /** #1663。開いた直後に「次にどこの何を押すか」が分かるようにする */
-  it("確認待ちの案内があれば、進捗ステップの下に出す", () => {
+  it("行き先が承認欄なら、進捗ステップの下に案内を出す", () => {
     renderCard({
       issue: makeIssue({ projectStatus: "Implementation" }),
+      checkUserGuidance: resolveCheckUserGuidance({ reason: "input", placement: "status" }),
+    });
+    expect(screen.getByText("質問への回答が必要です")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "承認欄へ移動" })).not.toBeNull();
+  });
+
+  it("進捗が無くても、行き先が承認欄の案内があればカードを出す", () => {
+    renderCard({
+      checkUserGuidance: resolveCheckUserGuidance({ reason: "input", placement: "status" }),
+    });
+    expect(screen.getByText("質問への回答が必要です")).not.toBeNull();
+  });
+
+  /**
+   * #2924。行き先がこのカードのすぐ下にある本体パネル（計画パネル・対応PRセクション）を
+   * 指すときは、その本体パネルが既に視界に入っているため、移動ボタンだけの案内パネルは
+   * 出さない。確認待ちであることは進捗ステップのバッジ（`WorkflowStatusSteps`）が受け持つ。
+   */
+  it("行き先が計画パネルなら、案内パネルは出さずバッジだけにする", () => {
+    renderCard({
+      issue: makeIssue({
+        projectStatus: "Implementation",
+        labels: [
+          { name: "00.check-user", color: "d73a4a", description: null },
+          { name: "01.check-plan", color: "d73a4a", description: null },
+        ],
+      }),
+      checkUserGuidance: resolveCheckUserGuidance({
+        reason: "plan",
+        placement: "status",
+        planDecisionPending: true,
+      }),
+    });
+    expect(screen.queryByText("計画の承認が必要です")).toBeNull();
+    expect(screen.queryByRole("button", { name: "計画へ移動" })).toBeNull();
+    // PC用・スマホ用の両方がDOMに存在し、CSSで出し分ける（`WorkflowStatusSteps`と同じ）
+    expect(screen.getAllByText(/ユーザー確認待ち/).length).toBeGreaterThan(0);
+  });
+
+  it("行き先が対応PRなら、案内パネルは出さずバッジだけにする", () => {
+    renderCard({
+      issue: makeIssue({
+        projectStatus: "Implementation",
+        labels: [
+          { name: "00.check-user", color: "d73a4a", description: null },
+          { name: "01.check-merge", color: "d73a4a", description: null },
+        ],
+      }),
+      checkUserGuidance: resolveCheckUserGuidance({
+        reason: "merge",
+        placement: "status",
+        hasPullRequestSection: true,
+      }),
+    });
+    expect(screen.queryByText("Pull Requestのマージが必要です")).toBeNull();
+    expect(screen.queryByRole("button", { name: "対応PRへ移動" })).toBeNull();
+    expect(screen.getAllByText(/ユーザー確認待ち/).length).toBeGreaterThan(0);
+  });
+
+  it("01.check-plan が付いていても、計画パネルの待ちが切れていれば承認欄への案内を出す", () => {
+    renderCard({
+      issue: makeIssue({ projectStatus: "Implementation" }),
+      // `planDecisionPending`を渡さない＝`SessionPlanRequest`がWAITINGでない状態
       checkUserGuidance: resolveCheckUserGuidance({ reason: "plan", placement: "status" }),
     });
     expect(screen.getByText("計画の承認が必要です")).not.toBeNull();
     expect(screen.getByRole("button", { name: "承認欄へ移動" })).not.toBeNull();
-  });
-
-  it("進捗が無くても、確認待ちの案内があればカードを出す", () => {
-    renderCard({
-      checkUserGuidance: resolveCheckUserGuidance({ reason: "merge", placement: "status" }),
-    });
-    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
   });
 
   /**

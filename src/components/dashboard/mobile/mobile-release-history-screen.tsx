@@ -2,14 +2,18 @@
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
-import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
+import {
+  ReleaseHistoryPanel,
+  type ReleaseCheckRepositoryOption,
+} from "@/components/dashboard/release-history-panel";
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
+import type { ReleaseCheckRecord, ReleaseCheckTargetSummary } from "@/lib/release-check";
 
 /**
  * スマホの「リリース履歴」画面（#2726）。
  *
  * PC版と**同じ`ReleaseHistoryPanel`**を`compact`で縮めて使う（`mobile-preview-screen.tsx`と
- * 同じ切り分け）。
+ * 同じ切り分け）。動作確認のフラグ（#2930）もそのまま同じ部品が扱う。
  *
  * **#2811でボトムナビの3枠目（「リリース」）を持つようになった。** それまではホームのメニュー
  * からのドリルダウンだったのでヘッダーに戻るボタンを出していたが、タブから直接開く画面には
@@ -20,11 +24,21 @@ export function MobileReleaseHistoryScreen({
   isLoading,
   error,
   onRefresh,
+  checkTargets,
+  checkRecords,
+  checkRepositoryOptions,
+  onToggleChecked,
+  onToggleCheckTarget,
 }: {
   entries: ReleaseHistoryItem[] | null;
   isLoading: boolean;
   error: string | null;
   onRefresh: () => void;
+  checkTargets: ReleaseCheckTargetSummary[];
+  checkRecords: ReleaseCheckRecord[];
+  checkRepositoryOptions: ReleaseCheckRepositoryOption[];
+  onToggleChecked: (target: { repoFullName: string; tagName: string }, checked: boolean) => void;
+  onToggleCheckTarget: (repository: { id: string; fullName: string }, targeted: boolean) => void;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -40,6 +54,11 @@ export function MobileReleaseHistoryScreen({
           isLoading={isLoading}
           error={error}
           onRefresh={onRefresh}
+          checkTargets={checkTargets}
+          checkRecords={checkRecords}
+          checkRepositoryOptions={checkRepositoryOptions}
+          onToggleChecked={onToggleChecked}
+          onToggleCheckTarget={onToggleCheckTarget}
           compact
         />
       </div>

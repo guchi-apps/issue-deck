@@ -33,6 +33,7 @@ function makeIssue(): Issue {
     htmlUrl: `https://github.com/${REPOSITORY_FULL_NAME}/issues/2863`,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
     hasUnreadComments: false,
     readCommentCount: 0,
     dispatchPendingAt: null,

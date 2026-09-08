@@ -77,6 +77,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     htmlUrl: `https://github.com/${REPOSITORY_FULL_NAME}/issues/3000`,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,

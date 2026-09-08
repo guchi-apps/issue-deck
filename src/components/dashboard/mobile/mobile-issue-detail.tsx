@@ -53,13 +53,19 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
+  describeDispatchEnqueueRejection,
+  describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
+  findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
+  resolveDispatchTargetRejection,
+  resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { prFixRequestLabels, resolvePrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -365,6 +371,46 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // マージ待ちの「修正を依頼する」をどこへ送るか（#2919）。**PCの詳細とまったく同じ判定**を
+  // 使う。片方だけ送り先を持つと、同じIssueをスマホから開いたときだけ押しても何も起きない
+  const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
+  const prFixSessionRejection = (() => {
+    if (prFixRoute.kind === "session") {
+      const controlJob = findSessionControlJobForIssue(
+        dispatch.jobs,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const rejection = resolveSessionControlRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        session: issueSession,
+        kind: "INSTRUCTION",
+        hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+      });
+      return rejection
+        ? describeSessionControlRejection(rejection, {
+            hostName: prFixRoute.host,
+            kind: "INSTRUCTION",
+          })
+        : null;
+    }
+    if (prFixRoute.kind === "resume") {
+      const rejection = resolveDispatchTargetRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+        blockingSession,
+      });
+      return rejection
+        ? describeDispatchEnqueueRejection(rejection, {
+            hostName: prFixRoute.host,
+            repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
+          })
+        : null;
+    }
+    return null;
+  })();
   // 計画への返事待ち（#2061）。**PCの詳細と同じものを同じ位置（セッション表示の下）に出す**——
   // 承認・修正の出口が片方の画面にしか無いと、スマホから見たときに従来どおり
   // 「Remote Controlから答えてください」しか出ない
@@ -374,6 +420,9 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
+  // （PCの詳細と同じ判定）
+  const planDecisionPending = planRequest?.status === "WAITING";
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
@@ -502,6 +551,8 @@ export function MobileIssueDetail({
     numbers: ReadonlySet<number>;
   } | null>(null);
   const [declineTargetNumber, setDeclineTargetNumber] = useState<number | null>(null);
+  // 修正依頼をセッションへ流せなかった理由（#2919）。PCの詳細と同じ扱い
+  const [prFixSessionError, setPrFixSessionError] = useState<string | null>(null);
   const issueKey = `${issue.repositoryFullName}#${issue.number}`;
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
@@ -680,14 +731,17 @@ export function MobileIssueDetail({
    * issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
    * 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
    */
-  async function updateLabelsAndComment(newLabels: string[], commentBody: string) {
+  async function updateLabelsAndComment(
+    newLabels: string[],
+    commentBody: string,
+  ): Promise<boolean> {
     const originalLabels = issue.labels.map((label) => label.name);
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       labels: newLabels,
     });
-    if (!updated) return;
+    if (!updated) return false;
     onIssueUpdated(updated);
 
     const [owner, repo] = issue.repositoryFullName.split("/");
@@ -700,7 +754,7 @@ export function MobileIssueDetail({
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-      return;
+      return true;
     }
 
     const rolledBack = await updateIssue({
@@ -712,6 +766,7 @@ export function MobileIssueDetail({
     setCommentMutationError((prev) =>
       rolledBack ? withRollbackNotice(prev ?? "") : withRollbackFailureNotice(prev ?? ""),
     );
+    return false;
   }
 
   async function handleApprove(text?: string) {
@@ -740,8 +795,36 @@ export function MobileIssueDetail({
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestContinuationCommentBody());
   }
 
+  /** マージ待ちの「修正を依頼する」（#2919）。判定も送り方もPCの詳細と同じ */
   async function handleRequestPrFix(reason: string) {
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
+    setPrFixSessionError(null);
+    const body = requestPrFixCommentBody(reason);
+    const labels = prFixRequestLabels(prFixRoute, issue.labels);
+    const posted = labels ? await updateLabelsAndComment(labels, body) : await postComment(body);
+    if (!posted) return;
+
+    if (prFixRoute.kind === "session") {
+      const result = await dispatch.sendPrFixNotify({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!result.ok) setPrFixSessionError(result.message);
+      return;
+    }
+    if (prFixRoute.kind === "resume") {
+      const enqueued = await dispatch.enqueue({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+        // **呼び戻すCLIを引き継ぐ**（`SessionRecoveryButton`と同じ）。省くと受け口が既定の
+        // Claude Codeへ落とし、Codexで進んでいたIssueが黙って別のCLIで立ち上がる
+        agent: prFixRoute.agent,
+      });
+      if (!enqueued) {
+        setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
+      }
+    }
   }
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
@@ -1039,8 +1122,12 @@ export function MobileIssueDetail({
           </div>
         )}
 
-        {/* アーティファクト（#2154・#2860）。PC版と同じく計画パネルのすぐ上に置く（#2190） */}
-        <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+        {/* アーティファクト（#2154・#2860・#2926）。PC版と同じく、計画承認待ちの間だけ
+            計画パネルのすぐ上に置く（#2190）。承認後の本来の置き場所は対応PRの並びの上側
+            （下記）で、ここに出すのは初めて見るときに見逃されないようにするための一時的な位置 */}
+        {planDecisionPending && (
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+        )}
 
         {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
             待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1154,6 +1241,13 @@ export function MobileIssueDetail({
           />
         )}
 
+        {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
+            上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
+            承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
+        {!planDecisionPending && (
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
+        )}
+
         {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
             コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
             既定では畳み、マージ待ちのときだけ開いたままにする（#1577・#1646） */}
@@ -1208,6 +1302,9 @@ export function MobileIssueDetail({
                 issueSuggestions={issueSuggestions}
                 onRequestPrFix={handleRequestPrFix}
                 isRequestingPrFix={isCommentSubmitting}
+                prFixRoute={prFixRoute}
+                prFixSessionRejection={prFixSessionRejection}
+                prFixSessionError={prFixSessionError}
               />
             )}
           </IssueDetailSection>
@@ -1336,6 +1433,9 @@ export function MobileIssueDetail({
             onDismissCheckUser={handleDismissCheckUser}
             onRequestContinuation={handleRequestContinuation}
             onRequestPrFix={handleRequestPrFix}
+            prFixRoute={prFixRoute}
+            prFixSessionRejection={prFixSessionRejection}
+            prFixSessionError={prFixSessionError}
             reviewFindings={reviewFindings}
             reviewPullRequestNumber={reviewPullRequestNumber}
             isLoadingReviewFindings={isLoadingReviewFindings}

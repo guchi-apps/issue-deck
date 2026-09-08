@@ -166,18 +166,23 @@ describe("isReleasePendingIssue", () => {
   });
 });
 
-describe("PROGRESS_SEGMENTS（#2867）", () => {
-  it("重みの合計は100（ツールチップの「目安 xx%」の分母）", () => {
-    expect(PROGRESS_SEGMENTS.reduce((sum, segment) => sum + segment.weight, 0)).toBe(100);
+describe("PROGRESS_SEGMENTS（#2867・#2927）", () => {
+  it("重みは全マス均等（#2927。developまでを等間隔にする）", () => {
+    const weights = PROGRESS_SEGMENTS.map((segment) => segment.weight);
+    expect(weights.every((weight) => weight === weights[0])).toBe(true);
     expect(PROGRESS_SEGMENTS.every((segment) => segment.weight > 0)).toBe(true);
   });
 
-  it("6段を遷移順にたどり、各段に少なくとも1マスある", () => {
+  it("developまでを遷移順にたどり、release・doneは含まない（#2927）", () => {
     const statuses = PROGRESS_SEGMENTS.map((segment) => segment.status);
     const indexes = statuses.map((status) => getProgressStatusIndex(status));
     expect([...indexes]).toEqual([...indexes].sort((a, b) => a - b));
     expect(new Set(statuses)).toEqual(
-      new Set(ADVANCED_PROGRESS_STATUSES.map((status) => status.key)),
+      new Set(
+        ADVANCED_PROGRESS_STATUSES.map((status) => status.key).filter(
+          (key) => key !== "release" && key !== "done",
+        ),
+      ),
     );
   });
 

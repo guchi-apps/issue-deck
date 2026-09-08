@@ -93,6 +93,7 @@ const repositories = [
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   },
   {
     id: "repo-2",
@@ -106,6 +107,7 @@ const repositories = [
     hidden: true,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   },
 ];
 

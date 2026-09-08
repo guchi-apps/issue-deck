@@ -81,6 +81,7 @@ const repositories = [
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
+    releaseCheckSince: null,
   },
 ];
 

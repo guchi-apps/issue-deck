@@ -79,7 +79,7 @@ describe("canCreateFollowupFromComment", () => {
   });
 });
 
-describe("resolveProgressSegments（#2867）", () => {
+describe("resolveProgressSegments（#2867・#2927）", () => {
   const states = (result: ReturnType<typeof resolveProgressSegments>) =>
     result?.segments.map((segment) => `${segment.key}:${segment.state}`);
 
@@ -93,15 +93,17 @@ describe("resolveProgressSegments（#2867）", () => {
       "pr-checks:pending",
       "pr-merge:pending",
       "develop:pending",
-      "release:pending",
-      "done:pending",
     ]);
     expect(planning?.ratio).toBe(0);
+    expect(planning?.productionTracker).toBe("hidden");
+  });
 
+  it("developへのマージが完了した時点で7マス全部済み・目安100%になる（#2927）", () => {
     const develop = resolveProgressSegments({ projectStatus: "Develop" });
-    expect(states(develop)?.slice(5, 8)).toEqual(["pr-merge:done", "develop:current", "release:pending"]);
-    // 計画12＋調査16＋実装20＋検証14＋CI8＋マージ4
-    expect(develop?.ratio).toBe(74);
+    expect(develop?.segments.every((segment) => segment.state === "done")).toBe(true);
+    expect(develop?.ratio).toBe(100);
+    // develop到達済み・本番マージはまだなので2点トラッカーは両方輪郭
+    expect(develop?.productionTracker).toBe("pending");
   });
 
   it("実装の中は位置で決める。位置が無ければ最初のマス（調査）", () => {
@@ -122,7 +124,9 @@ describe("resolveProgressSegments（#2867）", () => {
       "verifying:current",
       "pr-checks:pending",
     ]);
-    expect(verifying?.ratio).toBe(48);
+    // 済み3マス（計画・調査・実装）／7マス
+    expect(verifying?.ratio).toBe(43);
+    expect(verifying?.productionTracker).toBe("hidden");
   });
 
   it("developへマージの中はPRの位置で決める", () => {
@@ -141,13 +145,21 @@ describe("resolveProgressSegments（#2867）", () => {
     ]);
   });
 
-  it("終端（Done）は全部済みにして目安100%", () => {
+  it("本番へマージ中（Release）は主バー全部済み・2点トラッカーの1つ目だけ点灯", () => {
+    const release = resolveProgressSegments({ projectStatus: "Release" });
+    expect(release?.segments.every((segment) => segment.state === "done")).toBe(true);
+    expect(release?.ratio).toBe(100);
+    expect(release?.productionTracker).toBe("in-progress");
+  });
+
+  it("本番反映済（Done）は主バー全部済み・2点トラッカーも両方点灯", () => {
     const done = resolveProgressSegments({ projectStatus: "Done" });
     expect(done?.segments.every((segment) => segment.state === "done")).toBe(true);
     expect(done?.ratio).toBe(100);
+    expect(done?.productionTracker).toBe("done");
   });
 
-  it("段の境目に印を付ける（6段のまとまりをすき間で示す）", () => {
+  it("段の境目に印を付ける（4段のまとまりをすき間で示す）", () => {
     const result = resolveProgressSegments({ projectStatus: "Planning" });
     expect(result?.segments.map((segment) => segment.stageEnd)).toEqual([
       true, // 計画｜調査
@@ -156,8 +168,6 @@ describe("resolveProgressSegments（#2867）", () => {
       true, // 検証・仕上げ｜CI・レビュー
       false,
       true, // マージ待ち｜develop反映済
-      true,
-      true,
       false, // 末尾
     ]);
   });

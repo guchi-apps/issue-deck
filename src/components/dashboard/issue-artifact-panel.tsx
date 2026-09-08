@@ -9,30 +9,81 @@ import {
 } from "lucide-react";
 
 import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
+import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
 import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
 import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
 /**
- * Issue詳細の「アーティファクト」カード（#2154・#2190）。
+ * Issue詳細の「アーティファクト」カード（#2154・#2190・#2926）。
  *
  * セッションが`Artifact`ツールで公開した見た目案を、**claude.aiへ遷移せずにその場で開く**
  * ための入口。1件も無いIssueでは何も出さない（大半のIssueはアーティファクトを作らない）。
  *
- * **畳めるセクション（`IssueDetailSection`）ではなく独立したカードにしている**（#2190）。
- * 対応PR・子Issueと同じ「補助情報」の扱いにしていたが、`25.artifact-required`のIssueでは
- * これ自体が承認の対象で、畳まれていると開くまでどの案なのかが分からない。1件でもあれば
- * 常に開いたまま、サムネイルと開く導線を出す。
+ * **`variant`で2つの見せ方を切り替える**（#2926）。呼び出し側（`issue-detail.tsx`）が
+ * 計画承認待ちかどうかで選ぶ。
+ * - `standalone`（既定）: **畳めるセクション（`IssueDetailSection`）ではなく独立したカード**
+ *   にする（#2190）。`25.artifact-required`のIssueでは承認待ちの間これ自体が承認の対象で、
+ *   畳まれていると開くまでどの案なのかが分からない。1件でもあれば常に開いたまま出す
+ * - `section`: 承認が済んだ後の本来の置き場所（対応PRの並び）で使う。承認材料としての
+ *   役目は終えているので、対応PR・子Issueと同じ`IssueDetailSection`（既定は畳む）に収める
  */
 export function IssueArtifactPanel({
   artifacts,
   onReload,
+  variant = "standalone",
 }: {
   artifacts: SessionArtifactView[];
   onReload: () => void;
+  variant?: "standalone" | "section";
 }) {
   if (artifacts.length === 0) return null;
+
+  const list = (
+    <ul className="flex flex-col gap-2">
+      {artifacts.map((artifact, index) => (
+        <ArtifactCard
+          key={artifact.id}
+          artifact={artifact}
+          // **サムネイルは新しい方から数件だけ**。1件が数百KBのHTMLをiframeで実際に開くので、
+          // 上限（20件）まで並べると、Issueを開いただけでその全部を取りに行くことになる
+          withThumbnail={index < THUMBNAIL_LIMIT}
+        />
+      ))}
+    </ul>
+  );
+
+  const note = (
+    <p className="text-xs text-muted-foreground">
+      公開時のHTMLをissue-deckが保存したものです。claude.aiでの見え方とは細部が異なります。
+    </p>
+  );
+
+  const reloadButton = (
+    <button
+      type="button"
+      onClick={onReload}
+      className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    >
+      <RotateCcw className="size-3" />
+      更新
+    </button>
+  );
+
+  if (variant === "section") {
+    return (
+      <IssueDetailSection id="artifacts" title="アーティファクト" count={artifacts.length}>
+        <div className="flex flex-col gap-2">
+          {list}
+          <div className="flex items-center justify-between gap-2">
+            {note}
+            {reloadButton}
+          </div>
+        </div>
+      </IssueDetailSection>
+    );
+  }
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
@@ -42,31 +93,10 @@ export function IssueArtifactPanel({
         <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
           {artifacts.length}
         </span>
-        <button
-          type="button"
-          onClick={onReload}
-          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        >
-          <RotateCcw className="size-3" />
-          更新
-        </button>
+        <span className="ml-auto">{reloadButton}</span>
       </div>
-
-      <ul className="flex flex-col gap-2">
-        {artifacts.map((artifact, index) => (
-          <ArtifactCard
-            key={artifact.id}
-            artifact={artifact}
-            // **サムネイルは新しい方から数件だけ**。1件が数百KBのHTMLをiframeで実際に開くので、
-            // 上限（20件）まで並べると、Issueを開いただけでその全部を取りに行くことになる
-            withThumbnail={index < THUMBNAIL_LIMIT}
-          />
-        ))}
-      </ul>
-
-      <p className="text-xs text-muted-foreground">
-        公開時のHTMLをissue-deckが保存したものです。claude.aiでの見え方とは細部が異なります。
-      </p>
+      {list}
+      {note}
     </section>
   );
 }
