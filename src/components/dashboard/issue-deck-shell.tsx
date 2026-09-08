@@ -1256,6 +1256,20 @@ export function IssueDeckShell({
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
     [releaseHistory.entries, repositories],
   );
+  // 動作確認の対象に選べるリポジトリ（#2930）。**一覧と同じ母集団**（アーカイブ済みと
+  // 左メニューで非表示にしたぶんを除く）にする——リリース履歴に出てこないリポジトリを
+  // 選べても、その未確認はどこにも現れない。
+  const releaseCheckRepositoryOptions = useMemo(
+    () =>
+      repositories
+        .filter((repository) => !repository.archived && !repository.hidden)
+        .map((repository) => ({
+          id: repository.id,
+          name: repository.name,
+          fullName: repository.fullName,
+        })),
+    [repositories],
+  );
   // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
   // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
   // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
@@ -1699,6 +1713,11 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
+                  checkTargets={releaseHistory.checkTargets}
+                  checkRecords={releaseHistory.checkRecords}
+                  checkRepositoryOptions={releaseCheckRepositoryOptions}
+                  onToggleChecked={releaseHistory.setReleaseChecked}
+                  onToggleCheckTarget={releaseHistory.setCheckTarget}
                 />
               )}
 
@@ -2063,6 +2082,11 @@ export function IssueDeckShell({
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
                   onRefresh={releaseHistory.refresh}
+                  checkTargets={releaseHistory.checkTargets}
+                  checkRecords={releaseHistory.checkRecords}
+                  checkRepositoryOptions={releaseCheckRepositoryOptions}
+                  onToggleChecked={releaseHistory.setReleaseChecked}
+                  onToggleCheckTarget={releaseHistory.setCheckTarget}
                 />
               </div>
             </div>
