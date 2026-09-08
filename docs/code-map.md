@@ -581,22 +581,28 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     読み込み中の骨組みへ差し替わる）。
   - **逆に、Webhookが届かないリポジトリではこの合図が来ない。** 回答待ちの表示（一覧の行・
     左メニューのスピナー・コメント欄の吹き出し）が解除されず、Issueを開き直すまで残る。
-- **Issue一覧の進捗は9マスの横棒で出す**（#2516・#2867。`components/dashboard/workflow-status-steps.tsx`の
-  `WorkflowStepBadge`）。マスは`lib/issue-progress.ts`の`PROGRESS_SEGMENTS`で、Issue詳細の
+- **Issue一覧の進捗は、developへのマージが完了するまでを7マスの横棒で・本番マージ（release・done）は
+  別デザインの2点トラッカーで出す**（#2516・#2867・#2927。`components/dashboard/workflow-status-steps.tsx`の
+  `WorkflowStepBadge`）。7マスは`lib/issue-progress.ts`の`PROGRESS_SEGMENTS`で、Issue詳細の
   6段ステップ（`WorkflowStatusSteps`）のうち**実装を調査／実装／検証・仕上げの3マス、developへ
   マージをCI・レビュー／マージ待ちの2マスに分けた**もの。以前は18pxの円グラフ（`conic-gradient`で
   角度を塗る）だったが、その大きさでは3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
   分からなかった（#2516で6等分の横棒に）。さらに6等分では、長く待つ計画・実装のあいだに動くのが
   1〜2マスで、develop反映後の短い区間に同じ3マスが割り当てられていた（#2867で9マスに）。
-  - **マスの幅は「作業が動いている時間」の目安の重み**（`PROGRESS_SEGMENTS.weight`。合計100）で、
-    済んだマスの重みの合計をツールチップに「目安 xx%」と出す。実測（直近12本のPR）は計画7〜24分・
-    実装12〜25分・developへマージ4〜9分・本番へマージ3〜17分。**develop反映済（マージ→リリース）
-    だけは16分〜4.6時間と長いが、人がリリースを押すまでの待ちで作業は動いていないため実測どおりに
-    割り当てない**——作業が全部終わった行のバーが何時間も40%で止まって見えるのは、このIssueが
-    直したい状態そのもの。Status遷移の時刻はDBに無く、重みは実測から手で置いた固定値
+  - **マスの重みは均等**（`PROGRESS_SEGMENTS.weight`）。#2867では実測PR時間ベースの重み付け
+    （実装20・develop反映済12・本番反映済4など）だったが、develop到達時点でもバーが74%止まりで
+    満タンにならず、`done`になって初めて強制的に100%へ飛ぶ見た目のバグがあった。develop
+    までの7マスを等間隔にし、**developへのマージが完了した時点（Status: Develop）で常に
+    満タン（目安100%）にする**ことで直した（#2927）。ツールチップの「目安 xx%」は
+    済んだマスの重みの合計を全マスの重みの合計で正規化した値
+  - **release・done（本番マージ）はこの7マスに含まれない**（#2927）。一覧では本番マージの
+    状況をほぼ確認しないため、同じ横棒の続きにはせず、バー右の小さな2点トラッカー
+    （`ProductionTracker`。○─○、Issue詳細の丸＋接続線の意匠を縮小して踏襲）へ分離した。
+    develop未到達では表示せず、develop到達で両方輪郭・release中は1つ目が塗り＋点滅・doneは
+    両方塗りになる。色は新しい色を増やさず`currentColor`のまま、形の違いで「別デザイン」を表す
   - **塗りは3段階。済んだマス＝濃く、いまのマス＝半分（55%）、まだのマス＝薄く（15%）。**
-    終端（本番反映済）に着いたら全部塗る。6等分の頃は現在の段まで塗っていたが、それだと残りの
-    長さが「あとどれくらいか」を表さない。マスの状態は`resolveProgressSegments`
+    develop到達以降は全部塗る。6等分の頃は現在の段まで塗っていたが、それだと残りの長さが
+    「あとどれくらいか」を表さない。マスの状態は`resolveProgressSegments`
     （`lib/github/workflow-status.ts`）が決め、`ready`・未知のStatusではnull（バー自体を出さない）
   - **段の中の位置の材料は2つ。** 実装の中はサブPCのセッションが報告する作業（`DispatchSession.step`。
     #2705）を`resolveImplementationPosition`（`lib/dispatch/issue-session.ts`）で調査／実装／
@@ -606,7 +612,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     の「マージ」の段が`current`/`done`かだけで`resolvePullRequestPosition`が決める。**済んだ段の数を
     分母で割らない**——`ai-review`の段はcheck-runが現れてから増えるので、割ると後退する
   - **幅は整数pxで固定し、`flex`の伸縮に任せない**（`allocateSegmentWidths`。最大剰余法・下限2px・
-    合計がすき間を除いた幅に一致）。40pxから段の境目2px×5＋段の中1px×3を引いた27pxを9マスへ配る。
+    合計がすき間を除いた幅に一致）。バー全体は37px（#2516〜#2867の頃は40pxだったが#2927で変更）
+    で、段の境目2px×3＋段の中1px×3のすき間9pxを引いた28pxを7マスへ配る。**7マス均等の
+    重みで28pxがちょうど4pxずつに割り切れる値へ`BAR_WIDTH`を選んである**（計画レビューの
+    指摘。重みを揃えただけでは`allocateSegmentWidths`の端数処理で1px差の不揃いが残るため）。
     下限を当てたマスのぶん`flex`で全体が縮むと、`overflow-hidden`で末尾のマスが切れる
   - **6段（`WORKFLOW_STEPS`）との対応は段の境目のすき間で示す。** Issue詳細のスマホ用キャプション
     「実装中（2/6）」は段の数のままで、バーのマス数とは一致しない

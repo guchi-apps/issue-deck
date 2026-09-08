@@ -69,9 +69,13 @@ function pulse(container: HTMLElement): Element | null {
   return container.querySelector(".animate-pulse");
 }
 
-/** 濃く塗られた（済んだ）マスの数（#2516・#2867） */
+/**
+ * 濃く塗られた（済んだ）主バーのマスの数（#2516・#2867）。
+ * `[data-segment]`に絞るのは、本番マージの2点トラッカー（`[data-production-tracker]`。
+ * #2927）も塗りに`.bg-current`を使うため、絞らないとdone状態で数がずれるため。
+ */
 function filledSegments(container: HTMLElement): number {
-  return container.querySelectorAll(".bg-current").length;
+  return container.querySelectorAll("[data-segment].bg-current").length;
 }
 
 /** 半分の濃さで塗られた「いま」のマス（#2867）。無ければnull */
@@ -92,7 +96,7 @@ function queueState(overrides: Partial<IssueQueueState> = {}): IssueQueueState {
 afterEach(cleanup);
 
 describe("WorkflowStepBadge", () => {
-  it("済んだマスを濃く塗り、いまのマスは半分の濃さにする（9マス。#2867）", () => {
+  it("済んだマスを濃く塗り、いまのマスは半分の濃さにする（7マス。#2867・#2927）", () => {
     const planning = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
     expect(filledSegments(planning.container)).toBe(0);
     expect(currentSegment(planning.container)).toBe("planning");
@@ -110,9 +114,9 @@ describe("WorkflowStepBadge", () => {
     expect(currentSegment(developPr.container)).toBe("pr-checks");
     cleanup();
 
-    // 終端は全部塗る（半分の濃さのマスを残さない）
+    // develop到達以降は主バーを全部塗る（半分の濃さのマスを残さない。#2927）
     const done = render(<WorkflowStepBadge labels={[]} projectStatus="Done" />);
-    expect(filledSegments(done.container)).toBe(9);
+    expect(filledSegments(done.container)).toBe(7);
     expect(currentSegment(done.container)).toBeNull();
   });
 
@@ -153,9 +157,22 @@ describe("WorkflowStepBadge", () => {
     expect(currentSegment(container)).toBe("editing");
   });
 
-  it("ツールチップに済んだマスの重みの合計を「目安」として添える（#2867）", () => {
+  it("ツールチップに済んだマスの重みの合計を「目安」として添える（#2867・#2927）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Implementation"
+        session={session({ step: "TESTING" })}
+        now={NOW}
+      />,
+    );
+    // 済み3マス（計画・調査・実装）／7マス
+    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 43%");
+  });
+
+  it("developへのマージが完了した時点で目安は常に100%になる（#2927）", () => {
     const { container } = render(<WorkflowStepBadge labels={[]} projectStatus="Develop" />);
-    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 74%");
+    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 100%");
   });
 
   // #2516。一覧の行では`00.check-user`・`01.check-*`が下のラベル一覧から除外されるため
@@ -573,9 +590,39 @@ describe("developへマージの中の位置（#2867）", () => {
     expect(currentSegment(waiting.container)).toBe("pr-merge");
   });
 
-  it("順番待ちのバーは1マスも塗らない（9マスすべてがまだ）", () => {
+  it("順番待ちのバーは1マスも塗らない（7マスすべてがまだ）", () => {
     const { container } = render(<QueueStepBadge queue={queueState()} />);
     expect(filledSegments(container)).toBe(0);
-    expect(container.querySelectorAll("[data-segment]")).toHaveLength(9);
+    expect(container.querySelectorAll("[data-segment]")).toHaveLength(7);
+  });
+});
+
+/**
+ * 本番マージ（release・done）の2点トラッカー（#2927）。主バーとは別デザインで、
+ * developへ到達するまでは表示しない。
+ */
+describe("ProductionTracker（本番マージの2点トラッカー。#2927）", () => {
+  it("developへ到達する前は表示しない", () => {
+    const { container } = render(<WorkflowStepBadge labels={[]} projectStatus="Implementation" />);
+    expect(container.querySelector("[data-production-tracker]")).toBeNull();
+  });
+
+  it("develop到達で両方輪郭、release中は1つ目だけ点灯、doneは両方点灯する", () => {
+    const develop = render(<WorkflowStepBadge labels={[]} projectStatus="Develop" />);
+    expect(
+      develop.container.querySelector("[data-production-tracker]")?.getAttribute("data-production-tracker"),
+    ).toBe("pending");
+    cleanup();
+
+    const release = render(<WorkflowStepBadge labels={[]} projectStatus="Release" />);
+    expect(
+      release.container.querySelector("[data-production-tracker]")?.getAttribute("data-production-tracker"),
+    ).toBe("in-progress");
+    cleanup();
+
+    const done = render(<WorkflowStepBadge labels={[]} projectStatus="Done" />);
+    expect(
+      done.container.querySelector("[data-production-tracker]")?.getAttribute("data-production-tracker"),
+    ).toBe("done");
   });
 });
