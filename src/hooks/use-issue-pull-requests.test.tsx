@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
+import {
+  ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS,
+  ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+} from "@/lib/issue-pull-requests";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import type { IssuePullRequest } from "@/types/pull-request";
 
@@ -141,7 +145,7 @@ describe("useIssuePullRequests", () => {
     expect(result.current.isLoadingDetails).toBe(true);
   });
 
-  it("コンフリクトしている間は取り直し、解消された回で止まる（#2915）", async () => {
+  it("コンフリクトしている間は1分ごとに取り直し、解消された回で止まる（#2915）", async () => {
     vi.useFakeTimers();
     // 3回目の取得で解消される。以降は解消済みの応答を返し続ける
     const fetchMock = sequencedFetch([
@@ -161,15 +165,23 @@ describe("useIssuePullRequests", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current.pullRequests[0]?.mergeable).toBe(false);
 
-    // `pollWhileCiRunning`が偽でも、コンフリクトを見つけたら取り直しが始まる
+    // コンフリクトだけが理由のときは20秒では飛ばない
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // `pollWhileCiRunning`が偽でも、コンフリクトを見つけたら1分間隔で取り直しが始まる
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS - ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+      );
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.current.pullRequests[0]?.mergeable).toBe(false);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS);
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     // 再読み込みなしに「コンフリクトあり」が消える
@@ -177,7 +189,41 @@ describe("useIssuePullRequests", () => {
 
     // 動くものが無くなったので、以降はGitHub APIを叩かない
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS * 3);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("CI実行中からコンフリクトだけが残る状態へ移ると、間隔が20秒から1分へ切り替わる（#2915）", async () => {
+    vi.useFakeTimers();
+    const fetchMock = sequencedFetch([
+      [{ ...pullRequest(2360), ciStatus: "in_progress" as const }],
+      [conflicting(2360)],
+    ]);
+
+    renderHook(() => useIssuePullRequests("guchi-apps/issue-deck", 2352, [link(2360)], true));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // CI実行中は20秒で飛ぶ
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // コンフリクトだけになったので、次はもう20秒では飛ばない
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(
+        ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS - ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+      );
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
@@ -189,7 +235,7 @@ describe("useIssuePullRequests", () => {
     renderHook(() => useIssuePullRequests("guchi-apps/issue-deck", 2352, [link(2360)], false));
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS * 3);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

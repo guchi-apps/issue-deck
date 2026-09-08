@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
-import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { shorterAutoRefreshInterval, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type {
   PullRequestListResponse,
   PullRequestListScope,
@@ -88,10 +88,18 @@ type UsePullRequestsResult = {
  * 当たりの上限（5,000回/時）を超える。10秒間隔で回せるのは、取得側がETagの条件付きGETを
  * 通していて変化が無い間は304＝レート制限を消費しないため
  * （[lib/github/conditional-request.ts](../lib/github/conditional-request.ts)）。
+ *
+ * **`conflictAutoRefreshIntervalMs`は、コンフリクトしているPRがある間だけ足される要求**
+ * （#2915）。「コンフリクトあり」はこの一覧の`mergeable`だけを見て描いており（Issue一覧の
+ * 行の添え字・確認待ちのマージ待ちカード・Issueから重ねて開くPR詳細も同じ材料）、
+ * 取り直さないと解消された後も残る。**条件を2つに割っている**のは、画面を開いているか
+ * （呼び出し側にしか分からない）とコンフリクトが残っているか（取得結果にしか無い）を
+ * 1か所で決められないため。どちらかが欠ければ従来どおり回さない。
  */
 export function usePullRequests(
   scope: PullRequestListScope,
   autoRefreshIntervalMs: AutoRefreshIntervalMs = null,
+  conflictAutoRefreshIntervalMs: AutoRefreshIntervalMs = null,
 ): UsePullRequestsResult {
   const [pullRequests, setPullRequests] = useState<PullRequestSummary[]>([]);
   const [failedRepositories, setFailedRepositories] = useState<string[]>([]);
@@ -212,9 +220,21 @@ export function usePullRequests(
     };
   }, [fetchScope, reloadKey]);
 
+  // コンフリクトしているPRが手元にあるか（#2915）。openなPRだけを見る——マージ済み・
+  // クローズ済みのPRにはコンフリクトの表示を出さないため、取り直す理由にもならない
+  const hasConflictingPullRequest = pullRequests.some(
+    (pullRequest) =>
+      pullRequest.state === "open" && !pullRequest.merged && pullRequest.mergeable === false,
+  );
+  // 呼び出し側の要求と、コンフリクトが残っている間だけの要求の短い方を採る（#1767と同じ形）
+  const effectiveAutoRefreshIntervalMs = shorterAutoRefreshInterval(
+    autoRefreshIntervalMs,
+    hasConflictingPullRequest ? conflictAutoRefreshIntervalMs : null,
+  );
+
   // 裏に回っているタブでは取りに行かない・有効になった直後に1回取る、といった扱いは
   // ブランチ状況（`use-branch-flow.ts`）と共通なので`useAutoRefresh`が持つ（#1767）。
-  useAutoRefresh(autoRefreshIntervalMs, backgroundLoadRef);
+  useAutoRefresh(effectiveAutoRefreshIntervalMs, backgroundLoadRef);
 
   return {
     pullRequests,
@@ -227,7 +247,9 @@ export function usePullRequests(
     refresh,
     refreshInBackground,
     refreshFromPull,
-    autoRefresh: autoRefreshIntervalMs !== null,
-    pollIntervalMs: autoRefreshIntervalMs,
+    // 画面に出すのは実際に回している間隔（#2915）。要求した値をそのまま返すと、
+    // コンフリクトのために回っている間もヘッダーが「手動更新のみ」と言ってしまう
+    autoRefresh: effectiveAutoRefreshIntervalMs !== null,
+    pollIntervalMs: effectiveAutoRefreshIntervalMs,
   };
 }

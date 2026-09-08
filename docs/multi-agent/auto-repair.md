@@ -404,24 +404,13 @@ CI失敗の自動修正は人の操作なしに走るが、issue-deckの画面�
 
 | 画面 | 取り直しの間隔 | 条件 |
 | --- | --- | --- |
-| PR一覧・PR詳細 | 10秒 | PR画面（ペイン・スマホの画面）を開いている間 |
-| Issue一覧の添え字 | 60秒 | Issueペインを開いていて、`Develop PR`・`Release`のIssueが1件以上ある |
-| Issue詳細の対応PR | 20秒 | `isIssuePullRequestSettling`が真のPRが1件以上ある |
+| PR一覧・PR詳細（PRペイン） | 10秒 | PR画面（ペイン・スマホの画面）を開いている間 |
+| Issue一覧の添え字・確認待ちのカード・Issueから重ねて開くPR詳細 | 60秒 | Issueペイン／PRペインを開いていて、コンフリクトしているopen PRが1件以上ある（#2915）。または`Develop PR`・`Release`のIssueが1件以上ある（#2816） |
+| Issue詳細の対応PR | コンフリクトだけが理由なら60秒、CI・判定・自動修復が動いていれば20秒 | 状態が確定していない対応PRが1件以上ある |
 
-Issue詳細だけが**取得結果を見て自分で止める**ため、止める条件（`isIssuePullRequestSettling`）に
-入っていない状態はそこで固まる。#2915はコンフリクトがこれに該当していた。
-
-- **修復run（`repairRun`）では代用できない。** 行が立つのはissue-deckから起動した経路（画面の
-  ボタン・コンフリクト巡回）だけで、`claude-conflict-resolve.yml`がGitHub側のイベント
-  （`pull_request` / `schedule` / `workflow_run`）で自分から動いたときはDBに何も残らない。
-  その状態では「CI通過・判定済み・修復run無し」が揃うため、コンフリクト中でも「動くものは無い」と
-  判定されて取り直しが止まっていた
-- **コンフリクトは「待っていれば消えうる状態」として数える。** 解消されるまで取り直し、解消された
-  回で赤いピルが消え、そこで自動更新も止まる。`mergeable`が`null`（GitHubが判定中）のあいだは
-  数えない——表示側と同じく、判定前を「コンフリクトあり」として扱わないため
-- **`pollWhileCiRunning`が偽でも、取得結果に動きうるPRがあれば取り直しを始める。** この引数は
-  Issueの進捗（`Develop PR`・`Release`）とマージ待ちから決まるので、進捗の報告が届かず
-  `Implementation`に取り残されたIssueでは1回取って終わりになっていた
+**取り直す条件と間隔の正は[docs/code-map.md](../code-map.md)の「対応PRのポーリングを止める条件は
+「CI実行中か」だけにしない」**（`issuePullRequestPollIntervalMs`・`conflictAutoRefreshIntervalMs`の
+設計理由もそこにある）。ここでは重複して書かない。
 
 ## 本番デプロイの一時的な失敗の再実行（#2134）
 

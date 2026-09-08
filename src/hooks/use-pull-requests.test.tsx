@@ -5,20 +5,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 
 const POLL_INTERVAL_MS = 10_000;
+/** コンフリクトが残っている間だけの間隔（#2915。`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`） */
+const CONFLICT_INTERVAL_MS = 60_000;
 
 let hidden = false;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function stubFetch() {
+function stubFetch(pullRequests: unknown[] = []) {
   fetchMock = vi.fn(async () => ({
     ok: true,
     json: async () => ({
-      pullRequests: [],
+      pullRequests,
       failedRepositories: [],
       fetchedAt: new Date().toISOString(),
     }),
   }));
   vi.stubGlobal("fetch", fetchMock);
+}
+
+/** コンフリクトしているopen PR 1件ぶん。判定に使う列だけを持たせる（#2915） */
+function conflictingPullRequest(mergeable: boolean | null = false) {
+  return { id: "guchi-apps/issue-deck#2915", state: "open", merged: false, mergeable };
 }
 
 /** タイマーを進めたうえで、その間に走った取得のPromiseを消化する */
@@ -77,6 +84,44 @@ describe("usePullRequests の自動更新（#1531・#1767）", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("コンフリクトしているPRがあれば、コンフリクト用の間隔でも取り直す（#2915）", async () => {
+    stubFetch([conflictingPullRequest()]);
+    const { result } = renderHook(() => usePullRequests("open", null, CONFLICT_INTERVAL_MS));
+
+    // 有効になるのは1回目の取得でコンフリクトが分かってから。そこで「有効化直後の1回」が走る
+    await advance(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.pollIntervalMs).toBe(CONFLICT_INTERVAL_MS);
+
+    await advance(CONFLICT_INTERVAL_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("コンフリクトが無ければコンフリクト用の間隔では取り直さない（#2915）", async () => {
+    renderHook(() => usePullRequests("open", null, CONFLICT_INTERVAL_MS));
+    await advance(CONFLICT_INTERVAL_MS * 3);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("コンフリクト有無が未判定（null）なら取り直さない（判定前をコンフリクトとして扱わない）", async () => {
+    stubFetch([conflictingPullRequest(null)]);
+    renderHook(() => usePullRequests("open", null, CONFLICT_INTERVAL_MS));
+    await advance(CONFLICT_INTERVAL_MS * 3);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("画面が短い間隔を求めていれば、コンフリクト用の間隔には引き延ばされない（#2915）", async () => {
+    stubFetch([conflictingPullRequest()]);
+    const { result } = renderHook(() =>
+      usePullRequests("open", POLL_INTERVAL_MS, CONFLICT_INTERVAL_MS),
+    );
+
+    await advance(0);
+    expect(result.current.pollIntervalMs).toBe(POLL_INTERVAL_MS);
   });
 
   it("裏に回っているタブでは取りに行かず、前面へ戻った時点で取り直す", async () => {
