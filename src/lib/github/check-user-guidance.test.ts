@@ -89,7 +89,12 @@ describe("resolveCheckUserGuidance", () => {
     });
   });
 
-  /** 対応PRの行が無いIssueだけは、従来どおり承認カード自身が目的地になる */
+  /**
+   * 対応PRの行が無いIssueだけは、従来どおり承認カード自身が目的地になる。
+   *
+   * **そこでは画面のどこにもマージボタンが無い**（`IssuePullRequestList`は行が0件だと
+   * `null`を返す）ので、「下の『マージ』を押します」と案内してはいけない（PR #2918のレビュー）。
+   */
   it("対応PRのセクションが無ければ、承認カードの中では移動ボタンを出さない（#2914）", () => {
     const guidance = resolveCheckUserGuidance({
       reason: "merge",
@@ -98,6 +103,8 @@ describe("resolveCheckUserGuidance", () => {
     });
     expect(guidance?.action).toBeNull();
     expect(guidance?.buttons).toContain("修正を依頼する");
+    expect(guidance?.buttons).toContain("GitHub上で");
+    expect(guidance?.buttons).not.toContain("下の「マージ」");
   });
 
   it("対応PRのセクションが無いときは、押しても何も起きない移動先を出さない", () => {

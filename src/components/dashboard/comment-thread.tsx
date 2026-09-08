@@ -336,16 +336,20 @@ function ApprovalActions({
   // ラベルとコメントなのでセッションの状態を待つ理由が無い
   if (sessionStatePending && !mergeApprovalPending) return null;
 
-  // 次にどこの何を押せばよいか（#1663）。承認カードは行き先そのものなので、移動ボタンは
-  // 出さずボタン名だけが入る（`placement: "approval"`）。理由ラベルが読めなければnullで、
-  // 従来どおり見出しだけになる
+  // 次にどこの何を押せばよいか（#1663）。理由ラベルが読めなければnullで、従来どおり
+  // 見出しだけになる。
   // ローカル担当中は「内容がエージェントへ渡ります」と言わせない（#1903）。Remote Controlを
-  // 開くボタンは案内（`localSessionNotice`）が持つので、URLはここへ渡さない
+  // 開くボタンは案内（`localSessionNotice`）が持つので、URLはここへ渡さない。
+  // **`hasPullRequestSection`を必ず渡す**（#2914）。マージ待ちの操作一式は上部の対応PR
+  // セクションへ移したのでそこが目的地になるが、その行が1件も無いIssueでは飛ぶ先が無い。
+  // 渡し忘れると既定のtrueで「対応PRへ移動」を出し、**押しても何も起きない**
+  // （`focusCheckUserTarget`は目印が見つからなければfalseを返して終わる）
   const guidance = resolveCheckUserGuidance({
     reason: checkUserReason,
     placement: "approval",
     localSession,
     sessionAlive,
+    hasPullRequestSection,
   });
 
   // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
@@ -382,8 +386,13 @@ function ApprovalActions({
         ) : (
           <>
             <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
+            {/* 理由ラベルが読めないリポジトリではここに来る（`guidance`がnull）。**押す場所を
+                名指しするので、対応PRの行を読み取れているかで言い方を変える**（#2914。
+                読み取れていないときは画面のどこにもマージボタンが無い） */}
             <p className="text-sm text-muted-foreground">
-              画面上部の「対応PR」で内容を確認のうえマージしてください。
+              {hasPullRequestSection
+                ? "画面上部の「対応PR」で内容を確認のうえマージしてください。"
+                : "対応PRを読み取れていないため、GitHub上で内容を確認のうえマージしてください。"}
             </p>
           </>
         )}

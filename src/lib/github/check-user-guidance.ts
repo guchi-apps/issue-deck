@@ -83,7 +83,12 @@ const REASON_GUIDE: Record<CheckUserReason, ReasonGuide> = {
     // `buttonsHere`だけに書いていた。修正依頼欄を対応PRセクションへ移したので、移動先にも
     // 「修正を依頼する」がある
     buttonsAway: "対応PRの「マージ」を押します。直したい点があれば「修正を依頼する」。",
-    buttonsHere: "下の「マージ」を押します。直したい点があれば「修正を依頼する」。",
+    // **`buttonsHere`が出るのは、対応PRの行を1件も読み取れていないときだけ**（#2914。
+    // `hasPullRequestSection`がfalseのときにここが目的地になる）。その状態では
+    // `IssuePullRequestList`が`null`を返すため、画面のどこにもマージボタンが無い——
+    // 「下の『マージ』を押します」は、押せるものが無い案内になっていた
+    buttonsHere:
+      "対応PRを読み取れていないため、マージはGitHub上で行ってください。直したい点があれば下の「修正を依頼する」。",
     agentState: "待機中",
   },
   blocked: {

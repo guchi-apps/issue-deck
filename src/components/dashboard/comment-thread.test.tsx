@@ -344,6 +344,28 @@ describe("CommentThread PRマージ待ちの表示", () => {
     expect(screen.getByRole("button", { name: "修正を依頼する" })).not.toBeNull();
   });
 
+  /**
+   * その状態では画面のどこにもマージボタンが無い（`IssuePullRequestList`は行が0件だと
+   * `null`を返すため、この変更の前からそうだった）。**案内が「下の『マージ』を押します」で
+   * あってはいけない**——押せるものが無いことをそのまま書く（PR #2918のレビュー）。
+   */
+  it("対応PRセクションが無いときの案内は、マージ先としてGitHubを示す（#2914）", () => {
+    renderMergePending({ hasPullRequestSection: false, checkUserReason: "merge" });
+    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /対応PRへ移動/ })).toBeNull();
+    expect(screen.getByText(/マージはGitHub上で行ってください/)).not.toBeNull();
+  });
+
+  /** 理由ラベルが読めないリポジトリ（`guidance`がnull）でも、押す場所の名指しは実態に合わせる */
+  it("理由ラベルが無くても、対応PRセクションが無ければGitHubを示す（#2914）", () => {
+    renderMergePending({ hasPullRequestSection: false });
+    expect(screen.getByText(/GitHub上で内容を確認のうえマージしてください/)).not.toBeNull();
+
+    cleanup();
+    renderMergePending();
+    expect(screen.getByText(/画面上部の「対応PR」で内容を確認のうえマージしてください/)).not.toBeNull();
+  });
+
   it("上部のマージボタンから押された場合（mergedPullRequestNumbers）はマージ済みの表示になる（#1288・#1339）", () => {
     renderMergePending({ mergedPullRequestNumbers: new Set([674]), hasPullRequestSection: false });
 
