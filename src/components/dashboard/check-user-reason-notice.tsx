@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ExternalLink, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -81,7 +81,10 @@ export function CheckUserReasonNotice({
             onClick={() => focusCheckUserTarget(action.target)}
           >
             {SCROLL_BUTTON_LABEL[action.target]}
-            <ArrowDown />
+            {/* 矢印は行き先の向きに合わせる（#2914）。以前は下向き固定で、Issue詳細の上部に
+                あるパネル（「計画へ移動」「質問へ移動」）や、コメント欄から上部の対応PRへ
+                送る「対応PRへ移動」でも下を指していた。判定は`resolveCheckUserGuidance` */}
+            {action.direction === "up" ? <ArrowUp /> : <ArrowDown />}
           </Button>
         )}
         <p className="text-xs text-muted-foreground">{guidance.buttons}</p>

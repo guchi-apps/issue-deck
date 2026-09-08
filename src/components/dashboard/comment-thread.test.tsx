@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
-import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { IssueComment } from "@/types/issue";
 
 const commentSummary: IssueCommentSummaries = {
@@ -281,146 +281,17 @@ describe("CommentThread AI要約の表示位置", () => {
   });
 });
 
+/**
+ * #2914。マージ待ちの操作一式（PRの行・マージボタン・自動マージされなかった理由・
+ * レビュー本文・修正依頼欄）は画面上部の対応PRセクションへ移した。ここに残るのは
+ * 「どこへ行けばよいか」だけ。
+ */
 describe("CommentThread PRマージ待ちの表示", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("自動マージされなかった理由を案内の下に出し、マージ後は出さない（#1631）", async () => {
-    render(
-      <CommentThread
-        comments={[]}
-        repositoryFullName="m-guchi/issue-deck"
-        issueSuggestions={[]}
-        onUpdate={async () => true}
-        onDelete={async () => true}
-        commentSummary={commentSummary}
-        approvalPending
-        mergeApprovalPending
-        mergeCheckReasons={{
-          source: "review",
-          items: ["GitHub Actionsワークフローの変更 (.github/workflows/**)"],
-          postedAtLabel: "3分前",
-        }}
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
-        onApprove={async () => {}}
-        onReject={async () => {}}
-        onWithdraw={async () => {}}
-        onMergePullRequest={async () => true}
-      />,
-    );
-
-    expect(screen.getByText("自動マージされなかった理由")).not.toBeNull();
-    expect(screen.getByText("GitHub Actionsワークフローの変更 (.github/workflows/**)")).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
-
-    await waitFor(() => {
-      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
-    });
-    // マージし終えた後も理由が残ると、まだ操作が要るように読める
-    expect(screen.queryByText("自動マージされなかった理由")).toBeNull();
-  });
-
-  it("マージ実行後は「マージが必要です」ではなく完了の表示に切り替わる", async () => {
-    render(
-      <CommentThread
-        comments={[]}
-        repositoryFullName="m-guchi/issue-deck"
-        issueSuggestions={[]}
-        onUpdate={async () => true}
-        onDelete={async () => true}
-        commentSummary={commentSummary}
-        approvalPending
-        mergeApprovalPending
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
-        onApprove={async () => {}}
-        onReject={async () => {}}
-        onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
-      />,
-    );
-
-    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
-
-    await waitFor(() => {
-      expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
-    });
-    expect(screen.queryByText("Pull Requestのマージが必要です")).toBeNull();
-    expect(screen.queryByText("修正を依頼する")).toBeNull();
-  });
-
-  it("この欄からマージするとonPullRequestMergedで親へ伝える（#1288: 本文の上の対応PR一覧と状態を揃える）", async () => {
-    const onPullRequestMerged = vi.fn();
-    render(
-      <CommentThread
-        comments={[]}
-        repositoryFullName="m-guchi/issue-deck"
-        issueSuggestions={[]}
-        onUpdate={async () => true}
-        onDelete={async () => true}
-        commentSummary={commentSummary}
-        approvalPending
-        mergeApprovalPending
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
-        onApprove={async () => {}}
-        onReject={async () => {}}
-        onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
-        onPullRequestMerged={onPullRequestMerged}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /マージする/ }));
-    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
-
-    await waitFor(() => {
-      expect(onPullRequestMerged).toHaveBeenCalledWith(674);
-    });
-  });
-
-  it("本文の上のマージボタンから押された場合（mergedPullRequestNumbers）もマージ済みの表示になる（#1288・#1339）", () => {
-    render(
-      <CommentThread
-        comments={[]}
-        repositoryFullName="m-guchi/issue-deck"
-        issueSuggestions={[]}
-        onUpdate={async () => true}
-        onDelete={async () => true}
-        commentSummary={commentSummary}
-        approvalPending
-        mergeApprovalPending
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
-        onApprove={async () => {}}
-        onReject={async () => {}}
-        onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
-        mergedPullRequestNumbers={new Set([674])}
-      />,
-    );
-
-    expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
-    expect(screen.queryByText("修正を依頼する")).toBeNull();
-    const button = screen.getByRole("button", { name: /マージ済み/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-  });
-});
-
-describe("CommentThread PRマージ待ちのCI状態とマージボタン", () => {
-  afterEach(() => {
-    cleanup();
-  });
-
-  function renderMergePendingWithCiStatus(
-    pullRequestCiStatus: "in_progress" | "success" | "failure" | "none" | null,
-  ) {
+  function renderMergePending(props: Partial<ComponentProps<typeof CommentThread>> = {}) {
     return render(
       <CommentThread
         comments={[]}
@@ -432,66 +303,52 @@ describe("CommentThread PRマージ待ちのCI状態とマージボタン", () =
         approvalPending
         mergeApprovalPending
         pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
-        pullRequests={[
-          {
-            number: 674,
-            htmlUrl: "https://github.com/m-guchi/issue-deck/pull/674",
-            title: "対応PRのタイトル",
-            state: "open",
-            draft: false,
-            merged: false,
-            ciStatus: pullRequestCiStatus,
-            mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
-            mergeable: true,
-            repairRun: null,
-            linkedIssueNumber: 1288,
-            reviewVerdict: null,
-          },
-        ]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
         onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
+        {...props}
       />,
     );
   }
 
-  it("CI実行中はマージするボタンがdisabledになる", () => {
-    renderMergePendingWithCiStatus("in_progress");
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+  it("マージボタン・レビュー本文・修正依頼欄をここには出さない（#2914）", () => {
+    renderMergePending({
+      reviewFindings: {
+        verdictKind: "changes-requested",
+        verdictLabel: "要修正",
+        body: "- `a.ts:1` を直す",
+        createdAt: new Date().toISOString(),
+        htmlUrl: null,
+        reviewedSha: "0123456",
+        isStale: false,
+      },
+      reviewPullRequestNumber: 674,
+    });
+
+    expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+    expect(screen.queryByText("コードレビュー")).toBeNull();
+    expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
 
-  it("CI成功時はマージするボタンがdisabledにならない", () => {
-    renderMergePendingWithCiStatus("success");
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
+  it("理由ラベルが読めれば「対応PRへ移動」で上部へ送る（#2914）", () => {
+    renderMergePending({ checkUserReason: "merge" });
+    expect(screen.getByRole("button", { name: /対応PRへ移動/ })).not.toBeNull();
   });
 
-  it("CI失敗時はマージするボタンがdisabledにならない", () => {
-    renderMergePendingWithCiStatus("failure");
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
+  // 対応PRの行が1件も無いIssueでは飛ぶ先が無いため、ここが唯一の修正依頼の出口になる
+  it("上部に対応PRセクションが無いときだけ、修正依頼欄をここに出す（#2914）", () => {
+    renderMergePending({ hasPullRequestSection: false });
+    expect(screen.getByPlaceholderText("修正依頼を入力（必須）")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "修正を依頼する" })).not.toBeNull();
   });
 
-  it("CI状態が取得できない場合はマージするボタンがdisabledにならない", () => {
-    renderMergePendingWithCiStatus(null);
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-  });
+  it("上部のマージボタンから押された場合（mergedPullRequestNumbers）はマージ済みの表示になる（#1288・#1339）", () => {
+    renderMergePending({ mergedPullRequestNumbers: new Set([674]), hasPullRequestSection: false });
 
-  it("マージ操作エリアと修正依頼エリアの間にディバイダーが表示される", () => {
-    renderMergePendingWithCiStatus("success");
-    const separator = document.querySelector('[data-slot="separator"]');
-    expect(separator).not.toBeNull();
-  });
-
-  it("マージするボタンはopacityを含む全プロパティのtransitionを使わない（#1115: CIバッジ出現によるレイアウト移動とdisabled化のopacity transitionが重なり、モバイルSafariでボタンが二重表示される不具合の再発防止）", () => {
-    renderMergePendingWithCiStatus("in_progress");
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.className).not.toMatch(/(?:^|\s)transition-all(?:\s|$)/);
-    expect(button.className).toMatch(/(?:^|\s)transition-colors(?:\s|$)/);
+    expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
+    expect(screen.queryByText("修正を依頼する")).toBeNull();
   });
 });
 
@@ -564,122 +421,6 @@ describe("CommentThread 承認カードのテキスト入力", () => {
     fireEvent.change(textarea, { target: { value: "次のステップへ進んでください" } });
     fireEvent.click(screen.getByRole("button", { name: "承認" }));
     expect(onApprove).toHaveBeenCalledWith("次のステップへ進んでください");
-  });
-});
-
-describe("CommentThread PRマージ待ちの修正を依頼するテキスト入力", () => {
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
-  function renderMergePending(onRequestPrFix: (reason: string) => void) {
-    return render(
-      <CommentThread
-        comments={[]}
-        repositoryFullName="m-guchi/issue-deck"
-        issueSuggestions={[]}
-        onUpdate={async () => true}
-        onDelete={async () => true}
-        commentSummary={commentSummary}
-        approvalPending
-        mergeApprovalPending
-        onApprove={async () => {}}
-        onReject={async () => {}}
-        onWithdraw={async () => {}}
-        onRequestPrFix={onRequestPrFix}
-        onMergePullRequest={async () => true}
-      />,
-    );
-  }
-
-  it("入力欄が常設表示される", () => {
-    renderMergePending(() => {});
-    expect(screen.getByPlaceholderText("修正依頼を入力（必須）")).not.toBeNull();
-  });
-
-  it("空文字では修正を依頼するが送信されずエラー文言が出る", () => {
-    const onRequestPrFix = vi.fn();
-    renderMergePending(onRequestPrFix);
-    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
-    expect(screen.getByText("修正内容を入力してください")).not.toBeNull();
-    expect(onRequestPrFix).not.toHaveBeenCalled();
-  });
-
-  it("入力ありでonRequestPrFix(text)が呼ばれる", () => {
-    const onRequestPrFix = vi.fn();
-    renderMergePending(onRequestPrFix);
-    const textarea = screen.getByPlaceholderText("修正依頼を入力（必須）");
-    fireEvent.change(textarea, { target: { value: "CIが失敗しています" } });
-    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
-    expect(onRequestPrFix).toHaveBeenCalledWith("CIが失敗しています");
-  });
-
-  /**
-   * #2849。マージを押す直前に、自動レビューが何を指摘したのかを読み、そのまま修正依頼へ
-   * 渡せるようにする。**取り込みはGitHubへ何も送らない**——入るのは入力欄までで、
-   * 送るのは「修正を依頼する」を押したとき。
-   */
-  describe("レビュー指摘の取り込み", () => {
-    const review = {
-      verdictKind: "changes-requested" as const,
-      verdictLabel: "要修正",
-      body: "- `a.ts:1` を直す",
-      createdAt: new Date().toISOString(),
-      htmlUrl: null,
-      reviewedSha: "0123456",
-      isStale: false,
-    };
-
-    function renderWithReview(onRequestPrFix: (reason: string) => void) {
-      return render(
-        <CommentThread
-          comments={[]}
-          repositoryFullName="m-guchi/issue-deck"
-          issueSuggestions={[]}
-          onUpdate={async () => true}
-          onDelete={async () => true}
-          commentSummary={commentSummary}
-          approvalPending
-          mergeApprovalPending
-          onApprove={async () => {}}
-          onReject={async () => {}}
-          onWithdraw={async () => {}}
-          onRequestPrFix={onRequestPrFix}
-          onMergePullRequest={async () => true}
-          reviewFindings={review}
-          reviewPullRequestNumber={2851}
-        />,
-      );
-    }
-
-    it("対象PRが分からなければパネルを出さない", () => {
-      renderMergePending(() => {});
-      expect(screen.queryByText("コードレビュー")).toBeNull();
-    });
-
-    it("取り込むと入力欄が引用で埋まり、その内容がそのまま送られる", () => {
-      const onRequestPrFix = vi.fn();
-      renderWithReview(onRequestPrFix);
-
-      fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
-      const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("修正依頼を入力（必須）");
-      expect(textarea.value).toContain("自動レビュー（PR #2851・要修正）");
-      expect(textarea.value).toContain("> - `a.ts:1` を直す");
-
-      fireEvent.click(screen.getByRole("button", { name: "修正を依頼する" }));
-      expect(onRequestPrFix).toHaveBeenCalledWith(textarea.value);
-    });
-
-    it("書きかけの依頼は消さず、後ろへ足す", () => {
-      renderWithReview(() => {});
-      const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("修正依頼を入力（必須）");
-      fireEvent.change(textarea, { target: { value: "ついでにテストも足してください" } });
-
-      fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
-      expect(textarea.value).toContain("ついでにテストも足してください");
-      expect(textarea.value).toContain("自動レビュー（PR #2851・要修正）");
-    });
   });
 });
 
@@ -864,7 +605,6 @@ describe("CommentThread 承認カードの表示位置（#1639）", () => {
         onReject={async () => {}}
         onWithdraw={async () => {}}
         onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
       />,
     );
   }
@@ -935,7 +675,6 @@ describe("CommentThread ローカルセッションが担当しているとき",
         onAskClaude={props.onAskClaude ?? (async () => {})}
         onDismissCheckUser={props.onDismissCheckUser ?? (async () => {})}
         onRequestPrFix={async () => {}}
-        onMergePullRequest={async () => true}
         mergeApprovalPending={props.mergeApprovalPending}
       />,
     );

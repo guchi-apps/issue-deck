@@ -89,6 +89,23 @@ export function selectVisiblePullRequestLinks(
   return links.filter((link) => numbers.has(link.number));
 }
 
+/**
+ * 対応PRがすべてマージ済みになったか（#2914）。マージ待ちの操作を出すのをやめる判定に使う。
+ *
+ * **画面上部の対応PRセクション（マージボタン・レビュー本文・修正依頼欄）と、コメント欄の
+ * 承認カード（「マージしました」の案内）で同じ条件を使うためにここへ置く。** 判定を両方に
+ * 書くと、押した直後にどちらか片方だけが切り替わる。
+ *
+ * **1件もマージしていない状態はfalse。** `mergedNumbers`は「この画面のボタンから押した」記録で、
+ * 空のまま`every`を評価すると対応PRが0件のIssueまで「全部マージ済み」になる。
+ */
+export function areIssuePullRequestsAllMerged(
+  links: PullRequestLink[],
+  mergedNumbers: ReadonlySet<number>,
+): boolean {
+  return mergedNumbers.size > 0 && links.every((link) => mergedNumbers.has(link.number));
+}
+
 /** 畳んだ対応PRセクションの1行に出す内訳（#1577） */
 export type IssuePullRequestSummary = {
   /** 対応PRの総数。並びの正である`links`の件数と一致する */

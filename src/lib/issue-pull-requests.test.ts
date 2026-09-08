@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  areIssuePullRequestsAllMerged,
   canMergeIssuePullRequest,
   isIssuePullRequestSettling,
   issuePullRequestStateLabel,
@@ -150,5 +151,30 @@ describe("summarizeIssuePullRequestStates", () => {
     const summary = summarizeIssuePullRequestStates([pullRequest()], 3);
     expect(summary.total).toBe(3);
     expect(summary.buckets).toEqual([{ state: "open", count: 1 }]);
+  });
+});
+
+/**
+ * #2914。マージ待ちの操作一式（マージボタン・レビュー本文・修正依頼欄）を引っ込める判定で、
+ * 画面上部の対応PRセクションとコメント欄の承認カードが同じ条件を使う。
+ */
+describe("areIssuePullRequestsAllMerged", () => {
+  const links = [
+    { number: 616, url: "https://github.com/m-guchi/issue-deck/pull/616" },
+    { number: 620, url: "https://github.com/m-guchi/issue-deck/pull/620" },
+  ];
+
+  it("全部マージ済みならtrue", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set([616, 620]))).toBe(true);
+  });
+
+  it("1件でも残っていればfalse", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set([616]))).toBe(false);
+  });
+
+  /** 空のまま`every`を評価すると、対応PRが0件のIssueまで「全部マージ済み」になる */
+  it("1件もマージしていなければfalse（対応PRが0件のIssueも含む）", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set())).toBe(false);
+    expect(areIssuePullRequestsAllMerged([], new Set())).toBe(false);
   });
 });

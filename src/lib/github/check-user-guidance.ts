@@ -4,12 +4,20 @@ import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/ap
 export type CheckUserScrollTarget = "approval" | "pull-requests" | "plan" | "question";
 
 /**
+ * 移動ボタンが指す向き（#2914）。矢印の絵柄を決めるだけで、行き先は`target`が持つ。
+ *
+ * **同じ`target`でもパネルの置き場所によって向きが変わる。** 対応PRセクションはIssue詳細の
+ * 上部にあるので、上部のサマリーカードから見れば下、コメント欄の承認カードから見れば上になる。
+ */
+export type CheckUserScrollDirection = "up" | "down";
+
+/**
  * 次に押すものへの行き先。**`null`は「いま見ている場所が目的地」**（承認カードの中に出す
  * パネルなど）で、その場合は移動ボタンを出さずボタン名だけを添える。
  */
 export type CheckUserAction =
   | { kind: "remote-control"; url: string }
-  | { kind: "scroll"; target: CheckUserScrollTarget };
+  | { kind: "scroll"; target: CheckUserScrollTarget; direction: CheckUserScrollDirection };
 
 /** パネルを出す場所。行き先が自分自身になるかどうかがここで決まる */
 export type CheckUserPlacement = "status" | "approval";
@@ -70,10 +78,11 @@ const REASON_GUIDE: Record<CheckUserReason, ReasonGuide> = {
   merge: {
     description:
       "自動マージの条件を満たさなかったため、developへのマージはあなたが行う必要があります。",
-    // **「修正を依頼する」は`buttonsHere`にしか書かない**（#2057）。あのボタンはコメント欄の
-    // 承認カード（`comment-thread.tsx`）にしか無く、`buttonsAway`の行き先である上部の
-    // 対応PRセクションには「マージ」しか置いていない。移動先に無いボタンを案内していた
-    buttonsAway: "対応PRの「マージ」を押します。",
+    // **「修正を依頼する」は両方に書く**（#2914）。#2057の時点ではあのボタンがコメント欄の
+    // 承認カードにしか無く、行き先の対応PRセクションには「マージ」しか置いていなかったため
+    // `buttonsHere`だけに書いていた。修正依頼欄を対応PRセクションへ移したので、移動先にも
+    // 「修正を依頼する」がある
+    buttonsAway: "対応PRの「マージ」を押します。直したい点があれば「修正を依頼する」。",
     buttonsHere: "下の「マージ」を押します。直したい点があれば「修正を依頼する」。",
     agentState: "待機中",
   },
@@ -227,6 +236,9 @@ export function resolveCheckUserGuidance({
   if (sessionStatePending) return null;
   const guide = REASON_GUIDE[reason];
   const heading = CHECK_USER_REASON_HEADING[reason];
+  // 行き先はどれもIssue詳細の上部（計画・質問・対応PR）かコメント欄の承認カードで、
+  // **上部のサマリーカードから見れば下、コメント欄の承認カードから見れば上**になる（#2914）
+  const direction: CheckUserScrollDirection = placement === "approval" ? "up" : "down";
 
   // 計画の返事を画面から送れる（#2061）。**入力待ち・ローカル担当の差し替えより先に効く**——
   // どちらも「画面のボタンは届かないのでRemote Controlへ」と言うもので、計画パネルが出ている
@@ -239,7 +251,7 @@ export function resolveCheckUserGuidance({
       heading,
       description: QUESTION_PENDING_DESCRIPTION,
       buttons: QUESTION_PENDING_BUTTONS,
-      action: { kind: "scroll", target: "question" },
+      action: { kind: "scroll", target: "question", direction },
       agentState: guide.agentState,
     };
   }
@@ -253,7 +265,7 @@ export function resolveCheckUserGuidance({
       // （上部のサマリーカード・コメント欄の承認カード）から見ても目的地は別の場所なので、
       // 常に移動ボタンを出す
       buttons: PLAN_PENDING_BUTTONS,
-      action: { kind: "scroll", target: "plan" },
+      action: { kind: "scroll", target: "plan", direction },
       agentState: guide.agentState,
     };
   }
@@ -277,7 +289,7 @@ export function resolveCheckUserGuidance({
         ? { kind: "remote-control", url: remoteControlUrl }
         : placement === "approval"
           ? null
-          : { kind: "scroll", target: "approval" },
+          : { kind: "scroll", target: "approval", direction },
       agentState: guide.agentState,
     };
   }
@@ -305,20 +317,22 @@ export function resolveCheckUserGuidance({
           ? { kind: "remote-control", url: remoteControlUrl }
           : placement === "approval"
             ? null
-            : { kind: "scroll", target: "approval" },
+            : { kind: "scroll", target: "approval", direction },
       agentState: guide.agentState,
     };
   }
 
-  // 承認カードの中に出すパネルは、それ自体が目的地。移動ボタンは出さない
-  const atDestination = placement === "approval" && (target === "approval" || reason === "merge");
+  // 承認カードの中に出すパネルは、それ自体が目的地。移動ボタンは出さない。
+  // **マージは目的地ではなくなった**（#2914）——マージボタン・レビュー本文・修正依頼欄を
+  // 上部の対応PRセクションへ寄せたので、承認カードからは「対応PRへ移動」で送る
+  const atDestination = placement === "approval" && target === "approval";
 
   return {
     reason,
     heading,
     description: guide.description,
     buttons: atDestination ? guide.buttonsHere : guide.buttonsAway,
-    action: atDestination ? null : { kind: "scroll", target },
+    action: atDestination ? null : { kind: "scroll", target, direction },
     agentState: guide.agentState,
   };
 }

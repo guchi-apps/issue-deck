@@ -594,9 +594,14 @@ issue-deckのIssue詳細は、マージ待ちのときこのコメントを読�
   - セッションが入力待ち（`isSessionWaitingInput`）で理由が`merge`以外 … 「Claude Codeアプリで開く」。
     画面のボタンは`11.local`の間どこにも届かないため（`LocalSessionWaitingInputNotice`と同じ理由）。
     **マージだけ例外なのは、GitHub側の操作でセッションの状態に関係なく効くため**
-  - 理由が`merge` … 「対応PRへ移動」。対応PRのセクションが描かれていないIssueでは承認欄へ送る
+  - 理由が`merge` … 「対応PRへ移動」。**コメント欄の承認カードから見ても目的地は上部の対応PR**
+    （#2914。マージボタン・レビュー本文・修正依頼欄をそちらへ寄せたので、承認カードは
+    目的地ではなくなった）。対応PRのセクションが描かれていないIssueだけは承認欄へ送る
     （押しても何も起きない移動ボタンを出さない）
   - それ以外 … 「承認欄へ移動」
+- **矢印は行き先の向きに合わせる**（#2914）。同じ`target`でも、上部のサマリーカードから見れば
+  下・コメント欄の承認カードから見れば上になるため、向きは`placement`から決めて
+  `action.direction`に載せる（以前は下向き固定で、「計画へ移動」も上を指す先に下向きだった）。
 - 移動先は`src/lib/check-user-focus.ts`の目印（`data-check-user-target`）で指し、着いた枠を
   一瞬ハイライトする（`globals.css`の`check-user-flash`）。**idではなくdata属性なのは、
   PC版とスマホ版が同時にDOMへ乗るため**（`md:hidden`／`hidden md:flex`によるCSSの出し分けで、

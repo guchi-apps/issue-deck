@@ -11,7 +11,12 @@ import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-
 import { cn } from "@/lib/utils";
 
 /**
- * developへマージする直前の承認カードに出す、自動レビューの指摘（#2849）。
+ * developへマージする直前に出す、自動レビューの指摘（#2849）。
+ *
+ * **置き場所はIssue詳細の上部、対応PRセクションの中**（#2914。`MergeApprovalActions`が
+ * 修正依頼欄と一緒に描く）。マージボタンと同じ枠に置くのは、**古いコミットへの警告
+ * （`isStale`）や指摘を読まないままマージを押せる位置に置かない**ため。以前はコメント一覧の
+ * 末尾（承認カード）にあり、上部の対応PRセクションと同じPRの行がその上に重なっていた。
  *
  * **判定だけを出すマージ確認ダイアログ（`PullRequestMergeReview`・#2843）の続き。** あちらは
  * 「見過ごした指摘が無いか」を確かめる場所で、指摘の本文は意図して置いていない。こちらは

@@ -35,6 +35,7 @@ import {
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MergeApprovalActions } from "@/components/dashboard/merge-approval-actions";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
@@ -158,6 +159,7 @@ import {
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import {
+  areIssuePullRequestsAllMerged,
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
@@ -371,6 +373,12 @@ export function IssueDetail({
   const issueKey = issue ? `${issue.repositoryFullName}#${issue.number}` : "";
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
+  // 対応PRが全部マージ済みになったら、マージ待ちの操作一式（レビュー本文・修正依頼欄）を
+  // 引っ込める（#2914）。コメント欄の承認カードが「マージしました」へ切り替わるのと同じ判定
+  const allPullRequestsMerged = areIssuePullRequestsAllMerged(
+    pullRequestLinks,
+    mergedPullRequestNumbers,
+  );
   const declinedPullRequestNumbers =
     declinedPullRequests?.issueKey === issueKey ? declinedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
 
@@ -1171,6 +1179,23 @@ export function IssueDetail({
                 mergeError={mergePullRequestError}
                 declineError={mergePullRequestError}
               />
+              {/* 読んで決めるための一式——自動レビューの本文と修正依頼欄（#2914）。
+                  **マージボタンと同じ枠の中に置く**——以前はコメント一覧の末尾（承認カード）にあり、
+                  その上に上部と同じPRの行が重なっていた。マージ待ちのあいだだけ出し、
+                  全部マージし終えたら消す */}
+              {mergeApprovalPending && !allPullRequestsMerged && (
+                <MergeApprovalActions
+                  className="mt-2"
+                  review={reviewFindings}
+                  reviewPullRequestNumber={reviewPullRequestNumber}
+                  isLoadingReview={isLoadingReviewFindings}
+                  pullRequestLinks={pullRequestLinks}
+                  repositoryFullName={issue.repositoryFullName}
+                  issueSuggestions={issueSuggestions}
+                  onRequestPrFix={handleRequestPrFix}
+                  isRequestingPrFix={isCommentSubmitting}
+                />
+              )}
             </IssueDetailSection>
           )}
 
@@ -1342,10 +1367,8 @@ export function IssueDetail({
               onAskClaude={handleApprovalAskClaude}
               onDismissCheckUser={handleDismissCheckUser}
               mergeApprovalPending={mergeApprovalPending}
-              mergeCheckReasons={mergeCheckReasons}
               pullRequestLinks={pullRequestLinks}
-              pullRequests={pullRequests}
-              isLoadingPullRequests={isLoadingPullRequests}
+              hasPullRequestSection={visiblePullRequestLinks.length > 0}
               workflowRun={workflowRun}
               workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}
@@ -1356,23 +1379,12 @@ export function IssueDetail({
               reviewFindings={reviewFindings}
               reviewPullRequestNumber={reviewPullRequestNumber}
               isLoadingReviewFindings={isLoadingReviewFindings}
-              onMergePullRequest={handleMergePullRequest}
-              onDeclinePullRequest={handleDeclinePullRequest}
               isApproving={isSubmitting}
               isRejecting={isCommentSubmitting}
               isWithdrawing={isSubmitting}
               isRequestingContinuation={isCommentSubmitting}
               isRequestingPrFix={isCommentSubmitting}
-              isMergingPullRequest={isMergingPullRequest}
-              mergePullRequestError={mergePullRequestError}
-              mergeTargetNumber={mergeTargetNumber}
               mergedPullRequestNumbers={mergedPullRequestNumbers}
-              onPullRequestMerged={handlePullRequestMerged}
-              isDecliningPullRequest={isMergingPullRequest}
-              declinePullRequestError={mergePullRequestError}
-              declineTargetNumber={declineTargetNumber}
-              declinedPullRequestNumbers={declinedPullRequestNumbers}
-              onPullRequestDeclined={handlePullRequestDeclined}
               targetCommentIndex={targetCommentIndex}
               targetCommentRef={targetCommentRef}
               commentSummary={commentSummary}

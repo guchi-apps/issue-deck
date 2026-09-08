@@ -666,7 +666,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     `01.check-merge`の上部案内は「直したい点があれば『修正を依頼する』」と書いていたが、
     そのボタンはコメント欄の承認カード（`comment-thread.tsx`）にしか無く、案内が送る
     上部の対応PRセクションには「マージ」しか無かった（`buttonsAway`と`buttonsHere`を
-    分けているのはこのため）。
+    分けているのはこのため）。**#2914で修正依頼欄を対応PRセクションへ移したので、
+    いまは両方が「修正を依頼する」に触れる**——`buttonsAway`／`buttonsHere`を直すときは、
+    移動先に実在するかを毎回確かめる。
   - **押す先が無く、読んでも次の行動が変わらない表示は出さない。** 「実施順序 1
     前提はそろっている」がその例で、`IssueOrderSection`は前提待ちか被依存があるときだけ描く。
 - **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
@@ -1941,8 +1943,9 @@ export function POST(request: NextRequest) {
 - **developへマージする直前は、判定だけでなく指摘の本文も出し、そのまま修正依頼へ渡せる**
   （#2849。[`lib/github/pull-request-review-comment.ts`](../src/lib/github/pull-request-review-comment.ts)・
   [`pull-request-review-findings.tsx`](../src/components/dashboard/pull-request-review-findings.tsx)）。
-  マージ待ちの承認カード（`CommentThread`の`mergeApprovalPending`）に、対応PRへ投稿された
-  レビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
+  **置き場所はIssue詳細の上部、対応PRセクションの中**（#2914。
+  [`merge-approval-actions.tsx`](../src/components/dashboard/merge-approval-actions.tsx)）。
+  そこへ投稿されたレビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
   `## 検証結果`の判定だけ（#2843）で、何を指摘されたのかはコメントにしか無い。読むのは
   総評の判定マーカー（`issue-deck-review-verdict:… sha=…`）か転記の印
   （`issue-deck-review-report`。#2488）が付いたコメントで、**headと同じコミットへの最後のもの**を
@@ -1954,7 +1957,7 @@ export function POST(request: NextRequest) {
   レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
   付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
   出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
-  **取得はマージ待ちの承認カードを出すときだけ**（`usePullRequestReview`・
+  **取得はマージ待ちのときだけ**（`usePullRequestReview`・
   `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
   20秒ごとに回る`/api/issues/pull-requests`へ相乗りさせていない——あちらは全PRぶんの応答が
   膨らむうえ、本文は画面の上部では使わない。**同じ材料を返す`/api/pull-requests/detail`も
