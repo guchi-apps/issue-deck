@@ -46,6 +46,10 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 `collectWorkflowTags`）、手で除外リストを持つ必要は無い。一方**確認用のコマンド例は自動では
 外れない**——`gh repo list`は既定でアーカイブ済みも返すので`--no-archived`を付ける。
 
+**この表の更新は、アプリを終了させる作業の一部でしかない。** 実機の撤去・本番デプロイの停止・
+シークレットの後片付け・アーカイブまでの全体の順序と落とし穴は
+[app-shutdown.md](app-shutdown.md)を参照する。
+
 | リポジトリ | ステータス | 導入済み自動化ワークフロー | CLAUDE.md / ラベル体系 | 最終確認日 | 関連Issue | 備考 |
 |---|---|---|---|---|---|---|
 | `guchi-apps/issue-deck` | 対応済み | 一式（`claude-issue-dispatch.yml`・`issue-labels.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`release-develop-to-main.yml`）。うち`issue-labels.yml`は`reusable-issue-labels.yml`をローカルパス参照 | あり（本体） | 2026-08-09 | #354, #501, #940 | issue-deck自身のセルフホスティング。再利用可能ワークフローの提供元でもあり、常に最新を参照するカナリアとして機能する |
