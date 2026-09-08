@@ -106,6 +106,30 @@ describe("isIssuePullRequestSettling", () => {
   it("CIが確定して判定も修復も無ければ動いていない", () => {
     expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "failure" }))).toBe(false);
   });
+
+  it("コンフリクトしていればまだ動いている（解消されれば表示が消えるため。#2915）", () => {
+    expect(
+      isIssuePullRequestSettling(
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: false }),
+      ),
+    ).toBe(true);
+  });
+
+  it("コンフリクトが解消されれば動いていない（そこで取り直しを止める。#2915）", () => {
+    expect(
+      isIssuePullRequestSettling(
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("コンフリクト有無が未判定（null）なら動いていない扱い（判定前をコンフリクトとして扱わない）", () => {
+    expect(
+      isIssuePullRequestSettling(
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: null }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("issuePullRequestStateLabel", () => {

@@ -52,12 +52,23 @@ export function canMergeIssuePullRequest(pullRequest: IssuePullRequest): boolean
  * - `in_progress` … CIの結果がまだ確定していない
  * - 自動マージ可否の判定が`pending` … 判定が終わればマージボタンが押せるようになる（#1968）
  * - 自動修復が走っている … 終わればコンフリクトかCI失敗のどちらかが解消される（#2072）
+ * - **コンフリクトしている** … 解消されれば「コンフリクトあり」が消える（#2915）
+ *
+ * **コンフリクトを数えるのに`repairRun`では代用できない**（#2915）。修復runの行が立つのは
+ * issue-deckから起動した経路（画面のボタン・コンフリクト巡回）だけで、
+ * `claude-conflict-resolve.yml`がGitHub側のイベント（`pull_request` / `schedule` /
+ * `workflow_run`）で自分から動いたときはDBに何も残らない。その状態で「CI通過・判定済み・
+ * 修復run無し」が揃うため、ポーリングが止まったまま解消され、Issueを開き直すまで赤いピルが
+ * 残っていた。コンフリクトは**待っていれば消えうる状態**なので、解消されるまで取り直す。
  */
 export function isIssuePullRequestSettling(pullRequest: IssuePullRequest): boolean {
   return (
     pullRequest.ciStatus === "in_progress" ||
     pullRequest.mergeJudgement.state === "pending" ||
-    pullRequest.repairRun !== null
+    pullRequest.repairRun !== null ||
+    // `null`（GitHubが判定中・未取得）は数えない。表示（`ConflictBadge`）と同じく
+    // `false`のときだけコンフリクトとして扱う
+    pullRequest.mergeable === false
   );
 }
 

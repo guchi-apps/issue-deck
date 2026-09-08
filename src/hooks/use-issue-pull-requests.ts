@@ -37,6 +37,12 @@ type UseIssuePullRequestsResult = {
  *
  * **止める条件はCI実行中だけではない**（#2145）。コンフリクトの自動解消はCIが通過したまま
  * 走るため、CIだけを見て止めると解消が終わってもバッジが「自動解消中」のまま固まる。
+ *
+ * **動きうるPRを見つけたら、`pollWhileCiRunning`が偽でも取り直しを始める**（#2915）。
+ * この引数はIssueの進捗（`Develop PR`・`Release`）とマージ待ちから決まるため、進捗の報告が
+ * 届かず`Implementation`に取り残されたIssueでは1回取って終わりになる。コンフリクトのように
+ * 「待っていれば消えるが、消えたことは取り直さないと分からない」表示がそこで固まるので、
+ * 取得結果そのものを見て判断できるようにする（止め方は従来どおり自分で止める）。
  */
 export function useIssuePullRequests(
   repositoryFullName: string | null,
@@ -71,6 +77,18 @@ export function useIssuePullRequests(
     let intervalId: ReturnType<typeof setInterval> | null = null;
     const controller = new AbortController();
 
+    // 取り直しを始める／続ける。既に回っていれば何もしない（間隔を打ち直さないため）
+    function startPolling() {
+      if (intervalId) return;
+      intervalId = setInterval(() => load(true), POLL_INTERVAL_MS);
+    }
+
+    function stopPolling() {
+      if (!intervalId) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+
     async function load(fromPolling: boolean) {
       // 裏に回っているタブのために取り続けない。初回だけは表示に必要なので取りに行く
       if (fromPolling && document.hidden) return;
@@ -84,10 +102,11 @@ export function useIssuePullRequests(
         if (cancelled) return;
         const selected = selectIssuePullRequests(data.pullRequests, targetIssueNumber);
         setPullRequests(selected);
-        if (intervalId && !selected.some(isIssuePullRequestSettling)) {
-          clearInterval(intervalId);
-          intervalId = null;
-        }
+        // 動きうるPRが残っているかで、取り直しを始める／止めるを毎回決め直す（#2915）。
+        // 「止めるだけ」だと、`pollWhileCiRunning`が偽のIssueでコンフリクトを見つけても
+        // 取り直しが始まらない
+        if (selected.some(isIssuePullRequestSettling)) startPolling();
+        else stopPolling();
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
       } finally {
@@ -98,14 +117,14 @@ export function useIssuePullRequests(
     }
 
     load(false);
-    if (pollWhileCiRunning) {
-      intervalId = setInterval(() => load(true), POLL_INTERVAL_MS);
-    }
+    // マージ待ち・PR待ちのIssueでは、まだ何も取れていない時点から回し始める。CIが始まる前
+    // （動きうるPRがまだ無い状態）を初回の取得だけで見切らないため
+    if (pollWhileCiRunning) startPolling();
 
     return () => {
       cancelled = true;
       controller.abort();
-      if (intervalId) clearInterval(intervalId);
+      stopPolling();
     };
   }, [owner, repo, issueNumber, numbersKey, pollWhileCiRunning, reloadToken, loadKey]);
 
