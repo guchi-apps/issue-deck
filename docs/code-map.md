@@ -1993,6 +1993,13 @@ export function POST(request: NextRequest) {
   **リリース前の「修正をIssueにする」（#2838）とは行き先が違う**。あちらの対応PRは
   developへマージ済みで`issue-<番号>`ブランチも消えているため新規Issueへ切り出すしかないが、
   こちらはPRがまだopenなので同じPRへ修正コミットを積める。
+  **「修正を依頼する」の送り先はIssueの担当先で変わる**（#2919。
+  [`lib/dispatch/pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）。`@claude`コメントで
+  起こせるのは`11.local`が付いていないIssueだけで、付いている間は
+  `reusable-issue-dispatch.yml`が`mode=skip`へ倒し案内コメントを返して終わる。生きている
+  セッションがあればそこへ`INSTRUCTION`で固定の1行を流し、終わっていれば`11.local`も外してから
+  投稿する。判定に`resolveIssueExecutionTarget`を使わない理由と3通りの内訳は
+  [multi-agent/labels.md](multi-agent/labels.md)「マージ待ちの「修正を依頼する」は送り先を切り替える」。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・
   [`hooks/use-pull-request-files.ts`](../src/hooks/use-pull-request-files.ts)）。既定は畳んだ状態で、

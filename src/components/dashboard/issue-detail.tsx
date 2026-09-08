@@ -48,13 +48,21 @@ import { StartImplementationDialog } from "@/components/dashboard/start-implemen
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import {
+  describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
+  findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
+  resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import {
+  PR_FIX_SESSION_INSTRUCTION,
+  prFixRequestLabels,
+  resolvePrFixRequestRoute,
+} from "@/lib/dispatch/pr-fix-request";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -370,6 +378,9 @@ export function IssueDetail({
     numbers: ReadonlySet<number>;
   } | null>(null);
   const [declineTargetNumber, setDeclineTargetNumber] = useState<number | null>(null);
+  // 修正依頼をセッションへ流せなかった理由（#2919）。**コメントは投稿できている**ので、
+  // ここを黙って落とすと「コメントは増えたのにセッションは知らない」が残る
+  const [prFixSessionError, setPrFixSessionError] = useState<string | null>(null);
   const issueKey = issue ? `${issue.repositoryFullName}#${issue.number}` : "";
   const mergedPullRequestNumbers =
     mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
@@ -518,15 +529,18 @@ export function IssueDetail({
    * issues.unlabeledイベントだけでは実装の再開がトリガーされない（#173）。個人アカウントで
    * 投稿されるコメントを続けて送ることで、issue_commentトリガー経由で確実に再開させる。
    */
-  async function updateLabelsAndComment(newLabels: string[], commentBody: string) {
-    if (!issue) return;
+  async function updateLabelsAndComment(
+    newLabels: string[],
+    commentBody: string,
+  ): Promise<boolean> {
+    if (!issue) return false;
     const originalLabels = issue.labels.map((label) => label.name);
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       labels: newLabels,
     });
-    if (!updated) return;
+    if (!updated) return false;
     onIssueUpdated(updated);
 
     const [owner, repo] = issue.repositoryFullName.split("/");
@@ -539,7 +553,7 @@ export function IssueDetail({
     if (created) {
       setComments((prev) => [...prev, created]);
       onIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-      return;
+      return true;
     }
 
     const rolledBack = await updateIssue({
@@ -551,6 +565,7 @@ export function IssueDetail({
     setCommentMutationError((prev) =>
       rolledBack ? withRollbackNotice(prev ?? "") : withRollbackFailureNotice(prev ?? ""),
     );
+    return false;
   }
 
   async function handleApprove(text?: string) {
@@ -583,9 +598,32 @@ export function IssueDetail({
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestContinuationCommentBody());
   }
 
+  /**
+   * マージ待ちの「修正を依頼する」（#2919）。**依頼をIssueコメントとして残すのは3通りとも同じで、
+   * 変わるのはラベルと「誰に知らせるか」だけ。**
+   *
+   * - 無人実行が担当: 今までどおり。`@claude …`のコメントが`claude-issue-dispatch.yml`を起こす
+   * - ローカルセッションが担当: コメントを残したうえで、そのセッションへ固定の1行を流す
+   * - セッションが終了・記録なし: `11.local`も外してから投稿し、無人実行が拾える状態にする
+   *
+   * **セッションへの送信はコメントが残ってから。** 先に送ると、読みに行った先にまだ依頼が無い。
+   */
   async function handleRequestPrFix(reason: string) {
     if (!issue) return;
-    await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestPrFixCommentBody(reason));
+    setPrFixSessionError(null);
+    const posted = await updateLabelsAndComment(
+      prFixRequestLabels(prFixRoute, issue.labels),
+      requestPrFixCommentBody(reason),
+    );
+    if (!posted || prFixRoute.kind !== "session") return;
+    const result = await dispatch.sendSessionControl({
+      repositoryFullName: issue.repositoryFullName,
+      issueNumber: issue.number,
+      hostName: prFixRoute.host,
+      kind: "instruction",
+      instruction: PR_FIX_SESSION_INSTRUCTION,
+    });
+    if (!result.ok) setPrFixSessionError(result.message);
   }
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
@@ -754,6 +792,31 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // マージ待ちの「修正を依頼する」をどこへ送るか（#2919）。`11.local`が付いている間、
+  // `@claude`コメントを投稿しても無人実行は断るだけなので、担当先で送り方を変える
+  const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
+  // セッションへ送れない理由は、押す前に出して押せなくする（`SessionRecoveryButton`と同じ立場）。
+  // 判定と文言は追加指示（#1012）とまったく同じものを使う
+  const prFixSessionRejection = (() => {
+    if (prFixRoute.kind !== "session") return null;
+    const controlJob = findSessionControlJobForIssue(
+      dispatch.jobs,
+      issue.repositoryFullName,
+      issue.number,
+    );
+    const rejection = resolveSessionControlRejection({
+      host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+      session: issueSession,
+      kind: "INSTRUCTION",
+      hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+    });
+    return rejection
+      ? describeSessionControlRejection(rejection, {
+          hostName: prFixRoute.host,
+          kind: "INSTRUCTION",
+        })
+      : null;
+  })();
   // 計画への返事待ち（#2061）。**待っている間、端末には承認プロンプトが出ていない**ので、
   // ここが唯一の答える場所になる（切れると従来どおり端末のプロンプトへ戻る）
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
@@ -1194,6 +1257,9 @@ export function IssueDetail({
                   issueSuggestions={issueSuggestions}
                   onRequestPrFix={handleRequestPrFix}
                   isRequestingPrFix={isCommentSubmitting}
+                  prFixRoute={prFixRoute}
+                  prFixSessionRejection={prFixSessionRejection}
+                  prFixSessionError={prFixSessionError}
                 />
               )}
             </IssueDetailSection>
@@ -1376,6 +1442,9 @@ export function IssueDetail({
               onWithdraw={handleWithdraw}
               onRequestContinuation={handleRequestContinuation}
               onRequestPrFix={handleRequestPrFix}
+              prFixRoute={prFixRoute}
+              prFixSessionRejection={prFixSessionRejection}
+              prFixSessionError={prFixSessionError}
               reviewFindings={reviewFindings}
               reviewPullRequestNumber={reviewPullRequestNumber}
               isLoadingReviewFindings={isLoadingReviewFindings}

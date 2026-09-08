@@ -1,6 +1,6 @@
 "use client";
 
-import { Pencil } from "lucide-react";
+import { Info, Pencil } from "lucide-react";
 import { useState } from "react";
 
 import { ApprovalTextField } from "@/components/dashboard/approval-text-field";
@@ -8,6 +8,12 @@ import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import {
+  PR_FIX_SESSION_INSTRUCTION,
+  prFixRequestActionLabel,
+  type PrFixRequestRoute,
+} from "@/lib/dispatch/pr-fix-request";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
   buildReviewFixRequestText,
@@ -27,6 +33,11 @@ import { cn } from "@/lib/utils";
  * だけで、送るのは人が「修正を依頼する」を押したとき（#2849）。取り込む文面は
  * `buildReviewFixRequestText`が持つ。
  *
+ * **修正依頼の送り先は1つではない**（#2919）。`11.local`が付いている間、`@claude`コメントを
+ * 投稿しても無人実行は`mode=skip`で断るだけなので、送り先（`route`）に合わせて案内とボタンの
+ * 文言を変える。どこへ何が送られるのかは、押す前にこの欄で読める。判定は
+ * `resolvePrFixRequestRoute`が持ち、押したあとの処理は呼び出し側（Issue詳細）にある。
+ *
  * 出すものが1つも無ければ（レビューの取得中で、かつ修正依頼も送れない）何も描かない。
  */
 export function MergeApprovalActions({
@@ -38,6 +49,9 @@ export function MergeApprovalActions({
   issueSuggestions,
   onRequestPrFix,
   isRequestingPrFix = false,
+  prFixRoute = { kind: "actions" },
+  prFixSessionRejection = null,
+  prFixSessionError = null,
   className,
 }: {
   /** 対応PRへ投稿された自動レビューの本文。記録が無い・取得前はnull */
@@ -57,6 +71,29 @@ export function MergeApprovalActions({
   /** 「修正を依頼する」の処理。渡さない場合は修正依頼欄を出さない */
   onRequestPrFix?: (reason: string) => Promise<void> | void;
   isRequestingPrFix?: boolean;
+  /**
+   * 修正依頼の送り先（#2919）。既定は従来どおりの無人実行。
+   *
+   * **判定材料はIssueのラベルとセッションの状態**で、ここでは決めない
+   * （`resolvePrFixRequestRoute`）。この欄が受け取るのは結果だけ。
+   */
+  prFixRoute?: PrFixRequestRoute;
+  /**
+   * 走っているセッションへ送れない理由（#2919。`prFixRoute.kind === "session"`のときだけ意味がある）。
+   *
+   * **ボタンごと消さず、理由を出して押せなくする**（`SessionRecoveryButton`と同じ立場）。
+   * 文言は`describeSessionControlRejection`が持ち、判定は呼び出し側が
+   * `resolveSessionControlRejection`で行う（ホストの申告を知っているのがあちらのため）。
+   */
+  prFixSessionRejection?: string | null;
+  /**
+   * セッションへの送信そのものが失敗した理由（#2919）。押した**後**に出るもので、
+   * `prFixSessionRejection`と違いボタンは押せるままにする（書き直して送り直せる）。
+   *
+   * **黙って落とさない。** 依頼のコメントは投稿されているので、ここで何も出さないと
+   * 「コメントは増えたのにセッションは知らない」という、この画面がいちばん避けたい状態になる。
+   */
+  prFixSessionError?: string | null;
   className?: string;
 }) {
   const [prFixReason, setPrFixReason] = useState("");
@@ -67,6 +104,9 @@ export function MergeApprovalActions({
   const [hasImportedReview, setHasImportedReview] = useState(false);
 
   const showReview = reviewPullRequestNumber !== null && !isLoadingReview;
+  // 送れない理由が意味を持つのはセッションへ送るときだけ（#2919）。ほかの送り先はGitHubへの
+  // 操作なので、サブPCが落ちていようと押せる
+  const sessionBlocked = prFixRoute.kind === "session" && prFixSessionRejection !== null;
   if (!showReview && !onRequestPrFix) return null;
 
   function changePrFixReason(value: string) {
@@ -120,6 +160,13 @@ export function MergeApprovalActions({
         <>
           <Separator className="my-1" />
           <div className="flex flex-col gap-2">
+            {/* どこへ送られるのかを、書き始める前に出す（#2919）。無人実行が担当のIssueでは
+                今までどおり何も出さない（送り先が1つしかなく、言うことが無い） */}
+            <PrFixRouteNotice
+              route={prFixRoute}
+              rejection={prFixSessionRejection}
+              error={prFixSessionError}
+            />
             <ApprovalTextField
               value={prFixReason}
               onChange={changePrFixReason}
@@ -144,14 +191,81 @@ export function MergeApprovalActions({
                 size="sm"
                 className="ml-auto shrink-0"
                 onClick={submitPrFix}
-                disabled={isRequestingPrFix || isPrFixTextUploading}
+                disabled={isRequestingPrFix || isPrFixTextUploading || sessionBlocked}
               >
                 <Pencil />
-                修正を依頼する
+                {prFixRequestActionLabel(prFixRoute)}
               </Button>
             </div>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 修正依頼がどこへ送られるのかを、書き始める前に出す（#2919）。
+ *
+ * **無人実行が担当のIssueでは何も出さない。** 送り先が1つしかない状態で「無人実行へ送ります」と
+ * 言っても、読む人が確かめられることが増えない（今までどおりの画面のままにする）。
+ *
+ * ローカル担当のときだけ出し、**ラベルを外すこと・固定の1行を流すことを押す前に書く。**
+ * 黙って`11.local`が外れると、後から無人実行が動き出した理由を画面から辿れなくなる。
+ */
+function PrFixRouteNotice({
+  route,
+  rejection,
+  error,
+}: {
+  route: PrFixRequestRoute;
+  /** セッションへ送れない理由（`route.kind === "session"`のときだけ意味がある） */
+  rejection: string | null;
+  /** 送信そのものが失敗した理由（押した後に出る） */
+  error: string | null;
+}) {
+  if (route.kind === "actions") return null;
+
+  const hostName = route.host ? formatDispatchHostName(route.host) : null;
+
+  return (
+    <div className="rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
+      <p className="flex items-start gap-1.5">
+        <Info className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          {route.kind === "session" ? (
+            <>
+              このIssueは{hostName ? `${hostName}の` : ""}
+              <strong className="font-medium">セッションが担当中</strong>です（
+              <code>11.local</code>が付いている間、無人実行は修正依頼に反応しません）。
+              依頼はIssueコメントとして残したうえで、走っているセッションへ知らせます。
+            </>
+          ) : route.sessionEnded ? (
+            <>
+              このIssueを担当していた{hostName ? `${hostName}の` : ""}セッションは
+              <strong className="font-medium">終了しています</strong>。
+              <code>11.local</code>を外してから依頼を投稿し、無人実行（GitHub Actions）が
+              既存のPull Requestを直せるようにします。
+            </>
+          ) : (
+            <>
+              このIssueには<code>11.local</code>が付いていますが、
+              <strong className="font-medium">セッションの記録が見当たりません</strong>
+              （24時間で消えます）。ラベルを外してから依頼を投稿し、無人実行（GitHub Actions）が
+              既存のPull Requestを直せるようにします。
+            </>
+          )}
+        </span>
+      </p>
+      {/* 送る1行は固定で、押した人が書いた文面はコメントの側に入る（docs/multi-agent/gates.md）。
+          何が飛ぶのかを押す前に全文で出す */}
+      {route.kind === "session" && (
+        <p className="mt-1.5 pl-5">
+          セッションへ送る1行: 「{PR_FIX_SESSION_INSTRUCTION}」
+        </p>
+      )}
+      {route.kind === "session" && (rejection ?? error) && (
+        <p className="mt-1.5 pl-5 text-destructive">{rejection ?? error}</p>
       )}
     </div>
   );

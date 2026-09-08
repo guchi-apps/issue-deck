@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MergeApprovalActions } from "@/components/dashboard/merge-approval-actions";
+import { PR_FIX_SESSION_INSTRUCTION } from "@/lib/dispatch/pr-fix-request";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
 
 const review: PullRequestReviewCommentContent = {
@@ -104,5 +105,60 @@ describe("MergeApprovalActions レビュー指摘の取り込み", () => {
     fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
     expect(textarea.value).toContain("ついでにテストも足してください");
     expect(textarea.value).toContain("自動レビュー（PR #2851・要修正）");
+  });
+});
+
+/**
+ * 送り先による出し分け（#2919）。`11.local`が付いている間、`@claude`コメントは無人実行に
+ * 届かないため、押す前に「どこへ何が送られるのか」が読めることを確かめる。
+ */
+describe("MergeApprovalActions 修正依頼の送り先", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("無人実行が担当のときは案内を出さず、文言も従来どおり", () => {
+    renderActions({ prFixRoute: { kind: "actions" } });
+    expect(screen.getByRole("button", { name: "修正を依頼する" })).not.toBeNull();
+    expect(screen.queryByText(/セッションが担当中/)).toBeNull();
+  });
+
+  it("セッションが担当中なら、送る1行まで押す前に出す", () => {
+    renderActions({ prFixRoute: { kind: "session", host: "subpc" } });
+    expect(screen.getByRole("button", { name: "セッションへ送る" })).not.toBeNull();
+    expect(screen.getByText(/セッションが担当中/)).not.toBeNull();
+    expect(screen.getByText(new RegExp(PR_FIX_SESSION_INSTRUCTION))).not.toBeNull();
+  });
+
+  it("セッションへ送れない理由があるときは、理由を出して押せなくする", () => {
+    renderActions({
+      prFixRoute: { kind: "session", host: "subpc" },
+      prFixSessionRejection: "サブPC が応答していません。",
+    });
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "セッションへ送る" });
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText("サブPC が応答していません。")).not.toBeNull();
+  });
+
+  it("送信そのものが失敗した理由は出すが、書き直して送り直せる", () => {
+    renderActions({
+      prFixRoute: { kind: "session", host: "subpc" },
+      prFixSessionError: "積めませんでした",
+    });
+    const button = screen.getByRole<HTMLButtonElement>("button", { name: "セッションへ送る" });
+    expect(button.disabled).toBe(false);
+    expect(screen.getByText("積めませんでした")).not.toBeNull();
+  });
+
+  it("セッションが終了していれば、ラベルを外すことをボタンにも書く", () => {
+    renderActions({ prFixRoute: { kind: "handoff", host: "subpc", sessionEnded: true } });
+    expect(screen.getByRole("button", { name: "11.localを外して依頼する" })).not.toBeNull();
+    expect(screen.getByText(/終了しています/)).not.toBeNull();
+  });
+
+  it("セッションの記録が無いときは、そう言い分ける", () => {
+    renderActions({ prFixRoute: { kind: "handoff", host: null, sessionEnded: false } });
+    expect(screen.getByRole("button", { name: "11.localを外して依頼する" })).not.toBeNull();
+    expect(screen.getByText(/セッションの記録が見当たりません/)).not.toBeNull();
   });
 });
