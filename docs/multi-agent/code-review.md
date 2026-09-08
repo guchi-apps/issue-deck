@@ -5,6 +5,15 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
+**画面には「コードレビュー」と名の付くものが2つあり、これはそのうちの片方**（#2914）。
+
+| | 何を見るか | どこに出るか |
+| --- | --- | --- |
+| リポジトリ全体のレビュー（このドキュメント・#698） | 1リポジトリまるごと。指摘1件＝1カードで「Issueを作成」まで持つ | レビューIssueの詳細（`CodeReviewPanel`） |
+| develop向けPRの自動レビュー（#2849） | そのPRの差分。判定と本文を読み、そのまま修正依頼へ渡す | 対応PRセクションの中（`MergeApprovalActions`）。設計は[docs/code-map.md](../code-map.md)の「developへマージする直前は…」 |
+
+材料も出す場所も別なので、片方を直すときにもう片方は動かない。
+
 ## 経路
 
 ```text

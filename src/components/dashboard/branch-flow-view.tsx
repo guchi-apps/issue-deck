@@ -68,6 +68,7 @@ import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending"
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
+  MERGED_TO_MAIN_GROUP_KEY,
   formatUnreleasedSummary,
   isClosedLane,
   isReleaseAutoProgressing,
@@ -917,6 +918,10 @@ function ReleaseGroupHeader({
   const deployRunId = group.deploy?.runId ?? null;
   const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
+  // `main`へ直接マージされた作業の束（#2911）。**版もリリースPRも持たない**ので、
+  // 「v◯」とも「リリース済み」とも言えず、デプロイの状態も判定できない
+  // （`group.deploy`は常にnull）。見出しと日付の文言だけを別にする。
+  const mergedToMain = group.key === MERGED_TO_MAIN_GROUP_KEY;
   // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
   // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
   //
@@ -969,7 +974,13 @@ function ReleaseGroupHeader({
       <div className="flex flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-semibold text-purple-700 dark:text-purple-300">
-            {group.version ? `v${group.version}` : released ? "リリース済み" : "次のリリース"}
+            {group.version
+              ? `v${group.version}`
+              : mergedToMain
+                ? `${MAIN_BRANCH}へマージ済み`
+                : released
+                  ? "リリース済み"
+                  : "次のリリース"}
           </span>
           {released ? (
             <>
@@ -983,7 +994,12 @@ function ReleaseGroupHeader({
               )}
               <span className="text-xs text-muted-foreground">
                 {group.mergedAt &&
-                  `${formatMonthDay(group.mergedAt)}に${inProduction ? "本番反映" : "mainへマージ"}`}
+                  `${formatMonthDay(group.mergedAt)}に${
+                    // 直接マージの束は見出しが既に「mainへマージ済み」なので、日付には
+                    // 動詞だけを添える。デプロイまで届いたかは判定していないため
+                    // 「本番反映」とは言わない（#2911）
+                    mergedToMain ? "マージ" : inProduction ? "本番反映" : "mainへマージ"
+                  }`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && (

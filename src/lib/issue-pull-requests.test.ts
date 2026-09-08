@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  areIssuePullRequestsAllMerged,
   canMergeIssuePullRequest,
-  isIssuePullRequestSettling,
+  ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS,
+  ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+  issuePullRequestPollIntervalMs,
   issuePullRequestStateLabel,
   selectIssuePullRequests,
   summarizeIssuePullRequestStates,
@@ -79,32 +82,73 @@ describe("canMergeIssuePullRequest", () => {
   });
 });
 
-describe("isIssuePullRequestSettling", () => {
-  it("CI実行中はまだ動いている", () => {
-    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "in_progress" }))).toBe(true);
+describe("issuePullRequestPollIntervalMs", () => {
+  it("CI実行中は20秒で追う", () => {
+    expect(issuePullRequestPollIntervalMs([pullRequest({ ciStatus: "in_progress" })])).toBe(
+      ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+    );
   });
 
-  it("自動マージ可否の判定中はまだ動いている", () => {
+  it("自動マージ可否の判定中は20秒で追う", () => {
     expect(
-      isIssuePullRequestSettling(
-        pullRequest({ mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE } }),
-      ),
-    ).toBe(true);
+      issuePullRequestPollIntervalMs([
+        pullRequest({
+          mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+        }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
   });
 
-  it("CIが通っていても自動修復が走っていればまだ動いている（#2145）", () => {
+  it("CIが通っていても自動修復が走っていれば20秒で追う（#2145）", () => {
     expect(
-      isIssuePullRequestSettling(
+      issuePullRequestPollIntervalMs([
         pullRequest({
           ciStatus: "success",
           repairRun: { kind: "conflict", startedAt: "2026-08-22T00:00:00.000Z", runUrl: null },
         }),
-      ),
-    ).toBe(true);
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
   });
 
-  it("CIが確定して判定も修復も無ければ動いていない", () => {
-    expect(isIssuePullRequestSettling(pullRequest({ ciStatus: "failure" }))).toBe(false);
+  it("コンフリクトだけが理由なら1分へ落とす（誰かが直すまで残るため。#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: false }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS);
+  });
+
+  it("コンフリクトと数分で確定するものが混ざれば短い方を採る（#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ number: 1, ciStatus: "success", mergeable: false }),
+        pullRequest({ number: 2, ciStatus: "in_progress" }),
+      ]),
+    ).toBe(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
+  });
+
+  it("コンフリクトが解消されれば取り直さない（#2915）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: true }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("コンフリクト有無が未判定（null）なら取り直さない（判定前をコンフリクトとして扱わない）", () => {
+    expect(
+      issuePullRequestPollIntervalMs([
+        pullRequest({ ciStatus: "success", repairRun: null, mergeable: null }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("CIが確定して判定も修復もコンフリクトも無ければ取り直さない", () => {
+    expect(issuePullRequestPollIntervalMs([pullRequest({ ciStatus: "failure" })])).toBeNull();
+  });
+
+  it("対応PRが1件も無ければ取り直さない", () => {
+    expect(issuePullRequestPollIntervalMs([])).toBeNull();
   });
 });
 
@@ -150,5 +194,30 @@ describe("summarizeIssuePullRequestStates", () => {
     const summary = summarizeIssuePullRequestStates([pullRequest()], 3);
     expect(summary.total).toBe(3);
     expect(summary.buckets).toEqual([{ state: "open", count: 1 }]);
+  });
+});
+
+/**
+ * #2914。マージ待ちの操作一式（マージボタン・レビュー本文・修正依頼欄）を引っ込める判定で、
+ * 画面上部の対応PRセクションとコメント欄の承認カードが同じ条件を使う。
+ */
+describe("areIssuePullRequestsAllMerged", () => {
+  const links = [
+    { number: 616, url: "https://github.com/m-guchi/issue-deck/pull/616" },
+    { number: 620, url: "https://github.com/m-guchi/issue-deck/pull/620" },
+  ];
+
+  it("全部マージ済みならtrue", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set([616, 620]))).toBe(true);
+  });
+
+  it("1件でも残っていればfalse", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set([616]))).toBe(false);
+  });
+
+  /** 空のまま`every`を評価すると、対応PRが0件のIssueまで「全部マージ済み」になる */
+  it("1件もマージしていなければfalse（対応PRが0件のIssueも含む）", () => {
+    expect(areIssuePullRequestsAllMerged(links, new Set())).toBe(false);
+    expect(areIssuePullRequestsAllMerged([], new Set())).toBe(false);
   });
 });

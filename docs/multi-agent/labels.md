@@ -594,9 +594,18 @@ issue-deckのIssue詳細は、マージ待ちのときこのコメントを読�
   - セッションが入力待ち（`isSessionWaitingInput`）で理由が`merge`以外 … 「Claude Codeアプリで開く」。
     画面のボタンは`11.local`の間どこにも届かないため（`LocalSessionWaitingInputNotice`と同じ理由）。
     **マージだけ例外なのは、GitHub側の操作でセッションの状態に関係なく効くため**
-  - 理由が`merge` … 「対応PRへ移動」。対応PRのセクションが描かれていないIssueでは承認欄へ送る
-    （押しても何も起きない移動ボタンを出さない）
+  - 理由が`merge` … 「対応PRへ移動」。**コメント欄の承認カードから見ても目的地は上部の対応PR**
+    （#2914。マージボタン・レビュー本文・修正依頼欄をそちらへ寄せたので、承認カードは
+    目的地ではなくなった）。対応PRのセクションが描かれていないIssueだけは承認欄へ送る
+    （押しても何も起きない移動ボタンを出さない）。**この判定には`hasPullRequestSection`が
+    要るので、呼び出し側は必ず渡す**——渡し忘れると既定の`true`で「対応PRへ移動」が出て、
+    押しても何も起きない（`focusCheckUserTarget`は目印が無ければ`false`を返して終わる）。
+    その状態では画面のどこにもマージボタンが無い（`IssuePullRequestList`は行が0件なら
+    `null`を返す）ので、案内文もマージ先としてGitHubを示す
   - それ以外 … 「承認欄へ移動」
+- **矢印は行き先の向きに合わせる**（#2914）。同じ`target`でも、上部のサマリーカードから見れば
+  下・コメント欄の承認カードから見れば上になるため、向きは`placement`から決めて
+  `action.direction`に載せる（以前は下向き固定で、「計画へ移動」も上を指す先に下向きだった）。
 - 移動先は`src/lib/check-user-focus.ts`の目印（`data-check-user-target`）で指し、着いた枠を
   一瞬ハイライトする（`globals.css`の`check-user-flash`）。**idではなくdata属性なのは、
   PC版とスマホ版が同時にDOMへ乗るため**（`md:hidden`／`hidden md:flex`によるCSSの出し分けで、
@@ -1106,6 +1115,14 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
 - 対象が同じでも、**リポジトリが違えば別のIssue**（`guchi-apps/vps`の設定変更と
   `guchi-apps/issue-deck`の実装は別々に起票する。CLAUDE.md「複数リポジトリに影響する変更は、
   リポジトリごとにIssueを分ける」）
+- **無人実行からは、privateリポジトリのIssueは探せないし起票もできない**（#2908）。
+  上の`gh issue list --repo guchi-apps/vps`も`gh issue create --repo guchi-apps/vps`も、
+  GitHub Actions上のClaudeステップからは404で落ちる。届く範囲は同じorgのpublicリポジトリまでで、
+  privateなのは`vps`・`docs`・`subpc`・`question`など（アプリのリポジトリはすべてpublic）。
+  **原因はAppのインストール範囲ではなくトークンのスコープ**で、範囲を広げても直らない
+  （[../actions-token-model.md](../actions-token-model.md)「10. Claudeステップの`gh`が使う
+  トークンは実行中のリポジトリにスコープされる」）。ローカルセッションはユーザー本人のトークンで
+  動くため、どちらのコマンドもそのまま通る
 
 ### 重複確認コマンドは実行環境ごとの許可リストに合わせる（#2720）
 

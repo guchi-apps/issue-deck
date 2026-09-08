@@ -10,7 +10,7 @@ describe("resolveCheckUserGuidance", () => {
   it("計画の承認は、上部からは承認欄への移動を出す", () => {
     const guidance = resolveCheckUserGuidance({ reason: "plan", placement: "status" });
     expect(guidance?.heading).toBe("計画の承認が必要です");
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval", direction: "down" });
     expect(guidance?.buttons).toContain("コメント欄の「承認」");
     expect(guidance?.agentState).toBe("待機中");
   });
@@ -35,7 +35,7 @@ describe("resolveCheckUserGuidance", () => {
       remoteControlUrl: "https://claude.ai/remote/abc",
       planDecisionPending: true,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan", direction: "down" });
     expect(guidance?.buttons).toContain("承認して実装へ進む");
     expect(guidance?.description).not.toContain("Remote Control");
   });
@@ -47,7 +47,7 @@ describe("resolveCheckUserGuidance", () => {
       placement: "approval",
       planDecisionPending: true,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "plan", direction: "up" });
   });
 
   /** マージは待っているものが別（GitHub側の操作）。計画パネルへ送ってはいけない */
@@ -57,25 +57,54 @@ describe("resolveCheckUserGuidance", () => {
       placement: "status",
       planDecisionPending: true,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
   });
 
   it("マージは対応PRのセクションへ送る", () => {
     const guidance = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
     expect(guidance?.buttons).toContain("「マージ」");
   });
 
   /**
-   * #2057。「修正を依頼する」はコメント欄の承認カードにしか無いボタンで、上部の案内が送る
-   * 対応PRのセクションには置いていない。移動先に無いボタンを案内していた。
+   * #2914で修正依頼欄を対応PRのセクションへ移したので、移動先にも「修正を依頼する」がある。
+   * #2057の時点ではあのボタンがコメント欄の承認カードにしか無く、上部の案内から触れると
+   * 移動先に無いボタンを案内することになっていた。
    */
-  it("上部の案内は「修正を依頼する」に触れない（移動先にそのボタンが無い）", () => {
+  it("上部の案内も「修正を依頼する」に触れる（移動先にそのボタンがある）", () => {
     const away = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
-    expect(away?.buttons).not.toContain("修正を依頼する");
+    expect(away?.buttons).toContain("修正を依頼する");
+  });
 
-    const here = resolveCheckUserGuidance({ reason: "merge", placement: "approval" });
-    expect(here?.buttons).toContain("修正を依頼する");
+  /**
+   * #2914。マージ待ちの操作一式（マージボタン・レビュー本文・修正依頼欄）を対応PRの
+   * セクションへ寄せたので、**コメント欄の承認カードは目的地ではなくなった。**
+   */
+  it("承認カードの中からでも、マージは対応PRへ送る（#2914）", () => {
+    const guidance = resolveCheckUserGuidance({ reason: "merge", placement: "approval" });
+    expect(guidance?.action).toEqual({
+      kind: "scroll",
+      target: "pull-requests",
+      direction: "up",
+    });
+  });
+
+  /**
+   * 対応PRの行が無いIssueだけは、従来どおり承認カード自身が目的地になる。
+   *
+   * **そこでは画面のどこにもマージボタンが無い**（`IssuePullRequestList`は行が0件だと
+   * `null`を返す）ので、「下の『マージ』を押します」と案内してはいけない（PR #2918のレビュー）。
+   */
+  it("対応PRのセクションが無ければ、承認カードの中では移動ボタンを出さない（#2914）", () => {
+    const guidance = resolveCheckUserGuidance({
+      reason: "merge",
+      placement: "approval",
+      hasPullRequestSection: false,
+    });
+    expect(guidance?.action).toBeNull();
+    expect(guidance?.buttons).toContain("修正を依頼する");
+    expect(guidance?.buttons).toContain("GitHub上で");
+    expect(guidance?.buttons).not.toContain("下の「マージ」");
   });
 
   it("対応PRのセクションが無いときは、押しても何も起きない移動先を出さない", () => {
@@ -84,7 +113,7 @@ describe("resolveCheckUserGuidance", () => {
       placement: "status",
       hasPullRequestSection: false,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval", direction: "down" });
   });
 
   it("セッションが入力待ちのときはRemote Controlへ寄せる", () => {
@@ -108,7 +137,7 @@ describe("resolveCheckUserGuidance", () => {
       sessionWaitingInput: true,
       remoteControlUrl: null,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval", direction: "down" });
   });
 
   it("Codexの入力待ちは端末から答える案内にする", () => {
@@ -132,7 +161,7 @@ describe("resolveCheckUserGuidance", () => {
       sessionWaitingInput: true,
       remoteControlUrl: "https://claude.ai/code/session_abc",
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
   });
 
   // #1810。取得前の`sessions`は`[]`で、`sessionWaitingInput`は必ずfalseになる。そのまま
@@ -200,7 +229,7 @@ describe("resolveCheckUserGuidance", () => {
       remoteControlUrl: null,
     });
     expect(guidance?.buttons).toContain("動いていません");
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "approval", direction: "down" });
   });
 
   it("ローカルでも、回答済みは「確認待ちを外す」を押すことだけを言う", () => {
@@ -222,7 +251,7 @@ describe("resolveCheckUserGuidance", () => {
       localSession: true,
       sessionAlive: true,
     });
-    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests" });
+    expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
     expect(guidance?.buttons).toContain("「マージ」");
   });
 });

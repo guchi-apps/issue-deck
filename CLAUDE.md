@@ -106,6 +106,15 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
   **GitHubのIssue検索はHTMLコメントの中身も索引している**ので`--search "new-app-launch <アプリ名>"`で引ける
 - **見つかったら起票せず、そのIssueへコメントする。** 手順が足りなければそのIssueへ書き足す。
   **同じ手順を2か所に持たない**（`#2216`と`guchi-apps/vps#124`でcertbotの手順が重複し、片方が宙に浮いた）
+- **無人実行（GitHub Actions）から`--repo`付きで届くのは、同じorgのpublicリポジトリまで**（#2908）。
+  ClaudeステップのbashツールがGitHub CLIで使うトークンは、claude-code-actionがOIDC交換で発行した
+  実行中のリポジトリにスコープされたもので、`guchi-apps/vps`・`guchi-apps/docs`・`guchi-apps/subpc`
+  のようなprivateリポジトリは上の検索も`gh issue create`も404になる。**これを「GitHub Appの
+  インストール範囲に含まれていない」と診断しない**（インストールは`repository_selection: all`で、
+  範囲を広げても直らない）。届かないときは起票したかった内容をコメントへ書き切って人へ渡す。
+  ユーザー本人のトークンで動くローカルセッションからはそのまま起票できる
+  （[docs/actions-token-model.md](docs/actions-token-model.md)「10. Claudeステップの`gh`が使う
+  トークンは実行中のリポジトリにスコープされる」）
 - 判断基準の詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「他リポジトリへ起票するときも、先に探す」を参照
 
 ### すでに実装済み・対応不要のIssueは実装せず、報告して止まる
@@ -231,6 +240,12 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - **リポジトリを作った直後に雛形一式（ワークフローのcaller・CI・デプロイ・`CLAUDE.md`など）をコミットする**（#2247）。盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが初期化Issue自身だったため、初期化IssueだけがサブPCのローカルセッション専用になっていた。雛形の宣言は[`src/lib/new-app/scaffold.ts`](src/lib/new-app/scaffold.ts)にあり、**issue-deck自身が実物を持つファイル（`signaly-notify.sh`など）は写しを作らず`main`からそのまま配る**
 - **自動化できないものは自動化したように見せない。** DNSのAレコードはVPS管理画面にAPIが無く、VPS実機の操作（`/apps/<name>/`・DB作成・PM2・certbot）は`guchi-apps/vps`の`deploy.yml`が配る受け口ではないため、どちらも手作業Issueとして残す
 - 生成する手作業Issueの書式・失敗したときの扱い・盤面へ載るまでの順序は[docs/new-app-launch.md](docs/new-app-launch.md)を参照する
+
+### アプリを終了させるときは、リポジトリを削除せずアーカイブする
+
+運用をやめるアプリは`gh repo delete`せず`gh repo archive`する。他リポジトリからのリンクが全て404になり、なぜ作りなぜやめたかの記録も失われるため。アーカイブすれば`Repository.archived`を見る各巡回・配布対象からは自動で外れるが、GitHub Secrets・1Password・VPS実機の資源・DNS・外形監視・各種台帳は残るので手で片付ける。
+
+撤去の順序（依存元の後片付け → 外形監視 → VPS撤去と本番デプロイの停止 → シークレット → 台帳 → アーカイブ）と、issue-deck側で触るファイルの一覧は[docs/app-shutdown.md](docs/app-shutdown.md)を参照する。アプリ固有の事情は対象リポジトリの`docs/decommission.md`に書き、同じ手順を2か所に持たない。
 
 ### Issue間の実施順序は`## 前提条件`に書く（`71.manual-step`以外も）
 

@@ -274,11 +274,14 @@ export type BranchFlowStartedIssue = BranchFlowIssueRef & {
  *
  * - `released` … develop→mainのリリースPRに乗ってmainへ入った。`version`はそのリリースの版
  *   （リリースPRのタイトルから取れなかった場合はnull）
+ * - `merged-to-main` … 作業PRが`main`へ直接マージされた（#2911）。developを経由していないので
+ *   運んだリリースPRは存在しないが、**mainに入っていることは確実**
  * - `pending` … developには入ったが、まだリリースPRが出ていない（本番未反映）
  * - `unknown` … 取得しているクローズ済みPRの範囲より古く、どのリリースに乗ったか特定できない
  */
 export type BranchFlowReleaseState =
   | { kind: "released"; version: string | null; pullRequestNumber: number }
+  | { kind: "merged-to-main" }
   | { kind: "pending" }
   | { kind: "unknown" };
 

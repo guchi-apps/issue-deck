@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
-import { isIssuePullRequestSettling, selectIssuePullRequests } from "@/lib/issue-pull-requests";
+import {
+  ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
+  issuePullRequestPollIntervalMs,
+  selectIssuePullRequests,
+} from "@/lib/issue-pull-requests";
 import type { IssuePullRequest, IssuePullRequestListResponse } from "@/types/pull-request";
-
-const POLL_INTERVAL_MS = 20_000;
 
 const EMPTY: IssuePullRequest[] = [];
 
@@ -37,6 +39,15 @@ type UseIssuePullRequestsResult = {
  *
  * **止める条件はCI実行中だけではない**（#2145）。コンフリクトの自動解消はCIが通過したまま
  * 走るため、CIだけを見て止めると解消が終わってもバッジが「自動解消中」のまま固まる。
+ *
+ * **動きうるPRを見つけたら、`pollWhileCiRunning`が偽でも取り直しを始める**（#2915）。
+ * この引数はIssueの進捗（`Develop PR`・`Release`）とマージ待ちから決まるため、進捗の報告が
+ * 届かず`Implementation`に取り残されたIssueでは1回取って終わりになる。コンフリクトのように
+ * 「待っていれば消えるが、消えたことは取り直さないと分からない」表示がそこで固まるので、
+ * 取得結果そのものを見て判断できるようにする（止め方は従来どおり自分で止める）。
+ *
+ * **間隔は取得結果から決める**（`issuePullRequestPollIntervalMs`）。コンフリクトだけが
+ * 理由のときは1分へ落とし、コンフリクトが残っているあいだ20秒で叩き続けないようにする。
  */
 export function useIssuePullRequests(
   repositoryFullName: string | null,
@@ -71,6 +82,23 @@ export function useIssuePullRequests(
     let intervalId: ReturnType<typeof setInterval> | null = null;
     const controller = new AbortController();
 
+    // いま回している間隔（ms）。nullは回していない状態
+    let intervalMs: number | null = null;
+
+    /**
+     * 取り直しの間隔を`next`に合わせる。同じ値なら何もしない——毎回張り直すと、
+     * 取得のたびに次の発火が先延ばしされて事実上いつまでも回らない。
+     */
+    function applyPolling(next: number | null) {
+      if (next === intervalMs) return;
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      intervalMs = next;
+      if (next !== null) intervalId = setInterval(() => load(true), next);
+    }
+
     async function load(fromPolling: boolean) {
       // 裏に回っているタブのために取り続けない。初回だけは表示に必要なので取りに行く
       if (fromPolling && document.hidden) return;
@@ -84,10 +112,10 @@ export function useIssuePullRequests(
         if (cancelled) return;
         const selected = selectIssuePullRequests(data.pullRequests, targetIssueNumber);
         setPullRequests(selected);
-        if (intervalId && !selected.some(isIssuePullRequestSettling)) {
-          clearInterval(intervalId);
-          intervalId = null;
-        }
+        // 取り直しを続けるか・どの間隔でかを、取得結果から毎回決め直す（#2915）。
+        // 「止めるだけ」だと、`pollWhileCiRunning`が偽のIssueでコンフリクトを見つけても
+        // 取り直しが始まらない
+        applyPolling(issuePullRequestPollIntervalMs(selected));
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
       } finally {
@@ -98,14 +126,14 @@ export function useIssuePullRequests(
     }
 
     load(false);
-    if (pollWhileCiRunning) {
-      intervalId = setInterval(() => load(true), POLL_INTERVAL_MS);
-    }
+    // マージ待ち・PR待ちのIssueでは、まだ何も取れていない時点から回し始める。CIが始まる前
+    // （動きうるPRがまだ無い状態）を初回の取得だけで見切らないため
+    if (pollWhileCiRunning) applyPolling(ISSUE_PULL_REQUEST_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       controller.abort();
-      if (intervalId) clearInterval(intervalId);
+      applyPolling(null);
     };
   }, [owner, repo, issueNumber, numbersKey, pollWhileCiRunning, reloadToken, loadKey]);
 

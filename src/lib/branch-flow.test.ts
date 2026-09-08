@@ -871,6 +871,105 @@ describe("バージョンごとの束（releaseGroups）", () => {
   });
 });
 
+describe("mainへ直接マージされた作業の束（#2911）", () => {
+  // guchi-apps/vpsの実状態（2026-09-08時点）を写したもの。
+  // developは2026-09-06のバージョンバンプで止まり、以降の作業PRはすべてbase=mainで入っている。
+  // main...developの差分はバンプのマージ1件だけなので`unreleasedCommitCount`は0になり、
+  // 以前はこの3本が`unassignedLanes`（既定で非表示）へ落ちていた。
+  const vpsBranchStatus = branchStatus({
+    developVsMain: {
+      aheadBy: 1,
+      behindBy: 16,
+      sameContent: false,
+      units: {
+        mergeCount: 0,
+        directCount: 0,
+        versionBumpCount: 1,
+        mergedHeadRefs: ["release/v4.0.1"],
+      },
+    },
+  });
+  const flow = build({
+    pullRequests: [
+      releasePullRequest({
+        number: 214,
+        title: "v4.0.1をmainへリリースする",
+        headRef: "release-main/v4.0.1",
+        state: "closed",
+        merged: true,
+        createdAt: "2026-09-06T11:25:00Z",
+        mergedAt: "2026-09-06T11:30:14Z",
+      }),
+      pullRequest({
+        number: 222,
+        baseRef: "main",
+        headRef: "issue-220",
+        linkedIssueNumber: 220,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-09-07T16:19:44Z",
+      }),
+      pullRequest({
+        number: 228,
+        baseRef: "main",
+        headRef: "issue-227",
+        linkedIssueNumber: 227,
+        state: "closed",
+        merged: true,
+        mergedAt: "2026-09-08T14:13:16Z",
+      }),
+    ],
+    branchStatuses: [vpsBranchStatus],
+  });
+  const [repository] = flow.repositories;
+
+  it("既定で表示される束（配列の先頭）に入り、unassignedLanesへ落とさない", () => {
+    expect(repository.releaseGroups[0].key).toBe("merged-to-main");
+    expect(repository.releaseGroups[0].lanes.map((lane) => lane.branchName)).toEqual([
+      "issue-220",
+      "issue-227",
+    ]);
+    expect(repository.unassignedLanes).toEqual([]);
+  });
+
+  it("版もリリースPRも持たず、日付は最後にmainへ入った時刻", () => {
+    expect(repository.releaseGroups[0].version).toBeNull();
+    expect(repository.releaseGroups[0].pullRequest).toBeNull();
+    expect(repository.releaseGroups[0].deploy).toBeNull();
+    expect(repository.releaseGroups[0].mergedAt).toBe("2026-09-08T14:13:16Z");
+  });
+
+  it("developを経由しない変更を「未リリース」とは数えない", () => {
+    expect(unreleasedSummary(vpsBranchStatus.developVsMain).count).toBe(0);
+    expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  it("develop宛の作業PRは従来どおり版ごとの束へ入る", () => {
+    const developFlow = build({
+      pullRequests: [
+        releasePullRequest({
+          number: 178,
+          title: "v3.8.5をmainへリリースする",
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-14T12:00:00Z",
+        }),
+        pullRequest({
+          number: 176,
+          headRef: "issue-175",
+          linkedIssueNumber: 175,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-14T09:00:00Z",
+        }),
+      ],
+    });
+    const groups = developFlow.repositories[0].releaseGroups;
+    expect(groups.map((group) => group.key)).toEqual(["release-178"]);
+    expect(groups[0].lanes.map((lane) => lane.branchName)).toEqual(["issue-175"]);
+  });
+});
+
 describe("isClosedLane", () => {
   it("既定で隠すのは未マージのクローズだけ。マージ済みは束に入るので隠さない", () => {
     const flow = build({

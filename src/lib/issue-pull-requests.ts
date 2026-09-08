@@ -43,7 +43,7 @@ export function canMergeIssuePullRequest(pullRequest: IssuePullRequest): boolean
 }
 
 /**
- * 対応PRの状態がまだ動いている途中か（#2145）。ポーリングを続けるかどうかの判定に使う。
+ * 数分で確定する状態か（#2145。旧`isIssuePullRequestSettling`）。
  *
  * CI実行中だけを見て止めていた頃は、**CIが通ったあとに動く状態が更新されなかった**。
  * コンフリクトの自動解消が走っている最中はCIが「通過」のまま止まるため、解消が終わっても
@@ -52,13 +52,54 @@ export function canMergeIssuePullRequest(pullRequest: IssuePullRequest): boolean
  * - `in_progress` … CIの結果がまだ確定していない
  * - 自動マージ可否の判定が`pending` … 判定が終わればマージボタンが押せるようになる（#1968）
  * - 自動修復が走っている … 終わればコンフリクトかCI失敗のどちらかが解消される（#2072）
+ *
+ * どれも数分で終わるため、`ISSUE_PULL_REQUEST_POLL_INTERVAL_MS`で追ってよい。
+ * **コンフリクトはここに入れない**（誰かが直すまで残るので、間隔を分けて扱う。#2915）。
  */
-export function isIssuePullRequestSettling(pullRequest: IssuePullRequest): boolean {
+function isSettlingSoon(pullRequest: IssuePullRequest): boolean {
   return (
     pullRequest.ciStatus === "in_progress" ||
     pullRequest.mergeJudgement.state === "pending" ||
     pullRequest.repairRun !== null
   );
+}
+
+/** 数分で確定する状態を追う間隔。CI・判定・自動修復の移り変わりに追随する（#2145） */
+export const ISSUE_PULL_REQUEST_POLL_INTERVAL_MS = 20_000;
+
+/**
+ * コンフリクトだけが理由で取り直すときの間隔（#2915）。
+ *
+ * **打ち切りは置かない。** 何回・何分で諦める形にすると、そのあと解消されたときに
+ * 「コンフリクトあり」が固まったままになり、直そうとしている不具合がそのまま戻ってくる。
+ * 代わりに間隔を粗くして消費を抑える——コンフリクトの解消は自動でも数分、人が直すなら
+ * それ以上かかるもので、1分あれば消えたことは十分早く分かる（Issue一覧がPR一覧を
+ * 取り直す間隔`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`と同じ考え方）。
+ */
+export const ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS = 60_000;
+
+/**
+ * 対応PRを取り直す間隔（#2915）。`null`＝取り直さない（＝状態が確定した）。
+ *
+ * `use-issue-pull-requests.ts`の「まだ動きうるなら取り直し、確定したら自分で止める」を
+ * 純粋関数に出したもの。**間隔を2段に分ける**のは、コンフリクトだけが数分で確定しないため。
+ *
+ * **コンフリクトを`repairRun`で代用できない**（#2915）。修復runの行が立つのはissue-deckから
+ * 起動した経路（画面のボタン・コンフリクト巡回）だけで、`claude-conflict-resolve.yml`が
+ * GitHub側のイベント（`pull_request` / `schedule` / `workflow_run`）で自分から動いたときは
+ * DBに何も残らない。その状態では「CI通過・判定済み・修復run無し」が揃うため、取り直しが
+ * 止まったまま解消され、Issueを開き直すまで「コンフリクトあり」の赤いピルが残っていた。
+ */
+export function issuePullRequestPollIntervalMs(
+  pullRequests: readonly IssuePullRequest[],
+): number | null {
+  if (pullRequests.some(isSettlingSoon)) return ISSUE_PULL_REQUEST_POLL_INTERVAL_MS;
+  // `null`（GitHubが判定中・未取得）は数えない。表示（`ConflictBadge`）と同じく
+  // `false`のときだけコンフリクトとして扱う
+  if (pullRequests.some((pullRequest) => pullRequest.mergeable === false)) {
+    return ISSUE_PULL_REQUEST_CONFLICT_POLL_INTERVAL_MS;
+  }
+  return null;
 }
 
 /** 対応PRの状態を表すラベル。画面の状態バッジに使う */
@@ -87,6 +128,23 @@ export function selectVisiblePullRequestLinks(
   if (pullRequests.length === 0) return links;
   const numbers = new Set(pullRequests.map((pullRequest) => pullRequest.number));
   return links.filter((link) => numbers.has(link.number));
+}
+
+/**
+ * 対応PRがすべてマージ済みになったか（#2914）。マージ待ちの操作を出すのをやめる判定に使う。
+ *
+ * **画面上部の対応PRセクション（マージボタン・レビュー本文・修正依頼欄）と、コメント欄の
+ * 承認カード（「マージしました」の案内）で同じ条件を使うためにここへ置く。** 判定を両方に
+ * 書くと、押した直後にどちらか片方だけが切り替わる。
+ *
+ * **1件もマージしていない状態はfalse。** `mergedNumbers`は「この画面のボタンから押した」記録で、
+ * 空のまま`every`を評価すると対応PRが0件のIssueまで「全部マージ済み」になる。
+ */
+export function areIssuePullRequestsAllMerged(
+  links: PullRequestLink[],
+  mergedNumbers: ReadonlySet<number>,
+): boolean {
+  return mergedNumbers.size > 0 && links.every((link) => mergedNumbers.has(link.number));
 }
 
 /** 畳んだ対応PRセクションの1行に出す内訳（#1577） */

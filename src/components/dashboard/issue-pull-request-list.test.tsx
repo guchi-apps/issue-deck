@@ -117,6 +117,23 @@ describe("IssuePullRequestList", () => {
     expect(button.disabled).toBe(true);
   });
 
+  // #1115: CIバッジ出現によるレイアウト移動とdisabled化のopacity transitionが重なり、
+  // モバイルSafariでボタンが二重表示される不具合の再発防止。
+  // #2914でマージボタンがコメント欄の承認カードから消えたため、判定をこちらへ移した
+  it("マージするボタンはopacityを含む全プロパティのtransitionを使わない（#1115）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest({ ciStatus: "in_progress" })]}
+        mergeApprovalPending
+        onMerge={async () => true}
+      />,
+    );
+    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
+    expect(button.className).not.toMatch(/(?:^|\s)transition-all(?:\s|$)/);
+    expect(button.className).toMatch(/(?:^|\s)transition-colors(?:\s|$)/);
+  });
+
   it("自動マージ可否の判定中の行はマージボタンを押せない（#1968）", () => {
     render(
       <IssuePullRequestList

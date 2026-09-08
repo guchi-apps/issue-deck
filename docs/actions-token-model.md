@@ -5,7 +5,10 @@
 
 **#835で案B（GitHub Appのインストールトークン）へ移行し、#2388で他リポジトリを触る用途も
 寄せた。** 現在の構成は「8. 案Bへの移行（#835）」、他リポジトリ用途の移行と、`WORKFLOW_PAT`が
-1箇所だけ残っている理由は「9. 他リポジトリ用途の移行（#2388）」を参照。以下の1〜7は
+1箇所だけ残っている理由は「9. 他リポジトリ用途の移行（#2388）」を参照。**エージェント自身が打つ
+`gh`がどこまで届くのか**（他リポジトリへの起票・検索が404になる理由）は
+「10. Claudeステップの`gh`が使うトークンは実行中のリポジトリにスコープされる（#2908）」を参照。
+以下の1〜7は
 移行前の整理であり、`WORKFLOW_PAT`固有の性質（3-4・3-5・3-6など）は移行後には当てはまらない。
 
 発端は issue #357（他リポジトリでの実現可能性調査）で、GitHub Actions 上の実装エージェントが
@@ -520,3 +523,62 @@ $ gh api /orgs/guchi-apps/installations \
 `gh api -X PATCH repos/$REPO -F allow_auto_merge=true`は今後も権限不足で落ちるが、
 `|| true`で受けており、auto-mergeの有効化は`scripts/setup-develop-auto-merge.sh`へ
 寄せてある（#1475）。
+
+## 10. Claudeステップの`gh`が使うトークンは実行中のリポジトリにスコープされる（#2908）
+
+無人実行のClaude Codeステップ（計画・実装・分割・質問応答）は、いずれも`env:`で
+`GH_TOKEN: ${{ github.token }}`を渡している。**しかしエージェントのbashツールから見える
+`GH_TOKEN`はそれではない。** claude-code-actionが起動時にOIDC交換で発行した
+**Claude GitHub App（`claude`）のインストールトークン**で`process.env.GH_TOKEN`を上書きするため
+（`src/entrypoints/run.ts`。8節・`reusable-issue-dispatch.yml`の「pushの認証をワークフロー用
+トークンに固定する」ステップのコメントも参照）、エージェントが打つ`gh`はそちらで動く。実行ログには
+`Using GITHUB_TOKEN from OIDC`の1行が出る。
+
+そのトークンは**実行中のリポジトリ1つにスコープされている**。orgへのインストール自体は
+`repository_selection: all`だが、トークンの側が絞られている。そのため他リポジトリへ届くかどうかは
+**public / privateで割れる**。
+
+| 相手 | 到達 |
+|---|---|
+| 実行中のリポジトリ | 読み書きできる |
+| 同じorgのpublicリポジトリ | **読めるうえ、Issueの起票もできる**（実測: `guchi-apps/trainroute`の質問応答ステップから`guchi-apps/issue-deck#2906`を起票できた） |
+| 同じorgのprivateリポジトリ | **404**。`gh api repos/guchi-apps/vps`も`gh api search/issues -f q='repo:guchi-apps/vps …'`も通らない |
+
+2026-09-08時点でprivateなのは`vps`・`docs`・`subpc`・`question`・`claude-config`・`ideas`・
+`sensor_*`・`pi0w_*`。**アプリのリポジトリはすべてpublicなので、無人実行から起票できないのは
+`vps`・`docs`のような管理用リポジトリだけ**になる。
+
+### 「Appのインストール範囲に入っていない」と診断しない
+
+#2908の発端になった誤診断がこれ。`claude`のorgインストールは最初から全リポジトリを含んでおり、
+**インストール範囲を広げる操作をしても何も変わらない**（既に最大）。
+
+```console
+$ gh api /orgs/guchi-apps/installations \
+    --jq '.installations[] | select(.app_slug=="claude") | {repository_selection}'
+{"repository_selection":"all"}
+```
+
+同じ症状は、インストールトークンを`repositories`で1リポジトリへ絞れば再現する。`issue-deck-dev`
+Appで発行して`GET /repos/guchi-apps/<repo>`を叩いた実測が次で、**publicだけが範囲外でも200になる**
+のが要点。
+
+```text
+repositories: ["issue-deck"] → issue-deck 200 / trainroute(public) 200 / vps(private) 404 / docs(private) 404
+インストール全体             → issue-deck 200 / trainroute        200 / vps         200 / docs         200
+```
+
+### 届かないときにどうするか
+
+- **ローカルセッションからは届く。** `gh`がユーザー本人のトークンで動くため、
+  `gh issue create --repo guchi-apps/vps …`がそのまま通る
+  （[multi-repo-changes.md](multi-repo-changes.md)「3. リポジトリごとに子Issueを立て、サブIssueで
+  紐付ける」）。issue-deckの画面から「ローカルで開始」したセッションも同じ
+- 無人実行で気づいた場合は**起票を諦めて終わらせない**。起票したかった内容（対象リポジトリ・
+  タイトル・本文・ラベル）を回答／完了報告コメントへ書き切れば、人かローカルセッションが
+  そのまま起票できる。#2720と同じ扱い
+- 直す案は(a) Claudeステップの`github_token`にissue-deck Appのorg全体トークンを渡す、
+  (b) 起票だけissue-deckのサーバー（`repository_selection: all`のAppとして動く）経由にする、の2つ。
+  (a)はコメント・コミットの名義が`claude[bot]`から変わり（[attribution.md](attribution.md)）、
+  (b)は「書き込み権限を対象リポジトリのActionsの中に閉じる」という置き場所の方針（#1309・9節）に
+  触れる。**どちらも副作用が本体より大きいので、必要になった時点で判断する**

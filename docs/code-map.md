@@ -666,7 +666,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     `01.check-merge`の上部案内は「直したい点があれば『修正を依頼する』」と書いていたが、
     そのボタンはコメント欄の承認カード（`comment-thread.tsx`）にしか無く、案内が送る
     上部の対応PRセクションには「マージ」しか無かった（`buttonsAway`と`buttonsHere`を
-    分けているのはこのため）。
+    分けているのはこのため）。**#2914で修正依頼欄を対応PRセクションへ移したので、
+    いまは両方が「修正を依頼する」に触れる**——`buttonsAway`／`buttonsHere`を直すときは、
+    移動先に実在するかを毎回確かめる。
   - **押す先が無く、読んでも次の行動が変わらない表示は出さない。** 「実施順序 1
     前提はそろっている」がその例で、`IssueOrderSection`は前提待ちか被依存があるときだけ描く。
 - **セッション・ホストの状態で見た目が変わるものは、`dispatch.isLoaded`が立つまで形を決めない**
@@ -1648,12 +1650,29 @@ export function POST(request: NextRequest) {
   2回言うことになる。**肩代わりジョブ（`claude-review-fallback`）は数えない**（`00.check-user`を
   付けるだけでレビューをやり直さないため）。取得は既存のGraphQLの応答から読むだけで、
   **GitHub APIの消費は増えない**。
-- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145。
-  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)の
-  `isIssuePullRequestSettling`）。コンフリクトの自動解消と自動マージ可否の判定は**CIが通過した
-  まま**動くため、CI実行中だけを見て止めると、解消が終わってもバッジが「自動解消中」で固まり、
-  マージボタンも出てこない（Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものが
-  あるか**で判断する。
+- **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145・#2915。
+  [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の
+  `issuePullRequestPollIntervalMs`が間隔を決め、
+  [`hooks/use-issue-pull-requests.ts`](../src/hooks/use-issue-pull-requests.ts)が回す）。
+  コンフリクトの自動解消と自動マージ可否の判定は**CIが通過したまま**動くため、CI実行中だけを
+  見て止めると、解消が終わってもバッジが「自動解消中」で固まり、マージボタンも出てこない
+  （Issueを開き直すまで気付けない）。**CIが確定した後にまだ動くものがあるか**で判断する。
+  - **コンフリクト（`mergeable === false`）も「まだ動くもの」に数える**（#2915）。
+    数えていなかった頃は、CIもレビューも終わったコンフリクト中のPRで取り直しが止まり、
+    裏で解消されても「コンフリクトあり」の赤いピルがIssueを開き直すまで残っていた。
+    **修復run（`repairRun`）では代用できない**——行が立つのはissue-deckから起動した経路
+    （画面のボタン・コンフリクト巡回）だけで、`claude-conflict-resolve.yml`がGitHub側の
+    イベントで自分から動いたときはDBに何も残らない。
+  - **ただし間隔は2段に分ける**（#2915）。CI・判定・自動修復は数分で確定するので20秒、
+    コンフリクトだけが理由のときは1分。**回数・時間での打ち切りは置かない**——諦めた後に
+    解消されると、直そうとしている「消えない表示」がそのまま戻ってくるため。
+  - **「コンフリクトあり」が出るのはIssue詳細だけではない**（#2915）。Issue一覧の行の添え字
+    （[`lib/issue-pull-request-progress.ts`](../src/lib/issue-pull-request-progress.ts)）・
+    確認待ちのマージ待ちカード・Issueから重ねて開くPR詳細（#2149）は、材料が
+    [`hooks/use-pull-requests.ts`](../src/hooks/use-pull-requests.ts)のPR一覧のほうにある。
+    そこにも**コンフリクトが残っている間だけ有効になる間隔**（`conflictAutoRefreshIntervalMs`）を
+    渡している。条件を「画面を開いているか」（呼び出し側）と「コンフリクトが残っているか」
+    （取得結果）に割っているのは、片方だけでは決められないため。どちらかが欠ければ回さない。
 - **左メニューにPRの件数を出すため、PRペインを開いていなくてもダッシュボードのマウント時に
   1回だけ取得する**（#1389）。件数は
   [`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)の`computePullRequestNavCounts`が
@@ -1941,8 +1960,9 @@ export function POST(request: NextRequest) {
 - **developへマージする直前は、判定だけでなく指摘の本文も出し、そのまま修正依頼へ渡せる**
   （#2849。[`lib/github/pull-request-review-comment.ts`](../src/lib/github/pull-request-review-comment.ts)・
   [`pull-request-review-findings.tsx`](../src/components/dashboard/pull-request-review-findings.tsx)）。
-  マージ待ちの承認カード（`CommentThread`の`mergeApprovalPending`）に、対応PRへ投稿された
-  レビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
+  **置き場所はIssue詳細の上部、対応PRセクションの中**（#2914。
+  [`merge-approval-actions.tsx`](../src/components/dashboard/merge-approval-actions.tsx)）。
+  そこへ投稿されたレビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
   `## 検証結果`の判定だけ（#2843）で、何を指摘されたのかはコメントにしか無い。読むのは
   総評の判定マーカー（`issue-deck-review-verdict:… sha=…`）か転記の印
   （`issue-deck-review-report`。#2488）が付いたコメントで、**headと同じコミットへの最後のもの**を
@@ -1954,7 +1974,7 @@ export function POST(request: NextRequest) {
   レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
   付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
   出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
-  **取得はマージ待ちの承認カードを出すときだけ**（`usePullRequestReview`・
+  **取得はマージ待ちのときだけ**（`usePullRequestReview`・
   `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
   20秒ごとに回る`/api/issues/pull-requests`へ相乗りさせていない——あちらは全PRぶんの応答が
   膨らむうえ、本文は画面の上部では使わない。**同じ材料を返す`/api/pull-requests/detail`も
@@ -3648,6 +3668,55 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 この決まった書式（`* タイトル by @user in owner/repo#123`）だけを前提に箇条書きを抜き出している。
 **`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
 この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
+
+## 「共通知識」画面は書式の揺れを前提に、best-effortで読む（#2912）
+
+フリート各リポジトリのIssueに残った知見メモ（`<!-- knowledge-candidate -->`）と、
+`guchi-apps/docs`の`knowledge/`にたまった共通知識を1画面で見る（`pane=knowledge`。スマホは
+「確認環境」と同じホームからのドリルダウン）。取得は
+[`lib/github/knowledge-api.ts`](../src/lib/github/knowledge-api.ts)、整形は
+[`lib/knowledge-board.ts`](../src/lib/knowledge-board.ts)、表示は
+[`components/dashboard/knowledge-board-panel.tsx`](../src/components/dashboard/knowledge-board-panel.tsx)。
+**読み取りだけの画面**で、判定させるボタンも共有知識を書き換えるボタンも置かない——書き込めるのは
+`guchi-apps/docs`側の`promote-knowledge.yml`だけ、という
+[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための3重のガード」を崩さないため。
+
+- **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
+  設計したIssue（#2029・`guchi-apps/docs#65`）は、書式の説明としてマーカーをコードフェンスや
+  地の文に貼っている。単なる`includes`だと、判定していないIssueが「判定済み」になり、知見でも
+  ないコメント（計画・実装完了の報告）が知見として並ぶ。`stripCodeFences`＋行全体一致の2段で分ける
+- **知見メモの書式は実際には揃っていない。** `###`の見出し・`##`の見出し・`**太字**`・地の文が
+  混在し、マーカーの位置も先頭だったり末尾だったりする。したがって解析はbest-effortに振り、
+  **取れなかったものは落とさず本文の冒頭を見出しとして出す**（落とすと「メモを書いたのに一覧に
+  出ない」という最悪の形になる）。実データ73件で見出しが取れない件数が0になるまで詰めてある
+  - **`**知見メモ**`のような前置きだけの行を見出しにしない。** 実データで最も多い形で、そのまま
+    出すと一覧が「知見メモ」で埋まる。剥がしてから中身が残るかを見る
+  - **太字の行を知見の見出しと見なすのは16文字以上のときだけ**（`MEMO_HEADING_MIN_LENGTH`）。
+    `**根拠**`・`**なぜ非自明か**`・`**記載先**`はメモの中の小見出しで、長さで切らないと一覧が
+    それらで埋まる。知見の結論は一行で言い切る決まりなので必ずこれより長い
+  - **折り返した続きの行をつなぐ**（`joinContinuation`）。共有知識の`- **結論**:`も判定コメントの
+    `- 理由:`も、実データではほとんどが複数行。1行目だけを取ると文の途中で切れた文字列が出る
+- **一覧の取得は打ち切るが、件数は総数から出す。** `org:guchi-apps knowledge-candidate`は573件
+  ヒットするので、一覧は更新の新しい順に3ページ（300件）で止め、**打ち切ったことは`truncated`で
+  返して画面にも出す**。一方でKPIの「未判定の候補」は`GET /search/issues`の`total_count`
+  （1リクエスト）から出す——一覧から数えると「表示範囲での下限」にしかならないため。
+  **総数は本文で言及しているだけのIssueも含む概算**（実測で5%ほど多い）なので、単位に
+  「およそ」と添えて一覧の確かめ済みの件数と役割を分ける。
+  **否定は`NOT "knowledge-promotion:judged"`で書く**——`-"..."`のハイフンによる否定は効かず、
+  判定済みの件数がそのまま返るので、除外できていないことに気付けない
+- **「毎晩`success`なのに1件も判定していない」を出す**（#2912の計画レビューで判明）。
+  `promote-knowledge.yml`の収集は`gh search issues … --limit 200 --sort created --order asc`、
+  つまり**作成の古い順200件**だけを見る。窓は古い側から数えるので判定済みの件数はこの数を超えず、
+  **200に張り付いた時点で新しい知見メモへは構造的に到達できない**（2026-09-04〜09-07の実行は
+  すべて`success`だが、収集0件でClaudeステップが`skipped`だった）。issue-deck側は
+  `PROMOTION_COLLECT_LIMIT`（`lib/github/knowledge-api.ts`）にその上限の写しを持ち、
+  `判定済み >= 上限`のときに専用の警告を出す。**向こうの`--limit`を変えたらここも変える**
+  （ずれると警告が出ない・誤って出る）。滞留の警告（メモが古いまま残っている）とは
+  **別の帯として出す**——落ちているのと窓が埋まっているのとでは打つ手が違う
+- **取得は実測15秒**（GraphQLを最大4回＋検索2回。3つは並行）かかるので、`GET /api/knowledge`が
+  ユーザーごとに5分キャッシュする。更新ボタンは`?refresh=1`でそれを捨てさせる
+- 暖色（amber）を使うのは滞留の警告だけ。上の「暖色は『人の対応待ち』専用に空けておく」に従い、
+  承認はemerald、却下は色を当てない（失敗ではないため）
 
 ## 環境変数
 

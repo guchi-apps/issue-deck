@@ -127,3 +127,10 @@ Administrationだけ縮小する」という技術的な解決策は無い。選
 - 本Issueの対応はドキュメント化のみであり、GitHub App自体の権限設定（GitHub側App設定画面）は
   変更しない。選択肢A（Issue移動機能の廃止）を実際に採る場合は、別途ユーザー判断の上で新しい
   Issueとして切り出すのが適切と考える。
+- **このドキュメントが扱うのは`issue-deck` Appの権限で、無人実行のエージェントが打つ`gh`が
+  使うトークンは別物**（#2908）。そちらはclaude-code-actionがOIDC交換で発行する`claude` Appの
+  インストールトークンで、**実行中のリポジトリにスコープされている**。他リポジトリへの起票・検索が
+  404になるのはこのスコープが理由で、**どちらのAppもorgインストールは`repository_selection: all`
+  なので、インストール範囲を広げる操作をしても直らない**。詳細は
+  [docs/actions-token-model.md](actions-token-model.md)「10. Claudeステップの`gh`が使うトークンは
+  実行中のリポジトリにスコープされる」を参照。
