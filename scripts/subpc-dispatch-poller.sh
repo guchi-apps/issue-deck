@@ -2424,14 +2424,27 @@ resume_interrupted_sessions() {
   return 0
 }
 
-# --- ツール呼び出しが実行されないまま止まったセッションの引き上げ（#2655）--------------
-# 判定は`lib/session-tool-call-stall.sh`。APIエラー（#1971）と違い**自動での指示再送信は
-# 行わない**——固定文言の再送信だけでは、モデルが「自分は先にツールを呼び出した」という
-# 誤った過去発言を事実と誤認し続け、確実に復旧できないことを実地で確認しているため。
-# 検知したら1回だけ`notify_session_interrupted`でissue-deckへ引き上げ、続きは人に委ねる。
+# --- ツール呼び出しが実行されないまま止まったセッションの自動復旧（#2655・#2896）--------
+# 判定は`lib/session-tool-call-stall.sh`。**固定文面を上限（既定2回）まで自動で送り、それでも
+# 直らなければissue-deckへ1度だけ引き上げる**——APIエラー再開（#1971）とまったく同じ形で、
+# 違うのは送る本文と検知の条件だけ。
+#
+# #2655では自動再送信を行わない設計にしていた。根拠は「進めて」という**曖昧な**再送信で復旧
+# しなかった実例（research-desk#41）だが、#2896でその後の実測を取り直したところ、いま使って
+# いる固定文面（呼ばれていないことを事実として明言するもの）は29セッション中27セッションで
+# 復旧させていた。一方、人が画面のボタンを押すまでの放置時間は中央値12分・最長5時間だった。
+#
+# **CLAUDE.md「監視・計画レビューを行う実行体の禁止事項」の例外として開けてよい形**は
+# `resume_interrupted_sessions`と同じ3条件で、ここでも同時に満たしている。
+#
+#   1. 送る本文は固定（`SESSION_TOOL_CALL_STALL_BODY`）。**状況を読んで返事を組み立てない**
+#   2. 送る経路は人が押したときと同じ3段階プロトコル（`deliver_session_instruction`）。
+#      承認プロンプト・選択フォームの表示中、処理中、入力欄に打ちかけがある場合は送らない
+#   3. 送ってよいのは、**転記の末尾がツール呼び出し風のテキストである**ことを確かめられた
+#      セッションだけ
 
-escalate_tool_call_stalled_sessions() {
-  local session_name repo_name issue_number full_name
+recover_tool_call_stalled_sessions() {
+  local session_name repo_name issue_number full_name message status attempts
 
   [[ "${SESSION_TOOL_CALL_STALL_ENABLED:-1}" != "0" ]] || return 0
 
@@ -2443,26 +2456,46 @@ escalate_tool_call_stalled_sessions() {
     issue_number="${BASH_REMATCH[2]}"
 
     if ! session_tool_call_stall_detected "$session_name"; then
-      # 自力で動き出した（または最初から止まっていない）。次に同じ現象で止まったときに
-      # 「もう通知済み」を引きずらないよう、ここで消す。
-      session_state_clear_tool_call_stall "$session_name"
+      # 次に同じ現象で止まったときに前回の回数・「もう通知済み」を引きずらないよう消す。
+      # **ただし消してよいのは、送ったあと実際にツールが呼ばれたときだけ**（#2896）。
+      # 送出そのものが転記のmtimeを更新するため、「検知しなくなったら消す」にすると回数が
+      # 毎回0へ戻り、上限が一度も効かない（`session_tool_call_stall_recovered`の説明）。
+      session_tool_call_stall_recovered "$session_name" &&
+        session_state_clear_tool_call_stall "$session_name"
       continue
     fi
 
-    # 1セッションにつき1回だけ引き上げる（自動での再送信をしないため、再開の回数管理は無い）。
-    session_state_tool_call_stall_notified "$session_name" && continue
+    if session_tool_call_stall_exhausted "$session_name"; then
+      session_tool_call_stall_notified "$session_name" && continue
+      full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
+      echo "ツール呼び出しの再送信をあきらめました（上限 ${SESSION_TOOL_CALL_STALL_MAX_ATTEMPTS} 回）: $session_name"
+      notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
+        "直前の応答でツールを呼び出そうとした形跡がありますが、実際には呼び出されていません。自動で${SESSION_TOOL_CALL_STALL_MAX_ATTEMPTS}回送り直しましたが復帰しませんでした。" \
+        "tool_call_stall"
+      session_tool_call_stall_record_notified "$session_name"
+      continue
+    fi
+
+    session_tool_call_stall_due "$session_name" || continue
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "--dry-run のため引き上げません（ツール呼び出しが実行されないまま停滞: $session_name）"
+      echo "--dry-run のため送り直しません（ツール呼び出しが実行されないまま停滞: $session_name）"
       continue
     fi
 
-    full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
-    notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
-      "直前の応答でツールを呼び出そうとした形跡がありますが、実際には呼び出されていません。" \
-      "tool_call_stall"
-    session_state_mark_tool_call_stall_notified "$session_name"
-    echo "ツール呼び出しが実行されないまま停滞していたため引き上げました: $session_name"
+    # **許可する状態イベントは画面の停滞パネルと同じ`Stop|working`**（`send_session_instruction`が
+    # `recovery=true`で渡すもの）。この現象では`Stop`が正常に発火しているので既定のままでも
+    # たいてい通るが、**自動の送出を人が押したときより厳しくすると「ボタンなら送れるのに自動
+    # では毎回見送られる」状態になる**。停滞していること自体は転記の末尾で確かめている。
+    status=0
+    message="$(deliver_session_instruction "$session_name" "$SESSION_TOOL_CALL_STALL_BODY" 'Stop|working')" || status=$?
+    session_tool_call_stall_record_attempt "$session_name"
+    attempts="$(session_tool_call_stall_read_state "$session_name" | awk '{print $2}')"
+    case "$status" in
+      0) echo "ツール呼び出しが実行されていなかったため送り直しました（${attempts}/${SESSION_TOOL_CALL_STALL_MAX_ATTEMPTS}回目）: $session_name" ;;
+      1) echo "ツール呼び出しが実行されていませんが送り直しを見送りました: $session_name: $message" ;;
+      *) echo "ツール呼び出しが実行されていませんが送り直せませんでした: $session_name: $message" ;;
+    esac
   done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
   return 0
 }
@@ -3329,8 +3362,8 @@ run_once() {
   resume_interrupted_sessions
 
   # ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まった
-  # セッションを引き上げる（#2655）。同じ理由で回収・報告の後に行う。
-  escalate_tool_call_stalled_sessions
+  # セッションを送り直し、駄目なら引き上げる（#2655・#2896）。同じ理由で回収・報告の後に行う。
+  recover_tool_call_stalled_sessions
 
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。

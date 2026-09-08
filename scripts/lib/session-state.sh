@@ -183,11 +183,17 @@ session_state_clear_resume() {
 }
 
 # 「ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていない」まま止まって
-# いるセッションを引き上げ済みかの印（#2655）。
+# いるセッションの自動復旧の記録（#2655・#2896）。
 #
-# `.resume`（APIエラーの自動再開）と状態を分けているのは、**この現象では自動での再送信を
-# 行わない**ため。試行回数を数える意味が無く、「もう引き上げたか」の1ビットで足りる。
-# 同じキー空間を共有すると、片方の原因で中断した回数がもう片方の判定に紛れ込む。
+# 中身は`.resume`と同じ`<最後に試した時刻のepoch> <試した回数> <人へ渡したことを通知したか(0|1)>`
+# の1行。#2896で自動再送を入れるまでは「もう引き上げたか」の1ビットだけを置いていたが、
+# 上限まで送ってから人へ渡す形になったため、APIエラー再開（#1971）と同じ3項目に揃えた。
+# **`.resume`とファイルを分けるのは変えない**——同じキー空間を共有すると、片方の原因で
+# 中断した回数がもう片方の判定に紛れ込む。
+#
+# **旧形式（epochだけの1行）は`0 0 0`として読まれる**（`session_tool_call_stall_read_state`の
+# 正規表現に一致しないため）。pollerを入れ替えた時点で引き上げ済みだったセッションは、
+# 自動再送を1回受け直すことになるが、送る本文は同じ固定文面なので害は無い。
 #
 # 判定そのもの（何が「呼ばれていない」か）は`lib/session-tool-call-stall.sh`が持ち、
 # ここは置き場だけを持つ。**セッションが自力で動き出したら消す**
@@ -197,17 +203,18 @@ session_state_tool_call_stall_file() {
   printf '%s/%s.tool-call-stall' "$(session_state_dir)" "$1"
 }
 
-session_state_tool_call_stall_notified() {
-  local session="$1" file
+session_state_write_tool_call_stall() {
+  local session="$1" at="$2" attempts="$3" notified="$4" file content
   file="$(session_state_tool_call_stall_file "$session")" || return 1
-  [[ -f "$file" ]]
+  printf -v content '%s %s %s\n' "$at" "$attempts" "$notified"
+  session_state_write_file "$file" "$content"
 }
 
-session_state_mark_tool_call_stall_notified() {
-  local session="$1" file content
+session_state_read_tool_call_stall() {
+  local session="$1" file
   file="$(session_state_tool_call_stall_file "$session")" || return 1
-  printf -v content '%s\n' "$(date +%s)"
-  session_state_write_file "$file" "$content"
+  [[ -f "$file" ]] || return 1
+  head -1 "$file" 2>/dev/null
 }
 
 session_state_clear_tool_call_stall() {

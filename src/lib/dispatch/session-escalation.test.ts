@@ -98,8 +98,11 @@ describe("buildSessionInterruptedCommentBody（reason: tool_call_stall）", () =
     expect(body).not.toContain("APIエラーで中断したまま止まっています");
   });
 
-  it("自動での再送信をしていないことに触れる", () => {
-    expect(body).toContain("自動では再送信していません");
+  // #2896で自動再送を入れた。**引き上げが届いた時点で自動再送は使い切っている**ので、
+  // 「まだ何も試していない」と読める文面に戻してはいけない（人が同じ1行を1回送って終わる）。
+  it("自動で送り直したうえで復帰しなかったことに触れる", () => {
+    expect(body).toContain("上限回数まで自動で送りました");
+    expect(body).not.toContain("自動では再送信していません");
   });
 
   it("曖昧な継続指示を避け、事実を明言した具体的な文言を提示する（#2675）", () => {
