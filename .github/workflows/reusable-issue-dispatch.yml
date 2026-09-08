@@ -1191,7 +1191,10 @@ jobs:
       - name: Claude Code（計画提示）
         id: claude_plan
         if: steps.state.outputs.mode == 'plan'
-        uses: anthropics/claude-code-action@v1
+        # 上流の@v1(v1.0.218)はClaude Code 2.1.265を入れるが、GitHubホストランナーでは
+        # launcherが作られずENOENTで落ちるため、直前の正常版v1.0.217へ固定している(#2936)。
+        # 上流の修正後に@v1へ戻す。経緯はdocs/multi-agent/prompts-and-models.md参照。
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -1536,7 +1539,10 @@ jobs:
         # 成功しており、runを赤くして人に「計画が出ていない」と誤解させる方が害が大きい。
         if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@v1
+        # 上流の@v1(v1.0.218)はClaude Code 2.1.265を入れるが、GitHubホストランナーでは
+        # launcherが作られずENOENTで落ちるため、直前の正常版v1.0.217へ固定している(#2936)。
+        # 上流の修正後に@v1へ戻す。経緯はdocs/multi-agent/prompts-and-models.md参照。
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -1612,7 +1618,10 @@ jobs:
       - name: Claude Code（分割）
         id: claude_split
         if: steps.state.outputs.mode == 'split'
-        uses: anthropics/claude-code-action@v1
+        # 上流の@v1(v1.0.218)はClaude Code 2.1.265を入れるが、GitHubホストランナーでは
+        # launcherが作られずENOENTで落ちるため、直前の正常版v1.0.217へ固定している(#2936)。
+        # 上流の修正後に@v1へ戻す。経緯はdocs/multi-agent/prompts-and-models.md参照。
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -1740,7 +1749,10 @@ jobs:
         # (#735)と同じルール（`70.confirm`付き・起点を明記・目安3件まで）で起票を許可する。
         # ルール本文は.github/prompts/question.md側に置く。
         if: steps.state.outputs.mode == 'ask'
-        uses: anthropics/claude-code-action@v1
+        # 上流の@v1(v1.0.218)はClaude Code 2.1.265を入れるが、GitHubホストランナーでは
+        # launcherが作られずENOENTで落ちるため、直前の正常版v1.0.217へ固定している(#2936)。
+        # 上流の修正後に@v1へ戻す。経緯はdocs/multi-agent/prompts-and-models.md参照。
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -2016,7 +2028,10 @@ jobs:
       - name: Claude Code（実装・PR作成）
         id: claude_implement
         if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
-        uses: anthropics/claude-code-action@v1
+        # 上流の@v1(v1.0.218)はClaude Code 2.1.265を入れるが、GitHubホストランナーでは
+        # launcherが作られずENOENTで落ちるため、直前の正常版v1.0.217へ固定している(#2936)。
+        # 上流の修正後に@v1へ戻す。経緯はdocs/multi-agent/prompts-and-models.md参照。
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないようにする認証は、
           # 前段の「pushの認証をワークフロー用トークンに固定する」ステップが設定する
