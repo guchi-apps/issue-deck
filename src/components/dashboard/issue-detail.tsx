@@ -48,6 +48,7 @@ import { StartImplementationDialog } from "@/components/dashboard/start-implemen
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import {
+  describeDispatchEnqueueRejection,
   describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
@@ -55,14 +56,11 @@ import {
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
+  resolveDispatchTargetRejection,
   resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import {
-  PR_FIX_SESSION_INSTRUCTION,
-  prFixRequestLabels,
-  resolvePrFixRequestRoute,
-} from "@/lib/dispatch/pr-fix-request";
+import { prFixRequestLabels, resolvePrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -599,31 +597,46 @@ export function IssueDetail({
   }
 
   /**
-   * マージ待ちの「修正を依頼する」（#2919）。**依頼をIssueコメントとして残すのは3通りとも同じで、
+   * マージ待ちの「修正を依頼する」（#2919）。**依頼をIssueコメントとして残すのは4通りとも同じで、
    * 変わるのはラベルと「誰に知らせるか」だけ。**
    *
    * - 無人実行が担当: 今までどおり。`@claude …`のコメントが`claude-issue-dispatch.yml`を起こす
    * - ローカルセッションが担当: コメントを残したうえで、そのセッションへ固定の1行を流す
-   * - セッションが終了・記録なし: `11.local`も外してから投稿し、無人実行が拾える状態にする
+   * - セッションが終了: コメントを残したうえで、既存の復旧と同じ起動ジョブで呼び戻す
+   * - セッションの記録も無い: `11.local`を外してから投稿し、無人実行が拾える状態にする
    *
-   * **セッションへの送信はコメントが残ってから。** 先に送ると、読みに行った先にまだ依頼が無い。
+   * **サブPCへ積むのはコメントが残ってから。** 先に積むと、読みに行った先にまだ依頼が無い。
    */
   async function handleRequestPrFix(reason: string) {
     if (!issue) return;
     setPrFixSessionError(null);
-    const posted = await updateLabelsAndComment(
-      prFixRequestLabels(prFixRoute, issue.labels),
-      requestPrFixCommentBody(reason),
-    );
-    if (!posted || prFixRoute.kind !== "session") return;
-    const result = await dispatch.sendSessionControl({
-      repositoryFullName: issue.repositoryFullName,
-      issueNumber: issue.number,
-      hostName: prFixRoute.host,
-      kind: "instruction",
-      instruction: PR_FIX_SESSION_INSTRUCTION,
-    });
-    if (!result.ok) setPrFixSessionError(result.message);
+    const body = requestPrFixCommentBody(reason);
+    const labels = prFixRequestLabels(prFixRoute, issue.labels);
+    // ラベルを変えない送り先ではPATCHを投げない（`00.check-user`は届いてから外す）
+    const posted = labels ? await updateLabelsAndComment(labels, body) : await postComment(body);
+    if (!posted) return;
+
+    if (prFixRoute.kind === "session") {
+      const result = await dispatch.sendPrFixNotify({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!result.ok) setPrFixSessionError(result.message);
+      return;
+    }
+    if (prFixRoute.kind === "resume") {
+      // 呼び戻すのは「セッションを復旧」とまったく同じ起動ジョブ（#1830）。`11.local`は
+      // 付いたままなので、`useLocalSessionLaunch`の`ensureLocalLabel`に当たる処理は要らない
+      const enqueued = await dispatch.enqueue({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!enqueued) {
+        setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
+      }
+    }
   }
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
@@ -795,27 +808,46 @@ export function IssueDetail({
   // マージ待ちの「修正を依頼する」をどこへ送るか（#2919）。`11.local`が付いている間、
   // `@claude`コメントを投稿しても無人実行は断るだけなので、担当先で送り方を変える
   const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
-  // セッションへ送れない理由は、押す前に出して押せなくする（`SessionRecoveryButton`と同じ立場）。
-  // 判定と文言は追加指示（#1012）とまったく同じものを使う
+  // サブPCへ積めない理由は、押す前に出して押せなくする（`SessionRecoveryButton`と同じ立場）。
+  // **判定は送り先ごとに既存のものをそのまま使う**——生きているセッションへ送るのは追加指示
+  // （#1012）と同じ判定、呼び戻すのは起動ジョブ（#1830）と同じ判定。ここで別の判定を書くと、
+  // 押せる条件が場所によってずれる
   const prFixSessionRejection = (() => {
-    if (prFixRoute.kind !== "session") return null;
-    const controlJob = findSessionControlJobForIssue(
-      dispatch.jobs,
-      issue.repositoryFullName,
-      issue.number,
-    );
-    const rejection = resolveSessionControlRejection({
-      host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
-      session: issueSession,
-      kind: "INSTRUCTION",
-      hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
-    });
-    return rejection
-      ? describeSessionControlRejection(rejection, {
-          hostName: prFixRoute.host,
-          kind: "INSTRUCTION",
-        })
-      : null;
+    if (prFixRoute.kind === "session") {
+      const controlJob = findSessionControlJobForIssue(
+        dispatch.jobs,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const rejection = resolveSessionControlRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        session: issueSession,
+        kind: "INSTRUCTION",
+        hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+      });
+      return rejection
+        ? describeSessionControlRejection(rejection, {
+            hostName: prFixRoute.host,
+            kind: "INSTRUCTION",
+          })
+        : null;
+    }
+    if (prFixRoute.kind === "resume") {
+      const rejection = resolveDispatchTargetRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+        blockingSession,
+      });
+      return rejection
+        ? describeDispatchEnqueueRejection(rejection, {
+            hostName: prFixRoute.host,
+            repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
+          })
+        : null;
+    }
+    return null;
   })();
   // 計画への返事待ち（#2061）。**待っている間、端末には承認プロンプトが出ていない**ので、
   // ここが唯一の答える場所になる（切れると従来どおり端末のプロンプトへ戻る）

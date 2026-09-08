@@ -1997,8 +1997,10 @@ export function POST(request: NextRequest) {
   [`lib/dispatch/pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）。`@claude`コメントで
   起こせるのは`11.local`が付いていないIssueだけで、付いている間は
   `reusable-issue-dispatch.yml`が`mode=skip`へ倒し案内コメントを返して終わる。生きている
-  セッションがあればそこへ`INSTRUCTION`で固定の1行を流し、終わっていれば`11.local`も外してから
-  投稿する。判定に`resolveIssueExecutionTarget`を使わない理由と3通りの内訳は
+  セッションがあればそこへ固定の1行を流し（`POST /api/dispatch/pr-fix-notify`。本文とセッションの
+  生死をサーバー側で確かめ、`00.check-user`は`succeeded`が届いてから外す）、終わっていれば
+  起動ジョブで呼び戻し、記録も無ければ`11.local`を外して無人実行へ渡す。判定に
+  `resolveIssueExecutionTarget`を使わない理由と4通りの内訳は
   [multi-agent/labels.md](multi-agent/labels.md)「マージ待ちの「修正を依頼する」は送り先を切り替える」。
 - **変更ファイル一覧（`/api/pull-requests/files`）は、詳細の折りたたみを開いたときだけ取りに行く**
   （#1987。[`pull-request-file-list.tsx`](../src/components/dashboard/pull-request-file-list.tsx)・

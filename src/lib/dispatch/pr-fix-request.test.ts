@@ -33,17 +33,19 @@ describe("resolvePrFixRequestRoute", () => {
     ).toEqual({ kind: "session", host: "subpc" });
   });
 
-  it("セッションが終了していれば、札を外して無人実行へ引き継ぐ", () => {
-    expect(
-      resolvePrFixRequestRoute({ labels: labels("11.local"), session: session("EXITED") }),
-    ).toEqual({ kind: "handoff", host: "subpc", sessionEnded: true });
+  it("セッションが終了していれば、そのセッションを呼び戻す（札は外さない）", () => {
+    // Issue本文の「クローズしていたら再度立ち上げる」。呼び戻す導線は#1830で既にあり、
+    // `claude --continue`で前回の会話の続きから再開する
+    for (const state of ["EXITED", "FAILED", "GONE"] as const) {
+      expect(
+        resolvePrFixRequestRoute({ labels: labels("11.local"), session: session(state) }),
+      ).toEqual({ kind: "resume", host: "subpc" });
+    }
   });
 
-  it("セッションの記録が無いときも引き継ぎ側へ倒す（sessionEndedで言い分ける）", () => {
+  it("セッションの記録すら無いときだけ、札を外して無人実行へ引き継ぐ", () => {
     expect(resolvePrFixRequestRoute({ labels: labels("11.local"), session: null })).toEqual({
       kind: "handoff",
-      host: null,
-      sessionEnded: false,
     });
   });
 });
@@ -52,28 +54,31 @@ describe("prFixRequestActionLabel", () => {
   it("押したときに起きることを送り先ごとに言い分ける", () => {
     expect(prFixRequestActionLabel({ kind: "actions" })).toBe("修正を依頼する");
     expect(prFixRequestActionLabel({ kind: "session", host: "subpc" })).toBe("セッションへ送る");
-    expect(prFixRequestActionLabel({ kind: "handoff", host: null, sessionEnded: false })).toBe(
-      "11.localを外して依頼する",
+    expect(prFixRequestActionLabel({ kind: "resume", host: "subpc" })).toBe(
+      "セッションを再開して依頼する",
     );
+    expect(prFixRequestActionLabel({ kind: "handoff" })).toBe("11.localを外して依頼する");
   });
 });
 
 describe("prFixRequestLabels", () => {
   const current = labels("00.check-user", "01.check-merge", "21.plan-required", "11.local");
 
-  it("無人実行・セッションへ送る場合は00.check-userと理由ラベルだけを外す", () => {
-    for (const route of [
-      { kind: "actions" } as const,
-      { kind: "session", host: "subpc" } as const,
-    ]) {
-      expect(prFixRequestLabels(route, current)).toEqual(["21.plan-required", "11.local"]);
-    }
+  it("無人実行が担当なら00.check-userと理由ラベルだけを外す", () => {
+    expect(prFixRequestLabels({ kind: "actions" }, current)).toEqual([
+      "21.plan-required",
+      "11.local",
+    ]);
+  });
+
+  it("サブPCへ積む送り先ではラベルを変えない（届いてから外す）", () => {
+    // 積んだ時点で外すと、pollerが見送ったときに何も届いていないのに札だけ消える（#2886と同じ）
+    expect(prFixRequestLabels({ kind: "session", host: "subpc" }, current)).toBeNull();
+    expect(prFixRequestLabels({ kind: "resume", host: "subpc" }, current)).toBeNull();
   });
 
   it("引き継ぐ場合は11.localも外す（コメントより先に外れる）", () => {
-    expect(
-      prFixRequestLabels({ kind: "handoff", host: "subpc", sessionEnded: true }, current),
-    ).toEqual(["21.plan-required"]);
+    expect(prFixRequestLabels({ kind: "handoff" }, current)).toEqual(["21.plan-required"]);
   });
 });
 

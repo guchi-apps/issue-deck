@@ -53,6 +53,7 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
+  describeDispatchEnqueueRejection,
   describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
@@ -60,14 +61,11 @@ import {
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
+  resolveDispatchTargetRejection,
   resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import {
-  PR_FIX_SESSION_INSTRUCTION,
-  prFixRequestLabels,
-  resolvePrFixRequestRoute,
-} from "@/lib/dispatch/pr-fix-request";
+import { prFixRequestLabels, resolvePrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -377,24 +375,41 @@ export function MobileIssueDetail({
   // 使う。片方だけ送り先を持つと、同じIssueをスマホから開いたときだけ押しても何も起きない
   const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
   const prFixSessionRejection = (() => {
-    if (prFixRoute.kind !== "session") return null;
-    const controlJob = findSessionControlJobForIssue(
-      dispatch.jobs,
-      issue.repositoryFullName,
-      issue.number,
-    );
-    const rejection = resolveSessionControlRejection({
-      host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
-      session: issueSession,
-      kind: "INSTRUCTION",
-      hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
-    });
-    return rejection
-      ? describeSessionControlRejection(rejection, {
-          hostName: prFixRoute.host,
-          kind: "INSTRUCTION",
-        })
-      : null;
+    if (prFixRoute.kind === "session") {
+      const controlJob = findSessionControlJobForIssue(
+        dispatch.jobs,
+        issue.repositoryFullName,
+        issue.number,
+      );
+      const rejection = resolveSessionControlRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        session: issueSession,
+        kind: "INSTRUCTION",
+        hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+      });
+      return rejection
+        ? describeSessionControlRejection(rejection, {
+            hostName: prFixRoute.host,
+            kind: "INSTRUCTION",
+          })
+        : null;
+    }
+    if (prFixRoute.kind === "resume") {
+      const rejection = resolveDispatchTargetRejection({
+        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
+        blockingSession,
+      });
+      return rejection
+        ? describeDispatchEnqueueRejection(rejection, {
+            hostName: prFixRoute.host,
+            repositoryFullName: issue.repositoryFullName,
+            session: blockingSession,
+          })
+        : null;
+    }
+    return null;
   })();
   // 計画への返事待ち（#2061）。**PCの詳細と同じものを同じ位置（セッション表示の下）に出す**——
   // 承認・修正の出口が片方の画面にしか無いと、スマホから見たときに従来どおり
@@ -780,19 +795,30 @@ export function MobileIssueDetail({
   /** マージ待ちの「修正を依頼する」（#2919）。判定も送り方もPCの詳細と同じ */
   async function handleRequestPrFix(reason: string) {
     setPrFixSessionError(null);
-    const posted = await updateLabelsAndComment(
-      prFixRequestLabels(prFixRoute, issue.labels),
-      requestPrFixCommentBody(reason),
-    );
-    if (!posted || prFixRoute.kind !== "session") return;
-    const result = await dispatch.sendSessionControl({
-      repositoryFullName: issue.repositoryFullName,
-      issueNumber: issue.number,
-      hostName: prFixRoute.host,
-      kind: "instruction",
-      instruction: PR_FIX_SESSION_INSTRUCTION,
-    });
-    if (!result.ok) setPrFixSessionError(result.message);
+    const body = requestPrFixCommentBody(reason);
+    const labels = prFixRequestLabels(prFixRoute, issue.labels);
+    const posted = labels ? await updateLabelsAndComment(labels, body) : await postComment(body);
+    if (!posted) return;
+
+    if (prFixRoute.kind === "session") {
+      const result = await dispatch.sendPrFixNotify({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!result.ok) setPrFixSessionError(result.message);
+      return;
+    }
+    if (prFixRoute.kind === "resume") {
+      const enqueued = await dispatch.enqueue({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: prFixRoute.host,
+      });
+      if (!enqueued) {
+        setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
+      }
+    }
   }
 
   async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {

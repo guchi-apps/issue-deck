@@ -31,16 +31,20 @@ export type PrFixRequestRoute =
    */
   | { kind: "session"; host: string }
   /**
-   * `11.local`を外して無人実行へ渡す。札を外してからコメントを投稿するので、
-   * `issue_comment`を受けた時点でワークフローはもうスキップしない。
+   * 終了したセッションを呼び戻して依頼する（#2919のG1レビュー）。
+   *
+   * **`11.local`を外して無人実行へ倒さない。** Issueの要求が「クローズしていたら再度立ち上げる」で、
+   * 呼び戻す導線は#1830で既にある——worktreeを消していなければランチャーが`claude --continue`を
+   * 渡し、前回の会話の続きから再開する（`describeSessionRecovery`）。**起動のたびに
+   * `.prompts/issue-<番号>.md`は作り直される**ので、直前に投稿した修正依頼のコメントも
+   * そのプロンプトへ載る（`scripts/start-issue.sh`）。
    */
-  | {
-      kind: "handoff";
-      /** 担当していたホスト名。セッションの記録が無ければ`null` */
-      host: string | null;
-      /** セッションの記録があり、それが終わっているか（`false`は「記録が無い」） */
-      sessionEnded: boolean;
-    };
+  | { kind: "resume"; host: string }
+  /**
+   * `11.local`を外して無人実行へ渡す。**セッションの記録すら無いときの最終手段。**
+   * 記録は24時間で消えるので、それより後に押されたときはホストも特定できず、呼び戻す先が無い。
+   */
+  | { kind: "handoff" };
 
 /**
  * セッションへ流す固定の1行（#2919）。
@@ -48,6 +52,7 @@ export type PrFixRequestRoute =
  * **本文を実行体が組み立てない。** `docs/multi-agent/gates.md`の線は「固定文面の送信は可、
  * 選択肢の確定は不可」で、停滞からの復旧（`session-stall.ts`）と同じ立場にある。人が書いた
  * 修正依頼はIssueコメントの側に入り、ここを通るのは常にこの1行だけ。
+ * **受け口（`POST /api/dispatch/pr-fix-notify`）が、届いた本文がこれと同じかを確かめ直す。**
  *
  * 依頼の本文そのものを流さないのは、`DispatchJob.instruction`が**改行を含まない1行**しか
  * 受けないため（複数行は確定キーの解釈が画面の実装に依存する）。長い指示はコメントに書き、
@@ -60,9 +65,8 @@ export const PR_FIX_SESSION_INSTRUCTION =
  * 送り先を決める。
  *
  * `session`に渡すのは`findSessionForIssue`の結果（生きているものを優先して1件返す）。
- * **`ALIVE`以外はすべて引き継ぎ側へ倒す。** セッションの記録は24時間で落ちるため、
- * 「終了した」と「記録がもう無い」は画面からは見分けられない——どちらも「送る相手がいない」
- * ことに変わりはないので、行き先は同じにして文面だけ言い分ける（`sessionEnded`）。
+ * **`ALIVE`以外でも記録が残っている間は呼び戻す側へ倒す**（`resume`）。記録が消えて
+ * ホストすら特定できないときだけ、`11.local`を外す`handoff`になる。
  */
 export function resolvePrFixRequestRoute(params: {
   labels: readonly { name: string }[];
@@ -70,14 +74,15 @@ export function resolvePrFixRequestRoute(params: {
 }): PrFixRequestRoute {
   if (!isLocalSessionIssue(params.labels)) return { kind: "actions" };
   const session = params.session;
-  if (session && session.state === "ALIVE") return { kind: "session", host: session.host };
-  return { kind: "handoff", host: session?.host ?? null, sessionEnded: session !== null };
+  if (!session) return { kind: "handoff" };
+  if (session.state === "ALIVE") return { kind: "session", host: session.host };
+  return { kind: "resume", host: session.host };
 }
 
 /**
  * 送り先ごとのボタンの文言。
  *
- * **「修正を依頼する」のままにしない。** 押したときに起きることが3通りに分かれるので、
+ * **「修正を依頼する」のままにしない。** 押したときに起きることが4通りに分かれるので、
  * 何が起きるのかをボタン自身に言わせる（引き継ぎでは`11.local`を外すところまで書く——
  * ラベルが黙って外れると、無人実行が動き出した理由が後から読めなくなる）。
  */
@@ -87,23 +92,39 @@ export function prFixRequestActionLabel(route: PrFixRequestRoute): string {
       return "修正を依頼する";
     case "session":
       return "セッションへ送る";
+    case "resume":
+      return "セッションを再開して依頼する";
     case "handoff":
       return `${LOCAL_LABEL_NAME}を外して依頼する`;
   }
 }
 
 /**
- * 修正依頼の投稿と一緒に更新するラベル名の配列。
+ * 修正依頼の投稿と一緒に更新するラベル名の配列。**`null`は「ラベルを変えない」。**
  *
- * 土台は他の操作と揃えて`labelsAfterRejection`（`00.check-user`と理由ラベルだけを外し、
- * `21.plan-required`は残す）。引き継ぎのときだけ`11.local`も落とす。
- *
- * **落とすのはコメントより先**（呼び出し側の`updateLabelsAndComment`がラベル→コメントの順で
- * 送る）。逆にすると、コメントを受けたワークフローがまだ札の付いた状態を読み、スキップの
- * 案内コメントを返して終わる。
+ * - 無人実行・引き継ぎ: 他の操作と揃えて`labelsAfterRejection`（`00.check-user`と理由ラベル
+ *   だけを外し、`21.plan-required`は残す）。引き継ぎではさらに`11.local`も落とす。
+ *   **落とすのはコメントより先**（呼び出し側の`updateLabelsAndComment`がラベル→コメントの順で
+ *   送る）。逆にすると、コメントを受けたワークフローがまだ札の付いた状態を読み、スキップの
+ *   案内コメントを返して終わる
+ * - セッション・再開: **`00.check-user`をここでは外さない**（#2919のG1レビュー）。
+ *   `INSTRUCTION`の送出は非同期で、承認プロンプトの表示中・作業中・入力欄に打ちかけがある
+ *   場合はpollerが見送る。積んだ時点で外すと**何も届いていないのに札だけ消える**
+ *   （#2886で同じ指摘を受けた停滞からの復旧と同じ扱い）。外れるのは`succeeded`の報告が
+ *   届いた時点（`POST /api/dispatch/report`）。再開は既存の「セッションを復旧」に揃えて、
+ *   そちらもラベルを触らない
  */
-export function prFixRequestLabels(route: PrFixRequestRoute, labels: IssueLabel[]): string[] {
-  const next = labelsAfterRejection(labels);
-  if (route.kind !== "handoff") return next;
-  return next.filter((name) => name !== LOCAL_LABEL_NAME);
+export function prFixRequestLabels(
+  route: PrFixRequestRoute,
+  labels: IssueLabel[],
+): string[] | null {
+  switch (route.kind) {
+    case "actions":
+      return labelsAfterRejection(labels);
+    case "handoff":
+      return labelsAfterRejection(labels).filter((name) => name !== LOCAL_LABEL_NAME);
+    case "session":
+    case "resume":
+      return null;
+  }
 }
