@@ -1106,6 +1106,14 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
 - 対象が同じでも、**リポジトリが違えば別のIssue**（`guchi-apps/vps`の設定変更と
   `guchi-apps/issue-deck`の実装は別々に起票する。CLAUDE.md「複数リポジトリに影響する変更は、
   リポジトリごとにIssueを分ける」）
+- **無人実行からは、privateリポジトリのIssueは探せないし起票もできない**（#2908）。
+  上の`gh issue list --repo guchi-apps/vps`も`gh issue create --repo guchi-apps/vps`も、
+  GitHub Actions上のClaudeステップからは404で落ちる。届く範囲は同じorgのpublicリポジトリまでで、
+  privateなのは`vps`・`docs`・`subpc`・`question`など（アプリのリポジトリはすべてpublic）。
+  **原因はAppのインストール範囲ではなくトークンのスコープ**で、範囲を広げても直らない
+  （[../actions-token-model.md](../actions-token-model.md)「10. Claudeステップの`gh`が使う
+  トークンは実行中のリポジトリにスコープされる」）。ローカルセッションはユーザー本人のトークンで
+  動くため、どちらのコマンドもそのまま通る
 
 ### 重複確認コマンドは実行環境ごとの許可リストに合わせる（#2720）
 

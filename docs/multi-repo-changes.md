@@ -116,9 +116,13 @@ gh api repos/guchi-apps/issue-deck/issues/<親番号>/sub_issues --method POST -
 ほしい」と頼めば、上のコマンドをそのまま繰り返す。画面のボタンにして得られるのは往復の削減だけで、
 代わりにラベルの揃い判定・二度押し防止・部分成功の表示を恒久的に抱えることになる。
 
-**無人実行（GitHub Actions）では、UIの有無にかかわらず横展開の起票はできない。** Actionsの
-`GITHUB_TOKEN`は自リポジトリしか触れず（[actions-token-model.md](actions-token-model.md)）、
-一括起票UIを作ってもそこは変わらない。
+**無人実行（GitHub Actions）から起票できる範囲は、同じorgのpublicリポジトリまで。**
+ClaudeステップのbashツールがGitHub CLIで使うトークンは、claude-code-actionがOIDC交換で発行した
+Claude GitHub Appのインストールトークンで、**実行中のリポジトリ1つにスコープされている**。
+publicリポジトリは範囲外でも読み書きできるが、`guchi-apps/vps`・`guchi-apps/docs`・
+`guchi-apps/subpc`のようなprivateリポジトリは404になり、重複確認の検索すら通らない（#2908。
+実測と誤診断しやすい点は[actions-token-model.md](actions-token-model.md)「10. Claudeステップの
+`gh`が使うトークン」）。一括起票UIを作ってもそこは変わらない。
 
 以下は、当時まとめた設計案の記録。作るとなったら出発点になるが、**現時点で作る予定は無い**。
 
