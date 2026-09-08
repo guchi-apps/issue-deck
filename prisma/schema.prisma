@@ -710,6 +710,14 @@ model DispatchJob {
   // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは
   // 「どの手順を実行したのか」を後から辿るためで、行が持つ意味はあくまで記録。
   manualStepLine     Int?
+  // 代行実行をどこで走らせるか（#2901。`subpc`または`vps`。`kind`が`MANUAL_STEP`のときだけ入る）。
+  //
+  // **入るのはサーバーが本文から解決したものだけ**で、画面からは受け取らない（`command`と同じ
+  // 立場）。`null`（未設定＝この列より前に積まれたジョブ）はサブPCとして扱う。
+  //
+  // 語を2つに絞って渡すのは`previewAction`と同じ作法で、**接続先そのものは渡さない**
+  // ——SSHの宛先はサブPCの`dispatch.env`が持ち、issue-deckは知らない。
+  manualStepRunTarget String?
   // 止める対象のジョブid（#1882。`kind`が`MANUAL_STEP_ABORT`のときだけ入る）。
   //
   // **pollerへ渡すのはこのidだけで、実行するコマンドは渡さない。** pollerが
@@ -845,6 +853,16 @@ model DispatchHost {
   // 「`KEY=<値>`がリダイレクトとして解釈される」状態そのものなので、**申告が真でないホストへは
   // 値付きのジョブを払い出さない**（画面も理由を出して押させない）。
   manualStepValuesCapable  Boolean?
+  // VPSの手順を代行実行できるか（#2901）。**サブPCからVPSへSSHで到達できるpollerだけが申告する**
+  // （接続先は`~/.config/issue-deck/dispatch.env`の`MANUAL_STEP_VPS_SSH_TARGET`。リポジトリが
+  // PUBLICなのでGitには置かない）。**`null`（未申告＝古いpoller）は「できない」として扱う**
+  // （`manualStepCapable`と同じ向き）。
+  //
+  // **`manualStepCapable`とは分けて持つ。** 古いpollerはジョブの`manualStepRunTarget`を黙って
+  // 無視し、**VPSで実行するはずのコマンドをサブPCで実行してしまう**（`manualStepValuesCapable`と
+  // 同じ「配ってから`failed`で返る」では済まない種類の非対応）。申告が真でないホストへは
+  // VPSのジョブを払い出さず、画面も理由を出して押させない。
+  manualStepVpsCapable     Boolean?
   // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。

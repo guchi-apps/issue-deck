@@ -1261,7 +1261,7 @@ export function POST(request: NextRequest) {
     `toggleTask(line, false)`で本文の`- [x]`が`- [ ]`へ戻り、その手順は自動実行の計画へ戻るが、
     **取り消しただけでは実行し直さない**（積むのはサーバーで、「承認して自動実行」か再開のときに
     拾う。画面から積まないのは#1882の決まりのまま）。
-  - **サブPCで実行する手順は「承認して実行」で代行できる**（#1828。
+  - **サブPC・VPSで実行する手順は「承認して実行」で代行できる**（#1828・#2901。
     [`manual-step-run-panel.tsx`](../src/components/dashboard/manual-step-run-panel.tsx)・
     [`lib/manual-step-command.ts`](../src/lib/manual-step-command.ts)）。押すと既存の
     ジョブキューへ`MANUAL_STEP`のジョブが積まれ、サブPCのpollerが実行して終了コードと出力を
@@ -1269,6 +1269,12 @@ export function POST(request: NextRequest) {
     コマンドだけで、画面から届いた文字列は照合にしか使わない**（サーバーとpollerが本文と
     独立に2回照合する）。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業アシスタントからの代行実行1828)。
+    - **`（VPS）`の手順は、サブPCからSSHしてVPSで実行する**（#2901。`resolveManualStepRunTarget`・
+      `DispatchJob.manualStepRunTarget`・`DispatchHost.manualStepVpsCapable`・
+      [`scripts/run-manual-step.sh`](../scripts/run-manual-step.sh)）。**新しい実行の口は作らず**、
+      最後の1歩の走らせ先だけが変わる。SSHの宛先はサブPCの`dispatch.env`
+      （`MANUAL_STEP_VPS_SSH_TARGET`）にあり、**issue-deckは接続先を知らない**（ジョブに載るのは
+      `subpc`／`vps`の2語だけ）。`sudo`を含むVPSの手順はNOPASSWDが無いため代行しない
   - **承認1回で最後まで流し、失敗したらClaudeが修正案を出す**（#1869。
     [`manual-step-autorun-panel.tsx`](../src/components/dashboard/manual-step-autorun-panel.tsx)・
     [`hooks/use-manual-step-autorun.ts`](../src/hooks/use-manual-step-autorun.ts)・
@@ -1389,8 +1395,8 @@ export function POST(request: NextRequest) {
     `ManualStepVerificationCheck`）。全部が終了コード0で終わったIssueには「完了済みの可能性」の
     印（`Issue.manualStepVerifiedAt`）が付き、一覧の行と`ManualStepPanel`に出る。
     **自動でcloseはしない**（終了コードしか見ていないため）。巡回するのは実行するデバイスの
-    既定値がサブPCに決まり、**確認コマンドが読み取りだけだと読める**Issueに限る
-    （`isReadOnlyVerificationCommand`）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
+    既定値がサブPCかVPSに決まり、**確認コマンドが読み取りだけだと読める**Issueに限る
+    （`isReadOnlyVerificationCommand`。VPSの確認コマンドはそこへ到達できるホストが居るときだけ。#2901）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
     常駐プロセスは置かない。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。
   - **本文の書式は起票時に機械検査する**（#2048。

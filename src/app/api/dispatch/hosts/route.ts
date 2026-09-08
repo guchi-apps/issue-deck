@@ -103,6 +103,12 @@ export async function POST(request: NextRequest) {
     // 「配ってから`failed`で返る」で済まない種類の非対応なので、申告が無ければ配らない
     manualStepValuesCapable:
       typeof payload?.manualStepValues === "boolean" ? payload.manualStepValues : null,
+    // VPSの手順を代行実行できるpollerだけが送ってくる（#2901。SSHでVPSへ到達できるときだけ真）。
+    // **未申告はnull＝非対応扱い**。`manualStep`と分けるのは、古いpollerがジョブの
+    // `manualStepRunTarget`を黙って無視し、**VPSで実行するはずのコマンドをサブPCで実行して
+    // しまう**ため（`manualStepValues`と同じで「配ってから`failed`で返る」では済まない）
+    manualStepVpsCapable:
+      typeof payload?.manualStepVps === "boolean" ? payload.manualStepVps : null,
     // 計画レビュー（G1・#1855）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**。
     // このジョブは計画コメントの投稿を契機に**自動で積まれる**ため、非対応のpollerへ配ると
     // 計画のたびに`failed`のジョブが並ぶ（他の種別より、申告を見てから配る意味が大きい）

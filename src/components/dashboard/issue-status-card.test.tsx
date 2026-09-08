@@ -99,6 +99,7 @@ function makeLaunchJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     placeholderValues: null,
     resolvedCommand: null,
     manualStepLine: null,
+    manualStepRunTarget: "subpc",
     targetJobId: null,
     previewAction: null,
     exitCode: null,

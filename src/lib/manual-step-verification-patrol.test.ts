@@ -215,6 +215,7 @@ describe("runManualStepVerificationPatrol", () => {
       status: "SUCCEEDED",
       exitCode: 0,
       manualStepLine: VERIFICATION_LINES[0],
+      manualStepRunTarget: "subpc",
     });
     checkUpdate.mockImplementation(async ({ data }: { data: Record<string, unknown> }) =>
       checkRow({ currentJobId: null, doneLines: JSON.stringify(VERIFICATION_LINES.slice(0, 1)), ...data }),
@@ -250,6 +251,7 @@ describe("runManualStepVerificationPatrol", () => {
       status: "SUCCEEDED",
       exitCode: 1,
       manualStepLine: VERIFICATION_LINES[0],
+      manualStepRunTarget: "subpc",
     });
 
     await patrol.runManualStepVerificationPatrol(NOW);

@@ -283,6 +283,7 @@ describe("advanceManualStepRun", () => {
       status: "SUCCEEDED",
       exitCode: 0,
       manualStepLine: FIRST_LINE,
+      manualStepRunTarget: "subpc",
       message: null,
     });
     resolveInstallationToken.mockResolvedValue("token");
@@ -322,6 +323,7 @@ describe("advanceManualStepRun", () => {
       status: "FAILED",
       exitCode: 1,
       manualStepLine: FIRST_LINE,
+      manualStepRunTarget: "subpc",
       message: null,
     });
 
@@ -336,10 +338,10 @@ describe("advanceManualStepRun", () => {
   });
 
   it("代行できない手順に来たら、人の実行を待って止まる", async () => {
-    // サブPC以外の手作業＝どの項目も代行できない
+    // サブPC・VPS以外の手作業＝どの項目も代行できない
     issueFindFirst.mockResolvedValue({
-      body: BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "**VPS**（`ssh vps`）"),
-      title: "[手作業] VPS: 設定を変える",
+      body: BODY.replace("**サブPC**（メインPCからなら `ssh subpc`）", "**ブラウザ**"),
+      title: "[手作業] ブラウザ: 設定を変える",
       githubIssueId: BigInt(42),
       labels: [{ name: "71.manual-step" }],
     });
@@ -405,6 +407,7 @@ describe("advanceManualStepRun", () => {
       status: "RUNNING",
       exitCode: null,
       manualStepLine: FIRST_LINE,
+      manualStepRunTarget: "subpc",
       message: null,
     });
 

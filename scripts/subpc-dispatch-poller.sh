@@ -53,8 +53,9 @@
 #                         指摘をレビューIssueのコメントへ投稿して終わる
 #                         （scripts/start-code-review.sh）
 #
-# **pull型なのは、VPSがtailnetに参加しておらず、Tailscale SSHにforced commandが無いため**
-# （#1176）。issue-deck側からSSHでキックする経路は採れない。
+# **pull型なのは、Tailscale SSHにforced commandが無いため**（#1176）。issue-deck側から
+# SSHでキックする経路は採れない。VPSはその後tailnetへ参加したが、**逆向き＝このホストから
+# VPSへ**の代行実行にだけ使っている（#2901）。
 #
 # 使い方:
 #   scripts/subpc-dispatch-poller.sh            常駐して一定間隔でポーリングする（systemdの出口）
@@ -636,6 +637,50 @@ manual_step_values_capable() {
   printf 'true'
 }
 
+# VPSの手順を代行実行できるか（#2901）。**接続先が設定されていて、実際にSSHが通るかで判定する**
+# （`manual_step_capable`が`gh`の有無を見るのと同じ立場で、実行できないまま申告しない）。
+#
+# **`manual_step_capable`とは分けて申告する。** 古いpollerはジョブの`manualStepRunTarget`を
+# 黙って無視し、**VPSで実行するはずのコマンドをサブPCで実行してしまう**（`manualStepValues`と
+# 同じで「配ってから`failed`で返る」では済まない）。issue-deck側はこの申告が真でないホストへ
+# VPSのジョブを払い出さない。
+#
+# 疎通はTailscale SSHで、鍵の配布はしていない（認証はtailnetのACLが行う）。
+#
+# **毎巡は繋がない**（既定5分間隔でキャッシュする）。申告は30秒ごとに走るので、そのたびに
+# SSHすると——とりわけVPSが落ちているとき——`ConnectTimeout`のぶん**申告そのものが毎回遅れる**。
+# 直後に反映されないぶんは、設定を直したあと最大5分だけ画面が押せないことになる。
+MANUAL_STEP_VPS_PROBE_INTERVAL_MINUTES="${MANUAL_STEP_VPS_PROBE_INTERVAL_MINUTES:-5}"
+MANUAL_STEP_VPS_CAPABLE="false"
+MANUAL_STEP_VPS_PROBED_AT=0
+
+# 疎通の判定を（必要なら）取り直して`MANUAL_STEP_VPS_CAPABLE`へ入れる。
+#
+# **コマンド置換（`$(...)`）から呼ばない。** サブシェルで走るとキャッシュの更新が親へ戻らず、
+# 毎巡SSHすることになる（申告を組み立てる前に、この関数を素で呼ぶ）。
+refresh_manual_step_vps_capable() {
+  local now interval
+  if [[ -z "${MANUAL_STEP_VPS_SSH_TARGET:-}" ]]; then
+    # 設定が消えたときは即座に落とす（落とす方向はキャッシュしない）
+    MANUAL_STEP_VPS_CAPABLE="false"
+    MANUAL_STEP_VPS_PROBED_AT=0
+    return 0
+  fi
+  now="$(date +%s)"
+  interval=$(( MANUAL_STEP_VPS_PROBE_INTERVAL_MINUTES * 60 ))
+  if (( MANUAL_STEP_VPS_PROBED_AT > 0 && now - MANUAL_STEP_VPS_PROBED_AT < interval )); then
+    return 0
+  fi
+  MANUAL_STEP_VPS_PROBED_AT="$now"
+  if timeout 20 ssh -o BatchMode=yes \
+    -o ConnectTimeout="${MANUAL_STEP_VPS_SSH_CONNECT_TIMEOUT:-15}" \
+    "$MANUAL_STEP_VPS_SSH_TARGET" true </dev/null >/dev/null 2>&1; then
+    MANUAL_STEP_VPS_CAPABLE="true"
+  else
+    MANUAL_STEP_VPS_CAPABLE="false"
+  fi
+}
+
 # 計画レビュー（G1・#1855）のセッションを起こせるか。**ランチャーが手元にあるかで判定する**
 # （`cross_repo_question_capable`と同じ）。
 #
@@ -1117,6 +1162,9 @@ announce() {
   # どのコミットのものかという事実（版数が同じまま97コミット遅れていた、が起きている）。
   # **`startedCommit`（起動時のコミット）も一緒に載せる**（#2815）。チェックアウトだけが進んで
   # 再起動されていない状態は、HEADとorigin/developの比較だけでは見えない。
+  # **申告を組み立てる前に取り直す**（コマンド置換の中で呼ぶとキャッシュが効かない）
+  refresh_manual_step_vps_capable
+
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
     --argjson repositories "$repositories" \
@@ -1128,6 +1176,7 @@ announce() {
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson manualStepValues "$(manual_step_values_capable)" \
+    --argjson manualStepVps "$MANUAL_STEP_VPS_CAPABLE" \
     --argjson manualStepSession "$(manual_step_session_capable)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson codeReview "$(code_review_capable)" \
@@ -1142,7 +1191,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepSession: $manualStepSession, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -2834,7 +2883,11 @@ run_manual_step_job() {
   local values_json="${6:-{\}}"
   # issue-deck側が差し込んだ結果（#2403）。届かない場合は空で、そのときは突き合わせを省く
   local expected="${7:-}"
-  local body payload_file unit resolved
+  # どこで実行するか（#2901。`subpc`／`vps`）。**未知の語・空はサブPC**——読み取れなかった
+  # ときに向こう側へ倒すと、意図しないホストでコマンドが走る
+  local run_target="${8:-subpc}"
+  local body payload_file unit resolved where
+  [[ "$run_target" == "vps" ]] || run_target="subpc"
 
   if [[ -z "$command" ]]; then
     report_job "$job_id" failed "実行するコマンドが空です。"
@@ -2842,6 +2895,13 @@ run_manual_step_job() {
   fi
   if [[ ! -f "$MANUAL_STEP_RUNNER" ]]; then
     report_job "$job_id" failed "代行実行のスクリプトがありません（$MANUAL_STEP_RUNNER）。"
+    return 0
+  fi
+  # **申告と実物がずれていたら実行しない**（#2901）。申告した後に設定が消えた場合で、
+  # 「サブPCで実行してしまう」より「実行しない」へ倒す
+  if [[ "$run_target" == "vps" && -z "${MANUAL_STEP_VPS_SSH_TARGET:-}" ]]; then
+    report_job "$job_id" skipped \
+      "VPSへの接続先（MANUAL_STEP_VPS_SSH_TARGET）が設定されていないため実行しませんでした。"
     return 0
   fi
 
@@ -2898,11 +2958,17 @@ run_manual_step_job() {
   # `chmod 600`の意味はこれまでより重い。
   payload_file="$(mktemp -t issue-deck-manual-step-job.XXXXXX)"
   chmod 600 "$payload_file"
-  jq -n --arg jobId "$job_id" --arg command "$resolved" '{jobId: $jobId, command: $command}' \
+  jq -n --arg jobId "$job_id" --arg command "$resolved" --arg runTarget "$run_target" \
+    '{jobId: $jobId, command: $command, runTarget: $runTarget}' \
     >"$payload_file"
 
   # 実行を始めたことを先に伝える（届くまで最大1巡ぶん遅れるので、画面が黙る時間を短くする）
-  report_job "$job_id" running "サブPCで実行しています"
+  if [[ "$run_target" == "vps" ]]; then
+    where="サブPCからVPSへ接続して"
+  else
+    where="サブPCで"
+  fi
+  report_job "$job_id" running "${where}実行しています"
 
   unit="issue-deck-manual-step-$job_id"
   if command -v systemd-run >/dev/null 2>&1 &&
@@ -2978,7 +3044,8 @@ abort_manual_step_job() {
 run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command recovery
-  local placeholder_values resolved_command agent claude_local_model codex_model
+  local placeholder_values resolved_command manual_step_run_target agent claude_local_model
+  local codex_model
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -2998,6 +3065,8 @@ run_job() {
   # issue-deck側が値を差し込んだ結果（#2403）。実行するのはこちらではなく、pollerが自分で
   # 差し込み直したもの。これは突き合わせにだけ使う（`command`が照合専用なのと同じ立場）
   resolved_command="$(printf '%s' "$job_json" | jq -r '.resolvedCommand // ""')"
+  # どこで実行するか（#2901。`subpc`／`vps`）。**古いissue-deckは返さない**ので既定はサブPC
+  manual_step_run_target="$(printf '%s' "$job_json" | jq -r '.manualStepRunTarget // "subpc"')"
   # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
   # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
   agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
@@ -3141,7 +3210,7 @@ run_job() {
   # 問わない（実行するのはホスト上のコマンドで、worktreeを作るわけではない）。
   if [[ "$kind" == "MANUAL_STEP" ]]; then
     run_manual_step_job "$job_id" "$owner" "$repo" "$issue_number" "$command" \
-      "$placeholder_values" "$resolved_command"
+      "$placeholder_values" "$resolved_command" "$manual_step_run_target"
     return 0
   fi
 

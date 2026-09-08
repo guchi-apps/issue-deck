@@ -85,7 +85,7 @@ export async function runManualStepVerificationPatrol(now: Date = new Date()): P
   if (host === null) return;
 
   lastCandidateSearchAtMs = now.getTime();
-  const target = await findNextPatrolTarget(now);
+  const target = await findNextPatrolTarget(now, host.manualStepVpsCapable === true);
   if (target === null) return;
 
   const started = await db.manualStepVerificationCheck.upsert({
@@ -98,9 +98,9 @@ export async function runManualStepVerificationPatrol(now: Date = new Date()): P
     create: {
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
-      ...patrolStartValues(host, now),
+      ...patrolStartValues(host.name, now),
     },
-    update: patrolStartValues(host, now),
+    update: patrolStartValues(host.name, now),
   });
   await syncCheck(started, now);
 }
@@ -420,10 +420,12 @@ async function finishCheck(
 }
 
 /** 積む先のホスト。**代行実行を申告していて応答しているホスト**が居なければ巡回しない */
-async function pickPatrolHost(now: Date): Promise<string | null> {
+async function pickPatrolHost(
+  now: Date,
+): Promise<{ name: string; manualStepVpsCapable: boolean | null } | null> {
   const hosts = await db.dispatchHost.findMany({ where: { manualStepCapable: true } });
   const online = hosts.find((host) => isDispatchHostOnline(host.lastSeenAt, now));
-  return online?.name ?? null;
+  return online ? { name: online.name, manualStepVpsCapable: online.manualStepVpsCapable } : null;
 }
 
 type PatrolTarget = { repositoryFullName: string; issueNumber: number };
@@ -435,7 +437,11 @@ type PatrolTarget = { repositoryFullName: string; issueNumber: number };
  * 未処理の代行実行が積まれているものは、こちらが割り込むと人の実行を`already_queued`で
  * 弾いてしまう。
  */
-async function findNextPatrolTarget(now: Date): Promise<PatrolTarget | null> {
+async function findNextPatrolTarget(
+  now: Date,
+  /** 積む先のホストがVPSの確認コマンドを流せるか（#2901） */
+  vpsCapable: boolean,
+): Promise<PatrolTarget | null> {
   const issues = await db.issue.findMany({
     where: { state: "OPEN", labels: { some: { name: MANUAL_STEP_LABEL } } },
     select: {
@@ -448,9 +454,12 @@ async function findNextPatrolTarget(now: Date): Promise<PatrolTarget | null> {
   });
   if (issues.length === 0) return null;
 
-  const candidates = issues.filter(
-    (issue) => resolveManualStepPatrolTarget(issue.body, true).patrollable,
-  );
+  // **VPSの確認コマンドは、そこへ到達できるホストが居るときだけ候補にする**（#2901）。
+  // 積んでも`manual_step_vps_unsupported`で弾かれ、巡回の記録だけが失敗として残る
+  const candidates = issues.filter((issue) => {
+    const target = resolveManualStepPatrolTarget(issue.body, true);
+    return target.patrollable && (target.runTarget !== "vps" || vpsCapable);
+  });
   if (candidates.length === 0) return null;
 
   // **N+1にしない。** 候補ぶんの巡回の記録・自動実行・未処理ジョブをそれぞれ1本で引く

@@ -131,9 +131,10 @@ describe("findManualStepForQuestion", () => {
     expect(found?.device).toBe("VPS");
     expect(found?.command).toContain("GOOGLE_REFRESH_TOKEN");
     // 代行できない理由は`describeManualStepExecutionRejection`の文言をそのまま返す
-    // （手作業アシスタントの`ManualStepRunPanel`と同じ文になる）。サブPC以外はその判定が先に
-    // 出るので、埋める値より端末が理由になる——順序も既存の判定に従う
-    expect(found?.reason).toContain("VPSで実行するため");
+    // （手作業アシスタントの`ManualStepRunPanel`と同じ文になる）。**VPSは#2901で代行できる
+    // ようになった**ので、この手順が止まる理由は端末ではなく埋める値の方になる——順序も
+    // 既存の判定（`runTarget` → コマンド → 対話 → プレースホルダ）に従う
+    expect(found?.reason).toContain("<控えたrefresh_token>");
   });
 
   it("手順に結び付かない質問では当てない（関係のない手順を出さない）", () => {

@@ -11,6 +11,8 @@ import {
   findPlaceholder,
   hasUnfilledPlaceholder,
   isSubpcManualStepDevice,
+  parseManualStepRunTarget,
+  resolveManualStepRunTarget,
   listManualStepPlaceholders,
   normalizeManualStepPlaceholderValues,
   MANUAL_STEP_COMMAND_MAX_LENGTH,
@@ -180,6 +182,43 @@ describe("isSubpcManualStepDevice", () => {
   });
 });
 
+/**
+ * どこで代行実行するか（#2901）。**サブPCとVPSの2つだけ**で、それ以外は`null`
+ * （`isSubpcManualStepDevice`と同じく、読み取れなければ代行しない側へ倒す）。
+ */
+describe("resolveManualStepRunTarget", () => {
+  it("サブPCとVPSを実行先として返す", () => {
+    expect(resolveManualStepRunTarget("サブPC")).toBe("subpc");
+    expect(resolveManualStepRunTarget("sub-pc")).toBe("subpc");
+    expect(resolveManualStepRunTarget("VPS")).toBe("vps");
+    expect(resolveManualStepRunTarget("vps（`ssh vps`）")).toBe("vps");
+  });
+
+  it("到達できない実行先・記載が無いものはnullにする", () => {
+    expect(resolveManualStepRunTarget("ブラウザ")).toBeNull();
+    expect(resolveManualStepRunTarget("メインPC")).toBeNull();
+    expect(resolveManualStepRunTarget("1Password")).toBeNull();
+    expect(resolveManualStepRunTarget(null)).toBeNull();
+  });
+
+  // #2052と同じ倒し方。1つに絞れない本文は、どちらで実行するか決められない
+  it("端末が1つに絞れない値はnullにする", () => {
+    expect(resolveManualStepRunTarget("サブPCとVPS")).toBeNull();
+    expect(resolveManualStepRunTarget("ブラウザ（1Password）とサブPC")).toBeNull();
+  });
+});
+
+/** ジョブの列・pollerからの入力。**既知の2語だけを通す**（列を手で書き換えても変わらない） */
+describe("parseManualStepRunTarget", () => {
+  it("vpsだけをVPSとして読み、それ以外はサブPCにする", () => {
+    expect(parseManualStepRunTarget("vps")).toBe("vps");
+    expect(parseManualStepRunTarget("subpc")).toBe("subpc");
+    expect(parseManualStepRunTarget("VPS")).toBe("subpc");
+    expect(parseManualStepRunTarget("ssh vps")).toBe("subpc");
+    expect(parseManualStepRunTarget(null)).toBe("subpc");
+  });
+});
+
 describe("extractVerificationCommands", () => {
   it("`## 完了の確認方法`のコマンドを、コードブロックの行番号付きで取り出す（#1869）", () => {
     const commands = extractVerificationCommands(REAL_BODY);
@@ -330,6 +369,24 @@ describe("findInteractiveCommand", () => {
     expect(findInteractiveCommand("cd ~/apps/issue-deck && op signin --account my")).toBe(
       "op signin",
     );
+  });
+
+  // VPSにはNOPASSWDの設定が無く、SSH越しの代行実行では必ず落ちる（#2901）
+  it("VPSの手順では sudo を対象にする", () => {
+    expect(findInteractiveCommand("sudo systemctl restart apache2", "vps")).toBe("sudo");
+    expect(findInteractiveCommand("cd /apps/aide && sudo -u www-data ls", "vps")).toBe("sudo");
+  });
+
+  // サブPCではNOPASSWDが効くので、同じコマンドでも代行できる。実行先を渡さない
+  // 呼び出し（本文の書式検査）も従来どおりの判定になる
+  it("サブPC・実行先を渡さない呼び出しでは sudo を対象にしない", () => {
+    expect(findInteractiveCommand("sudo systemctl restart apache2", "subpc")).toBeNull();
+    expect(findInteractiveCommand("sudo systemctl restart apache2")).toBeNull();
+  });
+
+  // `sudoku`のような語の一部では当たらない（`interactivePattern`の`\b`）
+  it("語の一部の sudo は対象にしない", () => {
+    expect(findInteractiveCommand("echo sudoku", "vps")).toBeNull();
   });
 
   it("gh の対話的なログイン・スコープ追加も対象にする", () => {

@@ -54,7 +54,7 @@ describe("buildManualStepSessionPlan", () => {
     expect(plan.auto).toBe(2);
     expect(plan.user).toBe(2);
     expect(plan.entries[1].device).toBe("ブラウザ");
-    expect(plan.entries[1].rejection).toBe("device_not_subpc");
+    expect(plan.entries[1].rejection).toBe("device_not_runnable");
     expect(plan.entries[2].rejection).toBe("placeholder_command");
     expect(plan.entries[2].placeholder).toBe("<控えたkey>");
   });

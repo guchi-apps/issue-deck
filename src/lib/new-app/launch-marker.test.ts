@@ -82,7 +82,7 @@ describe("マーカー", () => {
     expect(guide.hasTemplate).toBe(true);
     expect(guide.where.defaultDevice).toBe("サブPC");
     const plan = buildManualStepRunPlan(body, undefined, {
-      host: { online: true, manualStepCapable: true, manualStepValuesCapable: true },
+      host: { online: true, manualStepCapable: true, manualStepValuesCapable: true, manualStepVpsCapable: true },
       isManualStepIssue: true,
     });
     expect(plan.entries.filter((entry) => entry.rejection !== null)).toEqual([

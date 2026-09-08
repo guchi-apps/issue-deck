@@ -651,6 +651,7 @@ describe("findDispatchJobForIssue", () => {
       placeholderValues: null,
       resolvedCommand: null,
       manualStepLine: null,
+      manualStepRunTarget: "subpc",
       targetJobId: null,
       previewAction: null,
       exitCode: null,
@@ -1050,6 +1051,7 @@ describe("横断質問（#1454）", () => {
       manualStepCapable: null,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
+      manualStepVpsCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
@@ -1189,6 +1191,7 @@ describe("横断質問（#1454）", () => {
         placeholderValues: null,
         resolvedCommand: null,
         manualStepLine: null,
+        manualStepRunTarget: "subpc",
         targetJobId: null,
         previewAction: null,
         exitCode: null,
@@ -1237,6 +1240,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       manualStepCapable: true,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
+      manualStepVpsCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
@@ -1386,6 +1390,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         placeholderValues: null,
         resolvedCommand: null,
         manualStepLine: null,
+        manualStepRunTarget: "subpc",
         targetJobId: null,
         previewAction: null,
         exitCode: null,
@@ -1434,6 +1439,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       manualStepCapable: true,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
+      manualStepVpsCapable: null,
       planReviewCapable: true,
       codeReviewCapable: true,
       codexCapable: null,
@@ -1557,6 +1563,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         placeholderValues: null,
         resolvedCommand: null,
         manualStepLine: null,
+        manualStepRunTarget: "subpc",
         targetJobId: null,
         previewAction: null,
         exitCode: null,
@@ -1583,9 +1590,14 @@ describe("コードレビュー（CODE_REVIEW）", () => {
 describe("resolveManualStepExecutionRejection", () => {
   function params(overrides: Record<string, unknown> = {}) {
     return {
-      host: { online: true, manualStepCapable: true, manualStepValuesCapable: true },
+      host: {
+        online: true,
+        manualStepCapable: true,
+        manualStepValuesCapable: true,
+        manualStepVpsCapable: true,
+      },
       isManualStepIssue: true,
-      isSubpcDevice: true,
+      runTarget: "subpc",
       hasCommand: true,
       interactiveCommand: null,
       placeholder: null,
@@ -1602,8 +1614,8 @@ describe("resolveManualStepExecutionRejection", () => {
   // そもそも代行の対象外で、ホストの状態を理由に出しても直す手がかりにならない
   it("Issue・手順の理由をホストの理由より先に出す", () => {
     expect(
-      resolveManualStepExecutionRejection(params({ isSubpcDevice: false, host: null })),
-    ).toBe("device_not_subpc");
+      resolveManualStepExecutionRejection(params({ runTarget: null, host: null })),
+    ).toBe("device_not_runnable");
     expect(
       resolveManualStepExecutionRejection(
         params({ hasCommand: false, host: { online: false, manualStepCapable: null } }),
@@ -1662,6 +1674,44 @@ describe("resolveManualStepExecutionRejection", () => {
     expect(resolveManualStepExecutionRejection(params({ isManualStepIssue: false }))).toBe(
       "not_manual_step",
     );
+  });
+
+  // VPSの手順（#2901）。**申告していないホストへは配らない**——古いpollerは実行先を黙って
+  // 無視し、VPSで実行するはずのコマンドをサブPCで実行してしまう
+  it("VPSへ到達できないpollerにはVPSの手順を押させない", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({
+          runTarget: "vps",
+          host: {
+            online: true,
+            manualStepCapable: true,
+            manualStepValuesCapable: true,
+            manualStepVpsCapable: null,
+          },
+        }),
+      ),
+    ).toBe("manual_step_vps_unsupported");
+  });
+
+  it("申告していればVPSの手順も押せる", () => {
+    expect(resolveManualStepExecutionRejection(params({ runTarget: "vps" }))).toBeNull();
+  });
+
+  // サブPCの手順は、VPSの申告が無くても従来どおり押せる
+  it("VPSの申告が無くてもサブPCの手順は押せる", () => {
+    expect(
+      resolveManualStepExecutionRejection(
+        params({
+          host: {
+            online: true,
+            manualStepCapable: true,
+            manualStepValuesCapable: true,
+            manualStepVpsCapable: null,
+          },
+        }),
+      ),
+    ).toBeNull();
   });
 
   // 未申告（古いpoller）は「できない」として扱う。配ると未知の種別として失敗になる
@@ -1724,6 +1774,7 @@ describe("resolveManualStepHost", () => {
       manualStepCapable: true,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
+      manualStepVpsCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: null,
@@ -1800,6 +1851,7 @@ describe("エージェントの選択（#2505）", () => {
       manualStepCapable: null,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
+      manualStepVpsCapable: null,
       planReviewCapable: null,
       codeReviewCapable: null,
       codexCapable: true,
