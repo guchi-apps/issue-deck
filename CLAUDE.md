@@ -232,6 +232,12 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - **自動化できないものは自動化したように見せない。** DNSのAレコードはVPS管理画面にAPIが無く、VPS実機の操作（`/apps/<name>/`・DB作成・PM2・certbot）は`guchi-apps/vps`の`deploy.yml`が配る受け口ではないため、どちらも手作業Issueとして残す
 - 生成する手作業Issueの書式・失敗したときの扱い・盤面へ載るまでの順序は[docs/new-app-launch.md](docs/new-app-launch.md)を参照する
 
+### アプリを終了させるときは、リポジトリを削除せずアーカイブする
+
+運用をやめるアプリは`gh repo delete`せず`gh repo archive`する。他リポジトリからのリンクが全て404になり、なぜ作りなぜやめたかの記録も失われるため。アーカイブすれば`Repository.archived`を見る各巡回・配布対象からは自動で外れるが、GitHub Secrets・1Password・VPS実機の資源・DNS・外形監視・各種台帳は残るので手で片付ける。
+
+撤去の順序（依存元の後片付け → 外形監視 → VPS撤去と本番デプロイの停止 → シークレット → 台帳 → アーカイブ）と、issue-deck側で触るファイルの一覧は[docs/app-shutdown.md](docs/app-shutdown.md)を参照する。アプリ固有の事情は対象リポジトリの`docs/decommission.md`に書き、同じ手順を2か所に持たない。
+
 ### Issue間の実施順序は`## 前提条件`に書く（`71.manual-step`以外も）
 
 「AをやってからBをマージする」のように順序が決まっている場合、**PR本文の散文やIssueコメントに書くだけでは画面に出ない**（#2003）。**待つ側のIssueの本文**に`## 前提条件`の見出しを足し、`- 先に完了している必要があるIssue・PR: #39`のように**番号を`#39`の形で**書く（別リポジトリは`owner/repo#39`）。
