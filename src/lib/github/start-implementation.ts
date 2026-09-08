@@ -15,9 +15,6 @@ export function startImplementationCommentBody(planRequired: boolean): string {
 /** 実装前にPlan modeでの計画提示・承認を必須にするラベル */
 export const PREVIEW_REQUIRED_LABEL = "23.preview-required";
 
-/** PR作成前に開発サーバーを起動し画面確認・承認を必須にするラベル */
-export const SCREENSHOT_REQUIRED_LABEL = "24.screenshot-required";
-
 /** 実装着手前に見た目のアーティファクト（自己完結HTML）を公開させるラベル（#1473・#1540） */
 export const ARTIFACT_REQUIRED_LABEL = "25.artifact-required";
 
@@ -27,7 +24,6 @@ export const MERGE_CONFIRM_REQUIRED_LABEL = "22.merge-confirm-required";
 export type StartImplementationOptionKey =
   | "planRequired"
   | "previewRequired"
-  | "screenshotRequired"
   | "artifactRequired"
   | "mergeConfirmRequired";
 
@@ -36,7 +32,6 @@ export type StartImplementationOptions = Record<StartImplementationOptionKey, bo
 export const START_IMPLEMENTATION_DEFAULT_OPTIONS: StartImplementationOptions = {
   planRequired: false,
   previewRequired: false,
-  screenshotRequired: false,
   artifactRequired: false,
   mergeConfirmRequired: false,
 };
@@ -80,13 +75,6 @@ export const START_IMPLEMENTATION_OPTIONS: {
     description:
       "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます（サブPC実行ならtailnet経由でスマホからも開けます）",
     githubLabel: PREVIEW_REQUIRED_LABEL,
-  },
-  {
-    key: "screenshotRequired",
-    label: "スクリーンショットが必要",
-    description:
-      "PR作成前に変更箇所のスクリーンショットを取得し、Issueへ貼ります（無人実行は終了と同時にdevサーバーが消えるため、画面を見る唯一の手段）",
-    githubLabel: SCREENSHOT_REQUIRED_LABEL,
   },
 ];
 
@@ -148,16 +136,11 @@ export function artifactRequiredDefaultForLabels({
 /**
  * 実行先に応じて、ダイアログに出すオプションを絞る（#1317）。
  *
- * **スクリーンショットはGitHub Actions（無人実行）のときだけ出す。** サブPC実行・ローカル実行では
- * `tailscale serve`で開発サーバーそのものをtailnetへ出せる（#1265）ため、スマホからでも実物の画面を
- * 確認でき、撮影は重いだけで得るものが無い。無人実行はワークフロー終了と同時にdevサーバーが消え、
- * Fly.ioのプレビュー環境も#1308で廃止したため、撮影が画面を見る唯一の手段として残る。
- *
- * **アーティファクトは逆に、GitHub Actions（無人実行）のときだけ隠す**（#1473）。
+ * **アーティファクトは、GitHub Actions（無人実行）のときだけ隠す**（#1473）。
  * アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない。
  *
  * **既にチェックが入っている場合は実行先によらず出す。** 隠すと、付いてしまったラベルを
- * このダイアログから外せなくなる（`resolveScreenshotRejection`で無効化する側と同じ考え方）。
+ * このダイアログから外せなくなる。
  */
 export function visibleStartImplementationOptions({
   isActionsTarget,
@@ -167,9 +150,6 @@ export function visibleStartImplementationOptions({
   options: StartImplementationOptions;
 }): typeof START_IMPLEMENTATION_OPTIONS {
   return START_IMPLEMENTATION_OPTIONS.filter((option) => {
-    if (option.key === "screenshotRequired") {
-      return isActionsTarget || options.screenshotRequired;
-    }
     if (option.key === "artifactRequired") {
       return !isActionsTarget || options.artifactRequired;
     }

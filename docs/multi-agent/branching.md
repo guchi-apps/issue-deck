@@ -173,7 +173,9 @@ scripts/cleanup-merged-branches.sh --apply --yes   # 実際に削除する
 次を**すべて**満たすブランチだけを削除する。1つでも欠けたら残す。
 
 1. 名前が保護対象でない — `main`／`develop`／`master`／デフォルトブランチ／`screenshots`
-   （#255のorphanブランチ）／GitHub上で`protected: true`
+   （#255のorphanブランチ。スクリーンショット撮影機能の廃止（#2883）で新規コミットは
+   無くなったが、過去のIssueコメントが参照している画像を残すため保護は継続）／
+   GitHub上で`protected: true`
 2. そのブランチをheadとするPRが1件以上あり、最新のPRがマージ済み
 3. openなPRのheadでない
 4. **ブランチの現在のSHAが、そのマージ済みPRの`head.sha`と一致する**

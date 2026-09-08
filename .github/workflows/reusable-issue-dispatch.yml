@@ -289,7 +289,6 @@ jobs:
       retry_attempt: ${{ steps.state.outputs.retry_attempt }}
       issue_closed: ${{ steps.state.outputs.issue_closed }}
       branch_exists: ${{ steps.state.outputs.branch_exists }}
-      screenshot_required: ${{ steps.state.outputs.screenshot_required }}
       preview_required: ${{ steps.state.outputs.preview_required }}
       lane: ${{ steps.state.outputs.lane }}
     steps:
@@ -432,9 +431,6 @@ jobs:
           LOCAL=false
           echo "$LABELS" | grep -qx "11.local" && LOCAL=true
           echo "local_active=$LOCAL" >> "$GITHUB_OUTPUT"
-          SCREENSHOT_REQUIRED=false
-          echo "$LABELS" | grep -qx "24.screenshot-required" && SCREENSHOT_REQUIRED=true
-          echo "screenshot_required=$SCREENSHOT_REQUIRED" >> "$GITHUB_OUTPUT"
           PREVIEW_REQUIRED=false
           echo "$LABELS" | grep -qx "23.preview-required" && PREVIEW_REQUIRED=true
           echo "preview_required=$PREVIEW_REQUIRED" >> "$GITHUB_OUTPUT"
@@ -551,7 +547,7 @@ jobs:
           esac
           echo "lane=$LANE" >> "$GITHUB_OUTPUT"
 
-          echo "判定結果: mode=$MODE lane=$LANE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP develop_pr=$DEVELOP_PR local=$LOCAL branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED screenshot_required=$SCREENSHOT_REQUIRED preview_required=$PREVIEW_REQUIRED"
+          echo "判定結果: mode=$MODE lane=$LANE branch=$BRANCH plan_required=$PLAN_REQUIRED awaiting_confirm=$AWAITING_CONFIRM wip=$WIP develop_pr=$DEVELOP_PR local=$LOCAL branch_exists=$BRANCH_EXISTS pr_state=$PR_STATE issue_closed=$ISSUE_CLOSED preview_required=$PREVIEW_REQUIRED"
 
       - name: 依頼を受け取ったことをリアクションで示す
         # triageはconcurrencyの外で即時実行されるため、dispatchがキュー待ちの間でも「受け取った」
@@ -896,7 +892,6 @@ jobs:
           RETRY_ATTEMPT: ${{ needs.triage.outputs.retry_attempt }}
           ISSUE_CLOSED: ${{ needs.triage.outputs.issue_closed }}
           BRANCH_EXISTS: ${{ needs.triage.outputs.branch_exists }}
-          SCREENSHOT_REQUIRED: ${{ needs.triage.outputs.screenshot_required }}
         run: |
           set -e
           echo "triageから引き継いだ判定: mode=$MODE branch=$BRANCH issue_number=$ISSUE_NUMBER"
@@ -936,7 +931,6 @@ jobs:
             echo "retry_attempt=$RETRY_ATTEMPT"
             echo "issue_closed=$ISSUE_CLOSED"
             echo "branch_exists=$BRANCH_EXISTS"
-            echo "screenshot_required=$SCREENSHOT_REQUIRED"
           } >> "$GITHUB_OUTPUT"
 
       - name: claude-code-actionに渡すモデル指定を取得する
@@ -1863,18 +1857,18 @@ jobs:
 
       - name: Setup Node.js（実装ステップ用）
         # 実装ステップ自体が使うNodeのバージョンを固定するための、呼び出し元向けの拡張点(#956)。
-        # 下のランタイム準備ブロックのSetup Nodeとは目的が異なる。あちらは撮影・DB準備のための
-        # ものでscreenshot_requiredに紐づくが、こちらは撮影の有無によらず実装のたびに効かせたい。
+        # 下のランタイム準備ブロックのSetup Nodeとは目的が異なる。あちらはDB準備のためのもので
+        # runtime-setupに紐づくが、こちらはruntime-setupの有無によらず実装のたびに効かせたい。
         #
-        # プリセット(runtime-setup)に混ぜると、撮影を使わないリポジトリがバージョン固定のためだけに
-        # nodeプリセットを選ばざるを得ず、不要な依存インストールとPlaywrightのダウンロードまで
-        # 走ってしまう。直交する軸として独立させている。
+        # プリセット(runtime-setup)に混ぜると、DBを使わないリポジトリがバージョン固定のためだけに
+        # nodeプリセットを選ばざるを得ず、不要な依存インストールまで走ってしまう。直交する軸として
+        # 独立させている。
         #
         # issue-deckは未指定のためスキップされ、従来どおりランナー既定のNodeで動く。
         #
-        # node-versionを指定しつつruntime-setupがnode/node-dbで、かつscreenshot_requiredも
-        # trueの場合はactions/setup-nodeが2回走るが、同じバージョンの再実行はキャッシュヒットで
-        # 数秒であり実害は無い。条件を複雑にして避けるより素直な条件のまま許容する。
+        # node-versionを指定しつつruntime-setupがnode/node-dbの場合はactions/setup-nodeが2回走るが、
+        # 同じバージョンの再実行はキャッシュヒットで数秒であり実害は無い。条件を複雑にして避けるより
+        # 素直な条件のまま許容する。
         if: |
           inputs.node-version != '' &&
           (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
@@ -1885,10 +1879,9 @@ jobs:
       # ここからはランタイム準備。呼び出し元リポジトリの技術スタックによって要否が変わるため、
       # inputs.runtime-setup / inputs.package-manager で出し分ける(#945)。
       #
-      # **パッケージマネージャの用意と依存インストールは、撮影の有無によらず常に行う(#931)。**
-      # 以前は「撮影(scripts/capture-issue-screenshots.sh)でのみ使う」という前提で
-      # screenshot_requiredでも絞っていた(#258, #319)が、実装エージェント自身が
-      # lint/typecheck/test/buildを実行するために依存関係を必要とする。
+      # **パッケージマネージャの用意と依存インストールは常に行う(#931)。**
+      # 以前はスクリーンショット撮影（廃止済み）でのみ使うという前提で絞っていた(#258, #319)が、
+      # 実装エージェント自身がlint/typecheck/test/buildを実行するために依存関係を必要とする。
       #
       # 絞っていた結果どうなったかの実測(#931のベースライン、issue-deck #1115のrun):
       # node_modulesが無い状態で起動し、エージェントがpnpmを用意しようとして
@@ -1896,8 +1889,6 @@ jobs:
       # 76ターン・10分を費やしてコード変更ゼロで停止している。
       # pnpmのリポジトリでは特に致命的で、pnpm自体がランナーに無いため、
       # allowedToolsにBash(pnpm:*)があっても実行するものが存在しない。
-      #
-      # マイグレーション・シード・Playwrightは撮影でのみ使うため、引き続きscreenshot_requiredで絞る。
       - name: Setup pnpm（実装ステップ用）
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
         uses: pnpm/action-setup@v4
@@ -1919,7 +1910,6 @@ jobs:
 
       - name: 依存関係をインストールする
         # 実装エージェントがlint・typecheck・test・buildを実行するために必要(#931)。
-        # 撮影時のマイグレーション・シードもこれに依存する。
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && inputs.runtime-setup != 'minimal' && hashFiles('package.json') != ''
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
@@ -1927,48 +1917,6 @@ jobs:
           else
             npm ci
           fi
-
-      - name: DBマイグレーションを適用する
-        # 無人実行で開発サーバーを起動できるようにするための土台(#256)。実際に起動して画面を
-        # 確認・撮影する処理自体は#258で統合済み(後述のClaude Codeステップのプロンプト内
-        # `24.screenshot-required`の節、およびscripts/capture-issue-screenshots.sh)。
-        #
-        # スクリプト名(db:migrate:deploy)は呼び出し元に存在するとは限らないため、inputsを
-        # 増やさずに済ませる目的で`--if-present`を使う。無ければ何もせず成功する(#945)。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup == 'node-db'
-        env:
-          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/${{ inputs.database-name }}
-        run: ${{ inputs.package-manager }} run --if-present db:migrate:deploy
-
-      - name: CIバイパス用ログインユーザーをシードする
-        # 認証プロバイダを経由しないCI専用ログインバイパス(#257)の対象ユーザーをupsertする。
-        # 後続の「画面確認用のダミーデータをシードする」ステップがこのユーザーに
-        # UserInstallationを紐付けるため、必ずこちらを先に実行する(#258)。
-        #
-        # スクリプトの有無は呼び出し元によるため、存在する場合のみ実行する(#945)。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup == 'node-db'
-        env:
-          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/${{ inputs.database-name }}
-        run: |
-          if [ -f scripts/ci-seed-user.mjs ]; then
-            node scripts/ci-seed-user.mjs
-          else
-            echo "scripts/ci-seed-user.mjs が無いためスキップします"
-          fi
-
-      - name: 画面確認用のダミーデータをシードする
-        # 実運用の同期処理は使わず、最小限のダミーデータ（リポジトリ・Issue数件）を直接投入する
-        # (#256)。CIバイパス用ユーザーへの紐付けも行う(#258。紐付けが無いと画面が空になる)。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup == 'node-db'
-        env:
-          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/${{ inputs.database-name }}
-        run: ${{ inputs.package-manager }} run --if-present db:seed:ci
-
-      - name: Playwrightのブラウザをインストールする
-        # スクリーンショット撮影(#258)にはchromiumのブラウザ本体が必要だが、ダウンロードに
-        # 時間がかかるため`24.screenshot-required`が付いている場合のみインストールする。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.state.outputs.screenshot_required == 'true' && inputs.runtime-setup != 'minimal'
-        run: ${{ inputs.package-manager }} exec playwright install --with-deps chromium
 
       - name: 01.check-answered（旧名 00.qa-answered）を除去する（実装着手時）
         # 質問回答サイクル（mode=plan/additionalの「単なる質問・確認」判定）で付与されうる
@@ -2391,15 +2339,8 @@ jobs:
         # 呼び出し元リポジトリ固有の後処理を差し込むための拡張点(#952)。issue-deck自身は
         # 使わない（既定は空で、その場合このステップはスキップされる）。
         #
-        # 最初の利用者はshopping-listのスクリーンショット撮影。撮影の作法は「そのアプリを
-        # どう起動するか」に強く依存し(shopping-listは自前バックエンドをNOTION_STUB付きで
-        # 起動してhealthzを待つ必要がある)、issue-deck方式(Claudeがプロンプト指示で
-        # スクリプトを実行し、スクリプト自身がサーバーを起動する)へ寄せるには対象リポジトリ側の
-        # 大きな作り替えが必要になるため、差し込み口を用意する方針とした。
-        #
-        # 撮影固有の条件(screenshot_required等)をここの`if:`に書くと、このフックが
-        # 「撮影専用」になり他用途に使えなくなる。絞り込みはスクリプト側に委ね、判断材料は
-        # 環境変数で渡す。
+        # 特定用途専用の条件をここの`if:`に書くと、このフックの用途が限定され他用途に使えなく
+        # なる。絞り込みはスクリプト側に委ね、判断材料は環境変数で渡す。
         #
         # 配置はdispatchジョブの最終ステップ。実装結果の検証・フォールバック通知より後に置くのは、
         # 後処理の失敗が「実装は完了したのに未完了として通知される」事態を招かないようにするため。
@@ -2413,7 +2354,6 @@ jobs:
           ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
           BRANCH: ${{ steps.state.outputs.branch }}
           MODE: ${{ steps.state.outputs.mode }}
-          SCREENSHOT_REQUIRED: ${{ steps.state.outputs.screenshot_required }}
           PREVIEW_REQUIRED: ${{ steps.state.outputs.preview_required }}
           POST_IMPLEMENT_SCRIPT: ${{ inputs.post-implement-script }}
         run: |

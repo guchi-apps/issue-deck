@@ -95,10 +95,12 @@ export type NewAppSpec = {
   /** 更新履歴（changelog）を持つか */
   changelog: boolean;
   /**
-   * CI撮影の認証バイパス（開発用ログイン＋ダミーデータ）を用意するか。
-   * **認証が無いアプリでは意味を持たない**ので、読むときは`screenshotBypassEnabled`を使う。
+   * 開発用ログイン（認証プロバイダを経由しないバイパス＋ダミーデータ）を用意するか。
+   * **認証が無いアプリでは意味を持たない**ので、読むときは`devLoginBypassEnabled`を使う。
+   * ログイン後の画面をローカル・無人実行から検証する手段で、スクリーンショット撮影専用ではない
+   * （`auth-dev-login` skill・issue-deck自身の`src/lib/ci-auth-bypass.ts`と同じ仕組み）。
    */
-  screenshotBypass: boolean;
+  devLoginBypass: boolean;
 };
 
 /** 種別ごとに決まる値。ウィザードの既定値と、生成するIssueの本文の両方が読む。 */
@@ -246,25 +248,13 @@ export function offlineEnabled(spec: Pick<NewAppSpec, "pwa" | "offline">): boole
 }
 
 /**
- * CI撮影の認証バイパスを用意するか。**認証が無いアプリでは迂回するものが無い**ため、
+ * 開発用ログインを用意するか。**認証が無いアプリでは迂回するものが無い**ため、
  * チェックの値によらず不要とする。
  */
-export function screenshotBypassEnabled(
-  spec: Pick<NewAppSpec, "auth" | "screenshotBypass">,
+export function devLoginBypassEnabled(
+  spec: Pick<NewAppSpec, "auth" | "devLoginBypass">,
 ): boolean {
-  return spec.auth !== "none" && spec.screenshotBypass;
-}
-
-/**
- * 無人実行のスクリーンショット（`24.screenshot-required`）が成立する種別か。
- *
- * **`runtime-setup: minimal`（FastAPI・静的サイト）ではPlaywrightがインストールされない**ため、
- * バイパスを用意しても無人では撮れない（`docs/cross-repo-setup-guide.md`「なお`minimal`では
- * Playwrightがインストールされないため、`24.screenshot-required`は無人実行では成立しない」）。
- * バイパス自体はローカルでの画面確認に効くので、**用意しないのではなく用途を断って書く**。
- */
-export function supportsUnattendedScreenshot(kind: NewAppKind): boolean {
-  return newAppKindProfile(kind).runtimeSetup !== "minimal";
+  return spec.auth !== "none" && spec.devLoginBypass;
 }
 
 /**
@@ -279,7 +269,7 @@ export function isAppearanceDefault(spec: NewAppSpec): boolean {
     spec.iconPlan === base.iconPlan &&
     spec.themeColor.toLowerCase() === base.themeColor.toLowerCase() &&
     spec.changelog === base.changelog &&
-    spec.screenshotBypass === base.screenshotBypass
+    spec.devLoginBypass === base.devLoginBypass
   );
 }
 
@@ -296,10 +286,10 @@ export function appearanceSummary(spec: NewAppSpec): string {
     spec.pwa ? `PWA対応・オフライン${offlineEnabled(spec) ? "あり" : "なし"}` : "PWA対応しない",
     `更新履歴${spec.changelog ? "あり" : "なし"}`,
     spec.auth === "none"
-      ? "CI撮影の認証バイパスは不要（認証なし）"
-      : screenshotBypassEnabled(spec)
-        ? `CI撮影の認証バイパスあり${supportsUnattendedScreenshot(spec.kind) ? "" : "（ローカル実行専用）"}`
-        : "CI撮影の認証バイパスなし",
+      ? "開発用ログインは不要（認証なし）"
+      : devLoginBypassEnabled(spec)
+        ? "開発用ログインあり"
+        : "開発用ログインなし",
   ];
   return parts.join("／");
 }
@@ -406,6 +396,6 @@ export function emptyNewAppSpec(): NewAppSpec {
     iconPlan: "provisional",
     themeColor: NEW_APP_DEFAULT_THEME_COLOR,
     changelog: true,
-    screenshotBypass: true,
+    devLoginBypass: true,
   };
 }

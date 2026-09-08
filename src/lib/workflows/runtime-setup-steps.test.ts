@@ -42,18 +42,6 @@ describe("ランタイム準備のステップ条件", () => {
     expect(condition).not.toContain("screenshot_required");
   });
 
-  it.each([
-    "DBマイグレーションを適用する",
-    "CIバイパス用ログインユーザーをシードする",
-    "画面確認用のダミーデータをシードする",
-    "Playwrightのブラウザをインストールする",
-  ])("%s は撮影時のみ実行する", (name) => {
-    const condition = stepCondition(name);
-
-    // 撮影でしか使わないものは引き続き絞る。毎回走らせると無駄な待ち時間になる
-    expect(condition).toContain("steps.state.outputs.screenshot_required == 'true'");
-  });
-
   it("minimal のリポジトリでは依存インストールを行わない", () => {
     // 依存ゼロ・ロックファイル無しの構成では npm ci / pnpm install が失敗する
     expect(stepCondition("依存関係をインストールする")).toContain(

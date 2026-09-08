@@ -21,7 +21,7 @@ const VALID = {
   iconPlan: "provisional",
   themeColor: "#0f172a",
   changelog: true,
-  screenshotBypass: true,
+  devLoginBypass: true,
 };
 
 describe("parseNewAppSpec", () => {

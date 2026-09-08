@@ -1,8 +1,4 @@
-import {
-  ARTIFACT_REQUIRED_LABEL,
-  PREVIEW_REQUIRED_LABEL,
-  SCREENSHOT_REQUIRED_LABEL,
-} from "@/lib/github/start-implementation";
+import { ARTIFACT_REQUIRED_LABEL, PREVIEW_REQUIRED_LABEL } from "@/lib/github/start-implementation";
 import { prPolicyInstructions } from "@/lib/prompts/pr-policy";
 import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.generated";
 
@@ -137,13 +133,6 @@ function previewInstructions(labelNames: ReadonlySet<string>): string {
   ].join("\n");
 }
 
-function screenshotInstructions(labelNames: ReadonlySet<string>): string {
-  if (labelNames.has(SCREENSHOT_REQUIRED_LABEL)) {
-    return `このIssueには\`${SCREENSHOT_REQUIRED_LABEL}\`ラベルが付いています。実装・テストが完了したら、PRを作成する**前**に変更箇所のスクリーンショットを取得し、ユーザーの承認を得てからPRを作成してください（新規依存関係の追加が必要な場合は、追加前に必ず確認する）。`;
-  }
-  return `このIssueには\`${SCREENSHOT_REQUIRED_LABEL}\`ラベルが付いていないため、Playwright等によるスクリーンショットの自動取得は不要です（トークン消費が大きいため）。`;
-}
-
 /**
  * 見た目のアーティファクト（#1473・#1540）。
  *
@@ -267,7 +256,6 @@ export function buildImplementationPrompt(params: {
     "{{DEV_COMMAND}}": PROVIDED_BY_SESSION,
     "{{DEV_PORT}}": PROVIDED_BY_SESSION,
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
-    "{{SCREENSHOT_INSTRUCTIONS}}": screenshotInstructions(labelNames),
     "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
     "{{PLAN_INSTRUCTIONS}}": PLAN_INSTRUCTIONS,
     "{{PLAN_COMMENT_NOTE}}": planCommentNote(repositoryFullName, issueNumber),

@@ -39,12 +39,11 @@ import {
   NEW_APP_PARENT_REPOSITORY,
   NEW_APP_VPS_REPOSITORY,
   appTitleFor,
+  devLoginBypassEnabled,
   hostnameFor,
   newAppKindProfile,
   offlineEnabled,
   publicUrlFor,
-  screenshotBypassEnabled,
-  supportsUnattendedScreenshot,
   vpsAppListLocation,
   type NewAppSpec,
 } from "@/lib/new-app/spec";
@@ -322,14 +321,12 @@ export function specTable(spec: NewAppSpec, options: SpecTableOptions = {}): str
       ],
       ["更新履歴", spec.changelog ? "持つ" : "持たない（バージョンだけが上がる）"],
       [
-        "CI撮影の認証バイパス",
+        "開発用ログイン",
         spec.auth === "none"
           ? "不要（認証なし）"
-          : screenshotBypassEnabled(spec)
-            ? supportsUnattendedScreenshot(spec.kind)
-              ? "用意する"
-              : "用意する（`runtime-setup: minimal` のため無人撮影は成立せず、ローカル実行専用）"
-            : "用意しない（`24.screenshot-required`は使えない）",
+          : devLoginBypassEnabled(spec)
+            ? "用意する"
+            : "用意しない",
       ],
     );
   }
@@ -523,14 +520,9 @@ function appearanceSteps(
     );
   }
 
-  if (screenshotBypassEnabled(spec)) {
-    // `runtime-setup: minimal`ではPlaywrightが入らないため、無人実行では撮れない。
-    // バイパス自体はローカルの画面確認に効くので、用途を断って書く
-    const unattended = supportsUnattendedScreenshot(spec.kind)
-      ? `**これが無いと \`24.screenshot-required\` が成立しない**`
-      : `\`runtime-setup: ${profile.runtimeSetup}\` ではPlaywrightが入らないため、**\`24.screenshot-required\` は無人実行では成立しない**。ローカル実行での画面確認用として作り、その旨を \`CLAUDE.md\` に書く`;
+  if (devLoginBypassEnabled(spec)) {
     steps.push(
-      `- [ ] CI撮影の認証バイパスを用意する（開発用ログインのエンドポイントと、ダミーデータを入れる \`${profile.packageManager === "pnpm" ? "pnpm" : "npm run"} db:seed:dev\` 相当）。${unattended}（参照実装はissue-deckの \`/api/dev/login\`）`,
+      `- [ ] 開発用ログインを用意する（開発用ログインのエンドポイントと、ダミーデータを入れる \`${profile.packageManager === "pnpm" ? "pnpm" : "npm run"} db:seed:dev\` 相当）。ログイン後の画面をローカル・無人実行から検証できるようにする（参照実装はissue-deckの \`/api/dev/login\`）`,
     );
   }
 

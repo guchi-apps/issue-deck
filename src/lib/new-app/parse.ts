@@ -54,7 +54,7 @@ export function parseNewAppSpec(value: unknown): NewAppSpec | null {
   if (typeof raw.pwa !== "boolean") return null;
   if (typeof raw.offline !== "boolean") return null;
   if (typeof raw.changelog !== "boolean") return null;
-  if (typeof raw.screenshotBypass !== "boolean") return null;
+  if (typeof raw.devLoginBypass !== "boolean") return null;
   if (typeof raw.iconPlan !== "string" || !ICON_PLANS.has(raw.iconPlan as NewAppIconPlan)) return null;
   if (typeof raw.themeColor !== "string" || !isValidThemeColor(raw.themeColor)) return null;
 
@@ -91,6 +91,6 @@ export function parseNewAppSpec(value: unknown): NewAppSpec | null {
     iconPlan: raw.iconPlan as NewAppIconPlan,
     themeColor: raw.themeColor,
     changelog: raw.changelog,
-    screenshotBypass: raw.screenshotBypass,
+    devLoginBypass: raw.devLoginBypass,
   };
 }

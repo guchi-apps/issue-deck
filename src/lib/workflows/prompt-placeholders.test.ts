@@ -174,7 +174,5 @@ describe("無人実行プロンプト", () => {
     });
 
     expect(expanded.split("\n")[0]).toContain("guchi-apps/car-careリポジトリ");
-    expect(expanded).toContain("npm run capture:issue-screenshots");
-    expect(expanded).not.toContain("pnpm run capture:issue-screenshots");
   });
 });

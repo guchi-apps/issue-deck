@@ -252,20 +252,20 @@ describe("NewAppDialog", () => {
     expect(screen.getByText(/表示名「家計」／.*更新履歴なし/)).toBeTruthy();
   });
 
-  it("認証が無いアプリでは撮影バイパスの項目を出さない（#2254）", async () => {
+  it("認証が無いアプリでは開発用ログインの項目を出さない（#2254・#2883）", async () => {
     mockFetch({ "/api/new-app/preflight": () => PREFLIGHT_OK });
     await advanceToPlacement();
 
     // このウィザードの認証の既定は「なし」で、そのときは迂回するものが無い
     fireEvent.click(screen.getByRole("button", { name: "変更する" }));
-    expect(screen.queryByLabelText(/CI撮影の認証バイパスを用意する/)).toBeNull();
+    expect(screen.queryByLabelText(/開発用ログインを用意する/)).toBeNull();
 
     fireEvent.change(screen.getByLabelText("認証"), { target: { value: "supabase-google" } });
-    expect(screen.getByLabelText(/CI撮影の認証バイパスを用意する/)).toBeTruthy();
+    expect(screen.getByLabelText(/開発用ログインを用意する/)).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("認証"), { target: { value: "none" } });
     fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
-    expect(screen.getByText(/CI撮影の認証バイパスは不要（認証なし）/)).toBeTruthy();
+    expect(screen.getByText(/開発用ログインは不要（認証なし）/)).toBeTruthy();
   });
 
   it("vpsに同じ対象のIssueが開いていれば、押す前に知らせる", async () => {

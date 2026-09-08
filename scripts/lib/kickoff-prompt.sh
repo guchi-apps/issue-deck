@@ -25,7 +25,6 @@ KICKOFF_PROMPT_OPTION_LABELS=(
   "25.artifact-required=アーティファクトで見た目を出す"
   "22.merge-confirm-required=マージ前に確認が必要"
   "23.preview-required=開発環境を起動する"
-  "24.screenshot-required=スクリーンショットが必要"
 )
 
 # プロンプトファイルの `- <キー>: <値>` 行を1つ読む。無ければ空を返す。

@@ -58,7 +58,6 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     contractVersion: 1,
     online: true,
     lastSeenAt: "2026-08-14T00:00:00.000Z",
-    screenshotCapable: true,
     sessionControlCapable: true,
     instructionCapable: true,
     crossRepoQuestionCapable: true,

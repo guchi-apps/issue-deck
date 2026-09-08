@@ -130,7 +130,7 @@ describe("parseIdeaDoc", () => {
       iconPlan: "provisional",
       themeColor: "#0f766e",
       changelog: true,
-      screenshotBypass: true,
+      devLoginBypass: true,
     });
     expect(result.unreadable).toEqual([]);
     // 空欄の行だけが未決として残る

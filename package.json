@@ -1,6 +1,6 @@
 {
   "name": "issue-deck",
-  "version": "4.91.0",
+  "version": "5.0.0",
   "private": true,
   "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "scripts": {
@@ -22,7 +22,6 @@
     "db:studio": "prisma studio",
     "db:seed:ci": "node scripts/seed-ci-db.mjs",
     "db:seed:dev": "bash scripts/seed-dev-db.sh",
-    "capture:issue-screenshots": "bash scripts/capture-issue-screenshots.sh",
     "check:workflows": "node scripts/check-workflow-expression-length.mjs && node scripts/check-workflow-expression-syntax.mjs"
   },
   "dependencies": {
@@ -63,7 +62,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "jsdom": "^30.0.1",
-    "playwright": "^1.62.1",
     "smee-client": "^5.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",

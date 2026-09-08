@@ -64,7 +64,6 @@ import {
   hostnameFor,
   isAppearanceDefault,
   newAppKindProfile,
-  supportsUnattendedScreenshot,
   publicUrlFor,
   validateNewAppSpec,
   NEW_APP_SPEC_ERROR_MESSAGES,
@@ -916,7 +915,7 @@ function PlacementStep({
           "iconPlan",
           "themeColor",
           "changelog",
-          "screenshotBypass",
+          "devLoginBypass",
         ]}
       />
 
@@ -1308,17 +1307,16 @@ function AppearancePanel({
               <input
                 type="checkbox"
                 className="mt-1"
-                checked={spec.screenshotBypass}
+                checked={spec.devLoginBypass}
                 onChange={(event) =>
-                  onChange((current) => ({ ...current, screenshotBypass: event.target.checked }))
+                  onChange((current) => ({ ...current, devLoginBypass: event.target.checked }))
                 }
               />
               <span className="flex flex-col">
-                <span className="text-sm">CI撮影の認証バイパスを用意する</span>
+                <span className="text-sm">開発用ログインを用意する</span>
                 <span className="text-xs text-muted-foreground">
-                  {supportsUnattendedScreenshot(spec.kind)
-                    ? "無人実行のスクリーンショット（24.screenshot-required）が成立する条件。後付けが効きにくいのでここで決めます"
-                    : `${newAppKindProfile(spec.kind).label}ではPlaywrightが入らないため、無人実行での撮影は成立しません。ローカルでの画面確認用として用意します`}
+                  認証プロバイダを経由しないログインバイパスとダミーデータで、ログイン後の画面を
+                  ローカル・無人実行から検証できるようにします
                 </span>
               </span>
             </label>
