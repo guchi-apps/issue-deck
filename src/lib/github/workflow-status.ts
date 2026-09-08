@@ -91,10 +91,23 @@ export type ProgressSegmentView = {
   stageEnd: boolean;
 };
 
+/**
+ * 本番マージの2点トラッカーの状態（#2927）。主バー（`PROGRESS_SEGMENTS`）はdevelopまでしか
+ * 追わないため、release・doneはここで別デザインとして表す。
+ *
+ * - `hidden`: developへまだ到達していない（主バー側で表示中）。トラッカー自体を出さない
+ * - `pending`: develop到達済み・本番マージはまだ（1つ目・2つ目とも輪郭）
+ * - `in-progress`: リリースPR作成〜マージ待ち（1つ目が塗り＋点滅、2つ目は輪郭）
+ * - `done`: mainへマージ完了（1つ目・2つ目とも塗り、つなぐ線も塗り）
+ */
+export type ProductionTrackerState = "hidden" | "pending" | "in-progress" | "done";
+
 export type ProgressSegmentsResult = {
   segments: ProgressSegmentView[];
-  /** 済んだマスの重みの合計（0〜100）。ツールチップの「目安 xx%」 */
+  /** 済んだマスの重みの合計（0〜100）。ツールチップの「目安 xx%」。develop到達以降は常に100 */
   ratio: number;
+  /** 本番マージの2点トラッカーの状態（#2927） */
+  productionTracker: ProductionTrackerState;
 };
 
 /**
@@ -107,14 +120,20 @@ export type ProgressSegmentPositions = {
   developPr?: "checks" | "merge";
 };
 
+/** develop・release・doneの`ProgressStatusKey`配列上のindex（`resolveProgressSegments`で使い回す） */
+const DEVELOP_STATUS_INDEX = getProgressStatusIndex("develop");
+const RELEASE_STATUS_INDEX = getProgressStatusIndex("release");
+
 /**
- * 進捗Statusと段の中の位置から、9マスそれぞれの状態と目安%を出す（#2867）。
+ * 進捗Statusと段の中の位置から、7マスそれぞれの状態と目安%、本番マージの2点トラッカーの
+ * 状態を出す（#2867・#2927）。
  *
  * - いまの段より前のマスは`done`、後のマスは`pending`
  * - いまの段に複数のマスがあれば、位置より前のマスが`done`・位置のマスが`current`。
  *   位置が渡されなければ最初のマスが`current`
- * - **終端（`done`）に着いたら全部`done`にする。** 本番反映済は「ここで待っている」ではなく
- *   完了なので、半分の濃さのマスを残さない
+ * - **developへのマージが完了した（`develop`到達）以降は主バーを常に満タン（`ratio`=100）
+ *   にする。** developより先（release・done）は主バーの対象外で、2点トラッカー
+ *   （`productionTracker`）が別デザインとして担う
  * - `ready`・未知のStatusはnull（`getWorkflowStepIndex`と同じで、バー自体を出さない）
  */
 export function resolveProgressSegments(
@@ -125,15 +144,17 @@ export function resolveProgressSegments(
   if (getWorkflowStepIndex(issue) === null) return null;
   const statusIndex = getProgressStatusIndex(status);
   const currentKey = currentSegmentKey(status, positions);
+  const reachedDevelop = statusIndex >= DEVELOP_STATUS_INDEX;
 
-  let ratio = 0;
+  const totalWeight = PROGRESS_SEGMENTS.reduce((sum, segment) => sum + segment.weight, 0);
+  let doneWeight = 0;
   let reachedCurrent = false;
   const segments = PROGRESS_SEGMENTS.map((segment, index): ProgressSegmentView => {
     const next = PROGRESS_SEGMENTS[index + 1];
     const stageEnd = next !== undefined && next.status !== segment.status;
     const segmentStatusIndex = getProgressStatusIndex(segment.status);
     let state: ProgressSegmentState;
-    if (status === "done" || segmentStatusIndex < statusIndex) {
+    if (reachedDevelop || segmentStatusIndex < statusIndex) {
       state = "done";
     } else if (segmentStatusIndex > statusIndex || reachedCurrent) {
       state = "pending";
@@ -143,10 +164,18 @@ export function resolveProgressSegments(
     } else {
       state = "done";
     }
-    if (state === "done") ratio += segment.weight;
+    if (state === "done") doneWeight += segment.weight;
     return { key: segment.key, label: segment.label, state, stageEnd };
   });
-  return { segments, ratio: Math.min(100, ratio) };
+  const ratio = reachedDevelop ? 100 : Math.round((doneWeight / totalWeight) * 100);
+  const productionTracker: ProductionTrackerState = !reachedDevelop
+    ? "hidden"
+    : statusIndex === DEVELOP_STATUS_INDEX
+      ? "pending"
+      : statusIndex === RELEASE_STATUS_INDEX
+        ? "in-progress"
+        : "done";
+  return { segments, ratio, productionTracker };
 }
 
 /** いまの段のうち`current`にするマス。段に1マスしか無ければそれ */
@@ -162,8 +191,8 @@ function currentSegmentKey(
 /**
  * 重みを整数pxへ割り付ける（#2867）。**合計は必ず`available`に一致し、各マスは`min`以上。**
  *
- * 40pxのバーからすき間を引いた幅を9マスへ配るため、`flex`の伸縮に任せると下限を当てた
- * マスのぶん全体が縮む（親が`overflow-hidden`だと末尾が切れる）。ここで先に整数へ丸め、
+ * 一覧の進捗バー（すき間を引いた幅をマス数へ配る）で使うため、`flex`の伸縮に任せると下限を
+ * 当てたマスのぶん全体が縮む（親が`overflow-hidden`だと末尾が切れる）。ここで先に整数へ丸め、
  * 端数は余りの大きい順に1pxずつ足す（最大剰余法）。下限を当てて`available`を超える場合は、
  * 下限の無いマスから重みの大きい順に削って合わせる。
  */

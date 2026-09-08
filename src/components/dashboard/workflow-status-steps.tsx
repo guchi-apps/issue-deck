@@ -28,6 +28,7 @@ import {
   getWorkflowStepIndex,
   resolveProgressSegments,
   WORKFLOW_STEPS,
+  type ProductionTrackerState,
   type ProgressSegmentView,
 } from "@/lib/github/workflow-status";
 import { PROGRESS_SEGMENTS, resolveProgressStatus } from "@/lib/issue-progress";
@@ -168,13 +169,20 @@ type QueueStepBadgeProps = {
  * 表していた。18pxの円では3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
  * 分からなかった。
  *
- * マスは`PROGRESS_SEGMENTS`の9つ（#2867）。#2516の時点では1マス＝1段（6マス）だったが、
- * 長く待つ計画・実装のあいだに動くのが1〜2マスで、develop反映後の短い区間に同じ3マスが
- * 割り当てられていたため、実装の中を3マス・developへマージの中を2マスに分け、各マスが
- * だいたい同じくらいの時間になるようにした。**Issue詳細の6段（`WorkflowStatusSteps`）との
- * 対応は段の境目のすき間（`STAGE_GAP`）で示す。**
+ * マスは`PROGRESS_SEGMENTS`の7つ（#2867・#2927）。#2516の時点では1マス＝1段（6マス）
+ * だったが、長く待つ計画・実装のあいだに動くのが1〜2マスに偏っていたため、実装の中を
+ * 3マス・developへマージの中を2マスに分けた（#2867）。**developへのマージが完了する
+ * （develop到達）までがこのバーの対象**で、release・doneは`ProductionTracker`が別デザイン
+ * として担う（#2927）。**Issue詳細の6段（`WorkflowStatusSteps`）との対応は段の境目の
+ * すき間（`STAGE_GAP`）で示す。**
  */
-const BAR_WIDTH = 40;
+/**
+ * 37px（#2927。#2516〜#2867の頃は40px）。**7マス・重み均等のときにすき間9pxを引いた
+ * 28pxがちょうど4pxずつへ割り切れる値へ合わせてある**（計画レビューの指摘）。重みが
+ * 全部同じでも`allocateSegmentWidths`の端数処理（最大剰余法）に委ねると割り切れない
+ * 場合に1px差の不揃いが残るため、割り切れる`BAR_WIDTH`を選ぶことで実際に等幅にする。
+ */
+const BAR_WIDTH = 37;
 const BAR_HEIGHT = 5;
 /** 同じ段の中のマスのすき間 */
 const SEGMENT_GAP = 1;
@@ -183,7 +191,7 @@ const STAGE_GAP = 2;
 /** マスの最小幅。これより細いと塗りの濃さの違いが読めない */
 const SEGMENT_MIN_WIDTH = 2;
 
-/** 各マスの幅（px）。重み比で整数に配り、すき間を除いた合計が`BAR_WIDTH`に一致する */
+/** 各マスの幅（px）。重み均等・`BAR_WIDTH`が割り切れる値のため、実際には全マス同じ幅になる */
 const SEGMENT_WIDTHS: readonly number[] = (() => {
   const gaps = PROGRESS_SEGMENTS.reduce((sum, segment, index) => {
     const next = PROGRESS_SEGMENTS[index + 1];
@@ -218,7 +226,7 @@ const SKIPPED_STEP_LABEL = "計画スキップ";
 const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りました";
 
 type ProgressBarProps = {
-  /** 9マスそれぞれの状態（`resolveProgressSegments`の結果。#2867） */
+  /** 7マスそれぞれの状態（`resolveProgressSegments`の結果。#2867・#2927） */
   segments: readonly ProgressSegmentView[];
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
@@ -305,12 +313,67 @@ function ProgressBar({
   );
 }
 
+/** 本番マージの2点トラッカーの寸法（#2927） */
+const TRACKER_WIDTH = 17;
+const TRACKER_HEIGHT = 8;
+const TRACKER_DOT_SIZE = 5;
+
 /**
- * 一覧などの省スペースな箇所向けに、現在の実装状況を**9マスの横棒**で示す（#2516・#2867）。
- * マスは`PROGRESS_SEGMENTS`で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の実装と
- * developへマージの中を分けたもの。済んだマスを濃く・いまのマスを半分の濃さで塗る。
+ * develop到達より先（release・done）を、主バー（`ProgressBar`）とは別デザインの
+ * 小さな2点トラッカーで示す（#2927）。一覧では本番マージの状況をほぼ確認しないため、
+ * developまでの進捗と同じ横棒の続きにはせず、主張を抑えた別の見た目にする。
+ *
+ * 意匠はIssue詳細の6段ステップ（`WorkflowStatusSteps`）の丸＋接続線を縮小して踏襲した
+ * ——1つ目の丸が「本番へマージ中（release）」、2つ目が「本番反映済（done）」に対応する。
+ *
+ * - `hidden`は何も描かない（developへまだ到達していない。主バー側が表示中）
+ * - `pending`は両方輪郭（develop到達済み・本番マージはまだ）
+ * - `in-progress`は1つ目が塗り＋点滅（リリースPR作成中〜マージ待ち）、2つ目は輪郭
+ * - `done`は両方塗り、つなぐ線も塗り（mainへマージ完了）
+ */
+function ProductionTracker({
+  state,
+  colorClass,
+}: {
+  state: ProductionTrackerState;
+  colorClass: string;
+}) {
+  if (state === "hidden") return null;
+  const firstFilled = state === "in-progress" || state === "done";
+  const secondFilled = state === "done";
+  const dotClass = (filled: boolean) =>
+    cn(
+      "shrink-0 rounded-full",
+      filled ? "bg-current" : "border border-current/45 bg-background",
+    );
+  return (
+    <span
+      aria-hidden="true"
+      data-production-tracker={state}
+      className={cn("flex shrink-0 items-center", colorClass)}
+      style={{ width: TRACKER_WIDTH, height: TRACKER_HEIGHT }}
+    >
+      <span
+        className={cn(dotClass(firstFilled), state === "in-progress" && "animate-pulse")}
+        style={{ width: TRACKER_DOT_SIZE, height: TRACKER_DOT_SIZE }}
+      />
+      <span
+        className={cn("mx-0.5 h-px flex-1", secondFilled ? "bg-current" : "bg-current/45")}
+      />
+      <span className={dotClass(secondFilled)} style={{ width: TRACKER_DOT_SIZE, height: TRACKER_DOT_SIZE }} />
+    </span>
+  );
+}
+
+/**
+ * 一覧などの省スペースな箇所向けに、現在の実装状況を**7マスの横棒**で示す（#2516・#2867・
+ * #2927）。マスは`PROGRESS_SEGMENTS`で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の
+ * 実装とdevelopへマージの中を分けたもの。済んだマスを濃く・いまのマスを半分の濃さで塗る。
  * 以前は同じ位置に18pxの円グラフ（`conic-gradient`）を出していたが、小さな円の角度では
  * 3/6と4/6を見分けられず、一覧を流し見しても何段目かが分からなかった。
+ *
+ * **developへのマージが完了した時点でバーは常に満タンになり、release・doneは`ProductionTracker`
+ * （2点トラッカー）が別デザインとして引き継ぐ**（#2927）。
  *
  * ユーザーの確認待ち（00.check-user）の場合はamber色に切り替えたうえでバーの左隣にアラート
  * アイコンを添え、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
@@ -349,7 +412,7 @@ export function WorkflowStepBadge({
   // 呼び出し側の絞り込みには頼らずここでも確かめる
   const prProgress = isPullRequestWaitingStatus(step.key) ? pullRequestProgress : null;
   const actionsRunning = running?.isRunning ?? false;
-  // 9マスの塗り（#2867）。実装の中の位置はサブPCのセッションが報告する作業から、
+  // 7マスの塗り（#2867・#2927）。実装の中の位置はサブPCのセッションが報告する作業から、
   // developへマージの中の位置はPRの内訳から決める。GitHub Actionsの実装ステップが
   // 走っていれば「実装」のマスまで進める（Actionsは作業の内訳を報告しないため、それ以上は
   // 分けられない）
@@ -484,6 +547,9 @@ export function WorkflowStepBadge({
         live={isSpinning}
         emphasizeTrack={approvalPending || showQaAnswerPending || prAttention}
       />
+      {/* develop到達より先（release・done）は本番マージの2点トラッカーへ引き継ぐ（#2927）。
+          developより前は`resolveProgressSegments`が"hidden"を返すため何も描かれない */}
+      <ProductionTracker state={progress.productionTracker} colorClass={accentColorClass} />
     </span>
   );
 }
