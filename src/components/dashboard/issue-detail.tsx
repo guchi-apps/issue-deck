@@ -1147,9 +1147,10 @@ export function IssueDetail({
           )}
 
           {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
-              上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す */}
+              上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
+              承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
           {!planDecisionPending && (
-            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
           )}
 
           {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
