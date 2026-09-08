@@ -17,14 +17,12 @@ import {
   X,
 } from "lucide-react";
 
-import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
+import { ApprovalTextField } from "@/components/dashboard/approval-text-field";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
-import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
-import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
+import { MergeApprovalActions } from "@/components/dashboard/merge-approval-actions";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
-import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
 import {
@@ -45,7 +43,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { IssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
@@ -62,14 +59,10 @@ import {
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
-import {
-  buildReviewFixRequestText,
-  type PullRequestReviewCommentContent,
-} from "@/lib/github/pull-request-review-comment";
-import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
+import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
+import { areIssuePullRequestsAllMerged } from "@/lib/issue-pull-requests";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
-import type { IssuePullRequest } from "@/types/pull-request";
 
 /** この文字数を超えるコメント本文にのみAI要約の生成ボタンを表示する */
 const LONG_COMMENT_THRESHOLD = 400;
@@ -130,16 +123,21 @@ type CommentThreadProps = {
   sessionStatePending?: boolean;
   /** trueの場合、承認・修正・取り下げボタンの代わりにPRマージを促す案内を表示する（PRマージ待ちで00.check-userが付いているissue用） */
   mergeApprovalPending?: boolean;
-  /** 自動マージされなかった理由（#1631）。PRマージ待ちの案内へ添える。解決は親が行う */
-  mergeCheckReasons?: MergeCheckReasons | null;
   /** `00.check-user`が付いている理由（#1490）。承認カードの見出しを出し分ける。読めない場合はnull */
   checkUserReason?: CheckUserReason | null;
-  /** mergeApprovalPending時に案内とあわせて表示する対応PRへのリンク（#1339で複数対応） */
+  /**
+   * 対応PRへのリンク（#1339で複数対応）。**すべてマージ済みになったかの判定にだけ使う**——
+   * PRの行とマージボタンは画面上部の対応PRセクションが持つ（#2914）
+   */
   pullRequestLinks?: PullRequestLink[];
-  /** 対応PRのタイトル・状態・CI状態。取得前は空配列 */
-  pullRequests?: IssuePullRequest[];
-  /** `pullRequests`の取得がまだ終わっていないか（#2352）。マージボタンを「確認中」で無効にする */
-  isLoadingPullRequests?: boolean;
+  /**
+   * 画面上部に対応PRセクションが描かれているか（#2914。`visiblePullRequestLinks.length > 0`）。
+   *
+   * **falseのときだけ、マージ待ちの操作一式（レビュー本文・修正依頼欄）をこのカードに出す。**
+   * 飛ぶ先が無いIssueで修正依頼を送れなくならないようにするためのフォールバックで、
+   * `resolveCheckUserGuidance`が移動ボタンを出さないのも同じ条件。
+   */
+  hasPullRequestSection?: boolean;
   /** 直近の「実行ログ:」リンクが指すGitHub Actions実行の状態。取得できない場合はnull */
   workflowRun?: WorkflowRunInfo | null;
   /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
@@ -170,37 +168,13 @@ type CommentThreadProps = {
    * 本文へ差し替わる（`sessionStatePending`と同じ考え方）
    */
   isLoadingReviewFindings?: boolean;
-  /** PRマージ待ち画面（mergeApprovalPending）で「マージする」ボタン押下時の処理 */
-  onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
-  /**
-   * PRマージ待ち画面（mergeApprovalPending）で「マージしない」ボタン押下時の処理（#2780）。
-   * PRをマージせずにクローズし、Issueも「対応終了」としてクローズする
-   */
-  onDeclinePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
-  isMergingPullRequest?: boolean;
-  /** PRマージ失敗時のエラーメッセージ。ボタン付近にインライン表示する */
-  mergePullRequestError?: string | null;
-  /** 直近にマージを実行したPR番号。実行中の表示とエラーの表示先を決める */
-  mergeTargetNumber?: number | null;
-  /** マージ済みとして扱うPR番号（本文の上のマージボタンから押された場合も含む・#1288/#1339） */
+  /** マージ済みとして扱うPR番号（上部のマージボタンから押された場合を含む・#1288/#1339） */
   mergedPullRequestNumbers?: ReadonlySet<number>;
-  /** この欄のマージボタンからマージが成功したときに呼ばれる（本文の上の一覧と状態を揃えるため） */
-  onPullRequestMerged?: (pullRequestNumber: number) => void;
-  /** 「マージしない」の実行中か（#2780） */
-  isDecliningPullRequest?: boolean;
-  /** 「マージしない」失敗時のエラーメッセージ */
-  declinePullRequestError?: string | null;
-  /** 直近に「マージしない」を実行したPR番号 */
-  declineTargetNumber?: number | null;
-  /** 「マージしない」済みとして扱うPR番号（本文の上のボタンから押された場合も含む） */
-  declinedPullRequestNumbers?: ReadonlySet<number>;
-  /** この欄の「マージしない」から成功したときに呼ばれる */
-  onPullRequestDeclined?: (pullRequestNumber: number) => void;
   /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
   targetCommentIndex?: number;
   /** targetCommentIndexが指すコメントの要素に設定するref */
@@ -208,40 +182,6 @@ type CommentThreadProps = {
   /** コメントごとのAI要約の状態・生成関数。本文が長いコメントにのみ要約UIを表示する */
   commentSummary: IssueCommentSummaries;
 };
-
-/** 承認・修正カード共通のテキスト入力欄。MentionTextarea常設表示＋「音声入力を整理」ボタンを担う */
-function ApprovalTextField({
-  value,
-  onChange,
-  placeholder,
-  repositoryFullName,
-  issueSuggestions,
-  disabled,
-  onUploadingChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  repositoryFullName: string;
-  issueSuggestions: IssueSuggestion[];
-  disabled?: boolean;
-  onUploadingChange?: (uploading: boolean) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <MentionTextarea
-        placeholder={placeholder}
-        value={value}
-        onChange={onChange}
-        issueSuggestions={issueSuggestions}
-        repositoryFullName={repositoryFullName}
-        onUploadingChange={onUploadingChange}
-        disabled={disabled}
-      />
-      <BodyCleanupButton value={value} onCleaned={onChange} disabled={disabled} />
-    </div>
-  );
-}
 
 function ApprovalActions({
   onApprove,
@@ -255,26 +195,14 @@ function ApprovalActions({
   reviewFindings = null,
   reviewPullRequestNumber = null,
   isLoadingReviewFindings = false,
-  onMergePullRequest,
-  onDeclinePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
-  isMergingPullRequest,
-  mergePullRequestError,
-  mergeTargetNumber,
   mergedPullRequestNumbers,
-  onPullRequestMerged,
-  isDecliningPullRequest,
-  declinePullRequestError,
-  declineTargetNumber,
-  declinedPullRequestNumbers,
-  onPullRequestDeclined,
   isFallbackNotice,
   mergeApprovalPending,
-  mergeCheckReasons = null,
   checkUserReason = null,
   sessionWaitingInput,
   sessionStatePending = false,
@@ -282,8 +210,7 @@ function ApprovalActions({
   sessionAlive = false,
   canAskClaude = false,
   pullRequestLinks,
-  pullRequests,
-  isLoadingPullRequests,
+  hasPullRequestSection = true,
   repositoryFullName,
   issueSuggestions,
   localSessionNotice,
@@ -303,31 +230,14 @@ function ApprovalActions({
   reviewPullRequestNumber?: number | null;
   /** レビュー本文の取得中か。取得が終わるまでパネルを描かない */
   isLoadingReviewFindings?: boolean;
-  onMergePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
-  onDeclinePullRequest?: (pullRequestNumber: number) => Promise<boolean> | boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
   isRequestingPrFix?: boolean;
-  isMergingPullRequest?: boolean;
-  mergePullRequestError?: string | null;
-  mergeTargetNumber?: number | null;
   mergedPullRequestNumbers?: ReadonlySet<number>;
-  onPullRequestMerged?: (pullRequestNumber: number) => void;
-  isDecliningPullRequest?: boolean;
-  declinePullRequestError?: string | null;
-  declineTargetNumber?: number | null;
-  declinedPullRequestNumbers?: ReadonlySet<number>;
-  onPullRequestDeclined?: (pullRequestNumber: number) => void;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
-  /**
-   * 自動マージされなかった理由（#1631）。`mergeApprovalPending`のときだけ描く。
-   * 解決は親（Issue詳細）が`resolveMergeCheckReasons`で行い、画面上部の対応PRセクションと
-   * **同じ値**を渡す。ここで解決し直すと、上と下で違う理由が出うる
-   */
-  mergeCheckReasons?: MergeCheckReasons | null;
   /** `00.check-user`が付いている理由（#1490）。読めないリポジトリではnull */
   checkUserReason?: CheckUserReason | null;
   sessionWaitingInput?: boolean;
@@ -340,8 +250,8 @@ function ApprovalActions({
   /** 「質問する」を出してよいか（#1903） */
   canAskClaude?: boolean;
   pullRequestLinks?: PullRequestLink[];
-  pullRequests?: IssuePullRequest[];
-  isLoadingPullRequests?: boolean;
+  /** 上部に対応PRセクションがあるか（#2914）。falseのときだけマージ待ちの操作一式をここに出す */
+  hasPullRequestSection?: boolean;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   localSessionNotice?: ReactNode;
@@ -351,26 +261,13 @@ function ApprovalActions({
   const [textValidationError, setTextValidationError] = useState<string | null>(null);
   const [isTextUploading, setIsTextUploading] = useState(false);
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
-  const [prFixReason, setPrFixReason] = useState("");
-  const [prFixValidationError, setPrFixValidationError] = useState<string | null>(null);
-  const [isPrFixTextUploading, setIsPrFixTextUploading] = useState(false);
-  // レビューの指摘を取り込んだか（#2849）。ボタンの文言を「もう一度取り込む」へ変えるだけで、
-  // 取り込みを1回に制限はしない（書きかけを消して入れ直したい場合がある）
-  const [hasImportedReview, setHasImportedReview] = useState(false);
-  // マージ済みかどうかは本文の上の対応PR一覧（#1288・#1339）と共有する。上の一覧から
-  // 押されたときは親から`mergedPullRequestNumbers`で伝わり、この欄から押したときは
-  // `onPullRequestMerged`で親へ伝える。親を持たない使い方でも表示が切り替わるよう、
-  // この欄の押下は自前の状態にも残す。
-  const [mergedHere, setMergedHere] = useState<ReadonlySet<number>>(EMPTY_MERGED_NUMBERS);
-  const mergedNumbers = new Set([...mergedHere, ...(mergedPullRequestNumbers ?? [])]);
-  // 「マージしない」も同じく上の一覧と状態を共有する（#2780）
-  const [declinedHere, setDeclinedHere] = useState<ReadonlySet<number>>(EMPTY_MERGED_NUMBERS);
-  const declinedNumbers = new Set([...declinedHere, ...(declinedPullRequestNumbers ?? [])]);
-  const isMerged =
-    mergedNumbers.size > 0 &&
-    (pullRequestLinks ?? []).every((link) => mergedNumbers.has(link.number));
+  // マージ済みかどうかは画面上部の対応PR一覧（#1288・#1339）と共有する。マージボタンを持つのは
+  // そちらだけなので（#2914）、押された結果は親から`mergedPullRequestNumbers`で伝わる。
+  const isMerged = areIssuePullRequestsAllMerged(
+    pullRequestLinks ?? [],
+    mergedPullRequestNumbers ?? EMPTY_MERGED_NUMBERS,
+  );
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
-  const prFixBusy = Boolean(isRequestingPrFix);
 
   function changeText(value: string) {
     setText(value);
@@ -433,66 +330,26 @@ function ApprovalActions({
     setIsWithdrawConfirmOpen(false);
   }
 
-  function changePrFixReason(value: string) {
-    setPrFixReason(value);
-    setPrFixValidationError(null);
-  }
-
-  /**
-   * レビューの指摘を修正依頼欄へ取り込む（#2849）。**GitHubへは何も送らない。**
-   * 入るのはこの欄までで、どの指摘を直させるかは引用から削って決める。
-   *
-   * **既に書いてあるものは消さずに後ろへ足す。** 自分で書きかけた依頼が消えると、
-   * 打ち直しになる（入力中のフォームを初期化し直さない、と同じ考え方）。
-   */
-  function importReviewFindings() {
-    if (!reviewFindings || reviewPullRequestNumber === null) return;
-    const imported = buildReviewFixRequestText({
-      review: reviewFindings,
-      pullRequestNumber: reviewPullRequestNumber,
-    });
-    setPrFixReason((prev) => (prev.trim() === "" ? imported : `${prev.trimEnd()}\n\n${imported}`));
-    setPrFixValidationError(null);
-    setHasImportedReview(true);
-  }
-
-  async function submitPrFix() {
-    if (!onRequestPrFix) return;
-    if (!prFixReason.trim()) {
-      setPrFixValidationError("修正内容を入力してください");
-      return;
-    }
-    await onRequestPrFix(prFixReason);
-    setPrFixReason("");
-    setPrFixValidationError(null);
-  }
-
-  function handleMerged(pullRequestNumber: number) {
-    setMergedHere((prev) => new Set([...prev, pullRequestNumber]));
-    onPullRequestMerged?.(pullRequestNumber);
-  }
-
-  function handleDeclined(pullRequestNumber: number) {
-    setDeclinedHere((prev) => new Set([...prev, pullRequestNumber]));
-    onPullRequestDeclined?.(pullRequestNumber);
-  }
-
   // セッションの状態が届くまでは、承認カードをどちらの形にも決めない（#1810）。取得前は
   // `sessionWaitingInput`が必ずfalseになるため、そのまま描くと「承認」「修正」を一瞬出して
   // からRemote Controlの案内（下の分岐）へ差し替わる。**マージ待ちだけは別**で、判定材料が
   // ラベルとコメントなのでセッションの状態を待つ理由が無い
   if (sessionStatePending && !mergeApprovalPending) return null;
 
-  // 次にどこの何を押せばよいか（#1663）。承認カードは行き先そのものなので、移動ボタンは
-  // 出さずボタン名だけが入る（`placement: "approval"`）。理由ラベルが読めなければnullで、
-  // 従来どおり見出しだけになる
+  // 次にどこの何を押せばよいか（#1663）。理由ラベルが読めなければnullで、従来どおり
+  // 見出しだけになる。
   // ローカル担当中は「内容がエージェントへ渡ります」と言わせない（#1903）。Remote Controlを
-  // 開くボタンは案内（`localSessionNotice`）が持つので、URLはここへ渡さない
+  // 開くボタンは案内（`localSessionNotice`）が持つので、URLはここへ渡さない。
+  // **`hasPullRequestSection`を必ず渡す**（#2914）。マージ待ちの操作一式は上部の対応PR
+  // セクションへ移したのでそこが目的地になるが、その行が1件も無いIssueでは飛ぶ先が無い。
+  // 渡し忘れると既定のtrueで「対応PRへ移動」を出し、**押しても何も起きない**
+  // （`focusCheckUserTarget`は目印が見つからなければfalseを返して終わる）
   const guidance = resolveCheckUserGuidance({
     reason: checkUserReason,
     placement: "approval",
     localSession,
     sessionAlive,
+    hasPullRequestSection,
   });
 
   // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
@@ -521,99 +378,39 @@ function ApprovalActions({
             </p>
           </>
         ) : guidance?.reason === "merge" ? (
-          /* 何を押せばよいか（#1663）と、なぜ自動マージされなかったのか（#1631）を1つの枠に
-             まとめる。理由の詳細は行き先の案内より下に置く */
-          <CheckUserReasonNotice guidance={guidance} className="mb-2">
-            {mergeCheckReasons && (
-              <MergeCheckReasonNotice reasons={mergeCheckReasons} className="bg-background" />
-            )}
-          </CheckUserReasonNotice>
+          /* 何を押せばよいか（#1663）だけを出す。**押す場所は画面上部の対応PRセクション**で、
+             PRの行・マージボタン・自動マージされなかった理由・レビュー本文・修正依頼欄は
+             すべてそちらが持つ（#2914）。「対応PRへ移動」はこの案内が出す（行き先の判定は
+             `resolveCheckUserGuidance`） */
+          <CheckUserReasonNotice guidance={guidance} />
         ) : (
           <>
             <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
+            {/* 理由ラベルが読めないリポジトリではここに来る（`guidance`がnull）。**押す場所を
+                名指しするので、対応PRの行を読み取れているかで言い方を変える**（#2914。
+                読み取れていないときは画面のどこにもマージボタンが無い） */}
             <p className="text-sm text-muted-foreground">
-              GitHub上で内容を確認のうえマージしてください。
+              {hasPullRequestSection
+                ? "画面上部の「対応PR」で内容を確認のうえマージしてください。"
+                : "対応PRを読み取れていないため、GitHub上で内容を確認のうえマージしてください。"}
             </p>
-            {/* なぜ自動マージされなかったのかを、押す前に読める位置へ出す（#1631）。
-                画面上部の対応PRセクションと同じ内容・同じ体裁 */}
-            {mergeCheckReasons && (
-              <MergeCheckReasonNotice reasons={mergeCheckReasons} className="mt-2" />
-            )}
           </>
         )}
-        {/* 対応PRとマージボタンは、本文の上に出しているのと同じ一覧で出す（#1339）。
-            マージはPR単位の操作なので、どのPRをマージするのかを行として示す */}
-        <IssuePullRequestList
-          variant="plain"
-          className="mt-2"
-          links={pullRequestLinks ?? []}
-          pullRequests={pullRequests ?? []}
-          isLoadingDetails={isLoadingPullRequests}
-          mergeApprovalPending
-          onMerge={onMergePullRequest}
-          onMerged={handleMerged}
-          onDecline={onDeclinePullRequest}
-          onDeclined={handleDeclined}
-          mergedNumbers={mergedNumbers}
-          declinedNumbers={declinedNumbers}
-          mergeTargetNumber={mergeTargetNumber}
-          isMerging={isMergingPullRequest}
-          declineTargetNumber={declineTargetNumber}
-          isDeclining={isDecliningPullRequest}
-          mergeError={mergePullRequestError}
-          declineError={declinePullRequestError}
-        />
-        {/* 自動レビューが何を指摘したのかを、マージを押す前に読める位置へ出す（#2849）。
-            **PRの行の下・修正依頼欄の上**に置く——読んでから「マージする」「修正を依頼する」の
-            どちらを押すかを決める場所なので、判断材料が2つのボタンの間に来る */}
-        {reviewPullRequestNumber !== null && !isLoadingReviewFindings && !isMerged && (
-          <PullRequestReviewFindings
-            className="mt-2"
-            review={reviewFindings ?? null}
-            pullRequestNumber={reviewPullRequestNumber}
-            pullRequestUrl={
-              pullRequestLinks?.find((link) => link.number === reviewPullRequestNumber)?.url
-            }
-            onImport={onRequestPrFix ? importReviewFindings : undefined}
-            isImported={hasImportedReview}
+        {/* 対応PRの行が1件も無いIssueだけは飛ぶ先が無いため、従来どおりここで修正依頼を
+            送れるようにする（#2914）。`resolveCheckUserGuidance`が移動ボタンを出さないのも
+            同じ条件（`hasPullRequestSection`） */}
+        {!hasPullRequestSection && !isMerged && (
+          <MergeApprovalActions
+            className="mt-3"
+            review={reviewFindings}
+            reviewPullRequestNumber={reviewPullRequestNumber}
+            isLoadingReview={isLoadingReviewFindings}
+            pullRequestLinks={pullRequestLinks}
+            repositoryFullName={repositoryFullName}
+            issueSuggestions={issueSuggestions}
+            onRequestPrFix={onRequestPrFix}
+            isRequestingPrFix={isRequestingPrFix}
           />
-        )}
-        {onRequestPrFix && !isMerged && (
-          <>
-            <Separator className="my-3" />
-            <div className="flex flex-col gap-2">
-              <ApprovalTextField
-                value={prFixReason}
-                onChange={changePrFixReason}
-                placeholder="修正依頼を入力（必須）"
-                repositoryFullName={repositoryFullName}
-                issueSuggestions={issueSuggestions}
-                disabled={prFixBusy}
-                onUploadingChange={setIsPrFixTextUploading}
-              />
-              {prFixValidationError && (
-                <p className="text-sm text-destructive">{prFixValidationError}</p>
-              )}
-              <div className="flex items-center gap-2">
-                {/* 取り込んだ内容がそのまま送られることを、送る直前に一度言う（#2849） */}
-                {hasImportedReview && (
-                  <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-                    レビュー指摘を取り込みました。この内容がそのままエージェントへ渡ります。
-                  </p>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-auto shrink-0"
-                  onClick={submitPrFix}
-                  disabled={prFixBusy || isPrFixTextUploading}
-                >
-                  <Pencil />
-                  修正を依頼する
-                </Button>
-              </div>
-            </div>
-          </>
         )}
       </div>
     );
@@ -833,10 +630,8 @@ export function CommentThread({
   canAskClaude,
   qaAnswerPending = false,
   mergeApprovalPending,
-  mergeCheckReasons = null,
   pullRequestLinks,
-  pullRequests,
-  isLoadingPullRequests,
+  hasPullRequestSection,
   workflowRun,
   workflowRunCommentId,
   onApprove,
@@ -850,23 +645,12 @@ export function CommentThread({
   reviewFindings,
   reviewPullRequestNumber,
   isLoadingReviewFindings,
-  onMergePullRequest,
-  onDeclinePullRequest,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
   isRequestingPrFix,
-  isMergingPullRequest,
-  mergePullRequestError,
-  mergeTargetNumber,
   mergedPullRequestNumbers,
-  onPullRequestMerged,
-  isDecliningPullRequest,
-  declinePullRequestError,
-  declineTargetNumber,
-  declinedPullRequestNumbers,
-  onPullRequestDeclined,
   targetCommentIndex,
   targetCommentRef,
   commentSummary,
@@ -917,26 +701,14 @@ export function CommentThread({
         reviewFindings={reviewFindings}
         reviewPullRequestNumber={reviewPullRequestNumber}
         isLoadingReviewFindings={isLoadingReviewFindings}
-        onMergePullRequest={onMergePullRequest}
-        onDeclinePullRequest={onDeclinePullRequest}
         isApproving={isApproving}
         isRejecting={isRejecting}
         isWithdrawing={isWithdrawing}
         isRequestingContinuation={isRequestingContinuation}
         isRequestingPrFix={isRequestingPrFix}
-        isMergingPullRequest={isMergingPullRequest}
-        mergePullRequestError={mergePullRequestError}
-        mergeTargetNumber={mergeTargetNumber}
         mergedPullRequestNumbers={mergedPullRequestNumbers}
-        onPullRequestMerged={onPullRequestMerged}
-        isDecliningPullRequest={isDecliningPullRequest}
-        declinePullRequestError={declinePullRequestError}
-        declineTargetNumber={declineTargetNumber}
-        declinedPullRequestNumbers={declinedPullRequestNumbers}
-        onPullRequestDeclined={onPullRequestDeclined}
         isFallbackNotice={isFallbackNotice}
         mergeApprovalPending={mergeApprovalPending}
-        mergeCheckReasons={mergeCheckReasons}
         checkUserReason={checkUserReason}
         sessionWaitingInput={sessionWaitingInput}
         sessionStatePending={sessionStatePending}
@@ -944,8 +716,7 @@ export function CommentThread({
         sessionAlive={sessionAlive}
         canAskClaude={canAskClaude}
         pullRequestLinks={pullRequestLinks}
-        pullRequests={pullRequests}
-        isLoadingPullRequests={isLoadingPullRequests}
+        hasPullRequestSection={hasPullRequestSection}
         repositoryFullName={repositoryFullName}
         issueSuggestions={issueSuggestions}
       />
