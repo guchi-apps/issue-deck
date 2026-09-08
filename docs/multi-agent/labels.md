@@ -500,6 +500,15 @@ Issue詳細の⋯メニュー →「クローズする」▸ のサブメニュ�
   `succeeded`の報告が届いた時点で、そのために受け口を分けてある
   （`POST /api/dispatch/pr-fix-notify`が`recovery`を立てて積み、`POST /api/dispatch/report`が外す）。
   再開の側は既存の「セッションを復旧」に揃えてラベルを触らない
+- **外すときは`01.check-merge`まで落とす**（`allowMergeReason`）。#1905のガード
+  （`isSessionRemovableCheckUserReason`）は`plan`・`input`・`blocked`しか通さず、これは
+  **「セッションのフックが、別の実行体の付けた札を落としてよいか」**の話。マージ待ちの
+  「修正を依頼する」は実行体ではなく**人が押した**もので、押したこと自体が「マージせずに
+  直させる」と決めた合図なので、`merge`まで外さないと押した人自身が片付けられない札が残る
+  （`isFixedInstructionRemovableCheckUserReason`）。**停滞からの復旧では広げない**——あちらが
+  外すのは引き上げが付けた`blocked`で、同じIssueにマージ待ちの札が乗っていることがある。
+  どちらの経路も`recovery`で積まれるため、**見分けているのは送った本文**（受け口が本文をその
+  1行に限っているので、`instruction`の一致がそのまま経路の識別になる）
 - **受け口はサーバー側で確かめ直す。** 本文が`PR_FIX_SESSION_INSTRUCTION`と同じであることと、
   セッションが今も`ALIVE`であることを見る（`session-recovery`と同じ立場——任意の本文を送れる
   うえに`00.check-user`まで外れる操作にすると、追加指示と分けた意味が消える）

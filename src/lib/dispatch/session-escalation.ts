@@ -345,20 +345,27 @@ export function buildSessionRecoveryCommentBody(params: {
 }
 
 /**
- * 画面から復旧文面を送ったので、引き上げのときに付けた`00.check-user`を理由ラベルごと外す
- * （#2886）。
+ * 画面から送った固定文面が**実際に届いた**ので、`00.check-user`を理由ラベルごと外す
+ * （#2886・#2919）。
  *
  * **押したこと自体が「人が続け方を決めた」合図**なので、引き上げコメントが言っていた
  * 「セッションが動き出してもこの`00.check-user`は自動では外れません」の条件はここで満たされる。
  * 画面から答えた回は承認プロンプトが出ずフックの合図が飛ばないため、外さないと押したのに
  * 「確認が必要です」の印が居座る（`resolveSessionPlanCheckUser`と同じ理由。#2341）。
  *
- * **失敗しても例外を投げない。** 復旧の指示はもうキューに入っておりセッションへ届くので、
+ * **どの理由まで外してよいかは呼び出し側が決める**（#2919）。停滞からの復旧が外すのは
+ * 引き上げが付けた`blocked`で、同じIssueにマージ待ちの札が乗っていても落としてはいけない。
+ * マージ待ちの「修正を依頼する」だけは`merge`まで外す——**押したのがまさにその札の持ち主
+ * （人）で、「マージせずに直させる」と決めた合図**だから。既定は#1905のガードそのまま。
+ *
+ * **失敗しても例外を投げない。** 指示はもうキューに入っておりセッションへ届くので、
  * ここで失敗を返すと「効かなかった」と誤解して押し直すことになる。
  */
-export async function resolveInterruptedSessionCheckUser(params: {
+export async function resolveFixedInstructionCheckUser(params: {
   repositoryFullName: string;
   issueNumber: number;
+  /** `01.check-merge`も外してよいか（マージ待ちの修正依頼だけ真） */
+  allowMergeReason?: boolean;
 }): Promise<boolean> {
   const parsed = parseRepositoryFullName(params.repositoryFullName);
   if (!parsed) return false;
@@ -367,11 +374,13 @@ export async function resolveInterruptedSessionCheckUser(params: {
     const token = await resolveInstallationToken(params.repositoryFullName);
     if (!token) return false;
 
-    await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token);
+    await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, {
+      allowMergeReason: params.allowMergeReason,
+    });
     return true;
   } catch (error) {
     console.error(
-      `[dispatch] 停滞の確認待ちを解けませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      `[dispatch] 送った固定文面の確認待ちを解けませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
       error,
     );
     return false;

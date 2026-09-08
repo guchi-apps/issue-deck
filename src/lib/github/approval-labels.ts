@@ -153,6 +153,27 @@ export function isSessionRemovableCheckUserReason(reason: CheckUserReason | null
 }
 
 /**
+ * 画面から固定文面を送る経路（#2886・#2919）が、**届いたことを確かめてから**外してよい理由。
+ *
+ * セッションのフックが外してよいもの（`SESSION_OWNED_CHECK_USER_REASONS`）に`merge`を足す。
+ * **#1905のガードは「セッションが、別の実行体が付けた札を落としてよいか」の話**で、こちらは
+ * 実行体ではなく**人がissue-deckの画面で押したこと**が起点になる。マージ待ちの
+ * 「修正を依頼する」を押したのは、まさに「マージせずに直させる」と決めた合図なので、
+ * `01.check-merge`が残っていると押した人自身が片付けられない札になる。
+ *
+ * **停滞からの復旧（#2886）ではここまで広げない。** あちらが外すのは引き上げが付けた
+ * `blocked`で、同じIssueにマージ待ちの札が乗っていることがあり、落とすと人はマージの合図を失う
+ * （呼び出し側が`allowMergeReason`で選ぶ）。
+ */
+export function isFixedInstructionRemovableCheckUserReason(
+  reason: CheckUserReason | null,
+  options: { allowMergeReason?: boolean } = {},
+): boolean {
+  if (isSessionRemovableCheckUserReason(reason)) return true;
+  return options.allowMergeReason === true && reason === "merge";
+}
+
+/**
  * 理由を`reason`の1枚に付け替えたあとの、あるべきラベル名の集合を返す（#1490）。
  *
  * **理由は常に1枚**なので、既に付いている他の理由ラベル（旧名を含む）は落とす。返すのは
