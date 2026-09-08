@@ -413,6 +413,8 @@ describe("daysSinceJstDate", () => {
 });
 
 describe("detectKnowledgeStall", () => {
+  const NO_COUNTS = { total: null, unjudged: null, judged: null };
+
   const sections = [
     { path: "knowledge/a.md", title: "A", summary: "", confirmedOn: "2026-08-27", source: null },
     { path: "knowledge/a.md", title: "B", summary: "", confirmedOn: "2026-08-31", source: null },
@@ -438,13 +440,18 @@ describe("detectKnowledgeStall", () => {
     const stall = detectKnowledgeStall(
       [pending("2026-09-01T00:00:00Z")],
       sections,
+      { total: 573, unjudged: 373, judged: 200 },
+      200,
       new Date("2026-09-08T00:00:00Z"),
     );
     expect(stall).toEqual({
       pendingCount: 1,
+      pendingTotal: 373,
       oldestPendingAt: "2026-09-01T00:00:00Z",
       lastPromotedOn: "2026-08-31",
       shouldWarn: true,
+      // 判定済みが収集の上限（200）に達している＝窓が埋まっている
+      collectWindowSaturated: true,
     });
   });
 
@@ -452,6 +459,8 @@ describe("detectKnowledgeStall", () => {
     const stall = detectKnowledgeStall(
       [pending("2026-09-08T00:00:00Z")],
       sections,
+      NO_COUNTS,
+      200,
       new Date("2026-09-08T12:00:00Z"),
     );
     expect(stall.shouldWarn).toBe(false);
@@ -459,5 +468,15 @@ describe("detectKnowledgeStall", () => {
 
   it("未判定が無ければ警告しない", () => {
     expect(detectKnowledgeStall([], sections).shouldWarn).toBe(false);
+  });
+
+  it("判定済みが収集の上限に達していなければ、窓は埋まっていない", () => {
+    const stall = detectKnowledgeStall([], sections, { total: 250, unjudged: 51, judged: 199 }, 200);
+    expect(stall.collectWindowSaturated).toBe(false);
+  });
+
+  it("件数が取れなければ窓の判定はしない（誤った警告を出さない）", () => {
+    expect(detectKnowledgeStall([], sections, NO_COUNTS, 200).collectWindowSaturated).toBe(false);
+    expect(detectKnowledgeStall([], sections).pendingTotal).toBeNull();
   });
 });

@@ -76,6 +76,13 @@ export type KnowledgeCandidate = {
   at: string;
 };
 
+/** 知見メモの総数（検索の`total_count`から取る概算。取れなければnull） */
+export type KnowledgeCounts = {
+  total: number | null;
+  unjudged: number | null;
+  judged: number | null;
+};
+
 /** 画面が受け取るデータ一式 */
 export type KnowledgeBoardData = {
   sections: KnowledgeSection[];
@@ -84,6 +91,13 @@ export type KnowledgeBoardData = {
   candidates: KnowledgeCandidate[];
   /** 検索の上限に達して見ていないIssueが残っているか */
   truncated: boolean;
+  /**
+   * 検索の総数（概算）。**一覧は300件で打ち切っている**ので、件数のKPIはこちらから出す。
+   * 打ち切りの影響を受けない代わり、本文で言及しているだけのIssueも含む（実測で5%ほど多い）
+   */
+  counts: KnowledgeCounts;
+  /** 格上げ判定エージェントが1回に集める上限（`promote-knowledge.yml`の`--limit`） */
+  collectLimit: number;
   /** 共有知識リポジトリのURL（見出しからのリンク先） */
   docsRepoUrl: string;
 };
@@ -550,27 +564,31 @@ export function daysSinceJstDate(date: string, now: number | Date = Date.now()):
 // ---- 滞留の判定 ------------------------------------------------------------
 
 export type KnowledgeStall = {
-  /** 未判定の候補の数 */
+  /** 一覧の中の未判定の件数（マーカーの行全体一致で確かめたもの） */
   pendingCount: number;
+  /** 検索の総数から見た未判定の件数（概算・打ち切りの影響を受けない）。取れなければnull */
+  pendingTotal: number | null;
   /** いちばん古い未判定メモの日時（ISO）。未判定が無ければnull */
   oldestPendingAt: string | null;
   /** 最後に共通知識へ反映された確認日（`YYYY-MM-DD`）。取れなければnull */
   lastPromotedOn: string | null;
-  /** 警告を出すか */
+  /** 未判定が滞留しているか */
   shouldWarn: boolean;
+  /**
+   * **格上げ判定の収集の窓が、判定済みで埋まっているか**（#2912）。
+   *
+   * ここが真のとき、ワークフローは毎晩`success`で終わりながら1件も判定しない。
+   * `shouldWarn`（メモが古いまま残っている）とは別に出す——原因が違うと打つ手も違う
+   * （落ちているなら実行ログ、埋まっているなら収集の窓の設定）。
+   */
+  collectWindowSaturated: boolean;
 };
 
-/**
- * 判定エージェントが止まっていないかを見る。
- *
- * 判定は毎日05:00 JSTに走るので、**未判定のいちばん古いメモが2日以上前**なら1回は巡回を
- * 通っているはずで、それでも残っているのは止まっているか失敗している。件数のしきい値では
- * なく古さで見るのは、実装が未マージの知見メモは仕様として判定対象外で、件数だけでは常に
- * 何件か残るため（`promote-knowledge.yml`の「未マージのため対象外」）。
- */
 export function detectKnowledgeStall(
   candidates: KnowledgeCandidate[],
   sections: KnowledgeSection[],
+  counts: KnowledgeCounts = { total: null, unjudged: null, judged: null },
+  collectLimit = 0,
   now: Date = new Date(),
 ): KnowledgeStall {
   const pending = candidates.filter((c) => c.verdict === "pending");
@@ -590,5 +608,17 @@ export function detectKnowledgeStall(
     oldestPendingAt && now.getTime() - new Date(oldestPendingAt).getTime() > STALE_MS,
   );
 
-  return { pendingCount: pending.length, oldestPendingAt, lastPromotedOn, shouldWarn };
+  // 判定済みが収集の上限に張り付いていたら、窓（作成の古い順N件）が判定済みで埋まっている。
+  // 窓は古い側から数えるので判定済みはこの数を超えず、達したまま止まるのが詰まりの形。
+  const collectWindowSaturated =
+    collectLimit > 0 && counts.judged !== null && counts.judged >= collectLimit;
+
+  return {
+    pendingCount: pending.length,
+    pendingTotal: counts.unjudged,
+    oldestPendingAt,
+    lastPromotedOn,
+    shouldWarn,
+    collectWindowSaturated,
+  };
 }

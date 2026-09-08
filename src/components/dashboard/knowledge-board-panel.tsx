@@ -51,7 +51,10 @@ export function KnowledgeBoardPanel({
   const [filePath, setFilePath] = useState<string | null>(null);
 
   const stall = useMemo(
-    () => (data ? detectKnowledgeStall(data.candidates, data.sections) : null),
+    () =>
+      data
+        ? detectKnowledgeStall(data.candidates, data.sections, data.counts, data.collectLimit)
+        : null,
     [data],
   );
   const files = useMemo(() => (data ? countByFile(data.sections) : []), [data]);
@@ -106,12 +109,14 @@ export function KnowledgeBoardPanel({
           {/* 状態の要約。数字が主役の画面ではないので、大きなタイルにはしない */}
           <dl className="flex overflow-hidden rounded-md border bg-card">
             <Stat label="たまった共通知識" value={String(data.sections.length)} unit={`件 / ${data.fileCount}ファイル`} />
+            {/* **件数は検索の総数から出す**（#2912）。一覧は300件で打ち切っているので、
+                そちらから数えると「表示範囲での下限」にしかならない。総数は本文で言及して
+                いるだけのIssueも含む概算なので、単位に「およそ」と書いて役割を分ける */}
             <Stat
               label="未判定の候補"
-              /* 検索を打ち切っている間は下限でしかないので、数字にそう書く（#2912） */
-              value={`${stall.pendingCount}${data.truncated ? "+" : ""}`}
-              unit="件"
-              warn={stall.shouldWarn}
+              value={stall.pendingTotal !== null ? String(stall.pendingTotal) : `${stall.pendingCount}+`}
+              unit={stall.pendingTotal !== null ? "件（およそ）" : "件"}
+              warn={stall.shouldWarn || stall.collectWindowSaturated}
             />
             <Stat
               label="最後に反映された日"
@@ -120,29 +125,32 @@ export function KnowledgeBoardPanel({
             />
           </dl>
 
-          {/* 判定エージェントが止まっているかもしれない、という唯一の要対応の合図。
+          {/* 判定が進んでいないときの合図。**原因ごとに分けて出す**——落ちているのと、
+              収集の窓が判定済みで埋まっているのとでは打つ手が違う。
               この画面で暖色を使うのはここだけ（`docs/code-map.md`の色の取り決め） */}
+          {stall.collectWindowSaturated && (
+            <Alert action={{ label: "実行履歴を開く", href: PROMOTE_WORKFLOW_URL }}>
+              <span className="font-bold">
+                格上げ判定が集める窓が、判定済みで埋まっています（判定済み{data.counts.judged}件 /
+                収集の上限{data.collectLimit}件）。
+              </span>{" "}
+              <code className="font-mono">promote-knowledge.yml</code>
+              は<strong>作成の古い順</strong>に{data.collectLimit}件だけを集めるため、これ以上
+              新しい知見メモへ到達できません。ワークフローは毎晩<code className="font-mono">success</code>
+              で終わりますが、判定は1件も行われていない可能性があります。
+            </Alert>
+          )}
+
           {stall.shouldWarn && (
-            <div className="flex flex-wrap items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs leading-relaxed dark:border-amber-900 dark:bg-amber-950/40">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-              <p className="min-w-0 flex-1">
-                <span className="font-bold">
-                  未判定の候補が{stall.pendingCount}
-                  {data.truncated ? "件以上" : "件"}たまっています。
-                </span>{" "}
-                表示している中でいちばん古いものは{formatRelativeDate(stall.oldestPendingAt ?? "")}の
-                投稿です。格上げ判定（<code className="font-mono">promote-knowledge.yml</code>・
-                毎日05:00 JST）が失敗し続けていないか確かめてください。
-              </p>
-              <a
-                href="https://github.com/guchi-apps/docs/actions/workflows/promote-knowledge.yml"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-auto shrink-0 rounded-sm border border-amber-300 bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent dark:border-amber-900"
-              >
-                実行履歴を開く
-              </a>
-            </div>
+            <Alert action={{ label: "実行履歴を開く", href: PROMOTE_WORKFLOW_URL }}>
+              <span className="font-bold">
+                未判定の候補が{stall.pendingTotal ?? stall.pendingCount}
+                {stall.pendingTotal === null && data.truncated ? "件以上" : "件"}たまっています。
+              </span>{" "}
+              表示している中でいちばん古いものは{formatRelativeDate(stall.oldestPendingAt ?? "")}の
+              投稿です。格上げ判定（<code className="font-mono">promote-knowledge.yml</code>・
+              毎日05:00 JST）が失敗し続けていないか確かめてください。
+            </Alert>
           )}
 
           <nav className="flex gap-0.5 border-b" aria-label="表示する内容">
@@ -211,6 +219,36 @@ export function KnowledgeBoardPanel({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** 格上げ判定ワークフローの実行履歴。滞留の原因を確かめる唯一の外部リンク */
+const PROMOTE_WORKFLOW_URL =
+  "https://github.com/guchi-apps/docs/actions/workflows/promote-knowledge.yml";
+
+function Alert({
+  children,
+  action,
+}: {
+  children: React.ReactNode;
+  action: { label: string; href: string };
+}) {
+  return (
+    <div className="flex flex-wrap items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs leading-relaxed dark:border-amber-900 dark:bg-amber-950/40">
+      <AlertTriangle
+        className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+        aria-hidden
+      />
+      <p className="min-w-0 flex-1">{children}</p>
+      <a
+        href={action.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ml-auto shrink-0 rounded-sm border border-amber-300 bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent dark:border-amber-900"
+      >
+        {action.label}
+      </a>
     </div>
   );
 }

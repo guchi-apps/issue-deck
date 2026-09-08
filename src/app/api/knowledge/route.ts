@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { fetchKnowledgeFiles, fetchKnowledgeMemos } from "@/lib/github/knowledge-api";
+import {
+  fetchKnowledgeFiles,
+  fetchKnowledgeMemoCounts,
+  fetchKnowledgeMemos,
+  PROMOTION_COLLECT_LIMIT,
+} from "@/lib/github/knowledge-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import {
   buildCandidate,
@@ -20,7 +25,7 @@ import {
  *
  * **取得結果をプロセス内で数分持ち回る。** 材料が変わるのは共有知識へのPRがマージされたときと、
  * 格上げ判定（毎日05:00 JST）が走ったときだけで、どちらも日単位でしか動かない。一方で取得には
- * GraphQLを最大4回・実測16秒かかるため、開き直すたびに待たせないだけの短い保持で十分効く。
+ * GraphQLを最大4回＋検索を2回・実測16秒かかるため、開き直すたびに待たせないだけの短い保持で十分効く。
  * `?refresh=1`を付けると捨てて取り直す（判定を手で流した直後に確かめられるように）。
  *
  * キャッシュはユーザーを跨がない。中身はprivateリポジトリのファイルとIssueなので、鍵に
@@ -48,10 +53,11 @@ async function handleGET(request: NextRequest) {
   }
 
   const result = await withUserGithubToken(user, "GET /api/knowledge", async (token) => {
-    // 共有知識のファイルと知見メモは互いに依存しないので同時に投げる。
-    const [{ files, docsRepoUrl }, { issues, truncated }] = await Promise.all([
+    // 共有知識のファイル・知見メモ・件数は互いに依存しないので同時に投げる。
+    const [{ files, docsRepoUrl }, { issues, truncated }, counts] = await Promise.all([
       fetchKnowledgeFiles(token),
       fetchKnowledgeMemos(token),
+      fetchKnowledgeMemoCounts(token),
     ]);
 
     const sections = sortKnowledgeSections(files.flatMap(parseKnowledgeFile));
@@ -64,6 +70,8 @@ async function handleGET(request: NextRequest) {
       fileCount: files.length,
       candidates,
       truncated,
+      counts,
+      collectLimit: PROMOTION_COLLECT_LIMIT,
       docsRepoUrl,
     };
     return data;

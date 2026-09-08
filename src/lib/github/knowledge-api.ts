@@ -16,6 +16,7 @@
  */
 
 import { githubGraphql } from "@/lib/github/graphql";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import type { RawIssue, RawKnowledgeFile } from "@/lib/knowledge-board";
 
 const DOCS_OWNER = "guchi-apps";
@@ -195,4 +196,69 @@ export async function fetchKnowledgeMemos(token: string): Promise<KnowledgeMemos
   }
 
   return { issues, truncated };
+}
+
+/**
+ * 格上げ判定エージェントが1回の実行で集める上限。
+ *
+ * **正は`guchi-apps/docs`の`.github/workflows/promote-knowledge.yml`**（収集ステップの
+ * `gh search issues … --limit 200 --sort created --order asc`）。ここに写しを置いているのは、
+ * 「判定済みの件数がこの数に達した＝収集の窓が判定済みで埋まっている」という**画面でしか
+ * 気付けない詰まり方**を出すため（#2912）。
+ *
+ * 窓は**作成の古い順**なので、判定済みの件数はこの数を超えない。超えないまま張り付いたときは、
+ * 新しい知見メモが構造的に窓の外にあり、ワークフローは毎晩`success`で終わりながら1件も
+ * 判定しない。**向こうの上限を変えたらここも変える**（ずれると警告が出ない・誤って出る）。
+ */
+export const PROMOTION_COLLECT_LIMIT = 200;
+
+/** 知見メモの総数（検索の`total_count`から取る概算） */
+export type KnowledgeMemoCounts = {
+  /** 知見メモを持つIssueの総数 */
+  total: number | null;
+  /** うち、判定コメントがまだ無いもの */
+  unjudged: number | null;
+  /** うち、判定済み */
+  judged: number | null;
+};
+
+/**
+ * 知見メモの総数を、検索の`total_count`から取る。
+ *
+ * **一覧のほうは検索を300件で打ち切っている**ので、そのままでは「未判定が何件あるか」が
+ * 表示範囲での下限にしかならない。総数は1リクエストで返るため、KPIだけはこちらから出す。
+ *
+ * **これは概算**——GitHubのIssue検索は本文で言及しているだけのIssueも拾う（この仕組みを
+ * 設計したIssue・プロンプトを直したIssueなど）。実測で5%ほど多く出る。行全体一致で
+ * 確かめた件数は一覧の側が持つので、画面では役割を分けて出す。
+ *
+ * **否定は`NOT`で書く。** `-"knowledge-promotion:judged"`のハイフンによる否定は効かず、
+ * 判定済みの件数がそのまま返る（除外できていないことに気付けない）。
+ */
+export async function fetchKnowledgeMemoCounts(token: string): Promise<KnowledgeMemoCounts> {
+  const base = `org:${DOCS_OWNER} "knowledge-candidate" in:comments`;
+
+  async function count(query: string): Promise<number | null> {
+    try {
+      const url = `${GITHUB_API}/search/issues?q=${encodeURIComponent(query)}&per_page=1`;
+      const res = await githubFetch(url, token);
+      if (!res.ok) return null;
+      const json = (await res.json()) as { total_count?: number };
+      return typeof json.total_count === "number" ? json.total_count : null;
+    } catch (error) {
+      console.error("[fetchKnowledgeMemoCounts]", error);
+      return null;
+    }
+  }
+
+  const [total, unjudged] = await Promise.all([
+    count(base),
+    count(`${base} NOT "knowledge-promotion:judged"`),
+  ]);
+
+  return {
+    total,
+    unjudged,
+    judged: total !== null && unjudged !== null ? total - unjudged : null,
+  };
 }
