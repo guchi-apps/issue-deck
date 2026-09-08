@@ -106,6 +106,15 @@ gh issue list --repo guchi-apps/vps --state open --search "aide-bot" --json numb
   **GitHubのIssue検索はHTMLコメントの中身も索引している**ので`--search "new-app-launch <アプリ名>"`で引ける
 - **見つかったら起票せず、そのIssueへコメントする。** 手順が足りなければそのIssueへ書き足す。
   **同じ手順を2か所に持たない**（`#2216`と`guchi-apps/vps#124`でcertbotの手順が重複し、片方が宙に浮いた）
+- **無人実行（GitHub Actions）から`--repo`付きで届くのは、同じorgのpublicリポジトリまで**（#2908）。
+  ClaudeステップのbashツールがGitHub CLIで使うトークンは、claude-code-actionがOIDC交換で発行した
+  実行中のリポジトリにスコープされたもので、`guchi-apps/vps`・`guchi-apps/docs`・`guchi-apps/subpc`
+  のようなprivateリポジトリは上の検索も`gh issue create`も404になる。**これを「GitHub Appの
+  インストール範囲に含まれていない」と診断しない**（インストールは`repository_selection: all`で、
+  範囲を広げても直らない）。届かないときは起票したかった内容をコメントへ書き切って人へ渡す。
+  ユーザー本人のトークンで動くローカルセッションからはそのまま起票できる
+  （[docs/actions-token-model.md](docs/actions-token-model.md)「10. Claudeステップの`gh`が使う
+  トークンは実行中のリポジトリにスコープされる」）
 - 判断基準の詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「他リポジトリへ起票するときも、先に探す」を参照
 
 ### すでに実装済み・対応不要のIssueは実装せず、報告して止まる
