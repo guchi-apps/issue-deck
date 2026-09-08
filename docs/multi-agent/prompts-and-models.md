@@ -454,3 +454,50 @@ Actionsの実行ログへワンクリックで辿れるようにし、無人実�
 のが狙い。計画提示ステップの計画コメント自体はClaude Codeエージェントが投稿するため、シェル
 スクリプト側でURLを組み立てて渡すのではなく、プロンプトの指示に組み込んでエージェントに
 追記させている。
+
+## `anthropics/claude-code-action`のバージョンを固定している（#2936）
+
+再利用ワークフローの`claude-code-action`ステップは、**動くタグ`@v1`ではなくコミットSHAで
+固定している**（`9c5ddab2e6d17b83ea679153b31f1d5f023cf636` = `v1.0.217`）。
+
+`@v1`が指す`v1.0.218`（2026-09-08 20:39 UTC）は、`base-action/action.yml`の
+`CLAUDE_CODE_VERSION`をClaude Code 2.1.265へ上げた。**このバージョンのネイティブ
+インストーラは、GitHubホストランナー上で`~/.local/bin/claude`のlauncherを作らないまま
+成功を報告する。** そのため直後のSDK実行が必ずENOENTで落ちる。
+
+```
+✔ Claude Code successfully installed!
+  Location: ~/.local/bin/claude
+⚠ Setup notes:
+  ● claude command at /home/runner/.local/bin/claude missing or broken (/home/runner/.local/bin does not exist)
+...
+ReferenceError: Claude Code native binary not found at /home/runner/.local/bin/claude.
+```
+
+- **インストーラが0で終わるため、actionの3回リトライも効かない。** actionは
+  「installed successfully」と表示した直後に存在しないパスを起動する
+- **ランナー固有で、手元では再現しない。** サブPC上の隔離した`$HOME`（`~/.local`ごと無い状態・
+  存在しない`$HOME/.local/bin`をPATHに載せた状態のどちらでも）で同じ`install.sh 2.1.265`を
+  流すとlauncherは正常に作られる
+- 上流Issue: [anthropics/claude-code-action#1817](https://github.com/anthropics/claude-code-action/issues/1817)。
+  同日に多数の利用者から同じ報告が付いており、公式に案内されている回避策も
+  「`v1.0.217`へ固定する」か「自前でインストールして`path_to_claude_code_executable`を渡す」の2つ
+- **止まるのはレビューだけではない。** 同じactionを使う実装・計画・分割・質問応答・CI修正・
+  コンフリクト解消・リリースPR作成の全経路が同時に止まる（フリート全リポジトリ）
+
+### 戻すとき
+
+上流が`@v1`を修正したら、**固定を外して`@v1`へ戻す**。放置するとClaude Codeのバージョンが
+2.1.263で凍結し、actionの新機能とずれていく（`path_to_claude_code_executable`の説明にある
+とおり、古いバージョンの使用は上流も推奨していない）。対象は再利用ワークフロー6ファイルの
+10か所で、次で一覧できる。
+
+```bash
+grep -rn "claude-code-action@9c5ddab2" .github/workflows/
+```
+
+### 配布先へ届くまで
+
+各リポジトリのcallerは`@workflows/vN`でタグ固定しているため、**この修正がフリートへ効くのは
+`develop`→`main`のリリースを通し、画面（設定＞フリート運用）の「新しいタグを切って配る」を
+押した後**。issue-deck自身のcallerはローカルパス参照なので`develop`へ入った時点で効く。
