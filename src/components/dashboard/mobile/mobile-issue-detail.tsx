@@ -814,6 +814,9 @@ export function MobileIssueDetail({
         repositoryFullName: issue.repositoryFullName,
         issueNumber: issue.number,
         hostName: prFixRoute.host,
+        // **呼び戻すCLIを引き継ぐ**（`SessionRecoveryButton`と同じ）。省くと受け口が既定の
+        // Claude Codeへ落とし、Codexで進んでいたIssueが黙って別のCLIで立ち上がる
+        agent: prFixRoute.agent,
       });
       if (!enqueued) {
         setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");

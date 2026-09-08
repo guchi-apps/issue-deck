@@ -14,8 +14,12 @@ function labels(...names: string[]): IssueLabel[] {
   return names.map((name) => ({ name, color: "ededed", description: null }));
 }
 
-function session(state: DispatchSessionView["state"], host = "subpc") {
-  return { host, state };
+function session(
+  state: DispatchSessionView["state"],
+  host = "subpc",
+  codexThreadKnown: DispatchSessionView["codexThreadKnown"] = null,
+) {
+  return { host, state, codexThreadKnown };
 }
 
 describe("resolvePrFixRequestRoute", () => {
@@ -39,7 +43,19 @@ describe("resolvePrFixRequestRoute", () => {
     for (const state of ["EXITED", "FAILED", "GONE"] as const) {
       expect(
         resolvePrFixRequestRoute({ labels: labels("11.local"), session: session(state) }),
-      ).toEqual({ kind: "resume", host: "subpc" });
+      ).toEqual({ kind: "resume", host: "subpc", agent: "claude" });
+    }
+  });
+
+  it("呼び戻すCLIは終了したセッションのものを引き継ぐ（Codexを黙ってClaude Codeにしない）", () => {
+    // `agent`を省くと受け口が既定（claude）へ落とすため、送り先の側で決めておく
+    for (const codexThreadKnown of [true, false] as const) {
+      expect(
+        resolvePrFixRequestRoute({
+          labels: labels("11.local"),
+          session: session("EXITED", "subpc", codexThreadKnown),
+        }),
+      ).toEqual({ kind: "resume", host: "subpc", agent: "codex" });
     }
   });
 
@@ -54,7 +70,7 @@ describe("prFixRequestActionLabel", () => {
   it("押したときに起きることを送り先ごとに言い分ける", () => {
     expect(prFixRequestActionLabel({ kind: "actions" })).toBe("修正を依頼する");
     expect(prFixRequestActionLabel({ kind: "session", host: "subpc" })).toBe("セッションへ送る");
-    expect(prFixRequestActionLabel({ kind: "resume", host: "subpc" })).toBe(
+    expect(prFixRequestActionLabel({ kind: "resume", host: "subpc", agent: "claude" })).toBe(
       "セッションを再開して依頼する",
     );
     expect(prFixRequestActionLabel({ kind: "handoff" })).toBe("11.localを外して依頼する");
@@ -74,7 +90,7 @@ describe("prFixRequestLabels", () => {
   it("サブPCへ積む送り先ではラベルを変えない（届いてから外す）", () => {
     // 積んだ時点で外すと、pollerが見送ったときに何も届いていないのに札だけ消える（#2886と同じ）
     expect(prFixRequestLabels({ kind: "session", host: "subpc" }, current)).toBeNull();
-    expect(prFixRequestLabels({ kind: "resume", host: "subpc" }, current)).toBeNull();
+    expect(prFixRequestLabels({ kind: "resume", host: "subpc", agent: "claude" }, current)).toBeNull();
   });
 
   it("引き継ぐ場合は11.localも外す（コメントより先に外れる）", () => {

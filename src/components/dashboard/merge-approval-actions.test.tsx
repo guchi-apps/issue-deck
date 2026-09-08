@@ -151,7 +151,7 @@ describe("MergeApprovalActions 修正依頼の送り先", () => {
   });
 
   it("セッションが終了していれば、呼び戻すことをボタンにも書く", () => {
-    renderActions({ prFixRoute: { kind: "resume", host: "subpc" } });
+    renderActions({ prFixRoute: { kind: "resume", host: "subpc", agent: "claude" } });
     expect(screen.getByRole("button", { name: "セッションを再開して依頼する" })).not.toBeNull();
     expect(screen.getByText(/終了しています/)).not.toBeNull();
     // 呼び戻す側では固定の1行を送らない（プロンプトへ載るのは投稿したコメントの方）
@@ -160,7 +160,7 @@ describe("MergeApprovalActions 修正依頼の送り先", () => {
 
   it("呼び戻せない理由があるときも、理由を出して押せなくする", () => {
     renderActions({
-      prFixRoute: { kind: "resume", host: "subpc" },
+      prFixRoute: { kind: "resume", host: "subpc", agent: "claude" },
       prFixSessionRejection: "サブPC が応答していません。",
     });
     const button = screen.getByRole<HTMLButtonElement>("button", {

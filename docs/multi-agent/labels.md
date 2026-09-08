@@ -490,6 +490,11 @@ Issue詳細の⋯メニュー →「クローズする」▸ のサブメニュ�
   いなければ`claude --continue`で前回の会話の続きから再開し、**起動のたびに
   `.prompts/issue-<番号>.md`が作り直される**ので直前に投稿した依頼コメントもプロンプトへ載る。
   `11.local`を外す引き継ぎは、**記録が消えて呼び戻す先が特定できないときだけの最終手段**
+- **呼び戻すときは`agent`を引き継ぐ**（`resolveIssueImplementationAgent`。既存の「セッションを
+  復旧」と同じ）。`POST /api/dispatch`は`agent`が無いと既定のClaude Codeへ落とすため、渡し忘れると
+  **Codexで進んでいたIssueが黙って別のCLIで立ち上がる**（「前回の会話の続きから再開します」と
+  いう案内が嘘になる）。決めるのは送り先の判定（`resolvePrFixRequestRoute`）の中で、
+  画面側では持たない——PC版・スマホ版の2か所へ同じ解決を書くと、片方だけ書き忘れる
 - **セッションへ流すのは固定の1行**（`PR_FIX_SESSION_INSTRUCTION`）で、人が書いた依頼はコメントの
   側に入る。`DispatchJob.instruction`が改行を含まない1行しか受けないためでもあり、
   [gates.md](gates.md)の「固定文面の送信は可、選択肢の確定は不可」の線に合わせるためでもある。

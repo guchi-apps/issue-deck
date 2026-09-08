@@ -1,3 +1,7 @@
+import {
+  resolveIssueImplementationAgent,
+  type IssueImplementationAgent,
+} from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { labelsAfterRejection } from "@/lib/github/approval-labels";
 import { isLocalSessionIssue, LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
@@ -38,8 +42,13 @@ export type PrFixRequestRoute =
    * 渡し、前回の会話の続きから再開する（`describeSessionRecovery`）。**起動のたびに
    * `.prompts/issue-<番号>.md`は作り直される**ので、直前に投稿した修正依頼のコメントも
    * そのプロンプトへ載る（`scripts/start-issue.sh`）。
+   *
+   * **`agent`を持つのは、呼び戻す相手のCLIを取り違えないため。** 起動ジョブの`agent`を省くと
+   * 受け口が既定（`claude`）へ落とすので、Codexで進んでいたIssueが黙ってClaude Codeで立ち上がる
+   * （「前回の会話の続きから再開します」という案内が嘘になる）。判定は既存の「セッションを復旧」
+   * （`SessionRecoveryButton`）と同じ`resolveIssueImplementationAgent`。
    */
-  | { kind: "resume"; host: string }
+  | { kind: "resume"; host: string; agent: IssueImplementationAgent }
   /**
    * `11.local`を外して無人実行へ渡す。**セッションの記録すら無いときの最終手段。**
    * 記録は24時間で消えるので、それより後に押されたときはホストも特定できず、呼び戻す先が無い。
@@ -70,13 +79,15 @@ export const PR_FIX_SESSION_INSTRUCTION =
  */
 export function resolvePrFixRequestRoute(params: {
   labels: readonly { name: string }[];
-  session: Pick<DispatchSessionView, "host" | "state"> | null;
+  session: Pick<DispatchSessionView, "host" | "state" | "codexThreadKnown"> | null;
 }): PrFixRequestRoute {
   if (!isLocalSessionIssue(params.labels)) return { kind: "actions" };
   const session = params.session;
   if (!session) return { kind: "handoff" };
   if (session.state === "ALIVE") return { kind: "session", host: session.host };
-  return { kind: "resume", host: session.host };
+  // **呼び戻すCLIはここで決める。** 画面側で決めると、PC・スマホの2か所へ同じ解決を書くことになり、
+  // 片方だけ書き忘れると「Codexのつもりが黙ってClaude Codeで立つ」が戻る
+  return { kind: "resume", host: session.host, agent: resolveIssueImplementationAgent(session) };
 }
 
 /**
