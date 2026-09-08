@@ -16,7 +16,10 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 // 対話が要るコマンドの表記は`manual-step-command.ts`が持つ（判定もそちら）。ここでは
 // 理由文の出し分けに使うためだけに`op signin`の表記を借りる（#2401）
-import { OP_SIGNIN_COMMAND } from "@/lib/manual-step-command";
+import {
+  OP_SIGNIN_COMMAND,
+  type ManualStepRunTarget,
+} from "@/lib/manual-step-command";
 
 /**
  * サブPCへのディスパッチ（#1179）で使う純粋関数と定数。
@@ -479,6 +482,13 @@ export type DispatchJobView = {
   /** 代行実行した手順の行番号（#1828）。画面がジョブと手順を対応付ける */
   manualStepLine: number | null;
   /**
+   * 代行実行をどこで走らせるか（#2901）。pollerはこれを見て、`vps`ならSSH越しに実行する。
+   *
+   * **接続先そのものは渡さない**——SSHの宛先はサブPCの`dispatch.env`が持つ。`MANUAL_STEP`
+   * 以外のジョブと、この列より前に積まれたジョブは`subpc`になる。
+   */
+  manualStepRunTarget: ManualStepRunTarget;
+  /**
    * 止める対象のジョブid（#1882。`kind`が`MANUAL_STEP_ABORT`のときだけ入る）。
    *
    * 画面は「この実行を止めようとしている中断ジョブがあるか」をこれで引く（中断も届くまで
@@ -583,6 +593,15 @@ export type DispatchHostView = {
    * 「配ってから`failed`で返る」では済まない種類の非対応にあたる。
    */
   manualStepValuesCapable: boolean | null;
+  /**
+   * VPSの手順を代行実行できるか（#2901）。**`null`（未申告）は「できない」として扱う**
+   * （`manualStepCapable`と同じ向き）。
+   *
+   * 申告するのは、サブPCからVPSへSSHで到達できるpollerだけ。**`manualStepValuesCapable`と
+   * 同じで「配ってから`failed`で返る」では済まない**——古いpollerはジョブの実行先を黙って
+   * 無視し、VPSで実行するはずのコマンドをサブPCで実行してしまう。
+   */
+  manualStepVpsCapable: boolean | null;
   /**
    * 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。**`null`（未申告）は「できない」として
    * 扱う**（`crossRepoQuestionCapable`と同じ）。
@@ -1041,7 +1060,7 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
  */
 export type ManualStepExecutionRejection =
   | "not_manual_step"
-  | "device_not_subpc"
+  | "device_not_runnable"
   | "no_command"
   | "interactive_command"
   | "placeholder_command"
@@ -1049,6 +1068,7 @@ export type ManualStepExecutionRejection =
   | "host_offline"
   | "manual_step_unsupported"
   | "manual_step_values_unsupported"
+  | "manual_step_vps_unsupported"
   | "already_queued"
   | "body_changed";
 
@@ -1066,18 +1086,19 @@ export function describeManualStepExecutionRejection(
   switch (rejection) {
     case "not_manual_step":
       return "この Issue は手作業Issue（`71.manual-step`）ではないため代行できません。";
-    case "device_not_subpc":
-      // **どこで実行する手作業なのかまで書く。** VPS・1Password・GitHub App・ブラウザでの設定は
-      // issue-deckから到達できず、代行できるようになる見込みも無い（「更新すれば押せる」ではない）
+    case "device_not_runnable":
+      // **どこで実行する手作業なのかまで書く。** メインPC・1Password・GitHub App・ブラウザでの
+      // 設定はissue-deckから到達できず、代行できるようになる見込みも無い（「更新すれば押せる」
+      // ではない）。**サブPCとVPSだけが代行できる**（VPSは#2901でサブPCからのSSH越しに加わった）
       return context.device
         ? `この手作業は${context.device}で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。`
-        : "この手作業はサブPC以外で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。";
+        : "この手作業はサブPC・VPS以外で実行するため、画面からは代行できません。手順どおり実行して「実行した・次へ」で進めてください。";
     case "no_command":
       // 0個・2個以上のどちらもここに来る。**どちらなのかは書き分けない**——実行する側にとっては
       // 「この手順は代行できない」で同じで、直すには本文を1手順1コマンドに書き直すしかない
       return "この手順は代行できません。実行するコマンドのブロックがちょうど1つ書かれている手順だけを代行します。";
     case "interactive_command": {
-      // **代行できるようになる見込みが無い理由**（`device_not_subpc`と同じ立場）。
+      // **代行できるようになる見込みが無い理由**（`device_not_runnable`と同じ立場）。
       // 代行実行のシェルには標準入力が無く、サインインの答えを渡せない。ここだけは人が
       // 実行して、続きは自動実行に任せてもらう（#2025）
       const head = context.interactiveCommand
@@ -1107,6 +1128,11 @@ export function describeManualStepExecutionRejection(
       // **ホストの都合**（更新すれば押せる）。古いpollerは知らないフィールドを黙って無視し、
       // 穴が空いたままのコマンドを実行してしまうので、申告が無いホストへは配らない（#2403）
       return `${formatDispatchHostName(context.hostName)} のpollerが、埋めた値を差し込む代行実行に対応していません（更新してから押せるようになります）。それまでは値を埋めたコマンドをコピーして、手元で実行してください。`;
+    case "manual_step_vps_unsupported":
+      // **ホストの都合**（`manual_step_values_unsupported`と同じ立場）。pollerが古いか、
+      // VPSへの接続先（`MANUAL_STEP_VPS_SSH_TARGET`）が設定されていないか、SSHが通らない。
+      // 申告が無いホストへ配ると、VPSで実行するはずのコマンドがサブPCで走ってしまう（#2901）
+      return `${formatDispatchHostName(context.hostName)} からVPSへ接続できないため、VPSの手順を代行できません（pollerの更新と、VPSへのSSH接続の設定が要ります）。それまでは手順どおりVPSで実行して「実行した・次へ」で進めてください。`;
     case "already_queued":
       return "この手作業には未処理の代行実行が既にあります。";
     case "body_changed":
@@ -1127,13 +1153,21 @@ export function describeManualStepExecutionRejection(
  */
 export function resolveManualStepExecutionRejection(params: {
   host:
-    | Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable">
+    | Pick<
+        DispatchHostView,
+        "online" | "manualStepCapable" | "manualStepValuesCapable" | "manualStepVpsCapable"
+      >
     | null
     | undefined;
   /** 対象が手作業Issue（`71.manual-step`）か */
   isManualStepIssue: boolean;
-  /** `## 前提条件`の「実行するデバイス」がサブPCか */
-  isSubpcDevice: boolean;
+  /**
+   * その手順をどこで走らせるか（`resolveManualStepRunTarget`の結果。#2901）。`null`は
+   * 代行の対象外——メインPC・ブラウザ・端末が1つに決まらない本文がここに来る。
+   *
+   * **判定そのものは`lib/manual-step-command.ts`が持つ**（`interactiveCommand`と同じ理由）。
+   */
+  runTarget: ManualStepRunTarget | null;
   /** その手順から実行するコマンドを1つだけ取り出せたか */
   hasCommand: boolean;
   /**
@@ -1161,7 +1195,7 @@ export function resolveManualStepExecutionRejection(params: {
   // **Issueと手順の性質を先に見る。** ホストの都合（更新すれば押せる）と違い、こちらは
   // そもそも代行の対象外で、ホストの状態を理由に出しても直す手がかりにならない
   if (!params.isManualStepIssue) return "not_manual_step";
-  if (!params.isSubpcDevice) return "device_not_subpc";
+  if (params.runTarget === null) return "device_not_runnable";
   if (!params.hasCommand) return "no_command";
   // **ホストの都合より先に見る。** 更新すれば押せるようになるものではなく、人が実行するしかない
   if (params.interactiveCommand) return "interactive_command";
@@ -1175,6 +1209,11 @@ export function resolveManualStepExecutionRejection(params: {
   // 黙って無視し、`command`（＝`<…>`が入ったままのテンプレート）をそのまま実行してしまう
   if (params.usesPlaceholderValues === true && params.host.manualStepValuesCapable !== true) {
     return "manual_step_values_unsupported";
+  }
+  // **VPSで走らせる実行も、pollerの申告とセットにする**（#2901）。古いpollerはジョブの
+  // `manualStepRunTarget`を黙って無視し、VPSで実行するはずのコマンドをサブPCで実行してしまう
+  if (params.runTarget === "vps" && params.host.manualStepVpsCapable !== true) {
+    return "manual_step_vps_unsupported";
   }
   if (params.hasActiveJob) return "already_queued";
   return null;

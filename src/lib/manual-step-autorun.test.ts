@@ -52,11 +52,12 @@ const BODY = `## この作業でできるようになること
 
 const READY_HOST: Pick<
   DispatchHostView,
-  "online" | "manualStepCapable" | "manualStepValuesCapable"
+  "online" | "manualStepCapable" | "manualStepValuesCapable" | "manualStepVpsCapable"
 > = {
   online: true,
   manualStepCapable: true,
   manualStepValuesCapable: true,
+  manualStepVpsCapable: true,
 };
 
 function plan(body = BODY, host = READY_HOST as typeof READY_HOST | null) {
@@ -86,19 +87,35 @@ describe("buildManualStepRunPlan", () => {
     expect(entry.rejection).toBe("no_command");
   });
 
-  it("サブPC以外で実行する手作業は、すべての項目が代行できない", () => {
-    const result = plan(BODY.replace("実行するデバイス: **サブPC**", "実行するデバイス: **VPS**"));
+  it("サブPC・VPS以外で実行する手作業は、すべての項目が代行できない", () => {
+    const result = plan(
+      BODY.replace("実行するデバイス: **サブPC**", "実行するデバイス: **ブラウザ**"),
+    );
 
     expect(result.runnable).toBe(0);
-    expect(result.entries.every((entry) => entry.rejection === "device_not_subpc")).toBe(true);
+    expect(result.entries.every((entry) => entry.rejection === "device_not_runnable")).toBe(true);
+  });
+
+  // #2901。VPSはtailnet越しにサブPCから実行できるようになった
+  it("VPSで実行する手作業は、申告のあるホストでだけ代行できる", () => {
+    const body = BODY.replace("実行するデバイス: **サブPC**", "実行するデバイス: **VPS**");
+    expect(plan(body).runnable).toBeGreaterThan(0);
+    expect(
+      plan(body, {
+        online: true,
+        manualStepCapable: true,
+        manualStepValuesCapable: true,
+        manualStepVpsCapable: null,
+      }).entries[0].rejection,
+    ).toBe("manual_step_vps_unsupported");
   });
 
   it("pollerが未対応・応答なしのときも、判定はディスパッチ側と同じ理由を返す", () => {
     expect(plan(BODY, null).entries[0].rejection).toBe("host_unknown");
-    expect(plan(BODY, { online: false, manualStepCapable: true, manualStepValuesCapable: true }).entries[0].rejection).toBe(
+    expect(plan(BODY, { online: false, manualStepCapable: true, manualStepValuesCapable: true, manualStepVpsCapable: true }).entries[0].rejection).toBe(
       "host_offline",
     );
-    expect(plan(BODY, { online: true, manualStepCapable: null, manualStepValuesCapable: null }).entries[0].rejection).toBe(
+    expect(plan(BODY, { online: true, manualStepCapable: null, manualStepValuesCapable: null, manualStepVpsCapable: null }).entries[0].rejection).toBe(
       "manual_step_unsupported",
     );
   });
@@ -251,7 +268,7 @@ describe("対話が要るコマンドを含む項目", () => {
       const result = plan(MIXED);
 
       expect(result.entries[0].device).toBe("ブラウザ");
-      expect(result.entries[0].rejection).toBe("device_not_subpc");
+      expect(result.entries[0].rejection).toBe("device_not_runnable");
       expect(result.entries[1].device).toBe("サブPC");
       expect(result.entries[1].rejection).toBeNull();
       expect(result.runnable).toBe(1);
@@ -265,7 +282,7 @@ describe("対話が要るコマンドを含む項目", () => {
       );
 
       expect(result.entries[1].device).toBeNull();
-      expect(result.entries[1].rejection).toBe("device_not_subpc");
+      expect(result.entries[1].rejection).toBe("device_not_runnable");
       expect(result.runnable).toBe(0);
     });
   });
@@ -427,7 +444,7 @@ describe("buildManualStepRunPlan の値の差し込み（#2403）", () => {
   it("pollerが値の差し込みに未対応なら、埋めても代行しない", () => {
     const entry = planWith(
       { "<控えたkey>": "kM3q" },
-      { online: true, manualStepCapable: true, manualStepValuesCapable: null },
+      { online: true, manualStepCapable: true, manualStepValuesCapable: null, manualStepVpsCapable: null },
     ).entries[0];
 
     expect(entry.rejection).toBe("manual_step_values_unsupported");

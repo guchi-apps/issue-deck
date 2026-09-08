@@ -46,10 +46,11 @@ const REFS: NewAppIssueRefs = {
   portBandPullRequest: "guchi-apps/issue-deck#2204",
 };
 
-const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable"> = {
+const READY_HOST: Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable" | "manualStepVpsCapable"> = {
   online: true,
   manualStepCapable: true,
   manualStepValuesCapable: true,
+  manualStepVpsCapable: true,
 };
 
 describe("buildNewAppPlan", () => {

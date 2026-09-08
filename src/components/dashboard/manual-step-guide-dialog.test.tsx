@@ -146,6 +146,7 @@ function subpcHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView 
     manualStepCapable: true,
     manualStepAbortCapable: null,
     manualStepValuesCapable: true,
+    manualStepVpsCapable: true,
     repositories: [REPO],
     ...overrides,
   } as DispatchHostView;
@@ -159,6 +160,7 @@ function manualStepJob(overrides: Partial<DispatchJobView> = {}): DispatchJobVie
     kind: "MANUAL_STEP",
     status: "SUCCEEDED",
     manualStepLine: STEP_LINE,
+    manualStepRunTarget: "subpc",
     targetJobId: null,
     previewAction: null,
     command: "git pull --ff-only",
@@ -450,9 +452,10 @@ describe("ManualStepGuideDialog の代行実行", () => {
     expect(taskList.toggleTask).not.toHaveBeenCalled();
   });
 
-  // VPS・1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない
-  it("サブPC以外で実行する手作業では、ボタンを出さずに理由を出す", () => {
-    const body = BODY.replace("**サブPC**", "**VPS**");
+  // 1Password・GitHub App・ブラウザでの設定はissue-deckから到達できない（VPSは#2901で
+  // サブPCからのSSH越しに代行できるようになったので、ここでは使わない）
+  it("サブPC・VPS以外で実行する手作業では、ボタンを出さずに理由を出す", () => {
+    const body = BODY.replace("**サブPC**", "**ブラウザ**");
     taskList.body = body;
     renderDialog([issue({ body })]);
     fireEvent.click(screen.getByRole("button", { name: "はじめる" }));
@@ -837,6 +840,7 @@ describe("ManualStepGuideDialog の自動実行", () => {
         jobs: [
           manualStepJob({
             manualStepLine: FIRST_LINE,
+            manualStepRunTarget: "subpc",
             command: "git pull --ff-only",
             status: "FAILED",
             exitCode: 1,

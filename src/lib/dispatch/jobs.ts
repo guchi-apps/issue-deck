@@ -109,8 +109,9 @@ import {
   fillManualStepPlaceholders,
   findInteractiveCommand,
   findPlaceholder,
-  isSubpcManualStepDevice,
   normalizeManualStepPlaceholderValues,
+  parseManualStepRunTarget,
+  resolveManualStepRunTarget,
   MANUAL_STEP_TIMEOUT_SECONDS,
 } from "@/lib/manual-step-command";
 import { parseManualStepGuide, resolveManualStepDevice } from "@/lib/manual-step-guide";
@@ -180,6 +181,8 @@ function toJobView(
         ? job.command
         : fillManualStepPlaceholders(job.command, manualStepValues),
     manualStepLine: job.manualStepLine,
+    // DBの値も信用せず、既知の2語だけを通す（#2901。`previewAction`と同じ作法）
+    manualStepRunTarget: parseManualStepRunTarget(job.manualStepRunTarget),
     targetJobId: job.targetJobId,
     // DBの値も信用せず、既知の3語だけを通す（#2444。列を手で書き換えられても、
     // pollerへ届く操作の種類は変わらない）
@@ -233,6 +236,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
     manualStepValuesCapable: host.manualStepValuesCapable,
+    manualStepVpsCapable: host.manualStepVpsCapable,
     planReviewCapable: host.planReviewCapable,
     codeReviewCapable: host.codeReviewCapable,
     codexCapable: host.codexCapable,
@@ -1094,7 +1098,10 @@ export async function enqueueManualStepJob(params: {
   // （`resolveManualStepExecutionRejection`）と同じで、コマンドの有無より先に見る
   const targetStep = guide.steps.find((step) => step.line === params.stepLine) ?? null;
   const device = resolveManualStepDevice(guide.where, targetStep);
-  if (!isSubpcManualStepDevice(device)) return reject("device_not_subpc", { device });
+  // どこで走らせるか（サブPC／VPS）。**VPSもサブPCのpollerが実行する**——SSHで最後の1歩だけを
+  // 向こうへ渡すので、ジョブの配り先は従来どおりサブPCのまま（#2901）
+  const runTarget = resolveManualStepRunTarget(device);
+  if (runTarget === null) return reject("device_not_runnable", { device });
 
   // 手順（`## やること`）と完了の確認（`## 完了の確認方法`）の両方が対象（#1869）。
   // **画面と同じ関数で取り出す**ので、押せるのにAPIが拒否する組み合わせが生まれない
@@ -1109,7 +1116,9 @@ export async function enqueueManualStepJob(params: {
   // **対話が要るコマンドは積まない**（#2025）。積んでも代行実行のシェルには標準入力が無く、
   // 失敗か打ち切りで終わる。画面（`buildManualStepRunPlan`）と同じ関数で判定するので、
   // 押せるのにここで拒否される組み合わせは生まれない
-  const interactiveCommand = findInteractiveCommand(extracted.command);
+  // **実行先も渡す**（#2901）。VPSにはNOPASSWDの設定が無く、`sudo`を含む手順はSSH越しの
+  // 代行実行では必ず落ちる。押す前に「あなたが実行」として並べる
+  const interactiveCommand = findInteractiveCommand(extracted.command, runTarget);
   // **人が埋めた値を先に差し込んでから、穴の有無を見る**（#2403）。差し込むのは名前の付く
   // `<…>`だけで、値はシェルの引用で包まれる（`fillManualStepPlaceholders`）。
   //
@@ -1136,10 +1145,11 @@ export async function enqueueManualStepJob(params: {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           manualStepCapable: host.manualStepCapable,
           manualStepValuesCapable: host.manualStepValuesCapable,
+          manualStepVpsCapable: host.manualStepVpsCapable,
         }
       : null,
     isManualStepIssue: true,
-    isSubpcDevice: true,
+    runTarget,
     hasCommand: true,
     interactiveCommand,
     placeholder,
@@ -1172,6 +1182,9 @@ export async function enqueueManualStepJob(params: {
         command: extracted.command,
         placeholderValues: placeholderValues ?? undefined,
         manualStepLine: params.stepLine,
+        // **実行先はサーバーが本文から解決したものだけを載せる**（`command`と同じ立場。#2901）。
+        // 画面からは受け取らない
+        manualStepRunTarget: runTarget,
       },
     });
     return { ok: true, job: toJobView(job) };
@@ -2129,6 +2142,8 @@ export async function announceDispatchHost(params: {
   manualStepAbortCapable: boolean | null;
   /** 埋めた値を差し込んで代行実行できるか（#2403）。申告していないpollerでは`null`＝非対応 */
   manualStepValuesCapable: boolean | null;
+  /** VPSの手順を代行実行できるか（#2901）。申告していないpollerでは`null`＝非対応 */
+  manualStepVpsCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
   /** リポジトリ全体のコードレビューを起こせるか（#698）。申告していないpollerでは`null`＝非対応 */
@@ -2204,6 +2219,7 @@ export async function announceDispatchHost(params: {
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,
     manualStepValuesCapable: params.manualStepValuesCapable,
+    manualStepVpsCapable: params.manualStepVpsCapable,
     planReviewCapable: params.planReviewCapable,
     codeReviewCapable: params.codeReviewCapable,
     codexCapable: params.codexCapable,

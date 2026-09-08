@@ -1,6 +1,7 @@
 import {
   extractVerificationCommands,
-  isSubpcManualStepDevice,
+  resolveManualStepRunTarget,
+  type ManualStepRunTarget,
   type ManualStepCommand,
 } from "@/lib/manual-step-command";
 import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-guide";
@@ -258,12 +259,17 @@ function isReadOnlySegment(segment: string): boolean {
 /** 巡回の対象にならなかった理由。画面には出さず、判定のテストと記録のために持つ */
 export type ManualStepPatrolRejection =
   | "not_manual_step"
-  | "device_not_subpc"
+  | "device_not_runnable"
   | "no_verification_command"
   | "not_read_only";
 
 export type ManualStepPatrolTarget =
-  | { patrollable: true; commands: ManualStepCommand[] }
+  | {
+      patrollable: true;
+      commands: ManualStepCommand[];
+      /** 確認コマンドをどこで流すか（#2901。`## 完了の確認方法`は既定値で判定する） */
+      runTarget: ManualStepRunTarget;
+    }
   | { patrollable: false; rejection: ManualStepPatrolRejection };
 
 /**
@@ -282,8 +288,9 @@ export function resolveManualStepPatrolTarget(
   if (!isManualStepIssue) return { patrollable: false, rejection: "not_manual_step" };
   // **確認節にデバイスを書く場所は無い**ので、手作業の既定値で判定する（#2052）。端末が複数
   // 書かれていて既定値が決まらない本文は、巡回の対象から外れる（代行と同じ倒し方）
-  if (!isSubpcManualStepDevice(guide.where.defaultDevice)) {
-    return { patrollable: false, rejection: "device_not_subpc" };
+  const runTarget = resolveManualStepRunTarget(guide.where.defaultDevice);
+  if (runTarget === null) {
+    return { patrollable: false, rejection: "device_not_runnable" };
   }
 
   const commands = extractVerificationCommands(body, guide);
@@ -293,5 +300,5 @@ export function resolveManualStepPatrolTarget(
   if (!commands.every((entry) => isReadOnlyVerificationCommand(entry.command))) {
     return { patrollable: false, rejection: "not_read_only" };
   }
-  return { patrollable: true, commands };
+  return { patrollable: true, commands, runTarget };
 }

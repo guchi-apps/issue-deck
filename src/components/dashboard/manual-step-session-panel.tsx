@@ -263,7 +263,7 @@ function ManualStepSessionRunPlan({
             <span className="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
               {/* 端末は**それが理由のときだけ**出す。コマンドが1つに定まらない手順に
                   「サブPC」と付けると、端末のせいで代行できないように読める */}
-              {!entry.checked && entry.rejection === "device_not_subpc" && entry.device !== null && (
+              {!entry.checked && entry.rejection === "device_not_runnable" && entry.device !== null && (
                 <Badge tone="device">{entry.device}</Badge>
               )}
               {entry.checked ? (

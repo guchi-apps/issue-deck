@@ -405,7 +405,8 @@ describe("QuestionAnswerPanel（手作業の手順）", () => {
     );
 
     expect(screen.getByText("最初の手順です")).toBeTruthy();
-    expect(screen.getByText("残り1件（うちあなたが実行 1件）")).toBeTruthy();
+    // VPSの手順は#2901で代行できるようになったので、「あなたが実行」の内訳は出ない
+    expect(screen.getByText("残り1件")).toBeTruthy();
     // 答えた後に何が起きるかまで出す（止まっているのは自動実行の途中）
     expect(screen.getByText(/これが最後の手順です/)).toBeTruthy();
   });

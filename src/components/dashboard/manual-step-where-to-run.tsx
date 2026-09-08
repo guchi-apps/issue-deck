@@ -31,7 +31,7 @@ export function ManualStepWhereToRun({
   where,
   device,
   command,
-  /** 代行できない理由（サブPC以外の手作業など）。あれば見出しの下に出す */
+  /** 代行できない理由（サブPC・VPS以外の手作業など）。あれば見出しの下に出す */
   reason,
 }: {
   where: ManualStepGuide["where"];

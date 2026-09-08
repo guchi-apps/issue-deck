@@ -9,7 +9,7 @@ import {
   fillManualStepPlaceholders,
   findInteractiveCommand,
   findPlaceholder,
-  isSubpcManualStepDevice,
+  resolveManualStepRunTarget,
   listManualStepPlaceholders,
   type ManualStepCommandKind,
 } from "@/lib/manual-step-command";
@@ -111,7 +111,10 @@ export function buildManualStepRunPlan(
   guide: ManualStepGuide = parseManualStepGuide(body),
   context: {
     host:
-      | Pick<DispatchHostView, "online" | "manualStepCapable" | "manualStepValuesCapable">
+      | Pick<
+          DispatchHostView,
+          "online" | "manualStepCapable" | "manualStepValuesCapable" | "manualStepVpsCapable"
+        >
       | null
       | undefined;
     isManualStepIssue: boolean;
@@ -145,7 +148,7 @@ export function buildManualStepRunPlan(
     resolveManualStepExecutionRejection({
       host: context.host,
       isManualStepIssue: context.isManualStepIssue,
-      isSubpcDevice: isSubpcManualStepDevice(device),
+      runTarget: resolveManualStepRunTarget(device),
       hasCommand,
       interactiveCommand,
       placeholder,
@@ -171,9 +174,14 @@ export function buildManualStepRunPlan(
     ...steps.map((step, index): ManualStepRunEntry => {
       const command = stepCommands.get(step.line as number) ?? null;
       const { filled, used } = fill(command);
-      const interactiveCommand = findInteractiveCommand(command);
-      const placeholder = findPlaceholder(filled);
       const device = resolveManualStepDevice(guide.where, step);
+      // **対話の判定にも実行先を渡す**（#2901）。VPSにはNOPASSWDの設定が無く、`sudo`を含む
+      // 手順はSSH越しの代行実行では必ず落ちる
+      const interactiveCommand = findInteractiveCommand(
+        command,
+        resolveManualStepRunTarget(device),
+      );
+      const placeholder = findPlaceholder(filled);
       return {
         kind: "step",
         order: index + 1,
@@ -194,9 +202,12 @@ export function buildManualStepRunPlan(
     // 確かめるかを書く場所がないため、手作業の既定値をそのまま使う
     ...verifications.map((entry, index): ManualStepRunEntry => {
       const { filled, used } = fill(entry.command);
-      const interactiveCommand = findInteractiveCommand(entry.command);
-      const placeholder = findPlaceholder(filled);
       const device = guide.where.defaultDevice;
+      const interactiveCommand = findInteractiveCommand(
+        entry.command,
+        resolveManualStepRunTarget(device),
+      );
+      const placeholder = findPlaceholder(filled);
       return {
         kind: "verification",
         order: index + 1,

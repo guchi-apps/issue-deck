@@ -36,11 +36,14 @@ export type ManualStepSessionPlan = {
  */
 const SESSION_HOST: Pick<
   DispatchHostView,
-  "online" | "manualStepCapable" | "manualStepValuesCapable"
+  "online" | "manualStepCapable" | "manualStepValuesCapable" | "manualStepVpsCapable"
 > = {
   online: true,
   manualStepCapable: true,
   manualStepValuesCapable: true,
+  // VPSの手順（#2901）も同じ理由で満たしておく。セッションは自分の`Bash`で`ssh`まで含めて
+  // 実行するため、pollerのSSH到達性の申告に左右されない
+  manualStepVpsCapable: true,
 };
 
 export function buildManualStepSessionPlan(
