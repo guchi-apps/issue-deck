@@ -21,6 +21,7 @@ const OPTIONS: readonly {
   { value: "ask", description: "作成のたびに選択画面を出します。" },
   { value: "detail", description: "作ったIssueの詳細をそのまま開きます。" },
   { value: "stay", description: "開いていた一覧・カンバンのままにします。" },
+  { value: "another", description: "同じリポジトリで新規作成の画面を開き直します。" },
 ];
 
 /**

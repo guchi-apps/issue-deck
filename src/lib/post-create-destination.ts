@@ -8,8 +8,11 @@
  * **既定は`ask`（毎回選ぶ）にする。** 記憶した先をいきなり適用すると、初めて使う人には
  * 「なぜここへ来たのか」が分からないまま挙動だけが変わる。選択画面で「次回からこの画面を
  * 出さない」を入れたときにだけ、押した方が既定として残る。
+ *
+ * `another`は「同じリポジトリで続けてもう1件作る」（#2932）。まとめて起票するときは、
+ * 1件作るたびに新規作成ダイアログを開き直してリポジトリを選ぶ操作が要っていた。
  */
-export type PostCreateDestination = "detail" | "stay";
+export type PostCreateDestination = "detail" | "stay" | "another";
 
 /** 保存されている設定。`ask`は「毎回選択画面を出す」（既定） */
 export type PostCreateDestinationSetting = PostCreateDestination | "ask";
@@ -23,7 +26,7 @@ export const POST_CREATE_DESTINATION_DEFAULT: PostCreateDestinationSetting = "as
  */
 export const POST_CREATE_DESTINATION_STORAGE_KEY = "issue-deck:post-create-destination";
 
-const SETTINGS: readonly PostCreateDestinationSetting[] = ["ask", "detail", "stay"];
+const SETTINGS: readonly PostCreateDestinationSetting[] = ["ask", "detail", "stay", "another"];
 
 /**
  * localStorageから読んだ値を設定のいずれかへ正規化する（`auto-refresh.ts`の`parse`と同じ役割）。
@@ -53,7 +56,7 @@ export function resolvePostCreateDestination(
   setting: PostCreateDestinationSetting,
 ): PostCreateDestination {
   const normalized = normalizePostCreateDestinationSetting(setting);
-  return normalized === "stay" ? "stay" : "detail";
+  return normalized === "ask" ? "detail" : normalized;
 }
 
 /** 設定画面のセレクトに出す文言（画面とテストで同じものを使う） */
@@ -61,4 +64,5 @@ export const POST_CREATE_DESTINATION_LABELS: Record<PostCreateDestinationSetting
   ask: "毎回選ぶ",
   detail: "Issueを開く",
   stay: "元の画面に戻る",
+  another: "続けて作成",
 };

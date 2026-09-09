@@ -294,7 +294,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
   まとめて起票しているときに毎回一覧へ戻る操作が要ったため、作成の直後に
   [`post-create-navigation-dialog.tsx`](../src/components/dashboard/post-create-navigation-dialog.tsx)
-  を出し、「Issueを開く」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  を出し、「Issueを開く」「続けて作成」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  - **「続けて作成」は、同じリポジトリだけを引き継いだ空のフォームを開き直す**（#2932）。
+    まとめて起票するときの「一覧へ戻る→もう一度開く→リポジトリを選ぶ」をなくすためのもので、
+    **呼び出し元のプリフィル（切り出し・レビュー指摘の埋め込み、引き継ぎの接頭辞`bodyPrefix`）は
+    持ち込まない**——2件目に無関係な内容が入るため、続けて作成で開いている間だけ抑止する。
+    引き継ぎは`create-issue-dialog.tsx`の`startAnotherIssue`が行い、**画面の状態への直接の
+    入れ直しと、初期化のeffectが見る控え（`continueRepositoryFullName`）を両方持つ**。
+    行き先を「続けて作成」で記憶していると`open`が`false`を経ずに開き直り、初期化のeffectが
+    走らないため、どちらか片方だけではリポジトリが落ちる。
   - **一覧への反映（`registerCreatedIssue`）と遷移（`selectIssue`）を分けてある。**
     作成フォームには`onCreated`（反映）と`onNavigateToIssue`（遷移）を別々に渡し、
     **`onNavigateToIssue`を渡さない呼び出しでは選択画面自体を出さない**。別ウィンドウ
