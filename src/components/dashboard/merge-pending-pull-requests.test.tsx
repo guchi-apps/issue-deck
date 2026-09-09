@@ -88,6 +88,36 @@ describe("MergePendingPullRequestsの「更新」（#2175）", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
+  // PR一覧と同じレールを出す（#2942）。同じPRなのに画面ごとに違う出し方になると、
+  // どちらが新しいのかを読む側が判断できなくなる（#2145と同じ理由）。
+  it("PR一覧と同じステータスレールを出し、リンクにはしない", () => {
+    render(
+      <MergePendingPullRequests
+        pullRequests={[
+          makePullRequest({
+            ciState: "success",
+            mergeJudgement: {
+              state: "settled",
+              step: null,
+              runUrl: null,
+              aiReview: { state: "failed", runUrl: "https://github.com/owner/repo/actions/runs/1" },
+            },
+          }),
+        ]}
+        onSelectPullRequest={vi.fn()}
+      />,
+    );
+
+    const rail = document.querySelector("[aria-label='CI・Claudeのレビュー・マージの状況']");
+    expect(Array.from(rail?.children ?? []).map((slot) => slot.textContent)).toEqual([
+      "CI通過",
+      "レビュー失敗",
+      "マージ待ち",
+    ]);
+    // カード全体が<button>なので、中に<a>を置くとHTMLとして不正になる
+    expect(rail?.querySelector("a")).toBeNull();
+  });
+
   it("取り直している間はボタンを押せない", () => {
     const onRefresh = vi.fn();
     render(

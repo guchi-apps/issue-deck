@@ -1486,6 +1486,21 @@ pnpm db:seed:dev
   CIの無人実行と同じCookie（`src/lib/ci-auth-bypass.ts`）で、**`NODE_ENV=production`では常に無効**。
 - 接続先がローカル（`localhost`/`127.0.0.1`）でなければ投入せず中止する。既存行を書き換える処理を含むため。
 
+**Pull Request一覧・PR詳細だけは、シードしてもローカルでは実物を出せない**（#2942）。Issueと違い
+PRはDBキャッシュを持たず、`GET /api/pull-requests`が**リポジトリごとにGitHubへ都度問い合わせる**
+（`docs/code-map.md`「PR一覧（`/api/pull-requests`）はキャッシュせず都度GitHub APIから取得する」）。
+シードが入れるのは実在しない`ci-dummy-org/sample-repo-1`〜`5`なので、応答は必ずこうなる。
+
+```json
+{"pullRequests":[],"fetchedAt":"...","failedRepositories":["ci-dummy-org/sample-repo-1", ...]}
+```
+
+画面には「取得できなかったリポジトリがあります」と空の一覧が出るだけで、**行が1つも描かれない**。
+`.env.local`のGitHub App設定を実物にしても、そのAppがインストールされたリポジトリが要る。
+したがって**PRの行の見た目を変えたときは、開発サーバーではなくjsdomのレンダリングテスト
+（`pull-request-list.test.tsx`など）で確かめる**。開発サーバーで確かめられるのは
+「`/dashboard?pane=pull-requests`が200で返り、ペインとヘッダーが描画される」ところまで。
+
 **自動実行（#1869・#1882）の見た目はシードだけでは出ない**（#2119）。`db:seed:dev`が入れるのは
 手作業Issueの本文までで、`ManualStepRun`の行は作らない。「ユーザーの作業待ち」の帯に出る自動実行の
 バッジと一覧（`manual-step-run-badge.tsx`）を実物で見たい場合は、シードのあとに`ManualStepRun`を

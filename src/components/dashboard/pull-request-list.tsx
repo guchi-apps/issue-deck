@@ -6,17 +6,14 @@ import { ExternalLink, Lock } from "lucide-react";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
   BranchBadge,
-  CiStateBadge,
-  ConflictBadge,
-  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   RepairRunBadge,
-  UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
@@ -24,11 +21,7 @@ import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto
 import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import {
-  canMergeFromDeck,
-  groupPullRequestsByRepository,
-  requiresUserMerge,
-} from "@/lib/pull-request-list";
+import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
 import { getPullRequestView } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -138,25 +131,26 @@ function PullRequestCard({
             Issue #{pullRequest.linkedIssueNumber}
           </GithubReferenceLink>
         )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {pullRequest.draft ? (
-          <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
-        ) : (
-          <CiStateBadge ciState={pullRequest.ciState} />
-        )}
-        <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
-        <ConflictBadge mergeable={pullRequest.mergeable} />
-        {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
-        <RepairRunBadge run={pullRequest.repairRun} />
-        {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
-        {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
+        {/* 作者と作成時刻はここへ移した（#2942）。状態の行をレールだけの行にするためで、
+            行数は今までと同じ3行のまま */}
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <UserAvatar login={pullRequest.authorLogin} className="size-4" />
           {pullRequest.authorLogin}
         </span>
-        <span className="text-xs text-muted-foreground">{formatRelativeDate(pullRequest.createdAt)}</span>
+        <span className="text-xs text-muted-foreground">
+          {formatRelativeDate(pullRequest.createdAt)}
+        </span>
+      </div>
+
+      {/* 状態は「出るものだけ横に並べる」のをやめ、CI → Claudeのレビュー → マージを
+          固定の位置に置く（#2942）。以前は行ごとにバッジの数も並び順も変わり、縦に読み
+          比べられなかった。判定と文言は`lib/pull-request-status-rail.ts`が持つ */}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <PullRequestStatusRail pullRequest={pullRequest} />
+        {/* 自動修復はめったに出ず、経過時間を数え直す生きたバッジなのでレールの外へ足す
+            （#2072）。CI失敗・コンフリクトの枠を打ち消さず、その隣で「いま自動で直しに
+            いっている」を言う */}
+        <RepairRunBadge run={pullRequest.repairRun} />
         <PullRequestRepairButtons
           repositoryFullName={pullRequest.repositoryFullName}
           pullRequestNumber={pullRequest.number}

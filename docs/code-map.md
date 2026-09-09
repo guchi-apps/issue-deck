@@ -294,7 +294,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
   まとめて起票しているときに毎回一覧へ戻る操作が要ったため、作成の直後に
   [`post-create-navigation-dialog.tsx`](../src/components/dashboard/post-create-navigation-dialog.tsx)
-  を出し、「Issueを開く」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  を出し、「Issueを開く」「続けて作成」「元の画面に戻る」のタイルを押した瞬間にそこへ進む。
+  - **「続けて作成」は、同じリポジトリだけを引き継いだ空のフォームを開き直す**（#2932）。
+    まとめて起票するときの「一覧へ戻る→もう一度開く→リポジトリを選ぶ」をなくすためのもので、
+    **呼び出し元のプリフィル（切り出し・レビュー指摘の埋め込み、引き継ぎの接頭辞`bodyPrefix`）は
+    持ち込まない**——2件目に無関係な内容が入るため、続けて作成で開いている間だけ抑止する。
+    引き継ぎは`create-issue-dialog.tsx`の`startAnotherIssue`が行い、**画面の状態への直接の
+    入れ直しと、初期化のeffectが見る控え（`continueRepositoryFullName`）を両方持つ**。
+    行き先を「続けて作成」で記憶していると`open`が`false`を経ずに開き直り、初期化のeffectが
+    走らないため、どちらか片方だけではリポジトリが落ちる。
   - **一覧への反映（`registerCreatedIssue`）と遷移（`selectIssue`）を分けてある。**
     作成フォームには`onCreated`（反映）と`onNavigateToIssue`（遷移）を別々に渡し、
     **`onNavigateToIssue`を渡さない呼び出しでは選択画面自体を出さない**。別ウィンドウ
@@ -1668,6 +1676,49 @@ export function POST(request: NextRequest) {
   2回言うことになる。**肩代わりジョブ（`claude-review-fallback`）は数えない**（`00.check-user`を
   付けるだけでレビューをやり直さないため）。取得は既存のGraphQLの応答から読むだけで、
   **GitHub APIの消費は増えない**。
+- **PR一覧の状態表示は、出るものだけを並べるバッジ列ではなく場所を固定した3枠にする**（#2942。
+  判定は[`lib/pull-request-status-rail.ts`](../src/lib/pull-request-status-rail.ts)の
+  `buildPullRequestStatusRail`、描画は
+  [`components/dashboard/pull-request-status-rail.tsx`](../src/components/dashboard/pull-request-status-rail.tsx)）。
+  一覧は長らく「出るものだけ」（CI状態・判定中・コンフリクト・Auto-merge有効・ユーザーの
+  マージが必要）を`flex-wrap`で横に並べており、**行ごとにバッジの数も並び順も変わるため縦に
+  読み比べられなかった**。さらに`AiReviewBadge`（上のClaudeのレビュー）は一覧に描いておらず、
+  **「Claudeの調査が成功したか・失敗したか・そもそも走らないのか」は詳細を開くまで分からない**
+  （出ていたのは`MergeJudgementBadge`の「Claudeがレビュー中」だけ）。枠を
+  **CI → Claudeのレビュー → マージ**の3つに固定すれば、真ん中の列を縦に見るだけで拾える。
+  - **枠は常に3つ返す。** 段そのものが無いPR（レビューのcheck-runが1件も無いリポジトリ・
+    リリースPR・起動前）は破線の輪郭と「—」で場所だけ空ける。**空にすると列がずれ、実線に
+    すると「まだ来ていない」（`pending`）と区別が付かない。**
+  - **状態と文言は新しく作らない。** 材料はIssue詳細の内訳
+    （[`lib/issue-pull-request-progress.ts`](../src/lib/issue-pull-request-progress.ts)の
+    `buildIssuePullRequestProgress`。#2816）をそのまま通し、PR一覧にしか無い事情
+    （ドラフト・コンフリクト・判定中・Auto-merge・ユーザーのマージ待ち）だけをマージの枠へ
+    重ねる。判定を2通り書くと、#2145・#2150で起きたように同じ状態が画面ごとに違う名前で出る。
+  - **狭い場所へ出すための短縮版は`IssuePullRequestStep.shortLabel`が持ち、文言そのものは
+    `lib/pull-request-list.ts`の`AI_REVIEW_SHORT_LABEL`（`AI_REVIEW_SETTLED_LABEL`の隣）に置く。**
+    `REPAIR_KIND_RUNNING_LABEL`と`REPAIR_KIND_RUNNING_SHORT_LABEL`が同じ場所に並んでいるのと
+    同じ形で、**長短を離すと片方だけ直された状態に気付けない**。あわせて
+    `issue-pull-request-progress.ts`にあった`AI_REVIEW_SETTLED_LABEL`の写し（3語）も消し、
+    `AI_REVIEW_STEP_LABEL`はそこから組み立てるようにした。**コンポーネント側で文字列を切らない。**
+  - **幅は枠ごとの`minmax()`ではなくグリッド全体の`max-w`で決め、狭いときは2行に折る。**
+    枠ごとに下限を置くと3枠が別々に縮み、行によって列の位置がずれる。**横幅がいちばん厳しいのは
+    スマホではなくPCのカラム**（#2516。上の「一覧の行で横幅がいちばん厳しいのはPC・iPad」）で、
+    PR一覧ペインは最小320px（行の余白を引いて実効284px）、確認待ちのマージ待ちカードは
+    Issue一覧カラムの最小280pxの中なので実効230px前後しかない。そこへ3枠を並べると1枠に
+    3〜4文字しか入らず「レビュー完了」が「レビ…」になる。**2行に折っても同じ一覧の中では全行が
+    同時に折れる**ので、列の位置は揃ったまま。
+  - **切り替えはコンテナクエリ（`@container` + `@min-[20rem]:grid-cols-3`）で、レール自身が
+    コンテナを持つ。** ビューポート幅のブレークポイントは使えない——PCでもPRペインだけが
+    狭いことがあり、画面の広さでは枠の広さを決められない。**置く側は何も渡さなくてよい**
+    （渡す形にすると、新しい置き場所で指定を忘れたときだけ崩れる）。
+  - **自動修復（`RepairRunBadge`）だけはレールの外に残す。** 経過時間を数え直す生きたバッジで、
+    めったに出ないものを固定の枠に居座らせると3枠のどれかを常に空けることになる。
+  - **「ユーザーの確認待ち」のマージ待ちカードにも同じレールを出す**（`merge-pending-pull-requests.tsx`）。
+    ただしカード全体が`<button>`なので`linkable={false}`を渡す——`<button>`の中に`<a>`を置くのは
+    HTMLとして不正で、押したときの当たり判定も読み上げも壊れる（レールの外枠を`<div>`ではなく
+    `<span>`にしているのも同じ理由）。
+  - **PR詳細（`pull-request-detail.tsx`）は今までのバッジ列のまま。** 一覧性が要るのは並ぶ側だけで、
+    詳細では`AiReviewBadge`・`ConflictBadge`が全文と実行ログを持つ。
 - **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145・#2915。
   [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の
   `issuePullRequestPollIntervalMs`が間隔を決め、

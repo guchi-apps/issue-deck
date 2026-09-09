@@ -243,6 +243,8 @@ describe("WorkflowTagStatusSection", () => {
   });
 
   it("mainが最新タグより進んでいれば、コミット数と差分へのリンクを出す（#2476）", async () => {
+    // 内容差分が分からない場合（hasContentDiff: null）は、従来どおりコミット数だけの表示に
+    // フォールバックする。ボタンは押せる
     mockFetch({
       latest: "workflows/v19",
       repositories: [latestStatus()],
@@ -251,6 +253,7 @@ describe("WorkflowTagStatusSection", () => {
         tag: "workflows/v19",
         aheadBy: 3,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+        hasContentDiff: null,
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -259,10 +262,13 @@ describe("WorkflowTagStatusSection", () => {
     expect(screen.getByText("差分を見る").getAttribute("href")).toBe(
       "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
     );
+    expect(
+      (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("mainが進んでいなければ、切っても中身が変わらないと出す（#2476）", async () => {
-    // **押せなくはしない。** 切り直したい場面はあるので、無駄打ちだと分かれば足りる
+    // 内容差分が分からない場合（hasContentDiff: null）。**押せなくはしない**
     mockFetch({
       latest: "workflows/v19",
       repositories: [latestStatus()],
@@ -271,6 +277,7 @@ describe("WorkflowTagStatusSection", () => {
         tag: "workflows/v19",
         aheadBy: 0,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+        hasContentDiff: null,
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -283,6 +290,54 @@ describe("WorkflowTagStatusSection", () => {
     expect(
       (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+
+  it("配布物の内容に差分があれば「配布が必要です」と結論を明示する（#2941）", async () => {
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [latestStatus()],
+      propagation: null,
+      sourceAhead: {
+        tag: "workflows/v19",
+        aheadBy: 40,
+        compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+        hasContentDiff: true,
+      },
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(
+      await screen.findByText(noteMatcher("配布が必要です。 main は v19 より 40 コミット進んでいます")),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("配布物の内容が同じと判定できたときは「新しいタグを切って配る」を無効化する（#2941）", async () => {
+    // コミット数（aheadBy）があっても、配る中身（.github/workflows・.github/prompts）が
+    // 同じなら押せない（workflows/v32→v33の実例と同じ形）
+    mockFetch({
+      latest: "workflows/v19",
+      repositories: [latestStatus()],
+      propagation: null,
+      sourceAhead: {
+        tag: "workflows/v19",
+        aheadBy: 40,
+        compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
+        hasContentDiff: false,
+      },
+    });
+    render(<WorkflowTagStatusSection open />);
+
+    expect(
+      await screen.findByText(
+        noteMatcher("main は v19 と同じ内容です。配布できる差分が無いため、タグを切れません。"),
+      ),
+    ).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("最新タグを取得できないときは、タグを切るボタンを出さない（#2476）", async () => {

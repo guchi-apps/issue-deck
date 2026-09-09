@@ -2,12 +2,8 @@
 
 import { Clock, GitPullRequest, RefreshCw } from "lucide-react";
 
-import {
-  BranchBadge,
-  CiStateBadge,
-  ConflictBadge,
-  MergeJudgementBadge,
-} from "@/components/dashboard/pull-request-badges";
+import { BranchBadge } from "@/components/dashboard/pull-request-badges";
+import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -176,13 +172,13 @@ export function MergePendingPullRequests({
               </span>
               <span className="flex flex-wrap items-center gap-2">
                 <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
-                <CiStateBadge ciState={pullRequest.ciState} />
-                <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
-                <ConflictBadge mergeable={pullRequest.mergeable} />
                 <span className="text-xs text-muted-foreground">
                   {formatRelativeDate(pullRequest.createdAt)}
                 </span>
               </span>
+              {/* PR一覧と同じステータスレール（#2942）。同じPRなのに画面ごとに違う出し方に
+                  なると、どちらが新しいのかを読む側が判断できなくなる（#2145と同じ理由） */}
+              <PullRequestStatusRail pullRequest={pullRequest} linkable={false} />
             </button>
             {/* 「いまは実施しない」（#2398）。カード全体が<button>なので、その外へ重ねて置く */}
             {onSnooze && (

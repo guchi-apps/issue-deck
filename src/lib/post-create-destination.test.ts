@@ -12,6 +12,7 @@ describe("normalizePostCreateDestinationSetting", () => {
     expect(normalizePostCreateDestinationSetting("ask")).toBe("ask");
     expect(normalizePostCreateDestinationSetting("detail")).toBe("detail");
     expect(normalizePostCreateDestinationSetting("stay")).toBe("stay");
+    expect(normalizePostCreateDestinationSetting("another")).toBe("another");
   });
 
   it("端末に残った未知の値・壊れた値は既定へ落とす", () => {
@@ -30,6 +31,7 @@ describe("shouldAskPostCreateDestination", () => {
   it("行き先を記憶していれば選択画面を出さない", () => {
     expect(shouldAskPostCreateDestination("detail")).toBe(false);
     expect(shouldAskPostCreateDestination("stay")).toBe(false);
+    expect(shouldAskPostCreateDestination("another")).toBe(false);
   });
 });
 
@@ -37,6 +39,7 @@ describe("resolvePostCreateDestination", () => {
   it("記憶した行き先をそのまま返す", () => {
     expect(resolvePostCreateDestination("detail")).toBe("detail");
     expect(resolvePostCreateDestination("stay")).toBe("stay");
+    expect(resolvePostCreateDestination("another")).toBe("another");
   });
 
   it("毎回選ぶ設定のまま呼ばれた場合は従来の挙動（詳細へ移動）へ落とす", () => {

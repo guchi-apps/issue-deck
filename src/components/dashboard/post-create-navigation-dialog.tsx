@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Undo2, type LucideIcon } from "lucide-react";
+import { FilePlus2, FileText, Undo2, type LucideIcon } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,6 +36,10 @@ type PostCreateNavigationDialogProps = {
  *
  * **閉じただけのときは何も記憶しない。** ×・Escapeは「まだ決めていない」であって、
  * 「元の画面に戻るを既定にする」ではない。
+ *
+ * 「続けて作成」（#2932）は、**押した瞬間に同じリポジトリの空の作成フォームが開き直る**。
+ * まとめて起票するときに、1件ごとに一覧へ戻ってリポジトリを選び直す往復をなくすためのもので、
+ * 実行するのは呼び出し元（`create-issue-dialog.tsx`）。
  */
 export function PostCreateNavigationDialog({
   issue,
@@ -68,12 +72,18 @@ export function PostCreateNavigationDialog({
           <span className="truncate text-sm font-medium">{issue.title}</span>
         </div>
 
-        <div role="group" aria-label="次に開く画面" className="grid grid-cols-2 gap-2">
+        <div role="group" aria-label="次に開く画面" className="grid grid-cols-3 gap-2">
           <DestinationTile
             icon={FileText}
             name="Issueを開く"
             description="作ったIssueの詳細へ"
             onSelect={() => onSelect("detail", remember)}
+          />
+          <DestinationTile
+            icon={FilePlus2}
+            name="続けて作成"
+            description="同じリポジトリでもう1件"
+            onSelect={() => onSelect("another", remember)}
           />
           <DestinationTile
             icon={Undo2}
@@ -101,7 +111,7 @@ export function PostCreateNavigationDialog({
 
 /**
  * 行き先1件（#2862）。**実行先のタイル（`StartImplementationDialog`）と同じ形にそろえる。**
- * 縦に積むアイコン＋名前で、押した瞬間にその画面へ進む。2枚しか並ばないので、
+ * 縦に積むアイコン＋名前で、押した瞬間にその画面へ進む。3枚しか並ばないので、
  * 実行先のタイルと違って説明もタイルの中に入る。
  */
 function DestinationTile({
