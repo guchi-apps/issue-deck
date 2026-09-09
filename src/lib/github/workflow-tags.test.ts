@@ -34,6 +34,7 @@ vi.mock("@/lib/github/request", () => ({
 
 import {
   collectWorkflowTags,
+  createNextWorkflowTag,
   dispatchPropagation,
   dispatchSharedFilePropagation,
 } from "@/lib/github/workflow-tags";
@@ -102,6 +103,13 @@ type RouteHandlers = {
    * （タグが無い・比較が返らない）
    */
   aheadBy?: number | null;
+  /**
+   * 配布物（`.github/workflows`・`.github/prompts`）の内容がタグと`main`で同じか（#2941）。
+   * 省略するとtree OIDを返さない（取得できなかった扱い）
+   */
+  hasContentDiff?: boolean;
+  /** `commits/main`が返すSHA（#1876）。`createNextWorkflowTag`のテストで使う */
+  mainSha?: string;
 };
 
 /**
@@ -117,6 +125,13 @@ function route(handlers: RouteHandlers) {
       const runs = handlers.latestRun ? [handlers.latestRun] : [];
       return Promise.resolve(ok({ workflow_runs: runs }));
     }
+    // タグを`main`の先端へ切る2手順（#1876）。`createNextWorkflowTag`だけが呼ぶ
+    if (String(url).endsWith("/commits/main")) {
+      return Promise.resolve(ok({ sha: handlers.mainSha ?? "main-sha" }));
+    }
+    if (String(url).endsWith("/git/refs")) {
+      return Promise.resolve(ok({}));
+    }
     if (!String(url).endsWith("/graphql")) return Promise.resolve(ok({}));
 
     const body = options?.body;
@@ -126,12 +141,30 @@ function route(handlers: RouteHandlers) {
       return Promise.resolve(ok({ data: { repository: { refs: { nodes } } } }));
     }
 
-    // 配布元の進み具合（#2476）。タグを基点に`main`と比べる
+    // 配布元の進み具合（#2476）と配布物の内容比較（#2941）。タグを基点に`main`と比べる
     if (body?.query.includes("compare(headRef")) {
       const aheadBy = handlers.aheadBy ?? null;
-      return Promise.resolve(
-        ok({ data: { repository: { ref: aheadBy === null ? null : { compare: { aheadBy } } } } }),
-      );
+      const repository: Record<string, unknown> = {
+        ref: aheadBy === null ? null : { compare: { aheadBy } },
+      };
+      if (handlers.hasContentDiff !== undefined) {
+        const mainOid = handlers.hasContentDiff ? "oid-main-changed" : "oid-same";
+        // .github/workflows は reusable-*.yml だけをエントリに含める（自分用ファイルは
+        // 比較対象に入らないことを、名前を混ぜたエントリで確かめるテストが別途ある）
+        repository.tagWorkflows = {
+          entries: [{ name: "reusable-issue-dispatch.yml", oid: "oid-same" }],
+        };
+        repository.mainWorkflows = {
+          entries: [{ name: "reusable-issue-dispatch.yml", oid: mainOid }],
+        };
+        repository.tagBlob0 = { oid: "oid-same" };
+        repository.mainBlob0 = { oid: "oid-same" };
+        repository.tagBlob1 = { oid: "oid-same" };
+        repository.mainBlob1 = { oid: "oid-same" };
+        repository.tagTree0 = { oid: "oid-same" };
+        repository.mainTree0 = { oid: "oid-same" };
+      }
+      return Promise.resolve(ok({ data: { repository } }));
     }
 
     // 配布する共有ファイルの本文（#2240）。配布元1リポジトリぶんなので、変数は添字なしの
@@ -188,7 +221,9 @@ describe("collectWorkflowTags", () => {
 
   it("mainが最新タグより進んでいるコミット数を返す（#2476）", async () => {
     // 「新しいタグを切って配る」は未更新が0件でも押せるため、押す前の判断材料として出す
-    githubFetch.mockImplementation(route({ tags: ["workflows/v12"], aheadBy: 48 }));
+    githubFetch.mockImplementation(
+      route({ tags: ["workflows/v12"], aheadBy: 48, hasContentDiff: true }),
+    );
 
     const overview = await collectWorkflowTags("user-1");
 
@@ -196,6 +231,7 @@ describe("collectWorkflowTags", () => {
       tag: "workflows/v12",
       aheadBy: 48,
       compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v12...main",
+      hasContentDiff: true,
     });
     // 件数だけを取る。RESTの`/compare`は差分のコミットとファイルまで返す
     const compare = graphqlCalls().find((call) => call.query.includes("compare(headRef"));
@@ -209,6 +245,105 @@ describe("collectWorkflowTags", () => {
 
     expect(overview.sourceAhead).toBeNull();
     expect(overview.repositories).toHaveLength(1);
+  });
+
+  it("コミット数が0でなくても配布物のtreeが同じなら hasContentDiff は false（#2941）", async () => {
+    // workflows/v32→v33の実例: 40コミット差があったが .github/workflows・.github/prompts の
+    // treeは完全に同一だった。aheadByだけでは判定できない
+    githubFetch.mockImplementation(
+      route({ tags: ["workflows/v12"], aheadBy: 40, hasContentDiff: false }),
+    );
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ aheadBy: 40, hasContentDiff: false });
+  });
+
+  /** compare(headRef)の応答をカスタムのrepositoryオブジェクトへ差し替える（他のクエリは`route`のまま） */
+  function withContentDiffRepository(repository: Record<string, unknown>) {
+    const base = route({ tags: ["workflows/v12"], aheadBy: 2 });
+    githubFetch.mockImplementation((url: string, token: string, options?: { body?: GraphqlCall }) => {
+      const body = options?.body;
+      if (body?.query.includes("compare(headRef")) {
+        return Promise.resolve(ok({ data: { repository: { ref: { compare: { aheadBy: 2 } }, ...repository } } }));
+      }
+      return base(url, token, options);
+    });
+  }
+
+  it(".github/workflowsの自分用ファイル（reusable-で始まらない）だけが変わっても hasContentDiff は false のまま（#2941）", async () => {
+    // workflows/v30→v31の実例: deploy.yml等2件しか変わっていないのに配布先には何も届かない。
+    // ディレクトリ全体で比較すると誤って「差分あり」になってしまう
+    withContentDiffRepository({
+      tagWorkflows: {
+        entries: [
+          { name: "reusable-issue-dispatch.yml", oid: "same" },
+          { name: "deploy.yml", oid: "deploy-tag" },
+        ],
+      },
+      mainWorkflows: {
+        entries: [
+          { name: "reusable-issue-dispatch.yml", oid: "same" },
+          { name: "deploy.yml", oid: "deploy-main-changed" },
+        ],
+      },
+      tagBlob0: { oid: "same" },
+      mainBlob0: { oid: "same" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: false });
+  });
+
+  it("reusable-*.ymlの内容が変わっていれば hasContentDiff は true（#2941）", async () => {
+    withContentDiffRepository({
+      tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "tag-oid" }] },
+      mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "main-oid" }] },
+      tagBlob0: { oid: "same" },
+      mainBlob0: { oid: "same" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
+  });
+
+  it("summarize-claude-usage.shだけが変わっていても hasContentDiff は true（#2941）", async () => {
+    // reusable-claude-ci-fix.yml等が prompts-ref のcheckout（タグ）から読む、
+    // プロンプト以外の配布物（workflows/v31→v32の実例）
+    withContentDiffRepository({
+      tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      tagBlob0: { oid: "tag-usage-sh" },
+      mainBlob0: { oid: "main-usage-sh" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
+  });
+
+  it("tree OIDが一部でも取れなければ hasContentDiff は null（#2941）", async () => {
+    // わからない場合はブロックしない方針。片方のtreeだけ読めた・読めなかったが起きても
+    // 「差分なし」と誤判定してボタンを無効化しないようにする
+    githubFetch.mockImplementation(route({ tags: ["workflows/v12"], aheadBy: 3 }));
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ aheadBy: 3, hasContentDiff: null });
   });
 
   it("最新タグが分からなければ進み具合を問い合わせない（#2476）", async () => {
@@ -588,6 +723,56 @@ describe("dispatchPropagation", () => {
     expect((post?.[2] as { body: { inputs: Record<string, string> } }).body.inputs.auto_merge).toBe(
       "false",
     );
+  });
+});
+
+describe("createNextWorkflowTag（#2941）", () => {
+  beforeEach(() => {
+    repositoryFindMany.mockReset().mockResolvedValue([repo("guchi-apps/car-care")]);
+    repositoryFindFirst
+      .mockReset()
+      .mockResolvedValue({ installation: { installationId: 42 } });
+    getInstallationToken.mockReset().mockResolvedValue("token");
+    githubFetch.mockReset();
+  });
+
+  function withRelease(handlers: Parameters<typeof route>[0] = {}) {
+    githubFetch.mockImplementation(route({ tags: ["workflows/v12"], ...handlers }));
+  }
+
+  it("配布物の内容が同じと判定できたときは切らない", async () => {
+    // workflows/v32→v33の実例と同じ形: コミット数はあるが配る中身は同じ
+    withRelease({ aheadBy: 40, hasContentDiff: false });
+
+    const result = await createNextWorkflowTag("user-1");
+
+    // まだ切っていないので、現在の最新タグをそのまま返す（次の版数は確定させない）
+    expect(result).toMatchObject({
+      created: false,
+      tag: "workflows/v12",
+      reason: "no_diff",
+    });
+    const refsPost = githubFetch.mock.calls.filter((call) => String(call[0]).endsWith("/git/refs"));
+    expect(refsPost).toHaveLength(0);
+  });
+
+  it("配布物の内容に差分があれば次の版数を切る", async () => {
+    withRelease({ aheadBy: 5, hasContentDiff: true });
+
+    const result = await createNextWorkflowTag("user-1");
+
+    expect(result).toMatchObject({ created: true, tag: "workflows/v13" });
+    const refsPost = githubFetch.mock.calls.find((call) => String(call[0]).endsWith("/git/refs"));
+    expect((refsPost?.[2] as { body: { ref: string } }).body.ref).toBe("refs/tags/workflows/v13");
+  });
+
+  it("内容差分が分からない場合はブロックしない", async () => {
+    // tree OIDが取得できない場合。「わからない場合は制限しない」という既存の全体方針に揃える
+    withRelease({ aheadBy: 5 });
+
+    const result = await createNextWorkflowTag("user-1");
+
+    expect(result).toMatchObject({ created: true, tag: "workflows/v13" });
   });
 });
 
