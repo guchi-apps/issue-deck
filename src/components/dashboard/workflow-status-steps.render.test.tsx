@@ -479,10 +479,10 @@ function progress(
     label: "Claudeがレビュー中",
     tone: "running",
     steps: [
-      { key: "opened", label: "実装完了", state: "done" },
-      { key: "ci", label: "CI通過", state: "done" },
-      { key: "ai-review", label: "Claudeがレビュー中", state: "current" },
-      { key: "merge", label: "マージ", state: "pending" },
+      { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
+      { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
+      { key: "ai-review", label: "Claudeがレビュー中", shortLabel: "Claudeがレビュー中", state: "current" },
+      { key: "merge", label: "マージ", shortLabel: "マージ", state: "pending" },
     ],
     ...overrides,
   };
@@ -578,10 +578,10 @@ describe("developへマージの中の位置（#2867）", () => {
           label: "マージ待ち",
           tone: "waiting",
           steps: [
-            { key: "opened", label: "実装完了", state: "done" },
-            { key: "ci", label: "CI通過", state: "done" },
-            { key: "ai-review", label: "Claudeのレビュー完了", state: "done" },
-            { key: "merge", label: "マージ", state: "current" },
+            { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
+            { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
+            { key: "ai-review", label: "Claudeのレビュー完了", shortLabel: "Claudeのレビュー完了", state: "done" },
+            { key: "merge", label: "マージ", shortLabel: "マージ", state: "current" },
           ],
         })}
       />,

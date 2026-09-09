@@ -160,6 +160,7 @@ describe("buildIssuePullRequestProgress の内訳", () => {
     expect(labelOf("opened", progress)).toEqual({
       key: "opened",
       label: "実装完了",
+      shortLabel: "実装完了",
       state: "done",
     });
   });
@@ -193,7 +194,38 @@ describe("buildIssuePullRequestProgress の内訳", () => {
 
   it("CIが失敗した段は failed で止まる", () => {
     const failed = buildIssuePullRequestProgress(pullRequest({ ciState: "failure" }));
-    expect(labelOf("ci", failed)).toEqual({ key: "ci", label: "CI失敗", state: "failed" });
+    expect(labelOf("ci", failed)).toEqual({
+      key: "ci",
+      label: "CI失敗",
+      shortLabel: "CI失敗",
+      state: "failed",
+    });
+  });
+
+  // PR一覧のステータスレール（#2942）は幅が狭く、「Claudeのレビュー完了」は枠に収まらない。
+  // 短縮版は主語を落としただけで、状態の呼び分けは`label`と1対1に保つ。
+  it("レビューの段だけ、主語を落とした短縮版を持つ", () => {
+    for (const [aiReview, label, shortLabel] of [
+      ["pending", "Claudeがレビュー中", "レビュー中"],
+      ["passed", "Claudeのレビュー完了", "レビュー完了"],
+      ["skipped", "Claudeのレビュー省略", "レビュー省略"],
+      ["failed", "Claudeのレビュー失敗", "レビュー失敗"],
+    ] as const) {
+      const step = labelOf(
+        "ai-review",
+        buildIssuePullRequestProgress(pullRequest({ mergeJudgement: judgement({ aiReview }) })),
+      );
+      expect(step?.label).toBe(label);
+      expect(step?.shortLabel).toBe(shortLabel);
+    }
+  });
+
+  it("短縮する必要が無い段は label と同じ文字列を持つ", () => {
+    const progress = buildIssuePullRequestProgress(pullRequest({ ciState: "unknown" }));
+    for (const step of progress.steps) {
+      if (step.key === "ai-review") continue;
+      expect(step.shortLabel).toBe(step.label);
+    }
   });
 });
 
