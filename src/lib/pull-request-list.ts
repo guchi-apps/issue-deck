@@ -551,6 +551,25 @@ export const AI_REVIEW_SETTLED_LABEL: Record<AiReviewSettledState, string> = {
   failed: "Claudeのレビュー失敗",
 };
 
+/**
+ * レビューの状態の**短い**呼び名（#2942）。PR一覧のステータスレールのように、
+ * 幅が数十pxしかない枠へ出すときだけ使う。
+ *
+ * **主語（「Claudeの」「Claudeが」）を落としただけで、状態の呼び分けは長い方と1対1に保つ。**
+ * `REPAIR_KIND_RUNNING_LABEL`と`REPAIR_KIND_RUNNING_SHORT_LABEL`が同じ場所に並んでいるのと
+ * 同じ形で、**長い方の隣に置く**——別のファイルへ置くと、片方だけ直された状態に気付けない。
+ * 長い方は`title`に出すので、短くしても全文を読む手段は残る。
+ *
+ * `pending`まで含めているのは、レールが「実行中」も同じ枠に出すため。長い方の`pending`は
+ * `MERGE_JUDGEMENT_STEP_LABEL["claude-review"]`（「Claudeがレビュー中」）が持っている。
+ */
+export const AI_REVIEW_SHORT_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
+  pending: "レビュー中",
+  passed: "レビュー完了",
+  skipped: "レビュー省略",
+  failed: "レビュー失敗",
+};
+
 /** バッジの`title`に出す説明（#2150）。PCでマウスを載せたときに、その状態の意味まで読めるようにする */
 export const AI_REVIEW_SETTLED_REASON: Record<AiReviewSettledState, string> = {
   passed: "Claude Codeによるレビューが終わっています（claude-review-develop）。",

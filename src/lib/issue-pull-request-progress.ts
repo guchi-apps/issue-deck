@@ -2,7 +2,13 @@ import type { AiReviewState, MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { CiState } from "@/lib/github/release-api";
 import { type ProgressStatusKey } from "@/lib/issue-progress";
-import { CI_STATE_LABEL, mergeJudgementLabel } from "@/lib/pull-request-list";
+import {
+  AI_REVIEW_SETTLED_LABEL,
+  AI_REVIEW_SHORT_LABEL,
+  CI_STATE_LABEL,
+  MERGE_JUDGEMENT_STEP_LABEL,
+  mergeJudgementLabel,
+} from "@/lib/pull-request-list";
 
 /**
  * 「developへマージ」段の中で、いま何が終わっていて何を待っているか（#2816）。
@@ -30,6 +36,15 @@ export type IssuePullRequestStepState = "done" | "current" | "pending" | "failed
 export type IssuePullRequestStep = {
   key: IssuePullRequestStepKey;
   label: string;
+  /**
+   * 幅の狭い場所（PR一覧のステータスレール。#2942）に出す短い言い回し。短くする必要が無い段では
+   * `label`と同じ文字列を入れる。
+   *
+   * **新しい言葉を作らず、`label`から主語（「Claudeの」）を落としただけにする。**
+   * `REPAIR_KIND_RUNNING_SHORT_LABEL`と同じ扱いで、長い方を`title`に出せば全文も読める。
+   * 列そのものに「Claudeのレビュー」と見出しが付くため、短い方でも何の話かは失われない。
+   */
+  shortLabel: string;
   state: IssuePullRequestStepState;
 };
 
@@ -74,12 +89,16 @@ export type IssuePullRequestProgressSource = {
   mergeJudgement: MergeJudgement;
 };
 
-/** Claudeのレビューの段に出す文言。`none`（check-runが無い）は段ごと落とすので入っていない */
+/**
+ * Claudeのレビューの段に出す文言。`none`（check-runが無い）は段ごと落とすので入っていない。
+ *
+ * **写しを作らず、PR画面が持っている文言をそのまま組み立てる**（#2942）。以前はここに
+ * `AI_REVIEW_SETTLED_LABEL`と同じ3語を書き写しており、同じ状態の呼び名が2か所にあった。
+ * 短縮版（`AI_REVIEW_SHORT_LABEL`）を足すにあたって、写しの方を消してある。
+ */
 const AI_REVIEW_STEP_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
-  pending: "Claudeがレビュー中",
-  passed: "Claudeのレビュー完了",
-  skipped: "Claudeのレビュー省略",
-  failed: "Claudeのレビュー失敗",
+  pending: MERGE_JUDGEMENT_STEP_LABEL["claude-review"],
+  ...AI_REVIEW_SETTLED_LABEL,
 };
 
 /** マージの段に出す文言 */
@@ -167,10 +186,12 @@ export function buildIssuePullRequestProgress(
   const judgementPending = mergeJudgement.state === "pending";
 
   const steps: IssuePullRequestStep[] = [
-    { key: "opened", label: OPENED_STEP_LABEL, state: "done" },
+    { key: "opened", label: OPENED_STEP_LABEL, shortLabel: OPENED_STEP_LABEL, state: "done" },
     {
       key: "ci",
       label: CI_STATE_LABEL[ciState],
+      // CIの呼び名（最長でも「CI状態は不明」）は狭い場所でもそのまま収まるので短縮版を持たない
+      shortLabel: CI_STATE_LABEL[ciState],
       state:
         ciState === "failure"
           ? "failed"
@@ -188,6 +209,7 @@ export function buildIssuePullRequestProgress(
     steps.push({
       key: "ai-review",
       label: AI_REVIEW_STEP_LABEL[aiReviewState],
+      shortLabel: AI_REVIEW_SHORT_LABEL[aiReviewState],
       state:
         aiReviewState === "failed"
           ? "failed"
@@ -204,6 +226,7 @@ export function buildIssuePullRequestProgress(
   steps.push({
     key: "merge",
     label: merged ? MERGED_STEP_LABEL : MERGE_STEP_LABEL,
+    shortLabel: merged ? MERGED_STEP_LABEL : MERGE_STEP_LABEL,
     state: merged ? "done" : beforeMergePending ? "pending" : "current",
   });
 
