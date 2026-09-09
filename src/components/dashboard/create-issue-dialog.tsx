@@ -428,6 +428,14 @@ export function CreateIssueDialog({
   const [postCreateIssue, setPostCreateIssue] = useState<Issue | null>(null);
   const { setting: postCreateSetting, setSetting: setPostCreateSetting } =
     usePostCreateDestination();
+  /**
+   * 「続けて作成」（#2932）で開き直したときに引き継ぐリポジトリ。**入っている間は、
+   * 呼び出し元のプリフィル（`defaultTitle`・`defaultBody`・`bodyPrefix`）を使わない。**
+   * 直前の入口の埋め込みや引き継ぎの接頭辞をそのまま持ち込むと、続けて作った2件目に
+   * 無関係な内容が入る。閉じた時点で落とし、次に開いた入口の指定へ戻す。
+   */
+  const [continueRepositoryFullName, setContinueRepositoryFullName] = useState<string | null>(null);
+  const effectiveBodyPrefix = continueRepositoryFullName ? null : bodyPrefix;
 
   const { labels, isLoading: isMetaLoading } = useIssueRepoMeta(
     open ? repositoryFullName : null,
@@ -486,14 +494,17 @@ export function CreateIssueDialog({
     // 渡されていればそちらを優先し、それ以外は空の状態にする（保存済みの下書きは自動では
     // 反映せず、readRestorableIssueDraftの結果をユーザーが「復元する」で選んだ場合のみ反映する）。
     // 外部トリガー（開閉）に同期する一度きりの処理であり、ループや連鎖的な再レンダリングは発生しない。
-    // 別ウィンドウへ移してきた内容があればそれを正とする（#1728）
-    const draft =
-      initialHandoff ??
-      resolveInitialIssueDraft({
-        defaultRepositoryFullName,
-        defaultTitle,
-        defaultBody,
-      });
+    // 別ウィンドウへ移してきた内容があればそれを正とする（#1728）。
+    // 「続けて作成」で開き直した場合だけは、作ったIssueのリポジトリだけを引き継いだ
+    // 空のフォームで始める（#2932）
+    const draft = continueRepositoryFullName
+      ? resolveInitialIssueDraft({ defaultRepositoryFullName: continueRepositoryFullName })
+      : (initialHandoff ??
+        resolveInitialIssueDraft({
+          defaultRepositoryFullName,
+          defaultTitle,
+          defaultBody,
+        }));
     setKind(draft.kind);
     // 移してきた値は「人が書いたもの」として扱う。`自動`の出どころは移す前の画面に残っており、
     // ここで復元すると、直したはずの項目まで自動と書かれかねない
@@ -503,8 +514,10 @@ export function CreateIssueDialog({
     setRepositoryFullName(draft.repositoryFullName);
     // 移してきたリポジトリは、移す前の画面で人が選んだものかどうかまでは分からない。
     // 触っていない扱いにすると`表示中のリポジトリ`が出るが、`defaultRepositoryFullName`も
-    // 同じ値で渡ってくるため表示は移す前と揃う
-    setHasPickedRepository(false);
+    // 同じ値で渡ってくるため表示は移す前と揃う。
+    // 「続けて作成」で引き継いだリポジトリは、直前の1件を作るときに本人が決めたものなので
+    // 選んだ扱いにする（#2932・#1733の下書き復元と同じ考え方）
+    setHasPickedRepository(continueRepositoryFullName !== null);
     setTitle(draft.title);
     setBody(draft.body);
     setSelectedLabels(draft.selectedLabels);
@@ -514,8 +527,10 @@ export function CreateIssueDialog({
     setPopOutBlocked(false);
     // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
     // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
+    // 「続けて作成」で開き直した直後も出さない（#2932）。直前の作成で下書きは消えているが、
+    // 消える前の内容を提示しても、今から書く2件目とは関係が無い
     setRestorableDraft(
-      initialHandoff
+      initialHandoff || continueRepositoryFullName
         ? null
         : readRestorableIssueDraft({ defaultRepositoryFullName, defaultTitle, defaultBody }),
     );
@@ -525,6 +540,7 @@ export function CreateIssueDialog({
     defaultTitle,
     defaultBody,
     initialHandoff,
+    continueRepositoryFullName,
     setError,
     setCommentError,
   ]);
@@ -594,12 +610,24 @@ export function CreateIssueDialog({
       body,
       selectedLabels,
       assignee: null,
-      bodyPrefix: bodyPrefix ?? null,
+      bodyPrefix: effectiveBodyPrefix ?? null,
     });
     if (!opened) {
       setPopOutBlocked(true);
       return;
     }
+    closeDialog();
+  }
+
+  /**
+   * このダイアログを閉じる（×・Escape・取り消し・作成後の自動クローズ）。
+   *
+   * **閉じる操作はすべてここを通す。** 「続けて作成」で引き継いだリポジトリ
+   * （`continueRepositoryFullName`）を閉じた時点で落とすため——次にどの入口から開くかは
+   * 分からず、持ち越すと呼び出し元のプリフィルを抑止したままになる（#2932）。
+   */
+  function closeDialog() {
+    setContinueRepositoryFullName(null);
     onOpenChange(false);
   }
 
@@ -729,7 +757,32 @@ export function CreateIssueDialog({
 
   /** 行き先を実行する。「元の画面に戻る」は**何もしない**のが実装（画面はもう戻っている） */
   function applyPostCreateDestination(issue: Issue, destination: PostCreateDestination) {
-    if (destination === "detail") onNavigateToIssue?.(issue);
+    if (destination === "detail") {
+      onNavigateToIssue?.(issue);
+      return;
+    }
+    if (destination === "another") startAnotherIssue(issue.repositoryFullName);
+  }
+
+  /**
+   * 「続けて作成」（#2932）。**直前に作ったIssueのリポジトリだけを引き継いだ空のフォーム**を
+   * 開き直す。作成の直前に`resetForm`が走っているので、ここで戻すのはリポジトリだけでよい。
+   *
+   * **画面の状態へ直接入れ直すのと、`continueRepositoryFullName`を控えるのを両方やる。**
+   * 直前の作成でダイアログが閉じたかどうかで、効く側が入れ替わるため。
+   *
+   * - 選択画面を挟んだとき: 作成の時点で`open`が`false`になっているので、ここで開き直すと
+   *   初期化のeffectが走る。そちらが見るのは控えた値の方
+   * - 行き先を「続けて作成」で記憶しているとき: 作成の直後にそのままここへ来るため、
+   *   `open`は`false`を経ずに`true`のままになり初期化のeffectが走らない。直接入れ直す方が効く
+   */
+  function startAnotherIssue(nextRepositoryFullName: string) {
+    setContinueRepositoryFullName(nextRepositoryFullName);
+    setRepositoryFullName(nextRepositoryFullName);
+    // 直前の1件を作るときに本人が決めたリポジトリなので、`表示中のリポジトリ`は出さない
+    setHasPickedRepository(true);
+    setRestorableDraft(null);
+    onOpenChange(true);
   }
 
   async function handleSubmit() {
@@ -743,7 +796,7 @@ export function CreateIssueDialog({
     const issue = await createIssue({
       repositoryFullName,
       title: resolved.title,
-      body: composeIssueBody(bodyPrefix, body),
+      body: composeIssueBody(effectiveBodyPrefix, body),
       labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
     });
@@ -751,7 +804,7 @@ export function CreateIssueDialog({
       resetForm();
       clearIssueDraft();
       onCreated(issue);
-      onOpenChange(false);
+      closeDialog();
       askOrApplyPostCreateDestination(issue);
     }
   }
@@ -768,7 +821,7 @@ export function CreateIssueDialog({
     const issue = await createIssue({
       repositoryFullName,
       title: buildAskRepoQuestionTitle(body),
-      body: composeIssueBody(bodyPrefix, body),
+      body: composeIssueBody(effectiveBodyPrefix, body),
       labels: selectedLabels,
       assignee: null,
     });
@@ -784,7 +837,7 @@ export function CreateIssueDialog({
 
     resetForm();
     clearIssueDraft();
-    onOpenChange(false);
+    closeDialog();
     onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
     // 質問もIssueを1件作る以上、行き先の扱いは作成と同じにする（#2862）。ここだけ必ず詳細へ
     // 移動させると、記憶した行き先と食い違う
@@ -810,7 +863,7 @@ export function CreateIssueDialog({
     const issue = await createIssue({
       repositoryFullName,
       title: resolved.title,
-      body: composeIssueBody(bodyPrefix, body),
+      body: composeIssueBody(effectiveBodyPrefix, body),
       labels: resolved.labels,
       assignee: DEFAULT_ASSIGNEE,
     });
@@ -820,7 +873,7 @@ export function CreateIssueDialog({
     clearIssueDraft();
     // 別ウィンドウでは`onOpenChange(false)`がウィンドウを閉じる操作なので、ここでは呼ばない
     // （#1728）。閉じると、この後に出す実行先の選択ごと消える。閉じるのは選択が終わった時点
-    if (!isWindow) onOpenChange(false);
+    if (!isWindow) closeDialog();
     onCreated(issue);
     setStartTargetIssue(issue);
   }
@@ -1020,13 +1073,13 @@ export function CreateIssueDialog({
           <Label htmlFor="create-issue-body">{isQuestion ? "質問内容" : "内容"}</Label>
           {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
               入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
-          {bodyPrefix && (
+          {effectiveBodyPrefix && (
             <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
               <p className="text-xs text-muted-foreground">
                 以下は本文の先頭に自動で付きます（編集不可）
               </p>
               <p className="mt-1 text-xs break-all whitespace-pre-wrap text-foreground">
-                {bodyPrefix.trim()}
+                {effectiveBodyPrefix.trim()}
               </p>
             </div>
           )}
@@ -1143,7 +1196,7 @@ export function CreateIssueDialog({
    */
   const footer = (
     <Chrome.Footer>
-      <Button variant="outline" onClick={() => onOpenChange(false)}>
+      <Button variant="outline" onClick={closeDialog}>
         {cancelLabel ?? (isWindow ? "閉じる" : "キャンセル")}
       </Button>
       {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
@@ -1198,7 +1251,7 @@ export function CreateIssueDialog({
           </div>
         )
       ) : (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : closeDialog())}>
           <DialogContent className="sm:max-w-lg" onKeyDown={handleKeyDown}>
             {header}
             {/* 書いている内容ごと別ウィンドウへ移す（#1728）。**スマホでは出さない**——
@@ -1235,7 +1288,7 @@ export function CreateIssueDialog({
             // 別ウィンドウでは、実行先を選び終えた（または閉じた）時点でウィンドウごと閉じる
             // （#1728）。作り終わったフォームだけが残っても、そこからできることは無い
             if (isWindow) {
-              onOpenChange(false);
+              closeDialog();
               return;
             }
             if (created) askOrApplyPostCreateDestination(created);

@@ -343,6 +343,82 @@ describe("CreateIssueDialog の「次に開く画面」", () => {
     expect(onNavigateToIssue).not.toHaveBeenCalled();
   });
 
+  /** #2932。まとめて起票するとき、1件ごとに一覧へ戻ってリポジトリを選び直す往復をなくす */
+  it("「続けて作成」を押すと、同じリポジトリのまま空のフォームが開き直る", async () => {
+    // 呼び出し元の初期値は空にしておく。開き直したときに入っているリポジトリが、
+    // 呼び出し元のプリフィルではなく直前に作ったIssueから引き継いだものだと確かめられる
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        onNavigateToIssue={vi.fn()}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickRepository(REPOSITORY_FULL_NAME);
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "1件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await screen.findByText("Issueを作成しました");
+    fireEvent.click(screen.getByRole("button", { name: /続けて作成/ }));
+
+    const title = (await screen.findByLabelText("タイトル")) as HTMLInputElement;
+    expect(title.value).toBe("");
+    expect(screen.queryByText("Issueを作成しました")).toBeNull();
+
+    fireEvent.change(title, { target: { value: "2件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(2));
+    expect(createIssue.mock.calls[1][0]).toMatchObject({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      title: "2件目",
+    });
+  });
+
+  /**
+   * 記憶したときは選択画面を挟まないぶん、ダイアログが`open`のまま開き直る。
+   * 初期化のeffectが走らない経路なので、リポジトリが残ることを別に見ておく（#2932）
+   */
+  it("「続けて作成」を記憶させると、選択画面を出さずに次のフォームが開いたままになる", async () => {
+    render(
+      <Harness
+        onCreated={vi.fn()}
+        onNavigateToIssue={vi.fn()}
+        defaultRepositoryFullName={null}
+      />,
+    );
+
+    pickRepository(REPOSITORY_FULL_NAME);
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "1件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await screen.findByText("Issueを作成しました");
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /続けて作成/ }));
+
+    const title = (await screen.findByLabelText("タイトル")) as HTMLInputElement;
+    fireEvent.change(title, { target: { value: "2件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(2));
+    expect(createIssue.mock.calls[1][0]).toMatchObject({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+    });
+    // 記憶しているので選択画面は出ず、3件目を書けるフォームがそのまま開いている
+    expect(screen.queryByText("Issueを作成しました")).toBeNull();
+    await waitFor(() =>
+      expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe(""),
+    );
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "3件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(3));
+    expect(createIssue.mock.calls[2][0]).toMatchObject({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      title: "3件目",
+    });
+  });
+
   it("行き先を記憶させると、次の作成では選択画面を出さずにそのまま進む", async () => {
     const onNavigateToIssue = vi.fn();
     const { unmount } = render(

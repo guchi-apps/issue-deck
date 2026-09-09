@@ -74,6 +74,17 @@ describe("PostCreateNavigationDialog（#2862）", () => {
     expect(onSelect).toHaveBeenCalledWith("stay", false);
   });
 
+  /** #2932。まとめて起票するときに、一覧へ戻ってリポジトリを選び直す往復をなくす */
+  it("「続けて作成」も同じ形で渡す", () => {
+    const onSelect = vi.fn();
+    render(
+      <PostCreateNavigationDialog issue={makeIssue()} onSelect={onSelect} onDismiss={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /続けて作成/ }));
+    expect(onSelect).toHaveBeenCalledWith("another", false);
+  });
+
   it("「次回からこの画面を出さない」を入れてから押すと、記憶する指示も一緒に渡す", () => {
     const onSelect = vi.fn();
     render(
