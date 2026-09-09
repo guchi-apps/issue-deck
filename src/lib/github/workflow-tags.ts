@@ -207,82 +207,163 @@ export async function fetchLatestWorkflowTag(token: string): Promise<string | nu
   }
 }
 
-/** tree比較の対象パス。配布スクリプトが実際に書き換える対象と揃える（#2941） */
-const CONTENT_DIFF_PATHS = [".github/workflows", ".github/prompts"] as const;
+/**
+ * タグで固定される配布物のうち、ディレクトリ全体をtree比較してよいもの（#2941）。
+ * `.github/workflows`は自分用ファイル（`ci.yml`・`deploy.yml`等）も混在するため、
+ * こちらには含めず`REUSABLE_WORKFLOW_PREFIX`で個別に絞る。
+ */
+const CONTENT_DIFF_TREE_PATHS = [".github/prompts"] as const;
+
+/**
+ * タグで固定される配布物のうち、個別ファイルとしてblob OIDを比較するもの（#2941）。
+ * 各`reusable-*.yml`が`prompts-ref`のcheckout（タグ）から`$ROOT/<このパス>`として読む
+ * （`reusable-claude-ci-fix.yml:233`・`reusable-issue-dispatch.yml:862`）。
+ * `workflows/v31→v32`では実際にこのうち1件だけが変わっている。
+ */
+const CONTENT_DIFF_BLOB_PATHS = [
+  ".github/scripts/summarize-claude-usage.sh",
+  "scripts/fleet-status.sh",
+] as const;
+
+/** `.github/workflows`直下でタグ配布の対象になるファイル名の接頭辞 */
+const REUSABLE_WORKFLOW_PREFIX = "reusable-";
+
+type TreeEntryRef = { name: string; oid: string };
+type ContentDiffRepository = {
+  ref: { compare: { aheadBy: number } | null } | null;
+  tagWorkflows: { entries?: TreeEntryRef[] | null } | null;
+  mainWorkflows: { entries?: TreeEntryRef[] | null } | null;
+} & Record<string, { oid: string } | null>;
+
+/** Treeのentriesから`reusable-*.yml`だけを`{ファイル名: oid}`へ絞る。取れなければnull */
+function reusableWorkflowOids(
+  tree: { entries?: TreeEntryRef[] | null } | null,
+): Record<string, string> | null {
+  if (!tree?.entries) return null;
+  const result: Record<string, string> = {};
+  for (const entry of tree.entries) {
+    if (entry.name.startsWith(REUSABLE_WORKFLOW_PREFIX) && entry.name.endsWith(".yml")) {
+      result[entry.name] = entry.oid;
+    }
+  }
+  return result;
+}
+
+/**
+ * タグで固定される配布物の内容が`main`と同じかを判定する（#2941）。
+ *
+ * 1つでも差分があれば即`true`。1つでも取得できなければ`null`（わからない＝ブロックしない）。
+ * どちらでもなければ`false`（配布物すべてが完全一致）。
+ */
+function computeHasContentDiff(repository: ContentDiffRepository | null): boolean | null {
+  if (!repository) return null;
+
+  const tagReusable = reusableWorkflowOids(repository.tagWorkflows);
+  const mainReusable = reusableWorkflowOids(repository.mainWorkflows);
+  if (!tagReusable || !mainReusable) return null;
+  const reusableNames = new Set([...Object.keys(tagReusable), ...Object.keys(mainReusable)]);
+  if ([...reusableNames].some((name) => tagReusable[name] !== mainReusable[name])) return true;
+
+  const otherPairs = [
+    ...CONTENT_DIFF_BLOB_PATHS.map((_path, index) => ({
+      tag: repository[`tagBlob${index}`]?.oid,
+      main: repository[`mainBlob${index}`]?.oid,
+    })),
+    ...CONTENT_DIFF_TREE_PATHS.map((_path, index) => ({
+      tag: repository[`tagTree${index}`]?.oid,
+      main: repository[`mainTree${index}`]?.oid,
+    })),
+  ];
+  if (otherPairs.some((pair) => !pair.tag || !pair.main)) return null;
+  return otherPairs.some((pair) => pair.tag !== pair.main);
+}
 
 /**
  * `main`の先端が最新タグからどれだけ進んでいるか・配布物の中身が変わっているかを取る（#2476・#2941）。
  *
  * **「新しいタグを切って配る」は未更新が0件でも押せる**（配布が一巡した状態こそ次のタグを
- * 切る場面）。ただし配布物（`.github/workflows`・`.github/prompts`）の中身が最新タグと同じ
- * なら切っても配る内容は変わらないため、押す前に読める形にしておく。
+ * 切る場面）。ただしタグで固定される配布物の中身が最新タグと同じなら切っても配る内容は
+ * 変わらないため、押す前に読める形にしておく。
  *
- * **判定は`aheadBy`（コミット数）ではなくtree OID比較で行う**（#2941）。コミット数は
+ * **判定は`aheadBy`（コミット数）ではなくtree/blob OID比較で行う**（#2941）。コミット数は
  * 無関係な変更でも増えるため「配布が要るか」の判定には使えない——実際`workflows/v32`→`v33`
- * は40コミット差があったが、両ディレクトリのtreeは完全に同一だった。`aheadBy`は補助情報
- * としてのみ残す。
+ * は40コミット差があったが、配布物の中身は完全に同一だった。`aheadBy`は補助情報として残す。
  *
- * **比較対象は`.github/workflows`・`.github/prompts`の2つだけ。** `.github/scripts`は
- * 別ワークフロー（`propagate-shared-files.yml`）が`main`から直接配る別物で、タグの参照とは
- * 無関係なので混ぜない。
+ * **`.github/workflows`はディレクトリ全体では比較しない。** 27ファイル中`reusable-*.yml`は
+ * 10本だけで、残りはissue-deck自身のcaller・`ci.yml`・`deploy.yml`等。ディレクトリごと比較
+ * すると、配布に無関係な自分用ファイルの変更だけで「差分あり」と誤判定する
+ * （実際`workflows/v30`→`v31`は`deploy.yml`等2件しか変わっていないのに配布先には何も
+ * 届かない）。`reusable-`で始まるファイルのoidだけを突き合わせる。
  *
  * **RESTの`/compare`は使わない。** あちらは差分のコミットとファイルまで返すため、画面を
- * 開くたび（配布の実行中は10秒ごと）に数百KBを運ぶことになる。GraphQLの`Ref.compare`は
- * 件数だけを返す。tree OIDも同じクエリへのフィールド追加だけで取れるため、追加の往復は無い。
+ * 開くたび（配布の実行中は10秒ごと）に数百KBを運ぶことになる。GraphQLなら同じクエリへの
+ * フィールド追加だけで済み、追加の往復は無い。
  */
 async function fetchSourceAhead(token: string, latest: string | null): Promise<SourceAhead | null> {
   if (!latest) return null;
 
   const [owner, name] = SOURCE_REPOSITORY.split("/");
-  const objectDeclarations = CONTENT_DIFF_PATHS.map(
-    (_path, index) => `$tagPath${index}: String!, $mainPath${index}: String!`,
+
+  const blobDeclarations = CONTENT_DIFF_BLOB_PATHS.map(
+    (_path, index) => `$tagBlob${index}: String!, $mainBlob${index}: String!`,
   ).join(", ");
-  const objectSelections = CONTENT_DIFF_PATHS.map(
+  const blobSelections = CONTENT_DIFF_BLOB_PATHS.map(
     (_path, index) =>
-      `      tagPath${index}: object(expression: $tagPath${index}) { oid }
-      mainPath${index}: object(expression: $mainPath${index}) { oid }`,
+      `      tagBlob${index}: object(expression: $tagBlob${index}) { oid }
+      mainBlob${index}: object(expression: $mainBlob${index}) { oid }`,
+  ).join("\n");
+  const treeDeclarations = CONTENT_DIFF_TREE_PATHS.map(
+    (_path, index) => `$tagTree${index}: String!, $mainTree${index}: String!`,
+  ).join(", ");
+  const treeSelections = CONTENT_DIFF_TREE_PATHS.map(
+    (_path, index) =>
+      `      tagTree${index}: object(expression: $tagTree${index}) { oid }
+      mainTree${index}: object(expression: $mainTree${index}) { oid }`,
   ).join("\n");
 
-  const query = `query($owner: String!, $name: String!, $tag: String!, ${objectDeclarations}) {
+  const query = `query($owner: String!, $name: String!, $tag: String!, $tagWorkflows: String!, $mainWorkflows: String!, ${blobDeclarations}, ${treeDeclarations}) {
     repository(owner: $owner, name: $name) {
       ref(qualifiedName: $tag) {
         compare(headRef: "main") { aheadBy }
       }
-${objectSelections}
+      tagWorkflows: object(expression: $tagWorkflows) {
+        ... on Tree { entries { name oid } }
+      }
+      mainWorkflows: object(expression: $mainWorkflows) {
+        ... on Tree { entries { name oid } }
+      }
+${blobSelections}
+${treeSelections}
     }
   }`;
 
-  const variables: Record<string, unknown> = { owner, name, tag: `refs/tags/${latest}` };
-  CONTENT_DIFF_PATHS.forEach((path, index) => {
-    variables[`tagPath${index}`] = `${latest}:${path}`;
-    variables[`mainPath${index}`] = `main:${path}`;
+  const variables: Record<string, unknown> = {
+    owner,
+    name,
+    tag: `refs/tags/${latest}`,
+    tagWorkflows: `${latest}:.github/workflows`,
+    mainWorkflows: `main:.github/workflows`,
+  };
+  CONTENT_DIFF_BLOB_PATHS.forEach((path, index) => {
+    variables[`tagBlob${index}`] = `${latest}:${path}`;
+    variables[`mainBlob${index}`] = `main:${path}`;
+  });
+  CONTENT_DIFF_TREE_PATHS.forEach((path, index) => {
+    variables[`tagTree${index}`] = `${latest}:${path}`;
+    variables[`mainTree${index}`] = `main:${path}`;
   });
 
-  type ObjectRef = { oid: string } | null;
-  type Data = {
-    repository:
-      | ({ ref: { compare: { aheadBy: number } | null } | null } & Record<string, ObjectRef>)
-      | null;
-  };
+  type Data = { repository: ContentDiffRepository | null };
   try {
     const data = await githubGraphql<Data>(token, query, variables, "配布元の進み具合の取得");
     const aheadBy = data.repository?.ref?.compare?.aheadBy;
     if (typeof aheadBy !== "number") return null;
 
-    const oids = CONTENT_DIFF_PATHS.map((_path, index) => ({
-      tag: data.repository?.[`tagPath${index}`]?.oid,
-      main: data.repository?.[`mainPath${index}`]?.oid,
-    }));
-    // どちらかのoidが1件でも取れなければ「わからない」として扱う（安全側に倒し、ブロックしない）
-    const hasContentDiff = oids.every((pair) => pair.tag && pair.main)
-      ? oids.some((pair) => pair.tag !== pair.main)
-      : null;
-
     return {
       tag: latest,
       aheadBy,
       compareUrl: `https://github.com/${SOURCE_REPOSITORY}/compare/${latest}...main`,
-      hasContentDiff,
+      hasContentDiff: computeHasContentDiff(data.repository),
     };
   } catch (error) {
     // 進み具合が分からなくてもタグは切れる。画面はこの行を出さないだけにする

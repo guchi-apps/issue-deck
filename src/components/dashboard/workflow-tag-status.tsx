@@ -576,11 +576,12 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
             新しいタグを切って配る
           </Button>
 
-          {/* 押す前の判断材料（#2476）。**判定は配布物（.github/workflows・.github/prompts）の
-              tree内容が同じかどうかで行う**（#2941）。コミット数（aheadBy）は無関係な変更でも
-              増えるため判定には使わず、補助情報としてのみ添える。
-              hasContentDiffがfalse（同じ内容）と判定できたときだけボタンを無効化し、
-              分からない場合（null）はこれまでどおり押せる */}
+          {/* 押す前の判断材料（#2476）。**判定はタグで固定される配布物（reusable-*.yml・
+              .github/prompts・summarize-claude-usage.sh・fleet-status.sh）の内容が同じ
+              かどうかで行う**（#2941、詳細は src/lib/github/workflow-tags.ts の
+              fetchSourceAhead）。コミット数（aheadBy）は無関係な変更でも増えるため判定には
+              使わず、補助情報としてのみ添える。hasContentDiffがfalse（同じ内容）と判定
+              できたときだけボタンを無効化し、分からない場合（null）はこれまでどおり押せる */}
           {sourceAhead && (
             <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
               {sourceAhead.hasContentDiff === false ? (

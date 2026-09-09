@@ -141,7 +141,7 @@ function route(handlers: RouteHandlers) {
       return Promise.resolve(ok({ data: { repository: { refs: { nodes } } } }));
     }
 
-    // 配布元の進み具合（#2476）とtree内容比較（#2941）。タグを基点に`main`と比べる
+    // 配布元の進み具合（#2476）と配布物の内容比較（#2941）。タグを基点に`main`と比べる
     if (body?.query.includes("compare(headRef")) {
       const aheadBy = handlers.aheadBy ?? null;
       const repository: Record<string, unknown> = {
@@ -149,10 +149,20 @@ function route(handlers: RouteHandlers) {
       };
       if (handlers.hasContentDiff !== undefined) {
         const mainOid = handlers.hasContentDiff ? "oid-main-changed" : "oid-same";
-        repository.tagPath0 = { oid: "oid-same" };
-        repository.mainPath0 = { oid: mainOid };
-        repository.tagPath1 = { oid: "oid-same" };
-        repository.mainPath1 = { oid: mainOid };
+        // .github/workflows は reusable-*.yml だけをエントリに含める（自分用ファイルは
+        // 比較対象に入らないことを、名前を混ぜたエントリで確かめるテストが別途ある）
+        repository.tagWorkflows = {
+          entries: [{ name: "reusable-issue-dispatch.yml", oid: "oid-same" }],
+        };
+        repository.mainWorkflows = {
+          entries: [{ name: "reusable-issue-dispatch.yml", oid: mainOid }],
+        };
+        repository.tagBlob0 = { oid: "oid-same" };
+        repository.mainBlob0 = { oid: "oid-same" };
+        repository.tagBlob1 = { oid: "oid-same" };
+        repository.mainBlob1 = { oid: "oid-same" };
+        repository.tagTree0 = { oid: "oid-same" };
+        repository.mainTree0 = { oid: "oid-same" };
       }
       return Promise.resolve(ok({ data: { repository } }));
     }
@@ -247,6 +257,83 @@ describe("collectWorkflowTags", () => {
     const overview = await collectWorkflowTags("user-1");
 
     expect(overview.sourceAhead).toMatchObject({ aheadBy: 40, hasContentDiff: false });
+  });
+
+  /** compare(headRef)の応答をカスタムのrepositoryオブジェクトへ差し替える（他のクエリは`route`のまま） */
+  function withContentDiffRepository(repository: Record<string, unknown>) {
+    const base = route({ tags: ["workflows/v12"], aheadBy: 2 });
+    githubFetch.mockImplementation((url: string, token: string, options?: { body?: GraphqlCall }) => {
+      const body = options?.body;
+      if (body?.query.includes("compare(headRef")) {
+        return Promise.resolve(ok({ data: { repository: { ref: { compare: { aheadBy: 2 } }, ...repository } } }));
+      }
+      return base(url, token, options);
+    });
+  }
+
+  it(".github/workflowsの自分用ファイル（reusable-で始まらない）だけが変わっても hasContentDiff は false のまま（#2941）", async () => {
+    // workflows/v30→v31の実例: deploy.yml等2件しか変わっていないのに配布先には何も届かない。
+    // ディレクトリ全体で比較すると誤って「差分あり」になってしまう
+    withContentDiffRepository({
+      tagWorkflows: {
+        entries: [
+          { name: "reusable-issue-dispatch.yml", oid: "same" },
+          { name: "deploy.yml", oid: "deploy-tag" },
+        ],
+      },
+      mainWorkflows: {
+        entries: [
+          { name: "reusable-issue-dispatch.yml", oid: "same" },
+          { name: "deploy.yml", oid: "deploy-main-changed" },
+        ],
+      },
+      tagBlob0: { oid: "same" },
+      mainBlob0: { oid: "same" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: false });
+  });
+
+  it("reusable-*.ymlの内容が変わっていれば hasContentDiff は true（#2941）", async () => {
+    withContentDiffRepository({
+      tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "tag-oid" }] },
+      mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "main-oid" }] },
+      tagBlob0: { oid: "same" },
+      mainBlob0: { oid: "same" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
+  });
+
+  it("summarize-claude-usage.shだけが変わっていても hasContentDiff は true（#2941）", async () => {
+    // reusable-claude-ci-fix.yml等が prompts-ref のcheckout（タグ）から読む、
+    // プロンプト以外の配布物（workflows/v31→v32の実例）
+    withContentDiffRepository({
+      tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      tagBlob0: { oid: "tag-usage-sh" },
+      mainBlob0: { oid: "main-usage-sh" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { oid: "same" },
+      mainTree0: { oid: "same" },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
   });
 
   it("tree OIDが一部でも取れなければ hasContentDiff は null（#2941）", async () => {

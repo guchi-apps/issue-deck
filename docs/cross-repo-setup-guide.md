@@ -715,11 +715,22 @@ car-careだけに配られ、他9リポジトリはv9のまま残っていた（
 並んでいるボタンでも、同じ条件とは限らない。**
 
 ボタンの下に`main`が最新タグと比べて配布物の中身が変わっているかを出す（`sourceAhead`）。
-**判定は`.github/workflows`・`.github/prompts`のtree内容比較で行う。** コミット数
-（`aheadBy`）は判定に使わない——無関係な変更でも増えるため「配布が要るか」の判定には
-使えない（`workflows/v32`→`v33`は40コミット差があったが両ディレクトリのtreeは完全に同一
-だった）。`.github/scripts`は別ワークフロー（`propagate-shared-files.yml`）が`main`から
-直接配る別物なので比較対象に含めない。
+**判定は「タグで実際に固定される配布物」のtree/blob OID比較で行う**——
+`.github/workflows`のうち`reusable-*.yml`だけ・`.github/prompts`全体・
+`.github/scripts/summarize-claude-usage.sh`・`scripts/fleet-status.sh`の4種。後ろの2
+ファイルは各`reusable-*.yml`が`prompts-ref`のcheckout（タグ）から
+`$ROOT/.github/scripts/summarize-claude-usage.sh`のように読んでおり
+（`reusable-claude-ci-fix.yml:233`等）、プロンプト以外にもタグでしか配られない実体が
+ある（`workflows/v31`→`v32`で実際にこの1件だけが変わった実績がある）。
+
+コミット数（`aheadBy`）は判定に使わない——無関係な変更でも増えるため「配布が要るか」の
+判定には使えない（`workflows/v32`→`v33`は40コミット差があったが配布物は完全に同一
+だった）。**`.github/workflows`はディレクトリ全体でも比較しない。** 27ファイル中
+`reusable-*.yml`は10本だけで、残りはissue-deck自身のcaller・`ci.yml`・`deploy.yml`等。
+ディレクトリごと比較すると、配布に無関係な自分用ファイルの変更だけで「差分あり」と誤判定
+する（`workflows/v30`→`v31`は`deploy.yml`等2件しか変わっていないのに配布先には何も
+届かない）。それ以外の`.github/scripts`配下は別ワークフロー
+（`propagate-shared-files.yml`）が`main`から直接配る別物なので比較対象に含めない。
 
 **中身が同じと判定できたときは「新しいタグを切って配る」を無効化する**（#2941）。
 以前は「押せなくはしない」設計だった（切り直したい場面はあるため）が、Issueの要求により
