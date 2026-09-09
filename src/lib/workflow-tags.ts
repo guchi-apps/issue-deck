@@ -250,19 +250,27 @@ export function shortWorkflowTag(tag: string): string {
 }
 
 /**
- * 配布元（issue-deckの`main`）が最新タグからどれだけ進んでいるか（#2476）。
+ * 配布元（issue-deckの`main`）が最新タグからどれだけ進んでいるか（#2476・#2941）。
  *
- * **「新しいタグを切って配る」を押す前の判断材料。** 進んでいなければ次の版数を切っても
- * 中身は最新タグと同じで、全リポジトリへ配り直すだけになる。取得できなかった場合は`null`
- * （進み具合が分からないだけで、タグは切れるため画面は行ごと出さない）。
+ * **配布が要るかどうかの判定は`hasContentDiff`で行う。** `aheadBy`（コミット数）はこの
+ * 用途に使えない——`.github/workflows`・`.github/prompts`に無関係なコミットが積まれても
+ * 増える。実際`workflows/v32`→`v33`は40コミット差があったが、配る中身（両ディレクトリの
+ * tree）は完全に同一だった。`aheadBy`は「差分を見る」リンクと並べて出す補助情報として残す。
  */
 export type SourceAhead = {
   /** 比較の基点にした最新タグ（`workflows/v28`） */
   tag: string;
-  /** `main`がそのタグより進んでいるコミット数。0なら同じ内容 */
+  /** `main`がそのタグより進んでいるコミット数。押す前の参考情報（補助情報。上記コメント参照） */
   aheadBy: number;
   /** GitHubの比較ページ。押す前に何が入るのかを読めるようにする */
   compareUrl: string;
+  /**
+   * 配布物（`.github/workflows`・`.github/prompts`）の内容が`main`とタグで同じか。
+   *
+   * `false`のときだけ「新しいタグを切って配る」を無効化する。取得できなければ`null`
+   * （わからない場合は制限しない、という他の判定と同じ方針）。
+   */
+  hasContentDiff: boolean | null;
 };
 
 /** 配布ワークフローの実行（run）のうち画面に出すぶん */

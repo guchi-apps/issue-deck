@@ -276,6 +276,9 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
   const run = overview?.propagation ?? null;
   // 配布元（`main`）が最新タグからどれだけ進んでいるか（#2476）。取れなければ出さない
   const sourceAhead = overview?.sourceAhead ?? null;
+  // 配布物の中身が最新タグと同じと判定できた場合だけボタンを無効化する（#2941）。
+  // 分からない場合（null）は無効化しない
+  const blockedByNoDiff = sourceAhead?.hasContentDiff === false;
   /**
    * 「新しいタグを切って配る」を出してよいか（#2476）。
    *
@@ -567,19 +570,30 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
             size="sm"
             className={targets.length > 0 ? "w-full" : "mt-1 w-full"}
             onClick={() => void handlePropagate(true)}
-            disabled={isDispatching || isRunning}
+            disabled={isDispatching || isRunning || blockedByNoDiff}
           >
             {isDispatching || isRunning ? <Loader2 className="animate-spin" /> : <Tag />}
             新しいタグを切って配る
           </Button>
 
-          {/* 押す前の判断材料（#2476）。進んでいなければ、切っても配る中身は変わらない。
-              **押せなくはしない**——切り直したい場面はあるため、無駄打ちだと分かれば足りる */}
+          {/* 押す前の判断材料（#2476）。**判定は配布物（.github/workflows・.github/prompts）の
+              tree内容が同じかどうかで行う**（#2941）。コミット数（aheadBy）は無関係な変更でも
+              増えるため判定には使わず、補助情報としてのみ添える。
+              hasContentDiffがfalse（同じ内容）と判定できたときだけボタンを無効化し、
+              分からない場合（null）はこれまでどおり押せる */}
           {sourceAhead && (
             <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
-              {sourceAhead.aheadBy > 0 ? (
+              {sourceAhead.hasContentDiff === false ? (
+                <span>
+                  main は {shortWorkflowTag(sourceAhead.tag)}{" "}
+                  と同じ内容です。配布できる差分が無いため、タグを切れません。
+                </span>
+              ) : sourceAhead.hasContentDiff === true || sourceAhead.aheadBy > 0 ? (
                 <>
                   <span className="tabular-nums">
+                    {sourceAhead.hasContentDiff === true && (
+                      <strong className="font-medium text-foreground">配布が必要です。 </strong>
+                    )}
                     main は {shortWorkflowTag(sourceAhead.tag)} より {sourceAhead.aheadBy}{" "}
                     コミット進んでいます
                   </span>

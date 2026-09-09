@@ -207,43 +207,82 @@ export async function fetchLatestWorkflowTag(token: string): Promise<string | nu
   }
 }
 
+/** tree比較の対象パス。配布スクリプトが実際に書き換える対象と揃える（#2941） */
+const CONTENT_DIFF_PATHS = [".github/workflows", ".github/prompts"] as const;
+
 /**
- * `main`の先端が最新タグからどれだけ進んでいるかを取る（#2476）。
+ * `main`の先端が最新タグからどれだけ進んでいるか・配布物の中身が変わっているかを取る（#2476・#2941）。
  *
  * **「新しいタグを切って配る」は未更新が0件でも押せる**（配布が一巡した状態こそ次のタグを
- * 切る場面）。ただし`main`が進んでいなければ切っても中身は最新タグと同じで、全リポジトリへ
- * 配り直すだけになるため、押す前に読める形にしておく。
+ * 切る場面）。ただし配布物（`.github/workflows`・`.github/prompts`）の中身が最新タグと同じ
+ * なら切っても配る内容は変わらないため、押す前に読める形にしておく。
+ *
+ * **判定は`aheadBy`（コミット数）ではなくtree OID比較で行う**（#2941）。コミット数は
+ * 無関係な変更でも増えるため「配布が要るか」の判定には使えない——実際`workflows/v32`→`v33`
+ * は40コミット差があったが、両ディレクトリのtreeは完全に同一だった。`aheadBy`は補助情報
+ * としてのみ残す。
+ *
+ * **比較対象は`.github/workflows`・`.github/prompts`の2つだけ。** `.github/scripts`は
+ * 別ワークフロー（`propagate-shared-files.yml`）が`main`から直接配る別物で、タグの参照とは
+ * 無関係なので混ぜない。
  *
  * **RESTの`/compare`は使わない。** あちらは差分のコミットとファイルまで返すため、画面を
  * 開くたび（配布の実行中は10秒ごと）に数百KBを運ぶことになる。GraphQLの`Ref.compare`は
- * 件数だけを返す。
+ * 件数だけを返す。tree OIDも同じクエリへのフィールド追加だけで取れるため、追加の往復は無い。
  */
 async function fetchSourceAhead(token: string, latest: string | null): Promise<SourceAhead | null> {
   if (!latest) return null;
 
   const [owner, name] = SOURCE_REPOSITORY.split("/");
-  const query = `query($owner: String!, $name: String!, $tag: String!) {
+  const objectDeclarations = CONTENT_DIFF_PATHS.map(
+    (_path, index) => `$tagPath${index}: String!, $mainPath${index}: String!`,
+  ).join(", ");
+  const objectSelections = CONTENT_DIFF_PATHS.map(
+    (_path, index) =>
+      `      tagPath${index}: object(expression: $tagPath${index}) { oid }
+      mainPath${index}: object(expression: $mainPath${index}) { oid }`,
+  ).join("\n");
+
+  const query = `query($owner: String!, $name: String!, $tag: String!, ${objectDeclarations}) {
     repository(owner: $owner, name: $name) {
       ref(qualifiedName: $tag) {
         compare(headRef: "main") { aheadBy }
       }
+${objectSelections}
     }
   }`;
 
-  type Data = { repository: { ref: { compare: { aheadBy: number } | null } | null } | null };
+  const variables: Record<string, unknown> = { owner, name, tag: `refs/tags/${latest}` };
+  CONTENT_DIFF_PATHS.forEach((path, index) => {
+    variables[`tagPath${index}`] = `${latest}:${path}`;
+    variables[`mainPath${index}`] = `main:${path}`;
+  });
+
+  type ObjectRef = { oid: string } | null;
+  type Data = {
+    repository:
+      | ({ ref: { compare: { aheadBy: number } | null } | null } & Record<string, ObjectRef>)
+      | null;
+  };
   try {
-    const data = await githubGraphql<Data>(
-      token,
-      query,
-      { owner, name, tag: `refs/tags/${latest}` },
-      "配布元の進み具合の取得",
-    );
+    const data = await githubGraphql<Data>(token, query, variables, "配布元の進み具合の取得");
     const aheadBy = data.repository?.ref?.compare?.aheadBy;
     if (typeof aheadBy !== "number") return null;
+
+    const oids = CONTENT_DIFF_PATHS.map((_path, index) => ({
+      tag: data.repository?.[`tagPath${index}`]?.oid,
+      main: data.repository?.[`mainPath${index}`]?.oid,
+    }));
+    // どちらかのoidが1件でも取れなければ「わからない」として扱う（安全側に倒し、ブロックしない）
+    const hasContentDiff = oids.every((pair) => pair.tag && pair.main)
+      ? oids.some((pair) => pair.tag !== pair.main)
+      : null;
+
     return {
       tag: latest,
       aheadBy,
       compareUrl: `https://github.com/${SOURCE_REPOSITORY}/compare/${latest}...main`,
+      hasContentDiff,
     };
   } catch (error) {
     // 進み具合が分からなくてもタグは切れる。画面はこの行を出さないだけにする
@@ -568,7 +607,7 @@ export type CreateWorkflowTagResult = {
   tag: string | null;
   /** タグが指すコミット（短縮なし） */
   sha: string | null;
-  reason?: "no_latest" | "already_exists" | "not_synced";
+  reason?: "no_latest" | "already_exists" | "not_synced" | "no_diff";
   message?: string;
 };
 
@@ -607,6 +646,19 @@ export async function createNextWorkflowTag(userId: string): Promise<CreateWorkf
       message: `最新タグの版数を読めません（${overview.latest}）。`,
     };
   }
+
+  // 配布物（.github/workflows・.github/prompts）の中身が最新タグと同じなら切らない（#2941）。
+  // わからない場合（hasContentDiffがnull）はブロックしない
+  if (overview.sourceAhead?.hasContentDiff === false) {
+    return {
+      created: false,
+      tag: overview.latest,
+      sha: null,
+      reason: "no_diff",
+      message: `main は ${overview.latest} と同じ内容です。配布できる差分がありません。`,
+    };
+  }
+
   const next = `workflows/v${current + 1}`;
 
   const [owner, repo] = SOURCE_REPOSITORY.split("/");
