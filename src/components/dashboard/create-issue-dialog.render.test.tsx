@@ -1002,6 +1002,9 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
   afterEach(() => {
     cleanup();
     window.localStorage.clear();
+    createIssue.mockReset();
+    enqueue.mockReset();
+    dispatchState.hosts = [];
     resetSuggest();
     vi.restoreAllMocks();
   });
@@ -1088,6 +1091,80 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
 
     expect(screen.getByRole("button", { name: "デッキへ戻る" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
+  });
+
+  /**
+   * #2953。作成のたびにウィンドウが閉じると、続けて書くために毎回開き直す往復が生まれる。
+   * ダイアログ表示の「続けて作成」（#2932）と同じ行き先へ合流させ、別ウィンドウは常に
+   * 開いたまま次のフォームへ切り替わるようにした。
+   */
+  it("作成した後もウィンドウを閉じず、続けて同じリポジトリで作成できる", async () => {
+    createIssue.mockResolvedValue(makeIssue({ title: "1件目" }));
+    const onOpenChangeWindow = vi.fn();
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={onOpenChangeWindow}
+        repositories={[makeRepository()]}
+        defaultRepositoryFullName={REPOSITORY_FULL_NAME}
+        issues={[]}
+        onCreated={vi.fn()}
+        claudeLocalModel="sonnet"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "1件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    // 別ウィンドウを閉じる操作（onOpenChange(false)）は呼ばれない
+    expect(onOpenChangeWindow).not.toHaveBeenCalledWith(false);
+
+    const title = (await screen.findByLabelText("タイトル")) as HTMLInputElement;
+    await waitFor(() => expect(title.value).toBe(""));
+
+    fireEvent.change(title, { target: { value: "2件目" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(2));
+    expect(createIssue.mock.calls[1][0]).toMatchObject({
+      repositoryFullName: REPOSITORY_FULL_NAME,
+      title: "2件目",
+    });
+    expect(onOpenChangeWindow).not.toHaveBeenCalledWith(false);
+  });
+
+  it("「作成+実装開始」の選択を終えた後もウィンドウを閉じず、続けて作成できる", async () => {
+    dispatchState.hosts = [makeHost()];
+    enqueue.mockResolvedValue(true);
+    createIssue.mockResolvedValue(makeIssue());
+    const onOpenChangeWindow = vi.fn();
+    render(
+      <CreateIssueDialog
+        open
+        presentation="window"
+        onOpenChange={onOpenChangeWindow}
+        repositories={[makeRepository()]}
+        defaultRepositoryFullName={REPOSITORY_FULL_NAME}
+        issues={[]}
+        onCreated={vi.fn()}
+        claudeLocalModel="sonnet"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成+実装開始" }));
+
+    await screen.findByText("実装を開始");
+    fireEvent.click(screen.getByRole("button", { name: "開始する" }));
+
+    await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("実装を開始")).toBeNull());
+
+    // 実行先を選び終えても別ウィンドウは閉じず、次のフォームへ切り替わる
+    expect(onOpenChangeWindow).not.toHaveBeenCalledWith(false);
+    await screen.findByLabelText("タイトル");
   });
 });
 
