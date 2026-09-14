@@ -156,6 +156,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     概念を持たないため、従来どおり全リポジトリを対象にする。**本番マージ待ちのPush通知
     （`notifications/release-merge-push.ts`。#2376）も同じで、母集団は全リポジトリ・
     絞るのは宛先の購読の側**
+- **左メニュー・フッタータブの常時バッジは、専用の画面を開いて取得済みの値を優先し、
+  閉じている間だけ専用ポーリングへフォールバックする**（#2951。「リリース履歴」行・スマホの
+  「リリース」タブの未確認件数）。`NotificationProvider`（[`notification-state.tsx`](../src/components/dashboard/notification-state.tsx)）は
+  常時5分間隔でポーリングする軽量専用API（母集団は「確認を追う対象」に選んだリポジトリだけ、
+  対象0件ならAPIへ問い合わせない）を持つが、対応する画面（`release-history-panel.tsx`）を
+  開いているあいだは、[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)が
+  画面のデータ（楽観的更新済みの確認記録を含む）から同じ関数で再計算した値を
+  `releaseHistoryUncheckedCountOverride`として渡し、そちらを優先する。ポーリングだけだと
+  「確認済みにする」を押した直後もバッジが最大5分古いまま残るため。
 - **PR詳細の開き方は2つあり、入口ごとに決まっている**（#2149）。「ユーザーの確認待ち」に並ぶ
   マージ待ちPRのカードだけが**その場に重ねて開く**（`prmodal`クエリ＋
   [`pull-request-detail-dialog.tsx`](../src/components/dashboard/pull-request-detail-dialog.tsx)）。
@@ -308,6 +317,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     **`onNavigateToIssue`を渡さない呼び出しでは選択画面自体を出さない**。別ウィンドウ
     （`/issues/new`）はもともと詳細へ移動しないため、これに当たる。行き先を選ばせない
     ほかの入口（一括作成・コードレビュー・横断質問）は従来どおり`handleIssueCreated`を使う。
+    **別ウィンドウでは選ばせないだけで、作成後は常に「続けて作成」する**（#2953）。
+    以前は作成のたびにウィンドウ自体が閉じ、続けて書くには毎回開き直す往復が要ったため、
+    `askOrApplyPostCreateDestination`の`isWindow`分岐を選択画面を出さずに直接
+    `startAnotherIssue`を呼ぶ形へ変え、通常の作成・質問・「作成+実装開始」の選択完了/
+    キャンセルのどの経路でもウィンドウを閉じないようにした。手動の「閉じる」/
+    「デッキへ戻る」ボタン（`closeDialog`）は変えていない。
+    **`startAnotherIssue`が画面の状態へ直接書き込む形で実装されていたおかげで実現できた**
+    ——初期化用`useEffect`は`open`がfalse→trueへ変わったことをトリガーにしており、
+    別ウィンドウでは`open`が常にtrueで一度も再実行されない。もし直接の書き込みが
+    無ければ、別ウィンドウでは「続けて作成」自体が効かなかった。
   - **「作成+実装開始」では実行先の選択（`StartImplementationDialog`）を閉じた後に出す。**
     キャンセルで閉じた場合も出す——起動しなくてもIssueは残っている。
   - **選んだ行き先を覚えるのはチェックを入れて押したときだけ**で、×・Escapeでは覚えない。
@@ -378,6 +397,29 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   行の境目に罫線）をここへ寄せる。**アイコンとリポジトリ名を`truncate`＋`ml-auto shrink-0`で
   並べ直さない**——長い文言がスマホ幅で画面の外へ出て読めなくなる（#1942で片方だけ直した結果、
   同じ画面で行の作りが割れていた）。
+- **「Claudeレビューの実行条件」カード（#2948）は、各リポジトリのcaller（`claude-review-develop.yml`）の
+  `with:`と、直近のIssue PRで`review / claude-review`が走ったかを並べる**。解析は
+  [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
+  [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
+  [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **「雛形のまま」は`main`の雛形（`.github/templates/callers/claude-review-develop.yml`）の
+    risk-paths行との行単位の一致で決める。** 雛形を改訂すると、旧雛形のままのリポジトリは
+    「固有パスのみ」に見える（旧版の履歴は持たない）。`risk-paths`の行の読み方（空行と`#`行を
+    飛ばし、最初の` :: `で分ける）は再利用ワークフローのループに揃えてあり、片方だけ変えない。
+    既定値（`REVIEW_INPUT_DEFAULTS`）も`workflow_call.inputs`の`default`と揃える
+  - **callerは`develop`のものを読む**（`pull_request`はマージ先の定義で動くため）。無ければ既定ブランチ
+  - **数えるのは`issue-<番号>`ブランチのPRだけ。** `release/`・`workflow-tag/`はゲートの
+    「対応Issue番号不明」に当たって常にレビューされるため、含めると割合が実態より高く見える
+    （2026-09-14のaide-botでは直近8件のうち実行7件だったが、うち6件は`release/`・`workflow-tag/`で、
+    Issue PRは2件中1件がskipだった）
+  - **実行・skipの判定はPR一覧と同じ`toAiReview`を通す**（`check-rollup.ts`の`claudeReviewOfContexts`）。
+    別に作ると再実行したPRなどでPR一覧の「レビュー未実行」と件数が食い違う。`claude-review`の
+    `skipped`は2つの意味を持つ——ゲートで見送られたか、`risk-check`が落ちた（`risk-paths`の書式誤り
+    など。`claude-review`は`needs: risk-check`）か。後者は「判定エラー」として分けて出す。
+    **`.github/workflows/`を変えるPRは「実行」に数えられる**（claude-code-actionの検証機構で
+    Claudeを実行しないまま`success`になり、check-runの結論からは見分けられない）
+  - **`/api/workflow-tags`（caller本文を取得済み）へ相乗りさせない。** こちらはPR30件ぶんの
+    `statusCheckRollup`まで読むため、配布カードを開くたびに走らせない
 - **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
   [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
   `package.json`の`"version"` lifecycleスクリプト

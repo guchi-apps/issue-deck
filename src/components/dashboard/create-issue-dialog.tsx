@@ -277,8 +277,8 @@ type CreateIssueDialogProps = {
    * 「次に開く画面」の選択（`PostCreateNavigationDialog`）で詳細が選ばれたときだけ呼ぶ。
    *
    * 渡さない呼び出し（別ウィンドウ`/issues/new`）では選択画面自体を出さない——あちらは
-   * もともと詳細へ移動せず（`broadcastIssueCreated`）、作成後はウィンドウを閉じるだけなので、
-   * 選ぶものが無い。
+   * もともと詳細へ移動せず（`broadcastIssueCreated`）、作成後は常に「続けて作成」する
+   * （#2953）ので、選ぶものが無い。
    */
   onNavigateToIssue?: (issue: Issue) => void;
   /** 出し方（#1728）。既定はダイアログ */
@@ -743,11 +743,16 @@ export function CreateIssueDialog({
   /**
    * 作り終わった後の行き先を決める（#2862）。**作成したどの経路からも最後にここを通す。**
    *
-   * 記憶した行き先があればそのまま進み、無ければ選択画面を出す。**別ウィンドウでは何もしない**
-   * ——あちらはもともと詳細へ移動せず、この時点でウィンドウ自体が閉じている。
+   * 記憶した行き先があればそのまま進み、無ければ選択画面を出す。**別ウィンドウでは常に
+   * 「続けて作成」**（#2953）——あちらはもともと詳細へ移動せず、デッキの一覧・詳細への
+   * 遷移はこの画面の役割ではないため、閉じずに次のIssueを書けるようにする。
    */
   function askOrApplyPostCreateDestination(issue: Issue) {
-    if (isWindow || !onNavigateToIssue) return;
+    if (isWindow) {
+      startAnotherIssue(issue.repositoryFullName);
+      return;
+    }
+    if (!onNavigateToIssue) return;
     if (shouldAskPostCreateDestination(postCreateSetting)) {
       setPostCreateIssue(issue);
       return;
@@ -804,7 +809,8 @@ export function CreateIssueDialog({
       resetForm();
       clearIssueDraft();
       onCreated(issue);
-      closeDialog();
+      // 別ウィンドウでは閉じずに「続けて作成」するため（#2953）、ここでは閉じない
+      if (!isWindow) closeDialog();
       askOrApplyPostCreateDestination(issue);
     }
   }
@@ -837,7 +843,8 @@ export function CreateIssueDialog({
 
     resetForm();
     clearIssueDraft();
-    closeDialog();
+    // 別ウィンドウでは閉じずに「続けて作成」するため（#2953）、ここでは閉じない
+    if (!isWindow) closeDialog();
     onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
     // 質問もIssueを1件作る以上、行き先の扱いは作成と同じにする（#2862）。ここだけ必ず詳細へ
     // 移動させると、記憶した行き先と食い違う
@@ -872,7 +879,8 @@ export function CreateIssueDialog({
     resetForm();
     clearIssueDraft();
     // 別ウィンドウでは`onOpenChange(false)`がウィンドウを閉じる操作なので、ここでは呼ばない
-    // （#1728）。閉じると、この後に出す実行先の選択ごと消える。閉じるのは選択が終わった時点
+    // （#1728）。閉じると、この後に出す実行先の選択ごと消える。選択が終わった後も閉じず、
+    // 「続けて作成」する（#2953）
     if (!isWindow) closeDialog();
     onCreated(issue);
     setStartTargetIssue(issue);
@@ -1285,12 +1293,8 @@ export function CreateIssueDialog({
             // 残っており、そのまま一覧へ戻りたいことも詳細を開きたいこともある
             const created = startTargetIssue;
             setStartTargetIssue(null);
-            // 別ウィンドウでは、実行先を選び終えた（または閉じた）時点でウィンドウごと閉じる
-            // （#1728）。作り終わったフォームだけが残っても、そこからできることは無い
-            if (isWindow) {
-              closeDialog();
-              return;
-            }
+            // 別ウィンドウでは、実行先を選び終えた（または閉じた）後も閉じずに「続けて作成」
+            // する（#2953）。`askOrApplyPostCreateDestination`が`isWindow`のときの行き先を持つ
             if (created) askOrApplyPostCreateDestination(created);
           }}
           // ラベル・コメント数の変化は、作成時と同じ経路（onCreated）で呼び出し側へ渡す。

@@ -344,7 +344,7 @@ function buildPullRequestQuery(count: number): string {
   return `query(${declarations}) {\n${selections}\n}`;
 }
 
-type RollupContextNode = {
+export type RollupContextNode = {
   __typename?: string;
   /** CheckRun。`review / claude-review`のように「callerのジョブID / ジョブ名」（#2059） */
   name?: string | null;
@@ -521,6 +521,33 @@ function toAiReview(judgementChecks: RollupContextNode[]): AiReview {
   if (conclusion === "success") return { state: "passed", runUrl };
   if (conclusion === "skipped" || conclusion === "neutral") return { state: "skipped", runUrl };
   return { state: "failed", runUrl };
+}
+
+/**
+ * PRの`statusCheckRollup`の全ノードから、Claudeのレビューの結果と`risk-check`が落ちたかを返す
+ * （#2948。設定＞フリート運用の「Claudeレビューの実行条件」が使う）。
+ *
+ * **判定はPR一覧と同じ`toAiReview`を通す。** 別に作ると、PR一覧の「レビュー未実行」と件数が
+ * 食い違う（再実行したPRで最後のcheck-runを採るかどうか、など）。
+ *
+ * **`risk-check`の失敗を一緒に返すのは、`claude-review`の`skipped`が2つの意味を持つため。**
+ * `claude-review`は`needs: [identify-issue, risk-check]`なので、callerの`risk-paths`の書式誤りで
+ * `risk-check`が落ちてもskipになる。そのまま数えると、callerの書き間違いが「ゲートで
+ * skipされただけ」に見える。
+ */
+export function claudeReviewOfContexts(nodes: RollupContextNode[]): {
+  aiReview: AiReview;
+  riskCheckFailed: boolean;
+} {
+  const judgementChecks = nodes.filter(
+    (node) => workflowFileOf(node) === MERGE_JUDGEMENT_WORKFLOW_FILE,
+  );
+  const riskChecks = judgementChecks.filter((node) => jobNameOf(node) === "risk-check");
+  const riskCheck = riskChecks[riskChecks.length - 1];
+  const riskCheckFailed =
+    (riskCheck?.status ?? "").toLowerCase() === "completed" &&
+    (riskCheck?.conclusion ?? "").toLowerCase() === "failure";
+  return { aiReview: toAiReview(judgementChecks), riskCheckFailed };
 }
 
 /**

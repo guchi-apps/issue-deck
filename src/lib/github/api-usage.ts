@@ -34,6 +34,9 @@ export const GITHUB_API_FEATURES = [
   // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
   { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "release_history", label: "リリース履歴の取得" },
+  // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
+  // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
+  { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },
   // 共通知識画面（#2912）。**画面を開いたときだけ**消費し、結果は5分キャッシュする。
   // 1回につきGraphQLを最大4回（共有知識のファイル1回＋知見メモの検索3ページ）
   { key: "knowledge_board", label: "共通知識の取得" },
@@ -95,6 +98,9 @@ export const GITHUB_API_FEATURES = [
   // 元は「Issueの再同期」(`sync`)として計上していたが、実態は共有ワークフローのタグ確認で、
   // 消費量も大きかったため#1503で分けた（同時にGraphQLへ寄せて消費自体を減らしている）
   { key: "workflow_tags", label: "共有ワークフローのタグ確認" },
+  // Claudeレビューの実行条件（#2948）。設定＞フリート運用のカードを開いたときだけ、
+  // インストールごとにGraphQLを「雛形1回＋リポジトリ5件ずつ」読む
+  { key: "review_gates", label: "Claudeレビュー実行条件の確認" },
   { key: "progress_report", label: "進捗のProject反映" },
   { key: "sync", label: "Issueの再同期" },
   { key: "repo_sync", label: "リポジトリの再同期" },

@@ -199,6 +199,63 @@ export async function fetchRecentReleases(
     }));
 }
 
+/** リポジトリ1件あたりの取得件数（#2726）。フリート全体でも数百件程度に収まる想定 */
+export const RELEASE_HISTORY_PER_REPOSITORY_LIMIT = 20;
+
+/**
+ * 動作確認の対象リポジトリで、基準時刻（`ReleaseCheckTarget.createdAt`）へ届くまで
+ * 遡ってよいページ数の上限（#2930）。
+ *
+ * **1ページ（20件）は、リリースの多いリポジトリでは数日ぶりにしかならない。** issue-deck自身は
+ * 直近7日で22件リリースしており、1ページだと約6日ぶんしか見えない。確認を1週間サボると、
+ * 未確認のカードが一覧から静かに落ち、「未確認 N件」からも消える——いちばん漏れやすい
+ * ケース（放置したリリース）で機能しなくなる。
+ *
+ * 遡るのは対象リポジトリだけで、しかも**基準時刻より古いリリースが1件出た時点で止める**ので、
+ * 対象に加えた直後は1ページで済む。ページが伸びるのは確認を溜めているあいだだけ。
+ * この上限（5ページ＝100件）はissue-deckの実測で約1か月ぶんにあたる。
+ */
+export const RELEASE_HISTORY_MAX_PAGES_FOR_CHECK_TARGET = 5;
+
+/**
+ * 1リポジトリぶんのリリースを取る。`sinceMs`（動作確認の基準時刻）が渡されたときだけ、
+ * それより古いリリースへ届くまでページを足す（上限`RELEASE_HISTORY_MAX_PAGES_FOR_CHECK_TARGET`）。
+ *
+ * **対象でないリポジトリは従来どおり1ページ。** 未確認のフラグが付かないので、遡っても
+ * GitHub APIを余計に叩くだけになる。
+ *
+ * `api/repositories/release-history`（全リポジトリ横断の一覧）と
+ * `api/repositories/release-history/unchecked-count`（左メニュー・フッタータブ向けの件数だけ、
+ * #2951）の両方から使う共通ロジック。
+ */
+export async function fetchReleasesBackTo(
+  owner: string,
+  repo: string,
+  token: string,
+  sinceMs: number | undefined,
+  hasReachedSince: (entries: readonly ReleaseHistoryItem[], sinceMs: number) => boolean,
+): Promise<ReleaseHistoryItem[]> {
+  const first = await fetchRecentReleases(owner, repo, token, RELEASE_HISTORY_PER_REPOSITORY_LIMIT);
+  if (sinceMs === undefined || first.length < RELEASE_HISTORY_PER_REPOSITORY_LIMIT) return first;
+
+  const collected = [...first];
+  for (let page = 2; page <= RELEASE_HISTORY_MAX_PAGES_FOR_CHECK_TARGET; page += 1) {
+    // 一覧は公開日時の新しい順なので、末尾が基準より古ければその先はすべて対象外。
+    if (hasReachedSince(collected, sinceMs)) break;
+    const next = await fetchRecentReleases(
+      owner,
+      repo,
+      token,
+      RELEASE_HISTORY_PER_REPOSITORY_LIMIT,
+      page,
+    );
+    if (next.length === 0) break;
+    collected.push(...next);
+    if (next.length < RELEASE_HISTORY_PER_REPOSITORY_LIMIT) break;
+  }
+  return collected;
+}
+
 /**
  * 指定したref時点の`.github/release-notes.md`をそのまま読む。無ければnull（#2725）。
  *

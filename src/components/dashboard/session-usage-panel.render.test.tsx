@@ -155,6 +155,44 @@ describe("SessionUsagePanel", () => {
     expect(rows.getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
     // 割る前の1行は残さない（フェーズ未集計の行も出ない）。
     expect(rows.queryByText("実装（フェーズ未集計）")).toBeNull();
+    // 作業の流れの外の種別が無ければ区切りも出さない（#2954）。
+    expect(rows.queryByText("作業の流れの外")).toBeNull();
+  });
+
+  /**
+   * #2954。金額順ではなく作業の順に並べ、横断質問・その他の手前に区切りを入れる。
+   */
+  it("セッション種別別を作業の順に並べ、流れの外の手前に区切りを入れる", () => {
+    renderPanel(
+      response([
+        entry({
+          sessionId: "impl",
+          costUsd: 20,
+          planCostUsd: 2,
+          researchCostUsd: 4,
+          codingCostUsd: 10,
+          wrapupCostUsd: 4,
+        }),
+        entry({ sessionId: "question", kind: "question", costUsd: 50 }),
+        entry({ sessionId: "actions", kind: "actions", costUsd: 1 }),
+      ]),
+    );
+
+    const card = screen.getByText("セッション種別別").closest("section");
+    const labels = within(card as HTMLElement)
+      .getAllByText(
+        /^(計画（Plan mode）|調査|実装|仕上げ（コミット・PR・報告）|GitHub Actions|作業の流れの外|横断質問)$/,
+      )
+      .map((element) => element.textContent);
+    expect(labels).toEqual([
+      "計画（Plan mode）",
+      "調査",
+      "実装",
+      "仕上げ（コミット・PR・報告）",
+      "GitHub Actions",
+      "作業の流れの外",
+      "横断質問",
+    ]);
   });
 
   it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {

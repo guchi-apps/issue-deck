@@ -37,6 +37,7 @@ function renderSidebar(
     unconfirmedQuestionCount = 0,
     waitingQuestionCount = 0,
     releaseActivity = null,
+    releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
   }: {
     checkUserPullRequestCount?: number;
@@ -44,6 +45,7 @@ function renderSidebar(
     unconfirmedQuestionCount?: number;
     waitingQuestionCount?: number;
     releaseActivity?: ReleaseActivityCounts | null;
+    releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
   } = {},
 ) {
@@ -67,6 +69,7 @@ function renderSidebar(
       unconfirmedQuestionCount={unconfirmedQuestionCount}
       waitingQuestionCount={waitingQuestionCount}
       releaseActivity={releaseActivity}
+      releaseUncheckedCount={releaseUncheckedCount}
       pullRequestNavCounts={pullRequestNavCounts}
       mergePendingAttention={mergePendingAttention}
       repositories={[]}
@@ -548,5 +551,35 @@ describe("SidebarNavの「ブランチ」行（#2167）", () => {
     renderSidebarWithRepositories([]);
 
     expect(branchNavItem().textContent).toBe("ブランチ");
+  });
+});
+
+describe("SidebarNavの「リリース履歴」行（#2951）", () => {
+  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0 };
+
+  function releaseHistoryNavItem() {
+    return screen.getByRole("button", { name: /リリース履歴/ });
+  }
+
+  it("未取得のうちは件数を出さない（0件と区別する）", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, { releaseUncheckedCount: null });
+
+    expect(releaseHistoryNavItem().textContent).toBe("リリース履歴");
+  });
+
+  it("未確認が0件なら件数を出さない", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, { releaseUncheckedCount: 0 });
+
+    expect(releaseHistoryNavItem().textContent).toBe("リリース履歴");
+  });
+
+  it("未確認があれば件数をオレンジの丸で出す", () => {
+    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, { releaseUncheckedCount: 4 });
+
+    expect(releaseHistoryNavItem().textContent).toContain("4");
+    expect(releaseHistoryNavItem().querySelector("span:last-child")?.className).toContain(
+      "bg-amber-500",
+    );
+    expect(releaseHistoryNavItem().getAttribute("title")).toContain("未確認のリリースが4件");
   });
 });

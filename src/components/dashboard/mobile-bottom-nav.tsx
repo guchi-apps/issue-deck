@@ -58,6 +58,11 @@ type MobileBottomNavViewProps = {
    * そのときは何も出さない（0を出すと「待っているものが無い」と読めてしまう）。
    */
   mergePending?: ReleaseMergePendingCounts | null;
+  /**
+   * 「リリース」タブのアイコンに重ねる未確認件数（#2951）。**`null`・`0`は何も出さない**
+   * （PCの左メニュー「リリース履歴」行と同じ材料）。
+   */
+  releaseUncheckedCount?: number | null;
 };
 
 /**
@@ -68,10 +73,18 @@ type MobileBottomNavViewProps = {
  * propで配れない。ベルと同じ材料を同じ1本のポーリングから読むので、取得は増えない
  * （`notification-state.tsx`。新しく`useRepositoryReleaseStatuses`を呼ぶと2本走る）。
  */
-export function MobileBottomNav(props: Omit<MobileBottomNavViewProps, "mergePending">) {
-  const { releaseMergePending } = useNotificationState();
+export function MobileBottomNav(
+  props: Omit<MobileBottomNavViewProps, "mergePending" | "releaseUncheckedCount">,
+) {
+  const { releaseMergePending, releaseUncheckedCount } = useNotificationState();
 
-  return <MobileBottomNavView {...props} mergePending={releaseMergePending} />;
+  return (
+    <MobileBottomNavView
+      {...props}
+      mergePending={releaseMergePending}
+      releaseUncheckedCount={releaseUncheckedCount}
+    />
+  );
 }
 
 /**
@@ -81,17 +94,25 @@ export function MobileBottomNavView({
   active = "home",
   onSelect,
   mergePending = null,
+  releaseUncheckedCount = null,
 }: MobileBottomNavViewProps) {
   // アイコンに重ねるのは合計だけ（#2055）。1枠に内訳2つは収まらず、収めるには
   // フッターを56px→68pxへ伸ばすことになる。内訳はタブを開いた「ブランチ」画面が持ち、
   // 開かずに読めるようにtitle・aria-labelへ入れる。
   const pendingCount = mergePending?.total ?? 0;
   const pendingLabel = describeReleaseMergePending(mergePending);
+  const uncheckedCount = releaseUncheckedCount ?? 0;
 
   return (
     <nav className="flex shrink-0 border-t bg-background md:hidden">
       {items.map(({ id, label, icon: Icon }) => {
-        const showsBadge = id === "flow" && pendingCount > 0;
+        const showsMergePendingBadge = id === "flow" && pendingCount > 0;
+        // 「リリース履歴」画面の「未確認」と同じ材料（#2951）。PCの左メニュー「リリース履歴」行と揃える
+        const showsUncheckedBadge = id === "release-history" && uncheckedCount > 0;
+        const showsBadge = showsMergePendingBadge || showsUncheckedBadge;
+        const badgeLabel = showsMergePendingBadge
+          ? pendingLabel
+          : `未確認のリリースが${uncheckedCount}件あります`;
 
         return (
           <button
@@ -100,8 +121,8 @@ export function MobileBottomNavView({
             onClick={() => onSelect?.(id)}
             // バッジを出すときだけ内訳を添える。0件のときまで付けると、押す前に読まれる
             // 情報が「反映待ちはありません」だけのタブになる
-            aria-label={showsBadge ? `${label}（${pendingLabel}）` : undefined}
-            title={showsBadge ? pendingLabel : undefined}
+            aria-label={showsBadge ? `${label}（${badgeLabel}）` : undefined}
+            title={showsBadge ? badgeLabel : undefined}
             className={cn(
               // **ラベルは折り返させない**（#2631）。折り返すとその枠だけ2行になり、
               // フッターの高さ（56px）が枠ごとに食い違う。収まらない場合は横にはみ出させて、
@@ -115,12 +136,15 @@ export function MobileBottomNavView({
                 ボタン全体を基準にすると、枠の右上（＝隣のタブとの境目）へ飛ぶ */}
             <span className="relative inline-flex">
               <Icon className="size-5" />
-              {showsBadge && (
+              {showsMergePendingBadge && (
                 <NotificationBadge
                   count={pendingCount}
                   hasError={mergePending?.hasError ?? false}
                   className="-top-1.5 -right-2.5"
                 />
+              )}
+              {showsUncheckedBadge && (
+                <NotificationBadge count={uncheckedCount} hasError={false} className="-top-1.5 -right-2.5" />
               )}
             </span>
             {label}
