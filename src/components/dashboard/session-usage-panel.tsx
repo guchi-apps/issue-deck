@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
@@ -15,6 +15,7 @@ import { getRepoColor } from "@/lib/repo-color";
 import {
   formatUsageTokens,
   formatUsageUsd,
+  isUsageKindInWorkFlow,
   sessionUsageCostSplit,
   sessionUsageKindLabel,
   sessionUsageModelLabel,
@@ -534,15 +535,19 @@ function Breakdown({
   rows,
   colorOf,
   maxVisibleRows,
+  separator,
 }: {
   title: string;
   hint: string;
   rows: (UsageGroup & { label: string })[];
   colorOf?: (key: string) => string | undefined;
   maxVisibleRows?: number;
+  /** 条件に合う最初の行の手前へ区切りを入れる（#2954）。先頭の行が合うときは入れない */
+  separator?: { label: string; isBefore: (key: string) => boolean };
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const max = rows[0]?.costUsd ?? 0;
+  // **棒の基準は先頭の行ではなく最大の行**（#2954）。種別別は作業の順に並べるため、先頭が最大とは限らない。
+  const max = rows.reduce((peak, row) => Math.max(peak, row.costUsd), 0);
   const maxTokens = rows.reduce(
     (peak, row) => Math.max(peak, row.contextTokens + row.outputTokens),
     0,
@@ -550,6 +555,9 @@ function Breakdown({
   const visibleRows =
     maxVisibleRows !== undefined && !isExpanded ? rows.slice(0, maxVisibleRows) : rows;
   const hiddenRows = maxVisibleRows !== undefined ? Math.max(rows.length - maxVisibleRows, 0) : 0;
+  const separatorIndex = separator
+    ? visibleRows.findIndex((row) => separator.isBefore(row.key))
+    : -1;
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
@@ -565,36 +573,46 @@ function Breakdown({
         <p className="text-xs text-muted-foreground">記録がありません</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {visibleRows.map((row) => {
+          {visibleRows.map((row, index) => {
             const color = colorOf?.(row.key);
             return (
-              <li key={row.key} className="flex flex-col gap-1">
-                <div className="flex items-baseline justify-between gap-2 text-[11px]">
-                  <span className="flex min-w-0 items-center gap-1.5 font-medium">
-                    {color && (
-                      <span
-                        aria-hidden
-                        className="size-[7px] shrink-0 rounded-[2px]"
-                        style={{ backgroundColor: color }}
-                      />
-                    )}
-                    <span className="truncate">{row.label}</span>
-                  </span>
-                  <span className="shrink-0 text-muted-foreground tabular-nums">
-                    {row.sessions}セッション
-                  </span>
-                  <span className="shrink-0 font-semibold tabular-nums">
-                    {formatUsageUsd(row.costUsd)}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <CostBar
-                    row={row}
-                    widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
-                  />
-                  <GroupTokenBar totals={row} maxTokens={maxTokens} />
-                </div>
-              </li>
+              <Fragment key={row.key}>
+                {/* 先頭の行の手前には入れない（流れの外の種別しか無い期間に、区切りだけが浮く） */}
+                {separator && index > 0 && index === separatorIndex && (
+                  <li className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span aria-hidden className="h-px flex-1 border-t border-dashed" />
+                    {separator.label}
+                    <span aria-hidden className="h-px flex-1 border-t border-dashed" />
+                  </li>
+                )}
+                <li className="flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                      {color && (
+                        <span
+                          aria-hidden
+                          className="size-[7px] shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: color }}
+                        />
+                      )}
+                      <span className="truncate">{row.label}</span>
+                    </span>
+                    <span className="shrink-0 text-muted-foreground tabular-nums">
+                      {row.sessions}セッション
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">
+                      {formatUsageUsd(row.costUsd)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <CostBar
+                      row={row}
+                      widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
+                    />
+                    <GroupTokenBar totals={row} maxTokens={maxTokens} />
+                  </div>
+                </li>
+              </Fragment>
             );
           })}
         </ul>
@@ -1210,12 +1228,17 @@ export function SessionUsagePanel({
                 使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
             <div className="flex flex-col gap-2">
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
-                  実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない */}
+                  実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
+                  **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}
               <Breakdown
                 title="セッション種別別"
                 hint="実装はフェーズで分割（転記から推定）"
                 rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
                 colorOf={(key) => KIND_ROW_COLORS[key]}
+                separator={{
+                  label: "作業の流れの外",
+                  isBefore: (key) => !isUsageKindInWorkFlow(key),
+                }}
               />
               {apiUsageSection}
             </div>

@@ -5,6 +5,7 @@ import {
   buildSessionUsageSummary,
   formatUsageTokens,
   formatUsageUsd,
+  isUsageKindInWorkFlow,
   sessionUsageCostSplit,
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
@@ -230,7 +231,7 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byRepository[0].sessions).toBe(210);
   });
 
-  it("リポジトリ・種別ごとの内訳を金額の多い順に出す", () => {
+  it("リポジトリ別は金額の多い順、種別別は作業の順に出す", () => {
     const summary = buildSessionUsageSummary({
       entries: [
         entry({ sessionId: "a", repository: "issue-deck", costUsd: 1 }),
@@ -267,17 +268,63 @@ describe("buildSessionUsageSummary", () => {
       reportedAt: null,
     });
 
+    // 金額（実装5・未集計4・調査2・仕上げ2・計画1）ではなく作業の順に並ぶ（#2954）。
     expect(summary.byKind.map((row) => row.key)).toEqual([
+      "phase-plan",
+      "phase-research",
       "phase-coding",
       "implementation-unsplit",
-      "phase-research",
       "phase-wrapup",
-      "phase-plan",
     ]);
     // 割ったあとの合計が、割る前の合計と一致すること（カードの合計が動かない）。
     expect(summary.byKind.reduce((sum, row) => sum + row.costUsd, 0)).toBeCloseTo(14, 6);
     // 本数は`byKind`から数えられない（1本が最大4行に現れる）ので、別に持つ。
     expect(summary.implementationSessions).toBe(2);
+  });
+
+  /**
+   * #2954。金額順では期間を切り替えるたびに行の位置が入れ替わり、作業の流れに沿って読めなかった。
+   */
+  it("種別別は計画→レビュー→GitHub Actions→流れの外→未知の種別の順に並べる", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "unknown-small", kind: "new-kind-a", costUsd: 1 }),
+        entry({ sessionId: "unknown-large", kind: "new-kind-b", costUsd: 30 }),
+        entry({ sessionId: "other", kind: "other", costUsd: 40 }),
+        entry({ sessionId: "question", kind: "question", costUsd: 50 }),
+        entry({ sessionId: "actions", kind: "actions", costUsd: 2 }),
+        entry({ sessionId: "code-review", kind: "code-review", costUsd: 20 }),
+        entry({ sessionId: "plan-review", kind: "plan-review", costUsd: 3 }),
+        entry({
+          sessionId: "impl",
+          costUsd: 10,
+          planCostUsd: 1,
+          researchCostUsd: 2,
+          codingCostUsd: 5,
+          wrapupCostUsd: 2,
+        }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    expect(summary.byKind.map((row) => row.key)).toEqual([
+      "phase-plan",
+      "plan-review",
+      "phase-research",
+      "phase-coding",
+      "phase-wrapup",
+      "code-review",
+      "actions",
+      "question",
+      "other",
+      "new-kind-b",
+      "new-kind-a",
+    ]);
+    expect(isUsageKindInWorkFlow("actions")).toBe(true);
+    expect(isUsageKindInWorkFlow("question")).toBe(false);
+    expect(isUsageKindInWorkFlow("new-kind-a")).toBe(false);
   });
 
   it("合計・日別・リポジトリ別・種別別をClaudeとCodexに分けて保持する", () => {
