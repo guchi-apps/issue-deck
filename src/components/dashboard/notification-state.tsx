@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { useReleaseUncheckedCount } from "@/hooks/use-release-unchecked-count";
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import {
   buildNotifications,
@@ -77,6 +78,12 @@ type NotificationState = {
    */
   releaseActivity: ReleaseActivityCounts | null;
   /**
+   * 「確認を追う対象」に選んだリポジトリの、未確認のリリース件数（#2951・#2930）。
+   * 左メニュー「リリース履歴」行とスマホのフッター「リリース」タブのバッジに使う。
+   * **まだ取れていない間はnull**（0件と区別する）。
+   */
+  releaseUncheckedCount: number | null;
+  /**
    * ベルの材料（リリース状況・Issue一覧・Pull Request一覧）をまとめて取り直す（#1909）。
    * 開いている間の自動更新と、右上の更新ボタンの両方がこれを呼ぶ。
    */
@@ -103,6 +110,7 @@ const EMPTY_STATE: NotificationState = {
   hasError: false,
   releaseMergePending: null,
   releaseActivity: null,
+  releaseUncheckedCount: null,
   refresh: () => {},
   isFetching: false,
   fetchedAt: null,
@@ -146,6 +154,7 @@ export function NotificationProvider({
   onRefreshIssues,
   onRefreshPullRequests,
   isRefreshingPullRequests = false,
+  releaseHistoryUncheckedCountOverride = null,
   children,
 }: {
   repositories: ConnectedRepository[];
@@ -178,6 +187,14 @@ export function NotificationProvider({
    */
   onRefreshPullRequests?: () => void;
   isRefreshingPullRequests?: boolean;
+  /**
+   * 「リリース履歴」画面（#2726）を開いているあいだ、そこが取得済みの未確認件数（#2951）。
+   * **渡された間はこちらを優先し、Providerの常時ポーリング（`useReleaseUncheckedCount`）より
+   * 正確・即時な値を使う**——画面で「確認済みにする」を押した直後、Providerのポーリングは
+   * 最大5分先まで走らないため、渡さないと左メニュー・フッタータブのバッジが古いまま残る
+   * （計画レビューの指摘）。画面を開いていない・まだ取得できていない間は`null`。
+   */
+  releaseHistoryUncheckedCountOverride?: number | null;
   children: ReactNode;
 }) {
   // 連携しているリポジトリが1件でもあれば取りに行く（スマホのリポジトリ一覧と同じ条件）。
@@ -187,6 +204,14 @@ export function NotificationProvider({
   // 対象にするかはAPI側が`release-develop-to-main.yml`の実在で決める。
   const hasConnectedRepository = repositories.length > 0;
   const { data: releaseStatuses, refetch } = useRepositoryReleaseStatuses(hasConnectedRepository);
+  // 「確認を追う対象」に選んだリポジトリは`ConnectedRepository.releaseCheckSince`として
+  // クライアントがすでに持っているため、対象0件ならAPIへ一切問い合わせない（#2951の計画
+  // レビュー指摘。対象があるリポジトリぶん、5分ごとに最大5ページのGitHub API呼び出しが
+  // 発生するため、無駄打ちを避ける）
+  const hasReleaseCheckTargets = repositories.some((repo) => repo.releaseCheckSince !== null);
+  const { count: polledReleaseUncheckedCount, refetch: refetchReleaseUncheckedCount } =
+    useReleaseUncheckedCount(hasReleaseCheckTargets);
+  const releaseUncheckedCount = releaseHistoryUncheckedCountOverride ?? polledReleaseUncheckedCount;
 
   const [isSelfFetching, setIsSelfFetching] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -205,6 +230,10 @@ export function NotificationProvider({
         onRefreshIssues ? onRefreshIssues() : Promise.resolve(true),
       ]);
       onRefreshPullRequests?.();
+      // **これも投げっぱなし**（`onRefreshPullRequests`と同じ）。ベルの「対応が必要なもの」の
+      // 一部ではなく左メニュー・フッタータブだけが読む別の数字なので、取得の成否を
+      // `fetchedAt`の判定に混ぜない（#2951）
+      void refetchReleaseUncheckedCount();
       // **取れなかった周は`fetchedAt`を進めない**（#1773と同じ）。進めると、取れていないのに
       // 「たった今更新」と出て、古いまま固まっていることに気づけない
       if (releaseOk && issuesOk) setFetchedAt(Date.now());
@@ -216,7 +245,13 @@ export function NotificationProvider({
       inFlightRef.current = false;
       setIsSelfFetching(false);
     }
-  }, [hasConnectedRepository, refetch, onRefreshIssues, onRefreshPullRequests]);
+  }, [
+    hasConnectedRepository,
+    refetch,
+    refetchReleaseUncheckedCount,
+    onRefreshIssues,
+    onRefreshPullRequests,
+  ]);
 
   const value = useMemo<NotificationState>(() => {
     // 左メニューで非表示にしたリポジトリは、通知ベルの項目からも件数からも外す（#2279）。
@@ -243,6 +278,7 @@ export function NotificationProvider({
       hasError: hasErrorNotification(items),
       releaseMergePending: countReleaseMergePending(visibleReleaseStatuses),
       releaseActivity: countReleaseActivity(visibleReleaseStatuses),
+      releaseUncheckedCount,
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる
       isFetching: isSelfFetching || isRefreshingPullRequests,
@@ -260,6 +296,7 @@ export function NotificationProvider({
     snoozes,
     now,
     releaseStatuses,
+    releaseUncheckedCount,
     refresh,
     isSelfFetching,
     isRefreshingPullRequests,

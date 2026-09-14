@@ -34,6 +34,9 @@ export const GITHUB_API_FEATURES = [
   // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
   { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "release_history", label: "リリース履歴の取得" },
+  // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
+  // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
+  { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },
   // 共通知識画面（#2912）。**画面を開いたときだけ**消費し、結果は5分キャッシュする。
   // 1回につきGraphQLを最大4回（共有知識のファイル1回＋知見メモの検索3ページ）
   { key: "knowledge_board", label: "共通知識の取得" },

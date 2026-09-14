@@ -156,6 +156,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     概念を持たないため、従来どおり全リポジトリを対象にする。**本番マージ待ちのPush通知
     （`notifications/release-merge-push.ts`。#2376）も同じで、母集団は全リポジトリ・
     絞るのは宛先の購読の側**
+- **左メニュー・フッタータブの常時バッジは、専用の画面を開いて取得済みの値を優先し、
+  閉じている間だけ専用ポーリングへフォールバックする**（#2951。「リリース履歴」行・スマホの
+  「リリース」タブの未確認件数）。`NotificationProvider`（[`notification-state.tsx`](../src/components/dashboard/notification-state.tsx)）は
+  常時5分間隔でポーリングする軽量専用API（母集団は「確認を追う対象」に選んだリポジトリだけ、
+  対象0件ならAPIへ問い合わせない）を持つが、対応する画面（`release-history-panel.tsx`）を
+  開いているあいだは、[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)が
+  画面のデータ（楽観的更新済みの確認記録を含む）から同じ関数で再計算した値を
+  `releaseHistoryUncheckedCountOverride`として渡し、そちらを優先する。ポーリングだけだと
+  「確認済みにする」を押した直後もバッジが最大5分古いまま残るため。
 - **PR詳細の開き方は2つあり、入口ごとに決まっている**（#2149）。「ユーザーの確認待ち」に並ぶ
   マージ待ちPRのカードだけが**その場に重ねて開く**（`prmodal`クエリ＋
   [`pull-request-detail-dialog.tsx`](../src/components/dashboard/pull-request-detail-dialog.tsx)）。
