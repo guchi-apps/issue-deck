@@ -378,6 +378,29 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   行の境目に罫線）をここへ寄せる。**アイコンとリポジトリ名を`truncate`＋`ml-auto shrink-0`で
   並べ直さない**——長い文言がスマホ幅で画面の外へ出て読めなくなる（#1942で片方だけ直した結果、
   同じ画面で行の作りが割れていた）。
+- **「Claudeレビューの実行条件」カード（#2948）は、各リポジトリのcaller（`claude-review-develop.yml`）の
+  `with:`と、直近のIssue PRで`review / claude-review`が走ったかを並べる**。解析は
+  [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
+  [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
+  [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **「雛形のまま」は`main`の雛形（`.github/templates/callers/claude-review-develop.yml`）の
+    risk-paths行との行単位の一致で決める。** 雛形を改訂すると、旧雛形のままのリポジトリは
+    「固有パスのみ」に見える（旧版の履歴は持たない）。`risk-paths`の行の読み方（空行と`#`行を
+    飛ばし、最初の` :: `で分ける）は再利用ワークフローのループに揃えてあり、片方だけ変えない。
+    既定値（`REVIEW_INPUT_DEFAULTS`）も`workflow_call.inputs`の`default`と揃える
+  - **callerは`develop`のものを読む**（`pull_request`はマージ先の定義で動くため）。無ければ既定ブランチ
+  - **数えるのは`issue-<番号>`ブランチのPRだけ。** `release/`・`workflow-tag/`はゲートの
+    「対応Issue番号不明」に当たって常にレビューされるため、含めると割合が実態より高く見える
+    （2026-09-14のaide-botでは直近8件のうち実行7件だったが、うち6件は`release/`・`workflow-tag/`で、
+    Issue PRは2件中1件がskipだった）
+  - **実行・skipの判定はPR一覧と同じ`toAiReview`を通す**（`check-rollup.ts`の`claudeReviewOfContexts`）。
+    別に作ると再実行したPRなどでPR一覧の「レビュー未実行」と件数が食い違う。`claude-review`の
+    `skipped`は2つの意味を持つ——ゲートで見送られたか、`risk-check`が落ちた（`risk-paths`の書式誤り
+    など。`claude-review`は`needs: risk-check`）か。後者は「判定エラー」として分けて出す。
+    **`.github/workflows/`を変えるPRは「実行」に数えられる**（claude-code-actionの検証機構で
+    Claudeを実行しないまま`success`になり、check-runの結論からは見分けられない）
+  - **`/api/workflow-tags`（caller本文を取得済み）へ相乗りさせない。** こちらはPR30件ぶんの
+    `statusCheckRollup`まで読むため、配布カードを開くたびに走らせない
 - **更新履歴（設定の「更新履歴」区分・#1764）に手で書き足さない。** データは
   [`lib/changelog.ts`](../src/lib/changelog.ts)の`APP_CHANGELOG`で、リリースのたびに
   `package.json`の`"version"` lifecycleスクリプト

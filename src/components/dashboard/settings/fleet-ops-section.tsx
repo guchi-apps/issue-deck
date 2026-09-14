@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Boxes, KeyRound, RefreshCw, ShieldCheck } from "lucide-react";
+import { Boxes, KeyRound, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
 
 import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
+import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import {
   AlertDialog,
@@ -91,6 +92,17 @@ export function FleetOpsSection({
         loadHint="開くと各リポジトリの参照状況をGitHubへ問い合わせます"
       >
         <WorkflowTagStatusSection open />
+      </LazyFleetPanel>
+
+      {/* 読み取りだけの区画だが、中身がcallerの設定値そのものなので配布の隣に置く（#2948）。
+          PRのチェックまで読むぶん重く、配布カードの取得には相乗りさせない */}
+      <LazyFleetPanel
+        icon={ScanSearch}
+        title="Claudeレビューの実行条件"
+        description="develop向けPRでclaude-reviewが走る条件と、直近の実行状況"
+        loadHint="開くと各リポジトリのcallerと直近のdevelop向けPRをGitHubへ問い合わせます"
+      >
+        <ReviewGateSection open />
       </LazyFleetPanel>
 
       <LazyFleetPanel
