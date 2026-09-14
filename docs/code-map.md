@@ -402,6 +402,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
   [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
   [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **取得は「callerとPR一覧（リポジトリ5件ずつ）」→「Issue PRのチェック集約（PR10件ずつ・並行4本）」の
+    2段階に分けてある（#2963）。** GitHubのGraphQLは約10秒で打ち切られて502・504（`We couldn't
+    respond to your request in time`）を返し、所要時間は`statusCheckRollup`を読むPRの件数にほぼ
+    比例する（issue-deckで30件約5秒・10件約1.5秒。`checkSuite.workflowRun`を辿るかはほぼ効かない）。
+    PR×チェックの入れ子を複数リポジトリぶん1クエリへ並べると、ポイント上限に届かなくても時間で
+    落ちる。集約の取得に失敗したクエリは画面全体を500にせず、その行だけ「実行状況を取得できませんでした」にする
   - **「雛形のまま」は`main`の雛形（`.github/templates/callers/claude-review-develop.yml`）の
     risk-paths行との行単位の一致で決める。** 雛形を改訂すると、旧雛形のままのリポジトリは
     「固有パスのみ」に見える（旧版の履歴は持たない）。`risk-paths`の行の読み方（空行と`#`行を
