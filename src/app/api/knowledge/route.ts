@@ -6,11 +6,13 @@ import {
   fetchKnowledgeFiles,
   fetchKnowledgeMemoCounts,
   fetchKnowledgeMemos,
+  fetchOpenPromotionPullRequests,
   PROMOTION_COLLECT_LIMIT,
 } from "@/lib/github/knowledge-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import {
   buildCandidate,
+  buildOpenPromotionPullRequest,
   parseKnowledgeFile,
   sortCandidates,
   sortKnowledgeSections,
@@ -53,12 +55,14 @@ async function handleGET(request: NextRequest) {
   }
 
   const result = await withUserGithubToken(user, "GET /api/knowledge", async (token) => {
-    // 共有知識のファイル・知見メモ・件数は互いに依存しないので同時に投げる。
-    const [{ files, docsRepoUrl }, { issues, truncated }, counts] = await Promise.all([
-      fetchKnowledgeFiles(token),
-      fetchKnowledgeMemos(token),
-      fetchKnowledgeMemoCounts(token),
-    ]);
+    // 共有知識のファイル・知見メモ・件数・マージ待ちPRは互いに依存しないので同時に投げる。
+    const [{ files, docsRepoUrl }, { issues, truncated }, counts, openPullRequests] =
+      await Promise.all([
+        fetchKnowledgeFiles(token),
+        fetchKnowledgeMemos(token),
+        fetchKnowledgeMemoCounts(token),
+        fetchOpenPromotionPullRequests(token),
+      ]);
 
     const sections = sortKnowledgeSections(files.flatMap(parseKnowledgeFile));
     const candidates = sortCandidates(
@@ -69,6 +73,7 @@ async function handleGET(request: NextRequest) {
       sections,
       fileCount: files.length,
       candidates,
+      openPromotionPullRequests: openPullRequests.map(buildOpenPromotionPullRequest),
       truncated,
       counts,
       collectLimit: PROMOTION_COLLECT_LIMIT,

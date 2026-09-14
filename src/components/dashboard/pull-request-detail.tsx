@@ -20,6 +20,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
+import { PullRequestFixIssueBar } from "@/components/dashboard/pull-request-fix-issue-bar";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -29,6 +30,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import {
+  showsPullRequestFixIssueBar,
+  type PullRequestFixIssueDraft,
+} from "@/lib/github/pull-request-fix-issue";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
@@ -54,6 +59,11 @@ type PullRequestDetailProps = {
    * 渡さない画面ではボタンを出さない。起点のリリースPRは表示中の`pullRequest`から渡す。
    */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
+  /**
+   * ヘッダーと本文の間の「修正Issueを起案」（#2961）。下書きを埋めた新規作成ダイアログを開く。
+   * 渡さない画面では帯を出さない。
+   */
+  onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -138,6 +148,7 @@ export function PullRequestDetail({
   onRefresh,
   onMerged,
   onCreateFixIssue,
+  onCreatePullRequestFixIssue,
   headerLeading,
   className,
   style,
@@ -367,6 +378,16 @@ export function PullRequestDetail({
 
         {currentDetail && (
           <>
+            {/* レビューの指摘から修正Issueを起案する（#2961）。リリースPRは検証結果パネルの
+                行ごとのボタンが受け持つので出さない */}
+            {onCreatePullRequestFixIssue && showsPullRequestFixIssueBar(pullRequest) && (
+              <PullRequestFixIssueBar
+                pullRequest={pullRequest}
+                events={currentDetail.events}
+                onCreate={onCreatePullRequestFixIssue}
+              />
+            )}
+
             {/* リリースPRの検証結果は、本文より先に出す（#2448）。mainへ出すかを決める人が
                 最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
                 スクロールしないと読めないのでは判断材料として遅い。

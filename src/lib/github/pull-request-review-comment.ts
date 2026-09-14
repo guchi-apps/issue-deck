@@ -214,11 +214,23 @@ export function buildReviewFixRequestText(params: {
   review: Pick<PullRequestReviewCommentContent, "body" | "verdictLabel">;
   pullRequestNumber: number;
 }): string {
+  const head =
+    `自動レビュー（PR #${params.pullRequestNumber}・${params.review.verdictLabel}）で` +
+    "指摘された次の点を修正してください。";
+
+  return `${head}\n\n${quoteReviewText(extractReviewConcerns(params.review.body))}\n`;
+}
+
+/**
+ * レビューの文面を引用（`> `）にする。長ければ`QUOTE_MAX_LINES`・`QUOTE_MAX_CHARS`で切り、
+ * 続きはPRで読ませる一文を足す。修正依頼欄（#2849）とPR詳細の修正Issueの下書き（#2961）で共用する。
+ */
+export function quoteReviewText(text: string): string {
   const lines: string[] = [];
   let chars = 0;
   let truncated = false;
 
-  for (const line of extractReviewConcerns(params.review.body).split("\n")) {
+  for (const line of text.split("\n")) {
     if (lines.length >= QUOTE_MAX_LINES || chars + line.length + 1 > QUOTE_MAX_CHARS) {
       truncated = true;
       break;
@@ -227,15 +239,10 @@ export function buildReviewFixRequestText(params: {
     lines.push(line === "" ? ">" : `> ${line}`);
   }
 
-  const quoted = lines.join("\n");
-  const head =
-    `自動レビュー（PR #${params.pullRequestNumber}・${params.review.verdictLabel}）で` +
-    "指摘された次の点を修正してください。";
   const tail = truncated
     ? "\n>\n> （長いため以降を省略しました。全文はPRのレビューコメントにあります）"
     : "";
-
-  return `${head}\n\n${quoted}${tail}\n`;
+  return `${lines.join("\n")}${tail}`;
 }
 
 /**

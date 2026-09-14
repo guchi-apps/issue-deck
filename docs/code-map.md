@@ -402,6 +402,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
   [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
   [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **取得は「callerとPR一覧（リポジトリ5件ずつ）」→「Issue PRのチェック集約（PR10件ずつ・並行4本）」の
+    2段階に分けてある（#2963）。** GitHubのGraphQLは約10秒で打ち切られて502・504（`We couldn't
+    respond to your request in time`）を返し、所要時間は`statusCheckRollup`を読むPRの件数にほぼ
+    比例する（issue-deckで30件約5秒・10件約1.5秒。`checkSuite.workflowRun`を辿るかはほぼ効かない）。
+    PR×チェックの入れ子を複数リポジトリぶん1クエリへ並べると、ポイント上限に届かなくても時間で
+    落ちる。集約の取得に失敗したクエリは画面全体を500にせず、その行だけ「実行状況を取得できませんでした」にする
   - **「雛形のまま」は`main`の雛形（`.github/templates/callers/claude-review-develop.yml`）の
     risk-paths行との行単位の一致で決める。** 雛形を改訂すると、旧雛形のままのリポジトリは
     「固有パスのみ」に見える（旧版の履歴は持たない）。`risk-paths`の行の読み方（空行と`#`行を
@@ -2085,8 +2091,14 @@ export function POST(request: NextRequest) {
   レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
   付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
   出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
-  **取得はマージ待ちのときだけ**（`usePullRequestReview`・
+  **取得はマージ待ちのときと、PR詳細の「修正Issueを起案」を押したときだけ**（`usePullRequestReview`・
   `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
+  PR詳細（#2961。[`pull-request-fix-issue-bar.tsx`](../src/components/dashboard/pull-request-fix-issue-bar.tsx)・
+  [`lib/github/pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)）では、
+  ヘッダーと本文の間の帯の強さをPR本文の判定と「変更を要求」のまま残っている人のレビュー
+  （レビュアーごとの最新状態。承認し直したものは落とす）だけで決め、本文は押した時点で1回取って
+  新規作成ダイアログの下書きへ引用する（起票はしない。引用の上限は`quoteReviewText`で修正依頼と共用）。
+  リリースPRには出さない（検証結果パネルの行ごとの「修正をIssueにする」が受け持つ）。
   20秒ごとに回る`/api/issues/pull-requests`へ相乗りさせていない——あちらは全PRぶんの応答が
   膨らむうえ、本文は画面の上部では使わない。**同じ材料を返す`/api/pull-requests/detail`も
   使わない**——あちらは1回4〜5リクエストで、ここで要るのはレビューコメント1件だけ。
@@ -3842,9 +3854,11 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 [`lib/github/knowledge-api.ts`](../src/lib/github/knowledge-api.ts)、整形は
 [`lib/knowledge-board.ts`](../src/lib/knowledge-board.ts)、表示は
 [`components/dashboard/knowledge-board-panel.tsx`](../src/components/dashboard/knowledge-board-panel.tsx)。
-**読み取りだけの画面**で、判定させるボタンも共有知識を書き換えるボタンも置かない——書き込めるのは
-`guchi-apps/docs`側の`promote-knowledge.yml`だけ、という
-[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための3重のガード」を崩さないため。
+**判定させるボタンも共有知識を書き換えるボタンも置かない**——書き込めるのは`guchi-apps/docs`側の
+`promote-knowledge.yml`だけ、という[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための
+3重のガード」を崩さないため。**唯一の例外がマージ待ちの反映PRの「マージする」「マージしない」
+ボタン**（#2950。後述）で、これは共有知識を書き換えるのではなく、`promote-knowledge.yml`が
+作った既存のPRを人間の代わりにマージ・closeするだけなので、上のガードには触れない。
 
 - **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
   設計したIssue（#2029・`guchi-apps/docs#65`）は、書式の説明としてマーカーをコードフェンスや
@@ -3882,6 +3896,29 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   ユーザーごとに5分キャッシュする。更新ボタンは`?refresh=1`でそれを捨てさせる
 - 暖色（amber）を使うのは滞留の警告だけ。上の「暖色は『人の対応待ち』専用に空けておく」に従い、
   承認はemerald、却下は色を当てない（失敗ではないため）
+- **「マージ待ちの反映PR」は、`guchi-apps/docs`のオープンPRのうちブランチ名が
+  `knowledge/promote-`で始まるものを検出する**（#2950。`knowledge-api.ts`の
+  `fetchOpenPromotionPullRequests`）。このプレフィックスは`promote-knowledge.yml`のPR作成
+  ステップ（`BRANCH="knowledge/promote-$(date -u +%Y%m%d-%H%M%S)"`）の写しで、**未マージの
+  反映PRが残っている間、同ワークフローは次回の判定を丸ごと見送る**（同じ`knowledge/*.md`を
+  触るPRが並んでコンフリクトするのを避けるため）。**向こうのブランチ名を変えたらここも変える**
+  （`PROMOTION_COLLECT_LIMIT`と同じ「写しを持つ」構造）
+- **出典Issueの抽出は、PR本文の`## 出典Issue`見出し以降に限定する**（`parsePromotionSourceIssues`）。
+  本文の前半はClaudeが自由記述で書くため、`出典: issue-deck#2350, aide-bot#51, #56`のような
+  短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
+  シェルステップが`- owner/repo#番号: URL`の固定書式で機械的に追記する節なので、ここだけを
+  対象にすれば誤検出しない
+- **唯一の書き込み操作である「マージする」「マージしない」ボタンは、既存のPRマージ機構を
+  そのまま再利用する**（`usePullRequestMergeMutation`の`mergePullRequest`・`closePullRequest`、
+  `POST /api/issues/pull-request-merge`・`POST /api/issues/pull-request-close`。
+  [`pull-request-merge-button.tsx`](../src/components/dashboard/pull-request-merge-button.tsx)と
+  同じ経路）。issue-deckのインストールトークンで実行するため、`guchi-apps/docs`が
+  GitHub Appのインストール範囲（`repository_selection: all`）に含まれ、`Repository`テーブルへ
+  同期済みであることが前提になる（`repository-sync.ts`はインストール範囲の全リポジトリを
+  絞り込まず`upsert`するため問題ない）。**「マージしない」を置くのは、
+  `promote-knowledge.yml`が「マージ**またはclose**されるまで次回の判定を見送る」仕様のため**
+  （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
+  対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
 
 ## 環境変数
 
