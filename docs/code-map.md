@@ -3825,9 +3825,9 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 [`components/dashboard/knowledge-board-panel.tsx`](../src/components/dashboard/knowledge-board-panel.tsx)。
 **判定させるボタンも共有知識を書き換えるボタンも置かない**——書き込めるのは`guchi-apps/docs`側の
 `promote-knowledge.yml`だけ、という[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための
-3重のガード」を崩さないため。**唯一の例外がマージ待ちの反映PRの「マージする」ボタン**（#2950。
-後述）で、これは共有知識を書き換えるのではなく、`promote-knowledge.yml`が作った既存のPRを
-人間の代わりにマージするだけなので、上のガードには触れない。
+3重のガード」を崩さないため。**唯一の例外がマージ待ちの反映PRの「マージする」「マージしない」
+ボタン**（#2950。後述）で、これは共有知識を書き換えるのではなく、`promote-knowledge.yml`が
+作った既存のPRを人間の代わりにマージ・closeするだけなので、上のガードには触れない。
 
 - **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
   設計したIssue（#2029・`guchi-apps/docs#65`）は、書式の説明としてマーカーをコードフェンスや
@@ -3877,12 +3877,17 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
   シェルステップが`- owner/repo#番号: URL`の固定書式で機械的に追記する節なので、ここだけを
   対象にすれば誤検出しない
-- **唯一の書き込み操作である「マージする」ボタンは、既存のPRマージ機構をそのまま再利用する**
-  （`usePullRequestMergeMutation`・`POST /api/issues/pull-request-merge`。
+- **唯一の書き込み操作である「マージする」「マージしない」ボタンは、既存のPRマージ機構を
+  そのまま再利用する**（`usePullRequestMergeMutation`の`mergePullRequest`・`closePullRequest`、
+  `POST /api/issues/pull-request-merge`・`POST /api/issues/pull-request-close`。
   [`pull-request-merge-button.tsx`](../src/components/dashboard/pull-request-merge-button.tsx)と
   同じ経路）。issue-deckのインストールトークンで実行するため、`guchi-apps/docs`が
   GitHub Appのインストール範囲（`repository_selection: all`）に含まれ、`Repository`テーブルへ
-  同期済みであることが前提になる
+  同期済みであることが前提になる（`repository-sync.ts`はインストール範囲の全リポジトリを
+  絞り込まず`upsert`するため問題ない）。**「マージしない」を置くのは、
+  `promote-knowledge.yml`が「マージ**またはclose**されるまで次回の判定を見送る」仕様のため**
+  （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
+  対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
 
 ## 環境変数
 
