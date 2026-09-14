@@ -478,6 +478,20 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
+  /**
+   * PR詳細の「修正Issueを起案」（#2961）。下書きは`PullRequestFixIssueBar`が自動レビューの
+   * 本文まで取ってから組み立てて渡す。**ここでも起票しない**
+   * （`openReleaseVerificationFixIssueDialog`と同じ立場）。
+   */
+  function openPullRequestFixIssueDialog(draft: { repositoryFullName: string; title: string; body: string }) {
+    setCreateDialogRepo(draft.repositoryFullName);
+    setCreateDialogTitle(draft.title);
+    setCreateDialogBody(draft.body);
+    setCreateDialogBodyPrefix(null);
+    setConfigIssueOrigin(null);
+    setCreateDialogOpen(true);
+  }
+
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
   // 元Issueの情報は入力欄ではなく固定接頭辞として渡し、入力欄は空のまま始める（#1322）。
@@ -1873,6 +1887,7 @@ export function IssueDeckShell({
                       selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                     }
                     onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+                    onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                     // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
                     onBack={() => goBackOrFallback(() => selectPullRequest(null))}
                   />
@@ -2245,6 +2260,7 @@ export function IssueDeckShell({
                   selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                 }
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+                onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                 className="hidden flex-1 md:flex"
               />
             </>
@@ -2404,6 +2420,7 @@ export function IssueDeckShell({
           onRefresh={modalPullRequestDetail.refresh}
           onMerged={() => modalPullRequest && handlePullRequestMerged(modalPullRequest)}
           onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+          onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
           /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
              クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
