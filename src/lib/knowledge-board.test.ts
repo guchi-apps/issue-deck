@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCandidate,
+  buildOpenPromotionPullRequest,
   CANDIDATE_MARKER,
   countByFile,
   daysSinceJstDate,
@@ -12,6 +13,7 @@ import {
   JUDGED_MARKER,
   parseKnowledgeFile,
   parseMemoComment,
+  parsePromotionSourceIssues,
   parseVerdictComment,
   sortCandidates,
   sortKnowledgeSections,
@@ -478,5 +480,70 @@ describe("detectKnowledgeStall", () => {
   it("件数が取れなければ窓の判定はしない（誤った警告を出さない）", () => {
     expect(detectKnowledgeStall([], sections, NO_COUNTS, 200).collectWindowSaturated).toBe(false);
     expect(detectKnowledgeStall([], sections).pendingTotal).toBeNull();
+  });
+});
+
+describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
+  const body = [
+    "自動生成: フリート各リポジトリのIssueに溜まった知見メモを審査し、共有知識へ格上げしました。",
+    "",
+    "---",
+    "",
+    "## 出典Issue",
+    "",
+    "- guchi-apps/issue-deck#2950: https://github.com/guchi-apps/issue-deck/issues/2950",
+    "- guchi-apps/aide#268: https://github.com/guchi-apps/aide/issues/268",
+    "",
+    "実行ログ: https://github.com/guchi-apps/docs/actions/runs/12345",
+    "",
+    "このPull Requestは `promote-knowledge.yml` が自動生成しました。",
+  ].join("\n");
+
+  it("`- owner/repo#番号: URL`の箇条書きから出典Issueを取る", () => {
+    expect(parsePromotionSourceIssues(body)).toEqual([
+      {
+        repoFullName: "guchi-apps/issue-deck",
+        number: 2950,
+        htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/2950",
+      },
+      {
+        repoFullName: "guchi-apps/aide",
+        number: 268,
+        htmlUrl: "https://github.com/guchi-apps/aide/issues/268",
+      },
+    ]);
+  });
+
+  it("出典Issueが書かれていなければ空配列（PR自体は落とさない）", () => {
+    expect(parsePromotionSourceIssues("自動生成: 手作業のPRです。")).toEqual([]);
+  });
+
+  it("buildOpenPromotionPullRequestはPRの基本情報と出典Issueをまとめる", () => {
+    expect(
+      buildOpenPromotionPullRequest({
+        number: 134,
+        title: "フリートの知見メモを共有知識へ格上げする",
+        htmlUrl: "https://github.com/guchi-apps/docs/pull/134",
+        createdAt: "2026-09-14T00:00:00Z",
+        body,
+      }),
+    ).toEqual({
+      number: 134,
+      title: "フリートの知見メモを共有知識へ格上げする",
+      htmlUrl: "https://github.com/guchi-apps/docs/pull/134",
+      createdAt: "2026-09-14T00:00:00Z",
+      sourceIssues: [
+        {
+          repoFullName: "guchi-apps/issue-deck",
+          number: 2950,
+          htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/2950",
+        },
+        {
+          repoFullName: "guchi-apps/aide",
+          number: 268,
+          htmlUrl: "https://github.com/guchi-apps/aide/issues/268",
+        },
+      ],
+    });
   });
 });

@@ -83,12 +83,40 @@ export type KnowledgeCounts = {
   judged: number | null;
 };
 
+/** 出典Issueの1件（反映PR本文の「## 出典Issue」箇条書きから取る） */
+export type PromotionSourceIssue = {
+  repoFullName: string;
+  number: number;
+  htmlUrl: string;
+};
+
+/** `guchi-apps/docs`へのマージ待ち反映PR（ブランチ名`knowledge/promote-*`）1件 */
+export type OpenPromotionPullRequest = {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  createdAt: string;
+  /** 抽出できなかった場合は空配列（PR自体は一覧から落とさない） */
+  sourceIssues: PromotionSourceIssue[];
+};
+
+/** 取得元の反映PR1件（`knowledge-api.ts`が返す形） */
+export type RawPromotionPullRequest = {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  createdAt: string;
+  body: string;
+};
+
 /** 画面が受け取るデータ一式 */
 export type KnowledgeBoardData = {
   sections: KnowledgeSection[];
   /** 共通知識のファイル数（`README.md`を除く） */
   fileCount: number;
   candidates: KnowledgeCandidate[];
+  /** マージ待ちの反映PR（作成の古い順） */
+  openPromotionPullRequests: OpenPromotionPullRequest[];
   /** 検索の上限に達して見ていないIssueが残っているか */
   truncated: boolean;
   /**
@@ -446,6 +474,38 @@ export function sortCandidates(candidates: KnowledgeCandidate[]): KnowledgeCandi
     .filter((c) => c.verdict !== "pending")
     .sort((a, b) => b.at.localeCompare(a.at));
   return [...pending, ...judged];
+}
+
+// ---- マージ待ちの反映PR -----------------------------------------------------
+
+/**
+ * 反映PR本文の「## 出典Issue」箇条書きから、出典Issueを取る。
+ *
+ * 書式は`promote-knowledge.yml`のPR作成ステップが決め打ちで生成する
+ * `- owner/repo#123: https://…`形式。取れなくても例外にせず空配列を返す
+ * （出典が読めないだけでPR自体を一覧から落とす理由が無い）。
+ */
+export function parsePromotionSourceIssues(body: string): PromotionSourceIssue[] {
+  const pattern = /^-\s+([\w.-]+\/[\w.-]+)#(\d+)\s*:\s*(\S+)/;
+  const sources: PromotionSourceIssue[] = [];
+
+  for (const line of stripCodeFences(body).split("\n")) {
+    const match = pattern.exec(line.trim());
+    if (!match) continue;
+    sources.push({ repoFullName: match[1], number: Number(match[2]), htmlUrl: match[3] });
+  }
+
+  return sources;
+}
+
+export function buildOpenPromotionPullRequest(pr: RawPromotionPullRequest): OpenPromotionPullRequest {
+  return {
+    number: pr.number,
+    title: pr.title,
+    htmlUrl: pr.htmlUrl,
+    createdAt: pr.createdAt,
+    sourceIssues: parsePromotionSourceIssues(pr.body),
+  };
 }
 
 // ---- knowledge/ のファイル -------------------------------------------------

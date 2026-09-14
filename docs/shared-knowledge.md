@@ -478,6 +478,14 @@ Claude Code実行前に、以下のステップを挟む。
 5. 判定結果（承認・却下と理由、作成したPRのURL）を出典Issueへコメントし、末尾に
    `<!-- knowledge-promotion:judged -->`を付ける。このマーカーが再実行時の二重処理を防ぐ
 
+**反映PRのブランチ名は`knowledge/promote-<UTCタイムスタンプ>`で固定**（`promote-knowledge.yml`の
+PR作成ステップ）。このPRは毎回`main`から新しいブランチで作られ既存のPRを再利用しないため、
+**未マージの反映PRが残っている間、次回の判定は見送られる**（同じ`knowledge/*.md`を触るPRが並んで
+コンフリクトするのを避けるため）。PR本文の末尾には`## 出典Issue`の見出しの下に
+`- owner/repo#番号: URL`形式で出典Issueが列挙される。issue-deckの「共通知識」画面
+（`src/lib/knowledge-board.ts`の`parsePromotionSourceIssues`・`fetchOpenPromotionPullRequests`）は、
+このブランチ名パターンでオープンな反映PRを検出し、マージ待ちとして一覧表示する（#2950）。
+
 **判定エージェントを置くのが`guchi-apps/docs`側である理由**（#2029）。知識を守る側が門番を持つ
 ため、issue-deckを含むどのアプリも共有知識への書き込み権限を持たなくてよい。収集元リポジトリが
 増えても各リポジトリ側の変更が要らない。フリート全体を巡回して1つのPRにまとめる先例が
