@@ -214,6 +214,47 @@ export function sessionUsageKindLabel(kind: string): string {
 }
 
 /**
+ * 「セッション種別別」の行の並び（#2954）。**金額順ではなく、Issueが進む順に固定する。**
+ * 金額順では期間を切り替えるたびに行の位置が入れ替わり、作業の流れに沿って読めなかった。
+ */
+const USAGE_WORK_FLOW_KIND_ORDER: readonly string[] = [
+  usagePhaseKindKey("plan"),
+  "plan-review",
+  usagePhaseKindKey("research"),
+  usagePhaseKindKey("coding"),
+  IMPLEMENTATION_UNSPLIT_KIND_KEY,
+  usagePhaseKindKey("wrapup"),
+  "code-review",
+  "actions",
+];
+
+/** Issueの作業の流れに属さない種別。流れの後ろに置き、画面は手前に区切りを入れる */
+const USAGE_KIND_ORDER: readonly string[] = [...USAGE_WORK_FLOW_KIND_ORDER, "question", "other"];
+
+/**
+ * 種別の行がIssueの作業の流れに入るか（#2954）。**未知の種別は流れの外として扱う**
+ * （どの工程か分からないものを、工程の途中へ紛れ込ませない）。
+ */
+export function isUsageKindInWorkFlow(kind: string): boolean {
+  return USAGE_WORK_FLOW_KIND_ORDER.includes(kind);
+}
+
+/**
+ * 「セッション種別別」の並べ替え（#2954）。作業の流れ → 横断質問・その他 → 未知の種別の順。
+ * **未知の種別は落とさず末尾に金額の多い順で置く**（落とすとカードの合計が合わなくなる）。
+ */
+export function compareUsageKinds(
+  a: { key: string; costUsd: number },
+  b: { key: string; costUsd: number },
+): number {
+  const rank = (key: string) => {
+    const index = USAGE_KIND_ORDER.indexOf(key);
+    return index === -1 ? USAGE_KIND_ORDER.length : index;
+  };
+  return rank(a.key) - rank(b.key) || b.costUsd - a.costUsd;
+}
+
+/**
  * モデルIDの短縮表示（#2646）。前方一致で拾う（`scripts/lib/session-usage.sh`の`price_for`と
  * 同じ考え方）。日付・世代のサフィックスは画面では要らないので落とす。
  */
@@ -521,7 +562,7 @@ export function buildSessionUsageSummary({
     totalsBySource,
     byDay: [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date)),
     byRepository: [...byRepository.values()].sort(byCost),
-    byKind: [...byKind.values()].sort(byCost),
+    byKind: [...byKind.values()].sort(compareUsageKinds),
     implementationSessions,
     byIssue: issues.slice(0, MAX_DETAIL_ISSUES),
     omittedIssues: omitted.length,
