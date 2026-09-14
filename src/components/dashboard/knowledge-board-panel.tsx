@@ -10,8 +10,19 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   countByFile,
@@ -134,7 +145,10 @@ export function KnowledgeBoardPanel({
           </dl>
 
           {data.openPromotionPullRequests.length > 0 && (
-            <PromotionPullRequestsSection pullRequests={data.openPromotionPullRequests} />
+            <PromotionPullRequestsSection
+              pullRequests={data.openPromotionPullRequests}
+              onMerged={onRefresh}
+            />
           )}
 
           {/* 判定が進んでいないときの合図。**原因ごとに分けて出す**——落ちているのと、
@@ -265,17 +279,26 @@ function Alert({
   );
 }
 
+/** 共有知識リポジトリ（マージ待ちの反映PRが作られる先）。`knowledge-api.ts`と同じ値 */
+const DOCS_REPO_OWNER = "guchi-apps";
+const DOCS_REPO_NAME = "docs";
+
 /**
  * 「マージ待ちの反映PR」（#2950）。格上げ判定が作った`guchi-apps/docs`へのPRのうち、
  * まだ人間がマージしていないものを一覧にする。未判定候補（青）・承認（緑）とは役割が違う
  * 「人がマージを判断する場所」であることを示すため、既存の警告色（amber）とも分けてindigoを使う。
  *
- * **読み取りだけ**で、この画面からマージはしない（`KnowledgeBoardPanel`と同じ方針）。
+ * **唯一の書き込み操作**として「マージする」ボタンを置く（`docs/code-map.md`「『共通知識』画面は
+ * 書式の揺れを前提に、best-effortで読む」参照）。共有知識自体は書き換えず、`promote-knowledge.yml`
+ * が既に作ったPRを人間の代わりにマージするだけなので、この画面の「読み取りだけ」の方針には
+ * 触れない。マージ操作は既存のPRマージ機構（`pull-request-merge-button.tsx`）をそのまま使う。
  */
 function PromotionPullRequestsSection({
   pullRequests,
+  onMerged,
 }: {
   pullRequests: OpenPromotionPullRequest[];
+  onMerged: () => void;
 }) {
   return (
     <section className="rounded-md border border-indigo-300 bg-indigo-50 p-2.5 dark:border-indigo-900 dark:bg-indigo-950/40">
@@ -294,14 +317,20 @@ function PromotionPullRequestsSection({
       </p>
       <ul className="mt-2 flex flex-col gap-1.5">
         {pullRequests.map((pr) => (
-          <PromotionPullRequestRow key={pr.number} pr={pr} />
+          <PromotionPullRequestRow key={pr.number} pr={pr} onMerged={onMerged} />
         ))}
       </ul>
     </section>
   );
 }
 
-function PromotionPullRequestRow({ pr }: { pr: OpenPromotionPullRequest }) {
+function PromotionPullRequestRow({
+  pr,
+  onMerged,
+}: {
+  pr: OpenPromotionPullRequest;
+  onMerged: () => void;
+}) {
   return (
     <li className="rounded-md border bg-card p-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -329,16 +358,108 @@ function PromotionPullRequestRow({ pr }: { pr: OpenPromotionPullRequest }) {
         </div>
       )}
 
-      <a
-        href={pr.htmlUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 hover:underline dark:text-indigo-300"
-      >
-        <ExternalLink className="size-3" aria-hidden />
-        PRを開いて確認する
-      </a>
+      <div className="mt-1.5 flex items-center gap-3">
+        <a
+          href={pr.htmlUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-700 hover:underline dark:text-indigo-300"
+        >
+          <ExternalLink className="size-3" aria-hidden />
+          PRを開いて確認する
+        </a>
+        <PromotionPullRequestMergeButton pr={pr} onMerged={onMerged} />
+      </div>
     </li>
+  );
+}
+
+/**
+ * 「マージする」ボタン。既存の`usePullRequestMergeMutation`・`POST /api/issues/pull-request-merge`
+ * をそのまま再利用する（issue-deckのインストールトークンで実行、ユーザー個人のトークンは使わない）。
+ *
+ * `PullRequestMergeButton`と違い、CI状態・自動レビュー判定・本番リリース内容の一覧は持たない
+ * （反映PRにはそれらの情報が無いため）。確認ダイアログはPRタイトルと出典Issueだけを見せる簡易版。
+ */
+function PromotionPullRequestMergeButton({
+  pr,
+  onMerged,
+}: {
+  pr: OpenPromotionPullRequest;
+  onMerged: () => void;
+}) {
+  const { mergePullRequest, isSubmitting, error, setError } = usePullRequestMergeMutation();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isMerged, setIsMerged] = useState(false);
+
+  async function runMerge() {
+    const merged = await mergePullRequest({
+      owner: DOCS_REPO_OWNER,
+      repo: DOCS_REPO_NAME,
+      number: pr.number,
+    });
+    if (merged) {
+      setConfirmOpen(false);
+      setIsMerged(true);
+      onMerged();
+    }
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="ml-auto h-6 shrink-0 px-2 text-[11px]"
+        disabled={isSubmitting || isMerged}
+        onClick={() => setConfirmOpen(true)}
+      >
+        {isMerged ? "マージ済み" : isSubmitting ? "マージ中..." : "マージする"}
+      </Button>
+
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) setError(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>このPRをマージしますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {DOCS_REPO_OWNER}/{DOCS_REPO_NAME} #{pr.number}（{pr.title}）をマージします。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pr.sourceIssues.length > 0 && (
+            <ul className="flex flex-wrap gap-1">
+              {pr.sourceIssues.map((source) => (
+                <li
+                  key={`${source.repoFullName}#${source.number}`}
+                  className="rounded-sm border bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+                >
+                  {source.repoFullName.split("/")[1] ?? source.repoFullName}#{source.number}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                // 確認結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する。
+                event.preventDefault();
+                runMerge();
+              }}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "マージ中..." : "マージする"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

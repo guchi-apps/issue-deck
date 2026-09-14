@@ -478,19 +478,32 @@ export function sortCandidates(candidates: KnowledgeCandidate[]): KnowledgeCandi
 
 // ---- マージ待ちの反映PR -----------------------------------------------------
 
+/** 出典Issueの箇条書きが始まる見出し。`promote-knowledge.yml`のPR作成ステップが固定で書く */
+const SOURCE_ISSUES_HEADING = "## 出典Issue";
+
 /**
- * 反映PR本文の「## 出典Issue」箇条書きから、出典Issueを取る。
+ * 反映PR本文の「## 出典Issue」見出し以降にある箇条書きから、出典Issueを取る。
  *
- * 書式は`promote-knowledge.yml`のPR作成ステップが決め打ちで生成する
- * `- owner/repo#123: https://…`形式。取れなくても例外にせず空配列を返す
+ * **本文の前半（見出しより前）は見ない。** そこはClaudeが自由記述で書く要約で、
+ * `出典: issue-deck#2350, aide-bot#51, #56`のような短縮記法が混じることがあり（実例:
+ * `guchi-apps/docs#133`）、`- owner/repo#N: URL`と誤って一致しうる。見出し以降はシェル
+ * ステップが`- owner/repo#123: https://…`の固定書式で機械的に追記する節なので、ここだけを
+ * 対象にすれば誤検出しない。見出し自体が無い・出典が書かれていない場合は例外にせず空配列を返す
  * （出典が読めないだけでPR自体を一覧から落とす理由が無い）。
  */
 export function parsePromotionSourceIssues(body: string): PromotionSourceIssue[] {
+  const stripped = stripCodeFences(body);
+  const headingIndex = stripped.indexOf(SOURCE_ISSUES_HEADING);
+  if (headingIndex === -1) return [];
+
+  const section = stripped.slice(headingIndex + SOURCE_ISSUES_HEADING.length);
   const pattern = /^-\s+([\w.-]+\/[\w.-]+)#(\d+)\s*:\s*(\S+)/;
   const sources: PromotionSourceIssue[] = [];
 
-  for (const line of stripCodeFences(body).split("\n")) {
-    const match = pattern.exec(line.trim());
+  for (const line of section.split("\n")) {
+    const trimmed = line.trim();
+    if (/^##\s/.test(trimmed)) break;
+    const match = pattern.exec(trimmed);
     if (!match) continue;
     sources.push({ repoFullName: match[1], number: Number(match[2]), htmlUrl: match[3] });
   }

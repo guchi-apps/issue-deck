@@ -486,6 +486,7 @@ describe("detectKnowledgeStall", () => {
 describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
   const body = [
     "自動生成: フリート各リポジトリのIssueに溜まった知見メモを審査し、共有知識へ格上げしました。",
+    "新設した主なファイルは次のとおり（出典: issue-deck#9999, aide-bot#1, #2）。",
     "",
     "---",
     "",
@@ -499,7 +500,7 @@ describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
     "このPull Requestは `promote-knowledge.yml` が自動生成しました。",
   ].join("\n");
 
-  it("`- owner/repo#番号: URL`の箇条書きから出典Issueを取る", () => {
+  it("`## 出典Issue`見出し以降の`- owner/repo#番号: URL`だけを取る", () => {
     expect(parsePromotionSourceIssues(body)).toEqual([
       {
         repoFullName: "guchi-apps/issue-deck",
@@ -512,6 +513,11 @@ describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
         htmlUrl: "https://github.com/guchi-apps/aide/issues/268",
       },
     ]);
+  });
+
+  it("見出しより前にある本文中の短縮記法（`出典: repo#N, #M`）は拾わない", () => {
+    const withoutHeading = body.split("## 出典Issue")[0];
+    expect(parsePromotionSourceIssues(withoutHeading)).toEqual([]);
   });
 
   it("出典Issueが書かれていなければ空配列（PR自体は落とさない）", () => {
