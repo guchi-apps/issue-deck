@@ -114,6 +114,11 @@ type SidebarNavProps = {
    * 読めてしまう）。
    */
   releaseActivity: ReleaseActivityCounts | null;
+  /**
+   * 「確認を追う対象」に選んだリポジトリの、未確認のリリース件数（#2951）。「リリース履歴」行の
+   * 件数とオレンジの丸に使う。**nullは未取得**で、そのときは件数を出さない。
+   */
+  releaseUncheckedCount: number | null;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   /**
@@ -139,15 +144,27 @@ type SidebarNavProps = {
 /**
  * PCの左メニュー（#742ほか）。
  *
- * **「ブランチ」行の件数はProviderから自分で読む**（#2167。`MobileBottomNav`と同じ形）。
- * 材料はベルと同じ1本のポーリング（`/api/repositories/release-pending-merges`）で、
- * これを描いている`issue-deck-shell.tsx`は`NotificationProvider`の親なのでフックを呼べず、
- * propで配れない。**新しく`useRepositoryReleaseStatuses`を呼ぶと取得が2本走る。**
+ * **「ブランチ」「リリース履歴」行の件数はProviderから自分で読む**（#2167・#2951。
+ * `MobileBottomNav`と同じ形）。前者は専用のポーリング（`/api/repositories/release-pending-merges`）を
+ * `NotificationProvider`が持つ。後者も同様の常時ポーリング（`/api/repositories/release-history/unchecked-count`）
+ * を持つが、**「リリース履歴」画面を開いて取得済みのあいだはそちらの値を優先する**
+ * （`issue-deck-shell.tsx`が`releaseHistoryUncheckedCountOverride`として渡す。「確認済みにする」を
+ * 押した直後、ポーリングだと反映が最大5分遅れるため）。`issue-deck-shell.tsx`は
+ * `NotificationProvider`の親なのでフックを呼べず、propで配れない。**ここで新しく同じフックを
+ * 呼ぶと取得が2本走る。**
  */
-export function SidebarNav(props: Omit<SidebarNavProps, "releaseActivity">) {
-  const { releaseActivity } = useNotificationState();
+export function SidebarNav(
+  props: Omit<SidebarNavProps, "releaseActivity" | "releaseUncheckedCount">,
+) {
+  const { releaseActivity, releaseUncheckedCount } = useNotificationState();
 
-  return <SidebarNavView {...props} releaseActivity={releaseActivity} />;
+  return (
+    <SidebarNavView
+      {...props}
+      releaseActivity={releaseActivity}
+      releaseUncheckedCount={releaseUncheckedCount}
+    />
+  );
 }
 
 /**
@@ -174,6 +191,7 @@ export function SidebarNavView({
   unconfirmedQuestionCount,
   waitingQuestionCount,
   releaseActivity,
+  releaseUncheckedCount,
   pullRequestNavCounts,
   mergePendingAttention,
   repositories,
@@ -357,8 +375,17 @@ export function SidebarNavView({
             icon: History,
             active: activePane === "releases",
             onClick: onSelectReleaseHistory,
-            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い（#2726）
-            title: "全リポジトリのGitHub Releaseを時系列で見る",
+            // **#2726時点では数字も丸も出していなかった**（見るだけの画面で、放っておくと
+            // 困ることが無いため）。#2951で「確認を追う対象」に選んだリポジトリの未確認件数
+            // （`lib/release-check.ts`）を出すようにした。**未確認が無いあいだは0件のときも
+            // 含めて出さない**——`0`を出すと「対象が無い」と読めてしまい、他の行（質問・
+            // ブランチ）の「取得済みの在庫数」とは意味が違う（対象を選んでいなければ`null`）
+            count: releaseUncheckedCount && releaseUncheckedCount > 0 ? releaseUncheckedCount : null,
+            emphasis: (releaseUncheckedCount ?? 0) > 0 ? "attention" : "none",
+            title:
+              releaseUncheckedCount && releaseUncheckedCount > 0
+                ? `未確認のリリースが${releaseUncheckedCount}件あります`
+                : "全リポジトリのGitHub Releaseを時系列で見る",
           })}
           {navRow({
             key: "nightly",

@@ -54,10 +54,11 @@ describe("MobileBottomNav（#1638でブランチと設定を入れ替え、#2631
     expect(onSelect).toHaveBeenCalledWith("flow");
   });
 
-  it("Providerの外では反映待ちの件数を出さない（未取得と同じ扱い）", () => {
+  it("Providerの外では反映待ち・未確認件数を出さない（未取得と同じ扱い）", () => {
     render(<MobileBottomNav active="home" onSelect={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
+    expect(screen.getByRole("button", { name: "リリース" }).textContent).toBe("リリース");
   });
 });
 
@@ -107,5 +108,30 @@ describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
     const badge = screen.getByText("1");
     expect(badge.className).toContain("bg-destructive");
     expect(badge.className).not.toContain("bg-amber-500");
+  });
+});
+
+describe("MobileBottomNavViewの未確認リリースバッジ（#2951）", () => {
+  it("リリースタブに未確認件数を出す", () => {
+    render(<MobileBottomNavView active="home" onSelect={vi.fn()} releaseUncheckedCount={4} />);
+
+    const releaseTab = screen.getByRole("button", {
+      name: "リリース（未確認のリリースが4件あります）",
+    });
+    expect(releaseTab.textContent).toContain("4");
+    const badge = screen.getByText("4");
+    expect(badge.className).toContain("bg-amber-500");
+    // 他のタブには付けない
+    expect(screen.getByRole("button", { name: "AI使用量" }).textContent).toBe("AI使用量");
+  });
+
+  it("未取得（null）・0件のときは数字を出さない", () => {
+    const { rerender } = render(
+      <MobileBottomNavView active="home" onSelect={vi.fn()} releaseUncheckedCount={null} />,
+    );
+    expect(screen.getByRole("button", { name: "リリース" }).textContent).toBe("リリース");
+
+    rerender(<MobileBottomNavView active="home" onSelect={vi.fn()} releaseUncheckedCount={0} />);
+    expect(screen.getByRole("button", { name: "リリース" }).textContent).toBe("リリース");
   });
 });

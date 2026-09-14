@@ -149,6 +149,7 @@ import {
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
+import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
 import { selectVisibleReleaseHistory } from "@/lib/release-history";
 import {
   applyOptimisticMerges,
@@ -1282,6 +1283,22 @@ export function IssueDeckShell({
         })),
     [repositories],
   );
+  /**
+   * 左メニュー・フッタータブへ渡す未確認件数（#2951）。**「リリース履歴」画面を開いていて
+   * 取得済みのあいだだけ値を持つ**（`visibleReleaseHistoryEntries`が`null`なら`null`のまま
+   * `NotificationProvider`へ渡し、常時ポーリングの値にフォールバックさせる）。
+   *
+   * 画面で「確認済みにする」を押すと`releaseHistory.checkRecords`が楽観的更新されるため、
+   * ここも即座に再計算され、左メニュー・フッタータブのバッジがポーリングを待たずに動く
+   * （計画レビューの指摘。ポーリングだけだと最大5分バッジが古いまま残っていた）。
+   * 母集団は画面のヘッダー「未確認 N件」と同じ`visibleReleaseHistoryEntries`（非表示
+   * リポジトリを除いたもの）に揃える。
+   */
+  const releaseHistoryUncheckedCountOverride = useMemo(() => {
+    if (visibleReleaseHistoryEntries === null) return null;
+    const checkIndex = buildReleaseCheckIndex(releaseCheckTargets, releaseHistory.checkRecords);
+    return countUncheckedReleases(visibleReleaseHistoryEntries, checkIndex);
+  }, [visibleReleaseHistoryEntries, releaseCheckTargets, releaseHistory.checkRecords]);
   // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
   // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
   // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
@@ -1674,6 +1691,7 @@ export function IssueDeckShell({
         onRefreshIssues={issuePolling.refresh}
         onRefreshPullRequests={openPullRequests.refreshInBackground}
         isRefreshingPullRequests={openPullRequests.isRefreshing}
+        releaseHistoryUncheckedCountOverride={releaseHistoryUncheckedCountOverride}
       >
       <div className="flex h-full flex-col">
         <TopBar

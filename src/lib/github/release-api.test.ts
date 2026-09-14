@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchRefCiState, resolveCiStateFromCheckRuns } from "@/lib/github/release-api";
+import { clearConditionalRequestCache } from "@/lib/github/conditional-request";
+import {
+  fetchReleasesBackTo,
+  fetchRefCiState,
+  resolveCiStateFromCheckRuns,
+  type ReleaseHistoryItem,
+} from "@/lib/github/release-api";
 
 function jsonResponse(status: number, body: unknown) {
   return {
@@ -153,5 +159,77 @@ describe("fetchRefCiState", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(403, {})));
 
     await expect(fetchRefCiState("owner", "repo", "develop", "token")).resolves.toBe("unknown");
+  });
+});
+
+describe("fetchReleasesBackTo（#2951で`api/repositories/release-history`から切り出し）", () => {
+  /** GitHub Releases REST APIのページ1件ぶん（20件固定）を模擬するfetchスタブ */
+  function stubReleasePages(pages: number[][]) {
+    const fetchMock = vi.fn(async (url: string) => {
+      const page = Number(new URL(url).searchParams.get("page") ?? "1");
+      const daysAgoList = pages[page - 1] ?? [];
+      return jsonResponse(
+        200,
+        daysAgoList.map((daysAgo) => ({
+          tag_name: `v${daysAgo}`,
+          html_url: `https://github.com/o/r/releases/tag/v${daysAgo}`,
+          published_at: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
+        })),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  /** `sinceMs`を下回る公開日時のエントリが1件でもあれば真（本物の`hasReachedReleaseCheckSince`と同じ形） */
+  function hasReachedSince(entries: readonly ReleaseHistoryItem[], sinceMs: number): boolean {
+    return entries.some((entry) => entry.publishedAt !== null && Date.parse(entry.publishedAt) < sinceMs);
+  }
+
+  afterEach(() => {
+    clearConditionalRequestCache();
+  });
+
+  it("sinceMsが無ければ1ページだけ取る（対象外リポジトリ）", async () => {
+    const fetchMock = stubReleasePages([Array.from({ length: 20 }, (_, i) => i)]);
+
+    const result = await fetchReleasesBackTo("o", "r", "token", undefined, hasReachedSince);
+
+    expect(result).toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("1ページ目が上限未満ならsinceMsがあってもページを足さない", async () => {
+    const fetchMock = stubReleasePages([[0, 1, 2]]);
+
+    const result = await fetchReleasesBackTo("o", "r", "token", Date.now(), hasReachedSince);
+
+    expect(result).toHaveLength(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("基準時刻より古いリリースに届くまでページを足す", async () => {
+    // 1ページ目（0〜19日前）はすべて基準時刻以降（19日前ちょうどまで）、
+    // 2ページ目の20日前で初めて基準を下回る
+    const sinceMs = Date.now() - 19 * 86_400_000;
+    const fetchMock = stubReleasePages([Array.from({ length: 20 }, (_, i) => i), [20, 21]]);
+
+    const result = await fetchReleasesBackTo("o", "r", "token", sinceMs, hasReachedSince);
+
+    expect(result).toHaveLength(22);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("上限ページ数（5）に達したら打ち切る", async () => {
+    // 5ページとも基準時刻より新しいまま埋まっている（確認を長く溜めたケース）
+    const sinceMs = Date.now() - 1000 * 86_400_000;
+    const fetchMock = stubReleasePages(
+      Array.from({ length: 6 }, (_, page) => Array.from({ length: 20 }, (_, i) => page * 20 + i)),
+    );
+
+    const result = await fetchReleasesBackTo("o", "r", "token", sinceMs, hasReachedSince);
+
+    expect(result).toHaveLength(100);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 });
