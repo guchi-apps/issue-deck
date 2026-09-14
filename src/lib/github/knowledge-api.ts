@@ -17,7 +17,7 @@
 
 import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
-import type { RawIssue, RawKnowledgeFile } from "@/lib/knowledge-board";
+import type { RawIssue, RawKnowledgeFile, RawPromotionPullRequest } from "@/lib/knowledge-board";
 
 const DOCS_OWNER = "guchi-apps";
 const DOCS_REPO = "docs";
@@ -117,6 +117,81 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
     .map((entry) => ({ path: `${KNOWLEDGE_DIR}/${entry.name}`, text: entry.object!.text! }));
 
   return { files, docsRepoUrl: data.repository?.url ?? fallback.docsRepoUrl };
+}
+
+/** 格上げ判定が作る反映PRのブランチ名の目印。`promote-knowledge.yml`が使うものと同じ */
+const PROMOTION_BRANCH_PREFIX = "knowledge/promote-";
+
+/** 反映PRを見るぶんには十分な件数。溜まっていても数件〜十数件止まりの想定（#126の見送り仕様） */
+const OPEN_PULL_REQUESTS_TO_SCAN = 30;
+
+const OPEN_PULL_REQUESTS_QUERY = `
+query KnowledgeOpenPullRequests($owner: String!, $repo: String!, $first: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequests(states: OPEN, first: $first, orderBy: { field: CREATED_AT, direction: ASC }) {
+      nodes {
+        number
+        title
+        url
+        createdAt
+        headRefName
+        body
+      }
+    }
+  }
+}`;
+
+type OpenPullRequestsResponse = {
+  repository: {
+    pullRequests: {
+      nodes: {
+        number: number;
+        title: string;
+        url: string;
+        createdAt: string;
+        headRefName: string;
+        body: string;
+      }[];
+    };
+  } | null;
+};
+
+/**
+ * `guchi-apps/docs`のオープンなPull Requestのうち、格上げ判定が作った反映PR
+ * （ブランチ名が`knowledge/promote-`で始まるもの）だけを取る。
+ *
+ * これが残っている間、`promote-knowledge.yml`は次回の判定を見送る（#126）。issue-deckの
+ * 「共通知識」画面はマージ操作を持たないため、ここでは一覧を返すだけで判定・マージは行わない。
+ *
+ * **読めなかったときは例外にせず空で返す**（`fetchKnowledgeFiles`と同じ方針）。
+ */
+export async function fetchOpenPromotionPullRequests(
+  token: string,
+): Promise<RawPromotionPullRequest[]> {
+  let data: OpenPullRequestsResponse;
+  try {
+    data = await githubGraphql<OpenPullRequestsResponse>(
+      token,
+      OPEN_PULL_REQUESTS_QUERY,
+      { owner: DOCS_OWNER, repo: DOCS_REPO, first: OPEN_PULL_REQUESTS_TO_SCAN },
+      "fetchOpenPromotionPullRequests",
+      { permissionHint: "（共有知識リポジトリのPull Requestを読む権限が要ります）" },
+    );
+  } catch (error) {
+    console.error("[fetchOpenPromotionPullRequests]", error);
+    return [];
+  }
+
+  const nodes = data.repository?.pullRequests.nodes ?? [];
+  return nodes
+    .filter((node) => node.headRefName.startsWith(PROMOTION_BRANCH_PREFIX))
+    .map((node) => ({
+      number: node.number,
+      title: node.title,
+      htmlUrl: node.url,
+      createdAt: node.createdAt,
+      body: node.body,
+    }));
 }
 
 const MEMO_QUERY = `

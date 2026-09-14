@@ -3842,9 +3842,11 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 [`lib/github/knowledge-api.ts`](../src/lib/github/knowledge-api.ts)、整形は
 [`lib/knowledge-board.ts`](../src/lib/knowledge-board.ts)、表示は
 [`components/dashboard/knowledge-board-panel.tsx`](../src/components/dashboard/knowledge-board-panel.tsx)。
-**読み取りだけの画面**で、判定させるボタンも共有知識を書き換えるボタンも置かない——書き込めるのは
-`guchi-apps/docs`側の`promote-knowledge.yml`だけ、という
-[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための3重のガード」を崩さないため。
+**判定させるボタンも共有知識を書き換えるボタンも置かない**——書き込めるのは`guchi-apps/docs`側の
+`promote-knowledge.yml`だけ、という[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための
+3重のガード」を崩さないため。**唯一の例外がマージ待ちの反映PRの「マージする」「マージしない」
+ボタン**（#2950。後述）で、これは共有知識を書き換えるのではなく、`promote-knowledge.yml`が
+作った既存のPRを人間の代わりにマージ・closeするだけなので、上のガードには触れない。
 
 - **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
   設計したIssue（#2029・`guchi-apps/docs#65`）は、書式の説明としてマーカーをコードフェンスや
@@ -3882,6 +3884,29 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   ユーザーごとに5分キャッシュする。更新ボタンは`?refresh=1`でそれを捨てさせる
 - 暖色（amber）を使うのは滞留の警告だけ。上の「暖色は『人の対応待ち』専用に空けておく」に従い、
   承認はemerald、却下は色を当てない（失敗ではないため）
+- **「マージ待ちの反映PR」は、`guchi-apps/docs`のオープンPRのうちブランチ名が
+  `knowledge/promote-`で始まるものを検出する**（#2950。`knowledge-api.ts`の
+  `fetchOpenPromotionPullRequests`）。このプレフィックスは`promote-knowledge.yml`のPR作成
+  ステップ（`BRANCH="knowledge/promote-$(date -u +%Y%m%d-%H%M%S)"`）の写しで、**未マージの
+  反映PRが残っている間、同ワークフローは次回の判定を丸ごと見送る**（同じ`knowledge/*.md`を
+  触るPRが並んでコンフリクトするのを避けるため）。**向こうのブランチ名を変えたらここも変える**
+  （`PROMOTION_COLLECT_LIMIT`と同じ「写しを持つ」構造）
+- **出典Issueの抽出は、PR本文の`## 出典Issue`見出し以降に限定する**（`parsePromotionSourceIssues`）。
+  本文の前半はClaudeが自由記述で書くため、`出典: issue-deck#2350, aide-bot#51, #56`のような
+  短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
+  シェルステップが`- owner/repo#番号: URL`の固定書式で機械的に追記する節なので、ここだけを
+  対象にすれば誤検出しない
+- **唯一の書き込み操作である「マージする」「マージしない」ボタンは、既存のPRマージ機構を
+  そのまま再利用する**（`usePullRequestMergeMutation`の`mergePullRequest`・`closePullRequest`、
+  `POST /api/issues/pull-request-merge`・`POST /api/issues/pull-request-close`。
+  [`pull-request-merge-button.tsx`](../src/components/dashboard/pull-request-merge-button.tsx)と
+  同じ経路）。issue-deckのインストールトークンで実行するため、`guchi-apps/docs`が
+  GitHub Appのインストール範囲（`repository_selection: all`）に含まれ、`Repository`テーブルへ
+  同期済みであることが前提になる（`repository-sync.ts`はインストール範囲の全リポジトリを
+  絞り込まず`upsert`するため問題ない）。**「マージしない」を置くのは、
+  `promote-knowledge.yml`が「マージ**またはclose**されるまで次回の判定を見送る」仕様のため**
+  （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
+  対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
 
 ## 環境変数
 
