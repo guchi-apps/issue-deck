@@ -2085,8 +2085,14 @@ export function POST(request: NextRequest) {
   レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
   付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
   出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
-  **取得はマージ待ちのときだけ**（`usePullRequestReview`・
+  **取得はマージ待ちのときと、PR詳細の「修正Issueを起案」を押したときだけ**（`usePullRequestReview`・
   `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
+  PR詳細（#2961。[`pull-request-fix-issue-bar.tsx`](../src/components/dashboard/pull-request-fix-issue-bar.tsx)・
+  [`lib/github/pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)）では、
+  ヘッダーと本文の間の帯の強さをPR本文の判定と「変更を要求」のまま残っている人のレビュー
+  （レビュアーごとの最新状態。承認し直したものは落とす）だけで決め、本文は押した時点で1回取って
+  新規作成ダイアログの下書きへ引用する（起票はしない。引用の上限は`quoteReviewText`で修正依頼と共用）。
+  リリースPRには出さない（検証結果パネルの行ごとの「修正をIssueにする」が受け持つ）。
   20秒ごとに回る`/api/issues/pull-requests`へ相乗りさせていない——あちらは全PRぶんの応答が
   膨らむうえ、本文は画面の上部では使わない。**同じ材料を返す`/api/pull-requests/detail`も
   使わない**——あちらは1回4〜5リクエストで、ここで要るのはレビューコメント1件だけ。
