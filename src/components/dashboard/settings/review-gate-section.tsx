@@ -203,6 +203,10 @@ function StateIcon({ repository }: { repository: ReviewGateRepository }) {
 
 function OutcomeMeter({ repository }: { repository: ReviewGateRepository }) {
   const summary = summarizeReviewOutcomes(repository.outcomes);
+  // 一部のPRを読めていないのに件数を出すと、欠けたぶんだけ少なく見える（#2963）
+  if (!repository.outcomesAvailable) {
+    return <span className="text-[11px] text-muted-foreground">実行状況を取得できませんでした</span>;
+  }
   if (repository.outcomes.length === 0) {
     return <span className="text-[11px] text-muted-foreground">Issue PRなし</span>;
   }
