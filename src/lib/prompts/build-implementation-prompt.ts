@@ -149,6 +149,12 @@ function previewInstructions(labelNames: ReadonlySet<string>): string {
  * スマホ用の画面へ切り替わるのは幅768pxまでなので、iPadは横（1180px）でもPCと同じ配置が狭い幅で出る。
  * ラベルの有無によらない原則なので、ラベルが無いときの文面にも但し書きとして入れている。
  *
+ * **Designタイプ（キャンバス）を使わせない**（#2984）。`Artifact`ツールの説明が「デザインを作るなら
+ * 最初に`quickstart`を呼ぶ」と勧めるため、放っておくとDesignタイプが選ばれる。そこから公開すると
+ * `file_path`が目次の`project/canvas.json`になり、カードにJSONがそのまま出た
+ * （guchi-apps/asset-manager#454）。**出口（`scripts/session-notify.sh`が`.html`以外を捨てる）と
+ * 対**で、入口をここで塞ぐ。
+ *
  * **アーティファクトそのものもスマホで読める作りにさせる**（#2974）。並べ方を決めていなかったため、
  * 枠を実寸のまま横スクロールに入れ、スマホで開くとスマホの枠すら収まらないものができていた。
  * 枠は実寸で組んで閲覧幅に合わせて`zoom`で縮める（高さの補正が要らない）。
@@ -167,6 +173,7 @@ function artifactInstructions(labelNames: ReadonlySet<string>): string {
     return [
       `このIssueには\`${ARTIFACT_REQUIRED_LABEL}\`ラベルが付いています。**コードを書き始める前に**、変更する画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLを提示して見た目の承認を得てから実装に入ってください。`,
       "",
+      '- **Designタイプ（キャンバス）では作らないでください**（#2984）。`Artifact`ツールは「デザインを作るなら最初に`action: "quickstart"`を呼ぶ」と勧めてきますが、そこで示されるDesignタイプから作ると、公開時の`file_path`がキャンバスの目次（`project/canvas.json`）になり、issue-deckのカードにはその**JSONがそのまま出ます**（画面ごとの`.dc.html`は届きません）。`quickstart`・`type_url`を使わず、**3画面を並べた1枚の自己完結HTMLファイル**を`file_path`に指定して公開してください。フックは`.html`/`.htm`以外を取り込みません',
       "- **画面デザインは原則PC・iPad・スマホの3画面を並べて提示してください**（#1632・#2460）。1つのアーティファクトの中に、PC（デスクトップ幅）・**iPad（横向き = 幅1180px × 高さ820px）**・**スマホ（iPhone 15 = 幅393px × 高さ852px）**の見た目を、この順（広い順）で並べます。iPadは幅768pxを超えるためスマホ用の画面へは切り替わらず、PCと同じ配置が狭い幅で出るため、PC・スマホのどちらの1枚にもその崩れは現れません。減らす場合は、その理由をアーティファクト本文に書いてください",
       "- **アーティファクトそのものも、スマホで開いて読める作りにしてください**（#2974）。承認する人は外出先のスマホで開くことが多く、枠を実寸のまま横スクロールに入れると、PCの枠もスマホの枠も横へ動かさないと見えません。(1) 各画面の枠は実寸（PCはデスクトップ幅・iPad 1180px・スマホ393px）で組み、`overflow-x:auto`の横スクロールに頼らず、閲覧幅に合わせて`zoom`で縮小します。枠に`class=\"fit\" data-w=\"1440\"`（数値は枠の幅）を付けて親を幅100%にし、ページ末尾に`<script>const fit=()=>document.querySelectorAll('.fit[data-w]').forEach(f=>(f.style.width=f.dataset.w+'px',f.style.zoom=Math.min(1,f.parentElement.clientWidth/f.dataset.w)));addEventListener('resize',fit);fit();</script>`を置けば足ります (2) 見出し・説明・注記は画面幅で折り返し、2列以上の比較や注記の並びは幅600px以下で1列に積みます (3) 幅393pxで開いたときに、ページ全体が横にはみ出さず、スマホの枠が画面の幅に収まるように仕上げます",
       "- **アーティファクトは実装前の見た目案であって実物ではありません。** 承認の意味は「この見た目で作ってよい」までで、実装が正しいことの確認にはなりません。実装後の見た目は開発サーバーの実画面で確かめてください。この但し書きはアーティファクト本文の先頭にも書きます",
@@ -186,6 +193,7 @@ function artifactInstructions(labelNames: ReadonlySet<string>): string {
   return [
     `このIssueには\`${ARTIFACT_REQUIRED_LABEL}\`ラベルが付いていないため、見た目のアーティファクトの作成は不要です。`,
     "ただし、ユーザーの求めなどで画面デザインをアーティファクトとして出す場合は、**PC（デスクトップ幅）・iPad（横向き = 幅1180px × 高さ820px）・スマホ（iPhone 15 = 幅393px × 高さ852px）の3画面を1つのアーティファクトに広い順で並べて提示してください**（#1632・#2460）。",
+    '**Designタイプ（キャンバス）では作らないでください**（#2984）。`action: "quickstart"`・`type_url`から作ると公開時の`file_path`がキャンバスの目次（`project/canvas.json`）になり、issue-deckのカードにJSONがそのまま出ます。3画面を並べた1枚の自己完結HTMLファイルを`file_path`に指定して公開してください。',
     "その場合も、各画面の枠は実寸で組んで閲覧幅に合わせて`zoom`で縮小し（横スクロールに頼らない）、2列以上の並びは幅600px以下で1列に積んで、スマホ（幅393px）で開いても横スクロールせずに読める作りにしてください（#2974）。",
     "Plan modeの最中に見た目の直しを求められた場合も、計画ファイルの末尾へ`<!-- artifact: <HTMLファイルの絶対パス> -->`とHTML全文（バッククォート4つ＋`artifact`のフェンス）を置いて計画を出し直せば、issue-deckが「アーティファクト」カードへ取り込みます（#2200）。",
     "CodexでHTMLを作った場合は、ローカルHTTPサーバーの`localhost` URLを計画へ載せず、`scripts/lib/codex-artifact.sh <HTMLファイル>`でIssueDeckへ登録し、返された`issuedeck.gucchii.com/artifacts/<id>`形式のURLを記載してください（#2597）。",
