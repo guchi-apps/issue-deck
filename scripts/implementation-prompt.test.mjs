@@ -110,6 +110,23 @@ afterAll(() => {
 });
 
 describe("実装プロンプトの生成", () => {
+  // #2974: 枠を実寸のまま横スクロールに入れると、スマホで開いたときにスマホの枠すら収まらない。
+  // 3か所（TS・start-issue.sh・generic-start-issue.sh）のうちシェル2本の写し漏れをここで拾う
+  it("ラベルの有無によらず、枠を閲覧幅に合わせて縮小しスマホで読める作りを求める", () => {
+    for (const labels of [[], ["25.artifact-required"]]) {
+      for (const prompt of [render("claude", labels), renderGeneric("claude", labels)]) {
+        expect(prompt).toContain("閲覧幅に合わせて`zoom`で縮小");
+        expect(prompt).toContain("幅600px以下で1列に積");
+      }
+    }
+    for (const prompt of [
+      render("claude", ["25.artifact-required"]),
+      renderGeneric("claude", ["25.artifact-required"]),
+    ]) {
+      expect(prompt).toContain("querySelectorAll('.fit[data-w]')");
+    }
+  });
+
   it("Codexでは計画を`submit-plan.sh`で出すよう書く", () => {
     const prompt = render("codex");
     expect(prompt).toContain(`\`${scriptsDir}/submit-plan.sh <計画ファイル>\`を実行してください`);
