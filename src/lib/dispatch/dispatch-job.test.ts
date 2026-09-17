@@ -58,6 +58,7 @@ import {
   readDispatchAgent,
   resolveDispatchAgentRejection,
   resolveSessionControlRejection,
+  parseAgentPauseReason,
   type DispatchHostView,
   type DispatchJobKind,
   type DispatchJobView,
@@ -316,6 +317,82 @@ describe("resolveDispatchTargetRejection", () => {
         blockingSession,
       }),
     ).toBe("already_queued");
+  });
+
+  // #2994。一括投入がラベルだけ書いてジョブを積み損ねないよう、生きているセッションの
+  // 判定より前で弾く
+  it("一時停止中のエージェントは、未完了ジョブ・生きているセッションより先に弾く", () => {
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: true,
+        blockingSession,
+        agentPauseReason: "manual",
+      }),
+    ).toBe("agent_paused");
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession: null,
+        agentPauseReason: "usage_limit",
+      }),
+    ).toBe("agent_paused");
+  });
+
+  it("一時停止していなければ従来どおり（省略・nullは稼働中）", () => {
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession: null,
+        agentPauseReason: null,
+      }),
+    ).toBe(null);
+    expect(
+      resolveDispatchTargetRejection({
+        host,
+        repositoryFullName,
+        hasActiveJob: false,
+        blockingSession: null,
+      }),
+    ).toBe(null);
+  });
+});
+
+describe("parseAgentPauseReason", () => {
+  it("既知のコードだけを受け入れる", () => {
+    expect(parseAgentPauseReason("manual")).toBe("manual");
+    expect(parseAgentPauseReason("usage_limit")).toBe("usage_limit");
+  });
+
+  it("知らない値・非文字列はnull（＝稼働中）へ落とす", () => {
+    expect(parseAgentPauseReason("paused")).toBeNull();
+    expect(parseAgentPauseReason(null)).toBeNull();
+    expect(parseAgentPauseReason(undefined)).toBeNull();
+  });
+});
+
+describe("describeDispatchEnqueueRejection の一時停止（#2994）", () => {
+  it("自動検知（usage_limit）は理由と、トグルで今すぐ再開できることを伝える", () => {
+    const message = describeDispatchEnqueueRejection("agent_paused", {
+      hostName: "subpc",
+      agentPauseReason: "usage_limit",
+    });
+    expect(message).toContain("サブスク枠");
+    expect(message).toContain("トグル");
+  });
+
+  it("手動（manual）は再開の仕方だけを伝える", () => {
+    const message = describeDispatchEnqueueRejection("agent_paused", {
+      hostName: "subpc",
+      agentPauseReason: "manual",
+    });
+    expect(message).not.toContain("サブスク枠");
+    expect(message).toContain("トグル");
   });
 });
 

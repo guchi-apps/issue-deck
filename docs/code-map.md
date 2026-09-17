@@ -3946,6 +3946,28 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
   対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
 
+## エージェント別の一時停止（#2994）とサブスク枠の読み方
+
+Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.claudeDispatchPauseReason`・
+`codexDispatchPauseReason`。`null`/`"manual"`/`"usage_limit"`）は`src/lib/dispatch/jobs.ts`の
+`enqueueDispatchJob`が積む前に弾き、`sweepAgentUsageLimitPause`（`POST /api/dispatch/claim`への
+相乗り）が枠の状態を見て自動でON/OFFする。
+
+- **`fetchClaudeUsage`（`src/lib/claude/usage.ts`）はサブPCのローカルセッションと同じサブスク枠を
+  読んでいる。** 探りリクエストの認証は`CLAUDE_CODE_OAUTH_TOKEN`（`src/lib/claude/request.ts`）で、
+  これはissue-deckの他のAI機能が使う`ANTHROPIC_API_KEY`とは別物——`claude`コマンドのOAuthトークンを
+  そのまま環境変数に入れている。したがって「issue-deckのサーバー側からClaude Code CLIのサブスク枠
+  使用率を見る」ための新しい取得経路は要らず、既存のこの関数（5分キャッシュ込み）をそのまま呼べばよい
+- **Codexの`CodexUsageSnapshot`は新しいセッションが動かない限り更新されない。** pollerが
+  `~/.codex/sessions/*.jsonl`の`rate_limits`を拾って上書きするだけの表なので、新規実行を一時停止すると
+  その瞬間の値のまま凍結する。**解除の判定を`usedPercent`が下がったかで書くと、一時停止したエージェントは
+  永久に自動解除されない。** 凍結時点で確定している`primaryResetsAt`（未来の固定時刻）の経過で判定すること
+- **自動検知（サブスク枠の使い切り）は動いているセッションへ何も送らない。** `sweepAgentUsageLimitPause`は
+  `AppSetting`のフラグを立てる／解くだけで、`send-keys`は一切呼ばない。動いているセッションへ中断
+  （C-c）を送るのは、人がトグルを手動でOFFにしたときだけ（既存の個別「停止」ボタン・#1332と同じ経路を
+  対象セッションの本数ぶん繰り返す）。この線引きにより、`docs/multi-agent/gates.md`の
+  「実行体が判断して送信する」禁止事項に触れず、新しい例外を追加する必要が無くなる
+
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub App・Push通知の4系統に分かれる。

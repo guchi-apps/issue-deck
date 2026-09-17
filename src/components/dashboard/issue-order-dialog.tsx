@@ -110,6 +110,8 @@ function OrderSession({
       const outcome = await enqueueIssueToDefaultHost(top.issue, {
         hosts: dispatch.hosts,
         sessions: dispatch.sessions,
+        // この経路は既定エージェント（claude）でしか積まない（#2994）
+        agentPauseReason: dispatch.agentPause?.claude ?? null,
         enqueue: dispatch.enqueue,
         enqueueError: dispatch.error,
         updateIssue,

@@ -498,6 +498,14 @@ model AppSetting {
   // 開始から3時間の窓で起動を試み、窓を過ぎても起動できなかった分は翌夜へ持ち越さない
   nightlyRunStartHour Int      @default(1)
 
+  // エージェント別の新規実行の一時停止（#2994）。null＝稼働中、"manual"＝人がトグルをOFFにした、
+  // "usage_limit"＝サブスク枠を使い切ったと検知して自動でOFFにした。**列はStringで正の一覧は
+  // `src/lib/dispatch/dispatch-job.ts`のAGENT_PAUSE_REASONSに持つ**（他のコード付き列と同じ作法）。
+  // 自動検知（`sweepAgentUsageLimitPause`）が上書きしてよいのは"usage_limit"だけで、
+  // "manual"は人がトグルをONに戻すまで自動では触らない
+  claudeDispatchPauseReason String?
+  codexDispatchPauseReason  String?
+
   updatedAt           DateTime @updatedAt
 }
 

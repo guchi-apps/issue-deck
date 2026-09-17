@@ -48,8 +48,19 @@ export type NightlyRunLaunchResult = {
   actions: NightlyRunLaunchAction[];
 };
 
-/** 積めなかったが、次の巡回でやり直せば通りうる理由（ホストの都合・自分が先に積んだジョブ） */
-const RETRYABLE_REJECTIONS: readonly string[] = ["host_unknown", "host_offline", "already_queued"];
+/**
+ * 積めなかったが、次の巡回でやり直せば通りうる理由（ホストの都合・自分が先に積んだジョブ）。
+ *
+ * `agent_paused`（#2994）もここに含める。エージェットの一時停止は3時間の窓の中でトグルが
+ * ONに戻る／枠が回復することがあり、`SKIPPED`（見送り）に確定させると窓の残り時間で
+ * 再挑戦する機会を失う。
+ */
+const RETRYABLE_REJECTIONS: readonly string[] = [
+  "host_unknown",
+  "host_offline",
+  "already_queued",
+  "agent_paused",
+];
 
 async function pruneOldEntries(now: Date): Promise<void> {
   const before = new Date(now.getTime() - NIGHTLY_RUN_RESULT_RETENTION_DAYS * 24 * 60 * 60 * 1000);

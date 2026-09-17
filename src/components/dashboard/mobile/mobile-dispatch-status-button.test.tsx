@@ -98,6 +98,8 @@ function makeDispatch(overrides: {
     hosts: overrides.hosts ?? [],
     jobs: overrides.jobs ?? [],
     sessions: overrides.sessions ?? [],
+    // エージェット別の一時停止（#2994）。既定は両方とも稼働中
+    agentPause: { claude: null, codex: null },
     concurrency: 2,
     fetchedAt: overrides.fetchedAt ?? Date.now() - 12_000,
     isFetching: overrides.isFetching ?? false,

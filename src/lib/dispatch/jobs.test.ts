@@ -24,12 +24,22 @@ const repositoryFindFirst = vi.fn();
 const issueFindMany = vi.fn();
 const issueFindFirst = vi.fn();
 const appSettingFindUnique = vi.fn();
+const appSettingUpsert = vi.fn();
+const codexUsageSnapshotFindFirst = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     appSetting: {
       get findUnique() {
         return appSettingFindUnique;
+      },
+      get upsert() {
+        return appSettingUpsert;
+      },
+    },
+    codexUsageSnapshot: {
+      get findFirst() {
+        return codexUsageSnapshotFindFirst;
       },
     },
     dispatchHost: {
@@ -131,6 +141,8 @@ const {
   listDispatchState,
   prioritizeDispatchJob,
   reportDispatchJob,
+  setAgentDispatchPause,
+  sweepAgentUsageLimitPause,
 } = await import("./jobs");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -248,6 +260,64 @@ describe("enqueueDispatchJob のエージェント", () => {
 
   it("既定のエージェントは申告が無くても積める", async () => {
     const result = await enqueue("claude");
+    expect(result.ok).toBe(true);
+  });
+});
+
+/**
+ * #2994。**一時停止は生きているセッションの判定より前で弾く。** 一括投入
+ * （`enqueue-issue.ts`）は先出し判定を通してからオプションのラベルを書くため、ここで
+ * 弾かないと一時停止中の一括投入でラベルだけが書かれてジョブが1件も積まれない。
+ */
+describe("enqueueDispatchJob の一時停止", () => {
+  it("一時停止していなければ従来どおり積める", async () => {
+    appSettingFindUnique.mockResolvedValue({
+      id: 1,
+      dispatchConcurrency: 2,
+      claudeDispatchPauseReason: null,
+      codexDispatchPauseReason: null,
+    });
+    const result = await enqueue();
+    expect(result.ok).toBe(true);
+  });
+
+  it("手動で一時停止中のエージェントでは弾く", async () => {
+    appSettingFindUnique.mockResolvedValue({
+      id: 1,
+      dispatchConcurrency: 2,
+      claudeDispatchPauseReason: "manual",
+    });
+    const result = await enqueue("claude");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("agent_paused");
+    expect(result.message).toContain("一時停止");
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+
+  it("自動検知（usage_limit）で一時停止中のエージェントでも弾き、理由をメッセージへ含める", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ codexCapable: true }));
+    appSettingFindUnique.mockResolvedValue({
+      id: 1,
+      dispatchConcurrency: 2,
+      codexDispatchPauseReason: "usage_limit",
+    });
+    const result = await enqueue("codex");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection).toBe("agent_paused");
+    expect(result.message).toContain("自動で一時停止");
+  });
+
+  it("一時停止していない側のエージェントには効かない", async () => {
+    appSettingFindUnique.mockResolvedValue({
+      id: 1,
+      dispatchConcurrency: 2,
+      claudeDispatchPauseReason: "manual",
+      codexDispatchPauseReason: null,
+    });
+    dispatchHostFindUnique.mockResolvedValue(host({ codexCapable: true }));
+    const result = await enqueue("codex");
     expect(result.ok).toBe(true);
   });
 });
@@ -2353,5 +2423,150 @@ describe("enqueueManualStepAbortJob", () => {
       expect(result.message).toContain("5分で打ち切られます");
     }
     expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #2994。**人が押した操作は常に`manual`で、ONにするときは理由を問わず必ず解除する**——
+ * 自動検知（`usage_limit`）で止まっていても、人がONに戻せばそこで解ける。
+ */
+describe("setAgentDispatchPause", () => {
+  function mockUpsert(row: Record<string, unknown> = {}) {
+    appSettingUpsert.mockImplementation(
+      async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
+        claudeDispatchPauseReason: null,
+        codexDispatchPauseReason: null,
+        ...row,
+        ...update,
+        ...(Object.keys(row).length === 0 ? create : {}),
+      }),
+    );
+  }
+
+  it("OFFにする（paused: true）と理由がmanualになる", async () => {
+    mockUpsert();
+    const result = await setAgentDispatchPause({ agent: "claude", paused: true });
+    expect(result.claude).toBe("manual");
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { claudeDispatchPauseReason: "manual" } }),
+    );
+  });
+
+  it("ONにする（paused: false）と、usage_limitで止まっていても解除される", async () => {
+    mockUpsert({ codexDispatchPauseReason: "usage_limit" });
+    const result = await setAgentDispatchPause({ agent: "codex", paused: false });
+    expect(result.codex).toBeNull();
+  });
+});
+
+/**
+ * #2994。**このスイープが動かしてよいのは`usage_limit`だけ。** `manual`は人がもう一度
+ * ONにするまで、枠の状態に関わらず一切触らない。
+ */
+describe("sweepAgentUsageLimitPause", () => {
+  function mockUpsert() {
+    appSettingUpsert.mockImplementation(
+      async ({ update }: { update: Record<string, unknown> }) => ({
+        claudeDispatchPauseReason: null,
+        codexDispatchPauseReason: null,
+        ...update,
+      }),
+    );
+  }
+
+  it("Codexの使用率が100%に達したら自動でONにする", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({ claudeDispatchPauseReason: null, codexDispatchPauseReason: null });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getCodexUsageSnapshot: async () => ({
+        primaryUsedPercent: 100,
+        primaryResetsAt: new Date(NOW.getTime() + 60_000),
+      }),
+    });
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { codexDispatchPauseReason: "usage_limit" } }),
+    );
+  });
+
+  it("Codexは使用率ではなくresetsAtの経過で自動解除する（使用率は凍結したまま）", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({
+      claudeDispatchPauseReason: null,
+      codexDispatchPauseReason: "usage_limit",
+    });
+    // resetsAtがまだ先なら解除しない
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getCodexUsageSnapshot: async () => ({
+        primaryUsedPercent: 100,
+        primaryResetsAt: new Date(NOW.getTime() + 60_000),
+      }),
+    });
+    expect(appSettingUpsert).not.toHaveBeenCalled();
+
+    // resetsAtを過ぎていれば、使用率が100%のままでも解除する
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getCodexUsageSnapshot: async () => ({
+        primaryUsedPercent: 100,
+        primaryResetsAt: new Date(NOW.getTime() - 1_000),
+      }),
+    });
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { codexDispatchPauseReason: null } }),
+    );
+  });
+
+  it("manualで止めているエージェントには一切触らない", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({
+      claudeDispatchPauseReason: null,
+      codexDispatchPauseReason: "manual",
+    });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getCodexUsageSnapshot: async () => ({
+        primaryUsedPercent: 100,
+        primaryResetsAt: new Date(NOW.getTime() - 1_000),
+      }),
+    });
+    expect(appSettingUpsert).not.toHaveBeenCalled();
+  });
+
+  it("Claudeの5時間枠がrejectedになったら自動でONにし、戻れば解除する", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({ claudeDispatchPauseReason: null, codexDispatchPauseReason: null });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getClaudeUsageWindow: async () => ({ status: "rejected", remainingPercent: 0 }),
+    });
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { claudeDispatchPauseReason: "usage_limit" } }),
+    );
+
+    appSettingUpsert.mockClear();
+    appSettingFindUnique.mockResolvedValue({
+      claudeDispatchPauseReason: "usage_limit",
+      codexDispatchPauseReason: null,
+    });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getClaudeUsageWindow: async () => ({ status: "allowed", remainingPercent: 40 }),
+    });
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { claudeDispatchPauseReason: null } }),
+    );
+  });
+
+  it("取得できない（トークン未設定・失敗）ときは何もしない", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({ claudeDispatchPauseReason: null, codexDispatchPauseReason: null });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getCodexUsageSnapshot: async () => null,
+      getClaudeUsageWindow: async () => null,
+    });
+    expect(appSettingUpsert).not.toHaveBeenCalled();
   });
 });
