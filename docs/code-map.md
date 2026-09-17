@@ -354,6 +354,18 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     戻る操作が下の画面へ効き、閉じたつもりが現在地まで変わる。深さの数え方は
     [`lib/history-stack.ts`](../src/lib/history-stack.ts)に合わせ、閉じた時点で
     `history.back()`により自分が積んだぶんを片付ける。
+  - **`useHistoryDismiss`を使う重ね表示を、閉じると同時に別の重ね表示へ切り替えない**（#2972）。
+    閉じた側の`history.back()`は非同期に届くため、同じ描画で開いた側が積んだエントリを
+    外してしまい、開いた直後に閉じる。入力欄の添付をプレビューから書き込みエディタ
+    （[`image-annotation-dialog.tsx`](../src/components/dashboard/image-annotation-dialog.tsx)）へ
+    移るときは、プレビューを閉じずに上へ重ねている。popstateは開いている全員に届くので、
+    エディタを閉じるとプレビューも一緒に閉じる（積んだ1件ぶんは残るが、ズレは安全側）。
+- **添付画像への書き込みは保存まで図形として持つ**（#2972。[`lib/annotation/shapes.ts`](../src/lib/annotation/shapes.ts)）。
+  座標は元画像のピクセルで持ち、保存時に元の解像度で1枚へ描き出して新しい画像として
+  アップロードし、添付を差し替える（元画像は未使用画像の整理で消える）。**色に意味は
+  持たせない**——エージェントは線の形（文字に重なる横線・矢印・書き足した文字）で意図を
+  読むため、何をしてほしいかは本文にも一言書く。キャンバスの`pointerdown`は既定動作を
+  止めている。止めないと互換のmousedownで、出したばかりの文字の入力欄からフォーカスが外れる。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と

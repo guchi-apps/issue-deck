@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -176,6 +176,49 @@ describe("MentionTextarea 画像の添付", () => {
 
     fireEvent.click(close);
     expect(document.querySelector('[aria-label="プレビューを閉じる"]')).toBeNull();
+  });
+
+  // #2972。書き込みを保存すると、同じ位置の添付が新しい画像に置き換わる（名前はそのまま）
+  it("サムネイルのペンから書き込んで保存すると、その添付だけが新しい画像に差し替わる", async () => {
+    stubUpload("/api/issues/images/annotated.png");
+    vi.stubGlobal(
+      "Image",
+      class {
+        onload: (() => void) | null = null;
+        naturalWidth = 400;
+        naturalHeight = 300;
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      },
+    );
+    const noop = () => {};
+    const ctx = new Proxy({}, { get: () => noop, set: () => true });
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+    const toBlob = vi
+      .spyOn(HTMLCanvasElement.prototype, "toBlob")
+      .mockImplementation((callback) => callback(new Blob(["x"], { type: "image/png" })));
+
+    const { container } = render(
+      <Harness initialValue={"![a.png](/img/a.png)\n![b.png](/img/b.png)"} />,
+    );
+    fireEvent.click(container.querySelector('[aria-label="a.png に書き込む"]') as HTMLElement);
+
+    const canvas = await screen.findByLabelText("a.png への書き込み");
+    fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 80, clientY: 60, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+    fireEvent.click(screen.getAllByRole("button", { name: "保存して差し替え" })[0]);
+
+    await waitFor(() =>
+      expect(emittedValue(container)).toBe(
+        "![a.png](/api/issues/images/annotated.png)\n![b.png](/img/b.png)",
+      ),
+    );
+    getContext.mockRestore();
+    toBlob.mockRestore();
   });
 
   it("末尾に画像記法を含む本文を渡すと、入力欄にURLを出さずサムネイルとして表示する", () => {
