@@ -8,6 +8,8 @@ import {
 } from "@/lib/artifact-document";
 
 const ID = "f4de9149-e883-4d06-af33-5da3a592aa59";
+/** `Artifact`ツールが今返す短いID（#2984）。UUIDではなく22文字の英数字 */
+const SHORT_ID = "XxWDfT8h7LawipKxDoz8nd";
 
 describe("parseArtifactUrlId", () => {
   it("`/code/artifact/<id>`からIDを取り出す", () => {
@@ -16,6 +18,17 @@ describe("parseArtifactUrlId", () => {
 
   it("公開ページ（`/public/artifacts/<id>`）も同じ扱い", () => {
     expect(parseArtifactUrlId(`https://claude.ai/public/artifacts/${ID}`)).toBe(ID);
+  });
+
+  it("短いパス・短いID（`/artifact/<id>`）も受け取る", () => {
+    expect(parseArtifactUrlId(`https://claude.ai/artifact/${SHORT_ID}`)).toBe(SHORT_ID);
+    expect(parseArtifactUrlId(`https://claude.ai/artifact/${SHORT_ID}?v=2#top`)).toBe(SHORT_ID);
+    expect(parseArtifactUrlId(`https://claude.ai/code/artifact/${SHORT_ID}`)).toBe(SHORT_ID);
+  });
+
+  it("短すぎるID・記号入りのIDは受け取らない", () => {
+    expect(parseArtifactUrlId("https://claude.ai/artifact/short")).toBeNull();
+    expect(parseArtifactUrlId("https://claude.ai/artifact/XxWDfT8h7Lawip_KxDoz8nd")).toBeNull();
   });
 
   it("クエリ・フラグメントが付いていても取り出せる", () => {

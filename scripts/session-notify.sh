@@ -516,10 +516,22 @@ if not isinstance(tool_input, dict):
 # 既定（省略時）が公開なので、Noneと空文字も通す
 if tool_input.get("action") not in (None, "", "publish"):
     sys.exit(0)
+# **Artifactタイプ（Design＝キャンバス等）からの作成は取り込まない**（#2984）。`type_url`を渡す
+# 公開は「型から新しいアーティファクトの器を作る」呼び出しで、見た目の原本はここに無い。
+if tool_input.get("type_url"):
+    sys.exit(0)
 source_path = tool_input.get("file_path")
 if not isinstance(source_path, str) or not source_path.strip():
     sys.exit(0)
 source_path = source_path.strip()
+# **HTMLだけを受け取る**（#2984）。Designタイプの公開は`file_path`に目次の
+# `project/canvas.json`を渡すため、中身を見ずに送ると`{"v": 3, "boards": {...}}`という
+# JSONがそのままカードへ出る（guchi-apps/asset-manager#454）。画面ごとの中身は
+# `project/*.dc.html`に分かれており、1枚のHTMLとしては取り出せない。
+# **キャンバスを解釈しにいかない**——目次の形式はclaude.ai側の都合で変わるうえ、
+# 見た目案は1枚の自己完結HTMLで出す約束にしてある（起動プロンプトに明記）。
+if not source_path.lower().endswith((".html", ".htm")):
+    sys.exit(0)
 
 try:
     with open(source_path, "rb") as handle:
@@ -538,9 +550,14 @@ except UnicodeDecodeError:
 response = hook.get("tool_response")
 if not isinstance(response, str):
     response = json.dumps(response, ensure_ascii=False)
+# **IDはUUIDとは限らない**（#2984）。いま返ってくるのは
+# `https://claude.ai/artifact/XxWDfT8h7LawipKxDoz8nd`のような22文字の英数字で、UUIDだけを
+# 拾っていたあいだは`claudeUrl`が常に空になっていた。**判定の正は
+# `src/lib/artifact-document.ts`の`ARTIFACT_URL_PATTERN`**で、あちらが受けない形を送っても
+# 捨てられる。変えるときは両方そろえる。
 found = re.search(
-    r"https://claude\.ai/(?:code/artifact|public/artifacts)/"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    r"https://claude\.ai/(?:code/artifact|public/artifacts|artifact)/"
+    r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9]{16,32})",
     response,
 )
 
