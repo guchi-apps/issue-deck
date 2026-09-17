@@ -21,6 +21,7 @@ const SINCE = "2026-09-01T00:00:00.000Z";
 
 function renderPanel(props: Partial<Parameters<typeof ReleaseHistoryPanel>[0]> = {}) {
   const onToggleChecked = vi.fn();
+  const onToggleCheckedLine = vi.fn();
   const onToggleCheckTarget = vi.fn();
   render(
     <ReleaseHistoryPanel
@@ -30,16 +31,18 @@ function renderPanel(props: Partial<Parameters<typeof ReleaseHistoryPanel>[0]> =
       onRefresh={() => {}}
       checkTargets={[{ repoFullName: "guchi-apps/issue-deck", since: SINCE }]}
       checkRecords={[]}
+      checkLineRecords={[]}
       checkRepositoryOptions={[
         { id: "repo-1", name: "issue-deck", fullName: "guchi-apps/issue-deck" },
         { id: "repo-2", name: "car-care", fullName: "guchi-apps/car-care" },
       ]}
       onToggleChecked={onToggleChecked}
+      onToggleCheckedLine={onToggleCheckedLine}
       onToggleCheckTarget={onToggleCheckTarget}
       {...props}
     />,
   );
-  return { onToggleChecked, onToggleCheckTarget };
+  return { onToggleChecked, onToggleCheckedLine, onToggleCheckTarget };
 }
 
 afterEach(() => {
@@ -119,5 +122,53 @@ describe("ReleaseHistoryPanel の動作確認フラグ（#2930）", () => {
     renderPanel({ checkTargets: [] });
     fireEvent.click(screen.getByRole("button", { name: "未確認だけ" }));
     expect(screen.getByText("未確認のリリースはありません。")).toBeTruthy();
+  });
+});
+
+describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2982）", () => {
+  it("箇条書き行にチェックボックスが出て、押すとリポジトリ・タグ・行番号を渡して呼ばれる", () => {
+    const { onToggleCheckedLine } = renderPanel();
+    const checkbox = screen.getByRole("checkbox", {
+      name: "「修正を依頼する導線を足す」を確認済みにする（参考）",
+    });
+    expect(checkbox).toBeTruthy();
+
+    fireEvent.click(checkbox);
+    expect(onToggleCheckedLine).toHaveBeenCalledWith(
+      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineIndex: 0 },
+      true,
+    );
+  });
+
+  it("記録済みの行はチェック済みで表示され、外すとfalseで呼ばれる", () => {
+    const { onToggleCheckedLine } = renderPanel({
+      checkLineRecords: [
+        {
+          repoFullName: "guchi-apps/issue-deck",
+          tagName: "v4.78.0",
+          lineIndex: 0,
+          checkedAt: "2026-09-07T12:00:00.000Z",
+        },
+      ],
+    });
+    const checkbox = screen.getByRole("checkbox", {
+      name: "「修正を依頼する導線を足す」を確認済みにする（参考）",
+    });
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(checkbox);
+    expect(onToggleCheckedLine).toHaveBeenCalledWith(
+      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineIndex: 0 },
+      false,
+    );
+  });
+
+  it("対象外のリリースでも参考チェックは表示される", () => {
+    renderPanel({
+      entries: [entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.12.0" })],
+    });
+    expect(
+      screen.getByRole("checkbox", { name: "「修正を依頼する導線を足す」を確認済みにする（参考）" }),
+    ).toBeTruthy();
   });
 });

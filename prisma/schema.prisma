@@ -37,6 +37,7 @@ model User {
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
   releaseCheckTargets  ReleaseCheckTarget[]
   releaseChecks        ReleaseCheck[]
+  releaseCheckLines    ReleaseCheckLine[]
 }
 
 // --- GitHub App 連携 ---
@@ -121,6 +122,7 @@ model Repository {
   issueCreationExcludedBy IssueCreationExcludedRepository[]
   releaseCheckTargetedBy  ReleaseCheckTarget[]
   releaseChecks           ReleaseCheck[]
+  releaseCheckLines       ReleaseCheckLine[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -216,6 +218,33 @@ model ReleaseCheck {
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@unique([userId, repositoryId, tagName])
+  @@index([repositoryId])
+}
+
+// ユーザーごとに「リリース本文の箇条書き1行（1機能）を確認した」と記録した1件（#2982）。
+//
+// **`ReleaseCheck`（リリース1件全体の確認フラグ）とは独立した参考情報。** 全行を
+// チェックしても`ReleaseCheck`は連動しない（Issue本文の要望どおり、全部チェック必須の
+// ような強制は持たせない）。
+//
+// **行の識別はインデックス。** 箇条書きは`extractReleaseHighlights`がリリース本文から
+// 都度抽出するため、DBには本文そのものを持たない。本文が編集されて行の順序が入れ替わると
+// チェック済みの対応がずれうるが、通常GitHub Releaseの本文は編集されないため許容する。
+model ReleaseCheckLine {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+  /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
+  tagName      String
+  /** `extractReleaseHighlights`が返す配列の添字（0始まり） */
+  lineIndex    Int
+
+  checkedAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId, tagName, lineIndex])
   @@index([repositoryId])
 }
 

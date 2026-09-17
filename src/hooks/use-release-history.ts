@@ -3,23 +3,36 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
-import { applyReleaseCheckToggle, type ReleaseCheckRecord } from "@/lib/release-check";
+import {
+  applyReleaseCheckLineToggle,
+  applyReleaseCheckToggle,
+  type ReleaseCheckLineRecord,
+  type ReleaseCheckRecord,
+} from "@/lib/release-check";
 
 type ReleaseHistoryResponse = {
   entries: ReleaseHistoryItem[];
   checkRecords?: ReleaseCheckRecord[];
+  checkLineRecords?: ReleaseCheckLineRecord[];
 };
 
 type UseReleaseHistoryResult = {
   entries: ReleaseHistoryItem[] | null;
   /** 確認済みの記録（#2930） */
   checkRecords: ReleaseCheckRecord[];
+  /** 箇条書き行ごとの確認記録（#2982） */
+  checkLineRecords: ReleaseCheckLineRecord[];
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
   /** 1件のリリースを確認済み／未確認へ切り替える */
   setReleaseChecked: (
     target: { repoFullName: string; tagName: string },
+    checked: boolean,
+  ) => Promise<void>;
+  /** 箇条書き1行を確認済み／未確認へ切り替える（#2982） */
+  setReleaseLineChecked: (
+    target: { repoFullName: string; tagName: string; lineIndex: number },
     checked: boolean,
   ) => Promise<void>;
 };
@@ -41,6 +54,7 @@ type UseReleaseHistoryResult = {
 export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
   const [entries, setEntries] = useState<ReleaseHistoryItem[] | null>(null);
   const [checkRecords, setCheckRecords] = useState<ReleaseCheckRecord[]>([]);
+  const [checkLineRecords, setCheckLineRecords] = useState<ReleaseCheckLineRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -66,6 +80,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         if (cancelled) return;
         setEntries(json.entries);
         setCheckRecords(json.checkRecords ?? []);
+        setCheckLineRecords(json.checkLineRecords ?? []);
       })
       .catch((err) => {
         if (cancelled || controller.signal.aborted) return;
@@ -102,5 +117,38 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     [checkRecords],
   );
 
-  return { entries, checkRecords, isLoading, error, refresh, setReleaseChecked };
+  const setReleaseLineChecked = useCallback(
+    async (
+      target: { repoFullName: string; tagName: string; lineIndex: number },
+      checked: boolean,
+    ) => {
+      const previous = checkLineRecords;
+      setCheckLineRecords(applyReleaseCheckLineToggle(previous, target, checked));
+      setError(null);
+
+      try {
+        const res = await fetch("/api/repositories/release-check-lines", {
+          method: checked ? "POST" : "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(target),
+        });
+        if (!res.ok) throw new Error(`保存に失敗しました (${res.status})`);
+      } catch (err) {
+        setCheckLineRecords(previous);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [checkLineRecords],
+  );
+
+  return {
+    entries,
+    checkRecords,
+    checkLineRecords,
+    isLoading,
+    error,
+    refresh,
+    setReleaseChecked,
+    setReleaseLineChecked,
+  };
 }

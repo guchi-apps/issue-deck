@@ -1808,8 +1808,10 @@ export function IssueDeckShell({
                   onRefresh={releaseHistory.refresh}
                   checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}
+                  checkLineRecords={releaseHistory.checkLineRecords}
                   checkRepositoryOptions={releaseCheckRepositoryOptions}
                   onToggleChecked={releaseHistory.setReleaseChecked}
+                  onToggleCheckedLine={releaseHistory.setReleaseLineChecked}
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
                 />
               )}
@@ -2178,8 +2180,10 @@ export function IssueDeckShell({
                   onRefresh={releaseHistory.refresh}
                   checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}
+                  checkLineRecords={releaseHistory.checkLineRecords}
                   checkRepositoryOptions={releaseCheckRepositoryOptions}
                   onToggleChecked={releaseHistory.setReleaseChecked}
+                  onToggleCheckedLine={releaseHistory.setReleaseLineChecked}
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
                 />
               </div>
