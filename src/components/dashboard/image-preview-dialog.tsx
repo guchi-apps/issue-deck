@@ -30,9 +30,17 @@ export function ImagePreviewDialog({
   image,
   onClose,
   onAnnotate,
+  suspended = false,
 }: {
   image: ImagePreviewTarget | null;
   onClose: () => void;
+  /**
+   * `true`の間は描画だけを外し、開いている扱い（履歴エントリ）は保つ（#2983）。
+   * 書き込み画面を上へ重ねている間に渡す。同じ`z-50`の全画面の層が重なると、iOS Safariは
+   * DOMの順番どおりに描かず、プレビューの暗幕が書き込み画面の上に乗って操作を塞いだ。
+   * 閉じてしまうと履歴エントリを外す`history.back()`が書き込み側を閉じるため、表示だけを外す。
+   */
+  suspended?: boolean;
   /**
    * 渡すと下辺に「書き込む」を出す（#2972）。入力欄の添付サムネイルから開いたときだけ
    * 渡す——投稿済みの画像は差し替える先が無いため。
@@ -44,7 +52,7 @@ export function ImagePreviewDialog({
 
   return (
     <DialogPrimitive.Root
-      open={open}
+      open={open && !suspended}
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
