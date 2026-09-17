@@ -575,6 +575,46 @@ asset-manager #451では、`Read`の許可待ちで15:33:43に`00.check-user`が
   ダイアログが出なくなるため）
 - 境界は`scripts/session-notify-activity.test.mjs`の「許可待ち（#2971）」が固定している
 
+### フックのJSONは環境変数で子プロセスへ渡さない（#2985）
+
+**Linuxは環境変数1つ（argvの1要素）の長さを`MAX_ARG_STRLEN`＝128KiBに制限しており、超えると
+`execve`が`E2BIG`（`Argument list too long`）で失敗する。** `PostToolUse`のJSONはツールの応答を
+丸ごと抱えるので、画像の`Read`（base64で数百KB）・長いファイルの読み取り・出力の多い
+コマンドで簡単に超える。
+
+`session-notify.sh`は`export HOOK_JSON`でpython3へ渡していたため、**超えた回はそこから先の
+すべての外部コマンド（python3・curl・git）が起動できず**、何も報告しないまま`exit 0`で
+終わっていた。このスクリプトは何が起きても`exit 0`で返す約束なので、**失敗はどこにも出ない。**
+#2985で実際に起きたのは次の形。
+
+1. `Read`（画像）で`PermissionRequest`が飛び、指紋とツール名をホストの`.permission`へ控える
+   （ここは`tool_input`だけなので小さく、成功する）
+2. 人が承認し、`Read`が走る
+3. `PostToolUse`のJSONが約500KBになり、指紋を作るpython3が`E2BIG`で起動できない
+4. 指紋が空のまま照合に外れて`activity=working`を報告できず、**許可待ちと`00.check-user`が
+   `Stop`まで残る**（画面には「許可を待っています」が出たまま）
+
+そこで**JSONは一時ファイル（`mktemp`の0600）へ書き、パスだけを`NOTIFY_HOOK_JSON_FILE`で
+渡す**。ファイルは`trap ... EXIT`で必ず消す。`HOOK_JSON`は**シェル変数のまま**（`[[ ... ]]`の
+前捌きに使うだけならexportは要らない）で、一時ファイルを作れなかったときだけ従来どおり
+exportする。**同じ落とし穴は`report_artifact_to_issue_deck`にもあった**——大きなアーティファクトの
+HTMLは`tool_input`に入るため、128KiBを超えると取り込み自体が黙って失敗していた。
+
+境界は`scripts/session-notify-activity.test.mjs`の「ツールの応答が128KiBを超えても…」が
+固定している。
+
+### 計画・質問の待ちに入ったら、許可待ちの説明を消す（#2985）
+
+ホスト側の記録（`.permission`）は`session-notify.sh`が計画・質問の待ちで消していたが、
+**issue-deckのDBには消す相手がいなかった。** 計画・質問の待ちは`activity`を動かさない
+（#2238）ため、直前の許可待ちで入った`activity=WAITING_INPUT`と`waitingTool`がそのまま残り、
+一覧の行に「質問に答える」と「許可待ち」が並んで出る（許可を拒否した後に質問しても同じ形になる）。
+
+`createSessionPlanRequest`・`createSessionQuestionRequest`が
+`clearDispatchSessionWaitingTool`（`src/lib/dispatch/sessions.ts`）を呼んで、**説明の2列だけ**を
+消す。`activity`には触らない——人を待っていること自体は続いており、待っている理由が許可から
+質問・計画へ移っただけのため。
+
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を報告した約60秒後に同じ内容がもう1件飛ぶことになる。
 

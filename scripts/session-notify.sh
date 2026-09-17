@@ -123,6 +123,39 @@ if [[ -z "$HOOK_JSON" ]]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# フックのJSONは**環境変数で子プロセスへ渡さない**（#2985）
+#
+# Linuxは環境変数1つ（argvの1要素）の長さを`MAX_ARG_STRLEN`＝128KiBに制限しており、
+# 超えると`execve`が`E2BIG`（`Argument list too long`）で失敗する。**`PostToolUse`のJSONは
+# ツールの応答を丸ごと抱える**ので、画像の`Read`（base64で数百KB）・長いファイルの読み取り・
+# 出力の多いコマンドで簡単に超える。
+#
+# `export HOOK_JSON`のまま超えると、**そこから先のすべての外部コマンド**（python3・curl・
+# git・sed）が起動できなくなる。このスクリプトは何が起きても`exit 0`で返す約束なので、
+# **失敗は一切表に出ず、フックが何も報告しないまま終わる。** 実際に、承認したのに許可待ちが
+# 解けない不具合（#2985）はこれで起きた——`PostToolUse`の指紋（#2971）を作るpython3が
+# 起動できず、指紋が空のまま照合に外れて`activity=working`を報告できていなかった。
+#
+# そこで**一時ファイルへ書き、パスだけ**を渡す。中身にはコマンド本文・ファイルの内容・
+# 計画の本文が入りうるので`mktemp`の0600のままにし、終了時に必ず消す。
+# 作れなかったときだけ従来どおり環境変数へ載せる（小さいJSONはそれで動く）。
+# ---------------------------------------------------------------------------
+NOTIFY_HOOK_JSON_FILE="$(mktemp "${TMPDIR:-/tmp}/session-notify-hook.XXXXXX" 2>/dev/null || true)"
+if [[ -n "$NOTIFY_HOOK_JSON_FILE" ]]; then
+  # 消す相手は**別の変数で持つ**。書き込みに失敗したときは`NOTIFY_HOOK_JSON_FILE`を空へ倒すので、
+  # trapがそれを見ていると作ったファイルが消えずに残る
+  NOTIFY_HOOK_JSON_TEMP="$NOTIFY_HOOK_JSON_FILE"
+  trap 'rm -f -- "$NOTIFY_HOOK_JSON_TEMP"' EXIT
+  printf '%s' "$HOOK_JSON" >"$NOTIFY_HOOK_JSON_FILE" 2>/dev/null || NOTIFY_HOOK_JSON_FILE=""
+fi
+export NOTIFY_HOOK_JSON_FILE
+if [[ -z "$NOTIFY_HOOK_JSON_FILE" ]]; then
+  # 一時ファイルを作れなかったときだけ従来どおり環境変数へ載せる。**128KiBを超えていれば
+  # どのみち`execve`が落ちる**が、載せなければ小さいJSONまで読めなくなる
+  export HOOK_JSON
+fi
+
 NOTIFY_ENV_FILE="${ISSUE_DECK_NOTIFY_ENV:-$HOME/.config/issue-deck/notify.env}"
 if [[ -f "$NOTIFY_ENV_FILE" ]]; then
   set -a
@@ -336,7 +369,7 @@ fi
 # **何も出力しない。** 出力するとClaude Codeが許可判定として読むため、ダイアログは従来どおり出す。
 # ---------------------------------------------------------------------------
 describe_permission_tool() {
-  HOOK_JSON="$HOOK_JSON" python3 - <<'PY' 2>/dev/null || true
+  python3 - <<'PY' 2>/dev/null || true
 import hashlib
 import json
 import os
@@ -344,8 +377,14 @@ import re
 import sys
 from urllib.parse import urlparse
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict):
@@ -442,8 +481,7 @@ report_artifact_to_issue_deck() {
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
 
   payload="$(
-    HOOK_JSON="$HOOK_JSON" \
-      ARTIFACT_REPO_SLUG="$REPO_SLUG" \
+    ARTIFACT_REPO_SLUG="$REPO_SLUG" \
       ARTIFACT_ISSUE_NUMBER="$ISSUE_NUMBER" \
       ARTIFACT_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}" \
       python3 - <<'PY' 2>/dev/null || true
@@ -456,8 +494,14 @@ import sys
 # （送っても400で返ってくるだけで、その往復に意味が無い）。
 LIMIT = 2 * 1024 * 1024
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict) or hook.get("hook_event_name") != "PostToolUse":
@@ -630,7 +674,8 @@ export NOTIFY_HOOK_PERMISSION_FINGERPRINT
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
 # URLを返すのはissue-deckの画面へ渡すため（#1264）。
 # ---------------------------------------------------------------------------
-export HOOK_JSON
+# **`HOOK_JSON`はexportしない**（#2985）。128KiBを超えると、ここから先のすべての外部コマンドが
+# `E2BIG`で起動できなくなる。python3へは`NOTIFY_HOOK_JSON_FILE`のパスだけを渡す
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
 export NOTIFY_REPO_SLUG="$REPO_SLUG"
 export NOTIFY_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}"
@@ -660,8 +705,14 @@ import sys
 # 長いセッションでは数MBになるため、全部は読まない。
 TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict):
