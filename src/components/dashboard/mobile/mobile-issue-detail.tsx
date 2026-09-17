@@ -395,17 +395,20 @@ export function MobileIssueDetail({
         : null;
     }
     if (prFixRoute.kind === "resume") {
+      // この経路（#1830のセッション復旧）は既定エージェント（claude）でしか起動しない（#2994）
       const rejection = resolveDispatchTargetRejection({
         host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
         blockingSession,
+        agentPauseReason: dispatch.agentPause.claude,
       });
       return rejection
         ? describeDispatchEnqueueRejection(rejection, {
             hostName: prFixRoute.host,
             repositoryFullName: issue.repositoryFullName,
             session: blockingSession,
+            agentPauseReason: dispatch.agentPause.claude,
           })
         : null;
     }

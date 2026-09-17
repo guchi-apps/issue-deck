@@ -221,6 +221,33 @@ export function readDispatchAgent(value: unknown): DispatchAgent {
   return parseDispatchAgent(value) ?? DEFAULT_DISPATCH_AGENT;
 }
 
+/**
+ * エージェント別の新規実行の一時停止理由（#2994）。`null`＝稼働中。
+ *
+ * - `manual` … 人がトグルをOFFにした。人がONに戻すまで自動では解除しない
+ * - `usage_limit` … サブスク枠を使い切ったと自動検知してOFFにした。枠が回復すれば自動で解除する
+ *
+ * 自動検知（`sweepAgentUsageLimitPause`・`jobs.ts`）が上書きしてよいのは`usage_limit`だけで、
+ * `manual`は人がトグルをONに戻すまで触らない。
+ */
+export const AGENT_PAUSE_REASONS = ["manual", "usage_limit"] as const;
+
+export type AgentPauseReason = (typeof AGENT_PAUSE_REASONS)[number];
+
+/**
+ * DBに入っている値を読む。**知らないコードは`null`（＝稼働中）へ落とす**
+ * （`parseSessionReapReason`と同じ作法。列は`String?`なので古い版・知らない値がありうる）。
+ */
+export function parseAgentPauseReason(value: unknown): AgentPauseReason | null {
+  if (typeof value !== "string") return null;
+  return (AGENT_PAUSE_REASONS as readonly string[]).includes(value)
+    ? (value as AgentPauseReason)
+    : null;
+}
+
+/** 画面へ返すエージェント別の一時停止状態。エージェントごとの理由（稼働中なら`null`） */
+export type DispatchAgentPauseState = Record<DispatchAgent, AgentPauseReason | null>;
+
 /** 画面・ログに出す表示名（`agent_cli_display_name`と揃える） */
 export function describeDispatchAgent(agent: DispatchAgent): string {
   return agent === "codex" ? "Codex CLI" : "Claude Code";
@@ -941,7 +968,10 @@ export type DispatchEnqueueRejection =
   // 既定以外のエージェントを、対応を申告していないホストへ積もうとした（#2505）。
   // **理由の文言は`resolveDispatchAgentRejection`が持つ**（画面と同じものを使う）ので、
   // ここでは受け取った文言をそのまま返す経路になる
-  | "agent_not_capable";
+  | "agent_not_capable"
+  // そのエージェントの新規実行が一時停止されている（#2994）。理由（`manual`／`usage_limit`）は
+  // `context.agentPauseReason`から読んで文言を出し分ける
+  | "agent_paused";
 
 export function describeDispatchEnqueueRejection(
   rejection: DispatchEnqueueRejection,
@@ -950,6 +980,8 @@ export function describeDispatchEnqueueRejection(
     repositoryFullName?: string;
     /** `session_alive`のときに、既に動いているセッションの居場所を添えるための情報 */
     session?: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+    /** `agent_paused`のときの理由。`agent`は文言に含めない（呼び出し元が選んだエージェントで分かるため） */
+    agentPauseReason?: AgentPauseReason | null;
   },
 ): string {
   switch (rejection) {
@@ -957,6 +989,10 @@ export function describeDispatchEnqueueRejection(
       // 画面はこの分岐に来ない（選べないホストにはエージェントの選択欄自体を出さない）。
       // ここへ来るのはAPIを直接叩いた場合で、ホスト名だけで書ける一般形を返す
       return `${formatDispatchHostName(context.hostName)} は指定されたエージェントでの起動に対応していません。`;
+    case "agent_paused":
+      return context.agentPauseReason === "usage_limit"
+        ? "サブスク枠を使い切ったため、新規実行を自動で一時停止しています。枠が回復すると自動で再開します（トグルをオンにすると今すぐ再開できます）。"
+        : "新規実行が一時停止されています。トグルをオンにすると再開できます。";
     case "host_unknown":
       return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
     case "host_offline":
@@ -1321,12 +1357,20 @@ export function resolveDispatchTargetRejection(params: {
   hasActiveJob: boolean;
   /** 既に動いているセッション（`findBlockingSession`の戻り値）。無ければ`null` */
   blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+  /**
+   * 起こすエージェントの一時停止理由（#2994）。**省略・`null`は「稼働中」**（従来どおり）。
+   * `enqueueDispatchJob`（`jobs.ts`）と同じ位置（ホストの生存確認の直後）で見る——ここで
+   * 弾かないと、一括投入（`enqueue-issue.ts`）がオプションのラベルだけ書いてジョブを
+   * 1件も積めない事態になる。
+   */
+  agentPauseReason?: AgentPauseReason | null;
 }): DispatchEnqueueRejection | null {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (!params.host.repositories.includes(params.repositoryFullName)) {
     return "repository_not_runnable";
   }
+  if (params.agentPauseReason) return "agent_paused";
   if (params.hasActiveJob) return "already_queued";
   // **セッションの判定は未完了ジョブの後ろ。** 両方あてはまる場合は、押した直後から見えている
   // ジョブの方が利用者にとって直近の事実で、そちらを出す方が話が通じる

@@ -4,6 +4,7 @@ import {
   findBlockingSession,
   resolveDefaultDispatchHost,
   resolveDispatchTargetRejection,
+  type AgentPauseReason,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -27,6 +28,11 @@ export type EnqueueIssueDeps = {
    * **渡さなければ従来どおり**——実行状況を持っていない呼び出し元は判定材料を増やさない。
    */
   actionsRunningIssueIds?: ReadonlySet<string>;
+  /**
+   * Claudeの新規実行の一時停止理由（#2994）。この経路は既定エージェント（`claude`）でしか
+   * 積まないため、渡すのはClaude分だけでよい。**省略・`null`は「稼働中」**（従来どおり）
+   */
+  agentPauseReason?: AgentPauseReason | null;
   enqueue: (input: {
     repositoryFullName: string;
     issueNumber: number;
@@ -104,6 +110,7 @@ export async function enqueueIssueToDefaultHost(
     repositoryFullName: issue.repositoryFullName,
     hasActiveJob: false,
     blockingSession,
+    agentPauseReason: deps.agentPauseReason,
   });
 
   if (!hostName || rejection) {
@@ -115,6 +122,7 @@ export async function enqueueIssueToDefaultHost(
               hostName: host.name,
               repositoryFullName: issue.repositoryFullName,
               session: blockingSession,
+              agentPauseReason: deps.agentPauseReason,
             })
           : "積める起動先がありません",
     };

@@ -507,6 +507,14 @@ model AppSetting {
   // 1件起動してから次を起動するまで空ける時間（分）。リセットの瞬間に全部走らせないための間隔
   nextWindowRunIntervalMinutes Int      @default(10)
 
+  // エージェント別の新規実行の一時停止（#2994）。null＝稼働中、"manual"＝人がトグルをOFFにした、
+  // "usage_limit"＝サブスク枠を使い切ったと検知して自動でOFFにした。**列はStringで正の一覧は
+  // `src/lib/dispatch/dispatch-job.ts`のAGENT_PAUSE_REASONSに持つ**（他のコード付き列と同じ作法）。
+  // 自動検知（`sweepAgentUsageLimitPause`）が上書きしてよいのは"usage_limit"だけで、
+  // "manual"は人がトグルをONに戻すまで自動では触らない
+  claudeDispatchPauseReason String?
+  codexDispatchPauseReason  String?
+
   updatedAt           DateTime @updatedAt
 }
 

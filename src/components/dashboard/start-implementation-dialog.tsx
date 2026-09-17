@@ -591,6 +591,11 @@ export function StartImplementationDialog({
           repositoryFullName: issue.repositoryFullName,
           hasActiveJob: blocksByActiveJob,
           blockingSession,
+          // 選択欄を出していないホストでは既定へ落とす（`effectiveAgent`と同じ扱い。#2994）
+          agentPauseReason:
+            dispatch.agentPause[
+              isDispatchAgentSelectable(selectedHost) ? agent : DEFAULT_DISPATCH_AGENT
+            ],
         })
       : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
@@ -651,6 +656,8 @@ export function StartImplementationDialog({
             repositoryFullName: issue.repositoryFullName,
             hasActiveJob: blocksByActiveJob,
             blockingSession,
+            agentPauseReason:
+              dispatch.agentPause[isDispatchAgentSelectable(host) ? agent : DEFAULT_DISPATCH_AGENT],
           });
           const name = formatDispatchHostName(host.name);
           return {
@@ -665,6 +672,10 @@ export function StartImplementationDialog({
                   hostName: host.name,
                   repositoryFullName: issue.repositoryFullName,
                   session: blockingSession,
+                  agentPauseReason:
+                    dispatch.agentPause[
+                      isDispatchAgentSelectable(host) ? agent : DEFAULT_DISPATCH_AGENT
+                    ],
                 })
               : null,
           };

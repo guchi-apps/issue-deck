@@ -360,12 +360,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     （[`image-annotation-dialog.tsx`](../src/components/dashboard/image-annotation-dialog.tsx)）へ
     移るときは、プレビューを閉じずに上へ重ねている。popstateは開いている全員に届くので、
     エディタを閉じるとプレビューも一緒に閉じる（積んだ1件ぶんは残るが、ズレは安全側）。
-  - **全画面の重ね表示を上へ重ねるときは、同じ`z-50`の層どうしの順番をDOM順に任せない**（#2983）。
+  - **全画面の重ね表示を上へ重ねるときは、同じ`z-50`の層どうしの順番をDOM順に任せない**（#2983、#2993）。
     iOS Safariはアニメーション（`animate-in`）や`backdrop-filter`（共通Dialogの暗幕の
     `backdrop-blur-xs`）を持つ層を順番どおりに描かず、下のダイアログの暗幕が書き込み
     エディタの上に乗って、タップも奪われた（PCのChromeでは再現しない）。エディタは
     `z-60`に上げて中身にも背景色を持たせ、下のプレビューは`suspended`で描画だけを外す
-    （閉じると上の履歴の問題が起きるため、開いている扱いは保つ）。
+    （閉じると上の履歴の問題が起きるため、開いている扱いは保つ）。さらに共通Dialogの中で
+    開くときは、親の半透明かつ`backdrop-filter`付き暗幕も書き込み中だけ描画・当たり判定から
+    外す。これは共通`Dialog`のContextで行うため、編集Issue・新規Issue・横断質問のすべてに効く。
+    上位の暗幕が最前面に合成されると、z-indexを上げても透明なカバーとして操作を塞ぐ。
 - **添付画像への書き込みは保存まで図形として持つ**（#2972。[`lib/annotation/shapes.ts`](../src/lib/annotation/shapes.ts)）。
   座標は元画像のピクセルで持ち、保存時に元の解像度で1枚へ描き出して新しい画像として
   アップロードし、添付を差し替える（元画像は未使用画像の整理で消える）。**色に意味は
@@ -534,6 +537,23 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **5時間枠1%あたりの実測換算（`buildQuotaEstimate`）は、#2666（`de23eb8e`）で廃止した
+    `buildQuotaScale`/`toQuotaPercent`と同じ計算式の再導入**（#2988）。「向きが違うから別物」
+    ではなく、計算自体（窓内の実測消費÷実測の使用率）は同一。**変えたのは2点だけ。**
+    (1) 当時は「5時間枠は1セッションで振り切れて物差しとして荒い」として週間枠を優先していたが、
+    今回のIssueの要求が5時間枠そのものの内訳のため、荒さ（＝1つのIssueが枠のほとんどを占める
+    ことがある）を許容してでも5時間枠に固定し、求まらなければ出さない（週間枠へフォールバック
+    しない）。(2) 当時除外していたGitHub Actionsも`CLAUDE_CODE_OAUTH_TOKEN`を共有し同じ枠を
+    消費するため按分に含め、計上漏れを1つ減らした。それでもissue-deck以外でのClaude利用・
+    アプリ内AI機能（`api-usage.ts`）は含まれないため、**Issue別の枠%は実際より大きめに出る**
+    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。画面の断り書きもこの向き）。
+  - **DB取得範囲は「期間の開始」と「5時間枠ウィンドウの開始」の早い方まで広げる**（#2988）。
+    `sessionUsagePeriodStartMs`が返す期間の開始は日本時間0:00始まりのため、深夜〜早朝に開くと
+    5時間枠の前半（`resetsAt - durationMs`）が前日にかかる。`buildSessionUsageSummary`は
+    従来どおり期間でしか集計しない（拡張ぶんは`endedAt`のフィルタで自然に落ちる）ため、
+    Issue別の枠%（`buildIssueQuotaPercents`）だけは`UsageIssue.entries`（期間内限定）ではなく
+    DB取得段階の`entries`（拡張済み）から計算し直す。グルーピングキーは`buildSessionUsageSummary`
+    内部と同じ`sessionUsageIssueKey`をexportして共有する。
 - **「Issue・PR別」の各行が持つタイトル（`UsageIssue.title`）は、`session-usage-view.ts`の
   純粋関数（`buildSessionUsageSummary`）では解決しない**（#2686）。この関数はDBを読まない方針
   （ファイル冒頭のコメント）を保つため常に`null`を返し、`/api/session-usage`の`resolveIssueTitles`が
@@ -3945,6 +3965,28 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   `promote-knowledge.yml`が「マージ**またはclose**されるまで次回の判定を見送る」仕様のため**
   （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
   対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
+
+## エージェント別の一時停止（#2994）とサブスク枠の読み方
+
+Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.claudeDispatchPauseReason`・
+`codexDispatchPauseReason`。`null`/`"manual"`/`"usage_limit"`）は`src/lib/dispatch/jobs.ts`の
+`enqueueDispatchJob`が積む前に弾き、`sweepAgentUsageLimitPause`（`POST /api/dispatch/claim`への
+相乗り）が枠の状態を見て自動でON/OFFする。
+
+- **`fetchClaudeUsage`（`src/lib/claude/usage.ts`）はサブPCのローカルセッションと同じサブスク枠を
+  読んでいる。** 探りリクエストの認証は`CLAUDE_CODE_OAUTH_TOKEN`（`src/lib/claude/request.ts`）で、
+  これはissue-deckの他のAI機能が使う`ANTHROPIC_API_KEY`とは別物——`claude`コマンドのOAuthトークンを
+  そのまま環境変数に入れている。したがって「issue-deckのサーバー側からClaude Code CLIのサブスク枠
+  使用率を見る」ための新しい取得経路は要らず、既存のこの関数（5分キャッシュ込み）をそのまま呼べばよい
+- **Codexの`CodexUsageSnapshot`は新しいセッションが動かない限り更新されない。** pollerが
+  `~/.codex/sessions/*.jsonl`の`rate_limits`を拾って上書きするだけの表なので、新規実行を一時停止すると
+  その瞬間の値のまま凍結する。**解除の判定を`usedPercent`が下がったかで書くと、一時停止したエージェントは
+  永久に自動解除されない。** 凍結時点で確定している`primaryResetsAt`（未来の固定時刻）の経過で判定すること
+- **自動検知（サブスク枠の使い切り）は動いているセッションへ何も送らない。** `sweepAgentUsageLimitPause`は
+  `AppSetting`のフラグを立てる／解くだけで、`send-keys`は一切呼ばない。動いているセッションへ中断
+  （C-c）を送るのは、人がトグルを手動でOFFにしたときだけ（既存の個別「停止」ボタン・#1332と同じ経路を
+  対象セッションの本数ぶん繰り返す）。この線引きにより、`docs/multi-agent/gates.md`の
+  「実行体が判断して送信する」禁止事項に触れず、新しい例外を追加する必要が無くなる
 
 ## 環境変数
 

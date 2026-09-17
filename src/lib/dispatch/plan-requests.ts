@@ -1,6 +1,7 @@
 import type { SessionPlanRequestStatus } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { clearDispatchSessionWaitingTool } from "@/lib/dispatch/sessions";
 import {
   buildPlanRevisionReason,
   SESSION_PLAN_DECIDED_VISIBLE_MS,
@@ -52,6 +53,13 @@ export async function createSessionPlanRequest(params: {
       plan: truncatePlanForPanel(params.plan),
       expiresAt: new Date(now.getTime() + params.waitSeconds * 1000),
     },
+  });
+  // 直前の許可待ちの説明を捨てる（#2985）。フックはホスト側の記録を同じ場面で消しているが、
+  // 計画の待ちは`activity`を動かさない（#2238）ため、消さないと画面に「計画を承認」と
+  // 「許可待ち」が並んで出る
+  await clearDispatchSessionWaitingTool({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
   });
   return toSessionPlanRequestView(created);
 }

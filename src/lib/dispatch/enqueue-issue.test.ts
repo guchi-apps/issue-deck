@@ -195,6 +195,24 @@ describe("enqueueIssueToDefaultHost", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  // #2994。一時停止中は、ラベルを書く前（`resolveDispatchTargetRejection`）で弾く。
+  // ここで弾かないと、一括投入で全Issueへオプションのラベルだけが書かれてジョブが
+  // 1件も積まれない事態になる
+  it("エージェントが一時停止中なら、ラベルを書かず積まない", async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const updateIssue = vi.fn().mockResolvedValue(null);
+
+    const outcome = await enqueueIssueToDefaultHost(
+      issue(),
+      deps({ agentPauseReason: "manual", enqueue, updateIssue }),
+      ["21.plan-required"],
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(updateIssue).not.toHaveBeenCalled();
+  });
+
   it("同じIssueのセッションが生きていれば積まない（#1311）", async () => {
     const enqueue = vi.fn().mockResolvedValue(true);
     const sessions = [

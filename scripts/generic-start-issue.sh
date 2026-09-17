@@ -585,6 +585,10 @@ if "23.preview-required" in label_names:
 # **計画レビューで見た目が変わったときの差し替え手順もここに書く**（#2110）。手順そのものは#1745で
 # 決めてdocs/multi-agent/labels.mdに書いてあるが、汎用ランチャーで起動した他リポジトリのセッションから
 # issue-deckのdocs/は読めず、実際に手順が届かずに止まった（guchi-apps/myroom#109）。
+# **Designタイプ（キャンバス）は使わせない**（#2984）。Artifactツールの説明が「デザインを作るなら
+# 最初にquickstartを呼ぶ」と勧めるため、放っておくとDesignタイプが選ばれ、公開時のfile_pathが
+# 目次のproject/canvas.jsonになってカードにJSONが出る（guchi-apps/asset-manager#454）。
+# 出口（scripts/session-notify.shが.html以外を捨てる）と対で、入口をここで塞ぐ。
 # **同じ文面が scripts/start-issue.sh と
 # src/lib/prompts/build-implementation-prompt.ts にもある。** 起動経路によって指示が
 # 変わらないよう、変えるときは3か所そろえる（scripts/lib/agent-language.sh と同じ構造）。
@@ -593,6 +597,12 @@ if "25.artifact-required" in label_names:
         "このIssueには`25.artifact-required`ラベルが付いています。**コードを書き始める前に**、"
         "変更する画面の見た目を自己完結HTMLのアーティファクトとして公開し、URLを提示して"
         "見た目の承認を得てから実装に入ってください。\n\n"
+        "- **Designタイプ（キャンバス）では作らないでください**（#2984）。`Artifact`ツールは"
+        "「デザインを作るなら最初に`action: \"quickstart\"`を呼ぶ」と勧めてきますが、そこで示される"
+        "Designタイプから作ると、公開時の`file_path`がキャンバスの目次（`project/canvas.json`）に"
+        "なり、issue-deckのカードにはその**JSONがそのまま出ます**（画面ごとの`.dc.html`は届きません）。"
+        "`quickstart`・`type_url`を使わず、**3画面を並べた1枚の自己完結HTMLファイル**を"
+        "`file_path`に指定して公開してください。フックは`.html`/`.htm`以外を取り込みません\n"
         "- **画面デザインは原則PC・iPad・スマホの3画面を並べて提示してください**（#1632・#2460）。"
         "1つのアーティファクトの中に、PC（デスクトップ幅）・**iPad（横向き = 幅1180px × 高さ820px）**・"
         "**スマホ（iPhone 15 = 幅393px × 高さ852px）**の見た目を、この順（広い順）で並べます。"
@@ -652,6 +662,10 @@ else:
         "**PC（デスクトップ幅）・iPad（横向き = 幅1180px × 高さ820px）・"
         "スマホ（iPhone 15 = 幅393px × 高さ852px）の3画面を1つのアーティファクトに"
         "広い順で並べて提示してください**（#1632・#2460）。"
+        "**Designタイプ（キャンバス）では作らないでください**（#2984）。"
+        "`action: \"quickstart\"`・`type_url`から作ると公開時の`file_path`がキャンバスの目次"
+        "（`project/canvas.json`）になり、issue-deckのカードにJSONがそのまま出ます。"
+        "3画面を並べた1枚の自己完結HTMLファイルを`file_path`に指定して公開してください。"
         "その場合も、各画面の枠は実寸で組んで閲覧幅に合わせて`zoom`で縮小し（横スクロールに頼らない）、2列以上の並びは幅6"
         "00px以下で1列に積んで、スマホ（幅393px）で開いても横スクロールせずに読める作りにしてください（#2974）。"
         "Plan modeの最中に見た目の直しを求められた場合も、計画ファイルの末尾へ"

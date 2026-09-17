@@ -123,6 +123,39 @@ if [[ -z "$HOOK_JSON" ]]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# フックのJSONは**環境変数で子プロセスへ渡さない**（#2985）
+#
+# Linuxは環境変数1つ（argvの1要素）の長さを`MAX_ARG_STRLEN`＝128KiBに制限しており、
+# 超えると`execve`が`E2BIG`（`Argument list too long`）で失敗する。**`PostToolUse`のJSONは
+# ツールの応答を丸ごと抱える**ので、画像の`Read`（base64で数百KB）・長いファイルの読み取り・
+# 出力の多いコマンドで簡単に超える。
+#
+# `export HOOK_JSON`のまま超えると、**そこから先のすべての外部コマンド**（python3・curl・
+# git・sed）が起動できなくなる。このスクリプトは何が起きても`exit 0`で返す約束なので、
+# **失敗は一切表に出ず、フックが何も報告しないまま終わる。** 実際に、承認したのに許可待ちが
+# 解けない不具合（#2985）はこれで起きた——`PostToolUse`の指紋（#2971）を作るpython3が
+# 起動できず、指紋が空のまま照合に外れて`activity=working`を報告できていなかった。
+#
+# そこで**一時ファイルへ書き、パスだけ**を渡す。中身にはコマンド本文・ファイルの内容・
+# 計画の本文が入りうるので`mktemp`の0600のままにし、終了時に必ず消す。
+# 作れなかったときだけ従来どおり環境変数へ載せる（小さいJSONはそれで動く）。
+# ---------------------------------------------------------------------------
+NOTIFY_HOOK_JSON_FILE="$(mktemp "${TMPDIR:-/tmp}/session-notify-hook.XXXXXX" 2>/dev/null || true)"
+if [[ -n "$NOTIFY_HOOK_JSON_FILE" ]]; then
+  # 消す相手は**別の変数で持つ**。書き込みに失敗したときは`NOTIFY_HOOK_JSON_FILE`を空へ倒すので、
+  # trapがそれを見ていると作ったファイルが消えずに残る
+  NOTIFY_HOOK_JSON_TEMP="$NOTIFY_HOOK_JSON_FILE"
+  trap 'rm -f -- "$NOTIFY_HOOK_JSON_TEMP"' EXIT
+  printf '%s' "$HOOK_JSON" >"$NOTIFY_HOOK_JSON_FILE" 2>/dev/null || NOTIFY_HOOK_JSON_FILE=""
+fi
+export NOTIFY_HOOK_JSON_FILE
+if [[ -z "$NOTIFY_HOOK_JSON_FILE" ]]; then
+  # 一時ファイルを作れなかったときだけ従来どおり環境変数へ載せる。**128KiBを超えていれば
+  # どのみち`execve`が落ちる**が、載せなければ小さいJSONまで読めなくなる
+  export HOOK_JSON
+fi
+
 NOTIFY_ENV_FILE="${ISSUE_DECK_NOTIFY_ENV:-$HOME/.config/issue-deck/notify.env}"
 if [[ -f "$NOTIFY_ENV_FILE" ]]; then
   set -a
@@ -336,7 +369,7 @@ fi
 # **何も出力しない。** 出力するとClaude Codeが許可判定として読むため、ダイアログは従来どおり出す。
 # ---------------------------------------------------------------------------
 describe_permission_tool() {
-  HOOK_JSON="$HOOK_JSON" python3 - <<'PY' 2>/dev/null || true
+  python3 - <<'PY' 2>/dev/null || true
 import hashlib
 import json
 import os
@@ -344,8 +377,14 @@ import re
 import sys
 from urllib.parse import urlparse
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict):
@@ -442,8 +481,7 @@ report_artifact_to_issue_deck() {
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
 
   payload="$(
-    HOOK_JSON="$HOOK_JSON" \
-      ARTIFACT_REPO_SLUG="$REPO_SLUG" \
+    ARTIFACT_REPO_SLUG="$REPO_SLUG" \
       ARTIFACT_ISSUE_NUMBER="$ISSUE_NUMBER" \
       ARTIFACT_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}" \
       python3 - <<'PY' 2>/dev/null || true
@@ -456,8 +494,14 @@ import sys
 # （送っても400で返ってくるだけで、その往復に意味が無い）。
 LIMIT = 2 * 1024 * 1024
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict) or hook.get("hook_event_name") != "PostToolUse":
@@ -472,10 +516,22 @@ if not isinstance(tool_input, dict):
 # 既定（省略時）が公開なので、Noneと空文字も通す
 if tool_input.get("action") not in (None, "", "publish"):
     sys.exit(0)
+# **Artifactタイプ（Design＝キャンバス等）からの作成は取り込まない**（#2984）。`type_url`を渡す
+# 公開は「型から新しいアーティファクトの器を作る」呼び出しで、見た目の原本はここに無い。
+if tool_input.get("type_url"):
+    sys.exit(0)
 source_path = tool_input.get("file_path")
 if not isinstance(source_path, str) or not source_path.strip():
     sys.exit(0)
 source_path = source_path.strip()
+# **HTMLだけを受け取る**（#2984）。Designタイプの公開は`file_path`に目次の
+# `project/canvas.json`を渡すため、中身を見ずに送ると`{"v": 3, "boards": {...}}`という
+# JSONがそのままカードへ出る（guchi-apps/asset-manager#454）。画面ごとの中身は
+# `project/*.dc.html`に分かれており、1枚のHTMLとしては取り出せない。
+# **キャンバスを解釈しにいかない**——目次の形式はclaude.ai側の都合で変わるうえ、
+# 見た目案は1枚の自己完結HTMLで出す約束にしてある（起動プロンプトに明記）。
+if not source_path.lower().endswith((".html", ".htm")):
+    sys.exit(0)
 
 try:
     with open(source_path, "rb") as handle:
@@ -494,9 +550,14 @@ except UnicodeDecodeError:
 response = hook.get("tool_response")
 if not isinstance(response, str):
     response = json.dumps(response, ensure_ascii=False)
+# **IDはUUIDとは限らない**（#2984）。いま返ってくるのは
+# `https://claude.ai/artifact/XxWDfT8h7LawipKxDoz8nd`のような22文字の英数字で、UUIDだけを
+# 拾っていたあいだは`claudeUrl`が常に空になっていた。**判定の正は
+# `src/lib/artifact-document.ts`の`ARTIFACT_URL_PATTERN`**で、あちらが受けない形を送っても
+# 捨てられる。変えるときは両方そろえる。
 found = re.search(
-    r"https://claude\.ai/(?:code/artifact|public/artifacts)/"
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    r"https://claude\.ai/(?:code/artifact|public/artifacts|artifact)/"
+    r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9]{16,32})",
     response,
 )
 
@@ -630,7 +691,8 @@ export NOTIFY_HOOK_PERMISSION_FINGERPRINT
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
 # URLを返すのはissue-deckの画面へ渡すため（#1264）。
 # ---------------------------------------------------------------------------
-export HOOK_JSON
+# **`HOOK_JSON`はexportしない**（#2985）。128KiBを超えると、ここから先のすべての外部コマンドが
+# `E2BIG`で起動できなくなる。python3へは`NOTIFY_HOOK_JSON_FILE`のパスだけを渡す
 export NOTIFY_ISSUE_NUMBER="$ISSUE_NUMBER"
 export NOTIFY_REPO_SLUG="$REPO_SLUG"
 export NOTIFY_HOST_NAME="${DISPATCH_HOST_NAME:-$(hostname -s 2>/dev/null || echo unknown)}"
@@ -660,8 +722,14 @@ import sys
 # 長いセッションでは数MBになるため、全部は読まない。
 TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024
 
+# フックのJSONは一時ファイルから読む（#2985。環境変数だと128KiBで`execve`が落ちる）
 try:
-    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
 except Exception:
     sys.exit(0)
 if not isinstance(hook, dict):

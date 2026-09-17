@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const sessionPlanRequestFindUnique = vi.fn();
 const sessionPlanRequestUpdate = vi.fn();
 const sessionPlanRequestUpdateMany = vi.fn();
+const sessionPlanRequestCreate = vi.fn();
+const clearDispatchSessionWaitingTool = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -16,11 +18,24 @@ vi.mock("@/lib/db", () => ({
       get updateMany() {
         return sessionPlanRequestUpdateMany;
       },
+      get create() {
+        return sessionPlanRequestCreate;
+      },
     },
   },
 }));
 
-import { releaseSessionPlanRequest, reportSessionPlanDelivery } from "@/lib/dispatch/plan-requests";
+vi.mock("@/lib/dispatch/sessions", () => ({
+  get clearDispatchSessionWaitingTool() {
+    return clearDispatchSessionWaitingTool;
+  },
+}));
+
+import {
+  createSessionPlanRequest,
+  releaseSessionPlanRequest,
+  reportSessionPlanDelivery,
+} from "@/lib/dispatch/plan-requests";
 
 const NOW = new Date("2026-08-22T10:30:00.000Z");
 
@@ -110,6 +125,32 @@ describe("reportSessionPlanDelivery", () => {
         deliveryExitCode: 3,
         deliverySummary: "計画の画面待機が終了しました",
       },
+    });
+  });
+});
+
+// #2985。計画の待ちは`activity`を動かさない（#2238）ので、直前の許可待ちで入った説明を
+// ここで捨てないと、画面に「計画を承認」と「許可待ち」が並んで出る。
+describe("createSessionPlanRequest", () => {
+  it("直前の許可待ちの説明を捨てる", async () => {
+    sessionPlanRequestUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+    sessionPlanRequestCreate.mockReset().mockResolvedValue(
+      row({ plan: "計画", createdAt: NOW, decidedAt: null, hostName: "subpc" }),
+    );
+    clearDispatchSessionWaitingTool.mockReset().mockResolvedValue({ updated: 1 });
+
+    await createSessionPlanRequest({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2108,
+      hostName: "subpc",
+      plan: "計画",
+      waitSeconds: 1800,
+      now: NOW,
+    });
+
+    expect(clearDispatchSessionWaitingTool).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2108,
     });
   });
 });

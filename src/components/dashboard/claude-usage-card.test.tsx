@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import type { ClaudeUsage } from "@/lib/claude/usage";
+import type { QuotaEstimate } from "@/lib/session-usage-view";
 
 // 表示は日本時間へ固定した（#1977）ので、瞬間はUTCで指定する。
 // 2026-08-04T03:00:00Z = 日本時間の12:00。
@@ -31,9 +32,15 @@ function usage(overrides: Partial<ClaudeUsage["windows"][number]> = {}): ClaudeU
   };
 }
 
-function render1(data: ClaudeUsage) {
+function render1(data: ClaudeUsage, quotaEstimate: QuotaEstimate | null = null) {
   return render(
-    <ClaudeUsageCard data={data} isLoading={false} error={null} notConfigured={false} />,
+    <ClaudeUsageCard
+      data={data}
+      isLoading={false}
+      error={null}
+      notConfigured={false}
+      quotaEstimate={quotaEstimate}
+    />,
   );
 }
 
@@ -68,5 +75,16 @@ describe("ClaudeUsageCard", () => {
     const { container } = render1(usage({ status: "rejected" }));
     const fill = container.querySelector<HTMLElement>('[data-slot="usage-meter-fill"]');
     expect(fill?.className).toContain("bg-destructive");
+  });
+
+  it("換算レートが渡されれば5時間枠の下に実測換算の注記を出す（#2988）", () => {
+    render1(usage(), { usdPerPercent: 1.5, windowStartMs: NOW_MS - 3_600_000, windowCostUsd: 15 });
+    expect(screen.getByText(/1% ≈ \$1\.50/)).not.toBeNull();
+    expect(screen.getByText(/\$15\.00/)).not.toBeNull();
+  });
+
+  it("換算レートが無ければ注記を出さない", () => {
+    render1(usage(), null);
+    expect(screen.queryByText(/実測換算/)).toBeNull();
   });
 });

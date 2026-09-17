@@ -4,13 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
-import type { SessionUsageSummary } from "@/lib/session-usage-view";
+import type { QuotaEstimate, SessionUsageSummary } from "@/lib/session-usage-view";
 
 export type SessionUsageResponse = SessionUsageSummary & {
   /** AIごとのプラン枠メーター。取得できなければnull */
   planUsage: { claude: ClaudeUsage | null; codex: CodexUsage | null };
   /** `CLAUDE_CODE_OAUTH_TOKEN`が未設定。エラーではないので理由を1行だけ出す */
   planNotConfigured: { claude: boolean; codex: boolean };
+  /** 5時間枠の実測換算レート（#2988）。求まらなければnull */
+  quotaEstimate: QuotaEstimate | null;
 };
 
 type UseSessionUsageResult = {

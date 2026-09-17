@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
-import { claimDispatchJobs } from "@/lib/dispatch/jobs";
+import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
 import { launchNextWindowRunEntries } from "@/lib/next-window-run-launch";
 import { launchNightlyRunEntries } from "@/lib/nightly-run-launch";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
@@ -64,6 +64,14 @@ export async function POST(request: NextRequest) {
   // （画面のポーリングに載せると、アプリを閉じているときのための通知が閉じている間だけ止まる）。
   // **失敗してもジョブの払い出しは続ける。**
   if (!fast) {
+    // サブスク枠の使い切り・回復を検知し、エージェット別の一時停止を自動でON/OFFする
+    // （#2994）。**夜間実行より先に回す**——ここで立てた一時停止を、直後の夜間実行の
+    // 起動判定にも効かせるため。失敗しても払い出しは続ける
+    try {
+      await sweepAgentUsageLimitPause();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] サブスク枠の一時停止を判定できませんでした:", error);
+    }
     // 夜間実行（#2772）。時刻が来ていれば、このホストへ積んである予定を起動ジョブへ変換する。
     // **Pushの巡回より先に回す**——変換したIssueの確認待ちは朝まで止める判定
     // （`selectNightlyRunPushHold`）が`LAUNCHED`の行を見るため、同じ巡回で順序が逆だと

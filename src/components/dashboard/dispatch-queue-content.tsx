@@ -2,6 +2,7 @@
 
 import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
 
+import { AgentBulkControlPanel } from "@/components/dashboard/agent-bulk-control-panel";
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import { RefreshIndicatorButton } from "@/components/dashboard/refresh-indicator-button";
@@ -101,6 +102,13 @@ export function DispatchQueueContent({
     <>
       {/* いつ時点の内容かと、取得中かどうか（#1773） */}
       <QueueRefreshRow dispatch={dispatch} />
+
+      {/*
+        エージェットの一括操作（#2994）。Claude Code・Codex CLIそれぞれの一括停止・新規実行の
+        一時停止トグル。**ホストの様子より上に置く**——暴走に気付いてまず止めたいのはここで、
+        個々のホストの余力を見るのはその次
+      */}
+      <AgentBulkControlPanel dispatch={dispatch} />
 
       {/*
         ホストの様子（#1567）。セッション本数と上限（#1394）・リソース使用率・そのホストで
