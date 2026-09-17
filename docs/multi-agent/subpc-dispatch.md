@@ -2608,6 +2608,10 @@ poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries�
   実際の送信は5分に1回
 - **Claude Codeの転記JSONLからは枠の情報を取れない**（#2995で全転記を横断確認）。使用率も
   リセット時刻も`message.usage`には無く、取れるのは**APIのレスポンスヘッダだけ**
+- **相乗り処理から外部APIを呼ぶなら、必ずタイムアウトを添える**（#2995の計画レビュー）。
+  相乗りはジョブの払い出しより前に`await`で走るため、**外部が詰まると払い出しごと止まる**。
+  try/catchで囲んで「失敗しても払い出しは続ける」形にしても、応答が返らないケースは救えない。
+  枠の取得には`callClaudeMessages`の`timeoutMs`（10秒）を渡している
 - **1回の巡回で起動するのは1件まで。** 次を起こすまで`nextWindowRunIntervalMinutes`（既定10分）
   空ける。0にすると連続して起こすが、それでも1巡回1件（サブPCの同時実行数の上限に一気に
   当たらないようにするため）
