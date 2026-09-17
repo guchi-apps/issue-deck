@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -16,6 +17,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
+import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import type { Issue } from "@/types/issue";
 
 type EditIssueDialogProps = {
@@ -36,6 +39,15 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
+  const { labels } = useIssueRepoMeta(issue?.repositoryFullName ?? null);
+  const {
+    isGenerating: isSuggesting,
+    error: suggestError,
+    notConfigured: suggestNotConfigured,
+    generate: generateSuggestion,
+  } = useIssueSuggest();
+  /** 本文からのタイトル付け直し（#2986）。材料（本文）が要り、保存中・生成中は二重に押せない */
+  const canRegenerateTitle = Boolean(body.trim()) && !isSubmitting && !isSuggesting;
   useEffect(() => {
     if (!open || !issue) return;
     // ダイアログを開くたびに対象Issueの最新値でフォームを初期化する。外部トリガー（開閉・対象切替）に
@@ -61,6 +73,20 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     }
   }
 
+  /**
+   * 「付け直す」（#2986）。内容（本文）を変えたあと、タイトルを本文に合わせてAIで再生成する。
+   * 新規作成フォームの同名ボタンと違い、編集画面にはラベル・種別（issue/question）の概念が
+   * 無いため、応答のうちタイトルだけを使う。
+   */
+  async function handleRegenerateTitle() {
+    const result = await generateSuggestion(
+      body,
+      labels.map((label) => ({ name: label.name, description: label.description })),
+    );
+    if (!result) return;
+    setTitle(result.title);
+  }
+
   if (!issue) return null;
 
   return (
@@ -74,13 +100,30 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edit-issue-title">タイトル</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="edit-issue-title">タイトル</Label>
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={!canRegenerateTitle}
+                onClick={handleRegenerateTitle}
+              >
+                {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+                付け直す
+              </Button>
+            </div>
             <Input
               id="edit-issue-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
             />
+            {suggestNotConfigured && (
+              <p className="text-xs text-muted-foreground">
+                選択したAIモデルの認証情報が設定されていないため、自動では決められません。自分で入力してください。
+              </p>
+            )}
+            {suggestError && <p className="text-xs text-destructive">{suggestError}</p>}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -110,7 +153,10 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             キャンセル
           </Button>
-          <Button onClick={handleSubmit} disabled={isSubmitting || !title.trim() || isImageUploading}>
+          <Button
+            onClick={handleSubmit}
+            disabled={isSubmitting || isSuggesting || !title.trim() || isImageUploading}
+          >
             {isSubmitting ? "保存中..." : "保存"}
           </Button>
         </DialogFooter>
