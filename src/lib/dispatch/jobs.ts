@@ -5,6 +5,7 @@ import {
   parseClaudeModel,
   type ClaudeModel,
 } from "@/lib/app-settings";
+import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import {
   buildCodexPairingActiveKey,
@@ -58,6 +59,7 @@ import {
   describePlanReviewRejection,
   describeSessionControlRejection,
   DEFAULT_DISPATCH_AGENT,
+  parseAgentPauseReason,
   DISPATCH_CLAIM_TIMEOUT_MS,
   DISPATCH_CONTROL_QUEUE_TIMEOUT_MS,
   DISPATCH_HEARTBEAT_TIMEOUT_MS,
@@ -89,7 +91,9 @@ import {
   type CodeReviewRejection,
   type CrossRepoQuestionRejection,
   type ManualStepSessionRejection,
+  type AgentPauseReason,
   type DispatchAgent,
+  type DispatchAgentPauseState,
   type DispatchEnqueueRejection,
   type DispatchHostView,
   type DispatchJobKind,
@@ -334,6 +338,139 @@ async function getDispatchConcurrency(): Promise<number> {
 }
 
 /**
+ * エージェント別の新規実行の一時停止状態を読む（#2994）。行が無ければ両方`null`（稼働中）。
+ *
+ * **保存されているコードも読み直しで検証する**（`step`・`reapReason`と同じ理由。列は
+ * `String?`なので古い版・知らない値が残っていることがある）。
+ */
+async function readAgentDispatchPauseState(): Promise<DispatchAgentPauseState> {
+  const setting = await db.appSetting.findUnique({
+    where: { id: 1 },
+    select: { claudeDispatchPauseReason: true, codexDispatchPauseReason: true },
+  });
+  return {
+    claude: parseAgentPauseReason(setting?.claudeDispatchPauseReason),
+    codex: parseAgentPauseReason(setting?.codexDispatchPauseReason),
+  };
+}
+
+async function writeAgentPauseReason(
+  agent: DispatchAgent,
+  reason: AgentPauseReason | null,
+): Promise<DispatchAgentPauseState> {
+  const data =
+    agent === "claude" ? { claudeDispatchPauseReason: reason } : { codexDispatchPauseReason: reason };
+  const updated = await db.appSetting.upsert({
+    where: { id: 1 },
+    create: { id: 1, ...data },
+    update: data,
+    select: { claudeDispatchPauseReason: true, codexDispatchPauseReason: true },
+  });
+  return {
+    claude: parseAgentPauseReason(updated.claudeDispatchPauseReason),
+    codex: parseAgentPauseReason(updated.codexDispatchPauseReason),
+  };
+}
+
+/**
+ * 人がトグルを操作したときの一時停止（#2994。`POST /api/dispatch/agent-pause`が呼ぶ）。
+ *
+ * **理由は常に`manual`。** ONにする（`paused: false`）ときは、自動検知（`usage_limit`）で
+ * 止まっていた場合も含めて必ず解除する——人が押した以上、以後は稼働中として扱う。
+ * OFFにする（`paused: true`）ときは理由を`manual`で上書きする。以後、枠が回復しても
+ * `sweepAgentUsageLimitPause`は`manual`を触らず、人がもう一度ONにするまで止まったまま。
+ */
+export async function setAgentDispatchPause(params: {
+  agent: DispatchAgent;
+  paused: boolean;
+}): Promise<DispatchAgentPauseState> {
+  return writeAgentPauseReason(params.agent, params.paused ? "manual" : null);
+}
+
+/** サブスク枠の使用率を1件ぶんだけ取り出した形。テストで差し込みやすいよう最小限にしてある */
+type CodexUsageSnapshotLite = { primaryUsedPercent: number; primaryResetsAt: Date };
+type ClaudeFiveHourWindowLite = { status: string | null; remainingPercent: number };
+
+/** Codexが「枠を使い切った」と見なす使用率のしきい値。100%（厳密一致）にしている */
+const CODEX_USAGE_PAUSE_THRESHOLD_PERCENT = 100;
+
+async function getLatestCodexUsageSnapshotLite(): Promise<CodexUsageSnapshotLite | null> {
+  return db.codexUsageSnapshot.findFirst({
+    orderBy: { observedAt: "desc" },
+    select: { primaryUsedPercent: true, primaryResetsAt: true },
+  });
+}
+
+/**
+ * Claudeの5時間枠の状態を、サブPCのローカルセッションと同じサブスク枠から読む（#2994）。
+ *
+ * 新しいpoller側の検知は作らず、既存の`fetchClaudeUsage`（`src/lib/claude/usage.ts`）を
+ * そのまま使う。**探りリクエストは`CLAUDE_CODE_OAUTH_TOKEN`で送っており、これはサブPCの
+ * ローカルセッションが使うのと同じサブスク枠のトークン**（`src/lib/claude/request.ts`）。
+ * 5分キャッシュが効くため、`claim`への相乗り（30秒間隔）で毎回呼んでも枠をほぼ消費しない。
+ * トークン未設定・取得失敗のときは`null`（＝この巡は判定しない）。
+ */
+async function getClaudeFiveHourWindowLite(): Promise<ClaudeFiveHourWindowLite | null> {
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!token) return null;
+  try {
+    const usage = await fetchClaudeUsage(token);
+    const window = usage.windows.find((candidate) => candidate.key === "5h");
+    return window ? { status: window.status, remainingPercent: window.remainingPercent } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * サブスク枠を使い切った／回復したことを検知し、一時停止を自動でON/OFFする（#2994）。
+ *
+ * **`POST /api/dispatch/claim`への相乗り**（夜間実行・確認待ちPushの巡回と同じ形）で呼ぶ。
+ * 人が押した`manual`は一切触らない——このスイープが動かすのは`usage_limit`だけ。
+ *
+ * - **Codex**: `CodexUsageSnapshot`（pollerが定期報告）の`primaryUsedPercent`が
+ *   {@link CODEX_USAGE_PAUSE_THRESHOLD_PERCENT}に達したら自動でON。**解除は`primaryResetsAt`の
+ *   経過で判定する**（一時停止中は新しいCodexセッションが動かず`usedPercent`が更新されないため、
+ *   使用率が下がるのを待つと永久に解除できない）。
+ * - **Claude**: `fetchClaudeUsage`の5時間枠が`rejected`（または残り0%）になったら自動でON、
+ *   それ以外に戻ったら自動でOFF（Anthropic側のヘッダがリセットを反映するのを都度読むだけで、
+ *   Codexと違って時刻を自前で持つ必要が無い）。
+ */
+export async function sweepAgentUsageLimitPause(params: {
+  now?: Date;
+  getCodexUsageSnapshot?: () => Promise<CodexUsageSnapshotLite | null>;
+  getClaudeUsageWindow?: () => Promise<ClaudeFiveHourWindowLite | null>;
+} = {}): Promise<void> {
+  const now = params.now ?? new Date();
+  const state = await readAgentDispatchPauseState();
+
+  if (state.codex !== "manual") {
+    const snapshot = await (params.getCodexUsageSnapshot ?? getLatestCodexUsageSnapshotLite)();
+    if (snapshot) {
+      if (state.codex === "usage_limit") {
+        if (now.getTime() >= snapshot.primaryResetsAt.getTime()) {
+          await writeAgentPauseReason("codex", null);
+        }
+      } else if (snapshot.primaryUsedPercent >= CODEX_USAGE_PAUSE_THRESHOLD_PERCENT) {
+        await writeAgentPauseReason("codex", "usage_limit");
+      }
+    }
+  }
+
+  if (state.claude !== "manual") {
+    const window = await (params.getClaudeUsageWindow ?? getClaudeFiveHourWindowLite)();
+    if (window) {
+      const exhausted = window.status === "rejected" || window.remainingPercent <= 0;
+      if (state.claude === "usage_limit") {
+        if (!exhausted) await writeAgentPauseReason("claude", null);
+      } else if (exhausted) {
+        await writeAgentPauseReason("claude", "usage_limit");
+      }
+    }
+  }
+}
+
+/**
  * 期限切れのジョブをTIMEOUTへ落とす。**呼ばれたときにだけ動く**（上のコメント参照）。
  *
  * `activeKey`をnullへ戻すのが要点で、これをしないと同じIssueに次のジョブを積めなくなる。
@@ -526,6 +663,15 @@ export async function enqueueDispatchJob(params: {
   await expireStaleDispatchJobs(now);
 
   const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
+  const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
+  // そのエージェントの新規実行が一時停止されていないか（#2994）。**先に読んでおき、
+  // `reject`のメッセージ組み立てにも使う。** 画面の先出し判定（`resolveDispatchTargetRejection`）
+  // と同じ位置（ホストの生存・エージェント対応の直後、未完了ジョブ・生きているセッションの
+  // 判定より前）で弾く。一括投入（`enqueue-issue.ts`）は先出し判定を通してからオプションの
+  // ラベルを書くため、ここで弾かないと一時停止中の一括投入でラベルだけが書かれてジョブが
+  // 1件も積まれない
+  const agentPauseState = await readAgentDispatchPauseState();
+  const agentPauseReason = agentPauseState[agent];
   const reject = (
     rejection: DispatchEnqueueRejection,
     session?: Pick<DispatchSessionView, "host" | "tmuxSessionName">,
@@ -536,6 +682,7 @@ export async function enqueueDispatchJob(params: {
       hostName: params.hostName,
       repositoryFullName: params.repositoryFullName,
       session,
+      agentPauseReason,
     }),
   });
 
@@ -548,7 +695,6 @@ export async function enqueueDispatchJob(params: {
   // 既定以外のエージェント（#2505）は、対応を申告しているホストにしか配らない。
   // **理由の文言は画面と同じ関数から取る**（`resolveDispatchAgentRejection`）。ここは
   // ホストの行を持っているので`toHostView`を通さず、判定に要る2つだけを渡す
-  const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
   const agentRejection = resolveDispatchAgentRejection(
     { name: host.name, codexCapable: host.codexCapable } as DispatchHostView,
     agent,
@@ -556,6 +702,8 @@ export async function enqueueDispatchJob(params: {
   if (agentRejection) {
     return { ok: false, rejection: "agent_not_capable", message: agentRejection };
   }
+
+  if (agentPauseReason) return reject("agent_paused");
 
   // 既に動いているセッションがあれば積ませない（#1311）。**画面側の`findBlockingSession`と
   // 同じ判定をここでも行う。** 一括投入（`bulk-dispatch-bar.tsx`）は個々のIssueの判定を
@@ -2054,35 +2202,40 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   planRequests: SessionPlanRequestView[];
   questionRequests: SessionQuestionRequestView[];
   concurrency: number;
+  /** エージェット別の新規実行の一時停止状態（#2994） */
+  agentPause: DispatchAgentPauseState;
 }> {
   await expireStaleDispatchJobs(now);
 
   // セッション（#1217）を専用のエンドポイントではなくここへ足しているのは、画面側が
   // `GET /api/dispatch`と`use-dispatch-state.ts`の1本で状態を読んでいるため。取得口を
-  // 増やすと、同じ画面のためにポーリングが2本走ることになる。
-  const [hosts, jobs, sessions, planRequests, questionRequests, concurrency] = await Promise.all([
-    db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
-    db.dispatchJob.findMany({
-      where: {
-        // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、
-        // ここで落ちるのは終了済みのものだけ（`dismissDispatchJob`）
-        dismissedAt: null,
-        OR: [
-          { status: { in: [...ACTIVE_DISPATCH_JOB_STATUSES] } },
-          { finishedAt: { gte: new Date(now.getTime() - FINISHED_JOB_RETENTION_MS) } },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    }),
-    listDispatchSessions(now),
-    // 計画への返事待ち（#2061）も同じ応答に載せる。**取得口を増やさない**（セッションと
-    // 同じ理由で、分けると同じ画面のためにポーリングが2本走る）
-    listSessionPlanRequests(now),
-    // 質問への回答待ち（#2189）も同じ応答に載せる。計画の返事待ちと同じ理由
-    listSessionQuestionRequests(now),
-    getDispatchConcurrency(),
-  ]);
+  // 増やすと、同じ画面のためにポーリングが2本走ることになる。エージェント別の一時停止
+  // （#2994）も同じ理由でここへ足す
+  const [hosts, jobs, sessions, planRequests, questionRequests, concurrency, agentPause] =
+    await Promise.all([
+      db.dispatchHost.findMany({ orderBy: { name: "asc" } }),
+      db.dispatchJob.findMany({
+        where: {
+          // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、
+          // ここで落ちるのは終了済みのものだけ（`dismissDispatchJob`）
+          dismissedAt: null,
+          OR: [
+            { status: { in: [...ACTIVE_DISPATCH_JOB_STATUSES] } },
+            { finishedAt: { gte: new Date(now.getTime() - FINISHED_JOB_RETENTION_MS) } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      listDispatchSessions(now),
+      // 計画への返事待ち（#2061）も同じ応答に載せる。**取得口を増やさない**（セッションと
+      // 同じ理由で、分けると同じ画面のためにポーリングが2本走る）
+      listSessionPlanRequests(now),
+      // 質問への回答待ち（#2189）も同じ応答に載せる。計画の返事待ちと同じ理由
+      listSessionQuestionRequests(now),
+      getDispatchConcurrency(),
+      readAgentDispatchPauseState(),
+    ]);
 
   // Issueの引き当て（#1519・#1625）は**ジョブとセッションが確定してから**。上の`Promise.all`へ
   // 入れられない（どのIssueを引くかが一覧に依存する）。0件ならクエリも投げない。
@@ -2114,6 +2267,7 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
     planRequests,
     questionRequests,
     concurrency,
+    agentPause,
   };
 }
 

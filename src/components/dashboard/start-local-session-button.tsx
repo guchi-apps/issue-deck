@@ -19,6 +19,7 @@ import {
   findDispatchJobForIssue,
   isActiveDispatchJobStatus,
   resolveDispatchTargetRejection,
+  type AgentPauseReason,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -125,6 +126,8 @@ export function StartLocalSessionButton({
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob,
         blockingSession,
+        // このボタンは既定エージェント（claude）でしか起動しない（#2994）
+        agentPauseReason: dispatch.agentPause.claude,
       })
     : null;
 
@@ -144,6 +147,7 @@ export function StartLocalSessionButton({
           hostName: onlyHost?.name ?? "",
           repositoryFullName: issue.repositoryFullName,
           session: blockingSession,
+          agentPauseReason: dispatch.agentPause.claude,
         })
       : null;
 
@@ -199,6 +203,7 @@ export function StartLocalSessionButton({
                 repositoryFullName={issue.repositoryFullName}
                 hasActiveJob={hasActiveJob}
                 blockingSession={blockingSession}
+                agentPauseReason={dispatch.agentPause.claude}
                 onSelect={() => void launch(host.name)}
               />
             ))}
@@ -238,6 +243,7 @@ function DispatchHostMenuItem({
   repositoryFullName,
   hasActiveJob,
   blockingSession,
+  agentPauseReason,
   onSelect,
 }: {
   host: DispatchHostView;
@@ -246,6 +252,7 @@ function DispatchHostMenuItem({
   repositoryFullName: string;
   hasActiveJob: boolean;
   blockingSession: DispatchSessionView | null;
+  agentPauseReason: AgentPauseReason | null;
   onSelect: () => void;
 }) {
   const rejection = resolveDispatchTargetRejection({
@@ -253,6 +260,7 @@ function DispatchHostMenuItem({
     repositoryFullName,
     hasActiveJob,
     blockingSession,
+    agentPauseReason,
   });
   const hostJobs = jobs.filter((job) => job.targetHost === host.name);
   const running = hostJobs.filter(

@@ -30,6 +30,8 @@ let dispatchState: {
 vi.mock("@/hooks/use-dispatch-state", () => ({
   useDispatchState: () => ({
     ...dispatchState,
+    // エージェット別の一時停止（#2994）。既定は両方とも稼働中
+    agentPause: { claude: null, codex: null },
     isSubmitting: false,
     setError: vi.fn(),
     enqueue,
