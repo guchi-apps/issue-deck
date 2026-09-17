@@ -348,6 +348,8 @@ describe("findBlockingSession", () => {
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
       ...overrides,
     };
@@ -451,6 +453,8 @@ describe("isIssueExecutionPending", () => {
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
       ...overrides,
     };

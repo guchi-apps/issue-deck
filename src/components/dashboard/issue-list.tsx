@@ -52,6 +52,7 @@ import {
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
 import {
+  describeSessionPermission,
   findSessionForIssue,
   resolveIssueImplementationAgent,
   summarizeIssueSession,
@@ -882,6 +883,9 @@ export function IssueList({
     // 「今夜の夜間実行」に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
     // ので、この引き当て表だけが手がかりになる。渡されていない画面ではnullでチップも出ない
     const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
+    // 承認ダイアログで許可を待っているか（#2971）。出口のボタンの言い方を「許可待ち」に変える
+    // ——「Remote」だけだと、確認待ちの理由が質問なのかアクセスの許可なのかが行から読めない
+    const permissionPending = issueSession ? describeSessionPermission(issueSession) !== null : false;
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -1092,7 +1096,7 @@ export function IssueList({
                     // 色は右上のバッジ（`WorkflowStepBadge`）の確認待ちと同じamberを借りる。同じ行で
                     // 同じ意味に別の色を当てない。**回転・点滅はさせない**（あちらも承認待ちでは
                     // 意図的に回転を止めている。待っているのは人であって処理ではない）
-                    emphasizeRemoteControl &&
+                    (emphasizeRemoteControl || permissionPending) &&
                       "border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400",
                   )}
                 >
@@ -1100,11 +1104,19 @@ export function IssueList({
                     href={remoteControlUrl}
                     target="_blank"
                     rel="noreferrer"
-                    title="Claude Codeアプリで開く"
-                    aria-label={`#${issue.number}のClaude Codeアプリで開く`}
+                    title={
+                      permissionPending
+                        ? "アクセスの許可を待っています（Claude Codeアプリで開く）"
+                        : "Claude Codeアプリで開く"
+                    }
+                    aria-label={
+                      permissionPending
+                        ? `#${issue.number}のアクセスの許可をClaude Codeアプリで選ぶ`
+                        : `#${issue.number}のClaude Codeアプリで開く`
+                    }
                   >
-                    <ExternalLink />
-                    Remote
+                    {permissionPending ? <Lock /> : <ExternalLink />}
+                    {permissionPending ? "許可待ち" : "Remote"}
                   </a>
                 </Button>
               )}

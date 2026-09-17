@@ -7,6 +7,8 @@ import {
   parseDispatchSessionActivity,
   parsePreviewUrl,
   parseRemoteControlUrl,
+  parseSessionWaitingTarget,
+  parseSessionWaitingTool,
 } from "@/lib/dispatch/session-state";
 import { recordDispatchSessionActivity } from "@/lib/dispatch/sessions";
 
@@ -52,6 +54,10 @@ export async function POST(request: NextRequest) {
   // セッションが入力待ちに入ったこと（#1417）。質問・権限の承認プロンプト・プレビューや
   // スクリーンショットの承認依頼は、ローカルセッションではどれもこの形になる
   const checkUserRequested = payload?.checkUserRequested === true;
+  // 何の許可を待っているか（#2971）。**形が違えば捨てるだけで、報告そのものは受け付ける**
+  // （説明が欠けても「入力を待っている」ことは画面に出せる）
+  const waitingTool = parseSessionWaitingTool(payload?.waitingTool);
+  const waitingTarget = waitingTool ? parseSessionWaitingTarget(payload?.waitingTarget) : null;
   // 中身が1つも無いリクエストだけを拒む。**セッション起動時のプレビュー公開（#1265）と
   // APIエラーで中断したセッションの引き上げ（#1971・#2280）は`activity`を伴わない**ので、
   // そちらを必須にはできない（中断は「今どうしているか」を言えないまま`00.check-user`だけを
@@ -88,6 +94,8 @@ export async function POST(request: NextRequest) {
     activity,
     remoteControlUrl,
     previewUrl,
+    waitingTool,
+    waitingTarget,
   });
 
   // 対象の行が無い（pollerがまだ1巡していない）場合も200で返す。呼び出し側に再送の判断を

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
+  describeSessionPermission,
   resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
@@ -210,6 +211,17 @@ export function LocalSessionWaitingInputNotice({
         </strong>
         （このコメント欄へ書いても走っているセッションには届きません）。待ち時間が切れた後は
         {isCodex ? "端末から伝えてください。" : "Remote Controlか端末から伝えてください。"}
+      </LocalSessionNotice>
+    );
+  }
+
+  // 承認ダイアログで許可を求めているとき（#2971）。答える場所は同じだが、押すものが違う
+  if (session && describeSessionPermission(session)) {
+    return (
+      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+        走っているセッションが<strong className="font-medium">アクセスの許可</strong>を待っています。
+        Claude Codeアプリから許可・拒否を選んでください（`11.local`が付いている間、このコメント欄へ
+        書いても走っているセッションには届きません）。選ぶと`00.check-user`は自動的に外れます。
       </LocalSessionNotice>
     );
   }

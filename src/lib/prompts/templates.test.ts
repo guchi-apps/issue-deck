@@ -146,6 +146,18 @@ describe("buildImplementationPrompt", () => {
     }
   });
 
+  // #2974: 枠を実寸のまま横スクロールに入れると、スマホで開いたときにスマホの枠すら収まらない
+  it("ラベルの有無によらず、枠を閲覧幅に合わせて縮小しスマホで読める作りを求める", () => {
+    for (const labels of [[], [{ name: "25.artifact-required" }]]) {
+      const prompt = buildImplementationPrompt({ ...BASE, labels });
+      expect(prompt).toContain("閲覧幅に合わせて`zoom`で縮小");
+      expect(prompt).toContain("幅600px以下で1列に積");
+    }
+    expect(
+      buildImplementationPrompt({ ...BASE, labels: [{ name: "25.artifact-required" }] }),
+    ).toContain("querySelectorAll('.fit[data-w]')");
+  });
+
   it("ラベルを並べる（無ければ「(なし)」）", () => {
     expect(buildImplementationPrompt({ ...BASE, labels: [] })).toContain("(なし)");
     expect(

@@ -47,6 +47,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   compactIssueSessionLabel,
+  describeSessionPermission,
   describeSessionReap,
   describeSessionStep,
   summarizeIssueSession,
@@ -151,6 +152,8 @@ export function IssueSessionStatus({
   // いま何をしているか（#2705）。走っていて、かつ申告があるときだけ返る。
   // 経過時間は残り時間と同じくポーリングのたびに計算し直す
   const stepNotice = describeSessionStep(session);
+  // 何の許可を待っているか（#2971）。承認ダイアログで止まっているときだけ返る
+  const permissionNotice = describeSessionPermission(session);
   const [confirmingKill, setConfirmingKill] = useState(false);
   // 停止の失敗は押した場所に出す（`dispatch.error`は起動ボタンの下に出るため、そちらへ流さない）
   const [controlError, setControlError] = useState<string | null>(null);
@@ -389,6 +392,26 @@ export function IssueSessionStatus({
         >
           {summary.detail}
         </p>
+      )}
+      {/* 何の許可を待っているか（#2971）。**畳まない。** 開いた先で許可してよいかを決める材料で、
+          Claude Codeアプリを開く前にここで読めるようにする。対象はリンクにしない（表示専用） */}
+      {permissionNotice && (
+        <dl
+          className={cn(
+            "grid w-full grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-md px-2.5 py-1.5 text-xs",
+            TONE_CLASS.waiting,
+            "ring-0",
+          )}
+        >
+          <dt className="font-medium">ツール</dt>
+          <dd className="break-words text-foreground">{permissionNotice.toolLabel}</dd>
+          {permissionNotice.target && (
+            <>
+              <dt className="font-medium">対象</dt>
+              <dd className="break-all font-mono text-foreground">{permissionNotice.target}</dd>
+            </>
+          )}
+        </dl>
       )}
       {/* なぜ終わるのか・畳まれた後どうなるか（#1817）。**畳まない。** 理由の無い終了予告は
           「勝手に消される」としか読めず、続けたい場合に何をすればよいかも分からない */}

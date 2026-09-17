@@ -12,6 +12,7 @@ import {
 } from "react";
 import { Eye, ImagePlus, Loader2, Pencil, X } from "lucide-react";
 
+import { ImageAnnotationDialog } from "@/components/dashboard/image-annotation-dialog";
 import {
   ImagePreviewDialog,
   type ImagePreviewTarget,
@@ -205,18 +206,30 @@ export function MentionTextarea({
     const uploadId = uploadIdRef.current;
     setUploads((prev) => [...prev, { id: uploadId, name: file.name }]);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/issues/images", { method: "POST", body: formData });
-      if (!res.ok) throw new Error("upload_failed");
-      const data: { url: string } = await res.json();
+      const url = await postImage(file);
       // カーソル位置は見ない。添付は常に末尾（サムネイル列の右端）へ足す（#1819）。
-      emitChange(bodyRef.current, [...attachmentsRef.current, { name: file.name, url: data.url }]);
+      emitChange(bodyRef.current, [...attachmentsRef.current, { name: file.name, url }]);
     } catch {
       setUploadError("画像のアップロードに失敗しました");
     } finally {
       setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
     }
+  }
+
+  /**
+   * 書き込み済みの画像をアップロードし、元の添付と同じ位置で差し替える（#2972）。
+   * 位置は添付のURLで探し直す——保存中に他の添付が消されると添字がずれるため。
+   * 元の画像を消すのは未使用画像の整理に任せる。失敗は投げ返し、エディタ側に出す。
+   */
+  async function replaceAttachment(originalUrl: string, file: File) {
+    const url = await postImage(file);
+    const current = attachmentsRef.current;
+    const index = current.findIndex((attachment) => attachment.url === originalUrl);
+    const next =
+      index === -1
+        ? [...current, { name: file.name, url }]
+        : current.map((attachment, i) => (i === index ? { ...attachment, url } : attachment));
+    emitChange(bodyRef.current, next);
   }
 
   function uploadImageFiles(files: Iterable<File>) {
@@ -393,6 +406,7 @@ export function MentionTextarea({
             attachments={attachments}
             uploads={uploads}
             onRemove={removeAttachment}
+            onAnnotated={replaceAttachment}
             disabled={disabled}
             className="min-w-0 flex-1"
           />
@@ -436,16 +450,19 @@ function AttachmentStrip({
   attachments,
   uploads,
   onRemove,
+  onAnnotated,
   disabled,
   className,
 }: {
   attachments: ImageAttachment[];
   uploads: { id: number; name: string }[];
   onRemove: (index: number) => void;
+  onAnnotated: (originalUrl: string, file: File) => Promise<void>;
   disabled?: boolean;
   className?: string;
 }) {
   const [preview, setPreview] = useState<ImagePreviewTarget | null>(null);
+  const [annotating, setAnnotating] = useState<ImagePreviewTarget | null>(null);
   const countLabel = uploads.length > 0 ? `${uploads.length}枚アップロード中` : null;
 
   return (
@@ -453,7 +470,21 @@ function AttachmentStrip({
       className={cn("flex items-center gap-2 overflow-x-auto py-0.5", className)}
       data-slot="mention-attachments"
     >
-      <ImagePreviewDialog image={preview} onClose={() => setPreview(null)} />
+      <ImagePreviewDialog
+        image={preview}
+        onClose={() => setPreview(null)}
+        // プレビューは閉じずに上へ重ねる。閉じると、プレビューの履歴エントリを外す
+        // history.back()が書き込み側の積んだエントリを外してしまい、開いた直後に閉じる。
+        // 書き込みを閉じたときの戻る操作でプレビューも一緒に閉じる（use-history-dismiss.ts）
+        onAnnotate={disabled ? undefined : () => setAnnotating(preview)}
+      />
+      <ImageAnnotationDialog
+        image={annotating}
+        onClose={() => setAnnotating(null)}
+        onSave={async (file) => {
+          if (annotating) await onAnnotated(annotating.src, file);
+        }}
+      />
       {attachments.map((attachment, index) => (
         <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
           {/* サムネイルは小さく中身を確かめられないので、押すとアプリ内で原寸を開く（#2065） */}
@@ -477,6 +508,17 @@ function AttachmentStrip({
             className="absolute top-0.5 right-0.5 grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
           >
             <X className="size-3" />
+          </button>
+          {/* 添付を取り消すバツと対角に置き、押し間違えないようにする（#2972） */}
+          <button
+            type="button"
+            onClick={() => setAnnotating({ src: attachment.url, name: attachment.name })}
+            disabled={disabled}
+            aria-label={`${attachment.name} に書き込む`}
+            title="書き込む"
+            className="absolute right-0.5 bottom-0.5 grid size-6 place-items-center rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+          >
+            <Pencil className="size-3" />
           </button>
         </div>
       ))}
@@ -520,4 +562,13 @@ function PreviewToggleButton({
       {isPreview ? "入力に戻る" : "プレビュー"}
     </Button>
   );
+}
+
+async function postImage(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/issues/images", { method: "POST", body: formData });
+  if (!res.ok) throw new Error("upload_failed");
+  const data: { url: string } = await res.json();
+  return data.url;
 }

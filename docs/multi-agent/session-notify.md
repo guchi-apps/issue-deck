@@ -538,11 +538,42 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Stop` | 転記の末尾が「クラシファイアの拒否のあと一度もtool_useが無い」形 | 拒否されたまま応答を終えた（#2844） | Issueコメント＋`00.check-user`＋`01.check-blocked`＋様子（`waiting_input`）（後述） |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | 計画を送り、画面の返事を待つ |
 | `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
-| `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt` | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
+| `PermissionRequest` | — | 承認ダイアログを出す直前（#2971） | **送らない**（何の許可かをホスト側の`.permission`へ控える。後述） |
+| `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt`、かつ許可を求めたツールそのもの（#2971） | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
 | `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
 | `PreToolUse` / `PostToolUse` | すべて | いま何をしているか（#2705） | **送らない**（ホスト側の`.step`へ書き、pollerが運ぶ。後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述。Codexではここで`codex queue`の宛先を残し、スレッドに`<リポジトリ名> #<Issue番号>`の名前を付ける。#2519・#2540） |
 | （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971）／ツール呼び出しが実行されないまま停滞（#2655） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
+
+### 許可待ちは、許可を求めたツールが走るまで解かない（#2971）
+
+**`PostToolUse`を「人が答えた」合図にしていたため、許可待ちの`00.check-user`が数秒で外れていた。**
+asset-manager #451では、`Read`の許可待ちで15:33:43に`00.check-user`が付き、3秒後に外れた。
+裏で動いていたExploreサブエージェントのツール実行が「直前が`permission_prompt`」の条件を
+満たしたため。確認待ちのPush通知は付与から3分待って送る作り（`check-user-push.ts`）なので
+一度も鳴らず、画面も「作業中」のまま、セッションは19分止まっていた。
+
+- **サブエージェントから飛ぶフックには`agent_id`が付く**（Claude Code 2.1.274のフック入力の
+  スキーマで確認。メインスレッドでは付かない）。並行して呼んだ別のツールの完了も同じ形で紛れ込む
+- そこで`PermissionRequest`（承認ダイアログを出す直前に飛ぶ）で、**ツール名と「何に対する
+  操作か」の1項目（`file_path`・`command`・`url`など）に`agent_id`を混ぜた指紋**をホストの
+  `<セッション名>.permission`へ控え、指紋が一致した`PostToolUse`だけを「答えた」と読む。
+  **全入力で指紋を取らない**——`PostToolUse`の`tool_input`には既定値が補われることがあり、
+  食い違うと`Stop`まで外れなくなる
+- **記録が無い入力待ち**（質問・計画は`PreToolUse`で記録する。`PermissionRequest`が飛ばない版）では、
+  `agent_id`付きの`PostToolUse`だけを捨てる。`AskUserQuestion`・`ExitPlanMode`は記録しない
+  （回答の`answers`が入力へ足され、指紋が一致しない）
+- 記録は`working`・`Stop`で消し、質問・計画の待ちに入るときも消す（拒否されて残った記録が、
+  次の待ちの照合を外さないように）。照合に外れても`Stop`が保険として`00.check-user`を外す
+- **何の許可かを画面へ出す。** `Notification / permission_prompt`は「ダイアログが出た」ことしか
+  言わないので、控えたツール名と表示用の対象を入力待ちの報告（`waitingTool`・`waitingTarget`）に
+  添え、`DispatchSession`の同名の列へ入れる（入力待ち以外の様子を受け取ったら消す）。
+  **対象はファイルのパスかURLのホスト名だけで、`Bash`のコマンド本文は運ばない**（`step`と同じ線）。
+  質問の選択フォームでも同じ`Notification`が飛ぶため、記録から120秒以内のときだけ添える
+- **`PermissionRequest`のフックは何も出力しない。** 出力するとClaude Codeが許可判定として読む。
+  画面から「許可」「拒否」を返す作りにはしていない（待っている間はClaude Codeアプリに
+  ダイアログが出なくなるため）
+- 境界は`scripts/session-notify-activity.test.mjs`の「許可待ち（#2971）」が固定している
 
 **`idle_prompt`を捨てるのは、直前の`Stop`と必ず二重になるため。** 応答が終わって60秒
 放置されると発火するので、`Stop`を報告した約60秒後に同じ内容がもう1件飛ぶことになる。

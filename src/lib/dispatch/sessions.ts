@@ -7,6 +7,8 @@ import {
   parseSessionInterruptedReason,
   parseSessionReapReason,
   parseSessionStep,
+  parseSessionWaitingTarget,
+  parseSessionWaitingTool,
   resolveSessionState,
   resolveStartingActivityTransition,
   shouldEscalateSession,
@@ -76,6 +78,14 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     // コードが読めなければ時刻も出さない——原因が分からないと停滞パネルは文面を選べない
     interruptedReason,
     interruptedAt: interruptedReason === null ? null : (session.interruptedAt?.toISOString() ?? null),
+    // 許可を求めているツール（#2971）。**入力待ちのときだけ出す**（古い値が残っていても、
+    // 答えた後の様子に「許可を待っています」を重ねない）。保存値も読み直しで検証する
+    waitingTool:
+      session.activity === "WAITING_INPUT" ? parseSessionWaitingTool(session.waitingTool) : null,
+    waitingTarget:
+      session.activity === "WAITING_INPUT" && parseSessionWaitingTool(session.waitingTool) !== null
+        ? parseSessionWaitingTarget(session.waitingTarget)
+        : null,
     // 実際に使っているモデル（#2723）の引き当ては`listDispatchSessions`が一括で行う
     // （タイトルの引き当てと同じ理由で、ここで引くとセッション1件ごとにクエリが増える）
     models: [],
@@ -100,6 +110,12 @@ export async function recordDispatchSessionActivity(params: {
   activity?: DispatchSessionActivity | null;
   remoteControlUrl?: string | null;
   previewUrl?: string | null;
+  /**
+   * 許可を求めているツールと対象（#2971）。**`activity`と一緒にしか書かない**——入力待ちなら
+   * 渡された値（無ければ`null`＝質問の待ち）、それ以外の様子なら消す
+   */
+  waitingTool?: string | null;
+  waitingTarget?: string | null;
   now?: Date;
 }): Promise<{ updated: number }> {
   const now = params.now ?? new Date();
@@ -114,6 +130,11 @@ export async function recordDispatchSessionActivity(params: {
       // **渡された項目だけを書く。** URLが取れなかった回で既存の値を消さない
       // （Claude Codeの内部ファイル依存で欠けうる。プレビューは公開時の1回しか報告しない）
       ...(params.activity ? { activity: params.activity, activityAt: now } : {}),
+      ...(params.activity
+        ? params.activity === "WAITING_INPUT" && params.waitingTool
+          ? { waitingTool: params.waitingTool, waitingTarget: params.waitingTarget ?? null }
+          : { waitingTool: null, waitingTarget: null }
+        : {}),
       ...(params.remoteControlUrl ? { remoteControlUrl: params.remoteControlUrl } : {}),
       ...(params.previewUrl ? { previewUrl: params.previewUrl } : {}),
     },
@@ -394,6 +415,9 @@ export async function reportDispatchSessions(params: {
               // 起動し直した直後のセッションにそのまま出るのを防ぐ
               interruptedReason: null,
               interruptedAt: null,
+              // 許可待ちの説明も捨てる（#2971）。`activity`と対の値なので一緒に消す
+              waitingTool: null,
+              waitingTarget: null,
             }
           : {}),
         // 起動確認で止まっている／人が答えて始まった（#1465）。**`revived`の後に置く**

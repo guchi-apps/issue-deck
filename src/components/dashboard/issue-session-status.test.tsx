@@ -36,6 +36,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     firstSeenAt: "2026-08-14T09:00:00.000Z",
     // pollerが1巡ごとに更新するので、生きている限り常に「今」に近い
@@ -894,5 +896,40 @@ describe("アプリで答える（#2822）", () => {
     await waitFor(() => {
       expect(screen.getByText("このセッションは終了しています。")).toBeTruthy();
     });
+  });
+});
+
+// #2971。何の許可を待っているかを、Claude Codeアプリを開く前に読めるようにする
+describe("許可待ち（#2971）", () => {
+  afterEach(cleanup);
+
+  it("ツールと対象を畳まずに出す", () => {
+    render(
+      <IssueSessionStatus
+        session={session({
+          activity: "WAITING_INPUT",
+          activityAt: NOW.toISOString(),
+          waitingTool: "Read",
+          waitingTarget: "/tmp/issue-deck-images/a.png",
+          remoteControlUrl: "https://claude.ai/code/s_1",
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+    expect(screen.getByText(/許可を待っています/)).toBeTruthy();
+    expect(screen.getByText("Read（ファイルの読み取り）")).toBeTruthy();
+    expect(screen.getByText("/tmp/issue-deck-images/a.png")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /アプリで開く/ })).toBeTruthy();
+  });
+
+  it("Bashでは対象の欄を出さない", () => {
+    render(
+      <IssueSessionStatus
+        session={session({ activity: "WAITING_INPUT", waitingTool: "Bash" })}
+        dispatch={makeDispatch()}
+      />,
+    );
+    expect(screen.getByText("Bash（コマンドの実行）")).toBeTruthy();
+    expect(screen.queryByText("対象")).toBeNull();
   });
 });
