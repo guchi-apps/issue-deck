@@ -37,6 +37,7 @@ model User {
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
   releaseCheckTargets  ReleaseCheckTarget[]
   releaseChecks        ReleaseCheck[]
+  releaseCheckLines    ReleaseCheckLine[]
 }
 
 // --- GitHub App 連携 ---
@@ -121,6 +122,7 @@ model Repository {
   issueCreationExcludedBy IssueCreationExcludedRepository[]
   releaseCheckTargetedBy  ReleaseCheckTarget[]
   releaseChecks           ReleaseCheck[]
+  releaseCheckLines       ReleaseCheckLine[]
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -216,6 +218,35 @@ model ReleaseCheck {
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@unique([userId, repositoryId, tagName])
+  @@index([repositoryId])
+}
+
+// ユーザーごとに「リリース本文の箇条書き1行（1機能）を確認した」と記録した1件（#2982）。
+//
+// **`ReleaseCheck`（リリース1件全体の確認フラグ）とは独立した参考情報。** 全行を
+// チェックしても`ReleaseCheck`は連動しない（Issue本文の要望どおり、全部チェック必須の
+// ような強制は持たせない）。
+//
+// **行の識別は対応するPRの参照（`lineKey`）で、並び順の添字ではない。** 箇条書きは
+// `extractReleaseHighlights`がリリース本文から都度抽出するため、DBには本文そのものを
+// 持たない。添字だと、本文の絞り込み条件（バージョンバンプPRを除く等）が後から増減した
+// だけで過去分すべての対応がずれる（#2807で実際に増えた）。PRの参照は本文の並び替え・
+// 絞り込み条件の変更のどちらにも影響されない（計画レビューでの指摘を反映。#2982）。
+model ReleaseCheckLine {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+  /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
+  tagName      String
+  /** `owner/repo#123`やPRのURL。`ReleaseHighlightLine.key`と同じ値 */
+  lineKey      String
+
+  checkedAt DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId, tagName, lineKey])
   @@index([repositoryId])
 }
 

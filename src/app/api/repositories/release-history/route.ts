@@ -5,7 +5,11 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
-import { hasReachedReleaseCheckSince, type ReleaseCheckRecord } from "@/lib/release-check";
+import {
+  hasReachedReleaseCheckSince,
+  type ReleaseCheckLineRecord,
+  type ReleaseCheckRecord,
+} from "@/lib/release-check";
 import { mergeReleaseHistory } from "@/lib/release-history";
 
 export function GET() {
@@ -31,13 +35,14 @@ async function handleGET() {
   });
 
   if (repositories.length === 0) {
-    return NextResponse.json({ entries: [], checkTargets: [], checkRecords: [] });
+    return NextResponse.json({ entries: [], checkTargets: [], checkRecords: [], checkLineRecords: [] });
   }
 
   // 動作確認のフラグ（#2930）の材料。**状態へ畳まずそのまま返す**——判定は
   // `lib/release-check.ts`の純粋関数が行い、画面は「確認済みにする」を押した直後も
   // 同じ関数で描き直す（サーバーの応答を待たない楽観的更新のため）。
-  const [checkTargetRows, checkRecordRows] = await Promise.all([
+  // 箇条書き行ごとの確認記録（#2982）も同じ材料の一つとして返す。
+  const [checkTargetRows, checkRecordRows, checkLineRecordRows] = await Promise.all([
     db.releaseCheckTarget.findMany({
       where: { userId },
       select: { createdAt: true, repository: { select: { fullName: true } } },
@@ -45,6 +50,15 @@ async function handleGET() {
     db.releaseCheck.findMany({
       where: { userId },
       select: { tagName: true, checkedAt: true, repository: { select: { fullName: true } } },
+    }),
+    db.releaseCheckLine.findMany({
+      where: { userId },
+      select: {
+        tagName: true,
+        lineKey: true,
+        checkedAt: true,
+        repository: { select: { fullName: true } },
+      },
     }),
   ]);
 
@@ -55,6 +69,12 @@ async function handleGET() {
   const checkRecords: ReleaseCheckRecord[] = checkRecordRows.map((row) => ({
     repoFullName: row.repository.fullName,
     tagName: row.tagName,
+    checkedAt: row.checkedAt.toISOString(),
+  }));
+  const checkLineRecords: ReleaseCheckLineRecord[] = checkLineRecordRows.map((row) => ({
+    repoFullName: row.repository.fullName,
+    tagName: row.tagName,
+    lineKey: row.lineKey,
     checkedAt: row.checkedAt.toISOString(),
   }));
 
@@ -89,5 +109,9 @@ async function handleGET() {
     }),
   );
 
-  return NextResponse.json({ entries: mergeReleaseHistory(perRepository), checkRecords });
+  return NextResponse.json({
+    entries: mergeReleaseHistory(perRepository),
+    checkRecords,
+    checkLineRecords,
+  });
 }
