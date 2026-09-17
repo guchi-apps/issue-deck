@@ -228,7 +228,7 @@ echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています..."
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REFERENCE_LIST" \
-  >"$PROMPT_FILE" <<'PY'
+  "$LAUNCHER_SCRIPTS_DIR" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
@@ -238,7 +238,9 @@ import sys
     repository,
     session_dir,
     reference_list,
-) = sys.argv[1:6]
+    # 添付画像の取得スクリプト（#2967）の置き場。cwdはissue-deckとは限らないので絶対パスで渡す
+    scripts_dir,
+) = sys.argv[1:7]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -265,6 +267,7 @@ replacements = {
     "{{ISSUE_COMMENTS}}": comment_text,
     "{{REPOSITORY}}": repository,
     "{{SESSION_DIR}}": session_dir,
+    "{{ISSUE_DECK_SCRIPTS_DIR}}": scripts_dir,
     "{{REFERENCE_LIST}}": reference_list.rstrip("\n") or "(なし)",
     "{{REFERENCE_COUNT}}": str(len([l for l in reference_list.splitlines() if l.strip()])),
 }

@@ -105,10 +105,13 @@ export function parseSessionPlanRevision(value: unknown): string | null {
  *
  * **フックが渡すのは文字列だけで、画像そのものは渡らない。** 画像記法のURLをそのまま置くと、
  * Claudeは「URLが書いてある」ことしか読み取れず、貼った本人は見せたつもりで見せられていない。
- * 取りに行き方（`curl`で落として`Read`で開く）を添えて、確かめる手順まで書く。
- * `WebFetch`ではなく`curl`＋`Read`なのは、`WebFetch`がHTMLをMarkdown化して要約するツールで
- * **画像そのものをClaudeに見せられない**ため（`docs/multi-agent/dispatch.md`。#195で同じ理由から
- * 無人実行の許可ツールへ`Bash(curl:*)`と`Read`を足した）。
+ * 取りに行き方（取得スクリプトで落として`Read`で開く）を添えて、確かめる手順まで書く。
+ * `WebFetch`ではなくファイルへ落として`Read`なのは、`WebFetch`がHTMLをMarkdown化して要約する
+ * ツールで**画像そのものをClaudeに見せられない**ため（`docs/multi-agent/dispatch.md`・#195）。
+ *
+ * **画像の配信は認証必須**（#2967）なので素の`curl`では401になる。スクリプトはフックと同じ
+ * issue-deck本体の`scripts/`（`~/apps/issue-deck/scripts/`。#1274）に置いてあり、
+ * `dispatch.env`の鍵で取得する。worktreeが他リポジトリでも届くよう絶対パスで書く。
  *
  * 画像が無ければ**本文をそのまま返す**（要らない案内で理由を薄めない）。
  */
@@ -119,10 +122,11 @@ export function buildPlanRevisionReason(revisionText: string): string {
     "",
     "---",
     "上の修正には画像が添付されています（`![...](...)`）。**この文面に画像そのものは含まれていません。**",
-    "次のように取得して`Read`で開き、中身を確かめてから計画を練り直してください（認証は不要です）。",
+    "次のように取得し、出力されたパスを`Read`で開いて中身を確かめてから計画を練り直してください",
+    "（画像の配信は認証が必要なので、URLを直接`curl`・`WebFetch`しても読めません）。",
     "",
     "```bash",
-    "curl -sSL -o /tmp/plan-revision-1.png '<画像のURL>'",
+    "~/apps/issue-deck/scripts/fetch-issue-images.sh '<画像のURL>'",
     "```",
   ].join("\n");
 }

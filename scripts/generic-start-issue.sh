@@ -812,6 +812,8 @@ replacements = {
     "{{PLAN_COMMENT_NOTE}}": plan_comment_note,
     "{{PR_POLICY_INSTRUCTIONS}}": pr_policy_instructions,
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": shared_context_instructions,
+    # 添付画像の取得スクリプト（#2967）もissue-deck側にあり、このworktreeには無い
+    "{{ISSUE_DECK_SCRIPTS_DIR}}": scripts_dir,
 }
 result = template
 for placeholder, value in replacements.items():

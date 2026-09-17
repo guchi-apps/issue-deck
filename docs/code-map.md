@@ -3492,13 +3492,21 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
-- `GET /api/issues/images/[filename]` … **認証を要求しない。** GitHub.com側のIssue画面からも
-  画像を表示できるようにするため。代わりにUUID形式のファイル名だけを許可して、パストラバーサルを
-  防いでいる。**列挙できる受け口はログイン必須の`GET /api/issues/images`（後述）だけ**で、
-  未認証で辿り着けるのはUUIDを知っている画像に限られる。
+- `GET /api/issues/images/[filename]` … **ログイン中の本人か、共有シークレットを持つAIだけに返す**
+  （#2967）。以前は未認証で、GitHub.com側のIssue画面でも表示できたが、**URLが公開リポジトリの
+  本文に載るため誰でも中身を見られた。** 読めるのはログインCookie・`Bearer PROGRESS_REPORT_SECRET`
+  （無人実行）・`Bearer DISPATCH_SECRET`（サブPCのローカルセッション）の3つで、未認証なら
+  ファイルの有無にかかわらず401。GitHub.comは画像を匿名のプロキシ（camo）経由で取るので、
+  **GitHub上では代替テキストだけが出る**（意図どおり）。`Cache-Control`は`private`。
+  UUID形式のファイル名だけを許可してパストラバーサルを防ぐのは従来どおり。
+- **AIは`scripts/fetch-issue-images.sh`で鍵を付けて取得し、保存先を`Read`で開く。** 無人実行は
+  Claudeステップの前に`reusable-issue-dispatch.yml`がIssue本文・コメントの画像を
+  `/tmp/issue-images/`へ落としておく（**鍵をClaudeの環境へ渡さないため**。Claudeには`curl`が
+  許可されている）。スクリプトは**鍵を設定の`APP_BASE_URL`にしか送らず**、URLからはファイル名
+  だけを取り出す（本文に紛れた別ホストのURLへ鍵を送らない）。
 - `GET /api/issues/images`（一覧）・`DELETE /api/issues/images/[filename]`（削除）…
-  **どちらもログイン必須**（#2462）。配信だけが未認証なのは「UUIDを知らない人は画像へ辿り着け
-  ない」ことが前提なので、**一覧を未認証にするとその前提が崩れる**。ファイル名の検証は
+  **どちらもログイン必須**（#2462）。一覧はファイル名をまとめて明かし、削除は取り消せないため、
+  配信と違ってシークレットでは通さない。ファイル名の検証は
   [`lib/uploaded-images.ts`](../src/lib/uploaded-images.ts)の
   `UPLOADED_IMAGE_FILENAME_PATTERN`が唯一の正で、一覧・配信・削除の3つが同じものを読む
   （写すと片方だけ緩んだときに防波堤が崩れる）。**置き場のパスの正は

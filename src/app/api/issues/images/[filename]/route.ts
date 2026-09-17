@@ -4,8 +4,10 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { UPLOADED_IMAGE_DIR, UPLOADED_IMAGE_TRASH_DIR } from "@/lib/images/image-storage";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { authorizeProgressReport } from "@/lib/progress-report-auth";
 import { isUploadedImageFilename } from "@/lib/uploaded-images";
 
 const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
@@ -15,8 +17,32 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   webp: "image/webp",
 };
 
+/**
+ * 画像を読んでよい呼び出し元か（#2967）。
+ *
+ * **URLはGitHubのIssue本文に載り、公開リポジトリでは誰でも読める**ため、URLを知っていることを
+ * 読む資格にしない。読めるのは次の3つだけ。
+ *
+ * - ログイン中の本人（issue-deckの画面。同一オリジンなのでCookieが付く）
+ * - `Bearer PROGRESS_REPORT_SECRET`（無人実行。Claudeステップの前に事前取得する。
+ *   `.github/workflows/reusable-issue-dispatch.yml`）
+ * - `Bearer DISPATCH_SECRET`（サブPCのローカルセッション。`scripts/fetch-issue-image.sh`）
+ *
+ * GitHub.com上の表示は匿名のプロキシ（camo）経由で取りに来るため、ここで必ず弾かれる。
+ * それは意図どおりで、GitHub上では代替テキストだけが出る。
+ */
+async function canReadImage(request: NextRequest): Promise<boolean> {
+  const authorization = request.headers.get("authorization");
+  if (authorization) {
+    return (
+      authorizeProgressReport(authorization) === "ok" || authorizeDispatch(authorization) === "ok"
+    );
+  }
+  return (await getCurrentUser()) !== null;
+}
+
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ filename: string }> },
 ) {
   const { filename } = await params;
@@ -24,6 +50,11 @@ export async function GET(
   // アップロードAPI（route.ts）が発行するUUIDファイル名の形式のみ許可し、パストラバーサルを防ぐ。
   if (!isUploadedImageFilename(filename)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // ファイルの有無より先に判定する。未認証の相手に「そのUUIDが存在するか」も教えない。
+  if (!(await canReadImage(request))) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const extension = filename.slice(filename.lastIndexOf(".") + 1);
@@ -42,7 +73,8 @@ export async function GET(
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": CONTENT_TYPE_BY_EXTENSION[extension],
-      "Cache-Control": "public, max-age=31536000, immutable",
+      // 共有キャッシュ（CDN・プロキシ）に載せると、認証を通った1回の応答が他人へ配られる
+      "Cache-Control": "private, max-age=31536000, immutable",
     },
   });
 }
@@ -50,7 +82,7 @@ export async function GET(
 /**
  * 画像1枚を削除する（#2462）。設定の「画像」区分の×ボタンから呼ぶ。
  *
- * **配信のGETと違いログイン必須。** 消えるのはVPS上の実ファイルだけで、その画像を貼った
+ * **ログイン必須**（シークレットでは消せない。読めるのと消せるのは別の権限）。消えるのはVPS上の実ファイルだけで、その画像を貼った
  * Issue本文・コメントのMarkdownはGitHub側に残る（そこは画像が表示されなくなる）。
  * 取り消せないので、確認は画面側（`ImagesSection`）で取る。
  */

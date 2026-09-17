@@ -206,8 +206,11 @@ describe("並行状況と親子Issue（#1267）", () => {
     expect(prompt).toContain("gh pr list --repo guchi-apps/issue-deck");
   });
 
-  it("画像はWebFetchで読むよう促す", () => {
-    expect(buildImplementationPrompt(BASE)).toContain("`WebFetch`でそのURLを読んでください");
+  // #2967: 画像の配信は認証必須になったため、WebFetchではなく鍵付きの取得スクリプトを案内する
+  it("画像は取得スクリプトで落としてReadで開くよう促す", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).toContain('~/apps/issue-deck/scripts/fetch-issue-images.sh "<画像URL>"');
+    expect(prompt).not.toContain("{{ISSUE_DECK_SCRIPTS_DIR}}");
   });
 
   // #2499: 既定はこれまでどおり「作って引き渡して`11.local`を外す」
