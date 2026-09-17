@@ -207,6 +207,11 @@ Claudeに聞く）と**サブPCで実行する**（ローカルセッション�
   GET専用化）が理想だが、Bashの許可ルールはコマンド文字列の前方一致でしか絞り込めずフラグの
   順序次第で回避されてしまう。本ワークフローは既に`Bash(git:*)`・`Bash(gh:*)`など広い許可を与えており
   （信頼された運用者のIssueのみを想定した既存の前提を踏襲）、`curl`もその前提の範囲内として許可した。
+  **画像の取得そのものは#2967でClaudeの外へ出した。** 画像の配信が認証必須になり、鍵
+  （`PROGRESS_REPORT_SECRET`）が要るようになったため。鍵をClaudeステップの環境へ置くと上記の
+  `curl`で任意の宛先へ送れてしまうので、前段の「Issueに貼られた画像を取得しておく」ステップが
+  `scripts/fetch-issue-images.sh`で`/tmp/issue-images/`へ落とし、Claudeはそれを`Read`で開くだけに
+  した（[code-map.md](../code-map.md)「画像・アーティファクトはVPSのローカルディスクに置く」）。
 - git push（ラベル操作を含む）は、Workflows: Read and write を持つワークフロー用トークンで行う
   （issue #106）。既定の`GITHUB_TOKEN`は
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの

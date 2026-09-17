@@ -868,6 +868,16 @@ jobs:
           fi
           echo "FLEET_STATUS_SCRIPT=$FLEET" >> "$GITHUB_ENV"
 
+          # 添付画像の取得スクリプト(#2967)。無くても落とさない(画像を読めないだけで、計画・実装は進める)。
+          IMAGES="$ROOT/scripts/fetch-issue-images.sh"
+          if [ -x "$IMAGES" ]; then
+            echo "添付画像の取得スクリプト: $IMAGES"
+          else
+            echo "添付画像の取得スクリプト $IMAGES が無いため、画像の事前取得はスキップします"
+            IMAGES=""
+          fi
+          echo "FETCH_ISSUE_IMAGES_SCRIPT=$IMAGES" >> "$GITHUB_ENV"
+
       - name: triageの判定結果を引き継ぐ
         # 判定自体はtriageジョブで完了しているが、以降のステップは既存の記述をそのまま活かすため、
         # 同じ id: state として出力し直す(#651)。ファイル全体に101箇所ある steps.state.outputs.*
@@ -932,6 +942,30 @@ jobs:
             echo "issue_closed=$ISSUE_CLOSED"
             echo "branch_exists=$BRANCH_EXISTS"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Issueに貼られた画像を取得しておく
+        # issue-deckの画像配信は認証必須(#2967。URLが公開リポジトリの本文に載るため)。
+        # **鍵(PROGRESS_REPORT_SECRET)をClaudeステップの環境へ渡さないために、ここで先に取得する。**
+        # Claudeの許可ツールにはcurlがあり、鍵が見える環境で走らせると任意の宛先へ送れてしまう。
+        # 保存先は/tmp/issue-images/<ファイル名>で、各プロンプトの「画像が含まれる場合」がそこを読ませる。
+        # 取得に失敗してもジョブは落とさない(画像を読めないだけで、計画・実装は進められる)。
+        if: steps.state.outputs.mode != 'skip' && env.FETCH_ISSUE_IMAGES_SCRIPT != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          ISSUE_DECK_IMAGE_BASE_URL: ${{ vars.APP_BASE_URL }}
+          ISSUE_DECK_IMAGE_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          if [ -z "$ISSUE_DECK_IMAGE_BASE_URL" ] || [ -z "$ISSUE_DECK_IMAGE_SECRET" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、添付画像の取得をスキップします"
+            exit 0
+          fi
+          if ! TEXT="$(gh issue view "$ISSUE_NUMBER" --json body,comments --jq '.body, .comments[].body')"; then
+            echo "::warning::Issue #$ISSUE_NUMBER の本文を取得できなかったため、添付画像の取得をスキップします"
+            exit 0
+          fi
+          printf '%s\n' "$TEXT" | "$FETCH_ISSUE_IMAGES_SCRIPT" --out /tmp/issue-images - ||
+            echo "::warning::取得できなかった添付画像があります（fetch-issue-images.sh exit $?）"
 
       - name: claude-code-actionに渡すモデル指定を取得する
         id: claude_model
