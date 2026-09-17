@@ -360,6 +360,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     （[`image-annotation-dialog.tsx`](../src/components/dashboard/image-annotation-dialog.tsx)）へ
     移るときは、プレビューを閉じずに上へ重ねている。popstateは開いている全員に届くので、
     エディタを閉じるとプレビューも一緒に閉じる（積んだ1件ぶんは残るが、ズレは安全側）。
+  - **全画面の重ね表示を上へ重ねるときは、同じ`z-50`の層どうしの順番をDOM順に任せない**（#2983）。
+    iOS Safariはアニメーション（`animate-in`）や`backdrop-filter`（共通Dialogの暗幕の
+    `backdrop-blur-xs`）を持つ層を順番どおりに描かず、下のダイアログの暗幕が書き込み
+    エディタの上に乗って、タップも奪われた（PCのChromeでは再現しない）。エディタは
+    `z-60`に上げて中身にも背景色を持たせ、下のプレビューは`suspended`で描画だけを外す
+    （閉じると上の履歴の問題が起きるため、開いている扱いは保つ）。
 - **添付画像への書き込みは保存まで図形として持つ**（#2972。[`lib/annotation/shapes.ts`](../src/lib/annotation/shapes.ts)）。
   座標は元画像のピクセルで持ち、保存時に元の解像度で1枚へ描き出して新しい画像として
   アップロードし、添付を差し替える（元画像は未使用画像の整理で消える）。**色に意味は

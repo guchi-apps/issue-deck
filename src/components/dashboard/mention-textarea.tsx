@@ -477,6 +477,8 @@ function AttachmentStrip({
         // history.back()が書き込み側の積んだエントリを外してしまい、開いた直後に閉じる。
         // 書き込みを閉じたときの戻る操作でプレビューも一緒に閉じる（use-history-dismiss.ts）
         onAnnotate={disabled ? undefined : () => setAnnotating(preview)}
+        // 書き込み中は描画を外し、全画面の層を1枚にする（#2983）
+        suspended={annotating !== null}
       />
       <ImageAnnotationDialog
         image={annotating}
