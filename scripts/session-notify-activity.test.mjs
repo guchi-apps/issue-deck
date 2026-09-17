@@ -393,6 +393,31 @@ describe("session-notify.sh の許可待ち（#2971）", () => {
     expect(workingReports()).toHaveLength(1);
   });
 
+  // 計画レビュー指摘1。`PermissionRequest`を経ない入力待ち（質問・計画・クラシファイア拒否）は
+  // 記録が無いので、メインスレッドの`PostToolUse`で従来どおり外れる
+  it("質問の待ちは、拒否されて残った記録があっても回答で解く", async () => {
+    writeFileSync(path.join(workDir, "notify.env"), "SESSION_QUESTION_WAIT_SECONDS=0\n");
+    await runHook(permissionRequest("Bash", { command: "rm -rf x" }));
+    await runHook({
+      hook_event_name: "PreToolUse",
+      session_id: "sess-1",
+      tool_name: "AskUserQuestion",
+      tool_input: { questions: [{ question: "進めますか？", options: [] }] },
+    });
+    await runHook(postToolUse("AskUserQuestion", { questions: [], answers: { a: "b" } }));
+
+    expect(workingReports()).toHaveLength(1);
+  });
+
+  it("クラシファイア拒否で引き上げた後は、次のツール実行で解く", async () => {
+    const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+    expect(escalations()).toHaveLength(1);
+
+    await runHook(postToolUse("Bash", { command: "ls" }));
+    expect(workingReports()).toHaveLength(1);
+  });
+
   it("応答が終わったら記録を消し、次の質問に古い説明を添えない", async () => {
     await runHook(permissionRequest("Read", { file_path: "/tmp/b.png" }));
     await runHook(waitingPrompt);
