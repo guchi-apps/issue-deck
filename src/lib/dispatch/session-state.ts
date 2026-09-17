@@ -128,6 +128,31 @@ export function parseRemoteControlUrl(value: unknown): string | null {
 }
 
 /**
+ * 承認ダイアログで許可を求めているツール名として受け入れる形（#2971）。
+ *
+ * 組み込みのツール（`Read`・`Bash`…）とMCPのツール（`mcp__server__tool`）が通る文字だけを許す。
+ * 画面へそのまま出す値なので、形の違うものは捨てて「許可を待っている」ことだけを出す。
+ */
+export function parseSessionWaitingTool(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return /^[A-Za-z0-9_.:-]{1,100}$/.test(value) ? value : null;
+}
+
+/** 許可を求めている対象（ファイルのパス・ホスト名）の上限。サブPC側で切り詰める長さと同じ */
+export const SESSION_WAITING_TARGET_MAX_LENGTH = 300;
+
+/**
+ * 許可を求めている対象として受け入れる形（#2971）。**表示専用のテキスト**で、リンクにはしない。
+ * 制御文字を落とし、上限を超えるものは捨てる（切り詰めるとパスの別の場所に見えるため）。
+ */
+export function parseSessionWaitingTarget(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (text.length === 0 || text.length > SESSION_WAITING_TARGET_MAX_LENGTH) return null;
+  return text;
+}
+
+/**
  * セッションを自動で畳む理由（#1817）。**サブPCの`scripts/reap-sessions.sh`が判定した経路**で、
  * 値そのものはあちらの`hold_until_reap`が書く。
  *
@@ -409,6 +434,13 @@ export type DispatchSessionView = {
    */
   interruptedReason: SessionInterruptedReason | null;
   interruptedAt: string | null;
+  /**
+   * 承認ダイアログで許可を求めているツールと対象（#2971）。**`activity`が`WAITING_INPUT`の
+   * ときだけ埋まる**（質問の待ちでは`null`）。対象はファイルのパスかホスト名で、`Bash`では
+   * コマンドを運ばないため`null`。画面に出す形にするのは`describeSessionPermission`
+   */
+  waitingTool: string | null;
+  waitingTarget: string | null;
   /**
    * そのセッションが**実際に使っているモデル**のID（#2723）。例: `["claude-opus-5"]`。
    *

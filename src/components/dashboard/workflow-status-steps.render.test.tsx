@@ -45,6 +45,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     ...overrides,
   };

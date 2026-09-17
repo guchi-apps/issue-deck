@@ -9,6 +9,8 @@ import {
   parsePreviewUrl,
   parseRemoteControlUrl,
   parseSessionName,
+  parseSessionWaitingTarget,
+  parseSessionWaitingTool,
   resolveRepositoryFullName,
   resolveSessionState,
   resolveStartingActivityTransition,
@@ -511,5 +513,27 @@ describe("isRevivedSession（#1353）", () => {
   it("行がまだ無ければ偽（作る側で初期値が入る）", () => {
     expect(isRevivedSession(null, "ALIVE")).toBe(false);
     expect(isRevivedSession(undefined, "ALIVE")).toBe(false);
+  });
+});
+
+// #2971。画面へそのまま出す値なので、形の違うものは捨てる
+describe("parseSessionWaitingTool / parseSessionWaitingTarget", () => {
+  it("組み込みとMCPのツール名を通す", () => {
+    expect(parseSessionWaitingTool("Read")).toBe("Read");
+    expect(parseSessionWaitingTool("mcp__github__create_issue")).toBe("mcp__github__create_issue");
+  });
+
+  it("形の違うツール名は捨てる", () => {
+    expect(parseSessionWaitingTool("")).toBeNull();
+    expect(parseSessionWaitingTool("Read file")).toBeNull();
+    expect(parseSessionWaitingTool("x".repeat(101))).toBeNull();
+    expect(parseSessionWaitingTool(1)).toBeNull();
+  });
+
+  it("対象は制御文字を落とし、長すぎるものは捨てる", () => {
+    expect(parseSessionWaitingTarget("/tmp/a\nb.png")).toBe("/tmp/ab.png");
+    expect(parseSessionWaitingTarget("  ")).toBeNull();
+    expect(parseSessionWaitingTarget("a".repeat(301))).toBeNull();
+    expect(parseSessionWaitingTarget(null)).toBeNull();
   });
 });

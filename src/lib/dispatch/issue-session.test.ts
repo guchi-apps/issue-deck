@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   compactIssueSessionLabel,
+  describeSessionPermission,
   describeSessionReap,
   describeSessionStep,
   describeSessionRecovery,
@@ -41,6 +42,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     ...overrides,
   };
@@ -595,5 +598,48 @@ describe("resolveImplementationPosition（#2867）", () => {
     expect(
       resolveImplementationPosition(session({ activity: "WAITING_INPUT", step: "EDITING" })),
     ).toBe("editing");
+  });
+});
+
+// #2971。承認ダイアログで許可を待っているときは、質問の待ちと言い分ける
+describe("describeSessionPermission", () => {
+  it("許可待ちの見出しとツール・対象を出す", () => {
+    const waiting = session({
+      activity: "WAITING_INPUT",
+      waitingTool: "Read",
+      waitingTarget: "/tmp/issue-deck-images/a.png",
+    });
+    const s = summarizeIssueSession(waiting);
+    expect(s.tone).toBe("waiting");
+    expect(s.label).toBe("サブPCのセッションがアクセスの許可を待っています");
+    expect(s.shortLabel).toBe("許可を待っています");
+    expect(describeSessionPermission(waiting)).toEqual({
+      toolLabel: "Read（ファイルの読み取り）",
+      target: "/tmp/issue-deck-images/a.png",
+    });
+  });
+
+  it("MCPのツールはサーバー名を添え、知らないツールは名前だけにする", () => {
+    expect(
+      describeSessionPermission(
+        session({ activity: "WAITING_INPUT", waitingTool: "mcp__github__create_issue" }),
+      )?.toolLabel,
+    ).toBe("create_issue（MCP: github）");
+    expect(
+      describeSessionPermission(session({ activity: "WAITING_INPUT", waitingTool: "Skill" }))
+        ?.toolLabel,
+    ).toBe("Skill");
+  });
+
+  it("質問の待ち・終わったセッションでは出さない", () => {
+    expect(describeSessionPermission(session({ activity: "WAITING_INPUT" }))).toBeNull();
+    expect(
+      describeSessionPermission(
+        session({ state: "GONE", activity: "WAITING_INPUT", waitingTool: "Read" }),
+      ),
+    ).toBeNull();
+    expect(summarizeIssueSession(session({ activity: "WAITING_INPUT" })).shortLabel).toBe(
+      "入力を待っています",
+    );
   });
 });
