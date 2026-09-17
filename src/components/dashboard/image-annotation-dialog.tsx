@@ -104,7 +104,10 @@ export function ImageAnnotationDialog({
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/90" />
+        {/* 他の全画面の層（z-50）より明示的に上へ置く（#2983）。同じz-indexで重なると、
+            iOS Safariはアニメーションやbackdrop-filterを持つ層をDOMの順番どおりに描かず、
+            下のダイアログの暗幕が書き込み画面の上に乗って入力を塞いだ */}
+        <DialogPrimitive.Overlay className="fixed inset-0 z-60 bg-black/90" />
         {image && (
           <AnnotationEditor
             key={image.src}
@@ -468,7 +471,8 @@ function AnnotationEditor({
           cancelText();
         }
       }}
-      className="fixed inset-0 z-50 flex flex-col text-white outline-none"
+      // 背景色は中身にも持たせ、暗幕との描画順に見た目を左右させない（#2983）
+      className="fixed inset-0 z-60 flex flex-col bg-neutral-950 text-white outline-none"
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button

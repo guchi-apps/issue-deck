@@ -102,4 +102,26 @@ describe("ImagePreviewDialog", () => {
     expect(back).toHaveBeenCalledTimes(1);
     back.mockRestore();
   });
+  it("書き込み画面を重ねている間は描画を外すが、履歴エントリは片付けない（#2983）", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const image = { src: "/img.png", name: "img.png" };
+
+    const view = render(<ImagePreviewDialog image={image} onClose={() => {}} />);
+    expect(screen.getByAltText("img.png")).toBeTruthy();
+
+    view.rerender(<ImagePreviewDialog image={image} onClose={() => {}} suspended />);
+    expect(screen.queryByAltText("img.png")).toBeNull();
+    // 閉じると書き込み側の履歴エントリまで外れるため、表示を外すだけにする
+    expect(back).not.toHaveBeenCalled();
+
+    // 表示を外すのをやめたら再び描き、履歴は積み直さない（実際の画面では、書き込みを閉じた
+    // ときのhistory.back()でプレビューも一緒に閉じる）
+    view.rerender(<ImagePreviewDialog image={image} onClose={() => {}} />);
+    expect(screen.getByAltText("img.png")).toBeTruthy();
+    expect(pushState).toHaveBeenCalledTimes(1);
+
+    pushState.mockRestore();
+    back.mockRestore();
+  });
 });
