@@ -1,6 +1,7 @@
 import type { SessionQuestionRequestStatus } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { clearDispatchSessionWaitingTool } from "@/lib/dispatch/sessions";
 import {
   SESSION_QUESTION_DECIDED_VISIBLE_MS,
   SESSION_QUESTION_DECISION_STATUS,
@@ -54,6 +55,13 @@ export async function createSessionQuestionRequest(params: {
       questions: serializeSessionQuestions(params.questions),
       expiresAt: new Date(now.getTime() + params.waitSeconds * 1000),
     },
+  });
+  // 直前の許可待ちの説明を捨てる（#2985）。フックはホスト側の記録を同じ場面で消しているが、
+  // 質問の待ちは`activity`を動かさない（#2238）ため、消さないと画面に「質問に答える」と
+  // 「許可待ち」が並んで出る
+  await clearDispatchSessionWaitingTool({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
   });
   return toSessionQuestionRequestView(created);
 }

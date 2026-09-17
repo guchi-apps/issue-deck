@@ -143,6 +143,33 @@ export async function recordDispatchSessionActivity(params: {
 }
 
 /**
+ * 「何の許可を待っているか」の説明だけを消す（#2985）。
+ *
+ * **計画・質問の待ちに入るときに呼ぶ。** ホスト側の記録（`<セッション名>.permission`）は
+ * `session-notify.sh`が同じ場面で消しているのに、issue-deckのDBには消す相手がいなかった。
+ * 計画・質問の待ちは`activity`を動かさない（#2238）ため、直前の許可待ちで入った
+ * `activity=WAITING_INPUT`と`waitingTool`がそのまま残り、画面には「質問に答える」と
+ * 「許可待ち」が並んで出ていた（許可を拒否した後に質問したときも同じ形になる）。
+ *
+ * **`activity`には触らない。** 人を待っていること自体は変わらず、待っている理由が
+ * 許可から質問・計画へ移っただけなので、消すのは説明の2列だけにする。
+ */
+export async function clearDispatchSessionWaitingTool(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<{ updated: number }> {
+  const result = await db.dispatchSession.updateMany({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      state: "ALIVE",
+    },
+    data: { waitingTool: null, waitingTarget: null },
+  });
+  return { updated: result.count };
+}
+
+/**
  * 中断・停滞したまま止まっていると引き上げたことを記録する（#2886）。
  *
  * **これまで引き上げはIssueコメントと`00.check-user`にしか残っていなかった**（#1971・#2655・
