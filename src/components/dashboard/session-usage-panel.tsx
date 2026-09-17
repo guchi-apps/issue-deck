@@ -971,6 +971,11 @@ function IssueGroupRow({
               <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
               <GroupTokenBar totals={issue} maxTokens={maxTokens} />
             </div>
+            {issue.quotaPercent !== null && (
+              <p className="mt-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400">
+                直近5時間枠のおよそ{Math.round(issue.quotaPercent)}%
+              </p>
+            )}
           </div>
         </button>
         <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
@@ -1153,6 +1158,7 @@ export function SessionUsagePanel({
             isLoading={isLoading && !data}
             error={null}
             notConfigured={data?.planNotConfigured.claude ?? false}
+            quotaEstimate={data?.quotaEstimate ?? null}
           />
         </div>
         <div>
