@@ -1,0 +1,119 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  EMPTY_HISTORY,
+  commitShapes,
+  findShapeAt,
+  fontSizeFor,
+  isNegligibleShape,
+  moveShape,
+  redoShapes,
+  strokeWidthFor,
+  undoShapes,
+  type Shape,
+} from "@/lib/annotation/shapes";
+
+const arrow: Shape = {
+  id: "a",
+  type: "arrow",
+  color: "red",
+  width: 4,
+  from: { x: 0, y: 0 },
+  to: { x: 100, y: 100 },
+};
+const rect: Shape = {
+  id: "r",
+  type: "rect",
+  color: "blue",
+  width: 4,
+  from: { x: 200, y: 200 },
+  to: { x: 300, y: 260 },
+};
+const text: Shape = {
+  id: "t",
+  type: "text",
+  color: "green",
+  at: { x: 50, y: 300 },
+  text: "反映待ち",
+  fontSize: 20,
+  textWidth: 80,
+};
+
+describe("findShapeAt", () => {
+  it("斜めの矢印は線の近くだけで当たり、外接矩形の隅では当たらない", () => {
+    expect(findShapeAt([arrow], { x: 52, y: 50 }, 4)?.id).toBe("a");
+    expect(findShapeAt([arrow], { x: 90, y: 10 }, 4)).toBeNull();
+  });
+
+  it("四角は枠線で当たり、内側では当たらない（下の図形を掴めるように）", () => {
+    expect(findShapeAt([rect], { x: 250, y: 201 }, 4)?.id).toBe("r");
+    expect(findShapeAt([rect], { x: 250, y: 230 }, 4)).toBeNull();
+  });
+
+  it("文字は背景の箱の内側ならどこでも当たる", () => {
+    expect(findShapeAt([text], { x: 90, y: 310 }, 0)?.id).toBe("t");
+    expect(findShapeAt([text], { x: 200, y: 310 }, 0)).toBeNull();
+  });
+
+  it("重なっていれば後から描いた方を返す", () => {
+    const later: Shape = { ...arrow, id: "later" };
+    expect(findShapeAt([arrow, later], { x: 50, y: 50 }, 4)?.id).toBe("later");
+  });
+
+  it("ペンは折れ線のどの区間でも当たる", () => {
+    const pen: Shape = {
+      id: "p",
+      type: "pen",
+      color: "red",
+      width: 6,
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+      ],
+    };
+    expect(findShapeAt([pen], { x: 11, y: 6 }, 0)?.id).toBe("p");
+    expect(findShapeAt([pen], { x: 0, y: 10 }, 0)).toBeNull();
+  });
+});
+
+describe("moveShape", () => {
+  it("図形の種類ごとに座標をずらし、元の図形は変えない", () => {
+    expect(moveShape(arrow, 5, -5)).toMatchObject({ from: { x: 5, y: -5 }, to: { x: 105, y: 95 } });
+    expect(moveShape(text, 10, 10)).toMatchObject({ at: { x: 60, y: 310 } });
+    expect(arrow).toMatchObject({ from: { x: 0, y: 0 } });
+  });
+});
+
+describe("isNegligibleShape", () => {
+  it("押しただけの矢印と空の文字は描いたことにしない", () => {
+    expect(isNegligibleShape({ ...arrow, to: { x: 1, y: 1 } })).toBe(true);
+    expect(isNegligibleShape({ ...text, text: "  " })).toBe(true);
+    expect(isNegligibleShape(arrow)).toBe(false);
+  });
+});
+
+describe("大きさ", () => {
+  it("高解像度の画像ほど線と文字を太く・大きくする", () => {
+    expect(strokeWidthFor("medium", 3000, 2000)).toBeGreaterThan(strokeWidthFor("medium", 800, 600));
+    expect(fontSizeFor("medium", 3000, 2000)).toBeGreaterThan(fontSizeFor("medium", 800, 600));
+    expect(strokeWidthFor("thin", 800, 600)).toBeLessThan(strokeWidthFor("thick", 800, 600));
+  });
+});
+
+describe("履歴", () => {
+  it("元に戻す・やり直すで状態を行き来し、新しく描くとやり直しは消える", () => {
+    let h = commitShapes(EMPTY_HISTORY, [arrow]);
+    h = commitShapes(h, [arrow, rect]);
+    h = undoShapes(h);
+    expect(h.present).toEqual([arrow]);
+    h = redoShapes(h);
+    expect(h.present).toEqual([arrow, rect]);
+    h = undoShapes(undoShapes(h));
+    expect(h.present).toEqual([]);
+    expect(undoShapes(h)).toBe(h);
+    h = commitShapes(h, [text]);
+    expect(h.future).toEqual([]);
+    expect(redoShapes(h)).toBe(h);
+  });
+});

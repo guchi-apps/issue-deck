@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink, Pencil, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useHistoryDismiss } from "@/hooks/use-history-dismiss";
@@ -29,9 +29,15 @@ export type ImagePreviewTarget = {
 export function ImagePreviewDialog({
   image,
   onClose,
+  onAnnotate,
 }: {
   image: ImagePreviewTarget | null;
   onClose: () => void;
+  /**
+   * 渡すと下辺に「書き込む」を出す（#2972）。入力欄の添付サムネイルから開いたときだけ
+   * 渡す——投稿済みの画像は差し替える先が無いため。
+   */
+  onAnnotate?: () => void;
 }) {
   const open = image !== null;
   useHistoryDismiss(open, onClose);
@@ -75,6 +81,16 @@ export function ImagePreviewDialog({
 
           <div className="flex shrink-0 items-center justify-between gap-3 px-4 pt-1 pb-4 text-xs text-white/70">
             <span className="truncate">{image?.name}</span>
+            {image && onAnnotate && (
+              <button
+                type="button"
+                onClick={onAnnotate}
+                className="ml-auto inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-white px-3 text-xs font-semibold text-neutral-900 hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-white focus-visible:outline-none"
+              >
+                <Pencil className="size-3.5" />
+                書き込む
+              </button>
+            )}
             {image && (
               <a
                 href={image.src}
