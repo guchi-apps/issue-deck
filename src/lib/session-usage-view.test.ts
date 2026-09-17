@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildIssueQuotaPercents,
   buildPhaseBreakdown,
+  buildQuotaEstimate,
   buildSessionUsageSummary,
   formatUsageTokens,
   formatUsageUsd,
   isUsageKindInWorkFlow,
   sessionUsageCostSplit,
+  sessionUsageIssueKey,
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
   sessionUsageImplementationPhases,
@@ -541,6 +544,120 @@ describe("buildPhaseBreakdown", () => {
     expect(breakdown.plan.sessions).toBe(0);
     expect(breakdown.implementation.sessions).toBe(0);
     expect(breakdown.action.sessions).toBe(0);
+  });
+});
+
+describe("buildQuotaEstimate", () => {
+  // resetsAt=06:00Zの5時間前=01:00Z がウィンドウ開始。
+  const RESETS_AT_SEC = Date.parse("2026-08-30T06:00:00.000Z") / 1000;
+  const FIVE_HOURS_MS = 5 * 60 * 60_000;
+
+  it("ウィンドウ内のClaudeの合計費用を使用率(%)で割ったレートを返す", () => {
+    const estimate = buildQuotaEstimate({
+      entries: [
+        entry({ costUsd: 10, endedAt: "2026-08-30T02:00:00.000Z" }), // ウィンドウ内
+        entry({ costUsd: 5, endedAt: "2026-08-30T04:00:00.000Z" }), // ウィンドウ内
+        entry({ costUsd: 100, endedAt: "2026-08-30T00:30:00.000Z" }), // ウィンドウより前
+        entry({ costUsd: 1000, agent: "codex", endedAt: "2026-08-30T02:00:00.000Z" }), // Codexは対象外
+      ],
+      usedPercent: 30,
+      resetsAt: RESETS_AT_SEC,
+      windowDurationMs: FIVE_HOURS_MS,
+    });
+
+    expect(estimate).not.toBeNull();
+    expect(estimate?.windowCostUsd).toBe(15);
+    expect(estimate?.usdPerPercent).toBeCloseTo(15 / 30);
+    expect(estimate?.windowStartMs).toBe(Date.parse("2026-08-30T01:00:00.000Z"));
+  });
+
+  it("resetsAtが取得できていなければnull", () => {
+    expect(
+      buildQuotaEstimate({
+        entries: [entry()],
+        usedPercent: 30,
+        resetsAt: null,
+        windowDurationMs: FIVE_HOURS_MS,
+      }),
+    ).toBeNull();
+  });
+
+  it("使用率が0以下ならnull", () => {
+    expect(
+      buildQuotaEstimate({
+        entries: [entry()],
+        usedPercent: 0,
+        resetsAt: RESETS_AT_SEC,
+        windowDurationMs: FIVE_HOURS_MS,
+      }),
+    ).toBeNull();
+  });
+
+  it("ウィンドウ内にClaudeの活動が無ければnull", () => {
+    expect(
+      buildQuotaEstimate({
+        entries: [entry({ endedAt: "2026-08-30T00:00:00.000Z" })],
+        usedPercent: 30,
+        resetsAt: RESETS_AT_SEC,
+        windowDurationMs: FIVE_HOURS_MS,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("sessionUsageIssueKey", () => {
+  it("issueNumberがあればリポジトリ#Issue番号をキーにする", () => {
+    expect(sessionUsageIssueKey({ repository: "issue-deck", issueNumber: 2988, prNumber: null })).toBe(
+      "issue-deck#2988",
+    );
+  });
+
+  it("issueNumberが無ければprNumberを##で区切って使う（#2650）", () => {
+    expect(sessionUsageIssueKey({ repository: "issue-deck", issueNumber: null, prNumber: 42 })).toBe(
+      "issue-deck##42",
+    );
+  });
+});
+
+describe("buildIssueQuotaPercents", () => {
+  const quota = {
+    usdPerPercent: 2,
+    windowStartMs: Date.parse("2026-08-30T01:00:00.000Z"),
+    windowCostUsd: 60,
+  };
+
+  it("ウィンドウ内のIssue別費用をレートで割った%を、DB取得済みentries全体から計算する", () => {
+    const percents = buildIssueQuotaPercents(
+      [
+        entry({ issueNumber: 1, costUsd: 4, endedAt: "2026-08-30T02:00:00.000Z" }),
+        // 期間の外（前日）だがウィンドウ内。UsageIssue.entriesには乗らないが、按分には含めたい行。
+        entry({ issueNumber: 1, costUsd: 2, endedAt: "2026-08-30T01:30:00.000Z" }),
+        entry({ issueNumber: 2, costUsd: 3, endedAt: "2026-08-30T03:00:00.000Z" }),
+      ],
+      quota,
+    );
+    expect(percents.get("issue-deck#1")).toBe(3); // (4+2)/2
+    expect(percents.get("issue-deck#2")).toBe(1.5); // 3/2
+  });
+
+  it("換算レート自体が無ければ空のMap", () => {
+    expect(buildIssueQuotaPercents([entry()], null).size).toBe(0);
+  });
+
+  it("ウィンドウより前の活動しか無いIssueはキーに含まれない", () => {
+    const percents = buildIssueQuotaPercents(
+      [entry({ issueNumber: 1, costUsd: 4, endedAt: "2026-08-30T00:00:00.000Z" })],
+      quota,
+    );
+    expect(percents.has("issue-deck#1")).toBe(false);
+  });
+
+  it("Codexの活動は無視する", () => {
+    const percents = buildIssueQuotaPercents(
+      [entry({ agent: "codex", issueNumber: 1, costUsd: 4, endedAt: "2026-08-30T02:00:00.000Z" })],
+      quota,
+    );
+    expect(percents.has("issue-deck#1")).toBe(false);
   });
 });
 

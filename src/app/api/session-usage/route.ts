@@ -7,8 +7,12 @@ import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
+  buildIssueQuotaPercents,
+  buildQuotaEstimate,
   buildSessionUsageSummary,
+  sessionUsageIssueKey,
   sessionUsagePeriodStartMs,
+  type QuotaEstimate,
   type SessionUsageEntry,
   type UsageIssue,
 } from "@/lib/session-usage-view";
@@ -218,8 +222,27 @@ export async function GET(request: NextRequest) {
   const nowMs = Date.now();
   const periodStartMs = sessionUsagePeriodStartMs(nowMs, days);
 
+  // **プラン枠の取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、
+  // 取れない日があっても「メーターが出ないだけ」で済ませる（設定画面と同じ扱い）。
+  // **DB取得より先に呼ぶ**（#2988）。5時間枠のウィンドウ開始（`resetsAt - durationMs`）が
+  // 期間の開始（`periodStartMs`）より前へはみ出すことがあり（「1日」は日本時間0:00始まりなので、
+  // 深夜〜早朝に開くとウィンドウの前半が前日にかかる）、そのぶんも取得範囲へ含める必要がある。
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const [claudePlanUsage, codexPlanUsage] = await Promise.all([
+    token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
+    getLatestCodexUsage().catch(() => null),
+  ]);
+
+  const fiveHourWindow = claudePlanUsage?.windows.find((w) => w.key === "5h") ?? null;
+  const quotaWindowStartMs =
+    fiveHourWindow?.resetsAt !== null && fiveHourWindow?.resetsAt !== undefined
+      ? fiveHourWindow.resetsAt * 1000 - fiveHourWindow.durationMs
+      : null;
+  const fetchStartMs =
+    quotaWindowStartMs !== null ? Math.min(periodStartMs, quotaWindowStartMs) : periodStartMs;
+
   const rows = await db.sessionUsage.findMany({
-    where: { endedAt: { gte: new Date(periodStartMs) } },
+    where: { endedAt: { gte: new Date(fetchStartMs) } },
     orderBy: { endedAt: "desc" },
     select: {
       sessionId: true,
@@ -254,17 +277,12 @@ export async function GET(request: NextRequest) {
   });
 
   const entries = rows.map(toEntry);
+  // **「いちばん新しい報告」は期間内の行だけで見る。** `rows`は5時間枠のウィンドウぶん
+  // 期間の外まで広げて取得しているため、そのまま最大値を取ると期間の意味とずれる。
   const reportedAt = rows.reduce<Date | null>((latest, row) => {
+    if (row.endedAt.getTime() < periodStartMs) return latest;
     return latest === null || row.reportedAt > latest ? row.reportedAt : latest;
   }, null);
-
-  // **プラン枠の取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、
-  // 取れない日があっても「メーターが出ないだけ」で済ませる（設定画面と同じ扱い）。
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const [claudePlanUsage, codexPlanUsage] = await Promise.all([
-    token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
-    getLatestCodexUsage().catch(() => null),
-  ]);
 
   const summary = buildSessionUsageSummary({
     entries,
@@ -275,11 +293,27 @@ export async function GET(request: NextRequest) {
 
   await resolveIssueTitles(summary.byIssue);
 
+  // 5時間枠の実測換算（#2988）。`entries`は取得範囲を広げてあるぶん、期間の外（だがウィンドウ内）
+  // の行も含む——`buildQuotaEstimate`・`buildIssueQuotaPercents`はどちらもそれを前提にしている。
+  const quotaEstimate: QuotaEstimate | null = fiveHourWindow
+    ? buildQuotaEstimate({
+        entries,
+        usedPercent: fiveHourWindow.usedPercent,
+        resetsAt: fiveHourWindow.resetsAt,
+        windowDurationMs: fiveHourWindow.durationMs,
+      })
+    : null;
+  const quotaPercentByIssueKey = buildIssueQuotaPercents(entries, quotaEstimate);
+  for (const issue of summary.byIssue) {
+    issue.quotaPercent = quotaPercentByIssueKey.get(sessionUsageIssueKey(issue)) ?? null;
+  }
+
   return NextResponse.json(
     {
       ...summary,
       planUsage: { claude: claudePlanUsage, codex: codexPlanUsage },
       planNotConfigured: { claude: !token, codex: !codexPlanUsage },
+      quotaEstimate,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

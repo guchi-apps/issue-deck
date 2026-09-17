@@ -4,19 +4,46 @@ import { UsageMeter } from "@/components/dashboard/usage-meter";
 import type { ClaudeUsage } from "@/hooks/use-claude-usage";
 import { useNow } from "@/hooks/use-now";
 import { calcElapsedTimePercent, formatResetAt, formatResetSentence } from "@/lib/format-reset";
+import { formatUsageUsd, type QuotaEstimate } from "@/lib/session-usage-view";
 
 type ClaudeUsageCardProps = {
   data: ClaudeUsage | null;
   isLoading: boolean;
   error: string | null;
   notConfigured: boolean;
+  /**
+   * 5時間枠の実測換算レート（#2988）。求まらない・渡されない場合は注記を出さない
+   * （試験・「AI使用量」以外からの呼び出し向けにオプショナルにしてある）。
+   */
+  quotaEstimate?: QuotaEstimate | null;
 };
+
+/**
+ * 5時間枠メーター下の実測換算の注記（#2988）。**5時間枠にしか付けない**
+ * （週間枠は今回のIssueの対象外——issue-deckが把握する消費と週間枠の対応は精度がさらに落ちる）。
+ */
+function QuotaNote({ quotaEstimate }: { quotaEstimate: QuotaEstimate }) {
+  return (
+    <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-relaxed dark:border-amber-900 dark:bg-amber-950/40">
+      直近5時間の実測換算：
+      <span className="font-semibold text-amber-700 dark:text-amber-400">
+        1% ≈ {formatUsageUsd(quotaEstimate.usdPerPercent)}
+      </span>
+      （セッション・Actions合計 {formatUsageUsd(quotaEstimate.windowCostUsd)}）
+      <span className="mt-0.5 block text-muted-foreground">
+        同じ枠を消費する他の利用（issue-deck以外でのClaude利用等）は含まれないため、
+        下のIssue別の割合は実際より大きめに出る目安です
+      </span>
+    </div>
+  );
+}
 
 export function ClaudeUsageCard({
   data,
   isLoading,
   error,
   notConfigured,
+  quotaEstimate,
 }: ClaudeUsageCardProps) {
   const now = useNow();
 
@@ -50,6 +77,9 @@ export function ClaudeUsageCard({
                   resetTitle={hasReset ? formatResetAt(resetsAt, now) : null}
                   isBlocked={usageWindow.status !== null && usageWindow.status !== "allowed"}
                 />
+                {usageWindow.key === "5h" && quotaEstimate && (
+                  <QuotaNote quotaEstimate={quotaEstimate} />
+                )}
               </li>
             );
           })}

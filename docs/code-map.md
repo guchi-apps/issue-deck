@@ -537,6 +537,23 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **5時間枠1%あたりの実測換算（`buildQuotaEstimate`）は、#2666（`de23eb8e`）で廃止した
+    `buildQuotaScale`/`toQuotaPercent`と同じ計算式の再導入**（#2988）。「向きが違うから別物」
+    ではなく、計算自体（窓内の実測消費÷実測の使用率）は同一。**変えたのは2点だけ。**
+    (1) 当時は「5時間枠は1セッションで振り切れて物差しとして荒い」として週間枠を優先していたが、
+    今回のIssueの要求が5時間枠そのものの内訳のため、荒さ（＝1つのIssueが枠のほとんどを占める
+    ことがある）を許容してでも5時間枠に固定し、求まらなければ出さない（週間枠へフォールバック
+    しない）。(2) 当時除外していたGitHub Actionsも`CLAUDE_CODE_OAUTH_TOKEN`を共有し同じ枠を
+    消費するため按分に含め、計上漏れを1つ減らした。それでもissue-deck以外でのClaude利用・
+    アプリ内AI機能（`api-usage.ts`）は含まれないため、**Issue別の枠%は実際より大きめに出る**
+    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。画面の断り書きもこの向き）。
+  - **DB取得範囲は「期間の開始」と「5時間枠ウィンドウの開始」の早い方まで広げる**（#2988）。
+    `sessionUsagePeriodStartMs`が返す期間の開始は日本時間0:00始まりのため、深夜〜早朝に開くと
+    5時間枠の前半（`resetsAt - durationMs`）が前日にかかる。`buildSessionUsageSummary`は
+    従来どおり期間でしか集計しない（拡張ぶんは`endedAt`のフィルタで自然に落ちる）ため、
+    Issue別の枠%（`buildIssueQuotaPercents`）だけは`UsageIssue.entries`（期間内限定）ではなく
+    DB取得段階の`entries`（拡張済み）から計算し直す。グルーピングキーは`buildSessionUsageSummary`
+    内部と同じ`sessionUsageIssueKey`をexportして共有する。
 - **「Issue・PR別」の各行が持つタイトル（`UsageIssue.title`）は、`session-usage-view.ts`の
   純粋関数（`buildSessionUsageSummary`）では解決しない**（#2686）。この関数はDBを読まない方針
   （ファイル冒頭のコメント）を保つため常に`null`を返し、`/api/session-usage`の`resolveIssueTitles`が
