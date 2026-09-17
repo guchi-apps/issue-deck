@@ -22,6 +22,9 @@ import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.g
 /** 起動しないと決まらない値の差し替え文言。プレースホルダのまま残すと指示として読めてしまう */
 const PROVIDED_BY_SESSION = "（貼り付け先のセッションで用意してください）";
 
+/** issue-deck本体の`scripts/`（サブPCの本体チェックアウト）。貼り付け先がworktreeでも届くよう絶対パスで書く */
+const ISSUE_DECK_SCRIPTS_DIR_ON_SUBPC = "~/apps/issue-deck/scripts";
+
 /**
  * 並行状況（#1267）。**ブラウザからはgitもghも叩けない**ので、ここでは埋められない。
  * 黙って空にすると「並行しているものは無い」と読まれるため、取得していないことを明示する。
@@ -267,6 +270,9 @@ export function buildImplementationPrompt(params: {
       baseBranch: PROVIDED_BY_SESSION,
     }),
     "{{SHARED_CONTEXT_INSTRUCTIONS}}": sharedContextInstructions(repositoryFullName),
+    // 添付画像の取得スクリプト（#2967）。ランチャー経路は同期コピーの絶対パスを埋めるが、
+    // ブラウザからは分からないので、サブPCの本体チェックアウトの場所を案内する
+    "{{ISSUE_DECK_SCRIPTS_DIR}}": ISSUE_DECK_SCRIPTS_DIR_ON_SUBPC,
   };
 
   const filled = Object.entries(replacements).reduce(
