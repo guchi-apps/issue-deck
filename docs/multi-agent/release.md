@@ -325,6 +325,12 @@ origin/develop`・`git log origin/main..origin/develop`を確認し、semverに�
 major/minor/patchのいずれかと判断根拠を返す。判定ステップ自体が失敗した場合や、返り値が
 major/minor/patchのいずれでもない不正な場合はpatchにフォールバックする。
 
+判断根拠はバンプPR（`release/vX.Y.Z`）本文の`## バージョンの判断根拠`に載るが、このPRは
+CI通過後すぐ自動マージされて閉じる。develop→mainのリリースPRを作るrunが、マージ済みバンプPR
+本文から同じ節を`gh pr list --head release/v$DEV_VERSION --state merged`で取り出し、
+リリースPR本文にも引き継ぐ（#2978。mainへマージするかを人が判断する時点でも理由を読めるように
+するため）。バンプPRが見つからない場合（squashマージ・#2117以前のPR等）は節ごと出さない。
+
 ### 同じステップが利用者向けの文言も作る
 
 このステップは上げ幅の判定だけでなく、**同じ差分から利用者向けの文言を2種類**生成する。

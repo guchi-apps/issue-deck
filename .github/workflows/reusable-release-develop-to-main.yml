@@ -733,6 +733,39 @@ jobs:
       # (`✅ 問題なし`・`⚠️ 要確認`)だけでは「何を指摘されたのか」が読めず、mainへ出すかを
       # 決める場からdevelop向けPRのコメントを1件ずつ開くことになっていた。**レビューを回し
       # 直すわけではない**——既に走ったレビューの出力を、判断する場所へ持ってくるだけ。
+      - name: develop→mainのPRへ引き継ぐバージョンの判断根拠を取得する
+        # バンプPR（release/vX.Y.Z）本文の`## バージョンの判断根拠`は、CI通過後すぐ自動マージ
+        # されて閉じるため、mainへマージするかを人が判断する時点では読めなくなる（#2978）。
+        # マージ済みのバンプPR本文から同じ節を抽出し、develop→mainのPR本文にも引き継ぐ。
+        id: reason
+        if: steps.state.outputs.need_main_pr == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+        run: |
+          set -e
+
+          BUMP_BODY="$(gh pr list --base develop --head "release/v$DEV_VERSION" --state merged \
+            --json body --jq '.[0].body // empty' 2>/dev/null || true)"
+          REASON=""
+          if [ -n "$BUMP_BODY" ]; then
+            # `## バージョンの判断根拠`の見出しから次の`## `見出しまでを切り出す。空行を挟んだ
+            # 複数行の文章なので、対象issue一覧の引き継ぎ（上のステップ）と違い行の絞り込みはしない。
+            REASON="$(printf '%s\n' "$BUMP_BODY" | tr -d '\r' \
+              | awk '/^## バージョンの判断根拠[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f')"
+          fi
+          if [ -n "$REASON" ]; then
+            echo "バンプPR（release/v$DEV_VERSION）から判断根拠を引き継ぎました"
+          else
+            echo "バンプPRから判断根拠を引き継げなかったため、develop→mainのPR本文には節を出しません"
+          fi
+          {
+            echo "reason<<REASON_EOF"
+            echo "$REASON"
+            echo "REASON_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: 対象issueの検証結果を集計する
         if: steps.state.outputs.need_main_pr == 'true'
         # 記録は補助情報なので、集計に失敗してもリリースPRの作成は止めない
@@ -871,6 +904,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           FREEZE_SHA_INPUT: ${{ steps.issues.outputs.freeze_sha }}
+          REASON: ${{ steps.reason.outputs.reason }}
         run: |
           set -e
 
@@ -900,6 +934,13 @@ jobs:
             echo
             echo "リリースする内容は \`${RELEASE_BRANCH}\`（\`${FREEZE_SHA}\`）で凍結しています。このPRを作った後にdevelopへ入った変更は、このリリースには含まれず次のリリースへ回ります（#2117）。"
             echo
+            # バンプPR本文から引き継いだ判断根拠（#2978）。引き継げなかった場合は節ごと出さない。
+            if [ -n "$REASON" ]; then
+              echo "## バージョンの判断根拠"
+              echo
+              echo "$REASON"
+              echo
+            fi
             # **プルリクエストが主、issueは従**（#2774）。本番へ出る中身の単位はPRで、
             # issueはそのPRのブランチ名（`issue-<番号>`）から導出している。
             # 拾えなかった場合（squashマージ運用など）は節ごと出さない。
