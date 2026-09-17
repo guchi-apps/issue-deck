@@ -7,10 +7,33 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
+const DialogOverlayContext = React.createContext({
+  overlayDisabled: false,
+  setOverlayDisabled: (_disabled: boolean) => {},
+})
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  const [overlayDisabled, setOverlayDisabled] = React.useState(false)
+  const setDialogOverlayDisabled = React.useCallback((disabled: boolean) => {
+    setOverlayDisabled(disabled)
+  }, [])
+  const overlayContext = React.useMemo(
+    () => ({ overlayDisabled, setOverlayDisabled: setDialogOverlayDisabled }),
+    [overlayDisabled, setDialogOverlayDisabled],
+  )
+
+  return (
+    <DialogOverlayContext.Provider value={overlayContext}>
+      <DialogPrimitive.Root data-slot="dialog" {...props} />
+    </DialogOverlayContext.Provider>
+  )
+}
+
+/** 入れ子の全画面表示中だけ、親Dialogの暗幕を退避させる。 */
+function useDialogOverlayDisabled() {
+  return React.useContext(DialogOverlayContext).setOverlayDisabled
 }
 
 function DialogTrigger({
@@ -33,13 +56,17 @@ function DialogClose({
 
 function DialogOverlay({
   className,
+  disabled = false,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+}: React.ComponentProps<typeof DialogPrimitive.Overlay> & { disabled?: boolean }) {
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        disabled
+          ? "pointer-events-none bg-transparent"
+          : "bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
         className
       )}
       {...props}
@@ -55,9 +82,10 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const { overlayDisabled } = React.useContext(DialogOverlayContext)
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay disabled={overlayDisabled} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
@@ -176,4 +204,5 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  useDialogOverlayDisabled,
 }
