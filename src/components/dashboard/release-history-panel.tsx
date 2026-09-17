@@ -81,7 +81,7 @@ export function ReleaseHistoryPanel({
   ) => void;
   /** 箇条書き1行の確認チェックを切り替える（#2982） */
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineIndex: number },
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (
@@ -342,18 +342,15 @@ function ReleaseHistoryCard({
   /** 箇条書き行ごとの確認記録の索引（#2982） */
   checkLineIndex: ReleaseCheckLineIndex;
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineIndex: number },
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
 }) {
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
   const [expanded, setExpanded] = useState(false);
   const { lines: allLines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
-  // 折りたたみ時も「何行目か」を保ったまま切り出す（チェック済み行の対応がプレビュー/展開で
-  // ずれないように、必ず`allLines`側の添字を使う）
-  const allLinesWithIndex = allLines.map((line, lineIndex) => ({ line, lineIndex }));
-  const lines = expanded ? allLinesWithIndex : allLinesWithIndex.slice(0, PREVIEW_LINE_COUNT);
-  const hiddenCount = allLinesWithIndex.length - lines.length;
+  const lines = expanded ? allLines : allLines.slice(0, PREVIEW_LINE_COUNT);
+  const hiddenCount = allLines.length - lines.length;
   const target = { repoFullName: entry.repoFullName, tagName: entry.tagName };
 
   return (
@@ -408,25 +405,25 @@ function ReleaseHistoryCard({
 
       {lines.length > 0 && (
         <ul className="mt-1.5 flex flex-col gap-0.5">
-          {lines.map(({ line, lineIndex }) => {
-            const lineTarget = { ...target, lineIndex };
+          {lines.map((line) => {
+            const lineTarget = { ...target, lineKey: line.key };
             const lineChecked = resolveReleaseCheckLineStatus(lineTarget, checkLineIndex) !== null;
             return (
-              <li key={lineIndex} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
+              <li key={line.key} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
                 <Checkbox
                   checked={lineChecked}
-                  aria-label={`「${line}」を確認済みにする（参考）`}
+                  aria-label={`「${line.text}」を確認済みにする（参考）`}
                   onCheckedChange={(next) => onToggleCheckedLine(lineTarget, next === true)}
                   className="mt-0.5 size-3.5 shrink-0"
                 />
-                <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line}</span>
+                <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
               </li>
             );
           })}
         </ul>
       )}
 
-      {(hiddenCount > 0 || (expanded && allLinesWithIndex.length > PREVIEW_LINE_COUNT)) && (
+      {(hiddenCount > 0 || (expanded && allLines.length > PREVIEW_LINE_COUNT)) && (
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}

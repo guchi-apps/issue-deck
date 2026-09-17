@@ -32,7 +32,7 @@ type UseReleaseHistoryResult = {
   ) => Promise<void>;
   /** 箇条書き1行を確認済み／未確認へ切り替える（#2982） */
   setReleaseLineChecked: (
-    target: { repoFullName: string; tagName: string; lineIndex: number },
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => Promise<void>;
 };
@@ -119,7 +119,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
 
   const setReleaseLineChecked = useCallback(
     async (
-      target: { repoFullName: string; tagName: string; lineIndex: number },
+      target: { repoFullName: string; tagName: string; lineKey: string },
       checked: boolean,
     ) => {
       const previous = checkLineRecords;

@@ -55,7 +55,7 @@ async function handleGET() {
       where: { userId },
       select: {
         tagName: true,
-        lineIndex: true,
+        lineKey: true,
         checkedAt: true,
         repository: { select: { fullName: true } },
       },
@@ -74,7 +74,7 @@ async function handleGET() {
   const checkLineRecords: ReleaseCheckLineRecord[] = checkLineRecordRows.map((row) => ({
     repoFullName: row.repository.fullName,
     tagName: row.tagName,
-    lineIndex: row.lineIndex,
+    lineKey: row.lineKey,
     checkedAt: row.checkedAt.toISOString(),
   }));
 

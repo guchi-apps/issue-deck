@@ -227,24 +227,26 @@ model ReleaseCheck {
 // チェックしても`ReleaseCheck`は連動しない（Issue本文の要望どおり、全部チェック必須の
 // ような強制は持たせない）。
 //
-// **行の識別はインデックス。** 箇条書きは`extractReleaseHighlights`がリリース本文から
-// 都度抽出するため、DBには本文そのものを持たない。本文が編集されて行の順序が入れ替わると
-// チェック済みの対応がずれうるが、通常GitHub Releaseの本文は編集されないため許容する。
+// **行の識別は対応するPRの参照（`lineKey`）で、並び順の添字ではない。** 箇条書きは
+// `extractReleaseHighlights`がリリース本文から都度抽出するため、DBには本文そのものを
+// 持たない。添字だと、本文の絞り込み条件（バージョンバンプPRを除く等）が後から増減した
+// だけで過去分すべての対応がずれる（#2807で実際に増えた）。PRの参照は本文の並び替え・
+// 絞り込み条件の変更のどちらにも影響されない（計画レビューでの指摘を反映。#2982）。
 model ReleaseCheckLine {
   id           String @id @default(cuid())
   userId       String
   repositoryId String
   /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
   tagName      String
-  /** `extractReleaseHighlights`が返す配列の添字（0始まり） */
-  lineIndex    Int
+  /** `owner/repo#123`やPRのURL。`ReleaseHighlightLine.key`と同じ値 */
+  lineKey      String
 
   checkedAt DateTime @default(now())
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, repositoryId, tagName, lineIndex])
+  @@unique([userId, repositoryId, tagName, lineKey])
   @@index([repositoryId])
 }
 

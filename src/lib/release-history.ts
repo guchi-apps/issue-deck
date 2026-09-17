@@ -41,7 +41,7 @@ export function selectVisibleReleaseHistory(
   return entries.filter((entry) => !hiddenFullNames.has(entry.repoFullName));
 }
 
-const GENERATED_BULLET_LINE = /^\*\s+(.+?)\s+by\s+@\S+\s+in\s+\S+\s*$/;
+const GENERATED_BULLET_LINE = /^\*\s+(.+?)\s+by\s+@\S+\s+in\s+(\S+)\s*$/;
 
 /**
  * バージョンバンプだけを行うPRのタイトル。`reusable-release-develop-to-main.yml`が作る
@@ -52,6 +52,20 @@ const GENERATED_BULLET_LINE = /^\*\s+(.+?)\s+by\s+@\S+\s+in\s+\S+\s*$/;
  * ハイライトの抽出時点で取り除く。
  */
 const VERSION_BUMP_TITLE = /^v\d+(?:\.\d+){2}を(?:mainへ)?リリースする$/;
+
+/** 抽出した箇条書き1行。`key`は#2982の行チェックが識別子として使う（下記コメント参照） */
+export type ReleaseHighlightLine = {
+  text: string;
+  /**
+   * 対応するPRの参照（`owner/repo#123`やPRのURL）。取り出せない手書きの行では
+   * `text`自体をフォールバックに使う。
+   *
+   * **並び順の添字ではなくこちらを識別子にする。** `text`は`VERSION_BUMP_TITLE`のような
+   * 絞り込みが後から増減しうる（#2807で実際に増えた）ため、絞り込みの前後で同じ行の
+   * 添字がずれる。PRの参照は本文の並び替え・絞り込み条件の変更のどちらにも影響されない。
+   */
+  key: string;
+};
 
 /**
  * GitHubが自動生成したリリース本文（`generate_release_notes: true`）から、
@@ -67,7 +81,7 @@ const VERSION_BUMP_TITLE = /^v\d+(?:\.\d+){2}を(?:mainへ)?リリースする$/
 export function extractReleaseHighlights(
   body: string | null,
   max = 3,
-): { lines: string[]; moreCount: number } {
+): { lines: ReleaseHighlightLine[]; moreCount: number } {
   if (!body) return { lines: [], moreCount: 0 };
 
   const bulletLines = body
@@ -76,10 +90,12 @@ export function extractReleaseHighlights(
     .filter((line) => line.startsWith("* "))
     .map((line) => {
       const match = GENERATED_BULLET_LINE.exec(line);
-      return (match ? match[1] : line.slice(2)).trim();
+      const text = (match ? match[1] : line.slice(2)).trim();
+      const key = match ? match[2] : text;
+      return { text, key };
     })
-    .filter((line) => line.length > 0)
-    .filter((line) => !VERSION_BUMP_TITLE.test(line));
+    .filter((item) => item.text.length > 0)
+    .filter((item) => !VERSION_BUMP_TITLE.test(item.text));
 
   return {
     lines: bulletLines.slice(0, max),

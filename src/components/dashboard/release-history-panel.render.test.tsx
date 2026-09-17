@@ -135,7 +135,7 @@ describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2
 
     fireEvent.click(checkbox);
     expect(onToggleCheckedLine).toHaveBeenCalledWith(
-      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineIndex: 0 },
+      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineKey: "guchi-apps/issue-deck#2919" },
       true,
     );
   });
@@ -146,7 +146,7 @@ describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2
         {
           repoFullName: "guchi-apps/issue-deck",
           tagName: "v4.78.0",
-          lineIndex: 0,
+          lineKey: "guchi-apps/issue-deck#2919",
           checkedAt: "2026-09-07T12:00:00.000Z",
         },
       ],
@@ -158,7 +158,7 @@ describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2
 
     fireEvent.click(checkbox);
     expect(onToggleCheckedLine).toHaveBeenCalledWith(
-      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineIndex: 0 },
+      { repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", lineKey: "guchi-apps/issue-deck#2919" },
       false,
     );
   });

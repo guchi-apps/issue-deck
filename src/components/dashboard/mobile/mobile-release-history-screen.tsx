@@ -46,7 +46,7 @@ export function MobileReleaseHistoryScreen({
   checkRepositoryOptions: ReleaseCheckRepositoryOption[];
   onToggleChecked: (target: { repoFullName: string; tagName: string }, checked: boolean) => void;
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineIndex: number },
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (repository: { id: string; fullName: string }, targeted: boolean) => void;

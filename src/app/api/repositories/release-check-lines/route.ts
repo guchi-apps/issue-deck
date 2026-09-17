@@ -13,6 +13,8 @@ import { db } from "@/lib/db";
 
 /** GitHubのref名の上限に合わせた保険。長すぎる値でDBのカラムを溢れさせない */
 const MAX_TAG_NAME_LENGTH = 255;
+/** `lineKey`カラムの型（`VARCHAR(191)`。ユニーク制約に含まれるためPrismaが自動でこの長さにする） */
+const MAX_LINE_KEY_LENGTH = 191;
 
 async function resolveRepository(userId: string, repoFullName: string) {
   return db.repository.findFirst({
@@ -24,19 +26,19 @@ async function resolveRepository(userId: string, repoFullName: string) {
   });
 }
 
-type ParsedBody = { repoFullName: string; tagName: string; lineIndex: number };
+type ParsedBody = { repoFullName: string; tagName: string; lineKey: string };
 
 async function parseBody(request: NextRequest): Promise<ParsedBody | null> {
   const payload = await request.json().catch(() => null);
   const repoFullName = payload?.repoFullName;
   const tagName = payload?.tagName;
-  const lineIndex = payload?.lineIndex;
+  const lineKey = payload?.lineKey;
 
   if (typeof repoFullName !== "string" || !repoFullName) return null;
   if (typeof tagName !== "string" || !tagName || tagName.length > MAX_TAG_NAME_LENGTH) return null;
-  if (typeof lineIndex !== "number" || !Number.isInteger(lineIndex) || lineIndex < 0) return null;
+  if (typeof lineKey !== "string" || !lineKey || lineKey.length > MAX_LINE_KEY_LENGTH) return null;
 
-  return { repoFullName, tagName, lineIndex };
+  return { repoFullName, tagName, lineKey };
 }
 
 export async function POST(request: NextRequest) {
@@ -57,14 +59,14 @@ export async function POST(request: NextRequest) {
 
   const checked = await db.releaseCheckLine.upsert({
     where: {
-      userId_repositoryId_tagName_lineIndex: {
+      userId_repositoryId_tagName_lineKey: {
         userId,
         repositoryId: repository.id,
         tagName: body.tagName,
-        lineIndex: body.lineIndex,
+        lineKey: body.lineKey,
       },
     },
-    create: { userId, repositoryId: repository.id, tagName: body.tagName, lineIndex: body.lineIndex },
+    create: { userId, repositoryId: repository.id, tagName: body.tagName, lineKey: body.lineKey },
     update: {},
   });
 
@@ -88,7 +90,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   await db.releaseCheckLine.deleteMany({
-    where: { userId, repositoryId: repository.id, tagName: body.tagName, lineIndex: body.lineIndex },
+    where: { userId, repositoryId: repository.id, tagName: body.tagName, lineKey: body.lineKey },
   });
 
   return NextResponse.json({ ok: true });

@@ -202,7 +202,11 @@ describe("applyReleaseCheckToggle", () => {
 });
 
 describe("resolveReleaseCheckLineStatus / buildReleaseCheckLineIndex（#2982）", () => {
-  const lineTarget = { repoFullName: "guchi-apps/issue-deck", tagName: "v1.0.0", lineIndex: 0 };
+  const lineTarget = {
+    repoFullName: "guchi-apps/issue-deck",
+    tagName: "v1.0.0",
+    lineKey: "guchi-apps/issue-deck#100",
+  };
 
   it("記録が無ければ未確認（null）を返す", () => {
     const index = buildReleaseCheckLineIndex([]);
@@ -216,12 +220,18 @@ describe("resolveReleaseCheckLineStatus / buildReleaseCheckLineIndex（#2982）"
 
   it("記録は同じリリースの別の行へ波及しない", () => {
     const index = buildReleaseCheckLineIndex([{ ...lineTarget, checkedAt: "2026-09-03T10:00:00Z" }]);
-    expect(resolveReleaseCheckLineStatus({ ...lineTarget, lineIndex: 1 }, index)).toBeNull();
+    expect(
+      resolveReleaseCheckLineStatus({ ...lineTarget, lineKey: "guchi-apps/issue-deck#101" }, index),
+    ).toBeNull();
   });
 });
 
 describe("applyReleaseCheckLineToggle（#2982）", () => {
-  const target = { repoFullName: "guchi-apps/issue-deck", tagName: "v1.0.0", lineIndex: 0 };
+  const target = {
+    repoFullName: "guchi-apps/issue-deck",
+    tagName: "v1.0.0",
+    lineKey: "guchi-apps/issue-deck#100",
+  };
   const now = new Date("2026-09-06T12:00:00Z");
 
   it("確認済みにすると記録が1件増える", () => {
@@ -236,7 +246,7 @@ describe("applyReleaseCheckLineToggle（#2982）", () => {
   });
 
   it("他の行の記録は残す", () => {
-    const other = { ...target, lineIndex: 1, checkedAt: "2026-09-01T10:00:00Z" };
+    const other = { ...target, lineKey: "guchi-apps/issue-deck#101", checkedAt: "2026-09-01T10:00:00Z" };
     expect(applyReleaseCheckLineToggle([other], target, true, now)).toEqual([
       other,
       { ...target, checkedAt: "2026-09-06T12:00:00.000Z" },
