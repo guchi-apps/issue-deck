@@ -6,6 +6,13 @@ import { callClaudeMessages } from "@/lib/claude/request";
  */
 const CACHE_TTL_MS = 5 * 60_000;
 
+/**
+ * 応答を待つ上限。**pollerの巡回（`POST /api/dispatch/claim`）から同期で呼ばれる**ため、
+ * api.anthropic.comが詰まったときにジョブの払い出しを止めない長さにする（#2995の計画レビュー）。
+ * `max_tokens: 1`の探りなので、通常は1秒未満で返る。
+ */
+const PROBE_TIMEOUT_MS = 10_000;
+
 /** ヘッダを得るためだけに送る最小の推論リクエスト。 */
 const PROBE_REQUEST_BODY = {
   max_tokens: 1,
@@ -122,6 +129,7 @@ export async function fetchClaudeUsage(token: string): Promise<ClaudeUsage> {
       feature: "plan_usage",
       token,
       body: PROBE_REQUEST_BODY,
+      timeoutMs: PROBE_TIMEOUT_MS,
     });
     res = response;
   } catch (cause) {
