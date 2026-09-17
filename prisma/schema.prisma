@@ -1211,6 +1211,17 @@ model DispatchSession {
   interruptedReason String?
   interruptedAt     DateTime?
 
+  // 承認ダイアログで人に許可を求めているツールと、その対象（#2971）。
+  //
+  // **`activity`がWAITING_INPUTのときだけ埋まる**（それ以外の様子を受け取ったら消す）。
+  // `Notification / permission_prompt`は「ダイアログが出た」ことしか言わないため、直前の
+  // `PermissionRequest`フックでサブPC側が控えた値を、入力待ちの報告に添えて運ぶ。
+  //
+  // 対象はファイルのパス（Read・Edit等）かURLのホスト名（WebFetch）だけで、**コマンドの本文は
+  // 運ばない**（`Bash`は対象なし。`step`と同じ線）。質問の待ちでは両方ともNULL
+  waitingTool   String? @db.VarChar(100)
+  waitingTarget String? @db.Text
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

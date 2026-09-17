@@ -805,6 +805,10 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   # 汎用ランチャーで起こす他リポジトリには`.claude/settings.json`が無いため。二重に呼ばれても
   # 上記の間引きで報告は入力待ち1回につき最大1回に収まる
   # （docs/multi-agent/session-notify.md「`PostToolUse`だけはworktree側の…」）。
+  # **`PermissionRequest`は承認ダイアログを出す直前に飛ぶ**（#2971）。何の許可を求めたかを
+  # ホストへ控えるだけで何も出力しない（出力すると許可判定として読まれる）。控えた指紋で、
+  # 上の`PostToolUse`が「許可を求めたツールそのものが走った」ときだけ入力待ちを解く。
+  #
   # **`ExitPlanMode`・`AskUserQuestion`のフックだけタイムアウトを延ばす**（#2061・#2189）。
   # あの2つは計画・質問を送ったあと、issue-deckの画面からの返事を
   # `SESSION_PLAN_WAIT_SECONDS`／`SESSION_QUESTION_WAIT_SECONDS`秒（既定30分・上限1時間）
@@ -858,6 +862,9 @@ ${HOOK_PERMISSIONS_JSON:+$HOOK_PERMISSIONS_JSON
       }
     ],
     "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
+    ],
+    "PermissionRequest": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
     ],
     "SessionStart": [

@@ -237,6 +237,20 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     };
   }
   if (session.activity === "WAITING_INPUT") {
+    // 承認ダイアログで許可を求めているとき（#2971）。**質問・計画の待ちと言い分ける**——
+    // 「入力を待っています」だけだと、開いた先で何を押せばよいのか（選択肢を選ぶのか、
+    // アクセスを許可するのか）が分からない。何の許可かは`describeSessionPermission`が出す
+    if (describeSessionPermission(session)) {
+      return {
+        ...base,
+        at: session.activityAt ?? session.lastReportedAt,
+        tone: "waiting",
+        label: `${formatDispatchHostName(session.host)}のセッションがアクセスの許可を待っています`,
+        shortLabel: "許可を待っています",
+        detail:
+          "許可するか拒否するかをClaude Codeアプリで選んでください。選ぶと確認待ちは自動で外れます",
+      };
+    }
     return {
       ...base,
       at: session.activityAt ?? session.lastReportedAt,
@@ -291,6 +305,52 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
     shortLabel: "実行中",
     detail: null,
   };
+}
+
+/** 許可を求めているツールの説明（#2971）。名前は画面でもそのまま出し、何をするツールかを添える */
+const PERMISSION_TOOL_TEXT: Record<string, string> = {
+  Read: "ファイルの読み取り",
+  Write: "ファイルの作成",
+  Edit: "ファイルの編集",
+  MultiEdit: "ファイルの編集",
+  NotebookEdit: "ノートブックの編集",
+  Glob: "ファイルの検索",
+  Grep: "ファイルの検索",
+  Bash: "コマンドの実行",
+  WebFetch: "Webページの取得",
+  WebSearch: "Web検索",
+};
+
+export type SessionPermissionNotice = {
+  /** 例: `Read（ファイルの読み取り）`・`create_issue（MCP: github）` */
+  toolLabel: string;
+  /**
+   * 何に対する操作か（ファイルのパス・ホスト名）。**コマンドは運ばれてこない**ので、
+   * `Bash`では常に`null`（`toolLabel`の「コマンドの実行」だけを出す）
+   */
+  target: string | null;
+};
+
+/**
+ * 承認ダイアログで何の許可を待っているか（#2971）。**生きていて入力待ちのセッションでだけ返る。**
+ *
+ * `Notification / permission_prompt`は「ダイアログが出た」ことしか言わないため、サブPC側が
+ * 直前の`PermissionRequest`フックで控えたツール名と対象を、入力待ちの報告に添えて運んでくる。
+ * 届いていなければ（質問の待ち・古いサブPC）`null`で、従来どおり「入力を待っています」と出す。
+ */
+export function describeSessionPermission(
+  session: DispatchSessionView,
+): SessionPermissionNotice | null {
+  if (session.state !== "ALIVE" || session.activity !== "WAITING_INPUT") return null;
+  const tool = session.waitingTool;
+  if (!tool) return null;
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
+  const toolLabel = mcp
+    ? `${mcp[2]}（MCP: ${mcp[1]}）`
+    : PERMISSION_TOOL_TEXT[tool]
+      ? `${tool}（${PERMISSION_TOOL_TEXT[tool]}）`
+      : tool;
+  return { toolLabel, target: session.waitingTarget };
 }
 
 /**

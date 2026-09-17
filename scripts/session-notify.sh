@@ -214,6 +214,24 @@ if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_read_event >/dev/
 fi
 export NOTIFY_LAST_STATE_EVENT
 
+# 人に許可を求めているツールの記録（#2971。`lib/session-state.sh`の`.permission`）。
+# 4行で、時刻・指紋・ツール名・表示用の対象。**`PostToolUse`を「人が答えた」と読んでよいかの
+# 照合**と、入力待ちの報告に「何の許可か」を添えるのに使う。
+NOTIFY_PERMISSION_AT=""
+NOTIFY_PERMISSION_FINGERPRINT=""
+NOTIFY_PERMISSION_TOOL=""
+NOTIFY_PERMISSION_TARGET=""
+if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_read_permission >/dev/null 2>&1; then
+  {
+    IFS= read -r NOTIFY_PERMISSION_AT
+    IFS= read -r NOTIFY_PERMISSION_FINGERPRINT
+    IFS= read -r NOTIFY_PERMISSION_TOOL
+    IFS= read -r NOTIFY_PERMISSION_TARGET
+  } < <(session_state_read_permission "$NOTIFY_TMUX_SESSION" 2>/dev/null || true)
+  [[ "$NOTIFY_PERMISSION_AT" =~ ^[0-9]+$ ]] || NOTIFY_PERMISSION_AT=""
+fi
+export NOTIFY_PERMISSION_FINGERPRINT
+
 # クラシファイアの拒否での引き上げを、すでに1回送ったか（#2844）。**判定材料は下の判定へ渡す。**
 # 送ったかどうかの記録はホスト側（`lib/session-state.sh`の`.classifier-block`）が持ち、
 # 印があるあいだは同じ停止で二重に引き上げない。
@@ -292,6 +310,101 @@ name_codex_thread() {
 # ため、issue-deckへも送らない（python3もHTTPも起こさない）。
 if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"SessionStart\" ]]; then
   record_codex_thread
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# 人に許可を求めたツールを記録する（#2971）
+#
+# **`PermissionRequest`は承認ダイアログを出す直前に飛ぶ**（`Notification / permission_prompt`は
+# ダイアログが出たことしか言わず、何の許可かを持たない）。ここで控えた指紋を、人が答えた後の
+# `PostToolUse`と照合する。**照合しないと誤って外す**——間引き（#1357）は「直前が入力待ちか」
+# しか見ないため、裏で動くサブエージェントのツールや、並行して呼んだ別のツールが終わっただけで
+# 「答えた」ことになり、asset-manager #451では付与の3秒後に`00.check-user`が外れて、付与から
+# 3分待つPush通知が鳴らないまま19分放置された。
+#
+# **指紋はツール名と「何に対する操作か」を表す1項目だけから作る**（全入力ではない）。
+# `PostToolUse`の`tool_input`は既定値が補われて許可を求めたときと一致しないことがあり、
+# 食い違うと`Stop`まで外れなくなる。サブエージェントの呼び出しは`agent_id`も混ぜる。
+#
+# **表示用の対象にコマンドの本文は入れない**（`Bash`は空にする。シークレットを含みうる行を
+# 画面とDBへ出さない。#2705の`step`と同じ線）。URLはホスト名だけにする。
+#
+# `ExitPlanMode`・`AskUserQuestion`は記録しない。あの2つは`PreToolUse`で入力待ちを記録済みで、
+# 回答の`answers`が入力へ足されるため指紋が一致しない。
+#
+# **何も出力しない。** 出力するとClaude Codeが許可判定として読むため、ダイアログは従来どおり出す。
+# ---------------------------------------------------------------------------
+describe_permission_tool() {
+  HOOK_JSON="$HOOK_JSON" python3 - <<'PY' 2>/dev/null || true
+import hashlib
+import json
+import os
+import re
+import sys
+from urllib.parse import urlparse
+
+try:
+    hook = json.loads(os.environ.get("HOOK_JSON", ""))
+except Exception:
+    sys.exit(0)
+if not isinstance(hook, dict):
+    sys.exit(0)
+tool = hook.get("tool_name")
+if not isinstance(tool, str) or not tool or tool in ("ExitPlanMode", "AskUserQuestion"):
+    sys.exit(0)
+tool_input = hook.get("tool_input")
+if not isinstance(tool_input, dict):
+    tool_input = {}
+
+
+def first_text(*keys):
+    for key in keys:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+# 照合に使う項目（コマンドはここにだけ使い、表示にも記録にもそのままは出さない）
+key = first_text("file_path", "notebook_path", "command", "url", "path", "pattern", "query")
+agent = hook.get("agent_id") if isinstance(hook.get("agent_id"), str) else ""
+fingerprint = hashlib.sha256(
+    json.dumps([agent, tool, key], ensure_ascii=False).encode("utf-8")
+).hexdigest()[:32]
+
+target = ""
+if tool in ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit"):
+    target = first_text("file_path", "notebook_path")
+elif tool in ("Glob", "Grep"):
+    target = first_text("path")
+elif tool == "WebFetch":
+    try:
+        target = urlparse(first_text("url")).hostname or ""
+    except ValueError:
+        target = ""
+# 改行・制御文字は1行1項目の記録を壊すので落とし、長さも抑える（issue-deck側の上限と同じ）
+target = re.sub(r"[\x00-\x1f\x7f]", "", target)[:300]
+tool = re.sub(r"[\x00-\x1f\x7f]", "", tool)[:100]
+print(fingerprint)
+print(tool)
+print(target)
+PY
+}
+
+if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PermissionRequest\" ]]; then
+  if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_write_permission >/dev/null 2>&1; then
+    {
+      IFS= read -r _permission_fingerprint
+      IFS= read -r _permission_tool
+      IFS= read -r _permission_target
+    } < <(describe_permission_tool)
+    if [[ -n "${_permission_fingerprint:-}" && -n "${_permission_tool:-}" ]]; then
+      session_state_write_permission "$NOTIFY_TMUX_SESSION" "$_permission_fingerprint" \
+        "$_permission_tool" "${_permission_target:-}" ||
+        echo "session-notify: 許可を求めたツールを記録できませんでした（実装は続行します）" >&2
+    fi
+  fi
   exit 0
 fi
 
@@ -487,6 +600,16 @@ if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\
   [[ "$NOTIFY_LAST_STATE_EVENT" != "permission_prompt" ]]; then
   exit 0
 fi
+
+# 入力待ちの直後の`PostToolUse`は、許可を求めたツールそのものかを照合する（#2971）。
+# **指紋を作るのは記録があるときだけ**（記録が無い経路は、python側がサブエージェントの
+# 呼び出しだけを捨てる）。
+NOTIFY_HOOK_PERMISSION_FINGERPRINT=""
+if [[ -n "$NOTIFY_PERMISSION_FINGERPRINT" ]] &&
+  [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PostToolUse\" ]]; then
+  NOTIFY_HOOK_PERMISSION_FINGERPRINT="$(describe_permission_tool | sed -n '1p')"
+fi
+export NOTIFY_HOOK_PERMISSION_FINGERPRINT
 
 # ---------------------------------------------------------------------------
 # 報告するかどうかの判定とpayloadの組み立て
@@ -771,8 +894,21 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
 # ときだけ**扱う（シェル側が状態ファイルから読んで渡してくる）。1回報告すれば状態ファイルは
 # `working`になるので、続くツールの実行では自然に止まる。
 #
+# **許可を求めたツールそのものが走ったときだけ**「答えた」と読む（#2971）。裏で動くサブエージェントの
+# ツールや、並行して呼んだ別のツールが終わっただけで外すと、人が見る前に確認待ちが消える。
+# 記録（`PermissionRequest`）があれば指紋で照合し、無ければ（質問・計画の待ち、`PermissionRequest`が
+# 飛ばなかった版）サブエージェントの呼び出し（`agent_id`付き）だけを捨てる。照合に外れて
+# 外し損ねても、応答終了（`Stop`）が保険として外す。
 if event == "PostToolUse":
     if os.environ.get("NOTIFY_LAST_STATE_EVENT", "") != "permission_prompt":
+        print("skip")
+        sys.exit(0)
+    pending = os.environ.get("NOTIFY_PERMISSION_FINGERPRINT", "")
+    if pending:
+        if os.environ.get("NOTIFY_HOOK_PERMISSION_FINGERPRINT", "") != pending:
+            print("skip")
+            sys.exit(0)
+    elif hook.get("agent_id"):
         print("skip")
         sys.exit(0)
     print("report", "working", "working")
@@ -1305,6 +1441,9 @@ if [[ "$decision" == "plan" ]]; then
   if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_record_event >/dev/null 2>&1; then
     session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
       echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+    # 前に拒否された許可待ちの記録が残っていると、答えた直後の`PostToolUse`が照合に外れる（#2971）
+    declare -F session_state_clear_permission >/dev/null 2>&1 &&
+      session_state_clear_permission "$NOTIFY_TMUX_SESSION"
   fi
 
   # 画面からの返事を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
@@ -1326,6 +1465,9 @@ if [[ "$decision" == "question" ]]; then
   if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_record_event >/dev/null 2>&1; then
     session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
       echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+    # 前に拒否された許可待ちの記録が残っていると、答えた直後の`PostToolUse`が照合に外れる（#2971）
+    declare -F session_state_clear_permission >/dev/null 2>&1 &&
+      session_state_clear_permission "$NOTIFY_TMUX_SESSION"
   fi
 
   # 画面からの回答を待つ。**決まらなければ何も出力せずに終える**（端末に従来どおりの
@@ -1426,6 +1568,22 @@ if [[ -n "$STATE_EVENT" && -n "$NOTIFY_TMUX_SESSION" ]] &&
     echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
 fi
 
+# 許可待ちの記録（#2971）。**答えた（`working`）・応答が終わった（`Stop`）なら消す。**
+# 入力待ちに入ったときは、直前の`PermissionRequest`が控えた「何の許可か」を報告へ添える。
+# 質問の選択フォームでも同じ`Notification`が飛ぶため、**記録が新しいときだけ**使う
+# （拒否されたまま残った古い記録を、次の質問の説明として出さない）。
+WAITING_TOOL=""
+WAITING_TARGET=""
+PERMISSION_FRESH_SECONDS=120
+if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_clear_permission >/dev/null 2>&1; then
+  session_state_clear_permission "$NOTIFY_TMUX_SESSION"
+elif [[ "$STATE_EVENT" == "permission_prompt" && -n "$NOTIFY_PERMISSION_AT" ]] &&
+  (($(date +%s) - NOTIFY_PERMISSION_AT <= PERMISSION_FRESH_SECONDS)); then
+  WAITING_TOOL="$NOTIFY_PERMISSION_TOOL"
+  WAITING_TARGET="$NOTIFY_PERMISSION_TARGET"
+fi
+
 # issue-deckの画面へ様子を渡す（#1264）。**#2280でSignalyへの通知を消してからは、これが
 # 承認待ちであることを人へ届ける唯一の経路**（画面の表示とPush通知の両方がこの報告から出る）。
 #
@@ -1440,16 +1598,22 @@ report_activity_to_issue_deck() {
   local body
   body="$(ACTIVITY="$ACTIVITY" REMOTE_URL="$REMOTE_URL" REPO_SLUG="$REPO_SLUG" \
     ISSUE_NUMBER="$ISSUE_NUMBER" CHECK_USER_RESOLVED="$CHECK_USER_RESOLVED" \
-    CHECK_USER_REQUESTED="$CHECK_USER_REQUESTED" python3 -c '
+    CHECK_USER_REQUESTED="$CHECK_USER_REQUESTED" WAITING_TOOL="$WAITING_TOOL" \
+    WAITING_TARGET="$WAITING_TARGET" python3 -c '
 import json, os
-print(json.dumps({
+body = {
     "repository": os.environ["REPO_SLUG"],
     "issue": int(os.environ["ISSUE_NUMBER"]),
     "activity": os.environ["ACTIVITY"],
     "remoteControlUrl": os.environ.get("REMOTE_URL") or None,
     "planResolved": os.environ.get("CHECK_USER_RESOLVED") == "1",
     "checkUserRequested": os.environ.get("CHECK_USER_REQUESTED") == "1",
-}))' 2>/dev/null || true)"
+}
+# 何の許可を待っているか（#2971）。**許可待ちのときだけ載せる**（質問の待ちでは付けない）
+if os.environ.get("WAITING_TOOL"):
+    body["waitingTool"] = os.environ["WAITING_TOOL"]
+    body["waitingTarget"] = os.environ.get("WAITING_TARGET") or None
+print(json.dumps(body))' 2>/dev/null || true)"
 
   if ! post_to_issue_deck /api/dispatch/sessions/activity "$body"; then
     echo "session-notify: issue-deckへの様子の報告に失敗しました（実装は続行します）" >&2

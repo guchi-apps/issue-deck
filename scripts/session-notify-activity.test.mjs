@@ -293,3 +293,115 @@ describe("session-notify.sh の様子の報告", () => {
     expect(activityReports()).toHaveLength(1);
   });
 });
+
+// #2971。許可待ちの直後の`PostToolUse`を「人が答えた」と読んでよいのは、**許可を求めたツール
+// そのものが走ったときだけ**。asset-manager #451では、裏で動くExploreサブエージェントの
+// ツール実行で付与の3秒後に`00.check-user`が外れ、付与から3分待つPush通知が鳴らなかった。
+describe("session-notify.sh の許可待ち（#2971）", () => {
+  const permissionRequest = (toolName, toolInput, extra = {}) => ({
+    hook_event_name: "PermissionRequest",
+    session_id: "sess-1",
+    tool_name: toolName,
+    tool_input: toolInput,
+    ...extra,
+  });
+  const postToolUse = (toolName, toolInput, extra = {}) => ({
+    hook_event_name: "PostToolUse",
+    session_id: "sess-1",
+    tool_name: toolName,
+    tool_input: toolInput,
+    tool_response: {},
+    tool_use_id: "toolu_1",
+    ...extra,
+  });
+  const waitingPrompt = {
+    hook_event_name: "Notification",
+    notification_type: "permission_prompt",
+    session_id: "sess-1",
+  };
+  const workingReports = () =>
+    activityReports().filter((entry) => entry.body?.activity === "working");
+
+  it("許可待ちの報告に、ツール名と対象を添える", async () => {
+    await runHook(permissionRequest("Read", { file_path: "/tmp/issue-deck-images/a.png" }));
+    expect(received).toEqual([]);
+    await runHook(waitingPrompt);
+
+    expect(activityReports()).toHaveLength(1);
+    expect(activityReports()[0].body).toMatchObject({
+      activity: "waiting_input",
+      checkUserRequested: true,
+      waitingTool: "Read",
+      waitingTarget: "/tmp/issue-deck-images/a.png",
+    });
+  });
+
+  it("Bashのコマンド本文とURLのパスは載せない", async () => {
+    await runHook(permissionRequest("Bash", { command: "curl -H 'Authorization: secret-token' x" }));
+    await runHook(waitingPrompt);
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1" });
+    await runHook(permissionRequest("WebFetch", { url: "https://example.com/path?token=abc" }));
+    await runHook(waitingPrompt);
+
+    const waits = activityReports().filter((entry) => entry.body?.activity === "waiting_input");
+    expect(waits[0].body).toMatchObject({ waitingTool: "Bash", waitingTarget: null });
+    expect(JSON.stringify(received)).not.toContain("secret-token");
+    expect(waits[1].body).toMatchObject({ waitingTool: "WebFetch", waitingTarget: "example.com" });
+    expect(JSON.stringify(received)).not.toContain("token=abc");
+  });
+
+  it("記録の無い質問の待ちには、ツール名を添えない", async () => {
+    await runHook(waitingPrompt);
+    expect(activityReports()[0].body).not.toHaveProperty("waitingTool");
+  });
+
+  it("サブエージェントや別のツールの完了では、入力待ちを解かない", async () => {
+    await runHook(permissionRequest("Read", { file_path: "/tmp/b.png" }));
+    await runHook(waitingPrompt);
+    await runHook(postToolUse("Grep", { pattern: "x", path: "/repo" }, { agent_id: "a1" }));
+    await runHook(postToolUse("Read", { file_path: "/tmp/a.png" }));
+    await runHook(postToolUse("Read", { file_path: "/tmp/b.png" }, { agent_id: "a1" }));
+
+    expect(workingReports()).toEqual([]);
+  });
+
+  it("許可を求めたツールそのものが走ったら、入力待ちを解く", async () => {
+    await runHook(permissionRequest("Read", { file_path: "/tmp/b.png" }));
+    await runHook(waitingPrompt);
+    await runHook(postToolUse("Read", { file_path: "/tmp/b.png", offset: 1 }));
+
+    expect(workingReports()).toHaveLength(1);
+    expect(workingReports()[0].body).toMatchObject({ planResolved: true });
+  });
+
+  it("サブエージェントが求めた許可は、そのサブエージェントの実行で解く", async () => {
+    await runHook(permissionRequest("Bash", { command: "ls" }, { agent_id: "a1" }));
+    await runHook(waitingPrompt);
+    await runHook(postToolUse("Bash", { command: "ls" }));
+    expect(workingReports()).toEqual([]);
+
+    await runHook(postToolUse("Bash", { command: "ls" }, { agent_id: "a1" }));
+    expect(workingReports()).toHaveLength(1);
+  });
+
+  it("記録が無い入力待ちでは、サブエージェントの実行だけを捨てる", async () => {
+    await runHook(waitingPrompt);
+    await runHook(postToolUse("Grep", { pattern: "x" }, { agent_id: "a1" }));
+    expect(workingReports()).toEqual([]);
+
+    await runHook(postToolUse("AskUserQuestion", { questions: [] }));
+    expect(workingReports()).toHaveLength(1);
+  });
+
+  it("応答が終わったら記録を消し、次の質問に古い説明を添えない", async () => {
+    await runHook(permissionRequest("Read", { file_path: "/tmp/b.png" }));
+    await runHook(waitingPrompt);
+    await runHook({ hook_event_name: "Stop", session_id: "sess-1" });
+    await runHook(waitingPrompt);
+    await runHook(postToolUse("AskUserQuestion", { questions: [] }));
+
+    const waits = activityReports().filter((entry) => entry.body?.activity === "waiting_input");
+    expect(waits[1].body).not.toHaveProperty("waitingTool");
+    expect(workingReports()).toHaveLength(1);
+  });
+});

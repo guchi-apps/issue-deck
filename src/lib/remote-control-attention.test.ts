@@ -26,6 +26,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     firstSeenAt: "2026-08-18T00:00:00Z",
     lastReportedAt: "2026-08-18T00:00:00Z",

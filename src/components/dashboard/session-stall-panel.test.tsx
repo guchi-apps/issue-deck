@@ -34,6 +34,8 @@ function makeSession(overrides: Partial<DispatchSessionView> = {}): DispatchSess
     stepSeenAt: null,
     interruptedReason: "api_error",
     interruptedAt: INTERRUPTED_AT,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     ...overrides,
   };

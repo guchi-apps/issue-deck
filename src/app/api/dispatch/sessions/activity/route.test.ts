@@ -66,9 +66,43 @@ describe("POST /api/dispatch/sessions/activity", () => {
       activity: "WAITING_INPUT",
       remoteControlUrl: "https://claude.ai/code/s_1",
       previewUrl: null,
+      waitingTool: null,
+      waitingTarget: null,
     });
     expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
     expect(requestSessionCheckUser).not.toHaveBeenCalled();
+  });
+
+  // #2971。何の許可を待っているか。**形が違えば捨てるだけで、報告そのものは受け付ける**
+  it("許可を待っているツールと対象を記録する", async () => {
+    const res = await POST(
+      postRequest(
+        {
+          ...target,
+          activity: "waiting_input",
+          waitingTool: "Read",
+          waitingTarget: "/tmp/issue-deck-images/a.png",
+        },
+        "Bearer secret-value",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(recordDispatchSessionActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ waitingTool: "Read", waitingTarget: "/tmp/issue-deck-images/a.png" }),
+    );
+  });
+
+  it("形の違うツール名は対象ごと捨てる", async () => {
+    const res = await POST(
+      postRequest(
+        { ...target, activity: "waiting_input", waitingTool: "<b>x</b>", waitingTarget: "/tmp/a" },
+        "Bearer secret-value",
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(recordDispatchSessionActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ waitingTool: null, waitingTarget: null }),
+    );
   });
 
   // #1357。承認に答えて作業へ戻ったことの報告。**印が無ければ`00.check-user`には触らない**
@@ -84,6 +118,8 @@ describe("POST /api/dispatch/sessions/activity", () => {
       activity: "WORKING",
       remoteControlUrl: null,
       previewUrl: null,
+      waitingTool: null,
+      waitingTarget: null,
     });
     expect(resolveSessionPlanCheckUser).not.toHaveBeenCalled();
   });

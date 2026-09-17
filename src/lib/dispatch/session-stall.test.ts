@@ -35,6 +35,8 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     stepSeenAt: null,
     interruptedReason: "api_error",
     interruptedAt: INTERRUPTED_AT,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
     ...overrides,
   };

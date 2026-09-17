@@ -443,6 +443,8 @@ describe("MobileHomeScreen（#1690）", () => {
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
         },
       ],

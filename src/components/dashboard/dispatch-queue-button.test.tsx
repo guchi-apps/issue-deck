@@ -454,6 +454,8 @@ describe("DispatchQueueButton のホスト表示", () => {
     stepSeenAt: null,
     interruptedReason: null,
     interruptedAt: null,
+    waitingTool: null,
+    waitingTarget: null,
     models: [],
       ...overrides,
     };

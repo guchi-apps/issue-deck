@@ -261,6 +261,44 @@ session_state_clear_classifier_block() {
   return 0
 }
 
+# 人に許可を求めているツールの記録（#2971）。
+#
+# **`PostToolUse`を「人が答えた」と読んでよいかの照合に使う。** 間引き（#1357）は「直前が
+# 入力待ちか」しか見ておらず、裏で動くサブエージェントのツールや、並行して呼んだ別のツールが
+# 終わっただけで`00.check-user`を外していた（asset-manager #451で付与の3秒後に外れ、
+# 付与から3分待つPush通知が鳴らなかった）。
+#
+# 中身は4行: 記録した時刻（epoch）・指紋・ツール名・表示用の対象（無ければ空行）。
+# **書くのは`session-notify.sh`の`PermissionRequest`だけ**で、指紋と対象の作り方もそちらが持つ。
+# 対象にコマンドの本文は入らない（`Bash`は空）。
+session_state_permission_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.permission' "$(session_state_dir)" "$1"
+}
+
+session_state_write_permission() {
+  local session="$1" fingerprint="$2" tool="$3" target="${4:-}" file content
+  file="$(session_state_permission_file "$session")" || return 1
+  printf -v content '%s\n%s\n%s\n%s\n' "$(date +%s)" "$fingerprint" "$tool" "$target"
+  session_state_write_file "$file" "$content"
+}
+
+# 記録をそのまま標準出力へ出す（無ければ何も出さない）
+session_state_read_permission() {
+  local session="$1" file
+  file="$(session_state_permission_file "$session" 2>/dev/null)" || return 0
+  [[ -f "$file" ]] || return 0
+  cat "$file" 2>/dev/null || true
+}
+
+session_state_clear_permission() {
+  local session="$1" file
+  file="$(session_state_permission_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Codexのセッションへ`codex queue`で追加指示を差し込み、次回の起動を`codex resume`で
 # 再開するための宛先（#2519・#2520）。
 #
@@ -546,6 +584,7 @@ session_state_remove() {
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
     "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_classifier_block_file "$session" 2>/dev/null || true)" \
+    "$(session_state_permission_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
     rm -f "$file" 2>/dev/null || true
