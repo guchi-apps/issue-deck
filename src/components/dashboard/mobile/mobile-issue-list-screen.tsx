@@ -42,7 +42,7 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
-import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
+import type { ScheduledRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -98,9 +98,9 @@ type MobileIssueListScreenProps = {
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
   /**
-   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   * 予約実行に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
    */
-  nightlyRunQueued?: NightlyRunQueuedMap;
+  nightlyRunQueued?: ScheduledRunQueuedMap;
   /** 保留中で`pinned`から外したもの（#2398）。`IssueList`へそのまま渡す */
   snoozedPinned?: { count: number; entries: SnoozeEntry[]; section: ReactNode };
   /**

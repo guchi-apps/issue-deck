@@ -6,7 +6,7 @@ import { IssueList } from "@/components/dashboard/issue-list";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
-import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
+import { selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import { buildSnoozeMap } from "@/lib/snooze";
 import type { CodeReviewSummary } from "@/lib/github/code-review";
 import type { Issue, IssueLabel } from "@/types/issue";
@@ -1154,7 +1154,7 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
 
 describe("IssueListの夜間実行の目印（#2866）", () => {
   function marksFor(enabled: boolean) {
-    return selectNightlyRunQueuedMarks({
+    return selectScheduledRunQueuedMarks({
       settings: { enabled, startHour: 1 },
       window: {
         nightKey: "2026-09-07",
@@ -1174,6 +1174,7 @@ describe("IssueListの夜間実行の目印（#2866）", () => {
           agent: "claude",
           claudeModel: null,
           optionLabels: [],
+          kind: "NIGHTLY",
           status: "QUEUED",
           nightKey: null,
           createdAt: "2026-09-07T10:00:00.000Z",
@@ -1182,6 +1183,12 @@ describe("IssueListの夜間実行の目印（#2866）", () => {
         },
       ],
       results: null,
+      nextWindow: {
+        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+        window: null,
+        queued: [],
+        results: null,
+      },
     });
   }
 

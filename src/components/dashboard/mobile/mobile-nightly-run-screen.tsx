@@ -8,7 +8,7 @@ import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import type { NightlyRunHandle } from "@/hooks/use-nightly-run";
 
 /**
- * スマホの「夜間実行」画面（#2772）。
+ * スマホの「予約実行」画面（#2772・#2995）。
  *
  * PC版と**同じ`NightlyRunPanel`**を`compact`で縮めて使う（`mobile-release-history-screen.tsx`と
  * 同じ切り分け）。ボトムナビのタブは持たず、ホームのメニューからのドリルダウンにする。
@@ -33,7 +33,7 @@ export function MobileNightlyRunScreen({
         >
           <ChevronLeft className="size-5" />
         </button>
-        <h1 className="flex-1 text-base font-semibold">夜間実行</h1>
+        <h1 className="flex-1 text-base font-semibold">予約実行</h1>
         <MobileDispatchStatusButton />
         <MobileNotificationButton />
       </header>

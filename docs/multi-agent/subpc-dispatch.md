@@ -2511,8 +2511,9 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 
 「今夜の夜間実行」に積んだIssueを、開始時刻（既定01:00・日本時間）から3時間の窓のあいだに
 サブPCへ順に起動する。起動後はいつもの経路（PR作成→自動レビュー→developへ自動マージ）で
-「本番反映待ち」まで進み、朝は左メニュー「夜間実行」（スマホはホームのメニュー）で結果を5つ
-（本番反映待ち／確認が必要／実行中／止まった／見送り）に分けて見る。
+「本番反映待ち」まで進み、朝は左メニュー「予約実行」（スマホはホームのメニュー）で結果を5つ
+（本番反映待ち／確認が必要／実行中／止まった／見送り）に分けて見る。**左メニューの名前は
+「予約実行」で、次枠実行（#2995）と同じ画面に並ぶ。**
 
 ```text
 「実装を開始」→ 実行先「今夜の夜間実行」   POST /api/nightly-run（NightlyRunEntry・QUEUED）
@@ -2568,13 +2569,57 @@ DispatchJob（QUEUED） → 同じ巡回の払い出しで起動 → 以降は�
 
 | 場所 | 役割 |
 |---|---|
-| `src/lib/nightly-run.ts`（＋test） | 窓・見送り・結果5分類・画面の目印（#2866）の純関数。`now`は引数で受ける |
-| `src/components/dashboard/nightly-run-marks.tsx` | 一覧のチップ・詳細の注釈（#2866）。PC・スマホで共有する |
+| `src/lib/nightly-run.ts`（＋test） | 夜の窓・見送り・結果5分類・画面の目印（#2866）の純関数。`now`は引数で受ける |
+| `src/lib/next-window-run.ts`（＋test） | 5時間枠の窓・起動の可否・画面の文言の純関数（#2995）。`now`と枠の状態を引数で受ける |
+| `src/components/dashboard/nightly-run-marks.tsx` | 一覧のチップ・詳細の注釈（#2866・#2995）。PC・スマホで共有する |
 | `src/lib/nightly-run-db.ts` | 設定の読み出し・Pushの保留対象（DBだけ。GitHub Appの認証を引きずらない） |
-| `src/lib/nightly-run-launch.ts` | 予定をジョブへ変換する（claimから呼ぶ） |
-| `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ） |
-| `src/app/api/nightly-run/` | 一覧・積む・取り消す・設定 |
-| `src/components/dashboard/nightly-run-panel.tsx` | 画面（PC・スマホ共用） |
+| `src/lib/next-window-run-db.ts` | 次枠実行の設定・5時間枠の取得・直前の起動時刻（#2995） |
+| `src/lib/nightly-run-launch.ts` | 予定をジョブへ変換する（claimから呼ぶ）。1件ぶんの手順は2種類で共有する |
+| `src/lib/next-window-run-launch.ts` | 次枠実行の窓の判定と1件ずつの起動（#2995） |
+| `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ＋枠の取得） |
+| `src/app/api/nightly-run/` | 一覧・積む（`kind`）・取り消す・設定 |
+| `src/components/dashboard/nightly-run-panel.tsx` | 画面（PC・スマホ共用・2つの節） |
+
+### 次枠実行（#2995）
+
+「次の5時間枠」に積んだIssueを、**いまのClaudeプラン枠の残りが設定ぶん（既定60分）を切ってから**
+サブPCへ1件ずつ起動する。夜間実行と同じ表（`NightlyRunEntry`。`kind`で分ける）・同じAPI・
+同じ画面（左メニュー「予約実行」）を使い、違うのは**窓の決まり方だけ**。
+
+```text
+「実装を開始」→ 実行先「次の5時間枠」   POST /api/nightly-run（kind=next-window・QUEUED）
+  ↓ 枠の残りが60分を切る（または枠が動いていない）
+poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries（そのホストの予定だけ）
+  → launchScheduledRunEntry（実ラベル判定 → enqueueDispatchJob → 11.local）→ 1件で打ち切り
+```
+
+- **なぜ枠の終わり際なのか。** Claudeのプラン枠は時計の境界ではなく**最初のリクエストで始まる**
+  （実測で`anthropic-ratelimit-unified-5h-reset`は`08:40`のような半端な時刻を返す）。何も
+  走らせていない時間帯には枠そのものが存在せず、その5時間ぶんの割り当ては誰にも使われないまま
+  消える。終わり際に起こすと、(1)いまの枠の使い残しが先に消費され、(2)セッションが
+  リセットをまたいで走るので**次の枠がその時点から始まり**、(3)リセットの瞬間に一斉起動しない
+- **積んだときの枠では起こさない。** 積む時点の`5h-reset`を`reservedResetsAt`に控え、この時刻を
+  過ぎるまで起動しない。これが「次の」枠の実体
+- **枠が動いていないときは待たずに起動する。** リセット時刻を過ぎている／取得した拍子に開いた
+  ばかり（残りがほぼ5時間）を`idle`として扱い、その場で起こす。起動そのものが枠の開始になる
+- **枠の取得は最小の推論リクエスト1本で、送信そのものが枠を開始する**（`claude/usage.ts`）。
+  **予定が1件も無いとき・次枠実行がOFFのときは呼ばない**（`next-window-run-launch.ts`・
+  `nightly-run-state.ts`）。取得側に5分のキャッシュがあるので、pollerが30秒ごとに呼んでも
+  実際の送信は5分に1回
+- **Claude Codeの転記JSONLからは枠の情報を取れない**（#2995で全転記を横断確認）。使用率も
+  リセット時刻も`message.usage`には無く、取れるのは**APIのレスポンスヘッダだけ**
+- **1回の巡回で起動するのは1件まで。** 次を起こすまで`nextWindowRunIntervalMinutes`（既定10分）
+  空ける。0にすると連続して起こすが、それでも1巡回1件（サブPCの同時実行数の上限に一気に
+  当たらないようにするため）
+- **24時間で見送る。** 積んだ枠が終わるまでに最大5時間、次の枠の終わり際までにさらに最大5時間
+  かかりうるので、24時間は「2回ぶんの枠をまたいでも起動できなかった」ことを意味する
+- **確認待ちPushは止めない。** 夜間実行は翌朝7時まで伏せる（`selectNightlyRunPushHold`）が、
+  次枠実行は枠のリセット時刻に従うので昼に起動することもあり、伏せる理由が無い
+- 人が居ないと進まないオプション（`23.preview-required`・`25.artifact-required`）は夜間実行と
+  同じく積む時点と起動時点の両方で弾く。枠のリセット時刻は時計と無関係で、起動が深夜になるか
+  昼になるかを積む時点では決められないため
+- **既定OFF**（夜間実行と同じ）。設定（有効／無効・起動する残り時間・起動の間隔）は
+  「予約実行」画面の「次の5時間枠」の節で切り替え、切り替えた時点で保存する
 
 ## API
 

@@ -10,8 +10,17 @@ import {
   type NightlyRunEntryStatus,
   type NightlyRunEntryView,
   type NightlyRunState,
+  type ScheduledRunKind,
 } from "@/lib/nightly-run";
 import { nightlyRunIssueKey, readNightlyRunSettings } from "@/lib/nightly-run-db";
+import {
+  resolveNextWindowRunWindow,
+  toNextWindowRunWindowView,
+} from "@/lib/next-window-run";
+import {
+  readClaudeWindowSnapshot,
+  readNextWindowRunSettings,
+} from "@/lib/next-window-run-db";
 
 /**
  * 「夜間実行」画面に出す状態を組み立てる（#2772）。
@@ -31,6 +40,7 @@ type EntryRow = {
   agent: string;
   claudeModel: string | null;
   optionLabels: unknown;
+  kind: ScheduledRunKind;
   status: NightlyRunEntryStatus;
   nightKey: string | null;
   skipReason: string | null;
@@ -127,6 +137,7 @@ function toView(
     agent: row.agent,
     claudeModel: row.claudeModel,
     optionLabels: parseNightlyRunOptionLabels(row.optionLabels),
+    kind: row.kind,
     status: row.status,
     nightKey: row.nightKey,
     createdAt: row.createdAt.toISOString(),
@@ -145,24 +156,35 @@ function toView(
   };
 }
 
+/** 種類ごとに「予定」と「直近1回の結果」に切り分ける */
+function splitByKind(rows: readonly EntryRow[], kind: ScheduledRunKind) {
+  const ofKind = rows.filter((row) => row.kind === kind);
+  const queued = ofKind.filter((row) => row.status === "QUEUED");
+  const processed = ofKind.filter((row) => row.status !== "QUEUED");
+  const latestKey = selectLatestNightKey(processed);
+  const results = latestKey ? processed.filter((row) => row.nightKey === latestKey) : [];
+  return { queued, latestKey, results };
+}
+
 export async function listNightlyRunState(now: Date = new Date()): Promise<NightlyRunState> {
   const settings = await readNightlyRunSettings();
   const window = resolveNightlyRunWindow(now, settings.startHour);
+  const nextWindowSettings = await readNextWindowRunSettings();
 
-  const queued = await db.nightlyRunEntry.findMany({
+  const queuedRows = await db.nightlyRunEntry.findMany({
     where: { status: "QUEUED" },
     orderBy: { createdAt: "asc" },
   });
-  const processed = await db.nightlyRunEntry.findMany({
+  const processedRows = await db.nightlyRunEntry.findMany({
     where: { status: { in: ["LAUNCHED", "SKIPPED"] }, nightKey: { not: null } },
     orderBy: { resolvedAt: "asc" },
   });
-  const latestNightKey = selectLatestNightKey(processed);
-  const results = latestNightKey
-    ? processed.filter((row) => row.nightKey === latestNightKey)
-    : [];
 
-  const rows = [...queued, ...results];
+  const nightly = splitByKind([...queuedRows, ...processedRows], "NIGHTLY");
+  const nextWindow = splitByKind([...queuedRows, ...processedRows], "NEXT_WINDOW");
+  const results = [...nightly.results, ...nextWindow.results];
+
+  const rows = [...queuedRows, ...results];
   const [issues, jobs, sessions] = await Promise.all([
     selectIssues(rows),
     selectJobs(results),
@@ -179,10 +201,35 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
     );
   };
 
+  // **枠を取りに行くのは、次枠実行がONか予定があるときだけ**（#2995）。取得は最小の推論
+  // リクエスト1本で、送信そのものが5時間枠を開始してしまう（`next-window-run-db.ts`）
+  const shouldReadWindow = nextWindowSettings.enabled || nextWindow.queued.length > 0;
+  const snapshot = shouldReadWindow ? await readClaudeWindowSnapshot() : null;
+  const claudeWindow = shouldReadWindow
+    ? toNextWindowRunWindowView(
+        resolveNextWindowRunWindow({
+          snapshot,
+          now,
+          leadMinutes: nextWindowSettings.leadMinutes,
+        }),
+        snapshot,
+      )
+    : null;
+
   return {
     settings,
     window: toNightlyRunWindowView(window),
-    queued: queued.map(view),
-    results: latestNightKey ? { nightKey: latestNightKey, entries: results.map(view) } : null,
+    queued: nightly.queued.map(view),
+    results: nightly.latestKey
+      ? { nightKey: nightly.latestKey, entries: nightly.results.map(view) }
+      : null,
+    nextWindow: {
+      settings: nextWindowSettings,
+      window: claudeWindow,
+      queued: nextWindow.queued.map(view),
+      results: nextWindow.latestKey
+        ? { runKey: nextWindow.latestKey, entries: nextWindow.results.map(view) }
+        : null,
+    },
   };
 }

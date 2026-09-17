@@ -498,6 +498,15 @@ model AppSetting {
   // 開始から3時間の窓で起動を試み、窓を過ぎても起動できなかった分は翌夜へ持ち越さない
   nightlyRunStartHour Int      @default(1)
 
+  // 次枠実行（#2995）。「次の5時間枠」に積んだIssueを、**いまの5時間枠の残りが
+  // `nextWindowRunLeadMinutes`分を切ってから**サブPCへ1件ずつ起動する。
+  // **既定はOFF**——夜間実行と同じく、無人で実装が進む処理なので人が納得してからONにする
+  nextWindowRunEnabled         Boolean  @default(false)
+  // 起動を始める「枠の残り時間」（分）。判定は`src/lib/next-window-run.ts`
+  nextWindowRunLeadMinutes     Int      @default(60)
+  // 1件起動してから次を起動するまで空ける時間（分）。リセットの瞬間に全部走らせないための間隔
+  nextWindowRunIntervalMinutes Int      @default(10)
+
   updatedAt           DateTime @updatedAt
 }
 
@@ -510,6 +519,18 @@ enum NightlyRunEntryStatus {
   LAUNCHED
   SKIPPED
   CANCELED
+}
+
+/// 予定の種類（#2995）。
+///
+/// NIGHTLY=今夜の夜間実行（時計で決まる窓）／NEXT_WINDOW=次の5時間枠（Claudeのプラン枠の
+/// リセット時刻で決まる窓）。**表を分けない**——積む・取り消す・起動する・結果を分類する、の
+/// どれも同じ処理で、分けると`activeKey`の二重投入防止と`enqueueDispatchJob`の呼び方を
+/// 2か所で守り続けることになる。違うのは「いつ窓が開くか」だけなので、そこだけを分ける
+/// （`nightly-run.ts` と `next-window-run.ts`）。
+enum ScheduledRunKind {
+  NIGHTLY
+  NEXT_WINDOW
 }
 
 /// 「今夜の夜間実行」に積んだIssue（#2772）。
@@ -536,11 +557,19 @@ model NightlyRunEntry {
   claudeModel        String?
   // 積むときに付けたオプションのラベル名の配列（表示用）
   optionLabels       Json
+  // 予定の種類（#2995）。既定が`NIGHTLY`なので、既存の行はそのまま夜間実行の予定として残る
+  kind               ScheduledRunKind      @default(NIGHTLY)
+  // 積んだ時点のClaude 5時間枠のリセット時刻（`NEXT_WINDOW`のときだけ入る）。
+  // **この時刻を過ぎるまで起動しない**＝「積んだときの枠では起こさない、次の枠で起こす」の実体。
+  // 取得に失敗したときはnullになり、そのときは枠の状態だけで判定する
+  reservedResetsAt   DateTime?
   status             NightlyRunEntryStatus @default(QUEUED)
   // 未処理（QUEUED）の間だけ`owner/repo#番号`が入るunique列。同じIssueを二重に積めないようにする
   // （`DispatchJob.activeKey`と同じ形）。処理が終わるとnullへ戻す
   activeKey          String?               @unique
-  // 起動した・見送った夜の日付（日本時間・`YYYY-MM-DD`。窓の開始日）。
+  // 起動した・見送った回のグループ鍵。`NIGHTLY`は夜の日付（日本時間・`YYYY-MM-DD`。窓の開始日）、
+  // `NEXT_WINDOW`はその枠のリセット時刻（日本時間・`YYYY-MM-DD HH:mm`）。**どちらも辞書順が
+  // 時刻順になる形**にしてあるので、`selectLatestNightKey`が種類を問わず最新の回を選べる。
   // **起動処理がその予定を掴んだ時点で入れる**（同時に走る巡回の取り合いを避ける席取り。
   // `reserveCheckUserPush`と同じ考え方）。QUEUEDのままnullへ戻すのは、起動先が応答して
   // いなくて次の巡回でやり直すときだけ
@@ -556,6 +585,7 @@ model NightlyRunEntry {
   resolvedAt         DateTime?
 
   @@index([status, targetHost, createdAt])
+  @@index([status, kind, targetHost, createdAt])
   @@index([nightKey])
   @@index([repositoryFullName, issueNumber])
 }

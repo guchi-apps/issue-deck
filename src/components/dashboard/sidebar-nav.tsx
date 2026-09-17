@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import {
   Archive,
   BookOpen,
+  CalendarClock,
   CircleSlash,
   Eye,
   EyeOff,
@@ -15,7 +16,6 @@ import {
   Loader2,
   Lock,
   MonitorPlay,
-  Moon,
   Plus,
   Rocket,
   Settings2,
@@ -389,15 +389,16 @@ export function SidebarNavView({
           })}
           {navRow({
             key: "nightly",
-            label: "夜間実行",
-            icon: Moon,
+            label: "予約実行",
+            icon: CalendarClock,
             active: activePane === "nightly",
             onClick: onSelectNightlyRun,
-            // 数えるのは**今夜の予定の件数**（#2772）。結果に「確認が必要」があっても丸は
-            // 出さない——確認待ちそのものは上の「ユーザーの確認待ち」が数えており、
-            // 両方に出すとどちらを押せば片付くのか分からなくなる
+            // 数えるのは**積んである予定の件数**（#2772・#2995。次の5時間枠と今夜の合計）。
+            // 結果に「確認が必要」があっても丸は出さない——確認待ちそのものは上の
+            // 「ユーザーの確認待ち」が数えており、両方に出すとどちらを押せば片付くのか
+            // 分からなくなる
             count: nightlyRunQueuedCount,
-            title: "今夜の予定と、前の夜の結果を見る",
+            title: "次の5時間枠と今夜の予定、直近の結果を見る",
           })}
           {navRow({
             key: "knowledge",
