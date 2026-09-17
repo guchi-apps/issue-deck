@@ -40,6 +40,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "6.1.1",
+    date: "2026-09-18",
+    changes: [
+      "iPhoneのSafariで、添付した画像に書き込もうとすると画面が暗いままで操作できなくなる不具合を修正しました。",
+    ],
+    usage: [
+      "1. Issueへのコメント入力欄などで画像を添付する",
+      "2. 添付した画像のサムネイルをタップしてプレビューを開き、「書き込む」を選ぶ",
+      "3. iPhoneのSafariでも書き込み画面が暗幕に隠れず明るく表示され、線などを描き込めれば修正が効いている",
+    ],
+  },
+  {
     version: "6.1.0",
     date: "2026-09-18",
     changes: [
