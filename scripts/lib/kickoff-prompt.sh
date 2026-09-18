@@ -21,10 +21,10 @@ KICKOFF_PROMPT_SUMMARY_MAX_CHARS=150
 # と揃える。** 画面で選んだ名前がそのまま起動したセッションの画面にも出るようにするため。
 # 二重に持つことになるので、ずれは `src/lib/prompts/kickoff-prompt.test.ts` が検出する。
 KICKOFF_PROMPT_OPTION_LABELS=(
-  "21.plan-required=計画が必要"
-  "25.artifact-required=アーティファクトで見た目を出す"
-  "22.merge-confirm-required=マージ前に確認が必要"
-  "23.preview-required=開発環境を起動する"
+  "21.plan-required=計画を立案"
+  "25.artifact-required=デザインを提示"
+  "22.merge-confirm-required=マージ前に確認"
+  "23.preview-required=開発環境を起動"
 )
 
 # プロンプトファイルの `- <キー>: <値>` 行を1つ読む。無ければ空を返す。
