@@ -11,6 +11,11 @@ import {
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import {
+  parseRebuildPullRequests,
+  type CompareCommit,
+  type ReleaseRebuildCandidate,
+} from "@/lib/release-rebuild";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** 「develop→mainのリリースフロー」を自動化するworkflowのファイル名（release-develop-to-main.yml） */
@@ -285,8 +290,49 @@ export type GithubApiPullRequest = {
   html_url: string;
   title: string;
   body: string | null;
-  head: { ref: string };
+  head: { ref: string; sha: string };
 };
+
+/**
+ * リリースPRのheadより後にdevelopへ入った変更（#3014）。作り直しボタンの可否と、確認
+ * ダイアログの「新たに含まれる変更」に使う。compareは1回で、リリースPRが開いている間だけ呼ぶ。
+ */
+export async function fetchReleaseRebuildCandidate(
+  owner: string,
+  repo: string,
+  releaseHeadSha: string,
+  token: string,
+): Promise<ReleaseRebuildCandidate> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=100`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { ahead_by?: number; commits?: CompareCommit[] } = await res.json();
+  return {
+    aheadBy: data.ahead_by ?? 0,
+    pullRequests: parseRebuildPullRequests(data.commits ?? []),
+  };
+}
+
+/**
+ * ブランチを削除する（#3014。作り直しで閉じたリリースPRの凍結ブランチ）。
+ * 既に無い（422/404）ときは成功として扱う——消したい状態には既になっている。
+ */
+export async function deleteBranch(
+  owner: string,
+  repo: string,
+  branch: string,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/git/refs/heads/${branch}`;
+  const res = await githubFetch(url, token, { method: "DELETE" });
+  if (!res.ok && res.status !== 404 && res.status !== 422) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
 
 /** 指定ブランチをbaseとするopenなPull Requestの一覧を取得する */
 export async function fetchOpenPullRequestsForBase(

@@ -6,6 +6,7 @@ import { Rocket } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
+import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +25,7 @@ import {
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
 import { isNextReleaseIssue } from "@/lib/issue-progress";
+import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -113,6 +115,16 @@ export function MobileReleaseSheet({
                 </span>
               </div>
               <ReleaseProgress status={releaseStatus} repoFullName={repository.fullName} />
+              {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
+                  状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
+              {releaseStatus.phase === "release_pr_open" &&
+                releaseStatus.releasePullRequest?.headRef?.startsWith(RELEASE_BRANCH_PREFIX) && (
+                  <ReleaseRebuildButton
+                    repositoryFullName={repository.fullName}
+                    mainVersion={releaseStatus.mainVersion}
+                    className="h-8 self-start"
+                  />
+                )}
               <Button
                 variant="outline"
                 disabled={isTriggeringRelease}

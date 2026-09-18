@@ -15,6 +15,11 @@ export type ReleasePullRequest = {
   number: number;
   url: string;
   title: string;
+  /**
+   * PRのheadブランチ（リリースPRなら`release-main/vX.Y.Z`、旧世代は`develop`）。凍結ブランチの
+   * リリースPRにだけ作り直しの導線を出すのに使う（#3014）。バンプPRでは使わないので省略可
+   */
+  headRef?: string;
   ciState: CiState | null;
   /**
    * コンフリクトの有無。GitHubが判定中・取得できなかった場合はnull（#1293）。
