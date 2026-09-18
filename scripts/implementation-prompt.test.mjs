@@ -209,6 +209,18 @@ describe("実装プロンプトの生成", () => {
     expect(prompt).not.toContain("plan-required -->");
   });
 
+  // #3021の計画レビュー: 節を移したり統合したりしたときに、名指しした参照先が宙に浮かないこと
+  it("「後述の『…』」で名指しした節が本文に見出しとして存在する", () => {
+    for (const agent of ["claude", "codex"]) {
+      for (const labels of [["21.plan-required"], ["21.plan-required", "25.artifact-required"], []]) {
+        const prompt = render(agent, labels);
+        for (const [, name] of prompt.matchAll(/後述の「([^」]+)」/g)) {
+          expect(prompt).toMatch(new RegExp(`^#{2,3} ${name}$`, "m"));
+        }
+      }
+    }
+  });
+
   // #3021: 毎回は使わない節は参照文書へ移し、索引から辿れるようにする
   it("手作業Issueの雛形は本文に載せず、参照文書への索引を載せる", () => {
     const prompt = render("claude", []);

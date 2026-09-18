@@ -157,6 +157,9 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 
 文面の正は次の2つで、**変えるときは両方を揃える**（出力言語と同じ二重管理）。
 
+**#3021以降、issue-deck版は規則（6項目・30〜40行・`## 変更するファイル`）だけを本文の`21.plan-required`区間に置き、
+言い回しは汎用版より短い。** 揃える対象は規則の中身で、文面の一致ではない。汎用版の整理は #3023 で追う。
+
 | ファイル | 効く範囲 |
 |---|---|
 | [scripts/prompts/implementation-agent.md](../../scripts/prompts/implementation-agent.md) | issue-deck自身のローカルセッション（`scripts/start-issue.sh`） |
@@ -206,6 +209,10 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 
 文面の正は3つ。前2つは計画の書式と同じ二重管理で、**変えるときは揃える**。
 
+**#3021以降、issue-deck版は4つの規則だけを本文の「進め方」に置き、実測値と経緯（この節の内容）は
+[implementation-agent-reference.md](implementation-agent-reference.md)へ移した。** 揃える対象は規則の中身で、
+汎用版・無人実行版の整理は #3023・#3024 で追う。
+
 | ファイル | 効く範囲 |
 |---|---|
 | [scripts/prompts/implementation-agent.md](../../scripts/prompts/implementation-agent.md) | issue-deck自身のローカルセッション |
@@ -237,7 +244,8 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 - 見た目のアーティファクトの節は、汎用ランチャー・画面の「実装プロンプトをコピー」と同じ文面を
   保つ規約があるため縮めていない
 - 汎用ランチャー（`generic-implementation-agent.md`）と無人実行（`.github/prompts/implement.md`）は
-  この整理の対象外で、従来どおり全節が載る
+  この整理の対象外で、従来どおり全節が載る（#3023・#3024で追う）
+- 「出力言語」の節は各プロンプトに置く決まり（[CLAUDE.md](../../CLAUDE.md)「出力言語」）なので本文に残している
 
 ## 使用するモデルの設定（#622）
 
