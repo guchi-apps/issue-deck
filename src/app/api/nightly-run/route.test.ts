@@ -60,6 +60,7 @@ const VALID_BODY = {
   repository: "guchi-apps/issue-deck",
   issue: 2772,
   host: "subpc",
+  kind: "next-window",
   optionLabels: ["21.plan-required"],
 };
 
@@ -75,7 +76,9 @@ describe("/api/nightly-run", () => {
     });
     findFirstIssue.mockResolvedValue({ labels: [{ name: "21.plan-required" }] });
     createEntry.mockResolvedValue({ id: "entry-1" });
-    listNightlyRunState.mockResolvedValue({ settings: { enabled: false, startHour: 1 } });
+    listNightlyRunState.mockResolvedValue({
+      nextWindow: { settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 } },
+    });
     readClaudeWindowSnapshot.mockResolvedValue({ resetsAt: RESETS_AT, usedPercent: 62 });
   });
 
@@ -89,7 +92,7 @@ describe("/api/nightly-run", () => {
     expect(listNightlyRunState).toHaveBeenCalledTimes(1);
   });
 
-  it("POSTは今夜の予定として積み、いまは起動しない", async () => {
+  it("POSTは次の5時間枠の予定として積み、いまは起動しない", async () => {
     const response = await POST(request(VALID_BODY));
 
     expect(response.status).toBe(201);
@@ -100,19 +103,11 @@ describe("/api/nightly-run", () => {
       issueNumber: 2772,
       targetHost: "subpc",
       agent: "claude",
+      kind: "NEXT_WINDOW",
       activeKey: "guchi-apps/issue-deck#2772",
       requestedByUserId: "user-1",
       optionLabels: ["21.plan-required"],
     });
-  });
-
-  /** #2995 */
-  it("POSTは`kind`で「次の5時間枠」に積める。枠を読まずに積むことはしない", async () => {
-    const response = await POST(request({ ...VALID_BODY, kind: "next-window" }));
-
-    expect(response.status).toBe(201);
-    const data = createEntry.mock.calls[0][0].data;
-    expect(data.kind).toBe("NEXT_WINDOW");
     // **積んだ時点の枠のリセット時刻を控える**（この時刻を過ぎるまで起動しないのが「次の」枠の実体）
     expect(data.reservedResetsAt).toEqual(new Date(RESETS_AT));
   });
@@ -121,19 +116,18 @@ describe("/api/nightly-run", () => {
   it("枠を取得できなくても「次の5時間枠」に積める", async () => {
     readClaudeWindowSnapshot.mockResolvedValue(null);
 
-    const response = await POST(request({ ...VALID_BODY, kind: "next-window" }));
+    const response = await POST(request(VALID_BODY));
 
     expect(response.status).toBe(201);
     expect(createEntry.mock.calls[0][0].data.reservedResetsAt).toBeNull();
   });
 
-  /** #2995: 既定（`kind`なし）は従来どおり夜間実行。枠の取得も行わない */
-  it("`kind`を指定しなければ夜間実行として積み、枠は取りに行かない", async () => {
-    const response = await POST(request(VALID_BODY));
-
-    expect(response.status).toBe(201);
-    expect(createEntry.mock.calls[0][0].data.kind).toBe("NIGHTLY");
-    expect(readClaudeWindowSnapshot).not.toHaveBeenCalled();
+  /** #3019: 「今夜の夜間実行」は削除済み。`kind`省略・`"nightly"`はどちらも400で断る */
+  it("`kind`を指定しない、または`nightly`を指定すると400になる", async () => {
+    const { kind: _kind, ...withoutKind } = VALID_BODY;
+    expect((await POST(request(withoutKind))).status).toBe(400);
+    expect((await POST(request({ ...VALID_BODY, kind: "nightly" }))).status).toBe(400);
+    expect(createEntry).not.toHaveBeenCalled();
   });
 
   it("知らない`kind`は400で断る", async () => {

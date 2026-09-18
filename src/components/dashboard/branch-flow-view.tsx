@@ -44,6 +44,7 @@ import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
+import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +82,7 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
   isMergeJudgementPending,
+  RELEASE_BRANCH_PREFIX,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
@@ -906,11 +908,14 @@ function ReleaseGroupHeader({
   repositoryFullName,
   group,
   releaseButton,
+  rebuildButton,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  /** リリースPRを閉じてバンプから作り直す導線（#3014）。リリースPRが開いている束だけに渡す */
+  rebuildButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
@@ -1034,6 +1039,7 @@ function ReleaseGroupHeader({
           {group.pullRequest && group.pullRequest.state === "open" && (
             <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onMerged} />
           )}
+          {rebuildButton}
           {releaseButton}
         </div>
 
@@ -1291,6 +1297,21 @@ function ReleaseFlowGraph({
                 />
               ) : undefined
             }
+            rebuildButton={
+              /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
+                 headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
+                 ブランチを消すとdevelopが消えるため出さない */
+              group.mergedAt === null &&
+              group.pullRequest !== null &&
+              group.pullRequest.state === "open" &&
+              group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) ? (
+                <ReleaseRebuildButton
+                  repositoryFullName={repository.repositoryFullName}
+                  mainVersion={repository.release.latestVersion}
+                  onTriggered={onReleaseTriggered}
+                />
+              ) : undefined
+            }
           />
         ))}
 
@@ -1386,11 +1407,13 @@ function ReleaseGroupHeaderWithLanes({
   repositoryFullName,
   group,
   releaseButton,
+  rebuildButton,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  rebuildButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
@@ -1399,6 +1422,7 @@ function ReleaseGroupHeaderWithLanes({
         repositoryFullName={repositoryFullName}
         group={group}
         releaseButton={releaseButton}
+        rebuildButton={rebuildButton}
         onMerged={onMerged}
       />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}

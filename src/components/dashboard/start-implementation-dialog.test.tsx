@@ -31,7 +31,7 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
   useProgressStatusMutation: () => ({ setProgressStatus }),
 }));
 
-// 夜間実行（#2772）の設定。タイルの説明に時刻を出すためだけの取得で、ここでは`fetch`の
+// 予約実行（#2995）の設定。タイルの説明にON/OFFを出すためだけの取得で、ここでは`fetch`の
 // 呼び出し回数を数えるテスト（おまかせ）に混ざらないようフックごと差し替える
 vi.mock("@/hooks/use-nightly-run", () => ({
   useNightlyRunSettings: () => null,
@@ -750,10 +750,10 @@ describe("StartImplementationDialog", () => {
   });
 
   // #2884計画レビュー（G1）の指摘1: チェックを外して外す予定のラベルは、外れた後の状態で
-  // 夜間実行の可否を判定する。生の実ラベルのままだと、外したいのにボタンがdisabledのままになり
+  // 予約実行の可否を判定する。生の実ラベルのままだと、外したいのにボタンがdisabledのままになり
   // 削除処理（applyOptionLabels）へ到達できない
-  describe("夜間実行とオプションの整合（#2884）", () => {
-    it("25.artifact-requiredが付いたままだと夜間実行は選べない", () => {
+  describe("予約実行とオプションの整合（#2884）", () => {
+    it("25.artifact-requiredが付いたままだと次の5時間枠は選べない", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({
         includeDispatchTargets: true,
@@ -763,11 +763,11 @@ describe("StartImplementationDialog", () => {
       });
 
       expect(
-        screen.getByRole("radio", { name: "今夜の夜間実行" }).hasAttribute("disabled"),
+        screen.getByRole("radio", { name: "次の5時間枠" }).hasAttribute("disabled"),
       ).toBe(true);
     });
 
-    it("チェックを外すと、実ラベルが残っていても夜間実行を選べるようになる", () => {
+    it("チェックを外すと、実ラベルが残っていても次の5時間枠を選べるようになる", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({
         includeDispatchTargets: true,
@@ -779,7 +779,7 @@ describe("StartImplementationDialog", () => {
       fireEvent.click(screen.getByRole("checkbox", { name: /アーティファクトで見た目を出す/ }));
 
       expect(
-        screen.getByRole("radio", { name: "今夜の夜間実行" }).hasAttribute("disabled"),
+        screen.getByRole("radio", { name: "次の5時間枠" }).hasAttribute("disabled"),
       ).toBe(false);
     });
   });

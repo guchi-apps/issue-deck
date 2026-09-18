@@ -86,16 +86,52 @@ Project Statusで探すのをやめたことで、T0〜T1のあいだにdevelop�
   場合だけ、従来どおり`Develop`/`Release`のStatusで探す（#2117以前のPR・手で作ったPR・
   PR作成時にissue-deckへ問い合わせできなかった場合の安全網）。
 
-### リリースPRのCIが落ちたときは、ブランチを直さず切り直す
+### リリースPRを出した後の修正は、バンプから作り直す（#3014）
 
 `release-main/vX.Y.Z`はマージ時に自動削除される（`delete_branch_on_merge`）。そこへ直接修正を
 pushすると、修正がmainにだけ残りdevelopから消え、次のリリースで巻き戻る。そのため自動修復
 （`reusable-claude-pr-repair.yml`）は、headがこのブランチのとき修正の行き先（`FIX_BASE_REF`）を
-`develop`にして**develop向けのPRとして出す**。修正はリリースPR自体には反映されないので、
-developへ取り込んだうえでリリースPRをcloseし、リリースを起動し直す（新しい凍結ブランチが
-現在のdevelop先端で作られる）。
+`develop`にして**develop向けのPRとして出す**。人が見つけた修正も同じで、Issue→developのPRで入れる。
 
-**この1手順目（修復PRをdevelopへ入れる）は自動では進まない**（#2230）。
+修正はリリースPR自体には反映されないので、developへ取り込んだうえで**issue-deckの「修正を入れて
+作り直す」**を押す（PCの「ブランチ」画面の版の見出し／スマホのリリースシート。リリースPRが
+開いている間だけ出る）。押すと次の順に進む。
+
+1. `POST /api/repositories/release/rebuild`がリリースPRへ理由のコメントを残してcloseし、
+   凍結ブランチを消してからリリースworkflowを起動する。**閉じてから起動する**——先に起動すると
+   状態判定が「リリースPRが開いている」と見てスキップすることがある
+2. workflowの状態判定は、`main版 != develop版`でリリースPRが無い**手動起動**のうち、developの版を
+   作ったバンプPRのマージ（件名`Merge pull request #N from <owner>/release/vX.Y.Z`）の後に
+   developへコミットが入っているものを**作り直し**と見て`need_bump`にする（`rebuild_from`に
+   そのマージコミットを渡す）。後に何も入っていなければ従来どおりリリースPRだけを作る
+3. バンプのステップが前回のバンプを`git revert -m 1`で取り消し（更新履歴・
+   `.github/release-notes.md`がバンプ前へ戻る）、そのうえで通常どおりバンプする。上げ幅・
+   更新履歴・使い方・対象一覧は修正込みの差分から作り直される。**版ファイルだけは取り消す版の
+   まま据え置く**——上げ幅を引数に取るbump-command（signalyの`bump_version.py "$BUMP_KIND"`）は
+   ファイル上の版から上げるため、mainの版へ戻すと次の繰り上げと結果が一致しない
+4. **版は必ず取り消した版より上にする**（判定がv6.4.0でもv6.4.1。そのときはbump-commandへ
+   `BUMP_KIND=patch`を渡し、判断根拠には判定どおりの上げ幅を残す）。同じ番号にすると差し引きで
+   `package.json`が変わらず、バンプPRのマージが`push`（`paths: package.json`）を起こさないため、
+   リリースPRが作られないまま止まる。取り消した版はタグも無く本番へ出ていないので欠番にしてよい
+
+**画面の可否は目安で、判定の正はworkflow側。** 画面はリリースPRのheadとdevelopのcompareで
+「後に入った変更」を出し、0件なら押せなくする。**その範囲にはバンプPR自身のマージ
+コミットが必ず1件含まれる**（凍結点はバンプPRのhead＝マージの第2親）ので、バンプPR・リリースPRの
+マージは数えない（`buildRebuildCandidate`）。数えると常に「変更あり」になる。ダイアログを開いたときに1回だけ取る
+（「ブランチ」画面は追加のGitHub API取得をしない前提のため）。
+
+制約:
+
+- **作り直せるのはheadが`release-main/v…`のリリースPRだけ。** head=`develop`の旧世代のPRで
+  ブランチを消すとdevelopが消えるため、画面にも出さず受け口でも弾く
+- **参照タグが古い配布先では作り直しにならない。** 旧workflowは手動起動でもリリースPRを
+  作るだけなので、修正は入るが更新履歴はバンプ時のままになる（今までの「閉じて起動し直す」と同じ）
+- **バンプ後に更新履歴ファイルを手で直していると、取り消しが衝突して失敗する。** 失敗は
+  `notify-failure`に乗る。衝突したファイルをdevelopで戻してから「リリースする」で起動し直す
+  （リリースPRは閉じたままなので、手動起動は同じ作り直しになる）
+- 手でリリースPRを閉じて「リリースする」を押した場合も、後に変更があれば作り直しになる
+
+**作り直しの前提になる「自動修復のPRをdevelopへ入れる」は自動では進まない**（#2230）。
 `reusable-claude-review-develop.yml`の`identify-issue`は対応Issue番号をブランチ名
 `issue-<番号>`からしか特定せず、自動修復が作る`pr-repair/<対象PR番号>-<run_id>`では番号が
 空になる。その結果、最後の`auto-merge`ジョブが「対応Issue番号を特定できないため、自動マージを
@@ -126,6 +162,8 @@ developへ取り込んだうえでリリースPRをcloseし、リリースを起
 | `reusable-issue-labels.yml` | `main-pr-in-progress`・`main-pr-merged`のhead条件 |
 | `reusable-claude-pr-repair.yml` | `FIX_BASE_REF`を`develop`に倒すcase |
 | `src/lib/pull-request-list.ts` | `RELEASE_BRANCH_PREFIX`・`isReleaseHeadRef`・`classifyPullRequest` |
+| `src/app/api/repositories/release/rebuild/route.ts` | 作り直しで閉じてよい凍結ブランチの判定（#3014） |
+| `src/lib/release-rebuild.ts` | 「後に入った変更」からバンプPR・リリースPRを除く判定 |
 
 **head=`develop`の判定はどこにも残してある。** 共有ワークフローの参照タグが古いリポジトリでは
 まだ`develop`をheadにしたリリースPRが作られるため、混在しても壊れないようにしている。

@@ -22,6 +22,7 @@ VPS側のリポジトリ（`guchi-apps/vps`）の`scripts/pm2-monitor.sh`がcron
 | #1121（[guchi-apps/vps#62](https://github.com/guchi-apps/vps/issues/62)の一環） | `--max-old-space-size=128` / `320M` | issue-deckだけ再起動ループになり、PM2再起動検知が5分おきに届いた（#1546） |
 | #1546 | `--max-old-space-size=256` / `512M` | ヒープ上限の明示（#1121の意図）は残しつつ、殺す閾値を#1121以前の値へ戻した |
 | #2331（2026-08-25） | `--max-old-space-size=256` / `768M` | 512Mでも足りず7〜8分ごとの再起動になった。**リークではなく、平常時のピーク（実測506MB）が512Mに接していた**ため閾値を上げた |
+| #3017（2026-09-18） | `--max-old-space-size=256 --max-semi-space-size=8` / `768M`・`next.config.mjs` | 再起動は起きていない。**使用量そのものを減らす**ために、若い世代の上限を明示し、設定ファイルをTypeScriptでなくした（下の「実測値（#3017）」） |
 
 #1121は「メモリ2GBのVPSにNext.jsが10本常駐しており、既定のヒープ上限では各プロセスが使わない
 メモリを抱え込む」という全アプリ共通の対応で、8アプリへ同じ`128MB / 320M`を適用したもの。
@@ -87,6 +88,63 @@ issue-deckは**実測RSSが10本中で最大（当時200MB）**のアプリで�
 RSS 481MBとの差**約264MBはヒープ外**（Prismaのクエリエンジン・undiciのバッファ・コード領域）。
 `--max-old-space-size`を触ってもこの264MBは減らないので、ヒープ上限は256MBのまま据え置いた。
 
+## 実測値（#3017・使用量を減らす設定の比較）
+
+#2331までは「殺されないようにする」対応で、使用量そのものは減らしていなかった。#3017では
+本番と同じNode 24・同じ`node_args`の本番ビルドをサブPCで起動し、**設定を1つずつ変えて**比べた。
+負荷はログイン画面へ900リクエスト（300件ごとに計測し、最後に5秒置く）。値は静置後のRSSで、
+複数回測ったものは平均。
+
+| 設定 | RSS | 備考 |
+| --- | ---: | --- |
+| 変更前（`next.config.ts`・若い世代は既定） | 353 MB | スレッド36本。`next-swc`のネイティブバイナリが28MB常駐 |
+| ＋`MALLOC_ARENA_MAX=2` | 340 MB | 測定のぶれと区別できない。**見送り** |
+| `next.config.mjs` | 311 MB | スレッド24本。SWCが読み込まれなくなる |
+| `.mjs`＋`preloadEntriesOnStart: false`＋`cacheMaxMemorySize: 0` | 292 MB | 起動直後は−22MBだが定常では−10〜18MB。初回表示が遅くなるため**見送り** |
+| `.mjs`＋`--max-semi-space-size=16` | 249 MB | heapTotal 100MB |
+| **`.mjs`＋`--max-semi-space-size=8`（採用）** | **224 MB** | heapTotal 85MB。処理時間は既定と同じ（900リクエストで17〜20秒） |
+| `.mjs`＋`--max-semi-space-size=4` | 219 MB | 8MBとの差は測定のぶれの範囲 |
+| `.mjs`＋`--max-old-space-size=192` | 319 MB | 効果なし |
+| `.mjs`＋`--max-old-space-size=128` | 228 MB | #1546でヒープ不足が疑われた値。同じ効果がsemi-spaceで取れるので**触らない** |
+| `next.config.ts`＋`next start --experimental-next-config-strip-types`＋semi 8 | 222〜241 MB | `.mjs`と同等。下記の理由で**見送り** |
+
+読み取れること。
+
+- **常駐の大半はコードではなく既定値だった。** Node 24は若い世代（new space）を大きく取り、
+  不要になったオブジェクトを抱えたままヒープが195MBまで膨らむ。上限を8MBにするとheapTotalは
+  85MBで落ち着く。`--max-old-space-size`は古い世代の上限なので、ここには効かない（192MBで変化なし）
+- **`next.config.ts`は本番でもコストがある。** `next start`は設定ファイルをトランスパイルする
+  ためだけにSWCを読み込み（`next/dist/build/next-config-ts/transpile-config.js`）、そのまま常駐する。
+  `.mjs`にすれば読み込まれない。型は`// @ts-check`＋JSDocと`tsconfig.json`の`include`で残している
+- **型除去フラグ（`--experimental-next-config-strip-types`）を採らなかった理由。** 減り方は`.mjs`と
+  同じだが、(1) experimentalで、(2) **失敗すると警告1行だけでSWCへ戻る**ためメモリの後退に
+  気付けず、(3) 起動のたびに`MODULE_TYPELESS_PACKAGE_JSON`の警告が本番ログへ出る。
+  拡張子を変えるほうは一度直せば戻らない
+- プロセス内キャッシュ（`issue-run-cache.ts`・`conditional-request.ts`など）はすべて件数上限と
+  TTLを持っており、増え続けるものは無かった。`next/image`・`sharp`は使っていない。
+  Prismaのクエリエンジン本体の常駐は9MB
+
+**この表はログイン画面だけの負荷で、本番の絶対値とは一致しない**（本番は認証後の画面と
+GitHubの応答を扱い、#2331の実測でheapUsedが128MBある）。減る向きは同じと見込むが、
+効果は本番で確かめる。
+
+### 反映の前後を本番で比べる
+
+`[memory]`行は起動ごとに最大値の更新を出すので、デプロイの前後でそれぞれの最大値を比べる。
+
+```bash
+sudo su github-user -s /bin/bash -c 'pm2 logs issue-deck --lines 2000 --nostream' | grep '\[memory\]' | tail -40
+```
+
+- `heapTotal`が200MB前後から100MB前後へ下がっていれば、semi-spaceが効いている
+- スレッド数が減っていれば、SWCが読み込まれていない（`ls /proc/$(pm2 pid issue-deck)/task | wc -l`）
+- **Nodeのメジャーを上げたら測り直す。** 若い世代の既定値はV8の版で変わる
+- 新しいピークが安定して低いと分かったら、`max_memory_restart`（768M）を「ピーク＋余裕」で
+  下げ直してよい。**先に下げない**（#1546・#2331の再起動ループと同じことになる）
+
+同じVPSの他のNext.jsアプリも同じ構成なら同じ原因を抱えている。横展開は本番で効果を確かめてから、
+リポジトリごとのIssueで行う（[multi-repo-changes.md](multi-repo-changes.md)）。
+
 ## 変更したときの反映
 
 `ecosystem.config.js`の変更は`pm2 restart`では反映されず、`pm2 start <file> --env production`での
@@ -145,6 +203,20 @@ sudo su github-user -s /bin/bash -c 'pm2 logs issue-deck --lines 500 --nostream'
 ```bash
 sudo su github-user -s /bin/bash -c 'for i in $(seq 1 21); do PID=$(pm2 pid issue-deck); RSS=$(ps -o rss= -p "$PID" 2>/dev/null); echo "$(date +%H:%M:%S) pid=$PID rss=$(( ${RSS:-0} /1024))MB"; sleep 30; done'
 ```
+
+### 3. ヒープ外が何に使われているか
+
+`process.memoryUsage()`も`pm2 describe`も、ヒープ外の内訳までは出さない。`/proc/<pid>/smaps`の
+`Rss:`をマッピング名ごとに足すと、**常駐しているネイティブライブラリが名前つきで出る**
+（#3017。本番に不要なはずの`next-swc`の常駐はこれで見つかった）。
+
+```bash
+awk '/^[0-9a-f]+-[0-9a-f]+ /{name=$6; if(name=="")name="[anon]"} /^Rss:/{r[name]+=$2} END{for(k in r) if(r[k]>4096) printf "%6d MB  %s\n", r[k]/1024, k}' /proc/<pid>/smaps | sort -rn | head
+```
+
+設定を変えて比べるときは、本番ビルド（`.next`・`node_modules`・`package.json`・`public`・`.env.local`）への
+シンボリックリンクと、試したい設定ファイルだけを置いた別ディレクトリを作って`next start`する。
+作業中のworktreeと開発サーバーを巻き込まない。
 
 ## 値を触るときの注意
 

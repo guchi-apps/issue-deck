@@ -115,6 +115,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -e
 
@@ -150,13 +151,50 @@ jobs:
             if [ -n "$EXISTING_MAIN_PR" ]; then
               echo "develop→mainのPR（$EXISTING_MAIN_PR）が既にオープン中のため、新規作成をスキップします"
             else
-              NEED_MAIN_PR=true
+              # **リリースの作り直し**（#3014）。リリースPRは`release-main/vX.Y.Z`で凍結しているため、
+              # 出した後に見つかった修正はそこへ足せない。修正をdevelopへ入れ、リリースPRを閉じて
+              # 手動で起動し直したときは、同じ版のリリースPRを作り直すのではなく**バンプから
+              # やり直す**——そうしないと更新履歴・使い方・判断根拠がバンプ時のまま（修正が
+              # 載らない）になる。
+              #
+              # 条件は3つ。手動起動であること（pushはバンプPRのマージ直後で、作り直す理由が無い）、
+              # developの版を作ったバンプPRのマージコミットがdevelopの本流にあること、
+              # **そのマージの後にdevelopへ新しいコミットが入っていること**（入っていなければ
+              # 中身は変わらないので、従来どおりリリースPRだけを作る）。
+              # バンプPRはgitの件名（`Merge pull request #N from <owner>/release/vX.Y.Z`）から探す。
+              # バンプPR上で人が版を直していた場合は見つからず、従来どおりの動きになる。
+              REBUILD_FROM=""
+              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+                BUMP_MERGE="$(git log --first-parent --merges --format='%H %s' origin/main..origin/develop \
+                  | awk -v branch="release/v$DEV_VERSION" '$2 == "Merge" && $3 == "pull" && $4 == "request" && $6 == "from" { ref = $7; sub(/^[^\/]*\//, "", ref); if (ref == branch) { print $1; exit } }')"
+                if [ -n "$BUMP_MERGE" ]; then
+                  AHEAD="$(git rev-list --count "$BUMP_MERGE..origin/develop")"
+                  if [ "$AHEAD" -gt 0 ]; then
+                    REBUILD_FROM="$BUMP_MERGE"
+                  else
+                    echo "バンプPRのマージ（$BUMP_MERGE）以降にdevelopへ入った変更が無いため、作り直さずリリースPRを作成します"
+                  fi
+                fi
+              fi
+
+              if [ -n "$REBUILD_FROM" ]; then
+                EXISTING_BUMP_PR="$(gh pr list --base develop --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | .[0].headRefName // empty')"
+                if [ -n "$EXISTING_BUMP_PR" ]; then
+                  echo "バージョンbump用のPR（$EXISTING_BUMP_PR）が既にオープン中のため、作り直しをスキップします"
+                else
+                  echo "v$DEV_VERSION のバンプ（$REBUILD_FROM）以降にdevelopへ${AHEAD}件のコミットが入っているため、バンプから作り直します"
+                  NEED_BUMP=true
+                fi
+              else
+                NEED_MAIN_PR=true
+              fi
             fi
           fi
 
           echo "need_bump=$NEED_BUMP" >> "$GITHUB_OUTPUT"
           echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
-          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION"
+          echo "rebuild_from=${REBUILD_FROM:-}" >> "$GITHUB_OUTPUT"
+          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-}"
 
       - name: リリース対象のプルリクエストとissueを特定する
         id: issues
@@ -548,6 +586,9 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
           MAIN_VERSION: ${{ steps.state.outputs.main_version }}
+          # 作り直し（#3014）のときだけ値が入る。DEV_VERSIONは取り消す側の版
+          DEV_VERSION: ${{ steps.state.outputs.dev_version }}
+          REBUILD_FROM: ${{ steps.state.outputs.rebuild_from }}
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
           BUMP_COMMAND: ${{ inputs.bump-command }}
@@ -583,9 +624,56 @@ jobs:
               ;;
           esac
           NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+          # **作り直しでは、版を必ず取り消す版より上にする**（#3014）。同じ番号で作り直すと
+          # 差し引きで`package.json`が変わらず、バンプPRのマージが`push`（paths: package.json）を
+          # 起こさないため、リリースPRが作られないまま止まる。取り消す版は本番へ出ておらず
+          # タグも無いので、欠番にしてよい（例: v6.4.0 → v6.4.1）。
+          if [ -n "$REBUILD_FROM" ] \
+            && [ "$(printf '%s\n%s\n' "$NEW_VERSION" "$DEV_VERSION" | sort -V | tail -n 1)" = "$DEV_VERSION" ]; then
+            IFS='.' read -r DEV_MAJOR DEV_MINOR DEV_PATCH <<< "$DEV_VERSION"
+            JUDGED_VERSION="$NEW_VERSION"
+            JUDGED_KIND="$BUMP_KIND"
+            NEW_VERSION="$DEV_MAJOR.$DEV_MINOR.$((DEV_PATCH + 1))"
+            # 上げ幅を引数に取るbump-command（signalyの`bump_version.py "$BUMP_KIND"`）は、ファイル上の
+            # 版から上げる。下で版ファイルを取り消す版（DEV_VERSION）に据え置くので、patchを渡せば
+            # NEW_VERSIONと同じ結果になる
+            BUMP_KIND=patch
+            echo "判定どおりの v$JUDGED_VERSION は作り直す v$DEV_VERSION 以下のため、v$NEW_VERSION にします"
+          fi
           BRANCH="release/v$NEW_VERSION"
 
+          git config user.name "Claude Code"
+          git config user.email "claude-code@example.com"
           git checkout -b "$BRANCH" origin/develop
+
+          # 作り直しでは、まず前回のバンプ（バンプPRのマージコミット）を取り消し、developを
+          # 「バンプ前＋その後の修正」の状態に戻してから通常どおりバンプする（#3014）。
+          # 更新履歴ファイルや`.github/release-notes.md`の前回分もこれで消えるので、
+          # 版を書き換えるコマンド（`npm version`・bump-command）の種類によらず同じ手順で済む。
+          if [ -n "$REBUILD_FROM" ]; then
+            REVERT_MAINLINE=()
+            if git rev-parse --verify --quiet "${REBUILD_FROM}^2" >/dev/null; then
+              REVERT_MAINLINE=(-m 1)
+            fi
+            if ! git revert --no-commit "${REVERT_MAINLINE[@]}" "$REBUILD_FROM"; then
+              git status --short
+              echo "::error::v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消せませんでした。バンプ後に更新履歴などを手で直していると衝突します。衝突したファイルをdevelopで戻してから起動し直してください"
+              exit 1
+            fi
+            REVERTED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
+            if [ "$REVERTED" != "$MAIN_VERSION" ]; then
+              echo "::error::バンプを取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。作り直せないため、手で確認してください"
+              exit 1
+            fi
+            # **版ファイルだけは取り消す版（DEV_VERSION）に据え置く。** 上げ幅を引数に取る
+            # bump-commandはファイル上の版から上げるため、mainの版へ戻したままだと繰り上げた
+            # NEW_VERSIONと一致しない（計画レビューの指摘）。DEV_VERSIONから同じ上げ幅で上げた
+            # 結果はNEW_VERSIONと一致する（NEW_VERSIONはDEV_VERSIONより上で、上げ幅の桁より
+            # 上はmainと同じため）。更新履歴など版ファイル以外は取り消したままにする。
+            git checkout "$REBUILD_FROM" -- "$VERSION_FILE"
+            echo "v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消しました（版ファイルは v$DEV_VERSION のまま）"
+          fi
 
           # **npm version を使う理由は「バージョンを書き換えること」ではなく、"version"
           # lifecycleスクリプトを起動すること。** これが更新履歴フック（RELEASE_CHANGELOG）と
@@ -657,8 +745,6 @@ jobs:
             echo "利用者向けの文面が生成されなかったため、.github/release-notes.md は更新しません"
           fi
 
-          git config user.name "Claude Code"
-          git config user.email "claude-code@example.com"
           # package.json本体に加え、"version" lifecycleスクリプトが更新履歴・使い方のフックとして
           # 新規作成・更新したファイルもバンプコミットへ含める（このステップ開始時点で
           # 作業ツリーはクリーンなので、意図しないファイルを拾うリスクは低い）
@@ -670,8 +756,15 @@ jobs:
           {
             echo "developへの取り込み待ちの変更を v${NEW_VERSION} としてリリースします。"
             echo
+            if [ -n "$REBUILD_FROM" ]; then
+              echo "**v${DEV_VERSION} のリリースを作り直しています**（#3014）。v${DEV_VERSION} のバンプを取り消し、その後にdevelopへ入った変更を含めて判定・更新履歴を作り直しました。v${DEV_VERSION} は本番へ出ていないため欠番になります。"
+              echo
+            fi
             echo "## バージョンの判断根拠"
-            echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+            echo "コード差分の内容から${JUDGED_KIND:-$BUMP_KIND}バージョンと判定しました。"
+            if [ -n "${JUDGED_VERSION:-}" ]; then
+              echo "作り直しのため、判定どおりの v${JUDGED_VERSION} ではなく v${NEW_VERSION} にしています（取り消した v${DEV_VERSION} より上にする必要があるため）。"
+            fi
             echo
             echo "$REASON"
             echo
@@ -973,7 +1066,7 @@ jobs:
             echo "- このPRはGitHub Actionsが自動作成しました（\`.github/workflows/release-develop-to-main.yml\`、#55）"
             echo "- develop→mainのマージはCLAUDE.mdの自動マージ不可カテゴリに該当するため自動マージはされません。ユーザーが内容を確認のうえマージしてください"
             echo "- マージ方式は必ず「Create a merge commit」を選んでください（squash mergeはdevelop/mainの祖先のつながりを切ってしまうため厳禁。詳細はrelease-to-mainスキル参照）"
-            echo "- **このPRのCIが失敗した場合、\`${RELEASE_BRANCH}\`を直接直さないでください。** 自動修復（\`claude-pr-repair.yml\`）は修正をdevelop向けPRとして出します。developへ取り込んだうえで、このPRをcloseしてリリースを起動し直すと、直した内容で凍結され直します"
+            echo "- **このPRを出した後に修正が必要になった場合（CI失敗を含む）、\`${RELEASE_BRANCH}\`を直接直さないでください。** 修正はdevelop向けPRとして入れ（自動修復\`claude-pr-repair.yml\`もdevelop向けに出します）、issue-deckの「修正を入れて作り直す」を押すと、このPRを閉じてバンプから作り直します（#3014）"
           } > /tmp/main-pr-body.md
 
           gh pr create --base main --head "$RELEASE_BRANCH" \

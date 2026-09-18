@@ -187,6 +187,59 @@ describe("実装プロンプトの生成", () => {
       expect(render(agent)).not.toMatch(/\{\{[A-Z_]+\}\}/);
     }
   });
+
+  // #3021: 計画を出さないセッションに計画の書き方・計画レビュー対応を載せない
+  it("`21.plan-required`が無ければ計画系の節とwait-plan-review.shを載せない", () => {
+    for (const agent of ["claude", "codex"]) {
+      const prompt = render(agent, []);
+      expect(prompt).not.toContain("計画は要約から書き、30〜40行に収める");
+      expect(prompt).not.toContain("計画へのレビュー指摘を受けた場合");
+      expect(prompt).not.toContain("wait-plan-review.sh");
+      expect(prompt).not.toContain("if:plan-required");
+      expect(prompt).toContain("計画の提示は不要です");
+      expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+    }
+  });
+
+  it("`21.plan-required`があれば計画系の節を載せ、条件の印は残さない", () => {
+    const prompt = render("claude");
+    expect(prompt).toContain("計画は要約から書き、30〜40行に収める");
+    expect(prompt).toContain("計画へのレビュー指摘を受けた場合");
+    expect(prompt).toContain("scripts/wait-plan-review.sh 2551");
+    expect(prompt).not.toContain("plan-required -->");
+  });
+
+  // #3021の計画レビュー: 節を移したり統合したりしたときに、名指しした参照先が宙に浮かないこと
+  it("「後述の『…』」で名指しした節が本文に見出しとして存在する", () => {
+    for (const agent of ["claude", "codex"]) {
+      for (const labels of [["21.plan-required"], ["21.plan-required", "25.artifact-required"], []]) {
+        const prompt = render(agent, labels);
+        for (const [, name] of prompt.matchAll(/後述の「([^」]+)」/g)) {
+          expect(prompt).toMatch(new RegExp(`^#{2,3} ${name}$`, "m"));
+        }
+      }
+    }
+  });
+
+  // #3021: 毎回は使わない節は参照文書へ移し、索引から辿れるようにする
+  it("手作業Issueの雛形は本文に載せず、参照文書への索引を載せる", () => {
+    const prompt = render("claude", []);
+    expect(prompt).not.toContain("manual-step-body-template:start");
+    expect(prompt).toContain("docs/multi-agent/implementation-agent-reference.md");
+    const reference = readFileSync(
+      path.join(repoRoot, "docs/multi-agent/implementation-agent-reference.md"),
+      "utf8",
+    );
+    for (const heading of [
+      "## 実装後にユーザーの手作業が残る場合",
+      "## ユーザー自身にコマンドを実行してもらう場合",
+      "## 実装中に得た知見の記録",
+      "## 全アプリ共通の共有知識",
+    ]) {
+      expect(reference).toContain(heading);
+      expect(prompt).toContain(`「${heading.slice(3)}」`);
+    }
+  });
 });
 
 describe("汎用ランチャーの実装プロンプトの生成（#2590）", () => {

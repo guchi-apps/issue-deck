@@ -266,9 +266,9 @@ type CreateIssueDialogProps = {
   issues: Issue[];
   onCreated: (issue: Issue) => void;
   /**
-   * 「作成+実装開始」から今夜の夜間実行へ積めたときに呼ぶ（#2866）。
+   * 「作成+実装開始」から次の5時間枠へ積めたときに呼ぶ（#2866）。
    *
-   * **ここも実行先に「今夜の夜間実行」を出す**（`includeDispatchTargets`）ので、
+   * **ここも実行先に「次の5時間枠」を出す**（`includeDispatchTargets`）ので、
    * Issue詳細と同じく積んだ直後に目印（一覧のチップ）を出すには、この合図が要る。省略可。
    */
   onNightlyRunQueued?: () => void;

@@ -60,6 +60,14 @@ function drawArrow(canvas: HTMLElement) {
   fireEvent.pointerUp(canvas, { clientX: 120, clientY: 90, pointerId: 1 });
 }
 
+/** 2本指で距離100→200へ広げる（中心は固定）。ズーム倍率が2倍になる操作 */
+function pinchZoomIn(canvas: HTMLElement) {
+  fireEvent.pointerDown(canvas, { clientX: 100, clientY: 100, pointerId: 1 });
+  fireEvent.pointerDown(canvas, { clientX: 200, clientY: 100, pointerId: 2 });
+  fireEvent.pointerMove(canvas, { clientX: 50, clientY: 100, pointerId: 1 });
+  fireEvent.pointerMove(canvas, { clientX: 250, clientY: 100, pointerId: 2 });
+}
+
 describe("ImageAnnotationDialog", () => {
   it("暗幕を別の要素で重ねず、中身だけが不透明な全画面の層になる（#3006）", async () => {
     await renderEditor();
@@ -130,6 +138,38 @@ describe("ImageAnnotationDialog", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "元に戻す" })[0]);
     fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("2本指でつまむと拡大でき、全体表示に戻すボタンでリセットできる", async () => {
+    const { canvas } = await renderEditor();
+    const wrapper = canvas.parentElement as HTMLElement;
+    expect(wrapper.style.transform).toBe("translate(0px, 0px) scale(1)");
+
+    const resetButtons = () => screen.getAllByRole("button", { name: "全体表示に戻す" });
+    expect(resetButtons()[0]).toHaveProperty("disabled", true);
+
+    pinchZoomIn(canvas);
+    expect(wrapper.style.transform).toBe("translate(0px, 0px) scale(2)");
+    expect(resetButtons()[0]).toHaveProperty("disabled", false);
+
+    fireEvent.click(resetButtons()[0]);
+    expect(wrapper.style.transform).toBe("translate(0px, 0px) scale(1)");
+    expect(resetButtons()[0]).toHaveProperty("disabled", true);
+  });
+
+  it("ピンチへ切り替わると進行中のペンの書き込みを破棄する", async () => {
+    const { canvas } = await renderEditor();
+    fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 50, clientY: 50, pointerId: 1 });
+    // 2本目が触れた時点でピンチへ切り替わり、1本目の書きかけは失われる
+    fireEvent.pointerDown(canvas, { clientX: 200, clientY: 10, pointerId: 2 });
+    fireEvent.pointerUp(canvas, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 200, clientY: 10, pointerId: 2 });
+
+    expect(screen.getAllByRole("button", { name: "保存して差し替え" })[0]).toHaveProperty(
+      "disabled",
+      true,
+    );
   });
 
   it("文字は押した場所に入力欄を出し、Enterで確定する", async () => {

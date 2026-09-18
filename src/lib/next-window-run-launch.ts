@@ -19,9 +19,8 @@ import {
 /**
  * 「次の5時間枠」に積んだIssueを、枠の終わり際に起動ジョブへ変換する（#2995）。
  *
- * 契機は夜間実行と同じ`POST /api/dispatch/claim`への相乗り。違うのは窓の決まり方だけで、
- * 1件ぶんの手順（実ラベルの判定 →`enqueueDispatchJob`→`11.local`）は
- * `launchScheduledRunEntry`を共有する。
+ * 契機は`POST /api/dispatch/claim`への相乗り。1件ぶんの手順（実ラベルの判定 →
+ * `enqueueDispatchJob`→`11.local`）は`launchScheduledRunEntry`を使う。
  *
  * **1回の巡回で起動するのは1件まで。** リセットの瞬間に全部走らせないための間隔
  * （`nextWindowRunIntervalMinutes`）はここで測る。間隔が0でも1件ずつにするのは、

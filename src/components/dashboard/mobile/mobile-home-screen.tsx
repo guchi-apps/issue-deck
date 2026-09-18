@@ -2,10 +2,10 @@
 
 import {
   BookOpen,
+  CalendarClock,
   FolderGit2,
   Loader2,
   MonitorPlay,
-  Moon,
   Rocket,
   Settings,
 } from "lucide-react";
@@ -84,9 +84,9 @@ type MobileHomeScreenProps = {
    * **外出先でこそ効く**——押し忘れて置きっぱなしのものが、ホームを開いただけで分かる。
    */
   previewRunning: boolean;
-  /** 「予約実行」画面を開く（#2772・#2995）。「確認環境」と同じくメニューへ直接1行として置く */
+  /** 「予約実行」画面を開く（#2995）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectNightlyRun: () => void;
-  /** 予約実行に積んであるIssueの数（#2772・#2995。次の5時間枠と今夜の合計）。行に出す */
+  /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す */
   nightlyRunQueuedCount: number | null;
   /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectKnowledge: () => void;
@@ -489,15 +489,15 @@ export function MobileHomeScreenView({
                     : "developの最新をサブPCで動かして画面で確かめる"
                 }
               />
-              {/* 予約実行（#2772・#2995）。数字は積んである予定の件数（PCの左メニューと同じ）。
+              {/* 予約実行（#2995）。数字は積んである予定の件数（PCの左メニューと同じ）。
                   **「リリース履歴」の行は#2811でフッターのタブ（「リリース」）へ移した**——
                   AI使用量（#2631）と同じで、同じ画面への入口を2か所に持たない */}
               <MobileNavRow
                 label="予約実行"
-                icon={Moon}
+                icon={CalendarClock}
                 onClick={onSelectNightlyRun}
                 count={nightlyRunQueuedCount}
-                title="今夜の予定と、前の夜の結果を見る"
+                title="次の5時間枠の予定、直近の結果を見る"
               />
               {/* 共通知識（#2912）。**件数は出さない**（PCの左メニューと同じ理由。ここから
                   押せる操作が無いものに数字を出すと、片付けると減るものに見える） */}

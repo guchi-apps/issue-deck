@@ -1152,41 +1152,31 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
   });
 });
 
-describe("IssueListの夜間実行の目印（#2866）", () => {
+describe("IssueListの予約実行の目印（#2866・#2995）", () => {
   function marksFor(enabled: boolean) {
     return selectScheduledRunQueuedMarks({
-      settings: { enabled, startHour: 1 },
-      window: {
-        nightKey: "2026-09-07",
-        startsAt: "2026-09-06T16:00:00.000Z",
-        endsAt: "2026-09-06T19:00:00.000Z",
-        isOpen: false,
-        nextStartsAt: "2026-09-07T16:00:00.000Z",
-      },
-      queued: [
-        {
-          id: "e1",
-          repositoryFullName: "guchi-apps/issue-deck",
-          issueNumber: 2,
-          issueId: "2",
-          issueTitle: null,
-          targetHost: "subpc",
-          agent: "claude",
-          claudeModel: null,
-          optionLabels: [],
-          kind: "NIGHTLY",
-          status: "QUEUED",
-          nightKey: null,
-          createdAt: "2026-09-07T10:00:00.000Z",
-          resolvedAt: null,
-          outcome: null,
-        },
-      ],
-      results: null,
       nextWindow: {
-        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+        settings: { enabled, leadMinutes: 60, intervalMinutes: 10 },
         window: null,
-        queued: [],
+        queued: [
+          {
+            id: "e1",
+            repositoryFullName: "guchi-apps/issue-deck",
+            issueNumber: 2,
+            issueId: "2",
+            issueTitle: null,
+            targetHost: "subpc",
+            agent: "claude",
+            claudeModel: null,
+            optionLabels: [],
+            kind: "NEXT_WINDOW",
+            status: "QUEUED",
+            nightKey: null,
+            createdAt: "2026-09-07T10:00:00.000Z",
+            resolvedAt: null,
+            outcome: null,
+          },
+        ],
         results: null,
       },
     });
@@ -1195,19 +1185,19 @@ describe("IssueListの夜間実行の目印（#2866）", () => {
   it("積まれている行にだけチップを出す", () => {
     renderList({ nightlyRunQueued: marksFor(true) });
 
-    expect(rowOf(2).textContent).toContain("今夜 01:00");
-    expect(rowOf(1).textContent).not.toContain("今夜");
+    expect(rowOf(2).textContent).toContain("次枠");
+    expect(rowOf(1).textContent).not.toContain("次枠");
   });
 
-  it("夜間実行がOFFなら、止まっている対象の名前を出す", () => {
+  it("次枠実行がOFFなら、止まっている対象の名前を出す", () => {
     renderList({ nightlyRunQueued: marksFor(false) });
 
-    expect(rowOf(2).textContent).toContain("夜間実行OFF");
+    expect(rowOf(2).textContent).toContain("次枠実行OFF");
   });
 
   it("渡されていない画面では何も出さない", () => {
     renderList();
 
-    expect(rowOf(2).textContent).not.toContain("今夜");
+    expect(rowOf(2).textContent).not.toContain("次枠");
   });
 });

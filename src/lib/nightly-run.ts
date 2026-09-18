@@ -1,6 +1,5 @@
 import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionState } from "@/lib/dispatch/session-state";
-import { toJstParts } from "@/lib/format-date-time";
 import {
   CHECK_USER_LABEL,
   CHECK_USER_REASON_TEXT,
@@ -23,96 +22,14 @@ import {
 } from "@/lib/next-window-run";
 
 /**
- * 夜間実行（#2772）の判定。**時刻を見る判定はすべて`now`を引数で受け取り、ここに閉じる。**
+ * 予約実行（次枠実行 #2995）の共有判定。**時刻を見る判定はすべて`now`を引数で受け取る。**
  *
- * 「今夜の夜間実行」に積んだIssueを、開始時刻（`AppSetting.nightlyRunStartHour`・日本時間）から
- * 3時間の窓のあいだにサブPCへ順に起動する。起動後はいつもの経路（PR作成→自動レビュー→
- * developへ自動マージ）で「本番反映待ち」まで進み、朝は結果を5つに分けて見る。
- *
- * - **JSTへ明示的に変換する。** 本番のVPSもサブPCもCIもUTCで動いている（`format-date-time.ts`）。
- *   `getHours()`をそのまま使うと9時間ずれ、22〜5時のように日付をまたぐ窓では境界の判定も崩れる
- * - **窓を過ぎた予定は翌夜へ持ち越さない**（見送りとして朝に出す）。黙って翌夜に走る方が怖い
- * - **承認・回答を代わりに押す経路は持たない**（`docs/multi-agent/gates.md`）。「計画が必要」の
- *   Issueは計画の投稿で止まり、朝に人が承認する
+ * かつては「今夜の夜間実行」（時計で決まる窓）も同じ表・同じ画面で扱っていたが#3019で削除した。
+ * ここに残る型・関数は、削除後も次枠実行（`next-window-run.ts`）と共有しているもの。
  */
-
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-
-/** 開始時刻から起動を試みる時間。過ぎた予定は「見送り」になる */
-export const NIGHTLY_RUN_WINDOW_HOURS = 3;
-
-/**
- * 夜間実行で起動したIssueの確認待ちPushを止めておく朝の時刻（日本時間の「時」）。
- *
- * 計画の投稿は`00.check-user`＋`01.check-plan`を付け、確認待ちのPushは待ちがあれば待ち時間ゼロで
- * 送られる（`notifications/check-user-push.ts`）。夜間実行では01:00に鳴ることになるため、
- * この時刻まで送らない。**朝この時刻に届く通知が、そのまま「手で対応が要るもの」の合図になる。**
- */
-export const NIGHTLY_RUN_MORNING_HOUR = 7;
 
 /** 結果を残す日数。これより古い予定の行は起動処理の巡回で消す */
 export const NIGHTLY_RUN_RESULT_RETENTION_DAYS = 30;
-
-export type NightlyRunWindow = {
-  /** 窓の開始日（日本時間・`YYYY-MM-DD`）。結果を夜ごとに束ねる鍵 */
-  nightKey: string;
-  /** 窓の開始（直近の開始時刻。まだ来ていなければ前日のもの） */
-  startsAt: Date;
-  /** 窓の終了（開始＋`NIGHTLY_RUN_WINDOW_HOURS`時間） */
-  endsAt: Date;
-  /** この夜に起動したIssueのPushを止めておく期限（開始日の翌朝`NIGHTLY_RUN_MORNING_HOUR`時） */
-  morningAt: Date;
-  /** `now`が窓の中か */
-  isOpen: boolean;
-  /** 次に窓が開く時刻。開いている間は`startsAt`（すでに始まっている） */
-  nextStartsAt: Date;
-};
-
-function jstDateKey(ms: number): string {
-  const parts = toJstParts(ms);
-  if (!parts) return "";
-  const mm = String(parts.month).padStart(2, "0");
-  const dd = String(parts.day).padStart(2, "0");
-  return `${parts.year}-${mm}-${dd}`;
-}
-
-/**
- * `now`から見た夜間実行の窓を解決する。
- *
- * 「今日の日本時間`startHour`時」を候補にし、まだ来ていなければ前日のものを取る。
- * 22時開始のように日付をまたぐ窓でも、開始側の日付で`nightKey`が決まる。
- */
-export function resolveNightlyRunWindow(now: Date, startHour: number): NightlyRunWindow {
-  const parts = toJstParts(now);
-  if (!parts) throw new Error("invalid now");
-  let startMs = Date.UTC(parts.year, parts.month - 1, parts.day, startHour) - JST_OFFSET_MS;
-  if (now.getTime() < startMs) startMs -= DAY_MS;
-  const endMs = startMs + NIGHTLY_RUN_WINDOW_HOURS * HOUR_MS;
-  const isOpen = now.getTime() >= startMs && now.getTime() < endMs;
-  // 開始が夜（22・23時）なら翌日の朝、深夜（0〜5時）なら同じ日の朝
-  const morningMs = startMs + ((NIGHTLY_RUN_MORNING_HOUR - startHour + 24) % 24) * HOUR_MS;
-  return {
-    nightKey: jstDateKey(startMs),
-    startsAt: new Date(startMs),
-    endsAt: new Date(endMs),
-    morningAt: new Date(morningMs),
-    isOpen,
-    nextStartsAt: new Date(isOpen ? startMs : startMs + DAY_MS),
-  };
-}
-
-/** `1` → `01:00` */
-export function formatNightlyRunHour(hour: number): string {
-  return `${String(hour).padStart(2, "0")}:00`;
-}
-
-/** 窓の時間帯。`01:00〜04:00` */
-export function describeNightlyRunWindowHours(startHour: number): string {
-  const endHour = (startHour + NIGHTLY_RUN_WINDOW_HOURS) % 24;
-  return `${formatNightlyRunHour(startHour)}〜${formatNightlyRunHour(endHour)}`;
-}
 
 /**
  * 予定の種類（#2995）。`ScheduledRunKind`（Prisma）と同じ語。
@@ -129,14 +46,14 @@ export const SCHEDULED_RUN_KIND_NAMES: Record<ScheduledRunKind, string> = {
 };
 
 /**
- * 夜間実行では進められないオプションのラベル。**人がその場にいないと止まるもの**に限る。
+ * 予約実行では進められないオプションのラベル。**人がその場にいないと止まるもの**に限る。
  *
  * - `23.preview-required`: 開発サーバーを起こして画面を確認してもらう工程で止まる。
  *   `merge-policy: relaxed`でも自動マージが止まる
  * - `25.artifact-required`: 見た目の承認を待つ工程で止まる
  *
- * `22.merge-confirm-required`（朝に自分の目で通すための札）は入れない。`21.plan-required`も
- * 入れない——計画の投稿で止まって朝に承認する、という使い方は夜間実行の想定に含まれる。
+ * `22.merge-confirm-required`（自分の目で通すための札）は入れない。`21.plan-required`も
+ * 入れない——計画の投稿で止まって後から承認する、という使い方は予約実行の想定に含まれる。
  */
 export const NIGHTLY_RUN_BLOCKING_LABELS: readonly string[] = [
   PREVIEW_REQUIRED_LABEL,
@@ -151,12 +68,12 @@ function optionLabelTitle(name: string): string {
  * 付いているラベルのうち、予約実行では進められないものがあればその理由を返す。
  * 積むとき（ダイアログ・API）と起動するとき（あとから付いたもの）の両方で使う。
  *
- * **次枠実行（#2995）にも同じラベルを当てる。** 枠のリセット時刻は時計と無関係なので、
- * 起動が深夜になるか昼になるかを積む時点では決められない。人が居ることを前提にできない。
+ * 枠のリセット時刻は時計と無関係なので、起動が深夜になるか昼になるかを積む時点では決められない。
+ * 人が居ることを前提にできない（#2995）。
  */
 export function resolveNightlyRunLabelRejection(
   labels: readonly { name: string }[],
-  kind: ScheduledRunKind = "NIGHTLY",
+  kind: ScheduledRunKind,
 ): string | null {
   const blocking = labels
     .map((label) => label.name)
@@ -171,15 +88,16 @@ export type NightlyRunLaunchDecision = { action: "launch" } | { action: "skip"; 
 /**
  * 起動する時点で、その予定を起動してよいか。**読むのはGitHub上の実ラベルとIssueの開閉。**
  *
- * 積んだ時点の判定と重ねて置くのは、夜のあいだに状況が変わるため（別のセッションで着手した・
- * closeした・承認待ちになった・`25.artifact-required`が付いた）。判定できない（`issueState`が
- * `null`＝取れなかった）ときは見送る——起動してから止まるより、朝に「見送り」と出る方が軽い。
+ * 積んだ時点の判定と重ねて置くのは、窓が開くまでのあいだに状況が変わるため（別のセッションで
+ * 着手した・closeした・承認待ちになった・`25.artifact-required`が付いた）。判定できない
+ * （`issueState`が`null`＝取れなかった）ときは見送る——起動してから止まるより、後で「見送り」と
+ * 出る方が軽い。
  */
 export function decideNightlyRunLaunch(input: {
   issueState: "open" | "closed" | null;
   labels: readonly { name: string }[];
-  /** 予定の種類（#2995）。見送り理由の文言だけが変わる。既定は夜間実行 */
-  kind?: ScheduledRunKind;
+  /** 予定の種類（#2995）。見送り理由の文言だけが変わる */
+  kind: ScheduledRunKind;
 }): NightlyRunLaunchDecision {
   if (input.issueState === null) {
     return { action: "skip", reason: "Issueの状態を取得できませんでした（GitHubの認証が切れている可能性があります）" };
@@ -198,14 +116,9 @@ export function decideNightlyRunLaunch(input: {
       reason: `確認待ち（${reason ? CHECK_USER_REASON_TEXT[reason] : CHECK_USER_LABEL}）のままでした`,
     };
   }
-  const labelRejection = resolveNightlyRunLabelRejection(input.labels, input.kind ?? "NIGHTLY");
+  const labelRejection = resolveNightlyRunLabelRejection(input.labels, input.kind);
   if (labelRejection) return { action: "skip", reason: labelRejection };
   return { action: "launch" };
-}
-
-/** 窓を過ぎても起動できなかった予定に付ける理由 */
-export function describeNightlyRunWindowMissed(startHour: number): string {
-  return `実行時間（${describeNightlyRunWindowHours(startHour)}）のあいだに起動できませんでした（サブPCが応答していなかった可能性があります）`;
 }
 
 export type NightlyRunEntryStatus = "QUEUED" | "LAUNCHED" | "SKIPPED" | "CANCELED";
@@ -308,11 +221,8 @@ export function classifyNightlyRunOutcome(input: {
   return { kind: "run", detail: "状態を確認しています" };
 }
 
-export type NightlyRunSettings = { enabled: boolean; startHour: number };
-
 /** 「予約実行」画面が読み書きする設定のひとまとまり（`GET`/`PATCH /api/nightly-run/settings`） */
 export type ScheduledRunSettings = {
-  nightly: NightlyRunSettings;
   nextWindow: NextWindowRunSettings;
 };
 
@@ -338,15 +248,7 @@ export type NightlyRunEntryView = {
   outcome: NightlyRunOutcome | null;
 };
 
-export type NightlyRunWindowView = {
-  nightKey: string;
-  startsAt: string;
-  endsAt: string;
-  isOpen: boolean;
-  nextStartsAt: string;
-};
-
-/** 予定と結果の1組。夜間実行と次枠実行で同じ形（画面もこの単位で描く） */
+/** 予定と結果の1組（画面もこの単位で描く） */
 export type ScheduledRunSection = {
   /** 予定（積んだ順） */
   queued: NightlyRunEntryView[];
@@ -355,19 +257,12 @@ export type ScheduledRunSection = {
 };
 
 /**
- * 「予約実行」画面（旧「夜間実行」）の状態。
+ * 「予約実行」画面の状態。
  *
- * **2種類の予定を1つの状態にまとめる**（#2995）。どちらも「積んで、あとで起きる」同じ仕組みで、
- * 取りに行く先を2つに分けると画面も更新間隔も二重になる。違うのは窓の決まり方だけなので、
- * `window`（時計の窓）と`nextWindow.window`（枠の窓）をそれぞれ持つ。
+ * かつては夜間実行（時計の窓）と次枠実行（枠の窓）の2種類を1つの状態にまとめていたが、
+ * #3019で夜間実行を削除したため次枠実行の1種類だけが残る。
  */
 export type NightlyRunState = {
-  settings: NightlyRunSettings;
-  window: NightlyRunWindowView;
-  /** 今夜の予定（積んだ順）。`nightly.queued`の別名として残してある */
-  queued: NightlyRunEntryView[];
-  /** 直近の夜の結果。まだ一度も走っていなければ`null` */
-  results: { nightKey: string; entries: NightlyRunEntryView[] } | null;
   /** 次の5時間枠の予定と結果（#2995） */
   nextWindow: ScheduledRunSection & {
     settings: NextWindowRunSettings;
@@ -375,16 +270,6 @@ export type NightlyRunState = {
     window: NextWindowRunWindowView | null;
   };
 };
-
-export function toNightlyRunWindowView(window: NightlyRunWindow): NightlyRunWindowView {
-  return {
-    nightKey: window.nightKey,
-    startsAt: window.startsAt.toISOString(),
-    endsAt: window.endsAt.toISOString(),
-    isOpen: window.isOpen,
-    nextStartsAt: window.nextStartsAt.toISOString(),
-  };
-}
 
 /**
  * 結果を分類ごとに数える。画面の要約（4枠）に使う。
@@ -431,10 +316,6 @@ export function parseNightlyRunOptionLabels(value: unknown): string[] {
  * **出すのは`QUEUED`の予定だけ。** 起動した後は進捗バー・セッションの表示が受け持つので、
  * 目印を重ねると同じことを2か所で言うことになる
  * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
- *
- * **2種類を1つの表にまとめる**（#2995）。どちらも同じ`Issue.id`で引き、同じIssueに両方が
- * 付くことはない（`activeKey`が種類をまたいで一意）。画面へ渡すのは組み立て済みの文言で、
- * 一覧・詳細の側が種類ごとの分岐を持たずに済むようにしてある。
  */
 export type ScheduledRunQueuedMark = {
   /** 取り消し（`DELETE /api/nightly-run/:id`）に使う予定の識別子 */
@@ -470,23 +351,6 @@ export function selectScheduledRunQueuedMarks(state: NightlyRunState | null): Sc
   const marks = new Map<string, ScheduledRunQueuedMark>();
   if (!state) return marks;
 
-  for (const entry of state.queued) {
-    if (entry.status !== "QUEUED" || !entry.issueId) continue;
-    const mark: NightlyRunQueuedMark = {
-      entryId: entry.id,
-      startHour: state.settings.startHour,
-      enabled: state.settings.enabled,
-    };
-    marks.set(entry.issueId, {
-      entryId: entry.id,
-      kind: "NIGHTLY",
-      enabled: mark.enabled,
-      chip: describeNightlyRunMarkChip(mark),
-      title: describeNightlyRunMarkTitle(mark),
-      detail: describeNightlyRunMarkDetail(mark),
-    });
-  }
-
   for (const entry of state.nextWindow.queued) {
     if (entry.status !== "QUEUED" || !entry.issueId) continue;
     const mark: NextWindowRunQueuedMark = {
@@ -513,37 +377,4 @@ export function findScheduledRunQueuedMark(
   issueId: string,
 ): ScheduledRunQueuedMark | null {
   return marks?.get(issueId) ?? null;
-}
-
-/** 夜間実行の目印を組み立てるための材料（文言は`describeNightlyRunMark*`が作る） */
-export type NightlyRunQueuedMark = {
-  entryId: string;
-  /** 起動を試み始める時刻（日本時間の「時」） */
-  startHour: number;
-  enabled: boolean;
-};
-
-/**
- * 一覧の行に出すチップの文言（#2866）。**開始時刻まで入れる**——「今夜」だけだと、
- * 積んだ覚えのある夜なのか、設定を変えた後の夜なのかを行から読めない。
- *
- * OFFのときは「今夜」ではなく**止まっている対象の名前**を出す（計画レビューG1の指摘3）。
- * 「今夜 OFF」だと予定の時間帯の話に読め、人が設定を戻すまで走らないことが伝わらない。
- */
-export function describeNightlyRunMarkChip(mark: NightlyRunQueuedMark): string {
-  return mark.enabled ? `今夜 ${formatNightlyRunHour(mark.startHour)}` : "夜間実行OFF";
-}
-
-/** チップのツールチップ・詳細の注釈で使う1行 */
-export function describeNightlyRunMarkTitle(mark: NightlyRunQueuedMark): string {
-  return mark.enabled
-    ? `今夜の夜間実行に積まれています（${describeNightlyRunWindowHours(mark.startHour)}に順に起動）`
-    : "今夜の夜間実行に積まれていますが、夜間実行はOFFです";
-}
-
-/** 詳細の注釈に添える説明。何が起きるか・いま開始したいときはどうするか */
-export function describeNightlyRunMarkDetail(mark: NightlyRunQueuedMark): string {
-  return mark.enabled
-    ? `${describeNightlyRunWindowHours(mark.startHour)}のあいだに順に起動します。いま開始する場合は先に予定を取り消してください。`
-    : "このままでは起動しません。夜間実行をONにするか、予定を取り消してください。";
 }

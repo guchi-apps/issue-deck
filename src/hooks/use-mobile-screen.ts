@@ -62,7 +62,7 @@ export type MobileScreen =
   | { kind: "usage" }
   // リリース履歴（#2726）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "release-history" }
-  // 夜間実行（#2772）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
+  // 予約実行（#2995）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "nightly-run" }
   // 共通知識（#2912）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "knowledge" }
@@ -402,7 +402,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   // リリース履歴は#2811でフッターのタブになったため、専用の遷移関数は持たない
   // （`selectTab("release-history")`で開く）。AI使用量（#2631）と同じ。
 
-  // ホームのメニューから夜間実行の画面へ遷移する（#2772）。確認環境と同じ形
+  // ホームのメニューから予約実行の画面へ遷移する（#2995）。確認環境と同じ形
   const selectNightlyRun = useCallback(() => navigate({ screen: "nightly-run" }), [navigate]);
 
   // ホームのメニューから共通知識の画面へ遷移する（#2912）。確認環境と同じ形
