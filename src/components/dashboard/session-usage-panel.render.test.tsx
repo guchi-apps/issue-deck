@@ -501,7 +501,7 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
-  it("内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別は縦棒でトークンを出さない（#3038）", () => {
+  it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
     renderPanel(response([entry()]));
 
     // 日別の縦棒。内側はエージェントの割合で、棒には数値を書けないのでツールチップへ出す。
@@ -510,10 +510,12 @@ describe("SessionUsagePanel", () => {
     // トークンの細い帯は日別では出さない。
     expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
-    // 種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
-    // リポジトリ別は円グラフへ替わり、帯を持たない（#3060）。
+    // Issue・PR別は細い帯（トークンの4区分。長さもトークン量に比例）を出す。
+    // リポジトリ別は円グラフ（#3060）、種別別は金額の棒だけ（#3064）で、帯を持たない。
+    const issues = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(issues).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
     const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
-    expect(within(breakdown).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
+    expect(within(breakdown).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
     // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();
