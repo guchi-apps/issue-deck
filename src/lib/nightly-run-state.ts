@@ -16,6 +16,7 @@ import { nightlyRunIssueKey, readNightlyRunSettings } from "@/lib/nightly-run-db
 import {
   resolveNextWindowRunWindow,
   toNextWindowRunWindowView,
+  type NextWindowRunSettings,
 } from "@/lib/next-window-run";
 import {
   readClaudeWindowSnapshot,
@@ -156,6 +157,19 @@ function toView(
   };
 }
 
+/**
+ * 枠を取りに行ってよいか。取得は最小の推論リクエスト1本で、送信そのものが5時間枠を
+ * 開始してしまうため、**次枠実行がONで、かつ予定が1件以上あるときだけ**呼ぶ（#2995・#3005）。
+ * 起動判定を持つ`next-window-run-launch.ts`の`launchNextWindowRunEntries`（`!settings.enabled`→
+ * return、`entries.length===0`→returnの2段の早期returnで同じANDを表す）と意図を揃えている。
+ */
+export function shouldReadNextWindowSnapshot(
+  settings: Pick<NextWindowRunSettings, "enabled">,
+  queuedCount: number,
+): boolean {
+  return settings.enabled && queuedCount > 0;
+}
+
 /** 種類ごとに「予定」と「直近1回の結果」に切り分ける */
 function splitByKind(rows: readonly EntryRow[], kind: ScheduledRunKind) {
   const ofKind = rows.filter((row) => row.kind === kind);
@@ -201,9 +215,7 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
     );
   };
 
-  // **枠を取りに行くのは、次枠実行がONか予定があるときだけ**（#2995）。取得は最小の推論
-  // リクエスト1本で、送信そのものが5時間枠を開始してしまう（`next-window-run-db.ts`）
-  const shouldReadWindow = nextWindowSettings.enabled || nextWindow.queued.length > 0;
+  const shouldReadWindow = shouldReadNextWindowSnapshot(nextWindowSettings, nextWindow.queued.length);
   const snapshot = shouldReadWindow ? await readClaudeWindowSnapshot() : null;
   const claudeWindow = shouldReadWindow
     ? toNextWindowRunWindowView(
