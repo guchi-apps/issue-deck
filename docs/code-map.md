@@ -527,7 +527,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   足すと、実際より安い金額になる。
 - **「AI使用量」画面の内訳カードは`リポジトリ別`・`セッション種別別`の2枚**（#3062）。
   以前は3枚目に「アプリ内AI機能別」（issue-deck自身のAPI呼び出しの内訳。#2752で種別別の隣へ
-  移した）があったが、表示ごと削除した。
+  移した）があったが、表示ごと削除した。**`リポジトリ別`は棒ではなく円グラフ**（金額の上位5件
+  ＋その他。#3060。[`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
+  配置は[`lib/pie-chart-layout.ts`](../src/lib/pie-chart-layout.ts)。詳細は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)）。
+  - **見出しは「何で分けたか」で揃え、`whitespace-nowrap`で折り返させない。** 「種別別」は
+    何の種別か分からない、という指摘から揃えた。**スマホ幅ではカードの中身が337pxしか無く**、
+    見出しと右の補足が2行ずつに割れて上半分が文字で埋まる。あふれたときに省略記号へ落とすのは
+    補足だけにする
+  - **期間の指定は画面上部のセレクタ1つに寄せる**（`days`をpropで渡す）。カードが自前の
+    「過去1日／過去7日」を持っていた頃は、上を30日にしたまま下だけ1日を見ることができた
 - **ローカルセッション（Claude Code本体）の消費は、左メニューの「AI使用量」で見る**（#2504）。
   上のカードに入らないぶんで、**転記からしか取れず、本番のissue-deck（VPS）は転記を持たない**
   ため、サブPCのpollerが`scripts/lib/session-usage.sh`で集計して数値だけを押し込む

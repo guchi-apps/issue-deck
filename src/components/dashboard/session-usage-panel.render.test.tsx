@@ -360,26 +360,38 @@ describe("SessionUsagePanel", () => {
     expect(container.querySelector("p.truncate")).toBeNull();
   });
 
-  it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {
-    const entries = Array.from({ length: 6 }, (_unused, index) =>
+  it("リポジトリ別は円グラフで、金額の上位5件と「その他」にまとめる（#3060）", () => {
+    const entries = Array.from({ length: 7 }, (_unused, index) =>
       entry({
         sessionId: `repo-${index}`,
         repository: `repository-${index}`,
-        costUsd: 6 - index,
+        costUsd: 7 - index,
       }),
     );
     renderPanel(response(entries));
 
-    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
-    expect(within(breakdown).getByText("repository-0")).toBeTruthy();
-    expect(within(breakdown).getByText("repository-4")).toBeTruthy();
-    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    // 名前が出るのは上位5件だけ。6位・7位は「その他」へ入り、件数を添える
+    const chart = within(card).getByRole("img");
+    expect(within(chart).getByText("repository-0")).toBeTruthy();
+    expect(within(chart).getByText("repository-4")).toBeTruthy();
+    expect(within(chart).queryByText("repository-5")).toBeNull();
+    expect(within(chart).getByText("その他")).toBeTruthy();
+    expect(within(chart).getByText("2リポジトリ")).toBeTruthy();
+    // 全体は28ドル。最大の切れは7/28で25.0%、その他は3/28で10.7%
+    expect(chart.getAttribute("aria-label")).toContain("repository-0 25.0%（$7.00）");
+    expect(chart.getAttribute("aria-label")).toContain("その他 10.7%（$3.00）");
+    // 棒＋トークン帯や「すべて表示」の展開ボタンは持たない
+    expect(within(card).queryByRole("button")).toBeNull();
+    expect(within(card).getByText("7リポジトリ・上位5件＋その他")).toBeTruthy();
+  });
 
-    fireEvent.click(within(breakdown).getByRole("button", { name: "すべて表示（残り 1 リポジトリ）" }));
-    expect(within(breakdown).getByText("repository-5")).toBeTruthy();
+  it("リポジトリ別の円グラフは、Claude・Codex・Actionsもトークンも区別しない（#3060）", () => {
+    renderPanel(response([entry()]));
 
-    fireEvent.click(within(breakdown).getByRole("button", { name: "上位5件のみ表示" }));
-    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    expect(within(card).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
+    expect(within(card).queryByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeNull();
   });
 
   it("明細の棒を、素の入力・キャッシュ書込・キャッシュ読出・出力の4つへ塗り分ける（#2628）", () => {
@@ -417,9 +429,10 @@ describe("SessionUsagePanel", () => {
     // トークンの細い帯は日別では出さない。
     expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
-    // リポジトリ別・種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
-    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
-    expect(within(breakdown).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+    // 種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
+    // リポジトリ別は円グラフへ替わり、帯を持たない（#3060）。
+    const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(within(breakdown).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
 
     // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();
