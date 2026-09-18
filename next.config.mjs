@@ -1,4 +1,8 @@
-import type { NextConfig } from "next";
+// @ts-check
+// 設定ファイルは**TypeScriptにしない**（#3017）。`next.config.ts`だと、本番の`next start`が起動時に
+// これをトランスパイルするためだけにSWCのネイティブバイナリを読み込み、そのまま常駐する
+// （実測でRSS約43MB・スレッド12本ぶん。docs/production-memory.md）。型はJSDocで付け、
+// `tsconfig.json`の`include`へこのファイルを個別に足して`pnpm typecheck`の対象に残している。
 
 // 開発サーバーの内部リソース（`/_next/*`・HMRのWebSocket）は、既定でクロスオリジンからの
 // アクセスが403になる。localhost以外のホスト名で開発サーバーを開くには、そのホストを
@@ -30,7 +34,8 @@ const extraDevOrigins = (process.env.ISSUE_DECK_DEV_ALLOWED_ORIGINS ?? "")
 // `"next start" does not work with "output: standalone" configuration.`という警告が
 // 本番ログへ出続けていたため外した（#2366）。使わない`.next/standalone`がビルド成果物に
 // 入って転送量が増える問題も同時に消える。
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   /* config options here */
   allowedDevOrigins: [...DEFAULT_DEV_ORIGINS, ...extraDevOrigins],
 };

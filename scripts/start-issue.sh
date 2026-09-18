@@ -581,6 +581,7 @@ prepare_issue() {
   # prompt-render:start（scripts/implementation-prompt.test.mjs がこの範囲を切り出して実行する）
   python3 - "$issue_json_file" "$PROMPT_TEMPLATE" "$DEV_PORT" "$SSLIP_URL" "$dev_log" "$PREPARE_ONLY" "$WORKTREE_DIR" "$issue_relations" "$concurrent_work" "$AGENT_KIND" "$LAUNCHER_SCRIPTS_DIR" >"$PROMPT_FILE" <<'PY'
 import json
+import re
 import sys
 
 issue_json_path, template_path, dev_port, sslip_url, dev_log = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
@@ -785,7 +786,7 @@ if agent_kind == "codex":
         "含まれない場合はそのまま実装に進んでよいです。"
     )
     plan_comment_note = (
-        f"  - **`{scripts_dir}/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
+        f"**`{scripts_dir}/submit-plan.sh`が、計画コメントの投稿（`plan-base`のSHA付き）と"
         "`00.check-user`＋`01.check-plan`の付与まで行います**（#2545）。"
         "同じ計画を`gh issue comment`で投稿し直さないでください。"
         f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
@@ -799,13 +800,29 @@ else:
         "含まれない場合はそのまま実装に進んでよいです。"
     )
     plan_comment_note = (
-        "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
+        "**Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容"
         "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、"
         "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。"
         "その場合は同じ計画を手で投稿し直さないでください。"
         f"`gh issue view {issue['number']} --comments`で投稿されていることを確かめ、"
         "**無ければ**上記のとおり手で投稿します"
     )
+
+# `21.plan-required`が無いセッションでは計画を出さないので、計画の書き方・計画レビューへの応答・
+# PR直前の`wait-plan-review.sh`を丸ごと載せない（#3021）。ひな形側で
+# `<!-- if:plan-required -->`〜`<!-- endif:plan-required -->`に囲った区間がそれで、ラベルが
+# 付いていれば印だけを消し、無ければ区間ごと消す。
+# **文面をPython側へ移さずひな形に残す**のは、指示の本文を1か所（Markdown）で読めるようにするため。
+plan_required = "21.plan-required" in label_names
+if not plan_required:
+    plan_instructions = "このIssueには`21.plan-required`が付いていないため、計画の提示は不要です。そのまま実装に進んでください。"
+    plan_comment_note = ""
+template = re.sub(
+    r"\n?<!-- if:plan-required -->\n(.*?)<!-- endif:plan-required -->\n",
+    (lambda m: "\n" + m.group(1)) if plan_required else (lambda m: "\n"),
+    template,
+    flags=re.S,
+)
 
 comments = issue.get("comments", [])
 if comments:

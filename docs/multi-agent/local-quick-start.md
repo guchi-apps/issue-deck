@@ -918,7 +918,7 @@ worktreeにブランチが乗っている・未コミットの変更があると
 Issueごとのセッションと同じserve方式へ寄せた。
 
 - **生のtailnet IPでは開けない。** serveはHostヘッダーで振り分けるため404になる。そもそも
-  `next.config.ts`の`allowedDevOrigins`（`**.ts.net`）にも当たらず、画面のHTMLが出ても
+  `next.config.mjs`の`allowedDevOrigins`（`**.ts.net`）にも当たらず、画面のHTMLが出ても
   `/_next/*`が403になっていた（#1289で実測）。開けないURLを並べないよう、**表示もFQDNだけにした**。
 - `--stop`と起動し直しのたびにserveを撤去する。**撤去し忘れると繋がらないURLが残るだけでなく、
   そのポートで`next dev`を起こせなくなる**（#1403）。`--foreground`も同じで、Ctrl-Cで撤去される
@@ -1391,7 +1391,7 @@ IPv4のループバック待ち受けに解決される。
 ### allowedDevOriginsに載せる必要がある
 
 localhost以外のホスト名で開くと、開発サーバーの内部リソース（`/_next/*`とHMRのWebSocket）が
-**403で弾かれる**。`next.config.ts`の`allowedDevOrigins`に載っているホストだけが通る。
+**403で弾かれる**。`next.config.mjs`の`allowedDevOrigins`に載っているホストだけが通る。
 
 ```ts
 allowedDevOrigins: ["localhost", "127.0.0.1", "**.sslip.io", "**.ts.net", ...extraDevOrigins]

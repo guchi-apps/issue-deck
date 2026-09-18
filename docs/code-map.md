@@ -380,6 +380,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持たせない**——エージェントは線の形（文字に重なる横線・矢印・書き足した文字）で意図を
   読むため、何をしてほしいかは本文にも一言書く。キャンバスの`pointerdown`は既定動作を
   止めている。止めないと互換のmousedownで、出したばかりの文字の入力欄からフォーカスが外れる。
+  **2本指ピンチでの拡大・縮小・パン（#3018）は、`canvas`自体でなくそれを包む内側の`div`へ
+  CSS `transform`（`translate`+`scale`）を掛けて実現する。** Pointer座標→画像座標の変換
+  （`toImagePoint`）は`getBoundingClientRect()`を使っており、これは`transform`適用後の
+  実際のスクリーン上の矩形を返すため、ズームしても変換ロジックの変更は不要だった。
+  ズームの影響を受けない基準矩形（`outerRef`）を別に持ち、ピンチの中心点をその基準の
+  ローカル座標として固定したうえで新しい`translate`を計算する（中心点固定ズーム）。
+  2本指目が触れた時点で進行中のペン・移動・文字入力は破棄し、1本指以下に戻るまでは
+  ピンチ扱いのままにする——同じ`canvas`上でシングルタッチ操作とピンチが競合するため。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -551,7 +559,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     しない）。(2) 当時除外していたGitHub Actionsも`CLAUDE_CODE_OAUTH_TOKEN`を共有し同じ枠を
     消費するため按分に含め、計上漏れを1つ減らした。それでもissue-deck以外でのClaude利用・
     アプリ内AI機能（`api-usage.ts`）は含まれないため、**Issue別の枠%は実際より大きめに出る**
-    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。画面の断り書きもこの向き）。
+    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。この断り書きは#3016で
+    画面から削除しており、性質の説明としてここにのみ残す）。
   - **DB取得範囲は「期間の開始」と「5時間枠ウィンドウの開始」の早い方まで広げる**（#2988）。
     `sessionUsagePeriodStartMs`が返す期間の開始は日本時間0:00始まりのため、深夜〜早朝に開くと
     5時間枠の前半（`resetsAt - durationMs`）が前日にかかる。`buildSessionUsageSummary`は
@@ -3164,6 +3173,8 @@ export function POST(request: NextRequest) {
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
   `scripts/start-issue.sh`を持つリポジトリ（issue-deck自身）だけが自前のスクリプトで起動し、
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
+  issue-deck自身の実装プロンプト（`scripts/prompts/implementation-agent.md`）は毎回使う指示だけを載せ、
+  一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
@@ -3516,6 +3527,32 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
   無印クラスを別グループとして扱うため、無印側だけ上書きされ`md:`側は残る）。
   プレースホルダーを別要素で用意せず**実ボタンと同じ`<Button>`をそのまま常時描画**すれば、
   この挙動があっても寸法は常に一致する
+
+## ダイアログの初期値を開くたびに作り直すなら、`useEffect`ではなく条件付きレンダリングでマウントし直す（#3009）
+
+**`open`が変わったときに`useState`の値を作り直したくて`useEffect(() => { if (open) setState(...) }, [open, ...])`
+と書くと、ESLintの`react-hooks/set-state-in-effect`に引っかかる。** エフェクト内での同期的な
+`setState`はカスケードするレンダーを招くため非推奨（[`pull-request-fix-session-dialog.tsx`](../src/components/dashboard/pull-request-fix-session-dialog.tsx)で実際に発生）。
+
+- **直し方はダイアログの中身を条件付きレンダリング（`open && <Dialog.../>`）にし、
+  `useState(initialProp)`をマウント時の初期値としてだけ使う。** 開くたびに新しいコンポーネント
+  インスタンスとしてマウントされるので、その時点の`initialProp`で初期化し直される
+- Radixの`Dialog`は`forceMount`を渡さない限り、閉じている間は元々中身をDOMから外している
+  （`Presence`によるアンマウント）ため、条件付きレンダリングを重ねても見た目の挙動は変わらない
+
+## 「修正をセッションへ送る」の送り先判定は、画面ごとに前段の絞り込みを足して再利用する（#3009）
+
+**マージ承認待ち（Issue詳細の`MergeApprovalActions`・#2919）専用に見えて、実際は
+`resolvePrFixRequestRoute`（[`pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）が
+持つ判定材料は「対象Issueのラベル」と「セッション状態」の2つだけ。** マージ承認待ちかどうか・
+PRがマージ済みかどうかは、この関数の外側で先に判定してから渡す設計になっている。
+
+PR詳細の「修正Issueを起案」（`PullRequestFixIssueBar`・#2961）へ同じ「セッションへ送る」を
+足すとき（[`pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)の
+`resolvePullRequestFixRoute`）も、`resolvePrFixRequestRoute`自体は変更せず、前段に
+「PRがマージ済みなら常に新規Issue作成」「元Issueが1件に絞れないなら常に新規Issue作成」という
+判定を足しただけで済んだ。**送り先判定を増やすときは、既存の判定関数を複製・改造せず、
+呼び出し側で前段の絞り込みを足せないかを先に検討する。**
 
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 

@@ -566,7 +566,7 @@ pollerが受け口を`env ISSUE_DECK_AGENT=codex`で呼ぶとき、それ以外�
 
 ## プロンプトは分岐させず、差分だけを足す
 
-実装プロンプトのひな形（`scripts/prompts/implementation-agent.md`）は43KBあり、Codex専用の写しを
+実装プロンプトのひな形（`scripts/prompts/implementation-agent.md`。#3021で整理する前は43KBあった）について、Codex専用の写しを
 作れば**片方が必ず古くなる**。そのため写しは作らず、Codexで起こしたときだけ
 `scripts/prompts/codex-supplement.md`（読み替え）を生成したプロンプトの末尾へ足す。
 

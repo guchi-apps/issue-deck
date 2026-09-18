@@ -1,3 +1,5 @@
+import { resolvePrFixRequestRoute, type PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   extractReviewConcerns,
   quoteReviewText,
@@ -110,26 +112,7 @@ export function buildPullRequestFixIssueDraft(params: {
     "",
   ];
 
-  const quotes: string[] = [];
-  if (review) {
-    quotes.push(
-      [
-        `**自動レビュー（${review.verdictLabel}）**` +
-          (review.isStale ? "（PRの最新コミットより前のコミットへのレビューです）" : ""),
-        "",
-        quoteReviewText(extractReviewConcerns(review.body)),
-      ].join("\n"),
-    );
-  }
-  for (const event of openChangeRequests) {
-    quotes.push(
-      [
-        `**変更を要求（${event.authorLogin}）**`,
-        "",
-        event.body.trim() ? quoteReviewText(event.body.trim()) : "> （本文なし。差分の行へのコメントを確認してください）",
-      ].join("\n"),
-    );
-  }
+  const quotes = buildPullRequestFixQuotes({ review, openChangeRequests });
   lines.push(
     quotes.length > 0
       ? quotes.join("\n\n")
@@ -147,4 +130,89 @@ export function buildPullRequestFixIssueDraft(params: {
     title: `${pullRequest.title} の修正（レビュー指摘）`,
     body: lines.join("\n"),
   };
+}
+
+/**
+ * 自動レビュー・「変更を要求」レビューを引用へ組み立てる。新規Issue下書き
+ * （`buildPullRequestFixIssueDraft`）とセッションへの依頼文（`buildPullRequestFixReason`）で共用する。
+ */
+function buildPullRequestFixQuotes(params: {
+  review: Pick<PullRequestReviewCommentContent, "body" | "verdictLabel" | "isStale"> | null;
+  openChangeRequests: readonly PullRequestEvent[];
+}): string[] {
+  const quotes: string[] = [];
+  if (params.review) {
+    quotes.push(
+      [
+        `**自動レビュー（${params.review.verdictLabel}）**` +
+          (params.review.isStale ? "（PRの最新コミットより前のコミットへのレビューです）" : ""),
+        "",
+        quoteReviewText(extractReviewConcerns(params.review.body)),
+      ].join("\n"),
+    );
+  }
+  for (const event of params.openChangeRequests) {
+    quotes.push(
+      [
+        `**変更を要求（${event.authorLogin}）**`,
+        "",
+        event.body.trim() ? quoteReviewText(event.body.trim()) : "> （本文なし。差分の行へのコメントを確認してください）",
+      ].join("\n"),
+    );
+  }
+  return quotes;
+}
+
+/**
+ * 「修正Issueを起案」の送り先がセッション（`session`・`resume`・`actions`・`handoff`）のときに
+ * Issueコメントへ投稿する依頼文（#3009）。**`@claude`は付けない**——付けるのは
+ * `requestPrFixCommentBody`（`prFixRequestLabels`と同様、送信直前に呼び出し側が付ける）。
+ */
+export function buildPullRequestFixReason(params: {
+  pullRequestNumber: number;
+  review: Pick<PullRequestReviewCommentContent, "body" | "verdictLabel" | "isStale"> | null;
+  openChangeRequests: readonly PullRequestEvent[];
+}): string {
+  const quotes = buildPullRequestFixQuotes(params);
+  const head = `PR #${params.pullRequestNumber} のレビューで指摘された次の点を修正してください。`;
+  if (quotes.length === 0) {
+    return `${head}\n\nレビューの指摘は取り込めませんでした。PR #${params.pullRequestNumber} のレビューを読んで、直す点を書いてください。`;
+  }
+  return `${head}\n\n${quotes.join("\n\n")}`;
+}
+
+/** PR詳細の「修正Issueを起案」帯の送り先。`create-issue`以外は`PrFixRequestRoute`（#2919）と同じ */
+export type PullRequestFixRoute = PrFixRequestRoute | { kind: "create-issue" };
+
+/**
+ * 「修正Issueを起案」帯の送り先を決める（#3009）。
+ *
+ * Issue詳細の「対応PR・マージ待ち」欄（#2919・`resolvePrFixRequestRoute`）はマージ承認待ちの
+ * Issueに限って「セッションへ送る」「セッションを再開して依頼する」を出していた。この帯は
+ * 承認待ちかどうかに関わらず出るため、まず**PRを更新できるかどうか**を先に判定する。
+ *
+ * - **マージ済み・クローズ済みなら常に`create-issue`。** どちらもPRを更新できず、新しい
+ *   Issueを立てるしか手段が無い（Issue #3009の要求どおり）。**「未マージ」を`!merged`だけで
+ *   判定しない**——クローズ済み・未マージのPRへ追加コミットしてもPRは更新されない
+ *   （`stateLabel`が区別している3状態のうち、送り先を切り替えてよいのは`open`だけ。
+ *   計画レビュー指摘1・#3009）
+ * - **元Issueが1件に絞れないときも`create-issue`。** 複数・0件のPRへセッション再開を出すと
+ *   どのIssueへ送るのかが曖昧になる（今回のスコープ外）
+ * - 絞れたら`resolvePrFixRequestRoute`にそのまま委ねる（`actions`・`session`・`resume`・`handoff`の
+ *   4通り）。いずれも新しいIssueを立てずに既存Issueへ指摘を届ける経路なので、`create-issue`とは
+ *   別に分ける必要が無い——`actions`（無人実行が担当）は`@claude`コメントで既存PRへ追加コミット
+ *   させ、`handoff`は`11.local`を外してから同じ経路に渡す（計画レビュー指摘2）
+ */
+export function resolvePullRequestFixRoute(params: {
+  pullRequest: Pick<PullRequestSummary, "merged" | "state" | "linkedIssueNumbers">;
+  /** 元Issueが1件のときのそのIssueのラベル。複数・0件・未解決（一覧に見つからない）ならnull */
+  targetIssueLabels: readonly { name: string }[] | null;
+  session: Pick<DispatchSessionView, "host" | "state" | "codexThreadKnown"> | null;
+}): PullRequestFixRoute {
+  if (params.pullRequest.merged || params.pullRequest.state !== "open") {
+    return { kind: "create-issue" };
+  }
+  if (params.pullRequest.linkedIssueNumbers.length !== 1) return { kind: "create-issue" };
+  if (params.targetIssueLabels === null) return { kind: "create-issue" };
+  return resolvePrFixRequestRoute({ labels: params.targetIssueLabels, session: params.session });
 }

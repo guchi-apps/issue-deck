@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Hourglass, Loader2, Moon, RefreshCw, X } from "lucide-react";
+import { CalendarClock, Hourglass, Loader2, RefreshCw, X } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -19,7 +19,6 @@ import { useNow } from "@/hooks/use-now";
 import {
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
   NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
-  NIGHTLY_RUN_START_HOUR_OPTIONS,
 } from "@/lib/app-settings";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatTimeOfDay } from "@/lib/format-date-time";
@@ -29,8 +28,6 @@ import {
   NIGHTLY_RUN_OUTCOME_DESCRIPTIONS,
   NIGHTLY_RUN_OUTCOME_LABELS,
   NIGHTLY_RUN_OUTCOME_ORDER,
-  describeNightlyRunWindowHours,
-  formatNightlyRunHour,
   summarizeNightlyRunOutcomes,
   type NightlyRunEntryView,
   type NightlyRunOutcomeKind,
@@ -45,15 +42,14 @@ import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 
 /**
- * 「予約実行」画面（#2772・#2995）。**積んで、あとで起きる予定を1画面にまとめる。**
+ * 「予約実行」画面（#2995）。**積んで、あとで起きる予定をまとめる。**
  *
- * 節は2つ。「次の5時間枠」（Claudeのプラン枠のリセット時刻で決まる窓）と「今夜の夜間実行」
- * （時計で決まる窓）で、どちらも「予定 → 直近1回の結果（5分類）」の同じ形で並べる。
- * 見る場所を2つに分けないのは、人から見ればどちらも「積んでおいたものが後で走る」1つの
- * 仕組みだから（`docs/code-map.md`「同じ状態を2か所で言わせない」）。
+ * 「次の5時間枠」（Claudeのプラン枠のリセット時刻で決まる窓）に積んだ予定を、
+ * 「予定 → 直近1回の結果（5分類）」の形で並べる（かつては「今夜の夜間実行」も同じ形で
+ * 並べていたが#3019で削除した）。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`release-history-panel.tsx`と同じ切り分け）。
- * 設定（有効／無効・時刻・残り時間・間隔）も各節の中に置き、**切り替えた時点で保存する**
+ * 設定（有効／無効・残り時間・間隔）も節の中に置き、**切り替えた時点で保存する**
  * （設定ダイアログの「実行設定」には載せない。あちらは保存ボタンを押すまで効かない値の区分）。
  */
 export function NightlyRunPanel({
@@ -201,58 +197,6 @@ export function NightlyRunPanel({
             onCancel={onCancel}
             onOpenIssue={onOpenIssue}
           />
-
-          <ScheduleSection
-            icon={<Moon className="size-3.5" aria-hidden />}
-            title="今夜の夜間実行"
-            scheduleLine={describeNightlyScheduleLine(state, compact)}
-            settings={
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
-                <label className="flex items-center gap-2 text-[13px] font-medium">
-                  <Checkbox
-                    checked={state.settings.enabled}
-                    disabled={isSubmitting}
-                    onCheckedChange={(checked) =>
-                      onUpdateSettings({ nightly: { enabled: checked === true } })
-                    }
-                  />
-                  <span>夜間実行を有効にする</span>
-                </label>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>開始時刻</span>
-                  <Select
-                    value={String(state.settings.startHour)}
-                    disabled={isSubmitting}
-                    onValueChange={(value) =>
-                      onUpdateSettings({ nightly: { startHour: Number(value) } })
-                    }
-                  >
-                    <SelectTrigger size="sm" className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {NIGHTLY_RUN_START_HOUR_OPTIONS.map((hour) => (
-                        <SelectItem key={hour} value={String(hour)}>
-                          {formatNightlyRunHour(hour)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <span>（日本時間・3時間のあいだ起動を試みます）</span>
-                </div>
-              </div>
-            }
-            emptyText="予定はありません。Issue詳細の「実装を開始」で実行先に「今夜の夜間実行」を選ぶと、ここに並びます。"
-            resultsTitle={
-              state.results ? `${formatNightKey(state.results.nightKey)}の夜の結果` : "前の夜の結果"
-            }
-            queued={state.queued}
-            results={state.results?.entries ?? null}
-            compact={compact}
-            isSubmitting={isSubmitting}
-            onCancel={onCancel}
-            onOpenIssue={onOpenIssue}
-          />
         </>
       )}
     </div>
@@ -310,21 +254,7 @@ function ClaudeWindowMeter({ window }: { window: NextWindowRunWindowView | null 
   );
 }
 
-function describeNightlyScheduleLine(state: NightlyRunState, compact: boolean): string {
-  const { settings, window } = state;
-  const hour = formatNightlyRunHour(settings.startHour);
-  if (!settings.enabled) {
-    return `夜間実行はOFFです。積んだIssueはONにした夜の${hour}から起動します。`;
-  }
-  if (window.isOpen) {
-    return `実行時間内（${describeNightlyRunWindowHours(settings.startHour)}）です。予定はサブPCの巡回のたびに順に起動します。`;
-  }
-  return compact
-    ? `次は ${formatTimeOfDay(window.nextStartsAt)} に開始`
-    : `次は ${formatTimeOfDay(window.nextStartsAt)} に開始します。同時に走る本数は実行設定の「サブPCの同時実行数」に従い、空くたびに次のIssueへ進みます`;
-}
-
-/** 1つの節（予定 → 直近の結果）。夜間実行と次枠実行で同じ形を使う */
+/** 1つの節（予定 → 直近の結果） */
 function ScheduleSection({
   icon,
   title,
@@ -621,15 +551,3 @@ function ResultsSection({
   );
 }
 
-/** `2026-09-02` → `9/2（火）` */
-function formatNightKey(nightKey: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(nightKey);
-  if (!match) return nightKey;
-  const date = new Date(`${nightKey}T00:00:00+09:00`);
-  const weekday = ["日", "月", "火", "水", "木", "金", "土"][jstWeekday(date)];
-  return `${Number(match[2])}/${Number(match[3])}（${weekday}）`;
-}
-
-function jstWeekday(date: Date): number {
-  return new Date(date.getTime() + 9 * 60 * 60 * 1000).getUTCDay();
-}

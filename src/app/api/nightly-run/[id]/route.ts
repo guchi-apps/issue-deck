@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
- * 夜間実行の予定を取り消す（#2772）。**取り消せるのは未処理（QUEUED）だけ。**
+ * 予約実行の予定を取り消す（#2995）。**取り消せるのは未処理（QUEUED）だけ。**
  *
  * 起動ジョブへ変換した後（LAUNCHED）の取り消しは実行キューの側（`POST /api/dispatch/<id>/cancel`・
  * 「停止」）が受け持つ。積む時点で付けたオプションのラベルは外さない（「実装を開始」で

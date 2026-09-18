@@ -15,11 +15,11 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 /**
- * 「予約実行」画面（夜間実行 #2772・次枠実行 #2995）のデータ取得と操作。
+ * 「予約実行」画面（次枠実行 #2995）のデータ取得と操作。
  *
  * **1画面で1回だけ呼び、左メニューの件数とパネルの両方へ配る**（`useDispatchState`と同じ形）。
  * 開いていないあいだも件数のためにゆっくり取り直し、開いているあいだは巡回の間隔に合わせて
- * 取り直す（夜の起動・朝の結果が動くのはサブPCの巡回のたび）。
+ * 取り直す（起動・結果が動くのはサブPCの巡回のたび）。
  */
 export function useNightlyRun(active: boolean) {
   const [state, setState] = useState<NightlyRunState | null>(null);
@@ -73,12 +73,11 @@ export function useNightlyRun(active: boolean) {
           method: "DELETE",
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));
-        // 取り消した行は取り直しを待たずに落とす（どちらの種類かは見ずに両方から外す）
+        // 取り消した行は取り直しを待たずに落とす
         setState((prev) =>
           prev
             ? {
                 ...prev,
-                queued: prev.queued.filter((entry) => entry.id !== entryId),
                 nextWindow: {
                   ...prev.nextWindow,
                   queued: prev.nextWindow.queued.filter((entry) => entry.id !== entryId),
@@ -114,12 +113,11 @@ export function useNightlyRun(active: boolean) {
           prev
             ? {
                 ...prev,
-                settings: settings.nightly,
                 nextWindow: { ...prev.nextWindow, settings: settings.nextWindow },
               }
             : prev,
         );
-        // 開始時刻・残り時間が変わると窓も変わるので取り直す
+        // 残り時間が変わると窓も変わるので取り直す
         refresh();
         return true;
       } catch (err) {
@@ -137,9 +135,8 @@ export function useNightlyRun(active: boolean) {
 
 export type NightlyRunHandle = ReturnType<typeof useNightlyRun>;
 
-/** 設定の部分更新。種類ごとに入れ子で送る（`PATCH /api/nightly-run/settings`と同じ形） */
+/** 設定の部分更新。入れ子で送る（`PATCH /api/nightly-run/settings`と同じ形） */
 export type ScheduledRunSettingsPatch = {
-  nightly?: Partial<ScheduledRunSettings["nightly"]>;
   nextWindow?: Partial<ScheduledRunSettings["nextWindow"]>;
 };
 

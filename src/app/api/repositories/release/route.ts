@@ -206,6 +206,8 @@ async function handleGET(request: NextRequest) {
             number: releasePr.number,
             url: releasePr.html_url,
             title: releasePr.title,
+            // 凍結ブランチ（`release-main/v…`）かどうかで作り直しの導線を出し分ける（#3014）
+            headRef: releasePr.head.ref,
             ciState: releaseState?.ciState ?? null,
             mergeable: releaseState?.mergeable ?? null,
             repairWorkflowAvailability: releaseRepairAvailability,

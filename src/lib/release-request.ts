@@ -9,6 +9,7 @@
  * ポーリングを持つフックごと持ち込まずにこの関数だけを使う。
  */
 
+import type { ReleaseRebuildCandidate } from "@/lib/release-rebuild";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** エラーコードを画面に出す文言へ直す。`useReleaseStatus`の取得側と同じ文面に揃えている */
@@ -29,6 +30,19 @@ export function releaseErrorMessage(
   // GitHubは`Unexpected inputs provided`の422で落とすが、そのままでは何をすればよいか読めない。
   if (errorCode === "bump_kind_unsupported") {
     return "このリポジトリのリリースworkflowは上げ幅の指定に未対応です。自動判定で起動してください。";
+  }
+  // リリースの作り直し（#3014）。どれも「次に何をすればよいか」まで言い切る。
+  if (errorCode === "release_pr_changed") {
+    return "リリースPRが変わっています（マージ・作り直し済みの可能性があります）。画面を更新してください。";
+  }
+  if (errorCode === "nothing_to_rebuild") {
+    return "リリースPRの後にdevelopへ入った変更が無いため、作り直しても中身が変わりません。";
+  }
+  if (errorCode === "rebuild_dispatch_bump_kind_unsupported") {
+    return "リリースPRは閉じましたが、このリポジトリのリリースworkflowは上げ幅の指定に未対応です。「リリースする」から自動判定で起動し直してください。";
+  }
+  if (errorCode === "rebuild_dispatch_failed") {
+    return "リリースPRは閉じましたが、リリースworkflowの起動に失敗しました。「リリースする」から起動し直すと作り直されます。";
   }
   if (errorCode === "github_api_error" && message) {
     return message;
@@ -88,4 +102,38 @@ export async function requestReleaseBulk(repoFullNames: string[]): Promise<Relea
     }
   });
   return { succeeded, failed };
+}
+
+/** 作り直しの確認ダイアログに出す材料（`GET /api/repositories/release/rebuild`。#3014） */
+export type ReleaseRebuildInfo = {
+  releasePullRequest: { number: number; title: string; url: string; version: string } | null;
+  candidate: ReleaseRebuildCandidate | null;
+};
+
+export async function fetchReleaseRebuild(repoFullName: string): Promise<ReleaseRebuildInfo> {
+  const [owner, repo] = repoFullName.split("/");
+  const params = new URLSearchParams({ owner, repo });
+  const res = await fetch(`/api/repositories/release/rebuild?${params}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  return json as ReleaseRebuildInfo;
+}
+
+/**
+ * `POST /api/repositories/release/rebuild`（#3014）。リリースPRを閉じ、リリースworkflowを
+ * 起動し直す。`pullRequestNumber`はダイアログで見ていたリリースPRで、変わっていれば409になる。
+ */
+export async function requestReleaseRebuild(
+  repoFullName: string,
+  pullRequestNumber: number,
+  bumpKind?: BumpKind,
+): Promise<void> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rebuild", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, pullRequestNumber, ...(bumpKind ? { bumpKind } : {}) }),
+  });
+  const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
 }

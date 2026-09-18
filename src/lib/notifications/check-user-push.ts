@@ -4,7 +4,6 @@ import {
   checkUserReason,
   type CheckUserReason,
 } from "@/lib/github/approval-labels";
-import { selectNightlyRunPushHold } from "@/lib/nightly-run-db";
 import {
   isPushConfigured,
   sendPushNotification,
@@ -96,8 +95,9 @@ export function decideCheckUserPush(input: {
    */
   hasPendingSessionRequest?: boolean;
   /**
-   * この時刻まで送らない（#2772）。夜間実行で起動したIssueの確認待ちは、計画の投稿で
-   * 深夜に付くため翌朝（`NIGHTLY_RUN_MORNING_HOUR`）まで止める。**待ちが生きていても止める**
+   * この時刻まで送らない（#2772。夜間実行で起動したIssueの確認待ちを翌朝まで止めるために
+   * 導入したが、夜間実行自体は#3019で削除した。呼び出し元は現在渡していないが、深夜に鳴らし
+   * たくない起動経路が今後増えたときのために口だけ残してある）。**待ちが生きていても止める**
    * ——待たずに送る理由（理由が確定していて自動では消えない）はそのままだが、鳴らす時刻の
    * 方が先に立つ。`null`・省略は従来どおり
    */
@@ -236,9 +236,6 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     now,
   );
 
-  // 夜間実行で今夜起動したIssueは朝まで鳴らさない（#2772）。対象が無ければ`null`
-  const nightlyHold = candidates.length > 0 ? await selectNightlyRunPushHold(now) : null;
-
   let sent = 0;
   for (const issue of candidates) {
     if (!issue.checkUserLabeledAt) continue;
@@ -247,7 +244,6 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
       labels: issue.labels,
       checkUserLabeledAt: issue.checkUserLabeledAt,
       hasPendingSessionRequest: pendingRequestKeys.has(key),
-      holdUntil: nightlyHold?.keys.has(key) ? nightlyHold.until : null,
       now,
     });
     if (decision === "wait") continue;
