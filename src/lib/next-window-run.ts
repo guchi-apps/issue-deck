@@ -49,9 +49,9 @@ export const NEXT_WINDOW_RUN_FRESH_WINDOW_MS = 3 * 60_000;
 /**
  * 予約が生きている時間。これを過ぎても起動できなかった予定は「見送り」にする。
  *
- * 夜間実行の窓（3時間）より長いのは、枠の切り替わりが時計と無関係だから。積んだ枠が
- * 終わるまでに最大5時間、次の枠の終わり際までにさらに最大5時間かかりうるので、
- * 24時間は「2回ぶんの枠をまたいでも起動できなかった」ことを意味する。
+ * 枠の切り替わりは時計と無関係で、積んだ枠が終わるまでに最大5時間、次の枠の終わり際までに
+ * さらに最大5時間かかりうるので、24時間は「2回ぶんの枠をまたいでも起動できなかった」ことを
+ * 意味する。
  */
 export const NEXT_WINDOW_RUN_EXPIRY_HOURS = 24;
 
@@ -82,7 +82,7 @@ export type NextWindowRunWindow = {
   opensAt: Date | null;
   /**
    * この回のグループ鍵（日本時間・`YYYY-MM-DD HH:mm`）。起動した予定を「どの枠で起こしたか」で
-   * 束ねるのに使う（夜間実行の`nightKey`と同じ役割・同じ列）。取得できなかった場合はnull
+   * 束ねるのに使う（`NightlyRunEntry.nightKey`列）。取得できなかった場合はnull
    */
   runKey: string | null;
 };
@@ -260,8 +260,7 @@ export function describeNextWindowRunSchedule(
 }
 
 /**
- * Issue一覧・Issue詳細に出す「次の5時間枠に積まれている」の目印（夜間実行の`NightlyRunQueuedMark`と
- * 同じ役割）。**`QUEUED`の予定にだけ出す。**
+ * Issue一覧・Issue詳細に出す「次の5時間枠に積まれている」の目印。**`QUEUED`の予定にだけ出す。**
  */
 export type NextWindowRunQueuedMark = {
   /** 取り消し（`DELETE /api/nightly-run/:id`）に使う予定の識別子 */

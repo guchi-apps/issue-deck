@@ -8,19 +8,16 @@ import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import {
   NIGHTLY_RUN_RESULT_RETENTION_DAYS,
   decideNightlyRunLaunch,
-  describeNightlyRunWindowMissed,
-  resolveNightlyRunWindow,
   type ScheduledRunKind,
 } from "@/lib/nightly-run";
-import { readNightlyRunSettings } from "@/lib/nightly-run-db";
 
 /**
- * 積んだ予定（`NightlyRunEntry`）を、時刻が来たら起動ジョブへ変換する（#2772・#2995）。
+ * 積んだ予定（`NightlyRunEntry`）を、時刻が来たら起動ジョブへ変換する（#2995）。
  *
  * **進めるための常駐プロセスは置かない**（`expireStaleDispatchJobs`・巡回2本と同じ方針）。
  * 呼ぶのはサブPCのpollerが30秒ごとに叩く`POST /api/dispatch/claim`で、**ブラウザを開いて
  * いなくても回る唯一の定期経路**（確認待ちPushの巡回と同じ相乗り）。時刻の判定はサーバー側の
- * 純関数（`resolveNightlyRunWindow`・`resolveNextWindowRunWindow`）が持ち、pollerは何も知らない。
+ * 純関数（`resolveNextWindowRunWindow`）が持ち、pollerは何も知らない。
  *
  * **起動先はclaimしてきたホストの予定だけ。** 積むときにホストを決めてあるので、そのホストが
  * 取りに来た巡回で変換すれば、直後の払い出しでそのまま起動へ回る。他のホストの予定は触らない。
@@ -28,8 +25,8 @@ import { readNightlyRunSettings } from "@/lib/nightly-run-db";
  * 1件ずつの手順は「実装を開始」ダイアログ・「次にやること」（`enqueue-issue.ts`）と同じ順:
  * 実ラベルを読んで判定 → `enqueueDispatchJob` → 積めたときだけ`11.local`。オプションのラベルは
  * 積んだ時点で付けてある（`POST /api/nightly-run`）。**この1件ぶんの手順は
- * `launchScheduledRunEntry`に寄せてあり、夜間実行と次枠実行で共有する**（#2995。2か所に
- * 置くと`activeKey`の戻し方と`11.local`の付け方を両方で守り続けることになる）。
+ * `launchScheduledRunEntry`に寄せてある**（かつては夜間実行とも共有していたが#3019で削除した。
+ * `kind`引数は残っているが渡ってくるのは`NEXT_WINDOW`だけになった）。
  *
  * GitHubへの読み書きは**積んだ人のトークン**で行う（`withUserGithubToken`）。ラベルの付与を
  * 人の操作として残すためで、インストールトークンにすると`issue-deck[bot]`が着手したように見える。
@@ -42,13 +39,6 @@ export type NightlyRunLaunchAction = {
   issueNumber: number;
   result: "launched" | "skipped" | "deferred";
   detail: string | null;
-};
-
-export type NightlyRunLaunchResult = {
-  enabled: boolean;
-  isOpen: boolean;
-  nightKey: string;
-  actions: NightlyRunLaunchAction[];
 };
 
 /**
@@ -208,64 +198,3 @@ export async function launchScheduledRunEntry(params: {
   return { reserved: true, action, stop: false };
 }
 
-export async function launchNightlyRunEntries(params: {
-  hostName: string;
-  now?: Date;
-}): Promise<NightlyRunLaunchResult> {
-  const now = params.now ?? new Date();
-  const settings = await readNightlyRunSettings();
-  const window = resolveNightlyRunWindow(now, settings.startHour);
-  const result: NightlyRunLaunchResult = {
-    enabled: settings.enabled,
-    isOpen: window.isOpen,
-    nightKey: window.nightKey,
-    actions: [],
-  };
-
-  await pruneOldScheduledRunEntries(now);
-  // OFFのあいだは予定を残したまま何もしない（窓を過ぎた見送りも付けない。ONにした夜に走る）
-  if (!settings.enabled) return result;
-
-  const entries = await db.nightlyRunEntry.findMany({
-    where: { status: "QUEUED", kind: "NIGHTLY", targetHost: params.hostName },
-    orderBy: { createdAt: "asc" },
-  });
-  if (entries.length === 0) return result;
-
-  if (!window.isOpen) {
-    // 直近の窓が閉じた後。**窓が閉じる前から積んであった予定**は起動できなかったものとして
-    // 見送る（サブPCが応答していなかった等）。窓が閉じた後に積んだものは今夜の予定なので残す
-    for (const entry of entries) {
-      if (entry.createdAt.getTime() >= window.endsAt.getTime()) continue;
-      await markScheduledRunSkipped(
-        entry.id,
-        window.nightKey,
-        describeNightlyRunWindowMissed(settings.startHour),
-        now,
-      );
-      result.actions.push({
-        entryId: entry.id,
-        repositoryFullName: entry.repositoryFullName,
-        issueNumber: entry.issueNumber,
-        result: "skipped",
-        detail: describeNightlyRunWindowMissed(settings.startHour),
-      });
-    }
-    return result;
-  }
-
-  for (const entry of entries) {
-    const outcome = await launchScheduledRunEntry({
-      entry,
-      kind: "NIGHTLY",
-      runKey: window.nightKey,
-      hostName: params.hostName,
-      now,
-    });
-    if (!outcome.reserved) continue;
-    if (outcome.action) result.actions.push(outcome.action);
-    if (outcome.stop) break;
-  }
-
-  return result;
-}

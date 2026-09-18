@@ -225,9 +225,9 @@ type MobileIssueDetailProps = {
   nightlyRunQueued?: ScheduledRunQueuedMap;
   /** 「予約実行」画面へ移る。省略すると注釈にその導線を出さない */
   onOpenNightlyRun?: () => void;
-  /** 今夜の予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
+  /** 積んだ予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
   onCancelNightlyRun?: (entryId: string) => void;
-  /** 「実装を開始」で今夜の予定へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
+  /** 「実装を開始」で次の5時間枠へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
   onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;

@@ -4,15 +4,13 @@ import { db } from "@/lib/db";
 import {
   classifyNightlyRunOutcome,
   parseNightlyRunOptionLabels,
-  resolveNightlyRunWindow,
   selectLatestNightKey,
-  toNightlyRunWindowView,
   type NightlyRunEntryStatus,
   type NightlyRunEntryView,
   type NightlyRunState,
   type ScheduledRunKind,
 } from "@/lib/nightly-run";
-import { nightlyRunIssueKey, readNightlyRunSettings } from "@/lib/nightly-run-db";
+import { nightlyRunIssueKey } from "@/lib/nightly-run-db";
 import {
   resolveNextWindowRunWindow,
   toNextWindowRunWindowView,
@@ -24,13 +22,13 @@ import {
 } from "@/lib/next-window-run-db";
 
 /**
- * 「夜間実行」画面に出す状態を組み立てる（#2772）。
+ * 「予約実行」画面に出す状態を組み立てる（#2995）。
  *
  * 材料は**DBにあるものだけ**（同期済みのIssue・ジョブ・セッション）。GitHubへは問い合わせない。
  * 結果の分類（`classifyNightlyRunOutcome`）は純関数に閉じ、ここは引いて渡すだけ。
  *
- * 結果は「直近の夜」の1回ぶんだけ出す。前の夜のぶんは表に残っているが画面には出さない
- * （並べると今夜の予定と混ざる。古い行は起動処理が30日で消す）。
+ * 結果は「直近の枠」の1回ぶんだけ出す。前の枠のぶんは表に残っているが画面には出さない
+ * （並べると今の予定と混ざる。古い行は`claim/route.ts`の巡回が30日で消す）。
  */
 
 type EntryRow = {
@@ -181,22 +179,23 @@ function splitByKind(rows: readonly EntryRow[], kind: ScheduledRunKind) {
 }
 
 export async function listNightlyRunState(now: Date = new Date()): Promise<NightlyRunState> {
-  const settings = await readNightlyRunSettings();
-  const window = resolveNightlyRunWindow(now, settings.startHour);
   const nextWindowSettings = await readNextWindowRunSettings();
 
   const queuedRows = await db.nightlyRunEntry.findMany({
-    where: { status: "QUEUED" },
+    where: { status: "QUEUED", kind: "NEXT_WINDOW" },
     orderBy: { createdAt: "asc" },
   });
   const processedRows = await db.nightlyRunEntry.findMany({
-    where: { status: { in: ["LAUNCHED", "SKIPPED"] }, nightKey: { not: null } },
+    where: {
+      status: { in: ["LAUNCHED", "SKIPPED"] },
+      kind: "NEXT_WINDOW",
+      nightKey: { not: null },
+    },
     orderBy: { resolvedAt: "asc" },
   });
 
-  const nightly = splitByKind([...queuedRows, ...processedRows], "NIGHTLY");
   const nextWindow = splitByKind([...queuedRows, ...processedRows], "NEXT_WINDOW");
-  const results = [...nightly.results, ...nextWindow.results];
+  const results = nextWindow.results;
 
   const rows = [...queuedRows, ...results];
   const [issues, jobs, sessions] = await Promise.all([
@@ -229,12 +228,6 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
     : null;
 
   return {
-    settings,
-    window: toNightlyRunWindowView(window),
-    queued: nightly.queued.map(view),
-    results: nightly.latestKey
-      ? { nightKey: nightly.latestKey, entries: nightly.results.map(view) }
-      : null,
     nextWindow: {
       settings: nextWindowSettings,
       window: claudeWindow,
