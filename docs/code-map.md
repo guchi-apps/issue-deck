@@ -3199,7 +3199,8 @@ export function POST(request: NextRequest) {
   **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
   終わらないセッションに終了予告が出る）。**横断質問セッションは
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
-  こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
+  こちらはcwdが質問Issue間で共有されるため`--continue`ではなく、質問Issueごとに控えたsessionIdで
+  `--resume`する。#3033）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。一覧は
   `scripts/local-repo-pr-policy.conf`、判定は`scripts/lib/pr-policy.sh`で、**起動プロンプトを

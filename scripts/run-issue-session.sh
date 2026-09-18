@@ -17,6 +17,8 @@
 #   ISSUE_DECK_DEV_COMMAND      開発サーバーの起動コマンド（既定は `pnpm dev`）
 #   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める
 #                                （Claude Code・Codex共通。#1541・#2520。既定は引き継ぐ）
+#                                ※横断質問セッション（ISSUE_DECK_SESSION_KIND=question）は`--continue`
+#                                  ではなく、`SessionStart`フックが控えたsessionIdで`--resume`する（#3033）
 #   ISSUE_DECK_AGENT=codex      Claude Codeではなく Codex CLI を起こす（#2377。既定は claude）
 #
 # **Codexで起こした場合、Claude Code側の連携の一部は効かない**（Remote Control・Plan modeの
@@ -957,7 +959,23 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 #
 RESUME_CONVERSATION=0
 CODEX_RESUME_THREAD=""
-if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
+CLAUDE_RESUME_FLAG="--continue"
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" &&
+  "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" && -n "$TMUX_SESSION_NAME" ]]; then
+  # 横断質問セッション（#3033）。**`--continue`は使わない。** 質問セッションのcwdは質問Issueごとでは
+  # なくリポジトリごとに固定されている（#1529）ため、「そのcwdで最後に動いた会話」は別の質問の
+  # ものでありうる（#1648）。代わりに、`SessionStart`フックがtmuxセッション名（質問Issueごとに一定）
+  # をキーに控えたsessionIdを`--resume`へ渡し、**同じ質問の会話だけ**へ戻す。
+  # 控えが無い・履歴の`<id>.jsonl`が消えている場合は新しい会話で始める（安全側）。
+  QUESTION_SESSION_ID="$(session_state_read_claude_session "$TMUX_SESSION_NAME" 2>/dev/null || true)"
+  CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
+  if [[ -n "$QUESTION_SESSION_ID" && -f "$CLAUDE_HISTORY_DIR/$QUESTION_SESSION_ID.jsonl" ]]; then
+    RESUME_CONVERSATION=1
+    CLAUDE_EXTRA_ARGS+=(--resume "$QUESTION_SESSION_ID")
+    CLAUDE_RESUME_FLAG="--resume"
+  fi
+elif [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" != "question" &&
+  "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
   if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
     RESUME_CONVERSATION=1
@@ -977,8 +995,18 @@ fi
 if [[ "$AGENT_KIND" == "codex" && "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
   session_state_clear_codex_thread "$TMUX_SESSION_NAME" || true
 fi
+# 質問セッション（#3033）も、新しい会話で始めるなら前回のsessionIdを残さない
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" &&
+  "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
+  session_state_clear_claude_session "$TMUX_SESSION_NAME" || true
+fi
 
-if [[ "$RESUME_CONVERSATION" == "1" ]]; then
+if [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ]]; then
+  # 横断質問セッション（#3033）。**cwdがgitリポジトリではない**ため、`gh issue view`に
+  # `--repo`が要る（無いと別のリポジトリの同じ番号を引くか失敗する）。やることも「作業の続き」
+  # ではなく「追加のコメント（追い質問）への回答」なので、言い方を分ける。
+  KICKOFF_PROMPT="${ISSUE_LABEL}の質問セッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --repo ${REPO_SLUG:-<質問Issueのリポジトリ>} --comments で前回以降に追加されたコメント（追い質問）を確認し、$PROMPT_FILE を読み直したうえで、まだ回答していない質問があれば同じ手順で調べて回答コメントを投稿してください。無ければ、追い質問が届くのを待ってください。"
+elif [[ "$RESUME_CONVERSATION" == "1" ]]; then
   # **「実装を開始してください」を渡してはいけない。** 前回の会話が載った状態でこの1行を渡すと、
   # 済んだ作業を最初からやり直しかねない。代わりに、前回以降に増えたもの（Issueコメント・
   # レビュー指摘）を読ませてから続きへ入らせる。
@@ -1035,7 +1063,7 @@ if [[ "$RESUME_CONVERSATION" == "1" ]]; then
   if [[ "$AGENT_KIND" == "codex" ]]; then
     echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（codex resume）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
   else
-    echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（--continue）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
+    echo "#$ISSUE_NUMBER: 前回の会話を引き継ぎます（$CLAUDE_RESUME_FLAG）。新しい会話で始めるには ISSUE_DECK_CLAUDE_RESUME=0 を渡してください。"
   fi
 fi
 echo "#$ISSUE_NUMBER: セッションへ次の文面を渡します。もし起動直後に何も始まらなければ、これを貼り付けてください。"
