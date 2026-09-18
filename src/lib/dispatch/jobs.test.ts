@@ -2539,7 +2539,10 @@ describe("sweepAgentUsageLimitPause", () => {
     appSettingFindUnique.mockResolvedValue({ claudeDispatchPauseReason: null, codexDispatchPauseReason: null });
     await sweepAgentUsageLimitPause({
       now: NOW,
-      getClaudeUsageWindow: async () => ({ status: "rejected", remainingPercent: 0 }),
+      getClaudeUsageWindows: async () => [
+        { key: "5h", status: "rejected", remainingPercent: 0 },
+        { key: "7d", status: "allowed", remainingPercent: 60 },
+      ],
     });
     expect(appSettingUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: { claudeDispatchPauseReason: "usage_limit" } }),
@@ -2552,11 +2555,45 @@ describe("sweepAgentUsageLimitPause", () => {
     });
     await sweepAgentUsageLimitPause({
       now: NOW,
-      getClaudeUsageWindow: async () => ({ status: "allowed", remainingPercent: 40 }),
+      getClaudeUsageWindows: async () => [
+        { key: "5h", status: "allowed", remainingPercent: 40 },
+        { key: "7d", status: "allowed", remainingPercent: 60 },
+      ],
     });
     expect(appSettingUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: { claudeDispatchPauseReason: null } }),
     );
+  });
+
+  it("週間枠(7d)がrejectedになったら、5時間枠がallowedのままでも自動でONにする（#3013）", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({ claudeDispatchPauseReason: null, codexDispatchPauseReason: null });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getClaudeUsageWindows: async () => [
+        { key: "5h", status: "allowed", remainingPercent: 80 },
+        { key: "7d", status: "rejected", remainingPercent: 0 },
+      ],
+    });
+    expect(appSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { claudeDispatchPauseReason: "usage_limit" } }),
+    );
+  });
+
+  it("両方の枠がallowedに戻るまで解除しない（#3013）", async () => {
+    mockUpsert();
+    appSettingFindUnique.mockResolvedValue({
+      claudeDispatchPauseReason: "usage_limit",
+      codexDispatchPauseReason: null,
+    });
+    await sweepAgentUsageLimitPause({
+      now: NOW,
+      getClaudeUsageWindows: async () => [
+        { key: "5h", status: "allowed", remainingPercent: 80 },
+        { key: "7d", status: "rejected", remainingPercent: 0 },
+      ],
+    });
+    expect(appSettingUpsert).not.toHaveBeenCalled();
   });
 
   it("取得できない（トークン未設定・失敗）ときは何もしない", async () => {
@@ -2565,7 +2602,7 @@ describe("sweepAgentUsageLimitPause", () => {
     await sweepAgentUsageLimitPause({
       now: NOW,
       getCodexUsageSnapshot: async () => null,
-      getClaudeUsageWindow: async () => null,
+      getClaudeUsageWindows: async () => null,
     });
     expect(appSettingUpsert).not.toHaveBeenCalled();
   });
