@@ -237,8 +237,9 @@ describe("MentionTextarea 画像の添付", () => {
  */
 describe("MentionTextarea 入力欄の下の行", () => {
   function buttonNames(container: HTMLElement) {
+    // 「画像を添付」は3行に組んで見える文字を縮めているので、名前はaria-labelから読む（#3054）
     return Array.from(container.querySelectorAll('[data-slot="mention-toolbar"] button')).map(
-      (button) => button.textContent,
+      (button) => button.getAttribute("aria-label") ?? button.textContent,
     );
   }
 
