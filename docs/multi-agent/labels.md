@@ -1518,7 +1518,8 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 `scripts/generate-prompt-templates.mjs`がマーカー（`<!-- manual-step-body-template:start -->`〜`:end`）
 で囲った区間へ差し込む。差し込み先はこの文書と、起票する3経路の指示
 （issue-deck自身のローカル実行は参照文書`docs/multi-agent/implementation-agent-reference.md`、
-`generic-implementation-agent.md`・`.github/prompts/implement.md`はプロンプト本文。#3021）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
+無人実行は参照文書`docs/multi-agent/unattended-implementation-reference.md`、
+`generic-implementation-agent.md`はプロンプト本文。#3021・#3024）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
 実行する**（ずれはCIの`Prompt shared template sync check`が落とす）。
 
 **なぜプロンプトへ埋め込むのか。** 以前はリテラルな骨組みがこの文書にしか無く、実際に起票する
@@ -1676,8 +1677,8 @@ managed block）が`~/.config/op/service-account-token`を読んで`OP_SERVICE_A
   変更が要る場合も`guchi-apps/subpc`側のIssueとして切り出す
 - **届き方は検査と雛形で違う。** 本文検査の判定はissue-deck側のAPI（`POST /api/manual-steps/body-check`）
   にあるので、規則を足せば配布タグを切らずに全リポジトリへ即日効く。一方**雛形は
-  `.github/prompts/implement.md`へ差し込まれ、他リポジトリはそれを`prompts-ref: workflows/vN`で
-  固定して読む**ため、新しい規約が他リポジトリの起票側へ届くのは`workflows/vN`を切って配布した後
+  `docs/multi-agent/unattended-implementation-reference.md`へ差し込まれ、他リポジトリはそれを`prompts-ref: workflows/vN`で
+  固定した`.shared-prompts/`から読む**ため、新しい規約が他リポジトリの起票側へ届くのは`workflows/vN`を切って配布した後
 
 #### 「この作業でできるようになること」を先頭に置く理由（#1730）
 
