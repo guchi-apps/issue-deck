@@ -60,6 +60,12 @@ export type SessionUsageEntry = {
   researchCostUsd?: number | null;
   codingCostUsd?: number | null;
   wrapupCostUsd?: number | null;
+  /**
+   * 実装・仕上げの中で、テスト・Lint・型チェック・ビルド・curlを呼んだ応答の金額（#3064）。
+   * **上の3つと足して実装の合計になる**（検証ぶんは実装・仕上げから抜いてある）。
+   * この列より前に報告された行はnull／undefinedで、そのぶんは実装・仕上げに含まれたまま（0として扱う）
+   */
+  verifyCostUsd?: number | null;
   models: string[];
   startedAt: string;
   endedAt: string;
@@ -183,10 +189,10 @@ export type SessionUsageSummary = {
 const MAX_DETAIL_ISSUES = 200;
 
 /**
- * 実装セッションのフェーズ（#2779）。**「セッション種別別」では実装の行をこの4つへ置き換える。**
+ * 実装セッションのフェーズ（#2779）。**「セッション種別別」では実装の行をこれらのフェーズへ置き換える（#3064で検証を足して5つ）。**
  * 実装は全体の9割を占める1行になっていて、そのままでは「実装が多い」以上のことが読めない。
  */
-export const USAGE_PHASE_ORDER = ["plan", "research", "coding", "wrapup"] as const;
+export const USAGE_PHASE_ORDER = ["plan", "research", "coding", "verify", "wrapup"] as const;
 export type UsageImplementationPhase = (typeof USAGE_PHASE_ORDER)[number];
 
 /** フェーズ1つぶんの行のキー。種別のキー（`implementation`など）と混ざらないよう接頭辞を付ける */
@@ -208,10 +214,14 @@ const KIND_LABELS: Record<string, string> = {
   "code-review": "コードレビュー",
   question: "横断質問",
   other: "その他",
-  actions: "GitHub Actions",
-  "phase-plan": "計画（Plan mode）",
+  // 種別別ではCI（`claude-review`など）とレビューが中心なので、実行経路の名前ではなく
+  // 何をしているかで呼ぶ（#3064）。Issue・PR別の明細は実行経路として「GitHub Actions」のまま
+  actions: "CI/CD・レビュー",
+  // 計画レビュー（別セッションの点検）と区別できるよう、立てる側は「立案」と呼ぶ（#3064）
+  "phase-plan": "計画立案",
   "phase-research": "調査",
   "phase-coding": "実装",
+  "phase-verify": "検証（テスト・Lint・型）",
   "phase-wrapup": "仕上げ（コミット・PR・報告）",
   [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "実装（フェーズ未集計）",
 };
@@ -229,6 +239,7 @@ const USAGE_WORK_FLOW_KIND_ORDER: readonly string[] = [
   "plan-review",
   usagePhaseKindKey("research"),
   usagePhaseKindKey("coding"),
+  usagePhaseKindKey("verify"),
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
   usagePhaseKindKey("wrapup"),
   "code-review",
@@ -320,16 +331,17 @@ function emptyPhaseBreakdown(): UsagePhaseBreakdown {
 }
 
 /**
- * セッション1本の金額を、実装の4フェーズへ割る（#2779）。フェーズを拾えなかった行はnull。
+ * セッション1本の金額を、実装のフェーズ（計画・調査・実装・検証・仕上げ）へ割る（#2779・#3064）。
+ * フェーズを拾えなかった行はnull。検証を持たない古い行は検証0として扱う。
  *
  * **計画は引き算で出す。** 集計側は`ExitPlanMode`が無いセッションの`planCostUsd`をnullで送る
  * （#2646の「区分なし」の意味を変えないため）が、その場合の計画は0であって不明ではない。
- * 残り3つとの差から出すと、**4つの合計が必ず`costUsd`と一致する**ので、カードの合計が動かない。
+ * 残りとの差から出すと、**全フェーズの合計が必ず`costUsd`と一致する**ので、カードの合計が動かない。
  */
 export function sessionUsageImplementationPhases(
   entry: Pick<
     SessionUsageEntry,
-    "costUsd" | "planCostUsd" | "researchCostUsd" | "codingCostUsd" | "wrapupCostUsd"
+    "costUsd" | "planCostUsd" | "researchCostUsd" | "codingCostUsd" | "verifyCostUsd" | "wrapupCostUsd"
   >,
 ): Record<UsageImplementationPhase, number> | null {
   const { researchCostUsd, codingCostUsd, wrapupCostUsd } = entry;
@@ -346,12 +358,17 @@ export function sessionUsageImplementationPhases(
   // **3つの合計が金額を超えていたら、その比のまま金額へ収める。** 集計し直した内訳が、
   // 先に書き込まれた金額（走っている途中のセッションの行）より新しいことがあり、そのままだと
   // カードの合計が「従量課金相当」タイルを上回る。
-  const rest = researchCostUsd + codingCostUsd + wrapupCostUsd;
+  const verifyCostUsd =
+    typeof entry.verifyCostUsd === "number" && Number.isFinite(entry.verifyCostUsd) && entry.verifyCostUsd > 0
+      ? entry.verifyCostUsd
+      : 0;
+  const rest = researchCostUsd + codingCostUsd + verifyCostUsd + wrapupCostUsd;
   const scale = rest > entry.costUsd && rest > 0 ? entry.costUsd / rest : 1;
   return {
     plan: Math.max(0, entry.costUsd - rest * scale),
     research: researchCostUsd * scale,
     coding: codingCostUsd * scale,
+    verify: verifyCostUsd * scale,
     wrapup: wrapupCostUsd * scale,
   };
 }
@@ -378,7 +395,7 @@ function scaleEntryToPhase(entry: SessionUsageEntry, costUsd: number): SessionUs
 
 /**
  * セッション1本が「セッション種別別」のどの行へ入るか（#2779）。
- * **実装だけは1本が最大4行へ分かれる**。ほかの種別は今までどおり1行。
+ * **実装だけは1本が最大5行へ分かれる**。ほかの種別は今までどおり1行。
  */
 function kindRowsForEntry(entry: SessionUsageEntry): { key: string; entry: SessionUsageEntry }[] {
   if (entry.kind !== "implementation") return [{ key: entry.kind, entry }];

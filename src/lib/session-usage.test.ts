@@ -367,6 +367,7 @@ describe("session_usage_aggregate", () => {
       const session = aggregate([file]).sessions[0];
       expect(session.researchCostUsd).toBeNull();
       expect(session.codingCostUsd).toBeNull();
+      expect(session.verifyCostUsd).toBeNull();
       expect(session.wrapupCostUsd).toBeNull();
     });
 
@@ -432,6 +433,42 @@ describe("session_usage_aggregate", () => {
       const session = aggregate([file]).sessions[0];
       expect(session.wrapupCostUsd).toBe(0);
       expect(session.codingCostUsd).toBeCloseTo(session.costUsd, 3);
+    });
+
+    it("実装・仕上げの中でテストやLintを呼んだ応答を検証へ移す（#3064）", () => {
+      const file = writeTranscript("verify.jsonl", [
+        // 調査の中のcurlは調べ物として調査に残す。
+        assistantLine("msg_1", {
+          output: 1000,
+          timestamp: "2026-08-25T03:00:00.000Z",
+          bash: "curl -s http://localhost:5065/api/health",
+        }),
+        assistantLine("msg_2", { output: 1000, timestamp: "2026-08-25T03:05:00.000Z", editTool: true }),
+        assistantLine("msg_3", {
+          output: 2000,
+          timestamp: "2026-08-25T03:10:00.000Z",
+          bash: "pnpm exec vitest run src/lib/foo.test.ts",
+        }),
+        assistantLine("msg_4", {
+          output: 1000,
+          timestamp: "2026-08-25T03:15:00.000Z",
+          bash: 'git -c user.name="Claude Code" commit -q -m "x"',
+        }),
+        // 仕上げの中の型チェックも検証。
+        assistantLine("msg_5", {
+          output: 1000,
+          timestamp: "2026-08-25T03:20:00.000Z",
+          bash: "pnpm typecheck && pnpm lint",
+        }),
+      ]);
+      const session = aggregate([file]).sessions[0];
+      expect(session.researchCostUsd).toBeCloseTo(session.codingCostUsd, 3);
+      // 検証は出力2000＋1000で、実装（1000）の3倍。
+      expect(session.verifyCostUsd).toBeCloseTo(session.codingCostUsd * 3, 3);
+      expect(session.wrapupCostUsd).toBeCloseTo(session.codingCostUsd, 3);
+      expect(
+        session.researchCostUsd + session.codingCostUsd + session.verifyCostUsd + session.wrapupCostUsd,
+      ).toBeCloseTo(session.costUsd, 3);
     });
   });
 });
@@ -614,6 +651,7 @@ describe("session_usage_report_payload", () => {
         "sessionId",
         "startedAt",
         "transcript",
+        "verifyCostUsd",
         "wrapupCostUsd",
       ].sort(),
     );

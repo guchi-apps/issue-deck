@@ -133,7 +133,7 @@ describe("SessionUsagePanel", () => {
   /**
    * #2779。実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
    */
-  it("セッション種別別で、実装をフェーズの4行に分けて出す", () => {
+  it("セッション種別別で、実装をフェーズの行に分けて出す", () => {
     renderPanel(
       response([
         entry({
@@ -141,7 +141,8 @@ describe("SessionUsagePanel", () => {
           planCostUsd: 2,
           implementationCostUsd: 18,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
       ]),
@@ -150,9 +151,10 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     expect(card).not.toBeNull();
     const rows = within(card as HTMLElement);
-    expect(rows.getByText("計画（Plan mode）")).toBeTruthy();
+    expect(rows.getByText("計画立案")).toBeTruthy();
     expect(rows.getByText("調査")).toBeTruthy();
     expect(rows.getByText("実装")).toBeTruthy();
+    expect(rows.getByText("検証（テスト・Lint・型）")).toBeTruthy();
     expect(rows.getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
     // 割る前の1行は残さない（フェーズ未集計の行も出ない）。
     expect(rows.queryByText("実装（フェーズ未集計）")).toBeNull();
@@ -171,9 +173,11 @@ describe("SessionUsagePanel", () => {
           costUsd: 20,
           planCostUsd: 2,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
+        entry({ sessionId: "plan-review", kind: "plan-review", costUsd: 3 }),
         entry({ sessionId: "question", kind: "question", costUsd: 50 }),
         entry({ sessionId: "actions", kind: "actions", costUsd: 1 }),
       ]),
@@ -182,18 +186,34 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     const labels = within(card as HTMLElement)
       .getAllByText(
-        /^(計画（Plan mode）|調査|実装|仕上げ（コミット・PR・報告）|GitHub Actions|作業の流れの外|横断質問)$/,
+        /^(計画立案|計画レビュー|調査|実装|検証（テスト・Lint・型）|仕上げ（コミット・PR・報告）|CI\/CD・レビュー|作業の流れの外|横断質問)$/,
       )
       .map((element) => element.textContent);
     expect(labels).toEqual([
-      "計画（Plan mode）",
+      "計画立案",
+      "計画レビュー",
       "調査",
       "実装",
+      "検証（テスト・Lint・型）",
       "仕上げ（コミット・PR・報告）",
-      "GitHub Actions",
+      "CI/CD・レビュー",
       "作業の流れの外",
       "横断質問",
     ]);
+  });
+
+  /**
+   * #3064。種別別は金額だけを見るので、トークンの細い帯を出さない（Issue・PR別には残す）。
+   */
+  it("セッション種別別にはトークンの帯を出さない", () => {
+    renderPanel(response([entry({ costUsd: 20, researchCostUsd: 4, codingCostUsd: 12, wrapupCostUsd: 4 })]));
+
+    const tokenTitle = /^入力 .* \/ 書込 .* \/ 読出 .* \/ 出力 /;
+    const kindCard = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(kindCard.querySelectorAll("[title]").length).toBeGreaterThan(0);
+    expect([...kindCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(false);
+    const issueCard = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect([...issueCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(true);
   });
 
   it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {

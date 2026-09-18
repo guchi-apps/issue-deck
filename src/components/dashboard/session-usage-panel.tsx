@@ -173,8 +173,8 @@ const OUTPUT_COLOR = "#4776e6";
 
 /**
  * 金額の棒の内側（#2633・#2667）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
- * 内訳（リポジトリ別・種別別・Issue別）の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す
- * （日別は#3038で縦棒に変わり、帯を出さなくなった）。
+ * Issue・PR別の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す
+ * （日別は#3038で縦棒、リポジトリ別は#3060で円グラフに変わり、種別別は#3064で金額の棒だけにした）。
  *
  * **`TOKEN_COLORS`・`OUTPUT_COLOR`（橙・青・紫）とは別の色相に離す**（#2667）。以前はこの3色を
  * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
@@ -202,6 +202,8 @@ const KIND_ROW_COLORS: Record<string, string> = {
   [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
   [usagePhaseKindKey("research")]: "#78716c",
   [usagePhaseKindKey("coding")]: PHASE_COLORS.implementation,
+  // 検証は実装と仕上げのあいだの濃さ（#3064）
+  [usagePhaseKindKey("verify")]: "#c4b5a5",
   [usagePhaseKindKey("wrapup")]: "#d6d3d1",
   [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#52525b",
 };
@@ -339,7 +341,7 @@ function TokenLegend() {
 }
 
 /**
- * 合計行（リポジトリ別・種別別・Issue別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
+ * 合計行（Issue・PR別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
  * この行はGitHub Actionsぶんも足し込んだ合計で、実行経路別に色を変えると1本の帯へ
  * 「区分」と「実行経路」の2つの軸が混ざる（それを避けるのが#2633）。
  */
@@ -496,7 +498,7 @@ const DAILY_VALUE_LABELS_MAX_DAYS = 7;
  * 平均は期間の全日（0の日と集計中の最新日を含む）÷日数で、横の点線と「平均 $○○」で示す。
  *
  * **トークン量は使わない**（金額と比例しないための二段の帯は#2633で入れたが、日別では不要になった。
- * リポジトリ別・種別別・Issue別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
+ * Issue・PR別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
  * 従来どおり**。最新日は集計の途中で必ず低く出るので、枠線を足して「減った」と読ませない。
  * ライブラリを足さずCSSだけで描く。
  */
@@ -661,7 +663,7 @@ function DailyLegend() {
 }
 
 /**
- * 種別別の内訳。二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * 種別別の内訳。**金額の棒だけで描く**（#3064。以前は細い帯〈トークン〉との二段だった。#2633）。
  * **リポジトリ別は円グラフ（`RepositoryPieChart`）へ替えた**（#3060）。
  * **太い棒の内側は日別の縦棒と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
  * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
@@ -682,10 +684,6 @@ function Breakdown({
 }) {
   // **棒の基準は先頭の行ではなく最大の行**（#2954）。種別別は作業の順に並べるため、先頭が最大とは限らない。
   const max = rows.reduce((peak, row) => Math.max(peak, row.costUsd), 0);
-  const maxTokens = rows.reduce(
-    (peak, row) => Math.max(peak, row.contextTokens + row.outputTokens),
-    0,
-  );
   const separatorIndex = separator ? rows.findIndex((row) => separator.isBefore(row.key)) : -1;
 
   return (
@@ -733,13 +731,7 @@ function Breakdown({
                       {formatUsageUsd(row.costUsd)}
                     </span>
                   </div>
-                  <div className="flex flex-col gap-0.5">
-                    <CostBar
-                      row={row}
-                      widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
-                    />
-                    <GroupTokenBar totals={row} maxTokens={maxTokens} />
-                  </div>
+                  <CostBar row={row} widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0} />
                 </li>
               </Fragment>
             );
@@ -928,7 +920,7 @@ function SessionCards({
  * Issue（またはIssue未特定のPR）1件ぶんの行（#2653）。**同じIssue番号を持つセッションは、
  * そこから派生したPRのGitHub Actions実行も含めて`issue`に合算済み**（`session-usage-view.ts`の
  * `buildSessionUsageSummary`）。ここでは合算した1本の横棒グラフとして出し、クリックで
- * 中の各セッションを展開する。`Breakdown`の行（リポジトリ別・種別別）と同じ描き方に揃える。
+ * 中の各セッションを展開する。`Breakdown`の行（種別別）と同じ金額の棒に、トークンの帯を足して描く。
  */
 const PHASE_META: Record<UsagePhaseKey, { label: string; dotColor: string }> = {
   plan: { label: "計画", dotColor: PHASE_COLORS.plan },
@@ -1317,7 +1309,7 @@ export function SessionUsagePanel({
               label="セッション"
               value={data.totals.sessions.toLocaleString()}
               /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
-                 1本が最大4行に現れる）ため、集計側が数えた本数を使う（#2779） */
+                 1本が最大5行に現れる）ため、集計側が数えた本数を使う（#2779） */
               sub={`実装 ${data.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
             />
           </div>
@@ -1359,10 +1351,6 @@ export function SessionUsagePanel({
             {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
                 使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
             <div className="flex flex-col gap-2">
-              {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒になり帯を出さなくなり（#3038）、
-                  リポジトリ別も円グラフへ替わった（#3060）ので、この凡例を使う種別別・Issue別の
-                  うち先に出る種別別の手前へ置く */}
-              <TokenLegend />
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
                   実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
                   **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}
@@ -1379,6 +1367,10 @@ export function SessionUsagePanel({
               {apiUsageSection}
             </div>
           </div>
+
+          {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒（#3038）、リポジトリ別は円グラフ（#3060）、
+              種別別は金額の棒だけ（#3064）になり、二段で描くのはIssue・PR別だけなのでその手前へ置く */}
+          <TokenLegend />
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
             <span className="text-xs font-semibold">Issue・PR別</span>

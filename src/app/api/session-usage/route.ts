@@ -60,6 +60,7 @@ function toEntry(row: {
   implementationCostUsd: number | null;
   researchCostUsd: number | null;
   codingCostUsd: number | null;
+  verifyCostUsd: number | null;
   wrapupCostUsd: number | null;
   models: string;
   startedAt: Date;
@@ -113,6 +114,8 @@ function toEntry(row: {
     researchCostUsd: hasPhaseCosts ? row.researchCostUsd : null,
     codingCostUsd: hasPhaseCosts ? row.codingCostUsd : null,
     wrapupCostUsd: hasPhaseCosts ? row.wrapupCostUsd : null,
+    // 検証（#3064）。この列より前の行はnullで、画面は0として扱う（実装・仕上げに含まれたまま）。
+    verifyCostUsd: hasPhaseCosts ? row.verifyCostUsd : null,
     models,
     startedAt: row.startedAt.toISOString(),
     endedAt: row.endedAt.toISOString(),
@@ -270,6 +273,7 @@ export async function GET(request: NextRequest) {
       workflowName: true,
       researchCostUsd: true,
       codingCostUsd: true,
+      verifyCostUsd: true,
       wrapupCostUsd: true,
       runUrl: true,
       reportedAt: true,
