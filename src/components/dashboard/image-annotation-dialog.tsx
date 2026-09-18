@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   Loader2,
+  Maximize2,
   Move,
   MoveUpRight,
   Pencil,
@@ -60,6 +61,8 @@ export type AnnotationTarget = {
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 /** 表示倍率の上限。小さなスクリーンショットを大画面で引き伸ばしすぎないため */
 const MAX_DISPLAY_SCALE = 1.5;
+/** ピンチで拡大できる上限（全体表示に対する倍率） */
+const MAX_PINCH_ZOOM = 4;
 
 const TOOLS: { id: AnnotationTool; label: string; icon: typeof Pencil }[] = [
   { id: "move", label: "移動", icon: Move },
@@ -146,6 +149,33 @@ type TextEdit = {
 
 type Drag = { id: string; start: Point; origin: Shape; moved: boolean };
 
+/** ピンチによる拡大・パン。`zoom`は全体表示（`scale`）に対する追加倍率、`x`/`y`はCSS px */
+type ViewTransform = { zoom: number; x: number; y: number };
+const DEFAULT_VIEW: ViewTransform = { zoom: 1, x: 0, y: 0 };
+
+/** ピンチ中に指の位置から追う状態。中心点（2本指の中点）を固定してズームする */
+type Pinch = {
+  distance: number;
+  center: Point;
+  startZoom: number;
+  startX: number;
+  startY: number;
+  /** ズームの影響を受けない土台（`outerRef`）の、ピンチ開始時点でのスクリーン上の矩形 */
+  outerRect: DOMRect;
+};
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** ズーム後の内容が土台（`outerWidth`×`outerHeight`）からはみ出さないようパンをクランプする */
+function clampView(view: ViewTransform, outerWidth: number, outerHeight: number): ViewTransform {
+  const zoom = clamp(view.zoom, 1, MAX_PINCH_ZOOM);
+  const minX = Math.min(0, outerWidth - outerWidth * zoom);
+  const minY = Math.min(0, outerHeight - outerHeight * zoom);
+  return { zoom, x: clamp(view.x, minX, 0), y: clamp(view.y, minY, 0) };
+}
+
 let shapeSeq = 0;
 function nextShapeId(): string {
   shapeSeq += 1;
@@ -165,7 +195,12 @@ function AnnotationEditor({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const [view, setView] = useState<ViewTransform>(DEFAULT_VIEW);
+  // ピンチはcanvasのPointer Eventで検出する。2本指になった時点で進行中のペン等は破棄する
+  const pointersRef = useRef<Map<number, Point>>(new Map());
+  const pinchRef = useRef<Pinch | null>(null);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
@@ -303,7 +338,23 @@ function AnnotationEditor({
   }
 
   function tolerance(e: PointerEvent) {
-    return (e.pointerType === "touch" ? 16 : 8) / scale;
+    return (e.pointerType === "touch" ? 16 : 8) / (scale * view.zoom);
+  }
+
+  /** ピンチ中の座標をピンチ開始時の土台矩形から計算し、`view`を中心固定で更新する */
+  function applyPinch(pinch: Pinch, points: Point[]) {
+    if (points.length !== 2) return;
+    const [p1, p2] = points;
+    const distance = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const center = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    const rawZoom = pinch.startZoom * (distance / pinch.distance);
+    const zoom = clamp(rawZoom, 1, MAX_PINCH_ZOOM);
+    // ピンチ開始時点の中心が指すローカル座標（土台基準）を固定したまま拡大・縮小する
+    const localX = (pinch.center.x - pinch.outerRect.left - pinch.startX) / pinch.startZoom;
+    const localY = (pinch.center.y - pinch.outerRect.top - pinch.startY) / pinch.startZoom;
+    const x = center.x - pinch.outerRect.left - localX * zoom;
+    const y = center.y - pinch.outerRect.top - localY * zoom;
+    setView(clampView({ zoom, x, y }, pinch.outerRect.width, pinch.outerRect.height));
   }
 
   function handlePointerDown(e: PointerEvent<HTMLCanvasElement>) {
@@ -311,6 +362,32 @@ function AnnotationEditor({
     // 互換のmousedownを止める。止めないと、この直後に出す文字の入力欄からフォーカスが
     // 外れ（キャンバスはフォーカスを受け取らないため）、入力が始まる前に確定されてしまう
     e.preventDefault();
+
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    if (pinchRef.current || pointersRef.current.size >= 2) {
+      // 2本指目が触れた時点でピンチへ切り替え、進行中のペン等は破棄する
+      if (!pinchRef.current) {
+        cancelText();
+        dragRef.current = null;
+        setDraft(null);
+        setMoving(null);
+      }
+      const points = [...pointersRef.current.values()];
+      if (points.length === 2 && outerRef.current) {
+        const [p1, p2] = points;
+        pinchRef.current = {
+          distance: Math.hypot(p2.x - p1.x, p2.y - p1.y),
+          center: { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+          startZoom: view.zoom,
+          startX: view.x,
+          startY: view.y,
+          outerRect: outerRef.current.getBoundingClientRect(),
+        };
+      }
+      return;
+    }
+
     // 文字の入力中に画像を押したら、まず入力を確定するだけにする
     if (textEditRef.current) {
       finishText();
@@ -336,7 +413,6 @@ function AnnotationEditor({
       return;
     }
 
-    e.currentTarget.setPointerCapture?.(e.pointerId);
     if (tool === "move") {
       if (hit) dragRef.current = { id: hit.id, start: point, origin: hit, moved: false };
       return;
@@ -352,6 +428,13 @@ function AnnotationEditor({
   }
 
   function handlePointerMove(e: PointerEvent<HTMLCanvasElement>) {
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if (pinchRef.current) {
+      applyPinch(pinchRef.current, [...pointersRef.current.values()]);
+      return;
+    }
     const drag = dragRef.current;
     if (drag) {
       const point = toImagePoint(e);
@@ -371,7 +454,13 @@ function AnnotationEditor({
     );
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e: PointerEvent<HTMLCanvasElement>) {
+    pointersRef.current.delete(e.pointerId);
+    if (pinchRef.current) {
+      // 1本指以下に戻るまではピンチ扱いのまま。指を1本ずつ離す操作で誤って描き始めない
+      if (pointersRef.current.size < 2) pinchRef.current = null;
+      return;
+    }
     const drag = dragRef.current;
     if (drag) {
       dragRef.current = null;
@@ -392,7 +481,7 @@ function AnnotationEditor({
       x: ((e.clientX - rect.left) * natural.width) / (rect.width || natural.width),
       y: ((e.clientY - rect.top) * natural.height) / (rect.height || natural.height),
     };
-    const hit = findShapeAt(shapes, point, 8 / scale);
+    const hit = findShapeAt(shapes, point, 8 / (scale * view.zoom));
     if (hit?.type === "text") startTextEdit(hit);
   }
 
@@ -409,6 +498,11 @@ function AnnotationEditor({
   function clearAll() {
     cancelText();
     if (shapes.length > 0) commit([]);
+  }
+
+  const zoomed = view.zoom !== 1 || view.x !== 0 || view.y !== 0;
+  function resetView() {
+    setView(DEFAULT_VIEW);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
@@ -459,6 +553,9 @@ function AnnotationEditor({
       </ToolbarButton>
       <ToolbarButton onClick={clearAll} disabled={shapes.length === 0 || saving} label="全部消す">
         <Trash2 />
+      </ToolbarButton>
+      <ToolbarButton onClick={resetView} disabled={!zoomed || saving} label="全体表示に戻す">
+        <Maximize2 />
       </ToolbarButton>
       <button
         type="button"
@@ -570,62 +667,73 @@ function AnnotationEditor({
           </div>
         </div>
 
-        <div ref={stageRef} className="relative order-1 min-h-0 flex-1 md:order-2">
+        <div ref={stageRef} className="relative order-1 min-h-0 flex-1 overflow-hidden md:order-2">
           <div className="absolute inset-0 grid place-items-center">
             {loadError ? (
               <p className="text-sm text-white/70">画像を読み込めませんでした</p>
             ) : !natural ? (
               <Loader2 className="size-6 animate-spin text-white/70" aria-label="画像を読み込み中" />
             ) : (
+              // 外側（outerRef）はズームの影響を受けない土台。ピンチの中心座標をここ基準で
+              // 固定するため、transformを掛けるのは内側のdivだけにする
               <div
+                ref={outerRef}
                 className="relative"
                 style={{ width: natural.width * scale, height: natural.height * scale }}
               >
-                <canvas
-                  ref={canvasRef}
-                  width={natural.width}
-                  height={natural.height}
-                  aria-label={`${image.name} への書き込み`}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={handlePointerUp}
-                  onDoubleClick={handleDoubleClick}
-                  className={cn(
-                    "block size-full touch-none rounded-sm shadow-[0_0_0_1px_rgba(255,255,255,0.15)]",
-                    tool === "move" ? "cursor-move" : tool === "text" ? "cursor-text" : "cursor-crosshair",
-                  )}
-                />
-                {textEdit && (
-                  <input
-                    autoFocus
-                    aria-label="書き込む文字"
-                    value={textEdit.value}
-                    placeholder="文字を入力"
-                    onChange={(e) =>
-                      setTextEdit((edit) => (edit ? { ...edit, value: e.target.value } : edit))
-                    }
-                    onBlur={finishText}
-                    onKeyDown={(e) => {
-                      // IME変換中のEnterは確定に使わない
-                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        finishText();
-                      }
-                    }}
-                    style={{
-                      left: textEdit.at.x * scale,
-                      top: textEdit.at.y * scale,
-                      color: colorValue(textEdit.color),
-                      // iOSは16px未満の入力欄で画面を拡大するため下回らせない
-                      fontSize: Math.max(16, textEdit.fontSize * scale),
-                    }}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
+                    transformOrigin: "0 0",
+                  }}
+                >
+                  <canvas
+                    ref={canvasRef}
+                    width={natural.width}
+                    height={natural.height}
+                    aria-label={`${image.name} への書き込み`}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    onDoubleClick={handleDoubleClick}
                     className={cn(
-                      "absolute min-w-[8em] rounded-sm border border-dashed border-current px-1 font-bold [field-sizing:content] focus:outline-none",
-                      textEdit.color === "white" ? "bg-neutral-900/85" : "bg-white/90",
+                      "block size-full touch-none rounded-sm shadow-[0_0_0_1px_rgba(255,255,255,0.15)]",
+                      tool === "move" ? "cursor-move" : tool === "text" ? "cursor-text" : "cursor-crosshair",
                     )}
                   />
-                )}
+                  {textEdit && (
+                    <input
+                      autoFocus
+                      aria-label="書き込む文字"
+                      value={textEdit.value}
+                      placeholder="文字を入力"
+                      onChange={(e) =>
+                        setTextEdit((edit) => (edit ? { ...edit, value: e.target.value } : edit))
+                      }
+                      onBlur={finishText}
+                      onKeyDown={(e) => {
+                        // IME変換中のEnterは確定に使わない
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          finishText();
+                        }
+                      }}
+                      style={{
+                        left: textEdit.at.x * scale,
+                        top: textEdit.at.y * scale,
+                        color: colorValue(textEdit.color),
+                        // iOSは16px未満の入力欄で画面を拡大するため下回らせない
+                        fontSize: Math.max(16, textEdit.fontSize * scale),
+                      }}
+                      className={cn(
+                        "absolute min-w-[8em] rounded-sm border border-dashed border-current px-1 font-bold [field-sizing:content] focus:outline-none",
+                        textEdit.color === "white" ? "bg-neutral-900/85" : "bg-white/90",
+                      )}
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -636,7 +744,7 @@ function AnnotationEditor({
             ? "置きたい場所を押して入力し、Enterで確定します。書いた文字を押すと書き直せます"
             : tool === "move"
               ? "書いたものをドラッグして位置を直せます。文字はダブルクリックで書き直せます"
-              : "画像の上をなぞって書き込みます"}
+              : "画像の上をなぞって書き込みます。2本指でつまむと拡大・縮小できます"}
         </p>
 
         {saveError && (

@@ -380,6 +380,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持たせない**——エージェントは線の形（文字に重なる横線・矢印・書き足した文字）で意図を
   読むため、何をしてほしいかは本文にも一言書く。キャンバスの`pointerdown`は既定動作を
   止めている。止めないと互換のmousedownで、出したばかりの文字の入力欄からフォーカスが外れる。
+  **2本指ピンチでの拡大・縮小・パン（#3018）は、`canvas`自体でなくそれを包む内側の`div`へ
+  CSS `transform`（`translate`+`scale`）を掛けて実現する。** Pointer座標→画像座標の変換
+  （`toImagePoint`）は`getBoundingClientRect()`を使っており、これは`transform`適用後の
+  実際のスクリーン上の矩形を返すため、ズームしても変換ロジックの変更は不要だった。
+  ズームの影響を受けない基準矩形（`outerRef`）を別に持ち、ピンチの中心点をその基準の
+  ローカル座標として固定したうえで新しい`translate`を計算する（中心点固定ズーム）。
+  2本指目が触れた時点で進行中のペン・移動・文字入力は破棄し、1本指以下に戻るまでは
+  ピンチ扱いのままにする——同じ`canvas`上でシングルタッチ操作とピンチが競合するため。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
