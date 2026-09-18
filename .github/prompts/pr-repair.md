@@ -26,8 +26,8 @@
   - `${HEAD_REF}` と同じ場合、その新しいPull Requestが `${FIX_BASE_REF}` へマージされた時点で
     #${PR_NUMBER} にも反映される
   - `${HEAD_REF}` と違う場合（`release-main/v…` → main のリリースPRを `develop` で直すとき）、
-    **修正は #${PR_NUMBER} には反映されない。** developへ取り込んだあと、リリースPRをcloseして
-    リリースを起動し直すと、直した内容で凍結され直す
+    **修正は #${PR_NUMBER} には反映されない。** developへ取り込んだあと、リリース画面の
+    「修正を入れて作り直す」を押すと、リリースPRを閉じて直した内容でバンプから作り直す
 
 ## 最初にやること
 
@@ -88,8 +88,8 @@
   含める。**`closes` / `fixes` は使わない**
 - 作成できたら `gh pr comment ${PR_NUMBER} --body "..."` で、元のPull Requestへ「修復用の
   Pull Requestを作成したこと」「そのURL」「マージした後どうなるか（`${FIX_BASE_REF}` が
-  `${HEAD_REF}` と同じならこのPull Requestに反映されること、違うならリリースを起動し直す
-  必要があること）」を日本語で報告する。コメント末尾に実行ログのリンク `実行ログ: ${RUN_URL}` と、投稿元を示す
+  `${HEAD_REF}` と同じならこのPull Requestに反映されること、違うならdevelopへ取り込んだ後に
+  リリース画面の「修正を入れて作り直す」を押す必要があること）」を日本語で報告する。コメント末尾に実行ログのリンク `実行ログ: ${RUN_URL}` と、投稿元を示す
   `<!-- issue-deck-source:claude-pr-repair -->` マーカーを必ず追記する
 - **作成したPull Requestを自分でマージしないこと。** マージは人が行う
 
