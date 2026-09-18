@@ -26,14 +26,10 @@ function QuotaNote({ quotaEstimate }: { quotaEstimate: QuotaEstimate }) {
   return (
     <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-relaxed dark:border-amber-900 dark:bg-amber-950/40">
       直近5時間の実測換算：
-      <span className="font-semibold text-amber-700 dark:text-amber-400">
+      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
         1% ≈ {formatUsageUsd(quotaEstimate.usdPerPercent)}
       </span>
       （セッション・Actions合計 {formatUsageUsd(quotaEstimate.windowCostUsd)}）
-      <span className="mt-0.5 block text-muted-foreground">
-        同じ枠を消費する他の利用（issue-deck以外でのClaude利用等）は含まれないため、
-        下のIssue別の割合は実際より大きめに出る目安です
-      </span>
     </div>
   );
 }
