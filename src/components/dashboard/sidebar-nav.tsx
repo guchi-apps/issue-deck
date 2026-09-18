@@ -79,11 +79,11 @@ type SidebarNavProps = {
   onSelectUsage: () => void;
   /** リリース履歴（#2726）の画面を開く */
   onSelectReleaseHistory: () => void;
-  /** 夜間実行（#2772）の画面を開く */
+  /** 予約実行（#2995）の画面を開く */
   onSelectNightlyRun: () => void;
   /** 共通知識（#2912）の画面を開く */
   onSelectKnowledge: () => void;
-  /** 今夜の夜間実行に積んであるIssueの数（#2772）。行に出す。nullなら出さない */
+  /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
@@ -393,12 +393,11 @@ export function SidebarNavView({
             icon: CalendarClock,
             active: activePane === "nightly",
             onClick: onSelectNightlyRun,
-            // 数えるのは**積んである予定の件数**（#2772・#2995。次の5時間枠と今夜の合計）。
-            // 結果に「確認が必要」があっても丸は出さない——確認待ちそのものは上の
-            // 「ユーザーの確認待ち」が数えており、両方に出すとどちらを押せば片付くのか
-            // 分からなくなる
+            // 数えるのは**積んである予定の件数**（#2995）。結果に「確認が必要」があっても
+            // 丸は出さない——確認待ちそのものは上の「ユーザーの確認待ち」が数えており、
+            // 両方に出すとどちらを押せば片付くのか分からなくなる
             count: nightlyRunQueuedCount,
-            title: "次の5時間枠と今夜の予定、直近の結果を見る",
+            title: "次の5時間枠の予定、直近の結果を見る",
           })}
           {navRow({
             key: "knowledge",

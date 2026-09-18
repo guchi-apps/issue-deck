@@ -35,7 +35,7 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
       return screen.kind;
     // 設定はフッターから外し、ホームのヘッダー右上から開く画面になった（#1638）。
     // 確認環境（#2444）も同じくホームのメニューからのドリルダウンで、タブを持たない。
-    // どちらも対応するタブが無いので点灯させない。夜間実行（#2772）・共通知識（#2912）も同じ。
+    // どちらも対応するタブが無いので点灯させない。予約実行（#2995）・共通知識（#2912）も同じ。
     case "settings":
     case "preview":
     case "nightly-run":

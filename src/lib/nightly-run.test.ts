@@ -3,14 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyNightlyRunOutcome,
   decideNightlyRunLaunch,
-  describeNightlyRunMarkChip,
-  describeNightlyRunMarkDetail,
-  describeNightlyRunMarkTitle,
-  describeNightlyRunWindowHours,
   findScheduledRunQueuedMark,
-  formatNightlyRunHour,
   resolveNightlyRunLabelRejection,
-  resolveNightlyRunWindow,
   selectLatestNightKey,
   selectScheduledRunQueuedMarks,
   summarizeNightlyRunOutcomes,
@@ -18,95 +12,58 @@ import {
   type NightlyRunState,
 } from "@/lib/nightly-run";
 
-/** UTCで動く環境（本番のVPS・サブPC・CI）を前提に、日本時間の値はUTC文字列から作る */
-function jst(text: string): Date {
-  return new Date(`${text}+09:00`);
-}
-
-describe("resolveNightlyRunWindow", () => {
-  it("開始時刻の前は前日の窓を指し、閉じている", () => {
-    const window = resolveNightlyRunWindow(jst("2026-09-03T00:30:00"), 1);
-    expect(window.nightKey).toBe("2026-09-02");
-    expect(window.isOpen).toBe(false);
-    expect(window.startsAt.toISOString()).toBe(jst("2026-09-02T01:00:00").toISOString());
-    expect(window.nextStartsAt.toISOString()).toBe(jst("2026-09-03T01:00:00").toISOString());
-  });
-
-  it("開始から3時間のあいだは開いている", () => {
-    const window = resolveNightlyRunWindow(jst("2026-09-03T02:59:00"), 1);
-    expect(window.nightKey).toBe("2026-09-03");
-    expect(window.isOpen).toBe(true);
-    expect(window.endsAt.toISOString()).toBe(jst("2026-09-03T04:00:00").toISOString());
-    expect(window.nextStartsAt.toISOString()).toBe(window.startsAt.toISOString());
-    expect(window.morningAt.toISOString()).toBe(jst("2026-09-03T07:00:00").toISOString());
-  });
-
-  it("3時間を過ぎると閉じ、次の開始は翌日", () => {
-    const window = resolveNightlyRunWindow(jst("2026-09-03T04:00:00"), 1);
-    expect(window.isOpen).toBe(false);
-    expect(window.nightKey).toBe("2026-09-03");
-    expect(window.nextStartsAt.toISOString()).toBe(jst("2026-09-04T01:00:00").toISOString());
-  });
-
-  it("22時開始は日付をまたぎ、nightKeyは開始側の日付、朝は翌日の7時", () => {
-    const window = resolveNightlyRunWindow(jst("2026-09-03T00:10:00"), 22);
-    expect(window.nightKey).toBe("2026-09-02");
-    expect(window.isOpen).toBe(true);
-    expect(window.startsAt.toISOString()).toBe(jst("2026-09-02T22:00:00").toISOString());
-    expect(window.endsAt.toISOString()).toBe(jst("2026-09-03T01:00:00").toISOString());
-    expect(window.morningAt.toISOString()).toBe(jst("2026-09-03T07:00:00").toISOString());
-  });
-
-  it("UTCの日付境界（日本時間9時）をまたいでも日本時間で判定する", () => {
-    // 2026-09-03T08:50 JST = 2026-09-02T23:50 UTC。UTCの日付は2日だが、日本時間では3日
-    const window = resolveNightlyRunWindow(jst("2026-09-03T08:50:00"), 1);
-    expect(window.nightKey).toBe("2026-09-03");
-    expect(window.isOpen).toBe(false);
-  });
-});
-
-describe("formatNightlyRunHour / describeNightlyRunWindowHours", () => {
-  it("2桁で整形し、窓の終わりは24時間で折り返す", () => {
-    expect(formatNightlyRunHour(1)).toBe("01:00");
-    expect(describeNightlyRunWindowHours(22)).toBe("22:00〜01:00");
-    expect(describeNightlyRunWindowHours(5)).toBe("05:00〜08:00");
-  });
-});
-
 describe("resolveNightlyRunLabelRejection", () => {
   it("開発環境・アーティファクトのラベルだけを塞ぐ", () => {
-    expect(resolveNightlyRunLabelRejection([{ name: "21.plan-required" }])).toBeNull();
-    expect(resolveNightlyRunLabelRejection([{ name: "22.merge-confirm-required" }])).toBeNull();
-    expect(resolveNightlyRunLabelRejection([{ name: "25.artifact-required" }])).toContain(
-      "アーティファクトで見た目を出す",
-    );
-    expect(resolveNightlyRunLabelRejection([{ name: "23.preview-required" }])).toContain(
-      "開発環境を起動する",
-    );
+    expect(
+      resolveNightlyRunLabelRejection([{ name: "21.plan-required" }], "NEXT_WINDOW"),
+    ).toBeNull();
+    expect(
+      resolveNightlyRunLabelRejection([{ name: "22.merge-confirm-required" }], "NEXT_WINDOW"),
+    ).toBeNull();
+    expect(
+      resolveNightlyRunLabelRejection([{ name: "25.artifact-required" }], "NEXT_WINDOW"),
+    ).toContain("アーティファクトで見た目を出す");
+    expect(
+      resolveNightlyRunLabelRejection([{ name: "23.preview-required" }], "NEXT_WINDOW"),
+    ).toContain("開発環境を起動する");
   });
 });
 
 describe("decideNightlyRunLaunch", () => {
   it("openで塞ぐラベルが無ければ起動する", () => {
     expect(
-      decideNightlyRunLaunch({ issueState: "open", labels: [{ name: "21.plan-required" }] }),
+      decideNightlyRunLaunch({
+        issueState: "open",
+        labels: [{ name: "21.plan-required" }],
+        kind: "NEXT_WINDOW",
+      }),
     ).toEqual({ action: "launch" });
   });
 
   it("状態が取れない・closed・着手済み・確認待ち・塞ぐラベルは見送る", () => {
-    expect(decideNightlyRunLaunch({ issueState: null, labels: [] }).action).toBe("skip");
-    expect(decideNightlyRunLaunch({ issueState: "closed", labels: [] }).action).toBe("skip");
-    const local = decideNightlyRunLaunch({ issueState: "open", labels: [{ name: "11.local" }] });
+    expect(
+      decideNightlyRunLaunch({ issueState: null, labels: [], kind: "NEXT_WINDOW" }).action,
+    ).toBe("skip");
+    expect(
+      decideNightlyRunLaunch({ issueState: "closed", labels: [], kind: "NEXT_WINDOW" }).action,
+    ).toBe("skip");
+    const local = decideNightlyRunLaunch({
+      issueState: "open",
+      labels: [{ name: "11.local" }],
+      kind: "NEXT_WINDOW",
+    });
     expect(local).toMatchObject({ action: "skip" });
     expect(local.action === "skip" && local.reason).toContain("11.local");
     const check = decideNightlyRunLaunch({
       issueState: "open",
       labels: [{ name: "00.check-user" }, { name: "01.check-plan" }],
+      kind: "NEXT_WINDOW",
     });
     expect(check.action === "skip" && check.reason).toContain("計画の承認");
     const artifact = decideNightlyRunLaunch({
       issueState: "open",
       labels: [{ name: "25.artifact-required" }],
+      kind: "NEXT_WINDOW",
     });
     expect(artifact.action).toBe("skip");
   });
@@ -216,9 +173,9 @@ describe("summarizeNightlyRunOutcomes / selectLatestNightKey", () => {
       agent: "claude",
       claudeModel: null,
       optionLabels: [],
-      kind: "NIGHTLY",
+      kind: "NEXT_WINDOW",
       status: "LAUNCHED",
-      nightKey: "2026-09-02",
+      nightKey: "2026-09-08 08:40",
       createdAt: "2026-09-02T10:00:00.000Z",
       resolvedAt: null,
       outcome: null,
@@ -236,15 +193,15 @@ describe("summarizeNightlyRunOutcomes / selectLatestNightKey", () => {
     expect(counts).toEqual({ ok: 2, warn: 1, run: 0, bad: 0, skip: 0 });
   });
 
-  it("処理済みの予定から最新の夜を選ぶ（予定・取り消しは見ない）", () => {
+  it("処理済みの予定から最新の枠を選ぶ（予定・取り消しは見ない）", () => {
     expect(
       selectLatestNightKey([
-        { status: "LAUNCHED", nightKey: "2026-09-01" },
-        { status: "SKIPPED", nightKey: "2026-09-02" },
-        { status: "CANCELED", nightKey: "2026-09-03" },
+        { status: "LAUNCHED", nightKey: "2026-09-01 08:40" },
+        { status: "SKIPPED", nightKey: "2026-09-02 08:40" },
+        { status: "CANCELED", nightKey: "2026-09-03 08:40" },
         { status: "QUEUED", nightKey: null },
       ]),
-    ).toBe("2026-09-02");
+    ).toBe("2026-09-02 08:40");
     expect(selectLatestNightKey([{ status: "QUEUED", nightKey: null }])).toBeNull();
   });
 });
@@ -261,7 +218,7 @@ describe("予約実行の目印（#2866・#2995）", () => {
       agent: "claude",
       claudeModel: null,
       optionLabels: [],
-      kind: "NIGHTLY",
+      kind: "NEXT_WINDOW",
       status: "QUEUED",
       nightKey: null,
       createdAt: "2026-09-07T10:00:00.000Z",
@@ -271,46 +228,41 @@ describe("予約実行の目印（#2866・#2995）", () => {
     };
   }
 
-  function state(overrides: Partial<NightlyRunState> = {}): NightlyRunState {
+  function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyRunState {
     return {
-      settings: { enabled: true, startHour: 1 },
-      window: {
-        nightKey: "2026-09-07",
-        startsAt: "2026-09-06T16:00:00.000Z",
-        endsAt: "2026-09-06T19:00:00.000Z",
-        isOpen: false,
-        nextStartsAt: "2026-09-07T16:00:00.000Z",
-      },
-      queued: [entry({})],
-      results: null,
       nextWindow: {
         settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
         window: null,
-        queued: [],
+        queued: [entry({})],
         results: null,
+        ...overrides,
       },
-      ...overrides,
     };
   }
 
   it("`Issue.id`で引ける表を作る（`owner/repo#番号`の鍵は作らない）", () => {
-    const marks = selectScheduledRunQueuedMarks(state());
-    expect(findScheduledRunQueuedMark(marks, "9001")).toEqual({
-      entryId: "e1",
-      kind: "NIGHTLY",
-      enabled: true,
-      chip: "今夜 01:00",
-      title: "今夜の夜間実行に積まれています（01:00〜04:00に順に起動）",
-      detail:
-        "01:00〜04:00のあいだに順に起動します。いま開始する場合は先に予定を取り消してください。",
-    });
+    const marks = selectScheduledRunQueuedMarks(
+      state({
+        window: {
+          phase: "waiting",
+          resetsAt: "2026-09-07T23:40:00.000Z",
+          opensAt: "2026-09-07T22:40:00.000Z",
+          usedPercent: 62,
+          runKey: "2026-09-08 08:40",
+        },
+      }),
+    );
+    const mark = findScheduledRunQueuedMark(marks, "9001");
+    expect(mark).toMatchObject({ entryId: "e1", kind: "NEXT_WINDOW", enabled: true, chip: "次枠 07:40〜" });
     // 別のIssue・取得前（表そのものが無い）は目印を出さない
     expect(findScheduledRunQueuedMark(marks, "9002")).toBeNull();
     expect(findScheduledRunQueuedMark(undefined, "9001")).toBeNull();
   });
 
   it("同期できていないIssue（issueIdがnull）は表へ入れない", () => {
-    expect(selectScheduledRunQueuedMarks(state({ queued: [entry({ issueId: null })] })).size).toBe(0);
+    expect(selectScheduledRunQueuedMarks(state({ queued: [entry({ issueId: null })] })).size).toBe(
+      0,
+    );
   });
 
   it("目印を出すのは`QUEUED`だけ（起動後は進捗の表示が受け持つ）", () => {
@@ -326,55 +278,14 @@ describe("予約実行の目印（#2866・#2995）", () => {
     expect(selectScheduledRunQueuedMarks(null).size).toBe(0);
   });
 
-  it("次の5時間枠の予定も同じ表に入る（#2995）", () => {
-    const marks = selectScheduledRunQueuedMarks(
-      state({
-        queued: [],
-        nextWindow: {
-          settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
-          window: {
-            phase: "waiting",
-            resetsAt: "2026-09-07T23:40:00.000Z",
-            opensAt: "2026-09-07T22:40:00.000Z",
-            usedPercent: 62,
-            runKey: "2026-09-08 08:40",
-          },
-          queued: [entry({ id: "n1", kind: "NEXT_WINDOW", issueId: "9003" })],
-          results: null,
-        },
-      }),
-    );
-    const mark = findScheduledRunQueuedMark(marks, "9003");
-    expect(mark?.kind).toBe("NEXT_WINDOW");
-    expect(mark?.chip).toBe("次枠 07:40〜");
-  });
-
   it("次枠実行がOFFならチップがOFFの文言になる（#2995）", () => {
     const marks = selectScheduledRunQueuedMarks(
       state({
-        queued: [],
-        nextWindow: {
-          settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
-          window: null,
-          queued: [entry({ id: "n1", kind: "NEXT_WINDOW", issueId: "9003" })],
-          results: null,
-        },
+        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
+        window: null,
+        queued: [entry({ issueId: "9003" })],
       }),
     );
     expect(findScheduledRunQueuedMark(marks, "9003")?.chip).toBe("次枠実行OFF");
-  });
-
-  it("文言に開始時刻と時間帯が入る", () => {
-    const mark = { entryId: "e1", startHour: 1, enabled: true };
-    expect(describeNightlyRunMarkChip(mark)).toBe("今夜 01:00");
-    expect(describeNightlyRunMarkTitle(mark)).toContain("01:00〜04:00");
-    expect(describeNightlyRunMarkDetail(mark)).toContain("01:00〜04:00");
-  });
-
-  it("夜間実行がOFFなら、走らないことを言う", () => {
-    const mark = { entryId: "e1", startHour: 1, enabled: false };
-    expect(describeNightlyRunMarkChip(mark)).toBe("夜間実行OFF");
-    expect(describeNightlyRunMarkTitle(mark)).toContain("OFF");
-    expect(describeNightlyRunMarkDetail(mark)).toContain("起動しません");
   });
 });

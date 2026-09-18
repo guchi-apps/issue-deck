@@ -679,7 +679,7 @@ export function IssueDeckShell({
   // 「リリース履歴」画面（#2726）。開いている間だけ取得する（GitHub Releaseは頻繁に増えない）。
   const isReleaseHistoryPaneActive =
     filters.pane === "releases" || mobileScreen.kind === "release-history";
-  // 「夜間実行」画面（#2772）。開いている間は巡回の間隔で、閉じている間は左メニューの件数の
+  // 「予約実行」画面（#2995）。開いている間は巡回の間隔で、閉じている間は左メニューの件数の
   // ためにゆっくり取り直す（フック側が間隔を切り替える）
   const isNightlyRunPaneActive = filters.pane === "nightly" || mobileScreen.kind === "nightly-run";
   // 「共通知識」画面（#2912）。開いている間だけ取得する（材料が動くのは共有知識へのPRが
@@ -1317,10 +1317,8 @@ export function IssueDeckShell({
     () => selectScheduledRunQueuedMarks(nightlyRun.state),
     [nightlyRun.state],
   );
-  /** 左メニューの件数。**次の5時間枠と今夜の合計**（積んである予定の総数） */
-  const nightlyRunQueuedCount = nightlyRun.state
-    ? nightlyRun.state.queued.length + nightlyRun.state.nextWindow.queued.length
-    : null;
+  /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
+  const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -2678,7 +2676,7 @@ export function IssueDeckShell({
           // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
           onCreated={registerCreatedIssue}
           onNavigateToIssue={selectIssue}
-          /* 「作成+実装開始」から今夜の予定へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
+          /* 「作成+実装開始」から次の5時間枠へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
              別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
           onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}

@@ -47,18 +47,6 @@ export function parseImageRetentionDays(value: unknown): number | null {
   return (IMAGE_RETENTION_DAYS_OPTIONS as readonly number[]).includes(value) ? value : null;
 }
 
-// 夜間実行（#2772）の開始時刻として選べる「時」（日本時間）。**夜のあいだに限る**——
-// 昼の時刻を選べる形にすると「夜間実行」という名前と挙動が食い違い、人が席にいる時間帯に
-// 無人の実装が走り出す。22時から翌5時までの1時間刻みで、並びは夜の順（22 → 5）。
-// 窓の判定（開始から3時間）とJSTへの変換は`src/lib/nightly-run.ts`が持つ。
-export const NIGHTLY_RUN_START_HOUR_OPTIONS = [22, 23, 0, 1, 2, 3, 4, 5] as const;
-export const NIGHTLY_RUN_START_HOUR_DEFAULT = 1;
-
-export function parseNightlyRunStartHour(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isInteger(value)) return null;
-  return (NIGHTLY_RUN_START_HOUR_OPTIONS as readonly number[]).includes(value) ? value : null;
-}
-
 // 次枠実行（#2995）で起動を始める「5時間枠の残り時間」（分）。**枠の終わり際に寄せる値だけ**を
 // 並べる——2時間より手前を選べるようにすると「いまの枠で実行する」のと変わらなくなり、枠を
 // またいで次の枠を起こすという目的から外れる。
@@ -72,7 +60,7 @@ export function parseNextWindowRunLeadMinutes(value: unknown): number | null {
 
 // 1件起動してから次を起動するまで空ける時間（分）。**0を残してある**のは、1件しか積まない
 // 使い方で待たされないようにするため。既定の10分は、枠が開いてから60分のあいだに6件まで
-// という見当（それ以上積むなら夜間実行の方が向く）。
+// という見当。
 export const NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS = [0, 5, 10, 15, 30] as const;
 export const NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT = 10;
 

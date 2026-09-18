@@ -18,17 +18,21 @@ import { readClaudeWindowSnapshot } from "@/lib/next-window-run-db";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
- * 予約実行（夜間実行 #2772・次枠実行 #2995）の予定と結果。
+ * 予約実行（次枠実行 #2995）の予定と結果。
  *
- * - `GET`: 「予約実行」画面に出す状態（設定・窓・予定・直近1回の結果を種類ごとに）
- * - `POST`: Issueを「今夜の夜間実行」または「次の5時間枠」に積む（`kind`で選ぶ）。
- *   **いまは起動しない。** 起動先のホストは積む時点で決め、窓が開いたらそのホストのclaimで
- *   `enqueueDispatchJob`へ変換する（`nightly-run-launch.ts`・`next-window-run-launch.ts`）
+ * - `GET`: 「予約実行」画面に出す状態（設定・窓・予定・直近1回の結果）
+ * - `POST`: Issueを「次の5時間枠」に積む。**いまは起動しない。** 起動先のホストは積む時点で
+ *   決め、窓が開いたらそのホストのclaimで`enqueueDispatchJob`へ変換する
+ *   （`next-window-run-launch.ts`）
  *
  * 積めない組み合わせはここで弾いて理由を返す（`POST /api/dispatch`と同じ考え方）。
  * オプションのラベル（`21.plan-required`等）は**呼び出し側（ダイアログ）が積む前に付ける**
  * （「実装を開始」と同じ順）。ここでは付いている実ラベルを見て、人が居ないと進まないもの
  * （`23.preview-required`・`25.artifact-required`）が付いていれば積ませない（G1の指摘1）。
+ *
+ * かつては「今夜の夜間実行」（`kind: "nightly"`）も同じ口で受けていたが、#3019で削除した。
+ * `NightlyRunEntry.kind`のenumに`NIGHTLY`は残っているが（既存行の後方互換）、この口からは
+ * 二度と作らせない。
  */
 export async function GET() {
   const userId = await requireUserId();
@@ -39,9 +43,8 @@ export async function GET() {
   return NextResponse.json(state, { headers: { "Cache-Control": "no-store" } });
 }
 
-/** `kind`はリクエストのボディでは`nightly`／`next-window`で受ける（DBの語と分けてある） */
+/** `kind`はリクエストのボディでは`next-window`だけを受ける。それ以外（未指定・`nightly`）は拒否する */
 function parseScheduledRunKind(value: unknown): ScheduledRunKind | null {
-  if (value === undefined || value === "nightly") return "NIGHTLY";
   if (value === "next-window") return "NEXT_WINDOW";
   return null;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Hourglass, Loader2, Moon, X } from "lucide-react";
+import { Hourglass, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { ScheduledRunQueuedMark } from "@/lib/nightly-run";
@@ -15,13 +15,12 @@ import { cn } from "@/lib/utils";
  * ——そのままでは走らず、人が動かないと進まない状態なので、意味の方が一致する。
  *
  * **文言は`selectScheduledRunQueuedMarks`が組み立て済みで渡す。** ここが種類ごとの分岐を持つと、
- * 一覧・詳細・スマホの3か所に同じ分岐が写る。ここで種類を見るのはアイコンだけ。
+ * 一覧・詳細・スマホの3か所に同じ分岐が写る。
  *
  * PCとスマホで同じ部品を使う（`nightly-run-panel.tsx`と同じ切り分け）。
  */
-function MarkIcon({ kind, className }: { kind: ScheduledRunQueuedMark["kind"]; className: string }) {
-  const Icon = kind === "NEXT_WINDOW" ? Hourglass : Moon;
-  return <Icon className={className} aria-hidden />;
+function MarkIcon({ className }: { className: string }) {
+  return <Hourglass className={className} aria-hidden />;
 }
 
 export function NightlyRunChip({
@@ -42,7 +41,7 @@ export function NightlyRunChip({
         className,
       )}
     >
-      <MarkIcon kind={mark.kind} className="size-2.5 shrink-0" />
+      <MarkIcon className="size-2.5 shrink-0" />
       {mark.chip}
     </span>
   );
@@ -86,7 +85,7 @@ export function NightlyRunNotice({
         className,
       )}
     >
-      <MarkIcon kind={mark.kind} className="size-4 shrink-0" />
+      <MarkIcon className="size-4 shrink-0" />
       <div className="min-w-0 flex-1 basis-48">
         <p className="font-semibold">{mark.title}</p>
         <p className="opacity-90">{mark.detail}</p>

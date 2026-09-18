@@ -278,7 +278,7 @@ export function useIssueFilters() {
     setFilters({ pane: "releases", pr: null, prmodal: null });
   }, [setFilters]);
 
-  // 左メニューの「夜間実行」画面への遷移（#2772）。上と同じくPRの選択状態を持たない。
+  // 左メニューの「予約実行」画面への遷移（#2995）。上と同じくPRの選択状態を持たない。
   const selectNightlyRunPane = useCallback(() => {
     setFilters({ pane: "nightly", pr: null, prmodal: null });
   }, [setFilters]);
