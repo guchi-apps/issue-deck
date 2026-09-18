@@ -103,7 +103,7 @@ export function ImageAnnotationDialog({
   useHistoryDismiss(open, requestClose);
 
   // 親の共通Dialog暗幕は半透明かつぼかし付きで、iOS Safariではポータルの書き込み画面より
-  // 前面に合成されることがある。書き込み中は書き込み画面自身の暗幕だけを残す（#2993）。
+  // 前面に合成されることがある。書き込み中は親の暗幕も外し、不透明な書き込み画面1枚だけにする（#2993・#3006）。
   useLayoutEffect(() => {
     setDialogOverlayDisabled(open);
     return () => setDialogOverlayDisabled(false);
