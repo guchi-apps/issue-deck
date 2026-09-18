@@ -429,4 +429,23 @@ describe("session-notify.sh の許可待ち（#2971）", () => {
     expect(waits[1].body).not.toHaveProperty("waitingTool");
     expect(workingReports()).toHaveLength(1);
   });
+
+  // #2985。**フックのJSONを環境変数で子プロセスへ渡すと、128KiB（`MAX_ARG_STRLEN`）を超えた
+  // 時点で`execve`が`E2BIG`で落ちる。** `PostToolUse`のJSONはツールの応答を丸ごと抱えるため、
+  // 画像の`Read`（base64で数百KB）で簡単に超え、指紋を作るpython3が起動できないまま
+  // 照合に外れて許可待ちが解けなくなっていた（このスクリプトは常に`exit 0`で返すので、
+  // 失敗はどこにも出ない）。**大きさで挙動が変わらないことを固定する。**
+  it("ツールの応答が128KiBを超えても、許可を求めたツールの実行で入力待ちを解く", async () => {
+    await runHook(permissionRequest("Read", { file_path: "/tmp/b.png" }));
+    await runHook(waitingPrompt);
+    await runHook(
+      postToolUse(
+        "Read",
+        { file_path: "/tmp/b.png" },
+        { tool_response: { file: { base64: "x".repeat(300 * 1024) } } },
+      ),
+    );
+
+    expect(workingReports()).toHaveLength(1);
+  });
 });

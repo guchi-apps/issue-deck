@@ -57,8 +57,12 @@ vi.mock("@/lib/dispatch/session-wrapup", () => ({
   },
 }));
 
-const { listDispatchSessions, markDispatchSessionEnded, reportDispatchSessions } =
-  await import("./sessions");
+const {
+  clearDispatchSessionWaitingTool,
+  listDispatchSessions,
+  markDispatchSessionEnded,
+  reportDispatchSessions,
+} = await import("./sessions");
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
 
@@ -618,5 +622,28 @@ describe("listDispatchSessions のモデル引き当て", () => {
 
     const [session] = await listDispatchSessions(NOW);
     expect(session.models).toEqual([]);
+  });
+});
+
+// #2985。計画・質問の待ちに入るときに、直前の許可待ちの説明だけを捨てる。
+// **`activity`には触らない**——人を待っていること自体は続いており、理由が移っただけ。
+describe("clearDispatchSessionWaitingTool", () => {
+  it("生きている行の説明だけを消す", async () => {
+    updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await clearDispatchSessionWaitingTool({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2985,
+    });
+
+    expect(result).toEqual({ updated: 1 });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2985,
+        state: "ALIVE",
+      },
+      data: { waitingTool: null, waitingTarget: null },
+    });
   });
 });

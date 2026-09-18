@@ -44,9 +44,18 @@ export const ARTIFACT_CONTENT_SECURITY_POLICY = [
  */
 export const ARTIFACT_IFRAME_SANDBOX = "allow-scripts allow-popups allow-forms allow-modals";
 
-/** claude.aiのアーティファクトURLの形。`/code/artifact/<id>`と、公開ページの`/public/artifacts/<id>`。 */
+/**
+ * claude.aiのアーティファクトURLの形。`/code/artifact/<id>`・公開ページの`/public/artifacts/<id>`・
+ * **短いパスの`/artifact/<id>`**（#2984）。
+ *
+ * **IDはUUIDとは限らない。** `Artifact`ツールが今返すのは
+ * `https://claude.ai/artifact/XxWDfT8h7LawipKxDoz8nd`のような22文字の英数字で、UUIDだけを
+ * 受けていたあいだは`claudeUrl`が常に`null`になり、カードの「claude.aiで開く」も、本文中の
+ * リンクのアプリ内プレビューへの差し替えも効いていなかった。**長さに幅を持たせて受ける**
+ * （桁数はclaude.ai側の都合で、こちらが決められるものではない）。
+ */
 const ARTIFACT_URL_PATTERN =
-  /^https:\/\/claude\.ai\/(?:code\/artifact|public\/artifacts)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[/?#].*)?$/;
+  /^https:\/\/claude\.ai\/(?:code\/artifact|public\/artifacts|artifact)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9]{16,32})(?:[/?#].*)?$/;
 
 /**
  * claude.aiのアーティファクトURLからIDを取り出す。**形が違えば`null`**。

@@ -48,6 +48,7 @@ import {
   type ShapeHistory,
 } from "@/lib/annotation/shapes";
 import { cn } from "@/lib/utils";
+import { useDialogOverlayDisabled } from "@/components/ui/dialog";
 
 /** 書き込みを始める画像。閉じているときは`null` */
 export type AnnotationTarget = {
@@ -91,10 +92,22 @@ export function ImageAnnotationDialog({
   onSave: (file: File) => Promise<void>;
 }) {
   const open = image !== null;
+  const setDialogOverlayDisabled = useDialogOverlayDisabled();
+  const close = useCallback(() => {
+    setDialogOverlayDisabled(false);
+    onClose();
+  }, [onClose, setDialogOverlayDisabled]);
   // 書きかけの有無は中のエディタだけが知っている。戻る操作・Escはここで受けて中へ渡す
-  const requestCloseRef = useRef<() => void>(onClose);
+  const requestCloseRef = useRef<() => void>(close);
   const requestClose = useCallback(() => requestCloseRef.current(), []);
   useHistoryDismiss(open, requestClose);
+
+  // 親の共通Dialog暗幕は半透明かつぼかし付きで、iOS Safariではポータルの書き込み画面より
+  // 前面に合成されることがある。書き込み中は書き込み画面自身の暗幕だけを残す（#2993）。
+  useLayoutEffect(() => {
+    setDialogOverlayDisabled(open);
+    return () => setDialogOverlayDisabled(false);
+  }, [open, setDialogOverlayDisabled]);
 
   return (
     <DialogPrimitive.Root
@@ -112,7 +125,7 @@ export function ImageAnnotationDialog({
           <AnnotationEditor
             key={image.src}
             image={image}
-            onClose={onClose}
+            onClose={close}
             onSave={onSave}
             requestCloseRef={requestCloseRef}
           />

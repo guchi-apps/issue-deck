@@ -7,7 +7,11 @@ import {
   type ReleaseCheckRepositoryOption,
 } from "@/components/dashboard/release-history-panel";
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
-import type { ReleaseCheckRecord, ReleaseCheckTargetSummary } from "@/lib/release-check";
+import type {
+  ReleaseCheckLineRecord,
+  ReleaseCheckRecord,
+  ReleaseCheckTargetSummary,
+} from "@/lib/release-check";
 
 /**
  * スマホの「リリース履歴」画面（#2726）。
@@ -26,8 +30,10 @@ export function MobileReleaseHistoryScreen({
   onRefresh,
   checkTargets,
   checkRecords,
+  checkLineRecords,
   checkRepositoryOptions,
   onToggleChecked,
+  onToggleCheckedLine,
   onToggleCheckTarget,
 }: {
   entries: ReleaseHistoryItem[] | null;
@@ -36,8 +42,13 @@ export function MobileReleaseHistoryScreen({
   onRefresh: () => void;
   checkTargets: ReleaseCheckTargetSummary[];
   checkRecords: ReleaseCheckRecord[];
+  checkLineRecords: ReleaseCheckLineRecord[];
   checkRepositoryOptions: ReleaseCheckRepositoryOption[];
   onToggleChecked: (target: { repoFullName: string; tagName: string }, checked: boolean) => void;
+  onToggleCheckedLine: (
+    target: { repoFullName: string; tagName: string; lineKey: string },
+    checked: boolean,
+  ) => void;
   onToggleCheckTarget: (repository: { id: string; fullName: string }, targeted: boolean) => void;
 }) {
   return (
@@ -56,8 +67,10 @@ export function MobileReleaseHistoryScreen({
           onRefresh={onRefresh}
           checkTargets={checkTargets}
           checkRecords={checkRecords}
+          checkLineRecords={checkLineRecords}
           checkRepositoryOptions={checkRepositoryOptions}
           onToggleChecked={onToggleChecked}
+          onToggleCheckedLine={onToggleCheckedLine}
           onToggleCheckTarget={onToggleCheckTarget}
           compact
         />

@@ -65,14 +65,23 @@ describe("extractReleaseHighlights", () => {
       "**Full Changelog**: https://github.com/guchi-apps/issue-deck/compare/v4.74.0...v4.75.0",
     ].join("\n");
     expect(extractReleaseHighlights(body)).toEqual({
-      lines: ["おまかせモデル選択を追加", "リリース通知の重複を修正"],
+      lines: [
+        { text: "おまかせモデル選択を追加", key: "guchi-apps/issue-deck#2712" },
+        { text: "リリース通知の重複を修正", key: "guchi-apps/issue-deck#2715" },
+      ],
       moreCount: 0,
     });
   });
 
   it("maxを超えるぶんはmoreCountへ回す", () => {
     const body = ["* A by @u in r#1", "* B by @u in r#2", "* C by @u in r#3"].join("\n");
-    expect(extractReleaseHighlights(body, 2)).toEqual({ lines: ["A", "B"], moreCount: 1 });
+    expect(extractReleaseHighlights(body, 2)).toEqual({
+      lines: [
+        { text: "A", key: "r#1" },
+        { text: "B", key: "r#2" },
+      ],
+      moreCount: 1,
+    });
   });
 
   it("本文が無ければ空を返す", () => {
@@ -86,7 +95,14 @@ describe("extractReleaseHighlights", () => {
       "* v4.81.0をmainへリリースする by @issue-deck[bot] in guchi-apps/issue-deck#2806",
     ].join("\n");
     expect(extractReleaseHighlights(body)).toEqual({
-      lines: ["夜間実行を追加する"],
+      lines: [{ text: "夜間実行を追加する", key: "guchi-apps/issue-deck#2803" }],
+      moreCount: 0,
+    });
+  });
+
+  it("PRの参照を取り出せない手書きの行は、テキスト自体を識別子にする（#2982）", () => {
+    expect(extractReleaseHighlights("* 手書きのメモ書き")).toEqual({
+      lines: [{ text: "手書きのメモ書き", key: "手書きのメモ書き" }],
       moreCount: 0,
     });
   });

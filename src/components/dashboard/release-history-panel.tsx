@@ -12,9 +12,13 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import {
   buildReleaseCheckIndex,
+  buildReleaseCheckLineIndex,
   countUncheckedReleases,
+  resolveReleaseCheckLineStatus,
   resolveReleaseCheckStatus,
   selectUncheckedReleases,
+  type ReleaseCheckLineIndex,
+  type ReleaseCheckLineRecord,
   type ReleaseCheckRecord,
   type ReleaseCheckStatus,
   type ReleaseCheckTargetSummary,
@@ -51,8 +55,10 @@ export function ReleaseHistoryPanel({
   onRefresh,
   checkTargets,
   checkRecords,
+  checkLineRecords,
   checkRepositoryOptions,
   onToggleChecked,
+  onToggleCheckedLine,
   onToggleCheckTarget,
   compact = false,
   className,
@@ -65,10 +71,17 @@ export function ReleaseHistoryPanel({
   checkTargets: ReleaseCheckTargetSummary[];
   /** 確認済みの記録（#2930） */
   checkRecords: ReleaseCheckRecord[];
+  /** 箇条書き行ごとの確認記録（#2982） */
+  checkLineRecords: ReleaseCheckLineRecord[];
   /** 対象リポジトリの選択欄に出す候補 */
   checkRepositoryOptions: ReleaseCheckRepositoryOption[];
   onToggleChecked: (
     target: { repoFullName: string; tagName: string },
+    checked: boolean,
+  ) => void;
+  /** 箇条書き1行の確認チェックを切り替える（#2982） */
+  onToggleCheckedLine: (
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (
@@ -84,6 +97,11 @@ export function ReleaseHistoryPanel({
   const checkIndex = useMemo(
     () => buildReleaseCheckIndex(checkTargets, checkRecords),
     [checkTargets, checkRecords],
+  );
+
+  const checkLineIndex = useMemo(
+    () => buildReleaseCheckLineIndex(checkLineRecords),
+    [checkLineRecords],
   );
 
   const uncheckedCount = useMemo(
@@ -212,6 +230,8 @@ export function ReleaseHistoryPanel({
                         : null
                     }
                     onToggleChecked={onToggleChecked}
+                    checkLineIndex={checkLineIndex}
+                    onToggleCheckedLine={onToggleCheckedLine}
                   />
                 ))}
               </ol>
@@ -308,6 +328,8 @@ function ReleaseHistoryCard({
   status,
   outOfScopeReason,
   onToggleChecked,
+  checkLineIndex,
+  onToggleCheckedLine,
 }: {
   entry: ReleaseHistoryItem;
   status: ReleaseCheckStatus;
@@ -315,6 +337,12 @@ function ReleaseHistoryCard({
   outOfScopeReason: "not_targeted" | null;
   onToggleChecked: (
     target: { repoFullName: string; tagName: string },
+    checked: boolean,
+  ) => void;
+  /** 箇条書き行ごとの確認記録の索引（#2982） */
+  checkLineIndex: ReleaseCheckLineIndex;
+  onToggleCheckedLine: (
+    target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
 }) {
@@ -377,12 +405,21 @@ function ReleaseHistoryCard({
 
       {lines.length > 0 && (
         <ul className="mt-1.5 flex flex-col gap-0.5">
-          {lines.map((line, index) => (
-            <li key={index} className="pl-3 text-xs leading-relaxed text-foreground/90 relative">
-              <span aria-hidden className="absolute left-0 top-[7px] size-1 rounded-full bg-muted-foreground" />
-              {line}
-            </li>
-          ))}
+          {lines.map((line) => {
+            const lineTarget = { ...target, lineKey: line.key };
+            const lineChecked = resolveReleaseCheckLineStatus(lineTarget, checkLineIndex) !== null;
+            return (
+              <li key={line.key} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
+                <Checkbox
+                  checked={lineChecked}
+                  aria-label={`「${line.text}」を確認済みにする（参考）`}
+                  onCheckedChange={(next) => onToggleCheckedLine(lineTarget, next === true)}
+                  className="mt-0.5 size-3.5 shrink-0"
+                />
+                <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
 
