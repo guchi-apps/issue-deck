@@ -156,6 +156,49 @@ describe("無人実行プロンプト", () => {
     }
   });
 
+  // #3024: 毎回は使わない節は参照文書へ移し、本文には索引だけを置く。参照文書は他リポジトリの
+  // 実行からも`.shared-prompts/`経由で読まれるうえ、値の差し込み（envsubst）を通らない
+  describe("実装プロンプトの参照文書", () => {
+    const REFERENCE_PATH = "docs/multi-agent/unattended-implementation-reference.md";
+    const reference = (): string => readFileSync(join(process.cwd(), REFERENCE_PATH), "utf8");
+
+    it("本文は毎回使う指示だけで、移した節を載せない", () => {
+      const body = readPrompt("implement.md");
+      expect(body).not.toContain("manual-step-body-template:start");
+      expect(body).not.toContain("<!-- knowledge-candidate -->");
+      // 索引が、他リポジトリ（.shared-prompts/）とissue-deck自身の両方の置き場所を案内する
+      expect(body).toContain(`.shared-prompts/${REFERENCE_PATH}`);
+      expect(body).toContain(`\`${REFERENCE_PATH}\``);
+      // 節を足し戻して膨らんだことに気付けるよう上限を置く（#3024前は52,752バイト）
+      expect(Buffer.byteLength(body, "utf8")).toBeLessThan(32_000);
+    });
+
+    it("索引が指す節が参照文書に見出しとして存在する", () => {
+      const body = readPrompt("implement.md");
+      const titles = [...body.matchAll(/^\| .*? \| 「([^」]+)」/gm)].map((m) => m[1] as string);
+      expect(titles.length).toBeGreaterThanOrEqual(4);
+      for (const title of titles) {
+        expect(reference(), `索引の「${title}」`).toMatch(new RegExp(`^## ${title}`, "m"));
+      }
+    });
+
+    it("差し込まれないプレースホルダを含まない", () => {
+      // envsubstを通らないため、残っているとエージェントへそのまま見える
+      expect(reference()).not.toMatch(/\$\{[A-Z_]+\}/);
+    });
+
+    it("呼び出し元で誤りになる issue-deck の記述が無い", () => {
+      reference()
+        .split("\n")
+        .forEach((line, index) => {
+          if (!line.includes("issue-deck")) return;
+          if (INTENTIONAL.some((pattern) => pattern.test(line))) return;
+
+          expect.fail(`${REFERENCE_PATH}:${index + 1} に意図しない issue-deck の記述がある\n  ${line.trim()}`);
+        });
+    });
+  });
+
   it("展開後の実装プロンプトが呼び出し元の値になっている", () => {
     const vars = substitutedFor("implement.md", "reusable-issue-dispatch.yml");
     const expanded = execFileSync("envsubst", [vars.map((key) => `$\{${key}}`).join(" ")], {
