@@ -414,13 +414,20 @@ describe("sessionUsageImplementationPhases", () => {
       sessionUsageImplementationPhases(
         entry({ costUsd: 10, planCostUsd: null, researchCostUsd: 2, codingCostUsd: 6, wrapupCostUsd: 2 }),
       ),
-    ).toEqual({ plan: 0, research: 2, coding: 6, wrapup: 2 });
+    ).toEqual({ plan: 0, research: 2, coding: 6, verify: 0, wrapup: 2 });
 
     expect(
       sessionUsageImplementationPhases(
         entry({ costUsd: 10, planCostUsd: 1, researchCostUsd: 2, codingCostUsd: 5, wrapupCostUsd: 2 }),
       ),
-    ).toEqual({ plan: 1, research: 2, coding: 5, wrapup: 2 });
+    ).toEqual({ plan: 1, research: 2, coding: 5, verify: 0, wrapup: 2 });
+
+    // 検証を持つ行（#3064）。検証も計画の引き算に入る。
+    expect(
+      sessionUsageImplementationPhases(
+        entry({ costUsd: 10, researchCostUsd: 2, codingCostUsd: 3, verifyCostUsd: 3, wrapupCostUsd: 1 }),
+      ),
+    ).toEqual({ plan: 1, research: 2, coding: 3, verify: 3, wrapup: 1 });
   });
 
   it("3つの合計が金額を超えていたら、その比のまま金額へ収める", () => {
@@ -429,7 +436,7 @@ describe("sessionUsageImplementationPhases", () => {
       sessionUsageImplementationPhases(
         entry({ costUsd: 10, researchCostUsd: 4, codingCostUsd: 12, wrapupCostUsd: 4 }),
       ),
-    ).toEqual({ plan: 0, research: 2, coding: 6, wrapup: 2 });
+    ).toEqual({ plan: 0, research: 2, coding: 6, verify: 0, wrapup: 2 });
   });
 
   it("3つ揃っていない行はnullを返す（フェーズ未集計として扱う）", () => {

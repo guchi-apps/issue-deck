@@ -84,7 +84,7 @@ describe("SessionUsagePanel", () => {
   /**
    * #2779。実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
    */
-  it("セッション種別別で、実装をフェーズの4行に分けて出す", () => {
+  it("セッション種別別で、実装をフェーズの行に分けて出す", () => {
     renderPanel(
       response([
         entry({
@@ -92,7 +92,8 @@ describe("SessionUsagePanel", () => {
           planCostUsd: 2,
           implementationCostUsd: 18,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
       ]),
@@ -101,9 +102,10 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     expect(card).not.toBeNull();
     const rows = within(card as HTMLElement);
-    expect(rows.getByText("計画（Plan mode）")).toBeTruthy();
+    expect(rows.getByText("計画立案")).toBeTruthy();
     expect(rows.getByText("調査")).toBeTruthy();
     expect(rows.getByText("実装")).toBeTruthy();
+    expect(rows.getByText("検証（テスト・Lint・型）")).toBeTruthy();
     expect(rows.getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
     // 割る前の1行は残さない（フェーズ未集計の行も出ない）。
     expect(rows.queryByText("実装（フェーズ未集計）")).toBeNull();
@@ -122,9 +124,11 @@ describe("SessionUsagePanel", () => {
           costUsd: 20,
           planCostUsd: 2,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
+        entry({ sessionId: "plan-review", kind: "plan-review", costUsd: 3 }),
         entry({ sessionId: "question", kind: "question", costUsd: 50 }),
         entry({ sessionId: "actions", kind: "actions", costUsd: 1 }),
       ]),
@@ -133,18 +137,34 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     const labels = within(card as HTMLElement)
       .getAllByText(
-        /^(計画（Plan mode）|調査|実装|仕上げ（コミット・PR・報告）|GitHub Actions|作業の流れの外|横断質問)$/,
+        /^(計画立案|計画レビュー|調査|実装|検証（テスト・Lint・型）|仕上げ（コミット・PR・報告）|CI\/CD・レビュー|作業の流れの外|横断質問)$/,
       )
       .map((element) => element.textContent);
     expect(labels).toEqual([
-      "計画（Plan mode）",
+      "計画立案",
+      "計画レビュー",
       "調査",
       "実装",
+      "検証（テスト・Lint・型）",
       "仕上げ（コミット・PR・報告）",
-      "GitHub Actions",
+      "CI/CD・レビュー",
       "作業の流れの外",
       "横断質問",
     ]);
+  });
+
+  /**
+   * #3064。種別別は金額だけを見るので、トークンの細い帯を出さない（Issue・PR別には残す）。
+   */
+  it("セッション種別別にはトークンの帯を出さない", () => {
+    renderPanel(response([entry({ costUsd: 20, researchCostUsd: 4, codingCostUsd: 12, wrapupCostUsd: 4 })]));
+
+    const tokenTitle = /^入力 .* \/ 書込 .* \/ 読出 .* \/ 出力 /;
+    const kindCard = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(kindCard.querySelectorAll("[title]").length).toBeGreaterThan(0);
+    expect([...kindCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(false);
+    const issueCard = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect([...issueCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(true);
   });
 
   it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {
@@ -420,7 +440,7 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
-  it("内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別は縦棒でトークンを出さない（#3038）", () => {
+  it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
     renderPanel(response([entry()]));
 
     // 日別の縦棒。内側はエージェントの割合で、棒には数値を書けないのでツールチップへ出す。
@@ -429,10 +449,12 @@ describe("SessionUsagePanel", () => {
     // トークンの細い帯は日別では出さない。
     expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
-    // 種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
-    // リポジトリ別は円グラフへ替わり、帯を持たない（#3060）。
+    // Issue・PR別は細い帯（トークンの4区分。長さもトークン量に比例）を出す。
+    // リポジトリ別は円グラフ（#3060）、種別別は金額の棒だけ（#3064）で、帯を持たない。
+    const issues = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(issues).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
     const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
-    expect(within(breakdown).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
+    expect(within(breakdown).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
     // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();

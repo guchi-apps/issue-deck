@@ -1463,6 +1463,9 @@ SESSION_USAGE_PHASE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-
 # 報告済みの行は`guchi-apps-<repo>`という別リポジトリとして残っているため、印を足して
 # 30日ぶんを一度だけ開き直し、正しいリポジトリ名・種別で上書きする。
 SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-code-review-backfill.stamp"
+# **#3064で実装・仕上げから「検証」（`verifyCostUsd`）を切り出した。** 上と同じ理由で、
+# 30日ぶんを一度だけ開き直して過去の行にも検証の内訳を入れる。
+SESSION_USAGE_VERIFY_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-verify-backfill.stamp"
 
 report_session_usage() {
   ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
@@ -1487,7 +1490,8 @@ report_session_usage() {
 
   local days backfill=0
   if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" &&
-    -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" ]]; then
+    -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" &&
+    -f "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" ]]; then
     days="$SESSION_USAGE_WINDOW_DAYS"
   else
     days="$SESSION_USAGE_BACKFILL_DAYS"
@@ -1545,6 +1549,7 @@ report_session_usage() {
     ((codex_backfill_ok)) && touch "$SESSION_USAGE_CODEX_BACKFILL_STAMP" 2>/dev/null || true
     touch "$SESSION_USAGE_PHASE_BACKFILL_STAMP" 2>/dev/null || true
     touch "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" 2>/dev/null || true
+    touch "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
   return 0
