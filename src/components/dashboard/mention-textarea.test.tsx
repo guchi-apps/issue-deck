@@ -264,12 +264,25 @@ describe("MentionTextarea 入力欄の下の行", () => {
     expect(buttonNames(hidden.container)).toContain("画像を添付");
   });
 
-  it("toolbarExtraで渡した操作を同じ行の右へ並べる", () => {
+  /**
+   * #3068。「画像を添付」は最右のサムネイルのすぐ右に並ぶ。サムネイルの列が伸びて操作を
+   * 右端へ押しやると、画像が1枚のときに間が大きく空く（列は縮むだけで、伸びない）
+   */
+  it("サムネイルの列の直後に「画像を添付」が並び、列は伸びない", () => {
     const { container } = render(
-      <Harness initialValue="本文" toolbarExtra={<button type="button">音声入力を整理</button>} />,
+      <Harness initialValue={"再現手順です。\n\n![a.png](/img/a.png)"} />,
     );
+    const strip = container.querySelector('[data-slot="mention-attachments"]') as HTMLElement;
+    const attach = container.querySelector(
+      '[data-slot="mention-toolbar"] button[aria-label="画像を添付"]',
+    ) as HTMLElement;
 
-    expect(buttonNames(container)).toEqual(["画像を添付", "プレビュー", "音声入力を整理"]);
+    // 列の次の要素が操作の並び（画像を添付を含む）で、列は縮むだけ（flex-1で伸ばさない）
+    expect(strip.nextElementSibling?.contains(attach)).toBe(true);
+    expect(strip.className).toContain("min-w-0");
+    expect(strip.className).not.toContain("flex-1");
+    // 操作は行が詰まっても縮まない（はみ出したサムネイルの側が見切れる）
+    expect(attach.parentElement?.className).toContain("shrink-0");
   });
 });
 

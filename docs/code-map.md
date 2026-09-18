@@ -294,10 +294,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面から読み取れないことだけ残す**——リポジトリの補足文は質問のとき（選択肢が減っている
   理由）だけ、見出しの説明文は質問のときだけ出し、Issueの説明文は`sr-only`で残す
   （消すと`DialogContent`の説明が無くなりRadixが警告する）。
-  入力欄の下の「画像を添付」「音声入力を整理」は添付サムネイルと同じ行に並べ、
+  入力欄の下の「画像を添付」は最右の添付サムネイルのすぐ右に並べ（はみ出す枚数では右端に
+  固定してサムネイル側が見切れる）、「音声入力を整理」は「内容」見出しの右隣へ置く（#3068）。
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
-  `showPreviewToggle` / `toolbarExtra`。コメント欄・Issue編集では既定のまま出る）。
+  `showPreviewToggle`。コメント欄・Issue編集では既定のまま出る）。
 - **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
   以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。

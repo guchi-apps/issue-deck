@@ -601,6 +601,25 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
   });
 
+  /**
+   * #3068。「音声入力を整理」は「内容」の見出しの右隣に置く。入力欄の下の行は画像の操作だけで、
+   * 文言は1行の「音声入力を整理」（3行に組んだ「音声整理」ではない）
+   */
+  it("「音声入力を整理」を「内容」の見出しの右隣に置き、入力欄の下の行には置かない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const label = screen.getByText("内容");
+    const cleanup = screen.getByRole("button", { name: "音声入力を整理" });
+
+    expect(cleanup.textContent).toBe("音声入力を整理");
+    expect(label.nextElementSibling?.contains(cleanup)).toBe(true);
+    expect(cleanup.closest('[data-slot="mention-toolbar"]')).toBeNull();
+    expect(
+      screen.getByLabelText("内容").compareDocumentPosition(cleanup) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+  });
+
   /** #1929。欄は無くすが、作成するIssueには必ず`m-guchi`が付く */
   it("担当者の選択欄を出さず、作成するIssueにはm-guchiが付く", async () => {
     repoMeta.assignees = ["m-guchi", "someone-else"];

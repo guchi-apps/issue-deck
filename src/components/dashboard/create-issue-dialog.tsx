@@ -1078,7 +1078,14 @@ export function CreateIssueDialog({
             `#123`のIssue補完が使えるようにするのがこの統合の主目的で、以前の質問ダイアログは
             素のTextareaだったためどちらも使えなかった */}
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="create-issue-body">{isQuestion ? "質問内容" : "内容"}</Label>
+          {/* 「音声入力を整理」は見出しの右隣に置く（#3068）。入力欄の下の行は画像の操作だけにする。
+              整形の失敗メッセージはボタンの下に出て行が伸びるので、見出しは上端にそろえる */}
+          <div className="flex items-start gap-2">
+            <Label htmlFor="create-issue-body" className="h-8 md:h-6">
+              {isQuestion ? "質問内容" : "内容"}
+            </Label>
+            <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+          </div>
           {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
               入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
           {effectiveBodyPrefix && (
@@ -1100,17 +1107,9 @@ export function CreateIssueDialog({
             repositoryFullName={repositoryFullName}
             placeholder={isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"}
             className="min-h-32 md:text-sm"
-            // 「画像を添付」と同じ行へ寄せる（#1929）。プレビューは出さない——貼った画像は
-            // サムネイルで見えており、書きかけを切り替えて確かめる場面が無い
+            // プレビューは出さない（#1929）——貼った画像はサムネイルで見えており、
+            // 書きかけを切り替えて確かめる場面が無い
             showPreviewToggle={false}
-            toolbarExtra={
-              <BodyCleanupButton
-                value={body}
-                onCleaned={setBody}
-                disabled={isSubmitting}
-                stacked
-              />
-            }
             autoFocus
           />
         </div>
