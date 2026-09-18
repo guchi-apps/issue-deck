@@ -47,13 +47,14 @@ describe("toCodexUsage", () => {
       observedAt.getTime() + 16 * 60_000,
     );
     expect(usage.stale).toBe(true);
+    expect(usage.windows.every((window) => !window.expired)).toBe(true);
     expect(usage.windows.map(({ label, usedPercent, remainingPercent }) => ({ label, usedPercent, remainingPercent }))).toEqual([
       { label: "5時間", usedPercent: 45, remainingPercent: 55 },
       { label: "週間", usedPercent: 7, remainingPercent: 93 },
     ]);
   });
 
-  it("リセット時刻を過ぎた枠は0%とし、次のリセット時刻を枠の長さずつ進める（#3037）", () => {
+  it("リセット時刻を過ぎた枠は推定せず、最後の観測値のままexpiredとして返す（#3052）", () => {
     const usage = toCodexUsage(
       {
         host: "subpc",
@@ -68,8 +69,9 @@ describe("toCodexUsage", () => {
       },
       new Date("2026-09-14T00:00:00Z").getTime(),
     );
+    expect(usage.source).toBe("transcript");
     const weekly = usage.windows[1];
-    expect(weekly).toMatchObject({ usedPercent: 0, remainingPercent: 100 });
-    expect(new Date(weekly.resetsAt * 1000).toISOString()).toBe("2026-09-20T03:00:00.000Z");
+    expect(weekly).toMatchObject({ usedPercent: 70, remainingPercent: 30, expired: true });
+    expect(new Date(weekly.resetsAt * 1000).toISOString()).toBe("2026-09-06T03:00:00.000Z");
   });
 });

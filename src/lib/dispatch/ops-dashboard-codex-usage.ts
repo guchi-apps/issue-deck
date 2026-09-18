@@ -48,6 +48,7 @@ function toWindow(value: unknown, key: CodexUsageWindow["key"]): CodexUsageWindo
     remainingPercent: 100 - used,
     resetsAt: Math.floor(resetsAt / 1000),
     durationMs: windowSeconds * 1000,
+    expired: false,
   };
 }
 
@@ -76,6 +77,7 @@ export function parseOpsDashboardCodexUsage(value: unknown): CodexUsage | null {
     windows: windows as CodexUsageWindow[],
     planType: typeof provider.plan === "string" ? provider.plan : null,
     host: "ops-dashboard",
+    source: "ops-dashboard",
     fetchedAt: Number.isNaN(fetchedAt) ? Date.now() : fetchedAt,
     stale: false,
   };

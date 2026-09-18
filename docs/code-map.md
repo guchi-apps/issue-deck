@@ -4032,7 +4032,10 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   ops-dashboardの`GET /api/ai-usage`から`chatgpt`の枠を読み（`ops-dashboard-codex-usage.ts`、5分キャッシュ）、
   読めないときだけ上の`CodexUsageSnapshot`へ戻る。**`wham/usage`をissue-deckから直接叩かない**——リフレッシュ
   トークンが使うたびにローテーションするため、ops-dashboard・Codex CLIのどちらかのトークンを失効させる。
-  スナップショットへ戻ったときは、リセット時刻を過ぎた枠を0%として出す（次のリセット時刻は推定値）。
+  スナップショットへ戻ったときは、画面に取得元（サブPCの転記・最終観測時刻）を注記し、リセット時刻を過ぎた枠は
+  `expired`として「まだ取得できていません」と出す（#3052）。以前（#3037）は0%・推定リセット時刻を出していたが、
+  週間枠は時計の境界で始まらず他端末での使用も転記に載らないため、実際と食い違った。**`OPS_API_TOKEN`が
+  issue-deckのGitHub secretに無いと`deploy.yml`が空値を書き、黙って転記へ戻る**（#3052の原因）。
   自動一時停止（上の`sweepAgentUsageLimitPause`）は今もスナップショットを直接読んでいる
 - **Claudeの自動検知は5時間枠（`5h`）と週間枠（`7d`）の両方を見る**（#3013）。片方でも`rejected`
   （または残り0%）なら`usage_limit`で止め、**両方**が戻ったときだけ解除する。週間枠を使い切った場合は
