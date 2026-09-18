@@ -13,9 +13,11 @@ import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
 import {
+  fillUsageDays,
   formatUsageTokens,
   formatUsageUsd,
   isUsageKindInWorkFlow,
+  niceAxisScale,
   sessionUsageCostSplit,
   sessionUsageKindLabel,
   sessionUsageModelLabel,
@@ -168,7 +170,8 @@ const OUTPUT_COLOR = "#4776e6";
 
 /**
  * 金額の棒の内側（#2633・#2667）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
- * 日別・内訳の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す。
+ * 内訳（リポジトリ別・種別別・Issue別）の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す
+ * （日別は#3038で縦棒に変わり、帯を出さなくなった）。
  *
  * **`TOKEN_COLORS`・`OUTPUT_COLOR`（橙・青・紫）とは別の色相に離す**（#2667）。以前はこの3色を
  * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
@@ -333,7 +336,7 @@ function TokenLegend() {
 }
 
 /**
- * 合計行（日別・リポジトリ別・種別別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
+ * 合計行（リポジトリ別・種別別・Issue別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
  * この行はGitHub Actionsぶんも足し込んだ合計で、実行経路別に色を変えると1本の帯へ
  * 「区分」と「実行経路」の2つの軸が混ざる（それを避けるのが#2633）。
  */
@@ -374,7 +377,7 @@ function costSplitByAgent(row: CostRow) {
 type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource };
 
 /**
- * 日別・内訳の太い棒。長さが金額、内側がClaude／Codex／GitHub Actionsの割合。
+ * 内訳の太い棒。長さが金額、内側がClaude／Codex／GitHub Actionsの割合（日別の縦棒も同じ3色）。
  * **割合そのものは棒に数値を書けないので、ツールチップへ金額で出す。**
  */
 function CostBar({
@@ -471,11 +474,28 @@ function ContextBar({ totals }: { totals: UsageTotals }) {
   );
 }
 
+/** 縦軸の目盛りの表記。`$100`・`$2.5`のように、間隔の刻みに合わせて小数を出す */
+function formatAxisUsd(value: number): string {
+  if (value === 0) return "$0";
+  return `$${Number.isInteger(value) ? value.toLocaleString() : value.toFixed(1)}`;
+}
+
+/** 日別の縦軸ラベルを何日おきに出すか。7日までは全日、それより多いと5日おき（最新日から数える） */
+const DAILY_LABEL_EVERY_DAYS = 5;
+const DAILY_ALL_LABELS_MAX_DAYS = 10;
+/** この日数までは棒の上に金額を出す。それを超えると幅が足りないので最大の日だけにする */
+const DAILY_VALUE_LABELS_MAX_DAYS = 7;
+
 /**
- * 日別の棒。**1行に太い棒（金額）と細い帯（トークン）を積む**（#2633）。金額とトークンは
- * 比例しない——キャッシュ読出に寄った日は帯が長いのに棒が短く出る——ので、1本へ混ぜずに
- * 軸ごとに分ける。**いちばん新しい日だけ枠線を足す**（集計の途中で必ず低く出るため、同じ塗りだと
- * 「減った」と読めてしまう）。ライブラリを足さずCSSだけで描く。
+ * 日別の縦棒グラフ（#3038）。**縦軸が金額、横軸が日付。** 期間の全日を等間隔に並べ、
+ * 金額0の日も日付ラベルと基準線上の短い印を残す（棒だけを消すと、隣の日が連続して見える）。
+ * 棒の幅は列数で割って決めるので、30日でもスマホで横スクロールしない（日付ラベルは間引く）。
+ * 平均は期間の全日（0の日と集計中の最新日を含む）÷日数で、横の点線と「平均 $○○」で示す。
+ *
+ * **トークン量は使わない**（金額と比例しないための二段の帯は#2633で入れたが、日別では不要になった。
+ * リポジトリ別・種別別・Issue別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
+ * 従来どおり**。最新日は集計の途中で必ず低く出るので、枠線を足して「減った」と読ませない。
+ * ライブラリを足さずCSSだけで描く。
  */
 function DailyChart({
   days,
@@ -484,49 +504,162 @@ function DailyChart({
   days: SessionUsageResponse["byDay"];
   todayKey: string;
 }) {
-  const max = days.reduce((peak, day) => Math.max(peak, day.costUsd), 0);
-  const maxTokens = days.reduce(
-    (peak, day) => Math.max(peak, day.contextTokens + day.outputTokens),
-    0,
-  );
   if (days.length === 0) {
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
 
+  const peak = days.reduce((top, day) => Math.max(top, day.costUsd), 0);
+  const scale = niceAxisScale(peak);
+  const average = days.reduce((sum, day) => sum + day.costUsd, 0) / days.length;
+  const peakIndex = days.findIndex((day) => day.costUsd === peak);
+  const isFewDays = days.length <= DAILY_VALUE_LABELS_MAX_DAYS;
+  const showsEveryLabel = days.length <= DAILY_ALL_LABELS_MAX_DAYS;
+  const barsGap = isFewDays ? "gap-2 sm:gap-3" : "gap-[2px] sm:gap-1";
+  const barMaxWidth = isFewDays ? "max-w-16" : "max-w-6";
+
   return (
-    <div className="flex flex-col gap-2">
-      {days.map((day) => {
-        const totalTokens = day.contextTokens + day.outputTokens;
-        return (
-          <div
-            key={day.date}
-            className="grid grid-cols-[3.5rem_1fr_4rem] items-center gap-2 text-[10px]"
-            title={`${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　${formatUsageTokens(totalTokens)}`}
+    <div className="grid grid-cols-[2.4rem_minmax(0,1fr)] gap-x-1 text-[10px] text-muted-foreground tabular-nums sm:grid-cols-[2.9rem_minmax(0,1fr)] sm:gap-x-1.5">
+      <div className="relative h-52">
+        {scale.ticks.map((tick) => (
+          <span
+            key={tick}
+            className="absolute right-0 translate-y-1/2 leading-none whitespace-nowrap"
+            style={{ bottom: `${(tick / scale.max) * 100}%` }}
           >
-            <span className="text-muted-foreground tabular-nums">
+            {formatAxisUsd(tick)}
+          </span>
+        ))}
+      </div>
+      <div className="relative h-52">
+        {scale.ticks.map((tick) => (
+          <div
+            key={tick}
+            aria-hidden
+            className={cn("absolute inset-x-0 border-t", tick === 0 ? "border-muted-foreground/60" : "border-border")}
+            style={{ bottom: `${(tick / scale.max) * 100}%` }}
+          />
+        ))}
+        <div className={cn("absolute inset-0 flex items-end", barsGap)}>
+          {days.map((day, index) => {
+            const split = costSplitByAgent(day);
+            const parts = [
+              { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude },
+              { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex },
+              { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions },
+            ];
+            const isZero = day.costUsd <= 0;
+            const showsValue = !isZero && (isFewDays || index === peakIndex);
+            return (
+              <div
+                key={day.date}
+                className="relative flex h-full min-w-0 flex-1 items-end justify-center"
+                title={`${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答`}
+              >
+                {isZero ? (
+                  // 棒の代わりに基準線上へ短い印を置き、「0だった日」と「日付が抜けた」を区別する
+                  <span
+                    aria-hidden
+                    className={cn("h-0.5 w-full rounded-full bg-muted-foreground/50", barMaxWidth)}
+                  />
+                ) : (
+                  <div
+                    className={cn(
+                      "flex w-full flex-col-reverse overflow-hidden rounded-t-[2px]",
+                      barMaxWidth,
+                      day.date === todayKey && "outline outline-1 outline-offset-1 outline-muted-foreground/60",
+                    )}
+                    style={{ height: `${(day.costUsd / scale.max) * 100}%` }}
+                    title={parts.map((part) => `${part.label} ${formatUsageUsd(part.value)}`).join(" / ")}
+                  >
+                    {parts.map((part) => (
+                      <span
+                        key={part.key}
+                        className="block w-full"
+                        style={{
+                          height: `${(part.value / day.costUsd) * 100}%`,
+                          backgroundColor: part.color,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+                {showsValue && (
+                  <span
+                    className="absolute left-1/2 -translate-x-1/2 pb-[3px] text-[10px] leading-none font-bold whitespace-nowrap text-foreground"
+                    style={{ bottom: `calc(${(day.costUsd / scale.max) * 100}% + 1px)` }}
+                  >
+                    {formatUsageUsd(day.costUsd)}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 z-10 border-t-[1.5px] border-dashed border-sky-600 dark:border-sky-400"
+          style={{ bottom: `${(average / scale.max) * 100}%` }}
+        >
+          <em className="absolute right-0 bottom-[3px] rounded-full border border-sky-600 bg-card px-1.5 py-px text-[10.5px] leading-snug font-bold text-sky-700 not-italic dark:border-sky-400 dark:text-sky-300">
+            平均 {formatUsageUsd(average)}
+          </em>
+        </div>
+      </div>
+      <div className={cn("col-start-2 mt-1 flex", barsGap)}>
+        {days.map((day, index) => {
+          const fromLatest = days.length - 1 - index;
+          const showsLabel = showsEveryLabel || fromLatest % DAILY_LABEL_EVERY_DAYS === 0;
+          return (
+            <span
+              key={day.date}
+              className={cn(
+                "flex h-[1.3em] min-w-0 flex-1 justify-center whitespace-nowrap",
+                !showsLabel && "invisible",
+                day.date === todayKey && "font-bold text-foreground",
+              )}
+            >
               {formatMonthDay(`${day.date}T00:00:00+09:00`)}
             </span>
-            <div className="flex flex-col gap-0.5">
-              <CostBar
-                row={day}
-                widthPercent={max > 0 ? (day.costUsd / max) * 100 : 0}
-                highlighted={day.date === todayKey}
-              />
-              <GroupTokenBar totals={day} maxTokens={maxTokens} />
-            </div>
-            <span className="text-right font-semibold tabular-nums">
-              {formatUsageUsd(day.costUsd)}
-            </span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 日別カードの凡例。棒の色（誰が使ったか）と平均線。トークンの帯は日別では出さない（#3038） */
+function DailyLegend() {
+  const items = [
+    { color: AGENT_COLORS.claude, label: "Claude" },
+    { color: AGENT_COLORS.codex, label: "Codex" },
+    { color: AGENT_COLORS.actions, label: "GitHub Actions" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+      {items.map((item) => (
+        <span key={item.label}>
+          <i
+            aria-hidden
+            className="mr-1 inline-block size-2 rounded-[2px]"
+            style={{ backgroundColor: item.color }}
+          />
+          <span className="text-foreground">{item.label}</span>
+        </span>
+      ))}
+      <span>
+        <i
+          aria-hidden
+          className="mr-1.5 inline-block w-4 border-t-[1.5px] border-dashed border-sky-600 align-middle dark:border-sky-400"
+        />
+        <span className="text-foreground">期間の平均</span>
+      </span>
     </div>
   );
 }
 
 /**
- * リポジトリ別・種別別の内訳。日別と同じ二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
- * **太い棒の内側も日別と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
+ * リポジトリ別・種別別の内訳。二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * **太い棒の内側は日別の縦棒と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
  * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
  */
 function Breakdown({
@@ -1086,7 +1219,9 @@ export function SessionUsagePanel({
   const avgContext =
     totals && totals.responses > 0 ? Math.round(totals.contextTokens / totals.responses) : 0;
   const planReview = data?.byKind.find((kind) => kind.key === "plan-review");
-  const todayKey = data?.byDay.at(-1)?.date ?? "";
+  // 日別は期間の全日を並べる（記録の無い日は0で埋める。#3038）。最後の日が「集計中の今日」
+  const dailyDays = data ? fillUsageDays(data.byDay, data.since, data.until) : [];
+  const todayKey = dailyDays.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
   const agentCostSub = data
     ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
@@ -1203,22 +1338,22 @@ export function SessionUsagePanel({
             />
           </div>
 
-          <TokenLegend />
-
-          <section className="flex flex-col gap-1 rounded-lg border p-3">
+          <section className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">日別</span>
-              {/* 太い棒＝金額／細い帯＝トークンの説明は直上のTokenLegendと重複するため落とす
-                  （#2666）。枠線の意味（集計途中で必ず低く出る）はここにしか無いので残す */}
+              {/* 棒の色と平均線の説明は下の`DailyLegend`に置く。枠線の意味（集計途中で必ず
+                  低く出る）はここにしか無いので残す */}
               <span className="text-[11px] text-muted-foreground">
                 いちばん新しい日は集計中
               </span>
             </div>
-            <DailyChart
-              days={data.byDay}
-              todayKey={todayKey}
-            />
+            <DailyLegend />
+            <DailyChart days={dailyDays} todayKey={todayKey} />
           </section>
+
+          {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒になり帯を出さなくなったので、
+              この凡例を使う下のリポジトリ別・種別別・Issue別の手前へ置く（#3038） */}
+          <TokenLegend />
 
           <div
             className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}
