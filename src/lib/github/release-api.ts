@@ -12,7 +12,7 @@ import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
-  parseRebuildPullRequests,
+  buildRebuildCandidate,
   type CompareCommit,
   type ReleaseRebuildCandidate,
 } from "@/lib/release-rebuild";
@@ -303,17 +303,14 @@ export async function fetchReleaseRebuildCandidate(
   releaseHeadSha: string,
   token: string,
 ): Promise<ReleaseRebuildCandidate> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=100`;
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=250`;
   const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
-  const data: { ahead_by?: number; commits?: CompareCommit[] } = await res.json();
-  return {
-    aheadBy: data.ahead_by ?? 0,
-    pullRequests: parseRebuildPullRequests(data.commits ?? []),
-  };
+  const data: { commits?: CompareCommit[] } = await res.json();
+  return buildRebuildCandidate(data.commits ?? []);
 }
 
 /**

@@ -21,7 +21,7 @@ export type ReleaseRebuildPullRequest = {
 
 /** リリースPRの後にdevelopへ入った変更。作り直しボタンの可否と確認ダイアログに使う */
 export type ReleaseRebuildCandidate = {
-  /** リリースPRのheadからdevelopまでのコミット数（マージコミットを含む） */
+  /** リリースPRのheadからdevelopまでのコミット数（マージコミットを含み、バンプPR・リリースPRのマージは除く） */
   aheadBy: number;
   /** そのうちPRのマージとして読み取れたもの（バンプPRは除く） */
   pullRequests: ReleaseRebuildPullRequest[];
@@ -56,6 +56,27 @@ export function parseRebuildPullRequests(commits: CompareCommit[]): ReleaseRebui
     });
   }
   return pullRequests.sort((a, b) => a.number - b.number);
+}
+
+/** バンプPR・リリースPRのマージコミットか。作り直しの「新しい変更」には数えない */
+function isReleaseMergeCommit(message: string): boolean {
+  const match = MERGE_SUBJECT.exec(message.split("\n")[0] ?? "");
+  return match !== null && (match[2].startsWith("release/v") || match[2].startsWith("release-main/v"));
+}
+
+/**
+ * 比較結果から、作り直しの材料を組み立てる。
+ *
+ * **リリースPRのheadからdevelopまでには、バンプPR自身のマージコミットが必ず1件ある**
+ * （凍結点はバンプPRのhead＝マージの第2親。計画レビューの指摘）。これを数えると
+ * 「後に入った変更がある」が常に真になり、押せない条件が効かなくなるため除く。
+ * workflow側の判定（バンプPRのマージコミットより後のコミット数）と同じ意味になる。
+ */
+export function buildRebuildCandidate(commits: CompareCommit[]): ReleaseRebuildCandidate {
+  return {
+    aheadBy: commits.filter(({ commit }) => !isReleaseMergeCommit(commit.message)).length,
+    pullRequests: parseRebuildPullRequests(commits),
+  };
 }
 
 /** 作り直しボタンを押せるか。**developに新しいコミットが無ければ押せない**（中身が変わらない） */

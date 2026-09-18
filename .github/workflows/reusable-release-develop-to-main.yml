@@ -633,7 +633,12 @@ jobs:
             && [ "$(printf '%s\n%s\n' "$NEW_VERSION" "$DEV_VERSION" | sort -V | tail -n 1)" = "$DEV_VERSION" ]; then
             IFS='.' read -r DEV_MAJOR DEV_MINOR DEV_PATCH <<< "$DEV_VERSION"
             JUDGED_VERSION="$NEW_VERSION"
+            JUDGED_KIND="$BUMP_KIND"
             NEW_VERSION="$DEV_MAJOR.$DEV_MINOR.$((DEV_PATCH + 1))"
+            # 上げ幅を引数に取るbump-command（signalyの`bump_version.py "$BUMP_KIND"`）は、ファイル上の
+            # 版から上げる。下で版ファイルを取り消す版（DEV_VERSION）に据え置くので、patchを渡せば
+            # NEW_VERSIONと同じ結果になる
+            BUMP_KIND=patch
             echo "判定どおりの v$JUDGED_VERSION は作り直す v$DEV_VERSION 以下のため、v$NEW_VERSION にします"
           fi
           BRANCH="release/v$NEW_VERSION"
@@ -661,7 +666,13 @@ jobs:
               echo "::error::バンプを取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。作り直せないため、手で確認してください"
               exit 1
             fi
-            echo "v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消しました"
+            # **版ファイルだけは取り消す版（DEV_VERSION）に据え置く。** 上げ幅を引数に取る
+            # bump-commandはファイル上の版から上げるため、mainの版へ戻したままだと繰り上げた
+            # NEW_VERSIONと一致しない（計画レビューの指摘）。DEV_VERSIONから同じ上げ幅で上げた
+            # 結果はNEW_VERSIONと一致する（NEW_VERSIONはDEV_VERSIONより上で、上げ幅の桁より
+            # 上はmainと同じため）。更新履歴など版ファイル以外は取り消したままにする。
+            git checkout "$REBUILD_FROM" -- "$VERSION_FILE"
+            echo "v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消しました（版ファイルは v$DEV_VERSION のまま）"
           fi
 
           # **npm version を使う理由は「バージョンを書き換えること」ではなく、"version"
@@ -750,7 +761,7 @@ jobs:
               echo
             fi
             echo "## バージョンの判断根拠"
-            echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+            echo "コード差分の内容から${JUDGED_KIND:-$BUMP_KIND}バージョンと判定しました。"
             if [ -n "${JUDGED_VERSION:-}" ]; then
               echo "作り直しのため、判定どおりの v${JUDGED_VERSION} ではなく v${NEW_VERSION} にしています（取り消した v${DEV_VERSION} より上にする必要があるため）。"
             fi

@@ -154,8 +154,13 @@ function runState(eventName = "workflow_dispatch") {
   return readOutputs(githubOutput);
 }
 
+// 上げ幅（BUMP_KIND）を受け取り、ファイル上の版から上げるbump-command（signalyの
+// `bump_version.py "$BUMP_KIND"`と同じ形）
+const KIND_BUMP_COMMAND =
+  'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));let [a,b,c]=p.version.split(".").map(Number);const k=process.env.BUMP_KIND;if(k==="major"){a++;b=0;c=0}else if(k==="minor"){b++;c=0}else{c++}p.version=[a,b,c].join(".");require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\'';
+
 /** 「バージョンをbumpしてdevelop向けPRを作成する」を走らせ、PR本文を返す */
-function runBump({ bumpKind, rebuildFrom, devVersion }) {
+function runBump({ bumpKind, rebuildFrom, devVersion, bumpCommand }) {
   git("update-ref", "refs/remotes/origin/develop", "develop");
   writeFileSync(path.join(workDir, "release-pr-lines.txt"), "");
   writeFileSync(path.join(workDir, "release-issue-lines.txt"), "- #6 修正\n");
@@ -175,6 +180,7 @@ function runBump({ bumpKind, rebuildFrom, devVersion }) {
       RELEASE_USAGE: "",
       // npm version の代わりに版だけを書き換える（lifecycleの代わりに更新履歴へ1行足す）
       BUMP_COMMAND:
+        bumpCommand ??
         'node -e \'const f="package.json";const p=JSON.parse(require("fs").readFileSync(f));p.version=process.env.NEW_VERSION;require("fs").writeFileSync(f,JSON.stringify(p,null,2)+"\\n")\' && sed -i "1i # v$NEW_VERSION" CHANGELOG.md',
     },
   });
@@ -252,6 +258,28 @@ describe("バージョンをbumpしてdevelop向けPRを作成する（作り直
     expect(readVersion()).toBe("2.0.0");
     expect(body).toContain("v1.1.0 のリリースを作り直しています");
     expect(body).not.toContain("判定どおりの");
+  });
+
+  it.each([
+    ["minor", "1.1.1"],
+    ["major", "2.0.0"],
+    ["patch", "1.1.1"],
+  ])("上げ幅を受け取るbump-commandでも、作り直した版が計算どおりになる（%s）", (bumpKind, expected) => {
+    mergePullRequest("issue-5", 10);
+    const bumpMerge = mergeBump("1.1.0", 11);
+    mergePullRequest("issue-6", 12);
+
+    const body = runBump({
+      bumpKind,
+      rebuildFrom: bumpMerge,
+      devVersion: "1.1.0",
+      bumpCommand: KIND_BUMP_COMMAND,
+    });
+
+    expect(readVersion()).toBe(expected);
+    expect(git("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(`release/v${expected}`);
+    // 判断根拠には判定どおりの上げ幅を残す（繰り上げで渡したpatchではなく）
+    expect(body).toContain(`コード差分の内容から${bumpKind}バージョンと判定しました`);
   });
 
   it("作り直しでなければ従来どおりmainの版から上げる", () => {

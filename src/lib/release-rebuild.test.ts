@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRebuildCandidate,
   canRebuildRelease,
   parseRebuildPullRequests,
   releaseRebuildCloseComment,
@@ -35,6 +36,24 @@ describe("parseRebuildPullRequests", () => {
     expect(parseRebuildPullRequests([commit("Merge pull request #5 from o/issue-4")])).toEqual([
       { number: 5, title: "Merge pull request #5 from o/issue-4", issueNumber: 4 },
     ]);
+  });
+});
+
+describe("buildRebuildCandidate", () => {
+  it("バンプPR自身のマージコミットだけなら、新しい変更は0件", () => {
+    expect(
+      buildRebuildCandidate([commit("Merge pull request #3018 from guchi-apps/release/v6.4.0\n\nv6.4.0をリリースする")]),
+    ).toEqual({ aheadBy: 0, pullRequests: [] });
+  });
+
+  it("バンプ後に入った修正のコミットとマージを数える", () => {
+    expect(
+      buildRebuildCandidate([
+        commit("Merge pull request #3018 from guchi-apps/release/v6.4.0\n\nv6.4.0をリリースする"),
+        commit("直す"),
+        commit("Merge pull request #3022 from guchi-apps/issue-3020\n\n直す"),
+      ]),
+    ).toEqual({ aheadBy: 2, pullRequests: [{ number: 3022, title: "直す", issueNumber: 3020 }] });
   });
 });
 
