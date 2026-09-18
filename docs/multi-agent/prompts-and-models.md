@@ -243,9 +243,48 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
   にも要点があるので、読み落としても方針は外れにくい
 - 見た目のアーティファクトの節は、汎用ランチャー・画面の「実装プロンプトをコピー」と同じ文面を
   保つ規約があるため縮めていない
-- 汎用ランチャー（`generic-implementation-agent.md`）と無人実行（`.github/prompts/implement.md`）は
-  この整理の対象外で、従来どおり全節が載る（#3023・#3024で追う）
+- 無人実行（`.github/prompts/implement.md`）はこの整理の対象外で、従来どおり全節が載る（#3024で追う）。
+  汎用ランチャーは次の節のとおり同じ整理を行った（#3023）
 - 「出力言語」の節は各プロンプトに置く決まり（[CLAUDE.md](../../CLAUDE.md)「出力言語」）なので本文に残している
+
+## 汎用ランチャーの実装プロンプトも毎回使う指示だけを載せる（#3023）
+
+他リポジトリ向けの`scripts/prompts/generic-implementation-agent.md`（`scripts/generic-start-issue.sh`が
+描画し、画面の「実装プロンプトをコピー」も同じ文面を`src/lib/prompts/templates.generated.ts`経由で使う）
+にも同じ整理を行った。ひな形は約21,000字から、`21.plan-required`が無いとき約8,000字（描画後は約9,500字）、
+あるとき約10,000字（描画後は約12,000字）になる。分け方は上の表と同じ3つで、参照文書は
+[`scripts/prompts/generic-implementation-agent-reference.md`](../../scripts/prompts/generic-implementation-agent-reference.md)。
+中身は手作業Issueの起票（雛形の差し込み先）・ユーザーにコマンドを実行してもらう・知見の記録・「往復を
+減らす」の実測値。issue-deck自身の版と違い、**共有知識の読み方は本文に残した**（`{{SHARED_CONTEXT_INSTRUCTIONS}}`が
+セッションごとの値〈共有知識の置き場・実装対象が共有知識リポジトリ自身か〉で文面ごと変わり、
+描画されない参照文書へは移せないため）。
+
+**参照文書の置き場所は`docs/`ではなく`scripts/prompts/`。** 汎用ランチャーのセッションのcwdは他
+リポジトリのworktreeで、相対パスでは届かない。ランチャーが走らせる同期コピー
+（`~/.cache/issue-deck/launcher-scripts/<SHA>/scripts/`）は`git archive ... scripts`で取り出すため
+`scripts/`の中にしか無く、`docs/`は本体の作業ツリーが古い・未コミットの変更があるときに
+プロンプトのひな形と食い違う。`scripts/prompts/`なら、ひな形と同じ版が`{{ISSUE_DECK_SCRIPTS_DIR}}`の
+絶対パスで読める。
+
+- **画面の「実装プロンプトをコピー」はサブPC以外（メインPC）へ貼られることがある。** 貼り付け先に
+  `~/apps/issue-deck`が無い・古いことがあるので、索引に`gh api -H "Accept: application/vnd.github.raw"
+  "repos/guchi-apps/issue-deck/contents/scripts/prompts/generic-implementation-agent-reference.md?ref=develop"`
+  でも読めると書いてある（issue-deckはpublicで、ユーザー本人の`gh`で読める）。ひな形へ静的に書いてあるので、
+  ランチャー経路にも同じ1行が出る
+- **参照文書はプロンプトのように描画されない。** `{{REPOSITORY}}`などは使えず、`<リポジトリ>`・
+  `<Issue番号>`・`<ベースブランチ>`と書き、プロンプトの「対応Issue」「作業環境」の値へ読み替えさせる
+  （`scripts/implementation-prompt.test.mjs`が`{{...}}`の残存を検出する）
+- **他リポジトリの`CLAUDE.md`には、手作業Issue・ユーザーへのコマンド依頼の規則が書かれていない。**
+  issue-deck自身の版は`CLAUDE.md`（毎回読み込まれる）が読み落としの補強になるが、汎用版には
+  それが無い。そのため索引の各項目に「該当したら何をするか」の核（`71.manual-step`の単独Issueとして
+  起票する・`00.check-user`＋`01.check-input`を付ける）を残し、「該当したのに読まずに進めない」と
+  書いてある。**索引を削るときはこの核を落とさない**
+- 手作業Issueの雛形の差し込み先（`scripts/generate-prompt-templates.mjs`の
+  `MANUAL_STEP_BODY_TEMPLATE_TARGETS`）は、プロンプト本文からこの参照文書へ付け替えた
+- **`{{...}}`を増やしていないので、サブPC本体の更新を待つ窓は無い**（[generic-launcher.md](generic-launcher.md)
+  「プロンプトのひな形へプレースホルダを増やすと…」）。区間を処理するコードが無い古い本体で新しいひな形を
+  描画しても、`<!-- if:plan-required -->`の印がHTMLコメントとして残り、計画の節が常に載る（従来と同じ）だけで
+  済む。ただし`{{PLAN_COMMENT_NOTE}}`の先頭の`  - `は古い本体だと残る（見た目の乱れだけ）
 
 ## 使用するモデルの設定（#622）
 

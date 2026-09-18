@@ -242,7 +242,9 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 まだ終わっていないので**完了報告でもない**。`71.manual-step`はPRマージ後も残る手作業を追跡する
 ためのもので、セッションの中で今すぐ実行してほしい1コマンドには重すぎる。
 
-そこで各実装プロンプトに「ユーザー自身にコマンドを実行してもらう場合」の節を置き、**端末や
+そこで各実装プロンプト（issue-deck自身と汎用ランチャーでは、毎回は使わないため参照文書
+`implementation-agent-reference.md`・`generic-implementation-agent-reference.md`に置き、プロンプトの索引から
+読ませる。#3021・#3023）に「ユーザー自身にコマンドを実行してもらう場合」の節を置き、**端末や
 ログに出すだけで終わらせず、Issueコメントとして投稿する**ことを求めている。コメントには
 「なぜエージェントが実行できないか」「コピペで実行できるコマンド」「実行後にエージェントが
 何をするか」を書く。
@@ -1517,8 +1519,9 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 上の雛形の実体は[docs/multi-agent/manual-step-body-template.md](manual-step-body-template.md)にあり、
 `scripts/generate-prompt-templates.mjs`がマーカー（`<!-- manual-step-body-template:start -->`〜`:end`）
 で囲った区間へ差し込む。差し込み先はこの文書と、起票する3経路の指示
-（issue-deck自身のローカル実行は参照文書`docs/multi-agent/implementation-agent-reference.md`、
-`generic-implementation-agent.md`・`.github/prompts/implement.md`はプロンプト本文。#3021）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
+（issue-deck自身のローカル実行は参照文書`docs/multi-agent/implementation-agent-reference.md`〈#3021〉、
+汎用ランチャーは参照文書`scripts/prompts/generic-implementation-agent-reference.md`〈#3023〉、
+`.github/prompts/implement.md`はプロンプト本文）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
 実行する**（ずれはCIの`Prompt shared template sync check`が落とす）。
 
 **なぜプロンプトへ埋め込むのか。** 以前はリテラルな骨組みがこの文書にしか無く、実際に起票する

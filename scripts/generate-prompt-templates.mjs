@@ -39,14 +39,15 @@ export const MANUAL_STEP_BODY_TEMPLATE_SOURCE = "docs/multi-agent/manual-step-bo
  * 雛形の差し込み先。
  *
  * **起票経路が3つある**（ローカル実行・汎用ランチャー・無人実行）ので、3経路とも要る。
- * issue-deck自身のローカル実行だけは、プロンプト本文ではなく必要なときに読む参照文書
- * （`implementation-agent-reference.md`）に置いている（#3021。毎回は使わない節のため）。
+ * issue-deck自身のローカル実行（`implementation-agent-reference.md`。#3021）と汎用ランチャー
+ * （`generic-implementation-agent-reference.md`。#3023）は、プロンプト本文ではなく必要なときに
+ * 読む参照文書に置いている（毎回は使わない節のため）。
  * `labels.md`も差し込み先に含めるのは、規約の正である文書と雛形が食い違わないようにするため。
  */
 export const MANUAL_STEP_BODY_TEMPLATE_TARGETS = [
   "docs/multi-agent/labels.md",
   "docs/multi-agent/implementation-agent-reference.md",
-  "scripts/prompts/generic-implementation-agent.md",
+  "scripts/prompts/generic-implementation-agent-reference.md",
   ".github/prompts/implement.md",
 ];
 

@@ -26,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const template = path.join(repoRoot, "scripts/prompts/implementation-agent.md");
 const genericTemplate = path.join(repoRoot, "scripts/prompts/generic-implementation-agent.md");
+const genericReference = path.join(repoRoot, "scripts/prompts/generic-implementation-agent-reference.md");
 // 汎用ランチャーが案内する`submit-plan.sh`の在り処（実行時は`LAUNCHER_SCRIPTS_DIR`）
 const scriptsDir = "/home/user/apps/issue-deck/scripts";
 let workDir;
@@ -264,5 +265,66 @@ describe("汎用ランチャーの実装プロンプトの生成（#2590）", ()
     for (const agent of ["claude", "codex"]) {
       expect(renderGeneric(agent)).not.toMatch(/\{\{[A-Z_]+\}\}/);
     }
+  });
+
+  // #3023: 計画を出さないセッションに計画の書き方・計画レビュー対応を載せない
+  it("`21.plan-required`が無ければ計画系の節と計画レビュー待ちを載せない", () => {
+    for (const agent of ["claude", "codex"]) {
+      const prompt = renderGeneric(agent, []);
+      expect(prompt).not.toContain("計画は要約から書き、30〜40行に収める");
+      expect(prompt).not.toContain("計画へのレビュー指摘を受けた場合");
+      expect(prompt).not.toContain("seq 1 12");
+      expect(prompt).not.toContain("if:plan-required");
+      expect(prompt).toContain("計画の提示は不要です");
+      expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+    }
+  });
+
+  it("`21.plan-required`があれば計画系の節を載せ、条件の印は残さない", () => {
+    for (const agent of ["claude", "codex"]) {
+      const prompt = renderGeneric(agent);
+      expect(prompt).toContain("計画は要約から書き、30〜40行に収める");
+      expect(prompt).toContain("計画へのレビュー指摘を受けた場合");
+      expect(prompt).toContain("seq 1 12");
+      expect(prompt).not.toContain("plan-required -->");
+    }
+    // 計画コメントの注記は箇条書きではなく段落として続く
+    expect(renderGeneric("claude")).toMatch(/\n\*\*Plan modeの`ExitPlanMode`で計画を提示した場合/);
+  });
+
+  // #3023: 毎回は使わない節は参照文書へ移し、cwdが他リポジトリでも届く絶対パスで索引を載せる
+  it("手作業Issueの雛形などは本文に載せず、参照文書への絶対パスの索引を載せる", () => {
+    const prompt = renderGeneric("claude", []);
+    expect(prompt).not.toContain("manual-step-body-template:start");
+    expect(prompt).not.toContain("<!-- knowledge-candidate -->");
+    expect(prompt).toContain(`\`${scriptsDir}/prompts/generic-implementation-agent-reference.md\``);
+    // 本体チェックアウトが無い・古いPCでも読める経路
+    expect(prompt).toContain("repos/guchi-apps/issue-deck/contents/scripts/prompts/generic-implementation-agent-reference.md");
+    const reference = readFileSync(genericReference, "utf8");
+    for (const heading of [
+      "## 実装後にユーザーの手作業が残る場合",
+      "## ユーザー自身にコマンドを実行してもらう場合",
+      "## 実装中に得た知見の記録",
+      "## 調査は往復を減らす形で行う",
+    ]) {
+      expect(reference).toContain(heading);
+      expect(prompt).toContain(`「${heading.slice(3)}」`);
+    }
+  });
+
+  // 参照文書は描画されずそのまま読まれるので、プレースホルダを残すと指示として読めてしまう
+  it("参照文書は描画されないので、プレースホルダを残さない", () => {
+    const reference = readFileSync(genericReference, "utf8");
+    expect(reference).not.toMatch(/\{\{[A-Z_]+\}\}/);
+    expect(reference).toContain("<!-- manual-step-body-template:start -->");
+    expect(reference).toContain("<!-- manual-step-body-template:end -->");
+  });
+
+  // 同期コピーは`git archive ... scripts`で取り出す（scripts/lib/launcher-scripts-sync.sh）。
+  // scripts/の外に置くと、cwdが他リポジトリのセッションからは届かない
+  it("参照文書はランチャーの同期コピーに含まれる`scripts/prompts/`の下にある", () => {
+    expect(path.relative(path.join(repoRoot, "scripts"), genericReference)).toBe(
+      "prompts/generic-implementation-agent-reference.md",
+    );
   });
 });

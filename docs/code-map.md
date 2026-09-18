@@ -3175,7 +3175,9 @@ export function POST(request: NextRequest) {
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
   issue-deck自身の実装プロンプト（`scripts/prompts/implementation-agent.md`）は毎回使う指示だけを載せ、
   一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
-  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
+  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`
+  （毎回使う指示だけ。手作業Issueの起票などは`scripts/prompts/generic-implementation-agent-reference.md`へ置き、
+  ひな形の索引から絶対パスで読ませる。#3023）。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
 - **そのホストで初めて開くリポジトリは、起こす前に止める**（#1838。`scripts/lib/claude-trust.sh`）。

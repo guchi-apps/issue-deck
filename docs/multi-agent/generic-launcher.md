@@ -153,6 +153,17 @@ Codexで起こすときは、issue-deck自身のランチャーと同じ下見�
   ひな形（`scripts/prompts/generic-implementation-agent.md`）の`{{PLAN_INSTRUCTIONS}}`・
   `{{PLAN_COMMENT_NOTE}}`がその2か所
 
+### プロンプトは毎回使う指示だけを載せ、残りは参照文書へ置く（#3023）
+
+ひな形（`scripts/prompts/generic-implementation-agent.md`）は、どのIssueでも毎回使う指示と、
+`21.plan-required`のときだけ載る区間（`<!-- if:plan-required -->`〜`<!-- endif:plan-required -->`。
+描画のPythonが印を消すか区間ごと消す）だけを持つ。手作業Issueの起票・ユーザーにコマンドを実行してもらう・
+知見の記録・調査の実測値は`scripts/prompts/generic-implementation-agent-reference.md`にあり、ひな形の
+「必要になったら読むもの」が`{{ISSUE_DECK_SCRIPTS_DIR}}/prompts/...`の**絶対パス**で案内する
+（cwdが他リポジトリのworktreeなので相対では届かない。`scripts/`の下に置くのは、同期コピーが
+`scripts/`しか含まないため）。設計理由・メインPCへ貼られる場合の読み方・置き換えたものは
+[prompts-and-models.md](prompts-and-models.md)「汎用ランチャーの実装プロンプトも毎回使う指示だけを載せる」。
+
 ### `submit-plan.sh`・`submit-question.sh`は絶対パスで案内する
 
 Codexの読み替えは計画と質問をこの2つのコマンドで画面へ出させるが、**どちらもissue-deckの
