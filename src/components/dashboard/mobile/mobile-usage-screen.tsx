@@ -3,7 +3,6 @@
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
-import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 
 /**
@@ -24,7 +23,6 @@ export function MobileUsageScreen({
   onChangeDays,
   onRefresh,
   onOpenIssue,
-  claudeApiUsage,
 }: {
   data: SessionUsageResponse | null;
   isLoading: boolean;
@@ -33,11 +31,6 @@ export function MobileUsageScreen({
   onChangeDays: (days: number) => void;
   onRefresh: () => void;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
-  claudeApiUsage?: {
-    data: ClaudeApiUsageSummary | null;
-    isLoading: boolean;
-    error: string | null;
-  };
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -57,7 +50,6 @@ export function MobileUsageScreen({
           onChangeDays={onChangeDays}
           onRefresh={onRefresh}
           onOpenIssue={onOpenIssue}
-          claudeApiUsage={claudeApiUsage}
           compact
         />
       </div>

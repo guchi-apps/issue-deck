@@ -497,11 +497,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
   **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
   添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
-- **設定の「状態」2枚目のカードは「AI使用量」で、中を`プラン枠`と`API呼び出し`に分ける**（#2347）。
-  `プラン枠`はレート制限ヘッダから読む5時間枠・週間枠の使用率（`claude-usage-card.tsx`・
-  [`lib/claude/usage.ts`](../src/lib/claude/usage.ts)）、`API呼び出し`はissue-deck自身が投げた
-  呼び出しの機能別内訳（[`claude-api-usage-list.tsx`](../src/components/dashboard/claude-api-usage-list.tsx)・
-  [`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)）。
+- **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
+  かつては設定の「状態」→「AI使用量」画面に機能別の内訳カード（「アプリ内AI機能別」）を出していたが、
+  **#3062で表示（カード・取得フック・`/api/claude/api-usage`）を削除した**。計上
+  （[`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)・`ClaudeApiUsageBucket`）は残っており、
+  読む画面は無い。プラン枠（5時間枠・週間枠）のメーターは`claude-usage-card.tsx`・
+  [`lib/claude/usage.ts`](../src/lib/claude/usage.ts)が別に受け持つ。
   **Anthropic APIを叩くのは[`lib/claude/request.ts`](../src/lib/claude/request.ts)だけにする**——
   数えられるのはそこを通った呼び出しだけで、`fetch`を各機能へ書き戻すと計上から漏れる。
   トークン数は推計ではなく応答の`usage`の実測値で、キャッシュの読み書きも合計に含める
@@ -513,42 +514,29 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **保持は7日で、集計のウィンドウも`過去1日`・`過去7日`の2つだけ**（プラン枠が5時間・週間なので、
   GitHub側の「今時」に当たる区切りがAIには無い）。
   **`lib/claude/`のうち画面からも読む定数・純粋関数は
-  [`limits.ts`](../src/lib/claude/limits.ts)、画面が読む集計の型は
+  [`limits.ts`](../src/lib/claude/limits.ts)、集計の型は
   [`api-usage-totals.ts`](../src/lib/claude/api-usage-totals.ts)へ置く**——
   AI呼び出し本体（`issue-search.ts`など）から値importすると、集計モジュールごと
   クライアントバンドルへ載る（後述の`issues-api.ts`と同じ分け方）。
   **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
   からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
-  **金額はAPI換算の目安として出す**（#2717。#2347の時点では「プラン契約なので出さない」と
-  していたが、#2568でOpenAI（従量課金）が候補に入り、モデルをIssueごとに選べるようになって
-  「どのモデルがどれだけ高いか」を比べる必要が出たため方針を変えた）。単価は
-  [`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)から引き、**表示側では必ず
-  「プランの実費ではない」と断る**（`session-usage-panel.tsx`と同じ扱い）。
-  **単価を知らないモデルが1つでも混じっている機能には金額を出さない**——足りない分を0として
+  **単価は[`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)にあり**（#2717）、
+  API換算の目安の金額を出すときに引く（プランの実費ではないと断る）。
+  **単価を知らないモデルが1つでも混じっているときは金額を出さない**——足りない分を0として
   足すと、実際より安い金額になる。
-- **「AI使用量」画面の内訳カードは3枚で、`リポジトリ別`・`セッション種別別`・`アプリ内AI機能別`の
-  順に並べる**（#2752）。**`リポジトリ別`は棒ではなく円グラフ**（金額の上位5件＋その他。#3060。
-  [`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
+- **「AI使用量」画面の内訳カードは`リポジトリ別`・`セッション種別別`の2枚**（#3062）。
+  以前は3枚目に「アプリ内AI機能別」（issue-deck自身のAPI呼び出しの内訳。#2752で種別別の隣へ
+  移した）があったが、表示ごと削除した。**`リポジトリ別`は棒ではなく円グラフ**（金額の上位5件
+  ＋その他。#3060。[`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
   配置は[`lib/pie-chart-layout.ts`](../src/lib/pie-chart-layout.ts)。詳細は
-  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)）。3枚目がissue-deck自身のAPI呼び出しの内訳
-  （[`claude-api-usage-list.tsx`](../src/components/dashboard/claude-api-usage-list.tsx)）で、
-  #2631で設定の「状態」から移したときは**明細を挟んだ画面のいちばん下**に離れていた。
-  同じ「何にAIを使ったか」の内訳なので隣に置く。
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)）。
   - **見出しは「何で分けたか」で揃え、`whitespace-nowrap`で折り返させない。** 「種別別」は
-    何の種別か分からず、「API呼び出し（issue-deck本体）」は手段の名前だった。**スマホ幅では
-    カードの中身が337pxしか無く**、見出しと右の補足が2行ずつに割れて上半分が文字で埋まる。
-    あふれたときに省略記号へ落とすのは補足だけにする
+    何の種別か分からない、という指摘から揃えた。**スマホ幅ではカードの中身が337pxしか無く**、
+    見出しと右の補足が2行ずつに割れて上半分が文字で埋まる。あふれたときに省略記号へ落とすのは
+    補足だけにする
   - **期間の指定は画面上部のセレクタ1つに寄せる**（`days`をpropで渡す）。カードが自前の
     「過去1日／過去7日」を持っていた頃は、上を30日にしたまま下だけ1日を見ることができた
-  - **`days=30`はウィンドウが無いので7日で代用し、そのことを画面で断る。** 集計そのものが
-    直近7日ぶん（`api-usage.ts`の`USAGE_WINDOW_MS`）で、それより前は復元できない。
-    **黙って7日の値を出さない**——期間の指定と数字が食い違う
-  - **その期間に0回だった機能は畳む**（件数は残す）。11機能のうち呼ばれるのは数件で、
-    0回のカードが並ぶとスマホでは合計へ辿り着く前に画面が尽きていた
-  - **セッションの記録がまだ1件も無いときは、このカードだけ単独で出す**（`session-usage-panel.tsx`の
-    `apiUsageSection`）。内訳カード3枚は`data`があるときしか描かれないが、アプリ自身の消費は
-    セッションと無関係に数えられている。移設のたびにここを落とすと、記録が届く前の画面から消える
 - **ローカルセッション（Claude Code本体）の消費は、左メニューの「AI使用量」で見る**（#2504）。
   上のカードに入らないぶんで、**転記からしか取れず、本番のissue-deck（VPS）は転記を持たない**
   ため、サブPCのpollerが`scripts/lib/session-usage.sh`で集計して数値だけを押し込む

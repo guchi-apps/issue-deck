@@ -23,7 +23,7 @@ type StatusSectionProps = Pick<
  * （[`session-usage-panel.tsx`](../session-usage-panel.tsx)）が同じ`ClaudeUsageCard`・
  * `CodexUsageCard`で出しており、**同じ値が2か所に出ていた**。片方を見て枠の残りを判断した後に
  * もう片方を開くと、取得タイミングの違いで数字が食い違って見える。ここには置かず、
- * 機能別のAPI消費内訳（ここにしか無かったもの）ごとAI使用量画面へ移した。
+ * 機能別のAPI消費内訳（ここにしか無かったもの）ごとAI使用量画面へ移した（その内訳は#3062で削除）。
  */
 export function StatusSection({
   rateLimits,
@@ -77,7 +77,7 @@ export function StatusSection({
 
       {/* 開いた人が「AI使用量が消えた」で終わらないよう、移った先を書く（#2631） */}
       <p className="text-xs text-muted-foreground">
-        AIの使用量（プラン枠・セッション別の消費・API呼び出しの内訳）は「AI使用量」の画面で見られます。
+        AIの使用量（プラン枠・セッション別の消費）は「AI使用量」の画面で見られます。
       </p>
     </div>
   );
