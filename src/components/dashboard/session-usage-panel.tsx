@@ -6,6 +6,7 @@ import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
+import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
 import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
@@ -13,6 +14,7 @@ import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
 import {
+  buildRepositoryPieSlices,
   fillUsageDays,
   formatUsageTokens,
   formatUsageUsd,
@@ -24,6 +26,7 @@ import {
   sessionUsagePhaseSplit,
   usagePhaseKindKey,
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
+  REPOSITORY_PIE_TOP_COUNT,
   type SessionUsageEntry,
   type UsageByAgent,
   type UsageBySource,
@@ -658,7 +661,8 @@ function DailyLegend() {
 }
 
 /**
- * リポジトリ別・種別別の内訳。二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * 種別別の内訳。二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * **リポジトリ別は円グラフ（`RepositoryPieChart`）へ替えた**（#3060）。
  * **太い棒の内側は日別の縦棒と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
  * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
  */
@@ -667,30 +671,22 @@ function Breakdown({
   hint,
   rows,
   colorOf,
-  maxVisibleRows,
   separator,
 }: {
   title: string;
   hint: string;
   rows: (UsageGroup & { label: string })[];
   colorOf?: (key: string) => string | undefined;
-  maxVisibleRows?: number;
   /** 条件に合う最初の行の手前へ区切りを入れる（#2954）。先頭の行が合うときは入れない */
   separator?: { label: string; isBefore: (key: string) => boolean };
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
   // **棒の基準は先頭の行ではなく最大の行**（#2954）。種別別は作業の順に並べるため、先頭が最大とは限らない。
   const max = rows.reduce((peak, row) => Math.max(peak, row.costUsd), 0);
   const maxTokens = rows.reduce(
     (peak, row) => Math.max(peak, row.contextTokens + row.outputTokens),
     0,
   );
-  const visibleRows =
-    maxVisibleRows !== undefined && !isExpanded ? rows.slice(0, maxVisibleRows) : rows;
-  const hiddenRows = maxVisibleRows !== undefined ? Math.max(rows.length - maxVisibleRows, 0) : 0;
-  const separatorIndex = separator
-    ? visibleRows.findIndex((row) => separator.isBefore(row.key))
-    : -1;
+  const separatorIndex = separator ? rows.findIndex((row) => separator.isBefore(row.key)) : -1;
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
@@ -706,7 +702,7 @@ function Breakdown({
         <p className="text-xs text-muted-foreground">記録がありません</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {visibleRows.map((row, index) => {
+          {rows.map((row, index) => {
             const color = colorOf?.(row.key);
             return (
               <Fragment key={row.key}>
@@ -749,19 +745,6 @@ function Breakdown({
             );
           })}
         </ul>
-      )}
-      {hiddenRows > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          aria-expanded={isExpanded}
-        >
-          {isExpanded
-            ? `上位${maxVisibleRows}件のみ表示`
-            : `すべて表示（残り ${hiddenRows} リポジトリ）`}
-        </Button>
       )}
     </section>
   );
@@ -1223,6 +1206,7 @@ export function SessionUsagePanel({
   const dailyDays = data ? fillUsageDays(data.byDay, data.since, data.until) : [];
   const todayKey = dailyDays.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
+  const repositoryPieSlices = data ? buildRepositoryPieSlices(data.byRepository) : [];
   const agentCostSub = data
     ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
     : "";
@@ -1351,23 +1335,34 @@ export function SessionUsagePanel({
             <DailyChart days={dailyDays} todayKey={todayKey} />
           </section>
 
-          {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒になり帯を出さなくなったので、
-              この凡例を使う下のリポジトリ別・種別別・Issue別の手前へ置く（#3038） */}
-          <TokenLegend />
-
           <div
             className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}
           >
-            <Breakdown
-              title="リポジトリ別"
-              hint={`${data.byRepository.length}リポジトリ`}
-              rows={data.byRepository.map((row) => ({ ...row, label: row.key || "(不明)" }))}
-              colorOf={(key) => getRepoColor(key || "(不明)")}
-              maxVisibleRows={5}
-            />
+            {/* **リポジトリ別は円グラフ**（#3060）。金額の上位5件と「その他」だけで、エージェント・
+                トークンの区別は持たない。下の凡例（太い棒＝金額／細い帯＝トークン）は当てはまらない */}
+            <section className="flex flex-col gap-2 rounded-lg border p-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
+                  {`${data.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
+                </span>
+              </div>
+              {repositoryPieSlices.length === 0 ? (
+                <p className="text-xs text-muted-foreground">記録がありません</p>
+              ) : (
+                <RepositoryPieChart slices={repositoryPieSlices} />
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                金額（API換算）の多い上位{REPOSITORY_PIE_TOP_COUNT}件。それ以外は「その他」にまとめています。
+              </p>
+            </section>
             {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
                 使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
             <div className="flex flex-col gap-2">
+              {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒になり帯を出さなくなり（#3038）、
+                  リポジトリ別も円グラフへ替わった（#3060）ので、この凡例を使う種別別・Issue別の
+                  うち先に出る種別別の手前へ置く */}
+              <TokenLegend />
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
                   実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
                   **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}

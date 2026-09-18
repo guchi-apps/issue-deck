@@ -528,7 +528,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **単価を知らないモデルが1つでも混じっている機能には金額を出さない**——足りない分を0として
   足すと、実際より安い金額になる。
 - **「AI使用量」画面の内訳カードは3枚で、`リポジトリ別`・`セッション種別別`・`アプリ内AI機能別`の
-  順に並べる**（#2752）。3枚目がissue-deck自身のAPI呼び出しの内訳
+  順に並べる**（#2752）。**`リポジトリ別`は棒ではなく円グラフ**（金額の上位5件＋その他。#3060。
+  [`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
+  配置は[`lib/pie-chart-layout.ts`](../src/lib/pie-chart-layout.ts)。詳細は
+  [multi-agent/session-inspect.md](multi-agent/session-inspect.md)）。3枚目がissue-deck自身のAPI呼び出しの内訳
   （[`claude-api-usage-list.tsx`](../src/components/dashboard/claude-api-usage-list.tsx)）で、
   #2631で設定の「状態」から移したときは**明細を挟んだ画面のいちばん下**に離れていた。
   同じ「何にAIを使ったか」の内訳なので隣に置く。
