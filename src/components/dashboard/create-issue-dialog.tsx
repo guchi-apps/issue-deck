@@ -1104,7 +1104,12 @@ export function CreateIssueDialog({
             // サムネイルで見えており、書きかけを切り替えて確かめる場面が無い
             showPreviewToggle={false}
             toolbarExtra={
-              <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+              <BodyCleanupButton
+                value={body}
+                onCleaned={setBody}
+                disabled={isSubmitting}
+                stacked
+              />
             }
             autoFocus
           />

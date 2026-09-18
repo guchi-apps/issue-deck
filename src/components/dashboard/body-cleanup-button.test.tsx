@@ -18,6 +18,16 @@ describe("BodyCleanupButton", () => {
     vi.unstubAllGlobals();
   });
 
+  it("stackedのときは「音声／整理」を縦に積むが、名前は「音声入力を整理」のまま（#3054）", () => {
+    const { rerender } = render(<BodyCleanupButton value="本文" onCleaned={() => {}} />);
+    expect(screen.getByRole("button", { name: "音声入力を整理" }).textContent).toBe("音声入力を整理");
+
+    rerender(<BodyCleanupButton value="本文" onCleaned={() => {}} stacked />);
+    const stacked = screen.getByRole("button", { name: "音声入力を整理" });
+    expect(stacked.textContent).toBe("音声整理");
+    expect(stacked.querySelector("br")).not.toBeNull();
+  });
+
   it("入力が空のときはボタンを押せない", () => {
     render(<BodyCleanupButton value="   " onCleaned={() => {}} />);
     const button = screen.getByRole("button", { name: /音声入力を整理/ });
