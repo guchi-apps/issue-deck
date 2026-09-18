@@ -191,21 +191,27 @@ export type PullRequestFixRoute = PrFixRequestRoute | { kind: "create-issue" };
  * Issueに限って「セッションへ送る」「セッションを再開して依頼する」を出していた。この帯は
  * 承認待ちかどうかに関わらず出るため、まず**PRを更新できるかどうか**を先に判定する。
  *
- * - **マージ済みなら常に`create-issue`。** PRを更新できず、新しいIssueを立てるしか手段が無い
- *   （Issue #3009の要求どおり）
+ * - **マージ済み・クローズ済みなら常に`create-issue`。** どちらもPRを更新できず、新しい
+ *   Issueを立てるしか手段が無い（Issue #3009の要求どおり）。**「未マージ」を`!merged`だけで
+ *   判定しない**——クローズ済み・未マージのPRへ追加コミットしてもPRは更新されない
+ *   （`stateLabel`が区別している3状態のうち、送り先を切り替えてよいのは`open`だけ。
+ *   計画レビュー指摘1・#3009）
  * - **元Issueが1件に絞れないときも`create-issue`。** 複数・0件のPRへセッション再開を出すと
  *   どのIssueへ送るのかが曖昧になる（今回のスコープ外）
- * - 絞れたら`resolvePrFixRequestRoute`にそのまま委ねる（`actions`・`session`・`resume`・`handoff`）。
- *   これらはいずれも新しいIssueを立てずに既存Issueへ指摘を届ける経路なので、`create-issue`とは別に
- *   分ける必要が無い
+ * - 絞れたら`resolvePrFixRequestRoute`にそのまま委ねる（`actions`・`session`・`resume`・`handoff`の
+ *   4通り）。いずれも新しいIssueを立てずに既存Issueへ指摘を届ける経路なので、`create-issue`とは
+ *   別に分ける必要が無い——`actions`（無人実行が担当）は`@claude`コメントで既存PRへ追加コミット
+ *   させ、`handoff`は`11.local`を外してから同じ経路に渡す（計画レビュー指摘2）
  */
 export function resolvePullRequestFixRoute(params: {
-  pullRequest: Pick<PullRequestSummary, "merged" | "linkedIssueNumbers">;
+  pullRequest: Pick<PullRequestSummary, "merged" | "state" | "linkedIssueNumbers">;
   /** 元Issueが1件のときのそのIssueのラベル。複数・0件・未解決（一覧に見つからない）ならnull */
   targetIssueLabels: readonly { name: string }[] | null;
   session: Pick<DispatchSessionView, "host" | "state" | "codexThreadKnown"> | null;
 }): PullRequestFixRoute {
-  if (params.pullRequest.merged) return { kind: "create-issue" };
+  if (params.pullRequest.merged || params.pullRequest.state !== "open") {
+    return { kind: "create-issue" };
+  }
   if (params.pullRequest.linkedIssueNumbers.length !== 1) return { kind: "create-issue" };
   if (params.targetIssueLabels === null) return { kind: "create-issue" };
   return resolvePrFixRequestRoute({ labels: params.targetIssueLabels, session: params.session });

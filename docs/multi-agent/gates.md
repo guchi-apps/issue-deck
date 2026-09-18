@@ -401,6 +401,16 @@ IssueのPRは同じ作業の表と裏）。ここを緩めると毎回何かし�
      ——停滞からの復旧が外すのは引き上げが付けた`blocked`までだが、こちらは`01.check-merge`まで
      落とす（`isFixedInstructionRemovableCheckUserReason`）。#1905のガードは「セッションのフックが
      別の実行体の札を落としてよいか」の話で、ここで押したのは**その札の持ち主である人自身**だから。
+
+     **押せる入口はマージ待ちの画面だけではない**（#3009）。PR詳細の「修正Issueを起案」帯
+     （`PullRequestFixIssueBar`・#2961）からも、対象PRが未マージ（`state === "open"`かつ
+     `!merged`）で元Issueが1件に絞れる場合は同じ固定の1行を同じ受け口へ送る
+     （`resolvePullRequestFixRoute`・`src/lib/github/pull-request-fix-issue.ts`）。送る本文・
+     受け口・`00.check-user`の外し方はどちらの入口でも1つの経路を共用しており、`01.check-merge`
+     まで外すかどうかは「送った本文が`PR_FIX_SESSION_INSTRUCTION`と一致するか」だけで判定する
+     （押した画面では区別しない）。PR詳細から押した場合も、押したのは**その札の持ち主である
+     人自身**という前提は変わらない——同じPRについてマージ待ちの札が乗っているなら、PR詳細の
+     帯を押すことは「マージせずに直させる」という同じ合図になる。
      **依頼の本文そのものを流さないのは、長さと改行の制約でもある**——
      `DispatchJob.instruction`は改行を含まない1行しか受けず、レビュー指摘を取り込んだ
      修正依頼は必ず複数行になる。

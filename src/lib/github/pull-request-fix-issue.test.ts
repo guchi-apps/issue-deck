@@ -165,12 +165,22 @@ describe("buildPullRequestFixReason", () => {
 });
 
 describe("resolvePullRequestFixRoute", () => {
-  const pullRequest = { merged: false, linkedIssueNumbers: [2951] };
+  const pullRequest = { merged: false, state: "open" as const, linkedIssueNumbers: [2951] };
 
   it("マージ済みなら常に新規Issue作成（PRを更新できないため）", () => {
     expect(
       resolvePullRequestFixRoute({
-        pullRequest: { merged: true, linkedIssueNumbers: [2951] },
+        pullRequest: { merged: true, state: "closed", linkedIssueNumbers: [2951] },
+        targetIssueLabels: labels("11.local"),
+        session: session("ALIVE"),
+      }),
+    ).toEqual({ kind: "create-issue" });
+  });
+
+  it("クローズ済みの未マージPRも新規Issue作成へ倒す（追加コミットしてもPRが更新されないため。計画レビュー指摘1）", () => {
+    expect(
+      resolvePullRequestFixRoute({
+        pullRequest: { merged: false, state: "closed", linkedIssueNumbers: [2951] },
         targetIssueLabels: labels("11.local"),
         session: session("ALIVE"),
       }),
@@ -180,14 +190,14 @@ describe("resolvePullRequestFixRoute", () => {
   it("元Issueが複数・0件なら新規Issue作成へ倒す", () => {
     expect(
       resolvePullRequestFixRoute({
-        pullRequest: { merged: false, linkedIssueNumbers: [2951, 2952] },
+        pullRequest: { merged: false, state: "open", linkedIssueNumbers: [2951, 2952] },
         targetIssueLabels: labels("11.local"),
         session: session("ALIVE"),
       }),
     ).toEqual({ kind: "create-issue" });
     expect(
       resolvePullRequestFixRoute({
-        pullRequest: { merged: false, linkedIssueNumbers: [] },
+        pullRequest: { merged: false, state: "open", linkedIssueNumbers: [] },
         targetIssueLabels: null,
         session: null,
       }),
