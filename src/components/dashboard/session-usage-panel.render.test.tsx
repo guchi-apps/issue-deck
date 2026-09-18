@@ -51,6 +51,7 @@ function response(entries: SessionUsageEntry[]): SessionUsageResponse {
     }),
     planUsage: { claude: null, codex: null },
     planNotConfigured: { claude: true, codex: true },
+    quotaEstimate: null,
   };
 }
 
@@ -570,5 +571,23 @@ describe("SessionUsagePanel", () => {
     expect(within(container).getByText("従量課金相当")).toBeTruthy();
     expect(within(container).queryByText(/金額はAPI換算の目安です/)).toBeNull();
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
+  });
+
+  it("quotaPercentが入っているIssueだけ、直近5時間枠のおよそ何%かを表示する（#2988）", () => {
+    const data = response([entry()]);
+    data.byIssue[0].quotaPercent = 12.4;
+    renderPanel(data);
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("直近5時間枠のおよそ12%")).toBeTruthy();
+  });
+
+  it("quotaPercentがnullのIssueには表示しない", () => {
+    const data = response([entry()]);
+    data.byIssue[0].quotaPercent = null;
+    renderPanel(data);
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(detail).queryByText(/直近5時間枠のおよそ/)).toBeNull();
   });
 });

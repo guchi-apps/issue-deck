@@ -61,6 +61,16 @@ function drawArrow(canvas: HTMLElement) {
 }
 
 describe("ImageAnnotationDialog", () => {
+  it("暗幕を別の要素で重ねず、中身だけが不透明な全画面の層になる（#3006）", async () => {
+    await renderEditor();
+    // 暗幕を置くとiOS Safariが中身より上に描き、画面全体を覆って入力を奪った
+    expect(document.querySelector("[data-radix-dialog-overlay], [data-slot='dialog-overlay']")).toBeNull();
+    const fixedLayers = [...document.body.querySelectorAll<HTMLElement>(".fixed.inset-0")];
+    expect(fixedLayers).toHaveLength(1);
+    expect(fixedLayers[0].dataset.slot).toBe("image-annotation");
+    expect(fixedLayers[0].className).toContain("bg-neutral-950");
+  });
+
   it("道具を切り替えると押された状態が移る", async () => {
     await renderEditor();
     expect(screen.getByRole("button", { name: /ペン/ }).getAttribute("aria-pressed")).toBe("true");

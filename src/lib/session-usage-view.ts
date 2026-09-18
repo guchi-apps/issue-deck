@@ -109,6 +109,13 @@ export type UsageIssue = UsageTotals & {
   bySource: UsageBySource;
   /** 計画・実装・Actionの3分類サマリー（#2670）。 */
   phases: UsagePhaseBreakdown;
+  /**
+   * 直近5時間枠の実測ウィンドウ内での、このIssueの消費が枠の何%に相当するかの目安（#2988）。
+   * ウィンドウ内に活動が無い、または換算レート自体が求まらない場合はnull。
+   * `/api/session-usage`が`buildIssueQuotaPercents`で計算して詰め直す（この純粋関数はDBも
+   * プラン枠APIも読まないため、デフォルトはnullのまま）。
+   */
+  quotaPercent: number | null;
 };
 
 export type UsagePhaseKey = "plan" | "implementation" | "action";
@@ -411,6 +418,21 @@ function addEntry(totals: UsageTotals, entry: SessionUsageEntry): void {
   totals.costUsd += entry.costUsd;
 }
 
+/**
+ * Issue（またはPR）単位のグルーピングキー。`buildSessionUsageSummary`の集計と、
+ * 窓（期間の外にはみ出しうる）から計算するIssue別の枠%按分（#2988）の両方で使う——
+ * 期間で絞った`UsageIssue.entries`だけでは窓の全体を拾えないことがあるため、
+ * 集計とは別に「このセッションはどのIssue行に属するか」を判定できる形で公開する。
+ */
+export function sessionUsageIssueKey(
+  entry: Pick<SessionUsageEntry, "repository" | "issueNumber" | "prNumber">,
+): string {
+  const repositoryKey = entry.repository ?? "";
+  return entry.issueNumber !== null
+    ? `${repositoryKey}#${entry.issueNumber}`
+    : `${repositoryKey}##${entry.prNumber ?? ""}`;
+}
+
 /** 日本時間の`YYYY-MM-DD`。解釈できない値は空文字 */
 function jstDateKey(iso: string): string {
   const parts = toJstParts(iso);
@@ -509,10 +531,7 @@ export function buildSessionUsageSummary({
     // issueNumberを解決できたもの）は、prNumberの有無・値が違っても同じIssueの活動としてまとめる。
     // **issueNumberが無いときだけprNumberを使う**（#2650）。Issueへ紐付かないPR起点の実行
     // （developへのPRレビュー等）を、複数のPRが1つの「Issue未特定」行へ潰れないよう区別するため
-    const issueKey =
-      entry.issueNumber !== null
-        ? `${repositoryKey}#${entry.issueNumber}`
-        : `${repositoryKey}##${entry.prNumber ?? ""}`;
+    const issueKey = sessionUsageIssueKey(entry);
     const issue =
       byIssue.get(issueKey) ??
       ({
@@ -526,6 +545,7 @@ export function buildSessionUsageSummary({
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
         phases: emptyPhaseBreakdown(),
+        quotaPercent: null,
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
@@ -736,4 +756,95 @@ export function formatUsageTokens(value: number): string {
   if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M`;
   if (value >= 1e3) return `${Math.round(value / 1e3).toLocaleString()}k`;
   return String(Math.round(value));
+}
+
+/**
+ * 5時間枠の実測換算レート（#2988）。
+ *
+ * **算出方法。** 5時間枠のヘッダには使用率(%)とリセット時刻はあるが、絶対量（トークン数・金額）は
+ * 非公開。そこで「リセット時刻から5時間引いた時刻」をウィンドウ開始とみなし、そこから現在までに
+ * issue-deckが把握しているClaudeの消費（ローカル・GitHub Actions問わず。どちらも同じ
+ * `CLAUDE_CODE_OAUTH_TOKEN`を使うため同じ枠を消費する）の合計金額を、実測の使用率(%)で割る。
+ * これで「1%あたり約$X」という、直近ウィンドウ内でだけ意味を持つ相対レートが求まる。
+ * `entries`は`buildIssueQuotaPercents`にも使うウィンドウ全体をカバーする範囲（期間の開始と
+ * ウィンドウ開始の早い方）で渡すこと——`/api/session-usage`が取得範囲を決める。
+ *
+ * **これは#2666（`de23eb8e`）で削除した`buildQuotaScale`/`toQuotaPercent`と同じ考え方の
+ * 再導入で、「向きが違うから別物」ではない。** 計算式は当時と同一（窓内の実測消費÷使用率）。
+ * ただし2点変えている。(1) 当時は「5時間枠は1セッションで振り切れて物差しとして荒い」として
+ * 週間枠を優先していたが、**今回のIssueの要求は5時間枠そのものの内訳**なので、荒さ（＝1つの
+ * Issueが枠のほとんどを占めることがある）はむしろ「今どのIssueが枠を圧迫しているか」を知りたい
+ * 目的に対しては有用な情報であり、週間枠で薄めると見えなくなる。5時間枠限定とし、求まらなければ
+ * 出さない（フォールバックで週間枠へ逃げない）。(2) 当時は`source !== "github-actions"`を除外
+ * していたが、GitHub Actionsも同じ`CLAUDE_CODE_OAUTH_TOKEN`を使い同じ枠を消費するため含める
+ * （計上漏れを1つ減らす）。
+ *
+ * **それでも把握できない消費（issue-deck以外でのClaude利用、`lib/claude/api-usage.ts`が数える
+ * アプリ内AI機能の呼び出し）は`entries`に入らない。** 分母（windowCostUsd）が実際より小さくなる
+ * ため`usdPerPercent`は本来より低く出て、**この換算を使って出すIssue別の枠%は実際より大きめに
+ * 出る**（画面はそう断る。#2666時点のコメントと向きは同じで、GitHub Actionsを含めたぶんだけ
+ * 当時よりは実際に近づく）。
+ */
+export type QuotaEstimate = {
+  /** 5時間枠1%あたりの従量課金相当額(USD)。 */
+  usdPerPercent: number;
+  /** 換算の元にしたウィンドウの開始時刻(epoch ms)。 */
+  windowStartMs: number;
+  /** ウィンドウ内の合計費用(USD)。 */
+  windowCostUsd: number;
+};
+
+export function buildQuotaEstimate({
+  entries,
+  usedPercent,
+  resetsAt,
+  windowDurationMs,
+}: {
+  entries: Pick<SessionUsageEntry, "agent" | "costUsd" | "endedAt">[];
+  usedPercent: number;
+  /** epoch秒。取得できていなければnull。 */
+  resetsAt: number | null;
+  windowDurationMs: number;
+}): QuotaEstimate | null {
+  if (resetsAt === null || !(usedPercent > 0)) return null;
+
+  const windowStartMs = resetsAt * 1000 - windowDurationMs;
+  const windowCostUsd = entries
+    .filter((entry) => entry.agent === "claude" && new Date(entry.endedAt).getTime() >= windowStartMs)
+    .reduce((sum, entry) => sum + entry.costUsd, 0);
+  if (!(windowCostUsd > 0)) return null;
+
+  return { usdPerPercent: windowCostUsd / usedPercent, windowStartMs, windowCostUsd };
+}
+
+/**
+ * Issue（PR）別に、直近5時間枠のウィンドウ内消費を「およそ何%」へ変換する（#2988）。
+ *
+ * **`UsageIssue.entries`ではなく、DB取得段階の`entries`全体から計算し直す。** 期間の切り出し
+ * （`sessionUsagePeriodStartMs`。「1日」は日本時間0:00始まり）とウィンドウの開始
+ * （`quota.windowStartMs`）は別の基準で決まり、ウィンドウが期間の外へはみ出すことがある
+ * （深夜〜早朝に開くと5時間枠の前半が前日にかかる）。`/api/session-usage`は取得範囲を
+ * `Math.min(期間の開始, ウィンドウの開始)`まで広げて`entries`を渡す——`buildSessionUsageSummary`
+ * 側は従来どおり期間でしか集計しないため、`UsageIssue.entries`だけを見るとウィンドウ前半の
+ * 消費が漏れて按分が過大に出る。ここではその広げたentriesを直接畳んで漏れを無くす。
+ */
+export function buildIssueQuotaPercents(
+  entries: Pick<SessionUsageEntry, "agent" | "costUsd" | "endedAt" | "repository" | "issueNumber" | "prNumber">[],
+  quota: QuotaEstimate | null,
+): Map<string, number> {
+  const percentByIssueKey = new Map<string, number>();
+  if (quota === null) return percentByIssueKey;
+
+  const costByIssueKey = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.agent !== "claude") continue;
+    if (new Date(entry.endedAt).getTime() < quota.windowStartMs) continue;
+    const key = sessionUsageIssueKey(entry);
+    costByIssueKey.set(key, (costByIssueKey.get(key) ?? 0) + entry.costUsd);
+  }
+
+  for (const [key, costUsd] of costByIssueKey) {
+    if (costUsd > 0) percentByIssueKey.set(key, costUsd / quota.usdPerPercent);
+  }
+  return percentByIssueKey;
 }

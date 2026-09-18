@@ -382,7 +382,7 @@ describe("SidebarNav", () => {
   // Pull Requestの枠の下・リポジトリの枠の上に置く（#2674）。「リリース履歴」は
   // 「ブランチ」の直下に置く（#2827。ブランチの変更を確認したあと、公開されたリリースを
   // 続けて見る動線のため）
-  it("要対応・質問・ブランチ・リリース履歴・夜間実行・共通知識・AI使用量・Issue・PR・コードレビュー・確認環境の順に並べる", () => {
+  it("要対応・質問・ブランチ・リリース履歴・予約実行・共通知識・AI使用量・Issue・PR・コードレビュー・確認環境の順に並べる", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
@@ -394,7 +394,7 @@ describe("SidebarNav", () => {
       "質問",
       "ブランチ",
       "リリース履歴",
-      "夜間実行",
+      "予約実行",
       "共通知識",
       "AI使用量",
       "すべてのIssue",

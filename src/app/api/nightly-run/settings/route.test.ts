@@ -39,6 +39,9 @@ describe("PATCH /api/nightly-run/settings", () => {
     upsert.mockImplementation(async ({ update }) => ({
       nightlyRunEnabled: update.nightlyRunEnabled ?? false,
       nightlyRunStartHour: update.nightlyRunStartHour ?? 1,
+      nextWindowRunEnabled: update.nextWindowRunEnabled ?? false,
+      nextWindowRunLeadMinutes: update.nextWindowRunLeadMinutes ?? 60,
+      nextWindowRunIntervalMinutes: update.nextWindowRunIntervalMinutes ?? 10,
     }));
   });
 
@@ -47,21 +50,46 @@ describe("PATCH /api/nightly-run/settings", () => {
   });
 
   it("有効／無効だけを切り替えられる（開始時刻は触らない）", async () => {
-    const response = await PATCH(request({ enabled: true }));
+    const response = await PATCH(request({ nightly: { enabled: true } }));
 
     expect(response.status).toBe(200);
     expect(upsert.mock.calls[0][0].update).toEqual({ nightlyRunEnabled: true });
-    expect(await response.json()).toEqual({ enabled: true, startHour: 1 });
+    expect(await response.json()).toEqual({
+      nightly: { enabled: true, startHour: 1 },
+      nextWindow: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
+    });
   });
 
   it("開始時刻は夜のあいだ（22〜5時）だけ受け付ける", async () => {
-    expect((await PATCH(request({ startHour: 22 }))).status).toBe(200);
-    expect((await PATCH(request({ startHour: 13 }))).status).toBe(400);
-    expect((await PATCH(request({ startHour: "1" }))).status).toBe(400);
+    expect((await PATCH(request({ nightly: { startHour: 22 } }))).status).toBe(200);
+    expect((await PATCH(request({ nightly: { startHour: 13 } }))).status).toBe(400);
+    expect((await PATCH(request({ nightly: { startHour: "1" } }))).status).toBe(400);
+  });
+
+  /** #2995 */
+  it("次枠実行の設定だけを切り替えられる（夜間実行は触らない）", async () => {
+    const response = await PATCH(
+      request({ nextWindow: { enabled: true, leadMinutes: 90, intervalMinutes: 0 } }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({
+      nextWindowRunEnabled: true,
+      nextWindowRunLeadMinutes: 90,
+      nextWindowRunIntervalMinutes: 0,
+    });
+  });
+
+  /** #2995: 選べる値だけを受ける（自由入力にすると枠の終わり際という意味が崩れる） */
+  it("残り時間・間隔は決まった選択肢だけ受け付ける", async () => {
+    expect((await PATCH(request({ nextWindow: { leadMinutes: 7 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { intervalMinutes: 7 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { enabled: "true" } }))).status).toBe(400);
   });
 
   it("何も指定しなければ400", async () => {
     expect((await PATCH(request({}))).status).toBe(400);
+    expect((await PATCH(request({ nightly: {}, nextWindow: {} }))).status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -69,7 +97,7 @@ describe("PATCH /api/nightly-run/settings", () => {
   it("プレビュー環境では403で封じる", async () => {
     process.env.PREVIEW_MODE = "true";
 
-    const response = await PATCH(request({ enabled: true }));
+    const response = await PATCH(request({ nightly: { enabled: true } }));
 
     expect(response.status).toBe(403);
     expect(upsert).not.toHaveBeenCalled();

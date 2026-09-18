@@ -61,6 +61,8 @@ function makeDispatch(overrides: {
     hosts: overrides.hosts ?? [],
     jobs: [],
     sessions: overrides.sessions ?? [],
+    // エージェット別の一時停止（#2994）。既定は両方とも稼働中
+    agentPause: { claude: null, codex: null },
     concurrency: 2,
     isLoaded: overrides.isLoaded ?? true,
     error: null,
@@ -179,7 +181,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "コードレビュー",
       "確認環境",
       // リリース履歴も#2811でフッターのタブ（「リリース」）へ移したので、ここには並ばない
-      "夜間実行",
+      "予約実行",
       "共通知識",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",

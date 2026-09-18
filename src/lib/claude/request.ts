@@ -142,6 +142,12 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     feature: ClaudeApiFeature;
     token: string;
     body: Record<string, unknown>;
+    /**
+     * 応答を待つ上限（ミリ秒）。**巡回の途中から呼ぶものは必ず指定する**（#2995）。
+     * `POST /api/dispatch/claim`の相乗り処理は同期で走るため、ここが返らないとジョブの
+     * 払い出しごと待たされる。省略時は待ち続ける（画面から呼ぶ長い生成のため）
+     */
+    timeoutMs?: number;
   },
 ): Promise<ClaudeMessagesResult<T>> {
   const model = await getAppAiModel(options.feature);
@@ -173,6 +179,9 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
             },
       body: JSON.stringify(requestBody),
       cache: "no-store",
+      ...(options.timeoutMs === undefined
+        ? {}
+        : { signal: AbortSignal.timeout(options.timeoutMs) }),
     },
   );
 

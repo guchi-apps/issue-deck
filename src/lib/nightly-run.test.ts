@@ -7,12 +7,12 @@ import {
   describeNightlyRunMarkDetail,
   describeNightlyRunMarkTitle,
   describeNightlyRunWindowHours,
-  findNightlyRunQueuedMark,
+  findScheduledRunQueuedMark,
   formatNightlyRunHour,
   resolveNightlyRunLabelRejection,
   resolveNightlyRunWindow,
   selectLatestNightKey,
-  selectNightlyRunQueuedMarks,
+  selectScheduledRunQueuedMarks,
   summarizeNightlyRunOutcomes,
   type NightlyRunEntryView,
   type NightlyRunState,
@@ -216,6 +216,7 @@ describe("summarizeNightlyRunOutcomes / selectLatestNightKey", () => {
       agent: "claude",
       claudeModel: null,
       optionLabels: [],
+      kind: "NIGHTLY",
       status: "LAUNCHED",
       nightKey: "2026-09-02",
       createdAt: "2026-09-02T10:00:00.000Z",
@@ -248,7 +249,7 @@ describe("summarizeNightlyRunOutcomes / selectLatestNightKey", () => {
   });
 });
 
-describe("夜間実行の目印（#2866）", () => {
+describe("予約実行の目印（#2866・#2995）", () => {
   function entry(overrides: Partial<NightlyRunEntryView>): NightlyRunEntryView {
     return {
       id: "e1",
@@ -260,6 +261,7 @@ describe("夜間実行の目印（#2866）", () => {
       agent: "claude",
       claudeModel: null,
       optionLabels: [],
+      kind: "NIGHTLY",
       status: "QUEUED",
       nightKey: null,
       createdAt: "2026-09-07T10:00:00.000Z",
@@ -281,28 +283,38 @@ describe("夜間実行の目印（#2866）", () => {
       },
       queued: [entry({})],
       results: null,
+      nextWindow: {
+        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+        window: null,
+        queued: [],
+        results: null,
+      },
       ...overrides,
     };
   }
 
   it("`Issue.id`で引ける表を作る（`owner/repo#番号`の鍵は作らない）", () => {
-    const marks = selectNightlyRunQueuedMarks(state());
-    expect(findNightlyRunQueuedMark(marks, "9001")).toEqual({
+    const marks = selectScheduledRunQueuedMarks(state());
+    expect(findScheduledRunQueuedMark(marks, "9001")).toEqual({
       entryId: "e1",
-      startHour: 1,
+      kind: "NIGHTLY",
       enabled: true,
+      chip: "今夜 01:00",
+      title: "今夜の夜間実行に積まれています（01:00〜04:00に順に起動）",
+      detail:
+        "01:00〜04:00のあいだに順に起動します。いま開始する場合は先に予定を取り消してください。",
     });
     // 別のIssue・取得前（表そのものが無い）は目印を出さない
-    expect(findNightlyRunQueuedMark(marks, "9002")).toBeNull();
-    expect(findNightlyRunQueuedMark(undefined, "9001")).toBeNull();
+    expect(findScheduledRunQueuedMark(marks, "9002")).toBeNull();
+    expect(findScheduledRunQueuedMark(undefined, "9001")).toBeNull();
   });
 
   it("同期できていないIssue（issueIdがnull）は表へ入れない", () => {
-    expect(selectNightlyRunQueuedMarks(state({ queued: [entry({ issueId: null })] })).size).toBe(0);
+    expect(selectScheduledRunQueuedMarks(state({ queued: [entry({ issueId: null })] })).size).toBe(0);
   });
 
   it("目印を出すのは`QUEUED`だけ（起動後は進捗の表示が受け持つ）", () => {
-    const marks = selectNightlyRunQueuedMarks(
+    const marks = selectScheduledRunQueuedMarks(
       state({
         queued: [entry({ status: "LAUNCHED" }), entry({ id: "e2", status: "CANCELED", issueId: "9002" })],
       }),
@@ -311,7 +323,45 @@ describe("夜間実行の目印（#2866）", () => {
   });
 
   it("取得前（stateがnull）は空の表になる", () => {
-    expect(selectNightlyRunQueuedMarks(null).size).toBe(0);
+    expect(selectScheduledRunQueuedMarks(null).size).toBe(0);
+  });
+
+  it("次の5時間枠の予定も同じ表に入る（#2995）", () => {
+    const marks = selectScheduledRunQueuedMarks(
+      state({
+        queued: [],
+        nextWindow: {
+          settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+          window: {
+            phase: "waiting",
+            resetsAt: "2026-09-07T23:40:00.000Z",
+            opensAt: "2026-09-07T22:40:00.000Z",
+            usedPercent: 62,
+            runKey: "2026-09-08 08:40",
+          },
+          queued: [entry({ id: "n1", kind: "NEXT_WINDOW", issueId: "9003" })],
+          results: null,
+        },
+      }),
+    );
+    const mark = findScheduledRunQueuedMark(marks, "9003");
+    expect(mark?.kind).toBe("NEXT_WINDOW");
+    expect(mark?.chip).toBe("次枠 07:40〜");
+  });
+
+  it("次枠実行がOFFならチップがOFFの文言になる（#2995）", () => {
+    const marks = selectScheduledRunQueuedMarks(
+      state({
+        queued: [],
+        nextWindow: {
+          settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
+          window: null,
+          queued: [entry({ id: "n1", kind: "NEXT_WINDOW", issueId: "9003" })],
+          results: null,
+        },
+      }),
+    );
+    expect(findScheduledRunQueuedMark(marks, "9003")?.chip).toBe("次枠実行OFF");
   });
 
   it("文言に開始時刻と時間帯が入る", () => {

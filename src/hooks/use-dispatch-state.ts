@@ -6,6 +6,7 @@ import type { ClaudeModel } from "@/lib/app-settings";
 import {
   isActiveDispatchJobStatus,
   type DispatchAgent,
+  type DispatchAgentPauseState,
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
@@ -54,6 +55,8 @@ export type DispatchState = {
    */
   questionRequests: SessionQuestionRequestView[];
   concurrency: number;
+  /** エージェット別の新規実行の一時停止状態（#2994） */
+  agentPause: DispatchAgentPauseState;
 };
 
 /** 未完了ジョブがある間の取得間隔。押した直後の状態変化を追う */
@@ -966,6 +969,38 @@ export function useDispatchState(enabled: boolean) {
     [markChanged],
   );
 
+  /**
+   * エージェット別の新規実行の一時停止を、人が手動で切り替える（#2994）。
+   *
+   * **失敗の理由は戻り値で返す**（`setSessionAnswerMode`と同じ。押した場所の下に出す）。
+   * 送信の直後に画面を書き換えず、次の取得で`agentPause`の値が変わるのを待つ
+   * （切り替えが効いたかどうかの正はサーバー側）。
+   */
+  const setAgentDispatchPaused = useCallback(
+    async (params: {
+      agent: DispatchAgent;
+      paused: boolean;
+    }): Promise<{ ok: true } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/agent-pause", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent: params.agent, paused: params.paused }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        markChanged();
+        refresh();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged, refresh],
+  );
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
@@ -974,6 +1009,7 @@ export function useDispatchState(enabled: boolean) {
     planRequests: state?.planRequests ?? [],
     questionRequests: state?.questionRequests ?? [],
     concurrency: state?.concurrency ?? null,
+    agentPause: state?.agentPause ?? { claude: null, codex: null },
     isLoaded,
     fetchedAt,
     isFetching,
@@ -991,6 +1027,7 @@ export function useDispatchState(enabled: boolean) {
     sendSessionRecovery,
     sendPrFixNotify,
     setSessionAnswerMode,
+    setAgentDispatchPaused,
     startManualStepSession,
     runManualStep,
     abortManualStep,

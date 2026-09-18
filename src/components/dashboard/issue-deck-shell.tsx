@@ -95,7 +95,7 @@ import {
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
-import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
+import { selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
   isMergeCheckUser,
@@ -1256,16 +1256,20 @@ export function IssueDeckShell({
   // 上がるもので、Issue一覧のように「開いた先に何も無い」が起きる並びではないため
   const knowledgeBoard = useKnowledgeBoard(isKnowledgePaneActive);
   /**
-   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。**取得口は増やさず、
+   * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
    * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
    *
-   * 夜間実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
+   * 予約実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
    * 最大5分遅れる。積んだ端末では「実装を開始」の成功時に`refresh`を呼んで即時に出す。
    */
   const nightlyRunQueued = useMemo(
-    () => selectNightlyRunQueuedMarks(nightlyRun.state),
+    () => selectScheduledRunQueuedMarks(nightlyRun.state),
     [nightlyRun.state],
   );
+  /** 左メニューの件数。**次の5時間枠と今夜の合計**（積んである予定の総数） */
+  const nightlyRunQueuedCount = nightlyRun.state
+    ? nightlyRun.state.queued.length + nightlyRun.state.nextWindow.queued.length
+    : null;
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -1777,7 +1781,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectKnowledge={selectKnowledge}
-                  nightlyRunQueuedCount={nightlyRun.state?.queued.length ?? null}
+                  nightlyRunQueuedCount={nightlyRunQueuedCount}
                   onSelectRepos={selectRepos}
                   /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
                      ——開いた先の一覧が既定で非表示ぶんを畳むため、含めるとホームの数字と
@@ -1940,7 +1944,7 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
-                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                   nightlyRunQueued={nightlyRunQueued}
                   snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
                   snoozedMergePendingEntries={snoozedMergePendingEntries}
@@ -2030,7 +2034,7 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
-                  /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                  /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                   nightlyRunQueued={nightlyRunQueued}
                 />
               )}
@@ -2056,7 +2060,7 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
-                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  /* 予約実行に積まれている印（#2866・#2995）。取り消しは予約実行の画面と同じAPI */
                   nightlyRunQueued={nightlyRunQueued}
                   onOpenNightlyRun={selectNightlyRun}
                   onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
@@ -2096,7 +2100,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectKnowledge={selectKnowledgePane}
-                nightlyRunQueuedCount={nightlyRun.state?.queued.length ?? null}
+                nightlyRunQueuedCount={nightlyRunQueuedCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={mergePendingPullRequests.length}
@@ -2140,7 +2144,7 @@ export function IssueDeckShell({
               </div>
             </div>
           ) : filters.pane === "nightly" ? (
-            /* PC: 夜間実行（#2772）。「AI使用量」と同じく中央〜右を1カラムで使う */
+            /* PC: 予約実行（#2772・#2995）。「AI使用量」と同じく中央〜右を1カラムで使う */
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
               <div className="mx-auto max-w-3xl">
                 <NightlyRunPanel
@@ -2327,7 +2331,7 @@ export function IssueDeckShell({
                 snoozes={snoozes}
                 onSnooze={snooze}
                 onUnsnooze={unsnooze}
-                /* 「今夜の夜間実行」に積まれている印（#2866）。一覧の行と詳細の注釈が同じ表を読む */
+                /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                 nightlyRunQueued={nightlyRunQueued}
                 // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
                 fetchedAt={issuePolling.fetchedAt}
@@ -2383,7 +2387,7 @@ export function IssueDeckShell({
                   snoozes={snoozes}
                   onSnooze={snooze}
                   onUnsnooze={unsnooze}
-                  /* 「今夜の夜間実行」に積まれている印（#2866）。取り消しは夜間実行の画面と同じAPI */
+                  /* 予約実行に積まれている印（#2866・#2995）。取り消しは予約実行の画面と同じAPI */
                   nightlyRunQueued={nightlyRunQueued}
                   onOpenNightlyRun={selectNightlyRunPane}
                   onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}

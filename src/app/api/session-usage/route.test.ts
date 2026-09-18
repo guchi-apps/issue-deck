@@ -33,7 +33,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/claude/usage", () => ({ fetchClaudeUsage: vi.fn().mockResolvedValue(null) }));
+const fetchClaudeUsage = vi.fn();
+vi.mock("@/lib/claude/usage", () => ({
+  get fetchClaudeUsage() {
+    return fetchClaudeUsage;
+  },
+}));
 vi.mock("@/lib/dispatch/codex-usage", () => ({ getLatestCodexUsage: vi.fn().mockResolvedValue(null) }));
 
 vi.mock("@/lib/github/app-auth", () => ({
@@ -61,8 +66,9 @@ import { GET } from "@/app/api/session-usage/route";
  * PR単体の行だけ**であることと、どちらの経路も失敗時に使用量本体を壊さないことを確かめる。
  */
 
-function request(): NextRequest {
-  return { url: "http://localhost/api/session-usage?days=7", nextUrl: new URL("http://localhost/api/session-usage?days=7") } as unknown as NextRequest;
+function request(days = 7): NextRequest {
+  const url = `http://localhost/api/session-usage?days=${days}`;
+  return { url, nextUrl: new URL(url) } as unknown as NextRequest;
 }
 
 /** `SessionUsage`テーブルの1行。テストで動かす列だけ埋める */
@@ -97,6 +103,8 @@ function sessionUsageRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+const ORIGINAL_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
 beforeEach(() => {
   vi.clearAllMocks();
   // 集計は「今日を含むN日」で切るため（`sessionUsagePeriodStartMs`）、時計を止めないと
@@ -107,10 +115,13 @@ beforeEach(() => {
   requireUserId.mockResolvedValue("user-1");
   repositoryFindMany.mockResolvedValue([]);
   issueFindMany.mockResolvedValue([]);
+  fetchClaudeUsage.mockResolvedValue(null);
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  process.env.CLAUDE_CODE_OAUTH_TOKEN = ORIGINAL_TOKEN;
 });
 
 describe("GET /api/session-usage", () => {
@@ -164,5 +175,77 @@ describe("GET /api/session-usage", () => {
     expect(response.status).toBe(200);
     expect(body.byIssue[0].title).toBeNull();
     expect(body.byIssue[0].costUsd).toBe(1);
+  });
+
+  it("5時間枠の実測ヘッダが取れれば、換算レートとIssue別の枠%を計算して返す（#2988）", async () => {
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 6 })]);
+    fetchClaudeUsage.mockResolvedValue({
+      windows: [
+        {
+          key: "5h",
+          label: "5時間",
+          usedPercent: 20,
+          remainingPercent: 80,
+          // NOW(03:00Z)の3時間後(06:00Z)にリセット → ウィンドウ開始は01:00Z。
+          resetsAt: Date.parse("2026-08-30T06:00:00.000Z") / 1000,
+          status: "allowed",
+          durationMs: 5 * 60 * 60_000,
+        },
+      ],
+      fetchedAt: Date.now(),
+      stale: false,
+    });
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.quotaEstimate).toEqual({
+      usdPerPercent: 6 / 20,
+      windowStartMs: Date.parse("2026-08-30T01:00:00.000Z"),
+      windowCostUsd: 6,
+    });
+    expect(body.byIssue[0].quotaPercent).toBe(20);
+  });
+
+  it("Claudeの使用量が取得できなければquotaEstimateはnull、Issueのquotaも全てnull", async () => {
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow()]);
+    fetchClaudeUsage.mockResolvedValue(null);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.quotaEstimate).toBeNull();
+    expect(body.byIssue[0].quotaPercent).toBeNull();
+  });
+
+  it("5時間枠のウィンドウが期間の開始より前へはみ出す場合、取得範囲をウィンドウ開始まで広げる（#2988）", async () => {
+    // 日本時間2026-08-31 02:10（UTC 17:10）に設定。「1日」の期間開始は日本時間の今日0:00
+    // = UTC 2026-08-30T15:00:00.000Z。
+    vi.setSystemTime(new Date("2026-08-30T17:10:00.000Z"));
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 6 })]);
+    fetchClaudeUsage.mockResolvedValue({
+      windows: [
+        {
+          key: "5h",
+          label: "5時間",
+          usedPercent: 20,
+          remainingPercent: 80,
+          // リセットはUTC 18:00 → ウィンドウ開始は13:00Z。期間開始(15:00Z)より2時間早い。
+          resetsAt: Date.parse("2026-08-30T18:00:00.000Z") / 1000,
+          status: "allowed",
+          durationMs: 5 * 60 * 60_000,
+        },
+      ],
+      fetchedAt: Date.now(),
+      stale: false,
+    });
+
+    const response = await GET(request(1));
+    expect(response.status).toBe(200);
+
+    // findManyへ渡された取得範囲が、期間の開始(15:00Z)ではなくウィンドウの開始(13:00Z)まで
+    // 広がっていることを確かめる。
+    const where = sessionUsageFindMany.mock.calls[0][0].where;
+    expect(where.endedAt.gte.toISOString()).toBe("2026-08-30T13:00:00.000Z");
   });
 });
