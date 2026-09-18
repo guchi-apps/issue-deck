@@ -4,6 +4,7 @@ import {
   buildIssueQuotaPercents,
   buildPhaseBreakdown,
   buildQuotaEstimate,
+  buildRepositoryPieSlices,
   buildSessionUsageSummary,
   fillUsageDays,
   formatUsageTokens,
@@ -757,5 +758,56 @@ describe("niceAxisScale", () => {
   it("全日が0のときは$1を上限にして目盛りだけ描ける", () => {
     expect(niceAxisScale(0)).toEqual({ max: 1, step: 1, ticks: [0, 1] });
     expect(niceAxisScale(Number.NaN)).toEqual({ max: 1, step: 1, ticks: [0, 1] });
+  });
+});
+
+describe("buildRepositoryPieSlices（#3060）", () => {
+  const group = (key: string, costUsd: number) => ({ key, costUsd });
+
+  it("金額の上位5件と、残りをまとめた「その他」に畳む", () => {
+    const slices = buildRepositoryPieSlices([
+      group("a", 60),
+      group("b", 20),
+      group("c", 10),
+      group("d", 5),
+      group("e", 3),
+      group("f", 1),
+      group("g", 1),
+    ]);
+
+    expect(slices.map((slice) => slice.label)).toEqual(["a", "b", "c", "d", "e", "その他"]);
+    const other = slices[5];
+    expect(other.isOther).toBe(true);
+    expect(other.costUsd).toBe(2);
+    expect(other.repositoryCount).toBe(2);
+    expect(slices.reduce((sum, slice) => sum + slice.fraction, 0)).toBeCloseTo(1);
+    expect(slices[0].fraction).toBeCloseTo(0.6);
+  });
+
+  it("並びは入力の順ではなく金額の多い順", () => {
+    const slices = buildRepositoryPieSlices([group("small", 1), group("big", 9)]);
+    expect(slices.map((slice) => slice.key)).toEqual(["big", "small"]);
+  });
+
+  it("5件以内なら「その他」を作らない", () => {
+    const slices = buildRepositoryPieSlices([group("a", 2), group("b", 1)]);
+    expect(slices.some((slice) => slice.isOther)).toBe(false);
+  });
+
+  it("金額が0のリポジトリは切れにも件数にも入れない", () => {
+    const slices = buildRepositoryPieSlices([group("a", 4), group("zero", 0)]);
+    expect(slices.map((slice) => slice.key)).toEqual(["a"]);
+    expect(slices[0].fraction).toBe(1);
+  });
+
+  it("リポジトリを判定できなかった行（空文字のキー）は「(不明)」の名前で出す", () => {
+    const [slice] = buildRepositoryPieSlices([group("", 3)]);
+    expect(slice.label).toBe("(不明)");
+    expect(slice.isOther).toBe(false);
+  });
+
+  it("金額の合計が0なら切れを返さない", () => {
+    expect(buildRepositoryPieSlices([])).toEqual([]);
+    expect(buildRepositoryPieSlices([group("a", 0)])).toEqual([]);
   });
 });
