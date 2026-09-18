@@ -3175,6 +3175,8 @@ export function POST(request: NextRequest) {
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
   issue-deck自身の実装プロンプト（`scripts/prompts/implementation-agent.md`）は毎回使う指示だけを載せ、
   一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
+  無人実行の`.github/prompts/implement.md`も同じ整理で、必要なときに読む手順は
+  `docs/multi-agent/unattended-implementation-reference.md`へ置いている（#3024）。
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`
   （毎回使う指示だけ。手作業Issueの起票などは`scripts/prompts/generic-implementation-agent-reference.md`へ置き、
   ひな形の索引から絶対パスで読ませる。#3023）。

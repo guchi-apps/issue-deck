@@ -99,7 +99,8 @@ Claude Codeは動き続けるし（skillの執筆自体がメインPCのObsidian
 | そのセッション限りの事情（一時的な障害・その場の手順） | 昇格させない。メモリに残すか削除する |
 
 昇格は実装エージェントの自己申告で、機械的な強制力は持たせていない。
-[`docs/multi-agent/implementation-agent-reference.md`](implementation-agent-reference.md)（issue-deck自身のローカル実行。プロンプトの索引から読む。#3021）と
+[`docs/multi-agent/implementation-agent-reference.md`](implementation-agent-reference.md)（issue-deck自身のローカル実行。プロンプトの索引から読む。#3021）、
+[`docs/multi-agent/unattended-implementation-reference.md`](unattended-implementation-reference.md)（無人実行。同じく索引から読む。#3024）と
 [`scripts/prompts/generic-implementation-agent-reference.md`](../../scripts/prompts/generic-implementation-agent-reference.md)（汎用ランチャー。同じく索引から読む。#3023）の
 「実装中に得た知見の記録」で促すに留め、投稿されたかどうかの検証はしない。共有知識と同じく
 **量より汚染防止を優先する**ため、取りこぼしは許容する。

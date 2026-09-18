@@ -300,7 +300,7 @@ type StartImplementationDialogProps = {
  * 実装エージェントを起動する。
  *
  * オプションは実行先で出し分ける（#1317・`visibleStartImplementationOptions`）。撮影は
- * GitHub Actionsを選んだときだけ出る。「計画が必要」の初期状態はIssueの種別ラベルから決まる。
+ * GitHub Actionsを選んだときだけ出る。「計画を立案」の初期状態はIssueの種別ラベルから決まる。
  *
  * `renderTrigger`を渡すと自前のトリガーボタンから開閉する（Issue詳細画面）。
  * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面の
@@ -416,7 +416,7 @@ export function StartImplementationDialog({
     repositoryLabelNamesRef.current = repositoryLabelNames;
   });
   /**
-   * 「アーティファクトで見た目を出す」を**ユーザー自身が触ったか**（#2884計画レビューG1の指摘2）。
+   * 「デザインを提示」を**ユーザー自身が触ったか**（#2884計画レビューG1の指摘2）。
    *
    * 下の既定再適用effectはリポジトリのラベル一覧が遅れて届いた時点でもう一度走るため、
    * 触っていなければOFF→ONへ寄せてよいが、**ユーザーが自分でOFFにした後だと巻き戻ってしまう**。
@@ -550,7 +550,7 @@ export function StartImplementationDialog({
   /** 同じ理由で、ダイアログでONにしたままでも積めない（積む前にラベルとして付くため） */
   const nightlyOptionRejection =
     isScheduledTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.some((key) => options[key])
-      ? `「アーティファクトで見た目を出す」「開発環境を起動する」をONにしたままでは${scheduledKindName}に積めません（承認・確認を待つ人がいない）`
+      ? `「デザインを提示」「開発環境を起動」をONにしたままでは${scheduledKindName}に積めません（承認・確認を待つ人がいない）`
       : null;
 
   const targetHostName =
@@ -705,25 +705,24 @@ export function StartImplementationDialog({
   const selectedEntry = targetEntries.find((entry) => isSameTarget(entry.target, effectiveTarget)) ?? null;
   const blockedEntries = targetEntries.filter((entry) => entry.rejection !== null);
   /**
-   * オプションのグリッドの下に出す説明（#1623）。**ONにしたものと、選べないものだけ出す。**
-   * 全部の説明を常に出すと縦に伸びてしまうため、ONにした内容の確認と、押せない理由の提示に絞る。
+   * オプションのグリッドの下に出す説明。**予約実行で選べないオプションの理由だけ出す**（#2995）。
+   *
+   * 各オプションの説明は出さない（#3046。スマホでダイアログが縦に伸びて開始ボタンが遠くなるため。
+   * 説明は各チップの`title`に残している）。予約実行の理由だけ残すのは、これが無いと
+   * 「なぜ押せない（積めない）のか」が画面から読めなくなるため。ONのままなら積めない理由、
+   * OFFなら選べない理由を出す。
    */
-  const optionHints = visibleOptions.flatMap((option) => {
-    // 予約実行では選べないもの（#2995）。ONのままなら積めない理由、OFFなら選べない理由を出す
-    if (isScheduledTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key)) {
-      return [
-        {
+  const optionHints = isScheduledTarget
+    ? visibleOptions
+        .filter((option) => NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key))
+        .map((option) => ({
           key: option.key,
           label: option.label,
           text: options[option.key]
             ? `ONのままでは${scheduledKindName}に積めません（承認・確認を待つ人がいない）。OFFにしてください`
             : `${scheduledKindName}では選べません（承認・確認を待つ人がいない）`,
-        },
-      ];
-    }
-    if (!options[option.key]) return [];
-    return [{ key: option.key, label: option.label, text: option.description }];
-  });
+        }))
+    : [];
 
   function handleOpenChange(nextOpen: boolean) {
     if (onOpenChangeProp) {
@@ -798,7 +797,7 @@ export function StartImplementationDialog({
   /** GitHub Actionsの無人実行を起動する（従来の経路） */
   async function startOnActions(currentIssue: Issue) {
     // カンバンを即座に追従させる（#991 Phase 3）。オプションラベル→Statusの順に書くのは、
-    // 万一この書き込みがWebhook起動の判定に届いた場合でも「計画が必要」の選択が先に反映される
+    // 万一この書き込みがWebhook起動の判定に届いた場合でも「計画を立案」の選択が先に反映される
     // ようにするため（通常はissue-deck自身の書き込みとして無視される）。失敗しても続行する。
     await setProgressStatus({
       repositoryFullName: issue.repositoryFullName,
@@ -997,7 +996,7 @@ export function StartImplementationDialog({
         {showTargets && !isTargetPending && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">実行先</p>
-            <div role="radiogroup" aria-label="実行先" className="grid grid-cols-4 gap-1.5">
+            <div role="radiogroup" aria-label="実行先" className="grid auto-cols-fr grid-flow-col gap-1.5">
               {targetEntries.map((entry) => (
                 <StartTargetTile
                   key={entry.key}
@@ -1135,17 +1134,15 @@ export function StartImplementationDialog({
                 );
               })}
             </div>
-            <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-              {optionHints.length > 0 ? (
-                optionHints.map((hint) => (
+            {optionHints.length > 0 && (
+              <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+                {optionHints.map((hint) => (
                   <li key={hint.key}>
                     <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
                   </li>
-                ))
-              ) : (
-                <li>オプションを押すとONになり、ここに内容が出ます。</li>
-              )}
-            </ul>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         <ApiErrorMessage message={error} />
@@ -1194,15 +1191,15 @@ export function StartImplementationDialog({
  * 実行先が確定するまでの骨組み（#1666）。**選択肢を1つも出さず、場所だけ確保する。**
  *
  * 見出しと枚数を本番と同じにしているのは、確定した瞬間にダイアログの高さが変わらないようにするため。
- * 枚数（実行先4・オプション4）は最も多い場合に合わせてあり、確定後に減ることはあっても増えない。
+ * 枚数（実行先5・オプション4）は最も多い場合に合わせてあり、確定後に減ることはあっても増えない。
  */
 function StartChoicesSkeleton() {
   return (
     <div className="flex flex-col gap-4" aria-busy="true">
       <div className="flex flex-col gap-2">
         <p className="text-sm font-medium">実行先</p>
-        <div className="grid grid-cols-4 gap-1.5">
-          {[0, 1, 2, 3].map((index) => (
+        <div className="grid auto-cols-fr grid-flow-col gap-1.5">
+          {[0, 1, 2, 3, 4].map((index) => (
             <Skeleton key={index} className="min-h-[68px] rounded-lg" />
           ))}
         </div>
@@ -1365,10 +1362,12 @@ function ModelPickNotice({
 }
 
 /**
- * 実行先の選択肢1件（#1623）。**アイコンを主役にした正方形のタイルで、4つ横に並べる。**
+ * 実行先の選択肢1件（#1623）。**アイコンを主役にした正方形のタイルで、枚数に関わらず1行に並べる**
+ * （#3046。以前は4列固定で、5枚目がスマホで2行目に落ちていた）。
  *
  * 読み上げ・hoverには正式名称と説明（選べない場合は理由）を残す。タイルの中に説明を置かないのは、
- * 幅が80px弱しか無く、置いても読めないため。**選べない場合に押せなくする扱いは従来どおり**
+ * 幅が60px強しか無く（iPhone 15でダイアログが361pxのとき5枚で1枚約61px）、置いても読めないため。
+ * 短い名前が入り切らない場合は省略表示にする。**選べない場合に押せなくする扱いは従来どおり**
  * （#1180）で、理由の判定と文言もAPI側（`enqueueDispatchJob`）と同じものを使っている。
  */
 function StartTargetTile({
@@ -1393,7 +1392,7 @@ function StartTargetTile({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex min-h-[68px] flex-col items-center justify-center gap-1.5 rounded-lg border px-1 py-2 text-center",
+        "flex min-h-[68px] min-w-0 flex-col items-center justify-center gap-1.5 rounded-lg border px-1 py-2 text-center",
         selected
           ? "border-primary bg-accent text-foreground ring-1 ring-primary"
           : "text-muted-foreground hover:bg-accent",
@@ -1401,7 +1400,7 @@ function StartTargetTile({
       )}
     >
       <Icon className="size-5" />
-      <span className="text-[10px] leading-tight font-medium">{entry.shortName}</span>
+      <span className="max-w-full truncate text-[10px] leading-tight font-medium">{entry.shortName}</span>
     </button>
   );
 }

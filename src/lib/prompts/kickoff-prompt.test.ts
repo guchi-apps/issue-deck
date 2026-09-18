@@ -122,9 +122,9 @@ describe("kickoff_prompt_summary", () => {
 
 describe("kickoff_prompt_options", () => {
   it("オプションのラベルだけを日本語名にして並べる", () => {
-    expect(callShell("kickoff_prompt_options", "11.local, 21.plan-required, 50.feature")).toBe("計画が必要");
+    expect(callShell("kickoff_prompt_options", "11.local, 21.plan-required, 50.feature")).toBe("計画を立案");
     expect(callShell("kickoff_prompt_options", "23.preview-required, 21.plan-required")).toBe(
-      "計画が必要 / 開発環境を起動する",
+      "計画を立案 / 開発環境を起動",
     );
   });
 
@@ -180,7 +180,7 @@ describe("kickoff_prompt_context_block", () => {
       ].join("\n"),
     );
     expect(callShell("kickoff_prompt_context_block", file, "5559", "", "1")).toBe(
-      ["- 概要: 説明の本文です。", "- オプション: 計画が必要", "- 開発環境: http://localhost:5559（起動済み）"].join(
+      ["- 概要: 説明の本文です。", "- オプション: 計画を立案", "- 開発環境: http://localhost:5559（起動済み）"].join(
         "\n",
       ),
     );
