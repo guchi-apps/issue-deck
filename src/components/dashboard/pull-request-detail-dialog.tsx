@@ -2,9 +2,11 @@
 
 import { X } from "lucide-react";
 
+import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import type { PullRequestFixIssueDraft } from "@/lib/github/pull-request-fix-issue";
+import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
+import type { PullRequestFixIssueDraft, PullRequestFixRoute } from "@/lib/github/pull-request-fix-issue";
 import type { ReleaseVerificationRow } from "@/lib/github/release-verification";
 import type {
   PullRequestSummary,
@@ -26,6 +28,13 @@ type PullRequestDetailDialogProps = {
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
   /** 「修正Issueを起案」（#2961）。`PullRequestDetail`へそのまま中継する */
   onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
+  /** 「修正Issueを起案」の送り先一式（#3009）。`PullRequestDetail`へそのまま中継する */
+  pullRequestFixRoute?: PullRequestFixRoute;
+  issueSuggestions?: IssueSuggestion[];
+  onRequestPullRequestSessionFix?: (route: PrFixRequestRoute, reason: string) => Promise<boolean>;
+  isSubmittingPullRequestSessionFix?: boolean;
+  pullRequestSessionFixRejection?: string | null;
+  pullRequestSessionFixError?: string | null;
 };
 
 /**
@@ -60,6 +69,12 @@ export function PullRequestDetailDialog({
   onClose,
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
+  pullRequestFixRoute,
+  issueSuggestions,
+  onRequestPullRequestSessionFix,
+  isSubmittingPullRequestSessionFix,
+  pullRequestSessionFixRejection,
+  pullRequestSessionFixError,
 }: PullRequestDetailDialogProps) {
   const open = pullRequestId !== null;
 
@@ -93,6 +108,12 @@ export function PullRequestDetailDialog({
           onMerged={onMerged}
           onCreateFixIssue={onCreateFixIssue}
           onCreatePullRequestFixIssue={onCreatePullRequestFixIssue}
+          pullRequestFixRoute={pullRequestFixRoute}
+          issueSuggestions={issueSuggestions}
+          onRequestPullRequestSessionFix={onRequestPullRequestSessionFix}
+          isSubmittingPullRequestSessionFix={isSubmittingPullRequestSessionFix}
+          pullRequestSessionFixRejection={pullRequestSessionFixRejection}
+          pullRequestSessionFixError={pullRequestSessionFixError}
           className="min-h-0"
           headerLeading={
             <button

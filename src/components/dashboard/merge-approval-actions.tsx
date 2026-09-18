@@ -214,8 +214,11 @@ export function MergeApprovalActions({
  *
  * ローカル担当のときだけ出し、**呼び戻すこと・ラベルを外すこと・固定の1行を流すことを押す前に
  * 書く。** 黙って`11.local`が外れると、後から無人実行が動き出した理由を画面から辿れなくなる。
+ *
+ * **PR詳細の「修正Issueを起案」の確認ダイアログ（#3009）とも共用する。** 送り先の判定材料
+ * （`PrFixRequestRoute`）が同じなので、出す文言も揃える。
  */
-function PrFixRouteNotice({
+export function PrFixRouteNotice({
   route,
   rejection,
   error,

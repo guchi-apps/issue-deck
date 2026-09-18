@@ -3512,6 +3512,32 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
   プレースホルダーを別要素で用意せず**実ボタンと同じ`<Button>`をそのまま常時描画**すれば、
   この挙動があっても寸法は常に一致する
 
+## ダイアログの初期値を開くたびに作り直すなら、`useEffect`ではなく条件付きレンダリングでマウントし直す（#3009）
+
+**`open`が変わったときに`useState`の値を作り直したくて`useEffect(() => { if (open) setState(...) }, [open, ...])`
+と書くと、ESLintの`react-hooks/set-state-in-effect`に引っかかる。** エフェクト内での同期的な
+`setState`はカスケードするレンダーを招くため非推奨（[`pull-request-fix-session-dialog.tsx`](../src/components/dashboard/pull-request-fix-session-dialog.tsx)で実際に発生）。
+
+- **直し方はダイアログの中身を条件付きレンダリング（`open && <Dialog.../>`）にし、
+  `useState(initialProp)`をマウント時の初期値としてだけ使う。** 開くたびに新しいコンポーネント
+  インスタンスとしてマウントされるので、その時点の`initialProp`で初期化し直される
+- Radixの`Dialog`は`forceMount`を渡さない限り、閉じている間は元々中身をDOMから外している
+  （`Presence`によるアンマウント）ため、条件付きレンダリングを重ねても見た目の挙動は変わらない
+
+## 「修正をセッションへ送る」の送り先判定は、画面ごとに前段の絞り込みを足して再利用する（#3009）
+
+**マージ承認待ち（Issue詳細の`MergeApprovalActions`・#2919）専用に見えて、実際は
+`resolvePrFixRequestRoute`（[`pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）が
+持つ判定材料は「対象Issueのラベル」と「セッション状態」の2つだけ。** マージ承認待ちかどうか・
+PRがマージ済みかどうかは、この関数の外側で先に判定してから渡す設計になっている。
+
+PR詳細の「修正Issueを起案」（`PullRequestFixIssueBar`・#2961）へ同じ「セッションへ送る」を
+足すとき（[`pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)の
+`resolvePullRequestFixRoute`）も、`resolvePrFixRequestRoute`自体は変更せず、前段に
+「PRがマージ済みなら常に新規Issue作成」「元Issueが1件に絞れないなら常に新規Issue作成」という
+判定を足しただけで済んだ。**送り先判定を増やすときは、既存の判定関数を複製・改造せず、
+呼び出し側で前段の絞り込みを足せないかを先に検討する。**
+
 ## Prismaの`upsert`は「同時に2回来る」を吸収しない（#2154）
 
 **複合ユニークキーに対する`upsert`はMySQLでは1文にならない。** PrismaはSELECTしてから

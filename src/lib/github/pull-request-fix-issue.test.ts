@@ -1,13 +1,29 @@
 import { describe, expect, it } from "vitest";
 
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   buildPullRequestFixIssueDraft,
+  buildPullRequestFixReason,
   resolvePullRequestFixIssueTone,
+  resolvePullRequestFixRoute,
   selectOpenChangeRequests,
   showsPullRequestFixIssueBar,
 } from "@/lib/github/pull-request-fix-issue";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import type { IssueLabel } from "@/types/issue";
 import type { PullRequestEvent } from "@/types/pull-request";
+
+function labels(...names: string[]): IssueLabel[] {
+  return names.map((name) => ({ name, color: "ededed", description: null }));
+}
+
+function session(
+  state: DispatchSessionView["state"],
+  host = "subpc",
+  codexThreadKnown: DispatchSessionView["codexThreadKnown"] = null,
+) {
+  return { host, state, codexThreadKnown };
+}
 
 function review(
   id: string,
@@ -119,5 +135,81 @@ describe("buildPullRequestFixIssueDraft", () => {
       openChangeRequests: [],
     });
     expect(draft.body).toContain("**自動レビュー（要確認）**（PRの最新コミットより前のコミットへのレビューです）");
+  });
+});
+
+describe("buildPullRequestFixReason", () => {
+  it("自動レビューと変更要求の引用を、新規Issue下書きと同じ組み立てで並べる", () => {
+    const reason = buildPullRequestFixReason({
+      pullRequestNumber: 2957,
+      review: {
+        body: "## 気になった点\n- 既読のタイミングが早い",
+        verdictLabel: "要修正",
+        isStale: false,
+      },
+      openChangeRequests: [review("r1", "alice", "changes_requested", "スマホで件数が消えない")],
+    });
+    expect(reason).toContain("PR #2957 のレビューで指摘された次の点を修正してください。");
+    expect(reason).toContain("> ## 気になった点\n> - 既読のタイミングが早い");
+    expect(reason).toContain("**変更を要求（alice）**\n\n> スマホで件数が消えない");
+  });
+
+  it("指摘を取り込めなかったときは、PRを読んで書く旨を入れる", () => {
+    const reason = buildPullRequestFixReason({
+      pullRequestNumber: 2957,
+      review: null,
+      openChangeRequests: [],
+    });
+    expect(reason).toContain("レビューの指摘は取り込めませんでした。");
+  });
+});
+
+describe("resolvePullRequestFixRoute", () => {
+  const pullRequest = { merged: false, linkedIssueNumbers: [2951] };
+
+  it("マージ済みなら常に新規Issue作成（PRを更新できないため）", () => {
+    expect(
+      resolvePullRequestFixRoute({
+        pullRequest: { merged: true, linkedIssueNumbers: [2951] },
+        targetIssueLabels: labels("11.local"),
+        session: session("ALIVE"),
+      }),
+    ).toEqual({ kind: "create-issue" });
+  });
+
+  it("元Issueが複数・0件なら新規Issue作成へ倒す", () => {
+    expect(
+      resolvePullRequestFixRoute({
+        pullRequest: { merged: false, linkedIssueNumbers: [2951, 2952] },
+        targetIssueLabels: labels("11.local"),
+        session: session("ALIVE"),
+      }),
+    ).toEqual({ kind: "create-issue" });
+    expect(
+      resolvePullRequestFixRoute({
+        pullRequest: { merged: false, linkedIssueNumbers: [] },
+        targetIssueLabels: null,
+        session: null,
+      }),
+    ).toEqual({ kind: "create-issue" });
+  });
+
+  it("元Issueが一覧に見つからない（ラベル未解決）ときも新規Issue作成へ倒す", () => {
+    expect(
+      resolvePullRequestFixRoute({ pullRequest, targetIssueLabels: null, session: null }),
+    ).toEqual({ kind: "create-issue" });
+  });
+
+  it("未マージで元Issueが1件に絞れれば、resolvePrFixRequestRouteの判定へそのまま委ねる", () => {
+    expect(
+      resolvePullRequestFixRoute({
+        pullRequest,
+        targetIssueLabels: labels("11.local"),
+        session: session("ALIVE", "subpc"),
+      }),
+    ).toEqual({ kind: "session", host: "subpc" });
+    expect(
+      resolvePullRequestFixRoute({ pullRequest, targetIssueLabels: labels("51.improvement"), session: null }),
+    ).toEqual({ kind: "actions" });
   });
 });
