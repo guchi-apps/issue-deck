@@ -388,6 +388,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ローカル座標として固定したうえで新しい`translate`を計算する（中心点固定ズーム）。
   2本指目が触れた時点で進行中のペン・移動・文字入力は破棄し、1本指以下に戻るまでは
   ピンチ扱いのままにする——同じ`canvas`上でシングルタッチ操作とピンチが競合するため。
+  **消しゴム（#3055）は元の画像を消さず、図形の一覧から消す。** ペンの線は線分単位で削り、
+  残った連続部分を別のペンの線へ分ける（`eraseShapesAt`）。矢印・四角・文字は部分で消せない
+  ので当たった時点で丸ごと消す。ポインタが1イベントで飛んでも取りこぼさないよう、前の位置から
+  半径の半分ずつ刻んで当てる（`eraseShapesAlong`）。**1回のなぞりは離した時点で履歴1件**
+  （途中は`moving`と同じく表示用の一時状態）なので、「元に戻す」1回で戻せる。消しゴムの
+  輪郭はキャンバスへ描くが、保存時の描き出しには含めない。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と

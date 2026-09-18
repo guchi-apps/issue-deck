@@ -11,6 +11,7 @@ import {
   type PointerEvent,
 } from "react";
 import {
+  Eraser,
   Loader2,
   Maximize2,
   Move,
@@ -33,6 +34,8 @@ import {
   colorValue,
   commitShapes,
   drawShape,
+  eraseShapesAlong,
+  eraserRadiusFor,
   findShapeAt,
   fontSizeFor,
   isNegligibleShape,
@@ -70,10 +73,12 @@ const TOOLS: { id: AnnotationTool; label: string; icon: typeof Pencil }[] = [
   { id: "arrow", label: "矢印", icon: MoveUpRight },
   { id: "rect", label: "四角", icon: Square },
   { id: "text", label: "文字", icon: Type },
+  { id: "eraser", label: "消しゴム", icon: Eraser },
 ];
 
 /**
  * 添付画像に線・矢印・四角・文字を書き込む全画面のエディタ（#2972）。
+ * 「消しゴム」（#3055）は書き込みだけを消し、元の画像は消さない。
  *
  * 「表示されている文字を変えたい」「順番を入れ替えたい」を画像の上で示すためのもの。
  * 書いたものは保存するまで図形として持ち（`lib/annotation/shapes.ts`）、「移動」で位置を
@@ -149,6 +154,9 @@ type TextEdit = {
 
 type Drag = { id: string; start: Point; origin: Shape; moved: boolean };
 
+/** 消しゴムでなぞっている最中の状態。離したときに`current`が`shapes`と違えば1件の履歴として確定する */
+type Erase = { last: Point; current: Shape[] };
+
 /** ピンチによる拡大・パン。`zoom`は全体表示（`scale`）に対する追加倍率、`x`/`y`はCSS px */
 type ViewTransform = { zoom: number; x: number; y: number };
 const DEFAULT_VIEW: ViewTransform = { zoom: 1, x: 0, y: 0 };
@@ -212,6 +220,9 @@ function AnnotationEditor({
   const [draft, setDraft] = useState<Shape | null>(null);
   const [moving, setMoving] = useState<Shape[] | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  const eraseRef = useRef<Erase | null>(null);
+  /** 消しゴムの輪郭を出す位置（画像ピクセル）。消しゴム以外・カーソルが外れたときは`null` */
+  const [eraserAt, setEraserAt] = useState<Point | null>(null);
   const [textEdit, setTextEdit] = useState<TextEdit | null>(null);
   const textEditRef = useRef<TextEdit | null>(null);
   const [saving, setSaving] = useState(false);
@@ -278,7 +289,22 @@ function AnnotationEditor({
     ctx.drawImage(img, 0, 0);
     for (const shape of visibleShapes) drawShape(ctx, shape);
     if (draft) drawShape(ctx, draft);
-  }, [natural, visibleShapes, draft]);
+    if (eraserAt && tool === "eraser") {
+      // 消しゴムの当たる範囲。保存時は描き出さない（この効果だけが描く）
+      const radius = eraserRadiusFor(size, natural.width, natural.height);
+      const line = 2 / (scale * view.zoom);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(eraserAt.x, eraserAt.y, radius, 0, Math.PI * 2);
+      ctx.lineWidth = line * 2;
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.stroke();
+      ctx.lineWidth = line;
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [natural, visibleShapes, draft, eraserAt, tool, size, scale, view.zoom]);
 
   function toImagePoint(e: PointerEvent<HTMLCanvasElement>): Point {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -341,6 +367,13 @@ function AnnotationEditor({
     return (e.pointerType === "touch" ? 16 : 8) / (scale * view.zoom);
   }
 
+  /** 消しゴムの半径。太さの段階に従い、拡大していても画面上で極端に小さくならない下限を持つ */
+  function eraserRadius(e: PointerEvent) {
+    if (!natural) return 0;
+    const floor = (e.pointerType === "touch" ? 12 : 6) / (scale * view.zoom);
+    return Math.max(eraserRadiusFor(size, natural.width, natural.height), floor);
+  }
+
   /** ピンチ中の座標をピンチ開始時の土台矩形から計算し、`view`を中心固定で更新する */
   function applyPinch(pinch: Pinch, points: Point[]) {
     if (points.length !== 2) return;
@@ -370,8 +403,10 @@ function AnnotationEditor({
       if (!pinchRef.current) {
         cancelText();
         dragRef.current = null;
+        eraseRef.current = null;
         setDraft(null);
         setMoving(null);
+        setEraserAt(null);
       }
       const points = [...pointersRef.current.values()];
       if (points.length === 2 && outerRef.current) {
@@ -413,6 +448,14 @@ function AnnotationEditor({
       return;
     }
 
+    if (tool === "eraser") {
+      const current = eraseShapesAlong(shapes, point, point, eraserRadius(e), nextShapeId);
+      eraseRef.current = { last: point, current };
+      setMoving(current === shapes ? null : current);
+      setEraserAt(point);
+      return;
+    }
+
     if (tool === "move") {
       if (hit) dragRef.current = { id: hit.id, start: point, origin: hit, moved: false };
       return;
@@ -433,6 +476,20 @@ function AnnotationEditor({
     }
     if (pinchRef.current) {
       applyPinch(pinchRef.current, [...pointersRef.current.values()]);
+      return;
+    }
+    if (tool === "eraser") {
+      const point = toImagePoint(e);
+      setEraserAt(point);
+      const erase = eraseRef.current;
+      if (erase) {
+        const current = eraseShapesAlong(erase.current, erase.last, point, eraserRadius(e), nextShapeId);
+        erase.last = point;
+        if (current !== erase.current) {
+          erase.current = current;
+          setMoving(current);
+        }
+      }
       return;
     }
     const drag = dragRef.current;
@@ -459,6 +516,15 @@ function AnnotationEditor({
     if (pinchRef.current) {
       // 1本指以下に戻るまではピンチ扱いのまま。指を1本ずつ離す操作で誤って描き始めない
       if (pointersRef.current.size < 2) pinchRef.current = null;
+      return;
+    }
+    const erase = eraseRef.current;
+    if (erase) {
+      eraseRef.current = null;
+      if (erase.current !== shapes) commit(erase.current);
+      setMoving(null);
+      // 指を離したあとに輪郭だけ残らないよう、タッチでは消す
+      if (e.pointerType === "touch") setEraserAt(null);
       return;
     }
     const drag = dragRef.current;
@@ -697,10 +763,19 @@ function AnnotationEditor({
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerUp}
                     onPointerCancel={handlePointerUp}
+                    onPointerLeave={() => {
+                      if (!eraseRef.current) setEraserAt(null);
+                    }}
                     onDoubleClick={handleDoubleClick}
                     className={cn(
                       "block size-full touch-none rounded-sm shadow-[0_0_0_1px_rgba(255,255,255,0.15)]",
-                      tool === "move" ? "cursor-move" : tool === "text" ? "cursor-text" : "cursor-crosshair",
+                      tool === "move"
+                        ? "cursor-move"
+                        : tool === "text"
+                          ? "cursor-text"
+                          : tool === "eraser"
+                            ? "cursor-none"
+                            : "cursor-crosshair",
                     )}
                   />
                   {textEdit && (
@@ -744,7 +819,9 @@ function AnnotationEditor({
             ? "置きたい場所を押して入力し、Enterで確定します。書いた文字を押すと書き直せます"
             : tool === "move"
               ? "書いたものをドラッグして位置を直せます。文字はダブルクリックで書き直せます"
-              : "画像の上をなぞって書き込みます。2本指でつまむと拡大・縮小できます"}
+              : tool === "eraser"
+                ? "書いたものの上をなぞって消します。ペンは触れた部分だけ、矢印・四角・文字は1つずつ消えます。元の画像は消えません"
+                : "画像の上をなぞって書き込みます。2本指でつまむと拡大・縮小できます"}
         </p>
 
         {saveError && (

@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   EMPTY_HISTORY,
   commitShapes,
+  eraseShapesAlong,
+  eraseShapesAt,
+  eraserRadiusFor,
   findShapeAt,
   fontSizeFor,
   isNegligibleShape,
@@ -115,5 +118,77 @@ describe("履歴", () => {
     h = commitShapes(h, [text]);
     expect(h.future).toEqual([]);
     expect(redoShapes(h)).toBe(h);
+  });
+});
+
+describe("消しゴム（#3055）", () => {
+  const pen: Shape = {
+    id: "p",
+    type: "pen",
+    color: "red",
+    width: 4,
+    points: [
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+      { x: 100, y: 0 },
+      { x: 150, y: 0 },
+    ],
+  };
+  const ids = () => {
+    let n = 0;
+    return () => `new-${++n}`;
+  };
+
+  it("何にも当たらなければ同じ配列をそのまま返す", () => {
+    const shapes = [pen, arrow, rect, text];
+    expect(eraseShapesAt(shapes, { x: 500, y: 500 }, 6, ids())).toBe(shapes);
+  });
+
+  it("ペンの線は当てた部分だけが削れ、残りは2本の線として残る", () => {
+    const result = eraseShapesAt([pen], { x: 75, y: 0 }, 6, ids());
+    // 50〜100の線分だけが消え、0〜50と100〜150が残る
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ id: "p", type: "pen" });
+    expect(result[0].type === "pen" && result[0].points).toEqual([
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+    ]);
+    expect(result[1]).toMatchObject({ id: "new-1", type: "pen", color: "red", width: 4 });
+    expect(result[1].type === "pen" && result[1].points).toEqual([
+      { x: 100, y: 0 },
+      { x: 150, y: 0 },
+    ]);
+  });
+
+  it("線の端を消すと1本のまま短くなり、全部に当たれば線ごと消える", () => {
+    const shortened = eraseShapesAt([pen], { x: 25, y: 0 }, 6, ids());
+    expect(shortened).toHaveLength(1);
+    expect(shortened[0].type === "pen" && shortened[0].points).toEqual([
+      { x: 50, y: 0 },
+      { x: 100, y: 0 },
+      { x: 150, y: 0 },
+    ]);
+    const dot: Shape = { id: "d", type: "pen", color: "red", width: 4, points: [{ x: 10, y: 10 }] };
+    expect(eraseShapesAt([dot], { x: 12, y: 10 }, 6, ids())).toEqual([]);
+  });
+
+  it("矢印・四角・文字は当たった1つだけが丸ごと消える", () => {
+    expect(eraseShapesAt([arrow, rect, text], { x: 50, y: 50 }, 6, ids())).toEqual([rect, text]);
+    expect(eraseShapesAt([arrow, rect, text], { x: 250, y: 200 }, 6, ids())).toEqual([arrow, text]);
+    expect(eraseShapesAt([arrow, rect, text], { x: 60, y: 305 }, 6, ids())).toEqual([arrow, rect]);
+  });
+
+  it("なぞった経路の途中にある線も取りこぼさない", () => {
+    // 到着点は線から遠いが、経路が線を横切る
+    const result = eraseShapesAlong([arrow], { x: 0, y: 100 }, { x: 100, y: 0 }, 6, ids());
+    expect(result).toEqual([]);
+  });
+
+  it("消しゴムの半径は太さの段階に応じて大きくなる", () => {
+    const thin = eraserRadiusFor("thin", 1000, 1000);
+    const medium = eraserRadiusFor("medium", 1000, 1000);
+    const thick = eraserRadiusFor("thick", 1000, 1000);
+    expect(thin).toBeLessThan(medium);
+    expect(medium).toBeLessThan(thick);
   });
 });

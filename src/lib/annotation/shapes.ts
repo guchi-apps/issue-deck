@@ -34,7 +34,7 @@ export const ANNOTATION_SIZES = [
 
 export type AnnotationSize = (typeof ANNOTATION_SIZES)[number]["id"];
 
-export type AnnotationTool = "move" | "pen" | "arrow" | "rect" | "text";
+export type AnnotationTool = "move" | "pen" | "arrow" | "rect" | "text" | "eraser";
 
 type ShapeBase = { id: string; color: AnnotationColor };
 
@@ -77,6 +77,11 @@ export function fontSizeFor(size: AnnotationSize, imageWidth: number, imageHeigh
   // 文字は細い・太いの差を線ほど広げない（小さすぎると読めず、大きすぎると画面を隠す）
   const ratio = 0.75 + sizeRatio(size) * 0.3;
   return Math.max(14, Math.round(24 * ratio * baseUnit(imageWidth, imageHeight)));
+}
+
+/** 消しゴムの半径（画像ピクセル）。太さの3段階に連動させ、線幅よりひと回り大きくして狙いやすくする */
+export function eraserRadiusFor(size: AnnotationSize, imageWidth: number, imageHeight: number) {
+  return Math.max(4, Math.round(10 * sizeRatio(size) * baseUnit(imageWidth, imageHeight)));
 }
 
 /** 文字の背景の余白。描画と当たり判定で同じ値を使う */
@@ -191,6 +196,91 @@ export function moveShape(shape: Shape, dx: number, dy: number): Shape {
     case "text":
       return { ...shape, at: shift(shape.at) };
   }
+}
+
+/**
+ * 消しゴムを`point`に当てたあとの図形一覧。当たるものが無ければ`shapes`そのものを返す
+ * （呼び出し側が参照の同一性で「変化なし」を見分けられる）。
+ *
+ * ペンの線は線分単位で削り、残った連続部分をそれぞれ別のペンの線にする（途中を消すと
+ * 線が2本に分かれる）。矢印・四角・文字は部分で消せないため、当たった時点で丸ごと消す。
+ * `nextId`は分かれた線に付ける新しいid。
+ */
+export function eraseShapesAt(
+  shapes: Shape[],
+  point: Point,
+  radius: number,
+  nextId: () => string,
+): Shape[] {
+  let changed = false;
+  const result: Shape[] = [];
+  for (const shape of shapes) {
+    if (shape.type !== "pen") {
+      if (hitsShape(shape, point, radius)) changed = true;
+      else result.push(shape);
+      continue;
+    }
+    const reach = radius + shape.width / 2;
+    if (shape.points.length === 1) {
+      if (Math.hypot(point.x - shape.points[0].x, point.y - shape.points[0].y) <= reach) {
+        changed = true;
+      } else {
+        result.push(shape);
+      }
+      continue;
+    }
+    const runs: Point[][] = [];
+    let run: Point[] = [];
+    let erasedAny = false;
+    for (let i = 1; i < shape.points.length; i++) {
+      const a = shape.points[i - 1];
+      const b = shape.points[i];
+      if (distanceToSegment(point, a, b) <= reach) {
+        erasedAny = true;
+        if (run.length > 0) runs.push(run);
+        run = [];
+      } else {
+        if (run.length === 0) run.push(a);
+        run.push(b);
+      }
+    }
+    if (run.length > 0) runs.push(run);
+    if (!erasedAny) {
+      result.push(shape);
+      continue;
+    }
+    changed = true;
+    runs.forEach((points, i) => {
+      result.push({ ...shape, id: i === 0 ? shape.id : nextId(), points });
+    });
+  }
+  return changed ? result : shapes;
+}
+
+/**
+ * 消しゴムを`from`から`to`へ動かしたときの図形一覧。指やマウスは1回のイベントで大きく
+ * 飛ぶことがあり、到着点だけに当てると間の線を取りこぼすため、半径の半分ずつ刻んで当てる。
+ */
+export function eraseShapesAlong(
+  shapes: Shape[],
+  from: Point,
+  to: Point,
+  radius: number,
+  nextId: () => string,
+): Shape[] {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(distance / Math.max(1, radius / 2)));
+  let current = shapes;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    current = eraseShapesAt(
+      current,
+      { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t },
+      radius,
+      nextId,
+    );
+  }
+  return current;
 }
 
 /** 押しただけで離した矢印・四角のように、描いたことにならない大きさの図形か */
