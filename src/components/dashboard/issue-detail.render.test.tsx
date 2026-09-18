@@ -100,7 +100,7 @@ const dispatchState: {
   isLoaded: true,
   error: null,
   isSubmitting: false,
-  // エージェット別の一時停止（#2994）。既定は両方とも稼働中
+  // エージェント別の一時停止（#2994）。既定は両方とも稼働中
   agentPause: { claude: null, codex: null },
   enqueue: vi.fn(),
   cancel: vi.fn(),

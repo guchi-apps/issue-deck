@@ -35,7 +35,7 @@ const dispatchState = {
   // 最初の取得が終わったか（#1666）。falseの間は実行先・オプションを出さない
   isLoaded: true,
   error: null,
-  // エージェット別の一時停止（#2994）。既定は両方とも稼働中
+  // エージェント別の一時停止（#2994）。既定は両方とも稼働中
   agentPause: { claude: null, codex: null },
   isSubmitting: false,
   enqueue,

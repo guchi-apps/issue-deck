@@ -389,7 +389,7 @@ export async function setAgentDispatchPause(params: {
 
 /** サブスク枠の使用率を1件ぶんだけ取り出した形。テストで差し込みやすいよう最小限にしてある */
 type CodexUsageSnapshotLite = { primaryUsedPercent: number; primaryResetsAt: Date };
-type ClaudeFiveHourWindowLite = { status: string | null; remainingPercent: number };
+type ClaudeUsageWindowLite = { key: string; status: string | null; remainingPercent: number };
 
 /** Codexが「枠を使い切った」と見なす使用率のしきい値。100%（厳密一致）にしている */
 const CODEX_USAGE_PAUSE_THRESHOLD_PERCENT = 100;
@@ -402,21 +402,30 @@ async function getLatestCodexUsageSnapshotLite(): Promise<CodexUsageSnapshotLite
 }
 
 /**
- * Claudeの5時間枠の状態を、サブPCのローカルセッションと同じサブスク枠から読む（#2994）。
+ * Claudeの5時間枠・週間枠の状態を、サブPCのローカルセッションと同じサブスク枠から読む
+ * （#2994・#3013）。
  *
  * 新しいpoller側の検知は作らず、既存の`fetchClaudeUsage`（`src/lib/claude/usage.ts`）を
  * そのまま使う。**探りリクエストは`CLAUDE_CODE_OAUTH_TOKEN`で送っており、これはサブPCの
  * ローカルセッションが使うのと同じサブスク枠のトークン**（`src/lib/claude/request.ts`）。
  * 5分キャッシュが効くため、`claim`への相乗り（30秒間隔）で毎回呼んでも枠をほぼ消費しない。
  * トークン未設定・取得失敗のときは`null`（＝この巡は判定しない）。
+ *
+ * **5時間枠（`5h`）だけでなく週間枠（`7d`）も返す。** 週間枠を使い切った場合、5時間枠側は
+ * `allowed`のままのことがあり、5時間枠だけを見ると自動一時停止が発火しない（#3013の
+ * レビュー指摘）。
  */
-async function getClaudeFiveHourWindowLite(): Promise<ClaudeFiveHourWindowLite | null> {
+async function getClaudeUsageWindowsLite(): Promise<ClaudeUsageWindowLite[] | null> {
   const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   if (!token) return null;
   try {
     const usage = await fetchClaudeUsage(token);
-    const window = usage.windows.find((candidate) => candidate.key === "5h");
-    return window ? { status: window.status, remainingPercent: window.remainingPercent } : null;
+    if (usage.windows.length === 0) return null;
+    return usage.windows.map((window) => ({
+      key: window.key,
+      status: window.status,
+      remainingPercent: window.remainingPercent,
+    }));
   } catch {
     return null;
   }
@@ -432,14 +441,14 @@ async function getClaudeFiveHourWindowLite(): Promise<ClaudeFiveHourWindowLite |
  *   {@link CODEX_USAGE_PAUSE_THRESHOLD_PERCENT}に達したら自動でON。**解除は`primaryResetsAt`の
  *   経過で判定する**（一時停止中は新しいCodexセッションが動かず`usedPercent`が更新されないため、
  *   使用率が下がるのを待つと永久に解除できない）。
- * - **Claude**: `fetchClaudeUsage`の5時間枠が`rejected`（または残り0%）になったら自動でON、
- *   それ以外に戻ったら自動でOFF（Anthropic側のヘッダがリセットを反映するのを都度読むだけで、
- *   Codexと違って時刻を自前で持つ必要が無い）。
+ * - **Claude**: `fetchClaudeUsage`の5時間枠・週間枠の**いずれか**が`rejected`（または残り0%）に
+ *   なったら自動でON、**両方**allowed側に戻ったら自動でOFF（Anthropic側のヘッダがリセットを
+ *   反映するのを都度読むだけで、Codexと違って時刻を自前で持つ必要が無い）。
  */
 export async function sweepAgentUsageLimitPause(params: {
   now?: Date;
   getCodexUsageSnapshot?: () => Promise<CodexUsageSnapshotLite | null>;
-  getClaudeUsageWindow?: () => Promise<ClaudeFiveHourWindowLite | null>;
+  getClaudeUsageWindows?: () => Promise<ClaudeUsageWindowLite[] | null>;
 } = {}): Promise<void> {
   const now = params.now ?? new Date();
   const state = await readAgentDispatchPauseState();
@@ -458,9 +467,11 @@ export async function sweepAgentUsageLimitPause(params: {
   }
 
   if (state.claude !== "manual") {
-    const window = await (params.getClaudeUsageWindow ?? getClaudeFiveHourWindowLite)();
-    if (window) {
-      const exhausted = window.status === "rejected" || window.remainingPercent <= 0;
+    const windows = await (params.getClaudeUsageWindows ?? getClaudeUsageWindowsLite)();
+    if (windows) {
+      const exhausted = windows.some(
+        (window) => window.status === "rejected" || window.remainingPercent <= 0,
+      );
       if (state.claude === "usage_limit") {
         if (!exhausted) await writeAgentPauseReason("claude", null);
       } else if (exhausted) {

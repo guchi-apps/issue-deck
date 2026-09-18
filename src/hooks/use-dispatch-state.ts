@@ -55,7 +55,7 @@ export type DispatchState = {
    */
   questionRequests: SessionQuestionRequestView[];
   concurrency: number;
-  /** エージェット別の新規実行の一時停止状態（#2994） */
+  /** エージェント別の新規実行の一時停止状態（#2994） */
   agentPause: DispatchAgentPauseState;
 };
 
@@ -970,7 +970,7 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
-   * エージェット別の新規実行の一時停止を、人が手動で切り替える（#2994）。
+   * エージェント別の新規実行の一時停止を、人が手動で切り替える（#2994）。
    *
    * **失敗の理由は戻り値で返す**（`setSessionAnswerMode`と同じ。押した場所の下に出す）。
    * 送信の直後に画面を書き換えず、次の取得で`agentPause`の値が変わるのを待つ
