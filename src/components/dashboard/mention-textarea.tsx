@@ -80,12 +80,6 @@ type MentionTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange
    * コメント投稿は書いたMarkdownを投稿前に確かめる意味が残るので既定のまま。
    */
   showPreviewToggle?: boolean;
-  /**
-   * 「画像を添付」と同じ行の右へ並べる追加の操作（#1929）。
-   * 呼び出し元が入力欄の下に別行で置いていたボタン（「音声入力を整理」）を、
-   * この行へ寄せて縦を詰めるためのもの。
-   */
-  toolbarExtra?: React.ReactNode;
 };
 
 export function MentionTextarea({
@@ -98,7 +92,6 @@ export function MentionTextarea({
   onUploadingChange,
   repositoryFullName,
   showPreviewToggle = true,
-  toolbarExtra,
   disabled,
   ...props
 }: MentionTextareaProps) {
@@ -390,8 +383,9 @@ export function MentionTextarea({
         )}
       </div>
       {/* サムネイルの列と操作を同じ行に置く（#1929）。**添付があるときに2行使わない。**
-          サムネイルの列は伸び縮みして横スクロールし、操作は折り返さず右端に固定する
-          ——スマホでは行が詰まるため、押せなくなるのはサムネイル側ではなくボタン側になる */}
+          操作は最右のサムネイルのすぐ右に並べ（#3068）、サムネイルの列は行が詰まったときだけ
+          縮んで横スクロールする。折り返さない操作は右端に残るので、スマホで押せなくなるのは
+          サムネイル側ではなくボタン側になることはない */}
       <div className="flex items-center gap-2" data-slot="mention-toolbar">
         <input
           ref={fileInputRef}
@@ -408,7 +402,7 @@ export function MentionTextarea({
             onRemove={removeAttachment}
             onAnnotated={replaceAttachment}
             disabled={disabled}
-            className="min-w-0 flex-1"
+            className="min-w-0"
           />
         )}
         <div className="flex shrink-0 items-center gap-1">
@@ -416,10 +410,11 @@ export function MentionTextarea({
             type="button"
             variant="ghost"
             size="sm"
-            // 1行目にアイコン・2〜3行目に文字の3行に組んで横幅を詰め、同じ行のサムネイルの
-            // 欄を広げる（#3054）。見えている文字は縮めるので、読み上げ・ホバーの名前は元の
-            // 「画像を添付」を残す
-            className="h-12 flex-col gap-0.5 px-2 text-xs text-muted-foreground"
+            // アイコンを左・文字を右に2行で組み、上下中央にそろえる（#3068）。文字を2行に
+            // 縮めて横幅を詰め、同じ行のサムネイルの欄を広げる（#3054）。見えている文字は
+            // 縮めるので、読み上げ・ホバーの名前は元の「画像を添付」を残す。
+            // mdの高さ（md:h-7）はsizeの側にあるので、md:h-12も足して打ち消す
+            className="h-12 gap-1.5 px-2.5 text-xs text-muted-foreground md:h-12"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || isUploading}
             aria-label={isUploading ? undefined : "画像を添付"}
@@ -443,7 +438,6 @@ export function MentionTextarea({
               disabled={value.trim() === ""}
             />
           )}
-          {toolbarExtra}
         </div>
       </div>
       {uploadError && <span className="text-xs text-destructive">{uploadError}</span>}
