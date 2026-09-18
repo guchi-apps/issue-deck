@@ -305,12 +305,13 @@ build_env_prefix() {
   # 回収の条件を実装セッションと分ける印（#1454）。worktreeを持たないため、
   # 「worktreeがcleanでpush済み」の判定を当てると永久に残る
   prefix+="export ISSUE_DECK_SESSION_KIND=question; "
-  # **前回の会話を引き継がない**（#1648）。run-issue-session.sh は cwd に会話履歴があれば
-  # `--continue` を付ける（#1541）が、質問セッションの cwd は**質問Issueごとではなく
-  # リポジトリごと**に固定されている（#1529）ため、そこに残っている会話は同じ質問のものとは
-  # 限らない。放置の猶予でセッションが畳まれるようになった以上（#1648）、引き継ぐと
-  # 「別の質問の続き」として始まる事故が起きる。畳まれた後の続きは新しい質問として聞き直す。
-  prefix+="export ISSUE_DECK_CLAUDE_RESUME=0; "
+  # **`--continue`では引き継がない**（#1648）。質問セッションの cwd は**質問Issueごとではなく
+  # リポジトリごと**に固定されている（#1529）ため、`--continue`が拾う「そのcwdで最後に動いた会話」
+  # は同じ質問のものとは限らず、「別の質問の続き」として始まる事故が起きる。
+  # 代わりに run-issue-session.sh が、種別（上のISSUE_DECK_SESSION_KIND=question）を見て、
+  # `SessionStart`フックが質問Issueごと（tmuxセッション名）に控えたsessionIdだけを
+  # `--resume`へ渡す（#3033）。控えが無ければ新しい会話で始まる。
+  # ISSUE_DECK_CLAUDE_RESUME=0 を渡せば、控えがあっても新しい会話にできる（この起動では渡さない）。
   # **書き込み系のツールを機械的に封じる。** `gh issue comment`で回答するためBashは残す
   prefix+="export ISSUE_DECK_DISALLOWED_TOOLS=$(printf '%q' "Edit,Write,NotebookEdit"); "
   for dir in "${REFERENCE_DIRS[@]}"; do

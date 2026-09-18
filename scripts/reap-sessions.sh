@@ -332,7 +332,7 @@ reap_one() {
     else
       issue_label="質問Issue"
       restart_hint="もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
-      restart_hint_idle="続きを聞く場合は、issue-deckの「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。"
+      restart_hint_idle="続きを聞く場合は、終了した行の「セッションを復旧」で会話の続きへ戻れます（「質問する」から新しく質問しても構いません）。"
     fi
     if ! issue_state="$(gh issue view "$issue_number" --repo "$repository" \
       --json state --jq '.state' 2>/dev/null)"; then

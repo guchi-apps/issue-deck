@@ -1162,21 +1162,24 @@ pollerが1巡ごとに`scripts/reap-sessions.sh`を呼び、条件を**すべて
 - **すぐ畳みたいときは画面の「終了」。** Issue詳細のセッション表示の「終了」がIssueをopenのまま
   セッションだけ畳む操作にあたる。「回答は終わったがIssueは記録として残したい」ためのラベルは
   作っていない（同じことがこの操作でできるため）。
-- **畳まれた質問セッションは会話を引き継がない**（`ISSUE_DECK_CLAUDE_RESUME=0`）。cwdが
-  質問Issue間で共有されている（#1529）ため、`--continue`は別の質問の会話を拾いうる。続きを
-  聞きたいときは画面の「質問する」から新しく質問する。
+- **畳まれた質問セッションは`--continue`ではなく`--resume <sessionId>`で戻る**（#3033）。cwdが
+  質問Issue間で共有されている（#1529）ため、`--continue`は別の質問の会話を拾いうる。代わりに
+  `SessionStart`フックが質問Issueごと（tmuxセッション名）に控えたsessionId
+  （`.claude-session`）だけを渡す。控えが無い・履歴が消えているときは新しい会話で始まる。
+  画面の入口は終了した行の「セッションを復旧」。
 
 ### 畳んだ後に追加指示が来たら
 
 **畳まれた後は、画面から起動し直せば前回の会話の続きから再開する**（Claude Codeは#1541、
-Codexは#2520。**横断質問セッションを除く**。上記のとおり質問セッションは常に新しい会話で始まる）。
+Codexは#2520。**横断質問セッションだけは`--continue`でなく控えたsessionIdの`--resume`**。上記のとおり）。
 Claude Codeはworktreeのcwdを`--continue`で拾い、session idを持たない。Codexは
 `SessionStart`フックがホスト内へ残したIssueごとのUUIDを`codex resume`へ渡す。
 
 `--recreate`でworktreeを作り直した場合と、`ISSUE_DECK_CLAUDE_RESUME=0`を渡した場合は、
 **従来どおり新しい会話で始まる**（作り直したのに古い前提が戻ると、そちらの方が事故になる）。
 
-再開の目印は起動時の出力で、Claude Codeは`前回の会話を引き継ぎます（--continue）`、Codexは
+再開の目印は起動時の出力で、Claude Codeは`前回の会話を引き継ぎます（--continue）`
+（質問セッションは`（--resume）`）、Codexは
 `前回の会話を引き継ぎます（codex resume）`の行が出る。
 
 猶予（条件4）と`11.local`（条件5）で「まだ触る可能性がある間」を残す設計は変えていない

@@ -315,16 +315,67 @@ describe("SessionRecoveryButton", () => {
   });
 
   /**
-   * 横断質問セッション（#1454）は畳むと会話を引き継げない（cwdが質問Issue間で共有されるため
-   * `--continue`が別の質問を拾う。#1648）。呼び戻す導線を出すと、続きどころか別の質問の続きが
-   * 始まる。
+   * 横断質問セッション（#1454）も復旧できる（#3033）。`--continue`はcwdが質問Issue間で共有される
+   * ため別の質問を拾う（#1648）が、ランチャーが質問Issueごとに控えたsessionIdで`--resume`する。
+   * issue-deck側は質問ジョブを積み直すだけで、実装のための`11.local`は付けない。
    */
-  it("横断質問から立ったセッションには出さない", () => {
-    const { container } = renderButton({
-      dispatch: makeDispatch({
+  describe("横断質問から立ったセッション（#3033）", () => {
+    function questionDispatch(overrides: Partial<DispatchStateHandle> = {}) {
+      return makeDispatch({
         jobs: [makeJob({ kind: "CROSS_REPO_QUESTION", status: "SUCCEEDED" })],
-      }),
+        ...overrides,
+      });
+    }
+
+    it("復旧ボタンを出し、押すと質問ジョブを積む（起動ジョブではない）", async () => {
+      renderButton({ dispatch: questionDispatch() });
+      expect(recoveryButton()).not.toBeNull();
+      fireEvent.click(recoveryButton()!);
+      await waitFor(() => {
+        expect(enqueue).toHaveBeenCalledWith({
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1830,
+          hostName: "subpc",
+          kind: "cross_repo_question",
+        });
+      });
     });
-    expect(container.firstChild).toBeNull();
+
+    it("11.localは付けない", async () => {
+      renderButton({ dispatch: questionDispatch() });
+      fireEvent.click(recoveryButton()!);
+      await waitFor(() => expect(enqueue).toHaveBeenCalled());
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("会話が戻らない場合があることを添える", () => {
+      renderButton({ dispatch: questionDispatch() });
+      expect(screen.getByText(/記録が残っていない場合は/)).not.toBeNull();
+    });
+
+    it("GitHub Actionsの実行中でも押せる（質問はActionsと同じブランチを進めない）", () => {
+      renderButton({
+        dispatch: questionDispatch(),
+        actionsRun: { status: "in_progress" },
+      });
+      expect(recoveryButton()!.hasAttribute("disabled")).toBe(false);
+    });
+
+    it("横断質問に対応していないホストなら、ボタンは残して理由を出す", () => {
+      renderButton({
+        dispatch: questionDispatch({ hosts: [makeHost({ crossRepoQuestionCapable: false })] }),
+      });
+      expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);
+      expect(screen.getByText(/横断質問に対応していません/)).not.toBeNull();
+    });
+
+    it("未処理の質問ジョブが既にあれば押せない", () => {
+      renderButton({
+        dispatch: questionDispatch({
+          jobs: [makeJob({ kind: "CROSS_REPO_QUESTION", status: "QUEUED" })],
+        }),
+      });
+      expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);
+    });
   });
 });

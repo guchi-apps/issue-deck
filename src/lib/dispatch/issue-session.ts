@@ -420,8 +420,10 @@ const REAP_REASON_TEXT: Record<DispatchSessionReapReason, string> = {
 };
 
 /**
- * 横断質問セッション（#1454）は畳まれても会話を引き継がない（cwdが質問Issue間で共有される
- * ため`--continue`が別の質問を拾う。#1648）。**実装セッションと同じ案内を出さない。**
+ * 横断質問セッション（#1454）は畳まれても`--continue`では戻れない（cwdが質問Issue間で共有される
+ * ため別の質問を拾う。#1648）。**実装セッションと同じ案内を出さない。** 放置で畳まれた場合は
+ * 終了した行の「セッションを復旧」（質問Issueごとに控えたsessionIdで`--resume`。#3033）で
+ * 同じ会話へ戻れるが、Issueが閉じられている場合は復旧の入口が出ないので新しく質問してもらう。
  *
  * worktreeが消えているセッション（`WORKTREE_GONE`・#2422）も会話は引き継がないが、案内の中身が
  * 違う（起動し直す先は「質問する」ではなく同じIssueで、ランチャーがworktreeを作り直す経路では
@@ -461,8 +463,10 @@ export function describeSessionReap(
   let suffix: string;
   if (session.reapReason === "WORKTREE_GONE") {
     suffix = `${head}次に起動するとworktreeを作り直すため、前回の会話は引き継ぎません。`;
+  } else if (session.reapReason === "QUESTION_IDLE") {
+    suffix = `${head}畳まれた後は、終了した行の「セッションを復旧」で会話の続きへ戻れます（「質問する」から新しく質問しても構いません）。`;
   } else if (QUESTION_REAP_REASONS.has(session.reapReason)) {
-    suffix = `${head}続きを聞くときは「質問する」から新しく質問してください（畳んだセッションの会話は引き継ぎません）。`;
+    suffix = `${head}続きを聞くときは「質問する」から新しく質問してください。`;
   } else {
     suffix = `${head}worktreeは残るので、次に起動すると前回の続きから再開します。`;
   }
@@ -493,9 +497,21 @@ export type SessionRecoveryNotice = {
   detail: string;
 };
 
-export function describeSessionRecovery(session: DispatchSessionView): SessionRecoveryNotice | null {
+export function describeSessionRecovery(
+  session: DispatchSessionView,
+  options: { isCrossRepoQuestion?: boolean } = {},
+): SessionRecoveryNotice | null {
   // 動いているセッションには復旧する相手がいない（止めたい・送りたいは既存の操作の担当）
   if (session.state === "ALIVE") return null;
+  // 横断質問セッション（#3033）。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第
+  // （`scripts/run-issue-session.sh`）。**「必ず続きから」とは言わない**——記録が消えていれば
+  // 質問Issueのコメントを読み直した新しい会話で始まる
+  if (options.isCrossRepoQuestion) {
+    return {
+      primary: session.activity === "WAITING_INPUT",
+      detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（会話の記録が残っていない場合は、質問Issueのコメントを読み直した新しい会話で始まります）`,
+    };
+  }
   return {
     primary: session.activity === "WAITING_INPUT",
     detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（worktreeはそのまま・${LOCAL_LABEL_NAME}を付け直します）`,

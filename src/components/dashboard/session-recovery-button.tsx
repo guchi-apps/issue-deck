@@ -7,12 +7,14 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useLocalSessionLaunch } from "@/hooks/use-local-session-launch";
 import {
   ACTIONS_RUNNING_ENQUEUE_REASON,
+  describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
   findBlockingSession,
   findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
   isActionsRunInProgress,
   isActiveDispatchJobStatus,
+  resolveCrossRepoQuestionRejection,
   resolveDispatchTargetRejection,
 } from "@/lib/dispatch/dispatch-job";
 import {
@@ -40,6 +42,12 @@ import type { Issue } from "@/types/issue";
  *
  * **押せない理由は押す前に出し、ボタンごと消さない**（#1332の「停止」と同じ立場）。導線ごと
  * 消すと、なぜ復旧できないのか（サブPCが落ちている・もう起動済み）が画面から分からなくなる。
+ *
+ * **横断質問セッション（#1454）も復旧できる**（#3033）。ただし積むのは`LAUNCH`ではなく質問ジョブ
+ * （`CROSS_REPO_QUESTION`）で、`11.local`は付けない（記録先の`question`リポジトリに無人実行は
+ * 無く、実装のためのラベルでもない）。会話がcwd（質問Issue間で共有）に紐づくため`--continue`は
+ * 使えない（#1648）が、ランチャーが質問Issueごとに控えたsessionIdで`--resume`する
+ * （`scripts/run-issue-session.sh`）ので、issue-deck側はここでも「もう一度起動する」以上のことをしない。
  */
 export function SessionRecoveryButton({
   issue,
@@ -73,24 +81,27 @@ export function SessionRecoveryButton({
     onIssueUpdated,
   });
 
-  const recovery = describeSessionRecovery(session);
+  // 横断質問セッション（#1454）か。判定材料は、そのセッションを立てた質問ジョブ——終了した
+  // セッションの行と同じく24時間は画面に残るので、行が出ている間は必ず突き合わせられる
+  const questionJob = findCrossRepoQuestionJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const isQuestion = questionJob !== null;
+
+  const recovery = describeSessionRecovery(session, { isCrossRepoQuestion: isQuestion });
   // closedなIssue・手作業Issueには起動する相手がいない（`StartLocalSessionButton`と同じ判定）
   const isAvailable =
     parseRepositoryFullName(issue.repositoryFullName) !== null &&
     issue.state === "open" &&
     !isManualStepIssue(issue.labels);
-  /**
-   * 横断質問セッション（#1454）は復旧できない。**会話がcwd（質問Issue間で共有）に紐づくため、
-   * 呼び戻すと別の質問の続きを拾う**（#1648。畳んだ後の案内も「新しく質問してください」で統一
-   * している）。判定材料は、そのセッションを立てた質問ジョブ——終了したセッションの行と同じく
-   * 24時間は画面に残るので、行が出ている間は必ず突き合わせられる。
-   */
-  const startedAsQuestion =
-    findCrossRepoQuestionJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number) !== null;
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
-  const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
+  // 未処理のジョブは、積む種別のものだけを見る（質問を積む導線が実装の起動ジョブに塞がれない）
+  const relevantJob = isQuestion ? questionJob : job;
+  const hasActiveJob = relevantJob !== null && isActiveDispatchJobStatus(relevantJob.status);
   // 既に立ち上がり直している場合は積ませない（#1311と同じ判定）
   const blockingSession = findBlockingSession({
     sessions: dispatch.sessions,
@@ -98,31 +109,53 @@ export function SessionRecoveryButton({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
   });
-  const rejection = resolveDispatchTargetRejection({
-    host,
-    repositoryFullName: issue.repositoryFullName,
-    hasActiveJob,
-    blockingSession,
-  });
+  const questionRejection = isQuestion
+    ? resolveCrossRepoQuestionRejection({ host, hasActiveJob, blockingSession })
+    : null;
+  const launchRejection = isQuestion
+    ? null
+    : resolveDispatchTargetRejection({
+        host,
+        repositoryFullName: issue.repositoryFullName,
+        hasActiveJob,
+        blockingSession,
+      });
+  const rejection = questionRejection ?? launchRejection;
 
   // Actionsが走っている間は復旧させない（#2032）。**ボタンごと消さず、理由を出して押せなく
   // する**——このコンポーネントは「なぜ復旧できないのかを画面から分かるようにする」ために
-  // 導線を残す方針で作られている（`rejection`の扱いと同じ）
-  const actionsRunning = isActionsRunInProgress(actionsRun);
+  // 導線を残す方針で作られている（`rejection`の扱いと同じ）。質問セッションはActionsと
+  // 同じブランチを進める心配が無いので見ない
+  const actionsRunning = !isQuestion && isActionsRunInProgress(actionsRun);
 
-  if (!recovery || !isAvailable || startedAsQuestion) return null;
+  if (!recovery || !isAvailable) return null;
 
-  const rejectionMessage = rejection
-    ? describeDispatchEnqueueRejection(rejection, {
-        hostName: session.host,
-        repositoryFullName: issue.repositoryFullName,
-        session: blockingSession,
-      })
-    : null;
+  const rejectionMessage = questionRejection
+    ? describeCrossRepoQuestionRejection(questionRejection, { hostName: session.host })
+    : launchRejection
+      ? describeDispatchEnqueueRejection(launchRejection, {
+          hostName: session.host,
+          repositoryFullName: issue.repositoryFullName,
+          session: blockingSession,
+        })
+      : null;
   const textClassName = cn(
     "w-full break-words text-xs text-muted-foreground",
     align === "end" ? "text-right" : "text-left",
   );
+
+  function recover() {
+    if (isQuestion) {
+      void dispatch.enqueue({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: session.host,
+        kind: "cross_repo_question",
+      });
+      return;
+    }
+    void launch(session.host, resolveIssueImplementationAgent(session));
+  }
 
   return (
     <div
@@ -137,7 +170,7 @@ export function SessionRecoveryButton({
         size="sm"
         className="w-full sm:w-auto"
         disabled={isSubmitting || rejection !== null || actionsRunning}
-        onClick={() => void launch(session.host, resolveIssueImplementationAgent(session))}
+        onClick={recover}
       >
         {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
         セッションを復旧
