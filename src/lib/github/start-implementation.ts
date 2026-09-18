@@ -5,7 +5,7 @@ import type { Issue, IssueLabel } from "@/types/issue";
 
 /**
  * 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する）。
- * 「計画が必要」選択時は実際には計画提示までしか行われないため、文言を「実装を開始」ではなく
+ * 「計画を立案」選択時は実際には計画提示までしか行われないため、文言を「実装を開始」ではなく
  * 「計画を立案」にする（approveCommentBodyのisPlanApprovalPendingと同じ出し分けパターン）。
  */
 export function startImplementationCommentBody(planRequired: boolean): string {
@@ -39,7 +39,7 @@ export const START_IMPLEMENTATION_DEFAULT_OPTIONS: StartImplementationOptions = 
 /**
  * 「実装を開始」ダイアログで選択できるオプションの定義（表示順）。
  *
- * **「計画が必要」と「アーティファクトで見た目を出す」を先頭2つに置いている**（#1623）。
+ * **「計画を立案」と「デザインを提示」を先頭2つに置いている**（#1623）。
  * ダイアログでは2列に並ぶため、実装に着手する前に承認をもらう2枚が1行目で揃う。
  */
 export const START_IMPLEMENTATION_OPTIONS: {
@@ -50,28 +50,28 @@ export const START_IMPLEMENTATION_OPTIONS: {
 }[] = [
   {
     key: "planRequired",
-    label: "計画が必要",
+    label: "計画を立案",
     description:
       "実装前にPlan modeで計画を提示し、承認を得てから実装を進めます（新機能・改善のIssueでは既定でON）",
     githubLabel: PLAN_REQUIRED_LABEL,
   },
   {
     key: "artifactRequired",
-    label: "アーティファクトで見た目を出す",
+    label: "デザインを提示",
     description:
-      "コードを書き始める前に見た目をPC・iPad（横）・スマホ（iPhone 15）の3画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。デザインのIssueでは既定でON。「計画が必要」と併用すると計画と一緒に承認できます）",
+      "コードを書き始める前に見た目をPC・iPad（横）・スマホ（iPhone 15）の3画面で自己完結HTMLのアーティファクトとして公開し、承認を得てから実装に入ります（実物ではなく実装前の見た目案です。デザインのIssueでは既定でON。「計画を立案」と併用すると計画と一緒に承認できます）",
     githubLabel: ARTIFACT_REQUIRED_LABEL,
   },
   {
     key: "mergeConfirmRequired",
-    label: "マージ前に確認が必要",
+    label: "マージ前に確認",
     description:
       "developへのマージ前に必ず自分で差分を確認します（認証・DB・Actions・Secretsといった変更の種類では止まらないので、自分の目で通したいときはここで指定します）",
     githubLabel: MERGE_CONFIRM_REQUIRED_LABEL,
   },
   {
     key: "previewRequired",
-    label: "開発環境を起動する",
+    label: "開発環境を起動",
     description:
       "PR作成前に開発サーバーを起動し、画面を確認してもらってから実装を進めます（サブPC実行ならtailnet経由でスマホからも開けます）",
     githubLabel: PREVIEW_REQUIRED_LABEL,
@@ -88,7 +88,7 @@ export const START_IMPLEMENTATION_OPTIONS: {
 export const PLAN_REQUIRED_DEFAULT_TYPE_LABELS = ["50.feature", "51.improvement", "62.design"];
 
 /**
- * Issueの種別ラベルから「計画が必要」の既定値を求める（#1317）。
+ * Issueの種別ラベルから「計画を立案」の既定値を求める（#1317）。
  *
  * **見るのは種別ラベルだけで、`21.plan-required`自体の有無は見ない。** 種別を選び直したときに
  * 既定を付け外しの両方向へ追従させるため（Issue作成画面）。既に付いているラベルを尊重するかどうかは
@@ -108,7 +108,7 @@ export function planRequiredDefaultForLabels(labelNames: readonly string[]): boo
 export const ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS = ["62.design"];
 
 /**
- * Issueの種別ラベルから「アーティファクトで見た目を出す」の既定値を求める（#1956）。
+ * Issueの種別ラベルから「デザインを提示」の既定値を求める（#1956）。
  *
  * `planRequiredDefaultForLabels`と同じく**種別ラベルだけを見て、`25.artifact-required`自体の有無は
  * 見ない**。既に付いているラベルを尊重するかどうかは呼び出し側（`startImplementationOptionsFromLabels`）
@@ -215,7 +215,7 @@ export function startImplementationLabelsToRemove(options: StartImplementationOp
 /**
  * issueに既に付与されているラベルから、対応するオプションの初期選択状態を求める。
  *
- * 「計画が必要」（#1317）と「アーティファクトで見た目を出す」（#1956）だけは種別ラベルからの既定も
+ * 「計画を立案」（#1317）と「デザインを提示」（#1956）だけは種別ラベルからの既定も
  * 見る。ラベルが付いていなくても、新機能・改善のIssueでは計画が、デザインのIssueではアーティファクトが
  * チェックの入った状態で開く。
  *
