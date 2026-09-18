@@ -325,7 +325,9 @@ describe("DispatchQueueButton の送信中の操作", () => {
       }),
     ]);
 
-    expect(screen.getByText("停止")).toBeDefined();
+    // 同じ画面に一括操作の「停止」ボタン（#3045）もあるため、ジョブ行の分は`button`以外で絞る
+    const stopLabels = screen.getAllByText("停止").filter((el) => el.closest("button") === null);
+    expect(stopLabels).toHaveLength(1);
     expect(screen.getByText("#1332 走っているセッションを止める")).toBeDefined();
     // 枠を使わないことの注記が無いと「実行中 0/2」との辻褄が合わないように見える
     expect(screen.getByText("同時実行数の枠は使わず、先に届きます。")).toBeDefined();
