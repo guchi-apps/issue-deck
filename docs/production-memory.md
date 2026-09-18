@@ -204,6 +204,20 @@ sudo su github-user -s /bin/bash -c 'pm2 logs issue-deck --lines 500 --nostream'
 sudo su github-user -s /bin/bash -c 'for i in $(seq 1 21); do PID=$(pm2 pid issue-deck); RSS=$(ps -o rss= -p "$PID" 2>/dev/null); echo "$(date +%H:%M:%S) pid=$PID rss=$(( ${RSS:-0} /1024))MB"; sleep 30; done'
 ```
 
+### 3. ヒープ外が何に使われているか
+
+`process.memoryUsage()`も`pm2 describe`も、ヒープ外の内訳までは出さない。`/proc/<pid>/smaps`の
+`Rss:`をマッピング名ごとに足すと、**常駐しているネイティブライブラリが名前つきで出る**
+（#3017。本番に不要なはずの`next-swc`の常駐はこれで見つかった）。
+
+```bash
+awk '/^[0-9a-f]+-[0-9a-f]+ /{name=$6; if(name=="")name="[anon]"} /^Rss:/{r[name]+=$2} END{for(k in r) if(r[k]>4096) printf "%6d MB  %s\n", r[k]/1024, k}' /proc/<pid>/smaps | sort -rn | head
+```
+
+設定を変えて比べるときは、本番ビルド（`.next`・`node_modules`・`package.json`・`public`・`.env.local`）への
+シンボリックリンクと、試したい設定ファイルだけを置いた別ディレクトリを作って`next start`する。
+作業中のworktreeと開発サーバーを巻き込まない。
+
 ## 値を触るときの注意
 
 - VPSは**Next.jsが10本常駐**している（メモリは#2331時点の実測で約3.9GB。上の注記のとおり
