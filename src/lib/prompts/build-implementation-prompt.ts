@@ -22,7 +22,13 @@ import { GENERIC_IMPLEMENTATION_AGENT_TEMPLATE } from "@/lib/prompts/templates.g
 /** 起動しないと決まらない値の差し替え文言。プレースホルダのまま残すと指示として読めてしまう */
 const PROVIDED_BY_SESSION = "（貼り付け先のセッションで用意してください）";
 
-/** issue-deck本体の`scripts/`（サブPCの本体チェックアウト）。貼り付け先がworktreeでも届くよう絶対パスで書く */
+/**
+ * issue-deck本体の`scripts/`（サブPCの本体チェックアウト）。貼り付け先がworktreeでも届くよう絶対パスで書く。
+ * 添付画像の取得スクリプト（#2967）と、必要になったら読む参照文書
+ * （`prompts/generic-implementation-agent-reference.md`。#3023）がここから届く。
+ * **本体チェックアウトが無い・古いPC（メインPCなど）向けの読み方（`gh api`）は、ひな形の
+ * 「必要になったら読むもの」に書いてある**ので、ここでは足さない。
+ */
 const ISSUE_DECK_SCRIPTS_DIR_ON_SUBPC = "~/apps/issue-deck/scripts";
 
 /**
@@ -79,7 +85,7 @@ function sharedContextInstructions(repositoryFullName: string): string {
       "",
       `- \`${SHARED_CONTEXT_DIR}\` は同じリポジトリの**本体チェックアウト**で、他のセッションが実行中に読んでいます。**そちらは編集しないでください**（貼り付け先が本体チェックアウトそのものの場合は、先にworktreeを作ってください）`,
       "- 索引は作業ツリー内の `CLAUDE.md`、実装エージェント向けの共通ルールは `agent-rules/implementation.md` です",
-      "- 後述「実装中に得た知見の記録」にある「共有知識リポジトリへ反映できません」は、**実装対象がこのリポジトリ自身である今回は当てはまりません**",
+      "- 参照文書「実装中に得た知見の記録」にある「共有知識リポジトリを直接編集してはいけません」は、**実装対象がこのリポジトリ自身である今回は、作業ツリー内の編集に限って当てはまりません**",
     ].join("\n");
   }
   return [
@@ -105,9 +111,27 @@ const PLAN_INSTRUCTIONS = [
   "含まれない場合はそのまま実装に進んでよいです。",
 ].join("");
 
+/** `21.plan-required`が付いていないセッションでは、計画の提示は求めない（#3023） */
+const PLAN_NOT_REQUIRED_INSTRUCTIONS =
+  "このIssueには`21.plan-required`が付いていないため、計画の提示は不要です。そのまま実装に進んでください。";
+
+/**
+ * ひな形の`<!-- if:plan-required -->`〜`<!-- endif:plan-required -->`の区間を処理する（#3023）。
+ * 計画の書式・計画レビューへの応答・PR直前の計画レビュー待ちは計画を出すセッションでしか使わないので、
+ * ラベルが付いていれば印だけを消し、無ければ区間ごと消す。**文面はここへ移さずひな形に残す**
+ * （指示の本文を1か所で読めるようにするため）。`scripts/generic-start-issue.sh`・
+ * `scripts/start-issue.sh`の描画と同じ正規表現・同じ置換にしてある。
+ */
+function applyPlanRequiredBlocks(template: string, planRequired: boolean): string {
+  return template.replace(
+    /\n?<!-- if:plan-required -->\n([\s\S]*?)<!-- endif:plan-required -->\n/g,
+    (_match, inner: string) => (planRequired ? `\n${inner}` : "\n"),
+  );
+}
+
 function planCommentNote(repositoryFullName: string, issueNumber: number): string {
   return [
-    "  - **Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容",
+    "**Plan modeの`ExitPlanMode`で計画を提示した場合、フックが同じ内容",
     "（`plan-base`のSHAとRemote Controlへのリンク付き）を自動でIssueへ投稿し、",
     "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。",
     "その場合は同じ計画を手で投稿し直さないでください。",
@@ -255,6 +279,7 @@ export function buildImplementationPrompt(params: {
 }): string {
   const { repositoryFullName, issueNumber, title, body, labels, comments, relations } = params;
   const labelNames = new Set(labels.map((label) => label.name));
+  const planRequired = labelNames.has("21.plan-required");
 
   const replacements: Record<string, string> = {
     "{{REPOSITORY}}": repositoryFullName,
@@ -274,8 +299,8 @@ export function buildImplementationPrompt(params: {
     "{{DEV_PORT}}": PROVIDED_BY_SESSION,
     "{{PREVIEW_INSTRUCTIONS}}": previewInstructions(labelNames),
     "{{ARTIFACT_INSTRUCTIONS}}": artifactInstructions(labelNames),
-    "{{PLAN_INSTRUCTIONS}}": PLAN_INSTRUCTIONS,
-    "{{PLAN_COMMENT_NOTE}}": planCommentNote(repositoryFullName, issueNumber),
+    "{{PLAN_INSTRUCTIONS}}": planRequired ? PLAN_INSTRUCTIONS : PLAN_NOT_REQUIRED_INSTRUCTIONS,
+    "{{PLAN_COMMENT_NOTE}}": planRequired ? planCommentNote(repositoryFullName, issueNumber) : "",
     // **ベースブランチはこの経路では決まらない**ので、他のプレースホルダと同じ但し書きを
     // そのまま埋め込む（`{{BASE_BRANCH}}`を文面に残すと置換の順序に依存する）。
     "{{PR_POLICY_INSTRUCTIONS}}": prPolicyInstructions({
@@ -291,7 +316,7 @@ export function buildImplementationPrompt(params: {
 
   const filled = Object.entries(replacements).reduce(
     (text, [placeholder, value]) => text.split(placeholder).join(value),
-    GENERIC_IMPLEMENTATION_AGENT_TEMPLATE,
+    applyPlanRequiredBlocks(GENERIC_IMPLEMENTATION_AGENT_TEMPLATE, planRequired),
   );
 
   return `${preamble(repositoryFullName, issueNumber)}\n${filled}`;

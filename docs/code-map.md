@@ -3177,7 +3177,9 @@ export function POST(request: NextRequest) {
   一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
   無人実行の`.github/prompts/implement.md`も同じ整理で、必要なときに読む手順は
   `docs/multi-agent/unattended-implementation-reference.md`へ置いている（#3024）。
-  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
+  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`
+  （毎回使う指示だけ。手作業Issueの起票などは`scripts/prompts/generic-implementation-agent-reference.md`へ置き、
+  ひな形の索引から絶対パスで読ませる。#3023）。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
 - **そのホストで初めて開くリポジトリは、起こす前に止める**（#1838。`scripts/lib/claude-trust.sh`）。

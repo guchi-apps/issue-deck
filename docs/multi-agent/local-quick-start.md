@@ -78,6 +78,11 @@
 `node scripts/generate-prompt-templates.mjs`を実行して生成物も一緒にコミットする
 （忘れると`pnpm test:unit`がこのテストで落ちる）。
 
+**貼った文面は毎回使う指示だけで、手作業Issueの起票手順などは別ファイル**
+（`scripts/prompts/generic-implementation-agent-reference.md`。#3023）にある。文面の
+「必要になったら読むもの」に、サブPCの`~/apps/issue-deck/scripts/prompts/`の絶対パスと、
+そのファイルが無いPC（メインPCなど）で読む`gh api`のコマンドが書いてある。
+
 起動コマンドのコピーは、**対象リポジトリがローカル起動プロトコルに適合しているときだけ**出す
 （貼った先で受け口が止まるだけの選択肢を並べないため）。スマホの画面では出さない（貼る先が無い）。
 
