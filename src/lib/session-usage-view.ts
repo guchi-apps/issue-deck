@@ -449,6 +449,58 @@ export function sessionUsagePeriodStartMs(nowMs: number, days: number): number {
   return startOfJstDayMs(nowMs, -(safeDays - 1)) ?? nowMs;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 日別の並びを、期間の全日（`since`の日〜`until`の日。日本時間）へ埋める（#3038）。
+ *
+ * **`buildSessionUsageSummary`の`byDay`は記録のあった日しか持たない**（セッションが1本も終わらな
+ * かった日は行が無い）。縦棒の日別は横軸が日付なので、間の日が抜けると隣り合う棒が連続した日に
+ * 見えてしまう。0の日を空の行で足して、日付を残す。集計側（API・既存テスト）は変えない。
+ *
+ * 期間の外に出た日（時計のずれで`until`より先になった記録など）は落とさず、そのまま並べる
+ * （落とすと合計と棒の総和が合わなくなる）。
+ */
+export function fillUsageDays(days: UsageDay[], since: string, until: string): UsageDay[] {
+  const startMs = startOfJstDayMs(since);
+  const endMs = startOfJstDayMs(until);
+  if (startMs === null || endMs === null) return days;
+
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  // 日本時間には夏時間が無く、1日は常に24時間。0:00を起点に足していけば日付がずれない。
+  for (let ms = startMs; ms <= endMs; ms += DAY_MS) {
+    const date = jstDateKey(new Date(ms).toISOString());
+    if (date && !byDate.has(date)) {
+      byDate.set(date, {
+        date,
+        ...emptyTotals(),
+        byAgent: emptyByAgent(),
+        bySource: emptyBySource(),
+      });
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * 縦軸の目盛り（#3038）。**最大値を含む「切りの良い」上限と間隔を返す**。目盛りは4本前後
+ * （0を含めて5本以下）で、間隔は1・2・5の10のべき乗倍から選ぶ。最大が0（全日が0）のときは
+ * 目盛りだけ描けるよう`$1`を上限にする。
+ */
+export function niceAxisScale(maxValue: number): { max: number; step: number; ticks: number[] } {
+  if (!Number.isFinite(maxValue) || maxValue <= 0) return { max: 1, step: 1, ticks: [0, 1] };
+  const raw = maxValue / 4;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((factor) => factor * power).find((value) => value >= raw) ?? power * 10;
+  const max = step * Math.ceil(maxValue / step - 1e-9);
+  const ticks: number[] = [];
+  for (let index = 0; index * step <= max + step / 1e6; index += 1) {
+    // 掛け算で出して足し込みの誤差（0.1+0.2）を持ち込まない。
+    ticks.push(Number((index * step).toPrecision(12)));
+  }
+  return { max, step, ticks };
+}
+
 /**
  * 期間で切ったうえで、画面が読むかたちへ畳む。
  */

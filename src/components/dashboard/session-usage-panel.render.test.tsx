@@ -469,22 +469,47 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
-  it("日別・内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）", () => {
+  it("内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別は縦棒でトークンを出さない（#3038）", () => {
     renderPanel(response([entry()]));
 
-    // 太い棒は金額で、内側はエージェントの割合。棒には数値を書けないのでツールチップへ出す。
+    // 日別の縦棒。内側はエージェントの割合で、棒には数値を書けないのでツールチップへ出す。
     const daily = screen.getByText("日別").closest("section") as HTMLElement;
     expect(within(daily).getByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeTruthy();
-    // 細い棒はトークンの4区分。長さもトークン量に比例させる。
-    expect(within(daily).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+    // トークンの細い帯は日別では出さない。
+    expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
-    // リポジトリ別・種別別にも同じ二段を出す。
+    // リポジトリ別・種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
     const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
     expect(within(breakdown).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
 
-    // 凡例は「どちらの棒の色か」を先に言う。
+    // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();
     expect(screen.getByText("細い帯＝トークン")).toBeTruthy();
+  });
+
+  it("日別は期間の全日を並べ、金額0の日も日付を残す（#3038）", () => {
+    // 7日（8/24〜8/30）のうち記録があるのは8/30だけ。残りの6日も日付と0の印を出す。
+    renderPanel(response([entry()]));
+
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    for (const day of ["8/24", "8/25", "8/26", "8/27", "8/28", "8/29", "8/30"]) {
+      expect(within(daily).getByText(day)).toBeTruthy();
+    }
+    expect(within(daily).getAllByTitle(/応答$/)).toHaveLength(7);
+    // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
+    expect(within(daily).getByTitle(/^2026-08-29\s+\$0\.00\s+0応答$/)).toBeTruthy();
+    // 縦軸は金額（$0と、最大を含む目盛り）。
+    expect(within(daily).getByText("$0")).toBeTruthy();
+    expect(within(daily).getByText("$20")).toBeTruthy();
+  });
+
+  it("日別に、期間の全日の平均を点線と金額で出す（#3038）", () => {
+    // 合計$20を7日で割ると$2.86。0の日も分母に入れる。
+    renderPanel(response([entry()]));
+
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    expect(within(daily).getByText("平均 $2.86")).toBeTruthy();
+    expect(within(daily).getByText("期間の平均")).toBeTruthy();
   });
 
   it("金額の棒でGitHub ActionsぶんをClaudeから引く（Codexが短く出ない。#2633）", () => {
@@ -502,8 +527,9 @@ describe("SessionUsagePanel", () => {
     const bar = within(daily).getByTitle(
       "Claude $10.00 / Codex $10.00 / GitHub Actions $20.00",
     );
-    const widths = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.width);
-    expect(widths).toEqual(["25%", "25%", "50%"]);
+    // 縦棒なので、積み上げの割合は高さで持つ。
+    const heights = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.height);
+    expect(heights).toEqual(["25%", "25%", "50%"]);
   });
 
   it("スマホ（compact）でもPCと同じ横棒グラフ・展開の一覧を出す（#2628・#2653）", () => {
