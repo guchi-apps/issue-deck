@@ -71,6 +71,16 @@ export function parseNextWindowRunIntervalMinutes(value: unknown): number | null
     : null;
 }
 
+// 5時間枠を開けておく（#3032）時間帯の開始・終了（日本時間の時）。既定は7:00〜23:00——夜間は
+// 開けない（寝ている間の枠は次枠実行で使うほうが得なため）。
+export const CLAUDE_WINDOW_KEEPALIVE_START_HOUR_DEFAULT = 7;
+export const CLAUDE_WINDOW_KEEPALIVE_END_HOUR_DEFAULT = 23;
+
+export function parseClaudeWindowKeepAliveHour(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= 0 && value <= 23 ? value : null;
+}
+
 // claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの候補値（#622）。
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない

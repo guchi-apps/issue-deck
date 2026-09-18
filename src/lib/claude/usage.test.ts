@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { parseUnifiedRateLimitHeaders } from "@/lib/claude/usage";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const callClaudeMessages = vi.fn();
+vi.mock("@/lib/claude/request", () => ({
+  get callClaudeMessages() {
+    return callClaudeMessages;
+  },
+}));
+
+import {
+  clearClaudeUsageCache,
+  fetchClaudeUsage,
+  parseUnifiedRateLimitHeaders,
+  peekClaudeFiveHourWindow,
+} from "@/lib/claude/usage";
 
 /** 実際の`POST /v1/messages`レスポンスから採取したヘッダ。 */
 function realHeaders(overrides: Record<string, string> = {}): Headers {
@@ -110,5 +123,44 @@ describe("parseUnifiedRateLimitHeaders", () => {
 
   it("ヘッダが1つも無ければ空配列を返す", () => {
     expect(parseUnifiedRateLimitHeaders(new Headers())).toEqual([]);
+  });
+});
+
+describe("fetchClaudeUsageのキャッシュ（#3032）", () => {
+  const start = new Date("2026-09-18T10:00:00Z");
+  const resetSec = start.getTime() / 1000 + 120;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    clearClaudeUsageCache();
+    callClaudeMessages.mockReset();
+    callClaudeMessages.mockResolvedValue({
+      response: { status: 200, headers: realHeaders({ "anthropic-ratelimit-unified-5h-reset": String(resetSec) }) },
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("5分以内でもリセット時刻を過ぎたキャッシュは使わない", async () => {
+    await fetchClaudeUsage("token");
+    vi.setSystemTime(start.getTime() + 60_000);
+    await fetchClaudeUsage("token");
+    expect(callClaudeMessages).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(start.getTime() + 121_000);
+    await fetchClaudeUsage("token");
+    expect(callClaudeMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("最後に取得した5時間枠のリセット時刻を、取得せずに読める", async () => {
+    expect(peekClaudeFiveHourWindow()).toBeNull();
+    await fetchClaudeUsage("token");
+    const peeked = peekClaudeFiveHourWindow();
+    expect(peeked?.resetsAt).toBe(resetSec * 1000);
+    expect(peeked?.usedPercent).toBeCloseTo(7);
+    expect(callClaudeMessages).toHaveBeenCalledTimes(1);
   });
 });

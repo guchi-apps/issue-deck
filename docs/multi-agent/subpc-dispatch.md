@@ -2563,7 +2563,8 @@ poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries�
 - **枠が動いていないときは待たずに起動する。** リセット時刻を過ぎている／取得した拍子に開いた
   ばかり（残りがほぼ5時間）を`idle`として扱い、その場で起こす。起動そのものが枠の開始になる
 - **枠の取得は最小の推論リクエスト1本で、送信そのものが枠を開始する**（`claude/usage.ts`）。
-  **予定が1件も無いとき・次枠実行がOFFのときは呼ばない**（`next-window-run-launch.ts`・
+  **次枠実行としては、予定が1件も無いとき・OFFのときは呼ばない**（例外は下の「5時間枠を開けておく」
+  で、ONかつ時間帯の中で枠が止まっているときだけ意図して1本送る。`next-window-run-launch.ts`・
   `nightly-run-state.ts`）。取得側に5分のキャッシュがあるので、pollerが30秒ごとに呼んでも
   実際の送信は5分に1回
 - **Claude Codeの転記JSONLからは枠の情報を取れない**（#2995で全転記を横断確認）。使用率も
@@ -2620,6 +2621,45 @@ poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries�
 | `src/lib/nightly-run-state.ts` | 画面に出す状態の組み立て（DBだけ＋枠の取得） |
 | `src/app/api/nightly-run/` | 一覧・積む・取り消す・設定 |
 | `src/components/dashboard/nightly-run-panel.tsx` | 画面（PC・スマホ共用） |
+
+### 5時間枠を開けておく（#3032）
+
+guchi-apps/question#69の案B。「予約実行」画面の設定をONにすると、**指定した時間帯（既定7:00〜23:00・
+日本時間）のあいだ、Claudeの5時間枠が止まっていれば**pollerの巡回ついでに最小の推論リクエストを
+1本送って枠を開ける。枠は最初のリクエストで始まるので（上の「次枠実行」）、作業を始める前に開けて
+おくと、上限に当たってもリセットが早く来る。**週間枠の総量は増えない。**
+
+```text
+poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaudeWindowOpen
+  → decideClaudeWindowKeepAlive（OFF／時間帯の外／枠が動いている／直前に送った → 何もしない）
+  → probedAtを記録 → readClaudeWindowSnapshot（claude/usage.tsの max_tokens: 1 の探り）
+```
+
+- **枠が動いている間は送らない。** 判定には`peekClaudeFiveHourResetsAt`（**取得せずに**読める、最後に
+  見たリセット時刻）を使い、それを過ぎたあとの最初の巡回で1本だけ送る。5分ごとに探り続ける形に
+  しなかったのは、枠が動いている間も送り続けることになるため
+- **`fetchClaudeUsage`のキャッシュ（5分）は、キャッシュ中の5hリセット時刻を過ぎていたら使わない。**
+  そうしないとリセット直後に前の枠の値が最大5分返り、枠を開けるのが遅れる（他の利用箇所にとっても
+  リセット後の古い値は誤りなので、正しい方向の変化）
+- **取得に失敗し続けてもpollerの巡回ごとには送らない。** 送る前に`claudeWindowKeepAliveProbedAt`を
+  書き、そこから5分は空ける（リセット時刻が分からないままだと30秒ごとに送ってしまうため）
+- **次枠実行の後に回す。** 同じ巡回で次枠実行が枠を取得していれば、その結果（キャッシュ）を見て
+  送らずに済む
+- **夜間を既定で外すのは、寝ている間の枠は次枠実行で使うほうが得だから。** 開始＞終了（22〜6など）は
+  日付をまたぎ、開始＝終了は終日
+- **画面のメーターは、この設定の都合だけでは送信しない。** `useNightlyRun`はシェルで常に（非アクティブでも
+  5分おきに）取り直しているため、ここで取得すると画面を開いているだけで探りが送られる。次枠実行の条件
+  （ON・予定あり）を満たさないときは`peekClaudeWindowSnapshot`で最後に見た値を読むだけにする
+  （#3032の計画レビュー）
+- **ONのあいだは次枠実行の`idle`（枠が動いていないのですぐ起動）がほとんど起きなくなる。** 枠がほぼ常に
+  動いているので、予定は枠の終わり際に起動する側へ寄る。次枠実行の設計の意図どおり
+- **既知の欠点**: pollerが止まっている（サブPCが落ちている）と開かない。案A（サブPCのtimer）と違って
+  issue-deckの本番が止まっても開かない
+
+| 場所 | 役割 |
+|---|---|
+| `src/lib/claude-window-keepalive.ts`（＋test） | 時間帯・送るかどうか・画面の文言の純関数（`now`を引数で受ける） |
+| `src/lib/claude-window-keepalive-run.ts`（＋test） | 設定の読み出しと、巡回から呼ぶ`keepClaudeWindowOpen` |
 
 ## API
 

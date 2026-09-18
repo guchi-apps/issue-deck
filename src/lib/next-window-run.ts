@@ -29,8 +29,8 @@ import { formatTimeOfDay, toJstParts } from "@/lib/format-date-time";
  *
  * 枠の状況は`src/lib/claude/usage.ts`のヘッダ方式でしか取れない。**Claude Codeの転記JSONLには
  * 使用率もリセット時刻も入っていない**（#2995で全転記を横断確認済み）。取得は最小の推論
- * リクエスト1本なので、**取得そのものが枠を開始する**。予約が1件も無いときとOFFのときは
- * 呼ばないこと。
+ * リクエスト1本なので、**取得そのものが枠を開始する**。次枠実行としては、予約が1件も無いときと
+ * OFFのときは呼ばないこと（例外は「5時間枠を開けておく」#3032。`claude-window-keepalive.ts`）。
  */
 
 /** Claudeの5時間枠の長さ。`claude/usage.ts`の`USAGE_WINDOWS`と同じ固定値 */

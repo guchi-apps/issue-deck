@@ -40,6 +40,9 @@ describe("PATCH /api/nightly-run/settings", () => {
       nextWindowRunEnabled: update.nextWindowRunEnabled ?? false,
       nextWindowRunLeadMinutes: update.nextWindowRunLeadMinutes ?? 60,
       nextWindowRunIntervalMinutes: update.nextWindowRunIntervalMinutes ?? 10,
+      claudeWindowKeepAliveEnabled: update.claudeWindowKeepAliveEnabled ?? false,
+      claudeWindowKeepAliveStartHour: update.claudeWindowKeepAliveStartHour ?? 7,
+      claudeWindowKeepAliveEndHour: update.claudeWindowKeepAliveEndHour ?? 23,
     }));
   });
 
@@ -54,7 +57,29 @@ describe("PATCH /api/nightly-run/settings", () => {
     expect(upsert.mock.calls[0][0].update).toEqual({ nextWindowRunEnabled: true });
     expect(await response.json()).toEqual({
       nextWindow: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+      keepAlive: { enabled: false, startHour: 7, endHour: 23 },
     });
+  });
+
+  /** #3032 */
+  it("5時間枠を開けておく設定を切り替えられる", async () => {
+    const response = await PATCH(
+      request({ keepAlive: { enabled: true, startHour: 22, endHour: 6 } }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({
+      claudeWindowKeepAliveEnabled: true,
+      claudeWindowKeepAliveStartHour: 22,
+      claudeWindowKeepAliveEndHour: 6,
+    });
+    expect((await response.json()).keepAlive).toEqual({ enabled: true, startHour: 22, endHour: 6 });
+  });
+
+  it("時間帯は0〜23の整数だけ受け付ける", async () => {
+    expect((await PATCH(request({ keepAlive: { startHour: 24 } }))).status).toBe(400);
+    expect((await PATCH(request({ keepAlive: { endHour: 7.5 } }))).status).toBe(400);
+    expect((await PATCH(request({ keepAlive: { enabled: 1 } }))).status).toBe(400);
   });
 
   /** #2995 */

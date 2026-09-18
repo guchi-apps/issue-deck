@@ -1,3 +1,7 @@
+import type {
+  ClaudeWindowKeepAliveSettings,
+  ClaudeWindowKeepAliveView,
+} from "@/lib/claude-window-keepalive";
 import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionState } from "@/lib/dispatch/session-state";
 import {
@@ -224,6 +228,8 @@ export function classifyNightlyRunOutcome(input: {
 /** 「予約実行」画面が読み書きする設定のひとまとまり（`GET`/`PATCH /api/nightly-run/settings`） */
 export type ScheduledRunSettings = {
   nextWindow: NextWindowRunSettings;
+  /** 5時間枠を開けておく（#3032） */
+  keepAlive: ClaudeWindowKeepAliveSettings;
 };
 
 /** 画面に出す予定・結果1件ぶん */
@@ -269,6 +275,8 @@ export type NightlyRunState = {
     /** いまの5時間枠の状況。取りに行かなかった・取れなかったときは`null` */
     window: NextWindowRunWindowView | null;
   };
+  /** 5時間枠を開けておく（#3032） */
+  keepAlive: ClaudeWindowKeepAliveView;
 };
 
 /**
@@ -347,7 +355,7 @@ export type ScheduledRunQueuedMap = ReadonlyMap<string, ScheduledRunQueuedMark>;
  * 同期できていないIssue（`issueId`が`null`）は表へ入れない。そのIssueはそもそも一覧にも
  * 詳細にも出ないので、目印を引く相手がいない。
  */
-export function selectScheduledRunQueuedMarks(state: NightlyRunState | null): ScheduledRunQueuedMap {
+export function selectScheduledRunQueuedMarks(state: Pick<NightlyRunState, "nextWindow"> | null): ScheduledRunQueuedMap {
   const marks = new Map<string, ScheduledRunQueuedMark>();
   if (!state) return marks;
 
