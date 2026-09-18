@@ -1001,6 +1001,45 @@ export function useDispatchState(enabled: boolean) {
     [markChanged, refresh],
   );
 
+  /**
+   * エージェントの「再開」を1回で行う（#3045）。新規実行のブロックを解除し、一括停止で止まって
+   * いるセッションへ固定の1行を積む（対象の選び直しと送る本文はサーバーが決める）。
+   *
+   * **失敗の理由は戻り値で返す**（`setAgentDispatchPaused`と同じ。押した場所の下に出す）。
+   * 一部のセッションへ積めなかったときも`ok: true`で、`failed`に理由を入れて返す
+   * （ブロックの解除は成立しているため）。
+   */
+  const resumeAgentSessions = useCallback(
+    async (params: {
+      agent: DispatchAgent;
+    }): Promise<
+      | { ok: true; resumed: number; failed: { repositoryFullName: string; issueNumber: number; message: string }[] }
+      | { ok: false; message: string }
+    > => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/agent-resume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agent: params.agent }),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as {
+          resumed: number;
+          failed: { repositoryFullName: string; issueNumber: number; message: string }[];
+        };
+        markChanged();
+        refresh();
+        return { ok: true, resumed: json.resumed, failed: json.failed };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged, refresh],
+  );
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
@@ -1028,6 +1067,7 @@ export function useDispatchState(enabled: boolean) {
     sendPrFixNotify,
     setSessionAnswerMode,
     setAgentDispatchPaused,
+    resumeAgentSessions,
     startManualStepSession,
     runManualStep,
     abortManualStep,

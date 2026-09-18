@@ -416,12 +416,25 @@ export function MentionTextarea({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+            // 1行目にアイコン・2〜3行目に文字の3行に組んで横幅を詰め、同じ行のサムネイルの
+            // 欄を広げる（#3054）。見えている文字は縮めるので、読み上げ・ホバーの名前は元の
+            // 「画像を添付」を残す
+            className="h-12 flex-col gap-0.5 px-2 text-xs text-muted-foreground"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || isUploading}
+            aria-label={isUploading ? undefined : "画像を添付"}
+            title={isUploading ? undefined : "画像を添付"}
           >
             {isUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
-            {isUploading ? "アップロード中..." : "画像を添付"}
+            {isUploading ? (
+              "アップロード中..."
+            ) : (
+              <span className="text-center leading-tight">
+                画像
+                <br />
+                添付
+              </span>
+            )}
           </Button>
           {showPreviewToggle && (
             <PreviewToggleButton

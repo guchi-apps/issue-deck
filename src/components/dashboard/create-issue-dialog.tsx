@@ -856,7 +856,7 @@ export function CreateIssueDialog({
    *
    * Issueを作成したうえで、**実装オプションと実行先を選ぶ「実装を開始」ダイアログへ渡す**。
    * オプションは作成フォームでは選ばせず（#1580）、こちらのダイアログだけで選ぶ。
-   * 「計画が必要」の初期値は、作成時に付けた種別ラベル（`50.feature`等）から決まる。
+   * 「計画を立案」の初期値は、作成時に付けた種別ラベル（`50.feature`等）から決まる。
    *
    * **以前はここで直接`@claude`コメントを投稿していた（#774）。** 起動先を選ぶ余地が無く、
    * 作成したIssueは必ずGitHub Actionsで走っていた。サブPCで始めたい場合は、いったん作成して
@@ -1104,7 +1104,12 @@ export function CreateIssueDialog({
             // サムネイルで見えており、書きかけを切り替えて確かめる場面が無い
             showPreviewToggle={false}
             toolbarExtra={
-              <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+              <BodyCleanupButton
+                value={body}
+                onCleaned={setBody}
+                disabled={isSubmitting}
+                stacked
+              />
             }
             autoFocus
           />

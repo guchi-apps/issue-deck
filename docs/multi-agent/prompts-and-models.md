@@ -158,7 +158,7 @@ Plan modeで`ExitPlanMode`へ渡した本文は、フックがそのままIssue�
 文面の正は次の2つで、**変えるときは両方を揃える**（出力言語と同じ二重管理）。
 
 **#3021以降、issue-deck版は規則（6項目・30〜40行・`## 変更するファイル`）だけを本文の`21.plan-required`区間に置き、
-言い回しは汎用版より短い。** 揃える対象は規則の中身で、文面の一致ではない。汎用版の整理は #3023 で追う。
+言い回しは汎用版より短い。** 揃える対象は規則の中身で、文面の一致ではない。汎用版も#3023で計画の節を`21.plan-required`区間へ入れたが、文面は従来の詳しい書式のまま。
 
 | ファイル | 効く範囲 |
 |---|---|
@@ -210,8 +210,10 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 文面の正は3つ。前2つは計画の書式と同じ二重管理で、**変えるときは揃える**。
 
 **#3021以降、issue-deck版は4つの規則だけを本文の「進め方」に置き、実測値と経緯（この節の内容）は
-[implementation-agent-reference.md](implementation-agent-reference.md)へ移した。** 揃える対象は規則の中身で、
-汎用版・無人実行版の整理は #3023・#3024 で追う。
+[implementation-agent-reference.md](implementation-agent-reference.md)へ移した。** 無人実行版も#3024で同じ形にし、
+実測値は[unattended-implementation-reference.md](unattended-implementation-reference.md)へ移している。
+汎用版も#3023で同じ形にし、実測値は[generic-implementation-agent-reference.md](../../scripts/prompts/generic-implementation-agent-reference.md)へ移している。
+揃える対象は規則の中身で、文面の一致ではない。
 
 | ファイル | 効く範囲 |
 |---|---|
@@ -243,9 +245,79 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
   にも要点があるので、読み落としても方針は外れにくい
 - 見た目のアーティファクトの節は、汎用ランチャー・画面の「実装プロンプトをコピー」と同じ文面を
   保つ規約があるため縮めていない
-- 汎用ランチャー（`generic-implementation-agent.md`）と無人実行（`.github/prompts/implement.md`）は
-  この整理の対象外で、従来どおり全節が載る（#3023・#3024で追う）
+- 汎用ランチャー（`generic-implementation-agent.md`）は#3023で、無人実行（`.github/prompts/implement.md`）は#3024で、
+  同じ整理をした（次の2節）
 - 「出力言語」の節は各プロンプトに置く決まり（[CLAUDE.md](../../CLAUDE.md)「出力言語」）なので本文に残している
+
+## 無人実行の実装プロンプトは毎回使う指示だけを載せる（#3024）
+
+`.github/prompts/implement.md`（無人実行の実装ステップ）も、一時は約52KBあり、どの実行でも全節が載っていた。
+#3021のローカル実装プロンプトと同じ整理で、毎回載る本文（約26KB）と、必要になったときに読む参照文書
+[unattended-implementation-reference.md](unattended-implementation-reference.md)（約30KB）に分けた。
+
+| 置き場所 | 載せるもの |
+|---|---|
+| `implement.md`の本文（毎回載る） | モードごとの手順・出力言語・実行できるコマンド・進め方・最初にやること・計画コメントがあるとき・画像・トークンとマーカー・対応不要なら止まる・責務・画面確認・行き詰まったとき・「必要になったら読むもの」の索引・禁止事項 |
+| 参照文書（必要になったら読む） | 手作業Issueの起票（雛形の差し込み先）・ユーザーにコマンドを実行してもらう・知見の記録・共有知識（`.shared-context/`）の読み方・「往復を減らす」の実測値 |
+
+ローカル版と違う点。
+
+- **無人実行にはひな形の条件区間（`<!-- if:plan-required -->`）を消す前処理が無い**（`envsubst`でプレースホルダを
+  埋めるだけ）。そのため計画に関する2節（「調査済みの事実」と計画レビューの指摘）は、「計画コメントがあるとき」の
+  1節へ縮めて本文に残した。ラベルで切り分けるには`reusable-issue-dispatch.yml`側に処理を足す必要があり、
+  すべての配布先の`uses:`タグを上げないと効かないため、この整理では見送った
+- **参照文書は`envsubst`を通らない。** 文中は`<Issue番号>`・`<owner/repo>`と書き、本文の索引が「読み替える」と
+  案内する。`${...}`を残さないことは`src/lib/workflows/prompt-placeholders.test.ts`が検査する
+- **参照文書の置き場所は、配布先のチェックアウトから読めるところ。** 他リポジトリの無人実行は`prompts-ref`で
+  issue-deckを丸ごと`.shared-prompts/`へチェックアウトする（sparseではない）ため、`docs/`も
+  `.shared-prompts/docs/multi-agent/`として読める。**新しい環境変数（`PROMPTS_DIR`のような）は足していない**——
+  ワークフローを変えると`uses:`のタグを上げるまで届かないうえ、`uses:`と`prompts-ref`のずれで
+  リテラルの`${…}`が残る事故になり得るため、本文の索引に置き場所を2つとも書いている
+  （`.shared-prompts/`があればそちら、無ければ`docs/`）。`.shared-context/`（共有知識）は使わない——
+  あちらは`guchi-apps/docs`の別リポジトリで、この文書の正はissue-deck側にある
+- **手作業Issueの雛形の差し込み先**（`MANUAL_STEP_BODY_TEMPLATE_TARGETS`）は、`implement.md`から
+  参照文書へ付け替えた。`node scripts/generate-prompt-templates.mjs --check`が同期を検査する
+- **配布先へ届くのは次の`workflows/vN`タグを切って配ってから**（`uses:`と`prompts-ref`を同じタグへ上げる）。
+  それまでの他リポジトリの無人実行は従来の全節版のまま動く
+
+## 汎用ランチャーの実装プロンプトも毎回使う指示だけを載せる（#3023）
+
+他リポジトリ向けの`scripts/prompts/generic-implementation-agent.md`（`scripts/generic-start-issue.sh`が
+描画し、画面の「実装プロンプトをコピー」も同じ文面を`src/lib/prompts/templates.generated.ts`経由で使う）
+にも同じ整理を行った。ひな形は約21,000字から、`21.plan-required`が無いとき約8,000字（描画後は約9,500字）、
+あるとき約10,000字（描画後は約12,000字）になる。分け方は上の表と同じ3つで、参照文書は
+[`scripts/prompts/generic-implementation-agent-reference.md`](../../scripts/prompts/generic-implementation-agent-reference.md)。
+中身は手作業Issueの起票（雛形の差し込み先）・ユーザーにコマンドを実行してもらう・知見の記録・「往復を
+減らす」の実測値。issue-deck自身の版と違い、**共有知識の読み方は本文に残した**（`{{SHARED_CONTEXT_INSTRUCTIONS}}`が
+セッションごとの値〈共有知識の置き場・実装対象が共有知識リポジトリ自身か〉で文面ごと変わり、
+描画されない参照文書へは移せないため）。
+
+**参照文書の置き場所は`docs/`ではなく`scripts/prompts/`。** 汎用ランチャーのセッションのcwdは他
+リポジトリのworktreeで、相対パスでは届かない。ランチャーが走らせる同期コピー
+（`~/.cache/issue-deck/launcher-scripts/<SHA>/scripts/`）は`git archive ... scripts`で取り出すため
+`scripts/`の中にしか無く、`docs/`は本体の作業ツリーが古い・未コミットの変更があるときに
+プロンプトのひな形と食い違う。`scripts/prompts/`なら、ひな形と同じ版が`{{ISSUE_DECK_SCRIPTS_DIR}}`の
+絶対パスで読める。
+
+- **画面の「実装プロンプトをコピー」はサブPC以外（メインPC）へ貼られることがある。** 貼り付け先に
+  `~/apps/issue-deck`が無い・古いことがあるので、索引に`gh api -H "Accept: application/vnd.github.raw"
+  "repos/guchi-apps/issue-deck/contents/scripts/prompts/generic-implementation-agent-reference.md?ref=develop"`
+  でも読めると書いてある（issue-deckはpublicで、ユーザー本人の`gh`で読める）。ひな形へ静的に書いてあるので、
+  ランチャー経路にも同じ1行が出る
+- **参照文書はプロンプトのように描画されない。** `{{REPOSITORY}}`などは使えず、`<リポジトリ>`・
+  `<Issue番号>`・`<ベースブランチ>`と書き、プロンプトの「対応Issue」「作業環境」の値へ読み替えさせる
+  （`scripts/implementation-prompt.test.mjs`が`{{...}}`の残存を検出する）
+- **他リポジトリの`CLAUDE.md`には、手作業Issue・ユーザーへのコマンド依頼の規則が書かれていない。**
+  issue-deck自身の版は`CLAUDE.md`（毎回読み込まれる）が読み落としの補強になるが、汎用版には
+  それが無い。そのため索引の各項目に「該当したら何をするか」の核（`71.manual-step`の単独Issueとして
+  起票する・`00.check-user`＋`01.check-input`を付ける）を残し、「該当したのに読まずに進めない」と
+  書いてある。**索引を削るときはこの核を落とさない**
+- 手作業Issueの雛形の差し込み先（`scripts/generate-prompt-templates.mjs`の
+  `MANUAL_STEP_BODY_TEMPLATE_TARGETS`）は、プロンプト本文からこの参照文書へ付け替えた
+- **`{{...}}`を増やしていないので、サブPC本体の更新を待つ窓は無い**（[generic-launcher.md](generic-launcher.md)
+  「プロンプトのひな形へプレースホルダを増やすと…」）。区間を処理するコードが無い古い本体で新しいひな形を
+  描画しても、`<!-- if:plan-required -->`の印がHTMLコメントとして残り、計画の節が常に載る（従来と同じ）だけで
+  済む。ただし`{{PLAN_COMMENT_NOTE}}`の先頭の`  - `は古い本体だと残る（見た目の乱れだけ）
 
 ## 使用するモデルの設定（#622）
 

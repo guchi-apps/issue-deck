@@ -1,5 +1,6 @@
 "use client";
 
+import { Play, Square } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -13,6 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { AGENT_RESUME_INSTRUCTION, selectStoppedSessions } from "@/lib/dispatch/agent-resume";
 import { describeDispatchAgent, DISPATCH_AGENTS, type DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { resolveIssueImplementationAgent } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -32,6 +34,12 @@ import { cn } from "@/lib/utils";
  * 中断の送出は人がトグルを手動でOFFにしたときに限る。`docs/multi-agent/gates.md`の
  * 「例外は4つ」に新しい例外を足す必要が無いのはこのため。「実行中」と「停止中（自動）」は
  * 独立した状態で、両方同時に成立しうる——このときは状態チップを両方出す。
+ *
+ * **トグルの左に「停止」／「再開」ボタンを置く**（#3045）。稼働中は「停止」、停止中は「再開」で、
+ * どちらも確認ダイアログを挟む。「停止」はトグルをOFFにするのと同じ処理。「再開」は新規実行の
+ * ブロック解除に加えて、**一括停止で止まったセッションへ固定の1行を送って続きから動かす**
+ * （`POST /api/dispatch/agent-resume`。送る対象と本文はサーバーが決める）。**トグルだけをONにした
+ * 場合はブロック解除のみで、セッションは再開しない。** 再開で送る固定文面は`gates.md`の例外2の内側。
  */
 export function AgentBulkControlPanel({ dispatch }: { dispatch: DispatchStateHandle }) {
   // 申告しているサブPCが1台も無ければ、一時停止という概念自体が無い
@@ -58,6 +66,7 @@ function AgentBulkControlRow({
   dispatch: DispatchStateHandle;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [resumeConfirming, setResumeConfirming] = useState(false);
   // 停止の失敗は押した場所に出す（`issue-session-status.tsx`の`controlError`と同じ扱い）
   const [error, setError] = useState<string | null>(null);
 
@@ -67,11 +76,31 @@ function AgentBulkControlRow({
   const pauseReason = dispatch.agentPause[agent];
   // トグルON＝稼働中（一時停止理由が無い）。OFF＝停止中（手動・自動のどちらでも）
   const running = pauseReason === null;
+  // 再開の対象の目安。**実際に送る対象はサーバーが選び直す**（同じ判定関数を使うが、こちらは
+  // 画面が持つ直近24時間のジョブしか見えない）
+  const resumableSessions = selectStoppedSessions(
+    dispatch.sessions.filter((session) => resolveIssueImplementationAgent(session) === agent),
+    dispatch.jobs,
+  );
 
   async function turnOn() {
     setError(null);
     const result = await dispatch.setAgentDispatchPaused({ agent, paused: false });
     if (!result.ok) setError(result.message);
+  }
+
+  async function resumeConfirmed() {
+    setError(null);
+    const result = await dispatch.resumeAgentSessions({ agent });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    // 一部へ積めなくても解除は成立している。最初の理由だけを出す（複数出すと押した場所が埋まる）
+    const first = result.failed[0];
+    if (first) {
+      setError(`${first.repositoryFullName}#${first.issueNumber}: ${first.message}`);
+    }
   }
 
   async function turnOffConfirmed() {
@@ -105,26 +134,51 @@ function AgentBulkControlRow({
           )}
         />
         <span className="text-sm font-semibold">{describeDispatchAgent(agent)}</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={running}
-          aria-label={`${describeDispatchAgent(agent)}の実行状態`}
-          title={running ? "稼働中（押すと停止します）" : "停止中（押すと再開します）"}
-          disabled={dispatch.isSubmitting}
-          onClick={() => (running ? setConfirming(true) : void turnOn())}
-          className={cn(
-            "ml-auto inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
-            running ? "bg-emerald-600" : "bg-muted-foreground/30",
+        <div className="ml-auto flex items-center gap-2.5">
+          {running ? (
+            <button
+              type="button"
+              aria-label={`${describeDispatchAgent(agent)}を停止`}
+              disabled={dispatch.isSubmitting}
+              onClick={() => setConfirming(true)}
+              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-red-500/50 pr-2.5 pl-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:text-red-400"
+            >
+              <Square className="size-3 fill-current" aria-hidden />
+              停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={`${describeDispatchAgent(agent)}を再開`}
+              disabled={dispatch.isSubmitting}
+              onClick={() => setResumeConfirming(true)}
+              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-emerald-500/50 pr-2.5 pl-2 text-xs font-bold text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
+            >
+              <Play className="size-3 fill-current" aria-hidden />
+              再開
+            </button>
           )}
-        >
-          <span
+          <button
+            type="button"
+            role="switch"
+            aria-checked={running}
+            aria-label={`${describeDispatchAgent(agent)}の実行状態`}
+            title={running ? "稼働中（押すと停止します）" : "停止中（押すと新規実行のブロックだけ解除します。止めたセッションは「再開」から）"}
+            disabled={dispatch.isSubmitting}
+            onClick={() => (running ? setConfirming(true) : void turnOn())}
             className={cn(
-              "size-[15px] rounded-full bg-white shadow transition-transform",
-              running ? "translate-x-[17px]" : "translate-x-0.5",
+              "inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
+              running ? "bg-emerald-600" : "bg-muted-foreground/30",
             )}
-          />
-        </button>
+          >
+            <span
+              className={cn(
+                "size-[15px] rounded-full bg-white shadow transition-transform",
+                running ? "translate-x-[17px]" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        </div>
       </div>
       {(aliveSessions.length > 0 || pauseReason) && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -157,8 +211,9 @@ function AgentBulkControlRow({
               <div>
                 <p>
                   動いているセッション（{aliveSessions.length}件）へ中断（Ctrl-C相当）を送り、新規実行も
-                  ブロックします。セッション自体は残り、続きから再開できます。オンに戻せばいつでも
-                  新規実行を再開できます。
+                  ブロックします。セッション自体は残り、「再開」を押すと続きから動かせます
+                  （トグルをオンにするだけなら、新規実行のブロック解除だけで、止めたセッションは
+                  動きません）。
                 </p>
                 {aliveSessions.length > 0 && (
                   <ul className="mt-2 list-disc pl-4">
@@ -183,6 +238,50 @@ function AgentBulkControlRow({
               }}
             >
               停止する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resumeConfirming} onOpenChange={setResumeConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{describeDispatchAgent(agent)}を再開しますか？</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>
+                  新規実行のブロックを解除し、一括停止で作業を中断されたセッションへ次の1行を送ります。
+                  質問や承認の返事を待っていたセッション、承認プロンプト・選択フォームの表示中の
+                  セッションには送りません。
+                </p>
+                <p className="mt-2 rounded border bg-muted px-2 py-1 text-foreground">
+                  {AGENT_RESUME_INSTRUCTION}
+                </p>
+                {resumableSessions.length > 0 && (
+                  <>
+                    <p className="mt-2">再開の対象（{resumableSessions.length}件）</p>
+                    <ul className="mt-1 list-disc pl-4">
+                      {resumableSessions.map((session) => (
+                        <li key={`${session.host}:${session.tmuxSessionName}`}>
+                          {session.repositoryFullName}#{session.issueNumber}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={dispatch.isSubmitting}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={dispatch.isSubmitting}
+              onClick={(event) => {
+                event.preventDefault();
+                void resumeConfirmed().finally(() => setResumeConfirming(false));
+              }}
+            >
+              再開する
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

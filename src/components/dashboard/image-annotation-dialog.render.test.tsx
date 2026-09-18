@@ -172,6 +172,32 @@ describe("ImageAnnotationDialog", () => {
     );
   });
 
+  it("消しゴムでなぞると書いたものが消え、元に戻すで1回で戻る（#3055）", async () => {
+    const { canvas } = await renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: /矢印/ }));
+    drawArrow(canvas);
+    const save = () => screen.getAllByRole("button", { name: "保存して差し替え" })[0];
+    expect(save()).toHaveProperty("disabled", false);
+
+    fireEvent.click(screen.getByRole("button", { name: /消しゴム/ }));
+    expect(screen.getByRole("button", { name: /消しゴム/ }).getAttribute("aria-pressed")).toBe("true");
+
+    // 矢印から離れた場所をなぞっても消えない
+    fireEvent.pointerDown(canvas, { clientX: 400, clientY: 400, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 420, clientY: 420, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 420, clientY: 420, pointerId: 1 });
+    expect(save()).toHaveProperty("disabled", false);
+
+    // 矢印の上を横切ると消え、書き込みが無くなるので保存できなくなる
+    fireEvent.pointerDown(canvas, { clientX: 60, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 70, clientY: 70, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 70, clientY: 70, pointerId: 1 });
+    expect(save()).toHaveProperty("disabled", true);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "元に戻す" })[0]);
+    expect(save()).toHaveProperty("disabled", false);
+  });
+
   it("文字は押した場所に入力欄を出し、Enterで確定する", async () => {
     const { canvas } = await renderEditor();
     fireEvent.click(screen.getByRole("button", { name: /文字/ }));

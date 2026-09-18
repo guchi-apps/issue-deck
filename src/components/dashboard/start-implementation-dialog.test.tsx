@@ -621,7 +621,7 @@ describe("StartImplementationDialog", () => {
     dispatchState.hosts = [makeHost()];
     renderDialog({ includeDispatchTargets: true });
 
-    // チェックボックスの並びはSTART_IMPLEMENTATION_OPTIONSの表示順（先頭が「計画が必要」）
+    // チェックボックスの並びはSTART_IMPLEMENTATION_OPTIONSの表示順（先頭が「計画を立案」）
     fireEvent.click(screen.getAllByRole("checkbox")[0]);
     fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
     clickStart();
@@ -638,7 +638,7 @@ describe("StartImplementationDialog", () => {
       renderDialog({ includeDispatchTargets: true });
 
       // オプションは作成フォームでは選ばせず、この画面だけで選ぶ（#1580）
-      expect(screen.queryByText("計画が必要")).not.toBeNull();
+      expect(screen.queryByText("計画を立案")).not.toBeNull();
       // 既定はサブPC。作成直後にGitHub Actionsへ固定されないこと自体が#1323の目的
       expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
     });
@@ -651,7 +651,7 @@ describe("StartImplementationDialog", () => {
 
       clickStart();
 
-      // 「計画が必要」は既にラベルとして付いている。文面と進捗はそれに従う
+      // 「計画を立案」は既にラベルとして付いている。文面と進捗はそれに従う
       await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
       expect(createComment.mock.calls[0][0].body).toBe("@claude 計画を立案してください");
       expect(setProgressStatus.mock.calls[0][0].status).toBe("planning");
@@ -666,10 +666,10 @@ describe("StartImplementationDialog", () => {
       renderDialog({ includeDispatchTargets: true });
 
       expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).toBeNull();
-      expect(screen.queryByRole("checkbox", { name: /開発環境を起動する/ })).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /開発環境を起動/ })).not.toBeNull();
     });
 
-    it("新機能のIssueでは「計画が必要」にチェックが入った状態で開き、そのままラベルが付く", async () => {
+    it("新機能のIssueでは「計画を立案」にチェックが入った状態で開き、そのままラベルが付く", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({
         includeDispatchTargets: true,
@@ -677,7 +677,7 @@ describe("StartImplementationDialog", () => {
       });
 
       expect(
-        screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+        screen.getByRole("checkbox", { name: /計画を立案/ }).getAttribute("aria-checked"),
       ).toBe("true");
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       clickStart();
@@ -694,12 +694,12 @@ describe("StartImplementationDialog", () => {
       });
 
       expect(
-        screen.getByRole("checkbox", { name: /計画が必要/ }).getAttribute("aria-checked"),
+        screen.getByRole("checkbox", { name: /計画を立案/ }).getAttribute("aria-checked"),
       ).toBe("false");
     });
 
     // デザインは計画の既定（#1317）にも入っているため、2つ同時にチェックが入る（#1956）
-    it("デザインのIssueでは「アーティファクトで見た目を出す」にもチェックが入り、そのままラベルが付く", async () => {
+    it("デザインのIssueでは「デザインを提示」にもチェックが入り、そのままラベルが付く", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({
         includeDispatchTargets: true,
@@ -708,7 +708,7 @@ describe("StartImplementationDialog", () => {
 
       expect(
         screen
-          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getByRole("checkbox", { name: /デザインを提示/ })
           .getAttribute("aria-checked"),
       ).toBe("true");
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
@@ -729,7 +729,7 @@ describe("StartImplementationDialog", () => {
 
       expect(
         screen
-          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getByRole("checkbox", { name: /デザインを提示/ })
           .getAttribute("aria-checked"),
       ).toBe("false");
     });
@@ -743,7 +743,7 @@ describe("StartImplementationDialog", () => {
 
       expect(
         screen
-          .getByRole("checkbox", { name: /アーティファクトで見た目を出す/ })
+          .getByRole("checkbox", { name: /デザインを提示/ })
           .getAttribute("aria-checked"),
       ).toBe("false");
     });
@@ -776,11 +776,22 @@ describe("StartImplementationDialog", () => {
         }),
       });
 
-      fireEvent.click(screen.getByRole("checkbox", { name: /アーティファクトで見た目を出す/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /デザインを提示/ }));
 
       expect(
         screen.getByRole("radio", { name: "次の5時間枠" }).hasAttribute("disabled"),
       ).toBe(false);
+    });
+
+    it("次の5時間枠を選んだときだけ、選べないオプションの理由をグリッドの下に出す（#3046）", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.queryByText(/では選べません/)).toBeNull();
+
+      fireEvent.click(screen.getByRole("radio", { name: "次の5時間枠" }));
+
+      expect(screen.getAllByText(/では選べません/)).toHaveLength(2);
     });
   });
 
@@ -801,7 +812,7 @@ describe("StartImplementationDialog", () => {
         }),
       });
 
-      const chip = screen.getByRole("checkbox", { name: /アーティファクトで見た目を出す/ });
+      const chip = screen.getByRole("checkbox", { name: /デザインを提示/ });
       expect(chip.getAttribute("aria-checked")).toBe("true");
       fireEvent.click(chip);
       expect(chip.getAttribute("aria-checked")).toBe("false");
@@ -830,7 +841,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, localSessionCommand: "start-issue 1248" });
 
-      // 4つ横並びにするとタイルの幅が80px弱しか無いため、出す文字は短縮版にする
+      // 5つを1行に並べるとタイルの幅が60px強しか無いため、出す文字は短縮版にする
       expect(screen.getByRole("radio", { name: "実装プロンプトをコピー" }).textContent).toBe(
         "プロンプト",
       );
@@ -850,16 +861,18 @@ describe("StartImplementationDialog", () => {
       expect(screen.getByText(/無人実行のワークフローを起動します/)).not.toBeNull();
     });
 
-    it("オプションはONにしたものだけ説明を出し、押すとラベルも付く", async () => {
+    it("オプションの説明欄は出さず（#3046）、押すとラベルが付く", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      // 何も選んでいないうちは、説明の代わりに使い方だけを出す
-      expect(screen.getByText("オプションを押すとONになり、ここに内容が出ます。")).not.toBeNull();
+      expect(screen.queryByText("オプションを押すとONになり、ここに内容が出ます。")).toBeNull();
 
-      fireEvent.click(screen.getByRole("checkbox", { name: /開発環境を起動する/ }));
+      const chip = screen.getByRole("checkbox", { name: /開発環境を起動/ });
+      fireEvent.click(chip);
 
-      expect(screen.getByText(/PR作成前に開発サーバーを起動し/)).not.toBeNull();
+      // 説明は本文には出さず、チップのtitle（hover・長押し）にだけ残す
+      expect(screen.queryByText(/PR作成前に開発サーバーを起動し/)).toBeNull();
+      expect(chip.getAttribute("title")).toMatch(/PR作成前に開発サーバーを起動し/);
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
@@ -870,7 +883,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      const chip = screen.getByRole("checkbox", { name: /マージ前に確認が必要/ });
+      const chip = screen.getByRole("checkbox", { name: /マージ前に確認/ });
       fireEvent.click(chip);
       expect(chip.getAttribute("aria-checked")).toBe("true");
       fireEvent.click(chip);
@@ -891,7 +904,7 @@ describe("StartImplementationDialog", () => {
         }),
       });
 
-      const chip = screen.getByRole("checkbox", { name: /マージ前に確認が必要/ });
+      const chip = screen.getByRole("checkbox", { name: /マージ前に確認/ });
       expect(chip.getAttribute("aria-checked")).toBe("true");
       fireEvent.click(chip);
       expect(chip.getAttribute("aria-checked")).toBe("false");
@@ -1004,7 +1017,7 @@ describe("StartImplementationDialog", () => {
       dispatchState.isLoaded = false;
       renderDialog();
 
-      expect(screen.queryByRole("checkbox", { name: /計画が必要/ })).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /計画を立案/ })).not.toBeNull();
       expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
         false,
       );

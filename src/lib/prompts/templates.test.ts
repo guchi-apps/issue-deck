@@ -92,6 +92,43 @@ describe("buildImplementationPrompt", () => {
     expect(prompt).toContain("明示的な承認を得る");
   });
 
+  // #3023: 計画を出さないセッションに計画の書き方・計画レビュー対応を載せない（ランチャーと同じ整理）
+  it("21.plan-requiredが無ければ計画系の節を載せない", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).not.toContain("計画は要約から書き、30〜40行に収める");
+    expect(prompt).not.toContain("計画へのレビュー指摘を受けた場合");
+    expect(prompt).not.toContain("seq 1 12");
+    expect(prompt).not.toContain("if:plan-required");
+    expect(prompt).toContain("計画の提示は不要です");
+  });
+
+  it("21.plan-requiredが付いていれば計画系の節を載せ、条件の印は残さない", () => {
+    const prompt = buildImplementationPrompt({
+      ...BASE,
+      labels: [{ name: "21.plan-required" }],
+    });
+    expect(prompt).toContain("計画は要約から書き、30〜40行に収める");
+    expect(prompt).toContain("計画へのレビュー指摘を受けた場合");
+    expect(prompt).toContain("seq 1 12");
+    expect(prompt).toContain("**Plan modeの`ExitPlanMode`で計画を提示した場合");
+    expect(prompt).not.toContain("plan-required -->");
+    expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+  });
+
+  // #3023: 毎回は使わない節は参照文書へ移す。メインPCへ貼られることもあるので、本体チェックアウトが
+  // 無くても読める経路（`gh api`）を索引に書く
+  it("毎回は使わない節は本文に載せず、参照文書への索引と読み方を載せる", () => {
+    const prompt = buildImplementationPrompt(BASE);
+    expect(prompt).not.toContain("manual-step-body-template:start");
+    expect(prompt).not.toContain("<!-- knowledge-candidate -->");
+    expect(prompt).toContain(
+      "`~/apps/issue-deck/scripts/prompts/generic-implementation-agent-reference.md`",
+    );
+    expect(prompt).toContain(
+      "repos/guchi-apps/issue-deck/contents/scripts/prompts/generic-implementation-agent-reference.md",
+    );
+  });
+
   // #1540: 実装が済んでから見せると、見た目がNGだったときに実装がやり直しになる
   it("25.artifact-requiredが無ければアーティファクトは不要と明記する", () => {
     expect(buildImplementationPrompt(BASE)).toContain("アーティファクトの作成は不要です");

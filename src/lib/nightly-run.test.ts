@@ -22,10 +22,10 @@ describe("resolveNightlyRunLabelRejection", () => {
     ).toBeNull();
     expect(
       resolveNightlyRunLabelRejection([{ name: "25.artifact-required" }], "NEXT_WINDOW"),
-    ).toContain("アーティファクトで見た目を出す");
+    ).toContain("デザインを提示");
     expect(
       resolveNightlyRunLabelRejection([{ name: "23.preview-required" }], "NEXT_WINDOW"),
-    ).toContain("開発環境を起動する");
+    ).toContain("開発環境を起動");
   });
 });
 

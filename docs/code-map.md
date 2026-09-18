@@ -388,6 +388,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   ローカル座標として固定したうえで新しい`translate`を計算する（中心点固定ズーム）。
   2本指目が触れた時点で進行中のペン・移動・文字入力は破棄し、1本指以下に戻るまでは
   ピンチ扱いのままにする——同じ`canvas`上でシングルタッチ操作とピンチが競合するため。
+  **消しゴム（#3055）は元の画像を消さず、図形の一覧から消す。** ペンの線は線分単位で削り、
+  残った連続部分を別のペンの線へ分ける（`eraseShapesAt`）。矢印・四角・文字は部分で消せない
+  ので当たった時点で丸ごと消す。ポインタが1イベントで飛んでも取りこぼさないよう、前の位置から
+  半径の半分ずつ刻んで当てる（`eraseShapesAlong`）。**1回のなぞりは離した時点で履歴1件**
+  （途中は`moving`と同じく表示用の一時状態）なので、「元に戻す」1回で戻せる。消しゴムの
+  輪郭はキャンバスへ描くが、保存時の描き出しには含めない。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -3175,7 +3181,11 @@ export function POST(request: NextRequest) {
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
   issue-deck自身の実装プロンプト（`scripts/prompts/implementation-agent.md`）は毎回使う指示だけを載せ、
   一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
-  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
+  無人実行の`.github/prompts/implement.md`も同じ整理で、必要なときに読む手順は
+  `docs/multi-agent/unattended-implementation-reference.md`へ置いている（#3024）。
+  ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`
+  （毎回使う指示だけ。手作業Issueの起票などは`scripts/prompts/generic-implementation-agent-reference.md`へ置き、
+  ひな形の索引から絶対パスで読ませる。#3023）。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
 - **そのホストで初めて開くリポジトリは、起こす前に止める**（#1838。`scripts/lib/claude-trust.sh`）。
@@ -4046,6 +4056,19 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   したがって**自動一時停止のあとで動いているセッションを止めるには、Issue詳細の個別「停止」ボタン
   （`issue-session-status.tsx`・#1332）を使う**。こちらはエージェント単位の一時停止の状態に
   関わらず、セッションごとに固定のC-cを積む
+- **「停止」「再開」ボタン（#3045）。** トグルの左に、稼働中は「停止」・停止中は「再開」を出し、
+  どちらも確認ダイアログを挟む（`agent-bulk-control-panel.tsx`）。「停止」はトグルをOFFにするのと
+  同じ処理。**「再開」は新規実行のブロック解除に加えて、一括停止で止まったセッションへ固定の1行を送る**
+  （`POST /api/dispatch/agent-resume`・`agent-resume-run.ts`）。止まったセッションの判定は
+  スキーマを足さず、`selectStoppedSessions`（`agent-resume.ts`）が「ALIVE、成功済みの`INTERRUPT`
+  ジョブがあり、その完了時刻以降に`activityAt`・`stepSeenAt`が進んでおらず、中断の時点で作業中だった」
+  ものを選ぶ（C-cでは`Stop`フックが飛ばないため、動き出せばどちらかが進む）。**作業中だったかは
+  `activity`の`WORKING`では見られない**（承認に答えた直後にしか報告されない）ので、`WAITING_INPUT`・
+  `NOT_STARTED`と「`Stop`が最後のツール実行より新しい」ものを外す（人の答えを待っていたセッションへ
+  「続けて」を送らないため）。再開ダイアログには送る固定の1行の全文を出す。画面の対象表示は直近24時間のジョブしか見えない目安で、
+  実際の対象はサーバーが7日ぶんのジョブから選び直す。**トグルだけをONにした場合はブロック解除のみ**
+  （止めたセッションは動かない）。再開のジョブは`recovery`付きだが、`report`が本文を見て
+  `00.check-user`を外さない。**畳まれた（GONE）セッションには送れない**（対象外）
 
 ## 環境変数
 
