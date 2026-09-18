@@ -12,6 +12,17 @@ type Props = {
   notConfigured: boolean;
 };
 
+/** 転記へ戻ったときに出す最終観測時刻（日本時間の「9/18 03:12」） */
+function formatObservedAt(ms: number): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(ms);
+}
+
 export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props) {
   const now = useNow();
   return (
@@ -29,6 +40,17 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
             <div className="h-[52px]" />
           </li>
           {data.windows.filter((window) => window.key === "secondary").map((window) => {
+            // リセット後の使用量が分からない枠は、推定の0%を出さずにそう書く（#3052）
+            if (window.expired) {
+              return (
+                <li key={window.key} className="rounded-lg border p-2">
+                  <p className="text-sm font-semibold">{window.label}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    リセット後の使用量はまだ取得できていません
+                  </p>
+                </li>
+              );
+            }
             const hasReset = now !== null;
             return (
               <li key={window.key} className="rounded-lg border p-2">
@@ -47,6 +69,13 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
               </li>
             );
           })}
+          {/* ops-dashboardから読めていないことに気付けるようにする（#3052。設定漏れで
+              転記へ戻ったまま、実際と違う値が出続けていた） */}
+          {data.source === "transcript" && (
+            <li className="text-xs text-muted-foreground">
+              ops-dashboardから取得できないため、サブPCの転記（最終観測 {formatObservedAt(data.fetchedAt)}）を表示しています
+            </li>
+          )}
         </ul>
       )}
     </>
