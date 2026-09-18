@@ -267,7 +267,7 @@ head_summary() {
 # アクセスURLを表示する。
 #
 # **出すのはMagicDNSのFQDN1本だけ（#1526）。** `tailscale serve`はHostヘッダーで振り分けるため
-# 生のtailnet IPでは404になり、そもそも next.config.ts の allowedDevOrigins（`**.ts.net`）にも
+# 生のtailnet IPでは404になり、そもそも next.config.mjs の allowedDevOrigins（`**.ts.net`）にも
 # 当たらない。開けないURLを並べると、繋がらないときにどれを試せばよいか分からなくなる。
 print_urls() {
   local port="$1" preview_url="${2:-}"

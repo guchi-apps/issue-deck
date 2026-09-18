@@ -29,7 +29,13 @@ module.exports = {
       // 出ておらず、ヒープ側は原因ではない（RSS 481MBのうちヒープは217MBで、残り約264MBは
       // Prismaのクエリエンジン・undiciのバッファ・コード領域といったヒープ外）。
       // 値の根拠と再発時の調べ方は docs/production-memory.md を参照。
-      node_args: "--max-old-space-size=256",
+      //
+      // `--max-semi-space-size=8`は若い世代（new space）の上限（#3017）。Node 24は既定でここを
+      // 大きく取るため、不要になったオブジェクトを抱えたままヒープが膨らむ。サブPCでの実測
+      // （本番ビルド・ログイン画面へ900リクエスト）では heapTotal 195MB→85MB・RSS 311MB→224MBに
+      // なり、処理時間は変わらなかった。4MBとの差は測定のぶれの範囲なので余裕のある8MBにする。
+      // **Nodeのメジャーを上げたら測り直す**（既定値はV8の版で変わる）。
+      node_args: "--max-old-space-size=256 --max-semi-space-size=8",
       max_memory_restart: "768M",
       // PM2 は max_memory_restart による再起動やサーバー再起動後の resurrect で
       // プロセスを起動し直す際、pm2 start 時に指定した --env production を失って
