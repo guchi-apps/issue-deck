@@ -551,7 +551,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     しない）。(2) 当時除外していたGitHub Actionsも`CLAUDE_CODE_OAUTH_TOKEN`を共有し同じ枠を
     消費するため按分に含め、計上漏れを1つ減らした。それでもissue-deck以外でのClaude利用・
     アプリ内AI機能（`api-usage.ts`）は含まれないため、**Issue別の枠%は実際より大きめに出る**
-    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。画面の断り書きもこの向き）。
+    （分母が小さいぶん「1%あたり」が低く出て、割ったときに大きく出る。この断り書きは#3016で
+    画面から削除しており、性質の説明としてここにのみ残す）。
   - **DB取得範囲は「期間の開始」と「5時間枠ウィンドウの開始」の早い方まで広げる**（#2988）。
     `sessionUsagePeriodStartMs`が返す期間の開始は日本時間0:00始まりのため、深夜〜早朝に開くと
     5時間枠の前半（`resetsAt - durationMs`）が前日にかかる。`buildSessionUsageSummary`は
