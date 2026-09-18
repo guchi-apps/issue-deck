@@ -217,6 +217,28 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 あること。`.github/prompts/`は`prompts-ref`で他リポジトリへも配られるため、**配布先へ届くのは次の
 `workflows/vN`タグを切ってからになる**（[cross-repo-setup-guide.md](../cross-repo-setup-guide.md)）。
 
+## issue-deckのローカル実装プロンプトは毎回使う指示だけを載せる（#3021）
+
+`scripts/prompts/implementation-agent.md`（`scripts/start-issue.sh`が描画する）は、一時は約26,000字
+（55KB）まで膨らみ、どのIssueでも全節が載っていた。最大の節は手作業Issueの起票手順（雛形込み約8,200字）
+で、使うのはごく一部のセッションだけだった。そこで節を次の3つに分けている。
+
+| 置き場所 | 載せるもの |
+|---|---|
+| ひな形の本文（毎回載る） | 出力言語・対応Issue・最初にやること・対応不要なら止まる・進め方・責務とIssueに残す記録・開発環境・PR直前の確認・禁止事項・「必要になったら読むもの」の索引 |
+| ひな形の`<!-- if:plan-required -->`〜`<!-- endif:plan-required -->`（`21.plan-required`のときだけ載る） | 計画の書式・計画をIssueに残す・計画レビューへの応答・PR直前の`wait-plan-review.sh` |
+| [implementation-agent-reference.md](implementation-agent-reference.md)（必要になったら読む） | 手作業Issueの起票（雛形の差し込み先）・ユーザーにコマンドを実行してもらう・知見の記録・共有知識の読み方・「往復を減らす」の実測値 |
+
+- **条件付きの区間はひな形に残し、Python側は印を消すか区間ごと消すかだけを決める。** 文面を
+  Python側へ移すと、指示の本文が2か所に分かれて読みにくくなるため
+- **参照文書へ移した節は、規則を外したのではなく読む時点を遅らせただけ。** 索引には「どの状況に
+  なったら読むか」を書く。手作業Issue・ユーザーへのコマンド依頼は`CLAUDE.md`（毎回読み込まれる）
+  にも要点があるので、読み落としても方針は外れにくい
+- 見た目のアーティファクトの節は、汎用ランチャー・画面の「実装プロンプトをコピー」と同じ文面を
+  保つ規約があるため縮めていない
+- 汎用ランチャー（`generic-implementation-agent.md`）と無人実行（`.github/prompts/implement.md`）は
+  この整理の対象外で、従来どおり全節が載る
+
 ## 使用するモデルの設定（#622）
 
 `claude-issue-dispatch.yml`の各モード（計画提示・分割・質問応答・実装/追加対応）の

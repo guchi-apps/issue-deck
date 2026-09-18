@@ -516,7 +516,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 ### プロンプト側にも完了報告を書く
 
 自動化は「何も残らなかった」を検出するだけで、中身のある完了報告の代わりにはならない。
-`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`の「Issueに残す記録」に
+`scripts/prompts/implementation-agent.md`の「責務とIssueに残す記録」・`generic-implementation-agent.md`の「Issueに残す記録」に
 **完了報告**（PRのURL・変更の要約・テスト内容）を必須項目として足してある。粒度は無人実行の
 `.github/prompts/implement.md`に揃えた。あわせて「着手した旨は投稿しない」（受付が自動で出るため）
 も書いてある。

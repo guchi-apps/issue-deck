@@ -1516,9 +1516,9 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 
 上の雛形の実体は[docs/multi-agent/manual-step-body-template.md](manual-step-body-template.md)にあり、
 `scripts/generate-prompt-templates.mjs`がマーカー（`<!-- manual-step-body-template:start -->`〜`:end`）
-で囲った区間へ差し込む。差し込み先はこの文書と、起票する3経路のプロンプト
-（`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`・
-`.github/prompts/implement.md`）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
+で囲った区間へ差し込む。差し込み先はこの文書と、起票する3経路の指示
+（issue-deck自身のローカル実行は参照文書`docs/multi-agent/implementation-agent-reference.md`、
+`generic-implementation-agent.md`・`.github/prompts/implement.md`はプロンプト本文。#3021）。**雛形を直したら`node scripts/generate-prompt-templates.mjs`を
 実行する**（ずれはCIの`Prompt shared template sync check`が落とす）。
 
 **なぜプロンプトへ埋め込むのか。** 以前はリテラルな骨組みがこの文書にしか無く、実際に起票する
