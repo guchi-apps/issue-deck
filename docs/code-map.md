@@ -3173,6 +3173,8 @@ export function POST(request: NextRequest) {
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
   `scripts/start-issue.sh`を持つリポジトリ（issue-deck自身）だけが自前のスクリプトで起動し、
   それ以外はissue-deck側の`scripts/generic-start-issue.sh`（汎用ランチャー）が起こす。
+  issue-deck自身の実装プロンプト（`scripts/prompts/implementation-agent.md`）は毎回使う指示だけを載せ、
+  一部のセッションしか使わない手順は`docs/multi-agent/implementation-agent-reference.md`へ置いている（#3021）。
   ポート帯は`scripts/local-repo-ports.conf`、プロンプトは`scripts/prompts/generic-implementation-agent.md`。
   **画面の`canStartLocalSession`は「起動コマンドをコピー」のゲートに限定**しており、サブPC導線はサブPCの
   申告だけで判定する。設計は[multi-agent/generic-launcher.md](multi-agent/generic-launcher.md)。
