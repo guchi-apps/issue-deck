@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { fetchOpsDashboardCodexUsage } from "@/lib/dispatch/ops-dashboard-codex-usage";
 
 export type CodexUsageWindow = {
   key: "primary" | "secondary";
@@ -103,14 +104,23 @@ export function toCodexUsage(row: {
 }, now = Date.now()): CodexUsage {
   const makeWindow = (
     key: CodexUsageWindow["key"], usedPercent: number, minutes: number, resetsAt: Date,
-  ): CodexUsageWindow => ({
-    key,
-    label: windowLabel(minutes),
-    usedPercent,
-    remainingPercent: 100 - usedPercent,
-    resetsAt: Math.floor(resetsAt.getTime() / 1000),
-    durationMs: minutes * 60_000,
-  });
+  ): CodexUsageWindow => {
+    const durationMs = minutes * 60_000;
+    let resetsAtMs = resetsAt.getTime();
+    // 転記はCodexを動かしたときにしか更新されない。リセット時刻を過ぎた枠の使用率は前の枠の
+    // 値なので0%として出す（#3037）。次のリセット時刻は枠の長さずつ進めた推定値になる。
+    const reset = resetsAtMs <= now;
+    if (reset) resetsAtMs += Math.ceil((now - resetsAtMs + 1) / durationMs) * durationMs;
+    const used = reset ? 0 : usedPercent;
+    return {
+      key,
+      label: windowLabel(minutes),
+      usedPercent: used,
+      remainingPercent: 100 - used,
+      resetsAt: Math.floor(resetsAtMs / 1000),
+      durationMs,
+    };
+  };
   return {
     host: row.host,
     planType: row.planType,
@@ -126,4 +136,12 @@ export function toCodexUsage(row: {
 export async function getLatestCodexUsage(): Promise<CodexUsage | null> {
   const row = await db.codexUsageSnapshot.findFirst({ orderBy: { observedAt: "desc" } });
   return row ? toCodexUsage(row) : null;
+}
+
+/**
+ * 画面に出すCodex枠。ops-dashboardから読めればそれを使い、読めなければ転記のスナップショットへ戻る
+ * （#3037。転記はCodexを動かした日にしか更新されないため、ops-dashboardの値を正とする）。
+ */
+export async function getCodexUsage(): Promise<CodexUsage | null> {
+  return (await fetchOpsDashboardCodexUsage()) ?? (await getLatestCodexUsage());
 }

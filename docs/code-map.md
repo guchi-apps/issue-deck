@@ -4025,6 +4025,13 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   `~/.codex/sessions/*.jsonl`の`rate_limits`を拾って上書きするだけの表なので、新規実行を一時停止すると
   その瞬間の値のまま凍結する。**解除の判定を`usedPercent`が下がったかで書くと、一時停止したエージェントは
   永久に自動解除されない。** 凍結時点で確定している`primaryResetsAt`（未来の固定時刻）の経過で判定すること
+- **画面のCodex枠（`/api/codex/usage`・`/api/session-usage`の`planUsage.codex`）はops-dashboardの値を正とする**
+  （#3037）。`getCodexUsage`（`src/lib/dispatch/codex-usage.ts`）が`OPS_DASHBOARD_URL`＋`OPS_API_TOKEN`で
+  ops-dashboardの`GET /api/ai-usage`から`chatgpt`の枠を読み（`ops-dashboard-codex-usage.ts`、5分キャッシュ）、
+  読めないときだけ上の`CodexUsageSnapshot`へ戻る。**`wham/usage`をissue-deckから直接叩かない**——リフレッシュ
+  トークンが使うたびにローテーションするため、ops-dashboard・Codex CLIのどちらかのトークンを失効させる。
+  スナップショットへ戻ったときは、リセット時刻を過ぎた枠を0%として出す（次のリセット時刻は推定値）。
+  自動一時停止（上の`sweepAgentUsageLimitPause`）は今もスナップショットを直接読んでいる
 - **自動検知（サブスク枠の使い切り）は動いているセッションへ何も送らない。** `sweepAgentUsageLimitPause`は
   `AppSetting`のフラグを立てる／解くだけで、`send-keys`は一切呼ばない。動いているセッションへ中断
   （C-c）を送るのは、人がトグルを手動でOFFにしたときだけ（既存の個別「停止」ボタン・#1332と同じ経路を

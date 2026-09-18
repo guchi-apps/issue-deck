@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
-import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
+import { getCodexUsage } from "@/lib/dispatch/codex-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
@@ -230,7 +230,7 @@ export async function GET(request: NextRequest) {
   const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
   const [claudePlanUsage, codexPlanUsage] = await Promise.all([
     token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
-    getLatestCodexUsage().catch(() => null),
+    getCodexUsage().catch(() => null),
   ]);
 
   const fiveHourWindow = claudePlanUsage?.windows.find((w) => w.key === "5h") ?? null;
