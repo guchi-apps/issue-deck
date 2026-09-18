@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentBulkControlPanel } from "@/components/dashboard/agent-bulk-control-panel";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { AGENT_RESUME_INSTRUCTION } from "@/lib/dispatch/agent-resume";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
@@ -82,6 +83,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
     isSubmitting: false,
     setAgentDispatchPaused: vi.fn().mockResolvedValue({ ok: true }),
     sendSessionControl: vi.fn().mockResolvedValue({ ok: true }),
+    resumeAgentSessions: vi.fn().mockResolvedValue({ ok: true, resumed: 0, failed: [] }),
     ...overrides,
   } as unknown as DispatchStateHandle;
 }
@@ -169,5 +171,108 @@ describe("AgentBulkControlPanel", () => {
       expect(setAgentDispatchPaused).toHaveBeenCalledWith({ agent: "claude", paused: false });
     });
     expect(screen.queryByRole("button", { name: "停止する" })).toBeNull();
+  });
+
+  it("稼働中は「停止」ボタン、停止中は「再開」ボタンを出す", () => {
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({ agentPause: { claude: null, codex: "manual" } })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Claude Codeを停止" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Claude Codeを再開" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Codex CLIを再開" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Codex CLIを停止" })).toBeNull();
+  });
+
+  it("「停止」ボタンも確認ダイアログを経て、一時停止と対象セッションへの中断を送る", async () => {
+    const sendSessionControl = vi.fn().mockResolvedValue({ ok: true });
+    const setAgentDispatchPaused = vi.fn().mockResolvedValue({ ok: true });
+    const session = makeSession({ codexThreadKnown: null });
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({ sessions: [session], sendSessionControl, setAgentDispatchPaused })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを停止" }));
+    expect(setAgentDispatchPaused).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "停止する" }));
+
+    await waitFor(() => {
+      expect(setAgentDispatchPaused).toHaveBeenCalledWith({ agent: "claude", paused: true });
+      expect(sendSessionControl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("「再開」ボタンは確認ダイアログを経てから再開を送る（確認前は何も送らない）", async () => {
+    const resumeAgentSessions = vi.fn().mockResolvedValue({ ok: true, resumed: 1, failed: [] });
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          agentPause: { claude: "manual", codex: null },
+          resumeAgentSessions,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    expect(resumeAgentSessions).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "再開する" }));
+
+    await waitFor(() => {
+      expect(resumeAgentSessions).toHaveBeenCalledWith({ agent: "claude" });
+    });
+  });
+
+  it("停止したセッションが分かるときは、再開ダイアログに対象を出す", async () => {
+    const session = makeSession({
+      codexThreadKnown: null,
+      activity: "RESPONDED",
+      activityAt: "2026-09-17T00:00:00Z",
+      stepSeenAt: "2026-09-17T00:30:00Z",
+    });
+    const interrupt = {
+      id: "job-1",
+      kind: "INTERRUPT",
+      status: "SUCCEEDED",
+      targetHost: session.host,
+      repositoryFullName: session.repositoryFullName,
+      issueNumber: session.issueNumber,
+      finishedAt: "2026-09-17T01:00:00Z",
+    };
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          agentPause: { claude: "manual", codex: null },
+          sessions: [session],
+          jobs: [interrupt] as unknown as DispatchStateHandle["jobs"],
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    expect(await screen.findByText("再開の対象（1件）")).not.toBeNull();
+    // 押す前に、送る固定の1行の全文が出ている
+    expect(screen.getByText(AGENT_RESUME_INSTRUCTION)).not.toBeNull();
+  });
+
+  it("再開に失敗した理由は押した場所に出す", async () => {
+    const resumeAgentSessions = vi
+      .fn()
+      .mockResolvedValue({ ok: false, message: "サブPCがオフラインです" });
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          agentPause: { claude: "manual", codex: null },
+          resumeAgentSessions,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    fireEvent.click(await screen.findByRole("button", { name: "再開する" }));
+
+    expect(await screen.findByText("サブPCがオフラインです")).not.toBeNull();
   });
 });

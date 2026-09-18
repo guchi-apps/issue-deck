@@ -4,6 +4,7 @@ import {
   normalizeCodexPairingExpiry,
   parseCodexPairingCode,
 } from "@/lib/dispatch/codex-pairing";
+import { isAgentResumeBody } from "@/lib/dispatch/agent-resume";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
@@ -139,7 +140,14 @@ export async function POST(request: NextRequest) {
   // 作業中・入力欄に打ちかけがある場合はpollerが見送るため、押した時点で外すと「何も届いて
   // いないのに札だけ消える」。押したこと自体は「人が続け方を決めた」合図だが、**その指示が
   // セッションへ入ったことまで確かめてから**印を片付ける。
-  if (result.job.kind === "INSTRUCTION" && result.job.recovery && status === "succeeded") {
+  // **一括停止からの再開（#3045）は外さない。** 押した人が決めたのは「止めたセッションを動かす」
+  // ことで、そのIssueに付いていた札（計画の承認待ちなど）を解く判断ではない。
+  if (
+    result.job.kind === "INSTRUCTION" &&
+    result.job.recovery &&
+    status === "succeeded" &&
+    !isAgentResumeBody(result.job.instruction ?? "")
+  ) {
     // **失敗しても報告そのものは受け付ける**（自動実行を進める処理と同じ扱い）。
     // `resolveFixedInstructionCheckUser`は内部で握り潰して真偽値を返す
     await resolveFixedInstructionCheckUser({
