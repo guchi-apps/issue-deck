@@ -29,10 +29,13 @@ import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-pr
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
+import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import {
   showsPullRequestFixIssueBar,
   type PullRequestFixIssueDraft,
+  type PullRequestFixRoute,
 } from "@/lib/github/pull-request-fix-issue";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
@@ -64,6 +67,18 @@ type PullRequestDetailProps = {
    * 渡さない画面では帯を出さない。
    */
   onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
+  /**
+   * 「修正Issueを起案」の送り先（#3009）。未指定（`showsPullRequestFixIssueBar`が偽になる
+   * リリースPR等）では帯自体を出さないので既定値は不要。
+   */
+  pullRequestFixRoute?: PullRequestFixRoute;
+  /** 「修正Issueを起案」の確認ダイアログの`@Issue番号`補完に使う候補一覧 */
+  issueSuggestions?: IssueSuggestion[];
+  /** `pullRequestFixRoute`が`create-issue`以外のときの送信（#3009） */
+  onRequestPullRequestSessionFix?: (route: PrFixRequestRoute, reason: string) => Promise<boolean>;
+  isSubmittingPullRequestSessionFix?: boolean;
+  pullRequestSessionFixRejection?: string | null;
+  pullRequestSessionFixError?: string | null;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -149,6 +164,12 @@ export function PullRequestDetail({
   onMerged,
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
+  pullRequestFixRoute,
+  issueSuggestions = [],
+  onRequestPullRequestSessionFix,
+  isSubmittingPullRequestSessionFix = false,
+  pullRequestSessionFixRejection = null,
+  pullRequestSessionFixError = null,
   headerLeading,
   className,
   style,
@@ -385,6 +406,13 @@ export function PullRequestDetail({
                 pullRequest={pullRequest}
                 events={currentDetail.events}
                 onCreate={onCreatePullRequestFixIssue}
+                route={pullRequestFixRoute}
+                repositoryFullName={pullRequest.repositoryFullName}
+                issueSuggestions={issueSuggestions}
+                onRequestSessionFix={onRequestPullRequestSessionFix}
+                isSubmittingSessionFix={isSubmittingPullRequestSessionFix}
+                sessionFixRejection={pullRequestSessionFixRejection}
+                sessionFixError={pullRequestSessionFixError}
               />
             )}
 
