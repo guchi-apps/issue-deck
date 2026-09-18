@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
-import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime } from "@/lib/format-date-time";
 import { buildSessionUsageSummary, type SessionUsageEntry } from "@/lib/session-usage-view";
@@ -69,65 +68,17 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
   );
 }
 
-/** issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移した） */
-function apiUsageSummary(): ClaudeApiUsageSummary {
-  const totals = {
-    calls: 5,
-    inputTokens: 1_000,
-    outputTokens: 200,
-    cacheReadTokens: 0,
-    cacheCreationTokens: 0,
-  };
-  return {
-    measuringSince: NOW_MS - 86_400_000,
-    totalLast24h: totals,
-    totalLast7d: totals,
-    features: [
-      {
-        key: "issue_summary",
-        label: "Issueの要約",
-        last24h: totals,
-        last7d: totals,
-        models: [{ model: "claude-haiku-4-5", last24h: totals, last7d: totals }],
-      },
-    ],
-  };
-}
-
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
-  // #2631。設定の「状態」にあった機能別のAPI消費内訳をここへ移した。渡されなければ出さない
-  it("claudeApiUsageを渡したときだけアプリ内AI機能別を出す", () => {
-    const { unmount } = renderPanel(response([]));
-    expect(screen.queryByText("アプリ内AI機能別")).toBeNull();
-    unmount();
-
-    renderPanel(response([]), {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
-    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
-    expect(screen.getByText("Issueの要約", { exact: false })).toBeTruthy();
-  });
-
-  /**
-   * #2752。以前は明細を挟んだ画面のいちばん下にあった。同じ「何にAIを使ったか」の内訳なので
-   * セッション種別別の真下へ置く。
-   */
-  it("アプリ内AI機能別をセッション種別別の直後に置く", () => {
-    renderPanel(response([entry()]), {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
+  // #3062。「アプリ内AI機能別」は削除した。内訳カードはこの並びの3枚だけ
+  it("内訳はリポジトリ別・セッション種別別・Issue・PR別の順で、アプリ内AI機能別は出さない", () => {
+    renderPanel(response([entry()]));
 
     const headings = screen
       .getAllByText(/^(リポジトリ別|セッション種別別|アプリ内AI機能別|Issue・PR別)$/)
       .map((node) => node.textContent);
-    expect(headings).toEqual([
-      "リポジトリ別",
-      "セッション種別別",
-      "アプリ内AI機能別",
-      "Issue・PR別",
-    ]);
+    expect(headings).toEqual(["リポジトリ別", "セッション種別別", "Issue・PR別"]);
   });
 
   /**
@@ -221,18 +172,6 @@ describe("SessionUsagePanel", () => {
 
     const card = screen.getByText("セッション種別別").closest("section");
     expect(within(card as HTMLElement).getByText("実装（フェーズ未集計）")).toBeTruthy();
-  });
-
-  /**
-   * #2752。セッションの記録がまだ届いていないと上の内訳ごと描かれない。このアプリ自身の消費は
-   * セッションと無関係に数えられているので、**そのときは単独で出す**。
-   */
-  it("セッションの記録がまだ無くてもアプリ内AI機能別は出す", () => {
-    renderPanel(null as unknown as SessionUsageResponse, {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
-    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
-    expect(screen.queryByText("セッション種別別")).toBeNull();
   });
 
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
