@@ -228,7 +228,7 @@ describe("予約実行の目印（#2866・#2995）", () => {
     };
   }
 
-  function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyRunState {
+  function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): Pick<NightlyRunState, "nextWindow"> {
     return {
       nextWindow: {
         settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },

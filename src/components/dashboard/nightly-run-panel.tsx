@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Hourglass, Loader2, RefreshCw, X } from "lucide-react";
+import { CalendarClock, Hourglass, Loader2, RefreshCw, Timer, X } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -20,6 +20,11 @@ import {
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
   NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
 } from "@/lib/app-settings";
+import {
+  describeClaudeWindowKeepAlive,
+  formatClaudeWindowKeepAliveHour,
+  type ClaudeWindowKeepAliveView,
+} from "@/lib/claude-window-keepalive";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatResetCountdown } from "@/lib/format-reset";
@@ -46,7 +51,8 @@ import { cn } from "@/lib/utils";
  *
  * 「次の5時間枠」（Claudeのプラン枠のリセット時刻で決まる窓）に積んだ予定を、
  * 「予定 → 直近1回の結果（5分類）」の形で並べる（かつては「今夜の夜間実行」も同じ形で
- * 並べていたが#3019で削除した）。
+ * 並べていたが#3019で削除した）。その上に、予定を持たない設定だけの節「5時間枠を開けておく」
+ * （#3032）を置く。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`release-history-panel.tsx`と同じ切り分け）。
  * 設定（有効／無効・残り時間・間隔）も節の中に置き、**切り替えた時点で保存する**
@@ -108,6 +114,13 @@ export function NightlyRunPanel({
       ) : (
         <>
           <ClaudeWindowMeter window={state.nextWindow.window} />
+
+          <KeepAliveSection
+            keepAlive={state.keepAlive}
+            compact={compact}
+            isSubmitting={isSubmitting}
+            onUpdateSettings={onUpdateSettings}
+          />
 
           <ScheduleSection
             icon={<Hourglass className="size-3.5" aria-hidden />}
@@ -251,6 +264,105 @@ function ClaudeWindowMeter({ window }: { window: NextWindowRunWindowView | null 
           : ""}
       </span>
     </div>
+  );
+}
+
+const KEEP_ALIVE_HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+
+/**
+ * 5時間枠を開けておく（#3032）。**予定を持たない設定だけの節**なので、`ScheduleSection`には載せない。
+ * 次枠実行と同じく切り替えた時点で保存する。
+ */
+function KeepAliveSection({
+  keepAlive,
+  compact,
+  isSubmitting,
+  onUpdateSettings,
+}: {
+  keepAlive: ClaudeWindowKeepAliveView;
+  compact: boolean;
+  isSubmitting: boolean;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
+}) {
+  const { settings } = keepAlive;
+  const hourSelect = (value: number, key: "startHour" | "endHour", label: string) => (
+    <Select
+      value={String(value)}
+      disabled={isSubmitting}
+      onValueChange={(next) => onUpdateSettings({ keepAlive: { [key]: Number(next) } })}
+    >
+      <SelectTrigger size="sm" className="w-20" aria-label={label}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {KEEP_ALIVE_HOUR_OPTIONS.map((hour) => (
+          <SelectItem key={hour} value={String(hour)}>
+            {formatClaudeWindowKeepAliveHour(hour)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <Timer className="size-3.5" aria-hidden />
+          5時間枠を開けておく
+        </h3>
+        <p className="text-[11px] text-muted-foreground">{describeClaudeWindowKeepAlive(keepAlive)}</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
+        <label className="flex items-center gap-2 text-[13px] font-medium">
+          <Checkbox
+            checked={settings.enabled}
+            disabled={isSubmitting}
+            onCheckedChange={(checked) => onUpdateSettings({ keepAlive: { enabled: checked === true } })}
+          />
+          <span>枠が止まっていたら自動で開ける</span>
+        </label>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>時間帯</span>
+          {hourSelect(settings.startHour, "startHour", "開始時刻")}
+          <span>〜</span>
+          {hourSelect(settings.endHour, "endHour", "終了時刻")}
+        </div>
+      </div>
+
+      {settings.enabled && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          {!keepAlive.withinHours ? (
+            <span className="rounded-full bg-muted px-2 py-px font-medium">時間帯の外</span>
+          ) : keepAlive.runningUntil ? (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-px font-medium text-emerald-700 dark:text-emerald-400">
+              枠は動いています
+            </span>
+          ) : (
+            <span className="rounded-full bg-muted px-2 py-px font-medium">枠は止まっています</span>
+          )}
+          <span>
+            最後に開けた時刻{" "}
+            {keepAlive.probedAt ? (
+              <span className="font-mono tabular-nums">{formatTimeOfDay(keepAlive.probedAt)}</span>
+            ) : (
+              "—"
+            )}
+          </span>
+        </div>
+      )}
+
+      {!compact && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          5時間枠は最初のリクエストで始まります。作業の前に枠を開けておくと、上限に当たっても
+          <strong className="font-semibold text-foreground">リセットまでの待ちが短く</strong>
+          なります。
+          <strong className="font-semibold text-foreground">週間枠の総量は増えません</strong>
+          。送るのは1トークンのリクエストで、消費は「AI使用量」の「プラン枠の取得」に計上されます。
+        </p>
+      )}
+    </section>
   );
 }
 

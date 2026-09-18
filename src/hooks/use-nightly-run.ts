@@ -114,6 +114,7 @@ export function useNightlyRun(active: boolean) {
             ? {
                 ...prev,
                 nextWindow: { ...prev.nextWindow, settings: settings.nextWindow },
+                keepAlive: { ...prev.keepAlive, settings: settings.keepAlive },
               }
             : prev,
         );
@@ -138,6 +139,7 @@ export type NightlyRunHandle = ReturnType<typeof useNightlyRun>;
 /** 設定の部分更新。入れ子で送る（`PATCH /api/nightly-run/settings`と同じ形） */
 export type ScheduledRunSettingsPatch = {
   nextWindow?: Partial<ScheduledRunSettings["nextWindow"]>;
+  keepAlive?: Partial<ScheduledRunSettings["keepAlive"]>;
 };
 
 /**

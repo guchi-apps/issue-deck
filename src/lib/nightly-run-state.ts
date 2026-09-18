@@ -1,3 +1,8 @@
+import {
+  isWithinClaudeWindowKeepAliveHours,
+  resolveClaudeWindowRunningUntil,
+} from "@/lib/claude-window-keepalive";
+import { readClaudeWindowKeepAliveSettings } from "@/lib/claude-window-keepalive-run";
 import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionState } from "@/lib/dispatch/session-state";
 import { db } from "@/lib/db";
@@ -17,6 +22,7 @@ import {
   type NextWindowRunSettings,
 } from "@/lib/next-window-run";
 import {
+  peekClaudeWindowSnapshot,
   readClaudeWindowSnapshot,
   readNextWindowRunSettings,
 } from "@/lib/next-window-run-db";
@@ -214,8 +220,22 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
     );
   };
 
-  const shouldReadWindow = shouldReadNextWindowSnapshot(nextWindowSettings, nextWindow.queued.length);
-  const snapshot = shouldReadWindow ? await readClaudeWindowSnapshot() : null;
+  // 5時間枠を開けておく（#3032）がONで時間帯の中なら、**取得せずに**最後に見た枠でメーターを出す。
+  // `useNightlyRun`はシェルで常に取り直しているので、ここで取得すると画面を開いているだけで
+  // 5分おきに探りが送られてしまう（枠が動いている間は送らない、という設計が崩れる）
+  const keepAliveSettings = await readClaudeWindowKeepAliveSettings();
+  const keepAliveWithinHours = isWithinClaudeWindowKeepAliveHours(keepAliveSettings, now);
+  const shouldFetchWindow = shouldReadNextWindowSnapshot(
+    nextWindowSettings,
+    nextWindow.queued.length,
+  );
+  const shouldReadWindow =
+    shouldFetchWindow || (keepAliveSettings.enabled && keepAliveWithinHours);
+  const snapshot = shouldFetchWindow
+    ? await readClaudeWindowSnapshot()
+    : shouldReadWindow
+      ? peekClaudeWindowSnapshot()
+      : null;
   const claudeWindow = shouldReadWindow
     ? toNextWindowRunWindowView(
         resolveNextWindowRunWindow({
@@ -235,6 +255,17 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
       results: nextWindow.latestKey
         ? { runKey: nextWindow.latestKey, entries: nextWindow.results.map(view) }
         : null,
+    },
+    keepAlive: {
+      settings: {
+        enabled: keepAliveSettings.enabled,
+        startHour: keepAliveSettings.startHour,
+        endHour: keepAliveSettings.endHour,
+      },
+      withinHours: keepAliveWithinHours,
+      probedAt: keepAliveSettings.probedAt?.toISOString() ?? null,
+      runningUntil:
+        resolveClaudeWindowRunningUntil(snapshot?.resetsAt ?? null, now)?.toISOString() ?? null,
     },
   };
 }

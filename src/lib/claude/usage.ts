@@ -95,6 +95,29 @@ export function parseUnifiedRateLimitHeaders(headers: Headers): ClaudeUsageWindo
 
 let cache: { windows: ClaudeUsageWindow[]; fetchedAt: number } | null = null;
 
+/**
+ * キャッシュ中の5時間枠のリセット時刻を過ぎているか。過ぎていれば中身は前の枠の値なので、
+ * 5分以内でもキャッシュを使わない（#3032。「5時間枠を開けておく」がリセット直後に枠を開けるため）。
+ */
+function hasFiveHourWindowReset(windows: ClaudeUsageWindow[], nowMs = Date.now()): boolean {
+  const resetsAt = windows.find((window) => window.key === "5h")?.resetsAt ?? null;
+  return resetsAt !== null && resetsAt * 1000 <= nowMs;
+}
+
+/**
+ * 最後に取得できた5時間枠（リセット時刻はepoch ms）。**取得はしない**（送信が枠を開始するため）。
+ * まだ一度も取れていなければnull。「5時間枠を開けておく」（#3032）が、枠が動いている間は
+ * 探りを送らないため・画面のメーターを探りなしで出すために使う。
+ */
+export function peekClaudeFiveHourWindow(): { resetsAt: number | null; usedPercent: number } | null {
+  const window = cache?.windows.find((entry) => entry.key === "5h");
+  if (!window) return null;
+  return {
+    resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
+    usedPercent: window.usedPercent,
+  };
+}
+
 /** テスト用にモジュールキャッシュを破棄する。 */
 export function clearClaudeUsageCache() {
   cache = null;
@@ -118,7 +141,7 @@ function staleOrThrow(message: string): ClaudeUsage {
  * 取得のたびにわずかにプラン枠を消費するので、必ずキャッシュを介して呼ぶこと。
  */
 export async function fetchClaudeUsage(token: string): Promise<ClaudeUsage> {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS && !hasFiveHourWindowReset(cache.windows)) {
     return { windows: cache.windows, fetchedAt: cache.fetchedAt, stale: false };
   }
 
