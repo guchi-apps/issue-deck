@@ -117,10 +117,10 @@ export function ImageAnnotationDialog({
       }}
     >
       <DialogPrimitive.Portal>
-        {/* 他の全画面の層（z-50）より明示的に上へ置く（#2983）。同じz-indexで重なると、
-            iOS Safariはアニメーションやbackdrop-filterを持つ層をDOMの順番どおりに描かず、
-            下のダイアログの暗幕が書き込み画面の上に乗って入力を塞いだ */}
-        <DialogPrimitive.Overlay className="fixed inset-0 z-60 bg-black/90" />
+        {/* 暗幕（Overlay）は置かない（#3006）。中身が不透明な全画面なので見た目上は要らず、
+            置くとiOS Safariが同じz-60の暗幕を中身より上に描き、画面全体が90%の黒に覆われて
+            入力も奪われた（DOM順は正しかった。スクショの画素値が暗幕のbg-black/90と一致）。
+            中身は他の全画面の層（z-50）より明示的に上へ置く（#2983） */}
         {image && (
           <AnnotationEditor
             key={image.src}
