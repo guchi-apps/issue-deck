@@ -3,11 +3,9 @@
 import { Fragment, type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
-import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { Button } from "@/components/ui/button";
-import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -37,12 +35,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * 「AI使用量」画面（#2504）。**サブPCのローカルセッションが使ったトークン**を、合計 → 推移 →
- * 内訳（リポジトリ別・セッション種別別・アプリ内AI機能別）→ 明細（セッション別）の順に出す。
+ * 内訳（リポジトリ別・セッション種別別）→ 明細（セッション別）の順に出す。
  *
- * **「アプリ内AI機能別」（issue-deck本体のAI機能が使ったAPIの内訳）は内訳の3枚目**で、
- * セッション種別別の真下に並ぶ（#2631で設定の「状態」から移設し、#2752で画面のいちばん下から
- * ここへ移した）。`claudeApiUsage`を渡したときだけ出る。**期間はこの画面のセレクタ1つに従い**、
- * カード自前の切り替えは持たない（同じ画面に期間の指定が2つあると読み違える）。
+ * **issue-deck本体のAI機能が使ったAPIの内訳（旧「アプリ内AI機能別」）はここに出さない**
+ * （#3062で削除）。この画面はサブPCのセッションの使用量だけを扱う。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`preview-panel.tsx`と同じ切り分け）。
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
@@ -76,17 +72,6 @@ type SessionUsagePanelProps = {
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
-  /**
-   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
-   * **セッションの使用量とは出どころが違う**——上の集計はサブPCのpollerが押し込む記録だが、
-   * これはこのアプリ自身が投げた呼び出しをメモリ上で数えたもの。渡さなければ出さない
-   * （試験・スマホの一部経路）。
-   */
-  claudeApiUsage?: {
-    data: ClaudeApiUsageSummary | null;
-    isLoading: boolean;
-    error: string | null;
-  };
   /** スマホ向けに縮める。表をカードへ畳み、コンテキスト列を落とす */
   compact?: boolean;
   className?: string;
@@ -1206,7 +1191,6 @@ export function SessionUsagePanel({
   onChangeDays,
   onRefresh,
   onOpenIssue,
-  claudeApiUsage,
   compact = false,
   className,
 }: SessionUsagePanelProps) {
@@ -1226,28 +1210,6 @@ export function SessionUsagePanel({
   const agentCostSub = data
     ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
     : "";
-
-  /**
-   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
-   * **置き場が2つある**（#2752）。ふだんはセッション種別別の真下だが、セッションの記録が
-   * まだ1件も無いときは上の内訳ごと描かれないため、単独でここへ出す。
-   */
-  const apiUsageSection = claudeApiUsage ? (
-    <section className="flex flex-col gap-2 rounded-lg border p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">アプリ内AI機能別</span>
-        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-          Issueの要約・AI検索など
-        </span>
-      </div>
-      <ClaudeApiUsageList
-        data={claudeApiUsage.data}
-        isLoading={claudeApiUsage.isLoading}
-        error={claudeApiUsage.error}
-        days={days}
-      />
-    </section>
-  ) : null;
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -1365,24 +1327,19 @@ export function SessionUsagePanel({
               colorOf={(key) => getRepoColor(key || "(不明)")}
               maxVisibleRows={5}
             />
-            {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
-                使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
-            <div className="flex flex-col gap-2">
-              {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
-                  実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
-                  **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}
-              <Breakdown
-                title="セッション種別別"
-                hint="実装はフェーズで分割（転記から推定）"
-                rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
-                colorOf={(key) => KIND_ROW_COLORS[key]}
-                separator={{
-                  label: "作業の流れの外",
-                  isBefore: (key) => !isUsageKindInWorkFlow(key),
-                }}
-              />
-              {apiUsageSection}
-            </div>
+            {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
+                実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
+                **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}
+            <Breakdown
+              title="セッション種別別"
+              hint="実装はフェーズで分割（転記から推定）"
+              rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
+              colorOf={(key) => KIND_ROW_COLORS[key]}
+              separator={{
+                label: "作業の流れの外",
+                isBefore: (key) => !isUsageKindInWorkFlow(key),
+              }}
+            />
           </div>
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
@@ -1428,11 +1385,6 @@ export function SessionUsagePanel({
           </p>
         </>
       )}
-
-      {/* **セッションの記録がまだ届いていないときの置き場**（#2752）。届いていれば上の
-          内訳（セッション種別別の下）へ出る。このアプリ自身の消費はセッションと無関係に
-          数えられているので、`data`が無くても出せる状態を保つ */}
-      {!data && apiUsageSection}
     </div>
   );
 }
