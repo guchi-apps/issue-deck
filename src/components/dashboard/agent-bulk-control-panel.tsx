@@ -19,7 +19,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { cn } from "@/lib/utils";
 
 /**
- * エージェット（Claude Code・Codex CLI）ごとに、実行中セッションの一括停止と新規実行の
+ * エージェント（Claude Code・Codex CLI）ごとに、実行中セッションの一括停止と新規実行の
  * 一時停止トグルを1行にまとめて出す（#2994）。
  *
  * **押すのは人。** トグルをOFFにする操作が「動いているセッションへ中断を送る」と

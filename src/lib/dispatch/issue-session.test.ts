@@ -223,6 +223,22 @@ describe("summarizeIssueSession", () => {
     it("異常終了も復旧の対象にする", () => {
       expect(describeSessionRecovery(session({ state: "FAILED", exitStatus: 1 }))).not.toBeNull();
     });
+
+    // #3033。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第なので言い切らない
+    it("横断質問セッションでは、記録が無ければ新しい会話になることを添える", () => {
+      const recovery = describeSessionRecovery(session({ state: "GONE" }), {
+        isCrossRepoQuestion: true,
+      });
+      expect(recovery?.detail).toContain("前回の会話の続き");
+      expect(recovery?.detail).toContain("記録が残っていない場合");
+      expect(recovery?.detail).not.toContain("11.local");
+    });
+
+    it("横断質問セッションでも動いているものには出さない", () => {
+      expect(
+        describeSessionRecovery(session({ state: "ALIVE" }), { isCrossRepoQuestion: true }),
+      ).toBeNull();
+    });
   });
 
   // #1353。pollerは1巡ごとにlastReportedAtを更新するため、これを入力待ちに添えると
@@ -444,12 +460,22 @@ describe("describeSessionReap", () => {
     ).toBeNull();
   });
 
-  it("質問セッションは会話を引き継がない旨を出す", () => {
+  it("放置で畳まれる質問セッションには、復旧で会話の続きへ戻れる旨を出す（#3033）", () => {
     const notice = describeSessionReap(
       session({ reapAt: "2026-08-16T12:10:00.000Z", reapReason: "QUESTION_IDLE" }),
       NOW,
     );
+    expect(notice?.detail).toContain("セッションを復旧");
+    expect(notice?.detail).not.toContain("worktree");
+  });
+
+  it("Issueが閉じられて畳まれる質問セッションには、新しく質問する旨を出す", () => {
+    const notice = describeSessionReap(
+      session({ reapAt: "2026-08-16T12:10:00.000Z", reapReason: "QUESTION_CLOSED" }),
+      NOW,
+    );
     expect(notice?.detail).toContain("新しく質問してください");
+    expect(notice?.detail).not.toContain("セッションを復旧");
     expect(notice?.detail).not.toContain("worktree");
   });
 

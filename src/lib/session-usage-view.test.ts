@@ -5,9 +5,11 @@ import {
   buildPhaseBreakdown,
   buildQuotaEstimate,
   buildSessionUsageSummary,
+  fillUsageDays,
   formatUsageTokens,
   formatUsageUsd,
   isUsageKindInWorkFlow,
+  niceAxisScale,
   sessionUsageCostSplit,
   sessionUsageIssueKey,
   sessionUsageModelLabel,
@@ -670,5 +672,90 @@ describe("sessionUsageModelLabel", () => {
 
   it("Codexなど対応表に無いモデルはそのまま出す", () => {
     expect(sessionUsageModelLabel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+  });
+});
+
+describe("fillUsageDays", () => {
+  it("記録の無い日を0の行で埋め、期間の全日（日本時間）を古い順に並べる（#3038）", () => {
+    // 8/28と8/30だけに記録がある3日間。間の8/29が抜けたままだと縦棒が連続して見える。
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "a", endedAt: "2026-08-28T02:00:00.000Z", costUsd: 5 }),
+        entry({ sessionId: "b", endedAt: "2026-08-30T02:00:00.000Z", costUsd: 7 }),
+      ],
+      nowMs: NOW_MS,
+      days: 3,
+      reportedAt: null,
+    });
+    expect(summary.byDay.map((day) => day.date)).toEqual(["2026-08-28", "2026-08-30"]);
+
+    const days = fillUsageDays(summary.byDay, summary.since, summary.until);
+
+    expect(days.map((day) => day.date)).toEqual(["2026-08-28", "2026-08-29", "2026-08-30"]);
+    expect(days.map((day) => day.costUsd)).toEqual([5, 0, 7]);
+    // 埋めた行も、画面が読む形（エージェント別・実行経路別）を持つ。
+    expect(days[1].byAgent.claude.costUsd).toBe(0);
+    expect(days[1].bySource["github-actions"].costUsd).toBe(0);
+  });
+
+  it("記録が1件も無い期間でも、全日を0で並べる", () => {
+    const days = fillUsageDays(
+      [],
+      new Date(Date.parse("2026-08-27T15:00:00.000Z")).toISOString(),
+      new Date(NOW_MS).toISOString(),
+    );
+    // 日本時間の8/28 0:00（UTC 8/27 15:00）から8/30まで。
+    expect(days.map((day) => day.date)).toEqual(["2026-08-28", "2026-08-29", "2026-08-30"]);
+  });
+
+  it("期間の外に出た日は落とさず並べる（合計と棒の総和を合わせる）", () => {
+    const stray = fillUsageDays(
+      [
+        {
+          date: "2026-09-01",
+          sessions: 1,
+          responses: 1,
+          inputTokens: 0,
+          cacheCreateTokens: 0,
+          cacheReadTokens: 0,
+          contextTokens: 0,
+          outputTokens: 0,
+          costUsd: 3,
+          byAgent: {
+            claude: { sessions: 1, responses: 1, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 3 },
+            codex: { sessions: 0, responses: 0, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 },
+          },
+          bySource: {
+            local: { sessions: 1, responses: 1, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 3 },
+            "github-actions": { sessions: 0, responses: 0, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 },
+          },
+        },
+      ],
+      new Date(Date.parse("2026-08-29T15:00:00.000Z")).toISOString(),
+      new Date(NOW_MS).toISOString(),
+    );
+    expect(stray.map((day) => day.date)).toEqual(["2026-08-30", "2026-09-01"]);
+  });
+
+  it("解釈できない期間はそのまま返す", () => {
+    expect(fillUsageDays([], "invalid", "invalid")).toEqual([]);
+  });
+});
+
+describe("niceAxisScale", () => {
+  it("最大を含む切りの良い上限と、0から始まる等間隔の目盛りを返す", () => {
+    // 445.4÷4≒111なので、間隔は100では足りず200になる（目盛りは4本前後に収める）。
+    expect(niceAxisScale(445.4)).toEqual({ max: 600, step: 200, ticks: [0, 200, 400, 600] });
+    expect(niceAxisScale(261.9)).toEqual({ max: 300, step: 100, ticks: [0, 100, 200, 300] });
+    expect(niceAxisScale(20)).toEqual({ max: 20, step: 5, ticks: [0, 5, 10, 15, 20] });
+  });
+
+  it("小さな金額でも小数の誤差を持ち込まない", () => {
+    expect(niceAxisScale(0.3).ticks).toEqual([0, 0.1, 0.2, 0.3]);
+  });
+
+  it("全日が0のときは$1を上限にして目盛りだけ描ける", () => {
+    expect(niceAxisScale(0)).toEqual({ max: 1, step: 1, ticks: [0, 1] });
+    expect(niceAxisScale(Number.NaN)).toEqual({ max: 1, step: 1, ticks: [0, 1] });
   });
 });

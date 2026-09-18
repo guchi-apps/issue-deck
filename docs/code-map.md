@@ -3199,7 +3199,8 @@ export function POST(request: NextRequest) {
   **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
   終わらないセッションに終了予告が出る）。**横断質問セッションは
   質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
-  こちらはcwdが質問Issue間で共有されるため会話を引き継がない）。設計は
+  こちらはcwdが質問Issue間で共有されるため`--continue`ではなく、質問Issueごとに控えたsessionIdで
+  `--resume`する。#3033）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。一覧は
   `scripts/local-repo-pr-policy.conf`、判定は`scripts/lib/pr-policy.sh`で、**起動プロンプトを
@@ -4024,11 +4025,27 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   `~/.codex/sessions/*.jsonl`の`rate_limits`を拾って上書きするだけの表なので、新規実行を一時停止すると
   その瞬間の値のまま凍結する。**解除の判定を`usedPercent`が下がったかで書くと、一時停止したエージェントは
   永久に自動解除されない。** 凍結時点で確定している`primaryResetsAt`（未来の固定時刻）の経過で判定すること
+- **画面のCodex枠（`/api/codex/usage`・`/api/session-usage`の`planUsage.codex`）はops-dashboardの値を正とする**
+  （#3037）。`getCodexUsage`（`src/lib/dispatch/codex-usage.ts`）が`OPS_DASHBOARD_URL`＋`OPS_API_TOKEN`で
+  ops-dashboardの`GET /api/ai-usage`から`chatgpt`の枠を読み（`ops-dashboard-codex-usage.ts`、5分キャッシュ）、
+  読めないときだけ上の`CodexUsageSnapshot`へ戻る。**`wham/usage`をissue-deckから直接叩かない**——リフレッシュ
+  トークンが使うたびにローテーションするため、ops-dashboard・Codex CLIのどちらかのトークンを失効させる。
+  スナップショットへ戻ったときは、リセット時刻を過ぎた枠を0%として出す（次のリセット時刻は推定値）。
+  自動一時停止（上の`sweepAgentUsageLimitPause`）は今もスナップショットを直接読んでいる
+- **Claudeの自動検知は5時間枠（`5h`）と週間枠（`7d`）の両方を見る**（#3013）。片方でも`rejected`
+  （または残り0%）なら`usage_limit`で止め、**両方**が戻ったときだけ解除する。週間枠を使い切った場合は
+  5時間枠側が`allowed`のままのことがあり、`5h`だけを見ると自動一時停止が発火しない
 - **自動検知（サブスク枠の使い切り）は動いているセッションへ何も送らない。** `sweepAgentUsageLimitPause`は
   `AppSetting`のフラグを立てる／解くだけで、`send-keys`は一切呼ばない。動いているセッションへ中断
   （C-c）を送るのは、人がトグルを手動でOFFにしたときだけ（既存の個別「停止」ボタン・#1332と同じ経路を
   対象セッションの本数ぶん繰り返す）。この線引きにより、`docs/multi-agent/gates.md`の
   「実行体が判断して送信する」禁止事項に触れず、新しい例外を追加する必要が無くなる
+- **自動で止まったあとに、動いているセッションを止める手段。** 一括トグルは自動で止まった時点で
+  すでにOFF表示になっており、そこを押すと`turnOn()`（再開）へ進むだけで、動いているセッションへの
+  C-cは送られない（C-c付きの`turnOffConfirmed`は、稼働中のトグルをOFFにするときだけ走る）。
+  したがって**自動一時停止のあとで動いているセッションを止めるには、Issue詳細の個別「停止」ボタン
+  （`issue-session-status.tsx`・#1332）を使う**。こちらはエージェント単位の一時停止の状態に
+  関わらず、セッションごとに固定のC-cを積む
 
 ## 環境変数
 

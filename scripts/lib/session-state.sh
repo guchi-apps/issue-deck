@@ -348,6 +348,62 @@ session_state_clear_codex_thread() {
   return 0
 }
 
+# そのセッションの種別（`implementation`・`question`・`manual-step`など）。記述子の`kind`。
+# **古い記述子・記述子が無い場合は`implementation`**（`session_state_write_descriptor`と同じ扱い）。
+session_state_session_kind() {
+  local session="$1" file kind
+  file="$(session_state_descriptor_file "$session" 2>/dev/null || true)" || {
+    printf 'implementation'
+    return 0
+  }
+  kind="$(session_state_field "$file" kind 2>/dev/null || true)"
+  printf '%s' "${kind:-implementation}"
+}
+
+# 横断質問セッション（`kind=question`）のClaude CodeのsessionIdを控え、畳んだ後の復旧で
+# `claude --resume <id>`へ渡すための宛先（#3033）。
+#
+# 質問セッションのcwdは質問Issueごとではなくリポジトリごとに固定されている（#1529）ため、
+# `--continue`（「そのcwdで最後に動いた会話」）だと別の質問の会話を拾う（#1648）。tmuxセッション名は
+# 質問Issueごとに一定なので、これをキーにsessionIdを控えれば、cwdが共有でも同じ質問の会話へ戻せる
+# （Codexの`.codex-thread`と同じ手口）。**書くのは`session-notify.sh`の`SessionStart`だけ。**
+# `session_state_remove`では消さない（畳んだ後にも要るため）。新しい会話で起こすときは
+# ランチャーが`session_state_clear_claude_session`で先に消す。
+session_state_claude_session_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.claude-session' "$(session_state_dir)" "$1"
+}
+
+# sessionIdを書く。フックのJSONから取り出した値をそのまま`--resume`へ渡すため、
+# UUIDの形だけはここで固定しておく。
+session_state_write_claude_session() {
+  local session="$1" id="$2" file content
+  [[ "$id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
+    return 1
+  file="$(session_state_claude_session_file "$session")" || return 1
+  printf -v content '%s\n' "$id"
+  session_state_write_file "$file" "$content"
+}
+
+# sessionIdを返す。無い・壊れている場合は非0（壊れた値はコマンド引数になるので返さない）。
+session_state_read_claude_session() {
+  local session="$1" file line
+  file="$(session_state_claude_session_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  line="$(head -1 "$file" 2>/dev/null || true)"
+  [[ "$line" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] ||
+    return 1
+  printf '%s' "$line"
+}
+
+# 新しい会話で起こす前に、前回のsessionIdを明示的に消す。
+session_state_clear_claude_session() {
+  local session="$1" file
+  file="$(session_state_claude_session_file "$session")" || return 1
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # Claude Codeがまだ開始していないことの印（#1465）。
 # `run-issue-session.sh`が`claude`を起動する直前に置き、`SessionStart`フックが消す。
 #
@@ -559,7 +615,8 @@ session_state_reason_changed() {
 # 引き継いだように見える。
 #
 # **`00.check-user`の印（`.check-user`・旧名`.plan`）とCodexのUUID（`.codex-thread`）は
-# 消さない**（#1905・#2520）。UUIDは次回の`codex resume`で前回の会話を特定するために必要で、
+# 消さない**（#1905・#2520）。質問セッションのsessionId（`.claude-session`・#3033）も同じ。
+# UUIDは次回の`codex resume`で前回の会話を特定するために必要で、
 # 新しい会話を起こす場合はランチャーが`session_state_clear_codex_thread`で先に消す。ここが
 # 消していたせいで、入力待ちのまま終わったセッションのIssueに`00.check-user`が付いたまま
 # 取り残されていた——ラベルはGitHubに残るのに、外す権利を表す印だけがホストから消えるため、

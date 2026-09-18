@@ -47,6 +47,12 @@ function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyR
       results: null,
       ...overrides,
     },
+    keepAlive: {
+      settings: { enabled: false, startHour: 7, endHour: 23 },
+      withinHours: true,
+      probedAt: null,
+      runningUntil: null,
+    },
   };
 }
 
@@ -109,6 +115,34 @@ describe("NightlyRunPanel", () => {
 
     fireEvent.click(screen.getByLabelText("次の5時間枠での実行を有効にする"));
     expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { enabled: false } });
+  });
+
+  /** #3032 */
+  it("5時間枠を開けておく設定の切り替えが送られる", () => {
+    const { onUpdateSettings } = renderPanel();
+
+    expect(screen.getByText("5時間枠を開けておく")).toBeTruthy();
+    expect(screen.getByText(/^OFFです/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("枠が止まっていたら自動で開ける"));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ keepAlive: { enabled: true } });
+  });
+
+  it("ONなら枠の状態と最後に開けた時刻を出す", () => {
+    const base = state();
+    renderPanel({
+      ...base,
+      keepAlive: {
+        settings: { enabled: true, startHour: 7, endHour: 23 },
+        withinHours: true,
+        // 2026-09-18 08:40 JST
+        probedAt: "2026-09-17T23:40:00.000Z",
+        runningUntil: "2026-09-18T04:40:00.000Z",
+      },
+    });
+
+    expect(screen.getByText("枠は動いています")).toBeTruthy();
+    expect(screen.getByText("08:40")).toBeTruthy();
+    expect(screen.getByText(/いまの枠は13:40にリセット/)).toBeTruthy();
   });
 
   it("取得前は骨組みだけ出す", () => {

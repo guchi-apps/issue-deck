@@ -4,7 +4,7 @@ import {
   parseNextWindowRunIntervalMinutes,
   parseNextWindowRunLeadMinutes,
 } from "@/lib/app-settings";
-import { fetchClaudeUsage } from "@/lib/claude/usage";
+import { fetchClaudeUsage, peekClaudeFiveHourWindow } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import type { ClaudeWindowSnapshot, NextWindowRunSettings } from "@/lib/next-window-run";
 
@@ -39,7 +39,9 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
  * いまのClaude 5時間枠を読む。取得できなければ`null`（呼び出し側は起動しない）。
  *
  * **この取得は最小の推論リクエスト1本で、送信そのものが枠を開始する**（`claude/usage.ts`）。
- * 予約が1件も無いとき・次枠実行がOFFのときは呼ばないこと。`fetchClaudeUsage`側に5分の
+ * 次枠実行としては、予約が1件も無いとき・次枠実行がOFFのときは呼ばないこと。例外は
+ * 「5時間枠を開けておく」（#3032）で、ONかつ時間帯の中で枠が止まっているときだけ、枠を開ける
+ * ために意図して呼ぶ（`claude-window-keepalive-run.ts`）。`fetchClaudeUsage`側に5分の
  * キャッシュがあるので、pollerが30秒ごとに呼んでも実際の送信は5分に1回に収まる。
  */
 export async function readClaudeWindowSnapshot(): Promise<ClaudeWindowSnapshot | null> {
@@ -57,6 +59,14 @@ export async function readClaudeWindowSnapshot(): Promise<ClaudeWindowSnapshot |
     // 非公開ヘッダに頼っているので、取れない日があっても画面と起動処理は止めない
     return null;
   }
+}
+
+/**
+ * 最後に取得できた5時間枠を、**送信せずに**読む（#3032）。まだ一度も取れていなければ`null`。
+ * 画面のメーターを「5時間枠を開けておく」の都合だけで出すときに使う。
+ */
+export function peekClaudeWindowSnapshot(): ClaudeWindowSnapshot | null {
+  return peekClaudeFiveHourWindow();
 }
 
 /** 次の5時間枠に積まれている予定の件数（0なら枠を取りに行かない） */

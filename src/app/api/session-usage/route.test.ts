@@ -39,7 +39,7 @@ vi.mock("@/lib/claude/usage", () => ({
     return fetchClaudeUsage;
   },
 }));
-vi.mock("@/lib/dispatch/codex-usage", () => ({ getLatestCodexUsage: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/dispatch/codex-usage", () => ({ getCodexUsage: vi.fn().mockResolvedValue(null) }));
 
 vi.mock("@/lib/github/app-auth", () => ({
   get getInstallationToken() {

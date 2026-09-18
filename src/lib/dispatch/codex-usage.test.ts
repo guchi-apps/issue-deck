@@ -52,4 +52,24 @@ describe("toCodexUsage", () => {
       { label: "週間", usedPercent: 7, remainingPercent: 93 },
     ]);
   });
+
+  it("リセット時刻を過ぎた枠は0%とし、次のリセット時刻を枠の長さずつ進める（#3037）", () => {
+    const usage = toCodexUsage(
+      {
+        host: "subpc",
+        planType: "plus",
+        observedAt: new Date("2026-08-30T06:00:00Z"),
+        primaryUsedPercent: 45,
+        primaryWindowMinutes: 300,
+        primaryResetsAt: new Date("2026-08-30T08:00:00Z"),
+        secondaryUsedPercent: 70,
+        secondaryWindowMinutes: 10_080,
+        secondaryResetsAt: new Date("2026-09-06T03:00:00Z"),
+      },
+      new Date("2026-09-14T00:00:00Z").getTime(),
+    );
+    const weekly = usage.windows[1];
+    expect(weekly).toMatchObject({ usedPercent: 0, remainingPercent: 100 });
+    expect(new Date(weekly.resetsAt * 1000).toISOString()).toBe("2026-09-20T03:00:00.000Z");
+  });
 });

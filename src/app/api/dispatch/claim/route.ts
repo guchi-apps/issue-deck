@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
   // （画面のポーリングに載せると、アプリを閉じているときのための通知が閉じている間だけ止まる）。
   // **失敗してもジョブの払い出しは続ける。**
   if (!fast) {
-    // サブスク枠の使い切り・回復を検知し、エージェット別の一時停止を自動でON/OFFする
+    // サブスク枠の使い切り・回復を検知し、エージェント別の一時停止を自動でON/OFFする
     // （#2994）。**次枠実行より先に回す**——ここで立てた一時停止を、直後の次枠実行の
     // 起動判定にも効かせるため。失敗しても払い出しは続ける
     try {
@@ -81,8 +82,8 @@ export async function POST(request: NextRequest) {
       console.error("[POST /api/dispatch/claim] 予約実行の古い結果行を消せませんでした:", error);
     }
     // 次枠実行（#2995）。Claudeの5時間枠の残りが設定ぶんを切っていれば1件だけ起動する。
-    // **予定が無いときとOFFのときは枠を取りに行かない**——取得は最小の推論リクエスト1本で、
-    // 送信そのものが枠を開始してしまう（`next-window-run-db.ts`）
+    // **次枠実行としては、予定が無いときとOFFのときは枠を取りに行かない**——取得は最小の推論リクエスト1本で、
+    // 送信そのものが枠を開始してしまう（`next-window-run-db.ts`。例外は下の「5時間枠を開けておく」）
     try {
       const nextWindow = await launchNextWindowRunEntries({ hostName });
       if (nextWindow.actions.length > 0) {
@@ -94,6 +95,21 @@ export async function POST(request: NextRequest) {
       }
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 次枠実行の予定を起動できませんでした:", error);
+    }
+    // 5時間枠を開けておく（#3032）。ONで時間帯の中、かつ枠が止まっているときだけ最小の探りを
+    // 1本送る。**次枠実行の後に回す**——次枠実行が同じ巡回で枠を取得していれば、その結果を
+    // 見て送らずに済む。失敗しても払い出しは続ける
+    try {
+      const keepAlive = await keepClaudeWindowOpen();
+      if (keepAlive.decision.action === "probe") {
+        console.info(
+          `[claude-window-keepalive] 5時間枠を開ける探りを送りました（リセット: ${
+            keepAlive.resetsAt === null ? "取得できず" : new Date(keepAlive.resetsAt).toISOString()
+          }）`,
+        );
+      }
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 5時間枠を開けておく処理に失敗しました:", error);
     }
     try {
       await sweepCheckUserPushNotifications();

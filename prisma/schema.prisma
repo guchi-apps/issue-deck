@@ -499,6 +499,17 @@ model AppSetting {
   // 1件起動してから次を起動するまで空ける時間（分）。リセットの瞬間に全部走らせないための間隔
   nextWindowRunIntervalMinutes Int      @default(10)
 
+  // 5時間枠を開けておく（#3032）。**指定した時間帯（日本時間の時）のあいだ、枠が止まっていれば**
+  // pollerの巡回ついでに最小の推論リクエストを1本送って枠を開ける。枠は最初のリクエストで始まるため、
+  // 作業前に開けておくと上限に当たってもリセットが早く来る。判定は`src/lib/claude-window-keepalive.ts`。
+  // **既定はOFF**——ONにすると、使わない日も枠が開き続ける（消費は1回あたり数トークン）
+  claudeWindowKeepAliveEnabled   Boolean   @default(false)
+  // 開ける時間帯の開始・終了（時・0〜23）。開始＝終了は終日。開始＞終了は日付をまたぐ（22〜6など）
+  claudeWindowKeepAliveStartHour Int       @default(7)
+  claudeWindowKeepAliveEndHour   Int       @default(23)
+  // 最後に枠を開ける探りを送った時刻。画面の「最後に開けた時刻」に出す
+  claudeWindowKeepAliveProbedAt  DateTime?
+
   // エージェント別の新規実行の一時停止（#2994）。null＝稼働中、"manual"＝人がトグルをOFFにした、
   // "usage_limit"＝サブスク枠を使い切ったと検知して自動でOFFにした。**列はStringで正の一覧は
   // `src/lib/dispatch/dispatch-job.ts`のAGENT_PAUSE_REASONSに持つ**（他のコード付き列と同じ作法）。

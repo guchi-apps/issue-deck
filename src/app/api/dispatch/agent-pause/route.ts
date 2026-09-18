@@ -6,7 +6,7 @@ import { setAgentDispatchPause } from "@/lib/dispatch/jobs";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
- * エージェット別の新規実行の一時停止を、人が手動で切り替える入口（#2994）。
+ * エージェント別の新規実行の一時停止を、人が手動で切り替える入口（#2994）。
  *
  * **押すのは人。** ここは`AppSetting`の一時停止理由（`manual`）を書き換えるだけで、
  * 動いているセッションへは何も送らない（`send-keys`を持たない。`sessions/answer-mode`と
