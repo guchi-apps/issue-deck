@@ -1,7 +1,7 @@
 "use client";
 
-import { Loader2, Moon, RefreshCw, X } from "lucide-react";
-import { useMemo } from "react";
+import { CalendarClock, Hourglass, Loader2, Moon, RefreshCw, X } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { NIGHTLY_RUN_START_HOUR_OPTIONS } from "@/lib/app-settings";
+import type { ScheduledRunSettingsPatch } from "@/hooks/use-nightly-run";
+import { useNow } from "@/hooks/use-now";
+import {
+  NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
+  NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
+  NIGHTLY_RUN_START_HOUR_OPTIONS,
+} from "@/lib/app-settings";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatTimeOfDay } from "@/lib/format-date-time";
+import { formatResetCountdown } from "@/lib/format-reset";
 import { START_IMPLEMENTATION_OPTIONS } from "@/lib/github/start-implementation";
 import {
   NIGHTLY_RUN_OUTCOME_DESCRIPTIONS,
@@ -27,18 +34,27 @@ import {
   summarizeNightlyRunOutcomes,
   type NightlyRunEntryView,
   type NightlyRunOutcomeKind,
-  type NightlyRunSettings,
   type NightlyRunState,
 } from "@/lib/nightly-run";
+import {
+  describeNextWindowRunSchedule,
+  formatNextWindowRunKeyLabel,
+  type NextWindowRunWindowView,
+} from "@/lib/next-window-run";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 
 /**
- * 「夜間実行」画面（#2772）。今夜の予定と、直近の夜の結果（5分類）を1画面に置く。
+ * 「予約実行」画面（#2772・#2995）。**積んで、あとで起きる予定を1画面にまとめる。**
+ *
+ * 節は2つ。「次の5時間枠」（Claudeのプラン枠のリセット時刻で決まる窓）と「今夜の夜間実行」
+ * （時計で決まる窓）で、どちらも「予定 → 直近1回の結果（5分類）」の同じ形で並べる。
+ * 見る場所を2つに分けないのは、人から見ればどちらも「積んでおいたものが後で走る」1つの
+ * 仕組みだから（`docs/code-map.md`「同じ状態を2か所で言わせない」）。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`release-history-panel.tsx`と同じ切り分け）。
- * 設定（有効／無効・開始時刻）も右上に置き、**切り替えた時点で保存する**（設定ダイアログの
- * 「実行設定」には載せない。あちらは保存ボタンを押すまで効かない値の区分）。
+ * 設定（有効／無効・時刻・残り時間・間隔）も各節の中に置き、**切り替えた時点で保存する**
+ * （設定ダイアログの「実行設定」には載せない。あちらは保存ボタンを押すまで効かない値の区分）。
  */
 export function NightlyRunPanel({
   state,
@@ -58,21 +74,23 @@ export function NightlyRunPanel({
   isSubmitting: boolean;
   onRefresh: () => void;
   onCancel: (entryId: string) => void;
-  onUpdateSettings: (patch: Partial<NightlyRunSettings>) => void;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
   /** Issue詳細を開く（シェルの`openUsageIssue`と同じ引き当て。同期済みのIssueが無ければ何も起きない） */
   onOpenIssue: (repositoryFullName: string, issueNumber: number) => void;
   compact?: boolean;
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    <div className={cn("flex flex-col gap-5", className)}>
       <header className="flex flex-wrap items-start gap-2">
         <div className="mr-auto">
           <h2 className="flex items-center gap-1.5 text-sm font-bold">
-            <Moon className="size-4" aria-hidden />
-            夜間実行
+            <CalendarClock className="size-4" aria-hidden />
+            予約実行
           </h2>
-          {state && <ScheduleLine state={state} compact={compact} />}
+          <p className="text-[11px] text-muted-foreground">
+            積んだIssueは、窓が開いた時点でサブPCの巡回が順に起動します
+          </p>
         </div>
         <Button variant="outline" size="icon" className="size-7" onClick={onRefresh} title="更新">
           {isLoading ? (
@@ -86,138 +104,309 @@ export function NightlyRunPanel({
 
       <ApiErrorMessage message={error} />
 
-      {state ? (
-        <SettingsRow settings={state.settings} isSubmitting={isSubmitting} onUpdate={onUpdateSettings} />
-      ) : (
-        <Skeleton className="h-9 w-full" />
-      )}
-
-      <section className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-[13px] font-semibold">
-            今夜の予定
-            {state && (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {state.queued.length}件・積んだ順に起動
-              </span>
-            )}
-          </h3>
-        </div>
-        {!state ? (
-          <Skeleton className="h-16 w-full" />
-        ) : state.queued.length === 0 ? (
-          <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-            予定はありません。Issue詳細の「実装を開始」で実行先に「今夜の夜間実行」を選ぶと、ここに並びます。
-          </p>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {state.queued.map((entry) => (
-              <QueuedRow
-                key={entry.id}
-                entry={entry}
-                compact={compact}
-                isSubmitting={isSubmitting}
-                onCancel={() => onCancel(entry.id)}
-                onOpenIssue={onOpenIssue}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-[13px] font-semibold">
-            {state?.results ? `${formatNightKey(state.results.nightKey)}の夜の結果` : "前の夜の結果"}
-            {state?.results && (
-              <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {state.results.entries.length}件
-              </span>
-            )}
-          </h3>
-          {!compact && state?.results && (
-            <span className="text-[11px] text-muted-foreground">結果は次の夜間実行が始まるまで残ります</span>
-          )}
-        </div>
-        {!state ? (
+      {!state ? (
+        <>
+          <Skeleton className="h-9 w-full" />
           <Skeleton className="h-24 w-full" />
-        ) : !state.results ? (
-          <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-            まだ一度も走っていません。
-          </p>
-        ) : (
-          <ResultsSection entries={state.results.entries} compact={compact} onOpenIssue={onOpenIssue} />
-        )}
-      </section>
+        </>
+      ) : (
+        <>
+          <ClaudeWindowMeter window={state.nextWindow.window} />
+
+          <ScheduleSection
+            icon={<Hourglass className="size-3.5" aria-hidden />}
+            title="次の5時間枠"
+            scheduleLine={describeNextWindowRunSchedule(
+              state.nextWindow.settings,
+              state.nextWindow.window,
+            )}
+            settings={
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
+                <label className="flex items-center gap-2 text-[13px] font-medium">
+                  <Checkbox
+                    checked={state.nextWindow.settings.enabled}
+                    disabled={isSubmitting}
+                    onCheckedChange={(checked) =>
+                      onUpdateSettings({ nextWindow: { enabled: checked === true } })
+                    }
+                  />
+                  <span>次の5時間枠での実行を有効にする</span>
+                </label>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>起動する残り時間</span>
+                  <Select
+                    value={String(state.nextWindow.settings.leadMinutes)}
+                    disabled={isSubmitting}
+                    onValueChange={(value) =>
+                      onUpdateSettings({ nextWindow: { leadMinutes: Number(value) } })
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS.map((minutes) => (
+                        <SelectItem key={minutes} value={String(minutes)}>
+                          {minutes}分
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>起動の間隔</span>
+                  <Select
+                    value={String(state.nextWindow.settings.intervalMinutes)}
+                    disabled={isSubmitting}
+                    onValueChange={(value) =>
+                      onUpdateSettings({ nextWindow: { intervalMinutes: Number(value) } })
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS.map((minutes) => (
+                        <SelectItem key={minutes} value={String(minutes)}>
+                          {minutes === 0 ? "空けない" : `${minutes}分`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            }
+            hint={
+              !compact && (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  5時間枠の残りが{state.nextWindow.settings.leadMinutes}
+                  分を切ってから、1件ずつ起動します。セッションは枠のリセットをまたいで走るので、
+                  <strong className="font-semibold text-foreground">
+                    次の5時間枠のカウントがその時点から始まります
+                  </strong>
+                  。枠が動いていないときは待たずに起動します（起動そのものが枠の開始になるため）。
+                </p>
+              )
+            }
+            emptyText="予定はありません。Issue詳細の「実装を開始」で実行先に「次の5時間枠」を選ぶと、ここに並びます。"
+            resultsTitle={
+              state.nextWindow.results
+                ? `${formatNextWindowRunKeyLabel(state.nextWindow.results.runKey)}の枠の結果`
+                : "前回の結果"
+            }
+            queued={state.nextWindow.queued}
+            results={state.nextWindow.results?.entries ?? null}
+            compact={compact}
+            isSubmitting={isSubmitting}
+            onCancel={onCancel}
+            onOpenIssue={onOpenIssue}
+          />
+
+          <ScheduleSection
+            icon={<Moon className="size-3.5" aria-hidden />}
+            title="今夜の夜間実行"
+            scheduleLine={describeNightlyScheduleLine(state, compact)}
+            settings={
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
+                <label className="flex items-center gap-2 text-[13px] font-medium">
+                  <Checkbox
+                    checked={state.settings.enabled}
+                    disabled={isSubmitting}
+                    onCheckedChange={(checked) =>
+                      onUpdateSettings({ nightly: { enabled: checked === true } })
+                    }
+                  />
+                  <span>夜間実行を有効にする</span>
+                </label>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>開始時刻</span>
+                  <Select
+                    value={String(state.settings.startHour)}
+                    disabled={isSubmitting}
+                    onValueChange={(value) =>
+                      onUpdateSettings({ nightly: { startHour: Number(value) } })
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {NIGHTLY_RUN_START_HOUR_OPTIONS.map((hour) => (
+                        <SelectItem key={hour} value={String(hour)}>
+                          {formatNightlyRunHour(hour)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span>（日本時間・3時間のあいだ起動を試みます）</span>
+                </div>
+              </div>
+            }
+            emptyText="予定はありません。Issue詳細の「実装を開始」で実行先に「今夜の夜間実行」を選ぶと、ここに並びます。"
+            resultsTitle={
+              state.results ? `${formatNightKey(state.results.nightKey)}の夜の結果` : "前の夜の結果"
+            }
+            queued={state.queued}
+            results={state.results?.entries ?? null}
+            compact={compact}
+            isSubmitting={isSubmitting}
+            onCancel={onCancel}
+            onOpenIssue={onOpenIssue}
+          />
+        </>
+      )}
     </div>
   );
 }
 
-function ScheduleLine({ state, compact }: { state: NightlyRunState; compact: boolean }) {
+/**
+ * いまのClaude 5時間枠。**「AI使用量」画面と同じ値**（`/api/claude/usage`）で、ここでは
+ * 予約の起動時刻を読むために出す。取りに行っていない（次枠実行がOFFで予定も無い）ときは出さない。
+ */
+function ClaudeWindowMeter({ window }: { window: NextWindowRunWindowView | null }) {
+  // 残り時間の表示だけは時計に依る（`useNow`。取り直しの間隔は`useNightlyRun`と同じ30秒）。
+  // **描画中に`Date.now()`を読まない**（`react-hooks/purity`）
+  const now = useNow();
+  if (!window) return null;
+  if (window.phase === "unknown") {
+    return (
+      <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+        Claudeの5時間枠の状況を取得できていません。取得できるまで次枠実行は起動しません。
+      </p>
+    );
+  }
+
+  const used = window.usedPercent;
+  // `useNow`は最初の描画で`null`を返す（サーバーとクライアントで時刻がずれないようにするため）。
+  // その間はカウントダウンを出さず、絶対時刻だけを出す
+  const countdown =
+    window.resetsAt && now !== null
+      ? formatResetCountdown(new Date(window.resetsAt).getTime() / 1000, now)
+      : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-3">
+      <span className="text-[11px] text-muted-foreground">いまの5時間枠</span>
+      <span className="font-mono text-sm font-semibold tabular-nums">
+        {used === null ? "—" : `${Math.round(used)}%`}
+      </span>
+      <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-[width]"
+          style={{ width: `${Math.min(100, Math.max(0, used ?? 0))}%` }}
+        />
+      </div>
+      <span className="text-[11px] text-muted-foreground">
+        {window.phase === "idle"
+          ? "枠は動いていません"
+          : window.resetsAt
+            ? `${formatTimeOfDay(window.resetsAt)}にリセット${countdown ? `（${countdown}）` : ""}`
+            : ""}
+        {window.opensAt && window.phase === "waiting"
+          ? ` ・ ${formatTimeOfDay(window.opensAt)}から起動`
+          : ""}
+      </span>
+    </div>
+  );
+}
+
+function describeNightlyScheduleLine(state: NightlyRunState, compact: boolean): string {
   const { settings, window } = state;
   const hour = formatNightlyRunHour(settings.startHour);
   if (!settings.enabled) {
-    return (
-      <p className="text-[11px] text-muted-foreground">
-        夜間実行はOFFです。積んだIssueはONにした夜の{hour}から起動します。
-      </p>
-    );
+    return `夜間実行はOFFです。積んだIssueはONにした夜の${hour}から起動します。`;
   }
   if (window.isOpen) {
-    return (
-      <p className="text-[11px] text-muted-foreground">
-        実行時間内（{describeNightlyRunWindowHours(settings.startHour)}）です。予定はサブPCの巡回のたびに順に起動します。
-      </p>
-    );
+    return `実行時間内（${describeNightlyRunWindowHours(settings.startHour)}）です。予定はサブPCの巡回のたびに順に起動します。`;
   }
-  return (
-    <p className="text-[11px] text-muted-foreground">
-      次は {formatTimeOfDay(window.nextStartsAt)} に開始
-      {compact ? "" : "します。同時に走る本数は実行設定の「サブPCの同時実行数」に従い、空くたびに次のIssueへ進みます"}
-    </p>
-  );
+  return compact
+    ? `次は ${formatTimeOfDay(window.nextStartsAt)} に開始`
+    : `次は ${formatTimeOfDay(window.nextStartsAt)} に開始します。同時に走る本数は実行設定の「サブPCの同時実行数」に従い、空くたびに次のIssueへ進みます`;
 }
 
-function SettingsRow({
+/** 1つの節（予定 → 直近の結果）。夜間実行と次枠実行で同じ形を使う */
+function ScheduleSection({
+  icon,
+  title,
+  scheduleLine,
   settings,
+  hint,
+  emptyText,
+  resultsTitle,
+  queued,
+  results,
+  compact,
   isSubmitting,
-  onUpdate,
+  onCancel,
+  onOpenIssue,
 }: {
-  settings: NightlyRunSettings;
+  icon: ReactNode;
+  title: string;
+  scheduleLine: string;
+  settings: ReactNode;
+  hint?: ReactNode;
+  emptyText: string;
+  resultsTitle: string;
+  queued: NightlyRunEntryView[];
+  results: NightlyRunEntryView[] | null;
+  compact: boolean;
   isSubmitting: boolean;
-  onUpdate: (patch: Partial<NightlyRunSettings>) => void;
+  onCancel: (entryId: string) => void;
+  onOpenIssue: (repositoryFullName: string, issueNumber: number) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
-      <label className="flex items-center gap-2 text-[13px] font-medium">
-        <Checkbox
-          checked={settings.enabled}
-          disabled={isSubmitting}
-          onCheckedChange={(checked) => onUpdate({ enabled: checked === true })}
-        />
-        <span>夜間実行を有効にする</span>
-      </label>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>開始時刻</span>
-        <Select
-          value={String(settings.startHour)}
-          disabled={isSubmitting}
-          onValueChange={(value) => onUpdate({ startHour: Number(value) })}
-        >
-          <SelectTrigger size="sm" className="w-24">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {NIGHTLY_RUN_START_HOUR_OPTIONS.map((hour) => (
-              <SelectItem key={hour} value={String(hour)}>
-                {formatNightlyRunHour(hour)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span>（日本時間・3時間のあいだ起動を試みます）</span>
+    <section className="flex flex-col gap-2">
+      <div>
+        <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
+          {icon}
+          {title}
+          <span className="ml-1 text-xs font-normal text-muted-foreground">
+            {queued.length}件・積んだ順に起動
+          </span>
+        </h3>
+        <p className="text-[11px] text-muted-foreground">{scheduleLine}</p>
       </div>
-    </div>
+
+      {settings}
+      {hint}
+
+      {queued.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          {emptyText}
+        </p>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          {queued.map((entry) => (
+            <QueuedRow
+              key={entry.id}
+              entry={entry}
+              compact={compact}
+              isSubmitting={isSubmitting}
+              onCancel={() => onCancel(entry.id)}
+              onOpenIssue={onOpenIssue}
+            />
+          ))}
+        </ul>
+      )}
+
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="text-[13px] font-semibold">
+          {resultsTitle}
+          {results && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {results.length}件
+            </span>
+          )}
+        </h4>
+      </div>
+      {!results ? (
+        <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+          まだ一度も走っていません。
+        </p>
+      ) : (
+        <ResultsSection entries={results} compact={compact} onOpenIssue={onOpenIssue} />
+      )}
+    </section>
   );
 }
 
@@ -284,7 +473,7 @@ function QueuedRow({
           className="h-7 shrink-0 gap-1 px-2 text-xs"
           disabled={isSubmitting}
           onClick={onCancel}
-          title="今夜の予定から外す"
+          title="予定から外す"
         >
           <X className="size-3" aria-hidden />
           取り消す
@@ -305,13 +494,13 @@ function QueuedRow({
   );
 }
 
-/** 予定の行に添える、朝にどうなるかの見込み */
+/** 予定の行に添える、起動した後どうなるかの見込み */
 function QueuedHint({ entry }: { entry: NightlyRunEntryView }) {
   if (entry.optionLabels.includes("21.plan-required")) {
-    return <span>→ 夜は計画の投稿で止まり、承認は朝に</span>;
+    return <span>→ 計画の投稿で止まり、承認は人が行う</span>;
   }
   if (entry.optionLabels.includes("22.merge-confirm-required")) {
-    return <span>→ 朝には「確認が必要」で止まる予定</span>;
+    return <span>→ 「確認が必要」で止まる予定</span>;
   }
   return <span>→ PR作成・自動レビュー・developマージまで進む</span>;
 }

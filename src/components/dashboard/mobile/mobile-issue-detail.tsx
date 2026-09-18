@@ -153,8 +153,8 @@ import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-req
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
-  findNightlyRunQueuedMark,
-  type NightlyRunQueuedMap,
+  findScheduledRunQueuedMark,
+  type ScheduledRunQueuedMap,
 } from "@/lib/nightly-run";
 import {
   isPullRequestWaitingStatus,
@@ -219,11 +219,11 @@ type MobileIssueDetailProps = {
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
   /**
-   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。PCの詳細・一覧の行と同じ表で、
+   * 予約実行に積まれているIssueの引き当て表（#2866）。PCの詳細・一覧の行と同じ表で、
    * こちらは全幅の開始ボタンの上に出す注釈に使う。
    */
-  nightlyRunQueued?: NightlyRunQueuedMap;
-  /** 「夜間実行」画面へ移る。省略すると注釈にその導線を出さない */
+  nightlyRunQueued?: ScheduledRunQueuedMap;
+  /** 「予約実行」画面へ移る。省略すると注釈にその導線を出さない */
   onOpenNightlyRun?: () => void;
   /** 今夜の予定を取り消す（`useNightlyRun`の`cancel`）。省略すると取り消しの導線を出さない */
   onCancelNightlyRun?: (entryId: string) => void;
@@ -462,8 +462,8 @@ export function MobileIssueDetail({
     jobs: dispatch.jobs,
     sessions: dispatch.sessions,
   });
-  // 「今夜の夜間実行」に積まれているか（#2866）。判定はPCの詳細・一覧の行と同じ引き当て表
-  const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
+  // 予約実行に積まれているか（#2866）。判定はPCの詳細・一覧の行と同じ引き当て表
+  const nightlyRunMark = findScheduledRunQueuedMark(nightlyRunQueued, issue.id);
   const {
     createComment,
     updateComment,
@@ -1147,7 +1147,7 @@ export function MobileIssueDetail({
           </div>
         )}
 
-        {/* 「今夜の夜間実行」に積まれている注釈（#2866）。**開始ボタンのすぐ上に置く**——
+        {/* 予約実行に積まれている注釈（#2866）。**開始ボタンのすぐ上に置く**——
             スマホでは全幅のボタンが視線の終点になるので、そこへ届く前に読ませる */}
         {nightlyRunMark && (
           <NightlyRunNotice

@@ -11,17 +11,19 @@ import {
   resolveDispatchAgentRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
-import { resolveNightlyRunLabelRejection } from "@/lib/nightly-run";
+import { resolveNightlyRunLabelRejection, type ScheduledRunKind } from "@/lib/nightly-run";
 import { nightlyRunIssueKey } from "@/lib/nightly-run-db";
 import { listNightlyRunState } from "@/lib/nightly-run-state";
+import { readClaudeWindowSnapshot } from "@/lib/next-window-run-db";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
- * 夜間実行（#2772）の予定と結果。
+ * 予約実行（夜間実行 #2772・次枠実行 #2995）の予定と結果。
  *
- * - `GET`: 「夜間実行」画面に出す状態（設定・窓・今夜の予定・直近の夜の結果）
- * - `POST`: Issueを「今夜の夜間実行」に積む。**いまは起動しない。** 起動先のホストは積む時点で
- *   決め、時刻が来たらそのホストのclaimで`enqueueDispatchJob`へ変換する（`nightly-run-launch.ts`）
+ * - `GET`: 「予約実行」画面に出す状態（設定・窓・予定・直近1回の結果を種類ごとに）
+ * - `POST`: Issueを「今夜の夜間実行」または「次の5時間枠」に積む（`kind`で選ぶ）。
+ *   **いまは起動しない。** 起動先のホストは積む時点で決め、窓が開いたらそのホストのclaimで
+ *   `enqueueDispatchJob`へ変換する（`nightly-run-launch.ts`・`next-window-run-launch.ts`）
  *
  * 積めない組み合わせはここで弾いて理由を返す（`POST /api/dispatch`と同じ考え方）。
  * オプションのラベル（`21.plan-required`等）は**呼び出し側（ダイアログ）が積む前に付ける**
@@ -35,6 +37,13 @@ export async function GET() {
   }
   const state = await listNightlyRunState();
   return NextResponse.json(state, { headers: { "Cache-Control": "no-store" } });
+}
+
+/** `kind`はリクエストのボディでは`nightly`／`next-window`で受ける（DBの語と分けてある） */
+function parseScheduledRunKind(value: unknown): ScheduledRunKind | null {
+  if (value === undefined || value === "nightly") return "NIGHTLY";
+  if (value === "next-window") return "NEXT_WINDOW";
+  return null;
 }
 
 function parseIssueTarget(
@@ -58,7 +67,8 @@ export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const target = parseIssueTarget(payload?.repository, payload?.issue);
   const hostName = parseDispatchHostName(payload?.host);
-  if (!target || !hostName) {
+  const kind = parseScheduledRunKind(payload?.kind);
+  if (!target || !hostName || !kind) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   // `agent`・`model`は`POST /api/dispatch`と同じく、未知の値は黙って既定へ落とさず400で断る
@@ -106,10 +116,15 @@ export async function POST(request: NextRequest) {
     where: { number: target.issueNumber, repository: { fullName: target.repositoryFullName } },
     select: { labels: { select: { name: true } } },
   });
-  const labelRejection = resolveNightlyRunLabelRejection(issue?.labels ?? []);
+  const labelRejection = resolveNightlyRunLabelRejection(issue?.labels ?? [], kind);
   if (labelRejection) {
     return NextResponse.json({ error: "label_blocked", message: labelRejection }, { status: 409 });
   }
+
+  // 次枠実行では**積んだ時点の枠のリセット時刻**を控える。この時刻を過ぎるまで起動しないのが
+  // 「次の」枠の実体（`next-window-run.ts`）。取れなければnullのまま積み、枠の状態だけで判定する
+  const reservedResetsAt =
+    kind === "NEXT_WINDOW" ? ((await readClaudeWindowSnapshot())?.resetsAt ?? null) : null;
 
   try {
     const entry = await db.nightlyRunEntry.create({
@@ -120,14 +135,17 @@ export async function POST(request: NextRequest) {
         agent,
         claudeModel,
         optionLabels,
+        kind,
+        reservedResetsAt: reservedResetsAt === null ? null : new Date(reservedResetsAt),
         activeKey: nightlyRunIssueKey(target.repositoryFullName, target.issueNumber),
         requestedByUserId: userId,
       },
     });
     return NextResponse.json({ entry: { id: entry.id } }, { status: 201 });
   } catch {
+    // `activeKey`は種類をまたいで一意。片方に積んであるIssueをもう片方へは積めない
     return NextResponse.json(
-      { error: "already_queued", message: "このIssueはすでに今夜の夜間実行に積んであります" },
+      { error: "already_queued", message: "このIssueはすでに予約実行に積んであります" },
       { status: 409 },
     );
   }

@@ -59,6 +59,30 @@ export function parseNightlyRunStartHour(value: unknown): number | null {
   return (NIGHTLY_RUN_START_HOUR_OPTIONS as readonly number[]).includes(value) ? value : null;
 }
 
+// 次枠実行（#2995）で起動を始める「5時間枠の残り時間」（分）。**枠の終わり際に寄せる値だけ**を
+// 並べる——2時間より手前を選べるようにすると「いまの枠で実行する」のと変わらなくなり、枠を
+// またいで次の枠を起こすという目的から外れる。
+export const NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS = [30, 45, 60, 90, 120] as const;
+export const NEXT_WINDOW_RUN_LEAD_MINUTES_DEFAULT = 60;
+
+export function parseNextWindowRunLeadMinutes(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS as readonly number[]).includes(value) ? value : null;
+}
+
+// 1件起動してから次を起動するまで空ける時間（分）。**0を残してある**のは、1件しか積まない
+// 使い方で待たされないようにするため。既定の10分は、枠が開いてから60分のあいだに6件まで
+// という見当（それ以上積むなら夜間実行の方が向く）。
+export const NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS = [0, 5, 10, 15, 30] as const;
+export const NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT = 10;
+
+export function parseNextWindowRunIntervalMinutes(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS as readonly number[]).includes(value)
+    ? value
+    : null;
+}
+
 // claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの候補値（#622）。
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない

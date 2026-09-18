@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
+import { launchNextWindowRunEntries } from "@/lib/next-window-run-launch";
 import { launchNightlyRunEntries } from "@/lib/nightly-run-launch";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import {
@@ -86,6 +87,21 @@ export async function POST(request: NextRequest) {
       }
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 夜間実行の予定を起動できませんでした:", error);
+    }
+    // 次枠実行（#2995）。Claudeの5時間枠の残りが設定ぶんを切っていれば1件だけ起動する。
+    // **予定が無いときとOFFのときは枠を取りに行かない**——取得は最小の推論リクエスト1本で、
+    // 送信そのものが枠を開始してしまう（`next-window-run-db.ts`）
+    try {
+      const nextWindow = await launchNextWindowRunEntries({ hostName });
+      if (nextWindow.actions.length > 0) {
+        console.info(
+          `[next-window-run] ${hostName} (${nextWindow.phase}): ${nextWindow.actions
+            .map((action) => `${action.repositoryFullName}#${action.issueNumber}=${action.result}`)
+            .join(", ")}`,
+        );
+      }
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 次枠実行の予定を起動できませんでした:", error);
     }
     try {
       await sweepCheckUserPushNotifications();

@@ -12,7 +12,7 @@ import {
   QA_ANSWER_MARKER,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
-import { selectNightlyRunQueuedMarks } from "@/lib/nightly-run";
+import { selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -836,7 +836,7 @@ describe("⋯メニューの「いまは実施しない」（#2458）", () => {
 // 「今夜の夜間実行」に積まれているIssueの注釈（#2866）
 describe("夜間実行に積まれているIssueの注釈", () => {
   function marksFor(enabled: boolean) {
-    return selectNightlyRunQueuedMarks({
+    return selectScheduledRunQueuedMarks({
       settings: { enabled, startHour: 1 },
       window: {
         nightKey: "2026-09-07",
@@ -856,6 +856,7 @@ describe("夜間実行に積まれているIssueの注釈", () => {
           agent: "claude",
           claudeModel: null,
           optionLabels: [],
+          kind: "NIGHTLY",
           status: "QUEUED",
           nightKey: null,
           createdAt: "2026-09-07T10:00:00.000Z",
@@ -864,6 +865,12 @@ describe("夜間実行に積まれているIssueの注釈", () => {
         },
       ],
       results: null,
+      nextWindow: {
+        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+        window: null,
+        queued: [],
+        results: null,
+      },
     });
   }
 

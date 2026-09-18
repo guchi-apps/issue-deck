@@ -44,8 +44,10 @@ export async function selectNightlyRunPushHold(now: Date): Promise<NightlyRunPus
   const window = resolveNightlyRunWindow(now, settings.startHour);
   if (now.getTime() >= window.morningAt.getTime()) return null;
 
+  // **夜間実行で起動したものだけを止める**（#2995）。次枠実行は枠のリセット時刻に従うので
+  // 昼に起動することもあり、そのぶんの確認待ちを翌朝まで伏せる理由が無い
   const entries = await db.nightlyRunEntry.findMany({
-    where: { status: "LAUNCHED", nightKey: window.nightKey },
+    where: { status: "LAUNCHED", kind: "NIGHTLY", nightKey: window.nightKey },
     select: { repositoryFullName: true, issueNumber: true },
   });
   if (entries.length === 0) return null;

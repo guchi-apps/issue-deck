@@ -23,7 +23,7 @@ import {
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
 import { selectSnoozedIssueIds, type SnoozeMap, type SnoozeTarget } from "@/lib/snooze";
-import type { NightlyRunQueuedMap } from "@/lib/nightly-run";
+import type { ScheduledRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -63,9 +63,9 @@ type MobileRepoIssuesScreenProps = {
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   onUnsnooze?: (target: SnoozeTarget) => void;
   /**
-   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
+   * 予約実行に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
    */
-  nightlyRunQueued?: NightlyRunQueuedMap;
+  nightlyRunQueued?: ScheduledRunQueuedMap;
 };
 
 export function MobileRepoIssuesScreen({

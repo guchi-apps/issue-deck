@@ -100,8 +100,8 @@ import {
 } from "@/lib/manual-step-attention";
 import { getLabelBadgeStyle } from "@/lib/label-color";
 import {
-  findNightlyRunQueuedMark,
-  type NightlyRunQueuedMap,
+  findScheduledRunQueuedMark,
+  type ScheduledRunQueuedMap,
 } from "@/lib/nightly-run";
 import {
   formatQuestionListCount,
@@ -204,12 +204,12 @@ type IssueListProps = {
    */
   snoozes?: SnoozeMap;
   /**
-   * 「今夜の夜間実行」に積まれているIssueの引き当て表（#2866。`selectNightlyRunQueuedMarks`）。
+   * 予約実行に積まれているIssueの引き当て表（#2866。`selectScheduledRunQueuedMarks`）。
    *
    * 積んでもラベル・ジョブ・セッションは付かないため、この表が無いと積んだ行はまだ何も指示して
    * いない行と見分けが付かない。省略時はチップを出さない。
    */
-  nightlyRunQueued?: NightlyRunQueuedMap;
+  nightlyRunQueued?: ScheduledRunQueuedMap;
   /** 保留にする・期限を付け替える（`useSnoozes`の`snooze`）。省略時は時計ボタンを出さない */
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   /** 保留を解除する（`useSnoozes`の`unsnooze`）。省略時は解除ボタンを出さない */
@@ -880,9 +880,9 @@ export function IssueList({
       : null;
     // 一覧に出すレビュー結果（#2855）。取れていないIssueはundefinedで、行にバッジが出ないだけ
     const codeReviewSummary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
-    // 「今夜の夜間実行」に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
+    // 予約実行に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
     // ので、この引き当て表だけが手がかりになる。渡されていない画面ではnullでチップも出ない
-    const nightlyRunMark = findNightlyRunQueuedMark(nightlyRunQueued, issue.id);
+    const nightlyRunMark = findScheduledRunQueuedMark(nightlyRunQueued, issue.id);
     // 承認ダイアログで許可を待っているか（#2971）。出口のボタンの言い方を「許可待ち」に変える
     // ——「Remote」だけだと、確認待ちの理由が質問なのかアクセスの許可なのかが行から読めない
     const permissionPending = issueSession ? describeSessionPermission(issueSession) !== null : false;
@@ -942,7 +942,7 @@ export function IssueList({
             <span className="flex min-w-0 items-center gap-1.5">
               <ManualStepVerifiedIcon verifiedAt={issue.manualStepVerifiedAt} />
               <ManualStepReadinessIcon readiness={prerequisiteReadiness?.get(issue.id)} />
-              {/* 「今夜の夜間実行」に積まれている行（#2866）。**進捗バーの左に置く**——
+              {/* 予約実行に積まれている行（#2866）。**進捗バーの左に置く**——
                   積んだだけの行は進捗もセッションも無く、この右クラスタで唯一の手がかりに
                   なる。バーの右（保留ボタン・アバターの側）は押せるものの並びなので、
                   押せない目印はバーより外へ出さない */}
