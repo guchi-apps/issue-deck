@@ -113,15 +113,33 @@ describe("agent_allowed_tools", () => {
       expect(withFiles).toEqual(expect.arrayContaining(rules));
     });
 
-    it("Read規則は1ファイルずつで、グロブを含まない", () => {
-      // **`Read(//…/**)`のようなディレクトリごとの許可を入れない。** 他Issueの指示ファイルまで
-      // 開くことになる。`Bash`側で`*`を禁じているのと同じ理由で、こちらも形で固定する。
+    it("ファイルとして渡したRead規則は1ファイルずつで、グロブを含まない", () => {
+      // **末尾`/`で明示しない限り、`Read(//…/**)`のようなディレクトリごとの許可にしない。**
+      // 他Issueの指示ファイルまで開くことになる。`Bash`側で`*`を禁じているのと同じ理由で、
+      // こちらも形で固定する。
       const withFiles = allowedTools(
         "/home/guchi/apps/issue-deck-worktrees/.prompts/issue-2778.md",
       ).split(",");
       for (const rule of withFiles.filter((r) => r.startsWith("Read("))) {
         expect(rule).toMatch(/^Read\(\/\/[^()*]+\)$/);
       }
+    });
+
+    it("末尾が/のパスはディレクトリとして中を丸ごと許可する（#3039）", () => {
+      // 添付画像の保存先（`fetch-issue-images.sh`）。ファイル名が起動時に決まらない。
+      const withDir = allowedTools("/tmp/issue-deck-images/").split(",");
+      expect(withDir).toContain("Read(//tmp/issue-deck-images/**)");
+      expect(withDir).toEqual(expect.arrayContaining(rules));
+      // 末尾の`/`が重なっていても1つにまとめる。
+      expect(allowedTools("/tmp/issue-deck-images//").split(",")).toContain(
+        "Read(//tmp/issue-deck-images/**)",
+      );
+    });
+
+    it("ルートそのものをディレクトリとして渡しても許可しない", () => {
+      // `Read(///**)`はファイルシステム全体を通してしまう。
+      expect(allowedTools("/").split(",")).toEqual(rules);
+      expect(allowedTools("//").split(",")).toEqual(rules);
     });
 
     it("ファイルを渡さなければRead規則は増えない", () => {
@@ -137,6 +155,8 @@ describe("agent_allowed_tools", () => {
         "/tmp/a,b/issue-2778.md",
         "/tmp/a b/issue-2778.md",
         "/tmp/issue-*.md",
+        "tmp/issue-deck-images/",
+        "/tmp/a b/issue-deck-images/",
       ).split(",");
       expect(dropped).toEqual(rules);
     });
