@@ -134,6 +134,14 @@ export function peekClaudeFiveHourWindow(): ClaudeWindowReading | null {
   return cache ? toClaudeWindowReading(cache.windows) : null;
 }
 
+/**
+ * 最後に取得できたウィンドウ一覧。**取得はしない**（`peekClaudeFiveHourWindow`と同じ理由）。
+ * 「AI使用量」の実行中セッション欄を20秒おきに取り直すとき（#3135）、5時間枠の換算に使う。
+ */
+export function peekClaudeUsageWindows(): ClaudeUsageWindow[] | null {
+  return cache ? cache.windows : null;
+}
+
 /** テスト用にモジュールキャッシュを破棄する。 */
 export function clearClaudeUsageCache() {
   cache = null;

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { fetchClaudeUsage } from "@/lib/claude/usage";
+import { fetchClaudeUsage, peekClaudeUsageWindows, type ClaudeUsageWindow } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import { getCodexUsage } from "@/lib/dispatch/codex-usage";
 import {
@@ -175,8 +175,9 @@ function toEntry(row: {
  *
  * issueNumberを持つ行はDBの`Issue`テーブル（Issue一覧画面向けに既に同期済み）から引くだけで、
  * 追加のAPI消費が無い。**issueNumberを持たないPR単体の行（developへのPRレビュー等）だけ**
- * GitHub APIへ都度問い合わせる——この画面は自動更新を持たず手動更新のみ（`use-session-usage.ts`）
- * なので、都度取得でもレート制限への影響は小さい。
+ * GitHub APIへ都度問い合わせる——期間の集計は自動更新を持たず手動更新のみ（`use-session-usage.ts`）
+ * なので、都度取得でもレート制限への影響は小さい。20秒おきに取り直す実行中のセッション（#3135）は
+ * 必ずissueNumberを持つため、この経路でGitHub APIを呼ばない。
  *
  * **リポジトリの突き合わせは`SessionUsage.repository`が持つ「ownerを除いた短い名前」でしか
  * 行えない**（`issue-deck-shell.tsx`の`openUsageIssue`と同じ前提）。取得できなかった行は
@@ -334,10 +335,64 @@ async function listCurrentSessionUsage(
   }
 }
 
+/**
+ * 5時間枠の実測換算（#2988）。`entries`はウィンドウの開始以降のClaudeの行を含んでいること。
+ * 期間の集計と実行中のセッションだけの取得（#3135）の両方が使う。
+ */
+function quotaEstimateOf(
+  fiveHourWindow: ClaudeUsageWindow | null,
+  entries: Pick<SessionUsageEntry, "agent" | "costUsd" | "endedAt">[],
+): QuotaEstimate | null {
+  return fiveHourWindow
+    ? buildQuotaEstimate({
+        entries,
+        usedPercent: fiveHourWindow.usedPercent,
+        resetsAt: fiveHourWindow.resetsAt,
+        windowDurationMs: fiveHourWindow.durationMs,
+      })
+    : null;
+}
+
+/**
+ * 実行中のセッションだけを返す（`?current=1`。#3135）。画面は「AI使用量」を開いている間、
+ * これを20秒おきに呼んで「実行中のセッション」欄だけを新しくする。
+ *
+ * **プラン枠は取得しない。** 取得は最小の推論リクエストで、送信そのものが枠を消費・開始する
+ * （`lib/claude/usage.ts`）。5時間枠の換算には、画面を開いたときの取得が残したキャッシュを
+ * 読むだけにする（無ければ換算なし＝割合を出さない）。期間の集計・Issue別の一覧も作らない。
+ */
+async function getCurrentOnly(): Promise<NextResponse> {
+  const now = new Date();
+  const fiveHourWindow = peekClaudeUsageWindows()?.find((w) => w.key === "5h") ?? null;
+  let quotaEstimate: QuotaEstimate | null = null;
+  if (fiveHourWindow?.resetsAt != null) {
+    const windowStartMs = fiveHourWindow.resetsAt * 1000 - fiveHourWindow.durationMs;
+    const windowRows = await db.sessionUsage.findMany({
+      where: { agent: "claude", endedAt: { gte: new Date(windowStartMs) } },
+      select: { agent: true, costUsd: true, endedAt: true },
+    });
+    quotaEstimate = quotaEstimateOf(
+      fiveHourWindow,
+      windowRows.map((row) => ({
+        agent: row.agent === "codex" ? "codex" : "claude",
+        costUsd: row.costUsd,
+        endedAt: row.endedAt.toISOString(),
+      })),
+    );
+  }
+
+  const currentSessions = await listCurrentSessionUsage(now, quotaEstimate);
+  return NextResponse.json({ currentSessions }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  if (request.nextUrl.searchParams.get("current") === "1") {
+    return getCurrentOnly();
   }
 
   const days = parseDays(request.nextUrl.searchParams.get("days"));
@@ -388,14 +443,7 @@ export async function GET(request: NextRequest) {
 
   // 5時間枠の実測換算（#2988）。`entries`は取得範囲を広げてあるぶん、期間の外（だがウィンドウ内）
   // の行も含む——`buildQuotaEstimate`・`buildIssueQuotaPercents`はどちらもそれを前提にしている。
-  const quotaEstimate: QuotaEstimate | null = fiveHourWindow
-    ? buildQuotaEstimate({
-        entries,
-        usedPercent: fiveHourWindow.usedPercent,
-        resetsAt: fiveHourWindow.resetsAt,
-        windowDurationMs: fiveHourWindow.durationMs,
-      })
-    : null;
+  const quotaEstimate = quotaEstimateOf(fiveHourWindow, entries);
   const quotaPercentByIssueKey = buildIssueQuotaPercents(entries, quotaEstimate);
   for (const issue of summary.byIssue) {
     issue.quotaPercent = quotaPercentByIssueKey.get(sessionUsageIssueKey(issue)) ?? null;

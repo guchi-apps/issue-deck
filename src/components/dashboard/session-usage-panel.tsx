@@ -1240,7 +1240,7 @@ function CurrentSessionBar({
     return (
       <div>
         <div className="h-2 rounded-full bg-muted" />
-        <p className="mt-0.5 text-[10px] text-muted-foreground italic">集計待ち（5分おきに報告）</p>
+        <p className="mt-0.5 text-[10px] text-muted-foreground italic">集計待ち（20秒おきに報告）</p>
       </div>
     );
   }
@@ -1289,8 +1289,9 @@ function OpenIssueButton({ session, onOpenIssue }: { session: CurrentSessionUsag
  * 「実行中のセッション」欄（#3084）。**いまサブPCで生きているセッションごとに、始まってからの
  * 使用量を並べる。** 画面のいちばん上に置き、期間（1日/7日/30日）には連動しない。
  *
- * 材料は実行状況パネルと同じセッション一覧と、pollerが5分おきに送る使用量で、使用量が
- * まだ届いていないセッションは「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
+ * 材料は実行状況パネルと同じセッション一覧と、pollerが20秒おきに送る動いている転記の使用量で
+ * （#3135）、画面を開いている間は20秒おきに取り直す。使用量がまだ届いていないセッションは
+ * 「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
  * 1本1カードで、応答数・コンテキストを5時間枠の割合と同じ行へ寄せる。
  */
 function CurrentSessionsSection({
@@ -1403,7 +1404,7 @@ function CurrentSessionsSection({
       )}
       {sessions.length > 0 && (
         <p className="text-[10px] text-muted-foreground">
-          状態は画面を開いた（更新した）時点のもので、自動では変わりません。金額はセッション開始からの累計（API換算の目安）で、期間の切り替えには連動しません。
+          状態と金額は画面を開いている間、20秒おきに更新します。金額はセッション開始からの累計（API換算の目安）で、期間の切り替えには連動しません。
         </p>
       )}
     </section>
@@ -1449,7 +1450,8 @@ export function SessionUsagePanel({
           <h2 className="text-sm font-bold">AI使用量</h2>
           <p className="text-[11px] text-muted-foreground">
             {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
-                開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする） */}
+                開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする）。
+                20秒おきに新しくなるのは「実行中のセッション」欄だけ（#3135） */}
             サブPCのClaude・CodexセッションとGitHub Actionsが使ったトークン
             {data?.reportedAt
               ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`

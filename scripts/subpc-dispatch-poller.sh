@@ -105,6 +105,8 @@
 #   NODE_MODULES_DEDUPE_INTERVAL_MINUTES
 #                                   node_modulesの重複を回収する間隔の分数（省略時は1440・0で無効）
 #   SESSION_USAGE_INTERVAL_MINUTES  トークン使用量を報告する間隔の分数（省略時は5・0で無効）
+#   SESSION_USAGE_LIVE_INTERVAL_SECONDS
+#                                   動いている転記だけの使用量を報告する間隔の秒数（省略時は20・0で無効）
 #   SESSION_USAGE_WINDOW_DAYS       1回の報告で開く転記の範囲の日数（省略時は2）
 #   SESSION_USAGE_BACKFILL_DAYS     初回だけ遡って埋める日数（省略時は30）
 #   CLAUDE_PROJECTS_DIR             転記の置き場（省略時は ~/.claude/projects）
@@ -432,6 +434,15 @@ NODE_MODULES_DEDUPE_INTERVAL_MINUTES="$(require_non_negative_int \
 # 数十ファイルで1秒前後で終わる。
 SESSION_USAGE_INTERVAL_MINUTES="$(require_non_negative_int \
   SESSION_USAGE_INTERVAL_MINUTES "${SESSION_USAGE_INTERVAL_MINUTES:-}" 5)"
+# 動いているセッションの使用量だけを報告する間隔（秒）。**0で無効**（#3135）。
+#
+# 「AI使用量」の実行中のセッション欄を20秒おきに新しくするためのもの。上の5分おきの報告は
+# 直近2日の転記を全部開く（実測で約180本・0.8秒・本文130KB）ので、それを20秒へ縮めずに、
+# **最終更新が直近の転記（と同じ作業ディレクトリの転記）だけ**を開く軽い報告を別に回す
+# （実測0.05秒・数KB）。刻みは速い巡回（`DISPATCH_FAST_POLL_INTERVAL_SECONDS`）に載るため、
+# それより細かくはならない。
+SESSION_USAGE_LIVE_INTERVAL_SECONDS="$(require_non_negative_int \
+  SESSION_USAGE_LIVE_INTERVAL_SECONDS "${SESSION_USAGE_LIVE_INTERVAL_SECONDS:-}" 20)"
 # 1回の報告で開く転記の範囲（日）。**pollerが止まっていた間を埋められる長さにする。**
 # 転記単位の集計は常にその転記の全期間ぶんなので、範囲を広げても数字は二重にならない
 # （同じ行を上書きするだけ）。
@@ -1552,6 +1563,63 @@ report_session_usage() {
     touch "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
+  return 0
+}
+
+# 動いているセッションの使用量だけを報告する（#3135）。
+#
+# 通常の報告（`report_session_usage`）と同じ受け口へ、**最終更新が直近の転記だけ**を集計して
+# 送る。受け口は`(host, agent, sessionId)`で上書きするので、5分おきの報告と重なっても
+# 二重には積まれない。「直近」は前回この報告を試みた時刻（初回は間隔の3倍前）で、報告が
+# 失敗し続けた間に動いた転記も、次に成功したときにまとめて拾える（落としても5分おきの報告が埋める）。
+#
+# **間隔は印のファイルではなく変数で測る**（再起動をまたいで持ち越す必要が無い）。
+# 失敗しても1巡を止めない。**埋め戻しが済むまでは走らせない**（埋め戻しは通常の報告の仕事）。
+SESSION_USAGE_LIVE_LAST=0
+report_live_session_usage() {
+  ((SESSION_USAGE_LIVE_INTERVAL_SECONDS > 0 && SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
+  [[ -f "$SESSION_USAGE_BACKFILL_STAMP" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+
+  local now since
+  now="$(date +%s)"
+  ((now - SESSION_USAGE_LIVE_LAST >= SESSION_USAGE_LIVE_INTERVAL_SECONDS)) || return 0
+  if ((SESSION_USAGE_LIVE_LAST > 0)); then
+    since=$((SESSION_USAGE_LIVE_LAST - 5))
+  else
+    since=$((now - SESSION_USAGE_LIVE_INTERVAL_SECONDS * 3))
+  fi
+  SESSION_USAGE_LIVE_LAST="$now"
+
+  local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+  local codex_sessions_dir="${CODEX_SESSIONS_DIR:-$HOME/.codex/sessions}"
+  local cutoff
+  cutoff="$(date -d "$((SESSION_USAGE_WINDOW_DAYS > 0 ? SESSION_USAGE_WINDOW_DAYS - 1 : 0)) days ago 00:00" +%s 2>/dev/null || echo 0)"
+
+  local claude_files codex_files claude_payload="" codex_payload=""
+  claude_files="$(session_usage_live_transcripts "$projects_dir" "$since" "$cutoff")"
+  codex_files="$(codex_session_usage_transcripts "$codex_sessions_dir" "$since")"
+  if [[ -n "$claude_files" ]]; then
+    claude_payload="$(printf '%s\n' "$claude_files" |
+      session_usage_aggregate 0 |
+      session_usage_report_payload "$HOST_NAME" 200 claude 2>/dev/null)" || claude_payload=""
+  fi
+  if [[ -n "$codex_files" ]]; then
+    codex_payload="$(printf '%s\n' "$codex_files" |
+      codex_session_usage_aggregate |
+      session_usage_report_payload "$HOST_NAME" 200 codex 2>/dev/null)" || codex_payload=""
+  fi
+
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    # 送るものが無いチャンク（`sessions: []`）は送らない（20秒ごとの空振りを増やさない）
+    [[ "$(printf '%s' "$line" | jq '.sessions | length' 2>/dev/null)" != "0" ]] || continue
+    if ! api_call POST /api/dispatch/session-usage "$line"; then
+      # 404（受け口の無い旧デプロイ）・000は通常の報告が扱う。ここは20秒ごとに走るので黙って見送る
+      return 0
+    fi
+  done <<<"${claude_payload}${claude_payload:+$'\n'}${codex_payload}"
   return 0
 }
 
@@ -3427,6 +3495,9 @@ run_once() {
     # （画面に出る記録が増えるため）。毎巡ではなく SESSION_USAGE_INTERVAL_MINUTES の
     # 間隔でだけ実際に走る。
     report_session_usage
+    # 動いているセッションだけの報告（#3135）。速い巡回が無効（`DISPATCH_FAST_POLL_INTERVAL_SECONDS=0`）
+    # でもここで回る（その場合の刻みは重い巡回の間隔になる）。
+    report_live_session_usage
     # Codexのプラン枠も同じ間隔で報告する（#2535）。Claudeの転記が無いホストでも独立して動く。
     report_codex_usage
   fi
@@ -3544,6 +3615,9 @@ wait_between_polls() {
     [[ "$SHUTDOWN" -eq 0 ]] || break
     if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$ANNOUNCE_ONLY" -eq 0 ]]; then
       claim_out_of_band
+      # 動いているセッションの使用量（#3135）。20秒の刻みを出すため、30秒の重い巡回ではなく
+      # 速い巡回に載せる。**dry-runでは呼ばない**（`report_session_usage`と同じ理由）
+      [[ "$DRY_RUN" -eq 1 ]] || report_live_session_usage
     fi
   done
 }
