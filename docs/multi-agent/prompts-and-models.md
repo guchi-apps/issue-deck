@@ -373,6 +373,8 @@ GitHub Actionsのように計画用と補助用には分けない。
 **選べる候補にHaiku・`auto`（CLIの既定）は無い**（#2756・#2776）。ローカルセッションは
 前述のとおりauto mode（`--permission-mode auto`）で起動しており、Haikuはauto modeで
 動作しない（[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)）。
+これは**メインセッションのモデル（`--model`）の制約**で、サブエージェントをHaikuで動かすのは
+問題ない（後掲「サブエージェントは既定でSonnetにする」。#3121）。
 `auto`（`--model`を付けずClaude Code側の設定・アカウントの既定に委ねる方式）は、
 「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により外した。
 候補の一覧は`CLAUDE_MODEL_OPTIONS`から`haiku`・`auto`を除いた`CLAUDE_LOCAL_MODEL_OPTIONS`
@@ -537,8 +539,10 @@ general-purpose）は、メインのモデルに関わらずSonnetで動かす�
   Bash・Read・Grepが通り、権限モードも`auto`のままだった（#3118の時点ではここを誤って書いていた）。
   確かめたのは読み取り専用のExploreだけで、general-purposeが書き込み系のツールを使うときの挙動は未確認
 - それでも既定にしないのは、**上乗せの削減が小さい**から。単価はSonnet 5が$2/$10、Haiku 4.5が
-  $1/$5で半額だが、上の30日の実測に当てると、OpusのExplore $73はSonnetで約$29、Haikuでも約$15に
-  なるだけで、サブエージェント全体でも**Sonnet比の削減は月$15〜25（全体の2%前後）**にとどまる。
+  $1/$5で半額だが、上の30日の実測に当てると、サブエージェント$119のうちOpusで動いていた
+  Explore $73の分は、Sonnetで約$29、Haikuでさらに約$15になるだけ。残り$46はどのモデルで
+  動いていたかの内訳を取っていないため幅を持たせて、**Sonnet比の上乗せ削減は月$15〜25
+  （全体の2%前後）**にとどまる。
   一方でHaikuは1世代前のモデルで、探索の取りこぼしや誤った要約はメインのセッション（費用の大半を
   占めるキャッシュ読み出し）の往復を増やす方向に効き、差額を簡単に食い潰す。Haikuでの探索品質は
   測っていないので、試すときは`ISSUE_DECK_CLAUDE_SUBAGENT_MODEL=haiku`で起動し、転記の費用と
