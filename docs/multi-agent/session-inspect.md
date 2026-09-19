@@ -169,7 +169,8 @@ scripts/session-usage.sh --all --json        # 全期間の正規化JSON
 ```
 転記（サブPC）
   → scripts/lib/session-usage.sh（集計・報告本文の組み立て）
-  → scripts/subpc-dispatch-poller.sh の report_session_usage（5分間隔）
+  → scripts/subpc-dispatch-poller.sh の report_session_usage（5分間隔・直近2日の転記を全部）
+                                    ＋ report_live_session_usage（20秒間隔・動いている転記だけ。#3135）
   → POST /api/dispatch/session-usage（src/lib/dispatch/session-usage.ts）
   → SessionUsage（1行＝転記1本）
   → GET /api/session-usage（src/lib/session-usage-view.ts で畳む）
@@ -197,6 +198,23 @@ scripts/session-usage.sh --all --json        # 全期間の正規化JSON
 - **`classify()`に作業場を足したときも印を足す**（#2832）。分類が変わっても既に報告済みの行は
   古い`repository`・`kind`のまま残り、再送しない限り画面から消えない
   （`SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP`がその例）
+
+### 実行中のセッションは20秒おきに新しくなる（#3135）
+
+「AI使用量」の実行中のセッション欄は、報告と画面の**両方**が20秒おきに動いて初めて新しくなる。
+画面だけ速くしても、材料が5分おきにしか届かなければ値は5分ごとにしか変わらない。
+
+- **報告は5分おきの全件を縮めず、軽い報告を別に回す。** 直近2日の転記を全部開く報告は実測で
+  約180本・0.8秒・本文130KBあり、20秒ごとには重い。`report_live_session_usage`は前回の報告以降に
+  更新された転記だけを開く（実測0.05秒・数KB）。間隔は`SESSION_USAGE_LIVE_INTERVAL_SECONDS`
+  （既定20・0で無効）で、30秒の重い巡回ではなく速い巡回（3秒刻み）に載せている
+- **動いている転記だけを開くと、写しへ二重に計上される。** 枝分かれ・`--continue`で写された転記は、
+  写し元を同時に開かないと`message.id`の重複除去（先に現れたほうへ計上）が効かない。そこで
+  動いている転記と**同じ作業ディレクトリ（スラッグのディレクトリ）の転記**を範囲内すべて一緒に開く
+  （`session_usage_live_transcripts`）
+- **画面は`GET /api/session-usage?current=1`だけを20秒おきに呼ぶ**（`use-session-usage.ts`）。
+  プラン枠の取得（推論リクエスト）は走らせず、5時間枠の換算は画面を開いたときの取得が残した
+  キャッシュ（`peekClaudeUsageWindows`）を読むだけにする。期間の集計は従来どおり手動更新のみ
 
 ### 作業場を新しく作ったら、`classify()`にも足す（#2832）
 

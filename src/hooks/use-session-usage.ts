@@ -31,12 +31,19 @@ type UseSessionUsageResult = {
   refresh: () => void;
 };
 
+/** 「実行中のセッション」欄を取り直す間隔（#3135）。pollerの軽い報告と同じ20秒 */
+export const CURRENT_SESSIONS_REFRESH_MS = 20_000;
+
 /**
  * 「AI使用量」画面（#2504）のデータ取得。
  *
- * **自動更新は持たない。** 材料はサブPCのpollerが5分ごとに押し込む記録で、秒単位で動くものが
- * 無い。周期で取り直すとプラン枠の取得（`lib/claude/usage.ts`のプローブ）がそのぶん走る。
- * 更新したいときは画面の更新ボタンを押す。
+ * **期間の集計は自動更新しない。** 材料はサブPCのpollerが5分ごとに押し込む記録で、周期で
+ * 取り直すとプラン枠の取得（`lib/claude/usage.ts`のプローブ）がそのぶん走る。更新したいときは
+ * 画面の更新ボタンを押す。
+ *
+ * **「実行中のセッション」欄だけは20秒おきに取り直す**（#3135）。pollerが動いている転記だけを
+ * 20秒おきに報告しており、`?current=1`はプラン枠を取得しない軽い経路。タブが裏にある間は
+ * 取らない（戻ったらすぐ1回取る）。
  *
  * `enabled`がfalseの間は取得しない。**一度取得した内容は保持する**（画面を出入りするたびに
  * 取り直さない。`use-branch-flow.ts`と同じ扱い）。
@@ -86,6 +93,46 @@ export function useSessionUsage(
       controller.abort();
     };
   }, [enabled, days, reloadKey]);
+
+  // 実行中のセッションの取り直し（#3135）。本体を取得できてから回し始める
+  const hasData = data !== null;
+  useEffect(() => {
+    if (!enabled || !hasData) return;
+
+    let cancelled = false;
+    let controller: AbortController | null = null;
+
+    const refreshCurrent = () => {
+      if (document.visibilityState !== "visible") return;
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      fetch("/api/session-usage?current=1", { signal: current.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
+          return (await res.json()) as Pick<SessionUsageResponse, "currentSessions">;
+        })
+        .then((json) => {
+          if (cancelled || !json.currentSessions) return;
+          const currentSessions = json.currentSessions;
+          setData((prev) => (prev ? { ...prev, currentSessions } : prev));
+        })
+        // 取り直しの失敗は黙って次の回を待つ（欄が1つ古くなるだけで、本体の表示は壊さない）
+        .catch(() => {});
+    };
+
+    const timer = window.setInterval(refreshCurrent, CURRENT_SESSIONS_REFRESH_MS);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshCurrent();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [enabled, hasData]);
 
   return { data, isLoading, error, refresh };
 }
