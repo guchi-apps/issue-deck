@@ -702,6 +702,8 @@ export NOTIFY_HOOK_PERMISSION_FINGERPRINT
 #                                                           3行目に`ExitPlanMode`の引数を添える。#2121）
 #   question <remote-controlのURL|->                        質問を送る（payloadは/sessions/question用。
 #                                                           3行目に`AskUserQuestion`の引数を添える。#2189）
+#   plan-retry                                              `ExitPlanMode`を別の応答で呼び直させる
+#                                                           （入力に計画が無い。#3136）
 #   skip                                                    何もしない
 #
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
@@ -727,8 +729,13 @@ if [[ "$HOOK_JSON" == *ExitPlanMode* ]]; then
 fi
 export NOTIFY_PLAN_BASE_SHA
 
+# `ExitPlanMode`を別の応答で呼び直させた印の置き場（#3136）。同じ計画につき1回だけ差し戻すために使う。
+# セッションの状態ファイルと同じXDGのstateディレクトリに置く（消えても差し戻しが1回増えるだけ）
+export NOTIFY_PLAN_RETRY_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state/issue-deck/sessions}/plan-retry"
+
 result="$(python3 - <<'PY' 2>/dev/null || true
 import glob
+import hashlib
 import json
 import os
 import re
@@ -899,6 +906,9 @@ def resolve_plan_text(tool_input):
                 break
         if plan_path:
             break
+    # `Write`の転記がまだ書かれていないときは、plan modeの開始時に指示されたパスを使う（#3136）
+    if not plan_path:
+        plan_path = resolve_plan_file_path()
     if not plan_path:
         return ""
     try:
@@ -906,6 +916,85 @@ def resolve_plan_text(tool_input):
             return f.read().strip()
     except Exception:
         return ""
+
+
+def resolve_plan_file_path():
+    """plan modeの開始時にClaude Codeが指示した計画ファイルのパス（#3136）。
+
+    転記の`attachment`（`type: plan_mode`）に`planFilePath`として残る。**plan modeに入った
+    時点で書かれる**ので、`ExitPlanMode`と同じ応答で書いた`Write`の転記がまだ無いときも引ける。
+    候補は`resolve_plan_text`と同じく`~/.claude/plans/`直下の`.md`に限る。
+    """
+    transcript = hook.get("transcript_path") or ""
+    if not transcript:
+        return ""
+    plans_dir = os.path.join(os.path.expanduser("~"), ".claude", "plans")
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            if size > TRANSCRIPT_TAIL_BYTES:
+                f.seek(size - TRANSCRIPT_TAIL_BYTES)
+                f.readline()
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return ""
+    for line in reversed(lines):
+        if '"plan_mode"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        attachment = entry.get("attachment") if isinstance(entry, dict) else None
+        if not isinstance(attachment, dict) or attachment.get("type") != "plan_mode":
+            continue
+        path = attachment.get("planFilePath")
+        if isinstance(path, str) and path.endswith(".md") and os.path.dirname(path) == plans_dir:
+            return path
+    return ""
+
+
+def plan_retry_needed(tool_input):
+    """`ExitPlanMode`を別の応答で呼び直させるか（#3136）。
+
+    **Claude Codeは`ExitPlanMode`を呼んだ時点で計画ファイルを読み、入力（`plan`・`planFilePath`）
+    へ詰める。** 計画ファイルの`Write`と同じ応答で並列に呼ぶと、詰める時点でまだファイルが無く
+    入力が`{}`になる。するとRemote Control（Claudeアプリ）は計画本文の無い汎用の承認カードを出し、
+    人は何を承認するのか読めない（実測: 2.1.278で同じ応答に並べた4件が全件`{}`、別の応答で
+    呼んだ約25件は全件本文入り）。
+
+    **差し戻すのは同じ計画（セッション・パス・中身）につき1回だけ。** 呼び直しても入力へ
+    詰めない版に当たったときに、差し戻しを繰り返して先へ進めなくなるのを避ける。
+    """
+    if isinstance(tool_input, dict):
+        direct = tool_input.get("plan")
+        if isinstance(direct, str) and direct.strip():
+            return False
+    plan_path = resolve_plan_file_path()
+    if not plan_path:
+        return False
+    try:
+        with open(plan_path, "rb") as f:
+            content = f.read()
+    except Exception:
+        content = b""
+    marker_dir = os.environ.get("NOTIFY_PLAN_RETRY_DIR", "")
+    if not marker_dir:
+        return False
+    digest = hashlib.sha256(
+        json.dumps([hook.get("session_id", ""), plan_path]).encode("utf-8") + b"\0" + content
+    ).hexdigest()[:32]
+    marker = os.path.join(marker_dir, digest)
+    if os.path.exists(marker):
+        return False
+    try:
+        os.makedirs(marker_dir, exist_ok=True)
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(plan_path + "\n")
+    except Exception:
+        # 印を残せないなら差し戻さない（残せないまま差し戻すと、繰り返しを止められない）
+        return False
+    return True
 
 
 # 計画の提示（#1342）。**`ExitPlanMode`の`PreToolUse`は、承認プロンプトが出る前に飛ぶ。**
@@ -919,6 +1008,11 @@ def resolve_plan_text(tool_input):
 # 場合は承認プロンプトが出ない＝`Notification`が飛ばないため、ここで待ちを作れていることが
 # 「計画が出た」ことを人へ届ける唯一の経路になる。
 if event == "PreToolUse" and hook.get("tool_name", "") == "ExitPlanMode":
+    # 入力に計画が無ければ、まず別の応答で呼び直させる（#3136。`plan_retry_needed`を参照）。
+    # 計画はまだIssueへ送らない——呼び直した方で送れば、画面とアプリの両方に計画が出る
+    if plan_retry_needed(hook.get("tool_input")):
+        print("plan-retry")
+        sys.exit(0)
     plan = resolve_plan_text(hook.get("tool_input"))
     # 宛先が引けない・計画が読めないなら何もしない。issue-deck側もこれらは400で弾く。
     # **読めなかったときに黙って諦めるのは、プロンプト側に手で投稿する経路が残っているため**
@@ -1503,8 +1597,16 @@ mark_check_user_pending() {
 
 decision_line="$(printf '%s' "$result" | head -1)"
 # 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted` /
-#       `plan <URL または "-">` / `question <URL または "-">` / `skip`
+#       `plan <URL または "-">` / `plan-retry` / `question <URL または "-">` / `skip`
 decision="${decision_line%% *}"
+
+if [[ "$decision" == "plan-retry" ]]; then
+  # 計画ファイルの`Write`と同じ応答で呼ばれ、入力に計画が無い（#3136）。**`deny`の理由が
+  # そのまま次の指示になる**ので、何をすればよいかを書く。承認プロンプトはまだ出していない
+  # （＝人は何も見ていない）ため、入力待ちの記録も`00.check-user`も付けない
+  plan_decision_output deny "計画ファイルの書き込みと同じ応答でExitPlanModeが呼ばれたため、計画本文を承認画面へ渡せませんでした。計画ファイルは書けています。ほかのツールを並べず、ExitPlanModeだけを次の応答で呼び直してください。"
+  exit 0
+fi
 
 if [[ "$decision" == "plan" ]]; then
   # 2行目が計画（issue-deck向け）、3行目が`ExitPlanMode`の引数。

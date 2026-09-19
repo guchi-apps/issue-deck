@@ -10,7 +10,7 @@
 
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,7 +99,7 @@ const HOOK_JSON = JSON.stringify({
  * **同期実行（`execFileSync`）にしない。** 返事を返すHTTPサーバーがこのプロセスに居るため、
  * イベントループを止めると自分で自分の返事を止めることになり、必ず「届かない」側に倒れる。
  */
-function runHook() {
+function runHook(hookJson = HOOK_JSON) {
   const child = execFile("bash", [script, "2108", "issue-deck", "guchi-apps/issue-deck"], {
     encoding: "utf8",
     cwd: repoRoot,
@@ -129,7 +129,7 @@ function runHook() {
     child.on("error", reject);
     child.on("close", () => resolve(stdout));
   });
-  child.stdin.end(HOOK_JSON);
+  child.stdin.end(hookJson);
   return done;
 }
 
@@ -194,6 +194,52 @@ describe("計画への返事待ち", () => {
 
     const decision = decisionOf(await runHook());
 
+    expect(decision).toMatchObject({ permissionDecision: "allow" });
+  });
+}, 60_000);
+
+// **計画ファイルの`Write`と同じ応答で`ExitPlanMode`を呼ぶと、入力が`{}`になる**（#3136）。
+// Claude Codeは呼んだ時点で計画ファイルを読んで入力へ詰めるため、まだ書かれていないと空になり、
+// Claudeアプリの承認カードに計画が出ない。フックは1回だけ差し戻して、別の応答で呼び直させる。
+describe("入力に計画が無いときの呼び直し", () => {
+  /** plan modeの開始を記録した転記と計画ファイルを置き、入力`{}`のフックJSONを返す */
+  function emptyInputHook() {
+    const plansDir = path.join(workDir, ".claude", "plans");
+    mkdirSync(plansDir, { recursive: true });
+    const planFile = path.join(plansDir, "test-plan.md");
+    writeFileSync(planFile, "## 要約\n\n**ファイルに書いた計画。**\n");
+    const transcript = path.join(workDir, "transcript.jsonl");
+    writeFileSync(
+      transcript,
+      `${JSON.stringify({ type: "attachment", attachment: { type: "plan_mode", planFilePath: planFile } })}\n`,
+    );
+    return JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "ExitPlanMode",
+      tool_input: {},
+      session_id: "session-3136",
+      transcript_path: transcript,
+    });
+  }
+
+  it("1回目は`deny`で呼び直させ、計画はまだ送らない", async () => {
+    const decision = decisionOf(await runHook(emptyInputHook()));
+
+    expect(decision).toMatchObject({ permissionDecision: "deny" });
+    expect(decision.permissionDecisionReason).toContain("ExitPlanModeだけを次の応答で呼び直してください");
+    expect(received).not.toContain("POST /api/dispatch/sessions/plan");
+  });
+
+  // 呼び直しても入力へ詰めない版に当たったとき、差し戻しを繰り返して先へ進めなくなるのを防ぐ
+  it("同じ計画の2回目は差し戻さず、計画ファイルの中身を送って従来どおり待つ", async () => {
+    const hookJson = emptyInputHook();
+    await runHook(hookJson);
+    received = [];
+    decisionQueue = [ok({ status: "APPROVED" })];
+
+    const decision = decisionOf(await runHook(hookJson));
+
+    expect(received).toContain("POST /api/dispatch/sessions/plan");
     expect(decision).toMatchObject({ permissionDecision: "allow" });
   });
 }, 60_000);
