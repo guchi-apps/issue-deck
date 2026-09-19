@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { parsePullRequestId } from "@/lib/github-reference";
 import type { PullRequestChange, PullRequestChangeListResponse } from "@/types/pull-request";
 
-type UsePullRequestChangesResult = {
+export type UsePullRequestChangesResult = {
   changes: PullRequestChange[] | null;
   /** 取得できたコミット数（打ち切っている場合は上限値） */
   commitCount: number;

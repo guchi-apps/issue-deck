@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
-import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
+import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
 import { PullRequestMergeReview } from "@/components/dashboard/pull-request-merge-review";
 import {
   AlertDialog,
@@ -18,6 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
 import {
+  ciWarning,
   isMergeJudgementPending,
   isProductionMerge,
   MERGE_JUDGEMENT_PENDING_LABEL,
@@ -46,10 +47,12 @@ type PullRequestMergeButtonProps = {
  * 一覧が入れ替わるまでの数秒はボタンが押せる状態で残り、そこを押すと2回目のマージ要求が飛ぶ
  * （GitHubは405で弾くが、画面にはエラーだけが出る）。
  *
- * **mainへのPRでは、確認ダイアログに「このリリースに含まれる変更」を並べる**（#2080。
- * `PullRequestMergeChanges`）。本番デプロイが走るマージなのに、ダイアログにはPR番号と
- * ブランチ名しか出ておらず、何を出そうとしているのかがその場では分からなかった。
- * その一覧はPR基準で、各行にそのPRの自動レビュー判定が付く（#2843）。
+ * **mainへのPRでは、確認ダイアログに「マージ前の確認」と「このリリースに含まれる変更」を
+ * 並べる**（#2080・#3093。`PullRequestMergeProduction`）。本番デプロイが走るマージなのに、
+ * ダイアログにはPR番号とブランチ名しか出ておらず、何を出そうとしているのかも、出してよいのかも
+ * その場では分からなかった。CI・コンフリクト・Claudeのレビューは「マージ前の確認」が出すので、
+ * 警告リストからはCIの1件だけを外す（同じ内容が二重に並ぶため。`mergeWarnings`自体は変えない
+ * ——確認ダイアログを開くかどうかの判定に使っている）。
  *
  * **mainへのPR以外では、そのPR1本ぶんのレビュー判定を出す**（#2843。`PullRequestMergeReview`）。
  * `mergeWarnings`が「要修正」「要確認」でも警告を返すようになったため、CIが通っていて待ちの
@@ -71,6 +74,9 @@ export function PullRequestMergeButton({
   const warnings = mergeWarnings(pullRequest);
   // 本番デプロイが走るマージだけ、何を出そうとしているのかをダイアログの中で出す（#2080）
   const productionMerge = isProductionMerge(pullRequest);
+  // 「マージ前の確認」がCIの状態を出すので、mainのときは警告リストのCIの項目を外す（#3093）
+  const ciWarningText = productionMerge ? ciWarning(pullRequest) : null;
+  const shownWarnings = warnings.filter((warning) => warning !== ciWarningText);
   const judgementPending = isMergeJudgementPending(pullRequest.mergeJudgement);
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
 
@@ -117,12 +123,12 @@ export function PullRequestMergeButton({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <ul className="list-disc space-y-1 pl-5 text-sm text-destructive">
-            {warnings.map((warning) => (
+            {shownWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
           {productionMerge ? (
-            <PullRequestMergeChanges pullRequest={pullRequest} open={confirmOpen} />
+            <PullRequestMergeProduction pullRequest={pullRequest} open={confirmOpen} />
           ) : (
             <PullRequestMergeReview
               verdict={pullRequest.reviewVerdict}

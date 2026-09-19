@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
+import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
 
@@ -66,7 +66,7 @@ function mockChanges(
   return { fetchMock, requestedUrls };
 }
 
-describe("PullRequestMergeChanges", () => {
+describe("PullRequestMergeProduction", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -84,7 +84,7 @@ describe("PullRequestMergeChanges", () => {
       }),
     ]);
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
 
     expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
     // 行頭はPR番号で、対応Issue番号は行の中に添える（#2843）
@@ -98,14 +98,14 @@ describe("PullRequestMergeChanges", () => {
     );
   });
 
-  it("PRごとの自動レビュー判定と内訳を出す（#2843）", async () => {
+  it("レビュー結果は「マージ前の確認」の1行に集約し、含まれる変更の行には出さない（#3093）", async () => {
     mockChanges([
       makeChange(),
       makeChange({ id: "a2", pullRequestNumber: 2078, issueNumber: 2063, title: "別の変更" }),
     ]);
 
     render(
-      <PullRequestMergeChanges
+      <PullRequestMergeProduction
         pullRequest={makePullRequest({
           releaseVerification: {
             rows: [
@@ -137,28 +137,45 @@ describe("PullRequestMergeChanges", () => {
       />,
     );
 
-    expect(await screen.findByText("問題なし（LGTM）")).toBeTruthy();
-    // 内訳の帯と行の両方に出るので2件（帯は「要修正 1」、行は「要修正」）
-    expect(screen.getAllByText("要修正")).toHaveLength(2);
-    // 内訳の帯。行を1つずつ読む前に「何本のうち何本が要修正か」を出す
-    expect(screen.getByText("問題なし")).toBeTruthy();
+    // 集計と、要修正のPRが「マージ前の確認」に出る
+    expect(await screen.findByText("要修正 1 ／ 問題なし 1")).toBeTruthy();
+    expect(screen.getByText("#2077が要修正")).toBeTruthy();
+    expect(screen.getByText("止めるべき項目があります（1件）")).toBeTruthy();
+    // 一覧の行には判定を並べない（何のPRが入るかだけを読む場所）
+    expect(screen.queryByText("問題なし（LGTM）")).toBeNull();
+    expect(screen.queryByText("要修正")).toBeNull();
+    expect(screen.getByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
+    expect(screen.getByText("別の変更")).toBeTruthy();
   });
 
-  it("判定の記録が無いリリースでは内訳の帯を出さない", async () => {
+  it("判定の記録が無いリリースは、レビューの行を灰色にして総合判定を「確認が必要」にしない", async () => {
     mockChanges([makeChange()]);
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
 
-    expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
-    // 行の判定は灰色の「記録なし」だけになり、内訳の帯そのものを出さない
-    expect(screen.getByText("記録なし")).toBeTruthy();
-    expect(screen.queryByText("問題なし")).toBeNull();
+    expect(await screen.findByText("自動レビューの記録がありません")).toBeTruthy();
+    expect(screen.getByText("確認できた2項目に問題はありません")).toBeTruthy();
+  });
+
+  it("CIとコンフリクトの状態を「マージ前の確認」に出す", async () => {
+    mockChanges([makeChange()]);
+
+    render(
+      <PullRequestMergeProduction
+        pullRequest={makePullRequest({ ciState: "failure", mergeable: false })}
+        open
+      />,
+    );
+
+    expect(await screen.findByText("止めるべき項目があります（2件）")).toBeTruthy();
+    expect(screen.getByText("失敗")).toBeTruthy();
+    expect(screen.getByText("あり")).toBeTruthy();
   });
 
   it("PRのタイトルから版を出す", async () => {
     mockChanges([makeChange()]);
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
 
     expect(await screen.findByText("v4.19.0")).toBeTruthy();
   });
@@ -166,7 +183,7 @@ describe("PullRequestMergeChanges", () => {
   it("閉じているあいだは取りに行かない", () => {
     const { fetchMock } = mockChanges([makeChange()]);
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open={false} />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open={false} />);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -181,17 +198,20 @@ describe("PullRequestMergeChanges", () => {
       })),
     );
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
 
     expect(await screen.findByText("変更点を取得できませんでした。")).toBeTruthy();
     expect(screen.getByText("GitHubへ接続できませんでした")).toBeTruthy();
+    // 取得できなくても「マージ前の確認」は出し、レビューの行だけ灰色にする（マージは止めない）
+    expect(screen.getByText("マージ前の確認")).toBeTruthy();
+    expect(screen.getByText("確認できません")).toBeTruthy();
     expect(screen.getByRole("link", { name: /GitHubで差分を見る/ })).toBeTruthy();
   });
 
   it("打ち切ったときは一部である旨を出す", async () => {
     mockChanges([makeChange()], { commitCount: 100, truncated: true });
 
-    render(<PullRequestMergeChanges pullRequest={makePullRequest()} open />);
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
 
     await waitFor(() =>
       expect(screen.getByText("コミットが多いため一部だけを出しています")).toBeTruthy(),

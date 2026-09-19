@@ -2114,11 +2114,26 @@ export function POST(request: NextRequest) {
   **一覧の応答へ載せるとき、指摘の本文（`reviewBody`）は落とす**（`withoutReviewBodies`）。
   PR一覧は全リポジトリぶんを1つの応答で返すため、本文まで載せると数十KB膨らむ。本文を読むのは
   PR詳細のパネルの役割で、そちらは詳細APIの`body`から読み直している。
-  **リリースの一覧の行はPR基準**（`pullRequestChangeLabel`はPR番号を先に返す）。レビューが走る
-  単位はPull Requestで判定もPRに紐づくため、行頭がIssue番号だと「この判定はどのPRのものか」を
-  読み替えることになる。突き合わせの鍵はPR番号で、表の行にPR番号が無いものだけIssue番号で拾う
-  （`applyReviewVerdicts`）。内訳の帯は表の集計ではなく**並べた行から数える**
-  （`tallyChangeReviews`）——表はIssueを数えたもので、画面に並ぶ行（PR）とは母数が違う。
+  **リリース（mainへのPR）では、判定は「マージ前の確認」のレビュー行へ集約し、「このリリースに
+  含まれる変更」の一覧には出さない**（#3093。[`pull-request-merge-precheck.tsx`](../src/components/dashboard/pull-request-merge-precheck.tsx)・
+  [`lib/pull-request-merge-precheck.ts`](../src/lib/pull-request-merge-precheck.ts)）。かつては一覧の
+  各行に判定を、見出しの下に内訳の帯を出していた（#2843）が、「何のPRが入るか」を読む場所と
+  「出してよいか」を判断する場所が混ざっていた。一覧はPR番号・タイトル・バンプの印だけにして
+  （行頭はPull Requestの番号。`pullRequestChangeLabel`）、CI・コンフリクト・レビューを総合判定つきの
+  1枚に並べる。**判定はマージを止めない**（材料を並べるだけ）。**変更点の取得は
+  `PullRequestMergeProduction`が1回だけ行い**、パネルと一覧で共有する（ダイアログの中に置くので、
+  閉じると取得結果も消えて開き直すたびに取り直す）。**mainのときだけ、警告リストからCIの1件を
+  外す**（同じ内容が二重に並ぶため。`ciWarning`。`mergeWarnings`自体は確認ダイアログを開くかどうかの
+  判定に使うので変えない）。
+  **レビューの行は「終わったか」と「結果に問題が無いか」を1つにまとめている**——どちらもリリースPR本文
+  の検証結果の表から作る同じ情報で、「記録なし」が未実行なのか取得失敗なのかも表から区別できない。
+  色は要修正=■、要確認・記録なし=▲、それ以外=●。**判定が1件も無いリリース（自動レビューを持たない
+  リポジトリ）は▲にせず灰色の「自動レビューの記録がありません」にして、総合判定の件数に数えない**
+  （毎回「確認が必要」になり、本当の指摘が埋もれる。`mergeWarnings`が「記録なし」で止めないのと同じ理由）。
+  変更点を取得できなかったときも灰色で、マージは止めない。
+  突き合わせの鍵はPR番号で、表の行にPR番号が無いものだけIssue番号で拾う（`applyReviewVerdicts`）。
+  件数は表の集計ではなく**並べた行から数える**（`tallyChangeReviews`）——表はIssueを数えたもので、
+  画面に並ぶ行（PR）とは母数が違う。
   **表に載るのは、リリースを凍結した時点でopenだった`issue-<番号>`ブランチのPRだけ**
   （`reusable-release-develop-to-main.yml`が対象issueの番号でループし、`select(.state == "OPEN")`で
   絞る）。つまり**バージョンバンプPRは必ず表に無い**ので、「記録を辿れなかった」ではなく
@@ -2209,6 +2224,8 @@ export function POST(request: NextRequest) {
   （`Merge pull request #<番号> from <owner>/<ブランチ>`）で、ブランチ名`issue-<番号>`から対応Issueまで
   辿り、**タイトルはDBキャッシュ（`Issue`テーブル）から解決する**ためIssueの件数ぶんのリクエストは
   増えない（[`lib/pull-request-changes.ts`](../src/lib/pull-request-changes.ts)）。
+  **この一覧は「何が入るか」だけを出し、レビュー判定は載せない**（#3093）。判定は同じダイアログの上に
+  置いた「マージ前の確認」（CI・コンフリクトと並べる。上の判定の節を参照）へ集約した。
   **PR本文の`## 対象issue`は使わない**——あれはPRを作った時点の一覧で、PRが開いているあいだに
   developへ入った変更が抜ける。出すのは`isProductionMerge`（`lib/pull-request-list.ts`。
   `mergeWarnings`が本番デプロイの警告を返すのと同じ判定）が真のPRだけで、develop向けPRの
