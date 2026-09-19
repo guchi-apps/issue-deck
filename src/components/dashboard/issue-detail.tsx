@@ -162,6 +162,7 @@ import {
 import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
+  resolvePullRequestStop,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import {
@@ -724,6 +725,11 @@ export function IssueDetail({
     isPullRequestWaitingStatus(resolveProgressStatus(issue))
       ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
       : null;
+  // 止まっているPR（CI失敗など）。停止パネルの見出しを原因入りにする（#3144）。
+  // ステッパーの内訳と同じPRを指すよう、同じ材料・同じ確かめ方で導く
+  const pullRequestStop = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolvePullRequestStop(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
   // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
@@ -948,6 +954,7 @@ export function IssueDetail({
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
     implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
+    pullRequestStop,
   });
 
   return (
@@ -1491,6 +1498,7 @@ export function IssueDetail({
               mergeApprovalPending={mergeApprovalPending}
               pullRequestLinks={pullRequestLinks}
               hasPullRequestSection={visiblePullRequestLinks.length > 0}
+              pullRequestStop={pullRequestStop}
               workflowRun={workflowRun}
               workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}

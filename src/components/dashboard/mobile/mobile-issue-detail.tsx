@@ -159,6 +159,7 @@ import {
 import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
+  resolvePullRequestStop,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
@@ -537,6 +538,10 @@ export function MobileIssueDetail({
   const pullRequestProgress = isPullRequestWaitingStatus(resolveProgressStatus(issue))
     ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
     : null;
+  // 止まっているPR（CI失敗など）。停止パネルの見出しを原因入りにする（#3144）
+  const pullRequestStop = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolvePullRequestStop(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   const {
     mergePullRequest,
     closePullRequest,
@@ -595,6 +600,7 @@ export function MobileIssueDetail({
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
     implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
+    pullRequestStop,
   });
 
   async function toggleLabel(name: string) {
@@ -1430,6 +1436,7 @@ export function MobileIssueDetail({
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLinks={pullRequestLinks}
             hasPullRequestSection={visiblePullRequestLinks.length > 0}
+            pullRequestStop={pullRequestStop}
             workflowRun={workflowRun}
             workflowRunCommentId={workflowRunCommentId}
             onApprove={handleApprove}

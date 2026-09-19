@@ -1074,6 +1074,18 @@ export function POST(request: NextRequest) {
     理由ラベル単体ではなく`resolveCheckUserGuidance`が返す`action`のtargetで判定する**
     （`plan`・`question`・`pull-requests`なら出さない。`null`＝承認欄自身、または
     `remote-control`なら出す）。
+    **対応PRが止まっている（CI失敗・コンフリクト・Claudeレビュー失敗）ときの停止パネル
+    （`01.check-blocked`）は、原因を見出しにして赤にする**（#3144）。以前は「続け方の指示が
+    必要です／理由は直近のコメントにあります」という汎用文のままで、止めているのがPRの
+    CI失敗だと読み取れなかった。原因は`resolvePullRequestStop`（`lib/issue-pull-request-progress.ts`。
+    ステッパーの内訳と同じPRを選ぶ）から`resolveCheckUserGuidance`の`pullRequestStop`へ渡り、
+    **リンク（「CIの実行結果を開く」「対応PRへ移動」）は`action`ではなく`guidance.cause`に持たせる**
+    ——`action`を`pull-requests`へ向けると、上の判定でパネルごと出なくなる。差し替えるのは
+    `blocked`のローカル担当の分岐と通常の分岐だけで、`merge`（マージ待ちの理由表示が別にある）・
+    `plan`・`question`・入力待ち（生きているプロンプトへの案内）は差し替えない。上部
+    （`IssueDetail`・`MobileIssueDetail`）とコメント欄（`CommentThread`）の3か所が同じ値を渡す。
+    **CI失敗・レビュー失敗・コンフリクトのPRでは、内訳の「マージ」段も現在地（琥珀）にしない**
+    （`buildIssuePullRequestProgress`。止まっている原因の赤とマージ待ちの琥珀が並ぶのを避ける）。
   - **対応PR・親子Issue・AI要約は既定で畳む**
     （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。

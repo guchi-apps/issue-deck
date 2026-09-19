@@ -57,12 +57,30 @@ export type IssuePullRequestStep = {
  */
 export type IssuePullRequestProgressTone = "running" | "waiting" | "attention";
 
+/**
+ * PRが止まっている原因（#3144）。`tone`が`attention`のときだけ入る。
+ *
+ * `label`は「CI失敗」のような1語で、**何が止めているのかを画面のほかの場所（停止パネル）へ
+ * 名指しで渡すには足りない**（文言を`label`から逆算すると、言い回しを直したときに壊れる）。
+ * 優先順は`label`と同じ（コンフリクト > CI失敗 > レビュー失敗）。
+ */
+export type IssuePullRequestStopKind = "conflict" | "ci" | "review";
+
+/** 停止パネルへ渡す「止まっているPR」。`htmlUrl`が無い材料（PR一覧）では`null` */
+export type PullRequestStop = {
+  number: number;
+  kind: IssuePullRequestStopKind;
+  htmlUrl: string | null;
+};
+
 export type IssuePullRequestProgress = {
   /** 対応PRの番号。詳細の見出しに出す */
   pullRequestNumber: number;
   /** 一覧の添える字・詳細の見出しに出す「いま何を待っているか」の1語 */
   label: string;
   tone: IssuePullRequestProgressTone;
+  /** 止まっている原因。止まっていなければ`null` */
+  stopKind: IssuePullRequestStopKind | null;
   /** 詳細に並べる内訳。`ai-review`は判定のcheck-runが無いリポジトリでは落ちる */
   steps: IssuePullRequestStep[];
 };
@@ -87,6 +105,8 @@ export type IssuePullRequestProgressSource = {
   /** `false`＝コンフリクトあり。`null`（判定中・未取得）は「なし」として扱わない */
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
+  /** PRのURL。停止パネルが実行結果へのリンクを作るために使う。持たない材料（PR一覧）では省く */
+  htmlUrl?: string | null;
 };
 
 /**
@@ -137,6 +157,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
   ciStatus: PullRequestCiStatus | null;
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
+  htmlUrl?: string | null;
 }): IssuePullRequestProgressSource {
   return {
     number: pullRequest.number,
@@ -146,6 +167,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
     ciState: ciStateFromPullRequestCiStatus(pullRequest.ciStatus),
     mergeable: pullRequest.mergeable,
     mergeJudgement: pullRequest.mergeJudgement,
+    htmlUrl: pullRequest.htmlUrl ?? null,
   };
 }
 
@@ -184,6 +206,7 @@ export function buildIssuePullRequestProgress(
   const { mergeJudgement, ciState, mergeable, draft, merged } = pullRequest;
   const aiReviewState = mergeJudgement.aiReview.state;
   const judgementPending = mergeJudgement.state === "pending";
+  const stopKind = resolveStopKind();
 
   const steps: IssuePullRequestStep[] = [
     { key: "opened", label: OPENED_STEP_LABEL, shortLabel: OPENED_STEP_LABEL, state: "done" },
@@ -220,9 +243,12 @@ export function buildIssuePullRequestProgress(
   }
   // マージの段が`current`になるのは、前の段が全部片付いて本当にマージだけが残ったとき。
   // 判定・CI・レビューのどれかが動いている間は`pending`のままにする——「マージ」と
-  // 「Claudeがレビュー中」が同時に光ると、どちらを待っているのか読めなくなる
+  // 「Claudeがレビュー中」が同時に光ると、どちらを待っているのか読めなくなる。
+  // **止まっているとき（CI失敗・レビュー失敗・コンフリクト）も同じ**（#3144）。マージは人が
+  // 押せる段ではなく、前の段が直るまで進めないので、琥珀の「マージ待ち」で光らせると
+  // 止まっている原因（赤）とマージ待ち（琥珀）が並び、どちらが本当の状態か読めなくなる
   const beforeMergePending =
-    judgementPending || ciState === "pending" || aiReviewState === "pending";
+    judgementPending || ciState === "pending" || aiReviewState === "pending" || stopKind !== null;
   steps.push({
     key: "merge",
     label: merged ? MERGED_STEP_LABEL : MERGE_STEP_LABEL,
@@ -230,7 +256,14 @@ export function buildIssuePullRequestProgress(
     state: merged ? "done" : beforeMergePending ? "pending" : "current",
   });
 
-  return { pullRequestNumber: pullRequest.number, steps, ...resolveWaiting() };
+  return { pullRequestNumber: pullRequest.number, steps, stopKind, ...resolveWaiting() };
+
+  function resolveStopKind(): IssuePullRequestStopKind | null {
+    if (mergeable === false) return "conflict";
+    if (ciState === "failure") return "ci";
+    if (aiReviewState === "failed") return "review";
+    return null;
+  }
 
   function resolveWaiting(): { label: string; tone: IssuePullRequestProgressTone } {
     if (mergeable === false) return { label: "コンフリクトあり", tone: "attention" };
@@ -257,6 +290,23 @@ export function resolveIssuePullRequestProgress(
 ): IssuePullRequestProgress | null {
   const target = selectProgressPullRequest(pullRequests);
   return target === null ? null : buildIssuePullRequestProgress(target);
+}
+
+/**
+ * 停止パネルへ渡す「止まっているPR」を導く（#3144）。止まっていなければnull。
+ *
+ * 選ぶPRは`resolveIssuePullRequestProgress`と同じ（`selectProgressPullRequest`）ので、
+ * ステッパーの内訳と停止パネルが別のPRを指すことは無い。
+ */
+export function resolvePullRequestStop(
+  pullRequests: readonly IssuePullRequestProgressSource[],
+): PullRequestStop | null {
+  const target = selectProgressPullRequest(pullRequests);
+  if (target === null) return null;
+  const { stopKind } = buildIssuePullRequestProgress(target);
+  return stopKind === null
+    ? null
+    : { number: target.number, kind: stopKind, htmlUrl: target.htmlUrl ?? null };
 }
 
 /**

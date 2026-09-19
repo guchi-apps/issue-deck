@@ -714,6 +714,10 @@ export function WorkflowStatusSteps({
   const currentStep = WORKFLOW_STEPS[currentIndex];
   // 内訳を描くのはPRを待っている段だけ（#2816）。`WorkflowStepBadge`と同じ確かめ方にする
   const prProgress = isPullRequestWaitingStatus(currentStep.key) ? pullRequestProgress : null;
+  // 止まっているPR（CI失敗・レビュー失敗・コンフリクト）。現在地の円とキャプションを赤にする（#3144）。
+  // **確認待ちの琥珀より優先する**——琥珀のままだと「人の返事を待っている」と読めるが、
+  // 実際に止めているのはPRの側で、同じ段の内訳（`PR_STEP_CLASS.failed`）が赤で言っている
+  const prStopped = prProgress?.tone === "attention";
   // 実行先が分かっている場合だけ添える。Actionsを期待している（＝従来どおり）ときは出さない。
   // 常に出すと、実行先が1つしか無かった頃と同じ情報量なのに行が増えるだけになる
   const targetLabel =
@@ -779,9 +783,11 @@ export function WorkflowStatusSteps({
                     "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-inset",
                     isDone && "bg-primary text-primary-foreground ring-primary",
                     isCurrent &&
-                      (approvalPending
-                        ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
-                        : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
+                      (prStopped
+                        ? "bg-destructive text-white ring-2 ring-destructive dark:text-background"
+                        : approvalPending
+                          ? "bg-amber-500 text-white ring-2 ring-amber-500 dark:bg-amber-500 dark:text-background"
+                          : "bg-[color-mix(in_oklch,var(--primary)_15%,var(--background))] text-primary ring-primary"),
                     // 通っていない段は塗らず、破線の輪郭にする（#2069）。未着手の段（実線の輪郭）
                     // とも、済みの段（塗りつぶし）とも重ならない見た目にする
                     isSkipped &&
@@ -826,7 +832,16 @@ export function WorkflowStatusSteps({
           折り返したときに行間ぶんしか空かず、丸みのあるバッジが上の行に貼り付いて見えていた */}
       <div className="mt-1.5 flex flex-col items-center gap-1.5 text-center text-[11px] md:hidden">
         <p>
-          <span className={cn("font-medium", approvalPending ? "text-amber-700 dark:text-amber-400" : "text-foreground")}>
+          <span
+            className={cn(
+              "font-medium",
+              prStopped
+                ? "text-destructive"
+                : approvalPending
+                  ? "text-amber-700 dark:text-amber-400"
+                  : "text-foreground",
+            )}
+          >
             {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
           </span>
           {captionSuffix && <span className="ml-1.5 text-muted-foreground">{captionSuffix}</span>}
