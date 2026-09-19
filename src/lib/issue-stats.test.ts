@@ -1037,45 +1037,7 @@ describe("time-dependent stats", () => {
   });
 });
 
-describe("filterIssuesByView（コードレビュー・#2855）", () => {
-  function review(id: string, state: "open" | "closed", updatedAt: string): Issue {
-    return makeIssue({
-      id,
-      title: `[レビュー] repo（${updatedAt.slice(0, 10)}）`,
-      state,
-      updatedAt,
-    });
-  }
-
-  it("close済みのレビューも並べる", () => {
-    const issues = [
-      review("a", "open", "2026-09-07T00:00:00.000Z"),
-      review("b", "closed", "2026-09-03T00:00:00.000Z"),
-      makeIssue({ id: "c", title: "ただのIssue" }),
-    ];
-    expect(
-      filterIssuesByView(issues, "code-review", null).map((issue) => issue.id),
-    ).toEqual(["a", "b"]);
-  });
-
-  it("過去のレビューは新しい方から20件までにし、未完了は全部残す", () => {
-    const closed = Array.from({ length: 25 }, (_, index) =>
-      review(`c${index}`, "closed", `2026-08-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`),
-    );
-    const issues = [...closed, review("open-1", "open", "2026-07-01T00:00:00.000Z")];
-
-    const filtered = filterIssuesByView(issues, "code-review", null);
-    expect(filtered).toHaveLength(21);
-    // 未完了は更新が古くても残る
-    expect(filtered.map((issue) => issue.id)).toContain("open-1");
-    // 残るclose済みは新しい方から20件（＝8/6〜8/25。8/1〜8/5は落ちる）
-    expect(filtered.map((issue) => issue.id)).toContain("c24");
-    expect(filtered.map((issue) => issue.id)).not.toContain("c0");
-  });
-});
-
-describe("computeNavCountsForFilters（コードレビュー・#3081）", () => {
-  // 一覧の状態絞り込みが「open」でも、このビューは`state: "all"`で並べる
+describe("コードレビュービュー（#3141）", () => {
   const listFilters = {
     q: "",
     repos: [] as string[],
@@ -1093,23 +1055,30 @@ describe("computeNavCountsForFilters（コードレビュー・#3081）", () => 
     });
   }
 
-  it("一覧にはclose済みも並ぶが、数字はopenのぶんだけ", () => {
+  it("レビューIssueだけに絞る（状態の絞り込みは一覧側の既定＝openに任せる）", () => {
+    const issues = [review("a", "open"), makeIssue({ id: "b", title: "ただのIssue" })];
+    expect(filterIssuesByView(issues, "code-review", null).map((issue) => issue.id)).toEqual([
+      "a",
+    ]);
+  });
+
+  it("状態はopenで絞られ、close済みのレビューは一覧にも件数にも入らない", () => {
     const issues = [
       review("a", "open"),
       review("b", "open"),
       review("c", "closed"),
       makeIssue({ id: "d", title: "ただのIssue" }),
     ];
-    expect(filterIssuesByView(issues, "code-review", null)).toHaveLength(3);
+    // ユーザーが「すべて」を選んでいても、このビューは既定（open）へ戻す
+    const resolved = resolveFiltersForView({ ...listFilters, state: "all" as const }, "code-review");
+    expect(resolved.state).toBe("open");
+    expect(
+      filterIssuesByView(applyIssueFilters(issues, resolved), "code-review", null),
+    ).toHaveLength(2);
     expect(computeNavCountsForFilters(issues, listFilters, null)["code-review"]).toBe(2);
   });
 
-  it("close済みしか無ければ0件", () => {
-    const issues = [review("a", "closed"), review("b", "closed")];
-    expect(computeNavCountsForFilters(issues, listFilters, null)["code-review"]).toBe(0);
-  });
-
-  it("保留中のopenなレビューは数字から外す", () => {
+  it("保留中のレビューは数字から外す", () => {
     const issues = [review("a", "open"), review("b", "open")];
     expect(
       computeNavCountsForFilters(issues, listFilters, null, issues, undefined, new Set(["a"]))[

@@ -361,30 +361,6 @@ export function summarizeCodeReviewComments(
 }
 
 /**
- * 「コードレビュー」ビューの一覧ヘッダーに出す件数表記（#2855）。
- *
- * このビューにはclose済みのレビューも並ぶ（＝過去の結果を読み返す場所）ため、行数だけでは
- * 「まだ読み終えていないレビューが何件あるか」が分からない。openのぶんを内訳として添える。
- * 添えるものが何も無ければnullを返し、呼び出し側は従来どおりの「N件」に落とす
- * （`formatQuestionListCount`と同じ形・同じ区切り）。
- *
- * @param listedCount 一覧に並んでいる行数（保留中は含まない）
- * @param snoozedCount 保留中で一覧から外したもの（#2456）
- */
-export function formatCodeReviewListCount(
-  issues: readonly Pick<Issue, "state">[],
-  listedCount: number,
-  snoozedCount = 0,
-): string | null {
-  const open = issues.filter((issue) => issue.state === "open").length;
-  const parts = [`${listedCount}件`];
-  // 全部openなら内訳は行数と同じ数字になるので添えない
-  if (open > 0 && open < listedCount) parts.push(`未完了${open}件`);
-  if (snoozedCount > 0) parts.push(`保留中${snoozedCount}件`);
-  return parts.length === 1 ? null : parts.join("・");
-}
-
-/**
  * 既にIssueにした指摘を引くための索引（見出し → Issue番号）。
  *
  * **同じリポジトリの、タイトルが完全一致するIssue**だけを拾う。指摘から起票するIssueの
