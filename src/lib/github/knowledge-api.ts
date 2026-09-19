@@ -18,6 +18,7 @@
 import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import type { RawIssue, RawKnowledgeFile, RawPromotionPullRequest } from "@/lib/knowledge-board";
+import { PROMOTION_BRANCH_PREFIX } from "@/lib/knowledge-promotion-pr";
 
 const DOCS_OWNER = "guchi-apps";
 const DOCS_REPO = "docs";
@@ -118,9 +119,6 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
 
   return { files, docsRepoUrl: data.repository?.url ?? fallback.docsRepoUrl };
 }
-
-/** 格上げ判定が作る反映PRのブランチ名の目印。`promote-knowledge.yml`が使うものと同じ */
-const PROMOTION_BRANCH_PREFIX = "knowledge/promote-";
 
 /** 反映PRを見るぶんには十分な件数。溜まっていても数件〜十数件止まりの想定（#126の見送り仕様） */
 const OPEN_PULL_REQUESTS_TO_SCAN = 30;

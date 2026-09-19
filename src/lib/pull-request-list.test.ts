@@ -201,6 +201,36 @@ describe("sortPullRequestsByUpdated", () => {
 });
 
 describe("filterPullRequestsByView", () => {
+  // 共通知識の反映PRは専用メニュー「共通知識」で扱う（#3082）
+  it("共通知識の反映PRは実行中・マージ待ちから外し、すべてのPRには残す", () => {
+    const promotion = (number: number, ciState: PullRequestSummary["ciState"]) =>
+      pullRequest({
+        number,
+        repositoryFullName: "guchi-apps/docs",
+        headRef: "knowledge/promote-20260918-223656",
+        baseRef: "main",
+        kind: "other",
+        ciState,
+      });
+    const pullRequests = [
+      pullRequest({ number: 1, ciState: "success" }),
+      promotion(2, "success"),
+      promotion(3, "pending"),
+    ];
+
+    expect(filterPullRequestsByView(pullRequests, "completed").map((pr) => pr.number)).toEqual([1]);
+    expect(filterPullRequestsByView(pullRequests, "in-progress")).toEqual([]);
+    expect(filterPullRequestsByView(pullRequests, "all").map((pr) => pr.number)).toEqual([1, 2, 3]);
+  });
+
+  it("他のリポジトリの同名ブランチは外さない", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, headRef: "knowledge/promote-20260918-223656", ciState: "success" }),
+    ];
+
+    expect(filterPullRequestsByView(pullRequests, "completed")).toHaveLength(1);
+  });
+
   // 「すべてのPR」はマージ済み・クローズ済みを含めるのをやめた（#1613）
   it("allはopenなPRだけを返す", () => {
     const pullRequests = [

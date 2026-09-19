@@ -35,6 +35,7 @@ import {
   isPullRequestViewAttention,
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
+import { describePromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
@@ -83,6 +84,11 @@ type SidebarNavProps = {
   onSelectNightlyRun: () => void;
   /** 共通知識（#2912）の画面を開く */
   onSelectKnowledge: () => void;
+  /**
+   * 共通知識の反映PR（`guchi-apps/docs`の`knowledge/promote-*`）の未マージ件数（#3082）。
+   * 「共通知識」行の件数とオレンジの丸に使う。**nullは未取得**で、そのときは出さない
+   */
+  knowledgePromotionCount?: number | null;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
   /**
@@ -183,6 +189,7 @@ export function SidebarNavView({
   onSelectReleaseHistory,
   onSelectNightlyRun,
   onSelectKnowledge,
+  knowledgePromotionCount = null,
   nightlyRunQueuedCount = null,
   onLaunchNewApp,
   navCounts,
@@ -405,10 +412,17 @@ export function SidebarNavView({
             icon: BookOpen,
             active: activePane === "knowledge",
             onClick: onSelectKnowledge,
-            // **数字も丸も出さない**（#2912）。未判定が溜まっていることは開いた先の警告が
-            // 受け持つ。左メニューに数字を出すと「片付けると減るもの」に見えるが、判定するのは
-            // `guchi-apps/docs`側のワークフローで、ここから押せる操作は何も無い
-            title: "フリートの知見メモと、共有知識にたまった知見を見る",
+            // 出すのは**マージ待ちの反映PRの件数だけ**（#3082）。未判定の知見メモの数は出さない
+            // （#2912。判定するのは`guchi-apps/docs`側のワークフローで、ここから押せる操作が
+            // 無く、数字を出すと「片付けると減るもの」に見える）。反映PRは開いた先の画面から
+            // マージ・closeできる人の待ちなので、「マージ待ち」と同じオレンジの丸で強調する。
+            // 0件のときは`0`も丸も出さない（出すと「取得できていない」と区別できない）
+            count: knowledgePromotionCount && knowledgePromotionCount > 0 ? knowledgePromotionCount : null,
+            emphasis: (knowledgePromotionCount ?? 0) > 0 ? "attention" : "none",
+            title: describePromotionPullRequests(
+              "フリートの知見メモと、共有知識にたまった知見を見る",
+              knowledgePromotionCount,
+            ),
           })}
           {navRow({
             key: "usage",

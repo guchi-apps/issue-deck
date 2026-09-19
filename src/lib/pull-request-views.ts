@@ -72,6 +72,8 @@ export const DEFAULT_PULL_REQUEST_VIEW: PullRequestViewId = "all";
  * そこには実行中のPRも混ざるため「あとはマージするだけのPR」だけを見る入口が無かった。
  * 「マージ待ち」へ改名したうえで戻し、3つとも並べる（#2120）。`filterPullRequestsByView`が
  * 「実行中」と「マージ待ち」でopenなPRを二分するので、2つの件数の和は「すべてのPR」に一致する。
+ * **ただし共通知識の反映PRは例外**（#3082）。「すべてのPR」にだけ数え、この2つには数えない
+ * （専用メニュー「共通知識」の件数で扱うため）。
  */
 export const sidebarPullRequestViews: PullRequestView[] = pullRequestViews;
 

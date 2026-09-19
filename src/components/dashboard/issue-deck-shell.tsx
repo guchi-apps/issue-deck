@@ -161,6 +161,7 @@ import {
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
+import { countOpenPromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
@@ -1316,6 +1317,13 @@ export function IssueDeckShell({
     () => selectScheduledRunQueuedMarks(nightlyRun.state),
     [nightlyRun.state],
   );
+  // 左メニュー「共通知識」の件数（#3082）。共通知識の反映PRは「マージ待ち」から外し（
+  // `filterPullRequestsByView`）、こちらで数える。母集団はリポジトリ絞り込みを掛けない集合
+  // （共通知識はリポジトリ横断の画面で、絞り込むと件数だけ消える）
+  const knowledgePromotionCount = useMemo(
+    () => countOpenPromotionPullRequests(crossRepositoryPullRequests, openPullRequests.fetchedAt !== null),
+    [crossRepositoryPullRequests, openPullRequests.fetchedAt],
+  );
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
   const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
   const visibleReleaseHistoryEntries = useMemo(
@@ -1959,6 +1967,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectKnowledge={selectKnowledge}
+                  knowledgePromotionCount={knowledgePromotionCount}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   onSelectRepos={selectRepos}
                   /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
@@ -2289,6 +2298,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectKnowledge={selectKnowledgePane}
+                knowledgePromotionCount={knowledgePromotionCount}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}

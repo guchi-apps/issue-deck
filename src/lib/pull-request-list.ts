@@ -5,6 +5,7 @@ import type {
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
 import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
+import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type {
@@ -178,6 +179,9 @@ export function sortPullRequestsByUpdated(
  * 数分は`pending`のまま**になる。この窓で外すと、ベルの赤い「チェック失敗」がその間だけ消える。
  * 判定の結果がどうであれCIが落ちたPRは人が直すしかなく、`isMergeWaitingForChecks`が
  * 「待っても解消しないもの」としてCI失敗を外さないのと同じ扱いにそろえる。
+ *
+ * **共通知識の反映PR（`isPromotionPullRequest`）は`in-progress`・`completed`のどちらからも外す**
+ * （#3082）。左メニュー「共通知識」の件数で扱う別の待ちで、「すべてのPR」にだけ残す。
  */
 export function filterPullRequestsByView(
   pullRequests: PullRequestSummary[],
@@ -186,6 +190,9 @@ export function filterPullRequestsByView(
   return pullRequests.filter((pullRequest) => {
     if (pullRequest.state !== "open") return false;
     if (view === "all") return true;
+    // 共通知識の反映PRは専用メニュー「共通知識」の件数で扱う（#3082）。実行中・マージ待ちの
+    // 一覧・件数・丸・ベルはここを通るため、ここで外せば全部から消える
+    if (isPromotionPullRequest(pullRequest)) return false;
     const completed =
       !pullRequest.draft &&
       (pullRequest.ciState === "failure" ||
