@@ -16,7 +16,6 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
-  CLAUDE_MODEL_FIT_DESCRIPTIONS,
   CLAUDE_MODEL_FIT_LABELS,
   describeClaudeModel,
   MODEL_PICK_SETTING,
@@ -203,22 +202,6 @@ const MODEL_ENTRIES: readonly { model: ClaudeLocalModel }[] = [
   { model: "opus" },
   { model: "sonnet" },
 ];
-
-/**
- * 選んだモデルの説明（#2723・#2776・#3106）。**金額ではなく、どんな作業に向くかを1行で述べる。**
- *
- * 金額（1件あたりの目安）はここに出していたが、1回ぶんなのか実費なのかが画面から決まらず、
- * FableとOpusがほぼ並ぶため見比べても選べなかった（#2723）。実績は「AI使用量」の画面で見る。
- *
- * 設定（設定 ＞ 実行）で選んだモデルには、それが最初の選択である旨を添える。
- * 「おまかせ」の説明は判定の様子（`ModelPickNotice`）が出すのでここには来ない。
- */
-function describeModelChoice(model: ClaudeLocalModel, claudeLocalModel: ClaudeLocalModelSetting): string {
-  const fit = CLAUDE_MODEL_FIT_DESCRIPTIONS[model];
-  return model === claudeLocalModel
-    ? `設定（設定 ＞ 実行）で選んだ${describeClaudeModel(model)}です。${fit}`
-    : fit;
-}
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -996,185 +979,190 @@ export function StartImplementationDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {renderTrigger && <DialogTrigger asChild>{renderTrigger(isSubmitting)}</DialogTrigger>}
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>実装を開始</DialogTitle>
-          <DialogDescription>
-            実行する場所と必要なオプションを選んでから開始してください。
-          </DialogDescription>
-        </DialogHeader>
-        {/* 実行先が確定するまでは、選択肢の代わりに骨組みだけを出す（#1666） */}
-        {isTargetPending && <StartChoicesSkeleton />}
-        {/* 実行先を先に選ばせる（#1623）。実行先によって出るオプションが変わる（撮影は
-            GitHub Actionsのときだけ・アーティファクトはそれ以外）ため、選ぶ順序としても素直になる */}
-        {showTargets && !isTargetPending && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">実行先</p>
-            <div role="radiogroup" aria-label="実行先" className="grid auto-cols-fr grid-flow-col gap-1.5">
-              {targetEntries.map((entry) => (
-                <StartTargetTile
-                  key={entry.key}
-                  entry={entry}
-                  selected={isSameTarget(entry.target, effectiveTarget)}
-                  onSelect={() => selectTarget(entry.target)}
-                />
-              ))}
-            </div>
-            {/* 選択中の説明。選べない実行先の理由は下でまとめて出すので、ここでは重ねない */}
-            {selectedEntry && selectedEntry.rejection === null && (
-              <p className="text-xs text-muted-foreground">{selectedEntry.description}</p>
-            )}
-            {blockedEntries.map((entry) => (
-              <p key={entry.key} className="text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">{entry.name}</span>: {entry.rejection}
-              </p>
-            ))}
-            {nightlyOptionRejection && (
-              <p className="text-xs text-destructive">{nightlyOptionRejection}</p>
-            )}
-          </div>
-        )}
-        {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
-            実行先（サブPC）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
-            対応を申告していないホストでは欄ごと出さない */}
-        {!isTargetPending && showAgents && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">エージェント</p>
-            <div role="radiogroup" aria-label="エージェント" className="grid grid-cols-2 gap-2">
-              {AGENT_ENTRIES.map((entry) => (
-                <AgentChip
-                  key={entry.agent}
-                  icon={entry.icon}
-                  label={describeDispatchAgent(entry.agent)}
-                  isDefault={entry.agent === DEFAULT_DISPATCH_AGENT}
-                  selected={agent === entry.agent}
-                  onSelect={() => setAgent(entry.agent)}
-                />
-              ))}
-            </div>
-            {/* **選んだ時点で出す**（#2505）。Codexでは入力待ちの通知・質問への回答・
-                Remote Controlが動かない（#2509で停止の通知、#2545で計画の承認パネルは動く
-                ようになった）。起動してから気づくと、届かない通知を待ち続けるか不具合として
-                報告することになる。文面の
-                正は`CODEX_LIMITATIONS`。配色は確認待ちの表示（`CheckUserReasonNotice`）に
-                合わせてamberで揃える */}
-            {agent === "codex" ? (
-              <div className="flex flex-col gap-1 rounded-md bg-amber-500/15 px-2.5 py-2 ring-1 ring-inset ring-amber-500/40">
-                <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
-                  <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-                  Codex CLIでは画面からの連携が一部効きません
+      {/* 1画面に収める（#3119）。**ヘッダー・本文・フッターを縦に積み、本文だけがスクロールする。**
+          フッター（キャンセル・開始）は本文の外に置いて常に見せる——以前は全体が1つのスクロール領域で、
+          スマホでは開始ボタンが画面の外へ出ていた。`overflow-y-auto`と`gap-4`は打ち消して自前で持つ
+          （やり方は`manual-step-guide-dialog.tsx`と同じ。段数を数える`grid-rows-*`は使わない。#2402）。
+          本文の`-mx-1 px-1`は、端のタイルの選択リング（`ring-1`）がスクロール領域で切れないための余白 */}
+      <DialogContent className="flex flex-col gap-0 overflow-hidden">
+        <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 pb-4 sm:gap-4">
+          <DialogHeader>
+            <DialogTitle>実装を開始</DialogTitle>
+            {/* 見た目には出さない。ダイアログの説明として読み上げには残す（Radixが説明の欠落を警告するため） */}
+            <DialogDescription className="sr-only">
+              実行する場所と必要なオプションを選んでから開始してください。
+            </DialogDescription>
+          </DialogHeader>
+          {/* 実行先が確定するまでは、選択肢の代わりに骨組みだけを出す（#1666） */}
+          {isTargetPending && <StartChoicesSkeleton />}
+          {/* 実行先を先に選ばせる（#1623）。実行先によって出るオプションが変わる（撮影は
+              GitHub Actionsのときだけ・アーティファクトはそれ以外）ため、選ぶ順序としても素直になる */}
+          {showTargets && !isTargetPending && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">実行先</p>
+              <div role="radiogroup" aria-label="実行先" className="grid auto-cols-fr grid-flow-col gap-1.5">
+                {targetEntries.map((entry) => (
+                  <StartTargetTile
+                    key={entry.key}
+                    entry={entry}
+                    selected={isSameTarget(entry.target, effectiveTarget)}
+                    onSelect={() => selectTarget(entry.target)}
+                  />
+                ))}
+              </div>
+              {/* 選択中の説明。選べない実行先の理由は下でまとめて出すので、ここでは重ねない */}
+              {selectedEntry && selectedEntry.rejection === null && (
+                <p className="text-xs text-muted-foreground">{selectedEntry.description}</p>
+              )}
+              {blockedEntries.map((entry) => (
+                <p key={entry.key} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{entry.name}</span>: {entry.rejection}
                 </p>
-                <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-400">
-                  {CODEX_LIMITATIONS.map((limitation) => (
-                    <li key={limitation}>{limitation}</li>
+              ))}
+              {nightlyOptionRejection && (
+                <p className="text-xs text-destructive">{nightlyOptionRejection}</p>
+              )}
+            </div>
+          )}
+          {/* エージェント（#2505）。**実行先とオプションの間に置く。** どのCLIで立てるかは
+              実行先（サブPC）の性質で、オプション（Issueにラベルとして残る選択）とは別の軸。
+              対応を申告していないホストでは欄ごと出さない */}
+          {!isTargetPending && showAgents && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">エージェント</p>
+              <div role="radiogroup" aria-label="エージェント" className="grid grid-cols-2 gap-2">
+                {AGENT_ENTRIES.map((entry) => (
+                  <AgentChip
+                    key={entry.agent}
+                    icon={entry.icon}
+                    label={describeDispatchAgent(entry.agent)}
+                    isDefault={entry.agent === DEFAULT_DISPATCH_AGENT}
+                    selected={agent === entry.agent}
+                    onSelect={() => setAgent(entry.agent)}
+                  />
+                ))}
+              </div>
+              {/* **選んだ時点で出す**（#2505）。Codexでは入力待ちの通知・質問への回答・
+                  Remote Controlが動かない（#2509で停止の通知、#2545で計画の承認パネルは動く
+                  ようになった）。起動してから気づくと、届かない通知を待ち続けるか不具合として
+                  報告することになる。文面の
+                  正は`CODEX_LIMITATIONS`。配色は確認待ちの表示（`CheckUserReasonNotice`）に
+                  合わせてamberで揃える。**Claude Codeでは何も出さない**（#3119。通知・承認・
+                  Remote Controlが使えるのは既定の動作で、毎回読ませる文ではない） */}
+              {agent === "codex" && (
+                <div className="flex flex-col gap-1 rounded-md bg-amber-500/15 px-2.5 py-2 ring-1 ring-inset ring-amber-500/40">
+                  <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+                    Codex CLIでは画面からの連携が一部効きません
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-400">
+                    {CODEX_LIMITATIONS.map((limitation) => (
+                      <li key={limitation}>{limitation}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          {/* モデル（#2717）。**エージェントとオプションの間に置く。** どのモデルで立てるかは
+              エージェントの下位の選択（Claude Codeで立てるときだけ意味がある）で、
+              オプション（Issueにラベルとして残る選択）とは別の軸。
+              **最初の選択は設定（設定 ＞ 実行）の値**（#3106）。重いIssueだけ上げる欄なので、
+              設定はSonnetのままにしておき、必要なときだけここで上げる使い方を想定している */}
+          {!isTargetPending && showModels && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">モデル</p>
+              <div role="radiogroup" aria-label="モデル" className="flex flex-col gap-2">
+                {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の3枚
+                    （自分で決める）とは性質が違う。並びの都合としても外に出す */}
+                <ModelChip
+                  icon={Sparkles}
+                  label="おまかせ"
+                  fit="Issueの内容から選ぶ"
+                  selected={model === AUTO_PICK}
+                  onSelect={() => selectModel(AUTO_PICK)}
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  {MODEL_ENTRIES.map((entry) => (
+                    <ModelChip
+                      key={entry.model}
+                      label={describeClaudeModel(entry.model)}
+                      fit={CLAUDE_MODEL_FIT_LABELS[entry.model]}
+                      selected={model === entry.model}
+                      onSelect={() => selectModel(entry.model)}
+                    />
+                  ))}
+                </div>
+              </div>
+              {/* 「おまかせ」のときは判定の結果（と理由）を出す。**理由を必ず添える**——
+                  当たり外れのある判定なので、納得できなければ別のチップを押せることが前提 */}
+              {/* 手動で選んだときの説明は出さない（#3119。チップの2行目と重複する） */}
+              {model === AUTO_PICK && (
+                <ModelPickNotice
+                  isPicking={modelPick.isPicking}
+                  result={modelPick.result}
+                  error={modelPick.error}
+                />
+              )}
+            </div>
+          )}
+          {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
+          {!isTargetPending && (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">オプション</p>
+              <div className="grid grid-cols-2 gap-2">
+                {visibleOptions.map((option) => {
+                  // 予約実行では承認・確認を待つ人がいないものを選ばせない（#2995）。
+                  // **既に付いているものは外せるよう、チェック済みなら塞がない**
+                  const nightlyUnavailable =
+                    isScheduledTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key);
+                  return (
+                    <StartOptionChip
+                      key={option.key}
+                      icon={START_OPTION_ICONS[option.key]}
+                      label={option.label}
+                      description={
+                        nightlyUnavailable
+                          ? `${scheduledKindName}では選べません（承認・確認を待つ人がいない）`
+                          : option.description
+                      }
+                      checked={options[option.key]}
+                      disabled={nightlyUnavailable && !options[option.key]}
+                      onToggle={() => toggleOption(option.key)}
+                    />
+                  );
+                })}
+              </div>
+              {optionHints.length > 0 && (
+                <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  {optionHints.map((hint) => (
+                    <li key={hint.key}>
+                      <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
+                    </li>
                   ))}
                 </ul>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                通知・計画の承認・質問への回答・Remote Controlがそのまま使えます。
-              </p>
-            )}
-          </div>
-        )}
-        {/* モデル（#2717）。**エージェントとオプションの間に置く。** どのモデルで立てるかは
-            エージェントの下位の選択（Claude Codeで立てるときだけ意味がある）で、
-            オプション（Issueにラベルとして残る選択）とは別の軸。
-            **最初の選択は設定（設定 ＞ 実行）の値**（#3106）。重いIssueだけ上げる欄なので、
-            設定はSonnetのままにしておき、必要なときだけここで上げる使い方を想定している */}
-        {!isTargetPending && showModels && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">モデル</p>
-            <div role="radiogroup" aria-label="モデル" className="flex flex-col gap-2">
-              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の3枚
-                  （自分で決める）とは性質が違う。並びの都合としても外に出す */}
-              <ModelChip
-                icon={Sparkles}
-                label="おまかせ"
-                fit="Issueの内容から選ぶ"
-                selected={model === AUTO_PICK}
-                onSelect={() => selectModel(AUTO_PICK)}
-              />
-              <div className="grid grid-cols-3 gap-2">
-                {MODEL_ENTRIES.map((entry) => (
-                  <ModelChip
-                    key={entry.model}
-                    label={describeClaudeModel(entry.model)}
-                    fit={CLAUDE_MODEL_FIT_LABELS[entry.model]}
-                    selected={model === entry.model}
-                    onSelect={() => selectModel(entry.model)}
-                  />
-                ))}
-              </div>
+              )}
             </div>
-            {/* 「おまかせ」のときは判定の結果（と理由）を出す。**理由を必ず添える**——
-                当たり外れのある判定なので、納得できなければ別のチップを押せることが前提 */}
-            {model === AUTO_PICK ? (
-              <ModelPickNotice
-                isPicking={modelPick.isPicking}
-                result={modelPick.result}
-                error={modelPick.error}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {describeModelChoice(model, claudeLocalModel)}
-              </p>
-            )}
-          </div>
-        )}
-        {/* オプションは実行先で出し分ける（#1317）ので、実行先が確定するまで出さない（#1666） */}
-        {!isTargetPending && (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm font-medium">オプション</p>
-            <div className="grid grid-cols-2 gap-2">
-              {visibleOptions.map((option) => {
-                // 予約実行では承認・確認を待つ人がいないものを選ばせない（#2995）。
-                // **既に付いているものは外せるよう、チェック済みなら塞がない**
-                const nightlyUnavailable =
-                  isScheduledTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.includes(option.key);
-                return (
-                  <StartOptionChip
-                    key={option.key}
-                    icon={START_OPTION_ICONS[option.key]}
-                    label={option.label}
-                    description={
-                      nightlyUnavailable
-                        ? `${scheduledKindName}では選べません（承認・確認を待つ人がいない）`
-                        : option.description
-                    }
-                    checked={options[option.key]}
-                    disabled={nightlyUnavailable && !options[option.key]}
-                    onToggle={() => toggleOption(option.key)}
-                  />
-                );
-              })}
-            </div>
-            {optionHints.length > 0 && (
-              <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-                {optionHints.map((hint) => (
-                  <li key={hint.key}>
-                    <span className="font-medium text-foreground">{hint.label}</span>: {hint.text}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        <ApiErrorMessage message={error} />
-        {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
-            一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
-        {blockedReason && !showTargets && (
-          <p className="text-sm text-destructive">{blockedReason}</p>
-        )}
-        <DialogFooter>
+          )}
+          <ApiErrorMessage message={error} />
+          {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
+              一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
+          {blockedReason && !showTargets && (
+            <p className="text-sm text-destructive">{blockedReason}</p>
+          )}
+        </div>
+        {/* スマホでも縦に積まず横並びにする（#3119。積むとフッターだけで約110px取られる）。
+            幅が足りる`sm`以上は従来どおり右寄せで、ボタンは内容の幅 */}
+        <DialogFooter className="flex-row justify-end">
           <DialogClose asChild>
-            <Button variant="outline" disabled={isSubmitting}>
+            <Button variant="outline" className="flex-1 sm:flex-none" disabled={isSubmitting}>
               キャンセル
             </Button>
           </DialogClose>
           {/* 実行先が確定するまでは押させない（#1666）。押せてしまうと、選ばせていない既定
               （ホストの一覧が空なのでGitHub Actions）で起動することになる */}
           <Button
+            className="flex-1 sm:flex-none"
             onClick={handleStart}
             disabled={
               isSubmitting ||
@@ -1360,7 +1348,12 @@ function ModelPickNotice({
   }
   if (result) {
     return (
-      <p className="text-xs text-muted-foreground">
+      // 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
+      // ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す
+      <p
+        className="line-clamp-2 text-xs text-muted-foreground"
+        title={`${describeClaudeModel(result.model)}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
+      >
         <span className="font-medium text-foreground">{describeClaudeModel(result.model)}</span>
         {result.reason ? ` — ${result.reason}` : "で起動します。"}
         {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}

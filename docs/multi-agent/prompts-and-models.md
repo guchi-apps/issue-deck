@@ -442,8 +442,9 @@ Fable 5.1は入力・出力がOpus 5の2倍だが、**キャッシュ読み出�
 - **実績は「AI使用量」の画面にある**（`session-usage-panel.tsx`）。モデル別・Issue別に、
   実測のトークンから割った額が出る。起動前の欄が目安を持つ必要はない
 
-代わりにチップの2行目へ**向いている作業**を出す（`CLAUDE_MODEL_FIT_LABELS`・
-`CLAUDE_MODEL_FIT_DESCRIPTIONS`。どちらも`src/lib/app-settings.ts`）。
+代わりにチップの2行目へ**向いている作業**を出す（`CLAUDE_MODEL_FIT_LABELS`、
+`src/lib/app-settings.ts`）。選んだあとに下へ出していた説明文（`CLAUDE_MODEL_FIT_DESCRIPTIONS`）は
+#3119で削除した（ダイアログを1画面に収めるため。チップの2行目と重複していた）。
 見積りを出していた`estimateSessionCostUsd`と、その元の平均トークン数の定数は消した。
 
 ### 「おまかせ」はissue-deckが選ぶ（#2723・#2776）

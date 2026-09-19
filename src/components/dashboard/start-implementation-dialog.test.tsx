@@ -487,14 +487,13 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByRole("radio", { name: /CLIの既定/ })).toBeNull();
     });
 
-    it("設定の値のモデルには、設定で選んだ旨を出す", () => {
+    // #3119。ダイアログを1画面に収めるため、手動で選んだモデルの説明文は出さない
+    it("設定の値のモデルにも、設定で選んだ旨の説明文は出さない", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
-      expect(screen.getByText(/設定（設定 ＞ 実行）で選んだOpusです。/)).toBeTruthy();
-      // 設定以外を選ぶと、その旨は消えて向いている作業だけになる
-      fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
+      expect(screen.getByRole("radio", { name: /^Opus/ }).getAttribute("aria-checked")).toBe("true");
       expect(screen.queryByText(/設定（設定 ＞ 実行）で選んだ/)).toBeNull();
     });
 
@@ -594,13 +593,15 @@ describe("StartImplementationDialog", () => {
 
     // #2723。金額（1件あたりの目安）は何の金額か画面から決まらず、FableとOpusがほぼ並ぶため
     // 見比べても選べなかった。出すのは「向いている作業」で、実績は「AI使用量」の画面で見る
-    it("Fableを選ぶと向いている作業を出し、金額は出さない", async () => {
+    it("Fableを選ぶと向いている作業はチップに出し、金額は出さない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
-      expect(screen.getByText(/原因が読めない不具合/)).toBeTruthy();
+      expect(screen.getByRole("radio", { name: /^Fable/ }).textContent).toContain("難しい調査・設計から");
+      // 選んだあとの説明文は出さない（#3119）
+      expect(screen.queryByText(/原因が読めない不具合/)).toBeNull();
       expect(screen.queryByText(/\$/)).toBeNull();
 
       clickStart();
