@@ -1403,7 +1403,7 @@ function CurrentSessionsSection({
       )}
       {sessions.length > 0 && (
         <p className="text-[10px] text-muted-foreground">
-          金額はセッション開始からの累計（API換算の目安）。期間の切り替えには連動しません。
+          状態は画面を開いた（更新した）時点のもので、自動では変わりません。金額はセッション開始からの累計（API換算の目安）で、期間の切り替えには連動しません。
         </p>
       )}
     </section>
