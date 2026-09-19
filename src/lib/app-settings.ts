@@ -140,8 +140,8 @@ export function describeClaudeModel(model: ClaudeModel): string {
  * しかも費用の6割強がキャッシュ読み出しのため FableとOpusがほぼ並び、見比べても選べなかった。
  * **選ぶ基準は作業の重さ**なので、そちらを持たせる。実績の金額は「AI使用量」の画面で見る。
  *
- * 短いのはチップの幅が2列で172px前後しかないため。**判断の背景は`CLAUDE_MODEL_FIT_DESCRIPTIONS`**
- * （選んだときにグリッドの下へ出す一行）に置く。
+ * 短いのはチップの幅が3列で110px前後しかないため。選んだあとの説明文は出さない（#3119。
+ * ダイアログを1画面に収めるためで、この2行目と重複していた）。
  */
 export const CLAUDE_MODEL_FIT_LABELS: Readonly<Record<ClaudeModel, string>> = {
   auto: "Claude Codeに任せる",
@@ -149,15 +149,6 @@ export const CLAUDE_MODEL_FIT_LABELS: Readonly<Record<ClaudeModel, string>> = {
   opus: "調査・設計判断あり",
   sonnet: "仕様が決まった実装",
   haiku: "文言修正・定型作業",
-};
-
-/** 選んだモデルの説明（#2723）。グリッドの下に1行で出す */
-export const CLAUDE_MODEL_FIT_DESCRIPTIONS: Readonly<Record<ClaudeModel, string>> = {
-  auto: "モデルを指定せずに起動します（--modelを付けません）。どのモデルで立つかはClaude Code側の設定・アカウントの既定で決まり、作業の内容では選ばれません。実際に動いたモデルはセッションの表示に出ます。",
-  fable: "原因が読めない不具合や、設計から考える実装に向きます。",
-  opus: "既存の作りを調べたうえで判断が要る実装に向きます。",
-  sonnet: "やることがはっきりしている実装に向きます。",
-  haiku: "判断の少ない小さな修正や、決まった形の追記に向きます。",
 };
 
 // APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。

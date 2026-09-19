@@ -1100,6 +1100,19 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   if [[ -n "${ISSUE_DECK_CLAUDE_MODEL:-}" ]]; then
     AGENT_LAUNCH_ARGS+=(--model "$ISSUE_DECK_CLAUDE_MODEL")
   fi
+  # サブエージェント（Explore・Plan・general-purpose）のモデル（#3118）。既定は`sonnet`。
+  # 何もしないと親のモデルを引き継ぎ、Opusで立てたセッションは読むだけのExploreまでOpusで回る。
+  # **`CLAUDE_CODE_SUBAGENT_MODEL`だけでは効かない。** 組み込みのExplore・Planは定義側で
+  # `model: inherit`を明示しており、定義の指定が環境変数より優先されるため、`_FORCE`を併用して
+  # 定義とAgent呼び出しの`model`指定を無視させる。forkは常に親のモデルのままで、ここの影響を受けない。
+  # `haiku`も指定できる（auto modeで動かないのはメインのモデルだけ。既定にしない理由は#3121・
+  # prompts-and-models.md）。`ISSUE_DECK_CLAUDE_SUBAGENT_MODEL=inherit`で従来どおり親を引き継ぐ。人が
+  # `CLAUDE_CODE_SUBAGENT_MODEL`を自分で渡しているときはそちらを尊重して触らない。
+  SUBAGENT_MODEL="${ISSUE_DECK_CLAUDE_SUBAGENT_MODEL:-sonnet}"
+  if [[ -z "${CLAUDE_CODE_SUBAGENT_MODEL:-}" && "$SUBAGENT_MODEL" != "inherit" ]]; then
+    export CLAUDE_CODE_SUBAGENT_MODEL="$SUBAGENT_MODEL" CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1
+    echo "#$ISSUE_NUMBER: サブエージェント（Explore等）はモデル $SUBAGENT_MODEL で動かします（forkは親のモデルのまま）。"
+  fi
   echo "#$ISSUE_NUMBER: ${AGENT_DISPLAY_NAME}セッション「$SESSION_NAME」を権限モード $PERMISSION_MODE で起動します..."
 else
   # 第2引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**

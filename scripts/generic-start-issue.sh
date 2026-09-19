@@ -51,6 +51,7 @@
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto。#1205）
 #   ISSUE_DECK_CLAUDE_MODEL             Claude Codeのモデル（未指定ならClaude Codeの既定）
+#   ISSUE_DECK_CLAUDE_SUBAGENT_MODEL    サブエージェントのモデル（既定は sonnet。haiku も可。inherit で親を引き継ぐ。#3118・#3121）
 #   ISSUE_DECK_AGENT                    起こすエージェントCLI（claude / codex。既定は claude。#2590）
 #   ISSUE_DECK_CODEX_MODEL              Codexのモデル（未指定ならCodex CLIの既定。#2550）
 #   ISSUE_DECK_CODEX_SANDBOX            Codexのサンドボックス（既定は workspace-write。#2377）
@@ -926,8 +927,8 @@ build_env_prefix() {
   for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_SKIP_SHARED_CONTEXT \
     ISSUE_DECK_CLAUDE_PERMISSION_MODE \
     ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_RESUME \
-    ISSUE_DECK_AGENT ISSUE_DECK_CLAUDE_MODEL ISSUE_DECK_CODEX_MODEL ISSUE_DECK_CODEX_SANDBOX \
-    ISSUE_DECK_CODEX_EXTRA_ARGS; do
+    ISSUE_DECK_AGENT ISSUE_DECK_CLAUDE_MODEL ISSUE_DECK_CLAUDE_SUBAGENT_MODEL ISSUE_DECK_CODEX_MODEL \
+    ISSUE_DECK_CODEX_SANDBOX ISSUE_DECK_CODEX_EXTRA_ARGS; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "
