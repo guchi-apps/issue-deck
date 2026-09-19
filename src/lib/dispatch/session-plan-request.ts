@@ -9,7 +9,7 @@ import { hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
  * `session-plan.ts`がIssueコメントとして残す（#1342）ので読むことはできたが、答える出口は
  * 端末の承認プロンプトだけで、画面（`LocalSessionWaitingInputNotice`）は
  * 「承認・修正はRemote Controlから伝えてください」と案内するしかなかった。画面の
- * 「追加指示を送る」（#1012）は**承認プロンプト・選択フォームの表示中は送らずに見送る**ため、
+ * 「追加指示」（#1012）は**承認プロンプト・選択フォームの表示中は送らずに見送る**ため、
  * まさに計画の承認ダイアログが出ている状態では使えない。
  *
  * 決めるのは人（画面のボタン）、受け取るのは計画を投稿した`PreToolUse(ExitPlanMode)`フック

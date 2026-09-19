@@ -654,8 +654,8 @@ describe("describeDispatchJobKind", () => {
   // 押したボタンとキューに出る言葉が違うと、それが自分の押したものか分からなくなる
   it("制御ジョブはボタンの文言（SESSION_CONTROL_LABELS.action）と揃える", () => {
     expect(describeDispatchJobKind("INTERRUPT")).toBe("停止");
-    expect(describeDispatchJobKind("KILL")).toBe("セッションを閉じる");
-    expect(describeDispatchJobKind("INSTRUCTION")).toBe("追加指示を送る");
+    expect(describeDispatchJobKind("KILL")).toBe("セッション終了");
+    expect(describeDispatchJobKind("INSTRUCTION")).toBe("追加指示");
   });
 
   // 「チップが無い＝実装」という暗黙のルールを覚えなくて済むよう、全種別に文言を持たせる
@@ -1078,7 +1078,7 @@ describe("セッションの操作（#1332）", () => {
     it("制御ジョブは種別に合わせた文言になる", () => {
       expect(describeDispatchJobStatus("QUEUED", "INTERRUPT").label).toBe("停止を送信しました");
       expect(describeDispatchJobStatus("SUCCEEDED", "INTERRUPT").label).toBe("停止を送りました");
-      expect(describeDispatchJobStatus("SUCCEEDED", "KILL").label).toBe("セッションを閉じました");
+      expect(describeDispatchJobStatus("SUCCEEDED", "KILL").label).toBe("セッションを終了しました");
       expect(describeDispatchJobStatus("SUCCEEDED").label).toBe("起動しました");
     });
 

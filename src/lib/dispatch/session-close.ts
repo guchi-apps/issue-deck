@@ -5,7 +5,7 @@ import { enqueueSessionControlJob } from "@/lib/dispatch/jobs";
 /**
  * Issueがcloseされたときに、そのIssueで走っているローカルセッションを畳む（#1518）。
  *
- * **画面の「セッションを閉じる」（#1332）と同じ`KILL`ジョブを、人が押さなくても積む。**
+ * **画面の「セッション終了」（#1332）と同じ`KILL`ジョブを、人が押さなくても積む。**
  * closeしても走り続けるのが実害になっていたのは、サブPC側の自動回収
  * （`scripts/reap-sessions.sh`）がIssueのCLOSEDを見る前に`11.local`で`hold`するため。
  * あのラベルは実装エージェントが引き渡し時に自分で外すもので、**closeで打ち切った
@@ -41,7 +41,7 @@ export type IssueClosedDispatchResult = {
  *
  * **`ALIVE`以外のセッションには積まない。** 終了したペイン（`EXITED`/`FAILED`）は異常終了の
  * 証拠で、最後の出力を読めるように残すのが既存の方針（`reap-sessions.sh`「読む前に消さない」）。
- * 片付けたいときは画面の「セッションを閉じる」を押せばよく、自動で消す理由が無い。
+ * 片付けたいときは画面の「セッション終了」を押せばよく、自動で消す理由が無い。
  *
  * **投げない。** 呼び出し元はIssueの同期処理（`upsertIssueRow`）で、ここでの失敗が
  * closeそのものやDB同期を巻き込むと、セッションを畳むための機能でIssueが閉じられなくなる。

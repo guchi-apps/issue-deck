@@ -105,7 +105,7 @@ describe("固定文面", () => {
     expect(isSessionStallRecoveryBody("api_error", preset!.body)).toBe(true);
     // 別の原因の文面は通さない（原因ごとに送るものが違う）
     expect(isSessionStallRecoveryBody("tool_call_stall", preset!.body)).toBe(false);
-    // 任意の本文は「追加指示を送る」の担当
+    // 任意の本文は「追加指示」の担当
     expect(isSessionStallRecoveryBody("api_error", "進めて")).toBe(false);
   });
 });
