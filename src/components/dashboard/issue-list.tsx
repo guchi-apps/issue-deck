@@ -51,7 +51,7 @@ import { canCodeReviewRepository } from "@/lib/dispatch/dispatch-job";
 import {
   mergedPullRequestRangeKey,
   type MergedPullRequestRange,
-} from "@/lib/github/merged-pr-count";
+} from "@/lib/github/merged-pr-range";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";

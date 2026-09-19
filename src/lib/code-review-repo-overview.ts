@@ -1,5 +1,5 @@
 import { isCodeReviewIssue } from "@/lib/github/code-review";
-import type { MergedPullRequestRange } from "@/lib/github/merged-pr-count";
+import type { MergedPullRequestRange } from "@/lib/github/merged-pr-range";
 import type { Issue } from "@/types/issue";
 
 /**
