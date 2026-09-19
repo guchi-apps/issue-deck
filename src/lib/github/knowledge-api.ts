@@ -17,7 +17,13 @@
 
 import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
-import type { RawIssue, RawKnowledgeFile, RawPromotionPullRequest } from "@/lib/knowledge-board";
+import {
+  isKnowledgeFilePath,
+  type RawIssue,
+  type RawKnowledgeFile,
+  type RawPromotionFile,
+  type RawPromotionPullRequest,
+} from "@/lib/knowledge-board";
 import { PROMOTION_BRANCH_PREFIX } from "@/lib/knowledge-promotion-pr";
 
 const DOCS_OWNER = "guchi-apps";
@@ -111,9 +117,9 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
 
   const entries = data.repository?.object?.entries ?? [];
   const files = entries
-    .filter((entry) => entry.type === "blob" && entry.name.endsWith(".md"))
-    // README.mdは索引であって知見ではない（`##`見出しが索引の節になってしまう）
-    .filter((entry) => entry.name !== "README.md")
+    // README.mdは索引であって知見ではない（`##`見出しが索引の節になってしまう）。反映PRの変更一覧と
+    // 同じ`isKnowledgeFilePath`で除く
+    .filter((entry) => entry.type === "blob" && isKnowledgeFilePath(`${KNOWLEDGE_DIR}/${entry.name}`))
     .filter((entry) => typeof entry.object?.text === "string" && !entry.object.isTruncated)
     .map((entry) => ({ path: `${KNOWLEDGE_DIR}/${entry.name}`, text: entry.object!.text! }));
 
@@ -122,6 +128,9 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
 
 /** 反映PRを見るぶんには十分な件数。溜まっていても数件〜十数件止まりの想定（#126の見送り仕様） */
 const OPEN_PULL_REQUESTS_TO_SCAN = 30;
+
+/** 反映PR1件あたり、本文まで読む`knowledge/*.md`の上限。超えたぶんは行数だけの表示に落とす */
+const KNOWLEDGE_FILES_TO_READ = 40;
 
 const OPEN_PULL_REQUESTS_QUERY = `
 query KnowledgeOpenPullRequests($owner: String!, $repo: String!, $first: Int!) {
@@ -134,25 +143,105 @@ query KnowledgeOpenPullRequests($owner: String!, $repo: String!, $first: Int!) {
         createdAt
         headRefName
         body
+        baseRefOid
+        headRefOid
+        commits(first: 1) { nodes { commit { parents(first: 1) { nodes { oid } } } } }
+        files(first: 100) { nodes { path changeType additions deletions } }
       }
     }
   }
 }`;
 
-type OpenPullRequestsResponse = {
-  repository: {
-    pullRequests: {
-      nodes: {
-        number: number;
-        title: string;
-        url: string;
-        createdAt: string;
-        headRefName: string;
-        body: string;
-      }[];
-    };
-  } | null;
+type ChangedFile = { path: string; changeType: string; additions: number; deletions: number };
+
+type OpenPullRequestNode = {
+  number: number;
+  title: string;
+  url: string;
+  createdAt: string;
+  headRefName: string;
+  body: string;
+  baseRefOid: string;
+  headRefOid: string;
+  commits: { nodes: { commit: { parents: { nodes: { oid: string }[] } } }[] };
+  files: { nodes: ChangedFile[] } | null;
 };
+
+type OpenPullRequestsResponse = {
+  repository: { pullRequests: { nodes: OpenPullRequestNode[] } } | null;
+};
+
+type BlobObject = { isTruncated?: boolean; text?: string | null } | null;
+
+/** 新規・改名・複製のファイルは、PRの前に同じパスの本文が無い（`null`は正常） */
+const NO_BASE_CHANGE_TYPES = new Set(["ADDED", "RENAMED", "COPIED"]);
+
+/**
+ * 変更された共通知識のファイルについて、PR前後の本文を1リクエストで取る。
+ *
+ * **比較元は`baseRefOid`（baseブランチの現在の先端）ではなく、PRの最初のコミットの親**にする。
+ * 反映PRは数日開いたままになることがあり、その間にbase側の`knowledge/`が別経路で変わると、
+ * 先端との比較では他人の変更が「更新」「削除」として混ざるため。取れなければ先端で代用する。
+ *
+ * **存在しないパスの`null`は失敗ではない。** 新規ファイルの比較元、削除ファイルのPR側は
+ * `changeType`で「本文が無いのが正常」と分かるので空文字で持つ。それ以外の`null`・切り詰められた
+ * 大きなファイル・リクエスト自体の失敗は`texts: null`（行数だけの表示に落とす）。
+ */
+async function fetchPromotionFileTexts(
+  token: string,
+  pr: OpenPullRequestNode,
+  files: ChangedFile[],
+): Promise<RawPromotionFile[]> {
+  const base = pr.commits.nodes[0]?.commit.parents.nodes[0]?.oid ?? pr.baseRefOid;
+  const targets = files
+    .filter((file) => isKnowledgeFilePath(file.path))
+    .slice(0, KNOWLEDGE_FILES_TO_READ);
+
+  const unread = (file: ChangedFile): RawPromotionFile => ({ ...file, texts: null });
+  if (targets.length === 0) return files.map(unread);
+
+  const declarations = targets.map((_, i) => `$b${i}: String!, $h${i}: String!`).join(", ");
+  const fields = targets
+    .map(
+      (_, i) =>
+        `b${i}: object(expression: $b${i}) { ... on Blob { isTruncated text } }\n` +
+        `    h${i}: object(expression: $h${i}) { ... on Blob { isTruncated text } }`,
+    )
+    .join("\n    ");
+  const query = `query KnowledgePromotionFiles($owner: String!, $repo: String!, ${declarations}) {
+  repository(owner: $owner, name: $repo) {
+    ${fields}
+  }
+}`;
+  const variables: Record<string, unknown> = { owner: DOCS_OWNER, repo: DOCS_REPO };
+  targets.forEach((file, i) => {
+    variables[`b${i}`] = `${base}:${file.path}`;
+    variables[`h${i}`] = `${pr.headRefOid}:${file.path}`;
+  });
+
+  let data: { repository: Record<string, BlobObject> | null };
+  try {
+    data = await githubGraphql(token, query, variables, "fetchPromotionFileTexts", {
+      permissionHint: "（共有知識リポジトリを読む権限が要ります）",
+    });
+  } catch (error) {
+    console.error("[fetchPromotionFileTexts]", error);
+    return files.map(unread);
+  }
+
+  const readBlob = (blob: BlobObject | undefined, absentIsNormal: boolean): string | null => {
+    if (blob && typeof blob.text === "string" && !blob.isTruncated) return blob.text;
+    return !blob && absentIsNormal ? "" : null;
+  };
+
+  const readTexts = new Map<string, RawPromotionFile["texts"]>();
+  targets.forEach((file, i) => {
+    const before = readBlob(data.repository?.[`b${i}`], NO_BASE_CHANGE_TYPES.has(file.changeType));
+    const after = readBlob(data.repository?.[`h${i}`], file.changeType === "DELETED");
+    readTexts.set(file.path, before !== null && after !== null ? { base: before, head: after } : null);
+  });
+  return files.map((file) => ({ ...file, texts: readTexts.get(file.path) ?? null }));
+}
 
 /**
  * `guchi-apps/docs`のオープンなPull Requestのうち、格上げ判定が作った反映PR
@@ -160,6 +249,8 @@ type OpenPullRequestsResponse = {
  *
  * これが残っている間、`promote-knowledge.yml`は次回の判定を見送る（#126）。issue-deckの
  * 「共通知識」画面はマージ操作を持たないため、ここでは一覧を返すだけで判定・マージは行わない。
+ * 各PRには、マージで共通知識へ入る内容を出すために、変更された`knowledge/*.md`の前後の本文も
+ * 付ける（#3107）。
  *
  * **読めなかったときは例外にせず空で返す**（`fetchKnowledgeFiles`と同じ方針）。
  */
@@ -181,15 +272,18 @@ export async function fetchOpenPromotionPullRequests(
   }
 
   const nodes = data.repository?.pullRequests.nodes ?? [];
-  return nodes
-    .filter((node) => node.headRefName.startsWith(PROMOTION_BRANCH_PREFIX))
-    .map((node) => ({
-      number: node.number,
-      title: node.title,
-      htmlUrl: node.url,
-      createdAt: node.createdAt,
-      body: node.body,
-    }));
+  return Promise.all(
+    nodes
+      .filter((node) => node.headRefName.startsWith(PROMOTION_BRANCH_PREFIX))
+      .map(async (node) => ({
+        number: node.number,
+        title: node.title,
+        htmlUrl: node.url,
+        createdAt: node.createdAt,
+        body: node.body,
+        files: await fetchPromotionFileTexts(token, node, node.files?.nodes ?? []),
+      })),
+  );
 }
 
 const MEMO_QUERY = `

@@ -4036,6 +4036,25 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
   シェルステップが`- owner/repo#番号: URL`の固定書式で機械的に追記する節なので、ここだけを
   対象にすれば誤検出しない
+- **「マージされる知識」は、PR本文ではなくPRの前後の`knowledge/*.md`を`##`セクション単位で比べて
+  出す**（#3107。`knowledge-board.ts`の`diffKnowledgeSections`・`buildPromotionKnowledgeFiles`、
+  表示は`PromotionKnowledgeList`）。出典Issueと違い、PR本文の`## Summary`は**読まない**——
+  Claudeの自由記述でファイル名・件数・書式が毎回変わるため。見出しが新しく現れれば「追加」、同じ
+  見出しの本文が変われば「更新」（既存の知見への追記もここ。PRの`patch`から`+## `行を拾う方式だと
+  追記を区別できない）、見出しごと消えれば「削除」。結論は共通知識の一覧と同じ`parseKnowledgeFile`
+  で取る。取得は`knowledge-api.ts`の`fetchPromotionFileTexts`で、PRごとに1リクエスト
+  （`object(expression: "<oid>:<path>")`のaliasを並べる。上限は`KNOWLEDGE_FILES_TO_READ`=40）
+  - **`knowledge/README.md`（索引）は除く。** 反映PRはほぼ毎回索引も更新し、混ぜると索引の節が
+    「更新」の知識として並ぶ。除外は`isKnowledgeFilePath`の1か所で、`fetchKnowledgeFiles`
+    （たまった共通知識）と共有する
+  - **比較元は`baseRefOid`（baseブランチの先端）ではなく、PRの最初のコミットの親。** 反映PRは
+    数日開いたままになり、その間に`main`の`knowledge/`が別経路で変わると、先端との比較では他人の
+    変更が「更新」「削除」に混ざる。取れなければ先端で代用する
+  - **存在しないパスの`null`は失敗ではない。** 新規ファイル（`changeType`が`ADDED`・`RENAMED`・
+    `COPIED`）の比較元は空文字で持ち、全セクションを「追加」にする。既存ファイルなのに`null`・
+    切り詰められた大きなファイル・取得の失敗は`texts: null`にして、セクションは出さず
+    ファイル名と`+N −M行`だけの表示に落とす（全部「追加」に見せない・PRを一覧から落とさない）
+  - 見出しで取り出せない変更（最初の`##`より前だけが変わったなど）も同じ表示で残す
 - **唯一の書き込み操作である「マージする」「マージしない」ボタンは、既存のPRマージ機構を
   そのまま再利用する**（`usePullRequestMergeMutation`の`mergePullRequest`・`closePullRequest`、
   `POST /api/issues/pull-request-merge`・`POST /api/issues/pull-request-close`。

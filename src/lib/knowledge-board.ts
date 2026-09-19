@@ -90,6 +90,28 @@ export type PromotionSourceIssue = {
   htmlUrl: string;
 };
 
+/** 反映PRが共通知識へ入れる変更1件（`##`セクション1つ＝1件） */
+export type PromotionKnowledgeItem = {
+  /** 追加＝ファイルに無かった見出し、更新＝同じ見出しの本文が変わった、削除＝見出しごと無くなった */
+  kind: "added" | "updated" | "removed";
+  title: string;
+  /** 追加・更新はPR側の`結論`（`KnowledgeSection.summary`と同じ）。削除は空 */
+  summary: string;
+};
+
+/** 反映PRが触る共通知識のファイル1つぶん */
+export type PromotionKnowledgeFile = {
+  path: string;
+  /**
+   * セクション単位の変更。**空なら「見出しの単位では取り出せなかった」**（本文を読めなかった・
+   * 最初の`##`より前だけが変わった・大きすぎて読めなかった、のどれか）。その場合も落とさず、
+   * 行数だけを`additions`・`deletions`で出す
+   */
+  items: PromotionKnowledgeItem[];
+  additions: number;
+  deletions: number;
+};
+
 /** `guchi-apps/docs`へのマージ待ち反映PR（ブランチ名`knowledge/promote-*`）1件 */
 export type OpenPromotionPullRequest = {
   number: number;
@@ -98,6 +120,23 @@ export type OpenPromotionPullRequest = {
   createdAt: string;
   /** 抽出できなかった場合は空配列（PR自体は一覧から落とさない） */
   sourceIssues: PromotionSourceIssue[];
+  /** マージで共通知識へ入る変更（`knowledge/*.md`のみ。`README.md`は除く）。無ければ空配列 */
+  knowledgeChanges: PromotionKnowledgeFile[];
+};
+
+/** 反映PRが変更するファイル1つの取得結果（`knowledge-api.ts`が返す形） */
+export type RawPromotionFile = {
+  path: string;
+  /** GitHubの`PullRequestChangedFile.changeType`（`ADDED`・`MODIFIED`・`DELETED`など） */
+  changeType: string;
+  additions: number;
+  deletions: number;
+  /**
+   * 比較元・PR側の本文。**`null`は「読めなかった」**（取得の失敗・切り詰められた大きなファイル・
+   * 取得数の上限超え）で、新規ファイルの比較元が無いことは`changeType`で表す（本文を`null`に
+   * しない）。`null`のファイルは行数だけの表示に落とす
+   */
+  texts: { base: string; head: string } | null;
 };
 
 /** 取得元の反映PR1件（`knowledge-api.ts`が返す形） */
@@ -107,6 +146,7 @@ export type RawPromotionPullRequest = {
   htmlUrl: string;
   createdAt: string;
   body: string;
+  files: RawPromotionFile[];
 };
 
 /** 画面が受け取るデータ一式 */
@@ -511,6 +551,126 @@ export function parsePromotionSourceIssues(body: string): PromotionSourceIssue[]
   return sources;
 }
 
+/**
+ * 共通知識として数えるファイルか（`knowledge/<名前>.md`）。**索引の`README.md`は知見ではない**
+ * ので除く——`##`見出しが索引の節になり、一覧に知見として並んでしまう。`fetchKnowledgeFiles`
+ * （たまった共通知識）と反映PRの変更一覧が同じ判定を使い、片方だけ外れることを防ぐ。
+ * 反映PRはほぼ毎回`README.md`の索引も更新するため、ここで外さないと毎回混ざる。
+ */
+export function isKnowledgeFilePath(path: string): boolean {
+  return /^knowledge\/[^/]+\.md$/.test(path) && path !== "knowledge/README.md";
+}
+
+type RawSection = { heading: string; lines: string[] };
+
+/**
+ * Markdownを`##`見出しごとの原文へ分ける。`parseKnowledgeFile`と同じ区切り（コードフェンスの中の
+ * `##`は見出しにしない）だが、**フェンスの中身も落とさず原文のまま持つ**——更新の判定は本文の
+ * 差で行うため、コードブロックの中だけが変わった場合も拾う必要がある。最初の`##`より前は捨てる。
+ */
+function splitRawSections(text: string): RawSection[] {
+  const sections: RawSection[] = [];
+  let fence: { char: string; length: number } | null = null;
+
+  for (const line of text.split("\n")) {
+    const fenceMatch = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const char = fenceMatch[1][0];
+      const length = fenceMatch[1].length;
+      if (!fence) {
+        fence = { char, length };
+      } else if (char === fence.char && length >= fence.length) {
+        fence = null;
+      }
+    } else if (!fence && /^##\s+/.test(line)) {
+      sections.push({ heading: line, lines: [] });
+      continue;
+    }
+    sections[sections.length - 1]?.lines.push(line);
+  }
+  return sections;
+}
+
+/** 比較用の本文。行末の空白と前後の空行（追記で動く）は差として扱わない */
+function normalizedSectionText(section: RawSection): string {
+  return section.lines
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
+/** 見出しの一致で対にする鍵。同じ見出しが複数あっても出現順で対にする */
+function sectionKeys(sections: RawSection[]): string[] {
+  const seen = new Map<string, number>();
+  return sections.map((section) => {
+    const title = cleanHeading(section.heading);
+    const n = (seen.get(title) ?? 0) + 1;
+    seen.set(title, n);
+    return `${n}\u0000${title}`;
+  });
+}
+
+/**
+ * 共通知識のファイル1つについて、PR前後の本文から**セクション単位の変更**を出す。
+ *
+ * 見出しが新しく現れたものは「追加」、同じ見出しの本文が変わったものは「更新」（既存の知見への
+ * 追記もここ）、見出しごと無くなったものは「削除」。順序はPR側の並びに、削除を末尾へ足す。
+ * 新規ファイルは`baseText`に空文字を渡す（すべて「追加」になる）。
+ *
+ * **PR本文の要約は読まない。** 反映PRの本文はClaudeの自由記述で、ファイル名・件数・書式が毎回
+ * 変わる。差分そのものを見れば、書かれ方に左右されず何が入るかが分かる。
+ */
+export function diffKnowledgeSections(
+  path: string,
+  baseText: string,
+  headText: string,
+): PromotionKnowledgeItem[] {
+  const baseSections = splitRawSections(baseText);
+  const headSections = splitRawSections(headText);
+  const baseKeys = sectionKeys(baseSections);
+  const headKeys = sectionKeys(headSections);
+  const baseByKey = new Map(baseKeys.map((key, i) => [key, baseSections[i]]));
+  const headKeySet = new Set(headKeys);
+
+  const items: PromotionKnowledgeItem[] = [];
+  headSections.forEach((section, i) => {
+    const before = baseByKey.get(headKeys[i]);
+    if (before && normalizedSectionText(before) === normalizedSectionText(section)) return;
+
+    // 結論の取り出しは共通知識の一覧と同じ`parseKnowledgeFile`に任せる（1セクションだけの原文で渡す）
+    const parsed = parseKnowledgeFile({
+      path,
+      text: [section.heading, ...section.lines].join("\n"),
+    })[0];
+    items.push({
+      kind: before ? "updated" : "added",
+      title: parsed?.title ?? cleanHeading(section.heading),
+      summary: parsed?.summary ?? "",
+    });
+  });
+
+  baseSections.forEach((section, i) => {
+    if (headKeySet.has(baseKeys[i])) return;
+    items.push({ kind: "removed", title: cleanHeading(section.heading), summary: "" });
+  });
+
+  return items;
+}
+
+/** 反映PRの変更ファイルから、画面に出す「共通知識への変更」を作る */
+export function buildPromotionKnowledgeFiles(files: RawPromotionFile[]): PromotionKnowledgeFile[] {
+  return files
+    .filter((file) => isKnowledgeFilePath(file.path))
+    .map((file) => ({
+      path: file.path,
+      items: file.texts ? diffKnowledgeSections(file.path, file.texts.base, file.texts.head) : [],
+      additions: file.additions,
+      deletions: file.deletions,
+    }))
+    // 何も変わっていない（行数も0）ファイルは出さない。行が動いたのに見出しで取れないものは残す
+    .filter((file) => file.items.length > 0 || file.additions + file.deletions > 0);
+}
+
 export function buildOpenPromotionPullRequest(pr: RawPromotionPullRequest): OpenPromotionPullRequest {
   return {
     number: pr.number,
@@ -518,6 +678,7 @@ export function buildOpenPromotionPullRequest(pr: RawPromotionPullRequest): Open
     htmlUrl: pr.htmlUrl,
     createdAt: pr.createdAt,
     sourceIssues: parsePromotionSourceIssues(pr.body),
+    knowledgeChanges: buildPromotionKnowledgeFiles(pr.files),
   };
 }
 
