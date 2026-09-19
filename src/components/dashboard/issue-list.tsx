@@ -95,7 +95,6 @@ import {
   summarizeCodeReviewFindingProgress,
   type CodeReviewFindingProgress,
 } from "@/lib/github/code-review";
-import { isStartImplementationOptionLabel } from "@/lib/github/start-implementation";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
@@ -104,13 +103,11 @@ import {
   type IssuePullRequestProgress,
 } from "@/lib/issue-pull-request-progress";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
-import { isProgressLabel } from "@/lib/issue-status";
 import {
   formatManualStepListCount,
   type ManualStepReadiness,
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
-import { getLabelBadgeStyle } from "@/lib/label-color";
 import {
   findScheduledRunQueuedMark,
   type ScheduledRunQueuedMap,
@@ -131,7 +128,7 @@ import {
   type SnoozeTarget,
 } from "@/lib/snooze";
 import { cn } from "@/lib/utils";
-import type { Issue, IssueLabel, NavViewId } from "@/types/issue";
+import type { Issue, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 type IssueListProps = {
@@ -320,18 +317,6 @@ type IssueListProps = {
   pullRequests?: PullRequestSummary[];
 };
 
-// 要対応ラベル（00.check-userと、その理由を表す01.check-*）と、廃止済みの進捗ラベル
-// （01〜09番台。#991 Phase 5・#1010）が他リポジトリに残っていた場合は、カード右上の
-// WorkflowStepBadgeが進捗と確認待ちの理由を表現するため、下部のラベル一覧からは除外する。
-// **実装オプションのラベルも出さない**（#1915）。「実装を開始」ダイアログで選んだ走らせ方で、
-// 盤面を眺めるときの手掛かりにならないうえ、ラベル行が2行に折り返してRemote Controlを
-// 置く場所が無かった。付いているものをすべて見るのはIssue詳細の役割
-function listCardLabels(labels: IssueLabel[]) {
-  return labels.filter(
-    (label) => !isProgressLabel(label.name) && !isStartImplementationOptionLabel(label.name),
-  );
-}
-
 function IssueStateIcon({ issue }: { issue: Issue }) {
   if (issue.state === "open") {
     return <CircleDot className="size-3 shrink-0 text-green-600" aria-label="Open" />;
@@ -406,7 +391,7 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
  * 状態はIssue自体の性質で、どのビューから見ても同じものだから。
  *
  * 読み終わったもの（`confirmed`）と質問以外（null）には何も出さない——一覧の大半を占める
- * 通常のIssueにまでラベルが増えると、隣に並ぶGitHubのラベルが読めなくなる。
+ * 通常のIssueにまでバッジが増えると、隣に並ぶ他のバッジが読めなくなる。
  *
  * **回答待ちだけは質問Issue以外にも出し、アイコンを回す**（#2309）。判定を`waiting`
  * （`isQaAnswerWaiting`）で受け取るのは、「質問する」ボタンが通常のIssueのコメント欄にも
@@ -1132,8 +1117,8 @@ export function IssueList({
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}
               />
-              {/* レビューの結果（#2855）。**ラベルより前に置く**——この行を開くかどうかは
-                  重い指摘が何件あるかで決めるもので、レビューIssueに付くラベルはそれより後 */}
+              {/* レビューの結果（#2855）。この行を開くかどうかは重い指摘が何件あるかで決める。
+                  GitHubのラベルは一覧のカードに出さない（#3159）。付いているものはIssue詳細で見る */}
               {/* レビューとレビューのあいだに入ったPRの件数（#3092）。リポジトリを選んだときだけ */}
               {codeReviewInterval && (
                 <span className="text-[10px] text-muted-foreground tabular-nums">
@@ -1146,15 +1131,6 @@ export function IssueList({
                   progress={codeReviewProgress.get(codeReviewSummaryKey(issue))}
                 />
               )}
-              {listCardLabels(issue.labels).map((label) => (
-                <span
-                  key={label.name}
-                  className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
-                  style={getLabelBadgeStyle(label.color)}
-                >
-                  {label.name}
-                </span>
-              ))}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {/* 計画の承認へ入る（#2061）。**行き先はアプリの中**で、押すとそのIssueが開き、
@@ -1216,7 +1192,7 @@ export function IssueList({
                   PRをマージ
                 </Button>
               )}
-              {/* 走っているセッションを一覧から開く（#1915）。**ラベル行の右端に置く**——
+              {/* 走っているセッションを一覧から開く（#1915）。**カード下段の右端に置く**——
                   カードの下へ1行足すと、セッションのあるカードだけ高さが変わって一覧が
                   不揃いになる。文言は「Remote」まで詰め、全文は`title`・`aria-label`に持たせる */}
               {remoteControlUrl && (

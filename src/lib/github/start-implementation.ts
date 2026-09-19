@@ -168,10 +168,9 @@ const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
  * **判定の正は`START_IMPLEMENTATION_OPTIONS`だけ**にする。番号帯（20番台）の正規表現で
  * 別に判定を作ると、オプションを増やしたときに片方だけ増えて食い違う。
  *
- * Issue一覧のカードでラベルを出すかどうかに使う（`issue-list.tsx`の`listCardLabels`）。
- * 一覧は「何のIssueか・急ぎか」を眺める場所で、どのオプションで走らせたかは開いてから
- * 確かめれば足りる。**Issue詳細のラベル欄からは除外しない**（そこは付いているものを
- * すべて見る場所）。
+ * ラベル選択欄（`isSelectableLabelName`）から外すのに使う。Issue一覧のカードはGitHubの
+ * ラベルをすべて出さなくなった（#3159）。**Issue詳細のラベル欄からは除外しない**（そこは
+ * 付いているものをすべて見る場所）。
  */
 export function isStartImplementationOptionLabel(name: string): boolean {
   return START_IMPLEMENTATION_OPTION_LABEL_NAMES.has(name);

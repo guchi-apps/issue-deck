@@ -177,8 +177,8 @@ describe("WorkflowStepBadge", () => {
     expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 100%");
   });
 
-  // #2516。一覧の行では`00.check-user`・`01.check-*`が下のラベル一覧から除外されるため
-  // （`listCardLabels`）、色で伝えるのはこのバッジだけになる。塗ったマスだけでは
+  // #2516。一覧の行にはGitHubのラベル（`00.check-user`・`01.check-*`を含む）が出ないため
+  // （#3159）、色で伝えるのはこのバッジだけになる。塗ったマスだけでは
   // `Planning`（1/6）の行で5pxしか色が乗らないので、未達のマスも濃く塗る
   it("確認待ち・回答待ちでは未達のマスも濃く塗る", () => {
     const plain = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
