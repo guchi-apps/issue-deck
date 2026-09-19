@@ -40,6 +40,8 @@ describe("PATCH /api/nightly-run/settings", () => {
       nextWindowRunEnabled: update.nextWindowRunEnabled ?? false,
       nextWindowRunLeadMinutes: update.nextWindowRunLeadMinutes ?? 60,
       nextWindowRunIntervalMinutes: update.nextWindowRunIntervalMinutes ?? 10,
+      nextWindowRunFiveHourFloorPercent: update.nextWindowRunFiveHourFloorPercent ?? 0,
+      nextWindowRunWeeklyFloorPercent: update.nextWindowRunWeeklyFloorPercent ?? 0,
       claudeWindowKeepAliveEnabled: update.claudeWindowKeepAliveEnabled ?? false,
       claudeWindowKeepAliveStartHour: update.claudeWindowKeepAliveStartHour ?? 7,
       claudeWindowKeepAliveEndHour: update.claudeWindowKeepAliveEndHour ?? 23,
@@ -56,7 +58,13 @@ describe("PATCH /api/nightly-run/settings", () => {
     expect(response.status).toBe(200);
     expect(upsert.mock.calls[0][0].update).toEqual({ nextWindowRunEnabled: true });
     expect(await response.json()).toEqual({
-      nextWindow: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+      nextWindow: {
+        enabled: true,
+        leadMinutes: 60,
+        intervalMinutes: 10,
+        fiveHourFloorPercent: 0,
+        weeklyFloorPercent: 0,
+      },
       keepAlive: { enabled: false, startHour: 7, endHour: 23 },
     });
   });
@@ -94,6 +102,30 @@ describe("PATCH /api/nightly-run/settings", () => {
       nextWindowRunLeadMinutes: 90,
       nextWindowRunIntervalMinutes: 0,
     });
+  });
+
+  /** #3100 */
+  it("残り枠の下限を切り替えられる", async () => {
+    const response = await PATCH(
+      request({ nextWindow: { fiveHourFloorPercent: 10, weeklyFloorPercent: 20 } }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({
+      nextWindowRunFiveHourFloorPercent: 10,
+      nextWindowRunWeeklyFloorPercent: 20,
+    });
+    expect((await response.json()).nextWindow).toMatchObject({
+      fiveHourFloorPercent: 10,
+      weeklyFloorPercent: 20,
+    });
+  });
+
+  it("下限は決まった選択肢（0・10〜50%）だけ受け付ける", async () => {
+    expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 15 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 100 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { fiveHourFloorPercent: -10 } }))).status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   /** #2995: 選べる値だけを受ける（自由入力にすると枠の終わり際という意味が崩れる） */

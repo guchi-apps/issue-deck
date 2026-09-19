@@ -838,7 +838,7 @@ describe("予約実行に積まれているIssueの注釈", () => {
   function marksFor(enabled: boolean) {
     return selectScheduledRunQueuedMarks({
       nextWindow: {
-        settings: { enabled, leadMinutes: 60, intervalMinutes: 10 },
+        settings: { enabled, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
         window: null,
         queued: [
           {

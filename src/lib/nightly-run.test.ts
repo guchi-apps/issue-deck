@@ -231,7 +231,7 @@ describe("予約実行の目印（#2866・#2995）", () => {
   function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): Pick<NightlyRunState, "nextWindow"> {
     return {
       nextWindow: {
-        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+        settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
         window: null,
         queued: [entry({})],
         results: null,
@@ -248,6 +248,9 @@ describe("予約実行の目印（#2866・#2995）", () => {
           resetsAt: "2026-09-07T23:40:00.000Z",
           opensAt: "2026-09-07T22:40:00.000Z",
           usedPercent: 62,
+          weeklyUsedPercent: null,
+          weeklyResetsAt: null,
+          quotaBlock: null,
           runKey: "2026-09-08 08:40",
         },
       }),
@@ -281,7 +284,7 @@ describe("予約実行の目印（#2866・#2995）", () => {
   it("次枠実行がOFFならチップがOFFの文言になる（#2995）", () => {
     const marks = selectScheduledRunQueuedMarks(
       state({
-        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
+        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
         window: null,
         queued: [entry({ issueId: "9003" })],
       }),

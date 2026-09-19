@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ScheduledRunSettingsPatch } from "@/hooks/use-nightly-run";
 import { useNow } from "@/hooks/use-now";
 import {
+  NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
   NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
 } from "@/lib/app-settings";
@@ -26,7 +27,7 @@ import {
   type ClaudeWindowKeepAliveView,
 } from "@/lib/claude-window-keepalive";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { formatTimeOfDay } from "@/lib/format-date-time";
+import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatResetCountdown } from "@/lib/format-reset";
 import { START_IMPLEMENTATION_OPTIONS } from "@/lib/github/start-implementation";
 import {
@@ -41,6 +42,7 @@ import {
 import {
   describeNextWindowRunSchedule,
   formatNextWindowRunKeyLabel,
+  type NextWindowRunSettings,
   type NextWindowRunWindowView,
 } from "@/lib/next-window-run";
 import { getRepoColor } from "@/lib/repo-color";
@@ -113,7 +115,7 @@ export function NightlyRunPanel({
         </>
       ) : (
         <>
-          <ClaudeWindowMeter window={state.nextWindow.window} />
+          <ClaudeWindowMeter window={state.nextWindow.window} settings={state.nextWindow.settings} />
 
           <KeepAliveSection
             keepAlive={state.keepAlive}
@@ -129,67 +131,82 @@ export function NightlyRunPanel({
               state.nextWindow.settings,
               state.nextWindow.window,
             )}
+            badge={
+              state.nextWindow.window?.quotaBlock && state.nextWindow.settings.enabled ? (
+                <span className="rounded-full bg-amber-500/15 px-2 py-px text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  起動を見送り中
+                </span>
+              ) : null
+            }
             settings={
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
-                <label className="flex items-center gap-2 text-[13px] font-medium">
-                  <Checkbox
-                    checked={state.nextWindow.settings.enabled}
-                    disabled={isSubmitting}
-                    onCheckedChange={(checked) =>
-                      onUpdateSettings({ nextWindow: { enabled: checked === true } })
-                    }
-                  />
-                  <span>次の5時間枠での実行を有効にする</span>
-                </label>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>起動する残り時間</span>
-                  <Select
-                    value={String(state.nextWindow.settings.leadMinutes)}
-                    disabled={isSubmitting}
-                    onValueChange={(value) =>
-                      onUpdateSettings({ nextWindow: { leadMinutes: Number(value) } })
-                    }
-                  >
-                    <SelectTrigger size="sm" className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS.map((minutes) => (
-                        <SelectItem key={minutes} value={String(minutes)}>
-                          {minutes}分
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-3">
+                  <label className="flex items-center gap-2 text-[13px] font-medium">
+                    <Checkbox
+                      checked={state.nextWindow.settings.enabled}
+                      disabled={isSubmitting}
+                      onCheckedChange={(checked) =>
+                        onUpdateSettings({ nextWindow: { enabled: checked === true } })
+                      }
+                    />
+                    <span>次の5時間枠での実行を有効にする</span>
+                  </label>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>起動する残り時間</span>
+                    <Select
+                      value={String(state.nextWindow.settings.leadMinutes)}
+                      disabled={isSubmitting}
+                      onValueChange={(value) =>
+                        onUpdateSettings({ nextWindow: { leadMinutes: Number(value) } })
+                      }
+                    >
+                      <SelectTrigger size="sm" className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS.map((minutes) => (
+                          <SelectItem key={minutes} value={String(minutes)}>
+                            {minutes}分
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>起動の間隔</span>
+                    <Select
+                      value={String(state.nextWindow.settings.intervalMinutes)}
+                      disabled={isSubmitting}
+                      onValueChange={(value) =>
+                        onUpdateSettings({ nextWindow: { intervalMinutes: Number(value) } })
+                      }
+                    >
+                      <SelectTrigger size="sm" className="w-24">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS.map((minutes) => (
+                          <SelectItem key={minutes} value={String(minutes)}>
+                            {minutes === 0 ? "空けない" : `${minutes}分`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>起動の間隔</span>
-                  <Select
-                    value={String(state.nextWindow.settings.intervalMinutes)}
-                    disabled={isSubmitting}
-                    onValueChange={(value) =>
-                      onUpdateSettings({ nextWindow: { intervalMinutes: Number(value) } })
-                    }
-                  >
-                    <SelectTrigger size="sm" className="w-24">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS.map((minutes) => (
-                        <SelectItem key={minutes} value={String(minutes)}>
-                          {minutes === 0 ? "空けない" : `${minutes}分`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <FloorSettings
+                  settings={state.nextWindow.settings}
+                  compact={compact}
+                  isSubmitting={isSubmitting}
+                  onUpdateSettings={onUpdateSettings}
+                />
               </div>
             }
             hint={
               !compact && (
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
                   5時間枠の残りが{state.nextWindow.settings.leadMinutes}
-                  分を切ってから、1件ずつ起動します。セッションは枠のリセットをまたいで走るので、
+                  分を切ってから、1件ずつ起動します。残りが下限を下回っている枠があるあいだは見送ります。セッションは枠のリセットをまたいで走るので、
                   <strong className="font-semibold text-foreground">
                     次の5時間枠のカウントがその時点から始まります
                   </strong>
@@ -217,10 +234,17 @@ export function NightlyRunPanel({
 }
 
 /**
- * いまのClaude 5時間枠。**「AI使用量」画面と同じ値**（`/api/claude/usage`）で、ここでは
- * 予約の起動時刻を読むために出す。取りに行っていない（次枠実行がOFFで予定も無い）ときは出さない。
+ * いまのClaude 5時間枠と週間枠。**「AI使用量」画面と同じ値**（`/api/claude/usage`）で、ここでは
+ * 予約の起動時刻と、残り枠の下限（#3100）に触れているかを読むために出す。取りに行っていない
+ * （次枠実行がOFFで予定も無い）ときは出さない。
  */
-function ClaudeWindowMeter({ window }: { window: NextWindowRunWindowView | null }) {
+function ClaudeWindowMeter({
+  window,
+  settings,
+}: {
+  window: NextWindowRunWindowView | null;
+  settings: NextWindowRunSettings;
+}) {
   // 残り時間の表示だけは時計に依る（`useNow`。取り直しの間隔は`useNightlyRun`と同じ30秒）。
   // **描画中に`Date.now()`を読まない**（`react-hooks/purity`）
   const now = useNow();
@@ -233,36 +257,160 @@ function ClaudeWindowMeter({ window }: { window: NextWindowRunWindowView | null 
     );
   }
 
-  const used = window.usedPercent;
   // `useNow`は最初の描画で`null`を返す（サーバーとクライアントで時刻がずれないようにするため）。
   // その間はカウントダウンを出さず、絶対時刻だけを出す
   const countdown =
     window.resetsAt && now !== null
       ? formatResetCountdown(new Date(window.resetsAt).getTime() / 1000, now)
       : null;
+  const fiveHourText =
+    (window.phase === "idle"
+      ? "枠は動いていません"
+      : window.resetsAt
+        ? `${formatTimeOfDay(window.resetsAt)}にリセット${countdown ? `（${countdown}）` : ""}`
+        : "") +
+    (window.opensAt && window.phase === "waiting"
+      ? ` ・ ${formatTimeOfDay(window.opensAt)}から起動`
+      : "");
+  const weeklyText = window.weeklyResetsAt
+    ? `${formatMonthDay(window.weeklyResetsAt)} ${formatTimeOfDay(window.weeklyResetsAt)}にリセット`
+    : "";
+  const showFloorLegend =
+    settings.fiveHourFloorPercent > 0 ||
+    (window.weeklyUsedPercent !== null && settings.weeklyFloorPercent > 0);
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border p-3">
-      <span className="text-[11px] text-muted-foreground">いまの5時間枠</span>
-      <span className="font-mono text-sm font-semibold tabular-nums">
-        {used === null ? "—" : `${Math.round(used)}%`}
-      </span>
-      <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-primary transition-[width]"
-          style={{ width: `${Math.min(100, Math.max(0, used ?? 0))}%` }}
+    <div className="flex flex-col gap-2.5 rounded-lg border p-3">
+      <QuotaMeterRow
+        label="いまの5時間枠"
+        usedPercent={window.usedPercent}
+        floorPercent={settings.fiveHourFloorPercent}
+        blocked={window.quotaBlock?.window === "fiveHour"}
+        text={fiveHourText}
+      />
+      {window.weeklyUsedPercent !== null && (
+        <QuotaMeterRow
+          label="週間枠"
+          usedPercent={window.weeklyUsedPercent}
+          floorPercent={settings.weeklyFloorPercent}
+          blocked={window.quotaBlock?.window === "weekly"}
+          text={weeklyText}
         />
-      </div>
-      <span className="text-[11px] text-muted-foreground">
-        {window.phase === "idle"
-          ? "枠は動いていません"
-          : window.resetsAt
-            ? `${formatTimeOfDay(window.resetsAt)}にリセット${countdown ? `（${countdown}）` : ""}`
-            : ""}
-        {window.opensAt && window.phase === "waiting"
-          ? ` ・ ${formatTimeOfDay(window.opensAt)}から起動`
-          : ""}
+      )}
+      {showFloorLegend && (
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span
+            className="inline-block h-2 w-3.5 border-l-2 border-amber-500"
+            style={FLOOR_ZONE_STYLE}
+            aria-hidden
+          />
+          斜線は下限を下回る範囲です。ここに入っている間は起動しません
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** 下限を下回る範囲（バーの右端から`floorPercent`ぶん）の斜線 */
+const FLOOR_ZONE_STYLE = {
+  backgroundImage:
+    "repeating-linear-gradient(135deg, rgb(245 158 11 / 0.3) 0 3px, transparent 3px 6px)",
+} as const;
+
+function QuotaMeterRow({
+  label,
+  usedPercent,
+  floorPercent,
+  blocked,
+  text,
+}: {
+  label: string;
+  usedPercent: number | null;
+  floorPercent: number;
+  blocked: boolean;
+  text: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <span className="min-w-20 text-[11px] text-muted-foreground">{label}</span>
+      <span className="font-mono text-sm font-semibold tabular-nums">
+        {usedPercent === null ? "—" : `${Math.round(usedPercent)}%`}
       </span>
+      <div className="relative h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn("h-full rounded-full transition-[width]", blocked ? "bg-amber-500" : "bg-primary")}
+          style={{ width: `${Math.min(100, Math.max(0, usedPercent ?? 0))}%` }}
+        />
+        {floorPercent > 0 && (
+          <div
+            className="absolute inset-y-0 right-0 border-l-2 border-amber-500"
+            style={{ ...FLOOR_ZONE_STYLE, width: `${floorPercent}%` }}
+            aria-hidden
+          />
+        )}
+      </div>
+      <span className="basis-full text-[11px] text-muted-foreground">{text}</span>
+    </div>
+  );
+}
+
+/**
+ * 起動しない残り枠の下限（#3100）。**次枠実行の設定の一部**で、切り替えた時点で保存する。
+ * 選ぶのは「残りがこの値を下回っている間は起動を見送る」ライン（0は制限しない）。
+ */
+function FloorSettings({
+  settings,
+  compact,
+  isSubmitting,
+  onUpdateSettings,
+}: {
+  settings: NextWindowRunSettings;
+  compact: boolean;
+  isSubmitting: boolean;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
+}) {
+  const floorSelect = (
+    value: number,
+    key: "fiveHourFloorPercent" | "weeklyFloorPercent",
+    label: string,
+  ) => (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span>{label}</span>
+      <Select
+        value={String(value)}
+        disabled={isSubmitting}
+        onValueChange={(next) => onUpdateSettings({ nextWindow: { [key]: Number(next) } })}
+      >
+        <SelectTrigger size="sm" className="w-28" aria-label={`${label}の下限`}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS.map((percent) => (
+            <SelectItem key={percent} value={String(percent)}>
+              {percent === 0 ? "制限しない" : `${percent}%`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <span className="text-[13px] font-semibold">起動しない残り枠の下限</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {floorSelect(settings.fiveHourFloorPercent, "fiveHourFloorPercent", "5時間枠")}
+        {floorSelect(settings.weeklyFloorPercent, "weeklyFloorPercent", "週間枠")}
+      </div>
+      {!compact && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          残りが下限を
+          <strong className="font-semibold text-foreground">下回っている間</strong>
+          は起動を見送り、上回れば次の巡回で再開します。5時間枠は「いまの枠を多く使っている＝作業中」
+          とみなして起こさない目安、週間枠は週の残りを取っておく目安です。見送りが24時間を超えた予定は
+          「見送り」になります（週間枠のリセットまで数日あるときなど）。
+        </p>
+      )}
     </div>
   );
 }
@@ -371,6 +519,7 @@ function ScheduleSection({
   icon,
   title,
   scheduleLine,
+  badge,
   settings,
   hint,
   emptyText,
@@ -385,6 +534,8 @@ function ScheduleSection({
   icon: ReactNode;
   title: string;
   scheduleLine: string;
+  /** 見出しの右に添える状態の印（見送り中など）。無ければnull */
+  badge?: ReactNode;
   settings: ReactNode;
   hint?: ReactNode;
   emptyText: string;
@@ -405,6 +556,7 @@ function ScheduleSection({
           <span className="ml-1 text-xs font-normal text-muted-foreground">
             {queued.length}件・積んだ順に起動
           </span>
+          {badge}
         </h3>
         <p className="text-[11px] text-muted-foreground">{scheduleLine}</p>
       </div>
