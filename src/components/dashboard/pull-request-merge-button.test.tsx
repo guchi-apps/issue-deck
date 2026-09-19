@@ -66,7 +66,26 @@ describe("PullRequestMergeButton", () => {
 
     expect(screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。")).toBeTruthy();
     expect(screen.getByText("このリリースに含まれる変更")).toBeTruthy();
+    // 確認の材料は「マージ前の確認」に集約する（#3093）
+    expect(screen.getByText("マージ前の確認")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("mainへのPRでは、CIの状態を警告リストではなく「マージ前の確認」に出す（#3093）", () => {
+    stubChanges();
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({ ciState: "failure" })}
+        onMerged={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    // 警告リストには本番デプロイの1件だけが残り、CIの「失敗」は確認パネルの行に出る
+    expect(screen.queryByText("CIが失敗しています。")).toBeNull();
+    expect(screen.getByText("失敗")).toBeTruthy();
+    expect(screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。")).toBeTruthy();
   });
 
   it("develop向けのPRでは出さず、取得もしない", () => {
