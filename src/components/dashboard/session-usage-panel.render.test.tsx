@@ -104,6 +104,9 @@ describe("SessionUsagePanel", () => {
       { onOpenIssue },
     );
     const section = screen.getByRole("region", { name: "実行中のセッション" });
+    // 最初は閉じていて、詳細は出ない（#3134）
+    expect(within(section).queryByText("AI使用量表示に現在のセッション使用状況を追加")).toBeNull();
+    fireEvent.click(within(section).getByRole("button", { expanded: false }));
     // プラン枠より上
     expect(
       section.compareDocumentPosition(screen.getByText("Claude プラン枠")) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -125,7 +128,35 @@ describe("SessionUsagePanel", () => {
   it("スマホでも応答数・コンテキストを5時間枠の割合と並べて出す（#3084）", () => {
     renderPanel({ ...response([entry()]), currentSessions: [liveSession] }, { compact: true });
     const section = screen.getByRole("region", { name: "実行中のセッション" });
+    fireEvent.click(within(section).getByRole("button", { expanded: false }));
     expect(within(section).getByText("141応答　コンテキスト 12M", { normalizer: (text) => text })).toBeTruthy();
+  });
+
+  it("閉じた状態ではセッションごとの金額を積み上げた棒と状態ごとの本数で出し、押すと詳細が開閉する（#3134）", () => {
+    renderPanel({
+      ...response([entry()]),
+      currentSessions: [
+        liveSession,
+        { ...liveSession, tmuxSessionName: "a", issueNumber: 1, statusTone: "running" as const, statusLabel: "作業中" },
+        { ...liveSession, tmuxSessionName: "b", issueNumber: 2, statusTone: "running" as const, statusLabel: "作業中" },
+      ],
+    });
+    const section = screen.getByRole("region", { name: "実行中のセッション" });
+    const segments = within(section).getByTestId("current-session-count-bar").children;
+    expect(segments).toHaveLength(3);
+    // 区間の長さはセッションの金額
+    expect((segments[0] as HTMLElement).style.flexGrow).toBe("7.35");
+    expect(within(section).getByText("作業中").textContent).toBe("作業中2");
+    expect(within(section).getByText("確認待ち").textContent).toBe("確認待ち1");
+    expect(within(section).queryByText("応答を終えている")).toBeNull();
+    expect(within(section).queryByText("Issue・状態")).toBeNull();
+
+    const toggle = within(section).getByRole("button", { expanded: false });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(within(section).getByText("Issue・状態")).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(within(section).queryByText("Issue・状態")).toBeNull();
   });
 
   // #3062。「アプリ内AI機能別」は削除した。内訳カードはこの並びの3枚だけ
