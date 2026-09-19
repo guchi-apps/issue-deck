@@ -62,6 +62,8 @@ export async function launchNextWindowRunEntries(params: {
     snapshot,
     now,
     leadMinutes: settings.leadMinutes,
+    fiveHourFloorPercent: settings.fiveHourFloorPercent,
+    weeklyFloorPercent: settings.weeklyFloorPercent,
   });
   result.phase = window.phase;
   result.runKey = window.runKey;
@@ -77,6 +79,7 @@ export async function launchNextWindowRunEntries(params: {
       lastLaunchedAt,
       leadMinutes: settings.leadMinutes,
       intervalMinutes: settings.intervalMinutes,
+      quotaBlock: window.quotaBlock,
     });
 
     if (decision.action === "skip") {

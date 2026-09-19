@@ -5,10 +5,13 @@ import {
   NEXT_WINDOW_RUN_EXPIRY_HOURS,
   decideNextWindowRunLaunch,
   describeNextWindowRunMarkChip,
+  describeNextWindowRunQuotaBlock,
   describeNextWindowRunSchedule,
   formatNextWindowRunKey,
   formatNextWindowRunKeyLabel,
+  resolveNextWindowRunQuotaBlock,
   resolveNextWindowRunWindow,
+  toNextWindowRunWindowView,
   type ClaudeWindowSnapshot,
 } from "@/lib/next-window-run";
 
@@ -77,6 +80,101 @@ describe("resolveNextWindowRunWindow", () => {
   it("枠が動いていないときの`runKey`は、ここから始まる枠のリセット時刻", () => {
     const now = RESETS_AT + HOUR;
     expect(windowAt(now).runKey).toBe(formatNextWindowRunKey(now + CLAUDE_FIVE_HOUR_WINDOW_MS));
+  });
+});
+
+/** #3100: 残りが下限を下回っている間は起動しない */
+describe("resolveNextWindowRunQuotaBlock", () => {
+  const now = new Date(RESETS_AT - 30 * 60_000);
+  const WEEK_RESETS_AT = RESETS_AT + 3 * 24 * HOUR;
+  const resolve = (
+    overrides: Partial<ClaudeWindowSnapshot>,
+    floors: { fiveHourFloorPercent?: number; weeklyFloorPercent?: number },
+    phase: "open" | "idle" | "waiting" = "open",
+    at: Date = now,
+  ) =>
+    resolveNextWindowRunQuotaBlock({
+      snapshot: snapshot({ weeklyResetsAt: WEEK_RESETS_AT, weeklyUsedPercent: 10, ...overrides }),
+      phase,
+      now: at,
+      fiveHourFloorPercent: floors.fiveHourFloorPercent ?? 0,
+      weeklyFloorPercent: floors.weeklyFloorPercent ?? 0,
+    });
+
+  it("下限が0（制限しない）なら、使い切っていても止めない", () => {
+    expect(resolve({ usedPercent: 100, weeklyUsedPercent: 100 }, {})).toBeNull();
+  });
+
+  it("5時間枠の残りが下限を下回ると止め、ちょうどなら止めない（下回っている間だけ）", () => {
+    // 使用62% → 残り38%
+    expect(resolve({}, { fiveHourFloorPercent: 40 })).toMatchObject({
+      window: "fiveHour",
+      floorPercent: 40,
+    });
+    expect(resolve({ usedPercent: 60 }, { fiveHourFloorPercent: 40 })).toBeNull();
+    expect(resolve({}, { fiveHourFloorPercent: 30 })).toBeNull();
+  });
+
+  it("5時間枠は`open`のときだけ見る（`idle`のスナップショットは前の枠の値）", () => {
+    expect(resolve({ usedPercent: 95 }, { fiveHourFloorPercent: 50 }, "idle")).toBeNull();
+    expect(resolve({ usedPercent: 95 }, { fiveHourFloorPercent: 50 }, "waiting")).toBeNull();
+  });
+
+  it("週間枠の残りが下限を下回ると止める。どのフェーズでも見る", () => {
+    for (const phase of ["open", "idle", "waiting"] as const) {
+      expect(resolve({ weeklyUsedPercent: 83 }, { weeklyFloorPercent: 20 }, phase)).toMatchObject({
+        window: "weekly",
+        floorPercent: 20,
+      });
+    }
+    expect(resolve({ weeklyUsedPercent: 80 }, { weeklyFloorPercent: 20 })).toBeNull();
+  });
+
+  it("週間枠がリセット済み・使用率が取れていないときは見ない", () => {
+    const afterReset = new Date(WEEK_RESETS_AT + 1);
+    expect(
+      resolve({ weeklyUsedPercent: 99 }, { weeklyFloorPercent: 20 }, "idle", afterReset),
+    ).toBeNull();
+    expect(resolve({ weeklyUsedPercent: null }, { weeklyFloorPercent: 20 })).toBeNull();
+    expect(
+      resolveNextWindowRunQuotaBlock({
+        snapshot: snapshot(), // 週間枠のフィールドが無い
+        phase: "open",
+        now,
+        fiveHourFloorPercent: 0,
+        weeklyFloorPercent: 20,
+      }),
+    ).toBeNull();
+  });
+
+  it("両方に触れていれば5時間枠を先に返す", () => {
+    expect(
+      resolve({ weeklyUsedPercent: 90 }, { fiveHourFloorPercent: 40, weeklyFloorPercent: 20 })?.window,
+    ).toBe("fiveHour");
+  });
+
+  it("理由の文は残りと下限を出す", () => {
+    expect(
+      describeNextWindowRunQuotaBlock({ window: "weekly", remainingPercent: 17, floorPercent: 20 }),
+    ).toBe("週間枠の残りが17%で、下限の20%を下回っています");
+  });
+
+  it("`resolveNextWindowRunWindow`の結果と画面用ビューに載る", () => {
+    const window = resolveNextWindowRunWindow({
+      snapshot: snapshot({ weeklyResetsAt: WEEK_RESETS_AT, weeklyUsedPercent: 83 }),
+      now,
+      leadMinutes: 60,
+      weeklyFloorPercent: 20,
+    });
+    expect(window.phase).toBe("open");
+    expect(window.quotaBlock?.window).toBe("weekly");
+    const view = toNextWindowRunWindowView(
+      window,
+      snapshot({ weeklyResetsAt: WEEK_RESETS_AT, weeklyUsedPercent: 83 }),
+    );
+    expect(view.weeklyUsedPercent).toBe(83);
+    expect(view.weeklyResetsAt).toBe(new Date(WEEK_RESETS_AT).toISOString());
+    expect(view.quotaBlock?.floorPercent).toBe(20);
   });
 });
 
@@ -154,6 +252,31 @@ describe("decideNextWindowRunLaunch", () => {
     ).toEqual({ action: "launch" });
   });
 
+  it("残り枠が下限を下回っていれば、終わり際でも待つ（見送りにはしない）", () => {
+    const decision = decideNextWindowRunLaunch({
+      ...base,
+      phase: "open",
+      quotaBlock: { window: "weekly", remainingPercent: 17, floorPercent: 20 },
+    });
+    expect(decision).toEqual({
+      action: "wait",
+      reason: "週間枠の残りが17%で、下限の20%を下回っています",
+    });
+  });
+
+  it("下限の待ちは期限（24時間）を延ばさない", () => {
+    const decision = decideNextWindowRunLaunch({
+      ...base,
+      phase: "open",
+      quotaBlock: { window: "weekly", remainingPercent: 17, floorPercent: 20 },
+      createdAt: new Date(base.now.getTime() - NEXT_WINDOW_RUN_EXPIRY_HOURS * HOUR),
+    });
+    expect(decision.action).toBe("skip");
+    // サブPCの不調と区別できる理由を出す
+    expect(decision.action === "skip" && decision.reason).toContain("週間枠の残りが17%");
+    expect(decision.action === "skip" && decision.reason).not.toContain("サブPC");
+  });
+
   it("積んでから24時間で見送る（枠を取れないままでも残さない）", () => {
     const decision = decideNextWindowRunLaunch({
       ...base,
@@ -166,12 +289,27 @@ describe("decideNextWindowRunLaunch", () => {
 });
 
 describe("画面に出す文言", () => {
-  const settings = { enabled: true, leadMinutes: 60, intervalMinutes: 10 };
+  const settings = { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 };
 
   it("OFFのときは枠の残り時間の話をしない", () => {
     const line = describeNextWindowRunSchedule({ ...settings, enabled: false }, null);
     expect(line).toContain("OFF");
     expect(line).not.toContain("リセット");
+  });
+
+  it("下限に触れているときは、理由を出して起動を見送ると伝える", () => {
+    const line = describeNextWindowRunSchedule(settings, {
+      phase: "open",
+      resetsAt: new Date(RESETS_AT).toISOString(),
+      opensAt: null,
+      usedPercent: 62,
+      weeklyUsedPercent: 83,
+      weeklyResetsAt: null,
+      runKey: null,
+      quotaBlock: { window: "weekly", remainingPercent: 17, floorPercent: 20 },
+    });
+    expect(line).toContain("週間枠の残りが17%");
+    expect(line).toContain("見送ります");
   });
 
   it("枠が動いていないときは「次の巡回で起動」と出す", () => {
@@ -180,6 +318,9 @@ describe("画面に出す文言", () => {
       resetsAt: null,
       opensAt: null,
       usedPercent: null,
+      weeklyUsedPercent: null,
+      weeklyResetsAt: null,
+      quotaBlock: null,
       runKey: null,
     });
     expect(line).toContain("動いていません");

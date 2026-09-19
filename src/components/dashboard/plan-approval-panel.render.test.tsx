@@ -225,11 +225,8 @@ describe("PlanApprovalPanel", () => {
     expect(latestReviseButton().disabled).toBe(true);
   });
 
-  /**
-   * #2425。定型文を末尾へ足すと画像記法の下に文が来て、`splitAttachments`が添付として
-   * 読めなくなる（サムネイルが消えて本文にURLが出る）。差し込む先は本文。
-   */
-  it("定型文は添付の前（本文の末尾）へ差し込む", async () => {
+  /** #2425。画像を添付して送ると、本文の後ろに画像記法が付いた1本の文として渡る */
+  it("画像を添付して送ると、本文の後ろに画像記法が付く", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
@@ -262,13 +259,9 @@ describe("PlanApprovalPanel", () => {
       expect(container.querySelectorAll('[data-slot="mention-attachments"] img').length).toBe(1),
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "懸念点をもう少し具体的に書いてください。" }),
-    );
-
-    // 添付はサムネイルのまま残り、定型文は本文の末尾へ入る
+    // 添付はサムネイルのまま残り、入力欄には本文だけが見える
     expect(container.querySelectorAll('[data-slot="mention-attachments"] img').length).toBe(1);
-    expect(textarea.value).toBe("ここを直して。\n懸念点をもう少し具体的に書いてください。");
+    expect(textarea.value).toBe("ここを直して。");
 
     // アップロード中は送れない（まだURLの入っていない本文が渡ってしまうため）
     await waitFor(() => expect(latestReviseButton().disabled).toBe(false));
@@ -277,7 +270,7 @@ describe("PlanApprovalPanel", () => {
       expect(decidePlan).toHaveBeenCalledWith({
         id: "req-1",
         decision: "revise",
-        text: "ここを直して。\n懸念点をもう少し具体的に書いてください。\n\n![a.png](/api/issues/images/a.png)",
+        text: "ここを直して。\n\n![a.png](/api/issues/images/a.png)",
       }),
     );
   });

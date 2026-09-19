@@ -58,6 +58,9 @@ export const GITHUB_API_FEATURES = [
   // だけ**コメントを取る（ポーリングはしない）。結果が返った後の要約は動かないので、
   // コメント件数が変わらない間はプロセス内キャッシュで返し、GitHubへは行かない
   { key: "code_review_summary", label: "レビュー結果の一覧表示" },
+  // 「コードレビュー」ビューのリポジトリ別の枠（#3092）。前回レビュー以降に入ったPRの件数を
+  // 検索APIの`total_count`で取る。ビューを開いたときだけ引き、プロセス内キャッシュで返す
+  { key: "code_review_merged_prs", label: "レビュー以降に入ったPRの件数" },
   { key: "sub_issues", label: "子Issueの取得" },
   { key: "repo_meta", label: "ラベル・担当者の取得" },
   { key: "issue_write", label: "Issueの作成・更新・削除・移動" },

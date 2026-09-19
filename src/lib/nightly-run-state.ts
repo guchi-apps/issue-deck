@@ -242,6 +242,8 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
           snapshot,
           now,
           leadMinutes: nextWindowSettings.leadMinutes,
+          fiveHourFloorPercent: nextWindowSettings.fiveHourFloorPercent,
+          weeklyFloorPercent: nextWindowSettings.weeklyFloorPercent,
         }),
         snapshot,
       )

@@ -65,6 +65,8 @@ describe("launchNextWindowRunEntries", () => {
       enabled: true,
       leadMinutes: 60,
       intervalMinutes: 10,
+      fiveHourFloorPercent: 0,
+      weeklyFloorPercent: 0,
     });
     readClaudeWindowSnapshot.mockResolvedValue({ resetsAt: RESETS_AT, usedPercent: 62 });
     readLastNextWindowLaunchedAt.mockResolvedValue(null);
@@ -121,6 +123,52 @@ describe("launchNextWindowRunEntries", () => {
       runKey: "2026-09-18 08:40",
       hostName: "subpc",
     });
+  });
+
+  /** #3100 */
+  it("週間枠の残りが下限を下回っていれば、終わり際でも起動を見送る", async () => {
+    readNextWindowRunSettings.mockResolvedValue({
+      enabled: true,
+      leadMinutes: 60,
+      intervalMinutes: 10,
+      fiveHourFloorPercent: 0,
+      weeklyFloorPercent: 20,
+    });
+    readClaudeWindowSnapshot.mockResolvedValue({
+      resetsAt: RESETS_AT,
+      usedPercent: 62,
+      weeklyResetsAt: RESETS_AT + 3 * 24 * 60 * MINUTE,
+      weeklyUsedPercent: 83,
+    });
+
+    const result = await launchNextWindowRunEntries({
+      hostName: "subpc",
+      now: new Date(RESETS_AT - 30 * MINUTE),
+    });
+
+    expect(launchScheduledRunEntry).not.toHaveBeenCalled();
+    expect(result.actions[0]).toMatchObject({ result: "deferred" });
+    expect(result.actions[0]?.detail).toContain("週間枠の残りが17%");
+  });
+
+  it("下限の内側に戻れば起動する（下限は待つだけで予定は残る）", async () => {
+    readNextWindowRunSettings.mockResolvedValue({
+      enabled: true,
+      leadMinutes: 60,
+      intervalMinutes: 10,
+      fiveHourFloorPercent: 0,
+      weeklyFloorPercent: 20,
+    });
+    readClaudeWindowSnapshot.mockResolvedValue({
+      resetsAt: RESETS_AT,
+      usedPercent: 62,
+      weeklyResetsAt: RESETS_AT + 3 * 24 * 60 * MINUTE,
+      weeklyUsedPercent: 50,
+    });
+
+    await launchNextWindowRunEntries({ hostName: "subpc", now: new Date(RESETS_AT - 30 * MINUTE) });
+
+    expect(launchScheduledRunEntry).toHaveBeenCalledTimes(1);
   });
 
   it("枠の途中では起動しない（待つ理由だけ返す）", async () => {

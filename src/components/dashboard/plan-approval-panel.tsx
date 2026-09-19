@@ -27,7 +27,7 @@ import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { composeAttachments, splitAttachments } from "@/lib/markdown-attachments";
+import { splitAttachments } from "@/lib/markdown-attachments";
 
 /**
  * ローカルセッションが提示した計画を読んで、その場で承認・修正を送るパネル（#2061）。
@@ -190,36 +190,6 @@ export function PlanApprovalPanel({
               rows={4}
               placeholder="どこを・なぜ・どう直してほしいかを書いてください。この文がそのままClaudeへ渡ります。画像はここへ貼り付け・ドロップできます。"
             />
-            {/* **アーティファクトの直しもここから頼める**（#2200）。承認前は「計画の直し」しか
-                送れないと読めてしまい、見た目の指摘だけRemote Controlへ回されていた */}
-            <p className="text-[11px] text-muted-foreground">
-              アーティファクト（見た目）の直しもここから頼めます。承認前でも、下の「アーティファクト」
-              カードが新しい見た目に差し替わります。画面のスクリーンショットや手描きのラフを
-              添付すると、そのままセッションが読みます。
-            </p>
-            {/* 定型文は**差し込むだけ**で押すのは人（追加指示・#1012と同じ作法）。
-                送る前に手直しできる形にしておく */}
-            <div className="flex flex-wrap gap-1.5">
-              {REVISION_PRESETS.map((preset) => (
-                <Button
-                  key={preset}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  // **差し込む先は本文で、添付の後ろではない**（#2425）。末尾に足すと
-                  // 画像記法の下に文が来て添付として読めなくなり、サムネイルが消えて
-                  // URLが本文に出る（`splitAttachments`は末尾の連なりだけを添付と見る）
-                  onClick={() =>
-                    setRevision((prev) => {
-                      const { body, attachments } = splitAttachments(prev);
-                      return composeAttachments(body ? `${body}\n${preset}` : preset, attachments);
-                    })
-                  }
-                >
-                  {preset}
-                </Button>
-              ))}
-            </div>
             {tooManyAttachments && (
               <p className="flex items-start gap-1.5 text-xs text-destructive">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -300,27 +270,10 @@ export function PlanApprovalPanel({
             {error}
           </p>
         )}
-
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          承認するとセッションはこの計画のまま実装に入ります。押した内容はIssueコメントにも残ります。
-          待ち時間が切れると端末に従来どおりの承認プロンプトが出て、ここからは送れなくなります。
-        </p>
       </div>
     </section>
   );
 }
-
-/**
- * 押した定型文（#2061）。**押すのは人**で、状況を見て自動で選ぶ実行体は作らない
- * （`docs/multi-agent/gates.md`）。入力欄へ差し込むだけで、送るのは別の操作。
- */
-const REVISION_PRESETS = [
-  "計画が大きすぎます。サブIssueへの分割を検討してください。",
-  "懸念点をもう少し具体的に書いてください。",
-  // 定型文のうち**これだけは書き足してもらう前提**（#2200）。どこをどう直すかは毎回違うが、
-  // 「アーティファクトを直してよい」こと自体が伝わっていないのが元の詰まりだった
-  "アーティファクトの見た目を直してください（直す箇所をこの下に書きます）:",
-] as const;
 
 function PlanDecisionResult({
   decision,

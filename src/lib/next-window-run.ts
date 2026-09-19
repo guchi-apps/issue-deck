@@ -61,6 +61,10 @@ export type ClaudeWindowSnapshot = {
   resetsAt: number | null;
   /** 使用率(0-100)。取得できなかった場合はnull */
   usedPercent: number | null;
+  /** 同じ応答に載っていた週間枠のリセット時刻(epoch ms)（#3100）。無ければnull・省略 */
+  weeklyResetsAt?: number | null;
+  /** 週間枠の使用率(0-100)。無ければnull・省略 */
+  weeklyUsedPercent?: number | null;
 };
 
 /**
@@ -74,6 +78,71 @@ export type ClaudeWindowSnapshot = {
  */
 export type NextWindowRunPhase = "unknown" | "idle" | "waiting" | "open";
 
+/**
+ * 「残り枠の下限」（#3100）に引っかかっている枠。**残りが下限を下回っている間は起動しない**。
+ * 日々の作業用に取っておく量を、無人で走る予約実行が食い切らないための歯止め。
+ */
+export type NextWindowRunQuotaBlock = {
+  window: "fiveHour" | "weekly";
+  /** 残り（0-100）。使用率から引いた値で、丸めていない */
+  remainingPercent: number;
+  floorPercent: number;
+};
+
+/**
+ * 下限に引っかかっている枠を返す（無ければnull）。5時間枠を先に見る。
+ *
+ * - **5時間枠は`open`（終わり際）のときだけ見る。** `idle`のスナップショットは、終わった前の枠の
+ *   使用率か、取得の拍子に開いたばかりの0%の枠で、どちらも「これから起動する枠」の残りではない。
+ *   `waiting`はどのみち待つので見る必要が無い
+ * - **週間枠はリセット時刻を過ぎていれば見ない**（前の週の使用率が残っているため）。使用率が
+ *   取れていないときも見ない（取れない日があっても、下限を設けない場合と同じ動きにとどめる）
+ */
+export function resolveNextWindowRunQuotaBlock(input: {
+  snapshot: ClaudeWindowSnapshot | null;
+  phase: NextWindowRunPhase;
+  now: Date;
+  fiveHourFloorPercent: number;
+  weeklyFloorPercent: number;
+}): NextWindowRunQuotaBlock | null {
+  const { snapshot, phase, now } = input;
+  if (!snapshot) return null;
+
+  if (
+    phase === "open" &&
+    input.fiveHourFloorPercent > 0 &&
+    snapshot.usedPercent !== null &&
+    Number.isFinite(snapshot.usedPercent)
+  ) {
+    const remainingPercent = 100 - snapshot.usedPercent;
+    if (remainingPercent < input.fiveHourFloorPercent) {
+      return { window: "fiveHour", remainingPercent, floorPercent: input.fiveHourFloorPercent };
+    }
+  }
+
+  const weeklyUsed = snapshot.weeklyUsedPercent ?? null;
+  const weeklyResetsAt = snapshot.weeklyResetsAt ?? null;
+  const weeklyIsCurrent = weeklyResetsAt === null || weeklyResetsAt > now.getTime();
+  if (
+    input.weeklyFloorPercent > 0 &&
+    weeklyUsed !== null &&
+    Number.isFinite(weeklyUsed) &&
+    weeklyIsCurrent
+  ) {
+    const remainingPercent = 100 - weeklyUsed;
+    if (remainingPercent < input.weeklyFloorPercent) {
+      return { window: "weekly", remainingPercent, floorPercent: input.weeklyFloorPercent };
+    }
+  }
+  return null;
+}
+
+/** 見送りの理由（人が読む文）。画面・巡回ログ・予定の待ち理由で同じ文を使う */
+export function describeNextWindowRunQuotaBlock(block: NextWindowRunQuotaBlock): string {
+  const label = block.window === "fiveHour" ? "5時間枠" : "週間枠";
+  return `${label}の残りが${Math.round(block.remainingPercent)}%で、下限の${block.floorPercent}%を下回っています`;
+}
+
 export type NextWindowRunWindow = {
   phase: NextWindowRunPhase;
   /** いまの枠のリセット時刻。取得できなかった場合はnull */
@@ -85,6 +154,8 @@ export type NextWindowRunWindow = {
    * 束ねるのに使う（`NightlyRunEntry.nightKey`列）。取得できなかった場合はnull
    */
   runKey: string | null;
+  /** 残り枠の下限に引っかかっている枠。無ければnull（#3100） */
+  quotaBlock: NextWindowRunQuotaBlock | null;
 };
 
 /** `2026-09-18T08:40:00+09:00` → `2026-09-18 08:40`（辞書順＝時刻順になる形） */
@@ -115,12 +186,15 @@ export function resolveNextWindowRunWindow(input: {
   snapshot: ClaudeWindowSnapshot | null;
   now: Date;
   leadMinutes: number;
+  /** 残り枠の下限（%・0＝制限しない）。省略は制限しない */
+  fiveHourFloorPercent?: number;
+  weeklyFloorPercent?: number;
 }): NextWindowRunWindow {
   const { snapshot, now, leadMinutes } = input;
   const nowMs = now.getTime();
   const resetsAtMs = snapshot?.resetsAt ?? null;
   if (resetsAtMs === null || !Number.isFinite(resetsAtMs)) {
-    return { phase: "unknown", resetsAt: null, opensAt: null, runKey: null };
+    return { phase: "unknown", resetsAt: null, opensAt: null, runKey: null, quotaBlock: null };
   }
 
   const resetsAt = new Date(resetsAtMs);
@@ -130,18 +204,27 @@ export function resolveNextWindowRunWindow(input: {
   const keySource =
     remainingMs <= 0 ? new Date(nowMs + CLAUDE_FIVE_HOUR_WINDOW_MS) : resetsAt;
   const runKey = formatNextWindowRunKey(keySource);
+  const withQuota = (phase: NextWindowRunPhase, opensAt: Date | null): NextWindowRunWindow => ({
+    phase,
+    resetsAt,
+    opensAt,
+    runKey,
+    quotaBlock: resolveNextWindowRunQuotaBlock({
+      snapshot,
+      phase,
+      now,
+      fiveHourFloorPercent: input.fiveHourFloorPercent ?? 0,
+      weeklyFloorPercent: input.weeklyFloorPercent ?? 0,
+    }),
+  });
 
-  if (remainingMs <= 0) {
-    return { phase: "idle", resetsAt, opensAt: null, runKey };
-  }
+  if (remainingMs <= 0) return withQuota("idle", null);
   if (remainingMs > CLAUDE_FIVE_HOUR_WINDOW_MS - NEXT_WINDOW_RUN_FRESH_WINDOW_MS) {
-    return { phase: "idle", resetsAt, opensAt: null, runKey };
+    return withQuota("idle", null);
   }
   const leadMs = leadMinutes * 60_000;
-  if (remainingMs <= leadMs) {
-    return { phase: "open", resetsAt, opensAt: new Date(resetsAtMs - leadMs), runKey };
-  }
-  return { phase: "waiting", resetsAt, opensAt: new Date(resetsAtMs - leadMs), runKey };
+  const opensAt = new Date(resetsAtMs - leadMs);
+  return withQuota(remainingMs <= leadMs ? "open" : "waiting", opensAt);
 }
 
 export type NextWindowRunDecision =
@@ -167,11 +250,18 @@ export function decideNextWindowRunLaunch(input: {
   lastLaunchedAt: Date | null;
   leadMinutes: number;
   intervalMinutes: number;
+  /** 残り枠の下限に引っかかっている枠（`resolveNextWindowRunWindow`の結果）。省略・nullは制限なし */
+  quotaBlock?: NextWindowRunQuotaBlock | null;
 }): NextWindowRunDecision {
   const nowMs = input.now.getTime();
 
   if (nowMs - input.createdAt.getTime() >= NEXT_WINDOW_RUN_EXPIRY_HOURS * 60 * 60_000) {
-    return { action: "skip", reason: describeNextWindowRunExpired() };
+    return {
+      action: "skip",
+      reason: input.quotaBlock
+        ? describeNextWindowRunQuotaExpired(input.quotaBlock)
+        : describeNextWindowRunExpired(),
+    };
   }
   if (input.phase === "unknown") {
     return { action: "wait", reason: "Claudeの5時間枠の状況を取得できませんでした" };
@@ -187,6 +277,10 @@ export function decideNextWindowRunLaunch(input: {
       action: "wait",
       reason: `5時間枠の残りが${input.leadMinutes}分を切るまで待っています`,
     };
+  }
+  if (input.quotaBlock) {
+    // 見送りではなく待つだけ。残りが下限を上回れば（5時間枠は次の枠、週間枠はリセット）再開する
+    return { action: "wait", reason: describeNextWindowRunQuotaBlock(input.quotaBlock) };
   }
   if (input.lastLaunchedAt && input.intervalMinutes > 0) {
     const nextAt = input.lastLaunchedAt.getTime() + input.intervalMinutes * 60_000;
@@ -205,10 +299,22 @@ export function describeNextWindowRunExpired(): string {
   return `${NEXT_WINDOW_RUN_EXPIRY_HOURS}時間のあいだに起動できませんでした（サブPCが応答していなかった可能性があります）`;
 }
 
+/**
+ * 期限切れの時点で残り枠の下限に引っかかっていたときの理由。サブPCの不調と区別する（#3100の計画レビュー）。
+ * 下限の待ちは期限を延ばさない（起動できる状態に戻った直後に期限切れで見送るのを避けるため、
+ * 待ちの長さで期限を数え直す仕組みは持たない）ので、週間枠のように数日待つ場合はここへ来る。
+ */
+export function describeNextWindowRunQuotaExpired(block: NextWindowRunQuotaBlock): string {
+  return `${NEXT_WINDOW_RUN_EXPIRY_HOURS}時間のあいだ起動できませんでした（${describeNextWindowRunQuotaBlock(block)}。枠が回復してから積み直してください）`;
+}
+
 export type NextWindowRunSettings = {
   enabled: boolean;
   leadMinutes: number;
   intervalMinutes: number;
+  /** 起動しない残り枠の下限（%・0＝制限しない。#3100） */
+  fiveHourFloorPercent: number;
+  weeklyFloorPercent: number;
 };
 
 /** 画面へ渡す枠の状況（`Date`はISO文字列にする） */
@@ -217,7 +323,11 @@ export type NextWindowRunWindowView = {
   resetsAt: string | null;
   opensAt: string | null;
   usedPercent: number | null;
+  /** 週間枠（#3100）。取れていなければnull */
+  weeklyUsedPercent: number | null;
+  weeklyResetsAt: string | null;
   runKey: string | null;
+  quotaBlock: NextWindowRunQuotaBlock | null;
 };
 
 export function toNextWindowRunWindowView(
@@ -229,7 +339,11 @@ export function toNextWindowRunWindowView(
     resetsAt: window.resetsAt?.toISOString() ?? null,
     opensAt: window.opensAt?.toISOString() ?? null,
     usedPercent: snapshot?.usedPercent ?? null,
+    weeklyUsedPercent: snapshot?.weeklyUsedPercent ?? null,
+    weeklyResetsAt:
+      snapshot?.weeklyResetsAt != null ? new Date(snapshot.weeklyResetsAt).toISOString() : null,
     runKey: window.runKey,
+    quotaBlock: window.quotaBlock,
   };
 }
 
@@ -246,6 +360,9 @@ export function describeNextWindowRunSchedule(
   }
   if (!window || window.phase === "unknown") {
     return "5時間枠の状況を取得できていません。取得できるまで起動しません。";
+  }
+  if (window.quotaBlock) {
+    return `${describeNextWindowRunQuotaBlock(window.quotaBlock)}。残りが下限を上回るまで起動を見送ります。`;
   }
   if (window.phase === "idle") {
     return "いま5時間枠は動いていません。予定はサブPCの次の巡回で起動します（そこから新しい枠が始まります）。";

@@ -629,10 +629,30 @@ export function isMergeJudgementPending(
  * mainへ入る＝押した瞬間に本番デプロイが走るPRか（#2080）。
  *
  * 「確認ダイアログを必ず挟む」（`mergeWarnings`）と「ダイアログに含まれる変更を並べる」
- * （`PullRequestMergeChanges`）が同じ条件で動く必要があるため、判定をここへ置いて共有する。
+ * （`PullRequestMergeProduction`）が同じ条件で動く必要があるため、判定をここへ置いて共有する。
  */
 export function isProductionMerge(pullRequest: { baseRef: string }): boolean {
   return pullRequest.baseRef === MAIN_BRANCH;
+}
+
+/**
+ * CIが成功していないときの警告文。成功していれば`null`。
+ *
+ * mainへのPRの確認ダイアログは「マージ前の確認」パネル（#3093）がCIの状態を出すため、
+ * 警告リストからこの1件だけを外す。文言の一致で外すと文言を直したときに黙って効かなく
+ * なるので、`mergeWarnings`と同じ関数から取る。
+ */
+export function ciWarning(pullRequest: Pick<PullRequestSummary, "ciState">): string | null {
+  switch (pullRequest.ciState) {
+    case "failure":
+      return "CIが失敗しています。";
+    case "pending":
+      return "CIがまだ実行中です。";
+    case "unknown":
+      return "CIの状態を確認できていません。";
+    default:
+      return null;
+  }
 }
 
 /**
@@ -650,13 +670,8 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   if (isProductionMerge(pullRequest)) {
     warnings.push("mainへのマージです。マージすると本番デプロイが走ります。");
   }
-  if (pullRequest.ciState === "failure") {
-    warnings.push("CIが失敗しています。");
-  } else if (pullRequest.ciState === "pending") {
-    warnings.push("CIがまだ実行中です。");
-  } else if (pullRequest.ciState === "unknown") {
-    warnings.push("CIの状態を確認できていません。");
-  }
+  const ci = ciWarning(pullRequest);
+  if (ci) warnings.push(ci);
   if (pullRequest.autoMergeEnabled) {
     warnings.push("Auto-mergeが有効です。待てばCI通過後に自動でマージされます。");
   }

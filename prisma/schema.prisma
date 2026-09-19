@@ -498,6 +498,10 @@ model AppSetting {
   nextWindowRunLeadMinutes     Int      @default(60)
   // 1件起動してから次を起動するまで空ける時間（分）。リセットの瞬間に全部走らせないための間隔
   nextWindowRunIntervalMinutes Int      @default(10)
+  // 起動しない「残り枠の下限」（%・0＝制限しない）。5時間枠・週間枠のそれぞれについて、**残りが
+  // この値を下回っている間は起動を見送る**（日々の作業用に取っておく量。判定は`next-window-run.ts`）
+  nextWindowRunFiveHourFloorPercent Int @default(0)
+  nextWindowRunWeeklyFloorPercent   Int @default(0)
 
   // 5時間枠を開けておく（#3032）。**指定した時間帯（日本時間の時）のあいだ、枠が止まっていれば**
   // pollerの巡回ついでに最小の推論リクエストを1本送って枠を開ける。枠は最初のリクエストで始まるため、

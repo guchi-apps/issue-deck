@@ -104,18 +104,34 @@ function hasFiveHourWindowReset(windows: ClaudeUsageWindow[], nowMs = Date.now()
   return resetsAt !== null && resetsAt * 1000 <= nowMs;
 }
 
-/**
- * 最後に取得できた5時間枠（リセット時刻はepoch ms）。**取得はしない**（送信が枠を開始するため）。
- * まだ一度も取れていなければnull。「5時間枠を開けておく」（#3032）が、枠が動いている間は
- * 探りを送らないため・画面のメーターを探りなしで出すために使う。
- */
-export function peekClaudeFiveHourWindow(): { resetsAt: number | null; usedPercent: number } | null {
-  const window = cache?.windows.find((entry) => entry.key === "5h");
-  if (!window) return null;
+/** 予約実行（#2995・#3100）が読む形。時刻はepoch ms。週間枠が取れていなければ`weekly*`はnull */
+export type ClaudeWindowReading = {
+  resetsAt: number | null;
+  usedPercent: number;
+  weeklyResetsAt: number | null;
+  weeklyUsedPercent: number | null;
+};
+
+/** 取得済みのウィンドウ一覧から、5時間枠と週間枠を予約実行の形へ寄せる。5時間枠が無ければnull */
+export function toClaudeWindowReading(windows: ClaudeUsageWindow[]): ClaudeWindowReading | null {
+  const five = windows.find((entry) => entry.key === "5h");
+  if (!five) return null;
+  const weekly = windows.find((entry) => entry.key === "7d");
   return {
-    resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
-    usedPercent: window.usedPercent,
+    resetsAt: five.resetsAt === null ? null : five.resetsAt * 1000,
+    usedPercent: five.usedPercent,
+    weeklyResetsAt: weekly?.resetsAt == null ? null : weekly.resetsAt * 1000,
+    weeklyUsedPercent: weekly?.usedPercent ?? null,
   };
+}
+
+/**
+ * 最後に取得できた5時間枠（リセット時刻はepoch ms）と、同じ応答に載っていた週間枠。**取得はしない**
+ * （送信が枠を開始するため）。まだ一度も取れていなければnull。「5時間枠を開けておく」（#3032）が、
+ * 枠が動いている間は探りを送らないため・画面のメーターを探りなしで出すために使う。
+ */
+export function peekClaudeFiveHourWindow(): ClaudeWindowReading | null {
+  return cache ? toClaudeWindowReading(cache.windows) : null;
 }
 
 /** テスト用にモジュールキャッシュを破棄する。 */
