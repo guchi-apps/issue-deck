@@ -651,38 +651,36 @@ describe("PRのマージへの入口（#3083）", () => {
   });
 });
 
-// #1915: 実装オプションでラベル行が折り返し、行の右端に置く場所が無かった
-describe("一覧のカードに出すラベル（#1915）", () => {
-  const labeled = [
-    makeIssue({
-      number: 1,
-      labels: [
-        label("50.feature"),
-        label("21.plan-required"),
-        label("25.artifact-required"),
-        label("11.local"),
-        label("80.Priority: High"),
-      ],
-    }),
-  ];
-
-  it("実装オプション（20番台）は出さない", () => {
+// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）
+describe("一覧のカードにGitHubラベルを出さない（#3159）", () => {
+  it("実装オプション・実行状態・分類・優先度のどれも出さない", () => {
+    const labeled = [
+      makeIssue({
+        number: 1,
+        labels: [
+          label("50.feature"),
+          label("21.plan-required"),
+          label("25.artifact-required"),
+          label("11.local"),
+          label("80.Priority: High"),
+        ],
+      }),
+    ];
     render(
       <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
     );
 
-    expect(screen.queryByText("21.plan-required")).toBeNull();
-    expect(screen.queryByText("25.artifact-required")).toBeNull();
-  });
-
-  it("実行状態・分類・優先度は今までどおり出す", () => {
-    render(
-      <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
-    );
-
-    expect(screen.getByText("50.feature")).toBeTruthy();
-    expect(screen.getByText("11.local")).toBeTruthy();
-    expect(screen.getByText("80.Priority: High")).toBeTruthy();
+    for (const name of [
+      "50.feature",
+      "21.plan-required",
+      "25.artifact-required",
+      "11.local",
+      "80.Priority: High",
+    ]) {
+      expect(screen.queryByText(name)).toBeNull();
+    }
+    // 行そのものは描かれている
+    expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
   });
 });
 
