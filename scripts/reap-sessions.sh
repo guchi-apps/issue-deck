@@ -402,6 +402,17 @@ reap_one() {
     hold "$session" "worktreeの状態を確認できない（$worktree）"
     return 0
   fi
+  # **`package-lock.json`の書き換えだけなら未コミットの変更として数えない**（#3149）。
+  # コミット済みのロックファイルが古いnpmリポジトリでは、`npm install`を打つだけで
+  # `"hasInstallScript": true`のような1行が増える。ランチャーは`--no-save`で入れるように
+  # した（generic-start-issue.sh）が、エージェントが作業中に自分で打てば同じことが起こり、
+  # PRがマージされても畳まれないまま残る（db-consoleの6本が実際に残った）。
+  # 無視するのは**変更がこの1件だけ**のとき（ルート直下の変更` M`に限る）で、`package.json`も
+  # 変わっていれば依存を足した作業中の可能性があるので従来どおり残す。畳むのはtmuxセッション
+  # だけで、worktreeの変更そのものは消えない。
+  if [[ "$dirty" == " M package-lock.json" ]]; then
+    dirty=""
+  fi
   if [[ -n "$dirty" ]]; then
     hold "$session" "worktreeに未コミットの変更がある"
     return 0

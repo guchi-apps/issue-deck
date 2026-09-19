@@ -133,6 +133,13 @@ Issueごとにブランチ・worktree・Claude Codeセッションを分離す�
 - **npmを使うリポジトリのworktreeは`npm install`が`package-lock.json`を書き換えるため、
   「未コミットの変更が1件ある」として残り続ける**（実測で12本中9本がこれ）。消してよければ
   `--repo <owner/repo> --issue <番号> --force`で消す。`.next`の削除は残る側にも効く
+  - 汎用ランチャー（`generic-start-issue.sh`）は#3149から`npm install --no-save`で入れるため、
+    起動しただけでは書き換わらない。コミット済みのロックファイルが古いリポジトリ（db-console
+    では`"hasInstallScript": true`の1行）で、作業中に自分で`npm install`を打った場合にだけ起こる
+  - セッションの回収（`reap-sessions.sh`）は、未コミットの変更が`package-lock.json`の書き換え
+    1件だけなら無視する（#3149。無視しないとPRがマージされてもセッションが畳まれず、本数の
+    上限を埋め続けた）。worktreeの削除（この節）の判定は変えておらず、すでにロックファイルが
+    書き換わっているworktreeはセッションが畳まれた後も残るので、従来どおり`--force`で消す
 
 #### 準備中のworktreeを消さない（`--min-age-minutes`）
 
