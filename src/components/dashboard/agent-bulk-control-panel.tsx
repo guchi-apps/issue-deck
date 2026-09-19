@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
 import { AGENT_RESUME_INSTRUCTION, selectStoppedSessions } from "@/lib/dispatch/agent-resume";
 import { describeDispatchAgent, DISPATCH_AGENTS, type DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { resolveIssueImplementationAgent } from "@/lib/dispatch/issue-session";
@@ -127,11 +128,11 @@ function AgentBulkControlRow({
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border bg-background p-2">
       <div className="flex items-center gap-2">
+        {/* 代表色（#3075）。実行状況の●・AI使用量画面と同じ色相で、ここは濃淡を付けない */}
         <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            agent === "claude" ? "bg-indigo-500" : "bg-teal-600",
-          )}
+          aria-hidden
+          className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+          style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
         />
         <span className="text-sm font-semibold">{describeDispatchAgent(agent)}</span>
         <div className="ml-auto flex items-center gap-2.5">
