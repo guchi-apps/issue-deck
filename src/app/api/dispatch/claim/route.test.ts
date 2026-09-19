@@ -112,6 +112,24 @@ describe("POST /api/dispatch/claim", () => {
     });
   });
 
+  // #3106。設定が「おまかせ」でも、pollerへ`pick`は渡さない（ランチャーが`--model pick`で起動して
+  // しまうため）。ダイアログを経由しない起動はSonnetで立てる
+  it("設定がおまかせ（pick）でモデル指定の無いジョブは、Sonnetで払い出す", async () => {
+    claimDispatchJobs.mockResolvedValue([
+      { id: "job-1", claudeModel: null },
+      { id: "job-2", claudeModel: "opus" },
+    ]);
+    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "pick", codexModel: "auto" });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 2 }));
+
+    const body = await res.json();
+    expect(body.jobs.map((job: { claudeLocalModel: string }) => job.claudeLocalModel)).toEqual([
+      "sonnet",
+      "opus",
+    ]);
+  });
+
   // #2717。**pollerは`claudeLocalModel`しか読まない**ので、Issueごとの指定はここで
   // 差し替えて届ける（poller側の変更が要らないのがこの持たせ方の要点）
   it("ジョブにモデルの指定があれば、設定の既定より優先して払い出す", async () => {

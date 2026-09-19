@@ -125,6 +125,10 @@ export async function POST(request: NextRequest) {
   const setting = (await db.appSetting.findUnique({ where: { id: 1 } })) as
     | { claudeLocalModel?: string; codexModel?: string }
     | null;
+  // **設定が「おまかせ」（`pick`）のときは`parseClaudeLocalModel`が弾いて既定（Sonnet）になる**（#3106）。
+  // 判定は「実装を開始」ダイアログが済ませて具体的なモデル名を積むので、ここへ届くのは
+  // ダイアログを経由しない起動（「次にやること」・「ローカルで開始」・PR修正依頼の呼び戻し・
+  // 一括停止からの再開）だけで、それらは判定せずSonnetで立てる。
   const claudeLocalModel =
     parseClaudeLocalModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;

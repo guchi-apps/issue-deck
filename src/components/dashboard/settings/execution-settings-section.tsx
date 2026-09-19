@@ -17,13 +17,13 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_OPTIONS,
-  CLAUDE_LOCAL_MODEL_OPTIONS,
+  CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
   type AppAiModel,
-  type ClaudeLocalModel,
+  type ClaudeLocalModelSetting,
   type ClaudeModel,
   type CodexModel,
 } from "@/lib/app-settings";
@@ -32,7 +32,7 @@ export type AppSettingsValues = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -43,7 +43,7 @@ type ExecutionSettingsSectionProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -77,7 +77,7 @@ export function ExecutionSettingsSection({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
-    useState<ClaudeLocalModel>(initialClaudeLocalModel);
+    useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
@@ -206,13 +206,13 @@ export function ExecutionSettingsSection({
         <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
         <Select
           value={claudeLocalModel}
-          onValueChange={(value) => setClaudeLocalModel(value as ClaudeLocalModel)}
+          onValueChange={(value) => setClaudeLocalModel(value as ClaudeLocalModelSetting)}
         >
           <SelectTrigger id="claude-local-model" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => (
+            {CLAUDE_LOCAL_MODEL_SETTING_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -220,8 +220,10 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          サブPCで新しく起動するClaude Codeセッションに使います。1つのセッションで計画から実装まで
-          進めるため、通常はSonnetが適しています。全リポジトリ共通です。Haikuはauto
+          「実装を開始」で最初から選ばれるモデルです。「おまかせ」を選ぶと、開くたびにIssueの内容から
+          モデルを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、「次にやること」・
+          「ローカルで開始」・PR修正依頼の呼び戻し・一括停止からの再開など、モデルを選ばずに
+          起動する経路ではSonnetで起動します。全リポジトリ共通です。Haikuはauto
           modeが動作しないため選べません（
           <a
             href="https://github.com/anthropics/claude-code/issues/43235"

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { AppAiModel, ClaudeLocalModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
 
 export function useAppSettingsMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,7 +32,7 @@ export function useAppSettingsMutations() {
   async function updateClaudeModel(
     claudeModel: ClaudeModel,
     claudeModelAssist: ClaudeModel,
-    claudeLocalModel: ClaudeLocalModel,
+    claudeLocalModel: ClaudeLocalModelSetting,
     codexModel: CodexModel,
     appAiModel: AppAiModel,
     appAiModelReasoning: AppAiModel,

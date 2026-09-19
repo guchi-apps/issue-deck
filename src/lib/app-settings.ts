@@ -204,6 +204,33 @@ export function parseClaudeLocalModel(value: unknown): ClaudeLocalModel | null {
     : null;
 }
 
+/**
+ * 「おまかせ」（Issueの内容からissue-deckがモデルを選ぶ）を表す設定値（#3106）。
+ * 「実装を開始」ダイアログの`AUTO_PICK`と同じ文字列で、**`ClaudeModel`ではない**。
+ *
+ * `AppSetting.claudeLocalModel`にだけ入り、ジョブ（`DispatchJob.claudeModel`）・APIの`model`・
+ * pollerへ渡る値には入らない（判定が終わった具体的なモデル名へ解決してから積む）。
+ * そのため`parseClaudeLocalModel`はこの値を弾いたままにしてある。
+ */
+export const MODEL_PICK_SETTING = "pick" as const;
+
+/**
+ * 設定「サブPC（Claude）：計画・実装」の候補（#3106）。先頭に「おまかせ」を足した4つで、
+ * 「実装を開始」ダイアログの最初の選択になる。
+ */
+export const CLAUDE_LOCAL_MODEL_SETTING_OPTIONS = [
+  { value: MODEL_PICK_SETTING, label: "おまかせ（Issueの内容から選ぶ）" },
+  ...CLAUDE_LOCAL_MODEL_OPTIONS,
+] as const;
+
+export type ClaudeLocalModelSetting = ClaudeLocalModel | typeof MODEL_PICK_SETTING;
+
+// `claudeLocalModel`設定の検証（設定の読み書き・画面へ渡す値）。ジョブ・APIの`model`には
+// `parseClaudeLocalModel`を使う——そちらは`pick`を通さない。
+export function parseClaudeLocalModelSetting(value: unknown): ClaudeLocalModelSetting | null {
+  return value === MODEL_PICK_SETTING ? MODEL_PICK_SETTING : parseClaudeLocalModel(value);
+}
+
 // Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
 export const CODEX_MODEL_OPTIONS = [
   { value: "auto", label: "Codexに任せる" },

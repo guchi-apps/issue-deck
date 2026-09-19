@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -185,7 +185,7 @@ function renderDialog(
     actionsDisabledReason?: string | null;
     localSessionCommand?: string | null;
     onOpenChange?: (open: boolean) => void;
-    claudeLocalModel?: "fable" | "opus" | "sonnet";
+    claudeLocalModel?: "fable" | "opus" | "sonnet" | "pick";
   } = {},
 ) {
   const issue = props.issue ?? makeIssue();
@@ -386,8 +386,8 @@ describe("StartImplementationDialog", () => {
       hostName: "subpc",
       // 選ばなければ既定のClaude Code（#2505）
       agent: "claude",
-      // 選ばなければ「設定に従う」（#2717）
-      model: null,
+      // 選ばなければ設定（設定 ＞ 実行）の値が最初から選ばれている（#3106）
+      model: "sonnet",
     });
     await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
     expect(updateIssue.mock.calls[0][0].labels).toContain(LOCAL_LABEL_NAME);
@@ -458,19 +458,24 @@ describe("StartImplementationDialog", () => {
   });
 
   /**
-   * #2717。**重いIssueだけモデルを上げるための欄**なので、既定（設定に従う）から動かさない。
+   * #2717。**重いIssueだけモデルを上げるための欄**。最初の選択は設定（設定 ＞ 実行）の値で、
+   * 「設定に従う」は#3106で削除した。
    * GitHub Actionsは設定を全体で読む別経路で、ジョブに積んだ値は届かない。
    */
-  describe("モデルの選択（#2717）", () => {
-    it("サブPCを選ぶと選択欄を出し、既定は「設定に従う」", () => {
+  describe("モデルの選択（#2717・#3106）", () => {
+    it("サブPCを選ぶと、おまかせ・Fable・Opus・Sonnetの4つを出し、設定の値が選ばれている", () => {
       dispatchState.hosts = [makeHost()];
-      renderDialog({ includeDispatchTargets: true });
+      renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
-      expect(screen.getByRole("radiogroup", { name: "モデル" })).toBeTruthy();
-      expect(screen.getByRole("radio", { name: /設定に従う/ }).getAttribute("aria-checked")).toBe(
-        "true",
-      );
+      const group = screen.getByRole("radiogroup", { name: "モデル" });
+      expect(within(group).getAllByRole("radio")).toHaveLength(4);
+      expect(screen.queryByRole("radio", { name: /設定に従う/ })).toBeNull();
+      const checked = (name: RegExp) =>
+        screen.getByRole("radio", { name }).getAttribute("aria-checked");
+      expect(checked(/^Opus/)).toBe("true");
+      expect(checked(/^Sonnet/)).toBe("false");
+      expect(checked(/^おまかせ/)).toBe("false");
     });
 
     // #2776。「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により削除
@@ -482,14 +487,91 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByRole("radio", { name: /CLIの既定/ })).toBeNull();
     });
 
-    // #2776。「設定に従う」を選んでも実際どのモデルで立つのか分からない、という指摘への対応
-    it("「設定に従う」に実際のモデル名を出す", () => {
+    it("設定の値のモデルには、設定で選んだ旨を出す", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true, claudeLocalModel: "opus" });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
-      expect(screen.getByText("設定の既定（Opus）で起動")).toBeTruthy();
-      expect(screen.getByText("設定（設定 ＞ 実行）で選んだOpusで起動します。")).toBeTruthy();
+      expect(screen.getByText(/設定（設定 ＞ 実行）で選んだOpusです。/)).toBeTruthy();
+      // 設定以外を選ぶと、その旨は消えて向いている作業だけになる
+      fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
+      expect(screen.queryByText(/設定（設定 ＞ 実行）で選んだ/)).toBeNull();
+    });
+
+    /**
+     * #3106。設定が「おまかせ」なら、開いた直後（モデル欄が出た時点）に**自動で**判定する。
+     * 押したときだけ呼ぶ従来の経路（下）とは別に、初期値が「おまかせ」のときだけ走る。
+     */
+    describe("初期値がおまかせ", () => {
+      it("サブPCを選んでモデル欄が出たら、押さなくても判定し、そのモデルで積む", async () => {
+        dispatchState.hosts = [makeHost()];
+        renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
+
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        expect(screen.getByRole("radio", { name: /^おまかせ/ }).getAttribute("aria-checked")).toBe(
+          "true",
+        );
+        await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+        expect(modelPickFetch).toHaveBeenCalledTimes(1);
+
+        clickStart();
+        await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+        expect(enqueue.mock.calls[0][0].model).toBe("opus");
+      });
+
+      it("判定が終わるまで開始を押させない", async () => {
+        dispatchState.hosts = [makeHost()];
+        modelPickFetch.mockReturnValue(new Promise(() => {}));
+        renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
+
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+            true,
+          ),
+        );
+      });
+
+      // 実行先がActionsのあいだは判定しない（枠の無駄遣い）。ホストが無く最初はActionsのときは、
+      // サブPCを選んでモデル欄が出た時点で判定する。切り替えを繰り返しても1回だけ
+      it("モデル欄が出るまでは判定せず、出たときに1回だけ判定する", async () => {
+        dispatchState.hosts = [];
+        const { rerenderSame } = renderDialog({
+          includeDispatchTargets: true,
+          claudeLocalModel: "pick",
+        });
+        expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
+        expect(modelPickFetch).not.toHaveBeenCalled();
+
+        dispatchState.hosts = [makeHost()];
+        rerenderSame();
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        await waitFor(() => expect(modelPickFetch).toHaveBeenCalledTimes(1));
+
+        fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+        expect(modelPickFetch).toHaveBeenCalledTimes(1);
+      });
+
+      // 失敗しても繰り返し呼ばない。やり直すときは「おまかせ」を押し直す
+      it("判定に失敗しても自動では繰り返さない", async () => {
+        dispatchState.hosts = [makeHost()];
+        modelPickFetch.mockResolvedValue({ ok: false, status: 500 });
+        renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
+
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        await waitFor(() => expect(screen.getByText(/モデルを選べませんでした/)).toBeTruthy());
+        expect(modelPickFetch).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("初期値がおまかせでなければ、モデル欄が出ても判定しない", () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true, claudeLocalModel: "sonnet" });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      expect(modelPickFetch).not.toHaveBeenCalled();
     });
 
     it("GitHub Actionsでは選択欄を出さない（設定の既定でしか起動しないため）", () => {
@@ -547,7 +629,7 @@ describe("StartImplementationDialog", () => {
       expect(enqueue.mock.calls[0][0].model).toBe("opus");
     });
 
-    // 決まる前に押せてしまうと、選んだつもりのない「設定に従う」で立つ
+    // 決まる前に押せてしまうと、選んだつもりのないモデルで立つ
     it("判定が終わるまで開始を押させない", async () => {
       dispatchState.hosts = [makeHost()];
       let resolvePick: (value: unknown) => void = () => {};

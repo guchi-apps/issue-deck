@@ -170,7 +170,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
-import type { ClaudeLocalModel } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
@@ -231,10 +231,11 @@ type IssueDetailProps = {
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
   /**
-   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。「実装を開始」ダイアログの
-   * 「設定に従う」チップに実際のモデル名を出すためだけに`StartImplementationDialog`へ渡す。
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。「実装を開始」ダイアログの
+   * モデル欄で最初から選ぶモデル（「おまかせ」なら開いた直後に判定する）として、
+   * `StartImplementationDialog`へ渡す。
    */
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
 };
 
 export function IssueDetail({
