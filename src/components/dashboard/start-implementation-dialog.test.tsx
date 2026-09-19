@@ -630,6 +630,45 @@ describe("StartImplementationDialog", () => {
       expect(enqueue.mock.calls[0][0].model).toBe("opus");
     });
 
+    /**
+     * #3154。おまかせが選んだモデルのチップに印（`title`と読み上げ文）を付ける。
+     * **選んでいる（`aria-checked`）のは「おまかせ」のまま**で、印は結果を示すだけ。
+     */
+    it("おまかせが選んだモデルのチップだけに印が付き、押すと手動選択へ切り替わる", async () => {
+      dispatchState.hosts = [makeHost()];
+      let resolvePick: (value: unknown) => void = () => {};
+      modelPickFetch.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePick = resolve;
+        }),
+      );
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      // 判定中はどれにも付かない
+      await waitFor(() => expect(screen.getByText(/モデルを選んでいます/)).toBeTruthy());
+      expect(screen.queryAllByTitle("おまかせが選んだモデル")).toHaveLength(0);
+
+      resolvePick({
+        ok: true,
+        json: async () => ({ model: "opus", reason: "調査から始まるためです。", source: "ai" }),
+      });
+      const opus = await screen.findByRole("radio", { name: /^Opus/ });
+      expect(opus.getAttribute("title")).toBe("おまかせが選んだモデル");
+      expect(opus.getAttribute("aria-checked")).toBe("false");
+      expect(screen.getByRole("radio", { name: /^おまかせ/ }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect(screen.queryAllByTitle("おまかせが選んだモデル")).toHaveLength(1);
+
+      // 押すと手動で選んだ扱いになり、おまかせの印は外れる
+      fireEvent.click(opus);
+      expect(opus.getAttribute("aria-checked")).toBe("true");
+      expect(screen.queryAllByTitle("おまかせが選んだモデル")).toHaveLength(0);
+    });
+
     // 決まる前に押せてしまうと、選んだつもりのないモデルで立つ
     it("判定が終わるまで開始を押させない", async () => {
       dispatchState.hosts = [makeHost()];

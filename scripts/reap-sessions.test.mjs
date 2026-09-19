@@ -175,6 +175,8 @@ function runGh({
   openPr = "",
   repository = "guchi-apps/issue-deck",
   pushedToBaseBranch = false,
+  dirtyFiles = [],
+  untrackedFiles = [],
 }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "reap-sessions-label-"));
   tempDirs.push(root);
@@ -191,12 +193,20 @@ function runGh({
   git(root, ["init", "--bare", "--initial-branch=develop", origin]);
   git(worktree, ["init", "--initial-branch=develop"]);
   fs.writeFileSync(path.join(worktree, "README.md"), "test\n");
-  git(worktree, ["add", "README.md"]);
+  fs.writeFileSync(path.join(worktree, "package.json"), "{}\n");
+  fs.writeFileSync(path.join(worktree, "package-lock.json"), "{}\n");
+  git(worktree, ["add", "README.md", "package.json", "package-lock.json"]);
   git(worktree, ["commit", "-m", "test"]);
   git(worktree, ["remote", "add", "origin", origin]);
   git(worktree, ["push", "origin", `HEAD:refs/heads/issue-${GH_ISSUE}`]);
   if (pushedToBaseBranch) git(worktree, ["push", "origin", "HEAD:refs/heads/develop"]);
   git(worktree, ["fetch", "origin"]);
+  // コミット後の書き換え（`status --porcelain`に` M`で出る）。#3149
+  for (const file of dirtyFiles) fs.appendFileSync(path.join(worktree, file), "changed\n");
+  for (const file of untrackedFiles) {
+    fs.mkdirSync(path.dirname(path.join(worktree, file)), { recursive: true });
+    fs.writeFileSync(path.join(worktree, file), "{}\n");
+  }
 
   fs.writeFileSync(
     path.join(binDir, "tmux"),
@@ -299,6 +309,37 @@ describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
     expect(result.stdout).toContain("セッションを畳みました");
     expect(result.stdout).toContain("PR #480 を作成しレビューへ引き渡し済み");
     expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+});
+
+describe("reap-sessions.sh: package-lock.json だけの書き換え（#3149）", () => {
+  it("変更が package-lock.json だけなら、マージ済みのセッションを畳む", () => {
+    const result = runGh({ idleSeconds: 30 * 60, mergedPr: "142", dirtyFiles: ["package-lock.json"] });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PR #142 がマージ済み");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+
+  it("package.json も変わっていれば、従来どおり残す", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      mergedPr: "142",
+      dirtyFiles: ["package.json", "package-lock.json"],
+    });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("worktreeに未コミットの変更がある");
+  });
+
+  it("未追跡の package-lock.json（`??`）は無視せず、従来どおり残す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, mergedPr: "142", untrackedFiles: ["sub/package-lock.json"] });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("worktreeに未コミットの変更がある");
+  });
+
+  it("package-lock.json 以外の1件だけでも、従来どおり残す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, mergedPr: "142", dirtyFiles: ["README.md"] });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("worktreeに未コミットの変更がある");
   });
 });
 

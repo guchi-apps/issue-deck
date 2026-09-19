@@ -1089,6 +1089,7 @@ export function StartImplementationDialog({
                       label={describeClaudeModel(entry.model)}
                       fit={CLAUDE_MODEL_FIT_LABELS[entry.model]}
                       selected={model === entry.model}
+                      picked={model === AUTO_PICK && pickedModel === entry.model}
                       onSelect={() => selectModel(entry.model)}
                     />
                   ))}
@@ -1271,14 +1272,20 @@ function AgentChip({
  * そちらを出し、幅を確保するために3列→2列にした（1枚110px→172px前後）。「設定に従う」を
  * 削除した#3106で選ぶ3つが残り、**再び3列**に戻した（スマホでは2行目が折り返す）。
  *
- * 角を`rounded-full`にしないのは2行になったため。アイコンを取るのは「おまかせ」（全幅）だけで、
- * ここが**issue-deckが選ぶ唯一の選択肢**であることを他の6枚と見分けるために付ける。
+ * 角を`rounded-full`にしないのは2行になったため。先頭のアイコン（`icon`）を取るのは「おまかせ」
+ * （全幅）だけで、ここが**issue-deckが選ぶ唯一の選択肢**であることを他の3枚と見分けるために付ける。
+ *
+ * **`picked`は「おまかせ」が選んだモデル**（#3154）。手動で選んだ`selected`より薄い枠と背景に、
+ * 名前の横の小さなスパークル（「おまかせ」のアイコンと同じ）を付ける。濃いか薄いかで
+ * 「自分で選んだ／おまかせが選んだ」を見分ける。**`aria-checked`は変えない**（選んでいるのは
+ * 「おまかせ」のチップで、ここは選ばれた結果を示すだけ）。押せば手動選択になり、印は外れる。
  */
 function ModelChip({
   icon: Icon,
   label,
   fit,
   selected,
+  picked = false,
   onSelect,
 }: {
   icon?: LucideIcon;
@@ -1286,17 +1293,25 @@ function ModelChip({
   /** 2行目に出す「向いている作業」 */
   fit: string;
   selected: boolean;
+  /** 「おまかせ」がこのモデルを選んだ状態（手動で選んだときとは別の見た目にする） */
+  picked?: boolean;
   onSelect: () => void;
 }) {
+  const highlighted = selected || picked;
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
+      title={picked ? "おまかせが選んだモデル" : undefined}
       onClick={onSelect}
       className={cn(
         "flex min-h-[46px] items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left",
-        selected ? "border-primary bg-accent" : "hover:bg-accent",
+        selected
+          ? "border-primary bg-accent"
+          : picked
+            ? "border-primary/40 bg-accent/60"
+            : "hover:bg-accent",
       )}
     >
       {Icon && (
@@ -1306,11 +1321,19 @@ function ModelChip({
         />
       )}
       <span className="flex flex-col gap-0.5">
-        <span className="text-xs leading-tight font-semibold">{label}</span>
+        <span className="flex items-center gap-1 text-xs leading-tight font-semibold">
+          {label}
+          {picked && (
+            <>
+              <Sparkles aria-hidden className="size-3 shrink-0 opacity-80" />
+              <span className="sr-only">（おまかせで選択）</span>
+            </>
+          )}
+        </span>
         <span
           className={cn(
             "text-[11px] leading-tight",
-            selected ? "text-foreground" : "text-muted-foreground",
+            highlighted ? "text-foreground" : "text-muted-foreground",
           )}
         >
           {fit}
