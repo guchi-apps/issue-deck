@@ -5,6 +5,7 @@ import {
   extractReleaseHighlights,
   groupReleaseHistoryByJstDate,
   mergeReleaseHistory,
+  resolveReleasePullRequestId,
   selectVisibleReleaseHistory,
 } from "@/lib/release-history";
 
@@ -105,6 +106,29 @@ describe("extractReleaseHighlights", () => {
       lines: [{ text: "手書きのメモ書き", key: "手書きのメモ書き" }],
       moreCount: 0,
     });
+  });
+});
+
+describe("resolveReleasePullRequestId", () => {
+  it("GitHubの自動生成本文のPR URLをPR idへ変える", () => {
+    expect(
+      resolveReleasePullRequestId("https://github.com/guchi-apps/issue-deck/pull/3114", "guchi-apps/issue-deck"),
+    ).toBe("guchi-apps/issue-deck#3114");
+  });
+
+  it("owner/repo#123形式はそのまま返し、#123はリリースを持つリポジトリのPRとみなす", () => {
+    expect(resolveReleasePullRequestId("guchi-apps/issue-deck#2712", "guchi-apps/other")).toBe(
+      "guchi-apps/issue-deck#2712",
+    );
+    expect(resolveReleasePullRequestId("#42", "guchi-apps/car-care")).toBe("guchi-apps/car-care#42");
+  });
+
+  it("手書きの行（keyが本文そのもの）・Issue URL・オーナー無しの参照はnull", () => {
+    expect(resolveReleasePullRequestId("手書きのメモ書き", "guchi-apps/issue-deck")).toBeNull();
+    expect(
+      resolveReleasePullRequestId("https://github.com/guchi-apps/issue-deck/issues/10", "guchi-apps/issue-deck"),
+    ).toBeNull();
+    expect(resolveReleasePullRequestId("r#1", "guchi-apps/issue-deck")).toBeNull();
   });
 });
 

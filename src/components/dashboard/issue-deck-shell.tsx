@@ -2014,6 +2014,7 @@ export function IssueDeckShell({
                   onToggleChecked={releaseHistory.setReleaseChecked}
                   onToggleCheckedLine={releaseHistory.setReleaseLineChecked}
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
+                  onOpenPullRequest={selectPullRequestModal}
                 />
               )}
 
@@ -2404,6 +2405,7 @@ export function IssueDeckShell({
                   onToggleChecked={releaseHistory.setReleaseChecked}
                   onToggleCheckedLine={releaseHistory.setReleaseLineChecked}
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
+                  onOpenPullRequest={selectPullRequestModal}
                 />
               </div>
             </div>

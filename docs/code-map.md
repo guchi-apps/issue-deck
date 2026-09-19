@@ -3937,6 +3937,21 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 **`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
 この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
 
+### 箇条書きの行から、PR詳細をその場に重ねて開く（#3128）
+
+行のタイトルを押すと、確認待ちのマージ待ちPR（#2149）と同じ`PullRequestDetailDialog`
+（`prmodal`クエリ）が開く。**新しい画面・APIは持たず、`selectPullRequestModal`を
+`ReleaseHistoryPanel`の`onOpenPullRequest`へ渡すだけ**（PC・スマホは同じ1つのダイアログを開く）。
+PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース履歴のスクロール位置を失うため。
+
+- **PR idへの変換は`resolveReleasePullRequestId`。** 実際の本文の参照は
+  `in https://github.com/owner/repo/pull/123`（GitHubの自動生成）で、`owner/repo#123`は
+  手書き・過去の書式。**どちらも受ける**（`ReleaseHighlightLine.key`が参照そのもの）。
+  取れない行（手書き・Issue URL）は押せないテキストのまま
+- 対象がマージ済みPRなので、ヘッダーは一覧（openのみ）に無く、詳細の`summary`から採る
+  （`resolvePullRequestHeader`）。連携していないリポジトリのPRは詳細APIが404になり、
+  ダイアログにその旨が出る
+
 ### 動作確認のフラグは「対象を選ぶ」ことでしか絞れない（#2930）
 
 リリースした機能が本番で動いているかを確かめたかどうかを、カードの「未確認」「確認済み」で
