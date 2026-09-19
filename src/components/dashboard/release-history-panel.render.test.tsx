@@ -172,3 +172,44 @@ describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2
     ).toBeTruthy();
   });
 });
+
+describe("ReleaseHistoryPanel のPR詳細への導線（#3128）", () => {
+  const URL_BODY =
+    "## What's Changed\n* 修正を依頼する導線を足す by @m-guchi in https://github.com/guchi-apps/issue-deck/pull/3114\n";
+
+  it("箇条書きのタイトルを押すとPR idを渡して呼ばれる（自動生成本文のURL形式）", () => {
+    const onOpenPullRequest = vi.fn();
+    renderPanel({ entries: [entry({ body: URL_BODY })], onOpenPullRequest });
+    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する導線を足す" }));
+    expect(onOpenPullRequest).toHaveBeenCalledWith("guchi-apps/issue-deck#3114");
+  });
+
+  it("owner/repo#N形式の行も押せる", () => {
+    const onOpenPullRequest = vi.fn();
+    renderPanel({ onOpenPullRequest });
+    fireEvent.click(screen.getByRole("button", { name: "修正を依頼する導線を足す" }));
+    expect(onOpenPullRequest).toHaveBeenCalledWith("guchi-apps/issue-deck#2919");
+  });
+
+  it("PR参照を持たない手書きの行は押せない", () => {
+    renderPanel({
+      entries: [entry({ body: "* 手書きのメモ書き\n" })],
+      onOpenPullRequest: vi.fn(),
+    });
+    expect(screen.getByText("手書きのメモ書き")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "手書きのメモ書き" })).toBeNull();
+  });
+
+  it("onOpenPullRequestを渡さなければ押せないテキストのまま", () => {
+    renderPanel({ entries: [entry({ body: URL_BODY })] });
+    expect(screen.queryByRole("button", { name: "修正を依頼する導線を足す" })).toBeNull();
+  });
+
+  it("確認チェックボックスを押してもPR詳細は開かず、行の確認記録だけが呼ばれる", () => {
+    const onOpenPullRequest = vi.fn();
+    const { onToggleCheckedLine } = renderPanel({ entries: [entry({ body: URL_BODY })], onOpenPullRequest });
+    fireEvent.click(screen.getByRole("checkbox", { name: /を確認済みにする（参考）/ }));
+    expect(onToggleCheckedLine).toHaveBeenCalledTimes(1);
+    expect(onOpenPullRequest).not.toHaveBeenCalled();
+  });
+});

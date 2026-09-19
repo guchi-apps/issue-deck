@@ -388,8 +388,8 @@ export function CreateIssueDialog({
    * 提案を出したときに、そこまで画面を寄せるための参照（#1890）。
    *
    * **判定を起こすのはフッターの「作成」「作成+実装開始」（#2773）で、提案を出す種別欄は
-   * フォームの先頭にある。** ダイアログは中身ごとスクロールする（`DialogContent`の
-   * `overflow-y-auto`）ため、本文が長いときやスマホ幅では、押した時点で種別欄は画面外にある。
+   * フォームの先頭にある。** ダイアログは本文だけがスクロールする（見出しとフッターは固定・
+   * #3123）ため、項目が多いときやスマホ幅では、押した時点で種別欄は画面外にある。
    * 提案が見えないまま作成まで進めると、#1641が避けたかった「押した本人から見えない」に戻る。
    * `block: "nearest"`なので、すでに見えているときは動かない。
    */
@@ -1105,7 +1105,13 @@ export function CreateIssueDialog({
             onUploadingChange={setIsImageUploading}
             repositoryFullName={repositoryFullName}
             placeholder={isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"}
-            className="min-h-32 md:text-sm"
+            // 高さは固定（#3123）。文字が増えても欄は伸びず、欄の中でスクロールする。以前は
+            // `Textarea`既定の`field-sizing-content max-h-64`で最大256pxまで伸び、スマホで
+            // ダイアログが1画面を超えていた。スマホの文字は16pxのまま（iOSが拡大するため・
+            // #1442）、行間だけ詰めて表示行数を稼ぐ。**`max-h-none`ではなく`max-h-48`**——
+            // tailwind-mergeは`max-h-none`を`max-h-64`と同じグループとして扱わず、両方が残って
+            // どちらが効くかがCSSの出力順に決まってしまう
+            className="h-48 max-h-48 min-h-0 field-sizing-fixed leading-snug md:text-sm md:leading-normal"
             // プレビューは出さない（#1929）——貼った画像はサムネイルで見えており、
             // 書きかけを切り替えて確かめる場面が無い
             showPreviewToggle={false}
@@ -1201,34 +1207,21 @@ export function CreateIssueDialog({
   );
 
   /**
-   * 操作ボタン（#1884）。**並べる順は「キャンセル → 副 → 主」で固定する。**
-   * フッターはスマホで`flex-col-reverse`（DOMの先頭が最下段）になるため、この順に置くと
-   * 縦積みの一番上が主ボタン、一番下がキャンセルになる。
+   * 操作ボタン（#1884・#3123）。**並べる順は「キャンセル → 作成 → 作成+実装開始」で固定する。**
+   * スマホでも縦に積まず横並びにする——積むとフッターだけで約170px取られ、内容欄を固定高にして
+   * 本文だけをスクロールさせても1画面に収まらない。左から見た順がそのまま画面の並びになる
+   * （以前は`flex-col-reverse`で縦積みの一番上が主ボタンだった）。幅が足りる`sm`以上は右寄せで、
+   * ボタンは内容の幅。
    */
   const footer = (
-    <Chrome.Footer>
-      <Button variant="outline" onClick={closeDialog}>
+    <Chrome.Footer className="flex-row justify-end">
+      <Button variant="outline" className="flex-none" onClick={closeDialog}>
         {cancelLabel ?? (isWindow ? "閉じる" : "キャンセル")}
       </Button>
-      {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
-          Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
-          実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
-          理由はダイアログのGitHub Actionsの選択肢の説明として出す。
-          タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
-      {!isQuestion && (
-        <Button
-          variant="secondary"
-          onClick={handleCreateAndStart}
-          disabled={
-            isSubmitting || !repositoryFullName || isImageUploading || (!title.trim() && !body.trim())
-          }
-        >
-          {isSubmitting ? "作成中..." : "作成+実装開始"}
-        </Button>
-      )}
       {/* 「タイトル・ラベルを付与」の専用ボタンは廃止（#2773）。タイトルが空のまま押すと、
           `handleSubmit`/`handleCreateAndStart`が送信前に自動で判定してから作成する */}
       <Button
+        className="flex-1 sm:flex-none"
         onClick={handleSubmit}
         disabled={
           isSubmitting ||
@@ -1245,6 +1238,23 @@ export function CreateIssueDialog({
             ? "作成中..."
             : "作成"}
       </Button>
+      {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
+          Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
+          実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
+          理由はダイアログのGitHub Actionsの選択肢の説明として出す。
+          タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
+      {!isQuestion && (
+        <Button
+          variant="secondary"
+          className="flex-1 sm:flex-none"
+          onClick={handleCreateAndStart}
+          disabled={
+            isSubmitting || !repositoryFullName || isImageUploading || (!title.trim() && !body.trim())
+          }
+        >
+          {isSubmitting ? "作成中..." : "作成+実装開始"}
+        </Button>
+      )}
     </Chrome.Footer>
   );
 
@@ -1263,8 +1273,17 @@ export function CreateIssueDialog({
         )
       ) : (
         <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : closeDialog())}>
-          <DialogContent className="sm:max-w-lg" onKeyDown={handleKeyDown}>
-            {header}
+          {/* 1画面に収める（#3123）。**見出し・本文・フッターを縦に積み、本文（`fields`）だけが
+              スクロールする。** 見出しを本文へ入れない理由は、右上の閉じる・別ウィンドウボタンが
+              `DialogContent`基準の`absolute`で、本文がその下を通って重なるため。`overflow-y-auto`と
+              `gap-4`は打ち消して自前で持つ（やり方は#3119の`start-implementation-dialog.tsx`と同じ。
+              段数を数える`grid-rows-*`は使わない・#2402）。本文の`-mx-1 px-1`は、入力欄の
+              フォーカスリング（`ring-3`）がスクロール領域で切れないための余白 */}
+          <DialogContent
+            className="flex flex-col gap-0 overflow-hidden sm:max-w-lg"
+            onKeyDown={handleKeyDown}
+          >
+            <div className="pb-3 sm:pb-4">{header}</div>
             {/* 書いている内容ごと別ウィンドウへ移す（#1728）。**スマホでは出さない**——
                 ブラウザにウィンドウを並べる概念が無く、押しても別タブが開くだけで、
                 一覧を見ながら書くという目的が成立しない */}
@@ -1278,7 +1297,9 @@ export function CreateIssueDialog({
             >
               <SquareArrowOutUpRight />
             </Button>
-            {fields}
+            <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 pb-4 sm:gap-4">
+              {fields}
+            </div>
             {footer}
           </DialogContent>
         </Dialog>

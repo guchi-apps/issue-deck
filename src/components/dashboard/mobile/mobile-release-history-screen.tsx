@@ -35,6 +35,7 @@ export function MobileReleaseHistoryScreen({
   onToggleChecked,
   onToggleCheckedLine,
   onToggleCheckTarget,
+  onOpenPullRequest,
 }: {
   entries: ReleaseHistoryItem[] | null;
   isLoading: boolean;
@@ -50,6 +51,7 @@ export function MobileReleaseHistoryScreen({
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (repository: { id: string; fullName: string }, targeted: boolean) => void;
+  onOpenPullRequest?: (pullRequestId: string) => void;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -72,6 +74,7 @@ export function MobileReleaseHistoryScreen({
           onToggleChecked={onToggleChecked}
           onToggleCheckedLine={onToggleCheckedLine}
           onToggleCheckTarget={onToggleCheckTarget}
+          onOpenPullRequest={onOpenPullRequest}
           compact
         />
       </div>

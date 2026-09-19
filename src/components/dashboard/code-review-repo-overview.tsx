@@ -1,6 +1,5 @@
 "use client";
 
-import { ScanSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -8,8 +7,6 @@ import type { CodeReviewRepoRow } from "@/lib/code-review-repo-overview";
 import { formatMonthDay } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
-/** 最初に出す行数。残りは「すべて表示」で開く */
-const COLLAPSED_ROW_COUNT = 5;
 /** 「すべて表示」の開閉を端末に覚えておくキー */
 const EXPANDED_STORAGE_KEY = "code-review-repo-overview-expanded";
 
@@ -39,6 +36,10 @@ function writeExpanded(expanded: boolean) {
  * このビューは上部の絞り込みが効かない作り〈#1750〉のため）、「実行」でそのリポジトリを
  * 選んだ状態のレビュー実行ダイアログが開く。
  *
+ * **たたんでいる間は行の一覧も凡例も出さず**、見出しと「すべて表示」だけにする（#3125）。
+ * 実行の入口は各行の「実行」だけで、見出しに別の「レビューを実行」は置かない。
+ * 絞り込み中の行だけは、解除できるようたたんでも残す。
+ *
  * 幅が狭い（スマホ・一覧の列を細くしたPC）ときは帯を2行目へ回す。判定は画面幅ではなく
  * 一覧の列の幅で行う（`@container`）。
  */
@@ -56,8 +57,8 @@ export function CodeReviewRepoOverview({
   countsLoading: boolean;
   selectedRepositoryFullName: string | null;
   onSelectRepository: (repositoryFullName: string | null) => void;
-  /** 渡されていなければ実行ボタンを出さない（リポジトリ指定は`null`で「選ばずに開く」） */
-  onStartCodeReview?: (repositoryFullName: string | null) => void;
+  /** 渡されていなければ各行の実行ボタンを出さない */
+  onStartCodeReview?: (repositoryFullName: string) => void;
 }) {
   // 端末の記憶はマウント後に読む（サーバーの描画と食い違わせない）
   const [expanded, setExpanded] = useState(false);
@@ -72,19 +73,10 @@ export function CodeReviewRepoOverview({
     });
   };
 
-  // 選んでいる行は、たたんでいても隠さない
-  const collapsedRows = rows.slice(0, COLLAPSED_ROW_COUNT);
-  const selectedHidden =
-    selectedRepositoryFullName !== null &&
-    !collapsedRows.some((row) => row.repositoryFullName === selectedRepositoryFullName);
+  // 選んでいる行は、たたんでいても隠さない（隠すと絞り込みを解除できない）
   const visibleRows = expanded
     ? rows
-    : selectedHidden
-      ? [
-          ...collapsedRows,
-          ...rows.filter((row) => row.repositoryFullName === selectedRepositoryFullName),
-        ]
-      : collapsedRows;
+    : rows.filter((row) => row.repositoryFullName === selectedRepositoryFullName);
 
   return (
     <section
@@ -94,16 +86,6 @@ export function CodeReviewRepoOverview({
       <div className="flex items-center gap-2 px-4 pt-2 pb-1">
         <h2 className="text-xs font-semibold">リポジトリ別のレビュー</h2>
         <span className="text-[11px] text-muted-foreground">前回からの経過が長い順</span>
-        {onStartCodeReview && (
-          <Button
-            size="xs"
-            className="ml-auto shrink-0"
-            onClick={() => onStartCodeReview(null)}
-          >
-            <ScanSearch />
-            レビューを実行
-          </Button>
-        )}
       </div>
 
       {rows.length === 0 ? (
@@ -113,52 +95,54 @@ export function CodeReviewRepoOverview({
         </p>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 px-4 pb-1 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="size-2 rounded-full bg-emerald-500" />
-              レビュー
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="size-2 rounded-full border-2 border-emerald-500" />
-              結果待ち
-            </span>
-            <span className="hidden @md:inline">帯は直近12週（左端が12週前、右端が今日）</span>
-          </div>
+          {expanded && (
+            <div className="flex flex-wrap items-center gap-x-3 px-4 pb-1 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                レビュー
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-2 rounded-full border-2 border-emerald-500" />
+                結果待ち
+              </span>
+              <span className="hidden @md:inline">帯は直近12週（左端が12週前、右端が今日）</span>
+            </div>
+          )}
           {/* 行の領域だけに高さの上限を置き、はみ出した分はこの中でスクロールさせる。
               上限が無いと「すべて表示」で枠が画面を占めきり、下のレビュー結果の一覧が
               押し出されて見えなくなる（#3113）。見出し・「たたむ」は枠の外なので常に届く */}
-          <ul className="flex max-h-[45dvh] flex-col overflow-y-auto overscroll-contain pb-1">
-            {visibleRows.map((row) => (
-              <CodeReviewRepoOverviewRow
-                key={row.repositoryFullName}
-                row={row}
-                sinceLastCount={sinceLastCounts.get(row.repositoryFullName)}
-                countsLoading={countsLoading}
-                selected={row.repositoryFullName === selectedRepositoryFullName}
-                onSelect={() =>
-                  onSelectRepository(
-                    row.repositoryFullName === selectedRepositoryFullName
-                      ? null
-                      : row.repositoryFullName,
-                  )
-                }
-                onStartCodeReview={
-                  onStartCodeReview && row.canRun
-                    ? () => onStartCodeReview(row.repositoryFullName)
-                    : undefined
-                }
-              />
-            ))}
-          </ul>
-          {rows.length > COLLAPSED_ROW_COUNT && (
-            <button
-              type="button"
-              onClick={toggleExpanded}
-              className="px-4 pb-2 text-xs text-emerald-700 hover:underline dark:text-emerald-400"
-            >
-              {expanded ? "たたむ" : `すべて表示（${rows.length}件）`}
-            </button>
+          {visibleRows.length > 0 && (
+            <ul className="flex max-h-[45dvh] flex-col overflow-y-auto overscroll-contain pb-1">
+              {visibleRows.map((row) => (
+                <CodeReviewRepoOverviewRow
+                  key={row.repositoryFullName}
+                  row={row}
+                  sinceLastCount={sinceLastCounts.get(row.repositoryFullName)}
+                  countsLoading={countsLoading}
+                  selected={row.repositoryFullName === selectedRepositoryFullName}
+                  onSelect={() =>
+                    onSelectRepository(
+                      row.repositoryFullName === selectedRepositoryFullName
+                        ? null
+                        : row.repositoryFullName,
+                    )
+                  }
+                  onStartCodeReview={
+                    onStartCodeReview && row.canRun
+                      ? () => onStartCodeReview(row.repositoryFullName)
+                      : undefined
+                  }
+                />
+              ))}
+            </ul>
           )}
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            className="px-4 pb-2 text-xs text-emerald-700 hover:underline dark:text-emerald-400"
+          >
+            {expanded ? "たたむ" : `すべて表示（${rows.length}件）`}
+          </button>
         </>
       )}
     </section>

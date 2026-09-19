@@ -51,9 +51,15 @@ function renderOverview(props: Partial<React.ComponentProps<typeof CodeReviewRep
   return { onSelectRepository, onStartCodeReview };
 }
 
+/** 一覧は既定でたたんでいる（#3125）。行を見るテストは「すべて表示」を押して開く */
+function openList() {
+  fireEvent.click(screen.getByRole("button", { name: /すべて表示/ }));
+}
+
 describe("CodeReviewRepoOverview", () => {
   it("前回の実施日・回数と、前回以降に入ったPRの件数を数字で出す。未実施は「未実施」", () => {
     renderOverview();
+    openList();
     expect(screen.getByText("未実施")).toBeTruthy();
     expect(screen.getByText("2日前・1回")).toBeTruthy();
     expect(screen.getByText("38件")).toBeTruthy();
@@ -61,6 +67,7 @@ describe("CodeReviewRepoOverview", () => {
 
   it("行を押すとそのリポジトリを選び、選択中の行をもう一度押すと解除する", () => {
     const first = renderOverview();
+    openList();
     fireEvent.click(screen.getByRole("button", { name: "deck" }));
     expect(first.onSelectRepository).toHaveBeenCalledWith("o/deck");
     cleanup();
@@ -70,18 +77,31 @@ describe("CodeReviewRepoOverview", () => {
     expect(second.onSelectRepository).toHaveBeenCalledWith(null);
   });
 
-  it("「実行」は実行できる行だけに出し、そのリポジトリを渡す。見出しのボタンは選ばずに開く", () => {
+  it("「実行」は実行できる行だけに出し、そのリポジトリを渡す。見出しに別の実行ボタンは無い", () => {
     const { onStartCodeReview } = renderOverview();
+    expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
+    openList();
     const runButtons = screen.getAllByRole("button", { name: "実行" });
     expect(runButtons).toHaveLength(1);
     fireEvent.click(runButtons[0]);
     expect(onStartCodeReview).toHaveBeenLastCalledWith("o/new");
-
-    fireEvent.click(screen.getByRole("button", { name: "レビューを実行" }));
-    expect(onStartCodeReview).toHaveBeenLastCalledWith(null);
   });
 
-  it("6件以上は5件までたたみ、「すべて表示」で開く。選んでいる行はたたんでも隠さない", () => {
+  it("たたんでいる間は行も凡例も出さず、「すべて表示」で開き「たたむ」で戻る。件数に関わらず同じ動き", () => {
+    renderOverview();
+    expect(screen.queryByRole("button", { name: "new" })).toBeNull();
+    expect(screen.queryByText("結果待ち")).toBeNull();
+
+    openList();
+    expect(screen.getByRole("button", { name: "new" })).toBeTruthy();
+    expect(screen.getByText("結果待ち")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "たたむ" }));
+    expect(screen.queryByRole("button", { name: "new" })).toBeNull();
+    expect(screen.getByRole("button", { name: "すべて表示（2件）" })).toBeTruthy();
+  });
+
+  it("選んでいる行はたたんでも残し、ほかの行は隠す", () => {
     const rows = Array.from({ length: 7 }, (_, index) =>
       row({ repositoryFullName: `o/repo${index}` }),
     );
@@ -89,7 +109,7 @@ describe("CodeReviewRepoOverview", () => {
     expect(screen.queryByRole("button", { name: "repo5" })).toBeNull();
     expect(screen.getByRole("button", { name: "repo6" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "すべて表示（7件）" }));
+    openList();
     expect(screen.getByRole("button", { name: "repo5" })).toBeTruthy();
   });
 });

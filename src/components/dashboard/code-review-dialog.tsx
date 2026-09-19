@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import {
-  canCodeReviewRepository,
   describeCodeReviewRejection,
   resolveCodeReviewRejection,
   resolveDefaultCodeReviewHost,
@@ -39,7 +38,6 @@ import {
 } from "@/lib/github/code-review";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
-import type { ConnectedRepository } from "@/types/repository";
 
 /**
  * 重点的に見る観点のプリセット（#698）。**押すと本文へ足すだけ**で、選択状態は持たない。
@@ -67,20 +65,20 @@ const FOCUS_PRESETS = [
  * リポジトリを既定にしているのは参照範囲が全リポジトリだからで、こちらは対象が1つに決まって
  * いる。指摘とコードが同じ場所にある方が、後から辿れる。
  *
- * **選択肢に出るのは、そのホストがレビューできるリポジトリだけ**（サブPCにチェックアウトが
- * あるもの）。選ばせてから断らない——読むコードが無ければレビューは成立しない。
+ * **対象のリポジトリも、ダイアログでは選ばせない**（#3125）。入口は一覧の各行の「実行」と
+ * Issue詳細の「再レビュー」で、どちらも開く時点で対象が決まっている。レビューできない
+ * （サブPCにチェックアウトが無い）リポジトリが渡っても、下の`rejection`が押す前に断る。
  */
 export function CodeReviewDialog({
   open,
   onOpenChange,
-  repositories,
-  defaultRepositoryFullName,
+  repositoryFullName: repositoryFullNameProp,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  repositories: ConnectedRepository[];
-  defaultRepositoryFullName?: string | null;
+  /** レビュー対象。閉じている間は`null`でよい */
+  repositoryFullName: string | null;
   onCreated: (issue: Issue) => void;
 }) {
   const { createIssue, isSubmitting: isCreatingIssue, error: createError, setError: setCreateError } =
@@ -92,7 +90,7 @@ export function CodeReviewDialog({
     setError: setCommentError,
   } = useIssueCommentMutations();
 
-  const [repositoryFullName, setRepositoryFullName] = useState("");
+  const repositoryFullName = repositoryFullNameProp ?? "";
   const [focus, setFocus] = useState("");
   const [hostName, setHostName] = useState<string | null>(null);
   /**
@@ -105,12 +103,6 @@ export function CodeReviewDialog({
   const dispatch = useDispatchState(open);
   const { setError: setDispatchError, hosts } = dispatch;
 
-  /** レビューできるリポジトリ＝どこかのホストにチェックアウトがあるもの */
-  const reviewableRepositories = useMemo(
-    () => repositories.filter((repo) => canCodeReviewRepository(hosts, repo.fullName)),
-    [repositories, hosts],
-  );
-
   useEffect(() => {
     if (!open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -121,22 +113,6 @@ export function CodeReviewDialog({
     setCommentError(null);
     setDispatchError(null);
   }, [open, setCreateError, setCommentError, setDispatchError]);
-
-  // 選択肢はホストの申告が届いてから確定するため、リポジトリの初期値は別に決める
-  useEffect(() => {
-    if (!open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRepositoryFullName((current) => {
-      if (current && reviewableRepositories.some((repo) => repo.fullName === current)) return current;
-      if (
-        defaultRepositoryFullName &&
-        reviewableRepositories.some((repo) => repo.fullName === defaultRepositoryFullName)
-      ) {
-        return defaultRepositoryFullName;
-      }
-      return reviewableRepositories[0]?.fullName ?? "";
-    });
-  }, [open, defaultRepositoryFullName, reviewableRepositories]);
 
   const isSubmitting = isCreatingIssue || isCreatingComment || dispatch.isSubmitting;
 
@@ -232,37 +208,13 @@ export function CodeReviewDialog({
           <DialogDescription>
             サブPCで読み取り専用のセッションを立て、リポジトリ全体を読みます。結果はレビュー用に作るIssueのコメントとして返ります。
           </DialogDescription>
+          <p className="text-sm">
+            <span className="text-muted-foreground">対象</span>{" "}
+            <span className="font-medium">{repositoryFullName}</span>
+          </p>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="code-review-repo">対象リポジトリ</Label>
-            {reviewableRepositories.length > 0 ? (
-              <Select value={repositoryFullName} onValueChange={setRepositoryFullName}>
-                <SelectTrigger id="code-review-repo" className="w-full">
-                  <SelectValue placeholder="リポジトリを選択" />
-                </SelectTrigger>
-                <SelectContent>
-                  {reviewableRepositories.map((repo) => (
-                    <SelectItem key={repo.id} value={repo.fullName}>
-                      {repo.fullName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                レビューできるリポジトリがありません（サブPCにチェックアウトがあり、pollerが動いているリポジトリだけを選べます）。
-              </p>
-            )}
-            {reviewableRepositories.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                サブPCにチェックアウトがあるリポジトリだけを表示しています（{repositories.length}件中{" "}
-                {reviewableRepositories.length}件）。
-              </p>
-            )}
-          </div>
-
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="code-review-focus">重点的に見てほしい観点（任意）</Label>
             <div className="flex flex-wrap gap-1.5">
