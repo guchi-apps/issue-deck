@@ -125,7 +125,7 @@ type MobileIssueListScreenProps = {
   /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
   onStartIssueOrder?: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
-  onStartCodeReview?: (repositoryFullName?: string | null) => void;
+  onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。`IssueList`へそのまま渡す */
   codeReviewIssues?: Issue[];
   codeReviewRepositoryFullNames?: string[];

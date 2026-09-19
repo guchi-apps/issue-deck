@@ -99,7 +99,7 @@ type MobileIssuesScreenProps = {
   /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
   onStartIssueOrder?: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
-  onStartCodeReview?: (repositoryFullName?: string | null) => void;
+  onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。一覧へそのまま渡す */
   codeReviewIssues?: Issue[];
   codeReviewRepositoryFullNames?: string[];
