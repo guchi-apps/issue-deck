@@ -530,9 +530,22 @@ general-purpose）は、メインのモデルに関わらずSonnetで動かす�
   呼び出しの`model`指定を無視させる（呼び出しで`inherit`を指定した場合だけは親を引き継ぐ）
 - **forkは対象外。** forkは常に親のモデルで動く（Claude Codeの仕様）ため、作業を丸ごと委ねる
   用途の品質は変わらない（そもそも実装そのものを委ねることは禁じている。#2896）
-- **Haikuにしない。** ローカルはauto modeで起動しており、Haikuはauto modeで動作しない（前掲
-  「サブPCのClaude Codeモデル」）。サブエージェントのツール実行も同じ権限判定を通るため、
-  安全側のSonnetに留める
+- **既定をHaikuにしない**（#3121）。**Haikuでも動く**——「Haikuはauto modeで動作しない」
+  （前掲「サブPCのClaude Codeモデル」）は**メインセッションのモデル**の制約で、サブエージェントには
+  当てはまらない。Claude Code 2.1.278で`--permission-mode auto`・メインSonnet・
+  `CLAUDE_CODE_SUBAGENT_MODEL=haiku`＋`_FORCE`としてExploreを起こすと、`claude-haiku-4-5`で
+  Bash・Read・Grepが通り、権限モードも`auto`のままだった（#3118の時点ではここを誤って書いていた）。
+  確かめたのは読み取り専用のExploreだけで、general-purposeが書き込み系のツールを使うときの挙動は未確認
+- それでも既定にしないのは、**上乗せの削減が小さい**から。単価はSonnet 5が$2/$10、Haiku 4.5が
+  $1/$5で半額だが、上の30日の実測に当てると、OpusのExplore $73はSonnetで約$29、Haikuでも約$15に
+  なるだけで、サブエージェント全体でも**Sonnet比の削減は月$15〜25（全体の2%前後）**にとどまる。
+  一方でHaikuは1世代前のモデルで、探索の取りこぼしや誤った要約はメインのセッション（費用の大半を
+  占めるキャッシュ読み出し）の往復を増やす方向に効き、差額を簡単に食い潰す。Haikuでの探索品質は
+  測っていないので、試すときは`ISSUE_DECK_CLAUDE_SUBAGENT_MODEL=haiku`で起動し、転記の費用と
+  メイン側の往復数をSonnetと比べてから既定を見直す
+- **ExploreだけHaikuにする、のような種類ごとの割り当てはしない。** `_FORCE`は定義を無視して
+  全サブエージェントに1つのモデルを当てる。分けるには組み込みExploreの定義を`.claude/agents/`で
+  上書きするしかなく、Claude Code側の定義の更新に追従できなくなる
 - **無人実行（GitHub Actions）は対象外。** 計画ステップは`Agent`を封じており（#780）、
   使うモデルは`claudeModel`・`claudeModelAssist`で全体に決めている
 

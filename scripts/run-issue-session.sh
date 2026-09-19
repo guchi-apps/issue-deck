@@ -1105,7 +1105,8 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   # **`CLAUDE_CODE_SUBAGENT_MODEL`だけでは効かない。** 組み込みのExplore・Planは定義側で
   # `model: inherit`を明示しており、定義の指定が環境変数より優先されるため、`_FORCE`を併用して
   # 定義とAgent呼び出しの`model`指定を無視させる。forkは常に親のモデルのままで、ここの影響を受けない。
-  # `ISSUE_DECK_CLAUDE_SUBAGENT_MODEL=inherit`で従来どおり親を引き継ぐ。人が
+  # `haiku`も指定できる（auto modeで動かないのはメインのモデルだけ。既定にしない理由は#3121・
+  # prompts-and-models.md）。`ISSUE_DECK_CLAUDE_SUBAGENT_MODEL=inherit`で従来どおり親を引き継ぐ。人が
   # `CLAUDE_CODE_SUBAGENT_MODEL`を自分で渡しているときはそちらを尊重して触らない。
   SUBAGENT_MODEL="${ISSUE_DECK_CLAUDE_SUBAGENT_MODEL:-sonnet}"
   if [[ -z "${CLAUDE_CODE_SUBAGENT_MODEL:-}" && "$SUBAGENT_MODEL" != "inherit" ]]; then
