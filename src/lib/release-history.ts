@@ -1,4 +1,5 @@
 import { formatJstWeekday, toJstParts } from "@/lib/format-date-time";
+import { buildPullRequestId, parseGithubReferenceUrl, parsePullRequestId } from "@/lib/github-reference";
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -101,6 +102,25 @@ export function extractReleaseHighlights(
     lines: bulletLines.slice(0, max),
     moreCount: Math.max(0, bulletLines.length - max),
   };
+}
+
+/**
+ * 箇条書き行の`key`（`ReleaseHighlightLine.key`）から、アプリ内でPR詳細を開くためのid
+ * （`<owner>/<repo>#<番号>`）を取り出す。PRの参照でなければnull（手書きの行など）。
+ *
+ * **実際のリリース本文の参照は`in https://github.com/owner/repo/pull/123`形式**（GitHubの
+ * 自動生成）で、`owner/repo#123`や`#123`は手書き・過去の書式のもの。3つとも受ける。
+ * `#123`はリリースを持つリポジトリ（`repoFullName`）のPRとみなす。URLが`/issues/`を指す
+ * 場合はPRと決められないのでnullにする。
+ */
+export function resolveReleasePullRequestId(key: string, repoFullName: string): string | null {
+  const fromUrl = parseGithubReferenceUrl(key);
+  if (fromUrl) {
+    return fromUrl.kind === "pull" ? buildPullRequestId(fromUrl.repositoryFullName, fromUrl.number) : null;
+  }
+  if (parsePullRequestId(key)) return key;
+  const bare = /^#(\d+)$/.exec(key);
+  return bare ? buildPullRequestId(repoFullName, Number(bare[1])) : null;
 }
 
 /** 日付（日本時間）でグルーピングした1日ぶん */

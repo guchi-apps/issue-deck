@@ -23,7 +23,11 @@ import {
   type ReleaseCheckStatus,
   type ReleaseCheckTargetSummary,
 } from "@/lib/release-check";
-import { extractReleaseHighlights, groupReleaseHistoryByJstDate } from "@/lib/release-history";
+import {
+  extractReleaseHighlights,
+  groupReleaseHistoryByJstDate,
+  resolveReleasePullRequestId,
+} from "@/lib/release-history";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +64,7 @@ export function ReleaseHistoryPanel({
   onToggleChecked,
   onToggleCheckedLine,
   onToggleCheckTarget,
+  onOpenPullRequest,
   compact = false,
   className,
 }: {
@@ -88,6 +93,11 @@ export function ReleaseHistoryPanel({
     repository: { id: string; fullName: string },
     targeted: boolean,
   ) => void;
+  /**
+   * 箇条書きのPRタイトルを押したときに、そのPR詳細を開く（#3128）。引数はPR id
+   * （`<owner>/<repo>#<番号>`）。渡さなければタイトルは押せないテキストのまま。
+   */
+  onOpenPullRequest?: (pullRequestId: string) => void;
   /** スマホ向けに縮める。見出しの説明文を落とす */
   compact?: boolean;
   className?: string;
@@ -232,6 +242,7 @@ export function ReleaseHistoryPanel({
                     onToggleChecked={onToggleChecked}
                     checkLineIndex={checkLineIndex}
                     onToggleCheckedLine={onToggleCheckedLine}
+                    onOpenPullRequest={onOpenPullRequest}
                   />
                 ))}
               </ol>
@@ -330,6 +341,7 @@ function ReleaseHistoryCard({
   onToggleChecked,
   checkLineIndex,
   onToggleCheckedLine,
+  onOpenPullRequest,
 }: {
   entry: ReleaseHistoryItem;
   status: ReleaseCheckStatus;
@@ -345,6 +357,7 @@ function ReleaseHistoryCard({
     target: { repoFullName: string; tagName: string; lineKey: string },
     checked: boolean,
   ) => void;
+  onOpenPullRequest?: (pullRequestId: string) => void;
 }) {
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
   const [expanded, setExpanded] = useState(false);
@@ -408,6 +421,7 @@ function ReleaseHistoryCard({
           {lines.map((line) => {
             const lineTarget = { ...target, lineKey: line.key };
             const lineChecked = resolveReleaseCheckLineStatus(lineTarget, checkLineIndex) !== null;
+            const pullRequestId = resolveReleasePullRequestId(line.key, entry.repoFullName);
             return (
               <li key={line.key} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
                 <Checkbox
@@ -416,7 +430,21 @@ function ReleaseHistoryCard({
                   onCheckedChange={(next) => onToggleCheckedLine(lineTarget, next === true)}
                   className="mt-0.5 size-3.5 shrink-0"
                 />
-                <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
+                {pullRequestId && onOpenPullRequest ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPullRequest(pullRequestId)}
+                    title="Pull Requestの詳細を開く"
+                    className={cn(
+                      "cursor-pointer text-left underline-offset-2 hover:text-foreground hover:underline",
+                      lineChecked && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {line.text}
+                  </button>
+                ) : (
+                  <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
+                )}
               </li>
             );
           })}
