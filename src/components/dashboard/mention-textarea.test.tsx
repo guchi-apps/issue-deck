@@ -237,7 +237,7 @@ describe("MentionTextarea 画像の添付", () => {
  */
 describe("MentionTextarea 入力欄の下の行", () => {
   function buttonNames(container: HTMLElement) {
-    // 「画像を添付」は3行に組んで見える文字を縮めているので、名前はaria-labelから読む（#3054）
+    // 「画像を添付」は文字を出さないアイコンだけのボタンなので、名前はaria-labelから読む（#3074）
     return Array.from(container.querySelectorAll('[data-slot="mention-toolbar"] button')).map(
       (button) => button.getAttribute("aria-label") ?? button.textContent,
     );
@@ -283,6 +283,51 @@ describe("MentionTextarea 入力欄の下の行", () => {
     expect(strip.className).not.toContain("flex-1");
     // 操作は行が詰まっても縮まない（はみ出したサムネイルの側が見切れる）
     expect(attach.parentElement?.className).toContain("shrink-0");
+  });
+
+  /**
+   * #3074。「画像添付」の文字は出さず、アイコンだけを点線の四角で囲む。文字が無くても
+   * 名前（読み上げ・ホバー）は残る。
+   */
+  it("「画像を添付」は文字を出さないアイコンだけの点線枠で、名前はaria-labelに残る", () => {
+    const { container } = render(<Harness initialValue="本文" />);
+    const attach = container.querySelector(
+      '[data-slot="mention-toolbar"] button[aria-label="画像を添付"]',
+    ) as HTMLElement;
+
+    expect(attach.textContent).toBe("");
+    expect(attach.querySelector("svg")).not.toBeNull();
+    expect(attach.getAttribute("title")).toBe("画像を添付");
+    expect(attach.className).toContain("border-dashed");
+  });
+
+  it("アップロード中も文字は出さず、押せない薄いアイコンのまま名前が「アップロード中」になる", async () => {
+    const pending = deferred<{ ok: boolean; json: () => Promise<{ url: string }> }>();
+    vi.stubGlobal("fetch", vi.fn(() => pending.promise));
+
+    const { container } = render(<Harness initialValue="本文" />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    setInputFiles(fileInput, [makeFile("a.png")]);
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const busy = await waitFor(() => {
+      const button = container.querySelector(
+        '[data-slot="mention-toolbar"] button[aria-label="アップロード中"]',
+      ) as HTMLButtonElement | null;
+      expect(button).not.toBeNull();
+      return button as HTMLButtonElement;
+    });
+    expect(busy.textContent).toBe("");
+    expect(busy.disabled).toBe(true);
+    // 回るスピナーはサムネイル列の点線枠が持つ。ボタンには出さず、点線＋スピナーを2種類並べない
+    expect(busy.querySelector("svg.animate-spin")).toBeNull();
+    expect(container.querySelector('[data-slot="mention-attachments"] svg.animate-spin')).not.toBeNull();
+
+    pending.resolve({ ok: true, json: () => Promise.resolve({ url: "/api/issues/images/a.png" }) });
+    await waitFor(() =>
+      expect(container.querySelector('button[aria-label="画像を添付"]')).not.toBeNull(),
+    );
+    vi.unstubAllGlobals();
   });
 });
 

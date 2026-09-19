@@ -410,26 +410,21 @@ export function MentionTextarea({
             type="button"
             variant="ghost"
             size="sm"
-            // アイコンを左・文字を右に2行で組み、上下中央にそろえる（#3068）。文字を2行に
-            // 縮めて横幅を詰め、同じ行のサムネイルの欄を広げる（#3054）。見えている文字は
-            // 縮めるので、読み上げ・ホバーの名前は元の「画像を添付」を残す。
-            // mdの高さ（md:h-7）はsizeの側にあるので、md:h-12も足して打ち消す
-            className="h-12 gap-1.5 px-2.5 text-xs text-muted-foreground md:h-12"
+            // 文字を出さず、アイコンを点線の四角で囲む（#3074）。「ここに画像を置く枠」に
+            // 見せて、押すと画像を添付できることを伝える。文字が無くなって同じ行のサムネイルの
+            // 欄も広がる（#3054）。見えない文字の代わりに、読み上げ・ホバーの名前を
+            // aria-label・titleで残す。高さは従来の48pxのまま（入力欄下の行を伸ばさない）。
+            // mdの寸法（md:size-7）はsizeの側にあるので、md:size-12も足して打ち消す
+            className="size-12 border-dashed border-muted-foreground/50 text-muted-foreground hover:border-foreground/60 hover:text-foreground md:size-12"
             onClick={() => fileInputRef.current?.click()}
             disabled={disabled || isUploading}
-            aria-label={isUploading ? undefined : "画像を添付"}
-            title={isUploading ? undefined : "画像を添付"}
+            aria-label={isUploading ? "アップロード中" : "画像を添付"}
+            title={isUploading ? "アップロード中" : "画像を添付"}
           >
-            {isUploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
-            {isUploading ? (
-              "アップロード中..."
-            ) : (
-              <span className="text-center leading-tight">
-                画像
-                <br />
-                添付
-              </span>
-            )}
+            {/* アップロード中もアイコンのまま薄く出す（disabledで薄くなる）。回るスピナーは
+                サムネイル列の点線枠が持っており、ここにも出すと同じ行に点線＋スピナーが
+                2種類並んで、どちらが添付の枠なのか見分けにくい */}
+            <ImagePlus className="size-5" />
           </Button>
           {showPreviewToggle && (
             <PreviewToggleButton
