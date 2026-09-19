@@ -121,6 +121,7 @@ import {
 } from "@/lib/github/pull-request-fix-issue";
 import {
   buildCodeReviewFindingIssueDraft,
+  isCodeReviewIssue,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
@@ -1117,6 +1118,15 @@ export function IssueDeckShell({
   const visibleRepositories = useMemo(
     () => repositories.filter((repo) => !repo.hidden),
     [repositories],
+  );
+  /**
+   * 「コードレビュー」ビューのリポジトリ別の枠（#3092）の材料。レビューIssueは一覧の20件上限
+   * （#2855）を掛ける前の全件で、非表示にしたリポジトリのものは`issues`の時点で外れている。
+   */
+  const codeReviewIssues = useMemo(() => issues.filter(isCodeReviewIssue), [issues]);
+  const codeReviewRepositoryFullNames = useMemo(
+    () => visibleRepositories.map((repo) => repo.fullName),
+    [visibleRepositories],
   );
 
   // 「Issueを作成」ダイアログのリポジトリ選択肢は、上の`visibleRepositories`からさらに
@@ -2168,7 +2178,9 @@ export function IssueDeckShell({
                   onStartIssueOrder={
                     issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start
                   }
-                  onStartCodeReview={() => openCodeReviewDialog()}
+                  onStartCodeReview={openCodeReviewDialog}
+                  codeReviewIssues={codeReviewIssues}
+                  codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
                   issueOrderAutoStart={issueOrderGuide.autoStart}
                   issueOrderCount={issueOrderGuide.totalCount}
                 />
@@ -2566,9 +2578,15 @@ export function IssueDeckShell({
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）
                 onStartIssueOrder={issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start}
                 // リポジトリ全体のコードレビューを実行する入口（#698）
-                onStartCodeReview={() =>
-                  openCodeReviewDialog(filters.repos.length === 1 ? filters.repos[0] : null)
+                // リポジトリ別の枠（#3092）の「実行」はそのリポジトリを渡す。見出しの
+                // 「レビューを実行」は従来どおり、絞り込みが1件ならそれを既定にする
+                onStartCodeReview={(repositoryFullName) =>
+                  openCodeReviewDialog(
+                    repositoryFullName ?? (filters.repos.length === 1 ? filters.repos[0] : null),
+                  )
                 }
+                codeReviewIssues={codeReviewIssues}
+                codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
                 issueOrderAutoStart={issueOrderGuide.autoStart}
                 issueOrderCount={issueOrderGuide.totalCount}
                 // 絞り込みを指定していても効かないビューであることを件数の隣に出す（#1750）

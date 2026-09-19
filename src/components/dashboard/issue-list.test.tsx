@@ -41,6 +41,11 @@ vi.mock("@/hooks/use-code-review-reports", () => ({
     `${issue.repositoryFullName}#${issue.number}`,
 }));
 
+let mergedPrCounts = new Map<string, number>();
+vi.mock("@/hooks/use-code-review-merged-pr-counts", () => ({
+  useCodeReviewMergedPrCounts: () => ({ counts: mergedPrCounts, loading: false }),
+}));
+
 vi.mock("@/hooks/use-issues-workflow-running", () => ({
   useIssuesWorkflowRunning: () => workflowRunningByIssueId,
 }));
@@ -112,6 +117,7 @@ afterEach(() => {
   dispatchState.manualStepRuns = [];
   workflowRunningByIssueId = {};
   codeReviewSummaries = new Map();
+  mergedPrCounts = new Map();
 });
 
 describe("IssueListの選択ハイライト（#1597）", () => {
@@ -759,7 +765,8 @@ describe("件数バーの折り返し（#2107）", () => {
     renderList({ issues: [], view: "code-review", onStartCodeReview: vi.fn() });
 
     expect(screen.getByRole("button", { name: "レビューを実行" })).toBeTruthy();
-    expect(barOf(/リポジトリ全体を読ませて/).className).toContain("flex-wrap");
+    // リポジトリ別の枠（#3092）の見出しに統合した
+    expect(screen.getByRole("region", { name: "リポジトリ別のレビュー" })).toBeTruthy();
   });
 
   it("他のビューには実行の入口を出さない", () => {
@@ -1250,5 +1257,49 @@ describe("IssueListの予約実行の目印（#2866・#2995）", () => {
     renderList();
 
     expect(rowOf(2).textContent).not.toContain("次枠");
+  });
+});
+
+// #3092。リポジトリ別の枠から選ぶと、そのリポジトリのレビューだけに絞る
+describe("コードレビューのリポジトリ別の枠", () => {
+  const reviews = [
+    makeIssue({
+      number: 11,
+      title: "[レビュー] issue-deck（2026-08-20）",
+      createdAt: "2026-08-20T00:00:00.000Z",
+    }),
+    makeIssue({
+      number: 12,
+      title: "[レビュー] issue-deck（2026-09-17）",
+      createdAt: "2026-09-17T00:00:00.000Z",
+    }),
+    makeIssue({
+      number: 21,
+      title: "[レビュー] car-care（2026-09-01）",
+      repositoryFullName: "guchi-apps/car-care",
+      createdAt: "2026-09-01T00:00:00.000Z",
+    }),
+  ];
+
+  it("行を押すとそのリポジトリのレビューだけが並び、前回からのPR件数が出る。「全件に戻す」で戻る", async () => {
+    mergedPrCounts = new Map([
+      ["guchi-apps/issue-deck|2026-08-20T00:00:00.000Z|2026-09-17T00:00:00.000Z", 187],
+    ]);
+    renderList({
+      issues: reviews,
+      view: "code-review",
+      codeReviewIssues: reviews,
+      codeReviewRepositoryFullNames: ["guchi-apps/issue-deck", "guchi-apps/car-care"],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "issue-deck" }));
+
+    expect(screen.queryByText(/car-care（2026-09-01）/)).toBeNull();
+    expect(screen.getByText(/issue-deck（2026-09-17）/)).toBeTruthy();
+    expect(screen.getByText("前回から PR 187件")).toBeTruthy();
+    expect(screen.getByText("初回")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "全件に戻す" }));
+    expect(screen.getByText(/car-care（2026-09-01）/)).toBeTruthy();
   });
 });

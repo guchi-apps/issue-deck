@@ -18,11 +18,12 @@ import {
   Lock,
   MessageCircleQuestion,
   MessageSquare,
-  ScanSearch,
   ScrollText,
   Star,
+  X,
 } from "lucide-react";
 
+import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
@@ -41,6 +42,17 @@ import {
   codeReviewSummaryKey,
   useCodeReviewReports,
 } from "@/hooks/use-code-review-reports";
+import { useCodeReviewMergedPrCounts } from "@/hooks/use-code-review-merged-pr-counts";
+import {
+  buildCodeReviewRepoRows,
+  reviewIntervalRanges,
+  sinceLastReviewRange,
+} from "@/lib/code-review-repo-overview";
+import { canCodeReviewRepository } from "@/lib/dispatch/dispatch-job";
+import {
+  mergedPullRequestRangeKey,
+  type MergedPullRequestRange,
+} from "@/lib/github/merged-pr-range";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueListScroll } from "@/hooks/use-issue-list-scroll";
 import { useIssuesWorkflowRunning } from "@/hooks/use-issues-workflow-running";
@@ -249,8 +261,22 @@ type IssueListProps = {
    * **ヘッダーではなく一覧の上に置く**（手作業アシスタント・「次にやること」と同じ理由）。
    * このビューには他に起動の入口が無いので、**Issueが0件でも出す**——出さないと、最初の
    * 1件を作る手段が画面から無くなる。
+   *
+   * リポジトリ別の枠（#3092）の「実行」からはそのリポジトリを渡す。`null`・省略は
+   * 「選ばずに開く」（ダイアログ側の既定に任せる）。
    */
-  onStartCodeReview?: () => void;
+  onStartCodeReview?: (repositoryFullName?: string | null) => void;
+  /**
+   * リポジトリ別の枠（#3092）が数えるレビューIssue。**一覧の20件上限（#2855）を掛ける前**の
+   * 集合を渡す——close済みで一覧から外れた古いレビューも、実施の記録としては数える。
+   * 省略時は一覧に並んでいるIssueだけで数える。
+   */
+  codeReviewIssues?: Issue[];
+  /**
+   * リポジトリ別の枠に載せてよいリポジトリ（左メニューで非表示にしていないもの）。
+   * 省略時はレビューしたことがあるリポジトリだけを載せる。
+   */
+  codeReviewRepositoryFullNames?: string[];
   /** 「次にやること」で1位を自動でサブPCへ積む設定か（#1853）。ボタンの文言が変わる */
   issueOrderAutoStart?: boolean;
   /**
@@ -483,6 +509,8 @@ export function IssueList({
   onStartManualStepGuide,
   onStartIssueOrder,
   onStartCodeReview,
+  codeReviewIssues,
+  codeReviewRepositoryFullNames,
   issueOrderAutoStart = false,
   issueOrderCount = 0,
   filtersIgnored = false,
@@ -512,15 +540,29 @@ export function IssueList({
    * ヘッダーの数字と並ぶ行数が食い違う。
    */
   const snoozeEnabled = isSnoozeEnabledForList(snoozes, onSnooze);
+  /**
+   * 「コードレビュー」ビューでリポジトリ別の枠（#3092）から選んだリポジトリ。
+   * **このビューは上部の絞り込みが効かない作り**（#1750）なので、URLの絞り込みには載せず
+   * この一覧の中だけで持つ。他のビューへ移ったら効かせない。
+   */
+  const [codeReviewRepository, setCodeReviewRepository] = useState<string | null>(null);
+  const activeCodeReviewRepository = view === "code-review" ? codeReviewRepository : null;
+  const scopedIssues = useMemo(
+    () =>
+      activeCodeReviewRepository === null
+        ? allIssues
+        : allIssues.filter((issue) => issue.repositoryFullName === activeCodeReviewRepository),
+    [allIssues, activeCodeReviewRepository],
+  );
   const { issues, snoozedIssues } = useMemo(() => {
-    if (!snoozeEnabled || !snoozes) return { issues: allIssues, snoozedIssues: [] as Issue[] };
+    if (!snoozeEnabled || !snoozes) return { issues: scopedIssues, snoozedIssues: [] as Issue[] };
     const listed: Issue[] = [];
     const snoozed: Issue[] = [];
-    for (const issue of allIssues) {
+    for (const issue of scopedIssues) {
       (findActiveIssueSnooze(snoozes, issue, now) ? snoozed : listed).push(issue);
     }
     return { issues: listed, snoozedIssues: snoozed };
-  }, [allIssues, snoozes, snoozeEnabled, now]);
+  }, [scopedIssues, snoozes, snoozeEnabled, now]);
   // 保留中の行を開いているか。**既定はたたむ**——伏せたものを見に来るのは解除するときだけで、
   // 開いたままにすると件数から外した意味が薄れる
   const [isSnoozedOpen, setIsSnoozedOpen] = useState(false);
@@ -668,7 +710,9 @@ export function IssueList({
    * 並んでいるIssueの数だけGitHubを叩くことになる。ここでフックを呼んでいるのは、PC・スマホの
    * どちらの一覧もこのコンポーネントを通るため（`useIssuesWorkflowRunning`と同じ理由）。
    */
-  const codeReviewSummaries = useCodeReviewReports(issues, view === "code-review");
+  // **リポジトリで絞る前の集合で引く**（#3092）。絞った集合で引くと、選択を切り替えるたびに
+  // 引き直しになり、枠の「結果待ち」の印も選んだリポジトリ以外から消える
+  const codeReviewSummaries = useCodeReviewReports(allIssues, view === "code-review");
   /**
    * 指摘の対応状況（#2868）。**要約に入っているのは指摘の見出しだけ**で、それが
    * Issueになったか・closeされたかは手元のIssueから数える（`summarizeCodeReviewFindingProgress`）。
@@ -689,6 +733,76 @@ export function IssueList({
     }
     return progressByKey;
   }, [issues, codeReviewSummaries, codeReviewFindingIssues]);
+  /**
+   * リポジトリ別の枠（#3092）の行。「結果待ち」は一覧の行のバッジと同じ要約から読む
+   * （一覧の20件上限より古いレビューは要約が無く、結果待ちとしては出ない）。
+   */
+  const codeReviewRepoRows = useMemo(() => {
+    if (view !== "code-review" || now === null) return [];
+    const reviewIssues = codeReviewIssues ?? allIssues;
+    return buildCodeReviewRepoRows({
+      reviewIssues,
+      repositoryFullNames:
+        codeReviewRepositoryFullNames ??
+        [...new Set(reviewIssues.map((issue) => issue.repositoryFullName))],
+      canRun: (repositoryFullName) => canCodeReviewRepository(dispatch.hosts, repositoryFullName),
+      isPending: (issue) =>
+        codeReviewSummaries.get(codeReviewSummaryKey(issue))?.state === "pending",
+      now,
+    });
+  }, [
+    view,
+    now,
+    codeReviewIssues,
+    allIssues,
+    codeReviewRepositoryFullNames,
+    dispatch.hosts,
+    codeReviewSummaries,
+  ]);
+  /** 選んだリポジトリの行。レビュー1件ごとの「前回から PR n件」の期間はここから作る */
+  const selectedCodeReviewRepoRow =
+    codeReviewRepoRows.find((row) => row.repositoryFullName === activeCodeReviewRepository) ??
+    null;
+  const codeReviewIntervalRanges = useMemo(
+    () =>
+      selectedCodeReviewRepoRow
+        ? reviewIntervalRanges(selectedCodeReviewRepoRow)
+        : new Map<string, MergedPullRequestRange>(),
+    [selectedCodeReviewRepoRow],
+  );
+  const codeReviewRangeKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const row of codeReviewRepoRows) {
+      const range = sinceLastReviewRange(row);
+      if (range) keys.push(mergedPullRequestRangeKey(range));
+    }
+    for (const range of codeReviewIntervalRanges.values()) {
+      keys.push(mergedPullRequestRangeKey(range));
+    }
+    return keys;
+  }, [codeReviewRepoRows, codeReviewIntervalRanges]);
+  const mergedPrCounts = useCodeReviewMergedPrCounts(codeReviewRangeKeys);
+  const sinceLastMergedPrCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of codeReviewRepoRows) {
+      const range = sinceLastReviewRange(row);
+      const count = range ? mergedPrCounts.counts.get(mergedPullRequestRangeKey(range)) : undefined;
+      if (count !== undefined) counts.set(row.repositoryFullName, count);
+    }
+    return counts;
+  }, [codeReviewRepoRows, mergedPrCounts.counts]);
+  /** 行に出す「前回から PR n件」。`null`はそのリポジトリで最初のレビュー（「初回」と出す） */
+  function describeCodeReviewInterval(issue: Issue): string | null {
+    if (!selectedCodeReviewRepoRow) return null;
+    if (!selectedCodeReviewRepoRow.reviews.some((review) => review.issueId === issue.id)) {
+      return null;
+    }
+    const range = codeReviewIntervalRanges.get(issue.id);
+    if (!range) return "初回";
+    const count = mergedPrCounts.counts.get(mergedPullRequestRangeKey(range));
+    if (count !== undefined) return `前回から PR ${count}件`;
+    return mergedPrCounts.loading ? "前回から PR …" : null;
+  }
   // 押した行を即座にハイライトするための楽観表示（#1597）。選択の正はURLクエリ
   // （`?issue=`）で、その更新はReactのトランジション＝低優先度の更新として入るため、
   // 右カラム（IssueDetail・プロパティパネル）の再描画が終わるまでハイライトが動かない。
@@ -886,6 +1000,7 @@ export function IssueList({
       : null;
     // 一覧に出すレビュー結果（#2855）。取れていないIssueはundefinedで、行にバッジが出ないだけ
     const codeReviewSummary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
+    const codeReviewInterval = describeCodeReviewInterval(issue);
     // 予約実行に積まれているか（#2866）。積んでもラベル・ジョブ・セッションは付かない
     // ので、この引き当て表だけが手がかりになる。渡されていない画面ではnullでチップも出ない
     const nightlyRunMark = findScheduledRunQueuedMark(nightlyRunQueued, issue.id);
@@ -1027,6 +1142,12 @@ export function IssueList({
               />
               {/* レビューの結果（#2855）。**ラベルより前に置く**——この行を開くかどうかは
                   重い指摘が何件あるかで決めるもので、レビューIssueに付くラベルはそれより後 */}
+              {/* レビューとレビューのあいだに入ったPRの件数（#3092）。リポジトリを選んだときだけ */}
+              {codeReviewInterval && (
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {codeReviewInterval}
+                </span>
+              )}
               {codeReviewSummary && (
                 <CodeReviewResultBadges
                   summary={codeReviewSummary}
@@ -1257,17 +1378,43 @@ export function IssueList({
         </div>
       )}
 
-      {/* リポジトリ全体のコードレビューを実行する入口（#698）。**このビュー唯一の起動口**なので、
-          並んでいるIssueが0件でも出す */}
-      {onStartCodeReview && view === "code-review" && (
-        <div className={cn(COUNT_BAR_CLASS, "bg-emerald-500/5")}>
+      {/* リポジトリ別のレビュー状況（#3092）。リポジトリ全体のコードレビューを実行する入口
+          （#698）も兼ねる。**このビュー唯一の起動口**なので、並んでいるIssueが0件でも出す */}
+      {view === "code-review" && (
+        <CodeReviewRepoOverview
+          rows={codeReviewRepoRows}
+          sinceLastCounts={sinceLastMergedPrCounts}
+          countsLoading={mergedPrCounts.loading}
+          selectedRepositoryFullName={activeCodeReviewRepository}
+          onSelectRepository={setCodeReviewRepository}
+          onStartCodeReview={onStartCodeReview}
+        />
+      )}
+      {activeCodeReviewRepository !== null && (
+        <div className={cn(COUNT_BAR_CLASS, "bg-emerald-500/10")}>
           <p className={COUNT_BAR_TEXT_CLASS}>
-            リポジトリ全体を読ませて、指摘を受け取れます。
+            <span className="font-medium text-foreground">
+              {activeCodeReviewRepository.split("/")[1] ?? activeCodeReviewRepository}
+            </span>
+            のレビュー{issues.length}件を表示中
+            {sinceLastMergedPrCounts.has(activeCodeReviewRepository) && (
+              <>
+                ・前回以降に入ったPR{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {sinceLastMergedPrCounts.get(activeCodeReviewRepository)}件
+                </span>
+              </>
+            )}
           </p>
           <div className={COUNT_BAR_ACTIONS_CLASS}>
-            <Button size="xs" className="shrink-0" onClick={onStartCodeReview}>
-              <ScanSearch />
-              レビューを実行
+            <Button
+              size="xs"
+              variant="outline"
+              className="shrink-0"
+              onClick={() => setCodeReviewRepository(null)}
+            >
+              <X />
+              全件に戻す
             </Button>
           </div>
         </div>
