@@ -437,6 +437,17 @@ export function upsertIssue(issues: Issue[], issue: Issue): Issue[] {
     : [issue, ...issues];
 }
 
+/**
+ * 別リポジトリへ移動したIssueを一覧へ反映する（#3145）。移動でGitHub IDが変わり`id`が別物になるため、
+ * `id`で置換する`upsertIssue`だけでは移動元が残る。移動元を外してから移動先を入れる。
+ */
+export function replaceMovedIssue(issues: Issue[], source: Issue, moved: Issue): Issue[] {
+  return upsertIssue(
+    issues.filter((item) => item.id !== source.id),
+    moved,
+  );
+}
+
 export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue[] {
   const prevById = new Map(prevIssues.map((issue) => [issue.id, issue] as const));
   return nextIssues.map((issue) => {

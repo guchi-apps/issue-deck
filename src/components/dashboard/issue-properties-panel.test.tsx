@@ -65,6 +65,7 @@ describe("IssuePropertiesPanel の進捗", () => {
         issue={buildIssue({ projectStatus: "Implementation" })}
         repositories={[]}
         onIssueUpdated={vi.fn()}
+        onIssueMoved={vi.fn()}
       />,
     );
 
@@ -77,6 +78,7 @@ describe("IssuePropertiesPanel の進捗", () => {
         issue={buildIssue({ projectStatus: null })}
         repositories={[]}
         onIssueUpdated={vi.fn()}
+        onIssueMoved={vi.fn()}
       />,
     );
 
@@ -91,6 +93,7 @@ describe("IssuePropertiesPanel の進捗", () => {
         issue={buildIssue({ projectStatus: "Ready" })}
         repositories={[]}
         onIssueUpdated={vi.fn()}
+        onIssueMoved={vi.fn()}
       />,
     );
 

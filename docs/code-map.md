@@ -990,6 +990,11 @@ export function POST(request: NextRequest) {
   - 画面の「Issueを移動」（`api/issues/transfer`）はWebhookと別経路で、GraphQLの`transferIssue`の後に
     新しい番号でREST APIから取り直して書く。ここでも移動元の行は残るため、
     `deleteTransferredSourceIssue`で消している（Webhookの到着を待たない）。
+  - **画面側も同じ理由で`onIssueUpdated`（`id`で置換）では反映できない**（#3145）。「Issueを移動」の
+    成功後は`issue-deck-shell.tsx`の`handleIssueMoved`が、`replaceMovedIssue`で移動元を一覧から外して
+    移動先を入れ、`selectIssue(moved, { history: "replace" })`で移動先の詳細へ移る。履歴は積まない——
+    積むと「戻る」が、もう解決できない移動元のURLへ着く。**GitHub上で直接移動した場合は
+    サーバーが旧ID→新IDの対応を持たないため、画面は自動で遷移せず、移動元が消えるだけ**。
   - **移動でIssueのGitHub IDが変わるため、移動先では行を作り直すことになる。** `00.check-user`の
     待ち時間計測（`checkUserLabeledAt`）など、DB行に紐づくissue-deck側の記録は引き継がれない。
   - 取り込みそこねて残った行は、画面の「再同期」（`syncRepositoryIssues`の

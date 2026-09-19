@@ -209,6 +209,7 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
       repositories={[repository]}
       currentUserLogin="guchi"
       onEdit={vi.fn()}
+      onIssueMoved={vi.fn()}
       onIssueUpdated={vi.fn()}
       onIssueDeleted={vi.fn()}
       onToggleFavorite={vi.fn()}
@@ -238,6 +239,7 @@ function renderMobileDetail(
       claudeLocalModel="sonnet"
       onBack={vi.fn()}
       onEdit={vi.fn()}
+      onIssueMoved={vi.fn()}
       onIssueUpdated={vi.fn()}
       onIssueDeleted={vi.fn()}
       onToggleFavorite={vi.fn()}
