@@ -99,7 +99,7 @@ const HOOK_JSON = JSON.stringify({
  * **同期実行（`execFileSync`）にしない。** 返事を返すHTTPサーバーがこのプロセスに居るため、
  * イベントループを止めると自分で自分の返事を止めることになり、必ず「届かない」側に倒れる。
  */
-function runHook(hookJson = HOOK_JSON) {
+function runHook(hookJson = HOOK_JSON, extraEnv = {}) {
   const child = execFile("bash", [script, "2108", "issue-deck", "guchi-apps/issue-deck"], {
     encoding: "utf8",
     cwd: repoRoot,
@@ -119,6 +119,7 @@ function runHook(hookJson = HOOK_JSON) {
       // 起動するため、curl・python3の起動待ちだけで1秒近く揺れる）。境界ぴったりでなく
       // 十分な余白を持たせる。
       SESSION_PLAN_POLL_GRACE_SECONDS: "6",
+      ...extraEnv,
     },
   });
   const done = new Promise((resolve, reject) => {
@@ -203,15 +204,15 @@ describe("計画への返事待ち", () => {
 // Claudeアプリの承認カードに計画が出ない。フックは1回だけ差し戻して、別の応答で呼び直させる。
 describe("入力に計画が無いときの呼び直し", () => {
   /** plan modeの開始を記録した転記と計画ファイルを置き、入力`{}`のフックJSONを返す */
+  const planFile = () => path.join(workDir, ".claude", "plans", "test-plan.md");
+
   function emptyInputHook() {
-    const plansDir = path.join(workDir, ".claude", "plans");
-    mkdirSync(plansDir, { recursive: true });
-    const planFile = path.join(plansDir, "test-plan.md");
-    writeFileSync(planFile, "## 要約\n\n**ファイルに書いた計画。**\n");
+    mkdirSync(path.dirname(planFile()), { recursive: true });
+    writeFileSync(planFile(), "## 要約\n\n**ファイルに書いた計画。**\n");
     const transcript = path.join(workDir, "transcript.jsonl");
     writeFileSync(
       transcript,
-      `${JSON.stringify({ type: "attachment", attachment: { type: "plan_mode", planFilePath: planFile } })}\n`,
+      `${JSON.stringify({ type: "attachment", attachment: { type: "plan_mode", planFilePath: planFile() } })}\n`,
     );
     return JSON.stringify({
       hook_event_name: "PreToolUse",
@@ -240,6 +241,31 @@ describe("入力に計画が無いときの呼び直し", () => {
     const decision = decisionOf(await runHook(hookJson));
 
     expect(received).toContain("POST /api/dispatch/sessions/plan");
+    expect(decision).toMatchObject({ permissionDecision: "allow" });
+  });
+
+  // 修正を求められて書き直した計画を、また同じ応答で出したときも差し戻す（計画ファイルのパスは
+  // 1セッション内で変わらないため、パスだけで「1回まで」にすると2回目以降の提示で効かない）
+  it("計画を書き直したら、同じファイルでも再び差し戻す", async () => {
+    const hookJson = emptyInputHook();
+    await runHook(hookJson);
+    writeFileSync(planFile(), "## 要約\n\n**書き直した計画。**\n");
+
+    const decision = decisionOf(await runHook(hookJson));
+
+    expect(decision).toMatchObject({ permissionDecision: "deny" });
+  });
+
+  // 印を残せないまま差し戻すと、呼び直すたびに差し戻され続ける
+  it("差し戻した印を残せないときは差し戻さない", async () => {
+    const blocker = path.join(workDir, "not-a-directory");
+    writeFileSync(blocker, "");
+    decisionQueue = [ok({ status: "APPROVED" })];
+
+    const decision = decisionOf(
+      await runHook(emptyInputHook(), { ISSUE_DECK_SESSION_STATE_DIR: blocker }),
+    );
+
     expect(decision).toMatchObject({ permissionDecision: "allow" });
   });
 }, 60_000);
