@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { CreateIssueWindow } from "@/components/dashboard/create-issue-window";
-import { CLAUDE_LOCAL_MODEL_DEFAULT, parseClaudeLocalModel } from "@/lib/app-settings";
+import { CLAUDE_LOCAL_MODEL_DEFAULT, parseClaudeLocalModelSetting } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
@@ -50,11 +50,12 @@ export default async function NewIssuePage() {
     getIssuesForUser(currentUser.id),
     // 一覧の印（#1888）はデッキ本体（`/dashboard`）と同じ材料で決める
     listDispatchRunnableRepositories(),
-    // 「作成+実装開始」の「設定に従う」チップに実際のモデル名を出すため（#2776）。
+    // 「作成+実装開始」のモデル欄の最初の選択を設定の値にするため（#2776・#3106）。
     // デッキ本体（`/dashboard`）と同じ取得・パース
     db.appSetting.findUnique({ where: { id: 1 } }) as Promise<{ claudeLocalModel?: string } | null>,
   ]);
-  const claudeLocalModel = parseClaudeLocalModel(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+  const claudeLocalModel =
+    parseClaudeLocalModelSetting(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
 
   const hiddenRepositoryIds = new Set(hiddenRepositories.map((row) => row.repositoryId));
   const issueCreationExcludedRepositoryIds = new Set(

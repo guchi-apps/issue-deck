@@ -24,7 +24,7 @@ import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSettingsData } from "@/hooks/use-settings-data";
 import { cn } from "@/lib/utils";
-import type { AppAiModel, ClaudeLocalModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -35,7 +35,7 @@ type SettingsDialogProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;

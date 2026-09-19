@@ -3090,7 +3090,9 @@ export function POST(request: NextRequest) {
   モデルを上げる」を参照。
   **「おまかせ」はissue-deckがIssueを読んで選ぶ**（#2723。`lib/claude/model-pick.ts`と
   `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければラベルと分量からの
-  ルールへ倒す）。**積むのは決まった具体的なモデル名**で、`auto`（`--model`を付けない＝
+  ルールへ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
+  自動で1回呼ぶ**〈#3106。最初の選択は設定の値で、「設定に従う」は削除した。検証は
+  `parseClaudeLocalModelSetting`〈`pick`を通す〉と`parseClaudeLocalModel`〈弾く〉に分かれる〉）。**積むのは決まった具体的なモデル名**で、`auto`（`--model`を付けない＝
   画面の表記は「CLIの既定」）ではない。**そのセッションが実際に使っているモデル**は
   `DispatchSessionView.models`に載り、セッションの行に印として出る——出どころは転記の集計
   （`SessionUsage.models`）しか無く、pollerの報告は5分ごとなので**最初の応答が集計される

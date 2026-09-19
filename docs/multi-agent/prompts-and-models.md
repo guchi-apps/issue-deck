@@ -376,10 +376,10 @@ GitHub Actionsのように計画用と補助用には分けない。
 `auto`（`--model`を付けずClaude Code側の設定・アカウントの既定に委ねる方式）は、
 「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により外した。
 候補の一覧は`CLAUDE_MODEL_OPTIONS`から`haiku`・`auto`を除いた`CLAUDE_LOCAL_MODEL_OPTIONS`
-（`src/lib/app-settings.ts`）で、設定画面の「サブPC（Claude）：計画・実装」と、「おまかせ」の
-判定候補（`MODEL_PICK_CANDIDATES`）が参照する。**「実装を開始」ダイアログのモデル欄
-（次項）はこれを参照せず、`start-implementation-dialog.tsx`の`MODEL_ENTRIES`に直書きしている**
-——「設定に従う」（`null`）というこの欄だけの選択肢を混ぜているため。両者は`haiku`・`auto`を
+（`src/lib/app-settings.ts`）で、設定画面の「サブPC（Claude）：計画・実装」（先頭に「おまかせ」を
+足した`CLAUDE_LOCAL_MODEL_SETTING_OPTIONS`。#3106）と、「おまかせ」の判定候補
+（`MODEL_PICK_CANDIDATES`）が参照する。**「実装を開始」ダイアログのモデル欄（次項）は
+`start-implementation-dialog.tsx`の`MODEL_ENTRIES`に直書きしている**。両者は`haiku`・`auto`を
 含まない、という制約だけを共有する。値の検証も`parseClaudeLocalModel`に分け、既存の値が
 Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。**GitHub Actions向け
 （`claudeModel`・`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——
@@ -391,12 +391,17 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 ### 重いIssueだけモデルを上げる（#2717）
 
 **モデルはIssueごとに、起動のたびに選べる。**「実装を開始」ダイアログの「モデル」欄で、
-そのIssueだけFableやOpusへ上げられる。既定は「設定に従う」で、選ばなければ従来どおり
-上の設定で立つ。選んだ値は`DispatchJob.claudeModel`に入り、払い出しAPIが
-`claudeLocalModel`として載せ直す——**pollerとランチャーは従来どおり`claudeLocalModel`しか
-読まない**ので、この経路にpoller側の変更は要らない。
+そのIssueだけFableやOpusへ上げられる。**選択肢はおまかせ・Fable・Opus・Sonnetの4つで、
+最初に選ばれているのは設定（設定 ＞ 実行）の値**（#3106。それまでは「設定に従う」が既定で、
+選んでも実際のモデルが分からなかったため削除した）。選んだ値は`DispatchJob.claudeModel`に入り、
+払い出しAPIが`claudeLocalModel`として載せ直す——**pollerとランチャーは従来どおり
+`claudeLocalModel`しか読まない**ので、この経路にpoller側の変更は要らない。
 
 欄の中身は#2723で作り直した（下の「モデル欄には金額を出さない」「おまかせ」を参照）。
+`claudeLocalModel`設定には「おまかせ」を表す`pick`（`MODEL_PICK_SETTING`）も入る（#3106）。
+**検証は2つに分かれる**——設定の読み書きは`parseClaudeLocalModelSetting`（`pick`を通す）、
+ジョブ・APIの`model`・払い出しは`parseClaudeLocalModel`（`pick`を弾く）。`pick`は
+ダイアログが判定して**具体的なモデル名へ解決してから**積むので、pollerへは届かない。
 
 **選択欄が出るのはサブPCでClaude Codeを起こすときだけ。** GitHub Actionsは
 `reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は届かない
@@ -453,7 +458,11 @@ Issueの要求により、ダイアログの選択肢（`MODEL_ENTRIES`）・設
 
 新しい「おまかせ」（全幅のチップ）は、**Issueの内容からissue-deckがモデルを選ぶ**。
 
-- 押したときだけ`POST /api/issues/model-pick`を呼ぶ（開いただけでは呼ばない）
+- 押したときだけ`POST /api/issues/model-pick`を呼ぶ（開いただけでは呼ばない）。**例外は設定の
+  値が「おまかせ」のとき**（#3106）で、モデル欄が出た時点（サブPCでClaude Codeを起こす実行先に
+  なったとき）に**1回だけ自動で**呼ぶ。きっかけを「開いたとき」にしないのは、実行先のホスト
+  一覧が開いた後に届くため。開くたびに記録をリセットし、失敗しても繰り返さない（やり直すときは
+  「おまかせ」を押し直す）。実行先がActions・Codexのあいだは呼ばない
 - 材料は**DBのIssue**（タイトル・本文・ラベル・コメント数）と、画面が既に持っていれば
   承認済みの計画コメント。**GitHubへは取りに行かない**
 - 判定はアプリ内AI（既定はHaiku。`lib/claude/model-pick.ts`）。**呼べなかった・応答を読めなかった
@@ -464,25 +473,32 @@ Issueの要求により、ダイアログの選択肢（`MODEL_ENTRIES`）・設
 - 積むのは**決まった具体的なモデル名**で、`auto`ではない。実行キューの印にも受付コメントにも
   そのモデルが出る（APIへ送る値の集合は#2717から変えていない）
 
-### 「設定に従う」を選んだときに実際のモデル名を出す（#2776）
+### 「設定に従う」は削除し、設定の値を最初の選択にする（#3106）
 
-「実装を開始」ダイアログの「設定に従う」チップは、選んでも**そのIssueがどのモデルで
-立つのか画面から分からない**という指摘を受け、アプリ設定「サブPC（Claude）：計画・実装」の
-現在値（`claudeLocalModel`）をチップの2行目・選択時の説明文へ差し込むようにした
-（`modelChipFit`・`describeModelChoice`。`start-implementation-dialog.tsx`）。
+#2776で「設定に従う」チップに実際のモデル名を出したが、そもそも**どのモデルで立つのかを
+チップの外（設定）まで見に行かないと分からない**選択肢だった。#3106でチップごと削除し、
+アプリ設定「サブPC（Claude）：計画・実装」の現在値（`claudeLocalModel`）を、**ダイアログを開いた
+ときに最初から選ばれているモデル**にした。設定が「おまかせ」なら判定を自動で走らせる（前項）。
 
-値は`issue-deck-shell.tsx`がトップレベルで保持しているものをそのままpropで渡す
+値は`issue-deck-shell.tsx`がトップレベルで保持しているものをそのまま渡す
 （`StartImplementationDialog`は自分では取りに行かない）。**取得口をダイアログ側に増やすと
 既存の判断（`dispatch`propと同じ理由。#1262）と食い違うため**、呼び出し元（`issue-detail.tsx`・
 `mobile-issue-detail.tsx`・`create-issue-dialog.tsx`）を経由してバケツリレーする形にした。
 `/issues/new`（別ウィンドウ）は`issue-deck-shell.tsx`を経由しないため、`dashboard/page.tsx`と
 同じくページ側でDBから直接読む。
 
+**「おまかせ」の判定が効くのは「実装を開始」ダイアログだけ。** モデルを付けずにジョブを積む
+経路——「次にやること」（`enqueue-issue.ts`）・「ローカルで開始」（`use-local-session-launch.ts`）・
+PR修正依頼でのセッションの呼び戻し・一括停止からの「再開」（`agent-resume-run.ts`）——は、
+払い出し（`claim`）の`job.claudeModel ?? claudeLocalModel`へ流れ込み、`claudeLocalModel`が
+`pick`だと`parseClaudeLocalModel`が弾いて**既定のSonnetで起動する**（判定はしない。積む処理に
+AI呼び出しと待ち時間を入れないため）。設定の説明文にもこの旨を書いてある。
+
 ### 実際に動いているモデルをセッションに出す（#2723）
 
 Issue詳細のセッション表示（`issue-session-status.tsx`）に「モデル Opus」の印が出る。
 **起動時に指定した値ではなく、転記の集計（`SessionUsage.models`）から引いた実物。**
-「設定に従う」で立てたときに実際どのモデルになるかはダイアログの説明文（前項）でも
+「おまかせ」で立てたときに実際どのモデルになるかはダイアログの判定結果（前々項）でも
 分かるが、**そのセッションで実際に動いたモデル**が知りたいときはこちらを見る
 （設定の変更前に積まれたジョブでは両者がずれることがある）。
 

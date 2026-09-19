@@ -49,7 +49,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
-import type { ClaudeLocalModel } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
 import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
@@ -291,11 +291,10 @@ type CreateIssueDialogProps = {
   /** 取り消しボタンの文言。別ウィンドウでは閉じ方が変わるため差し替える */
   cancelLabel?: string;
   /**
-   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。作成直後の
-   * 「作成+実装開始」（`StartImplementationDialog`）の「設定に従う」チップに
-   * 実際のモデル名を出すためだけに渡す。
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。作成直後の
+   * 「作成+実装開始」（`StartImplementationDialog`）のモデル欄で最初から選ぶモデルとして渡す。
    */
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
 };
 
 /**

@@ -83,7 +83,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import type { AppAiModel, ClaudeLocalModel, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
 import {
   ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS,
   PULL_REQUEST_POLL_INTERVAL_MS,
@@ -222,7 +222,7 @@ type IssueDeckShellProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModel;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
@@ -305,7 +305,7 @@ export function IssueDeckShell({
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
-    useState<ClaudeLocalModel>(initialClaudeLocalModel);
+    useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
