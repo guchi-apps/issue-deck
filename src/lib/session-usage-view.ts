@@ -969,3 +969,134 @@ export function buildIssueQuotaPercents(
   }
   return percentByIssueKey;
 }
+
+/**
+ * 「実行中のセッション」欄（#3084）の状態の出し分け。**文言はAPI側で`summarizeIssueSession`から
+ * 作って渡し、ここでは色の区別だけを持つ**（画面ごとに同じ状態を別の言い方で出さないため）。
+ * `idle`は「応答を終えています」（作業が終わったか、次の指示を待っている）。
+ */
+export type CurrentSessionTone = "running" | "waiting" | "idle";
+
+/** 突き合わせに使う、生きているセッション1本ぶん（`DispatchSession`のALIVEの行） */
+export type CurrentSessionInput = {
+  host: string;
+  tmuxSessionName: string;
+  repositoryFullName: string;
+  issueNumber: number;
+  /** pollerが最初にそのtmuxセッションを見た時刻（ISO）。「開始から」の起点 */
+  firstSeenAt: string;
+  agent: "claude" | "codex";
+  statusLabel: string;
+  statusTone: CurrentSessionTone;
+  /** 転記から引いたモデル（`listDispatchSessions`が埋める）。使用量の行に無いときの補い */
+  models: string[];
+};
+
+/** 画面に出す実行中のセッション1本ぶん */
+export type CurrentSessionUsage = {
+  host: string;
+  tmuxSessionName: string;
+  /** ownerを除いた短い名前（`SessionUsage.repository`・`onOpenIssue`と同じ形） */
+  repository: string;
+  issueNumber: number;
+  /** 常にnull。Issue・PR別のタイトル解決（`resolveIssueTitles`）をそのまま通すために持つ */
+  prNumber: null;
+  title: string | null;
+  agent: "claude" | "codex";
+  statusLabel: string;
+  statusTone: CurrentSessionTone;
+  startedAt: string;
+  models: string[];
+  /** 使用量の行が1件でも当たったか。falseなら「集計待ち」 */
+  reported: boolean;
+  responses: number;
+  contextTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** 直近5時間枠のおよそ何%か。Codex・換算できないときはnull */
+  quotaPercent: number | null;
+};
+
+/**
+ * 生きているセッションと`SessionUsage`の行を突き合わせる（#3084）。
+ *
+ * **突き合わせはホスト・リポジトリ名・Issue番号・種別（実装）で行い、`endedAt`がそのセッションの
+ * `firstSeenAt`以降の行だけを見る**（`sessions.ts`の`resolveSessionModels`と同じ基準。同じIssueの
+ * 前回のセッションを拾わない）。当たった行はすべて足す——サブエージェントの転記は別の行として
+ * 報告されるが、同じセッションの消費に違いない。`--continue`で再開した転記は開始からの累計になる。
+ *
+ * 並びは金額の多い順で、まだ報告の無いセッション（集計待ち）は末尾へ回す。
+ */
+export function buildCurrentSessionUsage({
+  sessions,
+  entries,
+  quota,
+}: {
+  sessions: readonly CurrentSessionInput[];
+  entries: readonly SessionUsageEntry[];
+  quota: QuotaEstimate | null;
+}): CurrentSessionUsage[] {
+  const rows = sessions.map((session): CurrentSessionUsage => {
+    const repository = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+    const startedMs = new Date(session.firstSeenAt).getTime();
+    const matched = entries.filter(
+      (entry) =>
+        (entry.source ?? "local") === "local" &&
+        entry.kind === "implementation" &&
+        entry.host === session.host &&
+        entry.repository === repository &&
+        entry.issueNumber === session.issueNumber &&
+        new Date(entry.endedAt).getTime() >= startedMs,
+    );
+
+    const costUsd = matched.reduce((sum, entry) => sum + entry.costUsd, 0);
+    // 5時間枠の換算はClaudeだけ（`buildIssueQuotaPercents`と同じ基準）
+    const windowCostUsd =
+      quota === null
+        ? 0
+        : matched
+            .filter(
+              (entry) =>
+                entry.agent === "claude" && new Date(entry.endedAt).getTime() >= quota.windowStartMs,
+            )
+            .reduce((sum, entry) => sum + entry.costUsd, 0);
+    const models = [...new Set(matched.flatMap((entry) => entry.models))];
+
+    return {
+      host: session.host,
+      tmuxSessionName: session.tmuxSessionName,
+      repository,
+      issueNumber: session.issueNumber,
+      prNumber: null,
+      title: null,
+      agent: session.agent,
+      statusLabel: session.statusLabel,
+      statusTone: session.statusTone,
+      startedAt: session.firstSeenAt,
+      models: models.length > 0 ? models : session.models,
+      reported: matched.length > 0,
+      responses: matched.reduce((sum, entry) => sum + entry.responses, 0),
+      contextTokens: matched.reduce((sum, entry) => sum + entry.contextTokens, 0),
+      outputTokens: matched.reduce((sum, entry) => sum + entry.outputTokens, 0),
+      costUsd,
+      quotaPercent: quota !== null && windowCostUsd > 0 ? windowCostUsd / quota.usdPerPercent : null,
+    };
+  });
+
+  return rows.sort((a, b) => {
+    if (a.reported !== b.reported) return a.reported ? -1 : 1;
+    return b.costUsd - a.costUsd;
+  });
+}
+
+/** 「開始から」の経過。1時間未満は分だけ、それ以上は「1時間18分」の形。1分未満は「1分未満」 */
+export function formatSessionElapsed(startedAt: string, nowMs: number): string {
+  const elapsedMs = nowMs - new Date(startedAt).getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 60_000) return "1分未満";
+  const totalMinutes = Math.floor(elapsedMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}分`;
+  if (hours >= 24) return `${Math.floor(hours / 24)}日${hours % 24}時間`;
+  return minutes === 0 ? `${hours}時間` : `${hours}時間${minutes}分`;
+}

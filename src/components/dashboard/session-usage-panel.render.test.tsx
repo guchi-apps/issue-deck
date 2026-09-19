@@ -71,6 +71,63 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
+  const liveSession = {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-3084",
+    repository: "issue-deck",
+    issueNumber: 3084,
+    prNumber: null,
+    title: "AI使用量表示に現在のセッション使用状況を追加",
+    agent: "claude" as const,
+    statusLabel: "入力を待っています",
+    statusTone: "waiting" as const,
+    startedAt: "2026-08-30T02:00:00.000Z",
+    models: ["claude-opus-5"],
+    reported: true,
+    responses: 141,
+    contextTokens: 12_400_000,
+    outputTokens: 1_000,
+    costUsd: 7.35,
+    quotaPercent: 11.23,
+  };
+
+  it("実行中のセッションを画面のいちばん上に、金額・5時間枠の割合（小数点1位）付きで出す（#3084）", () => {
+    const onOpenIssue = vi.fn();
+    renderPanel(
+      {
+        ...response([entry()]),
+        currentSessions: [
+          liveSession,
+          { ...liveSession, issueNumber: 3027, tmuxSessionName: "issue-deck-issue-3027", reported: false, costUsd: 0, title: null },
+        ],
+      },
+      { onOpenIssue },
+    );
+    const section = screen.getByRole("region", { name: "実行中のセッション" });
+    // プラン枠より上
+    expect(
+      section.compareDocumentPosition(screen.getByText("Claude プラン枠")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(within(section).getByText("2本・計", { exact: false })).toBeTruthy();
+    expect(within(section).getByText("AI使用量表示に現在のセッション使用状況を追加")).toBeTruthy();
+    expect(within(section).getAllByText("入力を待っています")).toHaveLength(2);
+    expect(within(section).getByText("5時間枠の約11.2%")).toBeTruthy();
+    expect(within(section).getByText("集計待ち（5分おきに報告）")).toBeTruthy();
+    fireEvent.click(within(section).getAllByTitle("Issueを開く")[0]);
+    expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 3084, null);
+  });
+
+  it("実行中のセッションが無ければ1行だけ出す（#3084）", () => {
+    renderPanel({ ...response([entry()]), currentSessions: [] });
+    expect(screen.getByText("いま実行中のセッションはありません")).toBeTruthy();
+  });
+
+  it("スマホでも応答数・コンテキストを5時間枠の割合と並べて出す（#3084）", () => {
+    renderPanel({ ...response([entry()]), currentSessions: [liveSession] }, { compact: true });
+    const section = screen.getByRole("region", { name: "実行中のセッション" });
+    expect(within(section).getByText("141応答　コンテキスト 12M", { normalizer: (text) => text })).toBeTruthy();
+  });
+
   // #3062。「アプリ内AI機能別」は削除した。内訳カードはこの並びの3枚だけ
   it("内訳はリポジトリ別・セッション種別別・Issue・PR別の順で、アプリ内AI機能別は出さない", () => {
     renderPanel(response([entry()]));

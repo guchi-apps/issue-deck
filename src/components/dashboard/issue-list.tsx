@@ -12,6 +12,7 @@ import {
   Clock,
   Compass,
   ExternalLink,
+  GitMerge,
   ListChecks,
   Loader2,
   Lock,
@@ -77,7 +78,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
-import { isApprovalPending } from "@/lib/github/approval-labels";
+import { checkUserReason, isApprovalPending } from "@/lib/github/approval-labels";
 import {
   formatCodeReviewListCount,
   summarizeCodeReviewFindingProgress,
@@ -850,6 +851,11 @@ export function IssueList({
     const planPending = planPendingIssueIds.has(issue.id);
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
+    // 自動マージされずPRのマージを待っている行（#3083）。「Remote」しか出ないと、なぜ確認が
+    // 要るのかが一覧から読めなかった。押した先はIssue詳細（「自動マージされなかった理由」と
+    // マージボタンがある）で、計画・質問の返事待ちがあればそちらを優先して橙を1つに保つ
+    const mergePending =
+      checkUserReason(issue.labels) === "merge" && !planPending && !questionPending;
     /**
      * 右上の進捗バッジ（`WorkflowStepBadge`）が回答待ちを言うか（#2309）。**言うなら
      * `QuestionStateBadge`の「回答待ち」は出さない**——同じ行の左右で同じことを2回言わせない
@@ -1078,6 +1084,23 @@ export function IssueList({
                 >
                   <ScrollText />
                   計画を承認
+                </Button>
+              )}
+              {mergePending && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
+                  title="自動マージされなかったPRをマージする"
+                  aria-label={`#${issue.number}のPRをマージする`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOptimisticSelectedId(issue.id);
+                    onSelectIssue(issue);
+                  }}
+                >
+                  <GitMerge />
+                  PRをマージ
                 </Button>
               )}
               {/* 走っているセッションを一覧から開く（#1915）。**ラベル行の右端に置く**——

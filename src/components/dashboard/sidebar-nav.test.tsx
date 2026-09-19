@@ -39,6 +39,7 @@ function renderSidebar(
     releaseActivity = null,
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
+    knowledgePromotionCount = null,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
@@ -47,6 +48,7 @@ function renderSidebar(
     releaseActivity?: ReleaseActivityCounts | null;
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
+    knowledgePromotionCount?: number | null;
   } = {},
 ) {
   render(
@@ -62,6 +64,7 @@ function renderSidebar(
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
       onSelectKnowledge={() => {}}
+      knowledgePromotionCount={knowledgePromotionCount}
       onLaunchNewApp={() => {}}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
@@ -150,6 +153,36 @@ function pullRequestNavItem(view: PullRequestViewId) {
 }
 
 afterEach(() => cleanup());
+
+/** 「共通知識」の行のボタン。行全体でなく、件数の丸を見るために`span:last-child`から読む */
+function knowledgeNavItem() {
+  return screen.getByText("共通知識").closest("button") as HTMLElement;
+}
+
+describe("SidebarNav 共通知識の反映PR（#3082）", () => {
+  it("未マージの反映PRがあれば件数をオレンジの丸で出す", () => {
+    renderSidebar({ all: 4, "in-progress": 3, completed: 0 }, NAV_COUNTS, {
+      knowledgePromotionCount: 1,
+    });
+
+    const badge = knowledgeNavItem().querySelector("span:last-child");
+    expect(badge?.textContent).toBe("1");
+    expect(badge?.className).toContain("bg-amber-500");
+    expect(knowledgeNavItem().getAttribute("title")).toContain("反映PRが1件");
+  });
+
+  it("0件・未取得なら数字も丸も出さない", () => {
+    for (const count of [0, null]) {
+      cleanup();
+      renderSidebar({ all: 4, "in-progress": 3, completed: 0 }, NAV_COUNTS, {
+        knowledgePromotionCount: count,
+      });
+
+      expect(knowledgeNavItem().textContent).toBe("共通知識");
+      expect(knowledgeNavItem().innerHTML).not.toContain("bg-amber-500");
+    }
+  });
+});
 
 describe("SidebarNav", () => {
   it("実行中のPRは件数を出す", () => {

@@ -63,7 +63,16 @@ type MobileBottomNavViewProps = {
    * （PCの左メニュー「リリース履歴」行と同じ材料）。
    */
   releaseUncheckedCount?: number | null;
+  /**
+   * 「ホーム」タブのアイコンに重ねるユーザーの確認待ち件数（#3080）。ホームのメニュー・PCの
+   * 左メニューの「ユーザーの確認待ち」と同じ数（確認待ちIssue＋ユーザーがマージするPR）を
+   * `issue-deck-shell.tsx`から受け取る。**`null`・`0`は何も出さない**。
+   */
+  checkUserCount?: number | null;
 };
+
+// 「ホーム」のバッジはこれを超えたら`99+`にする。3桁になると丸が広がって隣のタブへ寄る
+const CHECK_USER_BADGE_MAX = 99;
 
 /**
  * スマホのフッター（#1436・#1638・#2724・#2811）。
@@ -95,6 +104,7 @@ export function MobileBottomNavView({
   onSelect,
   mergePending = null,
   releaseUncheckedCount = null,
+  checkUserCount = null,
 }: MobileBottomNavViewProps) {
   // アイコンに重ねるのは合計だけ（#2055）。1枠に内訳2つは収まらず、収めるには
   // フッターを56px→68pxへ伸ばすことになる。内訳はタブを開いた「ブランチ」画面が持ち、
@@ -102,6 +112,7 @@ export function MobileBottomNavView({
   const pendingCount = mergePending?.total ?? 0;
   const pendingLabel = describeReleaseMergePending(mergePending);
   const uncheckedCount = releaseUncheckedCount ?? 0;
+  const waitingCount = checkUserCount ?? 0;
 
   return (
     <nav className="flex shrink-0 border-t bg-background md:hidden">
@@ -109,10 +120,14 @@ export function MobileBottomNavView({
         const showsMergePendingBadge = id === "flow" && pendingCount > 0;
         // 「リリース履歴」画面の「未確認」と同じ材料（#2951）。PCの左メニュー「リリース履歴」行と揃える
         const showsUncheckedBadge = id === "release-history" && uncheckedCount > 0;
-        const showsBadge = showsMergePendingBadge || showsUncheckedBadge;
-        const badgeLabel = showsMergePendingBadge
-          ? pendingLabel
-          : `未確認のリリースが${uncheckedCount}件あります`;
+        // ホームのメニューの「ユーザーの確認待ち」と同じ数（#3080）。どの画面にいても見落とさないため
+        const showsCheckUserBadge = id === "home" && waitingCount > 0;
+        const showsBadge = showsMergePendingBadge || showsUncheckedBadge || showsCheckUserBadge;
+        const badgeLabel = showsCheckUserBadge
+          ? `ユーザーの確認待ちが${waitingCount}件あります`
+          : showsMergePendingBadge
+            ? pendingLabel
+            : `未確認のリリースが${uncheckedCount}件あります`;
 
         return (
           <button
@@ -136,6 +151,14 @@ export function MobileBottomNavView({
                 ボタン全体を基準にすると、枠の右上（＝隣のタブとの境目）へ飛ぶ */}
             <span className="relative inline-flex">
               <Icon className="size-5" />
+              {showsCheckUserBadge && (
+                <NotificationBadge
+                  count={waitingCount}
+                  hasError={false}
+                  max={CHECK_USER_BADGE_MAX}
+                  className="-top-1.5 -right-2.5"
+                />
+              )}
               {showsMergePendingBadge && (
                 <NotificationBadge
                   count={pendingCount}

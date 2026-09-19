@@ -6,6 +6,7 @@ const repositoryFindMany = vi.fn();
 const issueFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchPullRequest = vi.fn();
+const listDispatchSessions = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get requireUserId() {
@@ -40,6 +41,12 @@ vi.mock("@/lib/claude/usage", () => ({
   },
 }));
 vi.mock("@/lib/dispatch/codex-usage", () => ({ getCodexUsage: vi.fn().mockResolvedValue(null) }));
+
+vi.mock("@/lib/dispatch/sessions", () => ({
+  get listDispatchSessions() {
+    return listDispatchSessions;
+  },
+}));
 
 vi.mock("@/lib/github/app-auth", () => ({
   get getInstallationToken() {
@@ -116,6 +123,7 @@ beforeEach(() => {
   repositoryFindMany.mockResolvedValue([]);
   issueFindMany.mockResolvedValue([]);
   fetchClaudeUsage.mockResolvedValue(null);
+  listDispatchSessions.mockResolvedValue([]);
   process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 });
 
@@ -125,6 +133,77 @@ afterEach(() => {
 });
 
 describe("GET /api/session-usage", () => {
+  it("生きているセッションごとに、始まってからの使用量を返す（#3084）", async () => {
+    listDispatchSessions.mockResolvedValue([
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-2686",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2686,
+        state: "ALIVE",
+        firstSeenAt: "2026-08-30T00:30:00.000Z",
+        activity: "WAITING_INPUT",
+        activityAt: "2026-08-30T02:50:00.000Z",
+        step: null,
+        stepAt: null,
+        stepSeenAt: null,
+        codexThreadKnown: null,
+        waitingTool: null,
+        waitingTarget: null,
+        models: [],
+      },
+      // 終わったセッションは出さない
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-1",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 1,
+        state: "EXITED",
+        firstSeenAt: "2026-08-30T00:30:00.000Z",
+        models: [],
+      },
+    ]);
+    // 期間の集計と実行中のセッションの2回引く。どちらも同じ行を返してよい
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 3, responses: 12 })]);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(body.currentSessions).toHaveLength(1);
+    expect(body.currentSessions[0]).toMatchObject({
+      issueNumber: 2686,
+      repository: "issue-deck",
+      statusLabel: "入力を待っています",
+      statusTone: "waiting",
+      reported: true,
+      costUsd: 3,
+      responses: 12,
+    });
+    // 実行中のセッションの取得は、期間ではなくセッションの開始時刻から引く
+    expect(sessionUsageFindMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          kind: "implementation",
+          endedAt: { gte: new Date("2026-08-30T00:30:00.000Z") },
+        }),
+      }),
+    );
+  });
+
+  it("セッション一覧の取得に失敗しても、使用量本体はそのまま返す（#3084）", async () => {
+    listDispatchSessions.mockRejectedValue(new Error("db down"));
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow()]);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.currentSessions).toEqual([]);
+    expect(body.byIssue).toHaveLength(1);
+    errorSpy.mockRestore();
+  });
+
   it("issueNumberを持つ行は、DBのIssueテーブルからタイトルを引く（GitHub APIは呼ばない）", async () => {
     sessionUsageFindMany.mockResolvedValue([sessionUsageRow()]);
     repositoryFindMany.mockResolvedValue([

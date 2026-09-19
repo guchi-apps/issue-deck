@@ -4,7 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
-import type { QuotaEstimate, SessionUsageSummary } from "@/lib/session-usage-view";
+import type {
+  CurrentSessionUsage,
+  QuotaEstimate,
+  SessionUsageSummary,
+} from "@/lib/session-usage-view";
 
 export type SessionUsageResponse = SessionUsageSummary & {
   /** AIごとのプラン枠メーター。取得できなければnull */
@@ -13,6 +17,11 @@ export type SessionUsageResponse = SessionUsageSummary & {
   planNotConfigured: { claude: boolean; codex: boolean };
   /** 5時間枠の実測換算レート（#2988）。求まらなければnull */
   quotaEstimate: QuotaEstimate | null;
+  /**
+   * いまサブPCで生きているセッションごとの使用量（#3084）。期間には連動しない。
+   * 古いサーバーの応答では無いことがあるので、画面は無ければ空として扱う
+   */
+  currentSessions?: CurrentSessionUsage[];
 };
 
 type UseSessionUsageResult = {
