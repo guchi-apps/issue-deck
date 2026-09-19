@@ -594,6 +594,57 @@ describe("計画の承認への入口（#2061）", () => {
   });
 });
 
+// #3083: 自動マージされなかった行に「Remote」しか出ず、なぜ確認が要るのかが読めなかった
+describe("PRのマージへの入口（#3083）", () => {
+  const mergeLabels = [{ name: "00.check-user" }, { name: "01.check-merge" }] as IssueLabel[];
+
+  it("理由が01.check-mergeの行に「PRをマージ」を出し、押すとそのIssueを開く", () => {
+    const onSelectIssue = vi.fn();
+    renderList({
+      onSelectIssue,
+      issues: [makeIssue({ number: 1, labels: mergeLabels })],
+      dispatch: makeDispatch([makeSession({ activity: "WORKING" })]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "#1のPRをマージする" }));
+
+    expect(onSelectIssue).toHaveBeenCalledTimes(1);
+    expect(onSelectIssue.mock.calls[0][0].number).toBe(1);
+  });
+
+  it("00.check-userが無ければ出さない", () => {
+    renderList({
+      issues: [makeIssue({ number: 1, labels: [{ name: "01.check-merge" }] as IssueLabel[] })],
+    });
+
+    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+  });
+
+  it("理由がマージ以外なら出さない", () => {
+    renderList({
+      issues: [
+        makeIssue({
+          number: 1,
+          labels: [{ name: "00.check-user" }, { name: "01.check-blocked" }] as IssueLabel[],
+        }),
+      ],
+    });
+
+    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+  });
+
+  /** 行の中でオレンジが2つ並ぶと、どちらを押せばよいのか分からなくなる */
+  it("計画の返事待ちがあれば、そちらを優先して出さない", () => {
+    renderList({
+      issues: [makeIssue({ number: 1, labels: mergeLabels })],
+      dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
+    });
+
+    expect(screen.getByRole("button", { name: "#1の計画を承認する" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+  });
+});
+
 // #1915: 実装オプションでラベル行が折り返し、行の右端に置く場所が無かった
 describe("一覧のカードに出すラベル（#1915）", () => {
   const labeled = [
