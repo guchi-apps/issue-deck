@@ -41,6 +41,7 @@ import {
   isPullRequestViewAttention,
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
+import { describePromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
@@ -90,6 +91,8 @@ type MobileHomeScreenProps = {
   nightlyRunQueuedCount: number | null;
   /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectKnowledge: () => void;
+  /** 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じく行の件数と丸に使う */
+  knowledgePromotionCount?: number | null;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -177,6 +180,7 @@ export function MobileHomeScreenView({
   onSelectNightlyRun,
   nightlyRunQueuedCount,
   onSelectKnowledge,
+  knowledgePromotionCount = null,
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -499,14 +503,22 @@ export function MobileHomeScreenView({
                 count={nightlyRunQueuedCount}
                 title="次の5時間枠の予定、直近の結果を見る"
               />
-              {/* 共通知識（#2912）。**件数は出さない**（PCの左メニューと同じ理由。ここから
-                  押せる操作が無いものに数字を出すと、片付けると減るものに見える） */}
+              {/* 共通知識（#2912）。出す件数は**マージ待ちの反映PRだけ**（#3082。PCの左メニューと
+                  同じ。未判定の知見メモの数は、ここから押せる操作が無いので出さない） */}
               <MobileNavRow
                 label="共通知識"
                 icon={BookOpen}
                 onClick={onSelectKnowledge}
-                count={null}
-                title="フリートの知見メモと、共有知識にたまった知見を見る"
+                count={
+                  knowledgePromotionCount && knowledgePromotionCount > 0
+                    ? knowledgePromotionCount
+                    : null
+                }
+                emphasis={(knowledgePromotionCount ?? 0) > 0 ? "attention" : "none"}
+                title={describePromotionPullRequests(
+                  "フリートの知見メモと、共有知識にたまった知見を見る",
+                  knowledgePromotionCount,
+                )}
               />
             </ul>
           </div>

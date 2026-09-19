@@ -239,6 +239,26 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(row.querySelector("span:last-child")?.className).not.toContain("bg-amber-500");
   });
 
+  // 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じ出し方
+  it("共通知識の行に、未マージの反映PRの件数をオレンジの丸で出す", () => {
+    renderHome({ knowledgePromotionCount: 2 });
+
+    const row = screen.getByRole("button", { name: /共通知識/ });
+    expect(row.textContent).toBe("共通知識2");
+    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+  });
+
+  it("共通知識の反映PRが0件・未取得なら数字も丸も出さない", () => {
+    for (const count of [0, null]) {
+      cleanup();
+      renderHome({ knowledgePromotionCount: count });
+
+      const row = screen.getByRole("button", { name: /共通知識/ });
+      expect(row.textContent).toBe("共通知識");
+      expect(row.innerHTML).not.toContain("bg-amber-500");
+    }
+  });
+
   it("「ユーザーの作業待ち」を強調するのは、いま実行できる手作業があるときだけ", () => {
     const { rerender } = renderHome({
       navCounts: { ...NAV_COUNTS, "manual-step": 2 },

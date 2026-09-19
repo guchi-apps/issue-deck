@@ -4002,7 +4002,16 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
   ステップ（`BRANCH="knowledge/promote-$(date -u +%Y%m%d-%H%M%S)"`）の写しで、**未マージの
   反映PRが残っている間、同ワークフローは次回の判定を丸ごと見送る**（同じ`knowledge/*.md`を
   触るPRが並んでコンフリクトするのを避けるため）。**向こうのブランチ名を変えたらここも変える**
-  （`PROMOTION_COLLECT_LIMIT`と同じ「写しを持つ」構造）
+  （`PROMOTION_COLLECT_LIMIT`と同じ「写しを持つ」構造）。接頭辞と`guchi-apps/docs`の定数は
+  クライアントからも読めるよう[`lib/knowledge-promotion-pr.ts`](../src/lib/knowledge-promotion-pr.ts)
+  に置き、`knowledge-api.ts`はそこからimportする
+- **反映PRは、PR一覧の「実行中」「マージ待ち」から外し、左メニュー「共通知識」の件数で見る**
+  （#3082）。除外は`pull-request-list.ts`の`filterPullRequestsByView`（`in-progress`・`completed`）
+  の1か所で、**一覧・左メニューの件数・オレンジの丸・ベルはどれもここを通る**ので個別に外す
+  必要は無い。「すべてのPR」には残す。「共通知識」行の件数は取得済みのPR一覧から
+  `countOpenPromotionPullRequests`で数える（`/api/knowledge`は取得に十数秒かかり、画面を開くまで
+  数が出ないため使わない）。0件・未取得のときは数字も丸も出さない。**未判定の知見メモの数は
+  従来どおり出さない**（#2912）
 - **出典Issueの抽出は、PR本文の`## 出典Issue`見出し以降に限定する**（`parsePromotionSourceIssues`）。
   本文の前半はClaudeが自由記述で書くため、`出典: issue-deck#2350, aide-bot#51, #56`のような
   短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
