@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildCandidate,
   buildOpenPromotionPullRequest,
+  buildPromotionKnowledgeFiles,
+  diffKnowledgeSections,
+  isKnowledgeFilePath,
   CANDIDATE_MARKER,
   countByFile,
   daysSinceJstDate,
@@ -532,6 +535,7 @@ describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
         htmlUrl: "https://github.com/guchi-apps/docs/pull/134",
         createdAt: "2026-09-14T00:00:00Z",
         body,
+        files: [],
       }),
     ).toEqual({
       number: 134,
@@ -550,6 +554,138 @@ describe("parsePromotionSourceIssues / buildOpenPromotionPullRequest", () => {
           htmlUrl: "https://github.com/guchi-apps/aide/issues/268",
         },
       ],
+      knowledgeChanges: [],
     });
+  });
+});
+
+describe("diffKnowledgeSections", () => {
+  const existing = [
+    "# 共通の落とし穴",
+    "",
+    "## 既存の知見A",
+    "",
+    "- **結論**: Aの結論",
+    "- **確認日**: 2026-08-01",
+    "",
+    "## 既存の知見B",
+    "",
+    "- **結論**: Bの結論",
+    "",
+  ].join("\n");
+
+  const newSection = [
+    "## 新しい知見C",
+    "",
+    "- **結論**: Cの結論。",
+    "  折り返した続き。",
+    "- **確認日**: 2026-09-18",
+    "",
+  ].join("\n");
+
+  it("見出しが新しく現れたセクションは「追加」になり、結論を取る", () => {
+    const items = diffKnowledgeSections("knowledge/a.md", existing, `${existing}\n${newSection}`);
+    expect(items).toEqual([
+      { kind: "added", title: "新しい知見C", summary: "Cの結論。折り返した続き。" },
+    ]);
+  });
+
+  it("既存の見出しの中身が変わったものは「更新」になる（追記もここ）", () => {
+    const head = existing.replace("- **確認日**: 2026-08-01", "- **確認日**: 2026-08-01\n- **追記**: 増えた行");
+    expect(diffKnowledgeSections("knowledge/a.md", existing, head)).toEqual([
+      { kind: "updated", title: "既存の知見A", summary: "Aの結論" },
+    ]);
+  });
+
+  it("新規ファイルは比較元を空文字にして、全セクションが「追加」になる", () => {
+    const items = diffKnowledgeSections("knowledge/new.md", "", `# 新規\n\n${newSection}`);
+    expect(items.map((item) => [item.kind, item.title])).toEqual([["added", "新しい知見C"]]);
+  });
+
+  it("見出しごと無くなったセクションは「削除」になり、末尾に並ぶ", () => {
+    const head = existing.split("## 既存の知見B")[0] + newSection;
+    expect(diffKnowledgeSections("knowledge/a.md", existing, head).map((i) => [i.kind, i.title])).toEqual([
+      ["added", "新しい知見C"],
+      ["removed", "既存の知見B"],
+    ]);
+  });
+
+  it("行末の空白と前後の空行だけの差は変更として数えない", () => {
+    const head = existing.replace("- **結論**: Aの結論", "- **結論**: Aの結論   ") + "\n\n\n";
+    expect(diffKnowledgeSections("knowledge/a.md", existing, head)).toEqual([]);
+  });
+
+  it("コードフェンスの中の`##`は見出しにせず、中だけが変わったら「更新」になる", () => {
+    const base = ["## 手順", "", "```md", "## これは見出しではない", "```", ""].join("\n");
+    const head = ["## 手順", "", "```md", "## これは見出しではない", "追加した行", "```", ""].join("\n");
+    expect(diffKnowledgeSections("knowledge/a.md", base, head).map((i) => [i.kind, i.title])).toEqual([
+      ["updated", "手順"],
+    ]);
+  });
+
+  it("同じ見出しが2つあっても出現順で対にする", () => {
+    const base = "## 同名\n\n本文1\n\n## 同名\n\n本文2\n";
+    const head = "## 同名\n\n本文1\n\n## 同名\n\n本文2を直した\n";
+    expect(diffKnowledgeSections("knowledge/a.md", base, head)).toHaveLength(1);
+  });
+});
+
+describe("isKnowledgeFilePath / buildPromotionKnowledgeFiles", () => {
+  it("knowledge直下のMarkdownだけを共通知識として数え、索引のREADME.mdは除く", () => {
+    expect(isKnowledgeFilePath("knowledge/web-push.md")).toBe(true);
+    expect(isKnowledgeFilePath("knowledge/README.md")).toBe(false);
+    expect(isKnowledgeFilePath("knowledge/sub/x.md")).toBe(false);
+    expect(isKnowledgeFilePath("CLAUDE.md")).toBe(false);
+    expect(isKnowledgeFilePath("standards/x.md")).toBe(false);
+  });
+
+  it("README.mdなど対象外のファイルは一覧に混ぜない", () => {
+    const files = buildPromotionKnowledgeFiles([
+      {
+        path: "knowledge/README.md",
+        changeType: "MODIFIED",
+        additions: 4,
+        deletions: 0,
+        texts: { base: "## 索引\n", head: "## 索引\n追加\n" },
+      },
+      {
+        path: "knowledge/a.md",
+        changeType: "ADDED",
+        additions: 3,
+        deletions: 0,
+        texts: { base: "", head: "## 新知見\n\n- **結論**: 結論\n" },
+      },
+    ]);
+    expect(files.map((f) => f.path)).toEqual(["knowledge/a.md"]);
+    expect(files[0].items).toEqual([{ kind: "added", title: "新知見", summary: "結論" }]);
+  });
+
+  it("本文を読めなかったファイルは、行数だけを持つ形で残す（落とさない）", () => {
+    expect(
+      buildPromotionKnowledgeFiles([
+        { path: "knowledge/big.md", changeType: "MODIFIED", additions: 12, deletions: 1, texts: null },
+      ]),
+    ).toEqual([{ path: "knowledge/big.md", items: [], additions: 12, deletions: 1 }]);
+  });
+
+  it("最初の見出しより前だけが変わったファイルも、行数だけで残す", () => {
+    const files = buildPromotionKnowledgeFiles([
+      {
+        path: "knowledge/a.md",
+        changeType: "MODIFIED",
+        additions: 1,
+        deletions: 0,
+        texts: { base: "# 題\n\n## 知見\n本文\n", head: "# 題\n前置きを足した\n\n## 知見\n本文\n" },
+      },
+    ]);
+    expect(files).toEqual([{ path: "knowledge/a.md", items: [], additions: 1, deletions: 0 }]);
+  });
+
+  it("行数も0で見出しも動いていないファイルは出さない", () => {
+    expect(
+      buildPromotionKnowledgeFiles([
+        { path: "knowledge/a.md", changeType: "MODIFIED", additions: 0, deletions: 0, texts: { base: "x", head: "x" } },
+      ]),
+    ).toEqual([]);
   });
 });

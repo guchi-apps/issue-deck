@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  ChevronDown,
   ExternalLink,
   GitMerge,
   GitPullRequest,
@@ -34,6 +35,8 @@ import {
   type KnowledgeCandidate,
   type KnowledgeSection,
   type OpenPromotionPullRequest,
+  type PromotionKnowledgeFile,
+  type PromotionKnowledgeItem,
 } from "@/lib/knowledge-board";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -359,6 +362,8 @@ function PromotionPullRequestRow({
         </div>
       )}
 
+      <PromotionKnowledgeList changes={pr.knowledgeChanges} />
+
       <div className="mt-1.5 flex items-center gap-3">
         <a
           href={pr.htmlUrl}
@@ -372,6 +377,136 @@ function PromotionPullRequestRow({
         <PromotionPullRequestActions pr={pr} onDone={onResolved} />
       </div>
     </li>
+  );
+}
+
+/** 一覧に最初から出すファイル数。超えたぶんは「あとNファイルを表示」で開く */
+const KNOWLEDGE_FILES_SHOWN = 5;
+
+const KNOWLEDGE_KIND_LABEL: Record<PromotionKnowledgeItem["kind"], string> = {
+  added: "追加",
+  updated: "更新",
+  removed: "削除",
+};
+
+/**
+ * 暖色（amber）は「人の対応待ち」専用に空けてあるので使わない。追加は緑、更新は青、削除は赤。
+ * 削除は反映PRではまず起きないが、起きたときに追加と見分けが付かないのは危険なので色を分ける。
+ */
+const KNOWLEDGE_KIND_CLASS: Record<PromotionKnowledgeItem["kind"], string> = {
+  added: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  updated: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300",
+  removed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+};
+
+/** 「追加3・更新1」のように、0件の種別は省いた内訳 */
+function describeKnowledgeCounts(items: PromotionKnowledgeItem[]): string {
+  return (["added", "updated", "removed"] as const)
+    .map((kind) => [kind, items.filter((item) => item.kind === kind).length] as const)
+    .filter(([, count]) => count > 0)
+    .map(([kind, count]) => `${KNOWLEDGE_KIND_LABEL[kind]}${count}`)
+    .join("・");
+}
+
+/**
+ * 反映PRをマージすると共通知識へ何が入るかの一覧（#3107）。
+ *
+ * それまでは出典Issueの番号しか出ず、マージの可否を決める材料が「PRを開いて確認する」しか
+ * なかった。PRの差分から取り出した`##`セクション（見出し＋結論）を、ファイルごとにまとめて出す。
+ * **既定は開いた状態**にする——押さないと中身が読めない一覧では、マージ前に読まれない。
+ * 長くなりうるので、ファイルは`KNOWLEDGE_FILES_SHOWN`件までにして残りを畳む。
+ */
+export function PromotionKnowledgeList({ changes }: { changes: PromotionKnowledgeFile[] }) {
+  const [open, setOpen] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+  if (changes.length === 0) return null;
+
+  const items = changes.flatMap((file) => file.items);
+  const shown = showAll ? changes : changes.slice(0, KNOWLEDGE_FILES_SHOWN);
+  const hidden = changes.slice(KNOWLEDGE_FILES_SHOWN);
+  const hiddenItemCount = hidden.reduce((n, file) => n + file.items.length, 0);
+
+  return (
+    <div className="mt-2.5 border-t pt-2" data-testid="promotion-knowledge-list">
+      <button
+        type="button"
+        className="flex w-full flex-wrap items-center gap-x-2 text-left text-xs font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ChevronDown
+          className={cn("size-3 text-muted-foreground transition-transform", !open && "-rotate-90")}
+          aria-hidden
+        />
+        マージされる知識
+        <span className="font-mono text-[11px] font-normal text-muted-foreground">
+          {items.length > 0 ? `${items.length}件（${describeKnowledgeCounts(items)}）／` : ""}
+          {changes.length}ファイル
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-1">
+          {shown.map((file) => (
+            <PromotionKnowledgeFileBlock key={file.path} file={file} />
+          ))}
+          {hidden.length > 0 && (
+            <button
+              type="button"
+              className="mt-2 text-[11px] text-indigo-700 hover:underline dark:text-indigo-300"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll
+                ? "折りたたむ"
+                : `あと${hidden.length}ファイル${hiddenItemCount > 0 ? `（${hiddenItemCount}件）` : ""}を表示`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromotionKnowledgeFileBlock({ file }: { file: PromotionKnowledgeFile }) {
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-baseline gap-1.5 border-b pb-0.5 text-[11px] text-muted-foreground">
+        <span className="min-w-0 break-all font-mono">{file.path}</span>
+        {file.items.length > 0 && <span className="ml-auto shrink-0">{file.items.length}件</span>}
+      </div>
+      {file.items.length === 0 ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          見出しの単位では取り出せませんでした（
+          <span className="font-mono">
+            +{file.additions} −{file.deletions}行
+          </span>
+          ）。PRを開いて確認してください。
+        </p>
+      ) : (
+        <ul>
+          {file.items.map((item, index) => (
+            <li key={`${item.kind}-${index}-${item.title}`} className="border-b border-dashed py-1.5 last:border-b-0">
+              <div className="flex items-start gap-1.5 text-xs font-semibold leading-snug">
+                <span
+                  className={cn(
+                    "mt-px shrink-0 rounded-sm px-1.5 py-px text-[10px] font-bold",
+                    KNOWLEDGE_KIND_CLASS[item.kind],
+                  )}
+                >
+                  {KNOWLEDGE_KIND_LABEL[item.kind]}
+                </span>
+                <span className="min-w-0 break-words">{item.title}</span>
+              </div>
+              {item.summary && (
+                <p className="mt-0.5 line-clamp-2 pl-9 text-[11px] leading-normal text-muted-foreground">
+                  {item.summary}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
