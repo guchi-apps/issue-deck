@@ -1,10 +1,16 @@
 import {
+  NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
   NEXT_WINDOW_RUN_LEAD_MINUTES_DEFAULT,
+  parseNextWindowRunFloorPercent,
   parseNextWindowRunIntervalMinutes,
   parseNextWindowRunLeadMinutes,
 } from "@/lib/app-settings";
-import { fetchClaudeUsage, peekClaudeFiveHourWindow } from "@/lib/claude/usage";
+import {
+  fetchClaudeUsage,
+  peekClaudeFiveHourWindow,
+  toClaudeWindowReading,
+} from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import type { ClaudeWindowSnapshot, NextWindowRunSettings } from "@/lib/next-window-run";
 
@@ -22,6 +28,8 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
       nextWindowRunEnabled: true,
       nextWindowRunLeadMinutes: true,
       nextWindowRunIntervalMinutes: true,
+      nextWindowRunFiveHourFloorPercent: true,
+      nextWindowRunWeeklyFloorPercent: true,
     },
   });
   return {
@@ -32,6 +40,12 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
     intervalMinutes:
       parseNextWindowRunIntervalMinutes(row?.nextWindowRunIntervalMinutes) ??
       NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
+    fiveHourFloorPercent:
+      parseNextWindowRunFloorPercent(row?.nextWindowRunFiveHourFloorPercent) ??
+      NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+    weeklyFloorPercent:
+      parseNextWindowRunFloorPercent(row?.nextWindowRunWeeklyFloorPercent) ??
+      NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
   };
 }
 
@@ -49,12 +63,7 @@ export async function readClaudeWindowSnapshot(): Promise<ClaudeWindowSnapshot |
   if (!token) return null;
   try {
     const usage = await fetchClaudeUsage(token);
-    const window = usage.windows.find((entry) => entry.key === "5h");
-    if (!window) return null;
-    return {
-      resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
-      usedPercent: window.usedPercent,
-    };
+    return toClaudeWindowReading(usage.windows);
   } catch {
     // 非公開ヘッダに頼っているので、取れない日があっても画面と起動処理は止めない
     return null;

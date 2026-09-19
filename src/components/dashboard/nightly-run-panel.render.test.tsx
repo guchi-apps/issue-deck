@@ -34,13 +34,16 @@ function entry(overrides: Partial<NightlyRunEntryView> = {}): NightlyRunEntryVie
 function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyRunState {
   return {
     nextWindow: {
-      settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10 },
+      settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
       window: {
         phase: "waiting",
         // 2026-09-18 08:40 JST
         resetsAt: "2026-09-17T23:40:00.000Z",
         opensAt: "2026-09-17T22:40:00.000Z",
         usedPercent: 62,
+        weeklyUsedPercent: null,
+        weeklyResetsAt: null,
+        quotaBlock: null,
         runKey: "2026-09-18 08:40",
       },
       queued: [entry()],
@@ -100,7 +103,7 @@ describe("NightlyRunPanel", () => {
   it("枠を取っていなければメーターを出さない", () => {
     renderPanel(
       state({
-        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10 },
+        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
         window: null,
         queued: [],
       }),
@@ -143,6 +146,46 @@ describe("NightlyRunPanel", () => {
     expect(screen.getByText("枠は動いています")).toBeTruthy();
     expect(screen.getByText("08:40")).toBeTruthy();
     expect(screen.getByText(/いまの枠は13:40にリセット/)).toBeTruthy();
+  });
+
+  /** #3100 */
+  it("週間枠のメーターと、下限に触れているときの見送り表示を出す", () => {
+    const base = state();
+    renderPanel(
+      state({
+        settings: {
+          enabled: true,
+          leadMinutes: 60,
+          intervalMinutes: 10,
+          fiveHourFloorPercent: 0,
+          weeklyFloorPercent: 20,
+        },
+        window: {
+          ...base.nextWindow.window!,
+          phase: "open",
+          weeklyUsedPercent: 83,
+          // 2026-09-23 09:00 JST
+          weeklyResetsAt: "2026-09-23T00:00:00.000Z",
+          quotaBlock: { window: "weekly", remainingPercent: 17, floorPercent: 20 },
+        },
+      }),
+    );
+
+    expect(screen.getByText("83%")).toBeTruthy();
+    expect(screen.getAllByText("週間枠")[0].parentElement?.textContent).toContain("9/23 09:00にリセット");
+    expect(screen.getByText("起動を見送り中")).toBeTruthy();
+    expect(screen.getByText(/週間枠の残りが17%で、下限の20%を下回っています/)).toBeTruthy();
+  });
+
+  it("下限を選ぶと送られる", () => {
+    const { onUpdateSettings } = renderPanel();
+
+    expect(screen.getByText("起動しない残り枠の下限")).toBeTruthy();
+    // 下限を設けていない（0）ときは見送り表示を出さない
+    expect(screen.queryByText("起動を見送り中")).toBeNull();
+    expect(screen.getByLabelText("週間枠の下限")).toBeTruthy();
+    expect(screen.getByLabelText("5時間枠の下限")).toBeTruthy();
+    expect(onUpdateSettings).not.toHaveBeenCalled();
   });
 
   it("取得前は骨組みだけ出す", () => {

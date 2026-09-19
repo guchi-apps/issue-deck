@@ -3,9 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   CLAUDE_WINDOW_KEEPALIVE_END_HOUR_DEFAULT,
   CLAUDE_WINDOW_KEEPALIVE_START_HOUR_DEFAULT,
+  NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
   NEXT_WINDOW_RUN_LEAD_MINUTES_DEFAULT,
   parseClaudeWindowKeepAliveHour,
+  parseNextWindowRunFloorPercent,
   parseNextWindowRunIntervalMinutes,
   parseNextWindowRunLeadMinutes,
 } from "@/lib/app-settings";
@@ -74,6 +76,14 @@ export async function PATCH(request: NextRequest) {
       nextWindow.intervalMinutes,
       parseNextWindowRunIntervalMinutes,
     ),
+    fiveHourFloorPercent: readOptionalNumber(
+      nextWindow.fiveHourFloorPercent,
+      parseNextWindowRunFloorPercent,
+    ),
+    weeklyFloorPercent: readOptionalNumber(
+      nextWindow.weeklyFloorPercent,
+      parseNextWindowRunFloorPercent,
+    ),
     keepAliveEnabled: readOptionalBoolean(keepAlive.enabled),
     keepAliveStartHour: readOptionalNumber(keepAlive.startHour, parseClaudeWindowKeepAliveHour),
     keepAliveEndHour: readOptionalNumber(keepAlive.endHour, parseClaudeWindowKeepAliveHour),
@@ -89,6 +99,8 @@ export async function PATCH(request: NextRequest) {
     nextEnabled,
     leadMinutes,
     intervalMinutes,
+    fiveHourFloorPercent,
+    weeklyFloorPercent,
     keepAliveEnabled,
     keepAliveStartHour,
     keepAliveEndHour,
@@ -96,6 +108,8 @@ export async function PATCH(request: NextRequest) {
     nextEnabled?: boolean;
     leadMinutes?: number;
     intervalMinutes?: number;
+    fiveHourFloorPercent?: number;
+    weeklyFloorPercent?: number;
     keepAliveEnabled?: boolean;
     keepAliveStartHour?: number;
     keepAliveEndHour?: number;
@@ -108,6 +122,9 @@ export async function PATCH(request: NextRequest) {
       nextWindowRunEnabled: nextEnabled ?? false,
       nextWindowRunLeadMinutes: leadMinutes ?? NEXT_WINDOW_RUN_LEAD_MINUTES_DEFAULT,
       nextWindowRunIntervalMinutes: intervalMinutes ?? NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
+      nextWindowRunFiveHourFloorPercent:
+        fiveHourFloorPercent ?? NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+      nextWindowRunWeeklyFloorPercent: weeklyFloorPercent ?? NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
       claudeWindowKeepAliveEnabled: keepAliveEnabled ?? false,
       claudeWindowKeepAliveStartHour:
         keepAliveStartHour ?? CLAUDE_WINDOW_KEEPALIVE_START_HOUR_DEFAULT,
@@ -117,6 +134,12 @@ export async function PATCH(request: NextRequest) {
       ...(nextEnabled === undefined ? {} : { nextWindowRunEnabled: nextEnabled }),
       ...(leadMinutes === undefined ? {} : { nextWindowRunLeadMinutes: leadMinutes }),
       ...(intervalMinutes === undefined ? {} : { nextWindowRunIntervalMinutes: intervalMinutes }),
+      ...(fiveHourFloorPercent === undefined
+        ? {}
+        : { nextWindowRunFiveHourFloorPercent: fiveHourFloorPercent }),
+      ...(weeklyFloorPercent === undefined
+        ? {}
+        : { nextWindowRunWeeklyFloorPercent: weeklyFloorPercent }),
       ...(keepAliveEnabled === undefined ? {} : { claudeWindowKeepAliveEnabled: keepAliveEnabled }),
       ...(keepAliveStartHour === undefined
         ? {}
@@ -134,6 +157,12 @@ export async function PATCH(request: NextRequest) {
       intervalMinutes:
         parseNextWindowRunIntervalMinutes(updated.nextWindowRunIntervalMinutes) ??
         NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
+      fiveHourFloorPercent:
+        parseNextWindowRunFloorPercent(updated.nextWindowRunFiveHourFloorPercent) ??
+        NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+      weeklyFloorPercent:
+        parseNextWindowRunFloorPercent(updated.nextWindowRunWeeklyFloorPercent) ??
+        NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
     },
     keepAlive: {
       enabled: updated.claudeWindowKeepAliveEnabled,

@@ -71,6 +71,19 @@ export function parseNextWindowRunIntervalMinutes(value: unknown): number | null
     : null;
 }
 
+// 次枠実行で起動しない「残り枠の下限」（%・#3100）。**残りがこの値を下回っている間は起動を見送る**。
+// 0は制限しない（既定。従来と同じ動き）。自由入力にしないのは、100のような値で無人実行が
+// 永久に止まるのを避けるため（上限は半分に留める）。5時間枠・週間枠で同じ選択肢を使う。
+export const NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS = [0, 10, 20, 30, 40, 50] as const;
+export const NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT = 0;
+
+export function parseNextWindowRunFloorPercent(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS as readonly number[]).includes(value)
+    ? value
+    : null;
+}
+
 // 5時間枠を開けておく（#3032）時間帯の開始・終了（日本時間の時）。既定は7:00〜23:00——夜間は
 // 開けない（寝ている間の枠は次枠実行で使うほうが得なため）。
 export const CLAUDE_WINDOW_KEEPALIVE_START_HOUR_DEFAULT = 7;
