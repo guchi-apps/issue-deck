@@ -17,6 +17,9 @@ type MobilePullRequestDetailScreenProps = {
   error: string | null;
   onRefresh: () => void;
   onMerged: () => void;
+  /** ヘッダーの「…」メニュー（#3161）。`PullRequestDetail`へそのまま中継する */
+  onClosed?: () => void;
+  onUpdated?: () => void;
   onBack: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
@@ -42,6 +45,8 @@ export function MobilePullRequestDetailScreen({
   error,
   onRefresh,
   onMerged,
+  onClosed,
+  onUpdated,
   onBack,
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
@@ -60,6 +65,8 @@ export function MobilePullRequestDetailScreen({
       error={error}
       onRefresh={onRefresh}
       onMerged={onMerged}
+      onClosed={onClosed}
+      onUpdated={onUpdated}
       onCreateFixIssue={onCreateFixIssue}
       onCreatePullRequestFixIssue={onCreatePullRequestFixIssue}
       pullRequestFixRoute={pullRequestFixRoute}

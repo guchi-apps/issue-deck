@@ -19,6 +19,7 @@ import {
   UserMergeRequiredBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
+import { PullRequestActionsMenu } from "@/components/dashboard/pull-request-actions-menu";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestFixIssueBar } from "@/components/dashboard/pull-request-fix-issue-bar";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -57,6 +58,14 @@ type PullRequestDetailProps = {
   error: string | null;
   onRefresh: () => void;
   onMerged: () => void;
+  /**
+   * ヘッダーの「…」メニュー（#3161）。PRをクローズできたとき・編集を保存できたとき。
+   * どちらも渡さない画面ではメニューを出さない。編集後の詳細の取り直しは部品の中で
+   * `onRefresh`を呼んで済ませる（通常の詳細と確認待ちの重ね表示は取得が別のため、
+   * 表示中の側だけを取り直す）ので、`onUpdated`は一覧の取り直しだけでよい。
+   */
+  onClosed?: () => void;
+  onUpdated?: () => void;
   /**
    * 検証結果の「要修正」「要確認」の行から、指摘を新規Issueの下書きにして開く（#2838）。
    * 渡さない画面ではボタンを出さない。起点のリリースPRは表示中の`pullRequest`から渡す。
@@ -162,6 +171,8 @@ export function PullRequestDetail({
   error,
   onRefresh,
   onMerged,
+  onClosed,
+  onUpdated,
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
   pullRequestFixRoute,
@@ -265,6 +276,18 @@ export function PullRequestDetail({
           <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
           更新
         </Button>
+        {onClosed && onUpdated && (
+          <PullRequestActionsMenu
+            pullRequest={pullRequest}
+            body={currentDetail?.body ?? null}
+            issueSuggestions={issueSuggestions}
+            onUpdated={() => {
+              onRefresh();
+              onUpdated();
+            }}
+            onClosed={onClosed}
+          />
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
