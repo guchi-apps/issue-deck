@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   buildRepositoryPieSlices,
@@ -168,8 +169,12 @@ const OUTPUT_COLOR = "#4776e6";
  * `PHASE_COLORS`のどの色とも離れることを確認して選んでいる（datavizスキルの
  * `validate_palette.js`で検証。IssueAgentBadge（#2635）のindigo/emeraldは`OUTPUT_COLOR`・
  * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかった）。
+ *
+ * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。●はモデルの
+ * 重さで濃淡を付けるが、ここは誰が使ったかだけを表すので1色に固定する。以前の
+ * rose-800（#9f1239）と明るい緑（#33cc4d）は明度が離れすぎていて、●の濃淡の段を作れなかった。
  */
-const AGENT_COLORS = { claude: "#9f1239", codex: "#33cc4d", actions: "#86198f" } as const;
+const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 
 /**
  * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_COLORS`）とは別軸**なので、

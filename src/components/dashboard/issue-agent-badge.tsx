@@ -23,6 +23,10 @@ type IssueAgentBadgeProps = {
  * 揃うようにした（indigo/emeraldは`session-usage-panel.tsx`側の`OUTPUT_COLOR`・
  * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかったため、そちら側の新色に
  * 合わせている）。
+ *
+ * #3075で実行状況の●（`agent-model-color.ts`）とAI使用量画面の色を、朱寄りの赤・青寄りの
+ * 緑へ差し替えたのに合わせ、バッジもred/emeraldへ寄せた（roseは●の赤より紫寄り、greenは
+ * ●の緑より黄寄りで、並ぶと別の色に見える）。
  */
 export function IssueAgentBadge({ agent, className }: IssueAgentBadgeProps) {
   return (
@@ -31,8 +35,8 @@ export function IssueAgentBadge({ agent, className }: IssueAgentBadgeProps) {
       className={cn(
         "h-5 shrink-0 px-1.5 text-[10px] font-medium",
         agent === "codex"
-          ? "border-green-300 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300"
-          : "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300",
+          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+          : "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300",
         className,
       )}
     >

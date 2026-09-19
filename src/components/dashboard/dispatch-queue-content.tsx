@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowUp, Loader2, X } from "lucide-react";
 import { AgentBulkControlPanel } from "@/components/dashboard/agent-bulk-control-panel";
 import { DispatchHostPanel } from "@/components/dashboard/dispatch-host-panel";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
+import { ModelDot, ModelDotLegend } from "@/components/dashboard/model-dot";
 import { RefreshIndicatorButton } from "@/components/dashboard/refresh-indicator-button";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -147,6 +148,7 @@ export function DispatchQueueContent({
       <QueueSection
         title="実行中"
         jobs={summary.running}
+        showModel
         onCancel={dispatch.cancel}
         onOpenIssue={onOpenIssue}
       />
@@ -157,6 +159,7 @@ export function DispatchQueueContent({
         onPrioritize={dispatch.prioritize}
         onOpenIssue={onOpenIssue}
         showOrder
+        showModel
       />
       {/*
         まだ届いていない停止・セッション終了・追加指示（#1519）。**上の実行中・順番待ちとは
@@ -210,7 +213,8 @@ export function DispatchQueueContent({
         バッジ＝`use-issues-workflow-running.ts`が示す）。同じ「実行」でも経路が別なので、
         出ていないことを止まっていると読まれないよう画面上で答えておく
       */}
-      <p className="mt-3 border-t pt-2 text-[11px] text-muted-foreground">
+      <ModelDotLegend className="mt-3 border-t pt-2" />
+      <p className="mt-2 text-[11px] text-muted-foreground">
         このキューはサブPCのような常駐ホストの分だけです。GitHub Actionsでの無人実行はここには出ません。
       </p>
 
@@ -319,6 +323,7 @@ function QueueSection({
   onPrioritize = null,
   onOpenIssue,
   showOrder = false,
+  showModel = false,
 }: {
   title: string;
   /** 節の見出しの下に出す補足（#1519）。「送信中の操作」が枠を使わないことの説明に使う */
@@ -348,6 +353,11 @@ function QueueSection({
    */
   onOpenIssue?: (issueId: string) => void;
   showOrder?: boolean;
+  /**
+   * 行頭にエージェント×モデルの●を出す（#3075）。渡すのは「実行中」「順番待ち」だけ——
+   * 送信中の操作・失敗はどのモデルで立つかを見る場面ではない
+   */
+  showModel?: boolean;
 }) {
   if (jobs.length === 0) return null;
 
@@ -365,6 +375,13 @@ function QueueSection({
                 <span className="mt-0.5 w-4 shrink-0 text-right text-muted-foreground">
                   {index + 1}
                 </span>
+              )}
+              {/*
+                Codexのジョブはモデルを持たず、Claudeも`null`（設定の既定）なら中抜きになる。
+                設定の既定から推定しない（起動までに設定が変わると食い違う）
+              */}
+              {showModel && (
+                <ModelDot agent={job.agent} model={job.claudeModel} className="mt-1" />
               )}
               <span className="min-w-0 flex-1">
                 {/*
