@@ -461,9 +461,9 @@ export function IssueDeckShell({
     setCrossQuestionDialogOpen(true);
   }
 
-  /** リポジトリ全体のコードレビュー（#698）。対象は選び直せるので、文脈のリポジトリは初期値だけ */
-  function openCodeReviewDialog(repositoryFullName?: string | null) {
-    setCodeReviewDialogRepo(repositoryFullName ?? null);
+  /** リポジトリ全体のコードレビュー（#698）。対象は開く時点で決まっており、ダイアログでは選び直さない（#3125） */
+  function openCodeReviewDialog(repositoryFullName: string) {
+    setCodeReviewDialogRepo(repositoryFullName);
     setCodeReviewDialogOpen(true);
   }
 
@@ -2578,13 +2578,8 @@ export function IssueDeckShell({
                 // 未着手の着手順をClaudeに決めさせる入口（#1853）
                 onStartIssueOrder={issueOrderGuide.notConfigured ? undefined : issueOrderGuide.start}
                 // リポジトリ全体のコードレビューを実行する入口（#698）
-                // リポジトリ別の枠（#3092）の「実行」はそのリポジトリを渡す。見出しの
-                // 「レビューを実行」は従来どおり、絞り込みが1件ならそれを既定にする
-                onStartCodeReview={(repositoryFullName) =>
-                  openCodeReviewDialog(
-                    repositoryFullName ?? (filters.repos.length === 1 ? filters.repos[0] : null),
-                  )
-                }
+                // リポジトリ別の枠（#3092）の各行の「実行」がそのリポジトリを渡す
+                onStartCodeReview={openCodeReviewDialog}
                 codeReviewIssues={codeReviewIssues}
                 codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
                 issueOrderAutoStart={issueOrderGuide.autoStart}
@@ -2719,8 +2714,7 @@ export function IssueDeckShell({
         <CodeReviewDialog
           open={codeReviewDialogOpen}
           onOpenChange={setCodeReviewDialogOpen}
-          repositories={visibleRepositories}
-          defaultRepositoryFullName={codeReviewDialogRepo}
+          repositoryFullName={codeReviewDialogRepo}
           onCreated={handleIssueCreated}
         />
         <NewAppDialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen} />

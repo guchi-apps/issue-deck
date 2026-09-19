@@ -760,19 +760,19 @@ describe("件数バーの折り返し（#2107）", () => {
     expect(screen.getByText(/未着手のIssueが/).className).toContain("basis-48");
   });
 
-  // #698。**このビュー唯一の起動口**なので、Issueが0件でも出す
-  it("「コードレビュー」ビューでは、Issueが1件も無くても実行の入口を出す", () => {
+  // #698。**このビュー唯一の起動口**（リポジトリ別の枠の各行の「実行」）なので、Issueが0件でも出す
+  it("「コードレビュー」ビューでは、Issueが1件も無くても実行の入口の枠を出す", () => {
     renderList({ issues: [], view: "code-review", onStartCodeReview: vi.fn() });
 
-    expect(screen.getByRole("button", { name: "レビューを実行" })).toBeTruthy();
-    // リポジトリ別の枠（#3092）の見出しに統合した
     expect(screen.getByRole("region", { name: "リポジトリ別のレビュー" })).toBeTruthy();
+    // 見出しの「レビューを実行」は無くした（#3125）
+    expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
   });
 
   it("他のビューには実行の入口を出さない", () => {
     renderList({ view: "all", onStartCodeReview: vi.fn() });
 
-    expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "リポジトリ別のレビュー" })).toBeNull();
   });
 });
 
@@ -1292,6 +1292,8 @@ describe("コードレビューのリポジトリ別の枠", () => {
       codeReviewRepositoryFullNames: ["guchi-apps/issue-deck", "guchi-apps/car-care"],
     });
 
+    // 枠は既定でたたんでいて行が出ない（#3125）ので、先に開く
+    fireEvent.click(await screen.findByRole("button", { name: /すべて表示/ }));
     fireEvent.click(await screen.findByRole("button", { name: "issue-deck" }));
 
     expect(screen.queryByText(/car-care（2026-09-01）/)).toBeNull();
