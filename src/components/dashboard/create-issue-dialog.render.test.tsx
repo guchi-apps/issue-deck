@@ -741,8 +741,39 @@ describe("CreateIssueDialog の1画面フォーム", () => {
   });
 
   /**
+   * #3123。並びは左から「キャンセル → 作成 → 作成+実装開始」。スマホでも縦に積まず横並びにした
+   * ので、DOMの並びがそのまま画面の並びになる（以前は`flex-col-reverse`の縦積みで、順が逆だった）。
+   */
+  it("操作ボタンは「キャンセル → 作成 → 作成+実装開始」の順に並ぶ", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const footer = screen.getByRole("button", { name: "キャンセル" }).parentElement;
+    const labels = Array.from(footer?.querySelectorAll("button") ?? []).map((b) => b.textContent);
+    expect(labels).toEqual(["キャンセル", "作成", "作成+実装開始"]);
+    // 縦積みに戻すと、フッターだけで約170px取られて1画面に収まらない
+    expect(footer?.className).toContain("flex-row");
+    expect(footer?.className).not.toContain("flex-col-reverse");
+  });
+
+  /**
+   * #3123。内容欄は文字量で伸びず、固定の高さで欄の中をスクロールする。`Textarea`の既定
+   * （`field-sizing-content max-h-64`）が残っていると、長文でまたダイアログが1画面を超える。
+   */
+  it("内容欄は固定の高さで、文字量に応じて伸びない", () => {
+    render(<Harness onCreated={vi.fn()} />);
+
+    const textarea = screen.getByLabelText("内容");
+    expect(textarea.className).toContain("h-48");
+    expect(textarea.className).toContain("field-sizing-fixed");
+    expect(textarea.className).not.toContain("field-sizing-content");
+    // 上限が既定の`max-h-64`のままだと、高さの指定と食い違って256pxまで伸びうる
+    expect(textarea.className).toContain("max-h-48");
+    expect(textarea.className).not.toContain("max-h-64");
+  });
+
+  /**
    * #1884。確認ステップにはキャンセルが無かったので、これは並べ替えではなく追加にあたる。
-   * スマホの縦積みでは、DOMの先頭に置いたキャンセルが一番下へ回る（`flex-col-reverse`）。
+   * 並びの詳細は上のテスト（#3123）が見る。ここでは、先頭がキャンセルであることだけを見る。
    */
   it("タイトルの有無によらずキャンセルを出し、操作ボタンの先頭に置く", () => {
     render(<Harness onCreated={vi.fn()} />);
