@@ -15,12 +15,6 @@ type BodyCleanupButtonProps = {
   disabled?: boolean;
   /** 外側のラッパーに付与するクラス */
   className?: string;
-  /**
-   * 1行目にアイコン・2〜3行目に「音声／整理」の3行に組む（#3054）。「画像を添付」と
-   * 同じ行へ並べるときに、横幅を詰めて同じ行のサムネイルの欄を広げるために使う。
-   * 読み上げ・ホバーの名前は変えない
-   */
-  stacked?: boolean;
 };
 
 /**
@@ -33,7 +27,6 @@ export function BodyCleanupButton({
   onCleaned,
   disabled,
   className,
-  stacked,
 }: BodyCleanupButtonProps) {
   const { isGenerating, error, notConfigured, generate } = useIssueBodyCleanup();
 
@@ -49,23 +42,12 @@ export function BodyCleanupButton({
         type="button"
         variant="outline"
         size="xs"
-        // mdの高さ（md:h-6）はsizeの側にあるので、md:h-12も足して打ち消す
-        className={cn("w-fit", stacked && "h-12 flex-col gap-0.5 px-2 md:h-12 md:px-2")}
+        className="w-fit"
         disabled={!value.trim() || isGenerating || disabled}
         onClick={handleCleanup}
-        aria-label={stacked ? "音声入力を整理" : undefined}
-        title={stacked ? "音声入力を整理" : undefined}
       >
         {isGenerating ? <Loader2 className="animate-spin" /> : <Mic />}
-        {stacked ? (
-          <span className="text-center leading-tight">
-            音声
-            <br />
-            整理
-          </span>
-        ) : (
-          "音声入力を整理"
-        )}
+        音声入力を整理
       </Button>
       {notConfigured && (
         <p className="text-xs text-muted-foreground">選択したAIモデルの認証情報が設定されていません</p>

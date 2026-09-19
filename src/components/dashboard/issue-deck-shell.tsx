@@ -58,7 +58,6 @@ import {
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
-import { useClaudeApiUsage } from "@/hooks/use-claude-api-usage";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useNightlyRun } from "@/hooks/use-nightly-run";
 import { useKnowledgeBoard } from "@/hooks/use-knowledge-board";
@@ -1366,11 +1365,6 @@ export function IssueDeckShell({
     const checkIndex = buildReleaseCheckIndex(releaseCheckTargets, releaseHistory.checkRecords);
     return countUncheckedReleases(visibleReleaseHistoryEntries, checkIndex);
   }, [visibleReleaseHistoryEntries, releaseCheckTargets, releaseHistory.checkRecords]);
-  // issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移設）。**AI使用量の
-  // 画面を開いているあいだだけ取りに行く**——設定にあったときの取得条件（「状態」区分を
-  // 開いているあいだ）と同じ考え方で、参照先はこのアプリのメモリ上の集計だけなのでAPIは
-  // 消費しない。
-  const claudeApiUsage = useClaudeApiUsage(isUsagePaneActive);
 
   /**
    * 使用量の明細からIssueまたはPRを開く（#2504・#2650）。**記録はリポジトリ名（ownerを除く）
@@ -2033,7 +2027,6 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
-                  claudeApiUsage={claudeApiUsage}
                 />
               )}
 
@@ -2335,7 +2328,6 @@ export function IssueDeckShell({
                   onChangeDays={setUsageDays}
                   onRefresh={sessionUsage.refresh}
                   onOpenIssue={openUsageIssue}
-                  claudeApiUsage={claudeApiUsage}
                 />
               </div>
             </div>

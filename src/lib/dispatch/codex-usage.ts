@@ -8,12 +8,20 @@ export type CodexUsageWindow = {
   remainingPercent: number;
   resetsAt: number;
   durationMs: number;
+  /**
+   * 転記のスナップショットで、リセット時刻を過ぎた枠（#3052）。リセット後の使用量は分からない
+   * （転記はサブPCでCodexを動かしたときしか更新されず、他端末での使用も知らない）ため、
+   * 使用率・リセット時刻は最後に観測した値のままにし、画面は「取得できていない」と出す。
+   */
+  expired: boolean;
 };
 
 export type CodexUsage = {
   windows: CodexUsageWindow[];
   planType: string | null;
   host: string;
+  /** ops-dashboardから読んだ値か、サブPCの転記のスナップショットへ戻った値か（#3052） */
+  source: "ops-dashboard" | "transcript";
   fetchedAt: number;
   stale: boolean;
 };
@@ -106,23 +114,22 @@ export function toCodexUsage(row: {
     key: CodexUsageWindow["key"], usedPercent: number, minutes: number, resetsAt: Date,
   ): CodexUsageWindow => {
     const durationMs = minutes * 60_000;
-    let resetsAtMs = resetsAt.getTime();
-    // 転記はCodexを動かしたときにしか更新されない。リセット時刻を過ぎた枠の使用率は前の枠の
-    // 値なので0%として出す（#3037）。次のリセット時刻は枠の長さずつ進めた推定値になる。
-    const reset = resetsAtMs <= now;
-    if (reset) resetsAtMs += Math.ceil((now - resetsAtMs + 1) / durationMs) * durationMs;
-    const used = reset ? 0 : usedPercent;
+    // 以前（#3037）はリセット済みの枠を0%とし、リセット時刻を枠の長さずつ進めて推定していた。
+    // Codexの週間枠は時計の境界で始まらず、他端末での使用も転記には載らないため、推定は
+    // 実際（使用51%・あと14時間）と食い違った（#3052）。分からないものは分からないと返す。
     return {
       key,
       label: windowLabel(minutes),
-      usedPercent: used,
-      remainingPercent: 100 - used,
-      resetsAt: Math.floor(resetsAtMs / 1000),
+      usedPercent,
+      remainingPercent: 100 - usedPercent,
+      resetsAt: Math.floor(resetsAt.getTime() / 1000),
       durationMs,
+      expired: resetsAt.getTime() <= now,
     };
   };
   return {
     host: row.host,
+    source: "transcript",
     planType: row.planType,
     fetchedAt: row.observedAt.getTime(),
     stale: now - row.observedAt.getTime() > STALE_AFTER_MS,

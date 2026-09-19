@@ -168,6 +168,16 @@ BASH_WRITE = re.compile(
 # 入るため「`-`で始まる語の繰り返し」では拾えない。区切り（改行・`;`・`&`・`|`）をまたがない
 # ことだけを条件にして、ヒアドキュメントの本文中の「commit」を巻き込まないようにする。
 BASH_COMMIT = re.compile(r"(?:^|[\s;&|(])git\s(?:[^\n;&|]*\s)?commit(?:\s|$)")
+# **検証のコマンド**（#3064）。テスト・Lint・型チェック・ビルド・画面の疎通確認。
+# 境界ではなく**応答ごとの印**で、実装・仕上げの窓の中でこれを呼んだ応答の金額を「検証」へ移す
+# （テストと修正は交互に来るため、時刻の境目では切れない）。結果を読んで直す応答は実装に残る。
+BASH_VERIFY = re.compile(
+    r"(?:^|[\s;&|(])(?:"
+    r"(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?(?:test|test:unit|lint|typecheck|build|build:ci|check:workflows)\b"
+    r"|(?:pnpm\s+(?:exec\s+)?|npx\s+|bunx\s+)?(?:vitest|tsc|eslint|playwright|jest)\b"
+    r"|pytest\b|ruff\b|mypy\b|shellcheck\b|bash\s+-n\b|curl\s"
+    r")"
+)
 
 KIND_LABELS = {
     "implementation": "実装",
@@ -325,6 +335,9 @@ for raw_path in sys.stdin:
     # 調査 → 実装、実装 → 仕上げの境界（#2779）。**どちらも最初の1回**を境に使う。
     first_write_ts = None
     first_commit_ts = None
+    # 検証のコマンドを呼んだ応答の`message.id`（#3064）。同じ応答の行がtool_useごとに分かれ、
+    # usageを数える最初の1行にtool_useが載っているとは限らないため、idで持って最後に引き当てる。
+    verify_message_ids = set()
     responses_log = []
 
     try:
@@ -396,6 +409,8 @@ for raw_path in sys.stdin:
                         command = tool_input.get("command") if isinstance(tool_input, dict) else None
                         if not isinstance(command, str):
                             continue
+                        if BASH_VERIFY.search(command) and isinstance(message.get("id"), str):
+                            verify_message_ids.add(message["id"])
                         if BASH_COMMIT.search(command):
                             if first_commit_ts is None or ts < first_commit_ts:
                                 first_commit_ts = ts
@@ -454,7 +469,7 @@ for raw_path in sys.stdin:
                 delta["costUsd"] = delta["inputCostUsd"] + delta["outputCostUsd"]
 
             add(bucket, delta)
-            responses_log.append((stamp, delta))
+            responses_log.append((stamp, message_id, delta))
             if model:
                 models.add(model)
             if local is not None:
@@ -494,16 +509,21 @@ for raw_path in sys.stdin:
             return "coding"
         return "research"
 
-    phase_buckets = {key: blank_bucket() for key in ("plan", "research", "coding", "wrapup")}
-    for response_stamp, response_delta in responses_log:
-        add(phase_buckets[phase_of(response_stamp)], response_delta)
+    phase_buckets = {key: blank_bucket() for key in ("plan", "research", "coding", "verify", "wrapup")}
+    for response_stamp, response_id, response_delta in responses_log:
+        phase = phase_of(response_stamp)
+        # 実装・仕上げの窓の中の検証だけを分ける（#3064）。計画・調査の中のcurlやテストは
+        # 調べ物の一部として、そのフェーズに残す。
+        if phase in ("coding", "wrapup") and response_id in verify_message_ids:
+            phase = "verify"
+        add(phase_buckets[phase], response_delta)
 
     # 計画/実装の2区分（#2646）。`ExitPlanMode`が1度も無ければ区分不明としてnullのまま出す
     # （画面は「区分なし」として合算のみを見せる）。**意味は#2646のままで、実装＝計画以外の全部。**
     if plan_exit_ts is not None:
         plan_cost_usd = round(phase_buckets["plan"]["costUsd"], 4)
         implementation_cost_usd = round(
-            sum(phase_buckets[key]["costUsd"] for key in ("research", "coding", "wrapup")), 4
+            sum(phase_buckets[key]["costUsd"] for key in ("research", "coding", "verify", "wrapup")), 4
         )
     else:
         plan_cost_usd = None
@@ -514,10 +534,12 @@ for raw_path in sys.stdin:
     if first_write_ts is None and first_commit_ts is None:
         research_cost_usd = None
         coding_cost_usd = None
+        verify_cost_usd = None
         wrapup_cost_usd = None
     else:
         research_cost_usd = round(phase_buckets["research"]["costUsd"], 4)
         coding_cost_usd = round(phase_buckets["coding"]["costUsd"], 4)
+        verify_cost_usd = round(phase_buckets["verify"]["costUsd"], 4)
         wrapup_cost_usd = round(phase_buckets["wrapup"]["costUsd"], 4)
 
     kind, repository, issue = classify(cwd)
@@ -547,6 +569,7 @@ for raw_path in sys.stdin:
             implementationCostUsd=implementation_cost_usd,
             researchCostUsd=research_cost_usd,
             codingCostUsd=coding_cost_usd,
+            verifyCostUsd=verify_cost_usd,
             wrapupCostUsd=wrapup_cost_usd,
         )
     )
@@ -915,10 +938,11 @@ for row in data.get("sessions") or []:
             # `.get`はNoneのまま送る（画面は「区分なし」として扱う）。
             "planCostUsd": row.get("planCostUsd"),
             "implementationCostUsd": row.get("implementationCostUsd"),
-            # 実装の中の4区分（#2779）。`調査 + 実装 + 仕上げ = implementationCostUsd`で、
-            # 境界を1つも拾えなかったセッションは3つともNone（画面は「フェーズ未集計」）。
+            # 実装の中の区分（#2779・#3064）。`調査 + 実装 + 検証 + 仕上げ = implementationCostUsd`で、
+            # 境界を1つも拾えなかったセッションは4つともNone（画面は「フェーズ未集計」）。
             "researchCostUsd": row.get("researchCostUsd"),
             "codingCostUsd": row.get("codingCostUsd"),
+            "verifyCostUsd": row.get("verifyCostUsd"),
             "wrapupCostUsd": row.get("wrapupCostUsd"),
             "models": row.get("models") or [],
             "startedAt": row.get("firstAt"),

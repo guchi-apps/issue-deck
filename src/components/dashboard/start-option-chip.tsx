@@ -53,7 +53,7 @@ export function StartOptionChip({
       )}
     >
       <Icon className={cn("size-4 shrink-0", checked ? "text-foreground" : "text-muted-foreground")} />
-      <span className="text-[11px] font-medium leading-tight">{label}</span>
+      <span className="text-xs font-medium leading-tight">{label}</span>
       {/* 押しても幅が動かないよう、OFFのときも場所だけ確保する */}
       <Check className={cn("ml-auto size-3.5 shrink-0 text-primary", !checked && "invisible")} />
     </button>

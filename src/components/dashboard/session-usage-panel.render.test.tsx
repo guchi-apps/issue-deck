@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
-import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime } from "@/lib/format-date-time";
 import { buildSessionUsageSummary, type SessionUsageEntry } from "@/lib/session-usage-view";
@@ -69,71 +68,23 @@ function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> 
   );
 }
 
-/** issue-deck本体のAI機能が使ったAPIの内訳（#2631で設定の「状態」から移した） */
-function apiUsageSummary(): ClaudeApiUsageSummary {
-  const totals = {
-    calls: 5,
-    inputTokens: 1_000,
-    outputTokens: 200,
-    cacheReadTokens: 0,
-    cacheCreationTokens: 0,
-  };
-  return {
-    measuringSince: NOW_MS - 86_400_000,
-    totalLast24h: totals,
-    totalLast7d: totals,
-    features: [
-      {
-        key: "issue_summary",
-        label: "Issueの要約",
-        last24h: totals,
-        last7d: totals,
-        models: [{ model: "claude-haiku-4-5", last24h: totals, last7d: totals }],
-      },
-    ],
-  };
-}
-
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
-  // #2631。設定の「状態」にあった機能別のAPI消費内訳をここへ移した。渡されなければ出さない
-  it("claudeApiUsageを渡したときだけアプリ内AI機能別を出す", () => {
-    const { unmount } = renderPanel(response([]));
-    expect(screen.queryByText("アプリ内AI機能別")).toBeNull();
-    unmount();
-
-    renderPanel(response([]), {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
-    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
-    expect(screen.getByText("Issueの要約", { exact: false })).toBeTruthy();
-  });
-
-  /**
-   * #2752。以前は明細を挟んだ画面のいちばん下にあった。同じ「何にAIを使ったか」の内訳なので
-   * セッション種別別の真下へ置く。
-   */
-  it("アプリ内AI機能別をセッション種別別の直後に置く", () => {
-    renderPanel(response([entry()]), {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
+  // #3062。「アプリ内AI機能別」は削除した。内訳カードはこの並びの3枚だけ
+  it("内訳はリポジトリ別・セッション種別別・Issue・PR別の順で、アプリ内AI機能別は出さない", () => {
+    renderPanel(response([entry()]));
 
     const headings = screen
       .getAllByText(/^(リポジトリ別|セッション種別別|アプリ内AI機能別|Issue・PR別)$/)
       .map((node) => node.textContent);
-    expect(headings).toEqual([
-      "リポジトリ別",
-      "セッション種別別",
-      "アプリ内AI機能別",
-      "Issue・PR別",
-    ]);
+    expect(headings).toEqual(["リポジトリ別", "セッション種別別", "Issue・PR別"]);
   });
 
   /**
    * #2779。実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
    */
-  it("セッション種別別で、実装をフェーズの4行に分けて出す", () => {
+  it("セッション種別別で、実装をフェーズの行に分けて出す", () => {
     renderPanel(
       response([
         entry({
@@ -141,7 +92,8 @@ describe("SessionUsagePanel", () => {
           planCostUsd: 2,
           implementationCostUsd: 18,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
       ]),
@@ -150,9 +102,10 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     expect(card).not.toBeNull();
     const rows = within(card as HTMLElement);
-    expect(rows.getByText("計画（Plan mode）")).toBeTruthy();
+    expect(rows.getByText("計画立案")).toBeTruthy();
     expect(rows.getByText("調査")).toBeTruthy();
     expect(rows.getByText("実装")).toBeTruthy();
+    expect(rows.getByText("検証（テスト・Lint・型）")).toBeTruthy();
     expect(rows.getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
     // 割る前の1行は残さない（フェーズ未集計の行も出ない）。
     expect(rows.queryByText("実装（フェーズ未集計）")).toBeNull();
@@ -171,9 +124,11 @@ describe("SessionUsagePanel", () => {
           costUsd: 20,
           planCostUsd: 2,
           researchCostUsd: 4,
-          codingCostUsd: 10,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
           wrapupCostUsd: 4,
         }),
+        entry({ sessionId: "plan-review", kind: "plan-review", costUsd: 3 }),
         entry({ sessionId: "question", kind: "question", costUsd: 50 }),
         entry({ sessionId: "actions", kind: "actions", costUsd: 1 }),
       ]),
@@ -182,18 +137,34 @@ describe("SessionUsagePanel", () => {
     const card = screen.getByText("セッション種別別").closest("section");
     const labels = within(card as HTMLElement)
       .getAllByText(
-        /^(計画（Plan mode）|調査|実装|仕上げ（コミット・PR・報告）|GitHub Actions|作業の流れの外|横断質問)$/,
+        /^(計画立案|計画レビュー|調査|実装|検証（テスト・Lint・型）|仕上げ（コミット・PR・報告）|CI\/CD・レビュー|作業の流れの外|横断質問)$/,
       )
       .map((element) => element.textContent);
     expect(labels).toEqual([
-      "計画（Plan mode）",
+      "計画立案",
+      "計画レビュー",
       "調査",
       "実装",
+      "検証（テスト・Lint・型）",
       "仕上げ（コミット・PR・報告）",
-      "GitHub Actions",
+      "CI/CD・レビュー",
       "作業の流れの外",
       "横断質問",
     ]);
+  });
+
+  /**
+   * #3064。種別別は金額だけを見るので、トークンの細い帯を出さない（Issue・PR別には残す）。
+   */
+  it("セッション種別別にはトークンの帯を出さない", () => {
+    renderPanel(response([entry({ costUsd: 20, researchCostUsd: 4, codingCostUsd: 12, wrapupCostUsd: 4 })]));
+
+    const tokenTitle = /^入力 .* \/ 書込 .* \/ 読出 .* \/ 出力 /;
+    const kindCard = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(kindCard.querySelectorAll("[title]").length).toBeGreaterThan(0);
+    expect([...kindCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(false);
+    const issueCard = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect([...issueCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(true);
   });
 
   it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {
@@ -201,18 +172,6 @@ describe("SessionUsagePanel", () => {
 
     const card = screen.getByText("セッション種別別").closest("section");
     expect(within(card as HTMLElement).getByText("実装（フェーズ未集計）")).toBeTruthy();
-  });
-
-  /**
-   * #2752。セッションの記録がまだ届いていないと上の内訳ごと描かれない。このアプリ自身の消費は
-   * セッションと無関係に数えられているので、**そのときは単独で出す**。
-   */
-  it("セッションの記録がまだ無くてもアプリ内AI機能別は出す", () => {
-    renderPanel(null as unknown as SessionUsageResponse, {
-      claudeApiUsage: { data: apiUsageSummary(), isLoading: false, error: null },
-    });
-    expect(screen.getByText("アプリ内AI機能別")).toBeTruthy();
-    expect(screen.queryByText("セッション種別別")).toBeNull();
   });
 
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
@@ -421,26 +380,38 @@ describe("SessionUsagePanel", () => {
     expect(container.querySelector("p.truncate")).toBeNull();
   });
 
-  it("リポジトリ別内訳は上位5件を表示し、ボタンで残りを展開・折りたためる", () => {
-    const entries = Array.from({ length: 6 }, (_unused, index) =>
+  it("リポジトリ別は円グラフで、金額の上位5件と「その他」にまとめる（#3060）", () => {
+    const entries = Array.from({ length: 7 }, (_unused, index) =>
       entry({
         sessionId: `repo-${index}`,
         repository: `repository-${index}`,
-        costUsd: 6 - index,
+        costUsd: 7 - index,
       }),
     );
     renderPanel(response(entries));
 
-    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
-    expect(within(breakdown).getByText("repository-0")).toBeTruthy();
-    expect(within(breakdown).getByText("repository-4")).toBeTruthy();
-    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    // 名前が出るのは上位5件だけ。6位・7位は「その他」へ入り、件数を添える
+    const chart = within(card).getByRole("img");
+    expect(within(chart).getByText("repository-0")).toBeTruthy();
+    expect(within(chart).getByText("repository-4")).toBeTruthy();
+    expect(within(chart).queryByText("repository-5")).toBeNull();
+    expect(within(chart).getByText("その他")).toBeTruthy();
+    expect(within(chart).getByText("2リポジトリ")).toBeTruthy();
+    // 全体は28ドル。最大の切れは7/28で25.0%、その他は3/28で10.7%
+    expect(chart.getAttribute("aria-label")).toContain("repository-0 25.0%（$7.00）");
+    expect(chart.getAttribute("aria-label")).toContain("その他 10.7%（$3.00）");
+    // 棒＋トークン帯や「すべて表示」の展開ボタンは持たない
+    expect(within(card).queryByRole("button")).toBeNull();
+    expect(within(card).getByText("7リポジトリ・上位5件＋その他")).toBeTruthy();
+  });
 
-    fireEvent.click(within(breakdown).getByRole("button", { name: "すべて表示（残り 1 リポジトリ）" }));
-    expect(within(breakdown).getByText("repository-5")).toBeTruthy();
+  it("リポジトリ別の円グラフは、Claude・Codex・Actionsもトークンも区別しない（#3060）", () => {
+    renderPanel(response([entry()]));
 
-    fireEvent.click(within(breakdown).getByRole("button", { name: "上位5件のみ表示" }));
-    expect(within(breakdown).queryByText("repository-5")).toBeNull();
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    expect(within(card).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
+    expect(within(card).queryByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeNull();
   });
 
   it("明細の棒を、素の入力・キャッシュ書込・キャッシュ読出・出力の4つへ塗り分ける（#2628）", () => {
@@ -469,7 +440,7 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
-  it("内訳の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別は縦棒でトークンを出さない（#3038）", () => {
+  it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
     renderPanel(response([entry()]));
 
     // 日別の縦棒。内側はエージェントの割合で、棒には数値を書けないのでツールチップへ出す。
@@ -478,9 +449,12 @@ describe("SessionUsagePanel", () => {
     // トークンの細い帯は日別では出さない。
     expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
-    // リポジトリ別・種別別は今までどおり、細い帯（トークンの4区分。長さもトークン量に比例）を出す。
-    const breakdown = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
-    expect(within(breakdown).getByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeTruthy();
+    // Issue・PR別は細い帯（トークンの4区分。長さもトークン量に比例）を出す。
+    // リポジトリ別は円グラフ（#3060）、種別別は金額の棒だけ（#3064）で、帯を持たない。
+    const issues = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(issues).getAllByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500").length).toBeGreaterThan(0);
+    const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(within(breakdown).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
     // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();

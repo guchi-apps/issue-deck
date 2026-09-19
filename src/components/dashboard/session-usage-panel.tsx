@@ -3,16 +3,16 @@
 import { Fragment, type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
-import { ClaudeApiUsageList } from "@/components/dashboard/claude-api-usage-list";
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
+import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
-import type { ClaudeApiUsageSummary } from "@/hooks/use-claude-api-usage";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { getRepoColor } from "@/lib/repo-color";
 import {
+  buildRepositoryPieSlices,
   fillUsageDays,
   formatUsageTokens,
   formatUsageUsd,
@@ -24,6 +24,7 @@ import {
   sessionUsagePhaseSplit,
   usagePhaseKindKey,
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
+  REPOSITORY_PIE_TOP_COUNT,
   type SessionUsageEntry,
   type UsageByAgent,
   type UsageBySource,
@@ -37,12 +38,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * 「AI使用量」画面（#2504）。**サブPCのローカルセッションが使ったトークン**を、合計 → 推移 →
- * 内訳（リポジトリ別・セッション種別別・アプリ内AI機能別）→ 明細（セッション別）の順に出す。
+ * 内訳（リポジトリ別・セッション種別別）→ 明細（セッション別）の順に出す。
  *
- * **「アプリ内AI機能別」（issue-deck本体のAI機能が使ったAPIの内訳）は内訳の3枚目**で、
- * セッション種別別の真下に並ぶ（#2631で設定の「状態」から移設し、#2752で画面のいちばん下から
- * ここへ移した）。`claudeApiUsage`を渡したときだけ出る。**期間はこの画面のセレクタ1つに従い**、
- * カード自前の切り替えは持たない（同じ画面に期間の指定が2つあると読み違える）。
+ * **issue-deck本体のAI機能が使ったAPIの内訳（旧「アプリ内AI機能別」）はここに出さない**
+ * （#3062で削除）。この画面はサブPCのセッションの使用量だけを扱う。
  *
  * **PCとスマホで同じ部品を使う**（`compact`で縮めるだけ。`preview-panel.tsx`と同じ切り分け）。
  * 片方にしか置かないと、外出先で「今どこにいくら使っているか」が分からない元の状態がそちらに
@@ -76,17 +75,6 @@ type SessionUsagePanelProps = {
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
-  /**
-   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
-   * **セッションの使用量とは出どころが違う**——上の集計はサブPCのpollerが押し込む記録だが、
-   * これはこのアプリ自身が投げた呼び出しをメモリ上で数えたもの。渡さなければ出さない
-   * （試験・スマホの一部経路）。
-   */
-  claudeApiUsage?: {
-    data: ClaudeApiUsageSummary | null;
-    isLoading: boolean;
-    error: string | null;
-  };
   /** スマホ向けに縮める。表をカードへ畳み、コンテキスト列を落とす */
   compact?: boolean;
   className?: string;
@@ -170,8 +158,8 @@ const OUTPUT_COLOR = "#4776e6";
 
 /**
  * 金額の棒の内側（#2633・#2667）。**表しているのは「誰が使ったか」で、トークンの帯とは軸が違う。**
- * 内訳（リポジトリ別・種別別・Issue別）の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す
- * （日別は#3038で縦棒に変わり、帯を出さなくなった）。
+ * Issue・PR別の行は太い棒（金額）と細い帯（トークン）の二段で描き、凡例もその2つに分けて出す
+ * （日別は#3038で縦棒、リポジトリ別は#3060で円グラフに変わり、種別別は#3064で金額の棒だけにした）。
  *
  * **`TOKEN_COLORS`・`OUTPUT_COLOR`（橙・青・紫）とは別の色相に離す**（#2667）。以前はこの3色を
  * そのまま使っており、Claudeと入力トークンが同じ橙、Codexと出力トークンが同じ青、
@@ -199,6 +187,8 @@ const KIND_ROW_COLORS: Record<string, string> = {
   [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
   [usagePhaseKindKey("research")]: "#78716c",
   [usagePhaseKindKey("coding")]: PHASE_COLORS.implementation,
+  // 検証は実装と仕上げのあいだの濃さ（#3064）
+  [usagePhaseKindKey("verify")]: "#c4b5a5",
   [usagePhaseKindKey("wrapup")]: "#d6d3d1",
   [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#52525b",
 };
@@ -336,7 +326,7 @@ function TokenLegend() {
 }
 
 /**
- * 合計行（リポジトリ別・種別別・Issue別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
+ * 合計行（Issue・PR別）のトークン内訳。**ローカルの濃さの並びだけで塗る。**
  * この行はGitHub Actionsぶんも足し込んだ合計で、実行経路別に色を変えると1本の帯へ
  * 「区分」と「実行経路」の2つの軸が混ざる（それを避けるのが#2633）。
  */
@@ -493,7 +483,7 @@ const DAILY_VALUE_LABELS_MAX_DAYS = 7;
  * 平均は期間の全日（0の日と集計中の最新日を含む）÷日数で、横の点線と「平均 $○○」で示す。
  *
  * **トークン量は使わない**（金額と比例しないための二段の帯は#2633で入れたが、日別では不要になった。
- * リポジトリ別・種別別・Issue別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
+ * Issue・PR別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
  * 従来どおり**。最新日は集計の途中で必ず低く出るので、枠線を足して「減った」と読ませない。
  * ライブラリを足さずCSSだけで描く。
  */
@@ -658,7 +648,8 @@ function DailyLegend() {
 }
 
 /**
- * リポジトリ別・種別別の内訳。二段（太い棒＝金額・細い帯＝トークン）で描く（#2633）。
+ * 種別別の内訳。**金額の棒だけで描く**（#3064。以前は細い帯〈トークン〉との二段だった。#2633）。
+ * **リポジトリ別は円グラフ（`RepositoryPieChart`）へ替えた**（#3060）。
  * **太い棒の内側は日別の縦棒と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
  * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
  */
@@ -667,30 +658,18 @@ function Breakdown({
   hint,
   rows,
   colorOf,
-  maxVisibleRows,
   separator,
 }: {
   title: string;
   hint: string;
   rows: (UsageGroup & { label: string })[];
   colorOf?: (key: string) => string | undefined;
-  maxVisibleRows?: number;
   /** 条件に合う最初の行の手前へ区切りを入れる（#2954）。先頭の行が合うときは入れない */
   separator?: { label: string; isBefore: (key: string) => boolean };
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
   // **棒の基準は先頭の行ではなく最大の行**（#2954）。種別別は作業の順に並べるため、先頭が最大とは限らない。
   const max = rows.reduce((peak, row) => Math.max(peak, row.costUsd), 0);
-  const maxTokens = rows.reduce(
-    (peak, row) => Math.max(peak, row.contextTokens + row.outputTokens),
-    0,
-  );
-  const visibleRows =
-    maxVisibleRows !== undefined && !isExpanded ? rows.slice(0, maxVisibleRows) : rows;
-  const hiddenRows = maxVisibleRows !== undefined ? Math.max(rows.length - maxVisibleRows, 0) : 0;
-  const separatorIndex = separator
-    ? visibleRows.findIndex((row) => separator.isBefore(row.key))
-    : -1;
+  const separatorIndex = separator ? rows.findIndex((row) => separator.isBefore(row.key)) : -1;
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border p-3">
@@ -706,7 +685,7 @@ function Breakdown({
         <p className="text-xs text-muted-foreground">記録がありません</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {visibleRows.map((row, index) => {
+          {rows.map((row, index) => {
             const color = colorOf?.(row.key);
             return (
               <Fragment key={row.key}>
@@ -737,31 +716,12 @@ function Breakdown({
                       {formatUsageUsd(row.costUsd)}
                     </span>
                   </div>
-                  <div className="flex flex-col gap-0.5">
-                    <CostBar
-                      row={row}
-                      widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0}
-                    />
-                    <GroupTokenBar totals={row} maxTokens={maxTokens} />
-                  </div>
+                  <CostBar row={row} widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0} />
                 </li>
               </Fragment>
             );
           })}
         </ul>
-      )}
-      {hiddenRows > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={() => setIsExpanded((prev) => !prev)}
-          aria-expanded={isExpanded}
-        >
-          {isExpanded
-            ? `上位${maxVisibleRows}件のみ表示`
-            : `すべて表示（残り ${hiddenRows} リポジトリ）`}
-        </Button>
       )}
     </section>
   );
@@ -945,7 +905,7 @@ function SessionCards({
  * Issue（またはIssue未特定のPR）1件ぶんの行（#2653）。**同じIssue番号を持つセッションは、
  * そこから派生したPRのGitHub Actions実行も含めて`issue`に合算済み**（`session-usage-view.ts`の
  * `buildSessionUsageSummary`）。ここでは合算した1本の横棒グラフとして出し、クリックで
- * 中の各セッションを展開する。`Breakdown`の行（リポジトリ別・種別別）と同じ描き方に揃える。
+ * 中の各セッションを展開する。`Breakdown`の行（種別別）と同じ金額の棒に、トークンの帯を足して描く。
  */
 const PHASE_META: Record<UsagePhaseKey, { label: string; dotColor: string }> = {
   plan: { label: "計画", dotColor: PHASE_COLORS.plan },
@@ -1206,7 +1166,6 @@ export function SessionUsagePanel({
   onChangeDays,
   onRefresh,
   onOpenIssue,
-  claudeApiUsage,
   compact = false,
   className,
 }: SessionUsagePanelProps) {
@@ -1223,31 +1182,10 @@ export function SessionUsagePanel({
   const dailyDays = data ? fillUsageDays(data.byDay, data.since, data.until) : [];
   const todayKey = dailyDays.at(-1)?.date ?? "";
   const issues = data?.byIssue ?? [];
+  const repositoryPieSlices = data ? buildRepositoryPieSlices(data.byRepository) : [];
   const agentCostSub = data
     ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
     : "";
-
-  /**
-   * issue-deck本体のAI機能が使ったAPIの内訳（#2347・#2631で設定の「状態」から移設）。
-   * **置き場が2つある**（#2752）。ふだんはセッション種別別の真下だが、セッションの記録が
-   * まだ1件も無いときは上の内訳ごと描かれないため、単独でここへ出す。
-   */
-  const apiUsageSection = claudeApiUsage ? (
-    <section className="flex flex-col gap-2 rounded-lg border p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">アプリ内AI機能別</span>
-        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-          Issueの要約・AI検索など
-        </span>
-      </div>
-      <ClaudeApiUsageList
-        data={claudeApiUsage.data}
-        isLoading={claudeApiUsage.isLoading}
-        error={claudeApiUsage.error}
-        days={days}
-      />
-    </section>
-  ) : null;
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -1333,7 +1271,7 @@ export function SessionUsagePanel({
               label="セッション"
               value={data.totals.sessions.toLocaleString()}
               /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
-                 1本が最大4行に現れる）ため、集計側が数えた本数を使う（#2779） */
+                 1本が最大5行に現れる）ため、集計側が数えた本数を使う（#2779） */
               sub={`実装 ${data.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
             />
           </div>
@@ -1351,22 +1289,27 @@ export function SessionUsagePanel({
             <DailyChart days={dailyDays} todayKey={todayKey} />
           </section>
 
-          {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒になり帯を出さなくなったので、
-              この凡例を使う下のリポジトリ別・種別別・Issue別の手前へ置く（#3038） */}
-          <TokenLegend />
-
           <div
             className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}
           >
-            <Breakdown
-              title="リポジトリ別"
-              hint={`${data.byRepository.length}リポジトリ`}
-              rows={data.byRepository.map((row) => ({ ...row, label: row.key || "(不明)" }))}
-              colorOf={(key) => getRepoColor(key || "(不明)")}
-              maxVisibleRows={5}
-            />
-            {/* **アプリ内AI機能別はセッション種別別の真下に置く**（#2752）。同じ「何にAIを
-                使ったか」の内訳なのに、以前は明細を挟んだ画面のいちばん下に離れていた */}
+            {/* **リポジトリ別は円グラフ**（#3060）。金額の上位5件と「その他」だけで、エージェント・
+                トークンの区別は持たない。下の凡例（太い棒＝金額／細い帯＝トークン）は当てはまらない */}
+            <section className="flex flex-col gap-2 rounded-lg border p-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
+                  {`${data.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
+                </span>
+              </div>
+              {repositoryPieSlices.length === 0 ? (
+                <p className="text-xs text-muted-foreground">記録がありません</p>
+              ) : (
+                <RepositoryPieChart slices={repositoryPieSlices} />
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                金額（API換算）の多い上位{REPOSITORY_PIE_TOP_COUNT}件。それ以外は「その他」にまとめています。
+              </p>
+            </section>
             <div className="flex flex-col gap-2">
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
                   実装は全体の9割を占めるため、1行のままでは「実装が多い」以外に読めない。
@@ -1381,9 +1324,12 @@ export function SessionUsagePanel({
                   isBefore: (key) => !isUsageKindInWorkFlow(key),
                 }}
               />
-              {apiUsageSection}
             </div>
           </div>
+
+          {/* 太い棒＝金額／細い帯＝トークンの凡例。日別は縦棒（#3038）、リポジトリ別は円グラフ（#3060）、
+              種別別は金額の棒だけ（#3064）になり、二段で描くのはIssue・PR別だけなのでその手前へ置く */}
+          <TokenLegend />
 
           <section className="flex flex-col gap-1 rounded-lg border p-3">
             <span className="text-xs font-semibold">Issue・PR別</span>
@@ -1428,11 +1374,6 @@ export function SessionUsagePanel({
           </p>
         </>
       )}
-
-      {/* **セッションの記録がまだ届いていないときの置き場**（#2752）。届いていれば上の
-          内訳（セッション種別別の下）へ出る。このアプリ自身の消費はセッションと無関係に
-          数えられているので、`data`が無くても出せる状態を保つ */}
-      {!data && apiUsageSection}
     </div>
   );
 }

@@ -92,6 +92,11 @@ export type SessionUsageReport = {
    */
   researchCostUsd: number | null;
   codingCostUsd: number | null;
+  /**
+   * 実装・仕上げの中の検証（テスト・Lint・型チェック等。#3064）。**3つの区分が揃っているときだけ
+   * 値を持つ**。検証を送らない古いpollerの行はnull（そのぶんは実装・仕上げに含まれたまま）
+   */
+  verifyCostUsd: number | null;
   wrapupCostUsd: number | null;
   models: string[];
   startedAt: Date;
@@ -205,6 +210,7 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
   const researchCostUsd = hasPhaseSplit ? parsedResearchCostUsd : null;
   const codingCostUsd = hasPhaseSplit ? parsedCodingCostUsd : null;
   const wrapupCostUsd = hasPhaseSplit ? parsedWrapupCostUsd : null;
+  const verifyCostUsd = hasPhaseSplit ? parseNonNegativeNumber(input.verifyCostUsd) : null;
 
   const rawModels = input.models;
   if (!Array.isArray(rawModels) || rawModels.some((model) => typeof model !== "string")) return null;
@@ -233,6 +239,7 @@ export function parseSessionUsageReport(value: unknown): SessionUsageReport | nu
     implementationCostUsd,
     researchCostUsd,
     codingCostUsd,
+    verifyCostUsd,
     wrapupCostUsd,
     models: rawModels as string[],
     startedAt,
@@ -304,6 +311,7 @@ export async function storeSessionUsage({
       implementationCostUsd: session.implementationCostUsd,
       researchCostUsd: session.researchCostUsd,
       codingCostUsd: session.codingCostUsd,
+      verifyCostUsd: session.verifyCostUsd,
       wrapupCostUsd: session.wrapupCostUsd,
       models: JSON.stringify(session.models),
       startedAt: session.startedAt,

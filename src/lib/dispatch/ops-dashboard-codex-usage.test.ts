@@ -27,6 +27,7 @@ describe("parseOpsDashboardCodexUsage", () => {
   it("chatgptの2つの枠をprimary・secondaryへ変換する", () => {
     expect(parseOpsDashboardCodexUsage(snapshot)).toEqual({
       host: "ops-dashboard",
+      source: "ops-dashboard",
       planType: "Plus",
       fetchedAt: Date.parse(snapshot.fetchedAt),
       stale: false,
@@ -38,6 +39,7 @@ describe("parseOpsDashboardCodexUsage", () => {
           remainingPercent: 88,
           resetsAt: Date.parse("2026-09-18T04:00:00.000Z") / 1000,
           durationMs: 18_000_000,
+          expired: false,
         },
         {
           key: "secondary",
@@ -46,6 +48,7 @@ describe("parseOpsDashboardCodexUsage", () => {
           remainingPercent: 65.5,
           resetsAt: Date.parse("2026-09-22T00:00:00.000Z") / 1000,
           durationMs: 604_800_000,
+          expired: false,
         },
       ],
     });

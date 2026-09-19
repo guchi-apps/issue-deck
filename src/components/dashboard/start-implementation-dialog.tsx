@@ -1252,9 +1252,9 @@ function AgentChip({
       <Icon
         className={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground")}
       />
-      <span className="text-[11px] font-medium leading-tight">{label}</span>
+      <span className="text-xs font-medium leading-tight">{label}</span>
       {isDefault && !selected && (
-        <span className="ml-auto text-[10px] text-muted-foreground">既定</span>
+        <span className="ml-auto text-[11px] text-muted-foreground">既定</span>
       )}
     </button>
   );
@@ -1302,10 +1302,10 @@ function ModelChip({
         />
       )}
       <span className="flex flex-col gap-0.5">
-        <span className="text-[11px] leading-tight font-semibold">{label}</span>
+        <span className="text-xs leading-tight font-semibold">{label}</span>
         <span
           className={cn(
-            "text-[10px] leading-tight",
+            "text-[11px] leading-tight",
             selected ? "text-foreground" : "text-muted-foreground",
           )}
         >
