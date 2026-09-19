@@ -124,7 +124,10 @@ export function CodeReviewRepoOverview({
             </span>
             <span className="hidden @md:inline">帯は直近12週（左端が12週前、右端が今日）</span>
           </div>
-          <ul className="flex flex-col pb-1">
+          {/* 行の領域だけに高さの上限を置き、はみ出した分はこの中でスクロールさせる。
+              上限が無いと「すべて表示」で枠が画面を占めきり、下のレビュー結果の一覧が
+              押し出されて見えなくなる（#3113）。見出し・「たたむ」は枠の外なので常に届く */}
+          <ul className="flex max-h-[45dvh] flex-col overflow-y-auto overscroll-contain pb-1">
             {visibleRows.map((row) => (
               <CodeReviewRepoOverviewRow
                 key={row.repositoryFullName}
