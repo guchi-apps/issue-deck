@@ -107,8 +107,8 @@ describe("getNavViewDefaultState", () => {
     expect(getNavViewDefaultState("question")).toBe("open");
   });
 
-  it("コードレビュービューは過去の結果を読み返す場所なのでall（#2855）", () => {
-    expect(getNavViewDefaultState("code-review")).toBe("all");
+  it("コードレビュービューも他のビューと同じくopen（#3141）", () => {
+    expect(getNavViewDefaultState("code-review")).toBe("open");
   });
 });
 

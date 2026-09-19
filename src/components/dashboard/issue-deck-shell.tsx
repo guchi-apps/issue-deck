@@ -1120,8 +1120,8 @@ export function IssueDeckShell({
     [repositories],
   );
   /**
-   * 「コードレビュー」ビューのリポジトリ別の枠（#3092）の材料。レビューIssueは一覧の20件上限
-   * （#2855）を掛ける前の全件で、非表示にしたリポジトリのものは`issues`の時点で外れている。
+   * 「コードレビュー」ビューのリポジトリ別の枠（#3092）の材料。レビューIssueは状態で絞る前の全件
+   * （一覧に並ぶのはopenだけ。#3141）で、非表示にしたリポジトリのものは`issues`の時点で外れている。
    */
   const codeReviewIssues = useMemo(() => issues.filter(isCodeReviewIssue), [issues]);
   const codeReviewRepositoryFullNames = useMemo(
