@@ -445,8 +445,15 @@ if [[ -n "$PACKAGE_MANAGER" && -f "$WORKTREE_DIR/package.json" ]]; then
   # そのまま増える。敷いてからinstallすると差分だけが入り、実ディスクの増分は数十MBで済む
   # （速度も数十秒→数秒になる）。pnpm・bunのリポジトリでは何もしない。
   seed_node_modules_from_main "$ISSUE_NUMBER" "$REPO_PATH" "$WORKTREE_DIR" "$PACKAGE_MANAGER"
-  echo "#$ISSUE_NUMBER: $PACKAGE_MANAGER install しています..."
-  (cd "$WORKTREE_DIR" && "$PACKAGE_MANAGER" install)
+  # **npmは`--no-save`で入れる**（#3149）。無指定の`npm install`はコミット済みの
+  # `package-lock.json`が古いと書き換える（`"hasInstallScript": true`の1行が増えるなど）。
+  # 起動しただけでworktreeが「未コミットの変更あり」になり、回収（reap-sessions.sh）にも
+  # worktreeの掃除（cleanup-worktrees.sh）にも残され続けていた。`--no-save`はロックファイルと
+  # `package.json`を書かず、`node_modules`は同じように入る。
+  INSTALL_ARGS=(install)
+  [[ "$PACKAGE_MANAGER" == "npm" ]] && INSTALL_ARGS+=(--no-save)
+  echo "#$ISSUE_NUMBER: $PACKAGE_MANAGER ${INSTALL_ARGS[*]} しています..."
+  (cd "$WORKTREE_DIR" && "$PACKAGE_MANAGER" "${INSTALL_ARGS[@]}")
 else
   echo "#$ISSUE_NUMBER: 依存インストールは不要です（package.json がありません）。"
 fi
