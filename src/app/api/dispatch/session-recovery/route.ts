@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: "invalid_body",
-        message: "この原因に用意されていない文面です。任意の指示は「追加指示を送る」から送ってください。",
+        message: "この原因に用意されていない文面です。任意の指示は「追加指示」から送ってください。",
       },
       { status: 400 },
     );

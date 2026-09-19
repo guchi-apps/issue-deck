@@ -111,6 +111,12 @@ const INSTRUCTION_PRESETS = [
   "CIが失敗しています。ログを確認して直してください。",
 ] as const;
 
+/**
+ * 操作の3ボタン（停止・追加指示・セッション終了）を1行に収めるための幅の割り振り（#3108）。
+ * スマホ（幅393px）では余白を詰めて幅いっぱいに、PC・iPad（`md`以上）では中身の幅のまま。
+ */
+const CONTROL_BUTTON_CLASS = "flex-auto px-2 md:flex-none md:px-2.5";
+
 function ToneIcon({ tone }: { tone: IssueSessionTone }) {
   const className = "size-3.5";
   switch (tone) {
@@ -247,6 +253,8 @@ export function IssueSessionStatus({
    * 離すと「アプリで答えられること自体」が画面から読み取れなくなる。
    */
   const showAnswerModeToggle = session.state === "ALIVE" && !isCodexSession;
+  // 出口の行（アプリで開く・開発環境を開く・アプリで答える）が出ているか。操作との間の線に使う
+  const hasExitRow = Boolean(summary.remoteControlUrl || summary.previewUrl || showAnswerModeToggle);
   // 起動できたセッションの中身を見る唯一の手掛かり（#1468）。畳んだ行のピルはセッションの
   // 状態を表すものに変わったため、コピーは展開側の明示的なボタンにする
   const attachCommand =
@@ -427,7 +435,7 @@ export function IssueSessionStatus({
       )}
       {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、
           畳むと画面から`00.check-user`を外せなくなる */}
-      {(summary.remoteControlUrl || summary.previewUrl || showAnswerModeToggle) && (
+      {hasExitRow && (
         <div
           className={cn(
             "flex w-full flex-wrap gap-2",
@@ -458,6 +466,13 @@ export function IssueSessionStatus({
               variant={session.answerInApp ? "default" : "outline"}
               size="sm"
               aria-pressed={session.answerInApp}
+              // 説明文を本文から外した分（#3108）。**押す前に何が起きるかはここに残す**——ONのときは
+              // 質問と計画の承認がこの画面のパネルへ出ず、Claude Codeアプリ（端末）にだけ出る
+              title={
+                session.answerInApp
+                  ? "ON: 質問と計画の承認はClaude Codeアプリ（端末）に出します。この画面にはパネルを出しません"
+                  : "OFF: 質問と計画の承認はこの画面のパネルに出ます。Claude Codeアプリで続けるならONにします"
+              }
               disabled={dispatch.isSubmitting}
               onClick={() => void toggleAnswerMode()}
             >
@@ -480,34 +495,6 @@ export function IssueSessionStatus({
           )}
         </div>
       )}
-      {/* いまどちらで答えるのかを本文として出す（#2822）。ホバーではなく本文なのは、他の
-          理由・案内と同じ立場（主な用途が外出先のスマホでホバーが無い）。**ONのときだけ
-          言い切らない**——OFF（既定）でも「アプリには出ない」ことが分からないと、
-          アプリを開いて何も無いときに何が起きているのか読み取れない */}
-      {showAnswerModeToggle && (
-        <p
-          className={cn(
-            "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
-          )}
-        >
-          {session.answerInApp ? (
-            <>
-              質問と計画の承認は
-              <strong className="font-medium text-foreground">
-                Claude Codeアプリ（端末）に出します
-              </strong>
-              。この画面にはパネルを出しません（Issueコメントと確認待ちの印はこれまでどおりです）。
-            </>
-          ) : (
-            <>
-              質問と計画の承認は
-              <strong className="font-medium text-foreground">この画面のパネル</strong>
-              に出ます。Claude Codeアプリで続けるなら「アプリで答える」をONにしてください。
-            </>
-          )}
-        </p>
-      )}
       {/* CodexのRemote Control相当（#2537）。**出口は畳まない**——入力待ちのCodexの
           セッションでは、これが画面から答えるための唯一の出口になる */}
       {showCodexPairing && host && (
@@ -525,13 +512,24 @@ export function IssueSessionStatus({
           className={cn(
             "flex w-full flex-col gap-1",
             align === "end" ? "items-end" : "items-start",
+            // 出口（アプリで開く・アプリで答える）と操作を線で分ける（#3108）。出口の行が無いときは
+            // すぐ上が状態のピルなので、線は引かない
+            hasExitRow && "mt-1 border-t pt-2.5",
           )}
         >
-          <div className="flex flex-wrap gap-2">
+          {/* 停止・追加指示・セッション終了は1行に収める（#3108）。**折り返さない**——スマホ幅
+              （393px）でも3つ並ぶよう、狭い幅ではボタンの余白を詰めて幅いっぱいに割り振る */}
+          <div
+            className={cn(
+              "flex w-full flex-nowrap gap-2",
+              align === "end" ? "justify-end" : "justify-start",
+            )}
+          >
             {showInterrupt && (
               <Button
                 variant="outline"
                 size="sm"
+                className={CONTROL_BUTTON_CLASS}
                 disabled={interruptRejection !== null || dispatch.isSubmitting}
                 onClick={() => void send("interrupt")}
               >
@@ -544,6 +542,7 @@ export function IssueSessionStatus({
               <Button
                 variant="outline"
                 size="sm"
+                className={CONTROL_BUTTON_CLASS}
                 disabled={instructionRejection !== null || dispatch.isSubmitting}
                 onClick={() => setInstructionOpen((open) => !open)}
               >
@@ -555,6 +554,7 @@ export function IssueSessionStatus({
               <Button
                 variant="outline"
                 size="sm"
+                className={CONTROL_BUTTON_CLASS}
                 disabled={killRejection !== null || dispatch.isSubmitting}
                 onClick={() => setConfirmingKill(true)}
               >
@@ -563,23 +563,6 @@ export function IssueSessionStatus({
               </Button>
             )}
           </div>
-          {/* 2つの違いを画面に出す（#1557）。ボタンの文言だけでは、押すまで「動いている処理だけが
-              止まる」のか「セッションごと終わる」のかが分からず、実際に問われた。
-              ホバーではなく本文として出すのは上の理由・案内と同じ立場（スマホにホバーが無い）。
-              並んでいるときにしか迷いようがないので、停止を出しているときだけ添える */}
-          {showInterrupt && (
-            <p
-              className={cn(
-                "w-full break-words text-xs text-muted-foreground",
-                align === "end" ? "text-right" : "text-left",
-              )}
-            >
-              「{SESSION_CONTROL_LABELS.INTERRUPT.action}
-              」は今動いている処理だけを止めます（セッションは残るので、追加指示で続けられます）。「
-              {SESSION_CONTROL_LABELS.KILL.action}
-              」はセッションごと終了します（worktreeは残るので、次に起動すると前回の続きから再開します）。
-            </p>
-          )}
           {/* 本文を書く場所。**押した人が書いた1行だけを送る**（実行体が組み立てる経路は無い） */}
           {showInstruction && instructionOpen && (
             <div className="flex w-full flex-col gap-1.5">
@@ -742,7 +725,7 @@ export function IssueSessionStatus({
       <AlertDialog open={confirmingKill} onOpenChange={setConfirmingKill}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>このセッションを閉じますか？</AlertDialogTitle>
+            <AlertDialogTitle>このセッションを終了しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {formatDispatchHostName(session.host)}の「{session.tmuxSessionName}」を終了します。作業中の内容は
               コミットされず、worktreeはそのまま残ります。次にこのIssueで起動したときは、前回の会話の

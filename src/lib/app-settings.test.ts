@@ -6,6 +6,7 @@ import {
   parseAppAiModel,
   parseAutoRetryLimit,
   parseClaudeLocalModel,
+  parseClaudeLocalModelSetting,
   parseClaudeModel,
   parseCodexModel,
   parseDispatchConcurrency,
@@ -112,12 +113,34 @@ describe("parseClaudeLocalModel", () => {
     expect(parseClaudeLocalModel("auto")).toBeNull();
   });
 
+  // ジョブ・APIの`model`は具体的なモデル名だけ。「おまかせ」は判定してから積む（#3106）
+  it("pickはnullを返す（設定専用の値のため）", () => {
+    expect(parseClaudeLocalModel("pick")).toBeNull();
+  });
+
   it("許可されていない値はnullを返す", () => {
     expect(parseClaudeLocalModel("claude-opus-4-1-20250805")).toBeNull();
     expect(parseClaudeLocalModel("")).toBeNull();
     expect(parseClaudeLocalModel(1)).toBeNull();
     expect(parseClaudeLocalModel(null)).toBeNull();
     expect(parseClaudeLocalModel(undefined)).toBeNull();
+  });
+});
+
+// 設定`claudeLocalModel`の検証。ジョブ・API用の`parseClaudeLocalModel`に「おまかせ」を足した形（#3106）
+describe("parseClaudeLocalModelSetting", () => {
+  it("おまかせ（pick）と、fable・opus・sonnetを通す", () => {
+    expect(parseClaudeLocalModelSetting("pick")).toBe("pick");
+    expect(parseClaudeLocalModelSetting("fable")).toBe("fable");
+    expect(parseClaudeLocalModelSetting("opus")).toBe("opus");
+    expect(parseClaudeLocalModelSetting("sonnet")).toBe("sonnet");
+  });
+
+  it("haiku・autoと不正な値はnullを返す", () => {
+    expect(parseClaudeLocalModelSetting("haiku")).toBeNull();
+    expect(parseClaudeLocalModelSetting("auto")).toBeNull();
+    expect(parseClaudeLocalModelSetting("")).toBeNull();
+    expect(parseClaudeLocalModelSetting(undefined)).toBeNull();
   });
 });
 

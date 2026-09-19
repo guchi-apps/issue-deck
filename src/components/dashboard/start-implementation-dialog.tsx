@@ -19,7 +19,9 @@ import {
   CLAUDE_MODEL_FIT_DESCRIPTIONS,
   CLAUDE_MODEL_FIT_LABELS,
   describeClaudeModel,
+  MODEL_PICK_SETTING,
   type ClaudeLocalModel,
+  type ClaudeLocalModelSetting,
   type ClaudeModel,
 } from "@/lib/app-settings";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -168,67 +170,54 @@ const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
  *
  * これを選んだ状態のまま積むことはなく、判定が終わった時点で具体的なモデル名へ解決する
  * （`effectiveModel`）。APIへ送る値の集合は#2717のときから変えていない。
+ * 設定（`AppSetting.claudeLocalModel`）の「おまかせ」と同じ文字列（`MODEL_PICK_SETTING`）。
  */
-const AUTO_PICK = "pick" as const;
-
-type ModelChoice = ClaudeModel | null | typeof AUTO_PICK;
+const AUTO_PICK = MODEL_PICK_SETTING;
 
 /**
- * モデルの選択肢（#2717・#2723・#2776）。**先頭は「設定に従う」（`null`）で、これが既定。**
+ * 選んでいるモデル。**`null`は無い**（#3106）。以前は「設定に従う」を`null`で表していたが、
+ * どのモデルで立つのか画面から分からないため選択肢ごと削除した。開いた時点の選択は
+ * 設定（設定 ＞ 実行）の値で、選ぶものは常に4つのどれか。
+ */
+type ModelChoice = ClaudeLocalModelSetting;
+
+/**
+ * 「自分で決める」モデルの選択肢（#2717・#2723・#2776・#3106）。重い順。
  *
  * 「おまかせ」（`AUTO_PICK`）はここに入れない——**全幅のチップとしてグリッドの上に置く**ので、
- * 並びの都合が違う。ここに並ぶのは「自分で決めない1つ」と「自分で決める3つ」で、
- * 決める側は重い順。
+ * 並びの都合が違う。ここに並ぶ3つは**3列**で、スマホでは1枚110px前後になり2行目は折り返す。
  *
- * **チップには短い名前と向いている作業を出す**（#2723で金額を外した）。2列に並べると
- * 1枚あたり172px前後で、`CLAUDE_MODEL_OPTIONS`のラベルは入らない。
+ * **チップには短い名前と向いている作業を出す**（#2723で金額を外した）。
  *
  * **`auto`（CLIの既定。`--model`を付けない起動）は選択肢に含めない**（#2776）。
  * 「どのモデルで動くか分からないまま起動できる方式」自体が不要というIssueの要求により、
  * `CLAUDE_LOCAL_MODEL_OPTIONS`（`src/lib/app-settings.ts`）からも同時に外した。
+ * 「設定に従う」（#2717）も#3106で削除した——設定の値は、この欄の最初の選択になった。
  *
  * **`haiku`も入れない**（#2756）。ここで選んだモデルはサブPCのローカルセッション
  * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
  * （https://github.com/anthropics/claude-code/issues/43235）。
  */
-const MODEL_ENTRIES: readonly { model: ClaudeLocalModel | null }[] = [
-  { model: null },
+const MODEL_ENTRIES: readonly { model: ClaudeLocalModel }[] = [
   { model: "fable" },
   { model: "opus" },
   { model: "sonnet" },
 ];
 
-/** チップに出す短い名前。「設定に従う」だけ`null`なのでここで補う */
-function modelChipLabel(model: ClaudeModel | null): string {
-  return model === null ? "設定に従う" : describeClaudeModel(model);
-}
-
 /**
- * チップの2行目に出す「向いている作業」（#2723・#2776）。**以前ここには金額が出ていた。**
- * 「設定に従う」は、アプリ設定（設定 ＞ 実行）の現在値（`claudeLocalModel`）が分かっていれば
- * そのモデル名を添える。まだ届いていなければ従来どおりの固定文言のままにする。
- */
-function modelChipFit(model: ClaudeModel | null, claudeLocalModel: ClaudeLocalModel): string {
-  return model === null
-    ? `設定の既定（${describeClaudeModel(claudeLocalModel)}）で起動`
-    : CLAUDE_MODEL_FIT_LABELS[model];
-}
-
-/**
- * 選んだモデルの説明（#2723・#2776）。**金額ではなく、どんな作業に向くかを1行で述べる。**
+ * 選んだモデルの説明（#2723・#2776・#3106）。**金額ではなく、どんな作業に向くかを1行で述べる。**
  *
  * 金額（1件あたりの目安）はここに出していたが、1回ぶんなのか実費なのかが画面から決まらず、
  * FableとOpusがほぼ並ぶため見比べても選べなかった（#2723）。実績は「AI使用量」の画面で見る。
  *
- * 「設定に従う」を選んだときに実際どのモデルで立つのかが分からない、という指摘（#2776）を
- * 受け、`claudeLocalModel`（アプリ設定の現在値。`issue-deck-shell.tsx`が保持し、設定ダイアログ
- * での保存にあわせて更新される）をそのまま文中へ差し込む。
+ * 設定（設定 ＞ 実行）で選んだモデルには、それが最初の選択である旨を添える。
+ * 「おまかせ」の説明は判定の様子（`ModelPickNotice`）が出すのでここには来ない。
  */
-function describeModelChoice(model: ClaudeModel | null, claudeLocalModel: ClaudeLocalModel): string {
-  if (model === null) {
-    return `設定（設定 ＞ 実行）で選んだ${describeClaudeModel(claudeLocalModel)}で起動します。`;
-  }
-  return CLAUDE_MODEL_FIT_DESCRIPTIONS[model];
+function describeModelChoice(model: ClaudeLocalModel, claudeLocalModel: ClaudeLocalModelSetting): string {
+  const fit = CLAUDE_MODEL_FIT_DESCRIPTIONS[model];
+  return model === claudeLocalModel
+    ? `設定（設定 ＞ 実行）で選んだ${describeClaudeModel(model)}です。${fit}`
+    : fit;
 }
 
 type StartImplementationDialogProps = {
@@ -285,13 +274,13 @@ type StartImplementationDialogProps = {
    */
   localSessionCommand?: string | null;
   /**
-   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。**「設定に従う」を選んだときに
-   * 実際どのモデルで立つのかを表示するためだけに使う**（`modelChipFit`・`describeModelChoice`）。
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。**開いたときに
+   * 最初から選ばれるモデル**で、「おまかせ」（`MODEL_PICK_SETTING`）なら開いた直後に判定を走らせる。
    * `issue-deck-shell.tsx`がトップレベルで保持している値をそのまま渡す（設定の保存にあわせて
    * 更新される）——ダイアログ自身は取りに行かない。子が各自取得するとポーリング・取得口が
    * 画面あたり何本も増えるのを避ける、という既存の判断（`dispatch`propと同じ理由）に揃えた。
    */
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
 };
 
 /**
@@ -363,20 +352,25 @@ export function StartImplementationDialog({
    */
   const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   /**
-   * このIssueだけに使うモデル（#2717）。**`null`は「設定に従う」で、これが既定。**
+   * このIssueだけに使うモデル（#2717）。**最初は設定（設定 ＞ 実行）の値**（#3106）。
    *
-   * エージェントと同じく、このダイアログを開いている間だけ持つ（次に開いたときは既定へ戻す）。
+   * エージェントと同じく、このダイアログを開いている間だけ持つ（次に開いたときは設定の値へ戻す）。
    * **1回きりの選択で、Issueにも設定にも残さない**——ラベルにすると14リポジトリへの配布が要り、
    * 設定に残すと次のIssueまで高いモデルのままになる。
    */
-  const [model, setModel] = useState<ModelChoice>(null);
+  const [model, setModel] = useState<ModelChoice>(claudeLocalModel);
+  // 開くたびの初期化effectから最新の設定値を読むためのref（設定の保存で値が変わっても、
+  // 開いている間の選択を巻き戻さないよう、effectの依存配列には含めない）
+  const claudeLocalModelRef = useRef(claudeLocalModel);
+  /** 初期値が「おまかせ」のときの自動判定を、この開いている間にもう走らせたか（#3106） */
+  const autoPickedRef = useRef(false);
   /**
-   * 「おまかせ」の判定（#2723）。**押したときだけ走り、結果は開いている間だけ持つ。**
-   * 走っている間は「開始する」を押させない——決まる前に押すと、選んだつもりのない
-   * 「設定に従う」で立ってしまう。
+   * 「おまかせ」の判定（#2723）。**押したとき、または初期値が「おまかせ」でモデル欄が出たときに
+   * 走り、結果は開いている間だけ持つ。** 走っている間は「開始する」を押させない——決まる前に
+   * 押すと、選んだつもりのないモデルで立ってしまう。
    */
   const modelPick = useModelPick();
-  const { reset: resetModelPick } = modelPick;
+  const { reset: resetModelPick, pick: pickModel } = modelPick;
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -414,6 +408,7 @@ export function StartImplementationDialog({
   useEffect(() => {
     issueLabelsRef.current = issue.labels;
     repositoryLabelNamesRef.current = repositoryLabelNames;
+    claudeLocalModelRef.current = claudeLocalModel;
   });
   /**
    * 「デザインを提示」を**ユーザー自身が触ったか**（#2884計画レビューG1の指摘2）。
@@ -438,7 +433,8 @@ export function StartImplementationDialog({
     setTarget(undefined);
     setStartedTarget(null);
     setAgent(DEFAULT_DISPATCH_AGENT);
-    setModel(null);
+    setModel(claudeLocalModelRef.current);
+    autoPickedRef.current = false;
     // 前に開いたときの判定結果は持ち越さない。Issueの内容もラベルも変わっているかもしれない
     resetModelPick();
     setCopied(false);
@@ -601,11 +597,11 @@ export function StartImplementationDialog({
   const showModels =
     (effectiveTarget.kind === "host" || isScheduledTarget) && effectiveAgent === DEFAULT_DISPATCH_AGENT;
   /**
-   * 実際に積むモデル。**選択欄を出していないときは「設定に従う」へ落とす。**
+   * 実際に積むモデル。**選択欄を出していないときは指定なし（`null`）へ落とす。**
    * サブPCでFableを選んだ後にCodexやGitHub Actionsへ切り替えても、選択が付いていかない。
    *
    * 「おまかせ」（#2723）は**判定結果の具体的なモデル名へ解決する。** 決まっていなければ
-   * 「設定に従う」で、その状態では開始そのものを押させない（`isPickPending`）。
+   * 指定なしで、その状態では開始そのものを押させない（`isPickPending`）。
    */
   const pickedModel: ClaudeModel | null = modelPick.result?.model ?? null;
   const effectiveModel: ClaudeModel | null = !showModels
@@ -757,12 +753,30 @@ export function StartImplementationDialog({
   function selectModel(next: ModelChoice) {
     setModel(next);
     if (next !== AUTO_PICK) return;
-    void modelPick.pick({
+    void pickModel({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       planComment: findLatestPlanCommentBody(comments),
     });
   }
+
+  /**
+   * 初期値が「おまかせ」のときの自動判定（#3106）。**きっかけは「開いたとき」ではなく
+   * 「モデル欄が出たとき」。** 実行先のホスト一覧は開いた後に届くため、開いた瞬間に決めると、
+   * 欄が出た後も判定が走らず「開始する」が押せないままになる。実行先をActionsへ切り替えて
+   * サブPCへ戻した場合も同じ条件で扱え、**1回開いたあたり1回だけ**走る（失敗しても
+   * 繰り返さない。やり直すときは「おまかせ」を押し直す）。
+   */
+  useEffect(() => {
+    if (!open || !showModels || autoPickedRef.current) return;
+    if (claudeLocalModel !== AUTO_PICK || model !== AUTO_PICK) return;
+    autoPickedRef.current = true;
+    void pickModel({
+      repositoryFullName: issue.repositoryFullName,
+      number: issue.number,
+      planComment: findLatestPlanCommentBody(comments),
+    });
+  }, [open, showModels, claudeLocalModel, model, pickModel, issue.repositoryFullName, issue.number, comments]);
 
   /**
    * 選択されたオプションに対応するラベルを付け、チェックを外したオプションのラベルは
@@ -1066,13 +1080,14 @@ export function StartImplementationDialog({
         {/* モデル（#2717）。**エージェントとオプションの間に置く。** どのモデルで立てるかは
             エージェントの下位の選択（Claude Codeで立てるときだけ意味がある）で、
             オプション（Issueにラベルとして残る選択）とは別の軸。
-            **重いIssueだけ上げるための欄**なので、既定は「設定に従う」から動かさない */}
+            **最初の選択は設定（設定 ＞ 実行）の値**（#3106）。重いIssueだけ上げる欄なので、
+            設定はSonnetのままにしておき、必要なときだけここで上げる使い方を想定している */}
         {!isTargetPending && showModels && (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium">モデル</p>
             <div role="radiogroup" aria-label="モデル" className="flex flex-col gap-2">
-              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の4枚
-                  （自分で決めるか、決めずに委ねるか）とは性質が違う。並びの都合としても外に出す */}
+              {/* 「おまかせ」は全幅（#2723）。**issue-deckが選ぶ唯一の選択肢**で、他の3枚
+                  （自分で決める）とは性質が違う。並びの都合としても外に出す */}
               <ModelChip
                 icon={Sparkles}
                 label="おまかせ"
@@ -1080,12 +1095,12 @@ export function StartImplementationDialog({
                 selected={model === AUTO_PICK}
                 onSelect={() => selectModel(AUTO_PICK)}
               />
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {MODEL_ENTRIES.map((entry) => (
                   <ModelChip
-                    key={entry.model ?? "inherit"}
-                    label={modelChipLabel(entry.model)}
-                    fit={modelChipFit(entry.model, claudeLocalModel)}
+                    key={entry.model}
+                    label={describeClaudeModel(entry.model)}
+                    fit={CLAUDE_MODEL_FIT_LABELS[entry.model]}
                     selected={model === entry.model}
                     onSelect={() => selectModel(entry.model)}
                   />
@@ -1165,7 +1180,7 @@ export function StartImplementationDialog({
               isSubmitting ||
               isTargetPending ||
               // 「おまかせ」の判定が終わるまで押させない（#2723）。決まる前に押すと、
-              // 選んだつもりのない「設定に従う」で立つ
+              // 選んだつもりのないモデルで立つ
               isPickPending ||
               selectedRejection !== null ||
               blockedReason !== null ||
@@ -1265,7 +1280,8 @@ function AgentChip({
  *
  * 以前は名前と1件あたりの目安金額を3列で並べていたが、金額は何の金額か画面から決まらず、
  * FableとOpusがほぼ同額のため見比べても選べなかった（#2723）。**押す理由は用途**なので
- * そちらを出し、幅を確保するために3列→2列にした（1枚110px→172px前後）。
+ * そちらを出し、幅を確保するために3列→2列にした（1枚110px→172px前後）。「設定に従う」を
+ * 削除した#3106で選ぶ3つが残り、**再び3列**に戻した（スマホでは2行目が折り返す）。
  *
  * 角を`rounded-full`にしないのは2行になったため。アイコンを取るのは「おまかせ」（全幅）だけで、
  * ここが**issue-deckが選ぶ唯一の選択肢**であることを他の6枚と見分けるために付ける。

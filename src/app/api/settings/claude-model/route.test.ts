@@ -138,6 +138,27 @@ describe("PATCH", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  // #3106。「実装を開始」の最初の選択を「おまかせ」にできる
+  it("claudeLocalModelにおまかせ（pick）を指定して保存でき、そのまま返す", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "opus", claudeLocalModel: "pick" }));
+
+    expect(res.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ claudeLocalModel: "pick" }),
+      }),
+    );
+    await expect(res.json()).resolves.toEqual(expect.objectContaining({ claudeLocalModel: "pick" }));
+  });
+
+  it("保存済みがおまかせ（pick）なら、GETでもそのまま返す", async () => {
+    findUnique.mockResolvedValue({ claudeModel: "opus", claudeLocalModel: "pick" });
+
+    await expect((await GET()).json()).resolves.toEqual(
+      expect.objectContaining({ claudeLocalModel: "pick" }),
+    );
+  });
+
   it("claudeLocalModelが不正な値の場合は400を返す", async () => {
     const res = await PATCH(
       patchRequest({ claudeModel: "opus", claudeLocalModel: "gpt-5.6-terra" }),

@@ -145,7 +145,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
-import type { ClaudeLocalModel } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -232,10 +232,11 @@ type MobileIssueDetailProps = {
   /** 手作業アシスタント（#1826）をこのIssueから開く */
   onStartManualStepGuide: (startIssueId: string) => void;
   /**
-   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776）。「実装を開始」ダイアログの
-   * 「設定に従う」チップに実際のモデル名を出すためだけに`StartImplementationDialog`へ渡す。
+   * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。「実装を開始」ダイアログの
+   * モデル欄で最初から選ぶモデル（「おまかせ」なら開いた直後に判定する）として、
+   * `StartImplementationDialog`へ渡す。
    */
-  claudeLocalModel: ClaudeLocalModel;
+  claudeLocalModel: ClaudeLocalModelSetting;
 };
 
 /** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
