@@ -115,7 +115,7 @@ describe("SessionUsagePanel", () => {
     expect(within(section).getByText("AI使用量表示に現在のセッション使用状況を追加")).toBeTruthy();
     expect(within(section).getAllByText("入力を待っています")).toHaveLength(2);
     expect(within(section).getByText("5時間枠の約11.2%")).toBeTruthy();
-    expect(within(section).getByText("集計待ち（5分おきに報告）")).toBeTruthy();
+    expect(within(section).getByText("集計待ち（20秒おきに報告）")).toBeTruthy();
     fireEvent.click(within(section).getAllByTitle("Issueを開く")[0]);
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 3084, null);
   });

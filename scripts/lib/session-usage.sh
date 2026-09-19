@@ -73,6 +73,30 @@ session_usage_transcripts() {
     cut -f2-
 }
 
+# 動いているセッションの転記だけを出す（#3135。pollerの20秒おきの軽い報告が使う）。
+#
+#   session_usage_live_transcripts <置き場> <動いているとみなす最終更新のしきい値> <範囲のしきい値>
+#
+# 第2引数より後に更新された転記を「動いている」とみなし、**その転記と同じ置き場（スラッグの
+# ディレクトリ＝作業ディレクトリ）にある転記も、第3引数（通常の報告と同じ範囲）以降のぶんを
+# 一緒に出す。** 枝分かれ・`--continue`で写された転記は、写し元を同時に開かないと
+# `message.id`の重複除去（先に現れたほうへ計上）が効かず、写しの側へ二重に計上される。
+# 写しは同じ作業ディレクトリに置かれるため、置き場単位で開けば十分に足りる。
+# 並びは`session_usage_transcripts`と同じ最終更新の古い順。
+session_usage_live_transcripts() {
+  local dir="$1" live_cutoff="${2:-0}" window_cutoff="${3:-0}"
+  [[ -d "$dir" ]] || return 0
+  local slug_dir
+  find "$dir" -mindepth 2 -maxdepth 2 -name '*.jsonl' -newermt "@$live_cutoff" -printf '%h\n' 2>/dev/null |
+    sort -u |
+    while IFS= read -r slug_dir; do
+      find "$slug_dir" -mindepth 1 -maxdepth 1 -name '*.jsonl' -printf '%T@\t%p\n' 2>/dev/null
+    done |
+    awk -F'\t' -v cutoff="$window_cutoff" '$1 >= cutoff' |
+    sort -n |
+    cut -f2-
+}
+
 # Codex CLIの転記は年/月/日の3階層にある。Claude用とは置き場も深さも違うため入口を分ける。
 codex_session_usage_transcripts() {
   local dir="$1" cutoff="${2:-0}"

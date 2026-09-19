@@ -35,9 +35,13 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const fetchClaudeUsage = vi.fn();
+const peekClaudeUsageWindows = vi.fn();
 vi.mock("@/lib/claude/usage", () => ({
   get fetchClaudeUsage() {
     return fetchClaudeUsage;
+  },
+  get peekClaudeUsageWindows() {
+    return peekClaudeUsageWindows;
   },
 }));
 vi.mock("@/lib/dispatch/codex-usage", () => ({ getCodexUsage: vi.fn().mockResolvedValue(null) }));
@@ -73,8 +77,8 @@ import { GET } from "@/app/api/session-usage/route";
  * PR単体の行だけ**であることと、どちらの経路も失敗時に使用量本体を壊さないことを確かめる。
  */
 
-function request(days = 7): NextRequest {
-  const url = `http://localhost/api/session-usage?days=${days}`;
+function request(days = 7, query = ""): NextRequest {
+  const url = `http://localhost/api/session-usage?days=${days}${query}`;
   return { url, nextUrl: new URL(url) } as unknown as NextRequest;
 }
 
@@ -123,6 +127,7 @@ beforeEach(() => {
   repositoryFindMany.mockResolvedValue([]);
   issueFindMany.mockResolvedValue([]);
   fetchClaudeUsage.mockResolvedValue(null);
+  peekClaudeUsageWindows.mockReturnValue(null);
   listDispatchSessions.mockResolvedValue([]);
   process.env.CLAUDE_CODE_OAUTH_TOKEN = "test-token";
 });
@@ -188,6 +193,74 @@ describe("GET /api/session-usage", () => {
         }),
       }),
     );
+  });
+
+  it("current=1は実行中のセッションだけを返し、プラン枠を取得しない（#3135）", async () => {
+    listDispatchSessions.mockResolvedValue([
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-2686",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2686,
+        state: "ALIVE",
+        firstSeenAt: "2026-08-30T00:30:00.000Z",
+        activity: "WORKING",
+        activityAt: "2026-08-30T02:50:00.000Z",
+        step: null,
+        stepAt: null,
+        stepSeenAt: null,
+        codexThreadKnown: null,
+        waitingTool: null,
+        waitingTarget: null,
+        models: [],
+      },
+    ]);
+    // 画面を開いたときの取得が残した5時間枠（10%）。窓は00:00〜05:00
+    peekClaudeUsageWindows.mockReturnValue([
+      {
+        key: "5h",
+        label: "5時間",
+        usedPercent: 10,
+        remainingPercent: 90,
+        resetsAt: Date.parse("2026-08-30T05:00:00.000Z") / 1000,
+        status: "allowed",
+        durationMs: 5 * 60 * 60_000,
+      },
+    ]);
+    // 1回目: 窓の中のClaudeの消費（$20 → 1%あたり$2）、2回目: 実行中のセッションの行（$3）
+    sessionUsageFindMany
+      .mockResolvedValueOnce([
+        { agent: "claude", costUsd: 20, endedAt: new Date("2026-08-30T02:00:00.000Z") },
+      ])
+      .mockResolvedValueOnce([sessionUsageRow({ costUsd: 3, responses: 12 })]);
+
+    const response = await GET(request(7, "&current=1"));
+    const body = await response.json();
+
+    expect(fetchClaudeUsage).not.toHaveBeenCalled();
+    expect(Object.keys(body)).toEqual(["currentSessions"]);
+    expect(body.currentSessions[0]).toMatchObject({ issueNumber: 2686, costUsd: 3, quotaPercent: 1.5 });
+  });
+
+  it("current=1でプラン枠のキャッシュが無ければ、割合を出さずに返す（#3135）", async () => {
+    listDispatchSessions.mockResolvedValue([
+      {
+        host: "subpc",
+        tmuxSessionName: "issue-deck-issue-2686",
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2686,
+        state: "ALIVE",
+        firstSeenAt: "2026-08-30T00:30:00.000Z",
+        models: [],
+      },
+    ]);
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 3 })]);
+
+    const body = await (await GET(request(7, "&current=1"))).json();
+
+    expect(fetchClaudeUsage).not.toHaveBeenCalled();
+    expect(sessionUsageFindMany).toHaveBeenCalledTimes(1);
+    expect(body.currentSessions[0]).toMatchObject({ costUsd: 3, quotaPercent: null });
   });
 
   it("セッション一覧の取得に失敗しても、使用量本体はそのまま返す（#3084）", async () => {

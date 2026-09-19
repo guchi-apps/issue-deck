@@ -473,6 +473,47 @@ describe("session_usage_aggregate", () => {
   });
 });
 
+describe("session_usage_live_transcripts", () => {
+  /** 置き場の下に`<スラッグ>/<名前>.jsonl`を作り、最終更新を`mtimeSec`（epoch秒）へ揃える */
+  function place(root: string, slug: string, name: string, mtimeSec: number): string {
+    fs.mkdirSync(path.join(root, slug), { recursive: true });
+    const file = path.join(root, slug, `${name}.jsonl`);
+    fs.writeFileSync(file, "{}\n");
+    fs.utimesSync(file, mtimeSec, mtimeSec);
+    return file;
+  }
+
+  it("動いている転記と、同じ作業ディレクトリの範囲内の転記だけを古い順に出す（#3135）", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-"));
+    tempDirs.push(root);
+    const now = 2_000_000_000;
+    // 動いている転記（issue-1）と、その写し元になりうる同じ置き場の転記
+    const live = place(root, "slug-issue-1", "live", now - 10);
+    const sibling = place(root, "slug-issue-1", "sibling", now - 3600);
+    // 同じ置き場でも範囲より古い転記は出さない
+    place(root, "slug-issue-1", "ancient", now - 10 * 86400);
+    // 動いていない別の置き場は開かない
+    place(root, "slug-issue-2", "idle", now - 600);
+
+    const out = callShell(
+      "session_usage_live_transcripts",
+      "",
+      root,
+      String(now - 60),
+      String(now - 2 * 86400),
+    );
+    expect(out.trim().split("\n")).toEqual([sibling, live]);
+  });
+
+  it("動いている転記が無ければ何も出さない", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "session-usage-live-"));
+    tempDirs.push(root);
+    const now = 2_000_000_000;
+    place(root, "slug-issue-1", "idle", now - 600);
+    expect(callShell("session_usage_live_transcripts", "", root, String(now - 60), "0")).toBe("");
+  });
+});
+
 describe("codex_session_usage_aggregate", () => {
   it("最後の累積値を使い、キャッシュ入力と通常入力を分ける", () => {
     const file = writeTranscript("codex.jsonl", [
