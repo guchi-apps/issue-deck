@@ -90,6 +90,21 @@ export function resolveNightlyRunLabelRejection(
 export type NightlyRunLaunchDecision = { action: "launch" } | { action: "skip"; reason: string };
 
 /**
+ * Issueの状態を取れなかったときの見送り理由。原因ごとに分ける（#3148）——以前は一律
+ * 「認証が切れている可能性」と出しており、延長すれば通る失敗なのか、人が再ログインしないと
+ * 通らない失敗なのかが画面から分からなかった。
+ */
+function describeIssueFetchFailure(failure: "reauth_required" | "api_error" | null): string {
+  if (failure === "reauth_required") {
+    return "GitHubの認証が切れていて、自動での延長もできませんでした。issue-deckへログインし直してから積み直してください";
+  }
+  if (failure === "api_error") {
+    return "GitHubへの問い合わせに失敗しました（一時的な障害の可能性があります）";
+  }
+  return "Issueを取得できませんでした（削除・移動された可能性があります）";
+}
+
+/**
  * 起動する時点で、その予定を起動してよいか。**読むのはGitHub上の実ラベルとIssueの開閉。**
  *
  * 積んだ時点の判定と重ねて置くのは、窓が開くまでのあいだに状況が変わるため（別のセッションで
@@ -102,9 +117,14 @@ export function decideNightlyRunLaunch(input: {
   labels: readonly { name: string }[];
   /** 予定の種類（#2995）。見送り理由の文言だけが変わる */
   kind: ScheduledRunKind;
+  /**
+   * `issueState`が`null`になった理由（#3148）。`reauth_required`＝トークンの延長にも失敗した／
+   * `api_error`＝GitHubへの問い合わせ自体が失敗した。省略時はIssueを引けなかった（404等）扱い
+   */
+  fetchFailure?: "reauth_required" | "api_error" | null;
 }): NightlyRunLaunchDecision {
   if (input.issueState === null) {
-    return { action: "skip", reason: "Issueの状態を取得できませんでした（GitHubの認証が切れている可能性があります）" };
+    return { action: "skip", reason: describeIssueFetchFailure(input.fetchFailure ?? null) };
   }
   if (input.issueState === "closed") {
     return { action: "skip", reason: "Issueがcloseされていました" };

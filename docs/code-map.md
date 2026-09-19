@@ -54,6 +54,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     自前のエラーとして`created`と一緒に返す
     （[`lib/new-app/launch-failure.ts`](../src/lib/new-app/launch-failure.ts)の
     `decideLaunchError`がこの判断を持つ）。
+  - **逆に、`fn`の中で401を`null`や`false`に畳んではいけない**（#3148）。延長は
+    `GithubApiError`（status 401）が`fn`から投げられたときにしか走らないため、失敗を
+    まとめて`null`で返す取得関数（`if (!res.ok) return null`）を使うと、期限切れのトークンが
+    延長されないまま「取得できなかった」扱いになる。ユーザートークンは8時間で切れるので、
+    **画面を触らない時間帯に動く経路（予約実行など）でだけ必ず失敗し、日中の確認では再現しない。**
+    `null`を返す取得関数でも401だけは投げる（`fetchIssueState`）
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
