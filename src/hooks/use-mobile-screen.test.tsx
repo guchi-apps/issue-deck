@@ -54,6 +54,20 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
     expect(url).toContain("issue=1001");
   });
 
+  it("Issueを移動した直後は、移動先の詳細へ履歴を積まずに置き換えて開く（#3145）", () => {
+    const { result } = renderMobileScreen("mscreen=issue-detail&missue=1001&issue=1001");
+
+    act(() => result.current.selectIssue(issues[1], { history: "replace" }));
+
+    // 積むと「戻る」が、移動で消えて解決できなくなった移動元のURLへ着く
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledTimes(1);
+    const url = urlOf(replace.mock.calls[0]);
+    expect(url).toContain("mscreen=issue-detail");
+    expect(url).toContain("missue=1002");
+    expect(url).toContain("issue=1002");
+  });
+
   it("一覧へ戻る遷移ではPC側の選択中Issueを畳む", () => {
     const { result } = renderMobileScreen("mscreen=issue-detail&missue=1001&issue=1001");
 

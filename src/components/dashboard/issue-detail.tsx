@@ -195,6 +195,8 @@ type IssueDetailProps = {
   currentUserLogin: string | null;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  /** 「Issueを移動」の成功後（プロパティシート内）。IDが変わるため移動元・移動先を両方渡す（#3145） */
+  onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -245,6 +247,7 @@ export function IssueDetail({
   currentUserLogin,
   onEdit,
   onIssueUpdated,
+  onIssueMoved,
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
@@ -1618,6 +1621,7 @@ export function IssueDetail({
             issue={issue}
             repositories={repositories}
             onIssueUpdated={onIssueUpdated}
+            onIssueMoved={onIssueMoved}
           />
         </SheetContent>
       </Sheet>

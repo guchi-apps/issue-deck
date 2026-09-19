@@ -447,33 +447,36 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   );
 
   const selectIssue = useCallback(
-    (issue: Issue) =>
-      navigate({
-        screen: "issue-detail",
-        issue: issue.id,
-        repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
-        view:
-          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
-            ? mobileScreen.view
-            : null,
-        labels:
-          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
-            ? mobileScreen.labels
-            : null,
-        state:
-          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
-            ? mobileScreen.state
-            : null,
-        assignee:
-          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
-            ? mobileScreen.assignee
-            : null,
-        sort:
-          mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
-            ? mobileScreen.sort
-            : null,
-        origin: mobileScreen.kind === "issues" ? mobileScreen.origin : undefined,
-      }),
+    (issue: Issue, options?: { history?: HistoryMode }) =>
+      navigate(
+        {
+          screen: "issue-detail",
+          issue: issue.id,
+          repo: mobileScreen.kind === "repo-detail" ? mobileScreen.repository.fullName : null,
+          view:
+            mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+              ? mobileScreen.view
+              : null,
+          labels:
+            mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+              ? mobileScreen.labels
+              : null,
+          state:
+            mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+              ? mobileScreen.state
+              : null,
+          assignee:
+            mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+              ? mobileScreen.assignee
+              : null,
+          sort:
+            mobileScreen.kind === "issues" || mobileScreen.kind === "repo-detail"
+              ? mobileScreen.sort
+              : null,
+          origin: mobileScreen.kind === "issues" ? mobileScreen.origin : undefined,
+        },
+        options,
+      ),
     [navigate, mobileScreen],
   );
 

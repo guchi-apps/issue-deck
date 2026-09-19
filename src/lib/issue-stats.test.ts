@@ -11,6 +11,7 @@ import {
   groupIssuesByRepository,
   hasIgnoredIssueFilters,
   reconcileIssues,
+  replaceMovedIssue,
   resolveFiltersForView,
   sortIssues,
   upsertIssue,
@@ -378,6 +379,29 @@ describe("computeFilterLabelSummary", () => {
   });
 });
 
+
+describe("replaceMovedIssue", () => {
+  it("移動元を一覧から外し、IDの変わった移動先を先頭に入れる（#3145）", () => {
+    const source = makeIssue({ id: "10", number: 5, repositoryFullName: "owner/a" });
+    const other = makeIssue({ id: "11", number: 6, repositoryFullName: "owner/a" });
+    const moved = makeIssue({ id: "20", number: 1, repositoryFullName: "owner/b" });
+
+    const result = replaceMovedIssue([source, other], source, moved);
+
+    expect(result.map((issue) => issue.id)).toEqual(["20", "11"]);
+  });
+
+  it("移動先が既に一覧にあるとき（Webhookが先に届いた場合）は重複させず置き換える", () => {
+    const source = makeIssue({ id: "10", repositoryFullName: "owner/a" });
+    const existing = makeIssue({ id: "20", title: "古い", repositoryFullName: "owner/b" });
+    const moved = makeIssue({ id: "20", title: "新しい", repositoryFullName: "owner/b" });
+
+    const result = replaceMovedIssue([source, existing], source, moved);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("新しい");
+  });
+});
 
 describe("upsertIssue", () => {
   it("新しく作られたIssueは先頭に足す", () => {

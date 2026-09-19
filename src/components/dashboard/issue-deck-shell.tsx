@@ -149,6 +149,7 @@ import {
   getAssigneeOptions,
   hasIgnoredIssueFilters,
   reconcileIssues,
+  replaceMovedIssue,
   resolveFiltersForView,
   sortIssues,
   upsertIssue,
@@ -610,6 +611,17 @@ export function IssueDeckShell({
 
   function handleIssueUpdated(issue: Issue) {
     setAllIssues((prev) => prev.map((item) => (item.id === issue.id ? issue : item)));
+  }
+
+  /**
+   * 「Issueを移動」の成功後（#3145）。**`handleIssueUpdated`では足りない**——移動でIssueのGitHub IDが
+   * 変わり`id`が別物になるため、置換は何にも当たらず、移動元が残ったまま移動先も一覧に入らない。
+   * 移動元を外して移動先を入れ、そのまま移動先の詳細を開く。履歴は積まず置き換える
+   * （積むと「戻る」が、もう解決できない移動元のURLへ着く）。
+   */
+  function handleIssueMoved(source: Issue, moved: Issue) {
+    setAllIssues((prev) => replaceMovedIssue(prev, source, moved));
+    selectIssue(moved, { history: "replace" });
   }
 
   // 別ウィンドウ（`/issues/new`）で作られたIssueを一覧へ加える（#1728）。
@@ -2259,6 +2271,7 @@ export function IssueDeckShell({
                   onBack={goBack}
                   onEdit={setEditingIssue}
                   onIssueUpdated={handleIssueUpdated}
+                  onIssueMoved={handleIssueMoved}
                   onIssueDeleted={handleIssueDeleted}
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
@@ -2602,6 +2615,7 @@ export function IssueDeckShell({
                   currentUserLogin={currentUserLogin}
                   onEdit={setEditingIssue}
                   onIssueUpdated={handleIssueUpdated}
+                  onIssueMoved={handleIssueMoved}
                   onIssueDeleted={handleIssueDeleted}
                   onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
@@ -2639,6 +2653,7 @@ export function IssueDeckShell({
                       issue={selectedIssue}
                       repositories={visibleRepositories}
                       onIssueUpdated={handleIssueUpdated}
+                      onIssueMoved={handleIssueMoved}
                     />
                   </div>
                 </>

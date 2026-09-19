@@ -196,6 +196,8 @@ type MobileIssueDetailProps = {
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  /** 「Issueを移動」の成功後。移動でIDが変わるため、`onIssueUpdated`ではなく移動元・移動先を両方渡す（#3145） */
+  onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -250,6 +252,7 @@ export function MobileIssueDetail({
   onBack,
   onEdit,
   onIssueUpdated,
+  onIssueMoved,
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
@@ -1548,7 +1551,7 @@ export function MobileIssueDetail({
         onOpenChange={setIsMoveDialogOpen}
         issue={issue}
         repositories={repositories}
-        onMoved={onIssueUpdated}
+        onMoved={(moved) => onIssueMoved(issue, moved)}
       />
 
       <IssueSummaryDialog
