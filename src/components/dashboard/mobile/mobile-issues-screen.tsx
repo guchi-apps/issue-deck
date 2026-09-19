@@ -99,7 +99,10 @@ type MobileIssuesScreenProps = {
   /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
   onStartIssueOrder?: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
-  onStartCodeReview?: () => void;
+  onStartCodeReview?: (repositoryFullName?: string | null) => void;
+  /** リポジトリ別の枠（#3092）の材料。一覧へそのまま渡す */
+  codeReviewIssues?: Issue[];
+  codeReviewRepositoryFullNames?: string[];
   issueOrderAutoStart?: boolean;
   issueOrderCount?: number;
 };
@@ -137,6 +140,8 @@ export function MobileIssuesScreen({
   onStartManualStepGuide,
   onStartIssueOrder,
   onStartCodeReview,
+  codeReviewIssues,
+  codeReviewRepositoryFullNames,
   issueOrderAutoStart,
   issueOrderCount,
 }: MobileIssuesScreenProps) {
@@ -239,6 +244,8 @@ export function MobileIssuesScreen({
       onStartManualStepGuide={onStartManualStepGuide}
       onStartIssueOrder={onStartIssueOrder}
       onStartCodeReview={onStartCodeReview}
+      codeReviewIssues={codeReviewIssues}
+      codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
       issueOrderAutoStart={issueOrderAutoStart}
       issueOrderCount={issueOrderCount}
       // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も
