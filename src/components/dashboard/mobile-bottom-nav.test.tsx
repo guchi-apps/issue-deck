@@ -135,3 +135,36 @@ describe("MobileBottomNavViewの未確認リリースバッジ（#2951）", () =
     expect(screen.getByRole("button", { name: "リリース" }).textContent).toBe("リリース");
   });
 });
+
+describe("MobileBottomNavViewの確認待ちバッジ（#3080）", () => {
+  it("ホームタブに確認待ち件数を出し、aria-labelで読める", () => {
+    render(<MobileBottomNavView active="flow" onSelect={vi.fn()} checkUserCount={5} />);
+
+    const homeTab = screen.getByRole("button", { name: "ホーム（ユーザーの確認待ちが5件あります）" });
+    expect(homeTab.textContent).toContain("5");
+    // 他のタブには付けない
+    expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
+  });
+
+  it("未取得（null）・0件のときは何も出さない", () => {
+    const { rerender } = render(<MobileBottomNavView active="home" onSelect={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "ホーム" }).textContent).toBe("ホーム");
+
+    rerender(<MobileBottomNavView active="home" onSelect={vi.fn()} checkUserCount={0} />);
+    expect(screen.getByRole("button", { name: "ホーム" }).textContent).toBe("ホーム");
+  });
+
+  it("100件以上は99+に頭打ちにする", () => {
+    render(<MobileBottomNavView active="home" onSelect={vi.fn()} checkUserCount={120} />);
+
+    const homeTab = screen.getByRole("button", { name: "ホーム（ユーザーの確認待ちが120件あります）" });
+    expect(homeTab.textContent).toContain("99+");
+    expect(homeTab.textContent).not.toContain("120");
+  });
+
+  it("確認待ちバッジは橙（赤にしない）", () => {
+    render(<MobileBottomNavView active="home" onSelect={vi.fn()} checkUserCount={2} />);
+
+    expect(screen.getByText("2").className).toContain("bg-amber-500");
+  });
+});
