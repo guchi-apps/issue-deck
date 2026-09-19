@@ -136,7 +136,10 @@ function planCommentNote(repositoryFullName: string, issueNumber: number): strin
     "`00.check-user`と理由ラベル`01.check-plan`を付けます**（#1342・#1490）。",
     "その場合は同じ計画を手で投稿し直さないでください。",
     `\`gh issue view ${issueNumber} --repo ${repositoryFullName} --comments\`で`,
-    "投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します",
+    "投稿されていることを確かめ、**無ければ**上記のとおり手で投稿します。",
+    "**計画ファイルの`Write`／`Edit`と`ExitPlanMode`は同じ応答に並べず、書き終えてから",
+    "次の応答で`ExitPlanMode`だけを呼んでください**（同じ応答で呼ぶと計画本文が",
+    "Claudeアプリの承認画面へ渡らず、フックが差し戻します。#3136）",
   ].join("");
 }
 
