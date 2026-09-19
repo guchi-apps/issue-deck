@@ -4,14 +4,25 @@ import { requireUserId } from "@/lib/auth-user";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
 import { getCodexUsage } from "@/lib/dispatch/codex-usage";
+import {
+  describeSessionStep,
+  isSessionStepFresh,
+  resolveIssueImplementationAgent,
+  summarizeIssueSession,
+} from "@/lib/dispatch/issue-session";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { listDispatchSessions } from "@/lib/dispatch/sessions";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
   buildIssueQuotaPercents,
+  buildCurrentSessionUsage,
   buildQuotaEstimate,
   buildSessionUsageSummary,
   sessionUsageIssueKey,
   sessionUsagePeriodStartMs,
+  type CurrentSessionInput,
+  type CurrentSessionUsage,
   type QuotaEstimate,
   type SessionUsageEntry,
   type UsageIssue,
@@ -36,6 +47,39 @@ function parseDays(value: string | null): number {
   const parsed = Number(value);
   return (ALLOWED_DAYS as readonly number[]).includes(parsed) ? parsed : DEFAULT_DAYS;
 }
+
+/** `toEntry`が読む列。期間の集計と実行中のセッション（#3084）の両方で同じ形に揃える */
+const SESSION_USAGE_SELECT = {
+  sessionId: true,
+  agent: true,
+  source: true,
+  host: true,
+  kind: true,
+  repository: true,
+  issueNumber: true,
+  prNumber: true,
+  responses: true,
+  inputTokens: true,
+  cacheCreate5mTokens: true,
+  cacheCreate1hTokens: true,
+  cacheReadTokens: true,
+  outputTokens: true,
+  costUsd: true,
+  inputCostUsd: true,
+  outputCostUsd: true,
+  planCostUsd: true,
+  implementationCostUsd: true,
+  models: true,
+  startedAt: true,
+  endedAt: true,
+  workflowName: true,
+  researchCostUsd: true,
+  codingCostUsd: true,
+  verifyCostUsd: true,
+  wrapupCostUsd: true,
+  runUrl: true,
+  reportedAt: true,
+} as const;
 
 /** DBの行（BigInt）を、そのままJSONにできる形へ落とす */
 function toEntry(row: {
@@ -138,7 +182,9 @@ function toEntry(row: {
  * 行えない**（`issue-deck-shell.tsx`の`openUsageIssue`と同じ前提）。取得できなかった行は
  * `title`をnullのままにし、画面は番号のみの表示にフォールバックする。
  */
-async function resolveIssueTitles(issues: UsageIssue[]): Promise<void> {
+async function resolveIssueTitles(
+  issues: Pick<UsageIssue, "repository" | "issueNumber" | "prNumber" | "title">[],
+): Promise<void> {
   const repositoryNames = [
     ...new Set(issues.flatMap((issue) => (issue.repository ? [issue.repository] : []))),
   ];
@@ -215,6 +261,79 @@ async function resolveIssueTitles(issues: UsageIssue[]): Promise<void> {
   );
 }
 
+/** 状態のピルの色分け。文言は実行状況パネルと同じ`summarizeIssueSession`から作る */
+function toCurrentSessionInput(session: DispatchSessionView, now: Date): CurrentSessionInput {
+  const summary = summarizeIssueSession(session);
+  const step = describeSessionStep(session, now);
+  const statusTone =
+    summary.tone === "waiting"
+      ? "waiting"
+      : session.activity === "RESPONDED" && !isSessionStepFresh(session)
+        ? "idle"
+        : "running";
+  return {
+    host: session.host,
+    tmuxSessionName: session.tmuxSessionName,
+    repositoryFullName: session.repositoryFullName,
+    issueNumber: session.issueNumber,
+    firstSeenAt: session.firstSeenAt,
+    agent: resolveIssueImplementationAgent(session),
+    statusLabel: step
+      ? `${summary.shortLabel}・${step.label}${step.since ? ` ${step.since}` : ""}`
+      : summary.shortLabel,
+    statusTone,
+    models: session.models,
+  };
+}
+
+/**
+ * 「実行中のセッション」欄（#3084）。**いまサブPCで生きているセッション（実行状況パネルと同じ
+ * `DispatchSession`のALIVE）ごとに、始まってからの使用量を返す。**
+ *
+ * 期間（`days`）には連動しない。セッションが期間の開始より前に立っていることがあるため、
+ * 期間の集計とは別に、生きているセッションに当たる行だけをもう1度引く。
+ *
+ * **失敗しても画面の残りは出す**（空配列を返す）。本体は期間の集計で、ここは添え物。
+ */
+async function listCurrentSessionUsage(
+  now: Date,
+  quota: QuotaEstimate | null,
+): Promise<CurrentSessionUsage[]> {
+  try {
+    const alive = (await listDispatchSessions(now)).filter((session) => session.state === "ALIVE");
+    if (alive.length === 0) return [];
+
+    const earliest = alive.reduce(
+      (oldest, session) => (session.firstSeenAt < oldest ? session.firstSeenAt : oldest),
+      alive[0].firstSeenAt,
+    );
+    const rows = await db.sessionUsage.findMany({
+      where: {
+        source: "local",
+        kind: "implementation",
+        endedAt: { gte: new Date(earliest) },
+        OR: alive.map((session) => ({
+          host: session.host,
+          repository: session.repositoryFullName.split("/")[1] ?? session.repositoryFullName,
+          issueNumber: session.issueNumber,
+        })),
+      },
+      select: SESSION_USAGE_SELECT,
+    });
+
+    const current = buildCurrentSessionUsage({
+      sessions: alive.map((session) => toCurrentSessionInput(session, now)),
+      entries: rows.map(toEntry),
+      quota,
+    });
+    await resolveIssueTitles(current);
+    return current;
+  } catch (error) {
+    console.error("[session-usage] 実行中のセッションの集計に失敗", error);
+    return [];
+  }
+}
+
 export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
@@ -247,37 +366,7 @@ export async function GET(request: NextRequest) {
   const rows = await db.sessionUsage.findMany({
     where: { endedAt: { gte: new Date(fetchStartMs) } },
     orderBy: { endedAt: "desc" },
-    select: {
-      sessionId: true,
-      agent: true,
-      source: true,
-      host: true,
-      kind: true,
-      repository: true,
-      issueNumber: true,
-      prNumber: true,
-      responses: true,
-      inputTokens: true,
-      cacheCreate5mTokens: true,
-      cacheCreate1hTokens: true,
-      cacheReadTokens: true,
-      outputTokens: true,
-      costUsd: true,
-      inputCostUsd: true,
-      outputCostUsd: true,
-      planCostUsd: true,
-      implementationCostUsd: true,
-      models: true,
-      startedAt: true,
-      endedAt: true,
-      workflowName: true,
-      researchCostUsd: true,
-      codingCostUsd: true,
-      verifyCostUsd: true,
-      wrapupCostUsd: true,
-      runUrl: true,
-      reportedAt: true,
-    },
+    select: SESSION_USAGE_SELECT,
   });
 
   const entries = rows.map(toEntry);
@@ -312,12 +401,15 @@ export async function GET(request: NextRequest) {
     issue.quotaPercent = quotaPercentByIssueKey.get(sessionUsageIssueKey(issue)) ?? null;
   }
 
+  const currentSessions = await listCurrentSessionUsage(new Date(nowMs), quotaEstimate);
+
   return NextResponse.json(
     {
       ...summary,
       planUsage: { claude: claudePlanUsage, codex: codexPlanUsage },
       planNotConfigured: { claude: !token, codex: !codexPlanUsage },
       quotaEstimate,
+      currentSessions,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
