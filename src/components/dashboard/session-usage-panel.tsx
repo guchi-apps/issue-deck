@@ -1189,14 +1189,16 @@ const CURRENT_SESSION_TONE_ORDER: CurrentSessionTone[] = ["running", "waiting", 
 type OpenIssueHandler = (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 
 /**
- * 閉じた状態の棒グラフ（#3134）。**1本＝1マスの均等幅**で、色は状態。金額に比例させると
- * 「何本動いているか」を数えにくくなるため、金額の比較は開いた詳細の棒に任せる。
+ * 閉じた状態の棒グラフ（#3134）。**セッションごとの金額を足し上げた1本の横棒**で、区間の長さが
+ * そのセッションの金額、色が状態。区間の間に隙間を空けて本数を数えられるようにし、まだ金額が
+ * 届いていない（集計待ち・$0の）セッションも最小幅の区間で残す（消すと本数が合わなくなる）。
  */
 function CurrentSessionCountBar({ sessions }: { sessions: CurrentSessionUsage[] }) {
   const counts = CURRENT_SESSION_TONE_ORDER.map((tone) => ({
     tone,
     count: sessions.filter((session) => session.statusTone === tone).length,
   })).filter(({ count }) => count > 0);
+  const hasCost = sessions.some((session) => session.costUsd > 0);
   return (
     <span className="flex flex-col gap-1.5">
       <span className="flex h-3 gap-[3px]" data-testid="current-session-count-bar">
@@ -1204,8 +1206,14 @@ function CurrentSessionCountBar({ sessions }: { sessions: CurrentSessionUsage[] 
           <i
             key={`${session.host}:${session.tmuxSessionName}`}
             aria-hidden
-            className={cn("min-w-0 flex-1 rounded-[3px]", CURRENT_SESSION_DOT_CLASS[session.statusTone])}
-            title={`#${session.issueNumber} ${session.statusLabel}`}
+            className={cn(
+              "min-w-1.5 basis-0 rounded-[3px]",
+              CURRENT_SESSION_DOT_CLASS[session.statusTone],
+              !session.reported && "opacity-40",
+            )}
+            // 金額が1件も届いていなければ均等に割る（全区間が最小幅に潰れるのを避ける）
+            style={{ flexGrow: hasCost ? session.costUsd : 1 }}
+            title={`#${session.issueNumber} ${session.statusLabel}　${session.reported ? formatUsageUsd(session.costUsd) : "集計待ち"}`}
           />
         ))}
       </span>

@@ -132,7 +132,7 @@ describe("SessionUsagePanel", () => {
     expect(within(section).getByText("141応答　コンテキスト 12M", { normalizer: (text) => text })).toBeTruthy();
   });
 
-  it("閉じた状態では本数を1本1マスの棒と状態ごとの本数で出し、押すと詳細が開閉する（#3134）", () => {
+  it("閉じた状態ではセッションごとの金額を積み上げた棒と状態ごとの本数で出し、押すと詳細が開閉する（#3134）", () => {
     renderPanel({
       ...response([entry()]),
       currentSessions: [
@@ -142,7 +142,10 @@ describe("SessionUsagePanel", () => {
       ],
     });
     const section = screen.getByRole("region", { name: "実行中のセッション" });
-    expect(within(section).getByTestId("current-session-count-bar").children).toHaveLength(3);
+    const segments = within(section).getByTestId("current-session-count-bar").children;
+    expect(segments).toHaveLength(3);
+    // 区間の長さはセッションの金額
+    expect((segments[0] as HTMLElement).style.flexGrow).toBe("7.35");
     expect(within(section).getByText("作業中").textContent).toBe("作業中2");
     expect(within(section).getByText("確認待ち").textContent).toBe("確認待ち1");
     expect(within(section).queryByText("応答を終えている")).toBeNull();
