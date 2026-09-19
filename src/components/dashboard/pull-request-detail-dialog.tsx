@@ -23,6 +23,12 @@ type PullRequestDetailDialogProps = {
   error: string | null;
   onRefresh: () => void;
   onMerged: () => void;
+  /**
+   * ヘッダーの「…」メニュー（#3161）。`PullRequestDetail`へ中継する。重ね表示を閉じる
+   * `onClose`と紛れないよう、PRのクローズは`onPullRequestClosed`と呼び分ける
+   */
+  onPullRequestClosed?: () => void;
+  onUpdated?: () => void;
   onClose: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
@@ -66,6 +72,8 @@ export function PullRequestDetailDialog({
   error,
   onRefresh,
   onMerged,
+  onPullRequestClosed,
+  onUpdated,
   onClose,
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
@@ -106,6 +114,8 @@ export function PullRequestDetailDialog({
           error={error}
           onRefresh={onRefresh}
           onMerged={onMerged}
+          onClosed={onPullRequestClosed}
+          onUpdated={onUpdated}
           onCreateFixIssue={onCreateFixIssue}
           onCreatePullRequestFixIssue={onCreatePullRequestFixIssue}
           pullRequestFixRoute={pullRequestFixRoute}

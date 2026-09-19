@@ -161,6 +161,25 @@ export async function closePullRequest(
   }
 }
 
+/**
+ * PRのタイトル・本文を書き換える（#3161）。`closePullRequest`と同じく`pulls`のPATCHを使う
+ * （`issues`のPATCHでもタイトル・本文は変わるが、PRの操作はPR側の口へ揃える）。
+ */
+export async function updatePullRequest(
+  owner: string,
+  repo: string,
+  number: number,
+  fields: { title: string; body: string },
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
+  const res = await githubFetch(url, token, { method: "PATCH", body: fields });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
 /** 過去の成功した実行1件。見込み時間の材料（#2777） */
 export type SuccessfulWorkflowRunRef = {
   id: number;
