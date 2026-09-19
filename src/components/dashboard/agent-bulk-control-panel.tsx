@@ -134,8 +134,28 @@ function AgentBulkControlRow({
           className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
           style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
         />
-        <span className="text-sm font-semibold">{describeDispatchAgent(agent)}</span>
-        <div className="ml-auto flex items-center gap-2.5">
+        {/* 状態チップは名前の右隣へ並べる（#3088）。狭い幅ではチップだけが名前の下へ折り返す */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold whitespace-nowrap">{describeDispatchAgent(agent)}</span>
+          {aliveSessions.length > 0 && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-primary">
+              実行中
+            </span>
+          )}
+          {pauseReason && (
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap",
+                pauseReason === "usage_limit"
+                  ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              停止中（{pauseReason === "usage_limit" ? "自動" : "手動"}）
+            </span>
+          )}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
           {running ? (
             <button
               type="button"
@@ -181,27 +201,6 @@ function AgentBulkControlRow({
           </button>
         </div>
       </div>
-      {(aliveSessions.length > 0 || pauseReason) && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {aliveSessions.length > 0 && (
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-              実行中
-            </span>
-          )}
-          {pauseReason && (
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                pauseReason === "usage_limit"
-                  ? "bg-violet-500/10 text-violet-700 dark:text-violet-300"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              停止中（{pauseReason === "usage_limit" ? "自動" : "手動"}）
-            </span>
-          )}
-        </div>
-      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
