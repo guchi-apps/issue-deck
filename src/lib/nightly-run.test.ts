@@ -69,6 +69,20 @@ describe("decideNightlyRunLaunch", () => {
   });
 });
 
+describe("decideNightlyRunLaunch: 状態を取れなかった理由の文言（#3148）", () => {
+  const reasonOf = (fetchFailure?: "reauth_required" | "api_error" | null) => {
+    const decision = decideNightlyRunLaunch({ issueState: null, labels: [], kind: "NEXT_WINDOW", fetchFailure });
+    return decision.action === "skip" ? decision.reason : null;
+  };
+
+  it("延長にも失敗したときだけ再ログインを促す", () => {
+    expect(reasonOf("reauth_required")).toContain("ログインし直して");
+    expect(reasonOf("api_error")).toContain("問い合わせに失敗");
+    expect(reasonOf(null)).toContain("削除・移動");
+    expect(reasonOf(undefined)).not.toContain("認証");
+  });
+});
+
 describe("classifyNightlyRunOutcome", () => {
   const launched = { status: "LAUNCHED" as const, skipReason: null };
   const open = (projectStatus: string | null, labels: string[] = []) => ({

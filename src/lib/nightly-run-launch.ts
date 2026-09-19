@@ -30,7 +30,9 @@ import {
  *
  * GitHubへの読み書きは**積んだ人のトークン**で行う（`withUserGithubToken`）。ラベルの付与を
  * 人の操作として残すためで、インストールトークンにすると`issue-deck[bot]`が着手したように見える。
- * トークンが切れていれば見送りとして残す（黙って起動しない）。
+ * 期限切れ（401）はリフレッシュトークンで延長して再試行し、延長にも失敗したときだけ見送りとして
+ * 残す（黙って起動しない）。GitHub Appのユーザートークンは8時間で切れるので、延長できないと
+ * 画面を触らない時間帯の起動が必ず見送りになる（#3148）。
  */
 
 export type NightlyRunLaunchAction = {
@@ -140,6 +142,10 @@ export async function launchScheduledRunEntry(params: {
     issueState: "value" in fetched ? fetched.value.state : null,
     labels: "value" in fetched ? fetched.value.labels.map((name) => ({ name })) : [],
     kind,
+    // 失敗の中身は`withUserGithubToken`が返すステータスで見分ける（409＝延長にも失敗・
+    // トークンはクリア済み／502＝それ以外のAPIエラー）
+    fetchFailure:
+      "value" in fetched ? null : fetched.errorResponse.status === 409 ? "reauth_required" : "api_error",
   });
   if (decision.action === "skip") {
     action.detail = decision.reason;
@@ -174,8 +180,15 @@ export async function launchScheduledRunEntry(params: {
   }
 
   // `11.local`は**積めたときだけ**付ける（`enqueue-issue.ts`と同じ）。付与に失敗しても
-  // 起動自体は妨げない（起動できないより、ラベルが遅れる方が軽い）
-  const labeled = await withUserGithubToken(user, logTag, (token) =>
+  // 起動自体は妨げない（起動できないより、ラベルが遅れる方が軽い）。
+  // **トークンは読み直す**（#3148）。上の取得で延長していれば`user`の値は古く、そのまま渡すと
+  // 401→ローテーション済みのリフレッシュトークンでの延長失敗→DB再読込、と毎回遠回りする
+  const latestUser =
+    (await db.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, githubAccessToken: true, githubRefreshToken: true },
+    })) ?? user;
+  const labeled = await withUserGithubToken(latestUser, logTag, (token) =>
     addIssueLabels(owner, repo, entry.issueNumber, token, [LOCAL_LABEL_NAME]),
   );
   if (!("value" in labeled)) {
