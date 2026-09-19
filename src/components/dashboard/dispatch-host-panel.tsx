@@ -8,6 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
+import { ModelDot } from "@/components/dashboard/model-dot";
+import { pickPrimaryModel } from "@/lib/agent-model-color";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
@@ -36,6 +38,7 @@ import {
 } from "@/lib/dispatch/host-reboot";
 import {
   describeSessionReap,
+  resolveIssueImplementationAgent,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
@@ -93,13 +96,6 @@ const CHECKOUT_TONE_CLASS: Record<DispatchHostCheckoutTone, string> = {
   normal: "text-muted-foreground",
   warn: "text-amber-700 dark:text-amber-400",
   critical: "text-destructive",
-};
-
-const SESSION_TONE_CLASS: Record<IssueSessionTone, string> = {
-  running: "bg-primary",
-  waiting: "bg-amber-500",
-  done: "bg-muted-foreground",
-  error: "bg-destructive",
 };
 
 const SESSION_TEXT_CLASS: Record<IssueSessionTone, string> = {
@@ -871,9 +867,14 @@ function SessionRow({
 
   return (
     <li className="flex items-start gap-1.5 text-xs">
-      <span
-        aria-hidden
-        className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", SESSION_TONE_CLASS[summary.tone])}
+      {/*
+        ●はエージェントとモデルの重さ（#3075）。以前は状態（実行中・入力待ち・失敗）の色だった
+        が、状態は2行目の文字色（`SESSION_TEXT_CLASS`）でも出ているのでそちらへ任せた
+      */}
+      <ModelDot
+        agent={resolveIssueImplementationAgent(session)}
+        model={pickPrimaryModel(session.models)}
+        className="mt-1"
       />
       <span className="min-w-0 flex-1">
         {/*
