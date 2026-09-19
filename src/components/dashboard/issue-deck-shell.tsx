@@ -2270,7 +2270,12 @@ export function IssueDeckShell({
               )}
             </div>
 
-            <MobileBottomNav active={activeBottomNavTab} onSelect={selectTab} />
+            {/* 「ホーム」タブの確認待ち件数（#3080）。ホームのメニュー・左メニューと同じ数え方 */}
+            <MobileBottomNav
+              active={activeBottomNavTab}
+              onSelect={selectTab}
+              checkUserCount={navCounts["check-user"] + mergePendingPullRequests.length}
+            />
           </div>
 
           {/* PC: 左カラム（ナビゲーション）。手動で開閉・幅調整ができる（#381） */}

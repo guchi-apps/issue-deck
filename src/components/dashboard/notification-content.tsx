@@ -157,10 +157,13 @@ export function NotificationBadge({
   count,
   hasError,
   className = "-top-1 -right-1",
+  max,
 }: {
   count: number;
   hasError: boolean;
   className?: string;
+  /** 指定すると、これを超える件数を`{max}+`と頭打ちにする（丸が隣の要素へはみ出さないように） */
+  max?: number;
 }) {
   if (count === 0) return null;
 
@@ -172,7 +175,7 @@ export function NotificationBadge({
         className,
       )}
     >
-      {count}
+      {max !== undefined && count > max ? `${max}+` : count}
     </span>
   );
 }
