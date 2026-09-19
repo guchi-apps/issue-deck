@@ -163,7 +163,7 @@ export function describeSessionStall(session: DispatchSessionView): SessionStall
  * **受け口（`POST /api/dispatch/session-recovery`）が押された本文を検証するために使う。**
  * 画面が送ってきた文字列をそのまま信じると、この経路が「任意の本文を送れるが確認待ちも
  * 自動で外れる」ものになり、追加指示（#1012）と分けた意味が消える。任意の本文を送りたい
- * ときは従来どおり「追加指示を送る」を使う。
+ * ときは従来どおり「追加指示」を使う。
  */
 export function isSessionStallRecoveryBody(
   reason: SessionInterruptedReason,

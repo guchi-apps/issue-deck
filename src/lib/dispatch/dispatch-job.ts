@@ -1032,13 +1032,13 @@ export const SESSION_CONTROL_LABELS = {
     failed: "停止できませんでした",
   },
   KILL: {
-    action: "セッションを閉じる",
+    action: "セッション終了",
     sending: "セッションの終了を送信しました",
-    done: "セッションを閉じました",
-    failed: "セッションを閉じられませんでした",
+    done: "セッションを終了しました",
+    failed: "セッションを終了できませんでした",
   },
   INSTRUCTION: {
-    action: "追加指示を送る",
+    action: "追加指示",
     sending: "追加指示を送信しました",
     done: "追加指示を送りました",
     failed: "追加指示を送れませんでした",

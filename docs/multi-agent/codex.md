@@ -103,7 +103,7 @@ npmで入れたCodex（`npm install -g @openai/codex`）では1つも動かな�
 | セッションに`<リポジトリ名> #<番号>`の名前を付けられるか | **△**。起動オプションには無いが、app-serverの`thread/name/set`で後から付けられる（#2540） |
 | `codex resume <session_id> <PROMPT>` | **○**。ピッカーを出さず、履歴も引き継ぐ |
 
-**この表のものは実装済みになった。** 「追加指示を送る」は#2519、「前回の会話の引き継ぎ」は
+**この表のものは実装済みになった。** 「追加指示」は#2519、「前回の会話の引き継ぎ」は
 #2520、Remote Controlは#2524（下の「Remote Controlはペアリングコードで繋ぐ」）。
 ただしRemote Controlで繋がるのは**ホスト単位**で、Claude Codeのような
 「そのIssueを開くURL」にはならない。
@@ -117,7 +117,7 @@ codex queue --thread <セッションUUID または 完全一致のセッショ�
 # → Queued message <メッセージUUID> for thread <セッションUUID>.
 ```
 
-**これがissue-deckにとって大きい。** Claude Code側の「追加指示を送る」（#1012）は、`tmux send-keys`
+**これがissue-deckにとって大きい。** Claude Code側の「追加指示」（#1012）は、`tmux send-keys`
 での本文送出とEnterの別送を3段階プロトコルで囲って成立させている（`scripts/subpc-dispatch-poller.sh`の
 `INSTRUCTION_*`）。承認プロンプトや選択フォームの表示中に送ると既定の選択肢で勝手に答えてしまう
 事故があったため、[gates.md](gates.md)は`send-keys`そのものを禁じ、そこだけを例外として開けている。
@@ -337,7 +337,7 @@ Codex側にも作れる。`--last`はホスト全体で最後のセッション�
 
 ## 追加指示は`codex queue`で送る（#2519）
 
-画面の「追加指示を送る」（#1012）は、Codexのセッションでも押せる。**送り方だけが違う。**
+画面の「追加指示」（#1012）は、Codexのセッションでも押せる。**送り方だけが違う。**
 
 | | Claude Code | Codex |
 |---|---|---|

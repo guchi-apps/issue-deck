@@ -296,28 +296,33 @@ describe("IssueSessionStatus のセッション操作", () => {
 
     expect(screen.getByRole("button", { name: "停止" }).hasAttribute("disabled")).toBe(false);
     expect(
-      screen.getByRole("button", { name: "セッションを閉じる" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "セッション終了" }).hasAttribute("disabled"),
     ).toBe(false);
   });
 
   /**
-   * #1557。ボタンの文言だけでは、押すまで「処理だけ止まる」のか「セッションごと終わる」のかが
-   * 分からず、実際に問われた。**並んでいるときにしか迷いようがない**ので、停止を出している
-   * ときだけ添える。
+   * #1557で添えていた「停止と閉じるの違い」の説明文は、#3108で画面から外した（違いはdocsと確認
+   * ダイアログに残す）。**3つのボタンは折り返さず1行に並べる**（狭い幅でも1行に収める）。
    */
-  it("2つが並ぶときは違いを添える", () => {
+  it("停止・追加指示・セッション終了を同じ1行に並べ、違いの説明文は出さない", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     openControls();
 
-    expect(screen.getByText(/今動いている処理だけを止めます/)).not.toBeNull();
-    expect(screen.getByText(/セッションごと終了します/)).not.toBeNull();
+    const row = screen.getByRole("button", { name: "停止" }).parentElement;
+    expect(row).toBe(screen.getByRole("button", { name: "追加指示" }).parentElement);
+    expect(row).toBe(screen.getByRole("button", { name: "セッション終了" }).parentElement);
+    expect(row?.className).toContain("flex-nowrap");
+    expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
+    expect(screen.queryByText(/セッションごと終了します/)).toBeNull();
   });
 
-  it("停止を出さないセッションには違いの説明も出さない", () => {
-    render(<IssueSessionStatus session={session({ state: "EXITED" })} dispatch={makeDispatch()} />);
+  // 出口（アプリで開く・アプリで答える）と操作の間を線で分ける（#3108）
+  it("出口の行があるときは、操作の上に区切り線を引く", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     openControls();
 
-    expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
+    const controls = screen.getByRole("button", { name: "停止" }).parentElement?.parentElement;
+    expect(controls?.className).toContain("border-t");
   });
 
   it("停止を押すとそのセッションのホストへ積む", async () => {
@@ -339,11 +344,11 @@ describe("IssueSessionStatus のセッション操作", () => {
   it("閉じるは確認してから積む", async () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     openControls();
-    fireEvent.click(screen.getByRole("button", { name: "セッションを閉じる" }));
+    fireEvent.click(screen.getByRole("button", { name: "セッション終了" }));
 
     expect(sendSessionControl).not.toHaveBeenCalled();
     const confirm = await screen.findByRole("alertdialog");
-    fireEvent.click(within(confirm).getByRole("button", { name: "セッションを閉じる" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "セッション終了" }));
 
     await waitFor(() =>
       expect(sendSessionControl).toHaveBeenCalledWith(expect.objectContaining({ kind: "kill" })),
@@ -371,7 +376,7 @@ describe("IssueSessionStatus のセッション操作", () => {
 
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
     expect(
-      screen.getByRole("button", { name: "セッションを閉じる" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "セッション終了" }).hasAttribute("disabled"),
     ).toBe(false);
   });
 
@@ -381,7 +386,7 @@ describe("IssueSessionStatus のセッション操作", () => {
     // 畳む相手が1つも無いので、開くトグルごと出さない（#1676）
     expect(screen.queryByRole("button", { name: /操作/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "セッションを閉じる" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "セッション終了" })).toBeNull();
   });
 
   // pull型なので、押した直後は何も起きない時間がある
@@ -440,7 +445,7 @@ describe("IssueSessionStatus のセッション操作", () => {
   describe("追加指示（#1012）", () => {
     function openForm() {
       openControls();
-      fireEvent.click(screen.getByRole("button", { name: "追加指示を送る" }));
+      fireEvent.click(screen.getByRole("button", { name: "追加指示" }));
       return screen.getByLabelText("追加指示の本文") as HTMLInputElement;
     }
 
@@ -485,7 +490,7 @@ describe("IssueSessionStatus のセッション操作", () => {
       openControls();
 
       expect(
-        screen.getByRole("button", { name: "追加指示を送る" }).hasAttribute("disabled"),
+        screen.getByRole("button", { name: "追加指示" }).hasAttribute("disabled"),
       ).toBe(true);
       expect(screen.getByText(/pollerが追加指示の送信に対応していません/)).not.toBeNull();
       // 停止・終了はそのまま押せる（申告が独立している）
@@ -507,7 +512,7 @@ describe("IssueSessionStatus のセッション操作", () => {
       openControls();
 
       expect(
-        screen.getByRole("button", { name: "追加指示を送る" }).hasAttribute("disabled"),
+        screen.getByRole("button", { name: "追加指示" }).hasAttribute("disabled"),
       ).toBe(true);
       expect(screen.getByText(/宛先がまだ分かりません/)).not.toBeNull();
       // 停止・終了はtmux側の操作なので宛先が要らない
@@ -534,7 +539,7 @@ describe("IssueSessionStatus のセッション操作", () => {
       );
       openControls();
 
-      expect(screen.queryByRole("button", { name: "追加指示を送る" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "追加指示" })).toBeNull();
     });
 
     // 見送りの理由はここにしか残らない（承認プロンプト表示中・打ちかけがある、など）
@@ -625,8 +630,8 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
 
     expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "追加指示を送る" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "セッションを閉じる" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "追加指示" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "セッション終了" })).toBeNull();
     // 違いの説明（#1557）も、ボタンを見ているときにしか要らない
     expect(screen.queryByText(/今動いている処理だけを止めます/)).toBeNull();
     expect(screen.getByRole("button", { name: /操作/ }).getAttribute("aria-expanded")).toBe(
@@ -842,7 +847,9 @@ describe("アプリで答える（#2822）", () => {
 
     const toggle = screen.getByRole("button", { name: /アプリで答える/ });
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
-    expect(screen.getByText(/この画面のパネル/)).toBeTruthy();
+    // 説明文は本文から外し（#3108）、押す前に読める分はtitleへ残している
+    expect(screen.queryByText(/この画面のパネル/)).toBeNull();
+    expect(toggle.getAttribute("title")).toContain("この画面のパネルに出ます");
   });
 
   it("押すとセッション名つきで切り替えを送る", async () => {
@@ -861,14 +868,15 @@ describe("アプリで答える（#2822）", () => {
     });
   });
 
-  it("ONのときは、答え先がアプリであることを本文で出す", () => {
+  it("ONのときは、答え先がアプリであることをtitleで示す", () => {
     render(
       <IssueSessionStatus session={session({ answerInApp: true })} dispatch={makeDispatch()} />,
     );
 
     const toggle = screen.getByRole("button", { name: /アプリで答える/ });
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByText(/Claude Codeアプリ（端末）に出します/)).toBeTruthy();
+    expect(screen.queryByText(/Claude Codeアプリ（端末）に出します/)).toBeNull();
+    expect(toggle.getAttribute("title")).toContain("Claude Codeアプリ（端末）に出します");
   });
 
   // Codexには`AskUserQuestion`のフックもRemote Controlも無く、切り替えた先が存在しない

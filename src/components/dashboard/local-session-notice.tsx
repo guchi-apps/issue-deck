@@ -25,7 +25,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
  * 事故がある）。ここが持てるのは「開く」までで、答えるのはRemote Control側。
  *
  * **入力待ちでないセッションへ1行の追加指示を流すのは別の導線にある**（#1012。Issue詳細の
- * セッション表示の「追加指示を送る」）。あちらは承認プロンプト・選択フォームの表示中は
+ * セッション表示の「追加指示」）。あちらは承認プロンプト・選択フォームの表示中は
  * 送らずに見送るため、ここが受け持つ「答える」とは重ならない。
  *
  * 承認欄（`LocalSessionApprovalNotice`）とコメント入力欄（`LocalSessionCommentNotice`）で

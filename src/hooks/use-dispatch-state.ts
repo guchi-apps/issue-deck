@@ -366,7 +366,7 @@ export function useDispatchState(enabled: boolean) {
    * **`sendSessionControl`の`instruction`と経路を分けているのは、こちらだけが確認待ちを
    * 外すから。** 受け口は本文が固定文面のどれかであることと、セッションが今も停滞して
    * いることを確かめてから積む（`session-stall.ts`）。任意の本文は従来どおり
-   * 「追加指示を送る」で送る。
+   * 「追加指示」で送る。
    *
    * **失敗の理由は戻り値で返す**（`sendSessionControl`と同じ。押した場所の下に出す）。
    * 積んだジョブは次の取得で`jobs`へ現れ、そちらが「送信しました」を出す。
