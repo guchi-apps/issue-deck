@@ -1177,7 +1177,50 @@ const CURRENT_SESSION_DOT_CLASS: Record<CurrentSessionTone, string> = {
   idle: "bg-stone-500 dark:bg-stone-400",
 };
 
+/** 閉じた状態の棒と凡例で使う状態の名前。並びもこの順（作業中 → 人を待っている → 応答を終えている） */
+const CURRENT_SESSION_TONE_LABEL: Record<CurrentSessionTone, string> = {
+  running: "作業中",
+  waiting: "確認待ち",
+  idle: "応答を終えている",
+};
+
+const CURRENT_SESSION_TONE_ORDER: CurrentSessionTone[] = ["running", "waiting", "idle"];
+
 type OpenIssueHandler = (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+
+/**
+ * 閉じた状態の棒グラフ（#3134）。**1本＝1マスの均等幅**で、色は状態。金額に比例させると
+ * 「何本動いているか」を数えにくくなるため、金額の比較は開いた詳細の棒に任せる。
+ */
+function CurrentSessionCountBar({ sessions }: { sessions: CurrentSessionUsage[] }) {
+  const counts = CURRENT_SESSION_TONE_ORDER.map((tone) => ({
+    tone,
+    count: sessions.filter((session) => session.statusTone === tone).length,
+  })).filter(({ count }) => count > 0);
+  return (
+    <span className="flex flex-col gap-1.5">
+      <span className="flex h-3 gap-[3px]" data-testid="current-session-count-bar">
+        {sessions.map((session) => (
+          <i
+            key={`${session.host}:${session.tmuxSessionName}`}
+            aria-hidden
+            className={cn("min-w-0 flex-1 rounded-[3px]", CURRENT_SESSION_DOT_CLASS[session.statusTone])}
+            title={`#${session.issueNumber} ${session.statusLabel}`}
+          />
+        ))}
+      </span>
+      <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground tabular-nums">
+        {counts.map(({ tone, count }) => (
+          <span key={tone} className="inline-flex items-center gap-1">
+            <i aria-hidden className={cn("size-2 rounded-[2px]", CURRENT_SESSION_DOT_CLASS[tone])} />
+            {CURRENT_SESSION_TONE_LABEL[tone]}
+            <b className="font-semibold text-foreground">{count}</b>
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
 
 /** 行の見出し（Issue番号・リポジトリ・タイトル・状態・モデル）。`elapsed`を渡すと1行目の右端へ置く */
 function CurrentSessionHeading({ session, elapsed }: { session: CurrentSessionUsage; elapsed: string | null }) {
@@ -1292,6 +1335,9 @@ function OpenIssueButton({ session, onOpenIssue }: { session: CurrentSessionUsag
  * 材料は実行状況パネルと同じセッション一覧と、pollerが5分おきに送る使用量で、使用量が
  * まだ届いていないセッションは「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
  * 1本1カードで、応答数・コンテキストを5時間枠の割合と同じ行へ寄せる。
+ *
+ * **最初は閉じた状態で、本数を示す棒グラフだけを出す**（#3134）。何本も動いていると詳細が
+ * 画面上部を埋め、期間の集計まで遠くなるため。見出しか棒を押すと上の詳細が開く。
  */
 function CurrentSessionsSection({
   sessions,
@@ -1305,37 +1351,58 @@ function CurrentSessionsSection({
   onOpenIssue?: OpenIssueHandler;
 }) {
   const now = useNow();
+  // 既定は閉じた状態（#3134）。開閉は記憶せず、画面を開くたびに閉じた状態から始める
+  const [isOpen, setIsOpen] = useState(false);
   const totalCost = sessions.reduce((sum, session) => sum + session.costUsd, 0);
   const maxCost = sessions.reduce((peak, session) => Math.max(peak, session.costUsd), 0);
   const elapsedOf = (session: CurrentSessionUsage) =>
     now === null ? null : formatSessionElapsed(session.startedAt, now);
 
+  if (sessions.length === 0) {
+    return (
+      <section aria-label="実行中のセッション" className="flex flex-col gap-2 rounded-lg border p-3">
+        <span className="text-xs font-semibold">実行中のセッション</span>
+        <p className="text-xs text-muted-foreground">いま実行中のセッションはありません</p>
+      </section>
+    );
+  }
+
   return (
     <section
       aria-label="実行中のセッション"
-      className={cn(
-        "flex flex-col gap-2 rounded-lg border p-3",
-        sessions.length > 0 && "border-emerald-600/60 dark:border-emerald-400/50",
-      )}
+      className="flex flex-col gap-2 rounded-lg border border-emerald-600/60 p-3 dark:border-emerald-400/50"
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="flex items-center gap-1.5 text-xs font-semibold">
-          {sessions.length > 0 && (
+      {/* 見出しと棒をまとめて1つのボタンにする（#3134）。どこを押しても開閉する */}
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="-m-1 flex flex-col gap-2 rounded-md p-1 text-left hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >
+        <span className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="flex items-center gap-1.5 text-xs font-semibold">
+            <ChevronRight
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0 self-center text-muted-foreground transition-transform",
+                isOpen && "rotate-90",
+              )}
+            />
             <i aria-hidden className="size-2 rounded-full bg-emerald-600 ring-[3px] ring-emerald-600/25 dark:bg-emerald-400" />
-          )}
-          実行中のセッション
-        </span>
-        {sessions.length > 0 && (
+            実行中のセッション
+          </span>
           <span className="text-[11px] text-muted-foreground tabular-nums">
             {sessions.length}本・計 <b className="text-foreground">{formatUsageUsd(totalCost)}</b>
             {reportedAt ? `・${formatRelativeDate(reportedAt)}の報告` : ""}
           </span>
-        )}
-      </div>
+          <span className="ml-auto text-[11px] whitespace-nowrap text-muted-foreground">
+            {isOpen ? "押すと閉じる" : "押すと詳細"}
+          </span>
+        </span>
+        <CurrentSessionCountBar sessions={sessions} />
+      </button>
 
-      {sessions.length === 0 ? (
-        <p className="text-xs text-muted-foreground">いま実行中のセッションはありません</p>
-      ) : compact ? (
+      {!isOpen ? null : compact ? (
         <ul className="flex flex-col gap-1.5">
           {sessions.map((session) => (
             <li
@@ -1401,7 +1468,7 @@ function CurrentSessionsSection({
           </ul>
         </div>
       )}
-      {sessions.length > 0 && (
+      {isOpen && (
         <p className="text-[10px] text-muted-foreground">
           状態は画面を開いた（更新した）時点のもので、自動では変わりません。金額はセッション開始からの累計（API換算の目安）で、期間の切り替えには連動しません。
         </p>
