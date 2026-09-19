@@ -1,4 +1,5 @@
 import { CHECK_USER_REASON_HEADING, type CheckUserReason } from "@/lib/github/approval-labels";
+import type { PullRequestStop } from "@/lib/issue-pull-request-progress";
 
 /** 画面内で「次の操作」をする場所（`check-user-focus.ts`がDOMのidへ対応付ける） */
 export type CheckUserScrollTarget = "approval" | "pull-requests" | "plan" | "question";
@@ -22,9 +23,32 @@ export type CheckUserAction =
 /** パネルを出す場所。行き先が自分自身になるかどうかがここで決まる */
 export type CheckUserPlacement = "status" | "approval";
 
+/**
+ * 停止パネルが名指しする「止まっているPR」（#3144）。
+ *
+ * **`action`とは別の項目にしてある。** 行き先が対応PRのセクション（`pull-requests`）の案内は
+ * `IssueStatusCard`が「本体パネルがすぐ下にある」として丸ごと出さない（#2924）。原因へのリンクを
+ * `action`に入れると、原因を伝えたいパネルそのものが消える。
+ */
+export type CheckUserCause = {
+  kind: PullRequestStop["kind"];
+  /** 「CIの実行結果を開く」のような外部リンクの名前 */
+  linkLabel: string;
+  /** リンク先。PRのURLを持たない材料では`null`で、その場合はリンクを出さない */
+  linkHref: string | null;
+  /** 対応PRのセクションへ移動するボタンを出すか。対応PRの行が描かれていないと押しても何も起きない */
+  canJumpToPullRequest: boolean;
+  jumpDirection: CheckUserScrollDirection;
+  /** パネルの最後に添える、原因とは別に残る疑問への一言 */
+  footnote: string;
+};
+
 export type CheckUserGuidance = {
   reason: CheckUserReason;
-  /** 見出し（`CHECK_USER_REASON_HEADING`と同じもの） */
+  /**
+   * 見出し（`CHECK_USER_REASON_HEADING`と同じもの）。**止まっているPRがあるとき
+   * （`cause`が入っているとき）は、原因を名指しした見出しに差し替わる。**
+   */
   heading: string;
   /** 何を求めているかの説明 */
   description: string;
@@ -39,6 +63,8 @@ export type CheckUserGuidance = {
    * 4行目が毎回その繰り返しになっていた。
    */
   agentState: string;
+  /** PRが止まっていることが原因のとき。停止パネルの色を赤にし、原因へのリンクを添える（#3144） */
+  cause: CheckUserCause | null;
 };
 
 export type CheckUserImplementationAgent = "claude" | "codex";
@@ -105,6 +131,69 @@ const REASON_GUIDE: Record<CheckUserReason, ReasonGuide> = {
     agentState: "待っていません",
   },
 };
+
+/**
+ * 止まっているPRごとの、停止パネルの文言（#3144）。
+ *
+ * 進捗ステッパーの`label`（「CI失敗」など1語）と呼び名を揃えてある。**「実装自体は完了しています」
+ * を添えるのは、止まっているのがエージェントの作業ではなくPRの側だと読み取れるようにするため。**
+ * 以前の停止パネルは「エージェントが作業を続けられずに停止しました」だけを言い、原因が
+ * CIの失敗でも同じ文面が出ていた。
+ */
+const PULL_REQUEST_STOP_COPY: Record<
+  PullRequestStop["kind"],
+  {
+    heading: (number: number) => string;
+    description: string;
+    linkLabel: string;
+    /** PRのURLに足すパス。CIとレビューは実行結果（Checks）へ、コンフリクトはPRそのものへ */
+    linkPath: string;
+  }
+> = {
+  ci: {
+    heading: (number) => `PR #${number} のCIが失敗して止まっています`,
+    description: "CIが通らないため、developへマージされません。実装自体は完了しています。",
+    linkLabel: "CIの実行結果を開く",
+    linkPath: "/checks",
+  },
+  conflict: {
+    heading: (number) => `PR #${number} がコンフリクトして止まっています`,
+    description: "developと衝突しているため、マージできません。実装自体は完了しています。",
+    linkLabel: "PRを開く",
+    linkPath: "",
+  },
+  review: {
+    heading: (number) => `PR #${number} のClaudeレビューが失敗して止まっています`,
+    description: "自動レビューが終わっていないため、マージされません。実装自体は完了しています。",
+    linkLabel: "レビューの実行結果を開く",
+    linkPath: "/checks",
+  },
+};
+
+const PULL_REQUEST_STOP_FOOTNOTE = "エージェントが作業を止めた理由は、直近のコメントにあります。";
+
+/** 止まっているPRから、見出し・説明・リンクを組み立てる。対象外の理由ではnull */
+function resolvePullRequestStopCause(
+  reason: CheckUserReason,
+  stop: PullRequestStop | null,
+  options: { direction: CheckUserScrollDirection; hasPullRequestSection: boolean },
+): { heading: string; description: string; cause: CheckUserCause } | null {
+  // 差し替えるのは`blocked`だけ。`ResolveCheckUserGuidanceOptions.pullRequestStop`に理由を書いてある
+  if (reason !== "blocked" || stop === null) return null;
+  const copy = PULL_REQUEST_STOP_COPY[stop.kind];
+  return {
+    heading: copy.heading(stop.number),
+    description: copy.description,
+    cause: {
+      kind: stop.kind,
+      linkLabel: copy.linkLabel,
+      linkHref: stop.htmlUrl ? `${stop.htmlUrl}${copy.linkPath}` : null,
+      canJumpToPullRequest: options.hasPullRequestSection,
+      jumpDirection: options.direction,
+      footnote: PULL_REQUEST_STOP_FOOTNOTE,
+    },
+  };
+}
 
 /**
  * 計画への返事を画面から送れるときの差し替え文（#2061）。
@@ -209,6 +298,17 @@ export type ResolveCheckUserGuidanceOptions = {
   sessionStatePending?: boolean;
   /** セッションの実装エージェント。CodexにはClaude CodeのRemote Controlが無いため案内を分ける */
   implementationAgent?: CheckUserImplementationAgent;
+  /**
+   * 対応PRが止まっている原因（#3144。`resolvePullRequestStop`の結果）。
+   *
+   * **差し替えるのは`blocked`だけ、かつ「実際の原因は別にある」と言える2か所（ローカル担当の
+   * 分岐と通常の分岐）だけ。**
+   * - `plan`・`question`・入力待ちは生きているプロンプトへの案内で、PRが止まっていても
+   *   そのプロンプトに答えるのが先
+   * - `merge`はマージ待ちの理由表示（`MergeCheckReasonNotice`・#1631）と対応PRセクションへの
+   *   導線を既に持っており、見出しを差し替えると「マージしてよいか」の判断が読み取りにくくなる
+   */
+  pullRequestStop?: PullRequestStop | null;
 };
 
 /**
@@ -234,6 +334,7 @@ export function resolveCheckUserGuidance({
   questionAnswerPending = false,
   sessionStatePending = false,
   implementationAgent = "claude",
+  pullRequestStop = null,
 }: ResolveCheckUserGuidanceOptions): CheckUserGuidance | null {
   if (reason === null) return null;
   // 行き先はローカルセッションが入力待ちかどうかで変わる（下の分岐）。**未確定のまま
@@ -258,6 +359,7 @@ export function resolveCheckUserGuidance({
       buttons: QUESTION_PENDING_BUTTONS,
       action: { kind: "scroll", target: "question", direction },
       agentState: guide.agentState,
+      cause: null,
     };
   }
 
@@ -272,6 +374,7 @@ export function resolveCheckUserGuidance({
       buttons: PLAN_PENDING_BUTTONS,
       action: { kind: "scroll", target: "plan", direction },
       agentState: guide.agentState,
+      cause: null,
     };
   }
 
@@ -296,19 +399,25 @@ export function resolveCheckUserGuidance({
           ? null
           : { kind: "scroll", target: "approval", direction },
       agentState: guide.agentState,
+      cause: null,
     };
   }
 
   const target: CheckUserScrollTarget =
     reason === "merge" && hasPullRequestSection ? "pull-requests" : "approval";
+  // 止まっているPRが原因のとき（#3144）。**入力待ち・計画・質問の分岐（上）は差し替えない**
+  const stopCause = resolvePullRequestStopCause(reason, pullRequestStop, {
+    direction,
+    hasPullRequestSection,
+  });
 
   // ローカルセッションが担当しているIssueでは、コメント欄の操作がセッションへ届かない（#1903）。
   // **マージだけは別**（GitHub側の操作なので実際に効く。入力待ちの分岐と同じ理由）
   if (localSession && reason !== "merge") {
     return {
       reason,
-      heading,
-      description: guide.description,
+      heading: stopCause?.heading ?? heading,
+      description: stopCause?.description ?? guide.description,
       buttons:
         reason === "answered"
           ? LOCAL_SESSION_BUTTONS_ANSWERED
@@ -324,6 +433,7 @@ export function resolveCheckUserGuidance({
             ? null
             : { kind: "scroll", target: "approval", direction },
       agentState: guide.agentState,
+      cause: stopCause?.cause ?? null,
     };
   }
 
@@ -334,10 +444,11 @@ export function resolveCheckUserGuidance({
 
   return {
     reason,
-    heading,
-    description: guide.description,
+    heading: stopCause?.heading ?? heading,
+    description: stopCause?.description ?? guide.description,
     buttons: atDestination ? guide.buttonsHere : guide.buttonsAway,
     action: atDestination ? null : { kind: "scroll", target, direction },
     agentState: guide.agentState,
+    cause: stopCause?.cause ?? null,
   };
 }

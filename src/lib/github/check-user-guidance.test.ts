@@ -254,4 +254,134 @@ describe("resolveCheckUserGuidance", () => {
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
     expect(guidance?.buttons).toContain("「マージ」");
   });
+
+  /**
+   * #3144: 停止パネルが「続け方の指示が必要です」としか言わず、PRのCIが落ちていることが読み取れな
+   * かった。差し替えるのは`blocked`だけで、リンクは`action`ではなく`cause`に持たせる
+   * （`action`を対応PRへ向けると`IssueStatusCard`がパネルごと隠す・#2924）。
+   */
+  describe("止まっているPRが原因のとき（#3144）", () => {
+    const stop = {
+      number: 148,
+      kind: "ci" as const,
+      htmlUrl: "https://github.com/o/r/pull/148",
+    };
+
+    it("blockedの見出しと説明を、原因を名指しした文言に差し替える", () => {
+      const guidance = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: stop,
+      });
+      expect(guidance?.heading).toBe("PR #148 のCIが失敗して止まっています");
+      expect(guidance?.description).toContain("CIが通らないため");
+      expect(guidance?.agentState).toBe("停止中");
+      expect(guidance?.cause).toMatchObject({
+        kind: "ci",
+        linkLabel: "CIの実行結果を開く",
+        linkHref: "https://github.com/o/r/pull/148/checks",
+        canJumpToPullRequest: true,
+        jumpDirection: "down",
+      });
+    });
+
+    it("行き先（action）は従来のまま承認欄で、対応PRへ向けない", () => {
+      const guidance = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: stop,
+      });
+      expect(guidance?.action).toEqual({ kind: "scroll", target: "approval", direction: "down" });
+    });
+
+    it("ローカルセッションが担当していても差し替える（Remote Controlの案内は残す）", () => {
+      const guidance = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        localSession: true,
+        sessionAlive: true,
+        remoteControlUrl: "https://claude.ai/code/session_abc",
+        pullRequestStop: stop,
+      });
+      expect(guidance?.heading).toBe("PR #148 のCIが失敗して止まっています");
+      expect(guidance?.action).toEqual({
+        kind: "remote-control",
+        url: "https://claude.ai/code/session_abc",
+      });
+    });
+
+    it("コンフリクト・レビュー失敗も、それぞれの見出しとリンク先になる", () => {
+      const conflict = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: { ...stop, kind: "conflict" },
+      });
+      expect(conflict?.heading).toBe("PR #148 がコンフリクトして止まっています");
+      expect(conflict?.cause?.linkHref).toBe("https://github.com/o/r/pull/148");
+
+      const review = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: { ...stop, kind: "review" },
+      });
+      expect(review?.heading).toBe("PR #148 のClaudeレビューが失敗して止まっています");
+      expect(review?.cause?.linkHref).toBe("https://github.com/o/r/pull/148/checks");
+    });
+
+    it("対応PRの行が描かれていなければ移動ボタンは出さず、承認カードからは上向きにする", () => {
+      const noSection = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        hasPullRequestSection: false,
+        pullRequestStop: stop,
+      });
+      expect(noSection?.cause?.canJumpToPullRequest).toBe(false);
+
+      const fromApproval = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "approval",
+        pullRequestStop: stop,
+      });
+      expect(fromApproval?.cause?.jumpDirection).toBe("up");
+    });
+
+    it("PRのURLを持たない材料ではリンクを出さない", () => {
+      const guidance = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: { ...stop, htmlUrl: null },
+      });
+      expect(guidance?.cause?.linkHref).toBeNull();
+    });
+
+    it("blocked以外の理由と、生きているプロンプトへの案内は差し替えない", () => {
+      for (const reason of ["merge", "plan", "input", "answered"] as const) {
+        const guidance = resolveCheckUserGuidance({
+          reason,
+          placement: "status",
+          pullRequestStop: stop,
+        });
+        expect(guidance?.cause).toBeNull();
+        expect(guidance?.heading).not.toContain("PR #148");
+      }
+      const waiting = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        sessionWaitingInput: true,
+        pullRequestStop: stop,
+      });
+      expect(waiting?.cause).toBeNull();
+      expect(waiting?.heading).toBe("続け方の指示が必要です");
+    });
+
+    it("止まっているPRが無ければ従来の文言のまま", () => {
+      const guidance = resolveCheckUserGuidance({
+        reason: "blocked",
+        placement: "status",
+        pullRequestStop: null,
+      });
+      expect(guidance?.heading).toBe("続け方の指示が必要です");
+      expect(guidance?.cause).toBeNull();
+    });
+  });
 });

@@ -8,6 +8,7 @@ import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   resolvePullRequestPosition,
+  resolvePullRequestStop,
   selectProgressPullRequest,
   type IssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
@@ -192,6 +193,20 @@ describe("buildIssuePullRequestProgress の内訳", () => {
     expect(labelOf("merge", settled)?.state).toBe("current");
   });
 
+  // #3144: CI失敗中に「マージ」が琥珀の現在地で光ると、止まっている原因（赤）とマージ待ち（琥珀）が
+  // 並び、どちらが本当の状態か読めなかった
+  it("止まっているPR（CI失敗・レビュー失敗・コンフリクト）では、マージの段も現在地にならない", () => {
+    for (const overrides of [
+      { ciState: "failure" as const },
+      { mergeJudgement: judgement({ aiReview: "failed" }) },
+      { mergeable: false },
+    ]) {
+      const stopped = buildIssuePullRequestProgress(pullRequest(overrides));
+      expect(labelOf("merge", stopped)?.state).toBe("pending");
+      expect(resolvePullRequestPosition(stopped)).toBe("checks");
+    }
+  });
+
   it("CIが失敗した段は failed で止まる", () => {
     const failed = buildIssuePullRequestProgress(pullRequest({ ciState: "failure" }));
     expect(labelOf("ci", failed)).toEqual({
@@ -282,5 +297,63 @@ describe("resolvePullRequestPosition（#2867）", () => {
 
   it("内訳が無ければ最初のマス", () => {
     expect(resolvePullRequestPosition(null)).toBe("checks");
+  });
+});
+
+describe("止まっている原因（stopKind）（#3144）", () => {
+  it("待っているものと同じ優先順（コンフリクト > CI失敗 > レビュー失敗）で1つだけ返す", () => {
+    expect(
+      buildIssuePullRequestProgress(
+        pullRequest({ mergeable: false, ciState: "failure" }),
+      ).stopKind,
+    ).toBe("conflict");
+    expect(
+      buildIssuePullRequestProgress(
+        pullRequest({ ciState: "failure", mergeJudgement: judgement({ aiReview: "failed" }) }),
+      ).stopKind,
+    ).toBe("ci");
+    expect(
+      buildIssuePullRequestProgress(
+        pullRequest({ mergeJudgement: judgement({ aiReview: "failed" }) }),
+      ).stopKind,
+    ).toBe("review");
+  });
+
+  it("動いている・人待ち・判定中は止まっているとは言わない", () => {
+    expect(buildIssuePullRequestProgress(pullRequest()).stopKind).toBeNull();
+    expect(buildIssuePullRequestProgress(pullRequest({ ciState: "pending" })).stopKind).toBeNull();
+    // `mergeable`がnull（GitHubが判定中）は「コンフリクトなし」とも「あり」とも言わない
+    expect(buildIssuePullRequestProgress(pullRequest({ mergeable: null })).stopKind).toBeNull();
+  });
+});
+
+describe("resolvePullRequestStop（#3144）", () => {
+  it("止まっているPRの番号・原因・URLを返す", () => {
+    expect(
+      resolvePullRequestStop([
+        pullRequest({ number: 148, ciState: "failure", htmlUrl: "https://github.com/o/r/pull/148" }),
+      ]),
+    ).toEqual({ number: 148, kind: "ci", htmlUrl: "https://github.com/o/r/pull/148" });
+  });
+
+  it("止まっていなければ、開いているPRが無ければ、nullを返す", () => {
+    expect(resolvePullRequestStop([pullRequest()])).toBeNull();
+    expect(resolvePullRequestStop([])).toBeNull();
+    expect(
+      resolvePullRequestStop([pullRequest({ state: "closed", merged: true, ciState: "failure" })]),
+    ).toBeNull();
+  });
+
+  it("ステッパーの内訳と同じPR（開いているうちで番号が最大）を選ぶ", () => {
+    expect(
+      resolvePullRequestStop([
+        pullRequest({ number: 10, ciState: "failure" }),
+        pullRequest({ number: 12 }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("URLを持たない材料ではhtmlUrlがnull", () => {
+    expect(resolvePullRequestStop([pullRequest({ ciState: "failure" })])?.htmlUrl).toBeNull();
   });
 });
