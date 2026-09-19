@@ -8,6 +8,7 @@ import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
 import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import { useNow } from "@/hooks/use-now";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
@@ -15,6 +16,7 @@ import { getRepoColor } from "@/lib/repo-color";
 import {
   buildRepositoryPieSlices,
   fillUsageDays,
+  formatSessionElapsed,
   formatUsageTokens,
   formatUsageUsd,
   isUsageKindInWorkFlow,
@@ -26,6 +28,8 @@ import {
   usagePhaseKindKey,
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
   REPOSITORY_PIE_TOP_COUNT,
+  type CurrentSessionTone,
+  type CurrentSessionUsage,
   type SessionUsageEntry,
   type UsageByAgent,
   type UsageBySource,
@@ -1160,6 +1164,252 @@ function IssueGroupList({
   );
 }
 
+/** 状態のピルの色（#3084）。作業中＝緑、人を待っている＝橙、応答を終えている＝中立色 */
+const CURRENT_SESSION_TONE_CLASS: Record<CurrentSessionTone, string> = {
+  running: "border-emerald-600/45 text-emerald-700 dark:text-emerald-400",
+  waiting: "border-amber-600/45 text-amber-700 dark:text-amber-400",
+  idle: "border-stone-500/45 text-stone-600 dark:text-stone-400",
+};
+
+const CURRENT_SESSION_DOT_CLASS: Record<CurrentSessionTone, string> = {
+  running: "bg-emerald-600 dark:bg-emerald-400",
+  waiting: "bg-amber-600 dark:bg-amber-400",
+  idle: "bg-stone-500 dark:bg-stone-400",
+};
+
+type OpenIssueHandler = (repository: string, issueNumber: number | null, prNumber: number | null) => void;
+
+/** 行の見出し（Issue番号・リポジトリ・タイトル・状態・モデル）。`elapsed`を渡すと1行目の右端へ置く */
+function CurrentSessionHeading({ session, elapsed }: { session: CurrentSessionUsage; elapsed: string | null }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
+        <span
+          aria-hidden
+          className="size-[7px] shrink-0 self-center rounded-[2px]"
+          style={{ backgroundColor: AGENT_COLORS[session.agent] }}
+          title={session.agent === "claude" ? "Claude" : "Codex"}
+        />
+        <span className="shrink-0 font-semibold">#{session.issueNumber}</span>
+        <span className="min-w-0 truncate text-muted-foreground">{session.repository}</span>
+        {elapsed && (
+          <span className="ml-auto shrink-0 pl-2 text-[10px] whitespace-nowrap text-muted-foreground tabular-nums">
+            開始から {elapsed}
+          </span>
+        )}
+      </div>
+      {session.title && (
+        <p className="mt-0.5 truncate text-[11px]" title={session.title}>
+          {session.title}
+        </p>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold",
+            CURRENT_SESSION_TONE_CLASS[session.statusTone],
+          )}
+        >
+          <i aria-hidden className={cn("size-1.5 rounded-full", CURRENT_SESSION_DOT_CLASS[session.statusTone])} />
+          {session.statusLabel}
+        </span>
+        {session.models.map((model) => (
+          <span
+            key={model}
+            className="shrink-0 rounded border bg-muted px-1 py-px text-[9px] font-medium text-foreground"
+          >
+            {sessionUsageModelLabel(model)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 金額の棒と、その下の5時間枠の割合。`trailing`は同じ行の右側へ置く（スマホの応答数・コンテキスト） */
+function CurrentSessionBar({
+  session,
+  maxCost,
+  trailing,
+}: {
+  session: CurrentSessionUsage;
+  maxCost: number;
+  trailing?: ReactNode;
+}) {
+  if (!session.reported) {
+    return (
+      <div>
+        <div className="h-2 rounded-full bg-muted" />
+        <p className="mt-0.5 text-[10px] text-muted-foreground italic">集計待ち（5分おきに報告）</p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${maxCost > 0 ? (session.costUsd / maxCost) * 100 : 0}%`,
+            backgroundColor: AGENT_COLORS[session.agent],
+          }}
+        />
+      </div>
+      <div className="mt-0.5 flex flex-wrap justify-between gap-x-2 text-[10px] text-muted-foreground tabular-nums">
+        {session.quotaPercent !== null ? (
+          <span className="font-semibold text-amber-700 dark:text-amber-400">
+            5時間枠の約{session.quotaPercent.toFixed(1)}%
+          </span>
+        ) : (
+          <span>プラン枠の換算なし</span>
+        )}
+        {trailing}
+      </div>
+    </div>
+  );
+}
+
+function OpenIssueButton({ session, onOpenIssue }: { session: CurrentSessionUsage; onOpenIssue?: OpenIssueHandler }) {
+  if (!onOpenIssue) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-5 shrink-0"
+      title="Issueを開く"
+      onClick={() => onOpenIssue(session.repository, session.issueNumber, null)}
+    >
+      <ExternalLink className="size-3" />
+      <span className="sr-only">Issueを開く</span>
+    </Button>
+  );
+}
+
+/**
+ * 「実行中のセッション」欄（#3084）。**いまサブPCで生きているセッションごとに、始まってからの
+ * 使用量を並べる。** 画面のいちばん上に置き、期間（1日/7日/30日）には連動しない。
+ *
+ * 材料は実行状況パネルと同じセッション一覧と、pollerが5分おきに送る使用量で、使用量が
+ * まだ届いていないセッションは「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
+ * 1本1カードで、応答数・コンテキストを5時間枠の割合と同じ行へ寄せる。
+ */
+function CurrentSessionsSection({
+  sessions,
+  reportedAt,
+  compact,
+  onOpenIssue,
+}: {
+  sessions: CurrentSessionUsage[];
+  reportedAt: string | null;
+  compact: boolean;
+  onOpenIssue?: OpenIssueHandler;
+}) {
+  const now = useNow();
+  const totalCost = sessions.reduce((sum, session) => sum + session.costUsd, 0);
+  const maxCost = sessions.reduce((peak, session) => Math.max(peak, session.costUsd), 0);
+  const elapsedOf = (session: CurrentSessionUsage) =>
+    now === null ? null : formatSessionElapsed(session.startedAt, now);
+
+  return (
+    <section
+      aria-label="実行中のセッション"
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border p-3",
+        sessions.length > 0 && "border-emerald-600/60 dark:border-emerald-400/50",
+      )}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="flex items-center gap-1.5 text-xs font-semibold">
+          {sessions.length > 0 && (
+            <i aria-hidden className="size-2 rounded-full bg-emerald-600 ring-[3px] ring-emerald-600/25 dark:bg-emerald-400" />
+          )}
+          実行中のセッション
+        </span>
+        {sessions.length > 0 && (
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {sessions.length}本・計 <b className="text-foreground">{formatUsageUsd(totalCost)}</b>
+            {reportedAt ? `・${formatRelativeDate(reportedAt)}の報告` : ""}
+          </span>
+        )}
+      </div>
+
+      {sessions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">いま実行中のセッションはありません</p>
+      ) : compact ? (
+        <ul className="flex flex-col gap-1.5">
+          {sessions.map((session) => (
+            <li
+              key={`${session.host}:${session.tmuxSessionName}`}
+              className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1.5 rounded-lg border p-2.5"
+            >
+              <CurrentSessionHeading session={session} elapsed={null} />
+              <div className="flex flex-col items-end justify-between gap-1">
+                <span className="text-[10px] whitespace-nowrap text-muted-foreground tabular-nums">
+                  {elapsedOf(session) ? `開始から ${elapsedOf(session)}` : ""}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="text-xs font-semibold tabular-nums">
+                    {session.reported ? formatUsageUsd(session.costUsd) : "—"}
+                  </span>
+                  <OpenIssueButton session={session} onOpenIssue={onOpenIssue} />
+                </span>
+              </div>
+              <div className="col-span-2">
+                <CurrentSessionBar
+                  session={session}
+                  maxCost={maxCost}
+                  trailing={
+                    <span>
+                      {`${session.responses.toLocaleString()}応答　コンテキスト ${formatUsageTokens(session.contextTokens)}`}
+                    </span>
+                  }
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="overflow-x-auto">
+          <ul className="flex min-w-[44rem] flex-col gap-0.5">
+            <li className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.4fr)_4.5rem_4rem_5.5rem_1.25rem] gap-2.5 px-1.5 text-[10px] font-semibold text-muted-foreground">
+              <span>Issue・状態</span>
+              <span>金額（最大との比較）</span>
+              <span className="text-right">金額</span>
+              <span className="text-right">応答</span>
+              <span className="text-right">コンテキスト</span>
+              <span />
+            </li>
+            {sessions.map((session) => (
+              <li
+                key={`${session.host}:${session.tmuxSessionName}`}
+                className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.4fr)_4.5rem_4rem_5.5rem_1.25rem] items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-accent/50"
+              >
+                <CurrentSessionHeading session={session} elapsed={elapsedOf(session)} />
+                <CurrentSessionBar session={session} maxCost={maxCost} />
+                <span className="text-right text-xs font-semibold tabular-nums">
+                  {session.reported ? formatUsageUsd(session.costUsd) : "—"}
+                </span>
+                <span className="text-right text-[11px] tabular-nums">
+                  {session.reported ? session.responses.toLocaleString() : "—"}
+                </span>
+                <span className="text-right text-[11px] tabular-nums">
+                  {session.reported ? formatUsageTokens(session.contextTokens) : "—"}
+                </span>
+                <OpenIssueButton session={session} onOpenIssue={onOpenIssue} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {sessions.length > 0 && (
+        <p className="text-[10px] text-muted-foreground">
+          金額はセッション開始からの累計（API換算の目安）。期間の切り替えには連動しません。
+        </p>
+      )}
+    </section>
+  );
+}
+
 /** 明細に出すIssueの件数。全部並べると30日で数百行になり、上位が読めなくなる */
 const VISIBLE_ISSUES_STEP = 20;
 
@@ -1226,6 +1476,16 @@ export function SessionUsagePanel({
       </header>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {/* いま動いているセッション（#3084）。期間の集計より先に、画面のいちばん上へ置く */}
+      {data && (
+        <CurrentSessionsSection
+          sessions={data.currentSessions ?? []}
+          reportedAt={data.reportedAt}
+          compact={compact}
+          onOpenIssue={onOpenIssue}
+        />
+      )}
 
       {/* プラン枠そのもの。**実測のメーター**で、Claude・Codexを並べて置く */}
       <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">

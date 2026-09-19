@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCurrentSessionUsage,
   buildIssueQuotaPercents,
   buildPhaseBreakdown,
   buildQuotaEstimate,
   buildRepositoryPieSlices,
   buildSessionUsageSummary,
   fillUsageDays,
+  formatSessionElapsed,
   formatUsageTokens,
   formatUsageUsd,
   isUsageKindInWorkFlow,
@@ -18,6 +20,7 @@ import {
   sessionUsageImplementationPhases,
   sessionUsageKindLabel,
   sessionUsagePhaseSplit,
+  type CurrentSessionInput,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
 
@@ -816,5 +819,101 @@ describe("buildRepositoryPieSlices（#3060）", () => {
   it("金額の合計が0なら切れを返さない", () => {
     expect(buildRepositoryPieSlices([])).toEqual([]);
     expect(buildRepositoryPieSlices([group("a", 0)])).toEqual([]);
+  });
+});
+
+describe("buildCurrentSessionUsage（#3084）", () => {
+  const baseSession: CurrentSessionInput = {
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-3084",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 3084,
+    firstSeenAt: "2026-09-19T01:00:00.000Z",
+    agent: "claude",
+    statusLabel: "作業中",
+    statusTone: "running",
+    models: ["claude-opus-5"],
+  };
+  const usage = (overrides: Partial<SessionUsageEntry> = {}): SessionUsageEntry => ({
+    agent: "claude",
+    source: "local",
+    sessionId: "a",
+    host: "subpc",
+    kind: "implementation",
+    repository: "issue-deck",
+    issueNumber: 3084,
+    prNumber: null,
+    responses: 10,
+    inputTokens: 100,
+    cacheCreateTokens: 200,
+    cacheReadTokens: 700,
+    outputTokens: 50,
+    contextTokens: 1_000,
+    costUsd: 2,
+    models: ["claude-opus-5"],
+    startedAt: "2026-09-19T01:00:00.000Z",
+    endedAt: "2026-09-19T01:30:00.000Z",
+    ...overrides,
+  });
+
+  it("同じホスト・リポジトリ・Issueで、開始以降に終わった行を足し込む", () => {
+    const [row] = buildCurrentSessionUsage({
+      sessions: [baseSession],
+      entries: [
+        usage(),
+        usage({ sessionId: "subagent", costUsd: 1, responses: 5, models: ["claude-haiku-4-5"] }),
+        // 前回のセッション（開始より前に終わった）は拾わない
+        usage({ sessionId: "old", endedAt: "2026-09-19T00:59:00.000Z", costUsd: 100 }),
+        // 別ホスト・別Issue・GitHub Actionsは拾わない
+        usage({ sessionId: "h", host: "mainpc", costUsd: 100 }),
+        usage({ sessionId: "i", issueNumber: 1, costUsd: 100 }),
+        usage({ sessionId: "gha", source: "github-actions", costUsd: 100 }),
+      ],
+      quota: null,
+    });
+    expect(row).toMatchObject({
+      repository: "issue-deck",
+      reported: true,
+      costUsd: 3,
+      responses: 15,
+      contextTokens: 2_000,
+      quotaPercent: null,
+    });
+    expect(row.models).toEqual(["claude-opus-5", "claude-haiku-4-5"]);
+  });
+
+  it("5時間枠の割合はウィンドウ内のClaudeの行だけで換算する", () => {
+    const [row] = buildCurrentSessionUsage({
+      sessions: [baseSession],
+      entries: [usage({ costUsd: 4 })],
+      quota: { usdPerPercent: 2, windowStartMs: Date.parse("2026-09-19T00:00:00.000Z"), windowCostUsd: 10 },
+    });
+    expect(row.quotaPercent).toBe(2);
+  });
+
+  it("行が無いセッションは集計待ちとして末尾に並べ、モデルはセッション側の値で補う", () => {
+    const rows = buildCurrentSessionUsage({
+      sessions: [
+        { ...baseSession, issueNumber: 1, tmuxSessionName: "issue-deck-issue-1" },
+        baseSession,
+        { ...baseSession, issueNumber: 2, tmuxSessionName: "issue-deck-issue-2" },
+      ],
+      entries: [usage({ costUsd: 1 }), usage({ sessionId: "b", issueNumber: 2, costUsd: 5 })],
+      quota: null,
+    });
+    expect(rows.map((row) => row.issueNumber)).toEqual([2, 3084, 1]);
+    expect(rows[2]).toMatchObject({ reported: false, costUsd: 0, models: ["claude-opus-5"] });
+  });
+});
+
+describe("formatSessionElapsed（#3084）", () => {
+  const start = "2026-09-19T00:00:00.000Z";
+  const at = (minutes: number) => Date.parse(start) + minutes * 60_000;
+  it("分・時間・日の単位で出す", () => {
+    expect(formatSessionElapsed(start, at(0.5))).toBe("1分未満");
+    expect(formatSessionElapsed(start, at(42))).toBe("42分");
+    expect(formatSessionElapsed(start, at(60))).toBe("1時間");
+    expect(formatSessionElapsed(start, at(78))).toBe("1時間18分");
+    expect(formatSessionElapsed(start, at(60 * 26))).toBe("1日2時間");
   });
 });
