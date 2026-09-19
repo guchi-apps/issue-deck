@@ -49,19 +49,30 @@ export function CheckUserReasonNotice({
   /** 理由の詳細（`01.check-merge`のときの「自動マージされなかった理由」など） */
   children?: ReactNode;
 }) {
-  const { action } = guidance;
+  const { action, cause } = guidance;
 
   return (
     <div
+      // 止まっているPRが原因のとき（#3144）は、確認待ちの琥珀ではなく止まっているものの赤にする。
+      // 進捗ステッパーの内訳（`PR_STEP_CLASS.failed`）と同じ色で、同じことを言っていると分かる
+      role={cause ? "alert" : undefined}
       className={cn(
-        "flex flex-col gap-1.5 rounded-md bg-amber-500/15 px-2.5 py-2 ring-1 ring-inset ring-amber-500/40",
+        "flex flex-col gap-1.5 rounded-md px-2.5 py-2 ring-1 ring-inset",
+        cause
+          ? "bg-destructive/10 ring-destructive/40"
+          : "bg-amber-500/15 ring-amber-500/40",
         className,
       )}
     >
       {/* エージェントの状態は見出しと同じ行へ寄せる（#2057）。以前はパネルの4行目に
           「待機中 マージするまで次の工程へ進みません」として独立した段を持っていたが、
           補足文はどの理由でも説明文かボタンの案内の言い換えだった（`check-user-guidance.ts`） */}
-      <p className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
+      <p
+        className={cn(
+          "flex items-center gap-2 text-xs font-semibold",
+          cause ? "text-destructive" : "text-amber-700 dark:text-amber-400",
+        )}
+      >
         <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
         <span className="min-w-0">{guidance.heading}</span>
         <span className="ml-auto shrink-0 rounded bg-background px-1.5 py-0.5 text-[11px] font-semibold text-foreground ring-1 ring-inset ring-border">
@@ -70,6 +81,32 @@ export function CheckUserReasonNotice({
       </p>
       <p className="text-[13px] leading-relaxed">{guidance.description}</p>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        {/* 原因へのリンクは`action`とは別に持つ（#3144）。行き先が対応PRのセクションの案内は
+            `IssueStatusCard`が丸ごと出さない（#2924）ため、`action`に入れるとこのパネルが消える */}
+        {cause?.linkHref && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-destructive bg-background font-semibold text-destructive hover:text-destructive"
+            asChild
+          >
+            <a href={cause.linkHref} target="_blank" rel="noreferrer">
+              {cause.linkLabel}
+              <ExternalLink />
+            </a>
+          </Button>
+        )}
+        {cause?.canJumpToPullRequest && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-background"
+            onClick={() => focusCheckUserTarget("pull-requests")}
+          >
+            {SCROLL_BUTTON_LABEL["pull-requests"]}
+            {cause.jumpDirection === "up" ? <ArrowUp /> : <ArrowDown />}
+          </Button>
+        )}
         {action?.kind === "remote-control" && (
           <Button size="sm" variant="outline" className="bg-background" asChild>
             <a href={action.url} target="_blank" rel="noreferrer">
@@ -94,6 +131,11 @@ export function CheckUserReasonNotice({
         )}
         <p className="text-xs text-muted-foreground">{guidance.buttons}</p>
       </div>
+      {cause && (
+        <p className="border-t border-dashed border-destructive/40 pt-1.5 text-xs text-muted-foreground">
+          {cause.footnote}
+        </p>
+      )}
       {children}
     </div>
   );

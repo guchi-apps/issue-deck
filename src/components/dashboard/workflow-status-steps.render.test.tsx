@@ -480,6 +480,7 @@ function progress(
     pullRequestNumber: 2822,
     label: "Claudeがレビュー中",
     tone: "running",
+    stopKind: null,
     steps: [
       { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
       { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },

@@ -92,7 +92,6 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { closedStateLabel } from "@/lib/issue-state-reason";
 import { checkUserReason, isApprovalPending } from "@/lib/github/approval-labels";
 import {
-  formatCodeReviewListCount,
   summarizeCodeReviewFindingProgress,
   type CodeReviewFindingProgress,
 } from "@/lib/github/code-review";
@@ -264,8 +263,8 @@ type IssueListProps = {
    */
   onStartCodeReview?: (repositoryFullName: string) => void;
   /**
-   * リポジトリ別の枠（#3092）が数えるレビューIssue。**一覧の20件上限（#2855）を掛ける前**の
-   * 集合を渡す——close済みで一覧から外れた古いレビューも、実施の記録としては数える。
+   * リポジトリ別の枠（#3092）が数えるレビューIssue。**状態で絞る前**の集合を渡す
+   * ——一覧に並ぶのはopenだけ（#3141）なので、close済みの古いレビューも、実施の記録としては数える。
    * 省略時は一覧に並んでいるIssueだけで数える。
    */
   codeReviewIssues?: Issue[];
@@ -732,7 +731,7 @@ export function IssueList({
   }, [issues, codeReviewSummaries, codeReviewFindingIssues]);
   /**
    * リポジトリ別の枠（#3092）の行。「結果待ち」は一覧の行のバッジと同じ要約から読む
-   * （一覧の20件上限より古いレビューは要約が無く、結果待ちとしては出ない）。
+   * （一覧に並ばないclose済みのレビューは要約が無く、結果待ちとしては出ない）。
    */
   const codeReviewRepoRows = useMemo(() => {
     if (view !== "code-review" || now === null) return [];
@@ -858,10 +857,6 @@ export function IssueList({
       ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
     (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
-    // 「コードレビュー」はclose済みも並ぶので、まだ読み終えていない件数を添える（#2855）
-    (view === "code-review"
-      ? formatCodeReviewListCount(issues, listedCount, snoozedTotal)
-      : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 

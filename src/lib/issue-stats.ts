@@ -50,41 +50,6 @@ function filterLatestReleaseIssues(issues: Issue[], referenceIssues: Issue[]): I
   });
 }
 
-/**
- * 「コードレビュー」ビューに残すclose済みレビューの上限（#2855）。
- *
- * このビューは過去のレビュー結果を読み返す場所なのでclose済みも並べる
- * （`LABEL_FILTER_PRESETS`の`code-review`が`state: "all"`）が、**窓が無いと
- * 一覧・行のバッジのためのコメント取得の2つが同時に上限を失う。**
- * 過去を含める他のビューはどちらも窓を持っている（「最近追加した」は24時間、
- * 「直近本番に反映した」は最新リリース）ので、ここにも1つ置く。
- *
- * 日数ではなく件数にしてあるのは、レビューを回す間隔がまちまちで、しばらく回して
- * いない期間に一覧が空になるため。
- */
-const CODE_REVIEW_HISTORY_LIMIT = 20;
-
-/**
- * 「コードレビュー」ビューに並べるレビューを、**未完了（open）は全部＋完了した新しい
- * 20件**に切り詰める（#2855）。
- *
- * openを常に残すのは、まだ読み終えていないレビューが件数の上限で画面から消えると、
- * このビューが「対応するもの」を見る場所として成立しなくなるため。切り詰めたぶんは
- * 「すべてのIssue」（状態=すべて）とGitHub側からは今までどおり読める。
- */
-function limitCodeReviewHistory(issues: Issue[]): Issue[] {
-  const closed = issues.filter((issue) => issue.state !== "open");
-  if (closed.length <= CODE_REVIEW_HISTORY_LIMIT) return issues;
-  // 一覧の並べ替え（`sortIssues`）はこの後なので、ここでは自前に新しい順で選ぶ
-  const kept = new Set(
-    [...closed]
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, CODE_REVIEW_HISTORY_LIMIT)
-      .map((issue) => issue.id),
-  );
-  return issues.filter((issue) => issue.state === "open" || kept.has(issue.id));
-}
-
 export function filterIssuesByView(
   issues: Issue[],
   view: NavViewId,
@@ -155,9 +120,6 @@ export function filterIssuesByView(
         return true;
       };
       const matched = issues.filter(matchesView);
-      // 過去のレビューは新しい方から一定件数までにする（#2855）。一覧・行のバッジのための
-      // コメント取得が、同じ1か所で頭打ちになる（左メニューの数字はopenだけを数える。#3081）
-      if (navView.codeReviewOnly) return limitCodeReviewHistory(matched);
       if (!navView.latestReleaseOnly) return matched;
       return filterLatestReleaseIssues(matched, referenceIssues.filter(matchesView));
     }
@@ -368,11 +330,6 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  * 「回答が届いていてまだ読んでいない」という合図はオレンジの丸（`computeQuestionAttention`）に
  * 残してあり、件数の内訳は一覧ヘッダーの`formatQuestionListCount`（`3件・未確認1件`）で読む。
  *
- * **「コードレビュー」（`code-review`）は、一覧に並ぶ行数ではなくopen（未完了）のぶんだけを出す**
- * （#3081）。このビューは読み終えたレビューも並べる（#2855）ため、行数のままだと「あと何件
- * 読めばよいか」が読めない。数字は一覧ヘッダーの`formatCodeReviewListCount`の「未完了N件」と
- * 一致する。
- *
  * **保留中の項目はどのビューの件数からも外す**（#2398・#2456。`lib/snooze.ts`）。
  * ユーザーが「いまは実施しない」と決めたものは、いま手を動かせば減る数には入らない。
  * **#2398では要対応の2ビュー（`check-user`・`manual-step`）だけだったが、#2456で全ビューへ
@@ -425,9 +382,7 @@ export function computeNavCountsForFilters(
         ? computeManualStepAttention(matched, referenceIssues).actionable
         : view.id === "check-user" && checkUserRunningIssueIds
           ? matched.filter((issue) => !checkUserRunningIssueIds.has(issue.id)).length
-          : view.id === "code-review"
-            ? matched.filter((issue) => issue.state === "open").length
-            : matched.length;
+          : matched.length;
   }
   return counts;
 }
@@ -480,6 +435,17 @@ export function upsertIssue(issues: Issue[], issue: Issue): Issue[] {
   return issues.some((item) => item.id === issue.id)
     ? issues.map((item) => (item.id === issue.id ? issue : item))
     : [issue, ...issues];
+}
+
+/**
+ * 別リポジトリへ移動したIssueを一覧へ反映する（#3145）。移動でGitHub IDが変わり`id`が別物になるため、
+ * `id`で置換する`upsertIssue`だけでは移動元が残る。移動元を外してから移動先を入れる。
+ */
+export function replaceMovedIssue(issues: Issue[], source: Issue, moved: Issue): Issue[] {
+  return upsertIssue(
+    issues.filter((item) => item.id !== source.id),
+    moved,
+  );
 }
 
 export function reconcileIssues(prevIssues: Issue[], nextIssues: Issue[]): Issue[] {

@@ -1202,12 +1202,6 @@ describe("コードレビュービューの行に出す結果（#2855）", () =>
     expect(reviewRow(30).textContent).toContain("レビュー中");
     expect(reviewRow(30).querySelector(".animate-spin")).not.toBeNull();
   });
-
-  it("close済みが混ざるヘッダーには未完了の件数を添える", () => {
-    renderList({ issues: reviews, view: "code-review", showHeader: true });
-
-    expect(screen.getByText("2件・未完了1件")).toBeTruthy();
-  });
 });
 
 describe("IssueListの予約実行の目印（#2866・#2995）", () => {

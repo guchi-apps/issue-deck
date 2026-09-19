@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { GithubApiError } from "@/lib/github/github-api-error";
 import {
+  fetchIssueState,
   fetchRepositoryComments,
   hasReopenedEvent,
   IssueTransferPartialError,
@@ -197,5 +199,32 @@ describe("hasReopenedEvent", () => {
     );
 
     await expect(hasReopenedEvent("guchi-apps", "issue-deck", 1, "token")).resolves.toBeNull();
+  });
+});
+
+describe("fetchIssueState", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("open・closedをそのまま返し、404はnullにする", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { state: "open" }))
+        .mockResolvedValueOnce(jsonResponse(200, { state: "closed" }))
+        .mockResolvedValueOnce(jsonResponse(404, { message: "Not Found" })),
+    );
+    expect(await fetchIssueState("o", "r", 1, "t")).toBe("open");
+    expect(await fetchIssueState("o", "r", 1, "t")).toBe("closed");
+    expect(await fetchIssueState("o", "r", 1, "t")).toBeNull();
+  });
+
+  it("401はnullに畳まずGithubApiErrorを投げる（トークンの延長を呼び出し側に任せる。#3148）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(401, { message: "Bad credentials" })));
+    const error = await fetchIssueState("o", "r", 1, "t").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GithubApiError);
+    expect((error as GithubApiError).status).toBe(401);
   });
 });

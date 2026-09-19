@@ -54,6 +54,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     自前のエラーとして`created`と一緒に返す
     （[`lib/new-app/launch-failure.ts`](../src/lib/new-app/launch-failure.ts)の
     `decideLaunchError`がこの判断を持つ）。
+  - **逆に、`fn`の中で401を`null`や`false`に畳んではいけない**（#3148）。延長は
+    `GithubApiError`（status 401）が`fn`から投げられたときにしか走らないため、失敗を
+    まとめて`null`で返す取得関数（`if (!res.ok) return null`）を使うと、期限切れのトークンが
+    延長されないまま「取得できなかった」扱いになる。ユーザートークンは8時間で切れるので、
+    **画面を触らない時間帯に動く経路（予約実行など）でだけ必ず失敗し、日中の確認では再現しない。**
+    `null`を返す取得関数でも401だけは投げる（`fetchIssueState`）
 - **ロジックは純粋関数として `lib/` に切り出し、隣に `*.test.ts` を置く。** コンポーネントに
   埋め込むとテストできなくなる。既存の `issue-status.ts` / `workflow-status.ts` /
   `search-query.ts` などがこの形。
@@ -990,6 +996,11 @@ export function POST(request: NextRequest) {
   - 画面の「Issueを移動」（`api/issues/transfer`）はWebhookと別経路で、GraphQLの`transferIssue`の後に
     新しい番号でREST APIから取り直して書く。ここでも移動元の行は残るため、
     `deleteTransferredSourceIssue`で消している（Webhookの到着を待たない）。
+  - **画面側も同じ理由で`onIssueUpdated`（`id`で置換）では反映できない**（#3145）。「Issueを移動」の
+    成功後は`issue-deck-shell.tsx`の`handleIssueMoved`が、`replaceMovedIssue`で移動元を一覧から外して
+    移動先を入れ、`selectIssue(moved, { history: "replace" })`で移動先の詳細へ移る。履歴は積まない——
+    積むと「戻る」が、もう解決できない移動元のURLへ着く。**GitHub上で直接移動した場合は
+    サーバーが旧ID→新IDの対応を持たないため、画面は自動で遷移せず、移動元が消えるだけ**。
   - **移動でIssueのGitHub IDが変わるため、移動先では行を作り直すことになる。** `00.check-user`の
     待ち時間計測（`checkUserLabeledAt`）など、DB行に紐づくissue-deck側の記録は引き継がれない。
   - 取り込みそこねて残った行は、画面の「再同期」（`syncRepositoryIssues`の
@@ -1069,6 +1080,18 @@ export function POST(request: NextRequest) {
     理由ラベル単体ではなく`resolveCheckUserGuidance`が返す`action`のtargetで判定する**
     （`plan`・`question`・`pull-requests`なら出さない。`null`＝承認欄自身、または
     `remote-control`なら出す）。
+    **対応PRが止まっている（CI失敗・コンフリクト・Claudeレビュー失敗）ときの停止パネル
+    （`01.check-blocked`）は、原因を見出しにして赤にする**（#3144）。以前は「続け方の指示が
+    必要です／理由は直近のコメントにあります」という汎用文のままで、止めているのがPRの
+    CI失敗だと読み取れなかった。原因は`resolvePullRequestStop`（`lib/issue-pull-request-progress.ts`。
+    ステッパーの内訳と同じPRを選ぶ）から`resolveCheckUserGuidance`の`pullRequestStop`へ渡り、
+    **リンク（「CIの実行結果を開く」「対応PRへ移動」）は`action`ではなく`guidance.cause`に持たせる**
+    ——`action`を`pull-requests`へ向けると、上の判定でパネルごと出なくなる。差し替えるのは
+    `blocked`のローカル担当の分岐と通常の分岐だけで、`merge`（マージ待ちの理由表示が別にある）・
+    `plan`・`question`・入力待ち（生きているプロンプトへの案内）は差し替えない。上部
+    （`IssueDetail`・`MobileIssueDetail`）とコメント欄（`CommentThread`）の3か所が同じ値を渡す。
+    **CI失敗・レビュー失敗・コンフリクトのPRでは、内訳の「マージ」段も現在地（琥珀）にしない**
+    （`buildIssuePullRequestProgress`。止まっている原因の赤とマージ待ちの琥珀が並ぶのを避ける）。
   - **対応PR・親子Issue・AI要約は既定で畳む**
     （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。

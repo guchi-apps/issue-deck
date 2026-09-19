@@ -28,12 +28,15 @@ type IssuePropertiesPanelProps = {
   issue: Issue;
   repositories: ConnectedRepository[];
   onIssueUpdated: (issue: Issue) => void;
+  /** 「Issueを移動」の成功後。移動でIDが変わるため、`onIssueUpdated`ではなく移動元・移動先を両方渡す（#3145） */
+  onIssueMoved: (source: Issue, moved: Issue) => void;
 };
 
 export function IssuePropertiesPanel({
   issue,
   repositories,
   onIssueUpdated,
+  onIssueMoved,
 }: IssuePropertiesPanelProps) {
   const { labels: repoLabels, assignees: repoAssignees, isLoading: isMetaLoading } =
     useIssueRepoMeta(issue.repositoryFullName);
@@ -208,7 +211,7 @@ export function IssuePropertiesPanel({
         onOpenChange={setIsMoveDialogOpen}
         issue={issue}
         repositories={repositories}
-        onMoved={onIssueUpdated}
+        onMoved={(moved) => onIssueMoved(issue, moved)}
       />
     </div>
   );

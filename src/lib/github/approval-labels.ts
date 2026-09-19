@@ -296,10 +296,11 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   // 「コードレビューを実行」で作られたレビューIssueの置き場（#698）。質問と同じく実装フローに
   // 乗らない。
   //
-  // **状態で絞らない（#2855）。** 完了の合図はcloseなので、openだけに絞ると読み終えた
-  // レビューが画面から消える。ここは「いま対応するもの」ではなく**過去のレビュー結果を
-  // 読み返す場所**なので、close済みも新しい順に並べる（「直近本番に反映した」と同じ扱い）。
-  { key: "code-review", label: "コードレビュー", labels: [], codeReviewOnly: true, state: "all" },
+  // **状態は他のビューと同じ既定（open）のまま（#3141）。** 完了の合図はcloseなので、読み終えた
+  // レビューは一覧から外れる（一時は過去の結果を読み返す場所として`state: "all"`にしていた
+  // #2855が、未実装などと揃えるため戻した）。close済みは「すべてのIssue」（状態=すべて）と
+  // GitHubから読める。
+  { key: "code-review", label: "コードレビュー", labels: [], codeReviewOnly: true },
   {
     key: "not-started",
     label: "未着手",

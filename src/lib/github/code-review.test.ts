@@ -12,7 +12,6 @@ import {
   describeCodeReviewFindingProgress,
   filterUncreatedCodeReviewFindings,
   findLatestCodeReviewReport,
-  formatCodeReviewListCount,
   isCodeReviewIssue,
   isCodeReviewPending,
   isCodeReviewReportComment,
@@ -266,28 +265,6 @@ describe("summarizeCodeReviewComments", () => {
     const older = `${CODE_REVIEW_REPORT_MARKER}\n\n### [重大] 古い指摘\n\n本文`;
     const summary = summarizeCodeReviewComments([{ body: older }, { body: REPORT }]);
     expect(summary.counts).toEqual({ high: 1, medium: 0, low: 1 });
-  });
-});
-
-describe("formatCodeReviewListCount", () => {
-  const open = { state: "open" as const };
-  const closed = { state: "closed" as const };
-
-  it("close済みが混ざっていれば未完了の件数を添える", () => {
-    expect(formatCodeReviewListCount([open, closed, closed], 3)).toBe("3件・未完了1件");
-  });
-
-  it("全部openなら添えるものが無いのでnull（呼び出し側が「N件」に落とす）", () => {
-    expect(formatCodeReviewListCount([open, open], 2)).toBeNull();
-  });
-
-  it("全部close済みでも未完了は出さない", () => {
-    expect(formatCodeReviewListCount([closed, closed], 2)).toBeNull();
-  });
-
-  it("保留中は他のビューと同じ形で添える", () => {
-    expect(formatCodeReviewListCount([open, closed], 2, 1)).toBe("2件・未完了1件・保留中1件");
-    expect(formatCodeReviewListCount([open], 1, 2)).toBe("1件・保留中2件");
   });
 });
 

@@ -295,7 +295,8 @@ export async function fetchRepositoryLabelNames(
 }
 
 /**
- * Issue1件の状態（open / closed）を読む（#2236）。**存在しなければnull。**
+ * Issue1件の状態（open / closed）を読む（#2236）。**存在しなければnull。** 401のときだけ
+ * `GithubApiError`を投げる（トークンの延長を呼び出し側に任せるため。#3148）。
  *
  * デプロイ失敗の追跡Issue（`deploy-failure-sweep-run.ts`）が、DBに「起票済み・open」と
  * 記録している行の実物を確かめるのに使う。**人が画面から先に閉じることがある**ため、
@@ -307,7 +308,14 @@ export async function fetchIssueState(
   number: number,
   token: string,
 ): Promise<"open" | "closed" | null> {
-  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`, token);
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`;
+  const res = await githubFetch(url, token);
+  // **401だけは投げる**（#3148）。`null`に畳むと`withUserGithubToken`が401を検知できず、
+  // リフレッシュトークンによる延長が走らない。ユーザートークンは8時間で切れるため、
+  // 画面を触らない時間帯に起動する予約実行がこの経路で必ず見送られていた
+  if (res.status === 401) {
+    throw new GithubApiError(401, `GitHub API request failed: 401 ${url}`);
+  }
   if (!res.ok) return null;
   const issue: { state?: unknown } = await res.json().catch(() => ({}));
   return issue.state === "closed" ? "closed" : issue.state === "open" ? "open" : null;

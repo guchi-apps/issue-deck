@@ -159,6 +159,7 @@ import {
 import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
+  resolvePullRequestStop,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
@@ -196,6 +197,8 @@ type MobileIssueDetailProps = {
   onBack: () => void;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  /** 「Issueを移動」の成功後。移動でIDが変わるため、`onIssueUpdated`ではなく移動元・移動先を両方渡す（#3145） */
+  onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -250,6 +253,7 @@ export function MobileIssueDetail({
   onBack,
   onEdit,
   onIssueUpdated,
+  onIssueMoved,
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
@@ -534,6 +538,10 @@ export function MobileIssueDetail({
   const pullRequestProgress = isPullRequestWaitingStatus(resolveProgressStatus(issue))
     ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
     : null;
+  // 止まっているPR（CI失敗など）。停止パネルの見出しを原因入りにする（#3144）
+  const pullRequestStop = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolvePullRequestStop(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   const {
     mergePullRequest,
     closePullRequest,
@@ -592,6 +600,7 @@ export function MobileIssueDetail({
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
     implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
+    pullRequestStop,
   });
 
   async function toggleLabel(name: string) {
@@ -1427,6 +1436,7 @@ export function MobileIssueDetail({
             mergeApprovalPending={mergeApprovalPending}
             pullRequestLinks={pullRequestLinks}
             hasPullRequestSection={visiblePullRequestLinks.length > 0}
+            pullRequestStop={pullRequestStop}
             workflowRun={workflowRun}
             workflowRunCommentId={workflowRunCommentId}
             onApprove={handleApprove}
@@ -1548,7 +1558,7 @@ export function MobileIssueDetail({
         onOpenChange={setIsMoveDialogOpen}
         issue={issue}
         repositories={repositories}
-        onMoved={onIssueUpdated}
+        onMoved={(moved) => onIssueMoved(issue, moved)}
       />
 
       <IssueSummaryDialog

@@ -162,6 +162,7 @@ import {
 import {
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
+  resolvePullRequestStop,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import {
@@ -195,6 +196,8 @@ type IssueDetailProps = {
   currentUserLogin: string | null;
   onEdit: (issue: Issue) => void;
   onIssueUpdated: (issue: Issue) => void;
+  /** 「Issueを移動」の成功後（プロパティシート内）。IDが変わるため移動元・移動先を両方渡す（#3145） */
+  onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
   onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
@@ -245,6 +248,7 @@ export function IssueDetail({
   currentUserLogin,
   onEdit,
   onIssueUpdated,
+  onIssueMoved,
   onIssueDeleted,
   onToggleFavorite,
   onCreateFollowupIssue,
@@ -721,6 +725,11 @@ export function IssueDetail({
     isPullRequestWaitingStatus(resolveProgressStatus(issue))
       ? resolveIssuePullRequestProgress(pullRequests.map(toIssuePullRequestProgressSource))
       : null;
+  // 止まっているPR（CI失敗など）。停止パネルの見出しを原因入りにする（#3144）。
+  // ステッパーの内訳と同じPRを指すよう、同じ材料・同じ確かめ方で導く
+  const pullRequestStop = isPullRequestWaitingStatus(resolveProgressStatus(issue))
+    ? resolvePullRequestStop(pullRequests.map(toIssuePullRequestProgressSource))
+    : null;
   // 自動マージされなかった理由（#1631）。マージ待ちのときしか描かないので、ここで常に
   // 解決しておいて上の対応PRセクションとコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
@@ -945,6 +954,7 @@ export function IssueDetail({
     questionAnswerPending: questionRequest?.status === "WAITING",
     sessionStatePending,
     implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
+    pullRequestStop,
   });
 
   return (
@@ -1488,6 +1498,7 @@ export function IssueDetail({
               mergeApprovalPending={mergeApprovalPending}
               pullRequestLinks={pullRequestLinks}
               hasPullRequestSection={visiblePullRequestLinks.length > 0}
+              pullRequestStop={pullRequestStop}
               workflowRun={workflowRun}
               workflowRunCommentId={workflowRunCommentId}
               onApprove={handleApprove}
@@ -1618,6 +1629,7 @@ export function IssueDetail({
             issue={issue}
             repositories={repositories}
             onIssueUpdated={onIssueUpdated}
+            onIssueMoved={onIssueMoved}
           />
         </SheetContent>
       </Sheet>

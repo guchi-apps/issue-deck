@@ -49,6 +49,7 @@ import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
+import type { PullRequestStop } from "@/lib/issue-pull-request-progress";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import {
   COMMENT_AGENT_PROFILES,
@@ -139,6 +140,11 @@ type CommentThreadProps = {
    * `resolveCheckUserGuidance`が移動ボタンを出さないのも同じ条件。
    */
   hasPullRequestSection?: boolean;
+  /**
+   * 対応PRが止まっている原因（#3144）。上部の停止パネルと同じ見出しを承認カードにも出すために
+   * 受け取る（`CheckUserReasonNotice`の「同じ内容を同じ体裁で出す」）。
+   */
+  pullRequestStop?: PullRequestStop | null;
   /** 直近の「実行ログ:」リンクが指すGitHub Actions実行の状態。取得できない場合はnull */
   workflowRun?: WorkflowRunInfo | null;
   /** workflowRunに対応する「実行ログ:」リンクを含むコメントのID。実行時間バッジをこのコメントの横に表示する */
@@ -225,6 +231,7 @@ function ApprovalActions({
   canAskClaude = false,
   pullRequestLinks,
   hasPullRequestSection = true,
+  pullRequestStop = null,
   repositoryFullName,
   issueSuggestions,
   localSessionNotice,
@@ -269,6 +276,8 @@ function ApprovalActions({
   pullRequestLinks?: PullRequestLink[];
   /** 上部に対応PRセクションがあるか（#2914）。falseのときだけマージ待ちの操作一式をここに出す */
   hasPullRequestSection?: boolean;
+  /** 対応PRが止まっている原因（#3144）。承認カードの案内の見出しを上部と揃える */
+  pullRequestStop?: PullRequestStop | null;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   localSessionNotice?: ReactNode;
@@ -367,6 +376,7 @@ function ApprovalActions({
     localSession,
     sessionAlive,
     hasPullRequestSection,
+    pullRequestStop,
   });
 
   // 走っているセッションが入力待ちのときは、承認・修正・取り下げのどれも効かない（#1417）。
@@ -652,6 +662,7 @@ export function CommentThread({
   mergeApprovalPending,
   pullRequestLinks,
   hasPullRequestSection,
+  pullRequestStop,
   workflowRun,
   workflowRunCommentId,
   onApprove,
@@ -743,6 +754,7 @@ export function CommentThread({
         canAskClaude={canAskClaude}
         pullRequestLinks={pullRequestLinks}
         hasPullRequestSection={hasPullRequestSection}
+        pullRequestStop={pullRequestStop}
         repositoryFullName={repositoryFullName}
         issueSuggestions={issueSuggestions}
       />
