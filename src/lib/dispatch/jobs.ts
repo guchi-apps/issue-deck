@@ -242,6 +242,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepValuesCapable: host.manualStepValuesCapable,
     manualStepVpsCapable: host.manualStepVpsCapable,
     planReviewCapable: host.planReviewCapable,
+    planReviewAgentCapable: host.planReviewAgentCapable,
     codeReviewCapable: host.codeReviewCapable,
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
@@ -960,6 +961,8 @@ export async function enqueuePlanReviewJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
+  /** 省略時は既存どおりClaude Codeでレビューする */
+  agent?: DispatchAgent;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueuePlanReviewJobResult> {
@@ -983,12 +986,15 @@ export async function enqueuePlanReviewJob(params: {
       ? {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           planReviewCapable: host.planReviewCapable,
+          planReviewAgentCapable: host.planReviewAgentCapable,
+          codexCapable: host.codexCapable,
           repositories: parseDispatchHostRepositories(host.repositories),
         }
       : null,
     repositoryFullName: params.repositoryFullName,
     // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
     hasActiveJob: false,
+    agent: params.agent,
   });
   if (rejection) return reject(rejection);
 
@@ -999,6 +1005,7 @@ export async function enqueuePlanReviewJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         kind: "PLAN_REVIEW",
+        agent: params.agent ?? DEFAULT_DISPATCH_AGENT,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,
@@ -2317,6 +2324,8 @@ export async function announceDispatchHost(params: {
   manualStepVpsCapable: boolean | null;
   /** 計画レビュー（G1）のセッションを起こせるか（#1855）。申告していないpollerでは`null`＝非対応 */
   planReviewCapable: boolean | null;
+  /** 計画レビューでジョブのagentを読めるか（#3186）。申告していないpollerでは`null`＝非対応 */
+  planReviewAgentCapable: boolean | null;
   /** リポジトリ全体のコードレビューを起こせるか（#698）。申告していないpollerでは`null`＝非対応 */
   codeReviewCapable: boolean | null;
   /** Codex CLIでセッションを起こせるか（#2505）。申告していないpollerでは`null`＝非対応 */
@@ -2392,6 +2401,7 @@ export async function announceDispatchHost(params: {
     manualStepValuesCapable: params.manualStepValuesCapable,
     manualStepVpsCapable: params.manualStepVpsCapable,
     planReviewCapable: params.planReviewCapable,
+    planReviewAgentCapable: params.planReviewAgentCapable,
     codeReviewCapable: params.codeReviewCapable,
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,

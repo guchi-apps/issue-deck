@@ -243,7 +243,9 @@ describe("enqueueDispatchJob のエージェント", () => {
   });
 
   it("対応を申告しているホストならcodexで積める", async () => {
-    dispatchHostFindUnique.mockResolvedValue(host({ codexCapable: true }));
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ codexCapable: true, planReviewAgentCapable: true }),
+    );
     const result = await enqueue("codex");
     expect(result.ok).toBe(true);
     expect(dispatchJobCreate.mock.calls[0][0].data.agent).toBe("codex");
@@ -724,10 +726,30 @@ describe("enqueuePlanReviewJob", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           kind: "PLAN_REVIEW",
+          agent: "claude",
           // 実装ジョブとは名前空間を分ける（同じIssueへ重ねて積めるように）
           activeKey: "plan_review:guchi-apps/issue-deck#1855",
         }),
       }),
+    );
+  });
+
+  it("Codexを指定した計画レビューにはエージェントを保存する", async () => {
+    dispatchHostFindUnique.mockResolvedValue(
+      host({ codexCapable: true, planReviewAgentCapable: true }),
+    );
+
+    await enqueuePlanReviewJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1855,
+      hostName: "subpc",
+      agent: "codex",
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ agent: "codex" }) }),
     );
   });
 

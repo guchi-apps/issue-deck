@@ -1298,11 +1298,12 @@ describe("横断質問（#1454）", () => {
  */
 describe("計画レビュー（PLAN_REVIEW）", () => {
   function host(
-    overrides: Partial<Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories">> = {},
-  ): Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories"> {
+    overrides: Partial<Pick<DispatchHostView, "online" | "planReviewCapable" | "codexCapable" | "repositories">> = {},
+  ): Pick<DispatchHostView, "online" | "planReviewCapable" | "codexCapable" | "repositories"> {
     return {
       online: true,
       planReviewCapable: true,
+      codexCapable: null,
       repositories: ["guchi-apps/issue-deck"],
       ...overrides,
     };
@@ -1423,6 +1424,28 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
         hasActiveJob: true,
       }),
     ).toBe("already_queued");
+  });
+
+  it("Codex非対応のホストではCodexの計画レビューを積めない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host({ codexCapable: null }),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+        agent: "codex",
+      }),
+    ).toBe("agent_not_capable");
+  });
+
+  it("計画レビュー用のagent申告が無いホストではCodexを選べない", () => {
+    expect(
+      resolvePlanReviewRejection({
+        host: host({ codexCapable: true }),
+        repositoryFullName: "guchi-apps/issue-deck",
+        hasActiveJob: false,
+        agent: "codex",
+      }),
+    ).toBe("agent_not_capable");
   });
 
   it("理由には何をすれば押せるようになるかを書く", () => {

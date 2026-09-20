@@ -74,9 +74,12 @@ source "$SCRIPT_DIR/lib/claude-trust.sh"
 # APIの一時的な過負荷（529）で打ち切られにくくする（#1971）。実装セッションと同じ値を使う。
 # shellcheck source=scripts/lib/claude-retries.sh
 source "$SCRIPT_DIR/lib/claude-retries.sh"
+# レビューに使うCLIの解決。実装セッションと同じ語（claude / codex）だけを受け取る。
+# shellcheck source=scripts/lib/agent-cli.sh
+source "$SCRIPT_DIR/lib/agent-cli.sh"
 
 usage() {
-  echo "Usage: scripts/start-plan-review.sh [--prepare-only] <owner> <repo> <issue番号>" >&2
+  echo "Usage: scripts/start-plan-review.sh [--prepare-only] [--agent claude|codex] <owner> <repo> <issue番号>" >&2
 }
 
 # 走っている計画レビューのセッション名（`<リポジトリ名>-plan-review-<番号>`）。
@@ -94,16 +97,28 @@ plan_review_sessions_alive_for() {
 }
 
 PREPARE_ONLY=0
+REVIEW_AGENT="claude"
 POSITIONAL=()
-for arg in "$@"; do
+while [[ $# -gt 0 ]]; do
+  arg="$1"
   case "$arg" in
     --prepare-only) PREPARE_ONLY=1 ;;
+    --agent)
+      shift
+      if [[ $# -eq 0 ]]; then
+        usage
+        exit 1
+      fi
+      REVIEW_AGENT="$1"
+      ;;
+    --agent=*) REVIEW_AGENT="${arg#--agent=}" ;;
     -h | --help)
       usage
       exit 0
       ;;
     *) POSITIONAL+=("$arg") ;;
   esac
+  shift
 done
 set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 
@@ -117,6 +132,8 @@ REPO="$2"
 ISSUE_NUMBER="$3"
 FULL_NAME="$OWNER/$REPO"
 
+agent_cli_resolve_kind "$REVIEW_AGENT" || exit 1
+
 # 置き場と名前。**参照スナップショット・プロンプト・ログをこの1か所へまとめる**（#1855）。
 PLAN_REVIEW_BASE="${ISSUE_DECK_PLAN_REVIEW_BASE:-$HOME/apps/issue-deck-worktrees/.plan-reviews}"
 SAFE_REPO="${REPO//[^A-Za-z0-9_-]/-}"
@@ -129,14 +146,14 @@ LOG_FILE="$PLAN_REVIEW_BASE/$SAFE_REPO-$ISSUE_NUMBER.log"
 # （多層防御。ここが最後にパス・シェル引数として使う場所）。
 local_session_validate_target "$OWNER" "$REPO" "$ISSUE_NUMBER" || exit 1
 
-for required_command in git python3; do
+for required_command in git gh python3; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Error: $required_command コマンドが見つかりません。" >&2
     exit 1
   fi
 done
-if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
-  echo "Error: claude コマンドが見つかりません。" >&2
+if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$(agent_cli_command_name "$AGENT_CLI_KIND")" >/dev/null 2>&1; then
+  echo "Error: $(agent_cli_command_name "$AGENT_CLI_KIND") コマンドが見つかりません。" >&2
   exit 1
 fi
 
@@ -237,6 +254,15 @@ echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています（$PROMPT
 plan_review_render_prompt "$PROMPT_TEMPLATE" "$ISSUE_NUMBER" "$FULL_NAME" "$WORKDIR" \
   "$CHECKOUT_LABEL" "$FLEET_STATUS_FILE" >"$PROMPT_FILE"
 
+if [[ "$AGENT_CLI_KIND" == "codex" ]]; then
+  CODEX_SUPPLEMENT="$LAUNCHER_SCRIPTS_DIR/prompts/codex-plan-review-supplement.md"
+  if [[ ! -f "$CODEX_SUPPLEMENT" ]]; then
+    echo "Error: Codex用の計画レビュープロンプトがありません（$CODEX_SUPPLEMENT）。" >&2
+    exit 1
+  fi
+  cat "$CODEX_SUPPLEMENT" >>"$PROMPT_FILE"
+fi
+
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   echo "#$ISSUE_NUMBER: 準備が完了しました。"
   echo "  作業ディレクトリ: $WORKDIR（$CHECKOUT_LABEL）"
@@ -245,9 +271,12 @@ if [[ "$PREPARE_ONLY" -eq 1 ]]; then
 fi
 
 # --- セッションの起動 ---------------------------------------------------------
-# **許可するツールはActionsの計画レビュー（reusable-issue-dispatch.ymlの「Claude Code（計画レビュー）」）
-# と同じ。** 文面（プロンプト）だけでなく、できることの範囲も2つの入口で揃える。
-# `gh pr merge`・`gh pr edit`（G2との兼務＝自己承認）と`gh issue edit`（承認まで倒す）は入れない。
+# Claude Codeでは、許可するツールをActionsの計画レビュー（reusable-issue-dispatch.ymlの
+# 「Claude Code（計画レビュー）」）と揃える。`gh pr merge`・`gh pr edit`（G2との兼務＝自己承認）と
+# `gh issue edit`（承認まで倒す）は入れない。Codex CLIには同じ許可リストが無いため、下で
+# ネットワークを明示的に開いたworkspace-writeサンドボックスを使い、レビュー用プロンプトの
+# 禁止事項と合わせて変更を防ぐ。Codexでは許可リストを機械的に適用できないため、承認・PR操作を
+# 行わない制約はプロンプトで明示する。
 PLAN_REVIEW_ALLOWED_TOOLS='Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git ls-remote:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob'
 # サブエージェントは使わせない（Actions側と同じ）。指摘の根拠は自分で確かめたものに限る。
 PLAN_REVIEW_DISALLOWED_TOOLS='Task,Agent'
@@ -283,14 +312,21 @@ if [[ "$PLAN_REVIEW_TIMEOUT" =~ ^[0-9]+$ && "$PLAN_REVIEW_TIMEOUT" -gt 0 ]] &&
   RUNNER="timeout $PLAN_REVIEW_TIMEOUT "
 fi
 
-# リトライ上限（#1971）は**コマンドへ埋め込む。** tmuxのセッションはtmuxサーバー側の環境を
-# 引き継ぐため、このスクリプトでexportしても向こうへは届かない（`--add-dir`の値と同じ扱い）。
-claude_export_max_retries
-SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | CLAUDE_CODE_MAX_RETRIES=%q %sclaude' \
-  "$WORKDIR" "$PROMPT_FILE" "$CLAUDE_CODE_MAX_RETRIES" "$RUNNER")"
-for arg in "${CLAUDE_ARGS[@]}"; do
-  SESSION_CMD+=" $(printf '%q' "$arg")"
-done
+# リトライ上限（#1971）はClaude Codeのコマンドへ埋め込む。tmuxのセッションはtmuxサーバー側の
+# 環境を引き継ぐため、このスクリプトでexportしても向こうへは届かない。
+if [[ "$AGENT_CLI_KIND" == "claude" ]]; then
+  claude_export_max_retries
+  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | CLAUDE_CODE_MAX_RETRIES=%q %sclaude' \
+    "$WORKDIR" "$PROMPT_FILE" "$CLAUDE_CODE_MAX_RETRIES" "$RUNNER")"
+  for arg in "${CLAUDE_ARGS[@]}"; do
+    SESSION_CMD+=" $(printf '%q' "$arg")"
+  done
+else
+  # `codex exec`は標準入力の`-`でプロンプトを受け取る。G1の成果物である`gh issue comment`には
+  # ネットワークが必要なので、agent-cliと同じworkspace-writeのネットワーク許可を明示する。
+  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true -' \
+    "$WORKDIR" "$PROMPT_FILE" "$RUNNER")"
+fi
 SESSION_CMD+=" 2>&1 | tee $(printf '%q' "$LOG_FILE")"
 
 if ! command -v tmux >/dev/null 2>&1; then
