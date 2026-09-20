@@ -463,6 +463,17 @@ const COUNT_BAR_CLASS = "flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b 
 const COUNT_BAR_TEXT_CLASS = "min-w-0 grow basis-48 text-xs text-muted-foreground";
 const COUNT_BAR_ACTIONS_CLASS = "ml-auto flex shrink-0 items-center gap-2";
 
+/**
+ * 1件も並ばないときの文言（#3165）。**置く場所が2つある**ので、文言と見た目をここで1つにする。
+ *
+ * 先頭に固定するもの（マージ待ちPull Request・保留中の1行）が何も無ければ、今までどおり
+ * スクロール領域の外で縦中央に出す（`flex-1`を足す）。あるときは`<ul>`の中の1行として、
+ * 固定していたものの下に出す——縦中央に置くと、その上に並んでいるものと重なって見える。
+ */
+const EMPTY_MESSAGE = "該当するIssueがありません";
+const EMPTY_MESSAGE_CLASS =
+  "flex items-center justify-center p-8 text-center text-sm text-muted-foreground";
+
 export function IssueList({
   title,
   issues: allIssues,
@@ -558,6 +569,9 @@ export function IssueList({
       : [];
     return [...fromIssues, ...(snoozedPinned?.entries ?? [])];
   }, [snoozedIssues, snoozes, snoozedPinned, now]);
+  // Issueが0件でも`<ul>`（スクロール領域）を描く必要があるか（#3165）。先頭に固定していた
+  // ものは`<ul>`の中へ移したので、`<ul>`ごと消すとそれらまで消える
+  const hasPinnedRows = Boolean(pinnedSection) || (snoozeEnabled && snoozedTotal > 0);
 
   // 実行先の解決（#1262）。`GET /api/dispatch`は一覧ぶんをまとめて返すので、Issueの件数に
   // 関わらず取得は1本で足りる。**Actionsの実行を期待できないIssueをポーリングから外す**ため、
@@ -1394,7 +1408,8 @@ export function IssueList({
           消えるため、<ul>に直接付けると「該当するIssueがありません」の一覧を更新できない */}
       {/* **`pinnedSection`もこの枠の中に入れる**（#2175）。確認待ちの先頭に固定している
           マージ待ちPull Request（#1613）は画面の上半分を占めることがあり、枠の外に置くと
-          そこを下へなぞってもタッチが届かず「引っ張っても何も起きない」ことになる */}
+          そこを下へなぞってもタッチが届かず「引っ張っても何も起きない」ことになる
+          （#3165で`<ul>`の中へ移したので、いまはスクロール領域の一部でもある） */}
       {/* **`overflow-hidden`を外さないこと**（#2885）。中身は引っ張った量だけ`translateY`で
           下がるが、この枠が切り抜かないと下がったぶんがそのまま枠の外へはみ出し、下に並ぶ
           兄弟（スマホなら下端の絞り込み行）の上に重なって描かれる。絞り込み行は塗りが無い
@@ -1402,8 +1417,8 @@ export function IssueList({
       <div ref={pullContainerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <PullToRefreshIndicator pull={pull} />
 
-        {/* 引っ張りに追従して下がるのは<ul>だけでなく固定セクションも含めた中身全体。
-            片方だけ下げると、引いている最中に固定セクションと一覧の境目が割れて見える */}
+        {/* 引っ張りに追従して下がるのは<ul>だけでなく0件の文言も含めた中身全体。
+            片方だけ下げると、引いている最中に境目が割れて見える */}
         <div
           className="flex min-h-0 flex-1 flex-col"
           style={{
@@ -1411,45 +1426,16 @@ export function IssueList({
             transition: pull.isDragging ? "none" : "transform 0.2s ease-out",
           }}
         >
-          {pinnedSection}
-
-          {/* 保留中で一覧から外したぶんの1行（#2398）。**件数には足さず、消えたことだけを伝える**
-              ——マージ待ちPRが「CI・判定の完了待ちが3件あります」を件数に足さずに出しているのと
-              同じ扱い（#2081）。「表示」で開くと、その場で解除できる */}
-          {snoozeEnabled && snoozedTotal > 0 && (
-            <div className={cn(COUNT_BAR_CLASS, "bg-slate-500/5")}>
-              <p className={cn(COUNT_BAR_TEXT_CLASS, "flex items-center gap-1.5")}>
-                <Clock className="size-3 shrink-0" />
-                <span>
-                  保留中が
-                  <span className="font-medium text-foreground tabular-nums">{snoozedTotal}件</span>
-                  あります（{describeSnoozeResume(snoozedEntries, now)}）
-                </span>
-              </p>
-              <div className={COUNT_BAR_ACTIONS_CLASS}>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  className="shrink-0"
-                  aria-expanded={isSnoozedOpen}
-                  onClick={() => setIsSnoozedOpen((open) => !open)}
-                >
-                  {isSnoozedOpen ? "隠す" : "表示"}
-                </Button>
-              </div>
-            </div>
-          )}
-          {snoozeEnabled && isSnoozedOpen && (
-            <div className="border-b bg-slate-500/5">
-              {snoozedPinned?.section}
-              <ul>{snoozedIssues.map(renderSnoozedRow)}</ul>
-            </div>
-          )}
-
-          {issues.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-              該当するIssueがありません
-            </div>
+          {/* 先頭に固定していたもの（マージ待ちPull Request・保留中の1行）は、Issueの行と
+              **同じスクロール領域（<ul>）の中**に置く（#3165）。<ul>の外に兄弟として置くと、
+              flexアイテムの`min-height: auto`で枠は縮まない一方、<ul>は`min-h-0 flex-1`で
+              高さ0まで潰れる。マージ待ちPRが10件並んだ日は、Issueの行が1件も出ず、枠自身にも
+              スクロールが無いのではみ出したカードにも届かなかった。
+              **枠の中に別のスクロールを作る形では直らない**——引っ張って更新
+              （`use-pull-to-refresh.ts`）は<ul>が先頭にいる間の下向きのタッチを
+              `preventDefault`するため、入れ子のスクロールが指で動かせない。 */}
+          {issues.length === 0 && !hasPinnedRows ? (
+            <div className={cn(EMPTY_MESSAGE_CLASS, "flex-1")}>{EMPTY_MESSAGE}</div>
           ) : (
             // relativeは各行のoffsetTopの基準を<ul>自身にするために必要（#773）。付けないと
             // offsetParentが外側の要素（スマホならMobileIssueListScreenのルート）になり、
@@ -1468,6 +1454,46 @@ export function IssueList({
                 fabSpacing && "pb-20",
               )}
             >
+              {pinnedSection && <li>{pinnedSection}</li>}
+
+              {/* 保留中で一覧から外したぶんの1行（#2398）。**件数には足さず、消えたことだけを伝える**
+                  ——マージ待ちPRが「CI・判定の完了待ちが3件あります」を件数に足さずに出しているのと
+                  同じ扱い（#2081）。「表示」で開くと、その場で解除できる */}
+              {snoozeEnabled && snoozedTotal > 0 && (
+                <li className={cn(COUNT_BAR_CLASS, "bg-slate-500/5")}>
+                  <p className={cn(COUNT_BAR_TEXT_CLASS, "flex items-center gap-1.5")}>
+                    <Clock className="size-3 shrink-0" />
+                    <span>
+                      保留中が
+                      <span className="font-medium text-foreground tabular-nums">
+                        {snoozedTotal}件
+                      </span>
+                      あります（{describeSnoozeResume(snoozedEntries, now)}）
+                    </span>
+                  </p>
+                  <div className={COUNT_BAR_ACTIONS_CLASS}>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="shrink-0"
+                      aria-expanded={isSnoozedOpen}
+                      onClick={() => setIsSnoozedOpen((open) => !open)}
+                    >
+                      {isSnoozedOpen ? "隠す" : "表示"}
+                    </Button>
+                  </div>
+                </li>
+              )}
+              {snoozeEnabled && isSnoozedOpen && (
+                <li className="border-b bg-slate-500/5">
+                  {snoozedPinned?.section}
+                  <ul>{snoozedIssues.map(renderSnoozedRow)}</ul>
+                </li>
+              )}
+
+              {issues.length === 0 && (
+                <li className={EMPTY_MESSAGE_CLASS}>{EMPTY_MESSAGE}</li>
+              )}
               {isGrouped
                 ? repoGroups!.flatMap((group) => [
                     <li key={`group-${group.repositoryFullName}`}>

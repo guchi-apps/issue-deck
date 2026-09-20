@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -133,6 +133,14 @@ function renderScreen(
   );
 }
 
+/**
+ * ヘッダーの見出しと件数の行を包む要素。**件数の「N件」はヘッダーの外にも出る**ため
+ * （#3165でマージ待ちPRの見出しに総件数のバッジが付いた）、ここへ絞って読む。
+ */
+function headerOf(): HTMLElement {
+  return screen.getByRole("heading", { level: 1 }).parentElement as HTMLElement;
+}
+
 describe("MobileIssuesScreen のビュー件数（#1689）", () => {
   afterEach(() => {
     cleanup();
@@ -173,7 +181,8 @@ describe("MobileIssuesScreen の確認待ちに並ぶマージ待ちPR（#1713�
     // Issue以外も並ぶビューなので、見出しは「Issue」ではなくビュー名（#2081）
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("ユーザーの確認待ち");
     // ホーム画面の「要対応」と同じ2件になり、中身もその2件が並ぶ
-    expect(screen.getByText("2件")).toBeTruthy();
+    // （#3165で枠の見出しにも総件数のバッジが出るため、ヘッダーの中へ絞って読む）
+    expect(within(headerOf()).getByText("2件")).toBeTruthy();
     expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
     expect(screen.getByRole("button", { name: /v1.0.0をmainへリリースする/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("2");
@@ -212,7 +221,7 @@ describe("MobileIssuesScreen のCI・判定の完了待ち（#2081）", () => {
 
     expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
     expect(screen.getByText(/CI・判定の完了待ちが2件あります/)).toBeTruthy();
-    expect(screen.getByText("1件")).toBeTruthy();
+    expect(within(headerOf()).getByText("1件")).toBeTruthy();
   });
 });
 

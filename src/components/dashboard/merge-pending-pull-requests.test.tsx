@@ -134,3 +134,72 @@ describe("MergePendingPullRequestsの「更新」（#2175）", () => {
     expect(onRefresh).not.toHaveBeenCalled();
   });
 });
+
+describe("MergePendingPullRequestsの折りたたみ（#3165）", () => {
+  function makeMany(count: number): PullRequestSummary[] {
+    return Array.from({ length: count }, (_, index) =>
+      makePullRequest({
+        id: `owner/repo${index}#${index + 1}`,
+        repositoryFullName: `owner/repo${index}`,
+        number: index + 1,
+        title: `v1.0.${index}をmainへリリースする`,
+      }),
+    );
+  }
+
+  /** 並んでいるPRカードの数。完了待ちの1行や開閉ボタンは数えない */
+  function listedCount(): number {
+    return document.querySelectorAll("#merge-pending-list > li").length;
+  }
+
+  it("3件までならそのまま並べ、開閉ボタンを出さない", () => {
+    render(
+      <MergePendingPullRequests pullRequests={makeMany(3)} onSelectPullRequest={vi.fn()} />,
+    );
+
+    expect(listedCount()).toBe(3);
+    expect(screen.queryByRole("button", { name: /件を表示/ })).toBeNull();
+  });
+
+  it("4件以上は先頭3件だけ並べ、残りを「他N件を表示」で開ける", () => {
+    render(
+      <MergePendingPullRequests pullRequests={makeMany(11)} onSelectPullRequest={vi.fn()} />,
+    );
+
+    expect(listedCount()).toBe(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "他8件を表示" }));
+    expect(listedCount()).toBe(11);
+
+    fireEvent.click(screen.getByRole("button", { name: "先頭3件だけ表示" }));
+    expect(listedCount()).toBe(3);
+  });
+
+  it("畳んでいても、見出しには並べている数ではなく総件数を出す", () => {
+    render(
+      <MergePendingPullRequests pullRequests={makeMany(11)} onSelectPullRequest={vi.fn()} />,
+    );
+
+    expect(screen.getByText("あなたのマージを待っているPull Request").textContent).toContain(
+      "11件",
+    );
+  });
+
+  it("保留中の並び（#2398）は畳まない", () => {
+    // 「保留中N件」を開いた中身で、開いたのは中を見るためなので、そこでまた畳むと意味が無い
+    render(
+      <MergePendingPullRequests
+        pullRequests={makeMany(11)}
+        onSelectPullRequest={vi.fn()}
+        snoozed={{
+          snoozes: new Map(),
+          now: Date.parse("2026-08-01T00:00:00Z"),
+          onUnsnooze: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /件を表示/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "解除" })).toHaveLength(11);
+  });
+});
