@@ -175,7 +175,9 @@ journaldにもIssueにも出さない。詳細は[codex.md](codex.md)「Remote C
 3. **対応を申告したpollerにしか配らない。** pollerは`POST /api/dispatch/hosts`で
    `sessionControl: true`を申告し、`claim`はそれが真のホストにだけ制御ジョブを払い出す。
    古いpollerは`kind`を読まないため、渡すと**起動ジョブとして解釈してセッションを立てる**
-   （「閉じる」を押して起動する）。画面側も、申告していないホストではボタンを押させず理由を出す
+   （「閉じる」を押して起動する）。画面側も、申告していないホストではボタンを押させず理由を出す。
+   **種別と申告の対応は`OUT_OF_BAND_JOB_KIND_CAPABILITY`（`src/lib/dispatch/dispatch-job.ts`）
+   が1か所で持つ**（#3211。後述の「枠外の種別を足すときは払い出しの表も埋める」）
 4. **`QUEUED`のまま5分を過ぎた制御ジョブは`TIMEOUT`にする。** 起動ジョブと違い、**待たせるほど
    危険になる**（何時間も後に届いた`C-c`は、そのとき走っている別の作業を止める）
 5. **`activeKey`は種別で名前空間を分ける**（`interrupt:owner/repo#番号`）。制御ジョブで`null`に
@@ -2192,6 +2194,31 @@ pollerをsystemd timerではなく**常駐サービス**にしているのはこ
 long-poll（サーバーが最大25秒ジョブを待ってから返す）にすればHTTPの回数を増やさずに即時化
 できるが、Apacheのプロキシとデプロイ再起動をまたぐ長時間接続の扱いが増えるうえ、サーバー内で
 結局DBを1秒ごとに見ることになる。**pull型のまま刻む方が、止まり方が読める。**
+
+### 枠外の種別を足すときは払い出しの表も埋める（#3211）
+
+**積む側・実行する側が揃っていても、`claimDispatchJobs`が引きに行く種別に入っていなければ
+ジョブは誰にも配られない。** `QUEUED`のまま5分で`TIMEOUT`になり、画面には押した操作が
+失敗したことだけが残る。押した人から見ると「押しても何も起きない」で、**pollerのログには
+1行も出ない**（受け取っていないのだから当然だが、原因を探すときにいちばん見に行く場所が
+空になる）。
+
+`CODEX_PAIRING`（#2524）が実際にそうなっていた。積む受け口（`enqueueCodexPairingJob`）も、
+`OUT_OF_BAND_JOB_KINDS`への登録も、pollerの実行（`run_codex_pairing_job`）も入っていたが、
+払い出しの分岐にだけ`if (host?.codexRemoteControlCapable === true) …`が無く、**発行の
+ジョブが一度も配られていなかった**（journaldにCodexペアリングの実行記録が1件も無い）。
+分岐が種別ごとの`if`の列だったため、1つ書き漏らしても他が動いてしまい気付けない。
+
+対応表を`OUT_OF_BAND_JOB_KIND_CAPABILITY`（`src/lib/dispatch/dispatch-job.ts`）に置き、
+払い出しはそこを回すだけにした。**`Record<OutOfBandJobKind, …>`なので、
+`OUT_OF_BAND_JOB_KINDS`へ種別を足すと表を埋めるまで型が通らない。**
+
+- 表の値は`DispatchHost`（Prismaのモデル）と`DispatchHostView`で同じ名前の申告フィールド。
+  **`null`（未申告＝古いpoller）は「できない」**という判定（`=== true`）は変えていない
+- `INTERRUPT`・`KILL`・`INSTRUCTION`は`SESSION_CONTROL_JOB_KINDS`側なのでこの表には載らない
+  （操作する相手がセッションで、pollerがセッション名を組み立て直す種別のため）
+- 同じ書き漏れを`src/lib/dispatch/jobs.test.ts`が一覧で見張る（「枠外の種別は、対応する申告が
+  trueなら全て払い出しの対象になる」）
 
 ## 画面から起動先を選ぶ（#1180）
 

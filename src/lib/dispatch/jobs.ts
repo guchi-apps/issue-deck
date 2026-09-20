@@ -70,6 +70,7 @@ import {
   isDispatchHostOnline,
   isSessionReportedJobKind,
   normalizeDispatchHostRepositories,
+  OUT_OF_BAND_JOB_KIND_CAPABILITY,
   OUT_OF_BAND_JOB_KINDS,
   parseDispatchHostRepositories,
   parsePreviewAction,
@@ -1769,24 +1770,18 @@ export async function claimDispatchJobs(params: {
   const controlKinds: DispatchJobKind[] = [];
   if (host?.sessionControlCapable === true) controlKinds.push("INTERRUPT", "KILL");
   if (host?.instructionCapable === true) controlKinds.push("INSTRUCTION");
-  // **手作業の代行実行（#1828）も枠外で先に配る。** セッションを立てないので枠を消費せず、
-  // 承認から5分で失効する以上、起動待ちの後ろに並ばせると届く前に失効しうる。
-  // 対応を申告していないpollerには配らない（未知の種別として`failed`になり、押した実行が失われる）
-  // **枠外のジョブでも申告は種別ごとに見る。** 手作業の代行に対応した既存のpollerは
-  // チェックアウトの更新（#1875）を知らないため、`OUT_OF_BAND_JOB_KINDS`をまとめて配ると
-  // 未知の種別として`failed`になり、押した更新が失われる。
-  if (host?.manualStepCapable === true) controlKinds.push("MANUAL_STEP");
-  // **中断（#1882）は代行実行とは別の申告で配る。** 代行実行を実行できるpollerでも、止める側の
-  // 実装が入っているとは限らない。非対応のpollerへ配ると未知の種別として`failed`になり、
-  // 画面には「中断できなかった」だけが残る（そのときは打ち切りを待つ案内を出す方が正しい）
-  if (host?.manualStepAbortCapable === true) controlKinds.push("MANUAL_STEP_ABORT");
-  if (host?.selfUpdateCapable === true) controlKinds.push("SELF_UPDATE");
-  // 確認環境（#2444）も枠外。セッションを立てないので枠を消費しない。**申告していないpollerへは
-  // 配らない**（未知の種別として`failed`になり、押した操作が失われる）
-  if (host?.previewCapable === true) controlKinds.push("PREVIEW");
-  // ホストの再起動（#2496）も枠外。セッションを立てない点は確認環境と同じで、**申告していない
-  // pollerへは配らない**（未知の種別として`failed`になり、押した再起動が失われる）
-  if (host?.rebootCapable === true) controlKinds.push("REBOOT");
+  // **枠外のジョブ（#1828）も、制御ジョブと一緒にここで先に配る。** セッションを立てないので
+  // 枠を消費せず、5分で失効する以上、起動待ちの後ろに並ばせると届く前に失効しうる。
+  //
+  // **申告は種別ごとに見る。** 手作業の代行に対応した既存のpollerはチェックアウトの更新
+  // （#1875）を知らないため、`OUT_OF_BAND_JOB_KINDS`をまとめて配ると未知の種別として
+  // `failed`になり、押した操作が失われる。どの申告を見るかは
+  // `OUT_OF_BAND_JOB_KIND_CAPABILITY`が持つ——**種別ごとに`if`を書き足す形にしていたせいで、
+  // `CODEX_PAIRING`（#2524）だけがここに書かれず、ペアリングのジョブが誰にも配られないまま
+  // 5分で`TIMEOUT`になっていた**（#3211）。表に寄せたので、種別を足せば型が埋めさせる
+  for (const kind of OUT_OF_BAND_JOB_KINDS) {
+    if (host?.[OUT_OF_BAND_JOB_KIND_CAPABILITY[kind]] === true) controlKinds.push(kind);
+  }
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
