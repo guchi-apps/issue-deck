@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { decideSessionPlanRequest } from "@/lib/dispatch/plan-requests";
 import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
+import { advanceSessionPlanProgress } from "@/lib/dispatch/session-plan-progress";
 import {
   buildSessionPlanDecisionCommentBody,
   describeSessionPlanDecisionRejection,
@@ -84,6 +85,15 @@ export async function POST(request: NextRequest) {
   // **失敗しても成功として返す**——返事はもうDBに入っていてセッションへ届く（コメント投稿と同じ）。
   if (decision !== "defer") {
     await resolveSessionPlanCheckUser({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+    });
+  }
+
+  // **承認したら進捗を実装へ進める**（#3213）。修正・端末で答える場合は計画のまま。
+  // 失敗しても成功として返す（返事はもうDBに入っていてセッションへ届く）
+  if (decision === "approve") {
+    await advanceSessionPlanProgress({
       repositoryFullName: result.request.repositoryFullName,
       issueNumber: result.request.issueNumber,
     });

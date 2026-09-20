@@ -66,7 +66,8 @@ Edit x35 / ...`）で足りるものとして扱う。個々のツール呼び�
 ついて置いている断りと同じ扱いで、ここに依存した判定を他の仕組みへ広げないこと。
 
 同じ理由で、**転記を読むのはこのスクリプトと `scripts/session-notify.sh`、
-`scripts/subpc-dispatch-poller.sh` の中断検知（#1971）、`scripts/session-usage.sh` の使用量集計
+`scripts/subpc-dispatch-poller.sh` の中断検知（#1971）とCodexの作業ステップの取り込み
+（#3213。Codexは`PostToolUse`フックを繋いでいない）、`scripts/session-usage.sh` の使用量集計
 （#2350）だけ**に留める。転記の場所を引く手順は `scripts/lib/session-transcript.sh` に
 集めてあり、**写しを増やさない**。
 

@@ -642,6 +642,15 @@ Statusは**いまどこにいるか**しか持たず、**どの段を通って�
 - **途中の段階からの移動を無条件には拾わない。** 拾うと**Phase 2の進捗報告そのものが実行の
   再起動になる**。`Planning → Implementation`だけ例外にできるのは、承認待ちラベルの有無で
   「人が承認した」と「機械が報告した」を区別できるため（#1020）
+- **ローカルセッションの計画承認は、issue-deckが`Planning → Implementation`を報告する**（#3213）。
+  起動時に`Planning`を報告するのは`scripts/lib/progress-report.sh`で、承認後に進めるのは無人実行の
+  ワークフローだけだったため、ローカルで画面から承認しても「計画」のまま次の`Develop PR`まで動かず、
+  一覧のバーも詳細のステップも計画で止まって見えた（Codexでは作業ステップも出ず「計画検討中」で固定）。
+  `POST /api/dispatch/plan-decision`が承認（`approve`）を保存した直後に
+  `advanceSessionPlanProgress`（`lib/dispatch/session-plan-progress.ts`。`reportProgressStatus`・`onlyFrom: planning`）を呼ぶ。**`Planning`に
+  いるものだけ**を動かすので、進んだIssueを巻き戻さない。送り主が`issue-deck` Appで`11.local`も
+  付いているため、上の起動の対象にはならない。**端末・Remote Controlで承認した場合は画面を
+  通らないので動かない**
 - **後戻りには何も割り当てない。** 実行のキャンセルを割り当てるとStatusを書き戻す処理と
   往復しうるうえ、ドラッグの誤操作で実行が止まる影響が大きい
 - **`from`が`null`（盤面へ載せた直後）も対象外。** 載せる操作自体が実行の開始になってしまう

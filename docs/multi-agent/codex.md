@@ -100,6 +100,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 入力待ちの通知（Push通知） | ○（`Notification`フック） | **×**（同じイベントが無い。後述） |
 | 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | ○（`scripts/submit-plan.sh`。#2545） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | ○（`scripts/submit-question.sh`。#2579） |
+| 作業ステップの表示（一覧の「実装中(3分)」・進捗バーの調査／実装／検証のマス） | ○（`Pre/PostToolUse`フックが`.step`を書く。#2705） | ○（**フックではなく転記から**。pollerが直近のツール呼び出しを分類して`.step`を書く。#3213。下の「作業ステップは転記から起こす」） |
 | AI使用量の集計（エージェント別・Issue別） | ○ | ○（#2535） |
 | AI使用量のフェーズ内訳（計画・調査・実装・検証・仕上げ） | ○ | ○（#3169。下の「フェーズの内訳も同じ5行へ割る」） |
 | APIエラーで中断したセッションの自動再開 | ○ | ○（`task_complete.error`を検知して`codex queue`で再開。#3178） |
@@ -109,6 +110,32 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
+
+### 作業ステップは転記から起こす（#3213）
+
+一覧の添える字「実装中(3分)」と進捗バーの調査／実装／検証・仕上げのマスは、`.step`
+（`scripts/lib/session-step.sh`の語彙）だけを材料にしている。Claude Codeは`Pre/PostToolUse`フックが
+書くが、**Codexは`SessionStart`・`Stop`しかフックを繋いでいない**ため`.step`が空のままで、画面は
+進捗Statusの「計画検討中（サブPC）」で固定され、実装に入ってもバーが動かなかった。
+
+**pollerが転記（`~/.codex/sessions/…/rollout-*.jsonl`）の末尾から直近のツール呼び出しを読み、
+同じ分類で`.step`を書く**（`scripts/lib/session-codex-step.sh`。セッションの報告のたびに1回）。
+
+- 呼び出しは`response_item`・`payload.type=custom_tool_call`・`name=exec`で、`payload.input`に
+  JSのコードが入る。拾うのは`tools.apply_patch(`（→`EDITING`）と`tools.exec_command(`の`cmd`
+  （→`session_step_from_bash_command`。Claude Codeと同じ分類）、`web__run`・`view_image`（→`EXPLORING`）
+- **見た時刻は転記のレコードの時刻**。巡回した時刻で書くと直前の`Stop`より後になり、終わった
+  ターンの作業が「いま走っている」ように出る（`isSessionStepFresh`）
+- `write_stdin`（走っているコマンドへの入力・待ち）と`update_plan`は作業の種類を表さないので書かない。
+  `submit-plan.sh`・`submit-question.sh`も書かない（画面の返事を待って止まるため、「コマンド実行中」と
+  出すと人を待っていることが隠れる）
+- **読めなければ何もしない**（従来どおり進捗Statusの文言に戻る）。転記の形はCodexの内部仕様
+- フックを繋ぐ案は見送った。`exec`ラッパーの下で`tool_name`／`tool_input`がどう渡るかを実機で
+  確かめておらず、ツール呼び出しごとにプロセスを起こすことにもなる。反映はpollerの巡回間隔ぶん遅れる
+- **計画の承認後に進捗が動かない問題は別の原因**で、エージェント種別を問わない。ローカルセッションは
+  承認を受けて`Planning`→`Implementation`へ進める経路が無かった。画面から承認したとき
+  （`POST /api/dispatch/plan-decision`）にissue-deckが報告する（`advanceSessionPlanProgress`。
+  [progress-status-architecture.md](../progress-status-architecture.md)）。端末で承認した場合は動かない
 
 ### 画面デザインをIssueDeck配下で共有する（#2597）
 
