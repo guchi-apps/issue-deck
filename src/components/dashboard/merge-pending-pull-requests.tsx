@@ -1,6 +1,7 @@
 "use client";
 
-import { Clock, GitPullRequest, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, Clock, GitPullRequest, RefreshCw } from "lucide-react";
 
 import { BranchBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
@@ -18,6 +19,12 @@ import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
+ * 畳んだときに並べる件数（#3165）。スマホ（iPhone 15・393×852）で見出し・3件・「他N件を表示」
+ * を足して画面のおよそ半分に収まり、下に確認待ちのIssueが2件見える数。
+ */
+const COLLAPSED_COUNT = 3;
+
+/**
  * 「ユーザーの確認待ち」一覧の先頭に出す、ユーザーのマージを待っているPull Request（#1613）。
  *
  * develop→mainのリリースPRは対応Issueを持たないため、`00.check-user`を手掛かりにする確認待ちの
@@ -31,6 +38,11 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 件数だけ受け取る**（#2081）。押せないPRを並べても開いた先に操作が無く、リリースPRを
  * 一斉に起票した直後はそれで一覧が埋まっていた。ただし完全に消すと、対応Issueを持たない
  * リリースPRはどこにも現れないまま数分後に突然現れるため、最後の1行で件数だけ伝える。
+ *
+ * **既定で並べるのは`COLLAPSED_COUNT`件までで、残りは「他N件を表示」の1行にまとめる**
+ * （#3165）。リリースPRを各リポジトリへ一斉に起票した日は10件を超え、枠だけで画面が埋まって
+ * 確認待ちのIssueが1件も見えなくなっていた。**件数は見出しのバッジで必ず出す**ので、
+ * 畳んでいても何件待たれているかは分かる。
  */
 export function MergePendingPullRequests({
   pullRequests,
@@ -74,6 +86,10 @@ export function MergePendingPullRequests({
   /** 取り直しが飛んでいる間の表示（アイコンの回転）。`onRefresh`が無いときは使わない */
   isRefreshing?: boolean;
 }) {
+  // 畳んだ状態の開閉（#3165）。**覚えない**——Issueを開いて戻ると畳んだ状態に戻る。
+  // 開いたままにすると、次に来たときにまた枠で画面が埋まる（それが直したかった状態）
+  const [isExpanded, setIsExpanded] = useState(false);
+
   if (pullRequests.length === 0 && waitingForChecksCount === 0) return null;
 
   // 保留中のPRは、一覧の「保留中N件」を開いた中に並ぶ（#2398）。見出しも件数の行も出さない
@@ -144,20 +160,32 @@ export function MergePendingPullRequests({
     );
   }
 
+  // 畳むのは`COLLAPSED_COUNT`を超えたときだけ。1件だけ隠しても画面は広がらず、
+  // 押す手間だけが増える
+  const isCollapsible = pullRequests.length > COLLAPSED_COUNT;
+  const hiddenCount = isCollapsible ? pullRequests.length - COLLAPSED_COUNT : 0;
+  const listedPullRequests =
+    isCollapsible && !isExpanded ? pullRequests.slice(0, COLLAPSED_COUNT) : pullRequests;
+
   return (
     <section className="border-b bg-amber-500/5 px-4 py-3" aria-labelledby="merge-pending-title">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h3
           id="merge-pending-title"
           className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400"
         >
           <GitPullRequest className="size-3.5 shrink-0" />
           あなたのマージを待っているPull Request
+          {/* 畳んでいるときも「何件待たれているか」だけは必ず読める（#3165）。
+              出すのは並べている数ではなく総数で、左メニューの数え方と同じ */}
+          <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 font-semibold tabular-nums">
+            {pullRequests.length}件
+          </span>
         </h3>
         <RefreshButton onRefresh={onRefresh} isRefreshing={isRefreshing} />
       </div>
-      <ul className="mt-2 flex flex-col gap-1.5">
-        {pullRequests.map((pullRequest) => (
+      <ul id="merge-pending-list" className="mt-2 flex flex-col gap-1.5">
+        {listedPullRequests.map((pullRequest) => (
           <li key={pullRequest.id} className="relative">
             <button
               type="button"
@@ -197,6 +225,27 @@ export function MergePendingPullRequests({
           </li>
         ))}
       </ul>
+      {isCollapsible && (
+        <Button
+          size="xs"
+          variant="outline"
+          className="mt-1.5 w-full bg-background"
+          aria-expanded={isExpanded}
+          aria-controls="merge-pending-list"
+          onClick={() => setIsExpanded((expanded) => !expanded)}
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="size-3.5" />
+              先頭{COLLAPSED_COUNT}件だけ表示
+            </>
+          ) : (
+            <>
+              <ChevronDown className="size-3.5" />他{hiddenCount}件を表示
+            </>
+          )}
+        </Button>
+      )}
       {waitingForChecksCount > 0 && (
         <p className="mt-2 text-xs text-muted-foreground">
           <WaitingForChecksText count={waitingForChecksCount} />
