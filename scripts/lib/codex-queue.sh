@@ -22,8 +22,17 @@
 # このファイル自体は実行せず、source して使う。宛先（セッションUUID）の置き場は
 # `lib/session-state.sh`の`.codex-thread`で、書くのは`session-notify.sh`の`SessionStart`。
 
-# 実行する`codex`。**差し替えられるのは検証のときだけ**で、pollerは既定のまま使う。
-CODEX_QUEUE_COMMAND="${ISSUE_DECK_CODEX_COMMAND:-codex}"
+# 実行する`codex`。検証では環境変数で差し替えられる。通常は、読込み元が
+# `agent-cli.sh`を用意していればstandalone版を選ぶ（#3194）。
+codex_queue_command() {
+  if [[ -n "${ISSUE_DECK_CODEX_COMMAND:-}" ]]; then
+    printf '%s' "$ISSUE_DECK_CODEX_COMMAND"
+  elif declare -F agent_cli_codex_command >/dev/null 2>&1; then
+    agent_cli_codex_command
+  else
+    printf 'codex'
+  fi
+}
 
 # `codex queue`の打ち切り（秒）。**待たされ続けないための保険。** 通常は即座に返る
 # （メッセージを積むだけで、ターンの完了は待たない）。
@@ -36,7 +45,7 @@ CODEX_QUEUE_TIMEOUT_SECONDS="${ISSUE_DECK_CODEX_QUEUE_TIMEOUT_SECONDS:-30}"
 # 1・2のときは理由を標準出力へ1行で返す（**呼び出し元が報告の形を決める**。
 # `deliver_session_instruction`と同じ規約）。
 codex_queue_send() {
-  local thread="$1" body="$2" out status=0
+  local thread="$1" body="$2" out status=0 command
 
   # **宛先が無いのは「見送り」。** ディレクトリの信頼確認（`Do you trust the contents of this
   # directory?`）に答えるまでフックが1つも飛ばず、UUIDが手に入らない。異常ではなく、
@@ -49,8 +58,9 @@ codex_queue_send() {
     echo "追加指示の本文が空です"
     return 2
   fi
-  if ! command -v "$CODEX_QUEUE_COMMAND" >/dev/null 2>&1; then
-    echo "$CODEX_QUEUE_COMMAND コマンドが見つからないため送れませんでした"
+  command="$(codex_queue_command)"
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "$command コマンドが見つからないため送れませんでした"
     return 2
   fi
 
@@ -60,7 +70,7 @@ codex_queue_send() {
   # **終了コードは`||`で受ける。** `if ! cmd; then $?` は`!`が反転させた後の値になり、
   # 打ち切り（124）と通常の失敗を見分けられない。
   out="$(timeout "$CODEX_QUEUE_TIMEOUT_SECONDS" \
-    "$CODEX_QUEUE_COMMAND" queue --thread "$thread" --message "$body" 2>&1)" || status=$?
+    "$command" queue --thread "$thread" --message "$body" 2>&1)" || status=$?
   if ((status != 0)); then
     # 打ち切りと、終了済みセッション（`No active session found matching …`）を同じ形で返す。
     # **理由はジョブの`message`として画面に出る**ので、原因の1行をそのまま載せる。

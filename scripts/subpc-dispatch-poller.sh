@@ -741,8 +741,9 @@ code_review_capable() {
 #
 # 出力は1行目が`true`/`false`、2行目が`false`のときの理由（画面には出さず、journaldへ出す用）。
 codex_capable() {
-  local probe
-  if ! command -v codex >/dev/null 2>&1; then
+  local probe codex_command
+  codex_command="$(agent_cli_codex_command)"
+  if ! command -v "$codex_command" >/dev/null 2>&1; then
     printf 'false\ncodexコマンドが入っていません'
     return 0
   fi
@@ -772,13 +773,7 @@ codex_capable() {
 # **取りこぼす側へ倒してある。** 将来インストール先が変わればfalseになるが、そのときは画面に
 # ボタンが出ないだけ。逆に誤ってtrueにすると、押した人には「押しても失敗する」しか残らない。
 codex_remote_control_capable() {
-  local real
-  command -v codex >/dev/null 2>&1 || { printf 'false'; return; }
-  real="$(readlink -f "$(command -v codex)" 2>/dev/null || true)"
-  case "$real" in
-    */packages/standalone/*) printf 'true' ;;
-    *) printf 'false' ;;
-  esac
+  agent_cli_standalone_codex_command >/dev/null 2>&1 && printf 'true' || printf 'false'
 }
 
 # チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
@@ -2943,7 +2938,7 @@ run_reboot_job() {
 # **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
 # `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい。
 run_codex_pairing_job() {
-  local job_id="$1"
+  local job_id="$1" codex_command
   local start_rc=0 pair_rc=0 pair_out code expires attempt
 
   if [[ "$(codex_remote_control_capable)" != "true" ]]; then
@@ -2951,11 +2946,12 @@ run_codex_pairing_job() {
       "Codexのremote-controlを使えません（公式インストーラのstandalone installが要ります）。"
     return 0
   fi
+  codex_command="$(agent_cli_standalone_codex_command)"
 
   # デーモンを起こす。**出力は読まない**（`serverName`はホスト名で既に分かっており、
   # 起きたかどうかは続く`pair`が通るかで分かる）
   echo "Codexのapp-serverデーモンを起こします..."
-  timeout 120 codex remote-control start --json >/dev/null 2>&1 || start_rc=$?
+  timeout 120 "$codex_command" remote-control start --json >/dev/null 2>&1 || start_rc=$?
   if [[ "$start_rc" -ne 0 ]]; then
     report_job "$job_id" failed \
       "Codexのデーモンを起動できませんでした（終了コード $start_rc）。"
@@ -2966,7 +2962,7 @@ run_codex_pairing_job() {
   # 落ちることがある**（#2521の実機確認）。デーモンが上がりきるのを待って数回試す
   for (( attempt = 1; attempt <= 3; attempt++ )); do
     pair_rc=0
-    pair_out="$(timeout 60 codex remote-control pair --json 2>/dev/null)" || pair_rc=$?
+    pair_out="$(timeout 60 "$codex_command" remote-control pair --json 2>/dev/null)" || pair_rc=$?
     code="$(printf '%s' "$pair_out" | jq -r '.manualPairingCode // ""' 2>/dev/null || printf '')"
     [[ -n "$code" ]] && break
     (( attempt < 3 )) && sleep 3

@@ -35,14 +35,14 @@ import { hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
  *
  * **待っている間、端末には承認プロンプトが出ない。** 長くするほど画面から承認できる時間が
  * 延びる一方、端末に座っている人は待たされる（Escで中断すればすぐプロンプトへ戻せる）。
- * スマホ・別PCから承認する運用に合わせて30分を既定にしている。
+ * 外出中でもissue-deckの画面から答えられるよう12時間を既定にしている。
  * ホスト側の`SESSION_PLAN_WAIT_SECONDS`（`~/.config/issue-deck/notify.env`）で変えられる。
  */
-export const SESSION_PLAN_WAIT_SECONDS_DEFAULT = 1800;
+export const SESSION_PLAN_WAIT_SECONDS_DEFAULT = 12 * 60 * 60;
 
 /** 受け取ってよい待ち時間の範囲。フックが壊れた値を送ってきても、ここで常識的な幅へ丸める */
 export const SESSION_PLAN_WAIT_SECONDS_MIN = 60;
-export const SESSION_PLAN_WAIT_SECONDS_MAX = 3600;
+export const SESSION_PLAN_WAIT_SECONDS_MAX = 24 * 60 * 60;
 
 /**
  * 修正の本文の上限。**Claudeへそのまま渡る文章**なので、追加指示（500文字・1行）より広く取る
@@ -136,7 +136,7 @@ export function buildPlanRevisionReason(revisionText: string): string {
  *
  * **`0`だけは特別で、そのまま`0`を返す**（＝待たない）。ホスト側で
  * `SESSION_PLAN_WAIT_SECONDS=0`にしたときにここで下限へ丸めてしまうと、フックは待たないのに
- * 画面には「承認を待っています」が既定の30分ぶん残り、押しても誰も受け取らないパネルになる。
+ * 画面には「承認を待っています」が既定の12時間ぶん残り、押しても誰も受け取らないパネルになる。
  */
 export function parseSessionPlanWaitSeconds(value: unknown): number {
   const seconds = typeof value === "number" ? value : Number(value);

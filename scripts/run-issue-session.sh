@@ -824,12 +824,12 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   #
   # **`ExitPlanMode`・`AskUserQuestion`のフックだけタイムアウトを延ばす**（#2061・#2189）。
   # あの2つは計画・質問を送ったあと、issue-deckの画面からの返事を
-  # `SESSION_PLAN_WAIT_SECONDS`／`SESSION_QUESTION_WAIT_SECONDS`秒（既定30分・上限1時間）
+  # `SESSION_PLAN_WAIT_SECONDS`／`SESSION_QUESTION_WAIT_SECONDS`秒（計画は既定12時間・上限24時間）
   # 待つ。Claude Codeの既定（10分）のままだと、待ち切る前にフックが打ち切られて画面から
   # 答えられる時間が縮む。
   #
   # **待ち時間そのものは`~/.config/issue-deck/notify.env`側にあり、ここからは見えない。**
-  # 上限（`SESSION_PLAN_WAIT_SECONDS_MAX`＝3600秒）に余裕を足した固定値を置いて、どう設定
+  # 上限（`SESSION_PLAN_WAIT_SECONDS_MAX`＝86400秒）に余裕を足した固定値を置いて、どう設定
   # されていても足りるようにする。**ここが長いこと自体は待ち時間を延ばさない**——フックは
   # 返事が決まるか待ち時間が切れた時点で終わる。
   #
@@ -838,7 +838,7 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   #
   # **matcherは正規表現で2つのツールに掛ける。** 片方だけに付けると、付いていない方は
   # 既定の10分で打ち切られる（打ち切られても壊れないが、画面から答えられる時間が縮む）。
-  WAIT_HOOK_TIMEOUT=3660
+  WAIT_HOOK_TIMEOUT=86460
   # **`permissions.defaultMode`も一緒に置く**（#2733）。下の`--permission-mode auto`はCLI引数で、
   # Claude Code本体が持つマイグレーション（設定ファイル側が`auto`でないとauto modeの同意
   # `skipAutoPermissionPrompt`を打ち消す）の判定材料にならない。打ち消されると`grep`のような
