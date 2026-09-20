@@ -42,6 +42,12 @@ export function ClaudeUsageCard({
   quotaEstimate,
 }: ClaudeUsageCardProps) {
   const now = useNow();
+  // 2列表示ではCodexの週間枠と先頭行を揃える。取得元の配列順に依存せず、
+  // 週間枠を先に置く（#3195）。
+  const windows = [...(data?.windows ?? [])].sort((a, b) => {
+    const order = (key: string) => (key === "7d" ? 0 : key === "5h" ? 1 : 2);
+    return order(a.key) - order(b.key);
+  });
 
   return (
     <>
@@ -50,12 +56,12 @@ export function ClaudeUsageCard({
       {notConfigured && (
         <p className="text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>
       )}
-      {data && data.windows.length === 0 && (
+      {data && windows.length === 0 && (
         <p className="text-xs text-muted-foreground">使用量を取得できませんでした</p>
       )}
-      {data && data.windows.length > 0 && (
+      {data && windows.length > 0 && (
         <ul className="flex flex-col gap-2">
-          {data.windows.map((usageWindow) => {
+          {windows.map((usageWindow) => {
             const { resetsAt } = usageWindow;
             const hasReset = resetsAt !== null && now !== null;
             return (
