@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { notifyCodexSessionDecision } from "@/lib/dispatch/codex-decision-notify";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
-import { decideSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import {
+  decideSessionPlanRequest,
+  recordSessionPlanCodexDelivery,
+} from "@/lib/dispatch/plan-requests";
 import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import { advanceSessionPlanProgress } from "@/lib/dispatch/session-plan-progress";
 import {
@@ -97,6 +101,28 @@ export async function POST(request: NextRequest) {
       repositoryFullName: result.request.repositoryFullName,
       issueNumber: result.request.issueNumber,
     });
+  }
+
+  // **Codexのセッションには、ここから継続指示を積む**（#3218）。あちらは`submit-plan.sh`の
+  // 完了を待たずにターンを終えているため、判断を取りに来る当事者がいない
+  // （`src/lib/dispatch/codex-decision-notify.ts`）。**`defer`では送らない**——端末で答えると
+  // 言っただけで、人はまだ答えていない。**失敗しても成功として返す**（判断はもうDBに入っている）
+  if (decision !== "defer") {
+    const notified = await notifyCodexSessionDecision({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+      kind: decision === "approve" ? "plan-approved" : "plan-revision",
+      requestedByUserId: user.id,
+    });
+    // **Codexだと分かったときだけ記録する。** Claude Codeのセッション（`not_codex`）と、
+    // どちらか分からないとき（`no_session`）は、フックが`report_delivery`で書く側を残す
+    if (notified.ok || (notified.reason !== "not_codex" && notified.reason !== "no_session")) {
+      await recordSessionPlanCodexDelivery({
+        id: result.request.id,
+        queued: notified.ok,
+        summary: notified.ok ? null : notified.message,
+      });
+    }
   }
 
   return NextResponse.json({ request: result.request });

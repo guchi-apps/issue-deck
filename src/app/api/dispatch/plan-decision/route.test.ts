@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const decideSessionPlanRequest = vi.fn();
+const recordSessionPlanCodexDelivery = vi.fn();
+const notifyCodexSessionDecision = vi.fn();
 const resolveSessionPlanCheckUser = vi.fn();
 const advanceSessionPlanProgress = vi.fn();
 const createComment = vi.fn();
@@ -21,6 +23,15 @@ vi.mock("@/lib/dispatch/installation-token", () => ({
 vi.mock("@/lib/dispatch/plan-requests", () => ({
   get decideSessionPlanRequest() {
     return decideSessionPlanRequest;
+  },
+  get recordSessionPlanCodexDelivery() {
+    return recordSessionPlanCodexDelivery;
+  },
+}));
+
+vi.mock("@/lib/dispatch/codex-decision-notify", () => ({
+  get notifyCodexSessionDecision() {
+    return notifyCodexSessionDecision;
   },
 }));
 
@@ -63,6 +74,8 @@ beforeEach(() => {
   decideSessionPlanRequest.mockResolvedValue({ ok: true, request });
   resolveSessionPlanCheckUser.mockResolvedValue(true);
   advanceSessionPlanProgress.mockResolvedValue(true);
+  recordSessionPlanCodexDelivery.mockResolvedValue(undefined);
+  notifyCodexSessionDecision.mockResolvedValue({ ok: false, reason: "not_codex", message: "" });
   createComment.mockResolvedValue({});
 });
 
@@ -141,5 +154,61 @@ describe("POST /api/dispatch/plan-decision", () => {
     advanceSessionPlanProgress.mockResolvedValue(false);
     const res = await POST(postRequest({ id: "plan-1", decision: "approve" }));
     expect(res.status).toBe(200);
+  });
+
+  /**
+   * #3218。Codexは`submit-plan.sh`の完了を待たずにターンを終えるため、判断を取りに来る
+   * 当事者がいない。判断が決まった時点でこちらから継続指示を積む。
+   */
+  it("承認・修正ではCodexのセッションへ継続指示を積む", async () => {
+    notifyCodexSessionDecision.mockResolvedValue({ ok: true, jobId: "job-1" });
+
+    await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    expect(notifyCodexSessionDecision).toHaveBeenLastCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2341,
+      kind: "plan-approved",
+      requestedByUserId: "user-1",
+    });
+
+    await POST(postRequest({ id: "plan-1", decision: "revise", text: "直してください" }));
+    expect(notifyCodexSessionDecision).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "plan-revision" }),
+    );
+    expect(recordSessionPlanCodexDelivery).toHaveBeenLastCalledWith({
+      id: "plan-1",
+      queued: true,
+      summary: null,
+    });
+  });
+
+  it("端末で答える場合は積まない（人はまだ答えていない）", async () => {
+    await POST(postRequest({ id: "plan-1", decision: "defer" }));
+    expect(notifyCodexSessionDecision).not.toHaveBeenCalled();
+    expect(recordSessionPlanCodexDelivery).not.toHaveBeenCalled();
+  });
+
+  // Claude Codeのセッションはフックが判断を取りに来る。配送の記録もそちらに任せる
+  it("Claude Codeのセッション・セッション不明のときは配送の記録を書かない", async () => {
+    for (const reason of ["not_codex", "no_session"]) {
+      notifyCodexSessionDecision.mockResolvedValue({ ok: false, reason, message: "" });
+      await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    }
+    expect(recordSessionPlanCodexDelivery).not.toHaveBeenCalled();
+  });
+
+  it("Codexへ積めなかった理由は配送の記録として残す", async () => {
+    notifyCodexSessionDecision.mockResolvedValue({
+      ok: false,
+      reason: "not_alive",
+      message: "Codexのセッションが動いていません。",
+    });
+    const res = await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    expect(res.status).toBe(200);
+    expect(recordSessionPlanCodexDelivery).toHaveBeenCalledWith({
+      id: "plan-1",
+      queued: false,
+      summary: "Codexのセッションが動いていません。",
+    });
   });
 });

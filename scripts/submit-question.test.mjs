@@ -94,6 +94,17 @@ describe("submit-question.sh", () => {
     });
   });
 
+  // #3218: Codexはシェルの実行を30秒で打ち切って完了と解釈しターンを終えるため、
+  // ここで待っても回答を受け取る当事者がいない。登録だけして返し、回答はpollerが
+  // `codex queue`で次のターンとして届ける
+  it("Codexでは回答を待たず、登録だけして終了コード0で返す", async () => {
+    const result = await run({ ISSUE_DECK_AGENT: "codex" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("回答はこのコマンドでは待ちません");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/api/dispatch/sessions/question");
+  });
+
   it("WAITINGのあとに回答されるまでポーリングする", async () => {
     decisions = [{ status: "WAITING", answers: null }, { status: "ANSWERED", answers: { "どう進めますか？": "停止する" } }];
     const result = await run();
