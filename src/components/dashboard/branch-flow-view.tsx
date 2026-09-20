@@ -17,6 +17,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDashed,
+  CirclePlay,
   Clock,
   ExternalLink,
   GitBranch,
@@ -796,7 +797,8 @@ function IssuePriorityBadge({ priority }: { priority: BranchFlowIssuePriority })
  * 実行ボタンを押して動き出した、まだブランチが無いIssue（#1704・#2386）。
  *
  * 流れ図のいちばん上、作業レーンより上流に置く。**枝も点も破線にして「まだブランチになっていない」
- * ことを形で出す**——実線の枝（＝実在するブランチ）と同じ描き方にすると、ブランチが切られたものと
+ * ことを形で出す**（破線の意味は「ブランチがまだ無い」で、畳んだ行の未着手〔#3163〕も同じ破線の丸を
+ * 使う。着手中は畳んだ行では再生マークの丸に替えたが、この流れ図の点は変えていない）——実線の枝（＝実在するブランチ）と同じ描き方にすると、ブランチが切られたものと
  * 見分けが付かない。
  *
  * **頭出しはしない**（#2386）。3件までに畳んでいたのは未着手（＝バックログ全体）を並べていた
@@ -1609,12 +1611,24 @@ function RepositorySummaryRow({
           className="text-amber-600 dark:text-amber-400"
         />
       )}
+      {/* 未着手（Ready）の件数（#3163）。保留にしているIssueも含み、すぐには動かないことがあるので、
+          着手中より薄い色にして目立たせない。破線の丸は流れ図の着手中ノードと同じ描き方で、
+          「まだブランチが無い」ことを形で出す（未着手も着手中もブランチは無い）。
+          「動きなし」の判定（`hasAnything`）には入れない——動いているものが無いことは変わらない */}
+      {summary.readyIssueCount > 0 && (
+        <SummaryCount
+          icon={CircleDashed}
+          label={`未着手 ${summary.readyIssueCount}件`}
+          count={summary.readyIssueCount}
+          className="opacity-55"
+        />
+      )}
       {/* 開かなくても、実行ボタンを押したものが何本走っているかが分かるようにする（#1704・#2386）。
-          破線の丸は流れ図の着手中ノードと同じ描き方で、まだブランチが無いことを形で出す。
+          破線の丸は未着手へ譲り（#3163）、実行中を表す再生マークの丸にする。
           ブランチが上がったぶんは右隣の「進行中」が数えるので、2つを足すと総数になる */}
       {summary.startedIssueCount > 0 && (
         <SummaryCount
-          icon={CircleDashed}
+          icon={CirclePlay}
           label={`着手中 ${summary.startedIssueCount}件`}
           count={summary.startedIssueCount}
         />
