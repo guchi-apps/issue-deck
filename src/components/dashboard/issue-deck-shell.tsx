@@ -50,6 +50,7 @@ import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { KnowledgeBoardPanel } from "@/components/dashboard/knowledge-board-panel";
+import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
   SESSION_USAGE_PERIODS,
@@ -266,6 +267,7 @@ export function IssueDeckShell({
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectKnowledgePane,
+    selectIdeasPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -350,6 +352,7 @@ export function IssueDeckShell({
     selectPreview,
     selectNightlyRun,
     selectKnowledge,
+    selectIdeas,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -2012,6 +2015,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectKnowledge={selectKnowledge}
+                  onSelectIdeas={selectIdeas}
                   knowledgePromotionCount={knowledgePromotionCount}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   onSelectRepos={selectRepos}
@@ -2061,6 +2065,12 @@ export function IssueDeckShell({
                   onRefresh={knowledgeBoard.refresh}
                   onBack={goBack}
                 />
+              )}
+
+              {mobileScreen.kind === "ideas" && (
+                <div className="h-full overflow-y-auto p-4">
+                  <IdeasPanel onBack={goBack} />
+                </div>
               )}
 
               {mobileScreen.kind === "nightly-run" && (
@@ -2358,6 +2368,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectKnowledge={selectKnowledgePane}
+                onSelectIdeas={selectIdeasPane}
                 knowledgePromotionCount={knowledgePromotionCount}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
@@ -2386,7 +2397,11 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "usage" ? (
+          {filters.pane === "ideas" ? (
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-5xl"><IdeasPanel /></div>
+            </div>
+          ) : filters.pane === "usage" ? (
             /* PC: AI使用量（#2504）。「確認環境」と同じく中央〜右を1カラムで使う */
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
               <div className="mx-auto max-w-4xl">

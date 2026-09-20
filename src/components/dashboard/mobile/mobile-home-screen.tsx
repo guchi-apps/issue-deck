@@ -5,6 +5,7 @@ import {
   CalendarClock,
   FolderGit2,
   Loader2,
+  Lightbulb,
   MonitorPlay,
   Rocket,
   Settings,
@@ -91,6 +92,8 @@ type MobileHomeScreenProps = {
   nightlyRunQueuedCount: number | null;
   /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectKnowledge: () => void;
+  /** 新規アプリの構想一覧を開く */
+  onSelectIdeas?: () => void;
   /** 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じく行の件数と丸に使う */
   knowledgePromotionCount?: number | null;
   /**
@@ -180,6 +183,7 @@ export function MobileHomeScreenView({
   onSelectNightlyRun,
   nightlyRunQueuedCount,
   onSelectKnowledge,
+  onSelectIdeas = () => {},
   knowledgePromotionCount = null,
   onSelectRepos,
   repositoryCount,
@@ -505,6 +509,13 @@ export function MobileHomeScreenView({
               />
               {/* 共通知識（#2912）。出す件数は**マージ待ちの反映PRだけ**（#3082。PCの左メニューと
                   同じ。未判定の知見メモの数は、ここから押せる操作が無いので出さない） */}
+              <MobileNavRow
+                label="構想"
+                icon={Lightbulb}
+                onClick={onSelectIdeas}
+                count={null}
+                title="新規アプリの構想を確認・整理する"
+              />
               <MobileNavRow
                 label="共通知識"
                 icon={BookOpen}
