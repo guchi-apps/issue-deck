@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
-import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
 import { broadcastIssueCreated } from "@/lib/issue-broadcast";
 import { takeIssueCreateHandoff, type IssueCreateHandoff } from "@/lib/issue-create-window";
 import type { Issue } from "@/types/issue";
@@ -18,6 +18,7 @@ type CreateIssueWindowProps = {
    * 「作成+実装開始」へそのまま渡す。
    */
   claudeLocalModel: ClaudeLocalModelSetting;
+  codexModel: CodexModelSetting;
 };
 
 /**
@@ -31,6 +32,7 @@ export function CreateIssueWindow({
   repositories,
   issues,
   claudeLocalModel,
+  codexModel,
 }: CreateIssueWindowProps) {
   /**
    * 受け渡しの読み取りはlocalStorageに触るため、マウント後に行う（サーバー側では読めない）。
@@ -90,6 +92,7 @@ export function CreateIssueWindow({
       // 10秒以内に現れるため、ここでは失敗しても止めない
       onCreated={broadcastIssueCreated}
       claudeLocalModel={claudeLocalModel}
+      codexModel={codexModel}
     />
   );
 }

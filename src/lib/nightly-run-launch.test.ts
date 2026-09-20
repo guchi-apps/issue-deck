@@ -140,3 +140,42 @@ describe("launchScheduledRunEntry: 期限切れのトークン（#3148）", () =
     expect(mockedEnqueue).not.toHaveBeenCalled();
   });
 });
+
+// #3192。予約実行に積んだCodexのモデルは、起動時のジョブへそのまま引き継ぐ
+describe("launchScheduledRunEntry: モデルの引き継ぎ（#3192）", () => {
+  beforeEach(() => {
+    entryUpdateMany.mockResolvedValue({ count: 1 });
+    entryUpdate.mockResolvedValue({});
+    userFindUnique.mockResolvedValue({
+      id: "user-1",
+      githubAccessToken: "enc:ok",
+      githubRefreshToken: "enc:refresh",
+    });
+    mockedEnqueue.mockResolvedValue({ ok: true, job: { id: "job-1" } } as never);
+    stubGithub("ok");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("Codexのモデルの指定をジョブへ渡す。未知の語は指定なしへ倒す", async () => {
+    await launchScheduledRunEntry({
+      ...params,
+      entry: { ...params.entry, agent: "codex", codexModel: "gpt-5.6-sol" },
+    });
+    expect(mockedEnqueue.mock.calls[0][0]).toMatchObject({
+      agent: "codex",
+      codexModel: "gpt-5.6-sol",
+      claudeModel: null,
+    });
+
+    mockedEnqueue.mockClear();
+    await launchScheduledRunEntry({
+      ...params,
+      entry: { ...params.entry, agent: "codex", codexModel: "opus" },
+    });
+    expect(mockedEnqueue.mock.calls[0][0].codexModel).toBeNull();
+  });
+});

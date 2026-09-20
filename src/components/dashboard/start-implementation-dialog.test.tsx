@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
@@ -186,6 +187,7 @@ function renderDialog(
     localSessionCommand?: string | null;
     onOpenChange?: (open: boolean) => void;
     claudeLocalModel?: "fable" | "opus" | "sonnet" | "pick";
+    codexModel?: ComponentProps<typeof StartImplementationDialog>["codexModel"];
   } = {},
 ) {
   const issue = props.issue ?? makeIssue();
@@ -203,6 +205,7 @@ function renderDialog(
       actionsDisabledReason={props.actionsDisabledReason ?? null}
       localSessionCommand={props.localSessionCommand ?? null}
       claudeLocalModel={props.claudeLocalModel ?? "sonnet"}
+      codexModel={props.codexModel ?? "gpt-5.6-terra"}
     />
   );
   const result = render(element());
@@ -581,14 +584,99 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
     });
 
-    it("Codexを選ぶと選択欄が消える（Codexのモデルは別の設定のため）", () => {
-      dispatchState.hosts = [makeHost({ codexCapable: true })];
-      renderDialog({ includeDispatchTargets: true });
+    /**
+     * #3192。Codexを選ぶと、同じ位置の「モデル」欄がCodexの候補（おまかせ・Sol・Terra・Luna）へ
+     * 切り替わる。積む値は今のエージェントの選択だけで、もう一方の選択は付いていかない。
+     */
+    describe("Codexのモデル（#3192）", () => {
+      const openCodex = (props: Parameters<typeof renderDialog>[0] = {}) => {
+        dispatchState.hosts = [makeHost({ codexCapable: true })];
+        renderDialog({ includeDispatchTargets: true, ...props });
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+      };
+      const checked = (name: RegExp) =>
+        screen.getByRole("radio", { name }).getAttribute("aria-checked");
 
-      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
-      expect(screen.getByRole("radiogroup", { name: "モデル" })).toBeTruthy();
-      fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
-      expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
+      it("Codexを選ぶと、おまかせ・Sol・Terra・Lunaの4つに切り替わり、設定の値が選ばれている", () => {
+        openCodex({ codexModel: "gpt-5.6-sol" });
+
+        const group = screen.getByRole("radiogroup", { name: "モデル" });
+        expect(within(group).getAllByRole("radio")).toHaveLength(4);
+        expect(screen.queryByRole("radio", { name: /^Opus/ })).toBeNull();
+        expect(checked(/^Sol/)).toBe("true");
+        expect(checked(/^Terra/)).toBe("false");
+      });
+
+      it("選んだモデルを積む（Claude Codeの選択は付いていかない）", async () => {
+        openCodex({ claudeLocalModel: "fable" });
+        fireEvent.click(screen.getByRole("radio", { name: /^Luna/ }));
+        clickStart();
+
+        await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+        expect(enqueue.mock.calls[0][0]).toMatchObject({ agent: "codex", model: "gpt-5.6-luna" });
+      });
+
+      // 旧世代・`auto`はダイアログの候補に無く、選択なしで開くと何で立つか分からなくなる
+      it("設定が旧世代（GPT-5.5）のときは、Terraが選ばれた状態で開く", () => {
+        openCodex({ codexModel: "gpt-5.5" });
+
+        expect(checked(/^Terra/)).toBe("true");
+      });
+
+      it("エージェントを行き来しても、それぞれの選択が残る", () => {
+        openCodex({ claudeLocalModel: "opus" });
+        fireEvent.click(screen.getByRole("radio", { name: /^Sol/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^Claude Code/ }));
+        expect(checked(/^Opus/)).toBe("true");
+        fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+        expect(checked(/^Sol/)).toBe("true");
+      });
+
+      it("おまかせを押すとCodex向けに判定し、選ばれたモデルで積む", async () => {
+        modelPickFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            model: "gpt-5.6-terra",
+            reason: "通常の実装だと読めるためです。",
+            source: "ai",
+          }),
+        });
+        openCodex();
+        fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+        await waitFor(() => expect(screen.getByText(/通常の実装だと読めるためです/)).toBeTruthy());
+        expect(screen.getByTitle("おまかせが選んだモデル").textContent).toContain("Terra");
+        const body = JSON.parse(modelPickFetch.mock.calls[0][1].body as string);
+        expect(body.agent).toBe("codex");
+
+        clickStart();
+        await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+        expect(enqueue.mock.calls[0][0].model).toBe("gpt-5.6-terra");
+      });
+
+      it("設定がおまかせなら、Codexを選んだ時点で自動判定する（Claude Code側の判定とは別に1回）", async () => {
+        modelPickFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({ model: "gpt-5.6-sol", reason: "調査が要るためです。", source: "ai" }),
+        });
+        openCodex({ codexModel: "pick" });
+
+        await waitFor(() => expect(screen.getByText(/調査が要るためです/)).toBeTruthy());
+        expect(modelPickFetch).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(modelPickFetch.mock.calls[0][1].body as string).agent).toBe("codex");
+      });
+
+      it("判定が終わるまで開始を押させない", async () => {
+        modelPickFetch.mockReturnValue(new Promise(() => {}));
+        openCodex({ codexModel: "pick" });
+
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+            true,
+          ),
+        );
+      });
     });
 
     // #2723。金額（1件あたりの目安）は何の金額か画面から決まらず、FableとOpusがほぼ並ぶため
@@ -628,6 +716,46 @@ describe("StartImplementationDialog", () => {
       clickStart();
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(enqueue.mock.calls[0][0].model).toBe("opus");
+    });
+
+    /**
+     * #3189。Jevで判定したときだけ、判定元のバッジ・確信度・候補ごとの確率を出す。
+     * **接戦だったのかが押す前に分かる**ようにするためで、理由の1文だけでは読み取れない。
+     */
+    it("Jevの判定なら確信度と候補ごとの確率を出す", async () => {
+      dispatchState.hosts = [makeHost()];
+      modelPickFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          model: "opus",
+          reason: "難しさ 2/3と判定したためです。",
+          source: "jev",
+          confidence: 0.82,
+          probabilities: { opus: 0.82, sonnet: 0.15, fable: 0.03 },
+        }),
+      });
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      await waitFor(() => expect(screen.getByText("Jev")).toBeTruthy());
+      expect(screen.getByText(/確信度 82%/)).toBeTruthy();
+      expect(screen.getByText("15%")).toBeTruthy();
+      expect(screen.getByText("3%")).toBeTruthy();
+    });
+
+    // アプリ内AI・ルールの判定は確率を返さないので、確率の行ごと出さない
+    it("Jev以外の判定ではバッジも確率も出さない", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+      expect(screen.queryByText("Jev")).toBeNull();
+      expect(screen.queryByText(/確信度/)).toBeNull();
     });
 
     /**
@@ -690,7 +818,8 @@ describe("StartImplementationDialog", () => {
 
       resolvePick({
         ok: true,
-        json: async () => ({ model: "haiku", reason: "定型的な追記のためです。", source: "ai" }),
+        // 候補にあるモデルだけを採る（`haiku`のような候補外の値は判定なし扱いになる。#3192）
+        json: async () => ({ model: "sonnet", reason: "定型的な追記のためです。", source: "ai" }),
       });
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(

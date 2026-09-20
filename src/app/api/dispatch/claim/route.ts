@@ -11,6 +11,7 @@ import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   parseClaudeLocalModel,
+  parseCodexLocalModel,
   parseCodexModel,
 } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -131,6 +132,9 @@ export async function POST(request: NextRequest) {
   // 一括停止からの再開）だけで、それらは判定せずSonnetで立てる。
   const claudeLocalModel =
     parseClaudeLocalModel(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
+  // **設定が「おまかせ」（`pick`）のときは`parseCodexModel`が弾いて既定（Terra）になる**（#3192。
+  // Claudeの`claudeLocalModel`と同じ）。判定は「実装を開始」ダイアログが済ませて具体的なモデル名を
+  // 積むので、ここへ届くのはダイアログを経由しない起動だけで、それらは判定せずTerraで立てる。
   const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   return NextResponse.json(
     {
@@ -141,7 +145,9 @@ export async function POST(request: NextRequest) {
       jobs: jobs.map((job) => ({
         ...job,
         claudeLocalModel: job.claudeModel ?? claudeLocalModel,
-        codexModel,
+        // Codexも同じ（#3192）。ジョブに指定があればそれを`codexModel`として載せ直すので、
+        // pollerは従来どおりこのキーだけを読む。指定が無いジョブは設定の既定がそのまま載る
+        codexModel: parseCodexLocalModel(job.codexModel) ?? codexModel,
       })),
     },
     { headers: { "Cache-Control": "no-store" } },

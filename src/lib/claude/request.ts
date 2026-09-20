@@ -45,6 +45,13 @@ export type ClaudeMessagesResult<T> = {
   response: Response;
   /** 応答をJSONとして読めた場合のみ入る（`response.ok`でない場合はnull）。 */
   json: T | null;
+  /** 失敗応答に含まれる、利用者へ出してよい機械可読な原因。 */
+  error: AiApiError | null;
+};
+
+export type AiApiError = {
+  code: string | null;
+  requestId: string | null;
 };
 
 type OpenAiResponsesResponse = {
@@ -60,6 +67,36 @@ type OpenAiResponsesResponse = {
 
 function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function retryAfterMs(response: Response): number {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter !== null) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 5_000);
+
+    const at = Date.parse(retryAfter);
+    if (!Number.isNaN(at)) return Math.min(Math.max(at - Date.now(), 0), 5_000);
+  }
+  return 1_000;
+}
+
+async function readAiApiError(response: Response): Promise<AiApiError> {
+  let code: string | null = null;
+  try {
+    const body: unknown = await response.clone().json();
+    if (typeof body === "object" && body !== null && "error" in body) {
+      const error = (body as { error?: unknown }).error;
+      if (typeof error === "object" && error !== null) {
+        const details = error as { code?: unknown; type?: unknown };
+        if (typeof details.code === "string") code = details.code;
+        else if (typeof details.type === "string") code = details.type;
+      }
+    }
+  } catch {
+    // 失敗本文がJSONでなくても、HTTPステータスを扱う呼び出し元は継続できる。
+  }
+  return { code, requestId: response.headers.get("x-request-id") };
 }
 
 const REASONING_FEATURES = new Set<ClaudeApiFeature>(["manual_step_fix", "new_app_consult"]);
@@ -157,13 +194,13 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     return {
       response: new Response(JSON.stringify({ error: "not_configured" }), { status: 501 }),
       json: null,
+      error: { code: "not_configured", requestId: null },
     };
   }
   const requestBody =
     provider === "openai" ? openAiBody(options.body, model) : { ...options.body, model };
-  const response = await fetch(
-    provider === "openai" ? OPENAI_RESPONSES_API : `${ANTHROPIC_API}/v1/messages`,
-    {
+  const request = () =>
+    fetch(provider === "openai" ? OPENAI_RESPONSES_API : `${ANTHROPIC_API}/v1/messages`, {
       method: "POST",
       headers:
         provider === "openai"
@@ -179,14 +216,28 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
             },
       body: JSON.stringify(requestBody),
       cache: "no-store",
-      ...(options.timeoutMs === undefined
-        ? {}
-        : { signal: AbortSignal.timeout(options.timeoutMs) }),
-    },
-  );
+      ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
+    });
+
+  let response = await request();
+  let error = response.ok ? null : await readAiApiError(response);
+
+  // OpenAIは出力トークンを予約してからレート制限を判定する。拒否された呼び出しは生成を始めて
+  // いないため、短い待機の後に1回だけ再試行しても二重生成にならない。
+  if (provider === "openai" && response.status === 429 && error?.code === "rate_limit_exceeded") {
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs(response)));
+    response = await request();
+    error = response.ok ? null : await readAiApiError(response);
+  }
 
   // 拒否された呼び出し（レート制限の429など）はプラン枠を消費しないため計上しない。
-  if (!response.ok) return { response, json: null };
+  if (!response.ok) {
+    console.error(`[AI API] ${options.feature} ${response.status}`, {
+      code: error?.code,
+      requestId: error?.requestId,
+    });
+    return { response, json: null, error };
+  }
 
   let json: T | null = null;
   try {
@@ -194,7 +245,7 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     json = (provider === "openai" ? normalizeOpenAiResponse(raw as OpenAiResponsesResponse) : raw) as T;
   } catch {
     // 応答が壊れていても計測のためだけに機能を落とさない。呼び出し元が扱えるようnullで返す。
-    return { response, json: null };
+    return { response, json: null, error: null };
   }
 
   const usage = json?.usage;
@@ -210,5 +261,5 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     },
   });
 
-  return { response, json };
+  return { response, json, error: null };
 }

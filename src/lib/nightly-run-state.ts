@@ -44,6 +44,7 @@ type EntryRow = {
   targetHost: string;
   agent: string;
   claudeModel: string | null;
+  codexModel?: string | null;
   optionLabels: unknown;
   kind: ScheduledRunKind;
   status: NightlyRunEntryStatus;
@@ -141,6 +142,7 @@ function toView(
     targetHost: row.targetHost,
     agent: row.agent,
     claudeModel: row.claudeModel,
+    codexModel: row.codexModel ?? null,
     optionLabels: parseNightlyRunOptionLabels(row.optionLabels),
     kind: row.kind,
     status: row.status,

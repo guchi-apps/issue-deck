@@ -48,10 +48,30 @@ agent_cli_resolve_kind() {
   return 1
 }
 
+# standalone installのCodex本体。mise等がPATHの先頭にnpm版を置いていても、Remote Controlと
+# 同じapp-serverへ繋がる本体を選ぶ（#3194）。無ければ空を返す。
+agent_cli_standalone_codex_command() {
+  local codex_home="${CODEX_HOME:-$HOME/.codex}"
+  local command="$codex_home/packages/standalone/current/codex"
+  [[ -x "$command" ]] || return 1
+  printf '%s' "$command"
+}
+
+# 実行するCodex本体。standalone版があればPATHより優先し、無ければ従来どおりPATHに委ねる。
+# 後者ではRemote Controlを申告しないが、Codex CLI自体は従来どおり起動できる。
+agent_cli_codex_command() {
+  local standalone
+  if standalone="$(agent_cli_standalone_codex_command)"; then
+    printf '%s' "$standalone"
+    return 0
+  fi
+  command -v codex 2>/dev/null || printf 'codex'
+}
+
 # 種別に対応する実行ファイル名。`command -v`の判定と起動の両方で使う。
 agent_cli_command_name() {
   case "${1:-claude}" in
-    codex) printf 'codex' ;;
+    codex) agent_cli_codex_command ;;
     *) printf 'claude' ;;
   esac
 }
@@ -232,9 +252,10 @@ agent_cli_build_codex_args() {
 # `codex sandbox`を持たない版では材料が無い。そこを`broken`にすると、動くかもしれないホストで
 # Codexを選べなくなる。**証拠があるときだけ塞ぐ。**
 agent_cli_codex_sandbox_probe() {
-  local mode output probe_args timeout_args=()
+  local mode output probe_args timeout_args=() codex_command
 
-  if ! command -v codex >/dev/null 2>&1; then
+  codex_command="$(agent_cli_codex_command)"
+  if ! command -v "$codex_command" >/dev/null 2>&1; then
     printf 'unknown'
     return 0
   fi
@@ -245,7 +266,7 @@ agent_cli_codex_sandbox_probe() {
     timeout_args=(timeout 10)
   fi
 
-  if ! "${timeout_args[@]}" codex sandbox --help >/dev/null 2>&1; then
+  if ! "${timeout_args[@]}" "$codex_command" sandbox --help >/dev/null 2>&1; then
     printf 'unknown'
     return 0
   fi
@@ -256,7 +277,7 @@ agent_cli_codex_sandbox_probe() {
     probe_args+=(-c sandbox_workspace_write.network_access=true)
   fi
 
-  if output="$("${timeout_args[@]}" codex sandbox "${probe_args[@]}" -- /bin/true 2>&1)"; then
+  if output="$("${timeout_args[@]}" "$codex_command" sandbox "${probe_args[@]}" -- /bin/true 2>&1)"; then
     printf 'ok'
     return 0
   fi

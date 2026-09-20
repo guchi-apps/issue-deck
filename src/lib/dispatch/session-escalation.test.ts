@@ -155,3 +155,36 @@ describe("buildSessionInterruptedCommentBody（reason: classifier_blocked）", (
     expect(body).toContain("自動では外れません");
   });
 });
+
+describe("buildSessionInterruptedCommentBody（reason: turn_stall・#3174）", () => {
+  const body = buildSessionInterruptedCommentBody({
+    hostName: "subpc",
+    tmuxSessionName: "issue-deck-issue-3174",
+    detail: "直前のターンが完了しないまま止まっています。",
+    remoteControlUrl: null,
+    reason: "turn_stall",
+  });
+
+  it("Codexのターンが閉じていないという原因を説明する", () => {
+    expect(body).toContain("ターンを完了しないまま止まっています");
+    expect(body).toContain("`task_started`");
+    expect(body).not.toContain("APIエラーで中断したまま止まっています");
+    expect(body).not.toContain("呼び出されないまま停滞しています");
+  });
+
+  it("画面からは実行中にしか見えないことに触れる", () => {
+    expect(body).toContain("「実行中」にしか見えません");
+  });
+
+  it("pollerが自動で送った文面をそのまま載せる（人が写して送れる）", () => {
+    expect(body).toContain("codex queue");
+    expect(body).toContain(
+      "直前のターンが完了しないまま中断しています。中断したところから作業を続けてください。",
+    );
+  });
+
+  it("続きを人が引き取るための出口は共通のまま出す", () => {
+    expect(body).toContain("tmux attach -t issue-deck-issue-3174");
+    expect(body).toContain("自動では外れません");
+  });
+});

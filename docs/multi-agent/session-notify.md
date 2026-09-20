@@ -190,7 +190,7 @@ ExitPlanMode（計画の提示）
   修正もできない**という、いちばん困る組み合わせになる
 - 待ち時間は`~/.config/issue-deck/notify.env`の`SESSION_PLAN_WAIT_SECONDS`（質問は
   `SESSION_QUESTION_WAIT_SECONDS`。#2189）（秒。`0`で待たない。
-  60〜3600の範囲へissue-deck側が丸める）。`ExitPlanMode`のフックだけ`timeout`を延ばして
+  計画は60〜86400の範囲へissue-deck側が丸める）。`ExitPlanMode`のフックだけ`timeout`を延ばして
   あるのはこのため（`scripts/run-issue-session.sh`。**打ち切られても壊れない**）
 - 押した内容（承認・修正・端末で答える）は**Issueコメントとしても残る**。投稿はissue-deckの
   GitHub App名義になるので、末尾の投稿者マーカーで押した本人の発言として画面に出す
@@ -675,6 +675,10 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
+- **原因（`interrupt_reason`）は4つ**——`api_error`・`tool_call_stall`・`classifier_blocked`・
+  `turn_stall`（Codexのターンが閉じないまま止まった形。#3174）。`session-notify.sh`は値を
+  そのまま通すだけで、受け入れる一覧を持つのは`SESSION_INTERRUPTED_REASONS`
+  （`src/lib/dispatch/session-state.ts`）だけにしてある
 
 ### ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まることがある（#2655）
 

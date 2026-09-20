@@ -242,6 +242,78 @@ export function parseCodexModel(value: unknown): CodexModel | null {
   return (CODEX_MODEL_VALUES as readonly string[]).includes(value) ? (value as CodexModel) : null;
 }
 
+/**
+ * 「実装を開始」ダイアログで選べるCodexのモデル（#3192）。**重い順。**
+ * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ3つ。
+ *
+ * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。どのモデルで立つか分からない
+ * 方式は、Claude側で選択肢から外したのと同じ理由（#2776）で選ばせない。設定
+ * （`AppSetting.codexModel`）には従来どおり残り、ダイアログを経由しない起動が読む。
+ * 値は`CODEX_MODEL_OPTIONS`の部分集合なので、選んだものはそのまま`-m`へ渡せる。
+ */
+export const CODEX_LOCAL_MODEL_VALUES = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
+
+export type CodexLocalModel = (typeof CODEX_LOCAL_MODEL_VALUES)[number];
+
+// ジョブ・APIの`model`の検証（`parseClaudeLocalModel`のCodex版）。`pick`（おまかせ）は通さない。
+export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {
+  if (typeof value !== "string") return null;
+  return (CODEX_LOCAL_MODEL_VALUES as readonly string[]).includes(value)
+    ? (value as CodexLocalModel)
+    : null;
+}
+
+/** 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前 */
+export const CODEX_MODEL_SHORT_LABELS: Readonly<Record<CodexModel, string>> = {
+  auto: "CLIの既定",
+  "gpt-5.6-sol": "Sol",
+  "gpt-5.6-terra": "Terra",
+  "gpt-5.6-luna": "Luna",
+  "gpt-5.5": "GPT-5.5",
+  "gpt-5.4": "GPT-5.4",
+};
+
+export function describeCodexModel(model: CodexModel): string {
+  return CODEX_MODEL_SHORT_LABELS[model];
+}
+
+/** モデルごとの「向いている作業」（`CLAUDE_MODEL_FIT_LABELS`と同じ位置づけ。チップの2行目） */
+export const CODEX_MODEL_FIT_LABELS: Readonly<Record<CodexLocalModel, string>> = {
+  "gpt-5.6-sol": "難しい調査・設計から",
+  "gpt-5.6-terra": "仕様が決まった実装",
+  "gpt-5.6-luna": "文言修正・定型作業",
+};
+
+/**
+ * 設定「Codex：サブPCでの計画・実装」の候補（#3192）。先頭に「おまかせ」を足したもので、
+ * 「実装を開始」ダイアログの最初の選択になる（`CLAUDE_LOCAL_MODEL_SETTING_OPTIONS`のCodex版）。
+ */
+export const CODEX_MODEL_SETTING_OPTIONS = [
+  { value: MODEL_PICK_SETTING, label: "おまかせ（Issueの内容から選ぶ）" },
+  ...CODEX_MODEL_OPTIONS,
+] as const;
+
+export type CodexModelSetting = CodexModel | typeof MODEL_PICK_SETTING;
+
+// `codexModel`設定の検証（設定の読み書き・画面へ渡す値）。ジョブ・APIの`model`には
+// `parseCodexLocalModel`を使い、`pick`は通さない。払い出し（claim）も同じく`parseCodexModel`が
+// `pick`を弾いて既定（Terra）へ落とす——判定はダイアログだけが行う。
+export function parseCodexModelSetting(value: unknown): CodexModelSetting | null {
+  return value === MODEL_PICK_SETTING ? MODEL_PICK_SETTING : parseCodexModel(value);
+}
+
+/**
+ * ダイアログを開いたときのCodexモデルの初期選択。設定が「おまかせ」ならそれ、選べる3つのどれかなら
+ * その値、それ以外（`auto`・旧世代）は既定（Terra）。旧世代・`auto`はダイアログの候補に無く、
+ * 選択なしのまま開くとどれで立つのかが分からなくなるため。
+ */
+export function resolveCodexInitialModel(
+  setting: CodexModelSetting,
+): CodexLocalModel | typeof MODEL_PICK_SETTING {
+  if (setting === MODEL_PICK_SETTING) return MODEL_PICK_SETTING;
+  return parseCodexLocalModel(setting) ?? CODEX_MODEL_DEFAULT;
+}
+
 // アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
 // スナップショット日付を固定せず、同じモデル系列の更新を自動で受けられるエイリアスを使う。
 export const APP_AI_MODEL_OPTIONS = [
@@ -271,5 +343,31 @@ export function parseAppAiModel(value: unknown): AppAiModel | null {
   if (typeof value !== "string") return null;
   return (APP_AI_MODEL_VALUES as readonly string[]).includes(value)
     ? (value as AppAiModel)
+    : null;
+}
+
+/**
+ * 「おまかせ」（モデルの自動選択）の判定に使うAI（#3189）。
+ *
+ * **モデルを選ぶ側のAIであって、選ばれる側ではない。** 選ばれるのは今までどおり
+ * `MODEL_PICK_CANDIDATES`（sonnet・opus・fable）で、ここはその判定を誰にさせるかの設定。
+ *
+ * `jev`はTypeSafeのSystem Oneモデルで、**文章を書かず候補から1つと確率だけを返す**。
+ * 候補外の答えが構造上返らないぶん、応答を読めずにルールへ倒れることが無くなる。
+ * ただし`TYPESAFE_API_KEY`が要るため、**未設定・呼び出し失敗のときは`app-ai`と同じ経路へ倒す**。
+ */
+export const MODEL_PICK_ENGINE_OPTIONS = [
+  { value: "app-ai", label: "アプリ内AIのモデルに従う" },
+  { value: "jev", label: "Jev（TypeSafe・判定専用／高速・低コスト）" },
+] as const;
+
+export const MODEL_PICK_ENGINE_DEFAULT = MODEL_PICK_ENGINE_OPTIONS[0].value;
+export const MODEL_PICK_ENGINE_VALUES = MODEL_PICK_ENGINE_OPTIONS.map((option) => option.value);
+export type ModelPickEngine = (typeof MODEL_PICK_ENGINE_VALUES)[number];
+
+export function parseModelPickEngine(value: unknown): ModelPickEngine | null {
+  if (typeof value !== "string") return null;
+  return (MODEL_PICK_ENGINE_VALUES as readonly string[]).includes(value)
+    ? (value as ModelPickEngine)
     : null;
 }

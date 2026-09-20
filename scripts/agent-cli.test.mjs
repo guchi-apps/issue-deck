@@ -23,7 +23,13 @@ function run(script, env) {
     const stdout = execFileSync("bash", ["-c", body], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      ...(env ? { env: { ...process.env, ...env } } : {}),
+      env: {
+        ...process.env,
+        // 実行中の開発機にstandalone版が入っていても、各テストは渡したPATHだけを検証する。
+        CODEX_HOME: path.join(os.tmpdir(), "agent-cli-no-standalone"),
+        ISSUE_DECK_CODEX_MODEL: "",
+        ...(env ?? {}),
+      },
     });
     return { stdout, status: 0 };
   } catch (error) {
@@ -32,12 +38,13 @@ function run(script, env) {
 }
 
 /** 種別を解決して、解決結果・実行ファイル名・表示名を1行ずつ返す */
-function resolve(raw) {
+function resolve(raw, env) {
   const { stdout, status } = run(
     [
       `agent_cli_resolve_kind ${JSON.stringify(raw)} || exit 1`,
       `printf '%s\\n%s\\n%s\\n' "$AGENT_CLI_KIND" "$(agent_cli_command_name "$AGENT_CLI_KIND")" "$(agent_cli_display_name "$AGENT_CLI_KIND")"`,
     ].join("\n"),
+    env,
   );
   const [kind, command, displayName] = stdout.split("\n");
   return { kind: kind ?? "", command: command ?? "", displayName: displayName ?? "", status };
@@ -70,7 +77,27 @@ describe("agent_cli_resolve_kind", () => {
   });
 
   it("codex を指定すると codex を起こす", () => {
-    expect(resolve("codex")).toMatchObject({ kind: "codex", command: "codex", displayName: "Codex CLI" });
+    expect(resolve("codex", {
+      CODEX_HOME: path.join(os.tmpdir(), "no-standalone-codex"),
+      PATH: "/usr/bin:/bin",
+    })).toMatchObject({
+      kind: "codex",
+      command: "codex",
+      displayName: "Codex CLI",
+    });
+  });
+
+  it("standalone版があればPATHより優先する", () => {
+    const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "agent-cli-standalone-"));
+    const command = path.join(codexHome, "packages/standalone/current/codex");
+    fs.mkdirSync(path.dirname(command), { recursive: true });
+    fs.writeFileSync(command, "#!/usr/bin/env bash\n");
+    fs.chmodSync(command, 0o755);
+    try {
+      expect(resolve("codex", { CODEX_HOME: codexHome }).command).toBe(command);
+    } finally {
+      fs.rmSync(codexHome, { recursive: true, force: true });
+    }
   });
 
   it("大文字で書いても同じ", () => {

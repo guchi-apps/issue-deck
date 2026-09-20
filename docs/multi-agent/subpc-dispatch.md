@@ -454,6 +454,34 @@ Codexも#3178で同じ再開を行う。`SessionStart`で控えたスレッドUU
 なお、**そもそも打ち切られにくくする**ため、ランチャーは`CLAUDE_CODE_MAX_RETRIES=15`
 （Claude Code側の上限。既定は10）を渡してセッションを起こす（`scripts/run-issue-session.sh`）。
 
+### Codexのターンが閉じないまま止まったセッションの自動再開（#3174）
+
+APIエラー（上記）はターンが`task_complete`で閉じている形だが、Codexには**ターンの開始
+（`task_started`）だけが転記へ書かれ、`task_complete`も`turn_aborted`（Ctrl-Cでの中断）も
+来ないまま更新が止まる**形がある。セッションはtmuxの中で生きているため、issue-deckの画面からは
+「実行中」にしか見えず、Push通知も出ない。判定は`scripts/lib/session-codex-turn-stall.sh`で、
+巡回は`recover_codex_turn_stalled_sessions`。
+
+| 段 | やること |
+|---|---|
+| 検知 | 生きているCodexの実装セッションの転記で、`task_started` / `task_complete` / `turn_aborted`のうち**最後のものが`task_started`**で、かつそのファイルが `SESSION_CODEX_TURN_STALL_MINUTES`（既定10分）更新されていないこと |
+| 送出 | **固定の1行**（「直前のターンが完了しないまま中断しています。…」）を`codex queue`で送る。TUIのキー入力を経由しないので、[gates.md](gates.md)の`send-keys`の例外を新しく開けていない |
+| 打ち切り | `SESSION_CODEX_TURN_STALL_MAX_ATTEMPTS`（既定3回）まで、`SESSION_CODEX_TURN_STALL_INTERVAL_MINUTES`（既定5分）の間隔で試す。使い切ったら送るのをやめ、issue-deckへ**1度だけ**引き上げる（Issueコメント＋`00.check-user`＋`01.check-blocked`。原因は`turn_stall`） |
+
+**閾値は実測から決めた。** 2026-09-20時点のサブPCの転記74件を機械的に走査したところ、
+`task_started` 141 / `task_complete` 129 / `turn_aborted` 5 で、差の7件が「開始したまま閉じて
+いない」ターン（1件は実行中、6件は過去に消えたセッション）だった。**ターンの中のレコード間隔は
+最大103秒**で、120秒を超えたファイルは1件も無い。長くかかるツール実行でもこの程度しか空かない
+ので、既定10分なら動いているターンへ割り込まない。
+
+**回数の記録（`.codex-turn-stall`）を消す条件は「転記のターンが閉じたこと」だけ**にしてある。
+検知には停滞時間が入っているため、「検知しなくなったら消す」にすると送った直後に回数が0へ戻り、
+上限が一度も効かない（#2896で`session_tool_call_stall_recovered`が解いたのと同じ穴）。ターンが
+閉じたかどうかは時間に依存しないので、`codex queue`が転記を更新するかどうかにも依存しない。
+
+Codex自体が応答しなくなっている場合は`codex queue`が`No active session found`で失敗する。
+回数だけ消費して引き上げまで進むので、人には「送っても直らなかった」として届く。
+
 ### 手作業アシスタントからの代行実行（#1828）
 
 手作業アシスタント（#1826）の手順画面に「承認して実行」を置き、**押した1回の承認でサブPC上の

@@ -8,8 +8,11 @@ import {
   parseClaudeLocalModel,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
+  parseCodexLocalModel,
   parseCodexModel,
+  parseCodexModelSetting,
   parseDispatchConcurrency,
+  resolveCodexInitialModel,
 } from "@/lib/app-settings";
 
 describe("parseAutoRetryLimit", () => {
@@ -157,5 +160,53 @@ describe("parseCodexModel", () => {
   it("許可されていない値はnullを返す", () => {
     expect(parseCodexModel("gpt-5-codex")).toBeNull();
     expect(parseCodexModel(5)).toBeNull();
+  });
+});
+
+// #3192。ダイアログ・ジョブ・APIの`model`（Codex）。旧世代・`auto`・おまかせは通さない
+describe("parseCodexLocalModel", () => {
+  it("Sol・Terra・Lunaを通す", () => {
+    expect(parseCodexLocalModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(parseCodexLocalModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(parseCodexLocalModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+  });
+
+  it("旧世代・auto・pick・Claudeのモデル・不正な値はnull", () => {
+    for (const value of ["gpt-5.5", "gpt-5.4", "auto", "pick", "opus", "", undefined, null, 1]) {
+      expect(parseCodexLocalModel(value)).toBeNull();
+    }
+  });
+});
+
+// 設定`codexModel`の検証。`parseCodexModel`に「おまかせ」を足した形（`parseClaudeLocalModelSetting`のCodex版）
+describe("parseCodexModelSetting", () => {
+  it("おまかせ（pick）と既存の候補を通す", () => {
+    expect(parseCodexModelSetting("pick")).toBe("pick");
+    expect(parseCodexModelSetting("auto")).toBe("auto");
+    expect(parseCodexModelSetting("gpt-5.5")).toBe("gpt-5.5");
+  });
+
+  it("不正な値はnull", () => {
+    expect(parseCodexModelSetting("opus")).toBeNull();
+    expect(parseCodexModelSetting(undefined)).toBeNull();
+  });
+
+  // 払い出し（claim）は`parseCodexModel`で読むので、`pick`は既定（Terra）へ倒れる
+  it("払い出しが使うparseCodexModelはpickを通さない", () => {
+    expect(parseCodexModel("pick")).toBeNull();
+  });
+});
+
+describe("resolveCodexInitialModel", () => {
+  it("おまかせと、選べる3つはそのまま", () => {
+    expect(resolveCodexInitialModel("pick")).toBe("pick");
+    expect(resolveCodexInitialModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(resolveCodexInitialModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+  });
+
+  it("旧世代・autoは候補に無いのでTerra", () => {
+    expect(resolveCodexInitialModel("auto")).toBe("gpt-5.6-terra");
+    expect(resolveCodexInitialModel("gpt-5.5")).toBe("gpt-5.6-terra");
+    expect(resolveCodexInitialModel("gpt-5.4")).toBe("gpt-5.6-terra");
   });
 });

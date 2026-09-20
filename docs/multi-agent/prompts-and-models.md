@@ -405,10 +405,11 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 ジョブ・APIの`model`・払い出しは`parseClaudeLocalModel`（`pick`を弾く）。`pick`は
 ダイアログが判定して**具体的なモデル名へ解決してから**積むので、pollerへは届かない。
 
-**選択欄が出るのはサブPCでClaude Codeを起こすときだけ。** GitHub Actionsは
-`reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は届かない
-（Issueごとに変えるならラベルの新設と全リポジトリへの配布が要る）。Codexのモデルは
-別の設定（`CODEX_MODEL_OPTIONS`）で、ここでは扱わない。
+**選択欄が出るのはサブPCを選んだときだけ**（Claude Code・Codexのどちらでも。#3192）。
+GitHub Actionsは`reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は
+届かない（Issueごとに変えるならラベルの新設と全リポジトリへの配布が要る）。Codexを選ぶと欄の
+中身がおまかせ・Sol・Terra・Lunaへ切り替わり、選んだ値は`DispatchJob.codexModel`に入る
+（設計は[codex.md](codex.md)「モデルは起動ごとに選べる」）。
 
 **全体の既定ではなく起動ごとの選択にしたのは、割高さが対話の長さで変わるから。**
 `SessionUsage`の実測（直近90日・実装セッション619件・すべてOpus 5）では、1件あたりの
@@ -475,6 +476,36 @@ Issueの要求により、ダイアログの選択肢（`MODEL_ENTRIES`）・設
   チップを押せることが前提。判定が終わるまで「開始する」は押させない
 - 積むのは**決まった具体的なモデル名**で、`auto`ではない。実行キューの印にも受付コメントにも
   そのモデルが出る（APIへ送る値の集合は#2717から変えていない）
+
+### 「おまかせ」の判定はJevへ切り替えられる（#3189）
+
+**選ぶ側のAIだけを差し替える。** 選ばれるのは今までどおり`MODEL_PICK_CANDIDATES`
+（sonnet・opus・fable）で、積み方も画面の見た目も変わらない。設定 ▸ 実行の
+「おまかせの判定に使うAI」（`AppSetting.modelPickEngine`）で選ぶ。
+
+- **Jev（TypeSafeのSystem Oneモデル）は文章を書かない。** 渡した選択肢から1つと確率だけを返す
+  （`POST https://api.typesafe.ai/v1/systemone`・`src/lib/typesafe/system-one.ts`）。
+  **候補外の答えが構造上返らない**ので、アプリ内AIに「JSONだけを出力してください」と頼んで
+  読み取る経路（`parseModelPick`）で起きていた「応答を読めずルールへ倒れる」が無くなる
+- **理由の1文はコードが組み立てる。** Jevは説明文を返さないため、モデルの選択（`choice`）と
+  一緒に難しさ（`score`）と「調査から始まるか」（`noul`）を聞き、**判定と同じ根拠**から
+  `formatJevReason`が1文にする。後付けの説明にしないためで、聞くのは1回の呼び出しで済む
+- **確信度と候補ごとの確率も画面へ出す**（Jevのときだけ）。88%対10%ならそのまま押せばよく、
+  45%対42%なら自分で選び直す材料になる——理由の1文ではここが読み取れない
+- **判定の材料は既存の経路と同じ**（Issueのタイトル・本文・ラベル・承認済みの計画）だが、
+  **送信先が1社増える。** privateリポジトリ（`guchi-apps/vps`・`docs`・`subpc`）のIssue本文も
+  対象になるため、**切り替える設定の説明文にその旨を出している**（既定はアプリ内AIのままで、
+  選ばない限り送信先は変わらない）。アプリ内AIの送信先（Anthropic／OpenAI）は下の
+  「アプリ内AIのモデルとプロバイダー」を参照
+- **候補はエージェントごとに変わる**（#3192と同じ`CANDIDATES_BY_AGENT`）。Codexを選んでいる
+  ときはCodexのモデル名を候補として渡し、Claudeのモデルが混じった確率は捨てる
+- **`TYPESAFE_API_KEY`が未設定・呼び出しに失敗したときは、黙ってアプリ内AI→ルールへ倒す。**
+  設定を戻さないと起動できない状態を作らない。キーはGitHub secret経由で本番の`.env`へ入る
+  （`.github/secrets-manifest.tsv`・`deploy.yml`）
+- **実装エージェントとしては選べない。** コードを書けないモデルなので、`MODEL_ENTRIES`にも
+  `DispatchAgent`にも足さない
+- 単価は入力$0.042/1Mトークン・**出力は無料**（返すのが文章ではないため）。消費量は他の
+  アプリ内AI機能と同じ`model_pick`として計上する（`src/lib/ai-model-pricing.ts`の`jev`）
 
 ### 「設定に従う」は削除し、設定の値を最初の選択にする（#3106）
 

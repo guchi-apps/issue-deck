@@ -34,11 +34,7 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
       )}
       {data && (
         <ul className="flex flex-col gap-2">
-          {/* Claudeの5時間枠と同じ高さを確保するが、Codexにはその枠がないため中身は出さない。
-              **1列（スマホ）では揃える相手が無いので出さない**（#2666。横に並ぶ2列時だけ出す） */}
-          <li aria-hidden="true" className="hidden invisible rounded-lg border p-2 sm:block">
-            <div className="h-[52px]" />
-          </li>
+          {/* Claudeの週間枠と同じ先頭行に置く（#3195）。 */}
           {data.windows.filter((window) => window.key === "secondary").map((window) => {
             // リセット後の使用量が分からない枠は、推定の0%を出さずにそう書く（#3052）
             if (window.expired) {

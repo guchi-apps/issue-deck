@@ -170,8 +170,8 @@ fi
 # 応答しなければ）何も返さずに終え、従来どおりのプロンプトが出る。`0`で待たない。
 # 上限・下限と既定はissue-deck側（`src/lib/dispatch/session-plan-request.ts`）が持っており、
 # ここで渡した値はそこで丸められる。
-PLAN_WAIT_SECONDS="${SESSION_PLAN_WAIT_SECONDS:-1800}"
-[[ "$PLAN_WAIT_SECONDS" =~ ^[0-9]+$ ]] || PLAN_WAIT_SECONDS=1800
+PLAN_WAIT_SECONDS="${SESSION_PLAN_WAIT_SECONDS:-43200}"
+[[ "$PLAN_WAIT_SECONDS" =~ ^[0-9]+$ ]] || PLAN_WAIT_SECONDS=43200
 export NOTIFY_PLAN_WAIT_SECONDS="$PLAN_WAIT_SECONDS"
 # 返事を確かめる間隔（秒）。画面のポーリング（未完了があるときは5秒）より短くして、
 # 押してからセッションが動き出すまでの体感を短く保つ
@@ -1120,7 +1120,8 @@ if event == "SessionInterrupted":
     # ——Issueコメント＋`00.check-user`＋`01.check-blocked`——で引き上げる（#2280）。
     #
     # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
-    # 画面も応答テキストも載せない。`reason`も同様に固定の種別（`api_error`・`tool_call_stall`）
+    # 画面も応答テキストも載せない。`reason`も同様に固定の種別（`api_error`・`tool_call_stall`・
+    # `turn_stall`）
     # で、issue-deck側（`session-escalation.ts`）が原因ごとにIssueコメントの文言を出し分ける。
     if not repo_slug or not issue_number.isdigit() or not tmux_session:
         print("skip")

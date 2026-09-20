@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { parseClaudeLocalModel } from "@/lib/app-settings";
+import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import {
   DEFAULT_DISPATCH_AGENT,
@@ -404,9 +404,18 @@ export async function POST(request: NextRequest) {
   // このIssueだけに使うClaudeのモデル（#2717）。**省略は「設定の既定に従う」**で従来どおり。
   // `agent`と同じく**未知の値は黙って既定へ落とさず400で断る**——Fableを指定したつもりで
   // Sonnetが立つ方が、その場で断られるより分かりにくい
-  const claudeModel = payload?.model === undefined ? null : parseClaudeLocalModel(payload.model);
-  if (payload?.model !== undefined && !claudeModel) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  //
+  // **`model`の語は`agent`で決まる**（#3192）。Claude Codeなら`fable`・`opus`・`sonnet`、Codexなら
+  // `gpt-5.6-*`で、もう一方の語（Codexへ`opus`を送る等）は選んだつもりのないモデルで立つより
+  // その場で断る方がよいので400にする
+  let claudeModel: ReturnType<typeof parseClaudeLocalModel> = null;
+  let codexModel: ReturnType<typeof parseCodexLocalModel> = null;
+  if (payload?.model !== undefined) {
+    if (agent === "codex") codexModel = parseCodexLocalModel(payload.model);
+    else claudeModel = parseClaudeLocalModel(payload.model);
+    if (!claudeModel && !codexModel) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
   }
 
   const result = await enqueueDispatchJob({
@@ -415,6 +424,7 @@ export async function POST(request: NextRequest) {
     hostName,
     agent,
     claudeModel,
+    codexModel,
     requestedByUserId: userId,
   });
 

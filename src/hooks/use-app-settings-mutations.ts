@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type {
+  AppAiModel,
+  ClaudeLocalModelSetting,
+  ClaudeModel,
+  CodexModelSetting,
+  ModelPickEngine,
+} from "@/lib/app-settings";
 
 export function useAppSettingsMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,9 +39,10 @@ export function useAppSettingsMutations() {
     claudeModel: ClaudeModel,
     claudeModelAssist: ClaudeModel,
     claudeLocalModel: ClaudeLocalModelSetting,
-    codexModel: CodexModel,
+    codexModel: CodexModelSetting,
     appAiModel: AppAiModel,
     appAiModelReasoning: AppAiModel,
+    modelPickEngine: ModelPickEngine,
   ): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -50,6 +57,7 @@ export function useAppSettingsMutations() {
           codexModel,
           appAiModel,
           appAiModelReasoning,
+          modelPickEngine,
         }),
       });
       if (!res.ok) {

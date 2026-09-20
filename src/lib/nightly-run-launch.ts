@@ -1,4 +1,4 @@
-import { parseClaudeLocalModel } from "@/lib/app-settings";
+import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { db } from "@/lib/db";
 import { readDispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
@@ -64,6 +64,8 @@ export type ScheduledRunEntryRow = {
   issueNumber: number;
   agent: string;
   claudeModel: string | null;
+  /** #3192。省略可なのは、この列を知らない呼び出し元・テストの値を壊さないため */
+  codexModel?: string | null;
   requestedByUserId: string | null;
 };
 
@@ -159,6 +161,7 @@ export async function launchScheduledRunEntry(params: {
     hostName,
     agent: readDispatchAgent(entry.agent),
     claudeModel: parseClaudeLocalModel(entry.claudeModel),
+    codexModel: parseCodexLocalModel(entry.codexModel),
     requestedByUserId: entry.requestedByUserId,
     now,
   });

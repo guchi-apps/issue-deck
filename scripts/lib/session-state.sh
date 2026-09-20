@@ -225,6 +225,43 @@ session_state_clear_tool_call_stall() {
   return 0
 }
 
+# Codexのセッションが「ターンを始めたまま終えていない」形で止まったときの自動送信の記録
+# （#3174）。
+#
+# 中身は`.resume`・`.tool-call-stall`と同じ
+# `<最後に試した時刻のepoch> <試した回数> <人へ渡したことを通知したか(0|1)>`の1行。
+# **ファイルを分けるのは他の2つと同じ理由**——同じキー空間を共有すると、片方の原因で
+# 止まった回数がもう片方の判定に紛れ込む。
+#
+# 判定そのもの（何が「ターンが閉じていない」か）は`lib/session-codex-turn-stall.sh`が持ち、
+# ここは置き場だけを持つ。**ターンが閉じたら消す**（`session_state_clear_codex_turn_stall`）。
+session_state_codex_turn_stall_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.codex-turn-stall' "$(session_state_dir)" "$1"
+}
+
+session_state_write_codex_turn_stall() {
+  local session="$1" at="$2" attempts="$3" notified="$4" file content
+  file="$(session_state_codex_turn_stall_file "$session")" || return 1
+  printf -v content '%s %s %s\n' "$at" "$attempts" "$notified"
+  session_state_write_file "$file" "$content"
+}
+
+session_state_read_codex_turn_stall() {
+  local session="$1" file
+  file="$(session_state_codex_turn_stall_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  head -1 "$file" 2>/dev/null
+}
+
+session_state_clear_codex_turn_stall() {
+  local session="$1" file
+  file="$(session_state_codex_turn_stall_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # auto modeのクラシファイアにコマンドを拒否されたまま応答を終えたセッションを、引き上げ済みかの
 # 印（#2844）。
 #
@@ -640,6 +677,7 @@ session_state_remove() {
     "$(session_state_step_file "$session" 2>/dev/null || true)" \
     "$(session_state_resume_file "$session" 2>/dev/null || true)" \
     "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
+    "$(session_state_codex_turn_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_classifier_block_file "$session" 2>/dev/null || true)" \
     "$(session_state_permission_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do

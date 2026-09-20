@@ -123,6 +123,7 @@ function renderDialog() {
       codexModel="auto"
       appAiModel="claude-haiku-4-5"
       appAiModelReasoning="claude-sonnet-5"
+      modelPickEngine="app-ai"
       dispatchConcurrency={2}
       repositories={repositories}
       onSetRepositoryHidden={onSetRepositoryHidden}
@@ -228,6 +229,7 @@ describe("SettingsDialog", () => {
       "auto",
       "claude-haiku-4-5",
       "claude-sonnet-5",
+      "app-ai",
     );
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
@@ -237,6 +239,7 @@ describe("SettingsDialog", () => {
       codexModel: "auto",
       appAiModel: "claude-haiku-4-5",
       appAiModelReasoning: "claude-sonnet-5",
+      modelPickEngine: "app-ai",
       dispatchConcurrency: 2,
     });
   });

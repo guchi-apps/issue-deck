@@ -42,6 +42,7 @@ beforeEach(() => {
     codexModel: update.codexModel ?? "auto",
     appAiModel: update.appAiModel ?? "claude-haiku-4-5",
     appAiModelReasoning: update.appAiModelReasoning ?? "claude-sonnet-5",
+    modelPickEngine: update.modelPickEngine ?? "app-ai",
   }));
 });
 
@@ -55,6 +56,7 @@ describe("GET", () => {
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-haiku-4-5",
       appAiModelReasoning: "claude-sonnet-5",
+      modelPickEngine: "app-ai",
     });
   });
 
@@ -74,6 +76,7 @@ describe("GET", () => {
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-sonnet-5",
       appAiModelReasoning: "claude-opus-5",
+      modelPickEngine: "app-ai",
     });
   });
 });
@@ -103,6 +106,17 @@ describe("PATCH", () => {
           appAiModelReasoning: "claude-sonnet-5",
         },
       }),
+    );
+  });
+
+  // #3192。「おまかせ」は設定にだけ入る値（ダイアログが判定して具体的なモデル名へ解決する）
+  it("codexModelにおまかせ（pick）を保存できる", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "sonnet", codexModel: "pick" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).codexModel).toBe("pick");
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ codexModel: "pick" }) }),
     );
   });
 
@@ -191,6 +205,23 @@ describe("PATCH", () => {
     const res = await PATCH(
       patchRequest({ claudeModel: "opus", appAiModelReasoning: "gpt-5.5" }),
     );
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("modelPickEngineにjevを指定して保存でき、そのまま返す", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "opus", modelPickEngine: "jev" }));
+
+    expect(res.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ modelPickEngine: "jev" }) }),
+    );
+    await expect(res.json()).resolves.toMatchObject({ modelPickEngine: "jev" });
+  });
+
+  it("modelPickEngineが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "opus", modelPickEngine: "gpt-5.5" }));
 
     expect(res.status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();

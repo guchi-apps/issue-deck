@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import type { ModelPickResult } from "@/lib/claude/model-pick";
+import type { ModelPickAgent, ModelPickResult } from "@/lib/claude/model-pick";
 
 /**
  * 「実装を開始」ダイアログの「おまかせ」（#2723）。**押したときだけ呼ぶ。**
@@ -13,8 +13,11 @@ import type { ModelPickResult } from "@/lib/claude/model-pick";
  * 同じIssueで押し直した場合は**覚えている結果をそのまま出す**（`resultRef`）。
  * チップを行き来しただけで判定が何度も走らないようにするためで、
  * 選び直したいときはダイアログを開き直せば消える。
+ *
+ * **エージェントごとに別のインスタンスを持つ**（#3192）。Claude CodeとCodexでは候補が違い、
+ * 片方の結果を他方の欄で使い回すと、選ばれたモデルがその欄に存在しないことになる。
  */
-export function useModelPick() {
+export function useModelPick(agent: ModelPickAgent = "claude") {
   const [result, setResult] = useState<ModelPickResult | null>(null);
   const [isPicking, setIsPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function useModelPick() {
             repo,
             number: params.number,
             planComment: params.planComment,
+            agent,
           }),
         });
         if (!res.ok) {
@@ -66,7 +70,7 @@ export function useModelPick() {
         setIsPicking(false);
       }
     },
-    [],
+    [agent],
   );
 
   return { result, isPicking, error, pick, reset };

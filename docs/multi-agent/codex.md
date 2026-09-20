@@ -25,6 +25,9 @@ ISSUE_DECK_AGENT=codex scripts/start-issue.sh <Issue番号>
   組み立てられること**（#2526。下の「サンドボックスを組み立てられないホスト」）。判定は
   `scripts/subpc-dispatch-poller.sh`の`codex_capable`。**古いpollerはジョブの`agent`を読まない**
   ため、申告が無いホストで選ばせるとCodexを選んだのにClaude Codeが黙って立つ
+- **モデルも同じダイアログで選べる**（#3192）。エージェントでCodex CLIを選ぶと、Claude Codeと
+  同じ位置の「モデル」欄がCodexの候補（おまかせ・Sol・Terra・Luna）へ切り替わる。詳細は下の
+  「モデルは起動ごとに選べる」
 - **選べるのは「実装を開始」ダイアログだけ。** ツールバーの「サブPCで開始」ボタンと
   「セッションを復旧」は従来どおりClaude Codeで起こす（同じ選択をメニューの階層にも持たない）
 - **GitHub Actions・「実装プロンプトをコピー」・「起動コマンドをコピー」には効かない**
@@ -54,6 +57,37 @@ TUIのセッションは起こせるが、共有のapp-serverデーモンに載�
 `codex remote-control`）が1つも動かない（後述の「`codex agents`・`remote-control`はstandalone
 installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は**戻すこと**（同じ節に手順がある）。
 
+## モデルは起動ごとに選べる（#3192）
+
+「実装を開始」ダイアログの「モデル」欄は、エージェントに合わせて中身が変わる。**Claude Codeで
+立てるときの「おまかせ」・Fable・Opus・Sonnetと同じ形**で、Codexでは**おまかせ・Sol・Terra・Luna**。
+選んだ値は`DispatchJob.codexModel`へ入り、払い出し（`POST /api/dispatch/claim`）が
+`job.codexModel ?? 設定`を`codexModel`として載せ直す。**pollerは従来どおり`codexModel`
+だけを読む**ので、poller・ランチャー側の変更は要らない（Claudeの`claudeLocalModel`と同じ持たせ方）。
+
+| | Claude Code | Codex |
+|---|---|---|
+| ジョブの列 | `DispatchJob.claudeModel` | `DispatchJob.codexModel` |
+| ダイアログの候補 | `CLAUDE_LOCAL_MODEL_OPTIONS`（fable・opus・sonnet） | `CODEX_LOCAL_MODEL_VALUES`（sol・terra・luna） |
+| 設定の値 | `AppSetting.claudeLocalModel`（`pick`あり） | `AppSetting.codexModel`（`pick`あり。旧世代・`auto`も残る） |
+| 払い出しで`pick`のとき | Sonnet | Terra |
+
+- **`POST /api/dispatch`・`POST /api/nightly-run`の`model`は`agent`で語が決まる。** Codexへ`opus`、
+  Claude Codeへ`gpt-5.6-sol`を送ると400（選んだつもりのないモデルで立つより、その場で断る）
+- **ダイアログの候補に`auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。** どのモデルで
+  立つか分からない方式を選ばせない、というClaude側の方針（#2776）に揃えた。**設定には残る**ので、
+  ダイアログを経由しない起動（次にやること・ローカルで開始・PR修正依頼の呼び戻し・一括停止からの再開）は
+  従来どおり設定の値で立つ。**設定が旧世代・`auto`のときのダイアログの初期選択はTerra**
+  （`resolveCodexInitialModel`。選択なしで開くと何で立つか分からなくなるため）
+- **「おまかせ」は判定を行うのがどちらもアプリ内AI**（既定Claude Haiku。Codexへ問い合わせる経路は無い）。
+  変わるのは候補・プロンプト・AIを呼べないときのルール（`lib/claude/model-pick.ts`。
+  `POST /api/issues/model-pick`の`agent`で切り替える）。**ルールでLunaを選ぶのは文書だけの短い更新に
+  限り、迷ったらTerra**。エージェントごとに判定と結果を別に持つので、切り替えても取り違えない
+  （`use-model-pick.ts`をエージェントごとに1つずつ持つ）
+- **設定が「おまかせ」なら、Codexを選んだ時点で1回だけ自動で判定する**（Claude Codeの
+  #3106と同じ。開いたあたり、エージェントごとに1回）。判定が終わるまで「開始する」は押せない
+- 実行キューの行に、指定したモデルの印と●の濃さが出る（指定が無いジョブには付けない）
+
 ## Claude Codeと揃わないもの
 
 Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一部効かない**。
@@ -69,7 +103,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | AI使用量の集計（エージェント別・Issue別） | ○ | ○（#2535） |
 | AI使用量のフェーズ内訳（計画・調査・実装・検証・仕上げ） | ○ | ○（#3169。下の「フェーズの内訳も同じ5行へ割る」） |
 | APIエラーで中断したセッションの自動再開 | ○ | ○（`task_complete.error`を検知して`codex queue`で再開。#3178） |
-| ツール呼び出し空振りからの自動再開 | ○ | **×**（Claude Code固有の転記判定。#3174） |
+| ターンが閉じないまま止まったセッションの自動再開 | ○（ツール呼び出しの空振り。#2896） | ○（`task_started`のまま閉じない形を検知して`codex queue`で再開。#3174。**現象そのものが違う**——下の「ターンの取りこぼし」） |
 | アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール。`scripts/lib/codex-artifact.sh`で手動登録する） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
 | Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
@@ -223,9 +257,9 @@ standalone installへ入れ替えた**（#2521）。以下はその結果。
 #### 入れ替えても、npm版は消さずに済む
 
 インストーラは`~/.codex/packages/standalone/releases/<版>-x86_64-unknown-linux-musl/`（約330MB）へ
-実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**サブPCの`~/.local/bin`はPATHの先頭**
-（`~/.profile`が置いている。miseのshimsより前）なので、npm版を消さなくても新しいシェルでは
-standalone版が優先される。
+実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**PATHの順序に依存しない**——pollerは
+miseのshimsが先に来る環境でも`~/.codex/packages/standalone/current/codex`を明示的に選ぶ（#3194）。
+npm版を消す必要はない。
 
 - **戻すのは`rm ~/.local/bin/codex`の1回で済む**（消すとmiseのshim経由でnpm版に戻る）
 - **走っているセッションには影響しない。** 実行中のプロセスは起動時に解決した実体を握ったままで、
@@ -721,6 +755,37 @@ Codexのカード（`codex-usage-card.tsx`）が週間枠しか出さないの�
 `secondary`は`null`。Claude側と同じ2段のメーターにはできないので、**高さだけを合わせた空の枠**を
 置いてある（#2666）。
 
+## 転記からターンの取りこぼしを見つける（#3174）
+
+Codexの転記（`~/.codex/sessions/<年>/<月>/<日>/rollout-<時刻>-<スレッドUUID>.jsonl`）は、
+**ターンの区切りを`event_msg`として明示的に書く。** この3つだけを見れば、ターンが閉じたかどうかが
+外から分かる。
+
+| `payload.type` | いつ書かれるか |
+|---|---|
+| `task_started` | ターンの開始（人の入力・`codex queue`で積んだ差し込み） |
+| `task_complete` | ターンの終了。APIエラーのときは`error`が入る（#3178の判定材料） |
+| `turn_aborted` | Ctrl-Cでの中断（`reason: "interrupted"`） |
+
+**開始だけが書かれて、どれも来ないまま更新が止まる**ことがある。セッションはtmuxの中で生きて
+いるため画面からは「実行中」にしか見え（`Stop`フックも飛ばない）ず、放置される。これを停滞として
+拾うのが`scripts/lib/session-codex-turn-stall.sh`で、詳細は
+[subpc-dispatch.md](subpc-dispatch.md)「Codexのターンが閉じないまま止まったセッションの自動再開」。
+
+**Claude Codeの「ツール呼び出しの空振り」（#2655・#2896）とは別の現象。** あちらは`Agent({…})`の
+ようなコード風のテキストを出しただけでターンを正常に終える形で、Codexはツールを
+`custom_tool_call`としてネイティブに呼ぶため同じ形にはならない。**Codexで再現しないものを移植
+しようとしない**（判定材料が無く、誤検知しか増えない）。
+
+実測（2026-09-20・サブPCの転記74件）:
+
+- `task_started` 141 / `task_complete` 129 / `turn_aborted` 5。差の7件が「開始したまま閉じて
+  いない」ターンで、1件は実行中、6件は過去に消えたセッションだった
+- **ターンの中のレコード間隔は最大103秒**（120秒を超えたファイルは0件）。ツールの実行中は転記へ
+  何も書かれないが、それでもこの程度しか空かない。停滞の閾値を分単位で置けば誤検知しない
+- ターンをまたぐ間隔（人の入力待ち）は最大42分まで伸びる。**マーカーを見ずに「更新が止まった
+  時間」だけで判定すると、入力待ちを停滞と読む**
+
 ## 揃えられないものの決着（#3169）
 
 **比較表の`×`・`△`を1つずつ、「別Issueへ起票した」か「Codex側に仕組みが無く実現不可」かで決着させる。**
@@ -736,7 +801,7 @@ Issueを跨いで同じ調査を繰り返さないための記録で、**実機�
 | 無人実行（GitHub Actions） | **人の判断待ち** | `OPENAI_API_KEY`のSecrets追加と課金の判断が要る。決まるまで起票しない |
 
 **揃っているものは表に出さない。** AI使用量の集計・セッション種別のバッジ・計画の承認・質問への回答・
-追加指示・前回の会話の引き継ぎ・APIエラーからの自動再開は、いずれも画面から同じように使える（上の比較表）。
+追加指示・前回の会話の引き継ぎ・中断／停滞からの自動再開は、いずれも画面から同じように使える（上の比較表）。
 
 ## まだやっていないこと
 
@@ -748,8 +813,6 @@ Issueを跨いで同じ調査を繰り返さないための記録で、**実機�
 - **契約適合の他リポジトリ（自前の`scripts/start-issue.sh`を持つもの）は`ISSUE_DECK_AGENT`を
   読まない。** 揃えるまでは受け口が止める。**汎用ランチャーで起こすリポジトリは#2590で対応済み**
   （むしろ`start-issue.sh`を持たない側が先に使えるようになった）
-- **ツール呼び出し空振りからの自動再開が効かない**（#3174）。`session-tool-call-stall.sh`は
-  Claude Codeがツール呼び出し風のテキストだけを出した転記を判定するため、Codexに安全な同等判定は無い。
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）

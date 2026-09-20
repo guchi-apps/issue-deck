@@ -24,7 +24,13 @@ import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSettingsData } from "@/hooks/use-settings-data";
 import { cn } from "@/lib/utils";
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type {
+  AppAiModel,
+  ClaudeLocalModelSetting,
+  ClaudeModel,
+  CodexModelSetting,
+  ModelPickEngine,
+} from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -36,9 +42,10 @@ type SettingsDialogProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
-  codexModel: CodexModel;
+  codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
+  modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
@@ -65,6 +72,7 @@ export function SettingsDialog({
   codexModel,
   appAiModel,
   appAiModelReasoning,
+  modelPickEngine,
   dispatchConcurrency,
   repositories,
   onSetRepositoryHidden,
@@ -153,6 +161,7 @@ export function SettingsDialog({
                   codexModel={codexModel}
                   appAiModel={appAiModel}
                   appAiModelReasoning={appAiModelReasoning}
+                  modelPickEngine={modelPickEngine}
                   dispatchConcurrency={dispatchConcurrency}
                   onUpdated={onUpdated}
                 />

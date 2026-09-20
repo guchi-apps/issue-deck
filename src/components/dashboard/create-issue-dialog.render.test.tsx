@@ -199,6 +199,7 @@ function Harness({
       onCreated={onCreated}
       onNavigateToIssue={onNavigateToIssue}
       claudeLocalModel="sonnet"
+      codexModel="gpt-5.6-terra"
     />
   );
 }
@@ -1106,6 +1107,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         issues={[]}
         onCreated={vi.fn()}
         claudeLocalModel="sonnet"
+        codexModel="gpt-5.6-terra"
         initialHandoff={{
           kind: "issue",
           repositoryFullName: REPOSITORY_FULL_NAME,
@@ -1138,6 +1140,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         onCreated={vi.fn()}
         cancelLabel="デッキへ戻る"
         claudeLocalModel="sonnet"
+        codexModel="gpt-5.6-terra"
       />,
     );
 
@@ -1163,6 +1166,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         issues={[]}
         onCreated={vi.fn()}
         claudeLocalModel="sonnet"
+        codexModel="gpt-5.6-terra"
       />,
     );
 
@@ -1202,6 +1206,7 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         issues={[]}
         onCreated={vi.fn()}
         claudeLocalModel="sonnet"
+        codexModel="gpt-5.6-terra"
       />,
     );
 
@@ -1260,6 +1265,7 @@ describe("CreateIssueDialog の選んだリポジトリの保持", () => {
           issues={[]}
           onCreated={vi.fn()}
           claudeLocalModel="sonnet"
+          codexModel="gpt-5.6-terra"
         />
       </>
     );

@@ -1,4 +1,4 @@
-import type { ClaudeModel } from "@/lib/app-settings";
+import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
 // 型だけのimport（コンパイル時に消える）。`host-checkout.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-metrics.ts`と同じ）
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
@@ -274,9 +274,10 @@ export const CODEX_LIMITATIONS = [
   // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
   // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
   "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
-  // APIエラーは#3178でCodexの`task_complete.error`から再開できるようになった。ここに残るのは
-  // Claude Code固有の「ツール呼び出し風テキスト」の空振りだけ（`session-tool-call-stall.sh`）。
-  "ツール呼び出しが空振りして止まったセッションは自動再開できません",
+  // APIエラー（#3178）とターンの取りこぼし（#3174）はCodexの転記から検知して`codex queue`で
+  // 再開する。残るのはClaude Code固有の「ツール呼び出し風テキスト」の空振りだけで、これは
+  // Codexがツールをネイティブに呼ぶ（`custom_tool_call`）以上、同じ形では起こらない
+  // （`session-tool-call-stall.sh`）。**制限として出す理由が無くなったので、ここから外した。**
 ] as const;
 
 /**
@@ -472,6 +473,14 @@ export type DispatchJobView = {
    * 金額の見積りと突き合わせられない。
    */
   claudeModel: ClaudeModel | null;
+  /**
+   * このIssueだけに使うCodexのモデル（#3192。`kind`が`LAUNCH`・`agent`が`codex`のときだけ）。
+   *
+   * `claudeModel`と同じく**`null`は「設定の既定に従う」**（`AppSetting.codexModel`）で、払い出しが
+   * この値があればジョブごとの`codexModel`として載せる。**省略可にしているのは**、この列を知らない
+   * 時点の呼び出し元・テストの値を壊さないため（`toJobView`は常に返す）。
+   */
+  codexModel?: CodexLocalModel | null;
   status: DispatchJobStatus;
   message: string | null;
   /**

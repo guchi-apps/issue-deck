@@ -180,9 +180,10 @@ source "$SCRIPT_DIR/lib/progress-report.sh"
 # セッションを畳んだときの状態ファイルの後始末に使う（#1332。reap-sessions.shと同じ扱い）。
 # shellcheck source=scripts/lib/session-state.sh
 source "$SCRIPT_DIR/lib/session-state.sh"
-# APIエラーで中断したセッションの検知（#1971）と、ツール呼び出しが実行されないまま止まった
-# セッションの検知（#2655）。**転記を読むのはこの用途だけ**で、判定の中身は
-# `lib/session-resume.sh`・`lib/session-tool-call-stall.sh`、転記の場所の解決は
+# APIエラーで中断したセッションの検知（#1971）、ツール呼び出しが実行されないまま止まった
+# セッションの検知（#2655）、Codexのターンが閉じないまま止まったセッションの検知（#3174）。
+# **転記を読むのはこの用途だけ**で、判定の中身は`lib/session-resume.sh`・
+# `lib/session-tool-call-stall.sh`・`lib/session-codex-turn-stall.sh`、転記の場所の解決は
 # `lib/session-transcript.sh`が持つ。
 # shellcheck source=scripts/lib/session-transcript.sh
 source "$SCRIPT_DIR/lib/session-transcript.sh"
@@ -190,6 +191,8 @@ source "$SCRIPT_DIR/lib/session-transcript.sh"
 source "$SCRIPT_DIR/lib/session-resume.sh"
 # shellcheck source=scripts/lib/session-tool-call-stall.sh
 source "$SCRIPT_DIR/lib/session-tool-call-stall.sh"
+# shellcheck source=scripts/lib/session-codex-turn-stall.sh
+source "$SCRIPT_DIR/lib/session-codex-turn-stall.sh"
 # Codexのセッションへの追加指示（#2519）。**`send-keys`を使わない**ので3段階プロトコルの
 # 外側に置いてある（`codex queue`はTUIのキー入力を経由しない）。
 # shellcheck source=scripts/lib/codex-queue.sh
@@ -738,8 +741,9 @@ code_review_capable() {
 #
 # 出力は1行目が`true`/`false`、2行目が`false`のときの理由（画面には出さず、journaldへ出す用）。
 codex_capable() {
-  local probe
-  if ! command -v codex >/dev/null 2>&1; then
+  local probe codex_command
+  codex_command="$(agent_cli_codex_command)"
+  if ! command -v "$codex_command" >/dev/null 2>&1; then
     printf 'false\ncodexコマンドが入っていません'
     return 0
   fi
@@ -769,13 +773,7 @@ codex_capable() {
 # **取りこぼす側へ倒してある。** 将来インストール先が変わればfalseになるが、そのときは画面に
 # ボタンが出ないだけ。逆に誤ってtrueにすると、押した人には「押しても失敗する」しか残らない。
 codex_remote_control_capable() {
-  local real
-  command -v codex >/dev/null 2>&1 || { printf 'false'; return; }
-  real="$(readlink -f "$(command -v codex)" 2>/dev/null || true)"
-  case "$real" in
-    */packages/standalone/*) printf 'true' ;;
-    *) printf 'false' ;;
-  esac
+  agent_cli_standalone_codex_command >/dev/null 2>&1 && printf 'true' || printf 'false'
 }
 
 # チェックアウトの更新と自己再起動ができるか（#1875）。**gitリポジトリであることだけを見る。**
@@ -2634,6 +2632,79 @@ recover_tool_call_stalled_sessions() {
   return 0
 }
 
+# --- Codexのターンが閉じないまま止まったセッションの自動復旧（#3174）-----------------
+# 判定は`lib/session-codex-turn-stall.sh`。**固定文面を上限（既定3回）まで自動で送り、それでも
+# 直らなければissue-deckへ1度だけ引き上げる**——APIエラー再開（#1971）とまったく同じ形で、
+# 違うのは送る本文と検知の条件だけ。
+#
+# Codexの転記はターンの開始（`task_started`）と終了（`task_complete`・`turn_aborted`）を必ず
+# 書くが、**開始だけ書かれて閉じないまま更新が止まる**ことがある。APIエラー（#3178で拾える
+# ようにした`task_complete.error`）とは条件が排他で、あちらはターンが閉じている前提。
+#
+# **`send-keys`を使わないので、gates.mdの例外を新しく開けていない。**
+# `deliver_session_instruction`がエージェント種別を見て`codex queue`へ振る（#2519）。
+# それでも、APIエラー再開と同じ3条件は満たしている。
+#
+#   1. 送る本文は固定（`SESSION_CODEX_TURN_STALL_BODY`）。**状況を読んで返事を組み立てない**
+#   2. 送る経路は人が「追加指示」を押したときと同じもの
+#   3. 送ってよいのは、**転記のターンが閉じていない**ことを確かめられたセッションだけ
+
+recover_codex_turn_stalled_sessions() {
+  local session_name repo_name issue_number full_name message status attempts
+
+  [[ "${SESSION_CODEX_TURN_STALL_ENABLED:-1}" != "0" ]] || return 0
+
+  while IFS= read -r session_name; do
+    [[ -n "$session_name" ]] || continue
+    # 実装セッションだけを対象にする（`resume_interrupted_sessions`と同じ絞り込み）。
+    [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+
+    if ! session_codex_turn_stall_detected "$session_name"; then
+      # 次に同じ形で止まったときに前回の回数・「もう通知済み」を引きずらないよう消す。
+      # **消す条件は「ターンが閉じたこと」だけ**（`session_codex_turn_stall_settled`）。
+      # 検知には停滞時間が入っているため、「検知しなくなったら消す」にすると送った直後に
+      # 回数が0へ戻り、上限が一度も効かない（#2896で解いたのと同じ穴）。
+      session_codex_turn_stall_settled "$session_name" &&
+        session_state_clear_codex_turn_stall "$session_name"
+      continue
+    fi
+
+    if session_codex_turn_stall_exhausted "$session_name"; then
+      session_codex_turn_stall_notified "$session_name" && continue
+      full_name="$(resolve_session_repository "$session_name" "$repo_name" || true)"
+      echo "Codexのターン停滞からの自動再開をあきらめました（上限 ${SESSION_CODEX_TURN_STALL_MAX_ATTEMPTS} 回）: $session_name"
+      notify_session_interrupted "$session_name" "$repo_name" "$issue_number" "${full_name:-}" \
+        "直前のターンが完了しないまま止まっています。自動で${SESSION_CODEX_TURN_STALL_MAX_ATTEMPTS}回送り直しましたが復帰しませんでした。" \
+        "turn_stall"
+      session_codex_turn_stall_record_notified "$session_name"
+      continue
+    fi
+
+    session_codex_turn_stall_due "$session_name" || continue
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "--dry-run のため送り直しません（Codexのターンが閉じないまま停滞: $session_name）"
+      continue
+    fi
+
+    # 第3引数（許可する状態イベント）は`codex queue`の経路では読まれないが、**既定のままに
+    # しない**。エージェント種別の判定が外れてClaude Code側の3段階プロトコルへ落ちたときに、
+    # 「止まっているのに`working`だから見送る」にならないようにしておく（APIエラー再開と同じ）。
+    status=0
+    message="$(deliver_session_instruction "$session_name" "$SESSION_CODEX_TURN_STALL_BODY" 'Stop|working')" || status=$?
+    session_codex_turn_stall_record_attempt "$session_name"
+    attempts="$(session_codex_turn_stall_read_state "$session_name" | awk '{print $2}')"
+    case "$status" in
+      0) echo "Codexのターンが閉じないまま停滞していたため送り直しました（${attempts}/${SESSION_CODEX_TURN_STALL_MAX_ATTEMPTS}回目）: $session_name" ;;
+      1) echo "Codexのターンが閉じないまま停滞していますが送り直しを見送りました: $session_name: $message" ;;
+      *) echo "Codexのターンが閉じないまま停滞していますが送り直せませんでした: $session_name: $message" ;;
+    esac
+  done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  return 0
+}
+
 # --- セッションの操作（#1332・#1012）--------------------------------------------
 # 画面から積まれた「停止」「閉じる」「追加指示」を実行する。
 #
@@ -2867,7 +2938,7 @@ run_reboot_job() {
 # **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
 # `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい。
 run_codex_pairing_job() {
-  local job_id="$1"
+  local job_id="$1" codex_command
   local start_rc=0 pair_rc=0 pair_out code expires attempt
 
   if [[ "$(codex_remote_control_capable)" != "true" ]]; then
@@ -2875,11 +2946,12 @@ run_codex_pairing_job() {
       "Codexのremote-controlを使えません（公式インストーラのstandalone installが要ります）。"
     return 0
   fi
+  codex_command="$(agent_cli_standalone_codex_command)"
 
   # デーモンを起こす。**出力は読まない**（`serverName`はホスト名で既に分かっており、
   # 起きたかどうかは続く`pair`が通るかで分かる）
   echo "Codexのapp-serverデーモンを起こします..."
-  timeout 120 codex remote-control start --json >/dev/null 2>&1 || start_rc=$?
+  timeout 120 "$codex_command" remote-control start --json >/dev/null 2>&1 || start_rc=$?
   if [[ "$start_rc" -ne 0 ]]; then
     report_job "$job_id" failed \
       "Codexのデーモンを起動できませんでした（終了コード $start_rc）。"
@@ -2890,7 +2962,7 @@ run_codex_pairing_job() {
   # 落ちることがある**（#2521の実機確認）。デーモンが上がりきるのを待って数回試す
   for (( attempt = 1; attempt <= 3; attempt++ )); do
     pair_rc=0
-    pair_out="$(timeout 60 codex remote-control pair --json 2>/dev/null)" || pair_rc=$?
+    pair_out="$(timeout 60 "$codex_command" remote-control pair --json 2>/dev/null)" || pair_rc=$?
     code="$(printf '%s' "$pair_out" | jq -r '.manualPairingCode // ""' 2>/dev/null || printf '')"
     [[ -n "$code" ]] && break
     (( attempt < 3 )) && sleep 3
@@ -3521,6 +3593,10 @@ run_once() {
   # ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まった
   # セッションを送り直し、駄目なら引き上げる（#2655・#2896）。同じ理由で回収・報告の後に行う。
   recover_tool_call_stalled_sessions
+
+  # Codexのターンが開始したまま閉じず、更新が止まったセッションを送り直し、駄目なら
+  # 引き上げる（#3174）。同じ理由で回収・報告の後に行う。
+  recover_codex_turn_stalled_sessions
 
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。

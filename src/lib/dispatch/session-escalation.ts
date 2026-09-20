@@ -244,7 +244,11 @@ export function buildSessionInterruptedCommentBody(params: {
             "⚠️ このIssueの実装セッションが、auto modeのクラシファイアにコマンドを拒否されたまま",
             "応答を終えています。",
           ]
-        : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
+        : reason === "turn_stall"
+          ? [
+              "⚠️ このIssueのCodexセッションが、ターンを完了しないまま止まっています。",
+            ]
+          : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
   lines.push(
     "",
     `- ホスト: \`${params.hostName}\``,
@@ -284,6 +288,21 @@ export function buildSessionInterruptedCommentBody(params: {
       "- 端末の承認プロンプトで許可する（3回連続で拒否されると承認プロンプトへ昇格します）",
       "- 拒否されたコマンドを人が代わりに実行し、結果をセッションへ伝える",
       "- 別の手段で進めるよう指示する",
+    );
+  } else if (reason === "turn_stall") {
+    lines.push(
+      "Codexの転記は、ターンの開始で`task_started`、終了で`task_complete`、Ctrl-Cでの中断で",
+      "`turn_aborted`を書きます。**開始だけが書かれて、どれも来ないまま更新が止まった**状態です。",
+      "セッションはtmuxの中で生きているため、画面からは「実行中」にしか見えません。",
+      "pollerが下の固定文面を`codex queue`で上限回数まで自動で送りましたが、復帰しませんでした",
+      "（#3174。`scripts/lib/session-codex-turn-stall.sh`）。",
+      "",
+      "```text",
+      "直前のターンが完了しないまま中断しています。中断したところから作業を続けてください。",
+      "```",
+      "",
+      "送っても変わらない場合、Codex自体が応答しなくなっている可能性があります",
+      "（`codex queue`が`No active session found`で失敗します）。その場合は起こし直してください。",
     );
   } else {
     lines.push(
