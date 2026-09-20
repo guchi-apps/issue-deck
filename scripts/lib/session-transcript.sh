@@ -29,6 +29,12 @@ session_transcript_records_dir() {
   printf '%s' "${CLAUDE_SESSIONS_DIR:-$HOME/.claude/sessions}"
 }
 
+# Codexの転記の置き場。UUIDは`SessionStart`フックが状態ファイルへ残すため、日付ディレクトリを
+# 総当たりしても別セッションを拾わない（#3178）。検証では`CODEX_SESSIONS_DIR`で差し替えられる。
+session_codex_transcript_dir() {
+  printf '%s' "${CODEX_SESSIONS_DIR:-$HOME/.codex/sessions}"
+}
+
 # `<pid>.json` から1つの値を取り出す。第1引数はtmuxのセッション名。
 #
 # **`.tmux` は `<セッション名>:@<window>.%<pane>` の形**なので、先頭の要素だけを突き合わせる。
@@ -108,6 +114,25 @@ session_transcript_latest() {
   printf '%s' "$newest"
 }
 
+# CodexのスレッドUUIDから転記を引く。ファイル名は`rollout-<時刻>-<thread UUID>.jsonl`で、
+# 巻き戻し後はUUIDの後ろにrollout IDが足されることがあるため、UUIDの直後だけを固定する。
+# どちらの形もCodexの内部形式なので、読めなければ何もしない側へ倒す。
+session_codex_transcript_path() {
+  local session="$1" thread dir file newest=""
+  [[ -n "$session" ]] || return 1
+  thread="$(session_state_read_codex_thread "$session" 2>/dev/null || true)"
+  [[ "$thread" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || return 1
+  dir="$(session_codex_transcript_dir)"
+  [[ -d "$dir" ]] || return 1
+  while IFS= read -r -d '' file; do
+    if [[ -z "$newest" || "$file" -nt "$newest" ]]; then
+      newest="$file"
+    fi
+  done < <(find "$dir" -type f -name "rollout-*-${thread}"'*.jsonl' -print0 2>/dev/null)
+  [[ -n "$newest" ]] || return 1
+  printf '%s' "$newest"
+}
+
 # セッション名 → 転記ファイル。**まず `<pid>.json` の `sessionId` で名指しする。**
 # 転記のファイル名はそのままsessionIdなので、当たれば「そのセッションのもの」だと確実に言える。
 # 引けないとき（jqが無い・記録が消えた・古いClaude Code）だけ、cwd → 置き場 → mtimeが最新、
@@ -115,6 +140,11 @@ session_transcript_latest() {
 session_transcript_path() {
   local session="$1" cwd session_id dir path
   [[ -n "$session" ]] || return 1
+
+  if [[ "$(session_state_agent_kind "$session" 2>/dev/null || true)" == "codex" ]]; then
+    session_codex_transcript_path "$session"
+    return $?
+  fi
 
   cwd="$(session_transcript_record_field "$session" cwd 2>/dev/null || true)"
   [[ -n "$cwd" ]] || cwd="$(session_transcript_cwd "$session" 2>/dev/null || true)"

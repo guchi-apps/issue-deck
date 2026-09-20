@@ -31,6 +31,20 @@ const assistantText = record("assistant", {
   message: { role: "assistant", content: [{ type: "text", text: "できました" }] },
 });
 const userText = record("user", { message: { role: "user", content: "続けて" } });
+const codexApiError = record("event_msg", {
+  payload: {
+    type: "task_complete",
+    turn_id: "turn-1",
+    last_agent_message: null,
+    error: { message: "request failed", codex_error_info: "other" },
+  },
+});
+const codexComplete = record("event_msg", {
+  payload: { type: "task_complete", turn_id: "turn-1", last_agent_message: "できました" },
+});
+const codexUserInput = record("response_item", {
+  payload: { type: "message", role: "user", content: [{ type: "input_text", text: "続けて" }] },
+});
 
 /**
  * 転記を書き、最終更新を`ageMinutes`分前にする。
@@ -89,6 +103,43 @@ describe("session_resume_transcript_interrupted", () => {
   it("エラーの後に人の入力があれば中断とみなさない（もう誰かが再開させている）", () => {
     const file = writeTranscript([apiError, turnDuration, userText], 0);
     expect(runBash(`session_resume_transcript_interrupted ${JSON.stringify(file)}`).status).not.toBe(0);
+  });
+
+  it("Codexのエラー付きtask_completeを中断とみなす", () => {
+    const file = writeTranscript([codexApiError], 0);
+    expect(runBash(`session_resume_transcript_interrupted ${JSON.stringify(file)}`).status).toBe(0);
+  });
+
+  it("Codexの正常なtask_completeは中断とみなさない", () => {
+    const file = writeTranscript([codexComplete], 0);
+    expect(runBash(`session_resume_transcript_interrupted ${JSON.stringify(file)}`).status).not.toBe(0);
+  });
+
+  it("Codexのエラー後に入力があれば中断とみなさない", () => {
+    const file = writeTranscript([codexApiError, codexUserInput], 0);
+    expect(runBash(`session_resume_transcript_interrupted ${JSON.stringify(file)}`).status).not.toBe(0);
+  });
+});
+
+describe("session_codex_transcript_path", () => {
+  const session = "repo-issue-3178";
+  const thread = "11111111-2222-3333-4444-555555555555";
+
+  it("状態ファイルのスレッドUUIDと一致する最新のCodex転記を返す", () => {
+    const sessions = path.join(workDir, "codex-sessions", "2026", "09", "20");
+    mkdirSync(sessions, { recursive: true });
+    const older = path.join(sessions, `rollout-2026-09-20T01-00-00-${thread}.jsonl`);
+    const newer = path.join(sessions, `rollout-2026-09-20T02-00-00-${thread}_rollout.jsonl`);
+    writeFileSync(older, "{}\n");
+    writeFileSync(newer, "{}\n");
+    const oldAt = new Date(Date.now() - 60_000);
+    utimesSync(older, oldAt, oldAt);
+    const setup = [
+      `session_state_write_descriptor ${session} /tmp repo 3178 false implementation codex`,
+      `session_state_write_codex_thread ${session} ${thread}`,
+      `session_transcript_path ${session}`,
+    ].join("; ");
+    expect(runBash(setup, { CODEX_SESSIONS_DIR: path.join(workDir, "codex-sessions") }).stdout).toBe(newer);
   });
 });
 

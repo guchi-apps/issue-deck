@@ -441,7 +441,12 @@ Claude Codeはサーバー側の一時エラー（529 Overloaded など）を再
 書き始めるだけ**である。worktreeも会話もそのまま残っており、人が端末で「続けて」と打つのと
 同じことをしている。
 
-検知はClaude Codeの内部仕様（転記の置き場とレコードの形）に依存するため、**読めなければ
+Codexも#3178で同じ再開を行う。`SessionStart`で控えたスレッドUUIDから
+`~/.codex/sessions/`の転記を引き、最後の`event_msg.payload.type = "task_complete"`に
+`error`があるときだけ中断とみなす。送出は既存の`codex queue`経路なので、tmuxへのキー入力を
+経由しない。通常完了・後続の入力・転記を特定できない場合は、Claude Codeと同じく何もしない。
+
+検知は両CLIの内部仕様（転記の置き場とレコードの形）に依存するため、**読めなければ
 「中断していない」＝何もしない**へ倒す。その場合はこれまでどおり止まったまま人を待つ。
 設定はすべて `~/.config/issue-deck/dispatch.env`（`SESSION_RESUME_*`）で、`SESSION_RESUME_ENABLED=0`
 で仕組みごと止められる。
