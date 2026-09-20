@@ -160,7 +160,8 @@ set -euo pipefail
 #     足す（#2886）。28以前は既定の`Stop`だけを許可するため、APIエラーで中断して`working`の
 #     まま止まったセッションへは、画面のボタンを押しても毎回「作業中のため送りませんでした」で
 #     見送られていた。
-DISPATCH_POLLER_VERSION="29"
+# 30: 計画レビューのagentを読み、Codex CLIも起動する（#3186）。
+DISPATCH_POLLER_VERSION="30"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1190,6 +1191,7 @@ announce() {
     --argjson manualStepVps "$MANUAL_STEP_VPS_CAPABLE" \
     --argjson manualStepSession "$(manual_step_session_capable)" \
     --argjson planReview "$(plan_review_capable)" \
+    --argjson planReviewAgent true \
     --argjson codeReview "$(code_review_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
@@ -1202,7 +1204,7 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3150,7 +3152,7 @@ run_job() {
   resolved_command="$(printf '%s' "$job_json" | jq -r '.resolvedCommand // ""')"
   # どこで実行するか（#2901。`subpc`／`vps`）。**古いissue-deckは返さない**ので既定はサブPC
   manual_step_run_target="$(printf '%s' "$job_json" | jq -r '.manualStepRunTarget // "subpc"')"
-  # 起こすエージェントCLI（#2505。`LAUNCH`以外では見ない）。
+  # 起こすエージェントCLI（#2505。`LAUNCH`と`PLAN_REVIEW`で使う）。
   # **古いissue-deckは`agent`を返さない**ので、その場合は従来どおり`claude`として扱う
   agent="$(printf '%s' "$job_json" | jq -r '.agent // "claude"')"
   # 設定画面で選んだサブPCのClaudeモデル。古いissue-deckは返さないため、その場合はauto。
@@ -3259,7 +3261,7 @@ run_job() {
     fi
     launch_and_report "$job_id" "$(plan_review_session_name "$repo" "$issue_number")" \
       "計画レビュー（G1）を起動しています" \
-      bash "$PLAN_REVIEW_LAUNCHER" "$owner" "$repo" "$issue_number"
+      bash "$PLAN_REVIEW_LAUNCHER" --agent "$agent" "$owner" "$repo" "$issue_number"
     return 0
   fi
 

@@ -739,7 +739,7 @@ model DispatchJob {
   targetHost         String
   // 何をするジョブか（#1332）。既存行はすべて起動ジョブなのでLAUNCHが既定
   kind               DispatchJobKind   @default(LAUNCH)
-  // 起こすエージェントCLI（#2505。`kind`が`LAUNCH`のときだけ意味がある）。
+  // 起こすエージェントCLI（#2505。`LAUNCH`と`PLAN_REVIEW`で意味がある）。
   //
   // **入るのは`ISSUE_DECK_AGENT`へそのまま渡せる小文字の語**（`claude` / `codex`）で、
   // pollerは受け取った値を検証せずに環境変数へ入れる…のではなく、**画面・API・pollerの
@@ -996,6 +996,9 @@ model DispatchHost {
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
   planReviewCapable        Boolean?
+  // 計画レビューでジョブの`agent`を読み、Codex CLIを起こせるか（#3186）。`codexCapable`だけでは
+  // 古いpollerが`PLAN_REVIEW`のagentを無視してClaude Codeを起動するため、別に申告する。
+  planReviewAgentCapable   Boolean?
   // リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。
   // `scripts/start-code-review.sh`を持つpollerだけが申告する。**`null`（未申告＝古いpoller）は
   // 「できない」として扱う**（`planReviewCapable`と同じ向き）。

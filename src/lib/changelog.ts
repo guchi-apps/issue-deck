@@ -40,6 +40,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.16.0",
+    date: "2026-09-20",
+    changes: [
+      "計画レビュー（Issueの実装計画をAIにチェックしてもらう機能）で、レビューに使うAIをChatGPT（Codex CLI）に切り替えられるようになりました。対応環境では、これまでのClaude Codeに加えてChatGPTでもレビューを依頼できます。",
+    ],
+    usage: [
+      "1. Issue詳細画面を開き、計画レビューを依頼できる「計画をレビュー」ボタンを表示させる",
+      "2. 対応環境では、ボタンの上に「Claude Code」「ChatGPT（Codex CLI）」の選択肢が表示されるので、レビューに使いたい方を選ぶ",
+      "3. 「計画をレビュー」ボタンを押す",
+      "4. しばらくして、選んだAIによるレビュー結果がIssueのコメントとして投稿されれば成功",
+    ],
+  },
+  {
     version: "7.15.0",
     date: "2026-09-20",
     changes: [

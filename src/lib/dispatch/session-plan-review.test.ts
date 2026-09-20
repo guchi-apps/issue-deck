@@ -52,9 +52,18 @@ describe("postSessionPlan の計画レビュー起動", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1855,
       hostName: "subpc",
+      agent: undefined,
       // 人が押したわけではないので、積んだユーザーは残らない
       requestedByUserId: null,
     });
+  });
+
+  it("Codexが投稿した計画はCodexのレビューを積む", async () => {
+    await expect(postSessionPlan({ ...PLAN, agent: "codex" })).resolves.toBe(true);
+
+    expect(enqueuePlanReviewJob).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "codex" }),
+    );
   });
 
   /**

@@ -185,6 +185,7 @@ export async function postSessionPlan(params: {
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
       hostName: params.hostName,
+      agent: params.agent,
       labels,
     });
     return true;
@@ -221,6 +222,7 @@ async function requestPlanReview(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string | null;
+  agent?: "claude" | "codex";
   /** `addCheckUserWithReason`が返した付与後のラベル名。取れなければ`null` */
   labels: string[] | null;
 }): Promise<void> {
@@ -232,6 +234,7 @@ async function requestPlanReview(params: {
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
       hostName: params.hostName,
+      agent: params.agent,
       // 人が押したわけではないので積んだユーザーは残らない（無人実行の起動と同じ扱い）
       requestedByUserId: null,
     });
