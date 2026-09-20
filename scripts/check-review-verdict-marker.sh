@@ -152,22 +152,33 @@ done
 # 「この判定の後にコミットが積まれています」が黙って出なくなる**——修正を積んだ後も
 # 修正前の「要修正」がそのまま出る状態（#3172の起点）へ戻る。
 # 節そのものは`sha=`が無くても読めるよう作ってあるので、ここで落とすしかない。
-SECTION_SHA_WRITE='<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} sha=${HEAD_SHA} -->'
+# **開始マーカーの属性にしていないのは、古い読み手を黙って壊さないため。** `review=`・`risk=`の
+# 直後が`-->`である前提で読んでいる版（この変更より前の画面。本番へ出るのはリリース後）は、
+# 属性が増えた瞬間に節ごと「記録なし」へ倒れ、要修正のPRでマージ警告が消える。
+SECTION_SHA_WRITE='<!-- issue-deck-verification:sha=${HEAD_SHA} -->'
+SECTION_SHA_READ='issue-deck-verification:sha=([0-9a-fA-F]+)'
 
 if ! grep -qF "$SECTION_SHA_WRITE" "$WORKFLOW"; then
-  echo "エラー: $WORKFLOW の検証結果の節に判定時点のコミット（sha=）がありません。" >&2
+  echo "エラー: $WORKFLOW の検証結果の節に判定時点のコミット（sha=）の行がありません。" >&2
   echo "  期待する行: $SECTION_SHA_WRITE" >&2
   fail=1
 fi
 
-if ! grep -qF 'sha=<レビューしたときのhead SHA>' "$REVIEW_AGENT_PROMPT"; then
+if ! grep -qF '<!-- issue-deck-verification:sha=<レビューしたときのhead SHA> -->' "$REVIEW_AGENT_PROMPT"; then
   echo "エラー: $REVIEW_AGENT_PROMPT の検証結果の節に判定時点のコミット（sha=）の指示がありません。" >&2
   fail=1
 fi
 
-if ! grep -qF 'sha=([0-9a-fA-F]+)' "$VERDICT_PARSER"; then
+if ! grep -qF "$SECTION_SHA_READ" "$VERDICT_PARSER"; then
   echo "エラー: $VERDICT_PARSER に判定時点のコミット（sha=）の読み取りがありません。" >&2
-  echo "  期待する文字列: sha=([0-9a-fA-F]+)" >&2
+  echo "  期待する文字列: $SECTION_SHA_READ" >&2
+  fail=1
+fi
+
+# 開始マーカーへ属性を足していないことも見張る（上のコメントの理由）。
+if grep -qE 'issue-deck-verification:start[^>]*sha=' "$WORKFLOW" "$REVIEW_AGENT_PROMPT"; then
+  echo "エラー: 検証結果の開始マーカーへ属性（sha=）を足しています。" >&2
+  echo "  古い読み手が節ごと読めなくなるため、判定時点のコミットは節の中の別行に置きます（#3172）。" >&2
   fail=1
 fi
 

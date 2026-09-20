@@ -22,7 +22,7 @@ describe("PullRequestMergeReview", () => {
   afterEach(cleanup);
 
   it("判定・リスク・確認要否の3つを出す", () => {
-    render(<PullRequestMergeReview verdict={verdict()} />);
+    render(<PullRequestMergeReview verdict={verdict()} headSha={null} />);
 
     expect(screen.getByText("問題なし（LGTM）")).toBeTruthy();
     expect(screen.getByText("該当なし")).toBeTruthy();
@@ -32,6 +32,7 @@ describe("PullRequestMergeReview", () => {
   it("リスクに該当した理由もぶら下げる", () => {
     render(
       <PullRequestMergeReview
+        headSha={null}
         verdict={verdict({
           reviewKind: "changes-requested",
           reviewLabel: "要修正",
@@ -48,7 +49,7 @@ describe("PullRequestMergeReview", () => {
   });
 
   it("記録が無いことも出す（「問題なし」と同じ見た目にしない）", () => {
-    render(<PullRequestMergeReview verdict={null} />);
+    render(<PullRequestMergeReview verdict={null} headSha={null} />);
 
     expect(screen.getByText(/レビューの記録がありません/)).toBeTruthy();
   });
@@ -95,12 +96,13 @@ describe("PullRequestMergeReview", () => {
   });
 
   it("PRのURLを渡したときだけレビューへの導線を出す", () => {
-    const { rerender } = render(<PullRequestMergeReview verdict={verdict()} />);
+    const { rerender } = render(<PullRequestMergeReview verdict={verdict()} headSha={null} />);
     expect(screen.queryByRole("link", { name: /レビューを読む/ })).toBeNull();
 
     rerender(
       <PullRequestMergeReview
         verdict={verdict()}
+        headSha={null}
         htmlUrl="https://github.com/guchi-apps/issue-deck/pull/2845"
       />,
     );

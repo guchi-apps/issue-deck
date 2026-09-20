@@ -80,15 +80,26 @@ export function ReviewVerdictFreshnessNote({
   freshness,
   reviewedSha,
   headSha,
+  isReviewing = false,
   className,
 }: {
   freshness: ReviewVerdictFreshness;
   reviewedSha: string | null | undefined;
   /** PRの最新コミット。持っていない画面では省略でき、そのときは判定時点だけを書く */
   headSha?: string | null;
+  /**
+   * いま自動レビューが走り直しているか（#3172）。`mergeJudgement`が`pending`かどうかで決まる。
+   * 待てば更新されるのか、待っても変わらないのかを書き分けるために受け取る。
+   */
+  isReviewing?: boolean;
   className?: string;
 }) {
-  const notice = buildReviewVerdictFreshnessNotice({ freshness, reviewedSha, headSha });
+  const notice = buildReviewVerdictFreshnessNotice({
+    freshness,
+    reviewedSha,
+    headSha,
+    isReviewing,
+  });
   if (!notice) return null;
 
   const isStale = notice.freshness === "stale";

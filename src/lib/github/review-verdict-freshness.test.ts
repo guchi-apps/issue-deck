@@ -76,6 +76,28 @@ describe("buildReviewVerdictFreshnessNotice", () => {
     expect(text).toContain(`最新 ${shortSha(HEAD)}`);
   });
 
+  it("再レビューが走っていれば「レビューし直しています」と言う（#3172）", () => {
+    const text = reviewVerdictFreshnessText({
+      freshness: "stale",
+      reviewedSha: REVIEWED,
+      headSha: HEAD,
+      isReviewing: true,
+    });
+
+    expect(text).toContain("いま最新のコミットをレビューし直しています");
+    expect(text).not.toContain("走っていません");
+  });
+
+  it("再レビューが走っていなければ、待っても変わらないことを言う（#3172）", () => {
+    const text = reviewVerdictFreshnessText({
+      freshness: "stale",
+      reviewedSha: REVIEWED,
+      headSha: HEAD,
+    });
+
+    expect(text).toContain("修正後の再レビューは走っていません");
+  });
+
   it("headを持たない画面では、判定時点だけを出す", () => {
     const text = reviewVerdictFreshnessText({ freshness: "stale", reviewedSha: REVIEWED });
 

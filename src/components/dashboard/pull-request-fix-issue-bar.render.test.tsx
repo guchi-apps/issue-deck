@@ -117,6 +117,17 @@ describe("PullRequestFixIssueBar の判定の鮮度（#3172）", () => {
     expect(screen.getByText(REVIEWED_SHA.slice(0, 7))).toBeTruthy();
   });
 
+  it("再レビューが走っているあいだは、待てば更新されることを言う", () => {
+    renderBar(
+      makePullRequest({
+        reviewVerdict: verdict({ reviewedSha: REVIEWED_SHA }),
+        mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      }),
+    );
+
+    expect(screen.getByText(/いま最新のコミットをレビューし直しています/)).toBeTruthy();
+  });
+
   it("どこにも記録が無ければ、鮮度を言わない（従来どおりの見た目）", () => {
     renderBar(makePullRequest());
 

@@ -206,7 +206,8 @@ export function IssueMergeButton({
           <PullRequestMergeReview
             verdict={reviewVerdict ?? null}
             htmlUrl={pullRequestUrl}
-            headSha={headSha}
+            headSha={headSha ?? null}
+            isReviewing={judgementPending}
           />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>キャンセル</AlertDialogCancel>

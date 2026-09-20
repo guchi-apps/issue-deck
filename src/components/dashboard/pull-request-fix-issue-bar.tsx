@@ -21,6 +21,7 @@ import {
   type PullRequestReviewCommentContent,
 } from "@/lib/github/pull-request-review-comment";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import { isMergeJudgementPending } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type { PullRequestEvent, PullRequestSummary } from "@/types/pull-request";
 
@@ -217,6 +218,7 @@ export function PullRequestFixIssueBar({
           freshness={freshness}
           reviewedSha={reviewedSha}
           headSha={pullRequest.headSha}
+          isReviewing={isMergeJudgementPending(pullRequest.mergeJudgement)}
         />
         <p className="mt-0.5 text-xs text-muted-foreground">
           {route.kind === "create-issue"

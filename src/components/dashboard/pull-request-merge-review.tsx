@@ -30,6 +30,7 @@ export function PullRequestMergeReview({
   verdict,
   htmlUrl,
   headSha,
+  isReviewing = false,
   className,
 }: {
   /** そのPRの判定。記録が無ければnull */
@@ -38,9 +39,14 @@ export function PullRequestMergeReview({
   htmlUrl?: string;
   /**
    * そのPRの最新コミット（#3172）。判定時点のコミットと突き合わせて鮮度の1行を出す。
-   * 取得前・持っていない画面では省略でき、そのときは従来どおり判定だけを出す。
+   *
+   * **省略できるようにしない。** このパネルはPR画面とIssue画面の別々の経路から呼ばれており
+   * （`PullRequestSummary`と`IssuePullRequest`）、任意にすると片方だけ鮮度が出ない状態を
+   * 型で見つけられない。取得前はnullを渡す（そのときは従来どおり判定だけを出す）。
    */
-  headSha?: string | null;
+  headSha: string | null;
+  /** いま自動レビューが走り直しているか（#3172）。`mergeJudgement`が`pending`かどうか */
+  isReviewing?: boolean;
   className?: string;
 }) {
   const freshness = resolveReviewVerdictFreshness({
@@ -74,6 +80,7 @@ export function PullRequestMergeReview({
               freshness={freshness}
               reviewedSha={verdict.reviewedSha}
               headSha={headSha}
+              isReviewing={isReviewing}
             />
             <div className="flex items-center gap-2.5">
               <dt className="w-28 shrink-0 text-muted-foreground">機械的リスク判定</dt>
