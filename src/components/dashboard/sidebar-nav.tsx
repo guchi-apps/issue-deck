@@ -13,6 +13,7 @@ import {
   Gauge,
   GitBranch,
   History,
+  Lightbulb,
   Loader2,
   Lock,
   MonitorPlay,
@@ -84,6 +85,8 @@ type SidebarNavProps = {
   onSelectNightlyRun: () => void;
   /** 共通知識（#2912）の画面を開く */
   onSelectKnowledge: () => void;
+  /** 新規アプリの構想一覧を開く */
+  onSelectIdeas?: () => void;
   /**
    * 共通知識の反映PR（`guchi-apps/docs`の`knowledge/promote-*`）の未マージ件数（#3082）。
    * 「共通知識」行の件数とオレンジの丸に使う。**nullは未取得**で、そのときは出さない
@@ -189,6 +192,7 @@ export function SidebarNavView({
   onSelectReleaseHistory,
   onSelectNightlyRun,
   onSelectKnowledge,
+  onSelectIdeas = () => {},
   knowledgePromotionCount = null,
   nightlyRunQueuedCount = null,
   onLaunchNewApp,
@@ -405,6 +409,14 @@ export function SidebarNavView({
             // 両方に出すとどちらを押せば片付くのか分からなくなる
             count: nightlyRunQueuedCount,
             title: "次の5時間枠の予定、直近の結果を見る",
+          })}
+          {navRow({
+            key: "ideas",
+            label: "構想",
+            icon: Lightbulb,
+            active: activePane === "ideas",
+            onClick: onSelectIdeas,
+            title: "新規アプリの構想を確認・整理する",
           })}
           {navRow({
             key: "knowledge",
