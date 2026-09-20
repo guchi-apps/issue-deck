@@ -2855,6 +2855,11 @@ export function POST(request: NextRequest) {
   後に付いたIssue**（#1968の事後確認）には触らない。設計は
   [multi-agent/labels.md](multi-agent/labels.md)「マージ時に外しそこねた`00.check-user`は
   巡回が外す」。
+  **全指摘が対応済み（起票したIssueがすべてclose済み）になったコードレビューIssueを閉じるのも同じ巡回**
+  （#3216。判定は[`lib/github/code-review-close-sweep.ts`](../src/lib/github/code-review-close-sweep.ts)、
+  IOは`code-review-close-sweep-run.ts`。画面の`対応済み n/n`と同じ`summarizeCodeReviewFindingProgress`を使い、
+  再レビュー依頼中・開け直し済みは閉じない。設計は[multi-agent/code-review.md](multi-agent/code-review.md)
+  「全指摘が対応済みなら自動でcloseする」）。
   **これは新設ではなくGitHub Actionsからの移設**——`reusable-issue-labels.yml`の
   `develop-merge-sweep`・`manual-step-label`が各リポジトリの15分ごとのcronで動いており、
   Actionsの課金はジョブ単位で1分未満切り上げのため、実測20秒・5秒の2ジョブでも1回の実行で

@@ -7,6 +7,8 @@ import {
 } from "@/lib/github/approval-labels";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches, fetchBranchHeadSha } from "@/lib/github/branches-api";
+import { sweepCompletedCodeReviews } from "@/lib/github/code-review-close-sweep-run";
+import type { CodeReviewCloseSkipReason } from "@/lib/github/code-review-close-sweep";
 import {
   addIssueLabels,
   createComment,
@@ -120,7 +122,9 @@ export type ProgressSweepAction = {
     /** closedなIssueの取り残しをdoneへ回収した（#2690） */
     | "closed_advanced"
     /** 本番反映済みなのにopenのまま残っていたIssueをcloseした（#2715） */
-    | "open_closed";
+    | "open_closed"
+    /** 全指摘が対応済みのコードレビューIssueをcloseした（#3216） */
+    | "code_review_closed";
 };
 
 export type ProgressSweepResult = {
@@ -144,6 +148,7 @@ export type ProgressSweepResult = {
       | ProgressSweepSkipReason
       | ClosedStrandedSkipReason
       | MergedOpenSkipReason
+      | CodeReviewCloseSkipReason
       | "fetch_failed"
       | "action_failed",
       number
@@ -312,6 +317,17 @@ export async function runProgressSweep(
 
   actions.push(...(await sweepStaleCheckUser({ tokenFor, countSkip })));
   actions.push(...(await sweepManualStepLabels({ tokenFor, countSkip })));
+  // 全指摘が対応済みのコードレビューIssueを閉じる（#3216）。1件の失敗は中で握るが、
+  // DBの取得自体が落ちた場合に、ここまでの巡回の成果（actions）まで捨てないよう外側でも握る。
+  try {
+    const closedReviews = await sweepCompletedCodeReviews({ tokenFor, countSkip });
+    actions.push(
+      ...closedReviews.map((review) => ({ ...review, kind: "code_review_closed" as const })),
+    );
+  } catch (error) {
+    console.error("[progress-sweep] コードレビューIssueの自動close:", error);
+    countSkip("fetch_failed");
+  }
 
   return {
     swept: true,
