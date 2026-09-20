@@ -376,6 +376,36 @@ export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
   return (OUT_OF_BAND_JOB_KINDS as readonly DispatchJobKind[]).includes(kind);
 }
 
+export type OutOfBandJobKind = (typeof OUT_OF_BAND_JOB_KINDS)[number];
+
+/** ホストの申告のうち、`boolean | null`で「できる／できない」を表すフィールドの名前 */
+type DispatchHostCapabilityField = {
+  [K in keyof DispatchHostView]-?: DispatchHostView[K] extends boolean | null ? K : never;
+}[keyof DispatchHostView];
+
+/**
+ * 枠外ジョブの種別と、**それを配ってよいかを決めるホストの申告**の対応（#3211）。
+ *
+ * **払い出し（`claimDispatchJobs`）はこの表だけを見る。** 種別ごとに`if`を書き足す形にして
+ * いたため、`CODEX_PAIRING`（#2524）が積む側・実行する側とも揃っているのに**払い出しの分岐
+ * だけ書き漏れ**、ペアリングコードのジョブが`QUEUED`のまま5分で`TIMEOUT`になっていた
+ * （押した人からは「押しても繋がらない」としか見えない。#3211）。
+ *
+ * **`Record<OutOfBandJobKind, …>`にしてあるので、`OUT_OF_BAND_JOB_KINDS`へ種別を足すと
+ * ここも埋めるまで型が通らない。** 同じ書き漏れをもう一度できないようにするのが目的。
+ *
+ * 値は`DispatchHost`（Prismaのモデル）と`DispatchHostView`で同じ名前のフィールドを指す。
+ * **`null`（未申告＝古いpoller）は「できない」**——`=== true`で判定する側の作法は変えない。
+ */
+export const OUT_OF_BAND_JOB_KIND_CAPABILITY = {
+  MANUAL_STEP: "manualStepCapable",
+  MANUAL_STEP_ABORT: "manualStepAbortCapable",
+  SELF_UPDATE: "selfUpdateCapable",
+  PREVIEW: "previewCapable",
+  REBOOT: "rebootCapable",
+  CODEX_PAIRING: "codexRemoteControlCapable",
+} as const satisfies Record<OutOfBandJobKind, DispatchHostCapabilityField>;
+
 /**
  * 追加指示の本文の上限（#1012）。長い指示はIssueコメントに書き、ここへは
  * 「コメントを読んでから続けて」の1行を流す運用にする。

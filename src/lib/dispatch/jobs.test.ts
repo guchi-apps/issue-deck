@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { OUT_OF_BAND_JOB_KIND_CAPABILITY } from "./dispatch-job";
+
 const dispatchHostFindUnique = vi.fn();
 const dispatchSessionFindFirst = vi.fn();
 const dispatchSessionFindMany = vi.fn();
@@ -1061,6 +1063,62 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(kinds).not.toContainEqual({
       in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"],
     });
+  });
+
+  // #3211。積む側（`enqueueCodexPairingJob`）と実行する側（pollerの`run_codex_pairing_job`）は
+  // 揃っていたのに、**払い出しの分岐にだけ`CODEX_PAIRING`が無く**、押したジョブが`QUEUED`の
+  // まま5分で`TIMEOUT`になっていた（押した人からは「押しても繋がらない」としか見えない）
+  it("Codexのペアリングに対応したpollerにはペアリングジョブを配る", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ codexRemoteControlCapable: true }));
+    dispatchJobCount.mockResolvedValue(0);
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | string | undefined;
+      if (typeof kind === "object" && kind?.in?.includes("CODEX_PAIRING")) {
+        return [queuedJob({ id: "pairing-1", kind: "CODEX_PAIRING" })];
+      }
+      return [];
+    });
+
+    // 軽い巡回（`maxJobs: 0`）でも届く。枠を消費しない枠外のジョブだから
+    const claimed = await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(claimed.map((job) => job.id)).toEqual(["pairing-1"]);
+  });
+
+  it("Codexのペアリングを申告していないpollerには配らない", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ codexRemoteControlCapable: null }));
+    dispatchJobCount.mockResolvedValue(0);
+    dispatchJobFindMany.mockResolvedValue([]);
+
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+    for (const kind of claimedKinds()) {
+      const list =
+        typeof kind === "object" && kind !== null && "in" in kind
+          ? (kind as { in: string[] }).in
+          : [kind];
+      expect(list).not.toContain("CODEX_PAIRING");
+    }
+  });
+
+  // 枠外の種別を足したときに払い出しの分岐だけ書き漏れる（#3211）のを防ぐ。
+  // **表（`OUT_OF_BAND_JOB_KIND_CAPABILITY`）に載っている種別は、対応する申告がtrueなら必ず
+  // 引きに行く**ことを、種別ごとではなく一覧で確かめる
+  it("枠外の種別は、対応する申告がtrueなら全て払い出しの対象になる", async () => {
+    for (const [kind, capability] of Object.entries(OUT_OF_BAND_JOB_KIND_CAPABILITY)) {
+      dispatchJobFindMany.mockClear();
+      dispatchHostFindUnique.mockResolvedValue(host({ [capability]: true }));
+      dispatchJobCount.mockResolvedValue(0);
+      dispatchJobFindMany.mockResolvedValue([]);
+
+      await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+
+      const requested = claimedKinds().flatMap((value) =>
+        typeof value === "object" && value !== null && "in" in value
+          ? (value as { in: string[] }).in
+          : [],
+      );
+      expect(requested).toContain(kind);
+    }
   });
 
   it("再起動が積まれていなければ従来どおり起動ジョブを配る", async () => {
