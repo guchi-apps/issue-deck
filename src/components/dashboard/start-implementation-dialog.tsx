@@ -1463,16 +1463,26 @@ function ModelPickNotice({
   if (result) {
     const modelName = describePickedModel(agent, result.model);
     return (
-      // 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
-      // ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す
-      <p
-        className="line-clamp-2 text-xs text-muted-foreground"
-        title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
-      >
-        <span className="font-medium text-foreground">{modelName}</span>
-        {result.reason ? ` — ${result.reason}` : "で起動します。"}
-        {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
-      </p>
+      <div className="flex flex-col gap-1">
+        {/* 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
+            ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す */}
+        <p
+          className="line-clamp-2 text-xs text-muted-foreground"
+          title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
+        >
+          {/* 誰が選んだのかを先頭に出す（#3189）。判定の当たり外れを見比べるとき、
+              Jevで選んだのかアプリ内AIで選んだのかが分からないと比べようがない */}
+          {result.source === "jev" && (
+            <span className="mr-1 rounded-full border px-1.5 py-px text-[10px] font-semibold">
+              Jev
+            </span>
+          )}
+          <span className="font-medium text-foreground">{modelName}</span>
+          {result.reason ? ` — ${result.reason}` : "で起動します。"}
+          {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
+        </p>
+        <ModelPickProbabilities agent={agent} result={result} />
+      </div>
     );
   }
   if (error) {
@@ -1482,6 +1492,60 @@ function ModelPickNotice({
     <p className="text-xs text-muted-foreground">
       Issueのタイトル・本文・ラベル・承認済みの計画から、issue-deckがモデルを選びます。
     </p>
+  );
+}
+
+/**
+ * 候補ごとの確率（#3189）。**Jevで判定したときだけ出る**（他の経路は確率を返さない）。
+ *
+ * 出すのは「接戦だったのか、はっきり決まったのか」を押す前に見せるため。88%対10%なら
+ * そのまま押せばよく、45%対42%なら自分で選び直す材料になる——理由の1文だけでは
+ * ここが読み取れない。**表示は多くても3行**なので、ダイアログの丈はほとんど伸びない。
+ */
+function ModelPickProbabilities({
+  agent,
+  result,
+}: {
+  agent: DispatchAgent;
+  result: ModelPickResult;
+}) {
+  const probabilities = result.probabilities;
+  if (!probabilities) return null;
+
+  const rows = Object.entries(probabilities)
+    .filter(([, value]) => typeof value === "number")
+    .sort((a, b) => b[1] - a[1]);
+  if (rows.length === 0) return null;
+
+  const toPercent = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 100);
+
+  return (
+    <div className="flex flex-col gap-1">
+      {result.confidence !== undefined && (
+        <p className="text-[11px] text-muted-foreground">
+          確信度 {toPercent(result.confidence)}%
+        </p>
+      )}
+      <div className="flex flex-col gap-0.5">
+        {rows.map(([candidate, value]) => (
+          <div
+            key={candidate}
+            className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-1.5 text-[11px] text-muted-foreground"
+          >
+            <span className={candidate === result.model ? "text-foreground" : undefined}>
+              {describePickedModel(agent, candidate)}
+            </span>
+            <span className="h-1 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full rounded-full bg-muted-foreground/60"
+                style={{ width: `${toPercent(value)}%` }}
+              />
+            </span>
+            <span className="text-right tabular-nums">{toPercent(value)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

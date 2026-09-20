@@ -3,6 +3,7 @@ import {
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_DEFAULT,
   APP_AI_MODEL_REASONING_DEFAULT,
+  MODEL_PICK_ENGINE_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
@@ -10,6 +11,7 @@ import {
   parseClaudeModel,
   parseCodexModelSetting,
   parseAppAiModel,
+  parseModelPickEngine,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -44,6 +46,8 @@ export default async function DashboardPage() {
   const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   const appAiModelReasoning =
     parseAppAiModel(appSetting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT;
+  const modelPickEngine =
+    parseModelPickEngine(appSetting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT;
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
 
   const hiddenRepositoryIds = currentUser
@@ -135,6 +139,7 @@ export default async function DashboardPage() {
       codexModel={codexModel}
       appAiModel={appAiModel}
       appAiModelReasoning={appAiModelReasoning}
+      modelPickEngine={modelPickEngine}
       dispatchConcurrency={dispatchConcurrency}
     />
   );

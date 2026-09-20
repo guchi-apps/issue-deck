@@ -47,6 +47,10 @@ export const MODEL_RATES: Readonly<Record<string, ModelRate>> = {
   "gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02 },
   "gpt-5.5": { input: 5.0, output: 30.0, cacheRead: 0.5 },
   "gpt-5.4": { input: 2.5, output: 15.0, cacheRead: 0.25 },
+  // TypeSafeのJev（#3189）。**出力は無料**——文章を返さず、選んだ答えと確率しか返さないため
+  // 課金対象の出力トークンが存在しない。キャッシュの仕組みも無いので読み出しは入力と同額にする
+  // （`resolveModelRate`は前方一致なので`jev-1.13.0`も`jev-latest`もここに当たる）。
+  jev: { input: 0.042, output: 0, cacheRead: 0.042 },
 };
 
 /**

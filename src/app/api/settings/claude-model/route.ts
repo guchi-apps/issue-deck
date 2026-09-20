@@ -5,10 +5,12 @@ import {
   APP_AI_MODEL_REASONING_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
+  MODEL_PICK_ENGINE_DEFAULT,
   parseAppAiModel,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
   parseCodexModelSetting,
+  parseModelPickEngine,
 } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -26,6 +28,7 @@ async function getClaudeModels() {
     appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
     appAiModelReasoning:
       parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
+    modelPickEngine: parseModelPickEngine(setting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
   };
 }
 
@@ -86,6 +89,14 @@ export async function PATCH(request: NextRequest) {
   if (hasAppAiReasoning && appAiModelReasoning === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasModelPickEngine =
+    payload !== null && typeof payload === "object" && "modelPickEngine" in payload;
+  const modelPickEngine = hasModelPickEngine
+    ? parseModelPickEngine(payload?.modelPickEngine)
+    : undefined;
+  if (hasModelPickEngine && modelPickEngine === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
 
   const updated = (await db.appSetting.upsert({
     where: { id: 1 },
@@ -97,6 +108,7 @@ export async function PATCH(request: NextRequest) {
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
       ...(appAiModel ? { appAiModel } : {}),
       ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
+      ...(modelPickEngine ? { modelPickEngine } : {}),
     },
     update: {
       claudeModel,
@@ -105,6 +117,7 @@ export async function PATCH(request: NextRequest) {
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
       ...(appAiModel ? { appAiModel } : {}),
       ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
+      ...(modelPickEngine ? { modelPickEngine } : {}),
     },
   })) as Awaited<ReturnType<typeof db.appSetting.upsert>> & { claudeLocalModel?: string };
 
@@ -117,5 +130,6 @@ export async function PATCH(request: NextRequest) {
     appAiModel: parseAppAiModel(updated.appAiModel) ?? APP_AI_MODEL_DEFAULT,
     appAiModelReasoning:
       parseAppAiModel(updated.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
+    modelPickEngine: parseModelPickEngine(updated.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
   });
 }
