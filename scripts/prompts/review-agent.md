@@ -80,8 +80,13 @@
      | `none` | `該当なし` |
      | `hit` | `⚠️ 該当あり: <止めた理由>` |
 
+   - **開始マーカーの`sha=`には、レビューしたときのheadコミットを書く**（#3172。
+     `gh pr view <PR番号> --json headRefOid --jq .headRefOid`）。画面はこれをPRの最新コミットと
+     突き合わせ、修正コミットが積まれた後に「要修正」をそのまま出さず「この判定の後にコミットが
+     積まれています」と添える。**省いても壊れない**が、その場合は判定の鮮度が出ないままになる
+
    ````
-   <!-- issue-deck-verification:start review=lgtm risk=none -->
+   <!-- issue-deck-verification:start review=lgtm risk=none sha=<レビューしたときのhead SHA> -->
    ## 検証結果
 
    - 自動レビュー: ✅ 問題なし（LGTM）

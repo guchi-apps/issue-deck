@@ -1097,7 +1097,9 @@ jobs:
 
           TMP="${RUNNER_TEMP:-/tmp}"
           {
-            echo "<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} -->"
+            # sha= は「いつの中身に対する判定か」の記録（#3172）。画面はこれをPRのheadと
+            # 突き合わせ、修正コミットを積んだ後に古い判定をそのまま出さないようにする
+            echo "<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} sha=${HEAD_SHA} -->"
             echo "## 検証結果"
             echo
             echo "- 自動レビュー: ${REVIEW_TEXT}"

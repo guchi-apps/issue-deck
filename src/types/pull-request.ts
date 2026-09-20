@@ -54,6 +54,14 @@ export type PullRequestSummary = {
   mergedAt: string | null;
   baseRef: string;
   headRef: string;
+  /**
+   * headコミットのSHA（#3172）。自動レビューの判定が「いまの中身に対するものか」を
+   * 突き合わせるために持つ。
+   *
+   * **一覧・詳細のどちらの経路もPR本体のレスポンスを受け取っている**ので、これを持つことで
+   * GitHub APIの消費は増えない（`reviewVerdict`と同じ立場）。
+   */
+  headSha: string;
   kind: PullRequestKind;
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
@@ -257,6 +265,11 @@ export type IssuePullRequest = {
    * 材料も同じPR本文。Issue画面のマージ確認にも同じ判定を出すために持つ。
    */
   reviewVerdict: PullRequestReviewVerdict | null;
+  /**
+   * headコミットのSHA（#3172）。意味は`PullRequestSummary.headSha`と同じ。
+   * **同じ判定が画面によって鮮度つき・鮮度なしで出ないように、こちらにも持たせる。**
+   */
+  headSha: string;
 };
 
 export type IssuePullRequestListResponse = {

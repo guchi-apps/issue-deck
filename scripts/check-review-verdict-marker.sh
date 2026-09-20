@@ -147,6 +147,30 @@ for file in "$WORKFLOW" "$REVIEW_AGENT_PROMPT" "$VERDICT_PARSER"; do
   fi
 done
 
+# 判定時点のコミット（#3172）は、書く側（レビューのワークフロー・ローカルのレビュー
+# エージェント）と読む側（画面のパーサー）にまたがる。**ずれても赤くならず、画面の
+# 「この判定の後にコミットが積まれています」が黙って出なくなる**——修正を積んだ後も
+# 修正前の「要修正」がそのまま出る状態（#3172の起点）へ戻る。
+# 節そのものは`sha=`が無くても読めるよう作ってあるので、ここで落とすしかない。
+SECTION_SHA_WRITE='<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} sha=${HEAD_SHA} -->'
+
+if ! grep -qF "$SECTION_SHA_WRITE" "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW の検証結果の節に判定時点のコミット（sha=）がありません。" >&2
+  echo "  期待する行: $SECTION_SHA_WRITE" >&2
+  fail=1
+fi
+
+if ! grep -qF 'sha=<レビューしたときのhead SHA>' "$REVIEW_AGENT_PROMPT"; then
+  echo "エラー: $REVIEW_AGENT_PROMPT の検証結果の節に判定時点のコミット（sha=）の指示がありません。" >&2
+  fail=1
+fi
+
+if ! grep -qF 'sha=([0-9a-fA-F]+)' "$VERDICT_PARSER"; then
+  echo "エラー: $VERDICT_PARSER に判定時点のコミット（sha=）の読み取りがありません。" >&2
+  echo "  期待する文字列: sha=([0-9a-fA-F]+)" >&2
+  fail=1
+fi
+
 # リリースPR本文の見出しは、書く側（リリースのワークフロー）と読む側（画面のパーサー）の
 # 契約。ずれるとパネルが黙って出なくなる。
 for file in "$RELEASE_WORKFLOW" "$PARSER"; do
@@ -184,3 +208,4 @@ echo "OK: claude-reviewの判定マーカーは $PROMPT と $WORKFLOW で一致�
 echo "OK: 総評の判定マーカーと検証結果の節の契約も揃っています（#2448）"
 echo "OK: レビュー本文の折りたたみのマーカーも揃っています（#2488）"
 echo "OK: マージ待ちのレビュー指摘パネルの読み取りも揃っています（#2849）"
+echo "OK: 判定時点のコミット（sha=）の書き込みと読み取りも揃っています（#3172）"

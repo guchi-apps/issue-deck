@@ -2208,6 +2208,28 @@ export function POST(request: NextRequest) {
   置き、PR詳細の検証結果パネルと共有する（同じ判定が場所によって違う色で出ると、盤面の色が
   意味を持たなくなる）。節のマーカーは`scripts/check-review-verdict-marker.sh`が
   ワークフローと突き合わせる**読み側の1つ**としてこのパーサーも見ている。
+- **自動レビューの判定は「いつのコミットに対するものか」まで出す**（#3172。
+  [`lib/github/review-verdict-freshness.ts`](../src/lib/github/review-verdict-freshness.ts)・
+  [`review-verdict.tsx`](../src/components/dashboard/review-verdict.tsx)の`ReviewVerdictFreshnessNote`）。
+  判定はPR本文に残る一方でコミットは進むため、指摘を直してから次のレビューが終わるまでのあいだ、
+  PR詳細の帯は前回の「要修正」をそのまま出していた（修正前の話なのか、直したうえでまだ直って
+  いないのかが読めない）。**判定時点のコミットを判定と一緒に残し、PRのheadと突き合わせて1行添える。**
+  - 記録先は検証結果の節の開始マーカー（`<!-- issue-deck-verification:start review=… risk=… sha=… -->`）。
+    書くのは`reusable-claude-review-develop.yml`とローカルのレビュー・統合エージェント
+    （`scripts/prompts/review-agent.md`）で、**`sha=`の有無も`scripts/check-review-verdict-marker.sh`が
+    CIで突き合わせる**——ずれても赤くならず、この1行が黙って出なくなるだけだから
+  - **`unknown`（記録なし）は「古い」へ倒さない。** この変更より前のPRと、共有ワークフローの
+    新しいタグがまだ配られていないリポジトリのPRには`sha=`が無い。分からないときに注意書きを
+    付けると、最新のレビューにまで付いて本当に古いときの1行が効かなくなる
+    （`selectPullRequestReviewComment`の`isStale`が同じ理由でfalseへ倒すのと同じ）
+  - **PR詳細の帯だけは、本文に`sha=`が無いときレビューコメントの`sha=`で補う**
+    （`PullRequestFixIssueBar`。詳細APIが返す`events`に総評コメントが入っているため取得は増えない）。
+    判定が古いときは見出しの時制も「判定していました」へ変える
+  - 出す場所はPR詳細の帯・マージ確認ダイアログ（`PullRequestMergeReview`）・Issue詳細の指摘パネル
+    （`PullRequestReviewFindings`）で、**文と色は`ReviewVerdictFreshnessNote`の1か所**に置く。
+    同じ判定が画面ごとに違う結論に読めると、色と記号を1か所に集めた意味が消える。
+    突き合わせ先の`headSha`は`PullRequestSummary`・`IssuePullRequest`が持つ（PR本体の
+    レスポンスに入っているのでGitHub APIの消費は増えない）
 - **developへマージする直前は、判定だけでなく指摘の本文も出し、そのまま修正依頼へ渡せる**
   （#2849。[`lib/github/pull-request-review-comment.ts`](../src/lib/github/pull-request-review-comment.ts)・
   [`pull-request-review-findings.tsx`](../src/components/dashboard/pull-request-review-findings.tsx)）。

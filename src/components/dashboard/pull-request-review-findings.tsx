@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, CornerDownLeft, ExternalLink } from "lucide-
 import { useState } from "react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
-import { VerdictText } from "@/components/dashboard/review-verdict";
+import { ReviewVerdictFreshnessNote, VerdictText } from "@/components/dashboard/review-verdict";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
@@ -90,11 +90,11 @@ export function PullRequestReviewFindings({
           {/* 古いコミットへのレビューであることは、本文より先に言う（#2849）。追いコミットの後に
               出す指摘は、既に直っている可能性がある */}
           {review.isStale && (
-            <p className="border-b bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-              このレビューの後にコミットが積まれています（レビュー時点:{" "}
-              <code className="font-mono">{review.reviewedSha?.slice(0, 7)}</code>
-              ）。指摘が既に直っている可能性があります。
-            </p>
+            <ReviewVerdictFreshnessNote
+              className="rounded-none border-b px-3 py-2 ring-0"
+              freshness="stale"
+              reviewedSha={review.reviewedSha}
+            />
           )}
 
           <div className="px-3 py-2">

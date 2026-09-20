@@ -2,8 +2,9 @@
 
 import { ExternalLink } from "lucide-react";
 
-import { VerdictText } from "@/components/dashboard/review-verdict";
+import { ReviewVerdictFreshnessNote, VerdictText } from "@/components/dashboard/review-verdict";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,14 +29,25 @@ import { cn } from "@/lib/utils";
 export function PullRequestMergeReview({
   verdict,
   htmlUrl,
+  headSha,
   className,
 }: {
   /** そのPRの判定。記録が無ければnull */
   verdict: PullRequestReviewVerdict | null;
   /** レビューコメントを読みに行く先（PRのURL）。渡さない画面では導線を出さない */
   htmlUrl?: string;
+  /**
+   * そのPRの最新コミット（#3172）。判定時点のコミットと突き合わせて鮮度の1行を出す。
+   * 取得前・持っていない画面では省略でき、そのときは従来どおり判定だけを出す。
+   */
+  headSha?: string | null;
   className?: string;
 }) {
+  const freshness = resolveReviewVerdictFreshness({
+    reviewedSha: verdict?.reviewedSha,
+    headSha,
+  });
+
   return (
     <div className={cn("overflow-hidden rounded-lg border", className)}>
       <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2">
@@ -56,6 +68,13 @@ export function PullRequestMergeReview({
                 <VerdictText kind={verdict.reviewKind} label={verdict.reviewLabel} />
               </dd>
             </div>
+            {/* 押す直前に「その判定がいまの中身に対するものか」まで言う（#3172）。
+                判定だけだと、直した後に押すときも直す前と同じ表示になる */}
+            <ReviewVerdictFreshnessNote
+              freshness={freshness}
+              reviewedSha={verdict.reviewedSha}
+              headSha={headSha}
+            />
             <div className="flex items-center gap-2.5">
               <dt className="w-28 shrink-0 text-muted-foreground">機械的リスク判定</dt>
               <dd className="min-w-0">

@@ -133,6 +133,7 @@ export function PullRequestMergeButton({
             <PullRequestMergeReview
               verdict={pullRequest.reviewVerdict}
               htmlUrl={pullRequest.htmlUrl}
+              headSha={pullRequest.headSha}
             />
           )}
           <ApiErrorMessage message={error} />

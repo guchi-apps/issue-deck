@@ -20,9 +20,16 @@ import type { ReviewVerdictKind, RiskVerdictKind } from "@/lib/github/release-ve
  * GitHub APIの消費は増えない。
  */
 
-/** 節の開始マーカー。ワークフロー側と対（CIで突き合わせる） */
+/**
+ * 節の開始マーカー。ワークフロー側と対（CIで突き合わせる）。
+ *
+ * **`sha=`は後から足したので省略可**（#3172）。この変更より前に書かれたPRの本文と、共有
+ * ワークフローの新しいタグがまだ配られていないリポジトリのPRには入っていない。読めないときは
+ * 「判定時点のコミットが分からない」であって「古い」ではないため、`reviewedSha`をnullにして
+ * 鮮度を出さない側へ倒す（`resolveReviewVerdictFreshness`）。
+ */
 const SECTION_START_PATTERN =
-  /<!--\s*issue-deck-verification:start\s+review=([A-Za-z-]+)\s+risk=([A-Za-z-]+)\s*-->/;
+  /<!--\s*issue-deck-verification:start\s+review=([A-Za-z-]+)\s+risk=([A-Za-z-]+)(?:\s+sha=([0-9a-fA-F]+))?\s*-->/;
 
 const SECTION_END_MARKER = "<!-- issue-deck-verification:end -->";
 
@@ -55,6 +62,13 @@ export type PullRequestReviewVerdict = {
   riskReasons: string[];
   /** 「ユーザーの確認」の行の文言。書かれていなければnull */
   confirmLabel: string | null;
+  /**
+   * 判定したときのheadコミット（#3172）。マーカーに`sha=`が無ければnull。
+   *
+   * **PRの最新コミットと突き合わせて「いまの中身に対する判定か」を出すためだけに使う。**
+   * 判定そのもの（`reviewKind`）はこれが無くても読めるので、欠けていても行ごと落とさない。
+   */
+  reviewedSha: string | null;
 };
 
 /** 判定が読めなかったときに出す文言。`unknown`は「判定できなかった」であって危険信号ではない */
@@ -134,6 +148,7 @@ export function parsePullRequestReviewVerdict(
     riskLabel: riskLabel ? stripMark(riskLabel) : FALLBACK_RISK_LABEL,
     riskReasons: findRiskReasons(section),
     confirmLabel: confirmLabel ?? null,
+    reviewedSha: matched[3] ?? null,
   };
 }
 

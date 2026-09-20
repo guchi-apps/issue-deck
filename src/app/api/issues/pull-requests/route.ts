@@ -83,6 +83,8 @@ function toIssuePullRequest(
     // 自動レビューの判定はPR本文に残っている（#2843）。本文はここまで来ているので、
     // Issue画面のマージ確認にも同じ判定を出せる（GitHub APIの消費は増えない）。
     reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
+    // 判定の鮮度（#3172）の突き合わせ先。PR本体のレスポンスに入っているので消費は増えない
+    headSha: pullRequest.head.sha,
   };
 }
 

@@ -67,6 +67,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergedAt: null,
     baseRef: "develop",
     headRef: "issue-100",
+    headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     kind: "issue",
     linkedIssueNumber: 100,
     linkedIssueNumbers: [100],

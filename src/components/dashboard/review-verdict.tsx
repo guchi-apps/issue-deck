@@ -1,3 +1,7 @@
+import {
+  buildReviewVerdictFreshnessNotice,
+  type ReviewVerdictFreshness,
+} from "@/lib/github/review-verdict-freshness";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { cn } from "@/lib/utils";
 
@@ -58,5 +62,60 @@ export function VerdictText({
       {count !== undefined && <span className="font-semibold tabular-nums">{count}</span>}
       {label}
     </span>
+  );
+}
+
+/**
+ * 判定が「いまのコミットに対するものか」の1行（#3172）。
+ *
+ * **判定を出している場所すべてで同じ文・同じ色にする。** PR詳細の帯・マージ確認ダイアログ・
+ * Issue詳細のレビュー指摘パネルは同じ判定を別の器で出しているので、片方だけ「古い」と
+ * 書いてあると、読む人は画面ごとに別の結論を持つことになる（判定の色と記号を
+ * `REVIEW_TONE`・`REVIEW_MARK`の1か所に置いているのと同じ理由）。
+ *
+ * **記録が無いとき（`unknown`）は何も出さない。** 判定時点のコミットが読めないのは
+ * 「古い」ではないため、注意書きを付けずにいまと同じ見た目のままにする。
+ */
+export function ReviewVerdictFreshnessNote({
+  freshness,
+  reviewedSha,
+  headSha,
+  className,
+}: {
+  freshness: ReviewVerdictFreshness;
+  reviewedSha: string | null | undefined;
+  /** PRの最新コミット。持っていない画面では省略でき、そのときは判定時点だけを書く */
+  headSha?: string | null;
+  className?: string;
+}) {
+  const notice = buildReviewVerdictFreshnessNotice({ freshness, reviewedSha, headSha });
+  if (!notice) return null;
+
+  const isStale = notice.freshness === "stale";
+  return (
+    <p
+      className={cn(
+        "flex items-start gap-1.5 text-[11px]",
+        isStale
+          ? "rounded-sm bg-amber-500/10 px-2 py-1 text-amber-700 ring-1 ring-inset ring-amber-500/40 dark:text-amber-400"
+          : "text-muted-foreground",
+        className,
+      )}
+    >
+      <span aria-hidden="true" className="text-[10px] leading-4">
+        {isStale ? REVIEW_MARK["needs-check"] : REVIEW_MARK.ok}
+      </span>
+      <span className="min-w-0">
+        {notice.parts.map((part, index) =>
+          part.mono ? (
+            <code key={index} className="font-mono">
+              {part.text}
+            </code>
+          ) : (
+            <span key={index}>{part.text}</span>
+          ),
+        )}
+      </span>
+    </p>
   );
 }
