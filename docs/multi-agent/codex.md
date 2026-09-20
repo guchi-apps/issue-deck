@@ -461,15 +461,41 @@ Codex側にも作れる。`--last`はホスト全体で最後のセッション�
 送ると勝手に回答済みになる）が理由で、`codex queue`はそこを通らない。**Codexでは例外を
 開けずに同じ機能が成り立つ。**
 
-### 計画判断後の継続も同じ経路で送る（#3179）
+### 計画・質問の判断は、issue-deckが払い出して送る（#3218）
 
-`submit-plan.sh`は、Codexが計画の承認または修正依頼を受け取った後に、同じtmuxセッションの
-UUIDへ固定の継続指示を`codex queue`で積む。判断を返したターンがそこで終了しても、次のターンが
-計画に従った実装または計画の再送を始められるためである。UUIDがまだ無い（信頼確認前）か送信に
-失敗した場合は、判断の返却を妨げず、従来どおり端末から再開する。
+**Codexは判断を待てない。** `submit-plan.sh`・`submit-question.sh`はシェルのコマンドとして
+実行されるが、Codexは`tools.exec_command`を`yield_time_ms: 30000`で呼ぶため、30秒で打ち切られた
+出力が「`Script completed` / `Wall time 30.2 seconds`」として返る。**まだ走っているとは書かれない**
+ので、Codexは完了と解釈してそのターンを終える。実測（ops-dashboard#302）では、スクリプト自身は
+162秒後に修正依頼を受け取って終了コード0で完了していたが、それを受け取る当事者はもういなかった。
 
-キューは実行中のターンを止めないため、固定文面は「同じ作業を既に進行・完了している場合は何も
-せず終了する」と明記する。修正・再送で複数の判断が積まれても、完了済みの作業を繰り返さない。
+**#3179の保険（スクリプトの中から`codex queue`を打つ）はセッションの内側では動かない。**
+Codexのサンドボックスが書込みを許すのはworktree・`/tmp`・`$TMPDIR`・対象リポジトリの`.git`だけで、
+`~/.codex`のstate DB（SQLite）は読み取り専用になる（`attempt to write a readonly database`）。
+2026-09-20の失敗5件と ops-dashboard#302 は偶発ではなく、通ったのは`~/.codex/app-server-daemon`が
+上がってWALファイルがあった1回だけだった。
+
+そこで送る場所をサンドボックスの外へ出した。
+
+1. `submit-plan.sh`・`submit-question.sh`は、`ISSUE_DECK_AGENT=codex`のとき**登録だけして
+   終了コード0で返る**。標準出力に「このターンはここで終えてよい／承認を待たずに進まないこと」を出す
+2. 画面から承認・修正・回答を押すと、issue-deckが`INSTRUCTION`ジョブを積む
+   （[`src/lib/dispatch/codex-decision-notify.ts`](../../src/lib/dispatch/codex-decision-notify.ts)）
+3. pollerが`deliver_codex_instruction`から`codex queue`で送る。pollerは通常のユーザー権限で
+   走っているので`~/.codex`へ書ける
+
+**送る本文は3つの固定文面だけ**（承認・修正・質問への回答）。修正の内容と回答はIssueコメントに
+残っている（`buildSessionPlanDecisionCommentBody`・`buildSessionQuestionAnswerCommentBody`）ので、
+固定文面は「最新のコメントを読め」と言うだけにする。`DispatchJob.instruction`は改行を含まない
+500字までで、人が書いた長い文章は入らない。
+
+**送り先はCodexのセッションに限る**（`codexThreadKnown`が非null）。Claude Codeのセッションへ
+積むと、pollerが`send-keys`の3段階プロトコルの方へ倒し、人の操作を挟まない自動の`send-keys`に
+なってしまう。Claude Codeはフックが`GET …/decision`で判断を取りに来るので、そもそも要らない。
+
+**届かなかったことは画面に出す。** 計画の返事待ちには`CODEX_QUEUED`／`CODEX_QUEUE_FAILED`を
+配送の記録として書くので、計画パネルの結果欄に積めたかどうかが出る。セッションが終わっていて
+積めない場合は、既存の「セッションを復旧」から呼び戻す。
 
 ### 宛先はIssueごとの状態ファイルに残す
 
@@ -768,7 +794,8 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
 | `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記・計画の出し方の差し替え | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
-| 計画の登録と判断待ち（Codex用） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh) |
+| 計画・質問の登録（Codexでは待たずに返す。#3218） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh)・[`scripts/submit-question.sh`](../../scripts/submit-question.sh) |
+| 判断・回答をCodexへ払い出す固定文面と送り先の判定（#3218） | [`src/lib/dispatch/codex-decision-notify.ts`](../../src/lib/dispatch/codex-decision-notify.ts) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
 | 他リポジトリでの種別の受け取り・読み替えの追記・計画の出し方の差し替え（#2590） | [`scripts/generic-start-issue.sh`](../../scripts/generic-start-issue.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |

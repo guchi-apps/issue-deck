@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { notifyCodexSessionDecision } from "@/lib/dispatch/codex-decision-notify";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import {
   decideSessionQuestionRequest,
@@ -93,7 +94,11 @@ export async function POST(request: NextRequest) {
   // **手作業Issue（`71.manual-step`）には残さない**（#2771）。手作業セッションは手順を1つ実行する
   // たびに「次へ進みますか」と聞くため、手順の数だけコメントが増える。代行実行が「手順ごとに
   // Issueへコメントはしない」（#1828）としているのと揃える。回答自体はDBに残り、セッションへ届く
-  if (!(await isManualStepIssueInCache(result.request.repositoryFullName, result.request.issueNumber))) {
+  const isManualStep = await isManualStepIssueInCache(
+    result.request.repositoryFullName,
+    result.request.issueNumber,
+  );
+  if (!isManualStep) {
     await recordAnswerComment({
       repositoryFullName: result.request.repositoryFullName,
       issueNumber: result.request.issueNumber,
@@ -111,6 +116,21 @@ export async function POST(request: NextRequest) {
     await resolveSessionPlanCheckUser({
       repositoryFullName: result.request.repositoryFullName,
       issueNumber: result.request.issueNumber,
+    });
+  }
+
+  // **Codexのセッションには、ここから継続指示を積む**（#3218）。`submit-question.sh`の完了を
+  // 待たずにターンを終えているため、回答を取りに来る当事者がいない。回答そのものは上で
+  // Issueコメントへ残しているので、流すのは「それを読め」という固定の1行だけ
+  // （`src/lib/dispatch/codex-decision-notify.ts`）。**失敗しても成功として返す**
+  //
+  // **手作業Issueでは送らない。** あちらは回答をIssueへ残さないので、読みに行かせる先が無い
+  if (decision !== "defer" && !isManualStep) {
+    await notifyCodexSessionDecision({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+      kind: "question-answered",
+      requestedByUserId: user.id,
     });
   }
 

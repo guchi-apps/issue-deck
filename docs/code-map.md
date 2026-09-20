@@ -3227,6 +3227,13 @@ export function POST(request: NextRequest) {
   Remote Controlの強調（`lib/remote-control-attention.ts`）を下ろし、確認待ちの案内は
   `plan`ターゲットへスクロールさせる（`lib/github/check-user-guidance.ts`）。
   **パネルはPC版・スマホ版の両方の詳細に置く**（`plan-approval-mount.test.ts`が置き忘れを捕まえる）。
+  **Codexのセッションでは、判断を待つのではなく、issue-deck側から押し込む**（#3218。Codexは
+  シェルの実行を30秒で打ち切って完了と解釈しターンを終えるため、`submit-plan.sh`・
+  `submit-question.sh`が待っても受け取る当事者がいない。両スクリプトは登録だけして返り、
+  判断が決まった時点で`lib/dispatch/codex-decision-notify.ts`が固定文面の`INSTRUCTION`ジョブを積む
+  ＝pollerが`codex queue`で次のターンを起こす。修正の内容と回答はIssueコメントから読ませる。
+  積めたかどうかは`SessionPlanRequest.deliveryStatus`の`CODEX_QUEUED`／`CODEX_QUEUE_FAILED`として
+  計画パネルに出る）。
   **返事を待つあいだの1回のHTTP失敗で降りない**（#2108）。降りるのは届かない状態が
   `SESSION_PLAN_POLL_GRACE_SECONDS`（既定60秒）続いたときだけで、そのときは
   `POST /api/dispatch/sessions/plan/decision`で画面の待ちも畳ませる（畳ませないと、押しても

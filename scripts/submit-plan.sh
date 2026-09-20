@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Codexの計画をissue-deckへ登録し、Issue詳細からの承認・修正を待つ（#2545）。
+# 計画をissue-deckへ登録する（#2545）。
+#
+# **Codex（`ISSUE_DECK_AGENT=codex`）では登録だけして返る**（#3218）。判断はpollerが
+# `codex queue`で次のターンとして届ける。それ以外では、従来どおり判断が出るまでここで待つ。
 
 set -euo pipefail
 
@@ -12,8 +15,9 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/submit-plan.sh <plan-file>
 
-計画をissue-deckへ登録し、画面からの承認または修正を待ちます。
-終了コード: 0=承認または修正依頼、3=期限切れ・通信失敗
+計画をissue-deckへ登録します。Codexでは登録だけして返り、判断は次のターンとして届きます。
+それ以外では画面からの承認または修正を待ちます。
+終了コード: 0=登録（Codex）／承認または修正依頼、3=期限切れ・通信失敗
 EOF
 }
 
@@ -70,47 +74,6 @@ fi
 HOST_NAME="$(dispatch_env_value DISPATCH_HOST_NAME)"
 [[ -n "$HOST_NAME" ]] || HOST_NAME="$(hostname -s 2>/dev/null || printf 'unknown')"
 PLAN_BASE_SHA="$(git rev-parse origin/develop 2>/dev/null || git rev-parse origin/main 2>/dev/null || true)"
-
-# Codexの`queue`は、実行中のターンを中断せず次のターンの先頭へ固定文面を積む。
-# このスクリプトの完了を受けてCodexがターンを終える場合にも、承認・修正依頼から作業を再開できる
-# ようにする。一方、同じターンで既に作業を続ける場合や複数の判断が積まれた場合にも、下の文面が
-# 重複実行を明示的に禁じるため、余分なターンは安全に終えられる。
-CODEX_PLAN_APPROVED_CONTINUATION='issue-deckの画面で計画が承認されました。現在の応答でまだ実装を始めていない場合は、承認済みの計画に従って実装・検証・コミット・PR作成を続けてください。すでに同じ作業を進めているか完了している場合は、重複して実施せず、この指示には何もせずに終了してください。'
-CODEX_PLAN_REVISION_CONTINUATION='issue-deckの画面で計画の修正が求められました。修正がまだ反映されていない場合は、指摘を計画へ反映して再送してください。すでに修正済み、再送済み、または後続の判断を処理している場合は、重複して実施せず、この指示には何もせずに終了してください。'
-
-# Codexの計画判断後に、同じセッションの次のターンを起こす。
-# UUIDは`SessionStart`フックが状態ファイルへ残す唯一の宛先であり、信頼確認前など取得できない場合は
-# 従来どおり判断だけを返す。キュー送信の失敗も計画判断を失敗扱いにしない。
-queue_codex_plan_continuation() {
-  local decision="$1" body thread result
-  [[ "${ISSUE_DECK_AGENT:-}" == "codex" ]] || return 0
-  [[ -n "${ISSUE_DECK_TMUX_SESSION:-}" ]] || {
-    echo "Warning: Codexのtmuxセッション名が分からないため、計画判断後の継続指示を送れませんでした" >&2
-    return 0
-  }
-
-  case "$decision" in
-    APPROVED) body="$CODEX_PLAN_APPROVED_CONTINUATION" ;;
-    REVISION_REQUESTED) body="$CODEX_PLAN_REVISION_CONTINUATION" ;;
-    *) return 0 ;;
-  esac
-
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  # shellcheck source=scripts/lib/session-state.sh
-  source "$script_dir/lib/session-state.sh"
-  # shellcheck source=scripts/lib/codex-queue.sh
-  source "$script_dir/lib/codex-queue.sh"
-  thread="$(session_state_read_codex_thread "$ISSUE_DECK_TMUX_SESSION" 2>/dev/null || true)"
-  [[ -n "$thread" ]] || {
-    echo "Warning: CodexのスレッドUUIDが未取得のため、計画判断後の継続指示を送れませんでした" >&2
-    return 0
-  }
-
-  if ! result="$(codex_queue_send "$thread" "$body")"; then
-    echo "Warning: Codexへ計画判断後の継続指示を送れませんでした: ${result:-不明なエラー}" >&2
-  fi
-}
 
 build_payload() {
   python3 - "$PLAN_FILE" "$REPOSITORY" "$ISSUE_NUMBER" "$HOST_NAME" "$WAIT_SECONDS" "$PLAN_BASE_SHA" <<'PY'
@@ -188,12 +151,10 @@ handle_decision() {
   status="$(json_field "$response" status)"
   case "$status" in
     APPROVED)
-      queue_codex_plan_continuation "$status"
       echo "計画がissue-deckの画面で承認されました。実装へ進んでください。"
       return 0
       ;;
     REVISION_REQUESTED)
-      queue_codex_plan_continuation "$status"
       revision="$(json_field "$response" revisionText)"
       # Codexは終了コードが0以外のコマンドを失敗として扱い、失敗したコマンドの出力を
       # 次の計画作成へ使わないことがある。修正本文を標準出力へ出し、成功した対話結果として
@@ -225,6 +186,24 @@ REQUEST_ID="$(json_field "$RESPONSE" planRequestId)"
   echo "Error: 計画の返事待ちを作れませんでした" >&2
   exit 3
 }
+
+# **Codexでは待たない**（#3218）。
+#
+# Codexはシェルの実行を`yield_time_ms: 30000`で打ち切り、打ち切られた出力を
+# 「`Script completed` / `Wall time 30.2 seconds`」として受け取る。**まだ走っているとは
+# 書かれない**ので、Codexは完了と解釈してそのターンを終える。ここで待ち続けても、判断を
+# 受け取る当事者はもういない（ops-dashboard#302では162秒後に修正依頼を受け取って正常終了した
+# プロセスが、誰にも読まれないまま残っていた）。
+#
+# 判断が決まったら、issue-deckが`INSTRUCTION`ジョブを積み、pollerが`codex queue`で次のターンを
+# 起こす（`src/lib/dispatch/codex-decision-notify.ts`）。**セッションの内側からは送れない**
+# ——Codexのサンドボックスでは`~/.codex`が読み取り専用で、`codex queue`はstate DBを開けない。
+if [[ "${ISSUE_DECK_AGENT:-}" == "codex" ]]; then
+  echo "計画をissue-deckへ登録しました。Issue詳細に承認パネルが出ています。"
+  echo "判断はこのコマンドでは待ちません。承認・修正は新しいターンとして届くので、このターンはここで終えてください。"
+  echo "**承認を待たずに実装へ進まないでください。**"
+  exit 0
+fi
 
 echo "計画をissue-deckへ登録しました。Issue詳細からの承認・修正を待っています。" >&2
 DEADLINE=$((SECONDS + WAIT_SECONDS))

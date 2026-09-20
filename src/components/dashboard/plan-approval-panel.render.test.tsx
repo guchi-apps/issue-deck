@@ -289,6 +289,46 @@ describe("PlanApprovalPanel", () => {
   });
 
   /**
+   * #3218。Codexでは`submit-plan.sh`が判断を取りに来ないので、フックからの
+   * `report_delivery`は永遠に届かない。issue-deckが`INSTRUCTION`ジョブを積めたかを
+   * 代わりに書き、パネルはそれを出す（既定の「取得・処理完了報告を待っています」のままだと、
+   * 待っている相手が居ないのに待ち続けているように見える）。
+   */
+  it("Codexへ継続指示を積めたかを出す", () => {
+    render(
+      <PlanApprovalPanel
+        request={request({
+          status: "APPROVED",
+          decidedAt: new Date().toISOString(),
+          deliveryStatus: "CODEX_QUEUED",
+        })}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    expect(screen.getByText(/継続指示を積みました/)).toBeTruthy();
+  });
+
+  it("Codexへ積めなかったときは理由と次の手を出す", () => {
+    render(
+      <PlanApprovalPanel
+        request={request({
+          status: "APPROVED",
+          decidedAt: new Date().toISOString(),
+          deliveryStatus: "CODEX_QUEUE_FAILED",
+          deliverySummary: "Codexのセッションが動いていません。",
+        })}
+        session={session()}
+        dispatch={dispatchHandle()}
+      />,
+    );
+
+    expect(screen.getByText(/Codexのセッションが動いていません。/)).toBeTruthy();
+    expect(screen.getByText(/端末から続きを指示してください/)).toBeTruthy();
+  });
+
+  /**
    * #2158。**押していない計画に「承認を送りました」が出ていた。**
    *
    * Issue詳細はIssueを切り替えてもマウントされたままなので、押した結果を
