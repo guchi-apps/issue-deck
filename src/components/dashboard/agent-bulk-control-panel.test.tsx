@@ -108,6 +108,66 @@ describe("AgentBulkControlPanel", () => {
     expect(screen.getAllByText("実行中")).toHaveLength(1);
   });
 
+  it("Codex CLIの実行中表示の右隣に接続ボタンを出す", () => {
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexRemoteControlCapable: true })],
+          sessions: [makeSession({ codexThreadKnown: false })],
+          requestCodexPairing: vi.fn().mockResolvedValue({ ok: true }),
+        })}
+      />,
+    );
+
+    const codexName = screen.getByText("Codex CLI");
+    const row = codexName.closest("div.flex.flex-col.gap-1\\.5");
+    expect(row?.textContent).toMatch(/Codex CLI.*実行中.*Codexに繋ぐ/);
+  });
+
+  it("接続ボタンから対応ホストへペアリング発行を依頼する", async () => {
+    const requestCodexPairing = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexRemoteControlCapable: true })],
+          requestCodexPairing,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Codexに繋ぐ" }));
+    await waitFor(() => expect(requestCodexPairing).toHaveBeenCalledWith("subpc"));
+  });
+
+  it("発行済みのペアリングコードはCodex CLI行の下に表示する", () => {
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({
+          hosts: [makeHost({ codexRemoteControlCapable: true })],
+          jobs: [
+            {
+              id: "pairing",
+              kind: "CODEX_PAIRING",
+              status: "SUCCEEDED",
+              targetHost: "subpc",
+              codexPairingCode: "A1B2-C3D4",
+              codexPairingExpiresAt: new Date(Date.now() + 540_000).toISOString(),
+            },
+          ] as unknown as DispatchStateHandle["jobs"],
+          requestCodexPairing: vi.fn().mockResolvedValue({ ok: true }),
+        })}
+      />,
+    );
+
+    expect(screen.getByText("A1B2-C3D4")).not.toBeNull();
+  });
+
+  it("対応ホストが無ければ接続ボタンを出さない", () => {
+    render(<AgentBulkControlPanel dispatch={makeDispatch()} />);
+
+    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+  });
+
   it("自動検知で一時停止中なら理由付きのチップを出す", () => {
     render(
       <AgentBulkControlPanel
