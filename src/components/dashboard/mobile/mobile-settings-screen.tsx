@@ -24,7 +24,13 @@ import {
 } from "@/components/dashboard/settings/settings-sections";
 import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { useSettingsData } from "@/hooks/use-settings-data";
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModelSetting } from "@/lib/app-settings";
+import type {
+  AppAiModel,
+  ClaudeLocalModelSetting,
+  ClaudeModel,
+  CodexModelSetting,
+  ModelPickEngine,
+} from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -42,6 +48,7 @@ type MobileSettingsScreenProps = {
   codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
+  modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
   onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
@@ -65,6 +72,7 @@ export function MobileSettingsScreen({
   codexModel,
   appAiModel,
   appAiModelReasoning,
+  modelPickEngine,
   dispatchConcurrency,
   repositories,
   onSetRepositoryHidden,
@@ -175,6 +183,7 @@ export function MobileSettingsScreen({
             codexModel={codexModel}
             appAiModel={appAiModel}
             appAiModelReasoning={appAiModelReasoning}
+            modelPickEngine={modelPickEngine}
             dispatchConcurrency={dispatchConcurrency}
             onUpdated={onUpdated}
           />

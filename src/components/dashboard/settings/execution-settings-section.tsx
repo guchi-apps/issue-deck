@@ -22,10 +22,12 @@ import {
   CODEX_MODEL_SETTING_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
+  MODEL_PICK_ENGINE_OPTIONS,
   type AppAiModel,
   type ClaudeLocalModelSetting,
   type ClaudeModel,
   type CodexModelSetting,
+  type ModelPickEngine,
 } from "@/lib/app-settings";
 
 export type AppSettingsValues = {
@@ -36,6 +38,7 @@ export type AppSettingsValues = {
   codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
+  modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
 };
 
@@ -47,6 +50,7 @@ type ExecutionSettingsSectionProps = {
   codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
+  modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
   onUpdated: (values: AppSettingsValues) => void;
@@ -67,6 +71,7 @@ export function ExecutionSettingsSection({
   codexModel: initialCodexModel,
   appAiModel: initialAppAiModel,
   appAiModelReasoning: initialAppAiModelReasoning,
+  modelPickEngine: initialModelPickEngine,
   dispatchConcurrency: initialDispatchConcurrency,
   onUpdated,
 }: ExecutionSettingsSectionProps) {
@@ -82,6 +87,8 @@ export function ExecutionSettingsSection({
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
+  const [modelPickEngine, setModelPickEngine] =
+    useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -106,6 +113,7 @@ export function ExecutionSettingsSection({
     codexModel !== initialCodexModel ||
     appAiModel !== initialAppAiModel ||
     appAiModelReasoning !== initialAppAiModelReasoning ||
+    modelPickEngine !== initialModelPickEngine ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
   async function handleSubmit() {
@@ -119,6 +127,7 @@ export function ExecutionSettingsSection({
       codexModel,
       appAiModel,
       appAiModelReasoning,
+      modelPickEngine,
     );
     if (!claudeModelOk) return;
     const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
@@ -131,6 +140,7 @@ export function ExecutionSettingsSection({
       codexModel,
       appAiModel,
       appAiModelReasoning,
+      modelPickEngine,
       dispatchConcurrency,
     });
     setIsSaved(true);
@@ -259,6 +269,37 @@ export function ExecutionSettingsSection({
           モデルを選ばずに起動する経路（次にやること・ローカルで開始など）ではTerraで起動します。
           旧世代（GPT-5.5・5.4）と「Codexに任せる」は、この設定でだけ選べます（ダイアログの初期選択は
           Terraになります）。全リポジトリ共通です。
+        </p>
+      </div>
+
+      {/* 「おまかせ」の判定に使うAI（#3189）。**選ばれる側のモデルではなく、選ぶ側。**
+          サブPCのモデル設定（すぐ上）で「おまかせ」を選んだときだけ効くので、その直後に置く */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="model-pick-engine">おまかせの判定に使うAI</Label>
+        <Select
+          value={modelPickEngine}
+          onValueChange={(value) => setModelPickEngine(value as ModelPickEngine)}
+        >
+          <SelectTrigger id="model-pick-engine" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MODEL_PICK_ENGINE_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {/* **送信先が1社増えることを、切り替えるこの場で伝える**（#3189の計画レビュー）。
+            判定の材料はIssueのタイトル・本文・ラベル・承認済みの計画で、privateリポジトリの
+            本文も含む。既定（アプリ内AI）のままなら送信先は今までどおり変わらない */}
+        <p className="text-xs text-muted-foreground">
+          「実装を開始」で「おまかせ」を選んだときに、Issueの内容からモデルを選ぶAIです。
+          Jevは文章を書かない判定専用のモデルで、渡した候補以外を返しません。
+          選ぶとIssueのタイトル・本文・ラベル・承認済みの計画がTypeSafeへ送られます（private
+          リポジトリのIssueも対象です）。TYPESAFE_API_KEYが未設定のとき・呼び出しに失敗した
+          ときは、アプリ内AIのモデルで判定します。
         </p>
       </div>
 

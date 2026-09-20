@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { MODEL_PICK_ENGINE_DEFAULT, parseModelPickEngine } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { DEFAULT_DISPATCH_AGENT, parseDispatchAgent } from "@/lib/dispatch/dispatch-job";
-import { pickModelByRule, pickModelForIssue } from "@/lib/claude/model-pick";
+import { pickModelByJev, pickModelByRule, pickModelForIssue } from "@/lib/claude/model-pick";
 import { getAppAiToken } from "@/lib/claude/request";
 import { db } from "@/lib/db";
 
@@ -17,6 +18,10 @@ import { db } from "@/lib/db";
  *
  * **AIのトークンが無くても200で返す。** その場合はラベルと分量からのルールで選び、
  * `source: "rule"`として返す——起動の入口なので、選べないからといって塞がない。
+ *
+ * 判定に使うAIは設定（`AppSetting.modelPickEngine`）で選ぶ（#3189）。`jev`を選んでいても
+ * **キー未設定・呼び出し失敗なら黙ってアプリ内AIへ倒す**（さらにそこも駄目ならルール）。
+ * 設定を切り替えて選び直す前に起動できなくなる方が困るため、経路は常に3段で残す。
  */
 export async function POST(request: NextRequest) {
   const userId = await requireUserId();
@@ -65,6 +70,16 @@ export async function POST(request: NextRequest) {
     commentCount: issue.commentCount,
     planComment,
   };
+
+  const setting = await db.appSetting
+    .findUnique({ where: { id: 1 }, select: { modelPickEngine: true } })
+    .catch(() => null);
+  const engine = parseModelPickEngine(setting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT;
+
+  if (engine === "jev") {
+    const picked = await pickModelByJev(input, agent);
+    if (picked) return NextResponse.json(picked);
+  }
 
   const token = await getAppAiToken("model_pick");
   if (!token) {

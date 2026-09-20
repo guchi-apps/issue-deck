@@ -345,3 +345,29 @@ export function parseAppAiModel(value: unknown): AppAiModel | null {
     ? (value as AppAiModel)
     : null;
 }
+
+/**
+ * 「おまかせ」（モデルの自動選択）の判定に使うAI（#3189）。
+ *
+ * **モデルを選ぶ側のAIであって、選ばれる側ではない。** 選ばれるのは今までどおり
+ * `MODEL_PICK_CANDIDATES`（sonnet・opus・fable）で、ここはその判定を誰にさせるかの設定。
+ *
+ * `jev`はTypeSafeのSystem Oneモデルで、**文章を書かず候補から1つと確率だけを返す**。
+ * 候補外の答えが構造上返らないぶん、応答を読めずにルールへ倒れることが無くなる。
+ * ただし`TYPESAFE_API_KEY`が要るため、**未設定・呼び出し失敗のときは`app-ai`と同じ経路へ倒す**。
+ */
+export const MODEL_PICK_ENGINE_OPTIONS = [
+  { value: "app-ai", label: "アプリ内AIのモデルに従う" },
+  { value: "jev", label: "Jev（TypeSafe・判定専用／高速・低コスト）" },
+] as const;
+
+export const MODEL_PICK_ENGINE_DEFAULT = MODEL_PICK_ENGINE_OPTIONS[0].value;
+export const MODEL_PICK_ENGINE_VALUES = MODEL_PICK_ENGINE_OPTIONS.map((option) => option.value);
+export type ModelPickEngine = (typeof MODEL_PICK_ENGINE_VALUES)[number];
+
+export function parseModelPickEngine(value: unknown): ModelPickEngine | null {
+  if (typeof value !== "string") return null;
+  return (MODEL_PICK_ENGINE_VALUES as readonly string[]).includes(value)
+    ? (value as ModelPickEngine)
+    : null;
+}

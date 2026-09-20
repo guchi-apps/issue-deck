@@ -83,7 +83,13 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModelSetting } from "@/lib/app-settings";
+import type {
+  AppAiModel,
+  ClaudeLocalModelSetting,
+  ClaudeModel,
+  CodexModelSetting,
+  ModelPickEngine,
+} from "@/lib/app-settings";
 import {
   ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS,
   PULL_REQUEST_POLL_INTERVAL_MS,
@@ -227,6 +233,7 @@ type IssueDeckShellProps = {
   codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
+  modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   /** `issues`をサーバー側で取った時刻（#1797）。一覧のヘッダーの「HH:MM時点」の初期値になる */
   issuesFetchedAt: string;
@@ -244,6 +251,7 @@ export function IssueDeckShell({
   codexModel: initialCodexModel,
   appAiModel: initialAppAiModel,
   appAiModelReasoning: initialAppAiModelReasoning,
+  modelPickEngine: initialModelPickEngine,
   dispatchConcurrency: initialDispatchConcurrency,
 }: IssueDeckShellProps) {
   const {
@@ -311,6 +319,8 @@ export function IssueDeckShell({
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
+  const [modelPickEngine, setModelPickEngine] =
+    useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
 
@@ -324,6 +334,7 @@ export function IssueDeckShell({
     setCodexModel(next.codexModel);
     setAppAiModel(next.appAiModel);
     setAppAiModelReasoning(next.appAiModelReasoning);
+    setModelPickEngine(next.modelPickEngine);
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
@@ -2239,6 +2250,7 @@ export function IssueDeckShell({
                   codexModel={codexModel}
                   appAiModel={appAiModel}
                   appAiModelReasoning={appAiModelReasoning}
+                  modelPickEngine={modelPickEngine}
                   dispatchConcurrency={dispatchConcurrency}
                   repositories={repositories}
                   onSetRepositoryHidden={handleSetRepositoryHidden}
@@ -2779,6 +2791,7 @@ export function IssueDeckShell({
           codexModel={codexModel}
           appAiModel={appAiModel}
           appAiModelReasoning={appAiModelReasoning}
+          modelPickEngine={modelPickEngine}
           dispatchConcurrency={dispatchConcurrency}
           repositories={repositories}
           onSetRepositoryHidden={handleSetRepositoryHidden}

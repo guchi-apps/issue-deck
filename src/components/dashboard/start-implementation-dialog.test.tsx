@@ -719,6 +719,46 @@ describe("StartImplementationDialog", () => {
     });
 
     /**
+     * #3189。Jevで判定したときだけ、判定元のバッジ・確信度・候補ごとの確率を出す。
+     * **接戦だったのかが押す前に分かる**ようにするためで、理由の1文だけでは読み取れない。
+     */
+    it("Jevの判定なら確信度と候補ごとの確率を出す", async () => {
+      dispatchState.hosts = [makeHost()];
+      modelPickFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          model: "opus",
+          reason: "難しさ 2/3と判定したためです。",
+          source: "jev",
+          confidence: 0.82,
+          probabilities: { opus: 0.82, sonnet: 0.15, fable: 0.03 },
+        }),
+      });
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      await waitFor(() => expect(screen.getByText("Jev")).toBeTruthy());
+      expect(screen.getByText(/確信度 82%/)).toBeTruthy();
+      expect(screen.getByText("15%")).toBeTruthy();
+      expect(screen.getByText("3%")).toBeTruthy();
+    });
+
+    // アプリ内AI・ルールの判定は確率を返さないので、確率の行ごと出さない
+    it("Jev以外の判定ではバッジも確率も出さない", async () => {
+      dispatchState.hosts = [makeHost()];
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+      expect(screen.queryByText("Jev")).toBeNull();
+      expect(screen.queryByText(/確信度/)).toBeNull();
+    });
+
+    /**
      * #3154。おまかせが選んだモデルのチップに印（`title`と読み上げ文）を付ける。
      * **選んでいる（`aria-checked`）のは「おまかせ」のまま**で、印は結果を示すだけ。
      */
