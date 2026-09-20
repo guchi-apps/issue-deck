@@ -2025,8 +2025,10 @@ describe("エージェントの選択（#2505）", () => {
     // 選んだ時点で画面に出す文言。空にすると注意そのものが消える
     expect(CODEX_LIMITATIONS.length).toBeGreaterThan(0);
     expect(CODEX_LIMITATIONS.join("")).toContain("Remote Control");
-    // APIエラーは#3178で再開できる。残るのはClaude Code固有のツール呼び出し空振りだけ
-    expect(CODEX_LIMITATIONS.join("")).toContain("空振り");
+    // 自動再開はAPIエラー（#3178）もターンの取りこぼし（#3174）も効くようになった。
+    // ツール呼び出しの空振りはCodexでは起こらない形なので、制限としては並べない
+    expect(CODEX_LIMITATIONS.join("")).not.toContain("自動再開");
+    expect(CODEX_LIMITATIONS.join("")).not.toContain("空振り");
     expect(CODEX_LIMITATIONS.join("")).not.toContain("APIエラー");
   });
 

@@ -675,6 +675,10 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
+- **原因（`interrupt_reason`）は4つ**——`api_error`・`tool_call_stall`・`classifier_blocked`・
+  `turn_stall`（Codexのターンが閉じないまま止まった形。#3174）。`session-notify.sh`は値を
+  そのまま通すだけで、受け入れる一覧を持つのは`SESSION_INTERRUPTED_REASONS`
+  （`src/lib/dispatch/session-state.ts`）だけにしてある
 
 ### ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まることがある（#2655）
 

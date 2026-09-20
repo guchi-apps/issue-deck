@@ -3,29 +3,37 @@ import { NextResponse, type NextRequest } from "next/server";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
 import { escalateInterruptedSession } from "@/lib/dispatch/session-escalation";
-import { parseDispatchSessionName, parseRemoteControlUrl } from "@/lib/dispatch/session-state";
+import {
+  parseDispatchSessionName,
+  parseRemoteControlUrl,
+  parseSessionInterruptedReason,
+} from "@/lib/dispatch/session-state";
 import { recordDispatchSessionInterruption } from "@/lib/dispatch/sessions";
 
 /** コメントに載せる`detail`の上限。pollerが持つ固定の文言しか来ないので短くてよい */
 const MAX_DETAIL_LENGTH = 200;
 
 /**
- * 中断・停滞したまま止まっているセッションの引き上げ（#1971・#2280・#2655）。
+ * 中断・停滞したまま止まっているセッションの引き上げ（#1971・#2280・#2655・#2844・#3174）。
  *
  * 送るのは`scripts/session-notify.sh`で、入口はpollerが合成する`SessionInterrupted`。原因は
- * `reason`で2種類ある。
+ * `reason`で4種類ある。
  *   - `api_error`: Claude CodeがAPIの一時エラーを再試行しきるとturnが打ち切られ、
  *     **`Stop`フックが飛ばない**ため、フックだけを待っていると誰にも伝わらない。pollerが
  *     自動再開を上限まで試したあとに叩く
  *   - `tool_call_stall`: ツールを呼び出したつもりでテキストに書いただけで実際には呼ばれず、
- *     `Stop`は正常に発火するが実質何も進んでいないセッション。自動での再送信はしない
+ *     `Stop`は正常に発火するが実質何も進んでいないセッション。pollerが自動での再送信を
+ *     上限まで試したあとに叩く（#2896）
+ *   - `turn_stall`（#3174）: Codexのセッションが、ターンの開始（`task_started`）だけを転記へ
+ *     書いたまま完了も中断も書かずに止まった形。tmuxの中では生きているため画面からは
+ *     「実行中」にしか見えない。pollerが`codex queue`で上限まで送ったあとに叩く
  *   - `classifier_blocked`（#2844）: auto modeのクラシファイアがコマンドを拒否し、拒否された
  *     エージェントが説明のテキストだけを出してターンを終えたセッション。**拒否には承認
  *     プロンプトが伴わないので`Notification`が飛ばず**、`Stop`は正常に発火するため画面からは
  *     「応答が終わった」ようにしか見えない。**入口だけpollerではなく`Stop`フック**で、
  *     判定材料がその時点で転記に揃っているぶん待たずに引き上げる
  * どれも**1回の停止につき1回**だけ叩く（送ったかどうかの記録はホスト側の`.resume`・
- * `.tool-call-stall`・`.classifier-block`が持つ）。
+ * `.tool-call-stall`・`.codex-turn-stall`・`.classifier-block`が持つ）。
  *
  * **#2280より前はSignalyへ通知するだけだった。** webhookを消したので、異常終了（#1217）・
  * 起動確認での足止め（#1465）と同じ形——Issueコメント＋`00.check-user`＋`01.check-blocked`——へ
@@ -65,12 +73,11 @@ export async function POST(request: NextRequest) {
       ? payload.detail.trim().slice(0, MAX_DETAIL_LENGTH)
       : null;
   const remoteControlUrl = parseRemoteControlUrl(payload?.remoteControlUrl);
-  // 未知の値・省略時は`api_error`（#1971からの後方互換）。原因ごとの文言分岐は
-  // `session-escalation.ts`が持つ（#2655で`tool_call_stall`・#2844で`classifier_blocked`を追加）。
-  const reason =
-    payload?.reason === "tool_call_stall" || payload?.reason === "classifier_blocked"
-      ? payload.reason
-      : "api_error";
+  // 未知の値・省略時は`api_error`（#1971からの後方互換）。**受け入れる値の一覧は
+  // `SESSION_INTERRUPTED_REASONS`だけが持つ**（#3174。ここで名前を数え上げ直していたため、
+  // 原因を足しても受け口が落とし、画面の停滞パネルが出ないという食い違いが起きうる形だった）。
+  // 原因ごとの文言分岐は`session-escalation.ts`が持つ。
+  const reason = parseSessionInterruptedReason(payload?.reason) ?? "api_error";
 
   // **画面が停滞を知るための記録**（#2886）。引き上げがIssueコメントとラベルにしか残らないと、
   // 復旧文面はコメント本文の中のコードブロックのままで、送るには`tmux attach`かRemote Controlを
