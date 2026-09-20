@@ -25,6 +25,7 @@ import { db } from "@/lib/db";
 
 const ANTHROPIC_API = "https://api.anthropic.com";
 const OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses";
+const JEV_SYSTEM_ONE_API = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
 const ANTHROPIC_VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
 
@@ -46,6 +47,70 @@ export type ClaudeMessagesResult<T> = {
   /** 応答をJSONとして読めた場合のみ入る（`response.ok`でない場合はnull）。 */
   json: T | null;
 };
+
+type JevSystemOneUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+};
+
+export type JevSystemOneResponse = {
+  model?: string;
+  usage?: JevSystemOneUsage;
+};
+
+/**
+ * Vercel AI Gateway経由でJevのSystem One APIを呼ぶ。
+ *
+ * Jevはmessages形式ではなく型付き質問を受け取るため、`callClaudeMessages`とは別の入力形を持つ。
+ * ただし送信・失敗時の扱い・使用量計上を機能ごとに散らさないため、外部AI APIの共通入口である
+ * このモジュールに置く。APIキーが無いときのフォールバック判断は呼び出し元が行う。
+ */
+export async function callJevSystemOne<T extends JevSystemOneResponse>(options: {
+  feature: ClaudeApiFeature;
+  apiKey: string;
+  body: Record<string, unknown>;
+  timeoutMs?: number;
+}): Promise<ClaudeMessagesResult<T>> {
+  let response: Response;
+  try {
+    response = await fetch(JEV_SYSTEM_ONE_API, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(options.body),
+      cache: "no-store",
+      ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
+    });
+  } catch {
+    return {
+      response: new Response(JSON.stringify({ error: "request_failed" }), { status: 503 }),
+      json: null,
+    };
+  }
+  if (!response.ok) return { response, json: null };
+
+  let json: T | null = null;
+  try {
+    json = (await response.json()) as T;
+  } catch {
+    return { response, json: null };
+  }
+
+  recordClaudeApiCall({
+    feature: options.feature,
+    model: json.model ?? "typesafe-ai/jev",
+    tokens: {
+      inputTokens: readTokenCount(json.usage?.input_tokens),
+      outputTokens: readTokenCount(json.usage?.output_tokens),
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    },
+  });
+
+  return { response, json };
+}
 
 type OpenAiResponsesResponse = {
   model?: string;

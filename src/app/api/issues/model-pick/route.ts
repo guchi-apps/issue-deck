@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { pickModelByRule, pickModelForIssue } from "@/lib/claude/model-pick";
+import { pickModelForIssue } from "@/lib/claude/model-pick";
 import { getAppAiToken } from "@/lib/claude/request";
 import { db } from "@/lib/db";
 
@@ -57,10 +57,5 @@ export async function POST(request: NextRequest) {
     planComment,
   };
 
-  const token = await getAppAiToken("model_pick");
-  if (!token) {
-    return NextResponse.json({ ...pickModelByRule(input), source: "rule" });
-  }
-
-  return NextResponse.json(await pickModelForIssue(token, input));
+  return NextResponse.json(await pickModelForIssue(await getAppAiToken("model_pick"), input));
 }

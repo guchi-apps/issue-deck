@@ -713,6 +713,25 @@ describe("StartImplementationDialog", () => {
       await waitFor(() => expect(screen.getByText(/ラベルと分量から選びました/)).toBeTruthy());
     });
 
+    it("Jevで選ばれた場合は分類結果と分かるように出す", async () => {
+      dispatchState.hosts = [makeHost()];
+      modelPickFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          model: "opus",
+          reason: "JevがIssueの内容を分類しました（確信度 82%）。",
+          confidence: 0.82,
+          source: "jev",
+        }),
+      });
+      renderDialog({ includeDispatchTargets: true });
+
+      fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
+
+      await waitFor(() => expect(screen.getByText(/Jevで分類しました/)).toBeTruthy());
+    });
+
     it("実行先をGitHub Actionsへ移すと選択が付いていかない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });

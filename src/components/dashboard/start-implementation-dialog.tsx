@@ -1379,6 +1379,7 @@ function ModelPickNotice({
       >
         <span className="font-medium text-foreground">{describeClaudeModel(result.model)}</span>
         {result.reason ? ` — ${result.reason}` : "で起動します。"}
+        {result.source === "jev" && "（Jevで分類しました）"}
         {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
       </p>
     );

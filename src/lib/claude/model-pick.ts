@@ -12,7 +12,7 @@
  * （`pickModelByRule`）。AIが使えないからといって起動そのものを止めない。
  */
 
-import { callClaudeMessages } from "@/lib/claude/request";
+import { callClaudeMessages, callJevSystemOne } from "@/lib/claude/request";
 
 /**
  * 自動選択が選べるモデル。`auto`（CLIの既定）は「選ばない」という選択なのでここには入れない。
@@ -35,6 +35,11 @@ export const MODEL_PICK_PLAN_HEAD_LENGTH = 1500;
 /** 画面へ出す理由の文字数上限 */
 const MAX_REASON_LENGTH = 120;
 
+/** Jevがこの値を下回る確信度なら、既存の生成AI判定へ委ねる。 */
+export const JEV_MIN_CONFIDENCE = 0.6;
+
+const JEV_MODEL = "typesafe-ai/jev";
+
 export type ModelPickInput = {
   title: string;
   body: string;
@@ -50,7 +55,9 @@ export type ModelPickResult = {
   /** なぜそのモデルなのか（日本語1〜2文） */
   reason: string;
   /** AIが選んだのか、ルールへ倒れたのか。画面がそのまま出す */
-  source: "ai" | "rule";
+  source: "jev" | "ai" | "rule";
+  /** Jevが選んだときだけ返る、選択肢の分布から得た確信度。 */
+  confidence?: number;
 };
 
 function truncate(text: string, maxLength: number): string {
@@ -141,6 +148,76 @@ type AnthropicMessageResponse = {
   content?: { type: string; text?: string }[];
 };
 
+type JevChoiceAnswer = {
+  type?: string;
+  choice?: unknown;
+  confidence?: unknown;
+};
+
+type JevSystemOneResponse = {
+  model?: string;
+  answers?: { model?: JevChoiceAnswer };
+  usage?: { input_tokens?: number; output_tokens?: number };
+};
+
+function buildJevState(input: ModelPickInput): string {
+  const labels = input.labels.length > 0 ? input.labels.join(", ") : "（なし）";
+  const body = input.body.trim() ? truncate(input.body, MODEL_PICK_BODY_HEAD_LENGTH) : "（本文なし）";
+  const plan = input.planComment?.trim()
+    ? `\n承認済みの計画:\n${truncate(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH)}`
+    : "";
+
+  return `タイトル: ${input.title}\nラベル: ${labels}\nコメント数: ${input.commentCount}\n本文:\n${body}${plan}`;
+}
+
+function parseJevModelPick(json: JevSystemOneResponse): {
+  model: ModelPickCandidate;
+  confidence: number;
+} | null {
+  const answer = json.answers?.model;
+  if (answer?.type !== "choice" || typeof answer.choice !== "string") return null;
+  if (typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence)) return null;
+  if (answer.confidence < JEV_MIN_CONFIDENCE || answer.confidence > 1) return null;
+
+  const model = MODEL_PICK_CANDIDATES.find((candidate) => candidate === answer.choice);
+  return model ? { model, confidence: answer.confidence } : null;
+}
+
+async function pickModelWithJev(
+  apiKey: string,
+  input: ModelPickInput,
+): Promise<ModelPickResult | null> {
+  const { response, json } = await callJevSystemOne<JevSystemOneResponse>({
+    feature: "model_pick",
+    apiKey,
+    body: {
+      model: JEV_MODEL,
+      state: buildJevState(input),
+      questions: {
+        model: {
+          type: "choice",
+          instructions: "このIssueを実装するClaude Codeに最も適したモデルを選んでください。",
+          criteria: {
+            sonnet: "要件が明確な通常の実装。迷う場合はこちらを選ぶ。",
+            opus: "既存実装の調査、原因の切り分け、または複数の設計判断が必要な実装。",
+            fable: "原因が不明な難しい不具合、または設計から決める必要がある実装。",
+          },
+        },
+      },
+    },
+    timeoutMs: 10_000,
+  });
+  if (!response.ok || !json) return null;
+
+  const picked = parseJevModelPick(json);
+  if (!picked) return null;
+  return {
+    ...picked,
+    reason: `JevがIssueの内容を分類しました（確信度 ${Math.round(picked.confidence * 100)}%）。`,
+    source: "jev",
+  };
+}
+
 function extractJsonText(text: string): string {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
@@ -183,10 +260,18 @@ export function parseModelPick(
  * 起動そのものを止めるより、説明のつくモデルで立てる方が軽い。
  */
 export async function pickModelForIssue(
-  token: string,
+  token: string | null,
   input: ModelPickInput,
 ): Promise<ModelPickResult> {
   const fallback = (): ModelPickResult => ({ ...pickModelByRule(input), source: "rule" });
+
+  const jevApiKey = process.env.AI_GATEWAY_API_KEY;
+  if (jevApiKey) {
+    const picked = await pickModelWithJev(jevApiKey, input);
+    if (picked) return picked;
+  }
+
+  if (!token) return fallback();
 
   let text: string | undefined;
   try {

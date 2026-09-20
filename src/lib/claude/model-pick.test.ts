@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildModelPickPrompt,
+  JEV_MIN_CONFIDENCE,
   parseModelPick,
+  pickModelForIssue,
   pickModelByRule,
   type ModelPickInput,
 } from "@/lib/claude/model-pick";
@@ -16,6 +18,11 @@ function input(overrides: Partial<ModelPickInput> = {}): ModelPickInput {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 describe("parseModelPick", () => {
   it("JSONからモデルと理由を取り出す", () => {
@@ -115,5 +122,72 @@ describe("buildModelPickPrompt", () => {
   // 本文が無いIssueでも判定は走る（タイトルとラベルだけで選ぶ）
   it("本文が空でも組み立てられる", () => {
     expect(buildModelPickPrompt(input({ body: "" }))).toContain("（本文なし）");
+  });
+});
+
+describe("pickModelForIssue", () => {
+  it("JevのChoice応答を採用し、確信度を返す", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          model: "jev-1.13.0",
+          answers: { model: { type: "choice", choice: "opus", confidence: 0.82 } },
+          usage: { input_tokens: 300, output_tokens: 20 },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(pickModelForIssue(null, input())).resolves.toEqual({
+      model: "opus",
+      confidence: 0.82,
+      reason: "JevがIssueの内容を分類しました（確信度 82%）。",
+      source: "jev",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("Jevの確信度が閾値未満ならルール判定へ戻す", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            answers: {
+              model: { type: "choice", choice: "fable", confidence: JEV_MIN_CONFIDENCE - 0.01 },
+            },
+          }),
+        ),
+      ),
+    );
+
+    await expect(pickModelForIssue(null, input())).resolves.toEqual({
+      ...pickModelByRule(input()),
+      source: "rule",
+    });
+  });
+
+  it("Jevが知らない選択肢を返した場合は採用しない", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "gateway-key");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            answers: { model: { type: "choice", choice: "haiku", confidence: 1 } },
+          }),
+        ),
+      ),
+    );
+
+    await expect(pickModelForIssue(null, input())).resolves.toEqual({
+      ...pickModelByRule(input()),
+      source: "rule",
+    });
   });
 });
