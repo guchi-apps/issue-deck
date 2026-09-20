@@ -377,11 +377,16 @@ function QueueSection({
                 </span>
               )}
               {/*
-                Codexのジョブはモデルを持たず、Claudeも`null`（設定の既定）なら中抜きになる。
-                設定の既定から推定しない（起動までに設定が変わると食い違う）
+                指定が無いジョブ（`null`＝設定の既定）は中抜きになる。設定の既定から推定しない
+                （起動までに設定が変わると食い違う）。Codexのジョブも、画面で選んだモデル
+                （`codexModel`）があれば濃さで示す（#3192）
               */}
               {showModel && (
-                <ModelDot agent={job.agent} model={job.claudeModel} className="mt-1" />
+                <ModelDot
+                  agent={job.agent}
+                  model={job.agent === "codex" ? (job.codexModel ?? null) : job.claudeModel}
+                  className="mt-1"
+                />
               )}
               <span className="min-w-0 flex-1">
                 {/*

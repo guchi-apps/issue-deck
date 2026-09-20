@@ -221,6 +221,7 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
       claudeLocalModel="sonnet"
+      codexModel="gpt-5.6-terra"
       {...overrides}
     />,
   );
@@ -237,6 +238,7 @@ function renderMobileDetail(
       repositories={[repository]}
       currentUserLogin="guchi"
       claudeLocalModel="sonnet"
+      codexModel="gpt-5.6-terra"
       onBack={vi.fn()}
       onEdit={vi.fn()}
       onIssueMoved={vi.fn()}

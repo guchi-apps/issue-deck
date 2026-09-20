@@ -106,6 +106,17 @@ describe("PATCH", () => {
     );
   });
 
+  // #3192。「おまかせ」は設定にだけ入る値（ダイアログが判定して具体的なモデル名へ解決する）
+  it("codexModelにおまかせ（pick）を保存できる", async () => {
+    const res = await PATCH(patchRequest({ claudeModel: "sonnet", codexModel: "pick" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).codexModel).toBe("pick");
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: expect.objectContaining({ codexModel: "pick" }) }),
+    );
+  });
+
   // 設定画面は常に両方を送るが、片方だけ更新したい呼び出しや旧形式のリクエストを壊さないため、
   // claudeModelAssistの省略を許容し、その場合は既存値を変更しない。
   it("claudeModelAssistが無い場合はclaudeModelだけを更新する", async () => {

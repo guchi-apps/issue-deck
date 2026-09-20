@@ -117,3 +117,72 @@ describe("buildModelPickPrompt", () => {
     expect(buildModelPickPrompt(input({ body: "" }))).toContain("（本文なし）");
   });
 });
+
+// #3192。Codexの「おまかせ」。判定を行うのはどちらもアプリ内AIで、変わるのは候補・プロンプト・ルール
+describe("Codexの候補（#3192）", () => {
+  it("Codexの応答からはCodexの候補だけを採る", () => {
+    expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
+      model: "gpt-5.6-sol",
+      reason: "調査が要るためです。",
+    });
+    expect(parseModelPick('{"model":"gpt-5.6-luna","reason":"軽い修正のためです。"}', "codex")?.model).toBe(
+      "gpt-5.6-luna",
+    );
+  });
+
+  // Codexの欄にClaudeのモデルが紛れると、`-m opus`で起動しようとして落ちる
+  it("Claudeの候補・旧世代・autoはCodexでは採らない", () => {
+    expect(parseModelPick('{"model":"opus","reason":"x"}', "codex")).toBeNull();
+    expect(parseModelPick('{"model":"gpt-5.5","reason":"x"}', "codex")).toBeNull();
+    expect(parseModelPick('{"model":"auto","reason":"x"}', "codex")).toBeNull();
+    // 逆に、Claudeの欄でCodexのモデルは採らない（従来どおり）
+    expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"x"}', "claude")).toBeNull();
+  });
+
+  it("プロンプトはCodex CLIとCodexの候補を案内する", () => {
+    const prompt = buildModelPickPrompt(input(), "codex");
+    expect(prompt).toContain("Codex CLI");
+    expect(prompt).toContain("gpt-5.6-sol");
+    expect(prompt).toContain("gpt-5.6-terra");
+    expect(prompt).toContain("gpt-5.6-luna");
+    expect(prompt).not.toContain("`opus`");
+    expect(prompt).toContain("ボタンの文言を直す");
+  });
+
+  it("agentを省略したプロンプトはClaude Codeのまま", () => {
+    const prompt = buildModelPickPrompt(input());
+    expect(prompt).toContain("Claude Code");
+    expect(prompt).toContain("`fable`");
+    expect(prompt).not.toContain("gpt-5.6");
+  });
+
+  describe("ルール", () => {
+    it("不具合はSol", () => {
+      expect(pickModelByRule(input({ labels: ["52.bug"] }), "codex").model).toBe("gpt-5.6-sol");
+    });
+
+    it("計画が要る・長い・やり取りが多いものはSol", () => {
+      expect(pickModelByRule(input({ labels: ["21.plan-required"] }), "codex").model).toBe(
+        "gpt-5.6-sol",
+      );
+      expect(pickModelByRule(input({ body: "あ".repeat(800) }), "codex").model).toBe("gpt-5.6-sol");
+      expect(pickModelByRule(input({ commentCount: 10 }), "codex").model).toBe("gpt-5.6-sol");
+    });
+
+    it("文書だけの短い更新はLuna", () => {
+      expect(pickModelByRule(input({ labels: ["60.documentation"] }), "codex").model).toBe(
+        "gpt-5.6-luna",
+      );
+    });
+
+    it("迷ったらTerra。理由は必ず添える", () => {
+      const picked = pickModelByRule(input(), "codex");
+      expect(picked.model).toBe("gpt-5.6-terra");
+      expect(picked.reason.length).toBeGreaterThan(0);
+    });
+
+    it("agentを省略した判定は従来どおりClaudeの候補", () => {
+      expect(pickModelByRule(input({ labels: ["52.bug"] })).model).toBe("opus");
+    });
+  });
+});

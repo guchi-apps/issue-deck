@@ -352,6 +352,25 @@ describe("enqueueDispatchJob のモデル", () => {
 
   // `agent`と違い、ホストの申告では塞がない。`--model`はどのバージョンのClaude Codeでも
   // 受け付ける引数で、古いpollerに当たっても設定の既定で立つだけ（黙って壊れる方向が無い）
+  // #3192。Codexも同じ持たせ方（`claim`が`codexModel`として載せ直す）
+  it("Codexのモデルの指定をジョブへ保存し、指定が無ければnullで積む", async () => {
+    const withModel = await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      codexModel: "gpt-5.6-sol",
+      requestedByUserId: null,
+      now: NOW,
+    });
+    expect(withModel.ok).toBe(true);
+    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBe("gpt-5.6-sol");
+    if (withModel.ok) expect(withModel.job.codexModel).toBe("gpt-5.6-sol");
+
+    dispatchJobCreate.mockClear();
+    await enqueue();
+    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBeNull();
+  });
+
   it("Codex非対応のホストでもモデルの指定は通る", async () => {
     const result = await enqueueDispatchJob({
       repositoryFullName: REPOSITORY,

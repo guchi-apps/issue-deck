@@ -405,10 +405,11 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 ジョブ・APIの`model`・払い出しは`parseClaudeLocalModel`（`pick`を弾く）。`pick`は
 ダイアログが判定して**具体的なモデル名へ解決してから**積むので、pollerへは届かない。
 
-**選択欄が出るのはサブPCでClaude Codeを起こすときだけ。** GitHub Actionsは
-`reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は届かない
-（Issueごとに変えるならラベルの新設と全リポジトリへの配布が要る）。Codexのモデルは
-別の設定（`CODEX_MODEL_OPTIONS`）で、ここでは扱わない。
+**選択欄が出るのはサブPCを選んだときだけ**（Claude Code・Codexのどちらでも。#3192）。
+GitHub Actionsは`reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は
+届かない（Issueごとに変えるならラベルの新設と全リポジトリへの配布が要る）。Codexを選ぶと欄の
+中身がおまかせ・Sol・Terra・Lunaへ切り替わり、選んだ値は`DispatchJob.codexModel`に入る
+（設計は[codex.md](codex.md)「モデルは起動ごとに選べる」）。
 
 **全体の既定ではなく起動ごとの選択にしたのは、割高さが対話の長さで変わるから。**
 `SessionUsage`の実測（直近90日・実装セッション619件・すべてOpus 5）では、1件あたりの

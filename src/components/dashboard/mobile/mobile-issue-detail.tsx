@@ -145,7 +145,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
-import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -240,6 +240,7 @@ type MobileIssueDetailProps = {
    * `StartImplementationDialog`へ渡す。
    */
   claudeLocalModel: ClaudeLocalModelSetting;
+  codexModel: CodexModelSetting;
 };
 
 /** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
@@ -271,6 +272,7 @@ export function MobileIssueDetail({
   onNightlyRunQueued,
   onStartManualStepGuide,
   claudeLocalModel,
+  codexModel,
 }: MobileIssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。PCの詳細と同じく、早期returnより前で呼ぶ
   const snoozeNow = useNow();
@@ -1179,6 +1181,7 @@ export function MobileIssueDetail({
             comments={comments}
             subIssueRelations={subIssueRelations}
             claudeLocalModel={claudeLocalModel}
+            codexModel={codexModel}
             renderTrigger={(isSubmitting) => (
               <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}

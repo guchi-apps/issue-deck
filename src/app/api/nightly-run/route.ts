@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { parseClaudeLocalModel } from "@/lib/app-settings";
+import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import {
@@ -80,9 +80,15 @@ export async function POST(request: NextRequest) {
   if (!agent) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
-  const claudeModel = payload?.model === undefined ? null : parseClaudeLocalModel(payload.model);
-  if (payload?.model !== undefined && !claudeModel) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  // `model`の語は`agent`で決まる（`POST /api/dispatch`と同じ。#3192）
+  let claudeModel: ReturnType<typeof parseClaudeLocalModel> = null;
+  let codexModel: ReturnType<typeof parseCodexLocalModel> = null;
+  if (payload?.model !== undefined) {
+    if (agent === "codex") codexModel = parseCodexLocalModel(payload.model);
+    else claudeModel = parseClaudeLocalModel(payload.model);
+    if (!claudeModel && !codexModel) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
   }
   const optionLabels = Array.isArray(payload?.optionLabels)
     ? payload.optionLabels.filter((item: unknown): item is string => typeof item === "string")
@@ -137,6 +143,7 @@ export async function POST(request: NextRequest) {
         targetHost: hostName,
         agent,
         claudeModel,
+        codexModel,
         optionLabels,
         kind,
         reservedResetsAt: reservedResetsAt === null ? null : new Date(reservedResetsAt),

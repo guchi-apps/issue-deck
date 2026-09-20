@@ -25,6 +25,9 @@ ISSUE_DECK_AGENT=codex scripts/start-issue.sh <Issue番号>
   組み立てられること**（#2526。下の「サンドボックスを組み立てられないホスト」）。判定は
   `scripts/subpc-dispatch-poller.sh`の`codex_capable`。**古いpollerはジョブの`agent`を読まない**
   ため、申告が無いホストで選ばせるとCodexを選んだのにClaude Codeが黙って立つ
+- **モデルも同じダイアログで選べる**（#3192）。エージェントでCodex CLIを選ぶと、Claude Codeと
+  同じ位置の「モデル」欄がCodexの候補（おまかせ・Sol・Terra・Luna）へ切り替わる。詳細は下の
+  「モデルは起動ごとに選べる」
 - **選べるのは「実装を開始」ダイアログだけ。** ツールバーの「サブPCで開始」ボタンと
   「セッションを復旧」は従来どおりClaude Codeで起こす（同じ選択をメニューの階層にも持たない）
 - **GitHub Actions・「実装プロンプトをコピー」・「起動コマンドをコピー」には効かない**
@@ -53,6 +56,37 @@ codex login
 TUIのセッションは起こせるが、共有のapp-serverデーモンに載るもの（`codex agents`・
 `codex remote-control`）が1つも動かない（後述の「`codex agents`・`remote-control`はstandalone
 installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は**戻すこと**（同じ節に手順がある）。
+
+## モデルは起動ごとに選べる（#3192）
+
+「実装を開始」ダイアログの「モデル」欄は、エージェントに合わせて中身が変わる。**Claude Codeで
+立てるときの「おまかせ」・Fable・Opus・Sonnetと同じ形**で、Codexでは**おまかせ・Sol・Terra・Luna**。
+選んだ値は`DispatchJob.codexModel`へ入り、払い出し（`POST /api/dispatch/claim`）が
+`job.codexModel ?? 設定`を`codexModel`として載せ直す。**pollerは従来どおり`codexModel`
+だけを読む**ので、poller・ランチャー側の変更は要らない（Claudeの`claudeLocalModel`と同じ持たせ方）。
+
+| | Claude Code | Codex |
+|---|---|---|
+| ジョブの列 | `DispatchJob.claudeModel` | `DispatchJob.codexModel` |
+| ダイアログの候補 | `CLAUDE_LOCAL_MODEL_OPTIONS`（fable・opus・sonnet） | `CODEX_LOCAL_MODEL_VALUES`（sol・terra・luna） |
+| 設定の値 | `AppSetting.claudeLocalModel`（`pick`あり） | `AppSetting.codexModel`（`pick`あり。旧世代・`auto`も残る） |
+| 払い出しで`pick`のとき | Sonnet | Terra |
+
+- **`POST /api/dispatch`・`POST /api/nightly-run`の`model`は`agent`で語が決まる。** Codexへ`opus`、
+  Claude Codeへ`gpt-5.6-sol`を送ると400（選んだつもりのないモデルで立つより、その場で断る）
+- **ダイアログの候補に`auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。** どのモデルで
+  立つか分からない方式を選ばせない、というClaude側の方針（#2776）に揃えた。**設定には残る**ので、
+  ダイアログを経由しない起動（次にやること・ローカルで開始・PR修正依頼の呼び戻し・一括停止からの再開）は
+  従来どおり設定の値で立つ。**設定が旧世代・`auto`のときのダイアログの初期選択はTerra**
+  （`resolveCodexInitialModel`。選択なしで開くと何で立つか分からなくなるため）
+- **「おまかせ」は判定を行うのがどちらもアプリ内AI**（既定Claude Haiku。Codexへ問い合わせる経路は無い）。
+  変わるのは候補・プロンプト・AIを呼べないときのルール（`lib/claude/model-pick.ts`。
+  `POST /api/issues/model-pick`の`agent`で切り替える）。**ルールでLunaを選ぶのは文書だけの短い更新に
+  限り、迷ったらTerra**。エージェントごとに判定と結果を別に持つので、切り替えても取り違えない
+  （`use-model-pick.ts`をエージェントごとに1つずつ持つ）
+- **設定が「おまかせ」なら、Codexを選んだ時点で1回だけ自動で判定する**（Claude Codeの
+  #3106と同じ。開いたあたり、エージェントごとに1回）。判定が終わるまで「開始する」は押せない
+- 実行キューの行に、指定したモデルの印と●の濃さが出る（指定が無いジョブには付けない）
 
 ## Claude Codeと揃わないもの
 
