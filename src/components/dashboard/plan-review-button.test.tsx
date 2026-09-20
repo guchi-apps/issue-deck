@@ -154,7 +154,24 @@ describe("PlanReviewButton", () => {
         issueNumber: 1855,
         hostName: "subpc",
         kind: "plan_review",
+        agent: "claude",
       });
+    });
+  });
+
+  it("Codex対応ホストではChatGPTを選んでレビューを積める", async () => {
+    render(
+      <PlanReviewButton
+        issue={makeIssue()}
+        dispatch={makeDispatch({ hosts: [makeHost({ codexCapable: true, planReviewAgentCapable: true })] })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "ChatGPT（Codex CLI）" }));
+    fireEvent.click(reviewButton());
+
+    await waitFor(() => {
+      expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ agent: "codex" }));
     });
   });
 

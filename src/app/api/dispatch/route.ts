@@ -334,10 +334,16 @@ export async function POST(request: NextRequest) {
   // 承認待ちで生きているのが常態）ので、`enqueueDispatchJob`とは別の関数へ振る。
   // ここは人が押したときの経路で、自動起動（計画コメントの投稿）は`postSessionPlan`が直接積む
   if (kind === "PLAN_REVIEW") {
+    const agent =
+      payload?.agent === undefined ? DEFAULT_DISPATCH_AGENT : parseDispatchAgent(payload.agent);
+    if (!agent) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
     const planReviewResult = await enqueuePlanReviewJob({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
       hostName,
+      agent,
       requestedByUserId: userId,
     });
     if (!planReviewResult.ok) {

@@ -289,6 +289,11 @@ export function isDispatchAgentSelectable(host: DispatchHostView | null): boolea
   return host?.codexCapable === true;
 }
 
+/** 計画レビューはagentを読むpollerだけでCodexを選べる（#3186）。 */
+export function isPlanReviewAgentSelectable(host: DispatchHostView | null): boolean {
+  return host?.codexCapable === true && host.planReviewAgentCapable === true;
+}
+
 /**
  * そのホストへそのエージェントで積めるか。積めない理由を返し、積めるなら`null`。
  *
@@ -641,6 +646,8 @@ export type DispatchHostView = {
    * 未知の種別として`failed`になったジョブが画面へ並ぶ。
    */
   planReviewCapable: boolean | null;
+  /** 計画レビューでジョブのagentを読めるか。未申告の古いpollerはCodexを選べない */
+  planReviewAgentCapable?: boolean | null;
   /**
    * リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**`null`（未申告）は
    * 「できない」として扱う**（`planReviewCapable`と同じ）。
@@ -1554,6 +1561,7 @@ export type PlanReviewRejection =
   | "host_offline"
   | "plan_review_unsupported"
   | "repository_not_runnable"
+  | "agent_not_capable"
   | "already_queued";
 
 export function describePlanReviewRejection(
@@ -1571,6 +1579,8 @@ export function describePlanReviewRejection(
       return `${formatDispatchHostName(context.hostName)} のpollerが計画レビューに対応していません（更新してから押せるようになります）。`;
     case "repository_not_runnable":
       return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} で実行できません（cloneされていないか、ローカル起動に対応していません）。`;
+    case "agent_not_capable":
+      return `${formatDispatchHostName(context.hostName)} はCodex CLIでの計画レビューに対応していません（codexが未導入か、pollerが古い可能性があります）。`;
     case "already_queued":
       return "このIssueには実行中または待機中の計画レビューが既にあります。";
   }
@@ -1583,9 +1593,15 @@ export function describePlanReviewRejection(
  * 「画面では押せるのにAPIが断る」状態が生まれるのは、起動側（#1180）・制御側（#1332）と同じ。
  */
 export function resolvePlanReviewRejection(params: {
-  host: Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories"> | null | undefined;
+  host:
+    | (Pick<DispatchHostView, "online" | "planReviewCapable" | "repositories"> &
+        Partial<Pick<DispatchHostView, "codexCapable" | "planReviewAgentCapable">>)
+    | null
+    | undefined;
   repositoryFullName: string;
   hasActiveJob: boolean;
+  /** 省略時は既存どおりClaude Codeでレビューする */
+  agent?: DispatchAgent;
 }): PlanReviewRejection | null {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
@@ -1593,6 +1609,10 @@ export function resolvePlanReviewRejection(params: {
   if (!params.host.repositories.includes(params.repositoryFullName)) {
     return "repository_not_runnable";
   }
+  if (
+    params.agent === "codex" &&
+    !(params.host.codexCapable === true && params.host.planReviewAgentCapable === true)
+  ) return "agent_not_capable";
   if (params.hasActiveJob) return "already_queued";
   return null;
 }

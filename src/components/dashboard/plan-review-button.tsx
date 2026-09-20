@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2, ScanSearch } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -7,10 +8,13 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
   describePlanReviewRejection,
+  DEFAULT_DISPATCH_AGENT,
   findPlanReviewJobForIssue,
+  isPlanReviewAgentSelectable,
   isActiveDispatchJobStatus,
   resolveDefaultPlanReviewHost,
   resolvePlanReviewRejection,
+  type DispatchAgent,
 } from "@/lib/dispatch/dispatch-job";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import type { Issue } from "@/types/issue";
@@ -36,6 +40,7 @@ export function PlanReviewButton({
   /** 画面で1回だけ取ったディスパッチの状態（#1262） */
   dispatch: DispatchStateHandle;
 }) {
+  const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   const job = findPlanReviewJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
 
@@ -55,7 +60,9 @@ export function PlanReviewButton({
     host: judgedHost,
     repositoryFullName: issue.repositoryFullName,
     hasActiveJob,
+    agent,
   });
+  const showAgentSelector = isPlanReviewAgentSelectable(judgedHost);
 
   if (parseRepositoryFullName(issue.repositoryFullName) === null) return null;
 
@@ -69,6 +76,32 @@ export function PlanReviewButton({
 
   return (
     <div className="mt-2 flex w-full flex-col items-end gap-1">
+      {showAgentSelector && (
+        <div role="radiogroup" aria-label="計画レビューのエージェント" className="flex w-full gap-1">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={agent === "claude"}
+            onClick={() => setAgent("claude")}
+            className={`rounded-md border px-2 py-1 text-xs ${
+              agent === "claude" ? "border-foreground bg-muted" : "text-muted-foreground"
+            }`}
+          >
+            Claude Code
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={agent === "codex"}
+            onClick={() => setAgent("codex")}
+            className={`rounded-md border px-2 py-1 text-xs ${
+              agent === "codex" ? "border-foreground bg-muted" : "text-muted-foreground"
+            }`}
+          >
+            ChatGPT（Codex CLI）
+          </button>
+        </div>
+      )}
       <Button
         variant="outline"
         size="sm"
@@ -81,6 +114,7 @@ export function PlanReviewButton({
             issueNumber: issue.number,
             hostName,
             kind: "plan_review",
+            agent,
           });
         }}
       >
