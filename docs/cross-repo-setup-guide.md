@@ -1073,6 +1073,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `PROGRESS_REPORT_SECRET` | issue-deckの進捗API（`POST /api/progress`で報告、`GET /api/progress`で問い合わせ）の共有シークレット（#991 Phase 2・Phase 5） | **必須**（後述）。organization secretとして1つ登録すれば全リポジトリで共有できる。`reusable-issue-labels.yml`は`workflow_call`の`required: false`で受け取り（callerが明示的に渡す）、`reusable-issue-dispatch.yml`は`secrets: inherit`で受け取る |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
 | `OPS_API_TOKEN` | ops-dashboardの`GET /api/ai-usage`を読むためのトークン（#3037）。`OPS_DASHBOARD_URL`（`deploy.yml`がVPS上で`http://127.0.0.1:3110`固定で設定するため、GitHub側にsecret/variableとしては登録しない）とあわせて`getCodexUsage`（`src/lib/dispatch/codex-usage.ts`）が使う | ops-dashboardの`OPS_API_TOKEN`と同じ値を登録する。未設定のときは転記のスナップショットへ戻るだけで、issue-deck自体の動作は止まらない |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway（Jev、TypeSafe互換API）のAPIキー。Jevで実装モデル（Sonnet・Opus・Fable）を分類する際に使う（#3180） | issue-deckのみで使用。未設定のときは既存のClaude API判定、続いてルール判定へフォールバックするため、issue-deck自体の動作は止まらない。本番への値の投入は#3181で追跡 |
 
 ### `provision-secret.sh --from-stdin`はパイプ経由だと必ず失敗していた（#2728）
 
