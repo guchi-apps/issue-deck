@@ -1659,6 +1659,18 @@ export function IssueDeckShell({
   }
 
   /**
+   * PR詳細の「…」メニューからクローズできたとき（#3161）。`handlePullRequestMerged`から
+   * 楽観反映（「マージ済み」の上書き）だけを除いた形——閉じたPRをマージ済みとして出すと嘘になる。
+   * 詳細を閉じるのは`pr`・`prmodal`の両方を見る（確認待ちの重ね表示から閉じた場合も、
+   * 操作できない詳細を残さないため）。
+   */
+  function handlePullRequestClosed(pullRequest: PullRequestSummary) {
+    if (filters.pr === pullRequest.id) selectPullRequest(null);
+    if (filters.prmodal === pullRequest.id) selectPullRequestModal(null);
+    openPullRequests.refresh();
+  }
+
+  /**
    * ブランチ画面からマージできたとき（#1756）。
    *
    * マージ済みとしての反映（＝同じPRを二度マージできないこと）は`handlePullRequestMerged`が
@@ -2101,6 +2113,10 @@ export function IssueDeckShell({
                     onMerged={() =>
                       selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                     }
+                    onClosed={() =>
+                      selectedPullRequest && handlePullRequestClosed(selectedPullRequest)
+                    }
+                    onUpdated={openPullRequests.refresh}
                     onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                     onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                     pullRequestFixRoute={pullRequestFixRoute}
@@ -2497,6 +2513,10 @@ export function IssueDeckShell({
                 onMerged={() =>
                   selectedPullRequest && handlePullRequestMerged(selectedPullRequest)
                 }
+                onClosed={() =>
+                  selectedPullRequest && handlePullRequestClosed(selectedPullRequest)
+                }
+                onUpdated={openPullRequests.refresh}
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                 onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                 pullRequestFixRoute={pullRequestFixRoute}
@@ -2671,6 +2691,8 @@ export function IssueDeckShell({
           error={modalPullRequestDetail.error}
           onRefresh={modalPullRequestDetail.refresh}
           onMerged={() => modalPullRequest && handlePullRequestMerged(modalPullRequest)}
+          onPullRequestClosed={() => modalPullRequest && handlePullRequestClosed(modalPullRequest)}
+          onUpdated={openPullRequests.refresh}
           onCreateFixIssue={openReleaseVerificationFixIssueDialog}
           onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
           pullRequestFixRoute={modalPullRequestFixRoute}

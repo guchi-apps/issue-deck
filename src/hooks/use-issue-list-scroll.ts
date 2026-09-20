@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
 
 import {
   collectIssueListScrollAnchors,
+  computeAboveRowsScrollTop,
   computeCenteredIssueListScrollTop,
   computeRestoredIssueListScrollTop,
   type IssueListItemOffset,
@@ -123,6 +124,32 @@ export function useIssueListScroll({
 
     restoredKeyRef.current = scrollKey;
   }, [scrollKey, issueIds, selectedIssueId, listRef, itemRefs]);
+
+  // 行より上に積まれているもの（#3165で`<ul>`の中へ移した、マージ待ちPull Requestの枠と
+  // 「保留中N件」の行）の高さが変わったぶんを、そのままscrollTopへ足して打ち消す。
+  //
+  // **復元は`scrollKey`ごとに1回しか走らないのに対し、マージ待ちPRはマウント後の取得で
+  // 遅れて届く。** 復元でscrollTopを決めた後に枠が先頭へ挿入されると、行だけが枠の高さぶん
+  // 一斉に下がり、戻ってきた位置が枠の高さぶんずれる（枠の高さは画面の半分近くある）。
+  // **ブラウザのスクロールアンカリングには任せない**——iOS Safariは`overflow-anchor`に
+  // 未対応で、報告があったのもiPhoneの画面。
+  //
+  // 測るのは先頭の行の`offsetTop`＝「行より上にあるものの高さ」で、どのIssueが先頭に来ても
+  // 同じ値になる（絞り込みや並べ替えで先頭が入れ替わってもずれない）。`offsetTop`は
+  // スクロールでは変わらないため、指で動かしている最中に割り込むことはない。
+  const aboveRowsHeightRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const firstIssueId = issueIds[0];
+    const firstRow = firstIssueId ? itemRefs.current?.get(firstIssueId) : undefined;
+    const aboveRowsHeight = firstRow?.offsetTop ?? null;
+    const previous = aboveRowsHeightRef.current;
+    aboveRowsHeightRef.current = aboveRowsHeight;
+
+    if (!list || aboveRowsHeight === null) return;
+    const next = computeAboveRowsScrollTop(list.scrollTop, previous, aboveRowsHeight);
+    if (next !== list.scrollTop) list.scrollTop = next;
+  });
 
   // 保存。スクロールのたびに全行を走査するため、requestAnimationFrameで1フレームに
   // 1回へ間引く。一覧は仮想化していないので走査はO(表示件数)になる。

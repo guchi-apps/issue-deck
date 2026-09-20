@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildIssueListScrollKey,
   collectIssueListScrollAnchors,
+  computeAboveRowsScrollTop,
   computeCenteredIssueListScrollTop,
   computeRestoredIssueListScrollTop,
   type IssueListItemOffset,
@@ -150,5 +151,29 @@ describe("buildIssueListScrollKey", () => {
     expect(buildIssueListScrollKey(["pc", "all"])).not.toBe(
       buildIssueListScrollKey(["pc", "check-user"]),
     );
+  });
+});
+
+// #3165: 先頭に固定していたマージ待ちPull Requestの枠は`<ul>`の中へ移したので、それが遅れて
+// 届くと行だけが下がり、復元した位置が枠の高さぶんずれる
+describe("computeAboveRowsScrollTop", () => {
+  it("行より上が高くなったぶんをscrollTopへ足して打ち消す", () => {
+    expect(computeAboveRowsScrollTop(600, 0, 420)).toBe(1020);
+  });
+
+  it("行より上が低くなれば同じだけ戻す", () => {
+    expect(computeAboveRowsScrollTop(1020, 420, 0)).toBe(600);
+  });
+
+  it("先頭にいるときは動かさない（上に増えたものはそのまま見せる）", () => {
+    expect(computeAboveRowsScrollTop(0, 0, 420)).toBe(0);
+  });
+
+  it("まだ測っていないときは動かさない", () => {
+    expect(computeAboveRowsScrollTop(600, null, 420)).toBe(600);
+  });
+
+  it("負のscrollTopにはしない", () => {
+    expect(computeAboveRowsScrollTop(100, 420, 0)).toBe(0);
   });
 });

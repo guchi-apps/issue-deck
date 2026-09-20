@@ -651,38 +651,36 @@ describe("PRのマージへの入口（#3083）", () => {
   });
 });
 
-// #1915: 実装オプションでラベル行が折り返し、行の右端に置く場所が無かった
-describe("一覧のカードに出すラベル（#1915）", () => {
-  const labeled = [
-    makeIssue({
-      number: 1,
-      labels: [
-        label("50.feature"),
-        label("21.plan-required"),
-        label("25.artifact-required"),
-        label("11.local"),
-        label("80.Priority: High"),
-      ],
-    }),
-  ];
-
-  it("実装オプション（20番台）は出さない", () => {
+// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）
+describe("一覧のカードにGitHubラベルを出さない（#3159）", () => {
+  it("実装オプション・実行状態・分類・優先度のどれも出さない", () => {
+    const labeled = [
+      makeIssue({
+        number: 1,
+        labels: [
+          label("50.feature"),
+          label("21.plan-required"),
+          label("25.artifact-required"),
+          label("11.local"),
+          label("80.Priority: High"),
+        ],
+      }),
+    ];
     render(
       <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
     );
 
-    expect(screen.queryByText("21.plan-required")).toBeNull();
-    expect(screen.queryByText("25.artifact-required")).toBeNull();
-  });
-
-  it("実行状態・分類・優先度は今までどおり出す", () => {
-    render(
-      <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
-    );
-
-    expect(screen.getByText("50.feature")).toBeTruthy();
-    expect(screen.getByText("11.local")).toBeTruthy();
-    expect(screen.getByText("80.Priority: High")).toBeTruthy();
+    for (const name of [
+      "50.feature",
+      "21.plan-required",
+      "25.artifact-required",
+      "11.local",
+      "80.Priority: High",
+    ]) {
+      expect(screen.queryByText(name)).toBeNull();
+    }
+    // 行そのものは描かれている
+    expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
   });
 });
 
@@ -909,6 +907,37 @@ describe("先頭に固定したセクションの引っ張って更新（#2175�
     expect(shifted).not.toBeNull();
     expect(shifted!.style.transform).not.toBe("");
     expect(shifted!.parentElement!.className).toContain("overflow-hidden");
+  });
+});
+
+// #3165: マージ待ちPRが多いと、固定セクションが高さを取り切ってIssueの行が1件も出ず、
+// 枠自身にもスクロールが無いので下へも届かなかった
+describe("先頭に固定したセクションの置き場所（#3165）", () => {
+  it("固定セクションは、Issueの行と同じスクロール領域（<ul>）の中に入る", () => {
+    const { container } = renderList({
+      pinnedSection: <div data-testid="pinned">あなたのマージを待っているPull Request</div>,
+    });
+
+    const list = container.querySelector("ul")!;
+    expect(list.className).toContain("overflow-y-auto");
+    expect(list.contains(screen.getByTestId("pinned"))).toBe(true);
+  });
+
+  it("Issueが0件でも固定セクションは残り、その下に文言を出す", () => {
+    renderList({
+      issues: [],
+      pinnedSection: <div data-testid="pinned">あなたのマージを待っているPull Request</div>,
+    });
+
+    expect(screen.getByTestId("pinned")).toBeTruthy();
+    expect(screen.getByText("該当するIssueがありません")).toBeTruthy();
+  });
+
+  it("固定セクションが無ければ、0件の文言は今までどおり<ul>の外に出す", () => {
+    const { container } = renderList({ issues: [] });
+
+    expect(container.querySelector("ul")).toBeNull();
+    expect(screen.getByText("該当するIssueがありません")).toBeTruthy();
   });
 });
 

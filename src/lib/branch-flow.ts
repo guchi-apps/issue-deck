@@ -1,4 +1,6 @@
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
+import { isCodeReviewIssue } from "@/lib/github/code-review";
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import { resolveProgressStatus, type ProgressStatusKey } from "@/lib/issue-progress";
 import {
@@ -334,6 +336,8 @@ export type BranchFlowIssueSource = {
   body?: string | null;
   /** ラベル名だけ。手作業Issue（`71.manual-step`）の判定に使う（#1510） */
   labels?: string[];
+  /** サブPCへ積んだジョブが未完了の間の時刻。未着手の件数から外すために使う（#3163） */
+  dispatchPendingAt?: string | null;
 };
 
 export type BuildBranchFlowInput = {
@@ -587,6 +591,8 @@ function buildRepository({
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     startedIssueCount: startedIssues.length,
+    // 未着手は着手中とは別の数字として、薄く出す（#3163）
+    readyIssueCount: countReadyIssues(issues, laneMainIssueNumbers),
     deploy: deployState,
   };
 
@@ -682,6 +688,36 @@ function collectStartedIssues(
       priority: resolveIssuePriority(issue.labels ?? []),
     }))
     .sort(compareStartedIssues);
+}
+
+/**
+ * 未着手（`Ready`）のopen Issueの件数（#3163）。畳んだ1行に薄く出すためだけの数字で、
+ * 一覧としては持たない（開いた中身には並べない）。
+ *
+ * 条件は左メニューの「未着手」ビュー（`not-started`）に揃えるが、**`00.check-user`は除かない**——
+ * 保留にしているIssueも「待っている量」として見せるのがこの数字の目的。
+ * - **Project Statusが無いIssueは数えない。** `resolveProgressStatus`は未登録を`ready`とみなす
+ *   ため、盤面に載っていないリポジトリではバックログ全件が未着手に見えてしまう
+ * - **`dispatchPendingAt`が立っているIssueは数えない。** 押した直後はStatusが`Ready`のままで、
+ *   数えると押したのに未着手が減らない（#1347）
+ * - 手作業Issue・質問Issue・レビューIssueは実装するものではないので数えない
+ * - すでにレーンとして出ているIssueは、着手中と同じく二重に数えない
+ */
+function countReadyIssues(
+  issues: BranchFlowIssueSource[],
+  laneIssueNumbers: ReadonlySet<number>,
+): number {
+  return issues.filter(
+    (issue) =>
+      issue.state === "open" &&
+      issue.projectStatus != null &&
+      !issue.dispatchPendingAt &&
+      !isManualStepIssue(issue) &&
+      !isAskRepoQuestionIssue(issue) &&
+      !isCodeReviewIssue(issue) &&
+      resolveProgressStatus(issue) === "ready" &&
+      !laneIssueNumbers.has(issue.number),
+  ).length;
 }
 
 function compareStartedIssues(a: BranchFlowStartedIssue, b: BranchFlowStartedIssue): number {

@@ -392,6 +392,7 @@ describe("buildBranchFlow", () => {
       needsUserMerge: false,
       openManualStepCount: 0,
       startedIssueCount: 0,
+      readyIssueCount: 0,
       releaseInProgress: false,
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
@@ -1703,6 +1704,7 @@ describe("サマリー行の集計", () => {
       needsUserMerge: true,
       openManualStepCount: 0,
       startedIssueCount: 0,
+      readyIssueCount: 0,
       releaseInProgress: false,
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
@@ -1984,6 +1986,69 @@ describe("着手中のIssue（startedIssues。#2386）", () => {
     ]);
     expect(flow.repositories[0].startedIssues[1].priority).toBe("high");
     expect(flow.repositories[0].startedIssues.at(-1)?.priority).toBe("low");
+  });
+});
+
+describe("未着手のIssueの件数（readyIssueCount。#3163）", () => {
+  function readyCount(issues: BranchFlowIssueSource[]): number {
+    return build({ issues, branchStatuses: [branchStatus()] }).repositories[0].summary
+      .readyIssueCount;
+  }
+
+  it("Readyのopen Issueを数え、着手中の件数とは分ける", () => {
+    const flow = build({
+      issues: [
+        issue({ number: 1, projectStatus: "Ready" }),
+        issue({ number: 2, projectStatus: "Ready" }),
+        issue({ number: 3, projectStatus: "Implementation" }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(flow.repositories[0].summary.readyIssueCount).toBe(2);
+    expect(flow.repositories[0].summary.startedIssueCount).toBe(1);
+  });
+
+  it("保留の`00.check-user`が付いたIssueも数える", () => {
+    expect(
+      readyCount([issue({ number: 1, projectStatus: "Ready", labels: ["00.check-user"] })]),
+    ).toBe(1);
+  });
+
+  it("Ready以外・クローズ済み・手作業・質問・レビューIssueは数えない", () => {
+    expect(
+      readyCount([
+        issue({ number: 1, projectStatus: "Develop" }),
+        issue({ number: 2, projectStatus: "Ready", state: "closed" }),
+        issue({ number: 3, projectStatus: "Ready", labels: ["71.manual-step"] }),
+        issue({ number: 4, projectStatus: "Ready", title: "[質問] これは何ですか" }),
+        issue({ number: 5, projectStatus: "Ready", title: "[レビュー] 全体" }),
+      ]),
+    ).toBe(0);
+  });
+
+  /** Projectへ載っていないリポジトリで、バックログ全件を未着手として数えない */
+  it("Project Statusが無いIssueは数えない", () => {
+    expect(readyCount([issue({ number: 1, projectStatus: null })])).toBe(0);
+  });
+
+  /** 押した直後はStatusがReadyのまま。数えると押したのに未着手が減らない（#1347） */
+  it("サブPCへ積んだ直後（dispatchPendingAt）のIssueは数えない", () => {
+    expect(
+      readyCount([
+        issue({ number: 1, projectStatus: "Ready", dispatchPendingAt: "2026-09-20T00:00:00Z" }),
+      ]),
+    ).toBe(0);
+  });
+
+  it("すでにレーンとして出ているIssueは数えない", () => {
+    const flow = build({
+      issues: [issue({ number: 30, projectStatus: "Ready" })],
+      pullRequests: [pullRequest({ number: 1, headRef: "issue-30", linkedIssueNumber: 30 })],
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(flow.repositories[0].summary.readyIssueCount).toBe(0);
   });
 });
 

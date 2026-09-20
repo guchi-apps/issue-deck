@@ -2242,6 +2242,24 @@ describe("着手中のIssue（#1704・#2386）", () => {
     expect(screen.queryByLabelText(/着手中/)).toBeNull();
     expect(screen.queryByText(/Issue #30/)).toBeNull();
   });
+
+  /** #3163: 未着手は着手中とは別の薄い件数として畳んだ行に出す。動いているものは無いので「動きなし」は残す */
+  it("未着手の件数を畳んだ1行に出し、未着手だけなら「動きなし」も残す", () => {
+    renderFlow({
+      issues: [10, 11, 12].map((number) => ({
+        number,
+        title: `未着手${number}`,
+        repositoryFullName: REPO,
+        state: "open" as const,
+        projectStatus: "Ready",
+      })),
+      branchStatuses: [branchStatus()],
+    });
+
+    expect(screen.getByLabelText("未着手 3件")).toBeTruthy();
+    expect(screen.queryByLabelText(/着手中/)).toBeNull();
+    expect(screen.getByText("動きなし")).toBeTruthy();
+  });
 });
 
 describe("BranchFlowView の自動更新（#1767）", () => {

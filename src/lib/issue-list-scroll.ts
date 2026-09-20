@@ -101,6 +101,26 @@ export function computeCenteredIssueListScrollTop(
 }
 
 /**
+ * 行より上に積まれているもの（マージ待ちPull Requestの枠・「保留中N件」の行。#3165で
+ * `<ul>`の中へ移した）の高さが変わったときに、位置を保つためのscrollTopを求める。
+ *
+ * **復元は`scrollKey`ごとに1回しか走らないのに対し、マージ待ちPRはマウント後の取得で遅れて
+ * 届く。** 復元でscrollTopを決めた後に枠が先頭へ挿入されると、行だけが枠の高さぶん一斉に
+ * 下がって、戻ってきた位置が枠の高さぶんずれる。増えたぶんをそのままscrollTopへ足して打ち消す。
+ *
+ * **先頭（`scrollTop === 0`）では打ち消さない**——上に増えたものをそのまま見せるのが正しい。
+ * `previousAboveRowsHeight`が`null`（まだ測っていない）のときも動かさない。
+ */
+export function computeAboveRowsScrollTop(
+  scrollTop: number,
+  previousAboveRowsHeight: number | null,
+  aboveRowsHeight: number,
+): number {
+  if (previousAboveRowsHeight === null || scrollTop === 0) return scrollTop;
+  return Math.max(0, scrollTop + (aboveRowsHeight - previousAboveRowsHeight));
+}
+
+/**
  * 一覧の文脈（画面種別・ビュー・絞り込み条件）ごとにスクロール位置を分けるためのキーを作る。
  * 絞り込みを変えたら別の一覧として扱い、先頭から表示する。
  */
