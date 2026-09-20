@@ -123,11 +123,20 @@ session_state_step_file() {
 }
 
 # ステップを書く。**コードが同じなら「入った時刻」は据え置き、「最後に見た時刻」だけ進める。**
+#
+# 第3引数は「見た時刻」のepoch（省略時は現在）。**フックが書くClaude Codeは常に現在でよい**が、
+# 転記から拾うCodexは、ツールを呼んだ時刻（転記のレコードの時刻）を渡す。pollerが巡回した
+# 時刻で書くと、直前の`Stop`より後に見たことになり、終わったターンの作業が「いま走っている」
+# ように出る（`isSessionStepFresh`は`stepSeenAt`と`activityAt`の前後だけで見ている）。
 session_state_write_step() {
-  local session="$1" step="$2" file content previous now entered
+  local session="$1" step="$2" seen_at="${3:-}" file content previous now entered
   [[ -n "$step" ]] || return 1
   file="$(session_state_step_file "$session")" || return 1
-  now="$(date +%s)"
+  if [[ "$seen_at" =~ ^[0-9]+$ ]]; then
+    now="$seen_at"
+  else
+    now="$(date +%s)"
+  fi
   entered="$now"
   previous="$(session_state_read_step "$session" 2>/dev/null || true)"
   if [[ "$previous" =~ ^([0-9]+)[[:space:]]+([A-Z_]+)([[:space:]]|$) ]] &&

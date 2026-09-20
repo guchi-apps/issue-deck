@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const decideSessionPlanRequest = vi.fn();
 const resolveSessionPlanCheckUser = vi.fn();
+const advanceSessionPlanProgress = vi.fn();
 const createComment = vi.fn();
 const getCurrentUser = vi.fn();
 
@@ -26,6 +27,12 @@ vi.mock("@/lib/dispatch/plan-requests", () => ({
 vi.mock("@/lib/dispatch/session-plan", () => ({
   get resolveSessionPlanCheckUser() {
     return resolveSessionPlanCheckUser;
+  },
+}));
+
+vi.mock("@/lib/dispatch/session-plan-progress", () => ({
+  get advanceSessionPlanProgress() {
+    return advanceSessionPlanProgress;
   },
 }));
 
@@ -55,6 +62,7 @@ beforeEach(() => {
   getCurrentUser.mockResolvedValue({ id: "user-1", githubLogin: "m-guchi" });
   decideSessionPlanRequest.mockResolvedValue({ ok: true, request });
   resolveSessionPlanCheckUser.mockResolvedValue(true);
+  advanceSessionPlanProgress.mockResolvedValue(true);
   createComment.mockResolvedValue({});
 });
 
@@ -104,6 +112,33 @@ describe("POST /api/dispatch/plan-decision", () => {
   // ラベルを外せなくても返事はもうDBに入っている。失敗を返すと押し直すことになる
   it("ラベルを外せなくても200で返す", async () => {
     resolveSessionPlanCheckUser.mockResolvedValue(false);
+    const res = await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    expect(res.status).toBe(200);
+  });
+
+  /**
+   * #3213。ローカルセッションには承認を受けて進捗を進める経路が無く、承認しても「計画」の
+   * まま次のPR作成まで動かなかった。
+   */
+  it("承認したら進捗を実装へ進める", async () => {
+    const res = await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    expect(res.status).toBe(200);
+    expect(advanceSessionPlanProgress).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2341,
+    });
+  });
+
+  it("修正・端末で答える場合、返事を保存できなかった場合は進捗を進めない", async () => {
+    await POST(postRequest({ id: "plan-1", decision: "revise", text: "直してください" }));
+    await POST(postRequest({ id: "plan-1", decision: "defer" }));
+    decideSessionPlanRequest.mockResolvedValue({ ok: false, rejection: "not_found" });
+    await POST(postRequest({ id: "plan-1", decision: "approve" }));
+    expect(advanceSessionPlanProgress).not.toHaveBeenCalled();
+  });
+
+  it("進捗を進められなくても200で返す", async () => {
+    advanceSessionPlanProgress.mockResolvedValue(false);
     const res = await POST(postRequest({ id: "plan-1", decision: "approve" }));
     expect(res.status).toBe(200);
   });

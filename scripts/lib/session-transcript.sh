@@ -5,6 +5,7 @@
 #
 #   scripts/inspect-session.sh        人が他セッションのやり取りを読むとき
 #   scripts/subpc-dispatch-poller.sh  APIエラーで中断したセッションを見つけるとき（#1971）
+#                                     Codexの作業ステップを`.step`へ起こすとき（#3213。lib/session-codex-step.sh）
 #
 # **転記を読むのはこの2つと `scripts/session-notify.sh` に留める**
 # （docs/multi-agent/session-inspect.md）。ここに依存した判定を他の仕組みへ広げない。

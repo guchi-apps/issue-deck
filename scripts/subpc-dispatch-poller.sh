@@ -193,6 +193,12 @@ source "$SCRIPT_DIR/lib/session-resume.sh"
 source "$SCRIPT_DIR/lib/session-tool-call-stall.sh"
 # shellcheck source=scripts/lib/session-codex-turn-stall.sh
 source "$SCRIPT_DIR/lib/session-codex-turn-stall.sh"
+# Codexのセッションの作業ステップを転記から`.step`へ書く（#3213）。Codexは`PostToolUse`フックを
+# 繋いでおらず、フックが書くはずの`.step`が空のままだった。分類は`lib/session-step.sh`。
+# shellcheck source=scripts/lib/session-step.sh
+source "$SCRIPT_DIR/lib/session-step.sh"
+# shellcheck source=scripts/lib/session-codex-step.sh
+source "$SCRIPT_DIR/lib/session-codex-step.sh"
 # Codexのセッションへの追加指示（#2519）。**`send-keys`を使わない**ので3段階プロトコルの
 # 外側に置いてある（`codex queue`はTUIのキー入力を経由しない）。
 # shellcheck source=scripts/lib/codex-queue.sh
@@ -2170,6 +2176,9 @@ report_sessions() {
 
     # owner/repo を戻せないセッションは送らない（他リポジトリ・曖昧な同名）。
     full_name="$(resolve_session_repository "$session_name" "$repo_name")" || continue
+
+    # Codexは作業ステップを転記から起こす（#3213）。**書けなくても報告は止めない**
+    session_codex_step_sync "$session_name" 2>/dev/null || true
 
     local dead_json status_json
     if [[ "$pane_dead" == "1" ]]; then dead_json=true; else dead_json=false; fi
