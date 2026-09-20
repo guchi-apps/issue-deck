@@ -185,7 +185,7 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
   });
 
-  it("Claudeのレビューが終わったPRはCI状態の隣にバッジを出す（#2150）", () => {
+  it("レビューが終わったPRはCI状態の隣にバッジを出す（#2150）", () => {
     renderDetail({
       pullRequest: makePullRequest({
         mergeJudgement: {
@@ -197,7 +197,7 @@ describe("PullRequestDetail", () => {
       }),
     });
     expect(screen.getByText("CI通過")).toBeTruthy();
-    expect(screen.getByText("Claudeのレビュー完了")).toBeTruthy();
+    expect(screen.getByText("レビュー完了")).toBeTruthy();
   });
 
   // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
@@ -212,7 +212,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
-    expect(screen.getByText("Claudeのレビュー省略")).toBeTruthy();
+    expect(screen.getByText("レビュー省略")).toBeTruthy();
   });
 
   it("レビューのcheck-runが無いPRにはバッジを出さない（#2150）", () => {
