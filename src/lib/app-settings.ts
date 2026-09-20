@@ -245,7 +245,7 @@ export function parseCodexModel(value: unknown): CodexModel | null {
 
 /**
  * 「実装を開始」ダイアログで選べるCodexのモデル（#3192）。**重い順。**
- * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ4つ。
+ * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ4つ（Astra・Sol・Terra・Luna）。
  *
  * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。どのモデルで立つか分からない
  * 方式は、Claude側で選択肢から外したのと同じ理由（#2776）で選ばせない。設定
