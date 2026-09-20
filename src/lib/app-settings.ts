@@ -225,7 +225,8 @@ export function parseClaudeLocalModelSetting(value: unknown): ClaudeLocalModelSe
 // Codex CLI起動時の`-m`へ渡す候補（#2550）。"auto"は`-m`を付与しない特別な値。
 export const CODEX_MODEL_OPTIONS = [
   { value: "auto", label: "Codexに任せる" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（最高精度）" },
+  { value: "gpt-6-astra", label: "GPT-6 Astra（最高精度）" },
+  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（高精度）" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },
   { value: "gpt-5.5", label: "GPT-5.5（旧世代）" },
@@ -244,14 +245,19 @@ export function parseCodexModel(value: unknown): CodexModel | null {
 
 /**
  * 「実装を開始」ダイアログで選べるCodexのモデル（#3192）。**重い順。**
- * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ3つ。
+ * 「おまかせ」の判定候補（`lib/claude/model-pick.ts`）も同じ4つ（Astra・Sol・Terra・Luna）。
  *
  * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。どのモデルで立つか分からない
  * 方式は、Claude側で選択肢から外したのと同じ理由（#2776）で選ばせない。設定
  * （`AppSetting.codexModel`）には従来どおり残り、ダイアログを経由しない起動が読む。
  * 値は`CODEX_MODEL_OPTIONS`の部分集合なので、選んだものはそのまま`-m`へ渡せる。
  */
-export const CODEX_LOCAL_MODEL_VALUES = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
+export const CODEX_LOCAL_MODEL_VALUES = [
+  "gpt-6-astra",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
 
 export type CodexLocalModel = (typeof CODEX_LOCAL_MODEL_VALUES)[number];
 
@@ -266,6 +272,7 @@ export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {
 /** 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前 */
 export const CODEX_MODEL_SHORT_LABELS: Readonly<Record<CodexModel, string>> = {
   auto: "CLIの既定",
+  "gpt-6-astra": "Astra",
   "gpt-5.6-sol": "Sol",
   "gpt-5.6-terra": "Terra",
   "gpt-5.6-luna": "Luna",
@@ -279,7 +286,8 @@ export function describeCodexModel(model: CodexModel): string {
 
 /** モデルごとの「向いている作業」（`CLAUDE_MODEL_FIT_LABELS`と同じ位置づけ。チップの2行目） */
 export const CODEX_MODEL_FIT_LABELS: Readonly<Record<CodexLocalModel, string>> = {
-  "gpt-5.6-sol": "難しい調査・設計から",
+  "gpt-6-astra": "未知の調査・設計から",
+  "gpt-5.6-sol": "難しい調査・実装",
   "gpt-5.6-terra": "仕様が決まった実装",
   "gpt-5.6-luna": "文言修正・定型作業",
 };

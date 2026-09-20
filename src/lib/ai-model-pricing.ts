@@ -42,6 +42,7 @@ export const MODEL_RATES: Readonly<Record<string, ModelRate>> = {
   "claude-sonnet-4-6": { input: 3.0, output: 15.0, cacheRead: 0.3 },
   "claude-sonnet-4-5": { input: 3.0, output: 15.0, cacheRead: 0.3 },
   "claude-haiku-4-5": { input: 1.0, output: 5.0, cacheRead: 0.1 },
+  "gpt-6-astra": { input: 10.0, output: 50.0, cacheRead: 1.0 },
   "gpt-5.6-sol": { input: 4.0, output: 20.0, cacheRead: 0.4 },
   "gpt-5.6-terra": { input: 2.0, output: 12.0, cacheRead: 0.2 },
   "gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02 },

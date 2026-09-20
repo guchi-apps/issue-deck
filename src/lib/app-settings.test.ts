@@ -150,6 +150,7 @@ describe("parseClaudeLocalModelSetting", () => {
 describe("parseCodexModel", () => {
   it("許可された値はそのまま返す", () => {
     expect(parseCodexModel("auto")).toBe("auto");
+    expect(parseCodexModel("gpt-6-astra")).toBe("gpt-6-astra");
     expect(parseCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(parseCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
     expect(parseCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
@@ -165,7 +166,8 @@ describe("parseCodexModel", () => {
 
 // #3192。ダイアログ・ジョブ・APIの`model`（Codex）。旧世代・`auto`・おまかせは通さない
 describe("parseCodexLocalModel", () => {
-  it("Sol・Terra・Lunaを通す", () => {
+  it("Astra・Sol・Terra・Lunaを通す", () => {
+    expect(parseCodexLocalModel("gpt-6-astra")).toBe("gpt-6-astra");
     expect(parseCodexLocalModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(parseCodexLocalModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
     expect(parseCodexLocalModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
@@ -198,8 +200,9 @@ describe("parseCodexModelSetting", () => {
 });
 
 describe("resolveCodexInitialModel", () => {
-  it("おまかせと、選べる3つはそのまま", () => {
+  it("おまかせと、選べる4つはそのまま", () => {
     expect(resolveCodexInitialModel("pick")).toBe("pick");
+    expect(resolveCodexInitialModel("gpt-6-astra")).toBe("gpt-6-astra");
     expect(resolveCodexInitialModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(resolveCodexInitialModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
   });

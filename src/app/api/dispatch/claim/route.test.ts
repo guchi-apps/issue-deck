@@ -166,7 +166,7 @@ describe("POST /api/dispatch/claim", () => {
   // 差し替えて届ける
   it("ジョブにCodexのモデルの指定があれば、設定の既定より優先して払い出す", async () => {
     claimDispatchJobs.mockResolvedValue([
-      { id: "job-1", agent: "codex", codexModel: "gpt-5.6-sol" },
+      { id: "job-1", agent: "codex", codexModel: "gpt-6-astra" },
       { id: "job-2", agent: "codex", codexModel: null },
     ]);
     appSettingFindUnique.mockResolvedValue({
@@ -178,7 +178,7 @@ describe("POST /api/dispatch/claim", () => {
 
     const body = await res.json();
     expect(body.jobs.map((job: { codexModel: string }) => job.codexModel)).toEqual([
-      "gpt-5.6-sol",
+      "gpt-6-astra",
       "gpt-5.5",
     ]);
   });

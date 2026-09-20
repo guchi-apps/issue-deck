@@ -408,7 +408,7 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 **選択欄が出るのはサブPCを選んだときだけ**（Claude Code・Codexのどちらでも。#3192）。
 GitHub Actionsは`reusable-issue-dispatch.yml`が設定を全体で読む別経路で、ジョブに積んだ値は
 届かない（Issueごとに変えるならラベルの新設と全リポジトリへの配布が要る）。Codexを選ぶと欄の
-中身がおまかせ・Sol・Terra・Lunaへ切り替わり、選んだ値は`DispatchJob.codexModel`に入る
+中身がおまかせ・Astra・Sol・Terra・Lunaへ切り替わり、選んだ値は`DispatchJob.codexModel`に入る
 （設計は[codex.md](codex.md)「モデルは起動ごとに選べる」）。
 
 **全体の既定ではなく起動ごとの選択にしたのは、割高さが対話の長さで変わるから。**

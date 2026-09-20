@@ -647,7 +647,7 @@ codex_session_usage_aggregate() {
   script="$(cat <<'PY'
 import json, os, re, sys
 
-PRICES={"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
+PRICES={"gpt-6-astra":(10,1,50),"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
 # キャッシュ書き込みの倍率。CodexはTTLの内訳を持たないので、Claude側の5分TTLと同じ1.25倍で数える。
 CACHE_WRITE_5M=1.25
 WORKTREE=re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
