@@ -11,6 +11,14 @@ describe("resolveModelRate", () => {
     });
   });
 
+  it("GPT-6 Astraの単価を返す", () => {
+    expect(resolveModelRate("gpt-6-astra")).toEqual({
+      input: 10.0,
+      output: 50.0,
+      cacheRead: 1.0,
+    });
+  });
+
   it("日付サフィックス付きは前方一致で拾う", () => {
     expect(resolveModelRate("claude-haiku-4-5-20251001")).toEqual({
       input: 1.0,

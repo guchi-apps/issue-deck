@@ -125,6 +125,10 @@ describe("buildModelPickPrompt", () => {
 // #3192。Codexの「おまかせ」。判定を行うのはどちらもアプリ内AIで、変わるのは候補・プロンプト・ルール
 describe("Codexの候補（#3192）", () => {
   it("Codexの応答からはCodexの候補だけを採る", () => {
+    expect(parseModelPick('{"model":"gpt-6-astra","reason":"設計が必要なためです。"}', "codex")).toEqual({
+      model: "gpt-6-astra",
+      reason: "設計が必要なためです。",
+    });
     expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
       model: "gpt-5.6-sol",
       reason: "調査が要るためです。",
@@ -146,6 +150,7 @@ describe("Codexの候補（#3192）", () => {
   it("プロンプトはCodex CLIとCodexの候補を案内する", () => {
     const prompt = buildModelPickPrompt(input(), "codex");
     expect(prompt).toContain("Codex CLI");
+    expect(prompt).toContain("gpt-6-astra");
     expect(prompt).toContain("gpt-5.6-sol");
     expect(prompt).toContain("gpt-5.6-terra");
     expect(prompt).toContain("gpt-5.6-luna");
@@ -223,6 +228,7 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
   it("Codexの選択肢はCodexのモデル名にする", () => {
     const questions = buildModelPickQuestions("codex");
     expect(Object.keys((questions.model as { criteria: Record<string, unknown> }).criteria)).toEqual([
+      "gpt-6-astra",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
       "gpt-5.6-luna",

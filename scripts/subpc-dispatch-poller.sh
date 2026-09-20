@@ -3451,7 +3451,7 @@ run_job() {
       ;;
   esac
   case "$codex_model" in
-    auto | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna | gpt-5.5 | gpt-5.4) ;;
+    auto | gpt-6-astra | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna | gpt-5.5 | gpt-5.4) ;;
     *)
       report_job "$job_id" failed "受け取ったCodexモデルが不正です: $codex_model"
       return 0
