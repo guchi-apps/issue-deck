@@ -266,14 +266,18 @@ export function describeDispatchAgent(agent: DispatchAgent): string {
  *
  * **できるようになったものは消す**（#2551）。計画の承認・修正は#2545（`scripts/submit-plan.sh`）で
  * 画面へ出るようになり、前回の会話の引き継ぎは#2520（`codex resume <UUID>`）で動く。
+ * **質問への回答も#2579（`scripts/submit-question.sh`）で画面へ出るようになったので外した**（#3169）。
  * ここに古い制限が残っていると、動いていないのはそういう仕様だと読まれ、不具合が報告されない。
  */
 export const CODEX_LIMITATIONS = [
   "入力待ちのPush通知が飛びません（停止の通知は飛びます）",
-  "質問への回答は画面に出ません（Issueコメントで受け取ります）",
   // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
   // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
   "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
+  // 中断・停滞の検知はClaude Codeの転記（`~/.claude/projects`のJSONL）を読む実装で、Codexの
+  // 転記は見ていない（`scripts/lib/session-resume.sh`・`session-tool-call-stall.sh`）。
+  // 判定できないセッションは静かに見送られるため、止まっても誰も気づけない（#3169）
+  "止まったセッションの自動再開が効きません（気づけるのは停止の通知だけです）",
 ] as const;
 
 /**

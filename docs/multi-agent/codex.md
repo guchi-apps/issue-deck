@@ -66,7 +66,10 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 入力待ちの通知（Push通知） | ○（`Notification`フック） | **×**（同じイベントが無い。後述） |
 | 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | ○（`scripts/submit-plan.sh`。#2545） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | ○（`scripts/submit-question.sh`。#2579） |
-| アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール） |
+| AI使用量の集計（エージェント別・Issue別） | ○ | ○（#2535） |
+| AI使用量のフェーズ内訳（計画・調査・実装・検証・仕上げ） | ○ | ○（#3169。下の「フェーズの内訳も同じ5行へ割る」） |
+| 中断・停滞したセッションの自動再開 | ○ | **×**（Claude Codeの転記を読む実装で、Codexの転記は見ていない） |
+| アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール。`scripts/lib/codex-artifact.sh`で手動登録する） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
 | Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
@@ -656,7 +659,74 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 | 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |
 | 語の検証・表示名・選べるかの判定 | [`src/lib/dispatch/dispatch-job.ts`](../../src/lib/dispatch/dispatch-job.ts) |
 | 選択欄と注意の表示 | [`src/components/dashboard/start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx) |
+| 使用量の集計（転記の読み取り・フェーズの境界） | [`scripts/lib/session-usage.sh`](../../scripts/lib/session-usage.sh)の`codex_session_usage_aggregate` |
+| プラン枠の読み取り | [`scripts/lib/codex-usage.sh`](../../scripts/lib/codex-usage.sh)・[`src/lib/dispatch/codex-usage.ts`](../../src/lib/dispatch/codex-usage.ts) |
 | 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs)・[`scripts/codex-queue.test.mjs`](../../scripts/codex-queue.test.mjs) |
+
+## AI使用量はClaude Codeと同じ粒度で出す（#3169）
+
+画面の「AI使用量」は、エージェント別（Claude／Codex）・リポジトリ別・セッション種別別・Issue別の
+どれもCodexを数えている（#2535）。**揃っていなかったのは「セッション種別別」のフェーズの行だけ**で、
+Codexのセッションは実装の金額がまるごと「実装（フェーズ未集計）」の1行へ落ちていた。
+
+### フェーズの内訳も同じ5行へ割る
+
+`codex_session_usage_aggregate`（`scripts/lib/session-usage.sh`）がフェーズの境界を拾うようにした。
+**考え方はClaude側（`session_usage_aggregate`）と同じで、拾う場所だけが違う。** Codexのツール
+呼び出しは`exec`の1つしか無く、中身はJavaScriptのソースとして`input`に入っている。
+
+| 境目 | Claude Code | Codex |
+|---|---|---|
+| 計画 → 調査 | `ExitPlanMode` | `scripts/submit-plan.sh`の実行（#2545） |
+| 調査 → 実装 | `Edit`/`Write`/`MultiEdit`/`NotebookEdit`、またはBashでの書き込み | `tools.apply_patch(`、または`cmd`がBashでの書き込み |
+| 実装 → 仕上げ | 最初の`git commit` | 同じ（`cmd`を見る） |
+| 検証の印 | テスト・Lint・型チェック・ビルド・疎通確認 | 同じ（`cmd`を見る） |
+
+- **`BASH_WRITE`・`BASH_COMMIT`・`BASH_VERIFY`の正規表現は両方で同じものを持つ。片方だけ直さない。**
+  Codex側は`"cmd":"…"`をJSONとして解いてから当てる（`exec`のソースはJSの文字列なので、
+  素のソースへ当てると`\n`のようなエスケープを踏む）
+- **境は「次に来た応答の時刻」にする。** Codexの`custom_tool_call`は、その呼び出しを出した応答の
+  `token_count`より**前**の行に出る（Claudeは同じ応答の中の`tool_use`なので時刻が並ぶ）。
+  呼び出し自体の時刻を境に使うと、計画を出した応答が計画の外へ落ちる
+- **境を1つも拾えなかったセッションは、従来どおり区分なし（`null`）で送る。** 画面は
+  「実装（フェーズ未集計）」として合算だけを見せる。実測（サブPCの転記67本）では43本が割れた
+
+### 金額は累積値の差から積む
+
+`token_count`の`total_token_usage`は**累積値**で、`last_token_usage`（そのAPI呼び出しぶん）の合計と
+一致する。フェーズへ割るには応答ごとの金額が要るので、**前の値との差**を1応答ぶんとして積む。
+
+- **累積値は1本の転記の中で巻き戻る**（圧縮・枝分かれの後は0から数え直す）。以前のように最後の
+  累積値だけを読むと、巻き戻りより前の消費がまるごと落ちていた（実測で1セッションぶんの金額が
+  半分に出ていた）。下がった時点で基準を戻し、差を積んだものを合計にする
+- 差の合計を金額にしているので、**5つのフェーズの合計はセッションの金額とぴったり合う**
+  （画面のカードの合計が「従量課金相当」タイルと食い違わない）
+
+### Codexのプラン枠に5時間枠は無い
+
+Codexのカード（`codex-usage-card.tsx`）が週間枠しか出さないのは取りこぼしではない。転記の
+`rate_limits`を実機で確かめると、**プランによって返る枠が変わる**——`plus`は`primary`が5時間
+（`window_minutes: 300`）＋`secondary`が週間（`10080`）だが、いまの`prolite`は`primary`が週間だけで
+`secondary`は`null`。Claude側と同じ2段のメーターにはできないので、**高さだけを合わせた空の枠**を
+置いてある（#2666）。
+
+## 揃えられないものの決着（#3169）
+
+**比較表の`×`・`△`を1つずつ、「別Issueへ起票した」か「Codex側に仕組みが無く実現不可」かで決着させる。**
+Issueを跨いで同じ調査を繰り返さないための記録で、**実機（codex-cli 0.152.1）で確かめた事実だけを書く。**
+
+| 揃っていないもの | 決着 | 根拠 |
+|---|---|---|
+| 中断・停滞したセッションの自動再開 | **#3174へ起票** | 検知はClaude Codeの転記を読む実装で、Codexの転記は見ていない（上の「まだやっていないこと」） |
+| 入力待ちのPush通知 | **実現不可** | Codexに`Notification`に当たるイベントが無い。フックの一覧にあるのは`PreToolUse`・`PermissionRequest`・`PostToolUse`・`Pre/PostCompact`・`SessionStart`・`SessionEnd`・`Subagent*`・`UserPromptSubmit`・`Interrupt`・`Stop`で、承認待ちに当たる`PermissionRequest`は`--ask-for-approval never`では発火しない |
+| Remote ControlのIssueごとのリンク | **実現不可** | `codex remote-control pair`が返すのは10分で切れる`XXXX-XXXX`のペアリングコードだけで、URLを出さない。`serverName`はホスト名なので、繋がる単位はホスト（#2524）。代わりに繋いだ先で見分けられるよう、セッション名を`<リポジトリ名> #<番号>`へ揃えてある（#2540） |
+| 質問・計画をアプリ側で受け取るトグル（`answerInApp`・#2822） | **実現不可** | 上と同じ理由で、切り替えた先（Claude Codeアプリに当たる出口）が無い。ONにすると画面からもアプリからも答えられない質問ができるため、受け口が断る（`session-answer-mode.ts`） |
+| アーティファクトの自動取り込み | **実現不可** | `Artifact`はClaude Code固有のツールで、フックで拾う相手がいない。`scripts/lib/codex-artifact.sh`で同じカードへ登録する（#2597） |
+| ディレクトリの信頼確認がIssueごとに出る | **実現不可（方針）** | 自動で答えない（[session-notify.md](session-notify.md)「信頼確認そのものは自動化しない」）。答えていないことは画面の「まだ開始していません」で分かる |
+| 無人実行（GitHub Actions） | **人の判断待ち** | `OPENAI_API_KEY`のSecrets追加と課金の判断が要る。決まるまで起票しない |
+
+**揃っているものは表に出さない。** AI使用量の集計・セッション種別のバッジ・計画の承認・質問への回答・
+追加指示・前回の会話の引き継ぎは、いずれも画面から同じように使える（上の比較表）。
 
 ## まだやっていないこと
 
@@ -668,8 +738,10 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 - **契約適合の他リポジトリ（自前の`scripts/start-issue.sh`を持つもの）は`ISSUE_DECK_AGENT`を
   読まない。** 揃えるまでは受け口が止める。**汎用ランチャーで起こすリポジトリは#2590で対応済み**
   （むしろ`start-issue.sh`を持たない側が先に使えるようになった）
-- **質問の受け答えは画面へ出せていない**（#2509）。計画は#2545で専用コマンドから既存パネルへ
-  出せるようにしたが、Codexに`AskUserQuestion`に当たる安定したツールは無い
+- **中断・停滞したセッションの自動再開が効かない**（#3169）。`scripts/lib/session-resume.sh`・
+  `session-tool-call-stall.sh`が読むのは`~/.claude/projects`のJSONLと`~/.claude/sessions/<pid>.json`
+  で、Codexのセッションはそこに何も書かない。`session_transcript_path`が引けないセッションは
+  静かに見送られる（誤検知はしないが、止まっても画面にも通知にも出ない）
 - **ディレクトリの信頼確認はIssueごとに1回出る。** Claude Codeのように本体チェックアウトへ
   記録されないため、worktreeを作るたびに人が答える必要がある。答えるまで止まっていることは
   画面に出る（「まだ開始していません」）
