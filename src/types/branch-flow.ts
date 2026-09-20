@@ -415,8 +415,8 @@ export type BranchFlowRepositorySummary = {
    */
   releaseMergeTarget: ReleaseMergeTarget | null;
   /**
-   * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に破線の丸の
-   * アイコンと数字だけで出す（#1886。言葉は`title`と`aria-label`が持つ）。
+   * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に再生マークの丸の
+   * アイコンと数字だけで出す（#1886・#3163。言葉は`title`と`aria-label`が持つ）。
    *
    * **`activeLaneCount`（進行中）と足し合わせて「いま動いている総数」になる。** ブランチが
    * 上がったIssueはレーンとして数えられているため、こちらからは外してある。
@@ -425,6 +425,22 @@ export type BranchFlowRepositorySummary = {
    * 開かずに走っている本数だけ分かればよい、というのがこの数字の役目。
    */
   startedIssueCount: number;
+  /**
+   * 未着手（`Ready`）のopen Issueの件数（#3163）。畳んだ1行に破線の丸のアイコンと数字だけを、
+   * **着手中より薄い色**で出す。保留にしているIssueも含むため、すぐ動くとは限らない数として
+   * 目立たせない。
+   *
+   * **着手中（`startedIssueCount`）へは足さない。** #2386で「いま何本走っているか」を読めるよう
+   * `ready`を外した経緯があり、別の数字として並べる。**Project Statusが無いIssueは数えない**
+   * （`resolveProgressStatus`は未登録を一律`ready`とみなすため、盤面へ載っていないリポジトリの
+   * バックログ全件が並んでしまう）。サブPCへ積んだ直後のIssue（`dispatchPendingAt`）と、質問・
+   * レビューIssueも数えない（左メニューの「未着手」ビューと同じ線）。`00.check-user`が付いた
+   * 保留のIssueは意図して含める。
+   *
+   * **手が要るものではない**ので、`needsAttention`には加えず、`hasAnything`（「動きなし」の判定）
+   * にも入れない。
+   */
+  readyIssueCount: number;
   /**
    * 直近のリリースの本番デプロイの状態（#1579）。畳んだ1行に「デプロイ中」「デプロイ失敗」を
    * 出すために持つ。**mainへマージした後もここが動いている間はまだ本番へ出ていない。**
