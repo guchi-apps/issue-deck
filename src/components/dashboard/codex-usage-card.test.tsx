@@ -80,6 +80,27 @@ describe("CodexUsageCard", () => {
     expect(screen.queryByText(/サブPCの転記/)).toBeNull();
   });
 
+  it("週間枠の前に高さ合わせ用の空の枠を置かない（#3195）", () => {
+    const { container } = render(
+      <CodexUsageCard
+        data={{
+          host: "subpc",
+          source: "ops-dashboard",
+          planType: "plus",
+          fetchedAt: Date.parse("2026-08-30T06:00:00Z"),
+          stale: false,
+          windows: [
+            { key: "secondary", label: "週間", usedPercent: 7, remainingPercent: 93, resetsAt: 1788663600, durationMs: 604_800_000, expired: false },
+          ],
+        }}
+        isLoading={false}
+        error={null}
+        notConfigured={false}
+      />,
+    );
+    expect(container.querySelectorAll("li")).toHaveLength(1);
+  });
+
   it("未報告を説明する", () => {
     render(<CodexUsageCard data={null} isLoading={false} error={null} notConfigured />);
     expect(screen.getByText("Codex使用量の報告がまだありません")).toBeTruthy();

@@ -87,4 +87,25 @@ describe("ClaudeUsageCard", () => {
     render1(usage(), null);
     expect(screen.queryByText(/実測換算/)).toBeNull();
   });
+
+  it("週間枠を5時間枠より先に表示する（#3195）", () => {
+    render1({
+      ...usage(),
+      windows: [
+        usage().windows[0],
+        {
+          key: "7d",
+          label: "週間",
+          usedPercent: 80,
+          remainingPercent: 20,
+          resetsAt: (NOW_MS + 24 * 60 * 60_000) / 1000,
+          status: "allowed",
+          durationMs: 7 * 24 * 60 * 60_000,
+        },
+      ],
+    });
+
+    const labels = screen.getAllByRole("meter").map((meter) => meter.getAttribute("aria-label"));
+    expect(labels).toEqual(["週間の使用量", "5時間の使用量"]);
+  });
 });
