@@ -60,9 +60,14 @@ session_resume_transcript_interrupted() {
   local transcript="$1" last
   [[ -f "$transcript" ]] || return 1
   last="$(tail -c "$SESSION_RESUME_TAIL_BYTES" "$transcript" 2>/dev/null |
-    grep -E '"type":"(assistant|user|queue-operation)"' | tail -1 || true)"
+    grep -E '"type":"(assistant|user|queue-operation)|"type":"(event_msg|response_item)"' | tail -1 || true)"
   [[ -n "$last" ]] || return 1
-  printf '%s' "$last" | grep -q '"isApiErrorMessage":true'
+  if printf '%s' "$last" | grep -q '"isApiErrorMessage":true'; then
+    return 0
+  fi
+  # Codexのエラーは`event_msg`の`task_complete`へ`error`として保存される。通常の
+  # `task_complete`、またはその後にユーザー入力がある転記は上のlast判定で除外される（#3178）。
+  printf '%s' "$last" | grep -qE '"type":"event_msg".*"type":"task_complete".*"error":'
 }
 
 # 転記が最後に書かれてから経った秒数。読めなければ非0で返る。

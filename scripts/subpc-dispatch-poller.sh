@@ -2491,7 +2491,11 @@ notify_session_interrupted() {
   local session="$1" repo_name="$2" issue_number="$3" full_name="$4" detail="$5" reason="${6:-api_error}"
   local session_id hook_json
   [[ -x "$NOTIFY_SCRIPT" ]] || return 0
-  session_id="$(session_transcript_record_field "$session" sessionId 2>/dev/null || true)"
+  if [[ "$(session_state_agent_kind "$session")" == "codex" ]]; then
+    session_id="$(session_state_read_codex_thread "$session" 2>/dev/null || true)"
+  else
+    session_id="$(session_transcript_record_field "$session" sessionId 2>/dev/null || true)"
+  fi
   hook_json="$(jq -nc --arg id "$session_id" --arg detail "$detail" --arg reason "$reason" \
     '{hook_event_name: "SessionInterrupted", session_id: $id, interrupt_detail: $detail, interrupt_reason: $reason}')" || return 0
   printf '%s' "$hook_json" |
