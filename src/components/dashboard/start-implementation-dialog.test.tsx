@@ -741,8 +741,10 @@ describe("StartImplementationDialog", () => {
 
       await waitFor(() => expect(screen.getByText("Jev")).toBeTruthy());
       expect(screen.getByText(/確信度 82%/)).toBeTruthy();
-      expect(screen.getByText("15%")).toBeTruthy();
-      expect(screen.getByText("3%")).toBeTruthy();
+      // #3231。確率は下部の一覧ではなく、対応する各モデルのカード内に置く。
+      expect(within(screen.getByRole("radio", { name: /^Opus/ })).getByText("82%")).toBeTruthy();
+      expect(within(screen.getByRole("radio", { name: /^Sonnet/ })).getByText("15%")).toBeTruthy();
+      expect(within(screen.getByRole("radio", { name: /^Fable/ })).getByText("3%")).toBeTruthy();
     });
 
     // アプリ内AI・ルールの判定は確率を返さないので、確率の行ごと出さない
