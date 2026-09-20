@@ -100,6 +100,8 @@ export function toPullRequestSummary(
     mergedAt: pullRequest.merged_at,
     baseRef,
     headRef,
+    // 判定の鮮度（#3172）を出すために持つ。本文と同じく、この層まで来ているものを渡すだけ
+    headSha: pullRequest.head.sha,
     kind: classifyPullRequest({ baseRef, headRef }),
     linkedIssueNumber: linkedIssueNumbers[0] ?? null,
     linkedIssueNumbers,

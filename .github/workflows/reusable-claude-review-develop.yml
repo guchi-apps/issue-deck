@@ -1108,6 +1108,12 @@ jobs:
             fi
             echo "- ユーザーの確認: ${CONFIRM_TEXT}"
             echo
+            # 「いつの中身に対する判定か」の記録（#3172）。画面はこれをPRのheadと突き合わせ、
+            # 修正コミットを積んだ後に古い判定をそのまま出さないようにする。
+            # **開始マーカーの属性にはしない**——`review=`・`risk=`の直後が`-->`である前提で
+            # 読んでいる版が本番に出ているあいだ、節ごと「記録なし」に倒れるため（画面が
+            # リリースされるまで要修正PRのマージ警告が消える）。別行なら古い読み手は読み飛ばす
+            echo "<!-- issue-deck-verification:sha=${HEAD_SHA} -->"
             echo "<sub>この節は\`claude-review-develop.yml\`が自動で更新します（#2448）。判定の根拠はこのPRのレビューコメントにあります。</sub>"
             echo "<!-- issue-deck-verification:end -->"
           } > "$TMP/verification-section.md"

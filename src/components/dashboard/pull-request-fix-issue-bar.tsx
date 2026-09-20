@@ -5,6 +5,7 @@ import { AlertCircle, Loader2, Pencil, Plus } from "lucide-react";
 
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestFixSessionDialog } from "@/components/dashboard/pull-request-fix-session-dialog";
+import { ReviewVerdictFreshnessNote } from "@/components/dashboard/review-verdict";
 import { Button } from "@/components/ui/button";
 import { prFixRequestActionLabel, type PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import {
@@ -15,7 +16,12 @@ import {
   type PullRequestFixIssueDraft,
   type PullRequestFixRoute,
 } from "@/lib/github/pull-request-fix-issue";
-import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
+import {
+  selectPullRequestReviewComment,
+  type PullRequestReviewCommentContent,
+} from "@/lib/github/pull-request-review-comment";
+import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import { isMergeJudgementPending } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type { PullRequestEvent, PullRequestSummary } from "@/types/pull-request";
 
@@ -87,9 +93,26 @@ export function PullRequestFixIssueBar({
   const openChangeRequests = selectOpenChangeRequests(events);
   const tone = resolvePullRequestFixIssueTone(pullRequest, openChangeRequests);
   const verdictKind = pullRequest.reviewVerdict?.reviewKind;
+
+  // 判定時点のコミット（#3172）。PR本文のマーカーを先に見て、無ければ**この画面が既に
+  // 持っているレビューコメント**のマーカーで補う（`sha=`をPR本文へ書き始める前のPRと、
+  // 本文にしか判定を書かないローカルのレビュー・統合セッションのPRが読めるようになる）。
+  // どちらも取得済みの材料なので、GitHub APIの消費は増えない。
+  const reviewedSha =
+    pullRequest.reviewVerdict?.reviewedSha ??
+    selectPullRequestReviewComment(
+      events.map((event) => ({ body: event.body, createdAt: event.createdAt, htmlUrl: null })),
+      pullRequest.headSha,
+    )?.reviewedSha ??
+    null;
+  const freshness = resolveReviewVerdictFreshness({ reviewedSha, headSha: pullRequest.headSha });
+
   const headline =
     verdictKind === "changes-requested" || verdictKind === "needs-check"
-      ? `自動レビューが「${pullRequest.reviewVerdict?.reviewLabel}」と判定しています`
+      ? `自動レビューが「${pullRequest.reviewVerdict?.reviewLabel}」と判定して${
+          // 判定の後にコミットが積まれているときは時制で先に言う。詳しい突き合わせは下の1行
+          freshness === "stale" ? "いました" : "います"
+        }`
       : "レビューで変更を求められています";
   const buttonLabel = route.kind === "create-issue" ? "修正Issueを起案" : prFixRequestActionLabel(route);
 
@@ -188,6 +211,15 @@ export function PullRequestFixIssueBar({
             </span>
           )}
         </p>
+        {/* 「いまの中身に対する判定か」を、指摘そのものより先に言う（#3172）。修正コミットを
+            積んだ後も同じ帯が残るため、これが無いと修正前の話なのかが読み取れない */}
+        <ReviewVerdictFreshnessNote
+          className="mt-1"
+          freshness={freshness}
+          reviewedSha={reviewedSha}
+          headSha={pullRequest.headSha}
+          isReviewing={isMergeJudgementPending(pullRequest.mergeJudgement)}
+        />
         <p className="mt-0.5 text-xs text-muted-foreground">
           {route.kind === "create-issue"
             ? "指摘を引用した新しいIssueの下書きを開きます。この画面からは起票しません。"

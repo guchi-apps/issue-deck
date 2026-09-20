@@ -43,6 +43,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
   return {
     ciRunId: null,
     ciChecks: [],
+    headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     id: `${REPO}#${overrides.number ?? 1}`,
     repositoryFullName: REPO,
     repositoryPrivate: false,
@@ -151,6 +152,7 @@ describe("buildBranchFlow", () => {
       state: "closed",
       merged: true,
       headRef: "issue-1400",
+      headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
       linkedIssueNumber: 1400,
     });
 

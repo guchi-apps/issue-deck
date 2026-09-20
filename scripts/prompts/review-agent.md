@@ -80,6 +80,13 @@
      | `none` | `該当なし` |
      | `hit` | `⚠️ 該当あり: <止めた理由>` |
 
+   - **節の中へ、レビューしたときのheadコミットを1行残す**（#3172。
+     `gh pr view <PR番号> --json headRefOid --jq .headRefOid`）。画面はこれをPRの最新コミットと
+     突き合わせ、修正コミットが積まれた後に「要修正」をそのまま出さず「この判定の後にコミットが
+     積まれています」と添える。**開始マーカーの属性にはしない**（`review=`・`risk=`しか想定して
+     いない読み手が黙って節ごと読み飛ばすため）。**省いても壊れない**が、その場合は判定の鮮度が
+     出ないままになる
+
    ````
    <!-- issue-deck-verification:start review=lgtm risk=none -->
    ## 検証結果
@@ -87,6 +94,8 @@
    - 自動レビュー: ✅ 問題なし（LGTM）
    - 機械的リスク判定: 該当なし
    - ユーザーの確認: 不要
+
+   <!-- issue-deck-verification:sha=<レビューしたときのhead SHA> -->
    <!-- issue-deck-verification:end -->
    ````
 

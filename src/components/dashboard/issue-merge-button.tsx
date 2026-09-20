@@ -52,6 +52,11 @@ type IssueMergeButtonProps = {
    * PR画面のマージ確認と同じものを出し、Issue画面から押すときだけ判定が見えないのを無くす。
    */
   reviewVerdict?: PullRequestReviewVerdict | null;
+  /**
+   * 対応PRの最新コミット（#3172）。判定の鮮度を出すために確認ダイアログへ渡す。
+   * 取得前はnullで、そのときは従来どおり判定だけを出す。
+   */
+  headSha?: string | null;
   /** 対応PRのURL。レビューコメントを読みに行く導線に使う */
   pullRequestUrl?: string;
   /** 対応PRの最新コミットのCI状態。実行中はマージさせない */
@@ -106,6 +111,7 @@ export function IssueMergeButton({
   onDeclined,
   pullRequestNumber,
   reviewVerdict,
+  headSha,
   pullRequestUrl,
   ciStatus,
   mergeJudgement,
@@ -197,7 +203,12 @@ export function IssueMergeButton({
               マージコミットでdevelopへマージします。この操作は取り消せません。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <PullRequestMergeReview verdict={reviewVerdict ?? null} htmlUrl={pullRequestUrl} />
+          <PullRequestMergeReview
+            verdict={reviewVerdict ?? null}
+            htmlUrl={pullRequestUrl}
+            headSha={headSha ?? null}
+            isReviewing={judgementPending}
+          />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={confirmMerge} disabled={busy}>

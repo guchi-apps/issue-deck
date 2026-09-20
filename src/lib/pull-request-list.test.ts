@@ -43,6 +43,7 @@ function pullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSu
     mergedAt: null,
     baseRef: "develop",
     headRef: "issue-1",
+    headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     kind: "issue",
     linkedIssueNumber: 1,
     linkedIssueNumbers: [],
@@ -681,6 +682,7 @@ function reviewVerdict(
     riskLabel: "該当なし",
     riskReasons: [],
     confirmLabel: null,
+    reviewedSha: null,
   };
 }
 
@@ -736,6 +738,20 @@ describe("mergeWarnings", () => {
     expect(
       mergeWarnings(pullRequest({ reviewVerdict: reviewVerdict("needs-check", "要確認") })),
     ).toEqual(["自動レビューが「要確認」と判定しています。"]);
+  });
+
+  it("判定の後にコミットが積まれていれば、警告の時制も変える（#3172）", () => {
+    const stale = pullRequest({
+      reviewVerdict: {
+        ...reviewVerdict("changes-requested", "要修正"),
+        reviewedSha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+      },
+      headSha: "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432",
+    });
+
+    expect(mergeWarnings(stale)).toEqual([
+      "自動レビューが「要修正」と判定していました（この判定の後にコミットが積まれています）。",
+    ]);
   });
 
   it("問題なし・実施なし・記録なしでは確認を挟まない（本当の指摘が埋もれる）", () => {
