@@ -77,6 +77,19 @@ const TOOL_CALL_STALL_BODY =
   "直前の応答はツール呼び出し風のテキストを出力しただけで、実際にはツールは呼ばれていません。バックグラウンドで動いているものは何もありません。もう一度、実際にツールを呼び出して進めてください。";
 
 /**
+ * Codexのターンが閉じないまま止まったときの復旧文面（#3174）。
+ *
+ * **pollerが自動で送るものと同じ1行**（`scripts/lib/session-codex-turn-stall.sh`の
+ * `SESSION_CODEX_TURN_STALL_BODY`）。片方だけ書き換えると、自動で送ったものと人が押して
+ * 送ったもので文面が食い違い、どちらが効いたのかを後から追えなくなる。
+ *
+ * 送り先がCodexなので、送出は`send-keys`ではなく`codex queue`を通る（`lib/codex-queue.sh`）。
+ * **押す人から見た手触りは他の原因と同じ**で、違うのは中で使う経路だけ。
+ */
+const TURN_STALL_BODY =
+  "直前のターンが完了しないまま中断しています。中断したところから作業を続けてください。";
+
+/**
  * 原因ごとの文面（#2886）。**ここだけが文面の正**で、画面もAPIもここから引く。
  *
  * `classifier_blocked`に「これを送れば直る」文面が無いのは、拒否そのものが妥当な挙動だから
@@ -105,6 +118,16 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
     presets: [
       { label: "ツールが呼ばれていないと伝えて送る", body: TOOL_CALL_STALL_BODY },
     ],
+  },
+  turn_stall: {
+    reason: "turn_stall",
+    title: "ターンが完了しないまま止まっています",
+    detail: [
+      "Codexのセッションが、ターンの開始（`task_started`）だけを転記へ書いたまま、完了（`task_complete`）も中断（`turn_aborted`）も書かずに止まっています。tmuxの中では生きているため、画面からは「実行中」にしか見えません。",
+      "サブPCのpollerが固定の1行を上限回数まで`codex queue`で送りましたが、復帰しませんでした（#3174）。同じ1行をここから送り直せます。",
+      "送っても変わらない場合、Codex自体が応答しなくなっている可能性があります（`codex queue`が`No active session found`で失敗します）。端末から見て、駄目なら起こし直してください。",
+    ],
+    presets: [{ label: "中断したところから続けるよう送る", body: TURN_STALL_BODY }],
   },
   classifier_blocked: {
     reason: "classifier_blocked",

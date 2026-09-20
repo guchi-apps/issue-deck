@@ -202,6 +202,7 @@ PRを拾い、オープンで`Develop PR`＋`00.check-user`・`01.check-merge`�
 | すでに実装済み・対応不要と判断して停止した | `.github/prompts/implement.md`・`plan.md`が根拠付きの報告コメントとあわせて付与（#1601） | 端末でユーザーに確認するため、質問と同じ経路で付く（フックが`01.check-input`を付ける）。判断の根拠はIssueコメントにも残す |
 | Claude Codeが起動確認（フォルダの信頼確認）で止まった | 該当なし（無人実行はセッションを持たない） | pollerの報告を受けて`escalateNotStartedSession`が付与（#1465。**フックが1つも飛ばない状態なので、ホスト側の印ではなくpollerの計器で判定する**） |
 | APIエラーで中断し、自動再開を諦めた | 該当なし（同上） | pollerが`POST /api/dispatch/sessions/interrupted`へ引き上げ、`escalateInterruptedSession`が`00.check-user`＋`01.check-blocked`を付与（#1971・#2280。**turnが打ち切られて`Stop`フックが飛ばない状態**。ユーザーがやるのは回答ではなく続け方の指示なので理由は`blocked`） |
+| Codexのターンが閉じないまま止まり、自動再開を諦めた | 該当なし（同上） | 同じ受け口へ`reason=turn_stall`で引き上げる（#3174。**転記に`task_started`だけが残り`task_complete`も`turn_aborted`も来ない状態**。tmuxの中では生きているため画面からは「実行中」にしか見えない） |
 | PRマージとほぼ同時のpushでdevelopへ入らないコミットが取り残された | issue-deck側の巡回（`POST /api/issues/progress-sweep`）が`00.check-user`＋`01.check-blocked`を付与（#1999・#2294。後述「取り残されたコミットは見送らず人へ渡す」） | 同じ（定期的な巡回での検知なので、コミットの起点を問わない） |
 
 ### マージを求める`00.check-user`は、実装側から付けない（#1709）

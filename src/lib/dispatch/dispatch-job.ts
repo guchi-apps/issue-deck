@@ -274,9 +274,10 @@ export const CODEX_LIMITATIONS = [
   // #2524でペアリングコード方式のRemote Control相当を足したが、**繋がる先はホストごと**で、
   // Issueを指して開くリンクにはならない（`codex-pairing.ts`）
   "Remote Controlのリンクは出ません（実行キューのカードからホストごとに繋ぎます）",
-  // APIエラーは#3178でCodexの`task_complete.error`から再開できるようになった。ここに残るのは
-  // Claude Code固有の「ツール呼び出し風テキスト」の空振りだけ（`session-tool-call-stall.sh`）。
-  "ツール呼び出しが空振りして止まったセッションは自動再開できません",
+  // APIエラー（#3178）とターンの取りこぼし（#3174）はCodexの転記から検知して`codex queue`で
+  // 再開する。残るのはClaude Code固有の「ツール呼び出し風テキスト」の空振りだけで、これは
+  // Codexがツールをネイティブに呼ぶ（`custom_tool_call`）以上、同じ形では起こらない
+  // （`session-tool-call-stall.sh`）。**制限として出す理由が無くなったので、ここから外した。**
 ] as const;
 
 /**

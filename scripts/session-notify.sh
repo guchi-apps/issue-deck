@@ -1120,7 +1120,8 @@ if event == "SessionInterrupted":
     # ——Issueコメント＋`00.check-user`＋`01.check-blocked`——で引き上げる（#2280）。
     #
     # **`detail`はpollerが組み立てた固定の文言だけ**（何回試して諦めたか、など）。セッションの
-    # 画面も応答テキストも載せない。`reason`も同様に固定の種別（`api_error`・`tool_call_stall`）
+    # 画面も応答テキストも載せない。`reason`も同様に固定の種別（`api_error`・`tool_call_stall`・
+    # `turn_stall`）
     # で、issue-deck側（`session-escalation.ts`）が原因ごとにIssueコメントの文言を出し分ける。
     if not repo_slug or not issue_number.isdigit() or not tmux_session:
         print("skip")

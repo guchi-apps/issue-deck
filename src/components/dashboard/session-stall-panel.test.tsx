@@ -166,6 +166,24 @@ describe("SessionStallPanel", () => {
     });
   });
 
+  it("Codexのターン停滞でも、原因の見出しと固定文面のボタンを出す（#3174）", () => {
+    // 送出は`codex queue`だが、**押す人から見た手触りは他の原因と同じ**にしてある。
+    const sendSessionRecovery = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <SessionStallPanel
+        session={makeSession({ interruptedReason: "turn_stall" })}
+        dispatch={makeDispatch({ sendSessionRecovery })}
+      />,
+    );
+    expect(screen.getByText("ターンが完了しないまま止まっています")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /中断したところから続けるよう送る/ }));
+    expect(sendSessionRecovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "直前のターンが完了しないまま中断しています。中断したところから作業を続けてください。",
+      }),
+    );
+  });
+
   it("固定文面で解けない場合の出口としてClaude Codeアプリのリンクを残す", () => {
     render(
       <SessionStallPanel
