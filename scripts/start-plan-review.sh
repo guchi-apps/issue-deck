@@ -324,7 +324,7 @@ if [[ "$AGENT_CLI_KIND" == "claude" ]]; then
 else
   # `codex exec`は標準入力の`-`でプロンプトを受け取る。G1の成果物である`gh issue comment`には
   # ネットワークが必要なので、agent-cliと同じworkspace-writeのネットワーク許可を明示する。
-  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write -c sandbox_workspace_write.network_access=true -' \
+  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true -' \
     "$WORKDIR" "$PROMPT_FILE" "$RUNNER")"
 fi
 SESSION_CMD+=" 2>&1 | tee $(printf '%q' "$LOG_FILE")"
