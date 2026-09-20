@@ -114,6 +114,10 @@ TMUX_SESSION_NAME=""
 if [[ -n "${TMUX:-}" ]]; then
   TMUX_SESSION_NAME="$(tmux display-message -p '#S' 2>/dev/null || true)"
 fi
+# `submit-plan.sh`のようにCodexが実行する子プロセスも、状態ファイルのキーをこの値で特定する。
+# `$TMUX`を子プロセスごとに解釈し直すと、tmux外からの実行と区別できず、計画判断後の継続を
+# 誤ったセッションへ送る余地が生まれるため、ランチャーが得た値だけを明示して引き継ぐ。
+export ISSUE_DECK_TMUX_SESSION="$TMUX_SESSION_NAME"
 
 WORKTREE_BASE="${ISSUE_DECK_WORKTREE_BASE:-$HOME/apps/issue-deck-worktrees}"
 DEV_SERVER_DIR="$WORKTREE_BASE/.dev-servers"

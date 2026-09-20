@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,6 +17,10 @@ let releaseDecision;
 let workDir;
 let configFile;
 let planFile;
+let stateDir;
+let codexCommand;
+const tmuxSession = "issue-deck-issue-2545";
+const codexThread = "11111111-1111-4111-8111-111111111111";
 
 beforeEach(async () => {
   requests = [];
@@ -43,8 +47,12 @@ beforeEach(async () => {
   workDir = mkdtempSync(path.join(tmpdir(), "submit-plan-"));
   configFile = path.join(workDir, "dispatch.env");
   planFile = path.join(workDir, "plan.md");
+  stateDir = path.join(workDir, "state");
+  codexCommand = path.join(workDir, "codex");
   writeFileSync(configFile, `APP_BASE_URL=${baseUrl}\nDISPATCH_SECRET=test-secret\n`, "utf8");
   writeFileSync(planFile, "## 要約\n\n**テスト計画**\n", "utf8");
+  writeFileSync(path.join(workDir, "codex"), "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >>\"$TEST_CODEX_QUEUE_LOG\"\n", "utf8");
+  chmodSync(codexCommand, 0o755);
 });
 
 afterEach(async () => {
@@ -94,6 +102,53 @@ describe("submit-plan.sh", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("影響範囲を追記してください");
     expect(result.stderr).not.toContain("影響範囲を追記してください");
+  });
+
+  it("Codexでは承認後の冪等な継続指示を同じスレッドへ積む", async () => {
+    const queueLog = path.join(workDir, "queue.log");
+    // 状態ディレクトリはスクリプト側が作らない読み取り専用の入力である。
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, `${tmuxSession}.codex-thread`), `${codexThread}\n`, "utf8");
+    const result = await run({
+      ISSUE_DECK_AGENT: "codex",
+      ISSUE_DECK_TMUX_SESSION: tmuxSession,
+      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+      ISSUE_DECK_CODEX_COMMAND: codexCommand,
+      TEST_CODEX_QUEUE_LOG: queueLog,
+    });
+    expect(result.code).toBe(0);
+    const queued = readFileSync(queueLog, "utf8");
+    expect(queued).toContain(`--thread\n${codexThread}`);
+    expect(queued).toContain("すでに同じ作業を進めているか完了している場合は、重複して実施せず");
+  });
+
+  it("Codexでは修正依頼後にも重複を避ける継続指示を積む", async () => {
+    decisions = [{ status: "REVISION_REQUESTED", revisionText: "影響範囲を追記してください" }];
+    const queueLog = path.join(workDir, "queue.log");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(path.join(stateDir, `${tmuxSession}.codex-thread`), `${codexThread}\n`, "utf8");
+    const result = await run({
+      ISSUE_DECK_AGENT: "codex",
+      ISSUE_DECK_TMUX_SESSION: tmuxSession,
+      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+      ISSUE_DECK_CODEX_COMMAND: codexCommand,
+      TEST_CODEX_QUEUE_LOG: queueLog,
+    });
+    expect(result.code).toBe(0);
+    expect(readFileSync(queueLog, "utf8")).toContain("すでに修正済み、再送済み、または後続の判断を処理している場合は、重複して実施せず");
+  });
+
+  it("CodexのスレッドUUIDが無くても承認結果は返す", async () => {
+    const result = await run({
+      ISSUE_DECK_AGENT: "codex",
+      ISSUE_DECK_TMUX_SESSION: tmuxSession,
+      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+      ISSUE_DECK_CODEX_COMMAND: codexCommand,
+      TEST_CODEX_QUEUE_LOG: path.join(workDir, "queue.log"),
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("承認されました");
+    expect(result.stderr).toContain("スレッドUUIDが未取得");
   });
 
   it("WAITINGのあとに承認されるまでポーリングする", async () => {
