@@ -74,7 +74,7 @@ export const PROGRESS_SWEEP_DEFAULT_INTERVAL_MINUTES = 5;
 export const PROGRESS_SWEEP_STRANDED_GRACE_MINUTES = 120;
 
 /** 巡回が投稿するコメントの発信元マーカー（`comment-source.ts`のid） */
-const COMMENT_SOURCE_MARKER = "<!-- issue-deck-source:progress-sweep -->";
+export const COMMENT_SOURCE_MARKER = "<!-- issue-deck-source:progress-sweep -->";
 
 /** 見送った理由。ログにそのまま出す（なぜ動かなかったのかを後から追うため） */
 export type ProgressSweepSkipReason =

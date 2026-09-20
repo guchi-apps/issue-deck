@@ -141,6 +141,32 @@ Issue——ここは表示のための当て推量。
 **左メニューの行に回るアイコンは相変わらず出さない**——あちらが見ているのは一覧のデータで、
 そこにコメントは載っていない。
 
+## 全指摘が対応済みなら自動でcloseする（#3216）
+
+一覧の完了の合図はclose（#3141）だが、行が`対応済み n/n`になっても人がcloseするまで一覧に
+残っていた。**画面が「対応済み」と数えたものと同じ判定で、巡回がレビューIssueを`completed`で
+閉じる**——閉じたものは上の仕様どおり一覧から外れ、閉じるときに理由をコメントで残す。
+
+- **相乗りする先は進捗の巡回**（`runProgressSweep`。約5分間隔・poller経由。
+  [subpc-dispatch.md](subpc-dispatch.md)）。専用のエンドポイントもpollerの呼び出しも足していない。
+  判定は`code-review-close-sweep.ts`（純関数）、IOは`code-review-close-sweep-run.ts`
+- **閉じる条件は、結果が返っていて、指摘が1件以上あり、その全部が起票済みでcloseされていること**
+  （`summarizeCodeReviewFindingProgress`の`resolved === total`。画面のチップと同じ関数）。
+  `指摘なし`（0件）は閉じない。**判定の弱点も画面と同じ**で、見出しを書き換えたIssueは「未起票」、
+  `not planned`のcloseも「対応済み」に数える。画面で`対応済み`と出ているものだけを閉じる、を優先し、
+  自動closeのためだけに厳しい別判定を持たない（行の見た目と食い違うため）
+- **探し先はissue-deckのDB。** 開いている`[レビュー] `Issueと、指摘の見出しに一致するIssueのstateは
+  DBから引く。結果の要約は画面と同じプロセス内キャッシュ（`code-review-report-cache.ts`）を共用し、
+  キャッシュに無いときだけコメントを取る
+- **閉じると決めた後に、次の3つを確かめてから閉じる**（要約のキャッシュは最大5分遅れうるため）。
+  (1)コメントを取り直し、**結果の後に再レビューの依頼が来ていない**こと
+  （`findLatestCodeReviewReport`は最後の結果を返すので、再レビュー中でも旧結果が`reported`に見える）
+  (2)取り直した結果の指摘の並びが判定時と同じであること (3)**人が開け直したことが無い**こと
+  （`hasReopenedEvent`。開け直したものは閉じ直さず、プロセスが生きている間は確認も出さない）。
+  確かめられなかったものは閉じず、次の巡回で引き直す
+- 進捗の巡回の結果には`code_review_closed`として出る。見送りの理由のうち平常時に毎巡起きるもの
+  （結果待ち・指摘0件・未対応あり）は数えず、閉じると決めた後に止まったものだけを`skipped`へ数える
+
 ## リポジトリ別のレビュー状況（#3092）
 
 一覧の先頭に「リポジトリ別のレビュー」枠を置き、**どのリポジトリをいつレビューしたか**と
@@ -268,6 +294,10 @@ Issue——ここは表示のための当て推量。
   落ちるのは正しい挙動で、**払い出しと枠の計算と取り消しが同じ集合を見ていること**の確認になる
 - 結果の書式を変える → `scripts/prompts/code-review-agent.md`と`src/lib/github/code-review.ts`を**必ず両方**。
   片方だけ変えると、投稿はされるのにカードにならない（画面からは「レビュー中のまま」に見える）
+- 自動closeの条件を変える → `src/lib/github/code-review-close-sweep.ts`（判定）・
+  `code-review-close-sweep-run.ts`（IO）。**「対応済み」の数え方そのものは
+  `summarizeCodeReviewFindingProgress`が持ち、画面のチップと共用**なので、そちらを変えると
+  自動closeの対象も動く
 - 一覧の結果表示を変える → `src/hooks/use-code-review-reports.ts`・
   `src/app/api/issues/code-review-reports/route.ts`・`src/lib/github/code-review-report-cache.ts`・
   `src/components/dashboard/code-review-result-badges.tsx`。**バッジの見た目はIssue詳細の
