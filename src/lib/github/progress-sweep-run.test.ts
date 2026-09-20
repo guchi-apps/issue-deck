@@ -140,13 +140,24 @@ function pullRequestsForHead(closed: unknown[], open: unknown[] = []) {
 }
 
 /**
- * `db.issue.findMany`は2つの巡回（滞留した`00.check-user`の回収・手作業ラベルの埋め直し）が
- * 使うので、`where`の形で振り分ける。手作業側だけが`title`で絞り込む。
+ * `db.issue.findMany`は複数の巡回（滞留した`00.check-user`の回収・手作業ラベルの埋め直し・
+ * 全指摘対応済みのコードレビューIssueのclose）が使うので、`where`の形で振り分ける。
+ * `title`で絞り込むものは、`startsWith`の接頭辞（手作業・コードレビュー）と`in`（指摘のIssue）で見分ける。
+ * コードレビューは既定では0件（自動closeの細かい振る舞いは`code-review-close-sweep-run.test.ts`）。
  */
-function issueRowsFor(rows: { staleCheckUser?: unknown[]; manualStep?: unknown[] }) {
-  return vi.fn(async (args: { where?: { title?: unknown } }) =>
-    args?.where?.title === undefined ? (rows.staleCheckUser ?? []) : (rows.manualStep ?? []),
-  );
+function issueRowsFor(rows: {
+  staleCheckUser?: unknown[];
+  manualStep?: unknown[];
+  codeReview?: unknown[];
+  codeReviewFindings?: unknown[];
+}) {
+  return vi.fn(async (args: { where?: { title?: { startsWith?: string; in?: unknown } } }) => {
+    const title = args?.where?.title;
+    if (title === undefined) return rows.staleCheckUser ?? [];
+    if (title.in !== undefined) return rows.codeReviewFindings ?? [];
+    if (title.startsWith === "[レビュー] ") return rows.codeReview ?? [];
+    return rows.manualStep ?? [];
+  });
 }
 
 /** signaly#200の実測。11:27:25にラベルが付き、11:28:28にPRがマージされた */
@@ -481,6 +492,42 @@ describe("runProgressSweep", () => {
     const result = await runProgressSweep({ now: NOW });
 
     expect(result.actions).toEqual([]);
+  });
+
+  it("全指摘が対応済みのコードレビューIssueを閉じ、成果に数える（#3216）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(
+      issueRowsFor({
+        codeReview: [
+          {
+            number: 241,
+            commentCount: 2,
+            repositoryId: "repo-vps",
+            repository: {
+              ownerLogin: "guchi-apps",
+              name: "vps",
+              fullName: "guchi-apps/vps",
+              installation: { id: "inst-row", installationId: 111 },
+            },
+          },
+        ],
+        codeReviewFindings: [{ number: 10, title: "指摘A", state: "CLOSED" }],
+      }),
+    );
+    fetchCommentsForIssue.mockResolvedValue([
+      { body: "<!-- issue-deck-code-review-report -->\n\n### [中] 指摘A\n\n本文\n" },
+    ]);
+    hasReopenedEvent.mockResolvedValue(false);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "vps", 241, "token", {
+      state: "closed",
+      state_reason: "completed",
+    });
+    expect(result.actions).toEqual([
+      { repositoryFullName: "guchi-apps/vps", issueNumber: 241, kind: "code_review_closed" },
+    ]);
   });
 
   it("ラベルの無い手作業Issueへ 71.manual-step を付け直す", async () => {

@@ -100,6 +100,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | 入力待ちの通知（Push通知） | ○（`Notification`フック） | **×**（同じイベントが無い。後述） |
 | 計画の承認パネル（画面から承認・修正） | ○（`ExitPlanMode`のフック） | ○（`scripts/submit-plan.sh`。#2545） |
 | 質問への回答（画面から答える） | ○（`AskUserQuestion`のフック） | ○（`scripts/submit-question.sh`。#2579） |
+| 作業ステップの表示（一覧の「実装中(3分)」・進捗バーの調査／実装／検証のマス） | ○（`Pre/PostToolUse`フックが`.step`を書く。#2705） | ○（**フックではなく転記から**。pollerが直近のツール呼び出しを分類して`.step`を書く。#3213。下の「作業ステップは転記から起こす」） |
 | AI使用量の集計（エージェント別・Issue別） | ○ | ○（#2535） |
 | AI使用量のフェーズ内訳（計画・調査・実装・検証・仕上げ） | ○ | ○（#3169。下の「フェーズの内訳も同じ5行へ割る」） |
 | APIエラーで中断したセッションの自動再開 | ○ | ○（`task_complete.error`を検知して`codex queue`で再開。#3178） |
@@ -109,6 +110,32 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
 | `--disallowedTools`による封じ込め | ○ | **×**（指定されていたら起動を断る） |
+
+### 作業ステップは転記から起こす（#3213）
+
+一覧の添える字「実装中(3分)」と進捗バーの調査／実装／検証・仕上げのマスは、`.step`
+（`scripts/lib/session-step.sh`の語彙）だけを材料にしている。Claude Codeは`Pre/PostToolUse`フックが
+書くが、**Codexは`SessionStart`・`Stop`しかフックを繋いでいない**ため`.step`が空のままで、画面は
+進捗Statusの「計画検討中（サブPC）」で固定され、実装に入ってもバーが動かなかった。
+
+**pollerが転記（`~/.codex/sessions/…/rollout-*.jsonl`）の末尾から直近のツール呼び出しを読み、
+同じ分類で`.step`を書く**（`scripts/lib/session-codex-step.sh`。セッションの報告のたびに1回）。
+
+- 呼び出しは`response_item`・`payload.type=custom_tool_call`・`name=exec`で、`payload.input`に
+  JSのコードが入る。拾うのは`tools.apply_patch(`（→`EDITING`）と`tools.exec_command(`の`cmd`
+  （→`session_step_from_bash_command`。Claude Codeと同じ分類）、`web__run`・`view_image`（→`EXPLORING`）
+- **見た時刻は転記のレコードの時刻**。巡回した時刻で書くと直前の`Stop`より後になり、終わった
+  ターンの作業が「いま走っている」ように出る（`isSessionStepFresh`）
+- `write_stdin`（走っているコマンドへの入力・待ち）と`update_plan`は作業の種類を表さないので書かない。
+  `submit-plan.sh`・`submit-question.sh`も書かない（画面の返事を待って止まるため、「コマンド実行中」と
+  出すと人を待っていることが隠れる）
+- **読めなければ何もしない**（従来どおり進捗Statusの文言に戻る）。転記の形はCodexの内部仕様
+- フックを繋ぐ案は見送った。`exec`ラッパーの下で`tool_name`／`tool_input`がどう渡るかを実機で
+  確かめておらず、ツール呼び出しごとにプロセスを起こすことにもなる。反映はpollerの巡回間隔ぶん遅れる
+- **計画の承認後に進捗が動かない問題は別の原因**で、エージェント種別を問わない。ローカルセッションは
+  承認を受けて`Planning`→`Implementation`へ進める経路が無かった。画面から承認したとき
+  （`POST /api/dispatch/plan-decision`）にissue-deckが報告する（`advanceSessionPlanProgress`。
+  [progress-status-architecture.md](../progress-status-architecture.md)）。端末で承認した場合は動かない
 
 ### 画面デザインをIssueDeck配下で共有する（#2597）
 
@@ -228,9 +255,9 @@ Codexセッション全部の一覧（#2524・#2537）で、名前が自動命�
   ——NDJSON・`Content-Length`の両方で無反応
 - **stdinを閉じるとリクエストを処理せずに終了する**（実測200ms）。応答を読み終えるまでstdinを
   開けておく（実装は`coproc`。`scripts/lib/codex-thread-name.sh`）
-- **走っているセッションにも効き、モデルの自動命名に上書きされない。** tmuxで起こしたTUIの
-  スレッドへ付け替え、ターンをまたいで保たれることを実機で確認した（逆順ではない——モデルが
-  先に名付けた後から付け替えている）
+- **走っているセッションにも効く。** tmuxで起こしたTUIのスレッドへ付け替えられる。ただし
+  **モデルの自動命名に上書きされる**（#2540で「上書きされない」としていたのは誤り。
+  下の「自動命名で消えた名前は巡回で付け直す」）
 - 知らないスレッドIDには`no rollout found for thread id …`が返る。**セッション開始の直後は
   転記がまだ無いことがある**ので、そのときだけ数回やり直す
 - 付けるのは`session-notify.sh`の`SessionStart`（`name_codex_thread`）。**切り離して走らせる**
@@ -238,6 +265,38 @@ Codexセッション全部の一覧（#2524・#2537）で、名前が自動命�
 
 **宛先は引き続きUUIDで持つ。** 名前は人が一覧で見分けるためのもので、`codex queue`が名前でも
 引けることには依存しない（名前は後から人が変えられる）。
+
+#### 自動命名で消えた名前は巡回で付け直す（#3220）
+
+**`SessionStart`で1回付けるだけでは残らない。** 実機（codex-cli 0.152.1）では、付けた
+`<リポジトリ名> #<番号>`が**最初のターンの2〜6秒後にモデルの自動命名で上書きされる**。索引
+（`~/.codex/session_index.jsonl`）には3行がこの順で並ぶ。
+
+```
+13:52:04  出力言語は日本語です。ユーザーの目に…   ← プロンプトの先頭を切ったもの
+13:52:05  asset-manager #504                  ← SessionStartのフックが付けたもの
+13:52:07  アプリアイコンを変更                   ← モデルの自動命名（これが残る）
+```
+
+2026-09-20時点でapp-serverの一覧（`thread/list`）に出ていた25本のうち22本が自動命名のままで、
+**ChatGPTアプリのリモート制御からどれがどのIssueのセッションか選べなかった**——#2540が
+やろうとしていたことが実際には効いていなかった。
+
+そこで**pollerがセッションを報告するたびに、名前がずれていれば付け直す**
+（`sync_codex_thread_name` → `codex_thread_name_sync`）。
+
+- **判定では`codex`を起こさない。** 索引の最後の行（同じIDの行は名前が変わるたびに増える）を
+  読んで比べるだけで、`codex app-server`を起こすのはずれているときだけ。付け直した結果も索引へ
+  入るため、次の巡では何も起きない
+- **自動命名が走るのは最初のターンの1回だけ**なので、付け直しも実質1回で落ち着く。反映は
+  巡回の間隔（60秒）ぶん遅れる
+- **索引を読めない・知らない形のときは何もしない**（自動命名のままになるだけ）。索引の形は
+  Codexの内部仕様で、当て推量で書くと人が付けた名前まで壊す
+- **人がChatGPTアプリ側で改名しても巡回で戻る。** 一覧の名札としての一意性を優先している。
+  止めたいときは`ISSUE_DECK_CODEX_NAME_SYNC=0`（pollerの環境）
+- **自動命名を止める設定は無い**（`codex features list`にも索引・`config.toml`のキーにも
+  見当たらない）。`Stop`フックで付け直す案は、ターンごとに`codex app-server`を起こすことに
+  なるため採らない
 
 ### `codex agents`・`remote-control`はstandalone installが要る（#2521で入れ替えた）
 
@@ -310,6 +369,19 @@ $ codex remote-control pair --json
 Issueのセッション表示**（#2537。スマホのIssue詳細にも同じものが出る）。押すとpollerが
 `codex remote-control start`（デーモンの起動）と`pair --json`（コードの発行）を打ち、
 返ってきた`XXXX-XXXX`が画面へ出る。ChatGPTアプリの「Connect to Codex」へ打ち込むと繋がる。
+
+**スマホから繋ぐ手順**（#3220の答え。繋いだ後はそのホストのCodexセッションの様子を逐一見られる）。
+
+1. issue-deckを開き、実行キューのサブPCのカード（またはCodexで動いているIssueのセッション表示）の
+   「Codexに繋ぐ」を押す。**10分で切れる**ので、繋ぐ直前に押す
+2. ChatGPTアプリの設定＞リモート制御＞「接続を追加」へ、出てきた`XXXX-XXXX`を入れる
+3. 一覧に`<リポジトリ名> #<Issue番号>`の名前で並ぶ（#2540・#3220）。繋がる単位はホストなので、
+   **そのホストで動いているCodexセッションが全部見える**
+
+**「オフライン」と出るときは、そのホストのデーモンが上がっていないか、別のホストの接続を見ている。**
+`remoteControlEnabled`は`~/.codex/app-server-daemon/settings.json`に残り、Codexのセッションが
+立つたびにデーモンも上がるが、確実なのは「Codexに繋ぐ」をもう一度押すこと（`start`は冪等）。
+サブPCの接続名はホスト名（`subpc`）になる。
 
 - **繋がるのはホスト単位。** `serverName`はホスト名（`subpc`）なので、1枚のコードで
   そのホストのCodexセッションが**全部**見える（`codex agents`に出るもの。tmuxで起こした
@@ -389,15 +461,41 @@ Codex側にも作れる。`--last`はホスト全体で最後のセッション�
 送ると勝手に回答済みになる）が理由で、`codex queue`はそこを通らない。**Codexでは例外を
 開けずに同じ機能が成り立つ。**
 
-### 計画判断後の継続も同じ経路で送る（#3179）
+### 計画・質問の判断は、issue-deckが払い出して送る（#3218）
 
-`submit-plan.sh`は、Codexが計画の承認または修正依頼を受け取った後に、同じtmuxセッションの
-UUIDへ固定の継続指示を`codex queue`で積む。判断を返したターンがそこで終了しても、次のターンが
-計画に従った実装または計画の再送を始められるためである。UUIDがまだ無い（信頼確認前）か送信に
-失敗した場合は、判断の返却を妨げず、従来どおり端末から再開する。
+**Codexは判断を待てない。** `submit-plan.sh`・`submit-question.sh`はシェルのコマンドとして
+実行されるが、Codexは`tools.exec_command`を`yield_time_ms: 30000`で呼ぶため、30秒で打ち切られた
+出力が「`Script completed` / `Wall time 30.2 seconds`」として返る。**まだ走っているとは書かれない**
+ので、Codexは完了と解釈してそのターンを終える。実測（ops-dashboard#302）では、スクリプト自身は
+162秒後に修正依頼を受け取って終了コード0で完了していたが、それを受け取る当事者はもういなかった。
 
-キューは実行中のターンを止めないため、固定文面は「同じ作業を既に進行・完了している場合は何も
-せず終了する」と明記する。修正・再送で複数の判断が積まれても、完了済みの作業を繰り返さない。
+**#3179の保険（スクリプトの中から`codex queue`を打つ）はセッションの内側では動かない。**
+Codexのサンドボックスが書込みを許すのはworktree・`/tmp`・`$TMPDIR`・対象リポジトリの`.git`だけで、
+`~/.codex`のstate DB（SQLite）は読み取り専用になる（`attempt to write a readonly database`）。
+2026-09-20の失敗5件と ops-dashboard#302 は偶発ではなく、通ったのは`~/.codex/app-server-daemon`が
+上がってWALファイルがあった1回だけだった。
+
+そこで送る場所をサンドボックスの外へ出した。
+
+1. `submit-plan.sh`・`submit-question.sh`は、`ISSUE_DECK_AGENT=codex`のとき**登録だけして
+   終了コード0で返る**。標準出力に「このターンはここで終えてよい／承認を待たずに進まないこと」を出す
+2. 画面から承認・修正・回答を押すと、issue-deckが`INSTRUCTION`ジョブを積む
+   （[`src/lib/dispatch/codex-decision-notify.ts`](../../src/lib/dispatch/codex-decision-notify.ts)）
+3. pollerが`deliver_codex_instruction`から`codex queue`で送る。pollerは通常のユーザー権限で
+   走っているので`~/.codex`へ書ける
+
+**送る本文は3つの固定文面だけ**（承認・修正・質問への回答）。修正の内容と回答はIssueコメントに
+残っている（`buildSessionPlanDecisionCommentBody`・`buildSessionQuestionAnswerCommentBody`）ので、
+固定文面は「最新のコメントを読め」と言うだけにする。`DispatchJob.instruction`は改行を含まない
+500字までで、人が書いた長い文章は入らない。
+
+**送り先はCodexのセッションに限る**（`codexThreadKnown`が非null）。Claude Codeのセッションへ
+積むと、pollerが`send-keys`の3段階プロトコルの方へ倒し、人の操作を挟まない自動の`send-keys`に
+なってしまう。Claude Codeはフックが`GET …/decision`で判断を取りに来るので、そもそも要らない。
+
+**届かなかったことは画面に出す。** 計画の返事待ちには`CODEX_QUEUED`／`CODEX_QUEUE_FAILED`を
+配送の記録として書くので、計画パネルの結果欄に積めたかどうかが出る。セッションが終わっていて
+積めない場合は、既存の「セッションを復旧」から呼び戻す。
 
 ### 宛先はIssueごとの状態ファイルに残す
 
@@ -696,17 +794,19 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 | 起動の分岐（Claude固有の処理を飛ばす・フックの有効化） | [`scripts/run-issue-session.sh`](../../scripts/run-issue-session.sh) |
 | フックから呼ばれる通知スクリプト（Claudeと共通） | [`scripts/session-notify.sh`](../../scripts/session-notify.sh) |
 | `--agent`の受け取り・存在チェック・サンドボックスの起動前チェック・読み替えの追記・計画の出し方の差し替え | [`scripts/start-issue.sh`](../../scripts/start-issue.sh) |
-| 計画の登録と判断待ち（Codex用） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh) |
+| 計画・質問の登録（Codexでは待たずに返す。#3218） | [`scripts/submit-plan.sh`](../../scripts/submit-plan.sh)・[`scripts/submit-question.sh`](../../scripts/submit-question.sh) |
+| 判断・回答をCodexへ払い出す固定文面と送り先の判定（#3218） | [`src/lib/dispatch/codex-decision-notify.ts`](../../src/lib/dispatch/codex-decision-notify.ts) |
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
 | 他リポジトリでの種別の受け取り・読み替えの追記・計画の出し方の差し替え（#2590） | [`scripts/generic-start-issue.sh`](../../scripts/generic-start-issue.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
 | `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
+| セッション名を付ける・自動命名から付け直す（#2540・#3220） | [`scripts/lib/codex-thread-name.sh`](../../scripts/lib/codex-thread-name.sh) |
 | 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |
 | 語の検証・表示名・選べるかの判定 | [`src/lib/dispatch/dispatch-job.ts`](../../src/lib/dispatch/dispatch-job.ts) |
 | 選択欄と注意の表示 | [`src/components/dashboard/start-implementation-dialog.tsx`](../../src/components/dashboard/start-implementation-dialog.tsx) |
 | 使用量の集計（転記の読み取り・フェーズの境界） | [`scripts/lib/session-usage.sh`](../../scripts/lib/session-usage.sh)の`codex_session_usage_aggregate` |
 | プラン枠の読み取り | [`scripts/lib/codex-usage.sh`](../../scripts/lib/codex-usage.sh)・[`src/lib/dispatch/codex-usage.ts`](../../src/lib/dispatch/codex-usage.ts) |
-| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs)・[`scripts/codex-queue.test.mjs`](../../scripts/codex-queue.test.mjs) |
+| 境界のテスト | [`scripts/agent-cli.test.mjs`](../../scripts/agent-cli.test.mjs)・[`scripts/codex-queue.test.mjs`](../../scripts/codex-queue.test.mjs)・[`scripts/codex-thread-name.test.mjs`](../../scripts/codex-thread-name.test.mjs) |
 
 ## AI使用量はClaude Codeと同じ粒度で出す（#3169）
 
@@ -794,7 +894,7 @@ Issueを跨いで同じ調査を繰り返さないための記録で、**実機�
 | 揃っていないもの | 決着 | 根拠 |
 |---|---|---|
 | 入力待ちのPush通知 | **実現不可** | Codexに`Notification`に当たるイベントが無い。フックの一覧にあるのは`PreToolUse`・`PermissionRequest`・`PostToolUse`・`Pre/PostCompact`・`SessionStart`・`SessionEnd`・`Subagent*`・`UserPromptSubmit`・`Interrupt`・`Stop`で、承認待ちに当たる`PermissionRequest`は`--ask-for-approval never`では発火しない |
-| Remote ControlのIssueごとのリンク | **実現不可** | `codex remote-control pair`が返すのは10分で切れる`XXXX-XXXX`のペアリングコードだけで、URLを出さない。`serverName`はホスト名なので、繋がる単位はホスト（#2524）。代わりに繋いだ先で見分けられるよう、セッション名を`<リポジトリ名> #<番号>`へ揃えてある（#2540） |
+| Remote ControlのIssueごとのリンク | **実現不可** | `codex remote-control pair`が返すのは10分で切れる`XXXX-XXXX`のペアリングコードだけで、URLを出さない。`serverName`はホスト名なので、繋がる単位はホスト（#2524）。代わりに繋いだ先で見分けられるよう、セッション名を`<リポジトリ名> #<番号>`へ揃えてある（#2540。自動命名で消えるためpollerの巡回で付け直す。#3220） |
 | 質問・計画をアプリ側で受け取るトグル（`answerInApp`・#2822） | **実現不可** | 上と同じ理由で、切り替えた先（Claude Codeアプリに当たる出口）が無い。ONにすると画面からもアプリからも答えられない質問ができるため、受け口が断る（`session-answer-mode.ts`） |
 | アーティファクトの自動取り込み | **実現不可** | `Artifact`はClaude Code固有のツールで、フックで拾う相手がいない。`scripts/lib/codex-artifact.sh`で同じカードへ登録する（#2597） |
 | ディレクトリの信頼確認がIssueごとに出る | **実現不可（方針）** | 自動で答えない（[session-notify.md](session-notify.md)「信頼確認そのものは自動化しない」）。答えていないことは画面の「まだ開始していません」で分かる |
@@ -805,9 +905,10 @@ Issueを跨いで同じ調査を繰り返さないための記録で、**実機�
 
 ## まだやっていないこと
 
-- **subpcでは今のところサンドボックスを組み立てられない**（#2526）。`guchi-apps/subpc#77`で
-  ホスト側のuserns制限が緩むまで、画面の「実装を開始」にエージェント欄は出ない（急ぐときの
-  逃げ道は上の「サンドボックスを組み立てられないホスト」）
+- ~~**subpcでは今のところサンドボックスを組み立てられない**（#2526）~~ →
+  **解消済み。** 2026-09-20の実機では下見（`codex sandbox -c sandbox_mode=workspace-write …`）が
+  0で返り、画面の「実装を開始」にもエージェント欄が出ている（pollerも`codex`を申告している）。
+  組み立てられないホストでの止まり方は上の「サンドボックスを組み立てられないホスト」のまま
 - **無人実行（GitHub Actions）は対象外。** `claude-issue-dispatch.yml`は`claude-code-action`の
   ままで、Codexで走らせるには`OPENAI_API_KEY`のSecrets追加と課金の判断が要る
 - **契約適合の他リポジトリ（自前の`scripts/start-issue.sh`を持つもの）は`ISSUE_DECK_AGENT`を

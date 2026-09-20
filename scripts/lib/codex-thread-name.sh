@@ -21,8 +21,9 @@
 #     `codex app-server`を1回起こすだけでよい（`codex queue`と同じ。#2519）
 #   - **`codex app-server proxy`（走っているデーモンの制御ソケットへの中継）では応答が返らない。**
 #     NDJSON・`Content-Length`の両方で無反応だったため、stdioの`codex app-server`を使う
-#   - **走っているセッションにも効き、モデルの自動命名に上書きされない。** tmuxで起こしたTUIの
-#     スレッドへ付け替え、ターンの完了をまたいで60秒後まで名前が保たれることを確認した
+#   - **走っているセッションにも効く。** tmuxで起こしたTUIのスレッドへ付け替えられる。
+#     ただし**モデルの自動命名に上書きされる**（#2540では「されない」としていたが誤り。
+#     下の「付けた名前は、モデルの自動命名で上書きされる」）
 #   - **stdinを閉じるとリクエストを処理せずに終了する**（200msで抜ける）。そのため応答を
 #     読み終えるまでstdinを開けておく（下の`coproc`）
 #   - 知らないスレッドIDには`{"error":{"code":-32600,"message":"no rollout found for thread id …"}}`
@@ -165,4 +166,80 @@ codex_thread_name_set() {
 
   echo "${out:-名前を付けられませんでした}"
   return 2
+}
+
+# ---------------------------------------------------------------------------
+# 付けた名前は、モデルの自動命名で上書きされる（#3220）
+#
+# #2540では「モデルの自動命名に上書きされない」としていたが、**実機（codex-cli 0.152.1）では
+# 逆だった。** `SessionStart`で付けた`<リポジトリ名> #<番号>`は、最初のターンの2〜6秒後に
+# モデルが付け直す題名で消える。索引（`~/.codex/session_index.jsonl`）には3行がこの順で並ぶ。
+#
+#   13:52:04  出力言語は日本語です。ユーザーの目に…  ← プロンプトの先頭を切ったもの
+#   13:52:05  asset-manager #504                  ← `SessionStart`のフックが付けたもの
+#   13:52:07  アプリアイコンを変更                  ← モデルの自動命名（これが残る）
+#
+# 2026-09-20時点でapp-serverの一覧に出ていた25本のうち22本が自動命名のままで、**ChatGPT
+# アプリのリモート制御からどれがどのIssueのセッションか選べなかった**（#2524・#2537で繋がるのは
+# ホスト単位＝そのホストのCodexセッション全部の一覧なので、見分ける手段は名前しかない）。
+#
+# **自動命名を止める設定は無い**（`codex features list`にも索引・`config.toml`のキーにも
+# 見当たらない）ため、pollerの巡回から付け直す。自動命名が走るのは最初のターンの1回だけなので、
+# 付け直しも実質1回で落ち着く。
+# ---------------------------------------------------------------------------
+
+# 付け直しそのものを止めるスイッチ（0で無効）。**壊れたときに黙って止められる逃げ道**で、
+# `lib/session-codex-step.sh`の`ISSUE_DECK_CODEX_STEP`と同じ持たせ方。
+CODEX_THREAD_NAME_SYNC_ENABLED="${ISSUE_DECK_CODEX_NAME_SYNC:-1}"
+
+# Codexの索引。**`CODEX_HOME`を尊重する**（`codex`自身が見る場所と揃える）。
+CODEX_THREAD_NAME_INDEX="${ISSUE_DECK_CODEX_SESSION_INDEX:-${CODEX_HOME:-$HOME/.codex}/session_index.jsonl}"
+
+# いま付いている名前を返す。**読めないときは非0**（＝何もしない側へ倒す）。
+#
+# 索引は`{"id":"<UUID>","thread_name":"…","updated_at":"…"}`の追記型で、**名前が変わるたびに
+# 1行増える**。同じIDの行が複数あるので、最後の行が現在の名前になる。
+#
+# **形はCodexの内部仕様**（公開されていない）。読めない・知らない形のときは名前を触らない
+# ——付け直しを諦めれば自動命名のままになるだけだが、当て推量で書くと人が付けた名前も壊す。
+codex_thread_name_current() {
+  local thread="$1" line name
+  [[ -n "$thread" ]] || return 1
+  [[ -f "$CODEX_THREAD_NAME_INDEX" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  # **UUIDで絞ってから最後の1行だけを解く。** 索引は1日に数十行ずつ伸びるので、
+  # 全行をjqへ流すとセッションの数だけ読み直すことになる。
+  line="$(grep -F -- "$thread" "$CODEX_THREAD_NAME_INDEX" 2>/dev/null | tail -n 1)"
+  [[ -n "$line" ]] || return 1
+  name="$(jq -r --arg id "$thread" 'select(.id == $id) | .thread_name // empty' <<<"$line" 2>/dev/null)"
+  [[ -n "$name" ]] || return 1
+  printf '%s' "$name"
+}
+
+# 名前が`<リポジトリ名> #<番号>`からずれていたら付け直す。
+#
+# 第1引数はスレッドUUID、第2引数は付けたい名前。
+# 返り値: 0=揃っている／付け直した / 1=見送り（宛先・名前が無い、索引を読めない）/ 2=付け直せなかった。
+#
+# **判定で`codex`を起こさない。** 索引を読むだけなので、巡回のたびに呼んでよい。実際に
+# `codex app-server`を起こすのはずれているときだけで、付け直した結果も索引へ1行入るため、
+# 次の巡回では何も起きない。
+codex_thread_name_sync() {
+  local thread="$1" name="$2" current
+
+  [[ "$CODEX_THREAD_NAME_SYNC_ENABLED" == "1" ]] || return 1
+  if [[ -z "$thread" || -z "$name" ]]; then
+    echo "付け直す宛先または名前がありません"
+    return 1
+  fi
+
+  current="$(codex_thread_name_current "$thread" 2>/dev/null || true)"
+  if [[ -z "$current" ]]; then
+    echo "Codexの索引から今の名前を読めませんでした"
+    return 1
+  fi
+  [[ "$current" == "$name" ]] && return 0
+
+  codex_thread_name_set "$thread" "$name"
 }

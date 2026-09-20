@@ -125,6 +125,7 @@ export function PlanApprovalPanel({
         remoteControlUrl={remoteControlUrl}
         deliveryStatus={request.deliveryStatus}
         deliveryExitCode={request.deliveryExitCode}
+        deliverySummary={request.deliverySummary}
       />
     );
   }
@@ -275,12 +276,45 @@ export function PlanApprovalPanel({
   );
 }
 
+/**
+ * 判断が実際にセッションへ届いたかの1行。**待ち受けの形がエージェントで違う**ので、
+ * ここも2系統になる。
+ *
+ * - Claude Code: フックが`GET …/plan/decision`で取りに来て、処理の結果を`report_delivery`で
+ *   返す（`PROCESSED`・`PROCESS_FAILED`・`COMMUNICATION_FAILED`・`DECISION_OBSERVED`）
+ * - Codex: 取りに来ない（#3218）。issue-deckが`INSTRUCTION`ジョブを積めたかだけを書く
+ *   （`CODEX_QUEUED`・`CODEX_QUEUE_FAILED`。`src/lib/dispatch/codex-decision-notify.ts`）
+ */
+function describeDelivery(
+  status: string | null | undefined,
+  exitCode: number | null | undefined,
+  summary: string | null | undefined,
+): string {
+  switch (status) {
+    case "CODEX_QUEUED":
+      return "Codexのセッションへ継続指示を積みました。次のターンで再開します。";
+    case "CODEX_QUEUE_FAILED":
+      return `Codexのセッションへ継続指示を積めませんでした（${summary ?? "理由不明"}）。端末から続きを指示してください。`;
+    case "PROCESSED":
+      return "サブPCのセッション側から処理完了の報告を受けました。";
+    case "PROCESS_FAILED":
+      return `サブPCは判断を取得しましたが、セッション処理が失敗しました（終了コード: ${exitCode ?? "不明"}）。`;
+    case "COMMUNICATION_FAILED":
+      return "サブPCとの通信に失敗したため、判断の処理結果を確認できません。";
+    case "DECISION_OBSERVED":
+      return "サブPCが判断を取得しました。セッション側の処理完了報告を待っています。";
+    default:
+      return "サブPCからの取得・処理完了報告を待っています。";
+  }
+}
+
 function PlanDecisionResult({
   decision,
   hostLabel,
   remoteControlUrl,
   deliveryStatus,
   deliveryExitCode,
+  deliverySummary,
 }: {
   decision: "approve" | "revise" | "defer" | "expired";
   hostLabel: string;
@@ -288,6 +322,7 @@ function PlanDecisionResult({
   remoteControlUrl: string | null;
   deliveryStatus?: string | null;
   deliveryExitCode?: number | null;
+  deliverySummary?: string | null;
 }) {
   const tone =
     decision === "approve"
@@ -335,16 +370,7 @@ function PlanDecisionResult({
       </div>
       {(decision === "approve" || decision === "revise") && (
         <p className="border-t border-current/15 pt-2 text-[11px] leading-relaxed">
-          {deliveryStatus === "PROCESSED"
-            ? "サブPCのセッション側から処理完了の報告を受けました。"
-            : deliveryStatus === "PROCESS_FAILED"
-              ? `サブPCは判断を取得しましたが、セッション処理が失敗しました（終了コード: ${deliveryExitCode ?? "不明"}）。`
-              : deliveryStatus === "COMMUNICATION_FAILED"
-                ? "サブPCとの通信に失敗したため、判断の処理結果を確認できません。"
-                : deliveryStatus === "DECISION_OBSERVED"
-                  ? "サブPCが判断を取得しました。セッション側の処理完了報告を待っています。"
-                  : "サブPCからの取得・処理完了報告を待っています。"
-          }
+          {describeDelivery(deliveryStatus, deliveryExitCode, deliverySummary)}
         </p>
       )}
       {answerElsewhere && remoteControlUrl && (

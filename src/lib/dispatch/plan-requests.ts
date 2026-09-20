@@ -150,6 +150,39 @@ export async function reportSessionPlanDelivery(params: {
 }
 
 /**
+ * Codexのセッションへ継続指示を積んだ結果を、そのまま配送の記録として残す（#3218）。
+ *
+ * **Codexでは`submit-plan.sh`が判断を取りに来ない。** 待たずに登録だけして返すよう変えたため、
+ * `pollSessionPlanRequest`も`reportSessionPlanDelivery`も呼ばれない——何もしないと画面の
+ * 計画パネルが「サブPCからの取得・処理完了報告を待っています。」を出したまま固まる。
+ * 届けたのは`INSTRUCTION`ジョブなので、**積めたかどうか**をここで1回だけ書いて終わりにする。
+ *
+ * ジョブがその後どうなったか（pollerが`codex queue`を打てたか）はディスパッチのキューに出る。
+ * **そこまでをこの行へ写しに行かない**——2か所で同じことを追う仕掛けが増えるだけになる。
+ */
+export async function recordSessionPlanCodexDelivery(params: {
+  id: string;
+  /** `INSTRUCTION`ジョブを積めたか */
+  queued: boolean;
+  /** 積めなかった理由。画面にそのまま出る */
+  summary: string | null;
+  now?: Date;
+}): Promise<void> {
+  const now = params.now ?? new Date();
+  await db.sessionPlanRequest.updateMany({
+    where: { id: params.id, deliveryReportedAt: null },
+    data: {
+      deliveredAt: now,
+      decisionObservedAt: now,
+      deliveryStatus: params.queued ? "CODEX_QUEUED" : "CODEX_QUEUE_FAILED",
+      deliveryReportedAt: now,
+      deliveryExitCode: params.queued ? 0 : 2,
+      deliverySummary: params.summary?.slice(0, 500) ?? null,
+    },
+  });
+}
+
+/**
  * セッションが待つのをやめたことを書き込み、**そのうえで最後にもう一度結論を返す**（#2108）。
  *
  * 呼ぶのは`scripts/session-notify.sh`——issue-deckへ届かない状態が続いて待ちを降りるとき。

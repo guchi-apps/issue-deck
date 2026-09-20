@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Codexの質問をissue-deckへ登録し、Issue詳細からの回答を待つ（#2579）。
+# 質問をissue-deckへ登録する（#2579）。
+#
+# **Codex（`ISSUE_DECK_AGENT=codex`）では登録だけして返る**（#3218）。回答はpollerが
+# `codex queue`で次のターンとして届ける。それ以外では、従来どおり回答が出るまでここで待つ。
 
 set -euo pipefail
 
@@ -12,9 +15,10 @@ usage() {
   cat >&2 <<'EOF'
 Usage: scripts/submit-question.sh <questions-json-file>
 
-質問をissue-deckへ登録し、画面からの回答を待ちます。
+質問をissue-deckへ登録します。Codexでは登録だけして返り、回答は次のターンとして届きます。
+それ以外では画面からの回答を待ちます。
 質問ファイルはAskUserQuestionと同じquestions配列のJSONです。
-終了コード: 0=回答（stdoutにanswers JSON）、2=端末で回答、3=期限切れ・通信失敗
+終了コード: 0=登録（Codex）／回答（stdoutにanswers JSON）、2=端末で回答、3=期限切れ・通信失敗
 EOF
 }
 
@@ -169,6 +173,20 @@ REQUEST_ID="$(json_field "$RESPONSE" questionRequestId)"
   echo "Error: 質問の返事待ちを作れませんでした" >&2
   exit 3
 }
+
+# **Codexでは待たない**（#3218。理由は`submit-plan.sh`の同じ場所を参照）。Codexはシェルの
+# 実行を30秒で打ち切って完了と解釈しターンを終えるため、ここで待ち続けても回答を受け取る当事者が
+# いない。回答が決まったら、issue-deckが`INSTRUCTION`ジョブを積み、pollerが`codex queue`で
+# 次のターンを起こす（`src/lib/dispatch/codex-decision-notify.ts`）。
+#
+# **回答そのものはIssueコメントに残る**（`buildSessionQuestionAnswerCommentBody`）。次のターンで
+# そこを読む——`DispatchJob.instruction`は改行なし500字までで、回答のJSONは載せられない。
+if [[ "${ISSUE_DECK_AGENT:-}" == "codex" ]]; then
+  echo "質問をissue-deckへ登録しました。Issue詳細に回答フォームが出ています。"
+  echo "回答はこのコマンドでは待ちません。回答は新しいターンとして届くので、このターンはここで終えてください。"
+  echo "**回答を待たずに、自分で決めて作業を進めないでください。**"
+  exit 0
+fi
 
 echo "質問をissue-deckへ登録しました。Issue詳細からの回答を待っています。" >&2
 DEADLINE=$((SECONDS + WAIT_SECONDS))

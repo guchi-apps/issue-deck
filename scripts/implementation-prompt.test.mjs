@@ -145,7 +145,11 @@ describe("実装プロンプトの生成", () => {
     expect(supplement).toContain(
       "`{{ISSUE_DECK_SCRIPTS_DIR}}/submit-question.sh <質問JSONファイル>`を実行してください",
     );
-    expect(supplement).toContain("標準出力のanswers JSON");
+    // #3218: Codexは30秒でシェルを打ち切ってターンを終えるため、回答を待てない。
+    // 登録だけして返り、回答は新しいターンとして届く
+    expect(supplement).toContain("計画と同じく回答は待たず、登録できた時点で`0`で返ります");
+    expect(supplement).toContain("最新のコメントに\n  ある回答を読んでから続けます");
+    expect(supplement).not.toContain("標準出力のanswers JSON");
     expect(supplement).not.toContain("確認が必要なときは端末で質問し");
   });
 
@@ -155,7 +159,7 @@ describe("実装プロンプトの生成", () => {
       "utf8",
     );
     expect(supplement).toContain("「計画を`gh issue comment`で手動投稿する」という指示は実行しないでください");
-    expect(supplement).toContain("subPCのセッションへ届きません");
+    expect(supplement).toContain("サブPCのセッションへ届きません");
     expect(supplement).toContain(
       "**必ず**`{{ISSUE_DECK_SCRIPTS_DIR}}/submit-plan.sh <計画ファイル>`を実行してください",
     );

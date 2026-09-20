@@ -193,10 +193,20 @@ source "$SCRIPT_DIR/lib/session-resume.sh"
 source "$SCRIPT_DIR/lib/session-tool-call-stall.sh"
 # shellcheck source=scripts/lib/session-codex-turn-stall.sh
 source "$SCRIPT_DIR/lib/session-codex-turn-stall.sh"
+# Codexのセッションの作業ステップを転記から`.step`へ書く（#3213）。Codexは`PostToolUse`フックを
+# 繋いでおらず、フックが書くはずの`.step`が空のままだった。分類は`lib/session-step.sh`。
+# shellcheck source=scripts/lib/session-step.sh
+source "$SCRIPT_DIR/lib/session-step.sh"
+# shellcheck source=scripts/lib/session-codex-step.sh
+source "$SCRIPT_DIR/lib/session-codex-step.sh"
 # Codexのセッションへの追加指示（#2519）。**`send-keys`を使わない**ので3段階プロトコルの
 # 外側に置いてある（`codex queue`はTUIのキー入力を経由しない）。
 # shellcheck source=scripts/lib/codex-queue.sh
 source "$SCRIPT_DIR/lib/codex-queue.sh"
+# Codexのセッション名を`<リポジトリ名> #<Issue番号>`へ揃え直す（#3220）。`SessionStart`で
+# 付けた名前がモデルの自動命名で消えると、ChatGPTアプリのリモート制御からIssueを選べなくなる。
+# shellcheck source=scripts/lib/codex-thread-name.sh
+source "$SCRIPT_DIR/lib/codex-thread-name.sh"
 # メモリ・SWAPの逼迫で起動を見送るかの判定（#2095）。**判定だけを別に持つ**のは、
 # 壊れると「起動が永久に止まる」か「逼迫しても止まらない」のどちらかになる境界で、
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
@@ -2146,6 +2156,37 @@ session_codex_thread_json() {
   fi
 }
 
+# Codexのセッション名を`<リポジトリ名> #<Issue番号>`へ揃え直す（#3220）。
+#
+# 名前は`SessionStart`のフックが1回付けるが、**その2〜6秒後にモデルの自動命名で上書きされる**
+# （`lib/codex-thread-name.sh`の「付けた名前は、モデルの自動命名で上書きされる」）。繋いだ
+# ChatGPTアプリに出るのはホストのCodexセッション全部の一覧（#2524・#2537）で、見分ける手段は
+# 名前しかないため、ここで揃え直す。
+#
+# **判定だけなら索引を読むだけで済む**（`codex`を起こさない）ので、巡回のたびに呼んでよい。
+# 実際に付け直すのはずれているときだけで、付け直した結果も索引に入るため次の巡では何も起きない。
+#
+# **切り離して走らせる。** 名前が付くのを待つ価値は無く（付かなくてもセッションは動く）、
+# 1巡が`codex app-server`の応答待ちで止まるほうが困る。`session-notify.sh`の
+# `name_codex_thread`と同じ形。
+sync_codex_thread_name() {
+  local session="$1" repo="$2" issue="$3" thread
+  [[ "${CODEX_THREAD_NAME_SYNC_ENABLED:-1}" == "1" ]] || return 0
+  [[ -n "$session" && -n "$repo" && -n "$issue" ]] || return 0
+  [[ "$(session_state_agent_kind "$session" 2>/dev/null || true)" == "codex" ]] || return 0
+  thread="$(session_state_read_codex_thread "$session" 2>/dev/null || true)"
+  [[ -n "$thread" ]] || return 0
+
+  local runner=(setsid)
+  command -v setsid >/dev/null 2>&1 || runner=()
+  "${runner[@]}" bash -c '
+    source "$1/lib/codex-thread-name.sh" || exit 0
+    codex_thread_name_sync "$2" "$3" >/dev/null 2>&1 || true
+  ' _ "$SCRIPT_DIR" "$thread" "$repo #$issue" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+
 # そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
 #
 # **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
@@ -2170,6 +2211,11 @@ report_sessions() {
 
     # owner/repo を戻せないセッションは送らない（他リポジトリ・曖昧な同名）。
     full_name="$(resolve_session_repository "$session_name" "$repo_name")" || continue
+
+    # Codexは作業ステップを転記から起こす（#3213）。**書けなくても報告は止めない**
+    session_codex_step_sync "$session_name" 2>/dev/null || true
+    # Codexのセッション名は自動命名で消える（#3220）。**揃え直せなくても報告は止めない**
+    sync_codex_thread_name "$session_name" "$repo_name" "$issue_number" 2>/dev/null || true
 
     local dead_json status_json
     if [[ "$pane_dead" == "1" ]]; then dead_json=true; else dead_json=false; fi

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -104,26 +104,23 @@ describe("submit-plan.sh", () => {
     expect(result.stderr).not.toContain("影響範囲を追記してください");
   });
 
-  it("Codexでは承認後の冪等な継続指示を同じスレッドへ積む", async () => {
-    const queueLog = path.join(workDir, "queue.log");
-    // 状態ディレクトリはスクリプト側が作らない読み取り専用の入力である。
-    mkdirSync(stateDir, { recursive: true });
-    writeFileSync(path.join(stateDir, `${tmuxSession}.codex-thread`), `${codexThread}\n`, "utf8");
-    const result = await run({
-      ISSUE_DECK_AGENT: "codex",
-      ISSUE_DECK_TMUX_SESSION: tmuxSession,
-      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
-      ISSUE_DECK_CODEX_COMMAND: codexCommand,
-      TEST_CODEX_QUEUE_LOG: queueLog,
-    });
+  // #3218: Codexはシェルの実行を30秒で打ち切って完了と解釈しターンを終えるため、
+  // ここで待っても判断を受け取る当事者がいない。登録だけして返し、判断はpollerが
+  // `codex queue`で次のターンとして届ける
+  it("Codexでは判断を待たず、登録だけして終了コード0で返す", async () => {
+    const result = await run({ ISSUE_DECK_AGENT: "codex" });
     expect(result.code).toBe(0);
-    const queued = readFileSync(queueLog, "utf8");
-    expect(queued).toContain(`--thread\n${codexThread}`);
-    expect(queued).toContain("すでに同じ作業を進めているか完了している場合は、重複して実施せず");
+    expect(result.stdout).toContain("判断はこのコマンドでは待ちません");
+    expect(result.stdout).toContain("承認を待たずに実装へ進まないでください");
+    // 登録の1件だけで、判断のポーリングも配送の報告も行わない
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("/api/dispatch/sessions/plan");
+    expect(JSON.parse(requests[0].body)).toMatchObject({ agent: "codex" });
   });
 
-  it("Codexでは修正依頼後にも重複を避ける継続指示を積む", async () => {
-    decisions = [{ status: "REVISION_REQUESTED", revisionText: "影響範囲を追記してください" }];
+  // #3218: セッションの内側からは`~/.codex`が読み取り専用で`codex queue`を打てない。
+  // 打とうとすること自体をやめたので、`codex`コマンドは1度も呼ばれない
+  it("Codexでもセッションの内側から`codex queue`を打たない", async () => {
     const queueLog = path.join(workDir, "queue.log");
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(path.join(stateDir, `${tmuxSession}.codex-thread`), `${codexThread}\n`, "utf8");
@@ -135,20 +132,7 @@ describe("submit-plan.sh", () => {
       TEST_CODEX_QUEUE_LOG: queueLog,
     });
     expect(result.code).toBe(0);
-    expect(readFileSync(queueLog, "utf8")).toContain("すでに修正済み、再送済み、または後続の判断を処理している場合は、重複して実施せず");
-  });
-
-  it("CodexのスレッドUUIDが無くても承認結果は返す", async () => {
-    const result = await run({
-      ISSUE_DECK_AGENT: "codex",
-      ISSUE_DECK_TMUX_SESSION: tmuxSession,
-      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
-      ISSUE_DECK_CODEX_COMMAND: codexCommand,
-      TEST_CODEX_QUEUE_LOG: path.join(workDir, "queue.log"),
-    });
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("承認されました");
-    expect(result.stderr).toContain("スレッドUUIDが未取得");
+    expect(existsSync(queueLog)).toBe(false);
   });
 
   it("WAITINGのあとに承認されるまでポーリングする", async () => {

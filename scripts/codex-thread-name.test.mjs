@@ -276,3 +276,112 @@ describe("session-notify.sh の SessionStart（#2540）", () => {
     expect(sentRequests()).toEqual([]);
   });
 });
+
+/**
+ * 自動命名で消えた名前を、pollerの巡回から付け直す（#3220）。
+ *
+ * **#2540の「モデルの自動命名に上書きされない」は誤りだった。** 実機（codex-cli 0.152.1）では
+ * `SessionStart`で付けた`<リポジトリ名> #<番号>`が最初のターンの2〜6秒後に消え、ChatGPT
+ * アプリのリモート制御の一覧からIssueを選べなくなる。ここが崩れると同じ状態へ戻る。
+ *
+ * 判定に使う索引（`session_index.jsonl`）はCodexの内部仕様なので、**読めないときは何もしない**
+ * （名前を当て推量で書き換えない）ことも一緒に固定する。
+ */
+describe("codex_thread_name_sync（#3220）", () => {
+  const thread = "01a0bf16-9325-7202-bc94-e899d0072f89";
+
+  /**
+   * 索引（`session_index.jsonl`）を置く。`names`は古い順＝実機と同じ追記順。
+   * `{ raw: "…" }`を混ぜると、その文字列をそのまま1行として書く（壊れた行の再現用）。
+   */
+  function writeIndex(names, id = thread) {
+    const file = path.join(workDir, "session_index.jsonl");
+    writeFileSync(
+      file,
+      names
+        .map((name) =>
+          typeof name === "string"
+            ? JSON.stringify({ id, thread_name: name, updated_at: "2026-09-20T13:52:05Z" })
+            : name.raw,
+        )
+        .join("\n") + "\n",
+    );
+    return file;
+  }
+
+  function runSync(env) {
+    return runBash(`codex_thread_name_sync "${thread}" "asset-manager #504"; echo "status=$?"`, env);
+  }
+
+  it("自動命名に変わっていたら付け直す", () => {
+    const stub = writeCodexStub("ok");
+    const index = writeIndex(["出力言語は日本語です…", "asset-manager #504", "アプリアイコンを変更"]);
+
+    const result = runSync({ ISSUE_DECK_CODEX_COMMAND: stub, ISSUE_DECK_CODEX_SESSION_INDEX: index });
+
+    expect(result.stdout).toContain("status=0");
+    expect(sentRequests()).toEqual([
+      { id: 2, method: "thread/name/set", params: { threadId: thread, name: "asset-manager #504" } },
+    ]);
+  });
+
+  // **同じIDの行は何度も増える。** 最後の行＝いまの名前で、古い行を見ると毎巡付け直してしまう
+  it("揃っているときは何も送らない", () => {
+    const stub = writeCodexStub("ok");
+    const index = writeIndex(["アプリアイコンを変更", "asset-manager #504"]);
+
+    const result = runSync({ ISSUE_DECK_CODEX_COMMAND: stub, ISSUE_DECK_CODEX_SESSION_INDEX: index });
+
+    expect(sentRequests()).toEqual([]);
+    expect(result.stdout).toContain("status=0");
+  });
+
+  it("索引が無いときは何もしない（1）", () => {
+    const stub = writeCodexStub("ok");
+
+    const result = runSync({
+      ISSUE_DECK_CODEX_COMMAND: stub,
+      ISSUE_DECK_CODEX_SESSION_INDEX: path.join(workDir, "no-such-index.jsonl"),
+    });
+
+    expect(sentRequests()).toEqual([]);
+    expect(result.stdout).toContain("status=1");
+  });
+
+  // 形が変わって読めなくなったら、名前は触らない（自動命名のままになるだけ）
+  it("索引を解けないときは何もしない（1）", () => {
+    const stub = writeCodexStub("ok");
+    const index = writeIndex([{ raw: `{"id":"${thread}","thread_nam` }]);
+
+    const result = runSync({ ISSUE_DECK_CODEX_COMMAND: stub, ISSUE_DECK_CODEX_SESSION_INDEX: index });
+
+    expect(sentRequests()).toEqual([]);
+    expect(result.stdout).toContain("status=1");
+  });
+
+  // 別のセッションの行に引っかかって、他人の名前を書き換えない
+  it("索引に自分の行が無いときは何もしない（1）", () => {
+    const stub = writeCodexStub("ok");
+    const index = writeIndex(["ops-dashboard #302"], "01a0bee5-963f-7460-bff7-4d49361c133d");
+
+    const result = runSync({ ISSUE_DECK_CODEX_COMMAND: stub, ISSUE_DECK_CODEX_SESSION_INDEX: index });
+
+    expect(sentRequests()).toEqual([]);
+    expect(result.stdout).toContain("status=1");
+  });
+
+  // 壊れたときに黙って止められる逃げ道（`lib/session-codex-step.sh`と同じ持たせ方）
+  it("スイッチを0にすると付け直さない（1）", () => {
+    const stub = writeCodexStub("ok");
+    const index = writeIndex(["アプリアイコンを変更"]);
+
+    const result = runSync({
+      ISSUE_DECK_CODEX_COMMAND: stub,
+      ISSUE_DECK_CODEX_SESSION_INDEX: index,
+      ISSUE_DECK_CODEX_NAME_SYNC: "0",
+    });
+
+    expect(sentRequests()).toEqual([]);
+    expect(result.stdout).toContain("status=1");
+  });
+});
