@@ -109,11 +109,11 @@ describe("MergePendingPullRequestsの「更新」（#2175）", () => {
       />,
     );
 
-    const rail = document.querySelector("[aria-label='CI・Claudeのレビュー・マージの状況']");
+    const rail = document.querySelector("[aria-label='CI・コンフリクト・レビューの状況']");
     expect(Array.from(rail?.children ?? []).map((slot) => slot.textContent)).toEqual([
-      "CI通過",
-      "レビュー失敗",
-      "マージ待ち",
+      "CI✔",
+      "コンフリクト実施中",
+      "レビュー×",
     ]);
     // カード全体が<button>なので、中に<a>を置くとHTMLとして不正になる
     expect(rail?.querySelector("a")).toBeNull();

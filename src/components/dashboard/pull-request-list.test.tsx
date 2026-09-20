@@ -113,7 +113,7 @@ describe("PullRequestList", () => {
   it("CI通過済みのPRにはマージボタンを出す", () => {
     renderList([makePullRequest({ ciState: "success" })]);
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
-    expect(screen.getByText("CI通過")).toBeTruthy();
+    expect(screen.getByTitle("CI: CI通過")).toBeTruthy();
   });
 
   it("CI実行中・Auto-merge有効のPRにもマージボタンを出す（#1087）", () => {
@@ -122,44 +122,22 @@ describe("PullRequestList", () => {
       makePullRequest({ number: 3, autoMergeEnabled: true }),
     ]);
     expect(screen.getAllByRole("button", { name: "マージする" })).toHaveLength(2);
-    expect(screen.getByText("CI実行中")).toBeTruthy();
-    expect(screen.getByText("自動マージ")).toBeTruthy();
-  });
-
-  it("自動でマージされないPRのマージの枠は「マージ待ち」になる（#1469・#2942）", () => {
-    renderList([
-      // 対応Issueに00.check-userが付いた実装PR
-      makePullRequest({ number: 1, linkedIssueCheckUser: true }),
-      // develop→mainのリリースPR（常に人がマージする）
-      makePullRequest({
-        number: 2,
-        kind: "release",
-        baseRef: "main",
-        headRef: "develop",
-        linkedIssueNumber: null,
-      }),
-    ]);
-    expect(screen.getAllByText("マージ待ち")).toHaveLength(2);
-  });
-
-  it("判定が確定していないPRには出さない（#1469）", () => {
-    renderList([makePullRequest({ linkedIssueCheckUser: false })]);
-    expect(screen.queryByText("マージ待ち")).toBeNull();
+    expect(screen.getAllByText("実施中").length).toBeGreaterThan(0);
   });
 
   // 一覧も`mergeable`を持つようになった（#1742）。CI通過だけを見て「入れられる」と読めてしまう
   // 状態を無くすのが目的なので、バッジと自動解消ボタンをここで確かめる。
   it("コンフリクトしているPRはその旨と自動解消ボタンを出し、マージボタンを出さない（#1742）", () => {
     renderList([makePullRequest({ ciState: "success", mergeable: false })]);
-    expect(screen.getByText("CI通過")).toBeTruthy();
-    expect(screen.getByText("コンフリクト")).toBeTruthy();
+    expect(screen.getByTitle("CI: CI通過")).toBeTruthy();
+    expect(screen.getByTitle(/コンフリクト: baseブランチとコンフリクトしています/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
-  it("コンフリクトの判定が出ていないPRには何も出さない（#1742）", () => {
+  it("コンフリクトの判定が出ていないPRは確認中で表示する（#1742）", () => {
     renderList([makePullRequest({ mergeable: null })]);
-    expect(screen.queryByText("コンフリクト")).toBeNull();
+    expect(screen.getByTitle("コンフリクト: コンフリクトの有無を確認しています。")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
   });
@@ -242,7 +220,7 @@ describe("PullRequestList", () => {
       "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     );
     // 失敗している事実は打ち消さず、その隣に重ねて出す。
-    expect(screen.getByText("CI失敗")).toBeTruthy();
+    expect(screen.getByTitle("CI: CI失敗")).toBeTruthy();
     expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
       true,
     );
@@ -268,7 +246,7 @@ describe("PullRequestList", () => {
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
     renderList([makePullRequest({ draft: true })]);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
-    expect(screen.getByText("ドラフト")).toBeTruthy();
+    expect(screen.getByTitle("CI: ドラフトのPRでは、CI状態もマージ可否の判定も取得していません。")).toBeTruthy();
   });
 
   it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
@@ -284,26 +262,6 @@ describe("PullRequestList", () => {
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
-  it("判定中はマージの枠を「判定中」にし、実行ログへのリンクにする（#2059・#2942）", () => {
-    // 「CI通過」なのにボタンが「判定中」で押せない理由は、`title`だけではスマホで読めない。
-    // レールでは幅が足りないので段の名前（「Claudeがレビュー中」）は`title`へ譲る。
-    renderList([
-      makePullRequest({
-        ciState: "success",
-        mergeJudgement: {
-          state: "pending",
-          step: "claude-review",
-          runUrl: "https://github.com/owner/repo/actions/runs/1/job/2",
-          aiReview: AI_REVIEW_NONE,
-        },
-      }),
-    ]);
-    const badge = screen.getByRole("link", { name: /判定中/ }) as HTMLAnchorElement;
-    expect(badge.href).toBe("https://github.com/owner/repo/actions/runs/1/job/2");
-    expect(badge.title).toContain("Claudeがレビュー中");
-    expect(screen.getByText("CI通過")).toBeTruthy();
-  });
-
   it("判定が終わっていれば判定中のバッジは出さない（#2059）", () => {
     renderList([
       makePullRequest({
@@ -312,7 +270,7 @@ describe("PullRequestList", () => {
       }),
     ]);
     expect(screen.queryByText("マージ可否を判定中")).toBeNull();
-    expect(screen.queryByText("Claudeがレビュー中")).toBeNull();
+    expect(screen.queryByText("レビュー実施中")).toBeNull();
   });
 
   it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {

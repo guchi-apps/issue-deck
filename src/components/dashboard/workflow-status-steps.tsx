@@ -148,7 +148,7 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * 「developへマージ」段の内訳（#2816）。一覧の行では**添える字の1語だけ**を使う。
    *
    * 「developへマージ」はPRを作った瞬間からマージされるまで表示が変わらず、CIを待って
-   * いるのかClaudeのレビューを待っているのかが一覧から読めなかった。4段のチップとしての
+   * いるのかレビューを待っているのかが一覧から読めなかった。4段のチップとしての
    * 内訳はIssue詳細の`WorkflowStatusSteps`が出す。
    */
   pullRequestProgress?: IssuePullRequestProgress | null;
@@ -440,7 +440,7 @@ export function WorkflowStepBadge({
     qaAnswerPending: showQaAnswerPending,
     now,
   }) ||
-    // PRのCI・Claudeのレビューが動いている間も掃く（#2816）。ローカルセッションはPRを作った
+    // PRのCI・レビューが動いている間も掃く（#2816）。ローカルセッションはPRを作った
     // 時点で終わるため、ここを足さないと**いちばん待つ数分〜十数分だけバーが止まって見える**。
     // 承認待ち（人待ち）のときは足さない——`isWorkflowBadgeSpinning`が人待ちを回さないのと同じ線
     (prProgress?.tone === "running" && !approvalPending);
@@ -485,7 +485,7 @@ export function WorkflowStepBadge({
   // 分かっているときは、進捗Status（「計画検討中」）と実行先（「サブPC」）を省いてそれだけを
   // 見せる（#2782）。両方を並べると`max-w-[7rem]`（326行目）の箱に収まりきらず、見たい
   // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す。
-  // **PRの内訳（「Claudeがレビュー中」）はそれらより優先する**（#2816）。この段で待っている
+  // **PRの内訳（「レビュー実施中」）はそれらより優先する**（#2816）。この段で待っている
   // のはPR側の処理で、そこでのローカルセッションは既に役目を終えている
   const stepText = prProgress
     ? prProgress.label
@@ -604,17 +604,17 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
   );
 }
 
-/** 内訳の段の見た目（#2816）。`pending`はまだ来ていない段なので、輪郭だけにして目を引かない */
-const PR_STEP_CLASS: Record<IssuePullRequestStepState, string> = {
-  done: "border-foreground/25 text-foreground",
-  current: "border-primary bg-primary/10 text-primary font-semibold",
-  failed: "border-destructive bg-destructive/10 text-destructive font-semibold",
-  pending: "border-border text-muted-foreground",
+/** PR進捗の状態記号。工程名と状態を分け、色だけに頼らず読めるようにする。 */
+const PR_STEP_STATUS: Record<IssuePullRequestStepState, { label: string; className: string }> = {
+  done: { label: "✔", className: "text-emerald-700 dark:text-emerald-400" },
+  current: { label: "実施中", className: "text-primary" },
+  failed: { label: "×", className: "text-destructive" },
+  pending: { label: "—", className: "text-muted-foreground" },
 };
 
 /**
- * 「developへマージ」段の内訳（#2816）。**実装完了 → CI → Claudeのレビュー → マージ**を
- * 1行のチップとして並べ、その上に「いま何を待っているか」を1語で出す。
+ * 「developへマージ」段の内訳（#2816）。工程ごとに✔・×・実施中を並べ、その上に
+ * 「いま何を待っているか」を1語で出す。
  *
  * ここを足すまで、Issue詳細でCI・レビューの進み具合を見るには対応PRのセクション（既定で
  * 畳んである）を開くしかなかった。**セクション側は消さない**——あちらはPRごとの内訳と
@@ -646,30 +646,13 @@ function PullRequestProgressSteps({ progress }: { progress: IssuePullRequestProg
           {progress.label}
         </span>
       </div>
-      <ul className="flex flex-wrap gap-1.5" aria-label="developへマージの内訳">
+      <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="developへマージの内訳">
         {progress.steps.map((step) => {
-          // マージの段だけは、現在地でも動いているのは機械ではなく順番待ち（#2816）。
-          // 回すと「あと少しで終わる」に読めるので、砂時計＋人待ちの琥珀にする
-          const waiting = step.key === "merge" && step.state === "current";
+          const status = PR_STEP_STATUS[step.state];
           return (
-            <li
-              key={step.key}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-                waiting
-                  ? "border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400"
-                  : PR_STEP_CLASS[step.state],
-              )}
-            >
-              {step.state === "done" && <Check className="size-3" aria-hidden="true" />}
-              {step.state === "current" &&
-                (waiting ? (
-                  <Hourglass className="size-3" aria-hidden="true" />
-                ) : (
-                  <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-                ))}
-              {step.state === "failed" && <CircleAlert className="size-3" aria-hidden="true" />}
-              {step.label}
+            <li key={step.key} className="inline-flex items-center gap-1.5">
+              <span className="font-medium">{step.label}</span>
+              <span className={cn("font-semibold", status.className)}>{status.label}</span>
             </li>
           );
         })}

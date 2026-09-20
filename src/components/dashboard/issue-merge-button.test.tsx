@@ -55,7 +55,7 @@ describe("IssueMergeButton", () => {
     const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     // なぜ押せないかが分かるよう理由をtitleに出す。
-    expect(button.title).toContain("claude-review-develop");
+    expect(button.title).toContain("00.check-user");
   });
 
   it("判定が終わっていれば押せる（#1968）", () => {

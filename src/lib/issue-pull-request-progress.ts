@@ -2,19 +2,13 @@ import type { AiReviewState, MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { CiState } from "@/lib/github/release-api";
 import { type ProgressStatusKey } from "@/lib/issue-progress";
-import {
-  AI_REVIEW_SETTLED_LABEL,
-  AI_REVIEW_SHORT_LABEL,
-  CI_STATE_LABEL,
-  MERGE_JUDGEMENT_STEP_LABEL,
-  mergeJudgementLabel,
-} from "@/lib/pull-request-list";
+import { CI_STATE_LABEL } from "@/lib/pull-request-list";
 
 /**
  * 「developへマージ」段の中で、いま何が終わっていて何を待っているか（#2816）。
  *
  * 進捗ステップの`Develop PR`は、PRを作った瞬間からマージされるまで同じ表示のままだった。
- * 実際にその間に動いているのは**PRの作成（＝実装完了）→ CI → Claudeのレビュー → マージ**の
+ * 実際にその間に動いているのは**PRの作成（＝実装完了）→ CI → コンフリクト確認 → レビュー → マージ**の
  * 4つで、待っている人が知りたいのは「どれで止まっているか」。材料
  * （`ciState`・`mergeJudgement`・`aiReview`）はPR画面が既に取っているものをそのまま使い、
  * **GitHub APIは1回も増やさない。**
@@ -25,7 +19,7 @@ import {
  */
 
 /** 内訳の段。`opened`（実装完了）だけはPRが在ること自体が根拠なので常に済み */
-export type IssuePullRequestStepKey = "opened" | "ci" | "ai-review" | "merge";
+export type IssuePullRequestStepKey = "opened" | "ci" | "conflict" | "ai-review" | "merge";
 
 /**
  * 段の状態。`failed`は「その段で止まっている」で、`pending`は「まだそこまで来ていない」。
@@ -40,9 +34,7 @@ export type IssuePullRequestStep = {
    * 幅の狭い場所（PR一覧のステータスレール。#2942）に出す短い言い回し。短くする必要が無い段では
    * `label`と同じ文字列を入れる。
    *
-   * **新しい言葉を作らず、`label`から主語（「Claudeの」）を落としただけにする。**
-   * `REPAIR_KIND_RUNNING_SHORT_LABEL`と同じ扱いで、長い方を`title`に出せば全文も読める。
-   * 列そのものに「Claudeのレビュー」と見出しが付くため、短い方でも何の話かは失われない。
+   * 狭い場所でも状態を省略しないため、現在は`label`と同じ文字列を入れる。
    */
   shortLabel: string;
   state: IssuePullRequestStepState;
@@ -110,15 +102,14 @@ export type IssuePullRequestProgressSource = {
 };
 
 /**
- * Claudeのレビューの段に出す文言。`none`（check-runが無い）は段ごと落とすので入っていない。
- *
- * **写しを作らず、PR画面が持っている文言をそのまま組み立てる**（#2942）。以前はここに
- * `AI_REVIEW_SETTLED_LABEL`と同じ3語を書き写しており、同じ状態の呼び名が2か所にあった。
- * 短縮版（`AI_REVIEW_SHORT_LABEL`）を足すにあたって、写しの方を消してある。
+ * レビューの段に出す文言。実行するエージェントを限定しない。
+ * `none`（check-runが無い）は段ごと落とすので入っていない。
  */
 const AI_REVIEW_STEP_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
-  pending: MERGE_JUDGEMENT_STEP_LABEL["claude-review"],
-  ...AI_REVIEW_SETTLED_LABEL,
+  pending: "レビュー実施中",
+  passed: "レビュー完了",
+  skipped: "レビュー省略",
+  failed: "レビュー失敗",
 };
 
 /** マージの段に出す文言 */
@@ -224,6 +215,12 @@ export function buildIssuePullRequestProgress(
               ? "current"
               : "pending",
     },
+    {
+      key: "conflict",
+      label: "コンフリクト",
+      shortLabel: "コンフリクト",
+      state: mergeable === false ? "failed" : mergeable === true ? "done" : "current",
+    },
   ];
   // 判定のcheck-runが1件も無いリポジトリ（ワークフロー未配布・起動前・リリースPR）では
   // レビューの段を並べない。空の段を出すと「まだ来ていない」と読めてしまい、来ないものを
@@ -232,7 +229,7 @@ export function buildIssuePullRequestProgress(
     steps.push({
       key: "ai-review",
       label: AI_REVIEW_STEP_LABEL[aiReviewState],
-      shortLabel: AI_REVIEW_SHORT_LABEL[aiReviewState],
+      shortLabel: AI_REVIEW_STEP_LABEL[aiReviewState],
       state:
         aiReviewState === "failed"
           ? "failed"
@@ -243,12 +240,16 @@ export function buildIssuePullRequestProgress(
   }
   // マージの段が`current`になるのは、前の段が全部片付いて本当にマージだけが残ったとき。
   // 判定・CI・レビューのどれかが動いている間は`pending`のままにする——「マージ」と
-  // 「Claudeがレビュー中」が同時に光ると、どちらを待っているのか読めなくなる。
+  // 「レビュー実施中」が同時に光ると、どちらを待っているのか読めなくなる。
   // **止まっているとき（CI失敗・レビュー失敗・コンフリクト）も同じ**（#3144）。マージは人が
   // 押せる段ではなく、前の段が直るまで進めないので、琥珀の「マージ待ち」で光らせると
   // 止まっている原因（赤）とマージ待ち（琥珀）が並び、どちらが本当の状態か読めなくなる
   const beforeMergePending =
-    judgementPending || ciState === "pending" || aiReviewState === "pending" || stopKind !== null;
+    judgementPending ||
+    ciState === "pending" ||
+    mergeable === null ||
+    aiReviewState === "pending" ||
+    stopKind !== null;
   steps.push({
     key: "merge",
     label: merged ? MERGED_STEP_LABEL : MERGE_STEP_LABEL,
@@ -271,11 +272,10 @@ export function buildIssuePullRequestProgress(
     if (aiReviewState === "failed") {
       return { label: AI_REVIEW_STEP_LABEL.failed, tone: "attention" };
     }
+    if (mergeable === null) return { label: "コンフリクト確認中", tone: "running" };
     if (merged) return { label: MERGED_STEP_LABEL, tone: "running" };
     if (draft) return { label: "下書き", tone: "waiting" };
-    if (judgementPending) {
-      return { label: mergeJudgementLabel(mergeJudgement.step), tone: "running" };
-    }
+    if (judgementPending) return { label: "判定実施中", tone: "running" };
     if (ciState === "pending") return { label: CI_STATE_LABEL.pending, tone: "running" };
     return { label: "マージ待ち", tone: "waiting" };
   }

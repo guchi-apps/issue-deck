@@ -654,12 +654,12 @@ describe("isMergeJudgementPending", () => {
   });
 
   it("待っている段階を画面の文言へ言い換える（#2059）", () => {
-    expect(mergeJudgementLabel("claude-review")).toBe("Claudeがレビュー中");
+    expect(mergeJudgementLabel("claude-review")).toBe("レビュー実施中");
     expect(mergeJudgementLabel("wait-for-ci")).toBe("CIの完了待ち");
     // 段階を特定できないときも「何かを判定中」だと分かる文言へ縮退させる。
     expect(mergeJudgementLabel(null)).toBe("マージ可否を判定中");
-    expect(mergeJudgementReason("claude-review")).toContain("Claudeがレビュー中です");
-    expect(mergeJudgementReason(null)).toContain("claude-review-develop");
+    expect(mergeJudgementReason("claude-review")).toContain("レビュー実施中です");
+    expect(mergeJudgementReason(null)).toContain("マージ可否を判定中です");
   });
 
   it("判定中でも`mergeWarnings`は増やさない（止め方はボタンの無効化。#1968）", () => {

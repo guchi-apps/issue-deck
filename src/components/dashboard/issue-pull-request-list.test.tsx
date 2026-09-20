@@ -173,10 +173,10 @@ describe("IssuePullRequestList", () => {
         onMerge={async () => true}
       />,
     );
-    expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
+    expect(screen.getByText("レビュー実施中")).toBeTruthy();
   });
 
-  it("Claudeのレビューが終わった行はバッジを出す（#2150）", () => {
+  it("レビューが終わった行はバッジを出す（#2150）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
@@ -197,7 +197,7 @@ describe("IssuePullRequestList", () => {
         mergeApprovalPending={false}
       />,
     );
-    const badge = screen.getByText("Claudeのレビュー完了");
+    const badge = screen.getByText("レビュー完了");
     // 実行ログへ行けるようリンクにする（他のバッジと同じ形）
     expect(badge.closest("a")?.getAttribute("href")).toBe(
       "https://github.com/owner/repo/actions/runs/1/job/2",
@@ -205,7 +205,7 @@ describe("IssuePullRequestList", () => {
   });
 
   // 実行中の言い回しは「Claudeがレビュー中」が持っており、二重に出さない（#2150）。
-  it("Claudeのレビューが実行中の行には完了バッジを出さない（#2150）", () => {
+  it("レビューが実行中の行には完了バッジを出さない（#2150）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
@@ -223,8 +223,8 @@ describe("IssuePullRequestList", () => {
         mergeApprovalPending={false}
       />,
     );
-    expect(screen.queryByText(/Claudeのレビュー/)).toBeNull();
-    expect(screen.getByText("Claudeがレビュー中")).toBeTruthy();
+    expect(screen.queryByText(/レビュー完了/)).toBeNull();
+    expect(screen.getByText("レビュー実施中")).toBeTruthy();
   });
 
   it("コンフリクトしている行はバッジを出し、マージボタンを出さない（#2145）", () => {

@@ -517,7 +517,7 @@ export const MERGE_JUDGEMENT_PENDING_LABEL = "判定中";
 export const MERGE_JUDGEMENT_STEP_LABEL: Record<MergeJudgementStep, string> = {
   "wait-for-ci": "CIの完了待ち",
   "risk-check": "マージ可否を判定中",
-  "claude-review": "Claudeがレビュー中",
+  "claude-review": "レビュー実施中",
   "auto-merge": "自動マージの判定中",
 };
 
@@ -537,26 +537,26 @@ export function mergeJudgementLabel(step: MergeJudgementStep | null): string {
  * PCでマウスを載せたときに「押せない理由」まで読めるようにするため。
  */
 export function mergeJudgementReason(step: MergeJudgementStep | null): string {
-  return `${mergeJudgementLabel(step)}です（claude-review-develop）。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
+  return `${mergeJudgementLabel(step)}です。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
 }
 
 /**
- * バッジとして描く、Claudeのレビューの「終わった後」の状態（#2150）。
+ * バッジとして描く、レビューの「終わった後」の状態（#2150）。
  * `AiReviewState`から`pending`（実行中）と`none`（check-runが無い）を除いたもの。
  */
 export type AiReviewSettledState = Exclude<AiReviewState, "pending" | "none">;
 
 /**
- * Claudeのレビューの状態を表す、画面のバッジの文言（#2150）。
+ * レビューの状態を表す、画面のバッジの文言（#2150）。
  *
  * **`pending`は入っていない。** 実行中の言い回しは`MERGE_JUDGEMENT_STEP_LABEL`の
- * 「Claudeがレビュー中」が既に持っており、両方出すと同じことを2回言うことになる。
+ * 「レビュー実施中」が既に持っており、両方出すと同じことを2回言うことになる。
  * このバッジが引き受けるのは「終わった後」の3状態だけ。
  */
 export const AI_REVIEW_SETTLED_LABEL: Record<AiReviewSettledState, string> = {
-  passed: "Claudeのレビュー完了",
-  skipped: "Claudeのレビュー省略",
-  failed: "Claudeのレビュー失敗",
+  passed: "レビュー完了",
+  skipped: "レビュー省略",
+  failed: "レビュー失敗",
 };
 
 /**
@@ -580,11 +580,11 @@ export const AI_REVIEW_SHORT_LABEL: Record<Exclude<AiReviewState, "none">, strin
 
 /** バッジの`title`に出す説明（#2150）。PCでマウスを載せたときに、その状態の意味まで読めるようにする */
 export const AI_REVIEW_SETTLED_REASON: Record<AiReviewSettledState, string> = {
-  passed: "Claude Codeによるレビューが終わっています（claude-review-develop）。",
+  passed: "レビューが終わっています。",
   skipped:
-    "差分が小さくリスクのあるパスも含まれないため、Claude Codeによるレビューは実行されていません（claude-review-develop / risk-check）。",
+    "差分が小さくリスクのあるパスも含まれないため、レビューは実行されていません。",
   failed:
-    "Claude Codeによるレビューが失敗しました（claude-review-develop）。対応Issueへ00.check-userが付き、ユーザーの確認待ちになります。",
+    "レビューが失敗しました。対応Issueへ00.check-userが付き、ユーザーの確認待ちになります。",
 };
 
 /**
