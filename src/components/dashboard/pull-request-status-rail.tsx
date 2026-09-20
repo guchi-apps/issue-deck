@@ -1,7 +1,5 @@
 "use client";
 
-import { Check, CircleAlert, Hourglass, Loader2, type LucideIcon } from "lucide-react";
-
 import {
   buildPullRequestStatusRail,
   type PullRequestRailSlot,
@@ -11,50 +9,28 @@ import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
- * 枠の見た目。Issue詳細の内訳（`workflow-status-steps.tsx`の`PR_STEP_CLASS`）と同じ配色に
- * 揃えてある——同じ段を別の色で出すと、どちらが新しいのかを読む側が判断できなくなる。
+ * 状態の見た目。工程名と✔・×・実施中を分け、色だけに頼らず読めるようにする。
  *
  * `absent`（その段自体が無い）だけは新しく足したもので、**破線の輪郭で場所だけ空ける。**
  * 空にすると列がずれ、実線の輪郭にすると「まだ来ていない」（`pending`）と見分けが付かない。
  */
-const SLOT_CLASS: Record<PullRequestRailSlotState, string> = {
-  done: "border-foreground/25 text-foreground",
-  current: "border-primary bg-primary/10 text-primary font-semibold",
-  waiting: "border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400",
-  failed: "border-destructive bg-destructive/10 text-destructive font-semibold",
-  pending: "border-border text-muted-foreground",
-  absent: "border-dashed border-border text-muted-foreground/60 justify-center",
+const SLOT_STATUS: Record<PullRequestRailSlotState, { label: string; className: string }> = {
+  done: { label: "✔", className: "text-emerald-700 dark:text-emerald-400" },
+  current: { label: "実施中", className: "text-primary" },
+  waiting: { label: "—", className: "text-muted-foreground" },
+  failed: { label: "×", className: "text-destructive" },
+  pending: { label: "—", className: "text-muted-foreground" },
+  absent: { label: "—", className: "text-muted-foreground" },
 };
-
-const SLOT_ICON: Partial<Record<PullRequestRailSlotState, LucideIcon>> = {
-  done: Check,
-  current: Loader2,
-  waiting: Hourglass,
-  failed: CircleAlert,
-};
-
-function SlotIcon({ state }: { state: PullRequestRailSlotState }) {
-  const Icon = SLOT_ICON[state];
-  if (!Icon) return null;
-  // 回すのは機械が動いているときだけ。人待ち（砂時計）を回すと「あと少しで終わる」に読める
-  return (
-    <Icon
-      className={cn("size-3 shrink-0", state === "current" && "animate-spin")}
-      aria-hidden="true"
-    />
-  );
-}
 
 function RailSlot({ slot, linkable }: { slot: PullRequestRailSlot; linkable: boolean }) {
-  const className = cn(
-    "inline-flex min-w-0 items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] leading-5",
-    SLOT_CLASS[slot.state],
-  );
+  const status = SLOT_STATUS[slot.state];
+  const className = "inline-flex min-w-0 items-center justify-between gap-2 px-1 py-0.5 text-xs leading-5";
   const title = slot.title ? `${slot.columnLabel}: ${slot.title}` : slot.columnLabel;
   const content = (
     <>
-      <SlotIcon state={slot.state} />
-      <span className="truncate">{slot.label}</span>
+      <span className="truncate">{slot.columnLabel}</span>
+      <span className={cn("shrink-0 font-semibold", status.className)}>{status.label}</span>
     </>
   );
 
@@ -81,7 +57,7 @@ function RailSlot({ slot, linkable }: { slot: PullRequestRailSlot; linkable: boo
 /**
  * PR一覧の1行に出す、場所を固定した状態の列（#2942）。
  *
- * **CI → Claudeのレビュー → マージ**の3枠を等幅のグリッドに置き、行をまたいで同じ位置に
+ * **CI → コンフリクト → レビュー**の3項目を等幅のグリッドに置き、行をまたいで同じ位置に
  * 並べる。以前は状態を表すバッジが「出るものだけ」横に並んでいたため、行ごとに数も並び順も
  * 変わり、縦に読み比べられなかった。判定と文言は
  * [`lib/pull-request-status-rail.ts`](../../lib/pull-request-status-rail.ts)が持つ。
@@ -124,9 +100,9 @@ export function PullRequestStatusRail({
     <span className={cn("@container block w-full max-w-[23rem]", className)}>
       <span
         className="grid grid-cols-2 gap-1 @min-[20rem]:grid-cols-3"
-        aria-label="CI・Claudeのレビュー・マージの状況"
+        aria-label="CI・コンフリクト・レビューの状況"
       >
-        {slots.map((slot) => (
+              {slots.map((slot) => (
           <RailSlot key={slot.key} slot={slot} linkable={linkable} />
         ))}
       </span>

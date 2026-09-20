@@ -478,13 +478,14 @@ function progress(
 ): IssuePullRequestProgress {
   return {
     pullRequestNumber: 2822,
-    label: "Claudeがレビュー中",
+    label: "レビュー実施中",
     tone: "running",
     stopKind: null,
     steps: [
       { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
       { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
-      { key: "ai-review", label: "Claudeがレビュー中", shortLabel: "Claudeがレビュー中", state: "current" },
+      { key: "conflict", label: "コンフリクト", shortLabel: "コンフリクト", state: "done" },
+      { key: "ai-review", label: "レビュー実施中", shortLabel: "レビュー実施中", state: "current" },
       { key: "merge", label: "マージ", shortLabel: "マージ", state: "pending" },
     ],
     ...overrides,
@@ -502,7 +503,7 @@ describe("PRを待っている段の内訳（#2816）", () => {
         now={NOW}
       />,
     );
-    expect(container.textContent).toContain("Claudeがレビュー中");
+    expect(container.textContent).toContain("レビュー実施中");
     // セッションが終わっているだけの「PR待ち」には戻さない
     expect(container.textContent).not.toContain("PR待ち");
   });
@@ -543,16 +544,16 @@ describe("PRを待っている段の内訳（#2816）", () => {
         now={NOW}
       />,
     );
-    expect(container.textContent).not.toContain("Claudeがレビュー中");
+    expect(container.textContent).not.toContain("レビュー実施中");
     expect(container.textContent).toContain("実装中");
   });
 
-  it("詳細のステップは、4段の内訳と対応PRの番号を並べる", () => {
+  it("詳細のステップは、コンフリクトを含む内訳と対応PRの番号を並べる", () => {
     const { container } = render(
       <WorkflowStatusSteps labels={[]} projectStatus="Develop PR" pullRequestProgress={progress()} />,
     );
     expect(container.textContent).toContain("PR #2822");
-    for (const label of ["実装完了", "CI通過", "Claudeがレビュー中", "マージ"]) {
+    for (const label of ["実装完了", "CI通過", "コンフリクト", "レビュー実施中", "マージ"]) {
       expect(container.textContent).toContain(label);
     }
   });
@@ -583,7 +584,8 @@ describe("developへマージの中の位置（#2867）", () => {
           steps: [
             { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
             { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
-            { key: "ai-review", label: "Claudeのレビュー完了", shortLabel: "Claudeのレビュー完了", state: "done" },
+            { key: "conflict", label: "コンフリクト", shortLabel: "コンフリクト", state: "done" },
+            { key: "ai-review", label: "レビュー完了", shortLabel: "レビュー完了", state: "done" },
             { key: "merge", label: "マージ", shortLabel: "マージ", state: "current" },
           ],
         })}

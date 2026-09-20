@@ -58,6 +58,7 @@ export function CodexPairingControl({
   onRequestCodexPairing,
   context = "host",
   align = "end",
+  inline = false,
   className,
 }: {
   host: DispatchHostView;
@@ -68,6 +69,8 @@ export function CodexPairingControl({
   /** どこに置いているか。**文言とボタンの大きさだけが変わる**（送るものは同じ） */
   context?: CodexPairingContext;
   align?: "start" | "end";
+  /** エージェント行に置く小さい接続ボタン（#3228）。結果はボタンの下に表示する。 */
+  inline?: boolean;
   className?: string;
 }) {
   const hostName = host.name;
@@ -134,7 +137,7 @@ export function CodexPairingControl({
         "flex flex-col gap-1",
         // ホストのカードでは従来の見た目を変えない（#2524のまま）。Issueの画面では
         // 隣の「Claude Codeアプリで開く」と同じ幅で並べる
-        compact ? "mt-1.5" : "w-full",
+        inline ? "w-[108px] shrink-0" : compact ? "mt-1.5" : "w-full",
         alignEnd ? "items-end" : "items-start",
         className,
       )}
@@ -142,7 +145,10 @@ export function CodexPairingControl({
       <Button
         variant="outline"
         size="sm"
-        className={cn(compact && "h-7 text-[11px]")}
+        className={cn(
+          compact && "h-7 text-[11px]",
+          inline && "h-[26px] w-full gap-1 px-1.5 text-[11px]",
+        )}
         disabled={disabled}
         onClick={() => void request()}
       >

@@ -1,19 +1,14 @@
 import { buildIssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
-import {
-  MERGE_JUDGEMENT_PENDING_LABEL,
-  mergeJudgementReason,
-  requiresUserMerge,
-} from "@/lib/pull-request-list";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
  * PR一覧の各行に、**場所を固定して**並べる状態の列（#2942）。
  *
  * 一覧はこれまで「出るものだけ」をバッジとして横に並べていたため、行ごとに数も並び順も変わり、
- * 縦に読み比べられなかった。さらにClaudeのレビューは実行中しか出ておらず（`MergeJudgementBadge`）、
+ * 縦に読み比べられなかった。さらにレビューは実行中しか出ておらず（`MergeJudgementBadge`）、
  * 完了・省略・失敗は**一覧のどこにも出ていなかった**——`AiReviewBadge`はPR詳細とIssue画面だけが
- * 描いている。列を`CI` → `Claudeのレビュー` → `マージ`の3つに固定すれば、真ん中の列を縦に
- * 見るだけで「どのPRのレビューが終わっていて、どれが落ちたか」を拾える。
+ * 描いている。列を`CI` → `コンフリクト` → `レビュー`の3つに固定すれば、状態を縦に
+ * 見るだけで、対応が必要なPRを拾える。
  *
  * **状態と文言は新しく作らない。** 材料はIssue詳細の「developへマージ」の内訳
  * （[`issue-pull-request-progress.ts`](./issue-pull-request-progress.ts)の
@@ -27,7 +22,7 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * この判定の外に残すのは`repairRun`（自動修復の実行中）だけで、あちらは経過時間を数え直す
  * 生きたバッジ（`RepairRunBadge`）なので、レールの右へ今までどおり別に並べる。
  */
-export type PullRequestRailSlotKey = "ci" | "ai-review" | "merge";
+export type PullRequestRailSlotKey = "ci" | "conflict" | "ai-review";
 
 /**
  * 1枠の状態。色とアイコンの出し分けはこれだけで決まる。
@@ -63,8 +58,8 @@ export type PullRequestRailSlot = {
 /** 列の見出し。読み上げ（`aria-label`）と`title`の頭に付ける */
 const COLUMN_LABEL: Record<PullRequestRailSlotKey, string> = {
   ci: "CI",
-  "ai-review": "Claudeのレビュー",
-  merge: "マージ",
+  conflict: "コンフリクト",
+  "ai-review": "レビュー",
 };
 
 /** ドラフトのPRではCI状態も判定も取りに行っていない（`fetchPullRequestCiStates`） */
@@ -74,7 +69,7 @@ const DRAFT_TITLE = "ドラフトのPRでは、CI状態もマージ可否の判�
 /** レビューのcheck-runが1件も無いPR。**「まだ来ていない」とは言わない**（来ないため） */
 const AI_REVIEW_ABSENT_LABEL = "—";
 const AI_REVIEW_ABSENT_TITLE =
-  "このPRではClaudeのレビューが走りません（ワークフローが配られていない・リリースPR・起動前のいずれか）。";
+  "このPRではレビュー工程がありません（ワークフローが配られていない・リリースPR・起動前のいずれか）。";
 
 const CONFLICT_LABEL = "コンフリクト";
 const CONFLICT_TITLE =
@@ -98,7 +93,7 @@ export function buildPullRequestStatusRail(
   const stepOf = (key: "ci" | "ai-review" | "merge") =>
     progress.steps.find((step) => step.key === key) ?? null;
 
-  return [ciSlot(), aiReviewSlot(), mergeSlot()];
+  return [ciSlot(), conflictSlot(), aiReviewSlot()];
 
   function ciSlot(): PullRequestRailSlot {
     if (pullRequest.draft) {
@@ -124,50 +119,14 @@ export function buildPullRequestStatusRail(
     );
   }
 
-  /**
-   * マージの枠だけは、内訳の段（`merge`）に一覧固有の事情を重ねる。
-   *
-   * **順番は「止まっている > 機械が動いている > 人待ち」。** 止まっているもの
-   * （コンフリクト）を先に出さないと、放っておけば進むものに隠れる——`resolveWaiting`と
-   * 同じ考え方で、`00.check-user`のamberはその後に来る。
-   */
-  function mergeSlot(): PullRequestRailSlot {
-    if (pullRequest.merged) {
-      return slot("merge", "マージ済み", "done", "developへマージ済みです。", null);
-    }
+  function conflictSlot(): PullRequestRailSlot {
     if (pullRequest.mergeable === false) {
-      return slot("merge", CONFLICT_LABEL, "failed", CONFLICT_TITLE, null);
+      return slot("conflict", CONFLICT_LABEL, "failed", CONFLICT_TITLE, null);
     }
-    if (pullRequest.mergeJudgement.state === "pending") {
-      // 段の名前（「Claudeがレビュー中」など）はこの幅に収まらないので、ボタンと同じ「判定中」を
-      // 出し、どの段を待っているかは`title`（`mergeJudgementReason`）に譲る。レビューの段の
-      // 進み具合は隣の枠が既に出している
-      return slot(
-        "merge",
-        MERGE_JUDGEMENT_PENDING_LABEL,
-        "current",
-        mergeJudgementReason(pullRequest.mergeJudgement.step),
-        pullRequest.mergeJudgement.runUrl,
-      );
+    if (pullRequest.mergeable === true) {
+      return slot("conflict", "解消済み", "done", "コンフリクトはありません。", null);
     }
-    if (requiresUserMerge(pullRequest)) {
-      return slot("merge", USER_MERGE_LABEL, "waiting", USER_MERGE_TITLE, null);
-    }
-    if (pullRequest.autoMergeEnabled) {
-      return slot("merge", AUTO_MERGE_LABEL, "pending", AUTO_MERGE_TITLE, null);
-    }
-    const step = stepOf("merge");
-    if (step === null) return slot("merge", AI_REVIEW_ABSENT_LABEL, "absent", "", null);
-    // 内訳の`current`は「前の段が全部片付いてマージだけが残った」状態で、動いているのは機械では
-    // なく順番待ち。Issue詳細の内訳（`PullRequestProgressSteps`）が同じ段をamberにしているのと
-    // 揃える
-    return slot(
-      "merge",
-      step.shortLabel,
-      step.state === "current" ? "waiting" : step.state,
-      step.label,
-      null,
-    );
+    return slot("conflict", "確認中", "current", "コンフリクトの有無を確認しています。", null);
   }
 
   function slot(

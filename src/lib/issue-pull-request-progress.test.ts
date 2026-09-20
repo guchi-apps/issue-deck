@@ -114,7 +114,7 @@ describe("buildIssuePullRequestProgress の待っているもの", () => {
       buildIssuePullRequestProgress(
         pullRequest({ mergeJudgement: judgement({ state: "pending", aiReview: "failed" }) }),
       ),
-    ).toMatchObject({ label: "Claudeのレビュー失敗", tone: "attention" });
+    ).toMatchObject({ label: "レビュー失敗", tone: "attention" });
   });
 
   it("判定が動いている間は、判定の段の名前をCIより先に出す（#2066と同じ理由）", () => {
@@ -125,7 +125,7 @@ describe("buildIssuePullRequestProgress の待っているもの", () => {
           mergeJudgement: judgement({ state: "pending", step: "claude-review", aiReview: "pending" }),
         }),
       ),
-    ).toMatchObject({ label: "Claudeがレビュー中", tone: "running" });
+    ).toMatchObject({ label: "判定実施中", tone: "running" });
   });
 
   it("判定のcheck-runが無いリポジトリでは、CIの状態をそのまま出す", () => {
@@ -170,12 +170,12 @@ describe("buildIssuePullRequestProgress の内訳", () => {
     const withReview = buildIssuePullRequestProgress(
       pullRequest({ mergeJudgement: judgement({ aiReview: "skipped" }) }),
     );
-    expect(withReview.steps.map((step) => step.key)).toEqual(["opened", "ci", "ai-review", "merge"]);
+    expect(withReview.steps.map((step) => step.key)).toEqual(["opened", "ci", "conflict", "ai-review", "merge"]);
 
     const withoutReview = buildIssuePullRequestProgress(
       pullRequest({ mergeJudgement: judgement({ state: "unknown", aiReview: "none" }) }),
     );
-    expect(withoutReview.steps.map((step) => step.key)).toEqual(["opened", "ci", "merge"]);
+    expect(withoutReview.steps.map((step) => step.key)).toEqual(["opened", "ci", "conflict", "merge"]);
   });
 
   it("前の段が動いている間、マージの段は現在地にならない", () => {
@@ -217,14 +217,12 @@ describe("buildIssuePullRequestProgress の内訳", () => {
     });
   });
 
-  // PR一覧のステータスレール（#2942）は幅が狭く、「Claudeのレビュー完了」は枠に収まらない。
-  // 短縮版は主語を落としただけで、状態の呼び分けは`label`と1対1に保つ。
-  it("レビューの段だけ、主語を落とした短縮版を持つ", () => {
+  it("レビューの段は実行主体を含まない汎用ラベルを持つ", () => {
     for (const [aiReview, label, shortLabel] of [
-      ["pending", "Claudeがレビュー中", "レビュー中"],
-      ["passed", "Claudeのレビュー完了", "レビュー完了"],
-      ["skipped", "Claudeのレビュー省略", "レビュー省略"],
-      ["failed", "Claudeのレビュー失敗", "レビュー失敗"],
+      ["pending", "レビュー実施中", "レビュー実施中"],
+      ["passed", "レビュー完了", "レビュー完了"],
+      ["skipped", "レビュー省略", "レビュー省略"],
+      ["failed", "レビュー失敗", "レビュー失敗"],
     ] as const) {
       const step = labelOf(
         "ai-review",
@@ -233,6 +231,18 @@ describe("buildIssuePullRequestProgress の内訳", () => {
       expect(step?.label).toBe(label);
       expect(step?.shortLabel).toBe(shortLabel);
     }
+  });
+
+  it("コンフリクトは解消済み・要対応・確認中を工程の状態として返す", () => {
+    expect(labelOf("conflict", buildIssuePullRequestProgress(pullRequest({ mergeable: true })))).toMatchObject({
+      state: "done",
+    });
+    expect(labelOf("conflict", buildIssuePullRequestProgress(pullRequest({ mergeable: false })))).toMatchObject({
+      state: "failed",
+    });
+    expect(labelOf("conflict", buildIssuePullRequestProgress(pullRequest({ mergeable: null })))).toMatchObject({
+      state: "current",
+    });
   });
 
   it("短縮する必要が無い段は label と同じ文字列を持つ", () => {
@@ -289,8 +299,8 @@ describe("resolvePullRequestPosition（#2867）", () => {
     const after = buildIssuePullRequestProgress(
       pullRequest({ mergeJudgement: judgement({ state: "pending", aiReview: "pending" }) }),
     );
-    expect(before.steps).toHaveLength(3);
-    expect(after.steps).toHaveLength(4);
+      expect(before.steps).toHaveLength(4);
+      expect(after.steps).toHaveLength(5);
     expect(resolvePullRequestPosition(before)).toBe("checks");
     expect(resolvePullRequestPosition(after)).toBe("checks");
   });

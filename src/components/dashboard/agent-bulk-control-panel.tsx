@@ -13,11 +13,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
 import { AGENT_RESUME_INSTRUCTION, selectStoppedSessions } from "@/lib/dispatch/agent-resume";
 import { describeDispatchAgent, DISPATCH_AGENTS, type DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { resolveIssueImplementationAgent } from "@/lib/dispatch/issue-session";
+import { selectHostCodexPairingJob } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +77,12 @@ function AgentBulkControlRow({
     (session) => session.state === "ALIVE" && resolveIssueImplementationAgent(session) === agent,
   );
   const pauseReason = dispatch.agentPause[agent];
+  // ペアリングコードはホスト単位で発行する。実行状況の一括操作には接続可能なホストを1つだけ
+  // 出すことで、Codex CLIの状態と接続操作を同じ行で読めるようにする（#3228）。
+  const codexPairingHost =
+    agent === "codex"
+      ? dispatch.hosts.find((host) => host.codexRemoteControlCapable === true) ?? null
+      : null;
   // トグルON＝稼働中（一時停止理由が無い）。OFF＝停止中（手動・自動のどちらでも）
   const running = pauseReason === null;
   // 再開の対象の目安。**実際に送る対象はサーバーが選び直す**（同じ判定関数を使うが、こちらは
@@ -127,15 +135,16 @@ function AgentBulkControlRow({
 
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border bg-background p-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2">
         {/* 代表色（#3075）。実行状況の●・AI使用量画面と同じ色相で、ここは濃淡を付けない */}
         <span
           aria-hidden
           className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
           style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
         />
-        {/* 状態チップは名前の右隣へ並べる（#3088）。狭い幅ではチップだけが名前の下へ折り返す */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        {/* Codexの接続操作も状態チップの右隣に置く（#3228）。狭い幅でも同じ行に収めるため、
+            ここは折り返さず、停止操作側の文言を小さい幅ではアイコンにする。 */}
+        <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-x-2">
           <span className="text-sm font-semibold whitespace-nowrap">{describeDispatchAgent(agent)}</span>
           {aliveSessions.length > 0 && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-primary">
@@ -154,18 +163,27 @@ function AgentBulkControlRow({
               停止中（{pauseReason === "usage_limit" ? "自動" : "手動"}）
             </span>
           )}
+          {codexPairingHost && (
+            <CodexPairingControl
+              host={codexPairingHost}
+              job={selectHostCodexPairingJob(dispatch.jobs, codexPairingHost.name)}
+              onRequestCodexPairing={dispatch.requestCodexPairing}
+              context="host"
+              inline
+            />
+          )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2.5">
           {running ? (
             <button
               type="button"
               aria-label={`${describeDispatchAgent(agent)}を停止`}
               disabled={dispatch.isSubmitting}
               onClick={() => setConfirming(true)}
-              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-red-500/50 pr-2.5 pl-2 text-xs font-bold text-red-600 disabled:opacity-50 dark:text-red-400"
+              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-red-500/50 px-1.5 text-xs font-bold text-red-600 disabled:opacity-50 sm:pr-2.5 sm:pl-2 dark:text-red-400"
             >
               <Square className="size-3 fill-current" aria-hidden />
-              停止
+              <span className="hidden sm:inline">停止</span>
             </button>
           ) : (
             <button
@@ -173,10 +191,10 @@ function AgentBulkControlRow({
               aria-label={`${describeDispatchAgent(agent)}を再開`}
               disabled={dispatch.isSubmitting}
               onClick={() => setResumeConfirming(true)}
-              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-emerald-500/50 pr-2.5 pl-2 text-xs font-bold text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
+              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-emerald-500/50 px-1.5 text-xs font-bold text-emerald-700 disabled:opacity-50 sm:pr-2.5 sm:pl-2 dark:text-emerald-400"
             >
               <Play className="size-3 fill-current" aria-hidden />
-              再開
+              <span className="hidden sm:inline">再開</span>
             </button>
           )}
           <button

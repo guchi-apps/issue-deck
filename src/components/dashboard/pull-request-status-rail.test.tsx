@@ -51,43 +51,42 @@ function withAiReview(state: AiReviewState, runUrl: string | null = null) {
 
 /** 枠の並びを左から読む。**列の位置が固定されていること**がこのコンポーネントの目的 */
 function slotLabels(container: HTMLElement): string[] {
-  const rail = container.querySelector("[aria-label='CI・Claudeのレビュー・マージの状況']");
+  const rail = container.querySelector("[aria-label='CI・コンフリクト・レビューの状況']");
   return Array.from(rail?.children ?? []).map((slot) => slot.textContent ?? "");
 }
 
 afterEach(cleanup);
 
 describe("PullRequestStatusRail（#2942）", () => {
-  it("枠は常にCI・Claudeのレビュー・マージの3つで、順番も変わらない", () => {
+  it("項目は常にCI・コンフリクト・レビューの3つで、順番も変わらない", () => {
     const { container } = render(<PullRequestStatusRail pullRequest={withAiReview("passed")} />);
-    expect(slotLabels(container)).toEqual(["CI通過", "レビュー完了", "マージ"]);
+    expect(slotLabels(container)).toEqual(["CI✔", "コンフリクト実施中", "レビュー✔"]);
   });
 
   // 状態によって枠が増減すると、行をまたいだ列の位置がずれて縦に読み比べられなくなる。
   it("レビューのcheck-runが1件も無いPRでも枠を空けて3つに保つ", () => {
     const { container } = render(<PullRequestStatusRail pullRequest={withAiReview("none")} />);
-    expect(slotLabels(container)).toEqual(["CI通過", "—", "マージ"]);
+    expect(slotLabels(container)).toEqual(["CI✔", "コンフリクト実施中", "レビュー—"]);
     // 「まだ来ていない」とは言わない——来ないため
-    expect(screen.getByTitle(/Claudeのレビューが走りません/)).toBeTruthy();
+    expect(screen.getByTitle(/レビュー工程がありません/)).toBeTruthy();
   });
 
-  it("Claudeのレビューは実行中・完了・省略・失敗を出し分ける", () => {
+  it("レビューは実行中・完了・省略・失敗を状態記号で出し分ける", () => {
     for (const [state, label] of [
-      ["pending", "レビュー中"],
-      ["passed", "レビュー完了"],
-      ["skipped", "レビュー省略"],
-      ["failed", "レビュー失敗"],
+      ["pending", "レビュー実施中"],
+      ["passed", "レビュー✔"],
+      ["skipped", "レビュー✔"],
+      ["failed", "レビュー×"],
     ] as const) {
       const { container } = render(<PullRequestStatusRail pullRequest={withAiReview(state)} />);
-      expect(slotLabels(container)[1]).toBe(label);
+      expect(slotLabels(container)[2]).toBe(label);
       cleanup();
     }
   });
 
-  // 短くしたのは主語だけで、全文は`title`から読める（#2942の懸念点への担保）
-  it("短くした文言でも、全文と列の名前をtitleで読める", () => {
+  it("状態記号でも、補助テキストからレビューの結果を読める", () => {
     render(<PullRequestStatusRail pullRequest={withAiReview("skipped")} />);
-    expect(screen.getByTitle("Claudeのレビュー: Claudeのレビュー省略")).toBeTruthy();
+    expect(screen.getByTitle("レビュー: レビュー省略")).toBeTruthy();
   });
 
   it("レビューの実行ログが分かっていれば枠ごとリンクにする", () => {
@@ -96,7 +95,7 @@ describe("PullRequestStatusRail（#2942）", () => {
         pullRequest={withAiReview("failed", "https://github.com/owner/repo/actions/runs/1")}
       />,
     );
-    const link = screen.getByRole("link", { name: /レビュー失敗/ }) as HTMLAnchorElement;
+    const link = screen.getByRole("link", { name: /レビュー/ }) as HTMLAnchorElement;
     expect(link.href).toBe("https://github.com/owner/repo/actions/runs/1");
   });
 
@@ -109,25 +108,24 @@ describe("PullRequestStatusRail（#2942）", () => {
       />,
     );
     expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByText("レビュー失敗")).toBeTruthy();
+    expect(screen.getByText("×")).toBeTruthy();
   });
 
   it("CI失敗はそのままCIの枠に出る", () => {
     const { container } = render(
       <PullRequestStatusRail pullRequest={makePullRequest({ ciState: "failure" })} />,
     );
-    expect(slotLabels(container)[0]).toBe("CI失敗");
+    expect(slotLabels(container)[0]).toBe("CI×");
   });
 
   it("ドラフトはCI状態も判定も取っていないため、CIの枠が「ドラフト」になる", () => {
     const { container } = render(
       <PullRequestStatusRail pullRequest={makePullRequest({ draft: true })} />,
     );
-    expect(slotLabels(container)[0]).toBe("ドラフト");
+    expect(slotLabels(container)[0]).toBe("CI—");
   });
 
-  // 止まっているもの（コンフリクト）は、放っておけば進むもの（判定中）より先に出す
-  it("コンフリクトは判定中より優先してマージの枠に出る", () => {
+  it("コンフリクトは専用の項目に×で出る", () => {
     const { container } = render(
       <PullRequestStatusRail
         pullRequest={makePullRequest({
@@ -141,10 +139,10 @@ describe("PullRequestStatusRail（#2942）", () => {
         })}
       />,
     );
-    expect(slotLabels(container)[2]).toBe("コンフリクト");
+    expect(slotLabels(container)[1]).toBe("コンフリクト×");
   });
 
-  it("判定中は段の名前ではなくボタンと同じ「判定中」を出す", () => {
+  it("コンフリクトの確認中は「実施中」で出る", () => {
     const { container } = render(
       <PullRequestStatusRail
         pullRequest={makePullRequest({
@@ -157,28 +155,6 @@ describe("PullRequestStatusRail（#2942）", () => {
         })}
       />,
     );
-    expect(slotLabels(container)[2]).toBe("判定中");
-  });
-
-  it("ユーザーがマージするしかないPRは「マージ待ち」、Auto-merge有効なら「自動マージ」", () => {
-    const user = render(
-      <PullRequestStatusRail pullRequest={makePullRequest({ linkedIssueCheckUser: true })} />,
-    );
-    expect(slotLabels(user.container)[2]).toBe("マージ待ち");
-    cleanup();
-
-    const auto = render(
-      <PullRequestStatusRail pullRequest={makePullRequest({ autoMergeEnabled: true })} />,
-    );
-    expect(slotLabels(auto.container)[2]).toBe("自動マージ");
-  });
-
-  it("マージ済みのPRはマージの枠が「マージ済み」になる", () => {
-    const { container } = render(
-      <PullRequestStatusRail
-        pullRequest={makePullRequest({ state: "closed", merged: true })}
-      />,
-    );
-    expect(slotLabels(container)[2]).toBe("マージ済み");
+    expect(slotLabels(container)[1]).toBe("コンフリクト実施中");
   });
 });
