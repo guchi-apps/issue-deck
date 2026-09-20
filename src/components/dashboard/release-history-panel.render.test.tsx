@@ -45,6 +45,12 @@ function renderPanel(props: Partial<Parameters<typeof ReleaseHistoryPanel>[0]> =
   return { onToggleChecked, onToggleCheckedLine, onToggleCheckTarget };
 }
 
+/** 初期表示は未確認だけなので、確認済み・対象外のカードを見るときは先にこのボタンを押す（#3170） */
+function showAllReleases() {
+  // 未確認が0件のときは案内の横にも同名の入口が出るので、ヘッダーのボタン（先頭）を押す
+  fireEvent.click(screen.getAllByRole("button", { name: "確認済みも表示" })[0]);
+}
+
 afterEach(() => {
   cleanup();
 });
@@ -76,6 +82,9 @@ describe("ReleaseHistoryPanel の動作確認フラグ（#2930）", () => {
         },
       ],
     });
+    // 確認済みだけなので、初期表示では隠れている
+    expect(screen.queryByText("確認済み")).toBeNull();
+    showAllReleases();
     expect(screen.getByText("確認済み")).toBeTruthy();
     expect(screen.queryByText("未確認 1件")).toBeNull();
 
@@ -88,12 +97,16 @@ describe("ReleaseHistoryPanel の動作確認フラグ（#2930）", () => {
 
   it("対象に加える前のリリースにはフラグが付かない", () => {
     renderPanel({ entries: [entry({ publishedAt: "2026-08-20T00:00:00.000Z" })] });
+    showAllReleases();
+    expect(screen.getByText("v4.78.0")).toBeTruthy();
     expect(screen.queryByText("未確認")).toBeNull();
     expect(screen.queryByRole("button", { name: "確認済みにする" })).toBeNull();
   });
 
   it("対象を1つも選んでいなければ「対象外」の印も出さない", () => {
     renderPanel({ checkTargets: [] });
+    showAllReleases();
+    expect(screen.getByText("v4.78.0")).toBeTruthy();
     expect(screen.queryByText("対象外")).toBeNull();
     expect(screen.queryByText("未確認")).toBeNull();
   });
@@ -102,26 +115,64 @@ describe("ReleaseHistoryPanel の動作確認フラグ（#2930）", () => {
     renderPanel({
       entries: [entry(), entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.12.0" })],
     });
+    showAllReleases();
     expect(screen.getByText("対象外")).toBeTruthy();
   });
+});
 
-  it("「未確認だけ」で確認済みと対象外のカードが隠れる", () => {
-    renderPanel({
-      entries: [entry(), entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.12.0" })],
-    });
-    expect(screen.getByText("car-care")).toBeTruthy();
+describe("ReleaseHistoryPanel の初期表示（#3170）", () => {
+  const mixedEntries = [
+    entry(),
+    entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.12.0" }),
+    entry({ tagName: "v4.77.0", publishedAt: "2026-09-05T05:00:00.000Z" }),
+  ];
+  const checkedRecord = {
+    repoFullName: "guchi-apps/issue-deck",
+    tagName: "v4.77.0",
+    checkedAt: "2026-09-07T12:00:00.000Z",
+  };
 
-    fireEvent.click(screen.getByRole("button", { name: "未確認だけ" }));
+  it("初期表示は未確認のカードだけで、確認済みと対象外は隠れる", () => {
+    renderPanel({ entries: mixedEntries, checkRecords: [checkedRecord] });
+    expect(screen.getByText("v4.78.0")).toBeTruthy();
+    expect(screen.queryByText("v4.77.0")).toBeNull();
     expect(screen.queryByText("car-care")).toBeNull();
-    expect(screen.getByText("issue-deck")).toBeTruthy();
-    // 件数は絞り込みの前の母集団から数えるので動かない
-    expect(screen.getByText("未確認 1件")).toBeTruthy();
+    expect(screen.getByText("未確認のリリースを新しい順に並べています")).toBeTruthy();
   });
 
-  it("未確認が1件も無い状態で「未確認だけ」を押すと、専用の案内を出す", () => {
+  it("「確認済みも表示」を押すと全件に切り替わり、もう一度押すと未確認だけに戻る", () => {
+    renderPanel({ entries: mixedEntries, checkRecords: [checkedRecord] });
+    const toggle = screen.getByRole("button", { name: "確認済みも表示" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("v4.77.0")).toBeTruthy();
+    expect(screen.getByText("car-care")).toBeTruthy();
+    // 件数は絞り込みの前の母集団から数えるので動かない
+    expect(screen.getByText("未確認 1件")).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("v4.77.0")).toBeNull();
+    expect(screen.queryByText("car-care")).toBeNull();
+  });
+
+  it("未確認が1件も無いときは専用の案内と、全件へ切り替える入口を出す", () => {
     renderPanel({ checkTargets: [] });
-    fireEvent.click(screen.getByRole("button", { name: "未確認だけ" }));
     expect(screen.getByText("未確認のリリースはありません。")).toBeTruthy();
+    expect(screen.queryByText("v4.78.0")).toBeNull();
+
+    // 案内の横の入口はヘッダーのボタンと同じ名前で、押すと全件が出る
+    const [, entrance] = screen.getAllByRole("button", { name: "確認済みも表示" });
+    fireEvent.click(entrance);
+    expect(screen.getByText("v4.78.0")).toBeTruthy();
+    expect(screen.queryByText("未確認のリリースはありません。")).toBeNull();
+  });
+
+  it("リリースがまだ無いときは、絞り込みの案内ではなく従来の案内を出す", () => {
+    renderPanel({ entries: [] });
+    expect(screen.getByText("リリースがまだありません。")).toBeTruthy();
+    expect(screen.queryByText("未確認のリリースはありません。")).toBeNull();
   });
 });
 
@@ -167,6 +218,7 @@ describe("ReleaseHistoryPanel の箇条書き行ごとの確認チェック（#2
     renderPanel({
       entries: [entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.12.0" })],
     });
+    showAllReleases();
     expect(
       screen.getByRole("checkbox", { name: "「修正を依頼する導線を足す」を確認済みにする（参考）" }),
     ).toBeTruthy();

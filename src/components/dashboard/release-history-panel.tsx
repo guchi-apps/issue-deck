@@ -102,7 +102,9 @@ export function ReleaseHistoryPanel({
   compact?: boolean;
   className?: string;
 }) {
-  const [uncheckedOnly, setUncheckedOnly] = useState(false);
+  // 初期表示は未確認のリリースだけ（#3170）。確認済み・対象外も見たいときだけボタンで全件へ切り替える。
+  // 画面を開くたびに初期値へ戻す（永続化しない）。
+  const [showAll, setShowAll] = useState(false);
 
   const checkIndex = useMemo(
     () => buildReleaseCheckIndex(checkTargets, checkRecords),
@@ -120,11 +122,11 @@ export function ReleaseHistoryPanel({
   );
 
   // 絞り込みは表示の直前に掛ける。件数（`uncheckedCount`）は絞り込みの前の母集団から数えるので、
-  // 「未確認だけ」に切り替えても数字が動かない。
+  // 「確認済みも表示」に切り替えても数字が動かない。
   const visibleEntries = useMemo(() => {
     if (!entries) return null;
-    return uncheckedOnly ? selectUncheckedReleases(entries, checkIndex) : entries;
-  }, [entries, uncheckedOnly, checkIndex]);
+    return showAll ? entries : selectUncheckedReleases(entries, checkIndex);
+  }, [entries, showAll, checkIndex]);
 
   const groups = useMemo(
     () => groupReleaseHistoryByJstDate(visibleEntries ?? []),
@@ -143,7 +145,9 @@ export function ReleaseHistoryPanel({
           <h2 className="text-sm font-bold">リリース履歴</h2>
           {!compact && (
             <p className="text-[11px] text-muted-foreground">
-              全リポジトリのGitHub Releaseを新しい順に並べたタイムラインです
+              {showAll
+                ? "全リポジトリのGitHub Releaseを新しい順に並べたタイムラインです"
+                : "未確認のリリースを新しい順に並べています"}
             </p>
           )}
         </div>
@@ -156,13 +160,14 @@ export function ReleaseHistoryPanel({
         )}
 
         <Button
-          variant={uncheckedOnly ? "secondary" : "outline"}
+          variant={showAll ? "secondary" : "outline"}
           size="sm"
-          className="h-7 shrink-0 px-2 text-[11px]"
-          aria-pressed={uncheckedOnly}
-          onClick={() => setUncheckedOnly((prev) => !prev)}
+          className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+          aria-pressed={showAll}
+          onClick={() => setShowAll((prev) => !prev)}
         >
-          未確認だけ
+          {showAll && <Check className="size-3" aria-hidden />}
+          確認済みも表示
         </Button>
 
         <CheckTargetPicker
@@ -204,10 +209,17 @@ export function ReleaseHistoryPanel({
       )}
 
       {/* 絞り込んだ結果が空になるのと、そもそもリリースが無いのとは別の案内にする */}
-      {entries && entries.length > 0 && uncheckedOnly && groups.length === 0 && (
-        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          未確認のリリースはありません。
-        </p>
+      {entries && entries.length > 0 && !showAll && groups.length === 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+          <span>未確認のリリースはありません。</span>
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="text-xs font-semibold text-foreground underline underline-offset-2"
+          >
+            確認済みも表示
+          </button>
+        </div>
       )}
 
       {groups.length > 0 && (

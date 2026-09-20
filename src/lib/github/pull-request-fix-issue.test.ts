@@ -35,7 +35,15 @@ function review(
 }
 
 function verdict(reviewKind: PullRequestReviewVerdict["reviewKind"], reviewLabel: string): PullRequestReviewVerdict {
-  return { reviewKind, reviewLabel, riskKind: "none", riskLabel: "該当なし", riskReasons: [], confirmLabel: null };
+  return {
+    reviewKind,
+    reviewLabel,
+    riskKind: "none",
+    riskLabel: "該当なし",
+    riskReasons: [],
+    confirmLabel: null,
+    reviewedSha: null,
+  };
 }
 
 const basePullRequest = {
@@ -44,6 +52,7 @@ const basePullRequest = {
   title: "リリース履歴の未確認件数を表示する",
   baseRef: "develop",
   headRef: "issue-2951",
+  headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   merged: false,
   state: "open" as const,
   linkedIssueNumbers: [2951],

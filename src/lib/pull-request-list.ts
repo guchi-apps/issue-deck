@@ -5,6 +5,7 @@ import type {
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
 import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
+import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
@@ -680,7 +681,18 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   // では止めない**——レビューを省くのは設計どおりの動きで、そこで止めるとほぼ全てのPRで
   // ダイアログが出ることになり、本当に読むべき指摘が埋もれる（`needsReviewAttention`）。
   if (pullRequest.reviewVerdict && needsReviewAttention(pullRequest.reviewVerdict.reviewKind)) {
-    warnings.push(`自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定しています。`);
+    // 判定の後にコミットが積まれているときは、時制で先に言う（#3172）。判定そのものは
+    // 残っているので警告自体は出したうえで、修正前の話かどうかを読めるようにする
+    const stale =
+      resolveReviewVerdictFreshness({
+        reviewedSha: pullRequest.reviewVerdict.reviewedSha,
+        headSha: pullRequest.headSha,
+      }) === "stale";
+    warnings.push(
+      stale
+        ? `自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定していました（この判定の後にコミットが積まれています）。`
+        : `自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定しています。`,
+    );
   }
   return warnings;
 }

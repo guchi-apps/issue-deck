@@ -37,6 +37,7 @@ describe("parsePullRequestReviewVerdict", () => {
       riskLabel: "該当なし",
       riskReasons: [],
       confirmLabel: "不要（自動マージの対象）",
+      reviewedSha: null,
     });
   });
 
@@ -60,6 +61,7 @@ describe("parsePullRequestReviewVerdict", () => {
       riskLabel: "該当あり",
       riskReasons: ["認証・認可に関わる変更", "DBスキーマ変更・マイグレーション"],
       confirmLabel: "必要（自動マージはスキップされます）",
+      reviewedSha: null,
     });
   });
 
@@ -114,6 +116,37 @@ describe("parsePullRequestReviewVerdict", () => {
     expect(parsePullRequestReviewVerdict(body(LGTM_SECTION).replace(/\n/g, "\r\n"))?.reviewKind).toBe(
       "ok",
     );
+  });
+
+  it("節の中の`sha=`の行から判定時点のコミットを読む（#3172）", () => {
+    const section = LGTM_SECTION.replace(
+      "<!-- issue-deck-verification:end -->",
+      [
+        "<!-- issue-deck-verification:sha=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0 -->",
+        "<!-- issue-deck-verification:end -->",
+      ].join("\n"),
+    );
+
+    expect(parsePullRequestReviewVerdict(body(section))?.reviewedSha).toBe(
+      "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+    );
+  });
+
+  it("開始マーカーへ属性として足された`sha=`では節ごと読めなくなる（だから別行にした。#3172）", () => {
+    // 古い読み手を壊さない形を選んだ理由を、書式が戻されたときに落とせるようにしておく
+    const section = LGTM_SECTION.replace(
+      "review=lgtm risk=none",
+      "review=lgtm risk=none sha=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+    );
+
+    expect(parsePullRequestReviewVerdict(body(section))).toBeNull();
+  });
+
+  it("`sha=`の行が無い節でも判定は読める（配布前・この変更より前のPR）", () => {
+    const parsed = parsePullRequestReviewVerdict(body(LGTM_SECTION));
+
+    expect(parsed?.reviewKind).toBe("ok");
+    expect(parsed?.reviewedSha).toBeNull();
   });
 });
 

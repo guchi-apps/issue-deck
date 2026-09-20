@@ -625,58 +625,297 @@ PY
   _session_usage_run_python "$script" "${1:-0}" "${2:-}" "${3:-}"
 }
 
-# Codex CLIの転記をClaude側と同じ正規化JSONへ畳む。
-# token_countは累積値なので、セッション内の最後の値だけを使う。
+# Codex CLIの転記をClaude側と同じ正規化JSONへ畳む（#2535・#3169）。
+#
+# **`token_count`は累積値**なので、前の値との差を1応答ぶんとして扱う。合計は最後の累積値と
+# 必ず一致し、フェーズの内訳だけが応答ごとに分かれる（`last_token_usage`も同じ値を持つが、
+# 欠けた行があっても合計がずれない差分のほうを使う）。
+#
+# **フェーズの境界の考え方はClaude側（`session_usage_aggregate`）と同じで、拾う場所だけが違う。**
+# Codexのツール呼び出しは`exec`の1つだけで、中身はJavaScriptのソースとして`input`に入る。
+#
+#   計画 → 調査     `scripts/submit-plan.sh`の実行（#2545。Codexに`ExitPlanMode`は無い）
+#   調査 → 実装     `tools.apply_patch(`か、`cmd`がBashでの書き込み
+#   実装 → 仕上げ   `cmd`が最初の`git commit`
+#   検証の印        `cmd`がテスト・Lint・型チェック・ビルド・疎通確認（応答ごとの印）
+#
+# **境界を1つも拾えなかったセッションは、従来どおり区分なし（`null`）で送る。** 画面は
+# 「実装（フェーズ未集計）」の行として合算だけを見せる。Codexの転記も非公開仕様なので、
+# 読めない行・知らない形は黙って捨てる側へ倒す（Claude側と同じ）。
 codex_session_usage_aggregate() {
   local script
   script="$(cat <<'PY'
 import json, os, re, sys
+
 PRICES={"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
+# キャッシュ書き込みの倍率。CodexはTTLの内訳を持たないので、Claude側の5分TTLと同じ1.25倍で数える。
+CACHE_WRITE_5M=1.25
 WORKTREE=re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
 LABELS={"implementation":"実装","plan-review":"計画レビュー","code-review":"コードレビュー","question":"横断質問","other":"その他"}
+
+# `exec`の`input`（JavaScriptのソース）から、実際のシェルコマンドを取り出す。
+# `{"cmd":"..."}`はJSONとして書かれているので、取り出した中身はJSONの文字列として解く。
+CMD_IN_SOURCE=re.compile(r'"cmd"\s*:\s*"((?:[^"\\]|\\.)*)"')
+# ファイルを書き換えるツール（調査 → 実装の境目）。Codexはこれが`exec`の中の呼び出しで来る。
+APPLY_PATCH=re.compile(r"tools\.apply_patch\s*\(")
+# 計画の提出（計画 → 調査の境目）。CodexはIssueDeckの受け口を叩く（#2545）。
+PLAN_SUBMIT=re.compile(r"submit-plan\.sh(?:\s|\"|$)")
+# 以下3つはClaude側（`session_usage_aggregate`）と同じ正規表現。**片方だけ直さない。**
+BASH_WRITE=re.compile(
+    r"(?:^|[\s;&|(])(?:sed\s+-i|tee\s|patch\s|git\s+apply|dd\s+if=)"
+    r"|>>?\s*(?!/dev/null|&)[^\s;&|)]"
+)
+BASH_COMMIT=re.compile(r"(?:^|[\s;&|(])git\s(?:[^\n;&|]*\s)?commit(?:\s|$)")
+BASH_VERIFY=re.compile(
+    r"(?:^|[\s;&|(])(?:"
+    r"(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?(?:test|test:unit|lint|typecheck|build|build:ci|check:workflows)\b"
+    r"|(?:pnpm\s+(?:exec\s+)?|npx\s+|bunx\s+)?(?:vitest|tsc|eslint|playwright|jest)\b"
+    r"|pytest\b|ruff\b|mypy\b|shellcheck\b|bash\s+-n\b|curl\s"
+    r")"
+)
+
+
 def number(value):
-    try:return max(0,int(value))
-    except (TypeError,ValueError):return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def classify(cwd):
-    matched=WORKTREE.search(cwd or "")
-    if matched:return "implementation",matched.group("repo"),int(matched.group("issue"))
-    if "/.plan-reviews/" in (cwd or ""):return "plan-review",os.path.basename(cwd).removeprefix("guchi-apps-"),None
-    if "/.code-reviews/" in (cwd or ""):return "code-review",os.path.basename(cwd).removeprefix("guchi-apps-"),None
-    if "/.questions/" in (cwd or ""):return "question",os.path.basename(cwd).removeprefix("guchi-apps-"),None
-    return "other",os.path.basename(cwd or "") or None,None
+    matched = WORKTREE.search(cwd or "")
+    if matched:
+        return "implementation", matched.group("repo"), int(matched.group("issue"))
+    if "/.plan-reviews/" in (cwd or ""):
+        return "plan-review", os.path.basename(cwd).removeprefix("guchi-apps-"), None
+    if "/.code-reviews/" in (cwd or ""):
+        return "code-review", os.path.basename(cwd).removeprefix("guchi-apps-"), None
+    if "/.questions/" in (cwd or ""):
+        return "question", os.path.basename(cwd).removeprefix("guchi-apps-"), None
+    return "other", os.path.basename(cwd or "") or None, None
+
+
 def price_for(model):
-    matches=[(key,value) for key,value in PRICES.items() if model==key or model.startswith(key+"-")]
-    return max(matches,key=lambda pair:len(pair[0]))[1] if matches else None
-sessions=[];totals={"responses":0,"input":0,"cacheCreate5m":0,"cacheCreate1h":0,"cacheRead":0,"output":0,"costUsd":0.0,"inputCostUsd":0.0,"outputCostUsd":0.0};unknown=set();read_files=0;unreadable=0
+    matches = [(key, value) for key, value in PRICES.items() if model == key or model.startswith(key + "-")]
+    return max(matches, key=lambda pair: len(pair[0]))[1] if matches else None
+
+
+def commands(source):
+    """`exec`のソースに含まれるシェルコマンドを全部出す。解けない断片は黙って捨てる。"""
+    for matched in CMD_IN_SOURCE.finditer(source):
+        try:
+            yield json.loads('"' + matched.group(1) + '"')
+        except ValueError:
+            continue
+
+
+def cost_of(price, uncached, cached, created, output):
+    """(入力側, 出力側)。単価が分からないモデルは両方0。"""
+    if not price:
+        return 0.0, 0.0
+    return (
+        (uncached * price[0] + cached * price[1] + created * price[0] * CACHE_WRITE_5M) / 1_000_000,
+        output * price[2] / 1_000_000,
+    )
+
+
+sessions = []
+totals = {"responses": 0, "input": 0, "cacheCreate5m": 0, "cacheCreate1h": 0, "cacheRead": 0,
+          "output": 0, "costUsd": 0.0, "inputCostUsd": 0.0, "outputCostUsd": 0.0}
+unknown = set()
+read_files = 0
+unreadable = 0
+
 for raw_path in sys.stdin:
-    path=raw_path.strip()
-    if not path:continue
-    try:handle=open(path,encoding="utf-8",errors="replace")
-    except OSError:unreadable+=1;continue
-    read_files+=1;cwd=None;model="";first_at=None;last_at=None;latest=None;responses=0
+    path = raw_path.strip()
+    if not path:
+        continue
+    try:
+        handle = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        unreadable += 1
+        continue
+    read_files += 1
+    cwd = None
+    model = ""
+    first_at = None
+    last_at = None
+    latest = None
+    previous = None
+    responses = 0
+    bucket = {"input": 0, "cacheRead": 0, "cacheCreate5m": 0, "output": 0,
+              "inputCostUsd": 0.0, "outputCostUsd": 0.0}
+    # (時刻, 入力側の金額, 出力側の金額, 検証か)
+    responses_log = []
+    pending_verify = False
+    pending_plan = False
+    pending_write = False
+    pending_commit = False
+    plan_submit_ts = None
+    first_write_ts = None
+    first_commit_ts = None
     with handle:
         for line in handle:
-            if '"token_count"' not in line and '"session_meta"' not in line and '"turn_context"' not in line:continue
-            try:record=json.loads(line)
-            except ValueError:continue
-            payload=record.get("payload") or {};stamp=record.get("timestamp")
-            if record.get("type")=="session_meta":cwd=payload.get("cwd") or cwd
-            if record.get("type")=="turn_context":model=payload.get("model") or model;cwd=payload.get("cwd") or cwd
-            if payload.get("type")=="token_count":
-                usage=(payload.get("info") or {}).get("total_token_usage")
-                if isinstance(usage,dict):latest=usage;responses+=1
-            if stamp:first_at=stamp if first_at is None or stamp<first_at else first_at;last_at=stamp if last_at is None or stamp>last_at else last_at
-    if not latest or not first_at or not last_at:continue
-    total_input=number(latest.get("input_tokens"));cached=number(latest.get("cached_input_tokens"));created=number(latest.get("cache_write_input_tokens"));uncached=max(0,total_input-cached-created);output=number(latest.get("output_tokens"));price=price_for(model);in_cost=0.0;out_cost=0.0
+            if ('"token_count"' not in line and '"session_meta"' not in line
+                    and '"turn_context"' not in line and '"custom_tool_call"' not in line):
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            payload = record.get("payload") or {}
+            if not isinstance(payload, dict):
+                continue
+            stamp = record.get("timestamp")
+            if record.get("type") == "session_meta":
+                cwd = payload.get("cwd") or cwd
+            if record.get("type") == "turn_context":
+                model = payload.get("model") or model
+                cwd = payload.get("cwd") or cwd
+
+            # フェーズの境界（#3169）。**印を次の応答へ持ち越す。**
+            #
+            # Codexのツール呼び出しは、その呼び出しを出した応答の`token_count`より**前**の行に
+            # 出る（Claudeは同じ応答の中のtool_useなので時刻が並ぶ）。呼び出し自体の時刻を境に
+            # 使うと、その応答が境の外へ落ちる。境は必ず「次に来た応答の時刻」にする。
+            if payload.get("type") == "custom_tool_call":
+                source = payload.get("input")
+                if isinstance(source, str):
+                    if PLAN_SUBMIT.search(source):
+                        pending_plan = True
+                    if APPLY_PATCH.search(source):
+                        pending_write = True
+                    for command in commands(source):
+                        if BASH_VERIFY.search(command):
+                            pending_verify = True
+                        if BASH_COMMIT.search(command):
+                            pending_commit = True
+                        elif BASH_WRITE.search(command):
+                            pending_write = True
+
+            if payload.get("type") == "token_count":
+                usage = (payload.get("info") or {}).get("total_token_usage")
+                if isinstance(usage, dict):
+                    latest = usage
+                    responses += 1
+                    # **累積値の差が1応答ぶん。**
+                    #
+                    # 累積値は1本の転記の中で巻き戻ることがある（圧縮・枝分かれの後は0から数え直す）。
+                    # 以前のように最後の値だけを読むと、巻き戻りより前の消費がまるごと落ちていた
+                    # （実測で1セッションぶんの金額が半分に出ていた）ので、下がった時点で基準を戻し、
+                    # 差を積んだものを合計にする。**巻き戻りが無ければ最後の累積値と同じ値になる。**
+                    current = (number(usage.get("input_tokens")), number(usage.get("cached_input_tokens")),
+                               number(usage.get("cache_write_input_tokens")), number(usage.get("output_tokens")))
+                    base = previous if previous and current[0] >= previous[0] else (0, 0, 0, 0)
+                    delta = tuple(max(0, now - before) for now, before in zip(current, base))
+                    previous = current
+                    uncached = max(0, delta[0] - delta[1] - delta[2])
+                    price = price_for(model)
+                    in_cost, out_cost = cost_of(price, uncached, delta[1], delta[2], delta[3])
+                    bucket["input"] += uncached
+                    bucket["cacheRead"] += delta[1]
+                    bucket["cacheCreate5m"] += delta[2]
+                    bucket["output"] += delta[3]
+                    bucket["inputCostUsd"] += in_cost
+                    bucket["outputCostUsd"] += out_cost
+                    response_stamp = stamp if isinstance(stamp, str) else ""
+                    if pending_plan:
+                        # 計画の出し直しで複数回呼ばれても、**最後の1回**だけを境に使う。
+                        if plan_submit_ts is None or response_stamp > plan_submit_ts:
+                            plan_submit_ts = response_stamp
+                    if pending_write and (first_write_ts is None or response_stamp < first_write_ts):
+                        first_write_ts = response_stamp
+                    if pending_commit and (first_commit_ts is None or response_stamp < first_commit_ts):
+                        first_commit_ts = response_stamp
+                    responses_log.append((response_stamp, in_cost, out_cost, pending_verify))
+                    pending_plan = pending_write = pending_commit = pending_verify = False
+            if stamp:
+                first_at = stamp if first_at is None or stamp < first_at else first_at
+                last_at = stamp if last_at is None or stamp > last_at else last_at
+    if not latest or not first_at or not last_at:
+        continue
+
+    if price_for(model) is None and model:
+        unknown.add(model)
+    uncached = bucket["input"]
+    cached = bucket["cacheRead"]
+    created = bucket["cacheCreate5m"]
+    output = bucket["output"]
+    total_input = uncached + cached + created
     # 入力側・出力側の内訳も出す（#2626）。表示側でトークン比から按分し直させないため。
-    if price:in_cost=(uncached*price[0]+cached*price[1]+created*price[0]*1.25)/1_000_000;out_cost=output*price[2]/1_000_000
-    elif model:unknown.add(model)
-    cost=in_cost+out_cost
-    kind,repo,issue=classify(cwd);row={"responses":responses,"input":uncached,"cacheCreate5m":created,"cacheCreate1h":0,"cacheRead":cached,"output":output,"costUsd":round(cost,4),"inputCostUsd":round(in_cost,4),"outputCostUsd":round(out_cost,4),"contextTokens":total_input,"avgContext":round(total_input/responses),"kind":kind,"kindLabel":LABELS[kind],"repository":repo,"issue":issue,"cwd":cwd,"transcript":path,"models":[model] if model else [],"firstAt":first_at,"lastAt":last_at};sessions.append(row)
-    for key in ("responses","input","cacheCreate5m","cacheCreate1h","cacheRead","output"):totals[key]+=row[key]
-    totals["costUsd"]+=cost;totals["inputCostUsd"]+=in_cost;totals["outputCostUsd"]+=out_cost
-sessions.sort(key=lambda row:(-row["costUsd"],row["transcript"]));totals.update({"costUsd":round(totals["costUsd"],4),"inputCostUsd":round(totals["inputCostUsd"],4),"outputCostUsd":round(totals["outputCostUsd"],4),"sessions":len(sessions),"transcripts":read_files,"unreadableTranscripts":unreadable,"duplicateRows":0})
-json.dump({"totals":totals,"sessions":sessions,"byDay":[],"byModel":[],"unknownModels":sorted(unknown)},sys.stdout,ensure_ascii=False);print()
+    in_cost = bucket["inputCostUsd"]
+    out_cost = bucket["outputCostUsd"]
+    cost = in_cost + out_cost
+
+    # 境界の順序を「計画 → 調査 → 実装 → 仕上げ」へ寄せる（Claude側と同じ）。
+    plan_end = plan_submit_ts
+    research_end = first_write_ts
+    if plan_end is not None and research_end is not None and research_end < plan_end:
+        research_end = plan_end
+    coding_end = first_commit_ts
+    for boundary in (plan_end, research_end):
+        if coding_end is not None and boundary is not None and coding_end < boundary:
+            coding_end = boundary
+
+    def phase_of(value, plan_end=plan_end, research_end=research_end, coding_end=coding_end):
+        if plan_end is not None and value <= plan_end:
+            return "plan"
+        if coding_end is not None and value >= coding_end:
+            return "wrapup"
+        if research_end is not None and value >= research_end:
+            return "coding"
+        return "research"
+
+    phases = {key: 0.0 for key in ("plan", "research", "coding", "verify", "wrapup")}
+    for response_stamp, response_in, response_out, is_verify in responses_log:
+        phase = phase_of(response_stamp)
+        # 実装・仕上げの窓の中の検証だけを分ける（#3064）。調べ物の中のcurlはそのフェーズに残す。
+        if phase in ("coding", "wrapup") and is_verify:
+            phase = "verify"
+        phases[phase] += response_in + response_out
+
+    if plan_submit_ts is not None:
+        plan_cost_usd = round(phases["plan"], 4)
+        implementation_cost_usd = round(
+            sum(phases[key] for key in ("research", "coding", "verify", "wrapup")), 4)
+    else:
+        plan_cost_usd = None
+        implementation_cost_usd = None
+
+    # **書き込みもコミットも1度も無いセッションは区分なし**（Claude側と同じ）。全額が「調査」に
+    # 寄って、実際には実装していたセッションまで調査として数えてしまうため。
+    if first_write_ts is None and first_commit_ts is None:
+        research_cost_usd = coding_cost_usd = verify_cost_usd = wrapup_cost_usd = None
+    else:
+        research_cost_usd = round(phases["research"], 4)
+        coding_cost_usd = round(phases["coding"], 4)
+        verify_cost_usd = round(phases["verify"], 4)
+        wrapup_cost_usd = round(phases["wrapup"], 4)
+
+    kind, repo, issue = classify(cwd)
+    row = {"responses": responses, "input": uncached, "cacheCreate5m": created, "cacheCreate1h": 0,
+           "cacheRead": cached, "output": output, "costUsd": round(cost, 4),
+           "inputCostUsd": round(in_cost, 4), "outputCostUsd": round(out_cost, 4),
+           "contextTokens": total_input, "avgContext": round(total_input / responses) if responses else 0,
+           "kind": kind, "kindLabel": LABELS[kind], "repository": repo, "issue": issue, "cwd": cwd,
+           "transcript": path, "models": [model] if model else [], "firstAt": first_at, "lastAt": last_at,
+           "planCostUsd": plan_cost_usd, "implementationCostUsd": implementation_cost_usd,
+           "researchCostUsd": research_cost_usd, "codingCostUsd": coding_cost_usd,
+           "verifyCostUsd": verify_cost_usd, "wrapupCostUsd": wrapup_cost_usd}
+    sessions.append(row)
+    for key in ("responses", "input", "cacheCreate5m", "cacheCreate1h", "cacheRead", "output"):
+        totals[key] += row[key]
+    totals["costUsd"] += cost
+    totals["inputCostUsd"] += in_cost
+    totals["outputCostUsd"] += out_cost
+
+sessions.sort(key=lambda row: (-row["costUsd"], row["transcript"]))
+totals.update({"costUsd": round(totals["costUsd"], 4), "inputCostUsd": round(totals["inputCostUsd"], 4),
+               "outputCostUsd": round(totals["outputCostUsd"], 4), "sessions": len(sessions),
+               "transcripts": read_files, "unreadableTranscripts": unreadable, "duplicateRows": 0})
+json.dump({"totals": totals, "sessions": sessions, "byDay": [], "byModel": [],
+           "unknownModels": sorted(unknown)}, sys.stdout, ensure_ascii=False, separators=(",", ":"))
+print()
 PY
 )"
   _session_usage_run_python "$script"
@@ -958,7 +1197,7 @@ for row in data.get("sessions") or []:
             # 画面がトークン比で按分し直さずに済むよう金額のまま送る。
             "inputCostUsd": row.get("inputCostUsd"),
             "outputCostUsd": row.get("outputCostUsd"),
-            # 計画/実装の内訳（#2646）。`ExitPlanMode`が無いセッション・Codexの行は無いので
+            # 計画/実装の内訳（#2646・#3169）。計画を1度も出していないセッションには無いので、
             # `.get`はNoneのまま送る（画面は「区分なし」として扱う）。
             "planCostUsd": row.get("planCostUsd"),
             "implementationCostUsd": row.get("implementationCostUsd"),

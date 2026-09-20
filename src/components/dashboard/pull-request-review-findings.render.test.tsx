@@ -48,7 +48,7 @@ describe("PullRequestReviewFindings", () => {
       />,
     );
 
-    expect(screen.getByText(/このレビューの後にコミットが積まれています/)).toBeTruthy();
+    expect(screen.getByText(/この判定の後にコミットが積まれています/)).toBeTruthy();
     // 短縮したSHAを出す（どの時点のレビューかを確かめられるように）
     expect(screen.getByText("0123456")).toBeTruthy();
   });

@@ -23,6 +23,7 @@ function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullReque
     mergedAt: null,
     baseRef: "main",
     headRef: "develop",
+    headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     kind: "release",
     linkedIssueNumber: null,
     linkedIssueNumbers: [],
@@ -128,6 +129,7 @@ describe("PullRequestMergeButton", () => {
             riskLabel: "該当あり",
             riskReasons: ["認証・認可に関わる変更"],
             confirmLabel: "必要（自動マージはスキップされます）",
+            reviewedSha: null,
           },
         })}
         onMerged={() => {}}

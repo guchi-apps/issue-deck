@@ -227,6 +227,7 @@ export function IssuePullRequestList({
                   onDeclined={() => onDeclined?.(link.number)}
                   pullRequestNumber={link.number}
                   reviewVerdict={detail?.reviewVerdict ?? null}
+                  headSha={detail?.headSha ?? null}
                   pullRequestUrl={detail?.htmlUrl}
                   ciStatus={detail?.ciStatus ?? null}
                   mergeJudgement={detail?.mergeJudgement ?? null}

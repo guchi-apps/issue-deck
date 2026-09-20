@@ -2002,6 +2002,13 @@ describe("エージェントの選択（#2505）", () => {
     // 選んだ時点で画面に出す文言。空にすると注意そのものが消える
     expect(CODEX_LIMITATIONS.length).toBeGreaterThan(0);
     expect(CODEX_LIMITATIONS.join("")).toContain("Remote Control");
+    // 止まったセッションの自動再開はClaude Codeの転記を読む実装で、Codexでは効かない（#3169）
+    expect(CODEX_LIMITATIONS.join("")).toContain("自動再開");
+  });
+
+  it("できるようになったものは並べない（質問への回答は#2579で画面へ出る）", () => {
+    // 古い制限が残っていると、動いていないのはそういう仕様だと読まれ、不具合が報告されない
+    expect(CODEX_LIMITATIONS.join("")).not.toContain("質問への回答");
   });
 });
 

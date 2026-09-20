@@ -45,8 +45,9 @@ export type SessionUsageEntry = {
   /**
    * `costUsd`の計画（Plan mode）・実装の内訳（#2646）。転記に残る`ExitPlanMode`の最後の
    * 呼び出し時刻を境に、集計側（`scripts/lib/session-usage.sh`）が振り分けたもの。
-   * Plan modeを使っていないセッション・Codexの行はnull（`sessionUsagePhaseSplit`が
-   * 「区分なし」として扱う）。**近似は行わない**——入力/出力の内訳と違い、境界が分からない
+   * 計画を1度も出していないセッションはnull（`sessionUsagePhaseSplit`が「区分なし」として
+   * 扱う）。**Codexの行にも入る**（#3169。あちらの境は`scripts/submit-plan.sh`の実行）。
+   * **近似は行わない**——入力/出力の内訳と違い、境界が分からない
    * セッションを他の数値から按分する手立てが無いため
    */
   planCostUsd?: number | null;
@@ -54,8 +55,9 @@ export type SessionUsageEntry = {
   /**
    * `implementationCostUsd`をさらに割った内訳（#2779）。境界はどれも転記のツール呼び出しで、
    * 調査＝最初のファイル編集まで／実装＝最初の`git commit`まで／仕上げ＝それ以降。
-   * **3つ揃っていなければ3つともnull**（境界を1つも拾えなかったセッション・Codexの行）。
-   * `sessionUsageImplementationPhases`が「フェーズ未集計」として扱う
+   * **3つ揃っていなければ3つともnull**（境界を1つも拾えなかったセッション）。
+   * `sessionUsageImplementationPhases`が「フェーズ未集計」として扱う。**Codexの行にも入る**
+   * （#3169。あちらの書き込みは`tools.apply_patch`）
    */
   researchCostUsd?: number | null;
   codingCostUsd?: number | null;
