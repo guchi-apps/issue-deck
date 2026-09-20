@@ -95,6 +95,17 @@ function extractJsonText(text: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
+function suggestionGenerationError(status: number, code: string | null | undefined): Error {
+  if (code === "insufficient_quota") {
+    return new Error(`OpenAI APIの利用枠が不足しています。請求設定を確認してください (${status}: ${code})`);
+  }
+  if (code === "rate_limit_exceeded") {
+    return new Error(`AIのリクエスト上限に達しました。少し待ってから再試行してください (${status}: ${code})`);
+  }
+  const detail = code ? `: ${code}` : "";
+  return new Error(`AIによる提案生成に失敗しました (${status}${detail})`);
+}
+
 /**
  * Issue本文からタイトル・ラベルの提案をClaudeに生成させる。
  *
@@ -108,7 +119,7 @@ export async function generateIssueSuggestion(
 ): Promise<IssueSuggestResult> {
   const prompt = buildIssueSuggestPrompt(input);
 
-  const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
+  const { response: res, json, error } = await callClaudeMessages<AnthropicMessageResponse>({
     feature: "issue_suggest",
     token,
     body: {
@@ -118,7 +129,7 @@ export async function generateIssueSuggestion(
   });
 
   if (!res.ok) {
-    throw new Error(`AIによる提案生成に失敗しました (${res.status})`);
+    throw suggestionGenerationError(res.status, error?.code);
   }
 
   const text = json?.content?.find((block) => block.type === "text")?.text?.trim();
