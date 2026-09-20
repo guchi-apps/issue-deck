@@ -91,13 +91,18 @@ describe("callClaudeMessages", () => {
     expect(summary.features[0].models[0].model).toBe("claude-haiku-4-5");
   });
 
-  it("拒否された呼び出し（429など）は計上せず、例外も投げない", async () => {
+  it("利用枠不足の429は再試行せず、原因とリクエストIDを返す", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(jsonResponse({ error: "rate_limited" }, 429)),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: "insufficient_quota", message: "利用枠が不足しています" } }),
+          { status: 429, headers: { "content-type": "application/json", "x-request-id": "req_quota" } },
+        ),
+      ),
     );
 
-    const { response, json } = await callClaudeMessages({
+    const { response, json, error } = await callClaudeMessages({
       feature: "plan_usage",
       token: "test-token",
       body: { model: "claude-haiku-4-5", max_tokens: 1, messages: [] },
@@ -105,7 +110,34 @@ describe("callClaudeMessages", () => {
 
     expect(response.status).toBe(429);
     expect(json).toBeNull();
+    expect(error).toEqual({ code: "insufficient_quota", requestId: "req_quota" });
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(getClaudeApiUsageSummary(NOW).features).toEqual([]);
+  });
+
+  it("OpenAIの一時的なレート制限は待機後に1回だけ再試行する", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-luna" });
+    process.env.OPENAI_API_KEY = "openai-test-token";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: "rate_limit_exceeded" } }), {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ output_text: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = callClaudeMessages({
+      feature: "issue_suggest",
+      token: "anthropic-token",
+      body: { max_tokens: 16, messages: [] },
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(result).resolves.toMatchObject({ response: { status: 200 }, json: { content: [{ text: "ok" }] } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("送信先・認証ヘッダ・bodyをそのまま渡す", async () => {

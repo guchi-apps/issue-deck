@@ -161,6 +161,19 @@ describe("generateIssueSuggestion", () => {
 
     expect(result).toEqual({ kind: "issue", title: "タイトル", labels: ["30.bug"] });
   });
+
+  it("APIが返した機械可読な原因を失敗メッセージに含める", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "insufficient_quota" } }), {
+        status: 429,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(
+      generateIssueSuggestion("dummy-token", { body: "本文", availableLabels: [] }),
+    ).rejects.toThrow("OpenAI APIの利用枠が不足しています。請求設定を確認してください (429: insufficient_quota)");
+  });
 });
 
 /**
