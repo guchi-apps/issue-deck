@@ -110,6 +110,42 @@ function aggregateCodex(paths: string[]) {
   return JSON.parse(callShell("codex_session_usage_aggregate", paths.join("\n") + "\n"));
 }
 
+/** Codexの転記の1行（`session_meta` / `turn_context` / `custom_tool_call` / `token_count`） */
+function codexMeta(timestamp: string, cwd: string) {
+  return { type: "session_meta", timestamp, payload: { cwd } };
+}
+
+function codexTurn(timestamp: string, model = "gpt-5.6-sol") {
+  return { type: "turn_context", timestamp, payload: { model } };
+}
+
+/** `exec`の`input`はJavaScriptのソースで、シェルのコマンドはその中のJSONに入る */
+function codexExec(timestamp: string, source: string) {
+  return { type: "response_item", timestamp, payload: { type: "custom_tool_call", name: "exec", input: source } };
+}
+
+/** `total_token_usage`は累積値。テストでも累積のまま渡す */
+function codexTokens(
+  timestamp: string,
+  totals: { input: number; cached: number; output: number; created?: number },
+) {
+  return {
+    type: "event_msg",
+    timestamp,
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {
+          input_tokens: totals.input,
+          cached_input_tokens: totals.cached,
+          cache_write_input_tokens: totals.created ?? 0,
+          output_tokens: totals.output,
+        },
+      },
+    },
+  };
+}
+
 describe("session_usage_aggregate", () => {
   it("同じmessage.idの行を1応答として数える（usageは全content行に重複して書かれる）", () => {
     // 同じ応答が3行に分かれて書かれている転記。除去しないと3応答・3倍のトークンになる。
@@ -529,6 +565,71 @@ describe("codex_session_usage_aggregate", () => {
     // 入力側（非キャッシュ$4/1M・キャッシュ$0.4/1M・書き込み1.25倍）と出力側（$20/1M）を分けて出す。
     expect(result.totals.inputCostUsd).toBeCloseTo(0.0035, 4);
     expect(result.totals.outputCostUsd).toBeCloseTo(0.004, 4);
+  });
+
+  it("累積値が巻き戻っても、巻き戻る前の消費を落とさない", () => {
+    // 圧縮・枝分かれの後、`total_token_usage`は0から数え直す。最後の値だけを読むと
+    // 巻き戻りより前の消費がまるごと落ちる（実測で金額が半分に出ていた）。
+    const file = writeTranscript("codex-rollback.jsonl", [
+      codexMeta("2026-08-30T01:00:00.000Z", "/home/u/apps/issue-deck-worktrees/issue-2900"),
+      codexTurn("2026-08-30T01:00:01.000Z"),
+      codexTokens("2026-08-30T01:01:00.000Z", { input: 1000, cached: 800, output: 100 }),
+      codexTokens("2026-08-30T01:02:00.000Z", { input: 2000, cached: 1600, output: 200 }),
+      // ここで巻き戻る
+      codexTokens("2026-08-30T01:03:00.000Z", { input: 500, cached: 400, output: 50 }),
+    ]);
+
+    const result = aggregateCodex([file]);
+    // 2000（巻き戻る前の最後）＋ 500（巻き戻ったあと）＝ 2500 が入力の合計。
+    expect(result.totals).toMatchObject({ responses: 3, cacheRead: 2000, input: 500, output: 250 });
+  });
+
+  it("計画・調査・実装・検証・仕上げのフェーズへ割る", () => {
+    const file = writeTranscript("codex-phases.jsonl", [
+      codexMeta("2026-08-30T01:00:00.000Z", "/home/u/apps/issue-deck-worktrees/issue-2901"),
+      codexTurn("2026-08-30T01:00:01.000Z"),
+      // 計画: submit-plan.sh を叩くまで
+      codexExec("2026-08-30T01:01:00.000Z", 'const r = await tools.exec_command({"cmd":"scripts/submit-plan.sh /tmp/plan.md"});'),
+      codexTokens("2026-08-30T01:01:10.000Z", { input: 1000, cached: 0, output: 100 }),
+      // 調査: 読むだけ
+      codexExec("2026-08-30T01:02:00.000Z", 'const r = await tools.exec_command({"cmd":"rg -n foo src"});'),
+      codexTokens("2026-08-30T01:02:10.000Z", { input: 2000, cached: 0, output: 200 }),
+      // 実装: apply_patch
+      codexExec("2026-08-30T01:03:00.000Z", "const r = await tools.apply_patch(patch);"),
+      codexTokens("2026-08-30T01:03:10.000Z", { input: 3000, cached: 0, output: 300 }),
+      // 検証: テストの実行（実装の窓の中なので検証へ移る）
+      codexExec("2026-08-30T01:04:00.000Z", 'const r = await tools.exec_command({"cmd":"pnpm test"});'),
+      codexTokens("2026-08-30T01:04:10.000Z", { input: 4000, cached: 0, output: 400 }),
+      // 仕上げ: 最初のコミット以降
+      codexExec("2026-08-30T01:05:00.000Z", 'const r = await tools.exec_command({"cmd":"git commit -m x"});'),
+      codexTokens("2026-08-30T01:05:10.000Z", { input: 5000, cached: 0, output: 500 }),
+    ]);
+
+    const [session] = aggregateCodex([file]).sessions;
+    // 出力は100/100/100/100/100トークンずつ（$20/1M）、入力は1000ずつ（$4/1M）。
+    expect(session.planCostUsd).toBeCloseTo(0.006, 4);
+    expect(session.researchCostUsd).toBeCloseTo(0.006, 4);
+    expect(session.codingCostUsd).toBeCloseTo(0.006, 4);
+    expect(session.verifyCostUsd).toBeCloseTo(0.006, 4);
+    expect(session.wrapupCostUsd).toBeCloseTo(0.006, 4);
+    // 5つの合計はセッションの金額とぴったり合う（画面のカードの合計が動かないため）。
+    expect(session.planCostUsd + session.implementationCostUsd).toBeCloseTo(session.costUsd, 4);
+  });
+
+  it("書き込みもコミットも無いセッションは区分なし（従来どおり未集計へ倒す）", () => {
+    const file = writeTranscript("codex-readonly.jsonl", [
+      codexMeta("2026-08-30T01:00:00.000Z", "/home/u/apps/issue-deck-worktrees/issue-2902"),
+      codexTurn("2026-08-30T01:00:01.000Z"),
+      codexExec("2026-08-30T01:01:00.000Z", 'const r = await tools.exec_command({"cmd":"rg -n foo src"});'),
+      codexTokens("2026-08-30T01:01:10.000Z", { input: 1000, cached: 0, output: 100 }),
+    ]);
+
+    const [session] = aggregateCodex([file]).sessions;
+    expect(session.planCostUsd).toBeNull();
+    expect(session.researchCostUsd).toBeNull();
+    expect(session.codingCostUsd).toBeNull();
+    expect(session.verifyCostUsd).toBeNull();
+    expect(session.wrapupCostUsd).toBeNull();
   });
 });
 

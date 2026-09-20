@@ -80,8 +80,8 @@ export type SessionUsageReport = {
   outputCostUsd: number | null;
   /**
    * `costUsd`の計画（Plan mode）・実装の内訳（#2646）。**片方でも欠けたら両方nullにする**
-   * （上のinputCostUsd/outputCostUsdと同じ理由）。Plan modeを使っていないセッション・
-   * Codexの行は常にnull
+   * （上のinputCostUsd/outputCostUsdと同じ理由）。計画を1度も出していないセッションはnull。
+   * **Codexの行にも入る**（#3169。あちらの境は`scripts/submit-plan.sh`の実行）
    */
   planCostUsd: number | null;
   implementationCostUsd: number | null;

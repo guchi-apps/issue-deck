@@ -1477,6 +1477,10 @@ SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/
 # **#3064で実装・仕上げから「検証」（`verifyCostUsd`）を切り出した。** 上と同じ理由で、
 # 30日ぶんを一度だけ開き直して過去の行にも検証の内訳を入れる。
 SESSION_USAGE_VERIFY_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-verify-backfill.stamp"
+# **#3169でCodexの行にもフェーズの内訳が入るようになった。** Claude側の印はどれも既に
+# 置かれているため、Codexの過去ぶんを埋め直すには別の印が要る（置かないと、入れ替えた時点で
+# 3日以上前に終わったCodexのセッションは30日ぶん「実装（フェーズ未集計）」のまま残る）。
+SESSION_USAGE_CODEX_PHASE_BACKFILL_STAMP="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/session-usage-codex-phase-backfill.stamp"
 
 report_session_usage() {
   ((SESSION_USAGE_INTERVAL_MINUTES > 0)) || return 0
@@ -1502,7 +1506,7 @@ report_session_usage() {
   local days backfill=0
   if [[ -f "$SESSION_USAGE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_BACKFILL_STAMP" &&
     -f "$SESSION_USAGE_PHASE_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" &&
-    -f "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" ]]; then
+    -f "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" && -f "$SESSION_USAGE_CODEX_PHASE_BACKFILL_STAMP" ]]; then
     days="$SESSION_USAGE_WINDOW_DAYS"
   else
     days="$SESSION_USAGE_BACKFILL_DAYS"
@@ -1561,6 +1565,8 @@ report_session_usage() {
     touch "$SESSION_USAGE_PHASE_BACKFILL_STAMP" 2>/dev/null || true
     touch "$SESSION_USAGE_CODE_REVIEW_BACKFILL_STAMP" 2>/dev/null || true
     touch "$SESSION_USAGE_VERIFY_BACKFILL_STAMP" 2>/dev/null || true
+    # Codexの集計が落ちた巡では置かない（Claudeの印と違い、埋め直す相手がCodexの行だけのため）。
+    ((codex_backfill_ok)) && touch "$SESSION_USAGE_CODEX_PHASE_BACKFILL_STAMP" 2>/dev/null || true
     echo "トークン使用量の過去ぶん（直近${days}日・${stored}セッション）を報告しました。"
   fi
   return 0
