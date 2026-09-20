@@ -4,7 +4,7 @@ import { AlertTriangle, Ban, Check, CheckCircle2, Clock, Copy, Loader2 } from "l
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { describeClaudeModel } from "@/lib/app-settings";
+import { describeClaudeModel, describeCodexModel } from "@/lib/app-settings";
 import {
   DEFAULT_DISPATCH_AGENT,
   describeDispatchAgent,
@@ -159,6 +159,16 @@ export function DispatchJobStatus({
           title="このIssueだけに指定したモデルです（設定の既定ではありません）"
         >
           {describeClaudeModel(job.claudeModel)}
+        </span>
+      )}
+      {/* Codexも同じ（#3192）。Codexのジョブはエージェントの印（上のamber）が別に付くので、
+          モデルの印は色を変えずに並べる */}
+      {job.kind === "LAUNCH" && job.agent === "codex" && job.codexModel && (
+        <span
+          className="inline-flex w-fit items-center rounded-full bg-muted px-2 py-0.5 font-medium ring-1 ring-inset ring-border"
+          title="このIssueだけに指定したモデルです（設定の既定ではありません）"
+        >
+          {describeCodexModel(job.codexModel)}
         </span>
       )}
       {copied && <span className="text-muted-foreground">コピーしました</span>}

@@ -162,4 +162,44 @@ describe("POST /api/dispatch/claim", () => {
       ],
     });
   });
+  // #3192。Claudeと同じく**pollerは`codexModel`しか読まない**ので、Issueごとの指定はここで
+  // 差し替えて届ける
+  it("ジョブにCodexのモデルの指定があれば、設定の既定より優先して払い出す", async () => {
+    claimDispatchJobs.mockResolvedValue([
+      { id: "job-1", agent: "codex", codexModel: "gpt-5.6-sol" },
+      { id: "job-2", agent: "codex", codexModel: null },
+    ]);
+    appSettingFindUnique.mockResolvedValue({
+      claudeLocalModel: "sonnet",
+      codexModel: "gpt-5.5",
+    });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 2 }));
+
+    const body = await res.json();
+    expect(body.jobs.map((job: { codexModel: string }) => job.codexModel)).toEqual([
+      "gpt-5.6-sol",
+      "gpt-5.5",
+    ]);
+  });
+
+  // 設定が「おまかせ」でも`-m pick`で起動させない。ダイアログを経由しない起動はTerraで立てる
+  it("設定がおまかせ（pick）でCodexのモデル指定の無いジョブは、Terraで払い出す", async () => {
+    claimDispatchJobs.mockResolvedValue([{ id: "job-1", agent: "codex", codexModel: null }]);
+    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "pick" });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
+
+    expect((await res.json()).jobs[0].codexModel).toBe("gpt-5.6-terra");
+  });
+
+  // ジョブの列を手で書き換えられても、pollerへ届く語は既知のものだけ
+  it("ジョブのCodexモデルが未知の語なら、設定の既定へ倒す", async () => {
+    claimDispatchJobs.mockResolvedValue([{ id: "job-1", agent: "codex", codexModel: "opus" }]);
+    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "gpt-5.6-luna" });
+
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
+
+    expect((await res.json()).jobs[0].codexModel).toBe("gpt-5.6-luna");
+  });
 });

@@ -24,7 +24,7 @@ import {
 } from "@/components/dashboard/settings/settings-sections";
 import { StatusSection } from "@/components/dashboard/settings/status-section";
 import { useSettingsData } from "@/hooks/use-settings-data";
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModelSetting } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -39,7 +39,7 @@ type MobileSettingsScreenProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
-  codexModel: CodexModel;
+  codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;

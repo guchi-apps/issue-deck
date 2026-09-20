@@ -8,7 +8,7 @@ import {
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
-  parseCodexModel,
+  parseCodexModelSetting,
   parseAppAiModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
@@ -40,7 +40,7 @@ export default async function DashboardPage() {
   // 通してしまい、選べないはずの値がshellのstateへ入ってしまう）。#3106で「おまかせ」（`pick`）は通す
   const claudeLocalModel =
     parseClaudeLocalModelSetting(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
-  const codexModel = parseCodexModel(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
+  const codexModel = parseCodexModelSetting(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   const appAiModelReasoning =
     parseAppAiModel(appSetting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT;

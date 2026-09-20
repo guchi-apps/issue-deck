@@ -83,7 +83,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
-import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModel } from "@/lib/app-settings";
+import type { AppAiModel, ClaudeLocalModelSetting, ClaudeModel, CodexModelSetting } from "@/lib/app-settings";
 import {
   ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS,
   PULL_REQUEST_POLL_INTERVAL_MS,
@@ -224,7 +224,7 @@ type IssueDeckShellProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
-  codexModel: CodexModel;
+  codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
@@ -307,7 +307,7 @@ export function IssueDeckShell({
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
     useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
-  const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
+  const [codexModel, setCodexModel] = useState<CodexModelSetting>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
@@ -2307,6 +2307,7 @@ export function IssueDeckShell({
                   onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
+                  codexModel={codexModel}
                 />
               )}
 
@@ -2657,6 +2658,7 @@ export function IssueDeckShell({
                   onNightlyRunQueued={nightlyRun.refresh}
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
+                  codexModel={codexModel}
                 />
               </div>
               {selectedIssue && (
@@ -2739,6 +2741,7 @@ export function IssueDeckShell({
              別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
           onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}
+          codexModel={codexModel}
         />
         <BulkCreateCodeReviewIssuesDialog
           open={bulkCreateCodeReviewState !== null}

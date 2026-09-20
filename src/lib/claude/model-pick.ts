@@ -12,6 +12,7 @@
  * （`pickModelByRule`）。AIが使えないからといって起動そのものを止めない。
  */
 
+import { CODEX_LOCAL_MODEL_VALUES, type CodexLocalModel } from "@/lib/app-settings";
 import { callClaudeMessages } from "@/lib/claude/request";
 
 /**
@@ -25,6 +26,24 @@ import { callClaudeMessages } from "@/lib/claude/request";
 export const MODEL_PICK_CANDIDATES = ["sonnet", "opus", "fable"] as const;
 
 export type ModelPickCandidate = (typeof MODEL_PICK_CANDIDATES)[number];
+
+/**
+ * 「おまかせ」で選ぶ対象のエージェント（#3192）。**判定を行うのはどちらもアプリ内AI**（Claude）で、
+ * Codexのモデルを選ぶときも変わらない——変わるのは候補・プロンプト・ルールだけ。
+ */
+export type ModelPickAgent = "claude" | "codex";
+
+/**
+ * Codexの候補。Claude側のsonnet/opusに、標準（Terra）と重い（Sol）が当たる。Claude側にFableのような
+ * 最上位は無く、代わりに軽い作業向けのLunaがある（`agent-model-color.ts`の段の対応と同じ物差し）。
+ */
+export const CODEX_MODEL_PICK_CANDIDATES = CODEX_LOCAL_MODEL_VALUES;
+
+/** エージェントごとの候補。`parseModelPick`が候補外の応答を弾くのに使う */
+const CANDIDATES_BY_AGENT: Readonly<Record<ModelPickAgent, readonly string[]>> = {
+  claude: MODEL_PICK_CANDIDATES,
+  codex: CODEX_MODEL_PICK_CANDIDATES,
+};
 
 /** プロンプトへ載せる本文の文字数。全文を載せても判断は変わらず、枠だけを食う */
 export const MODEL_PICK_BODY_HEAD_LENGTH = 1200;
@@ -46,7 +65,8 @@ export type ModelPickInput = {
 };
 
 export type ModelPickResult = {
-  model: ModelPickCandidate;
+  /** `agent`がclaudeなら`ModelPickCandidate`、codexなら`CodexLocalModel`（どちらもジョブへそのまま積める） */
+  model: ModelPickCandidate | CodexLocalModel;
   /** なぜそのモデルなのか（日本語1〜2文） */
   reason: string;
   /** AIが選んだのか、ルールへ倒れたのか。画面がそのまま出す */
@@ -74,13 +94,18 @@ function normalizeLabel(label: string): string {
  * 選ばない**——ここで一番高いものへ倒すと、AIが落ちている間ずっと重いモデルで走ることになる。
  * 判定の根拠が説明できることを優先し、迷ったら`sonnet`にする。
  */
-export function pickModelByRule(input: ModelPickInput): {
-  model: ModelPickCandidate;
+export function pickModelByRule(
+  input: ModelPickInput,
+  agent: ModelPickAgent = "claude",
+): {
+  model: ModelPickCandidate | CodexLocalModel;
   reason: string;
 } {
   const labels = input.labels.map(normalizeLabel);
   const has = (name: string) => labels.some((label) => label === name);
   const bodyLength = input.body.replace(/\s+/g, "").length;
+
+  if (agent === "codex") return pickCodexModelByRule(input, has, bodyLength);
 
   if (has("bug") || has("unexpected")) {
     return { model: "opus", reason: "不具合のIssueで、原因の調査から始まるためです。" };
@@ -94,8 +119,44 @@ export function pickModelByRule(input: ModelPickInput): {
   return { model: "sonnet", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
+/**
+ * Codex版のルール（#3192）。考え方はClaude版と同じで、**Lunaを選ぶのは文書だけの更新のような
+ * 説明のつく場合に限り**、迷ったらTerraにする。重い判定（Sol）へ倒すのも同じ条件。
+ */
+function pickCodexModelByRule(
+  input: ModelPickInput,
+  has: (name: string) => boolean,
+  bodyLength: number,
+): { model: CodexLocalModel; reason: string } {
+  if (has("bug") || has("unexpected")) {
+    return { model: "gpt-5.6-sol", reason: "不具合のIssueで、原因の調査から始まるためです。" };
+  }
+  if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {
+    return {
+      model: "gpt-5.6-sol",
+      reason: "計画や長いやり取りがあり、決めることが多いIssueだと読めるためです。",
+    };
+  }
+  if (has("documentation") && bodyLength < 400) {
+    return { model: "gpt-5.6-luna", reason: "文書だけの短い更新だと読めるためです。" };
+  }
+  return { model: "gpt-5.6-terra", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
+}
+
+const CODEX_PICK_OPTIONS = `- \`gpt-5.6-terra\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
+- \`gpt-5.6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合、**設計から考える**必要がある実装向け
+- \`gpt-5.6-luna\`: 文言・設定値の修正や、決まった手順をなぞるだけの**軽い作業**向け`;
+
+const CODEX_PICK_GUIDE = `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
+- \`gpt-5.6-sol\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
+- \`gpt-5.6-luna\`は変更の範囲が数行〜1ファイルに収まると読めるときだけにしてください
+- 迷ったら\`gpt-5.6-terra\`にしてください`;
+
 /** Issueの内容から使うモデルを選ばせるプロンプトを組み立てる。 */
-export function buildModelPickPrompt(input: ModelPickInput): string {
+export function buildModelPickPrompt(
+  input: ModelPickInput,
+  agent: ModelPickAgent = "claude",
+): string {
   const labels = input.labels.length > 0 ? input.labels.join(", ") : "（なし）";
   const body = input.body.trim()
     ? truncate(input.body, MODEL_PICK_BODY_HEAD_LENGTH)
@@ -104,27 +165,40 @@ export function buildModelPickPrompt(input: ModelPickInput): string {
     ? `\n# 承認済みの計画\n${truncate(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH)}\n`
     : "";
 
-  return `以下は、これから実装エージェント（Claude Code）に実装させるGitHubのIssueです。**このIssueの実装に使うモデル**を1つ選んでください。
+  const isCodex = agent === "codex";
+  const agentName = isCodex ? "Codex CLI" : "Claude Code";
+  const options = isCodex
+    ? CODEX_PICK_OPTIONS
+    : `- \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
+- \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
+- \`fable\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け`;
+  const guide = isCodex
+    ? CODEX_PICK_GUIDE
+    : `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
+- \`fable\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
+- 迷ったら\`sonnet\`にしてください`;
+  const example = isCodex ? "gpt-5.6-terra" : "sonnet";
+  const modelList = isCodex
+    ? "`gpt-5.6-sol`・`gpt-5.6-terra`・`gpt-5.6-luna`"
+    : "`sonnet`・`opus`・`fable`";
+
+  return `以下は、これから実装エージェント（${agentName}）に実装させるGitHubのIssueです。**このIssueの実装に使うモデル**を1つ選んでください。
 
 # 選択肢
 
-- \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
-- \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
-- \`fable\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け
+${options}
 
 # 選び方
 
-- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
-- \`fable\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
-- 迷ったら\`sonnet\`にしてください
+${guide}
 
 # 出力
 
 前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
 
-{"model": "sonnet", "reason": "そのモデルを選んだ理由"}
+{"model": "${example}", "reason": "そのモデルを選んだ理由"}
 
-- \`model\`は\`sonnet\`・\`opus\`・\`fable\`のいずれか
+- \`model\`は${modelList}のいずれか
 - \`reason\`は日本語で1〜2文。**Issueの何を見てそう判断したのか**が伝わるように書いてください
 
 # Issue
@@ -153,7 +227,8 @@ function extractJsonText(text: string): string {
  */
 export function parseModelPick(
   text: string,
-): { model: ModelPickCandidate; reason: string } | null {
+  agent: ModelPickAgent = "claude",
+): { model: ModelPickCandidate | CodexLocalModel; reason: string } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(extractJsonText(text));
@@ -165,13 +240,13 @@ export function parseModelPick(
   const { model, reason } = parsed as { model?: unknown; reason?: unknown };
   if (typeof model !== "string") return null;
 
-  const matched = MODEL_PICK_CANDIDATES.find(
+  const matched = CANDIDATES_BY_AGENT[agent].find(
     (candidate) => candidate === model.trim().toLowerCase(),
   );
   if (!matched) return null;
 
   return {
-    model: matched,
+    model: matched as ModelPickCandidate | CodexLocalModel,
     reason: typeof reason === "string" ? truncate(reason, MAX_REASON_LENGTH) : "",
   };
 }
@@ -185,8 +260,9 @@ export function parseModelPick(
 export async function pickModelForIssue(
   token: string,
   input: ModelPickInput,
+  agent: ModelPickAgent = "claude",
 ): Promise<ModelPickResult> {
-  const fallback = (): ModelPickResult => ({ ...pickModelByRule(input), source: "rule" });
+  const fallback = (): ModelPickResult => ({ ...pickModelByRule(input, agent), source: "rule" });
 
   let text: string | undefined;
   try {
@@ -195,7 +271,7 @@ export async function pickModelForIssue(
       token,
       body: {
         max_tokens: 512,
-        messages: [{ role: "user", content: buildModelPickPrompt(input) }],
+        messages: [{ role: "user", content: buildModelPickPrompt(input, agent) }],
       },
     });
     if (!res.ok) return fallback();
@@ -205,7 +281,7 @@ export async function pickModelForIssue(
   }
 
   if (!text) return fallback();
-  const picked = parseModelPick(text);
+  const picked = parseModelPick(text, agent);
   if (!picked) return fallback();
 
   return { ...picked, source: "ai" };

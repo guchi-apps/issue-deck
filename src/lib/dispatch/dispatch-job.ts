@@ -1,4 +1,4 @@
-import type { ClaudeModel } from "@/lib/app-settings";
+import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
 // 型だけのimport（コンパイル時に消える）。`host-checkout.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-metrics.ts`と同じ）
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
@@ -472,6 +472,14 @@ export type DispatchJobView = {
    * 金額の見積りと突き合わせられない。
    */
   claudeModel: ClaudeModel | null;
+  /**
+   * このIssueだけに使うCodexのモデル（#3192。`kind`が`LAUNCH`・`agent`が`codex`のときだけ）。
+   *
+   * `claudeModel`と同じく**`null`は「設定の既定に従う」**（`AppSetting.codexModel`）で、払い出しが
+   * この値があればジョブごとの`codexModel`として載せる。**省略可にしているのは**、この列を知らない
+   * 時点の呼び出し元・テストの値を壊さないため（`toJobView`は常に返す）。
+   */
+  codexModel?: CodexLocalModel | null;
   status: DispatchJobStatus;
   message: string | null;
   /**

@@ -263,6 +263,8 @@ export type NightlyRunEntryView = {
   targetHost: string;
   agent: string;
   claudeModel: string | null;
+  /** #3192。`agent`がcodexのとき、積んだときに指定したモデル（nullは設定に従う） */
+  codexModel?: string | null;
   optionLabels: string[];
   kind: ScheduledRunKind;
   status: NightlyRunEntryStatus;

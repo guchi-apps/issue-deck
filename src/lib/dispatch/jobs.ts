@@ -3,7 +3,9 @@ import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 import {
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
+  parseCodexLocalModel,
   type ClaudeModel,
+  type CodexLocalModel,
 } from "@/lib/app-settings";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { db } from "@/lib/db";
@@ -170,6 +172,8 @@ function toJobView(
     // 「設定の既定に従う」= null になる。`agent`と同じ作法だが、既定へ落とすのではなく
     // **落とし先が「指定なし」**である点だけが違う）
     claudeModel: parseClaudeModel(job.claudeModel),
+    // 同じ作法（#3192）。既知の語だけを通し、未知の語・nullは「設定の既定に従う」
+    codexModel: parseCodexLocalModel(job.codexModel),
     status: job.status,
     message: job.message,
     instruction: job.instruction,
@@ -668,6 +672,12 @@ export async function enqueueDispatchJob(params: {
    * ——選んだのに別のCLIが立つ`agent`と違い、黙って壊れる方向が無い。
    */
   claudeModel?: ClaudeModel | null;
+  /**
+   * このIssueだけに使うCodexのモデル（#3192。`agent`が`codex`のときだけ意味がある）。
+   * `claudeModel`と同じく**省略・`null`は「設定の既定に従う」**で、ホストの申告では塞がない
+   * （古いpollerに当たっても`-m`が付かず設定の既定で立つだけで、別のCLIが立つことは無い）。
+   */
+  codexModel?: CodexLocalModel | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueDispatchJobResult> {
@@ -754,6 +764,7 @@ export async function enqueueDispatchJob(params: {
         // 「設定に従う」はnullで持つ（#2717）。エイリアスの実体を書き込むと、
         // 後で設定を変えても積み置きのジョブだけ古い既定のまま立つ
         claudeModel: params.claudeModel ?? null,
+        codexModel: params.codexModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,

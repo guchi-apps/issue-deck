@@ -677,6 +677,7 @@ function QueuedRow({
         <span className="rounded-full bg-muted px-2 py-px">{formatDispatchHostName(entry.targetHost)}</span>
         {entry.claudeModel && <span className="rounded-full bg-muted px-2 py-px">{entry.claudeModel}</span>}
         {entry.agent !== "claude" && <span className="rounded-full bg-muted px-2 py-px">{entry.agent}</span>}
+        {entry.codexModel && <span className="rounded-full bg-muted px-2 py-px">{entry.codexModel}</span>}
         {entry.optionLabels.map((name) => (
           <span key={name} className="rounded-full bg-primary/10 px-2 py-px text-primary">
             {optionLabelTitle(name)}

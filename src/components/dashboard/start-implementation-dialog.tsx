@@ -17,11 +17,18 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
   CLAUDE_MODEL_FIT_LABELS,
+  CODEX_LOCAL_MODEL_VALUES,
+  CODEX_MODEL_FIT_LABELS,
   describeClaudeModel,
+  describeCodexModel,
   MODEL_PICK_SETTING,
+  parseClaudeLocalModel,
+  parseCodexLocalModel,
+  resolveCodexInitialModel,
   type ClaudeLocalModel,
   type ClaudeLocalModelSetting,
-  type ClaudeModel,
+  type CodexLocalModel,
+  type CodexModelSetting,
 } from "@/lib/app-settings";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
@@ -180,6 +187,16 @@ const AUTO_PICK = MODEL_PICK_SETTING;
  */
 type ModelChoice = ClaudeLocalModelSetting;
 
+/** Codexで選んでいるモデル（#3192）。Claude Codeの`ModelChoice`と同じく`null`は無い */
+type CodexModelChoice = CodexLocalModel | typeof AUTO_PICK;
+
+/** チップ1枚ぶん。エージェントごとの選択肢（`MODEL_ENTRIES`・`CODEX_MODEL_ENTRIES`）の共通の形 */
+type ModelEntry = {
+  model: ClaudeLocalModel | CodexLocalModel;
+  label: string;
+  fit: string;
+};
+
 /**
  * 「自分で決める」モデルの選択肢（#2717・#2723・#2776・#3106）。重い順。
  *
@@ -197,11 +214,23 @@ type ModelChoice = ClaudeLocalModelSetting;
  * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
  * （https://github.com/anthropics/claude-code/issues/43235）。
  */
-const MODEL_ENTRIES: readonly { model: ClaudeLocalModel }[] = [
-  { model: "fable" },
-  { model: "opus" },
-  { model: "sonnet" },
-];
+const MODEL_ENTRIES: readonly ModelEntry[] = (["fable", "opus", "sonnet"] as const).map(
+  (model) => ({
+    model,
+    label: describeClaudeModel(model),
+    fit: CLAUDE_MODEL_FIT_LABELS[model],
+  }),
+);
+
+/**
+ * Codexの選択肢（#3192）。**Claude Codeと同じ形・同じ並び順（重い順）で、選ぶ3つだけ。**
+ * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない——理由は`CODEX_LOCAL_MODEL_VALUES`。
+ */
+const CODEX_MODEL_ENTRIES: readonly ModelEntry[] = CODEX_LOCAL_MODEL_VALUES.map((model) => ({
+  model,
+  label: describeCodexModel(model),
+  fit: CODEX_MODEL_FIT_LABELS[model],
+}));
 
 type StartImplementationDialogProps = {
   issue: Issue;
@@ -264,6 +293,12 @@ type StartImplementationDialogProps = {
    * 画面あたり何本も増えるのを避ける、という既存の判断（`dispatch`propと同じ理由）に揃えた。
    */
   claudeLocalModel: ClaudeLocalModelSetting;
+  /**
+   * アプリ設定「Codex：サブPCでの計画・実装」の現在値（#3192）。`claudeLocalModel`のCodex版で、
+   * Codex CLIを選んだときの最初のモデルになる。**「おまかせ」なら、Codexを選んだ時点で判定を走らせる。**
+   * 選べる3つ以外（`auto`・旧世代）は、初期選択がTerraになる（`resolveCodexInitialModel`）。
+   */
+  codexModel: CodexModelSetting;
 };
 
 /**
@@ -305,6 +340,7 @@ export function StartImplementationDialog({
   localSessionCommand = null,
   subIssueRelations,
   claudeLocalModel,
+  codexModel: codexModelSetting,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -342,18 +378,29 @@ export function StartImplementationDialog({
    * 設定に残すと次のIssueまで高いモデルのままになる。
    */
   const [model, setModel] = useState<ModelChoice>(claudeLocalModel);
+  /**
+   * Codexで使うモデル（#3192）。**Claude Codeの`model`とは別に持つ**——エージェントを切り替えても
+   * それぞれの選択が残り、積むときは今のエージェントの方だけを見る（`effectiveModel`）。
+   */
+  const [codexModel, setCodexModel] = useState<CodexModelChoice>(() =>
+    resolveCodexInitialModel(codexModelSetting),
+  );
   // 開くたびの初期化effectから最新の設定値を読むためのref（設定の保存で値が変わっても、
   // 開いている間の選択を巻き戻さないよう、effectの依存配列には含めない）
   const claudeLocalModelRef = useRef(claudeLocalModel);
-  /** 初期値が「おまかせ」のときの自動判定を、この開いている間にもう走らせたか（#3106） */
-  const autoPickedRef = useRef(false);
+  const codexModelSettingRef = useRef(codexModelSetting);
+  /** 初期値が「おまかせ」のときの自動判定を、この開いている間にもう走らせたか（#3106。#3192でエージェント別） */
+  const autoPickedRef = useRef<Record<DispatchAgent, boolean>>({ claude: false, codex: false });
   /**
    * 「おまかせ」の判定（#2723）。**押したとき、または初期値が「おまかせ」でモデル欄が出たときに
    * 走り、結果は開いている間だけ持つ。** 走っている間は「開始する」を押させない——決まる前に
    * 押すと、選んだつもりのないモデルで立ってしまう。
    */
-  const modelPick = useModelPick();
-  const { reset: resetModelPick, pick: pickModel } = modelPick;
+  const claudeModelPick = useModelPick("claude");
+  /** Codexの「おまかせ」の判定（#3192）。Claude Codeとは候補が違うので別のインスタンス */
+  const codexModelPick = useModelPick("codex");
+  const { reset: resetClaudeModelPick, pick: pickClaudeModel } = claudeModelPick;
+  const { reset: resetCodexModelPick, pick: pickCodexModel } = codexModelPick;
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
   const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
@@ -392,6 +439,7 @@ export function StartImplementationDialog({
     issueLabelsRef.current = issue.labels;
     repositoryLabelNamesRef.current = repositoryLabelNames;
     claudeLocalModelRef.current = claudeLocalModel;
+    codexModelSettingRef.current = codexModelSetting;
   });
   /**
    * 「デザインを提示」を**ユーザー自身が触ったか**（#2884計画レビューG1の指摘2）。
@@ -417,12 +465,14 @@ export function StartImplementationDialog({
     setStartedTarget(null);
     setAgent(DEFAULT_DISPATCH_AGENT);
     setModel(claudeLocalModelRef.current);
-    autoPickedRef.current = false;
+    setCodexModel(resolveCodexInitialModel(codexModelSettingRef.current));
+    autoPickedRef.current = { claude: false, codex: false };
     // 前に開いたときの判定結果は持ち越さない。Issueの内容もラベルも変わっているかもしれない
-    resetModelPick();
+    resetClaudeModelPick();
+    resetCodexModelPick();
     setCopied(false);
     setNightlyError(null);
-  }, [open, resetModelPick]);
+  }, [open, resetClaudeModelPick, resetCodexModelPick]);
 
   /**
    * リポジトリのラベル一覧は非同期で届くため、開いた直後の同期では間に合わないことがある（#1956）。
@@ -571,14 +621,14 @@ export function StartImplementationDialog({
    */
   const effectiveAgent: DispatchAgent = showAgents ? agent : DEFAULT_DISPATCH_AGENT;
   /**
-   * モデルを選ばせるか（#2717）。**サブPCを選んでいて、Claude Codeで立てるときだけ。**
+   * モデルを選ばせるか（#2717・#3192）。**サブPCを選んでいるとき。** Claude Codeでも
+   * Codexでも出し、欄の中身（候補・「おまかせ」の判定）だけがエージェントで変わる。
    *
    * GitHub Actionsは設定を全体で読む別経路（`reusable-issue-dispatch.yml`）で、ジョブに
-   * 積んだ値は届かない。Codexのモデルは別の設定（`CODEX_MODEL_OPTIONS`）で、ここでは扱わない。
-   * 「コピー」の2つは起動そのものを人が行うため、選ばせても反映しようがない。
+   * 積んだ値は届かない。「コピー」の2つは起動そのものを人が行うため、選ばせても反映しようがない。
    */
-  const showModels =
-    (effectiveTarget.kind === "host" || isScheduledTarget) && effectiveAgent === DEFAULT_DISPATCH_AGENT;
+  const showModels = effectiveTarget.kind === "host" || isScheduledTarget;
+  const isCodexAgent = effectiveAgent === "codex";
   /**
    * 実際に積むモデル。**選択欄を出していないときは指定なし（`null`）へ落とす。**
    * サブPCでFableを選んだ後にCodexやGitHub Actionsへ切り替えても、選択が付いていかない。
@@ -586,14 +636,22 @@ export function StartImplementationDialog({
    * 「おまかせ」（#2723）は**判定結果の具体的なモデル名へ解決する。** 決まっていなければ
    * 指定なしで、その状態では開始そのものを押させない（`isPickPending`）。
    */
-  const pickedModel: ClaudeModel | null = modelPick.result?.model ?? null;
-  const effectiveModel: ClaudeModel | null = !showModels
+  //
+  // **今のエージェントの選択・判定だけを見る**（#3192）。判定結果は`parse*`で今のエージェントの
+  // 候補に照らし直す——別のエージェントの結果が紛れ込んでも、積む値にはならない。
+  const modelPick = isCodexAgent ? codexModelPick : claudeModelPick;
+  const modelChoice: ModelChoice | CodexModelChoice = isCodexAgent ? codexModel : model;
+  const modelEntries = isCodexAgent ? CODEX_MODEL_ENTRIES : MODEL_ENTRIES;
+  const pickedModel: ClaudeLocalModel | CodexLocalModel | null = isCodexAgent
+    ? parseCodexLocalModel(modelPick.result?.model)
+    : parseClaudeLocalModel(modelPick.result?.model);
+  const effectiveModel: ClaudeLocalModel | CodexLocalModel | null = !showModels
     ? null
-    : model === AUTO_PICK
+    : modelChoice === AUTO_PICK
       ? pickedModel
-      : model;
+      : modelChoice;
   /** 「おまかせ」を選んだのに、まだ何で立つか決まっていない状態 */
-  const isPickPending = showModels && model === AUTO_PICK && pickedModel === null;
+  const isPickPending = showModels && modelChoice === AUTO_PICK && pickedModel === null;
   // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
   const visibleOptions = visibleStartImplementationOptions({
     isActionsTarget: effectiveTarget.kind === "actions",
@@ -733,10 +791,11 @@ export function StartImplementationDialog({
    * 承認済みの計画は**既に取得してあるコメントからだけ**拾う（取りに行かない）。押した人を
    * 待たせないためで、計画が無ければタイトル・本文・ラベルだけで判定する。
    */
-  function selectModel(next: ModelChoice) {
-    setModel(next);
+  function selectModel(next: ModelChoice | CodexModelChoice) {
+    if (isCodexAgent) setCodexModel(next as CodexModelChoice);
+    else setModel(next as ModelChoice);
     if (next !== AUTO_PICK) return;
-    void pickModel({
+    void (isCodexAgent ? pickCodexModel : pickClaudeModel)({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       planComment: findLatestPlanCommentBody(comments),
@@ -751,15 +810,33 @@ export function StartImplementationDialog({
    * 繰り返さない。やり直すときは「おまかせ」を押し直す）。
    */
   useEffect(() => {
-    if (!open || !showModels || autoPickedRef.current) return;
-    if (claudeLocalModel !== AUTO_PICK || model !== AUTO_PICK) return;
-    autoPickedRef.current = true;
-    void pickModel({
+    if (!open || !showModels || autoPickedRef.current[effectiveAgent]) return;
+    // Codexも同じ（#3192）。設定が「おまかせ」で、まだ別のモデルへ選び直していないときだけ
+    const isInitialPick = isCodexAgent
+      ? codexModelSetting === AUTO_PICK && codexModel === AUTO_PICK
+      : claudeLocalModel === AUTO_PICK && model === AUTO_PICK;
+    if (!isInitialPick) return;
+    autoPickedRef.current[effectiveAgent] = true;
+    void (isCodexAgent ? pickCodexModel : pickClaudeModel)({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
       planComment: findLatestPlanCommentBody(comments),
     });
-  }, [open, showModels, claudeLocalModel, model, pickModel, issue.repositoryFullName, issue.number, comments]);
+  }, [
+    open,
+    showModels,
+    effectiveAgent,
+    isCodexAgent,
+    claudeLocalModel,
+    codexModelSetting,
+    model,
+    codexModel,
+    pickClaudeModel,
+    pickCodexModel,
+    issue.repositoryFullName,
+    issue.number,
+    comments,
+  ]);
 
   /**
    * 選択されたオプションに対応するラベルを付け、チェックを外したオプションのラベルは
@@ -1079,17 +1156,17 @@ export function StartImplementationDialog({
                   icon={Sparkles}
                   label="おまかせ"
                   fit="Issueの内容から選ぶ"
-                  selected={model === AUTO_PICK}
+                  selected={modelChoice === AUTO_PICK}
                   onSelect={() => selectModel(AUTO_PICK)}
                 />
                 <div className="grid grid-cols-3 gap-2">
-                  {MODEL_ENTRIES.map((entry) => (
+                  {modelEntries.map((entry) => (
                     <ModelChip
                       key={entry.model}
-                      label={describeClaudeModel(entry.model)}
-                      fit={CLAUDE_MODEL_FIT_LABELS[entry.model]}
-                      selected={model === entry.model}
-                      picked={model === AUTO_PICK && pickedModel === entry.model}
+                      label={entry.label}
+                      fit={entry.fit}
+                      selected={modelChoice === entry.model}
+                      picked={modelChoice === AUTO_PICK && pickedModel === entry.model}
                       onSelect={() => selectModel(entry.model)}
                     />
                   ))}
@@ -1098,8 +1175,9 @@ export function StartImplementationDialog({
               {/* 「おまかせ」のときは判定の結果（と理由）を出す。**理由を必ず添える**——
                   当たり外れのある判定なので、納得できなければ別のチップを押せることが前提 */}
               {/* 手動で選んだときの説明は出さない（#3119。チップの2行目と重複する） */}
-              {model === AUTO_PICK && (
+              {modelChoice === AUTO_PICK && (
                 <ModelPickNotice
+                  agent={effectiveAgent}
                   isPicking={modelPick.isPicking}
                   result={modelPick.result}
                   error={modelPick.error}
@@ -1343,6 +1421,16 @@ function ModelChip({
   );
 }
 
+/** 「おまかせ」が選んだモデルの表示名。エージェントの候補に無い値なら、そのまま出す */
+function describePickedModel(agent: DispatchAgent, model: string): string {
+  if (agent === "codex") {
+    const codex = parseCodexLocalModel(model);
+    return codex ? describeCodexModel(codex) : model;
+  }
+  const claude = parseClaudeLocalModel(model);
+  return claude ? describeClaudeModel(claude) : model;
+}
+
 /**
  * 「おまかせ」の判定の様子（#2723）。**判定中・結果・失敗の3つを同じ場所に出す。**
  *
@@ -1353,10 +1441,13 @@ function ModelChip({
  * でも、AIが内容を読んだのか、ラベルと分量だけで決めたのかで、結果の重みが違う。
  */
 function ModelPickNotice({
+  agent,
   isPicking,
   result,
   error,
 }: {
+  /** どのエージェントの判定か。選ばれたモデルの名前（`Opus`・`Sol`）の引き方が変わる（#3192） */
+  agent: DispatchAgent;
   isPicking: boolean;
   result: ModelPickResult | null;
   error: string | null;
@@ -1370,14 +1461,15 @@ function ModelPickNotice({
     );
   }
   if (result) {
+    const modelName = describePickedModel(agent, result.model);
     return (
       // 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
       // ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す
       <p
         className="line-clamp-2 text-xs text-muted-foreground"
-        title={`${describeClaudeModel(result.model)}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
+        title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
       >
-        <span className="font-medium text-foreground">{describeClaudeModel(result.model)}</span>
+        <span className="font-medium text-foreground">{modelName}</span>
         {result.reason ? ` — ${result.reason}` : "で起動します。"}
         {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
       </p>

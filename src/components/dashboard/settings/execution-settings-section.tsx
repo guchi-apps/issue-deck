@@ -19,13 +19,13 @@ import {
   APP_AI_MODEL_OPTIONS,
   CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
+  CODEX_MODEL_SETTING_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
   type AppAiModel,
   type ClaudeLocalModelSetting,
   type ClaudeModel,
-  type CodexModel,
+  type CodexModelSetting,
 } from "@/lib/app-settings";
 
 export type AppSettingsValues = {
@@ -33,7 +33,7 @@ export type AppSettingsValues = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
-  codexModel: CodexModel;
+  codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
@@ -44,7 +44,7 @@ type ExecutionSettingsSectionProps = {
   claudeModel: ClaudeModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
-  codexModel: CodexModel;
+  codexModel: CodexModelSetting;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   dispatchConcurrency: number;
@@ -78,7 +78,7 @@ export function ExecutionSettingsSection({
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
     useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
-  const [codexModel, setCodexModel] = useState<CodexModel>(initialCodexModel);
+  const [codexModel, setCodexModel] = useState<CodexModelSetting>(initialCodexModel);
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
@@ -240,12 +240,12 @@ export function ExecutionSettingsSection({
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="codex-model">Codex：サブPCでの計画・実装</Label>
-        <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModel)}>
+        <Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModelSetting)}>
           <SelectTrigger id="codex-model" className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CODEX_MODEL_OPTIONS.map((option) => (
+            {CODEX_MODEL_SETTING_OPTIONS.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -253,8 +253,12 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          サブPCで新しく起動するCodex CLIセッションに使います。通常はTerra、難しいIssueはSol、
-          単純な修正を優先する場合はLunaが適しています。全リポジトリ共通です。
+          「実装を開始」でCodex CLIを選んだとき、最初から選ばれるモデルです。通常はTerra、難しい
+          IssueはSol、単純な修正を優先する場合はLunaが適しています。「おまかせ」を選ぶと、開くたびに
+          Issueの内容からSol・Terra・Lunaを選びます。ただし「おまかせ」が効くのは「実装を開始」だけで、
+          モデルを選ばずに起動する経路（次にやること・ローカルで開始など）ではTerraで起動します。
+          旧世代（GPT-5.5・5.4）と「Codexに任せる」は、この設定でだけ選べます（ダイアログの初期選択は
+          Terraになります）。全リポジトリ共通です。
         </p>
       </div>
 

@@ -49,7 +49,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
-import type { ClaudeLocalModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
 import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
@@ -295,6 +295,7 @@ type CreateIssueDialogProps = {
    * 「作成+実装開始」（`StartImplementationDialog`）のモデル欄で最初から選ぶモデルとして渡す。
    */
   claudeLocalModel: ClaudeLocalModelSetting;
+  codexModel: CodexModelSetting;
 };
 
 /**
@@ -348,6 +349,7 @@ export function CreateIssueDialog({
   initialHandoff = null,
   cancelLabel,
   claudeLocalModel,
+  codexModel,
 }: CreateIssueDialogProps) {
   const isWindow = presentation === "window";
   const Chrome = isWindow ? WINDOW_CHROME : DIALOG_CHROME;
@@ -1350,6 +1352,7 @@ export function CreateIssueDialog({
           // 作成した直後なのでコメントも親子関係も無い。「取得していません」と書かせないよう空で渡す
           subIssueRelations={{ parent: null, children: [], childCount: 0 }}
           claudeLocalModel={claudeLocalModel}
+          codexModel={codexModel}
         />
       )}
       {/* 作り終わった後の行き先（#2862）。実行先の選択と同じく、作成フォームは閉じているので
