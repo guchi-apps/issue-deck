@@ -585,8 +585,9 @@ describe("StartImplementationDialog", () => {
     });
 
     /**
-     * #3192。Codexを選ぶと、同じ位置の「モデル」欄がCodexの候補（おまかせ・Sol・Terra・Luna）へ
-     * 切り替わる。積む値は今のエージェントの選択だけで、もう一方の選択は付いていかない。
+     * #3192。Codexを選ぶと、同じ位置の「モデル」欄がCodexの候補
+     * （おまかせ・Astra・Sol・Terra・Luna）へ切り替わる。積む値は今のエージェントの選択だけで、
+     * もう一方の選択は付いていかない。
      */
     describe("Codexのモデル（#3192）", () => {
       const openCodex = (props: Parameters<typeof renderDialog>[0] = {}) => {
@@ -598,12 +599,13 @@ describe("StartImplementationDialog", () => {
       const checked = (name: RegExp) =>
         screen.getByRole("radio", { name }).getAttribute("aria-checked");
 
-      it("Codexを選ぶと、おまかせ・Sol・Terra・Lunaの4つに切り替わり、設定の値が選ばれている", () => {
+      it("Codexを選ぶと、おまかせ・Astra・Sol・Terra・Lunaの5つに切り替わり、設定の値が選ばれている", () => {
         openCodex({ codexModel: "gpt-5.6-sol" });
 
         const group = screen.getByRole("radiogroup", { name: "モデル" });
-        expect(within(group).getAllByRole("radio")).toHaveLength(4);
+        expect(within(group).getAllByRole("radio")).toHaveLength(5);
         expect(screen.queryByRole("radio", { name: /^Opus/ })).toBeNull();
+        expect(checked(/^Astra/)).toBe("false");
         expect(checked(/^Sol/)).toBe("true");
         expect(checked(/^Terra/)).toBe("false");
       });
@@ -741,8 +743,10 @@ describe("StartImplementationDialog", () => {
 
       await waitFor(() => expect(screen.getByText("Jev")).toBeTruthy());
       expect(screen.getByText(/確信度 82%/)).toBeTruthy();
-      expect(screen.getByText("15%")).toBeTruthy();
-      expect(screen.getByText("3%")).toBeTruthy();
+      // #3231。確率は下部の一覧ではなく、対応する各モデルのカード内に置く。
+      expect(within(screen.getByRole("radio", { name: /^Opus/ })).getByText("82%")).toBeTruthy();
+      expect(within(screen.getByRole("radio", { name: /^Sonnet/ })).getByText("15%")).toBeTruthy();
+      expect(within(screen.getByRole("radio", { name: /^Fable/ })).getByText("3%")).toBeTruthy();
     });
 
     // アプリ内AI・ルールの判定は確率を返さないので、確率の行ごと出さない

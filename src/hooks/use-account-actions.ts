@@ -9,7 +9,9 @@ export function useAccountActions() {
 
   async function handleLogout() {
     const supabase = createClient();
-    await supabase.auth.signOut();
+    // Supabaseプロジェクトは他アプリと共有している。既定のglobalでは同じユーザーの
+    // 全refresh tokenが失効するため、IssueDeckで使っているセッションだけを破棄する。
+    await supabase.auth.signOut({ scope: "local" });
     router.push("/login");
     router.refresh();
   }
@@ -17,7 +19,8 @@ export function useAccountActions() {
   async function handleDeleteAccount() {
     await fetch("/api/account", { method: "DELETE" });
     const supabase = createClient();
-    await supabase.auth.signOut();
+    // アカウント削除では残っているセッションを利用可能なままにしない。
+    await supabase.auth.signOut({ scope: "global" });
     router.push("/login");
     router.refresh();
   }

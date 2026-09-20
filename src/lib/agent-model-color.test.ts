@@ -10,6 +10,7 @@ import {
 describe("modelWeightTier", () => {
   it("出力単価でClaude・Codexを同じ物差しの4段に分ける", () => {
     expect(modelWeightTier("claude-fable-5-1")).toBe(0);
+    expect(modelWeightTier("gpt-6-astra")).toBe(0);
     expect(modelWeightTier("claude-opus-5")).toBe(1);
     expect(modelWeightTier("claude-sonnet-5")).toBe(2);
     expect(modelWeightTier("claude-haiku-4-5-20251001")).toBe(3);

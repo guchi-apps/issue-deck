@@ -60,7 +60,7 @@ installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は*
 ## モデルは起動ごとに選べる（#3192）
 
 「実装を開始」ダイアログの「モデル」欄は、エージェントに合わせて中身が変わる。**Claude Codeで
-立てるときの「おまかせ」・Fable・Opus・Sonnetと同じ形**で、Codexでは**おまかせ・Sol・Terra・Luna**。
+立てるときの「おまかせ」・Fable・Opus・Sonnetと同じ形**で、Codexでは**おまかせ・Astra・Sol・Terra・Luna**。
 選んだ値は`DispatchJob.codexModel`へ入り、払い出し（`POST /api/dispatch/claim`）が
 `job.codexModel ?? 設定`を`codexModel`として載せ直す。**pollerは従来どおり`codexModel`
 だけを読む**ので、poller・ランチャー側の変更は要らない（Claudeの`claudeLocalModel`と同じ持たせ方）。
@@ -68,7 +68,7 @@ installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は*
 | | Claude Code | Codex |
 |---|---|---|
 | ジョブの列 | `DispatchJob.claudeModel` | `DispatchJob.codexModel` |
-| ダイアログの候補 | `CLAUDE_LOCAL_MODEL_OPTIONS`（fable・opus・sonnet） | `CODEX_LOCAL_MODEL_VALUES`（sol・terra・luna） |
+| ダイアログの候補 | `CLAUDE_LOCAL_MODEL_OPTIONS`（fable・opus・sonnet） | `CODEX_LOCAL_MODEL_VALUES`（astra・sol・terra・luna） |
 | 設定の値 | `AppSetting.claudeLocalModel`（`pick`あり） | `AppSetting.codexModel`（`pick`あり。旧世代・`auto`も残る） |
 | 払い出しで`pick`のとき | Sonnet | Terra |
 

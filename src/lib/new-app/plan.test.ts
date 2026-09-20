@@ -241,6 +241,18 @@ describe("buildInitIssueBody", () => {
     );
   });
 
+  it("共有Supabaseを使うアプリだけローカルscopeでのログアウトを求める", () => {
+    const body = buildInitIssueBody(spec(), REFS);
+    expect(body).toContain('signOut({ scope: "local" })');
+    expect(body).toContain("他アプリ・他端末までログアウト");
+    expect(buildInitIssueBody(spec({ auth: "none" }), REFS)).not.toContain(
+      'signOut({ scope: "local" })',
+    );
+    expect(buildInitIssueBody(spec({ auth: "fastapi-google" }), REFS)).not.toContain(
+      'signOut({ scope: "local" })',
+    );
+  });
+
   it("マルチエージェント運用に対応させないときは導入の節を出さない", () => {
     expect(buildInitIssueBody(spec({ multiAgent: false }), REFS)).not.toContain(
       "claude-issue-dispatch.yml を置く",

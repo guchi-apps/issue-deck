@@ -604,6 +604,13 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
     ? `\n- [ ] \`prisma/schema.prisma\` と初期マイグレーションを作る${has("prisma.config.ts") ? "（\`prisma.config.ts\` は雛形にあり、\`loadEnv\` の \`quiet: true\` を落とさないこと）" : ""}\n- [ ] \`db:migrate:deploy\` と \`db:seed:ci\` のnpm scriptsを用意する（共有ワークフローがこの名前で呼ぶ。違う名前だと無言でスキップされる）`
     : "";
 
+  // Supabaseプロジェクトは他アプリと共有するため、signOut()の既定（global）を使うと
+  // そのユーザーが利用中の全アプリ・全端末のrefresh tokenまで失効する。
+  const authTasks =
+    spec.auth === "supabase-google"
+      ? `\n- [ ] Supabase Authの通常ログアウトと、許可外ユーザーなどのセッション破棄は \`signOut({ scope: "local" })\` を使う。引数なしの \`signOut()\` は共有Supabaseプロジェクト上の他アプリ・他端末までログアウトさせるため使わない`
+      : "";
+
   // **`typecheck`の中身をここで固定する**（#2378）。Next.js 16の`PageProps`/`LayoutProps`/
   // `RouteContext`は`.next/types`へ生成されるグローバル型で、`tsc --noEmit`だけでは
   // `Cannot find name 'LayoutProps'`になる。`next build`は内部で型生成するため、
@@ -721,7 +728,7 @@ ${prerequisites}
 ${alreadyThere}
 ## やること
 
-- [ ] アプリの雛形を作る（${profile.label}）
+- [ ] アプリの雛形を作る（${profile.label}）${authTasks}
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる${packageManagerTask}${buildApprovalTask}
 - [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
 - [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}

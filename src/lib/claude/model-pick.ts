@@ -41,8 +41,8 @@ export type ModelPickCandidate = (typeof MODEL_PICK_CANDIDATES)[number];
 export type ModelPickAgent = "claude" | "codex";
 
 /**
- * Codexの候補。Claude側のsonnet/opusに、標準（Terra）と重い（Sol）が当たる。Claude側にFableのような
- * 最上位は無く、代わりに軽い作業向けのLunaがある（`agent-model-color.ts`の段の対応と同じ物差し）。
+ * Codexの候補。Claude側のsonnet/opus/fableに、標準（Terra）・高精度（Sol）・最上位（Astra）が当たる。
+ * Lunaは軽い作業向け（`agent-model-color.ts`の段の対応と同じ物差し）。
  */
 export const CODEX_MODEL_PICK_CANDIDATES = CODEX_LOCAL_MODEL_VALUES;
 
@@ -135,7 +135,8 @@ export function pickModelByRule(
 
 /**
  * Codex版のルール（#3192）。考え方はClaude版と同じで、**Lunaを選ぶのは文書だけの更新のような
- * 説明のつく場合に限り**、迷ったらTerraにする。重い判定（Sol）へ倒すのも同じ条件。
+ * 説明のつく場合に限り**、迷ったらTerraにする。重い判定（Sol）へ倒すのも同じ条件で、
+ * 最上位のAstraはClaude側のFableと同様にフォールバックで選ばない。
  */
 function pickCodexModelByRule(
   input: ModelPickInput,
@@ -157,12 +158,13 @@ function pickCodexModelByRule(
   return { model: "gpt-5.6-terra", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
-const CODEX_PICK_OPTIONS = `- \`gpt-5.6-terra\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
-- \`gpt-5.6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合、**設計から考える**必要がある実装向け
+const CODEX_PICK_OPTIONS = `- \`gpt-6-astra\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け
+- \`gpt-5.6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
+- \`gpt-5.6-terra\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
 - \`gpt-5.6-luna\`: 文言・設定値の修正や、決まった手順をなぞるだけの**軽い作業**向け`;
 
 const CODEX_PICK_GUIDE = `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
-- \`gpt-5.6-sol\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
+- \`gpt-6-astra\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
 - \`gpt-5.6-luna\`は変更の範囲が数行〜1ファイルに収まると読めるときだけにしてください
 - 迷ったら\`gpt-5.6-terra\`にしてください`;
 
@@ -193,7 +195,7 @@ export function buildModelPickPrompt(
 - 迷ったら\`sonnet\`にしてください`;
   const example = isCodex ? "gpt-5.6-terra" : "sonnet";
   const modelList = isCodex
-    ? "`gpt-5.6-sol`・`gpt-5.6-terra`・`gpt-5.6-luna`"
+    ? "`gpt-6-astra`・`gpt-5.6-sol`・`gpt-5.6-terra`・`gpt-5.6-luna`"
     : "`sonnet`・`opus`・`fable`";
 
   return `以下は、これから実装エージェント（${agentName}）に実装させるGitHubのIssueです。**このIssueの実装に使うモデル**を1つ選んでください。
@@ -344,9 +346,10 @@ const CHOICE_CRITERIA_BY_AGENT: Readonly<
     fable: "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
   },
   codex: {
+    "gpt-6-astra": "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
     "gpt-5.6-terra": "やることがはっきりしている通常の実装。既定で、迷ったときもこれ",
     "gpt-5.6-sol":
-      "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合、設計から考える必要がある実装",
+      "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合",
     "gpt-5.6-luna": "文言・設定値の修正や、決まった手順をなぞるだけの軽い作業",
   },
 };
