@@ -257,9 +257,9 @@ standalone installへ入れ替えた**（#2521）。以下はその結果。
 #### 入れ替えても、npm版は消さずに済む
 
 インストーラは`~/.codex/packages/standalone/releases/<版>-x86_64-unknown-linux-musl/`（約330MB）へ
-実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**サブPCの`~/.local/bin`はPATHの先頭**
-（`~/.profile`が置いている。miseのshimsより前）なので、npm版を消さなくても新しいシェルでは
-standalone版が優先される。
+実体を置き、`~/.local/bin/codex`をそこへのsymlinkにする。**PATHの順序に依存しない**——pollerは
+miseのshimsが先に来る環境でも`~/.codex/packages/standalone/current/codex`を明示的に選ぶ（#3194）。
+npm版を消す必要はない。
 
 - **戻すのは`rm ~/.local/bin/codex`の1回で済む**（消すとmiseのshim経由でnpm版に戻る）
 - **走っているセッションには影響しない。** 実行中のプロセスは起動時に解決した実体を握ったままで、
