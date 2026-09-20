@@ -1167,6 +1167,11 @@ export function StartImplementationDialog({
                       fit={entry.fit}
                       selected={modelChoice === entry.model}
                       picked={modelChoice === AUTO_PICK && pickedModel === entry.model}
+                      probability={
+                        modelChoice === AUTO_PICK && modelPick.result?.source === "jev"
+                          ? modelPick.result.probabilities?.[entry.model]
+                          : undefined
+                      }
                       onSelect={() => selectModel(entry.model)}
                     />
                   ))}
@@ -1364,6 +1369,7 @@ function ModelChip({
   fit,
   selected,
   picked = false,
+  probability,
   onSelect,
 }: {
   icon?: LucideIcon;
@@ -1373,9 +1379,12 @@ function ModelChip({
   selected: boolean;
   /** 「おまかせ」がこのモデルを選んだ状態（手動で選んだときとは別の見た目にする） */
   picked?: boolean;
+  /** Jevによる候補別の確率。無い経路では表示しない */
+  probability?: number;
   onSelect: () => void;
 }) {
   const highlighted = selected || picked;
+  const percent = probability === undefined ? null : toPercent(probability);
   return (
     <button
       type="button"
@@ -1398,7 +1407,7 @@ function ModelChip({
           className={cn("size-4 shrink-0", selected ? "text-foreground" : "text-muted-foreground")}
         />
       )}
-      <span className="flex flex-col gap-0.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-center gap-1 text-xs leading-tight font-semibold">
           {label}
           {picked && (
@@ -1416,9 +1425,25 @@ function ModelChip({
         >
           {fit}
         </span>
+        {percent !== null && (
+          <span className="mt-1 flex items-center gap-1.5 border-t pt-1.5">
+            <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full rounded-full bg-muted-foreground/60"
+                style={{ width: `${percent}%` }}
+              />
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{percent}%</span>
+          </span>
+        )}
       </span>
     </button>
   );
+}
+
+/** APIからの確率を表示用の0〜100整数へ丸める。範囲外の値でもUIを崩さない */
+function toPercent(value: number): number {
+  return Math.round(Math.min(1, Math.max(0, value)) * 100);
 }
 
 /** 「おまかせ」が選んだモデルの表示名。エージェントの候補に無い値なら、そのまま出す */
@@ -1464,24 +1489,27 @@ function ModelPickNotice({
     const modelName = describePickedModel(agent, result.model);
     return (
       <div className="flex flex-col gap-1">
-        {/* 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
-            ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す */}
-        <p
-          className="line-clamp-2 text-xs text-muted-foreground"
-          title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
-        >
+        <div className="flex items-start gap-1 text-xs text-muted-foreground">
           {/* 誰が選んだのかを先頭に出す（#3189）。判定の当たり外れを見比べるとき、
-              Jevで選んだのかアプリ内AIで選んだのかが分からないと比べようがない */}
+              Jevで選んだのかアプリ内AIで選んだのかが分からないと比べようがない。
+              切り詰める理由文とは別の要素にして、バッジの上側が欠けないようにする（#3231） */}
           {result.source === "jev" && (
-            <span className="mr-1 rounded-full border px-1.5 py-px text-[10px] font-semibold">
+            <span className="inline-flex shrink-0 rounded-full border px-1.5 py-px text-[10px] leading-none font-semibold">
               Jev
             </span>
           )}
-          <span className="font-medium text-foreground">{modelName}</span>
-          {result.reason ? ` — ${result.reason}` : "で起動します。"}
-          {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
-        </p>
-        <ModelPickProbabilities agent={agent} result={result} />
+          {/* 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
+              ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す */}
+          <p
+            className="line-clamp-2 min-w-0"
+            title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
+          >
+            <span className="font-medium text-foreground">{modelName}</span>
+            {result.reason ? ` — ${result.reason}` : "で起動します。"}
+            {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
+          </p>
+        </div>
+        <ModelPickConfidence result={result} />
       </div>
     );
   }
@@ -1496,56 +1524,19 @@ function ModelPickNotice({
 }
 
 /**
- * 候補ごとの確率（#3189）。**Jevで判定したときだけ出る**（他の経路は確率を返さない）。
+ * Jevの確信度（#3189）。候補別の確率は、対応するモデルカードの下へ表示する（#3231）。
  *
- * 出すのは「接戦だったのか、はっきり決まったのか」を押す前に見せるため。88%対10%なら
- * そのまま押せばよく、45%対42%なら自分で選び直す材料になる——理由の1文だけでは
- * ここが読み取れない。**表示は多くても3行**なので、ダイアログの丈はほとんど伸びない。
+ * 確率はカードと対応付けて見せることで、接戦かどうかを押す前に見比べやすくする。
  */
-function ModelPickProbabilities({
-  agent,
+function ModelPickConfidence({
   result,
 }: {
-  agent: DispatchAgent;
   result: ModelPickResult;
 }) {
-  const probabilities = result.probabilities;
-  if (!probabilities) return null;
-
-  const rows = Object.entries(probabilities)
-    .filter(([, value]) => typeof value === "number")
-    .sort((a, b) => b[1] - a[1]);
-  if (rows.length === 0) return null;
-
-  const toPercent = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 100);
+  if (result.confidence === undefined) return null;
 
   return (
-    <div className="flex flex-col gap-1">
-      {result.confidence !== undefined && (
-        <p className="text-[11px] text-muted-foreground">
-          確信度 {toPercent(result.confidence)}%
-        </p>
-      )}
-      <div className="flex flex-col gap-0.5">
-        {rows.map(([candidate, value]) => (
-          <div
-            key={candidate}
-            className="grid grid-cols-[4.5rem_1fr_2.5rem] items-center gap-1.5 text-[11px] text-muted-foreground"
-          >
-            <span className={candidate === result.model ? "text-foreground" : undefined}>
-              {describePickedModel(agent, candidate)}
-            </span>
-            <span className="h-1 overflow-hidden rounded-full bg-muted">
-              <span
-                className="block h-full rounded-full bg-muted-foreground/60"
-                style={{ width: `${toPercent(value)}%` }}
-              />
-            </span>
-            <span className="text-right tabular-nums">{toPercent(value)}%</span>
-          </div>
-        ))}
-      </div>
-    </div>
+    <p className="text-[11px] text-muted-foreground">確信度 {toPercent(result.confidence)}%</p>
   );
 }
 
