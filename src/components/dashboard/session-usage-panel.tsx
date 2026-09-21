@@ -80,7 +80,7 @@ type SessionUsagePanelProps = {
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
-  /** スマホ向けに縮める。表をカードへ畳み、コンテキスト列を落とす */
+  /** スマホ向けに縮める。表をカードへ畳み、入力トークン列を落とす */
   compact?: boolean;
   className?: string;
 };
@@ -129,7 +129,7 @@ function Tile({
   label: string;
   value: string;
   sub: string;
-  /** 値と`sub`のあいだに挟む細い帯（コンテキストの内訳）。無ければ出さない */
+  /** 値と`sub`のあいだに挟む細い帯（入力トークンの内訳）。無ければ出さない */
   bar?: ReactNode;
 }) {
   return (
@@ -450,7 +450,7 @@ function GroupTokenBar({ totals, maxTokens }: { totals: UsageTotals; maxTokens: 
   );
 }
 
-/** 合計タイルに挟む、期間全体のコンテキストの内訳。入力側の3つだけを見せる */
+/** 合計タイルに挟む、期間全体の入力トークンの内訳。入力側の3つだけを見せる */
 function ContextBar({ totals }: { totals: UsageTotals }) {
   const segments = groupTokenSegments(totals).slice(0, 3);
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
@@ -1277,7 +1277,7 @@ function CurrentSessionHeading({ session, elapsed }: { session: CurrentSessionUs
   );
 }
 
-/** 金額の棒と、その下の5時間枠の割合。`trailing`は同じ行の右側へ置く（スマホの応答数・コンテキスト） */
+/** 金額の棒と、その下の5時間枠の割合。`trailing`は同じ行の右側へ置く（スマホの応答数・入力トークン） */
 function CurrentSessionBar({
   session,
   maxCost,
@@ -1343,7 +1343,7 @@ function OpenIssueButton({ session, onOpenIssue }: { session: CurrentSessionUsag
  * 材料は実行状況パネルと同じセッション一覧と、pollerが20秒おきに送る動いている転記の使用量で
  * （#3135）、画面を開いている間は20秒おきに取り直す。使用量がまだ届いていないセッションは
  * 「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
- * 1本1カードで、応答数・コンテキストを5時間枠の割合と同じ行へ寄せる。
+ * 1本1カードで、応答数・入力トークンを5時間枠の割合と同じ行へ寄せる。
  *
  * **最初は閉じた状態で、本数を示す棒グラフだけを出す**（#3134）。何本も動いていると詳細が
  * 画面上部を埋め、期間の集計まで遠くなるため。見出しか棒を押すと上の詳細が開く。
@@ -1436,7 +1436,7 @@ function CurrentSessionsSection({
                   maxCost={maxCost}
                   trailing={
                     <span>
-                      {`${session.responses.toLocaleString()}応答　コンテキスト ${formatUsageTokens(session.contextTokens)}`}
+                      {`${session.responses.toLocaleString()}応答　入力トークン ${formatUsageTokens(session.contextTokens)}`}
                     </span>
                   }
                 />
@@ -1452,7 +1452,7 @@ function CurrentSessionsSection({
               <span>金額（最大との比較）</span>
               <span className="text-right">金額</span>
               <span className="text-right">応答</span>
-              <span className="text-right">コンテキスト</span>
+              <span className="text-right">入力トークン</span>
               <span />
             </li>
             {sessions.map((session) => (
@@ -1645,14 +1645,14 @@ export function SessionUsagePanel({
             <Tile
               label="応答"
               value={period.totals.responses.toLocaleString()}
-              /* コンテキストタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
+              /* 入力トークンタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
               sub={`1応答 ${formatUsageUsd(perResponseUsd)}・平均 ${formatUsageTokens(avgContext)}`}
             />
             <Tile
-              label="コンテキスト"
+              label="入力トークン"
               value={formatUsageTokens(period.totals.contextTokens)}
               bar={<ContextBar totals={period.totals} />}
-              sub={`入力 ${formatUsageTokens(period.totals.inputTokens)}・書込 ${formatUsageTokens(period.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(period.totals.cacheReadTokens)}`}
+              sub={`内訳 入力 ${formatUsageTokens(period.totals.inputTokens)}・書込 ${formatUsageTokens(period.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(period.totals.cacheReadTokens)}`}
             />
             <Tile
               label="セッション"
