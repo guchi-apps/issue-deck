@@ -1091,7 +1091,10 @@ export function CreateIssueDialog({
             素のTextareaだったためどちらも使えなかった */}
         <div className="flex flex-col gap-1.5">
           {/* 「音声入力を整理」は見出しの右隣に置く（#3068）。入力欄の下の行は画像の操作だけにする。
-              整形の失敗メッセージはボタンの下に出て行が伸びるので、見出しは上端にそろえる */}
+              整形の失敗メッセージはボタンの下に出て行が伸びるので、見出しは上端にそろえる。
+              見出し・2つのボタンは1行に収める（#3310）。スマホ幅（393px）の入力欄は約328pxで、
+              「内容」27px＋整理120px＋抽出166px＋余白16pxの全文だと約1pxあふれるため、
+              抽出ボタンの文言は`sm`未満で「画像から抽出」（約110px）に縮めている */}
           <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
             <Label htmlFor="create-issue-body" className="h-8 md:h-6">
               {isQuestion ? "質問内容" : "内容"}
