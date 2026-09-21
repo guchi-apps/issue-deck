@@ -34,7 +34,8 @@ import {
  * **materialはサブPCのpollerが押し込んだ`SessionUsage`の行だけ**で、ここから転記を読みには
  * 行かない（本番のissue-deckは転記を持たない）。
  *
- * **プラン枠のメーターも一緒に返す。** 画面が`/api/claude/usage`を別に叩くと取得が2本走る。
+ * **プラン枠のメーターは`?plan=1`で別に返す**（#3304）。取得が遅く、期間の集計をそれに
+ * 待たせないため。画面が`/api/claude/usage`を別に叩くと取得が2本走るので、こちらを使う。
  * 取得は`lib/claude/usage.ts`が5分キャッシュしているので、設定画面と同時に開いても
  * プラン枠を余分に消費しない。
  */
@@ -354,6 +355,28 @@ function quotaEstimateOf(
 }
 
 /**
+ * 5時間枠の実測換算を作る（#2988）。ウィンドウ開始以降のClaudeの行だけを1本引く。
+ * 「実行中のセッションだけ」（#3135）と「プラン枠だけ」（#3304）が使う。期間の集計は、
+ * 期間ぶんの行を引くついでに`quotaEstimateOf`へ渡すので、こちらは通らない。
+ */
+async function estimateQuota(fiveHourWindow: ClaudeUsageWindow | null): Promise<QuotaEstimate | null> {
+  if (fiveHourWindow?.resetsAt == null) return null;
+  const windowStartMs = fiveHourWindow.resetsAt * 1000 - fiveHourWindow.durationMs;
+  const windowRows = await db.sessionUsage.findMany({
+    where: { agent: "claude", endedAt: { gte: new Date(windowStartMs) } },
+    select: { agent: true, costUsd: true, endedAt: true },
+  });
+  return quotaEstimateOf(
+    fiveHourWindow,
+    windowRows.map((row) => ({
+      agent: row.agent === "codex" ? "codex" : "claude",
+      costUsd: row.costUsd,
+      endedAt: row.endedAt.toISOString(),
+    })),
+  );
+}
+
+/**
  * 実行中のセッションだけを返す（`?current=1`。#3135）。画面は「AI使用量」を開いている間、
  * これを20秒おきに呼んで「実行中のセッション」欄だけを新しくする。
  *
@@ -364,25 +387,42 @@ function quotaEstimateOf(
 async function getCurrentOnly(): Promise<NextResponse> {
   const now = new Date();
   const fiveHourWindow = peekClaudeUsageWindows()?.find((w) => w.key === "5h") ?? null;
-  let quotaEstimate: QuotaEstimate | null = null;
-  if (fiveHourWindow?.resetsAt != null) {
-    const windowStartMs = fiveHourWindow.resetsAt * 1000 - fiveHourWindow.durationMs;
-    const windowRows = await db.sessionUsage.findMany({
-      where: { agent: "claude", endedAt: { gte: new Date(windowStartMs) } },
-      select: { agent: true, costUsd: true, endedAt: true },
-    });
-    quotaEstimate = quotaEstimateOf(
-      fiveHourWindow,
-      windowRows.map((row) => ({
-        agent: row.agent === "codex" ? "codex" : "claude",
-        costUsd: row.costUsd,
-        endedAt: row.endedAt.toISOString(),
-      })),
-    );
-  }
-
+  const quotaEstimate = await estimateQuota(fiveHourWindow);
   const currentSessions = await listCurrentSessionUsage(now, quotaEstimate);
   return NextResponse.json({ currentSessions }, { headers: { "Cache-Control": "no-store" } });
+}
+
+/**
+ * プラン枠のメーターと5時間枠の実測換算だけを返す（`?plan=1`。#3304）。
+ *
+ * **画面の残りをこれに待たせないために分けてある。** プラン枠の取得は、Claudeの最小の推論
+ * リクエスト（最大10秒）とCodexのops-dashboardへの問い合わせ（最大5秒）で、期間の集計や実行中の
+ * セッション（どちらもDBだけ）より桁違いに遅い。かつては同じ応答に載っていたため、画面を開いて
+ * から何も出ない時間がこの取得の長さだけ続いていた。画面は集計を先に出し、こちらは届き次第
+ * プラン枠の欄へ差し替える。
+ *
+ * **取得の消費とキャッシュ（5分）は変わらない。** 呼ぶのは画面を開いたときと更新ボタンのときだけで、
+ * ここで温まったキャッシュを、集計（`?days=`）の5時間枠換算が`peekClaudeUsageWindows`で読む。
+ */
+async function getPlanOnly(): Promise<NextResponse> {
+  // **取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、取れない日があっても
+  // 「メーターが出ないだけ」で済ませる（設定画面と同じ扱い）。
+  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const [claudePlanUsage, codexPlanUsage] = await Promise.all([
+    token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
+    getCodexUsage().catch(() => null),
+  ]);
+  const fiveHourWindow = claudePlanUsage?.windows.find((w) => w.key === "5h") ?? null;
+  const quotaEstimate = await estimateQuota(fiveHourWindow);
+
+  return NextResponse.json(
+    {
+      planUsage: { claude: claudePlanUsage, codex: codexPlanUsage },
+      planNotConfigured: { claude: !token, codex: !codexPlanUsage },
+      quotaEstimate,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -394,23 +434,21 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("current") === "1") {
     return getCurrentOnly();
   }
+  if (request.nextUrl.searchParams.get("plan") === "1") {
+    return getPlanOnly();
+  }
 
   const days = parseDays(request.nextUrl.searchParams.get("days"));
   const nowMs = Date.now();
   const periodStartMs = sessionUsagePeriodStartMs(nowMs, days);
 
-  // **プラン枠の取得に失敗しても画面は出す。** 非公開のヘッダに依存しているので、
-  // 取れない日があっても「メーターが出ないだけ」で済ませる（設定画面と同じ扱い）。
-  // **DB取得より先に呼ぶ**（#2988）。5時間枠のウィンドウ開始（`resetsAt - durationMs`）が
-  // 期間の開始（`periodStartMs`）より前へはみ出すことがあり（「1日」は日本時間0:00始まりなので、
-  // 深夜〜早朝に開くとウィンドウの前半が前日にかかる）、そのぶんも取得範囲へ含める必要がある。
-  const token = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const [claudePlanUsage, codexPlanUsage] = await Promise.all([
-    token ? fetchClaudeUsage(token).catch(() => null) : Promise.resolve(null),
-    getCodexUsage().catch(() => null),
-  ]);
-
-  const fiveHourWindow = claudePlanUsage?.windows.find((w) => w.key === "5h") ?? null;
+  // **プラン枠の取得は待たない**（#3304。取得は`?plan=1`へ分けた）。5時間枠の換算には、その取得が
+  // 残したキャッシュを読むだけにする（`?current=1`と同じ）。キャッシュが冷えていれば換算なしで返し、
+  // 画面はプラン枠が届いたあとで集計を取り直して埋める（`use-session-usage.ts`）。
+  // 5時間枠のウィンドウ開始（`resetsAt - durationMs`）が期間の開始（`periodStartMs`）より前へ
+  // はみ出すことがあり（「1日」は日本時間0:00始まりなので、深夜〜早朝に開くとウィンドウの前半が
+  // 前日にかかる）、そのぶんも取得範囲へ含める必要がある（#2988）。
+  const fiveHourWindow = peekClaudeUsageWindows()?.find((w) => w.key === "5h") ?? null;
   const quotaWindowStartMs =
     fiveHourWindow?.resetsAt !== null && fiveHourWindow?.resetsAt !== undefined
       ? fiveHourWindow.resetsAt * 1000 - fiveHourWindow.durationMs
@@ -454,8 +492,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       ...summary,
-      planUsage: { claude: claudePlanUsage, codex: codexPlanUsage },
-      planNotConfigured: { claude: !token, codex: !codexPlanUsage },
       quotaEstimate,
       currentSessions,
     },

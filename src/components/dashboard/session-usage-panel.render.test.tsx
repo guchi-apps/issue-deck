@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
-import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import type { SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { formatDateTime } from "@/lib/format-date-time";
 import { buildSessionUsageSummary, type SessionUsageEntry } from "@/lib/session-usage-view";
 
@@ -48,16 +48,25 @@ function response(entries: SessionUsageEntry[]): SessionUsageResponse {
       days: 7,
       reportedAt: "2026-08-30T02:55:00.000Z",
     }),
-    planUsage: { claude: null, codex: null },
-    planNotConfigured: { claude: true, codex: true },
     quotaEstimate: null,
   };
 }
 
-function renderPanel(data: SessionUsageResponse, props: Record<string, unknown> = {}) {
+/** プラン枠は集計と別に届く（#3304）。既定は「取得済みで、どちらも未設定」 */
+const PLAN_LOADED: SessionUsagePlanState = {
+  data: {
+    planUsage: { claude: null, codex: null },
+    planNotConfigured: { claude: true, codex: true },
+    quotaEstimate: null,
+  },
+  error: null,
+};
+
+function renderPanel(data: SessionUsageResponse | null, props: Record<string, unknown> = {}) {
   return render(
     <SessionUsagePanel
       data={data}
+      plan={PLAN_LOADED}
       isLoading={false}
       error={null}
       days={7}
@@ -715,9 +724,76 @@ describe("SessionUsagePanel", () => {
       renderPanel({ ...response([entry()]), currentSessions: [] }, { days: 30, isLoading: true });
       expect(screen.getByText("Claude プラン枠")).toBeTruthy();
       expect(screen.getByRole("region", { name: "実行中のセッション" })).toBeTruthy();
-      expect(screen.getByText("読み込み中...")).toBeTruthy();
-      expect(screen.queryByText("従量課金相当")).toBeNull();
-      expect(screen.queryByText("日別")).toBeNull();
+      // 集計の値は出さず、実物と同じ枠のスケルトンで待つ
+      expect(screen.getByText("集計を読み込み中")).toBeTruthy();
+      expect(screen.queryByText(/1応答/)).toBeNull();
+      expect(screen.queryByText("記録がありません")).toBeNull();
+    });
+  });
+
+  describe("取得待ちのスケルトン（#3304）", () => {
+    it("何も届いていなくても、見出しと枠を先に出す", () => {
+      renderPanel(null, { plan: { data: null, error: null }, isLoading: true });
+
+      expect(screen.getByRole("heading", { name: "AI使用量" })).toBeTruthy();
+      expect(screen.getByRole("group", { name: "集計する期間" })).toBeTruthy();
+      expect(screen.getByRole("region", { name: "実行中のセッション" })).toBeTruthy();
+      for (const label of [
+        "Claude プラン枠",
+        "Codex プラン枠",
+        "従量課金相当",
+        "日別",
+        "リポジトリ別",
+        "セッション種別別",
+        "Issue・PR別",
+      ]) {
+        expect(screen.getByText(label)).toBeTruthy();
+      }
+      expect(screen.getByText("集計を読み込み中")).toBeTruthy();
+      expect(screen.getByText("実行中のセッションを読み込み中")).toBeTruthy();
+      // Claudeは週間・5時間の2行、Codexは週間の1行
+      expect(screen.getAllByText("週間を読み込み中")).toHaveLength(2);
+      expect(screen.getAllByText("5時間を読み込み中")).toHaveLength(1);
+      expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(10);
+    });
+
+    it("点滅は動きを減らす設定のときに止める", () => {
+      renderPanel(null, { plan: { data: null, error: null } });
+      const bones = [...document.querySelectorAll('[data-slot="skeleton"]')];
+      expect(bones.length).toBeGreaterThan(0);
+      for (const bone of bones) expect(bone.className).toContain("motion-reduce:animate-none");
+    });
+
+    it("集計が先に届いたら、プラン枠だけスケルトンのまま集計を出す", () => {
+      renderPanel(
+        { ...response([entry()]), currentSessions: [] },
+        { plan: { data: null, error: null } },
+      );
+
+      expect(screen.getByText("従量課金相当")).toBeTruthy();
+      expect(screen.queryByText("集計を読み込み中")).toBeNull();
+      expect(screen.queryByText("実行中のセッションを読み込み中")).toBeNull();
+      expect(screen.getByText("いま実行中のセッションはありません")).toBeTruthy();
+      // プラン枠は届くまでメーターの形で待つ
+      expect(screen.getAllByText("週間を読み込み中")).toHaveLength(2);
+      expect(screen.getByText("5時間を読み込み中")).toBeTruthy();
+    });
+
+    it("プラン枠の取得に失敗したら、スケルトンのまま止めずエラーを出す", () => {
+      renderPanel(response([entry()]), {
+        plan: { data: null, error: "プラン枠の取得に失敗しました (500)" },
+      });
+
+      expect(screen.queryByText("5時間を読み込み中")).toBeNull();
+      expect(screen.getAllByText("プラン枠の取得に失敗しました (500)").length).toBeGreaterThan(0);
+    });
+
+    it("集計の取得に失敗したら、スケルトンを止めてエラーだけを出す", () => {
+      renderPanel(null, { error: "取得に失敗しました (500)", plan: PLAN_LOADED });
+
+      expect(screen.getByText("取得に失敗しました (500)")).toBeTruthy();
+      expect(screen.queryByText("集計を読み込み中")).toBeNull();
+      expect(screen.queryByText("実行中のセッションを読み込み中")).toBeNull();
     });
   });
 });

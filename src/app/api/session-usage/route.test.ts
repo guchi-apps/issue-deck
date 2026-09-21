@@ -331,22 +331,19 @@ describe("GET /api/session-usage", () => {
 
   it("5時間枠の実測ヘッダが取れれば、換算レートとIssue別の枠%を計算して返す（#2988）", async () => {
     sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 6 })]);
-    fetchClaudeUsage.mockResolvedValue({
-      windows: [
-        {
-          key: "5h",
-          label: "5時間",
-          usedPercent: 20,
-          remainingPercent: 80,
-          // NOW(03:00Z)の3時間後(06:00Z)にリセット → ウィンドウ開始は01:00Z。
-          resetsAt: Date.parse("2026-08-30T06:00:00.000Z") / 1000,
-          status: "allowed",
-          durationMs: 5 * 60 * 60_000,
-        },
-      ],
-      fetchedAt: Date.now(),
-      stale: false,
-    });
+    // 集計はプラン枠を取得せず、取得済みのキャッシュだけを読む（#3304）
+    peekClaudeUsageWindows.mockReturnValue([
+      {
+        key: "5h",
+        label: "5時間",
+        usedPercent: 20,
+        remainingPercent: 80,
+        // NOW(03:00Z)の3時間後(06:00Z)にリセット → ウィンドウ開始は01:00Z。
+        resetsAt: Date.parse("2026-08-30T06:00:00.000Z") / 1000,
+        status: "allowed",
+        durationMs: 5 * 60 * 60_000,
+      },
+    ]);
 
     const response = await GET(request());
     const body = await response.json();
@@ -359,9 +356,9 @@ describe("GET /api/session-usage", () => {
     expect(body.byIssue[0].quotaPercent).toBe(20);
   });
 
-  it("Claudeの使用量が取得できなければquotaEstimateはnull、Issueのquotaも全てnull", async () => {
+  it("プラン枠のキャッシュが無ければquotaEstimateはnull、Issueのquotaも全てnull", async () => {
     sessionUsageFindMany.mockResolvedValue([sessionUsageRow()]);
-    fetchClaudeUsage.mockResolvedValue(null);
+    peekClaudeUsageWindows.mockReturnValue(null);
 
     const response = await GET(request());
     const body = await response.json();
@@ -375,22 +372,18 @@ describe("GET /api/session-usage", () => {
     // = UTC 2026-08-30T15:00:00.000Z。
     vi.setSystemTime(new Date("2026-08-30T17:10:00.000Z"));
     sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 6 })]);
-    fetchClaudeUsage.mockResolvedValue({
-      windows: [
-        {
-          key: "5h",
-          label: "5時間",
-          usedPercent: 20,
-          remainingPercent: 80,
-          // リセットはUTC 18:00 → ウィンドウ開始は13:00Z。期間開始(15:00Z)より2時間早い。
-          resetsAt: Date.parse("2026-08-30T18:00:00.000Z") / 1000,
-          status: "allowed",
-          durationMs: 5 * 60 * 60_000,
-        },
-      ],
-      fetchedAt: Date.now(),
-      stale: false,
-    });
+    peekClaudeUsageWindows.mockReturnValue([
+      {
+        key: "5h",
+        label: "5時間",
+        usedPercent: 20,
+        remainingPercent: 80,
+        // リセットはUTC 18:00 → ウィンドウ開始は13:00Z。期間開始(15:00Z)より2時間早い。
+        resetsAt: Date.parse("2026-08-30T18:00:00.000Z") / 1000,
+        status: "allowed",
+        durationMs: 5 * 60 * 60_000,
+      },
+    ]);
 
     const response = await GET(request(1));
     expect(response.status).toBe(200);
@@ -399,5 +392,75 @@ describe("GET /api/session-usage", () => {
     // 広がっていることを確かめる。
     const where = sessionUsageFindMany.mock.calls[0][0].where;
     expect(where.endedAt.gte.toISOString()).toBe("2026-08-30T13:00:00.000Z");
+  });
+
+  it("集計はプラン枠を取得せず、プラン枠の欄も返さない（#3304）", async () => {
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow()]);
+
+    const response = await GET(request());
+    const body = await response.json();
+
+    expect(fetchClaudeUsage).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty("planUsage");
+    expect(body).not.toHaveProperty("planNotConfigured");
+    expect(body.byIssue).toHaveLength(1);
+  });
+
+  it("plan=1はプラン枠と換算だけを返し、集計・実行中のセッションは作らない（#3304）", async () => {
+    sessionUsageFindMany.mockResolvedValue([sessionUsageRow({ costUsd: 6 })]);
+    const claude = {
+      windows: [
+        {
+          key: "5h",
+          label: "5時間",
+          usedPercent: 20,
+          remainingPercent: 80,
+          resetsAt: Date.parse("2026-08-30T06:00:00.000Z") / 1000,
+          status: "allowed",
+          durationMs: 5 * 60 * 60_000,
+        },
+      ],
+      fetchedAt: Date.now(),
+      stale: false,
+    };
+    fetchClaudeUsage.mockResolvedValue(claude);
+
+    const response = await GET(request(7, "&plan=1"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchClaudeUsage).toHaveBeenCalledWith("test-token");
+    expect(body.planUsage).toEqual({ claude, codex: null });
+    expect(body.planNotConfigured).toEqual({ claude: false, codex: true });
+    expect(body.quotaEstimate).toEqual({
+      usdPerPercent: 6 / 20,
+      windowStartMs: Date.parse("2026-08-30T01:00:00.000Z"),
+      windowCostUsd: 6,
+    });
+    expect(body).not.toHaveProperty("byIssue");
+    expect(body).not.toHaveProperty("currentSessions");
+    expect(listDispatchSessions).not.toHaveBeenCalled();
+  });
+
+  it("plan=1でClaudeの取得に失敗しても、200でプラン枠なしとして返す（#3304）", async () => {
+    fetchClaudeUsage.mockRejectedValue(new Error("boom"));
+
+    const response = await GET(request(7, "&plan=1"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.planUsage.claude).toBeNull();
+    expect(body.quotaEstimate).toBeNull();
+    expect(sessionUsageFindMany).not.toHaveBeenCalled();
+  });
+
+  it("plan=1でトークンが未設定なら、取得せずに未設定として返す（#3304）", async () => {
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const response = await GET(request(7, "&plan=1"));
+    const body = await response.json();
+
+    expect(fetchClaudeUsage).not.toHaveBeenCalled();
+    expect(body.planNotConfigured.claude).toBe(true);
   });
 });
