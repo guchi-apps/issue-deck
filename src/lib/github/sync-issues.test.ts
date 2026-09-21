@@ -588,7 +588,7 @@ describe("upsertIssueFromWebhookPayload のラベル同期", () => {
 
   const LABELS = [
     { id: 1, name: "11.local", color: "ededed", description: null },
-    { id: 2, name: "40.unexpected", color: "d73a4a", description: "想定外の挙動" },
+    { id: 2, name: "40.investigation", color: "d73a4a", description: "想定外の挙動" },
   ];
 
   it("同時実行で落ちない書き方で入れる（skipDuplicates付きのcreateMany）", async () => {
@@ -605,7 +605,7 @@ describe("upsertIssueFromWebhookPayload のラベル同期", () => {
         },
         {
           issueId: "issue-1",
-          name: "40.unexpected",
+          name: "40.investigation",
           color: "d73a4a",
           description: "想定外の挙動",
           githubLabelId: BigInt(2),
@@ -620,7 +620,7 @@ describe("upsertIssueFromWebhookPayload のラベル同期", () => {
 
     expect(issueLabelUpdateMany).toHaveBeenCalledTimes(2);
     expect(issueLabelUpdateMany).toHaveBeenCalledWith({
-      where: { issueId: "issue-1", name: "40.unexpected" },
+      where: { issueId: "issue-1", name: "40.investigation" },
       data: { color: "d73a4a", description: "想定外の挙動", githubLabelId: BigInt(2) },
     });
   });
@@ -629,7 +629,7 @@ describe("upsertIssueFromWebhookPayload のラベル同期", () => {
     await upsertIssueFromWebhookPayload("repo-1", makeRawIssue({ labels: LABELS }));
 
     expect(issueLabelDeleteMany).toHaveBeenCalledWith({
-      where: { issueId: "issue-1", name: { notIn: ["11.local", "40.unexpected"] } },
+      where: { issueId: "issue-1", name: { notIn: ["11.local", "40.investigation"] } },
     });
   });
 

@@ -21,21 +21,26 @@ describe("isLabelClearedOnClose", () => {
     expect(isLabelClearedOnClose("22.merge-confirm-required")).toBe(false);
     expect(isLabelClearedOnClose("50.feature")).toBe(false);
     expect(isLabelClearedOnClose("71.manual-step")).toBe(false);
-    expect(isLabelClearedOnClose("90.Close: duplicate")).toBe(false);
+    expect(isLabelClearedOnClose("91.Close: duplicate")).toBe(false);
   });
 });
 
 describe("クローズ理由ラベル", () => {
-  it("画面に出す4種はすべて`90.Close: `始まりで、APIの入力検証を通る", () => {
-    expect(CLOSE_REASON_LABELS).toHaveLength(4);
+  it("画面に出す6種はすべて`9x.Close: `始まりで、APIの入力検証を通る", () => {
+    expect(CLOSE_REASON_LABELS).toHaveLength(6);
     for (const reason of CLOSE_REASON_LABELS) {
-      expect(reason.name.startsWith("90.Close: ")).toBe(true);
+      expect(reason.name).toMatch(/^9\d\.Close: /);
       expect(isCloseReasonLabelName(reason.name)).toBe(true);
     }
   });
 
+  it("`96.Close: completed`は`not_planned`のメニューに並べない", () => {
+    expect(CLOSE_REASON_LABELS.map((reason) => reason.name)).not.toContain("96.Close: completed");
+    expect(isCloseReasonLabelName("96.Close: completed")).toBe(false);
+  });
+
   it("一覧に無いラベル名は受け付けない（任意のラベルを付けさせない）", () => {
-    expect(isCloseReasonLabelName("90.Close: unknown")).toBe(false);
+    expect(isCloseReasonLabelName("99.Close: unknown")).toBe(false);
     expect(isCloseReasonLabelName("11.local")).toBe(false);
   });
 });

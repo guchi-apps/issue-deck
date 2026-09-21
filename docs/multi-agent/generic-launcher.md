@@ -405,10 +405,9 @@ failed to update https://github.com/guchi-apps/vps/issues/68: '11.local' not fou
 > # help wanted・invalid・question・wontfix）は gh label delete で消す
 > ```
 >
-> `guchi-apps/docs`の`label-sync/sync-labels.sh`は`gh-label-sync`拡張（未インストール）を
-> 要求するため、1リポジトリなら`gh label clone --force`の方が早い
-> （[cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「ラベルの正はこのissue-deck
-> リポジトリに置いている」）。
+> ラベルはissue-deckの`scripts/sync-labels.sh apply --repo <名前>`で揃える
+> （[cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「ラベルの正は、このissue-deck
+> リポジトリの`.github/labels.json`に置いている」）。
 
 **この2つはローカルセッションでも実行できない場合がある。** `gh repo create`はauto modeの
 クラシファイアに拒否されるため（#2430で実測）、リポジトリの作成だけはユーザーに1コマンド

@@ -385,7 +385,7 @@ describe("runProgressSweep", () => {
     fetchPullRequestsForHead.mockResolvedValue([
       { state: "closed", merged_at: CHECK_USER_MERGED_AT },
     ]);
-    removeIssueLabel.mockResolvedValue(["01.check-merge", "40.unexpected"]);
+    removeIssueLabel.mockResolvedValue(["01.check-merge", "40.investigation"]);
 
     const result = await runProgressSweep({ now: NOW });
 

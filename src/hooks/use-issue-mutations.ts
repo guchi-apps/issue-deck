@@ -23,7 +23,7 @@ export type UpdateIssueInput = {
   labels?: string[];
   assignee?: string | null;
   /**
-   * クローズと同時に付けるクローズ理由ラベル（`90.Close: *`。#2178）。
+   * クローズと同時に付けるクローズ理由ラベル（`9x.Close: *`。#2178）。
    * `state: "closed"`のときだけ効き、リポジトリに定義が無ければ付与を諦めてクローズだけ行う。
    */
   closeReasonLabel?: string;

@@ -271,7 +271,7 @@ open Issueのブランチを既定から外しているのはこのためだが�
 実施するなら、その新規Issue用に別セッションを起こす（`scripts/start-issue.sh <番号>`、または
 画面の「ローカルで開始」）。今のセッションでやってよいのは**起票まで**。
 
-- `71.manual-step`（人の手作業）・`70.confirm`（やるかどうか未決）で起票したものは、そもそも
+- `71.manual-step`（人の手作業）・`70.needs-decision`（やるかどうか未決）で起票したものは、そもそも
   実装フローに乗せない。起票して終わりでよい
 - 元Issueのスコープに収まる変更なら、新規Issueを立てずそのまま今のブランチで実装する。
   「別Issueとして起票するか」と「別ブランチで実装するか」は同じ一つの判断で、片方だけを分けない
@@ -420,7 +420,7 @@ Actions上でClaude Codeを動かす際の知見、共通コーディング方�
 
 **`11.local`が効くのはActions側が判定する時点まで**で、逆向き（Actionsが走っている最中にサブPCへ積む）は止められない。triageと陳腐化チェックを通過して走っているrunは、後から`11.local`を付けても止まらないからで、そのままだと同じ`issue-<番号>`ブランチをActionsとサブPCが別々に進める（#2032）。こちらは**積む側の画面**で塞ぐ——GitHub Actionsの実行が進行中のIssueには起動の導線を出さない（Issue詳細の起動ボタン・「セッションを復旧」の2つ）。判定材料は画面が既にポーリングしている実行状況で、GitHub APIは追加で叩かない。詳細は[subpc-dispatch.md](subpc-dispatch.md)「GitHub Actionsが走っている間は積ませない（#2032）」。
 
-`11.local`は`0x.`始まりではないため、issue-deck画面上は進捗ステップ（`WorkflowStepBadge`）ではなく通常のラベルとして表示・編集できる（`src/lib/issue-status.ts`の`isProgressLabel`）。あわせて番号帯が重ならないよう、優先度ラベルを`80.Priority: High`・`89.Priority: low`へリネームした。
+`11.local`は`0x.`始まりではないため、issue-deck画面上は進捗ステップ（`WorkflowStepBadge`）ではなく通常のラベルとして表示・編集できる（`src/lib/issue-status.ts`の`isProgressLabel`）。あわせて番号帯が重ならないよう、優先度ラベルを`80.Priority: High`・`89.Priority: Low`へリネームした。
 
 ## ブランチ保護ルール案
 

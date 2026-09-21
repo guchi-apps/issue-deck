@@ -1060,6 +1060,9 @@ export function POST(request: NextRequest) {
   横展開の運用は[multi-repo-changes.md](multi-repo-changes.md)。
   **一覧にはバッジを出していない**（IssueごとにGraphQLを1回叩くN+1になるため）。運用は
   [multi-agent/labels.md](multi-agent/labels.md)。
+- **共通GitHubラベルの正本は[`.github/labels.json`](../.github/labels.json)、配布は`scripts/sync-labels.sh`**（#3237）。
+  名前・説明・色と旧名から新名への対応を持ち、`labels-manifest.test.ts`が正本とコードの参照名の一致と
+  旧名の取りこぼしを検査する。体系・手順は[label-scheme.md](label-scheme.md)。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
   判定は必ず [`lib/issue-progress.ts`](../src/lib/issue-progress.ts) の `resolveProgressStatus`
   を通す（Status名を直接見ない）。Statusは`projects_v2_item`
@@ -2524,7 +2527,7 @@ export function POST(request: NextRequest) {
   （実例: PR #2387の本文にある`#2388`）。
   **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）には`planning`を足さない**——ブランチが無いのが
   正常な状態で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
-  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: low`）→ 番号の新しい順で、
+  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: Low`）→ 番号の新しい順で、
   **頭出しはせず全件出す**（#2386）。3件までに畳んでいたのは未着手を並べていたときの都合で、
   着手中は同時に走っているセッションの本数しかない。
   **畳んだ1行の件数（未着手・着手中・進行中・未リリース）はアイコンと数字だけで出す**（#1886・`SummaryCount`）。

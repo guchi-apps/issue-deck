@@ -41,13 +41,15 @@ const AUTO_ASSIGNABLE_MIN_BAND = 30;
 // 予定判断で本来は推定に向かないが、本文へ緊急性が書かれているときに拾える利便を優先した。
 // 外せば範囲が30〜70番台の連続した帯になり下の除外も不要になるが、整理のために機能は削らない。
 const AUTO_ASSIGNABLE_MAX_BAND = 89;
-// 71番台（`71.manual-step`）は、タイトルが`[手作業]`で始まるIssueへ`reusable-issue-labels.yml`の
-// `manual-step-label`ジョブが付けるルールベースのラベル（docs/multi-agent/labels.md参照）。
-// 推定で付くと「ユーザーの作業待ち」ビューへ紛れ込み、Issue詳細から実装の導線が消える。
-// **この例外は恒久的な仕様**（#1702）。`71.manual-step`を実行状態の帯（`11.local`の隣）へ移して
-// 例外を無くす案は、約70か所の参照・8リポジトリのラベル改名・14リポジトリへの
-// `reusable-issue-labels.yml`再配布に見合わないため見送っている。
-const AUTO_ASSIGNABLE_EXCLUDED_BAND = 71;
+// 自動付与から外すのは次の2つ（番号の先頭2桁で判定する）。**この例外は恒久的な仕様**（#1702・#3237）。
+// - `71.manual-step`: タイトルが`[手作業]`で始まるIssueへ`reusable-issue-labels.yml`の
+//   `manual-step-label`ジョブが付けるルールベースのラベル（docs/multi-agent/labels.md参照）。
+//   推定で付くと「ユーザーの作業待ち」ビューへ紛れ込み、Issue詳細から実装の導線が消える。
+// - `41.cannot-reproduce`と`72`〜`75`（`blocked`・`needs-info`・`needs-spec`・`agent-ready`）:
+//   調べた結果や作業の進み具合を表す**状態**で、起票時の本文からは決められない。推定で付くと
+//   「進行不能」「エージェントがそのまま着手できる」のような誤った状態が、押した本人から
+//   見えないまま付く。**`70.needs-decision`は本文から判断できるので対象に残す。**
+const AUTO_ASSIGNABLE_EXCLUDED_NUMBERS: ReadonlySet<number> = new Set([41, 71, 72, 73, 74, 75]);
 const NUMBER_BAND_PATTERN = /^(\d{2})\./;
 
 /**
@@ -61,7 +63,7 @@ export function isAutoAssignableLabelName(labelName: string): boolean {
   const match = NUMBER_BAND_PATTERN.exec(labelName);
   if (!match) return false;
   const band = Number(match[1]);
-  if (band === AUTO_ASSIGNABLE_EXCLUDED_BAND) return false;
+  if (AUTO_ASSIGNABLE_EXCLUDED_NUMBERS.has(band)) return false;
   return band >= AUTO_ASSIGNABLE_MIN_BAND && band <= AUTO_ASSIGNABLE_MAX_BAND;
 }
 

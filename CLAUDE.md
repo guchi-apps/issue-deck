@@ -197,7 +197,9 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。**誰がいつ付け、いつ外すのかの一覧は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「`00.check-user`が付く・外れるタイミング」を参照**（無人実行・ローカル実行・画面操作の3経路に分かれているため、ここを正とする）。**付けるときは、その理由を表す`01.check-*`ラベル（`01.check-plan`・`01.check-input`・`01.check-merge`・`01.check-blocked`・`01.check-answered`）も1枚あわせて付ける**（#1490。同じ節を参照）。理由ラベルは`00.check-user`とのANDでしか読まれず、**そのリポジトリに定義が無ければ付けなくてよい**。
 
-`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`89.Priority: low`へリネームした。
+`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
+
+**共通GitHubラベルの名前・説明・色の正本は`.github/labels.json`で、全リポジトリへは`scripts/sync-labels.sh`で配る**（#3237。体系・旧名との対応・手順は[docs/label-scheme.md](docs/label-scheme.md)）。ラベルを足す・改名するときは正本を先に直し、個別のリポジトリだけでは直さない。
 
 `Release`・`Done`に対応するdevelop→mainのリリースフロー自体は、バージョンbump PR・develop→mainのPR作成までを`.github/workflows/release-develop-to-main.yml`が自動化している（詳細は[docs/multi-agent/release.md](docs/multi-agent/release.md)参照）。develop→mainの実際のマージは下記「自動マージ不可カテゴリ」に該当するため人間が手動で行う。
 

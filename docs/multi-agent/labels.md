@@ -22,21 +22,26 @@
 | `01.` | `01.check-plan`・`01.check-input`・`01.check-merge`・`01.check-blocked`・`01.check-answered` | `00.check-user`が付いた理由（#1490） | 同上 | ✕ |
 | `11.` | `11.local` | 実行状態（ローカルセッションが持っている） | 起動スクリプト・画面 | ✕ |
 | `21.`〜`25.` | `21.plan-required`・`22.merge-confirm-required`・`23.preview-required`・`25.artifact-required` | 実装オプション（ゲート） | 人（「実装を開始」ダイアログ） | ✕ |
-| `30.` | `30.bug`・`31.security` | 不具合 | 人・Claudeの推定 | ○ |
-| `40.` | `40.unexpected` | 想定外の動作（不具合か仕様かの切り分けが要る） | 人・Claudeの推定 | ○ |
-| `50.` | `50.feature`・`51.improvement` | 追加・改善 | 人・Claudeの推定 | ○ |
-| `60.` | `60.chore`・`61.ops`・`62.design`・`65.docs` | その他の作業 | 人・Claudeの推定 | ○ |
-| `70.` | `70.confirm` | 実施するか未決 | 人・Claudeの推定・ワークフロー | ○ |
+| `30.`〜`49.` | `30.bug`・`31.security`・`40.investigation`・`41.cannot-reproduce` | 問題・調査 | 人・Claudeの推定（`41`は除く） | ○（`41`を除く） |
+| `50.`〜`59.` | `50.feature`・`51.improvement`・`52.performance`・`53.accessibility`・`54.data-migration`・`55.integration` | 機能変更 | 人・Claudeの推定 | ○ |
+| `60.`〜`69.` | `60.chore`・`61.ops`・`62.design`・`63.refactor`・`64.test`・`65.docs`・`66.dependencies` | 保守・開発基盤 | 人・Claudeの推定 | ○ |
+| `70.` | `70.needs-decision` | 実施方針や仕様の判断が必要（実施するか未決） | 人・Claudeの推定・ワークフロー | ○ |
 | `71.` | `71.manual-step` | ユーザー自身の手作業が必要 | ワークフロー（タイトル起点）・人 | ✕ |
-| `80.` / `89.` | `80.Priority: High`・`89.Priority: low` | 優先度 | 人・Claudeの推定 | ○ |
-| `90.` | `90.Close: another`・`90.Close: duplicate`・`90.Close: invalid`・`90.Close: wonfix` | closeの理由 | 人（画面の「クローズする」・#2178） | ✕ |
+| `72.`〜`75.` | `72.blocked`・`73.needs-info`・`74.needs-spec`・`75.agent-ready` | 進行・判断の状態（進行不能・情報不足・要件不足・着手可） | 人 | ✕ |
+| `80.`〜`89.` | `80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low` | 優先度（`85`は付いていないのと同じ通常） | 人・Claudeの推定 | ○ |
+| `90.`〜`99.` | `90.Close: another`・`91.Close: duplicate`・`92.Close: invalid`・`93.Close: cannot-reproduce`・`94.Close: wontfix`・`95.Close: obsolete`・`96.Close: completed` | closeの理由 | 人（画面の「クローズする」・#2178） | ✕ |
+
+**名前・色・説明の正本は[`.github/labels.json`](../../.github/labels.json)**で、全リポジトリへは`scripts/sync-labels.sh`で配る
+（#3237。体系・旧名との対応・手順は[../label-scheme.md](../label-scheme.md)）。この表は番号帯の意味を説明するもので、
+名前を足すときは`labels.json`を先に直す。
 
 「自動付与」は**Issue本文からClaudeがタイトル・ラベルを推定する機能**（`isAutoAssignableLabelName`）の
 対象かどうか。人が手で選べる範囲はこれとは別で、`isSelectableLabelName`が決める（後掲
 「手で選ぶラベルの範囲とは別物」）。
 
-> **`40.unexpected`（旧`40.invalid`）と`61.ops`はGitHub側の反映が別作業**（#1714）。ラベルの改名・
-> 新設は19リポジトリへの操作で、この表を含むPull Requestをマージしても反映されない。
+> **ラベルの改名・新設はGitHub側の反映が別作業**（#1714・#3237）。全リポジトリへの操作で、
+> この表を含むPull Requestをマージしても反映されない。`scripts/sync-labels.sh apply`で配る
+> （[../label-scheme.md](../label-scheme.md)）。
 
 ### 一覧のカードにはGitHubラベルを出さない（#3159）
 
@@ -69,7 +74,7 @@ Remote Controlを開くボタンの場所（#1915）。
 
 ### `71.manual-step`は70番台に据え置く（#1702で確認）
 
-`70.confirm`（実施するかが**未決**）と`71.manual-step`（やることは**決定済み**で実行者が人）は
+`70.needs-decision`（実施するかが**未決**）と`71.manual-step`（やることは**決定済み**で実行者が人）は
 性質が違うため、`71`を`11.local`の隣——実行状態の帯——へ移す案を検討したが、**移さないと決めた。**
 
 移設に必要なのは、リテラル`71.manual-step`の約70か所の書き換え（コード・docs・プロンプト・
@@ -78,7 +83,7 @@ Remote Controlを開くボタンの場所（#1915）。
 手作業Issueへラベルが自動付与されない期間**を許容すること。対して得られるのは、
 `isAutoAssignableLabelName`から3行の例外を消すことだけで、割に合わない。
 
-したがって**「自動付与の対象は30〜89番台、ただし71番台を除く」を恒久的な仕様として据え置く**
+したがって**「自動付与の対象は30〜89番台、ただし`41`・`71`〜`75`を除く」を恒久的な仕様として据え置く**（#3237で除外に`41`・`72`〜`75`を足した。調べた結果や進み具合を表す状態ラベルで、起票時の本文からは決められないため）
 （後掲「Claudeによるラベル自動付与の対象は30〜89番台に限る（#1662）」）。除外を名前一致では
 なく番号帯で行っているのは、配布先のリポジトリでラベル名が違い得るため。
 
@@ -93,11 +98,12 @@ Remote Controlを開くボタンの場所（#1915）。
 
 ### 似た名前のラベルの使い分け
 
-- **`40.unexpected`（種別）と`90.Close: invalid`（closeの理由）** — `40.unexpected`は「期待と違う挙動で、
-  不具合か仕様かの切り分けが要る」ものに着手前から付ける種別。`90.Close: invalid`は「正しくない・
-  再現しない」と結論が出てcloseするときの理由。**着手前に付けるか、closeするときに付けるかで分かれる。**
-  もとは`40.invalid`という名前で`90.Close: invalid`と紛らわしかったため、#1702で改名した（実績は
-  `40.`が48件に対し`90.Close: invalid`は1件で、役割が競合していたわけではなく名前だけが衝突していた）。
+- **`40.investigation`（種別）と`92.Close: invalid`・`93.Close: cannot-reproduce`（closeの理由）** —
+  `40.investigation`は「原因または対応要否の調査が必要」なものに着手前から付ける種別。
+  `92.Close: invalid`は「Issueの前提や内容が正しくない」、`93.Close: cannot-reproduce`は「再現できない」と
+  結論が出てcloseするときの理由。**着手前に付けるか、closeするときに付けるかで分かれる。**
+  現時点で再現できず追加調査が要る段階（まだcloseしない）は`41.cannot-reproduce`。
+  この種別は以前「想定外の動作」を表す名前で`30.bug`と意味が重なっていたため、#3237で調査を表す名前へ改名した。
 - **`60.chore`（その他・軽微な修正）と`61.ops`（運用基盤の整備）** — `61.ops`は他リポジトリへの
   ワークフロー配布、各アプリのマルチエージェント運用への載せ替え、サブPC・メインPCのホスト設定
   といった、**アプリの機能ではなく運用基盤を動かす作業**。#1702の時点で`60.chore`47件のうち
@@ -397,10 +403,11 @@ Issueがcloseされたら、issue-deckが`00.check-user`・理由ラベル`01.ch
 - **失敗しても投げない。** 後片付けの失敗でcloseそのものやDB同期を巻き添えにしない
   （#1856の`closeStrandedProgress`と同じ約束）
 
-### クローズ理由ラベル`90.Close: *`は画面から選ぶ（#2178）
+### クローズ理由ラベル`9x.Close: *`は画面から選ぶ（#2178）
 
-Issue詳細の⋯メニュー →「クローズする」▸ のサブメニューに、区切り線の下として4種
-（`duplicate`・`wonfix`・`invalid`・`another`）が並ぶ。選ぶとクリック1回でクローズまで終わる。
+Issue詳細の⋯メニュー →「クローズする」▸ のサブメニューに、区切り線の下として6種
+（`duplicate`・`wontfix`・`obsolete`・`cannot-reproduce`・`invalid`・`another`）が並ぶ
+（`96.Close: completed`は`state_reason=completed`のクローズ用なので並べない。#3237）。選ぶとクリック1回でクローズまで終わる。
 
 - **どれも`state_reason`は`not_planned`。** 理由ラベルは「計画外の内訳」であって、closeの種類
   そのものではない。GitHubには`duplicate`という`state_reason`もあるが、Prismaの
@@ -761,7 +768,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 （[../code-map.md](../code-map.md)「データの流れ」）。一覧にはバッジを出していない（Issueごとに
 1クエリ増えてN+1になるため）。
 
-分割とは別に、計画提示ステップは調査中に見つかった元Issueのスコープ外の関連事項（追加対応すべき別件・副作用や懸念点など）を、承認フローを経ずにその場で新規Issueとして起票してよい（元Issue自体の実装承認とは独立。#735）。分割が「元Issueのスコープを割る」ものであるのに対し、これは「元Issueとは別の関連事項を独立Issueとして提案する」もので、本文に「起点: #<元Issue番号>」を含め、`70.confirm`ラベルを付与したうえで1回あたり目安3件までに留める。
+分割とは別に、計画提示ステップは調査中に見つかった元Issueのスコープ外の関連事項（追加対応すべき別件・副作用や懸念点など）を、承認フローを経ずにその場で新規Issueとして起票してよい（元Issue自体の実装承認とは独立。#735）。分割が「元Issueのスコープを割る」ものであるのに対し、これは「元Issueとは別の関連事項を独立Issueとして提案する」もので、本文に「起点: #<元Issue番号>」を含め、`70.needs-decision`ラベルを付与したうえで1回あたり目安3件までに留める。
 
 ## 質問セッションは実装しないが、Issueの起票はしてよい
 
@@ -775,7 +782,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 ルールは上記の計画提示ステップからの起票（#735）と同じにしてある。
 
 - 本文に「起点: #<質問Issue番号>」を含め、質問Issueを読み返さなくても単独で伝わるように書く
-- `70.confirm`を付ける（人が着手要否を判断するまで実装フローへ自動で乗せない）
+- `70.needs-decision`を付ける（人が着手要否を判断するまで実装フローへ自動で乗せない）
 - 1回あたり目安3件まで。超える分は回答コメントに箇条書きで残す
 - 起票したら回答コメント本文にも番号の一覧を書く
 - **起票してもそのセッションでは実装しない**（実装は別セッションを起こす）
@@ -1329,9 +1336,9 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 - **00番台にしない。** `^00\.`のラベルは`isAttentionLabel`により一覧カードのラベル表示から
   除外される（`src/lib/issue-status.ts`・`src/components/dashboard/issue-list.tsx`）ため、
   盤面で手作業Issueだと見分けられなくなる。
-- `70.confirm`（実施するか検討必要）とも役割が違う。`70.confirm`は**やるかどうかが未決**、
+- `70.needs-decision`（実施するか検討必要）とも役割が違う。`70.needs-decision`は**やるかどうかが未決**、
   `71.manual-step`は**やることは決まっていて実行者が人**である。
-- 他リポジトリには`guchi-apps/docs`の`label-sync/`でissue-deckから配る
+- 他リポジトリには`scripts/sync-labels.sh`でissue-deckの`.github/labels.json`から配る
   （[../cross-repo-setup-guide.md](../cross-repo-setup-guide.md)「2. ラベル体系」）。
 
 #### 付け忘れはワークフローが埋める（#1492）
@@ -1974,7 +1981,7 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 （`src/components/dashboard/create-issue-dialog.tsx` → `/api/issues/suggest` →
 `src/lib/claude/issue-suggest.ts`）。**Issueへラベルを推定で付ける経路はこれ1つだけ。**
 
-**推定の対象にするのは30〜89番台のラベルだけで、71番台は除く。** 判定は
+**推定の対象にするのは30〜89番台のラベルだけで、`41`・`71`〜`75`は除く**（`41`・`72`〜`75`は#3237で追加）。 判定は
 `isAutoAssignableLabelName`（`src/lib/issue-status.ts`）1か所にある。
 
 **この「71だけを除く」は恒久的な仕様である**（#1702）。`71.manual-step`を別の帯へ移して例外を
@@ -1986,9 +1993,10 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 | `00.` / `01.check-*` | `00.check-user`・`01.check-plan` | ✕ | 承認待ちの合図。人とワークフローが付け外しする |
 | `11.` | `11.local` | ✕ | 「いまローカルセッションが持っている」という実行状態。起動経路が付ける |
 | `21.`〜`25.` | `21.plan-required`・`23.preview-required` | ✕ | 「実装を開始」ダイアログのチェックボックスで選ぶゲート（「画面のオプション4つの使い分け」参照） |
-| `30.`〜`70.`・`80.`/`89.` | `30.bug`・`40.unexpected`・`51.improvement`・`61.ops`・`70.confirm`・`80.Priority: High` | ○ | 種別・優先度。**本文の内容から決まる**ので推定に向く |
+| `30.`〜`70.`・`80.`〜`89.`（`41`を除く） | `30.bug`・`40.investigation`・`51.improvement`・`61.ops`・`70.needs-decision`・`80.Priority: High` | ○ | 種別・優先度。**本文の内容から決まる**ので推定に向く |
 | `71.` | `71.manual-step` | ✕ | タイトルが`[手作業]`で始まるIssueへワークフローが付ける（上記「付け忘れはワークフローが埋める」） |
-| `90.` | `90.Close: duplicate` | ✕ | closeの理由。起票の時点で決まるものではない |
+| `41.`・`72.`〜`75.` | `41.cannot-reproduce`・`72.blocked`・`73.needs-info`・`74.needs-spec`・`75.agent-ready` | ✕ | 調べた結果・作業の進み具合を表す状態で、起票時の本文からは決められない（#3237） |
+| `90.`〜`96.` | `91.Close: duplicate` | ✕ | closeの理由。起票の時点で決まるものではない |
 
 - **`71`を外すのは、付け方の正がタイトルにあるから。** 推定で付くと「ユーザーの作業待ち」ビューへ
   紛れ込み、Issue詳細に「実装を開始」ではなく手作業の案内パネルが出るため、エージェントへ
@@ -2003,7 +2011,7 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
   `buildIssueSuggestPrompt`と`generateIssueSuggestion`の2か所が同じ関数を通る。
 - **画面側でリセットする範囲も同じ集合に揃える。** `mergeSuggestedLabels`は「自動生成のたびに
   選択済みラベルを一度リセットしてから結果を反映する」実装だが、リセット対象を自動付与の対象へ
-  狭めていないと、**人が手で選んだ`11.local`や`90.Close: *`が黙って消える**（生成結果には
+  狭めていないと、**人が手で選んだ`11.local`や`9x.Close: *`が黙って消える**（生成結果には
   出てこないので復活しない）。
 
 ### 手で選ぶラベルの範囲とは別物
@@ -2011,7 +2019,7 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 ラベル選択欄（作成ダイアログ・質問ダイアログ）で人が選べる範囲は
 `isSelectableLabelName`（`src/lib/github/start-implementation.ts`）が決めており、
 こちらは進捗管理用ラベルと実装オプション用ラベル（`21.`〜`25.`）だけを外す。
-**`11.local`・`71.manual-step`・`90.Close: *`は人なら選べる。** 自動付与の対象を絞っても、
+**`11.local`・`71.manual-step`・`9x.Close: *`は人なら選べる。** 自動付与の対象を絞っても、
 人が意図して付ける経路は塞がない。
 
 ## 自動マージ可否の判定方法

@@ -110,7 +110,7 @@ rm -f /tmp/a /tmp/b 2>/dev/null; echo done   # rm が未許可、かつ ; でつ
   `.github/workflows/reusable-*.yml`は十万バイトを超えるものがあります
 - **文脈が伸びた状態で粘らない。** 調べても見通しが立たないまま往復が積み上がってきたら、
   **Issueが大きすぎるサイン**です。区切りの良い範囲までを仕上げてPull Requestにし、残りは
-  `gh issue create`で新しいIssueとして起票（本文に「起点: #${ISSUE_NUMBER}」・`70.confirm`
+  `gh issue create`で新しいIssueとして起票（本文に「起点: #${ISSUE_NUMBER}」・`70.needs-decision`
   ラベル・目安3件まで）してPR本文と完了報告からリンクしてください。区切れるところが無ければ、
   その時点で分かっている状況を`gh issue comment`で報告し、
   `gh issue edit ${ISSUE_NUMBER} --add-label "00.check-user" --add-label "01.check-blocked"`

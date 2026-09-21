@@ -59,7 +59,7 @@ describe("parseModelPick", () => {
 describe("pickModelByRule", () => {
   it("不具合のIssueは調査が要るものとして扱う", () => {
     expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("opus");
-    expect(pickModelByRule(input({ labels: ["40.unexpected"] })).model).toBe("opus");
+    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("opus");
   });
 
   // ラベルの番号はリポジトリごとにずれるので、番号ではなく名前で判定する

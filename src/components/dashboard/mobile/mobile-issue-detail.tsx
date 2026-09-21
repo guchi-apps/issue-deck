@@ -1026,7 +1026,7 @@ export function MobileIssueDetail({
                       計画外としてクローズ
                     </DropdownMenuItem>
                     {/* クローズ理由ラベル（#2178）。区切り線から下は「計画外の内訳」で、
-                        どれも`not_planned`でクローズしつつ`90.Close: *`を1枚付ける */}
+                        どれも`not_planned`でクローズしつつ`9x.Close: *`を1枚付ける */}
                     <DropdownMenuSeparator />
                     {CLOSE_REASON_LABELS.map((reason) => (
                       <DropdownMenuItem

@@ -117,7 +117,7 @@ export function pickModelByRule(
 
   if (agent === "codex") return pickCodexModelByRule(input, has, bodyLength);
 
-  if (has("bug") || has("unexpected")) {
+  if (has("bug") || has("investigation")) {
     return { model: "opus", reason: "不具合のIssueで、原因の調査から始まるためです。" };
   }
   if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {
@@ -139,7 +139,7 @@ function pickCodexModelByRule(
   has: (name: string) => boolean,
   bodyLength: number,
 ): { model: CodexLocalModel; reason: string } {
-  if (has("bug") || has("unexpected")) {
+  if (has("bug") || has("investigation")) {
     return { model: "gpt-5.6-sol", reason: "不具合のIssueで、原因の調査から始まるためです。" };
   }
   if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {

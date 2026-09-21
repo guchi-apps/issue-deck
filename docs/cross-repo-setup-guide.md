@@ -548,25 +548,24 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 マルチエージェント運用のオプション制御に使う9個のラベルは、issue-deckリポジトリに
 手動で作成したカスタムラベルであり、導入前の他リポジトリには存在しない。
 
-**ラベルの正はこのissue-deckリポジトリに置いている。** `guchi-apps/docs`の`label-sync/`にある
-同期スクリプトで、issue-deckをソースとして対象リポジトリへ一括作成できる。
+**ラベルの正は、このissue-deckリポジトリの[`.github/labels.json`](../.github/labels.json)に置いている**
+（名前・説明・色と、旧名から新名への対応。#3237）。全リポジトリへは`scripts/sync-labels.sh`で配る。
+体系・旧名との対応・変更手順は[label-scheme.md](label-scheme.md)を参照。
 
 ```bash
-cd /home/guchi/apps/_docs/label-sync
-GITHUB_USER=guchi-apps ./sync-labels.sh dry-run --from issue-deck --to my-app --delete-unmanaged
-GITHUB_USER=guchi-apps ./sync-labels.sh apply   --from issue-deck --to my-app --delete-unmanaged
+cd ~/apps/issue-deck   # issue-deckのチェックアウト
+scripts/sync-labels.sh dry-run --repo my-app   # 変更対象と件数を確認する（書き込まない）
+scripts/sync-labels.sh apply   --repo my-app   # 反映する
 ```
 
-**`GITHUB_USER=guchi-apps`を必ず付ける。** スクリプトの既定値は組織移行前の`m-guchi`のままで
-（#996の移行に追随していない）、省略すると存在しないリポジトリを見に行く。
-
-**`apply`は`[y/N]`の対話確認を求める。** `--delete-unmanaged`を付けた場合は警告も出す。
-自動化のつもりで非対話に流すと、**警告だけ出して何も変更せず正常終了する**ため、
-成功したように見えて実際には同期されていない。実行後は必ず`gh label list`で結果を確かめる。
-
-```bash
-gh label list --repo guchi-apps/my-app --limit 60 --json name --jq '[.[].name]|sort|join(" ")'
-```
+- **`--repo`を省くと非アーカイブの全リポジトリ**（privateを含む）が対象になる。アーカイブ済みは
+  変更せずスキップとして一覧に出る
+- **`dry-run`が既定**で、`apply`を明示しない限り何も書かない。**既存リポジトリへは必ずdry-runで
+  改名・付け替えの件数を見てから`apply`する**
+- 旧名は改名で移す（既存Issueへの付与は維持される）。新名が既にあるときはIssueを付け替えてから
+  旧ラベルを消す。**正本にも旧名にも無いラベルは削除せず報告だけ**する（GitHub既定の`bug`等が残る）
+- 一部のリポジトリで失敗しても残りを処理し、最後に成功・失敗・スキップの一覧を出す（失敗があれば終了コード1）
+- 再実行しても差分は出ない。実行後は`dry-run`をもう一度流し、全リポジトリが「変更なし」になることで確かめる
 
 ### ラベルが入る経路は2つで、Organizationのデフォルトラベルは採らない（#1002）
 
@@ -574,8 +573,8 @@ gh label list --repo guchi-apps/my-app --limit 60 --json name --jq '[.[].name]|s
 
 | 経路 | 使うとき |
 |---|---|
-| 画面の「新規アプリを立ち上げる」がAPIで写す（[`src/lib/github/repositories-api.ts`](../src/lib/github/repositories-api.ts)の`cloneRepositoryLabels`） | issue-deckの導線でリポジトリを作ったとき（既定） |
-| `guchi-apps/docs`の`label-sync/sync-labels.sh`（1件なら`gh label clone --force`） | 導線を通さず作ったリポジトリ・既存リポジトリの差分是正 |
+| 画面の「新規アプリを立ち上げる」がAPIで写す（[`src/lib/github/repositories-api.ts`](../src/lib/github/repositories-api.ts)の`cloneRepositoryLabels`。issue-deckの現在のラベルを写す） | issue-deckの導線でリポジトリを作ったとき（既定） |
+| `scripts/sync-labels.sh`（[label-scheme.md](label-scheme.md)） | 導線を通さず作ったリポジトリ・既存リポジトリの差分是正・体系の更新（#3237） |
 
 GitHubにはOrganization単位で「新規リポジトリに自動で入るラベル」を定義する機能
 （Organization Settings → Code, planning, and automation → Repository → Repository defaults）が
@@ -594,8 +593,10 @@ GitHubにはOrganization単位で「新規リポジトリに自動で入るラ�
 ### 既存の別世代のラベルがあるリポジトリ
 
 導入前のリポジトリは旧世代のラベル体系を持っていることが多い（`01.wip`・`22.preview-required`・
-`10.Priority: High`など）。**`--delete-unmanaged`を使い、旧ラベルを残さない。** 新旧が併存すると
-どちらを付けるか迷い、ワークフローが参照する名前と食い違ったまま気づけない。
+`10.Priority: High`など）。`scripts/sync-labels.sh`は管理外のラベルを**削除せず報告だけ**するため、
+旧世代のラベルは同期のあとも残る。**新旧が併存するとどちらを付けるか迷い、ワークフローが
+参照する名前と食い違ったまま気づけない**ので、内容を確かめてから`gh label delete`で個別に消す
+（`--delete-unmanaged`に当たる一括削除は用意していない。既存Issueからラベルが外れて戻せないため）。
 
 **削除は、そのラベルが付いているIssueからの除去でもある。** 実行前に対象を数え、
 **特に進捗を表していたラベルが付いたopenなIssueを控えておく**（次項）。
@@ -621,7 +622,7 @@ Statusという写しが存在しない。
 手順は次のとおり。
 
 1. ラベル同期の**前**に、進捗ラベルが付いたopenなIssueを控える（上のコマンド）
-2. ラベルを同期する（旧進捗ラベルは削除される）
+2. ラベルを同期する（旧進捗ラベルは管理外として残るので、手順1で控えてから`gh label delete`で消す）
 3. callerを置き、盤面へ載せる
 4. 控えた状態を進捗報告APIで書き戻す
 
@@ -652,8 +653,8 @@ curl -sS -X POST "$APP_BASE_URL/api/progress" \
 | `22.merge-confirm-required` | `d4c5f9` | developへのマージ前に人間の確認・承認が必要 | 内容によらず常に`00.check-user`を付与させる |
 | `23.preview-required` | `d4c5f9` | 画面プレビューでの確認・承認が必要 | PR作成前に開発サーバーURLでの確認を必須にする |
 | `25.artifact-required` | `d4c5f9` | アーティファクトでの視覚確認・承認が必要 | **実装着手前**に見た目のアーティファクト公開・承認を必須にする（ローカル実行専用。#1473・#1540。配布先は限られる。**配っていないリポジトリでは`62.design`による既定ONも効かない**——存在しないラベル名を付与するとその場で作られてしまうため。#1956） |
-| `70.confirm` | `5319e7` | 確認項目（実施するか検討必要） | 計画提示ステップ・質問応答ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする（#735・#1528） |
-| `71.manual-step` | `d876e3` | ユーザー自身の手作業が必要（エージェントが代行できない） | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「ユーザーの作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
+| `70.needs-decision` | `5319e7` | 実施方針や仕様について判断が必要 | 計画提示ステップ・質問応答ステップが関連Issueを自発的に起票する際に付与し、実装フローへ自動で乗らないようにする（#735・#1528） |
+| `71.manual-step` | `5319e7` | ユーザー自身の操作・認証・購入などが必要 | デプロイ後に残る手作業を単独Issueとして起票する際に付与し、issue-deckの「ユーザーの作業待ち」ビューへ載せる（[multi-agent/labels.md](multi-agent/labels.md)） |
 
 > **進捗ラベル（`01.planning`〜`09.main`）は作成しない。** #991 Phase 5（#1010）で廃止し、進捗は
 > GitHub ProjectsのStatusで管理する（[progress-status-architecture.md](progress-status-architecture.md)）。
@@ -1022,10 +1023,10 @@ gh label create "23.preview-required" --color d4c5f9 --description "画面プレ
 # 24.screenshot-requiredはスクリーンショット撮影機能の廃止（#2883）により削除済み。番号は欠番のまま。
 # 25.artifact-requiredはローカルセッション専用（無人実行では作れない）のため、他リポジトリへはまだ配っていない（#1473）
 gh label create "25.artifact-required" --color d4c5f9 --description "アーティファクトでの視覚確認・承認が必要"
-gh label create "70.confirm" --color 5319e7 --description "確認項目（実施するか検討必要）"
+gh label create "70.needs-decision" --color 5319e7 --description "実施方針や仕様について判断が必要"
 # 71.manual-stepは`manual-step-label`ジョブ(#1492)が参照する。無いリポジトリでは付与が警告付きで
 # スキップされ、手作業Issueが「ユーザーの作業待ち」ビューに現れない。
-gh label create "71.manual-step" --color d876e3 --description "ユーザー自身の手作業が必要（エージェントが代行できない）"
+gh label create "71.manual-step" --color 5319e7 --description "ユーザー自身の操作・認証・購入などが必要"
 ```
 
 issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目的のみで使う一般的なラベルも
