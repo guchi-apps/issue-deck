@@ -691,7 +691,7 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
  * 実行キューのホストのカードにしか無かった。入力待ちのCodexのセッションを開いても、
  * 画面から答える出口が1つも無いように見えていた。
  */
-describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
+describe("IssueSessionStatus のCodex接続（#2537）", () => {
   function pairingJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
     return {
       id: "job-pairing",
@@ -737,7 +737,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "接続" })).toBeNull();
   });
 
   it("走っているCodexのセッションでは押せる", async () => {
@@ -748,7 +748,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Codexに繋ぐ" });
+    const button = screen.getByRole("button", { name: "接続" });
     expect(button.hasAttribute("disabled")).toBe(false);
     // **繋がる先はホスト単位。** 押したIssueだけに繋がると誤解させない
     expect(screen.getByText(/このIssueだけでなく/)).not.toBeNull();
@@ -771,7 +771,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Codexに繋ぐ" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "接続" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/standalone installのCodexが要ります/)).not.toBeNull();
   });
 
@@ -784,7 +784,7 @@ describe("IssueSessionStatus のCodexに繋ぐ（#2537）", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "接続" })).toBeNull();
   });
 
   // 発行されたコードは、押した人が別の端末へ打ち込むもの。残り時間も添える

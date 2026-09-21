@@ -121,7 +121,7 @@ describe("AgentBulkControlPanel", () => {
 
     const codexName = screen.getByText("Codex CLI");
     const row = codexName.closest("div.flex.flex-col.gap-1\\.5");
-    expect(row?.textContent).toMatch(/Codex CLI.*実行中.*Codexに繋ぐ/);
+    expect(row?.textContent).toMatch(/Codex CLI.*実行中.*接続/);
   });
 
   it("接続ボタンから対応ホストへペアリング発行を依頼する", async () => {
@@ -135,7 +135,7 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Codexに繋ぐ" }));
+    fireEvent.click(screen.getByRole("button", { name: "接続" }));
     await waitFor(() => expect(requestCodexPairing).toHaveBeenCalledWith("subpc"));
   });
 
@@ -165,7 +165,7 @@ describe("AgentBulkControlPanel", () => {
   it("対応ホストが無ければ接続ボタンを出さない", () => {
     render(<AgentBulkControlPanel dispatch={makeDispatch()} />);
 
-    expect(screen.queryByRole("button", { name: "Codexに繋ぐ" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "接続" })).toBeNull();
   });
 
   it("自動検知で一時停止中なら理由付きのチップを出す", () => {
