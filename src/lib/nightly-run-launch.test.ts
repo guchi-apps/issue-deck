@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { refreshGithubUserToken } from "@/lib/github/refresh-user-token";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
-import { launchScheduledRunEntry } from "@/lib/nightly-run-launch";
+import { cancelManuallyStartedScheduledRuns, launchScheduledRunEntry } from "@/lib/nightly-run-launch";
 
 const entryUpdateMany = vi.fn();
 const entryUpdate = vi.fn();
+const entryFindMany = vi.fn();
+const issueFindMany = vi.fn();
+const jobFindMany = vi.fn();
 const userFindUnique = vi.fn();
 const userUpdate = vi.fn();
 
@@ -17,6 +20,19 @@ vi.mock("@/lib/db", () => ({
       },
       get update() {
         return entryUpdate;
+      },
+      get findMany() {
+        return entryFindMany;
+      },
+    },
+    issue: {
+      get findMany() {
+        return issueFindMany;
+      },
+    },
+    dispatchJob: {
+      get findMany() {
+        return jobFindMany;
       },
     },
     user: {
@@ -177,5 +193,91 @@ describe("launchScheduledRunEntry: モデルの引き継ぎ（#3192）", () => {
       entry: { ...params.entry, agent: "codex", codexModel: "opus" },
     });
     expect(mockedEnqueue.mock.calls[0][0].codexModel).toBeNull();
+  });
+});
+
+// #3274。積んだ後に手動で実装開始されたIssueの予定は、枠を待たずに取り消して画面から外す
+describe("cancelManuallyStartedScheduledRuns（#3274）", () => {
+  const queuedAt = new Date("2026-09-19T10:00:00Z");
+  const entry = (id: string, issueNumber: number) => ({
+    id,
+    repositoryFullName: "guchi-apps/aide",
+    issueNumber,
+    createdAt: queuedAt,
+  });
+  const issue = (number: number, labels: string[]) => ({
+    number,
+    labels: labels.map((name) => ({ name })),
+    repository: { fullName: "guchi-apps/aide" },
+  });
+
+  beforeEach(() => {
+    entryUpdateMany.mockResolvedValue({ count: 1 });
+    issueFindMany.mockResolvedValue([]);
+    jobFindMany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("予定が無ければ何も引かずに0件で終わる", async () => {
+    entryFindMany.mockResolvedValue([]);
+    expect(await cancelManuallyStartedScheduledRuns(now)).toBe(0);
+    expect(issueFindMany).not.toHaveBeenCalled();
+    expect(jobFindMany).not.toHaveBeenCalled();
+  });
+
+  it("起動処理が席を取った予定は対象から外す（問い合わせの条件で`nightKey`が空のものだけを読む）", async () => {
+    entryFindMany.mockResolvedValue([]);
+    await cancelManuallyStartedScheduledRuns(now);
+    expect(entryFindMany.mock.calls[0][0].where).toEqual({ status: "QUEUED", nightKey: null });
+  });
+
+  it("11.localが付いた予定だけをCANCELEDにする。書き込みも席が空の予定に限る", async () => {
+    entryFindMany.mockResolvedValue([entry("e1", 1), entry("e2", 2)]);
+    issueFindMany.mockResolvedValue([issue(1, ["11.local"]), issue(2, ["21.plan-required"])]);
+
+    expect(await cancelManuallyStartedScheduledRuns(now)).toBe(1);
+
+    expect(entryUpdateMany).toHaveBeenCalledTimes(1);
+    expect(entryUpdateMany).toHaveBeenCalledWith({
+      where: { id: "e1", status: "QUEUED", nightKey: null },
+      data: {
+        status: "CANCELED",
+        skipReason: expect.stringContaining("手動で実装が開始された"),
+        activeKey: null,
+        resolvedAt: now,
+      },
+    });
+  });
+
+  it("積んだ後に作られた起動ジョブがあれば取り消す。積む前のジョブは手動着手とみなさない", async () => {
+    entryFindMany.mockResolvedValue([entry("e1", 1), entry("e2", 2)]);
+    issueFindMany.mockResolvedValue([issue(1, []), issue(2, [])]);
+    jobFindMany.mockResolvedValue([
+      { repositoryFullName: "guchi-apps/aide", issueNumber: 1, createdAt: new Date("2026-09-19T11:00:00Z") },
+      { repositoryFullName: "guchi-apps/aide", issueNumber: 2, createdAt: new Date("2026-09-19T09:00:00Z") },
+    ]);
+
+    expect(await cancelManuallyStartedScheduledRuns(now)).toBe(1);
+    expect(entryUpdateMany.mock.calls[0][0].where.id).toBe("e1");
+  });
+
+  it("判定と書き込みのあいだに起動処理が席を取っていたら（更新0件）数えない", async () => {
+    entryFindMany.mockResolvedValue([entry("e1", 1)]);
+    issueFindMany.mockResolvedValue([issue(1, ["11.local"])]);
+    entryUpdateMany.mockResolvedValue({ count: 0 });
+
+    expect(await cancelManuallyStartedScheduledRuns(now)).toBe(0);
+  });
+
+  it("失敗・取り消しで終わったジョブは手動着手に数えない（問い合わせの条件）", async () => {
+    entryFindMany.mockResolvedValue([entry("e1", 1)]);
+    await cancelManuallyStartedScheduledRuns(now);
+    expect(jobFindMany.mock.calls[0][0].where).toMatchObject({
+      kind: "LAUNCH",
+      status: { in: ["QUEUED", "CLAIMED", "RUNNING", "SUCCEEDED"] },
+    });
   });
 });

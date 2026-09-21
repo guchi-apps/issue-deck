@@ -595,7 +595,8 @@ model NightlyRunEntry {
   // `reserveCheckUserPush`と同じ考え方）。QUEUEDのままnullへ戻すのは、起動先が応答して
   // いなくて次の巡回でやり直すときだけ
   nightKey           String?
-  // 見送った理由（人が読む文）。SKIPPEDのときだけ入る
+  // 見送った理由（人が読む文）。SKIPPEDのときと、手動で実装開始されて自動で取り消したとき（#3274。
+  // CANCELED）に入る。人が画面から取り消したCANCELEDでは入らない
   skipReason         String?               @db.Text
   // 起動ジョブへ変換したときのDispatchJob.id
   dispatchJobId      String?

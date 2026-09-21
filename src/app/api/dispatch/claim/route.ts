@@ -5,7 +5,10 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
 import { launchNextWindowRunEntries } from "@/lib/next-window-run-launch";
-import { pruneOldScheduledRunEntries } from "@/lib/nightly-run-launch";
+import {
+  cancelManuallyStartedScheduledRuns,
+  pruneOldScheduledRunEntries,
+} from "@/lib/nightly-run-launch";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -81,6 +84,18 @@ export async function POST(request: NextRequest) {
       await pruneOldScheduledRunEntries(new Date());
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 予約実行の古い結果行を消せませんでした:", error);
+    }
+    // 積んだ後に手動で実装開始されたIssueの予定を取り消す（#3274）。**次枠実行より先に回す**
+    // ——同じ巡回で起動判定に入る前に外し、手動で着手済みのIssueへ重ねて起動しないため。
+    // 次枠実行がOFFでも回す（OFFのあいだも予定は残るので、着手済みのものだけは画面から外す）。
+    // 失敗しても払い出しは続ける
+    try {
+      const canceled = await cancelManuallyStartedScheduledRuns(new Date());
+      if (canceled > 0) {
+        console.info(`[next-window-run] 手動で実装開始されたため予定を${canceled}件取り消しました`);
+      }
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 手動着手された予約実行を取り消せませんでした:", error);
     }
     // 次枠実行（#2995）。Claudeの5時間枠の残りが設定ぶんを切っていれば1件だけ起動する。
     // **次枠実行としては、予定が無いときとOFFのときは枠を取りに行かない**——取得は最小の推論リクエスト1本で、
