@@ -151,45 +151,66 @@ describe("SessionStart フックが控えるsessionId", () => {
 });
 
 describe("run-issue-session.sh の再開", () => {
-  it("質問セッションは、控えたIDと履歴が揃えば`--resume <id>`で戻る（`--continue`は使わない）", () => {
-    writeFileSync(idFile(), `${SESSION_ID}\n`);
-    writeFileSync(path.join(historyDir, `${SESSION_ID}.jsonl`), "");
-    // 同じcwdの別の質問の会話。`--continue`ならこちらを拾いうる
-    writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
+  // `runLauncher`は`run-issue-session.sh`を丸ごとサブプロセスとして起動する重いテストで、
+  // CIのフルスイート実行（並列ワーカー＋7000件超）の終盤では既定の5秒を超えて時々タイムアウトする
+  // （#3277のCIで発生）。実処理は1秒未満で終わるので、ロジックではなく既定タイムアウトの余裕不足が
+  // 原因と判断し、`scripts/heavy-command.test.mjs`と同じ形でサブプロセス起動テストへ個別の
+  // タイムアウトを設定する。
+  it(
+    "質問セッションは、控えたIDと履歴が揃えば`--resume <id>`で戻る（`--continue`は使わない）",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(idFile(), `${SESSION_ID}\n`);
+      writeFileSync(path.join(historyDir, `${SESSION_ID}.jsonl`), "");
+      // 同じcwdの別の質問の会話。`--continue`ならこちらを拾いうる
+      writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
 
-    const args = runLauncher({ kind: "question" });
-    expect(args).toContain(`--resume ${SESSION_ID}`);
-    expect(args).not.toContain("--continue");
-    expect(args).toContain("前回の会話の続きです");
-    // cwdがgitリポジトリではないので、質問Issueを`--repo`で明示する。追い質問への回答向けの言い方にする
-    expect(args).toContain("gh issue view 69 --repo guchi-apps/question --comments");
-    expect(args).toContain("追い質問");
-    // 終了後（`cleanup`）も控えを消さない。消すと畳んだ後の復旧が毎回新しい会話になる
-    expect(existsSync(idFile())).toBe(true);
-  });
+      const args = runLauncher({ kind: "question" });
+      expect(args).toContain(`--resume ${SESSION_ID}`);
+      expect(args).not.toContain("--continue");
+      expect(args).toContain("前回の会話の続きです");
+      // cwdがgitリポジトリではないので、質問Issueを`--repo`で明示する。追い質問への回答向けの言い方にする
+      expect(args).toContain("gh issue view 69 --repo guchi-apps/question --comments");
+      expect(args).toContain("追い質問");
+      // 終了後（`cleanup`）も控えを消さない。消すと畳んだ後の復旧が毎回新しい会話になる
+      expect(existsSync(idFile())).toBe(true);
+    },
+  );
 
-  it("控えが無ければ、同じcwdに別の会話があっても新しい会話で始める", () => {
-    writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
+  it(
+    "控えが無ければ、同じcwdに別の会話があっても新しい会話で始める",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
 
-    const args = runLauncher({ kind: "question" });
-    expect(args).not.toContain("--resume");
-    expect(args).not.toContain("--continue");
-    expect(args).not.toContain("前回の会話の続きです");
-  });
+      const args = runLauncher({ kind: "question" });
+      expect(args).not.toContain("--resume");
+      expect(args).not.toContain("--continue");
+      expect(args).not.toContain("前回の会話の続きです");
+    },
+  );
 
-  it("控えた会話の履歴が消えていれば新しい会話で始め、古いIDも消す", () => {
-    writeFileSync(idFile(), `${SESSION_ID}\n`);
+  it(
+    "控えた会話の履歴が消えていれば新しい会話で始め、古いIDも消す",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(idFile(), `${SESSION_ID}\n`);
 
-    const args = runLauncher({ kind: "question" });
-    expect(args).not.toContain("--resume");
-    expect(existsSync(idFile())).toBe(false);
-  });
+      const args = runLauncher({ kind: "question" });
+      expect(args).not.toContain("--resume");
+      expect(existsSync(idFile())).toBe(false);
+    },
+  );
 
-  it("実装セッションは従来どおり`--continue`で戻る", () => {
-    writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
+  it(
+    "実装セッションは従来どおり`--continue`で戻る",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
 
-    const args = runLauncher({ kind: "implementation" });
-    expect(args).toContain("--continue");
-    expect(args).not.toContain("--resume");
-  });
+      const args = runLauncher({ kind: "implementation" });
+      expect(args).toContain("--continue");
+      expect(args).not.toContain("--resume");
+    },
+  );
 });
