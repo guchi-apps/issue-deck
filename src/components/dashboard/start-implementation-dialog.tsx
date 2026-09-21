@@ -54,6 +54,8 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useModelPick } from "@/hooks/use-model-pick";
 import { useNightlyRunSettings } from "@/hooks/use-nightly-run";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
+import { useClaudeUsage } from "@/hooks/use-claude-usage";
+import { hasClaudeLowRemainingQuota } from "@/lib/claude/usage";
 import {
   CODEX_LIMITATIONS,
   DEFAULT_DISPATCH_AGENT,
@@ -410,6 +412,9 @@ export function StartImplementationDialog({
     error: commentMutationError,
   } = useIssueCommentMutations();
   const { setProgressStatus } = useProgressStatusMutation();
+  // Claudeの枠が少ない場合だけ、Codex対応ホストで既定エージェントを切り替える。
+  // ダイアログを閉じている間や、ローカル実行を選べない経路では探りリクエストを送らない。
+  const claudeUsage = useClaudeUsage(open && includeDispatchTargets === true);
   // 開いている間だけ取得する。閉じているダイアログのためにポーリングを増やさない。
   // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
   const ownDispatch = useDispatchState(
@@ -450,6 +455,8 @@ export function StartImplementationDialog({
    * 「外したのに削除が効かない」という実害になるため、一度でも触ったら以後は再適用しない。
    */
   const artifactRequiredTouchedRef = useRef(false);
+  /** 使用者がエージェントを選び直したら、非同期の使用量取得で既定を上書きしない。 */
+  const agentTouchedRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -463,6 +470,7 @@ export function StartImplementationDialog({
     // 実行先は前回の選択を持ち越さない。未選択に戻し、既定（サブPC）から選び直させる
     setTarget(undefined);
     setStartedTarget(null);
+    agentTouchedRef.current = false;
     setAgent(DEFAULT_DISPATCH_AGENT);
     setModel(claudeLocalModelRef.current);
     setCodexModel(resolveCodexInitialModel(codexModelSettingRef.current));
@@ -615,6 +623,19 @@ export function StartImplementationDialog({
    */
   const showAgents =
     (effectiveTarget.kind === "host" || isScheduledTarget) && isDispatchAgentSelectable(selectedHost);
+
+  /**
+   * Claudeの枠が少ないときの初期選択。取得が古い・失敗した・未取得なら従来どおりClaudeへ倒す。
+   * Codexを選べない実行先では変更しないため、GitHub Actionsや非対応ホストへは影響しない。
+   */
+  useEffect(() => {
+    if (!open || !showAgents || agentTouchedRef.current) return;
+    const shouldUseCodex =
+      claudeUsage.data !== null &&
+      !claudeUsage.data.stale &&
+      hasClaudeLowRemainingQuota(claudeUsage.data.windows);
+    setAgent(shouldUseCodex ? "codex" : DEFAULT_DISPATCH_AGENT);
+  }, [open, showAgents, claudeUsage.data]);
   /**
    * 実際に積むエージェント。**選択欄を出していない実行先では既定へ落とす。**
    * サブPCでCodexを選んだ後にGitHub Actionsへ切り替えても、選択が残ったまま付いていかない。
@@ -1115,7 +1136,10 @@ export function StartImplementationDialog({
                     label={describeDispatchAgent(entry.agent)}
                     isDefault={entry.agent === DEFAULT_DISPATCH_AGENT}
                     selected={agent === entry.agent}
-                    onSelect={() => setAgent(entry.agent)}
+                    onSelect={() => {
+                      agentTouchedRef.current = true;
+                      setAgent(entry.agent);
+                    }}
                   />
                 ))}
               </div>
