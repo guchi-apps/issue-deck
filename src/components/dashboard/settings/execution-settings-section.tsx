@@ -272,10 +272,11 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      {/* 「おまかせ」の判定に使うAI（#3189）。**選ばれる側のモデルではなく、選ぶ側。**
-          サブPCのモデル設定（すぐ上）で「おまかせ」を選んだときだけ効くので、その直後に置く */}
+      {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
+          「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く。
+          サブPCのモデル設定（すぐ上）の直後に置く */}
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="model-pick-engine">おまかせの判定に使うAI</Label>
+        <Label htmlFor="model-pick-engine">判定に使うAI（おまかせ・ラベル付与）</Label>
         <Select
           value={modelPickEngine}
           onValueChange={(value) => setModelPickEngine(value as ModelPickEngine)}
@@ -295,11 +296,12 @@ export function ExecutionSettingsSection({
             判定の材料はIssueのタイトル・本文・ラベル・承認済みの計画で、privateリポジトリの
             本文も含む。既定（アプリ内AI）のままなら送信先は今までどおり変わらない */}
         <p className="text-xs text-muted-foreground">
-          「実装を開始」で「おまかせ」を選んだときに、Issueの内容からモデルを選ぶAIです。
+          「実装を開始」で「おまかせ」を選んだときにモデルを選ぶ判定と、Issue作成で「タイトル自動」を
+          使ったときにラベルを付ける判定に使うAIです（タイトルはどちらでもアプリ内AIが付けます）。
           Jevは文章を書かない判定専用のモデルで、渡した候補以外を返しません。
-          選ぶとIssueのタイトル・本文・ラベル・承認済みの計画がTypeSafeへ送られます（private
-          リポジトリのIssueも対象です）。TYPESAFE_API_KEYが未設定のとき・呼び出しに失敗した
-          ときは、アプリ内AIのモデルで判定します。
+          選ぶとIssueのタイトル・本文・ラベル・承認済みの計画（ラベル付与では作成中の本文）が
+          TypeSafeへ送られます（privateリポジトリのIssueも対象です）。TYPESAFE_API_KEYが未設定の
+          とき・呼び出しに失敗したときは、アプリ内AIで判定します。
         </p>
       </div>
 
