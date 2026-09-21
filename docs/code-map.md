@@ -500,7 +500,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `package.json`の`"version"` lifecycleスクリプト
   （[`scripts/version-changelog.mjs`](../scripts/version-changelog.mjs)）が、共有ワークフローの
   生成した`RELEASE_CHANGELOG`（何が変わったか）と`RELEASE_USAGE`（どう使うか・#1729）を
-  配列の先頭へ足す。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
+  配列の先頭へ足す。**`RELEASE_CHANGELOG`が空のリリースはエントリを作らない**（#3282。かつては
+  「（変更内容を追記してください）」の枠を作り、誰も埋めないまま画面に残っていた）。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
   モジュールだけで書き、`preversion`は作らない。** 表示は
   [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
   PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・

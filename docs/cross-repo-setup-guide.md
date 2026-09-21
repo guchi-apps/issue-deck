@@ -967,6 +967,14 @@ bump-command: npm version "$NEW_VERSION" --no-git-tag-version --ignore-scripts &
 `RELEASE_CHANGELOG`だけを読んでいる既存のスクリプトはそのままでも壊れない（未使用の環境変数が
 1つ増えるだけ）。対応状況は[docs/supported-repositories.md](supported-repositories.md)を参照。
 
+#### `RELEASE_CHANGELOG`が空のときは、エントリを作らない（#3282）
+
+画面で体感できる変化が無いリリースでは`RELEASE_CHANGELOG`が空で渡る。**このとき更新履歴へ
+「（変更内容を追記してください）」のような枠を作らない。** 誰も埋めないまま更新履歴の画面に
+その文字が残り続ける（issue-deckでは9件・他アプリでも8〜28件が実際に残っていた）。空なら
+`insertChangelogEntry`は何も挿入せず（`usage`だけあっても同じ）、バージョンだけが上がる。
+`scripts/version-changelog.mjs`を写しているアプリは、この分岐まで揃える。
+
 **実行後にバージョンが実際に変わったかを検証する**ため、コマンドが成功しても書き換わって
 いなければワークフローが止まる。上記2つの失敗はいずれもコマンド自体の終了コードで
 検出されたが、引数が合っていても書き換え先が違うようなケースはこの検証が拾う。
