@@ -1405,10 +1405,27 @@ describe("IssueListの一括予約（#3284）", () => {
     expect(screen.queryByRole("button", { name: "まとめて予約" })).toBeNull();
   });
 
+  it.each(["all", "in-progress", "release-pending"] as const)(
+    "%sビューでは入口を出さない",
+    (view) => {
+      useHost();
+      renderList({ issues: bulkIssues, view, onNightlyRunQueued: vi.fn() });
+
+      expect(screen.queryByRole("button", { name: "まとめて予約" })).toBeNull();
+    },
+  );
+
+  it("未着手ビューでだけ入口を出す", () => {
+    useHost();
+    renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued: vi.fn() });
+
+    expect(screen.getByRole("button", { name: "まとめて予約" })).toBeTruthy();
+  });
+
   it("選択モードでは選べない行に理由を出し、行を押しても詳細は開かない", () => {
     useHost();
     const onSelectIssue = vi.fn();
-    renderList({ issues: bulkIssues, onSelectIssue, onNightlyRunQueued: vi.fn() });
+    renderList({ issues: bulkIssues, view: "not-started", onSelectIssue, onNightlyRunQueued: vi.fn() });
 
     fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
 
@@ -1428,7 +1445,7 @@ describe("IssueListの一括予約（#3284）", () => {
     useHost();
     const onNightlyRunQueued = vi.fn();
     const fetchMock = stubFetch(() => ({ ok: true }));
-    renderList({ issues: bulkIssues, onNightlyRunQueued });
+    renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued });
 
     fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
     fireEvent.click(screen.getByRole("button", { name: "全選択" }));
@@ -1457,7 +1474,7 @@ describe("IssueListの一括予約（#3284）", () => {
     stubFetch((body) =>
       body.issue === 2 ? { ok: false, message: "このIssueはすでに予約実行に積んであります" } : { ok: true },
     );
-    renderList({ issues: bulkIssues, onNightlyRunQueued: vi.fn() });
+    renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued: vi.fn() });
 
     fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
     fireEvent.click(screen.getByRole("button", { name: "全選択" }));
@@ -1474,7 +1491,7 @@ describe("IssueListの一括予約（#3284）", () => {
 
   it("予約済みの行と、実行できるサブPCが無いリポジトリの行は選べない", () => {
     // ホスト無し
-    renderList({ issues: bulkIssues, onNightlyRunQueued: vi.fn() });
+    renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued: vi.fn() });
     fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
     expect(rowOf(1).textContent).toContain("サブPCが登録されていません");
     cleanup();
@@ -1482,6 +1499,7 @@ describe("IssueListの一括予約（#3284）", () => {
     useHost();
     renderList({
       issues: bulkIssues,
+      view: "not-started",
       onNightlyRunQueued: vi.fn(),
       nightlyRunQueued: new Map([
         [
