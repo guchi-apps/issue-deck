@@ -21,6 +21,21 @@ describe("ImageExtractButton", () => {
     expect((screen.getByRole("button", { name: /画像から変更内容を抽出/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  /**
+   * #3310。スマホ幅（`sm`未満）は「画像から抽出」に縮めて、見出し・「音声入力を整理」と1行に収める。
+   * jsdomにはCSSが無いので、縮める部分が`hidden sm:inline`の`span`に分かれていることを確かめる。
+   * 全文（`textContent`・アクセシブルネーム）は従来のまま
+   */
+  it("スマホ幅では「変更内容を」を隠して縮め、全文は変えない", () => {
+    render(<ImageExtractButton value={WITH_IMAGE} onChange={() => {}} />);
+    const button = screen.getByRole("button", { name: "画像から変更内容を抽出" });
+
+    expect(button.textContent).toBe("画像から変更内容を抽出");
+    const hidden = button.querySelector("span");
+    expect(hidden?.textContent).toBe("変更内容を");
+    expect(hidden?.className).toBe("hidden sm:inline");
+  });
+
   it("押すと添付画像のURLを送り、変更内容を本文の末尾（画像記法の上）へ足す", async () => {
     const fetchMock = vi
       .fn()
