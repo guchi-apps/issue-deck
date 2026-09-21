@@ -35,6 +35,7 @@ export function PullRequestReviewFindings({
   review,
   pullRequestNumber,
   pullRequestUrl,
+  reviewRunUrl,
   onImport,
   isImported,
   className,
@@ -45,6 +46,8 @@ export function PullRequestReviewFindings({
   pullRequestNumber: number;
   /** PRのURL。レビューコメントのURLが取れないときの「GitHubで読む」の行き先 */
   pullRequestUrl?: string;
+  /** レビューが実行中・失敗などで、コメント本文より先に実行状況を確認したいときの行き先 */
+  reviewRunUrl?: string | null;
   /**
    * 指摘を修正依頼欄へ取り込む。渡さない場合は取り込みボタンを出さない
    * （マージ済み・修正依頼を送れない画面向け）。
@@ -55,7 +58,7 @@ export function PullRequestReviewFindings({
   className?: string;
 }) {
   const [isOpen, setIsOpen] = useState(true);
-  const readUrl = review?.htmlUrl ?? pullRequestUrl ?? null;
+  const readUrl = review?.htmlUrl ?? reviewRunUrl ?? pullRequestUrl ?? null;
 
   return (
     <div className={cn("overflow-hidden rounded-lg border", className)}>
@@ -133,7 +136,7 @@ export function PullRequestReviewFindings({
             rel="noopener noreferrer"
             className="inline-flex shrink-0 items-center gap-1 text-[11px] text-foreground hover:underline"
           >
-            GitHubで読む
+            {reviewRunUrl && review?.htmlUrl === null ? "レビューの実行ログを開く" : "GitHubで読む"}
             <ExternalLink aria-hidden className="size-3" />
           </a>
         )}
