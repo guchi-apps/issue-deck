@@ -1,6 +1,6 @@
 "use client";
 
-import { UsageMeter } from "@/components/dashboard/usage-meter";
+import { UsageMeter, UsageMeterSkeleton } from "@/components/dashboard/usage-meter";
 import type { ClaudeUsage } from "@/hooks/use-claude-usage";
 import { useNow } from "@/hooks/use-now";
 import { calcElapsedTimePercent, formatResetAt, formatResetSentence } from "@/lib/format-reset";
@@ -51,7 +51,16 @@ export function ClaudeUsageCard({
 
   return (
     <>
-      {isLoading && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+      {isLoading && (
+        // 実物の並び（週間 → 5時間）と同じ2行を、枠つきで先に描く（#3304）
+        <ul className="flex flex-col gap-2">
+          {["週間", "5時間"].map((label) => (
+            <li key={label} className="rounded-lg border p-2">
+              <UsageMeterSkeleton label={label} />
+            </li>
+          ))}
+        </ul>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
       {notConfigured && (
         <p className="text-xs text-muted-foreground">Claudeのトークンが設定されていません</p>

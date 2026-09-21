@@ -1,13 +1,14 @@
 "use client";
 
-import { Fragment, memo, type ReactNode, useState } from "react";
+import { Fragment, memo, type CSSProperties, type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
 import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
-import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { useNow } from "@/hooks/use-now";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -69,6 +70,8 @@ export const SESSION_USAGE_PERIODS = [
 
 type SessionUsagePanelProps = {
   data: SessionUsageResponse | null;
+  /** プラン枠（#3304）。集計より遅れて届くので別に受け取る。届くまではメーターの形で待つ */
+  plan: SessionUsagePlanState;
   isLoading: boolean;
   error: string | null;
   days: number;
@@ -1497,10 +1500,126 @@ function CurrentSessionsSection({
 }
 
 /**
+ * 取得待ちの灰色の帯（#3304）。`ui/skeleton.tsx`は`animate-pulse`を持つだけなので、
+ * `prefers-reduced-motion`のときに点滅を止める指定をここで足す。
+ */
+function Bone({ className, style }: { className?: string; style?: CSSProperties }) {
+  return <Skeleton aria-hidden className={cn("motion-reduce:animate-none", className)} style={style} />;
+}
+
+/**
+ * 「実行中のセッション」欄の取得待ち（#3304）。届いた結果が0本でも1枠の高さで済むよう、
+ * 空のときの表示（見出し＋1行）と同じ形にする。
+ */
+function CurrentSessionsSkeleton() {
+  return (
+    <section
+      aria-label="実行中のセッション"
+      aria-busy="true"
+      className="flex flex-col gap-2 rounded-lg border p-3"
+    >
+      <span className="text-xs font-semibold">実行中のセッション</span>
+      <Bone className="h-4 w-48 max-w-full" />
+      <span className="sr-only" role="status">
+        実行中のセッションを読み込み中
+      </span>
+    </section>
+  );
+}
+
+/** 合計タイル1枚の取得待ち。見出しは実物と同じ文字を出し、値と補足だけを帯にする */
+function TileSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-lg border p-3">
+      <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</span>
+      <Bone className="my-0.5 h-6 w-24 sm:h-7" />
+      <Bone className="mt-0.5 h-3 w-full max-w-40" />
+    </div>
+  );
+}
+
+/** 日別の縦棒の高さ（%）。何日ぶん届くかは分からないので、7本の見本で「棒グラフが入る」形だけを示す */
+const DAILY_SKELETON_HEIGHTS = [40, 62, 30, 78, 55, 90, 34] as const;
+
+/**
+ * 期間の集計（タイル・日別・リポジトリ別・種別別・Issue・PR別）の取得待ち（#3304）。**枠と見出しは
+ * 実物と同じものを先に描き、中身だけを灰色の帯にする。** 届いた瞬間に位置がずれないよう、
+ * タイル・グラフの高さと2カラムの構成を実物に合わせる（**`SessionUsagePanel`の並びを変えるときは
+ * ここも直す**）。期間を切り替えて集計が届くまでの間にも同じものを出す。
+ */
+function PeriodSkeleton({ compact }: { compact: boolean }) {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true">
+      <span className="sr-only" role="status">
+        集計を読み込み中
+      </span>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <TileSkeleton label="従量課金相当" />
+        <TileSkeleton label="応答" />
+        <TileSkeleton label="入力トークン" />
+        <TileSkeleton label="セッション" />
+      </div>
+
+      <section className="flex flex-col gap-2 rounded-lg border p-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-xs font-semibold">日別</span>
+        </div>
+        {/* 実物の`DailyChart`は縦軸2.4〜2.9rem＋高さ`h-52`。棒は下端をそろえて並べる */}
+        <div className="flex h-52 items-end gap-2 pl-[2.4rem] sm:gap-3 sm:pl-[2.9rem]">
+          {DAILY_SKELETON_HEIGHTS.map((height, index) => (
+            <Bone
+              key={index}
+              className="flex-1 rounded-b-none"
+              // 棒の高さは見本の値で、データではない
+              style={{ height: `${height}%` }}
+            />
+          ))}
+        </div>
+      </section>
+
+      <div className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}>
+        <section className="flex flex-col gap-2 rounded-lg border p-3">
+          <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
+          <Bone className="mx-auto size-32 rounded-full" />
+          <div className="flex flex-col gap-1.5">
+            {[0, 1, 2, 3].map((row) => (
+              <Bone key={row} className="h-3 w-full" />
+            ))}
+          </div>
+        </section>
+        <section className="flex flex-col gap-2 rounded-lg border p-3">
+          <span className="shrink-0 text-xs font-semibold whitespace-nowrap">セッション種別別</span>
+          <ul className="flex flex-col gap-2">
+            {[0, 1, 2, 3, 4].map((row) => (
+              <li key={row} className="flex flex-col gap-1">
+                <Bone className="h-3 w-2/3" />
+                <Bone className="h-2 w-full" />
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <section className="flex flex-col gap-1 rounded-lg border p-3">
+        <span className="text-xs font-semibold">Issue・PR別</span>
+        <ul className="flex flex-col gap-1.5">
+          {[0, 1, 2].map((row) => (
+            <li key={row} className="flex flex-col gap-1.5 px-1.5 py-1.5">
+              <Bone className="h-3.5 w-3/4" />
+              <Bone className="h-2 w-full" />
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+/**
  * プラン枠そのもの。**実測のメーター**で、Claude・Codexを並べて置く。
  *
  * **期間の切り替えでは描き直さない**（#3257）。受け取るのは期間に連動しない値だけで、
- * `use-session-usage.ts`が期間変更時に前の参照を引き継ぐので、`memo`が効いて再描画されない。
+ * `use-session-usage.ts`がプラン枠を集計と別の状態として持つので、`memo`が効いて再描画されない。
  */
 const PlanUsageSection = memo(function PlanUsageSection({
   claude,
@@ -1509,13 +1628,15 @@ const PlanUsageSection = memo(function PlanUsageSection({
   codexNotConfigured,
   quotaEstimate,
   isLoading,
+  error,
 }: {
-  claude: SessionUsageResponse["planUsage"]["claude"];
-  codex: SessionUsageResponse["planUsage"]["codex"];
+  claude: SessionUsagePlan["planUsage"]["claude"];
+  codex: SessionUsagePlan["planUsage"]["codex"];
   claudeNotConfigured: boolean;
   codexNotConfigured: boolean;
-  quotaEstimate: SessionUsageResponse["quotaEstimate"];
+  quotaEstimate: SessionUsagePlan["quotaEstimate"];
   isLoading: boolean;
+  error: string | null;
 }) {
   return (
     <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
@@ -1524,7 +1645,7 @@ const PlanUsageSection = memo(function PlanUsageSection({
         <ClaudeUsageCard
           data={claude}
           isLoading={isLoading}
-          error={null}
+          error={error}
           notConfigured={claudeNotConfigured}
           quotaEstimate={quotaEstimate}
         />
@@ -1534,7 +1655,7 @@ const PlanUsageSection = memo(function PlanUsageSection({
         <CodexUsageCard
           data={codex}
           isLoading={isLoading}
-          error={null}
+          error={error}
           notConfigured={codexNotConfigured}
         />
       </div>
@@ -1547,6 +1668,7 @@ const VISIBLE_ISSUES_STEP = 20;
 
 export function SessionUsagePanel({
   data,
+  plan,
   isLoading,
   error,
   days,
@@ -1607,23 +1729,27 @@ export function SessionUsagePanel({
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      {/* いま動いているセッション（#3084）。期間の集計より先に、画面のいちばん上へ置く */}
-      {data && (
+      {/* いま動いているセッション（#3084）。期間の集計より先に、画面のいちばん上へ置く。
+          届くまでは枠だけ先に描く（#3304） */}
+      {data ? (
         <CurrentSessionsSection
           sessions={data.currentSessions ?? []}
           reportedAt={data.reportedAt}
           compact={compact}
           onOpenIssue={onOpenIssue}
         />
+      ) : (
+        !error && <CurrentSessionsSkeleton />
       )}
 
       <PlanUsageSection
-        claude={data?.planUsage.claude ?? null}
-        codex={data?.planUsage.codex ?? null}
-        claudeNotConfigured={data?.planNotConfigured.claude ?? false}
-        codexNotConfigured={data?.planNotConfigured.codex ?? false}
-        quotaEstimate={data?.quotaEstimate ?? null}
-        isLoading={isLoading && !data}
+        claude={plan.data?.planUsage.claude ?? null}
+        codex={plan.data?.planUsage.codex ?? null}
+        claudeNotConfigured={plan.data?.planNotConfigured.claude ?? false}
+        codexNotConfigured={plan.data?.planNotConfigured.codex ?? false}
+        quotaEstimate={plan.data?.quotaEstimate ?? null}
+        isLoading={plan.data === null && plan.error === null}
+        error={plan.error}
       />
 
       {/* 期間の選択は**プラン枠の下**（#3257）。切り替わるのはこの下の集計だけで、プラン枠と
@@ -1642,7 +1768,9 @@ export function SessionUsagePanel({
         <span className="text-[11px] text-muted-foreground">この下の集計だけが切り替わります</span>
       </div>
 
-      {isLoading && !period && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+      {/* 集計が届くまでは、実物と同じ枠のスケルトンを出す（#3304）。取得に失敗したときは
+          スケルトンのまま止めず、上のエラー表示だけにする */}
+      {!period && !error && <PeriodSkeleton compact={compact} />}
 
       {period && (
         <>
