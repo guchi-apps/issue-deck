@@ -161,6 +161,15 @@ on:
         required: false
         type: string
         default: relaxed
+      enable-auto-merge:
+        description: >-
+          自動マージを有効にするか。true(既定)は従来どおり判定を通ったPRへ
+          GitHub Auto-mergeを予約する。falseはリスク判定とClaudeによるレビューだけを
+          実行し、PRのマージは人が行う。main直行など、ブランチ保護や運用方針から
+          自動マージを使わないリポジトリ向け。
+        required: false
+        type: boolean
+        default: true
       prompts-ref:
         description: >-
           プロンプト(.github/prompts/)の取得元とするissue-deckのref。
@@ -875,6 +884,7 @@ jobs:
     # supersededになった古い実行がauto-mergeを有効化してしまう。
     if: >-
       !cancelled()
+      && inputs.enable-auto-merge
       && github.event.pull_request.draft == false
       && needs.identify-issue.result == 'success'
       && needs.risk-check.result == 'success'
