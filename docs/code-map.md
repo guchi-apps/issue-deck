@@ -314,6 +314,19 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle`。コメント欄・Issue編集では既定のまま出る）。
+- **書き込み済みの画像から変更内容を読み取る「画像から変更内容を抽出」は、押したときだけ走る**
+  （#3243。[`image-extract-button.tsx`](../src/components/dashboard/image-extract-button.tsx)。
+  「内容」見出しの右、「音声入力を整理」の隣）。呼び出しごとにプラン枠を消費するため、
+  添付・書き込み保存のたびの自動実行にはしない。添付画像（本文末尾の画像記法）が1枚以上あるときだけ
+  押せる。サーバー（`POST /api/issues/image-extract`→[`lib/claude/image-extract.ts`](../src/lib/claude/image-extract.ts)）は
+  **URLを取りに行かず**、URLに含まれるUUIDファイル名だけを拾って`uploads/images`から読む
+  （任意のURL・パスを読ませない）。**1回4枚・1枚5MBまで**（Anthropic APIの画像上限。縮小はせず
+  エラー文言で案内する）。結果は`## 画像から読み取った変更内容`＋箇条書きとして
+  **`appendToBody`（`lib/markdown-attachments.ts`）で本文末尾（画像記法の上）へ足す**——確定は
+  押した人が入力欄で直して決める。読み取りの間に本文を直されても上書きしないよう、書き戻す値は
+  最新のものをrefから読む。書き込みが読めなかったときは推測せず「判読できない書き込みがあります」の
+  1行を足す。**OpenAI系のモデルを選んでいるときは、`request.ts`の`openAiBody`が`image`ブロックを
+  `input_image`へ変換する**（Anthropic形式のcontent配列をそのまま渡せる）。
 - **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
   以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。

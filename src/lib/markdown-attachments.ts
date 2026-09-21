@@ -62,3 +62,15 @@ export function composeAttachments(body: string, attachments: ImageAttachment[])
 export function hasImageMarkdown(value: string): boolean {
   return INLINE_IMAGE_PATTERN.test(value);
 }
+
+/**
+ * 本文の末尾（添付の画像記法の上）へ文を足す（#3243）。
+ *
+ * **`value + "\n" + text`と書かない。** 画像記法の下に文が来ると、次の`splitAttachments`が
+ * 添付として読めなくなり、サムネイルが消えて入力欄にURLが現れる（#2425）。
+ */
+export function appendToBody(value: string, text: string): string {
+  const { body, attachments } = splitAttachments(value);
+  const trimmed = body.replace(/\s+$/, "");
+  return composeAttachments(trimmed === "" ? text : `${trimmed}\n\n${text}`, attachments);
+}
