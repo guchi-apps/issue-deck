@@ -9,6 +9,12 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const NOW = new Date("2026-09-02T12:00:00.000Z");
 const startManualStepSession = vi.fn();
+const copyText = vi.fn(async (text: string) => {
+  void text;
+  return true;
+});
+
+vi.mock("@/lib/copy-text", () => ({ copyText: (text: string) => copyText(text) }));
 
 /** テンプレートどおりの本文（サブPCの手順1件・ブラウザの手順1件・完了の確認1件） */
 const BODY = `## 前提条件
@@ -25,6 +31,10 @@ const BODY = `## 前提条件
     \`\`\`
 
 - [ ] （ブラウザ）1Passwordで\`apps\`ボールトの値を登録する
+
+    \`\`\`bash
+    open https://1password.com && echo registered
+    \`\`\`
 
 ## 完了の確認方法
 
@@ -129,6 +139,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
 beforeEach(() => {
   vi.clearAllMocks();
   startManualStepSession.mockResolvedValue({ ok: true });
+  copyText.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -194,13 +205,26 @@ describe("ManualStepSessionPanel（#2771）", () => {
   it("自動で流す手順と、人に頼む手順を起動前に並べる", () => {
     render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
     expect(screen.getByText("自動で実行 2件")).toBeTruthy();
-    expect(screen.getByText("あなたが実行 1件")).toBeTruthy();
+    expect(screen.getAllByText("あなたが実行 1件")).toHaveLength(2);
     expect(
       screen.getByText("systemctl --user restart issue-deck-dispatch-poller.service"),
     ).toBeTruthy();
     expect(screen.getByText("ブラウザ")).toBeTruthy();
     // 代行しない理由は手作業アシスタントと同じ文言で出す
     expect(screen.getByText(/ブラウザで実行するため/)).toBeTruthy();
+  });
+
+  it("人が実行するコマンドをまとめて、または1行ずつコピーできる", async () => {
+    render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "2行をまとめてコピー" }));
+    await waitFor(() =>
+      expect(copyText).toHaveBeenCalledWith("open https://1password.com\necho registered"),
+    );
+    expect(screen.getByRole("button", { name: "コピーしました" })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "コピー" })[0]);
+    await waitFor(() => expect(copyText).toHaveBeenLastCalledWith("open https://1password.com"));
   });
 
   it("失敗した理由は押した場所の下に出す", async () => {
