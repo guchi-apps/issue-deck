@@ -21,8 +21,7 @@ export const POST_CREATE_DESTINATION_DEFAULT: PostCreateDestinationSetting = "as
 
 /**
  * 設定の保存キー（端末ごと・localStorage）。**どの端末で作ったかで戻りたい先が変わる**ため、
- * アプリ全体の設定（`AppSetting`）ではなく端末ごとの設定にしている
- * （`use-issue-order-guide.ts`の自動開始と同じ理由）。
+ * アプリ全体の設定（`AppSetting`）ではなく端末ごとの設定にしている。
  */
 export const POST_CREATE_DESTINATION_STORAGE_KEY = "issue-deck:post-create-destination";
 

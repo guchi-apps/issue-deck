@@ -579,7 +579,7 @@ UIの名称だけ「判定に使うAI（おまかせ・ラベル付与）」に�
 同じくページ側でDBから直接読む。
 
 **「おまかせ」の判定が効くのは「実装を開始」ダイアログだけ。** モデルを付けずにジョブを積む
-経路——「次にやること」（`enqueue-issue.ts`）・「ローカルで開始」（`use-local-session-launch.ts`）・
+経路——「ローカルで開始」（`use-local-session-launch.ts`）・
 PR修正依頼でのセッションの呼び戻し・一括停止からの「再開」（`agent-resume-run.ts`）——は、
 払い出し（`claim`）の`job.claudeModel ?? claudeLocalModel`へ流れ込み、`claudeLocalModel`が
 `pick`だと`parseClaudeLocalModel`が弾いて**既定のSonnetで起動する**（判定はしない。積む処理に

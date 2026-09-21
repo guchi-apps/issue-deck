@@ -126,15 +126,11 @@ type MobileIssueListScreenProps = {
   pullRequests?: PullRequestSummary[];
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
   onStartManualStepGuide?: (startIssueId?: string) => void;
-  /** 「次にやること」（#1853）を開く。出すかどうかの判定は`IssueList`が行う */
-  onStartIssueOrder?: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
   onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。`IssueList`へそのまま渡す */
   codeReviewIssues?: Issue[];
   codeReviewRepositoryFullNames?: string[];
-  issueOrderAutoStart?: boolean;
-  issueOrderCount?: number;
   /** Issue一覧のスクロール位置を保存・復元する単位を表すキー（#773） */
   scrollKey: string;
   /**
@@ -187,12 +183,9 @@ export function MobileIssueListScreen({
   checkUserRunningIssueIds,
   pullRequests,
   onStartManualStepGuide,
-  onStartIssueOrder,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
-  issueOrderAutoStart,
-  issueOrderCount,
   scrollKey,
   onRefresh,
   fetchedAt = null,
@@ -385,12 +378,9 @@ export function MobileIssueListScreen({
         checkUserRunningIssueIds={checkUserRunningIssueIds}
         pullRequests={pullRequests}
         onStartManualStepGuide={onStartManualStepGuide}
-        onStartIssueOrder={onStartIssueOrder}
         onStartCodeReview={onStartCodeReview}
         codeReviewIssues={codeReviewIssues}
         codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
-        issueOrderAutoStart={issueOrderAutoStart}
-        issueOrderCount={issueOrderCount}
         onPullToRefresh={onRefresh ? handlePullToRefresh : undefined}
       />
 
