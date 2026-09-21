@@ -246,6 +246,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `basis-48`と同じ`flex-basis`を奪い合い、どちらが勝つかがTailwindのCSS出力順に依存する。
   折り返しはjsdomでは再現できないため、指定が残っているかは`issue-list.test.tsx`が
   クラスで見張っている。
+- **Issue一覧の「まとめて予約」（#3284）は、選択モードの状態を`hooks/use-bulk-reserve.ts`、
+  入口の1行と下端に固定する登録バーを`bulk-reserve-bar.tsx`に置き、`issue-list.tsx`は行の
+  チェック・理由・行押下の切り替えだけを持つ。** 入口バーは`COUNT_BAR_*`と同じ折り返しの作り
+  （`flex-wrap`＋`basis-48`＋`ml-auto`）。登録バーは**スクロール領域（`<ul>`を包む枠）の外＝
+  ルートの最後の子**に置く——中に入れると引っ張って更新の`translateY`に引きずられる。
+  選択モードでは行を包む選択用`<button>`が`role="checkbox"`になり、押しても詳細は開かない。
+  **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
+  `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
+  （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。

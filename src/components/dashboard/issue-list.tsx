@@ -23,11 +23,14 @@ import {
   X,
 } from "lucide-react";
 
+import { BulkReserveDock, BulkReserveEntryBar } from "@/components/dashboard/bulk-reserve-bar";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useBulkReserve } from "@/hooks/use-bulk-reserve";
 import { NightlyRunChip } from "@/components/dashboard/nightly-run-marks";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -110,6 +113,9 @@ import {
 } from "@/lib/manual-step-attention";
 import {
   findScheduledRunQueuedMark,
+  pickBulkReserveHost,
+  resolveBulkReserveRejection,
+  type BulkReserveTarget,
   type ScheduledRunQueuedMap,
 } from "@/lib/nightly-run";
 import {
@@ -219,6 +225,13 @@ type IssueListProps = {
    * いない行と見分けが付かない。省略時はチップを出さない。
    */
   nightlyRunQueued?: ScheduledRunQueuedMap;
+  /**
+   * 一覧から予約実行へまとめて積めるようにする（#3284）。**渡した画面だけ**「まとめて予約」を
+   * 出す。積めたら呼ぶ（予約実行の件数・行のチップを取り直す）
+   */
+  onNightlyRunQueued?: () => void;
+  /** 一括登録の結果バーの「予約実行を見る」。省略すると出さない */
+  onOpenNightlyRun?: () => void;
   /** 保留にする・期限を付け替える（`useSnoozes`の`snooze`）。省略時は時計ボタンを出さない */
   onSnooze?: (target: SnoozeTarget, until: string | null) => void;
   /** 保留を解除する（`useSnoozes`の`unsnooze`）。省略時は解除ボタンを出さない */
@@ -495,6 +508,8 @@ export function IssueList({
   codeReviewFindingIssues,
   snoozes,
   nightlyRunQueued,
+  onNightlyRunQueued,
+  onOpenNightlyRun,
   onSnooze,
   onUnsnooze,
   checkUserRunningIssueIds,
@@ -936,7 +951,44 @@ export function IssueList({
     );
   }
 
+  // 一覧からの一括予約（#3284）。**入口を出すのは`onNightlyRunQueued`を渡された画面だけ**で、
+  // 手作業（`manual-step`）・コードレビューの一覧は実装を開始する対象ではないので出さない
+  const bulk = useBulkReserve({ onQueued: onNightlyRunQueued });
+  const bulkAvailable =
+    onNightlyRunQueued !== undefined && view !== "manual-step" && view !== "code-review";
+  const bulkActive = bulkAvailable && bulk.active;
+  /** その行を一括予約へ選べない理由。選べるなら`null`（積める判定は「実装を開始」と同じ関数を通す） */
+  function bulkRejectionFor(issue: Issue): string | null {
+    return resolveBulkReserveRejection({
+      state: issue.state,
+      labels: issue.labels,
+      alreadyQueued: findScheduledRunQueuedMark(nightlyRunQueued, issue.id) !== null,
+      isActive:
+        queueStateByIssueId.has(issue.id) ||
+        Boolean(runningByIssueId[issue.id]?.isRunning) ||
+        (checkUserRunningIssueIds?.has(issue.id) ?? false),
+      hasHost: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName) !== null,
+    });
+  }
+  const bulkSelectableIssues = bulkActive
+    ? issues.filter((issue) => bulkRejectionFor(issue) === null)
+    : [];
+  const bulkSelectedTargets: BulkReserveTarget[] = bulkActive
+    ? bulkSelectableIssues
+        .filter((issue) => bulk.selected.has(issue.id))
+        .map((issue) => ({
+          issueId: issue.id,
+          repositoryFullName: issue.repositoryFullName,
+          number: issue.number,
+          host: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName) ?? "",
+        }))
+    : [];
+  const bulkHostNames = [...new Set(bulkSelectedTargets.map((target) => target.host))];
+
   function renderIssueRow(issue: Issue, showRepoName: boolean) {
+    const bulkRejection = bulkActive ? bulkRejectionFor(issue) : null;
+    const bulkChecked = bulkActive && bulk.selected.has(issue.id);
+    const bulkFailure = bulkActive ? (bulk.failures.get(issue.id) ?? null) : null;
     const issueSession = sessionByIssueId.get(issue.id) ?? null;
     // 実行中は一覧から保留にして処理を隠せないようにする（#2610）。GitHub Actionsと
     // ローカルエージェントの判定は、それぞれ既存の一覧用の状態をそのまま使う。
@@ -1014,8 +1066,12 @@ export function IssueList({
           // isolateで行の中に重なり順を閉じ込める（#1945）。下のz-0/z-10は当たり判定と本文の
           // 前後だけを決めたいもので、これが無いと一覧の外にある要素（右下の丸ボタンなど）と
           // 同じ土俵で比較され、z-indexを持たない側が一覧の後ろへ回ってしまう
-          "relative isolate border-b border-l-4 border-l-transparent hover:bg-accent",
-          highlightedIssueId === issue.id && "border-l-primary bg-accent",
+          "relative isolate border-b border-l-4 border-l-transparent",
+          // 選択モードでは行を押しても詳細を開かないので、押せない行にhoverの色は付けない
+          !bulkActive && "hover:bg-accent",
+          bulkActive && !bulkRejection && "hover:bg-indigo-50 dark:hover:bg-indigo-950",
+          bulkChecked && "bg-indigo-50 dark:bg-indigo-950",
+          !bulkActive && highlightedIssueId === issue.id && "border-l-primary bg-accent",
         )}
       >
         {/* 行を選ぶ当たり判定（#1915）。**本文を包む`<button>`にしない。** ラベル行へ足した
@@ -1025,13 +1081,36 @@ export function IssueList({
         <button
           type="button"
           aria-label={`#${issue.number} ${issue.title}`}
+          // 選択モードでは行全体がチェックの切り替えになる（詳細は開かない。#3284）
+          role={bulkActive ? "checkbox" : undefined}
+          aria-checked={bulkActive ? bulkChecked : undefined}
+          aria-disabled={bulkActive && bulkRejection ? true : undefined}
           onClick={() => {
+            if (bulkActive) {
+              if (!bulkRejection) bulk.toggle(issue.id);
+              return;
+            }
             setOptimisticSelectedId(issue.id);
             onSelectIssue(issue);
           }}
           className="absolute inset-0 z-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
         />
-        <div className="pointer-events-none relative z-10 flex w-full flex-col gap-1.5 px-4 py-3 text-left">
+        <div
+          className={cn(
+            "pointer-events-none relative z-10 flex w-full flex-col gap-1.5 px-4 py-3 text-left",
+            bulkActive && "pl-11",
+            bulkRejection && "opacity-60",
+          )}
+        >
+          {bulkActive && (
+            <Checkbox
+              checked={bulkChecked}
+              disabled={bulkRejection !== null}
+              tabIndex={-1}
+              aria-hidden
+              className="absolute left-4 top-3.5 size-[18px]"
+            />
+          )}
           <div className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
               <IssueStateIcon issue={issue} />
@@ -1259,6 +1338,15 @@ export function IssueList({
               <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
+          {/* 一括予約で選べない理由（#3284）。積めなかった結果は理由より優先して出す。
+              行全体を薄くしているので、文字は前景色にして読める濃さを保つ */}
+          {bulkFailure ? (
+            <p className="text-xs font-medium text-destructive" role="alert">
+              {bulkFailure}
+            </p>
+          ) : (
+            bulkRejection && <p className="text-xs text-foreground">{bulkRejection}</p>
+          )}
         </div>
       </li>
     );
@@ -1300,6 +1388,17 @@ export function IssueList({
           </div>
           <Star className="size-4 shrink-0 text-muted-foreground" />
         </div>
+      )}
+
+      {/* 一覧から予約実行へまとめて積む入口（#3284）。手作業アシスタントの入口と同じく、ヘッダーではなく
+          一覧の上に置くことで、ヘッダーを出さないスマホにも同じ位置で出る */}
+      {bulkAvailable && issues.length > 0 && (
+        <BulkReserveEntryBar
+          active={bulkActive}
+          disabled={bulk.isSubmitting}
+          onStart={bulk.start}
+          onExit={bulk.exit}
+        />
       )}
 
       {/* 溜まった手作業を1件ずつ案内する入口（#1826）。**ヘッダーではなく一覧の上に置く**——
@@ -1511,6 +1610,24 @@ export function IssueList({
           )}
         </div>
       </div>
+
+      {/* 予約実行へ登録する固定バー（#3284）。一覧の列の下端に貼り付く。選択中と、登録の結果を
+          伝えているあいだだけ出す。**スクロール領域の外**（ルートの最後の子）に置く */}
+      {bulkAvailable && (bulk.active || bulk.summary !== null || bulk.isSubmitting) && (
+        <BulkReserveDock
+          active={bulkActive}
+          selectedCount={bulkSelectedTargets.length}
+          selectableCount={bulkSelectableIssues.length}
+          hostNames={bulkHostNames}
+          progress={bulk.progress}
+          summary={bulk.summary}
+          onSelectAll={() => bulk.replaceSelection(bulkSelectableIssues.map((issue) => issue.id))}
+          onClear={() => bulk.replaceSelection([])}
+          onSubmit={() => void bulk.submit(bulkSelectedTargets)}
+          onDismissSummary={bulk.dismissSummary}
+          onOpenNightlyRun={onOpenNightlyRun}
+        />
+      )}
     </div>
   );
 }
