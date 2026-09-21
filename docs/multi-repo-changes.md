@@ -48,7 +48,7 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 | `.github/scripts/`の共有スクリプト | issue-deckで直す → 画面から一括配布PR（丸ごとコピー。自動マージしない） | **あり** | [supported-repositories.md](supported-repositories.md)「`signaly-notify.sh`の配布状況」（#2240） |
 | 各リポジトリの`deploy.yml`・`release.yml`への**アンカー行の隣に1行足すだけ**の編集 | 上の共有スクリプト配布PRに相乗りさせる。**リポジトリごとの中身に依存しない編集に限る** | **あり** | [supported-repositories.md](supported-repositories.md)「配布PRは`deploy.yml`・`release.yml`への1行追加も運ぶ」（#2391） |
 | callerの新規追加（`release-develop-to-main.yml`等） | 手。配布は既存ファイルの置換だけで、callerの新規追加はしない | なし | [supported-repositories.md](supported-repositories.md)の各「配布状況」 |
-| ラベル体系 | `guchi-apps/docs`の`label-sync/sync-labels.sh`をリポジトリごとに流す（新規リポジトリは画面の「新規アプリを立ち上げる」が作成時に写す） | 新規のみ | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
+| ラベル体系 | issue-deckの`scripts/sync-labels.sh`で全リポジトリへ流す（正本は`.github/labels.json`。新規リポジトリは画面の「新規アプリを立ち上げる」が作成時に写す） | 新規のみ（既存は手で`apply`） | [label-scheme.md](label-scheme.md)・[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
 | Secrets・variables | リポジトリごと。共通値はorganizationへ寄せる | 一部 | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「4. Secrets」 |
 | 全アプリ共通の知識（`CLAUDE.md`・運用ルール） | 知見メモ → `guchi-apps/docs`の格上げ判定エージェント → 共有知識リポジトリへのPR | 一部 | [shared-knowledge.md](shared-knowledge.md)「9. 共有知識更新フロー」 |
 | **アプリのコードそのもの**（同じ不具合が各アプリにある等） | **リポジトリごとにIssueを立てて個別に実装する。これ以外の手段は無い** | なし | 下記の手順 |
@@ -103,7 +103,7 @@ gh api repos/guchi-apps/issue-deck/issues/<親番号>/sub_issues --method POST -
 
 `90.Close: another`（他のリポジトリで対応したため、クローズ）は**同じ要件が別リポジトリで
 片付いた**ときに使う。横展開で「このリポジトリには不要だった」と判断した場合は
-`90.Close: wonfix`のほうが実態に合う。
+`94.Close: wontfix`のほうが実態に合う。
 
 ## 一括起票機能は作らない（#1722）
 

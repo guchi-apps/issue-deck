@@ -49,13 +49,13 @@ describe("mergeSuggestedLabels", () => {
   });
 
   /** #1662。生成結果に出てこないラベルまでリセットすると、自動生成のたびに黙って消える。 */
-  it("自動付与の対象外のラベル（人が手で選んだ11.local・90.Close: *）はリセットせず維持する", () => {
-    const prev = ["11.local", "90.Close: duplicate", "30.bug"];
+  it("自動付与の対象外のラベル（人が手で選んだ11.local・9x.Close: *）はリセットせず維持する", () => {
+    const prev = ["11.local", "91.Close: duplicate", "30.bug"];
     const suggested = ["60.chore"];
 
     expect(mergeSuggestedLabels(prev, suggested)).toEqual([
       "11.local",
-      "90.Close: duplicate",
+      "91.Close: duplicate",
       "60.chore",
     ]);
   });

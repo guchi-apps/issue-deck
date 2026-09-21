@@ -276,7 +276,7 @@ function runGh({
 
 describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
   it("11.local が付いていても、PRがマージ済みなら畳む", () => {
-    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local", "70.confirm"], mergedPr: "470" });
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local", "70.needs-decision"], mergedPr: "470" });
     expect(result.stdout).toContain("セッションを畳みました");
     expect(result.stdout).toContain("PR #470 がマージ済み");
     expect(result.killed).toContain(`=${GH_SESSION}`);

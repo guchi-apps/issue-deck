@@ -73,7 +73,7 @@ scripts/fetch-issue-images.sh "<画像URL>"
 
 - **ファイルを読む・探すときは`Read`・`Grep`・`Glob`を使う。** `Bash`の`sed -n`・`cat`・`grep -rn`・`find`で代用しない（auto modeの案内よりこちらを優先する）。`Bash`は`git`・`gh`・テスト・Lintなど、それらで表せない処理に使う。セッションのコストは往復の回数でほぼ決まるため
 - **依存の無い調査は1応答に複数のツール呼び出しを並べて発行する。** 前の結果で次に読む場所が決まるときだけ順に呼ぶ
-- **往復が積み上がっても見通しが立たないのは、Issueが大きすぎるサイン。** 区切りの良い範囲でPRにし、残りは新しいIssue（本文に「起点: #{{ISSUE_NUMBER}}」・`70.confirm`・目安3件まで）として起票してPR本文と完了報告からリンクする。起票したIssueはこのセッションで実装しない
+- **往復が積み上がっても見通しが立たないのは、Issueが大きすぎるサイン。** 区切りの良い範囲でPRにし、残りは新しいIssue（本文に「起点: #{{ISSUE_NUMBER}}」・`70.needs-decision`・目安3件まで）として起票してPR本文と完了報告からリンクする。起票したIssueはこのセッションで実装しない
 - **担当する作業そのもの（指示を読む・計画する・実装する）を`Agent`へ委任しない**（#2896）。調査を`Explore`へ委ねるのは構わない
 
 背景の実測値は [docs/multi-agent/implementation-agent-reference.md](../../docs/multi-agent/implementation-agent-reference.md)「調査は往復を減らす形で行う」にあります。

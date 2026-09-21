@@ -1,0 +1,295 @@
+{
+  "_comment": "全リポジトリで共通利用するGitHubラベルの正本(#3237)。scripts/sync-labels.shが読む。renamesは旧名→新名で、旧名が存在すればrename、新名も既にあればIssueを付け替えて旧名を削除する。変更手順はdocs/label-scheme.md。",
+  "labels": [
+    {
+      "name": "00.check-user",
+      "color": "f0883e",
+      "description": "ユーザーの確認・指示が必要",
+      "category": "automation"
+    },
+    {
+      "name": "01.check-answered",
+      "color": "fef2c0",
+      "description": "回答済み。読むだけで実装は再開しない（00.check-userの理由）",
+      "category": "automation"
+    },
+    {
+      "name": "01.check-blocked",
+      "color": "fef2c0",
+      "description": "続け方の指示待ち。エージェントは停止（00.check-userの理由）",
+      "category": "automation"
+    },
+    {
+      "name": "01.check-input",
+      "color": "fef2c0",
+      "description": "質問・確認への回答待ち（00.check-userの理由）",
+      "category": "automation"
+    },
+    {
+      "name": "01.check-merge",
+      "color": "fef2c0",
+      "description": "PRのマージ待ち（00.check-userの理由）",
+      "category": "automation"
+    },
+    {
+      "name": "01.check-plan",
+      "color": "fef2c0",
+      "description": "計画の承認待ち（00.check-userの理由）",
+      "category": "automation"
+    },
+    {
+      "name": "11.local",
+      "color": "e99695",
+      "description": "ローカル(VSCode等)で対応中。無人実行ワークフローを起動しない",
+      "category": "automation"
+    },
+    {
+      "name": "21.plan-required",
+      "color": "d4c5f9",
+      "description": "計画の確認・承認が必要",
+      "category": "automation"
+    },
+    {
+      "name": "22.merge-confirm-required",
+      "color": "d4c5f9",
+      "description": "developへのマージ前に人間の確認・承認が必要",
+      "category": "automation"
+    },
+    {
+      "name": "23.preview-required",
+      "color": "d4c5f9",
+      "description": "画面プレビューでの確認・承認が必要",
+      "category": "automation"
+    },
+    {
+      "name": "25.artifact-required",
+      "color": "d4c5f9",
+      "description": "アーティファクトでの視覚確認・承認が必要",
+      "category": "automation"
+    },
+    {
+      "name": "30.bug",
+      "color": "b60205",
+      "description": "再現可能な不具合",
+      "category": "problem"
+    },
+    {
+      "name": "31.security",
+      "color": "b60205",
+      "description": "セキュリティ上の問題・リスク",
+      "category": "problem"
+    },
+    {
+      "name": "40.investigation",
+      "color": "b60205",
+      "description": "原因または対応要否の調査が必要",
+      "category": "problem"
+    },
+    {
+      "name": "41.cannot-reproduce",
+      "color": "b60205",
+      "description": "現時点では再現できず、追加調査が必要",
+      "category": "problem"
+    },
+    {
+      "name": "50.feature",
+      "color": "0052cc",
+      "description": "新しい機能の追加",
+      "category": "change"
+    },
+    {
+      "name": "51.improvement",
+      "color": "0052cc",
+      "description": "既存機能の改善",
+      "category": "change"
+    },
+    {
+      "name": "52.performance",
+      "color": "0052cc",
+      "description": "処理速度・負荷・使用量の改善",
+      "category": "change"
+    },
+    {
+      "name": "53.accessibility",
+      "color": "0052cc",
+      "description": "操作性・アクセシビリティの改善",
+      "category": "change"
+    },
+    {
+      "name": "54.data-migration",
+      "color": "0052cc",
+      "description": "DB・設定・保存形式の移行",
+      "category": "change"
+    },
+    {
+      "name": "55.integration",
+      "color": "0052cc",
+      "description": "外部サービス・API・MCPとの連携",
+      "category": "change"
+    },
+    {
+      "name": "60.chore",
+      "color": "bfdadc",
+      "description": "分類しにくい軽微な保守作業",
+      "category": "maintenance"
+    },
+    {
+      "name": "61.ops",
+      "color": "bfdadc",
+      "description": "デプロイ・ホスト・監視・ワークフローなど運用基盤の整備",
+      "category": "maintenance"
+    },
+    {
+      "name": "62.design",
+      "color": "bfdadc",
+      "description": "UI・UX・見た目の変更",
+      "category": "maintenance"
+    },
+    {
+      "name": "63.refactor",
+      "color": "bfdadc",
+      "description": "挙動を変えないコード構造の改善",
+      "category": "maintenance"
+    },
+    {
+      "name": "64.test",
+      "color": "bfdadc",
+      "description": "テスト追加・修正・検証環境の整備",
+      "category": "maintenance"
+    },
+    {
+      "name": "65.docs",
+      "color": "bfdadc",
+      "description": "README・仕様書・手順書の整備",
+      "category": "maintenance"
+    },
+    {
+      "name": "66.dependencies",
+      "color": "bfdadc",
+      "description": "ライブラリ・Actions・実行環境の更新",
+      "category": "maintenance"
+    },
+    {
+      "name": "70.needs-decision",
+      "color": "5319e7",
+      "description": "実施方針や仕様について判断が必要",
+      "category": "state"
+    },
+    {
+      "name": "71.manual-step",
+      "color": "5319e7",
+      "description": "ユーザー自身の操作・認証・購入などが必要",
+      "category": "state"
+    },
+    {
+      "name": "72.blocked",
+      "color": "5319e7",
+      "description": "他Issue・権限・外部サービスなどが原因で進行不能",
+      "category": "state"
+    },
+    {
+      "name": "73.needs-info",
+      "color": "5319e7",
+      "description": "実装に必要な情報が不足している",
+      "category": "state"
+    },
+    {
+      "name": "74.needs-spec",
+      "color": "5319e7",
+      "description": "要件・受入条件を明確にする必要がある",
+      "category": "state"
+    },
+    {
+      "name": "75.agent-ready",
+      "color": "5319e7",
+      "description": "エージェントがそのまま着手できる状態",
+      "category": "state"
+    },
+    {
+      "name": "80.Priority: High",
+      "color": "fbca04",
+      "description": "優先的に対応する",
+      "category": "priority"
+    },
+    {
+      "name": "85.Priority: Medium",
+      "color": "fbca04",
+      "description": "通常の優先度",
+      "category": "priority"
+    },
+    {
+      "name": "89.Priority: Low",
+      "color": "fbca04",
+      "description": "時間に余裕があれば対応する",
+      "category": "priority"
+    },
+    {
+      "name": "90.Close: another",
+      "color": "c5def5",
+      "description": "別リポジトリ・別Issueで対応した",
+      "category": "close"
+    },
+    {
+      "name": "91.Close: duplicate",
+      "color": "c5def5",
+      "description": "既存Issueと重複している",
+      "category": "close"
+    },
+    {
+      "name": "92.Close: invalid",
+      "color": "c5def5",
+      "description": "Issueの前提または内容が正しくない",
+      "category": "close"
+    },
+    {
+      "name": "93.Close: cannot-reproduce",
+      "color": "c5def5",
+      "description": "再現できないためクローズする",
+      "category": "close"
+    },
+    {
+      "name": "94.Close: wontfix",
+      "color": "c5def5",
+      "description": "現象・要望は確認したが対応しない",
+      "category": "close"
+    },
+    {
+      "name": "95.Close: obsolete",
+      "color": "c5def5",
+      "description": "環境・仕様変更によって不要になった",
+      "category": "close"
+    },
+    {
+      "name": "96.Close: completed",
+      "color": "c5def5",
+      "description": "対応完了をラベルでも明示する場合に使用",
+      "category": "close"
+    }
+  ],
+  "renames": [
+    {
+      "from": "40.unexpected",
+      "to": "40.investigation"
+    },
+    {
+      "from": "70.confirm",
+      "to": "70.needs-decision"
+    },
+    {
+      "from": "89.Priority: low",
+      "to": "89.Priority: Low"
+    },
+    {
+      "from": "90.Close: duplicate",
+      "to": "91.Close: duplicate"
+    },
+    {
+      "from": "90.Close: invalid",
+      "to": "92.Close: invalid"
+    },
+    {
+      "from": "90.Close: wonfix",
+      "to": "94.Close: wontfix"
+    }
+  ]
+}

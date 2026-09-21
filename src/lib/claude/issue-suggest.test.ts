@@ -53,7 +53,7 @@ describe("buildIssueSuggestPrompt", () => {
         { name: "11.local", description: "ローカルで対応中" },
         { name: "21.plan-required", description: "計画が必要" },
         { name: "71.manual-step", description: "ユーザー自身の手作業が必要" },
-        { name: "90.Close: duplicate", description: "重複のためクローズ" },
+        { name: "91.Close: duplicate", description: "重複のためクローズ" },
         { name: "30.bug", description: "不具合" },
         { name: "80.Priority: High", description: "緊急 高" },
       ],
@@ -65,7 +65,7 @@ describe("buildIssueSuggestPrompt", () => {
     expect(prompt).not.toContain("11.local");
     expect(prompt).not.toContain("21.plan-required");
     expect(prompt).not.toContain("71.manual-step");
-    expect(prompt).not.toContain("90.Close: duplicate");
+    expect(prompt).not.toContain("91.Close: duplicate");
     expect(prompt).toContain("- 30.bug: 不具合");
     expect(prompt).toContain("- 80.Priority: High: 緊急 高");
   });
@@ -112,7 +112,7 @@ describe("generateIssueSuggestion", () => {
   it("対象範囲のラベルだけを返す（Claudeが範囲外を返しても落とす。#1662）", async () => {
     mockClaudeResponse({
       title: "ログインに失敗する",
-      labels: ["30.bug", "71.manual-step", "11.local", "90.Close: duplicate", "21.plan-required"],
+      labels: ["30.bug", "71.manual-step", "11.local", "91.Close: duplicate", "21.plan-required"],
     });
 
     const result = await generateIssueSuggestion("dummy-token", {
@@ -121,7 +121,7 @@ describe("generateIssueSuggestion", () => {
         { name: "30.bug", description: "不具合" },
         { name: "71.manual-step", description: "ユーザー自身の手作業が必要" },
         { name: "11.local", description: "ローカルで対応中" },
-        { name: "90.Close: duplicate", description: "重複のためクローズ" },
+        { name: "91.Close: duplicate", description: "重複のためクローズ" },
         { name: "21.plan-required", description: "計画が必要" },
       ],
     });
@@ -130,7 +130,7 @@ describe("generateIssueSuggestion", () => {
   });
 
   it("リポジトリに存在しないラベル名は落とす", async () => {
-    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.unexpected"] });
+    mockClaudeResponse({ title: "タイトル", labels: ["30.bug", "40.investigation"] });
 
     const result = await generateIssueSuggestion("dummy-token", {
       body: "本文",

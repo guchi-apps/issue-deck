@@ -87,7 +87,7 @@ export function groupRepositoriesByWorkflowStatus(
  *
  * **リセットするのは自動付与の対象になるラベル（30〜89番台。71番台を除く。#1662）だけ。**
  * 生成結果に出てこないラベル——進捗管理用・実装オプション用に加えて、人が手で選んだ
- * `11.local`や`90.Close: *`——までリセットすると、判定のたびに黙って消え、
+ * `11.local`や`9x.Close: *`——までリセットすると、判定のたびに黙って消え、
  * 生成結果からは二度と復活しない。
  */
 export function mergeSuggestedLabels(prev: string[], suggested: string[]): string[] {

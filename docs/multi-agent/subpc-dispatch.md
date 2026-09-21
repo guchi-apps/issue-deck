@@ -1259,7 +1259,7 @@ pollerはsystemd unitの`ExecStart`で本体チェックアウトの`scripts/sub
 | 参照 | そのリポジトリのworktree | 実行できる全リポジトリの**`origin/develop`のスナップショット**（`--add-dir`。#1583） |
 | 書き込みツール | 使える | `--disallowedTools "Edit,Write,NotebookEdit"`で**封じる** |
 | 開発サーバー | ラベル次第で起動 | 起動しない |
-| 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件（＋気付いた別件があれば`70.confirm`付きの新規Issue。#1528） |
+| 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件（＋気付いた別件があれば`70.needs-decision`付きの新規Issue。#1528） |
 | 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED、またはOPENのまま`QUESTION_SESSION_IDLE_MINUTES`（既定30）放置**（gitの判定は当てない。#1648） |
 | 畳んだ後の再起動 | 前回の会話の続きから再開する（Claude Codeは`--continue`・#1541、Codexは`codex resume`・#2520） | **質問Issueごとに控えたsessionIdで`--resume`する**（`--continue`はcwdが共有のため使えない。#1648・#3033）。控えが無ければ新しい会話 |
 
@@ -1382,7 +1382,7 @@ Issueとして残らないまま質問Issue自身で実装された。`run-issue
 
 横断質問セッションだけの注意として、**起票先は質問Issueの記録先リポジトリとは限らない。**
 記録先（`question`等）へ誤って起票すると実装セッションを起こせない場所に埋もれるため、
-プロンプトは`gh issue create --repo <owner/repo>`で起票先を明示させる。`70.confirm`が定義されて
+プロンプトは`gh issue create --repo <owner/repo>`で起票先を明示させる。`70.needs-decision`が定義されて
 いないリポジトリではラベル付きの作成が失敗するので、その場合はラベル無しで起票して回答に
 その旨を書く。
 
