@@ -100,15 +100,11 @@ type MobileIssuesScreenProps = {
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   /** 手作業アシスタント（#1826）を開く */
   onStartManualStepGuide: () => void;
-  /** 「次にやること」（#1853）を開く。未対応の環境では渡らない */
-  onStartIssueOrder?: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
   onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。一覧へそのまま渡す */
   codeReviewIssues?: Issue[];
   codeReviewRepositoryFullNames?: string[];
-  issueOrderAutoStart?: boolean;
-  issueOrderCount?: number;
 };
 
 export function MobileIssuesScreen({
@@ -144,12 +140,9 @@ export function MobileIssuesScreen({
   fetchedAt,
   autoRefreshIntervalMs,
   onStartManualStepGuide,
-  onStartIssueOrder,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
-  issueOrderAutoStart,
-  issueOrderCount,
 }: MobileIssuesScreenProps) {
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
 
@@ -248,12 +241,9 @@ export function MobileIssuesScreen({
       checkUserRunningIssueIds={checkUserRunningIssueIds}
       pullRequests={pullRequests}
       onStartManualStepGuide={onStartManualStepGuide}
-      onStartIssueOrder={onStartIssueOrder}
       onStartCodeReview={onStartCodeReview}
       codeReviewIssues={codeReviewIssues}
       codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
-      issueOrderAutoStart={issueOrderAutoStart}
-      issueOrderCount={issueOrderCount}
       // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も
       // `MobileIssueListScreen`がこれを見て行うため、件数と中身が別々にならない
       pinned={{

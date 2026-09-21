@@ -168,7 +168,7 @@ export function isSessionReportedJobKind(kind: DispatchJobKind): kind is Session
 
 /** 画面・pollerとやり取りするときの表記（小文字）を内部の表現へ写す */
 export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
-  // **省略時は`LAUNCH`。** 既存の呼び出し元（「次にやること」の自動開始・実装開始ダイアログ）は`kind`を送らない
+  // **省略時は`LAUNCH`。** 既存の呼び出し元（実装開始ダイアログなど）は`kind`を送らない
   if (value === undefined || value === null || value === "launch") return "LAUNCH";
   if (value === "interrupt") return "INTERRUPT";
   if (value === "kill") return "KILL";
@@ -1409,7 +1409,7 @@ export function resolveDispatchTargetRejection(params: {
   /**
    * 起こすエージェントの一時停止理由（#2994）。**省略・`null`は「稼働中」**（従来どおり）。
    * `enqueueDispatchJob`（`jobs.ts`）と同じ位置（ホストの生存確認の直後）で見る——ここで
-   * 弾かないと、一括投入（`enqueue-issue.ts`）がオプションのラベルだけ書いてジョブを
+   * 弾かないと、一括投入がオプションのラベルだけ書いてジョブを
    * 1件も積めない事態になる。
    */
   agentPauseReason?: AgentPauseReason | null;
@@ -1843,7 +1843,7 @@ export function isActionsRunInProgress(
  * 持っていない（画面のポーリング結果が判定材料）。そこへ混ぜると「画面にしか無い拒否理由」が
  * 拒否一覧に並び、対応が崩れる。
  *
- * 積む導線が複数ある（「次にやること」の自動開始・「セッションを復旧」）ので、文言だけはここで揃える。
+ * 積む導線が複数ある（「実装を開始」・「セッションを復旧」など）ので、文言だけはここで揃える。
  */
 export const ACTIONS_RUNNING_ENQUEUE_REASON =
   "GitHub Actionsの実行が進行中です。同じブランチを2つの経路が進めることになるため、実行が終わるまでサブPCへは積めません。";

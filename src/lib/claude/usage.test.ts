@@ -8,8 +8,10 @@ vi.mock("@/lib/claude/request", () => ({
 }));
 
 import {
+  CLAUDE_LOW_REMAINING_PERCENT,
   clearClaudeUsageCache,
   fetchClaudeUsage,
+  hasClaudeLowRemainingQuota,
   parseUnifiedRateLimitHeaders,
   peekClaudeFiveHourWindow,
 } from "@/lib/claude/usage";
@@ -89,6 +91,38 @@ describe("parseUnifiedRateLimitHeaders", () => {
     );
 
     expect(windows[0].status).toBe("allowed_warning");
+  });
+
+  it("5時間枠または週間枠の残りが警告基準未満なら、実行開始には少なすぎると判定する", () => {
+    expect(CLAUDE_LOW_REMAINING_PERCENT).toBe(10);
+    expect(
+      hasClaudeLowRemainingQuota(
+        parseUnifiedRateLimitHeaders(
+          realHeaders({ "anthropic-ratelimit-unified-5h-utilization": "0.91" }),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      hasClaudeLowRemainingQuota(
+        parseUnifiedRateLimitHeaders(
+          realHeaders({ "anthropic-ratelimit-unified-7d-utilization": "0.91" }),
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("残りが警告基準ちょうど、または枠が無ければ既定を切り替えない", () => {
+    expect(
+      hasClaudeLowRemainingQuota(
+        parseUnifiedRateLimitHeaders(
+          realHeaders({
+            "anthropic-ratelimit-unified-5h-utilization": "0.9",
+            "anthropic-ratelimit-unified-7d-utilization": "0.8",
+          }),
+        ),
+      ),
+    ).toBe(false);
+    expect(hasClaudeLowRemainingQuota([])).toBe(false);
   });
 
   it("utilizationが無いウィンドウは除外する", () => {
