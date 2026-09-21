@@ -160,7 +160,7 @@ export function CodexPairingControl({
         ) : (
           <Smartphone className={cn(compact && "size-3")} />
         )}
-        Codexに繋ぐ
+        接続
       </Button>
 
       {/* 出てきたコード。**押した人がこれを別の端末へ打ち込む**ので、行の中で最も読みやすくする */}
