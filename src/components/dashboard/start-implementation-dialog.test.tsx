@@ -721,18 +721,18 @@ describe("StartImplementationDialog", () => {
     });
 
     /**
-     * #3189。Jevで判定したときだけ、判定元のバッジ・確信度・候補ごとの確率を出す。
-     * **接戦だったのかが押す前に分かる**ようにするためで、理由の1文だけでは読み取れない。
+     * #3189で候補ごとの確率を、#3231でそれを各カードの中へ移した。
+     * **#3255で説明の行（判定元のバッジ・組み立てた理由・確信度）は出すのをやめた**ので、
+     * Jevのときに画面へ残るのは確率とカードの印だけになる。
      */
-    it("Jevの判定なら確信度と候補ごとの確率を出す", async () => {
+    it("Jevの判定なら候補ごとの確率だけを出し、説明の行は出さない", async () => {
       dispatchState.hosts = [makeHost()];
       modelPickFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
           model: "opus",
-          reason: "難しさ 2/3と判定したためです。",
+          reason: "",
           source: "jev",
-          confidence: 0.82,
           probabilities: { opus: 0.82, sonnet: 0.15, fable: 0.03 },
         }),
       });
@@ -741,16 +741,20 @@ describe("StartImplementationDialog", () => {
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
 
-      await waitFor(() => expect(screen.getByText("Jev")).toBeTruthy());
-      expect(screen.getByText(/確信度 82%/)).toBeTruthy();
       // #3231。確率は下部の一覧ではなく、対応する各モデルのカード内に置く。
-      expect(within(screen.getByRole("radio", { name: /^Opus/ })).getByText("82%")).toBeTruthy();
+      await waitFor(() =>
+        expect(within(screen.getByRole("radio", { name: /^Opus/ })).getByText("82%")).toBeTruthy(),
+      );
       expect(within(screen.getByRole("radio", { name: /^Sonnet/ })).getByText("15%")).toBeTruthy();
       expect(within(screen.getByRole("radio", { name: /^Fable/ })).getByText("3%")).toBeTruthy();
+
+      expect(screen.queryByText("Jev")).toBeNull();
+      expect(screen.queryByText(/確信度/)).toBeNull();
+      expect(screen.queryByText(/Opusで起動します/)).toBeNull();
     });
 
     // アプリ内AI・ルールの判定は確率を返さないので、確率の行ごと出さない
-    it("Jev以外の判定ではバッジも確率も出さない", async () => {
+    it("Jev以外の判定では理由の1文を出し、確率は出さない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 

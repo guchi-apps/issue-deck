@@ -125,11 +125,11 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("いま実行中のセッションはありません")).toBeTruthy();
   });
 
-  it("スマホでも応答数・コンテキストを5時間枠の割合と並べて出す（#3084）", () => {
+  it("スマホでも応答数・入力トークンを5時間枠の割合と並べて出す（#3084）", () => {
     renderPanel({ ...response([entry()]), currentSessions: [liveSession] }, { compact: true });
     const section = screen.getByRole("region", { name: "実行中のセッション" });
     fireEvent.click(within(section).getByRole("button", { expanded: false }));
-    expect(within(section).getByText("141応答　コンテキスト 12M", { normalizer: (text) => text })).toBeTruthy();
+    expect(within(section).getByText("141応答　入力トークン 12M", { normalizer: (text) => text })).toBeTruthy();
   });
 
   it("閉じた状態ではセッションごとの金額を積み上げた棒と状態ごとの本数で出し、押すと詳細が開閉する（#3134）", () => {
@@ -465,7 +465,7 @@ describe("SessionUsagePanel", () => {
   it("タイトルを解決できていない行はタイトルの表示を出さない（#2686）", () => {
     const { container } = renderPanel(response([entry({ sessionId: "impl" })]));
 
-    expect(container.querySelector("p.truncate")).toBeNull();
+    expect(container.querySelector("p.truncate[title]")).toBeNull();
   });
 
   it("リポジトリ別は円グラフで、金額の上位5件と「その他」にまとめる（#3060）", () => {
@@ -523,9 +523,9 @@ describe("SessionUsagePanel", () => {
     expect(screen.queryByText("入力（キャッシュ含む）")).toBeNull();
   });
 
-  it("合計の「コンテキスト」に、期間全体のキャッシュ内訳を出す（#2628）", () => {
+  it("合計の「入力トークン」に、期間全体のキャッシュ内訳を出す（#2628・#3254）", () => {
     renderPanel(response([entry()]));
-    expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
+    expect(screen.getByText("内訳 入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
   it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
@@ -677,5 +677,36 @@ describe("SessionUsagePanel", () => {
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).queryByText(/直近5時間枠のおよそ/)).toBeNull();
+  });
+  describe("ヘッダーと期間選択の配置（#3257）", () => {
+    it("経過時間を見出しと同じ行に、更新ボタンをその行の右端に置き、見出し下の説明文は出さない", () => {
+      renderPanel(response([entry()]));
+      const heading = screen.getByRole("heading", { name: "AI使用量" });
+      const header = heading.parentElement as HTMLElement;
+      expect(within(header).getByText(/subpc から/)).toBeTruthy();
+      const refresh = within(header).getByRole("button", { name: "更新" });
+      expect(header.lastElementChild).toBe(refresh);
+      expect(screen.queryByText(/GitHub Actionsが使ったトークン/)).toBeNull();
+    });
+
+    it("期間選択はプラン枠より下、日別より上に置く", () => {
+      renderPanel(response([entry()]));
+      const period = screen.getByRole("group", { name: "集計する期間" });
+      const claudePlan = screen.getByText("Claude プラン枠");
+      expect(claudePlan.compareDocumentPosition(period) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        period.compareDocumentPosition(screen.getByText("日別")) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("選択した期間の応答が届くまでは集計を隠し、プラン枠と実行中のセッションは出したままにする", () => {
+      // 前の期間（7日）の応答が残っている状態で、30日を選んだところ
+      renderPanel({ ...response([entry()]), currentSessions: [] }, { days: 30, isLoading: true });
+      expect(screen.getByText("Claude プラン枠")).toBeTruthy();
+      expect(screen.getByRole("region", { name: "実行中のセッション" })).toBeTruthy();
+      expect(screen.getByText("読み込み中...")).toBeTruthy();
+      expect(screen.queryByText("従量課金相当")).toBeNull();
+      expect(screen.queryByText("日別")).toBeNull();
+    });
   });
 });

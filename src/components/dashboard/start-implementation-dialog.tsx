@@ -1464,6 +1464,11 @@ function describePickedModel(agent: DispatchAgent, model: string): string {
  *
  * ルールへ倒れた場合（AIを呼べなかった・応答を読めなかった）はその旨も出す。同じ「選ばれた」
  * でも、AIが内容を読んだのか、ラベルと分量だけで決めたのかで、結果の重みが違う。
+ *
+ * **Jevで選んだときだけは、結果の行を出さない**（#3255）。Jevは文章を返さないので、出せるのは
+ * コードが組み立てた説明（「難しさ◯/3・原因の調査から始まる見込み◯%と判定したためです」）と
+ * 確信度だけだった。**この2つはモデルの選択に使っておらず**、選ばれた根拠として読むと誤りに
+ * なる。Jevの根拠は候補ごとの確率で、そちらは各モデルカードに出ている（#3231）。
  */
 function ModelPickNotice({
   agent,
@@ -1486,30 +1491,21 @@ function ModelPickNotice({
     );
   }
   if (result) {
+    // Jevは説明を出さない（#3255）。選ばれたモデルはカードの印、根拠は確率バーが示す
+    if (result.source === "jev") return null;
     const modelName = describePickedModel(agent, result.model);
     return (
-      <div className="flex flex-col gap-1">
-        <div className="flex items-start gap-1 text-xs text-muted-foreground">
-          {/* 誰が選んだのかを先頭に出す（#3189）。判定の当たり外れを見比べるとき、
-              Jevで選んだのかアプリ内AIで選んだのかが分からないと比べようがない。
-              切り詰める理由文とは別の要素にして、バッジの上側が欠けないようにする（#3231） */}
-          {result.source === "jev" && (
-            <span className="inline-flex shrink-0 rounded-full border px-1.5 py-px text-[10px] leading-none font-semibold">
-              Jev
-            </span>
-          )}
-          {/* 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
-              ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す */}
-          <p
-            className="line-clamp-2 min-w-0"
-            title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
-          >
-            <span className="font-medium text-foreground">{modelName}</span>
-            {result.reason ? ` — ${result.reason}` : "で起動します。"}
-            {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
-          </p>
-        </div>
-        <ModelPickConfidence result={result} />
+      <div className="flex items-start gap-1 text-xs text-muted-foreground">
+        {/* 2行までにする（#3119）。理由はAIが書く長文になりがちで、全文を出すとスマホで
+            ダイアログが縦に伸びる。**理由を出す方針は変えない**ので、全文は`title`に残す */}
+        <p
+          className="line-clamp-2 min-w-0"
+          title={`${modelName}${result.reason ? ` — ${result.reason}` : "で起動します。"}`}
+        >
+          <span className="font-medium text-foreground">{modelName}</span>
+          {result.reason ? ` — ${result.reason}` : "で起動します。"}
+          {result.source === "rule" && "（AIを呼べなかったため、ラベルと分量から選びました）"}
+        </p>
       </div>
     );
   }
@@ -1520,23 +1516,6 @@ function ModelPickNotice({
     <p className="text-xs text-muted-foreground">
       Issueのタイトル・本文・ラベル・承認済みの計画から、issue-deckがモデルを選びます。
     </p>
-  );
-}
-
-/**
- * Jevの確信度（#3189）。候補別の確率は、対応するモデルカードの下へ表示する（#3231）。
- *
- * 確率はカードと対応付けて見せることで、接戦かどうかを押す前に見比べやすくする。
- */
-function ModelPickConfidence({
-  result,
-}: {
-  result: ModelPickResult;
-}) {
-  if (result.confidence === undefined) return null;
-
-  return (
-    <p className="text-[11px] text-muted-foreground">確信度 {toPercent(result.confidence)}%</p>
   );
 }
 

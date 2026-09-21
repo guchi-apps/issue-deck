@@ -33,7 +33,7 @@ function request() {
   }) as unknown as Parameters<typeof POST>[0];
 }
 
-const JEV_RESULT = { model: "opus", reason: "難しさ 2/3と判定したためです。", source: "jev" };
+const JEV_RESULT = { model: "opus", reason: "", source: "jev" };
 const AI_RESULT = { model: "sonnet", reason: "通常の実装だと判断したためです。", source: "ai" };
 const RULE_RESULT = { model: "sonnet", reason: "やることの範囲が読めるためです。" };
 

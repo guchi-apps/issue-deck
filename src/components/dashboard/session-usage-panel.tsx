@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, memo, type ReactNode, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -80,7 +80,7 @@ type SessionUsagePanelProps = {
    * 渡さなければ行を押せない（試験・スマホの一部経路）。
    */
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
-  /** スマホ向けに縮める。表をカードへ畳み、コンテキスト列を落とす */
+  /** スマホ向けに縮める。表をカードへ畳み、入力トークン列を落とす */
   compact?: boolean;
   className?: string;
 };
@@ -129,7 +129,7 @@ function Tile({
   label: string;
   value: string;
   sub: string;
-  /** 値と`sub`のあいだに挟む細い帯（コンテキストの内訳）。無ければ出さない */
+  /** 値と`sub`のあいだに挟む細い帯（入力トークンの内訳）。無ければ出さない */
   bar?: ReactNode;
 }) {
   return (
@@ -450,7 +450,7 @@ function GroupTokenBar({ totals, maxTokens }: { totals: UsageTotals; maxTokens: 
   );
 }
 
-/** 合計タイルに挟む、期間全体のコンテキストの内訳。入力側の3つだけを見せる */
+/** 合計タイルに挟む、期間全体の入力トークンの内訳。入力側の3つだけを見せる */
 function ContextBar({ totals }: { totals: UsageTotals }) {
   const segments = groupTokenSegments(totals).slice(0, 3);
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
@@ -1277,7 +1277,7 @@ function CurrentSessionHeading({ session, elapsed }: { session: CurrentSessionUs
   );
 }
 
-/** 金額の棒と、その下の5時間枠の割合。`trailing`は同じ行の右側へ置く（スマホの応答数・コンテキスト） */
+/** 金額の棒と、その下の5時間枠の割合。`trailing`は同じ行の右側へ置く（スマホの応答数・入力トークン） */
 function CurrentSessionBar({
   session,
   maxCost,
@@ -1343,7 +1343,7 @@ function OpenIssueButton({ session, onOpenIssue }: { session: CurrentSessionUsag
  * 材料は実行状況パネルと同じセッション一覧と、pollerが20秒おきに送る動いている転記の使用量で
  * （#3135）、画面を開いている間は20秒おきに取り直す。使用量がまだ届いていないセッションは
  * 「集計待ち」と出す。PCは列を揃えた表、スマホ（`compact`）は
- * 1本1カードで、応答数・コンテキストを5時間枠の割合と同じ行へ寄せる。
+ * 1本1カードで、応答数・入力トークンを5時間枠の割合と同じ行へ寄せる。
  *
  * **最初は閉じた状態で、本数を示す棒グラフだけを出す**（#3134）。何本も動いていると詳細が
  * 画面上部を埋め、期間の集計まで遠くなるため。見出しか棒を押すと上の詳細が開く。
@@ -1436,7 +1436,7 @@ function CurrentSessionsSection({
                   maxCost={maxCost}
                   trailing={
                     <span>
-                      {`${session.responses.toLocaleString()}応答　コンテキスト ${formatUsageTokens(session.contextTokens)}`}
+                      {`${session.responses.toLocaleString()}応答　入力トークン ${formatUsageTokens(session.contextTokens)}`}
                     </span>
                   }
                 />
@@ -1452,7 +1452,7 @@ function CurrentSessionsSection({
               <span>金額（最大との比較）</span>
               <span className="text-right">金額</span>
               <span className="text-right">応答</span>
-              <span className="text-right">コンテキスト</span>
+              <span className="text-right">入力トークン</span>
               <span />
             </li>
             {sessions.map((session) => (
@@ -1486,6 +1486,52 @@ function CurrentSessionsSection({
   );
 }
 
+/**
+ * プラン枠そのもの。**実測のメーター**で、Claude・Codexを並べて置く。
+ *
+ * **期間の切り替えでは描き直さない**（#3257）。受け取るのは期間に連動しない値だけで、
+ * `use-session-usage.ts`が期間変更時に前の参照を引き継ぐので、`memo`が効いて再描画されない。
+ */
+const PlanUsageSection = memo(function PlanUsageSection({
+  claude,
+  codex,
+  claudeNotConfigured,
+  codexNotConfigured,
+  quotaEstimate,
+  isLoading,
+}: {
+  claude: SessionUsageResponse["planUsage"]["claude"];
+  codex: SessionUsageResponse["planUsage"]["codex"];
+  claudeNotConfigured: boolean;
+  codexNotConfigured: boolean;
+  quotaEstimate: SessionUsageResponse["quotaEstimate"];
+  isLoading: boolean;
+}) {
+  return (
+    <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
+      <div>
+        <p className="mb-1 text-xs font-semibold">Claude プラン枠</p>
+        <ClaudeUsageCard
+          data={claude}
+          isLoading={isLoading}
+          error={null}
+          notConfigured={claudeNotConfigured}
+          quotaEstimate={quotaEstimate}
+        />
+      </div>
+      <div>
+        <p className="mb-1 text-xs font-semibold">Codex プラン枠</p>
+        <CodexUsageCard
+          data={codex}
+          isLoading={isLoading}
+          error={null}
+          notConfigured={codexNotConfigured}
+        />
+      </div>
+    </section>
+  );
+});
+
 /** 明細に出すIssueの件数。全部並べると30日で数百行になり、上位が読めなくなる */
 const VISIBLE_ISSUES_STEP = 20;
 
@@ -1504,45 +1550,42 @@ export function SessionUsagePanel({
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
   const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
 
-  const totals = data?.totals;
+  // **期間の集計は、選択中の期間の応答が届いてから出す。** 期間を変えたときは前の応答が残っている
+  // （プラン枠と実行中のセッションを消さないため。`use-session-usage.ts`）ので、`days`で見分ける
+  const period = data && data.days === days ? data : null;
+  const totals = period?.totals;
   const perResponseUsd = totals && totals.responses > 0 ? totals.costUsd / totals.responses : 0;
   const avgContext =
     totals && totals.responses > 0 ? Math.round(totals.contextTokens / totals.responses) : 0;
-  const planReview = data?.byKind.find((kind) => kind.key === "plan-review");
+  const planReview = period?.byKind.find((kind) => kind.key === "plan-review");
   // 日別は期間の全日を並べる（記録の無い日は0で埋める。#3038）。最後の日が「集計中の今日」
-  const dailyDays = data ? fillUsageDays(data.byDay, data.since, data.until) : [];
+  const dailyDays = period ? fillUsageDays(period.byDay, period.since, period.until) : [];
   const todayKey = dailyDays.at(-1)?.date ?? "";
-  const issues = data?.byIssue ?? [];
-  const repositoryPieSlices = data ? buildRepositoryPieSlices(data.byRepository) : [];
-  const agentCostSub = data
-    ? `Claude ${formatUsageUsd(data.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(data.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(data.totalsBySource["github-actions"].costUsd)}`
+  const issues = period?.byIssue ?? [];
+  const repositoryPieSlices = period ? buildRepositoryPieSlices(period.byRepository) : [];
+  const agentCostSub = period
+    ? `Claude ${formatUsageUsd(period.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(period.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(period.totalsBySource["github-actions"].costUsd)}`
     : "";
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      <header className="flex flex-wrap items-center gap-2">
-        <div className="mr-auto">
-          <h2 className="text-sm font-bold">AI使用量</h2>
-          <p className="text-[11px] text-muted-foreground">
-            {/* **いつの報告かを見出しに出す。** 材料はpollerが5分おきに押し込む記録で、
-                開いた瞬間の値ではない（古いまま止まっていることに気付けるようにする）。
-                20秒おきに新しくなるのは「実行中のセッション」欄だけ（#3135） */}
-            サブPCのClaude・CodexセッションとGitHub Actionsが使ったトークン
-            {data?.reportedAt
-              ? `　/　${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`
-              : ""}
+      {/* **見出しの右横にいつの報告かを出し、更新ボタンを右端に置く**（#3257）。材料はpollerが
+          5分おきに押し込む記録で、開いた瞬間の値ではない（古いまま止まっていることに気付けるように
+          する）。20秒おきに新しくなるのは「実行中のセッション」欄だけ（#3135） */}
+      <header className="flex items-center gap-2.5">
+        <h2 className="shrink-0 text-sm font-bold">AI使用量</h2>
+        {data?.reportedAt && (
+          <p className="min-w-0 truncate text-[11px] text-muted-foreground">
+            {`${data.hosts.join("・") || "subpc"} から ${formatRelativeDate(data.reportedAt)}`}
           </p>
-        </div>
-        <Segmented
-          ariaLabel="集計する期間"
-          options={SESSION_USAGE_PERIODS.map((period) => ({
-            value: period.days,
-            label: period.label,
-          }))}
-          value={days}
-          onChange={onChangeDays}
-        />
-        <Button variant="outline" size="icon" className="size-7" onClick={onRefresh} title="更新">
+        )}
+        <Button
+          variant="outline"
+          size="icon"
+          className="ml-auto size-7 shrink-0"
+          onClick={onRefresh}
+          title="更新"
+        >
           {isLoading ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
@@ -1564,57 +1607,59 @@ export function SessionUsagePanel({
         />
       )}
 
-      {/* プラン枠そのもの。**実測のメーター**で、Claude・Codexを並べて置く */}
-      <section className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
-        <div>
-          <p className="mb-1 text-xs font-semibold">Claude プラン枠</p>
-          <ClaudeUsageCard
-            data={data?.planUsage.claude ?? null}
-            isLoading={isLoading && !data}
-            error={null}
-            notConfigured={data?.planNotConfigured.claude ?? false}
-            quotaEstimate={data?.quotaEstimate ?? null}
-          />
-        </div>
-        <div>
-          <p className="mb-1 text-xs font-semibold">Codex プラン枠</p>
-          <CodexUsageCard
-            data={data?.planUsage.codex ?? null}
-            isLoading={isLoading && !data}
-            error={null}
-            notConfigured={data?.planNotConfigured.codex ?? false}
-          />
-        </div>
-      </section>
+      <PlanUsageSection
+        claude={data?.planUsage.claude ?? null}
+        codex={data?.planUsage.codex ?? null}
+        claudeNotConfigured={data?.planNotConfigured.claude ?? false}
+        codexNotConfigured={data?.planNotConfigured.codex ?? false}
+        quotaEstimate={data?.quotaEstimate ?? null}
+        isLoading={isLoading && !data}
+      />
 
-      {isLoading && !data && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+      {/* 期間の選択は**プラン枠の下**（#3257）。切り替わるのはこの下の集計だけで、プラン枠と
+          実行中のセッションは期間に連動しない */}
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="text-xs font-semibold">集計期間</span>
+        <Segmented
+          ariaLabel="集計する期間"
+          options={SESSION_USAGE_PERIODS.map((option) => ({
+            value: option.days,
+            label: option.label,
+          }))}
+          value={days}
+          onChange={onChangeDays}
+        />
+        <span className="text-[11px] text-muted-foreground">この下の集計だけが切り替わります</span>
+      </div>
 
-      {data && (
+      {isLoading && !period && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+
+      {period && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile
               label="従量課金相当"
-              value={formatUsageUsd(data.totalsByAgent.claude.costUsd + data.totalsByAgent.codex.costUsd)}
+              value={formatUsageUsd(period.totalsByAgent.claude.costUsd + period.totalsByAgent.codex.costUsd)}
               sub={agentCostSub}
             />
             <Tile
               label="応答"
-              value={data.totals.responses.toLocaleString()}
-              /* コンテキストタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
+              value={period.totals.responses.toLocaleString()}
+              /* 入力トークンタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
               sub={`1応答 ${formatUsageUsd(perResponseUsd)}・平均 ${formatUsageTokens(avgContext)}`}
             />
             <Tile
-              label="コンテキスト"
-              value={formatUsageTokens(data.totals.contextTokens)}
-              bar={<ContextBar totals={data.totals} />}
-              sub={`入力 ${formatUsageTokens(data.totals.inputTokens)}・書込 ${formatUsageTokens(data.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(data.totals.cacheReadTokens)}`}
+              label="入力トークン"
+              value={formatUsageTokens(period.totals.contextTokens)}
+              bar={<ContextBar totals={period.totals} />}
+              sub={`内訳 入力 ${formatUsageTokens(period.totals.inputTokens)}・書込 ${formatUsageTokens(period.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(period.totals.cacheReadTokens)}`}
             />
             <Tile
               label="セッション"
-              value={data.totals.sessions.toLocaleString()}
+              value={period.totals.sessions.toLocaleString()}
               /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
                  1本が最大5行に現れる）ため、集計側が数えた本数を使う（#2779） */
-              sub={`実装 ${data.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${data.totalsBySource["github-actions"].sessions}`}
+              sub={`実装 ${period.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${period.totalsBySource["github-actions"].sessions}`}
             />
           </div>
 
@@ -1640,7 +1685,7 @@ export function SessionUsagePanel({
               <div className="flex items-baseline justify-between gap-2">
                 <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
                 <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
-                  {`${data.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
+                  {`${period.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
                 </span>
               </div>
               {repositoryPieSlices.length === 0 ? (
@@ -1659,7 +1704,7 @@ export function SessionUsagePanel({
               <Breakdown
                 title="セッション種別別"
                 hint="実装はフェーズで分割（転記から推定）"
-                rows={data.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
+                rows={period.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
                 colorOf={(key) => KIND_ROW_COLORS[key]}
                 separator={{
                   label: "作業の流れの外",
@@ -1701,10 +1746,10 @@ export function SessionUsagePanel({
                 )}
                 {/* 明細は上位200件で切ってある（応答の大きさを抑えるため）。
                     **合計・内訳には入っている**ので、そこだけを断る */}
-                {data.omittedIssues > 0 && issues.length <= visibleIssues && (
+                {period.omittedIssues > 0 && issues.length <= visibleIssues && (
                   <p className="pt-1 text-center text-[11px] text-muted-foreground">
-                    ほか {data.omittedIssues.toLocaleString()} 件（合計{" "}
-                    {formatUsageUsd(data.omittedIssueCostUsd)}
+                    ほか {period.omittedIssues.toLocaleString()} 件（合計{" "}
+                    {formatUsageUsd(period.omittedIssueCostUsd)}
                     ）は明細に出していません。上の合計・内訳には入っています。
                   </p>
                 )}

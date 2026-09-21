@@ -44,7 +44,8 @@ export type DashboardPane =
   | "usage"
   | "releases"
   | "nightly"
-  | "knowledge";
+  | "knowledge"
+  | "ideas";
 
 function parsePane(value: string | null): DashboardPane {
   if (
@@ -54,7 +55,8 @@ function parsePane(value: string | null): DashboardPane {
     value === "usage" ||
     value === "releases" ||
     value === "nightly" ||
-    value === "knowledge"
+    value === "knowledge" ||
+    value === "ideas"
   ) {
     return value;
   }
@@ -288,6 +290,10 @@ export function useIssueFilters() {
     setFilters({ pane: "knowledge", pr: null, prmodal: null });
   }, [setFilters]);
 
+  const selectIdeasPane = useCallback(() => {
+    setFilters({ pane: "ideas", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // PRを開くのは現在地が進む操作なので履歴を積む。閉じる側（null）は戻る操作・マージ後の
   // 後始末で呼ばれるため積まない（積むと戻る操作が往復を増やすだけになる。#1396）。
   const selectPullRequest = useCallback(
@@ -339,6 +345,7 @@ export function useIssueFilters() {
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectKnowledgePane,
+    selectIdeasPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,

@@ -563,6 +563,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **画面の並びは「見出し＋報告の経過時間＋更新ボタン（右端）→ 実行中のセッション → プラン枠 →
+    期間選択 → 期間の集計」**（#3257）。期間選択がプラン枠の下にあるのは、切り替わるのが下の
+    集計だけだから。**期間を変えてもプラン枠・実行中のセッションは取り直さず描き直さない。**
+    `use-session-usage.ts`が期間だけが変わった取得で前の応答を残し、`planUsage`・
+    `planNotConfigured`・`quotaEstimate`・`currentSessions`を前の参照のまま引き継ぐ（応答は
+    期間の集計と1本のままなので、サーバーは変えていない）。画面は`data.days`が選択中の期間と
+    一致するまで集計を隠し、プラン枠は`memo`化した`PlanUsageSection`へ渡す。プラン枠を取り直すのは
+    初回と更新ボタンのときだけ
   - **5時間枠1%あたりの実測換算（`buildQuotaEstimate`）は、#2666（`de23eb8e`）で廃止した
     `buildQuotaScale`/`toQuotaPercent`と同じ計算式の再導入**（#2988）。「向きが違うから別物」
     ではなく、計算自体（窓内の実測消費÷実測の使用率）は同一。**変えたのは2点だけ。**
@@ -3197,7 +3205,9 @@ export function POST(request: NextRequest) {
   `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければラベルと分量からの
   ルールへ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
   自動で1回呼ぶ**〈#3106。最初の選択は設定の値で、「設定に従う」は削除した。検証は
-  `parseClaudeLocalModelSetting`〈`pick`を通す〉と`parseClaudeLocalModel`〈弾く〉に分かれる〉）。**積むのは決まった具体的なモデル名**で、`auto`（`--model`を付けない＝
+  `parseClaudeLocalModelSetting`〈`pick`を通す〉と`parseClaudeLocalModel`〈弾く〉に分かれる〉。
+  **判定をJevで行うときは、聞くのも出すのもモデルの選択だけ**〈#3255。難しさ・調査の要否・
+  確信度はモデルの選択に使っていなかったため、質問ごとやめた〉）。**積むのは決まった具体的なモデル名**で、`auto`（`--model`を付けない＝
   画面の表記は「CLIの既定」）ではない。**そのセッションが実際に使っているモデル**は
   `DispatchSessionView.models`に載り、セッションの行に印として出る——出どころは転記の集計
   （`SessionUsage.models`）しか無く、pollerの報告は5分ごとなので**最初の応答が集計される

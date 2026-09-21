@@ -40,6 +40,7 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
     case "preview":
     case "nightly-run":
     case "knowledge":
+    case "ideas":
       return null;
     case "issue-detail":
       return resolveBottomNavTab(screen.back);

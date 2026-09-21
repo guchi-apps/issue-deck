@@ -387,6 +387,37 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 （`claudeModel`・`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——
 引き続きHaiku・`auto`を選べる（前掲「使用するモデルの設定」）。
 
+#### auto modeを外してHaikuを使う形は採らない（#3248）
+
+「auto modeが要らない軽い作業ならHaikuでもよいのでは」という案は成り立たない。
+**auto modeを外すと、ファイル編集は通るがBashが1件ずつ承認待ちになる。** ローカルセッションは
+`git add`・`git commit`・`git push`・`gh pr create`・`rg`を使うが、許可リスト
+（[scripts/lib/agent-allowed-tools.sh](../../scripts/lib/agent-allowed-tools.sh)）にあるのは
+読み取りと検証のコマンドだけで、書き込み系は意図的に入れていない。通そうとすると許可リストを
+書き込み系まで広げることになり、**auto modeの権限クラシファイアを外したうえで無条件に通す範囲を
+増やす**という、いちばん避けたい形になる。広げても承認プロンプトは消えない（コマンド置換を含む形は
+静的解析できず規則の対象外。前掲のとおり#2017で実測）。
+
+Claude Code 2.1.278（2026-09-21）で実際に確かめた結果は次のとおり。`--print`での1往復に
+Write・Bashを1件ずつ行わせ、結果JSONの`permission_denials`を見た。
+
+| 起動 | Write | Bash（`touch … && git init`） |
+|---|---|---|
+| `--model haiku --permission-mode auto` | 拒否 | — |
+| `--model sonnet --permission-mode auto` | 成功 | — |
+| `--model haiku --permission-mode acceptEdits` | 成功 | 拒否 |
+| `--model haiku --permission-mode dontAsk` | — | 拒否 |
+
+上流の[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)は
+重複としてclose、統合先の
+[#42648](https://github.com/anthropics/claude-code/issues/42648)も無活動でcloseされており、
+**Haikuでauto modeが動かない状態は直っていない。** 直ったかどうかは上の1行目
+（Haiku＋auto modeでWriteが通るか）で確かめられる。
+
+なお**Codexは最も軽いモデル（Luna）を選べる**ため、「実装を開始」ダイアログはCodexが4択・
+Claudeが3択の非対称になっている。Codexは`--ask-for-approval never`で走らせ権限モードの制約が
+無いためで（#2377）、Claude側だけ候補が1つ少ないのはこの章の制約による。
+
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
 品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
 
@@ -487,11 +518,16 @@ Issueの要求により、ダイアログの選択肢（`MODEL_ENTRIES`）・設
   （`POST https://api.typesafe.ai/v1/systemone`・`src/lib/typesafe/system-one.ts`）。
   **候補外の答えが構造上返らない**ので、アプリ内AIに「JSONだけを出力してください」と頼んで
   読み取る経路（`parseModelPick`）で起きていた「応答を読めずルールへ倒れる」が無くなる
-- **理由の1文はコードが組み立てる。** Jevは説明文を返さないため、モデルの選択（`choice`）と
-  一緒に難しさ（`score`）と「調査から始まるか」（`noul`）を聞き、**判定と同じ根拠**から
-  `formatJevReason`が1文にする。後付けの説明にしないためで、聞くのは1回の呼び出しで済む
-- **確信度と候補ごとの確率も画面へ出す**（Jevのときだけ）。88%対10%ならそのまま押せばよく、
-  45%対42%なら自分で選び直す材料になる——理由の1文ではここが読み取れない
+- **Jevのときは理由の文章も確信度も出さない**（#3255。聞くのも`choice`の1問だけ）。#3189では
+  モデルの選択（`choice`）と一緒に難しさ（`score`）と「調査から始まるか」（`noul`）を聞き、
+  `formatJevReason`が「難しさ 0.1/3・原因の調査から始まる見込み 9%と判定したためです」の
+  1文を組み立てていた。**この2つはモデルの選択には使っておらず**、選ぶのは`choice`の答え
+  だけだったため、**同じ入力から別々に出た答えが理由として並んでいる**形になっていた
+  （難しさ 2.7/3 でも`sonnet`が選ばれうる）。読む人が判定の根拠と取り違えるので、表示・質問
+  ともにやめた。画面に残るのは候補ごとの確率と、おまかせが選んだカードの印だけになる
+- **候補ごとの確率は画面へ出す**（Jevのときだけ）。88%対10%ならそのまま押せばよく、
+  45%対42%なら自分で選び直す材料になる——**Jevで判定したことも、確率が出ているかで分かる**
+  （#3255でバッジをやめたため）
 - **判定の材料は既存の経路と同じ**（Issueのタイトル・本文・ラベル・承認済みの計画）だが、
   **送信先が1社増える。** privateリポジトリ（`guchi-apps/vps`・`docs`・`subpc`）のIssue本文も
   対象になるため、**切り替える設定の説明文にその旨を出している**（既定はアプリ内AIのままで、
