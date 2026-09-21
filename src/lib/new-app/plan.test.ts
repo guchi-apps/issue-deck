@@ -278,6 +278,22 @@ describe("buildInitIssueBody", () => {
     ).toContain('"build:ci": "next build"');
   });
 
+  it("Next.js系では next.config.ts を next.config.mjs へ置き換えさせる（#3223）", () => {
+    // `next.config.ts`のままだと、本番の`next start`が起動時にSWCを読み込んで常駐する
+    for (const kind of ["next", "next-db"] as const) {
+      const body = buildInitIssueBody(spec({ kind }), REFS, SCAFFOLD);
+      expect(body, kind).toContain("`next.config.mjs` に置き換え");
+      expect(body, kind).toContain('`"next.config.mjs"`');
+      expect(body, kind).toContain("`next.config.ts` は残さない");
+    }
+  });
+
+  it("Next.js以外では next.config の置き換えを出さない（#3223）", () => {
+    expect(buildInitIssueBody(spec({ kind: "fastapi" }), REFS, SCAFFOLD)).not.toContain(
+      "next.config",
+    );
+  });
+
   it("packageManagerでpnpmの版を固定させる（#2378）", () => {
     // ci.yml・deploy.ymlのpnpm/action-setupもVPSのcorepackも、ここを見て版を決める
     const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
