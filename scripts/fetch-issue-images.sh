@@ -38,7 +38,7 @@ EOF
 
 # `src/lib/uploaded-images.ts`の`UPLOADED_IMAGE_FILENAME_SOURCE`と同じ形。
 # ここで拾えないものは配信側でも404になるので、緩める必要は無い。
-FILENAME_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp)'
+FILENAME_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp|svg)'
 
 sources=()
 while [[ $# -gt 0 ]]; do

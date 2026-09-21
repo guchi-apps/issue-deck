@@ -25,6 +25,7 @@ import {
   splitAttachments,
   type ImageAttachment,
 } from "@/lib/markdown-attachments";
+import { isSvgImageUrl } from "@/lib/uploaded-images";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
@@ -39,9 +40,15 @@ export function getRepoIssueSuggestions(issues: Issue[], repositoryFullName: str
     .map((issue) => ({ number: issue.number, title: issue.title }));
 }
 
+// SVGサムネイルの地。透明な部分が見えるよう市松にする（#3286）
+const SVG_CHECKER_STYLE = {
+  backgroundImage: "repeating-conic-gradient(var(--muted) 0% 25%, var(--background) 0% 50%)",
+  backgroundSize: "12px 12px",
+};
+
 const MENTION_SUGGESTIONS = ["claude"];
 const MAX_ISSUE_SUGGESTIONS = 8;
-const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
 
 type Trigger = {
   type: "mention" | "issue";
@@ -202,8 +209,12 @@ export function MentionTextarea({
       const url = await postImage(file);
       // カーソル位置は見ない。添付は常に末尾（サムネイル列の右端）へ足す（#1819）。
       emitChange(bodyRef.current, [...attachmentsRef.current, { name: file.name, url }]);
-    } catch {
-      setUploadError("画像のアップロードに失敗しました");
+    } catch (error) {
+      setUploadError(
+        error instanceof Error && error.message === "invalid_svg"
+          ? "SVGとして読み取れないファイルです"
+          : "画像のアップロードに失敗しました",
+      );
     } finally {
       setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
     }
@@ -478,7 +489,8 @@ function AttachmentStrip({
         // プレビューは閉じずに上へ重ねる。閉じると、プレビューの履歴エントリを外す
         // history.back()が書き込み側の積んだエントリを外してしまい、開いた直後に閉じる。
         // 書き込みを閉じたときの戻る操作でプレビューも一緒に閉じる（use-history-dismiss.ts）
-        onAnnotate={disabled ? undefined : () => setAnnotating(preview)}
+        // SVGは書き込みの対象外（書き込みはcanvasを介してPNGへ描き出すため。#3286）
+        onAnnotate={disabled || isSvgImageUrl(preview?.src ?? "") ? undefined : () => setAnnotating(preview)}
         // 書き込み中は描画を外し、全画面の層を1枚にする（#2983）
         suspended={annotating !== null}
       />
@@ -489,43 +501,59 @@ function AttachmentStrip({
           if (annotating) await onAnnotated(annotating.src, file);
         }}
       />
-      {attachments.map((attachment, index) => (
-        <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
-          {/* サムネイルは小さく中身を確かめられないので、押すとアプリ内で原寸を開く（#2065） */}
-          <button
-            type="button"
-            onClick={() => setPreview({ src: attachment.url, name: attachment.name })}
-            title={`${attachment.name}（拡大する）`}
-            className="block size-full cursor-zoom-in overflow-hidden rounded-md border"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={attachment.url} alt={attachment.name} className="size-full object-cover" />
-            <span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-[9px] leading-tight text-white">
-              {attachment.name}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onRemove(index)}
-            disabled={disabled}
-            aria-label={`${attachment.name} の添付を取り消す`}
-            className="absolute top-0.5 right-0.5 grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
-          >
-            <X className="size-3" />
-          </button>
-          {/* 添付を取り消すバツと対角に置き、押し間違えないようにする（#2972） */}
-          <button
-            type="button"
-            onClick={() => setAnnotating({ src: attachment.url, name: attachment.name })}
-            disabled={disabled}
-            aria-label={`${attachment.name} に書き込む`}
-            title="書き込む"
-            className="absolute right-0.5 bottom-0.5 grid size-6 place-items-center rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
-          >
-            <Pencil className="size-3" />
-          </button>
-        </div>
-      ))}
+      {attachments.map((attachment, index) => {
+        const isSvg = isSvgImageUrl(attachment.url);
+        return (
+          <div key={`${attachment.url}-${index}`} className="relative size-16 shrink-0 md:size-18">
+            {/* サムネイルは小さく中身を確かめられないので、押すとアプリ内で原寸を開く（#2065） */}
+            <button
+              type="button"
+              onClick={() => setPreview({ src: attachment.url, name: attachment.name })}
+              title={`${attachment.name}（拡大する）`}
+              className="block size-full cursor-zoom-in overflow-hidden rounded-md border"
+            >
+              {/* SVGは背景が透明なことが多いので市松の地に載せ、切り抜かず全体を出す（#3286） */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={attachment.url}
+                alt={attachment.name}
+                className={cn("size-full", isSvg ? "object-contain p-2 pb-3.5" : "object-cover")}
+                style={isSvg ? SVG_CHECKER_STYLE : undefined}
+              />
+              {isSvg && (
+                <span className="absolute top-0.5 left-0.5 rounded-sm bg-primary px-1 text-[9px] leading-[15px] font-bold tracking-wide text-primary-foreground">
+                  SVG
+                </span>
+              )}
+              <span className="absolute inset-x-0 bottom-0 truncate bg-linear-to-t from-black/80 to-transparent px-1 pt-2 pb-0.5 text-[9px] leading-tight text-white">
+                {attachment.name}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              disabled={disabled}
+              aria-label={`${attachment.name} の添付を取り消す`}
+              className="absolute top-0.5 right-0.5 grid size-6 place-items-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+            >
+              <X className="size-3" />
+            </button>
+            {/* 添付を取り消すバツと対角に置き、押し間違えないようにする（#2972）。SVGには出さない */}
+            {!isSvg && (
+              <button
+                type="button"
+                onClick={() => setAnnotating({ src: attachment.url, name: attachment.name })}
+                disabled={disabled}
+                aria-label={`${attachment.name} に書き込む`}
+                title="書き込む"
+                className="absolute right-0.5 bottom-0.5 grid size-6 place-items-center rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                <Pencil className="size-3" />
+              </button>
+            )}
+          </div>
+        );
+      })}
       {uploads.map((upload) => (
         <div
           key={upload.id}
@@ -572,7 +600,10 @@ async function postImage(file: File): Promise<string> {
   const formData = new FormData();
   formData.append("file", file);
   const res = await fetch("/api/issues/images", { method: "POST", body: formData });
-  if (!res.ok) throw new Error("upload_failed");
+  if (!res.ok) {
+    const body: { error?: string } | null = await res.json().catch(() => null);
+    throw new Error(body?.error === "invalid_svg" ? "invalid_svg" : "upload_failed");
+  }
   const data: { url: string } = await res.json();
   return data.url;
 }

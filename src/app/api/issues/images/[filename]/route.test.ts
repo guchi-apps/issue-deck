@@ -57,6 +57,32 @@ describe("GET /api/issues/images/[filename]", () => {
     expect(Buffer.from(await res.arrayBuffer())).toEqual(BYTES);
   });
 
+  it("SVGは画像として配信しつつ、直接開かれても実行されないヘッダーを付ける（#3286）", async () => {
+    const svgName = FILENAME.replace(/\.png$/, ".svg");
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    await mkdir(UPLOADED_IMAGE_DIR, { recursive: true });
+    await writeFile(path.join(UPLOADED_IMAGE_DIR, svgName), svg);
+    try {
+      const res = await GET(request, params(svgName));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/svg+xml");
+      expect(res.headers.get("Content-Security-Policy")).toContain("sandbox");
+      expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
+      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    } finally {
+      await rm(path.join(UPLOADED_IMAGE_DIR, svgName), { force: true });
+    }
+  });
+
+  it("SVG以外にはCSPを付けない（従来どおり）", async () => {
+    await writeFile(path.join(UPLOADED_IMAGE_TRASH_DIR, FILENAME), BYTES);
+
+    const res = await GET(request, params(FILENAME));
+
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
   it("どちらにも無ければ404", async () => {
     expect((await GET(request, params(FILENAME))).status).toBe(404);
   });
