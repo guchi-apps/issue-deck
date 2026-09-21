@@ -315,10 +315,10 @@ type CreateIssueDialogProps = {
  * 種別・リポジトリ・内容・タイトル・ラベル・担当者を**すべて1画面に並べる**。#1605で入れた
  * 2ステップ（内容だけを書く`input` → 推定結果を確かめる`confirm`）は廃止した。
  *
- * **自動で決まるのはタイトルとラベルだけ。** タイトルが空のまま「作成」「作成+実装開始」を
- * 押すと、送信の直前に自動で判定してから作成する（`POST /api/issues/suggest`。#2773）。
- * タイトルをすでに書いていれば判定はスキップする。**専用の付与ボタンは無い**——押した後に
- * 直すことがほぼ無い実運用に合わせ、確認のステップを挟まない。判定だけをその場で試したい
+ * **自動で決まるのはタイトルとラベルだけ。** 「作成」「作成+実装開始」を押すと、タイトルか
+ * ラベルが空なら送信の直前に自動で判定する（`POST /api/issues/suggest`。#2773・#3295）。
+ * 手入力済みのタイトルと手動選択済みのラベルは維持する。**専用の付与ボタンは無い**——押した
+ * 後に直すことがほぼ無い実運用に合わせ、確認のステップを挟まない。判定だけをその場で試したい
  * 場合はラベル欄の横の「付け直す」を使う。
  *
  * **リポジトリは人が決める**（#1884）。初期値になるのは「開いていた画面のリポジトリ」だけで、
@@ -707,22 +707,27 @@ export function CreateIssueDialog({
    * 無人実行に乗ってしまう取り返しの付きにくい間違いになる**ため、呼び出し元には
    * 「続けてはいけない」ことをnullで伝える。
    */
-  async function runSuggestion(): Promise<{ title: string; labels: string[] } | null> {
+  async function runSuggestion({
+    preserveTitle = false,
+  }: {
+    preserveTitle?: boolean;
+  } = {}): Promise<{ title: string; labels: string[] } | null> {
     const result = await generateSuggestion(
       body,
       labels.map((label) => ({ name: label.name, description: label.description })),
     );
     if (!result) return null;
     const mergedLabels = mergeSuggestedLabels(selectedLabels, result.labels);
-    setTitle(result.title);
+    const resolvedTitle = preserveTitle ? title : result.title;
+    setTitle(resolvedTitle);
     setSelectedLabels(mergedLabels);
-    setAutoFilled({ title: true, labels: result.labels.length > 0 });
+    setAutoFilled({ title: !preserveTitle, labels: result.labels.length > 0 });
     setLabelSuggestionMissed(result.labels.length === 0);
-    if (result.kind === "question") {
+    if (!preserveTitle && result.kind === "question") {
       setQuestionHint({ phase: "suggested" });
       return null;
     }
-    return { title: result.title, labels: mergedLabels };
+    return { title: resolvedTitle, labels: mergedLabels };
   }
 
   /** ラベル欄横の「付け直す」（#1884・#2773）。すでにあるタイトルでも強制的に判定し直す。 */
@@ -731,14 +736,19 @@ export function CreateIssueDialog({
   }
 
   /**
-   * 「作成」「作成+実装開始」共通の前処理（#2773）。**タイトルが空のときだけ**送信の直前に
-   * AI判定を行い、その結果を使う。すでに書いていれば判定をスキップしてそのまま使う。
+   * 「作成」「作成+実装開始」共通の前処理（#2773・#3295）。タイトルかラベルが空なら送信の
+   * 直前にAI判定を行う。タイトルを手入力済みならその値は維持し、未選択のラベルだけを補う。
+   * 人がラベルを選んでいれば、その選択をAIで上書きしない。
    *
    * @returns 作成処理を続けてよければ確定したタイトル・ラベル、続けてはいけない場合はnull
    *   （判定に失敗した・質問だと判定されて提案を出した、のいずれか。呼び出し元は静かに中断する）
    */
   async function ensureTitleAndLabels(): Promise<{ title: string; labels: string[] } | null> {
-    if (title.trim()) return { title, labels: selectedLabels };
+    if (title.trim()) {
+      if (selectedLabels.length > 0 || !body.trim()) return { title, labels: selectedLabels };
+      // ラベル判定に失敗しても、手入力したタイトルがあれば従来どおり作成できるようにする。
+      return (await runSuggestion({ preserveTitle: true })) ?? { title, labels: selectedLabels };
+    }
     return runSuggestion();
   }
 

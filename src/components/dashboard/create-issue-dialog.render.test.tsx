@@ -181,12 +181,14 @@ function Harness({
   onNavigateToIssue,
   repositories = [makeRepository()],
   defaultRepositoryFullName = REPOSITORY_FULL_NAME,
+  initialSelectedLabels = [],
 }: {
   onCreated: (issue: Issue) => void;
   /** 渡したときだけ「次に開く画面」の選択が出る（#2862） */
   onNavigateToIssue?: (issue: Issue) => void;
   repositories?: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
+  initialSelectedLabels?: string[];
 }) {
   const [open, setOpen] = useState(true);
   return (
@@ -195,6 +197,20 @@ function Harness({
       onOpenChange={setOpen}
       repositories={repositories}
       defaultRepositoryFullName={defaultRepositoryFullName}
+      initialHandoff={
+        initialSelectedLabels.length > 0
+          ? {
+              kind: "issue",
+              repositoryFullName: defaultRepositoryFullName ?? "",
+              title: "",
+              body: "",
+              selectedLabels: initialSelectedLabels,
+              assignee: null,
+              bodyPrefix: null,
+              savedAt: 0,
+            }
+          : null
+      }
       issues={[]}
       onCreated={onCreated}
       onNavigateToIssue={onNavigateToIssue}
@@ -561,6 +577,7 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     cleanup();
     createIssue.mockReset();
     resetSuggest();
+    repoMeta.labels = [];
     repoMeta.assignees = [];
     window.localStorage.clear();
   });
@@ -823,7 +840,9 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     );
   });
 
-  it("タイトルを自分で書いていれば、作成時に自動判定を呼ばない", async () => {
+  /** #3295。タイトルを手入力しても、ラベルが空なら本文からラベルだけを補う */
+  it("タイトルを自分で書いていても、ラベルが空なら自動判定してタイトルを維持する", async () => {
+    suggestGenerate.mockResolvedValue({ title: "AIが考えた別タイトル", labels: ["51.improvement"] });
     render(<Harness onCreated={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
@@ -838,8 +857,24 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
     await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
+    expect(suggestGenerate).toHaveBeenCalledTimes(1);
+    expect(createIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "自分で書いた", labels: ["51.improvement"] }),
+    );
+  });
+
+  it("ラベルを自分で選んでいれば、作成時に自動判定で上書きしない", async () => {
+    render(<Harness onCreated={vi.fn()} initialSelectedLabels={["40.investigation"]} />);
+
+    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "本文" } });
+    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "自分で書いた" } });
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
     expect(suggestGenerate).not.toHaveBeenCalled();
-    expect(createIssue).toHaveBeenCalledWith(expect.objectContaining({ title: "自分で書いた" }));
+    expect(createIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "自分で書いた", labels: ["40.investigation"] }),
+    );
   });
 
   it("「付け直す」でも同じ生成を呼ぶ", async () => {
