@@ -651,35 +651,119 @@ describe("PRのマージへの入口（#3083）", () => {
   });
 });
 
-// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）
+// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）。
+// 例外は未着手ビューの種類ラベル（#3285）
 describe("一覧のカードにGitHubラベルを出さない（#3159）", () => {
-  it("実装オプション・実行状態・分類・優先度のどれも出さない", () => {
-    const labeled = [
-      makeIssue({
-        number: 1,
-        labels: [
-          label("50.feature"),
-          label("21.plan-required"),
-          label("25.artifact-required"),
-          label("11.local"),
-          label("80.Priority: High"),
-        ],
-      }),
-    ];
+  const labeled = [
+    makeIssue({
+      number: 1,
+      labels: [
+        label("50.feature"),
+        label("21.plan-required"),
+        label("25.artifact-required"),
+        label("11.local"),
+        label("80.Priority: High"),
+      ],
+    }),
+  ];
+  const names = [
+    "50.feature",
+    "21.plan-required",
+    "25.artifact-required",
+    "11.local",
+    "80.Priority: High",
+  ];
+
+  it("未着手以外のビューでは、実装オプション・実行状態・分類・優先度のどれも出さない", () => {
+    render(
+      <IssueList
+        title="すべて"
+        issues={labeled}
+        selectedIssueId={null}
+        onSelectIssue={vi.fn()}
+        view="all"
+      />,
+    );
+
+    for (const name of names) expect(screen.queryByText(name)).toBeNull();
+    // 行そのものは描かれている
+    expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
+  });
+
+  it("ビューを指定しない一覧でも出さない", () => {
     render(
       <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
     );
 
-    for (const name of [
-      "50.feature",
-      "21.plan-required",
-      "25.artifact-required",
-      "11.local",
-      "80.Priority: High",
-    ]) {
+    for (const name of names) expect(screen.queryByText(name)).toBeNull();
+  });
+});
+
+// #3285: 未着手ビューの行にだけ、種類ラベル（30〜69番台）を1行・横スクロールで出す
+describe("未着手ビューの種類ラベル（#3285）", () => {
+  const renderNotStarted = (
+    issues: Issue[],
+    onSelectIssue: (issue: Issue) => void = vi.fn(),
+  ) =>
+    render(
+      <IssueList
+        title="未着手"
+        issues={issues}
+        selectedIssueId={null}
+        onSelectIssue={onSelectIssue}
+        view="not-started"
+      />,
+    );
+
+  it("30〜69番台のラベルだけを番号順に出し、要対応・オプション・優先度は出さない", () => {
+    renderNotStarted([
+      makeIssue({
+        number: 1,
+        labels: [
+          label("62.design"),
+          label("11.local"),
+          label("21.plan-required"),
+          label("30.bug"),
+          label("80.Priority: High"),
+          label("51.improvement"),
+        ],
+      }),
+    ]);
+
+    const shown = ["30.bug", "51.improvement", "62.design"].map((name) => screen.getByText(name));
+    // 番号順に並んでいる
+    expect(shown[0].compareDocumentPosition(shown[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(shown[1].compareDocumentPosition(shown[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const name of ["11.local", "21.plan-required", "80.Priority: High"]) {
       expect(screen.queryByText(name)).toBeNull();
     }
-    // 行そのものは描かれている
+  });
+
+  it("ラベルは折り返さず、収まらないぶんは横スクロールにする", () => {
+    renderNotStarted([
+      makeIssue({ number: 1, labels: [label("30.bug"), label("50.feature"), label("65.docs")] }),
+    ]);
+
+    const container = screen.getByText("30.bug").parentElement as HTMLElement;
+    expect(container.className).toContain("flex-nowrap");
+    expect(container.className).toContain("overflow-x-auto");
+    expect(screen.getByText("30.bug").className).toContain("whitespace-nowrap");
+  });
+
+  it("ラベル行を押しても行が選択される", () => {
+    const onSelectIssue = vi.fn();
+    const issue = makeIssue({ number: 1, labels: [label("30.bug")] });
+    renderNotStarted([issue], onSelectIssue);
+
+    fireEvent.click(screen.getByText("30.bug"));
+
+    expect(onSelectIssue).toHaveBeenCalledWith(issue);
+  });
+
+  it("種類ラベルが付いていない行では何も出さない", () => {
+    renderNotStarted([makeIssue({ number: 1, labels: [label("11.local")] })]);
+
+    expect(screen.queryByText("11.local")).toBeNull();
     expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
   });
 });
