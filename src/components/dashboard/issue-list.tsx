@@ -102,7 +102,9 @@ import {
   resolveIssuePullRequestProgress,
   type IssuePullRequestProgress,
 } from "@/lib/issue-pull-request-progress";
+import { selectKindLabels } from "@/lib/issue-kind-labels";
 import { groupIssuesByRepository, type IssueRepositoryGroup } from "@/lib/issue-stats";
+import { getLabelBadgeStyle } from "@/lib/label-color";
 import {
   formatManualStepListCount,
   type ManualStepReadiness,
@@ -998,6 +1000,8 @@ export function IssueList({
     // 承認ダイアログで許可を待っているか（#2971）。出口のボタンの言い方を「許可待ち」に変える
     // ——「Remote」だけだと、確認待ちの理由が質問なのかアクセスの許可なのかが行から読めない
     const permissionPending = issueSession ? describeSessionPermission(issueSession) !== null : false;
+    // 種類ラベルを出すのは未着手ビューだけ（#3285）
+    const showKindLabels = view === "not-started";
     const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
       labels: issue.labels,
       session: sessionByIssueId.get(issue.id) ?? null,
@@ -1122,8 +1126,36 @@ export function IssueList({
               #{issue.number} {issue.title}
             </span>
           </p>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <div className="flex flex-wrap items-center gap-1">
+          <div
+            className={cn(
+              "flex items-center justify-between gap-2 text-xs text-muted-foreground",
+              // ラベルの有る行と無い行で下段の高さが違うと一覧が不揃いになる。ラベル（20px）に合わせる
+              showKindLabels && "min-h-5",
+            )}
+          >
+            {/* 未着手ビューだけ、種類ラベル（30〜69番台）を1行で出す（#3285。ほかのビューは#3159の
+                とおりGitHubラベルを出さない）。**折り返さず、収まらないぶんは横スクロール**にして、
+                ラベルの多い行だけ背が伸びて一覧が不揃いになるのを避ける。スクロールバーは出さず
+                （行の高さが変わる）、端で切れたラベルを続きの合図にする。
+                行の当たり判定は本文の下に敷いた全面ボタンで、本文は`pointer-events-none`。
+                スクロールを受けるためここだけ`pointer-events-auto`にし、代わりに`onClick`で
+                行の選択を担う（カードのどこを押しても選択、という前提を保つ） */}
+            <div
+              className={cn(
+                "flex items-center gap-1",
+                showKindLabels
+                  ? "pointer-events-auto min-w-0 flex-1 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0"
+                  : "flex-wrap",
+              )}
+              onClick={
+                showKindLabels
+                  ? () => {
+                      setOptimisticSelectedId(issue.id);
+                      onSelectIssue(issue);
+                    }
+                  : undefined
+              }
+            >
               {issueSession && (
                 <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
               )}
@@ -1132,7 +1164,8 @@ export function IssueList({
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}
               />
               {/* レビューの結果（#2855）。この行を開くかどうかは重い指摘が何件あるかで決める。
-                  GitHubのラベルは一覧のカードに出さない（#3159）。付いているものはIssue詳細で見る */}
+                  GitHubのラベルは、未着手ビューの種類ラベル（#3285）を除いて一覧のカードに出さない
+                  （#3159）。付いているものはIssue詳細で見る */}
               {/* レビューとレビューのあいだに入ったPRの件数（#3092）。リポジトリを選んだときだけ */}
               {codeReviewInterval && (
                 <span className="text-[10px] text-muted-foreground tabular-nums">
@@ -1145,6 +1178,16 @@ export function IssueList({
                   progress={codeReviewProgress.get(codeReviewSummaryKey(issue))}
                 />
               )}
+              {showKindLabels &&
+                selectKindLabels(issue.labels).map((label) => (
+                  <span
+                    key={label.name}
+                    className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                    style={getLabelBadgeStyle(label.color)}
+                  >
+                    {label.name}
+                  </span>
+                ))}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {/* 計画の承認へ入る（#2061）。**行き先はアプリの中**で、押すとそのIssueが開き、
