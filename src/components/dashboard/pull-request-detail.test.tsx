@@ -185,7 +185,7 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
   });
 
-  it("レビューが終わったPRはCI状態の隣にバッジを出す（#2150）", () => {
+  it("CI・レビューの状態を四角い操作表示で出す（#3319）", () => {
     renderDetail({
       pullRequest: makePullRequest({
         mergeJudgement: {
@@ -196,8 +196,8 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
-    expect(screen.getByText("CI通過")).toBeTruthy();
-    expect(screen.getByText("レビュー完了")).toBeTruthy();
+    expect(screen.getByText("CI通過").tagName).toBe("SPAN");
+    expect(screen.getByRole("button", { name: /レビュー完了/ })).toBeTruthy();
   });
 
   // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
@@ -215,9 +215,78 @@ describe("PullRequestDetail", () => {
     expect(screen.getByText("レビュー省略")).toBeTruthy();
   });
 
+  it("レビュー実行中は丸い判定バッジを重ねず、操作表示だけを出す（#3319）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "pending",
+          step: "claude-review",
+          runUrl: null,
+          aiReview: { state: "pending", runUrl: null },
+        },
+      }),
+    });
+
+    expect(screen.getAllByText("レビュー実施中")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /レビュー実施中/ })).toBeTruthy();
+  });
+
   it("レビューのcheck-runが無いPRにはバッジを出さない（#2150）", () => {
     renderDetail();
     expect(screen.queryByText(/^Claudeのレビュー/)).toBeNull();
+  });
+
+  it("CIの操作表示を押すと既存のジョブ内訳を開閉できる（#3319）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "pending",
+        ciChecks: [
+          {
+            name: "Unit tests",
+            status: "in_progress",
+            conclusion: null,
+            startedAt: "2026-08-01T01:00:00Z",
+            completedAt: null,
+            htmlUrl: null,
+            runId: null,
+          },
+        ],
+      }),
+    });
+
+    const status = screen.getByRole("button", { name: /CI実行中/ });
+    expect(status.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(status);
+    expect(status.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("CIの内訳")).toBeTruthy();
+    expect(screen.getByText("Unit tests")).toBeTruthy();
+  });
+
+  it("レビューの操作表示を押すと判定と本文を開ける（#3319）", () => {
+    const headSha = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "failed", runUrl: null },
+        },
+      }),
+      detail: makeDetail({
+        events: [
+          makeEvent({
+            body: `## 総評\n\n修正が必要です。\n\n<!-- issue-deck-review-verdict:changes-requested sha=${headSha} -->`,
+          }),
+        ],
+      }),
+    });
+
+    const status = screen.getByRole("button", { name: /レビュー失敗/ });
+    fireEvent.click(status);
+    expect(status.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("要修正")).toBeTruthy();
+    expect(screen.getAllByText("修正が必要です。")).toHaveLength(2);
   });
 
   it("別のPRの取得結果は表示しない", () => {

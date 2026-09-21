@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Bot,
   BotOff,
+  ChevronDown,
+  ChevronRight,
   Clock,
   GitMerge,
   GitPullRequest,
@@ -25,6 +27,7 @@ import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repa
 import type { CiState } from "@/lib/github/release-api";
 import {
   AI_REVIEW_SETTLED_LABEL,
+  AI_REVIEW_SHORT_LABEL,
   CI_STATE_LABEL,
   AI_REVIEW_SETTLED_REASON,
   aiReviewSettledState,
@@ -78,6 +81,49 @@ export function CiStateBadge({ ciState }: { ciState: CiState | null | undefined 
     >
       {CI_STATE_LABEL[ciState]}
     </span>
+  );
+}
+
+/**
+ * PR詳細でCIの内訳を開くための表示。丸いバッジとは役割が違い、押せることを形でも示す。
+ * 一覧などの読み取り専用の場所は`CiStateBadge`を使い続ける（#3319）。
+ */
+export function CiStatusButton({
+  ciState,
+  expanded,
+  onClick,
+}: {
+  ciState: CiState | null | undefined;
+  expanded?: boolean;
+  onClick?: () => void;
+}) {
+  if (!ciState) return null;
+
+  const className = cn(
+    "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium",
+    ciState === "pending"
+      ? "border-primary/60 bg-primary/10 text-primary"
+      : ciState === "failure"
+        ? "border-destructive/60 bg-destructive/10 text-destructive"
+        : "border-border bg-background text-muted-foreground",
+  );
+
+  if (!onClick) return <span className={className}>{CI_STATE_LABEL[ciState]}</span>;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={expanded}
+      className={cn(
+        className,
+        "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+      title={expanded ? "CIの内訳を閉じる" : "CIの内訳を開く"}
+    >
+      {CI_STATE_LABEL[ciState]}
+      {expanded ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+    </button>
   );
 }
 
@@ -319,6 +365,44 @@ export function AiReviewBadge({ aiReview }: { aiReview: AiReview | null | undefi
     >
       {content}
     </a>
+  );
+}
+
+/**
+ * PR詳細で自動レビューの本文を開くための表示。CIと同じ四角い操作表示に揃える（#3319）。
+ * `none`だけは、ワークフローが無いのか起動前なのかを区別できないため出さない。
+ */
+export function AiReviewStatusButton({
+  aiReview,
+  expanded,
+  onClick,
+}: {
+  aiReview: AiReview | null | undefined;
+  expanded: boolean;
+  onClick: () => void;
+}) {
+  const state = aiReview?.state;
+  if (!state || state === "none") return null;
+
+  const label = state === "pending" ? "レビュー実施中" : AI_REVIEW_SHORT_LABEL[state];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={expanded}
+      className={cn(
+        "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        state === "pending"
+          ? "border-primary/60 bg-primary/10 text-primary"
+          : state === "failed"
+            ? "border-destructive/60 bg-destructive/10 text-destructive"
+            : "border-border bg-background text-muted-foreground",
+      )}
+      title={expanded ? "レビューの詳細を閉じる" : "レビューの詳細を開く"}
+    >
+      {label}
+      {expanded ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+    </button>
   );
 }
 
