@@ -835,13 +835,6 @@ describe("件数バーの折り返し（#2107）", () => {
     );
   });
 
-  it("「次にやること」の入口バーも折り返せる", () => {
-    renderList({ view: "not-started", issueOrderCount: 67, onStartIssueOrder: vi.fn() });
-
-    expect(barOf(/未着手のIssueが/).className).toContain("flex-wrap");
-    expect(screen.getByText(/未着手のIssueが/).className).toContain("basis-48");
-  });
-
   // #698。**このビュー唯一の起動口**（リポジトリ別の枠の各行の「実行」）なので、Issueが0件でも出す
   it("「コードレビュー」ビューでは、Issueが1件も無くても実行の入口の枠を出す", () => {
     renderList({ issues: [], view: "code-review", onStartCodeReview: vi.fn() });

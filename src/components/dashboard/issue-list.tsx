@@ -10,7 +10,6 @@ import {
   CircleDot,
   CircleSlash,
   Clock,
-  Compass,
   ExternalLink,
   GitMerge,
   ListChecks,
@@ -260,13 +259,6 @@ type IssueListProps = {
    */
   onStartManualStepGuide?: (startIssueId?: string) => void;
   /**
-   * 「次にやること」（#1853）を開く。「未着手」でだけ使う。
-   * 渡さない・未着手が1件も無い場合はボタンを出さない。
-   * `CLAUDE_CODE_OAUTH_TOKEN`が未設定の環境では親（`useIssueOrderGuide`の`notConfigured`）が
-   * 渡すのをやめるので、押しても何も起きないボタンが残らない
-   */
-  onStartIssueOrder?: () => void;
-  /**
    * コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ使う。
    *
    * このビューの起動の入口は、リポジトリ別の枠（#3092）の各行の「実行」だけで、そのリポジトリを
@@ -285,14 +277,6 @@ type IssueListProps = {
    * 省略時はレビューしたことがあるリポジトリだけを載せる。
    */
   codeReviewRepositoryFullNames?: string[];
-  /** 「次にやること」で1位を自動でサブPCへ積む設定か（#1853）。ボタンの文言が変わる */
-  issueOrderAutoStart?: boolean;
-  /**
-   * 「次にやること」が判定の対象にする件数（#1853）。**この一覧の行数ではなく、
-   * ユーザーの絞り込みを通していない「未着手」の総数**を渡す（`useIssueOrderGuide`）。
-   * 一覧の行数を出すと、リポジトリで絞ったときに「N件あります」と実際に判定する件数がずれる
-   */
-  issueOrderCount?: number;
   /**
    * 絞り込みを指定しているのに、このビューでは適用されない状態か（#1750）。
    * 判定は`hasIgnoredIssueFilters`で行い、ここは受け取った結果を注記として出すだけ。
@@ -456,7 +440,7 @@ function GroupHeader({ group }: { group: IssueRepositoryGroup }) {
 }
 
 /**
- * 一覧の上に並ぶ「〜が n件あります。」の入口バー（手作業アシスタント・「次にやること」）で
+ * 一覧の上に並ぶ「〜が n件あります。」の入口バー（手作業アシスタント）で
  * 共有する見た目。
  *
  * **入りきらないときは折り返す**（#2107）。以前は1行固定の`flex`で、右のバッジ・ボタンだけに
@@ -516,12 +500,9 @@ export function IssueList({
   onUnsnooze,
   checkUserRunningIssueIds,
   onStartManualStepGuide,
-  onStartIssueOrder,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
-  issueOrderAutoStart = false,
-  issueOrderCount = 0,
   filtersIgnored = false,
   dispatch: injectedDispatch,
   onPullToRefresh,
@@ -1485,26 +1466,6 @@ export function IssueList({
             </div>
           </div>
         )}
-
-      {/* 未着手のIssueの着手順をClaudeに決めさせる入口（#1853）。手作業アシスタントと同じく
-          ヘッダーではなく一覧の上に置くことで、PC・スマホのどちらにも同じ位置で出る。
-          **自動開始が有効なら文言でそう伝える**——押した瞬間に実装セッションが積まれるので、
-          「順番を決める」としか書いていないと、始まったことが押した本人から見えない */}
-      {onStartIssueOrder && view === "not-started" && issueOrderCount > 0 && (
-        <div className={cn(COUNT_BAR_CLASS, "bg-sky-500/5")}>
-          <p className={COUNT_BAR_TEXT_CLASS}>
-            未着手のIssueが
-            <span className="font-medium tabular-nums text-foreground">{issueOrderCount}件</span>
-            あります。
-          </p>
-          <div className={COUNT_BAR_ACTIONS_CLASS}>
-            <Button size="xs" className="shrink-0" onClick={onStartIssueOrder}>
-              <Compass />
-              {issueOrderAutoStart ? "順番を決めて開始" : "順番を決める"}
-            </Button>
-          </div>
-        </div>
-      )}
 
       {/* リポジトリ別のレビュー状況（#3092）。リポジトリ全体のコードレビューを実行する入口
           （#698）も兼ねる。**このビュー唯一の起動口**なので、並んでいるIssueが0件でも出す */}

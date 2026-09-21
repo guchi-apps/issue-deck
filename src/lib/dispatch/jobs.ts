@@ -690,7 +690,7 @@ export async function enqueueDispatchJob(params: {
   // そのエージェントの新規実行が一時停止されていないか（#2994）。**先に読んでおき、
   // `reject`のメッセージ組み立てにも使う。** 画面の先出し判定（`resolveDispatchTargetRejection`）
   // と同じ位置（ホストの生存・エージェント対応の直後、未完了ジョブ・生きているセッションの
-  // 判定より前）で弾く。一括投入（`enqueue-issue.ts`）は先出し判定を通してからオプションの
+  // 判定より前）で弾く。一括投入は先出し判定を通してからオプションの
   // ラベルを書くため、ここで弾かないと一時停止中の一括投入でラベルだけが書かれてジョブが
   // 1件も積まれない
   const agentPauseState = await readAgentDispatchPauseState();

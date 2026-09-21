@@ -24,7 +24,7 @@ import { nightlyRunIssueKey } from "@/lib/nightly-run-db";
  * **起動先はclaimしてきたホストの予定だけ。** 積むときにホストを決めてあるので、そのホストが
  * 取りに来た巡回で変換すれば、直後の払い出しでそのまま起動へ回る。他のホストの予定は触らない。
  *
- * 1件ずつの手順は「実装を開始」ダイアログ・「次にやること」（`enqueue-issue.ts`）と同じ順:
+ * 1件ずつの手順は「実装を開始」ダイアログと同じ順:
  * 実ラベルを読んで判定 → `enqueueDispatchJob` → 積めたときだけ`11.local`。オプションのラベルは
  * 積んだ時点で付けてある（`POST /api/nightly-run`）。**この1件ぶんの手順は
  * `launchScheduledRunEntry`に寄せてある**（かつては夜間実行とも共有していたが#3019で削除した。
@@ -265,7 +265,7 @@ export async function launchScheduledRunEntry(params: {
     return { reserved: true, action, stop: false };
   }
 
-  // `11.local`は**積めたときだけ**付ける（`enqueue-issue.ts`と同じ）。付与に失敗しても
+  // `11.local`は**積めたときだけ**付ける（「実装を開始」ダイアログと同じ）。付与に失敗しても
   // 起動自体は妨げない（起動できないより、ラベルが遅れる方が軽い）。
   // **トークンは読み直す**（#3148）。上の取得で延長していれば`user`の値は古く、そのまま渡すと
   // 401→ローテーション済みのリフレッシュトークンでの延長失敗→DB再読込、と毎回遠回りする
