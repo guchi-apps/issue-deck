@@ -9,7 +9,6 @@ import {
   ListChecks,
   Loader2,
   TriangleAlert,
-  Wrench,
 } from "lucide-react";
 
 import { IssueDependents } from "@/components/dashboard/issue-dependents";
@@ -129,20 +128,7 @@ export function ManualStepPanel({
   const asking = closeWarning !== null && askedAboutClose;
 
   return (
-    <section
-      className={cn(
-        "flex flex-col gap-2 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3",
-        className,
-      )}
-      aria-labelledby="manual-step-panel-title"
-    >
-      <p
-        id="manual-step-panel-title"
-        className="flex items-center gap-1.5 text-sm font-medium text-violet-700 dark:text-violet-300"
-      >
-        <Wrench className="size-4 shrink-0" />
-        あなたの手作業を待っています
-      </p>
+    <section className={cn("flex flex-col gap-2", className)} aria-label="手作業の状況と操作">
       {/* 待っている相手の状況（#1705）。実行してよいかの判断材料なので、出口のボタンより先に出す。
           **前提が揃っていなくてもボタンは押せるままにする**——ここの判定は本文に書かれた
           番号からの推定で、外したときに完了できなくなる方が損が大きい */}

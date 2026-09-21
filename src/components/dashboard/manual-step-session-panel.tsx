@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Loader2, MessageSquareText, Monitor } from "lucide-react";
+import { Check, Copy, Loader2, MessageSquareText, Monitor } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import { copyText } from "@/lib/copy-text";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
@@ -23,6 +24,7 @@ import {
   buildManualStepSessionPlan,
   type ManualStepSessionPlan,
 } from "@/lib/manual-step-session-plan";
+import { splitShellCommandLines } from "@/lib/shell-command-lines";
 import type { Issue } from "@/types/issue";
 import { cn } from "@/lib/utils";
 
@@ -246,14 +248,18 @@ function ManualStepSessionRunPlan({
         </span>
       </div>
 
-      <ol className="flex flex-col">
-        {plan.entries.map((entry) => (
+      <ManualStepUserCommands
+        entries={plan.entries.filter((entry) => !entry.checked && entry.rejection !== null)}
+        hostName={hostName}
+      />
+
+      <ol className="flex flex-col border-t">
+        {plan.entries.filter((entry) => entry.checked || entry.rejection === null).map((entry) => (
           <li
             key={entry.line}
             className={cn(
               "flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t px-2.5 py-2 first:border-t-0",
               entry.checked && "opacity-60",
-              !entry.checked && entry.rejection !== null && "bg-amber-500/5",
             )}
           >
             <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
@@ -263,34 +269,19 @@ function ManualStepSessionRunPlan({
             <span className="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
               {/* 端末は**それが理由のときだけ**出す。コマンドが1つに定まらない手順に
                   「サブPC」と付けると、端末のせいで代行できないように読める */}
-              {!entry.checked && entry.rejection === "device_not_runnable" && entry.device !== null && (
-                <Badge tone="device">{entry.device}</Badge>
-              )}
               {entry.checked ? (
                 <Badge tone="done">
                   <Check className="size-3" aria-hidden />
                   実行済み
                 </Badge>
-              ) : entry.rejection === null ? (
-                <Badge tone="auto">自動</Badge>
               ) : (
-                <Badge tone="user">あなたが実行</Badge>
+                <Badge tone="auto">自動</Badge>
               )}
             </span>
             {entry.command !== null && !entry.checked && (
               <pre className="w-full overflow-x-auto rounded border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
                 {entry.command}
               </pre>
-            )}
-            {!entry.checked && entry.rejection !== null && (
-              <p className="w-full text-[11px] leading-relaxed text-muted-foreground">
-                {describeManualStepExecutionRejection(entry.rejection, {
-                  hostName,
-                  device: entry.device,
-                  interactiveCommand: entry.interactiveCommand,
-                  placeholder: entry.placeholder,
-                })}
-              </p>
             )}
           </li>
         ))}
@@ -301,6 +292,103 @@ function ManualStepSessionRunPlan({
         全文を示して毎回聞きます。クローズも最後に聞きます。
       </p>
     </div>
+  );
+}
+
+/**
+ * 人が端末・ブラウザで行うコマンドを、コピーできる単位でまとめて出す（#3303）。
+ *
+ * `splitShellCommandLines`の結果は表示・コピー専用であり、セッションの実行へ渡さない。
+ * そのため、ここで改行や`&&`を分けても本文照合と実行の単位は変わらない。
+ */
+function ManualStepUserCommands({
+  entries,
+  hostName,
+}: {
+  entries: ManualStepSessionPlan["entries"];
+  hostName: string;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const commands = entries.flatMap((entry) =>
+    entry.filledCommand === null
+      ? []
+      : splitShellCommandLines(entry.filledCommand).map((command) => ({ entry, command })),
+  );
+  const allCommands = commands.map(({ command }) => command).join("\n");
+
+  async function handleCopy(key: string, text: string) {
+    if (await copyText(text)) setCopied(key);
+  }
+
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="border-b border-amber-500/30 bg-amber-500/5" aria-labelledby="manual-step-user-commands">
+      <div className="flex flex-wrap items-center gap-2 px-2.5 py-2">
+        <div className="min-w-0 flex-1">
+          <p id="manual-step-user-commands" className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+            あなたが実行 {entries.length}件
+          </p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            PCではまとめて、スマホでは1行ずつコピーして実行できます。
+          </p>
+        </div>
+        {commands.length > 0 && (
+          <Button variant="outline" size="xs" onClick={() => void handleCopy("all", allCommands)}>
+            {copied === "all" ? <Check /> : <Copy />}
+            {copied === "all" ? "コピーしました" : `${commands.length}行をまとめてコピー`}
+          </Button>
+        )}
+      </div>
+      <ol className="flex flex-col border-t border-amber-500/20">
+        {entries.map((entry) => {
+          const entryCommands = commands.filter((item) => item.entry.line === entry.line);
+          return (
+            <li key={entry.line} className="border-t border-amber-500/20 px-2.5 py-2 first:border-t-0">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {entry.kind === "step" ? entry.order : "確認"}
+                </span>
+                <span className="min-w-0 flex-1 text-xs">{entry.text}</span>
+                {entry.rejection === "device_not_runnable" && entry.device !== null && (
+                  <Badge tone="device">{entry.device}</Badge>
+                )}
+              </div>
+              {entryCommands.map(({ command }, index) => {
+                const key = `${entry.line}:${index}`;
+                return (
+                  <div key={key} className="mt-1.5 flex items-start gap-1.5">
+                    <code className="min-w-0 flex-1 overflow-x-auto rounded border bg-background px-2 py-1.5 font-mono text-[11px] leading-relaxed">
+                      {command}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      className="shrink-0"
+                      onClick={() => void handleCopy(key, command)}
+                    >
+                      {copied === key ? <Check /> : <Copy />}
+                      {copied === key ? "コピーしました" : "コピー"}
+                    </Button>
+                  </div>
+                );
+              })}
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                {describeManualStepExecutionRejection(entry.rejection!, {
+                  hostName,
+                  device: entry.device,
+                  interactiveCommand: entry.interactiveCommand,
+                  placeholder: entry.placeholder,
+                })}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+      <span role="status" aria-live="polite" className="sr-only">
+        {copied === null ? "" : "コマンドをコピーしました"}
+      </span>
+    </section>
   );
 }
 

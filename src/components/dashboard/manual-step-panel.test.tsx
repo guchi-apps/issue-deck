@@ -147,6 +147,7 @@ describe("ManualStepPanel", () => {
   it("手順の説明は出さず、クローズのボタンだけを出す", () => {
     render(<ManualStepPanel isSubmitting={false} onComplete={vi.fn()} onSkip={vi.fn()} />);
 
+    expect(screen.queryByText("あなたの手作業を待っています")).toBeNull();
     expect(screen.queryByText(/実装エージェントへは送りません/)).toBeNull();
     expect(screen.queryByRole("list")).toBeNull();
     expect(screen.queryByText(/進捗（Status）はReadyのまま/)).toBeNull();
