@@ -934,11 +934,10 @@ export function IssueList({
     );
   }
 
-  // 一覧からの一括予約（#3284）。**入口を出すのは`onNightlyRunQueued`を渡された画面だけ**で、
-  // 手作業（`manual-step`）・コードレビューの一覧は実装を開始する対象ではないので出さない
+  // 一覧からの一括予約（#3284・#3296）。未着手以外では着手済み・本番反映待ちのIssueまで
+  // 選べてしまうため、入口・選択状態ともに未着手ビューだけに限定する。
   const bulk = useBulkReserve({ onQueued: onNightlyRunQueued });
-  const bulkAvailable =
-    onNightlyRunQueued !== undefined && view !== "manual-step" && view !== "code-review";
+  const bulkAvailable = onNightlyRunQueued !== undefined && view === "not-started";
   const bulkActive = bulkAvailable && bulk.active;
   /** その行を一括予約へ選べない理由。選べるなら`null`（積める判定は「実装を開始」と同じ関数を通す） */
   function bulkRejectionFor(issue: Issue): string | null {
