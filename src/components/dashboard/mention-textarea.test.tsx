@@ -164,6 +164,60 @@ describe("MentionTextarea 画像の添付", () => {
     expect(emittedValue(container)).toBe("再現手順です。\n\n![b.png](/img/b.png)");
   });
 
+  // #3286
+  it("SVGを選べる（ファイル選択の候補に含まれ、アップロードされる）", async () => {
+    stubUpload("/api/issues/images/icon.svg");
+    const { container } = render(<Harness />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileInput.accept).toContain("image/svg+xml");
+
+    await attach(container, makeFile("icon.svg", "image/svg+xml"));
+
+    expect(emittedValue(container)).toBe("![icon.svg](/api/issues/images/icon.svg)");
+  });
+
+  it("SVGのサムネイルには「SVG」の印が付き、書き込みボタンは出さない（PNGには出す）", () => {
+    const { container } = render(
+      <Harness initialValue={"![a.png](/img/a.png)\n![icon.svg](/api/issues/images/icon.svg)"} />,
+    );
+
+    expect(container.querySelector('[aria-label="a.png に書き込む"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="icon.svg に書き込む"]')).toBeNull();
+    // 取り消しは従来どおり使える
+    expect(container.querySelector('[aria-label="icon.svg の添付を取り消す"]')).not.toBeNull();
+    const badges = Array.from(container.querySelectorAll('[data-slot="mention-attachments"] span')).filter(
+      (el) => el.textContent === "SVG",
+    );
+    expect(badges).toHaveLength(1);
+  });
+
+  it("SVGのプレビューには「書き込む」を出さない", () => {
+    const { container } = render(<Harness initialValue={"![icon.svg](/api/issues/images/icon.svg)"} />);
+
+    fireEvent.click(container.querySelector('[title="icon.svg（拡大する）"]') as HTMLElement);
+
+    expect(document.querySelector('[data-slot="image-preview"]')).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "書き込む" })).toBeNull();
+    // 開いたままだと次のテストへ残る（この環境は自動でDOMを片付けない）
+    fireEvent.click(document.querySelector('[aria-label="プレビューを閉じる"]') as HTMLElement);
+  });
+
+  it("SVGとして読み取れないと判定されたときは、その旨を出して添付しない", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({ ok: false, status: 415, json: () => Promise.resolve({ error: "invalid_svg" }) }),
+      ),
+    );
+    const { container } = render(<Harness />);
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    setInputFiles(fileInput, [makeFile("broken.svg", "image/svg+xml")]);
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(await screen.findByText("SVGとして読み取れないファイルです")).toBeTruthy();
+    expect(attachedNames(container)).toEqual([]);
+  });
+
   // 別タブに開くとホーム画面から起動したアプリで戻れなくなるため、アプリ内で開く（#2065）
   it("サムネイルを押すとプレビューが開き、バツボタンで閉じる", () => {
     const { container } = render(<Harness initialValue={"![a.png](/img/a.png)"} />);

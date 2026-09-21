@@ -4,7 +4,7 @@ import path from "node:path";
 import { callClaudeMessages } from "@/lib/claude/request";
 import type { ImageExtractResult } from "@/lib/image-extract-format";
 import { UPLOADED_IMAGE_DIR, UPLOADED_IMAGE_TRASH_DIR } from "@/lib/images/image-storage";
-import { extractUploadedImageFilenames } from "@/lib/uploaded-images";
+import { extractUploadedImageFilenames, isSvgImageUrl } from "@/lib/uploaded-images";
 
 /** 1回に送る画像の上限。読み取りの消費は枚数に比例するため絞る */
 export const MAX_EXTRACT_IMAGES = 4;
@@ -118,9 +118,17 @@ export async function generateImageExtract(
   token: string,
   imageUrls: string[],
 ): Promise<ImageExtractResult> {
-  const filenames = resolveImageFilenames(imageUrls);
+  const attached = resolveImageFilenames(imageUrls);
+  // SVGはAnthropic APIの画像として送れない（400になる）ので、送る前に外す（#3286）。
+  // 書き込みはPNGへ描き出す機能で、SVGには書き込めない（書き込み済みの画像はPNGになっている）
+  const filenames = attached.filter((filename) => !isSvgImageUrl(filename));
   if (filenames.length === 0) {
-    throw new ImageExtractError("no_images", "読み取る画像がありません");
+    throw new ImageExtractError(
+      "no_images",
+      attached.length > 0
+        ? "SVGは読み取れません。PNG・JPEG・GIF・WebPの画像を添付してください"
+        : "読み取る画像がありません",
+    );
   }
   if (filenames.length > MAX_EXTRACT_IMAGES) {
     throw new ImageExtractError(

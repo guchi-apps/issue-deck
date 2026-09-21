@@ -9,7 +9,7 @@ import type { UploadedImage, UploadedImageUsage, UploadedImageSummary } from "@/
  * 未使用と判定して消す」事故になる。
  */
 const UPLOADED_IMAGE_FILENAME_SOURCE =
-  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:png|jpg|gif|webp)";
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:png|jpg|gif|webp|svg)";
 
 /**
  * アップロードAPI（`POST /api/issues/images`）が発行するUUIDファイル名の形式。
@@ -48,6 +48,53 @@ export function extractUploadedImageFilenames(text: string | null | undefined): 
   const matches = text.match(new RegExp(UPLOADED_IMAGE_FILENAME_SOURCE, "g"));
   if (!matches) return [];
   return [...new Set(matches)];
+}
+
+/**
+ * 画像のURL（クエリ付きも可）がSVGを指しているか（#3286）。SVGは透明な地と固有の寸法を持たない
+ * ことがあるため、サムネイル・拡大表示の見せ方（市松の地・書き込みの非表示）を分ける判定に使う。
+ */
+export function isSvgImageUrl(url: string): boolean {
+  return /\.svg(?:[?#].*)?$/i.test(url);
+}
+
+/** SVGの先頭として読める範囲。XML宣言・コメント・DOCTYPEの後ろに`<svg`が来るまでを見る */
+export const SVG_HEAD_SCAN_BYTES = 64 * 1024;
+
+/**
+ * 文字列の先頭がSVG文書として読めるか（#3286）。
+ *
+ * アップロードAPIがSVGを受け付けるときの入口の確認で、**中身の無害化ではない**（無害化は配信の
+ * CSPが担う。`app/api/issues/images/[filename]/route.ts`）。拡張子・MIMEだけを信じて、
+ * HTMLなど別物をSVGとして保存してしまうのを避ける。XML宣言・コメント・DOCTYPEは読み飛ばす。
+ * **正規表現の入れ子の繰り返しは使わない**（空白が長い入力で指数的に遅くなるため、切り出しで進める）。
+ */
+export function looksLikeSvg(head: string): boolean {
+  let text = head.replace(/^\uFEFF/, "");
+  for (;;) {
+    text = text.trimStart();
+    if (text.startsWith("<?")) {
+      const end = text.indexOf("?>");
+      if (end === -1) return false;
+      text = text.slice(end + 2);
+    } else if (text.startsWith("<!--")) {
+      const end = text.indexOf("-->");
+      if (end === -1) return false;
+      text = text.slice(end + 3);
+    } else if (/^<!DOCTYPE/i.test(text)) {
+      const firstClose = text.indexOf(">");
+      const subsetOpen = text.indexOf("[");
+      const end =
+        subsetOpen !== -1 && (firstClose === -1 || subsetOpen < firstClose)
+          ? text.indexOf("]>")
+          : firstClose;
+      if (end === -1) return false;
+      text = text.slice(text.indexOf(">", end) + 1);
+    } else {
+      break;
+    }
+  }
+  return /^<svg[\s>/]/.test(text);
 }
 
 /** `uploads/images/`から読んだファイル1件ぶんの生の情報 */

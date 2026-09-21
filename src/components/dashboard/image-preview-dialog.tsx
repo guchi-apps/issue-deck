@@ -4,6 +4,7 @@ import { ExternalLink, Pencil, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { useHistoryDismiss } from "@/hooks/use-history-dismiss";
+import { isSvgImageUrl } from "@/lib/uploaded-images";
 
 /** プレビューで開いている画像。閉じているときは`null` */
 export type ImagePreviewTarget = {
@@ -82,7 +83,13 @@ export function ImagePreviewDialog({
               <img
                 src={image.src}
                 alt={image.name}
-                className="max-h-full max-w-full cursor-default rounded-md object-contain"
+                // SVGは透明な地に線だけのことが多く、暗幕の上では読めない。白い地に載せ、寸法を
+                // 持たない（小さく縮む）ものにも最低限の大きさを与える（#3286）
+                className={
+                  isSvgImageUrl(image.src)
+                    ? "max-h-full max-w-full min-h-64 min-w-64 cursor-default rounded-md bg-white object-contain"
+                    : "max-h-full max-w-full cursor-default rounded-md object-contain"
+                }
               />
             )}
           </div>

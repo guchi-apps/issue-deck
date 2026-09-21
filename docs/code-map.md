@@ -3784,6 +3784,16 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
+  **受け付ける形式はPNG・JPEG・GIF・WebP・SVG**（#3286）。SVGは拡張子・MIMEを名乗るだけの
+  HTMLなどを保存しないよう、先頭が`<svg`（XML宣言・コメント・DOCTYPEは読み飛ばす）かを
+  `looksLikeSvg`（`lib/uploaded-images.ts`）で確かめ、外れたら415`invalid_svg`を返す。
+  **SVGの扱いは他の形式と3点違う。** (1) 配信（`GET`）にだけ`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`と
+  `X-Content-Type-Options: nosniff`を付ける（`<img>`経由なら実行されないが、URLを新しいタブで
+  直接開くと同一オリジンでスクリプトが動きログインCookieの権限で実行され得るため。中身の無害化は
+  しない）。(2) 入力欄のサムネイルは市松の地に全体を出し「SVG」の印を付け、**「書き込む」は出さない**
+  （書き込みはcanvasを介してPNGへ描き出すため。判定は`isSvgImageUrl`）。(3) 「書き込みから変更内容を
+  読み取る」（`lib/claude/image-extract.ts`）はSVGをAnthropic APIへ送らず外す（送ると400になる）。
+  AIの取得（`scripts/fetch-issue-images.sh`）はSVGも保存し、`Read`でXMLテキストとして読める。
 - `GET /api/issues/images/[filename]` … **ログイン中の本人か、共有シークレットを持つAIだけに返す**
   （#2967）。以前は未認証で、GitHub.com側のIssue画面でも表示できたが、**URLが公開リポジトリの
   本文に載るため誰でも中身を見られた。** 読めるのはログインCookie・`Bearer PROGRESS_REPORT_SECRET`

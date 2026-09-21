@@ -83,6 +83,27 @@ describe("generateImageExtract", () => {
     expect(callClaudeMessages).not.toHaveBeenCalled();
   });
 
+  // SVGはAnthropic APIの画像として送れず400になるため、送る前に外す（#3286）
+  it("SVGだけならAIを呼ばずno_imagesで、SVGが読めない旨を伝える", async () => {
+    const svg = "eeeeeeee-1111-2222-3333-444444444403.svg";
+
+    await expect(generateImageExtract("token", [url(svg)])).rejects.toMatchObject({
+      code: "no_images",
+      message: expect.stringContaining("SVG"),
+    });
+    expect(callClaudeMessages).not.toHaveBeenCalled();
+  });
+
+  it("SVGが混ざっていても、SVGだけを外して残りの画像を読ませる", async () => {
+    callClaudeMessages.mockResolvedValue(aiResponse('{"items":["A"],"unreadable":false}'));
+    const svg = "eeeeeeee-1111-2222-3333-444444444403.svg";
+
+    await generateImageExtract("token", [url(svg), url(NAME_A)]);
+
+    const content = callClaudeMessages.mock.calls[0][0].body.messages[0].content;
+    expect(content.filter((block: { type: string }) => block.type === "image")).toHaveLength(1);
+  });
+
   it("上限を超える枚数はtoo_many_images", async () => {
     const urls = Array.from({ length: 5 }, (_, i) => url(`eeeeeeee-1111-2222-3333-44444444440${i}.png`));
     await expect(generateImageExtract("token", urls)).rejects.toMatchObject({ code: "too_many_images" });
