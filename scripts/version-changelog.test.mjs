@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CHANGELOG_PLACEHOLDER,
   insertChangelogEntry,
   parseReleaseChangelog,
   parseReleaseUsage,
@@ -79,10 +78,20 @@ describe("insertChangelogEntry", () => {
     expect(content).not.toContain("usage: [");
   });
 
-  it("changelogが空なら手で埋めるための枠を作る", () => {
-    const { content } = insertChangelogEntry(BASE, "3.30.0", "2026-08-17", [], []);
+  // 「（変更内容を追記してください）」の枠を作ると、誰も埋めないまま画面に残り続ける（#3282）
+  it("changelogが空ならエントリを作らず、プレースホルダーも残さない", () => {
+    const { content, inserted } = insertChangelogEntry(BASE, "3.30.0", "2026-08-17", [], []);
 
-    expect(content).toContain(CHANGELOG_PLACEHOLDER);
+    expect(inserted).toBe(false);
+    expect(content).toBe(BASE);
+    expect(content).not.toContain("追記してください");
+  });
+
+  it("changelogが空ならusageだけあってもエントリを作らない", () => {
+    const { content, inserted } = insertChangelogEntry(BASE, "3.30.0", "2026-08-17", [], ["1. 設定を開く"]);
+
+    expect(inserted).toBe(false);
+    expect(content).toBe(BASE);
   });
 
   it("同じバージョンが既にあれば何もしない", () => {
