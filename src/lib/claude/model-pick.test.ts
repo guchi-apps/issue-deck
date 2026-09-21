@@ -4,7 +4,6 @@ import {
   buildModelPickPrompt,
   buildModelPickQuestions,
   buildModelPickState,
-  formatJevReason,
   parseModelPick,
   pickModelByJev,
   pickModelByRule,
@@ -220,8 +219,12 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
       "opus",
       "fable",
     ]);
-    expect(questions.difficulty.type).toBe("score");
-    expect(questions.investigation.type).toBe("noul");
+  });
+
+  // 難しさ・調査の要否はモデルの選択に使っておらず、画面にも出さなくなった（#3255）
+  it("聞くのはモデルの1問だけにする", () => {
+    expect(Object.keys(buildModelPickQuestions())).toEqual(["model"]);
+    expect(Object.keys(buildModelPickQuestions("codex"))).toEqual(["model"]);
   });
 
   // Codexの欄でClaudeの候補を出すと、`-m opus`で起動しようとして落ちる（#3192と同じ理由）
@@ -234,31 +237,6 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
       "gpt-5.6-luna",
     ]);
     expect(JSON.stringify(questions.model)).toContain("Codex CLI");
-  });
-});
-
-describe("formatJevReason", () => {
-  // Jevは文章を返さないので、画面に出す理由はここで組み立てる
-  it("難しさと調査の要否から1文にする", () => {
-    expect(formatJevReason({ difficulty: 2, investigation: 0.76, confidence: 0.82 })).toBe(
-      "難しさ 2/3・原因の調査から始まる見込み 76%と判定したためです。",
-    );
-  });
-
-  it("期待値が段の間なら小数で出す", () => {
-    expect(formatJevReason({ difficulty: 2.25, investigation: null, confidence: null })).toBe(
-      "難しさ 2.3/3と判定したためです。",
-    );
-  });
-
-  it("補助の答えが無ければ確信度だけで1文にする", () => {
-    expect(formatJevReason({ difficulty: null, investigation: null, confidence: 0.5 })).toBe(
-      "確信度 50%で選びました。",
-    );
-  });
-
-  it("何も読めなければ空にする（理由なしとして扱う）", () => {
-    expect(formatJevReason({ difficulty: null, investigation: null, confidence: null })).toBe("");
   });
 });
 
@@ -279,7 +257,7 @@ describe("pickModelByJev", () => {
     vi.unstubAllGlobals();
   });
 
-  it("選んだモデル・理由・確信度・確率を返す", async () => {
+  it("選んだモデルと確率を返す。理由は空で、確信度は返さない", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -292,8 +270,6 @@ describe("pickModelByJev", () => {
               confidence: 0.82,
               probabilities: { opus: 0.82, sonnet: 0.15, fable: 0.03 },
             },
-            difficulty: { type: "score", score: 2, confidence: 0.7 },
-            investigation: { type: "noul", noul: 0.76 },
           },
           usage: { input_tokens: 400, output_tokens: 0 },
         }),
@@ -302,14 +278,13 @@ describe("pickModelByJev", () => {
 
     expect(await pickModelByJev(input())).toEqual({
       model: "opus",
-      reason: "難しさ 2/3・原因の調査から始まる見込み 76%と判定したためです。",
+      reason: "",
       source: "jev",
-      confidence: 0.82,
       probabilities: { opus: 0.82, sonnet: 0.15, fable: 0.03 },
     });
   });
 
-  it("補助の答えが欠けていてもモデルさえ読めれば採用する", async () => {
+  it("確率が欠けていてもモデルさえ読めれば採用する", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
