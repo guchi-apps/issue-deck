@@ -710,7 +710,7 @@ describe("mergeWarnings", () => {
       mergeWarnings(
         pullRequest({ baseRef: "main", headRef: "develop", kind: "release", ciState: "success" }),
       ),
-    ).toEqual(["mainへのマージです。マージすると本番デプロイが走ります。"]);
+    ).toEqual(["マージすると本番デプロイが走ります。"]);
   });
 
   it("main宛でCIも落ちている場合は両方返す（#1548）", () => {
@@ -719,7 +719,7 @@ describe("mergeWarnings", () => {
         pullRequest({ baseRef: "main", headRef: "develop", kind: "release", ciState: "failure" }),
       ),
     ).toEqual([
-      "mainへのマージです。マージすると本番デプロイが走ります。",
+      "マージすると本番デプロイが走ります。",
       "CIが失敗しています。",
     ]);
   });

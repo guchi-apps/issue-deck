@@ -13,7 +13,15 @@ import {
   RepairRunBadge,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestCiStatusBadge } from "@/components/dashboard/pull-request-ci-status";
+import {
+  PullRequestProgressLabel,
+  PullRequestProgressStepList,
+} from "@/components/dashboard/pull-request-progress-steps";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
+import {
+  buildIssuePullRequestProgress,
+  toIssuePullRequestProgressSource,
+} from "@/lib/issue-pull-request-progress";
 import {
   canMergeIssuePullRequest,
   issuePullRequestStateLabel,
@@ -197,27 +205,40 @@ export function IssuePullRequestList({
           // 詳細が取れていない行では判断材料が無いので、マージできる前提で出す
           const canMerge = detail ? canMergeIssuePullRequest(detail) : true;
           const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (canMerge || merged || declined);
+          // 開いていて下書きでないPRだけ、Issue詳細の上部と同じ内訳を出す（#3239）。マージ済み・
+          // クローズ・下書きは待っているものが無い（または材料が取れていない）ので、従来の
+          // 状態バッジのまま。この画面でマージ・「マージしない」した直後の行も内訳を外す
+          const progress =
+            detail && detail.state === "open" && !detail.draft && !merged && !declined
+              ? buildIssuePullRequestProgress(toIssuePullRequestProgressSource(detail))
+              : null;
 
           return (
             <li key={link.number} className="flex min-w-0 flex-wrap items-center gap-2">
               <GithubReferenceLink
                 href={link.url}
                 // スマホでのタップ領域を確保する（旧PullRequestLinkBadgeと同じ扱い）
-                className="inline-flex min-h-11 min-w-0 items-center gap-1.5 text-sm font-medium text-primary hover:underline md:min-h-0"
+                className={cn(
+                  "inline-flex min-h-11 min-w-0 items-center gap-1.5 text-sm font-medium text-primary hover:underline md:min-h-0",
+                  // 内訳のある行は、タイトルを1行使い、状態・待っているもの・マージボタンを次の行へ送る
+                  progress && "w-full",
+                )}
               >
                 <GitPullRequest className="size-3.5 shrink-0" />
                 <span className="shrink-0">#{link.number}</span>
                 {detail && <span className="truncate font-normal">{detail.title}</span>}
               </GithubReferenceLink>
               {detail && <IssuePullRequestStateBadge pullRequest={detail} />}
-              {detail && <PullRequestCiStatusBadge status={detail.ciStatus} />}
-              {/* Claudeのレビューが終わったかも、PR画面と同じ部品・同じ並び順で出す（#2150） */}
-              {detail && <AiReviewBadge aiReview={detail.mergeJudgement.aiReview} />}
-              {/* コンフリクトと自動修復の実行中は、PR画面と同じバッジ・同じ文言で出す（#2145）。
-                  CI状態だけを出していた頃は、コンフリクトしていても「CI通過」しか見えなかった */}
-              {detail && <ConflictBadge mergeable={detail.mergeable} />}
+              {detail && progress && <PullRequestProgressLabel progress={progress} />}
+              {/* 内訳を出さない行（マージ済み・クローズ・下書き）は、従来どおりバッジで言う。
+                  CI・レビュー・コンフリクト・判定は内訳の工程に入っているので、内訳がある行では出さない */}
+              {detail && !progress && <PullRequestCiStatusBadge status={detail.ciStatus} />}
+              {detail && !progress && <AiReviewBadge aiReview={detail.mergeJudgement.aiReview} />}
+              {detail && !progress && <ConflictBadge mergeable={detail.mergeable} />}
+              {/* 自動修復の実行中は、PR画面と同じバッジ・同じ文言で出す（#2145）。経過時間を数え直す
+                  生きたバッジなので、内訳の工程には入れずここに残す */}
               {detail && <RepairRunBadge run={detail.repairRun} compact />}
-              {detail && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
+              {detail && !progress && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
               {showMergeButton && onMerge && (
                 <IssueMergeButton
                   className="ml-auto"
@@ -242,6 +263,15 @@ export function IssuePullRequestList({
                       : declineTargetNumber === link.number
                         ? declineError
                         : null
+                  }
+                />
+              )}
+              {progress && (
+                <PullRequestProgressStepList
+                  className="w-full"
+                  progress={progress}
+                  reviewRunUrl={
+                    detail?.mergeJudgement.aiReview.runUrl ?? detail?.mergeJudgement.runUrl ?? null
                   }
                 />
               )}

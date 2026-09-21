@@ -99,9 +99,13 @@ const STARTED_ISSUE_PROGRESS_SET: ReadonlySet<ProgressStatusKey> = new Set(
   STARTED_ISSUE_PROGRESS_STATUSES,
 );
 
-/** 優先度ラベル。`11.local`と番号帯が重ならないよう80・89番台へリネーム済み（CLAUDE.md） */
+/**
+ * 優先度ラベル。`11.local`と番号帯が重ならないよう80番台にある（CLAUDE.md）。
+ * **`85.Priority: Medium`（通常）はここに持たない。** 付いていないIssueと扱いが同じ（並びも
+ * 表示も「通常」）なので、`resolveIssuePriority`はどちらもnullを返す（#3237）。
+ */
 export const HIGH_PRIORITY_LABEL = "80.Priority: High";
-export const LOW_PRIORITY_LABEL = "89.Priority: low";
+export const LOW_PRIORITY_LABEL = "89.Priority: Low";
 
 /** 優先度ラベルから優先度を取る。付いていなければnull（#1704） */
 export function resolveIssuePriority(labels: readonly string[]): BranchFlowIssuePriority | null {

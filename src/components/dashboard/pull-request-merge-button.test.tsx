@@ -65,11 +65,46 @@ describe("PullRequestMergeButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "マージする" }));
 
-    expect(screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。")).toBeTruthy();
+    expect(screen.getByText("マージすると本番デプロイが走ります。")).toBeTruthy();
     expect(screen.getByText("このリリースに含まれる変更")).toBeTruthy();
     // 確認の材料は「マージ前の確認」に集約する（#3093）
     expect(screen.getByText("マージ前の確認")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("確認ダイアログは説明を「リポジトリ名 #番号」だけにし、ブランチ名や重複した警告を出さない（#3260）", () => {
+    stubChanges();
+    render(<PullRequestMergeButton pullRequest={makePullRequest()} onMerged={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    expect(screen.getByText("guchi-apps/issue-deck #2075")).toBeTruthy();
+    expect(screen.queryByText(/をマージします。/)).toBeNull();
+    expect(screen.queryByText(/develop → main/)).toBeNull();
+    expect(screen.queryByText(/mainへのマージです/)).toBeNull();
+    expect(screen.queryByText(/この判定でマージは止まりません/)).toBeNull();
+  });
+
+  it("ボタンは本文のスクロール領域の外（下端）に、キャンセル→マージするの横1列で置く（#3260）", () => {
+    stubChanges();
+    render(<PullRequestMergeButton pullRequest={makePullRequest()} onMerged={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    const dialog = screen.getByRole("alertdialog");
+    const footer = dialog.querySelector('[data-slot="alert-dialog-footer"]');
+    const scrollBody = dialog.querySelector(".overflow-y-auto");
+    expect(footer).not.toBeNull();
+    expect(scrollBody).not.toBeNull();
+    // フッターは本文（スクロールする側）の子ではない
+    expect(scrollBody?.contains(footer)).toBe(false);
+    // 横1列（flex-row）で、左がキャンセル・右がマージする
+    expect(footer?.className).toContain("flex-row");
+    const buttons = Array.from(footer?.querySelectorAll("button") ?? []);
+    expect(buttons.map((button) => button.textContent)).toEqual(["キャンセル", "マージする"]);
+    // 「マージする」は危険色ではなく他の画面の主ボタンと同じ黒（primary）
+    expect(buttons[1].className).toContain("bg-primary");
+    expect(buttons[1].className).not.toContain("bg-destructive");
   });
 
   it("mainへのPRでは、CIの状態を警告リストではなく「マージ前の確認」に出す（#3093）", () => {
@@ -86,7 +121,7 @@ describe("PullRequestMergeButton", () => {
     // 警告リストには本番デプロイの1件だけが残り、CIの「失敗」は確認パネルの行に出る
     expect(screen.queryByText("CIが失敗しています。")).toBeNull();
     expect(screen.getByText("失敗")).toBeTruthy();
-    expect(screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。")).toBeTruthy();
+    expect(screen.getByText("マージすると本番デプロイが走ります。")).toBeTruthy();
   });
 
   it("develop向けのPRでは出さず、取得もしない", () => {

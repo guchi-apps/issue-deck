@@ -422,6 +422,11 @@ export type PullRequestChangeListResponse = {
    * 残りはGitHubで見てもらう（`PullRequestFileListResponse.truncated`と同じ方針）。
    */
   truncated: boolean;
+  /**
+   * マージ先（main）の現在の版（#3260。例: `1.0.12`）。リリースPRの「どの版から上げるか」に使う。
+   * mainの`package.json`から読めないリポジトリ（`version.json`型など）と、読み取りに失敗したときはnull。
+   */
+  previousVersion: string | null;
 };
 
 export type PullRequestFileListResponse = {

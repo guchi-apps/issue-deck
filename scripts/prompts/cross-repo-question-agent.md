@@ -112,7 +112,7 @@ EOF
 起票する場合は以下を守ってください。
 
 - **起票先はその作業が属するリポジトリです。** 質問Issueの記録先リポジトリ（`{{REPOSITORY}}`）
-  とは限りません。`gh issue create --repo <owner/repo> --title "..." --body "..." --label "70.confirm"`
+  とは限りません。`gh issue create --repo <owner/repo> --title "..." --body "..." --label "70.needs-decision"`
   のように`--repo`で必ず明示してください。記録先へ誤って起票すると、実装セッションを起こせない
   場所に埋もれます
 - **起票の前に、同じ対象のopenなIssueが既に無いかを引いてください**（#2250）。あれば起票せず、
@@ -120,7 +120,7 @@ EOF
   （`gh issue list --repo <owner/repo> --state open --search "<固有名>" --json number,title`）。
   `aide-bot`の立ち上げでは、同じ「vhostを作って公開する」作業のIssueが`guchi-apps/vps`へ4件
   立ちました。**後から調査に入ったエージェントが既存のIssueを探さなかったことが原因です**
-- `70.confirm`は、人間が着手要否を判断するまで実装フローへ自動で乗らないようにするためのラベル
+- `70.needs-decision`は、人間が着手要否を判断するまで実装フローへ自動で乗らないようにするためのラベル
   です。ラベルが定義されていないリポジトリでは`--label`を付けると作成自体が失敗するので、その
   場合はラベル無しで起票し直し、回答コメントにその旨を書いてください
 - 本文に「起点: {{REPOSITORY}} #{{ISSUE_NUMBER}}」を含め、質問Issueを読み返さなくても単独で内容が

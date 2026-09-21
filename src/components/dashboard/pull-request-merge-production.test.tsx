@@ -56,12 +56,12 @@ function makeChange(overrides: Partial<PullRequestChange> = {}): PullRequestChan
 
 function mockChanges(
   changes: PullRequestChange[],
-  { commitCount = changes.length, truncated = false } = {},
+  { commitCount = changes.length, truncated = false, previousVersion = null as string | null } = {},
 ) {
   const requestedUrls: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     requestedUrls.push(String(input));
-    return { ok: true, json: async () => ({ changes, commitCount, truncated }) };
+    return { ok: true, json: async () => ({ changes, commitCount, truncated, previousVersion }) };
   });
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, requestedUrls };
@@ -91,12 +91,37 @@ describe("PullRequestMergeProduction", () => {
     // 行頭はPR番号で、対応Issue番号は行の中に添える（#2843）
     expect(screen.getByText("#2077")).toBeTruthy();
     expect(screen.getByText("Issue #2062")).toBeTruthy();
-    // 対応Issueが取れないバンプPRは番号だけを出し、利用者向けの変更ではない印を添える
-    expect(screen.getByText("#2074")).toBeTruthy();
-    expect(screen.getByText("バンプ")).toBeTruthy();
+    // バージョンバンプのPRは行に出さず、PR件数にも数えない（#3260）
+    expect(screen.queryByText("#2074")).toBeNull();
+    expect(screen.queryByText("v4.19.0をリリースする")).toBeNull();
+    expect(screen.queryByText("バンプ")).toBeNull();
+    expect(screen.getByText(/PR 1件/)).toBeTruthy();
     expect(requestedUrls[0]).toContain(
       "/api/pull-requests/changes?owner=guchi-apps&repo=issue-deck&number=2075",
     );
+  });
+
+  it("どの版からどの版へ上げるかを、変更一覧とは別に出す（#3260）", async () => {
+    mockChanges([makeChange()], { previousVersion: "4.18.2" });
+
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
+
+    expect(await screen.findByText("v4.18.2")).toBeTruthy();
+    expect(screen.getByText("v4.19.0")).toBeTruthy();
+    // 版は「このリリースに含まれる変更」の見出しには載せない
+    const heading = screen.getByText("このリリースに含まれる変更").parentElement;
+    expect(heading?.textContent).not.toContain("v4.19.0");
+  });
+
+  it("前の版が読めないときは、新しい版だけを出し、エラーにしない（#3260）", async () => {
+    mockChanges([makeChange()], { previousVersion: null });
+
+    render(<PullRequestMergeProduction pullRequest={makePullRequest()} open />);
+
+    expect(await screen.findByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
+    expect(screen.getByText("v4.19.0")).toBeTruthy();
+    expect(screen.queryByText("→")).toBeNull();
+    expect(screen.queryByText("変更点を取得できませんでした。")).toBeNull();
   });
 
   it("レビュー結果は「マージ前の確認」の1行に集約し、含まれる変更の行には出さない（#3093）", async () => {

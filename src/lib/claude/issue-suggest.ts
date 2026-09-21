@@ -40,7 +40,7 @@ function truncate(text: string, maxLength: number): string {
 
 // 自動生成の選択対象は30〜89番台（71番台を除く）のラベルだけ（#1662）。判定の実体は
 // `isAutoAssignableLabelName`（`src/lib/issue-status.ts`）。`11.local`・`21.plan-required`〜
-// `25.artifact-required`・`71.manual-step`・`90.Close: *`は、本文の内容ではなく運用の都合
+// `25.artifact-required`・`71.manual-step`・`9x.Close: *`は、本文の内容ではなく運用の都合
 // （誰が対応中か・どのゲートを通すか・なぜcloseしたか）で人やワークフローが付けるラベルで、
 // 本文からの推定で付けてよいものではない。**この範囲は#1702で恒久的な仕様として据え置いた**
 // （`71`を別の帯へ移す案・優先度を外す案をどちらも検討したうえで現状維持と決めた）。

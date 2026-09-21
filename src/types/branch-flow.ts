@@ -247,10 +247,10 @@ export type BranchFlowIssueRef = {
 };
 
 /**
- * Issueの優先度（`80.Priority: High` / `89.Priority: low`）。付いていなければnull（#1704）。
+ * Issueの優先度（`80.Priority: High` / `89.Priority: Low`）。付いていない・`85.Priority: Medium`（通常）ならnull（#1704・#3237）。
  *
  * ブランチ画面が使うのは**実装予定の並び順と1行の表示だけ**なので、ラベル名から解決した結果を
- * この2値へ潰して持つ。優先度ラベルは`11.local`と番号帯が重ならないよう80・89番台にリネーム済み。
+ * この2値へ潰して持つ。優先度ラベルは`11.local`と番号帯が重ならないよう80番台にある。
  */
 export type BranchFlowIssuePriority = "high" | "low";
 

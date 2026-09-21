@@ -83,8 +83,8 @@ export function buildIssueOrderPrompt(input: IssueOrderInput): string {
 次の観点で判断し、確からしい順に最大${ISSUE_ORDER_RESULT_LIMIT}件挙げてください。上にあるものほど重視します。
 
 1. **他のIssueの前提になっているもの**を先にする。共通化・基盤・データ構造の変更など、後から入れると他のIssueが手戻りになるもの
-2. **優先度ラベル**（\`80.Priority: High\`は先へ、\`89.Priority: low\`は後ろへ）
-3. **壊れているものを直す**（\`30.bug\`・\`40.unexpected\`）。日常的に使う機能が壊れているものほど先
+2. **優先度ラベル**（\`80.Priority: High\`は先へ、\`85.Priority: Medium\`は付いていないのと同じ通常、\`89.Priority: Low\`は後ろへ）
+3. **壊れているものを直す**（\`30.bug\`・原因の調査が要る\`40.investigation\`）。日常的に使う機能が壊れているものほど先
 4. **短時間で終わるもの**を挟み、未着手が滞留しないようにする
 5. 同じファイル・同じ領域を触るIssueは**連続させる**（並行して実装すると衝突するため）
 

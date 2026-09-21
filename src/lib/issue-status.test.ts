@@ -60,16 +60,21 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
     for (const name of [
       "30.bug",
       "31.security",
-      "40.unexpected",
+      "40.investigation",
       "50.feature",
       "51.improvement",
+      "52.performance",
+      "55.integration",
       "60.chore",
       "61.ops",
       "62.design",
+      "63.refactor",
       "65.docs",
-      "70.confirm",
+      "66.dependencies",
+      "70.needs-decision",
       "80.Priority: High",
-      "89.Priority: low",
+      "85.Priority: Medium",
+      "89.Priority: Low",
     ]) {
       expect(isAutoAssignableLabelName(name)).toBe(true);
     }
@@ -77,6 +82,18 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
 
   it("71番台（手作業。ワークフローがタイトルから付ける）は対象外", () => {
     expect(isAutoAssignableLabelName("71.manual-step")).toBe(false);
+  });
+
+  it("起票時の本文からは決められない状態ラベル（41・72〜75）は対象外", () => {
+    for (const name of [
+      "41.cannot-reproduce",
+      "72.blocked",
+      "73.needs-info",
+      "74.needs-spec",
+      "75.agent-ready",
+    ]) {
+      expect(isAutoAssignableLabelName(name)).toBe(false);
+    }
   });
 
   it("30番未満・90番以上（要対応・進捗・ローカル・実装オプション・クローズ理由）は対象外", () => {
@@ -89,7 +106,7 @@ describe("isAutoAssignableLabelName（ラベル自動付与の対象範囲。#16
       "22.merge-confirm-required",
       "23.preview-required",
       "25.artifact-required",
-      "90.Close: duplicate",
+      "91.Close: duplicate",
       "99.something",
     ]) {
       expect(isAutoAssignableLabelName(name)).toBe(false);

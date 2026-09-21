@@ -1975,7 +1975,7 @@ describe("着手中のIssue（startedIssues。#2386）", () => {
     const flow = build({
       issues: [
         issue({ number: 40, projectStatus: "Implementation" }),
-        issue({ number: 41, projectStatus: "Implementation", labels: ["89.Priority: low"] }),
+        issue({ number: 41, projectStatus: "Implementation", labels: ["89.Priority: Low"] }),
         issue({ number: 42, projectStatus: "Implementation", labels: ["80.Priority: High"] }),
         issue({ number: 43, projectStatus: "Implementation" }),
         issue({ number: 44, projectStatus: "Planning" }),

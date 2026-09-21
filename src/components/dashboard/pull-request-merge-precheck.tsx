@@ -95,10 +95,6 @@ export function PullRequestMergePrecheck({ precheck }: { precheck: MergePrecheck
           );
         })}
       </ul>
-
-      <div className="border-t px-3 py-1.5 text-[11px] text-muted-foreground">
-        この判定でマージは止まりません。最終判断はあなたが行います。
-      </div>
     </div>
   );
 }

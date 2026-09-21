@@ -485,7 +485,7 @@ function progress(
       { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
       { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
       { key: "conflict", label: "コンフリクト", shortLabel: "コンフリクト", state: "done" },
-      { key: "ai-review", label: "レビュー実施中", shortLabel: "レビュー実施中", state: "current" },
+      { key: "ai-review", label: "レビュー", shortLabel: "レビュー", state: "current" },
       { key: "merge", label: "マージ", shortLabel: "マージ", state: "pending" },
     ],
     ...overrides,
@@ -553,7 +553,7 @@ describe("PRを待っている段の内訳（#2816）", () => {
       <WorkflowStatusSteps labels={[]} projectStatus="Develop PR" pullRequestProgress={progress()} />,
     );
     expect(container.textContent).toContain("PR #2822");
-    for (const label of ["実装完了", "CI通過", "コンフリクト", "レビュー実施中", "マージ"]) {
+    for (const label of ["実装完了", "CI通過", "コンフリクト", "レビュー", "マージ"]) {
       expect(container.textContent).toContain(label);
     }
   });
@@ -585,7 +585,7 @@ describe("developへマージの中の位置（#2867）", () => {
             { key: "opened", label: "実装完了", shortLabel: "実装完了", state: "done" },
             { key: "ci", label: "CI通過", shortLabel: "CI通過", state: "done" },
             { key: "conflict", label: "コンフリクト", shortLabel: "コンフリクト", state: "done" },
-            { key: "ai-review", label: "レビュー完了", shortLabel: "レビュー完了", state: "done" },
+            { key: "ai-review", label: "レビュー", shortLabel: "レビュー", state: "done" },
             { key: "merge", label: "マージ", shortLabel: "マージ", state: "current" },
           ],
         })}

@@ -2,7 +2,9 @@
 
 import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
 import { PullRequestMergePrecheck } from "@/components/dashboard/pull-request-merge-precheck";
+import { PullRequestMergeVersion } from "@/components/dashboard/pull-request-merge-version";
 import { usePullRequestChanges } from "@/hooks/use-pull-request-changes";
+import { releaseVersionFromTitle } from "@/lib/branch-flow";
 import { applyReviewVerdicts } from "@/lib/pull-request-changes";
 import {
   buildMergePrecheck,
@@ -12,7 +14,8 @@ import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
  * mainへのPRの確認ダイアログの中身（#3093）。「マージ前の確認」と「このリリースに含まれる変更」を
- * 並べる。
+ * 並べる。先頭には「どの版からどの版へ上げるか」を独立して置く（#3260。
+ * `PullRequestMergeVersion`。前の版は変更点と同じ取得で受け取る）。
  *
  * **変更点の取得はここで1回だけ行い、2つの表示で共有する。** レビューの行の材料（各PRの判定）は
  * 変更点の一覧を読んでから突き合わせるため、別々に取ると同じAPIを2回叩くことになる。
@@ -45,6 +48,11 @@ export function PullRequestMergeProduction({
 
   return (
     <>
+      <PullRequestMergeVersion
+        from={state.previousVersion}
+        to={releaseVersionFromTitle(pullRequest.title)}
+        isLoading={state.isLoading || (state.changes === null && state.error === null)}
+      />
       <PullRequestMergePrecheck precheck={buildMergePrecheck(pullRequest, reviews)} />
       <PullRequestMergeChanges pullRequest={pullRequest} state={state} />
     </>

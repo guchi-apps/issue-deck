@@ -669,7 +669,7 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
   // 待ちが無いPRは1クリックでマージする既定のままだと、確認なしで本番反映まで進んでしまう。
   // **警告を1つ返すことで、既存の「警告があれば確認ダイアログを挟む」経路に必ず乗せる**（#1548）。
   if (isProductionMerge(pullRequest)) {
-    warnings.push("mainへのマージです。マージすると本番デプロイが走ります。");
+    warnings.push("マージすると本番デプロイが走ります。");
   }
   const ci = ciWarning(pullRequest);
   if (ci) warnings.push(ci);

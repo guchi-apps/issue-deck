@@ -345,7 +345,7 @@ gh issue create --title "[手作業] <実行する場所>: <やること>" --lab
 - **文脈が伸びた状態で粘らない。** 調べても実装の見通しが立たないまま往復が積み上がって
   きたら、**Issueが大きすぎるサイン**です。そのまま押し切っても、以降の往復すべてが膨らんだ
   文脈を運び続けるだけになります。区切りの良い範囲までを仕上げてPull Requestにし、残りは
-  `gh issue create`で新しいIssueとして起票（本文に「起点: #<Issue番号>」・`70.confirm`
+  `gh issue create`で新しいIssueとして起票（本文に「起点: #<Issue番号>」・`70.needs-decision`
   ラベル・目安3件まで）してPR本文と完了報告からリンクしてください。区切れるところが無ければ、
   その時点で分かっている状況を`gh issue comment`で報告し、
   `gh issue edit <Issue番号> --add-label "00.check-user" --add-label "01.check-blocked"`

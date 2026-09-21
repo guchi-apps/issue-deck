@@ -143,7 +143,7 @@ async function handlePATCH(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // クローズ理由ラベル（`90.Close: *`）は**クローズより先に付ける**（#2178）。
+  // クローズ理由ラベル（`9x.Close: *`）は**クローズより先に付ける**（#2178）。
   // 後から付けると、`updateIssue`が返すペイロードにそのラベルが乗らず、色も説明も無い状態で
   // DBへ入る（次の同期まで直らない）。先に付ければGitHubがクローズ後のレスポンスで
   // 完全なラベルとして返してくれるので、追加の取得が要らない。

@@ -30,7 +30,9 @@ function RailSlot({ slot, linkable }: { slot: PullRequestRailSlot; linkable: boo
   const content = (
     <>
       <span className="truncate">{slot.columnLabel}</span>
-      <span className={cn("shrink-0 font-semibold", status.className)}>{status.label}</span>
+      <span className={cn("shrink-0 font-semibold", status.className)}>
+        {slot.statusText ?? status.label}
+      </span>
     </>
   );
 

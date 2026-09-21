@@ -537,6 +537,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
   からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
+  **画面の代わりに、ops-dashboardへ`GET /api/ai-usage`で公開している**（#3263。
+  [`lib/ai-usage-export.ts`](../src/lib/ai-usage-export.ts)、認証は`OPS_API_TOKEN`のBearer）。
+  ops-dashboardの「アプリ別のAI利用」の形に合わせ、**Claude・OpenAI・Jevすべてを機能×モデルごとの1行**で返す。
+  **`inputTokens`は「キャッシュに載らなかった分」**で、OpenAIだけは記録済みの`input_tokens`が読み込み
+  キャッシュを含むため公開時に差し引く（記録側は区別していない）。1行でも形が違うとops-dashboardは
+  応答全体を捨てるので、数値は有限の非負整数に丸める。既存の`/api/typesafe/usage`（Jevだけ・回数と入力
+  トークンだけ）はそのまま残す。**ops-dashboardの`AI_APP_USAGE_SOURCES`へこのURLを足すと、TypeSafe連携
+  からのJevの補完をやめてこちらを正にする**（両方を数えるとJevが二重になる）。切り替えはops-dashboard側の設定。
   **単価は[`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)にあり**（#2717）、
   API換算の目安の金額を出すときに引く（プランの実費ではないと断る）。
   **単価を知らないモデルが1つでも混じっているときは金額を出さない**——足りない分を0として
@@ -786,6 +794,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     実行順で選ぶとレビュー中もずっと「CI実行中」になる
   - **出すのは`isPullRequestWaitingStatus`が真の段（`Develop PR`・`Release`）だけ。** PRがまだ
     無い段・マージが済んだ段では待っているものが無く、空の内訳は「まだ来ていない」と読める
+  - **同じ内訳をIssue詳細の下部の対応PRの各行にも出す**（#3239）。部品は
+    [`pull-request-progress-steps.tsx`](../src/components/dashboard/pull-request-progress-steps.tsx)
+    （見出しの1語＝`PullRequestProgressLabel`と工程の一覧＝`PullRequestProgressStepList`）に置き、
+    上部（`WorkflowStatusSteps`）と`IssuePullRequestList`が同じものを通す。上下で言い方・記号を
+    食い違わせないため、行の側で別に組み立てない。**出すのは開いていて下書きでないPRの行だけ**で、
+    マージ済み・クローズ・下書き（この画面でマージ／「マージしない」した直後の行も）は従来の状態
+    バッジのまま。内訳のある行では、CI・レビュー・コンフリクト・判定のバッジを出さない
+    （内訳の工程が言うため）。自動修復のバッジ（`RepairRunBadge`）は経過時間を数え直す生きた
+    バッジなので内訳に入れず残す。レビューの実行ログへのリンクは、行の側が`reviewRunUrl`で渡す
+  - **レビューの工程名は「レビュー」に固定し、状態は記号で言う**（#3239）。CI・コンフリクトと
+    同じ「工程名＋状態記号」に揃え、「レビュー実施中 実施中」のように状態が工程名と記号で2回
+    出るのをやめた。実施中・✔・×に加え、**省略だけは記号（✔）だと「済んだ」と読めるため、
+    段の`statusText`（「省略」）で言う**。マウスを載せたときの全文（「レビュー省略」など）は段の
+    `detail`が持ち、PR一覧のレール（`pull-request-status-rail.ts`）も同じ`detail`・`statusText`を読む
   - **一覧のためにPR一覧を取り直す間隔は1分**（`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`）で、
     **Issueペインを開いている AND 「PR待ち」の行がある**ときだけ回す。`useAutoRefresh`が
     止めるのは裏に回ったタブだけで、行の有無だけを条件にするとAI使用量や設定を開いている
@@ -1060,6 +1082,9 @@ export function POST(request: NextRequest) {
   横展開の運用は[multi-repo-changes.md](multi-repo-changes.md)。
   **一覧にはバッジを出していない**（IssueごとにGraphQLを1回叩くN+1になるため）。運用は
   [multi-agent/labels.md](multi-agent/labels.md)。
+- **共通GitHubラベルの正本は[`.github/labels.json`](../.github/labels.json)、配布は`scripts/sync-labels.sh`**（#3237）。
+  名前・説明・色と旧名から新名への対応を持ち、`labels-manifest.test.ts`が正本とコードの参照名の一致と
+  旧名の取りこぼしを検査する。体系・手順は[label-scheme.md](label-scheme.md)。
 - **Issueの進捗はGitHub Projects v2のStatusで持ち、進捗ラベルはフォールバック。**
   判定は必ず [`lib/issue-progress.ts`](../src/lib/issue-progress.ts) の `resolveProgressStatus`
   を通す（Status名を直接見ない）。Statusは`projects_v2_item`
@@ -2333,6 +2358,17 @@ export function POST(request: NextRequest) {
   開き直すぶんがETagの304になる点も変更ファイル一覧と同じ。**取得できなくてもマージは止めない**
   ——変更点は判断材料であって、マージの前提条件ではない。マージコミットが1件も無いリポジトリ
   （squash運用）ではコミットの件名をそのまま並べる。
+  **ダイアログは上から「バージョン」→「マージ前の確認」→この一覧の順で、ボタンは本文と別に下端へ
+  固定する**（#3260）。**版は一覧の見出しから切り出して独立した帯にする**
+  （[`pull-request-merge-version.tsx`](../src/components/dashboard/pull-request-merge-version.tsx)）——
+  「v旧 → v新」で出し、新しい版はリリースPRのタイトル、**前の版は`/api/pull-requests/changes`が
+  同じ呼び出しで添える`previousVersion`（mainの`package.json`。`fetchPackageVersion`）**から取る。
+  `version.json`型のリポジトリや読み取りの失敗では取れないが、版は判断材料なので変更点は返し、
+  新しい版だけを出す。**バージョンバンプのPRは一覧の行にも件数にも出さない**
+  （毎回必ず前の版のバンプが入るため。`withoutVersionBumps`）。ボタンは横1列の
+  ［キャンセル］［マージする］で、本文だけがスクロールする（`PullRequestMergeButton`）。
+  「マージする」は破壊的操作ではないので`AlertDialogAction`の`variant="default"`（黒）にしている
+  （既定は`destructive`）。見出し・説明文（「リポジトリ名 #番号」のみ）・警告は中央揃え。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、
@@ -2524,7 +2560,7 @@ export function POST(request: NextRequest) {
   （実例: PR #2387の本文にある`#2388`）。
   **ブランチの存在確認（`ACTIVE_ISSUE_PROGRESS_STATUSES`）には`planning`を足さない**——ブランチが無いのが
   正常な状態で、名指しで問い合わせてもGitHub APIの消費が増えるだけになる。
-  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: low`）→ 番号の新しい順で、
+  並びは計画検討中 → 優先度（`80.Priority: High` → 無印 → `89.Priority: Low`）→ 番号の新しい順で、
   **頭出しはせず全件出す**（#2386）。3件までに畳んでいたのは未着手を並べていたときの都合で、
   着手中は同時に走っているセッションの本数しかない。
   **畳んだ1行の件数（未着手・着手中・進行中・未リリース）はアイコンと数字だけで出す**（#1886・`SummaryCount`）。
