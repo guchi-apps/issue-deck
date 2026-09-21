@@ -1,5 +1,9 @@
-import { Check, CircleAlert, Hourglass, Loader2, MessageCircleQuestion, Minus } from "lucide-react";
+import { Check, CircleAlert, Hourglass, MessageCircleQuestion, Minus } from "lucide-react";
 
+import {
+  PullRequestProgressLabel,
+  PullRequestProgressStepList,
+} from "@/components/dashboard/pull-request-progress-steps";
 import {
   describeIssueExecutionTarget,
   type IssueExecutionTarget,
@@ -36,7 +40,6 @@ import {
   isPullRequestWaitingStatus,
   resolvePullRequestPosition,
   type IssuePullRequestProgress,
-  type IssuePullRequestStepState,
 } from "@/lib/issue-pull-request-progress";
 import { cn } from "@/lib/utils";
 import { isWorkflowBadgeSpinning } from "@/lib/workflow-badge-activity";
@@ -604,59 +607,26 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
   );
 }
 
-/** PR進捗の状態記号。工程名と状態を分け、色だけに頼らず読めるようにする。 */
-const PR_STEP_STATUS: Record<IssuePullRequestStepState, { label: string; className: string }> = {
-  done: { label: "✔", className: "text-emerald-700 dark:text-emerald-400" },
-  current: { label: "実施中", className: "text-primary" },
-  failed: { label: "×", className: "text-destructive" },
-  pending: { label: "—", className: "text-muted-foreground" },
-};
-
 /**
  * 「developへマージ」段の内訳（#2816）。工程ごとに✔・×・実施中を並べ、その上に
  * 「いま何を待っているか」を1語で出す。
  *
  * ここを足すまで、Issue詳細でCI・レビューの進み具合を見るには対応PRのセクション（既定で
- * 畳んである）を開くしかなかった。**セクション側は消さない**——あちらはPRごとの内訳と
- * マージボタンを持っており、こちらはIssueとして何を待っているかの要約という別の役
- * （`docs/code-map.md`「同じ状態を2か所で言わせない。誰が言うかは並べる側が決める」）。
+ * 畳んである）を開くしかなかった。**セクション側は消さない**——あちらはPRごとの行とマージボタンを
+ * 持っており、こちらはIssueとして何を待っているかの要約という別の役。ただしセクションの各行
+ * （`IssuePullRequestList`）も、開いているPRには**同じ部品**（`pull-request-progress-steps.tsx`）で
+ * 同じ内訳を出す（#3239）。上下で言い方・記号を食い違わせないため、部品は共有する。
  */
 function PullRequestProgressSteps({ progress }: { progress: IssuePullRequestProgress }) {
-  const running = progress.tone === "running";
-
   return (
     <div className="mt-3 flex flex-col gap-2 border-t pt-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span className="font-medium text-muted-foreground tabular-nums">
           PR #{progress.pullRequestNumber}
         </span>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 font-semibold",
-            progress.tone === "attention"
-              ? "text-destructive"
-              : progress.tone === "waiting"
-                ? "text-amber-700 dark:text-amber-400"
-                : "text-foreground",
-          )}
-        >
-          {/* 待っているのが処理なら回す。人待ち（マージ待ち）は回さない——一覧の進捗バーと
-              同じ使い分けで、動きが「放っておけば進む」ことの合図になっている */}
-          {running && <Loader2 className="size-3 animate-spin" aria-hidden="true" />}
-          {progress.label}
-        </span>
+        <PullRequestProgressLabel progress={progress} />
       </div>
-      <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="developへマージの内訳">
-        {progress.steps.map((step) => {
-          const status = PR_STEP_STATUS[step.state];
-          return (
-            <li key={step.key} className="inline-flex items-center gap-1.5">
-              <span className="font-medium">{step.label}</span>
-              <span className={cn("font-semibold", status.className)}>{status.label}</span>
-            </li>
-          );
-        })}
-      </ul>
+      <PullRequestProgressStepList progress={progress} />
     </div>
   );
 }

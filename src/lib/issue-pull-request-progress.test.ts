@@ -217,19 +217,22 @@ describe("buildIssuePullRequestProgress の内訳", () => {
     });
   });
 
-  it("レビューの段は実行主体を含まない汎用ラベルを持つ", () => {
-    for (const [aiReview, label, shortLabel] of [
-      ["pending", "レビュー実施中", "レビュー実施中"],
-      ["passed", "レビュー完了", "レビュー完了"],
-      ["skipped", "レビュー省略", "レビュー省略"],
-      ["failed", "レビュー失敗", "レビュー失敗"],
+  it("レビューの段は工程名「レビュー」に固定し、状態は記号（と全文）で言う", () => {
+    for (const [aiReview, state, detail, statusText] of [
+      ["pending", "current", "レビュー実施中", undefined],
+      ["passed", "done", "レビュー完了", undefined],
+      ["skipped", "done", "レビュー省略", "省略"],
+      ["failed", "failed", "レビュー失敗", undefined],
     ] as const) {
       const step = labelOf(
         "ai-review",
         buildIssuePullRequestProgress(pullRequest({ mergeJudgement: judgement({ aiReview }) })),
       );
-      expect(step?.label).toBe(label);
-      expect(step?.shortLabel).toBe(shortLabel);
+      expect(step?.label).toBe("レビュー");
+      expect(step?.shortLabel).toBe("レビュー");
+      expect(step?.state).toBe(state);
+      expect(step?.detail).toBe(detail);
+      expect(step?.statusText).toBe(statusText);
     }
   });
 

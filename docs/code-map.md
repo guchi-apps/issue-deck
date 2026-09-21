@@ -786,6 +786,20 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     実行順で選ぶとレビュー中もずっと「CI実行中」になる
   - **出すのは`isPullRequestWaitingStatus`が真の段（`Develop PR`・`Release`）だけ。** PRがまだ
     無い段・マージが済んだ段では待っているものが無く、空の内訳は「まだ来ていない」と読める
+  - **同じ内訳をIssue詳細の下部の対応PRの各行にも出す**（#3239）。部品は
+    [`pull-request-progress-steps.tsx`](../src/components/dashboard/pull-request-progress-steps.tsx)
+    （見出しの1語＝`PullRequestProgressLabel`と工程の一覧＝`PullRequestProgressStepList`）に置き、
+    上部（`WorkflowStatusSteps`）と`IssuePullRequestList`が同じものを通す。上下で言い方・記号を
+    食い違わせないため、行の側で別に組み立てない。**出すのは開いていて下書きでないPRの行だけ**で、
+    マージ済み・クローズ・下書き（この画面でマージ／「マージしない」した直後の行も）は従来の状態
+    バッジのまま。内訳のある行では、CI・レビュー・コンフリクト・判定のバッジを出さない
+    （内訳の工程が言うため）。自動修復のバッジ（`RepairRunBadge`）は経過時間を数え直す生きた
+    バッジなので内訳に入れず残す。レビューの実行ログへのリンクは、行の側が`reviewRunUrl`で渡す
+  - **レビューの工程名は「レビュー」に固定し、状態は記号で言う**（#3239）。CI・コンフリクトと
+    同じ「工程名＋状態記号」に揃え、「レビュー実施中 実施中」のように状態が工程名と記号で2回
+    出るのをやめた。実施中・✔・×に加え、**省略だけは記号（✔）だと「済んだ」と読めるため、
+    段の`statusText`（「省略」）で言う**。マウスを載せたときの全文（「レビュー省略」など）は段の
+    `detail`が持ち、PR一覧のレール（`pull-request-status-rail.ts`）も同じ`detail`・`statusText`を読む
   - **一覧のためにPR一覧を取り直す間隔は1分**（`ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS`）で、
     **Issueペインを開いている AND 「PR待ち」の行がある**ときだけ回す。`useAutoRefresh`が
     止めるのは裏に回ったタブだけで、行の有無だけを条件にするとAI使用量や設定を開いている

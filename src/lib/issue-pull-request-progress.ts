@@ -38,6 +38,16 @@ export type IssuePullRequestStep = {
    */
   shortLabel: string;
   state: IssuePullRequestStepState;
+  /**
+   * 状態記号（✔・×・実施中・—）の代わりに出す言葉。**記号では言えない状態だけ**に持たせる
+   * （現在はレビューの「省略」。✔にすると「レビューが済んだ」と読めてしまう）。
+   */
+  statusText?: string;
+  /**
+   * `label`だけでは何の状態か分からない段（レビュー。工程名を「レビュー」に固定したため）が、
+   * マウスを載せたときに出す全文（「レビュー省略」など）。無ければ`label`を使う。
+   */
+  detail?: string;
 };
 
 /**
@@ -102,8 +112,12 @@ export type IssuePullRequestProgressSource = {
 };
 
 /**
- * レビューの段に出す文言。実行するエージェントを限定しない。
+ * レビューの状態を言う文言。実行するエージェントを限定しない。
  * `none`（check-runが無い）は段ごと落とすので入っていない。
+ *
+ * **段の`label`にはこれを使わない**（工程名は`AI_REVIEW_STEP_NAME`の「レビュー」に固定し、
+ * 状態は記号で言う）。ここに残しているのは、止まっているPRの見出し（`resolveWaiting`）と
+ * 段の`detail`（マウスを載せたときの全文）。
  */
 const AI_REVIEW_STEP_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
   pending: "レビュー実施中",
@@ -111,6 +125,15 @@ const AI_REVIEW_STEP_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
   skipped: "レビュー省略",
   failed: "レビュー失敗",
 };
+
+/**
+ * レビューの段の工程名。CI・コンフリクトと同じく「工程名＋状態記号」で並べるため、状態
+ * （実施中・完了・失敗）を工程名へ混ぜない。「レビュー実施中 実施中」のように状態が2回出ていた。
+ */
+const AI_REVIEW_STEP_NAME = "レビュー";
+
+/** 記号（✔）では「済んだ」と読めてしまう省略だけは、言葉で言う */
+const AI_REVIEW_SKIPPED_STATUS_TEXT = "省略";
 
 /** マージの段に出す文言 */
 const MERGE_STEP_LABEL = "マージ";
@@ -228,8 +251,10 @@ export function buildIssuePullRequestProgress(
   if (aiReviewState !== "none") {
     steps.push({
       key: "ai-review",
-      label: AI_REVIEW_STEP_LABEL[aiReviewState],
-      shortLabel: AI_REVIEW_STEP_LABEL[aiReviewState],
+      label: AI_REVIEW_STEP_NAME,
+      shortLabel: AI_REVIEW_STEP_NAME,
+      detail: AI_REVIEW_STEP_LABEL[aiReviewState],
+      ...(aiReviewState === "skipped" ? { statusText: AI_REVIEW_SKIPPED_STATUS_TEXT } : {}),
       state:
         aiReviewState === "failed"
           ? "failed"

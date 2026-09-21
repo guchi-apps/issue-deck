@@ -75,7 +75,7 @@ describe("PullRequestStatusRail（#2942）", () => {
     for (const [state, label] of [
       ["pending", "レビュー実施中"],
       ["passed", "レビュー✔"],
-      ["skipped", "レビュー✔"],
+      ["skipped", "レビュー省略"],
       ["failed", "レビュー×"],
     ] as const) {
       const { container } = render(<PullRequestStatusRail pullRequest={withAiReview(state)} />);
