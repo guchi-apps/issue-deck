@@ -2333,6 +2333,17 @@ export function POST(request: NextRequest) {
   開き直すぶんがETagの304になる点も変更ファイル一覧と同じ。**取得できなくてもマージは止めない**
   ——変更点は判断材料であって、マージの前提条件ではない。マージコミットが1件も無いリポジトリ
   （squash運用）ではコミットの件名をそのまま並べる。
+  **ダイアログは上から「バージョン」→「マージ前の確認」→この一覧の順で、ボタンは本文と別に下端へ
+  固定する**（#3260）。**版は一覧の見出しから切り出して独立した帯にする**
+  （[`pull-request-merge-version.tsx`](../src/components/dashboard/pull-request-merge-version.tsx)）——
+  「v旧 → v新」で出し、新しい版はリリースPRのタイトル、**前の版は`/api/pull-requests/changes`が
+  同じ呼び出しで添える`previousVersion`（mainの`package.json`。`fetchPackageVersion`）**から取る。
+  `version.json`型のリポジトリや読み取りの失敗では取れないが、版は判断材料なので変更点は返し、
+  新しい版だけを出す。**バージョンバンプのPRは一覧の行にも件数にも出さない**
+  （毎回必ず前の版のバンプが入るため。`withoutVersionBumps`）。ボタンは横1列の
+  ［キャンセル］［マージする］で、本文だけがスクロールする（`PullRequestMergeButton`）。
+  「マージする」は破壊的操作ではないので`AlertDialogAction`の`variant="default"`（黒）にしている
+  （既定は`destructive`）。見出し・説明文（「リポジトリ名 #番号」のみ）・警告は中央揃え。
 - **「ブランチ」画面（`pane=flow`・スマホは`mscreen=flow`＝フッターの4枠目。#1638）は、
   新しく取りに行くのをブランチの存在確認だけに絞る**（#1455）。IssueとPRの対応・ブランチに対するPRの状態を1画面で
   俯瞰する画面で、Issueは既存のDBキャッシュ、PRは既存の`/api/pull-requests`の結果をそのまま使い、

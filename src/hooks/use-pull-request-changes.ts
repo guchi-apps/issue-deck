@@ -11,6 +11,8 @@ export type UsePullRequestChangesResult = {
   commitCount: number;
   /** 1ページの上限で打ち切ったか */
   truncated: boolean;
+  /** マージ先（main）の現在の版。読めなければnull（#3260） */
+  previousVersion: string | null;
   isLoading: boolean;
   error: string | null;
 };
@@ -38,6 +40,7 @@ export function usePullRequestChanges(
     changes: PullRequestChange[];
     commitCount: number;
     truncated: boolean;
+    previousVersion: string | null;
   } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
@@ -78,6 +81,7 @@ export function usePullRequestChanges(
           changes: data.changes,
           commitCount: data.commitCount,
           truncated: data.truncated,
+          previousVersion: data.previousVersion ?? null,
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -100,6 +104,7 @@ export function usePullRequestChanges(
     changes: current?.changes ?? null,
     commitCount: current?.commitCount ?? 0,
     truncated: current?.truncated ?? false,
+    previousVersion: current?.previousVersion ?? null,
     isLoading: loadingKey !== null && loadingKey === key,
     error,
   };
