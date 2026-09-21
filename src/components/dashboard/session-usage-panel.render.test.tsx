@@ -465,7 +465,7 @@ describe("SessionUsagePanel", () => {
   it("タイトルを解決できていない行はタイトルの表示を出さない（#2686）", () => {
     const { container } = renderPanel(response([entry({ sessionId: "impl" })]));
 
-    expect(container.querySelector("p.truncate")).toBeNull();
+    expect(container.querySelector("p.truncate[title]")).toBeNull();
   });
 
   it("リポジトリ別は円グラフで、金額の上位5件と「その他」にまとめる（#3060）", () => {
@@ -677,5 +677,36 @@ describe("SessionUsagePanel", () => {
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     expect(within(detail).queryByText(/直近5時間枠のおよそ/)).toBeNull();
+  });
+  describe("ヘッダーと期間選択の配置（#3257）", () => {
+    it("経過時間を見出しと同じ行に、更新ボタンをその行の右端に置き、見出し下の説明文は出さない", () => {
+      renderPanel(response([entry()]));
+      const heading = screen.getByRole("heading", { name: "AI使用量" });
+      const header = heading.parentElement as HTMLElement;
+      expect(within(header).getByText(/subpc から/)).toBeTruthy();
+      const refresh = within(header).getByRole("button", { name: "更新" });
+      expect(header.lastElementChild).toBe(refresh);
+      expect(screen.queryByText(/GitHub Actionsが使ったトークン/)).toBeNull();
+    });
+
+    it("期間選択はプラン枠より下、日別より上に置く", () => {
+      renderPanel(response([entry()]));
+      const period = screen.getByRole("group", { name: "集計する期間" });
+      const claudePlan = screen.getByText("Claude プラン枠");
+      expect(claudePlan.compareDocumentPosition(period) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        period.compareDocumentPosition(screen.getByText("日別")) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it("選択した期間の応答が届くまでは集計を隠し、プラン枠と実行中のセッションは出したままにする", () => {
+      // 前の期間（7日）の応答が残っている状態で、30日を選んだところ
+      renderPanel({ ...response([entry()]), currentSessions: [] }, { days: 30, isLoading: true });
+      expect(screen.getByText("Claude プラン枠")).toBeTruthy();
+      expect(screen.getByRole("region", { name: "実行中のセッション" })).toBeTruthy();
+      expect(screen.getByText("読み込み中...")).toBeTruthy();
+      expect(screen.queryByText("従量課金相当")).toBeNull();
+      expect(screen.queryByText("日別")).toBeNull();
+    });
   });
 });
