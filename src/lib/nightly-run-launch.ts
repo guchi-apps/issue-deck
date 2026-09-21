@@ -7,9 +7,11 @@ import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import {
   NIGHTLY_RUN_RESULT_RETENTION_DAYS,
+  decideManualStartCancel,
   decideNightlyRunLaunch,
   type ScheduledRunKind,
 } from "@/lib/nightly-run";
+import { nightlyRunIssueKey } from "@/lib/nightly-run-db";
 
 /**
  * 積んだ予定（`NightlyRunEntry`）を、時刻が来たら起動ジョブへ変換する（#2995）。
@@ -74,6 +76,87 @@ export async function pruneOldScheduledRunEntries(now: Date): Promise<void> {
   await db.nightlyRunEntry.deleteMany({
     where: { status: { in: ["LAUNCHED", "SKIPPED", "CANCELED"] }, resolvedAt: { lt: before } },
   });
+}
+
+/**
+ * 積んだ後に手動で実装開始されたIssueの予定を取り消す（#3274）。
+ *
+ * 予約実行の画面は`QUEUED`・`LAUNCHED`・`SKIPPED`しか描かないので、`CANCELED`にすれば画面から
+ * 消える（行は理由付きで残り、`pruneOldScheduledRunEntries`が30日で掃除する）。判定は
+ * `decideManualStartCancel`。GitHubへは問い合わせず、**DBに同期済みのラベルと起動ジョブ**だけを
+ * 読む（次枠実行がOFFでも回すため、積んだ人のトークンに依存させない）。
+ *
+ * **`nightKey`が入っている予定は触らない。** 起動処理が席を取った後（自分で作るジョブ・
+ * `11.local`を手動着手と取り違える）で、`updateMany`の条件にも同じ`nightKey: null`を置いて、
+ * 判定と書き込みのあいだに席を取られた場合も取り消さない。
+ *
+ * @returns 取り消した予定の件数
+ */
+export async function cancelManuallyStartedScheduledRuns(now: Date): Promise<number> {
+  const entries = await db.nightlyRunEntry.findMany({
+    where: { status: "QUEUED", nightKey: null },
+    select: { id: true, repositoryFullName: true, issueNumber: true, createdAt: true },
+  });
+  if (entries.length === 0) return 0;
+
+  const targets = entries.map((entry) => ({
+    repositoryFullName: entry.repositoryFullName,
+    issueNumber: entry.issueNumber,
+  }));
+  // ジョブの絞り込みは最も古い予定より後で足りる（Issueごとの厳密な比較は下でメモリ上で行う）
+  const oldestQueuedAt = new Date(Math.min(...entries.map((entry) => entry.createdAt.getTime())));
+  const [issues, jobs] = await Promise.all([
+    db.issue.findMany({
+      where: {
+        OR: targets.map((target) => ({
+          number: target.issueNumber,
+          repository: { fullName: target.repositoryFullName },
+        })),
+      },
+      select: {
+        number: true,
+        labels: { select: { name: true } },
+        repository: { select: { fullName: true } },
+      },
+    }),
+    db.dispatchJob.findMany({
+      where: {
+        kind: "LAUNCH",
+        // 失敗・タイムアウト・取り消しで終わったものは、実際には着手されていない
+        status: { in: ["QUEUED", "CLAIMED", "RUNNING", "SUCCEEDED"] },
+        createdAt: { gt: oldestQueuedAt },
+        OR: targets.map((target) => ({
+          repositoryFullName: target.repositoryFullName,
+          issueNumber: target.issueNumber,
+        })),
+      },
+      select: { repositoryFullName: true, issueNumber: true, createdAt: true },
+    }),
+  ]);
+
+  const labelsByIssue = new Map(
+    issues.map((issue) => [nightlyRunIssueKey(issue.repository.fullName, issue.number), issue.labels]),
+  );
+
+  let canceled = 0;
+  for (const entry of entries) {
+    const key = nightlyRunIssueKey(entry.repositoryFullName, entry.issueNumber);
+    const reason = decideManualStartCancel({
+      labels: labelsByIssue.get(key) ?? [],
+      hasLaunchJobSinceQueued: jobs.some(
+        (job) =>
+          nightlyRunIssueKey(job.repositoryFullName, job.issueNumber) === key &&
+          job.createdAt > entry.createdAt,
+      ),
+    });
+    if (reason === null) continue;
+    const result = await db.nightlyRunEntry.updateMany({
+      where: { id: entry.id, status: "QUEUED", nightKey: null },
+      data: { status: "CANCELED", skipReason: reason, activeKey: null, resolvedAt: now },
+    });
+    canceled += result.count;
+  }
+  return canceled;
 }
 
 export async function markScheduledRunSkipped(

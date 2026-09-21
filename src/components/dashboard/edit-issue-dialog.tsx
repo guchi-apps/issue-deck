@@ -17,7 +17,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import type { Issue } from "@/types/issue";
 
@@ -39,7 +38,6 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     () => (issue ? getRepoIssueSuggestions(issues, issue.repositoryFullName) : []),
     [issues, issue],
   );
-  const { labels } = useIssueRepoMeta(issue?.repositoryFullName ?? null);
   const {
     isGenerating: isSuggesting,
     error: suggestError,
@@ -79,10 +77,8 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
    * 無いため、応答のうちタイトルだけを使う。
    */
   async function handleRegenerateTitle() {
-    const result = await generateSuggestion(
-      body,
-      labels.map((label) => ({ name: label.name, description: label.description })),
-    );
+    // 使うのはタイトルだけ。ラベルを渡すと、Jevを選んでいるときに使わない判定を呼んでしまう（#3245）
+    const result = await generateSuggestion(body, []);
     if (!result) return;
     setTitle(result.title);
   }

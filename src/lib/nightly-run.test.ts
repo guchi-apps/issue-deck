@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyNightlyRunOutcome,
+  decideManualStartCancel,
   decideNightlyRunLaunch,
   findScheduledRunQueuedMark,
   resolveNightlyRunLabelRejection,
@@ -66,6 +67,29 @@ describe("decideNightlyRunLaunch", () => {
       kind: "NEXT_WINDOW",
     });
     expect(artifact.action).toBe("skip");
+  });
+});
+
+describe("decideManualStartCancel（#3274）", () => {
+  it("手動着手の形跡が無ければ取り消さない（オプションのラベルは着手ではない）", () => {
+    expect(
+      decideManualStartCancel({
+        labels: [{ name: "21.plan-required" }, { name: "51.improvement" }],
+        hasLaunchJobSinceQueued: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("11.localが付いていれば取り消す", () => {
+    expect(
+      decideManualStartCancel({ labels: [{ name: "11.local" }], hasLaunchJobSinceQueued: false }),
+    ).toContain("11.local");
+  });
+
+  it("11.localが無くても、積んだ後に起動ジョブが作られていれば取り消す", () => {
+    expect(decideManualStartCancel({ labels: [], hasLaunchJobSinceQueued: true })).toContain(
+      "起動ジョブ",
+    );
   });
 });
 
