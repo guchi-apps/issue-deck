@@ -537,6 +537,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
   からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
+  **画面の代わりに、ops-dashboardへ`GET /api/ai-usage`で公開している**（#3263。
+  [`lib/ai-usage-export.ts`](../src/lib/ai-usage-export.ts)、認証は`OPS_API_TOKEN`のBearer）。
+  ops-dashboardの「アプリ別のAI利用」の形に合わせ、**Claude・OpenAI・Jevすべてを機能×モデルごとの1行**で返す。
+  **`inputTokens`は「キャッシュに載らなかった分」**で、OpenAIだけは記録済みの`input_tokens`が読み込み
+  キャッシュを含むため公開時に差し引く（記録側は区別していない）。1行でも形が違うとops-dashboardは
+  応答全体を捨てるので、数値は有限の非負整数に丸める。既存の`/api/typesafe/usage`（Jevだけ・回数と入力
+  トークンだけ）はそのまま残す。**ops-dashboardの`AI_APP_USAGE_SOURCES`へこのURLを足すと、TypeSafe連携
+  からのJevの補完をやめてこちらを正にする**（両方を数えるとJevが二重になる）。切り替えはops-dashboard側の設定。
   **単価は[`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)にあり**（#2717）、
   API換算の目安の金額を出すときに引く（プランの実費ではないと断る）。
   **単価を知らないモデルが1つでも混じっているときは金額を出さない**——足りない分を0として
