@@ -125,11 +125,11 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("いま実行中のセッションはありません")).toBeTruthy();
   });
 
-  it("スマホでも応答数・コンテキストを5時間枠の割合と並べて出す（#3084）", () => {
+  it("スマホでも応答数・入力トークンを5時間枠の割合と並べて出す（#3084）", () => {
     renderPanel({ ...response([entry()]), currentSessions: [liveSession] }, { compact: true });
     const section = screen.getByRole("region", { name: "実行中のセッション" });
     fireEvent.click(within(section).getByRole("button", { expanded: false }));
-    expect(within(section).getByText("141応答　コンテキスト 12M", { normalizer: (text) => text })).toBeTruthy();
+    expect(within(section).getByText("141応答　入力トークン 12M", { normalizer: (text) => text })).toBeTruthy();
   });
 
   it("閉じた状態ではセッションごとの金額を積み上げた棒と状態ごとの本数で出し、押すと詳細が開閉する（#3134）", () => {
@@ -523,9 +523,9 @@ describe("SessionUsagePanel", () => {
     expect(screen.queryByText("入力（キャッシュ含む）")).toBeNull();
   });
 
-  it("合計の「コンテキスト」に、期間全体のキャッシュ内訳を出す（#2628）", () => {
+  it("合計の「入力トークン」に、期間全体のキャッシュ内訳を出す（#2628・#3254）", () => {
     renderPanel(response([entry()]));
-    expect(screen.getByText("入力 1k・書込 2k・読出 7k")).toBeTruthy();
+    expect(screen.getByText("内訳 入力 1k・書込 2k・読出 7k")).toBeTruthy();
   });
 
   it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
