@@ -1029,6 +1029,7 @@ export function IssueList({
         <button
           type="button"
           aria-label={`#${issue.number} ${issue.title}`}
+          data-row-hit=""
           onClick={() => {
             setOptimisticSelectedId(issue.id);
             onSelectIssue(issue);
@@ -1138,8 +1139,9 @@ export function IssueList({
                 ラベルの多い行だけ背が伸びて一覧が不揃いになるのを避ける。スクロールバーは出さず
                 （行の高さが変わる）、端で切れたラベルを続きの合図にする。
                 行の当たり判定は本文の下に敷いた全面ボタンで、本文は`pointer-events-none`。
-                スクロールを受けるためここだけ`pointer-events-auto`にし、代わりに`onClick`で
-                行の選択を担う（カードのどこを押しても選択、という前提を保つ） */}
+                スクロールを受けるためここだけ`pointer-events-auto`にし、押されたときは
+                全面ボタン（`data-row-hit`）へ押しを渡す（カードのどこを押しても同じ動きになる。
+                選択の処理を2か所に書かない） */}
             <div
               className={cn(
                 "flex items-center gap-1",
@@ -1149,9 +1151,11 @@ export function IssueList({
               )}
               onClick={
                 showKindLabels
-                  ? () => {
-                      setOptimisticSelectedId(issue.id);
-                      onSelectIssue(issue);
+                  ? (event) => {
+                      event.currentTarget
+                        .closest("li")
+                        ?.querySelector<HTMLButtonElement>("[data-row-hit]")
+                        ?.click();
                     }
                   : undefined
               }
