@@ -20,12 +20,6 @@ vi.mock("@/hooks/use-issue-mutations", () => ({
   useIssueMutations: () => issueMutations,
 }));
 
-const repoMeta = { labels: [], assignees: [] as string[], isLoading: false };
-
-vi.mock("@/hooks/use-issue-repo-meta", () => ({
-  useIssueRepoMeta: () => repoMeta,
-}));
-
 const suggestGenerate = vi.fn();
 const suggestState = {
   isGenerating: false,
@@ -110,6 +104,7 @@ describe("EditIssueDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "付け直す" }));
 
     await waitFor(() => {
+      // ラベルは使わないので空で呼ぶ（Jevを選んでいても判定を呼ばせない。#3245）
       expect(suggestGenerate).toHaveBeenCalledWith("元の本文", []);
       expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe(
         "生成されたタイトル",

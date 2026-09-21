@@ -3913,6 +3913,11 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 `- 30.bug: 不具合`の形で渡している以上、記号や説明が付いたまま返ることがあり、完全一致だけを
 見ているとその場合にラベルが1つも付かない（タイトルだけが入った状態になる）。
 理由は[multi-agent/labels.md](multi-agent/labels.md)「Claudeによるラベル自動付与の対象は30〜89番台に限る」。
+**設定（`AppSetting.modelPickEngine`）が`jev`のときは、ラベルだけをJevが判定する**（#3245。
+`suggestLabelsByJev`。タイトルと種別はアプリ内AIのまま）。ラベル1つずつのnoul（しきい値0.5・
+どれも届かなければ最大の1つ）と、優先度だけの`choice`（「付けない」を含む）で聞き、対象の集合は
+上と同じ`isAutoAssignableLabelName`。Jevが使えないときはAIにラベルも選ばせる従来の経路へ倒れる
+（[multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「Issue作成のラベル付与にも同じ設定が効く」）。
 
 **理由から「次にどこの何を押すか」を組み立てるのは
 [`lib/github/check-user-guidance.ts`](../src/lib/github/check-user-guidance.ts)1か所**（#1663）。

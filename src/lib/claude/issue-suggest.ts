@@ -1,5 +1,12 @@
 import { callClaudeMessages } from "@/lib/claude/request";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
+import {
+  askSystemOne,
+  readChoiceAnswer,
+  readNoulAnswer,
+  type SystemOneQuestion,
+  type SystemOneResponse,
+} from "@/lib/typesafe/system-one";
 
 /** 提案生成に使うモデル。プラン枠消費を抑えるため軽量なモデルを使う。 */
 
@@ -48,9 +55,21 @@ function truncate(text: string, maxLength: number): string {
 // 必ず同じ集合を使う。** プロンプト側だけ絞ると、Claudeが範囲外のラベル名を返したときに
 // 後処理が素通ししてしまう。
 
+export type IssueSuggestPromptOptions = {
+  /**
+   * ラベルの選択までAIに頼むか（既定`true`）。**Jevがラベルを判定したときは`false`**にして、
+   * プロンプトからラベルの節を外す（#3245。タイトルと種別だけを聞く）。
+   */
+  includeLabels?: boolean;
+};
+
 /** Issue本文と選択可能なラベル一覧から、タイトル・ラベル提案生成用プロンプトを組み立てる。 */
-export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
+export function buildIssueSuggestPrompt(
+  input: IssueSuggestInput,
+  options: IssueSuggestPromptOptions = {},
+): string {
   const { body, availableLabels } = input;
+  const includeLabels = options.includeLabels ?? true;
   const selectableLabels = availableLabels.filter((label) => isAutoAssignableLabelName(label.name));
 
   const labelsText =
@@ -60,15 +79,31 @@ export function buildIssueSuggestPrompt(input: IssueSuggestInput): string {
           .join("\n")
       : "(利用可能なラベルなし)";
 
+  const kindRules = `"kind"のルール:
+- "issue" … 何かを直したい・作りたい・変えたい・調べて対応してほしい、という作業の依頼。不具合の報告もこちら。
+- "question" … 「〜とは何ですか」「なぜ〜なのですか」「〜はできますか」「〜と〜の違いは」のように、**答えを聞くことが目的**で、コードを変える依頼が含まれていないもの。
+- **迷ったら"issue"にしてください。** 作業の依頼と読める部分が少しでもあれば"issue"です。`;
+
+  if (!includeLabels) {
+    return `以下はこれから作成するGitHub Issueの本文です。この内容から、この本文が「作業の依頼」なのか「質問」なのかの判定と、簡潔で分かりやすい日本語のタイトル案を提案してください。
+
+出力は前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
+{"kind": "issue", "title": "タイトル案"}
+
+${kindRules}
+
+本文に画像のURLが含まれていても、そこからは判断できないので無視してください。
+
+# 本文
+${truncate(body, MAX_BODY_LENGTH)}`;
+  }
+
   return `以下はこれから作成するGitHub Issueの本文です。この内容から、この本文が「作業の依頼」なのか「質問」なのかの判定と、簡潔で分かりやすい日本語のタイトル案と、下記の「利用可能なラベル一覧」の中から内容に適合するものを選んだ配列を提案してください。
 
 出力は前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
 {"kind": "issue", "title": "タイトル案", "labels": ["ラベル名1", "ラベル名2"]}
 
-"kind"のルール:
-- "issue" … 何かを直したい・作りたい・変えたい・調べて対応してほしい、という作業の依頼。不具合の報告もこちら。
-- "question" … 「〜とは何ですか」「なぜ〜なのですか」「〜はできますか」「〜と〜の違いは」のように、**答えを聞くことが目的**で、コードを変える依頼が含まれていないもの。
-- **迷ったら"issue"にしてください。** 作業の依頼と読める部分が少しでもあれば"issue"です。
+${kindRules}
 
 "labels"のルール:
 - 「利用可能なラベル一覧」に書かれているラベル名を、説明を付けずそのまま書いてください。
@@ -116,8 +151,10 @@ function suggestionGenerationError(status: number, code: string | null | undefin
 export async function generateIssueSuggestion(
   token: string,
   input: IssueSuggestInput,
+  options: IssueSuggestPromptOptions = {},
 ): Promise<IssueSuggestResult> {
-  const prompt = buildIssueSuggestPrompt(input);
+  const includeLabels = options.includeLabels ?? true;
+  const prompt = buildIssueSuggestPrompt(input, { includeLabels });
 
   const { response: res, json, error } = await callClaudeMessages<AnthropicMessageResponse>({
     feature: "issue_suggest",
@@ -148,7 +185,8 @@ export async function generateIssueSuggestion(
     typeof parsed !== "object" ||
     parsed === null ||
     typeof (parsed as { title?: unknown }).title !== "string" ||
-    !Array.isArray((parsed as { labels?: unknown }).labels)
+    // ラベルをAIに頼まなかったとき（Jevが判定したとき）は、応答に`labels`が無くてよい
+    (includeLabels && !Array.isArray((parsed as { labels?: unknown }).labels))
   ) {
     throw new Error("Claudeの応答の形式が不正です");
   }
@@ -157,9 +195,11 @@ export async function generateIssueSuggestion(
     kind: rawKind,
     title,
     labels: rawLabels,
-  } = parsed as { kind?: unknown; title: string; labels: unknown[] };
+  } = parsed as { kind?: unknown; title: string; labels?: unknown[] };
 
-  const labels = matchSuggestedLabels(rawLabels, input.availableLabels);
+  const labels = includeLabels
+    ? matchSuggestedLabels(rawLabels ?? [], input.availableLabels)
+    : [];
 
   return { kind: normalizeSuggestedKind(rawKind), title: title.trim(), labels };
 }
@@ -208,4 +248,130 @@ export function matchSuggestedLabels(
     .filter((label): label is string => label !== undefined);
 
   return [...new Set(matched)];
+}
+
+// ---------------------------------------------------------------------------
+// Jev（TypeSafeのSystem Oneモデル）でラベルを判定する（#3245）
+// ---------------------------------------------------------------------------
+// タイトルと種別（issue／question）はアプリ内AIのまま。**ラベルだけ**をJevへ移す。
+// ラベルは複数付けられるので、**ラベル1つずつに「付けるか」をnoulで聞く**。ただし優先度
+// （`80.`〜`89.`）は同時に2つ付くと意味が食い違うため、**1つしか選ばれない`choice`**にして
+// 「付けない」を選択肢へ入れる（優先度は本文にはっきり書かれているときだけ付けたい）。
+// 対象のラベルは`isAutoAssignableLabelName`の集合で、AIの経路と同じ（プロンプトの候補と
+// 後処理で集合がずれると範囲外のラベルが付くため）。
+
+/** 「付ける」とみなす確率の下限。下回ったラベルは付けない（ただし種別は最低1つ付ける） */
+export const JEV_LABEL_THRESHOLD = 0.5;
+
+/** 優先度ラベルの番号帯（`80.Priority: High`〜`89.Priority: Low`） */
+const PRIORITY_PATTERN = /^8\d\./;
+
+/** 優先度の`choice`で「どれも付けない」を表す選択肢。ラベル名と衝突しない語にする */
+export const JEV_NO_PRIORITY = "付けない";
+
+/** 優先度の質問のキー。ラベルごとのnoul質問のキーは`label_<連番>` */
+const PRIORITY_QUESTION_KEY = "priority";
+
+export type LabelSuggestQuestions = {
+  questions: Record<string, SystemOneQuestion>;
+  /** noul質問のキー → ラベル名。**ラベル名をそのままキーにしない**（`.`・`:`・空白を含むため） */
+  noulKeyToLabel: Map<string, string>;
+  /** 優先度の`choice`が返しうるラベル名（「付けない」を含まない） */
+  priorityLabels: string[];
+};
+
+/** 判定の対象になるラベルから、Jevへ渡す質問を組み立てる。対象が無ければ`null` */
+export function buildLabelSuggestQuestions(
+  availableLabels: IssueSuggestLabelInput[],
+): LabelSuggestQuestions | null {
+  const selectable = availableLabels.filter((label) => isAutoAssignableLabelName(label.name));
+  if (selectable.length === 0) return null;
+
+  const priority = selectable.filter((label) => PRIORITY_PATTERN.test(label.name));
+  const others = selectable.filter((label) => !PRIORITY_PATTERN.test(label.name));
+
+  const questions: Record<string, SystemOneQuestion> = {};
+  const noulKeyToLabel = new Map<string, string>();
+
+  others.forEach((label, index) => {
+    const key = `label_${index}`;
+    noulKeyToLabel.set(key, label.name);
+    const description = label.description ? `（${label.description}）` : "";
+    questions[key] = {
+      type: "noul",
+      instructions: `この本文のIssueに、ラベル「${label.name}」${description}を付けるべきですか。本文の内容に当てはまるときだけ「はい」にしてください。`,
+    };
+  });
+
+  if (priority.length > 0) {
+    questions[PRIORITY_QUESTION_KEY] = {
+      type: "choice",
+      instructions: `この本文のIssueに付ける優先度を選んでください。優先度は本文に緊急性や期限がはっきり書かれているときだけ選び、書かれていなければ「${JEV_NO_PRIORITY}」にしてください。`,
+      criteria: {
+        ...Object.fromEntries(priority.map((label) => [label.name, label.description])),
+        [JEV_NO_PRIORITY]: "本文から優先度を判断できない",
+      },
+    };
+  }
+
+  return { questions, noulKeyToLabel, priorityLabels: priority.map((label) => label.name) };
+}
+
+/**
+ * Jevの答えからラベルを取り出す。**読める答えが1つも無ければ`null`**（呼び出し元がAIへ倒す）。
+ *
+ * - noul: `JEV_LABEL_THRESHOLD`以上のものを付ける。**1つも届かなければ確率が最大の1つを付ける**
+ *   （AIの経路の「種別を必ず1つは選ぶ」を保つ）
+ * - 優先度: 選ばれたラベルだけを付ける。「付けない」・候補外の答えは付けない
+ */
+export function readLabelSuggestAnswers(
+  response: SystemOneResponse,
+  built: LabelSuggestQuestions,
+): string[] | null {
+  const chosen: string[] = [];
+  let answered = false;
+
+  let best: { label: string; probability: number } | null = null;
+  for (const [key, label] of built.noulKeyToLabel) {
+    const answer = readNoulAnswer(response.answers?.[key]);
+    if (!answer) continue;
+    answered = true;
+    if (answer.noul >= JEV_LABEL_THRESHOLD) chosen.push(label);
+    if (!best || answer.noul > best.probability) best = { label, probability: answer.noul };
+  }
+  if (chosen.length === 0 && best) chosen.push(best.label);
+
+  if (built.priorityLabels.length > 0) {
+    const answer = readChoiceAnswer(response.answers?.[PRIORITY_QUESTION_KEY]);
+    if (answer) {
+      answered = true;
+      const picked = built.priorityLabels.find((label) => label === answer.choice.trim());
+      if (picked) chosen.push(picked);
+    }
+  }
+
+  return answered ? [...new Set(chosen)] : null;
+}
+
+/**
+ * 本文からラベルをJevに判定させる（#3245）。**判定できなければ`null`。**
+ *
+ * `null`はキー未設定・呼び出しの失敗・答えが読めなかったとき・対象のラベルが無いとき。
+ * 呼び出し元（`POST /api/issues/suggest`）がアプリ内AIにラベルも選ばせる従来の経路へ倒す。
+ */
+export async function suggestLabelsByJev(
+  input: IssueSuggestInput,
+): Promise<string[] | null> {
+  const built = buildLabelSuggestQuestions(input.availableLabels);
+  if (!built) return null;
+
+  const response = await askSystemOne({
+    feature: "issue_suggest",
+    // 文章ではなくJSONで渡す（`buildModelPickState`と同じ）
+    state: { 本文: truncate(input.body, MAX_BODY_LENGTH) },
+    questions: built.questions,
+  });
+  if (!response) return null;
+
+  return readLabelSuggestAnswers(response, built);
 }
