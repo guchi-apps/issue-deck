@@ -1682,9 +1682,39 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
 
 - **`v22`以前を参照しているとこの経路は無い。** `Implementation`から先へ進むジョブが1つも
   発火せず、PRをマージして内容が反映された後もissueが盤面の「実行中」に残り続ける（#1901）
-- **`claude-review-develop.yml`は入れても効かない。** callerのトリガーが`branches: [develop]`
-  固定のため、base が`main`のPRは判定されない。したがってこのPRは必ず人がマージする前提で、
-  `main-direct-pr-opened`が常に`00.check-user` + `01.check-merge`を付ける
+- **レビューを入れる場合はmain向けの専用callerを置く。** `claude-review-develop.yml` は
+  `branches: [develop]` 固定のため、base が`main`のPRは判定されない。main直行の運用では
+  `enable-auto-merge: false` を必ず指定し、レビュー結果を確認して人がマージする。
+
+  ```yaml
+  name: Claude Code Review (main向けPR)
+
+  on:
+    pull_request:
+      types: [opened, synchronize, reopened, ready_for_review]
+      branches: [main]
+
+  concurrency:
+    group: claude-review-main-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+  jobs:
+    review:
+      uses: guchi-apps/issue-deck/.github/workflows/reusable-claude-review-develop.yml@workflows/vN
+      with:
+        enable-auto-merge: false
+        prompts-ref: workflows/vN
+      secrets: inherit
+      permissions:
+        contents: write
+        pull-requests: write
+        issues: write
+        actions: read
+        id-token: write
+  ```
+
+  `workflows/vN` は、この入力を含むリリース済みの同一タグへ置き換える。別途対象言語のCIを
+  `main`向けPRで実行し、そのジョブをブランチ保護の必須チェックへ設定する。
 - **`release-develop-to-main.yml`は入れない。** マージがそのまま反映であり、リリースという段が無い
 
 ## 6. リポジトリ差異の吸収チェックリスト
