@@ -2617,6 +2617,17 @@ poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries�
 - **契機は`POST /api/dispatch/claim`への相乗り**（確認待ちPushの巡回と同じ）。ブラウザを開いて
   いなくても回る唯一の定期経路で、pollerの変更は要らない。**窓の判定はサーバー側の純関数**
   （`src/lib/next-window-run.ts`）が持つ
+- **Issue一覧からまとめて積める**（#3284）。一覧の上の「まとめて予約」で選択モードに入り、行を
+  選んで、画面下部に固定した登録バーの「次の5時間枠にN件を予約」を押す。**新しい積み方は作らず、
+  「実装を開始」と同じ`POST /api/nightly-run`を1件ずつ順に呼ぶ**（`useBulkReserve`・
+  `reserveIssuesSequentially`）。行ごとの「選べない理由」（closed・予約済み・`11.local`・実行中・
+  確認待ち・`23.preview-required`/`25.artifact-required`・実行できるホスト無し）は
+  `resolveBulkReserveRejection`（`nightly-run.ts`）が決め、ラベルの塞ぎ方は
+  `resolveNightlyRunLabelRejection`をそのまま通す。**ダイアログのオプション（計画を立案等）は
+  足さず、各Issueに付いているラベルに従う**。エージェントは既定・モデルは指定なし・起動先は
+  そのリポジトリを持つ先頭のホスト（`pickBulkReserveHost`）。1件の失敗で後続を止めず、積めなかった
+  行だけ選択のまま理由を出す。入口はスマホ・PC共通の`IssueList`（`onNightlyRunQueued`を渡した
+  画面だけ）
 - **なぜ枠の終わり際なのか。** Claudeのプラン枠は時計の境界ではなく**最初のリクエストで始まる**
   （実測で`anthropic-ratelimit-unified-5h-reset`は`08:40`のような半端な時刻を返す）。何も
   走らせていない時間帯には枠そのものが存在せず、その5時間ぶんの割り当ては誰にも使われないまま

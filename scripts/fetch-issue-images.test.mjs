@@ -20,6 +20,7 @@ const script = path.join(repoRoot, "scripts/fetch-issue-images.sh");
 const SECRET = "test-secret";
 const IMAGE_A = "aaaaaaaa-1111-2222-3333-444444444444.png";
 const IMAGE_B = "bbbbbbbb-1111-2222-3333-444444444444.jpg";
+const IMAGE_SVG = "cccccccc-1111-2222-3333-444444444444.svg";
 
 let server;
 let baseUrl;
@@ -41,6 +42,10 @@ beforeEach(async () => {
     }
     if (request.url === `/api/issues/images/${IMAGE_B}`) {
       res.writeHead(200, { "Content-Type": "image/jpeg" }).end("JPGDATA");
+      return;
+    }
+    if (request.url === `/api/issues/images/${IMAGE_SVG}`) {
+      res.writeHead(200, { "Content-Type": "image/svg+xml" }).end("<svg></svg>");
       return;
     }
     res.writeHead(404).end();
@@ -101,6 +106,17 @@ describe("fetch-issue-images.sh", () => {
       `/api/issues/images/${IMAGE_A}`,
       `/api/issues/images/${IMAGE_B}`,
     ]);
+  });
+
+  it("SVGも取得して保存する（#3286。AIはReadでXMLテキストとして読める）", async () => {
+    const result = await run(["-"], {
+      input: `![icon](https://issue-deck.example/api/issues/images/${IMAGE_SVG})`,
+    });
+
+    expect(result.code).toBe(0);
+    const paths = result.stdout.trim().split("\n");
+    expect(paths).toEqual([path.join(workDir, "out", IMAGE_SVG)]);
+    expect(readFileSync(paths[0], "utf8")).toBe("<svg></svg>");
   });
 
   it("URLのホストではなく、設定の取得先へ鍵を送る（別ホストへ鍵を漏らさない）", async () => {

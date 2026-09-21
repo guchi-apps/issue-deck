@@ -246,6 +246,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `basis-48`と同じ`flex-basis`を奪い合い、どちらが勝つかがTailwindのCSS出力順に依存する。
   折り返しはjsdomでは再現できないため、指定が残っているかは`issue-list.test.tsx`が
   クラスで見張っている。
+- **Issue一覧の「まとめて予約」（#3284）は、選択モードの状態を`hooks/use-bulk-reserve.ts`、
+  入口の1行と下端に固定する登録バーを`bulk-reserve-bar.tsx`に置き、`issue-list.tsx`は行の
+  チェック・理由・行押下の切り替えだけを持つ。** 入口バーは`COUNT_BAR_*`と同じ折り返しの作り
+  （`flex-wrap`＋`basis-48`＋`ml-auto`）。登録バーは**スクロール領域（`<ul>`を包む枠）の外＝
+  ルートの最後の子**に置く——中に入れると引っ張って更新の`translateY`に引きずられる。
+  選択モードでは行を包む選択用`<button>`が`role="checkbox"`になり、押しても詳細は開かない。
+  **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
+  `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
+  （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
@@ -3776,6 +3785,16 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
+  **受け付ける形式はPNG・JPEG・GIF・WebP・SVG**（#3286）。SVGは拡張子・MIMEを名乗るだけの
+  HTMLなどを保存しないよう、先頭が`<svg`（XML宣言・コメント・DOCTYPEは読み飛ばす）かを
+  `looksLikeSvg`（`lib/uploaded-images.ts`）で確かめ、外れたら415`invalid_svg`を返す。
+  **SVGの扱いは他の形式と3点違う。** (1) 配信（`GET`）にだけ`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`と
+  `X-Content-Type-Options: nosniff`を付ける（`<img>`経由なら実行されないが、URLを新しいタブで
+  直接開くと同一オリジンでスクリプトが動きログインCookieの権限で実行され得るため。中身の無害化は
+  しない）。(2) 入力欄のサムネイルは市松の地に全体を出し「SVG」の印を付け、**「書き込む」は出さない**
+  （書き込みはcanvasを介してPNGへ描き出すため。判定は`isSvgImageUrl`）。(3) 「書き込みから変更内容を
+  読み取る」（`lib/claude/image-extract.ts`）はSVGをAnthropic APIへ送らず外す（送ると400になる）。
+  AIの取得（`scripts/fetch-issue-images.sh`）はSVGも保存し、`Read`でXMLテキストとして読める。
 - `GET /api/issues/images/[filename]` … **ログイン中の本人か、共有シークレットを持つAIだけに返す**
   （#2967）。以前は未認証で、GitHub.com側のIssue画面でも表示できたが、**URLが公開リポジトリの
   本文に載るため誰でも中身を見られた。** 読めるのはログインCookie・`Bearer PROGRESS_REPORT_SECRET`

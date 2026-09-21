@@ -4,7 +4,9 @@ import {
   buildUploadedImageList,
   extractUploadedImageFilenames,
   formatUploadedImageSize,
+  isSvgImageUrl,
   isUploadedImageFilename,
+  looksLikeSvg,
   selectCleanupTargets,
   summarizeUploadedImages,
 } from "@/lib/uploaded-images";
@@ -17,13 +19,54 @@ describe("isUploadedImageFilename", () => {
   it("アップロードAPIが作るUUID名だけを通す", () => {
     expect(isUploadedImageFilename(`${UUID}.png`)).toBe(true);
     expect(isUploadedImageFilename(`${UUID}.webp`)).toBe(true);
+    expect(isUploadedImageFilename(`${UUID}.svg`)).toBe(true);
   });
 
   it("パストラバーサル・対象外の拡張子・大文字のUUIDは通さない", () => {
     expect(isUploadedImageFilename(`../../etc/passwd`)).toBe(false);
-    expect(isUploadedImageFilename(`${UUID}.svg`)).toBe(false);
+    expect(isUploadedImageFilename(`${UUID}.svgz`)).toBe(false);
+    expect(isUploadedImageFilename(`${UUID}.html`)).toBe(false);
     expect(isUploadedImageFilename(`${UUID.toUpperCase()}.png`)).toBe(false);
     expect(isUploadedImageFilename("screenshot.png")).toBe(false);
+  });
+});
+
+describe("isSvgImageUrl", () => {
+  it("拡張子がsvgのURL（クエリ付きも）だけをSVGとみなす", () => {
+    expect(isSvgImageUrl(`https://x.example/api/issues/images/${UUID}.svg`)).toBe(true);
+    expect(isSvgImageUrl(`/api/issues/images/${UUID}.svg?v=1`)).toBe(true);
+    expect(isSvgImageUrl(`/api/issues/images/${UUID}.png`)).toBe(false);
+    expect(isSvgImageUrl("/api/issues/images/svg.png")).toBe(false);
+  });
+});
+
+describe("looksLikeSvg", () => {
+  it("素のsvg要素・XML宣言・コメント・DOCTYPE・BOMの後ろのsvg要素を通す", () => {
+    expect(looksLikeSvg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toBe(true);
+    expect(looksLikeSvg('\n  <svg\n xmlns="http://www.w3.org/2000/svg">')).toBe(true);
+    expect(looksLikeSvg('<?xml version="1.0" encoding="UTF-8"?>\n<!-- 生成 -->\n<svg>')).toBe(true);
+    expect(
+      looksLikeSvg(
+        '<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg>',
+      ),
+    ).toBe(true);
+    expect(looksLikeSvg('<!DOCTYPE svg [<!ENTITY a "b">]><svg>')).toBe(true);
+    expect(looksLikeSvg("\uFEFF<svg>")).toBe(true);
+  });
+
+  it("HTMLなどSVG以外・閉じていない前置き・空は通さない", () => {
+    expect(looksLikeSvg("<html><body><svg></svg></body></html>")).toBe(false);
+    expect(looksLikeSvg("<script>alert(1)</script>")).toBe(false);
+    expect(looksLikeSvg("<svgfoo>")).toBe(false);
+    expect(looksLikeSvg("<!-- 閉じていない<svg>")).toBe(false);
+    expect(looksLikeSvg('<?xml version="1.0"')).toBe(false);
+    expect(looksLikeSvg("")).toBe(false);
+  });
+
+  it("空白だらけの入力でも一瞬で判定する", () => {
+    const started = Date.now();
+    expect(looksLikeSvg(`${" ".repeat(60_000)}x`)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });
 
@@ -89,8 +132,15 @@ describe("extractUploadedImageFilenames", () => {
     expect(extractUploadedImageFilenames("ただの本文です")).toEqual([]);
   });
 
+  // SVGを拾えないと、貼られているSVGを「未使用」と判定して自動削除してしまう（#3286）
+  it("SVGも本文中の使用画像として拾う", () => {
+    expect(extractUploadedImageFilenames(`![icon](/api/issues/images/${UUID}.svg)`)).toEqual([
+      `${UUID}.svg`,
+    ]);
+  });
+
   it("対象外の拡張子・大文字のUUIDは拾わない（消してよい判定に使うため緩めない）", () => {
-    expect(extractUploadedImageFilenames(`/api/issues/images/${UUID}.svg`)).toEqual([]);
+    expect(extractUploadedImageFilenames(`/api/issues/images/${UUID}.html`)).toEqual([]);
     expect(extractUploadedImageFilenames(`/api/issues/images/${UUID.toUpperCase()}.png`)).toEqual(
       [],
     );
