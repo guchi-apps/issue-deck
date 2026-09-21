@@ -434,3 +434,85 @@ export function findScheduledRunQueuedMark(
 ): ScheduledRunQueuedMark | null {
   return marks?.get(issueId) ?? null;
 }
+
+/**
+ * 一覧から予約実行へまとめて積む（#3284）ときの、行ごとの「選べない理由」。選べるなら`null`。
+ *
+ * 積む口は「実装を開始」ダイアログと同じ`POST /api/nightly-run`で、そこでも同じ判定をする。
+ * ここは**押す前に行へ理由を出す**ための判定で、ラベルの塞ぎ方は
+ * `resolveNightlyRunLabelRejection`をそのまま使う（2か所に書かない）。
+ */
+export function resolveBulkReserveRejection(input: {
+  state: "open" | "closed";
+  labels: readonly { name: string }[];
+  /** 予約実行にすでに積まれているか（`selectScheduledRunQueuedMarks`の引き当て表に載っているか） */
+  alreadyQueued: boolean;
+  /** 起動ジョブが未完了・セッションが動いているなど、いま実行中か待機中か */
+  isActive: boolean;
+  /** そのリポジトリを実行できるホストがあるか */
+  hasHost: boolean;
+}): string | null {
+  if (input.state === "closed") return "closeされています";
+  if (input.alreadyQueued) return "予約済みです";
+  const names = input.labels.map((label) => label.name);
+  if (names.includes(LOCAL_LABEL_NAME)) return `着手済みです（${LOCAL_LABEL_NAME}）`;
+  if (input.isActive) return "実行中、または実行待ちです";
+  if (names.includes(CHECK_USER_LABEL)) {
+    const reason = checkUserReason(input.labels);
+    return `確認待ち（${reason ? CHECK_USER_REASON_TEXT[reason] : CHECK_USER_LABEL}）のため積めません`;
+  }
+  const labelRejection = resolveNightlyRunLabelRejection(input.labels, "NEXT_WINDOW");
+  if (labelRejection) return labelRejection;
+  if (!input.hasHost) return "このリポジトリを実行できるサブPCが登録されていません";
+  return null;
+}
+
+/** 起動先のホスト。「実装を開始」ダイアログの`nightlyHost`と同じく、そのリポジトリを持つ先頭のホスト */
+export function pickBulkReserveHost(
+  hosts: readonly { name: string; repositories: readonly string[] }[],
+  repositoryFullName: string,
+): string | null {
+  return hosts.find((host) => host.repositories.includes(repositoryFullName))?.name ?? null;
+}
+
+export type BulkReserveTarget = {
+  issueId: string;
+  repositoryFullName: string;
+  number: number;
+  host: string;
+};
+
+export type BulkReserveResult =
+  | { issueId: string; ok: true }
+  | { issueId: string; ok: false; message: string };
+
+/**
+ * 選んだIssueを**1件ずつ順に**積む。積む処理（`reserve`）は呼び出し側が渡す。
+ *
+ * 並列にしないのは、`reservedResetsAt`を積む時点の枠から控える処理が件数ぶん同じ行を読み、
+ * 失敗の理由を行と対応づけて残しやすいため（数十件までしか選ばない想定）。1件の失敗で
+ * 後続を止めず、`reserve`が例外を投げても失敗として記録して続ける。
+ */
+export async function reserveIssuesSequentially(
+  targets: readonly BulkReserveTarget[],
+  reserve: (target: BulkReserveTarget) => Promise<{ ok: true } | { ok: false; message: string }>,
+): Promise<BulkReserveResult[]> {
+  const results: BulkReserveResult[] = [];
+  for (const target of targets) {
+    try {
+      const outcome = await reserve(target);
+      results.push(
+        outcome.ok
+          ? { issueId: target.issueId, ok: true }
+          : { issueId: target.issueId, ok: false, message: outcome.message },
+      );
+    } catch (err) {
+      results.push({
+        issueId: target.issueId,
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return results;
+}

@@ -5,6 +5,9 @@ import {
   decideManualStartCancel,
   decideNightlyRunLaunch,
   findScheduledRunQueuedMark,
+  pickBulkReserveHost,
+  reserveIssuesSequentially,
+  resolveBulkReserveRejection,
   resolveNightlyRunLabelRejection,
   selectLatestNightKey,
   selectScheduledRunQueuedMarks,
@@ -328,5 +331,73 @@ describe("予約実行の目印（#2866・#2995）", () => {
       }),
     );
     expect(findScheduledRunQueuedMark(marks, "9003")?.chip).toBe("次枠実行OFF");
+  });
+});
+
+describe("resolveBulkReserveRejection", () => {
+  const base = { state: "open" as const, labels: [], alreadyQueued: false, isActive: false, hasHost: true };
+
+  it("何も引っかからなければ選べる", () => {
+    expect(resolveBulkReserveRejection(base)).toBeNull();
+    // 計画の投稿で止まるのは予約実行の想定に含まれる
+    expect(
+      resolveBulkReserveRejection({ ...base, labels: [{ name: "21.plan-required" }] }),
+    ).toBeNull();
+  });
+
+  it("選べない理由を行ごとに返す", () => {
+    expect(resolveBulkReserveRejection({ ...base, state: "closed" })).toContain("close");
+    expect(resolveBulkReserveRejection({ ...base, alreadyQueued: true })).toBe("予約済みです");
+    expect(
+      resolveBulkReserveRejection({ ...base, labels: [{ name: "11.local" }] }),
+    ).toContain("11.local");
+    expect(resolveBulkReserveRejection({ ...base, isActive: true })).toContain("実行");
+    expect(
+      resolveBulkReserveRejection({
+        ...base,
+        labels: [{ name: "00.check-user" }, { name: "01.check-plan" }],
+      }),
+    ).toContain("計画の承認");
+    expect(
+      resolveBulkReserveRejection({ ...base, labels: [{ name: "25.artifact-required" }] }),
+    ).toContain("デザインを提示");
+    expect(resolveBulkReserveRejection({ ...base, hasHost: false })).toContain("サブPC");
+  });
+});
+
+describe("pickBulkReserveHost", () => {
+  it("そのリポジトリを持つ先頭のホストを返す", () => {
+    const hosts = [
+      { name: "a", repositories: ["o/x"] },
+      { name: "b", repositories: ["o/x", "o/y"] },
+    ];
+    expect(pickBulkReserveHost(hosts, "o/y")).toBe("b");
+    expect(pickBulkReserveHost(hosts, "o/x")).toBe("a");
+    expect(pickBulkReserveHost(hosts, "o/z")).toBeNull();
+  });
+});
+
+describe("reserveIssuesSequentially", () => {
+  const targets = [1, 2, 3].map((n) => ({
+    issueId: `i${n}`,
+    repositoryFullName: "o/x",
+    number: n,
+    host: "a",
+  }));
+
+  it("失敗や例外があっても後続を止めず、順番どおりに結果を返す", async () => {
+    const order: number[] = [];
+    const results = await reserveIssuesSequentially(targets, async (target) => {
+      order.push(target.number);
+      if (target.number === 2) return { ok: false, message: "already_queued" };
+      if (target.number === 3) throw new Error("network");
+      return { ok: true };
+    });
+    expect(order).toEqual([1, 2, 3]);
+    expect(results).toEqual([
+      { issueId: "i1", ok: true },
+      { issueId: "i2", ok: false, message: "already_queued" },
+      { issueId: "i3", ok: false, message: "network" },
+    ]);
   });
 });

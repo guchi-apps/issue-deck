@@ -101,6 +101,10 @@ type MobileIssueListScreenProps = {
    * 予約実行に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
    */
   nightlyRunQueued?: ScheduledRunQueuedMap;
+  /** 一覧からの一括予約（#3284）。積めたら予約実行の件数・印を取り直す。渡した画面だけ入口を出す */
+  onNightlyRunQueued?: () => void;
+  /** 一括予約の結果バーの「予約実行を見る」 */
+  onOpenNightlyRun?: () => void;
   /** 保留中で`pinned`から外したもの（#2398）。`IssueList`へそのまま渡す */
   snoozedPinned?: { count: number; entries: SnoozeEntry[]; section: ReactNode };
   /**
@@ -175,6 +179,8 @@ export function MobileIssueListScreen({
   onSnooze,
   onUnsnooze,
   nightlyRunQueued,
+  onNightlyRunQueued,
+  onOpenNightlyRun,
   snoozedPinned,
   prerequisiteReadiness,
   codeReviewFindingIssues,
@@ -371,6 +377,8 @@ export function MobileIssueListScreen({
         onSnooze={onSnooze}
         onUnsnooze={onUnsnooze}
         nightlyRunQueued={nightlyRunQueued}
+        onNightlyRunQueued={onNightlyRunQueued}
+        onOpenNightlyRun={onOpenNightlyRun}
         snoozedPinned={snoozedPinned}
         prerequisiteReadiness={prerequisiteReadiness}
         codeReviewFindingIssues={codeReviewFindingIssues}

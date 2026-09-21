@@ -2204,6 +2204,9 @@ export function IssueDeckShell({
                   onUnsnooze={unsnooze}
                   /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                   nightlyRunQueued={nightlyRunQueued}
+                  /* 一覧から予約実行へまとめて積む（#3284）。積めたら件数・行のチップを取り直す */
+                  onNightlyRunQueued={nightlyRun.refresh}
+                  onOpenNightlyRun={selectNightlyRun}
                   snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
                   snoozedMergePendingEntries={snoozedMergePendingEntries}
                   /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
@@ -2297,6 +2300,8 @@ export function IssueDeckShell({
                   onUnsnooze={unsnooze}
                   /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                   nightlyRunQueued={nightlyRunQueued}
+                  onNightlyRunQueued={nightlyRun.refresh}
+                  onOpenNightlyRun={selectNightlyRun}
                 />
               )}
 
@@ -2622,6 +2627,9 @@ export function IssueDeckShell({
                 onUnsnooze={unsnooze}
                 /* 予約実行に積まれている印（#2866・#2995）。一覧の行と詳細の注釈が同じ表を読む */
                 nightlyRunQueued={nightlyRunQueued}
+                /* 一覧から予約実行へまとめて積む（#3284）。積めたら件数・行のチップを取り直す */
+                onNightlyRunQueued={nightlyRun.refresh}
+                onOpenNightlyRun={selectNightlyRunPane}
                 // いつ時点の内容かと自動更新の状態（#1797）。PR一覧・ブランチ画面と同じ並びで出す
                 fetchedAt={issuePolling.fetchedAt}
                 autoRefreshIntervalMs={issuePolling.pollIntervalMs}
