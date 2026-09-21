@@ -101,7 +101,13 @@ function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/** 答えが期待した型かを確かめる。**形が違えば採らない**（呼び出し元が従来経路へ倒す） */
+/**
+ * 答えが期待した型かを確かめる。**形が違えば採らない**（呼び出し元が従来経路へ倒す）
+ *
+ * 3つともJevが受け付ける質問の型に対応させて置いてある。**いまアプリが使っているのは
+ * `choice`だけ**で（#3255でモデル判定から`score`・`noul`をやめた）、残り2つはこのファイルが
+ * Jevの入口として型を揃えておくためのもの。
+ */
 export function readChoiceAnswer(answer: SystemOneAnswer | undefined): ChoiceAnswer | null {
   if (!answer || answer.type !== "choice") return null;
   if (typeof answer.choice !== "string" || answer.choice.length === 0) return null;
