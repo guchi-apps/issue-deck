@@ -2081,6 +2081,7 @@ export function IssueDeckShell({
               {mobileScreen.kind === "usage" && (
                 <MobileUsageScreen
                   data={sessionUsage.data}
+                  plan={sessionUsage.plan}
                   isLoading={sessionUsage.isLoading}
                   error={sessionUsage.error}
                   days={usageDays}
@@ -2402,6 +2403,7 @@ export function IssueDeckShell({
               <div className="mx-auto max-w-4xl">
                 <SessionUsagePanel
                   data={sessionUsage.data}
+                  plan={sessionUsage.plan}
                   isLoading={sessionUsage.isLoading}
                   error={sessionUsage.error}
                   days={usageDays}

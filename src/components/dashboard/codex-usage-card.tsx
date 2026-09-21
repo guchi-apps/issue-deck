@@ -1,6 +1,6 @@
 "use client";
 
-import { UsageMeter } from "@/components/dashboard/usage-meter";
+import { UsageMeter, UsageMeterSkeleton } from "@/components/dashboard/usage-meter";
 import { useNow } from "@/hooks/use-now";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 import { calcElapsedTimePercent, formatResetAt, formatResetSentence } from "@/lib/format-reset";
@@ -27,7 +27,14 @@ export function CodexUsageCard({ data, isLoading, error, notConfigured }: Props)
   const now = useNow();
   return (
     <>
-      {isLoading && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+      {isLoading && (
+        // Codexが出すのは週間枠の1行だけ（#3195）。同じ形の枠を先に描く（#3304）
+        <ul className="flex flex-col gap-2">
+          <li className="rounded-lg border p-2">
+            <UsageMeterSkeleton label="週間" />
+          </li>
+        </ul>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
       {notConfigured && (
         <p className="text-xs text-muted-foreground">Codex使用量の報告がまだありません</p>

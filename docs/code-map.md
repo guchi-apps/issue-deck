@@ -597,11 +597,22 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **画面の並びは「見出し＋報告の経過時間＋更新ボタン（右端）→ 実行中のセッション → プラン枠 →
     期間選択 → 期間の集計」**（#3257）。期間選択がプラン枠の下にあるのは、切り替わるのが下の
     集計だけだから。**期間を変えてもプラン枠・実行中のセッションは取り直さず描き直さない。**
-    `use-session-usage.ts`が期間だけが変わった取得で前の応答を残し、`planUsage`・
-    `planNotConfigured`・`quotaEstimate`・`currentSessions`を前の参照のまま引き継ぐ（応答は
-    期間の集計と1本のままなので、サーバーは変えていない）。画面は`data.days`が選択中の期間と
-    一致するまで集計を隠し、プラン枠は`memo`化した`PlanUsageSection`へ渡す。プラン枠を取り直すのは
-    初回と更新ボタンのときだけ
+    `use-session-usage.ts`が期間だけが変わった取得で前の応答を残し、`currentSessions`を前の参照の
+    まま引き継ぐ。プラン枠は集計と別の状態（`plan`）なので期間には触られず、`memo`化した
+    `PlanUsageSection`が描き直されない。画面は`data.days`が選択中の期間と一致するまで集計を隠す。
+    プラン枠を取り直すのは初回と更新ボタンのときだけ
+  - **プラン枠は集計と別のリクエスト（`GET /api/session-usage?plan=1`）で取り、画面は枠と
+    スケルトンを先に描く**（#3304）。プラン枠の取得はClaudeの最小の推論リクエスト（最大10秒）と
+    Codexへの問い合わせ（最大5秒）で、DBだけの集計・実行中のセッションより桁違いに遅い。
+    1本にまとめていた頃は、これが終わるまで画面に何も出なかった。**集計（`?days=`）はプラン枠を
+    取得せず、`peekClaudeUsageWindows`が返す取得済みのキャッシュから5時間枠の換算を作る**
+    （`?current=1`と同じ流儀）。したがって**キャッシュが冷えた状態で開いた初回だけ、集計は換算なし
+    （「直近5時間枠のおよそN%」が出ない）で先に届く**。`use-session-usage.ts`はプラン枠が届いて
+    換算が求まった時点で、集計を1回だけ静かに取り直して埋める（`isLoading`も`data`の消去もしない。
+    取り直しても求まらなければ繰り返さない）。スケルトンは`session-usage-panel.tsx`の
+    `PeriodSkeleton`・`CurrentSessionsSkeleton`と`usage-meter.tsx`の`UsageMeterSkeleton`で、
+    **実物の`SessionUsagePanel`・`UsageMeter`の並びや文字サイズを変えるときは同時に直す**（高さを
+    揃えてあり、届いた瞬間の位置ずれを抑えている）。点滅は`motion-reduce:animate-none`で止める
   - **5時間枠1%あたりの実測換算（`buildQuotaEstimate`）は、#2666（`de23eb8e`）で廃止した
     `buildQuotaScale`/`toQuotaPercent`と同じ計算式の再導入**（#2988）。「向きが違うから別物」
     ではなく、計算自体（窓内の実測消費÷実測の使用率）は同一。**変えたのは2点だけ。**

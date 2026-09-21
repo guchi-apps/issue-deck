@@ -3,7 +3,7 @@
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { SessionUsagePanel } from "@/components/dashboard/session-usage-panel";
-import type { SessionUsageResponse } from "@/hooks/use-session-usage";
+import type { SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 
 /**
  * スマホの「AI使用量」画面（#2504）。
@@ -17,6 +17,7 @@ import type { SessionUsageResponse } from "@/hooks/use-session-usage";
  */
 export function MobileUsageScreen({
   data,
+  plan,
   isLoading,
   error,
   days,
@@ -25,6 +26,7 @@ export function MobileUsageScreen({
   onOpenIssue,
 }: {
   data: SessionUsageResponse | null;
+  plan: SessionUsagePlanState;
   isLoading: boolean;
   error: string | null;
   days: number;
@@ -44,6 +46,7 @@ export function MobileUsageScreen({
       <div className="flex-1 overflow-y-auto overscroll-contain p-4 pb-20">
         <SessionUsagePanel
           data={data}
+          plan={plan}
           isLoading={isLoading}
           error={error}
           days={days}

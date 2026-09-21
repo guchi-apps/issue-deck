@@ -1,5 +1,6 @@
 "use client";
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 /** この割合を下回ったら警告色にする残量(%)。 */
@@ -110,6 +111,28 @@ export function UsageMeter({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * `UsageMeter`の取得待ちの形（#3304）。見出し行・バー・下段の3段を、実物と同じ高さで灰色の帯にする。
+ * 取得できた瞬間に行の高さが変わって画面が跳ねないようにするため、**`UsageMeter`の文字サイズ・
+ * 余白を変えるときはここも直す。**
+ *
+ * 読み上げには1つの「読み込み中」だけを出す（帯ごとに読み上げさせない）。点滅は
+ * `prefers-reduced-motion`のときだけ止める。
+ */
+export function UsageMeterSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col gap-1" role="status" aria-busy="true">
+      <span className="sr-only">{label}を読み込み中</span>
+      <div aria-hidden className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="font-medium">{label}</span>
+        <Skeleton className="h-3 w-12 rounded-sm motion-reduce:animate-none" />
+      </div>
+      <Skeleton aria-hidden className="h-2 w-full rounded-full motion-reduce:animate-none" />
+      <Skeleton aria-hidden className="h-2.5 w-28 rounded-sm motion-reduce:animate-none" />
     </div>
   );
 }
