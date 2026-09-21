@@ -62,7 +62,15 @@ export function ImageExtractButton({ value, onChange, disabled }: ImageExtractBu
         onClick={handleExtract}
       >
         {isExtracting ? <Loader2 className="animate-spin" /> : <ScanText />}
-        {isExtracting ? "読み取り中" : "画像から変更内容を抽出"}
+        {/* スマホ幅（`sm`未満）は「画像から抽出」に縮める（#3310）。見出し「内容」・「音声入力を整理」と
+            並べて1行に収めるため。全文だと393px幅で約1pxあふれ、この行だけ次の段へ落ちていた */}
+        {isExtracting ? (
+          "読み取り中"
+        ) : (
+          <>
+            画像から<span className="hidden sm:inline">変更内容を</span>抽出
+          </>
+        )}
       </Button>
       {isExtracting && (
         <p role="status" className="basis-full text-xs text-muted-foreground">
