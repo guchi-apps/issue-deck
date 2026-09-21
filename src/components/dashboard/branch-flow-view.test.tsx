@@ -1254,7 +1254,7 @@ describe("BranchFlowView", () => {
 
       expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
       expect(
-        screen.getByText("mainへのマージです。マージすると本番デプロイが走ります。"),
+        screen.getByText("マージすると本番デプロイが走ります。"),
       ).toBeTruthy();
     });
 

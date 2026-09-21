@@ -4,10 +4,19 @@ import { ExternalLink } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import type { UsePullRequestChangesResult } from "@/hooks/use-pull-request-changes";
-import { releaseVersionFromTitle } from "@/lib/branch-flow";
 import { pullRequestChangeIssueLabel, pullRequestChangeLabel } from "@/lib/pull-request-changes";
-import { cn } from "@/lib/utils";
 import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
+
+/**
+ * 一覧に出すのは実際に入る変更だけ。**バージョンバンプのPRは外す**（#3260）。
+ *
+ * リリースには前の版のバンプPR（`v1.0.12をリリースする`）が必ず含まれ、毎回同じ行が並んでいた。
+ * 何が上がるかは上の「バージョン」（`PullRequestMergeVersion`）が示すので、行としては要らない。
+ * PR件数にも数えない（数えると、見えている行数と件数がずれる）。
+ */
+function withoutVersionBumps(changes: PullRequestChange[]): PullRequestChange[] {
+  return changes.filter((change) => change.kind !== "version-bump");
+}
 
 type PullRequestMergeChangesProps = {
   pullRequest: PullRequestSummary;
@@ -18,7 +27,6 @@ type PullRequestMergeChangesProps = {
 function ChangeRow({ change }: { change: PullRequestChange }) {
   const label = pullRequestChangeLabel(change);
   const issueLabel = pullRequestChangeIssueLabel(change);
-  const bump = change.kind === "version-bump";
 
   return (
     <li className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
@@ -27,14 +35,7 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
           {label}
         </span>
       )}
-      <span className={cn("min-w-0 flex-1 truncate text-xs leading-6", bump && "text-muted-foreground")}>
-        {change.title}
-      </span>
-      {bump && (
-        <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] leading-6 text-muted-foreground">
-          バンプ
-        </span>
-      )}
+      <span className="min-w-0 flex-1 truncate text-xs leading-6">{change.title}</span>
       {/* 対応Issue番号は主語ではなくなったが、Issueから探す読み方も残す。幅が足りない画面では畳む */}
       {issueLabel && (
         <span className="hidden shrink-0 font-mono text-[11px] leading-6 text-muted-foreground tabular-nums sm:inline">
@@ -65,18 +66,13 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
  * （`PullRequestMergePrecheck`）。一覧は何のPRが含まれるかを読む場所にとどめる。
  */
 export function PullRequestMergeChanges({ pullRequest, state }: PullRequestMergeChangesProps) {
-  const { changes, commitCount, truncated, isLoading, error } = state;
-  const version = releaseVersionFromTitle(pullRequest.title);
+  const { changes: allChanges, commitCount, truncated, isLoading, error } = state;
+  const changes = allChanges === null ? null : withoutVersionBumps(allChanges);
 
   return (
     <div className="overflow-hidden rounded-lg border">
       <div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-2">
         <span className="text-xs font-semibold">このリリースに含まれる変更</span>
-        {version && (
-          <span className="shrink-0 rounded-full border px-2 font-mono text-[11px] leading-5">
-            v{version}
-          </span>
-        )}
         {changes !== null && (
           <span className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">
             PR {changes.length}件 ・ コミット{" "}
@@ -102,7 +98,7 @@ export function PullRequestMergeChanges({ pullRequest, state }: PullRequestMerge
 
       {changes !== null && changes.length === 0 && (
         <p className="px-3 py-2.5 text-xs text-muted-foreground">
-          このマージに含まれるコミットはありません。
+          このマージに含まれる変更はありません。
         </p>
       )}
 

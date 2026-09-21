@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
+import { fetchPackageVersion } from "@/lib/github/release-api";
 import {
   fetchPullRequestCommits,
   PULL_REQUEST_COMMITS_PER_PAGE,
@@ -26,6 +27,10 @@ export function GET(request: NextRequest) {
  * `PULL_REQUEST_COMMITS_PER_PAGE`件で打ち切り、打ち切ったことは`truncated`で画面へ伝える。
  * **対応Issueのタイトルはissue-deckが持っているキャッシュ（`Issue`テーブル）から解決する**ので、
  * Issueの件数ぶんの追加リクエストは発生しない。
+ *
+ * **mainの現在の版も1回で添える**（`previousVersion`。#3260）。リリースPRの確認ダイアログが
+ * 「どの版からどの版へ上げるか」を出すための材料で、`package.json`を読む1リクエストが増える。
+ * 読めなくても（`version.json`型・読み取りの失敗）変更点は返す——版は判断材料であって前提ではない。
  */
 async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
@@ -56,7 +61,10 @@ async function handleGET(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const commits = await fetchPullRequestCommits(owner, repo, number, token);
+    const [commits, previousVersion] = await Promise.all([
+      fetchPullRequestCommits(owner, repo, number, token),
+      fetchPackageVersion(owner, repo, "main", token).catch(() => null),
+    ]);
     const changes = toPullRequestChanges(
       commits.map((commit) => ({ sha: commit.sha, message: commit.commit.message })),
     );
@@ -77,6 +85,7 @@ async function handleGET(request: NextRequest) {
       changes: applyIssueTitles(changes, titleByIssueNumber),
       commitCount: commits.length,
       truncated: commits.length >= PULL_REQUEST_COMMITS_PER_PAGE,
+      previousVersion,
     };
     return NextResponse.json(response);
   } catch (error) {

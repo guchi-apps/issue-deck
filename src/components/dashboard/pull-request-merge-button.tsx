@@ -110,37 +110,46 @@ export function PullRequestMergeButton({
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        {/* 変更点を並べるぶん、mainへのPRのときだけ広げる。中身が増えても画面からはみ出さない
-            よう、高さの上限とスクロールはどちらの幅でも付ける（スマホで下端が切れる） */}
+        {/* 変更点を並べるぶん、mainへのPRのときだけ広げる。**ボタンは下端に固定し、スクロールするのは
+            本文だけ**（#3260）。判定や変更一覧が長くなっても、押す場所を探して下までスクロールしなくて
+            よい。高さの上限はどちらの幅でも付ける（スマホで下端が切れる） */}
         <AlertDialogContent
-          className={cn("max-h-[90dvh] overflow-y-auto", productionMerge && "sm:max-w-lg")}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle>このPRをマージしますか？</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pullRequest.repositoryFullName} #{pullRequest.number}（{pullRequest.headRef} →{" "}
-              {pullRequest.baseRef}）をマージします。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-destructive">
-            {shownWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-          {productionMerge ? (
-            <PullRequestMergeProduction pullRequest={pullRequest} open={confirmOpen} />
-          ) : (
-            <PullRequestMergeReview
-              verdict={pullRequest.reviewVerdict}
-              htmlUrl={pullRequest.htmlUrl}
-              headSha={pullRequest.headSha}
-              isReviewing={judgementPending}
-            />
+          className={cn(
+            "flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0",
+            productionMerge && "sm:max-w-lg",
           )}
-          <ApiErrorMessage message={error} />
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSubmitting}>キャンセル</AlertDialogCancel>
+        >
+          <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto p-4 sm:p-6">
+            <AlertDialogHeader className="text-center sm:text-center">
+              <AlertDialogTitle>このPRをマージしますか？</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pullRequest.repositoryFullName} #{pullRequest.number}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <ul className="space-y-1 text-center text-sm text-destructive">
+              {shownWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+            {productionMerge ? (
+              <PullRequestMergeProduction pullRequest={pullRequest} open={confirmOpen} />
+            ) : (
+              <PullRequestMergeReview
+                verdict={pullRequest.reviewVerdict}
+                htmlUrl={pullRequest.htmlUrl}
+                headSha={pullRequest.headSha}
+                isReviewing={judgementPending}
+              />
+            )}
+            <ApiErrorMessage message={error} />
+          </div>
+          <AlertDialogFooter className="flex-row gap-2.5 border-t px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-stretch sm:px-6 sm:pt-4 sm:pb-4">
+            <AlertDialogCancel className="flex-1" disabled={isSubmitting}>
+              キャンセル
+            </AlertDialogCancel>
             <AlertDialogAction
+              variant="default"
+              className="flex-1"
               onClick={(event) => {
                 // 確認結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する。
                 event.preventDefault();
