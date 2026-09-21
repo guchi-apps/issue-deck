@@ -71,6 +71,10 @@ function run(args, { input = "", env = {} } = {}) {
       },
       (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr }),
     );
+    // 引数だけでURLを渡すテストでは、スクリプトが標準入力を読まずに先に終了することがある。
+    // その場合ここへのwriteはEPIPEになるが、プロセスの終了コード自体は`error`経由で
+    // 正しく取れているので、このストリームエラーは無視してよい。
+    child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
 }
