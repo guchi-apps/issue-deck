@@ -15,6 +15,21 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
+/**
+ * SVGを配信するときに付けるヘッダー（#3286）。
+ *
+ * SVGは`<script>`やイベントハンドラを含められ、`<img>`経由なら実行されないが、URLを新しい
+ * タブで直接開くと**同一オリジンのページとして実行され、ログインCookieの権限で動いてしまう**。
+ * `sandbox`で不透明なオリジンに落とし、`default-src 'none'`で読み込みと実行を全部止める
+ * （`style-src 'unsafe-inline'`だけは、SVG自身の`<style>`で見た目が崩れないように残す）。
+ * `nosniff`はContent-Typeの読み替えでHTMLとして解釈されるのを防ぐ。
+ */
+const SVG_SAFETY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  "X-Content-Type-Options": "nosniff",
 };
 
 /**
@@ -73,6 +88,7 @@ export async function GET(
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       "Content-Type": CONTENT_TYPE_BY_EXTENSION[extension],
+      ...(extension === "svg" ? SVG_SAFETY_HEADERS : {}),
       // 共有キャッシュ（CDN・プロキシ）に載せると、認証を通った1回の応答が他人へ配られる
       "Cache-Control": "private, max-age=31536000, immutable",
     },

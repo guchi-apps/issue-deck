@@ -165,6 +165,13 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     expect(cleanup.sort()).toEqual(packed.sort());
   });
 
+  it("配布するのは next.config.mjs で、旧名の next.config.ts は含めない（#3223）", () => {
+    // 新規アプリの設定ファイルは`.mjs`にして出す（本番の`next start`にSWCを読み込ませない）
+    const deploy = content(spec(), ".github/workflows/deploy.yml");
+    expect(deploy).toContain("next.config.mjs");
+    expect(deploy).not.toContain("next.config.ts");
+  });
+
   it("DBを使う種別だけマイグレーションとDATABASE_URLの組み立てを持つ", () => {
     const withDb = content(spec(), ".github/workflows/deploy.yml");
     expect(withDb).toContain("prisma migrate deploy");

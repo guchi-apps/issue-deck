@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { getUploadedImageInventory } from "@/lib/images/image-cleanup-run";
 import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { looksLikeSvg, SVG_HEAD_SCAN_BYTES } from "@/lib/uploaded-images";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
@@ -16,6 +17,7 @@ const EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/gif": "gif",
   "image/webp": "webp",
+  "image/svg+xml": "svg",
 };
 
 /**
@@ -58,8 +60,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "file_too_large" }, { status: 413 });
   }
 
-  const filename = `${randomUUID()}.${extension}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // SVGは拡張子・MIMEを名乗るだけのHTMLなどを保存しないよう、先頭がSVG文書かを確かめる（#3286）
+  if (extension === "svg" && !looksLikeSvg(buffer.subarray(0, SVG_HEAD_SCAN_BYTES).toString("utf8"))) {
+    return NextResponse.json({ error: "invalid_svg" }, { status: 415 });
+  }
+
+  const filename = `${randomUUID()}.${extension}`;
 
   await mkdir(UPLOADED_IMAGE_DIR, { recursive: true });
   await writeFile(path.join(UPLOADED_IMAGE_DIR, filename), buffer);

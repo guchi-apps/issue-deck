@@ -651,35 +651,119 @@ describe("PRのマージへの入口（#3083）", () => {
   });
 });
 
-// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）
+// #3159: GitHubのラベルは一覧のカードに出さない（付いているものはIssue詳細で見る）。
+// 例外は未着手ビューの種類ラベル（#3285）
 describe("一覧のカードにGitHubラベルを出さない（#3159）", () => {
-  it("実装オプション・実行状態・分類・優先度のどれも出さない", () => {
-    const labeled = [
-      makeIssue({
-        number: 1,
-        labels: [
-          label("50.feature"),
-          label("21.plan-required"),
-          label("25.artifact-required"),
-          label("11.local"),
-          label("80.Priority: High"),
-        ],
-      }),
-    ];
+  const labeled = [
+    makeIssue({
+      number: 1,
+      labels: [
+        label("50.feature"),
+        label("21.plan-required"),
+        label("25.artifact-required"),
+        label("11.local"),
+        label("80.Priority: High"),
+      ],
+    }),
+  ];
+  const names = [
+    "50.feature",
+    "21.plan-required",
+    "25.artifact-required",
+    "11.local",
+    "80.Priority: High",
+  ];
+
+  it("未着手以外のビューでは、実装オプション・実行状態・分類・優先度のどれも出さない", () => {
+    render(
+      <IssueList
+        title="すべて"
+        issues={labeled}
+        selectedIssueId={null}
+        onSelectIssue={vi.fn()}
+        view="all"
+      />,
+    );
+
+    for (const name of names) expect(screen.queryByText(name)).toBeNull();
+    // 行そのものは描かれている
+    expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
+  });
+
+  it("ビューを指定しない一覧でも出さない", () => {
     render(
       <IssueList title="すべて" issues={labeled} selectedIssueId={null} onSelectIssue={vi.fn()} />,
     );
 
-    for (const name of [
-      "50.feature",
-      "21.plan-required",
-      "25.artifact-required",
-      "11.local",
-      "80.Priority: High",
-    ]) {
+    for (const name of names) expect(screen.queryByText(name)).toBeNull();
+  });
+});
+
+// #3285: 未着手ビューの行にだけ、種類ラベル（30〜69番台）を1行・横スクロールで出す
+describe("未着手ビューの種類ラベル（#3285）", () => {
+  const renderNotStarted = (
+    issues: Issue[],
+    onSelectIssue: (issue: Issue) => void = vi.fn(),
+  ) =>
+    render(
+      <IssueList
+        title="未着手"
+        issues={issues}
+        selectedIssueId={null}
+        onSelectIssue={onSelectIssue}
+        view="not-started"
+      />,
+    );
+
+  it("30〜69番台のラベルだけを番号順に出し、要対応・オプション・優先度は出さない", () => {
+    renderNotStarted([
+      makeIssue({
+        number: 1,
+        labels: [
+          label("62.design"),
+          label("11.local"),
+          label("21.plan-required"),
+          label("30.bug"),
+          label("80.Priority: High"),
+          label("51.improvement"),
+        ],
+      }),
+    ]);
+
+    const shown = ["30.bug", "51.improvement", "62.design"].map((name) => screen.getByText(name));
+    // 番号順に並んでいる
+    expect(shown[0].compareDocumentPosition(shown[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(shown[1].compareDocumentPosition(shown[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const name of ["11.local", "21.plan-required", "80.Priority: High"]) {
       expect(screen.queryByText(name)).toBeNull();
     }
-    // 行そのものは描かれている
+  });
+
+  it("ラベルは折り返さず、収まらないぶんは横スクロールにする", () => {
+    renderNotStarted([
+      makeIssue({ number: 1, labels: [label("30.bug"), label("50.feature"), label("65.docs")] }),
+    ]);
+
+    const container = screen.getByText("30.bug").parentElement as HTMLElement;
+    expect(container.className).toContain("flex-nowrap");
+    expect(container.className).toContain("overflow-x-auto");
+    expect(screen.getByText("30.bug").className).toContain("whitespace-nowrap");
+  });
+
+  it("ラベル行を押しても行が選択される", () => {
+    const onSelectIssue = vi.fn();
+    const issue = makeIssue({ number: 1, labels: [label("30.bug")] });
+    renderNotStarted([issue], onSelectIssue);
+
+    fireEvent.click(screen.getByText("30.bug"));
+
+    expect(onSelectIssue).toHaveBeenCalledWith(issue);
+  });
+
+  it("種類ラベルが付いていない行では何も出さない", () => {
+    renderNotStarted([makeIssue({ number: 1, labels: [label("11.local")] })]);
+
+    expect(screen.queryByText("11.local")).toBeNull();
     expect(screen.getByRole("button", { name: /#1 / })).toBeTruthy();
   });
 });
@@ -1280,6 +1364,141 @@ describe("IssueListの予約実行の目印（#2866・#2995）", () => {
     renderList();
 
     expect(rowOf(2).textContent).not.toContain("次枠");
+  });
+});
+
+describe("IssueListの一括予約（#3284）", () => {
+  const bulkIssues = [
+    makeIssue({ number: 1 }),
+    makeIssue({ number: 2 }),
+    makeIssue({ number: 3, labels: [label("25.artifact-required")] }),
+    makeIssue({ number: 4, labels: [label("11.local")] }),
+  ];
+
+  function useHost() {
+    dispatchState.hosts = [
+      { name: "subpc", online: true, repositories: ["guchi-apps/issue-deck"] },
+    ];
+  }
+
+  function stubFetch(handler: (body: Record<string, unknown>) => { ok: boolean; message?: string }) {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const outcome = handler(JSON.parse(String(init?.body ?? "{}")));
+      return {
+        ok: outcome.ok,
+        status: outcome.ok ? 201 : 409,
+        json: async () => (outcome.message ? { message: outcome.message } : {}),
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("予約実行へ積む口を渡していない画面では入口を出さない", () => {
+    useHost();
+    renderList({ issues: bulkIssues });
+
+    expect(screen.queryByRole("button", { name: "まとめて予約" })).toBeNull();
+  });
+
+  it("選択モードでは選べない行に理由を出し、行を押しても詳細は開かない", () => {
+    useHost();
+    const onSelectIssue = vi.fn();
+    renderList({ issues: bulkIssues, onSelectIssue, onNightlyRunQueued: vi.fn() });
+
+    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+
+    expect(rowOf(3).textContent).toContain("デザインを提示");
+    expect(rowOf(4).textContent).toContain("11.local");
+    expect(rowOf(1).textContent).not.toContain("着手済み");
+
+    fireEvent.click(selectButtonOf(1));
+    expect(onSelectIssue).not.toHaveBeenCalled();
+    expect(selectButtonOf(1).getAttribute("aria-checked")).toBe("true");
+    // 選べない行は押しても選択にならない
+    fireEvent.click(selectButtonOf(3));
+    expect(selectButtonOf(3).getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("全選択で選べる行だけを選び、登録すると次枠実行として1件ずつ積む", async () => {
+    useHost();
+    const onNightlyRunQueued = vi.fn();
+    const fetchMock = stubFetch(() => ({ ok: true }));
+    renderList({ issues: bulkIssues, onNightlyRunQueued });
+
+    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    fireEvent.click(screen.getByRole("button", { name: "全選択" }));
+    expect(screen.getByText("2件を選択中")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "次の5時間枠に2件を予約" }));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+    expect(bodies.map((body) => body.issue)).toEqual([1, 2]);
+    expect(bodies[0]).toMatchObject({
+      repository: "guchi-apps/issue-deck",
+      host: "subpc",
+      kind: "next-window",
+    });
+    expect(onNightlyRunQueued).toHaveBeenCalledTimes(1);
+    // 全件積めたら選択モードを閉じ、結果だけを伝える
+    expect(screen.getByText("2件を予約しました")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "選択を終了" })).toBeNull();
+  });
+
+  it("積めなかった行だけ選択のまま残し、理由を行に出す", async () => {
+    useHost();
+    stubFetch((body) =>
+      body.issue === 2 ? { ok: false, message: "このIssueはすでに予約実行に積んであります" } : { ok: true },
+    );
+    renderList({ issues: bulkIssues, onNightlyRunQueued: vi.fn() });
+
+    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    fireEvent.click(screen.getByRole("button", { name: "全選択" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "次の5時間枠に2件を予約" }));
+    });
+
+    expect(screen.getByText("1件を予約・1件は積めませんでした")).toBeTruthy();
+    expect(rowOf(2).textContent).toContain("すでに予約実行に積んであります");
+    expect(selectButtonOf(2).getAttribute("aria-checked")).toBe("true");
+    expect(selectButtonOf(1).getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("button", { name: "次の5時間枠に1件を予約" })).toBeTruthy();
+  });
+
+  it("予約済みの行と、実行できるサブPCが無いリポジトリの行は選べない", () => {
+    // ホスト無し
+    renderList({ issues: bulkIssues, onNightlyRunQueued: vi.fn() });
+    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    expect(rowOf(1).textContent).toContain("サブPCが登録されていません");
+    cleanup();
+
+    useHost();
+    renderList({
+      issues: bulkIssues,
+      onNightlyRunQueued: vi.fn(),
+      nightlyRunQueued: new Map([
+        [
+          "2",
+          {
+            entryId: "e1",
+            kind: "NEXT_WINDOW",
+            enabled: true,
+            chip: "次枠",
+            title: "",
+            detail: "",
+          },
+        ],
+      ]) as never,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    expect(rowOf(2).textContent).toContain("予約済みです");
   });
 });
 

@@ -10,7 +10,10 @@
  * - `RELEASE_USAGE` — どう使うか。番号付きの複数行（#1729）。**画面で使える変化が無い
  *   リリースでは空**で渡るため、その場合は`usage`を書かない
  *
- * 未設定・空のとき（手元で`npm version`を叩いた場合など）は、後から手で埋めるための枠だけを作る。
+ * `RELEASE_CHANGELOG`が未設定・空のとき（手元で`npm version`を叩いた場合や、画面で体感できる
+ * 変化が無いリリース）は**エントリを作らない**（#3282）。かつては「（変更内容を追記してください）」
+ * という枠を作っていたが、誰も埋めないまま更新履歴の画面にその文字が残り続けた。書くことが無い
+ * 版は履歴に載せない。
  *
  * **依存関係に触れてはいけない。** 共有ワークフローはバージョンbumpのために依存を
  * インストールしないため、Node標準モジュールだけで完結させる（`preversion`も作らない）。
@@ -20,8 +23,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const changelogPath = join(dirname(fileURLToPath(import.meta.url)), "../src/lib/changelog.ts");
-
-export const CHANGELOG_PLACEHOLDER = "（変更内容を追記してください）";
 
 const CHANGELOG_MARKER = "export const APP_CHANGELOG: ChangelogEntry[] = [";
 
@@ -62,7 +63,11 @@ export function insertChangelogEntry(content, version, date, changes = [], usage
     throw new Error("APP_CHANGELOG marker not found in changelog.ts");
   }
 
-  const items = changes.length > 0 ? changes : [CHANGELOG_PLACEHOLDER];
+  // 何が変わったかが無い版は、使い方があっても載せない（変更の無い履歴は読む価値が無いため）。
+  if (changes.length === 0) {
+    return { content, inserted: false };
+  }
+
   const usageBlock =
     usage.length > 0
       ? `\n    usage: [\n${usage.map((item) => `      "${escapeForTs(item)}",`).join("\n")}\n    ],`
@@ -72,7 +77,7 @@ export function insertChangelogEntry(content, version, date, changes = [], usage
     version: "${version}",
     date: "${date}",
     changes: [
-${items.map((item) => `      "${escapeForTs(item)}",`).join("\n")}
+${changes.map((item) => `      "${escapeForTs(item)}",`).join("\n")}
     ],${usageBlock}
   },`;
 
@@ -99,18 +104,18 @@ function main() {
   const { content, inserted } = insertChangelogEntry(original, version, todayJst(), changes, usage);
 
   if (!inserted) {
-    console.log(`changelog.ts already has version ${version}; skipping.`);
+    console.log(
+      changes.length === 0
+        ? `No user-facing changes for v${version}; changelog entry not added.`
+        : `changelog.ts already has version ${version}; skipping.`,
+    );
     return;
   }
 
   writeFileSync(changelogPath, content, "utf8");
-  if (changes.length > 0) {
-    console.log(
-      `Added changelog entry for v${version} (${changes.length} change(s), ${usage.length} usage line(s))`,
-    );
-  } else {
-    console.log(`Added changelog stub for v${version}`);
-  }
+  console.log(
+    `Added changelog entry for v${version} (${changes.length} change(s), ${usage.length} usage line(s))`,
+  );
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

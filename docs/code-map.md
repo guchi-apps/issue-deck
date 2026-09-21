@@ -246,6 +246,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `basis-48`と同じ`flex-basis`を奪い合い、どちらが勝つかがTailwindのCSS出力順に依存する。
   折り返しはjsdomでは再現できないため、指定が残っているかは`issue-list.test.tsx`が
   クラスで見張っている。
+- **Issue一覧の「まとめて予約」（#3284）は、選択モードの状態を`hooks/use-bulk-reserve.ts`、
+  入口の1行と下端に固定する登録バーを`bulk-reserve-bar.tsx`に置き、`issue-list.tsx`は行の
+  チェック・理由・行押下の切り替えだけを持つ。** 入口バーは`COUNT_BAR_*`と同じ折り返しの作り
+  （`flex-wrap`＋`basis-48`＋`ml-auto`）。登録バーは**スクロール領域（`<ul>`を包む枠）の外＝
+  ルートの最後の子**に置く——中に入れると引っ張って更新の`translateY`に引きずられる。
+  選択モードでは行を包む選択用`<button>`が`role="checkbox"`になり、押しても詳細は開かない。
+  **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
+  `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
+  （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
@@ -314,6 +323,19 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   プレビューへの切り替えはこのフォームでは出さない
   （[`mention-textarea.tsx`](../src/components/dashboard/mention-textarea.tsx)の
   `showPreviewToggle`。コメント欄・Issue編集では既定のまま出る）。
+- **書き込み済みの画像から変更内容を読み取る「画像から変更内容を抽出」は、押したときだけ走る**
+  （#3243。[`image-extract-button.tsx`](../src/components/dashboard/image-extract-button.tsx)。
+  「内容」見出しの右、「音声入力を整理」の隣）。呼び出しごとにプラン枠を消費するため、
+  添付・書き込み保存のたびの自動実行にはしない。添付画像（本文末尾の画像記法）が1枚以上あるときだけ
+  押せる。サーバー（`POST /api/issues/image-extract`→[`lib/claude/image-extract.ts`](../src/lib/claude/image-extract.ts)）は
+  **URLを取りに行かず**、URLに含まれるUUIDファイル名だけを拾って`uploads/images`から読む
+  （任意のURL・パスを読ませない）。**1回4枚・1枚5MBまで**（Anthropic APIの画像上限。縮小はせず
+  エラー文言で案内する）。結果は`## 画像から読み取った変更内容`＋箇条書きとして
+  **`appendToBody`（`lib/markdown-attachments.ts`）で本文末尾（画像記法の上）へ足す**——確定は
+  押した人が入力欄で直して決める。読み取りの間に本文を直されても上書きしないよう、書き戻す値は
+  最新のものをrefから読む。書き込みが読めなかったときは推測せず「判読できない書き込みがあります」の
+  1行を足す。**OpenAI系のモデルを選んでいるときは、`request.ts`の`openAiBody`が`image`ブロックを
+  `input_image`へ変換する**（Anthropic形式のcontent配列をそのまま渡せる）。
 - **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
   以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
@@ -487,7 +509,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   `package.json`の`"version"` lifecycleスクリプト
   （[`scripts/version-changelog.mjs`](../scripts/version-changelog.mjs)）が、共有ワークフローの
   生成した`RELEASE_CHANGELOG`（何が変わったか）と`RELEASE_USAGE`（どう使うか・#1729）を
-  配列の先頭へ足す。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
+  配列の先頭へ足す。**`RELEASE_CHANGELOG`が空のリリースはエントリを作らない**（#3282。かつては
+  「（変更内容を追記してください）」の枠を作り、誰も埋めないまま画面に残っていた）。**バンプ時に依存はインストールされないため、このスクリプトはNode標準
   モジュールだけで書き、`preversion`は作らない。** 表示は
   [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
   PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
@@ -765,7 +788,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     だった頃と同じ`isWorkflowBadgeSpinning`（#1439）
   - **確認待ち（amber）・回答待ち（blue）ではアイコンをバーの左隣に出し、未達のマスも濃く塗る**
     （`emphasizeTrack`）。5px高のバーの中にアイコンは収まらない。そして**一覧の行にはGitHubの
-    ラベル（`00.check-user`・`01.check-*`を含む）が出ない**（#3159）ため、
+    ラベル（`00.check-user`・`01.check-*`を含む）が出ない**（#3159。未着手ビューの種類ラベル〈30〜69番台〉だけは
+    #3285で出す。`00.`・`01.check-*`は種類ではないので同じく出ない）ため、
     このバッジが色で伝える唯一の場所になる。塗ったマスだけを色付けると`Planning`の行で
     数pxしか色が乗らないので、18pxの円が全面で色を帯びていた頃と同等の面積を確保する
   - **バーは円より22px幅を取る。** Issue一覧カラムは最小280pxまで詰められるため、行の右側の
@@ -3761,6 +3785,16 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
 - `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
+  **受け付ける形式はPNG・JPEG・GIF・WebP・SVG**（#3286）。SVGは拡張子・MIMEを名乗るだけの
+  HTMLなどを保存しないよう、先頭が`<svg`（XML宣言・コメント・DOCTYPEは読み飛ばす）かを
+  `looksLikeSvg`（`lib/uploaded-images.ts`）で確かめ、外れたら415`invalid_svg`を返す。
+  **SVGの扱いは他の形式と3点違う。** (1) 配信（`GET`）にだけ`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`と
+  `X-Content-Type-Options: nosniff`を付ける（`<img>`経由なら実行されないが、URLを新しいタブで
+  直接開くと同一オリジンでスクリプトが動きログインCookieの権限で実行され得るため。中身の無害化は
+  しない）。(2) 入力欄のサムネイルは市松の地に全体を出し「SVG」の印を付け、**「書き込む」は出さない**
+  （書き込みはcanvasを介してPNGへ描き出すため。判定は`isSvgImageUrl`）。(3) 「書き込みから変更内容を
+  読み取る」（`lib/claude/image-extract.ts`）はSVGをAnthropic APIへ送らず外す（送ると400になる）。
+  AIの取得（`scripts/fetch-issue-images.sh`）はSVGも保存し、`Read`でXMLテキストとして読める。
 - `GET /api/issues/images/[filename]` … **ログイン中の本人か、共有シークレットを持つAIだけに返す**
   （#2967）。以前は未認証で、GitHub.com側のIssue画面でも表示できたが、**URLが公開リポジトリの
   本文に載るため誰でも中身を見られた。** 読めるのはログインCookie・`Bearer PROGRESS_REPORT_SECRET`

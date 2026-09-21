@@ -123,8 +123,31 @@ export async function getAppAiToken(feature: ClaudeApiFeature): Promise<string |
     : process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
 }
 
+/**
+ * Anthropic形式のcontent（`text`・`image`ブロックの配列）をResponses APIの形へ寄せる（#3243）。
+ * 文字列のcontentと、知らないブロックはそのまま通す。
+ */
+function openAiContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map((block) => {
+    const b = block as {
+      type?: string;
+      text?: string;
+      source?: { type?: string; media_type?: string; data?: string };
+    };
+    if (b.type === "text") return { type: "input_text", text: b.text };
+    if (b.type === "image" && b.source?.type === "base64") {
+      return { type: "input_image", image_url: `data:${b.source.media_type};base64,${b.source.data}` };
+    }
+    return block;
+  });
+}
+
 function openAiBody(body: Record<string, unknown>, model: AppAiModel): Record<string, unknown> {
-  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const messages = (Array.isArray(body.messages) ? body.messages : []).map((message) => {
+    const m = message as { role?: string; content?: unknown };
+    return Array.isArray(m.content) ? { ...m, content: openAiContent(m.content) } : message;
+  });
   const outputConfig = body.output_config as
     | { format?: { type?: string; schema?: unknown } }
     | undefined;

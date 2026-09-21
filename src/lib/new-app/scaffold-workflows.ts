@@ -507,7 +507,7 @@ export function deployWorkflow(spec: NewAppSpec): string {
     "deploy",
     ...(usesDb ? ["scripts/construct-database-url.sh"] : []),
     "scripts/update-env-file.sh",
-    "next.config.ts",
+    "next.config.mjs",
   ];
   const archive = archiveEntries.map((entry) => `            ${entry} \\`).join("\n").replace(/ \\$/, "");
   const cleanup = archiveEntries

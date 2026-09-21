@@ -651,6 +651,28 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
       承認漏れは\`${profile.packageManager} install\`の成功では気づけない`
     : "";
 
+  // **設定ファイルは`next.config.ts`のまま出さない**（#3223。ops-dashboardのカナリア）。
+  // `create-next-app`が作るのは`next.config.ts`で、本番の`next start`は起動時にこれを
+  // トランスパイルするためだけにSWCのネイティブバイナリを読み込み、そのまま常駐する
+  // （実測で`VmHWM`が−87MB・−35%、`Threads`が−3本。#3017でissue-deck自身も済ませた）。
+  // `deploy.yml`（`scaffold-workflows.ts`）が配るのは`next.config.mjs`なので、置き換えないと
+  // アーカイブの`tar`が対象を見つけられずに落ちる
+  const nextConfigTask = isNext
+    ? `
+- [ ] \`create-next-app\` が作った \`next.config.ts\` を \`next.config.mjs\` に置き換え、\`tsconfig.json\` の
+      \`include\` へ \`"next.config.mjs"\` を足す。**\`next.config.ts\` は残さない**——本番の \`next start\` が起動時に
+      TypeScriptを読むためだけにSWCを読み込んで常駐し、メモリを約35%余計に使う。\`deploy.yml\` が配るのも
+      \`next.config.mjs\` で、名前が違うとアーカイブの \`tar\` が失敗する。型はJSDocで付ける
+
+  \`\`\`js
+  // @ts-check
+  /** @type {import("next").NextConfig} */
+  const nextConfig = {};
+
+  export default nextConfig;
+  \`\`\``
+    : "";
+
   const ciTasks = has(".github/workflows/ci.yml")
     ? `\n- [ ] \`.github/workflows/ci.yml\` が呼ぶ \`lint\`・\`typecheck\`・\`build:ci\` のnpm scriptsを用意する${typecheckScript}`
     : `\n- [ ] \`.github/workflows/ci.yml\` を作る（必須）
@@ -728,7 +750,7 @@ ${prerequisites}
 ${alreadyThere}
 ## やること
 
-- [ ] アプリの雛形を作る（${profile.label}）${authTasks}
+- [ ] アプリの雛形を作る（${profile.label}）${nextConfigTask}${authTasks}
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる${packageManagerTask}${buildApprovalTask}
 - [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
 - [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}

@@ -392,6 +392,25 @@ callerを置いてしまえば、初期化Issueも最初から無人実行で回
   `version-file`の既定値（`package.json`）がそのままでは合わないため、現状のまま
   `multiAgent`に従わせてある。
 
+### 設定ファイルは`next.config.mjs`で出す（#3223）
+
+`create-next-app`が作る`next.config.ts`のままだと、本番の`next start`が起動時にこれを
+トランスパイルするためだけにSWCのネイティブバイナリを読み込み、そのまま常駐する。
+ops-dashboardのカナリア（guchi-apps/ops-dashboard#291・#304）で`.mjs`化は`VmHWM`が−87MB
+（−35%）・`Threads`が−3本・`restarts`が0だった（issue-deck自身は#3017で済んでいる）。
+一方`--max-semi-space-size=8`はヒープが小さいアプリでは寄与がほぼ無かったため、雛形の
+`node_args`には入れていない。
+
+- **`deploy.yml`が配るのは`next.config.mjs`**（`scaffold-workflows.ts`の`archiveEntries`。
+  掃除の`rm -rf`も同じ配列から作る）。新規アプリだけが対象で、本番に旧名は無いので、
+  掃除の行に`next.config.ts`は並べない。
+- **`next.config.ts`を`.mjs`へ置き換える手順は、初期化Issueの「やること」に書く**
+  （[`lib/new-app/plan.ts`](../src/lib/new-app/plan.ts)の`nextConfigTask`）。`next.config.ts`は
+  雛形が生成するのではなく`create-next-app`が作るもので、初期化Issueが取り込む段階でしか
+  置き換えられないため。個人スキル（`new-app-setup`）は無人実行から読めず、
+  `guchi-apps/docs`の標準は別リポジトリなので、実行する場所に近いここへ置いた。
+  置き換えないと`deploy.yml`の`tar`が`next.config.mjs`を見つけられずに落ちる。
+
 ### `repository_selection`はDBではなくGitHubへ聞く
 
 DBの`GithubInstallation.repositorySelection`は`installation`イベントでしか更新されず、

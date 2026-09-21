@@ -205,6 +205,47 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
   });
 
+  it("GPTモデルへは画像ブロックをinput_imageへ変換して送る（#3243）", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-terra" });
+    process.env.OPENAI_API_KEY = "openai-test-token";
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        model: "gpt-5.6-terra",
+        output: [{ type: "message", content: [{ type: "output_text", text: "回答" }] }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({
+      feature: "issue_image_extract",
+      token: "anthropic-token",
+      body: {
+        max_tokens: 8,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+              { type: "text", text: "読み取って" },
+            ],
+          },
+        ],
+      },
+    });
+
+    const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(sent.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_image", image_url: "data:image/png;base64,QUJD" },
+          { type: "input_text", text: "読み取って" },
+        ],
+      },
+    ]);
+  });
+
   it("GPTモデルはResponses APIへ変換し、応答を既存形式へ正規化する", async () => {
     findUnique.mockResolvedValue({ appAiModelReasoning: "gpt-5.6-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";

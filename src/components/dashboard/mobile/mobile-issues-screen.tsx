@@ -66,6 +66,10 @@ type MobileIssuesScreenProps = {
    * 予約実行に積まれているIssueの引き当て表（#2866）。`IssueList`へそのまま渡す
    */
   nightlyRunQueued?: ScheduledRunQueuedMap;
+  /** 一覧からの一括予約（#3284）。積めたら予約実行の件数・印を取り直す。渡した画面だけ入口を出す */
+  onNightlyRunQueued?: () => void;
+  /** 一括予約の結果バーの「予約実行を見る」 */
+  onOpenNightlyRun?: () => void;
   /** 保留中で上の配列から外したマージ待ちPR（#2398）。「保留中N件」を開くと並ぶ */
   snoozedMergePendingPullRequests?: PullRequestSummary[];
   /** そのPRの期限（#2398）。「最短でいつ戻るか」の1行に使う */
@@ -125,6 +129,8 @@ export function MobileIssuesScreen({
   onSnooze,
   onUnsnooze,
   nightlyRunQueued,
+  onNightlyRunQueued,
+  onOpenNightlyRun,
   snoozedMergePendingPullRequests,
   snoozedMergePendingEntries,
   pullRequests,
@@ -267,6 +273,8 @@ export function MobileIssuesScreen({
       onSnooze={onSnooze}
       onUnsnooze={onUnsnooze}
       nightlyRunQueued={nightlyRunQueued}
+      onNightlyRunQueued={onNightlyRunQueued}
+      onOpenNightlyRun={onOpenNightlyRun}
       snoozedPinned={
         view === "check-user" && snoozes && onUnsnooze
           ? {
