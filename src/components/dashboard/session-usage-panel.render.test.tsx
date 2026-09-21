@@ -111,7 +111,9 @@ describe("SessionUsagePanel", () => {
     expect(
       section.compareDocumentPosition(screen.getByText("Claude プラン枠")) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(within(section).getByText("2本・計", { exact: false })).toBeTruthy();
+    // 見出しは本数と報告時刻だけ。合計金額は棒の右に出す（#3242）
+    expect(within(section).getByText(/^2本/)).toBeTruthy();
+    expect(within(section).getByTestId("current-session-total-cost").textContent).toBe("計 $7.35");
     expect(within(section).getByText("AI使用量表示に現在のセッション使用状況を追加")).toBeTruthy();
     expect(within(section).getAllByText("入力を待っています")).toHaveLength(2);
     expect(within(section).getByText("5時間枠の約11.2%")).toBeTruthy();
@@ -150,6 +152,15 @@ describe("SessionUsagePanel", () => {
     expect(within(section).getByText("確認待ち").textContent).toBe("確認待ち1");
     expect(within(section).queryByText("応答を終えている")).toBeNull();
     expect(within(section).queryByText("Issue・状態")).toBeNull();
+
+    // 合計金額は棒と同じ行の右側、「押すと詳細」は見出しと同じ行にある（#3242）
+    const bar = within(section).getByTestId("current-session-count-bar");
+    const total = within(section).getByTestId("current-session-total-cost");
+    expect(total.textContent).toBe("計 $22.05");
+    expect(total.parentElement).toBe(bar.parentElement);
+    expect(bar.nextElementSibling).toBe(total);
+    const hint = within(section).getByText("押すと詳細");
+    expect(hint.parentElement).toBe(within(section).getByText("実行中のセッション").parentElement);
 
     const toggle = within(section).getByRole("button", { expanded: false });
     fireEvent.click(toggle);

@@ -1192,8 +1192,9 @@ type OpenIssueHandler = (repository: string, issueNumber: number | null, prNumbe
  * 閉じた状態の棒グラフ（#3134）。**セッションごとの金額を足し上げた1本の横棒**で、区間の長さが
  * そのセッションの金額、色が状態。区間の間に隙間を空けて本数を数えられるようにし、まだ金額が
  * 届いていない（集計待ち・$0の）セッションも最小幅の区間で残す（消すと本数が合わなくなる）。
+ * **合計金額は棒の右端に置く**（#3242）。見出しに入れると、スマホで「押すと詳細」が折り返す。
  */
-function CurrentSessionCountBar({ sessions }: { sessions: CurrentSessionUsage[] }) {
+function CurrentSessionCountBar({ sessions, totalCost }: { sessions: CurrentSessionUsage[]; totalCost: number }) {
   const counts = CURRENT_SESSION_TONE_ORDER.map((tone) => ({
     tone,
     count: sessions.filter((session) => session.statusTone === tone).length,
@@ -1201,21 +1202,29 @@ function CurrentSessionCountBar({ sessions }: { sessions: CurrentSessionUsage[] 
   const hasCost = sessions.some((session) => session.costUsd > 0);
   return (
     <span className="flex flex-col gap-1.5">
-      <span className="flex h-3 gap-[3px]" data-testid="current-session-count-bar">
-        {sessions.map((session) => (
-          <i
-            key={`${session.host}:${session.tmuxSessionName}`}
-            aria-hidden
-            className={cn(
-              "min-w-1.5 basis-0 rounded-[3px]",
-              CURRENT_SESSION_DOT_CLASS[session.statusTone],
-              !session.reported && "opacity-40",
-            )}
-            // 金額が1件も届いていなければ均等に割る（全区間が最小幅に潰れるのを避ける）
-            style={{ flexGrow: hasCost ? session.costUsd : 1 }}
-            title={`#${session.issueNumber} ${session.statusLabel}　${session.reported ? formatUsageUsd(session.costUsd) : "集計待ち"}`}
-          />
-        ))}
+      <span className="flex items-center gap-3">
+        <span className="flex h-3 min-w-0 flex-1 gap-[3px]" data-testid="current-session-count-bar">
+          {sessions.map((session) => (
+            <i
+              key={`${session.host}:${session.tmuxSessionName}`}
+              aria-hidden
+              className={cn(
+                "min-w-1.5 basis-0 rounded-[3px]",
+                CURRENT_SESSION_DOT_CLASS[session.statusTone],
+                !session.reported && "opacity-40",
+              )}
+              // 金額が1件も届いていなければ均等に割る（全区間が最小幅に潰れるのを避ける）
+              style={{ flexGrow: hasCost ? session.costUsd : 1 }}
+              title={`#${session.issueNumber} ${session.statusLabel}　${session.reported ? formatUsageUsd(session.costUsd) : "集計待ち"}`}
+            />
+          ))}
+        </span>
+        <span
+          className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums"
+          data-testid="current-session-total-cost"
+        >
+          計 <b className="text-sm font-semibold text-foreground">{formatUsageUsd(totalCost)}</b>
+        </span>
       </span>
       <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground tabular-nums">
         {counts.map(({ tone, count }) => (
@@ -1388,8 +1397,10 @@ function CurrentSessionsSection({
         onClick={() => setIsOpen((prev) => !prev)}
         className="-m-1 flex flex-col gap-2 rounded-md p-1 text-left hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
-        <span className="flex w-full flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="flex items-center gap-1.5 text-xs font-semibold">
+        {/* 1行に収める（#3242）。幅が足りないときは本数・報告時刻の部分だけが「…」に縮み、
+            見出しと「押すと詳細」は残る */}
+        <span className="flex w-full items-baseline gap-x-2 whitespace-nowrap">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold">
             <ChevronRight
               aria-hidden
               className={cn(
@@ -1400,15 +1411,14 @@ function CurrentSessionsSection({
             <i aria-hidden className="size-2 rounded-full bg-emerald-600 ring-[3px] ring-emerald-600/25 dark:bg-emerald-400" />
             実行中のセッション
           </span>
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {sessions.length}本・計 <b className="text-foreground">{formatUsageUsd(totalCost)}</b>
-            {reportedAt ? `・${formatRelativeDate(reportedAt)}の報告` : ""}
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
+            {sessions.length}本{reportedAt ? `・${formatRelativeDate(reportedAt)}の報告` : ""}
           </span>
-          <span className="ml-auto text-[11px] whitespace-nowrap text-muted-foreground">
+          <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
             {isOpen ? "押すと閉じる" : "押すと詳細"}
           </span>
         </span>
-        <CurrentSessionCountBar sessions={sessions} />
+        <CurrentSessionCountBar sessions={sessions} totalCost={totalCost} />
       </button>
 
       {!isOpen ? null : compact ? (
