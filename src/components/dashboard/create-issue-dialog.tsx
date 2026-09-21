@@ -12,6 +12,7 @@ import {
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
+import { ImageExtractButton } from "@/components/dashboard/image-extract-button";
 import { LabelPicker } from "@/components/dashboard/label-picker";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PostCreateNavigationDialog } from "@/components/dashboard/post-create-navigation-dialog";
@@ -1081,11 +1082,14 @@ export function CreateIssueDialog({
         <div className="flex flex-col gap-1.5">
           {/* 「音声入力を整理」は見出しの右隣に置く（#3068）。入力欄の下の行は画像の操作だけにする。
               整形の失敗メッセージはボタンの下に出て行が伸びるので、見出しは上端にそろえる */}
-          <div className="flex items-start gap-2">
+          <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
             <Label htmlFor="create-issue-body" className="h-8 md:h-6">
               {isQuestion ? "質問内容" : "内容"}
             </Label>
             <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
+            {/* 書き込み済みの画像から変更内容を読み取って本文の末尾へ足す（#3243）。状態の文は
+                この行の次の段へ全幅で出る（`flex-wrap`と`basis-full`） */}
+            <ImageExtractButton value={body} onChange={setBody} disabled={isSubmitting} />
           </div>
           {/* 引き継ぎ元などの固定接頭辞は入力欄に入れず、ここに読み取り専用で見せる（#1322）。
               入力欄は1行目から自分の書きたいことを書ける状態で始まり、消してしまう心配も無い */}
