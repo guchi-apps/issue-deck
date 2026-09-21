@@ -25,6 +25,9 @@ const USAGE_WINDOWS: { key: string; label: string; durationMs: number }[] = [
   { key: "7d", label: "週間", durationMs: 7 * 24 * 60 * 60_000 },
 ];
 
+/** 使用量メーターと同じ、残量が少ないとみなす境目（%）。 */
+export const CLAUDE_LOW_REMAINING_PERCENT = 10;
+
 export type ClaudeUsageWindow = {
   key: string;
   label: string;
@@ -47,6 +50,16 @@ export type ClaudeUsage = {
   /** レート制限等でキャッシュを返した場合にtrue。 */
   stale: boolean;
 };
+
+/**
+ * 実行を始めるには少なすぎるClaude枠があるか。
+ *
+ * 5時間枠と週間枠はどちらも上限になり得るため、取得できたどちらか一方でも警告域ならtrueにする。
+ * 使用量を取得できなかった場合は呼び出し側がfalseへ倒し、従来のClaude既定を維持する。
+ */
+export function hasClaudeLowRemainingQuota(windows: readonly ClaudeUsageWindow[]): boolean {
+  return windows.some((window) => window.remainingPercent < CLAUDE_LOW_REMAINING_PERCENT);
+}
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));

@@ -8,6 +8,7 @@ import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
+import type { ClaudeUsage } from "@/lib/claude/usage";
 import {
   ARTIFACT_REQUIRED_LABEL,
   MERGE_CONFIRM_REQUIRED_LABEL,
@@ -36,6 +37,12 @@ vi.mock("@/hooks/use-progress-status-mutation", () => ({
 // 呼び出し回数を数えるテスト（おまかせ）に混ざらないようフックごと差し替える
 vi.mock("@/hooks/use-nightly-run", () => ({
   useNightlyRunSettings: () => null,
+}));
+
+// Claude枠の読み取り。実際の通信はフック側で検証済みなので、ここでは既定エージェントへの反映だけを見る。
+let claudeUsage: ClaudeUsage | null = null;
+vi.mock("@/hooks/use-claude-usage", () => ({
+  useClaudeUsage: () => ({ data: claudeUsage, isLoading: false, error: null, notConfigured: false }),
 }));
 
 // モデルの自動選択（#2723）。**押したときだけ呼ばれる**ことも検証したいので、フックごと
@@ -229,6 +236,7 @@ describe("StartImplementationDialog", () => {
       error: null,
     };
     repositoryLabelNames = [ARTIFACT_REQUIRED_LABEL];
+    claudeUsage = null;
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
@@ -420,6 +428,78 @@ describe("StartImplementationDialog", () => {
       );
       // 押していないうちは注意を出さない（縦に伸ばさない）
       expect(screen.queryByText(/画面からの連携が一部効きません/)).toBeNull();
+    });
+
+    it("Claudeの5時間枠または週間枠が警告域なら、既定をCodex CLIへ切り替える", async () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      claudeUsage = {
+        windows: [
+          {
+            key: "5h",
+            label: "5時間",
+            usedPercent: 91,
+            remainingPercent: 9,
+            resetsAt: 1_788_876_000,
+            status: "allowed_warning",
+            durationMs: 5 * 60 * 60_000,
+          },
+        ],
+        fetchedAt: Date.now(),
+        stale: false,
+      };
+      renderDialog({ includeDispatchTargets: true });
+
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: "Codex CLI" }).getAttribute("aria-checked")).toBe("true"),
+      );
+    });
+
+    it("取得値が古い場合はCodexへ切り替えず、Claude Codeを既定に保つ", () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      claudeUsage = {
+        windows: [
+          {
+            key: "7d",
+            label: "週間",
+            usedPercent: 95,
+            remainingPercent: 5,
+            resetsAt: 1_788_876_000,
+            status: "allowed_warning",
+            durationMs: 7 * 24 * 60 * 60_000,
+          },
+        ],
+        fetchedAt: Date.now() - 10 * 60_000,
+        stale: true,
+      };
+      renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("使用量の取得後でも、利用者が選び直したClaude Codeは維持する", async () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      const { rerenderSame } = renderDialog({ includeDispatchTargets: true });
+      fireEvent.click(screen.getByRole("radio", { name: "Claude Code" }));
+      claudeUsage = {
+        windows: [
+          {
+            key: "5h",
+            label: "5時間",
+            usedPercent: 91,
+            remainingPercent: 9,
+            resetsAt: 1_788_876_000,
+            status: "allowed_warning",
+            durationMs: 5 * 60 * 60_000,
+          },
+        ],
+        fetchedAt: Date.now(),
+        stale: false,
+      };
+      rerenderSame();
+
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe("true"),
+      );
     });
 
     it("Codexを選ぶと、その場で効かなくなる連携を出す", () => {

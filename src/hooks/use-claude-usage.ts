@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
 
-export type { ClaudeUsage, ClaudeUsageWindow } from "@/lib/claude/usage";
+export {
+  CLAUDE_LOW_REMAINING_PERCENT,
+  hasClaudeLowRemainingQuota,
+  type ClaudeUsage,
+  type ClaudeUsageWindow,
+} from "@/lib/claude/usage";
 
 export function useClaudeUsage(enabled: boolean) {
   const [data, setData] = useState<ClaudeUsage | null>(null);
