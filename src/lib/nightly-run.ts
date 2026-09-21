@@ -145,6 +145,32 @@ export function decideNightlyRunLaunch(input: {
   return { action: "launch" };
 }
 
+/**
+ * 予定を積んだ後に、そのIssueが手動で実装開始されていないか（#3274）。開始されていれば、
+ * 予定を取り消す理由（`skipReason`に残す文）を返す。
+ *
+ * 手動の開始は2つの形で見える。どちらも起動処理（`launchScheduledRunEntry`）を通らない
+ * ——通るなら予定が`nightKey`を握っている最中で、呼び出し側が対象から外している。
+ * - `11.local`が付いた（「実装を開始」・ローカルセッションのどちらも必ず付ける）
+ * - 予定を積んだ後に、生きている起動ジョブが作られた（`11.local`の付与に失敗した場合の保険）
+ *
+ * 起動する時点の判定（`decideNightlyRunLaunch`）は同じ`11.local`を見て「見送り」にしていたが、
+ * それだと枠が開くまで予定が画面に残り続ける。着手の時点で外すために、判定を前へ出した。
+ */
+export function decideManualStartCancel(input: {
+  labels: readonly { name: string }[];
+  /** 予定を積んだ後に作られた、失敗・取り消しで終わっていない起動ジョブがあるか */
+  hasLaunchJobSinceQueued: boolean;
+}): string | null {
+  if (input.labels.some((label) => label.name === LOCAL_LABEL_NAME)) {
+    return `手動で実装が開始されたため、予約を取り消しました（${LOCAL_LABEL_NAME}）`;
+  }
+  if (input.hasLaunchJobSinceQueued) {
+    return "手動で実装が開始されたため、予約を取り消しました（起動ジョブ）";
+  }
+  return null;
+}
+
 export type NightlyRunEntryStatus = "QUEUED" | "LAUNCHED" | "SKIPPED" | "CANCELED";
 
 export type NightlyRunOutcomeKind = "ok" | "warn" | "run" | "bad" | "skip";
