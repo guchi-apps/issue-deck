@@ -30,6 +30,11 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
   };
 }
 
+/** 内訳の工程名の要素から、同じ行の状態（✔・×・実施中・—・省略）を読む */
+function stepStatus(stepName: HTMLElement): string | null {
+  return stepName.parentElement?.lastElementChild?.textContent ?? null;
+}
+
 describe("IssuePullRequestList", () => {
   afterEach(() => {
     cleanup();
@@ -154,7 +159,7 @@ describe("IssuePullRequestList", () => {
     expect(button.disabled).toBe(true);
   });
 
-  it("判定中の行は待っている段階をバッジで出す（#2059）", () => {
+  it("判定中の行は、待っているものを見出しの1語で出す（#2059・#3239）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
@@ -173,10 +178,10 @@ describe("IssuePullRequestList", () => {
         onMerge={async () => true}
       />,
     );
-    expect(screen.getByText("レビュー実施中")).toBeTruthy();
+    expect(screen.getByText("判定実施中")).toBeTruthy();
   });
 
-  it("レビューが終わった行はバッジを出す（#2150）", () => {
+  it("レビューが終わった行は、レビューの工程を✔で出し、実行ログへのリンクにする（#2150・#3239）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
@@ -197,15 +202,15 @@ describe("IssuePullRequestList", () => {
         mergeApprovalPending={false}
       />,
     );
-    const badge = screen.getByText("レビュー完了");
-    // 実行ログへ行けるようリンクにする（他のバッジと同じ形）
-    expect(badge.closest("a")?.getAttribute("href")).toBe(
+    const step = screen.getByText("レビュー");
+    // 実行ログへ行けるようリンクにする（バッジの頃と同じ）
+    expect(step.closest("a")?.getAttribute("href")).toBe(
       "https://github.com/owner/repo/actions/runs/1/job/2",
     );
+    expect(stepStatus(step)).toBe("✔");
   });
 
-  // 実行中の言い回しは「Claudeがレビュー中」が持っており、二重に出さない（#2150）。
-  it("レビューが実行中の行には完了バッジを出さない（#2150）", () => {
+  it("レビューが実行中の行は、工程名「レビュー」の状態を「実施中」で出す（#2150・#3239）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
@@ -224,7 +229,102 @@ describe("IssuePullRequestList", () => {
       />,
     );
     expect(screen.queryByText(/レビュー完了/)).toBeNull();
-    expect(screen.getByText("レビュー実施中")).toBeTruthy();
+    expect(stepStatus(screen.getByText("レビュー"))).toBe("実施中");
+  });
+
+  it("開いているPRの行は、上部と同じ5工程を同じ順に出す（#3239）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            ciStatus: "success",
+            mergeable: true,
+            mergeJudgement: {
+              state: "pending",
+              step: "claude-review",
+              runUrl: null,
+              aiReview: { state: "pending", runUrl: null },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    const steps = Array.from(
+      screen.getByRole("list", { name: "developへマージの内訳" }).querySelectorAll("li"),
+    ).map((item) => item.textContent);
+    expect(steps).toEqual(["実装完了✔", "CI通過✔", "コンフリクト✔", "レビュー実施中", "マージ—"]);
+    // 個別のバッジは内訳へ寄せた（同じ状態を2回言わない）
+    expect(screen.queryByText("CI通過", { selector: "span.rounded-full" })).toBeNull();
+  });
+
+  it("レビューが省略された行は、記号（✔）ではなく「省略」と出す（#3239）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            mergeJudgement: {
+              state: "settled",
+              step: null,
+              runUrl: null,
+              aiReview: { state: "skipped", runUrl: null },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    expect(stepStatus(screen.getByText("レビュー"))).toBe("省略");
+  });
+
+  it("レビューが失敗した行は「×」で出し、見出しにも失敗を出す（#3239）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            mergeJudgement: {
+              state: "settled",
+              step: null,
+              runUrl: null,
+              aiReview: { state: "failed", runUrl: null },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    expect(stepStatus(screen.getByText("レビュー"))).toBe("×");
+    expect(screen.getByText("レビュー失敗")).toBeTruthy();
+  });
+
+  it("マージ済み・下書き・クローズのPRの行には内訳を出さない（#3239）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616), link(617), link(618)]}
+        pullRequests={[
+          pullRequest({ number: 616, merged: true, state: "closed" }),
+          pullRequest({ number: 617, draft: true }),
+          pullRequest({ number: 618, state: "closed" }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    expect(screen.queryByRole("list", { name: "developへマージの内訳" })).toBeNull();
+  });
+
+  it("この画面でマージした行は、GitHub側の反映前でも内訳を外す（#3239）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[pullRequest()]}
+        mergeApprovalPending={false}
+        mergedNumbers={new Set([616])}
+      />,
+    );
+    expect(screen.queryByRole("list", { name: "developへマージの内訳" })).toBeNull();
   });
 
   it("コンフリクトしている行はバッジを出し、マージボタンを出さない（#2145）", () => {

@@ -53,6 +53,8 @@ export type PullRequestRailSlot = {
   title: string;
   /** 実行ログへのリンク。無ければnull */
   href: string | null;
+  /** 状態記号の代わりに出す言葉（レビューの「省略」）。無ければ`state`の記号を出す */
+  statusText?: string;
 };
 
 /** 列の見出し。読み上げ（`aria-label`）と`title`の頭に付ける */
@@ -102,7 +104,7 @@ export function buildPullRequestStatusRail(
     const step = stepOf("ci");
     // `buildIssuePullRequestProgress`はCIの段を必ず返すが、型の上ではnullがありうる
     if (step === null) return slot("ci", AI_REVIEW_ABSENT_LABEL, "absent", "", null);
-    return slot("ci", step.shortLabel, step.state, step.label, null);
+    return slot("ci", step.shortLabel, step.state, step.detail ?? step.label, null);
   }
 
   function aiReviewSlot(): PullRequestRailSlot {
@@ -110,13 +112,16 @@ export function buildPullRequestStatusRail(
     if (step === null) {
       return slot("ai-review", AI_REVIEW_ABSENT_LABEL, "absent", AI_REVIEW_ABSENT_TITLE, null);
     }
-    return slot(
-      "ai-review",
-      step.shortLabel,
-      step.state,
-      step.label,
-      pullRequest.mergeJudgement.aiReview.runUrl,
-    );
+    return {
+      ...slot(
+        "ai-review",
+        step.shortLabel,
+        step.state,
+        step.detail ?? step.label,
+        pullRequest.mergeJudgement.aiReview.runUrl,
+      ),
+      ...(step.statusText ? { statusText: step.statusText } : {}),
+    };
   }
 
   function conflictSlot(): PullRequestRailSlot {
