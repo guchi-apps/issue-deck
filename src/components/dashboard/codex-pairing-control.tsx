@@ -69,7 +69,10 @@ export function CodexPairingControl({
   /** どこに置いているか。**文言とボタンの大きさだけが変わる**（送るものは同じ） */
   context?: CodexPairingContext;
   align?: "start" | "end";
-  /** エージェント行に置く小さい接続ボタン（#3228）。結果はボタンの下に表示する。 */
+  /**
+   * エージェント行に置く小さい接続ボタン（#3228）。結果はボタンの下に表示する。
+   * 横幅が狭く説明文が数行に折り返して行を押し広げるため、「どこへ繋がるか」の説明文は出さない（#3238）。
+   */
   inline?: boolean;
   className?: string;
 }) {
@@ -193,8 +196,9 @@ export function CodexPairingControl({
         </span>
       )}
 
-      {/* **繋がる先を押す前に出す。** Issueごとに分かれないことは、コードを見てからでは分からない */}
-      {!code && !notice && (
+      {/* **繋がる先を押す前に出す。** Issueごとに分かれないことは、コードを見てからでは分からない。
+          エージェント行のボタン（`inline`）だけは出さない（#3238） */}
+      {!code && !notice && !inline && (
         <span
           className={cn(
             "text-[11px] text-muted-foreground",
