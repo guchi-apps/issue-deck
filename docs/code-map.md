@@ -563,6 +563,14 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **画面の並びは「見出し＋報告の経過時間＋更新ボタン（右端）→ 実行中のセッション → プラン枠 →
+    期間選択 → 期間の集計」**（#3257）。期間選択がプラン枠の下にあるのは、切り替わるのが下の
+    集計だけだから。**期間を変えてもプラン枠・実行中のセッションは取り直さず描き直さない。**
+    `use-session-usage.ts`が期間だけが変わった取得で前の応答を残し、`planUsage`・
+    `planNotConfigured`・`quotaEstimate`・`currentSessions`を前の参照のまま引き継ぐ（応答は
+    期間の集計と1本のままなので、サーバーは変えていない）。画面は`data.days`が選択中の期間と
+    一致するまで集計を隠し、プラン枠は`memo`化した`PlanUsageSection`へ渡す。プラン枠を取り直すのは
+    初回と更新ボタンのときだけ
   - **5時間枠1%あたりの実測換算（`buildQuotaEstimate`）は、#2666（`de23eb8e`）で廃止した
     `buildQuotaScale`/`toQuotaPercent`と同じ計算式の再導入**（#2988）。「向きが違うから別物」
     ではなく、計算自体（窓内の実測消費÷実測の使用率）は同一。**変えたのは2点だけ。**
