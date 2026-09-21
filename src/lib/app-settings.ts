@@ -164,7 +164,10 @@ export function parseClaudeModel(value: unknown): ClaudeModel | null {
  *
  * - `haiku`: ローカルセッションは`--permission-mode auto`で起動しており
  *   （`run-issue-session.sh`・`start-issue.sh`）、Haikuはauto modeで動作しないため選ばせない
- *   （https://github.com/anthropics/claude-code/issues/43235）。
+ *   （https://github.com/anthropics/claude-code/issues/43235）。**#3248でClaude Code 2.1.278と
+ *   して再検証し、状況は変わっていない**（上流のIssueは重複・無活動でcloseされたまま）。auto mode
+ *   を外して`acceptEdits`で起動する案も、Bashが1件ずつ承認待ちになるため採らない
+ *   （`docs/multi-agent/prompts-and-models.md`「auto modeを外してHaikuを使う形は採らない」）。
  * - `auto`（CLIの既定。`--model`を付けずClaude Code側の設定・アカウントの既定に委ねる）は
  *   #2776で選択肢から外した。「どのモデルで動くか分からない」まま起動できる方式自体が不要
  *   というIssueの要求に加え、`auto`を選べる状態を残すと、`scripts/run-issue-session.sh`の

@@ -387,6 +387,37 @@ Haiku・`auto`のままでも既定（Sonnet）へフォールバックする。
 （`claudeModel`・`claudeModelAssist`）は許可リスト方式でauto modeを使わないため対象外**——
 引き続きHaiku・`auto`を選べる（前掲「使用するモデルの設定」）。
 
+#### auto modeを外してHaikuを使う形は採らない（#3248）
+
+「auto modeが要らない軽い作業ならHaikuでもよいのでは」という案は成り立たない。
+**auto modeを外すと、ファイル編集は通るがBashが1件ずつ承認待ちになる。** ローカルセッションは
+`git add`・`git commit`・`git push`・`gh pr create`・`rg`を使うが、許可リスト
+（[scripts/lib/agent-allowed-tools.sh](../../scripts/lib/agent-allowed-tools.sh)）にあるのは
+読み取りと検証のコマンドだけで、書き込み系は意図的に入れていない。通そうとすると許可リストを
+書き込み系まで広げることになり、**auto modeの権限クラシファイアを外したうえで無条件に通す範囲を
+増やす**という、いちばん避けたい形になる。広げても承認プロンプトは消えない（コマンド置換を含む形は
+静的解析できず規則の対象外。前掲のとおり#2017で実測）。
+
+Claude Code 2.1.278（2026-09-21）で実際に確かめた結果は次のとおり。`--print`での1往復に
+Write・Bashを1件ずつ行わせ、結果JSONの`permission_denials`を見た。
+
+| 起動 | Write | Bash（`touch … && git init`） |
+|---|---|---|
+| `--model haiku --permission-mode auto` | 拒否 | — |
+| `--model sonnet --permission-mode auto` | 成功 | — |
+| `--model haiku --permission-mode acceptEdits` | 成功 | 拒否 |
+| `--model haiku --permission-mode dontAsk` | — | 拒否 |
+
+上流の[anthropics/claude-code#43235](https://github.com/anthropics/claude-code/issues/43235)は
+重複としてclose、統合先の
+[#42648](https://github.com/anthropics/claude-code/issues/42648)も無活動でcloseされており、
+**Haikuでauto modeが動かない状態は直っていない。** 直ったかどうかは上の1行目
+（Haiku＋auto modeでWriteが通るか）で確かめられる。
+
+なお**Codexは最も軽いモデル（Luna）を選べる**ため、「実装を開始」ダイアログはCodexが4択・
+Claudeが3択の非対称になっている。Codexは`--ask-for-approval never`で走らせ権限モードの制約が
+無いためで（#2377）、Claude側だけ候補が1つ少ないのはこの章の制約による。
+
 削減効果と品質の両方を見ながら割り当てを調整できるよう、実際のコストは#903のJob Summaryで確認する。
 品質は自動では測れないため、倒すステップは保守的に選び、問題があれば個別に戻す。
 
