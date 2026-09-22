@@ -4,13 +4,14 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   buildPullRequestFixIssueDraft,
   buildPullRequestFixReason,
+  findExistingPullRequestFixIssue,
   resolvePullRequestFixIssueTone,
   resolvePullRequestFixRoute,
   selectOpenChangeRequests,
   showsPullRequestFixIssueBar,
 } from "@/lib/github/pull-request-fix-issue";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
-import type { IssueLabel } from "@/types/issue";
+import type { Issue, IssueLabel } from "@/types/issue";
 import type { PullRequestEvent } from "@/types/pull-request";
 
 function labels(...names: string[]): IssueLabel[] {
@@ -230,5 +231,74 @@ describe("resolvePullRequestFixRoute", () => {
     expect(
       resolvePullRequestFixRoute({ pullRequest, targetIssueLabels: labels("51.improvement"), session: null }),
     ).toEqual({ kind: "actions" });
+  });
+});
+
+function fixIssue(overrides: Partial<Issue>): Issue {
+  return {
+    id: "issue-1",
+    number: 100,
+    title: "修正",
+    body: "",
+    state: "open",
+    stateReason: null,
+    repositoryFullName: "guchi-apps/issue-deck",
+    repositoryPrivate: false,
+    repositoryArchived: false,
+    author: { login: "issue-deck-agent" },
+    assignee: null,
+    labels: [],
+    milestone: null,
+    commentCount: 0,
+    createdAt: "2026-09-14T00:00:00Z",
+    updatedAt: "2026-09-14T00:00:00Z",
+    closedAt: null,
+    checkUserLabeledAt: null,
+    qaAnswerPendingAt: null,
+    lastCommentAt: null,
+    dispatchPendingAt: null,
+    manualStepVerifiedAt: null,
+    projectStatus: null,
+    htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/100",
+    favorite: false,
+    hasUnreadComments: false,
+    readCommentCount: 0,
+    ...overrides,
+  };
+}
+
+describe("findExistingPullRequestFixIssue", () => {
+  const pullRequest = { repositoryFullName: "guchi-apps/issue-deck", number: 2957 };
+
+  it("本文にこのPRの「対象PR: #番号」マーカーを含むopenなIssueを見つける", () => {
+    const found = fixIssue({ number: 3001, body: "指摘です。\n\n- 対象PR: #2957" });
+    expect(findExistingPullRequestFixIssue(pullRequest, [found])).toEqual({
+      number: 3001,
+      htmlUrl: found.htmlUrl,
+    });
+  });
+
+  it("closeされたIssueは対象にしない（まだ直っていない目印にならないため）", () => {
+    const closed = fixIssue({ number: 3001, state: "closed", body: "- 対象PR: #2957" });
+    expect(findExistingPullRequestFixIssue(pullRequest, [closed])).toBeNull();
+  });
+
+  it("別のリポジトリの同番号Issueは対象にしない", () => {
+    const other = fixIssue({
+      number: 3001,
+      repositoryFullName: "guchi-apps/vps",
+      body: "- 対象PR: #2957",
+    });
+    expect(findExistingPullRequestFixIssue(pullRequest, [other])).toBeNull();
+  });
+
+  it("PR番号の前方一致で別のPRを巻き込まない（#295と#2957を混同しない）", () => {
+    const other = fixIssue({ number: 3002, body: "- 対象PR: #29570" });
+    expect(findExistingPullRequestFixIssue(pullRequest, [other])).toBeNull();
+  });
+
+  it("マーカーが無ければnull", () => {
+    const unrelated = fixIssue({ number: 3003, body: "関係ない指摘です" });
+    expect(findExistingPullRequestFixIssue(pullRequest, [unrelated])).toBeNull();
   });
 });

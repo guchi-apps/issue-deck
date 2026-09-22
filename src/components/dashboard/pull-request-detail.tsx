@@ -44,6 +44,7 @@ import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
+import type { Issue } from "@/types/issue";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -83,6 +84,12 @@ type PullRequestDetailProps = {
    * リリースPR等）では帯自体を出さないので既定値は不要。
    */
   pullRequestFixRoute?: PullRequestFixRoute;
+  /**
+   * `pullRequestFixRoute`が`create-issue`のとき、このPRを参照する既存の修正Issueが
+   * 既にあればそれ（#3331）。二重起票に気づけるよう、帯のボタンをそのIssueへのリンクへ
+   * 切り替えるために使う。無ければ`null`。
+   */
+  existingPullRequestFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null;
   /** 「修正Issueを起案」の確認ダイアログの`@Issue番号`補完に使う候補一覧 */
   issueSuggestions?: IssueSuggestion[];
   /** `pullRequestFixRoute`が`create-issue`以外のときの送信（#3009） */
@@ -178,6 +185,7 @@ export function PullRequestDetail({
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
   pullRequestFixRoute,
+  existingPullRequestFixIssue = null,
   issueSuggestions = [],
   onRequestPullRequestSessionFix,
   isSubmittingPullRequestSessionFix = false,
@@ -449,6 +457,7 @@ export function PullRequestDetail({
                 events={currentDetail.events}
                 onCreate={onCreatePullRequestFixIssue}
                 route={pullRequestFixRoute}
+                existingFixIssue={existingPullRequestFixIssue}
                 repositoryFullName={pullRequest.repositoryFullName}
                 issueSuggestions={issueSuggestions}
                 onRequestSessionFix={onRequestPullRequestSessionFix}

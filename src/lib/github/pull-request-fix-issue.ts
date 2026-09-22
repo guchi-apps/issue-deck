@@ -6,6 +6,7 @@ import {
   type PullRequestReviewCommentContent,
 } from "@/lib/github/pull-request-review-comment";
 import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
+import type { Issue } from "@/types/issue";
 import type { PullRequestEvent, PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -73,6 +74,16 @@ function stateLabel(pullRequest: Pick<PullRequestSummary, "merged" | "state">): 
   return pullRequest.state === "closed" ? "クローズ済み" : "未マージ";
 }
 
+/**
+ * 修正Issue本文に埋め込む「このPRの修正である」マーカー行（#3331）。
+ *
+ * **起票時（`buildPullRequestFixIssueDraft`）と検索時（`findExistingPullRequestFixIssue`）で
+ * 同じ文字列を作る唯一の場所。** ここを直したら両方に効く。
+ */
+function buildTargetPullRequestMarker(pullRequestNumber: number): string {
+  return `対象PR: #${pullRequestNumber}`;
+}
+
 export function buildPullRequestFixIssueDraft(params: {
   pullRequest: Pick<
     PullRequestSummary,
@@ -105,7 +116,7 @@ export function buildPullRequestFixIssueDraft(params: {
     lead,
     "",
     `- 元Issue: ${issueRefs || "（記録なし）"}`,
-    `- 対象PR: #${pullRequest.number}（${pullRequest.baseRef} ← ${pullRequest.headRef}・${stateLabel(pullRequest)}）`,
+    `- ${buildTargetPullRequestMarker(pullRequest.number)}（${pullRequest.baseRef} ← ${pullRequest.headRef}・${stateLabel(pullRequest)}）`,
     `- 自動レビュー: ${verdictLabel ?? "（記録なし）"}`,
     "",
     "## 指摘",
@@ -123,13 +134,42 @@ export function buildPullRequestFixIssueDraft(params: {
   for (const number of pullRequest.linkedIssueNumbers) {
     lines.push(`- 元Issue: #${number}`);
   }
-  lines.push(`- 対象PR: #${pullRequest.number}`);
+  lines.push(`- ${buildTargetPullRequestMarker(pullRequest.number)}`);
 
   return {
     repositoryFullName: pullRequest.repositoryFullName,
     title: `${pullRequest.title} の修正（レビュー指摘）`,
     body: lines.join("\n"),
   };
+}
+
+/**
+ * このPRを参照する既存の修正Issueを検索する（#3331）。
+ *
+ * 「修正Issueを起案」帯は押すたびに新規作成ダイアログを開くため、**同じPRの同じ指摘を
+ * 見落として2重に起票する事故が起きていた。** 押す前に気づけるよう、`buildTargetPullRequestMarker`
+ * が本文へ埋め込むマーカー行で既存Issueを探す。
+ *
+ * **PR番号の前方一致で別のPR（例: #29と#293）を巻き込まないよう、後ろに数字が続かないことを
+ * 確認する。** **`open`なIssueだけを対象にする**——closeされた修正Issueは「まだ直っていない」の
+ * 目印にならない。
+ */
+export function findExistingPullRequestFixIssue(
+  pullRequest: Pick<PullRequestSummary, "repositoryFullName" | "number">,
+  allIssues: readonly Pick<Issue, "state" | "repositoryFullName" | "body" | "number" | "htmlUrl">[],
+): Pick<Issue, "number" | "htmlUrl"> | null {
+  const marker = buildTargetPullRequestMarker(pullRequest.number).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  const pattern = new RegExp(`${marker}(?!\\d)`);
+  const found = allIssues.find(
+    (issue) =>
+      issue.state === "open" &&
+      issue.repositoryFullName === pullRequest.repositoryFullName &&
+      pattern.test(issue.body),
+  );
+  return found ? { number: found.number, htmlUrl: found.htmlUrl } : null;
 }
 
 /**
