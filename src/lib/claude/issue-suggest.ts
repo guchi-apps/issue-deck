@@ -320,8 +320,12 @@ export function buildLabelSuggestQuestions(
 /**
  * Jevの答えからラベルを取り出す。**読める答えが1つも無ければ`null`**（呼び出し元がAIへ倒す）。
  *
- * - noul: `JEV_LABEL_THRESHOLD`以上のものを付ける。**1つも届かなければ確率が最大の1つを付ける**
- *   （AIの経路の「種別を必ず1つは選ぶ」を保つ）
+ * - noul: `JEV_LABEL_THRESHOLD`以上のものを付ける。**1つも届かなければ何も付けない**（#3367）。
+ *   noulの対象は`isAutoAssignableLabelName`の30〜70番台全体で、`31.security`・
+ *   `54.data-migration`・`70.needs-decision`のような、Issueの種別ではなく状態や性質を表す
+ *   ラベルも含む。以前は「AIの経路の『種別を必ず1つは選ぶ』を保つ」ため確率最大の1つを
+ *   強制的に付けていたが、AIの経路が必ず選ばせているのは種別を表すラベルに限られ、その集合を
+ *   コード側で判定する手段が無いため、決められない以上は何も付けない側へ倒す
  * - 優先度: 選ばれたラベルだけを付ける。「付けない」・候補外の答えは付けない
  */
 export function readLabelSuggestAnswers(
@@ -331,15 +335,12 @@ export function readLabelSuggestAnswers(
   const chosen: string[] = [];
   let answered = false;
 
-  let best: { label: string; probability: number } | null = null;
   for (const [key, label] of built.noulKeyToLabel) {
     const answer = readNoulAnswer(response.answers?.[key]);
     if (!answer) continue;
     answered = true;
     if (answer.noul >= JEV_LABEL_THRESHOLD) chosen.push(label);
-    if (!best || answer.noul > best.probability) best = { label, probability: answer.noul };
   }
-  if (chosen.length === 0 && best) chosen.push(best.label);
 
   if (built.priorityLabels.length > 0) {
     const answer = readChoiceAnswer(response.answers?.[PRIORITY_QUESTION_KEY]);
