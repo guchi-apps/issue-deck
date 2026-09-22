@@ -55,6 +55,18 @@ describe("IssueDetailSection", () => {
     expect(screen.getByText("対応PRの一覧")).not.toBeNull();
   });
 
+  it("tone=dangerのとき赤枠になる（PR失敗の強調。#3317）", () => {
+    const { container } = render(
+      <IssueDetailSection id="pull-requests" title="対応PR" tone="danger">
+        <p>対応PRの一覧</p>
+      </IssueDetailSection>,
+    );
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("border-destructive");
+    expect(root.className).toContain("bg-destructive/10");
+  });
+
   it("forceOpenの間は開いたまま畳めない（マージ待ちで押すべきものを隠さない）", () => {
     render(
       <IssueDetailSection id="pull-requests" title="対応PR" forceOpen>
