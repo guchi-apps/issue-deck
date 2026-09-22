@@ -391,6 +391,41 @@ session_state_clear_codex_thread() {
   local session="$1" file
   file="$(session_state_codex_thread_file "$session")" || return 1
   rm -f "$file" 2>/dev/null || true
+  session_state_clear_codex_archived "$session" || true
+  return 0
+}
+
+# 終わったセッションのスレッドをアーカイブ済みにした印（#3357）。中身はアーカイブしたUUID。
+#
+# **UUIDごと持つ。** 同じIssueで新しい会話を起こすと`.codex-thread`のUUIDが変わるため、
+# 印のUUIDと一致しないものは「まだアーカイブしていない」と読む。書くのはpollerの巡回
+# （`lib/codex-thread-archive.sh`）、消すのは`codex resume`の前にアーカイブを戻すランチャー。
+session_state_codex_archived_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.codex-archived' "$(session_state_dir)" "$1"
+}
+
+session_state_mark_codex_archived() {
+  local session="$1" thread="$2" file content
+  [[ -n "$thread" ]] || return 1
+  file="$(session_state_codex_archived_file "$session")" || return 1
+  printf -v content '%s\n' "$thread"
+  session_state_write_file "$file" "$content"
+}
+
+# そのUUIDがアーカイブ済みか。
+session_state_codex_archived_is() {
+  local session="$1" thread="$2" file
+  [[ -n "$thread" ]] || return 1
+  file="$(session_state_codex_archived_file "$session")" || return 1
+  [[ -f "$file" ]] || return 1
+  [[ "$(head -1 "$file" 2>/dev/null || true)" == "$thread" ]]
+}
+
+session_state_clear_codex_archived() {
+  local session="$1" file
+  file="$(session_state_codex_archived_file "$session")" || return 1
+  rm -f "$file" 2>/dev/null || true
   return 0
 }
 

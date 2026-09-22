@@ -998,6 +998,16 @@ elif [[ "$AGENT_KIND" == "codex" && "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" && -
   CODEX_RESUME_THREAD="$(session_state_read_codex_thread "$TMUX_SESSION_NAME" 2>/dev/null || true)"
   if [[ -n "$CODEX_RESUME_THREAD" ]]; then
     RESUME_CONVERSATION=1
+    # 前回のセッションが終わった後、pollerがChatGPTアプリのリモート一覧から外すために
+    # アーカイブしている（#3357）。アーカイブ済みのままでは`codex resume`が転記を見つけられない
+    # ため、先に戻す。**戻せなくても起動は止めない**
+    if [[ -f "$SCRIPT_DIR/lib/codex-thread-archive.sh" ]]; then
+      # shellcheck source=scripts/lib/codex-thread-archive.sh
+      source "$SCRIPT_DIR/lib/codex-thread-archive.sh"
+      if ! unarchive_message="$(codex_thread_unarchive_for_resume "$TMUX_SESSION_NAME" "$CODEX_RESUME_THREAD")"; then
+        echo "#$ISSUE_NUMBER: 警告: 前回の会話のアーカイブを戻せませんでした（$unarchive_message）。" >&2
+      fi
+    fi
   fi
 fi
 
