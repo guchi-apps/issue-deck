@@ -204,3 +204,40 @@ describe("MergePendingPullRequestsの折りたたみ（#3165）", () => {
     expect(screen.getAllByRole("button", { name: "解除" })).toHaveLength(11);
   });
 });
+
+describe("MergePendingPullRequestsの対応Issueの印（#3345）", () => {
+  const developPullRequest = makePullRequest({
+    id: "owner/repo#20",
+    number: 20,
+    title: "気温データカードの高さを縮小する",
+    kind: "issue",
+    baseRef: "develop",
+    headRef: "issue-465",
+    linkedIssueNumber: 465,
+  });
+
+  it("対応Issueが確認待ちに並んでいるPRにだけ印を出す", () => {
+    render(
+      <MergePendingPullRequests
+        pullRequests={[makePullRequest(), developPullRequest]}
+        listedIssueKeys={new Set(["owner/repo#465"])}
+        onSelectPullRequest={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText(/下の一覧にもあります/)).toHaveLength(1);
+    expect(screen.getByText("対応Issue #465・下の一覧にもあります")).toBeTruthy();
+  });
+
+  it("対応Issueが並んでいなければ印を出さない", () => {
+    render(
+      <MergePendingPullRequests
+        pullRequests={[developPullRequest]}
+        listedIssueKeys={new Set(["owner/other#465"])}
+        onSelectPullRequest={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/下の一覧にもあります/)).toBeNull();
+  });
+});

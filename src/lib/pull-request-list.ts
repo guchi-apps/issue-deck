@@ -331,36 +331,67 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
 }
 
 /**
- * 「ユーザーの確認待ち」へ一緒に出す候補のPull Request（#1613）。
+ * 「ユーザーの確認待ち」へ一緒に出す候補のPull Request（#1613・#3345）。
  *
- * `requiresUserMerge`なPRのうち、**対応Issueが同じ一覧に並んでいないものだけ**を返す。
- * develop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`の
- * コメント参照）ので、そのままでは同じ案件がIssueとPRで二重に並ぶ。逆に、develop→mainの
- * リリースPRは対応Issueを持たないため、除外しなければどの確認待ちにも現れない。これが
- * この一覧にPRを混ぜる主な理由。
+ * `requiresUserMerge`なPRを**対応Issueの有無を問わず**返す。#1613では対応Issueが同じ一覧に
+ * 並ぶPRを二重表示を避けるために外していたが、それでは枠に出るのがリリースPR（develop→main）
+ * だけになり、develop向けのマージ待ちPRはIssueを1件ずつ見ないと分からなかった（#3345）。
+ * 同じ案件がIssue行と枠の両方に出るのは許容し、枠のカードに対応Issueの印を付けて同じ案件だと
+ * 読めるようにする（`isLinkedIssueListed`）。**件数だけは二重に数えない**
+ * （`pullRequestsCountedAsCheckUser`）。
  *
  * ここから先、「いま押せるもの」（`pullRequestsAwaitingUserMerge`）と「CI・判定の完了待ち」
  * （`pullRequestsWaitingForMergeChecks`）へ分かれる。母集団を1か所に持つのは、2つの数を
- * 足したものが従来の件数と必ず一致するようにするため。
+ * 足したものが母集団の件数と必ず一致するようにするため。
  */
-function pullRequestsRequiringUserMerge(
-  pullRequests: PullRequestSummary[],
+function pullRequestsRequiringUserMerge(pullRequests: PullRequestSummary[]): PullRequestSummary[] {
+  return sortOpenPullRequests(pullRequests.filter(requiresUserMerge));
+}
+
+/**
+ * 「ユーザーの確認待ち」に並んでいるIssueを、`isLinkedIssueListed`で引ける形にする（#3345）。
+ *
+ * @param checkUserIssues 「ユーザーの確認待ち」ビューに並んでいるIssue（リポジトリ名と番号だけ見る）
+ */
+export function checkUserIssueKeys(
   checkUserIssues: readonly { repositoryFullName: string; number: number }[],
+): ReadonlySet<string> {
+  return new Set(checkUserIssues.map((issue) => `${issue.repositoryFullName}#${issue.number}`));
+}
+
+/**
+ * PRの対応Issueが「ユーザーの確認待ち」に並んでいるか（#1613・#3345）。
+ *
+ * 本文の`#番号`参照から拾った2件目以降（`linkedIssueNumbers`）は単なる言及のことがあり、
+ * それで同じ案件と見なすと件数からPRが漏れるため、対応Issueの1件だけで判定する。
+ * リポジトリが違えば同じ番号でも別のIssue。
+ *
+ * @param listedIssues `checkUserIssueKeys`の結果
+ */
+export function isLinkedIssueListed(
+  pullRequest: PullRequestSummary,
+  listedIssues: ReadonlySet<string>,
+): boolean {
+  if (pullRequest.linkedIssueNumber === null) return false;
+  return listedIssues.has(`${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`);
+}
+
+/**
+ * 枠に並べるPRのうち、確認待ちの**件数へ足す**もの（#1713・#3345）。
+ *
+ * develop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`の
+ * コメント参照）ので、対応Issueが同じ一覧に並んでいるPRはそのIssueとして既に1件数えている。
+ * 足すのは対応Issueが並んでいないもの（主にリリースPR）だけにして、左メニュー・一覧ヘッダー・
+ * スマホホームの「要対応」が同じ案件を2回数えないようにする。
+ *
+ * @param pullRequests 枠に並べるPR（`pullRequestsAwaitingUserMerge`・保留を外した後）
+ * @param listedIssues `checkUserIssueKeys`の結果
+ */
+export function pullRequestsCountedAsCheckUser(
+  pullRequests: PullRequestSummary[],
+  listedIssues: ReadonlySet<string>,
 ): PullRequestSummary[] {
-  const listedIssues = new Set(
-    checkUserIssues.map((issue) => `${issue.repositoryFullName}#${issue.number}`),
-  );
-  return sortOpenPullRequests(
-    pullRequests.filter((pullRequest) => {
-      if (!requiresUserMerge(pullRequest)) return false;
-      // 本文の`#番号`参照から拾った2件目以降（`linkedIssueNumbers`）は単なる言及のことがあり、
-      // それで重複と見なすと確認待ちからPRが消えてしまうため、対応Issueの1件だけで判定する。
-      if (pullRequest.linkedIssueNumber === null) return true;
-      return !listedIssues.has(
-        `${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`,
-      );
-    }),
-  );
+  return pullRequests.filter((pullRequest) => !isLinkedIssueListed(pullRequest, listedIssues));
 }
 
 /**
@@ -420,19 +451,16 @@ export function resolvePullRequestHeader(
 }
 
 /**
- * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613・#2081）。
+ * 「ユーザーの確認待ち」へ一緒に出すPull Requestを選ぶ（#1613・#2081・#3345）。
  *
  * 返すのは`pullRequestsRequiringUserMerge`のうち**いまマージを押せるもの**だけ。件数
- * （左メニュー・一覧ヘッダー・スマホホームの「要対応」）もこの結果から数えるため、
- * 一覧の中身と数字は今までどおり一致する（#1713）。
- *
- * @param checkUserIssues 「ユーザーの確認待ち」ビューに並んでいるIssue（リポジトリ名と番号だけ見る）
+ * （左メニュー・一覧ヘッダー・スマホホームの「要対応」）はこの結果を
+ * `pullRequestsCountedAsCheckUser`で絞って数える（#1713）。
  */
 export function pullRequestsAwaitingUserMerge(
   pullRequests: PullRequestSummary[],
-  checkUserIssues: readonly { repositoryFullName: string; number: number }[],
 ): PullRequestSummary[] {
-  return pullRequestsRequiringUserMerge(pullRequests, checkUserIssues).filter(
+  return pullRequestsRequiringUserMerge(pullRequests).filter(
     (pullRequest) => !isMergeWaitingForChecks(pullRequest),
   );
 }
@@ -447,9 +475,8 @@ export function pullRequestsAwaitingUserMerge(
  */
 export function pullRequestsWaitingForMergeChecks(
   pullRequests: PullRequestSummary[],
-  checkUserIssues: readonly { repositoryFullName: string; number: number }[],
 ): PullRequestSummary[] {
-  return pullRequestsRequiringUserMerge(pullRequests, checkUserIssues).filter(
+  return pullRequestsRequiringUserMerge(pullRequests).filter(
     isMergeWaitingForChecks,
   );
 }

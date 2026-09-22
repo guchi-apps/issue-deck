@@ -46,6 +46,16 @@ type MobileIssuesScreenProps = {
    */
   mergePendingPullRequests: PullRequestSummary[];
   /**
+   * 上の配列のうち、確認待ちの件数へ足す数（#3345）。対応Issueが同じ一覧に並んでいるPRは
+   * そのIssueとして数えているため含まない。渡さなければ配列の件数をそのまま使う
+   */
+  checkUserPullRequestCount?: number;
+  /**
+   * 確認待ちに並んでいるIssue（`checkUserIssueKeys`。#3345）。対応Issueが並んでいるPRの
+   * カードに印を付けるのに使う
+   */
+  listedCheckUserIssueKeys?: ReadonlySet<string>;
+  /**
    * CI・判定の完了待ちで上の配列から外したPRの件数（#2081）。件数表示には足さず、
    * 枠の下の1行にだけ出す。
    */
@@ -119,6 +129,8 @@ export function MobileIssuesScreen({
   assignee,
   sort,
   mergePendingPullRequests,
+  checkUserPullRequestCount,
+  listedCheckUserIssueKeys,
   mergeCheckWaitingCount = 0,
   checkUserRunningIssueIds,
   snoozes,
@@ -248,10 +260,11 @@ export function MobileIssuesScreen({
       // `MobileIssueListScreen`がこれを見て行うため、件数と中身が別々にならない
       pinned={{
         view: "check-user",
-        count: mergePendingPullRequests.length,
+        count: checkUserPullRequestCount ?? mergePendingPullRequests.length,
         section: (
           <MergePendingPullRequests
             pullRequests={mergePendingPullRequests}
+            listedIssueKeys={listedCheckUserIssueKeys}
             waitingForChecksCount={mergeCheckWaitingCount}
             onSelectPullRequest={onSelectPullRequest}
             onSnooze={onSnooze}
