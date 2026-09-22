@@ -161,8 +161,8 @@ function route(handlers: RouteHandlers) {
         repository.mainBlob0 = { oid: "oid-same" };
         repository.tagBlob1 = { oid: "oid-same" };
         repository.mainBlob1 = { oid: "oid-same" };
-        repository.tagTree0 = { oid: "oid-same" };
-        repository.mainTree0 = { oid: "oid-same" };
+        repository.tagTree0 = { entries: [{ name: "review-develop.md", oid: "oid-same" }] };
+        repository.mainTree0 = { entries: [{ name: "review-develop.md", oid: "oid-same" }] };
       }
       return Promise.resolve(ok({ data: { repository } }));
     }
@@ -232,6 +232,7 @@ describe("collectWorkflowTags", () => {
       aheadBy: 48,
       compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v12...main",
       hasContentDiff: true,
+      changedFiles: [".github/workflows/reusable-issue-dispatch.yml"],
     });
     // 件数だけを取る。RESTの`/compare`は差分のコミットとファイルまで返す
     const compare = graphqlCalls().find((call) => call.query.includes("compare(headRef"));
@@ -291,16 +292,16 @@ describe("collectWorkflowTags", () => {
       mainBlob0: { oid: "same" },
       tagBlob1: { oid: "same" },
       mainBlob1: { oid: "same" },
-      tagTree0: { oid: "same" },
-      mainTree0: { oid: "same" },
+      tagTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
+      mainTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
     });
 
     const overview = await collectWorkflowTags("user-1");
 
-    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: false });
+    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: false, changedFiles: [] });
   });
 
-  it("reusable-*.ymlの内容が変わっていれば hasContentDiff は true（#2941）", async () => {
+  it("reusable-*.ymlの内容が変わっていれば hasContentDiff は true で変更ファイル名を返す（#2941・#3344）", async () => {
     withContentDiffRepository({
       tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "tag-oid" }] },
       mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "main-oid" }] },
@@ -308,16 +309,19 @@ describe("collectWorkflowTags", () => {
       mainBlob0: { oid: "same" },
       tagBlob1: { oid: "same" },
       mainBlob1: { oid: "same" },
-      tagTree0: { oid: "same" },
-      mainTree0: { oid: "same" },
+      tagTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
+      mainTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
     });
 
     const overview = await collectWorkflowTags("user-1");
 
-    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
+    expect(overview.sourceAhead).toMatchObject({
+      hasContentDiff: true,
+      changedFiles: [".github/workflows/reusable-issue-dispatch.yml"],
+    });
   });
 
-  it("summarize-claude-usage.shだけが変わっていても hasContentDiff は true（#2941）", async () => {
+  it("summarize-claude-usage.shだけが変わっていても hasContentDiff は true で変更ファイル名を返す（#2941・#3344）", async () => {
     // reusable-claude-ci-fix.yml等が prompts-ref のcheckout（タグ）から読む、
     // プロンプト以外の配布物（workflows/v31→v32の実例）
     withContentDiffRepository({
@@ -327,13 +331,36 @@ describe("collectWorkflowTags", () => {
       mainBlob0: { oid: "main-usage-sh" },
       tagBlob1: { oid: "same" },
       mainBlob1: { oid: "same" },
-      tagTree0: { oid: "same" },
-      mainTree0: { oid: "same" },
+      tagTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
+      mainTree0: { entries: [{ name: "review-develop.md", oid: "same" }] },
     });
 
     const overview = await collectWorkflowTags("user-1");
 
-    expect(overview.sourceAhead).toMatchObject({ hasContentDiff: true });
+    expect(overview.sourceAhead).toMatchObject({
+      hasContentDiff: true,
+      changedFiles: [".github/scripts/summarize-claude-usage.sh"],
+    });
+  });
+
+  it(".github/prompts配下で変わったファイル名を返す（#3344）", async () => {
+    withContentDiffRepository({
+      tagWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      mainWorkflows: { entries: [{ name: "reusable-issue-dispatch.yml", oid: "same" }] },
+      tagBlob0: { oid: "same" },
+      mainBlob0: { oid: "same" },
+      tagBlob1: { oid: "same" },
+      mainBlob1: { oid: "same" },
+      tagTree0: { entries: [{ name: "review-develop.md", oid: "tag-oid" }] },
+      mainTree0: { entries: [{ name: "review-develop.md", oid: "main-oid" }] },
+    });
+
+    const overview = await collectWorkflowTags("user-1");
+
+    expect(overview.sourceAhead).toMatchObject({
+      hasContentDiff: true,
+      changedFiles: [".github/prompts/review-develop.md"],
+    });
   });
 
   it("tree OIDが一部でも取れなければ hasContentDiff は null（#2941）", async () => {
