@@ -121,6 +121,7 @@ import {
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import {
+  findExistingPullRequestFixIssue,
   resolvePullRequestFixRoute,
   type PullRequestFixRoute,
 } from "@/lib/github/pull-request-fix-issue";
@@ -1528,6 +1529,22 @@ export function IssueDeckShell({
     () => resolvePullRequestFixRouteFor(modalPullRequest, allIssues, dispatch.sessions),
     [modalPullRequest, allIssues, dispatch.sessions],
   );
+  // 「修正Issueを起案」（route.kindがcreate-issueのとき）で、このPRを参照する既存の修正Issueが
+  // 既にあれば気づけるようにする（#3331。二重起票の防止）
+  const existingPullRequestFixIssue = useMemo(
+    () =>
+      selectedPullRequest && pullRequestFixRoute.kind === "create-issue"
+        ? findExistingPullRequestFixIssue(selectedPullRequest, allIssues)
+        : null,
+    [selectedPullRequest, pullRequestFixRoute, allIssues],
+  );
+  const modalExistingPullRequestFixIssue = useMemo(
+    () =>
+      modalPullRequest && modalPullRequestFixRoute.kind === "create-issue"
+        ? findExistingPullRequestFixIssue(modalPullRequest, allIssues)
+        : null,
+    [modalPullRequest, modalPullRequestFixRoute, allIssues],
+  );
   const pullRequestFixIssueSuggestions = useMemo(
     () =>
       selectedPullRequest
@@ -2137,6 +2154,7 @@ export function IssueDeckShell({
                     onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                     onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                     pullRequestFixRoute={pullRequestFixRoute}
+                    existingPullRequestFixIssue={existingPullRequestFixIssue}
                     issueSuggestions={pullRequestFixIssueSuggestions}
                     onRequestPullRequestSessionFix={(route, reason) =>
                       selectedPullRequest
@@ -2545,6 +2563,7 @@ export function IssueDeckShell({
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
                 onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
                 pullRequestFixRoute={pullRequestFixRoute}
+                existingPullRequestFixIssue={existingPullRequestFixIssue}
                 issueSuggestions={pullRequestFixIssueSuggestions}
                 onRequestPullRequestSessionFix={(route, reason) =>
                   selectedPullRequest
@@ -2721,6 +2740,7 @@ export function IssueDeckShell({
           onCreateFixIssue={openReleaseVerificationFixIssueDialog}
           onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
           pullRequestFixRoute={modalPullRequestFixRoute}
+          existingPullRequestFixIssue={modalExistingPullRequestFixIssue}
           issueSuggestions={modalPullRequestFixIssueSuggestions}
           onRequestPullRequestSessionFix={(route, reason) =>
             modalPullRequest

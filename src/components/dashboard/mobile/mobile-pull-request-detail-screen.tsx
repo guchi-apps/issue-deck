@@ -7,6 +7,7 @@ import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import type { PullRequestFixIssueDraft, PullRequestFixRoute } from "@/lib/github/pull-request-fix-issue";
 import type { ReleaseVerificationRow } from "@/lib/github/release-verification";
+import type { Issue } from "@/types/issue";
 import type { PullRequestSummary, PullRequestDetail as PullRequestDetailData } from "@/types/pull-request";
 
 type MobilePullRequestDetailScreenProps = {
@@ -27,6 +28,8 @@ type MobilePullRequestDetailScreenProps = {
   onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
   /** 「修正Issueを起案」の送り先一式（#3009）。`PullRequestDetail`へそのまま中継する */
   pullRequestFixRoute?: PullRequestFixRoute;
+  /** 対象PRを参照する既存の修正Issue（#3331）。`PullRequestDetail`へそのまま中継する */
+  existingPullRequestFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null;
   issueSuggestions?: IssueSuggestion[];
   onRequestPullRequestSessionFix?: (route: PrFixRequestRoute, reason: string) => Promise<boolean>;
   isSubmittingPullRequestSessionFix?: boolean;
@@ -51,6 +54,7 @@ export function MobilePullRequestDetailScreen({
   onCreateFixIssue,
   onCreatePullRequestFixIssue,
   pullRequestFixRoute,
+  existingPullRequestFixIssue,
   issueSuggestions,
   onRequestPullRequestSessionFix,
   isSubmittingPullRequestSessionFix,
@@ -70,6 +74,7 @@ export function MobilePullRequestDetailScreen({
       onCreateFixIssue={onCreateFixIssue}
       onCreatePullRequestFixIssue={onCreatePullRequestFixIssue}
       pullRequestFixRoute={pullRequestFixRoute}
+      existingPullRequestFixIssue={existingPullRequestFixIssue}
       issueSuggestions={issueSuggestions}
       onRequestPullRequestSessionFix={onRequestPullRequestSessionFix}
       isSubmittingPullRequestSessionFix={isSubmittingPullRequestSessionFix}

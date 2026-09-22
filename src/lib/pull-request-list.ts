@@ -618,7 +618,7 @@ export function aiReviewSettledState(
  * （ワークフロー未配布・起動前）は`unknown`で従来どおり押せる。
  *
  * `null`・`undefined`（未取得）も押せる側＝`false`として扱う。呼び出し元
- * （`IssueMergeButton`）でその場しのぎの既定値を組み立てさせないための判定側の責務（#2059）。
+ * （`PullRequestMergeButton`など）でその場しのぎの既定値を組み立てさせないための判定側の責務（#2059）。
  */
 export function isMergeJudgementPending(
   mergeJudgement: MergeJudgement | null | undefined,

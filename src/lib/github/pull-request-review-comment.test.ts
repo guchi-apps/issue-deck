@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildReviewFixRequestText,
   extractReviewConcerns,
+  quoteReviewText,
   selectPullRequestReviewComment,
-  selectReviewTargetPullRequestNumber,
   type PullRequestReviewCommentSource,
 } from "@/lib/github/pull-request-review-comment";
 
@@ -176,65 +175,17 @@ describe("extractReviewConcerns", () => {
   });
 });
 
-describe("buildReviewFixRequestText", () => {
-  it("本文を引用にして、どのPRのどの判定かを先頭に書く", () => {
-    const text = buildReviewFixRequestText({
-      review: { body: "## 気になった点\n\n- `a.ts:1` を直す", verdictLabel: "要修正" },
-      pullRequestNumber: 2851,
-    });
-
-    expect(text).toBe(
-      [
-        "自動レビュー（PR #2851・要修正）で指摘された次の点を修正してください。",
-        "",
-        "> ## 気になった点",
-        ">",
-        "> - `a.ts:1` を直す",
-        "",
-      ].join("\n"),
+describe("quoteReviewText", () => {
+  it("本文を引用（`> `）にする", () => {
+    expect(quoteReviewText("## 気になった点\n\n- `a.ts:1` を直す")).toBe(
+      ["> ## 気になった点", ">", "> - `a.ts:1` を直す"].join("\n"),
     );
   });
 
   it("長い本文は切り、続きの読み先を書く", () => {
-    const text = buildReviewFixRequestText({
-      review: { body: Array.from({ length: 200 }, (_, i) => `- 指摘${i}`).join("\n"), verdictLabel: "要修正" },
-      pullRequestNumber: 1,
-    });
+    const text = quoteReviewText(Array.from({ length: 200 }, (_, i) => `- 指摘${i}`).join("\n"));
 
     expect(text).toContain("（長いため以降を省略しました。全文はPRのレビューコメントにあります）");
     expect(text.split("\n").filter((line) => line.startsWith("> - 指摘")).length).toBe(60);
-  });
-});
-
-describe("selectReviewTargetPullRequestNumber", () => {
-  function pullRequest(
-    number: number,
-    overrides: Partial<{ state: "open" | "closed"; merged: boolean; draft: boolean }> = {},
-  ) {
-    return { number, state: "open" as const, merged: false, draft: false, ...overrides };
-  }
-
-  it("openでマージ済みでないPRのうち、番号がいちばん小さいものを選ぶ", () => {
-    expect(
-      selectReviewTargetPullRequestNumber([pullRequest(2860), pullRequest(2851)]),
-    ).toBe(2851);
-  });
-
-  it("マージ済み・クローズ済み・ドラフトは選ばない", () => {
-    expect(
-      selectReviewTargetPullRequestNumber([
-        pullRequest(2840, { state: "closed", merged: true }),
-        pullRequest(2845, { state: "closed" }),
-        pullRequest(2850, { draft: true }),
-        pullRequest(2851),
-      ]),
-    ).toBe(2851);
-  });
-
-  it("対象が無ければnull（パネルを出さない）", () => {
-    expect(selectReviewTargetPullRequestNumber([])).toBeNull();
-    expect(
-      selectReviewTargetPullRequestNumber([pullRequest(2840, { state: "closed", merged: true })]),
-    ).toBeNull();
   });
 });

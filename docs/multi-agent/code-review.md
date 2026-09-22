@@ -10,7 +10,7 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 | | 何を見るか | どこに出るか |
 | --- | --- | --- |
 | リポジトリ全体のレビュー（このドキュメント・#698） | 1リポジトリまるごと。指摘1件＝1カードで「Issueを作成」まで持つ | レビューIssueの詳細（`CodeReviewPanel`） |
-| develop向けPRの自動レビュー（#2849） | そのPRの差分。判定と本文を読み、そのまま修正依頼へ渡す | 対応PRセクションの中（`MergeApprovalActions`）。設計は[docs/code-map.md](../code-map.md)の「developへマージする直前は…」 |
+| develop向けPRの自動レビュー（#2849） | そのPRの差分。判定と本文を読み、そのまま修正依頼へ渡す | PR詳細（`PullRequestReviewFindings`・`PullRequestFixIssueBar`。#3333）。設計は[docs/code-map.md](../code-map.md)の「developへマージする直前は…」 |
 
 材料も出す場所も別なので、片方を直すときにもう片方は動かない。
 

@@ -21,7 +21,6 @@ import { ApprovalTextField } from "@/components/dashboard/approval-text-field";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CommentAiSummary } from "@/components/dashboard/comment-ai-summary";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
-import { MergeApprovalActions } from "@/components/dashboard/merge-approval-actions";
 import { MentionTextarea, type IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { WorkflowRunStatus } from "@/components/dashboard/workflow-run-status";
@@ -59,18 +58,11 @@ import {
 } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
-import type { PullRequestLink } from "@/lib/github/pull-request-link";
-import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
-import { areIssuePullRequestsAllMerged } from "@/lib/issue-pull-requests";
-import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
 
 /** この文字数を超えるコメント本文にのみAI要約の生成ボタンを表示する */
 const LONG_COMMENT_THRESHOLD = 400;
-
-/** マージ済みのPRがまだ無いときに使う空集合。毎レンダーの再生成を避ける */
-const EMPTY_MERGED_NUMBERS: ReadonlySet<number> = new Set();
 
 type CommentThreadProps = {
   comments: IssueComment[];
@@ -128,15 +120,9 @@ type CommentThreadProps = {
   /** `00.check-user`が付いている理由（#1490）。承認カードの見出しを出し分ける。読めない場合はnull */
   checkUserReason?: CheckUserReason | null;
   /**
-   * 対応PRへのリンク（#1339で複数対応）。**すべてマージ済みになったかの判定にだけ使う**——
-   * PRの行とマージボタンは画面上部の対応PRセクションが持つ（#2914）
-   */
-  pullRequestLinks?: PullRequestLink[];
-  /**
    * 画面上部に対応PRセクションが描かれているか（#2914。`visiblePullRequestLinks.length > 0`）。
    *
-   * **falseのときだけ、マージ待ちの操作一式（レビュー本文・修正依頼欄）をこのカードに出す。**
-   * 飛ぶ先が無いIssueで修正依頼を送れなくならないようにするためのフォールバックで、
+   * マージ待ちの案内で「対応PRへ移動」を出すか・GitHubで確かめるよう言うかを決める。
    * `resolveCheckUserGuidance`が移動ボタンを出さないのも同じ条件。
    */
   hasPullRequestSection?: boolean;
@@ -160,38 +146,10 @@ type CommentThreadProps = {
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
   onRequestContinuation?: () => Promise<void> | void;
-  /** PRマージ待ち画面（mergeApprovalPending）で「修正を依頼する」ボタン押下時の処理 */
-  onRequestPrFix?: (reason: string) => Promise<void> | void;
-  /**
-   * 修正依頼の送り先（#2919）。**対応PRセクションが出ていないときの控え**として、
-   * ここでも`MergeApprovalActions`を描くため同じものを受け取る。渡さないと、
-   * ラベルを外す送り先なのにボタンだけ「修正を依頼する」のまま残る
-   */
-  prFixRoute?: PrFixRequestRoute;
-  /** セッションへ送れない理由（`prFixRoute.kind === "session"`のときだけ意味がある） */
-  prFixSessionRejection?: string | null;
-  /** セッションへの送信そのものが失敗した理由 */
-  prFixSessionError?: string | null;
-  /**
-   * 対応PRへ投稿された自動レビューの本文（#2849）。`mergeApprovalPending`のときだけ描く。
-   * 取得は親（Issue詳細）が`usePullRequestReview`で行う。記録が無い・取得前はnull
-   */
-  reviewFindings?: PullRequestReviewCommentContent | null;
-  /** `reviewFindings`が付いているPR番号。取り込む文面と見出しに使う */
-  reviewPullRequestNumber?: number | null;
-  /**
-   * レビュー本文の取得がまだ終わっていないか。**終わるまでパネルを描かない**——取得前は
-   * `reviewFindings`が必ずnullになるため、そのまま描くと「記録がありません」を一瞬出してから
-   * 本文へ差し替わる（`sessionStatePending`と同じ考え方）
-   */
-  isLoadingReviewFindings?: boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
-  isRequestingPrFix?: boolean;
-  /** マージ済みとして扱うPR番号（上部のマージボタンから押された場合を含む・#1288/#1339） */
-  mergedPullRequestNumbers?: ReadonlySet<number>;
   /** 「ページ下部へ移動」ボタンの1回目クリック時のスクロール先とするコメントのインデックス（0始まり） */
   targetCommentIndex?: number;
   /** targetCommentIndexが指すコメントの要素に設定するref */
@@ -208,19 +166,10 @@ function ApprovalActions({
   onAskClaude,
   onDismissCheckUser,
   onRequestContinuation,
-  onRequestPrFix,
-  prFixRoute,
-  prFixSessionRejection,
-  prFixSessionError,
-  reviewFindings = null,
-  reviewPullRequestNumber = null,
-  isLoadingReviewFindings = false,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
-  isRequestingPrFix,
-  mergedPullRequestNumbers,
   isFallbackNotice,
   mergeApprovalPending,
   checkUserReason = null,
@@ -229,7 +178,6 @@ function ApprovalActions({
   localSession = false,
   sessionAlive = false,
   canAskClaude = false,
-  pullRequestLinks,
   hasPullRequestSection = true,
   pullRequestStop = null,
   repositoryFullName,
@@ -244,22 +192,10 @@ function ApprovalActions({
   onAskClaude?: (question: string) => Promise<void> | void;
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
-  onRequestPrFix?: (reason: string) => Promise<void> | void;
-  prFixRoute?: PrFixRequestRoute;
-  prFixSessionRejection?: string | null;
-  prFixSessionError?: string | null;
-  /** 対応PRの自動レビュー本文（#2849）。記録が無い・取得前はnull */
-  reviewFindings?: PullRequestReviewCommentContent | null;
-  /** `reviewFindings`が付いているPR番号 */
-  reviewPullRequestNumber?: number | null;
-  /** レビュー本文の取得中か。取得が終わるまでパネルを描かない */
-  isLoadingReviewFindings?: boolean;
   isApproving?: boolean;
   isRejecting?: boolean;
   isWithdrawing?: boolean;
   isRequestingContinuation?: boolean;
-  isRequestingPrFix?: boolean;
-  mergedPullRequestNumbers?: ReadonlySet<number>;
   isFallbackNotice?: boolean;
   mergeApprovalPending?: boolean;
   /** `00.check-user`が付いている理由（#1490）。読めないリポジトリではnull */
@@ -273,8 +209,7 @@ function ApprovalActions({
   sessionAlive?: boolean;
   /** 「質問する」を出してよいか（#1903） */
   canAskClaude?: boolean;
-  pullRequestLinks?: PullRequestLink[];
-  /** 上部に対応PRセクションがあるか（#2914）。falseのときだけマージ待ちの操作一式をここに出す */
+  /** 上部に対応PRセクションがあるか（#2914）。マージ待ちの案内の行き先を決める */
   hasPullRequestSection?: boolean;
   /** 対応PRが止まっている原因（#3144）。承認カードの案内の見出しを上部と揃える */
   pullRequestStop?: PullRequestStop | null;
@@ -287,12 +222,6 @@ function ApprovalActions({
   const [textValidationError, setTextValidationError] = useState<string | null>(null);
   const [isTextUploading, setIsTextUploading] = useState(false);
   const [isWithdrawConfirmOpen, setIsWithdrawConfirmOpen] = useState(false);
-  // マージ済みかどうかは画面上部の対応PR一覧（#1288・#1339）と共有する。マージボタンを持つのは
-  // そちらだけなので（#2914）、押された結果は親から`mergedPullRequestNumbers`で伝わる。
-  const isMerged = areIssuePullRequestsAllMerged(
-    pullRequestLinks ?? [],
-    mergedPullRequestNumbers ?? EMPTY_MERGED_NUMBERS,
-  );
   const busy = Boolean(isApproving || isRejecting || isWithdrawing || isRequestingContinuation);
 
   function changeText(value: string) {
@@ -397,50 +326,22 @@ function ApprovalActions({
   if (mergeApprovalPending) {
     return (
       <div {...checkUserTargetProps("approval")} className="mt-3 rounded-lg border border-dashed p-3">
-        {isMerged ? (
-          <>
-            <p className="mb-2 text-sm font-medium">Pull Requestをマージしました</p>
-            <p className="text-sm text-muted-foreground">
-              画面表示が更新されるまで少しお待ちください。
-            </p>
-          </>
-        ) : guidance?.reason === "merge" ? (
-          /* 何を押せばよいか（#1663）だけを出す。**押す場所は画面上部の対応PRセクション**で、
-             PRの行・マージボタン・自動マージされなかった理由・レビュー本文・修正依頼欄は
-             すべてそちらが持つ（#2914）。「対応PRへ移動」はこの案内が出す（行き先の判定は
-             `resolveCheckUserGuidance`） */
+        {guidance?.reason === "merge" ? (
+          /* 何を押せばよいか（#1663）だけを出す。**マージ・修正依頼はPR詳細で行う**（#3333）。
+             画面上部の対応PRセクションの各行にPR詳細への導線があり、「対応PRへ移動」は
+             この案内が出す（行き先の判定は`resolveCheckUserGuidance`） */
           <CheckUserReasonNotice guidance={guidance} />
         ) : (
           <>
             <p className="mb-2 text-sm font-medium">Pull Requestのマージが必要です</p>
-            {/* 理由ラベルが読めないリポジトリではここに来る（`guidance`がnull）。**押す場所を
-                名指しするので、対応PRの行を読み取れているかで言い方を変える**（#2914。
-                読み取れていないときは画面のどこにもマージボタンが無い） */}
+            {/* 理由ラベルが読めないリポジトリではここに来る（`guidance`がnull）。**行き先を
+                名指しするので、対応PRの行を読み取れているかで言い方を変える**（#2914） */}
             <p className="text-sm text-muted-foreground">
               {hasPullRequestSection
-                ? "画面上部の「対応PR」で内容を確認のうえマージしてください。"
+                ? "画面上部の「対応PR」からPR詳細を開き、内容を確認のうえマージしてください。"
                 : "対応PRを読み取れていないため、GitHub上で内容を確認のうえマージしてください。"}
             </p>
           </>
-        )}
-        {/* 対応PRの行が1件も無いIssueだけは飛ぶ先が無いため、従来どおりここで修正依頼を
-            送れるようにする（#2914）。`resolveCheckUserGuidance`が移動ボタンを出さないのも
-            同じ条件（`hasPullRequestSection`） */}
-        {!hasPullRequestSection && !isMerged && (
-          <MergeApprovalActions
-            className="mt-3"
-            review={reviewFindings}
-            reviewPullRequestNumber={reviewPullRequestNumber}
-            isLoadingReview={isLoadingReviewFindings}
-            pullRequestLinks={pullRequestLinks}
-            repositoryFullName={repositoryFullName}
-            issueSuggestions={issueSuggestions}
-            onRequestPrFix={onRequestPrFix}
-            prFixRoute={prFixRoute}
-            prFixSessionRejection={prFixSessionRejection}
-            prFixSessionError={prFixSessionError}
-            isRequestingPrFix={isRequestingPrFix}
-          />
         )}
       </div>
     );
@@ -660,7 +561,6 @@ export function CommentThread({
   canAskClaude,
   qaAnswerPending = false,
   mergeApprovalPending,
-  pullRequestLinks,
   hasPullRequestSection,
   pullRequestStop,
   workflowRun,
@@ -672,19 +572,10 @@ export function CommentThread({
   onAskClaude,
   onDismissCheckUser,
   onRequestContinuation,
-  onRequestPrFix,
-  prFixRoute,
-  prFixSessionRejection,
-  prFixSessionError,
-  reviewFindings,
-  reviewPullRequestNumber,
-  isLoadingReviewFindings,
   isApproving,
   isRejecting,
   isWithdrawing,
   isRequestingContinuation,
-  isRequestingPrFix,
-  mergedPullRequestNumbers,
   targetCommentIndex,
   targetCommentRef,
   commentSummary,
@@ -731,19 +622,10 @@ export function CommentThread({
         onAskClaude={onAskClaude}
         onDismissCheckUser={onDismissCheckUser}
         onRequestContinuation={onRequestContinuation}
-        onRequestPrFix={onRequestPrFix}
-        prFixRoute={prFixRoute}
-        prFixSessionRejection={prFixSessionRejection}
-        prFixSessionError={prFixSessionError}
-        reviewFindings={reviewFindings}
-        reviewPullRequestNumber={reviewPullRequestNumber}
-        isLoadingReviewFindings={isLoadingReviewFindings}
         isApproving={isApproving}
         isRejecting={isRejecting}
         isWithdrawing={isWithdrawing}
         isRequestingContinuation={isRequestingContinuation}
-        isRequestingPrFix={isRequestingPrFix}
-        mergedPullRequestNumbers={mergedPullRequestNumbers}
         isFallbackNotice={isFallbackNotice}
         mergeApprovalPending={mergeApprovalPending}
         checkUserReason={checkUserReason}
@@ -752,7 +634,6 @@ export function CommentThread({
         localSession={localSession}
         sessionAlive={sessionAlive}
         canAskClaude={canAskClaude}
-        pullRequestLinks={pullRequestLinks}
         hasPullRequestSection={hasPullRequestSection}
         pullRequestStop={pullRequestStop}
         repositoryFullName={repositoryFullName}

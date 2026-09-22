@@ -2,10 +2,9 @@
 
 import type { ReactNode } from "react";
 
-import { GitPullRequest } from "lucide-react";
+import { ArrowRight, GitPullRequest } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
-import { IssueMergeButton } from "@/components/dashboard/issue-merge-button";
 import {
   AiReviewBadge,
   ConflictBadge,
@@ -17,13 +16,13 @@ import {
   PullRequestProgressLabel,
   PullRequestProgressStepList,
 } from "@/components/dashboard/pull-request-progress-steps";
+import { Button } from "@/components/ui/button";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
   buildIssuePullRequestProgress,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import {
-  canMergeIssuePullRequest,
   issuePullRequestStateLabel,
   type IssuePullRequestStateLabel,
   type IssuePullRequestSummary,
@@ -38,46 +37,18 @@ type IssuePullRequestListProps = {
   /** 取得済みの対応PRの詳細。`links`の部分集合で、取得前は空になる */
   pullRequests: IssuePullRequest[];
   /**
-   * `pullRequests`の取得がまだ一度も終わっていないか（#2352）。取得前の行のマージボタンを
-   * 「確認中」で押せなくするために使う。**空配列だけでは「取得前」と「取得できなかった」を
-   * 区別できない**ため、判定は取得元（`useIssuePullRequests`）から受け取る。
+   * ユーザーのマージ確認待ちか。trueのときは枠をハイライトし、各行の導線を
+   * 「PR詳細でマージ・修正依頼」の塗りボタンにする（#3333）
    */
-  isLoadingDetails?: boolean;
-  /** ユーザーのマージ確認待ちか。trueのときだけマージボタンを出し、枠をハイライトする */
   mergeApprovalPending: boolean;
-  /** マージを実行する。成功したらtrueを返す。省略するとマージボタンを出さない */
-  onMerge?: (pullRequestNumber: number) => Promise<boolean> | boolean;
-  onMerged?: (pullRequestNumber: number) => void;
-  /**
-   * PRをマージせずにクローズし、Issueも「対応終了」としてクローズする（#2780「マージしない」）。
-   * 成功したらtrueを返す。省略すると「マージしない」ボタンを出さない
-   */
-  onDecline?: (pullRequestNumber: number) => Promise<boolean> | boolean;
-  onDeclined?: (pullRequestNumber: number) => void;
-  /** この画面でマージ済みにしたPR番号。GitHub側の反映を待たずに「マージ済み」を出すため */
-  mergedNumbers?: ReadonlySet<number>;
-  /** この画面で「マージしない」を実行したPR番号（#2780）。マージ済みと同じく楽観表示に使う */
-  declinedNumbers?: ReadonlySet<number>;
-  /** 直近にマージを実行したPR番号。実行中の表示とエラーの表示先を決める */
-  mergeTargetNumber?: number | null;
-  isMerging?: boolean;
-  /** 直近に「マージしない」を実行したPR番号（#2780） */
-  declineTargetNumber?: number | null;
-  isDeclining?: boolean;
-  /** マージ失敗時のエラーメッセージ。`mergeTargetNumber`の行に出す */
-  mergeError?: string | null;
-  /** 「マージしない」失敗時のエラーメッセージ。`declineTargetNumber`の行に出す（#2780） */
-  declineError?: string | null;
   /**
    * `card`（既定）は枠と「対応PR」の見出しを付ける。Issue本文の上に単独で置くときの形。
-   * `plain`は行だけを出す。コメント欄のマージ待ちカードのように、既に枠と見出しを持つ
-   * 入れ物の中へ置くときに使う（枠が二重になるのを避ける）。
+   * `plain`は行だけを出す。既に枠と見出しを持つ入れ物の中へ置くときに使う（枠が二重になるのを避ける）。
    */
   variant?: "card" | "plain";
   /**
    * 一覧の先頭（`card`なら見出しの下）へ差し込む案内。マージ待ちの理由（#1631）を、
-   * PC・スマホのどちらでも**マージボタンと同じ枠の中**へ出すための口。枠の外へ置くと、
-   * `card`では箱が2つ縦に並んで見え、どちらの操作に対する説明なのかが読み取れなくなる。
+   * PC・スマホのどちらでも**PR詳細への導線と同じ枠の中**へ出すための口。
    */
   notice?: ReactNode;
   className?: string;
@@ -136,41 +107,21 @@ export function IssuePullRequestStateCounts({ buckets }: { buckets: IssuePullReq
 }
 
 /**
- * Issueの対応PRを一覧で表示し、マージボタンを**そのPRの行の中に**置く（#1339）。
+ * Issueの対応PRを一覧で表示する。**PRを変更する操作は置かない**（#3333）。
  *
- * 1つのIssueに複数のPRがぶら下がりうるようになったため、マージボタンをIssue単位の位置
- * （画面上部の操作列・スマホのヘッダー）へ置いておくと、押したときにどのPRがマージされるのか
- * 決まらない。マージはPRに紐づく操作なので、ボタンはPRの行の中だけに置く。
- *
- * #1288が画面上部にもボタンを出していたのは「コメント欄まで下げなくても押せるように」で、
- * この一覧をIssue本文より上に置くことで同じ到達性を保っている。
+ * 以前（#1288・#1339・#2780）はこの行に「マージする」「マージしない」を置き、Issue詳細からも
+ * PRをマージ・クローズできた。PR詳細にも同じ操作があり、確認ダイアログと判定（`mergeWarnings`・
+ * 本番マージ判定など）が2系統に割れて、どちらから押すかで確かめる内容が変わりえた。
+ * **Issue詳細は「何を完了させるか」、PR詳細は「変更をどう統合するか」**に分け、ここは
+ * 状態の要約（状態・CI・レビュー・コンフリクト・判定）と、アプリ内のPR詳細を開く導線だけを持つ。
  *
  * 並びの正は`links`（コメント本文・timelineから得たPR番号）で、`pullRequests`はそこへ
- * 後から合流するタイトル・状態。詳細が取れていない行でも番号とマージボタンは出す
- * （取得に失敗しただけでマージできなくなるのを避けるため）。
- *
- * **ただし合流を待っている間は、マージボタンを「確認中」で押せなくする**（#2352）。
- * CI・Claudeレビュー・マージ判定のバッジは詳細と一緒に届くため、待っている間の行は
- * 「押せる『マージする』だけがある行」に見え、直後にバッジが増えて「判定中」へ変わる。
- * その数秒が誤操作の窓になっていた。ボタン自体は出したままにして、行の形は変えない。
+ * 後から合流するタイトル・状態。詳細が取れていない行でも番号とPR詳細への導線は出す。
  */
 export function IssuePullRequestList({
   links,
   pullRequests,
-  isLoadingDetails = false,
   mergeApprovalPending,
-  onMerge,
-  onMerged,
-  onDecline,
-  onDeclined,
-  mergedNumbers,
-  declinedNumbers,
-  mergeTargetNumber,
-  isMerging,
-  declineTargetNumber,
-  isDeclining,
-  mergeError,
-  declineError,
   variant = "card",
   notice,
   className,
@@ -198,20 +149,17 @@ export function IssuePullRequestList({
       <ul className="flex flex-col gap-2">
         {visibleLinks.map((link) => {
           const detail = detailByNumber.get(link.number);
-          // 取得が終わるまでは押せなくする。終わったのに詳細が無い行（取得失敗）は従来どおり
-          const detailPending = !detail && isLoadingDetails;
-          const merged = Boolean(mergedNumbers?.has(link.number)) || Boolean(detail?.merged);
-          const declined = Boolean(declinedNumbers?.has(link.number));
-          // 詳細が取れていない行では判断材料が無いので、マージできる前提で出す
-          const canMerge = detail ? canMergeIssuePullRequest(detail) : true;
-          const showMergeButton = Boolean(onMerge) && mergeApprovalPending && (canMerge || merged || declined);
+          const open = detail ? detail.state === "open" && !detail.merged : true;
           // 開いていて下書きでないPRだけ、Issue詳細の上部と同じ内訳を出す（#3239）。マージ済み・
           // クローズ・下書きは待っているものが無い（または材料が取れていない）ので、従来の
-          // 状態バッジのまま。この画面でマージ・「マージしない」した直後の行も内訳を外す
+          // 状態バッジのまま
           const progress =
-            detail && detail.state === "open" && !detail.draft && !merged && !declined
+            detail && detail.state === "open" && !detail.draft && !detail.merged
               ? buildIssuePullRequestProgress(toIssuePullRequestProgressSource(detail))
               : null;
+          // マージを待っているのは開いているPRだけ。閉じた行まで塗りボタンにすると、
+          // どれを見に行けばよいのかが読み取れなくなる
+          const emphasize = mergeApprovalPending && open;
 
           return (
             <li key={link.number} className="flex min-w-0 flex-wrap items-center gap-2">
@@ -220,7 +168,7 @@ export function IssuePullRequestList({
                 // スマホでのタップ領域を確保する（旧PullRequestLinkBadgeと同じ扱い）
                 className={cn(
                   "inline-flex min-h-11 min-w-0 items-center gap-1.5 text-sm font-medium text-primary hover:underline md:min-h-0",
-                  // 内訳のある行は、タイトルを1行使い、状態・待っているもの・マージボタンを次の行へ送る
+                  // 内訳のある行は、タイトルを1行使い、状態・待っているもの・導線を次の行へ送る
                   progress && "w-full",
                 )}
               >
@@ -239,33 +187,20 @@ export function IssuePullRequestList({
                   生きたバッジなので、内訳の工程には入れずここに残す */}
               {detail && <RepairRunBadge run={detail.repairRun} compact />}
               {detail && !progress && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
-              {showMergeButton && onMerge && (
-                <IssueMergeButton
-                  className="ml-auto"
-                  onMerge={() => onMerge(link.number)}
-                  onMerged={() => onMerged?.(link.number)}
-                  onDecline={onDecline ? () => onDecline(link.number) : undefined}
-                  onDeclined={() => onDeclined?.(link.number)}
-                  pullRequestNumber={link.number}
-                  reviewVerdict={detail?.reviewVerdict ?? null}
-                  headSha={detail?.headSha ?? null}
-                  pullRequestUrl={detail?.htmlUrl}
-                  ciStatus={detail?.ciStatus ?? null}
-                  mergeJudgement={detail?.mergeJudgement ?? null}
-                  isDetailPending={detailPending}
-                  isMerging={Boolean(isMerging) && mergeTargetNumber === link.number}
-                  isMerged={merged}
-                  isDeclining={Boolean(isDeclining) && declineTargetNumber === link.number}
-                  isDeclined={declined}
-                  error={
-                    mergeTargetNumber === link.number
-                      ? mergeError
-                      : declineTargetNumber === link.number
-                        ? declineError
-                        : null
-                  }
-                />
-              )}
+              {/* マージ・クローズ・修正依頼・コンフリクト解消はPR詳細が持つ（#3333）。
+                  タイトルのリンクと行き先は同じだが、「ここで操作はできない、あちらで行う」ことを
+                  ボタンの形で言う。マージ待ちの行はスマホで押し損ねないよう幅いっぱいにする */}
+              <Button
+                asChild
+                size="sm"
+                variant={emphasize ? "default" : "outline"}
+                className={cn("ml-auto", emphasize && "max-md:min-h-10 max-md:w-full")}
+              >
+                <GithubReferenceLink href={link.url}>
+                  {emphasize ? "PR詳細でマージ・修正依頼" : "PR詳細で操作"}
+                  <ArrowRight />
+                </GithubReferenceLink>
+              </Button>
               {progress && (
                 <PullRequestProgressStepList
                   className="w-full"
@@ -279,6 +214,9 @@ export function IssuePullRequestList({
           );
         })}
       </ul>
+      {mergeApprovalPending && (
+        <p className="text-xs text-muted-foreground">マージ・クローズ・修正依頼はPR詳細で行います。</p>
+      )}
     </div>
   );
 }

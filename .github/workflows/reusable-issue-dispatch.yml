@@ -594,11 +594,36 @@ jobs:
           # だけが落ち、スキップ判定自体は正しいのにジョブ失敗として扱われてnotify-failureが
           # 「起動に失敗しました」と誤通知する(#929)。同ジョブの他ステップと揃えている。
           GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          # 11.localのケースだけ使う(#3331)。issue-deckのcomment-relay APIへ、生きている
+          # ローカルセッションへこのコメントを転送できないか問い合わせる。
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
           set -e
           if [ "${{ steps.state.outputs.local_active }}" = "true" ]; then
-            BODY='🖐️ このIssueには `11.local` ラベルが付いているため、無人実行（GitHub Actions）では対応しません。ローカルのClaude Codeセッションで対応中の想定です。'
-            BODY="$BODY"$'\n\n''Actions側に任せる場合は `11.local` を外してから、改めて `@claude` とコメントしてください。'
+            # **走っているローカルセッションへの転送を先に試みる（#3331）。** 従来は
+            # 「11.localを外して改めて@claudeとコメントしてください」と案内するだけで、
+            # 実際に動いているセッションには何も伝わらなかった。issue-deckの
+            # POST /api/dispatch/comment-relayがセッションの生死を確かめ直し、生きていれば
+            # 固定文言のINSTRUCTIONジョブを積む。未設定・不達でもエラーにせず、
+            # 従来どおりの案内文へフォールバックする(このAPIの失敗でワークフローは止めない)。
+            RELAYED=false
+            if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
+              RELAY_BODY="$(curl -sS -m 20 -X POST \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+                -H "Content-Type: application/json" \
+                -d "{\"repository\":\"$GH_REPO\",\"issue\":$ISSUE_NUMBER}" \
+                "$APP_BASE_URL/api/dispatch/comment-relay")" || RELAY_BODY=""
+              RELAYED="$(printf '%s' "$RELAY_BODY" | jq -r 'select(.ok == true) | .relayed // false' 2>/dev/null || true)"
+              [ "$RELAYED" = "true" ] || RELAYED=false
+            fi
+            if [ "$RELAYED" = "true" ]; then
+              BODY='🖥️ このIssueには `11.local` ラベルが付いているため、無人実行（GitHub Actions）では対応しません。走っているローカルのClaude Codeセッションへこのコメントを伝えました。'
+            else
+              BODY='🖐️ このIssueには `11.local` ラベルが付いているため、無人実行（GitHub Actions）では対応しません。ローカルのClaude Codeセッションで対応中の想定です。'
+              BODY="$BODY"$'\n\n''Actions側に任せる場合は `11.local` を外してから、改めて `@claude` とコメントしてください。'
+            fi
             BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
             gh issue comment ${{ steps.state.outputs.issue_number }} --body "$BODY"
             exit 0
