@@ -26,6 +26,22 @@ export const BUMP_KIND_CRITERIA: Record<BumpKind, string> = {
 const SEMVER_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
 
 /**
+ * `1.2.3`形式のバージョン同士を比較する。`a`が新しければ正、古ければ負、同じなら0を返す。
+ * どちらかが`1.2.3`形式として読めない場合はnullを返す（呼び出し側は「比較できない」として扱う）。
+ */
+export function compareVersions(a: string, b: string): number | null {
+  const matchA = SEMVER_PATTERN.exec(a.trim());
+  const matchB = SEMVER_PATTERN.exec(b.trim());
+  if (!matchA || !matchB) return null;
+
+  for (let i = 1; i <= 3; i++) {
+    const diff = Number(matchA[i]) - Number(matchB[i]);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
  * 指定した上げ幅で次のバージョンを計算する。確認ダイアログに`3.21.0 → 3.22.0`の目安を出すためだけに
  * 使う（**実際にバージョンを書き換えるのはworkflow側の`npm version`**で、ここでの計算結果は
  * どこへも渡さない）。`1.2.3`形式として読めない場合はnullを返し、画面は目安を出さない。

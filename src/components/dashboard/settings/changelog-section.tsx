@@ -4,6 +4,7 @@ import { Lightbulb } from "lucide-react";
 
 import packageJson from "../../../../package.json";
 import { APP_CHANGELOG } from "@/lib/changelog";
+import { compareVersions } from "@/lib/semver-bump";
 import { cn } from "@/lib/utils";
 
 const dateFormatter = new Intl.DateTimeFormat("ja-JP", {
@@ -24,9 +25,17 @@ function formatDate(date: string) {
  * 中身（`APP_CHANGELOG`）はリリースのたびに`scripts/version-changelog.mjs`が先頭へ足す。
  * `usage`（どう使うか・#1729）は**画面で使える変化が無いリリースでは生成されない**ため、
  * 無いときは枠ごと出さない。空の見出しだけが残ると書き漏らしに見えるため。
+ *
+ * **「使用中」の印は、現在のバージョンと完全一致するエントリではなく、現在のバージョン以下で
+ * 最も新しいエントリに付ける。** 画面で使える変化が無いリリース（#3282）はエントリ自体を
+ * 持たないため、`packageJson.version`と一致するエントリが無いことがある。その場合でも、
+ * 利用者が体感できる変更としては直近のエントリのままなので、そこへ印を付ける。
  */
 export function ChangelogSection() {
   const currentVersion = packageJson.version;
+  const currentEntry = APP_CHANGELOG.find(
+    (entry) => (compareVersions(entry.version, currentVersion) ?? 1) <= 0,
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -40,7 +49,7 @@ export function ChangelogSection() {
         >
           <div className="flex items-baseline gap-2">
             <h3 className="text-sm font-semibold tabular-nums">v{entry.version}</h3>
-            {entry.version === currentVersion && (
+            {entry === currentEntry && (
               <span className="rounded-full border border-primary/30 bg-primary/10 px-1.5 py-px text-[0.65rem] font-medium text-foreground">
                 使用中
               </span>
