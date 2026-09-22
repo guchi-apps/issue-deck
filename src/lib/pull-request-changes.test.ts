@@ -91,6 +91,42 @@ describe("toPullRequestChanges", () => {
     ]);
   });
 
+  it("マージコミットと混ざったsquashコミットもPRとして拾う（#3339）", () => {
+    // stockly #98（v1.2.6）の実際のコミット列。バンプPRのマージと、squashでマージされた
+    // 参照タグ更新PRだけのリリースで、以前は「PR 0件」になっていた
+    const changes = toPullRequestChanges([
+      mergeCommit("a1", 94, "release/v1.2.5", "v1.2.5をリリースする"),
+      { sha: "a2", message: "共有ワークフローの参照をworkflows/v39へ上げる (#96)" },
+      { sha: "a3", message: "v1.2.6をリリースする。" },
+    ]);
+
+    expect(changes).toEqual([
+      {
+        id: "a2",
+        pullRequestNumber: 96,
+        issueNumber: null,
+        title: "共有ワークフローの参照をworkflows/v39へ上げる",
+        kind: "commit",
+      },
+      {
+        id: "a1",
+        pullRequestNumber: 94,
+        issueNumber: null,
+        title: "v1.2.5をリリースする",
+        kind: "version-bump",
+      },
+    ]);
+  });
+
+  it("マージコミットで拾えたPRと同じ番号のsquash形式の件名は重ねない", () => {
+    const changes = toPullRequestChanges([
+      { sha: "a1", message: "途中のコミット (#2077)" },
+      mergeCommit("a2", 2077, "issue-2062", "自動マージ失敗時の理由を画面へ出す"),
+    ]);
+
+    expect(changes.map((change) => change.id)).toEqual(["a2"]);
+  });
+
   it("コミットが無ければ空配列を返す", () => {
     expect(toPullRequestChanges([])).toEqual([]);
   });

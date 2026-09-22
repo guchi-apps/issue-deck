@@ -41,6 +41,9 @@ function splitMessage(message: string): { subject: string; body: string } {
  * マージコミット（`Merge pull request #<番号> from <owner>/<ブランチ>`）だけを拾って
  * PR単位へ畳む。ブランチ名が`issue-<番号>`なら対応Issueまで辿れる。
  *
+ * マージコミットがあるときも、件名が`… (#2077)`のsquashコミットはPRとして拾う（#3339）。
+ * マージコミットの運用でも、参照タグ更新PRのようにsquashで入るPRが混ざるため。
+ *
  * **マージコミットが1件も無いリポジトリ（squash運用）では、コミットの件名をそのまま並べる。**
  * 畳めないからといって何も出さないと、squash運用のリポジトリだけ確認材料がゼロになるため。
  * 件名が`… (#2077)`で終わるGitHubのsquash既定形式なら、そこからPR番号だけは拾う。
@@ -52,11 +55,25 @@ export function toPullRequestChanges(
   commits: readonly PullRequestCommitSource[],
 ): PullRequestChange[] {
   const merges: PullRequestChange[] = [];
+  const squashes: PullRequestChange[] = [];
 
   for (const commit of commits) {
     const { subject, body } = splitMessage(commit.message);
     const matched = subject.match(MERGE_COMMIT_SUBJECT);
-    if (!matched) continue;
+    if (!matched) {
+      const squashMatched = subject.match(SQUASH_COMMIT_SUBJECT);
+      if (squashMatched) {
+        squashes.push({
+          id: commit.sha,
+          pullRequestNumber: Number(squashMatched[1]),
+          issueNumber: null,
+          // 行頭にPR番号を出すので、件名末尾の`(#96)`は重ねない
+          title: subject.replace(SQUASH_COMMIT_SUBJECT, "").trim() || subject,
+          kind: "commit",
+        });
+      }
+      continue;
+    }
 
     const branch = matched[2];
     const issueMatched = branch.match(ISSUE_BRANCH);
@@ -70,7 +87,17 @@ export function toPullRequestChanges(
     });
   }
 
-  if (merges.length > 0) return merges.reverse();
+  if (merges.length > 0) {
+    // マージコミットの運用でも、squashで入ったPRが混ざる（#3339）。issue-deckが配る共有
+    // ワークフローの参照タグ更新PR（`propagate-workflow-tag.sh`）は`--squash`でマージするため、
+    // マージコミットだけを拾うとそのPRが落ち、中身が参照タグの更新だけのリリースでは
+    // 「PR 0件」になっていた。同じPR番号がマージコミットで拾えていれば重ねない
+    const mergedNumbers = new Set(merges.map((change) => change.pullRequestNumber));
+    const extra = squashes.filter((change) => !mergedNumbers.has(change.pullRequestNumber));
+    const merged = [...merges, ...extra];
+    const order = new Map(commits.map((commit, index) => [commit.sha, index]));
+    return merged.sort((a, b) => (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0));
+  }
 
   return commits
     .map((commit) => {
