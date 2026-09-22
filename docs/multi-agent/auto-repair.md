@@ -233,9 +233,10 @@ develop→mainのリリースPR（head=`develop`）のCI失敗はこのワーク
 
 ### ジョブ構成
 
-- **detect**: `workflow_run`イベントのペイロードから、develop向けかつ`issue-<番号>`命名規約に
-  従うブランチのPRの失敗のみを対象Issue番号として抽出する。`workflow_dispatch`で手動実行する
-  場合は入力されたIssue番号をそのまま使う。
+- **detect**: `workflow_run`イベントのペイロードから、develop向け、またはdevelopを持たない
+  main直行リポジトリ（#3356）のmain向けで、`issue-<番号>`命名規約に従うブランチのPRの失敗のみを
+  対象Issue番号として抽出する。`workflow_dispatch`で手動実行する場合は入力されたIssue番号を
+  そのまま使う。
 - **fix**: 対象PRの状態（Issueのクローズ有無、現在のHEADに対するCIの実行結果）を再確認したうえで、
   対応ブランチをcheckoutし、`gh run view <run_id> --log-failed`で取得した失敗ログをもとに
   Claude Codeが原因を読解して修正し、`pnpm test`・`pnpm build:ci`で確認してからpushする。
@@ -246,8 +247,8 @@ develop→mainのリリースPR（head=`develop`）のCI失敗はこのワーク
 - `workflow_run`（`workflows: ["CI"]`, `types: [completed]`）: CIの結果が出るたびに検知する。
   `ci.yml`は`concurrency.cancel-in-progress: true`のため、追加pushで前の実行が`cancelled`に
   なった場合は`conclusion != 'failure'`となり誤反応しない。`conclusion == 'failure'`かつ
-  `event == 'pull_request'`かつ対象PRの`base.ref == 'develop'`かつ`head.ref`が`issue-<番号>`
-  規約に従うもののみを対象にする。
+  `event == 'pull_request'`かつ対象PRの`base.ref`が`develop`または`main`かつ`head.ref`が
+  `issue-<番号>`規約に従うもののみを対象にする。
 - `workflow_dispatch`: 手動実行用。対象のIssue番号を入力する。
 
 ### 既存の実装ワークフローとの競合回避

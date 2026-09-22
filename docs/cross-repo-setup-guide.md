@@ -1736,6 +1736,12 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
   `workflows/vN` は、この入力を含むリリース済みの同一タグへ置き換える。別途対象言語のCIを
   `main`向けPRで実行し、そのジョブをブランチ保護の必須チェックへ設定する。
 - **`release-develop-to-main.yml`は入れない。** マージがそのまま反映であり、リリースという段が無い
+- **`claude-ci-fix.yml`もそのまま置ける**（`workflows/v40`以降、#3356）。`reusable-claude-ci-fix.yml`の
+  `detect`ジョブが`base.ref`に`develop`と`main`の両方を許容するため、caller自体はdevelop運用の
+  リポジトリと同一の書式でよく、main向け専用のバリエーションは不要（`claude-review-develop.yml`と
+  異なり、`on:`が`workflow_run`・`workflow_dispatch`でPRのbase.refを直接指定していないため）。
+  `runs-on: ubuntu-latest`固定のため、Xcodeビルドなどランナー側の実行環境を要する検証は
+  `verify-commands`で「ローカルでは検証できない」旨を明記し、コード上の確認に留める
 
 ## 6. リポジトリ差異の吸収チェックリスト
 

@@ -1,7 +1,8 @@
 name: Reusable Claude CI Fix
 
-# develop向けPR（issue-<番号>ブランチ）のCI（.github/workflows/ci.yml）が失敗した際、
-# Claude Codeが原因を修正してpushするワークフローのジョブ本体（#1066）。
+# develop向け、またはdevelopを持たないリポジトリのmain向けPR（issue-<番号>ブランチ）のCI
+# （.github/workflows/ci.yml）が失敗した際、Claude Codeが原因を修正してpushするワークフローの
+# ジョブ本体（#1066・developを持たないリポジトリへの対応は#3356）。
 # トリガー定義は呼び出し元の claude-ci-fix.yml が持ち、ここは on: workflow_call のみ。
 #
 # もとは各リポジトリへファイルごとコピーする方式だったが、コピーは
@@ -116,7 +117,7 @@ jobs:
             exit 0
           fi
           if [ "$WORKFLOW_RUN_EVENT" != "pull_request" ]; then
-            echo "event=$WORKFLOW_RUN_EVENT のため対象外です（developへの直接pushはこのワークフローの対象外）"
+            echo "event=$WORKFLOW_RUN_EVENT のため対象外です（デフォルトブランチへの直接pushはこのワークフローの対象外）"
             echo "should_process=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -130,8 +131,11 @@ jobs:
 
           BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
           HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
-          if [ "$BASE_REF" != "develop" ]; then
-            echo "base=$BASE_REF のため対象外です（developへ向くPRのみ対象。develop→mainのリリースPRは#812で別途検討）"
+          # developを持たないmain直行リポジトリ（reusable-issue-labels.ymlのmain-direct-pr-opened
+          # と同じ考え方、#1901）にも対応するため、developとmainの両方を許容する。develop→mainの
+          # リリースPRはbase=mainでもhead=release/*のため、次のhead_refチェックで除外される。
+          if [ "$BASE_REF" != "develop" ] && [ "$BASE_REF" != "main" ]; then
+            echo "base=$BASE_REF のため対象外です（develop・mainへ向くPRのみ対象）"
             echo "should_process=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -184,7 +188,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: develop
+          # developを持たないmain直行リポジトリでは`develop`ブランチ自体が存在しないため、
+          # 呼び出し元リポジトリの既定ブランチ（develop運用ならdevelop、main直行ならmain）に
+          # 追従する。この時点ではまだ対象PRを特定していないため、後段の「作業ブランチを
+          # checkoutする」ステップで実際の作業ブランチへ切り替える。
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           # 後続のgit push、および.github/workflows/配下の修正に備え、workflow書き込み権限を持つ
           # ワークフロー用トークンでcheckoutする（claude-conflict-resolve.ymlと同じ理由）。
@@ -269,9 +277,11 @@ jobs:
             exit 0
           fi
 
-          PR_JSON="$(gh pr list --head "$BRANCH" --base develop --state open --json number,url,headRefOid --jq '.[0]')"
+          # --baseはdevelop/mainの両方を許容するため指定しない。issue-<番号>ブランチはIssueごとに
+          # 1つしか存在しない前提（命名規約）のため、head branch名だけで一意に特定できる。
+          PR_JSON="$(gh pr list --head "$BRANCH" --state open --json number,url,headRefOid --jq '.[0]')"
           if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
-            echo "対象のdevelop向けPRが見つからないため何もしません"
+            echo "対象のPRが見つからないため何もしません"
             echo "should_fix=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
