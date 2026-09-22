@@ -220,8 +220,13 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
   - `implement`の場合、または`additional`でPRがまだ無い場合:
     `gh pr create --base develop --head ${BRANCH}`で
     `develop`向けPull Requestを作成する（タイトル・本文は日本語で、見出しの語（Summary/Test planなど）
-    だけ英語でもよい。本文には対応Issue・実装内容・
-    テスト内容・確認方法・注意点を記載する。developマージ時点ではissueをcloseしない運用のため
+    だけ英語でもよい。本文の構成は[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)
+    「PRテンプレート」（正は`CLAUDE.md`「PR本文テンプレート」）に従う：対応Issue・
+    Issueを閉じるPRか途中PRか（`<!-- issue-deck-pr-role:closing -->`または
+    `<!-- issue-deck-pr-role:interim -->`をその項目に書く）・実装内容・実装上の判断と採用理由
+    （該当する場合）・テスト内容・画面変更や動作証跡（該当する場合）・影響範囲・未対応事項・
+    デプロイ／移行／ロールバック上の注意（該当する場合）・確認方法・注意点。
+    developマージ時点ではissueをcloseしない運用のため
     `closes #番号` / `fixes #番号`は使わず、`#${ISSUE_NUMBER}`のように
     番号のみ記載する）
   - `additional`でPRが既にある場合: 新規PRは作成しない。既存のPull Request

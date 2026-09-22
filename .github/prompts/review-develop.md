@@ -29,6 +29,9 @@ develop向けPull Request（${REPOSITORY}/pull/${PR_NUMBER}）を自動レビュ
 - 対応Issueの要件を満たしているか（`gh issue view <番号>`でIssue本文・コメントを確認する）
 - Issue外の変更が混入していないか
 - 既存設計・このリポジトリの`CLAUDE.md`・`docs/`のルールと整合しているか
+- PR本文の「Issueを閉じるPRか、途中PRか」（`issue-deck-pr-role`マーカー）が実態と合っているか。
+  `closing`と書かれているのに対応Issue本文の完了条件チェックリストに未消化項目が残っている場合は
+  指摘する（[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)参照）
 - コード品質・セキュリティ上の問題がないか（OWASP Top10等の観点を含む）
 - CI結果に問題がないか（`gh pr checks`で確認。ただし**このジョブはCI（`ci.yml`）と並行して
   走っており、確認した時点では結果が出ていないのが普通**（#2066）。実行中なら「CIは実行中」と

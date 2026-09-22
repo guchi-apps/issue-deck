@@ -25,6 +25,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: 600,
+    role: null,
     reviewVerdict: null,
     headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
     ...overrides,
@@ -64,6 +65,32 @@ describe("IssuePullRequestList", () => {
     expect(screen.getByText("土台を入れる")).not.toBeNull();
     expect(screen.getByText("#620")).not.toBeNull();
     expect(screen.getByText("本体を実装する")).not.toBeNull();
+  });
+
+  /** #3334。1 Issueに複数PRがある場合に、どれが最終PRかを一覧から読めるようにする */
+  it("PR本文のロールマーカーに応じて最終PR・途中PRのバッジを出す", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616), link(620)]}
+        pullRequests={[
+          pullRequest({ number: 616, role: "interim" }),
+          pullRequest({ number: 620, role: "closing" }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+
+    expect(screen.getByText("途中PR")).not.toBeNull();
+    expect(screen.getByText("最終PR")).not.toBeNull();
+  });
+
+  it("ロールマーカーが無いPRではバッジを出さない", () => {
+    render(
+      <IssuePullRequestList links={[link(616)]} pullRequests={[pullRequest({ role: null })]} mergeApprovalPending={false} />,
+    );
+
+    expect(screen.queryByText("最終PR")).toBeNull();
+    expect(screen.queryByText("途中PR")).toBeNull();
   });
 
   /**

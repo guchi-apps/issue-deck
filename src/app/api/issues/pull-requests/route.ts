@@ -14,6 +14,7 @@ import {
   visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import { parsePullRequestRole } from "@/lib/github/pull-request-role";
 import {
   fetchPullRequest,
   type GithubApiPullRequestDetail,
@@ -80,6 +81,9 @@ function toIssuePullRequest(
       title: pullRequest.title,
       body: pullRequest.body,
     }),
+    // 「Issueを閉じるPRか、途中PRか」もPR本文に残っている（#3334）。本文はここまで来ているので、
+    // GitHub APIの消費は増えない。
+    role: parsePullRequestRole(pullRequest.body),
     // 自動レビューの判定はPR本文に残っている（#2843）。本文はここまで来ているので、
     // Issue画面のマージ確認にも同じ判定を出せる（GitHub APIの消費は増えない）。
     reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),

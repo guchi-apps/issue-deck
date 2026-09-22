@@ -42,6 +42,7 @@
    - 対応Issueの要件を満たしているか
    - Issue外の変更が混入していないか
    - 既存設計・`CLAUDE.md` / `docs/` のルールと整合しているか
+   - PR本文の「Issueを閉じるPRか、途中PRか」（`issue-deck-pr-role`マーカー）が実態と合っているか。`closing`と書かれているのに対応Issue本文の完了条件チェックリストに未消化項目が残っている場合は指摘する（[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)参照）
    - コード品質・セキュリティ上の問題がないか
    - CI結果（`gh pr checks <PR番号>`）が成功しているか
    - UIに関わる変更は、必要に応じて `pnpm dev` を起動して目視確認する
