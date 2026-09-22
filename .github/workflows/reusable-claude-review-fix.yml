@@ -1,0 +1,661 @@
+name: Reusable Claude Review Fix
+
+# develop向け、またはdevelopを持たないリポジトリのmain向けPR（issue-<番号>ブランチ）で、
+# 自動レビュー（reusable-claude-review-develop.yml）が「要修正」と判定した指摘を、
+# Claude Codeが直してpushするワークフローのジョブ本体（#3363）。
+# トリガー定義は呼び出し元の claude-review-fix.yml が持ち、ここは on: workflow_call のみ。
+#
+# **直してよいかを決めるのはレビュー側。** レビューが「人の判断が要らない指摘だけ」と印を
+# 付け、auto-mergeジョブがそれを見て自動修正へ渡したとき（Issueへ
+# `<!-- issue-deck-review-fix:handoff sha=<head SHA> -->`付きのコメントを残す）だけ、
+# workflow_run起点のこのワークフローが着手する。渡されていなければ何もしない
+# （印が無いときは従来どおり00.check-userで人へ渡っている）。
+# 画面の「レビュー指摘を自動修正」ボタン（workflow_dispatch）は人が押したものなので、
+# 渡しの印を求めない。
+#
+# ジョブの形は reusable-claude-ci-fix.yml と揃えてある（入力・トークン・プロンプトの取得・
+# 開始/終了の報告・Develop PRへの再報告・フォールバック通知）。違いは、失敗ログの代わりに
+# レビューコメントを読ませることと、リトライの上限をレビュー側（渡しの回数）で数えること。
+#
+# 呼び出し元は secrets: inherit で WORKFLOW_APP_PRIVATE_KEY(未登録ならWORKFLOW_PAT)・
+# CLAUDE_CODE_OAUTH_TOKEN を渡すこと。
+
+on:
+  workflow_call:
+    inputs:
+      runtime-setup:
+        description: "ランタイム準備のプリセット: node-db / node / minimal"
+        required: false
+        type: string
+        default: minimal
+      package-manager:
+        description: "パッケージマネージャ: npm / pnpm"
+        required: false
+        type: string
+        default: npm
+      node-version:
+        description: "セットアップするNode.jsのバージョン。未指定なら24"
+        required: false
+        type: string
+        default: ""
+      install-dependencies:
+        description: >-
+          ランタイム準備で依存関係をインストールするか。runtime-setup が minimal 以外のときのみ効く。
+          Nodeのセットアップは必要だが依存のインストールは不要なリポジトリ（検証コマンドが
+          node --check だけで node_modules を要さない等）で false にする。
+        required: false
+        type: boolean
+        default: true
+      build-env:
+        description: >-
+          Claude Codeステップに設定するビルド検証用の環境変数（複数行の KEY=VALUE）。
+          値はワークフローログに残りうるCI専用のプレースホルダーに限り、
+          実シークレットは絶対に渡さないこと（実シークレットは secrets: inherit で渡る）。
+          値に改行を含めることはできない。
+        required: false
+        type: string
+        default: ""
+      verify-commands:
+        description: >-
+          修正後の検証手順の説明。プロンプトの「- 修正後、」に続けてそのまま埋め込まれるため、
+          文末まで含む完全な文で渡すこと。ビルドに外部サービスが要らない旨などの補足も
+          ここに含める。未指定なら
+          「.github/workflows/ci.yml を読んで同じコマンドを実行する」旨の文面へ
+          フォールバックする。
+        required: false
+        type: string
+        default: ""
+      prompts-ref:
+        description: >-
+          プロンプト(.github/prompts/)の取得元とするissue-deckのref。
+          未指定なら呼び出し元リポジトリの.github/prompts/を使う(issue-deck自身はこちら)。
+          他リポジトリから呼ぶ場合は uses: と同じタグを指定する。
+        required: false
+        type: string
+        default: ""
+      issue-number:
+        description: >-
+          手動実行(workflow_dispatch)時の対象Issue番号。呼び出し元が自身の
+          workflow_dispatch入力を渡す。workflow_run起点の場合は空になり、
+          detectジョブがworkflow_runのペイロードから判定する。
+          再利用ワークフロー内のinputsコンテキストはworkflow_callのinputsを指し、
+          呼び出し元のworkflow_dispatch入力は見えないため、こうして明示的に渡す。
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      should_process: ${{ steps.detect.outputs.should_process }}
+      issue_number: ${{ steps.detect.outputs.issue_number }}
+      manual: ${{ steps.detect.outputs.manual }}
+    steps:
+      - name: 対象Issueを判定する
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          PR_LIST_JSON: ${{ toJson(github.event.workflow_run.pull_requests) }}
+        run: |
+          set -e
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "手動実行のため入力されたIssue番号をそのまま対象にします"
+            echo "should_process=true" >> "$GITHUB_OUTPUT"
+            echo "issue_number=$INPUT_ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "manual=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # レビューのワークフローはキャンセル（追いコミットでsupersededになった実行）も
+          # 失敗も起こりうる。渡しの判定はauto-mergeジョブが最後に行うため、成功した実行だけを見る
+          if [ "$WORKFLOW_RUN_CONCLUSION" != "success" ]; then
+            echo "conclusion=$WORKFLOW_RUN_CONCLUSION のため対象外です"
+            echo "should_process=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$WORKFLOW_RUN_EVENT" != "pull_request" ]; then
+            echo "event=$WORKFLOW_RUN_EVENT のため対象外です"
+            echo "should_process=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_JSON="$(echo "$PR_LIST_JSON" | jq -c '.[0]')"
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "workflow_runペイロードにPR情報が無いため対象外です"
+            echo "should_process=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_REF="$(echo "$PR_JSON" | jq -r '.base.ref')"
+          HEAD_REF="$(echo "$PR_JSON" | jq -r '.head.ref')"
+          # reusable-claude-ci-fix.ymlと同じく、developを持たないmain直行リポジトリ（#3356）にも対応する
+          if [ "$BASE_REF" != "develop" ] && [ "$BASE_REF" != "main" ]; then
+            echo "base=$BASE_REF のため対象外です（develop・mainへ向くPRのみ対象）"
+            echo "should_process=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! echo "$HEAD_REF" | grep -qE '^issue-[0-9]+$'; then
+            echo "head=$HEAD_REF がissue-<番号>命名規約に従わないため対象外です"
+            echo "should_process=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ISSUE_NUMBER="$(echo "$HEAD_REF" | sed -E 's/^issue-([0-9]+)$/\1/')"
+          echo "対象Issue: #$ISSUE_NUMBER"
+          echo "should_process=true" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "manual=false" >> "$GITHUB_OUTPUT"
+
+  fix:
+    needs: detect
+    if: needs.detect.outputs.should_process == 'true'
+    runs-on: ubuntu-latest
+    # claude-issue-dispatch.ymlのdispatchジョブのbranchレーンと同じグループ名で直列化する。
+    # 同じissue-<番号>ブランチへ、人間からの追加依頼（@claudeコメント）による実装ステップや
+    # claude-conflict-resolve.ymlのコンフリクト解消のpushと競合しないようにする
+    # （claude-conflict-resolve.ymlと同じ考え方）。
+    concurrency:
+      group: issue-dispatch-${{ needs.detect.outputs.issue_number }}-branch
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: GitHub Appのインストールトークンを発行する
+        # 期限切れが単一障害点になるsecrets.WORKFLOW_PATを、1時間で失効するインストールトークンへ
+        # 置き換える(#835。仕組みの詳細はreusable-issue-dispatch.ymlの同名ステップと
+        # docs/actions-token-model.mdを参照)。vars.WORKFLOW_APP_IDが未登録ならこのステップは
+        # skipされ、使用箇所は`|| secrets.WORKFLOW_PAT`で従来のPATへ落ちる。
+        # permission-*は、このワークフローが実際に使う権限だけへ絞るために付けている。
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: read
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # developを持たないmain直行リポジトリでは`develop`ブランチ自体が存在しないため、
+          # 呼び出し元リポジトリの既定ブランチ（develop運用ならdevelop、main直行ならmain）に
+          # 追従する。この時点ではまだ対象PRを特定していないため、後段の「作業ブランチを
+          # checkoutする」ステップで実際の作業ブランチへ切り替える。
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          # 後続のgit push、および.github/workflows/配下の修正に備え、workflow書き込み権限を持つ
+          # ワークフロー用トークンでcheckoutする（claude-conflict-resolve.ymlと同じ理由）。
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        # 共有ワークフローはcaller側リポジトリをcheckoutするため、.github/prompts/配下も
+        # caller側のものが読まれる。プロンプトを各リポジトリへコピーせずに共有するための
+        # 取得経路（reusable-issue-dispatch.ymlと同じ仕組み、#960）。
+        #
+        # 未指定(既定)なら何もしない。issue-deck自身は自分の.github/prompts/を使うため指定しない。
+        # persist-credentials: false は本体リポジトリのpush認証と混線させないため。
+        # continue-on-errorは付けない。プロンプトは必須であり、取得に失敗したまま進むと
+        # 空のプロンプトで走り出すため。
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 共有ファイルの参照先を決める
+        # 呼び出し元リポジトリに存在しうる/しないファイルの場所を1箇所で決める
+        # （reusable-issue-dispatch.ymlの同名ステップと同じ、#960・#964）。
+        env:
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PROMPTS_REF" ]; then
+            ROOT=.shared-prompts
+          else
+            ROOT=.
+          fi
+
+          DIR="$ROOT/.github/prompts"
+          if [ ! -d "$DIR" ]; then
+            echo "::error::プロンプトのディレクトリ $DIR が存在しません。他リポジトリから呼ぶ場合は prompts-ref に uses: と同じタグを指定してください"
+            exit 1
+          fi
+          echo "プロンプトの参照先: $DIR"
+          echo "PROMPTS_DIR=$DIR" >> "$GITHUB_ENV"
+
+          # 使用量出力スクリプト(#903)。プロンプトと違い必須ではないため、無くても落とさない。
+          USAGE="$ROOT/.github/scripts/summarize-claude-usage.sh"
+          if [ -x "$USAGE" ]; then
+            echo "使用量出力スクリプト: $USAGE"
+          else
+            echo "使用量出力スクリプト $USAGE が無いため、使用量のJob Summary出力はスキップします"
+            USAGE=""
+          fi
+          echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
+
+      - name: pushの認証をワークフロー用トークンに固定する
+        # claude-code-actionは実行時にactions/checkoutが残した認証情報を削除するため、
+        # push専用URL（remote.origin.pushurl）にPATを固定して.github/workflows/配下を含む
+        # pushのremote rejectedを防ぐ（claude-conflict-resolve.ymlの同名ステップと同じ理由）。
+        env:
+          WORKFLOW_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git remote set-url --push origin \
+            "https://x-access-token:${WORKFLOW_TOKEN}@github.com/${REPOSITORY}.git"
+
+      - name: 対象PRの状態・渡しの有無を再確認する
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          MANUAL: ${{ needs.detect.outputs.manual }}
+        run: |
+          set -e
+          BRANCH="issue-$ISSUE_NUMBER"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          ISSUE_JSON="$(gh issue view "$ISSUE_NUMBER" --json state,labels,comments)"
+          if [ "$(echo "$ISSUE_JSON" | jq -r .state)" = "CLOSED" ]; then
+            echo "Issueがクローズ済みのため何もしません"
+            echo "should_fix=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_JSON="$(gh pr list --head "$BRANCH" --state open --json number,url,headRefOid --jq '.[0]')"
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "対象のPRが見つからないため何もしません"
+            echo "should_fix=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PR_NUMBER="$(echo "$PR_JSON" | jq -r '.number')"
+          PR_URL="$(echo "$PR_JSON" | jq -r '.url')"
+          HEAD_SHA="$(echo "$PR_JSON" | jq -r '.headRefOid')"
+
+          if [ "$MANUAL" != "true" ]; then
+            # **auto-mergeジョブが自動修正へ渡したときだけ着手する**（#3363）。印の`sha=`で
+            # いまのheadに対する渡しに絞る——追いコミットで前の判定が古くなったPRや、
+            # 人へ渡った（印の無い）判定に反応しないため
+            HANDOFF="<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"
+            if ! echo "$ISSUE_JSON" | jq -r '.comments[].body' | grep -qF "$HANDOFF"; then
+              echo "いまのhead（$HEAD_SHA）に対する自動修正の渡しが無いため何もしません"
+              echo "should_fix=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # 渡した後にローカルで対応を始めた・人が確認待ちにした場合は手を出さない
+            if echo "$ISSUE_JSON" | jq -r '.labels[].name' | grep -qxE '11\.local|00\.check-user'; then
+              echo "Issueに 11.local または 00.check-user が付いているため何もしません"
+              echo "should_fix=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # 直す材料は、このPRへ投稿された最新の自動レビュー（総評の判定マーカー付きのコメント）。
+          # 手動実行では判定時点のコミットを問わない（押した人が「この指摘を直して」と頼んでいる）
+          # --paginateの--jqはページごとに評価されるため、ページをまとめてから最後の1件を取る
+          gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
+            | jq -rs '[.[][] | select(.body | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha="))] | last | .body // ""' \
+            > /tmp/review-comment.md
+          if ! grep -q '[^[:space:]]' /tmp/review-comment.md; then
+            echo "自動レビューのコメントが見つからないため何もしません"
+            echo "should_fix=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "レビューコメント: $(wc -l < /tmp/review-comment.md) 行"
+
+          echo "should_fix=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: 手動実行のときは確認待ちを外す
+        # 画面の「レビュー指摘を自動修正」を押すのは、人が確認したうえで直しを任せたということ。
+        # 00.check-user（と理由ラベル）が付いたままだと、直した後の再レビューがLGTMでも
+        # auto-mergeジョブが「確認待ち」としてマージを見送るため、ここで外す。
+        # 自動（workflow_run）の経路では00.check-userが付いていれば上で着手自体を見送っている。
+        if: steps.state.outputs.should_fix == 'true' && needs.detect.outputs.manual == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in 00.check-user 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}" || echo "::warning::確認待ちのラベルを外せませんでした"
+          fi
+
+      - name: 作業ブランチをcheckoutする
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+        run: |
+          set -e
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+
+      - name: 対応開始をコメントで通知する
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          set -e
+          BODY="🛠️ 自動レビューの指摘を受けて、\`${BRANCH}\` ブランチで自動修正を試みます。"
+          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
+          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-review-fix -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+
+      - name: 自動修正の開始をissue-deckへ報告する
+        # 画面（PR一覧・PR詳細・通知ベル）へ「レビュー指摘を自動修正中」を出すため（#2072・#3363）。
+        # **GitHub APIからは引けない**——このワークフローは`workflow_run`で起動するため、
+        # runの`head_branch`・`head_sha`が対象PRではなくデフォルトブランチを指し、
+        # 実行から対象PRへ辿る手段が無い。走っている側から報告する。
+        # 進捗報告（`POST /api/progress`）と同じ値・同じ「失敗してもワークフローを止めない」扱い。
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、修復状況の報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/pull-requests/repair-runs" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"pullRequest\":$PR_NUMBER,\"kind\":\"review\",\"status\":\"running\",\"runUrl\":\"$RUN_URL\"}")" || code=000
+          [ "$code" = "200" ] || echo "::warning::修復状況（開始）の報告に失敗しました（PR #$PR_NUMBER / HTTP $code）"
+
+      - name: 解消前のコメント数を記録する
+        id: before
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
+          echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        if: steps.state.outputs.should_fix == 'true' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: steps.state.outputs.should_fix == 'true' && inputs.runtime-setup != 'minimal'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version || '24' }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: 依存関係をインストールする
+        if: steps.state.outputs.should_fix == 'true' && inputs.runtime-setup != 'minimal' && inputs.install-dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: ビルド検証用の環境変数を設定する
+        # Claude Codeエージェントがビルドを実行して修正を検証できるようにするための
+        # CI専用プレースホルダー。実シークレットは渡さない前提（inputs.build-envのdescription参照）。
+        if: steps.state.outputs.should_fix == 'true' && inputs.build-env != ''
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in \#*) continue ;; esac
+            if ! printf '%s' "$line" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*='; then
+              echo "::error::build-env の行が KEY=VALUE 形式ではありません: $line"
+              exit 1
+            fi
+            # 環境変数名だけをログに出す（値はプレースホルダーの想定だが、念のため出力しない）
+            echo "設定: ${line%%=*}"
+            echo "$line" >> "$GITHUB_ENV"
+          done <<< "$BUILD_ENV"
+
+      - name: レビュー指摘修正プロンプトを組み立てる
+        # プロンプト本文は.github/prompts/review-fix.mdに置き、ここで動的な値を埋めたうえで
+        # 環境変数に格納する（reusable-issue-dispatch.ymlと同じ仕組み、#907）。
+        #
+        # ワークフローのYAMLに直接書くと、`${{ }}`を1つでも含む文字列はブロック全体が1つの式
+        # テンプレートとして扱われ、その長さに21,000バイト(UTF-8)の上限がかかる。超えると
+        # ワークフローファイル自体が「Invalid workflow file」となりトリガーが一切発火しなくなる
+        # （#901で無人実行が丸半日停止した）。env経由にすることでこの上限を構造的に回避する。
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          PR_URL: ${{ steps.state.outputs.pr_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERIFY_COMMANDS_INPUT: ${{ inputs.verify-commands }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERIFY_COMMANDS_INPUT" ]; then
+            VERIFY_COMMANDS="$VERIFY_COMMANDS_INPUT"
+          else
+            VERIFY_COMMANDS='`.github/workflows/ci.yml` を読み、CIが実行している検証コマンドと同じものを実行して、問題がないことを確認する'
+          fi
+          export VERIFY_COMMANDS
+
+          PROMPT_FILE="${PROMPTS_DIR:-.github/prompts}/review-fix.md"
+          # プロンプトが空のままclaude-code-actionへ渡ると、エージェントが何をすべきか分からないまま
+          # 走り出してしまう。ファイルの取り違え・削除に気付けるよう、ここで明示的に落とす。
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+          # envsubstの置換対象を変数リストで明示指定し、プロンプト本文中の他の$表記を巻き込まない
+          # ようにする。
+          {
+            echo 'PROMPT_REVIEW_FIX<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${ISSUE_NUMBER} ${BRANCH} ${PR_NUMBER} ${PR_URL} ${REPOSITORY} ${RUN_URL} ${VERIFY_COMMANDS}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Claude Code（レビュー指摘修正）
+        id: claude_review_fix
+        if: steps.state.outputs.should_fix == 'true'
+        uses: anthropics/claude-code-action@v1
+        env:
+          # .github/workflows/配下を含むgit pushの認証は、前段の「pushの認証をワークフロー用トークンに
+          # 固定する」ステップが設定するremote.origin.pushurlで別途完結しており、このステップの
+          # GH_TOKENには依存しない（claude-conflict-resolve.ymlと同じ理由）。
+          # ビルド検証用の環境変数は前段の「ビルド検証用の環境変数を設定する」ステップが
+          # $GITHUB_ENV経由で設定済み。
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#1328）。
+          # workflow_run（レビューの完了）で起動する場合のactorはレビューを起こしたpushの実行者で、
+          # 自動修正自身のpush・claude[bot]のPRではbotになる。画面の「レビュー指摘を自動修正」ボタンは
+          # GitHub Appのインストールトークンでworkflow_dispatchするためactorが
+          # issue-deck[bot]になり、指定が無いと`Workflow initiated by non-human actor`で
+          # 必ず失敗する。claude[bot]名義のpushでCIが失敗した場合も同様に通す
+          # （reusable-claude-conflict-resolve.yml・reusable-claude-pr-repair.ymlと揃える）。
+          allowed_bots: "issue-deck[bot],claude[bot]"
+          show_full_output: true
+          # 実装が使う検証コマンドの許可リスト。**3つの再利用可能ワークフロー
+          # (reusable-issue-dispatch / reusable-claude-ci-fix / reusable-claude-review-fix /
+          # reusable-claude-conflict-resolve)で同一に保つこと。** ここだけ食い違うと、
+          # 「CIは自動修正できるのに実装はできない」といった不揃いな挙動になる(#1147)。
+          #
+          # 出し分けるのはパッケージマネージャ本体だけにする(#931)。pnpmのリポジトリで
+          # npmを許可するとロックファイルの取り違えが起きうるため、そこだけは分ける。
+          # allowedToolsは許可リストであり、載っていないコマンドは拒否される。issue-deck
+          # 自身はpnpmのため、pnpm固定でもセルフホスティングでは表面化せず、#1047でnpmの
+          # リポジトリを増やして初めて発覚した(dispatchだけがこの出し分けから漏れていた)。
+          #
+          # **nodeとnpxは両方で許可する(#931)。** 以前はnpm側にしかnodeが無く、pnpmの
+          # リポジトリでは `node -e "..."` のような状態確認が拒否されていた。実測では
+          # エージェントが `pnpm exec node <ファイル>` へ切り替えて回復したが、
+          # 一時ファイルを書く手間が余分に発生していた。nodeはパッケージマネージャに
+          # 依存しない実行系で、どちらのリポジトリでも同じように必要になる。
+          #
+          # pythonは常に許可する。Pythonを使わないリポジトリでは単に使われないだけで、
+          # pip installで任意パッケージを取得できる点はnpm/npxと同等のためリスクの
+          # 種類が増えるわけではない。呼び出し元ごとに絞るinputは、必要になるまで
+          # 増やさない(#1056 myroomがpytestを使う)。
+          # ランナー標準のPythonを使うため、CIがsetup-pythonで固定しているバージョンと
+          # ズレる可能性がある。厳密に揃える必要が出たらruntime-setupのプリセット追加を
+          # 検討する。
+          #
+          # ls・cat・head・tail・wcは状態確認のための読み取り専用コマンド(#931)。
+          # 実測では `ls node_modules/.bin/playwright`・`cat .claude/settings.json` が
+          # 拒否されており、いずれも「今どうなっているか」を見るだけの操作だった。
+          # 書き込み・削除系(mkdir・rm・mv)は足していない。一時ファイルは既存の /tmp 直下へ
+          # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
+          # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
+          claude_args: >-
+            --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
+          prompt: ${{ env.PROMPT_REVIEW_FIX }}
+
+      - name: Claude使用量をJob Summaryに出力する（Claude Code（レビュー指摘修正））
+        # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
+        # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
+        if: always() && steps.claude_review_fix.outputs.execution_file != ''
+        env:
+          AI_USAGE_REPORT_URL: ${{ vars.APP_BASE_URL }}/api/dispatch/actions-usage
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          # スクリプトが解決できていない場合はスキップする(#964)。使用量は補助情報であり、
+          # 呼び出し元にスクリプトが無いことで本来の処理を失敗させない。
+          if [ -z "${CLAUDE_USAGE_SCRIPT:-}" ]; then
+            echo "使用量出力スクリプトが無いためスキップします"
+            exit 0
+          fi
+          "$CLAUDE_USAGE_SCRIPT" "Claude Code（レビュー指摘修正）" "${{ steps.claude_review_fix.outputs.execution_file }}"
+
+      - name: Project Status を Develop PR へ戻す
+        # reusable-issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
+        # （このジョブが上記ステップで行うpushを含む）をトリガーに無条件でImplementationを
+        # 報告するため、developへのPRが出ている段階のissueが盤面上だけ実装中へ巻き戻る。
+        # それを打ち消して`Develop PR`へ戻す。LLMの実行有無に依存させないため独立した
+        # シェルステップとする（同じ状態を再報告するだけなので常に実行してよい）。
+        #
+        # Phase 4までは同じ目的で実装中を示す進捗ラベルを除去していた。進捗ラベルの廃止
+        # （#991 Phase 5・#1010）にあわせてStatusの再報告へ置き換えている。
+        if: always() && steps.state.outputs.should_fix == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          STATUS: develop-pr
+        run: |
+          missing=""
+          [ -n "$APP_BASE_URL" ] || missing="APP_BASE_URL"
+          [ -n "$PROGRESS_REPORT_SECRET" ] || missing="${missing:+$missing, }PROGRESS_REPORT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "$missing が未設定のため、Project Statusの報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/progress" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"issue\":$ISSUE_NUMBER,\"status\":\"$STATUS\"}")" || code=000
+          if [ "$code" = "200" ]; then
+            echo "issue #$ISSUE_NUMBER を $STATUS として報告しました"
+          else
+            echo "::warning::Project Statusの報告に失敗しました（issue #$ISSUE_NUMBER / status=$STATUS / HTTP $code）"
+          fi
+
+      - name: 修正結果を検証し、報告が確認できない場合はフォールバック通知する
+        # Claude Codeエージェントに報告コメントの投稿を委ねるだけだと、途中でエラー終了した
+        # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
+        # そのため後続のステップとして独立に結果を確認する（claude-conflict-resolve.ymlの
+        # 同種の検証ステップと同じ考え方）。
+        if: always() && steps.state.outputs.should_fix == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          BEFORE_COUNT: ${{ steps.before.outputs.comment_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -e
+          AFTER_COUNT="$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments | length')"
+          : "${BEFORE_COUNT:=0}"
+          if [ "$AFTER_COUNT" -gt "$BEFORE_COUNT" ]; then
+            echo "新規コメントを確認できたため、完了または停止の報告は行われたとみなします（投稿前: $BEFORE_COUNT 件, 投稿後: $AFTER_COUNT 件）"
+            exit 0
+          fi
+
+          echo "新規コメントが確認できないため、フォールバックコメントを投稿します"
+          FALLBACK_BODY="⚠️ レビュー指摘の自動修正ステップが終了しましたが、結果の報告コメントを確認できませんでした。調査や修正の途中で行き詰まった、またはエラーで終了した可能性があります。実行ログをご確認ください: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-review-fix -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
+          REASON_LABEL="01.check-blocked"
+          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
+          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
+          # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in "00.check-user" "$REASON_LABEL"; do
+            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--add-label "$name")
+            else
+              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
+            fi
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
+            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
+              LABEL_ARGS+=(--remove-label "$name")
+            fi
+          done
+          if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
+            gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
+          fi
+
+      - name: 自動修正の終了をissue-deckへ報告する
+        # 画面から「自動修正中」を消す（#2072）。`if: always()`で、直せた場合も断念した場合も
+        # 必ず通す。実行そのものがキャンセルされてここへ来なかった場合は、issue-deck側が
+        # 開始から`REPAIR_RUN_STALE_MINUTES`で時間切れとして倒す。
+        if: always() && steps.state.outputs.should_fix == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、修復状況の報告をスキップします"
+            exit 0
+          fi
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -X POST "$APP_BASE_URL/api/pull-requests/repair-runs" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"repository\":\"$REPO\",\"pullRequest\":$PR_NUMBER,\"kind\":\"review\",\"status\":\"finished\",\"runUrl\":\"$RUN_URL\"}")" || code=000
+          [ "$code" = "200" ] || echo "::warning::修復状況（終了）の報告に失敗しました（PR #$PR_NUMBER / HTTP $code）"

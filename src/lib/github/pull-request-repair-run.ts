@@ -44,7 +44,7 @@ export const REPAIR_RUN_STALE_MINUTES = 360;
 
 /** `kind`として受け付ける値か。DBには文字列で入るため読み出し時にも通す */
 export function isRepairKind(value: unknown): value is RepairKind {
-  return value === "ci" || value === "conflict";
+  return value === "ci" || value === "conflict" || value === "review";
 }
 
 /** 報告された`status`として受け付ける値か */
@@ -71,6 +71,10 @@ export function isRepairRunActive(
  *
  * - `conflict` … コンフリクトが解消されている（`mergeable`がtrue）
  * - `ci` … CIが通っている（`ciState`がsuccess）
+ * - `review` … **PRの状態からは言えない**ので常に「消えていない」（#3363）。修正をpushすると
+ *   判定はいったん未判定へ戻り、そこから「直った」と「まだ再レビュー中」を区別できないため。
+ *   終了の報告と`REPAIR_RUN_STALE_MINUTES`で消える（ジョブは`cancel-in-progress: false`の
+ *   concurrencyで直列化しており、始まる前にキャンセルされて報告が落ちる経路は無い）
  *
  * どちらも**修復が終わったことの十分な根拠**になる。コンフリクト解消のワークフロー自身、
  * 着手前に`mergeable`を見直して「既にコンフリクトが解消されている」なら何もせずに終わる。
@@ -82,6 +86,7 @@ export function isRepairSymptomGone(
   kind: RepairKind,
   pullRequest: { mergeable?: boolean | null; ciState?: CiState | null },
 ): boolean {
+  if (kind === "review") return false;
   return kind === "conflict" ? pullRequest.mergeable === true : pullRequest.ciState === "success";
 }
 

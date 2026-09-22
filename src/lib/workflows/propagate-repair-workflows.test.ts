@@ -20,6 +20,7 @@ const TEMPLATES = [
   "claude-conflict-resolve.yml",
   "claude-pr-repair.yml",
   "claude-review-develop.yml",
+  "claude-review-fix.yml",
 ] as const;
 
 /** 参照元。実際の caller（guchi-apps/aide）と同じ形にしてある */

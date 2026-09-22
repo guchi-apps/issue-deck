@@ -5,7 +5,11 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { canRepairFromDeck, resolveRepairDispatch } from "@/lib/github/pull-request-repair";
+import {
+  canRepairFromDeck,
+  resolveRepairDispatch,
+  supportsRepairKind,
+} from "@/lib/github/pull-request-repair";
 import {
   isRepairKind,
   recordPullRequestRepairRun,
@@ -76,14 +80,22 @@ async function handlePOST(request: NextRequest) {
       );
     }
 
-    const dispatch = resolveRepairDispatch(
-      {
-        number: pullRequest.number,
-        baseRef: pullRequest.base.ref,
-        headRef: pullRequest.head.ref,
-      },
-      kind,
-    );
+    const target = {
+      number: pullRequest.number,
+      baseRef: pullRequest.base.ref,
+      headRef: pullRequest.head.ref,
+    };
+    // レビュー指摘の修正はdevelop向け`issue-<番号>`PRにしか起動先が無い（#3363）
+    if (!supportsRepairKind(target, kind)) {
+      return NextResponse.json(
+        {
+          error: "not_repairable",
+          message: "レビュー指摘の自動修正は、Issueから作られたdevelop向けPull Requestだけが対象です。",
+        },
+        { status: 409 },
+      );
+    }
+    const dispatch = resolveRepairDispatch(target, kind);
 
     await dispatchWorkflow(
       owner,

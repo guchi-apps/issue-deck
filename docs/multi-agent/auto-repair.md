@@ -1,7 +1,7 @@
-# PRコンフリクト・CI失敗・本番デプロイ失敗の自動解消
+# PRコンフリクト・CI失敗・レビュー指摘・本番デプロイ失敗の自動解消
 
-develop向けPRがコンフリクトした場合、CIが失敗した場合、および本番デプロイが失敗した場合の
-自動修復。
+develop向けPRがコンフリクトした場合、CIが失敗した場合、自動レビューが「要修正」と判定した場合、
+および本番デプロイが失敗した場合の自動修復。
 
 索引: [Issueごとの複数Claude Codeエージェント運用 設計](../multi-agent-workflow.md)
 
@@ -12,6 +12,10 @@ develop向けPRがコンフリクトした場合、CIが失敗した場合、お
 | `issue-<番号>` → develop | `claude-ci-fix.yml`（#807） | `claude-conflict-resolve.yml`（#315） | 自動検知 + 画面のボタン |
 | `release/vX.Y.Z` → develop（バンプPR） | `claude-pr-repair.yml`（#1293） | 同左 | 画面のボタンのみ |
 | develop → main（リリースPR） | `claude-pr-repair.yml`（#1293） | 同左 | 画面のボタンのみ |
+
+自動レビューの「要修正」は、`issue-<番号>` → developのPRに限って`claude-review-fix.yml`（#3363）が
+受け持つ。上の表の2つと違い、**直してよいかをレビュー側が決める**——後述の
+「[レビュー指摘の自動修正（#3363）](#レビュー指摘の自動修正3363)」。
 
 mainへ入った**後**の本番デプロイ（`deploy.yml`）の失敗だけは、上の3つとは別建てになっている
 （`deploy-retry.yml`。#2134）。**PRではなくワークフローの実行が対象で、直すのではなく流し直す**
@@ -301,6 +305,77 @@ develop→mainのリリースPR（head=`develop`）のCI失敗はこのワーク
 CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「このPRのheadコミットに対して
 `pull_request`イベントで走ったrun」を全て見て、失敗しているものの`--log-failed`を最大3件まで
 連結して渡す。CIのワークフロー名はリポジトリごとに異なりうるため（#1047の経路）。
+
+## レビュー指摘の自動修正（#3363）
+
+自動レビュー（`claude-review-develop.yml`）が「要修正」と判定すると、`auto-merge`ジョブが
+`00.check-user`＋`01.check-merge`を付けて**必ず人で止まっていた**。指摘の多くは型の誤りや
+要件の実装漏れのように直し方が一通りに決まるもので、人がやるのは「修正を依頼する」を押すことだけ
+だった。そこで、**人の判断が要らない指摘だけのとき**に限り、確認待ちにせず直しへ回す。
+
+| | |
+| --- | --- |
+| 渡すかを決める | `reusable-claude-review-develop.yml`の`auto-merge`ジョブ（「マージ保留の判定を反映する」） |
+| 直す | `claude-review-fix.yml`（本体`reusable-claude-review-fix.yml`・プロンプト`.github/prompts/review-fix.md`） |
+| 起動 | レビューの完了（`workflow_run`）と、画面の「レビュー指摘を自動修正」（`workflow_dispatch`） |
+| 上限 | 1つのIssueにつき自動の渡しは2回まで。超えたら従来どおり人へ渡し、その旨をIssueへ書く |
+
+### 直してよいかを決めるのはレビュー側
+
+**レビューが印を付けたときだけ渡す（フェイルセーフ）。** レビューのプロンプト
+（`.github/prompts/review-develop.md`）は、総評が`changes-requested`で、指摘がすべて
+「直し方がIssueとコードから一通りに決まる」ときだけ、判定マーカーの次の行に
+`<!-- issue-deck-review-autofix:ok sha=<head SHA> -->`を付ける。仕様の選択・要件の解釈・
+トレードオフ・範囲を広げる提案が1件でもあれば付けない。**付け忘れても人へ確認が求められる
+だけで済む**ので、迷ったら付けない側へ倒してある。
+
+`auto-merge`ジョブは、止めた理由がレビューの「要修正」**だけ**で（機械的リスク判定に該当して
+いない＝`22.merge-confirm-required`・`.shared-context/`の混入・`strict`のカテゴリで止まって
+いない）、次をすべて満たすときに渡す。
+
+- 印がいまのheadに付いている
+- 対応Issueに`11.local`・`00.check-user`が付いていない（ローカルで対応中・人が確認待ちにした）
+- そのリポジトリに`claude-review-fix.yml`が置かれている（**置かれていないのに渡すと、
+  `00.check-user`の無い「要修正」のPRが誰にも拾われずに残る**）
+- PRがまだマージされていない
+- 自動の渡しがまだ2回に達していない
+
+渡すときは`00.check-user`を付けず、自動マージもしない。代わりに対応Issueへ
+`<!-- issue-deck-review-fix:handoff sha=<head SHA> -->`付きのコメントを残す。`claude-review-fix.yml`は
+レビューの完了で起動し、**いまのheadに対するこの印があるときだけ**着手する。印の文字列は
+`scripts/check-review-verdict-marker.sh`がプロンプト・レビュー・修正の3ファイルで突き合わせる。
+
+### 直す側が判断の要る指摘に当たったら
+
+直す側のプロンプトも指摘を「直してよい」「判断が要る」に仕分ける。レビューの印をすり抜けて
+判断の要る指摘が混ざっていた場合は、**pushより先に**`00.check-user`＋`01.check-blocked`を付け、
+直せたものだけ直してから、決めてほしいことと選択肢をIssueへ書いて止まる。先にラベルを
+付けるのは、pushで走る再レビューが先に終わると自動マージされうるため。
+
+人が方針をIssueへ書いて画面の「レビュー指摘を自動修正」を押すと、その方針で直す。**手動の起動では
+渡しの印を求めず、着手時に`00.check-user`と理由ラベルを外す**——付いたままだと、直した後の
+再レビューがLGTMでもマージが見送られるため。
+
+### 画面
+
+- ピル「レビュー指摘を自動修正中」（`RepairRunBadge`。`PullRequestRepairRun.kind`が`review`）。
+  **レビュー指摘はPRの状態から「直った」と言えない**（修正のpushで判定はいったん未判定へ戻る）
+  ため、`visibleRepairRun`で症状から消さず、終了の報告と時間切れで消す。ジョブは
+  `cancel-in-progress: false`で直列化しており、始まる前にキャンセルされて報告が落ちる経路は無い
+- 要修正の帯（`PullRequestFixIssueBar`）に「自動修正に回しています」の1行
+- 修復ボタン「レビュー指摘を自動修正」は、PR本文の`## 検証結果`が要修正の、develop向け
+  `issue-<番号>`PRにだけ出る（`repairKindsFor`）
+
+### 取りこぼしうるもの
+
+- **渡した後に`claude-review-fix.yml`が起動しなかった場合**、PRは`00.check-user`の無いまま
+  「要修正」で残る（赤い帯は出ているので画面では分かる）。GitHubのイベント配送の取りこぼしは
+  コンフリクトで実例がある（上記「issue-deckからの巡回検知」）が、巡回での拾い直しはまだ無い
+- **`.github/workflows/**`を変更するPRはレビュー自体が走らない**ため、この経路にも乗らない
+- **他リポジトリへは2段階で届く。** 渡しの判断は`reusable-claude-review-develop.yml`にあり
+  参照タグで届くが、callerの`claude-review-fix.yml`は設定＞フリート運用から配る
+  （`REPAIR_WORKFLOW_SPECS`。`requires`は`claude-review-develop.yml`）。callerが無い間は
+  従来どおり人へ渡るだけで壊れない
 
 ## 画面のボタンからの起動（#1293）
 

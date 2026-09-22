@@ -13,6 +13,7 @@ import {
   fetchActivePullRequestRepairRun,
   visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
+import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchPullRequest,
@@ -109,6 +110,9 @@ async function handleGET(request: NextRequest) {
           state: pullRequest.state === "closed" ? "closed" : "open",
           draft: pullRequest.draft,
           ciState,
+          baseRef: pullRequest.base.ref,
+          headRef: pullRequest.head.ref,
+          reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
         },
         pullRequest.mergeable,
       ),

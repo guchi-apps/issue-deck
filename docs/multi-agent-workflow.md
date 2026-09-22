@@ -46,7 +46,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [計画フェーズの信頼性と実装runへの引き継ぎ](multi-agent/dispatch-plan.md) | 計画提示ステップのフォールバック・自己リトライ、計画runの調査結果を実装runへ渡す仕組み |
 | [プロンプトの配置・使用モデル・使用量の可視化](multi-agent/prompts-and-models.md) | `.github/prompts/`の構成と式テンプレート長上限、実装用／補助用モデルの設定、Job Summaryへの使用量出力 |
 | [Phase 6: develop→mainのリリースフロー自動化](multi-agent/release.md) | バージョンbump PR・リリースPR作成の自動化 |
-| [PRコンフリクト・CI失敗の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`（Issueに紐づかないPR向け）と画面のボタンからの起動 |
+| [PRコンフリクト・CI失敗・レビュー指摘の自動解消](multi-agent/auto-repair.md) | `claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-review-fix.yml`（要修正の指摘。#3363）・`claude-pr-repair.yml`（Issueに紐づかないPR向け）と画面のボタンからの起動 |
 | [ローカルセッションの起動](multi-agent/local-quick-start.md) | ローカル起動プロトコル、ヘッドレス（tmux）起動、開発サーバーのポート帯と回収、手元へ貼るプロンプト・起動コマンドのコピー |
 | [Codex CLIでローカルセッションを起こす](multi-agent/codex.md) | `--agent codex`での起動、Claude Codeと揃わないもの（フック・Remote Control・Plan modeの承認）、サンドボックスとネットワークの設定 |
 | [サブPCへのディスパッチ](multi-agent/subpc-dispatch.md) | pull型のジョブキュー、実行可能リポジトリの申告、同時実行数の上限、サブPC側のpollerとsystemd |

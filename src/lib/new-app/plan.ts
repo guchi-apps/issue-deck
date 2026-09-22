@@ -733,7 +733,7 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
 callerは雛形として置かれています。残りは保護設定と、まだ配られていないcallerだけです。
 
 - [ ] \`develop\` にBranch protection（CI必須）を設定する
-- [ ] 自動修復系のcaller（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・\`claude-review-develop.yml\`・\`deploy-retry.yml\`）を、issue-deckの画面（設定＞フリート運用）から配る
+- [ ] 自動修復系のcaller（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・\`claude-review-develop.yml\`・\`claude-review-fix.yml\`・\`deploy-retry.yml\`）を、issue-deckの画面（設定＞フリート運用）から配る
 `
         : "";
 

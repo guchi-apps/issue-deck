@@ -410,12 +410,24 @@ describe("missingRepairWorkflows", () => {
     expect(missingRepairWorkflows(["claude-issue-dispatch.yml"])).not.toContain("deploy-retry.yml");
   });
 
+  // #3363。レビューの完了を購読するので、レビューのcallerがあるリポジトリにだけ配る
+  it("claude-review-develop.yml があれば claude-review-fix.yml を不足に挙げる", () => {
+    expect(
+      missingRepairWorkflows(["claude-issue-dispatch.yml", "claude-review-develop.yml"]),
+    ).toContain("claude-review-fix.yml");
+  });
+
+  it("claude-review-develop.yml が無いリポジトリには claude-review-fix.yml を配らない", () => {
+    expect(missingRepairWorkflows(["claude-issue-dispatch.yml"])).not.toContain("claude-review-fix.yml");
+  });
+
   it("既に置かれているものは不足に挙げない", () => {
     const missing = missingRepairWorkflows([
       "claude-issue-dispatch.yml",
       "claude-ci-fix.yml",
       "claude-conflict-resolve.yml",
       "claude-review-develop.yml",
+      "claude-review-fix.yml",
     ]);
 
     expect(missing).toEqual([]);

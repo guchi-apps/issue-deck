@@ -397,6 +397,12 @@ export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
     label: "develop向けPRの自動マージ判定",
   },
   {
+    // 購読先が`claude-review-develop.yml`の完了なので、それが無いリポジトリでは発火しない（#3363）
+    file: "claude-review-fix.yml",
+    requires: [REPAIR_WORKFLOW_SOURCE, "claude-review-develop.yml"],
+    label: "develop向けPRのレビュー指摘修正",
+  },
+  {
     file: "deploy-retry.yml",
     requires: [REPAIR_WORKFLOW_SOURCE, "deploy.yml"],
     label: "本番デプロイの一時的な失敗の再実行",

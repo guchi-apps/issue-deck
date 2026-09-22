@@ -163,3 +163,27 @@ describe("PullRequestFixIssueBar の既存修正Issueへの気づかせ（#3331�
     expect(screen.queryByRole("link", { name: /起票済み/ })).toBeNull();
   });
 });
+
+describe("PullRequestFixIssueBar の自動修正中の表示（#3363）", () => {
+  afterEach(cleanup);
+
+  it("レビュー指摘の自動修正が走っていれば、放っておけば片付くことを添える", () => {
+    renderBar(
+      makePullRequest({
+        repairRun: { kind: "review", startedAt: "2026-09-19T01:00:00.000Z", runUrl: null },
+      }),
+    );
+
+    expect(screen.getByText(/自動修正に回しています/)).toBeTruthy();
+  });
+
+  it("CI失敗の自動修正では出さない（帯が語るのはレビュー指摘のことだけ）", () => {
+    renderBar(
+      makePullRequest({
+        repairRun: { kind: "ci", startedAt: "2026-09-19T01:00:00.000Z", runUrl: null },
+      }),
+    );
+
+    expect(screen.queryByText(/自動修正に回しています/)).toBeNull();
+  });
+});
