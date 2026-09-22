@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BUMP_KIND_CRITERIA, isBumpKind, nextVersion } from "@/lib/semver-bump";
+import { BUMP_KIND_CRITERIA, compareVersions, isBumpKind, nextVersion } from "@/lib/semver-bump";
 
 describe("nextVersion", () => {
   it("上げ幅ごとに次のバージョンを返す", () => {
@@ -43,5 +43,27 @@ describe("BUMP_KIND_CRITERIA", () => {
   it("3値すべてに基準の文面がある（画面の選択肢に添える）", () => {
     expect(Object.keys(BUMP_KIND_CRITERIA).sort()).toEqual(["major", "minor", "patch"]);
     Object.values(BUMP_KIND_CRITERIA).forEach((criteria) => expect(criteria.length).toBeGreaterThan(0));
+  });
+});
+
+describe("compareVersions", () => {
+  it("新しいほうが正、古いほうが負、同じなら0を返す", () => {
+    expect(compareVersions("1.2.4", "1.2.3")).toBeGreaterThan(0);
+    expect(compareVersions("1.2.3", "1.2.4")).toBeLessThan(0);
+    expect(compareVersions("1.2.3", "1.2.3")).toBe(0);
+  });
+
+  it("上位の桁を優先して比較する", () => {
+    expect(compareVersions("2.0.0", "1.9.9")).toBeGreaterThan(0);
+    expect(compareVersions("1.10.0", "1.9.9")).toBeGreaterThan(0);
+  });
+
+  it("前置のvと前後の空白は許容する", () => {
+    expect(compareVersions("v1.2.3", " 1.2.3 ")).toBe(0);
+  });
+
+  it("読めないバージョンではnullを返す", () => {
+    expect(compareVersions("1.2", "1.2.0")).toBeNull();
+    expect(compareVersions("1.2.0", "not-a-version")).toBeNull();
   });
 });

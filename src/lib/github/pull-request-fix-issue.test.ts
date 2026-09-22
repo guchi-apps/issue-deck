@@ -4,6 +4,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   buildPullRequestFixIssueDraft,
   buildPullRequestFixReason,
+  extractTargetPullRequestNumber,
   findExistingPullRequestFixIssue,
   resolvePullRequestFixIssueTone,
   resolvePullRequestFixRoute,
@@ -300,5 +301,23 @@ describe("findExistingPullRequestFixIssue", () => {
   it("マーカーが無ければnull", () => {
     const unrelated = fixIssue({ number: 3003, body: "関係ない指摘です" });
     expect(findExistingPullRequestFixIssue(pullRequest, [unrelated])).toBeNull();
+  });
+});
+
+describe("extractTargetPullRequestNumber", () => {
+  it("「対象PR: #番号」マーカーからPR番号を取り出す", () => {
+    expect(extractTargetPullRequestNumber("指摘です。\n\n- 対象PR: #2957")).toBe(2957);
+  });
+
+  it("PR番号の後ろに数字が続く場合は、そのまま長い番号として読む（前方一致で切り詰めない）", () => {
+    expect(extractTargetPullRequestNumber("- 対象PR: #29570")).toBe(29570);
+  });
+
+  it("マーカーが無ければnull", () => {
+    expect(extractTargetPullRequestNumber("関係ない指摘です")).toBeNull();
+  });
+
+  it("本文がnullならnull", () => {
+    expect(extractTargetPullRequestNumber(null)).toBeNull();
   });
 });

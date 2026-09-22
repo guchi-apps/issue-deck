@@ -207,6 +207,10 @@ source "$SCRIPT_DIR/lib/codex-queue.sh"
 # 付けた名前がモデルの自動命名で消えると、ChatGPTアプリのリモート制御からIssueを選べなくなる。
 # shellcheck source=scripts/lib/codex-thread-name.sh
 source "$SCRIPT_DIR/lib/codex-thread-name.sh"
+# 終わったCodexセッションをChatGPTアプリのリモート一覧から外し、Remote Controlのデーモンを
+# 落ちたままにしない（#3357）。
+# shellcheck source=scripts/lib/codex-thread-archive.sh
+source "$SCRIPT_DIR/lib/codex-thread-archive.sh"
 # メモリ・SWAPの逼迫で起動を見送るかの判定（#2095）。**判定だけを別に持つ**のは、
 # 壊れると「起動が永久に止まる」か「逼迫しても止まらない」のどちらかになる境界で、
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
@@ -2187,6 +2191,44 @@ sync_codex_thread_name() {
   return 0
 }
 
+# 終わったCodexセッションのスレッドをアーカイブし、Remote Controlのデーモンを見張る（#3357）。
+#
+# **「終わった」はペインが生きていないこと。** tmuxのセッション名で`.codex-thread`と突き合わせる
+# （`lib/codex-thread-archive.sh`）。セッションが残っていてもペインが死んでいればCodexは
+# 抜けているので、一覧から外してよい。
+#
+# **切り離して走らせる。** 初回は溜まっていた過去分（数十件）をまとめて片付けるため、1巡を
+# 待たせない。前の巡のものが走っている間は重ねない（flock）。
+CODEX_THREAD_ARCHIVE_LOCK="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/codex-thread-archive.lock"
+tidy_codex_remote_control() {
+  local codex_command
+  codex_command="$(agent_cli_standalone_codex_command 2>/dev/null || true)"
+  # standalone installでないホストにはRemote Controlが無い（#2521）。隠す相手も起こす相手もいない
+  [[ -n "$codex_command" ]] || return 0
+
+  codex_remote_control_keepalive "$codex_command" || true
+
+  [[ "$CODEX_THREAD_ARCHIVE_ENABLED" == "1" ]] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  local live=()
+  mapfile -t live < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null |
+    awk -F '\t' '$2 != "1" { print $1 }' | sort -u)
+
+  mkdir -p "$(dirname "$CODEX_THREAD_ARCHIVE_LOCK")" 2>/dev/null || true
+  local runner=(setsid)
+  command -v setsid >/dev/null 2>&1 || runner=()
+  "${runner[@]}" bash -c '
+    exec 9>"$2" || exit 0
+    flock -n 9 || exit 0
+    source "$1/lib/session-state.sh" || exit 0
+    source "$1/lib/codex-thread-archive.sh" || exit 0
+    shift 2
+    codex_thread_archive_ended "$@"
+  ' _ "$SCRIPT_DIR" "$CODEX_THREAD_ARCHIVE_LOCK" "${live[@]+"${live[@]}"}" 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+
 # そのホストで今見えている、Issueに紐づくtmuxセッションを報告する。
 #
 # **0本でも空配列を送る。** issue-deck側は「報告に含まれない＝消えた」と判定するため、
@@ -3602,6 +3644,9 @@ run_once() {
   # コンフリクトしたPRの巡回検知をissue-deckへ促す（#2116）。**dry-runでは呼ばない**
   # （ワークフローの起動という外向きの副作用があるため）。
   if [[ "$DRY_RUN" -eq 0 ]]; then
+    # 終わったCodexセッションをリモート一覧から外し、デーモンを見張る（#3357）。**dry-runでは
+    # 呼ばない**（スレッドのアーカイブとデーモンの起動という副作用があるため）
+    tidy_codex_remote_control
     sweep_pull_request_conflicts
     # 本番デプロイ失敗の巡回検知（#2236）。**dry-runでは呼ばない**（Issueの起票という
     # 外向きの副作用があるため）。
