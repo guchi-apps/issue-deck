@@ -75,13 +75,29 @@ function stateLabel(pullRequest: Pick<PullRequestSummary, "merged" | "state">): 
 }
 
 /**
- * 修正Issue本文に埋め込む「このPRの修正である」マーカー行（#3331）。
+ * 修正Issue本文に埋め込む「このPRの修正である」マーカー行の接頭辞（#3331・#3353）。
  *
- * **起票時（`buildPullRequestFixIssueDraft`）と検索時（`findExistingPullRequestFixIssue`）で
- * 同じ文字列を作る唯一の場所。** ここを直したら両方に効く。
+ * **起票時（`buildPullRequestFixIssueDraft`）・検索時（`findExistingPullRequestFixIssue`）・
+ * 対象PRのマージ検知によるclose巡回（`fix-issue-close-sweep-run.ts`）で同じ文字列を使う
+ * 唯一の場所。** ここを直したら全部に効く。
  */
+export const TARGET_PULL_REQUEST_MARKER_PREFIX = "対象PR: #";
+
 function buildTargetPullRequestMarker(pullRequestNumber: number): string {
-  return `対象PR: #${pullRequestNumber}`;
+  return `${TARGET_PULL_REQUEST_MARKER_PREFIX}${pullRequestNumber}`;
+}
+
+/**
+ * Issue本文から`対象PR: #NN`マーカーが指すPR番号を取り出す（#3353）。
+ *
+ * `findExistingPullRequestFixIssue`と同じ「PR番号の後ろに数字が続かない」制約を掛け、
+ * `#29`と`#293`のような前方一致の巻き込みを避ける。見つからなければ`null`（修正Issue以外の
+ * 本文にはマーカーが無い）。
+ */
+export function extractTargetPullRequestNumber(body: string | null): number | null {
+  if (!body) return null;
+  const match = body.match(new RegExp(`${TARGET_PULL_REQUEST_MARKER_PREFIX}(\\d+)(?!\\d)`));
+  return match ? Number(match[1]) : null;
 }
 
 export function buildPullRequestFixIssueDraft(params: {

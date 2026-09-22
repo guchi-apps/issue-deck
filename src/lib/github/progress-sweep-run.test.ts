@@ -6,6 +6,7 @@ const dispatchSessionFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectItems = vi.fn();
 const fetchPullRequestsForHead = vi.fn();
+const fetchPullRequest = vi.fn();
 const fetchBranchHeadSha = vi.fn();
 const compareBranches = vi.fn();
 const fetchCommentsForIssue = vi.fn();
@@ -53,6 +54,9 @@ vi.mock("@/lib/github/projects-api", () => ({
 vi.mock("@/lib/github/pull-requests-api", () => ({
   get fetchPullRequestsForHead() {
     return fetchPullRequestsForHead;
+  },
+  get fetchPullRequest() {
+    return fetchPullRequest;
   },
 }));
 
@@ -150,14 +154,21 @@ function issueRowsFor(rows: {
   manualStep?: unknown[];
   codeReview?: unknown[];
   codeReviewFindings?: unknown[];
+  /** 対象PRの`対象PR: #NN`マーカーで絞り込む修正Issue（#3353） */
+  fixIssue?: unknown[];
 }) {
-  return vi.fn(async (args: { where?: { title?: { startsWith?: string; in?: unknown } } }) => {
-    const title = args?.where?.title;
-    if (title === undefined) return rows.staleCheckUser ?? [];
-    if (title.in !== undefined) return rows.codeReviewFindings ?? [];
-    if (title.startsWith === "[レビュー] ") return rows.codeReview ?? [];
-    return rows.manualStep ?? [];
-  });
+  return vi.fn(
+    async (args: {
+      where?: { title?: { startsWith?: string; in?: unknown }; body?: { contains?: string } };
+    }) => {
+      if (args?.where?.body?.contains !== undefined) return rows.fixIssue ?? [];
+      const title = args?.where?.title;
+      if (title === undefined) return rows.staleCheckUser ?? [];
+      if (title.in !== undefined) return rows.codeReviewFindings ?? [];
+      if (title.startsWith === "[レビュー] ") return rows.codeReview ?? [];
+      return rows.manualStep ?? [];
+    },
+  );
 }
 
 /** signaly#200の実測。11:27:25にラベルが付き、11:28:28にPRがマージされた */
@@ -527,6 +538,39 @@ describe("runProgressSweep", () => {
     });
     expect(result.actions).toEqual([
       { repositoryFullName: "guchi-apps/vps", issueNumber: 241, kind: "code_review_closed" },
+    ]);
+  });
+
+  it("対象PRがマージされた修正Issueを閉じ、成果に数える（#3353）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(
+      issueRowsFor({
+        fixIssue: [
+          {
+            number: 3001,
+            body: "指摘です。\n\n- 対象PR: #2957",
+            repositoryId: "repo-issue-deck",
+            repository: {
+              ownerLogin: "guchi-apps",
+              name: "issue-deck",
+              fullName: "guchi-apps/issue-deck",
+              installation: { id: "inst-row", installationId: 111 },
+            },
+          },
+        ],
+      }),
+    );
+    fetchPullRequest.mockResolvedValue({ merged: true, state: "closed" });
+    hasReopenedEvent.mockResolvedValue(false);
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "issue-deck", 3001, "token", {
+      state: "closed",
+      state_reason: "completed",
+    });
+    expect(result.actions).toEqual([
+      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001, kind: "fix_issue_closed" },
     ]);
   });
 
