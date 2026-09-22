@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PullRequestFixIssueBar } from "@/components/dashboard/pull-request-fix-issue-bar";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import type { Issue } from "@/types/issue";
 import type { PullRequestEvent, PullRequestSummary } from "@/types/pull-request";
 
 const REVIEWED_SHA = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
@@ -74,7 +75,11 @@ function reviewComment(sha: string): PullRequestEvent {
   };
 }
 
-function renderBar(pullRequest: PullRequestSummary, events: PullRequestEvent[] = []) {
+function renderBar(
+  pullRequest: PullRequestSummary,
+  events: PullRequestEvent[] = [],
+  options: { existingFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null } = {},
+) {
   render(
     <PullRequestFixIssueBar
       pullRequest={pullRequest}
@@ -82,6 +87,7 @@ function renderBar(pullRequest: PullRequestSummary, events: PullRequestEvent[] =
       onCreate={vi.fn()}
       repositoryFullName={pullRequest.repositoryFullName}
       issueSuggestions={[]}
+      existingFixIssue={options.existingFixIssue}
     />,
   );
 }
@@ -134,5 +140,26 @@ describe("PullRequestFixIssueBar の判定の鮮度（#3172）", () => {
     expect(screen.getByText(/自動レビューが「要修正」と判定しています/)).toBeTruthy();
     expect(screen.queryByText(/この判定の後にコミットが積まれています/)).toBeNull();
     expect(screen.queryByText(/最新のコミット/)).toBeNull();
+  });
+});
+
+describe("PullRequestFixIssueBar の既存修正Issueへの気づかせ（#3331）", () => {
+  afterEach(cleanup);
+
+  it("既存の修正Issueがあれば、起票ボタンをそのIssueへのリンクへ切り替える", () => {
+    renderBar(makePullRequest(), [], {
+      existingFixIssue: { number: 3001, htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/3001" },
+    });
+
+    const link = screen.getByRole("link", { name: /起票済み（#3001）/ });
+    expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/issues/3001");
+    expect(screen.queryByRole("button", { name: /修正Issueを起案/ })).toBeNull();
+  });
+
+  it("既存の修正Issueが無ければ、従来どおり起票ボタンを出す", () => {
+    renderBar(makePullRequest(), [], { existingFixIssue: null });
+
+    expect(screen.getByRole("button", { name: /修正Issueを起案/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /起票済み/ })).toBeNull();
   });
 });

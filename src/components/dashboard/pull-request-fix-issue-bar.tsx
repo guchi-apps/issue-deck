@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, Loader2, Pencil, Plus } from "lucide-react";
+import { AlertCircle, ExternalLink, Loader2, Pencil, Plus } from "lucide-react";
 
+import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestFixSessionDialog } from "@/components/dashboard/pull-request-fix-session-dialog";
 import { ReviewVerdictFreshnessNote } from "@/components/dashboard/review-verdict";
@@ -23,6 +24,7 @@ import {
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { isMergeJudgementPending } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
+import type { Issue } from "@/types/issue";
 import type { PullRequestEvent, PullRequestSummary } from "@/types/pull-request";
 
 type PullRequestFixIssueBarProps = {
@@ -34,6 +36,11 @@ type PullRequestFixIssueBarProps = {
    * ラベル・セッション状態**で、ここでは決めない（`resolvePullRequestFixRoute`）。
    */
   route?: PullRequestFixRoute;
+  /**
+   * `route`が`create-issue`のとき、このPRを参照する既存の修正Issueが既にあればそれ（#3331）。
+   * あればボタンを新規作成ではなくそのIssueへのリンクに切り替え、二重起票に気づけるようにする。
+   */
+  existingFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
   /** `route`が`create-issue`以外のときの送信（#3009）。成功したら確認ダイアログを閉じる */
@@ -79,6 +86,7 @@ export function PullRequestFixIssueBar({
   events,
   onCreate,
   route = { kind: "create-issue" },
+  existingFixIssue = null,
   repositoryFullName,
   issueSuggestions,
   onRequestSessionFix,
@@ -114,7 +122,15 @@ export function PullRequestFixIssueBar({
           freshness === "stale" ? "いました" : "います"
         }`
       : "レビューで変更を求められています";
-  const buttonLabel = route.kind === "create-issue" ? "修正Issueを起案" : prFixRequestActionLabel(route);
+  // このPRを参照する既存の修正Issueが既にあるとき、押すたびに新規作成ダイアログを開くと
+  // 同じ指摘を2重に起票してしまう（#3331）。既存Issueへのリンク表示に切り替えて気づかせる
+  const alreadyFiledIssue = route.kind === "create-issue" ? existingFixIssue : null;
+  const isAlreadyFiled = alreadyFiledIssue !== null;
+  const buttonLabel = alreadyFiledIssue
+    ? `起票済み（#${alreadyFiledIssue.number}）`
+    : route.kind === "create-issue"
+      ? "修正Issueを起案"
+      : prFixRequestActionLabel(route);
 
   async function handleClick() {
     setIsPreparing(true);
@@ -133,7 +149,17 @@ export function PullRequestFixIssueBar({
     if (await onRequestSessionFix(route, reason)) setSessionDialogOpen(false);
   }
 
-  const button = (
+  const button = alreadyFiledIssue ? (
+    <Button asChild size="sm" variant="outline" className={cn("shrink-0", tone !== "none" && "max-md:w-full")}>
+      <GithubReferenceLink
+        href={alreadyFiledIssue.htmlUrl}
+        reference={{ repositoryFullName, number: alreadyFiledIssue.number, kind: "issue" }}
+      >
+        <ExternalLink />
+        {buttonLabel}
+      </GithubReferenceLink>
+    </Button>
+  ) : (
     <Button
       size="sm"
       variant={tone === "none" ? "ghost" : tone === "needs-check" ? "outline" : "default"}
@@ -176,9 +202,11 @@ export function PullRequestFixIssueBar({
     return (
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-b px-4 py-2">
         <p className="text-xs text-muted-foreground">
-          {route.kind === "create-issue"
-            ? "レビュー後に気づいた修正も、ここからIssueにできます。"
-            : "レビュー後に気づいた修正も、ここから元Issueのセッションへ送れます。"}
+          {isAlreadyFiled
+            ? "このPRの修正Issueは既に起票されています。"
+            : route.kind === "create-issue"
+              ? "レビュー後に気づいた修正も、ここからIssueにできます。"
+              : "レビュー後に気づいた修正も、ここから元Issueのセッションへ送れます。"}
         </p>
         {button}
         {dialog}
@@ -221,9 +249,11 @@ export function PullRequestFixIssueBar({
           isReviewing={isMergeJudgementPending(pullRequest.mergeJudgement)}
         />
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {route.kind === "create-issue"
-            ? "指摘を引用した新しいIssueの下書きを開きます。この画面からは起票しません。"
-            : "新しいIssueは作らず、このPRを実装していたIssueへ指摘を伝えます。"}
+          {isAlreadyFiled
+            ? "二重に起票しないよう、リンクから既存Issueの内容を確認してください。"
+            : route.kind === "create-issue"
+              ? "指摘を引用した新しいIssueの下書きを開きます。この画面からは起票しません。"
+              : "新しいIssueは作らず、このPRを実装していたIssueへ指摘を伝えます。"}
         </p>
       </div>
       {button}
