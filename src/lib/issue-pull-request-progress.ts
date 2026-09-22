@@ -352,3 +352,21 @@ export function resolvePullRequestPosition(
   const merge = progress?.steps.find((step) => step.key === "merge");
   return merge && (merge.state === "current" || merge.state === "done") ? "merge" : "checks";
 }
+
+/**
+ * 対応PRの中に、CI失敗・コンフリクト・レビュー失敗で止まっているPRが1件でもあるか（#3317）。
+ * 「対応PR」セクションを初期状態で開き、赤枠で強調するかどうかの判定に使う。
+ * `selectProgressPullRequest`と違い最新の1本だけでなく全件を見る——畳んだセクションの
+ * 中に、見えていない失敗を残さないため。
+ */
+export function hasAttentionPullRequest(
+  pullRequests: readonly IssuePullRequestProgressSource[],
+): boolean {
+  return pullRequests.some(
+    (pullRequest) =>
+      pullRequest.state === "open" &&
+      !pullRequest.draft &&
+      !pullRequest.merged &&
+      buildIssuePullRequestProgress(pullRequest).tone === "attention",
+  );
+}

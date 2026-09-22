@@ -31,8 +31,8 @@ type IssueDetailSectionProps = {
    * 「畳まれていると押すべきものに気付けない」場面のための逃げ道（#1577）。
    */
   forceOpen?: boolean;
-  /** `attention`は枠をamberでハイライトする（マージ待ちの対応PR） */
-  tone?: "default" | "attention";
+  /** `attention`は枠をamberでハイライトする（マージ待ちの対応PR）。`danger`は赤でハイライトする（失敗している対応PR） */
+  tone?: "default" | "attention" | "danger";
   className?: string;
   children: ReactNode;
 };
@@ -72,6 +72,7 @@ export function IssueDetailSection({
       className={cn(
         "rounded-lg border",
         tone === "attention" && "border-amber-500 bg-amber-500/10",
+        tone === "danger" && "border-destructive bg-destructive/10",
         className,
       )}
     >
