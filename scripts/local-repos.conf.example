@@ -30,7 +30,6 @@ guchi-apps/shopping-list       /home/<ユーザー名>/apps/shopping-list
 guchi-apps/car-care            /home/<ユーザー名>/apps/car-care
 guchi-apps/asset-manager       /home/<ユーザー名>/apps/asset-manager
 guchi-apps/meisai-lab          /home/<ユーザー名>/apps/meisai-lab
-guchi-apps/subscription-lists  /home/<ユーザー名>/apps/subscription-lists
 
 # clone していないリポジトリを書いても、起動時とpollerの申告の両方で弾かれる
 # （チェックアウト先が実在しないため）。書き得ではあるが、実態と揃えておく方が読みやすい。

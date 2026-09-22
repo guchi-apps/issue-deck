@@ -57,7 +57,7 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 | `guchi-apps/dayspan` | 対応済み | **参照**（5つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`。**コピー**: `release-develop-to-main.yml` | あり（新規作成） | 2026-08-13 | #971, #1129 | Next.js + Prisma + MariaDBのため`runtime-setup: node-db`・`package-manager: pnpm`・`database-name: app_dayspan`・`node-version: "24"`をcallerで指定。当時の`24.screenshot-required`は全画面がSupabase Auth + Google OAuthの背後にありCIログインバイパスもPlaywright依存も持たないため無人撮影は成立せず、ローカル実行でのみ意味を持つラベルとして残していた（**撮影機能自体はissue-deck側で#2883により廃止済み**） |
 | `guchi-apps/meisai-lab` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1051, guchi-apps/meisai-lab#69 | #1047の1周目。Next.js + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`は入れていない（無人実装はdispatchだけで成立するため1周目はスコープを絞った。必要になれば参照方式で追加できる）。**この保留は#1475で解除した**（下記「12リポジトリすべてへ配ると決めた」）。導入前は旧世代のラベル体系で、`05.develop`が付いていた#66の進捗は削除前に控えて書き戻した |
 | `guchi-apps/car-care` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-08-13 | #1050, guchi-apps/car-care#32 | #1047の2周目。Next.js + Prisma 7 + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`database-name`は既定の`app_ci`。**`test`・`typecheck`のnpm scriptを持たない**が、当時ワークフローが呼んでいたのは`db:migrate:deploy`・`db:seed:ci`（どちらも`24.screenshot-required`付きの実行のみ・`--if-present`で保護）だけのため実害は無く、scriptを足さずAGENTS.mdへ実際の検証コマンド（`lint`・`build:ci`）を書く形にした（**このマイグレーション・シードのステップ自体、スクリーンショット撮影機能の廃止（#2883）にあわせて共有ワークフローから削除済み**）。`npm run build`は`scripts/with-local-env.sh`経由でローカルの`.env`を要求するため、CI・無人実行は`build:ci`を使う点も明記 |
-| `guchi-apps/subscription-lists` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1052, guchi-apps/subscription-lists#45 | #1047の3周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`test`・`typecheck`・`db:migrate:deploy`・`build:ci`をすべて持ち、共有ワークフローと過不足なく噛み合う。**`/install-github-app`が生成した素の`claude.yml`・`claude-code-review.yml`を削除した**（前者は`claude-issue-dispatch.yml`と同じ`issue_comment`イベントで起動し二重起動していた。詳細は下記）。`CLAUDE.md`・`AGENTS.md`のどちらも無かったため新規作成 |
+| `guchi-apps/subscription-lists` | **運用終了**（2026-09-22。#3293） | **配布対象外**。運用終了までは**参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1052, guchi-apps/subscription-lists#45, guchi-apps/asset-manager#493, #3293 | サブスク管理をAsset Managerへ移管したため運用を終了し、リポジトリをアーカイブした（起点は guchi-apps/asset-manager#493、撤去手順は guchi-apps/asset-manager#543）。**共有ワークフローの配布・参照タグの更新・ドリフト検査の対象から外した。** 導入時（2026-08-13）の記録: #1047の3周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "20.19"`（`ci.yml`準拠）。`test`・`typecheck`・`db:migrate:deploy`・`build:ci`をすべて持ち、共有ワークフローと過不足なく噛み合う。**`/install-github-app`が生成した素の`claude.yml`・`claude-code-review.yml`を削除した**（前者は`claude-issue-dispatch.yml`と同じ`issue_comment`イベントで起動し二重起動していた。詳細は下記）。`CLAUDE.md`・`AGENTS.md`のどちらも無かったため新規作成 |
 | `guchi-apps/asset-manager` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1053, guchi-apps/asset-manager#155 | #1047の4周目。Next.js + Prisma + MySQLで`runtime-setup: node-db`・`package-manager: npm`。**`node-version`は`"20"`**（CIが`ci.yml`ではなく`test.yml`で、そこが`'20'`。他リポジトリの`20.19`と違う）。**`build`系の命名が他アプリと逆**で、`npm run build`がラッパー無し（CI・無人実行向け）、`npm run build:local`がローカル用。`npm run check`は`build:local`を含むため無人実行では使えない。この点をCLAUDE.mdの冒頭に置いた。`.claude/settings.json`は権限許可リストのみで運用ルールは含まない |
 | `guchi-apps/portfolio` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1054, guchi-apps/portfolio#81 | #1047の5周目。**`runtime-setup: node`を初めて使ったリポジトリ**（`prisma/`を持たずDBを使わないため。`node-db`にすると不要なMySQLサービスコンテナの起動・マイグレーション・シードが動く）。`database-name`は`node`では使われないので指定していない。`package-manager: npm`・`node-version: "20"`（`ci.yml`準拠）。**`test`・`typecheck`のnpm scriptを持たず、`lint`と`build`だけ**でCIも同じ2つを実行している。`npm run build`はラッパー無しでCI・無人実行から使え、`npm run build:local`は**1Passwordの`op run --env-file=.env.tpl`経由**なので無人実行では使えない（car-care・asset-managerの`with-local-env.sh`とは失敗の仕方が違い、`op`コマンド自体が無いことで落ちる）。進捗ラベルが`09.main`まで進んだままcloseされずに残っていた#76は、盤面へ載せたあとStatus `Done`にしてcloseした |
 | `guchi-apps/solitaire` | 対応済み | **参照**（2つとも`@workflows/v9`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-13 | #1055, guchi-apps/solitaire#23 | #1047の6周目。**`runtime-setup: minimal`を使った唯一の周**（`dependencies`・`devDependencies`のどちらも無く、`package-lock.json`も`pnpm-lock.yaml`も無い素のJS）。`node`/`node-db`にするとロックファイル不在で`npm ci`が落ちるが、`minimal`では`npm ci`・Playwrightインストール・DB準備の各ステップが`runtime-setup != 'minimal'`の条件で丸ごとスキップされる。`node-version: "20"`（`ci.yml`準拠）は`runtime-setup`と独立した軸で、`cache:`を付けずに`setup-node`を呼ぶだけのためロックファイル無しでも失敗しない。**検証コマンドは`npm test`（`node --test tests`）と`npm run build`の2つだけで、どちらもラッパー無しで無人実行から使える**（car-care・asset-manager・portfolioと違い`.env`も1Passwordも要らない）。`npm start`が`python3 -m http.server`である点、テストは`node:test`/`node:assert`で書く点、**`24.screenshot-required`は`minimal`だとPlaywrightが入らず無人実行では成立しない**点をCLAUDE.mdに明記した（**撮影機能自体はissue-deck側で#2883により廃止済み**。solitaire側のCLAUDE.mdの当該記述も追って整理が必要）。旧世代の`10.`/`19.`優先度ラベル削除で失われる分は#11・#12へ`89.Priority: Low`を付け直した（進捗ラベルはopen issueに1件も付いておらず復元は不要だった） |
@@ -280,7 +280,7 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
 持っていなかった。** #1475で12件すべてへ配ると決め、#2103で`vps`・`subpc`も配ると決めた
 結果、2026-08-25時点では下の「対象外」を除く全リポジトリへ行き渡っている。
 
-| 配布済み | `issue-deck`（ローカルパス参照）・`aide`・`aide-bot`・`asset-manager`・`car-care`・`clip-hive`・`dayspan`・`db-console`・`meisai-lab`・`myroom`・`ops-dashboard`・`portfolio`・`research-desk`・`shopping-list`（アーカイブ済み）・`signaly`・`solitaire`・`subscription-lists`・`trainroute`（運用終了。#2882）・**`vps`・`subpc`**
+| 配布済み | `issue-deck`（ローカルパス参照）・`aide`・`aide-bot`・`asset-manager`・`car-care`・`clip-hive`・`dayspan`・`db-console`・`meisai-lab`・`myroom`・`ops-dashboard`・`portfolio`・`research-desk`・`shopping-list`（アーカイブ済み）・`signaly`・`solitaire`・`subscription-lists`（運用終了。#3293）・`trainroute`（運用終了。#2882）・**`vps`・`subpc`**
 |---|---|
 | **対象外** | **`docs`・`claude-config`**（どちらも`develop`を持たず、PRが`issue-<番号>` → `main`の直行になる。`base: develop`のトリガーが一度も発火しないため、置いても効かない） |
 
@@ -875,11 +875,12 @@ issue-deckを直しても自動では行き渡らない。
 同一の内容**（blobのSHAが一致。#2391のリリース本文と#2237・#2239の`exit 0`を含む）。
 
 `clip-hive` / `aide-bot` / `signaly` / `meisai-lab` / `dayspan` / `asset-manager` /
-`car-care` / `myroom` / `aide` / `ops-dashboard` / `subscription-lists` /
+`car-care` / `myroom` / `aide` / `ops-dashboard` /
 `solitaire` / `portfolio` / `db-console` / `subpc` / `trainroute`
 
 **`shopping-list`も同じ内容を持っていたが、運用終了（#2435）で配布対象から外した。`trainroute`も
-同様に運用終了（#2882）で配布対象から外した。**
+同様に運用終了（#2882）で配布対象から外した。`subscription-lists`も同様に運用終了（#3293）で
+配布対象から外した。**
 
 **`guchi-apps/subpc`だけは独自の変更がある。** そのリポジトリだけの`NOTIFY_NOTE`（反映は成功
 したが再起動などの操作が残っていることを通知へ足す）が入っており、配布は中身をそのまま上書き
@@ -920,7 +921,7 @@ GitHub Actionsのsecretはワークフローが`env:`へ渡さないとスクリ
 # リリース通知のenvが入っているか（未適用のリポジトリだけが出る）
 # **grepは -aE で引く。** CRLFのリポジトリがあり、値を桁揃えしているリポジトリもある
 for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
-         myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
+         myroom aide ops-dashboard solitaire portfolio db-console subpc; do
   br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
   for f in deploy release; do
     body="$(gh api "repos/guchi-apps/$r/contents/.github/workflows/$f.yml?ref=$br" --jq .content 2>/dev/null | base64 -d)"
@@ -940,7 +941,7 @@ done
 gh api "repos/guchi-apps/issue-deck/contents/.github/scripts/signaly-notify.sh?ref=main" \
   --jq .content | base64 -d > /tmp/signaly-notify-source.sh
 for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
-         myroom aide ops-dashboard subscription-lists solitaire portfolio db-console subpc; do
+         myroom aide ops-dashboard solitaire portfolio db-console subpc; do
   br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
   gh api "repos/guchi-apps/$r/contents/.github/scripts/signaly-notify.sh?ref=$br" --jq .content \
     2>/dev/null | base64 -d > /tmp/signaly-notify-target.sh \
@@ -1010,7 +1011,7 @@ callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`�
 
 ```bash
 # 配置状況の確認
-for r in dayspan meisai-lab car-care subscription-lists asset-manager \
+for r in dayspan meisai-lab car-care asset-manager \
          portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
          aide-bot; do
   echo -n "$r: "
@@ -1056,7 +1057,7 @@ done
 
 ```bash
 # 実装状況の確認。deploy.yml に health が無いリポジトリは、呼び出し先のスクリプトも見ること
-for r in dayspan meisai-lab car-care subscription-lists asset-manager \
+for r in dayspan meisai-lab car-care asset-manager \
          portfolio solitaire myroom signaly clip-hive ops-dashboard db-console aide \
          aide-bot subpc vps issue-deck; do
   printf '%-20s ' "$r"
@@ -1092,7 +1093,7 @@ done
 | `guchi-apps/shopping-list` | —（※） | **運用終了**（#2435。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯7000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
 | `guchi-apps/meisai-lab` | — | ○ |
 | `guchi-apps/car-care` | — | ○ |
-| `guchi-apps/subscription-lists` | — | ○ |
+| `guchi-apps/subscription-lists` | — | **運用終了**（#3293。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯12000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
 | `guchi-apps/asset-manager` | — | ○ |
 | `guchi-apps/portfolio` | — | ○（※2） |
 | `guchi-apps/solitaire` | — | ○（※2） |
