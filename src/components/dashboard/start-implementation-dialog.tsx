@@ -1183,7 +1183,15 @@ export function StartImplementationDialog({
                   selected={modelChoice === AUTO_PICK}
                   onSelect={() => selectModel(AUTO_PICK)}
                 />
-                <div className="grid grid-cols-3 gap-2">
+                {/* スマホでは件数で列数を変える（#3252）。3件（Claude Code）は横3つ、
+                    4件（Codex）は3＋1に折り返っていたのを横2×縦2にする。PC・iPad幅
+                    （`sm`以上）は元々の3列固定のまま変更しない */}
+                <div
+                  className={cn(
+                    "grid gap-2",
+                    modelEntries.length === 4 ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3",
+                  )}
+                >
                   {modelEntries.map((entry) => (
                     <ModelChip
                       key={entry.model}
@@ -1378,6 +1386,7 @@ function AgentChip({
  * FableとOpusがほぼ同額のため見比べても選べなかった（#2723）。**押す理由は用途**なので
  * そちらを出し、幅を確保するために3列→2列にした（1枚110px→172px前後）。「設定に従う」を
  * 削除した#3106で選ぶ3つが残り、**再び3列**に戻した（スマホでは2行目が折り返す）。
+ * Codexは4つ選べるため、スマホ幅だけ横2×縦2に変える（#3252。列数の分岐はグリッド側のclassNameで行う）。
  *
  * 角を`rounded-full`にしないのは2行になったため。先頭のアイコン（`icon`）を取るのは「おまかせ」
  * （全幅）だけで、ここが**issue-deckが選ぶ唯一の選択肢**であることを他の3枚と見分けるために付ける。
