@@ -415,6 +415,38 @@ Issueのセッション表示**（#2537。スマホのIssue詳細にも同じも
 - **Issue一覧の行には出していない**（#2537）。あの行のRemote Controlはリンク（#1915）で、
   発行の往復と10分で切れるコードの表示は行に収まらない。一覧から辿るときはIssueを開く
 
+#### 終わったセッションはリモート一覧から外し、デーモンは落ちたままにしない（#3357）
+
+ChatGPTアプリのリモート一覧は、app-serverの`thread/list`（**アーカイブされていないスレッド全部**）で、
+終わったセッションも消えずに並び続ける。2026-09-22時点では、動いているのは1本なのに過去の
+Issueのセッションが90本以上並んでいた。pollerの巡回（`tidy_codex_remote_control`）で2つを行う。
+実装は`scripts/lib/codex-thread-archive.sh`と`scripts/lib/codex-app-server-rpc.py`。
+
+- **終わったセッションのスレッドを`thread/archive`でアーカイブする**（削除はしない）。「終わった」は
+  `.codex-thread`を持つセッションのtmuxペインが生きていないこと。済んだものは`.codex-archived`の
+  印（中身はUUID）で見送るので、2巡目以降は`codex`を起こさない。**対象はissue-deckが起こした
+  セッションだけ**で、ChatGPTアプリから直接始めた会話には触らない
+- **`codex resume`の前に`thread/unarchive`で戻す**（`run-issue-session.sh`）。アーカイブ済みの
+  スレッドは転記が移されており、そのままでは前回の会話を引き継げない
+- **Remote Controlを有効にしたホスト（`remoteControlEnabled: true`）で、デーモンが落ちていれば
+  `codex remote-control start`で起こし直す**。生死はpidと制御ソケットで見て、打つのは落ちている
+  ときだけ（5分に1回まで）。以前は再起動のあと、Codexのセッションを起こすか「Codexに繋ぐ」を
+  押すまでオフラインのままだった
+- 止めるときは`ISSUE_DECK_CODEX_ARCHIVE_ENDED=0`・`ISSUE_DECK_CODEX_REMOTE_KEEPALIVE=0`（pollerの環境）
+
+**アーカイブはデーモンの制御ソケットへ送る。** ChatGPTアプリで開いたスレッドはデーモンが読み込んで
+書き手になっており、stdioで起こした`codex app-server`から打つと`thread … already has an active
+writer`で拒否される（codex-cli 0.152.1の実機）。制御ソケット
+（`~/.codex/app-server-control/app-server-control.sock`）は**WebSocketで話す**——HTTPの
+Upgradeを通したあと、テキストフレームにJSON-RPCを1本ずつ載せれば応答が返る（`codex app-server
+proxy`が無反応だったのは、NDJSON・`Content-Length`で話しかけていたため）。デーモン経由の
+`thread/archive`は読み込み中のスレッドも閉じたうえでアーカイブする。ソケットが無いときは
+stdioの`codex app-server`へ落とす（デーモンがいなければ書き手を握る者もいない）。
+
+- アーカイブ済みのスレッドへもう一度`thread/archive`を打つと`no rollout found for thread id …`が
+  返る。転記の無いまま終わったスレッドも同じなので、**どちらも済んだ扱い**にする
+- `thread/unarchive`で元の一覧へ戻る
+
 #### tmuxで普通に起こしたTUIは、デーモンに載る
 
 「1（tmuxのセッションが共有デーモンに載るか）」の答えは**載る**。standalone版で
