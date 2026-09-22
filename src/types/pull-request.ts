@@ -4,6 +4,7 @@ import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import type { PullRequestRole } from "@/lib/github/pull-request-role";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
 import type { DeployFailureIssueRef } from "@/types/branch-flow";
@@ -261,6 +262,12 @@ export type IssuePullRequest = {
   /** headブランチ名・タイトル・本文から推定した対応Issue番号。特定できなければnull */
   linkedIssueNumber: number | null;
   /**
+   * このIssueを閉じるPRか、途中PRか（#3334）。PR本文の`<!-- issue-deck-pr-role:… -->`
+   * マーカーから読む（`lib/github/pull-request-role.ts`）。書かれていなければnull
+   * （マーカー導入前のPR・このリポジトリの運用に従っていないPRを含む）。
+   */
+  role: PullRequestRole | null;
+  /**
    * このPRの自動レビュー判定（#2843）。意味は`PullRequestSummary.reviewVerdict`と同じで、
    * 材料も同じPR本文。Issue画面のマージ確認にも同じ判定を出すために持つ。
    */
@@ -396,7 +403,8 @@ export type PullRequestFile = {
  *
  * - `issue` … developへ入った作業PR（`issue-<番号>`ブランチ）
  * - `version-bump` … バージョンバンプPR（`release/vX.Y.Z`）。利用者から見た変更ではない
- * - `commit` … マージコミットへ畳めなかったコミット（squash運用のリポジトリ）
+ * - `commit` … マージコミットへ畳めなかったコミット（squash運用のリポジトリ、またはマージコミットの
+ *   運用に混ざったsquashのPR。#3339）
  */
 export type PullRequestChangeKind = "issue" | "version-bump" | "commit";
 

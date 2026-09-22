@@ -139,10 +139,9 @@ export function SessionRecoveryButton({
           session: blockingSession,
         })
       : null;
-  const textClassName = cn(
-    "w-full break-words text-xs text-muted-foreground",
-    align === "end" ? "text-right" : "text-left",
-  );
+  // ボタンの位置は`align`に従わせつつ、説明文は右寄せだと折り返し位置が読みにくいため常に
+  // 左寄せで表示する（#3316）
+  const textClassName = "w-full break-words text-xs text-muted-foreground text-left";
 
   function recover() {
     if (isQuestion) {

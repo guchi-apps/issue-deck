@@ -39,6 +39,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 
 | ファイル | 内容 |
 |---|---|
+| [Issue・PRの責任モデルと開発ライフサイクル](issue-pr-responsibility-model.md) | IssueとPRがそれぞれ何を正として持つか、1 Issue・1 PRの原則と親子Issue・複数PRの使い分け、Refs／Closesの使い分け、Issue／PRの状態モデル、担当ごとの責任、Issue／PRテンプレート |
 | [ブランチ・worktree運用とエージェントの役割](multi-agent/branching.md) | Issueごとのブランチ・worktree分離、エージェントの責務、共有知識層、ブランチ保護 |
 | [Issueラベルによる状態管理とトグル](multi-agent/labels.md) | ラベルの状態遷移、計画フェーズ・プレビュー・マージ前確認の各トグル、サブIssue分割、自動マージ可否の判定、ユーザーの手作業のIssue化（`71.manual-step`） |
 | [Phase 5: @claudeコメント起点の完全自動化](multi-agent/dispatch.md) | `claude-issue-dispatch.yml`の全体。トリガー、詰まりからの再開、通知コメント、権限モード、既知の制約 |
