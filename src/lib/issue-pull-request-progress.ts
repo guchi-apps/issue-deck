@@ -1,8 +1,14 @@
-import type { AiReviewState, MergeJudgement } from "@/lib/github/check-rollup";
+import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { CiState } from "@/lib/github/release-api";
 import { type ProgressStatusKey } from "@/lib/issue-progress";
-import { CI_STATE_LABEL } from "@/lib/pull-request-list";
+import {
+  AI_REVIEW_VERDICT_LABEL,
+  type AiReviewVerdictState,
+  CI_STATE_LABEL,
+  resolveAiReviewVerdictState,
+} from "@/lib/pull-request-list";
 
 /**
  * 「developへマージ」段の中で、いま何が終わっていて何を待っているか（#2816）。
@@ -24,8 +30,11 @@ export type IssuePullRequestStepKey = "opened" | "ci" | "conflict" | "ai-review"
 /**
  * 段の状態。`failed`は「その段で止まっている」で、`pending`は「まだそこまで来ていない」。
  * 通り過ぎた段は`done`で、材料が無くて言えない段は並べない（段ごと落とす）。
+ *
+ * `needs-check`は`ai-review`の段だけが持つ（#3373）。CIと同じ✔/×の2値では、レビューの
+ * 「要確認」（マージ前に人が読むべきだが、要修正ほど重くはない）を表せないため。
  */
-export type IssuePullRequestStepState = "done" | "current" | "pending" | "failed";
+export type IssuePullRequestStepState = "done" | "current" | "pending" | "failed" | "needs-check";
 
 export type IssuePullRequestStep = {
   key: IssuePullRequestStepKey;
@@ -107,24 +116,25 @@ export type IssuePullRequestProgressSource = {
   /** `false`＝コンフリクトあり。`null`（判定中・未取得）は「なし」として扱わない */
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
+  /**
+   * このPR1本ぶんの自動レビュー判定（#3373）。PR本文の`## 検証結果`から読む。記録が無ければnull。
+   * `ai-review`ジョブが`passed`のとき、この`reviewKind`で✔/△/×をさらに出し分ける。
+   */
+  reviewVerdict: PullRequestReviewVerdict | null;
   /** PRのURL。停止パネルが実行結果へのリンクを作るために使う。持たない材料（PR一覧）では省く */
   htmlUrl?: string | null;
 };
 
 /**
- * レビューの状態を言う文言。実行するエージェントを限定しない。
- * `none`（check-runが無い）は段ごと落とすので入っていない。
+ * レビュー実施中の文言。**段の`label`にはこれを使わない**（工程名は`AI_REVIEW_STEP_NAME`の
+ * 「レビュー」に固定し、状態は記号で言う）。ここで持つのは段の`detail`（マウスを載せたときの
+ * 全文）用。
  *
- * **段の`label`にはこれを使わない**（工程名は`AI_REVIEW_STEP_NAME`の「レビュー」に固定し、
- * 状態は記号で言う）。ここに残しているのは、止まっているPRの見出し（`resolveWaiting`）と
- * 段の`detail`（マウスを載せたときの全文）。
+ * `pending`以外の文言（完了・要確認・要修正・省略・失敗）は`AI_REVIEW_VERDICT_LABEL`
+ * （`pull-request-list.ts`）に一本化してある（#3373）。同じ状態を2通り書くと、
+ * PR一覧と内訳とで違う名前が出かねない。
  */
-const AI_REVIEW_STEP_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
-  pending: "レビュー実施中",
-  passed: "レビュー完了",
-  skipped: "レビュー省略",
-  failed: "レビュー失敗",
-};
+const AI_REVIEW_PENDING_LABEL = "レビュー実施中";
 
 /**
  * レビューの段の工程名。CI・コンフリクトと同じく「工程名＋状態記号」で並べるため、状態
@@ -171,6 +181,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
   ciStatus: PullRequestCiStatus | null;
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
+  reviewVerdict: PullRequestReviewVerdict | null;
   htmlUrl?: string | null;
 }): IssuePullRequestProgressSource {
   return {
@@ -181,6 +192,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
     ciState: ciStateFromPullRequestCiStatus(pullRequest.ciStatus),
     mergeable: pullRequest.mergeable,
     mergeJudgement: pullRequest.mergeJudgement,
+    reviewVerdict: pullRequest.reviewVerdict,
     htmlUrl: pullRequest.htmlUrl ?? null,
   };
 }
@@ -217,8 +229,9 @@ export function selectProgressPullRequest<T extends IssuePullRequestProgressSour
 export function buildIssuePullRequestProgress(
   pullRequest: IssuePullRequestProgressSource,
 ): IssuePullRequestProgress {
-  const { mergeJudgement, ciState, mergeable, draft, merged } = pullRequest;
+  const { mergeJudgement, ciState, mergeable, draft, merged, reviewVerdict } = pullRequest;
   const aiReviewState = mergeJudgement.aiReview.state;
+  const aiReviewVerdictState = resolveAiReviewVerdictState(mergeJudgement.aiReview, reviewVerdict);
   const judgementPending = mergeJudgement.state === "pending";
   const stopKind = resolveStopKind();
 
@@ -253,14 +266,19 @@ export function buildIssuePullRequestProgress(
       key: "ai-review",
       label: AI_REVIEW_STEP_NAME,
       shortLabel: AI_REVIEW_STEP_NAME,
-      detail: AI_REVIEW_STEP_LABEL[aiReviewState],
-      ...(aiReviewState === "skipped" ? { statusText: AI_REVIEW_SKIPPED_STATUS_TEXT } : {}),
+      detail:
+        aiReviewState === "pending"
+          ? AI_REVIEW_PENDING_LABEL
+          : AI_REVIEW_VERDICT_LABEL[aiReviewVerdictState as AiReviewVerdictState],
+      ...(aiReviewVerdictState === "skipped" ? { statusText: AI_REVIEW_SKIPPED_STATUS_TEXT } : {}),
       state:
-        aiReviewState === "failed"
+        aiReviewVerdictState === "failed" || aiReviewVerdictState === "changes-requested"
           ? "failed"
-          : aiReviewState === "pending"
-            ? "current"
-            : "done",
+          : aiReviewVerdictState === "needs-check"
+            ? "needs-check"
+            : aiReviewState === "pending"
+              ? "current"
+              : "done",
     });
   }
   // マージの段が`current`になるのは、前の段が全部片付いて本当にマージだけが残ったとき。
@@ -295,7 +313,7 @@ export function buildIssuePullRequestProgress(
     if (mergeable === false) return { label: "コンフリクトあり", tone: "attention" };
     if (ciState === "failure") return { label: CI_STATE_LABEL.failure, tone: "attention" };
     if (aiReviewState === "failed") {
-      return { label: AI_REVIEW_STEP_LABEL.failed, tone: "attention" };
+      return { label: AI_REVIEW_VERDICT_LABEL.failed, tone: "attention" };
     }
     if (mergeable === null) return { label: "コンフリクト確認中", tone: "running" };
     if (merged) return { label: MERGED_STEP_LABEL, tone: "running" };

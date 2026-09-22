@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AiReviewState, MergeJudgement, MergeJudgementStep } from "@/lib/github/check-rollup";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { CiState } from "@/lib/github/release-api";
 import {
   buildIssuePullRequestProgress,
@@ -38,12 +39,27 @@ function pullRequest(
     ciState: "success",
     mergeable: true,
     mergeJudgement: judgement({}),
+    reviewVerdict: null,
     ...overrides,
   };
 }
 
 function labelOf(step: string, progress: ReturnType<typeof buildIssuePullRequestProgress>) {
   return progress.steps.find((entry) => entry.key === step);
+}
+
+function reviewVerdict(
+  reviewKind: PullRequestReviewVerdict["reviewKind"],
+): PullRequestReviewVerdict {
+  return {
+    reviewKind,
+    reviewLabel: "",
+    riskKind: "none",
+    riskLabel: "",
+    riskReasons: [],
+    confirmLabel: null,
+    reviewedSha: null,
+  };
 }
 
 describe("isPullRequestWaitingStatus", () => {
@@ -219,21 +235,50 @@ describe("buildIssuePullRequestProgress の内訳", () => {
   });
 
   it("レビューの段は工程名「レビュー」に固定し、状態は記号（と全文）で言う", () => {
-    for (const [aiReview, state, detail, statusText] of [
-      ["pending", "current", "レビュー実施中", undefined],
-      ["passed", "done", "レビュー完了", undefined],
-      ["skipped", "done", "レビュー省略", "省略"],
-      ["failed", "failed", "レビュー失敗", undefined],
+    for (const [aiReview, verdictKind, state, detail, statusText] of [
+      ["pending", null, "current", "レビュー実施中", undefined],
+      ["passed", null, "done", "レビュー完了", undefined],
+      ["skipped", null, "done", "レビュー省略", "省略"],
+      ["failed", null, "failed", "レビュー失敗", undefined],
     ] as const) {
       const step = labelOf(
         "ai-review",
-        buildIssuePullRequestProgress(pullRequest({ mergeJudgement: judgement({ aiReview }) })),
+        buildIssuePullRequestProgress(
+          pullRequest({
+            mergeJudgement: judgement({ aiReview }),
+            reviewVerdict: verdictKind ? reviewVerdict(verdictKind) : null,
+          }),
+        ),
       );
       expect(step?.label).toBe("レビュー");
       expect(step?.shortLabel).toBe("レビュー");
       expect(step?.state).toBe(state);
       expect(step?.detail).toBe(detail);
       expect(step?.statusText).toBe(statusText);
+    }
+  });
+
+  // #3373: ジョブ（`aiReview`）は成功していても、PR本文の検証結果（`reviewVerdict`）が
+  // 要確認・要修正なら、CIと同じように△・×で見分けられることを確認する
+  it("レビューのジョブが成功していても、検証結果が要確認・要修正ならその判定を優先する（#3373）", () => {
+    for (const [verdictKind, state, detail] of [
+      ["ok", "done", "レビュー完了"],
+      ["needs-check", "needs-check", "レビュー要確認"],
+      ["changes-requested", "failed", "レビュー要修正"],
+      ["skipped", "done", "レビュー完了"],
+      ["unknown", "done", "レビュー完了"],
+    ] as const) {
+      const step = labelOf(
+        "ai-review",
+        buildIssuePullRequestProgress(
+          pullRequest({
+            mergeJudgement: judgement({ aiReview: "passed" }),
+            reviewVerdict: reviewVerdict(verdictKind),
+          }),
+        ),
+      );
+      expect(step?.state).toBe(state);
+      expect(step?.detail).toBe(detail);
     }
   });
 

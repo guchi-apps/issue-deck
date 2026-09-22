@@ -33,6 +33,7 @@ export type PullRequestRailSlotKey = "ci" | "conflict" | "ai-review";
  * - `failed` … そこで止まっている
  * - `pending` … まだそこまで来ていない
  * - `absent` … その段自体がこのPRには無い。**場所だけ空けて何も主張しない**
+ * - `needs-check` … レビューが「要確認」の判定を出した（#3373）。`ai-review`列だけが持つ
  */
 export type PullRequestRailSlotState =
   | "done"
@@ -40,7 +41,8 @@ export type PullRequestRailSlotState =
   | "waiting"
   | "failed"
   | "pending"
-  | "absent";
+  | "absent"
+  | "needs-check";
 
 export type PullRequestRailSlot = {
   key: PullRequestRailSlotKey;

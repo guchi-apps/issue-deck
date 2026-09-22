@@ -4,7 +4,10 @@ import type {
   MergeJudgement,
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
-import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
+import {
+  needsReviewAttention,
+  type PullRequestReviewVerdict,
+} from "@/lib/github/pull-request-review-verdict";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
@@ -586,25 +589,6 @@ export const AI_REVIEW_SETTLED_LABEL: Record<AiReviewSettledState, string> = {
   failed: "レビュー失敗",
 };
 
-/**
- * レビューの状態の**短い**呼び名（#2942）。PR一覧のステータスレールのように、
- * 幅が数十pxしかない枠へ出すときだけ使う。
- *
- * **主語（「Claudeの」「Claudeが」）を落としただけで、状態の呼び分けは長い方と1対1に保つ。**
- * `REPAIR_KIND_RUNNING_LABEL`と`REPAIR_KIND_RUNNING_SHORT_LABEL`が同じ場所に並んでいるのと
- * 同じ形で、**長い方の隣に置く**——別のファイルへ置くと、片方だけ直された状態に気付けない。
- * 長い方は`title`に出すので、短くしても全文を読む手段は残る。
- *
- * `pending`まで含めているのは、レールが「実行中」も同じ枠に出すため。長い方の`pending`は
- * `MERGE_JUDGEMENT_STEP_LABEL["claude-review"]`（「Claudeがレビュー中」）が持っている。
- */
-export const AI_REVIEW_SHORT_LABEL: Record<Exclude<AiReviewState, "none">, string> = {
-  pending: "レビュー中",
-  passed: "レビュー完了",
-  skipped: "レビュー省略",
-  failed: "レビュー失敗",
-};
-
 /** バッジの`title`に出す説明（#2150）。PCでマウスを載せたときに、その状態の意味まで読めるようにする */
 export const AI_REVIEW_SETTLED_REASON: Record<AiReviewSettledState, string> = {
   passed: "レビューが終わっています。",
@@ -626,6 +610,52 @@ export function aiReviewSettledState(
   const state = aiReview?.state;
   return state === "passed" || state === "skipped" || state === "failed" ? state : null;
 }
+
+/**
+ * レビューの「終わった後」の状態に、PR本文の検証結果（要確認・要修正）を重ねたもの（#3373）。
+ *
+ * **`AiReviewSettledState`（ジョブが実行できたか）だけでは、CIのように✔/△/×を出し分けられない。**
+ * ジョブが`passed`（実行できた）ときだけ`reviewVerdict.reviewKind`を見て、`ok`をさらに
+ * `needs-check`・`changes-requested`へ分ける。ジョブ自体の成否を表す`skipped`・`failed`は
+ * そのまま通す——判定が取れない・落ちたことと、判定が「要修正」だったことは別の軸のため。
+ *
+ * `reviewVerdict`が無い（節が無い・`unknown`）場合は`ok`に倒す。**記録が無いのは危険信号
+ * ではない**（`needsReviewAttention`と同じ方針）ので、従来どおり✔として扱う。
+ */
+export type AiReviewVerdictState = "ok" | "needs-check" | "changes-requested" | "skipped" | "failed";
+
+export function resolveAiReviewVerdictState(
+  aiReview: AiReview | null | undefined,
+  reviewVerdict: PullRequestReviewVerdict | null | undefined,
+): AiReviewVerdictState | null {
+  const settled = aiReviewSettledState(aiReview);
+  if (settled === null) return null;
+  if (settled !== "passed") return settled;
+
+  switch (reviewVerdict?.reviewKind) {
+    case "changes-requested":
+      return "changes-requested";
+    case "needs-check":
+      return "needs-check";
+    default:
+      return "ok";
+  }
+}
+
+/**
+ * `AiReviewVerdictState`の文言（#3373）。PR一覧・PR詳細のどちらもこれを使う。
+ *
+ * **`AI_REVIEW_SETTLED_LABEL`とは別に持つ。** あちらは`AiReviewBadge`（Issue詳細の
+ * マージ済み・クローズ済み・下書き行だけに出る）専用で、ジョブの成否しか見ない。
+ * マージ後は判定内容の意味が薄れるため、今回はそちらまでは広げない。
+ */
+export const AI_REVIEW_VERDICT_LABEL: Record<AiReviewVerdictState, string> = {
+  ok: "レビュー完了",
+  "needs-check": "レビュー要確認",
+  "changes-requested": "レビュー要修正",
+  skipped: "レビュー省略",
+  failed: "レビュー失敗",
+};
 
 /**
  * 自動マージ可否の判定がまだ下っていないPRか（#1968）。**真のあいだは画面からマージさせない。**

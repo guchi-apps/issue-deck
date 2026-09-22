@@ -19,6 +19,7 @@ const PR_STEP_STATUS: Record<IssuePullRequestStepState, { label: string; classNa
   current: { label: "実施中", className: "text-primary" },
   failed: { label: "×", className: "text-destructive" },
   pending: { label: "—", className: "text-muted-foreground" },
+  "needs-check": { label: "△", className: "text-amber-700 dark:text-amber-400" },
 };
 
 /**

@@ -355,6 +355,7 @@ export function PullRequestDetail({
             {/* CIとは別の軸のレビュー状態。実行中・省略・失敗・完了を同じ操作表示で出す（#3319）。 */}
             <AiReviewStatusButton
               aiReview={pullRequest.mergeJudgement.aiReview}
+              reviewVerdict={pullRequest.reviewVerdict}
               expanded={reviewDetailOpen}
               onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
             />
