@@ -49,9 +49,8 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "pull_request_files", label: "PR詳細の変更ファイル一覧の取得" },
   { key: "pull_request_changes", label: "マージ確認の変更点の取得" },
-  // マージ確認のレビュー指摘（#2849）。**マージ待ちの承認カードを出すときだけ**消費する
-  // （対象PRの本体とコメントで2リクエスト）。指摘を読んで修正を依頼するかを決める場所なので、
-  // ポーリングはせず、Issueを開き直したときに取り直す
+  // マージ確認のレビュー指摘（#2849）。**PR詳細の「修正Issueを起案」「修正を依頼」を押したときだけ**
+  // 消費する（対象PRの本体とコメントで2リクエスト。#3333でIssue詳細からは取らなくなった）
   { key: "pull_request_review_comment", label: "マージ確認のレビュー指摘の取得" },
   { key: "issue_comments", label: "コメント取得" },
   // 「コードレビュー」ビューの一覧に出す結果の要約（#2855）。**並んでいるレビューIssueの数

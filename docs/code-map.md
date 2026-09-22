@@ -1870,7 +1870,6 @@ export function POST(request: NextRequest) {
   Issue側もコンフリクト有無（`mergeable`）と修復状況（`repairRun`）を返し、バッジは
   `pull-request-badges.tsx`の同じコンポーネント（`ConflictBadge`・`RepairRunBadge`）を使う。
   **文言も揃える**——CI状態の言い回しがIssue側だけ「CI成功」だった。
-  マージボタンの出し分けも`canMergeIssuePullRequest`を`canMergeFromDeck`と同じ判定にする。
   消費は増えない: `mergeable`は上のとおりCI状態と同じGraphQLに相乗りし（1件ずつの
   `fetchRefCheckState`をやめ、`fetchPullRequestCiStates`のまとめ取りにしたので**むしろ減る**）、
   `repairRun`はGitHubではなくDBを1回引くだけ。
@@ -2218,9 +2217,8 @@ export function POST(request: NextRequest) {
   判定だけを渡す。**GitHub APIの消費は増えず、ダイアログを開いた瞬間に出る**——開いてから
   取りに行く「このリリースに含まれる変更」（`/api/pull-requests/changes`）との違いはここ。
   develop向けPRは自分ひとつぶんの`## 検証結果`（`parsePullRequestReviewVerdict`）、リリースPRは
-  対象issueぶんを集めた表（`parseReleaseVerification`）を読む。Issue詳細のマージ確認
-  （`IssueMergeButton`）にも同じパネルを出しており、材料は`/api/issues/pull-requests`が
-  同じ本文から読んだもの。
+  対象issueぶんを集めた表（`parseReleaseVerification`）を読む。Issue詳細にはマージ確認を
+  置かない（#3333。マージはPR詳細だけで行う）。
   **一覧の応答へ載せるとき、指摘の本文（`reviewBody`）は落とす**（`withoutReviewBodies`）。
   PR一覧は全リポジトリぶんを1つの応答で返すため、本文まで載せると数十KB膨らむ。本文を読むのは
   PR詳細のパネルの役割で、そちらは詳細APIの`body`から読み直している。
@@ -2285,7 +2283,7 @@ export function POST(request: NextRequest) {
   - **PR詳細の帯だけは、本文に`sha=`が無いときレビューコメントの`sha=`で補う**
     （`PullRequestFixIssueBar`。詳細APIが返す`events`に総評コメントが入っているため取得は増えない）。
     判定が古いときは見出しの時制も「判定していました」へ変える
-  - 出す場所はPR詳細の帯・マージ確認ダイアログ（`PullRequestMergeReview`）・Issue詳細の指摘パネル
+  - 出す場所はPR詳細の帯・マージ確認ダイアログ（`PullRequestMergeReview`）・PR詳細の指摘パネル
     （`PullRequestReviewFindings`）で、**文と色は`ReviewVerdictFreshnessNote`の1か所**に置く。
     同じ判定が画面ごとに違う結論に読めると、色と記号を1か所に集めた意味が消える。
     突き合わせ先の`headSha`は`PullRequestSummary`・`IssuePullRequest`が持つ（PR本体の
@@ -2293,9 +2291,8 @@ export function POST(request: NextRequest) {
 - **developへマージする直前は、判定だけでなく指摘の本文も出し、そのまま修正依頼へ渡せる**
   （#2849。[`lib/github/pull-request-review-comment.ts`](../src/lib/github/pull-request-review-comment.ts)・
   [`pull-request-review-findings.tsx`](../src/components/dashboard/pull-request-review-findings.tsx)）。
-  **置き場所はIssue詳細の上部、対応PRセクションの中**（#2914。
-  [`merge-approval-actions.tsx`](../src/components/dashboard/merge-approval-actions.tsx)）。
-  そこへ投稿されたレビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
+  **置き場所はPR詳細**（#3333。#2914ではIssue詳細の対応PRセクションにも修正依頼欄と一緒に
+  置いていたが、PRへの操作をPR詳細へ一本化した）。PRへ投稿されたレビューコメントを出す。**材料はPRの会話コメントで、PR本文ではない**——本文に残るのは
   `## 検証結果`の判定だけ（#2843）で、何を指摘されたのかはコメントにしか無い。読むのは
   総評の判定マーカー（`issue-deck-review-verdict:… sha=…`）か転記の印
   （`issue-deck-review-report`。#2488）が付いたコメントで、**headと同じコミットへの最後のもの**を
@@ -2307,8 +2304,8 @@ export function POST(request: NextRequest) {
   レビュー・統合セッションは判定をPR本文の`## 検証結果`へ書き、PRコメントに判定マーカーを
   付けない（`scripts/prompts/review-agent.md`）ため、レビュー済みでもここは空になる。何も
   出さないと「指摘が無い」と「誰も本文を残していない」が同じ見た目になる（#2843と同じ考え方）。
-  **取得はマージ待ちのときと、PR詳細の「修正Issueを起案」を押したときだけ**（`usePullRequestReview`・
-  `GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
+  **帯の本文取得はPR詳細の「修正Issueを起案」（送り先がセッションなら「修正を依頼」）を押したときだけ**
+  （`GET /api/pull-requests/review`。PR本体＋コメントで2リクエスト、ポーリングなし）。
   PR詳細（#2961。[`pull-request-fix-issue-bar.tsx`](../src/components/dashboard/pull-request-fix-issue-bar.tsx)・
   [`lib/github/pull-request-fix-issue.ts`](../src/lib/github/pull-request-fix-issue.ts)）では、
   ヘッダーと本文の間の帯の強さをPR本文の判定と「変更を要求」のまま残っている人のレビュー
@@ -2820,7 +2817,20 @@ export function POST(request: NextRequest) {
   **自動更新の取得では読み込み表示（ボタンの無効化・「読み込み中...」）を出さず、更新アイコンの
   回転（`isRefreshing`）だけを出す。** 周期ごとに操作できなくなるのを避けつつ、画面が勝手に
   変わったときに何が起きたのかが分かるようにするため。失敗も画面に出さない（次の周期で回復する）。
-- **Issue画面の「対応PR」は複数持てる。マージボタンはPRの行の中だけに置く**（#1339）。
+- **Issue詳細は「何を完了させるか」、PR詳細は「変更をどう統合するか」を扱う**（#3333）。
+  Issue詳細の対応PRには状態の要約（状態・CI・レビュー・コンフリクト・マージ判定）とPR詳細を開く
+  導線（「PR詳細で操作」、マージ待ちの行は「PR詳細でマージ・修正依頼」）だけを置き、**PRを変更する
+  操作（マージ・クローズ・レビュー指摘の確認・修正依頼・コンフリクト解消の起動・PR起点の修正
+  Issueの起案）はPR詳細だけが持つ。** 以前はIssue詳細の行にも「マージする」（`IssueMergeButton`・
+  #1288）・「マージしない」（#2780。PRと一緒にIssueも対応終了で閉じた）とレビュー本文＋修正依頼欄
+  （`MergeApprovalActions`・#2914）があり、同じマージAPIを使いながら確認ダイアログと判定
+  （PR詳細の`mergeWarnings`・本番マージ判定・リリース内容確認）が2系統に割れ、修正依頼の送信も
+  Issue詳細（PC・スマホ）と`issue-deck-shell.tsx`の3か所に同じ手順があった。いまは確認ダイアログは
+  `PullRequestMergeButton`、修正依頼の送信は`issue-deck-shell.tsx`の`handlePullRequestFixSessionRequest`
+  の1系統。**PR詳細からPRを閉じても元Issueは閉じない**（#3161）——Issueの完了・対応終了は
+  Issue詳細のクローズで明示的に行う。PC版・スマホ版でPR操作が戻ってこないことは
+  `issue-detail-pr-actions.test.ts`がソースの形で見張る。
+- **Issue画面の「対応PR」は複数持てる**（#1339）。
   対応PRの番号はIssueコメント中のPR URLから拾い（[`lib/github/pull-request-link.ts`](../src/lib/github/pull-request-link.ts)の
   `extractPullRequestLinks`）、**1件も見つからないときだけ**Timeline APIのcross-referenceへ
   フォールバックする（`/api/issues/pull-request-link`）。タイトル・状態・CI状態は番号を渡して
@@ -2828,18 +2838,11 @@ export function POST(request: NextRequest) {
   CI状態を足して2）。**コメント中のPR URLは単なる言及も混ざるため**、PR側から推定した対応Issue番号
   （`extractLinkedIssueNumber`）が別のIssueを指すものは
   [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の`selectIssuePullRequests`が落とす
-  （推定できない`null`は残す）。**マージはIssueではなくPRに紐づく操作なので、ボタンは
+  （推定できない`null`は残す）。行は
   [`components/dashboard/issue-pull-request-list.tsx`](../src/components/dashboard/issue-pull-request-list.tsx)
-  の各行の中だけにあり、画面上部の操作列・スマホのヘッダーには置かない。** 「コメント欄まで
-  下げなくても押せる」という#1288の要件は、この一覧をIssue本文より上に置くことで満たしている。
+  が描き、詳細が取れていない行でも番号とPR詳細への導線は出す。この一覧はIssue本文より上に置く。
   ポーリングするのはマージ待ち かつ CI実行中のときだけで、CIが確定したら自分で止まる
-  （`hooks/use-issue-pull-requests.ts`）。**この詳細が届くまでのあいだ、行のマージボタンは
-  「確認中」で押せない**（#2352）。CI・Claudeレビュー・マージ判定のバッジは詳細と一緒に届くため、
-  待っている間の行は「押せる『マージする』だけがある行」に見え、直後にバッジが増えて「判定中」
-  （#1968）へ変わる。その数秒が誤操作の窓になっていた。**空配列だけでは「取得前」と
-  「取得したが詳細が取れなかった」を区別できない**ので、区別はフックが`isLoadingDetails`として
-  持つ（取得が失敗してもfalseになる——取得できなかっただけでマージ不能にしない#1339の扱いは
-  そのまま）。
+  （`hooks/use-issue-pull-requests.ts`）。
 - **詰まったPRの修復は、画面から`POST /api/pull-requests/repair`でGitHub Actionsを起動する**
   （#1293）。ボタンは「CI失敗を自動修正」「コンフリクトを自動解消」の2種類で、マージ待ちPR
   一覧・PR詳細・スマホのリリースシートの進捗に出る。**どのワークフローを起動するかの判定は
@@ -3005,7 +3008,7 @@ export function POST(request: NextRequest) {
     [`components/dashboard/refresh-indicator-button.tsx`](../src/components/dashboard/refresh-indicator-button.tsx)
     にある。
   - **同じ操作を2行に出さない。** リリースのマージ待ちとして出したPRと、確認待ちとして出した
-    Issueに紐づくPRは、PRの区分から落とす（Issue詳細に`issue-merge-button.tsx`があるので
+    Issueに紐づくPRは、PRの区分から落とす（Issue詳細の対応PRからPR詳細を開けるので
     操作は失われず、左メニューの「確認待ち」件数とも食い違わない）。
   - **自動で進行中のもの（`progressing`・Auto-merge有効でCI成功）は出さない。** 人が何も
     しなくてよいものを並べるとベルを開く意味が薄れる。
@@ -3748,7 +3751,7 @@ Issue詳細の⋯メニューの「いまは実施しない」がこれで、パ
 
 ## 「修正をセッションへ送る」の送り先判定は、画面ごとに前段の絞り込みを足して再利用する（#3009）
 
-**マージ承認待ち（Issue詳細の`MergeApprovalActions`・#2919）専用に見えて、実際は
+**マージ承認待ち（旧Issue詳細の修正依頼欄・#2919。#3333でPR詳細へ一本化）専用に見えて、実際は
 `resolvePrFixRequestRoute`（[`pr-fix-request.ts`](../src/lib/dispatch/pr-fix-request.ts)）が
 持つ判定材料は「対象Issueのラベル」と「セッション状態」の2つだけ。** マージ承認待ちかどうか・
 PRがマージ済みかどうかは、この関数の外側で先に判定してから渡す設計になっている。
@@ -4275,7 +4278,8 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
   絞り込まず`upsert`するため問題ない）。**「マージしない」を置くのは、
   `promote-knowledge.yml`が「マージ**またはclose**されるまで次回の判定を見送る」仕様のため**
   （#2950の計画レビューで判明）——closeできないと、判定を再開する手段が無くなる。
-  対応するissue-deck上のIssueは無いため、`issue-merge-button.tsx`と違いIssueのクローズは行わない
+  対応するissue-deck上のIssueは無いため、Issueのクローズは行わない（通常のPRでもPRのクローズと
+  Issueのクローズは連動させない。#3333）
 
 ## エージェント別の一時停止（#2994）とサブスク枠の読み方
 

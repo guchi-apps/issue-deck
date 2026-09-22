@@ -397,8 +397,8 @@ export function buildNotifications(input: BuildNotificationsInput): Notification
 
   // PR側から落とす対象を集める。
   // 1. リリースのマージ待ちとして既に出したPR。
-  // 2. 確認待ちとして既に出したIssueに紐づくPR。Issue詳細に`issue-merge-button.tsx`が
-  //    あるので操作は失われず、左メニューの「確認待ち」件数とも食い違わない。
+  // 2. 確認待ちとして既に出したIssueに紐づくPR。Issue詳細の対応PRからPR詳細を開けるので
+  //    操作は失われず、左メニューの「確認待ち」件数とも食い違わない（#3333）。
   const excludedPullRequestIds = new Set<string>(
     releaseItems.flatMap((item) =>
       item.target.kind === "pull-request" ? [item.target.pullRequestId] : [],

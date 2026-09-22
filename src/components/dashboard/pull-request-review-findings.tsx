@@ -1,11 +1,10 @@
 "use client";
 
-import { ChevronDown, ChevronRight, CornerDownLeft, ExternalLink } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { ReviewVerdictFreshnessNote, VerdictText } from "@/components/dashboard/review-verdict";
-import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
 import { cn } from "@/lib/utils";
@@ -13,19 +12,12 @@ import { cn } from "@/lib/utils";
 /**
  * developへマージする直前に出す、自動レビューの指摘（#2849）。
  *
- * **置き場所はIssue詳細の上部、対応PRセクションの中**（#2914。`MergeApprovalActions`が
- * 修正依頼欄と一緒に描く）。マージボタンと同じ枠に置くのは、**古いコミットへの警告
- * （`isStale`）や指摘を読まないままマージを押せる位置に置かない**ため。以前はコメント一覧の
- * 末尾（承認カード）にあり、上部の対応PRセクションと同じPRの行がその上に重なっていた。
+ * **置き場所はPR詳細**（#3333）。#2914ではIssue詳細の対応PRセクションにも修正依頼欄と一緒に
+ * 置いていたが、PRへの操作（マージ・修正依頼）をPR詳細へ一本化したため、ここだけになった。
  *
  * **判定だけを出すマージ確認ダイアログ（`PullRequestMergeReview`・#2843）の続き。** あちらは
  * 「見過ごした指摘が無いか」を確かめる場所で、指摘の本文は意図して置いていない。こちらは
  * **その指摘を読んで、直させるかどうかを決める場所**なので本文を出す。
- *
- * **「修正依頼に取り込む」はGitHubへ何も送らない。** 押すと下の修正依頼欄が引用で埋まるだけで、
- * 送るのは人が「修正を依頼する」を押したとき。指摘のうちどれを直させるかは、引用から不要な行を
- * 削って決める（リリース前の「修正をIssueにする」が、押しても起票せず埋めたダイアログを開く
- * だけなのと同じ立場。#2838）。
  *
  * **本文は既定で開いておく。** リリースPRの検証結果（`VerificationSummaryPanel`）が既定で
  * 閉じているのは10件以上が並ぶためで、ここは1件しか出ない。閉じておくと、指摘があることに
@@ -36,25 +28,16 @@ export function PullRequestReviewFindings({
   pullRequestNumber,
   pullRequestUrl,
   reviewRunUrl,
-  onImport,
-  isImported,
   className,
 }: {
   /** 読み取れたレビュー。記録が無ければnull（下の「記録がありません」を出す） */
   review: PullRequestReviewCommentContent | null;
-  /** そのレビューが付いているPR番号。見出しと取り込む文面に使う */
+  /** そのレビューが付いているPR番号。見出しに使う */
   pullRequestNumber: number;
   /** PRのURL。レビューコメントのURLが取れないときの「GitHubで読む」の行き先 */
   pullRequestUrl?: string;
   /** レビューが実行中・失敗などで、コメント本文より先に実行状況を確認したいときの行き先 */
   reviewRunUrl?: string | null;
-  /**
-   * 指摘を修正依頼欄へ取り込む。渡さない場合は取り込みボタンを出さない
-   * （マージ済み・修正依頼を送れない画面向け）。
-   */
-  onImport?: () => void;
-  /** 既に取り込み済みか。押し直せるが、文言で「済み」だと分かるようにする */
-  isImported?: boolean;
   className?: string;
 }) {
   const [isOpen, setIsOpen] = useState(true);
@@ -125,9 +108,9 @@ export function PullRequestReviewFindings({
 
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/50 px-3 py-1.5">
         <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
-          {review
-            ? "指摘を下の修正依頼へ引用で取り込みます。送る前に不要な行を削れます。"
-            : "修正させたい内容は、下の修正依頼欄へ書いて送れます。"}
+          {/* 修正依頼の入口はPR詳細上部の帯（`PullRequestFixIssueBar`）。押すと指摘を引用した
+              依頼文・下書きが開く（#3009・#3333） */}
+          指摘を直させるときは、画面上部の「修正を依頼」「修正Issueを起案」から送ります。
         </span>
         {readUrl && (
           <a
@@ -139,12 +122,6 @@ export function PullRequestReviewFindings({
             {reviewRunUrl && review?.htmlUrl === null ? "レビューの実行ログを開く" : "GitHubで読む"}
             <ExternalLink aria-hidden className="size-3" />
           </a>
-        )}
-        {review && onImport && (
-          <Button variant="outline" size="sm" className="shrink-0" onClick={onImport}>
-            <CornerDownLeft />
-            {isImported ? "もう一度取り込む" : "指摘を修正依頼に取り込む"}
-          </Button>
         )}
       </div>
     </div>
