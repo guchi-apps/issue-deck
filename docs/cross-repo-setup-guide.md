@@ -1346,6 +1346,26 @@ op://apps/githubaction-sshkey/PRIVATE_KEY                       ← 1リポジ�
 `?ssh-format=openssh` の有無で取得される形式が変わる。organizationへ寄せる際、多数派かつ
 issue-deckで実績のある **openssh 付きに統一**した。
 
+### `SERVER_SSH_PRIVATE_KEY`はアプリ単位の鍵へ段階移行する予定（#3158）
+
+guchi-apps/vps#255で、VPS rootへの入口（`sudo vps-apply`）は`vps-ci`専用鍵と`authorized_keys`の
+`command=`（forced command。`vps-ssh-gate.sh`が実装例）で絞った。一方`SERVER_SSH_PRIVATE_KEY`は
+上の表のとおり13リポジトリが共有する`github-user`ログイン用の鍵で、forced commandによる制限は
+無い。この鍵1本の漏洩で、`github-user`が読める全アプリの`.env`・`dump.pm2`（各アプリの環境変数）
+を読め、コードを書き換えて再起動できる。
+
+**方針は、`github-user`のUnixユーザーは維持したまま（アプリ数分に分けるとPM2の常駐構成
+`pm2-github-user.service`への影響が大きいため）、アプリ単位の鍵と`vps-ci`と同じforced command
+パターンで実行できる操作を絞ること。** organizationへ共通値を寄せる本節の方針そのものへの
+部分的な方向転換になるため、移行は次の順で段階的に進める。
+
+1. VPS側（`guchi-apps/vps`）に`github-user`向けのforced command gateを実装する
+2. issue-deckの新規アプリ雛形（`src/lib/new-app/scaffold-workflows.ts`）をアプリ専用鍵対応へ切り替える
+3. 既存アプリ（12〜13個）を順次移行し、移行が終わったアプリから`org-secrets-manifest.tsv`の
+   `SERVER_SSH_PRIVATE_KEY`参照を外す
+
+現時点では方針の決定のみで、1・2はそれぞれ別Issueに切り出してある（issue-deck#3158から辿れる）。
+
 ### アプリ間で共有する認証値は提供側の`op://`を参照する（#2624）
 
 アプリ同士がAPIを呼び合うときの共有シークレット（AIDEが他アプリを叩くトークンなど）は、
