@@ -273,6 +273,14 @@ export type SourceAhead = {
    * （わからない場合は制限しない、という他の判定と同じ方針）。
    */
   hasContentDiff: boolean | null;
+  /**
+   * `hasContentDiff`の判定根拠として、`main`とタグで内容が異なっていたファイルのパス（#3344）。
+   *
+   * **「配布が必要」の真偽値だけでは、なぜ必要と判定されたのかを画面から確認できなかった。**
+   * 差分のあったファイル名を添えることで、その場で判定を検証できるようにする。
+   * `hasContentDiff`が`true`のときだけ意味を持つ（`false`・`null`のときは空配列）。
+   */
+  changedFiles: string[];
 };
 
 /** 配布ワークフローの実行（run）のうち画面に出すぶん */
