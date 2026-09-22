@@ -344,20 +344,22 @@ describe("readLabelSuggestAnswers（#3245）", () => {
     expect(labels).toEqual(["30.bug", "31.security"]);
   });
 
-  it("どれもしきい値に届かないときは、確率が最大の1つだけを付ける（種別を最低1つ付ける）", () => {
+  it("どれもしきい値に届かないときは何も付けない（種別以外が最大確率になっても付けない。#3367）", () => {
     const labels = readLabelSuggestAnswers(
       {
         answers: {
           label_0: noul(0.2),
-          label_1: noul(0.05),
-          label_2: noul(0.4),
+          // 3候補のうち最大確率なのは種別ではない31.security。以前はこれが最大というだけで
+          // 付いていたが、種別かどうかを判定できないため付けない
+          label_1: noul(0.4),
+          label_2: noul(0.05),
           priority: choice(JEV_NO_PRIORITY),
         },
       },
       built,
     );
 
-    expect(labels).toEqual(["50.feature"]);
+    expect(labels).toEqual([]);
   });
 
   it("優先度は選ばれたときだけ付け、「付けない」・候補外の答えは付けない", () => {

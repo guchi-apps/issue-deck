@@ -61,14 +61,15 @@ jobs:
             exit 1
           fi
 
-          # 配れるのは自動修復の3種と claude-review-develop.yml・deploy-retry.yml だけ
-          # （#1475・#2134）。ここを緩めると任意のファイル名を作りにいける
+          # 配れるのは自動修復の3種と claude-review-develop.yml・claude-review-fix.yml・deploy-retry.yml だけ
+          # （#1475・#2134・#3363）。ここを緩めると任意のファイル名を作りにいける
           if ! printf '%s' "$TARGETS" | jq -e '
             all(.workflows | type == "array" and length > 0
                 and all(. == "claude-ci-fix.yml"
                         or . == "claude-conflict-resolve.yml"
                         or . == "claude-pr-repair.yml"
                         or . == "claude-review-develop.yml"
+                        or . == "claude-review-fix.yml"
                         or . == "deploy-retry.yml"))' >/dev/null; then
             echo "::error::workflows に配布対象外のファイル名が含まれています"
             exit 1

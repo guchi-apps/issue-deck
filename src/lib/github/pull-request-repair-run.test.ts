@@ -49,6 +49,7 @@ describe("isRepairKind / isRepairRunStatus", () => {
   it("受け付ける値だけを通す", () => {
     expect(isRepairKind("ci")).toBe(true);
     expect(isRepairKind("conflict")).toBe(true);
+    expect(isRepairKind("review")).toBe(true);
     expect(isRepairKind("deploy")).toBe(false);
     expect(isRepairKind(undefined)).toBe(false);
 
@@ -65,6 +66,11 @@ describe("repairRunKey", () => {
 });
 
 describe("isRepairSymptomGone", () => {
+  it("レビュー指摘の修正はPRの状態からは消さない（#3363）", () => {
+    // 修正のpushで判定はいったん未判定へ戻るため、CI成功・コンフリクト無しでも走っている扱い
+    expect(isRepairSymptomGone("review", { mergeable: true, ciState: "success" })).toBe(false);
+  });
+
   it("コンフリクトが解消されていれば、コンフリクト解消は終わっているとみなす", () => {
     expect(isRepairSymptomGone("conflict", { mergeable: true })).toBe(true);
     expect(isRepairSymptomGone("conflict", { mergeable: false })).toBe(false);

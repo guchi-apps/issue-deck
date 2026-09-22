@@ -21,6 +21,7 @@ const OWNERS: Record<string, string> = {
   "split.md": "reusable-issue-dispatch.yml",
   "question.md": "reusable-issue-dispatch.yml",
   "ci-fix.md": "reusable-claude-ci-fix.yml",
+  "review-fix.md": "reusable-claude-review-fix.yml",
   "conflict-resolve.md": "reusable-claude-conflict-resolve.yml",
   "pr-repair.md": "reusable-claude-pr-repair.yml",
   "review-develop.md": "reusable-claude-review-develop.yml",

@@ -4,11 +4,13 @@ import {
   CI_FIX_WORKFLOW_FILE,
   CONFLICT_RESOLVE_WORKFLOW_FILE,
   PR_REPAIR_WORKFLOW_FILE,
+  REVIEW_FIX_WORKFLOW_FILE,
   canRepairFromDeck,
   isRepairWorkflowMissing,
   repairKindsFor,
   repairUnavailableNotices,
   resolveRepairDispatch,
+  supportsRepairKind,
 } from "@/lib/github/pull-request-repair";
 
 describe("resolveRepairDispatch", () => {
@@ -27,6 +29,16 @@ describe("resolveRepairDispatch", () => {
       resolveRepairDispatch({ number: 42, baseRef: "develop", headRef: "issue-123" }, "conflict"),
     ).toEqual({
       workflowFile: CONFLICT_RESOLVE_WORKFLOW_FILE,
+      ref: "develop",
+      inputs: { issue_number: "123" },
+    });
+  });
+
+  it("develop向けのissue-<番号>PRのレビュー指摘はレビュー指摘修正ワークフローへIssue番号を渡す", () => {
+    expect(
+      resolveRepairDispatch({ number: 42, baseRef: "develop", headRef: "issue-123" }, "review"),
+    ).toEqual({
+      workflowFile: REVIEW_FIX_WORKFLOW_FILE,
       ref: "develop",
       inputs: { issue_number: "123" },
     });
@@ -64,6 +76,22 @@ describe("resolveRepairDispatch", () => {
   });
 });
 
+describe("supportsRepairKind", () => {
+  it("レビュー指摘の修正はdevelop向けのissue-<番号>PRだけ", () => {
+    expect(supportsRepairKind({ number: 1, baseRef: "develop", headRef: "issue-9" }, "review")).toBe(true);
+    // Issueに紐づかないPRへは起動先が無い（claude-pr-repair.ymlは受け持たない）
+    expect(supportsRepairKind({ number: 1, baseRef: "main", headRef: "develop" }, "review")).toBe(false);
+    expect(supportsRepairKind({ number: 1, baseRef: "develop", headRef: "release/v1.0.0" }, "review")).toBe(
+      false,
+    );
+  });
+
+  it("CI・コンフリクトはどのPRでも起動先がある", () => {
+    expect(supportsRepairKind({ number: 1, baseRef: "main", headRef: "develop" }, "ci")).toBe(true);
+    expect(supportsRepairKind({ number: 1, baseRef: "main", headRef: "develop" }, "conflict")).toBe(true);
+  });
+});
+
 describe("canRepairFromDeck", () => {
   it("openかつdraftでないPRだけが対象", () => {
     expect(canRepairFromDeck({ state: "open", draft: false })).toBe(true);
@@ -97,6 +125,35 @@ describe("repairKindsFor", () => {
     expect(repairKindsFor({ ...open, ciState: "pending" }, true)).toEqual([]);
     expect(repairKindsFor({ ...open, ciState: "unknown" }, true)).toEqual([]);
     expect(repairKindsFor({ ...open, ciState: null }, true)).toEqual([]);
+  });
+
+  describe("レビュー指摘（#3363）", () => {
+    const issuePr = { ...open, ciState: "success", baseRef: "develop", headRef: "issue-3" } as const;
+    const verdict = (reviewKind: string) => ({ reviewKind });
+
+    it("自動レビューが要修正ならレビュー指摘の修正を出す", () => {
+      expect(repairKindsFor({ ...issuePr, reviewVerdict: verdict("changes-requested") }, true)).toEqual([
+        "review",
+      ]);
+    });
+
+    it("要確認・LGTM・判定なしでは出さない", () => {
+      expect(repairKindsFor({ ...issuePr, reviewVerdict: verdict("needs-check") }, true)).toEqual([]);
+      expect(repairKindsFor({ ...issuePr, reviewVerdict: verdict("lgtm") }, true)).toEqual([]);
+      expect(repairKindsFor({ ...issuePr, reviewVerdict: null }, true)).toEqual([]);
+    });
+
+    it("Issueに紐づかないPR・ブランチ名を渡さない呼び出し元では出さない", () => {
+      expect(
+        repairKindsFor(
+          { ...open, ciState: "success", baseRef: "main", headRef: "develop", reviewVerdict: verdict("changes-requested") },
+          true,
+        ),
+      ).toEqual([]);
+      expect(
+        repairKindsFor({ ...open, ciState: "success", reviewVerdict: verdict("changes-requested") }, true),
+      ).toEqual([]);
+    });
   });
 
   it("draft・closedのPRでは何も出さない", () => {

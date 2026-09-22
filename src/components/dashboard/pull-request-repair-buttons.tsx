@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitMerge, Info, Wrench } from "lucide-react";
+import { GitMerge, Info, MessageSquareWarning, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
@@ -47,6 +47,7 @@ type PullRequestRepairButtonsProps = {
 const KIND_ICON: Record<RepairKind, typeof Wrench> = {
   ci: Wrench,
   conflict: GitMerge,
+  review: MessageSquareWarning,
 };
 
 /**

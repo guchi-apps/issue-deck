@@ -2,9 +2,10 @@ import type { CiState } from "@/lib/github/release-api";
 
 /**
  * PRの詰まりを自動で直す種類（#1293）。
- * `ci`はCIの失敗、`conflict`はbaseブランチとのコンフリクトを指す。
+ * `ci`はCIの失敗、`conflict`はbaseブランチとのコンフリクト、`review`は自動レビューが
+ * 「要修正」と判定した指摘（#3363）を指す。
  */
-export type RepairKind = "ci" | "conflict";
+export type RepairKind = "ci" | "conflict" | "review";
 
 /** Issue専用ブランチの命名規約（`scripts/start-issue.sh`が作成する`issue-<番号>`） */
 const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
@@ -14,6 +15,12 @@ export const CI_FIX_WORKFLOW_FILE = "claude-ci-fix.yml";
 
 /** develop向け`issue-<番号>`PRのコンフリクトを解消するワークフロー（#315） */
 export const CONFLICT_RESOLVE_WORKFLOW_FILE = "claude-conflict-resolve.yml";
+
+/**
+ * develop向け`issue-<番号>`PRで、自動レビューが「要修正」と判定した指摘を直すワークフロー（#3363）。
+ * Issueに紐づかないPR（バンプPR・リリースPR）は自動レビューの対象外のため、受け持たない。
+ */
+export const REVIEW_FIX_WORKFLOW_FILE = "claude-review-fix.yml";
 
 /** Issueに紐づかないPR（バンプPR・develop→mainのリリースPR等）を直すワークフロー（#1293） */
 export const PR_REPAIR_WORKFLOW_FILE = "claude-pr-repair.yml";
@@ -44,6 +51,22 @@ export type RepairTargetPullRequest = {
  * （バンプPR・develop→mainのリリースPR・規約外のPR）は対応するIssueが存在しないため、
  * PR自身へ報告する`claude-pr-repair.yml`が受け持つ。
  */
+const ISSUE_PR_WORKFLOW_FILE: Record<RepairKind, string> = {
+  ci: CI_FIX_WORKFLOW_FILE,
+  conflict: CONFLICT_RESOLVE_WORKFLOW_FILE,
+  review: REVIEW_FIX_WORKFLOW_FILE,
+};
+
+/**
+ * その種類の修復を、このPRへ起動できるか。**`review`はdevelop向け`issue-<番号>`PRだけ**
+ * （#3363）——`claude-pr-repair.yml`はレビュー指摘の修正を受け持たないため、それ以外のPRへ
+ * 起動すると入力の検証で必ず落ちる。`ci`・`conflict`はどのPRでも起動先がある。
+ */
+export function supportsRepairKind(pullRequest: RepairTargetPullRequest, kind: RepairKind): boolean {
+  if (kind !== "review") return true;
+  return ISSUE_BRANCH_PATTERN.test(pullRequest.headRef) && pullRequest.baseRef === "develop";
+}
+
 export function resolveRepairDispatch(
   pullRequest: RepairTargetPullRequest,
   kind: RepairKind,
@@ -51,7 +74,7 @@ export function resolveRepairDispatch(
   const issueMatch = ISSUE_BRANCH_PATTERN.exec(pullRequest.headRef);
   if (issueMatch && pullRequest.baseRef === "develop") {
     return {
-      workflowFile: kind === "ci" ? CI_FIX_WORKFLOW_FILE : CONFLICT_RESOLVE_WORKFLOW_FILE,
+      workflowFile: ISSUE_PR_WORKFLOW_FILE[kind],
       ref: REPAIR_DISPATCH_REF,
       inputs: { issue_number: issueMatch[1] },
     };
@@ -84,7 +107,15 @@ export function canRepairFromDeck(pullRequest: {
  * ワークフロー側で弾かれるだけになる）。
  */
 export function repairKindsFor(
-  pullRequest: { state: "open" | "closed"; draft: boolean; ciState: CiState | null },
+  pullRequest: {
+    state: "open" | "closed";
+    draft: boolean;
+    ciState: CiState | null;
+    /** 渡さない呼び出し元（リリース進捗など）では`review`を出さない */
+    baseRef?: string;
+    headRef?: string;
+    reviewVerdict?: { reviewKind: string } | null;
+  },
   mergeable: boolean | null | undefined,
 ): RepairKind[] {
   if (!canRepairFromDeck(pullRequest)) return [];
@@ -92,6 +123,16 @@ export function repairKindsFor(
   const kinds: RepairKind[] = [];
   if (mergeable === false) kinds.push("conflict");
   if (pullRequest.ciState === "failure") kinds.push("ci");
+  // 自動レビューが「要修正」と判定したPR（#3363）。判定の後にコミットが積まれていても出す——
+  // 押した先のワークフローが最新のレビューを読み直し、直っていれば何もせずに終わるため
+  if (
+    pullRequest.reviewVerdict?.reviewKind === "changes-requested" &&
+    pullRequest.baseRef !== undefined &&
+    pullRequest.headRef !== undefined &&
+    supportsRepairKind({ number: 0, baseRef: pullRequest.baseRef, headRef: pullRequest.headRef }, "review")
+  ) {
+    kinds.push("review");
+  }
   return kinds;
 }
 
@@ -99,6 +140,7 @@ export function repairKindsFor(
 export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   ci: "CI失敗を自動修正",
   conflict: "コンフリクトを自動解消",
+  review: "レビュー指摘を自動修正",
 };
 
 /**
@@ -110,18 +152,21 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
 export const REPAIR_KIND_RUNNING_LABEL: Record<RepairKind, string> = {
   ci: "CI失敗を自動修正中",
   conflict: "コンフリクトを自動解消中",
+  review: "レビュー指摘を自動修正中",
 };
 
 /** 幅の狭い場所（通知ベル・スマホの一覧）で使う短い言い回し（#2072） */
 export const REPAIR_KIND_RUNNING_SHORT_LABEL: Record<RepairKind, string> = {
   ci: "自動修正中",
   conflict: "自動解消中",
+  review: "自動修正中",
 };
 
 /** 未配布を説明するときに使う、修復の種類の呼び方（#1960） */
 const REPAIR_KIND_WORKFLOW_LABEL: Record<RepairKind, string> = {
   ci: "CI失敗修正",
   conflict: "コンフリクト解消",
+  review: "レビュー指摘修正",
 };
 
 /**
@@ -191,4 +236,6 @@ export const REPAIR_KIND_DESCRIPTION: Record<RepairKind, string> = {
   ci: "失敗したCIのログをClaude Codeが読んで原因を修正し、検証したうえでpushします。",
   conflict:
     "baseブランチの最新をClaude Codeが取り込み、コンフリクトを解消して検証したうえでpushします。",
+  review:
+    "自動レビューの指摘をClaude Codeが読んで修正し、検証したうえでpushします。判断が要る指摘は直さず、Issueで確認を求めます。",
 };

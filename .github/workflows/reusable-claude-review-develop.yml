@@ -161,6 +161,15 @@ on:
         required: false
         type: string
         default: relaxed
+      review-auto-fix:
+        description: >-
+          自動レビューが「要修正」と判定し、しかも「人の判断が要らない指摘だけ」と印を付けたとき、
+          00.check-userで人へ渡さずに claude-review-fix.yml（レビュー指摘の自動修正）へ渡すか
+          (#3363)。true(既定)でも、そのリポジトリに claude-review-fix.yml が置かれていなければ
+          従来どおり人へ渡る。falseにすると常に従来どおり。
+        required: false
+        type: boolean
+        default: true
       enable-auto-merge:
         description: >-
           自動マージを有効にするか。true(既定)は従来どおり判定を通ったPRへ
@@ -919,6 +928,7 @@ jobs:
       # ラベル付与・コメント投稿の名義を従来のgithub-actions[bot]から変えないため
       # (docs/attribution.md)。
       - name: マージ保留の判定を反映する
+        id: hold
         if: needs.identify-issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -930,6 +940,7 @@ jobs:
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
+          REVIEW_AUTO_FIX: ${{ inputs.review-auto-fix }}
         run: |
           set -e
 
@@ -961,6 +972,46 @@ jobs:
           if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
             exit 0
+          fi
+
+          # レビュー指摘の自動修正へ渡すか(#3363)。止めた理由がレビューの「要修正」だけで、
+          # レビュー自身が「人の判断が要らない指摘だけ」と印を付けたときに限り、00.check-userを
+          # 付けずに claude-review-fix.yml へ渡す。**印が無ければ人へ渡す(フェイルセーフ)**。
+          # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
+          # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
+          # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
+          if [ "$REVIEW_BLOCKED" = "true" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+            HANDOFF_BLOCKER=""
+            AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
+            HANDOFF_MAX=2
+            HANDOFF_COUNT="$(printf '%s' "$ISSUE_COMMENTS" | grep -c "issue-deck-review-fix:handoff sha=" || true)"
+            if ! gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$AUTOFIX_MARKER"; then
+              HANDOFF_BLOCKER="レビューが「人の判断が要らない指摘だけ」と判定していない"
+            elif gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qxE '11\.local|00\.check-user'; then
+              HANDOFF_BLOCKER="対応Issueに 11.local または 00.check-user が付いている"
+            elif ! gh api "repos/${GH_REPO}/contents/.github/workflows/claude-review-fix.yml" --silent >/dev/null 2>&1; then
+              HANDOFF_BLOCKER="claude-review-fix.yml がこのリポジトリに無い"
+            elif [ "$(gh pr view "$PR_NUMBER" --json merged --jq .merged 2>/dev/null || echo false)" = "true" ]; then
+              HANDOFF_BLOCKER="PRが既にマージされている"
+            elif [ "$HANDOFF_COUNT" -ge "$HANDOFF_MAX" ]; then
+              HANDOFF_BLOCKER="自動修正を${HANDOFF_COUNT}回試みた"
+              LIMIT_BODY="⚠️ レビュー指摘の自動修正を${HANDOFF_COUNT}回試みましたが、まだ「要修正」と判定されています。繰り返しを避けるため自動修正を止め、確認を待ちます。内容を確認してから、issue-deckのPR画面の「レビュー指摘を自動修正」で再実行するか、修正を依頼してください。"
+              gh issue comment "$ISSUE_NUMBER" --body "$LIMIT_BODY"$'\n\n<!-- issue-deck-source:claude-review-fix -->' \
+                || echo "::warning::上限到達のコメントを投稿できませんでした"
+            fi
+
+            if [ -z "$HANDOFF_BLOCKER" ]; then
+              ATTEMPT=$((HANDOFF_COUNT + 1))
+              BODY="🛠️ 自動レビューが「要修正」と判定しましたが、人の判断が要らない指摘だけのため、確認待ちにせず自動修正へ回します（${ATTEMPT}/${HANDOFF_MAX}回目）。直した後に再レビューされ、問題が無ければそのまま自動マージされます。"
+              BODY="$BODY"$'\n\n'"指摘の内容: PR #${PR_NUMBER} のレビューコメント"
+              BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-review-fix -->'
+              BODY="$BODY"$'\n'"<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"
+              gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+              echo "レビュー指摘の自動修正へ渡しました（${ATTEMPT}/${HANDOFF_MAX}回目）。00.check-userは付与しません。"
+              echo "handoff=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "レビュー指摘の自動修正へは渡しません: ${HANDOFF_BLOCKER}"
           fi
 
           REASON_LABEL="01.check-merge"
@@ -1040,6 +1091,7 @@ jobs:
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
+          REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
         run: |
           set -euo pipefail
 
@@ -1096,7 +1148,9 @@ jobs:
             RISK_TEXT="該当なし"
           fi
 
-          if [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ]; then
+          if [ "$REVIEW_FIX_HANDOFF" = "true" ]; then
+            CONFIRM_TEXT="不要（指摘を自動修正へ回しました。直した後に再レビューされます）"
+          elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ]; then
             CONFIRM_TEXT="必要（自動マージはスキップされます）"
           else
             CONFIRM_TEXT="不要（自動マージの対象）"
@@ -1153,9 +1207,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
         run: |
           if [ -z "$ISSUE_NUMBER" ]; then
             echo "対応Issue番号を特定できないため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          # レビュー指摘の自動修正へ渡したPR(#3363)は、00.check-userを付けていないが
+          # 「要修正」のままなのでマージしない。直したpushで走る次のレビューが改めて判定する
+          if [ "$REVIEW_FIX_HANDOFF" = "true" ]; then
+            echo "レビュー指摘の自動修正へ渡したため、自動マージをスキップします。"
             exit 0
           fi
 

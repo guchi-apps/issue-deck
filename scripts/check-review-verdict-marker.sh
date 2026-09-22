@@ -211,6 +211,40 @@ for file in "$RELEASE_WORKFLOW" "$PARSER"; do
   fi
 done
 
+# --- レビュー指摘の自動修正への渡し（#3363）---
+#
+# 2つの印が3ファイルにまたがる。**どちらもずれても赤くならない**——自動修正OKの印が読めないと
+# 常に人へ渡り（機能が黙って止まる）、渡しの印が読めないと`claude-review-fix.yml`が着手せず、
+# **00.check-userも付かないまま「要修正」のPRが放置される**。
+FIX_WORKFLOW=".github/workflows/reusable-claude-review-fix.yml"
+[ -f "$FIX_WORKFLOW" ] || { echo "エラー: $FIX_WORKFLOW が見つかりません" >&2; exit 1; }
+
+AUTOFIX_PROMPT='<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->'
+AUTOFIX_READ='AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"'
+HANDOFF_WRITE='<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->'
+HANDOFF_READ='HANDOFF="<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"'
+
+if ! grep -qF "$AUTOFIX_PROMPT" "$PROMPT"; then
+  echo "エラー: $PROMPT に自動修正OKの印の指示が見つかりません。" >&2
+  echo "  期待する行: $AUTOFIX_PROMPT" >&2
+  fail=1
+fi
+if ! grep -qF "$AUTOFIX_READ" "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW に自動修正OKの印の読み取りが見つかりません。" >&2
+  echo "  期待する行: $AUTOFIX_READ" >&2
+  fail=1
+fi
+if ! grep -qF "$HANDOFF_WRITE" "$WORKFLOW"; then
+  echo "エラー: $WORKFLOW に自動修正への渡しの印の書き込みが見つかりません。" >&2
+  echo "  期待する文字列: $HANDOFF_WRITE" >&2
+  fail=1
+fi
+if ! grep -qF "$HANDOFF_READ" "$FIX_WORKFLOW"; then
+  echo "エラー: $FIX_WORKFLOW に自動修正への渡しの印の読み取りが見つかりません。" >&2
+  echo "  期待する行: $HANDOFF_READ" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
@@ -220,3 +254,4 @@ echo "OK: 総評の判定マーカーと検証結果の節の契約も揃って�
 echo "OK: レビュー本文の折りたたみのマーカーも揃っています（#2488）"
 echo "OK: マージ待ちのレビュー指摘パネルの読み取りも揃っています（#2849）"
 echo "OK: 判定時点のコミット（sha=）の書き込みと読み取りも揃っています（#3172）"
+echo "OK: レビュー指摘の自動修正への渡しの印も揃っています（#3363）"

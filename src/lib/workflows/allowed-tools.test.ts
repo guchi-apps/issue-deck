@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 const WORKFLOWS = [
   "reusable-issue-dispatch.yml",
   "reusable-claude-ci-fix.yml",
+  "reusable-claude-review-fix.yml",
   "reusable-claude-conflict-resolve.yml",
   "reusable-claude-pr-repair.yml",
 ] as const;

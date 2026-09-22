@@ -3,7 +3,8 @@
 #
 # propagate-repair-workflows.yml から1リポジトリずつ呼ばれる。配るのは
 # claude-conflict-resolve.yml / claude-ci-fix.yml / claude-pr-repair.yml の自動修復3種と、
-# develop向けPRの自動マージ可否を判定する claude-review-develop.yml、
+# develop向けPRの自動マージ可否を判定する claude-review-develop.yml、その「要修正」を直す
+# claude-review-fix.yml（#3363）、
 # 本番デプロイの一時的な失敗を1回だけ再実行する deploy-retry.yml（#2134）で、
 # **どれを配るかは呼び出し元（issue-deckの画面）が決めて渡す**（ここで再検知すると画面の
 # 表示と実際の対象がずれる。propagate-workflow-tag.sh と同じ方針）。
@@ -127,7 +128,7 @@ CREATED=""
 REPAIRED=""
 for FILE in $WORKFLOWS; do
   case "$FILE" in
-    claude-ci-fix.yml | claude-conflict-resolve.yml | claude-pr-repair.yml | claude-review-develop.yml) ;;
+    claude-ci-fix.yml | claude-conflict-resolve.yml | claude-pr-repair.yml | claude-review-develop.yml | claude-review-fix.yml) ;;
     deploy-retry.yml)
       # **購読先の名前が取れないなら配らない。** 既定値で埋めると、名前の違うリポジトリで
       # 「置いてあるのに一度も発火しない」ワークフローが残り、そのことに誰も気づけない。
@@ -277,7 +278,7 @@ if ! git push --quiet -u origin "$BRANCH"; then
     || fail "pushに失敗しました"
 fi
 
-PR_BODY="$(printf '## 実装内容\n\nこのリポジトリに置かれていなかったワークフロー（caller）を追加し、置かれてはいるが\nYAMLとして読めなくなっていたものを雛形から作り直した。\n\n%s\n参照タグ: `%s`（`claude-issue-dispatch.yml` と同じ）\nCIワークフロー名: `%s`（`workflow_run` の購読先）\n\n`with:` の `runtime-setup`・`package-manager`・`node-version` は `claude-issue-dispatch.yml`\nから写している（自動修復の3種のみ。`claude-review-develop.yml` はこれらの入力を宣言して\nいないため写していない）。**`verify-commands`・`build-env` は入っていない**（リポジトリごとに\n違うため）。検証を強くしたい場合は、%s 本体の同名ファイルを参考に後から足す。\n\n### 自動マージの前提（`claude-review-develop.yml`を含む場合）\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、Actionsの一覧に追加したワークフローが出ること\n- issue-deckの画面で、詰まっているPRの「CI失敗を自動修正」「コンフリクトを自動解消」が\n  エラーにならずに起動すること（`workflow_dispatch` の受け口はデフォルトブランチの定義から\n  解決されるため、**マージするまでは起動できない**）\n- `claude-review-develop.yml` を含む場合: マージ後の次のdevelop向けPRで `Claude Code Review`\n  が走り、低リスクPRなら `00.check-user` が付かずに自動マージされること\n\n## 注意点\n\n- **`workflow_run` はワークフローの名前で購読する。** このリポジトリのCIの名前が `%s` から\n  変わったら、このファイルも直す（黙って発火しなくなる）。`deploy-retry.yml` を含む場合は\n  本番デプロイの名前（`%s`）も同じ扱い\n- **`deploy-retry.yml` が再実行するのは `build`・`deploy` ジョブの失敗だけ。** このリポジトリの\n  `deploy.yml` のジョブ名が違う場合は、`with:` に `retryable-jobs` を足して合わせる\n  （合っていないジョブだけが失敗したときは、安全側に倒れて再実行しない）\n- **`claude-review-develop.yml` の自動マージには `develop` のブランチ保護が要る。** 保護が\n  無いと `gh pr merge --auto` が「既にマージ可能」として断られ、毎回 `00.check-user` が付く\n  だけで終わる（上の「自動マージの前提」を参照）\n- **自動マージしない。** 新しいワークフローの追加はGitHub Actionsの変更にあたるため、\n  内容を確認して手でマージする\n- **作り直したファイルは中身が雛形へ戻る。** このリポジトリだけで足していた `verify-commands`・\n  `build-env` などがあれば、マージ前に差分を見て入れ直すこと\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' "$CHANGE_LINES" "$TAG" "$CI_WORKFLOW" "$SOURCE_REPO" "$PREREQ_NOTE" "$CI_WORKFLOW" "$DEPLOY_WORKFLOW" "$SOURCE_REPO")"
+PR_BODY="$(printf '## 実装内容\n\nこのリポジトリに置かれていなかったワークフロー（caller）を追加し、置かれてはいるが\nYAMLとして読めなくなっていたものを雛形から作り直した。\n\n%s\n参照タグ: `%s`（`claude-issue-dispatch.yml` と同じ）\nCIワークフロー名: `%s`（`workflow_run` の購読先）\n\n`with:` の `runtime-setup`・`package-manager`・`node-version` は `claude-issue-dispatch.yml`\nから写している（自動修復の3種のみ。`claude-review-develop.yml` はこれらの入力を宣言して\nいないため写していない）。**`verify-commands`・`build-env` は入っていない**（リポジトリごとに\n違うため）。検証を強くしたい場合は、%s 本体の同名ファイルを参考に後から足す。\n\n### 自動マージの前提（`claude-review-develop.yml`を含む場合）\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、Actionsの一覧に追加したワークフローが出ること\n- issue-deckの画面で、詰まっているPRの「CI失敗を自動修正」「コンフリクトを自動解消」が\n  エラーにならずに起動すること（`workflow_dispatch` の受け口はデフォルトブランチの定義から\n  解決されるため、**マージするまでは起動できない**）\n- `claude-review-develop.yml` を含む場合: マージ後の次のdevelop向けPRで `Claude Code Review`\n  が走り、低リスクPRなら `00.check-user` が付かずに自動マージされること\n\n## 注意点\n\n- **`workflow_run` はワークフローの名前で購読する。** このリポジトリのCIの名前が `%s` から\n  変わったら、このファイルも直す（黙って発火しなくなる）。`deploy-retry.yml` を含む場合は\n  本番デプロイの名前（`%s`）も同じ扱い\n- **`claude-review-fix.yml` は `claude-review-develop.yml` の名前（`Claude Code Review (develop向けPR)`）で\n  購読する。** レビューのワークフロー名を変えたら、こちらも直す\n- **`deploy-retry.yml` が再実行するのは `build`・`deploy` ジョブの失敗だけ。** このリポジトリの\n  `deploy.yml` のジョブ名が違う場合は、`with:` に `retryable-jobs` を足して合わせる\n  （合っていないジョブだけが失敗したときは、安全側に倒れて再実行しない）\n- **`claude-review-develop.yml` の自動マージには `develop` のブランチ保護が要る。** 保護が\n  無いと `gh pr merge --auto` が「既にマージ可能」として断られ、毎回 `00.check-user` が付く\n  だけで終わる（上の「自動マージの前提」を参照）\n- **自動マージしない。** 新しいワークフローの追加はGitHub Actionsの変更にあたるため、\n  内容を確認して手でマージする\n- **作り直したファイルは中身が雛形へ戻る。** このリポジトリだけで足していた `verify-commands`・\n  `build-env` などがあれば、マージ前に差分を見て入れ直すこと\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' "$CHANGE_LINES" "$TAG" "$CI_WORKFLOW" "$SOURCE_REPO" "$PREREQ_NOTE" "$CI_WORKFLOW" "$DEPLOY_WORKFLOW" "$SOURCE_REPO")"
 
 PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
   --title "不足しているワークフローを追加する" \
