@@ -108,7 +108,7 @@ scripts/fetch-issue-images.sh "<画像URL>"
 ## 責務とIssueに残す記録
 
 - Issueの要件を実装し、テスト・Lint・型チェック・ビルドを実行して、コミット・pushする
-- `develop`向けPRを作成する。本文には対応Issue・実装内容・テスト内容・確認方法・注意点を書き、Issueは`closes`を使わず`#{{ISSUE_NUMBER}}`のように番号だけを書く。進捗（`Implementation`→`Develop PR`）はpushとPR作成を契機に自動で報告されるので、自分では動かさない
+- `develop`向けPRを作成する。本文の構成は[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)「PRテンプレート」（正は`CLAUDE.md`「PR本文テンプレート」）に従う：対応Issue・Issueを閉じるPRか途中PRか（`<!-- issue-deck-pr-role:closing -->`または`<!-- issue-deck-pr-role:interim -->`をその項目に書く）・実装内容・実装上の判断と採用理由（該当する場合）・テスト内容・画面変更や動作証跡（該当する場合）・影響範囲・未対応事項・デプロイ／移行／ロールバック上の注意（該当する場合）・確認方法・注意点。Issueは`closes`を使わず`#{{ISSUE_NUMBER}}`のように番号だけを書く。進捗（`Implementation`→`Develop PR`）はpushとPR作成を契機に自動で報告されるので、自分では動かさない
 - **PRを作ったら最後に`gh issue comment {{ISSUE_NUMBER}}`で完了報告を投稿する。** 内容はPRのURL・変更の要約（触ったファイルと対応内容の箇条書き）・実行したテストと確認の内容
 - PRを作ってローカルでの作業を終える時点で`11.local`を外す（付けたままだと無人実行がこのIssueへ追加対応できない）
 - 後から参照する価値のある判断（方針の変更・見送った案と理由・仕様に影響する追加指示）と、作業を中断する場合の到達点・残りは、Issueコメントに残す。着手した旨のコメントは投稿しない（起動時に自動で投稿済み）。コメント投稿に失敗しても実装は止めない

@@ -82,6 +82,25 @@ function IssuePullRequestStateBadge({ pullRequest }: { pullRequest: IssuePullReq
   );
 }
 
+const ROLE_LABEL: Record<NonNullable<IssuePullRequest["role"]>, string> = {
+  closing: "最終PR",
+  interim: "途中PR",
+};
+
+/**
+ * 「このIssueを閉じるPRか、途中PRか」のバッジ（#3334）。developへのマージではissueを
+ * 自動クローズしない運用のため、GitHubの`closes`/`fixes`の代わりにPR本文のマーカー
+ * （`lib/github/pull-request-role.ts`）から読む。1 Issueに複数PRがぶら下がる場合に、
+ * どれが最終PRかを一覧から読めるようにする。マーカーが無いPR（導入前のPR等）では出さない。
+ */
+function IssuePullRequestRoleBadge({ role }: { role: NonNullable<IssuePullRequest["role"]> }) {
+  return (
+    <span className="inline-flex w-fit items-center rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-600 ring-1 ring-inset ring-sky-500 dark:text-sky-400">
+      {ROLE_LABEL[role]}
+    </span>
+  );
+}
+
 /**
  * 状態ごとの件数バッジ（例:「マージ済み 5」「Open 1」）。
  *
@@ -177,6 +196,7 @@ export function IssuePullRequestList({
                 {detail && <span className="truncate font-normal">{detail.title}</span>}
               </GithubReferenceLink>
               {detail && <IssuePullRequestStateBadge pullRequest={detail} />}
+              {detail?.role && <IssuePullRequestRoleBadge role={detail.role} />}
               {detail && progress && <PullRequestProgressLabel progress={progress} />}
               {/* 内訳を出さない行（マージ済み・クローズ・下書き）は、従来どおりバッジで言う。
                   CI・レビュー・コンフリクト・判定は内訳の工程に入っているので、内訳がある行では出さない */}

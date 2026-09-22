@@ -35,6 +35,7 @@ function pullRequest(number: number): IssuePullRequest {
     mergeable: true,
     repairRun: null,
     linkedIssueNumber: 2352,
+    role: null,
     reviewVerdict: null,
     headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
   };

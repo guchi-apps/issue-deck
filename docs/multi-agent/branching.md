@@ -322,7 +322,7 @@ Issueごとに独立したClaude Codeセッションとして起動する。
 - Issueの要件を実装する
 - テスト・Lint・型チェック・ビルドを実行する
 - 変更をコミットしてpushする
-- `develop`向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載。developマージ時点ではissueをcloseしない運用のため、`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載する）
+- `develop`向けPull Requestを作成する。本文の構成は[Issue・PRの責任モデル](../issue-pr-responsibility-model.md)「PRテンプレート」（正は`CLAUDE.md`「PR本文テンプレート」）に従う。developマージ時点ではissueをcloseしない運用のため`closes #番号`/`fixes #番号`は使わず`#番号`のみ記載し、代わりに「Issueを閉じるPRか、途中PRか」を`issue-deck-pr-role`マーカーで明示する
 - PR作成をトリガーとした`Implementation`→`Develop PR`の遷移（ワークフローが自動で報告する）
 - 全アプリ共通の共有知識（`.shared-context/`）を必要な範囲で参照する
 - 実装中に得た知見を`docs/`へ同梱し、あわせて同じ内容を対応Issueへ「知見メモ」（`<!-- knowledge-candidate -->`）として投稿する。共有知識へ格上げするかどうかは判定しない（共有知識リポジトリ自体も編集しない。[docs/shared-knowledge.md](../shared-knowledge.md)参照）

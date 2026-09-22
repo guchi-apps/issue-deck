@@ -139,4 +139,30 @@ describe("GET /api/issues/pull-requests", () => {
 
     expect(body.pullRequests[0].repairRun).toEqual(RUN);
   });
+
+  // PR本文の`issue-deck-pr-role`マーカーを`role`として返す（#3334）。
+  it("PR本文のロールマーカーを読み取る", async () => {
+    fetchPullRequest.mockResolvedValue({
+      number: 222,
+      html_url: "https://github.com/guchi-apps/myroom/pull/222",
+      title: "エアコンをダッシュボードから操作できるようにする",
+      state: "open",
+      draft: false,
+      merged: false,
+      head: { ref: "issue-213" },
+      body: "- Issueを閉じるPRか、途中PRか: 最終PRです。<!-- issue-deck-pr-role:closing -->",
+    });
+
+    const response = await GET(request());
+    const body = (await response.json()) as IssuePullRequestListResponse;
+
+    expect(body.pullRequests[0].role).toBe("closing");
+  });
+
+  it("マーカーが無いPRではroleがnull", async () => {
+    const response = await GET(request());
+    const body = (await response.json()) as IssuePullRequestListResponse;
+
+    expect(body.pullRequests[0].role).toBeNull();
+  });
 });
