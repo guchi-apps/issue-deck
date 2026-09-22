@@ -227,7 +227,7 @@ Issueの種類に応じたテンプレート差分は、既にある実例をそ
 | PRマージ後、Issueに残っている完了条件や確認作業を表示する | Issue本文のタスクリスト表示（`use-issue-task-list.ts`）で実装済み。専用の「完了条件パネル」は設けず、Issue本文をそのまま使う |
 | PRだけで要件が変更されている場合に気づける情報構造を検討する | 検討の結果、専用の仕組みは設けない。「PRだけで仕様を変更せず、先にIssueの要件・完了条件を更新する」という運用規則で担保し、レビューエージェントがIssueとの整合を確認する責務（「担当ごとの責任」表）に含める |
 | Issue／PRの新規作成時にテンプレートを利用できるようにする | Issue側はUI選択式を持たず、本ドキュメントのガイドラインをChatGPT・実装エージェントが参照する形（上記「Issueテンプレート」参照）。PR側は実装エージェント用プロンプトが本ドキュメントの構成に従う |
-| エージェント用プロンプト・共有ワークフローにも同じ規則を反映する | issue-deck自身のIssueを扱う`.github/prompts/implement.md`・`scripts/prompts/implementation-agent.md`を更新済み（#3334）。他リポジトリ向け汎用ランチャー（`scripts/prompts/generic-implementation-agent.md`）は対象外（上記「PRテンプレート」参照） |
+| エージェント用プロンプト・共有ワークフローにも同じ規則を反映する | 実装エージェント側は`.github/prompts/implement.md`・`scripts/prompts/implementation-agent.md`、レビューエージェント側は`.github/prompts/review-develop.md`・`scripts/prompts/review-agent.md`を更新済み（#3334）。他リポジトリ向け汎用ランチャー（`scripts/prompts/generic-implementation-agent.md`）は対象外（上記「PRテンプレート」参照） |
 | 既存リポジトリ固有のルールがある場合は、共通規則より固有ルールを優先できるようにする | `CLAUDE.md`「参照の優先順位」が既にこの構造（Issue本文＞`CLAUDE.md`＞リポジトリの`docs/`＞共有知識）を持つ。本ドキュメントもこの優先順位の下に位置する一次情報源として扱う |
 
 ## 既存Issue・PRとの互換性・移行方法
