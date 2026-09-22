@@ -233,49 +233,96 @@ type ContentDiffRepository = {
   ref: { compare: { aheadBy: number } | null } | null;
   tagWorkflows: { entries?: TreeEntryRef[] | null } | null;
   mainWorkflows: { entries?: TreeEntryRef[] | null } | null;
-} & Record<string, { oid: string } | null>;
+} & Record<string, unknown>;
+
+/** Treeのentriesを`{ファイル名: oid}`へ変換。取れなければnull */
+function treeEntryOids(
+  tree: { entries?: TreeEntryRef[] | null } | null | undefined,
+): Record<string, string> | null {
+  if (!tree?.entries) return null;
+  const result: Record<string, string> = {};
+  for (const entry of tree.entries) result[entry.name] = entry.oid;
+  return result;
+}
 
 /** Treeのentriesから`reusable-*.yml`だけを`{ファイル名: oid}`へ絞る。取れなければnull */
 function reusableWorkflowOids(
   tree: { entries?: TreeEntryRef[] | null } | null,
 ): Record<string, string> | null {
-  if (!tree?.entries) return null;
+  const all = treeEntryOids(tree);
+  if (!all) return null;
   const result: Record<string, string> = {};
-  for (const entry of tree.entries) {
-    if (entry.name.startsWith(REUSABLE_WORKFLOW_PREFIX) && entry.name.endsWith(".yml")) {
-      result[entry.name] = entry.oid;
-    }
+  for (const [name, oid] of Object.entries(all)) {
+    if (name.startsWith(REUSABLE_WORKFLOW_PREFIX) && name.endsWith(".yml")) result[name] = oid;
   }
   return result;
 }
 
+/** 2つの{ファイル名: oid}マップを比較し、内容が異なるファイル名（パス接頭辞付き）を返す */
+function changedEntryNames(
+  tag: Record<string, string>,
+  main: Record<string, string>,
+  pathPrefix: string,
+): string[] {
+  const names = new Set([...Object.keys(tag), ...Object.keys(main)]);
+  return [...names].filter((name) => tag[name] !== main[name]).map((name) => `${pathPrefix}${name}`);
+}
+
 /**
- * タグで固定される配布物の内容が`main`と同じかを判定する（#2941）。
+ * タグで固定される配布物の内容が`main`と同じかを判定する（#2941）。判定根拠として、
+ * 差分のあったファイル名も返す（#3344）。
  *
- * 1つでも差分があれば即`true`。1つでも取得できなければ`null`（わからない＝ブロックしない）。
- * どちらでもなければ`false`（配布物すべてが完全一致）。
+ * **「配布が必要」の真偽値だけでは、なぜ必要と判定されたのかを画面から確認できなかった。**
+ * 差分のあったファイル名を`changedFiles`へ集め、「特定のPRが入った場合にのみ必要」という
+ * 前提を画面上で検証できるようにする。
+ *
+ * 1つでも差分が見つかれば即`hasContentDiff: true`（見つかった時点の`changedFiles`を返す。
+ * 他のパスが取得できていなくても結論は変わらないため、取得エラーは待たない）。差分が1件も
+ * 見つからなかった場合だけ、取得できなかったパスが無いかを確認し、あれば`null`
+ * （わからない＝ブロックしない）、無ければ`false`（配布物すべてが完全一致）。
  */
-function computeHasContentDiff(repository: ContentDiffRepository | null): boolean | null {
-  if (!repository) return null;
+function computeContentDiff(
+  repository: ContentDiffRepository | null,
+): { hasContentDiff: boolean | null; changedFiles: string[] } {
+  if (!repository) return { hasContentDiff: null, changedFiles: [] };
 
   const tagReusable = reusableWorkflowOids(repository.tagWorkflows);
   const mainReusable = reusableWorkflowOids(repository.mainWorkflows);
-  if (!tagReusable || !mainReusable) return null;
-  const reusableNames = new Set([...Object.keys(tagReusable), ...Object.keys(mainReusable)]);
-  if ([...reusableNames].some((name) => tagReusable[name] !== mainReusable[name])) return true;
+  if (!tagReusable || !mainReusable) return { hasContentDiff: null, changedFiles: [] };
 
-  const otherPairs = [
-    ...CONTENT_DIFF_BLOB_PATHS.map((_path, index) => ({
-      tag: repository[`tagBlob${index}`]?.oid,
-      main: repository[`mainBlob${index}`]?.oid,
-    })),
-    ...CONTENT_DIFF_TREE_PATHS.map((_path, index) => ({
-      tag: repository[`tagTree${index}`]?.oid,
-      main: repository[`mainTree${index}`]?.oid,
-    })),
-  ];
-  if (otherPairs.some((pair) => !pair.tag || !pair.main)) return null;
-  return otherPairs.some((pair) => pair.tag !== pair.main);
+  const changedFiles = changedEntryNames(tagReusable, mainReusable, ".github/workflows/");
+
+  CONTENT_DIFF_BLOB_PATHS.forEach((path, index) => {
+    const tag = (repository[`tagBlob${index}`] as { oid: string } | null)?.oid;
+    const main = (repository[`mainBlob${index}`] as { oid: string } | null)?.oid;
+    if (tag && main && tag !== main) changedFiles.push(path);
+  });
+
+  CONTENT_DIFF_TREE_PATHS.forEach((path, index) => {
+    const tag = treeEntryOids(
+      repository[`tagTree${index}`] as { entries?: TreeEntryRef[] | null } | null,
+    );
+    const main = treeEntryOids(
+      repository[`mainTree${index}`] as { entries?: TreeEntryRef[] | null } | null,
+    );
+    if (tag && main) changedFiles.push(...changedEntryNames(tag, main, `${path}/`));
+  });
+
+  if (changedFiles.length > 0) return { hasContentDiff: true, changedFiles };
+
+  const blobUnknown = CONTENT_DIFF_BLOB_PATHS.some(
+    (_path, index) =>
+      !(repository[`tagBlob${index}`] as { oid: string } | null)?.oid ||
+      !(repository[`mainBlob${index}`] as { oid: string } | null)?.oid,
+  );
+  const treeUnknown = CONTENT_DIFF_TREE_PATHS.some(
+    (_path, index) =>
+      !treeEntryOids(repository[`tagTree${index}`] as { entries?: TreeEntryRef[] | null } | null) ||
+      !treeEntryOids(repository[`mainTree${index}`] as { entries?: TreeEntryRef[] | null } | null),
+  );
+  if (blobUnknown || treeUnknown) return { hasContentDiff: null, changedFiles: [] };
+
+  return { hasContentDiff: false, changedFiles: [] };
 }
 
 /**
@@ -317,8 +364,8 @@ async function fetchSourceAhead(token: string, latest: string | null): Promise<S
   ).join(", ");
   const treeSelections = CONTENT_DIFF_TREE_PATHS.map(
     (_path, index) =>
-      `      tagTree${index}: object(expression: $tagTree${index}) { oid }
-      mainTree${index}: object(expression: $mainTree${index}) { oid }`,
+      `      tagTree${index}: object(expression: $tagTree${index}) { ... on Tree { entries { name oid } } }
+      mainTree${index}: object(expression: $mainTree${index}) { ... on Tree { entries { name oid } } }`,
   ).join("\n");
 
   const query = `query($owner: String!, $name: String!, $tag: String!, $tagWorkflows: String!, $mainWorkflows: String!, ${blobDeclarations}, ${treeDeclarations}) {
@@ -359,11 +406,13 @@ ${treeSelections}
     const aheadBy = data.repository?.ref?.compare?.aheadBy;
     if (typeof aheadBy !== "number") return null;
 
+    const { hasContentDiff, changedFiles } = computeContentDiff(data.repository);
     return {
       tag: latest,
       aheadBy,
       compareUrl: `https://github.com/${SOURCE_REPOSITORY}/compare/${latest}...main`,
-      hasContentDiff: computeHasContentDiff(data.repository),
+      hasContentDiff,
+      changedFiles,
     };
   } catch (error) {
     // 進み具合が分からなくてもタグは切れる。画面はこの行を出さないだけにする

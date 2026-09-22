@@ -583,38 +583,53 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
               使わず、補助情報としてのみ添える。hasContentDiffがfalse（同じ内容）と判定
               できたときだけボタンを無効化し、分からない場合（null）はこれまでどおり押せる */}
           {sourceAhead && (
-            <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
-              {sourceAhead.hasContentDiff === false ? (
-                <span>
-                  main は {shortWorkflowTag(sourceAhead.tag)}{" "}
-                  と同じ内容です。配布できる差分が無いため、タグを切れません。
-                </span>
-              ) : sourceAhead.hasContentDiff === true || sourceAhead.aheadBy > 0 ? (
-                <>
-                  <span className="tabular-nums">
-                    {sourceAhead.hasContentDiff === true && (
-                      <strong className="font-medium text-foreground">配布が必要です。 </strong>
-                    )}
-                    main は {shortWorkflowTag(sourceAhead.tag)} より {sourceAhead.aheadBy}{" "}
-                    コミット進んでいます
+            <>
+              <p className="flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted-foreground">
+                {sourceAhead.hasContentDiff === false ? (
+                  <span>
+                    main は {shortWorkflowTag(sourceAhead.tag)}{" "}
+                    と同じ内容です。配布できる差分が無いため、タグを切れません。
                   </span>
-                  <a
-                    className="inline-flex items-center gap-0.5 underline underline-offset-2"
-                    href={sourceAhead.compareUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    差分を見る
-                    <ExternalLink className="size-3" />
-                  </a>
-                </>
-              ) : (
-                <span>
-                  main は {shortWorkflowTag(sourceAhead.tag)}{" "}
-                  と同じ内容です。切っても配る中身は変わりません。
-                </span>
+                ) : sourceAhead.hasContentDiff === true || sourceAhead.aheadBy > 0 ? (
+                  <>
+                    <span className="tabular-nums">
+                      {sourceAhead.hasContentDiff === true && (
+                        <strong className="font-medium text-foreground">配布が必要です。 </strong>
+                      )}
+                      main は {shortWorkflowTag(sourceAhead.tag)} より {sourceAhead.aheadBy}{" "}
+                      コミット進んでいます
+                    </span>
+                    <a
+                      className="inline-flex items-center gap-0.5 underline underline-offset-2"
+                      href={sourceAhead.compareUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      差分を見る
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </>
+                ) : (
+                  <span>
+                    main は {shortWorkflowTag(sourceAhead.tag)}{" "}
+                    と同じ内容です。切っても配る中身は変わりません。
+                  </span>
+                )}
+              </p>
+
+              {/* 判定根拠（#3344）。「配布が必要です」の真偽値だけでは、なぜ必要と判定
+                  されたのかを確認できなかった。実際に内容が変わったファイル名を出すことで、
+                  「特定のPRが入った場合にのみ必要」という前提をその場で検証できるようにする */}
+              {sourceAhead.hasContentDiff === true && sourceAhead.changedFiles.length > 0 && (
+                <ul className="flex flex-col gap-0.5 pl-0.5 text-[11px] text-muted-foreground">
+                  {sourceAhead.changedFiles.map((file) => (
+                    <li key={file} className="truncate">
+                      <code>{file}</code>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </p>
+            </>
           )}
         </>
       )}

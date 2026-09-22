@@ -254,6 +254,7 @@ describe("WorkflowTagStatusSection", () => {
         aheadBy: 3,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: null,
+        changedFiles: [],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -278,6 +279,7 @@ describe("WorkflowTagStatusSection", () => {
         aheadBy: 0,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: null,
+        changedFiles: [],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -292,7 +294,7 @@ describe("WorkflowTagStatusSection", () => {
     ).toBe(false);
   });
 
-  it("配布物の内容に差分があれば「配布が必要です」と結論を明示する（#2941）", async () => {
+  it("配布物の内容に差分があれば「配布が必要です」と結論を明示し、変更ファイル名も出す（#2941・#3344）", async () => {
     mockFetch({
       latest: "workflows/v19",
       repositories: [latestStatus()],
@@ -302,6 +304,7 @@ describe("WorkflowTagStatusSection", () => {
         aheadBy: 40,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: true,
+        changedFiles: [".github/workflows/reusable-issue-dispatch.yml"],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -312,6 +315,8 @@ describe("WorkflowTagStatusSection", () => {
     expect(
       (screen.getByRole("button", { name: "新しいタグを切って配る" }) as HTMLButtonElement).disabled,
     ).toBe(false);
+    // なぜ「配布が必要」と判定されたのかを、その場で検証できるように差分ファイル名を出す（#3344）
+    expect(screen.getByText(".github/workflows/reusable-issue-dispatch.yml")).toBeTruthy();
   });
 
   it("配布物の内容が同じと判定できたときは「新しいタグを切って配る」を無効化する（#2941）", async () => {
@@ -326,6 +331,7 @@ describe("WorkflowTagStatusSection", () => {
         aheadBy: 40,
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: false,
+        changedFiles: [],
       },
     });
     render(<WorkflowTagStatusSection open />);
