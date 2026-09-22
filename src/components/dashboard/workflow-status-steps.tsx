@@ -1,10 +1,6 @@
 import { Check, CircleAlert, Hourglass, MessageCircleQuestion, Minus } from "lucide-react";
 
 import {
-  PullRequestProgressLabel,
-  PullRequestProgressStepList,
-} from "@/components/dashboard/pull-request-progress-steps";
-import {
   describeIssueExecutionTarget,
   type IssueExecutionTarget,
 } from "@/lib/dispatch/issue-execution-target";
@@ -608,30 +604,6 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
 }
 
 /**
- * 「developへマージ」段の内訳（#2816）。工程ごとに✔・×・実施中を並べ、その上に
- * 「いま何を待っているか」を1語で出す。
- *
- * ここを足すまで、Issue詳細でCI・レビューの進み具合を見るには対応PRのセクション（既定で
- * 畳んである）を開くしかなかった。**セクション側は消さない**——あちらはPRごとの行とマージボタンを
- * 持っており、こちらはIssueとして何を待っているかの要約という別の役。ただしセクションの各行
- * （`IssuePullRequestList`）も、開いているPRには**同じ部品**（`pull-request-progress-steps.tsx`）で
- * 同じ内訳を出す（#3239）。上下で言い方・記号を食い違わせないため、部品は共有する。
- */
-function PullRequestProgressSteps({ progress }: { progress: IssuePullRequestProgress }) {
-  return (
-    <div className="mt-3 flex flex-col gap-2 border-t pt-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <span className="font-medium text-muted-foreground tabular-nums">
-          PR #{progress.pullRequestNumber}
-        </span>
-        <PullRequestProgressLabel progress={progress} />
-      </div>
-      <PullRequestProgressStepList progress={progress} />
-    </div>
-  );
-}
-
-/**
  * Planning〜Doneの実装状況（Project Status）をstep形式で可視化する。Statusを持たないissueでは何も表示しない。
  * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
@@ -805,10 +777,6 @@ export function WorkflowStatusSteps({
           </span>
         )}
       </div>
-      {/* 「developへマージ」の中で何が終わって何を待っているか（#2816）。PC・スマホの
-          どちらでも同じものを出す——スマホは段のラベルすら出ないので、内訳が無いと
-          この画面から読めるのは「3/6」だけになる */}
-      {prProgress && <PullRequestProgressSteps progress={prProgress} />}
     </div>
   );
 }

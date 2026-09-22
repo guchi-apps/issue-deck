@@ -157,6 +157,7 @@ import {
   type ScheduledRunQueuedMap,
 } from "@/lib/nightly-run";
 import {
+  hasAttentionPullRequest,
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   resolvePullRequestStop,
@@ -585,6 +586,14 @@ export function MobileIssueDetail({
   const pullRequestSummary = summarizeIssuePullRequestStates(
     pullRequests,
     visiblePullRequestLinks.length,
+  );
+  // 対応PRの中にCI失敗・コンフリクト・レビュー失敗で止まっているものが1件でもあれば、
+  // セクションを開いて赤く強調する（#3317）。見送った（declined）PRは対象から外す——
+  // 既にユーザーが対応不要と判断したPRの失敗で毎回開かせても意味が無い
+  const hasFailingPullRequest = hasAttentionPullRequest(
+    pullRequests
+      .filter((pullRequest) => !declinedPullRequestNumbers.has(pullRequest.number))
+      .map(toIssuePullRequestProgressSource),
   );
   const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
   // 確認待ちのときに、次にどこの何を押せばよいかを上部から案内する（#1663）。PCの詳細と同じ
@@ -1274,8 +1283,8 @@ export function MobileIssueDetail({
             targetProps={checkUserTargetProps("pull-requests")}
             title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
             count={pullRequestSummary.total}
-            forceOpen={mergeApprovalPending}
-            tone={mergeApprovalPending ? "attention" : "default"}
+            forceOpen={mergeApprovalPending || hasFailingPullRequest}
+            tone={hasFailingPullRequest ? "danger" : mergeApprovalPending ? "attention" : "default"}
             summary={<IssuePullRequestStateCounts buckets={pullRequestSummary.buckets} />}
           >
             <IssuePullRequestList

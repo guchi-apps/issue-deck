@@ -240,8 +240,8 @@ export function PullRequestDetail({
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
-  // CIの内訳を開けるのは、CI状態のバッジを出しているPR（＝チェックを取っているPR）だけ（#2777）。
-  // 行の元はチェック一覧で、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
+  // CIの内訳は、チェック一覧を行の元にし、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
+  // 一覧の再取得でチェックが一時的に空になっても、CIの操作表示そのものは読み取り専用へ戻さない。
   const showsCiBadge = !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft;
   const ciChecks = showsCiBadge ? pullRequest.ciChecks : [];
   const ciRunId = showsCiBadge ? pullRequest.ciRunId : null;
@@ -340,12 +340,8 @@ export function PullRequestDetail({
             ) : (
               <CiStatusButton
                 ciState={pullRequest.ciState}
-                expanded={ciChecks.length > 0 && ciDetailOpen}
-                onClick={
-                  ciChecks.length > 0
-                    ? () => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)
-                    : undefined
-                }
+                expanded={ciDetailOpen}
+                onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
               />
             )}
             {/* CIとは別の軸のレビュー状態。実行中・省略・失敗・完了を同じ操作表示で出す（#3319）。 */}
@@ -392,7 +388,7 @@ export function PullRequestDetail({
           </div>
 
           {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
-          {ciChecks.length > 0 && (
+          {ciDetailOpen && (
             <WorkflowRunProgressPanel
               repositoryFullName={pullRequest.repositoryFullName}
               runId={ciRunId}

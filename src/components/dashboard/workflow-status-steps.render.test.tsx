@@ -548,19 +548,9 @@ describe("PRを待っている段の内訳（#2816）", () => {
     expect(container.textContent).toContain("実装中");
   });
 
-  it("詳細のステップは、コンフリクトを含む内訳と対応PRの番号を並べる", () => {
+  it("詳細のステップ（タイムライン）はPRの内訳を描かない（#3317・対応PRのセクションと重複するため）", () => {
     const { container } = render(
       <WorkflowStatusSteps labels={[]} projectStatus="Develop PR" pullRequestProgress={progress()} />,
-    );
-    expect(container.textContent).toContain("PR #2822");
-    for (const label of ["実装完了", "CI通過", "コンフリクト", "レビュー", "マージ"]) {
-      expect(container.textContent).toContain(label);
-    }
-  });
-
-  it("詳細でも、PRを待っていない段では内訳を描かない", () => {
-    const { container } = render(
-      <WorkflowStatusSteps labels={[]} projectStatus="Develop" pullRequestProgress={progress()} />,
     );
     expect(container.textContent).not.toContain("PR #2822");
   });

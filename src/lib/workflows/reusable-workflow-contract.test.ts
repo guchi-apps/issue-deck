@@ -23,6 +23,19 @@ function read(name: string): string {
   return readFileSync(join(WORKFLOWS_DIR, name), "utf8");
 }
 
+/** `workflow_call.inputs` にある入力の型と既定値を取り出す。 */
+function workflowInput(source: string, name: string): { type: string; default: string } | null {
+  const match = new RegExp(
+    `^ {6}${name}:\\n([\\s\\S]*?)^(?= {6}[a-z][a-z0-9-]*:| {4}secrets:|jobs:)`,
+    "m",
+  ).exec(source);
+  if (!match) return null;
+
+  const type = /^ {8}type: (.+)$/m.exec(match[1] as string)?.[1];
+  const defaultValue = /^ {8}default: (.+)$/m.exec(match[1] as string)?.[1];
+  return type && defaultValue ? { type, default: defaultValue } : null;
+}
+
 /** `on:` に `workflow_call` を持つか（= 再利用可能ワークフロー） */
 function isReusable(source: string): boolean {
   const on = /^on:\n((?: {2}.*\n|\n)*)/m.exec(source);
@@ -95,5 +108,13 @@ describe("再利用可能ワークフローの契約", () => {
         }
       }
     }
+  });
+
+  it("レビュー専用モードは既定で既存の自動マージを維持する", () => {
+    const source = read("reusable-claude-review-develop.yml");
+
+    expect(workflowInput(source, "enable-auto-merge")).toEqual({ type: "boolean", default: "true" });
+    expect(source).toMatch(/auto-merge:[\s\S]*?&& inputs\.enable-auto-merge/);
+    expect(source).toMatch(/auto-merge-fallback:[\s\S]*?needs\.auto-merge\.result == 'failure'/);
   });
 });

@@ -196,7 +196,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
-    expect(screen.getByText("CI通過").tagName).toBe("SPAN");
+    expect(screen.getByRole("button", { name: /CI通過/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /レビュー完了/ })).toBeTruthy();
   });
 
@@ -260,6 +260,48 @@ describe("PullRequestDetail", () => {
     expect(status.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("CIの内訳")).toBeTruthy();
     expect(screen.getByText("Unit tests")).toBeTruthy();
+  });
+
+  it("再取得でCIのチェック内訳が空になっても、CIの操作表示を維持する（#3325）", () => {
+    const initialPullRequest = makePullRequest({
+      ciChecks: [
+        {
+          name: "Unit tests",
+          status: "completed",
+          conclusion: "success",
+          startedAt: "2026-08-01T01:00:00Z",
+          completedAt: "2026-08-01T01:01:00Z",
+          htmlUrl: null,
+          runId: null,
+        },
+      ],
+    });
+    const { rerender } = render(
+      <PullRequestDetail
+        pullRequest={initialPullRequest}
+        detail={makeDetail()}
+        isLoading={false}
+        error={null}
+        onRefresh={vi.fn()}
+        onMerged={vi.fn()}
+      />,
+    );
+    const status = screen.getByRole("button", { name: /CI通過/ });
+    expect(status.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(status);
+    expect(status.getAttribute("aria-expanded")).toBe("true");
+
+    rerender(
+      <PullRequestDetail
+        pullRequest={makePullRequest({ ciChecks: [], ciRunId: null })}
+        detail={makeDetail()}
+        isLoading={false}
+        error={null}
+        onRefresh={vi.fn()}
+        onMerged={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /CI通過/ }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("レビューの操作表示を押すと判定と本文を開ける（#3319）", () => {

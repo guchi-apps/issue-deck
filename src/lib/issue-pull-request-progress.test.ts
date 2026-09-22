@@ -5,6 +5,7 @@ import type { CiState } from "@/lib/github/release-api";
 import {
   buildIssuePullRequestProgress,
   ciStateFromPullRequestCiStatus,
+  hasAttentionPullRequest,
   isPullRequestWaitingStatus,
   resolveIssuePullRequestProgress,
   resolvePullRequestPosition,
@@ -368,5 +369,43 @@ describe("resolvePullRequestStop（#3144）", () => {
 
   it("URLを持たない材料ではhtmlUrlがnull", () => {
     expect(resolvePullRequestStop([pullRequest({ ciState: "failure" })])?.htmlUrl).toBeNull();
+  });
+});
+
+describe("hasAttentionPullRequest（#3317）", () => {
+  it("CI失敗・コンフリクト・レビュー失敗のいずれかがあればtrue", () => {
+    expect(hasAttentionPullRequest([pullRequest({ ciState: "failure" })])).toBe(true);
+    expect(hasAttentionPullRequest([pullRequest({ mergeable: false })])).toBe(true);
+    expect(
+      hasAttentionPullRequest([pullRequest({ mergeJudgement: judgement({ aiReview: "failed" }) })]),
+    ).toBe(true);
+  });
+
+  it("全PRを見る。最新（番号最大）以外のPRの失敗も拾う", () => {
+    expect(
+      hasAttentionPullRequest([
+        pullRequest({ number: 10, ciState: "failure" }),
+        pullRequest({ number: 20 }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("動いている・人待ちだけならfalse", () => {
+    expect(hasAttentionPullRequest([pullRequest()])).toBe(false);
+    expect(hasAttentionPullRequest([pullRequest({ ciState: "pending" })])).toBe(false);
+  });
+
+  it("下書き・マージ済み・クローズ済みは対象から外す", () => {
+    expect(hasAttentionPullRequest([pullRequest({ draft: true, mergeable: false })])).toBe(false);
+    expect(
+      hasAttentionPullRequest([pullRequest({ merged: true, state: "closed", ciState: "failure" })]),
+    ).toBe(false);
+    expect(
+      hasAttentionPullRequest([pullRequest({ state: "closed", ciState: "failure" })]),
+    ).toBe(false);
+  });
+
+  it("PRが無ければfalse", () => {
+    expect(hasAttentionPullRequest([])).toBe(false);
   });
 });
