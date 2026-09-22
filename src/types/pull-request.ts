@@ -396,7 +396,8 @@ export type PullRequestFile = {
  *
  * - `issue` … developへ入った作業PR（`issue-<番号>`ブランチ）
  * - `version-bump` … バージョンバンプPR（`release/vX.Y.Z`）。利用者から見た変更ではない
- * - `commit` … マージコミットへ畳めなかったコミット（squash運用のリポジトリ）
+ * - `commit` … マージコミットへ畳めなかったコミット（squash運用のリポジトリ、またはマージコミットの
+ *   運用に混ざったsquashのPR。#3339）
  */
 export type PullRequestChangeKind = "issue" | "version-bump" | "commit";
 
