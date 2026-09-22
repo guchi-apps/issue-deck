@@ -14,7 +14,10 @@ import {
   mergeJudgementReason,
   mergeWarnings,
   pullRequestsAwaitingUserMerge,
+  pullRequestsCountedAsCheckUser,
   pullRequestsWaitingForMergeChecks,
+  checkUserIssueKeys,
+  isLinkedIssueListed,
   splitSnoozedPullRequests,
   requiresUserMerge,
   resolvePullRequestHeader,
@@ -480,8 +483,8 @@ describe("groupPullRequestsByRepository", () => {
 });
 
 describe("pullRequestsAwaitingUserMerge", () => {
-  // 対応Issueを持たないリリースPRは、これが無いとどの確認待ちにも現れない（#1613）
-  it("対応Issueが確認待ちの一覧に居ないマージ待ちPRだけを返す", () => {
+  // 対応Issueを持たないリリースPRも、対応Issueが確認待ちに並ぶdevelop向けPRも返す（#1613・#3345）
+  it("対応Issueの有無を問わずマージ待ちPRを返す", () => {
     const release = pullRequest({
       number: 100,
       kind: "release",
@@ -502,12 +505,9 @@ describe("pullRequestsAwaitingUserMerge", () => {
       linkedIssueCheckUser: true,
     });
 
-    const result = pullRequestsAwaitingUserMerge(
-      [release, listed, notListed],
-      [{ repositoryFullName: "guchi-apps/issue-deck", number: 1590 }],
-    );
+    const result = pullRequestsAwaitingUserMerge([release, listed, notListed]);
 
-    expect(result.map((pr) => pr.number)).toEqual([100, 102]);
+    expect(result.map((pr) => pr.number)).toEqual([100, 101, 102]);
   });
 
   it("マージ待ちでないPRは返さない", () => {
@@ -517,7 +517,6 @@ describe("pullRequestsAwaitingUserMerge", () => {
         pullRequest({ number: 2, autoMergeEnabled: true, linkedIssueCheckUser: true }),
         pullRequest({ number: 3, state: "closed", merged: true, linkedIssueCheckUser: true }),
       ],
-      [],
     );
 
     expect(result).toEqual([]);
@@ -535,7 +534,6 @@ describe("pullRequestsAwaitingUserMerge", () => {
         }),
         releasePullRequest({ number: 3 }),
       ],
-      [],
     );
 
     expect(result.map((pr) => pr.number)).toEqual([3]);
@@ -550,27 +548,45 @@ describe("pullRequestsAwaitingUserMerge", () => {
         releasePullRequest({ number: 2, mergeable: false }),
         releasePullRequest({ number: 3, ciState: "unknown" }),
       ],
-      [],
     );
 
     expect(result.map((pr) => pr.number)).toEqual([1, 2, 3]);
   });
 
+});
+
+describe("pullRequestsCountedAsCheckUser", () => {
+  // 対応Issueが並んでいるPRはそのIssueとして数えているため、件数へ足さない（#1713・#3345）
+  it("対応Issueが確認待ちに並んでいるPRを除く", () => {
+    const result = pullRequestsCountedAsCheckUser(
+      [
+        releasePullRequest({ number: 100 }),
+        pullRequest({ number: 101, linkedIssueNumber: 1590 }),
+        pullRequest({ number: 102, linkedIssueNumber: 1600 }),
+      ],
+      checkUserIssueKeys([{ repositoryFullName: "guchi-apps/issue-deck", number: 1590 }]),
+    );
+
+    expect(result.map((pr) => pr.number)).toEqual([100, 102]);
+  });
+
   // リポジトリが違えば同じ番号でも別のIssue
   it("重複の判定はリポジトリと番号の組で行う", () => {
-    const result = pullRequestsAwaitingUserMerge(
-      [
-        pullRequest({
-          number: 5,
-          linkedIssueNumber: 12,
-          linkedIssueCheckReason: "merge",
-          linkedIssueCheckUser: true,
-        }),
-      ],
-      [{ repositoryFullName: "guchi-apps/car-care", number: 12 }],
+    const result = pullRequestsCountedAsCheckUser(
+      [pullRequest({ number: 5, linkedIssueNumber: 12 })],
+      checkUserIssueKeys([{ repositoryFullName: "guchi-apps/car-care", number: 12 }]),
     );
 
     expect(result.map((pr) => pr.number)).toEqual([5]);
+  });
+});
+
+describe("isLinkedIssueListed", () => {
+  it("対応Issueが無いPRは並んでいない扱いにする", () => {
+    const keys = checkUserIssueKeys([{ repositoryFullName: "guchi-apps/issue-deck", number: 1 }]);
+
+    expect(isLinkedIssueListed(pullRequest({ linkedIssueNumber: null }), keys)).toBe(false);
+    expect(isLinkedIssueListed(pullRequest({ linkedIssueNumber: 1 }), keys)).toBe(true);
   });
 });
 
@@ -587,28 +603,26 @@ describe("pullRequestsWaitingForMergeChecks", () => {
       pullRequest({ number: 4, linkedIssueCheckUser: false, ciState: "pending" }),
     ];
 
-    const waiting = pullRequestsWaitingForMergeChecks(pullRequests, []);
-    const awaiting = pullRequestsAwaitingUserMerge(pullRequests, []);
+    const waiting = pullRequestsWaitingForMergeChecks(pullRequests);
+    const awaiting = pullRequestsAwaitingUserMerge(pullRequests);
 
     expect(waiting.map((pr) => pr.number)).toEqual([1, 2]);
     expect(awaiting.map((pr) => pr.number)).toEqual([3]);
   });
 
-  it("対応Issueが同じ一覧に並ぶPRは、完了待ちとしても数えない", () => {
-    const result = pullRequestsWaitingForMergeChecks(
-      [
-        pullRequest({
-          number: 5,
-          linkedIssueNumber: 12,
-          linkedIssueCheckReason: "merge",
-          linkedIssueCheckUser: true,
-          ciState: "pending",
-        }),
-      ],
-      [{ repositoryFullName: "guchi-apps/issue-deck", number: 12 }],
-    );
+  // 枠に並べるPRと同じ母集団から数える（#3345）。対応Issueが並んでいても「あと何件来るか」に入る
+  it("対応Issueが同じ一覧に並ぶPRも、完了待ちとして数える", () => {
+    const result = pullRequestsWaitingForMergeChecks([
+      pullRequest({
+        number: 5,
+        linkedIssueNumber: 12,
+        linkedIssueCheckReason: "merge",
+        linkedIssueCheckUser: true,
+        ciState: "pending",
+      }),
+    ]);
 
-    expect(result).toEqual([]);
+    expect(result.map((pr) => pr.number)).toEqual([5]);
   });
 });
 

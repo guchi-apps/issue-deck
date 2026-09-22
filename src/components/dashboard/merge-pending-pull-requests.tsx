@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Clock, GitPullRequest, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, CircleDot, Clock, GitPullRequest, RefreshCw } from "lucide-react";
 
 import { BranchBadge } from "@/components/dashboard/pull-request-badges";
 import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
@@ -9,6 +9,7 @@ import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { isLinkedIssueListed } from "@/lib/pull-request-list";
 import {
   describeSnoozeUntil,
   findActiveSnooze,
@@ -31,6 +32,10 @@ const COLLAPSED_COUNT = 3;
  * 一覧にはこれまで現れず、ブランチ画面かPR画面へ移らないと気づけなかった。マージという「人が
  * やること」は他の確認待ちと同じ性質なので、同じ場所に並べる。
  *
+ * **対応Issueが同じ一覧に並んでいるdevelop向けPRも並ぶ**（#3345）。以前は二重表示を避けて
+ * 外しており、枠にはリリースPRしか出なかった。同じ案件だと読めるよう、そのカードには
+ * 「対応Issue」のチップを付ける（`listedIssueKeys`）。
+ *
  * 何を出すかを決めるのは`pullRequestsAwaitingUserMerge`で、ここは受け取った分を描くだけ。
  * 空配列なら何も描かない（今までと同じ見た目に戻る）。
  *
@@ -46,6 +51,7 @@ const COLLAPSED_COUNT = 3;
  */
 export function MergePendingPullRequests({
   pullRequests,
+  listedIssueKeys,
   waitingForChecksCount = 0,
   onSelectPullRequest,
   onSnooze,
@@ -55,6 +61,11 @@ export function MergePendingPullRequests({
   isRefreshing = false,
 }: {
   pullRequests: PullRequestSummary[];
+  /**
+   * 確認待ちに並んでいるIssue（`checkUserIssueKeys`。#3345）。対応Issueがここに含まれるPRの
+   * カードに「対応Issue #N・下の一覧にもあります」を出す。渡さなければ出さない
+   */
+  listedIssueKeys?: ReadonlySet<string>;
   /** CI・判定の完了待ちで一覧から外したPRの件数（#2081）。0なら完了待ちの行を出さない */
   waitingForChecksCount?: number;
   onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
@@ -204,6 +215,14 @@ export function MergePendingPullRequests({
                   {formatRelativeDate(pullRequest.createdAt)}
                 </span>
               </span>
+              {/* 同じ案件が下のIssue行にもあることを示す（#3345）。件数にはIssue側の1件だけを
+                  数えているので、ここで2件あるように見せない */}
+              {listedIssueKeys && isLinkedIssueListed(pullRequest, listedIssueKeys) && (
+                <span className="inline-flex items-center gap-1 self-start rounded bg-sky-500/10 px-1.5 text-xs text-sky-700 dark:text-sky-400">
+                  <CircleDot className="size-3 shrink-0" />
+                  対応Issue #{pullRequest.linkedIssueNumber}・下の一覧にもあります
+                </span>
+              )}
               {/* PR一覧と同じステータスレール（#2942）。同じPRなのに画面ごとに違う出し方に
                   なると、どちらが新しいのかを読む側が判断できなくなる（#2145と同じ理由） */}
               <PullRequestStatusRail pullRequest={pullRequest} linkable={false} />

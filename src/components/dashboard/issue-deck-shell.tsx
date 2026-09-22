@@ -176,9 +176,11 @@ import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-ch
 import { selectVisibleReleaseHistory } from "@/lib/release-history";
 import {
   applyOptimisticMerges,
+  checkUserIssueKeys,
   computePullRequestNavCounts,
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
+  pullRequestsCountedAsCheckUser,
   pullRequestsWaitingForMergeChecks,
   splitSnoozedPullRequests,
   resolvePullRequestHeader,
@@ -1258,8 +1260,9 @@ export function IssueDeckShell({
     [visiblePullRequests, openPullRequests.fetchedAt],
   );
 
-  // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものは
-  // 二重に出さないため、確認待ちのIssue一覧を渡して除く。**リポジトリ絞り込みは掛けない**
+  // 「ユーザーの確認待ち」へ一緒に出すマージ待ちPR（#1613）。対応Issueが同じ一覧に並ぶものも
+  // 並べる（#3345）——件数だけは下の`checkUserPullRequestCount`で二重に数えないようにする。
+  // **リポジトリ絞り込みは掛けない**
   // （#1750）——並ぶ先が絞り込みを適用しないビューなので、掛けると同じ一覧の中でIssueだけ
   // 全体・PRだけ絞られた状態になる。
   // 保留中（#2398）は一覧から外し、「保留中N件」の1行へ合流させる。**外すのは押せる状態の
@@ -1267,11 +1270,27 @@ export function IssueDeckShell({
   const { listed: mergePendingPullRequests, snoozed: snoozedMergePendingPullRequests } = useMemo(
     () =>
       splitSnoozedPullRequests(
-        pullRequestsAwaitingUserMerge(crossRepositoryPullRequests, checkUserIssues),
+        pullRequestsAwaitingUserMerge(crossRepositoryPullRequests),
         snoozes,
         now ?? Date.now(),
       ),
-    [crossRepositoryPullRequests, checkUserIssues, snoozes, now],
+    [crossRepositoryPullRequests, snoozes, now],
+  );
+
+  // 確認待ちに並んでいるIssue（#3345）。枠のカードに「対応Issue」の印を付けるのと、
+  // 件数から対応Issueが並んでいるPRを外すのに使う
+  const listedCheckUserIssueKeys = useMemo(
+    () => checkUserIssueKeys(checkUserIssues),
+    [checkUserIssues],
+  );
+
+  // 確認待ちの件数へ足すPRの数（#1713・#3345）。対応Issueが同じ一覧に並んでいるPRは
+  // そのIssueとして既に数えているため足さない。左メニュー・一覧ヘッダー・スマホホームの
+  // 「要対応」・下タブが同じ数を読む
+  const checkUserPullRequestCount = useMemo(
+    () =>
+      pullRequestsCountedAsCheckUser(mergePendingPullRequests, listedCheckUserIssueKeys).length,
+    [mergePendingPullRequests, listedCheckUserIssueKeys],
   );
 
   // 伏せたPRの期限。一覧の1行が「最短でいつ戻るか」を出すのに使う
@@ -1295,8 +1314,8 @@ export function IssueDeckShell({
   // 上の一覧から外した「CI・判定の完了待ち」の件数（#2081）。**件数には足さず**、枠の下の
   // 1行にだけ出す。押せないPRを並べないぶん、あと何件来るのかは読めるようにしておく。
   const mergeCheckWaitingCount = useMemo(
-    () => pullRequestsWaitingForMergeChecks(crossRepositoryPullRequests, checkUserIssues).length,
-    [crossRepositoryPullRequests, checkUserIssues],
+    () => pullRequestsWaitingForMergeChecks(crossRepositoryPullRequests).length,
+    [crossRepositoryPullRequests],
   );
 
   // 「ユーザーの確認待ち」に並ぶマージ待ちPRの取り直し（#2175）。PCの「更新」ボタンと、
@@ -1308,8 +1327,8 @@ export function IssueDeckShell({
   // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
   // すぐ下に並ぶメニューの行と必ず同じ数字になる。
   const overviewStats = useMemo(
-    () => computeOverviewStats(navCounts, mergePendingPullRequests.length),
-    [navCounts, mergePendingPullRequests.length],
+    () => computeOverviewStats(navCounts, checkUserPullRequestCount),
+    [navCounts, checkUserPullRequestCount],
   );
 
   // ブランチ画面のリリースの束が組み立てられる状態か（#1711）。**要求した`scope`ではなく、
@@ -2015,7 +2034,7 @@ export function IssueDeckShell({
                 <MobileHomeScreen
                   overviewStats={overviewStats}
                   navCounts={navCounts}
-                  checkUserPullRequestCount={mergePendingPullRequests.length}
+                  checkUserPullRequestCount={checkUserPullRequestCount}
                   manualStepAttention={manualStepAttention}
                   unconfirmedQuestionCount={unconfirmedQuestionCount}
                   waitingQuestionCount={waitingQuestionCount}
@@ -2208,6 +2227,8 @@ export function IssueDeckShell({
                   /* ホーム画面の「要対応」が数に含めているのと同じ配列を渡す（#1713）。
                      数だけ足して中身を出さないと、押して開いた一覧が空に見える */
                   mergePendingPullRequests={mergePendingPullRequests}
+                  checkUserPullRequestCount={checkUserPullRequestCount}
+                  listedCheckUserIssueKeys={listedCheckUserIssueKeys}
                   mergeCheckWaitingCount={mergeCheckWaitingCount}
                   /* 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
                      PCの一覧と同じ集合を渡す */
@@ -2362,7 +2383,7 @@ export function IssueDeckShell({
             <MobileBottomNav
               active={activeBottomNavTab}
               onSelect={selectTab}
-              checkUserCount={navCounts["check-user"] + mergePendingPullRequests.length}
+              checkUserCount={navCounts["check-user"] + checkUserPullRequestCount}
             />
           </div>
 
@@ -2387,7 +2408,7 @@ export function IssueDeckShell({
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
-                checkUserPullRequestCount={mergePendingPullRequests.length}
+                checkUserPullRequestCount={checkUserPullRequestCount}
                 manualStepAttention={manualStepAttention}
                 unconfirmedQuestionCount={unconfirmedQuestionCount}
                 waitingQuestionCount={waitingQuestionCount}
@@ -2596,6 +2617,8 @@ export function IssueDeckShell({
                   filters.view === "check-user" ? (
                     <MergePendingPullRequests
                       pullRequests={mergePendingPullRequests}
+                      /* 対応Issueが下に並んでいるPRに印を付ける（#3345） */
+                      listedIssueKeys={listedCheckUserIssueKeys}
                       waitingForChecksCount={mergeCheckWaitingCount}
                       /* 「いまは実施しない」（#2398）。Issueの行と同じ選択肢を出す */
                       onSnooze={snooze}
@@ -2612,7 +2635,7 @@ export function IssueDeckShell({
                 }
                 // 一覧のヘッダーの件数も左メニューと同じ数え方にする（#1713）
                 pinnedCount={
-                  filters.view === "check-user" ? mergePendingPullRequests.length : 0
+                  filters.view === "check-user" ? checkUserPullRequestCount : 0
                 }
                 // 保留中で一覧から外したマージ待ちPR（#2398）。Issue側と1行にまとめて出す
                 snoozedPinned={
