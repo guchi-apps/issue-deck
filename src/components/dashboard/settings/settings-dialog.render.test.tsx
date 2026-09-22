@@ -166,9 +166,13 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Issue Deck v/ }));
     expect(screen.getByText("これまでの更新内容")).toBeTruthy();
-    // 更新履歴の先頭は現行バージョンで、「使用中」の印が付く
-    expect(screen.getByText("使用中")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: `v${packageJson.version}` })).toBeTruthy();
+    // 更新履歴の先頭のエントリに「使用中」の印が付く（画面で使える変化が無いリリースでは
+    // 現行バージョンぴったりのエントリが無いことがあるため、先頭＝直近の実体あるエントリで
+    // 判定する。#3282）
+    const badge = screen.getByText("使用中");
+    const section = badge.closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section!).getByRole("heading", { name: /^v\d+\.\d+\.\d+$/ })).toBeTruthy();
   });
 
   it("保存ボタンを持つのは実行設定だけで、即時実行の区分には無い（#1539）", () => {
