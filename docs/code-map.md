@@ -2850,6 +2850,9 @@ export function POST(request: NextRequest) {
   で、`issue-<番号>`のdevelop向けPRは既存の`claude-ci-fix.yml`・`claude-conflict-resolve.yml`へ、
   Issueに紐づかないPR（バンプPR・develop→mainのリリースPR）は新設の`claude-pr-repair.yml`へ
   振り分ける。設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)。
+  自動レビューが要修正のdevelop向け`issue-<番号>`PRには3つめの「レビュー指摘を自動修正」
+  （`claude-review-fix.yml`。#3363）が出る。**この種類だけはIssueに紐づかないPRへ起動先が無い**
+  ため、`supportsRepairKind`でボタンの表示とAPIの受け付けの両方を絞っている。
 - **コンフリクトしたPRは、GitHubのイベントを待たずにissue-deck側から巡回して見つける**
   （#2116。判定は[`lib/github/conflict-sweep.ts`](../src/lib/github/conflict-sweep.ts)、IOは
   [`lib/github/conflict-sweep-run.ts`](../src/lib/github/conflict-sweep-run.ts)）。

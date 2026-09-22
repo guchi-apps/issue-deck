@@ -1,0 +1,60 @@
+name: Claude Review Fix
+
+# develop向けPR（issue-<番号>ブランチ）で自動レビューが「要修正」と判定した指摘を、
+# Claude Codeが直してpushするワークフロー（docs/multi-agent/auto-repair.md
+# 「レビュー指摘の自動修正」参照、issue #3363）。
+#
+# **トリガー定義のみ**を持ち、ジョブ本体はreusable-claude-review-fix.ymlにある。
+# issue-deck自身はローカルパス参照(./)を使い、他アプリはタグ固定(@workflows/vX)で参照する
+# （claude-ci-fix.ymlと同じカナリア構成。#934）。
+#
+# トリガー:
+# - workflow_run（Claude Code Review (develop向けPR), completed）: レビューの結果が出るたびに
+#   起動するが、**レビュー側（auto-mergeジョブ）が自動修正へ渡したときだけ着手する**。
+#   渡すのは「要修正」かつ「人の判断が要らない指摘だけ」とレビューが印を付けた場合に限られ、
+#   それ以外は従来どおり00.check-userで人へ渡る。名前はclaude-review-develop.ymlのname:と
+#   一致している必要がある（違うと黙って発火しなくなる）
+# - workflow_dispatch: issue-deckの画面の「レビュー指摘を自動修正」ボタンと手動実行
+on:
+  workflow_run:
+    workflows: ["Claude Code Review (develop向けPR)"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "対象のIssue番号（develop向けPRのissue-<番号>ブランチのIssue番号）"
+        required: true
+        type: number
+
+jobs:
+  review-fix:
+    uses: ./.github/workflows/reusable-claude-review-fix.yml
+    # issue-deckは唯一pnpmを使うリポジトリ（他の全アプリはnpm）。既定は多数派のnpmのため明示する。
+    with:
+      runtime-setup: node-db
+      package-manager: pnpm
+      # 再利用ワークフロー内のinputsコンテキストはworkflow_callのinputsを指すため、
+      # 呼び出し元のworkflow_dispatch入力はここで明示的に渡す。
+      issue-number: ${{ inputs.issue_number }}
+      # プロンプトの「- 修正後、」に続けてそのまま埋め込まれるため、文末まで含めて書く。
+      # YAMLの折りたたみ(>-)は改行を半角スペースへ変換し日本語の途中に空白が入るため、1行で書く。
+      verify-commands: "`pnpm test`（lint・typecheck・unit testを実行）と `pnpm build:ci` を実行し、いずれも問題がないことを確認する（DBサーバーは実際には起動していないが、環境変数はこのステップに既に設定済みのため`.github/workflows/ci.yml`のbuildステップと同様に成功するはず）"
+      # pnpm build:ciの実行に必要。.github/workflows/ci.ymlのbuildステップと同じ
+      # プレースホルダー値を使う（実際の外部サービスには接続しない）。
+      # 実シークレットはここに書かない（secrets: inheritで別途渡る）。
+      build-env: |
+        DATABASE_URL=mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
+        NEXT_PUBLIC_SUPABASE_URL=https://ci-placeholder.supabase.co
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=ci-placeholder
+        GITHUB_APP_ID=123456
+        GITHUB_APP_PRIVATE_KEY_BASE64=Y2ktcGxhY2Vob2xkZXI=
+        NEXT_PUBLIC_GITHUB_APP_SLUG=ci-placeholder
+        GITHUB_WEBHOOK_SECRET=ci-placeholder
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write

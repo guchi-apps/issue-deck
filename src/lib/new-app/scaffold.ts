@@ -773,7 +773,7 @@ Secretsや環境変数／課金・決済／大規模な依存関係の更新／\
 ${workflowList}
 
 自動修復系（\`claude-ci-fix.yml\`・\`claude-conflict-resolve.yml\`・\`claude-pr-repair.yml\`・
-\`claude-review-develop.yml\`・\`deploy-retry.yml\`）はまだ置かれていない。issue-deckの画面
+\`claude-review-develop.yml\`・\`claude-review-fix.yml\`・\`deploy-retry.yml\`）はまだ置かれていない。issue-deckの画面
 （設定＞フリート運用）から\`${repo}\`へ配れる。
 
 **callerに書ける\`with:\`は、参照しているタグ時点の再利用ワークフローが持つ入力だけ。**

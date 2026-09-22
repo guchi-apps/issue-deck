@@ -74,6 +74,7 @@ const NON_CI_WORKFLOW_FILES = new Set([
   "claude-review-develop.yml",
   "claude-conflict-resolve.yml",
   "claude-ci-fix.yml",
+  "claude-review-fix.yml",
   "claude-pr-repair.yml",
   "issue-labels.yml",
   "release-develop-to-main.yml",

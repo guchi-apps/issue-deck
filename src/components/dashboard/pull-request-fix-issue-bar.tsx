@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, ExternalLink, Loader2, Pencil, Plus } from "lucide-react";
+import { AlertCircle, ExternalLink, Loader2, Pencil, Plus, Wrench } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
@@ -101,6 +101,7 @@ export function PullRequestFixIssueBar({
   const openChangeRequests = selectOpenChangeRequests(events);
   const tone = resolvePullRequestFixIssueTone(pullRequest, openChangeRequests);
   const verdictKind = pullRequest.reviewVerdict?.reviewKind;
+  const isReviewAutoFixRunning = pullRequest.repairRun?.kind === "review";
 
   // 判定時点のコミット（#3172）。PR本文のマーカーを先に見て、無ければ**この画面が既に
   // 持っているレビューコメント**のマーカーで補う（`sha=`をPR本文へ書き始める前のPRと、
@@ -241,6 +242,14 @@ export function PullRequestFixIssueBar({
         </p>
         {/* 「いまの中身に対する判定か」を、指摘そのものより先に言う（#3172）。修正コミットを
             積んだ後も同じ帯が残るため、これが無いと修正前の話なのかが読み取れない */}
+        {/* 自動修正へ回っているあいだ（#3363）。帯の赤は消さず、放っておけば片付くことを
+            先に言う——この1行が無いと、走っている最中に同じ指摘を手で依頼し直してしまう */}
+        {isReviewAutoFixRunning && (
+          <p className="mt-1 flex items-start gap-1.5 text-xs font-medium text-primary">
+            <Wrench className="mt-0.5 size-3 shrink-0 animate-spin" aria-hidden="true" />
+            人の判断が要らない指摘のため、自動修正に回しています。終わると再レビューされ、問題が無ければそのままマージされます。
+          </p>
+        )}
         <ReviewVerdictFreshnessNote
           className="mt-1"
           freshness={freshness}
