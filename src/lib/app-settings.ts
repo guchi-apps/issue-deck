@@ -98,18 +98,39 @@ export function parseClaudeWindowKeepAliveHour(value: unknown): number | null {
 // "auto"は--modelを付与しない特別な値。それ以外はClaude Code CLIが解釈するモデルエイリアス
 // （最新のOpus/Sonnet/Haikuに解決される）で、特定のスナップショット日付は含めない
 // （固定すると将来のモデル更新を自動で受けられなくなるため）。
+//
+// **ラベルのバージョン番号（例:「Opus 5.5」）は`CLAUDE_ALIAS_MODEL_IDS`が指す現行モデルの表記**
+// （#3374。エイリアスでどのバージョンが動くか画面から分からないというレビュー指摘を受けて追加）。
+// エイリアスの指す世代が変わったら、`CLAUDE_ALIAS_MODEL_IDS`とここ・`CLAUDE_MODEL_SHORT_LABELS`の
+// バージョン番号をあわせて直す。
 export const CLAUDE_MODEL_OPTIONS = [
   { value: "auto", label: "Claude Codeに任せる" },
-  { value: "fable", label: "Claude Fable（最高精度）" },
-  { value: "opus", label: "Claude Opus（高精度）" },
-  { value: "sonnet", label: "Claude Sonnet（標準）" },
-  { value: "haiku", label: "Claude Haiku（高速）" },
+  { value: "fable", label: "Claude Fable 5.1（最高精度）" },
+  { value: "opus", label: "Claude Opus 5.5（高精度）" },
+  { value: "sonnet", label: "Claude Sonnet 5（標準）" },
+  { value: "haiku", label: "Claude Haiku 4.5（高速）" },
 ] as const;
 
 export const CLAUDE_MODEL_VALUES = CLAUDE_MODEL_OPTIONS.map((option) => option.value);
 export const CLAUDE_LOCAL_MODEL_DEFAULT = "sonnet" as const;
 
 export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
+
+/**
+ * エイリアス（`fable`・`opus`・`sonnet`・`haiku`）が現在指す具体的なモデルID（#3374）。
+ *
+ * エイリアスはClaude Code CLIが起動時に自動で最新版へ解決するため、issue-deck側は実際に
+ * どのスナップショットが動くかを知らない。ここは**表示・料金換算・重さの色分け専用の推定**で、
+ * `src/lib/ai-model-pricing.ts`の`MODEL_RATES`にある現行世代を当てる。エイリアスの指す世代が
+ * 実際に変わったら（CLI側の既定が更新されたら）ここを直し、`CLAUDE_MODEL_OPTIONS`・
+ * `CLAUDE_MODEL_SHORT_LABELS`のバージョン表記もあわせて直す。
+ */
+export const CLAUDE_ALIAS_MODEL_IDS: Readonly<Record<Exclude<ClaudeModel, "auto">, string>> = {
+  fable: "claude-fable-5-1",
+  opus: "claude-opus-5-5",
+  sonnet: "claude-sonnet-5",
+  haiku: "claude-haiku-4-5",
+};
 
 /**
  * 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前（#2717）。
@@ -120,13 +141,15 @@ export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
  * 選ばれるわけではない**のに「おまかせ」は賢く選ぶように読める。受付コメント
  * （`lib/dispatch/session-start.ts`）が先に使っていた呼び方へ揃えた。「おまかせ」の名前は、
  * issue-deckがIssueを読んで選ぶ起動ダイアログの選択肢（`lib/claude/model-pick.ts`）が引き継ぐ。
+ *
+ * バージョン番号は`CLAUDE_ALIAS_MODEL_IDS`と同じ表記にする（#3374）。
  */
 export const CLAUDE_MODEL_SHORT_LABELS: Readonly<Record<ClaudeModel, string>> = {
   auto: "CLIの既定",
-  fable: "Fable",
-  opus: "Opus",
-  sonnet: "Sonnet",
-  haiku: "Haiku",
+  fable: "Fable 5.1",
+  opus: "Opus 5.5",
+  sonnet: "Sonnet 5",
+  haiku: "Haiku 4.5",
 };
 
 export function describeClaudeModel(model: ClaudeModel): string {
@@ -330,7 +353,7 @@ export function resolveCodexInitialModel(
 export const APP_AI_MODEL_OPTIONS = [
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）" },
   { value: "claude-sonnet-5", label: "Claude Sonnet 5（標準）" },
-  { value: "claude-opus-5", label: "Claude Opus 5（高精度）" },
+  { value: "claude-opus-5-5", label: "Claude Opus 5.5（高精度）" },
   // Fable 5.1は単価がSonnet 5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）

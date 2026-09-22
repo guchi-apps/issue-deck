@@ -140,6 +140,7 @@ PRICES = {
     "claude-fable-5-1": (10.0, 50.0, 0.25),
     "claude-fable-5": (10.0, 50.0, 1.0),
     "claude-mythos-5": (10.0, 50.0, 1.0),
+    "claude-opus-5-5": (4.0, 20.0, 0.2),
     "claude-opus-5": (5.0, 25.0, 0.5),
     "claude-opus-4-8": (5.0, 25.0, 0.5),
     "claude-opus-4-7": (5.0, 25.0, 0.5),
