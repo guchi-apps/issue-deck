@@ -63,17 +63,8 @@ describe("resolveCheckUserGuidance", () => {
   it("マージは対応PRのセクションへ送る", () => {
     const guidance = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
-    expect(guidance?.buttons).toContain("「マージ」");
-  });
-
-  /**
-   * #2914で修正依頼欄を対応PRのセクションへ移したので、移動先にも「修正を依頼する」がある。
-   * #2057の時点ではあのボタンがコメント欄の承認カードにしか無く、上部の案内から触れると
-   * 移動先に無いボタンを案内することになっていた。
-   */
-  it("上部の案内も「修正を依頼する」に触れる（移動先にそのボタンがある）", () => {
-    const away = resolveCheckUserGuidance({ reason: "merge", placement: "status" });
-    expect(away?.buttons).toContain("修正を依頼する");
+    // 移動先の対応PRの行にあるボタン名をそのまま書く（#3333。マージはPR詳細で行う）
+    expect(guidance?.buttons).toContain("「PR詳細でマージ・修正依頼」");
   });
 
   /**
@@ -102,7 +93,6 @@ describe("resolveCheckUserGuidance", () => {
       hasPullRequestSection: false,
     });
     expect(guidance?.action).toBeNull();
-    expect(guidance?.buttons).toContain("修正を依頼する");
     expect(guidance?.buttons).toContain("GitHub上で");
     expect(guidance?.buttons).not.toContain("下の「マージ」");
   });
@@ -252,7 +242,7 @@ describe("resolveCheckUserGuidance", () => {
       sessionAlive: true,
     });
     expect(guidance?.action).toEqual({ kind: "scroll", target: "pull-requests", direction: "down" });
-    expect(guidance?.buttons).toContain("「マージ」");
+    expect(guidance?.buttons).toContain("「PR詳細でマージ・修正依頼」");
   });
 
   /**

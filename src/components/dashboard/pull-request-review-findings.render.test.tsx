@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
@@ -59,45 +59,12 @@ describe("PullRequestReviewFindings", () => {
         review={null}
         pullRequestNumber={2851}
         pullRequestUrl="https://github.com/guchi-apps/issue-deck/pull/2851"
-        onImport={() => {}}
       />,
     );
 
     expect(screen.getByText(/レビュー本文の記録がありません/)).toBeTruthy();
-    // 取り込む中身が無いので、ボタンは出さない
-    expect(screen.queryByRole("button", { name: /修正依頼に取り込む/ })).toBeNull();
     expect(screen.getByRole("link", { name: /GitHubで読む/ }).getAttribute("href")).toBe(
       "https://github.com/guchi-apps/issue-deck/pull/2851",
     );
-  });
-
-  it("取り込みを渡さない画面ではボタンを出さない（マージ済みなど）", () => {
-    render(<PullRequestReviewFindings review={review()} pullRequestNumber={2851} />);
-
-    expect(screen.queryByRole("button", { name: /修正依頼に取り込む/ })).toBeNull();
-  });
-
-  it("取り込みボタンは押した内容を親へ渡し、済みが分かる文言へ変わる", () => {
-    const onImport = vi.fn();
-    const { rerender } = render(
-      <PullRequestReviewFindings
-        review={review()}
-        pullRequestNumber={2851}
-        onImport={onImport}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "指摘を修正依頼に取り込む" }));
-    expect(onImport).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <PullRequestReviewFindings
-        review={review()}
-        pullRequestNumber={2851}
-        onImport={onImport}
-        isImported
-      />,
-    );
-    expect(screen.getByRole("button", { name: "もう一度取り込む" })).toBeTruthy();
   });
 });

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssuePullRequestList } from "@/components/dashboard/issue-pull-request-list";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
@@ -65,98 +66,66 @@ describe("IssuePullRequestList", () => {
     expect(screen.getByText("本体を実装する")).not.toBeNull();
   });
 
-  it("マージ待ちでなければマージボタンを出さない", () => {
+  /**
+   * #3333。PRを変更する操作（マージ・マージしない・修正依頼）はPR詳細だけが持つ。
+   * Issue詳細の行に置くのは、アプリ内のPR詳細を開く導線だけ。
+   */
+  it("マージ待ちでも、行にはマージ・「マージしない」を出さない（#3333）", () => {
+    render(
+      <IssuePullRequestList links={[link(616)]} pullRequests={[pullRequest()]} mergeApprovalPending />,
+    );
+    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /マージしない/ })).toBeNull();
+  });
+
+  it("各行にPR詳細への導線を出す（#3333）", () => {
     render(
       <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest()]}
+        links={[link(616), link(620)]}
+        pullRequests={[pullRequest({ number: 616 }), pullRequest({ number: 620, state: "closed", merged: true })]}
         mergeApprovalPending={false}
-        onMerge={async () => true}
       />,
     );
-    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+    const buttons = screen.getAllByRole("link", { name: /PR詳細で操作/ });
+    expect(buttons.map((button) => button.getAttribute("href"))).toEqual([
+      "https://github.com/m-guchi/issue-deck/pull/616",
+      "https://github.com/m-guchi/issue-deck/pull/620",
+    ]);
   });
 
-  it("マージ待ちのopenなPRの行にだけマージボタンを出す（#1339）", () => {
+  it("マージ待ちのときは、開いている行の導線を「PR詳細でマージ・修正依頼」にする（#3333）", () => {
     render(
       <IssuePullRequestList
         links={[link(616), link(620)]}
-        pullRequests={[
-          pullRequest({ number: 616, state: "closed", merged: true }),
-          pullRequest({ number: 620 }),
-        ]}
+        pullRequests={[pullRequest({ number: 616, state: "closed", merged: true }), pullRequest({ number: 620 })]}
         mergeApprovalPending
-        onMerge={async () => true}
       />,
     );
-
-    // マージ済みの行は押せない「マージ済み」、openの行が押せる「マージする」
-    expect(screen.getByText("マージ済み", { selector: "span" })).not.toBeNull();
-    expect(screen.getAllByRole("button", { name: /マージする/ })).toHaveLength(1);
+    // マージ済みの行はマージを待っていないので、強調しない
+    expect(screen.getAllByRole("link", { name: /PR詳細で操作/ })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /PR詳細でマージ・修正依頼/ }).getAttribute("href")).toBe(
+      "https://github.com/m-guchi/issue-deck/pull/620",
+    );
+    expect(screen.getByText("マージ・クローズ・修正依頼はPR詳細で行います。")).not.toBeNull();
   });
 
-  it("下書き・クローズ済みのPRにはマージボタンを出さない", () => {
+  it("導線を押すとGitHubではなくアプリ内のPR詳細を開く（#3333）", () => {
+    const openReference = vi.fn();
     render(
-      <IssuePullRequestList
-        links={[link(616), link(620)]}
-        pullRequests={[
-          pullRequest({ number: 616, draft: true, ciStatus: null }),
-          pullRequest({ number: 620, state: "closed", merged: false, ciStatus: null }),
-        ]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
+      <GithubReferenceNavigationProvider openReference={openReference}>
+        <IssuePullRequestList links={[link(616)]} pullRequests={[pullRequest()]} mergeApprovalPending />
+      </GithubReferenceNavigationProvider>,
     );
-    expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
+    fireEvent.click(screen.getByRole("link", { name: /PR詳細でマージ・修正依頼/ }));
+    expect(openReference).toHaveBeenCalledWith(
+      expect.objectContaining({ repositoryFullName: "m-guchi/issue-deck", number: 616, kind: "pull" }),
+    );
   });
 
-  it("CI実行中の行のマージボタンは押せない", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest({ ciStatus: "in_progress" })]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-  });
-
-  // #1115: CIバッジ出現によるレイアウト移動とdisabled化のopacity transitionが重なり、
-  // モバイルSafariでボタンが二重表示される不具合の再発防止。
-  // #2914でマージボタンがコメント欄の承認カードから消えたため、判定をこちらへ移した
-  it("マージするボタンはopacityを含む全プロパティのtransitionを使わない（#1115）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest({ ciStatus: "in_progress" })]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.className).not.toMatch(/(?:^|\s)transition-all(?:\s|$)/);
-    expect(button.className).toMatch(/(?:^|\s)transition-colors(?:\s|$)/);
-  });
-
-  it("自動マージ可否の判定中の行はマージボタンを押せない（#1968）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        // CIは通っているが判定はまだ走っている状態（PR #1959の再現）。
-        pullRequests={[
-          pullRequest({
-            ciStatus: "success",
-            mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
-          }),
-        ]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /判定中/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+  it("詳細をまだ取得できていない行にも番号とPR詳細への導線を出す", () => {
+    render(<IssuePullRequestList links={[link(616)]} pullRequests={[]} mergeApprovalPending />);
+    expect(screen.getByText("#616")).not.toBeNull();
+    expect(screen.getByRole("link", { name: /PR詳細でマージ・修正依頼/ })).not.toBeNull();
   });
 
   it("判定中の行は、待っているものを見出しの1語で出す（#2059・#3239）", () => {
@@ -175,7 +144,6 @@ describe("IssuePullRequestList", () => {
           }),
         ]}
         mergeApprovalPending
-        onMerge={async () => true}
       />,
     );
     expect(screen.getByText("判定実施中")).toBeTruthy();
@@ -315,26 +283,13 @@ describe("IssuePullRequestList", () => {
     expect(screen.queryByRole("list", { name: "developへマージの内訳" })).toBeNull();
   });
 
-  it("この画面でマージした行は、GitHub側の反映前でも内訳を外す（#3239）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest()]}
-        mergeApprovalPending={false}
-        mergedNumbers={new Set([616])}
-      />,
-    );
-    expect(screen.queryByRole("list", { name: "developへマージの内訳" })).toBeNull();
-  });
-
-  it("コンフリクトしている行はバッジを出し、マージボタンを出さない（#2145）", () => {
+  it("コンフリクトしている行はバッジを出す（#2145）", () => {
     render(
       <IssuePullRequestList
         links={[link(616)]}
         // PR画面では「コンフリクトあり」が出ているのに、Issue画面はCI状態しか出していなかった
         pullRequests={[pullRequest({ ciStatus: "success", mergeable: false })]}
         mergeApprovalPending
-        onMerge={async () => true}
       />,
     );
     expect(screen.getByText("コンフリクトあり")).toBeTruthy();
@@ -357,103 +312,9 @@ describe("IssuePullRequestList", () => {
           }),
         ]}
         mergeApprovalPending
-        onMerge={async () => true}
       />,
     );
     expect(screen.getByText(/自動解消中/)).toBeTruthy();
-  });
-
-  it("コンフリクトの判定前（null）はマージボタンを出したままにする（#2145）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest({ mergeable: null })]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    expect(screen.queryByText("コンフリクトあり")).toBeNull();
-    expect(screen.getByRole("button", { name: /マージする/ })).toBeTruthy();
-  });
-
-  it("マージするとその行のPR番号でonMerge・onMergedを呼ぶ", async () => {
-    const onMerge = vi.fn(async () => true);
-    const onMerged = vi.fn();
-    render(
-      <IssuePullRequestList
-        links={[link(616), link(620)]}
-        pullRequests={[pullRequest({ number: 616 }), pullRequest({ number: 620 })]}
-        mergeApprovalPending
-        onMerge={onMerge}
-        onMerged={onMerged}
-      />,
-    );
-
-    // 2行目（#620）のマージボタンを押す
-    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ })[1]);
-    fireEvent.click(screen.getAllByRole("button", { name: /マージする/ }).at(-1)!);
-
-    await waitFor(() => {
-      expect(onMerged).toHaveBeenCalledWith(620);
-    });
-    expect(onMerge).toHaveBeenCalledWith(620);
-  });
-
-  it("この画面でマージしたPRは、GitHub側の反映前でも「マージ済み」になる", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest()]}
-        mergeApprovalPending
-        onMerge={async () => true}
-        mergedNumbers={new Set([616])}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /マージ済み/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-  });
-
-  it("詳細をまだ取得できていなくても番号とマージボタンは出す（取得失敗でマージ不能にしない）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[]}
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    expect(screen.getByText("#616")).not.toBeNull();
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-  });
-
-  it("詳細の取得が終わるまではマージボタンを「確認中」で押せなくする（#2352）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[]}
-        isLoadingDetails
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    expect(screen.getByText("#616")).not.toBeNull();
-    const button = screen.getByRole("button", { name: /確認中/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-  });
-
-  it("詳細が届いている行は取得中でも押せる（判定は行ごと。#2352）", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616)]}
-        pullRequests={[pullRequest({ number: 616 })]}
-        isLoadingDetails
-        mergeApprovalPending
-        onMerge={async () => true}
-      />,
-    );
-    const button = screen.getByRole("button", { name: /マージする/ }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
   });
 
   it("絞り込みで落ちたPR（別Issueの言及）は行に出さない", () => {
@@ -467,20 +328,6 @@ describe("IssuePullRequestList", () => {
     );
     expect(screen.getByText("#616")).not.toBeNull();
     expect(screen.queryByText("#1327")).toBeNull();
-  });
-
-  it("マージ失敗のエラーは対象の行に出す", () => {
-    render(
-      <IssuePullRequestList
-        links={[link(616), link(620)]}
-        pullRequests={[pullRequest({ number: 616 }), pullRequest({ number: 620 })]}
-        mergeApprovalPending
-        onMerge={async () => true}
-        mergeTargetNumber={620}
-        mergeError="コンフリクトしています"
-      />,
-    );
-    expect(screen.getAllByText("コンフリクトしています")).toHaveLength(1);
   });
 
   it("noticeで渡した案内を一覧と同じ枠の中に出す（#1631）", () => {

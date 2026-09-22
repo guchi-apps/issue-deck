@@ -282,9 +282,8 @@ describe("CommentThread AI要約の表示位置", () => {
 });
 
 /**
- * #2914。マージ待ちの操作一式（PRの行・マージボタン・自動マージされなかった理由・
- * レビュー本文・修正依頼欄）は画面上部の対応PRセクションへ移した。ここに残るのは
- * 「どこへ行けばよいか」だけ。
+ * #2914・#3333。PRのマージ・クローズ・修正依頼はPR詳細が持ち、Issue詳細の上部の対応PR
+ * セクションはPR詳細への導線だけを持つ。ここに残るのは「どこへ行けばよいか」だけ。
  */
 describe("CommentThread PRマージ待ちの表示", () => {
   afterEach(() => {
@@ -302,29 +301,16 @@ describe("CommentThread PRマージ待ちの表示", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
         {...props}
       />,
     );
   }
 
-  it("マージボタン・レビュー本文・修正依頼欄をここには出さない（#2914）", () => {
-    renderMergePending({
-      reviewFindings: {
-        verdictKind: "changes-requested",
-        verdictLabel: "要修正",
-        body: "- `a.ts:1` を直す",
-        createdAt: new Date().toISOString(),
-        htmlUrl: null,
-        reviewedSha: "0123456",
-        isStale: false,
-      },
-      reviewPullRequestNumber: 674,
-    });
+  it("マージボタン・レビュー本文・修正依頼欄をここには出さない（#2914・#3333）", () => {
+    renderMergePending();
 
     expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
     expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
@@ -337,23 +323,22 @@ describe("CommentThread PRマージ待ちの表示", () => {
     expect(screen.getByRole("button", { name: /対応PRへ移動/ })).not.toBeNull();
   });
 
-  // 対応PRの行が1件も無いIssueでは飛ぶ先が無いため、ここが唯一の修正依頼の出口になる
-  it("上部に対応PRセクションが無いときだけ、修正依頼欄をここに出す（#2914）", () => {
+  /** 対応PRの行が1件も無いIssueでも、修正依頼欄は出さない（PRへの修正依頼はPR詳細だけ。#3333） */
+  it("上部に対応PRセクションが無くても、修正依頼欄は出さない（#3333）", () => {
     renderMergePending({ hasPullRequestSection: false });
-    expect(screen.getByPlaceholderText("修正依頼を入力（必須）")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "修正を依頼する" })).not.toBeNull();
+    expect(screen.queryByPlaceholderText("修正依頼を入力（必須）")).toBeNull();
+    expect(screen.queryByRole("button", { name: "修正を依頼する" })).toBeNull();
   });
 
   /**
-   * その状態では画面のどこにもマージボタンが無い（`IssuePullRequestList`は行が0件だと
-   * `null`を返すため、この変更の前からそうだった）。**案内が「下の『マージ』を押します」で
-   * あってはいけない**——押せるものが無いことをそのまま書く（PR #2918のレビュー）。
+   * その状態では画面のどこにもPR詳細への導線が無い（`IssuePullRequestList`は行が0件だと
+   * `null`を返す）。**押せるものが無いことをそのまま書く**（PR #2918のレビュー）。
    */
   it("対応PRセクションが無いときの案内は、マージ先としてGitHubを示す（#2914）", () => {
     renderMergePending({ hasPullRequestSection: false, checkUserReason: "merge" });
     expect(screen.queryByRole("button", { name: /マージする/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /対応PRへ移動/ })).toBeNull();
-    expect(screen.getByText(/マージはGitHub上で行ってください/)).not.toBeNull();
+    expect(screen.getByText(/GitHub上で行ってください/)).not.toBeNull();
   });
 
   /** 理由ラベルが読めないリポジトリ（`guidance`がnull）でも、押す場所の名指しは実態に合わせる */
@@ -363,14 +348,7 @@ describe("CommentThread PRマージ待ちの表示", () => {
 
     cleanup();
     renderMergePending();
-    expect(screen.getByText(/画面上部の「対応PR」で内容を確認のうえマージしてください/)).not.toBeNull();
-  });
-
-  it("上部のマージボタンから押された場合（mergedPullRequestNumbers）はマージ済みの表示になる（#1288・#1339）", () => {
-    renderMergePending({ mergedPullRequestNumbers: new Set([674]), hasPullRequestSection: false });
-
-    expect(screen.getByText("Pull Requestをマージしました")).not.toBeNull();
-    expect(screen.queryByText("修正を依頼する")).toBeNull();
+    expect(screen.getByText(/「対応PR」からPR詳細を開き、内容を確認のうえマージしてください/)).not.toBeNull();
   });
 });
 
@@ -471,7 +449,6 @@ describe("CommentThread セッションが入力待ちのとき", () => {
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
         mergeApprovalPending={overrides.mergeApprovalPending}
       />,
     );
@@ -519,7 +496,6 @@ describe("CommentThread セッションの状態が届いていないとき", ()
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
         mergeApprovalPending={overrides.mergeApprovalPending}
       />,
     );
@@ -622,11 +598,9 @@ describe("CommentThread 承認カードの表示位置（#1639）", () => {
         commentSummary={commentSummary}
         approvalPending
         mergeApprovalPending={props.mergeApprovalPending}
-        pullRequestLinks={[{ number: 674, url: "https://github.com/m-guchi/issue-deck/pull/674" }]}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
-        onRequestPrFix={async () => {}}
       />,
     );
   }
@@ -696,7 +670,6 @@ describe("CommentThread ローカルセッションが担当しているとき",
         onComment={props.onComment ?? (async () => {})}
         onAskClaude={props.onAskClaude ?? (async () => {})}
         onDismissCheckUser={props.onDismissCheckUser ?? (async () => {})}
-        onRequestPrFix={async () => {}}
         mergeApprovalPending={props.mergeApprovalPending}
       />,
     );

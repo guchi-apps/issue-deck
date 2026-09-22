@@ -39,7 +39,6 @@ import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog"
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MobileIssuePropertiesSection } from "@/components/dashboard/mobile/mobile-issue-properties-section";
 import { MobileIssueSummaryCard } from "@/components/dashboard/mobile/mobile-issue-summary-card";
-import { MergeApprovalActions } from "@/components/dashboard/merge-approval-actions";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import {
@@ -53,19 +52,13 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
-  describeDispatchEnqueueRejection,
-  describeSessionControlRejection,
   findBlockingSession,
   findDispatchJobForIssue,
-  findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
-  resolveDispatchTargetRejection,
-  resolveSessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { prFixRequestLabels, resolvePrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
 import {
   LocalSessionApprovalNotice,
   LocalSessionCommentNotice,
@@ -114,12 +107,10 @@ import {
   rejectCommentBody,
   withoutCheckUserLabels,
   requestContinuationCommentBody,
-  requestPrFixCommentBody,
   withRollbackFailureNotice,
   withRollbackNotice,
 } from "@/lib/github/approval-labels";
 import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
-import { selectReviewTargetPullRequestNumber } from "@/lib/github/pull-request-review-comment";
 import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
@@ -140,7 +131,6 @@ import {
 import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
-  areIssuePullRequestsAllMerged,
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
@@ -183,8 +173,6 @@ import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisite
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
 import { usePullRequestLinks } from "@/hooks/use-pull-request-link";
-import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
-import { usePullRequestReview } from "@/hooks/use-pull-request-review";
 import { useSwipeBack } from "@/hooks/use-swipe-back";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -243,9 +231,6 @@ type MobileIssueDetailProps = {
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
 };
-
-/** 表示中のIssueでまだマージしていないときに渡す空集合。毎レンダーの再生成を避ける */
-const EMPTY_MERGED_NUMBERS: ReadonlySet<number> = new Set();
 
 export function MobileIssueDetail({
   issue,
@@ -379,49 +364,6 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
-  // マージ待ちの「修正を依頼する」をどこへ送るか（#2919）。**PCの詳細とまったく同じ判定**を
-  // 使う。片方だけ送り先を持つと、同じIssueをスマホから開いたときだけ押しても何も起きない
-  const prFixRoute = resolvePrFixRequestRoute({ labels: issue.labels, session: issueSession });
-  const prFixSessionRejection = (() => {
-    if (prFixRoute.kind === "session") {
-      const controlJob = findSessionControlJobForIssue(
-        dispatch.jobs,
-        issue.repositoryFullName,
-        issue.number,
-      );
-      const rejection = resolveSessionControlRejection({
-        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
-        session: issueSession,
-        kind: "INSTRUCTION",
-        hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
-      });
-      return rejection
-        ? describeSessionControlRejection(rejection, {
-            hostName: prFixRoute.host,
-            kind: "INSTRUCTION",
-          })
-        : null;
-    }
-    if (prFixRoute.kind === "resume") {
-      // この経路（#1830のセッション復旧）は既定エージェント（claude）でしか起動しない（#2994）
-      const rejection = resolveDispatchTargetRejection({
-        host: dispatch.hosts.find((candidate) => candidate.name === prFixRoute.host),
-        repositoryFullName: issue.repositoryFullName,
-        hasActiveJob: dispatchJob !== null && isActiveDispatchJobStatus(dispatchJob.status),
-        blockingSession,
-        agentPauseReason: dispatch.agentPause.claude,
-      });
-      return rejection
-        ? describeDispatchEnqueueRejection(rejection, {
-            hostName: prFixRoute.host,
-            repositoryFullName: issue.repositoryFullName,
-            session: blockingSession,
-            agentPauseReason: dispatch.agentPause.claude,
-          })
-        : null;
-    }
-    return null;
-  })();
   // 計画への返事待ち（#2061）。**PCの詳細と同じものを同じ位置（セッション表示の下）に出す**——
   // 承認・修正の出口が片方の画面にしか無いと、スマホから見たときに従来どおり
   // 「Remote Controlから答えてください」しか出ない
@@ -520,8 +462,6 @@ export function MobileIssueDetail({
     : null;
   const {
     pullRequests,
-    isLoadingDetails: isLoadingPullRequests,
-    refresh: refreshPullRequests,
   } = useIssuePullRequests(
     issue.repositoryFullName,
     issue.number,
@@ -529,13 +469,6 @@ export function MobileIssueDetail({
     // PCの詳細と同じ条件（#2816）。PRを待っている段のあいだは取り直しを続け、CIと
     // Claudeのレビューの進み具合が開いた時点で固まらないようにする
     mergeApprovalPending || isPullRequestWaitingStatus(resolveProgressStatus(issue)),
-  );
-  // マージ待ちのときだけ、対応PRの自動レビュー本文を1回取りに行く（#2849）。PCの詳細と同じ
-  const reviewPullRequestNumber = selectReviewTargetPullRequestNumber(pullRequests);
-  const { review: reviewFindings, isLoading: isLoadingReviewFindings } = usePullRequestReview(
-    issue.repositoryFullName,
-    reviewPullRequestNumber,
-    mergeApprovalPending,
   );
   // 「developへマージ」段の内訳（#2816）。PCの詳細と同じく、取得済みの対応PRから導くだけ
   const pullRequestProgress = isPullRequestWaitingStatus(resolveProgressStatus(issue))
@@ -545,40 +478,6 @@ export function MobileIssueDetail({
   const pullRequestStop = isPullRequestWaitingStatus(resolveProgressStatus(issue))
     ? resolvePullRequestStop(pullRequests.map(toIssuePullRequestProgressSource))
     : null;
-  const {
-    mergePullRequest,
-    closePullRequest,
-    isSubmitting: isMergingPullRequest,
-    error: mergePullRequestError,
-    setError: setMergePullRequestError,
-  } = usePullRequestMergeMutation();
-  // マージ済みの表示は、対応PR一覧を出している2箇所（本文の上・コメント欄のマージ待ちカード）で
-  // 共有する。GitHub側の反映を待つ間だけの楽観表示（#1288・#1339）。画面内のリンクから別の
-  // Issueへ移ってもこのコンポーネントは再マウントされないため、どのIssueで押したかを一緒に持つ
-  const [mergedPullRequests, setMergedPullRequests] = useState<{
-    issueKey: string;
-    numbers: ReadonlySet<number>;
-  } | null>(null);
-  const [mergeTargetNumber, setMergeTargetNumber] = useState<number | null>(null);
-  // 「マージしない」（#2780）も同じ考え方で持つ
-  const [declinedPullRequests, setDeclinedPullRequests] = useState<{
-    issueKey: string;
-    numbers: ReadonlySet<number>;
-  } | null>(null);
-  const [declineTargetNumber, setDeclineTargetNumber] = useState<number | null>(null);
-  // 修正依頼をセッションへ流せなかった理由（#2919）。PCの詳細と同じ扱い
-  const [prFixSessionError, setPrFixSessionError] = useState<string | null>(null);
-  const issueKey = `${issue.repositoryFullName}#${issue.number}`;
-  const mergedPullRequestNumbers =
-    mergedPullRequests?.issueKey === issueKey ? mergedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
-  // 対応PRが全部マージ済みになったら、マージ待ちの操作一式（レビュー本文・修正依頼欄）を
-  // 引っ込める（#2914）。コメント欄の承認カードが「マージしました」へ切り替わるのと同じ判定
-  const allPullRequestsMerged = areIssuePullRequestsAllMerged(
-    pullRequestLinks,
-    mergedPullRequestNumbers,
-  );
-  const declinedPullRequestNumbers =
-    declinedPullRequests?.issueKey === issueKey ? declinedPullRequests.numbers : EMPTY_MERGED_NUMBERS;
   const swipeBackHandlers = useSwipeBack(onBack);
   // 対応PRのセクションは、一覧が実際に描く行が1件以上あるときだけ出す（#1577）。
   // 判定を`IssuePullRequestList`と共有しないと、行が無いのに空の枠だけが残る
@@ -588,12 +487,9 @@ export function MobileIssueDetail({
     visiblePullRequestLinks.length,
   );
   // 対応PRの中にCI失敗・コンフリクト・レビュー失敗で止まっているものが1件でもあれば、
-  // セクションを開いて赤く強調する（#3317）。見送った（declined）PRは対象から外す——
-  // 既にユーザーが対応不要と判断したPRの失敗で毎回開かせても意味が無い
+  // セクションを開いて赤く強調する（#3317）
   const hasFailingPullRequest = hasAttentionPullRequest(
-    pullRequests
-      .filter((pullRequest) => !declinedPullRequestNumbers.has(pullRequest.number))
-      .map(toIssuePullRequestProgressSource),
+    pullRequests.map(toIssuePullRequestProgressSource),
   );
   const subIssueSummary = summarizeSubIssueProgress(subIssueRelations.children);
   // 確認待ちのときに、次にどこの何を押せばよいかを上部から案内する（#1663）。PCの詳細と同じ
@@ -817,87 +713,6 @@ export function MobileIssueDetail({
 
   async function handleRequestContinuation() {
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), requestContinuationCommentBody());
-  }
-
-  /** マージ待ちの「修正を依頼する」（#2919）。判定も送り方もPCの詳細と同じ */
-  async function handleRequestPrFix(reason: string) {
-    setPrFixSessionError(null);
-    const body = requestPrFixCommentBody(reason);
-    const labels = prFixRequestLabels(prFixRoute, issue.labels);
-    const posted = labels ? await updateLabelsAndComment(labels, body) : await postComment(body);
-    if (!posted) return;
-
-    if (prFixRoute.kind === "session") {
-      const result = await dispatch.sendPrFixNotify({
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
-        hostName: prFixRoute.host,
-      });
-      if (!result.ok) setPrFixSessionError(result.message);
-      return;
-    }
-    if (prFixRoute.kind === "resume") {
-      const enqueued = await dispatch.enqueue({
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
-        hostName: prFixRoute.host,
-        // **呼び戻すCLIを引き継ぐ**（`SessionRecoveryButton`と同じ）。省くと受け口が既定の
-        // Claude Codeへ落とし、Codexで進んでいたIssueが黙って別のCLIで立ち上がる
-        agent: prFixRoute.agent,
-      });
-      if (!enqueued) {
-        setPrFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
-      }
-    }
-  }
-
-  async function handleMergePullRequest(pullRequestNumber: number): Promise<boolean> {
-    setDeclineTargetNumber(null);
-    setMergeTargetNumber(pullRequestNumber);
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    return mergePullRequest({ owner, repo, number: pullRequestNumber });
-  }
-
-  function handlePullRequestMerged(pullRequestNumber: number) {
-    setMergedPullRequests((prev) => ({
-      issueKey,
-      numbers: new Set([...(prev?.issueKey === issueKey ? prev.numbers : []), pullRequestNumber]),
-    }));
-    // 楽観表示のあと、GitHub側の状態（マージ済み・CI）を取り直して実データへ寄せる
-    refreshPullRequests();
-  }
-
-  /** 「マージしない」（#2780）。PRをマージせずにクローズし、Issueも「対応終了」としてクローズする */
-  async function handleDeclinePullRequest(pullRequestNumber: number): Promise<boolean> {
-    setMergeTargetNumber(null);
-    setDeclineTargetNumber(pullRequestNumber);
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const closed = await closePullRequest({ owner, repo, number: pullRequestNumber });
-    if (!closed) return false;
-
-    const updated = await updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      state: "closed",
-      stateReason: "not_planned",
-      labels: labelsAfterApproval(issue.labels),
-    });
-    if (updated) {
-      onIssueUpdated(updated);
-    } else {
-      setMergePullRequestError(
-        "PRはクローズしましたが、Issueのクローズに失敗しました。手動でクローズしてください。",
-      );
-    }
-    return true;
-  }
-
-  function handlePullRequestDeclined(pullRequestNumber: number) {
-    setDeclinedPullRequests((prev) => ({
-      issueKey,
-      numbers: new Set([...(prev?.issueKey === issueKey ? prev.numbers : []), pullRequestNumber]),
-    }));
-    refreshPullRequests();
   }
 
   return (
@@ -1289,7 +1104,8 @@ export function MobileIssueDetail({
           >
             <IssuePullRequestList
               variant="plain"
-              /* 自動マージされなかった理由をマージボタンと同じ枠の中に出す（#1631）。PCと同じ */
+              /* 自動マージされなかった理由をPR詳細への導線と同じ枠の中に出す（#1631）。PCと同じ。
+                 PRのマージ・クローズ・修正依頼はPR詳細が持つ（#3333） */
               notice={
                 mergeApprovalPending ? (
                   <MergeCheckReasonNotice reasons={mergeCheckReasons} />
@@ -1297,41 +1113,8 @@ export function MobileIssueDetail({
               }
               links={pullRequestLinks}
               pullRequests={pullRequests}
-              isLoadingDetails={isLoadingPullRequests}
               mergeApprovalPending={mergeApprovalPending}
-              onMerge={handleMergePullRequest}
-              onMerged={handlePullRequestMerged}
-              onDecline={handleDeclinePullRequest}
-              onDeclined={handlePullRequestDeclined}
-              mergedNumbers={mergedPullRequestNumbers}
-              declinedNumbers={declinedPullRequestNumbers}
-              mergeTargetNumber={mergeTargetNumber}
-              isMerging={isMergingPullRequest}
-              declineTargetNumber={declineTargetNumber}
-              isDeclining={isMergingPullRequest}
-              mergeError={mergePullRequestError}
-              declineError={mergePullRequestError}
             />
-            {/* 読んで決めるための一式——自動レビューの本文と修正依頼欄（#2914）。
-                **マージボタンと同じ枠の中に置く**——以前はコメント一覧の末尾（承認カード）にあり、
-                その上に上部と同じPRの行が重なっていた。マージ待ちのあいだだけ出し、
-                全部マージし終えたら消す */}
-            {mergeApprovalPending && !allPullRequestsMerged && (
-              <MergeApprovalActions
-                className="mt-2"
-                review={reviewFindings}
-                reviewPullRequestNumber={reviewPullRequestNumber}
-                isLoadingReview={isLoadingReviewFindings}
-                pullRequestLinks={pullRequestLinks}
-                repositoryFullName={issue.repositoryFullName}
-                issueSuggestions={issueSuggestions}
-                onRequestPrFix={handleRequestPrFix}
-                isRequestingPrFix={isCommentSubmitting}
-                prFixRoute={prFixRoute}
-                prFixSessionRejection={prFixSessionRejection}
-                prFixSessionError={prFixSessionError}
-              />
-            )}
           </IssueDetailSection>
         )}
 
@@ -1446,7 +1229,6 @@ export function MobileIssueDetail({
             canAskClaude={canAskClaude(issue)}
             qaAnswerPending={qaAnswerPending}
             mergeApprovalPending={mergeApprovalPending}
-            pullRequestLinks={pullRequestLinks}
             hasPullRequestSection={visiblePullRequestLinks.length > 0}
             pullRequestStop={pullRequestStop}
             workflowRun={workflowRun}
@@ -1458,19 +1240,10 @@ export function MobileIssueDetail({
             onAskClaude={handleApprovalAskClaude}
             onDismissCheckUser={handleDismissCheckUser}
             onRequestContinuation={handleRequestContinuation}
-            onRequestPrFix={handleRequestPrFix}
-            prFixRoute={prFixRoute}
-            prFixSessionRejection={prFixSessionRejection}
-            prFixSessionError={prFixSessionError}
-            reviewFindings={reviewFindings}
-            reviewPullRequestNumber={reviewPullRequestNumber}
-            isLoadingReviewFindings={isLoadingReviewFindings}
             isApproving={isSubmitting}
             isRejecting={isCommentSubmitting}
             isWithdrawing={isSubmitting}
             isRequestingContinuation={isCommentSubmitting}
-            isRequestingPrFix={isCommentSubmitting}
-            mergedPullRequestNumbers={mergedPullRequestNumbers}
             targetCommentIndex={targetCommentIndex}
             targetCommentRef={targetCommentRef}
             commentSummary={commentSummary}

@@ -200,30 +200,8 @@ const QUOTE_MAX_LINES = 60;
 const QUOTE_MAX_CHARS = 4000;
 
 /**
- * レビュー本文を、修正依頼欄へそのまま入れられる文面に組み立てる（#2849）。
- *
- * **押した時点ではGitHubへ何も送らない。** 入るのは画面のテキスト欄までで、送るかどうか・
- * どの指摘を残すかは読んだ人が決める（リリース前の「修正をIssueにする」が、押しても起票せず
- * 埋めたダイアログを開くだけなのと同じ立場）。
- *
- * **本文は引用（`> `）にする。** レビューは自由記述のMarkdownで、見出しも箇条書きも入る。
- * 素のまま入れると、送った後のIssueコメントを見出しで区切って読む相手（無人実行の
- * `## 前提条件`の切り出しなど）がレビューの書きぶりで変わってしまう。
- */
-export function buildReviewFixRequestText(params: {
-  review: Pick<PullRequestReviewCommentContent, "body" | "verdictLabel">;
-  pullRequestNumber: number;
-}): string {
-  const head =
-    `自動レビュー（PR #${params.pullRequestNumber}・${params.review.verdictLabel}）で` +
-    "指摘された次の点を修正してください。";
-
-  return `${head}\n\n${quoteReviewText(extractReviewConcerns(params.review.body))}\n`;
-}
-
-/**
  * レビューの文面を引用（`> `）にする。長ければ`QUOTE_MAX_LINES`・`QUOTE_MAX_CHARS`で切り、
- * 続きはPRで読ませる一文を足す。修正依頼欄（#2849）とPR詳細の修正Issueの下書き（#2961）で共用する。
+ * 続きはPRで読ませる一文を足す。PR詳細の修正依頼・修正Issueの下書き（#2961・#3009）が使う。
  */
 export function quoteReviewText(text: string): string {
   const lines: string[] = [];
@@ -243,22 +221,4 @@ export function quoteReviewText(text: string): string {
     ? "\n>\n> （長いため以降を省略しました。全文はPRのレビューコメントにあります）"
     : "";
   return `${lines.join("\n")}${tail}`;
-}
-
-/**
- * どのPRのレビューを読むか（#2849）。openでマージ済みでないPRのうち、いちばん番号が小さいもの。
- *
- * **1つのIssueに対応PRが複数ぶら下がることがある**（#1339。修復用のPRなど）。マージ待ちの
- * カードはそれらを行として並べるが、レビューの指摘は「これからdevelopへ入るPR」のものだけを
- * 読ませたい。closedとdraftを外し、残りのうち先に作られた（＝番号が小さい）ものを選ぶ。
- * 該当が無ければnullで、パネルそのものを出さない。
- */
-export function selectReviewTargetPullRequestNumber(
-  pullRequests: readonly { number: number; state: "open" | "closed"; merged: boolean; draft: boolean }[],
-): number | null {
-  const open = pullRequests
-    .filter((pullRequest) => pullRequest.state === "open" && !pullRequest.merged && !pullRequest.draft)
-    .map((pullRequest) => pullRequest.number)
-    .sort((a, b) => a - b);
-  return open[0] ?? null;
 }

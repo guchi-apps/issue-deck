@@ -517,8 +517,8 @@ function PromotionKnowledgeFileBlock({ file }: { file: PromotionKnowledgeFile })
  *
  * **「マージしない」も置く**（計画レビューG1の指摘）。`promote-knowledge.yml`は
  * 「未マージの反映PRが**マージまたはclose**されるまで次回の判定を見送る」ため、マージしたくない
- * PRを画面からcloseできないと判定を再開する手段がGitHubを開くしかなくなる。`issue-merge-button.tsx`
- * と違い、対応するissue-deck上のIssueは無いため、PRのcloseだけを行いIssueのクローズは行わない。
+ * PRを画面からcloseできないと判定を再開する手段がGitHubを開くしかなくなる。対応するissue-deck上の
+ * Issueは無いため、PRのcloseだけを行う（通常のPRでもPRのcloseとIssueのクローズは連動させない。#3333）。
  *
  * `PullRequestMergeButton`と違い、CI状態・自動レビュー判定・本番リリース内容の一覧は持たない
  * （反映PRにはそれらの情報が無いため）。確認ダイアログはPRタイトルと出典Issueだけを見せる簡易版。
