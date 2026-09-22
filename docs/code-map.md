@@ -2930,6 +2930,15 @@ export function POST(request: NextRequest) {
   2分が課金されていた（privateリポジトリの従量課金のほとんどがこれ）。
   設計は[progress-status-architecture.md](progress-status-architecture.md)「取り残しの回収は
   issue-deck側の巡回が担う」と[github-billing.md](github-billing.md)。
+  **対象PRがマージされた修正Issueを閉じるのも同じ巡回**（#3353。判定は
+  [`lib/github/fix-issue-close-sweep.ts`](../src/lib/github/fix-issue-close-sweep.ts)、IOは
+  `fix-issue-close-sweep-run.ts`）。PR詳細の「修正Issueを起案」（`pull-request-fix-issue.ts`）が
+  作る修正Issueは、本文に`対象PR: #NN`マーカーを持つが、レビュー指摘への対応が対象PR側への
+  追加コミットとして直接取り込まれることが多く、修正Issue自身は`issue-<番号>`ブランチを持たない。
+  そのため上の「本番反映を検知してcloseする」巡回はブランチの有無が前提になっておりこの形を
+  拾えず、対象PRがマージされても手動closeを忘れると残り続けていた。探し先はDBの本文検索
+  （`body.contains("対象PR: #")`）で、対象PRが実際にマージされたかだけをGitHubへ確認し、
+  開け直し済みのものは閉じ直さない。
 - **自動修復が「いま走っているか」だけは、GitHubではなくissue-deckのDBが持つ**（#2072。
   `PullRequestRepairRun`と[`lib/github/pull-request-repair-run.ts`](../src/lib/github/pull-request-repair-run.ts)）。
   修復ワークフローは`workflow_run`で起動するため、runの`head_branch`・`head_sha`が対象PRでは
