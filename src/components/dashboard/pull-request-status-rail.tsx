@@ -21,6 +21,7 @@ const SLOT_STATUS: Record<PullRequestRailSlotState, { label: string; className: 
   failed: { label: "×", className: "text-destructive" },
   pending: { label: "—", className: "text-muted-foreground" },
   absent: { label: "—", className: "text-muted-foreground" },
+  "needs-check": { label: "△", className: "text-amber-700 dark:text-amber-400" },
 };
 
 function RailSlot({ slot, linkable }: { slot: PullRequestRailSlot; linkable: boolean }) {
