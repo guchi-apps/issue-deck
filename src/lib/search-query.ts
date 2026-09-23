@@ -97,6 +97,8 @@ export function matchesSearchQuery(
   if (options?.aiMatchedIds) {
     if (!options.aiMatchedIds.has(issue.id)) return false;
   } else if (parsed.keyword) {
+    // closedのIssueは一覧で本文を外している（`bodyOmitted`。#3390）ので、タイトルだけに当たる。
+    // 本文まで探したいときはAI検索（サーバー側で引く）を使う
     const haystack = `${issue.title}\n${issue.body}`.toLowerCase();
     if (!haystack.includes(parsed.keyword)) return false;
   }

@@ -38,7 +38,8 @@ export async function GET(request: NextRequest) {
   // （`/api/branch-flow/deploy`）と同じ形で取得時刻も返す（#1797）
   const fetchedAt = new Date().toISOString();
 
-  // この一覧は10秒おきに取り直され、全Issueの本文を含むため大きい（#3387）。内容が
+  // この一覧は10秒おきに取り直され、openのIssueの本文を含むため大きい（#3387。closedの本文は
+  // 外してあり、詳細を開いたときに`GET /api/issues/body`で取る。#3390）。内容が
   // 変わっていない周回は304で本文を送らない（`If-None-Match`は`use-issue-polling.ts`が
   // 自分で付ける）。**ETagは一覧だけから作る**——取得時刻まで含めると毎回変わって一致
   // しなくなる。取得時刻はヘッダーでも返し、304の周回でも「HH:MM時点」だけは進める
