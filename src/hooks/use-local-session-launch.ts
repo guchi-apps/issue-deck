@@ -2,6 +2,7 @@
 
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
 import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import type { Issue } from "@/types/issue";
@@ -47,16 +48,24 @@ export function useLocalSessionLaunch({
    * 起動ジョブを積み、積めたときだけ`11.local`を付ける。
    * **拒否されたのにラベルだけ残ると、無人実行までそのIssueに触れなくなる。**
    *
-   * `agent`（#2505）を省略すると既定のClaude Codeで立つ。**「サブPCで開始」ボタンと
-   * 「セッションを復旧」は省略する**——エージェントを選ばせるのは「実装を開始」ダイアログ
-   * だけにして、同じ選択をメニューの階層でも持たない。
+   * `agent`（#2505）を省略すると既定のClaude Codeで立つ。**「サブPCで開始」ボタンは省略する**
+   * ——エージェントを選ばせるのは「実装を開始」ダイアログだけにして、同じ選択をメニューの
+   * 階層でも持たない。**「セッションを復旧」は別のエージェント・モデルで復旧するメニュー
+   * （#3408）からだけ渡す**——本体のボタンは変わらず省略（前回と同じ設定）のまま。
+   *
+   * `model`も同じ扱い。省略・`null`は「設定の既定に従う」（`enqueue`が省く）。
    */
-  async function launch(hostName: string, agent?: DispatchAgent): Promise<boolean> {
+  async function launch(
+    hostName: string,
+    agent?: DispatchAgent,
+    model?: ClaudeModel | CodexLocalModel | null,
+  ): Promise<boolean> {
     const enqueued = await dispatch.enqueue({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName,
       agent,
+      model,
     });
     if (enqueued) await ensureLocalLabel();
     return enqueued;

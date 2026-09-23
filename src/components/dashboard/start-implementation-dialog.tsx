@@ -168,7 +168,7 @@ type StartTargetEntry = {
  * アイコンは実行先タイルと重ならないものを選ぶ。`Terminal`は「起動コマンドをコピー」が
  * 使っているため、Codexには`SquareTerminal`を当てている。
  */
-const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
+export const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
   { agent: "claude", icon: Asterisk },
   { agent: "codex", icon: SquareTerminal },
 ];
@@ -180,7 +180,7 @@ const AGENT_ENTRIES: readonly { agent: DispatchAgent; icon: LucideIcon }[] = [
  * （`effectiveModel`）。APIへ送る値の集合は#2717のときから変えていない。
  * 設定（`AppSetting.claudeLocalModel`）の「おまかせ」と同じ文字列（`MODEL_PICK_SETTING`）。
  */
-const AUTO_PICK = MODEL_PICK_SETTING;
+export const AUTO_PICK = MODEL_PICK_SETTING;
 
 /**
  * 選んでいるモデル。**`null`は無い**（#3106）。以前は「設定に従う」を`null`で表していたが、
@@ -193,7 +193,7 @@ type ModelChoice = ClaudeLocalModelSetting;
 type CodexModelChoice = CodexLocalModel | typeof AUTO_PICK;
 
 /** チップ1枚ぶん。エージェントごとの選択肢（`MODEL_ENTRIES`・`CODEX_MODEL_ENTRIES`）の共通の形 */
-type ModelEntry = {
+export type ModelEntry = {
   model: ClaudeLocalModel | CodexLocalModel;
   label: string;
   fit: string;
@@ -216,7 +216,7 @@ type ModelEntry = {
  * （`--permission-mode auto`で起動）にしか使われず、Haikuはauto modeで動作しない
  * （https://github.com/anthropics/claude-code/issues/43235）。
  */
-const MODEL_ENTRIES: readonly ModelEntry[] = (["fable", "opus", "sonnet"] as const).map(
+export const MODEL_ENTRIES: readonly ModelEntry[] = (["fable", "opus", "sonnet"] as const).map(
   (model) => ({
     model,
     label: describeClaudeModel(model),
@@ -228,7 +228,7 @@ const MODEL_ENTRIES: readonly ModelEntry[] = (["fable", "opus", "sonnet"] as con
  * Codexの選択肢（#3192）。**Claude Codeと同じ形・同じ並び順（重い順）で、選ぶ3つだけ。**
  * `auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない——理由は`CODEX_LOCAL_MODEL_VALUES`。
  */
-const CODEX_MODEL_ENTRIES: readonly ModelEntry[] = CODEX_LOCAL_MODEL_VALUES.map((model) => ({
+export const CODEX_MODEL_ENTRIES: readonly ModelEntry[] = CODEX_LOCAL_MODEL_VALUES.map((model) => ({
   model,
   label: describeCodexModel(model),
   fit: CODEX_MODEL_FIT_LABELS[model],
