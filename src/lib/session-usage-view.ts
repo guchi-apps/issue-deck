@@ -117,6 +117,14 @@ export type UsageDay = UsageTotals & {
 };
 export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent; bySource: UsageBySource };
 
+/**
+ * Issueスコープの種別別1行ぶん（#3410）。**「セッション種別別」（全体の`byKind`）と同じキー・
+ * 集計ロジック**（`kindRowsForEntry`）で、そのIssue・PRに絞って作る。全体の`byKind`と違い、
+ * `models`（そのIssueでその種別に使われたモデル。重複除去・出現順）を持つ——Issue単位は
+ * 行数が少なく、モデルまで出しても読める（`UsagePhaseTotals.models`と同じ考え方）。
+ */
+export type UsageKindGroup = UsageGroup & { models: string[] };
+
 export type UsageIssue = UsageTotals & {
   repository: string | null;
   issueNumber: number | null;
@@ -136,8 +144,11 @@ export type UsageIssue = UsageTotals & {
   entries: SessionUsageEntry[];
   byAgent: UsageByAgent;
   bySource: UsageBySource;
-  /** 計画・実装・Actionの3分類サマリー（#2670）。 */
-  phases: UsagePhaseBreakdown;
+  /**
+   * 種別別（#3410）。**「セッション種別別」と同じ粒度**（実装はフェーズへ割ってある）で、
+   * そのIssue・PRに絞った内訳。並びは全体の`byKind`と同じ`compareUsageKinds`（作業の順）。
+   */
+  byKind: UsageKindGroup[];
   /**
    * 直近5時間枠の実測ウィンドウ内での、このIssueの消費が枠の何%に相当するかの目安（#2988）。
    * ウィンドウ内に活動が無い、または換算レート自体が求まらない場合はnull。
@@ -146,31 +157,6 @@ export type UsageIssue = UsageTotals & {
    */
   quotaPercent: number | null;
 };
-
-export type UsagePhaseKey = "plan" | "implementation" | "action";
-
-export type UsagePhaseTotals = {
-  costUsd: number;
-  /**
-   * トークンの入力側内訳（#2628と同じ4区分）。**Actionは実測。計画・実装は按分の近似**で、
-   * 画面は計画・実装のバーをあえて単色にし、内訳（この4区分）までは出さない
-   * （`buildPhaseBreakdown`のコメント参照）。
-   */
-  inputTokens: number;
-  cacheCreateTokens: number;
-  cacheReadTokens: number;
-  contextTokens: number;
-  outputTokens: number;
-  sessions: number;
-  /**
-   * そのフェーズで使われたモデル（重複除去。出現順）。**フェーズ単位のモデル情報はDBに無い**ため、
-   * 按分元セッション（`entry.models`）をそのまま流用する。1セッション内でモデルが切り替わっていた
-   * 場合は、計画・実装の両方に同じモデルが出る
-   */
-  models: string[];
-};
-
-export type UsagePhaseBreakdown = Record<UsagePhaseKey, UsagePhaseTotals>;
 
 export type SessionUsageSummary = {
   /** 集計した期間（ISO）。`days`は日本時間の日数で、今日を含む */
@@ -386,23 +372,6 @@ function addEntryModelTier(tiers: UsageModelTiers, entry: SessionUsageEntry): vo
       number,
     ];
   }
-}
-
-function emptyPhaseTotals(): UsagePhaseTotals {
-  return {
-    costUsd: 0,
-    inputTokens: 0,
-    cacheCreateTokens: 0,
-    cacheReadTokens: 0,
-    contextTokens: 0,
-    outputTokens: 0,
-    sessions: 0,
-    models: [],
-  };
-}
-
-function emptyPhaseBreakdown(): UsagePhaseBreakdown {
-  return { plan: emptyPhaseTotals(), implementation: emptyPhaseTotals(), action: emptyPhaseTotals() };
 }
 
 /**
@@ -697,7 +666,7 @@ export function buildSessionUsageSummary({
         entries: [],
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
-        phases: emptyPhaseBreakdown(),
+        byKind: [],
         quotaPercent: null,
         ...emptyTotals(),
       } satisfies UsageIssue);
@@ -720,7 +689,25 @@ export function buildSessionUsageSummary({
       kindCost.set(entry.kind, (kindCost.get(entry.kind) ?? 0) + entry.costUsd);
     }
     issue.kinds = [...kindCost.entries()].sort((a, b) => b[1] - a[1]).map(([kind]) => kind);
-    issue.phases = buildPhaseBreakdown(issue.entries);
+    // **「セッション種別別」と同じ粒度で、このIssueに絞った内訳**（#3410）。全体の`byKind`
+    // （628-678行目あたり）と同じ`kindRowsForEntry`を使い、並びも`compareUsageKinds`で揃える。
+    const issueByKind = new Map<string, UsageKindGroup>();
+    for (const entry of issue.entries) {
+      for (const row of kindRowsForEntry(entry)) {
+        const kind = issueByKind.get(row.key) ?? {
+          key: row.key,
+          ...emptyTotals(),
+          byAgent: emptyByAgent(),
+          bySource: emptyBySource(),
+          models: [],
+        };
+        addEntryWithAgent(kind, row.entry);
+        addEntryWithSource(kind, row.entry);
+        addPhaseModels(kind.models, row.entry.models);
+        issueByKind.set(row.key, kind);
+      }
+    }
+    issue.byKind = [...issueByKind.values()].sort(compareUsageKinds);
     return issue;
   });
   issues.sort((a, b) => b.latestStartedAt.localeCompare(a.latestStartedAt));
@@ -874,70 +861,6 @@ export function buildRepositoryPieSlices(
     });
   }
   return slices;
-}
-
-/**
- * Issue1件ぶんの明細（`UsageIssue["entries"]`）を、計画・実装・Actionの3分類へ畳む（#2670）。
- *
- * **Actionは`source`で正確に分離できる**（トークンも実測）。ローカル実行のうち
- * `sessionUsagePhaseSplit`が区分を持つ行（Plan modeを使ったセッション）は、**金額は正確**
- * （集計側が単価から割ったもの）だが、**トークンはDBに計画/実装別の内訳が無いため、
- * 金額比でセッション全体のトークンを按分する**（近似）。区分を持たない行（Plan mode未使用）は
- * 全額・全トークンをそのまま実装へ計上する（按分不要で正確）。
- *
- * モデルはフェーズ単位の記録が無いため、按分元セッションの`models`をそのまま両フェーズへ流用する。
- */
-export function buildPhaseBreakdown(entries: SessionUsageEntry[]): UsagePhaseBreakdown {
-  const breakdown = emptyPhaseBreakdown();
-
-  for (const entry of entries) {
-    if (entry.source === "github-actions") {
-      const action = breakdown.action;
-      action.costUsd += entry.costUsd;
-      action.inputTokens += entry.inputTokens;
-      action.cacheCreateTokens += entry.cacheCreateTokens;
-      action.cacheReadTokens += entry.cacheReadTokens;
-      action.contextTokens += entry.contextTokens;
-      action.outputTokens += entry.outputTokens;
-      action.sessions += 1;
-      addPhaseModels(action.models, entry.models);
-      continue;
-    }
-
-    const split = sessionUsagePhaseSplit(entry);
-    if (split === null) {
-      const implementation = breakdown.implementation;
-      implementation.costUsd += entry.costUsd;
-      implementation.inputTokens += entry.inputTokens;
-      implementation.cacheCreateTokens += entry.cacheCreateTokens;
-      implementation.cacheReadTokens += entry.cacheReadTokens;
-      implementation.contextTokens += entry.contextTokens;
-      implementation.outputTokens += entry.outputTokens;
-      implementation.sessions += 1;
-      addPhaseModels(implementation.models, entry.models);
-      continue;
-    }
-
-    // トークンの按分は「概算」であることを画面が単色バーで示すだけで足りる
-    // （ユーザー判断・#2670）ため、入力/キャッシュ/出力の区分ごとには割らず、
-    // 合計（contextTokens／outputTokens）だけを金額比で按分する。
-    const planRatio = entry.costUsd > 0 ? split.planCostUsd / entry.costUsd : 0;
-    const plan = breakdown.plan;
-    plan.costUsd += split.planCostUsd;
-    plan.contextTokens += entry.contextTokens * planRatio;
-    plan.outputTokens += entry.outputTokens * planRatio;
-    plan.sessions += 1;
-    addPhaseModels(plan.models, entry.models);
-
-    const implementation = breakdown.implementation;
-    implementation.costUsd += split.implementationCostUsd;
-    implementation.contextTokens += entry.contextTokens * (1 - planRatio);
-    implementation.outputTokens += entry.outputTokens * (1 - planRatio);
-    implementation.sessions += 1;
-    addPhaseModels(implementation.models, entry.models);
-  }
-
-  return breakdown;
 }
 
 /**

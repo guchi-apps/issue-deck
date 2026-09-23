@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildCurrentSessionUsage,
   buildIssueQuotaPercents,
-  buildPhaseBreakdown,
   buildQuotaEstimate,
   buildRepositoryPieSlices,
   buildSessionUsageSummary,
@@ -134,6 +133,77 @@ describe("buildSessionUsageSummary", () => {
     expect(issue.entries.map((item) => item.sessionId)).toEqual(["plan", "impl"]);
     // 種別も金額の多い順
     expect(issue.kinds).toEqual(["implementation", "plan-review"]);
+  });
+
+  it("Issue単位の種別別内訳（byKind）は、全体のbyKindと同じ粒度・並びで作る（#3410）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({
+          sessionId: "plan-review",
+          kind: "plan-review",
+          costUsd: 0.5,
+          models: ["claude-opus-5"],
+        }),
+        // フェーズを拾えない実装行（フェーズ別の金額列を持たない）は unsplit へ入る。
+        entry({ sessionId: "impl", kind: "implementation", costUsd: 9, models: ["claude-sonnet-4-5"] }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    const issue = summary.byIssue[0];
+    // 並びは全体のbyKindと同じ「作業の順」（#2954）。
+    expect(issue.byKind.map((row) => row.key)).toEqual(["plan-review", "implementation-unsplit"]);
+    expect(issue.byKind.map((row) => row.costUsd)).toEqual([0.5, 9]);
+    expect(issue.byKind.map((row) => row.models)).toEqual([["claude-opus-5"], ["claude-sonnet-4-5"]]);
+  });
+
+  it("Issue単位のbyKindも、実装をフェーズごとの行へ割る（#3410）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({
+          costUsd: 20,
+          planCostUsd: 2,
+          implementationCostUsd: 18,
+          researchCostUsd: 4,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
+          wrapupCostUsd: 4,
+        }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    const issue = summary.byIssue[0];
+    expect(issue.byKind.map((row) => row.key)).toEqual([
+      "phase-plan",
+      "phase-research",
+      "phase-coding",
+      "phase-verify",
+      "phase-wrapup",
+    ]);
+    expect(issue.byKind.reduce((sum, row) => sum + row.costUsd, 0)).toBeCloseTo(20, 6);
+  });
+
+  it("Issue単位のbyKindは、同じ種別・同じセッションのモデルを重複除去して集約する（#3410）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "a", kind: "code-review", costUsd: 1, models: ["claude-sonnet-4-5"] }),
+        entry({ sessionId: "b", kind: "code-review", costUsd: 1, models: ["claude-sonnet-4-5"] }),
+        entry({ sessionId: "c", kind: "code-review", costUsd: 1, models: ["claude-opus-5"] }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    const issue = summary.byIssue[0];
+    expect(issue.byKind).toHaveLength(1);
+    expect(issue.byKind[0].sessions).toBe(3);
+    expect(issue.byKind[0].models).toEqual(["claude-sonnet-4-5", "claude-opus-5"]);
   });
 
   it("同じIssue番号なら、PR番号の有無・値が違うセッションも1つにまとめる（#2653）", () => {
@@ -523,97 +593,6 @@ describe("sessionUsagePhaseSplit", () => {
 
   it("片方だけしか無い行もnullを返す（合算だけを信用する）", () => {
     expect(sessionUsagePhaseSplit(entry({ planCostUsd: 1.2, implementationCostUsd: null }))).toBeNull();
-  });
-});
-
-describe("buildPhaseBreakdown", () => {
-  it("GitHub Actionsの行は正確なトークンのままActionへ計上する", () => {
-    const breakdown = buildPhaseBreakdown([
-      entry({
-        source: "github-actions",
-        inputTokens: 1000,
-        cacheCreateTokens: 200,
-        cacheReadTokens: 800,
-        outputTokens: 100,
-        contextTokens: 2000,
-        costUsd: 4,
-        models: ["claude-haiku-4-5-20251001"],
-      }),
-    ]);
-
-    expect(breakdown.action).toMatchObject({
-      costUsd: 4,
-      inputTokens: 1000,
-      cacheCreateTokens: 200,
-      cacheReadTokens: 800,
-      outputTokens: 100,
-      sessions: 1,
-      models: ["claude-haiku-4-5-20251001"],
-    });
-    expect(breakdown.plan.sessions).toBe(0);
-    expect(breakdown.implementation.sessions).toBe(0);
-  });
-
-  it("計画/実装の区分がある行は、金額はそのまま・トークンは金額比で按分する", () => {
-    const breakdown = buildPhaseBreakdown([
-      entry({
-        contextTokens: 1000,
-        outputTokens: 200,
-        costUsd: 10,
-        planCostUsd: 4,
-        implementationCostUsd: 6,
-        models: ["claude-sonnet-4-5"],
-      }),
-    ]);
-
-    // 金額は正確
-    expect(breakdown.plan.costUsd).toBe(4);
-    expect(breakdown.implementation.costUsd).toBe(6);
-    // トークンは金額比（0.4 / 0.6）で按分した近似
-    expect(breakdown.plan.contextTokens).toBeCloseTo(400);
-    expect(breakdown.plan.outputTokens).toBeCloseTo(80);
-    expect(breakdown.implementation.contextTokens).toBeCloseTo(600);
-    expect(breakdown.implementation.outputTokens).toBeCloseTo(120);
-    expect(breakdown.plan.models).toEqual(["claude-sonnet-4-5"]);
-    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5"]);
-  });
-
-  it("計画/実装の区分が無い行（Plan mode未使用）は、按分せず全額・全トークンを実装へ計上する", () => {
-    const breakdown = buildPhaseBreakdown([
-      entry({
-        contextTokens: 1000,
-        outputTokens: 200,
-        costUsd: 10,
-        planCostUsd: null,
-        implementationCostUsd: null,
-      }),
-    ]);
-
-    expect(breakdown.plan.sessions).toBe(0);
-    expect(breakdown.implementation).toMatchObject({
-      costUsd: 10,
-      contextTokens: 1000,
-      outputTokens: 200,
-      sessions: 1,
-    });
-  });
-
-  it("複数セッションのモデルを重複除去して集約する", () => {
-    const breakdown = buildPhaseBreakdown([
-      entry({ sessionId: "a", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
-      entry({ sessionId: "b", planCostUsd: null, implementationCostUsd: null, models: ["claude-sonnet-4-5"] }),
-      entry({ sessionId: "c", planCostUsd: null, implementationCostUsd: null, models: ["claude-opus-5"] }),
-    ]);
-
-    expect(breakdown.implementation.models).toEqual(["claude-sonnet-4-5", "claude-opus-5"]);
-    expect(breakdown.implementation.sessions).toBe(3);
-  });
-
-  it("実績の無いフェーズはsessionsが0のまま返る（画面はここで行を出し分ける）", () => {
-    const breakdown = buildPhaseBreakdown([]);
-    expect(breakdown.plan.sessions).toBe(0);
-    expect(breakdown.implementation.sessions).toBe(0);
-    expect(breakdown.action.sessions).toBe(0);
   });
 });
 
