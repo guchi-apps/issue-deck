@@ -42,6 +42,20 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.36.0",
+    date: "2026-09-23",
+    changes: [
+      "Codex CLIの利用モデルが最新世代の「GPT-6 Sol」「GPT-6 Luna」に更新されました。これまでの設定は自動的に新しいモデルへ引き継がれます。",
+    ],
+    usage: [
+      "1. Issue詳細（またはホーム画面）で「実装を開始」ダイアログを開く",
+      "2. エージェントで「Codex CLI」を選ぶ",
+      "3. モデルの選択肢に「GPT-6 Sol」「GPT-6 Luna」が表示されていることを確認する",
+      "4. 使いたいモデルを選んで実行を開始する",
+      "5. 開始後、実行キューやセッション表示のモデル名が「GPT-6 Sol」「GPT-6 Luna」と表示されれば反映成功",
+    ],
+  },
+  {
     version: "7.35.1",
     date: "2026-09-23",
     changes: [

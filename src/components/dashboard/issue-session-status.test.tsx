@@ -226,7 +226,13 @@ describe("IssueSessionStatus", () => {
     );
 
     expect(screen.getByText("モデル")).toBeTruthy();
-    expect(screen.getByText("Opus")).toBeTruthy();
+    expect(screen.getByText("Opus 5")).toBeTruthy();
+  });
+
+  it("CodexのGPT-6モデルは世代名付きで出す", () => {
+    render(<IssueSessionStatus session={session({ models: ["gpt-6-luna"] })} dispatch={makeDispatch()} />);
+
+    expect(screen.getByText("GPT-6 Luna")).toBeTruthy();
   });
 
   // Claude Codeが小さな処理で別のモデルを使うと2つ以上並ぶ。どれが主かは分からないので全部出す
@@ -238,7 +244,7 @@ describe("IssueSessionStatus", () => {
       />,
     );
 
-    expect(screen.getByText("Opus・Haiku")).toBeTruthy();
+    expect(screen.getByText("Opus 5・Haiku 4.5")).toBeTruthy();
   });
 
   // 最初の応答が集計されるまでは分からない。「不明」と出しても読み手にできることが無い

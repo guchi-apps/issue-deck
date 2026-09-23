@@ -11,8 +11,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Eye, ImagePlus, Loader2, Pencil, X } from "lucide-react";
+import dynamic from "next/dynamic";
 
-import { ImageAnnotationDialog } from "@/components/dashboard/image-annotation-dialog";
 import {
   ImagePreviewDialog,
   type ImagePreviewTarget,
@@ -28,6 +28,13 @@ import {
 import { isSvgImageUrl } from "@/lib/uploaded-images";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
+
+// canvasを使う注釈エディタは、画像を開いて「書き込む」を選んだときだけ必要になる。
+// 初回表示では読み込まず、注釈を始める操作で初めて取得する（#3391）。
+const ImageAnnotationDialog = dynamic(
+  () => import("@/components/dashboard/image-annotation-dialog").then((module) => module.ImageAnnotationDialog),
+  { ssr: false },
+);
 
 export type IssueSuggestion = {
   number: number;
@@ -494,13 +501,15 @@ function AttachmentStrip({
         // 書き込み中は描画を外し、全画面の層を1枚にする（#2983）
         suspended={annotating !== null}
       />
-      <ImageAnnotationDialog
-        image={annotating}
-        onClose={() => setAnnotating(null)}
-        onSave={async (file) => {
-          if (annotating) await onAnnotated(annotating.src, file);
-        }}
-      />
+      {annotating && (
+        <ImageAnnotationDialog
+          image={annotating}
+          onClose={() => setAnnotating(null)}
+          onSave={async (file) => {
+            await onAnnotated(annotating.src, file);
+          }}
+        />
+      )}
       {attachments.map((attachment, index) => {
         const isSvg = isSvgImageUrl(attachment.url);
         return (

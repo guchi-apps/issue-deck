@@ -758,6 +758,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     304が200へ読み替えられて再描画を省けず、304に添えた取得時刻（`X-Fetched-At`）が
     反映されるかもブラウザ次第になるため。ハッシュが揺れないよう`getIssuesForUser`は
     並び（Issue・ラベル）を`id`で固定している。
+  - **一覧（`GET /api/issues`・`/dashboard`の初期表示）はclosedのIssueの本文を外す**（#3390）。
+    closedは件数・本文の容量の大半を占めるのに、一覧側で本文を使うのは検索くらいだから。
+    外したIssueは`body: ""`に`bodyOmitted: true`が立つ（**空文字は本文が無いことを意味しない**）。
+    詳細を開くと[`use-issue-bodies.ts`](../src/hooks/use-issue-bodies.ts)が`GET /api/issues/body`で
+    1件ぶんを取り、`issue-deck-shell.tsx`の`allIssues`へ差し込む（下流の詳細・編集・要約は
+    差し込んだ後の一覧を受け取るので意識しなくてよい）。取った本文は`updatedAt`で版を突き合わせ、
+    一覧の版が進んだら取り直す。**openの本文は外していない**——前提条件の待ち
+    （`manual-step-prerequisites.ts`は相手の本文も読む）・手作業の案内・一覧の検索が一覧の本文を
+    直接読むため。一覧のキーワード検索はclosedではタイトルだけに当たる（本文はAI検索で探す）。
+    `/issues/new`は`#123`補完に番号とタイトルしか使わないので、openも含めて全件外す
+    （`getIssuesForUser(userId, { bodies: "none" })`）
 - **Issue詳細のコメントは定期的に取り直さない**（#2309）。
   [`use-issue-comments.ts`](../src/hooks/use-issue-comments.ts)が`GET /api/issues/comments`を
   叩くのは**選択中のIssueが切り替わったときだけ**で、Issue一覧のポーリング（10秒ごと・

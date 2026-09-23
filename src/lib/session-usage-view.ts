@@ -319,6 +319,15 @@ function extractModelVersion(model: string, prefix: string): string | null {
   return parts.length > 0 ? parts.join(".") : null;
 }
 
+const CODEX_MODEL_LABELS: Readonly<Record<string, string>> = {
+  "gpt-6-astra": "GPT-6 Astra",
+  "gpt-6-sol": "GPT-6 Sol",
+  "gpt-6-luna": "GPT-6 Luna",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-5.6-sol": "GPT-5.6 Sol",
+  "gpt-5.6-luna": "GPT-5.6 Luna",
+};
+
 export function sessionUsageModelLabel(model: string): string {
   for (const [pattern, label] of MODEL_LABEL_PATTERNS) {
     if (model.startsWith(pattern)) {
@@ -326,8 +335,7 @@ export function sessionUsageModelLabel(model: string): string {
       return version ? `${label} ${version}` : label;
     }
   }
-  // Codexのモデル名（`gpt-5.6-sol`等）はすでにバージョンを含む短い名前なのでそのまま出す。
-  return model;
+  return CODEX_MODEL_LABELS[model] ?? model;
 }
 
 function emptyTotals(): UsageTotals {

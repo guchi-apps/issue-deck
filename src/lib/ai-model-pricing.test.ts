@@ -20,6 +20,11 @@ describe("resolveModelRate", () => {
     });
   });
 
+  it("GPT-6 SolとLunaの単価を返す", () => {
+    expect(resolveModelRate("gpt-6-sol")).toEqual({ input: 2.0, output: 10.0, cacheRead: 0.2 });
+    expect(resolveModelRate("gpt-6-luna")).toEqual({ input: 0.1, output: 0.5, cacheRead: 0.01 });
+  });
+
   it("日付サフィックス付きは前方一致で拾う", () => {
     expect(resolveModelRate("claude-haiku-4-5-20251001")).toEqual({
       input: 1.0,

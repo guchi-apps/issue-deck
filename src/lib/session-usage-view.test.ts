@@ -745,7 +745,8 @@ describe("sessionUsageModelLabel", () => {
   });
 
   it("Codexなど対応表に無いモデルはそのまま出す", () => {
-    expect(sessionUsageModelLabel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(sessionUsageModelLabel("gpt-6-sol")).toBe("GPT-6 Sol");
+    expect(sessionUsageModelLabel("gpt-5.6-sol")).toBe("GPT-5.6 Sol");
   });
 });
 

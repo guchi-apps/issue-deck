@@ -40,9 +40,9 @@ describe("parseAppAiModel", () => {
     expect(parseAppAiModel("claude-haiku-4-5")).toBe("claude-haiku-4-5");
     expect(parseAppAiModel("claude-sonnet-5")).toBe("claude-sonnet-5");
     expect(parseAppAiModel("claude-opus-5-5")).toBe("claude-opus-5-5");
-    expect(parseAppAiModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(parseAppAiModel("gpt-6-sol")).toBe("gpt-6-sol");
     expect(parseAppAiModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(parseAppAiModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(parseAppAiModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
   it("許可されていない値はnullを返す", () => {
@@ -151,9 +151,9 @@ describe("parseCodexModel", () => {
   it("許可された値はそのまま返す", () => {
     expect(parseCodexModel("auto")).toBe("auto");
     expect(parseCodexModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(parseCodexModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(parseCodexModel("gpt-6-sol")).toBe("gpt-6-sol");
     expect(parseCodexModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(parseCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(parseCodexModel("gpt-6-luna")).toBe("gpt-6-luna");
     expect(parseCodexModel("gpt-5.5")).toBe("gpt-5.5");
     expect(parseCodexModel("gpt-5.4")).toBe("gpt-5.4");
   });
@@ -168,9 +168,9 @@ describe("parseCodexModel", () => {
 describe("parseCodexLocalModel", () => {
   it("Astra・Sol・Terra・Lunaを通す", () => {
     expect(parseCodexLocalModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(parseCodexLocalModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
+    expect(parseCodexLocalModel("gpt-6-sol")).toBe("gpt-6-sol");
     expect(parseCodexLocalModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
-    expect(parseCodexLocalModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(parseCodexLocalModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
   it("旧世代・auto・pick・Claudeのモデル・不正な値はnull", () => {
@@ -203,8 +203,8 @@ describe("resolveCodexInitialModel", () => {
   it("おまかせと、選べる4つはそのまま", () => {
     expect(resolveCodexInitialModel("pick")).toBe("pick");
     expect(resolveCodexInitialModel("gpt-6-astra")).toBe("gpt-6-astra");
-    expect(resolveCodexInitialModel("gpt-5.6-sol")).toBe("gpt-5.6-sol");
-    expect(resolveCodexInitialModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
+    expect(resolveCodexInitialModel("gpt-6-sol")).toBe("gpt-6-sol");
+    expect(resolveCodexInitialModel("gpt-6-luna")).toBe("gpt-6-luna");
   });
 
   it("旧世代・autoは候補に無いのでTerra", () => {

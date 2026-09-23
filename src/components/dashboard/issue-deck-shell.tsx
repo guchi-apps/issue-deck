@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 
 import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
@@ -12,7 +13,6 @@ import {
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-create-code-review-issues-dialog";
-import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
@@ -68,6 +68,7 @@ import { useSnoozes } from "@/hooks/use-snoozes";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
 import { useCanGoBackInApp, useHistoryNavigation } from "@/hooks/use-history-navigation";
 import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
+import { useIssueBodies } from "@/hooks/use-issue-bodies";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
@@ -187,6 +188,11 @@ import {
   type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
+
+// 手作業ガイドは明示的に開くまで表示しないため、初回表示のチャンクから外す（#3391）。
+const ManualStepGuideDialog = dynamic(
+  () => import("@/components/dashboard/manual-step-guide-dialog").then((module) => module.ManualStepGuideDialog),
+);
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -280,7 +286,15 @@ export function IssueDeckShell({
   // PC版ヘッダーの戻るボタンが押せるかどうか（#1771）
   const canGoBack = useCanGoBackInApp();
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(filters.view);
-  const [allIssues, setAllIssues] = useState<Issue[]>(initialIssues);
+  const [rawIssues, setAllIssues] = useState<Issue[]>(initialIssues);
+  /**
+   * closedのIssueは一覧で本文を外して届く（`bodyOmitted`。#3390）。開いたIssueのぶんだけ
+   * 取って差し込んだものを`allIssues`とし、**以降はすべてこちらを使う**——詳細・編集・要約が
+   * 本文を後から取ったことを意識しなくて済むようにするため。取得を頼むのは下の
+   * `displayedIssueId`・`editingIssue`の効果
+   */
+  const issueBodies = useIssueBodies(rawIssues);
+  const allIssues = issueBodies.issues;
   const [repositories, setRepositories] = useState<ConnectedRepository[]>(initialRepositories);
   /**
    * 一覧・件数・横断ビューの母集団（#2279）。左メニューで非表示にしたリポジトリのIssueを外す。
@@ -656,6 +670,18 @@ export function IssueDeckShell({
   const displayedIssueId =
     selectedIssue?.id ?? (mobileScreen.kind === "issue-detail" ? mobileScreen.issue.id : null);
 
+  // 開いたIssueと編集中のIssueの本文を取る（#3390）。本文を持っているIssueでは何もしない
+  const requestIssueBody = issueBodies.request;
+  useEffect(() => requestIssueBody(displayedIssueId), [requestIssueBody, displayedIssueId]);
+  useEffect(() => requestIssueBody(editingIssue?.id), [requestIssueBody, editingIssue?.id]);
+  // 編集ダイアログは開いた時点のIssueを持ち続ける（ポーリングで入力中の内容が巻き戻らない
+  // ように）。本文が届く前に開いた場合だけ、届いた版へ差し替える。効果ではなく描画中に
+  // 合わせる（差し替えれば`bodyOmitted`が外れるので1回で止まる）
+  if (editingIssue?.bodyOmitted) {
+    const hydrated = allIssues.find((item) => item.id === editingIssue.id);
+    if (hydrated && !hydrated.bodyOmitted) setEditingIssue(hydrated);
+  }
+
   useEffect(() => {
     if (!displayedIssueId) return;
     const issue = allIssues.find((item) => item.id === displayedIssueId);
@@ -819,7 +845,9 @@ export function IssueDeckShell({
   const { snoozes, snooze, unsnooze } = useSnoozes();
 
   const issuePolling = useIssuePolling((polledIssues) => {
-    const reconciledIssues = reconcileIssues(allIssues, polledIssues);
+    // 突き合わせる相手は本文を差し込む前の一覧。差し込んだ後と比べると、本文を外した
+    // closedのIssueが毎回「変わった」と判定され、参照が保たれなくなる（#3390）
+    const reconciledIssues = reconcileIssues(rawIssues, polledIssues);
 
     // 画面を開いている間に、新たに00.check-userラベルが付与されたIssueをトーストで知らせる
     // （画面下部にポコッと表示する方式。#852）。初回マウント時の直前状態（initialIssues）
@@ -2780,13 +2808,15 @@ export function IssueDeckShell({
         />
 
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
-        <ManualStepGuideDialog
-          queueIds={manualStepGuide.queueIds}
-          issues={allIssues}
-          open={manualStepGuide.open}
-          onOpenChange={manualStepGuide.setOpen}
-          onIssueUpdated={handleIssueUpdated}
-        />
+        {manualStepGuide.open && (
+          <ManualStepGuideDialog
+            queueIds={manualStepGuide.queueIds}
+            issues={allIssues}
+            open
+            onOpenChange={manualStepGuide.setOpen}
+            onIssueUpdated={handleIssueUpdated}
+          />
+        )}
 
         <CreateIssueDialog
           open={createDialogOpen}

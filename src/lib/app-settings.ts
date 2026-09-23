@@ -252,9 +252,9 @@ export function parseClaudeLocalModelSetting(value: unknown): ClaudeLocalModelSe
 export const CODEX_MODEL_OPTIONS = [
   { value: "auto", label: "Codexに任せる" },
   { value: "gpt-6-astra", label: "GPT-6 Astra（最高精度）" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（高精度）" },
+  { value: "gpt-6-sol", label: "GPT-6 Sol（高精度）" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },
+  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）" },
   { value: "gpt-5.5", label: "GPT-5.5（旧世代）" },
   { value: "gpt-5.4", label: "GPT-5.4（旧世代）" },
 ] as const;
@@ -280,9 +280,9 @@ export function parseCodexModel(value: unknown): CodexModel | null {
  */
 export const CODEX_LOCAL_MODEL_VALUES = [
   "gpt-6-astra",
-  "gpt-5.6-sol",
+  "gpt-6-sol",
   "gpt-5.6-terra",
-  "gpt-5.6-luna",
+  "gpt-6-luna",
 ] as const;
 
 export type CodexLocalModel = (typeof CODEX_LOCAL_MODEL_VALUES)[number];
@@ -298,10 +298,10 @@ export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {
 /** 狭い場所（起動ダイアログのチップ・実行キューの印）に出す短い名前 */
 export const CODEX_MODEL_SHORT_LABELS: Readonly<Record<CodexModel, string>> = {
   auto: "CLIの既定",
-  "gpt-6-astra": "Astra",
-  "gpt-5.6-sol": "Sol",
-  "gpt-5.6-terra": "Terra",
-  "gpt-5.6-luna": "Luna",
+  "gpt-6-astra": "GPT-6 Astra",
+  "gpt-6-sol": "GPT-6 Sol",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-6-luna": "GPT-6 Luna",
   "gpt-5.5": "GPT-5.5",
   "gpt-5.4": "GPT-5.4",
 };
@@ -313,9 +313,9 @@ export function describeCodexModel(model: CodexModel): string {
 /** モデルごとの「向いている作業」（`CLAUDE_MODEL_FIT_LABELS`と同じ位置づけ。チップの2行目） */
 export const CODEX_MODEL_FIT_LABELS: Readonly<Record<CodexLocalModel, string>> = {
   "gpt-6-astra": "未知の調査・設計から",
-  "gpt-5.6-sol": "難しい調査・実装",
+  "gpt-6-sol": "難しい調査・実装",
   "gpt-5.6-terra": "仕様が決まった実装",
-  "gpt-5.6-luna": "文言修正・定型作業",
+  "gpt-6-luna": "文言修正・定型作業",
 };
 
 /**
@@ -358,9 +358,9 @@ export const APP_AI_MODEL_OPTIONS = [
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）
   { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）" },
-  { value: "gpt-5.6-sol", label: "GPT-5.6 Sol（最高精度）" },
+  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）" },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
-  { value: "gpt-5.6-luna", label: "GPT-5.6 Luna（高速）" },
+  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
