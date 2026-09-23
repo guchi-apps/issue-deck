@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { useNow } from "@/hooks/use-now";
-import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
+import { formatDateTime, formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { AGENT_BASE_COLORS, AGENT_MODEL_TIER_COLORS } from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
@@ -1010,7 +1010,6 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
                   ))}
                 </span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">{row.sessions}セッション</span>
-                <span className="shrink-0 font-semibold tabular-nums">{formatUsageUsd(row.costUsd)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
@@ -1019,6 +1018,7 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
                 <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                   {formatUsageTokens(row.contextTokens + row.outputTokens)}
                 </span>
+                <span className="w-12 shrink-0 text-right font-semibold tabular-nums">{formatUsageUsd(row.costUsd)}</span>
               </div>
             </div>
           </Fragment>
@@ -1026,6 +1026,18 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
       })}
     </div>
   );
+}
+
+/** Issue行の右上に出す実行時間。最も早い開始〜最も遅い終了（#3432） */
+function issueRunSpanLabel(entries: Pick<SessionUsageEntry, "startedAt" | "endedAt">[]): string {
+  if (entries.length === 0) return "";
+  const start = entries.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), entries[0].startedAt);
+  const end = entries.reduce((max, e) => (e.endedAt > max ? e.endedAt : max), entries[0].endedAt);
+  const startLabel = formatDateTime(start);
+  const endLabel = formatDateTime(end);
+  if (!endLabel) return startLabel;
+  const sameDay = startLabel.split(" ")[0] === endLabel.split(" ")[0];
+  return `${startLabel} 〜 ${sameDay ? formatTimeOfDay(end) : endLabel}`;
 }
 
 function IssueGroupRow({
@@ -1069,9 +1081,6 @@ function IssueGroupRow({
             <div className="flex items-baseline gap-1.5 text-[11px]">
               <span className="shrink-0 font-semibold text-foreground">{issueGroupLabel(issue)}</span>
               <span className="min-w-0 truncate text-muted-foreground">{repository}</span>
-              <span className="ml-auto shrink-0 pl-2 text-muted-foreground tabular-nums">
-                {issue.sessions}セッション
-              </span>
             </div>
             {/* Issue・PRのタイトル（#2686）。取得できなかった行は出さず番号のみのままにする */}
             {issue.title && (
@@ -1104,19 +1113,31 @@ function IssueGroupRow({
                 </span>
               </div>
             )}
+            {/* 金額・トークン量は棒グラフの右に置く（#3432）。右端の列をそろえるため幅を固定する */}
             <div className="mt-1 flex flex-col gap-0.5">
-              <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
-              <GroupTokenBar totals={issue} maxTokens={maxTokens} />
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
+                </div>
+                <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums">
+                  {formatUsageUsd(issue.costUsd)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <GroupTokenBar totals={issue} maxTokens={maxTokens} />
+                </div>
+                <span className="w-12 shrink-0 text-right text-[10px] text-muted-foreground tabular-nums">
+                  {formatUsageTokens(issue.contextTokens + issue.outputTokens)}
+                </span>
+              </div>
             </div>
-            {issue.quotaPercent !== null && (
-              <p className="mt-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400">
-                直近5時間枠のおよそ{Math.round(issue.quotaPercent)}%
-              </p>
-            )}
           </div>
         </button>
-        <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
-          {formatUsageUsd(issue.costUsd)}
+        {/* 右上は金額ではなく実行時間（開始日時〜終了時刻）。終了の日付は開始日から分かるので
+            省く。日をまたぐときだけ日付を添える（#3432） */}
+        <span className="shrink-0 px-1.5 pt-2.5 text-right text-[11px] text-muted-foreground tabular-nums">
+          {issueRunSpanLabel(issue.entries)}
         </span>
         {/* 開けない行（Issue番号もPR番号も無い「Issue未特定」）でも同じ寸法で描き、
             見た目とキーボード操作だけを消す（#2685）。**条件付きでDOMごと消すと**、
