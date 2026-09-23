@@ -189,19 +189,22 @@ const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
 
 /**
- * 「セッション種別別」でフェーズの行に付ける点の色（#2779）。**棒の色分け（誰が使ったか）とは
- * 別の軸**なので、行頭の小さな点だけで示す。計画だけティールで目立たせ、残りは調査 → 実装 →
- * 仕上げの順に薄くなる中立色にして、並びが工程の順序に見えるようにする
- * （`PHASE_COLORS`の考え方をそのまま4段へ伸ばしたもの）。
+ * 「セッション種別別」の行に付ける点の色（#2779・#3425）。**棒の色分け（誰が使ったか）とは
+ * 別の軸**なので、行頭の小さな点とIssue・PR別のチップだけで示す。#3425で灰色系の濃淡をやめ、
+ * 全種別へ色相の違う固定色を割り当てた（種別を色で見分けられるように）。
  */
 const KIND_ROW_COLORS: Record<string, string> = {
   [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
-  [usagePhaseKindKey("research")]: "#78716c",
-  [usagePhaseKindKey("coding")]: PHASE_COLORS.implementation,
-  // 検証は実装と仕上げのあいだの濃さ（#3064）
-  [usagePhaseKindKey("verify")]: "#c4b5a5",
-  [usagePhaseKindKey("wrapup")]: "#d6d3d1",
-  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#52525b",
+  "plan-review": "#0ea5e9",
+  [usagePhaseKindKey("research")]: "#ca8a04",
+  [usagePhaseKindKey("coding")]: "#6366f1",
+  [usagePhaseKindKey("verify")]: "#65a30d",
+  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#71717a",
+  [usagePhaseKindKey("wrapup")]: "#ec4899",
+  "code-review": "#a855f7",
+  actions: "#ea580c",
+  question: "#a8a29e",
+  other: "#52525b",
 };
 
 type TokenSegment = { key: string; label: string; value: number; color: string };
@@ -1080,25 +1083,22 @@ function IssueGroupRow({
               </p>
             )}
             {/* 実行された種別のひと目表示（#3410）。開かなくても大まかな内訳が分かるように、
-                色を持つ種別（実装のフェーズ）はドットだけ、色を持たない種別（計画レビュー等）は
-                短いラベルで示す。詳細は行を開いたときの`IssueKindBreakdown`に譲る */}
+                全種別を色つきチップ（ドット＋名前）で示す（#3425）。詳細は行を開いたときの`IssueKindBreakdown`に譲る */}
             {issue.byKind.length > 0 && (
               <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                {issue.byKind.map((row) => {
-                  const color = KIND_ROW_COLORS[row.key];
-                  return color ? (
+                {issue.byKind.map((row) => (
+                  <span
+                    key={row.key}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[9px] text-muted-foreground"
+                  >
                     <span
-                      key={row.key}
                       aria-hidden
                       className="size-[6px] shrink-0 rounded-[1.5px]"
-                      style={{ backgroundColor: color }}
+                      style={{ backgroundColor: KIND_ROW_COLORS[row.key] ?? "#71717a" }}
                     />
-                  ) : (
-                    <span key={row.key} className="shrink-0 text-[9px] text-muted-foreground">
-                      {sessionUsageKindLabel(row.key)}
-                    </span>
-                  );
-                })}
+                    {sessionUsageKindLabel(row.key)}
+                  </span>
+                ))}
                 <span className="sr-only">
                   実行された種別: {issue.byKind.map((row) => sessionUsageKindLabel(row.key)).join("・")}
                 </span>

@@ -362,6 +362,19 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getByText("実行された種別: コードレビュー", { exact: false })).toBeTruthy();
   });
 
+  it("閉じたIssue行の種別チップに、種別ごとの色のドットを付ける（#3425）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "cr", issueNumber: 1, kind: "code-review", costUsd: 5 }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    const chip = within(detail).getByText("コードレビュー", { selector: "span.inline-flex" });
+    const dot = chip.querySelector("span[aria-hidden]") as HTMLElement;
+    expect(dot.style.backgroundColor).toBe("rgb(168, 85, 247)");
+  });
+
   it("行をクリックすると開閉し、閉じている行は中のセッションを出さない（#2653）", () => {
     renderPanel(
       response([
