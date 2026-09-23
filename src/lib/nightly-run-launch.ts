@@ -90,6 +90,11 @@ export async function pruneOldScheduledRunEntries(now: Date): Promise<void> {
  * `11.local`を手動着手と取り違える）で、`updateMany`の条件にも同じ`nightKey: null`を置いて、
  * 判定と書き込みのあいだに席を取られた場合も取り消さない。
  *
+ * **積む口（`POST /api/nightly-run`）は`11.local`付きのIssueを409で断る**（#3366）ので、
+ * ここで見る`11.local`は積んだ後に付いたものだけのはず。積む前から付いていたケースが紛れ込むのは
+ * 積む口の判定が漏れたときだけで、この関数はその場合の保険にはならない（積む前から付いていたのか
+ * 積んだ後に付いたのかを区別する情報を持たないため）。
+ *
  * @returns 取り消した予定の件数
  */
 export async function cancelManuallyStartedScheduledRuns(now: Date): Promise<number> {

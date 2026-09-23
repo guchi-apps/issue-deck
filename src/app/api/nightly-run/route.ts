@@ -11,6 +11,7 @@ import {
   resolveDispatchAgentRejection,
   type DispatchHostView,
 } from "@/lib/dispatch/dispatch-job";
+import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { resolveNightlyRunLabelRejection, type ScheduledRunKind } from "@/lib/nightly-run";
 import { nightlyRunIssueKey } from "@/lib/nightly-run-db";
 import { listNightlyRunState } from "@/lib/nightly-run-state";
@@ -29,6 +30,9 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * オプションのラベル（`21.plan-required`等）は**呼び出し側（ダイアログ）が積む前に付ける**
  * （「実装を開始」と同じ順）。ここでは付いている実ラベルを見て、人が居ないと進まないもの
  * （`23.preview-required`・`25.artifact-required`）が付いていれば積ませない（G1の指摘1）。
+ * すでに`11.local`が付いているIssue（別セッションで着手済み）も同様に断る（#3366）。断らずに
+ * 積むと、直後の巡回で`cancelManuallyStartedScheduledRuns`が「積んだ後に手動着手された」と
+ * 誤認して黙って`CANCELED`にしてしまう。
  *
  * かつては「今夜の夜間実行」（`kind: "nightly"`）も同じ口で受けていたが、#3019で削除した。
  * `NightlyRunEntry.kind`のenumに`NIGHTLY`は残っているが（既存行の後方互換）、この口からは
@@ -125,7 +129,17 @@ export async function POST(request: NextRequest) {
     where: { number: target.issueNumber, repository: { fullName: target.repositoryFullName } },
     select: { labels: { select: { name: true } } },
   });
-  const labelRejection = resolveNightlyRunLabelRejection(issue?.labels ?? [], kind);
+  const labels = issue?.labels ?? [];
+  // すでに着手済み（`11.local`）のIssueは積ませない（#3366）。ここで断らないと201で受け付けた
+  // 直後の巡回で`cancelManuallyStartedScheduledRuns`が「手動で実装開始されたため取り消した」と
+  // 誤判定する——`11.local`は積む前から付いていたかもしれず、あの判定はそれを区別できない
+  if (labels.some((label) => label.name === LOCAL_LABEL_NAME)) {
+    return NextResponse.json(
+      { error: "already_started", message: `着手済みです（${LOCAL_LABEL_NAME}）` },
+      { status: 409 },
+    );
+  }
+  const labelRejection = resolveNightlyRunLabelRejection(labels, kind);
   if (labelRejection) {
     return NextResponse.json({ error: "label_blocked", message: labelRejection }, { status: 409 });
   }
