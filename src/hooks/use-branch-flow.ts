@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type { BranchFlowResponse, RepositoryBranchStatus } from "@/types/branch-flow";
 
@@ -77,7 +78,12 @@ export function useBranchFlow(
         setError(null);
       }
       try {
-        const res = await fetch("/api/branch-flow", { signal: controller.signal });
+        // 応答が返らないまま決着しないと`inFlightRef`が立ったままになり、以後の自動更新が
+        // 全部見送られる（#3387）。打ち切って失敗にし、次の周期で取り直させる
+        const res = await fetchWithTimeout("/api/branch-flow", {
+          signal: controller.signal,
+          timeoutMs: SLOW_FETCH_TIMEOUT_MS,
+        });
         if (!res.ok) {
           const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
           throw new Error(

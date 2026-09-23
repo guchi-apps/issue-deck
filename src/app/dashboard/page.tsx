@@ -21,17 +21,54 @@ import { getIssuesForUser } from "@/lib/issues-for-user";
 export default async function DashboardPage() {
   const currentUser = await getCurrentUser();
 
-  const repositories = currentUser
-    ? await db.repository.findMany({
-        where: { installation: { userInstallations: { some: { userId: currentUser.id } } } },
-        orderBy: { fullName: "asc" },
-        include: { installation: true },
-      })
-    : [];
+  // 初期表示の読み出しは互いに依存しないので並べて待つ（#3387）。以前は8本を1本ずつ
+  // 直列に待っており、DBの往復ぶんだけ最初の表示が遅れていた
+  const [
+    repositories,
+    appSettingRow,
+    hiddenRepositoryRows,
+    favoriteRepositoryRows,
+    issueCreationExcludedRepositoryRows,
+    releaseCheckTargetRows,
+    issues,
+    dispatchRunnableRepositories,
+  ] = currentUser
+    ? await Promise.all([
+        db.repository.findMany({
+          where: { installation: { userInstallations: { some: { userId: currentUser.id } } } },
+          orderBy: { fullName: "asc" },
+          include: { installation: true },
+        }),
+        db.appSetting.findUnique({ where: { id: 1 } }),
+        db.hiddenRepository.findMany({
+          where: { userId: currentUser.id },
+          select: { repositoryId: true },
+        }),
+        db.favoriteRepository.findMany({
+          where: { userId: currentUser.id },
+          select: { repositoryId: true },
+        }),
+        db.issueCreationExcludedRepository.findMany({
+          where: { userId: currentUser.id },
+          select: { repositoryId: true },
+        }),
+        // リリース後の動作確認の対象リポジトリ（#2930）。**他の3つと同じくここで読む**——
+        // リリース履歴APIの応答へ相乗りさせると、対象の選択欄が「全リポジトリぶんのGitHub APIを
+        // 叩く重い取得」が返るまで全部オフに見える。値は真偽ではなく**いつから対象か**で、
+        // これより前に公開されたリリースには未確認を立てない（`lib/release-check.ts`）。
+        db.releaseCheckTarget.findMany({
+          where: { userId: currentUser.id },
+          select: { repositoryId: true, createdAt: true },
+        }),
+        getIssuesForUser(currentUser.id),
+        // 一覧の「どちらの実行経路にも対応していない」印（#1888）に使う。無人実行の有無
+        // （`hasClaudeWorkflow`）だけでは、サブPCのローカルセッションでのみ回すリポジトリ（#1741）に
+        // 非対応の印が出てしまう
+        listDispatchRunnableRepositories(),
+      ])
+    : [[], null, [], [], [], [], [], new Set<string>()];
 
-  const appSetting = (currentUser
-    ? await db.appSetting.findUnique({ where: { id: 1 } })
-    : null) as
+  const appSetting = appSettingRow as
     | ({ claudeLocalModel?: string } & Awaited<ReturnType<typeof db.appSetting.findUnique>>)
     | null;
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
@@ -50,62 +87,14 @@ export default async function DashboardPage() {
     parseModelPickEngine(appSetting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT;
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
 
-  const hiddenRepositoryIds = currentUser
-    ? new Set(
-        (
-          await db.hiddenRepository.findMany({
-            where: { userId: currentUser.id },
-            select: { repositoryId: true },
-          })
-        ).map((row) => row.repositoryId),
-      )
-    : new Set<string>();
-
-  const favoriteRepositoryIds = currentUser
-    ? new Set(
-        (
-          await db.favoriteRepository.findMany({
-            where: { userId: currentUser.id },
-            select: { repositoryId: true },
-          })
-        ).map((row) => row.repositoryId),
-      )
-    : new Set<string>();
-
-  const issueCreationExcludedRepositoryIds = currentUser
-    ? new Set(
-        (
-          await db.issueCreationExcludedRepository.findMany({
-            where: { userId: currentUser.id },
-            select: { repositoryId: true },
-          })
-        ).map((row) => row.repositoryId),
-      )
-    : new Set<string>();
-
-  // リリース後の動作確認の対象リポジトリ（#2930）。**他の3つと同じくここで読む**——
-  // リリース履歴APIの応答へ相乗りさせると、対象の選択欄が「全リポジトリぶんのGitHub APIを
-  // 叩く重い取得」が返るまで全部オフに見える。値は真偽ではなく**いつから対象か**で、
-  // これより前に公開されたリリースには未確認を立てない（`lib/release-check.ts`）。
-  const releaseCheckSinceByRepositoryId = currentUser
-    ? new Map(
-        (
-          await db.releaseCheckTarget.findMany({
-            where: { userId: currentUser.id },
-            select: { repositoryId: true, createdAt: true },
-          })
-        ).map((row) => [row.repositoryId, row.createdAt.toISOString()]),
-      )
-    : new Map<string, string>();
-
-  const issues = currentUser ? await getIssuesForUser(currentUser.id) : [];
-
-  // 一覧の「どちらの実行経路にも対応していない」印（#1888）に使う。無人実行の有無
-  // （`hasClaudeWorkflow`）だけでは、サブPCのローカルセッションでのみ回すリポジトリ（#1741）に
-  // 非対応の印が出てしまう
-  const dispatchRunnableRepositories = currentUser
-    ? await listDispatchRunnableRepositories()
-    : new Set<string>();
+  const hiddenRepositoryIds = new Set(hiddenRepositoryRows.map((row) => row.repositoryId));
+  const favoriteRepositoryIds = new Set(favoriteRepositoryRows.map((row) => row.repositoryId));
+  const issueCreationExcludedRepositoryIds = new Set(
+    issueCreationExcludedRepositoryRows.map((row) => row.repositoryId),
+  );
+  const releaseCheckSinceByRepositoryId = new Map(
+    releaseCheckTargetRows.map((row) => [row.repositoryId, row.createdAt.toISOString()]),
+  );
 
   return (
     <IssueDeckShell

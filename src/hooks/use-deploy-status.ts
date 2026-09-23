@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import { readTriggeredAt } from "@/hooks/use-trigger-pending";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { resolveDeployState } from "@/lib/branch-flow";
@@ -115,7 +116,10 @@ export function useDeployStatus(
     async function load() {
       inFlight = true;
       try {
-        const res = await fetch("/api/branch-flow/deploy", { signal: controller.signal });
+        const res = await fetchWithTimeout("/api/branch-flow/deploy", {
+          signal: controller.signal,
+          timeoutMs: SLOW_FETCH_TIMEOUT_MS,
+        });
         if (!res.ok) return;
         const data: BranchFlowDeployResponse = await res.json();
         if (cancelled) return;

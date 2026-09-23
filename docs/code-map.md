@@ -740,6 +740,24 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   持つため、PC・スマホで同じ`id`を使う（端末が違えばストレージも別で、同じ端末なら同じ設定が効く）。
   **積んだジョブの状態（`DispatchJobStatus`）はカードが出すので、`StartLocalSessionButton`へは
   `showJobStatus={false}`を渡す**（両方出すと「順番待ち」が同じ画面に2つ並ぶ）。
+- **画面から自前のAPIを定期的に叩くときは`fetchWithTimeout`を通す**（#3387）。
+  [`lib/fetch-with-timeout.ts`](../src/lib/fetch-with-timeout.ts)。ブラウザのfetchは自分では
+  タイムアウトせず、回線が不安定だと応答が返らないまま決着しない通信が起こる。すると
+  「前の取得が飛んでいる間は次を出さない」ガード（`inFlightRef`）や`setTimeout`の再帰で回す
+  ポーリングは**画面にエラーも出さないまま更新だけが止まる**。既定は30秒で、リポジトリ横断で
+  GitHub APIを束ねる取得（PR一覧・ブランチ状況・リリース状況など）は`SLOW_FETCH_TIMEOUT_MS`
+  （90秒）へ延ばす。書き込み（POST等）には付けていない——打ち切っても書き込み自体はサーバーで
+  完了し得るため、失敗と表示して押し直させると二重に実行される。
+  - **周期の中で前の取得を中断して出し直さない。** 遅い回線で1回が周期を超えると、どの回も
+    完了しないまま止まる（`use-session-usage.ts`の実行中セッションの取り直しがそうなっていた）。
+    飛んでいる間は次を見送り、詰まりはタイムアウトで解く。
+  - **Issue一覧（`GET /api/issues`）は内容のハッシュをETagにして、変わっていなければ304を返す。**
+    全Issue（closed含む）の本文ごとを10秒おきに返す、画面で最も大きく頻繁な取得のため。
+    `If-None-Match`は`use-issue-polling.ts`が自分で付け、304なら一覧を渡し直さない
+    （再描画もしない）。ブラウザのHTTPキャッシュに任せない（`Cache-Control: no-store`）のは、
+    304が200へ読み替えられて再描画を省けず、304に添えた取得時刻（`X-Fetched-At`）が
+    反映されるかもブラウザ次第になるため。ハッシュが揺れないよう`getIssuesForUser`は
+    並び（Issue・ラベル）を`id`で固定している。
 - **Issue詳細のコメントは定期的に取り直さない**（#2309）。
   [`use-issue-comments.ts`](../src/hooks/use-issue-comments.ts)が`GET /api/issues/comments`を
   叩くのは**選択中のIssueが切り替わったときだけ**で、Issue一覧のポーリング（10秒ごと・

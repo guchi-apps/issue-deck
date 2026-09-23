@@ -42,11 +42,8 @@ export function MobileIssueSummaryCard({ issue, onSelectRepository }: MobileIssu
   // 何を求められているかまで出す（#1490）。理由ラベルが配られていないリポジトリではnullになる
   const reason = checkUserReason(issue.labels);
   // 確認待ちのバッジを出しているあいだは、同じことを言う`00.check-user`・`01.check-*`を
-  // ラベル欄から外す（#2057）。上のバッジが日本語で言っているものを機械語で繰り返すために
-  // 上限3件の枠を2件使い、分類ラベルを「+N」の裏へ押し出していた
-  const { visible: visibleLabels, hiddenCount } = selectSummaryLabels(issue.labels, {
-    excludeAttention: approvalPending,
-  });
+  // ラベル欄から外す（#2057）。上のバッジが日本語で言っているものを機械語で繰り返すため
+  const labels = selectSummaryLabels(issue.labels, { excludeAttention: approvalPending });
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3">
@@ -103,20 +100,19 @@ export function MobileIssueSummaryCard({ issue, onSelectRepository }: MobileIssu
         <span>{formatRelativeDate(issue.updatedAt)}に更新</span>
       </div>
 
-      {visibleLabels.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {visibleLabels.map((label) => (
+      {labels.length > 0 && (
+        // 複数行にせず、収まらないぶんは横スクロールで見せる（#3388）。折り返さない代わりに
+        // スクロールバーは出さず、端で切れたラベルを続きの合図にする（issue-list.tsxと同じ方針）
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0 [&::-webkit-scrollbar]:hidden">
+          {labels.map((label) => (
             <span
               key={label.name}
-              className="rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset ring-border"
+              className="rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap ring-1 ring-inset ring-border"
               style={getLabelBadgeStyle(label.color)}
             >
               {label.name}
             </span>
           ))}
-          {hiddenCount > 0 && (
-            <span className="text-[11px] text-muted-foreground">+{hiddenCount}</span>
-          )}
         </div>
       )}
     </div>

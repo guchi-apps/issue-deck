@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import type { CiState } from "@/lib/github/release-api";
 import type {
   ReleaseButtonStatus,
@@ -69,7 +70,9 @@ export function useRepositoryReleaseStatuses(enabled: boolean, options: Options 
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/repositories/release-pending-merges");
+      const res = await fetchWithTimeout("/api/repositories/release-pending-merges", {
+        timeoutMs: SLOW_FETCH_TIMEOUT_MS,
+      });
       if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
       const json = (await res.json()) as { releaseStatuses: RepositoryReleaseStatus[] };
       if (mountedRef.current) setData(json.releaseStatuses);

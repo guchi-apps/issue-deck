@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import {
   isPropagationRunning,
   type PropagationRun,
@@ -77,7 +78,8 @@ export function useWorkflowTags(enabled: boolean) {
 
     async function load() {
       try {
-        const res = await fetch("/api/workflow-tags");
+        // リポジトリごとにGitHub APIを叩くため、既定より長く待つ
+        const res = await fetchWithTimeout("/api/workflow-tags", { timeoutMs: SLOW_FETCH_TIMEOUT_MS });
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
         const json = (await res.json()) as Overview;
         if (cancelled) return;
@@ -115,7 +117,16 @@ export function useWorkflowTags(enabled: boolean) {
       };
     }
 
-    const timer = setInterval(() => void load(), RUNNING_POLL_INTERVAL_MS);
+    // 裏に回っているタブでは取りに行かない。前の取得が飛んでいる間も重ねない——遅い回線で
+    // 1回が周期を超えると、同じ取得が積み重なるため（#3387）
+    let inFlight = false;
+    const timer = setInterval(() => {
+      if (document.hidden || inFlight) return;
+      inFlight = true;
+      void load().finally(() => {
+        inFlight = false;
+      });
+    }, RUNNING_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

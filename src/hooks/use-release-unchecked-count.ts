@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
+
 /**
  * バックグラウンド再取得間隔（#2951）。`use-repository-release-statuses.ts`の
  * `DEFAULT_INTERVAL_MS`と同じ考え方——リポジトリ数分のGitHub API消費が積み重なるため、
@@ -31,7 +33,9 @@ export function useReleaseUncheckedCount(enabled: boolean) {
 
   const load = useCallback(async (): Promise<number | null> => {
     try {
-      const res = await fetch("/api/repositories/release-history/unchecked-count");
+      const res = await fetchWithTimeout("/api/repositories/release-history/unchecked-count", {
+        timeoutMs: SLOW_FETCH_TIMEOUT_MS,
+      });
       if (!res.ok) return null;
       const json = (await res.json()) as { count: number };
       if (mountedRef.current) setCount(json.count);

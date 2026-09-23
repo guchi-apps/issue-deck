@@ -95,7 +95,7 @@ describe("MobileIssueSummaryCard（#1646）", () => {
     expect(screen.queryByText("m-guchi")).toBeNull();
   });
 
-  it("ラベルは上限まで出し、あふれた件数を添える", () => {
+  it("ラベルは全件を出す（複数行にせず横スクロールへ委ねる。#3388）", () => {
     renderCard({
       labels: [
         label("62.design"),
@@ -106,7 +106,9 @@ describe("MobileIssueSummaryCard（#1646）", () => {
     });
 
     expect(screen.getByText("62.design")).toBeTruthy();
-    expect(screen.getByText("+1")).toBeTruthy();
+    expect(screen.getByText("11.local")).toBeTruthy();
+    expect(screen.getByText("25.artifact-required")).toBeTruthy();
+    expect(screen.getByText("80.Priority: High")).toBeTruthy();
   });
 
   /**
@@ -129,8 +131,6 @@ describe("MobileIssueSummaryCard（#1646）", () => {
     expect(screen.queryByText("01.check-merge")).toBeNull();
     expect(screen.getByText("60.chore")).toBeTruthy();
     expect(screen.getByText("62.design")).toBeTruthy();
-    // 外したぶんは「隠した」わけではないので件数にも数えない
-    expect(screen.queryByText("+2")).toBeNull();
   });
 
   it("確認待ちでなければ従来どおり要対応ラベルも出す", () => {
