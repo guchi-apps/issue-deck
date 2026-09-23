@@ -35,9 +35,10 @@ on:
         default: auto
         options: [auto, patch, minor, major]
   schedule:
-    # 実装中issueが無いタイミングでの自動起動（#3404）。頻度を上げても実装中issueが
-    # あれば見送られるだけなので、1時間おきにしている。
-    - cron: "0 * * * *"
+    # 実装中issueが無いタイミングでの自動起動（#3404）。実際の実行間隔は画面の設定
+    # （#3416）で、cronは変えられないため15分おきに起動し、reusable側のgateが設定した
+    # 間隔の枠でない回を見送る。
+    - cron: "*/15 * * * *"
   # バンプPRがdevelopへ（auto-mergeで）マージされ、バージョンが変わったときに再起動して
   # develop→mainのPRを自動作成する。通常のフィーチャーpushではpackage.jsonが変わらないため
   # 起動しない。

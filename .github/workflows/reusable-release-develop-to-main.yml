@@ -425,6 +425,22 @@ jobs:
           READY=false
           if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
             echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、今回のスケジュール起動は見送ります"
+          elif ! INTERVAL="$(curl -sSf -m 20 \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+              "$APP_BASE_URL/api/release-prep/schedule" | jq -er '.intervalMinutes | select(type == "number")')"; then
+            # 間隔を取得できない（未デプロイ・停止中）場合は従来どおりの1時間おきに倒す
+            echo "自動実行間隔を取得できなかったため、既定の60分として判定します"
+            INTERVAL=60
+          fi
+          # cronは15分おきに起動する（#3416）。間隔の倍数にあたる15分枠の回だけ進む。
+          # 0は自動実行しない。間隔は15の倍数のみ（src/lib/app-settings.ts）。
+          SLOT=$(( $(date -u +%s) / 900 ))
+          if [ -n "${INTERVAL:-}" ] && [ "$INTERVAL" -le 0 ]; then
+            echo "リリース準備の自動実行が無効（間隔0）のため、今回のスケジュール起動は見送ります"
+          elif [ -n "${INTERVAL:-}" ] && [ $(( SLOT % (INTERVAL / 15) )) -ne 0 ]; then
+            echo "設定した間隔（${INTERVAL}分）の実行枠ではないため、今回のスケジュール起動は見送ります"
+          elif [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            :
           else
             BODY_FILE="${RUNNER_TEMP:-/tmp}/release-gate-progress.json"
             CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \

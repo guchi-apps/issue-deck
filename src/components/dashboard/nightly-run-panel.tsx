@@ -20,6 +20,8 @@ import {
   NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
   NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
+  describeClaudeModel,
+  parseClaudeLocalModel,
 } from "@/lib/app-settings";
 import {
   describeClaudeWindowKeepAlive,
@@ -675,7 +677,7 @@ function QueuedRow({
       </div>
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         <span className="rounded-full bg-muted px-2 py-px">{formatDispatchHostName(entry.targetHost)}</span>
-        {entry.claudeModel && <span className="rounded-full bg-muted px-2 py-px">{entry.claudeModel}</span>}
+        {entry.claudeModel && <span className="rounded-full bg-muted px-2 py-px">{claudeModelLabel(entry.claudeModel)}</span>}
         {entry.agent !== "claude" && <span className="rounded-full bg-muted px-2 py-px">{entry.agent}</span>}
         {entry.codexModel && <span className="rounded-full bg-muted px-2 py-px">{entry.codexModel}</span>}
         {entry.optionLabels.map((name) => (
@@ -687,6 +689,12 @@ function QueuedRow({
       </div>
     </li>
   );
+}
+
+/** 予定の行に出すClaudeのモデル名。未知の値は生の値のまま出す */
+function claudeModelLabel(model: string): string {
+  const parsed = parseClaudeLocalModel(model);
+  return parsed ? describeClaudeModel(parsed) : model;
 }
 
 /** 予定の行に添える、起動した後どうなるかの見込み */
