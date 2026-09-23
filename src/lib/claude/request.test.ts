@@ -116,7 +116,7 @@ describe("callClaudeMessages", () => {
   });
 
   it("OpenAIの一時的なレート制限は待機後に1回だけ再試行する", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-luna" });
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
     process.env.OPENAI_API_KEY = "openai-test-token";
     const fetchMock = vi
       .fn()
@@ -301,7 +301,7 @@ describe("callClaudeMessages", () => {
   });
 
   it("GPTモデル選択時にOpenAI APIキーが無ければ未設定を返す", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-luna" });
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 

@@ -140,28 +140,28 @@ function pickCodexModelByRule(
   bodyLength: number,
 ): { model: CodexLocalModel; reason: string } {
   if (has("bug") || has("investigation")) {
-    return { model: "gpt-5.6-sol", reason: "不具合のIssueで、原因の調査から始まるためです。" };
+    return { model: "gpt-6-sol", reason: "不具合のIssueで、原因の調査から始まるためです。" };
   }
   if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {
     return {
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       reason: "計画や長いやり取りがあり、決めることが多いIssueだと読めるためです。",
     };
   }
   if (has("documentation") && bodyLength < 400) {
-    return { model: "gpt-5.6-luna", reason: "文書だけの短い更新だと読めるためです。" };
+    return { model: "gpt-6-luna", reason: "文書だけの短い更新だと読めるためです。" };
   }
   return { model: "gpt-5.6-terra", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
 const CODEX_PICK_OPTIONS = `- \`gpt-6-astra\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け
-- \`gpt-5.6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
+- \`gpt-6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
 - \`gpt-5.6-terra\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
-- \`gpt-5.6-luna\`: 文言・設定値の修正や、決まった手順をなぞるだけの**軽い作業**向け`;
+- \`gpt-6-luna\`: 文言・設定値の修正や、決まった手順をなぞるだけの**軽い作業**向け`;
 
 const CODEX_PICK_GUIDE = `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
 - \`gpt-6-astra\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
-- \`gpt-5.6-luna\`は変更の範囲が数行〜1ファイルに収まると読めるときだけにしてください
+- \`gpt-6-luna\`は変更の範囲が数行〜1ファイルに収まると読めるときだけにしてください
 - 迷ったら\`gpt-5.6-terra\`にしてください`;
 
 /** Issueの内容から使うモデルを選ばせるプロンプトを組み立てる。 */
@@ -191,7 +191,7 @@ export function buildModelPickPrompt(
 - 迷ったら\`sonnet\`にしてください`;
   const example = isCodex ? "gpt-5.6-terra" : "sonnet";
   const modelList = isCodex
-    ? "`gpt-6-astra`・`gpt-5.6-sol`・`gpt-5.6-terra`・`gpt-5.6-luna`"
+    ? "`gpt-6-astra`・`gpt-6-sol`・`gpt-5.6-terra`・`gpt-6-luna`"
     : "`sonnet`・`opus`・`fable`";
 
   return `以下は、これから実装エージェント（${agentName}）に実装させるGitHubのIssueです。**このIssueの実装に使うモデル**を1つ選んでください。
@@ -331,9 +331,9 @@ const CHOICE_CRITERIA_BY_AGENT: Readonly<
   codex: {
     "gpt-6-astra": "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
     "gpt-5.6-terra": "やることがはっきりしている通常の実装。既定で、迷ったときもこれ",
-    "gpt-5.6-sol":
+    "gpt-6-sol":
       "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合",
-    "gpt-5.6-luna": "文言・設定値の修正や、決まった手順をなぞるだけの軽い作業",
+    "gpt-6-luna": "文言・設定値の修正や、決まった手順をなぞるだけの軽い作業",
   },
 };
 

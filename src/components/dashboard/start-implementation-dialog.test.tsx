@@ -680,39 +680,39 @@ describe("StartImplementationDialog", () => {
         screen.getByRole("radio", { name }).getAttribute("aria-checked");
 
       it("Codexを選ぶと、おまかせ・Astra・Sol・Terra・Lunaの5つに切り替わり、設定の値が選ばれている", () => {
-        openCodex({ codexModel: "gpt-5.6-sol" });
+        openCodex({ codexModel: "gpt-6-sol" });
 
         const group = screen.getByRole("radiogroup", { name: "モデル" });
         expect(within(group).getAllByRole("radio")).toHaveLength(5);
         expect(screen.queryByRole("radio", { name: /^Opus/ })).toBeNull();
-        expect(checked(/^Astra/)).toBe("false");
-        expect(checked(/^Sol/)).toBe("true");
-        expect(checked(/^Terra/)).toBe("false");
+        expect(checked(/^GPT-6 Astra/)).toBe("false");
+        expect(checked(/^GPT-6 Sol/)).toBe("true");
+        expect(checked(/^GPT-5.6 Terra/)).toBe("false");
       });
 
       it("選んだモデルを積む（Claude Codeの選択は付いていかない）", async () => {
         openCodex({ claudeLocalModel: "fable" });
-        fireEvent.click(screen.getByRole("radio", { name: /^Luna/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^GPT-6 Luna/ }));
         clickStart();
 
         await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
-        expect(enqueue.mock.calls[0][0]).toMatchObject({ agent: "codex", model: "gpt-5.6-luna" });
+        expect(enqueue.mock.calls[0][0]).toMatchObject({ agent: "codex", model: "gpt-6-luna" });
       });
 
       // 旧世代・`auto`はダイアログの候補に無く、選択なしで開くと何で立つか分からなくなる
       it("設定が旧世代（GPT-5.5）のときは、Terraが選ばれた状態で開く", () => {
         openCodex({ codexModel: "gpt-5.5" });
 
-        expect(checked(/^Terra/)).toBe("true");
+        expect(checked(/^GPT-5.6 Terra/)).toBe("true");
       });
 
       it("エージェントを行き来しても、それぞれの選択が残る", () => {
         openCodex({ claudeLocalModel: "opus" });
-        fireEvent.click(screen.getByRole("radio", { name: /^Sol/ }));
+        fireEvent.click(screen.getByRole("radio", { name: /^GPT-6 Sol/ }));
         fireEvent.click(screen.getByRole("radio", { name: /^Claude Code/ }));
         expect(checked(/^Opus/)).toBe("true");
         fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
-        expect(checked(/^Sol/)).toBe("true");
+        expect(checked(/^GPT-6 Sol/)).toBe("true");
       });
 
       it("おまかせを押すとCodex向けに判定し、選ばれたモデルで積む", async () => {
@@ -740,7 +740,7 @@ describe("StartImplementationDialog", () => {
       it("設定がおまかせなら、Codexを選んだ時点で自動判定する（Claude Code側の判定とは別に1回）", async () => {
         modelPickFetch.mockResolvedValue({
           ok: true,
-          json: async () => ({ model: "gpt-5.6-sol", reason: "調査が要るためです。", source: "ai" }),
+          json: async () => ({ model: "gpt-6-sol", reason: "調査が要るためです。", source: "ai" }),
         });
         openCodex({ codexModel: "pick" });
 

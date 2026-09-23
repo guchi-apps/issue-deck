@@ -179,11 +179,11 @@ describe("launchScheduledRunEntry: モデルの引き継ぎ（#3192）", () => {
   it("Codexのモデルの指定をジョブへ渡す。未知の語は指定なしへ倒す", async () => {
     await launchScheduledRunEntry({
       ...params,
-      entry: { ...params.entry, agent: "codex", codexModel: "gpt-5.6-sol" },
+      entry: { ...params.entry, agent: "codex", codexModel: "gpt-6-sol" },
     });
     expect(mockedEnqueue.mock.calls[0][0]).toMatchObject({
       agent: "codex",
-      codexModel: "gpt-5.6-sol",
+      codexModel: "gpt-6-sol",
       claudeModel: null,
     });
 

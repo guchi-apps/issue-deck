@@ -229,6 +229,12 @@ describe("IssueSessionStatus", () => {
     expect(screen.getByText("Opus")).toBeTruthy();
   });
 
+  it("CodexのGPT-6モデルは世代名付きで出す", () => {
+    render(<IssueSessionStatus session={session({ models: ["gpt-6-luna"] })} dispatch={makeDispatch()} />);
+
+    expect(screen.getByText("GPT-6 Luna")).toBeTruthy();
+  });
+
   // Claude Codeが小さな処理で別のモデルを使うと2つ以上並ぶ。どれが主かは分からないので全部出す
   it("複数のモデルが載っていれば並べる", () => {
     render(
