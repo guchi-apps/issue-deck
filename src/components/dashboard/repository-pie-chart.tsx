@@ -29,8 +29,13 @@ const SLICE_COLORS = [
   "var(--pie-5)",
 ];
 
+/** 金額順の順位（0始まり）に対する色。上位5件の外は「その他」のグレー。一覧の表（#3423）も同じ色を使う */
+export function repositoryRankColor(rank: number): string {
+  return SLICE_COLORS[rank] ?? "var(--pie-other)";
+}
+
 function sliceColor(slice: RepositoryPieSlice, rank: number): string {
-  return slice.isOther ? "var(--pie-other)" : (SLICE_COLORS[rank] ?? "var(--pie-other)");
+  return slice.isOther ? "var(--pie-other)" : repositoryRankColor(rank);
 }
 
 function percentText(fraction: number): string {

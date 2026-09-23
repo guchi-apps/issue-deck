@@ -5,6 +5,7 @@ import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
+import { RepositoryUsageTable } from "@/components/dashboard/repository-usage-table";
 import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,7 +29,6 @@ import {
   sessionUsagePhaseSplit,
   usagePhaseKindKey,
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
-  REPOSITORY_PIE_TOP_COUNT,
   type CurrentSessionTone,
   type CurrentSessionUsage,
   type SessionUsageEntry,
@@ -1711,6 +1711,8 @@ export function SessionUsagePanel({
   className,
 }: SessionUsagePanelProps) {
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
+  // 「リポジトリ別」の全件の表（#3423）。円グラフは上位5件＋その他なので、下位の金額はここで読む
+  const [repositoryListOpen, setRepositoryListOpen] = useState(false);
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
   const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
 
@@ -1854,18 +1856,25 @@ export function SessionUsagePanel({
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
-                  {`${period.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
-                </span>
+                <button
+                  type="button"
+                  aria-expanded={repositoryListOpen}
+                  aria-controls="repository-usage-table"
+                  onClick={() => setRepositoryListOpen((open) => !open)}
+                  className="min-w-0 truncate rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums hover:bg-muted"
+                >
+                  <span className="font-semibold text-foreground underline">
+                    {`${period.byRepository.length}リポジトリ`}
+                  </span>
+                  {repositoryListOpen ? " ▲" : " ▼"}
+                </button>
               </div>
               {repositoryPieSlices.length === 0 ? (
                 <p className="text-xs text-muted-foreground">記録がありません</p>
               ) : (
                 <RepositoryPieChart slices={repositoryPieSlices} />
               )}
-              <p className="text-[10px] text-muted-foreground">
-                金額（API換算）の多い上位{REPOSITORY_PIE_TOP_COUNT}件。それ以外は「その他」にまとめています。
-              </p>
+              {repositoryListOpen && <RepositoryUsageTable groups={period.byRepository} />}
             </section>
             <div className="flex flex-col gap-2">
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。
