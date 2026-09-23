@@ -68,7 +68,7 @@ describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
       <MobileBottomNavView
         active="home"
         onSelect={vi.fn()}
-        mergePending={{ develop: 1, main: 2, total: 3, hasError: false }}
+        mergePending={{ develop: 1, main: 2, total: 3, hasError: false, pullRequestIds: [] }}
       />,
     );
 
@@ -90,7 +90,7 @@ describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
       <MobileBottomNavView
         active="home"
         onSelect={vi.fn()}
-        mergePending={{ develop: 0, main: 0, total: 0, hasError: false }}
+        mergePending={{ develop: 0, main: 0, total: 0, hasError: false, pullRequestIds: [] }}
       />,
     );
     expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
@@ -101,7 +101,7 @@ describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
       <MobileBottomNavView
         active="home"
         onSelect={vi.fn()}
-        mergePending={{ develop: 0, main: 1, total: 1, hasError: true }}
+        mergePending={{ develop: 0, main: 1, total: 1, hasError: true, pullRequestIds: [] }}
       />,
     );
 
