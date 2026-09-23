@@ -377,7 +377,7 @@ describe("SessionUsagePanel", () => {
     expect(within(detail).getByText("実行された種別: コードレビュー", { exact: false })).toBeTruthy();
   });
 
-  it("閉じたIssue行の種別チップに、種別ごとの色のドットを付ける（#3425）", () => {
+  it("閉じたIssue行には種別チップを見た目として出さない（#3443）", () => {
     renderPanel(
       response([
         entry({ sessionId: "cr", issueNumber: 1, kind: "code-review", costUsd: 5 }),
@@ -385,9 +385,20 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    const chip = within(detail).getByText("コードレビュー", { selector: "span.inline-flex" });
-    const dot = chip.querySelector("span[aria-hidden]") as HTMLElement;
-    expect(dot.style.backgroundColor).toBe("rgb(168, 85, 247)");
+    expect(within(detail).queryByText("コードレビュー", { selector: "span.inline-flex" })).toBeNull();
+  });
+
+  it("Issue行の実行時間は「9/24 10:00〜10:21」形式で、日をまたいでも終了は時刻だけ（#3443）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "a", issueNumber: 1, costUsd: 5, startedAt: "2026-09-24T01:00:00.000Z", endedAt: "2026-09-24T01:21:00.000Z" }),
+        entry({ sessionId: "b", issueNumber: 2, costUsd: 4, startedAt: "2026-09-24T14:58:00.000Z", endedAt: "2026-09-24T15:08:00.000Z" }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    expect(within(detail).getByText("9/24 10:00〜10:21")).toBeTruthy();
+    expect(within(detail).getByText("9/24 23:58〜0:08")).toBeTruthy();
   });
 
   it("行をクリックすると開閉し、閉じている行は中のセッションを出さない（#2653）", () => {
