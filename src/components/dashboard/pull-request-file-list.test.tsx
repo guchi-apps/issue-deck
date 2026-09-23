@@ -27,6 +27,30 @@ function mockFiles(files: PullRequestFile[], truncated = false) {
   return { fetchMock, requestedUrls };
 }
 
+/**
+ * 一覧取得（`/api/pull-requests/files`）と個別ファイルの差分取得
+ * （`/api/pull-requests/file-diff`）をURLで振り分けてモックする。`diffs`は
+ * `{ [path]: 応答内容 }`で、指定が無いパスは`{ patch: null }`を返す。
+ */
+function mockFilesAndDiff(
+  files: PullRequestFile[],
+  diffs: Record<string, { ok: boolean; status?: number; body: unknown }> = {},
+) {
+  const requestedUrls: string[] = [];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    requestedUrls.push(url);
+    if (url.includes("/api/pull-requests/file-diff")) {
+      const path = new URL(url, "http://localhost").searchParams.get("path") ?? "";
+      const response = diffs[path] ?? { ok: true, body: { patch: null } };
+      return { ok: response.ok, status: response.status, json: async () => response.body };
+    }
+    return { ok: true, json: async () => ({ files, truncated: false }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, requestedUrls };
+}
+
 function renderList(props: Partial<React.ComponentProps<typeof PullRequestFileList>> = {}) {
   return render(
     <PullRequestFileList
@@ -129,5 +153,73 @@ describe("PullRequestFileList", () => {
     await waitFor(() => expect(screen.getByText(/先頭1件を表示しています/)).toBeTruthy());
     const link = screen.getByRole("link", { name: "GitHubのFiles changed" });
     expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/pull/42/files");
+  });
+
+  describe("差分の表示（#3383）", () => {
+    const path = "src/components/dashboard/pull-request-detail.tsx";
+
+    it("行のシェブロンを押すまで差分を取得しない", async () => {
+      const { fetchMock } = mockFilesAndDiff([makeFile({ path })], {
+        [path]: { ok: true, body: { patch: "@@ -1 +1 @@\n-old\n+new" } },
+      });
+      renderList();
+      toggle();
+      await waitFor(() => expect(screen.getByText("pull-request-detail.tsx")).toBeTruthy());
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("+new")).toBeNull();
+    });
+
+    it("シェブロンを押すと差分を取得して表示し、再度押しても取り直さない", async () => {
+      const { fetchMock, requestedUrls } = mockFilesAndDiff([makeFile({ path })], {
+        [path]: { ok: true, body: { patch: "@@ -1 +1 @@\n-old\n+new" } },
+      });
+      renderList();
+      toggle();
+      await waitFor(() => expect(screen.getByText("pull-request-detail.tsx")).toBeTruthy());
+
+      fireEvent.click(screen.getByRole("button", { name: `${path} の差分を表示` }));
+      await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+      expect(screen.getByText("-old")).toBeTruthy();
+      expect(requestedUrls[1]).toContain(
+        `/api/pull-requests/file-diff?owner=guchi-apps&repo=issue-deck&number=42&path=${encodeURIComponent(path)}`,
+      );
+
+      // 閉じて開き直しても取得し直さない
+      fireEvent.click(screen.getByRole("button", { name: `${path} の差分を閉じる` }));
+      expect(screen.queryByText("+new")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: `${path} の差分を表示` }));
+      await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("差分が無いファイルはGitHubへの誘導を出す", async () => {
+      mockFilesAndDiff([makeFile({ path })]);
+      renderList();
+      toggle();
+      await waitFor(() => expect(screen.getByText("pull-request-detail.tsx")).toBeTruthy());
+
+      fireEvent.click(screen.getByRole("button", { name: `${path} の差分を表示` }));
+      await waitFor(() => expect(screen.getByText(/差分を表示できません/)).toBeTruthy());
+      const link = screen.getByRole("link", { name: "GitHubで確認してください" });
+      expect(link.getAttribute("href")).toBe(makeFile().blobUrl);
+    });
+
+    it("差分の取得に失敗したらエラーと再試行を出す", async () => {
+      const { fetchMock } = mockFilesAndDiff([makeFile({ path })], {
+        [path]: {
+          ok: false,
+          status: 502,
+          body: { error: "github_api_error", message: "GitHubへ接続できません" },
+        },
+      });
+      renderList();
+      toggle();
+      await waitFor(() => expect(screen.getByText("pull-request-detail.tsx")).toBeTruthy());
+
+      fireEvent.click(screen.getByRole("button", { name: `${path} の差分を表示` }));
+      await waitFor(() => expect(screen.getByText("GitHubへ接続できません")).toBeTruthy());
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

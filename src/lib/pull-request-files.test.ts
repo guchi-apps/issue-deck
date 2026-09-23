@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GithubApiPullRequestFile } from "@/lib/github/pull-requests-api";
 import {
+  findPullRequestFilePatch,
   splitPullRequestFilePath,
   toPullRequestFileChange,
   toPullRequestFiles,
@@ -60,6 +61,26 @@ describe("toPullRequestFiles", () => {
       makeFile({ filename: "a.ts" }),
     ]);
     expect(files.map((file) => file.path)).toEqual(["z.ts", "a.ts"]);
+  });
+});
+
+describe("findPullRequestFilePatch", () => {
+  it("パスが一致するファイルのpatchを返す", () => {
+    const files = [
+      makeFile({ filename: "a.ts", patch: "@@ -1 +1 @@\n-old\n+new" }),
+      makeFile({ filename: "b.ts", patch: "@@ -1 +1 @@\n-x\n+y" }),
+    ];
+    expect(findPullRequestFilePatch(files, "b.ts")).toBe("@@ -1 +1 @@\n-x\n+y");
+  });
+
+  it("該当ファイルが無い場合はundefinedを返す", () => {
+    const files = [makeFile({ filename: "a.ts", patch: "@@ -1 +1 @@\n-old\n+new" })];
+    expect(findPullRequestFilePatch(files, "missing.ts")).toBeUndefined();
+  });
+
+  it("GitHubがpatchを省略したファイル（バイナリ等）はundefinedを返す", () => {
+    const files = [makeFile({ filename: "image.png", patch: undefined })];
+    expect(findPullRequestFilePatch(files, "image.png")).toBeUndefined();
   });
 });
 
