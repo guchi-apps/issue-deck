@@ -9,7 +9,10 @@ import {
 import { enqueueManualStepJob } from "@/lib/dispatch/jobs";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { extractVerificationCommands, type ManualStepCommand } from "@/lib/manual-step-command";
-import { resolveManualStepPatrolTarget } from "@/lib/manual-step-verification";
+import {
+  resolveManualStepPatrolTarget,
+  type ManualStepPatrolAuthor,
+} from "@/lib/manual-step-verification";
 
 /**
  * openな手作業Issueの`## 完了の確認方法`を定期巡回する（#2008）。
@@ -233,11 +236,19 @@ function passedValues(
   };
 }
 
-/** openな手作業Issueとして読めるときだけ本文を返す */
+/** DBの`Issue`行から起票者の形（`ManualStepPatrolAuthor`）を取り出す。組み立て方をここ1か所にまとめる */
+function toPatrolAuthor(issue: {
+  authorLogin: string;
+  authorAssociation: string | null;
+}): ManualStepPatrolAuthor {
+  return { login: issue.authorLogin, association: issue.authorAssociation };
+}
+
+/** openな手作業Issueとして読めるときだけ本文と起票者を返す */
 async function loadManualStepIssue(
   repositoryFullName: string,
   issueNumber: number,
-): Promise<{ body: string | null } | null> {
+): Promise<{ body: string | null; author: ManualStepPatrolAuthor } | null> {
   const repository = await db.repository.findFirst({
     where: { fullName: repositoryFullName },
     select: { id: true },
@@ -246,11 +257,17 @@ async function loadManualStepIssue(
 
   const issue = await db.issue.findFirst({
     where: { repositoryId: repository.id, number: issueNumber },
-    select: { body: true, state: true, labels: { select: { name: true } } },
+    select: {
+      body: true,
+      state: true,
+      authorLogin: true,
+      authorAssociation: true,
+      labels: { select: { name: true } },
+    },
   });
   if (!issue || issue.state !== "OPEN") return null;
   if (!issue.labels.some((label) => label.name === MANUAL_STEP_LABEL)) return null;
-  return { body: issue.body };
+  return { body: issue.body, author: toPatrolAuthor(issue) };
 }
 
 /**
@@ -447,6 +464,8 @@ async function findNextPatrolTarget(
     select: {
       number: true,
       body: true,
+      authorLogin: true,
+      authorAssociation: true,
       repository: { select: { fullName: true } },
     },
     orderBy: { githubUpdatedAt: "asc" },
@@ -457,7 +476,7 @@ async function findNextPatrolTarget(
   // **VPSの確認コマンドは、そこへ到達できるホストが居るときだけ候補にする**（#2901）。
   // 積んでも`manual_step_vps_unsupported`で弾かれ、巡回の記録だけが失敗として残る
   const candidates = issues.filter((issue) => {
-    const target = resolveManualStepPatrolTarget(issue.body, true);
+    const target = resolveManualStepPatrolTarget(issue.body, true, toPatrolAuthor(issue));
     return target.patrollable && (target.runTarget !== "vps" || vpsCapable);
   });
   if (candidates.length === 0) return null;
@@ -528,7 +547,7 @@ async function loadPatrolTarget(
   const issue = await loadManualStepIssue(repositoryFullName, issueNumber);
   if (issue === null) return null;
 
-  const target = resolveManualStepPatrolTarget(issue.body, true);
+  const target = resolveManualStepPatrolTarget(issue.body, true, issue.author);
   return target.patrollable ? target.commands : null;
 }
 

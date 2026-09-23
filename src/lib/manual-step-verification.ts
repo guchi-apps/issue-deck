@@ -1,3 +1,4 @@
+import { isBotLogin } from "@/lib/github/is-bot-login";
 import {
   extractVerificationCommands,
   resolveManualStepRunTarget,
@@ -19,6 +20,11 @@ import { parseManualStepGuide, type ManualStepGuide } from "@/lib/manual-step-gu
  *
  * - **`## 完了の確認方法`のコマンドだけを流す。** `## やること`の手順は状態を変えるので、
  *   人の承認なしには一切実行しない
+ * - **起票者がリポジトリのOWNER/MEMBER/COLLABORATOR、またはissue-deck自身の自動化（`[bot]`名義）
+ *   に限る**（`isTrustedManualStepPatrolAuthor`。#3365）。issue-deckはPUBLICで、`71.manual-step`
+ *   ラベルはタイトルが`[手作業]`で始まれば起票者を問わず付くため、ここで絞らないと外部の
+ *   誰でも無人実行の入口を立てられる。`authorAssociation`は同期のたびに書き直すので、
+ *   起票後に本文が書き換わる・権限が変わる経路も次の同期で反映される
  * - **読み取りだけだと読めるコマンドに限る**（`isReadOnlyVerificationCommand`）。確認節が
  *   読み取りだけであることはテンプレート上の期待にすぎず、本文で強制されてはいない
  * - **終了コード0でもクローズはしない。** 判断するのは人（`manual-step-command.ts`の
@@ -39,11 +45,9 @@ const READ_ONLY_COMMANDS = new Set([
   "grep",
   "egrep",
   "fgrep",
-  "rg",
   "jq",
   "wc",
   "cut",
-  "sort",
   "uniq",
   "tr",
   "ls",
@@ -64,7 +68,6 @@ const READ_ONLY_COMMANDS = new Set([
   "du",
   "free",
   "uptime",
-  "env",
   "printenv",
   "which",
   "type",
@@ -117,8 +120,6 @@ const READ_ONLY_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
     "ls-remote",
     "describe",
     "cat-file",
-    "branch",
-    "remote",
   ]),
   gh: new Set(["view", "list", "status"]),
   docker: new Set(["ps", "images", "logs", "inspect"]),
@@ -132,10 +133,21 @@ const READ_ONLY_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
  * 読み飛ばさないとそれをサブコマンドとして読んでしまう（`status`まで届かない）。
  */
 const OPTION_WITH_VALUE: Record<string, ReadonlySet<string>> = {
-  git: new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]),
+  git: new Set(["-C", "--git-dir", "--work-tree", "--namespace"]),
   systemctl: new Set(["-H", "--host", "-M", "--machine", "-t", "--type", "--state"]),
   gh: new Set(["-R", "--repo"]),
   docker: new Set(["-H", "--host", "--context"]),
+};
+
+/**
+ * サブコマンドの前に置かれていたら、それだけでコマンド全体を拒否するフラグ。
+ *
+ * `-c <name>=<value>`は`core.fsmonitor`・`core.sshCommand`のように**設定値としてコマンドを
+ * 埋め込める**ため、値を読み飛ばして通す（`OPTION_WITH_VALUE`）のではなく丸ごと拒否する。
+ * `--exec-path`はgitの内部コマンドの探索先を差し替えられるため同様に扱う。
+ */
+const BANNED_OPTIONS: Record<string, readonly string[]> = {
+  git: ["-c", "--exec-path"],
 };
 
 /**
@@ -235,21 +247,26 @@ function isReadOnlySegment(segment: string): boolean {
   if (withoutComment === "") return true;
 
   const tokens = withoutComment.split(/\s+/);
-  // `VAR=value cmd`のような環境変数の前置きは、値そのものは何も実行しないので読み飛ばす
-  let index = 0;
-  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index += 1;
-  if (index >= tokens.length) return false;
+  // **`VAR=value cmd`の前置きは丸ごと拒否する**（#3365）。`LD_PRELOAD`・`BASH_ENV`・
+  // `GIT_SSH_COMMAND`・`PATH`のように、値を読むだけで任意のコードを実行させたり別のコマンドへ
+  // 差し替えたりできる環境変数があり、「安全な名前だけを通す」判定を環境変数名についてまで
+  // 作り込むと判定漏れがそのまま無人実行の事故になる。取りこぼす側へ倒す
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) return false;
 
   // パスで書かれていても実体は同じ（`/usr/bin/jq`）。ただしパス自体は許可の材料にしない
-  const name = tokens[index].split("/").pop() ?? "";
+  const name = tokens[0].split("/").pop() ?? "";
   if (READ_ONLY_COMMANDS.has(name)) return true;
 
   const subcommands = READ_ONLY_SUBCOMMANDS[name];
   if (!subcommands) return false;
 
   const withValue = OPTION_WITH_VALUE[name] ?? new Set<string>();
-  let cursor = index + 1;
+  const banned = BANNED_OPTIONS[name] ?? [];
+  let cursor = 1;
   while (cursor < tokens.length && tokens[cursor].startsWith("-")) {
+    if (banned.some((option) => tokens[cursor] === option || tokens[cursor].startsWith(`${option}=`))) {
+      return false;
+    }
     const skipValue = withValue.has(tokens[cursor]);
     cursor += skipValue ? 2 : 1;
   }
@@ -259,6 +276,7 @@ function isReadOnlySegment(segment: string): boolean {
 /** 巡回の対象にならなかった理由。画面には出さず、判定のテストと記録のために持つ */
 export type ManualStepPatrolRejection =
   | "not_manual_step"
+  | "untrusted_author"
   | "device_not_runnable"
   | "no_verification_command"
   | "not_read_only";
@@ -272,6 +290,29 @@ export type ManualStepPatrolTarget =
     }
   | { patrollable: false; rejection: ManualStepPatrolRejection };
 
+/** 起票者がリポジトリに対して持つ関係。判定に使うのはこの2つだけ（#3365） */
+export type ManualStepPatrolAuthor = {
+  login: string;
+  /** GitHubの`author_association`。同期していないIssue・古いレコードでは`null` */
+  association: string | null;
+};
+
+/**
+ * 起票者を信頼して無人実行してよいか（#3365）。
+ *
+ * **人はOWNER/MEMBER/COLLABORATORだけを通す。** `CONTRIBUTOR`・`NONE`などは、GitHubアカウントさえ
+ * あれば誰でも該当しうるため通さない。**`[bot]`名義はissue-deck自身の自動化とみなして通す**——
+ * このリポジトリにインストールされたGitHub Appの権限は起票者本人（リポジトリのオーナー）が
+ * 管理しており、外部の人が任意の`[bot]`アカウントとしてこのリポジトリへIssueを起票することは
+ * できない（コメントの投稿者解決`resolveCommentAuthorLogin`と同じ判断）。
+ */
+export function isTrustedManualStepPatrolAuthor(author: ManualStepPatrolAuthor): boolean {
+  if (isBotLogin(author.login)) return true;
+  return author.association !== null && TRUSTED_AUTHOR_ASSOCIATIONS.has(author.association);
+}
+
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
 /**
  * その手作業Issueの確認コマンドを、定期巡回で流してよいか判定する。
  *
@@ -279,13 +320,18 @@ export type ManualStepPatrolTarget =
  * 上から順に全部流して初めて「通った」と言えるもので、一部だけ流しても結論が出ない。
  *
  * @param isManualStepIssue `71.manual-step`が付いているか（呼び出し側がラベルから渡す）
+ * @param author 起票者。`isTrustedManualStepPatrolAuthor`で信頼できるかを判定する（#3365）
  */
 export function resolveManualStepPatrolTarget(
   body: string | null,
   isManualStepIssue: boolean,
+  author: ManualStepPatrolAuthor,
   guide: ManualStepGuide = parseManualStepGuide(body),
 ): ManualStepPatrolTarget {
   if (!isManualStepIssue) return { patrollable: false, rejection: "not_manual_step" };
+  if (!isTrustedManualStepPatrolAuthor(author)) {
+    return { patrollable: false, rejection: "untrusted_author" };
+  }
   // **確認節にデバイスを書く場所は無い**ので、手作業の既定値で判定する（#2052）。端末が複数
   // 書かれていて既定値が決まらない本文は、巡回の対象から外れる（代行と同じ倒し方）
   const runTarget = resolveManualStepRunTarget(guide.where.defaultDevice);

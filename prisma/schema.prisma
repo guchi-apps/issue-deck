@@ -265,25 +265,30 @@ enum IssueStateReason {
 }
 
 model Issue {
-  id              String            @id @default(cuid())
-  githubIssueId   BigInt            @unique
-  repositoryId    String
-  number          Int
-  title           String            @db.Text
-  body            String?           @db.Text
-  state           IssueState
-  stateReason     IssueStateReason?
-  htmlUrl         String
-  authorLogin     String
-  assigneeLogin   String?
-  commentCount    Int               @default(0)
-  milestoneTitle  String?
-  milestoneOpen   Int?
-  milestoneClosed Int?
-  githubCreatedAt DateTime
-  githubUpdatedAt DateTime
-  githubClosedAt  DateTime?
-  syncedAt        DateTime          @default(now())
+  id                String            @id @default(cuid())
+  githubIssueId     BigInt            @unique
+  repositoryId      String
+  number            Int
+  title             String            @db.Text
+  body              String?           @db.Text
+  state             IssueState
+  stateReason       IssueStateReason?
+  htmlUrl           String
+  authorLogin       String
+  // GitHubの`author_association`（OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/NONE等）。
+  // 手作業Issueの確認コマンド定期巡回（#3365）が、起票者がリポジトリの信頼できる
+  // メンバーかどうかを判定するために使う。同期のたびに上書きするので、起票後に
+  // 権限が変わった（コラボレーターから外れた等）場合も次の同期で反映される
+  authorAssociation String?
+  assigneeLogin     String?
+  commentCount      Int               @default(0)
+  milestoneTitle    String?
+  milestoneOpen     Int?
+  milestoneClosed   Int?
+  githubCreatedAt   DateTime
+  githubUpdatedAt   DateTime
+  githubClosedAt    DateTime?
+  syncedAt          DateTime          @default(now())
 
   // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
   // 並べるための基準）。ラベルが外れるとnullに戻す
