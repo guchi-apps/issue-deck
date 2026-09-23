@@ -487,6 +487,11 @@ model AppSetting {
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
   dispatchConcurrency Int      @default(3)
 
+  // リリース準備（バンプPR・develop→mainのPR作成）の自動実行間隔（分・#3416）。`null`は既定の60分、
+  // 0は自動実行しない。GitHub Actionsのcronは実行時に変えられないため、ワークフローは15分おきに
+  // 起動し、reusable側のgateがこの値の境界をまたいだ回だけ進む。
+  releasePrepIntervalMinutes Int?
+
   // 参照されていない添付画像の自動削除（#2475）。**既定はOFF**——「未使用」の判定は
   // Issue本文とIssue／PRのコメントしか見ておらず、PR本文・リポジトリ内のファイル・
   // GitHub外への貼り付けは原理的に検出できない。人が中身を見て納得してから有効にする。

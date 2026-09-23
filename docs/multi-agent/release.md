@@ -460,7 +460,7 @@ PRを閉じるところから始める必要がある）。そこで、**起動�
 ## トリガー
 
 `workflow_dispatch`（手動実行）、**`package.json`の変更を伴う`develop`へのpush**、
-**1時間おきの`schedule`**（#3404）の3つ。
+**15分おきに起動する`schedule`**（#3404・#3416）の3つ。
 
 ```yaml
 on:
@@ -474,7 +474,7 @@ on:
         default: auto
         options: [auto, patch, minor, major]
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/15 * * * *"
   push:
     branches: [develop]
     paths:
@@ -486,6 +486,19 @@ on:
 「バンプPRをマージしたあと、もう一度手で起動する」という手間を省いている。
 
 同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
+
+### schedule起動の実行間隔は画面の設定で変える（#3416）
+
+GitHub Actionsのcronは実行時に変えられないため、**cronは15分おきに固定し、実際の間隔は
+gateステップが決める。** issue-deckの設定＞実行設定「リリース準備の自動実行間隔」
+（`AppSetting.releasePrepIntervalMinutes`。0=自動実行しない・15/30/60/120/360/720/1440分、
+未設定は60分）を`GET /api/release-prep/schedule`（`PROGRESS_REPORT_SECRET`認証）で取得し、
+UTCの15分枠の通し番号が「間隔÷15」で割り切れる回だけ進む。前回実行時刻は記録しない
+（ステートレス）。したがって1440分の実行時刻はUTC 0:00（日本時間9:00）になる。
+
+- 間隔を取得できないとき（issue-deck停止・未デプロイ）は従来どおり60分として判定する
+- cronの遅延が15分を超えると、その枠の実行は落ちる。リリース準備は冪等なので次の枠で拾う
+- 手動の「リリースする」（`workflow_dispatch`）はこの判定を経由しない
 
 ### schedule起動は実装中issueが無いことを確認してから走る（#3404）
 
