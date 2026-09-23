@@ -1,10 +1,23 @@
 "use client";
 
-import { Loader2, RotateCcw } from "lucide-react";
+import { ChevronDown, Loader2, RotateCcw } from "lucide-react";
 
+import {
+  CODEX_MODEL_ENTRIES,
+  MODEL_ENTRIES,
+} from "@/components/dashboard/start-implementation-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useLocalSessionLaunch } from "@/hooks/use-local-session-launch";
+import type { ClaudeLocalModel, CodexLocalModel } from "@/lib/app-settings";
 import {
   ACTIONS_RUNNING_ENQUEUE_REASON,
   describeCrossRepoQuestionRejection,
@@ -14,8 +27,10 @@ import {
   findDispatchJobForIssue,
   isActionsRunInProgress,
   isActiveDispatchJobStatus,
+  isDispatchAgentSelectable,
   resolveCrossRepoQuestionRejection,
   resolveDispatchTargetRejection,
+  type DispatchAgent,
 } from "@/lib/dispatch/dispatch-job";
 import {
   describeSessionRecovery,
@@ -26,6 +41,13 @@ import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
+
+/** エージェントの表示名（メニューの見出し用）。`describeDispatchAgent`は起動ダイアログの
+ * 文言（「〜で起動」）を持つため、見出しに使う短い名前はここに持つ */
+const AGENT_MENU_LABELS: Readonly<Record<DispatchAgent, string>> = {
+  claude: "Claude Code",
+  codex: "Codex（ChatGPT）",
+};
 
 /**
  * 終了したセッションを1クリックで呼び戻す（#1830）。
@@ -156,6 +178,25 @@ export function SessionRecoveryButton({
     void launch(session.host, resolveIssueImplementationAgent(session));
   }
 
+  /**
+   * 別のエージェント・モデルで復旧する（#3408）。「Claudeで実施していたが、別のモデル・
+   * 別のエージェント（Codex＝ChatGPT）で実装したい」という要望に応える。
+   *
+   * **ランチャー側は既に対応済み**（`scripts/run-issue-session.sh`）。前回と同じエージェント
+   * なら`--continue`／`codex resume`で会話の続きから、違うエージェントを選べば自動的に
+   * 新しい会話として立つ（worktreeは既存のものを再利用する）。issue-deck側はここで選んだ
+   * `agent`・`model`を渡すだけで、継続するかどうかの判定はサブPCに任せる。
+   */
+  function recoverWith(agentChoice: DispatchAgent, model: ClaudeLocalModel | CodexLocalModel) {
+    void launch(session.host, agentChoice, model);
+  }
+
+  // 横断質問セッションにはエージェント・モデルの概念が無いため出さない。それ以外は
+  // そのホストがCodexに対応していると申告している場合だけCodexの選択肢も並べる
+  // （`isDispatchAgentSelectable`と同じ判定。#2505）
+  const showModelMenu = !isQuestion;
+  const canSelectAgent = isDispatchAgentSelectable(host);
+
   return (
     <div
       className={cn(
@@ -164,16 +205,71 @@ export function SessionRecoveryButton({
       )}
     >
       {/* スマホ（主な用途）では幅いっぱいにして押しやすくし、PCの列では文字幅に収める */}
-      <Button
-        variant={recovery.primary ? "default" : "outline"}
-        size="sm"
-        className="w-full sm:w-auto"
-        disabled={isSubmitting || rejection !== null || actionsRunning}
-        onClick={recover}
-      >
-        {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-        セッションを復旧
-      </Button>
+      <div className="flex w-full gap-px sm:w-auto">
+        <Button
+          variant={recovery.primary ? "default" : "outline"}
+          size="sm"
+          className={cn("flex-1 sm:w-auto", showModelMenu && "rounded-r-none")}
+          disabled={isSubmitting || rejection !== null || actionsRunning}
+          onClick={recover}
+        >
+          {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+          セッションを復旧
+        </Button>
+        {showModelMenu && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant={recovery.primary ? "default" : "outline"}
+                size="sm"
+                className="rounded-l-none px-2"
+                disabled={isSubmitting || rejection !== null || actionsRunning}
+                aria-label="別のエージェント・モデルで復旧"
+              >
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                別のエージェント・モデルで復旧
+              </DropdownMenuLabel>
+              {canSelectAgent && (
+                <DropdownMenuLabel className="text-xs">
+                  {AGENT_MENU_LABELS.claude}
+                </DropdownMenuLabel>
+              )}
+              {MODEL_ENTRIES.map((entry) => (
+                <DropdownMenuItem
+                  key={`claude-${entry.model}`}
+                  className="flex-col items-start gap-0.5"
+                  onSelect={() => recoverWith("claude", entry.model)}
+                >
+                  <span className="font-medium">{entry.label}</span>
+                  <span className="text-xs text-muted-foreground">{entry.fit}</span>
+                </DropdownMenuItem>
+              ))}
+              {canSelectAgent && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs">
+                    {AGENT_MENU_LABELS.codex}
+                  </DropdownMenuLabel>
+                  {CODEX_MODEL_ENTRIES.map((entry) => (
+                    <DropdownMenuItem
+                      key={`codex-${entry.model}`}
+                      className="flex-col items-start gap-0.5"
+                      onSelect={() => recoverWith("codex", entry.model)}
+                    >
+                      <span className="font-medium">{entry.label}</span>
+                      <span className="text-xs text-muted-foreground">{entry.fit}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
       {/* 押すと何が起きるかは常に出す。**畳まない。** 「復旧」だけでは、会話が続くのか
           最初からやり直すのかが読み取れず、押してよいか判断できない */}
       <p className={textClassName}>{recovery.detail}</p>
