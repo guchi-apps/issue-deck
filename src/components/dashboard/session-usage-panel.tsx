@@ -12,7 +12,7 @@ import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } fr
 import { useNow } from "@/hooks/use-now";
 import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
+import { AGENT_BASE_COLORS, AGENT_MODEL_TIER_COLORS } from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   buildRepositoryPieSlices,
@@ -177,9 +177,10 @@ const OUTPUT_COLOR = "#4776e6";
  * `validate_palette.js`で検証。IssueAgentBadge（#2635）のindigo/emeraldは`OUTPUT_COLOR`・
  * `TOKEN_COLORS["github-actions"]`と近すぎて転用できなかった）。
  *
- * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。●はモデルの
- * 重さで濃淡を付けるが、ここは誰が使ったかだけを表すので1色に固定する。以前の
+ * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。以前の
  * rose-800（#9f1239）と明るい緑（#33cc4d）は明度が離れすぎていて、●の濃淡の段を作れなかった。
+ * **段が決まらないぶんの色として、進捗バー等ではこの1色に固定したまま使う**（#3396。
+ * 日別グラフだけは`dailyChartParts`が`AGENT_MODEL_TIER_COLORS`の濃淡へ差し替える）。
  */
 const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 
@@ -379,6 +380,33 @@ function costSplitByAgent(row: CostRow) {
 type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource };
 
 /**
+ * 日別の縦棒1本ぶんの積み上げ内訳（#3396）。Claude／Codexは`byAgent`の合計ではなく
+ * `day.modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
+ * ●と同じ`AGENT_MODEL_TIER_COLORS`の濃淡を使う。段が決まらないぶんは`AGENT_BASE_COLORS`
+ * （濃淡なしの代表色）。GitHub Actionsは従来どおり`costSplitByAgent`の単色のまま
+ * （モデル情報が薄いため据え置き）。**濃い（重い）ものを下、薄い（軽い）ものを上、
+ * Actionsをいちばん上に積む**（呼び出し側が`flex-col-reverse`で描くため、配列の先頭が最下段）。
+ */
+function dailyChartParts(day: SessionUsageResponse["byDay"][number]) {
+  const split = costSplitByAgent(day);
+  const tierParts = (["claude", "codex"] as const).flatMap((agent) => {
+    const bucket = day.modelTiers[agent];
+    return [
+      ...([0, 1, 2, 3] as const).map((tier) => ({
+        key: `${agent}-tier${tier}`,
+        value: bucket.costUsd[tier],
+        color: AGENT_MODEL_TIER_COLORS[agent][tier],
+      })),
+      { key: `${agent}-unresolved`, value: bucket.unresolvedCostUsd, color: AGENT_BASE_COLORS[agent] },
+    ];
+  });
+  // 金額0の区分は積んでも見えないので出さない（DOM要素数を実際の内訳と揃える）。
+  return [...tierParts, { key: "actions", value: split.actions, color: AGENT_COLORS.actions }].filter(
+    (part) => part.value > 0,
+  );
+}
+
+/**
  * 内訳の太い棒。長さが金額、内側がClaude／Codex／GitHub Actionsの割合（日別の縦棒も同じ3色）。
  * **割合そのものは棒に数値を書けないので、ツールチップへ金額で出す。**
  */
@@ -495,9 +523,9 @@ const DAILY_VALUE_LABELS_MAX_DAYS = 7;
  * 平均は期間の全日（0の日と集計中の最新日を含む）÷日数で、横の点線と「平均 $○○」で示す。
  *
  * **トークン量は使わない**（金額と比例しないための二段の帯は#2633で入れたが、日別では不要になった。
- * Issue・PR別には残っている）。**棒の内側の色（Claude／Codex／GitHub Actions）は
- * 従来どおり**。最新日は集計の途中で必ず低く出るので、枠線を足して「減った」と読ませない。
- * ライブラリを足さずCSSだけで描く。
+ * Issue・PR別には残っている）。**棒の内側は、Claude／Codexをモデルの重さ（tier）別の濃淡で
+ * 分け、GitHub Actionsは単色のまま積む**（#3396。`dailyChartParts`）。最新日は集計の途中で
+ * 必ず低く出るので、枠線を足して「減った」と読ませない。ライブラリを足さずCSSだけで描く。
  */
 function DailyChart({
   days,
@@ -543,19 +571,20 @@ function DailyChart({
         ))}
         <div className={cn("absolute inset-0 flex items-end", barsGap)}>
           {days.map((day, index) => {
+            const parts = dailyChartParts(day);
             const split = costSplitByAgent(day);
-            const parts = [
-              { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude },
-              { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex },
-              { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions },
-            ];
             const isZero = day.costUsd <= 0;
             const showsValue = !isZero && (isFewDays || index === peakIndex);
+            const modelNote = day.modelLabels.length > 0 ? `　・　モデル: ${day.modelLabels.join(", ")}` : "";
+            const dayTitle =
+              `${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　・　` +
+              `Claude ${formatUsageUsd(split.claude)} / Codex ${formatUsageUsd(split.codex)} / ` +
+              `GitHub Actions ${formatUsageUsd(split.actions)}${modelNote}`;
             return (
               <div
                 key={day.date}
                 className="relative flex h-full min-w-0 flex-1 items-end justify-center"
-                title={`${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答`}
+                title={dayTitle}
               >
                 {isZero ? (
                   // 棒の代わりに基準線上へ短い印を置き、「0だった日」と「日付が抜けた」を区別する
@@ -571,7 +600,6 @@ function DailyChart({
                       day.date === todayKey && "outline outline-1 outline-offset-1 outline-muted-foreground/60",
                     )}
                     style={{ height: `${(day.costUsd / scale.max) * 100}%` }}
-                    title={parts.map((part) => `${part.label} ${formatUsageUsd(part.value)}`).join(" / ")}
                   >
                     {parts.map((part) => (
                       <span
@@ -629,25 +657,41 @@ function DailyChart({
   );
 }
 
-/** 日別カードの凡例。棒の色（誰が使ったか）と平均線。トークンの帯は日別では出さない（#3038） */
+/**
+ * 日別カードの凡例（#3038）。**Claude／Codexは濃淡の4段（`AGENT_MODEL_TIER_COLORS`）で
+ * 「濃いほど重いモデル」を示す**（#3396。実行状況の●の凡例`ModelDotLegend`と同じ体裁）。
+ * GitHub Actionsは単色のまま。トークンの帯は日別では出さない（#3038）。
+ */
 function DailyLegend() {
-  const items = [
-    { color: AGENT_COLORS.claude, label: "Claude" },
-    { color: AGENT_COLORS.codex, label: "Codex" },
-    { color: AGENT_COLORS.actions, label: "GitHub Actions" },
-  ];
+  const agents = [
+    { key: "claude", label: "Claude" },
+    { key: "codex", label: "Codex" },
+  ] as const;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-      {items.map((item) => (
-        <span key={item.label}>
-          <i
-            aria-hidden
-            className="mr-1 inline-block size-2 rounded-[2px]"
-            style={{ backgroundColor: item.color }}
-          />
-          <span className="text-foreground">{item.label}</span>
+      {agents.map((agent) => (
+        <span key={agent.key} className="inline-flex items-center gap-1">
+          <span className="inline-flex items-center gap-0.5" aria-hidden>
+            {AGENT_MODEL_TIER_COLORS[agent.key].map((color) => (
+              <span
+                key={color}
+                className="size-2 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+          </span>
+          <span className="text-foreground">{agent.label}</span>
         </span>
       ))}
+      <span>濃いほど重いモデル</span>
+      <span>
+        <i
+          aria-hidden
+          className="mr-1 inline-block size-2 rounded-[2px]"
+          style={{ backgroundColor: AGENT_COLORS.actions }}
+        />
+        <span className="text-foreground">GitHub Actions</span>
+      </span>
       <span>
         <i
           aria-hidden

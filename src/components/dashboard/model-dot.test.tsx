@@ -9,7 +9,7 @@ afterEach(cleanup);
 describe("ModelDot", () => {
   it("モデルが分かれば段の色で塗り、エージェントとモデル名を読み上げる", () => {
     render(<ModelDot agent="claude" model="claude-opus-5" />);
-    const dot = screen.getByRole("img", { name: "Claude Opus" });
+    const dot = screen.getByRole("img", { name: "Claude Opus 5" });
     expect(dot.style.backgroundColor).toBe("rgb(179, 38, 30)");
   });
 

@@ -382,8 +382,8 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    expect(within(detail).getByText("Opus")).toBeTruthy();
-    expect(within(detail).getByText("Sonnet")).toBeTruthy();
+    expect(within(detail).getByText("Opus 5")).toBeTruthy();
+    expect(within(detail).getByText("Sonnet 5")).toBeTruthy();
   });
 
   it("Plan modeの内訳があるセッションだけ、料金の下に計画/実装を分けて出す（#2646）", () => {
@@ -551,9 +551,15 @@ describe("SessionUsagePanel", () => {
   it("Issue・PR別の行を、金額の太い棒とトークンの細い帯の二段にする（#2633）。日別・種別別はトークンを出さない（#3038・#3064）", () => {
     renderPanel(response([entry()]));
 
-    // 日別の縦棒。内側はエージェントの割合で、棒には数値を書けないのでツールチップへ出す。
+    // 日別の縦棒。内側はモデルの重さ（tier）別の濃淡で、棒には数値を書けないのでツールチップへ出す
+    // （エージェント別内訳・使われたモデル名も添える。#3396）。
     const daily = screen.getByText("日別").closest("section") as HTMLElement;
-    expect(within(daily).getByTitle("Claude $20.00 / Codex $0.00 / GitHub Actions $0.00")).toBeTruthy();
+    // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
+    expect(
+      within(daily).getByTitle(
+        /^2026-08-30\s+\$20\.00\s+100応答\s+・\s+Claude \$20\.00 \/ Codex \$0\.00 \/ GitHub Actions \$0\.00\s+・\s+モデル: Opus 5$/,
+      ),
+    ).toBeTruthy();
     // トークンの細い帯は日別では出さない。
     expect(within(daily).queryByTitle("入力 1k / 書込 2k / 読出 7k / 出力 500")).toBeNull();
 
@@ -577,9 +583,13 @@ describe("SessionUsagePanel", () => {
     for (const day of ["8/24", "8/25", "8/26", "8/27", "8/28", "8/29", "8/30"]) {
       expect(within(daily).getByText(day)).toBeTruthy();
     }
-    expect(within(daily).getAllByTitle(/応答$/)).toHaveLength(7);
+    expect(within(daily).getAllByTitle(/応答/)).toHaveLength(7);
     // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
-    expect(within(daily).getByTitle(/^2026-08-29\s+\$0\.00\s+0応答$/)).toBeTruthy();
+    expect(
+      within(daily).getByTitle(
+        /^2026-08-29\s+\$0\.00\s+0応答\s+・\s+Claude \$0\.00 \/ Codex \$0\.00 \/ GitHub Actions \$0\.00$/,
+      ),
+    ).toBeTruthy();
     // 縦軸は金額（$0と、最大を含む目盛り）。
     expect(within(daily).getByText("$0")).toBeTruthy();
     expect(within(daily).getByText("$20")).toBeTruthy();
@@ -594,6 +604,16 @@ describe("SessionUsagePanel", () => {
     expect(within(daily).getByText("期間の平均")).toBeTruthy();
   });
 
+  it("日別の凡例は、Claude／Codexをモデルの重さ（tier）の濃淡で示す（#3396）", () => {
+    renderPanel(response([entry()]));
+
+    const daily = screen.getByText("日別").closest("section") as HTMLElement;
+    expect(within(daily).getByText("Claude")).toBeTruthy();
+    expect(within(daily).getByText("Codex")).toBeTruthy();
+    expect(within(daily).getByText("濃いほど重いモデル")).toBeTruthy();
+    expect(within(daily).getByText("GitHub Actions")).toBeTruthy();
+  });
+
   it("金額の棒でGitHub ActionsぶんをClaudeから引く（Codexが短く出ない。#2633）", () => {
     // ActionsはClaude Codeなので`byAgent.claude`にも入っている。引かずに描くと、Claudeの帯が
     // Actionsのぶんまで伸び、残りとして描いていたCodexが消える。
@@ -606,9 +626,11 @@ describe("SessionUsagePanel", () => {
     );
 
     const daily = screen.getByText("日別").closest("section") as HTMLElement;
-    const bar = within(daily).getByTitle(
-      "Claude $10.00 / Codex $10.00 / GitHub Actions $20.00",
+    // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
+    const dayCell = within(daily).getByTitle(
+      /^2026-08-30\s+\$40\.00\s+300応答\s+・\s+Claude \$10\.00 \/ Codex \$10\.00 \/ GitHub Actions \$20\.00\s+・\s+モデル: Opus 5$/,
     );
+    const bar = dayCell.querySelector(".flex-col-reverse") as HTMLElement;
     // 縦棒なので、積み上げの割合は高さで持つ。
     const heights = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.height);
     expect(heights).toEqual(["25%", "25%", "50%"]);
