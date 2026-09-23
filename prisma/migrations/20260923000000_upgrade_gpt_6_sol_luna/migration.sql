@@ -25,7 +25,7 @@ SET `codexModel` = CASE `codexModel`
 END
 WHERE `status` = 'QUEUED';
 
-UPDATE `ScheduledRunEntry`
+UPDATE `NightlyRunEntry`
 SET `codexModel` = CASE `codexModel`
   WHEN 'gpt-5.6-sol' THEN 'gpt-6-sol'
   WHEN 'gpt-5.6-luna' THEN 'gpt-6-luna'
