@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.35.1",
+    date: "2026-09-23",
+    changes: [
+      "スマホでIssue詳細を開いたとき、ラベルが多いIssueでも省略されずに全部確認できるようになりました。",
+    ],
+    usage: [
+      "1. スマホでissue-deckを開き、対象のIssueを選んでIssue詳細画面を表示する",
+      "2. 画面上部のサマリーカードにあるラベル欄を左右にスクロールする",
+      "3. 以前は「+N」で隠れていた分も含め、すべてのラベルが表示されれば成功",
+    ],
+  },
+  {
     version: "7.35.0",
     date: "2026-09-23",
     changes: [
