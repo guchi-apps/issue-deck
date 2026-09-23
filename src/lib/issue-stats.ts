@@ -476,6 +476,8 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
   return (
     a.title === b.title &&
     a.body === b.body &&
+    // 本文を外した版と本文入りの版（編集直後など）は、本文が同じ空文字でも別物（#3390）
+    a.bodyOmitted === b.bodyOmitted &&
     a.state === b.state &&
     // Project Statusが変われば進捗表示も変わるため、再描画の判定に含める（#991）
     a.projectStatus === b.projectStatus &&

@@ -52,7 +52,8 @@ export default async function NewIssuePage() {
       where: { userId: currentUser.id },
       select: { repositoryId: true },
     }),
-    getIssuesForUser(currentUser.id),
+    // 本文は要らないので全件外す（#3390）
+    getIssuesForUser(currentUser.id, { bodies: "none" }),
     // 一覧の印（#1888）はデッキ本体（`/dashboard`）と同じ材料で決める
     listDispatchRunnableRepositories(),
     // 「作成+実装開始」のモデル欄の最初の選択を設定の値にするため（#2776・#3106）。

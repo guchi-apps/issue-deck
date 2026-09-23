@@ -5,7 +5,20 @@ import { listManualStepVerifiedAtByIssue } from "@/lib/manual-step-verification-
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { Issue } from "@/types/issue";
 
-export async function getIssuesForUser(userId: string): Promise<Issue[]> {
+/**
+ * 一覧に載せる本文の範囲（#3390）。
+ *
+ * - `open`: openのIssueだけ本文を持たせ、closedは外す（`bodyOmitted`）。デッキ本体
+ *   （`/dashboard`・`GET /api/issues`）が使う。前提条件の待ち（`manual-step-prerequisites.ts`）・
+ *   手作業の案内・一覧の検索はopenの本文を一覧から直接読むので、openまでは外さない
+ * - `none`: 全件の本文を外す。`/issues/new`は`#123`補完に番号とタイトルしか使わない
+ */
+export type IssueListBodies = "open" | "none";
+
+export async function getIssuesForUser(
+  userId: string,
+  options: { bodies: IssueListBodies } = { bodies: "open" },
+): Promise<Issue[]> {
   // 未完了ジョブ（#1347）はIssueの件数によらず1本で引ける。Issueごとに引くとN+1になる
   const [issueRows, pendingDispatchAt, manualStepVerifiedAt] = await Promise.all([
     db.issue.findMany({
@@ -30,7 +43,7 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
     const activeKey = buildDispatchActiveKey(row.repository.fullName, row.number);
     const dispatchedAt = pendingDispatchAt.get(activeKey);
     const verifiedAt = manualStepVerifiedAt.get(activeKey);
-    return {
+    const issue: Issue = {
       ...dbIssueToDisplayIssue(row.repository, row),
       favorite: row.favoritedBy.length > 0,
       hasUnreadComments: row.commentCount > readCommentCount,
@@ -38,5 +51,15 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
       dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
       manualStepVerifiedAt: verifiedAt?.toISOString() ?? null,
     };
+    return shouldOmitBody(issue, options.bodies) ? omitIssueBody(issue) : issue;
   });
+}
+
+function shouldOmitBody(issue: Issue, bodies: IssueListBodies): boolean {
+  return bodies === "none" || issue.state === "closed";
+}
+
+/** 本文を外した形にする（#3390）。空文字にしたうえで印を立て、「本文が無い」と区別する */
+export function omitIssueBody(issue: Issue): Issue {
+  return { ...issue, body: "", bodyOmitted: true };
 }

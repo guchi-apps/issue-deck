@@ -34,6 +34,7 @@ import {
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
+import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
@@ -1200,12 +1201,16 @@ export function IssueDetail({
               )}
             </div>
             <ApiErrorMessage message={taskList.error} />
-            <MarkdownBody
-              content={taskList.body}
-              repositoryFullName={issue.repositoryFullName}
-              onToggleTask={taskList.toggleTask}
-              isTaskToggling={taskList.isToggling}
-            />
+            {issue.bodyOmitted ? (
+              <IssueBodyPending failed={Boolean(issue.bodyLoadFailed)} />
+            ) : (
+              <MarkdownBody
+                content={taskList.body}
+                repositoryFullName={issue.repositoryFullName}
+                onToggleTask={taskList.toggleTask}
+                isTaskToggling={taskList.isToggling}
+              />
+            )}
           </div>
 
           <Separator />

@@ -1,3 +1,4 @@
+import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Issue } from "@/types/issue";
@@ -18,7 +19,11 @@ export function IssueSummaryDialog({ issue, open, onOpenChange }: IssueSummaryDi
           </DialogTitle>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto">
-          <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+          {issue.bodyOmitted ? (
+            <IssueBodyPending failed={Boolean(issue.bodyLoadFailed)} />
+          ) : (
+            <MarkdownBody content={issue.body} repositoryFullName={issue.repositoryFullName} />
+          )}
         </div>
       </DialogContent>
     </Dialog>
