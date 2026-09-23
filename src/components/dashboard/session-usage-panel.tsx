@@ -21,9 +21,11 @@ import {
   formatSessionElapsed,
   formatUsageTokens,
   formatUsageUsd,
+  indexCurrentSessionsByIssueKey,
   isUsageKindInWorkFlow,
   niceAxisScale,
   sessionUsageCostSplit,
+  sessionUsageIssueKey,
   sessionUsageKindLabel,
   sessionUsageModelLabel,
   sessionUsagePhaseSplit,
@@ -1038,12 +1040,17 @@ function IssueGroupRow({
   isOpen,
   onToggle,
   onOpenIssue,
+  liveSession,
+  now,
 }: {
   issue: UsageIssue;
   maxCost: number;
   maxTokens: number;
   isOpen: boolean;
   onToggle: () => void;
+  /** いま生きているセッション（#3435）。あれば行の見た目を変える */
+  liveSession?: CurrentSessionUsage;
+  now?: number | null;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 }) {
   const repository = issue.repository ?? "(不明)";
@@ -1055,7 +1062,15 @@ function IssueGroupRow({
   );
 
   return (
-    <li className={cn("rounded-lg", isOpen && "bg-muted/40")}>
+    <li
+      className={cn(
+        "rounded-lg",
+        isOpen && "bg-muted/40",
+        liveSession?.statusTone === "running" && "bg-emerald-600/[0.08] shadow-[inset_3px_0_0_0] shadow-emerald-600 dark:bg-emerald-400/10 dark:shadow-emerald-400",
+        liveSession?.statusTone === "waiting" && "bg-amber-600/[0.08] shadow-[inset_3px_0_0_0] shadow-amber-600 dark:bg-amber-400/10 dark:shadow-amber-400",
+      )}
+      data-live-tone={liveSession?.statusTone}
+    >
       <div className="flex items-start gap-1">
         <button
           type="button"
@@ -1072,6 +1087,27 @@ function IssueGroupRow({
             <div className="flex items-baseline gap-1.5 text-[11px]">
               <span className="shrink-0 font-semibold text-foreground">{issueGroupLabel(issue)}</span>
               <span className="min-w-0 truncate text-muted-foreground">{repository}</span>
+              {liveSession && (
+                <span
+                  data-testid="issue-live-pill"
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 text-[10px] font-semibold leading-4",
+                    CURRENT_SESSION_TONE_CLASS[liveSession.statusTone],
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      CURRENT_SESSION_DOT_CLASS[liveSession.statusTone],
+                      liveSession.statusTone === "running" && "animate-pulse motion-reduce:animate-none",
+                    )}
+                  />
+                  {liveSession.statusTone === "running"
+                    ? `実装中${now == null ? "" : ` ${formatSessionElapsed(liveSession.startedAt, now)}`}`
+                    : CURRENT_SESSION_TONE_LABEL[liveSession.statusTone]}
+                </span>
+              )}
               <span className="ml-auto shrink-0 pl-2 text-muted-foreground tabular-nums">
                 {issue.sessions}セッション
               </span>
@@ -1160,13 +1196,17 @@ function IssueGroupList({
   openKeys,
   onToggle,
   onOpenIssue,
+  liveSessions,
 }: {
   issues: UsageIssue[];
+  /** いま生きているセッションを行キーで引ける対応（#3435） */
+  liveSessions?: Map<string, CurrentSessionUsage>;
   openKeys: Record<string, boolean>;
   /** 押された行の直前の開閉状態（既定値込み）を渡す。呼び出し側はこれを反転させるだけでよい */
   onToggle: (key: string, wasOpen: boolean) => void;
   onOpenIssue?: (repository: string, issueNumber: number | null, prNumber: number | null) => void;
 }) {
+  const now = useNow();
   if (issues.length === 0) {
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
@@ -1192,6 +1232,8 @@ function IssueGroupList({
             isOpen={isOpen}
             onToggle={() => onToggle(key, isOpen)}
             onOpenIssue={onOpenIssue}
+            liveSession={liveSessions?.get(sessionUsageIssueKey(issue))}
+            now={now}
           />
         );
       })}
@@ -1728,6 +1770,7 @@ export function SessionUsagePanel({
   const dailyDays = period ? fillUsageDays(period.byDay, period.since, period.until) : [];
   const todayKey = dailyDays.at(-1)?.date ?? "";
   const issues = period?.byIssue ?? [];
+  const liveSessionsByKey = indexCurrentSessionsByIssueKey(data?.currentSessions ?? []);
   const repositoryPieSlices = period ? buildRepositoryPieSlices(period.byRepository) : [];
   const agentCostSub = period
     ? `Claude ${formatUsageUsd(period.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(period.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(period.totalsBySource["github-actions"].costUsd)}`
@@ -1912,6 +1955,7 @@ export function SessionUsagePanel({
                     setOpenIssueKeys((prev) => ({ ...prev, [key]: !wasOpen }))
                   }
                   onOpenIssue={onOpenIssue}
+                  liveSessions={liveSessionsByKey}
                 />
                 {issues.length > visibleIssues && (
                   <Button

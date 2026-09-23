@@ -10,6 +10,7 @@ import {
   formatSessionElapsed,
   formatUsageTokens,
   formatUsageUsd,
+  indexCurrentSessionsByIssueKey,
   isUsageKindInWorkFlow,
   niceAxisScale,
   sessionUsageCostSplit,
@@ -962,5 +963,35 @@ describe("formatSessionElapsed（#3084）", () => {
     expect(formatSessionElapsed(start, at(60))).toBe("1時間");
     expect(formatSessionElapsed(start, at(78))).toBe("1時間18分");
     expect(formatSessionElapsed(start, at(60 * 26))).toBe("1日2時間");
+  });
+});
+
+describe("indexCurrentSessionsByIssueKey（#3435）", () => {
+  const base = {
+    host: "subpc",
+    tmuxSessionName: "t",
+    repository: "issue-deck",
+    issueNumber: 1,
+    prNumber: null,
+    title: null,
+    agent: "claude" as const,
+    statusLabel: "",
+    startedAt: "2026-09-23T00:00:00Z",
+    models: [],
+    reported: true,
+    responses: 0,
+    contextTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+    quotaPercent: null,
+  };
+
+  it("同じIssueに複数あるときは強い状態を残す", () => {
+    const map = indexCurrentSessionsByIssueKey([
+      { ...base, tmuxSessionName: "a", statusTone: "idle" },
+      { ...base, tmuxSessionName: "b", statusTone: "running" },
+    ]);
+    expect(map.size).toBe(1);
+    expect(map.get("issue-deck#1")?.tmuxSessionName).toBe("b");
   });
 });

@@ -131,6 +131,20 @@ describe("SessionUsagePanel", () => {
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 3084, null);
   });
 
+  it("Issue・PR別で、生きているセッションのあるIssueの行にだけ状態のピルを出す（#3435）", () => {
+    renderPanel({
+      ...response([
+        entry({ sessionId: "a", issueNumber: 3084 }),
+        entry({ sessionId: "b", issueNumber: 2504 }),
+      ]),
+      currentSessions: [{ ...liveSession, statusTone: "running" as const, statusLabel: "作業中" }],
+    });
+    const pills = screen.getAllByTestId("issue-live-pill");
+    expect(pills).toHaveLength(1);
+    expect(pills[0].textContent).toMatch(/^実装中/);
+    expect(pills[0].closest("li")?.getAttribute("data-live-tone")).toBe("running");
+  });
+
   it("実行中のセッションが無ければ1行だけ出す（#3084）", () => {
     renderPanel({ ...response([entry()]), currentSessions: [] });
     expect(screen.getByText("いま実行中のセッションはありません")).toBeTruthy();
