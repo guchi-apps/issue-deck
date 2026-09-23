@@ -2845,6 +2845,8 @@ export function IssueDeckShell({
           repositoryFullName={bulkCreateCodeReviewState?.reviewIssue.repositoryFullName ?? ""}
           reviewNumber={bulkCreateCodeReviewState?.reviewIssue.number ?? 0}
           onCreated={handleIssueCreated}
+          hosts={dispatch.hosts}
+          onNightlyRunQueued={nightlyRun.refresh}
         />
         <CodeReviewDialog
           open={codeReviewDialogOpen}

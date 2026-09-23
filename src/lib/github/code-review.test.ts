@@ -13,6 +13,7 @@ import {
   filterUncreatedCodeReviewFindings,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
+  resolveCodeReviewFindingLabels,
   isCodeReviewPending,
   isCodeReviewReportComment,
   parseCodeReviewReport,
@@ -329,5 +330,33 @@ describe("describeCodeReviewFindingProgress", () => {
     expect(describeCodeReviewFindingProgress({ total: 2, created: 2, resolved: 2 })).toBe(
       "指摘2件：対応済み2件",
     );
+  });
+});
+
+describe("resolveCodeReviewFindingLabels（#3417）", () => {
+  const repoLabelNames = ["30.bug", "51.improvement", "80.Priority: High", "85.Priority: Medium", "89.Priority: Low"];
+
+  it("判定された種別と重要度の優先度ラベルを付ける", () => {
+    expect(
+      resolveCodeReviewFindingLabels({ severity: "high", suggestedKindLabels: ["30.bug"], repoLabelNames }),
+    ).toEqual(["30.bug", "80.Priority: High"]);
+  });
+
+  it("種別を判定できなければ51.improvementへ倒す", () => {
+    expect(
+      resolveCodeReviewFindingLabels({ severity: "low", suggestedKindLabels: [], repoLabelNames }),
+    ).toEqual(["51.improvement", "89.Priority: Low"]);
+  });
+
+  it("リポジトリに無いラベルは付けない", () => {
+    expect(
+      resolveCodeReviewFindingLabels({ severity: "medium", suggestedKindLabels: ["63.refactor"], repoLabelNames }),
+    ).toEqual(["51.improvement", "85.Priority: Medium"]);
+  });
+
+  it("ラベルが1つも無いリポジトリでは何も付けない", () => {
+    expect(
+      resolveCodeReviewFindingLabels({ severity: "high", suggestedKindLabels: ["30.bug"], repoLabelNames: [] }),
+    ).toEqual([]);
   });
 });
