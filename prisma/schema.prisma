@@ -776,7 +776,7 @@ model DispatchJob {
   // このIssueだけに使うCodexのモデル（#3192。`kind`が`LAUNCH`・`agent`が`codex`のときだけ意味がある）。
   //
   // **nullは「設定の既定に従う」**（`AppSetting.codexModel`）で、既存行はすべてnullになる。
-  // 入るのは`CODEX_LOCAL_MODEL_VALUES`のモデル名（`gpt-5.6-sol`など）だけで、`claudeModel`と
+  // 入るのは`CODEX_LOCAL_MODEL_VALUES`のモデル名（`gpt-6-sol`など）だけで、`claudeModel`と
   // 同じく画面・API・払い出しの3か所で既知の語だけを通す。払い出し（`POST /api/dispatch/claim`）が
   // この値をジョブごとの`codexModel`として載せ直すので、pollerは従来どおり`codexModel`だけを読む。
   codexModel         String?

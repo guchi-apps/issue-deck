@@ -359,13 +359,13 @@ describe("enqueueDispatchJob のモデル", () => {
       repositoryFullName: REPOSITORY,
       issueNumber: 1311,
       hostName: "subpc",
-      codexModel: "gpt-5.6-sol",
+      codexModel: "gpt-6-sol",
       requestedByUserId: null,
       now: NOW,
     });
     expect(withModel.ok).toBe(true);
-    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBe("gpt-5.6-sol");
-    if (withModel.ok) expect(withModel.job.codexModel).toBe("gpt-5.6-sol");
+    expect(dispatchJobCreate.mock.calls[0][0].data.codexModel).toBe("gpt-6-sol");
+    if (withModel.ok) expect(withModel.job.codexModel).toBe("gpt-6-sol");
 
     dispatchJobCreate.mockClear();
     await enqueue();

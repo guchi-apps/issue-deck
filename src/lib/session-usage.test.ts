@@ -567,6 +567,18 @@ describe("codex_session_usage_aggregate", () => {
     expect(result.totals.outputCostUsd).toBeCloseTo(0.004, 4);
   });
 
+  it("GPT-6 Solの単価で使用量を換算する", () => {
+    const file = writeTranscript("codex-gpt-6-sol.jsonl", [
+      codexMeta("2026-09-23T01:00:00.000Z", "/home/u/apps/issue-deck-worktrees/issue-3395"),
+      codexTurn("2026-09-23T01:00:01.000Z", "gpt-6-sol"),
+      codexTokens("2026-09-23T01:02:00.000Z", { input: 1000, cached: 800, created: 100, output: 200 }),
+    ]);
+
+    const result = aggregateCodex([file]);
+    expect(result.sessions[0].models).toEqual(["gpt-6-sol"]);
+    expect(result.totals.costUsd).toBeCloseTo(0.0026, 4);
+  });
+
   it("累積値が巻き戻っても、巻き戻る前の消費を落とさない", () => {
     // 圧縮・枝分かれの後、`total_token_usage`は0から数え直す。最後の値だけを読むと
     // 巻き戻りより前の消費がまるごと落ちる（実測で金額が半分に出ていた）。
