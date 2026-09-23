@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 
 import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
@@ -12,7 +13,6 @@ import {
 } from "@/components/dashboard/check-user-toast-viewport";
 import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-create-code-review-issues-dialog";
-import { ManualStepGuideDialog } from "@/components/dashboard/manual-step-guide-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
@@ -187,6 +187,11 @@ import {
   type OptimisticMerge,
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
+
+// 手作業ガイドは明示的に開くまで表示しないため、初回表示のチャンクから外す（#3391）。
+const ManualStepGuideDialog = dynamic(
+  () => import("@/components/dashboard/manual-step-guide-dialog").then((module) => module.ManualStepGuideDialog),
+);
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -2780,13 +2785,15 @@ export function IssueDeckShell({
         />
 
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
-        <ManualStepGuideDialog
-          queueIds={manualStepGuide.queueIds}
-          issues={allIssues}
-          open={manualStepGuide.open}
-          onOpenChange={manualStepGuide.setOpen}
-          onIssueUpdated={handleIssueUpdated}
-        />
+        {manualStepGuide.open && (
+          <ManualStepGuideDialog
+            queueIds={manualStepGuide.queueIds}
+            issues={allIssues}
+            open
+            onOpenChange={manualStepGuide.setOpen}
+            onIssueUpdated={handleIssueUpdated}
+          />
+        )}
 
         <CreateIssueDialog
           open={createDialogOpen}
