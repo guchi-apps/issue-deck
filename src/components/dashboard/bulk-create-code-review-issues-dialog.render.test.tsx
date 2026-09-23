@@ -20,6 +20,24 @@ vi.mock("@/hooks/use-issue-mutations", () => ({
   useIssueMutations: () => issueMutations,
 }));
 
+const repoMeta = {
+  labels: [
+    { name: "30.bug", color: "d73a4a", description: null },
+    { name: "51.improvement", color: "a2eeef", description: null },
+    { name: "80.Priority: High", color: "b60205", description: null },
+    { name: "85.Priority: Medium", color: "fbca04", description: null },
+    { name: "89.Priority: Low", color: "0e8a16", description: null },
+  ],
+  assignees: [] as string[],
+  isLoading: false,
+};
+vi.mock("@/hooks/use-issue-repo-meta", () => ({ useIssueRepoMeta: () => repoMeta }));
+
+// 種別の判定結果は指摘ごとに変えず、1件目の呼び出しだけ`30.bug`を返す
+const suggestLabels = vi.fn();
+const suggest = { generate: suggestLabels, isGenerating: false, error: null, notConfigured: false };
+vi.mock("@/hooks/use-issue-suggest", () => ({ useIssueSuggest: () => suggest }));
+
 const REPOSITORY_FULL_NAME = "guchi-apps/issue-deck";
 
 const REPORT_BODY = `${CODE_REVIEW_REPORT_MARKER}
@@ -89,6 +107,8 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
     issueMutations.isSubmitting = false;
     issueMutations.error = null;
     createIssue.mockReset();
+    suggestLabels.mockReset();
+    suggestLabels.mockResolvedValue({ kind: "issue", title: "", labels: [] });
   });
 
   afterEach(cleanup);
@@ -151,7 +171,8 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
       expect.objectContaining({
         repositoryFullName: REPOSITORY_FULL_NAME,
         title: "未完了ジョブの判定が種別を見ていない",
-        labels: [],
+        // 種別が判定できなければ51.improvement、重大は優先度High
+        labels: ["51.improvement", "80.Priority: High"],
         assignee: null,
       }),
     );
@@ -184,5 +205,56 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
     await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(2));
     expect(onCreated).toHaveBeenCalledTimes(1);
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("担当ホストがあり予約をONにすると、作成したIssueをモデル付きで次の5時間枠へ積む", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onNightlyRunQueued = vi.fn();
+    createIssue
+      .mockResolvedValueOnce(makeIssue({ id: "1", number: 3001 }))
+      .mockResolvedValueOnce(makeIssue({ id: "2", number: 3002 }));
+
+    render(
+      <BulkCreateCodeReviewIssuesDialog
+        open
+        onOpenChange={vi.fn()}
+        findings={findings()}
+        repositoryFullName={REPOSITORY_FULL_NAME}
+        reviewNumber={370}
+        onCreated={vi.fn()}
+        hosts={[{ name: "subpc", repositories: [REPOSITORY_FULL_NAME] }]}
+        onNightlyRunQueued={onNightlyRunQueued}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /次の5時間枠/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Opus/ }));
+    fireEvent.click(screen.getByRole("button", { name: "2件を作成して予約" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(body).toEqual({
+      repository: REPOSITORY_FULL_NAME,
+      issue: 3001,
+      host: "subpc",
+      kind: "next-window",
+      model: "opus",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("担当ホストが無ければ予約の欄を出さない", () => {
+    render(
+      <BulkCreateCodeReviewIssuesDialog
+        open
+        onOpenChange={vi.fn()}
+        findings={findings()}
+        repositoryFullName={REPOSITORY_FULL_NAME}
+        reviewNumber={370}
+        onCreated={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("作成後に「次の5時間枠」へ予約する")).toBeNull();
   });
 });

@@ -492,3 +492,37 @@ export function buildCodeReviewFindingIssueDraft(params: {
     body: bodyLines.join("\n"),
   };
 }
+
+/** 指摘の重要度から付ける優先度ラベル（#3417）。ラベル体系の正は`.github/labels.json` */
+const CODE_REVIEW_PRIORITY_LABELS: Record<CodeReviewSeverity, string> = {
+  high: "80.Priority: High",
+  medium: "85.Priority: Medium",
+  low: "89.Priority: Low",
+};
+
+/** 種別ラベルを判定できなかったときの既定。指摘は「今あるものを良くする」性質が最も多い */
+export const CODE_REVIEW_DEFAULT_KIND_LABEL = "51.improvement";
+
+/**
+ * 「まとめてIssueにする」で作成するIssueに付けるラベルを決める（#3417）。
+ *
+ * 種別（`suggestedKindLabels`。AI判定の結果）＋重要度から決める優先度。**ラベル無しでは作らない**ため、
+ * 種別が判定できなければ`CODE_REVIEW_DEFAULT_KIND_LABEL`へ倒す。ラベルが1つも定義されていない
+ * リポジトリ（`repoLabelNames`が空）ではGitHub既定の自動作成に任せず、体系を配っていない
+ * リポジトリへ番号付きラベルを増やさないよう、何も付けない。
+ */
+export function resolveCodeReviewFindingLabels(params: {
+  severity: CodeReviewSeverity;
+  suggestedKindLabels: readonly string[];
+  repoLabelNames: readonly string[];
+}): string[] {
+  const { repoLabelNames } = params;
+  if (repoLabelNames.length === 0) return [];
+  const available = new Set(repoLabelNames);
+  const kinds = params.suggestedKindLabels.filter((name) => available.has(name));
+  if (kinds.length === 0 && available.has(CODE_REVIEW_DEFAULT_KIND_LABEL)) {
+    kinds.push(CODE_REVIEW_DEFAULT_KIND_LABEL);
+  }
+  const priority = CODE_REVIEW_PRIORITY_LABELS[params.severity];
+  return [...new Set([...kinds, ...(available.has(priority) ? [priority] : [])])];
+}
