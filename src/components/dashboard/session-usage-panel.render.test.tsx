@@ -310,13 +310,56 @@ describe("SessionUsagePanel", () => {
     // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
     expect(within(detail).getAllByText("#2504")).toHaveLength(1);
     expect(within(detail).getByText("2セッション")).toBeTruthy();
-    // 「実装」は種別ラベルと計画/実装/Actionサマリー（#2670）の両方に出るため件数だけ見る。
+    // 「実装」「計画レビュー」は閉じた行の種別ひと目表示（#3410）と、開いた行の種別別内訳
+    // （`IssueKindBreakdown`）の両方に出るため件数だけ見る。
     expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
-    expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
+    expect(within(detail).getAllByText("計画レビュー", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getByText("Claude", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("Codex", { exact: false })).toBeTruthy();
     expect(within(detail).getAllByText("100%")).toHaveLength(1);
     expect(within(detail).getByText("1%")).toBeTruthy();
+  });
+
+  it("Issue・PR別を開くと、セッション種別別と同じ粒度でモデル・トークン・金額の内訳を出す（#3410）", () => {
+    renderPanel(
+      response([
+        entry({
+          costUsd: 20,
+          planCostUsd: 2,
+          implementationCostUsd: 18,
+          researchCostUsd: 4,
+          codingCostUsd: 7,
+          verifyCostUsd: 3,
+          wrapupCostUsd: 4,
+          models: ["claude-opus-5"],
+        }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    const breakdown = within(detail).getByText("種別別").closest("div") as HTMLElement;
+    // セッション種別別（`Breakdown`）と同じ粒度でフェーズへ割る。
+    expect(within(breakdown).getByText("計画立案")).toBeTruthy();
+    expect(within(breakdown).getByText("調査")).toBeTruthy();
+    expect(within(breakdown).getByText("実装")).toBeTruthy();
+    expect(within(breakdown).getByText("検証（テスト・Lint・型）")).toBeTruthy();
+    expect(within(breakdown).getByText("仕上げ（コミット・PR・報告）")).toBeTruthy();
+    // モデルバッジとトークン量が各行に出る。
+    expect(within(breakdown).getAllByText("Opus 5").length).toBeGreaterThan(0);
+    expect(within(breakdown).getAllByText(/^\d+(\.\d+)?k$/).length).toBeGreaterThan(0);
+  });
+
+  it("閉じたIssue行にも、実行された種別のひと目表示を出す（#3410）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "older", issueNumber: 1, kind: "code-review", costUsd: 5, startedAt: "2026-08-29T01:00:00.000Z", endedAt: "2026-08-29T02:00:00.000Z" }),
+        entry({ sessionId: "newer", issueNumber: 2, kind: "plan-review", costUsd: 1 }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    // #1は閉じている（#2の方が新しい）。閉じたままでも種別名がスクリーンリーダー向けに読める。
+    expect(within(detail).getByText("実行された種別: コードレビュー", { exact: false })).toBeTruthy();
   });
 
   it("行をクリックすると開閉し、閉じている行は中のセッションを出さない（#2653）", () => {
@@ -333,7 +376,7 @@ describe("SessionUsagePanel", () => {
     const olderRange = `${formatDateTime("2026-08-29T01:00:00.000Z")} 〜 ${formatDateTime("2026-08-29T02:00:00.000Z")}`;
 
     // 一番新しい活動（#2）だけが既定で開いており、#1は閉じている。
-    expect(within(detail).getByText("計画レビュー", { exact: false })).toBeTruthy();
+    expect(within(detail).getAllByText("計画レビュー", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).queryByText(olderRange)).toBeNull();
 
     fireEvent.click(within(detail).getByRole("button", { name: /#1/ }));
@@ -381,9 +424,10 @@ describe("SessionUsagePanel", () => {
       response([entry({ sessionId: "multi-model", models: ["claude-opus-5", "claude-sonnet-5"] })]),
     );
 
+    // 種別別内訳（`IssueKindBreakdown`、#3410）にも同じモデルのチップが出るため件数だけ見る。
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    expect(within(detail).getByText("Opus 5")).toBeTruthy();
-    expect(within(detail).getByText("Sonnet 5")).toBeTruthy();
+    expect(within(detail).getAllByText("Opus 5").length).toBeGreaterThan(0);
+    expect(within(detail).getAllByText("Sonnet 5").length).toBeGreaterThan(0);
   });
 
   it("Plan modeの内訳があるセッションだけ、料金の下に計画/実装を分けて出す（#2646）", () => {
