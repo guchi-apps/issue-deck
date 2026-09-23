@@ -179,6 +179,7 @@ async function writeIssueRow(
     stateReason: toIssueStateReason(raw.state_reason),
     htmlUrl: raw.html_url,
     authorLogin: raw.user?.login ?? "unknown",
+    authorAssociation: raw.author_association ?? null,
     assigneeLogin: raw.assignee?.login ?? null,
     commentCount: raw.comments,
     milestoneTitle: raw.milestone?.title ?? null,

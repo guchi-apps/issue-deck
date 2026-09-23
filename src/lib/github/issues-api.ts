@@ -15,6 +15,9 @@ export type GithubApiIssue = {
   state_reason?: GithubApiIssueStateReason;
   html_url: string;
   user: { login: string } | null;
+  // 起票者がこのリポジトリに対してどんな関係か（OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/NONE等）。
+  // 手作業Issueの確認コマンド定期巡回（#3365）が、起票者を信頼してよいかの判定に使う
+  author_association?: string;
   assignee: { login: string } | null;
   labels: ({ id: number; name: string; color: string; description: string | null } | string)[];
   milestone: { title: string; open_issues: number; closed_issues: number } | null;

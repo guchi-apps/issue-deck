@@ -145,6 +145,21 @@ describe("/api/nightly-run", () => {
     expect(createEntry).not.toHaveBeenCalled();
   });
 
+  /**
+   * #3366: 積む前から`11.local`が付いていたIssueを断らずに積むと、201で受け付けた直後の巡回
+   * （`cancelManuallyStartedScheduledRuns`）が「積んだ後に手動着手された」と誤判定して
+   * 黙って`CANCELED`にしてしまう。積む口で先に断る
+   */
+  it("すでに`11.local`が付いているIssueは積ませない", async () => {
+    findFirstIssue.mockResolvedValue({ labels: [{ name: "11.local" }] });
+
+    const response = await POST(request(VALID_BODY));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "already_started" });
+    expect(createEntry).not.toHaveBeenCalled();
+  });
+
   it("そのリポジトリを実行できないホストへは積ませない", async () => {
     findUniqueHost.mockResolvedValue({
       name: "subpc",
