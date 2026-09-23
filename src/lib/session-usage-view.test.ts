@@ -353,6 +353,63 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byRepository[0].byAgent.claude.sessions).toBe(1);
     expect(summary.byKind[0].byAgent.codex.sessions).toBe(1);
   });
+
+  it("日別の金額をエージェント×モデルの重さ（tier）別に積む（#3396）", () => {
+    // 単価表（ai-model-pricing.ts）でclaude-opus-5はtier1、claude-sonnet-5はtier2
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "opus", models: ["claude-opus-5"], costUsd: 4 }),
+        entry({ sessionId: "sonnet", models: ["claude-sonnet-5"], costUsd: 6 }),
+        entry({ sessionId: "unknown", models: ["claude-unknown-model"], costUsd: 1 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    const tiers = summary.byDay[0].modelTiers.claude;
+    expect(tiers.costUsd).toEqual([0, 4, 6, 0]);
+    expect(tiers.unresolvedCostUsd).toBe(1);
+  });
+
+  it("GitHub Actionsのentryはモデルtierへ積まない（日別グラフは単色のまま表す）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [entry({ source: "github-actions", models: ["claude-opus-5"], costUsd: 5 })],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    const tiers = summary.byDay[0].modelTiers.claude;
+    expect(tiers.costUsd).toEqual([0, 0, 0, 0]);
+    expect(tiers.unresolvedCostUsd).toBe(0);
+  });
+
+  it("1セッションが複数モデルを使った場合、最も重い1つへ金額をまとめて計上する", () => {
+    // claude-haiku-4-5はtier3、claude-opus-5はtier1（こちらが重い）
+    const summary = buildSessionUsageSummary({
+      entries: [entry({ models: ["claude-haiku-4-5", "claude-opus-5"], costUsd: 9 })],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    expect(summary.byDay[0].modelTiers.claude.costUsd).toEqual([0, 9, 0, 0]);
+  });
+
+  it("日別で使われたモデルのラベルを重複除去して持つ", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "a", models: ["claude-opus-5"] }),
+        entry({ sessionId: "b", models: ["claude-opus-5", "claude-haiku-4-5"] }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    expect(summary.byDay[0].modelLabels).toEqual(["Opus 5", "Haiku 4.5"]);
+  });
 });
 
 describe("整形", () => {
@@ -675,10 +732,16 @@ describe("buildIssueQuotaPercents", () => {
 });
 
 describe("sessionUsageModelLabel", () => {
-  it("Claudeのモデルは世代・日付サフィックスを落として短縮表示する", () => {
-    expect(sessionUsageModelLabel("claude-opus-5")).toBe("Opus");
-    expect(sessionUsageModelLabel("claude-sonnet-4-5")).toBe("Sonnet");
-    expect(sessionUsageModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku");
+  it("Claudeのモデルは系統名とバージョン番号に短縮し、日付サフィックスは落とす（#3396）", () => {
+    expect(sessionUsageModelLabel("claude-opus-5")).toBe("Opus 5");
+    expect(sessionUsageModelLabel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(sessionUsageModelLabel("claude-sonnet-4-5")).toBe("Sonnet 4.5");
+    expect(sessionUsageModelLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+    expect(sessionUsageModelLabel("claude-fable-5-1")).toBe("Fable 5.1");
+  });
+
+  it("バージョン番号が取れないモデルは系統名だけ返す", () => {
+    expect(sessionUsageModelLabel("claude-mythos")).toBe("Mythos");
   });
 
   it("Codexなど対応表に無いモデルはそのまま出す", () => {
@@ -740,6 +803,11 @@ describe("fillUsageDays", () => {
             local: { sessions: 1, responses: 1, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 3 },
             "github-actions": { sessions: 0, responses: 0, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 },
           },
+          modelTiers: {
+            claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 3 },
+            codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
+          },
+          modelLabels: [],
         },
       ],
       new Date(Date.parse("2026-08-29T15:00:00.000Z")).toISOString(),
