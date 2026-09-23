@@ -553,9 +553,35 @@ describe("SessionUsagePanel", () => {
     // 全体は28ドル。最大の切れは7/28で25.0%、その他は3/28で10.7%
     expect(chart.getAttribute("aria-label")).toContain("repository-0 25.0%（$7.00）");
     expect(chart.getAttribute("aria-label")).toContain("その他 10.7%（$3.00）");
-    // 棒＋トークン帯や「すべて表示」の展開ボタンは持たない
-    expect(within(card).queryByRole("button")).toBeNull();
-    expect(within(card).getByText("7リポジトリ・上位5件＋その他")).toBeTruthy();
+    // 「上位5件」の説明文は出さない（#3423）。ボタンは一覧の開閉だけ
+    expect(within(card).getAllByRole("button")).toHaveLength(1);
+    expect(within(card).queryByText(/上位5件/)).toBeNull();
+  });
+
+  it("「N リポジトリ」を押すと全件の表が開き、もう一度押すと閉じる（#3423）", () => {
+    const entries = Array.from({ length: 7 }, (_unused, index) =>
+      entry({
+        sessionId: `repo-${index}`,
+        repository: `repository-${index}`,
+        costUsd: 7 - index,
+      }),
+    );
+    renderPanel(response(entries));
+
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    const toggle = within(card).getByRole("button", { name: /7リポジトリ/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(card).queryByRole("table")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const table = within(card).getByRole("table");
+    // 円グラフでは「その他」に入る6位・7位も、表では名前と割合が読める
+    expect(within(table).getByText("repository-6")).toBeTruthy();
+    expect(within(table).getAllByRole("row")).toHaveLength(8);
+
+    fireEvent.click(toggle);
+    expect(within(card).queryByRole("table")).toBeNull();
   });
 
   it("リポジトリ別の円グラフは、Claude・Codex・Actionsもトークンも区別しない（#3060）", () => {
