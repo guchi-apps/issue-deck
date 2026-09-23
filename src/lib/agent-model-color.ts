@@ -1,5 +1,5 @@
 import { resolveModelRate } from "@/lib/ai-model-pricing";
-import type { ClaudeModel } from "@/lib/app-settings";
+import { CLAUDE_ALIAS_MODEL_IDS, type ClaudeModel } from "@/lib/app-settings";
 import type { IssueImplementationAgent } from "@/lib/dispatch/issue-session";
 
 /**
@@ -35,17 +35,6 @@ export type ModelWeightTier = 0 | 1 | 2 | 3;
 export const AGENT_BASE_COLORS: Readonly<Record<IssueImplementationAgent, string>> = {
   claude: AGENT_MODEL_TIER_COLORS.claude[0],
   codex: AGENT_MODEL_TIER_COLORS.codex[1],
-};
-
-/**
- * 起動時に指定するエイリアス（`CLAUDE_MODEL_OPTIONS`）→ 段を引くためのモデルID。
- * エイリアスはCLIが最新版へ解決するので、ここでは単価表にある現行の世代を当てる。
- */
-const CLAUDE_ALIAS_MODEL_IDS: Readonly<Record<Exclude<ClaudeModel, "auto">, string>> = {
-  fable: "claude-fable-5-1",
-  opus: "claude-opus-5",
-  sonnet: "claude-sonnet-5",
-  haiku: "claude-haiku-4-5",
 };
 
 /**

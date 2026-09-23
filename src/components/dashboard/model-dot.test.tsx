@@ -13,9 +13,9 @@ describe("ModelDot", () => {
     expect(dot.style.backgroundColor).toBe("rgb(179, 38, 30)");
   });
 
-  it("起動時のエイリアスは短い名前で出す", () => {
+  it("起動時のエイリアスは短い名前にバージョンを添えて出す", () => {
     render(<ModelDot agent="claude" model="sonnet" />);
-    expect(screen.getByRole("img", { name: "Claude Sonnet" })).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Claude Sonnet 5" })).not.toBeNull();
   });
 
   it("モデルが分からなければ塗らず、エージェント色の中抜きにする", () => {

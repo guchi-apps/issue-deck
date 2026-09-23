@@ -67,7 +67,7 @@ describe("GET", () => {
       claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-sonnet-5",
-      appAiModelReasoning: "claude-opus-5",
+      appAiModelReasoning: "claude-opus-5-5",
     });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
@@ -75,7 +75,7 @@ describe("GET", () => {
       claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-sonnet-5",
-      appAiModelReasoning: "claude-opus-5",
+      appAiModelReasoning: "claude-opus-5-5",
       modelPickEngine: "app-ai",
     });
   });
@@ -89,7 +89,7 @@ describe("PATCH", () => {
         claudeModelAssist: "haiku",
         claudeLocalModel: "sonnet",
         codexModel: "gpt-5.6-sol",
-        appAiModel: "claude-opus-5",
+        appAiModel: "claude-opus-5-5",
         appAiModelReasoning: "claude-sonnet-5",
       }),
     );
@@ -102,7 +102,7 @@ describe("PATCH", () => {
           claudeModelAssist: "haiku",
           claudeLocalModel: "sonnet",
           codexModel: "gpt-5.6-sol",
-          appAiModel: "claude-opus-5",
+          appAiModel: "claude-opus-5-5",
           appAiModelReasoning: "claude-sonnet-5",
         },
       }),
