@@ -48,6 +48,9 @@ export const GITHUB_API_FEATURES = [
   { key: "workflow_run_progress", label: "実行の内訳の取得" },
   { key: "pull_request_detail", label: "PR詳細（本文・コメント）の取得" },
   { key: "pull_request_files", label: "PR詳細の変更ファイル一覧の取得" },
+  // 変更ファイル一覧を開いたときと同じエンドポイントを再度叩くが、「差分を表示」押下という
+  // 別の操作から呼ばれるため、消費の内訳を分けて見られるようキーも分ける（#3383）。
+  { key: "pull_request_file_diff", label: "PR詳細の変更ファイル差分の取得" },
   { key: "pull_request_changes", label: "マージ確認の変更点の取得" },
   // マージ確認のレビュー指摘（#2849）。**PR詳細の「修正Issueを起案」「修正を依頼」を押したときだけ**
   // 消費する（対象PRの本体とコメントで2リクエスト。#3333でIssue詳細からは取らなくなった）

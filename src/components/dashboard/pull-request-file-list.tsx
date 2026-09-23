@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
+
 import { ChevronRight, ExternalLink } from "lucide-react";
 
+import { PullRequestFileDiffView } from "@/components/dashboard/pull-request-file-diff-view";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePersistedState } from "@/hooks/use-persisted-state";
+import { usePullRequestFileDiff } from "@/hooks/use-pull-request-file-diff";
 import { usePullRequestFiles } from "@/hooks/use-pull-request-files";
 import {
   PULL_REQUEST_FILE_CHANGE_LABEL,
@@ -58,39 +62,99 @@ function ChangeBar({ additions, deletions }: { additions: number; deletions: num
   );
 }
 
-function FileRow({ file }: { file: PullRequestFile }) {
+/**
+ * 変更ファイル1行（#3383）。
+ *
+ * 行頭のシェブロンを押すと、その行の下に差分（`patch`）を展開する。**取得は展開した
+ * タイミングだけ**（`usePullRequestFileDiff`の`enabled`にトグル状態を渡す）で、一度取れたら
+ * 閉じても保持する。GitHubへの外部リンクとは役割が別で、その場で読みたいときは展開、
+ * GitHub側の機能（行コメント等）を使いたいときは外部リンク、という使い分けにしている。
+ */
+function FileRow({ file, pullRequestId }: { file: PullRequestFile; pullRequestId: string }) {
   const { directory, name } = splitPullRequestFilePath(file.path);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const { patch, isLoading, error, retry } = usePullRequestFileDiff(
+    pullRequestId,
+    file.path,
+    diffOpen,
+  );
+
   return (
-    <li className="flex items-center gap-2 border-t px-4 py-1.5 pl-8 hover:bg-accent/50">
-      <span
-        className={cn(
-          "w-9 shrink-0 rounded py-0.5 text-center text-[10px] font-semibold",
-          CHANGE_CLASS[file.change],
-        )}
-      >
-        {PULL_REQUEST_FILE_CHANGE_LABEL[file.change]}
-      </span>
-      <span
-        className="flex min-w-0 flex-1 font-mono text-[11px]"
-        title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
-      >
-        <span className="min-w-0 truncate text-muted-foreground">{directory}</span>
-        <span className="shrink-0">{name}</span>
-      </span>
-      <span className="shrink-0 font-mono text-[11px] tabular-nums">
-        <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{" "}
-        <span className="text-destructive">-{file.deletions}</span>
-      </span>
-      <ChangeBar additions={file.additions} deletions={file.deletions} />
-      <a
-        href={file.blobUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-        aria-label={`${file.path} をGitHubで開く`}
-      >
-        <ExternalLink className="size-3" />
-      </a>
+    <li className="border-t">
+      <div className="flex items-center gap-2 px-4 py-1.5 pl-8 hover:bg-accent/50">
+        <button
+          type="button"
+          onClick={() => setDiffOpen((prev) => !prev)}
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          aria-expanded={diffOpen}
+          aria-label={`${file.path} の差分を${diffOpen ? "閉じる" : "表示"}`}
+        >
+          <ChevronRight
+            aria-hidden
+            className={cn("size-3 transition-transform", diffOpen && "rotate-90")}
+          />
+        </button>
+        <span
+          className={cn(
+            "w-9 shrink-0 rounded py-0.5 text-center text-[10px] font-semibold",
+            CHANGE_CLASS[file.change],
+          )}
+        >
+          {PULL_REQUEST_FILE_CHANGE_LABEL[file.change]}
+        </span>
+        <span
+          className="flex min-w-0 flex-1 font-mono text-[11px]"
+          title={file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}
+        >
+          <span className="min-w-0 truncate text-muted-foreground">{directory}</span>
+          <span className="shrink-0">{name}</span>
+        </span>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">
+          <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{" "}
+          <span className="text-destructive">-{file.deletions}</span>
+        </span>
+        <ChangeBar additions={file.additions} deletions={file.deletions} />
+        <a
+          href={file.blobUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          aria-label={`${file.path} をGitHubで開く`}
+        >
+          <ExternalLink className="size-3" />
+        </a>
+      </div>
+      {diffOpen &&
+        (error ? (
+          <div className="flex flex-col items-start gap-2 border-t px-4 py-3 pl-8">
+            <p className="text-xs text-destructive">{error}</p>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={retry}>
+              再試行
+            </Button>
+          </div>
+        ) : patch === undefined ? (
+          isLoading ? (
+            <div className="flex flex-col gap-2 border-t px-4 py-3 pl-8">
+              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-3 w-3/5" />
+            </div>
+          ) : null
+        ) : patch === null ? (
+          <p className="border-t px-4 py-3 pl-8 text-xs text-muted-foreground">
+            差分を表示できません。
+            <a
+              href={file.blobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-1 underline underline-offset-2 hover:text-foreground"
+            >
+              GitHubで確認してください
+            </a>
+            。
+          </p>
+        ) : (
+          <PullRequestFileDiffView patch={patch} />
+        ))}
     </li>
   );
 }
@@ -176,7 +240,7 @@ export function PullRequestFileList({
           <>
             <ul>
               {files.map((file) => (
-                <FileRow key={file.path} file={file} />
+                <FileRow key={file.path} file={file} pullRequestId={pullRequestId} />
               ))}
             </ul>
             {truncated && (

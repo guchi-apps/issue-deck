@@ -202,9 +202,14 @@ export async function fetchPullRequestReviewComments(
  * `GET /repos/{owner}/{repo}/pulls/{number}/files` のレスポンスのうち、変更ファイル一覧で使う
  * フィールド（#1987）。
  *
- * `patch`（差分そのもの）は受け取らない——画面では行単位の差分を出さず、内容を見たい場合は
- * GitHubへ飛ばす方針のため。1ファイルあたり数十KBになりうるので、応答をそのまま画面へ
- * 渡さないという意味でもある。
+ * `patch`（差分そのもの）は`GithubApiPullRequestFile`の型には含めているが、一覧表示
+ * （`toPullRequestFiles`）では読まない。1ファイルあたり数十KBになりうるため、一覧を開いた
+ * だけで全ファイルぶんを画面へ渡すことはせず、個別の「差分を表示」を押したときだけ
+ * `findPullRequestFilePatch`（`fetchPullRequestFiles`と同じレスポンスから該当ファイルの
+ * patchだけ抽出する。`lib/pull-request-files.ts`）経由で使う（#3383）。GitHubには1ファイル
+ * 単体のdiffを返す専用APIが無いため、取得自体はこのエンドポイントを再度叩く形になるが、
+ * URLが同じなのでETag（`githubFetchJsonWithEtag`）が効き、一覧取得後に差分を連続で開いても
+ * GitHub API消費は増えない。
  */
 export type GithubApiPullRequestFile = {
   filename: string;
@@ -216,6 +221,11 @@ export type GithubApiPullRequestFile = {
   blob_url: string;
   /** `renamed`のときのみ、変更前のパス */
   previous_filename?: string;
+  /**
+   * unified diff形式の差分本文（#3383）。バイナリファイルや差分が大きすぎる場合はGitHub側が
+   * 省略し、フィールド自体が返らない。
+   */
+  patch?: string;
 };
 
 /**
