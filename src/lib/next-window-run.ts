@@ -315,6 +315,8 @@ export type NextWindowRunSettings = {
   /** 起動しない残り枠の下限（%・0＝制限しない。#3100） */
   fiveHourFloorPercent: number;
   weeklyFloorPercent: number;
+  /** 一括予約の使用モデルの初期値（`<agent>:<model>`・空は設定に従う。#3438） */
+  bulkModel?: string;
 };
 
 /** 画面へ渡す枠の状況（`Date`はISO文字列にする） */

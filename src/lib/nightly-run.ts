@@ -451,6 +451,8 @@ export function resolveBulkReserveRejection(input: {
   isActive: boolean;
   /** そのリポジトリを実行できるホストがあるか */
   hasHost: boolean;
+  /** 使うエージェント（既定はclaude）。Codexのとき、対応ホストが無い理由を出し分ける */
+  agent?: "claude" | "codex";
 }): string | null {
   if (input.state === "closed") return "closeされています";
   if (input.alreadyQueued) return "予約済みです";
@@ -463,16 +465,28 @@ export function resolveBulkReserveRejection(input: {
   }
   const labelRejection = resolveNightlyRunLabelRejection(input.labels, "NEXT_WINDOW");
   if (labelRejection) return labelRejection;
-  if (!input.hasHost) return "このリポジトリを実行できるサブPCが登録されていません";
+  if (!input.hasHost) {
+    return input.agent === "codex"
+      ? "このリポジトリをCodexで実行できるサブPCがありません"
+      : "このリポジトリを実行できるサブPCが登録されていません";
+  }
   return null;
 }
 
 /** 起動先のホスト。「実装を開始」ダイアログの`nightlyHost`と同じく、そのリポジトリを持つ先頭のホスト */
 export function pickBulkReserveHost(
-  hosts: readonly { name: string; repositories: readonly string[] }[],
+  hosts: readonly { name: string; repositories: readonly string[]; codexCapable?: boolean | null }[],
   repositoryFullName: string,
+  agent: "claude" | "codex" = "claude",
 ): string | null {
-  return hosts.find((host) => host.repositories.includes(repositoryFullName))?.name ?? null;
+  // Codexは`codex`コマンドのあるホストだけ（`POST /api/nightly-run`の`resolveDispatchAgentRejection`と同じ条件）
+  return (
+    hosts.find(
+      (host) =>
+        host.repositories.includes(repositoryFullName) &&
+        (agent !== "codex" || host.codexCapable === true),
+    )?.name ?? null
+  );
 }
 
 export type BulkReserveTarget = {

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 
-import type { ClaudeLocalModel } from "@/lib/app-settings";
+import type { BulkReserveModelChoice } from "@/lib/app-settings";
 import {
   reserveIssuesSequentially,
   type BulkReserveTarget,
@@ -11,7 +11,7 @@ import {
 /** 「次の5時間枠」へ1件積む。積む口は「実装を開始」ダイアログと同じ`POST /api/nightly-run` */
 async function reserveOnNextWindow(
   target: BulkReserveTarget,
-  model: ClaudeLocalModel | null,
+  choice: BulkReserveModelChoice | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const res = await fetch("/api/nightly-run", {
     method: "POST",
@@ -22,7 +22,7 @@ async function reserveOnNextWindow(
       host: target.host,
       kind: "next-window",
       // 未選択（設定に従う）のときは送らない。積む口が「未指定＝設定の既定」として扱う
-      ...(model ? { model } : {}),
+      ...(choice ? { agent: choice.agent, model: choice.model } : {}),
     }),
   });
   if (res.ok) return { ok: true };
@@ -44,14 +44,16 @@ export function useBulkReserve({ onQueued }: { onQueued?: () => void } = {}) {
   const [failures, setFailures] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<BulkReserveSummary | null>(null);
-  // この回に予約する全件へ適用するClaudeのモデル。nullは「設定に従う」
-  const [model, setModel] = useState<ClaudeLocalModel | null>(null);
+  // この回に予約する全件へ適用するエージェントとモデル。nullは「設定に従う」。
+  // 初期値は設定の「一括予約の初期モデル」で、`start`が渡された値で選び直す（#3438）
+  const [model, setModel] = useState<BulkReserveModelChoice | null>(null);
 
   const isSubmitting = progress !== null;
 
-  const start = useCallback(() => {
+  const start = useCallback((initialModel: BulkReserveModelChoice | null = null) => {
     setActive(true);
     setSummary(null);
+    setModel(initialModel);
   }, []);
 
   const exit = useCallback(() => {

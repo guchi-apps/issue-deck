@@ -9,7 +9,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -17,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { ScheduledRunSettingsPatch } from "@/hooks/use-nightly-run";
 import { useNow } from "@/hooks/use-now";
 import {
+  BULK_RESERVE_MODEL_GROUPS,
   NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_OPTIONS,
   NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS,
@@ -202,6 +205,12 @@ export function NightlyRunPanel({
                   isSubmitting={isSubmitting}
                   onUpdateSettings={onUpdateSettings}
                 />
+                <BulkModelSettings
+                  settings={state.nextWindow.settings}
+                  compact={compact}
+                  isSubmitting={isSubmitting}
+                  onUpdateSettings={onUpdateSettings}
+                />
               </div>
             }
             hint={
@@ -355,6 +364,62 @@ function QuotaMeterRow({
     </div>
   );
 }
+
+/**
+ * 一覧の「まとめて予約」を開いたとき最初に選ばれているモデル（#3438）。Claude CodeとCodexの両方から
+ * 選べ、「設定に従う」なら`claudeLocalModel`・`codexModel`の設定へ委ねる。切り替えた時点で保存する。
+ */
+function BulkModelSettings({
+  settings,
+  compact,
+  isSubmitting,
+  onUpdateSettings,
+}: {
+  settings: NextWindowRunSettings;
+  compact: boolean;
+  isSubmitting: boolean;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
+}) {
+  const value = settings.bulkModel ? settings.bulkModel : FOLLOW_SETTINGS;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border p-3">
+      <span className="text-[13px] font-semibold">一括予約の初期モデル</span>
+      <Select
+        value={value}
+        disabled={isSubmitting}
+        onValueChange={(next) =>
+          onUpdateSettings({ nextWindow: { bulkModel: next === FOLLOW_SETTINGS ? "" : next } })
+        }
+      >
+        <SelectTrigger size="sm" className="w-56" aria-label="一括予約の初期モデル">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={FOLLOW_SETTINGS}>設定に従う</SelectItem>
+          {BULK_RESERVE_MODEL_GROUPS.map((group) => (
+            <SelectGroup key={group.label}>
+              <SelectLabel>{group.label}</SelectLabel>
+              {group.options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
+      {!compact && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Issue一覧の「まとめて予約」を開いたときに最初から選ばれるモデルです。予約のたびにバーで変えられます。
+          Codexを選ぶと、Codexを使えるサブPCのあるリポジトリだけ選べます。
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Radixの`SelectItem`は空文字を値にできないため、「設定に従う」だけこの語で表す */
+const FOLLOW_SETTINGS = "follow-settings";
 
 /**
  * 起動しない残り枠の下限（#3100）。**次枠実行の設定の一部**で、切り替えた時点で保存する。

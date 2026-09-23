@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BulkReserveDock } from "@/components/dashboard/bulk-reserve-bar";
@@ -8,7 +8,7 @@ import { BulkReserveDock } from "@/components/dashboard/bulk-reserve-bar";
 
 afterEach(cleanup);
 
-function renderDock(onModelChange: (model: string | null) => void) {
+function renderDock(onModelChange: (model: unknown) => void) {
   render(
     <BulkReserveDock
       active
@@ -28,11 +28,8 @@ function renderDock(onModelChange: (model: string | null) => void) {
 }
 
 describe("BulkReserveDock のモデル選択", () => {
-  it("既定は「設定に従う」で、3つのモデルを選べる", () => {
-    const onModelChange = vi.fn();
-    renderDock(onModelChange);
-    expect(screen.getByRole("radio", { name: "設定に従う" }).getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(screen.getByRole("radio", { name: /Opus/ }));
-    expect(onModelChange).toHaveBeenCalledWith("opus");
+  it("プルダウンで、未選択のときは「設定に従う」が出る", () => {
+    renderDock(vi.fn());
+    expect(screen.getByRole("combobox", { name: "使用モデル" }).textContent).toContain("設定に従う");
   });
 });

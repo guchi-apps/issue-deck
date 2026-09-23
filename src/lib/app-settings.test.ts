@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  describeBulkReserveModel,
+  encodeBulkReserveModel,
+  parseBulkReserveModelChoice,
   appAiProvider,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
@@ -211,5 +214,27 @@ describe("resolveCodexInitialModel", () => {
     expect(resolveCodexInitialModel("auto")).toBe("gpt-5.6-terra");
     expect(resolveCodexInitialModel("gpt-5.5")).toBe("gpt-5.6-terra");
     expect(resolveCodexInitialModel("gpt-5.4")).toBe("gpt-5.6-terra");
+  });
+});
+
+describe("一括予約のモデル選択（#3438）", () => {
+  it("<agent>:<model>を往復でき、空文字は設定に従う", () => {
+    expect(parseBulkReserveModelChoice("")).toBeNull();
+    expect(parseBulkReserveModelChoice("claude:opus")).toEqual({ agent: "claude", model: "opus" });
+    const codex = parseBulkReserveModelChoice("codex:gpt-6-sol");
+    expect(codex).toEqual({ agent: "codex", model: "gpt-6-sol" });
+    expect(encodeBulkReserveModel(codex ?? null)).toBe("codex:gpt-6-sol");
+    expect(encodeBulkReserveModel(null)).toBe("");
+  });
+
+  it("候補にない値・agentとモデルの取り違えは不正として扱う", () => {
+    for (const value of ["opus", "claude:auto", "codex:opus", "codex:auto", "gemini:x", undefined, 1]) {
+      expect(parseBulkReserveModelChoice(value)).toBeUndefined();
+    }
+  });
+
+  it("表示名にエージェントを添える", () => {
+    expect(describeBulkReserveModel("")).toBe("設定に従う");
+    expect(describeBulkReserveModel("codex:gpt-6-luna")).toBe("Codex ・ GPT-6 Luna");
   });
 });
