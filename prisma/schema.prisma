@@ -516,6 +516,8 @@ model AppSetting {
   // この値を下回っている間は起動を見送る**（日々の作業用に取っておく量。判定は`next-window-run.ts`）
   nextWindowRunFiveHourFloorPercent Int @default(0)
   nextWindowRunWeeklyFloorPercent   Int @default(0)
+  // 一括予約（#3438）の使用モデルの初期値。`<agent>:<model>`（例`codex:gpt-6-sol`）で、空は「設定に従う」
+  nextWindowRunBulkModel String @default("")
 
   // 5時間枠を開けておく（#3032）。**指定した時間帯（日本時間の時）のあいだ、枠が止まっていれば**
   // pollerの巡回ついでに最小の推論リクエストを1本送って枠を開ける。枠は最初のリクエストで始まるため、

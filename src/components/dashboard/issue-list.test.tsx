@@ -1383,8 +1383,19 @@ describe("IssueListの一括予約（#3284）", () => {
         json: async () => (outcome.message ? { message: outcome.message } : {}),
       } as Response;
     });
-    vi.stubGlobal("fetch", fetchMock);
+    // 選択モードに入るときの初期モデルの読み込み（#3438）は予約の呼び出しに数えない
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) =>
+      url === "/api/nightly-run/settings"
+        ? ({ ok: true, json: async () => ({ nextWindow: { bulkModel: "" } }) } as Response)
+        : fetchMock(url, init),
+    );
     return fetchMock;
+  }
+
+  async function startBulk() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    });
   }
 
   afterEach(() => {
@@ -1415,12 +1426,12 @@ describe("IssueListの一括予約（#3284）", () => {
     expect(screen.getByRole("button", { name: "まとめて予約" })).toBeTruthy();
   });
 
-  it("選択モードでは選べない行に理由を出し、行を押しても詳細は開かない", () => {
+  it("選択モードでは選べない行に理由を出し、行を押しても詳細は開かない", async () => {
     useHost();
     const onSelectIssue = vi.fn();
     renderList({ issues: bulkIssues, view: "not-started", onSelectIssue, onNightlyRunQueued: vi.fn() });
 
-    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    await startBulk();
 
     expect(rowOf(3).textContent).toContain("デザインを提示");
     expect(rowOf(4).textContent).toContain("11.local");
@@ -1440,7 +1451,7 @@ describe("IssueListの一括予約（#3284）", () => {
     const fetchMock = stubFetch(() => ({ ok: true }));
     renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued });
 
-    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    await startBulk();
     fireEvent.click(screen.getByRole("button", { name: "全選択" }));
     expect(screen.getByText("2件を選択中")).toBeTruthy();
 
@@ -1469,7 +1480,7 @@ describe("IssueListの一括予約（#3284）", () => {
     );
     renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued: vi.fn() });
 
-    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    await startBulk();
     fireEvent.click(screen.getByRole("button", { name: "全選択" }));
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "次の5時間枠に2件を予約" }));
@@ -1482,10 +1493,10 @@ describe("IssueListの一括予約（#3284）", () => {
     expect(screen.getByRole("button", { name: "次の5時間枠に1件を予約" })).toBeTruthy();
   });
 
-  it("予約済みの行と、実行できるサブPCが無いリポジトリの行は選べない", () => {
+  it("予約済みの行と、実行できるサブPCが無いリポジトリの行は選べない", async () => {
     // ホスト無し
     renderList({ issues: bulkIssues, view: "not-started", onNightlyRunQueued: vi.fn() });
-    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    await startBulk();
     expect(rowOf(1).textContent).toContain("サブPCが登録されていません");
     cleanup();
 
@@ -1508,7 +1519,7 @@ describe("IssueListの一括予約（#3284）", () => {
         ],
       ]) as never,
     });
-    fireEvent.click(screen.getByRole("button", { name: "まとめて予約" }));
+    await startBulk();
     expect(rowOf(2).textContent).toContain("予約済みです");
   });
 });

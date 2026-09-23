@@ -420,3 +420,67 @@ export function parseModelPickEngine(value: unknown): ModelPickEngine | null {
     ? (value as ModelPickEngine)
     : null;
 }
+
+/**
+ * 予約実行の一括予約（#3438）で使うモデルの選択。**エージェントとモデルの組**を1つの文字列
+ * `<agent>:<model>`（例: `claude:sonnet`・`codex:gpt-6-sol`）で持つ。空文字は「設定に従う」
+ * （`claudeLocalModel`・`codexModel`の設定値へ委ねる。`POST /api/nightly-run`が`model`を省略した扱い）。
+ *
+ * `AppSetting.nextWindowRunBulkModel`の値と、一括予約バーの選択値で共通。
+ */
+export const BULK_RESERVE_MODEL_DEFAULT = "";
+
+export type BulkReserveModelChoice =
+  | { agent: "claude"; model: ClaudeLocalModel }
+  | { agent: "codex"; model: CodexLocalModel };
+
+export function encodeBulkReserveModel(choice: BulkReserveModelChoice | null): string {
+  return choice ? `${choice.agent}:${choice.model}` : BULK_RESERVE_MODEL_DEFAULT;
+}
+
+/** 不正な値は`undefined`（保存APIは400で断り、読み出しは「設定に従う」へ落とす） */
+export function parseBulkReserveModelChoice(value: unknown): BulkReserveModelChoice | null | undefined {
+  if (value === BULK_RESERVE_MODEL_DEFAULT) return null;
+  if (typeof value !== "string") return undefined;
+  const [agent, model] = value.split(":");
+  if (agent === "claude") {
+    const parsed = parseClaudeLocalModel(model);
+    return parsed ? { agent, model: parsed } : undefined;
+  }
+  if (agent === "codex") {
+    const parsed = parseCodexLocalModel(model);
+    return parsed ? { agent, model: parsed } : undefined;
+  }
+  return undefined;
+}
+
+/** プルダウンのグループ。「設定に従う」は`BULK_RESERVE_MODEL_DEFAULT`の空文字 */
+export const BULK_RESERVE_MODEL_GROUPS: readonly {
+  label: string;
+  options: readonly { value: string; label: string }[];
+}[] = [
+  {
+    label: "Claude Code",
+    options: CLAUDE_LOCAL_MODEL_VALUES.map((model) => ({
+      value: `claude:${model}`,
+      label: describeClaudeModel(model),
+    })),
+  },
+  {
+    label: "Codex（ChatGPT）",
+    options: CODEX_LOCAL_MODEL_VALUES.map((model) => ({
+      value: `codex:${model}`,
+      label: describeCodexModel(model),
+    })),
+  },
+];
+
+/** 選択値の表示名（保存値が不正・空なら「設定に従う」） */
+export function describeBulkReserveModel(value: string): string {
+  const choice = parseBulkReserveModelChoice(value);
+  if (!choice) return "設定に従う";
+  const group = choice.agent === "codex" ? "Codex" : "Claude Code";
+  const name =
+    choice.agent === "codex" ? describeCodexModel(choice.model) : describeClaudeModel(choice.model);
+  return `${group} ・ ${name}`;
+}

@@ -29,6 +29,7 @@ import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { Checkbox } from "@/components/ui/checkbox";
+import { parseBulkReserveModelChoice } from "@/lib/app-settings";
 import { useBulkReserve } from "@/hooks/use-bulk-reserve";
 import { NightlyRunChip } from "@/components/dashboard/nightly-run-marks";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
@@ -939,6 +940,22 @@ export function IssueList({
   const bulk = useBulkReserve({ onQueued: onNightlyRunQueued });
   const bulkAvailable = onNightlyRunQueued !== undefined && view === "not-started";
   const bulkActive = bulkAvailable && bulk.active;
+  // 選んだモデルのエージェント。Codexなら、Codexを使えるサブPCのあるリポジトリだけ選べる（#3438）
+  const bulkAgent = bulk.model?.agent ?? "claude";
+  /** 「一括予約の初期モデル」設定を読んでから選択モードへ入る（設定を変えた直後でも古い値にならない） */
+  async function startBulk() {
+    let initial = null;
+    try {
+      const res = await fetch("/api/nightly-run/settings", { cache: "no-store" });
+      if (res.ok) {
+        const json = (await res.json()) as { nextWindow?: { bulkModel?: string } };
+        initial = parseBulkReserveModelChoice(json.nextWindow?.bulkModel ?? "") ?? null;
+      }
+    } catch {
+      // 読めなければ「設定に従う」から始める
+    }
+    bulk.start(initial);
+  }
   /** その行を一括予約へ選べない理由。選べるなら`null`（積める判定は「実装を開始」と同じ関数を通す） */
   function bulkRejectionFor(issue: Issue): string | null {
     return resolveBulkReserveRejection({
@@ -949,7 +966,8 @@ export function IssueList({
         queueStateByIssueId.has(issue.id) ||
         Boolean(runningByIssueId[issue.id]?.isRunning) ||
         (checkUserRunningIssueIds?.has(issue.id) ?? false),
-      hasHost: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName) !== null,
+      hasHost: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName, bulkAgent) !== null,
+      agent: bulkAgent,
     });
   }
   const bulkSelectableIssues = bulkActive
@@ -962,7 +980,7 @@ export function IssueList({
           issueId: issue.id,
           repositoryFullName: issue.repositoryFullName,
           number: issue.number,
-          host: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName) ?? "",
+          host: pickBulkReserveHost(dispatch.hosts, issue.repositoryFullName, bulkAgent) ?? "",
         }))
     : [];
   const bulkHostNames = [...new Set(bulkSelectedTargets.map((target) => target.host))];
@@ -1423,7 +1441,7 @@ export function IssueList({
         <BulkReserveEntryBar
           active={bulkActive}
           disabled={bulk.isSubmitting}
-          onStart={bulk.start}
+          onStart={startBulk}
           onExit={bulk.exit}
         />
       )}
