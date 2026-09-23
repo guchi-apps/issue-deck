@@ -1628,6 +1628,8 @@ export function IssueList({
           hostNames={bulkHostNames}
           progress={bulk.progress}
           summary={bulk.summary}
+          model={bulk.model}
+          onModelChange={bulk.setModel}
           onSelectAll={() => bulk.replaceSelection(bulkSelectableIssues.map((issue) => issue.id))}
           onClear={() => bulk.replaceSelection([])}
           onSubmit={() => void bulk.submit(bulkSelectedTargets)}
