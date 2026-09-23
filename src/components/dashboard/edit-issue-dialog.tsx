@@ -57,8 +57,14 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
     setError(null);
   }, [open, issue, setError]);
 
+  /**
+   * 本文がまだ届いていない（一覧で外されたclosedのIssue。#3390）。このまま保存すると空の本文で
+   * 上書きしてしまうので、届くまで本文の欄と保存を止める（届けば`issue`が差し替わる）
+   */
+  const bodyPending = Boolean(issue?.bodyOmitted);
+
   async function handleSubmit() {
-    if (!issue || !title.trim()) return;
+    if (!issue || !title.trim() || bodyPending) return;
     const updated = await updateIssue({
       repositoryFullName: issue.repositoryFullName,
       number: issue.number,
@@ -124,22 +130,32 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-issue-body">本文</Label>
-            <MentionTextarea
-              id="edit-issue-body"
-              value={body}
-              onChange={setBody}
-              issueSuggestions={issueSuggestions}
-              onUploadingChange={setIsImageUploading}
-              repositoryFullName={issue.repositoryFullName}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-              className="min-h-32"
-            />
-            <BodyCleanupButton value={body} onCleaned={setBody} />
+            {bodyPending ? (
+              <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                {issue.bodyLoadFailed
+                  ? "本文を読み込めませんでした。閉じて開き直してください。"
+                  : "本文を読み込んでいます…"}
+              </p>
+            ) : (
+              <>
+                <MentionTextarea
+                  id="edit-issue-body"
+                  value={body}
+                  onChange={setBody}
+                  issueSuggestions={issueSuggestions}
+                  onUploadingChange={setIsImageUploading}
+                  repositoryFullName={issue.repositoryFullName}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                  className="min-h-32"
+                />
+                <BodyCleanupButton value={body} onCleaned={setBody} />
+              </>
+            )}
           </div>
 
           <ApiErrorMessage message={error} />
@@ -151,7 +167,9 @@ export function EditIssueDialog({ open, onOpenChange, issue, issues, onUpdated }
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || isSuggesting || !title.trim() || isImageUploading}
+            disabled={
+              isSubmitting || isSuggesting || !title.trim() || isImageUploading || bodyPending
+            }
           >
             {isSubmitting ? "保存中..." : "保存"}
           </Button>

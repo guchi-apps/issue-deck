@@ -1,3 +1,4 @@
+import { modelWeightTier, pickPrimaryModel } from "@/lib/agent-model-color";
 import { startOfJstDayMs, toJstParts } from "@/lib/format-date-time";
 
 /**
@@ -93,7 +94,27 @@ export type UsageTotals = {
 
 export type UsageByAgent = Record<SessionUsageEntry["agent"], UsageTotals>;
 export type UsageBySource = Record<"local" | "github-actions", UsageTotals>;
-export type UsageDay = UsageTotals & { date: string; byAgent: UsageByAgent; bySource: UsageBySource };
+
+/**
+ * エージェント1つぶんの、モデルの重さ（tier）別の金額（#3396）。`agent-model-color.ts`の
+ * `ModelWeightTier`（0=最重〜3=軽）と同じ並び。**GitHub Actionsのentryはここに積まない**——
+ * 日別グラフはActionsを従来どおり単色（`bySource`由来）で表すため。段が決まらない
+ * （単価表に無いモデル・`auto`のみ）ぶんは`unresolvedCostUsd`へ。
+ */
+export type UsageModelTierTotals = {
+  costUsd: readonly [number, number, number, number];
+  unresolvedCostUsd: number;
+};
+export type UsageModelTiers = Record<SessionUsageEntry["agent"], UsageModelTierTotals>;
+
+export type UsageDay = UsageTotals & {
+  date: string;
+  byAgent: UsageByAgent;
+  bySource: UsageBySource;
+  modelTiers: UsageModelTiers;
+  /** その日に使われたモデルの表示ラベル（`sessionUsageModelLabel`、重複除去・出現順） */
+  modelLabels: string[];
+};
 export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent; bySource: UsageBySource };
 
 export type UsageIssue = UsageTotals & {
@@ -276,7 +297,7 @@ export function compareUsageKinds(
 
 /**
  * モデルIDの短縮表示（#2646）。前方一致で拾う（`scripts/lib/session-usage.sh`の`price_for`と
- * 同じ考え方）。日付・世代のサフィックスは画面では要らないので落とす。
+ * 同じ考え方）。
  */
 const MODEL_LABEL_PATTERNS: [pattern: string, label: string][] = [
   ["claude-opus", "Opus"],
@@ -285,6 +306,18 @@ const MODEL_LABEL_PATTERNS: [pattern: string, label: string][] = [
   ["claude-fable", "Fable"],
   ["claude-mythos", "Mythos"],
 ];
+
+/**
+ * `prefix`より後ろのハイフン区切り数字から、バージョン番号を組み立てる（#3396）。
+ * 例: "claude-opus-5-5"のprefix"claude-opus"以降"-5-5" → "5.5"。末尾の8桁日付
+ * サフィックス（`scripts/lib/session-usage.sh`が付けた実行日、"-20251001"等）は
+ * バージョンではないため先に落とす。数字が1つも無ければnull。
+ */
+function extractModelVersion(model: string, prefix: string): string | null {
+  const rest = model.slice(prefix.length).replace(/-\d{8}$/, "");
+  const parts = rest.split("-").filter((part) => /^\d+$/.test(part));
+  return parts.length > 0 ? parts.join(".") : null;
+}
 
 const CODEX_MODEL_LABELS: Readonly<Record<string, string>> = {
   "gpt-6-astra": "GPT-6 Astra",
@@ -297,7 +330,10 @@ const CODEX_MODEL_LABELS: Readonly<Record<string, string>> = {
 
 export function sessionUsageModelLabel(model: string): string {
   for (const [pattern, label] of MODEL_LABEL_PATTERNS) {
-    if (model.startsWith(pattern)) return label;
+    if (model.startsWith(pattern)) {
+      const version = extractModelVersion(model, pattern);
+      return version ? `${label} ${version}` : label;
+    }
   }
   return CODEX_MODEL_LABELS[model] ?? model;
 }
@@ -321,6 +357,35 @@ function emptyByAgent(): UsageByAgent {
 
 function emptyBySource(): UsageBySource {
   return { local: emptyTotals(), "github-actions": emptyTotals() };
+}
+
+function emptyModelTiers(): UsageModelTiers {
+  return {
+    claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
+    codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
+  };
+}
+
+/**
+ * 日別の「エージェント×モデルの重さ」内訳へ、1entryぶんの金額を積む（#3396）。**GitHub
+ * Actionsのentryは積まない**（日別グラフはActionsを単色のまま表す）。1entryが複数モデルを
+ * 使っていれば`pickPrimaryModel`と同じ「最も重い1つ」を代表とし、金額は丸ごとそこへ計上する
+ * （按分の手立てが無いため。実行状況の●と同じ近似）。
+ */
+function addEntryModelTier(tiers: UsageModelTiers, entry: SessionUsageEntry): void {
+  if (entry.source === "github-actions") return;
+  const tier = modelWeightTier(pickPrimaryModel(entry.models));
+  const bucket = tiers[entry.agent];
+  if (tier === null) {
+    bucket.unresolvedCostUsd += entry.costUsd;
+  } else {
+    bucket.costUsd = bucket.costUsd.map((value, index) => (index === tier ? value + entry.costUsd : value)) as [
+      number,
+      number,
+      number,
+      number,
+    ];
+  }
 }
 
 function emptyPhaseTotals(): UsagePhaseTotals {
@@ -503,6 +568,8 @@ export function fillUsageDays(days: UsageDay[], since: string, until: string): U
         ...emptyTotals(),
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        modelTiers: emptyModelTiers(),
+        modelLabels: [],
       });
     }
   }
@@ -571,9 +638,16 @@ export function buildSessionUsageSummary({
         ...emptyTotals(),
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        modelTiers: emptyModelTiers(),
+        modelLabels: [],
       };
       addEntryWithAgent(day, entry);
       addEntryWithSource(day, entry);
+      addEntryModelTier(day.modelTiers, entry);
+      for (const model of entry.models) {
+        const label = sessionUsageModelLabel(model);
+        if (!day.modelLabels.includes(label)) day.modelLabels.push(label);
+      }
       byDay.set(dateKey, day);
     }
 

@@ -36,6 +36,7 @@ import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
+import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MobileIssuePropertiesSection } from "@/components/dashboard/mobile/mobile-issue-properties-section";
 import { MobileIssueSummaryCard } from "@/components/dashboard/mobile/mobile-issue-summary-card";
@@ -1185,12 +1186,16 @@ export function MobileIssueDetail({
             )}
           </div>
           <ApiErrorMessage message={taskList.error} />
-          <MarkdownBody
-            content={taskList.body}
-            repositoryFullName={issue.repositoryFullName}
-            onToggleTask={taskList.toggleTask}
-            isTaskToggling={taskList.isToggling}
-          />
+          {issue.bodyOmitted ? (
+            <IssueBodyPending failed={Boolean(issue.bodyLoadFailed)} />
+          ) : (
+            <MarkdownBody
+              content={taskList.body}
+              repositoryFullName={issue.repositoryFullName}
+              onToggleTask={taskList.toggleTask}
+              isTaskToggling={taskList.isToggling}
+            />
+          )}
         </div>
 
         <Separator />

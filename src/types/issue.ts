@@ -67,7 +67,19 @@ export type Issue = {
   id: string;
   number: number;
   title: string;
+  /**
+   * 本文（Markdown）。**`bodyOmitted`が立っている間は空文字で、本文が無いことを意味しない。**
+   */
   body: string;
+  /**
+   * 一覧の取得で本文を外したIssue（#3390）。closedのIssueは件数・本文の容量の大半を占めるのに、
+   * 一覧側で本文を使うのは検索くらいなので、`GET /api/issues`と初期表示では本文を送らない。
+   * 詳細を開いたときに`GET /api/issues/body`で1件ぶんを取り、`useIssueBodies`が埋め戻す。
+   * 本文を持っているIssueでは項目ごと無い
+   */
+  bodyOmitted?: true;
+  /** 外した本文の取得に失敗した（#3390）。`bodyOmitted`と一緒にだけ立つ */
+  bodyLoadFailed?: true;
   state: IssueState;
   stateReason: IssueStateReason;
   repositoryFullName: string;
