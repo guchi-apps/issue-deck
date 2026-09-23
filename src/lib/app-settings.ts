@@ -31,6 +31,19 @@ export function parseDispatchConcurrency(value: unknown): number | null {
   return value;
 }
 
+// リリース準備（バンプPR・develop→mainのPR作成）の自動実行間隔（分・#3416）。0は自動実行しない。
+// 選べる値は、schedule起動の刻み（15分）の倍数に限る。判定はreusableワークフローのgateが
+// 「間隔の境界をまたいだ回だけ進む」形で行うため、15分未満や倍数でない値は表現できない。
+export const RELEASE_PREP_INTERVAL_MINUTES_OPTIONS = [0, 15, 30, 60, 120, 360, 720, 1440] as const;
+export const RELEASE_PREP_INTERVAL_MINUTES_DEFAULT = 60;
+
+export function parseReleasePrepIntervalMinutes(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return (RELEASE_PREP_INTERVAL_MINUTES_OPTIONS as readonly number[]).includes(value)
+    ? value
+    : null;
+}
+
 // 参照されていない添付画像を自動でゴミ箱へ移すまでの日数（#2475）。
 //
 // 既定の30日は**下書きの猶予**として決めている。投稿前の下書きはブラウザのlocalStorageに

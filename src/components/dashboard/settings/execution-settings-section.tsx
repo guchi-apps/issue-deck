@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
   AUTO_RETRY_LIMIT_MAX,
@@ -364,6 +365,8 @@ export function ExecutionSettingsSection({
           4本にするとメモリが足りずビルドが2倍以上遅くなります）。
         </p>
       </div>
+
+      <ReleasePrepIntervalField />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
