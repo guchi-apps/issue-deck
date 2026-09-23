@@ -64,6 +64,7 @@ describe("PATCH /api/nightly-run/settings", () => {
         intervalMinutes: 10,
         fiveHourFloorPercent: 0,
         weeklyFloorPercent: 0,
+        bulkModel: "",
       },
       keepAlive: { enabled: false, startHour: 7, endHour: 23 },
     });
@@ -119,6 +120,22 @@ describe("PATCH /api/nightly-run/settings", () => {
       fiveHourFloorPercent: 10,
       weeklyFloorPercent: 20,
     });
+  });
+
+  /** #3438 */
+  it("一括予約の初期モデルを保存できる（Claude・Codex・設定に従う）", async () => {
+    const response = await PATCH(request({ nextWindow: { bulkModel: "codex:gpt-6-sol" } }));
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({ nextWindowRunBulkModel: "codex:gpt-6-sol" });
+    upsert.mockClear();
+    expect((await PATCH(request({ nextWindow: { bulkModel: "" } }))).status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({ nextWindowRunBulkModel: "" });
+  });
+
+  it("一括予約の初期モデルは候補にない値・組み合わせを400で断る", async () => {
+    for (const bulkModel of ["gpt-6-sol", "claude:gpt-6-sol", "codex:auto", "codex:gpt-5.5", "x:y", 1]) {
+      expect((await PATCH(request({ nextWindow: { bulkModel } }))).status).toBe(400);
+    }
   });
 
   it("下限は決まった選択肢（0・10〜50%）だけ受け付ける", async () => {

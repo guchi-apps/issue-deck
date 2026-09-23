@@ -3,7 +3,21 @@
 import { CalendarClock, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { describeClaudeModel, type ClaudeLocalModel } from "@/lib/app-settings";
+import {
+  BULK_RESERVE_MODEL_GROUPS,
+  encodeBulkReserveModel,
+  parseBulkReserveModelChoice,
+  type BulkReserveModelChoice,
+} from "@/lib/app-settings";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { BulkReserveSummary } from "@/hooks/use-bulk-reserve";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +36,7 @@ export function BulkReserveEntryBar({
 }: {
   active: boolean;
   disabled: boolean;
-  onStart: () => void;
+  onStart: () => void | Promise<void>;
   onExit: () => void;
   className?: string;
 }) {
@@ -60,8 +74,8 @@ export function BulkReserveEntryBar({
   );
 }
 
-/** 一括予約で選べるモデル。「実装を開始」ダイアログのClaude Code側の候補（`MODEL_ENTRIES`）と同じ */
-const BULK_MODELS = ["fable", "opus", "sonnet"] as const satisfies readonly ClaudeLocalModel[];
+/** Radixの`SelectItem`は空文字を値にできないため、「設定に従う」だけこの語で表す */
+const FOLLOW_SETTINGS = "follow-settings";
 
 export function BulkReserveDock({
   active,
@@ -86,9 +100,9 @@ export function BulkReserveDock({
   hostNames: readonly string[];
   progress: { done: number; total: number } | null;
   summary: BulkReserveSummary | null;
-  /** 予約する全件に使うモデル。nullは「設定に従う」 */
-  model: ClaudeLocalModel | null;
-  onModelChange: (model: ClaudeLocalModel | null) => void;
+  /** 予約する全件に使うエージェントとモデル。nullは「設定に従う」 */
+  model: BulkReserveModelChoice | null;
+  onModelChange: (model: BulkReserveModelChoice | null) => void;
   onSelectAll: () => void;
   onClear: () => void;
   onSubmit: () => void;
@@ -134,31 +148,35 @@ export function BulkReserveDock({
           </span>
         </div>
         {active && !submitting && (
-          <div
-            role="radiogroup"
-            aria-label="使用モデル"
-            className="flex flex-wrap items-center gap-1.5 text-xs"
-          >
-            <span className="mr-0.5 text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs">
+            <span className="text-muted-foreground">
               使用モデル（{selectedCount}件すべてに適用）
             </span>
-            {[null, ...BULK_MODELS].map((value) => (
-              <button
-                key={value ?? "default"}
-                type="button"
-                role="radio"
-                aria-checked={model === value}
-                onClick={() => onModelChange(value)}
-                className={cn(
-                  "rounded-full border px-2.5 py-0.5 text-xs",
-                  model === value
-                    ? "border-indigo-500 bg-indigo-50 font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200"
-                    : "text-foreground hover:bg-muted",
-                )}
-              >
-                {value ? describeClaudeModel(value) : "設定に従う"}
-              </button>
-            ))}
+            <Select
+              value={model ? encodeBulkReserveModel(model) : FOLLOW_SETTINGS}
+              onValueChange={(next) =>
+                onModelChange(
+                  next === FOLLOW_SETTINGS ? null : (parseBulkReserveModelChoice(next) ?? null),
+                )
+              }
+            >
+              <SelectTrigger size="sm" className="w-56" aria-label="使用モデル">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={FOLLOW_SETTINGS}>設定に従う</SelectItem>
+                {BULK_RESERVE_MODEL_GROUPS.map((group) => (
+                  <SelectGroup key={group.label}>
+                    <SelectLabel>{group.label}</SelectLabel>
+                    {group.options.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">

@@ -1,4 +1,7 @@
 import {
+  BULK_RESERVE_MODEL_DEFAULT,
+  encodeBulkReserveModel,
+  parseBulkReserveModelChoice,
   NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
   NEXT_WINDOW_RUN_INTERVAL_MINUTES_DEFAULT,
   NEXT_WINDOW_RUN_LEAD_MINUTES_DEFAULT,
@@ -21,6 +24,12 @@ import type { ClaudeWindowSnapshot, NextWindowRunSettings } from "@/lib/next-win
  * 呼ばれる）が読む軽い層で、ここは`claude/usage.ts`＝Anthropic APIへの送信を引きずる。
  */
 
+/** 保存値が不正・未設定なら「設定に従う」（空文字）へ落とす */
+export function normalizeBulkModel(value: unknown): string {
+  const choice = parseBulkReserveModelChoice(value);
+  return choice ? encodeBulkReserveModel(choice) : BULK_RESERVE_MODEL_DEFAULT;
+}
+
 export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings> {
   const row = await db.appSetting.findUnique({
     where: { id: 1 },
@@ -30,6 +39,7 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
       nextWindowRunIntervalMinutes: true,
       nextWindowRunFiveHourFloorPercent: true,
       nextWindowRunWeeklyFloorPercent: true,
+      nextWindowRunBulkModel: true,
     },
   });
   return {
@@ -46,6 +56,7 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
     weeklyFloorPercent:
       parseNextWindowRunFloorPercent(row?.nextWindowRunWeeklyFloorPercent) ??
       NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+    bulkModel: normalizeBulkModel(row?.nextWindowRunBulkModel),
   };
 }
 

@@ -375,6 +375,17 @@ describe("pickBulkReserveHost", () => {
     expect(pickBulkReserveHost(hosts, "o/x")).toBe("a");
     expect(pickBulkReserveHost(hosts, "o/z")).toBeNull();
   });
+
+  it("Codexのときは、Codexを使えるホストだけを返す（#3438）", () => {
+    const hosts = [
+      { name: "a", repositories: ["o/x"], codexCapable: false },
+      { name: "b", repositories: ["o/x"], codexCapable: true },
+      { name: "c", repositories: ["o/y"], codexCapable: null },
+    ];
+    expect(pickBulkReserveHost(hosts, "o/x", "codex")).toBe("b");
+    expect(pickBulkReserveHost(hosts, "o/y", "codex")).toBeNull();
+    expect(pickBulkReserveHost(hosts, "o/y", "claude")).toBe("c");
+  });
 });
 
 describe("reserveIssuesSequentially", () => {
