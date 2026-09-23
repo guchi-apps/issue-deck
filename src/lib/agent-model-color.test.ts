@@ -14,11 +14,11 @@ describe("modelWeightTier", () => {
     expect(modelWeightTier("claude-opus-5")).toBe(1);
     expect(modelWeightTier("claude-sonnet-5")).toBe(2);
     expect(modelWeightTier("claude-haiku-4-5-20251001")).toBe(3);
-    expect(modelWeightTier("gpt-5.6-sol")).toBe(1);
+    expect(modelWeightTier("gpt-6-sol")).toBe(2);
     expect(modelWeightTier("gpt-5.5")).toBe(1);
     expect(modelWeightTier("gpt-5.6-terra")).toBe(2);
     expect(modelWeightTier("gpt-5.4")).toBe(2);
-    expect(modelWeightTier("gpt-5.6-luna")).toBe(3);
+    expect(modelWeightTier("gpt-6-luna")).toBe(3);
   });
 
   it("起動時に指定するエイリアスも段を引ける", () => {
@@ -39,7 +39,7 @@ describe("modelWeightTier", () => {
 describe("agentModelColor", () => {
   it("エージェントの系統から段の色を引く", () => {
     expect(agentModelColor("claude", "claude-opus-5")).toBe(AGENT_MODEL_TIER_COLORS.claude[1]);
-    expect(agentModelColor("codex", "gpt-5.6-luna")).toBe(AGENT_MODEL_TIER_COLORS.codex[3]);
+    expect(agentModelColor("codex", "gpt-6-luna")).toBe(AGENT_MODEL_TIER_COLORS.codex[3]);
   });
 
   it("段が決まらなければnull（中抜きで出す）", () => {

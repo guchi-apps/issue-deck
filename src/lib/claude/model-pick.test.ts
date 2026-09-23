@@ -128,12 +128,12 @@ describe("Codexの候補（#3192）", () => {
       model: "gpt-6-astra",
       reason: "設計が必要なためです。",
     });
-    expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
-      model: "gpt-5.6-sol",
+    expect(parseModelPick('{"model":"gpt-6-sol","reason":"調査が要るためです。"}', "codex")).toEqual({
+      model: "gpt-6-sol",
       reason: "調査が要るためです。",
     });
-    expect(parseModelPick('{"model":"gpt-5.6-luna","reason":"軽い修正のためです。"}', "codex")?.model).toBe(
-      "gpt-5.6-luna",
+    expect(parseModelPick('{"model":"gpt-6-luna","reason":"軽い修正のためです。"}', "codex")?.model).toBe(
+      "gpt-6-luna",
     );
   });
 
@@ -143,16 +143,16 @@ describe("Codexの候補（#3192）", () => {
     expect(parseModelPick('{"model":"gpt-5.5","reason":"x"}', "codex")).toBeNull();
     expect(parseModelPick('{"model":"auto","reason":"x"}', "codex")).toBeNull();
     // 逆に、Claudeの欄でCodexのモデルは採らない（従来どおり）
-    expect(parseModelPick('{"model":"gpt-5.6-sol","reason":"x"}', "claude")).toBeNull();
+    expect(parseModelPick('{"model":"gpt-6-sol","reason":"x"}', "claude")).toBeNull();
   });
 
   it("プロンプトはCodex CLIとCodexの候補を案内する", () => {
     const prompt = buildModelPickPrompt(input(), "codex");
     expect(prompt).toContain("Codex CLI");
     expect(prompt).toContain("gpt-6-astra");
-    expect(prompt).toContain("gpt-5.6-sol");
+    expect(prompt).toContain("gpt-6-sol");
     expect(prompt).toContain("gpt-5.6-terra");
-    expect(prompt).toContain("gpt-5.6-luna");
+    expect(prompt).toContain("gpt-6-luna");
     expect(prompt).not.toContain("`opus`");
     expect(prompt).toContain("ボタンの文言を直す");
   });
@@ -166,20 +166,20 @@ describe("Codexの候補（#3192）", () => {
 
   describe("ルール", () => {
     it("不具合はSol", () => {
-      expect(pickModelByRule(input({ labels: ["52.bug"] }), "codex").model).toBe("gpt-5.6-sol");
+      expect(pickModelByRule(input({ labels: ["52.bug"] }), "codex").model).toBe("gpt-6-sol");
     });
 
     it("計画が要る・長い・やり取りが多いものはSol", () => {
       expect(pickModelByRule(input({ labels: ["21.plan-required"] }), "codex").model).toBe(
-        "gpt-5.6-sol",
+        "gpt-6-sol",
       );
-      expect(pickModelByRule(input({ body: "あ".repeat(800) }), "codex").model).toBe("gpt-5.6-sol");
-      expect(pickModelByRule(input({ commentCount: 10 }), "codex").model).toBe("gpt-5.6-sol");
+      expect(pickModelByRule(input({ body: "あ".repeat(800) }), "codex").model).toBe("gpt-6-sol");
+      expect(pickModelByRule(input({ commentCount: 10 }), "codex").model).toBe("gpt-6-sol");
     });
 
     it("文書だけの短い更新はLuna", () => {
       expect(pickModelByRule(input({ labels: ["60.documentation"] }), "codex").model).toBe(
-        "gpt-5.6-luna",
+        "gpt-6-luna",
       );
     });
 
@@ -233,8 +233,8 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     expect(Object.keys((questions.model as { criteria: Record<string, unknown> }).criteria)).toEqual([
       "gpt-6-astra",
       "gpt-5.6-terra",
-      "gpt-5.6-sol",
-      "gpt-5.6-luna",
+      "gpt-6-sol",
+      "gpt-6-luna",
     ]);
     expect(JSON.stringify(questions.model)).toContain("Codex CLI");
   });
@@ -329,10 +329,10 @@ describe("pickModelByJev", () => {
           answers: {
             model: {
               type: "choice",
-              choice: "gpt-5.6-sol",
+              choice: "gpt-6-sol",
               confidence: 0.7,
               // 候補に無いラベル（Claude側のモデル）が混じっても捨てる
-              probabilities: { "gpt-5.6-sol": 0.7, "gpt-5.6-terra": 0.3, opus: 0.9 },
+              probabilities: { "gpt-6-sol": 0.7, "gpt-5.6-terra": 0.3, opus: 0.9 },
             },
           },
         }),
@@ -340,8 +340,8 @@ describe("pickModelByJev", () => {
     );
 
     const result = await pickModelByJev(input(), "codex");
-    expect(result?.model).toBe("gpt-5.6-sol");
-    expect(result?.probabilities).toEqual({ "gpt-5.6-sol": 0.7, "gpt-5.6-terra": 0.3 });
+    expect(result?.model).toBe("gpt-6-sol");
+    expect(result?.probabilities).toEqual({ "gpt-6-sol": 0.7, "gpt-5.6-terra": 0.3 });
   });
 
   // Claudeの欄でCodexのモデルが返ってきても採らない（逆も同じ）
@@ -351,7 +351,7 @@ describe("pickModelByJev", () => {
       "fetch",
       vi.fn(async () =>
         jevResponse({
-          answers: { model: { type: "choice", choice: "gpt-5.6-sol", confidence: 1 } },
+          answers: { model: { type: "choice", choice: "gpt-6-sol", confidence: 1 } },
         }),
       ),
     );

@@ -73,7 +73,7 @@ installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は*
 | 払い出しで`pick`のとき | Sonnet | Terra |
 
 - **`POST /api/dispatch`・`POST /api/nightly-run`の`model`は`agent`で語が決まる。** Codexへ`opus`、
-  Claude Codeへ`gpt-5.6-sol`を送ると400（選んだつもりのないモデルで立つより、その場で断る）
+  Claude Codeへ`gpt-6-sol`を送ると400（選んだつもりのないモデルで立つより、その場で断る）
 - **ダイアログの候補に`auto`（`-m`を付けない起動）と旧世代（GPT-5.5・5.4）は入れない。** どのモデルで
   立つか分からない方式を選ばせない、というClaude側の方針（#2776）に揃えた。**設定には残る**ので、
   ダイアログを経由しない起動（ローカルで開始・PR修正依頼の呼び戻し・一括停止からの再開）は
@@ -214,7 +214,7 @@ codex queue --thread <セッションUUID または 完全一致のセッショ�
 
 ```json
 {"session_id":"01a0510e-…","transcript_path":"/home/guchi/.codex/sessions/…jsonl",
- "cwd":"…","hook_event_name":"SessionStart","model":"gpt-5.6-sol",
+ "cwd":"…","hook_event_name":"SessionStart","model":"gpt-6-sol",
  "permission_mode":"bypassPermissions","source":"startup"}
 ```
 

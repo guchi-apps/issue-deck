@@ -196,10 +196,10 @@ describe("POST /api/dispatch/claim", () => {
   // ジョブの列を手で書き換えられても、pollerへ届く語は既知のものだけ
   it("ジョブのCodexモデルが未知の語なら、設定の既定へ倒す", async () => {
     claimDispatchJobs.mockResolvedValue([{ id: "job-1", agent: "codex", codexModel: "opus" }]);
-    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "gpt-5.6-luna" });
+    appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "gpt-6-luna" });
 
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
-    expect((await res.json()).jobs[0].codexModel).toBe("gpt-5.6-luna");
+    expect((await res.json()).jobs[0].codexModel).toBe("gpt-6-luna");
   });
 });
