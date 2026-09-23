@@ -2358,8 +2358,17 @@ export function POST(request: NextRequest) {
   だからで、開閉の作法（`Collapsible`・セクション単位の保存キー）だけを揃えている。
   **ページングはせず100件（`PULL_REQUEST_FILES_PER_PAGE`）で打ち切る**——1PRを開くだけで何十
   リクエストも消費する方が害が大きく、そこまで並べても画面では読めないため、打ち切ったことを
-  `truncated`で伝えてGitHubの「Files changed」へ誘導する。**差分そのもの（`patch`）は受け取らない**。
-  この画面が答えるのは「どこを触ったPRか」までで、行単位の差分はGitHubに任せる。
+  `truncated`で伝えてGitHubの「Files changed」へ誘導する。
+  **各行の「差分を表示」を押すと、その行だけ差分（`patch`）を遅延取得する**（#3383。
+  [`pull-request-file-diff-view.tsx`](../src/components/dashboard/pull-request-file-diff-view.tsx)・
+  [`hooks/use-pull-request-file-diff.ts`](../src/hooks/use-pull-request-file-diff.ts)・
+  `GET /api/pull-requests/file-diff`）。GitHubには1ファイル単体のdiffを返す専用APIが無いため、
+  内部では変更ファイル一覧と同じ`GET /pulls/{number}/files`（`fetchPullRequestFiles`）を呼び直し、
+  該当パスの`patch`だけを`findPullRequestFilePatch`（`lib/pull-request-files.ts`）で抜き出して返す。
+  **URLが一覧取得と同じなのでETagが効き**、一覧を開いた後に複数ファイルの差分を連続で開いても
+  GitHub API消費は増えない。差分表示は自前の簡易ビューアー（diff2html等のライブラリは使わず、
+  行頭記号で追加・削除・hunk見出しを判定するだけ）で、シンタックスハイライトは行わない。
+  GitHubがpatchを省略したファイル（バイナリ・巨大差分）は「GitHubで確認してください」に誘導する。
 - **mainへのPRのマージ確認ダイアログには「このリリースに含まれる変更」を並べる**（#2080。
   [`pull-request-merge-changes.tsx`](../src/components/dashboard/pull-request-merge-changes.tsx)・
   [`hooks/use-pull-request-changes.ts`](../src/hooks/use-pull-request-changes.ts)・

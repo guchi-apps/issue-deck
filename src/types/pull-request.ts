@@ -445,3 +445,13 @@ export type PullRequestFileListResponse = {
    */
   truncated: boolean;
 };
+
+/**
+ * 変更ファイル一覧の各行にある「差分を表示」を押したときの応答（#3383）。
+ *
+ * `patch`が`null`のときは、対象ファイルがバイナリ・差分が大きすぎるなどでGitHubが省略した
+ * ケースで、画面はGitHubへの誘導に倒す。
+ */
+export type PullRequestFileDiffResponse = {
+  patch: string | null;
+};

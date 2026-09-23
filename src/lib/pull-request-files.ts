@@ -55,3 +55,21 @@ export function splitPullRequestFilePath(path: string): { directory: string; nam
   if (index < 0) return { directory: "", name: path };
   return { directory: path.slice(0, index + 1), name: path.slice(index + 1) };
 }
+
+/**
+ * 変更ファイル一覧（`fetchPullRequestFiles`の生レスポンス）から、指定パス1件ぶんの差分本文を
+ * 取り出す（#3383）。
+ *
+ * **リネームされたファイルは変更後のパス（`filename`）で探す。** 変更ファイル一覧の画面が
+ * 出す`path`も変更後のパスなので、呼び出し側はそのまま渡せる。
+ *
+ * 戻り値が`undefined`のときは2通りを区別しない——「そのパスのファイルがPRに無い」と
+ * 「GitHubがpatchを省略した（バイナリ・巨大差分）」のどちらも、画面では同じ
+ * 「差分を表示できません」に倒すため。
+ */
+export function findPullRequestFilePatch(
+  files: GithubApiPullRequestFile[],
+  path: string,
+): string | undefined {
+  return files.find((file) => file.filename === path)?.patch;
+}
