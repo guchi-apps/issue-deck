@@ -459,7 +459,8 @@ PRを閉じるところから始める必要がある）。そこで、**起動�
 
 ## トリガー
 
-`workflow_dispatch`（手動実行）と、**`package.json`の変更を伴う`develop`へのpush**の2つ。
+`workflow_dispatch`（手動実行）、**`package.json`の変更を伴う`develop`へのpush**、
+**1時間おきの`schedule`**（#3404）の3つ。
 
 ```yaml
 on:
@@ -472,22 +473,44 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+  schedule:
+    - cron: "0 * * * *"
   push:
     branches: [develop]
     paths:
       - package.json
 ```
 
-`schedule`による定期起動はしない（#178）。通常のフィーチャーpushでは`package.json`が変わらない
-ため、pushトリガーが発火するのは実質**バンプPRがdevelopへマージされた瞬間だけ**である。この1回で
-develop→mainのPRを自動作成し、「バンプPRをマージしたあと、もう一度手で起動する」という手間を
-省いている。
-
-**pushトリガーからバンプPRが誤作成されることはない。** `need_bump`系のステップは
-`github.event_name == 'workflow_dispatch'`でゲートしてあり、push起点の実行はdevelop→mainのPR作成
-だけを行う。
+通常のフィーチャーpushでは`package.json`が変わらないため、pushトリガーが発火するのは実質
+**バンプPRがdevelopへマージされた瞬間だけ**である。この1回でdevelop→mainのPRを自動作成し、
+「バンプPRをマージしたあと、もう一度手で起動する」という手間を省いている。
 
 同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
+
+### schedule起動は実装中issueが無いことを確認してから走る（#3404）
+
+**過去（#178/#179）は「バンプPRの作成が人間の確認なしに走ってしまう」ことを理由に、
+developへのPRマージ・15分おきのscheduleを廃止し、`workflow_dispatch`だけに絞っていた。**
+#3404は「リリース準備開始（バンプPR・develop→mainのPR作成）自体は本番に影響せず、実際の
+マージは人間が確認する」ことを踏まえ、実装中issueが無いタイミングでの自動起動を改めて
+求めており、それに応じてscheduleを復活させている。**develop→mainの実際のマージは変わらず
+人間が手動で行う。**
+
+schedule起動時は、「リリース状態を判定する」ステップで`need_bump=true`になった場合でも、
+続く「スケジュール起動時、実装中のissueが無いことを確認する」ステップ（id: `gate`）が
+`GET /api/progress?repository=...&status=planning,implementation,develop-pr`でこのリポジトリの
+実装中issueの有無を確認し、1件でもあれば`ready=false`としてその回は見送る。issue-deckへ
+問い合わせできなかった場合も安全側に倒して見送る。バージョン判定・バンプPR作成の各ステップの
+`if`条件は`github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true'`で、
+`workflow_dispatch`（画面の「リリースする」ボタン）はこの確認を経由せず常に実行される。
+
+判定はこのリポジトリ自身の進捗のみを見る。フリート横断（他リポジトリの実装中issue）は見ない。
+他リポジトリへ展開する場合は、配布はタグを上げるまで効かないとしても、リポジトリごとに
+判断が要る変更のため別Issueとして起票する。
+
+**pushトリガーからバンプPRが誤作成されることはない。** `need_bump`系のステップは
+`workflow_dispatch`または上記ゲート通過でしかtrueにならず、push起点の実行はdevelop→mainのPR作成
+だけを行う（pushイベントでは`gate`ステップ自体がskipされ、`ready`は空文字のまま）。
 
 ### pushトリガーで起動したときは、ワークフローファイルもdevelop側のものが使われる
 

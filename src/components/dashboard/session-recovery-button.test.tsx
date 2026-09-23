@@ -199,6 +199,33 @@ function recoveryButton() {
   return screen.queryByRole("button", { name: "セッションを復旧" });
 }
 
+/** 「別のエージェント・モデルで復旧」メニューのトリガー */
+function modelMenuTrigger() {
+  return screen.queryByRole("button", { name: "別のエージェント・モデルで復旧" });
+}
+
+/** Radixのメニューがjsdomに無いAPIを呼ぶので埋めておく（`pull-request-actions-menu.test.tsx`と同じ） */
+function stubPointerApis() {
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.scrollIntoView ??= () => {};
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+/** 「…」を開く（Radixのメニューはpointerdownで開く） */
+function openModelMenu() {
+  fireEvent.pointerDown(modelMenuTrigger()!, {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  });
+}
+
 /**
  * #1830。回答が遅れているうちに畳まれたセッションを、終了した行のその場で呼び戻せるようにする。
  * 積むのは起動ジョブ（`LAUNCH`）そのもので、会話を引き継ぐかどうかを決めるのはサブPCの
@@ -206,6 +233,7 @@ function recoveryButton() {
  */
 describe("SessionRecoveryButton", () => {
   beforeEach(() => {
+    stubPointerApis();
     enqueue.mockResolvedValue(true);
     updateIssue.mockResolvedValue(makeIssue({ labels: [label("11.local")] }));
   });
@@ -312,6 +340,51 @@ describe("SessionRecoveryButton", () => {
       issue: makeIssue({ labels: [label("71.manual-step")] }),
     });
     expect(container.firstChild).toBeNull();
+  });
+
+  /**
+   * 別のエージェント・モデルで復旧するメニュー（#3408）。「Claudeで実施していたが、
+   * 別のモデル・別のエージェント（Codex＝ChatGPT）で実装したい」という要望に応える。
+   */
+  describe("別のエージェント・モデルで復旧するメニュー（#3408）", () => {
+    it("Codex非対応ホストでは、Claudeのモデルだけを選べる", async () => {
+      renderButton();
+      openModelMenu();
+      expect(await screen.findByRole("menuitem", { name: /Sonnet 5/ })).not.toBeNull();
+      expect(screen.queryByText("Codex（ChatGPT）")).toBeNull();
+
+      fireEvent.click(screen.getByRole("menuitem", { name: /Fable 5\.1/ }));
+      await waitFor(() => {
+        expect(enqueue).toHaveBeenCalledWith({
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1830,
+          hostName: "subpc",
+          agent: "claude",
+          model: "fable",
+        });
+      });
+    });
+
+    it("Codex対応ホストでは、Codexのモデルも選べる", async () => {
+      renderButton({ dispatch: makeDispatch({ hosts: [makeHost({ codexCapable: true })] }) });
+      openModelMenu();
+      const codexItem = await screen.findByRole("menuitem", { name: /Terra/ });
+      fireEvent.click(codexItem);
+      await waitFor(() => {
+        expect(enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({ agent: "codex" }),
+        );
+      });
+    });
+
+    it("横断質問セッションにはメニュー自体を出さない", () => {
+      renderButton({
+        dispatch: makeDispatch({
+          jobs: [makeJob({ kind: "CROSS_REPO_QUESTION", status: "SUCCEEDED" })],
+        }),
+      });
+      expect(modelMenuTrigger()).toBeNull();
+    });
   });
 
   /**
