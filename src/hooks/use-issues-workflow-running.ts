@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { isApprovalPending } from "@/lib/github/approval-labels";
 import { hasActiveWorkflowStep } from "@/lib/github/workflow-status";
 import type { Issue } from "@/types/issue";
@@ -68,7 +69,7 @@ export function useIssuesWorkflowRunning(
             if (knownRunId !== undefined) {
               params.set("knownRunId", String(knownRunId));
             }
-            const res = await fetch(`/api/issues/workflow-running?${params.toString()}`, {
+            const res = await fetchWithTimeout(`/api/issues/workflow-running?${params.toString()}`, {
               signal: controller.signal,
             });
             if (!res.ok) return [issue.id, NOT_RUNNING] as const;

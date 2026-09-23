@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { SecretSyncRunView } from "@/lib/secrets-sync";
 
 export type SecretsSyncRepository = {
@@ -36,7 +37,7 @@ export function useSecretsSync(enabled: boolean) {
 
     async function load() {
       try {
-        const res = await fetch("/api/secrets-sync");
+        const res = await fetchWithTimeout("/api/secrets-sync");
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
         const json: { repositories: SecretsSyncRepository[] } = await res.json();
         if (!cancelled) {
@@ -59,7 +60,16 @@ export function useSecretsSync(enabled: boolean) {
       cancelled = true;
     };
 
-    const timer = setInterval(() => void load(), RUNNING_POLL_INTERVAL_MS);
+    // 裏に回っているタブでは取りに行かない。前の取得が飛んでいる間も重ねない——遅い回線で
+    // 1回が周期を超えると、同じ取得が積み重なるため（#3387）
+    let inFlight = false;
+    const timer = setInterval(() => {
+      if (document.hidden || inFlight) return;
+      inFlight = true;
+      void load().finally(() => {
+        inFlight = false;
+      });
+    }, RUNNING_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);

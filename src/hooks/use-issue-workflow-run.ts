@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import { findLatestWorkflowRunLogComment } from "@/lib/github/workflow-run-log";
 import type { Issue, IssueComment } from "@/types/issue";
 
@@ -50,7 +51,7 @@ export function useIssueWorkflowRun(
     async function fetchRun() {
       if (document.hidden || isCompleted) return;
       try {
-        const res = await fetch(
+        const res = await fetchWithTimeout(
           `/api/issues/workflow-run?owner=${owner}&repo=${repo}&runId=${runId}`,
           { signal: controller.signal },
         );

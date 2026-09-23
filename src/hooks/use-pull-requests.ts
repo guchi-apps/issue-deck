@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAutoRefresh } from "@/hooks/use-auto-refresh";
+import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import { shorterAutoRefreshInterval, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type {
   PullRequestListResponse,
@@ -159,8 +160,11 @@ export function usePullRequests(
         setError(null);
       }
       try {
-        const res = await fetch(`/api/pull-requests?scope=${fetchScope}`, {
+        const res = await fetchWithTimeout(`/api/pull-requests?scope=${fetchScope}`, {
           signal: controller.signal,
+          // 応答が返らないまま決着しないと、飛んでいる取得の記録が残り続けて以後の自動更新が
+          // 全部見送られる（#3387）。打ち切って失敗にし、次の周期で取り直させる
+          timeoutMs: SLOW_FETCH_TIMEOUT_MS,
         });
         if (!res.ok) {
           const data: { error?: string; message?: string } = await res.json().catch(() => ({}));

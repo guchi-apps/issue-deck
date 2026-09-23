@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { ClaudeUsage } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 import type {
@@ -200,14 +201,16 @@ export function useSessionUsage(
     if (!enabled || !hasData) return;
 
     let cancelled = false;
-    let controller: AbortController | null = null;
+    const controller = new AbortController();
+    let inFlight = false;
 
     const refreshCurrent = () => {
       if (document.visibilityState !== "visible") return;
-      controller?.abort();
-      const current = new AbortController();
-      controller = current;
-      fetch("/api/session-usage?current=1", { signal: current.signal })
+      // 前の取り直しが飛んでいる間は次を出さない（#3387）。以前は毎回前のものを中断して
+      // 出し直しており、遅い回線で1回が周期を超えると、どの回も完了しないまま欄が止まっていた
+      if (inFlight) return;
+      inFlight = true;
+      fetchWithTimeout("/api/session-usage?current=1", { signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
           return (await res.json()) as Pick<SessionUsageResponse, "currentSessions">;
@@ -218,7 +221,10 @@ export function useSessionUsage(
           setData((prev) => (prev ? { ...prev, currentSessions } : prev));
         })
         // 取り直しの失敗は黙って次の回を待つ（欄が1つ古くなるだけで、本体の表示は壊さない）
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
     };
 
     const timer = window.setInterval(refreshCurrent, CURRENT_SESSIONS_REFRESH_MS);
@@ -228,7 +234,7 @@ export function useSessionUsage(
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      controller?.abort();
+      controller.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

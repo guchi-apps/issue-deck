@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
   ISSUE_PULL_REQUEST_POLL_INTERVAL_MS,
@@ -103,7 +104,7 @@ export function useIssuePullRequests(
       // 裏に回っているタブのために取り続けない。初回だけは表示に必要なので取りに行く
       if (fromPolling && document.hidden) return;
       try {
-        const res = await fetch(
+        const res = await fetchWithTimeout(
           `/api/issues/pull-requests?owner=${owner}&repo=${repo}&numbers=${numbersKey}`,
           { signal: controller.signal },
         );

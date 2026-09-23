@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { NightlyRunState, ScheduledRunSettings } from "@/lib/nightly-run";
 
 /** 画面を開いているあいだの取り直しの間隔。夜の起動は30秒ごとの巡回で進むので、それに揃える */
@@ -37,7 +38,7 @@ export function useNightlyRun(active: boolean) {
     async function load() {
       setIsLoading(true);
       try {
-        const res = await fetch("/api/nightly-run", { cache: "no-store" });
+        const res = await fetchWithTimeout("/api/nightly-run", { cache: "no-store" });
         if (!res.ok) throw new Error(await readErrorMessage(res));
         const json = (await res.json()) as NightlyRunState;
         if (!cancelled) {

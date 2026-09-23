@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { WorkflowRunProgress } from "@/lib/workflow-run-progress";
 
 /**
@@ -46,7 +47,7 @@ export function useWorkflowRunProgress(
     async function fetchProgress() {
       if (document.hidden || isCompleted) return;
       try {
-        const res = await fetch(
+        const res = await fetchWithTimeout(
           `/api/workflow-runs?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&runId=${runId}`,
           { signal: controller.signal },
         );
