@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { useNow } from "@/hooks/use-now";
-import { formatDateTime, formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
+import { formatCompactTime, formatDateTime, formatMonthDay, formatMonthDayTime } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { AGENT_BASE_COLORS, AGENT_MODEL_TIER_COLORS } from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
@@ -1033,16 +1033,15 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
   );
 }
 
-/** Issue行の右上に出す実行時間。最も早い開始〜最も遅い終了（#3432） */
+/** Issue行の右上に出す実行時間（例: `9/24 10:00〜10:21`）。最も早い開始〜最も遅い終了（#3432・#3443）。
+ * 終了は日をまたいでも時刻だけ（`9/24 23:58〜0:08`）。 */
 function issueRunSpanLabel(entries: Pick<SessionUsageEntry, "startedAt" | "endedAt">[]): string {
   if (entries.length === 0) return "";
   const start = entries.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), entries[0].startedAt);
   const end = entries.reduce((max, e) => (e.endedAt > max ? e.endedAt : max), entries[0].endedAt);
-  const startLabel = formatDateTime(start);
-  const endLabel = formatDateTime(end);
-  if (!endLabel) return startLabel;
-  const sameDay = startLabel.split(" ")[0] === endLabel.split(" ")[0];
-  return `${startLabel} 〜 ${sameDay ? formatTimeOfDay(end) : endLabel}`;
+  const startLabel = formatMonthDayTime(start);
+  const endLabel = formatCompactTime(end);
+  return endLabel ? `${startLabel}〜${endLabel}` : startLabel;
 }
 
 function IssueGroupRow({
@@ -1120,6 +1119,10 @@ function IssueGroupRow({
                     : CURRENT_SESSION_TONE_LABEL[liveSession.statusTone]}
                 </span>
               )}
+              {/* 実行時間は見出し行の右端。別カラムにすると棒グラフの列が狭まり、金額が左へ寄る（#3443） */}
+              <span className="ml-auto shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">
+                {issueRunSpanLabel(issue.entries)}
+              </span>
             </div>
             {/* Issue・PRのタイトル（#2686）。取得できなかった行は出さず番号のみのままにする */}
             {issue.title && (
@@ -1127,27 +1130,12 @@ function IssueGroupRow({
                 {issue.title}
               </p>
             )}
-            {/* 実行された種別のひと目表示（#3410）。開かなくても大まかな内訳が分かるように、
-                全種別を色つきチップ（ドット＋名前）で示す（#3425）。詳細は行を開いたときの`IssueKindBreakdown`に譲る */}
+            {/* 実行された種別は見た目には出さず（一覧が縦に伸びて邪魔になるため。#3443）、
+                読み上げ用にだけ残す（#3410）。内訳は行を開いたときの`IssueKindBreakdown`で見る */}
             {issue.byKind.length > 0 && (
-              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                {issue.byKind.map((row) => (
-                  <span
-                    key={row.key}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[9px] text-muted-foreground"
-                  >
-                    <span
-                      aria-hidden
-                      className="size-[6px] shrink-0 rounded-[1.5px]"
-                      style={{ backgroundColor: KIND_ROW_COLORS[row.key] ?? "#71717a" }}
-                    />
-                    {sessionUsageKindLabel(row.key)}
-                  </span>
-                ))}
-                <span className="sr-only">
-                  実行された種別: {issue.byKind.map((row) => sessionUsageKindLabel(row.key)).join("・")}
-                </span>
-              </div>
+              <span className="sr-only">
+                実行された種別: {issue.byKind.map((row) => sessionUsageKindLabel(row.key)).join("・")}
+              </span>
             )}
             {/* 金額・トークン量は棒グラフの右に置く（#3432）。右端の列をそろえるため幅を固定する */}
             <div className="mt-1 flex flex-col gap-0.5">
@@ -1170,11 +1158,6 @@ function IssueGroupRow({
             </div>
           </div>
         </button>
-        {/* 右上は金額ではなく実行時間（開始日時〜終了時刻）。終了の日付は開始日から分かるので
-            省く。日をまたぐときだけ日付を添える（#3432） */}
-        <span className="shrink-0 px-1.5 pt-2.5 text-right text-[11px] text-muted-foreground tabular-nums">
-          {issueRunSpanLabel(issue.entries)}
-        </span>
         {/* 開けない行（Issue番号もPR番号も無い「Issue未特定」）でも同じ寸法で描き、
             見た目とキーボード操作だけを消す（#2685）。**条件付きでDOMごと消すと**、
             隣の`flex-1`ボタン（棒グラフを含む）がそのぶん右へ広がり、棒グラフのレールだけ
