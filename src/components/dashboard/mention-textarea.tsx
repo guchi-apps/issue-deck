@@ -232,7 +232,7 @@ export function MentionTextarea({
    * 位置は添付のURLで探し直す——保存中に他の添付が消されると添字がずれるため。
    * 元の画像を消すのは未使用画像の整理に任せる。失敗は投げ返し、エディタ側に出す。
    */
-  async function replaceAttachment(originalUrl: string, file: File) {
+  async function replaceAttachment(originalUrl: string, file: File): Promise<string> {
     const url = await postImage(file);
     const current = attachmentsRef.current;
     const index = current.findIndex((attachment) => attachment.url === originalUrl);
@@ -241,6 +241,7 @@ export function MentionTextarea({
         ? [...current, { name: file.name, url }]
         : current.map((attachment, i) => (i === index ? { ...attachment, url } : attachment));
     emitChange(bodyRef.current, next);
+    return url;
   }
 
   function uploadImageFiles(files: Iterable<File>) {
@@ -477,7 +478,7 @@ function AttachmentStrip({
   attachments: ImageAttachment[];
   uploads: { id: number; name: string }[];
   onRemove: (index: number) => void;
-  onAnnotated: (originalUrl: string, file: File) => Promise<void>;
+  onAnnotated: (originalUrl: string, file: File) => Promise<string>;
   disabled?: boolean;
   className?: string;
 }) {
@@ -506,7 +507,10 @@ function AttachmentStrip({
           image={annotating}
           onClose={() => setAnnotating(null)}
           onSave={async (file) => {
-            await onAnnotated(annotating.src, file);
+            const url = await onAnnotated(annotating.src, file);
+            // 開いたままのプレビューも差し替え後の画像へ向ける。元のsrcのままだと、書き込み画面を
+            // 閉じて戻ったプレビューに書き込み前の画像が出る（#3424）
+            setPreview((current) => (current?.src === annotating.src ? { ...current, src: url } : current));
           }}
         />
       )}

@@ -275,6 +275,49 @@ describe("MentionTextarea 画像の添付", () => {
     toBlob.mockRestore();
   });
 
+  // #3424。プレビューから書き込んで保存すると、戻ったプレビューも書き込み後の画像を出す
+  it("プレビューから書き込んで保存すると、開いたままのプレビューが新しい画像に切り替わる", async () => {
+    stubUpload("/api/issues/images/annotated.png");
+    vi.stubGlobal(
+      "Image",
+      class {
+        onload: (() => void) | null = null;
+        naturalWidth = 400;
+        naturalHeight = 300;
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      },
+    );
+    const noop = () => {};
+    const ctx = new Proxy({}, { get: () => noop, set: () => true });
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+    const toBlob = vi
+      .spyOn(HTMLCanvasElement.prototype, "toBlob")
+      .mockImplementation((callback) => callback(new Blob(["x"], { type: "image/png" })));
+
+    const { container } = render(<Harness initialValue={"![a.png](/img/a.png)"} />);
+    fireEvent.click(container.querySelector('[title="a.png（拡大する）"]') as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "書き込む" }));
+
+    const canvas = await screen.findByLabelText("a.png への書き込み");
+    fireEvent.pointerDown(canvas, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 80, clientY: 60, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { pointerId: 1 });
+    fireEvent.click(screen.getAllByRole("button", { name: "保存して差し替え" })[0]);
+
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="image-preview"] img')?.getAttribute("src")).toBe(
+        "/api/issues/images/annotated.png",
+      ),
+    );
+    getContext.mockRestore();
+    toBlob.mockRestore();
+    fireEvent.click(document.querySelector('[aria-label="プレビューを閉じる"]') as HTMLElement);
+  });
+
   it("末尾に画像記法を含む本文を渡すと、入力欄にURLを出さずサムネイルとして表示する", () => {
     const { container } = render(
       <Harness initialValue={"再現手順です。\n\n![a.png](/img/a.png)"} />,
