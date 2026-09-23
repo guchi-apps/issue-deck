@@ -323,7 +323,8 @@ describe("SessionUsagePanel", () => {
 
     // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
     expect(within(detail).getAllByText("#2504")).toHaveLength(1);
-    expect(within(detail).getByText("2セッション")).toBeTruthy();
+    // Issue行のヘッダーにはセッション数を出さない（#3432）
+    expect(within(detail).queryByText("2セッション")).toBeNull();
     // 「実装」「計画レビュー」は閉じた行の種別ひと目表示（#3410）と、開いた行の種別別内訳
     // （`IssueKindBreakdown`）の両方に出るため件数だけ見る。
     expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
@@ -790,13 +791,13 @@ describe("SessionUsagePanel", () => {
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });
 
-  it("quotaPercentが入っているIssueだけ、直近5時間枠のおよそ何%かを表示する（#2988）", () => {
+  it("quotaPercentが入っていても、Issue行に直近5時間枠の割合は出さない（#3432。#2988の表示を削除）", () => {
     const data = response([entry()]);
     data.byIssue[0].quotaPercent = 12.4;
     renderPanel(data);
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    expect(within(detail).getByText("直近5時間枠のおよそ12%")).toBeTruthy();
+    expect(within(detail).queryByText("直近5時間枠のおよそ12%")).toBeNull();
   });
 
   it("quotaPercentがnullのIssueには表示しない", () => {

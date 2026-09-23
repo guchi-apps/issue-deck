@@ -45,6 +45,7 @@ describe("countReleaseMergePending（#2055）", () => {
       main: 0,
       total: 0,
       hasError: false,
+      pullRequestIds: [],
     });
   });
 
@@ -55,7 +56,17 @@ describe("countReleaseMergePending（#2055）", () => {
       makeDevelopPending("guchi-apps/portfolio"),
     ]);
 
-    expect(counts).toEqual({ develop: 1, main: 2, total: 3, hasError: false });
+    expect(counts).toEqual({
+      develop: 1,
+      main: 2,
+      total: 3,
+      hasError: false,
+      pullRequestIds: [
+        "guchi-apps/issue-deck#500",
+        "guchi-apps/vps#500",
+        "guchi-apps/portfolio#12",
+      ],
+    });
   });
 
   it("マージ待ちが無いリポジトリ（進行中・失敗のみ）は数えない", () => {
@@ -69,7 +80,13 @@ describe("countReleaseMergePending（#2055）", () => {
       }),
     ]);
 
-    expect(counts).toEqual({ develop: 0, main: 0, total: 0, hasError: false });
+    expect(counts).toEqual({
+      develop: 0,
+      main: 0,
+      total: 0,
+      hasError: false,
+      pullRequestIds: [],
+    });
   });
 
   it("チェックが落ちているマージ待ちが1件でもあればhasErrorになる", () => {
@@ -89,22 +106,22 @@ describe("describeReleaseMergePending（#2055）", () => {
   it("0件・未取得は待ちが無いことを伝える", () => {
     expect(describeReleaseMergePending(null)).toBe("反映待ちはありません");
     expect(
-      describeReleaseMergePending({ develop: 0, main: 0, total: 0, hasError: false }),
+      describeReleaseMergePending({ develop: 0, main: 0, total: 0, hasError: false, pullRequestIds: [] }),
     ).toBe("反映待ちはありません");
   });
 
   it("0件の側は文言から落とす", () => {
     expect(
-      describeReleaseMergePending({ develop: 0, main: 2, total: 2, hasError: false }),
+      describeReleaseMergePending({ develop: 0, main: 2, total: 2, hasError: false, pullRequestIds: [] }),
     ).toBe("mainへマージ待ち2件");
     expect(
-      describeReleaseMergePending({ develop: 1, main: 0, total: 1, hasError: false }),
+      describeReleaseMergePending({ develop: 1, main: 0, total: 1, hasError: false, pullRequestIds: [] }),
     ).toBe("developへマージ待ち1件");
   });
 
   it("両方あるときはdevelop・mainの順で並べる", () => {
     expect(
-      describeReleaseMergePending({ develop: 1, main: 2, total: 3, hasError: false }),
+      describeReleaseMergePending({ develop: 1, main: 2, total: 3, hasError: false, pullRequestIds: [] }),
     ).toBe("developへマージ待ち1件・mainへマージ待ち2件");
   });
 });

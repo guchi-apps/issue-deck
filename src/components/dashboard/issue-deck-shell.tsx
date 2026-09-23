@@ -20,6 +20,7 @@ import { GithubReferenceNavigationProvider } from "@/components/dashboard/github
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
 import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
+import { AppBadgeSync } from "@/components/dashboard/app-badge-sync";
 import { NotificationProvider } from "@/components/dashboard/notification-state";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
 import {
@@ -1315,11 +1316,14 @@ export function IssueDeckShell({
   // 確認待ちの件数へ足すPRの数（#1713・#3345）。対応Issueが同じ一覧に並んでいるPRは
   // そのIssueとして既に数えているため足さない。左メニュー・一覧ヘッダー・スマホホームの
   // 「要対応」・下タブが同じ数を読む
-  const checkUserPullRequestCount = useMemo(
+  const checkUserPullRequestIds = useMemo(
     () =>
-      pullRequestsCountedAsCheckUser(mergePendingPullRequests, listedCheckUserIssueKeys).length,
+      pullRequestsCountedAsCheckUser(mergePendingPullRequests, listedCheckUserIssueKeys).map(
+        (pullRequest) => pullRequest.id,
+      ),
     [mergePendingPullRequests, listedCheckUserIssueKeys],
   );
+  const checkUserPullRequestCount = checkUserPullRequestIds.length;
 
   // 伏せたPRの期限。一覧の1行が「最短でいつ戻るか」を出すのに使う
   const snoozedMergePendingEntries = useMemo(
@@ -2406,6 +2410,12 @@ export function IssueDeckShell({
                 />
               )}
             </div>
+
+            {/* PWAのアプリアイコンのバッジ（#3433）。フッター3タブの合計で、ホームとブランチに共通するPRは1件 */}
+            <AppBadgeSync
+              checkUserCount={navCounts["check-user"] + checkUserPullRequestCount}
+              checkUserPullRequestIds={checkUserPullRequestIds}
+            />
 
             {/* 「ホーム」タブの確認待ち件数（#3080）。ホームのメニュー・左メニューと同じ数え方 */}
             <MobileBottomNav
