@@ -24,15 +24,17 @@ import {
   REPAIR_KIND_RUNNING_SHORT_LABEL,
 } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { CiState } from "@/lib/github/release-api";
 import {
   AI_REVIEW_SETTLED_LABEL,
-  AI_REVIEW_SHORT_LABEL,
+  AI_REVIEW_VERDICT_LABEL,
   CI_STATE_LABEL,
   AI_REVIEW_SETTLED_REASON,
   aiReviewSettledState,
   mergeJudgementLabel,
   mergeJudgementReason,
+  resolveAiReviewVerdictState,
   type AiReviewSettledState,
 } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
@@ -371,20 +373,28 @@ export function AiReviewBadge({ aiReview }: { aiReview: AiReview | null | undefi
 /**
  * PR詳細で自動レビューの本文を開くための表示。CIと同じ四角い操作表示に揃える（#3319）。
  * `none`だけは、ワークフローが無いのか起動前なのかを区別できないため出さない。
+ *
+ * **文言・色はジョブの成否だけでなく、PR本文の検証結果（`reviewVerdict`）も見る**（#3373）。
+ * ジョブが`passed`でも、要確認・要修正の判定が付いていれば「レビュー完了」ではなく
+ * それぞれ「レビュー要確認」「レビュー要修正」を出し、CIと同じ✔/△/×の見分けに揃える。
  */
 export function AiReviewStatusButton({
   aiReview,
+  reviewVerdict,
   expanded,
   onClick,
 }: {
   aiReview: AiReview | null | undefined;
+  reviewVerdict?: PullRequestReviewVerdict | null;
   expanded: boolean;
   onClick: () => void;
 }) {
   const state = aiReview?.state;
   if (!state || state === "none") return null;
 
-  const label = state === "pending" ? "レビュー実施中" : AI_REVIEW_SHORT_LABEL[state];
+  const verdictState = resolveAiReviewVerdictState(aiReview, reviewVerdict);
+  const label =
+    state === "pending" ? "レビュー実施中" : AI_REVIEW_VERDICT_LABEL[verdictState ?? "ok"];
   return (
     <button
       type="button"
@@ -394,9 +404,11 @@ export function AiReviewStatusButton({
         "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         state === "pending"
           ? "border-primary/60 bg-primary/10 text-primary"
-          : state === "failed"
+          : verdictState === "failed" || verdictState === "changes-requested"
             ? "border-destructive/60 bg-destructive/10 text-destructive"
-            : "border-border bg-background text-muted-foreground",
+            : verdictState === "needs-check"
+              ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              : "border-border bg-background text-muted-foreground",
       )}
       title={expanded ? "レビューの詳細を閉じる" : "レビューの詳細を開く"}
     >

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
 import { AI_REVIEW_NONE, type AiReviewState } from "@/lib/github/check-rollup";
+import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -49,6 +50,20 @@ function withAiReview(state: AiReviewState, runUrl: string | null = null) {
   });
 }
 
+function reviewVerdict(
+  reviewKind: PullRequestReviewVerdict["reviewKind"],
+): PullRequestReviewVerdict {
+  return {
+    reviewKind,
+    reviewLabel: "",
+    riskKind: "none",
+    riskLabel: "",
+    riskReasons: [],
+    confirmLabel: null,
+    reviewedSha: null,
+  };
+}
+
 /** 枠の並びを左から読む。**列の位置が固定されていること**がこのコンポーネントの目的 */
 function slotLabels(container: HTMLElement): string[] {
   const rail = container.querySelector("[aria-label='CI・コンフリクト・レビューの状況']");
@@ -79,6 +94,31 @@ describe("PullRequestStatusRail（#2942）", () => {
       ["failed", "レビュー×"],
     ] as const) {
       const { container } = render(<PullRequestStatusRail pullRequest={withAiReview(state)} />);
+      expect(slotLabels(container)[2]).toBe(label);
+      cleanup();
+    }
+  });
+
+  // #3373: ジョブ（`aiReview`）が成功していても、PR本文の検証結果（`reviewVerdict`）が
+  // 要確認・要修正なら、CIと同じように△・×で見分けられることを確認する
+  it("レビューが成功していても、検証結果が要確認・要修正ならCIと同じように△・×で出す", () => {
+    for (const [kind, label] of [
+      ["needs-check", "レビュー△"],
+      ["changes-requested", "レビュー×"],
+    ] as const) {
+      const { container } = render(
+        <PullRequestStatusRail
+          pullRequest={makePullRequest({
+            mergeJudgement: {
+              state: "settled",
+              step: null,
+              runUrl: null,
+              aiReview: { state: "passed", runUrl: null },
+            },
+            reviewVerdict: reviewVerdict(kind),
+          })}
+        />,
+      );
       expect(slotLabels(container)[2]).toBe(label);
       cleanup();
     }

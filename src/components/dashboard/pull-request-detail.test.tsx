@@ -200,6 +200,54 @@ describe("PullRequestDetail", () => {
     expect(screen.getByRole("button", { name: /レビュー完了/ })).toBeTruthy();
   });
 
+  // #3373: ジョブが成功していても、PR本文の検証結果が要確認・要修正なら、四角枠の文言も
+  // それぞれ「レビュー要確認」「レビュー要修正」に変わる（「レビュー完了」固定ではない）
+  it("検証結果が要確認・要修正のPRは、四角枠にその判定を出す", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "passed", runUrl: null },
+        },
+        reviewVerdict: {
+          reviewKind: "needs-check",
+          reviewLabel: "",
+          riskKind: "none",
+          riskLabel: "",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: null,
+        },
+      }),
+    });
+    expect(screen.getByRole("button", { name: /レビュー要確認/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /レビュー完了/ })).toBeNull();
+    cleanup();
+
+    renderDetail({
+      pullRequest: makePullRequest({
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "passed", runUrl: null },
+        },
+        reviewVerdict: {
+          reviewKind: "changes-requested",
+          reviewLabel: "",
+          riskKind: "none",
+          riskLabel: "",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: null,
+        },
+      }),
+    });
+    expect(screen.getByRole("button", { name: /レビュー要修正/ })).toBeTruthy();
+  });
+
   // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
   it("レビューが実行されなかったPRは「省略」と出す（#2150）", () => {
     renderDetail({

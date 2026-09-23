@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { estimateCostUsd, formatCostUsd, resolveModelRate } from "@/lib/ai-model-pricing";
+import { APP_AI_MODEL_OPTIONS, CLAUDE_ALIAS_MODEL_IDS } from "@/lib/app-settings";
 
 describe("resolveModelRate", () => {
   it("モデルIDが一致すればその単価を返す", () => {
@@ -37,6 +38,31 @@ describe("resolveModelRate", () => {
     expect(resolveModelRate("gemini-3")).toBeNull();
     expect(resolveModelRate("")).toBeNull();
     expect(resolveModelRate(null)).toBeNull();
+  });
+
+  // #3374。取り違えると、Opus 5.5のセッションがOpus 5の単価（2割ほど高い）で計算されてしまう
+  it("Opus 5.5をOpus 5の単価で拾わない", () => {
+    expect(resolveModelRate("claude-opus-5-5")).toEqual({
+      input: 4.0,
+      output: 20.0,
+      cacheRead: 0.2,
+    });
+    expect(resolveModelRate("claude-opus-5")).toEqual({
+      input: 5.0,
+      output: 25.0,
+      cacheRead: 0.5,
+    });
+  });
+
+  // #3374。選択肢に載っているのに単価表への追加を忘れると、画面の金額が黙って空欄になる
+  it("選択できるモデルは全て単価表にある", () => {
+    const modelIds = [
+      ...APP_AI_MODEL_OPTIONS.map((option) => option.value),
+      ...Object.values(CLAUDE_ALIAS_MODEL_IDS),
+    ];
+    for (const modelId of modelIds) {
+      expect(resolveModelRate(modelId), `${modelId}の単価が見つからない`).not.toBeNull();
+    }
   });
 });
 
