@@ -1099,6 +1099,23 @@ export function buildCurrentSessionUsage({
   });
 }
 
+/**
+ * Issue・PR別の行（`sessionUsageIssueKey`）から、いま生きているセッションを引けるようにする（#3435）。
+ * 同じIssueに複数あるときは「作業中 → 人を待っている → 応答を終えている」の順に強い状態を残す。
+ */
+export function indexCurrentSessionsByIssueKey(
+  sessions: readonly CurrentSessionUsage[],
+): Map<string, CurrentSessionUsage> {
+  const rank: Record<CurrentSessionTone, number> = { running: 0, waiting: 1, idle: 2 };
+  const map = new Map<string, CurrentSessionUsage>();
+  for (const session of sessions) {
+    const key = sessionUsageIssueKey(session);
+    const current = map.get(key);
+    if (!current || rank[session.statusTone] < rank[current.statusTone]) map.set(key, session);
+  }
+  return map;
+}
+
 /** 「開始から」の経過。1時間未満は分だけ、それ以上は「1時間18分」の形。1分未満は「1分未満」 */
 export function formatSessionElapsed(startedAt: string, nowMs: number): string {
   const elapsedMs = nowMs - new Date(startedAt).getTime();
