@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.38.0",
+    date: "2026-09-23",
+    changes: [
+      "終了したセッションを復旧するとき、前回と同じ設定だけでなく、別のエージェント（Claude Code／Codex）や別のモデルを選んで再開できるようになりました。",
+    ],
+    usage: [
+      "1. Issue詳細画面で、終了したセッションの「セッションを復旧」ボタン横にある下向き矢印（▼）を押す",
+      "2. 開いたメニューから使いたいエージェント（Claude Code／Codex）とモデルを選ぶ",
+      "3. 選んだ内容でセッションが復旧され、Issueの進捗にセッションの起動状況が表示されれば成功",
+    ],
+  },
+  {
     version: "7.37.0",
     date: "2026-09-23",
     changes: [
