@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import type { ClaudeLocalModel } from "@/lib/app-settings";
 import {
   reserveIssuesSequentially,
   type BulkReserveTarget,
@@ -10,6 +11,7 @@ import {
 /** 「次の5時間枠」へ1件積む。積む口は「実装を開始」ダイアログと同じ`POST /api/nightly-run` */
 async function reserveOnNextWindow(
   target: BulkReserveTarget,
+  model: ClaudeLocalModel | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const res = await fetch("/api/nightly-run", {
     method: "POST",
@@ -19,6 +21,8 @@ async function reserveOnNextWindow(
       issue: target.number,
       host: target.host,
       kind: "next-window",
+      // 未選択（設定に従う）のときは送らない。積む口が「未指定＝設定の既定」として扱う
+      ...(model ? { model } : {}),
     }),
   });
   if (res.ok) return { ok: true };
@@ -40,6 +44,8 @@ export function useBulkReserve({ onQueued }: { onQueued?: () => void } = {}) {
   const [failures, setFailures] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [summary, setSummary] = useState<BulkReserveSummary | null>(null);
+  // この回に予約する全件へ適用するClaudeのモデル。nullは「設定に従う」
+  const [model, setModel] = useState<ClaudeLocalModel | null>(null);
 
   const isSubmitting = progress !== null;
 
@@ -83,7 +89,7 @@ export function useBulkReserve({ onQueued }: { onQueued?: () => void } = {}) {
       setProgress({ done: 0, total: targets.length });
       let done = 0;
       const results = await reserveIssuesSequentially(targets, async (target) => {
-        const outcome = await reserveOnNextWindow(target);
+        const outcome = await reserveOnNextWindow(target, model);
         done += 1;
         setProgress({ done, total: targets.length });
         return outcome;
@@ -103,7 +109,7 @@ export function useBulkReserve({ onQueued }: { onQueued?: () => void } = {}) {
       if (failed.size === 0) setActive(false);
       if (queuedIds.size > 0) onQueued?.();
     },
-    [onQueued],
+    [onQueued, model],
   );
 
   return {
@@ -112,6 +118,8 @@ export function useBulkReserve({ onQueued }: { onQueued?: () => void } = {}) {
     failures,
     progress,
     summary,
+    model,
+    setModel,
     isSubmitting,
     start,
     exit,
