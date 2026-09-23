@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
 import {
   isActiveDispatchJobStatus,
@@ -177,7 +178,7 @@ export function useDispatchState(enabled: boolean) {
       clearTimeout(fetchingTimerId);
       setIsFetching(true);
       try {
-        const res = await fetch("/api/dispatch");
+        const res = await fetchWithTimeout("/api/dispatch");
         if (!res.ok) return;
         const json = (await res.json()) as DispatchState;
         if (cancelled) return;

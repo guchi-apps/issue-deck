@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ISSUE_POLL_INTERVAL_MS, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { Issue } from "@/types/issue";
 
 export type IssuePollingHandle = {
@@ -57,21 +58,54 @@ export function useIssuePolling(
     };
   }, []);
 
-  const refresh = useCallback(async (): Promise<boolean> => {
+  /**
+   * 前回受け取った一覧のETag（#3387）。次の取得で`If-None-Match`に載せ、変わっていなければ
+   * 304で本文を受け取らずに済ませる。初期値（サーバー側で描いた一覧）のETagは持っていない
+   * ので、最初の1回だけはまるごと受け取る。
+   */
+  const etagRef = useRef<string | null>(null);
+  /**
+   * 飛んでいる取得（#3387）。遅い回線で1回の取得が10秒を超えると、次の周回が同じ大きな一覧を
+   * 重ねて取りに行ってしまうため、飛んでいる間は新しく投げずにその完了を待つ。
+   */
+  const inFlightRef = useRef<Promise<boolean> | null>(null);
+
+  const load = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch("/api/issues");
+      const res = await fetchWithTimeout("/api/issues", {
+        // 前回の一覧は手元にあるので、ブラウザのHTTPキャッシュを挟まず304をそのまま受け取る
+        cache: "no-store",
+        headers: etagRef.current ? { "If-None-Match": etagRef.current } : undefined,
+      });
+      const headerFetchedAt = res.headers.get("x-fetched-at");
+      if (res.status === 304) {
+        // 内容は手元と同じ。一覧は渡し直さず（再描画させず）、取得時刻だけを進める
+        if (mountedRef.current) setFetchedAt(headerFetchedAt ?? new Date().toISOString());
+        return true;
+      }
       if (!res.ok) return false;
       const data: { issues: Issue[]; fetchedAt?: string } = await res.json();
+      etagRef.current = res.headers.get("etag");
       if (mountedRef.current) {
         onIssuesRef.current(data.issues);
-        setFetchedAt(data.fetchedAt ?? new Date().toISOString());
+        setFetchedAt(data.fetchedAt ?? headerFetchedAt ?? new Date().toISOString());
       }
       return true;
     } catch {
-      // ネットワーク瞬断等は次回のポーリングで回復するため無視する
+      // ネットワーク瞬断・タイムアウト等は次回のポーリングで回復するため無視する
       return false;
     }
   }, []);
+
+  const refresh = useCallback((): Promise<boolean> => {
+    const inFlight = inFlightRef.current;
+    if (inFlight) return inFlight;
+    const started = load().finally(() => {
+      inFlightRef.current = null;
+    });
+    inFlightRef.current = started;
+    return started;
+  }, [load]);
 
   useEffect(() => {
     function poll() {

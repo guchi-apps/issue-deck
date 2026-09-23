@@ -15,6 +15,7 @@ import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { getIssuesForUser } from "@/lib/issues-for-user";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { buildWeakEtag, matchesIfNoneMatch } from "@/lib/response-etag";
 
 async function findRepository(userId: string, repositoryFullName: string) {
   return db.repository.findFirst({
@@ -26,7 +27,7 @@ async function findRepository(userId: string, repositoryFullName: string) {
   });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -35,7 +36,23 @@ export async function GET() {
   const issues = await getIssuesForUser(userId);
   // 「いつ時点の内容か」を画面に出すため、PR一覧（`/api/pull-requests`）・デプロイ状況
   // （`/api/branch-flow/deploy`）と同じ形で取得時刻も返す（#1797）
-  return NextResponse.json({ issues, fetchedAt: new Date().toISOString() });
+  const fetchedAt = new Date().toISOString();
+
+  // この一覧は10秒おきに取り直され、全Issueの本文を含むため大きい（#3387）。内容が
+  // 変わっていない周回は304で本文を送らない（`If-None-Match`は`use-issue-polling.ts`が
+  // 自分で付ける）。**ETagは一覧だけから作る**——取得時刻まで含めると毎回変わって一致
+  // しなくなる。取得時刻はヘッダーでも返し、304の周回でも「HH:MM時点」だけは進める
+  const etag = buildWeakEtag(issues);
+  const headers = {
+    ETag: etag,
+    // 前回の一覧は画面側が手元に持っているので、ブラウザのHTTPキャッシュには置かせない
+    "Cache-Control": "private, no-store",
+    "X-Fetched-At": fetchedAt,
+  };
+  if (matchesIfNoneMatch(request.headers.get("if-none-match"), etag)) {
+    return new NextResponse(null, { status: 304, headers });
+  }
+  return NextResponse.json({ issues, fetchedAt }, { headers });
 }
 
 export function POST(request: NextRequest) {

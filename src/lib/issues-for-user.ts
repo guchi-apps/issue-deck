@@ -10,8 +10,11 @@ export async function getIssuesForUser(userId: string): Promise<Issue[]> {
   const [issueRows, pendingDispatchAt, manualStepVerifiedAt] = await Promise.all([
     db.issue.findMany({
       where: { repository: { installation: { userInstallations: { some: { userId } } } } },
+      // 並びを固定する。`GET /api/issues`は一覧のハッシュをETagにしており（#3387）、
+      // 内容が同じでも並びが揺れると304にならず、毎回まるごと送り直すことになる
+      orderBy: { id: "asc" },
       include: {
-        labels: true,
+        labels: { orderBy: { id: "asc" } },
         repository: true,
         favoritedBy: { where: { userId } },
         commentReadBy: { where: { userId } },
