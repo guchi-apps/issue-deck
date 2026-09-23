@@ -1491,6 +1491,12 @@ issue-deckへ待ちを作り、そのまま画面の返事をポーリングし�
   （承認したツールが走ったこと）を代わりの手掛かりにしたが、**ツールを走らせない答え方は
   拾えない**。承認を拒否した場合と、`AskUserQuestion`以外の質問にテキストで答えただけで
   ツールが動かない場合は、従来どおり`Stop`まで入力待ちのままになる
+- **選択肢を本文の文章で並べて応答を終えると、`Stop`しか届かず`00.check-user`は付かない**（#3444。
+  guchi-apps/dayspan#737がこの形で通知なしに止まった）。当面の対策は実装エージェントのプロンプト
+  （`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`）に「人の判断を待つときは
+  `AskUserQuestion`を使う。それで済まない相談はIssueコメント＋`00.check-user`＋`01.check-blocked`」と
+  明記することで、従うかどうかはエージェント次第。`Stop`時点の`last_assistant_message`やPRの有無から
+  引き上げる仕組み（#2844と同じ形）は別Issueで扱う
 - **`Stop`は応答の終了ごとに発火する。** 無人で回す実装セッションは
   「起動 → 数十分作業 → Stop」でほぼ1回だが、`21.plan-required`のように人が途中で答える
   Issueではturnごとに飛ぶ。多すぎたときの間引きは実運用の数字を見てから入れる
