@@ -653,6 +653,9 @@ export function buildSessionUsageSummary({
     // issueNumberを解決できたもの）は、prNumberの有無・値が違っても同じIssueの活動としてまとめる。
     // **issueNumberが無いときだけprNumberを使う**（#2650）。Issueへ紐付かないPR起点の実行
     // （developへのPRレビュー等）を、複数のPRが1つの「Issue未特定」行へ潰れないよう区別するため
+    // **どちらの番号も無いセッションは「Issue・PR別」へ出さない**（#3427）。開けない行で、
+    // 合計・リポジトリ別・種別別には上で加算済みのため、金額は全体の合計に残る。
+    if (entry.issueNumber === null && entry.prNumber === null) continue;
     const issueKey = sessionUsageIssueKey(entry);
     const issue =
       byIssue.get(issueKey) ??
