@@ -267,7 +267,7 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byIssue[0].latestStartedAt).toBe("2026-08-30T02:30:00.000Z");
   });
 
-  it("Issue番号を持たないセッションも落とさず、リポジトリ単位でまとめる", () => {
+  it("Issue番号もPR番号も持たないセッションは合計に入れ、Issue・PR別には出さない（#3427）", () => {
     const summary = buildSessionUsageSummary({
       entries: [
         entry({ sessionId: "impl" }),
@@ -284,10 +284,9 @@ describe("buildSessionUsageSummary", () => {
       reportedAt: null,
     });
 
-    // 合計と明細が合っていること（落とすと合わなくなる）
     expect(summary.totals.costUsd).toBe(3);
-    expect(summary.byIssue.reduce((sum, issue) => sum + issue.costUsd, 0)).toBe(3);
-    expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([null, 2504]);
+    expect(summary.byRepository.reduce((sum, row) => sum + row.costUsd, 0)).toBe(3);
+    expect(summary.byIssue.map((issue) => issue.issueNumber)).toEqual([2504]);
   });
 
   it("明細は上位200件で切り、落としたぶんは件数と合計で返す（合計・内訳には入れたまま）", () => {

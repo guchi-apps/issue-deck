@@ -5,12 +5,13 @@ import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
+import { RepositoryUsageTable } from "@/components/dashboard/repository-usage-table";
 import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } from "@/hooks/use-session-usage";
 import { useNow } from "@/hooks/use-now";
-import { formatDateTime, formatMonthDay } from "@/lib/format-date-time";
+import { formatDateTime, formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { AGENT_BASE_COLORS, AGENT_MODEL_TIER_COLORS } from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
@@ -28,7 +29,6 @@ import {
   sessionUsagePhaseSplit,
   usagePhaseKindKey,
   IMPLEMENTATION_UNSPLIT_KIND_KEY,
-  REPOSITORY_PIE_TOP_COUNT,
   type CurrentSessionTone,
   type CurrentSessionUsage,
   type SessionUsageEntry,
@@ -189,19 +189,22 @@ const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
 
 /**
- * 「セッション種別別」でフェーズの行に付ける点の色（#2779）。**棒の色分け（誰が使ったか）とは
- * 別の軸**なので、行頭の小さな点だけで示す。計画だけティールで目立たせ、残りは調査 → 実装 →
- * 仕上げの順に薄くなる中立色にして、並びが工程の順序に見えるようにする
- * （`PHASE_COLORS`の考え方をそのまま4段へ伸ばしたもの）。
+ * 「セッション種別別」の行に付ける点の色（#2779・#3425）。**棒の色分け（誰が使ったか）とは
+ * 別の軸**なので、行頭の小さな点とIssue・PR別のチップだけで示す。#3425で灰色系の濃淡をやめ、
+ * 全種別へ色相の違う固定色を割り当てた（種別を色で見分けられるように）。
  */
 const KIND_ROW_COLORS: Record<string, string> = {
   [usagePhaseKindKey("plan")]: PHASE_COLORS.plan,
-  [usagePhaseKindKey("research")]: "#78716c",
-  [usagePhaseKindKey("coding")]: PHASE_COLORS.implementation,
-  // 検証は実装と仕上げのあいだの濃さ（#3064）
-  [usagePhaseKindKey("verify")]: "#c4b5a5",
-  [usagePhaseKindKey("wrapup")]: "#d6d3d1",
-  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#52525b",
+  "plan-review": "#0ea5e9",
+  [usagePhaseKindKey("research")]: "#ca8a04",
+  [usagePhaseKindKey("coding")]: "#6366f1",
+  [usagePhaseKindKey("verify")]: "#65a30d",
+  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "#71717a",
+  [usagePhaseKindKey("wrapup")]: "#ec4899",
+  "code-review": "#a855f7",
+  actions: "#ea580c",
+  question: "#a8a29e",
+  other: "#52525b",
 };
 
 type TokenSegment = { key: string; label: string; value: number; color: string };
@@ -1010,7 +1013,6 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
                   ))}
                 </span>
                 <span className="shrink-0 text-muted-foreground tabular-nums">{row.sessions}セッション</span>
-                <span className="shrink-0 font-semibold tabular-nums">{formatUsageUsd(row.costUsd)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1">
@@ -1019,6 +1021,7 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
                 <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                   {formatUsageTokens(row.contextTokens + row.outputTokens)}
                 </span>
+                <span className="w-12 shrink-0 text-right font-semibold tabular-nums">{formatUsageUsd(row.costUsd)}</span>
               </div>
             </div>
           </Fragment>
@@ -1026,6 +1029,18 @@ function IssueKindBreakdown({ rows }: { rows: UsageIssue["byKind"] }) {
       })}
     </div>
   );
+}
+
+/** Issue行の右上に出す実行時間。最も早い開始〜最も遅い終了（#3432） */
+function issueRunSpanLabel(entries: Pick<SessionUsageEntry, "startedAt" | "endedAt">[]): string {
+  if (entries.length === 0) return "";
+  const start = entries.reduce((min, e) => (e.startedAt < min ? e.startedAt : min), entries[0].startedAt);
+  const end = entries.reduce((max, e) => (e.endedAt > max ? e.endedAt : max), entries[0].endedAt);
+  const startLabel = formatDateTime(start);
+  const endLabel = formatDateTime(end);
+  if (!endLabel) return startLabel;
+  const sameDay = startLabel.split(" ")[0] === endLabel.split(" ")[0];
+  return `${startLabel} 〜 ${sameDay ? formatTimeOfDay(end) : endLabel}`;
 }
 
 function IssueGroupRow({
@@ -1069,9 +1084,6 @@ function IssueGroupRow({
             <div className="flex items-baseline gap-1.5 text-[11px]">
               <span className="shrink-0 font-semibold text-foreground">{issueGroupLabel(issue)}</span>
               <span className="min-w-0 truncate text-muted-foreground">{repository}</span>
-              <span className="ml-auto shrink-0 pl-2 text-muted-foreground tabular-nums">
-                {issue.sessions}セッション
-              </span>
             </div>
             {/* Issue・PRのタイトル（#2686）。取得できなかった行は出さず番号のみのままにする */}
             {issue.title && (
@@ -1080,43 +1092,52 @@ function IssueGroupRow({
               </p>
             )}
             {/* 実行された種別のひと目表示（#3410）。開かなくても大まかな内訳が分かるように、
-                色を持つ種別（実装のフェーズ）はドットだけ、色を持たない種別（計画レビュー等）は
-                短いラベルで示す。詳細は行を開いたときの`IssueKindBreakdown`に譲る */}
+                全種別を色つきチップ（ドット＋名前）で示す（#3425）。詳細は行を開いたときの`IssueKindBreakdown`に譲る */}
             {issue.byKind.length > 0 && (
               <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                {issue.byKind.map((row) => {
-                  const color = KIND_ROW_COLORS[row.key];
-                  return color ? (
+                {issue.byKind.map((row) => (
+                  <span
+                    key={row.key}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[9px] text-muted-foreground"
+                  >
                     <span
-                      key={row.key}
                       aria-hidden
                       className="size-[6px] shrink-0 rounded-[1.5px]"
-                      style={{ backgroundColor: color }}
+                      style={{ backgroundColor: KIND_ROW_COLORS[row.key] ?? "#71717a" }}
                     />
-                  ) : (
-                    <span key={row.key} className="shrink-0 text-[9px] text-muted-foreground">
-                      {sessionUsageKindLabel(row.key)}
-                    </span>
-                  );
-                })}
+                    {sessionUsageKindLabel(row.key)}
+                  </span>
+                ))}
                 <span className="sr-only">
                   実行された種別: {issue.byKind.map((row) => sessionUsageKindLabel(row.key)).join("・")}
                 </span>
               </div>
             )}
+            {/* 金額・トークン量は棒グラフの右に置く（#3432）。右端の列をそろえるため幅を固定する */}
             <div className="mt-1 flex flex-col gap-0.5">
-              <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
-              <GroupTokenBar totals={issue} maxTokens={maxTokens} />
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <CostBar row={issue} widthPercent={maxCost > 0 ? (issue.costUsd / maxCost) * 100 : 0} />
+                </div>
+                <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums">
+                  {formatUsageUsd(issue.costUsd)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <GroupTokenBar totals={issue} maxTokens={maxTokens} />
+                </div>
+                <span className="w-12 shrink-0 text-right text-[10px] text-muted-foreground tabular-nums">
+                  {formatUsageTokens(issue.contextTokens + issue.outputTokens)}
+                </span>
+              </div>
             </div>
-            {issue.quotaPercent !== null && (
-              <p className="mt-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-400">
-                直近5時間枠のおよそ{Math.round(issue.quotaPercent)}%
-              </p>
-            )}
           </div>
         </button>
-        <span className="shrink-0 px-1.5 pt-2.5 text-right text-xs font-semibold tabular-nums">
-          {formatUsageUsd(issue.costUsd)}
+        {/* 右上は金額ではなく実行時間（開始日時〜終了時刻）。終了の日付は開始日から分かるので
+            省く。日をまたぐときだけ日付を添える（#3432） */}
+        <span className="shrink-0 px-1.5 pt-2.5 text-right text-[11px] text-muted-foreground tabular-nums">
+          {issueRunSpanLabel(issue.entries)}
         </span>
         {/* 開けない行（Issue番号もPR番号も無い「Issue未特定」）でも同じ寸法で描き、
             見た目とキーボード操作だけを消す（#2685）。**条件付きでDOMごと消すと**、
@@ -1711,6 +1732,8 @@ export function SessionUsagePanel({
   className,
 }: SessionUsagePanelProps) {
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
+  // 「リポジトリ別」の全件の表（#3423）。円グラフは上位5件＋その他なので、下位の金額はここで読む
+  const [repositoryListOpen, setRepositoryListOpen] = useState(false);
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
   const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
 
@@ -1854,18 +1877,25 @@ export function SessionUsagePanel({
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
-                  {`${period.byRepository.length}リポジトリ・上位${REPOSITORY_PIE_TOP_COUNT}件＋その他`}
-                </span>
+                <button
+                  type="button"
+                  aria-expanded={repositoryListOpen}
+                  aria-controls="repository-usage-table"
+                  onClick={() => setRepositoryListOpen((open) => !open)}
+                  className="min-w-0 truncate rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground tabular-nums hover:bg-muted"
+                >
+                  <span className="font-semibold text-foreground underline">
+                    {`${period.byRepository.length}リポジトリ`}
+                  </span>
+                  {repositoryListOpen ? " ▲" : " ▼"}
+                </button>
               </div>
               {repositoryPieSlices.length === 0 ? (
                 <p className="text-xs text-muted-foreground">記録がありません</p>
               ) : (
                 <RepositoryPieChart slices={repositoryPieSlices} />
               )}
-              <p className="text-[10px] text-muted-foreground">
-                金額（API換算）の多い上位{REPOSITORY_PIE_TOP_COUNT}件。それ以外は「その他」にまとめています。
-              </p>
+              {repositoryListOpen && <RepositoryUsageTable groups={period.byRepository} />}
             </section>
             <div className="flex flex-col gap-2">
               {/* **実装は1行にせず、セッションの中のフェーズへ割って並べる**（#2779）。

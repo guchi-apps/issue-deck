@@ -17,6 +17,11 @@ export type ReleaseMergePendingCounts = {
   total: number;
   /** 数えたPRのどれかでチェックが落ちているか（バッジを赤にする条件） */
   hasError: boolean;
+  /**
+   * 数えたPRのid（`<owner>/<repo>#<番号>`。`PullRequestSummary.id`と同じ形）。アプリのバッジで
+   * 「ホームの確認待ち」と同じPRを二重に数えないための突き合わせに使う（#3433）。
+   */
+  pullRequestIds: string[];
 };
 
 /**
@@ -39,9 +44,12 @@ export function countReleaseMergePending(
 ): ReleaseMergePendingCounts | null {
   if (releaseStatuses === null) return null;
 
-  const pendingMerges = releaseStatuses
-    .map((releaseStatus) => releaseStatus.pendingMerge)
-    .filter((pendingMerge) => pendingMerge !== null);
+  const withPendingMerge = releaseStatuses.flatMap((releaseStatus) =>
+    releaseStatus.pendingMerge
+      ? [{ repoFullName: releaseStatus.repoFullName, merge: releaseStatus.pendingMerge }]
+      : [],
+  );
+  const pendingMerges = withPendingMerge.map((entry) => entry.merge);
 
   const develop = pendingMerges.filter((merge) => merge.mergeTarget === "develop").length;
   const main = pendingMerges.filter((merge) => merge.mergeTarget === "main").length;
@@ -51,6 +59,9 @@ export function countReleaseMergePending(
     main,
     total: develop + main,
     hasError: pendingMerges.some((merge) => merge.ciState === "failure"),
+    pullRequestIds: withPendingMerge.map(
+      (entry) => `${entry.repoFullName}#${entry.merge.pullRequestNumber}`,
+    ),
   };
 }
 

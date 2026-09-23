@@ -309,7 +309,8 @@ describe("SessionUsagePanel", () => {
 
     // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
     expect(within(detail).getAllByText("#2504")).toHaveLength(1);
-    expect(within(detail).getByText("2セッション")).toBeTruthy();
+    // Issue行のヘッダーにはセッション数を出さない（#3432）
+    expect(within(detail).queryByText("2セッション")).toBeNull();
     // 「実装」「計画レビュー」は閉じた行の種別ひと目表示（#3410）と、開いた行の種別別内訳
     // （`IssueKindBreakdown`）の両方に出るため件数だけ見る。
     expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
@@ -360,6 +361,19 @@ describe("SessionUsagePanel", () => {
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
     // #1は閉じている（#2の方が新しい）。閉じたままでも種別名がスクリーンリーダー向けに読める。
     expect(within(detail).getByText("実行された種別: コードレビュー", { exact: false })).toBeTruthy();
+  });
+
+  it("閉じたIssue行の種別チップに、種別ごとの色のドットを付ける（#3425）", () => {
+    renderPanel(
+      response([
+        entry({ sessionId: "cr", issueNumber: 1, kind: "code-review", costUsd: 5 }),
+      ]),
+    );
+
+    const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    const chip = within(detail).getByText("コードレビュー", { selector: "span.inline-flex" });
+    const dot = chip.querySelector("span[aria-hidden]") as HTMLElement;
+    expect(dot.style.backgroundColor).toBe("rgb(168, 85, 247)");
   });
 
   it("行をクリックすると開閉し、閉じている行は中のセッションを出さない（#2653）", () => {
@@ -470,28 +484,18 @@ describe("SessionUsagePanel", () => {
     expect(onOpenIssue).toHaveBeenCalledWith("issue-deck", 2504, null);
   });
 
-  it("Issueを開けない行にも、他の行と棒グラフの右端をそろえる同じ寸法のプレースホルダーを描く（#2685）", () => {
-    const onOpenIssue = vi.fn();
+  it("Issue番号もPR番号も無いセッションは「Issue・PR別」に行を出さない（#3427）", () => {
     renderPanel(
       response([
         entry({ sessionId: "impl" }),
         entry({ sessionId: "q", kind: "question", repository: null, issueNumber: null, costUsd: 1 }),
       ]),
-      { onOpenIssue },
+      { onOpenIssue: vi.fn() },
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    // 見えるボタンは開ける行の1つだけだが（既存テストのとおり）、開けない行にも
-    // 同じ`<Button>`がDOMには存在し、`aria-hidden`で隠れているだけ（＝棒グラフの
-    // 右端をそろえるための幅を確保している）。`title`属性はaria-hiddenでも
-    // DOMに残るため、これで両方の行のボタンを拾う。
-    const allOpenButtons = within(detail).getAllByTitle(/を開く/);
-    expect(allOpenButtons).toHaveLength(2);
-    const hiddenButton = allOpenButtons.find(
-      (button) => button.getAttribute("aria-hidden") === "true",
-    );
-    expect(hiddenButton).toBeTruthy();
-    expect((hiddenButton as HTMLButtonElement).disabled).toBe(true);
+    expect(within(detail).getAllByTitle(/を開く/)).toHaveLength(1);
+    expect(screen.queryByText("（Issue未特定）")).toBeNull();
   });
 
   it("Issue番号が無くPR番号だけの行は「PR #番号」と表示し、PRを開く導線を出す（#2650）", () => {
@@ -553,9 +557,35 @@ describe("SessionUsagePanel", () => {
     // 全体は28ドル。最大の切れは7/28で25.0%、その他は3/28で10.7%
     expect(chart.getAttribute("aria-label")).toContain("repository-0 25.0%（$7.00）");
     expect(chart.getAttribute("aria-label")).toContain("その他 10.7%（$3.00）");
-    // 棒＋トークン帯や「すべて表示」の展開ボタンは持たない
-    expect(within(card).queryByRole("button")).toBeNull();
-    expect(within(card).getByText("7リポジトリ・上位5件＋その他")).toBeTruthy();
+    // 「上位5件」の説明文は出さない（#3423）。ボタンは一覧の開閉だけ
+    expect(within(card).getAllByRole("button")).toHaveLength(1);
+    expect(within(card).queryByText(/上位5件/)).toBeNull();
+  });
+
+  it("「N リポジトリ」を押すと全件の表が開き、もう一度押すと閉じる（#3423）", () => {
+    const entries = Array.from({ length: 7 }, (_unused, index) =>
+      entry({
+        sessionId: `repo-${index}`,
+        repository: `repository-${index}`,
+        costUsd: 7 - index,
+      }),
+    );
+    renderPanel(response(entries));
+
+    const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
+    const toggle = within(card).getByRole("button", { name: /7リポジトリ/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(card).queryByRole("table")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const table = within(card).getByRole("table");
+    // 円グラフでは「その他」に入る6位・7位も、表では名前と割合が読める
+    expect(within(table).getByText("repository-6")).toBeTruthy();
+    expect(within(table).getAllByRole("row")).toHaveLength(8);
+
+    fireEvent.click(toggle);
+    expect(within(card).queryByRole("table")).toBeNull();
   });
 
   it("リポジトリ別の円グラフは、Claude・Codex・Actionsもトークンも区別しない（#3060）", () => {
@@ -747,13 +777,13 @@ describe("SessionUsagePanel", () => {
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });
 
-  it("quotaPercentが入っているIssueだけ、直近5時間枠のおよそ何%かを表示する（#2988）", () => {
+  it("quotaPercentが入っていても、Issue行に直近5時間枠の割合は出さない（#3432。#2988の表示を削除）", () => {
     const data = response([entry()]);
     data.byIssue[0].quotaPercent = 12.4;
     renderPanel(data);
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
-    expect(within(detail).getByText("直近5時間枠のおよそ12%")).toBeTruthy();
+    expect(within(detail).queryByText("直近5時間枠のおよそ12%")).toBeNull();
   });
 
   it("quotaPercentがnullのIssueには表示しない", () => {
