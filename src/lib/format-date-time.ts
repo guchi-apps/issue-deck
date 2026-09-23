@@ -105,6 +105,20 @@ export function formatTimeOfDay(value: number | string | Date): string {
   return `${pad2(parts.hour)}:${pad2(parts.minute)}`;
 }
 
+/** 時は0埋めなし・分は2桁の時刻（例: `0:08`・`10:21`）。範囲表示の終了側など、幅を詰めたい場所で使う */
+export function formatCompactTime(value: number | string | Date): string {
+  const parts = toJstParts(value);
+  if (parts === null) return "";
+  return `${parts.hour}:${pad2(parts.minute)}`;
+}
+
+/** 月/日と時刻（例: `9/24 10:00`）。一覧の実行時間の開始側で使う */
+export function formatMonthDayTime(value: number | string | Date): string {
+  const parts = toJstParts(value);
+  if (parts === null) return "";
+  return `${parts.month}/${parts.day} ${parts.hour}:${pad2(parts.minute)}`;
+}
+
 /** 月日だけ（例: `8/15`）。日付が変わったことだけを示す場所で使う */
 export function formatMonthDay(value: number | string | Date): string {
   const parts = toJstParts(value);
