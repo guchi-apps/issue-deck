@@ -1644,6 +1644,12 @@ export function POST(request: NextRequest) {
     （`isReadOnlyVerificationCommand`。VPSの確認コマンドはそこへ到達できるホストが居るときだけ。#2901）。動かす契機は`GET /api/dispatch`と結果報告の2つで、
     常駐プロセスは置かない。設計は
     [docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#完了の確認方法を定期巡回する2008)。
+    **起票者がリポジトリのOWNER/MEMBER/COLLABORATOR、または`[bot]`名義（issue-deck自身の
+    自動化）でなければ巡回の対象にしない**（`isTrustedManualStepPatrolAuthor`。#3365）。
+    `71.manual-step`ラベルはタイトルが`[手作業]`で始まれば起票者を問わず付くため、
+    ここで絞らないとPUBLICリポジトリの誰でも無人実行の入口を立てられる。判定材料の
+    `Issue.authorAssociation`（GitHubの`author_association`）は同期のたびに書き直すので、
+    起票後に権限が変わった場合も次の同期で反映される。
   - **本文の書式は起票時に機械検査する**（#2048。
     [`lib/manual-step-body-check.ts`](../src/lib/manual-step-body-check.ts)・
     `POST /api/manual-steps/body-check`・`reusable-issue-labels.yml`の`manual-step-body-check`）。

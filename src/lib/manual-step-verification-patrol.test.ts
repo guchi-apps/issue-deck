@@ -116,6 +116,9 @@ function issueRow(overrides: { number?: number; body?: string } = {}) {
   return {
     number: overrides.number ?? 1994,
     body: overrides.body ?? BODY,
+    // #3365。巡回は起票者を見るようになったので、テストの既定値はOWNERにしておく
+    authorLogin: "guchi",
+    authorAssociation: "OWNER",
     repository: { fullName: REPOSITORY },
   };
 }
@@ -159,6 +162,8 @@ beforeEach(async () => {
   issueFindFirst.mockResolvedValue({
     body: BODY,
     state: "OPEN",
+    authorLogin: "guchi",
+    authorAssociation: "OWNER",
     labels: [{ name: "71.manual-step" }],
   });
   repositoryFindFirst.mockResolvedValue({ id: "repo-1" });

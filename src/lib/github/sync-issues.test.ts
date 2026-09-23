@@ -248,6 +248,45 @@ describe("upsertIssueFromWebhookPayload の checkUserLabeledAt 更新", () => {
   });
 });
 
+// #3365。手作業Issueの確認コマンド定期巡回が起票者の信頼判定に使うため、
+// GitHubの`author_association`をそのままDBへ持ち越す
+describe("upsertIssueFromWebhookPayload の authorAssociation 反映", () => {
+  beforeEach(() => {
+    findUnique.mockResolvedValue(null);
+    upsert.mockReset().mockImplementation(async ({ update }) => ({ id: "issue-1", ...update }));
+    issueLabelCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+    issueLabelDeleteMany.mockReset().mockResolvedValue(undefined);
+    $transaction.mockReset().mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops));
+  });
+
+  it("author_associationをそのまま保存する", async () => {
+    const raw = makeRawIssue({ author_association: "OWNER" });
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ authorAssociation: "OWNER" }),
+        update: expect.objectContaining({ authorAssociation: "OWNER" }),
+      }),
+    );
+  });
+
+  it("author_associationが無ければnullを保存する", async () => {
+    const raw = makeRawIssue();
+    delete (raw as { author_association?: string }).author_association;
+
+    await upsertIssueFromWebhookPayload("repo-1", raw);
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ authorAssociation: null }),
+      }),
+    );
+  });
+});
+
 describe("updateQaAnswerPendingState", () => {
   beforeEach(() => {
     vi.useFakeTimers();
