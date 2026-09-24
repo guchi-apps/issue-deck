@@ -1,4 +1,5 @@
 import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
+import { isCodeReviewExcludedRepository } from "@/lib/code-review-excluded-repos";
 // 型だけのimport（コンパイル時に消える）。`host-checkout.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-metrics.ts`と同じ）
 import type { DispatchHostCheckout } from "@/lib/dispatch/host-checkout";
@@ -1689,6 +1690,7 @@ export type CodeReviewRejection =
   | "host_unknown"
   | "host_offline"
   | "code_review_unsupported"
+  | "repository_excluded"
   | "repository_not_runnable"
   | "already_queued";
 
@@ -1704,6 +1706,8 @@ export function describeCodeReviewRejection(
     case "code_review_unsupported":
       // **何をすれば押せるようになるかまで書く**（`plan_review_unsupported`と同じ）
       return `${formatDispatchHostName(context.hostName)} のpollerがコードレビューに対応していません（更新してから押せるようになります）。`;
+    case "repository_excluded":
+      return `${context.repositoryFullName ?? "このリポジトリ"} はコードレビューの対象外です（指摘からIssueを起こして直す運用を入れていないリポジトリのため）。`;
     case "repository_not_runnable":
       return `${context.repositoryFullName ?? "このリポジトリ"} は ${formatDispatchHostName(context.hostName)} にチェックアウトされていないためレビューできません（cloneと \`local-repos.conf\` への記載を確認してください）。`;
     case "already_queued":
@@ -1722,6 +1726,8 @@ export function resolveCodeReviewRejection(params: {
   repositoryFullName: string;
   hasActiveJob: boolean;
 }): CodeReviewRejection | null {
+  // ホストの状態より先に見る。どのホストを選んでも押せるようにはならない（#3453）
+  if (isCodeReviewExcludedRepository(params.repositoryFullName)) return "repository_excluded";
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.codeReviewCapable !== true) return "code_review_unsupported";

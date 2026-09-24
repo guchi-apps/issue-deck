@@ -1,10 +1,14 @@
 import { repositoryRankColor } from "@/components/dashboard/repository-pie-chart";
-import { formatUsageUsd, type UsageGroup } from "@/lib/session-usage-view";
+import {
+  formatUsageUsd,
+  REPOSITORY_PIE_MIN_FRACTION,
+  type UsageGroup,
+} from "@/lib/session-usage-view";
 
 /**
- * AI使用量「リポジトリ別」の全件の表（#3423）。円グラフは金額の上位5件と「その他」にまとめるため、
+ * AI使用量「リポジトリ別」の全件の表（#3423）。円グラフは金額が全体の3%以上のリポジトリと「その他」にまとめるため、
  * 「その他」に入ったリポジトリの金額はここで読む。並びは受け取った順（集計側が金額順に並べてある）。
- * 円グラフの切れと同じ色の点を、金額のある上位5件に付ける。
+ * 円グラフの切れと同じ色の点を、3%以上のリポジトリに付ける（未満は「その他」のグレー）。
  */
 export function RepositoryUsageTable({ groups }: { groups: Pick<UsageGroup, "key" | "costUsd">[] }) {
   const total = groups.reduce((sum, group) => sum + group.costUsd, 0);
@@ -30,7 +34,9 @@ export function RepositoryUsageTable({ groups }: { groups: Pick<UsageGroup, "key
                   aria-hidden
                   className="mr-1.5 inline-block size-2 rounded-full"
                   style={{
-                    background: group.costUsd > 0 ? repositoryRankColor(rank) : "var(--pie-other)",
+                    background:
+                      total > 0 && group.costUsd / total >= REPOSITORY_PIE_MIN_FRACTION
+                        ? repositoryRankColor(rank) : "var(--pie-other)",
                   }}
                 />
                 {group.key || "(不明)"}

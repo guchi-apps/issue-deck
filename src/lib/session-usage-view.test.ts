@@ -822,7 +822,7 @@ describe("niceAxisScale", () => {
 describe("buildRepositoryPieSlices（#3060）", () => {
   const group = (key: string, costUsd: number) => ({ key, costUsd });
 
-  it("金額の上位5件と、残りをまとめた「その他」に畳む", () => {
+  it("全体の3%以上のリポジトリと、3%未満をまとめた「その他」に畳む", () => {
     const slices = buildRepositoryPieSlices([
       group("a", 60),
       group("b", 20),
@@ -847,9 +847,20 @@ describe("buildRepositoryPieSlices（#3060）", () => {
     expect(slices.map((slice) => slice.key)).toEqual(["big", "small"]);
   });
 
-  it("5件以内なら「その他」を作らない", () => {
-    const slices = buildRepositoryPieSlices([group("a", 2), group("b", 1)]);
+  it("全て3%以上なら「その他」を作らない。6件以上でも名前を出す", () => {
+    const slices = buildRepositoryPieSlices(
+      ["a", "b", "c", "d", "e", "f", "g"].map((key, index) => group(key, 7 - index)),
+    );
+    expect(slices.map((slice) => slice.key)).toEqual(["a", "b", "c", "d", "e", "f", "g"]);
     expect(slices.some((slice) => slice.isOther)).toBe(false);
+  });
+
+  it("ちょうど3%は名前を出し、3%未満は「その他」へ入れる（#3454）", () => {
+    const slices = buildRepositoryPieSlices([group("a", 97), group("edge", 3), group("low", 0.5)]);
+    // 合計100.5。edgeは2.98%で未満、lowも未満
+    expect(slices.map((slice) => slice.label)).toEqual(["a", "その他"]);
+    const exact = buildRepositoryPieSlices([group("a", 97), group("edge", 3)]);
+    expect(exact.map((slice) => slice.key)).toEqual(["a", "edge"]);
   });
 
   it("金額が0のリポジトリは切れにも件数にも入れない", () => {
