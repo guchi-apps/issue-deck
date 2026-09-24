@@ -119,7 +119,7 @@ if [[ "$MODE" == "plan" ]]; then
 
   # 人が起動する入口では、読むのは本体チェックアウト（直前に`git pull`済み）。
   PROMPT_CONTENT="$(plan_review_render_prompt "$PROMPT_TEMPLATE" "$PLAN_ISSUE" "$REVIEW_REPO" \
-    "$ROOT" "本体チェックアウト・developの最新" "$FLEET_STATUS_FILE")"
+    "$ROOT" "本体チェックアウト・developの最新" "$FLEET_STATUS_FILE" "$ROOT/scripts")"
 
   echo "Issue #$PLAN_ISSUE の計画レビュー（G1）としてClaude Codeセッションを起動します。"
 else
@@ -231,7 +231,10 @@ claude_export_max_retries
 # 定型のコマンドを明示的に許可する（#2762）。実装セッションと同じ理由・同じ規則
 # （`scripts/lib/agent-allowed-tools.sh`）。レビュー・統合セッションも`gh pr view`・`git log`・
 # `gh run view`を絶え間なく叩くため、クラシファイアの判断がブレると同じところで止まる。
-REVIEWER_ALLOWED_TOOLS="$(agent_allowed_tools)"
+# 添付画像の保存先は、開くたびに承認待ちにならないよう`Read`を許可する（#3456。実装セッションの
+# `run-issue-session.sh`と同じ規則・同じ保存先）。
+export ISSUE_DECK_IMAGE_DIR="${ISSUE_DECK_IMAGE_DIR:-${TMPDIR:-/tmp}/issue-deck-images}"
+REVIEWER_ALLOWED_TOOLS="$(agent_allowed_tools "${ISSUE_DECK_IMAGE_DIR%/}/")"
 CLAUDE_EXTRA_ARGS+=(--allowedTools "$REVIEWER_ALLOWED_TOOLS")
 
 echo "Claude Codeセッションを権限モード $PERMISSION_MODE で起動します（このターミナルで実行）..."
