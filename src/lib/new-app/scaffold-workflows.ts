@@ -455,7 +455,7 @@ export function deployWorkflow(spec: NewAppSpec): string {
   const publicUrl = publicUrlFor(spec);
 
   const secretsEnv = [
-    "      SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}",
+    "      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}",
     "      HOST: ${{ secrets.SERVER_HOST }}",
     "      USERNAME: ${{ secrets.SERVER_USERNAME }}",
     "      SSH_PORT: ${{ secrets.SERVER_SSH_PORT }}",
@@ -477,14 +477,13 @@ export function deployWorkflow(spec: NewAppSpec): string {
           "      ALLOWED_GOOGLE_EMAILS: ${{ secrets.ALLOWED_GOOGLE_EMAILS }}",
         ]
       : []),
-    "      TARGET_DIR: ${{ secrets.TARGET_DIR }}",
     "      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}",
   ].join("\n");
 
   const secretsEnvComment = `    # GitHub側の値をここで明示的に渡す。以前は実行のたびに1Passwordから読んで
     # いたが、サービスアカウントの日次レート制限を使い切ってフリート全体の
     # デプロイが止まった（guchi-apps/issue-deck#1302）。SERVER_*${usesDb ? "・SHARED_DB_*" : ""}${supabase ? "・SUPABASE_*" : ""}
-    # はorganizationの共通値。
+    # はorganizationの共通値。SSH_PRIVATE_KEYだけはこのアプリ専用の鍵（guchi-apps/issue-deck#3348）。
     #
     # このブロックは scripts/generate-workflow-env-block.sh で生成する（guchi-apps/issue-deck#1307）。`;
 
@@ -505,55 +504,29 @@ export function deployWorkflow(spec: NewAppSpec): string {
     ".next",
     ...(usesDb ? ["prisma"] : []),
     "deploy",
-    ...(usesDb ? ["scripts/construct-database-url.sh"] : []),
-    "scripts/update-env-file.sh",
     "next.config.mjs",
   ];
   const archive = archiveEntries.map((entry) => `            ${entry} \\`).join("\n").replace(/ \\$/, "");
-  const cleanup = archiveEntries
-    .filter((entry) => !entry.startsWith("scripts/"))
-    .join(" ");
-
-  const sshEnv = [
-    ...(usesDb
-      ? ["          DATABASE_URL: ${{ env.DATABASE_URL }}", "          MIGRATE_DATABASE_URL: ${{ env.MIGRATE_DATABASE_URL }}"]
-      : []),
-    ...(supabase
-      ? [
-          "          NEXT_PUBLIC_SUPABASE_URL: ${{ env.NEXT_PUBLIC_SUPABASE_URL }}",
-          "          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}",
-          "          ALLOWED_GOOGLE_EMAILS: ${{ env.ALLOWED_GOOGLE_EMAILS }}",
-        ]
-      : []),
-    "          TARGET_DIR: ${{ env.TARGET_DIR }}",
-  ].join("\n");
-  const sshEnvNames = [
+  // gateへ標準入力で渡す変数（KEY=VALUE、1行1変数）。秘密の値をargvに載せないため。
+  // PORTは平文で持つ（standards/ports.md）。NODE_ENVもここで渡す。
+  const gateVars = [
+    "NODE_ENV=production",
+    `PORT=${port}`,
     ...(usesDb ? ["DATABASE_URL", "MIGRATE_DATABASE_URL"] : []),
     ...(supabase
       ? ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "ALLOWED_GOOGLE_EMAILS"]
       : []),
-    "TARGET_DIR",
-  ].join(",");
-
-  const updateEnv = [
-    "            update_env NODE_ENV production",
-    '            update_env PORT "$PORT"',
-    ...(usesDb ? ['            update_env DATABASE_URL "$DATABASE_URL"'] : []),
-    ...(supabase
-      ? [
-          '            update_env NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"',
-          '            update_env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"',
-          '            update_env ALLOWED_GOOGLE_EMAILS "$ALLOWED_GOOGLE_EMAILS"',
-        ]
-      : []),
-  ].join("\n");
-
-  const migrate = usesDb
-    ? `
-            echo "Applying database migrations..."
-            DATABASE_URL="$MIGRATE_DATABASE_URL" pnpm exec prisma migrate deploy
-`
-    : "";
+  ];
+  const gateEnvEntries = gateVars.filter((entry) => !entry.includes("="));
+  const gateEnvBlock = gateEnvEntries
+    .map((name) => `          ${name}: \${{ env.${name} }}`)
+    .join("\n");
+  const gatePrintf = [
+    `printf '%s\\n' "NODE_ENV=production" "PORT=${port}"`,
+    ...gateEnvEntries.map((name) => `printf '%s\\n' "${name}=\${${name}}"`),
+  ]
+    .map((line) => `            ${line}`)
+    .join("\n");
 
   return `name: Deploy to Production
 
@@ -713,77 +686,34 @@ ${constructDbStep}
           HOST: \${{ env.HOST }}
           SSH_PORT: \${{ env.SSH_PORT }}
 
+      # **VPSのgate（/usr/local/sbin/app-deploy-gate。guchi-apps/vps#275）へ渡す。**
+      # 鍵は「このアプリ専用」で、authorized_keysのcommand=が対象アプリを固定する。
+      # 任意のシェルコマンドは実行できず、upload・env・deployの3語だけが通る。
+      # 展開・.env更新・依存インストール・migrate・pm2・ヘルスチェックはgate側が行う。
       - name: Upload archive
-        run: scp -P "\${SSH_PORT}" deploy.tar.gz "\${USERNAME}@\${HOST}:\${TARGET_DIR}/deploy.tar.gz"
+        run: ssh -p "\${SSH_PORT}" "\${USERNAME}@\${HOST}" upload < deploy.tar.gz
         env:
           HOST: \${{ env.HOST }}
           USERNAME: \${{ env.USERNAME }}
           SSH_PORT: \${{ env.SSH_PORT }}
-          TARGET_DIR: \${{ env.TARGET_DIR }}
+
+      - name: Send environment variables
+        env:
+          HOST: \${{ env.HOST }}
+          USERNAME: \${{ env.USERNAME }}
+          SSH_PORT: \${{ env.SSH_PORT }}
+${gateEnvBlock}
+        run: |
+          {
+${gatePrintf}
+          } | ssh -p "\${SSH_PORT}" "\${USERNAME}@\${HOST}" env
 
       - name: Deploy and restart
-        uses: appleboy/ssh-action@v1
+        run: ssh -p "\${SSH_PORT}" "\${USERNAME}@\${HOST}" deploy
         env:
-${sshEnv}
-        with:
-          host: \${{ env.HOST }}
-          username: \${{ env.USERNAME }}
-          key: \${{ env.SSH_PRIVATE_KEY }}
-          port: \${{ env.SSH_PORT }}
-          # ここに無い変数はSSH先に存在しない。env: と同じ名前を必ず並べる。
-          envs: ${sshEnvNames}
-          script: |
-            set -euo pipefail
-            cd "\${TARGET_DIR}"
-
-            # 待受ポートはシークレットではなく設定値として平文で持つ
-            # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」）。
-            PORT=${port}
-
-            echo "Cleaning up old release files..."
-            # 配布物を増やしたらこの行にも足す。永続させたいディレクトリは絶対に入れない。
-            rm -rf ${cleanup}
-
-            echo "Extracting archive..."
-            tar -xzf deploy.tar.gz
-            rm deploy.tar.gz
-
-            update_env() {
-              bash scripts/update-env-file.sh .env "$1" "$2"
-            }
-
-            echo "Updating .env..."
-${updateEnv}
-
-            echo "Installing production dependencies..."
-            corepack enable pnpm >/dev/null 2>&1 || true
-            pnpm install --prod --frozen-lockfile
-${migrate}
-            echo "Restarting PM2..."
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 delete ${spec.repositoryName} 2>/dev/null || true
-              PORT="$PORT" pm2 start deploy/ecosystem.config.js --env production
-              pm2 save
-            else
-              echo "pm2 is required on the server. Install: npm install -g pm2"
-              exit 1
-            fi
-
-            echo "Health check..."
-            # Next.js は起動完了までに数秒かかる。1回だけのcurlでは起動が間に合わずに
-            # 失敗するため、一定時間リトライする。
-            for i in $(seq 1 30); do
-              if curl -fsS -o /dev/null "http://127.0.0.1:\${PORT}/"; then
-                echo "Deployment successful."
-                exit 0
-              fi
-              sleep 2
-            done
-
-            echo "Health check failed after 60s."
-            pm2 describe ${spec.repositoryName} || true
-            pm2 logs ${spec.repositoryName} --lines 50 --nostream || true
-            exit 1
+          HOST: \${{ env.HOST }}
+          USERNAME: \${{ env.USERNAME }}
+          SSH_PORT: \${{ env.SSH_PORT }}
 
       # **deployジョブの成功は公開できたことを保証しない**（guchi-apps/issue-deck#2252）。
       # 上のヘルスチェックが叩くのはVPS内の127.0.0.1で、ApacheのVirtualHostが無くても通る。

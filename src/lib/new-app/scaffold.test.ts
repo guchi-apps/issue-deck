@@ -154,15 +154,32 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     expect(deploy).toContain("PORT=3112");
   });
 
-  it("配布物とクリーンアップの対象が食い違わない", () => {
+  it("VPSへはアプリ専用鍵でgateの3語（upload・env・deploy）だけを送り、任意のシェルコマンドを実行しない（#3348）", () => {
     const deploy = content(spec(), ".github/workflows/deploy.yml");
-    const archive = /tar -czf deploy\.tar\.gz \\\n([\s\S]*?)\n\n/.exec(deploy)?.[1] ?? "";
-    const packed = archive
-      .split("\n")
-      .map((line) => line.replace(/\s|\\/g, ""))
-      .filter((line) => line !== "" && !line.startsWith("scripts/"));
-    const cleanup = /rm -rf (.+)/.exec(deploy)?.[1]?.split(" ") ?? [];
-    expect(cleanup.sort()).toEqual(packed.sort());
+    expect(deploy).not.toContain("appleboy/ssh-action");
+    expect(deploy).not.toContain("SERVER_SSH_PRIVATE_KEY");
+    expect(deploy).toContain("SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}");
+    expect(deploy).toContain('"${USERNAME}@${HOST}" upload < deploy.tar.gz');
+    expect(deploy).toContain('"${USERNAME}@${HOST}" env');
+    expect(deploy).toContain('"${USERNAME}@${HOST}" deploy');
+    // 対象アプリは鍵のcommand=が固定するので、置き場のパスをワークフローに持たない。
+    expect(deploy).not.toContain("TARGET_DIR");
+  });
+
+  it("gateへ渡す変数は、env: で宣言した名前と printf で送る名前がそろっている", () => {
+    const deploy = content(spec(), ".github/workflows/deploy.yml");
+    const block = /- name: Send environment variables\n([\s\S]*?)\n\n/.exec(deploy)?.[1] ?? "";
+    const declared = [...block.matchAll(/^ {10}([A-Z_]+): \$\{\{ env\./gm)].map((m) => m[1]).filter((name) => !["HOST", "USERNAME", "SSH_PORT"].includes(name));
+    const sent = [...block.matchAll(/"([A-Z_]+)=\$\{/g)].map((m) => m[1]);
+    expect(sent.sort()).toEqual(declared.sort());
+    expect(sent).toContain("DATABASE_URL");
+    expect(block).toContain('"PORT=3112"');
+  });
+
+  it("SSH_PRIVATE_KEYはアプリ専用の1Password参照で、organization共通鍵をinheritしない（#3348）", () => {
+    const manifest = content(spec(), ".github/secrets-manifest.tsv");
+    expect(manifest).toContain("SSH_PRIVATE_KEY\trepo\tsecret\tSSH_PRIVATE_KEY\top://apps/kakei-report/deploy-ssh-key");
+    expect(manifest).not.toContain("SERVER_SSH_PRIVATE_KEY");
   });
 
   it("配布するのは next.config.mjs で、旧名の next.config.ts は含めない（#3223）", () => {
@@ -174,14 +191,14 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
 
   it("DBを使う種別だけマイグレーションとDATABASE_URLの組み立てを持つ", () => {
     const withDb = content(spec(), ".github/workflows/deploy.yml");
-    expect(withDb).toContain("prisma migrate deploy");
+    expect(withDb).toContain("MIGRATE_DATABASE_URL");
     expect(withDb).toContain("scripts/construct-database-url.sh");
 
     const withoutDb = content(
       spec({ kind: "next", databaseName: null }),
       ".github/workflows/deploy.yml",
     );
-    expect(withoutDb).not.toContain("prisma migrate deploy");
+    expect(withoutDb).not.toContain("MIGRATE_DATABASE_URL");
     expect(withoutDb).not.toContain("scripts/construct-database-url.sh");
     expect(withoutDb).not.toContain("SHARED_DB_HOST");
   });
@@ -192,14 +209,6 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     expect(deploy).toContain("::warning::");
     const step = /- name: 公開URLの疎通を確認する（警告のみ）\n([\s\S]*?)\n\n/.exec(deploy)?.[1] ?? "";
     expect(step).toContain("continue-on-error: true");
-  });
-
-  it("SSH先へ渡す envs: と env: の名前がそろっている（ここに無い変数はSSH先に存在しない）", () => {
-    const deploy = content(spec(), ".github/workflows/deploy.yml");
-    const block = /- name: Deploy and restart\n([\s\S]*?)\n          script: \|/.exec(deploy)?.[1] ?? "";
-    const declared = [...block.matchAll(/^ {10}([A-Z_]+): \$\{\{ env\./gm)].map((m) => m[1]);
-    const passed = (/envs: (.+)/.exec(block)?.[1] ?? "").split(",");
-    expect(passed.sort()).toEqual(declared.sort());
   });
 });
 
