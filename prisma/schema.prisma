@@ -282,6 +282,11 @@ model Issue {
   authorAssociation String?
   assigneeLogin     String?
   commentCount      Int               @default(0)
+  // GitHubの`sub_issues_summary`（子Issueの総数・完了数）と`parent_issue_url`。一覧の行へ
+  // 「親Issue／子Issue」を出すための値（#3469）。REST・Webhookのpayloadにそのまま載る
+  subIssuesTotal     Int?
+  subIssuesCompleted Int?
+  parentIssueUrl     String?
   milestoneTitle    String?
   milestoneOpen     Int?
   milestoneClosed   Int?

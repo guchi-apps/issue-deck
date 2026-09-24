@@ -1,4 +1,5 @@
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { buildIssueHierarchy } from "@/lib/issue-hierarchy";
 import { isBotComment } from "@/lib/github/is-bot-comment";
 import type { GithubApiComment, GithubApiIssue } from "@/lib/github/issues-api";
 import type { Issue, IssueComment, IssueLabel, IssueStateReason } from "@/types/issue";
@@ -98,6 +99,11 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     labels: raw.labels.map(mapLabel),
     milestone,
     commentCount: raw.comments,
+    hierarchy: buildIssueHierarchy(
+      raw.sub_issues_summary?.total,
+      raw.sub_issues_summary?.completed,
+      raw.parent_issue_url,
+    ),
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
     closedAt: raw.closed_at ?? null,
@@ -150,6 +156,7 @@ export function dbIssueToDisplayIssue(
     })),
     milestone,
     commentCount: row.commentCount,
+    hierarchy: buildIssueHierarchy(row.subIssuesTotal, row.subIssuesCompleted, row.parentIssueUrl),
     createdAt: row.githubCreatedAt.toISOString(),
     updatedAt: row.githubUpdatedAt.toISOString(),
     closedAt: row.githubClosedAt?.toISOString() ?? null,

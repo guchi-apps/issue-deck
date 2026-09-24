@@ -99,6 +99,7 @@ import {
   type CodeReviewFindingProgress,
 } from "@/lib/github/code-review";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
+import { resolveIssueHierarchyBadges } from "@/lib/issue-hierarchy";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import {
   isPullRequestWaitingStatus,
@@ -1370,6 +1371,21 @@ export function IssueList({
                   </a>
                 </Button>
               )}
+              {/* 親Issue／子Issueの区別（#3469）。親は子の完了で終わるため通常は実装開始不要 */}
+              {resolveIssueHierarchyBadges(issue).map((badge) => (
+                <span
+                  key={badge.kind}
+                  title={badge.title}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
+                    badge.kind === "parent"
+                      ? "bg-violet-500/10 text-violet-700 ring-violet-500/40 dark:text-violet-300"
+                      : "text-muted-foreground ring-border",
+                  )}
+                >
+                  {badge.label}
+                </span>
+              ))}
               {issue.commentCount > 0 && (
                 <span className="flex items-center gap-0.5">
                   <MessageSquare className="size-3" />

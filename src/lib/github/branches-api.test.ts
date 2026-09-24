@@ -231,7 +231,12 @@ describe("lookupBranchRefs", () => {
 
     const result = await lookupBranchRefs("guchi-apps", "other", [], "token");
 
-    expect(result).toEqual({ existingBranches: [], developVsMain: null });
+    expect(result).toEqual({
+      existingBranches: [],
+      developVsMain: null,
+      mainHead: null,
+      developHeadOid: null,
+    });
   });
 
   it("リポジトリが見つからない応答でも落ちない", async () => {
@@ -239,7 +244,12 @@ describe("lookupBranchRefs", () => {
 
     const result = await lookupBranchRefs("guchi-apps", "missing", ["issue-1"], "token");
 
-    expect(result).toEqual({ existingBranches: [], developVsMain: null });
+    expect(result).toEqual({
+      existingBranches: [],
+      developVsMain: null,
+      mainHead: null,
+      developHeadOid: null,
+    });
   });
 
   // #2364。単一ブランチ運用のリポジトリで毎回のポーリングが失敗し、本番のログが埋まっていた
@@ -263,9 +273,63 @@ describe("lookupBranchRefs", () => {
       "token",
     );
 
-    expect(result).toEqual({ existingBranches: ["issue-2364"], developVsMain: null });
+    expect(result).toEqual({
+      existingBranches: ["issue-2364"],
+      developVsMain: null,
+      mainHead: null,
+      developHeadOid: null,
+    });
     // 正常な状態なので警告も出さない（ポーリングのたびにログへ出るのを避けるのが目的）
     expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // #3468。Xcodeで実機へ反映するリポジトリでは、mainの先頭が「実機に入っている版」になる
+  it("mainとdevelopの先頭コミットを同じ応答から返す", async () => {
+    stubGraphql({
+      repository: {
+        comparison: {
+          target: { oid: "3f2a1c9aaaa", committedDate: "2026-09-23T12:14:00Z" },
+          compare: {
+            aheadBy: 2,
+            behindBy: 0,
+            baseTarget: { tree: { oid: "tree-main" } },
+            headTarget: { oid: "a81b0e2bbbb", tree: { oid: "tree-develop" } },
+          },
+        },
+      },
+    });
+
+    const result = await lookupBranchRefs("guchi-apps", "aide-ios", [], "token");
+
+    expect(result.mainHead).toEqual({ oid: "3f2a1c9aaaa", committedAt: "2026-09-23T12:14:00Z" });
+    expect(result.developHeadOid).toBe("a81b0e2bbbb");
+  });
+
+  it("developが無くてもmainの先頭は返す", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubGraphql(
+      {
+        repository: {
+          comparison: {
+            target: { oid: "main-oid", committedDate: "2026-09-23T12:14:00Z" },
+            compare: null,
+          },
+        },
+      },
+      [
+        {
+          type: "NOT_FOUND",
+          path: ["repository", "comparison", "compare"],
+          message: "Could not resolve head ref 'develop'.",
+        },
+      ],
+    );
+
+    const result = await lookupBranchRefs("guchi-apps", "aide-ios", [], "token");
+
+    expect(result.mainHead).toEqual({ oid: "main-oid", committedAt: "2026-09-23T12:14:00Z" });
+    expect(result.developHeadOid).toBeNull();
     warn.mockRestore();
   });
 

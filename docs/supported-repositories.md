@@ -72,6 +72,7 @@ Issueを起こして実装で直す流れを想定していないため）。同
 | `guchi-apps/aide` | 対応済み | **参照**（2つとも`@workflows/v15`）: `issue-labels.yml`・`claude-issue-dispatch.yml` | あり（`CLAUDE.md`を新規作成） | 2026-08-15 | #1379, guchi-apps/aide#11 | #1047の起票後に作られたためどの周にも入っていなかったpublicリポジトリ。**Node 24を最初に使ったリポジトリ**（`ci.yml`・`engines`とも。当時の他は20〜22帯。#2213の`aide-bot`が2件目）で、Node 24が型ストリッピングで`.ts`を直接実行するため**ビルド工程そのものが無い**。`runtime-setup`は`node`——`dependencies`は空だが`minimal`にすると`npm ci`が走らず、`devDependencies`のTypeScriptが入らないため`npm run typecheck`が通らなくなる。検証は`typecheck`と`test`（`node --test`）の2つだけで、`lint`も`build`も無い。**ラベルがGitHub既定のままだった唯一のリポジトリ**で、旧世代の進捗ラベルすら無く控える作業は不要だった（既定ラベルはどのIssueにも付いておらず、役割が重複するため削除した）。**auto-mergeもrulesetも無かった**ため、有効化と`protect develop`（必須チェックは`typecheck-and-test`）の作成をあわせて行った。`release-develop-to-main.yml`はこの周では入れず、後からguchi-apps/aide#6（クローズ済み）で`@workflows/v18`参照のcallerが追加された（2026-08-15に実測） |
 | `guchi-apps/aide-bot` | 対応済み | **参照**（8つとも`@workflows/v25`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`・`release-develop-to-main.yml`・`version-tag-check.yml` | あり（`CLAUDE.md`を新規作成。`AGENTS.md`は`CLAUDE.md`を読ませる薄い1枚） | 2026-08-23 | #2213, guchi-apps/aide-bot#1 | **画面の「新規アプリを立ち上げる」（#2188）から立ち上げた最初のリポジトリ**（[new-app-launch.md](new-app-launch.md)）。Next.js 16 + Prisma + MariaDBで`runtime-setup: node-db`・**`package-manager: pnpm`**（`issue-deck`・`dayspan`に続く3件目）・`database-name: app_aide_bot`・`node-version: "24"`（`ci.yml`準拠）。**フリートで唯一、8つのcallerを最初から揃えて始めたリポジトリ**——他リポジトリが#1475・#1948で後追いしている自動修復3つと`claude-review-develop.yml`を、初期化の時点で置いてある。`develop`のブランチ保護（必須チェックは`lint-and-build`）と`Allow auto-merge`も揃っており、`scripts/setup-develop-auto-merge.sh`の後追いは要らなかった（2026-08-23にdry-runで実測）。**`pnpm test`は`lint && typecheck`の別名**でテストランナーは動かず、`pnpm dev`は`scripts/dev.sh`（`ensure-mysql.sh`とローカルの`.env.local`を要求）のため無人実行では使えない |
 | `guchi-apps/trainroute` | **運用終了（アーカイブ予定）**（2026-09-07。#2882） | **配布対象外**。運用終了までは**参照**（10個とも`@workflows/v26`）: `issue-labels.yml`・`claude-issue-dispatch.yml`・`claude-review-develop.yml`・`claude-conflict-resolve.yml`・`claude-ci-fix.yml`・`claude-pr-repair.yml`・`release-develop-to-main.yml`・`version-tag-check.yml`・`deploy-retry.yml`・`sync-secrets.yml` | あり（`AGENTS.md`に追記。`CLAUDE.md`は`@AGENTS.md`の1行） | 2026-09-07 | guchi-apps/aide#33, guchi-apps/trainroute#40, #2882 | 不要になったため廃止し、VPSから撤去することになった（起点: guchi-apps/trainroute#40、手順: guchi-apps/trainrouteの`docs/decommission.md`）。**削除ではなくアーカイブ**する（他リポジトリからのリンクを生かすため）。アーカイブするとIssue・PRが読み取り専用になり無人実行の対象として意味を持たなくなるため、issue-deck側の台帳（本表・共有ワークフローの配布対象・`scripts/local-repo-ports.conf`のポート帯）から外した（#2882）。**実際のリポジトリのアーカイブ操作自体はtrainroute側のdecommissionランブックで行うもので、このIssueのスコープ外。** 導入時（2026-08-26）の記録: **guchi-apps/aide#33（AIDEから通勤路線を読む）の依存として立ち上げたpublicリポジトリ。** Next.js 16 + Prisma + MariaDBで`runtime-setup: node-db`・`package-manager: npm`・`node-version: "24"`（`ci.yml`準拠）。**callerはcar-careから写したため`@workflows/v26`で、v27へは未追従** |
+| `guchi-apps/aide-ios` | 一部対応（#3472） | **参照**（2つとも`@workflows/v40`）: `ci.yml`（Xcodeビルド。参照ではなく実体）・`claude-review-main.yml`（main向けPRのレビュー。`enable-auto-merge: false`）。**`claude-issue-dispatch.yml`は置いていない**（無人実行なし。サブPCのローカルセッションで回す） | あり（`AGENTS.md`・`CLAUDE.md`） | 2026-09-24 | #3309, #3468, #3472, guchi-apps/aide-ios#13, guchi-apps/aide-ios#16, guchi-apps/aide-ios#22 | AIDEのiOSアプリ（private）。Xcodeプロジェクトだけで`package.json`を持たず、ビルドと実機検証はMac miniのXcode。**2026-09-24時点は`develop`を持たない`main`直行**で、develop/main運用への移行はguchi-apps/aide-ios#22が進めている。ポート帯は29000（`scripts/local-repo-ports.conf`）。**自動修復は未導入**（導入はguchi-apps/aide-ios#16）。`claude-ci-fix.yml`は`workflows/v40`以降でmain直行に対応する（#3356）ため置くだけで効くが、`claude-conflict-resolve.yml`は`--base develop`固定のため`develop`ができるまで対象外。画面の配布（設定＞フリート運用）は前提の`claude-issue-dispatch.yml`が無いため不足として出さず、aide-ios側で手で置く。`runtime-setup: minimal`とし、`verify-commands`には「Linuxではxcodebuild不可」を明記する |
 
 > **参照バージョンは表に書くが、正はcallerファイル。** タグを上げたら表も直すが、
 > 実態は各リポジトリの`.github/workflows/`を見るのが確実。次のコマンドで一覧できる。
@@ -245,6 +246,22 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 - **`templates/idea.md`の項目を増減したら`idea-doc.ts`の突き合わせも見直す。** 項目名は括弧書きを
   外した部分一致で拾っているので、名前を大きく変えると黙って未決へ落ちる
 - 判断の詳細は[new-app-launch.md](new-app-launch.md)「構想メモから読み込む」を参照
+
+## `guchi-apps/aide-ios`（Xcodeで実機へ反映するiOSアプリ）
+
+**`main`へのマージでは何も反映されない唯一のリポジトリ。** 手元のMac miniでXcodeビルドして
+実機のiPhoneへ入れるまで変更が届かず、`deploy.yml`も無い。移行前は`main`のみの運用で、
+「mainへマージ済み」と「実機に入っている」がずれ、何が実機に入っているのかが分からなかった（#3468）。
+
+| 項目 | 内容 |
+|---|---|
+| ブランチ運用 | `develop`/`main`へ移行する（guchi-apps/aide-ios#22）。`issue-<番号>`は`develop`から切り`develop`向けにPR |
+| `main`の意味 | **Xcodeで実機に入れた版。** Macの`scripts/xcode-release.sh`だけが、ビルドしたコミットを`main`へマージする（`gh pr merge --match-head-commit`。`develop`が先へ進んでいたら止まる） |
+| 盤面 | develop向けPRのマージで`Develop`、`main`へのマージ（＝実機反映）で`Done` |
+| 画面 | ブランチ画面に「実機に入っている版」（`main`の先頭）を出し、未反映の束はマージボタンの代わりにMacで打つコマンドを出す（[src/lib/device-build-repos.ts](../src/lib/device-build-repos.ts)。詳細は[multi-agent/release.md](multi-agent/release.md)「Xcodeで実機へ反映するリポジトリ」） |
+
+同じ性質のリポジトリ（手元でビルドしないと反映されないもの）を増やしたら、
+`src/lib/device-build-repos.ts`へも足す。
 
 ## `issue-labels.yml`callerの`issues:`トリガーの揃い方（#2010）
 
