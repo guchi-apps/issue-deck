@@ -113,8 +113,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
 
   afterEach(cleanup);
 
-  // 軽微は選ぶ手間を減らすため、開いた時点では既定で外しておく
-  it("軽微は既定で選択しない。ボタンは選択中の件数を出す", () => {
+  it("軽微も既定で選択する。ボタンは選択中の件数を出す", () => {
     render(
       <BulkCreateCodeReviewIssuesDialog
         open
@@ -126,7 +125,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "2件のIssueを作成" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "3件のIssueを作成" })).toBeTruthy();
   });
 
   it("選び直すと件数が変わる", () => {
@@ -142,7 +141,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
     );
 
     fireEvent.click(screen.getByText("分岐が読みにくい"));
-    expect(screen.getByRole("button", { name: "3件のIssueを作成" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2件のIssueを作成" })).toBeTruthy();
   });
 
   it("選んだ指摘を直列で作成し、それぞれonCreatedへ渡してから閉じる", async () => {
@@ -163,6 +162,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText("分岐が読みにくい"));
     fireEvent.click(screen.getByRole("button", { name: "2件のIssueを作成" }));
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(2));
@@ -200,6 +200,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText("分岐が読みにくい"));
     fireEvent.click(screen.getByRole("button", { name: "2件のIssueを作成" }));
 
     await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(2));
@@ -228,6 +229,7 @@ describe("BulkCreateCodeReviewIssuesDialog（#2859）", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText("分岐が読みにくい"));
     fireEvent.click(screen.getByRole("checkbox", { name: /次の5時間枠/ }));
     fireEvent.click(screen.getByRole("radio", { name: /Opus/ }));
     fireEvent.click(screen.getByRole("button", { name: "2件を作成して予約" }));
