@@ -127,6 +127,16 @@ describe("toPullRequestChanges", () => {
     expect(changes.map((change) => change.id)).toEqual(["a2"]);
   });
 
+  it("件名末尾の番号が対応Issue番号のコミットは、PRとして重ねない（#3459）", () => {
+    // clip-hive v1.0.18の形。作業ブランチのコミット件名の`(#154)`はIssue番号
+    const changes = toPullRequestChanges([
+      { sha: "a1", message: "S3認証情報の未設定時にエラーを出す (#154)" },
+      mergeCommit("a2", 160, "issue-154", "S3認証情報の未設定時に変数名入りのエラーを出す"),
+    ]);
+
+    expect(changes.map((change) => change.pullRequestNumber)).toEqual([160]);
+  });
+
   it("コミットが無ければ空配列を返す", () => {
     expect(toPullRequestChanges([])).toEqual([]);
   });

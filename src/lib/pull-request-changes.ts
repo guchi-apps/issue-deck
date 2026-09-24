@@ -93,7 +93,17 @@ export function toPullRequestChanges(
     // マージコミットだけを拾うとそのPRが落ち、中身が参照タグの更新だけのリリースでは
     // 「PR 0件」になっていた。同じPR番号がマージコミットで拾えていれば重ねない
     const mergedNumbers = new Set(merges.map((change) => change.pullRequestNumber));
-    const extra = squashes.filter((change) => !mergedNumbers.has(change.pullRequestNumber));
+    // 作業ブランチ内のコミットは件名が`… (#<Issue番号>)`で終わることがある（このリポジトリの
+    // コミット規約）。件名末尾の番号がマージコミットの対応Issue番号と一致するものはPRではなく
+    // Issueなので、PRとして重ねない（重ねると「PR 12件」「記録なし」がIssueの数だけ増える。#3459）
+    const linkedIssueNumbers = new Set(
+      merges.flatMap((change) => (change.issueNumber !== null ? [change.issueNumber] : [])),
+    );
+    const extra = squashes.filter(
+      (change) =>
+        !mergedNumbers.has(change.pullRequestNumber) &&
+        !linkedIssueNumbers.has(change.pullRequestNumber as number),
+    );
     const merged = [...merges, ...extra];
     const order = new Map(commits.map((commit, index) => [commit.sha, index]));
     return merged.sort((a, b) => (order.get(b.id) ?? 0) - (order.get(a.id) ?? 0));
