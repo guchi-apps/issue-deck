@@ -1627,6 +1627,32 @@ describe("コードレビュー（CODE_REVIEW）", () => {
     expect(canCodeReviewRepository([hostView()], "guchi-apps/issue-deck")).toBe(true);
   });
 
+  // 指摘→Issue→実装の流れを想定していないリポジトリは、チェックアウトがあっても選ばせない（#3453）
+  it("対象外のリポジトリは選べない", () => {
+    const checkedOut = { repositories: ["guchi-apps/issue-deck", "guchi-apps/claude-config"] };
+    expect(
+      resolveCodeReviewRejection({
+        host: host(checkedOut),
+        repositoryFullName: "guchi-apps/claude-config",
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_excluded");
+    expect(
+      resolveCodeReviewRejection({
+        host: null,
+        repositoryFullName: "guchi-apps/docs",
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_excluded");
+    expect(canCodeReviewRepository([hostView(checkedOut)], "guchi-apps/claude-config")).toBe(false);
+    expect(
+      describeCodeReviewRejection("repository_excluded", {
+        hostName: "subpc",
+        repositoryFullName: "guchi-apps/claude-config",
+      }),
+    ).toContain("対象外");
+  });
+
   it("理由には何をすれば押せるようになるかを書く", () => {
     expect(describeCodeReviewRejection("code_review_unsupported", { hostName: "subpc" })).toContain(
       "更新してから",

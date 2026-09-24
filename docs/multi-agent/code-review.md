@@ -233,6 +233,22 @@ Issue——ここは表示のための当て推量。
 **あちらは構成の表示のためにホストの死活を見ない**ので、選択肢の判定に使うと、サブPCが
 落ちている間も選べてしまい押した後で断ることになる。
 
+### 無人実行を入れない枠のリポジトリは選ばせない（#3453）
+
+**`docs`・`claude-config`・`vps`・`subpc`はレビューの対象外にしている。** レビューは
+「指摘→Issueを起案→そのIssueで実装して直す」流れの入口だが、この4つは無人実行を入れない枠
+（[supported-repositories.md](../supported-repositories.md)）で、その流れを想定していない
+（`docs`は格上げ判定エージェントが反映する共有知識、`claude-config`は`main`直行の個人設定、
+`vps`・`subpc`は`main`へ入ると実機へ反映される設定）。サブPCにチェックアウトがあるため、
+以前は選べてしまい、指摘から実装の当てが無いIssueが積まれていた。
+
+判定は`resolveCodeReviewRejection`の`repository_excluded`で、**ホストの状態より先に見る**
+（どのホストを選んでも押せるようにはならない）。画面の「実行」とAPI（`enqueueCodeReviewJob`）が
+同じ関数を通るので、両方で断る。一覧は`src/lib/code-review-excluded-repos.ts`の固定リストで持つ
+——`Repository`に種別の列は無く、`hasClaudeWorkflow`で絞ると`question`のような別の理由で
+無人実行を入れていないものまで外れる。**同じ枠のリポジトリを増やしたら、このリストへも足す。**
+過去にレビューしたものは、リポジトリ別の枠に「実行」の無い行として残る。
+
 ## 指摘の起票はエージェントに任せない
 
 レビューのセッションには`gh issue create`を渡していない（`CODE_REVIEW_ALLOWED_TOOLS`）。
@@ -256,7 +272,7 @@ Issue——ここは表示のための当て推量。
 
 | 項目 | 値・理由 |
 | --- | --- |
-| 対象リポジトリ | サブPCにチェックアウトがあるものだけ（`repository_not_runnable`）。読むコードがそこにしか無い |
+| 対象リポジトリ | サブPCにチェックアウトがあるものだけ（`repository_not_runnable`）。読むコードがそこにしか無い。無人実行を入れない枠の4つは除く（`repository_excluded`。上記） |
 | 参照先 | `origin/develop`（無ければ`origin/main`）のスナップショット。置き場は`~/apps/issue-deck-worktrees/.code-reviews`で、横断質問・計画レビューとは分ける |
 | 同時実行 | `DISPATCH_MAX_CODE_REVIEWS`（既定2）。セッション名が`-issue-`の規約から外れるため`DISPATCH_MAX_SESSIONS`には数えられない |
 | 実行時間 | `ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS`（既定2700秒＝45分）。フックを付けていないので、固まっても誰も気づけない。上限で必ず終わる形にする |

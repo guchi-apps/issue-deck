@@ -21,6 +21,9 @@ privateリポジトリから参照でき、privateでもブランチ保護が効
 別の軸にある（下記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」）。
 #1011が「順次導入する」としていた`vps`もこの扱いになる。`claude-config`（個人設定）は#1988で
 同じ枠へ加えた（下記「`claude-config`（個人設定）」）。
+この4つは**リポジトリ全体のコードレビュー（#698）の対象からも外している**（#3453。指摘から
+Issueを起こして実装で直す流れを想定していないため）。同じ枠のリポジトリを増やしたら
+`src/lib/code-review-excluded-repos.ts`へも足す（[docs/multi-agent/code-review.md](multi-agent/code-review.md)）。
 
 「対応」の実態はワークフローファイル一式・ラベル体系・CLAUDE.md・ブランチ運用・Secretsなど
 多軸にわたり、DBスキーマや自動判定で正確に表すのは難しいため、本ドキュメントでの手動記録に
