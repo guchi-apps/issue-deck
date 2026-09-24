@@ -204,8 +204,11 @@ function secretsManifest(spec: NewAppSpec): string {
   const profile = newAppKindProfile(spec.kind);
   const item = `op://apps/${spec.repositoryName}`;
   const rows: string[] = [
-    "# --- VPSへの接続（organizationの共通値） ---",
-    "SSH_PRIVATE_KEY\tinherit\tsecret\tSERVER_SSH_PRIVATE_KEY\t-",
+    "# --- VPSへの接続 ---",
+    "# SSH_PRIVATE_KEYはこのアプリ専用の鍵（forced commandで「このアプリのデプロイ」だけに絞る。",
+    "# guchi-apps/vps#275・guchi-apps/issue-deck#3348）。organization共通の鍵は使わない。",
+    `SSH_PRIVATE_KEY\trepo\tsecret\tSSH_PRIVATE_KEY\t${item}/deploy-ssh-key`,
+    "# 接続先はorganizationの共通値。",
     "HOST\tinherit\tsecret\tSERVER_HOST\t-",
     "USERNAME\tinherit\tsecret\tSERVER_USERNAME\t-",
     "SSH_PORT\tinherit\tsecret\tSERVER_SSH_PORT\t-",

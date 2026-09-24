@@ -259,6 +259,17 @@
   **これは手作業Issueにしない**——画面のボタン1つで済む操作だから（#2009）。サブPCの手作業
   Issueの`## 前提条件`に1行書いてある。
 
+### デプロイ用のSSH鍵は、アプリごとに専用の鍵を発行する（#3348）
+
+雛形の`deploy.yml`は、organization共通の`SERVER_SSH_PRIVATE_KEY`ではなく**アプリ専用の鍵**（`.github/secrets-manifest.tsv`の`SSH_PRIVATE_KEY`行＝`op://apps/<リポジトリ名>/deploy-ssh-key`）でVPSへ入る。VPS側の`authorized_keys`の`command=`（`/usr/local/sbin/app-deploy-gate <アプリ名>`。`guchi-apps/vps#275`）が対象アプリを固定するため、この鍵では**そのアプリの`upload`・`env`・`deploy`の3語しか実行できず**、任意のシェルコマンドも他アプリの`.env`・PM2にも触れない。
+
+- **ワークフローの呼び出し形**: `ssh ... upload < deploy.tar.gz` → 変数を`KEY=VALUE`で標準入力から`ssh ... env` → `ssh ... deploy`。展開・`.env`更新・`pnpm install`・`prisma migrate deploy`・`pm2`・ヘルスチェックはgate側が行うので、雛形はそれらを持たない（`TARGET_DIR`もgateが固定するためワークフローには出てこない）
+- **鍵の発行手順**（サブPCで1回。秘密鍵はファイルに残さない）:
+  1. `ssh-keygen -t ed25519 -N "" -C "deploy-<アプリ名>" -f "$(mktemp -u)"`で鍵を作り、秘密鍵を1Passwordの`op://apps/<リポジトリ名>/deploy-ssh-key`へ、公開鍵をVPSでの登録に使う
+  2. VPSで`sudo scripts/setup-app-keys.sh add --app <アプリ名> --pubkey <公開鍵ファイル>`（`guchi-apps/vps`。`sudo`を含むため代行実行の対象外）
+  3. `scripts/sync-github-secrets.sh`で`SSH_PRIVATE_KEY`をGitHubのrepository secretへ同期する
+- **既存アプリの鍵移行はこの雛形の対象外**（organization共通鍵のままのアプリは別途）
+
 ### 1Passwordのアイテムは、コマンドで投入する（#2249）
 
 **フィールド名の羅列を手作業Issueに書かない。** `aide-bot`の立ち上げでは
