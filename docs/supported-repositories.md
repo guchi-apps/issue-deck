@@ -246,6 +246,22 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
   外した部分一致で拾っているので、名前を大きく変えると黙って未決へ落ちる
 - 判断の詳細は[new-app-launch.md](new-app-launch.md)「構想メモから読み込む」を参照
 
+## `guchi-apps/aide-ios`（Xcodeで実機へ反映するiOSアプリ）
+
+**`main`へのマージでは何も反映されない唯一のリポジトリ。** 手元のMac miniでXcodeビルドして
+実機のiPhoneへ入れるまで変更が届かず、`deploy.yml`も無い。移行前は`main`のみの運用で、
+「mainへマージ済み」と「実機に入っている」がずれ、何が実機に入っているのかが分からなかった（#3468）。
+
+| 項目 | 内容 |
+|---|---|
+| ブランチ運用 | `develop`/`main`へ移行する（guchi-apps/aide-ios#22）。`issue-<番号>`は`develop`から切り`develop`向けにPR |
+| `main`の意味 | **Xcodeで実機に入れた版。** Macの`scripts/xcode-release.sh`だけが、ビルドしたコミットを`main`へマージする（`gh pr merge --match-head-commit`。`develop`が先へ進んでいたら止まる） |
+| 盤面 | develop向けPRのマージで`Develop`、`main`へのマージ（＝実機反映）で`Done` |
+| 画面 | ブランチ画面に「実機に入っている版」（`main`の先頭）を出し、未反映の束はマージボタンの代わりにMacで打つコマンドを出す（[src/lib/device-build-repos.ts](../src/lib/device-build-repos.ts)。詳細は[multi-agent/release.md](multi-agent/release.md)「Xcodeで実機へ反映するリポジトリ」） |
+
+同じ性質のリポジトリ（手元でビルドしないと反映されないもの）を増やしたら、
+`src/lib/device-build-repos.ts`へも足す。
+
 ## `issue-labels.yml`callerの`issues:`トリガーの揃い方（#2010）
 
 `manual-step-label`ジョブ（#1492。タイトルが`[手作業]`のIssueへ`71.manual-step`を付ける）は

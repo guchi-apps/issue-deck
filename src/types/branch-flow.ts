@@ -71,6 +71,13 @@ export type BranchComparison = {
   units: UnreleasedUnits | null;
 };
 
+/** ブランチの先頭コミット（#3468） */
+export type BranchHead = {
+  oid: string;
+  /** コミット日時（ISO 8601）。`--merge`でマージした`main`ではマージした時刻になる */
+  committedAt: string;
+};
+
 /**
  * リポジトリ1件ぶんのブランチ状況。`GET /api/branch-flow`が返す。
  *
@@ -100,6 +107,10 @@ export type RepositoryBranchStatus = {
    * 一致しなくなった瞬間に「押せるのに進捗が出ない」「押せないのに出せる」が起こる。
    */
   hasDeployWorkflow: boolean;
+  /** `main`の先頭コミット（#3468）。取れなければnull。古い応答には無い */
+  mainHead?: BranchHead | null;
+  /** `develop`の先頭コミットのOID（#3468）。`develop`が無ければnull。古い応答には無い */
+  developHeadOid?: string | null;
 };
 
 /**
@@ -476,6 +487,24 @@ export type ReleaseBlockedReason =
   | "release-in-progress"
   | "nothing-to-release";
 
+/**
+ * Xcodeで実機へ反映するリポジトリ（#3468。`lib/device-build-repos.ts`）の表示材料。
+ * **「`main`にある版＝実機に入れた版」と運用で定義している**ので、`main`の先頭をそのまま
+ * 「実機に入っている版」として出す。
+ */
+export type BranchFlowDeviceBuild = {
+  /** 反映が済んでいない束の札（「Xcode未反映」） */
+  pendingLabel: string;
+  /** 反映が済んだ束の日付に添える語（「実機反映（Xcode）」） */
+  reflectedLabel: string;
+  /** Macで実行するコマンド */
+  command: string;
+  /** 実機に入っている版＝`main`の先頭。ブランチ状況を取れていなければnull */
+  installed: BranchHead | null;
+  /** 次にビルドする版＝`develop`の先頭OID。未反映の変更が無ければnull */
+  buildTargetOid: string | null;
+};
+
 export type BranchFlowRepository = {
   repositoryFullName: string;
   repositoryPrivate: boolean;
@@ -543,4 +572,6 @@ export type BranchFlowRepository = {
   startedIssues: BranchFlowStartedIssue[];
   /** ブランチ状況を取得できたか。falseのときはPRだけから組み立てている */
   branchesLoaded: boolean;
+  /** Xcodeで実機へ反映するリポジトリならその表示材料（#3468）。それ以外はnull */
+  deviceBuild: BranchFlowDeviceBuild | null;
 };

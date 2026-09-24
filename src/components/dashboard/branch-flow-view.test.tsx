@@ -2554,3 +2554,57 @@ describe("一括リリース（#2770）", () => {
     expect(screen.getByText(/1件の起動に失敗しました/)).toBeTruthy();
   });
 });
+
+// #3468。mainにある版＝Xcodeで実機に入れた版、と運用で定義したリポジトリ
+describe("Xcodeで実機へ反映するリポジトリ（#3468）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const IOS = "guchi-apps/aide-ios";
+
+  function renderIos(pullRequests: PullRequestSummary[] = []) {
+    renderFlow({
+      repositories: [{ fullName: IOS, private: true }],
+      pullRequests: pullRequests.map((pullRequest) => ({ ...pullRequest, repositoryFullName: IOS })),
+      branchStatuses: [
+        branchStatus({
+          repositoryFullName: IOS,
+          hasReleaseWorkflow: true,
+          developVsMain: { aheadBy: 2, behindBy: 0, sameContent: false, units: null },
+          mainHead: { oid: "3f2a1c9aaaa", committedAt: "2026-09-23T12:14:00Z" },
+          developHeadOid: "a81b0e2bbbb",
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByText("aide-ios"));
+  }
+
+  it("mainの先頭を実機に入っている版として出す", () => {
+    renderIos();
+    expect(screen.getByText("実機に入っている版")).toBeTruthy();
+    expect(screen.getByText("main 3f2a1c9")).toBeTruthy();
+  });
+
+  it("未反映の束にはリリースボタンの代わりにMacで打つコマンドとビルド対象を出す", () => {
+    renderIos();
+    expect(screen.getByText("cd ~/Projects/AIDEios && scripts/xcode-release.sh")).toBeTruthy();
+    expect(screen.getByText("a81b0e2")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /リリースする/ })).toBeNull();
+  });
+
+  it("リリースPRが開いていても「mainへマージ待ち」と言わず、マージボタンを出さない", () => {
+    renderIos([
+      makeReleasePullRequest({
+        number: 30,
+        title: "developをmainへ",
+        state: "open",
+        ciState: "success",
+      }),
+    ]);
+    // 畳んだ1行と束の見出しの2か所
+    expect(screen.getAllByText("Xcode未反映")).toHaveLength(2);
+    expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+    expect(screen.queryByRole("button", { name: /マージ/ })).toBeNull();
+  });
+});

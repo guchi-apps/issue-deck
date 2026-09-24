@@ -540,6 +540,25 @@ pushトリガーは当然`develop`のものになる。**ジョブが対象コ�
 リリースフローや進捗の取得方法自体を変更する場合は、**バンプPRをマージした時点で新版が動く**
 ことを前提に段取りを組む。
 
+## Xcodeで実機へ反映するリポジトリ（#3468）
+
+`guchi-apps/aide-ios`は、`main`へマージしても何も起きない。Mac miniでXcodeビルドして実機へ
+入れるまで反映されないため、**「`main`にある版＝Xcodeで実機に入れた版」と運用で定義する。**
+
+- `main`へ入れるのはMacの`scripts/xcode-release.sh`だけ。`develop`の先端をXcodeで開き、実機へ
+  入れたあとEnterを押すと、develop→mainのリリースPRを**ビルドしたコミットを指定して**マージする
+  （`gh pr merge --merge --match-head-commit <SHA>`）。その間に`develop`が進んでいればマージは
+  失敗し、ビルドしていない版が`main`へ入ることは無い
+- ブランチ画面は、[src/lib/device-build-repos.ts](../../src/lib/device-build-repos.ts)に載った
+  リポジトリだけ表示を変える。`main`の先頭（`/api/branch-flow`の同じGraphQLに相乗りで取る）を
+  「実機に入っている版」として出し、「本番未反映」「本番反映」を「Xcode未反映」「実機反映（Xcode）」
+  へ置き換え、**`main`へのマージボタンと「リリースする」を出さない**（画面からマージすると、
+  ビルドしていない版が実機に入ったように記録されるため）。代わりにMacで打つコマンドと
+  ビルド対象の`develop`の先頭を出す
+- **採らなかった案。** 画面に「実機に入れた」ボタンを置いてDBへ記録する案は、GitHub上の事実と
+  別の正ができるため採らなかった。移動するgitタグで表す案は、`main`とタグの2つを見比べる必要が
+  残るため採らなかった
+
 ## 自動マージされないことの担保
 
 バージョンbump用PR（`release/v*` → `develop`）・develop→mainのPR（`release-main/v*` → `main`）は

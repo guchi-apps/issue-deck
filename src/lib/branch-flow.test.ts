@@ -2144,3 +2144,62 @@ describe("未リリースの件数（unreleasedSummary・#2333）", () => {
     expect(unreleasedSummary(null).count).toBe(0);
   });
 });
+
+// #3468。mainにある版＝Xcodeで実機に入れた版、と運用で定義したリポジトリ
+describe("buildBranchFlow deviceBuild", () => {
+  const IOS = "guchi-apps/aide-ios";
+  const mainHead = { oid: "3f2a1c9aaaa", committedAt: "2026-09-23T12:14:00Z" };
+  const unreleasedComparison = { aheadBy: 2, behindBy: 0, sameContent: false, units: null };
+
+  function buildIos(status: Partial<RepositoryBranchStatus>) {
+    return buildBranchFlow({
+      repositories: [{ fullName: IOS, private: true }],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [branchStatus({ repositoryFullName: IOS, ...status })],
+    }).repositories[0];
+  }
+
+  it("表に載ったリポジトリはmainの先頭を実機に入っている版として出す", () => {
+    const repository = buildIos({
+      mainHead,
+      developHeadOid: "a81b0e2bbbb",
+      developVsMain: unreleasedComparison,
+    });
+
+    expect(repository.deviceBuild).toEqual({
+      pendingLabel: "Xcode未反映",
+      reflectedLabel: "実機反映（Xcode）",
+      command: "cd ~/Projects/AIDEios && scripts/xcode-release.sh",
+      installed: mainHead,
+      buildTargetOid: "a81b0e2bbbb",
+    });
+  });
+
+  it("未反映の変更が無ければビルド対象を出さない", () => {
+    const repository = buildIos({
+      mainHead,
+      developHeadOid: "3f2a1c9aaaa",
+      developVsMain: { aheadBy: 0, behindBy: 0, sameContent: true, units: null },
+    });
+
+    expect(repository.deviceBuild?.buildTargetOid).toBeNull();
+    expect(repository.deviceBuild?.installed).toEqual(mainHead);
+  });
+
+  it("ブランチ状況が取れていなければ実機の版はnull", () => {
+    const repository = buildBranchFlow({
+      repositories: [{ fullName: IOS, private: true }],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    }).repositories[0];
+
+    expect(repository.deviceBuild?.installed).toBeNull();
+    expect(repository.deviceBuild?.buildTargetOid).toBeNull();
+  });
+
+  it("表に無いリポジトリはnull", () => {
+    expect(build({ branchStatuses: [branchStatus({ mainHead })] }).repositories[0].deviceBuild).toBeNull();
+  });
+});
