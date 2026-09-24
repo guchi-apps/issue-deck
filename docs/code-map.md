@@ -574,8 +574,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   足すと、実際より安い金額になる。
 - **「AI使用量」画面の内訳カードは`リポジトリ別`・`セッション種別別`の2枚**（#3062）。
   以前は3枚目に「アプリ内AI機能別」（issue-deck自身のAPI呼び出しの内訳。#2752で種別別の隣へ
-  移した）があったが、表示ごと削除した。**`リポジトリ別`は棒ではなく円グラフ**（金額の上位5件
-  ＋その他。#3060。[`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
+  移した）があったが、表示ごと削除した。**`リポジトリ別`は棒ではなく円グラフ**（金額が全体の3%以上
+  ＋その他。#3060・#3454。[`repository-pie-chart.tsx`](../src/components/dashboard/repository-pie-chart.tsx)・
   配置は[`lib/pie-chart-layout.ts`](../src/lib/pie-chart-layout.ts)。詳細は
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)）。
   - **見出しは「何で分けたか」で揃え、`whitespace-nowrap`で折り返させない。** 「種別別」は

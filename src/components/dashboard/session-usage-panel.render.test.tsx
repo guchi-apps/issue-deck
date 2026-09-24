@@ -561,27 +561,24 @@ describe("SessionUsagePanel", () => {
     expect(container.querySelector("p.truncate[title]")).toBeNull();
   });
 
-  it("リポジトリ別は円グラフで、金額の上位5件と「その他」にまとめる（#3060）", () => {
-    const entries = Array.from({ length: 7 }, (_unused, index) =>
-      entry({
-        sessionId: `repo-${index}`,
-        repository: `repository-${index}`,
-        costUsd: 7 - index,
-      }),
+  it("リポジトリ別は円グラフで、金額が全体の3%以上のリポジトリと「その他」にまとめる（#3060・#3454）", () => {
+    const costs = [60, 20, 10, 5, 3, 1, 1];
+    const entries = costs.map((costUsd, index) =>
+      entry({ sessionId: `repo-${index}`, repository: `repository-${index}`, costUsd }),
     );
     renderPanel(response(entries));
 
     const card = screen.getByText("リポジトリ別").closest("section") as HTMLElement;
-    // 名前が出るのは上位5件だけ。6位・7位は「その他」へ入り、件数を添える
+    // 名前が出るのは3%以上の5件だけ。3%未満の2件は「その他」へ入り、件数を添える
     const chart = within(card).getByRole("img");
     expect(within(chart).getByText("repository-0")).toBeTruthy();
     expect(within(chart).getByText("repository-4")).toBeTruthy();
     expect(within(chart).queryByText("repository-5")).toBeNull();
     expect(within(chart).getByText("その他")).toBeTruthy();
     expect(within(chart).getByText("2リポジトリ")).toBeTruthy();
-    // 全体は28ドル。最大の切れは7/28で25.0%、その他は3/28で10.7%
-    expect(chart.getAttribute("aria-label")).toContain("repository-0 25.0%（$7.00）");
-    expect(chart.getAttribute("aria-label")).toContain("その他 10.7%（$3.00）");
+    // 全体は100ドル。最大の切れは60.0%、その他は2/100で2.0%
+    expect(chart.getAttribute("aria-label")).toContain("repository-0 60.0%（$60.00）");
+    expect(chart.getAttribute("aria-label")).toContain("その他 2.0%（$2.00）");
     // 「上位5件」の説明文は出さない（#3423）。ボタンは一覧の開閉だけ
     expect(within(card).getAllByRole("button")).toHaveLength(1);
     expect(within(card).queryByText(/上位5件/)).toBeNull();

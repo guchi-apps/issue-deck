@@ -1757,7 +1757,7 @@ export function SessionUsagePanel({
   className,
 }: SessionUsagePanelProps) {
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
-  // 「リポジトリ別」の全件の表（#3423）。円グラフは上位5件＋その他なので、下位の金額はここで読む
+  // 「リポジトリ別」の全件の表（#3423）。円グラフは3%以上＋その他なので、3%未満の金額はここで読む
   const [repositoryListOpen, setRepositoryListOpen] = useState(false);
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
   const [openIssueKeys, setOpenIssueKeys] = useState<Record<string, boolean>>({});
@@ -1898,7 +1898,7 @@ export function SessionUsagePanel({
           <div
             className={cn("grid items-start gap-2", compact ? "grid-cols-1" : "sm:grid-cols-2")}
           >
-            {/* **リポジトリ別は円グラフ**（#3060）。金額の上位5件と「その他」だけで、エージェント・
+            {/* **リポジトリ別は円グラフ**（#3060）。金額が全体の3%以上のリポジトリと「その他」だけで、エージェント・
                 トークンの区別は持たない。下の凡例（太い棒＝金額／細い帯＝トークン）は当てはまらない */}
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="flex items-baseline justify-between gap-2">
