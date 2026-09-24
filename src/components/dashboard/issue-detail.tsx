@@ -545,7 +545,7 @@ export function IssueDetail({
 
   if (!issue) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
+      <div className="flex h-full min-w-0 flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
         左の一覧からIssueを選択してください
       </div>
     );
@@ -753,7 +753,7 @@ export function IssueDetail({
   return (
     // 本文・コメントの中のclaude.aiリンクもプレビューへ差し替えるので、詳細の全体を包む（#2154）
     <ArtifactPreviewProvider artifacts={artifacts}>
-    <div className="relative flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollContainerRef}
         data-scroll-container
