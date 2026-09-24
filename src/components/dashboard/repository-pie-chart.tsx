@@ -9,11 +9,11 @@ import {
 } from "@/lib/session-usage-view";
 
 /**
- * AI使用量の「リポジトリ別」円グラフ（#3060）。金額の上位5件と「その他」を、12時の位置から
+ * AI使用量の「リポジトリ別」円グラフ（#3060）。金額が全体の3%以上のリポジトリと「その他」を、12時の位置から
  * 時計回りに金額順で並べる。円の内側に「%」と括弧書きの金額、外側に名前を引き出し線でつなぐ。
  *
  * **扇形が狭くて金額が入り切らないときは、割合と金額を円の外の名前の下へ移す**（配置は
- * `layoutPie`が決める）。色は順位ごとの固定5色と、「その他」のグレー（`globals.css`の`--pie-*`）。
+ * `layoutPie`が決める）。色は順位ごとの固定10色（超えたら循環）と、「その他」のグレー（`globals.css`の`--pie-*`）。
  * 他の画面のリポジトリ色（`getRepoColor`のハッシュ色）とは揃えない——隣り合う扇形が同じ色に
  * なると境目が読めなくなるため。
  */
@@ -27,11 +27,16 @@ const SLICE_COLORS = [
   "var(--pie-3)",
   "var(--pie-4)",
   "var(--pie-5)",
+  "var(--pie-6)",
+  "var(--pie-7)",
+  "var(--pie-8)",
+  "var(--pie-9)",
+  "var(--pie-10)",
 ];
 
-/** 金額順の順位（0始まり）に対する色。上位5件の外は「その他」のグレー。一覧の表（#3423）も同じ色を使う */
+/** 金額順の順位（0始まり）に対する色。10色を使い切ったら循環する（#3454）。一覧の表（#3423）も同じ色を使う */
 export function repositoryRankColor(rank: number): string {
-  return SLICE_COLORS[rank] ?? "var(--pie-other)";
+  return SLICE_COLORS[rank % SLICE_COLORS.length];
 }
 
 function sliceColor(slice: RepositoryPieSlice, rank: number): string {

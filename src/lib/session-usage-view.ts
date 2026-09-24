@@ -827,23 +827,24 @@ export type RepositoryPieSlice = {
   isOther: boolean;
 };
 
-/** リポジトリ別の円グラフに名前を出す上位の件数。これより下は「その他」にまとめる */
-export const REPOSITORY_PIE_TOP_COUNT = 5;
+/** リポジトリ別の円グラフに名前を出す、全体に対する割合の下限（3%）。これ未満は「その他」にまとめる（#3454） */
+export const REPOSITORY_PIE_MIN_FRACTION = 0.03;
 
 /**
- * リポジトリ別の内訳を、**金額の上位5件と「その他」**の切れへ畳む（#3060）。
+ * リポジトリ別の内訳を、**全体の3%以上のリポジトリと「その他」**の切れへ畳む（#3060・#3454）。
  * エージェント（Claude・Codex・GitHub Actions）とトークン量の区別は持たない（金額だけを見る）。
  * 金額が0のリポジトリは切れにしない。割合は金額0を除いた合計に対する比。
  */
 export function buildRepositoryPieSlices(
   groups: Pick<UsageGroup, "key" | "costUsd">[],
-  topCount = REPOSITORY_PIE_TOP_COUNT,
+  minFraction = REPOSITORY_PIE_MIN_FRACTION,
 ): RepositoryPieSlice[] {
   const ranked = groups.filter((group) => group.costUsd > 0).sort((a, b) => b.costUsd - a.costUsd);
   const total = ranked.reduce((sum, group) => sum + group.costUsd, 0);
   if (total <= 0) return [];
 
-  const slices: RepositoryPieSlice[] = ranked.slice(0, topCount).map((group) => ({
+  const shown = ranked.filter((group) => group.costUsd / total >= minFraction);
+  const slices: RepositoryPieSlice[] = shown.map((group) => ({
     key: group.key,
     label: group.key || "(不明)",
     costUsd: group.costUsd,
@@ -851,7 +852,7 @@ export function buildRepositoryPieSlices(
     repositoryCount: 1,
     isOther: false,
   }));
-  const rest = ranked.slice(topCount);
+  const rest = ranked.slice(shown.length);
   if (rest.length > 0) {
     const restCost = rest.reduce((sum, group) => sum + group.costUsd, 0);
     slices.push({
