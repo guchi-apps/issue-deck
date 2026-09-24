@@ -1644,6 +1644,13 @@ describe("コードレビュー（CODE_REVIEW）", () => {
         hasActiveJob: false,
       }),
     ).toBe("repository_excluded");
+    expect(
+      resolveCodeReviewRejection({
+        host: host({ repositories: ["guchi-apps/ideas"] }),
+        repositoryFullName: "guchi-apps/ideas",
+        hasActiveJob: false,
+      }),
+    ).toBe("repository_excluded");
     expect(canCodeReviewRepository([hostView(checkedOut)], "guchi-apps/claude-config")).toBe(false);
     expect(
       describeCodeReviewRejection("repository_excluded", {
