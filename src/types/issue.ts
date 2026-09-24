@@ -63,6 +63,14 @@ export type SubIssueRelations = {
   childCount: number;
 };
 
+/** 一覧の行に出す親子関係（#3469） */
+export type IssueHierarchy = {
+  /** 子Issueの総数・完了数。子を持たなければnull */
+  children: { total: number; completed: number } | null;
+  /** 親Issue。親を持たなければnull */
+  parent: { repositoryFullName: string; number: number } | null;
+};
+
 export type Issue = {
   id: string;
   number: number;
@@ -90,6 +98,12 @@ export type Issue = {
   labels: IssueLabel[];
   milestone: IssueMilestone | null;
   commentCount: number;
+  /**
+   * 親子関係（#3469）。一覧の行へ「親Issue／子Issue」を出す。同期でGitHubの`sub_issues_summary`と
+   * `parent_issue_url`を保存した値で、取れていないIssue（古い行・取得できない環境）は省略される。
+   * 詳細で使う正確な関係は`SubIssueRelations`（`/api/issues/sub-issues`）
+   */
+  hierarchy?: IssueHierarchy;
   createdAt: string;
   updatedAt: string;
   /** closeされた日時（ISO8601）。openなIssueはnull */

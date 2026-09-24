@@ -22,6 +22,10 @@ export type GithubApiIssue = {
   labels: ({ id: number; name: string; color: string; description: string | null } | string)[];
   milestone: { title: string; open_issues: number; closed_issues: number } | null;
   comments: number;
+  /** 子Issueの総数・完了数（#3469）。子を持たないIssueではtotalが0 */
+  sub_issues_summary?: { total: number; completed: number; percent_completed?: number };
+  /** 親Issueの`api.github.com/repos/<owner>/<repo>/issues/<番号>`（#3469） */
+  parent_issue_url?: string | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
