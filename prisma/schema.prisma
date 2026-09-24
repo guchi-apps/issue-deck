@@ -1304,7 +1304,7 @@ model DispatchSession {
   //
   // **`POST /api/dispatch/sessions/interrupted`が書く**（#1971・#2655・#2844で足した引き上げは、
   // それまでIssueコメントとラベルにしか残らず、画面はセッションが停滞していることを知らなかった）。
-  // 値は`SessionInterruptedReason`（`api_error`・`tool_call_stall`・`classifier_blocked`）で、
+  // 値は`SessionInterruptedReason`（`api_error`・`tool_call_stall`・`classifier_blocked`・`question_asked`）で、
   // 理由コード・ステップと同じく**画面に出す文言はissue-deck側**に置く。
   //
   // **解除は書き戻さない。** 「まだ停滞しているか」は`activityAt`・`stepSeenAt`が

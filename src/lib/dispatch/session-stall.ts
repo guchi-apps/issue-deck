@@ -129,6 +129,24 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
     ],
     presets: [{ label: "中断したところから続けるよう送る", body: TURN_STALL_BODY }],
   },
+  question_asked: {
+    reason: "question_asked",
+    title: "文章での問いかけで応答を終えています",
+    detail: [
+      "`AskUserQuestion`を使わず、本文の問いかけで応答を終えたため、`Notification`が飛ばず画面からは「正常に応答した」ようにしか見えません（#3447）。",
+      "セッションの末尾の問いかけに答えるか、問いかけでなければ続けるよう送ってください。",
+    ],
+    presets: [
+      {
+        label: "AskUserQuestionで聞き直すよう送る",
+        body: "直前の問いかけは文章ではなく、AskUserQuestionで聞き直してください。",
+      },
+      {
+        label: "問いかけではないので続けるよう送る",
+        body: "直前の応答は問いかけではありません。判断が不要なら、そのまま作業を続けてください。",
+      },
+    ],
+  },
   classifier_blocked: {
     reason: "classifier_blocked",
     title: "コマンドが拒否されたまま応答を終えています",

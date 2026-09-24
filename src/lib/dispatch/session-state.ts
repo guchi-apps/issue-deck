@@ -264,6 +264,8 @@ export const SESSION_INTERRUPTED_REASONS = [
   "tool_call_stall",
   /** auto modeのクラシファイアにコマンドを拒否されたまま応答を終えた（#2844） */
   "classifier_blocked",
+  /** `AskUserQuestion`を使わず、文章での問いかけで応答を終えた（#3447） */
+  "question_asked",
   /**
    * Codexのターンが開始（`task_started`）したまま閉じず、転記の更新が止まった（#3174）。
    * **Codexのセッションでしか付かない**（Claude Codeの転記にこのマーカーは無い）

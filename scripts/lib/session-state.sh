@@ -307,6 +307,36 @@ session_state_clear_classifier_block() {
   return 0
 }
 
+# 「応答が問いかけで終わった」引き上げ済みの印（#3447）。
+#
+# `.classifier-block`と同じく「もう引き上げたか」の1ビット。消す契機も同じく2つ——問いかけで
+# 終わらなかった`Stop`と、人が答えて作業へ戻った`working`（`session-notify.sh`が消す）。
+session_state_question_asked_file() {
+  session_state_name_ok "${1:-}" || return 1
+  printf '%s/%s.question-asked' "$(session_state_dir)" "$1"
+}
+
+session_state_question_asked_notified() {
+  local session="$1" file
+  file="$(session_state_question_asked_file "$session")" || return 1
+  [[ -f "$file" ]]
+}
+
+session_state_mark_question_asked_notified() {
+  local session="$1" file content
+  file="$(session_state_question_asked_file "$session")" || return 1
+  printf -v content '%s\n' "$(date +%s)"
+  session_state_write_file "$file" "$content"
+}
+
+session_state_clear_question_asked() {
+  local session="$1" file
+  file="$(session_state_question_asked_file "$session" 2>/dev/null || true)" || return 0
+  [[ -n "$file" ]] || return 0
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 # 人に許可を求めているツールの記録（#2971）。
 #
 # **`PostToolUse`を「人が答えた」と読んでよいかの照合に使う。** 間引き（#1357）は「直前が
@@ -723,6 +753,7 @@ session_state_remove() {
     "$(session_state_tool_call_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_codex_turn_stall_file "$session" 2>/dev/null || true)" \
     "$(session_state_classifier_block_file "$session" 2>/dev/null || true)" \
+    "$(session_state_question_asked_file "$session" 2>/dev/null || true)" \
     "$(session_state_permission_file "$session" 2>/dev/null || true)" \
     "$(session_state_starting_file "$session" 2>/dev/null || true)"; do
     [[ -n "$file" ]] || continue
