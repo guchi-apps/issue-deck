@@ -4420,3 +4420,9 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
 `.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。
+
+## 一覧の行に出す親子関係（#3469）
+
+- 一覧の行は`Issue.hierarchy`（`src/types/issue.ts`）で親Issue／子Issueのバッジを出す。材料はGitHubのIssue payload（REST・Webhook）に載る`sub_issues_summary`と`parent_issue_url`で、`sync-issues.ts`が`Issue`テーブルの`subIssuesTotal`・`subIssuesCompleted`・`parentIssueUrl`へ保存し、`issue-mapper.ts`が`lib/issue-hierarchy.ts`の`buildIssueHierarchy`で写す。判定と文言は`resolveIssueHierarchyBadges`
+- **一覧のための近似値**で、詳細の「子Issue」（`/api/issues/sub-issues`、GitHubのネイティブ関係を都度取得）が正。列が埋まるのは同期後で、それまではバッジが出ないだけ
+- スマホ一覧も`IssueList`を使うため、バッジは同じ実装で出る
