@@ -132,6 +132,8 @@ async function handleGET() {
           developVsMain: lookup.developVsMain,
           hasReleaseWorkflow,
           hasDeployWorkflow,
+          mainHead: lookup.mainHead,
+          developHeadOid: lookup.developHeadOid,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。取れなかったことだけを返す。

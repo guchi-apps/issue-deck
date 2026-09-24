@@ -19,6 +19,7 @@ import {
   CircleDashed,
   CirclePlay,
   Clock,
+  Copy,
   ExternalLink,
   GitBranch,
   Loader2,
@@ -77,7 +78,7 @@ import {
   unreleasedSummary,
   type BranchFlow,
 } from "@/lib/branch-flow";
-import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
+import { formatMonthDay, formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
@@ -92,6 +93,7 @@ import { cn } from "@/lib/utils";
 import type {
   BranchFlowDeployState,
   BranchFlowDeployStateKind,
+  BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
   BranchFlowLane,
@@ -911,6 +913,7 @@ function ReleaseGroupHeader({
   group,
   releaseButton,
   rebuildButton,
+  deviceBuild,
   onMerged,
 }: {
   repositoryFullName: string;
@@ -918,6 +921,11 @@ function ReleaseGroupHeader({
   releaseButton?: React.ReactNode;
   /** リリースPRを閉じてバンプから作り直す導線（#3014）。リリースPRが開いている束だけに渡す */
   rebuildButton?: React.ReactNode;
+  /**
+   * Xcodeで実機へ反映するリポジトリ（#3468）。渡されたときは「本番」の文言を置き換え、
+   * mainへのマージボタンを出さない（mainへはMacのスクリプトがビルドした版だけを入れる）
+   */
+  deviceBuild?: BranchFlowDeviceBuild | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
@@ -951,7 +959,12 @@ function ReleaseGroupHeader({
   // `failure`を除くのは、同じ行に赤の「CI失敗」が並んで意味が競合するからで（#2038）、
   // この見出しには失敗を示すものが無く、外すと止まっているリリースが「リリース中」に見える。
   // 失敗そのものはすぐ下のPRの行（`CiStateBadge`）が出す。
+  //
+  // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
+  // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
+  // Xcodeでのビルド。そのあいだは`pendingLabel`（「Xcode未反映」）を出し続ける。
   const waitingUserMerge =
+    !deviceBuild &&
     group.pullRequest !== null &&
     group.pullRequest.state === "open" &&
     group.pullRequest.ciState !== "pending" &&
@@ -1005,7 +1018,13 @@ function ReleaseGroupHeader({
                     // 直接マージの束は見出しが既に「mainへマージ済み」なので、日付には
                     // 動詞だけを添える。デプロイまで届いたかは判定していないため
                     // 「本番反映」とは言わない（#2911）
-                    mergedToMain ? "マージ" : inProduction ? "本番反映" : "mainへマージ"
+                    mergedToMain
+                      ? "マージ"
+                      : deviceBuild
+                        ? deviceBuild.reflectedLabel
+                        : inProduction
+                          ? "本番反映"
+                          : "mainへマージ"
                   }`}
               </span>
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
@@ -1022,6 +1041,8 @@ function ReleaseGroupHeader({
             // mainへのマージだけは人が行う。待っているのが人の操作であることを、
             // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
             <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>
+          ) : deviceBuild ? (
+            <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>
           ) : (
             <ReleaseProgressPill
               label={
@@ -1038,7 +1059,7 @@ function ReleaseGroupHeader({
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
               `mergeWarnings`が返す警告で必ず確認ダイアログを通る */}
-          {group.pullRequest && group.pullRequest.state === "open" && (
+          {!deviceBuild && group.pullRequest && group.pullRequest.state === "open" && (
             <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onMerged} />
           )}
           {rebuildButton}
@@ -1056,6 +1077,9 @@ function ReleaseGroupHeader({
           />
         )}
 
+        {/* 未反映の束には、マージの代わりにMacで打つコマンドを出す（#3468） */}
+        {deviceBuild && !released && <DeviceBuildInstructions deviceBuild={deviceBuild} />}
+
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
         {group.bumpPullRequest && (
@@ -1067,6 +1091,90 @@ function ReleaseGroupHeader({
         )}
       </div>
     </li>
+  );
+}
+
+/** コミットOIDを画面に出す短い形（`git log --oneline`と同じ7桁） */
+function shortOid(oid: string): string {
+  return oid.slice(0, 7);
+}
+
+/**
+ * Xcodeで実機へ反映するリポジトリの「実機に入っている版」（#3468）。
+ *
+ * **`main`の先頭をそのまま出す。** mainへはMacのスクリプトが実機に入れた版だけを入れる運用
+ * （`lib/device-build-repos.ts`）なので、mainの先頭＝いま実機に入っている版になる。
+ * 束は畳まれるため、リポジトリの節（畳まれない場所）に置く。
+ */
+function DeviceBuildInstalledBand({ deviceBuild }: { deviceBuild: BranchFlowDeviceBuild }) {
+  const installed = deviceBuild.installed;
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-md bg-emerald-50 px-3 py-2 text-xs dark:bg-emerald-950/40">
+      <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+        実機に入っている版
+      </span>
+      {installed ? (
+        <>
+          <code className="rounded bg-background/70 px-1.5 py-0.5 font-mono">
+            {MAIN_BRANCH} {shortOid(installed.oid)}
+          </code>
+          <span className="text-muted-foreground">
+            {formatMonthDayTime(installed.committedAt)} に{deviceBuild.reflectedLabel}
+          </span>
+        </>
+      ) : (
+        <span className="text-muted-foreground">取得できませんでした</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 未反映の束に出す、Macで打つコマンド（#3468）。mainへのマージボタンの代わり。
+ *
+ * **画面からはマージさせない。** 画面でマージすると、ビルドしていない版が実機に入ったように
+ * mainへ記録される。スクリプトはビルドしたコミットでだけマージする
+ * （`gh pr merge --match-head-commit`）ので、ここに出すのはコマンドとビルド対象の版まで。
+ */
+function DeviceBuildInstructions({ deviceBuild }: { deviceBuild: BranchFlowDeviceBuild }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(deviceBuild.command);
+    } catch {
+      // クリップボードが使えない環境ではコピーできていないので成功表示を出さない
+      // （`dispatch-job-status.tsx`と同じ扱い）。コマンドは選択してコピーできる
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="flex max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-purple-400 bg-purple-50/60 px-3 py-2 text-xs dark:bg-purple-950/30">
+      <p>
+        Mac miniで次を実行すると、{DEVELOP_BRANCH}の先端
+        {deviceBuild.buildTargetOid && (
+          <>
+            {" "}
+            <code className="rounded bg-background/70 px-1 font-mono">
+              {shortOid(deviceBuild.buildTargetOid)}
+            </code>
+          </>
+        )}
+        {" "}をXcodeで開きます。実機に入れたあとEnterを押すと{MAIN_BRANCH}へ記録されます。
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <code className="min-w-0 rounded bg-background/70 px-1.5 py-0.5 font-mono break-all select-all">
+          {deviceBuild.command}
+        </code>
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={handleCopy}>
+          {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+          {copied ? "コピーしました" : "コピー"}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1246,6 +1354,8 @@ function ReleaseFlowGraph({
         />
       )}
 
+      {repository.deviceBuild && <DeviceBuildInstalledBand deviceBuild={repository.deviceBuild} />}
+
       <ul className="relative">
         {/* 2本のレール。行の高さによらず端まで伸ばす */}
         <span
@@ -1278,14 +1388,18 @@ function ReleaseFlowGraph({
             repositoryFullName={repository.repositoryFullName}
             group={group}
             onMerged={onMerged}
+            deviceBuild={repository.deviceBuild}
             releaseButton={
-              /* **未リリースの束には必ずリリースの導線を置く**（#2711）。以前は
+              /* **Xcodeで実機へ反映するリポジトリには出さない**（#3468）。リリースPRの作成から
+                 mainへのマージまでをMacのスクリプトが持ち、画面の導線はコマンドの表示だけにする。
+                 **未リリースの束には必ずリリースの導線を置く**（#2711）。以前は
                  `canTriggerRelease`のときだけ出していたため、押せない状態では「次のリリース
                  （本番未反映）」と言いながら本番へ出す手段が画面のどこにも無かった。押せない
                  ときは無効のボタンと理由（`releaseBlockedReason`）を出す。
                  **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
                  （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
                  押せる操作の隣に押せない操作が並ぶだけになる */
+              !repository.deviceBuild &&
               group.mergedAt === null &&
               group.pullRequest === null &&
               group.bumpPullRequest === null ? (
@@ -1303,6 +1417,7 @@ function ReleaseFlowGraph({
               /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                  headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
                  ブランチを消すとdevelopが消えるため出さない */
+              !repository.deviceBuild &&
               group.mergedAt === null &&
               group.pullRequest !== null &&
               group.pullRequest.state === "open" &&
@@ -1410,12 +1525,14 @@ function ReleaseGroupHeaderWithLanes({
   group,
   releaseButton,
   rebuildButton,
+  deviceBuild,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   rebuildButton?: React.ReactNode;
+  deviceBuild?: BranchFlowDeviceBuild | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   return (
@@ -1425,6 +1542,7 @@ function ReleaseGroupHeaderWithLanes({
         group={group}
         releaseButton={releaseButton}
         rebuildButton={rebuildButton}
+        deviceBuild={deviceBuild}
         onMerged={onMerged}
       />
       {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
@@ -1574,8 +1692,12 @@ function RepositorySummaryRow({
       {summary.releaseInProgress ? (
         // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
-        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う
-        summary.releaseMergeTarget ? (
+        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
+        // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
+        // 「Xcode未反映」を出す
+        repository.deviceBuild ? (
+          <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
+        ) : summary.releaseMergeTarget ? (
           <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
         ) : (
           <ReleaseProgressPill

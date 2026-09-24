@@ -1,3 +1,4 @@
+import { getDeviceBuildRepository } from "@/lib/device-build-repos";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
@@ -13,6 +14,7 @@ import {
 import type {
   BranchComparison,
   BranchFlowDeployRun,
+  BranchFlowDeviceBuild,
   BranchFlowDeployState,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
@@ -653,6 +655,29 @@ function buildRepository({
       .sort((a, b) => b.number - a.number),
     startedIssues,
     branchesLoaded: branchStatus !== null,
+    deviceBuild: resolveDeviceBuild(repository.fullName, branchStatus),
+  };
+}
+
+/**
+ * Xcodeで実機へ反映するリポジトリ（#3468）の表示材料を組み立てる。表に無いリポジトリはnull。
+ *
+ * ビルド対象（`develop`の先頭）は**未反映の変更があるときだけ**出す。無いときに出すと、
+ * 実機に入っている版と同じ中身をもう一度ビルドさせることになる。
+ */
+function resolveDeviceBuild(
+  repositoryFullName: string,
+  branchStatus: RepositoryBranchStatus | null,
+): BranchFlowDeviceBuild | null {
+  const device = getDeviceBuildRepository(repositoryFullName);
+  if (!device) return null;
+  const hasUnreleased = unreleasedCommitCount(branchStatus?.developVsMain) > 0;
+  return {
+    pendingLabel: device.pendingLabel,
+    reflectedLabel: device.reflectedLabel,
+    command: device.command,
+    installed: branchStatus?.mainHead ?? null,
+    buildTargetOid: hasUnreleased ? (branchStatus?.developHeadOid ?? null) : null,
   };
 }
 

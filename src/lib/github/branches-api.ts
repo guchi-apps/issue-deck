@@ -2,7 +2,7 @@ import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql, type GraphqlError } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
-import type { BranchComparison, UnreleasedUnits } from "@/types/branch-flow";
+import type { BranchComparison, BranchHead, UnreleasedUnits } from "@/types/branch-flow";
 
 /**
  * 1リポジトリあたりに存在を確認するブランチ数の上限。
@@ -15,6 +15,10 @@ export type BranchRefLookup = {
   existingBranches: string[];
   /** `main`と`develop`の差分。どちらかのブランチが無いリポジトリではnull */
   developVsMain: BranchComparison | null;
+  /** `main`の先頭コミット（#3468）。`main`が無い・取れない場合はnull */
+  mainHead: BranchHead | null;
+  /** `develop`の先頭コミットのOID（#3468）。`develop`が無いリポジトリではnull */
+  developHeadOid: string | null;
 };
 
 /**
@@ -40,8 +44,12 @@ type CompareNode = {
   commits?: { totalCount?: number | null; nodes?: (CompareCommit | null)[] | null } | null;
 } | null;
 
+type HeadTarget = { oid?: string | null; committedDate?: string | null } | null;
+
 type GraphqlResult = {
-  repository: ({ comparison: { compare: CompareNode } | null } & Record<
+  repository: ({
+    comparison: { target?: HeadTarget; compare: CompareNode } | null;
+  } & Record<
     string,
     unknown
   >) | null;
@@ -83,6 +91,9 @@ export async function lookupBranchRefs(
     query($owner: String!, $name: String!${variableDeclarations ? `, ${variableDeclarations}` : ""}) {
       repository(owner: $owner, name: $name) {
         comparison: ref(qualifiedName: "refs/heads/main") {
+          # mainの先頭（#3468）。Xcodeで実機へ反映するリポジトリでは「実機に入っている版」になる。
+          # developが無くても取れるよう、compareではなくref自身のtargetから読む
+          target { ... on Commit { oid committedDate } }
           compare(headRef: "develop") {
             aheadBy
             behindBy
@@ -126,7 +137,9 @@ export async function lookupBranchRefs(
   );
 
   const repository = data.repository;
-  if (!repository) return { existingBranches: [], developVsMain: null };
+  if (!repository) {
+    return { existingBranches: [], developVsMain: null, mainHead: null, developHeadOid: null };
+  }
 
   const existingBranches = targets.filter(
     (_, index) => (repository[`b${index}`] as RefNode) !== null,
@@ -135,7 +148,14 @@ export async function lookupBranchRefs(
   return {
     existingBranches,
     developVsMain: toBranchComparison(repository.comparison?.compare ?? null),
+    mainHead: toBranchHead(repository.comparison?.target ?? null),
+    developHeadOid: repository.comparison?.compare?.headTarget?.oid ?? null,
   };
+}
+
+function toBranchHead(target: HeadTarget): BranchHead | null {
+  if (!target?.oid || !target.committedDate) return null;
+  return { oid: target.oid, committedAt: target.committedDate };
 }
 
 /**
