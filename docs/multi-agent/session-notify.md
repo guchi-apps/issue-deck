@@ -675,7 +675,7 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
-- **原因（`interrupt_reason`）は4つ**——`api_error`・`tool_call_stall`・`classifier_blocked`・
+- **原因（`interrupt_reason`）は5つ（`question_asked`は#3447）**——`api_error`・`tool_call_stall`・`classifier_blocked`・
   `turn_stall`（Codexのターンが閉じないまま止まった形。#3174）。`session-notify.sh`は値を
   そのまま通すだけで、受け入れる一覧を持つのは`SESSION_INTERRUPTED_REASONS`
   （`src/lib/dispatch/session-state.ts`）だけにしてある
@@ -1495,8 +1495,11 @@ issue-deckへ待ちを作り、そのまま画面の返事をポーリングし�
   guchi-apps/dayspan#737がこの形で通知なしに止まった）。当面の対策は実装エージェントのプロンプト
   （`scripts/prompts/implementation-agent.md`・`generic-implementation-agent.md`）に「人の判断を待つときは
   `AskUserQuestion`を使う。それで済まない相談はIssueコメント＋`00.check-user`＋`01.check-blocked`」と
-  明記することで、従うかどうかはエージェント次第。`Stop`時点の`last_assistant_message`やPRの有無から
-  引き上げる仕組み（#2844と同じ形）は別Issueで扱う
+  明記することで、従うかどうかはエージェント次第。仕組み側でも、`Stop`の`last_assistant_message`の
+  最終段落が「選択・承認を求める語＋`？`」で終わっていて、PRのURLなど完了報告の印が無いときは、
+  `reason: question_asked`として#2844と同じ形（Issueコメント＋`00.check-user`＋`01.check-blocked`、
+  画面の様子は入力待ち）で引き上げる（#3447。印は`<セッション名>.question-asked`）。日本語の
+  ヒューリスティクスなので取りこぼしは残り、「PRが無いまま応答が終わった」は誤検知が多いため見ていない
 - **`Stop`は応答の終了ごとに発火する。** 無人で回す実装セッションは
   「起動 → 数十分作業 → Stop」でほぼ1回だが、`21.plan-required`のように人が途中で答える
   Issueではturnごとに飛ぶ。多すぎたときの間引きは実運用の数字を見てから入れる

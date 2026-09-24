@@ -156,6 +156,26 @@ describe("buildSessionInterruptedCommentBody（reason: classifier_blocked）", (
   });
 });
 
+describe("buildSessionInterruptedCommentBody（reason: question_asked・#3447）", () => {
+  const body = buildSessionInterruptedCommentBody({
+    hostName: "subpc",
+    tmuxSessionName: "issue-deck-issue-3447",
+    detail: "応答が文章での問いかけで終わりました。",
+    remoteControlUrl: null,
+    reason: "question_asked",
+  });
+
+  it("文章での問いかけで終わったという原因を説明する", () => {
+    expect(body).toContain("文章での問いかけで応答を終えています");
+    expect(body).toContain("`AskUserQuestion`");
+    expect(body).not.toContain("APIエラーで中断したまま止まっています");
+  });
+
+  it("出口の構造は共通のまま出す", () => {
+    expect(body).toContain("tmux attach -t issue-deck-issue-3447");
+  });
+});
+
 describe("buildSessionInterruptedCommentBody（reason: turn_stall・#3174）", () => {
   const body = buildSessionInterruptedCommentBody({
     hostName: "subpc",
