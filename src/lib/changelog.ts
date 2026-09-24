@@ -42,6 +42,17 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.44.2",
+    date: "2026-09-25",
+    changes: [
+      "Issue詳細画面で、タイトルや説明文が短い（または長い）場合に本文欄が画面幅いっぱいに表示されず狭く見えることがあった表示崩れを修正しました。",
+    ],
+    usage: [
+      "1. Issue一覧から任意のIssueを選択し、Issue詳細画面を開く。",
+      "2. タイトルや説明文の長さに関わらず、詳細ペインが左のIssue一覧の右側の余白なく画面幅いっぱいに表示されていれば修正が反映されています。",
+    ],
+  },
+  {
     version: "7.44.0",
     date: "2026-09-24",
     changes: [
