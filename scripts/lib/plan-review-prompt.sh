@@ -37,16 +37,19 @@ plan_review_fleet_status() {
 #
 #   $1 テンプレートのパス / $2 Issue番号 / $3 owner/repo / $4 作業ディレクトリ
 #   $5 作業ディレクトリの鮮度の説明 / $6 並行状況スナップショットを書いたファイル
+#   $7 issue-deckの`scripts/`ディレクトリ（省略時は作業ディレクトリの`scripts`。添付画像の取得
+#      スクリプトの場所として`{{ISSUE_DECK_SCRIPTS_DIR}}`へ埋める）
 #
 # **値はファイル・引数で渡し、テンプレートの中身は解釈しない。** 計画本文もIssueの本文も
-# ここには入らない（読むのはセッション自身の`gh issue view`）ので、埋めるのはこの5つだけ。
+# ここには入らない（読むのはセッション自身の`gh issue view`）ので、埋めるのはこの6つだけ。
 plan_review_render_prompt() {
   local template="$1" issue_number="$2" repository="$3" workdir="$4" checkout="$5" fleet_file="$6"
+  local scripts_dir="${7:-$workdir/scripts}"
 
-  python3 - "$template" "$issue_number" "$repository" "$workdir" "$checkout" "$fleet_file" <<'PY'
+  python3 - "$template" "$issue_number" "$repository" "$workdir" "$checkout" "$fleet_file" "$scripts_dir" <<'PY'
 import sys
 
-template_path, issue_number, repository, workdir, checkout, fleet_path = sys.argv[1:7]
+template_path, issue_number, repository, workdir, checkout, fleet_path, scripts_dir = sys.argv[1:8]
 
 with open(template_path, encoding="utf-8") as f:
     template = f.read()
@@ -59,6 +62,7 @@ replacements = {
     "{{WORKDIR}}": workdir,
     "{{CHECKOUT}}": checkout,
     "{{FLEET_STATUS}}": fleet,
+    "{{ISSUE_DECK_SCRIPTS_DIR}}": scripts_dir,
 }
 result = template
 for placeholder, value in replacements.items():

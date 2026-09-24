@@ -252,7 +252,7 @@ plan_review_fleet_status "$LAUNCHER_SCRIPTS_DIR/fleet-status.sh" "$REPO_PATH" "$
 
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています（$PROMPT_TEMPLATE_SOURCE）..."
 plan_review_render_prompt "$PROMPT_TEMPLATE" "$ISSUE_NUMBER" "$FULL_NAME" "$WORKDIR" \
-  "$CHECKOUT_LABEL" "$FLEET_STATUS_FILE" >"$PROMPT_FILE"
+  "$CHECKOUT_LABEL" "$FLEET_STATUS_FILE" "$LAUNCHER_SCRIPTS_DIR" >"$PROMPT_FILE"
 
 if [[ "$AGENT_CLI_KIND" == "codex" ]]; then
   CODEX_SUPPLEMENT="$LAUNCHER_SCRIPTS_DIR/prompts/codex-plan-review-supplement.md"
@@ -278,6 +278,9 @@ fi
 # 禁止事項と合わせて変更を防ぐ。Codexでは許可リストを機械的に適用できないため、承認・PR操作を
 # 行わない制約はプロンプトで明示する。
 PLAN_REVIEW_ALLOWED_TOOLS='Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git ls-remote:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob'
+# 添付画像の取得（#3456）。`-p`にはクラシファイアが無く、規則に無いBashは黙って拒否されるため、
+# 取得スクリプトだけを足す（相対パスは作業ディレクトリ＝対象リポジトリのもの、絶対パスは汎用テンプレート用）。
+PLAN_REVIEW_ALLOWED_TOOLS+=",Bash(scripts/fetch-issue-images.sh:*),Bash($LAUNCHER_SCRIPTS_DIR/fetch-issue-images.sh:*)"
 # サブエージェントは使わせない（Actions側と同じ）。指摘の根拠は自分で確かめたものに限る。
 PLAN_REVIEW_DISALLOWED_TOOLS='Task,Agent'
 
