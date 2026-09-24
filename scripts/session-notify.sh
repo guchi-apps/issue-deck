@@ -276,6 +276,15 @@ if [[ -n "$NOTIFY_TMUX_SESSION" ]] &&
 fi
 export NOTIFY_CLASSIFIER_BLOCK_NOTIFIED
 
+# 「問いかけで終わった」引き上げをすでに1回送ったか（#3447）。`.classifier-block`と同じ考え方。
+NOTIFY_QUESTION_ASKED_NOTIFIED=0
+if [[ -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_question_asked_notified >/dev/null 2>&1 &&
+  session_state_question_asked_notified "$NOTIFY_TMUX_SESSION"; then
+  NOTIFY_QUESTION_ASKED_NOTIFIED=1
+fi
+export NOTIFY_QUESTION_ASKED_NOTIFIED
+
 # 「まだ開始していない」印（`lib/session-state.sh`の`.starting`）を消す（#1465）。
 #
 # ランチャーが`claude`の起動直前に置いた印が消えないまま猶予（既定180秒）を過ぎると、pollerが
@@ -842,6 +851,40 @@ def classifier_blocked_at_end(transcript):
     return last_denial >= 0 and last_denial > last_tool_use
 
 
+# 応答の最終段落が「人に判断を求める問いかけ」で終わっているかを見る語（#3447）。
+QUESTION_ASK_WORDS = (
+    "どちら", "どれ", "いずれ", "どう", "よろしい", "しますか", "ますか", "でしょうか",
+    "ください", "いかが", "どの", "which", "should i", "shall i", "would you", "do you",
+)
+# 完了報告とみなす印。PRのURLや完了報告の言い回しがあれば、末尾の「〜しますか？」は
+# 「次にやりますか」程度の添え物で、止まって人の判断を待っているわけではない。
+QUESTION_DONE_MARKERS = ("/pull/", "完了報告", "PRを作成しました", "PRを作りました")
+
+
+def question_asked_at_end(message):
+    """応答が文章での問いかけで終わっているか（#3447）。誤検知を避けるため保守的に見る。
+
+    すべて満たすときだけ真: 最終段落が`？`/`?`で終わる／その段落に選択・承認を求める語がある／
+    本文に完了報告の印（PRのURLなど）が無い。判定材料は`Stop`フックの`last_assistant_message`
+    だけで、無い版では偽（従来どおり応答終了として報告する）。
+    """
+    if not isinstance(message, str) or not message.strip():
+        return False
+    if any(marker in message for marker in QUESTION_DONE_MARKERS):
+        return False
+    paragraphs = [p.strip() for p in message.strip().split("\n\n") if p.strip()]
+    if not paragraphs:
+        return False
+    last = paragraphs[-1]
+    if last.startswith("```") or last.endswith("```"):
+        return False
+    stripped = last.rstrip("*_`」』）) \t\n")
+    if not (stripped.endswith("？") or stripped.endswith("?")):
+        return False
+    lowered = last.lower()
+    return any(word in lowered for word in QUESTION_ASK_WORDS)
+
+
 def resolve_plan_text(tool_input):
     """提示された計画の本文を取り出す。
 
@@ -1166,6 +1209,27 @@ if event == "Stop":
             "tmuxSessionName": tmux_session,
             "detail": "auto modeのクラシファイアがコマンドを拒否したまま応答が終わりました。",
             "reason": "classifier_blocked",
+            "remoteControlUrl": resolve_remote_url() or None,
+        }))
+        sys.exit(0)
+    # **文章での問いかけで終わった応答も同じ形で引き上げる**（#3447）。`AskUserQuestion`を
+    # 使わないと`Notification`が飛ばず、`00.check-user`もPush通知も付かないまま止まる。
+    # 判定は`question_asked_at_end`（誤検知を避ける保守的な条件）。二重送信は印で止める。
+    if (
+        os.environ.get("NOTIFY_QUESTION_ASKED_NOTIFIED", "") != "1"
+        and repo_slug
+        and issue_number.isdigit()
+        and tmux_session
+        and question_asked_at_end(hook.get("last_assistant_message"))
+    ):
+        print("interrupted", "question_asked")
+        print(json.dumps({
+            "repository": repo_slug,
+            "issue": int(issue_number),
+            "hostName": host_name,
+            "tmuxSessionName": tmux_session,
+            "detail": "応答が文章での問いかけで終わりました（AskUserQuestionは使われていません）。",
+            "reason": "question_asked",
             "remoteControlUrl": resolve_remote_url() or None,
         }))
         sys.exit(0)
@@ -1707,6 +1771,20 @@ if [[ "$decision" == "interrupted" ]]; then
     fi
     report_classifier_block_activity "$(printf '%s' "$result" | sed -n '2p')"
   fi
+  # 問いかけで終わった応答の引き上げ（#3447）。後始末は上と同じ（状態・印・様子）
+  if [[ "$decision_line" == "interrupted question_asked" ]]; then
+    if [[ -n "$NOTIFY_TMUX_SESSION" ]]; then
+      if declare -F session_state_record_event >/dev/null 2>&1; then
+        session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
+          echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
+      fi
+      if declare -F session_state_mark_question_asked_notified >/dev/null 2>&1; then
+        session_state_mark_question_asked_notified "$NOTIFY_TMUX_SESSION" ||
+          echo "session-notify: 引き上げ済みの印を残せませんでした（実装は続行します）" >&2
+      fi
+    fi
+    report_classifier_block_activity "$(printf '%s' "$result" | sed -n '2p')"
+  fi
   exit 0
 fi
 
@@ -1744,6 +1822,12 @@ fi
 if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_TMUX_SESSION" ]] &&
   declare -F session_state_clear_classifier_block >/dev/null 2>&1; then
   session_state_clear_classifier_block "$NOTIFY_TMUX_SESSION" || true
+fi
+
+# 問いかけでの引き上げ済みの印も同じ契機で消す（#3447）
+if [[ ("$STATE_EVENT" == "Stop" || "$STATE_EVENT" == "working") && -n "$NOTIFY_TMUX_SESSION" ]] &&
+  declare -F session_state_clear_question_asked >/dev/null 2>&1; then
+  session_state_clear_question_asked "$NOTIFY_TMUX_SESSION" || true
 fi
 
 # セッションの状態を記録する（#1256）。**報告より先に行う。**

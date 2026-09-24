@@ -235,6 +235,46 @@ describe("session-notify.sh の様子の報告", () => {
     });
   });
 
+  // #3447。`AskUserQuestion`を使わず文章で問いかけて終えると`Stop`しか届かない。
+  describe("文章での問いかけで終わった応答（#3447）", () => {
+    it("選択を求める問いかけで終わっていれば引き上げる", async () => {
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        last_assistant_message: "案が2つあります。\n\nA案とB案のどちらで進めますか？",
+      });
+
+      expect(escalations()).toHaveLength(1);
+      expect(escalations()[0].body).toMatchObject({
+        reason: "question_asked",
+        issue: 2280,
+      });
+      expect(activityReports()[0].body).toMatchObject({ activity: "waiting_input" });
+    });
+
+    it("PRのURLを含む完了報告の末尾の問いかけは対象外", async () => {
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        last_assistant_message:
+          "PRを作成しました: https://github.com/guchi-apps/issue-deck/pull/1\n\n続けて別件も進めますか？",
+      });
+
+      expect(escalations()).toEqual([]);
+    });
+
+    it("問いかけで終わらない応答・last_assistant_messageが無いStopは対象外", async () => {
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        last_assistant_message: "どちらにするか迷いましたが、A案で実装しました。",
+      });
+      await runHook({ hook_event_name: "Stop", session_id: "sess-1" });
+
+      expect(escalations()).toEqual([]);
+    });
+  });
+
   // 拒否されたコマンドにはシークレットが混ざりうるうえ、Issueコメントは公開リポジトリに残る。
   it("引き上げの本文に転記の中身を載せない", async () => {
     const transcript = writeTranscript([toolUse, classifierDenial, assistantText]);

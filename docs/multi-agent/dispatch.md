@@ -212,6 +212,9 @@ Claudeに聞く）と**サブPCで実行する**（ローカルセッション�
   `curl`で任意の宛先へ送れてしまうので、前段の「Issueに貼られた画像を取得しておく」ステップが
   `scripts/fetch-issue-images.sh`で`/tmp/issue-images/`へ落とし、Claudeはそれを`Read`で開くだけに
   した（[code-map.md](../code-map.md)「画像・アーティファクトはVPSのローカルディスクに置く」）。
+  **計画レビュー（G1）・PRレビュー（G2）も同じ取得経路で画像を読める**（#3456）。無人実行の計画レビューは
+  同じ`/tmp/issue-images/`を`Read`し、ローカルのレビューは各プロンプトの案内で`fetch-issue-images.sh`を叩く
+  （自動起動の`-p`には許可規則を足してある）。
 - git push（ラベル操作を含む）は、Workflows: Read and write を持つワークフロー用トークンで行う
   （issue #106）。既定の`GITHUB_TOKEN`は
   `.github/workflows/`配下へのpushをGitHubの仕様上原理的に許可できない（リポジトリの

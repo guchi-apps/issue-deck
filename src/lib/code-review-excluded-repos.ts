@@ -8,6 +8,7 @@
  * - `docs`: 共有知識。内容は格上げ判定エージェントがフリートの知見メモから反映する
  * - `claude-config`: 個人設定。`develop`を持たず、`issue-<番号>`→`main`の直行
  * - `vps`・`subpc`: 実機の設定。`main`へ入ると`deploy.yml`が実機へ反映する
+ * - `ideas`: 構想の置き場（#3466）。アプリのコードを持たず、実装で直す対象が無い
  *
  * **リポジトリ名の固定リストで持つ。** `Repository`に種別の列は無く、近い列の
  * `hasClaudeWorkflow`（無人実行の有無）で絞ると`question`のような別の理由で入れていない
@@ -18,6 +19,7 @@ export const CODE_REVIEW_EXCLUDED_REPOSITORIES: readonly string[] = [
   "guchi-apps/claude-config",
   "guchi-apps/vps",
   "guchi-apps/subpc",
+  "guchi-apps/ideas",
 ];
 
 export function isCodeReviewExcludedRepository(repositoryFullName: string): boolean {

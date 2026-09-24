@@ -239,6 +239,11 @@ export function buildSessionInterruptedCommentBody(params: {
           "⚠️ このIssueの実装セッションが、ツールを呼び出そうとした形跡はあるものの、実際には",
           "呼び出されないまま停滞しています。",
         ]
+      : reason === "question_asked"
+        ? [
+            "⚠️ このIssueの実装セッションが、文章での問いかけで応答を終えています（`AskUserQuestion`は",
+            "使われていません）。",
+          ]
       : reason === "classifier_blocked"
         ? [
             "⚠️ このIssueの実装セッションが、auto modeのクラシファイアにコマンドを拒否されたまま",
@@ -274,6 +279,15 @@ export function buildSessionInterruptedCommentBody(params: {
       "バックグラウンドで動いているものは何もありません。もう一度、実際にツールを呼び出して",
       "進めてください。",
       "```",
+    );
+  } else if (reason === "question_asked") {
+    lines.push(
+      "選択肢を本文の文章で並べて応答を終えると、`Notification`フックが飛ばず`Stop`だけが届くため、",
+      "画面からは「正常に応答した」ようにしか見えません（#3444）。応答の末尾が問いかけで終わって",
+      "いることから、人の判断を待っている可能性があるとして引き上げました（#3447）。",
+      "",
+      "セッションの末尾の問いかけを端末かRemote Controlで確認し、回答を送ってください。",
+      "問いかけではなかった場合は、そのまま続けるよう指示してください。",
     );
   } else if (reason === "classifier_blocked") {
     lines.push(

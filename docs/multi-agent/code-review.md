@@ -235,8 +235,8 @@ Issue——ここは表示のための当て推量。
 
 ### 無人実行を入れない枠のリポジトリは選ばせない（#3453）
 
-**`docs`・`claude-config`・`vps`・`subpc`はレビューの対象外にしている。** レビューは
-「指摘→Issueを起案→そのIssueで実装して直す」流れの入口だが、この4つは無人実行を入れない枠
+**`docs`・`claude-config`・`vps`・`subpc`・`ideas`はレビューの対象外にしている。**（`ideas`は#3466で追加。構想の置き場でアプリのコードを持たない。） レビューは
+「指摘→Issueを起案→そのIssueで実装して直す」流れの入口だが、この5つは無人実行を入れない枠
 （[supported-repositories.md](../supported-repositories.md)）で、その流れを想定していない
 （`docs`は格上げ判定エージェントが反映する共有知識、`claude-config`は`main`直行の個人設定、
 `vps`・`subpc`は`main`へ入ると実機へ反映される設定）。サブPCにチェックアウトがあるため、
@@ -272,7 +272,7 @@ Issue——ここは表示のための当て推量。
 
 | 項目 | 値・理由 |
 | --- | --- |
-| 対象リポジトリ | サブPCにチェックアウトがあるものだけ（`repository_not_runnable`）。読むコードがそこにしか無い。無人実行を入れない枠の4つは除く（`repository_excluded`。上記） |
+| 対象リポジトリ | サブPCにチェックアウトがあるものだけ（`repository_not_runnable`）。読むコードがそこにしか無い。無人実行を入れない枠の5つは除く（`repository_excluded`。上記） |
 | 参照先 | `origin/develop`（無ければ`origin/main`）のスナップショット。置き場は`~/apps/issue-deck-worktrees/.code-reviews`で、横断質問・計画レビューとは分ける |
 | 同時実行 | `DISPATCH_MAX_CODE_REVIEWS`（既定2）。セッション名が`-issue-`の規約から外れるため`DISPATCH_MAX_SESSIONS`には数えられない |
 | 実行時間 | `ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS`（既定2700秒＝45分）。フックを付けていないので、固まっても誰も気づけない。上限で必ず終わる形にする |
