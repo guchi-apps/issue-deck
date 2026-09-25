@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArrowLeft,
@@ -129,7 +129,11 @@ import {
   isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
-import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
+import {
+  ARTIFACT_REQUIRED_LABEL,
+  canStartImplementation,
+  startImplementationDisabledReason,
+} from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
   selectVisiblePullRequestLinks,
@@ -266,7 +270,8 @@ export function MobileIssueDetail({
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
-  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
+  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
+    useIssueArtifacts(issue);
   // デプロイ失敗Issue（#2236）。PCの詳細と同じ判定・同じ部品を使う
   const deployFailureMeta = useMemo(() => parseDeployFailureMeta(issue?.body), [issue?.body]);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
@@ -314,6 +319,14 @@ export function MobileIssueDetail({
   );
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
   const dispatch = useDispatchState(true);
+  // 計画が出し直されたら取り直す（#3493）。作成を依頼した後の計画では公開済みになっているため
+  const planRequestId = (issue
+    ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
+    : undefined
+  )?.id;
+  useEffect(() => {
+    if (planRequestId) reloadArtifacts();
+  }, [planRequestId, reloadArtifacts]);
   const dispatchJob = findDispatchJobForIssue(
     dispatch.jobs,
     issue.repositoryFullName,
@@ -980,6 +993,11 @@ export function MobileIssueDetail({
               session={issueSession}
               dispatch={dispatch}
               onCheckUserResolved={handleCheckUserResolved}
+              artifactsMissing={
+                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
+                  isArtifactsLoaded &&
+                  artifacts.length === 0
+                }
             />
           </div>
         )}

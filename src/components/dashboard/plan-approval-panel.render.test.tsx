@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
-import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
+import {
+  PLAN_ARTIFACT_REQUEST_TEXT,
+  type SessionPlanRequestView,
+} from "@/lib/dispatch/session-plan-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const REPO = "guchi-apps/issue-deck";
@@ -127,6 +130,31 @@ describe("PlanApprovalPanel", () => {
       expect(screen.getByText("端末に承認プロンプトを出しました。")).toBeTruthy(),
     );
     expect(onCheckUserResolved).not.toHaveBeenCalled();
+  });
+
+  it("アーティファクトが無いときだけ作成依頼を出し、固定文を修正として送る（#3493）", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    const { rerender } = render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle(decidePlan)} />,
+    );
+    expect(screen.queryByRole("button", { name: /アーティファクトの作成を依頼/ })).toBeNull();
+
+    rerender(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+        artifactsMissing
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /アーティファクトの作成を依頼/ }));
+    await waitFor(() =>
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "revise",
+        text: PLAN_ARTIFACT_REQUEST_TEXT,
+      }),
+    );
   });
 
   /** `deny`の理由がそのまま次の指示になるので、本文が空のまま送れてはいけない */

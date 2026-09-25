@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ExternalLink,
@@ -141,7 +141,11 @@ import {
   isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
-import { canStartImplementation, startImplementationDisabledReason } from "@/lib/github/start-implementation";
+import {
+  ARTIFACT_REQUIRED_LABEL,
+  canStartImplementation,
+  startImplementationDisabledReason,
+} from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import { resolveProgressStatus } from "@/lib/issue-progress";
@@ -263,7 +267,8 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
   // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
-  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
+  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
+    useIssueArtifacts(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
@@ -306,6 +311,14 @@ export function IssueDetail({
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
+  // 計画が出し直されたら取り直す（#3493）。作成を依頼した後の計画では公開済みになっているため
+  const planRequestId = (issue
+    ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
+    : undefined
+  )?.id;
+  useEffect(() => {
+    if (planRequestId) reloadArtifacts();
+  }, [planRequestId, reloadArtifacts]);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
@@ -1048,6 +1061,11 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
+                artifactsMissing={
+                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
+                  isArtifactsLoaded &&
+                  artifacts.length === 0
+                }
               />
             </div>
           )}

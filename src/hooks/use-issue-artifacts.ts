@@ -10,6 +10,8 @@ const EMPTY: SessionArtifactView[] = [];
 type UseIssueArtifactsResult = {
   artifacts: SessionArtifactView[];
   isLoading: boolean;
+  /** 現在のIssueについて、取得が1回完了している（成功・失敗を問わない） */
+  isLoaded: boolean;
   /** 公開されたばかりのものを拾い直す。セクションの「更新」から呼ぶ */
   reload: () => void;
 };
@@ -26,6 +28,7 @@ type UseIssueArtifactsResult = {
 export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult {
   const [artifacts, setArtifacts] = useState<SessionArtifactView[]>(EMPTY);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
   const repositoryFullName = issue?.repositoryFullName ?? null;
   const issueNumber = issue?.number ?? null;
@@ -55,7 +58,10 @@ export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult 
         if (!controller.signal.aborted) setArtifacts(EMPTY);
       })
       .finally(() => {
-        if (!controller.signal.aborted) setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+          setLoadedKey(`${repositoryFullName}#${issueNumber}`);
+        }
       });
 
     return () => controller.abort();
@@ -63,5 +69,7 @@ export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult 
 
   const reload = useCallback(() => setReloadCount((count) => count + 1), []);
 
-  return { artifacts, isLoading, reload };
+  const isLoaded = loadedKey !== null && loadedKey === `${repositoryFullName}#${issueNumber}`;
+
+  return { artifacts, isLoading, isLoaded, reload };
 }
