@@ -263,7 +263,8 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
   // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
-  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
+  const { artifacts, isLoading: isLoadingArtifacts, reload: reloadArtifacts } =
+    useIssueArtifacts(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
@@ -1048,6 +1049,7 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
+                artifactsMissing={!isLoadingArtifacts && artifacts.length === 0}
               />
             </div>
           )}

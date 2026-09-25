@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ClipboardCheck,
   ExternalLink,
+  LayoutTemplate,
   Keyboard,
   Loader2,
   Pencil,
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
+  PLAN_ARTIFACT_REQUEST_TEXT,
   SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
@@ -59,6 +61,7 @@ export function PlanApprovalPanel({
   session,
   dispatch,
   onCheckUserResolved,
+  artifactsMissing = false,
 }: {
   request: SessionPlanRequestView;
   /** 計画を出したセッション。見つかっていなければ`null` */
@@ -72,6 +75,11 @@ export function PlanApprovalPanel({
    * 「端末・Remote Controlで答える」では呼ばない（人はまだ答えていない）。
    */
   onCheckUserResolved?: () => void;
+  /**
+   * このIssueに見た目のアーティファクトが1件も無いと確かめられているとき`true`（#3493）。
+   * 読み込み中・取得失敗は`false`にして、無いと決めつけない。
+   */
+  artifactsMissing?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
@@ -96,12 +104,12 @@ export function PlanApprovalPanel({
   // 「ここからは送れない」と言うだけでは、どこで答えればよいのかが画面から辿れない（#2108）
   const remoteControlUrl = session ? summarizeIssueSession(session).remoteControlUrl : null;
 
-  async function send(decision: "approve" | "revise" | "defer") {
+  async function send(decision: "approve" | "revise" | "defer", text?: string) {
     setError(null);
     const result = await dispatch.decidePlan({
       id: request.id,
       decision,
-      text: decision === "revise" ? revision : undefined,
+      text: decision === "revise" ? (text ?? revision) : undefined,
     });
     if (!result.ok) {
       setError(result.message);
@@ -246,6 +254,17 @@ export function PlanApprovalPanel({
               <Pencil />
               修正を送る
             </Button>
+            {artifactsMissing && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canSend || dispatch.isSubmitting}
+                onClick={() => void send("revise", PLAN_ARTIFACT_REQUEST_TEXT)}
+              >
+                <LayoutTemplate />
+                アーティファクトの作成を依頼
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

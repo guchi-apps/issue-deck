@@ -266,7 +266,8 @@ export function MobileIssueDetail({
   const { comments, isLoading, error, setComments } = useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
-  const { artifacts, reload: reloadArtifacts } = useIssueArtifacts(issue);
+  const { artifacts, isLoading: isLoadingArtifacts, reload: reloadArtifacts } =
+    useIssueArtifacts(issue);
   // デプロイ失敗Issue（#2236）。PCの詳細と同じ判定・同じ部品を使う
   const deployFailureMeta = useMemo(() => parseDeployFailureMeta(issue?.body), [issue?.body]);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
@@ -980,6 +981,7 @@ export function MobileIssueDetail({
               session={issueSession}
               dispatch={dispatch}
               onCheckUserResolved={handleCheckUserResolved}
+              artifactsMissing={!isLoadingArtifacts && artifacts.length === 0}
             />
           </div>
         )}

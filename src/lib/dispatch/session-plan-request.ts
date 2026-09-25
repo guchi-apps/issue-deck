@@ -55,6 +55,14 @@ export const SESSION_PLAN_WAIT_SECONDS_MAX = 24 * 60 * 60;
 export const SESSION_PLAN_REVISION_MAX_LENGTH = 2000;
 
 /**
+ * 画面の「アーティファクトの作成を依頼」が修正として送る固定の依頼文（#3493）。
+ * **本文の正はここ**で、人が書く修正文ではない。`25.artifact-required`なのに見た目が
+ * 未公開のまま計画が出たときに、計画の練り直しへ相乗りさせて公開を頼む。
+ */
+export const PLAN_ARTIFACT_REQUEST_TEXT =
+  "見た目のアーティファクトがまだ公開されていません。変更する画面の見た目を自己完結HTMLのアーティファクトとして公開し、そのURLを含めた計画を出し直してください。";
+
+/**
  * 修正1回に添付できる画像の枚数（#2425）。**Claudeへ渡す`deny`の理由に載る**ので、
  * URLの羅列で理由が埋まらない程度に抑える。画面はこの枚数で送信を止める。
  */
