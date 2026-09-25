@@ -257,6 +257,7 @@ guchi-apps/question#39）、アプリのコードを持たない。**サブPCの
 |---|---|
 | ブランチ運用 | `develop`/`main`へ移行する（guchi-apps/aide-ios#22）。`issue-<番号>`は`develop`から切り`develop`向けにPR |
 | `main`の意味 | **Xcodeで実機に入れた版。** Macの`scripts/xcode-release.sh`だけが、ビルドしたコミットを`main`へマージする（`gh pr merge --match-head-commit`。`develop`が先へ進んでいたら止まる） |
+| 反映の順序（#3495） | **バージョンバンプPR（`release-develop-to-main.yml`の`workflow_dispatch`）を`develop`へマージ→バンプ済みの`develop`先頭をMacでXcodeビルド→実機確認→最後に`main`へマージ。** ビルドしたものが最終版になり、マージとビルドの時点がずれない。`main`へのマージをビルドより先にしない（Actionsのmacosランナーは署名なしのシミュレータビルドまでで、実機へ入れられないため同時実行はできない）。`MARKETING_VERSION`の`version.json`との同期と`xcode-release.sh`のバンプ確認・タグ付けはaide-ios側で実施する |
 | 盤面 | develop向けPRのマージで`Develop`、`main`へのマージ（＝実機反映）で`Done` |
 | 画面 | ブランチ画面に「実機に入っている版」（`main`の先頭）を出し、未反映の束はマージボタンの代わりにMacで打つコマンドを出す（[src/lib/device-build-repos.ts](../src/lib/device-build-repos.ts)。詳細は[multi-agent/release.md](multi-agent/release.md)「Xcodeで実機へ反映するリポジトリ」） |
 
