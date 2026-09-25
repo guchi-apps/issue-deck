@@ -122,11 +122,9 @@ export function BulkCreateCodeReviewIssuesDialog({
 
   useEffect(() => {
     if (!open) return;
-    // 軽微は既定で外す。重大・中を優先して選ばせるための初期値で、選び直せば軽微も含められる
+    // 軽微も含めて全件を既定で選択する（不要なものは個別に外せる）
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected(
-      new Set(findings.map((_, index) => index).filter((index) => findings[index].severity !== "low")),
-    );
+    setSelected(new Set(findings.map((_, index) => index)));
     setCreatedIndices(new Set());
     setCreatedIssues(new Map());
     setReservedIndices(new Set());
