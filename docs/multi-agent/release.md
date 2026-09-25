@@ -549,6 +549,15 @@ pushトリガーは当然`develop`のものになる。**ジョブが対象コ�
   入れたあとEnterを押すと、develop→mainのリリースPRを**ビルドしたコミットを指定して**マージする
   （`gh pr merge --merge --match-head-commit <SHA>`）。その間に`develop`が進んでいればマージは
   失敗し、ビルドしていない版が`main`へ入ることは無い
+- **順序は「バンプPRを`develop`へマージ→バンプ済みの先頭をXcodeでビルド→最後に`main`へマージ」**
+  （#3495）。バージョンを確定させてからビルドするので、実機に入る版が最終版になり、`main`への
+  マージとビルドの時点もずれない。ビルドとマージを同時に走らせる案は、GitHub Actionsのmacosランナーが
+  署名なしのシミュレータ向けまでしか作れず実機へ入れられないため採らない。`MARKETING_VERSION`と
+  `version.json`の同期、`xcode-release.sh`がバンプ済みか確認して止まること、マージ後のタグ付けは
+  aide-ios側の変更（issue-deckでは実施しない）。バンプの起動は、画面に「リリースする」を出さない
+  ため`gh workflow run release-develop-to-main.yml --repo guchi-apps/aide-ios`（またはActions画面）で行い、
+  ブランチ画面の説明文にも書いてある。バンプが要るのは`main`へ入れるたびに1回で、バンプ後に
+  `develop`へ入った変更も同じ版番号でビルドされる
 - ブランチ画面は、[src/lib/device-build-repos.ts](../../src/lib/device-build-repos.ts)に載った
   リポジトリだけ表示を変える。`main`の先頭（`/api/branch-flow`の同じGraphQLに相乗りで取る）を
   「実機に入っている版」として出し、「本番未反映」「本番反映」を「Xcode未反映」「実機反映（Xcode）」
