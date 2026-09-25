@@ -1154,7 +1154,8 @@ function DeviceBuildInstructions({ deviceBuild }: { deviceBuild: BranchFlowDevic
   return (
     <div className="flex max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-purple-400 bg-purple-50/60 px-3 py-2 text-xs dark:bg-purple-950/30">
       <p>
-        バージョンバンプPRを{DEVELOP_BRANCH}へマージしたあと、Mac miniで次を実行すると、{DEVELOP_BRANCH}の先端
+        先に<code className="rounded bg-background/70 px-1 font-mono">gh workflow run release-develop-to-main.yml --repo guchi-apps/aide-ios</code>
+        でバージョンバンプPRを出して{DEVELOP_BRANCH}へマージします。そのあと、Mac miniで次を実行すると、{DEVELOP_BRANCH}の先端
         {deviceBuild.buildTargetOid && (
           <>
             {" "}
