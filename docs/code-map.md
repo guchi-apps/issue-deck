@@ -558,7 +558,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   AI呼び出し本体（`issue-search.ts`など）から値importすると、集計モジュールごと
   クライアントバンドルへ載る（後述の`issues-api.ts`と同じ分け方）。
   **無人実行・ローカルセッション（Claude Code本体）の消費はここに入らない**——転記ファイル
-  からしか取れず、読む側は`scripts/lib/session-transcript.sh`の3か所に限定してある。
+  からしか取れず、読む側は`scripts/lib/session-transcript.sh`を使う限られた場所（使用量集計・中断検知・
+  Codexの作業ステップ・別のAIへ引き継ぐときの要約〈#3496〉）に限定してある。
   同じプランを共有しているので、それらは`プラン枠`のメーターに合算で表れる。
   **画面の代わりに、ops-dashboardへ`GET /api/ai-usage`で公開している**（#3263。
   [`lib/ai-usage-export.ts`](../src/lib/ai-usage-export.ts)、認証は`OPS_API_TOKEN`のBearer）。
@@ -3335,6 +3336,16 @@ export function POST(request: NextRequest) {
   文言だけを「このIssueだけでなく」から始める形に変えている。**コードは資格情報**なので、
   `DispatchJob.codexPairingCode`はログイン必須の画面にだけ出し、期限を過ぎたら
   `expireStaleDispatchJobs`が列ごと空にする。
+  **セッションの行の「別のAIで続ける」は、いまのセッションのやり取りとブランチの状態を引き継いだ新しい
+  セッションを別のAI・モデルで起こす**（#3496。使い方の中心はClaudeの枠切れ→Codex CLI）。ボタンとダイアログは
+  `components/dashboard/session-handoff-dialog.tsx`（エージェント・モデルのチップは
+  `agent-model-chips.tsx`を「実装を開始」と共有）、枠の使い切り判定とIssueへ残す記録の文面は
+  `lib/dispatch/session-handoff.ts`。積むのは`POST /api/dispatch`のLAUNCHに`handoffFrom`・
+  `handoffTranscript`を付けたもの（`DispatchJob`の2列。`enqueueDispatchJob`は引き継ぎのときだけ
+  生きているセッションで弾かない）。要約の生成は`scripts/lib/session-handoff.sh`、元セッションを止めてから
+  起こす順序はpollerの`prepare_handoff_launch`、起動プロンプトへの追記は両ランチャーの
+  `session_handoff_append_to_prompt`。**要約を書いてから元を止める・引き継ぎ先は新しい会話で始める**
+  など、仕様の全体は[docs/multi-agent/codex.md](multi-agent/codex.md)「別のAIで続ける」。
   **`21.plan-required`のセッションが提示した計画は、`ExitPlanMode`の`PreToolUse`フックから
   `POST /api/dispatch/sessions/plan`へ流れ、Issueのコメント＋`00.check-user`になる**
   （#1342。組み立ては`lib/dispatch/session-plan.ts`。GitHubへ書く経路は`session-escalation.ts`と

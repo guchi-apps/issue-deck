@@ -57,6 +57,55 @@ TUIのセッションは起こせるが、共有のapp-serverデーモンに載�
 `codex remote-control`）が1つも動かない（後述の「`codex agents`・`remote-control`はstandalone
 installが要る」）。インストーラが`~/.bashrc`へ足すPATH追記は**戻すこと**（同じ節に手順がある）。
 
+## 別のAIで続ける（セッションの引き継ぎ・#3496）
+
+Claudeの5時間枠・週間枠に当たったときに、**続きをCodex CLIで進める**ための機能（逆向きと、同じエージェントで
+モデルだけを替える使い方もできる）。**同じセッションのままモデルを替えることはできない**（CLIが別物で、
+会話の状態を受け渡せない）ので、**いまのセッションのやり取りとブランチの状態を引き継いだ新しいセッションを
+起こし、元のセッションは停止する**。同じ作業ディレクトリを2つのAIが編集しないため。
+
+画面はIssue詳細のセッション行の「別のAIで続ける」（`SessionHandoffButton`）。選び方は「実装を開始」ダイアログと
+同じ並び（エージェント→モデル→引き継ぐ内容）で、チップは`agent-model-chips.tsx`で共有している。実行先と
+オプションは選ばせない（引き継ぐのは動いていた〈動いている〉セッションのホストで、オプションはIssueの
+ラベルとして付いている）。
+
+```text
+画面 → POST /api/dispatch {kind: LAUNCH, agent, model, handoffFrom, handoffTranscript}
+         ↓ enqueueDispatchJob（handoffFromがあるときだけ、生きているセッションがあっても積む）
+poller（run_job → prepare_handoff_launch）
+  1. session-handoff.sh で引き継ぎ要約を書く（~/.local/state/issue-deck/handoff/<repo>-issue-<番号>.md）
+  2. 元のtmuxセッションを止める（KILLと同じ後始末）
+  3. ISSUE_DECK_HANDOFF_FILE と ISSUE_DECK_CLAUDE_RESUME=0 を付けてランチャーを起こす
+ランチャー（start-issue.sh・generic-start-issue.sh）
+  → 起動プロンプトの末尾へ要約を追記（session_handoff_append_to_prompt）
+```
+
+- **要約はLLMを呼ばずに機械的に作る。** 材料は元セッションの転記の末尾（人とAIの文章だけ。既定は末尾30件・
+  1件1500字・全体3万字まで）とブランチの状態（origin/developからのコミット・未コミットの変更）。整理は
+  引き継ぎ先のセッション自身が抜粋を読んで行う。Issue本文・コメント・承認済みの計画は起動プロンプトに
+  もともと入っているので重ねない。生の転記の添付は押した人が選んだときだけ（コピーを同じ場所へ置き、
+  要約にパスを書く）
+- **要約を書いてから元を止める**（順序が逆だと、Codexが元のときに転記を引く手掛かりの状態ファイルが消える）。
+  書けない・止められないときはジョブを`failed`で返し、**元セッションには手を付けない**。止めた後に起動が
+  失敗した場合は、失敗の文言に「元のセッションは停止済み」を添える
+- **引き継ぎ先は新しい会話で始める**（`ISSUE_DECK_CLAUDE_RESUME=0`）。`--continue`を許すと、要約と食い違う
+  古い前提のまま動く
+- **対象リポジトリの契約適合ランチャー（そのリポジトリの`scripts/start-issue.sh`）が要約を読まないときは、
+  元を止める前にジョブを`failed`で返す**（`ISSUE_DECK_AGENT`の検査と同じく、宣言された版数ではなく実際に
+  走るファイルに`ISSUE_DECK_HANDOFF_FILE`があるかを見る。poller〈`prepare_handoff_launch`〉と受け口
+  〈`start-local-session.sh`〉の両方）。読まないランチャーへ渡すと、要約が付かないまま元だけが止まる。
+  汎用ランチャーはissue-deck自身のスクリプトなので確かめない
+- **`ISSUE_DECK_HANDOFF_FILE`は、このIssueの要約ファイルのパスと完全に一致するときだけ読む**。別のIssueの分や
+  任意のパスは読まない（複数Issueを1回で起動するときに漏れるのも防ぐ）。置き場はランチャーごとの
+  worktreeベースに依存しない固定の場所で、14日を過ぎたものは書き出しのたびに消す
+- **枠の判断材料**: ダイアログを開いたときだけ`GET /api/claude/usage`・`/api/codex/usage`を取る。**使い切りと
+  判定するのは取得できた枠が上限に達している（`rejected`か残り0%）ときだけ**で、取得できないときは選べる
+  ままにする（`summarizeAgentQuota`）。Claudeの取得は探りリクエストで5時間枠を始めてしまうため、
+  **セッション行に使用率の印を常時出すことはしていない**
+- `send-keys`は使わない（新しいセッションへは起動時の最初の指示として渡すだけで、
+  [gates.md](gates.md)の禁止に触れない）。Claude固有の連携（フック・承認フォームの画面連動）がCodexで
+  効かない範囲は、ダイアログにも同じ注意（`CodexLimitationsNotice`）を出す
+
 ## モデルは起動ごとに選べる（#3192）
 
 「実装を開始」ダイアログの「モデル」欄は、エージェントに合わせて中身が変わる。**Claude Codeで
