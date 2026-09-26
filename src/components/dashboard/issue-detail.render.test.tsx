@@ -40,7 +40,7 @@ const comments: IssueComment[] = [
   },
 ];
 
-const commentsState = { comments, isLoading: false, error: null, setComments: vi.fn() };
+const commentsState = { comments, isLoading: false, error: null, setComments: vi.fn(), refresh: vi.fn() };
 const subIssues = { relations: { parent: null, children: [] }, isLoading: false };
 const manualStepPrerequisites = { prerequisites: [], summary: null, dependents: [] };
 const taskList = {

@@ -120,6 +120,23 @@ afterEach(() => {
 });
 
 describe("SessionHandoffButton", () => {
+  it("開閉を呼び出し側が持つときは、押すボタンを出さずopenで開く（#3516）", () => {
+    const props = {
+      issue: makeIssue(),
+      session: makeSession({ state: "EXITED" }),
+      dispatch: makeDispatch(),
+      comments: [],
+      claudeLocalModel: "sonnet" as const,
+      codexModel: "gpt-5.6-terra" as const,
+      onCommentCreated: vi.fn(),
+      onOpenChange: vi.fn(),
+    };
+    const { rerender } = render(<SessionHandoffButton {...props} open={false} />);
+    expect(screen.queryByRole("button", { name: /別のAIで続ける/ })).toBeNull();
+    rerender(<SessionHandoffButton {...props} open />);
+    expect(screen.getByRole("button", { name: "引き継いで開始" })).toBeTruthy();
+  });
+
   it("Claudeのセッションから開くと、引き継ぎ先はCodex CLIが最初に選ばれている", () => {
     renderButton();
     open();

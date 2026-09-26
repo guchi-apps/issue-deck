@@ -27,7 +27,7 @@ export type PlanningPhaseState = "planned" | "skipped" | "unknown";
 export const SESSION_PLAN_COMMENT_MARKER = "<!-- issue-deck:session-plan -->";
 
 /** 計画として投稿されたコメントかどうか。無人実行・ローカルセッションのどちらの経路も拾う */
-function isPlanComment(comment: Pick<IssueComment, "body" | "author">): boolean {
+export function isPlanComment(comment: Pick<IssueComment, "body" | "author">): boolean {
   // `ExitPlanMode`のフック経由（#1342）。役割マーカーを持たないので先に見る
   if (comment.body.includes(SESSION_PLAN_COMMENT_MARKER)) return true;
   const resolved = resolveCommentSource(comment, comment.author.login);

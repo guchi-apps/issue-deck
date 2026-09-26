@@ -90,6 +90,8 @@ export function SessionHandoffButton({
   claudeLocalModel,
   codexModel: codexModelSetting,
   onCommentCreated,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   issue: Issue;
   /** 引き継ぎ元のセッション。動いているものでも、終了したものでもよい（転記が残っていれば引き継げる） */
@@ -102,8 +104,17 @@ export function SessionHandoffButton({
   codexModel: CodexModelSetting;
   /** 引き継ぎの記録を投稿できたときに、コメント一覧へ反映する */
   onCommentCreated: (comment: IssueComment) => void;
+  /**
+   * 開閉を呼び出し側が持つとき（#3516）。**渡すと、押すボタンを出さない。** 終了したセッションでは
+   * 復旧メニュー（`SessionRecoveryButton`）の項目から開くため、行に2つ目のボタンを並べない。
+   */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = onOpenChange !== undefined;
+  const open = isControlled ? controlledOpen === true : uncontrolledOpen;
+  const setOpen = isControlled ? onOpenChange : setUncontrolledOpen;
   const fromAgent: DispatchAgent = resolveIssueImplementationAgent(session);
   const alive = session.state === "ALIVE";
 
@@ -267,10 +278,12 @@ export function SessionHandoffButton({
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <ArrowRightLeft />
-        別のAIで続ける
-      </Button>
+      {!isControlled && (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <ArrowRightLeft />
+          別のAIで続ける
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex flex-col gap-0 overflow-hidden">
           <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1 pb-4 sm:gap-4">
