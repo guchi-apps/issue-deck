@@ -165,6 +165,21 @@ if [[ "$AGENT_KIND" != "claude" && "$LAUNCH_MODE" != "generic" ]]; then
   fi
 fi
 
+# 別のAIからの引き継ぎ（#3496）で起こすときも、同じ理由で確かめる。**引き継ぎ要約を読まない
+# ランチャーへ渡すと、要約が付かないまま新しいセッションが立つ**（元セッションはpollerが先に止めている）。
+# 判定は`ISSUE_DECK_AGENT`と同じく、実際に走るファイルを見る。汎用ランチャーはissue-deck自身の
+# スクリプトなので確かめない。pollerも同じ検査を**元セッションを止める前に**行っている
+# （`subpc-dispatch-poller.sh`の`prepare_handoff_launch`）。ここは手元から直接呼ばれた場合の砦。
+if [[ -n "${ISSUE_DECK_HANDOFF_FILE:-}" && "$LAUNCH_MODE" != "generic" ]]; then
+  if ! grep -q 'ISSUE_DECK_HANDOFF_FILE' "$LAUNCHER"; then
+    echo "Error: $FULL_NAME の scripts/start-issue.sh は引き継ぎ要約（ISSUE_DECK_HANDOFF_FILE）を読みません。" >&2
+    echo "  このまま起動すると要約が付かないまま新しいセッションが立つため、ここで止めます。" >&2
+    echo "  対象リポジトリの start-issue.sh を issue-deck と同じ形（scripts/lib/session-handoff.sh）へ" >&2
+    echo "  揃えてください（docs/multi-agent/codex.md「別のAIで続ける」）。" >&2
+    exit 1
+  fi
+fi
+
 # フォルダの信頼確認が済んでいるか（#1838）。**worktreeを作る前にここで止める。**
 #
 # 初めてClaude Codeを開くリポジトリでは、`claude`の起動直後に信頼確認が出て、答えるまで

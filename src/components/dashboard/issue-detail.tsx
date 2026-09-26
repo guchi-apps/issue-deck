@@ -1011,6 +1011,12 @@ export function IssueDetail({
             checkUserGuidance={checkUserGuidance}
             planningSkipped={planningSkipped}
             pullRequestProgress={pullRequestProgress}
+            handoff={{
+              comments,
+              claudeLocalModel,
+              codexModel,
+              onCommentCreated: (comment) => setComments((prev) => [...prev, comment]),
+            }}
           />
 
           {/* 停滞したセッションの復旧（#2886）。**質問・計画より上**に置く——停滞している間は

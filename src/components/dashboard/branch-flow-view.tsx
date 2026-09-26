@@ -962,7 +962,7 @@ function ReleaseGroupHeader({
   //
   // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
   // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
-  // Xcodeでのビルド。そのあいだは`pendingLabel`（「Xcode未反映」）を出し続ける。
+  // Macでのビルドからインストール・実機確認まで。そのあいだは`pendingLabel`（「実機未反映」）を出し続ける。
   const waitingUserMerge =
     !deviceBuild &&
     group.pullRequest !== null &&
@@ -1144,7 +1144,6 @@ function DeviceBuildInstructions({ deviceBuild }: { deviceBuild: BranchFlowDevic
       await navigator.clipboard.writeText(deviceBuild.command);
     } catch {
       // クリップボードが使えない環境ではコピーできていないので成功表示を出さない
-      // （`dispatch-job-status.tsx`と同じ扱い）。コマンドは選択してコピーできる
       return;
     }
     setCopied(true);
@@ -1152,29 +1151,57 @@ function DeviceBuildInstructions({ deviceBuild }: { deviceBuild: BranchFlowDevic
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-purple-400 bg-purple-50/60 px-3 py-2 text-xs dark:bg-purple-950/30">
-      <p>
-        先に<code className="rounded bg-background/70 px-1 font-mono">gh workflow run release-develop-to-main.yml --repo guchi-apps/aide-ios</code>
-        でバージョンバンプPRを出して{DEVELOP_BRANCH}へマージします。そのあと、Mac miniで次を実行すると、{DEVELOP_BRANCH}の先端
-        {deviceBuild.buildTargetOid && (
-          <>
-            {" "}
-            <code className="rounded bg-background/70 px-1 font-mono">
-              {shortOid(deviceBuild.buildTargetOid)}
-            </code>
-          </>
-        )}
-        {" "}（バージョン確定済みの版）をXcodeでビルドします。実機に入れたあとEnterを押すと、最後に{MAIN_BRANCH}へ記録されます。
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <code className="min-w-0 rounded bg-background/70 px-1.5 py-0.5 font-mono break-all select-all">
+    <div className="flex max-w-2xl flex-col gap-2 rounded-md border border-dashed border-purple-400 bg-purple-50/60 px-3 py-3 text-xs dark:bg-purple-950/30">
+      <p className="font-semibold">AIDE-iosを実機へ反映する手順</p>
+      <ol className="list-decimal space-y-2 pl-4">
+        <li>
+          バージョンをまだ上げていなければ、
+          <code className="rounded bg-background/70 px-1 font-mono">
+            gh workflow run release-develop-to-main.yml --repo guchi-apps/aide-ios
+          </code>
+          でバンプPRを作り、{DEVELOP_BRANCH}へマージします。バンプ済みなら再実行は不要です。
+        </li>
+        <li>
+          iPhoneをMac miniへUSB接続するか、ペアリング済みのネットワークで接続します。
+          Macで<code className="rounded bg-background/70 px-1 font-mono">xcrun devicectl list devices</code>
+          を実行し、対象iPhoneが<code className="rounded bg-background/70 px-1 font-mono">connected</code>
+          と表示されることを確かめてください。持ち出したiPhoneがMacから見えない間は、直接インストールできません。
+        </li>
+        <li>
+          Mac miniへSSHで入り、下のコマンドを実行します。
+          {deviceBuild.buildTargetOid && (
+            <>
+              {" "}今回ビルドする{DEVELOP_BRANCH}の先頭は
+              <code className="rounded bg-background/70 px-1 font-mono">
+                {shortOid(deviceBuild.buildTargetOid)}
+              </code>
+              です。
+            </>
+          )}
+        </li>
+        <li>
+          インストール・起動後、iPhoneで動作を確認します。SSHの入力待ちへ戻り、
+          <code className="rounded bg-background/70 px-1 font-mono">release</code>
+          と入力します。接続・署名・インストールで止まった場合、{MAIN_BRANCH}は変わりません。
+        </li>
+        <li>
+          リリースPRのCIとマージ、タグ作成が終わり、ターミナルに
+          <code className="rounded bg-background/70 px-1 font-mono">完了: main @ ...</code>
+          と表示されたら反映完了です。
+        </li>
+      </ol>
+      <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center">
+        <code className="block min-w-0 whitespace-pre-wrap break-all rounded bg-background/70 px-2 py-1 font-mono select-all">
           {deviceBuild.command}
         </code>
-        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={handleCopy}>
+        <Button size="sm" variant="outline" className="h-6 shrink-0 px-2 text-xs" onClick={handleCopy}>
           {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
           {copied ? "コピーしました" : "コピー"}
         </Button>
       </div>
+      <p className="text-muted-foreground">
+        IssueDeckはMacのビルド・端末接続・実機確認の結果を自動取得しません。上の手順で確認してください。
+      </p>
     </div>
   );
 }
@@ -1695,7 +1722,7 @@ function RepositorySummaryRow({
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
         // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
         // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
-        // 「Xcode未反映」を出す
+        // 「実機未反映」を出す
         repository.deviceBuild ? (
           <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
         ) : summary.releaseMergeTarget ? (

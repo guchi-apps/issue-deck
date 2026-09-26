@@ -2588,7 +2588,9 @@ describe("Xcodeで実機へ反映するリポジトリ（#3468）", () => {
 
   it("未反映の束にはリリースボタンの代わりにMacで打つコマンドとビルド対象を出す", () => {
     renderIos();
-    expect(screen.getByText("cd ~/Projects/AIDEios && scripts/xcode-release.sh")).toBeTruthy();
+    expect(screen.getByText(/cd ~\/Projects\/AIDEios &&/)).toBeTruthy();
+    expect(screen.getByText("release")).toBeTruthy();
+    expect(screen.getByText(/持ち出したiPhoneがMacから見えない間は/)).toBeTruthy();
     expect(screen.getByText("a81b0e2")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /リリースする/ })).toBeNull();
   });
@@ -2603,7 +2605,7 @@ describe("Xcodeで実機へ反映するリポジトリ（#3468）", () => {
       }),
     ]);
     // 畳んだ1行と束の見出しの2か所
-    expect(screen.getAllByText("Xcode未反映")).toHaveLength(2);
+    expect(screen.getAllByText("実機未反映")).toHaveLength(2);
     expect(screen.queryByText("mainへマージ待ち")).toBeNull();
     expect(screen.queryByRole("button", { name: /マージ/ })).toBeNull();
   });

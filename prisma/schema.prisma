@@ -801,6 +801,15 @@ model DispatchJob {
   // 同じく画面・API・払い出しの3か所で既知の語だけを通す。払い出し（`POST /api/dispatch/claim`）が
   // この値をジョブごとの`codexModel`として載せ直すので、pollerは従来どおり`codexModel`だけを読む。
   codexModel         String?
+  // 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496。`kind`が`LAUNCH`のときだけ意味がある）。
+  //
+  // **nullは通常の起動**で、既存行はすべてnullになる。入るのは`agent`と同じ既知の語（`claude` / `codex`）
+  // だけで、画面・API・払い出し・pollerの各所で絞る。値があるとpollerは、元セッションを止める**前に**
+  // 転記・Issue・gitの状態から引き継ぎ要約を書き出し、新しいセッションの最初の指示へ添える。
+  handoffFrom        String?
+  // 引き継ぎ要約に元セッションの生の転記も添えるか（#3496。`handoffFrom`があるときだけ意味がある）。
+  // 既定はfalse（要約のみ）。長い転記は引き継ぎ先の枠を食うため、押した人が選んだときだけ添える。
+  handoffTranscript  Boolean           @default(false)
   status             DispatchJobStatus @default(QUEUED)
   // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
   // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは

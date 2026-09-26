@@ -408,6 +408,47 @@ describe("enqueueDispatchJob のセッション生存ガード", () => {
     expect(dispatchJobCreate).not.toHaveBeenCalled();
   });
 
+  // #3496。「別のAIで続ける」は元セッションを止めて立て直すことが前提なので、生きていても積む
+  it("引き継ぎ（handoffFrom）なら、生きているセッションがあっても積み、指定をジョブへ保存する", async () => {
+    dispatchSessionFindFirst.mockResolvedValue(aliveSession());
+    const result = await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      handoffFrom: "claude",
+      handoffTranscript: true,
+      requestedByUserId: null,
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(true);
+    const data = dispatchJobCreate.mock.calls[0][0].data;
+    expect(data.handoffFrom).toBe("claude");
+    expect(data.handoffTranscript).toBe(true);
+    if (!result.ok) return;
+    expect(result.job.handoffFrom).toBe("claude");
+    expect(result.job.handoffTranscript).toBe(true);
+  });
+
+  it("通常の起動では引き継ぎの指定はnull・falseで積む", async () => {
+    await enqueue();
+    const data = dispatchJobCreate.mock.calls[0][0].data;
+    expect(data.handoffFrom).toBeNull();
+    expect(data.handoffTranscript).toBe(false);
+  });
+
+  it("handoffFromが無ければ、handoffTranscriptだけ渡されても保存しない", async () => {
+    await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      handoffTranscript: true,
+      requestedByUserId: null,
+      now: NOW,
+    });
+    expect(dispatchJobCreate.mock.calls[0][0].data.handoffTranscript).toBe(false);
+  });
+
   // ALIVEに限るのはDBのwhere側で担保している。ここではその条件が外れていないことを見る
   it("探すのはALIVEのセッションだけ", async () => {
     await enqueue();

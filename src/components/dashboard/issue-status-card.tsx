@@ -8,6 +8,7 @@ import { CodeReviewJobStatus } from "@/components/dashboard/code-review-job-stat
 import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
+import { SessionHandoffButton } from "@/components/dashboard/session-handoff-dialog";
 import { SessionRecoveryButton } from "@/components/dashboard/session-recovery-button";
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -22,7 +23,8 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { CheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import type { IssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
-import type { Issue } from "@/types/issue";
+import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
+import type { Issue, IssueComment } from "@/types/issue";
 
 type IssueStatusCardProps = {
   issue: Issue;
@@ -65,6 +67,18 @@ type IssueStatusCardProps = {
    * 対応PRを持っておらず、ここで取り直すと同じ取得が2本走る（`planningSkipped`と同じ形）。
    */
   pullRequestProgress?: IssuePullRequestProgress | null;
+  /**
+   * 「別のAIで続ける」（#3496）に必要な材料。**渡されたときだけ、セッションの行にボタンを出す。**
+   *
+   * 承認済みの計画（「おまかせ」の判定に渡す）とモデルの初期値は、親（Issue詳細）が
+   * すでに持っている。このカードで取り直すと同じ取得が2本走る（`planningSkipped`と同じ形）。
+   */
+  handoff?: {
+    comments: readonly IssueComment[];
+    claudeLocalModel: ClaudeLocalModelSetting;
+    codexModel: CodexModelSetting;
+    onCommentCreated: (comment: IssueComment) => void;
+  };
 };
 
 /**
@@ -89,6 +103,7 @@ export function IssueStatusCard({
   checkUserGuidance = null,
   planningSkipped = false,
   pullRequestProgress = null,
+  handoff,
 }: IssueStatusCardProps) {
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
@@ -203,6 +218,21 @@ export function IssueStatusCard({
               onIssueUpdated={onIssueUpdated}
               align="end"
             />
+          )}
+          {/* 別のAIで続ける（#3496）。復旧ボタンと同じく、セッションの行のすぐ下に置く。
+              枠を使い切って止まったセッションを、押した本人が見ているのはここ */}
+          {issueSession && handoff && (
+            <div className="flex w-full justify-end">
+              <SessionHandoffButton
+                issue={issue}
+                session={issueSession}
+                dispatch={dispatch}
+                comments={handoff.comments}
+                claudeLocalModel={handoff.claudeLocalModel}
+                codexModel={handoff.codexModel}
+                onCommentCreated={handoff.onCommentCreated}
+              />
+            </div>
           )}
           {localOnly && (
             <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs">

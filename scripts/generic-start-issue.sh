@@ -94,6 +94,9 @@ source "$SCRIPT_DIR/lib/pr-policy.sh"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$SCRIPT_DIR/lib/agent-cli.sh"
 
+# shellcheck source=scripts/lib/session-handoff.sh
+source "$SCRIPT_DIR/lib/session-handoff.sh"
+
 usage() {
   echo "Usage: scripts/generic-start-issue.sh [--prepare-only] [--no-tmux] <owner> <repo> <issue番号>" >&2
 }
@@ -888,6 +891,10 @@ rm -f "$ISSUE_JSON_FILE"
 if [[ "$AGENT_KIND" != "claude" && -f "$CODEX_SUPPLEMENT" ]]; then
   agent_cli_append_codex_supplement "$CODEX_SUPPLEMENT" "$PROMPT_FILE" "$LAUNCHER_SCRIPTS_DIR"
 fi
+
+# 別のAIからの引き継ぎ（#3496）。契約適合の`start-issue.sh`と同じ関数を同じ位置で呼ぶ
+# （`ISSUE_DECK_HANDOFF_FILE`がこのIssueの分と一致しなければ何もしない）
+session_handoff_append_to_prompt "$PROMPT_FILE" "$REPO" "$ISSUE_NUMBER"
 
 if [[ "$PREPARE_ONLY" -eq 1 ]]; then
   echo "#$ISSUE_NUMBER: 準備が完了しました。"

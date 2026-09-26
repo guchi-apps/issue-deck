@@ -187,6 +187,10 @@ source "$SCRIPT_DIR/lib/session-state.sh"
 # `lib/session-transcript.sh`が持つ。
 # shellcheck source=scripts/lib/session-transcript.sh
 source "$SCRIPT_DIR/lib/session-transcript.sh"
+
+# 別のAIへ引き継ぐときの要約の書き出し（#3496）。元セッションを止める前に呼ぶ。
+# shellcheck source=scripts/lib/session-handoff.sh
+source "$SCRIPT_DIR/lib/session-handoff.sh"
 # shellcheck source=scripts/lib/session-resume.sh
 source "$SCRIPT_DIR/lib/session-resume.sh"
 # shellcheck source=scripts/lib/session-tool-call-stall.sh
@@ -3290,7 +3294,7 @@ run_job() {
   local job_json="$1"
   local job_id owner repo full_name issue_number kind requested_session instruction command recovery
   local placeholder_values resolved_command manual_step_run_target agent claude_local_model
-  local codex_model
+  local codex_model handoff_from handoff_transcript
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
   full_name="$(printf '%s' "$job_json" | jq -r '.repositoryFullName')"
   issue_number="$(printf '%s' "$job_json" | jq -r '.issueNumber')"
@@ -3320,6 +3324,10 @@ run_job() {
   # 設定画面で選んだCodexモデル（#2550）。古いissue-deckは返さないため、その場合はauto。
   # `auto`はランチャーへ環境変数を渡さず、Codex CLI側の既定モデルに委ねる。
   codex_model="$(printf '%s' "$job_json" | jq -r '.codexModel // "auto"')"
+  # 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496。`LAUNCH`だけで使う）。
+  # **古いissue-deckは返さない**ので、その場合は空（＝通常の起動）。
+  handoff_from="$(printf '%s' "$job_json" | jq -r '.handoffFrom // ""')"
+  handoff_transcript="$(printf '%s' "$job_json" | jq -r 'if .handoffTranscript == true then "1" else "0" end')"
   owner="${full_name%%/*}"
   repo="${full_name#*/}"
 
@@ -3516,9 +3524,80 @@ run_job() {
   if [[ "$agent" == "codex" && "$codex_model" != "auto" ]]; then
     launch_env+=("ISSUE_DECK_CODEX_MODEL=$codex_model")
   fi
+  # 別のAIへの引き継ぎ（#3496）。**要約の書き出しと元セッションの停止は、ここ（起動の直前）で行う。**
+  # 受け取った語は`agent`と同じく既知のものに絞る。黙って通常の起動へ落とさない——引き継いだつもりが
+  # 何も引き継がれないまま新しいセッションが立つ方が、失敗として返るより分かりにくい。
+  local running_message="起動しています（$LOCAL_REPO_PATH$agent_label）"
+  if [[ -n "$handoff_from" ]]; then
+    case "$handoff_from" in
+      claude | codex) ;;
+      *)
+        report_job "$job_id" failed "受け取った引き継ぎ元のエージェントが不正です: $handoff_from"
+        return 0
+        ;;
+    esac
+    prepare_handoff_launch "$job_id" "$repo" "$issue_number" "$handoff_from" "$handoff_transcript" || return 0
+    # 引き継ぎ先は新しい会話で始める。前回の会話の再開（`--resume`）を許すと、引き継ぎ要約と食い違う
+    # 古い前提のまま動く（元がClaudeで先もClaudeの、モデルだけを替える引き継ぎでも同じ）。
+    launch_env+=("ISSUE_DECK_HANDOFF_FILE=$HANDOFF_FILE_PATH" "ISSUE_DECK_CLAUDE_RESUME=0")
+    running_message="引き継いで起動しています（$handoff_from → $agent）"
+  fi
   launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
-    "起動しています（$LOCAL_REPO_PATH$agent_label）" \
+    "$running_message" \
     "${launch_env[@]}" bash "$LAUNCHER" "$owner" "$repo" "$issue_number"
+}
+
+# 別のAIへ引き継ぐ前の準備（#3496）。**要約を書いてから元セッションを止める**（順序が逆だと、
+# Codexが元のときに転記を引く手掛かり（状態ファイルのスレッドUUID）が消えて要約が作れない）。
+# 書けたら`HANDOFF_FILE_PATH`へパスを入れて0を返す。書けない・止められないときは
+# ジョブを`failed`で報告して非0を返し、**元セッションには手を付けない**。
+#
+#   $1 ジョブID / $2 リポジトリ名 / $3 Issue番号 / $4 引き継ぎ元のエージェント / $5 生の転記を添えるか
+prepare_handoff_launch() {
+  local job_id="$1" repo="$2" issue_number="$3" from_agent="$4" include_transcript="$5"
+  local session worktree out
+  session="$(expected_session_name "$repo" "$issue_number")"
+  out="$(session_handoff_file_path "$repo" "$issue_number")"
+  HANDOFF_FILE_PATH="$out"
+
+  # dry-runでは書き出しも停止もしない（`launch_and_report`が同じ理由で起動しない）
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため引き継ぎ要約は書き出しません（$out）"
+    return 0
+  fi
+
+  # 対象リポジトリの契約適合ランチャーが引き継ぎ要約を読まないなら、**元のセッションを止める前に**断る
+  # （読まないランチャーへ渡すと、要約が付かないまま元だけが止まる）。`start-local-session.sh`の
+  # `ISSUE_DECK_AGENT`の検査と同じく、宣言された版数ではなく**実際に走るファイル**を見る。
+  # 汎用ランチャー（`LOCAL_REPO_MODE=generic`）はissue-deck自身のスクリプトなので確かめない
+  if [[ "${LOCAL_REPO_MODE:-}" == "contract" ]] &&
+    ! grep -q 'ISSUE_DECK_HANDOFF_FILE' "$LOCAL_REPO_PATH/scripts/start-issue.sh" 2>/dev/null; then
+    report_job "$job_id" failed \
+      "対象リポジトリの scripts/start-issue.sh が引き継ぎ要約（ISSUE_DECK_HANDOFF_FILE）を読まないため、引き継ぎは行っていません。元のセッションはそのままです。"
+    return 1
+  fi
+
+  session_handoff_prune
+  worktree="$(session_transcript_cwd "$session" 2>/dev/null || true)"
+  if ! session_handoff_build "$from_agent" "$session" "$worktree" "$out" "$include_transcript"; then
+    report_job "$job_id" failed "引き継ぎ要約を書き出せませんでした（$out）。元のセッションはそのままです。"
+    return 1
+  fi
+
+  if tmux_session_names | grep -qxF "$session"; then
+    if ! tmux kill-session -t "=$session" 2>/dev/null; then
+      report_job "$job_id" failed "元のセッションを停止できませんでした: $session。引き継ぎは行っていません。" "$session"
+      return 1
+    fi
+    # 状態ファイルを残すと、同じ名前で立て直すセッションが前回の`Stop`を引き継いだように見える
+    # （`KILL`・reap-sessions.shと同じ後始末）
+    session_state_remove "$session"
+    # 元のプロセスの後始末（開発サーバーの停止など）が済む前に新しいセッションが同じ作業ディレクトリ・
+    # ポートを取り合わないよう、少しだけ待つ
+    sleep 3
+    LAUNCH_FAILURE_NOTE="元のセッション（$session）は停止済みです。"
+  fi
+  return 0
 }
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
@@ -3537,6 +3616,12 @@ run_job() {
 launch_and_report() {
   local job_id="$1" expected_session="$2" running_message="$3"
   shift 3
+
+  # `prepare_handoff_launch`が直前にセットしたグローバル変数を、成否に関わらずここで
+  # 消費してすぐ消す。成功時に消し忘れると次の無関係なジョブの失敗メッセージへ紛れ込むため、
+  # 失敗時にだけ使う`local`変数へ移し替える。
+  local failure_note="${LAUNCH_FAILURE_NOTE:-}"
+  LAUNCH_FAILURE_NOTE=""
 
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
@@ -3602,7 +3687,7 @@ launch_and_report() {
     local message
     message="$(tail -c 1500 "$output_file")"
     # 出力は`report_job`が報告と同じ文字列で標準エラーへ出す（#1228）。
-    report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message"
+    report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message ${failure_note}"
   fi
   rm -f "$output_file"
 }

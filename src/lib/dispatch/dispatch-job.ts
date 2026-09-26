@@ -512,6 +512,16 @@ export type DispatchJobView = {
    * 時点の呼び出し元・テストの値を壊さないため（`toJobView`は常に返す）。
    */
   codexModel?: CodexLocalModel | null;
+  /**
+   * 引き継ぎ元のエージェント（#3496。`kind`が`LAUNCH`のときだけ）。**`null`は通常の起動。**
+   *
+   * 値があるとpollerは、元セッションを止める前に引き継ぎ要約を書き出し、新しいセッションの
+   * 最初の指示へ添える。省略可にしているのは、この列を知らない時点の呼び出し元・テストの値を
+   * 壊さないため（`toJobView`は常に返す）。
+   */
+  handoffFrom?: DispatchAgent | null;
+  /** 引き継ぎ要約に元セッションの生の転記も添えるか（#3496。`handoffFrom`があるときだけ意味がある） */
+  handoffTranscript?: boolean;
   status: DispatchJobStatus;
   message: string | null;
   /**

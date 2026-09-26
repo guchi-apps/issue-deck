@@ -68,8 +68,9 @@ Edit x35 / ...`）で足りるものとして扱う。個々のツール呼び�
 同じ理由で、**転記を読むのはこのスクリプトと `scripts/session-notify.sh`、
 `scripts/subpc-dispatch-poller.sh` の中断検知（#1971）とCodexの作業ステップの取り込み
 （#3213。Codexは`PostToolUse`フックを繋いでいない）、`scripts/session-usage.sh` の使用量集計
-（#2350）だけ**に留める。転記の場所を引く手順は `scripts/lib/session-transcript.sh` に
-集めてあり、**写しを増やさない**。
+（#2350）、**別のAIへ引き継ぐときの要約**（`scripts/lib/session-handoff.sh`。#3496。pollerが
+元セッションを止める前に、末尾の人とAIの文章だけを抜き出す）だけ**に留める。転記の場所を引く手順は
+`scripts/lib/session-transcript.sh` に集めてあり、**写しを増やさない**。
 
 使用量集計が読むのは`message.usage`と時刻・作業ディレクトリで、**内容の分類も状態の推定も
 行わない**（1箇所だけ最初のユーザー発言からIssue番号を拾うが、これも決まった形の抽出であって

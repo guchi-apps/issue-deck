@@ -285,6 +285,14 @@ export function useDispatchState(enabled: boolean) {
        * `fable`・`opus`・`sonnet`、Codexなら`gpt-5.6-*`）でなければAPIが400で断る。**
        */
       model?: ClaudeModel | CodexLocalModel | null;
+      /**
+       * 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496）。
+       * **実装セッション（`LAUNCH`）でだけ意味がある。** 指定すると、サブPCのpollerが元セッションの
+       * やり取りとブランチの状態を要約し、元セッションを止めてから新しいセッションを起こす。
+       */
+      handoffFrom?: DispatchAgent;
+      /** 引き継ぎ要約に元セッションの生の転記も添えるか（#3496。`handoffFrom`があるときだけ） */
+      handoffTranscript?: boolean;
     }): Promise<boolean> => {
       setIsSubmitting(true);
       setError(null);
@@ -301,6 +309,12 @@ export function useDispatchState(enabled: boolean) {
             // 「設定に従う」（null）はキーごと送らない。APIは`model`の有無で
             // 「指定なし」と「未知の値」を区別する（未知は400）
             ...(params.model ? { model: params.model } : {}),
+            ...(params.handoffFrom
+              ? {
+                  handoffFrom: params.handoffFrom,
+                  handoffTranscript: params.handoffTranscript === true,
+                }
+              : {}),
           }),
         });
         if (!res.ok) throw new Error(await readErrorMessage(res));

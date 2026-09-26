@@ -493,7 +493,7 @@ export type ReleaseBlockedReason =
  * 「実機に入っている版」として出す。
  */
 export type BranchFlowDeviceBuild = {
-  /** 反映が済んでいない束の札（「Xcode未反映」） */
+  /** 反映が済んでいない束の札（「実機未反映」。Macのビルド成否は含まない） */
   pendingLabel: string;
   /** 反映が済んだ束の日付に添える語（「実機反映（Xcode）」） */
   reflectedLabel: string;

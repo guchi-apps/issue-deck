@@ -418,6 +418,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 別のAIへ引き継いで起動する（#3496）。**省略は通常の起動**で、指定した場合だけ既知のエージェントの
+  // 語に絞る（未知の値は黙って通常の起動へ落とさず400で断る。`agent`と同じ向き）。
+  // 引き継ぎ要約の生成と元セッションの停止はpollerが行うので、ここでは指定を積むだけ
+  let handoffFrom: ReturnType<typeof parseDispatchAgent> = null;
+  if (payload?.handoffFrom !== undefined) {
+    handoffFrom = parseDispatchAgent(payload.handoffFrom);
+    if (!handoffFrom) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+  }
+
   const result = await enqueueDispatchJob({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
@@ -425,6 +436,8 @@ export async function POST(request: NextRequest) {
     agent,
     claudeModel,
     codexModel,
+    handoffFrom,
+    handoffTranscript: handoffFrom ? payload?.handoffTranscript === true : false,
     requestedByUserId: userId,
   });
 
