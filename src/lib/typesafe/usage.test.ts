@@ -57,6 +57,22 @@ describe("summarizeTypeSafeUsage", () => {
     });
   });
 
+  it("issue_suggestはJevの担当範囲に合わせて「ラベルの選択」と表示する", () => {
+    const suggest: ClaudeApiUsageSummary = {
+      ...source,
+      features: [
+        {
+          key: "issue_suggest",
+          label: "Issueの下書き提案",
+          last24h: totals(1, 100),
+          last7d: totals(1, 100),
+          models: [{ model: "jev-1.13.0", last24h: totals(1, 100), last7d: totals(1, 100) }],
+        },
+      ],
+    };
+    expect(summarizeTypeSafeUsage(suggest).features[0].label).toBe("ラベルの選択");
+  });
+
   it("Jevの記録が無ければゼロ値と空の内訳を返す", () => {
     const noJev = {
       ...source,

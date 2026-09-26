@@ -24,6 +24,15 @@ export type TypeSafeUsageSummary = {
   features: TypeSafeUsageFeature[];
 };
 
+/**
+ * Jevが実際に担当している範囲を表すラベル。`CLAUDE_API_FEATURES`の表示名はアプリ内AI側の
+ * 機能全体を指すため、Jevの担当が一部だけの機能はここで上書きする（無ければ既存ラベル）。
+ * `issue_suggest`のうちJevが担当するのはラベル判定のみ（#3245）。
+ */
+const JEV_FEATURE_LABELS: Partial<Record<ClaudeApiFeature, string>> = {
+  issue_suggest: "ラベルの選択",
+};
+
 function emptyTotals(): TypeSafeUsageTotals {
   return { calls: 0, inputTokens: 0 };
 }
@@ -67,7 +76,7 @@ export function summarizeTypeSafeUsage(summary: ClaudeApiUsageSummary): TypeSafe
     addTotals(last7d, featureLast7d);
     features.push({
       key: feature.key,
-      label: feature.label,
+      label: JEV_FEATURE_LABELS[feature.key] ?? feature.label,
       last24h: featureLast24h,
       last7d: featureLast7d,
     });
