@@ -4,6 +4,7 @@ import {
   type ClaudeApiTotals,
   type ClaudeApiUsageSummary,
 } from "@/lib/claude/api-usage";
+import { readCumulativeInputTokens } from "@/lib/claude/api-usage-persistence";
 
 /** ops-dashboardへ公開するJevの使用量は、呼出回数と入力トークン数だけに限定する。 */
 export type TypeSafeUsageTotals = {
@@ -22,6 +23,11 @@ export type TypeSafeUsageSummary = {
   last24h: TypeSafeUsageTotals;
   last7d: TypeSafeUsageTotals;
   features: TypeSafeUsageFeature[];
+  /**
+   * 集計開始からのJevの累計入力トークン数（減らない通算カウンタ。#3500）。
+   * 7日で消える5分バケットからは組み立てない。DBから読めなかったときは載せない（任意フィールド）。
+   */
+  totalInputTokens?: number;
 };
 
 /**
@@ -88,4 +94,15 @@ export function summarizeTypeSafeUsage(summary: ClaudeApiUsageSummary): TypeSafe
 /** TypeSafe Jevの実測使用量を、現在保持している5分バケットから返す。 */
 export function getTypeSafeUsageSummary(now: number = Date.now()): TypeSafeUsageSummary {
   return summarizeTypeSafeUsage(getClaudeApiUsageSummary(now));
+}
+
+/** DBの通算カウンタからJevだけの累計入力トークン数を返す。読めなければ`undefined`。 */
+export async function getTypeSafeTotalInputTokens(): Promise<number | undefined> {
+  const byModel = await readCumulativeInputTokens();
+  if (!byModel) return undefined;
+  let total = 0;
+  for (const [model, inputTokens] of byModel) {
+    if (isJevModel(model)) total += inputTokens;
+  }
+  return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }

@@ -22,13 +22,21 @@ export async function register() {
   });
 
   // AI側は呼び出しのたびに書く（`lib/claude/api-usage.ts`のコメントを参照）。
-  const { onBucketUpdated } = await import("@/lib/claude/api-usage");
-  const { hydrateClaudeApiUsageFromDb, flushBucketToDb: flushClaudeBucketToDb } = await import(
+  const { onBucketUpdated, onCallRecorded } = await import("@/lib/claude/api-usage");
+  const {
+    hydrateClaudeApiUsageFromDb,
+    flushBucketToDb: flushClaudeBucketToDb,
+    addCumulativeInputTokens,
+  } = await import(
     "@/lib/claude/api-usage-persistence"
   );
 
   await hydrateClaudeApiUsageFromDb();
   onBucketUpdated((bucket) => {
     void flushClaudeBucketToDb(bucket);
+  });
+  // 保持期間で消えない累計入力トークン（#3500）。バケットとは別に加算だけを書く。
+  onCallRecorded(({ model, inputTokens }) => {
+    void addCumulativeInputTokens(model, inputTokens);
   });
 }
