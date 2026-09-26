@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Loader2, RotateCcw } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, Loader2, RotateCcw } from "lucide-react";
 
 import {
   CODEX_MODEL_ENTRIES,
@@ -78,6 +78,7 @@ export function SessionRecoveryButton({
   actionsRun,
   onIssueUpdated,
   align = "end",
+  onHandoff,
 }: {
   issue: Issue;
   /** そのIssueのセッション（`findSessionForIssue`の結果） */
@@ -96,6 +97,12 @@ export function SessionRecoveryButton({
   onIssueUpdated: (issue: Issue) => void;
   /** 横並びのツールバー（PC）では右寄せ、縦積み（スマホ）では左寄せ */
   align?: "start" | "end";
+  /**
+   * 「要約を引き継いで別のAIで続ける」（#3496）を開く。**渡されたときだけメニューへ項目を出す**（#3516）。
+   * 別のAIを選んで起動し直す導線を、終了したセッションの行では復旧メニューの1つにまとめる。
+   * 開く先のダイアログは呼び出し側が持つ。
+   */
+  onHandoff?: () => void;
 }) {
   const { launch, isSubmitting, error } = useLocalSessionLaunch({
     issue,
@@ -231,7 +238,7 @@ export function SessionRecoveryButton({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
               <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                別のエージェント・モデルで復旧
+                別のエージェント・モデルで復旧（会話の続きから。別のエージェントは新しい会話）
               </DropdownMenuLabel>
               {canSelectAgent && (
                 <DropdownMenuLabel className="text-xs">
@@ -264,6 +271,23 @@ export function SessionRecoveryButton({
                       <span className="text-xs text-muted-foreground">{entry.fit}</span>
                     </DropdownMenuItem>
                   ))}
+                </>
+              )}
+              {onHandoff && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="flex-col items-start gap-0.5"
+                    onSelect={onHandoff}
+                  >
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <ArrowRightLeft className="size-3.5" />
+                      要約を引き継いで別のAIで続ける
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      会話は新しく始め、直近のやり取りとブランチの状態を要約して渡す
+                    </span>
+                  </DropdownMenuItem>
                 </>
               )}
             </DropdownMenuContent>
