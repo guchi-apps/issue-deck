@@ -75,6 +75,7 @@ import {
   parseDispatchHostRepositories,
   parsePreviewAction,
   PREVIEW_ISSUE_NUMBER,
+  parseDispatchAgent,
   readDispatchAgent,
   resolveCodeReviewRejection,
   resolveCrossRepoQuestionRejection,
@@ -175,6 +176,9 @@ function toJobView(
     claudeModel: parseClaudeModel(job.claudeModel),
     // 同じ作法（#3192）。既知の語だけを通し、未知の語・nullは「設定の既定に従う」
     codexModel: parseCodexLocalModel(job.codexModel),
+    // 既知の語だけを通す（#3496。未知の語・nullは通常の起動＝null）
+    handoffFrom: parseDispatchAgent(job.handoffFrom),
+    handoffTranscript: job.handoffTranscript === true,
     status: job.status,
     message: job.message,
     instruction: job.instruction,
@@ -679,6 +683,18 @@ export async function enqueueDispatchJob(params: {
    * （古いpollerに当たっても`-m`が付かず設定の既定で立つだけで、別のCLIが立つことは無い）。
    */
   codexModel?: CodexLocalModel | null;
+  /**
+   * 引き継ぎ元のエージェント（#3496）。**指定すると「別のAIで続ける」の起動になる。**
+   *
+   * 通常の起動と違うのは1点だけで、**動いているセッションがあっても弾かない**（`session_alive`）。
+   * 引き継ぎは元セッションを止めて立て直すことが前提で、pollerが要約を書き出してから止める。
+   * ホスト・リポジトリ・エージェントの対応と一時停止の判定は通常の起動と同じ（引き継ぎ先が
+   * 一時停止中なら積まない）。**引き継ぎ元と同じエージェントも許す**（同じCLIで別のモデルへ
+   * 切り替える用途）。
+   */
+  handoffFrom?: DispatchAgent | null;
+  /** 引き継ぎ要約に元セッションの生の転記も添えるか（#3496。`handoffFrom`があるときだけ意味がある） */
+  handoffTranscript?: boolean;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueDispatchJobResult> {
@@ -744,7 +760,7 @@ export async function enqueueDispatchJob(params: {
     },
     orderBy: { lastReportedAt: "desc" },
   });
-  if (aliveSession) {
+  if (aliveSession && !params.handoffFrom) {
     // 別ホストで動いている場合もあるため、積み先のホストではなくセッションの所属ホストを見る
     const sessionHost =
       aliveSession.host === host.name
@@ -766,6 +782,8 @@ export async function enqueueDispatchJob(params: {
         // 後で設定を変えても積み置きのジョブだけ古い既定のまま立つ
         claudeModel: params.claudeModel ?? null,
         codexModel: params.codexModel ?? null,
+        handoffFrom: params.handoffFrom ?? null,
+        handoffTranscript: params.handoffFrom ? params.handoffTranscript === true : false,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,

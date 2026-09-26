@@ -119,6 +119,9 @@ CODEX_SUPPLEMENT="$LAUNCHER_SCRIPTS_DIR/prompts/codex-supplement.md"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$ROOT/scripts/lib/agent-cli.sh"
 
+# shellcheck source=scripts/lib/session-handoff.sh
+source "$ROOT/scripts/lib/session-handoff.sh"
+
 # 端末のタイトル（タブ名）を書き換える。worktree作成・pnpm installの間も、どのIssueの準備中かが
 # タイトルから分かるようにする（#1105）。この後Claude Codeが起動すると、同じ書式の`--name`
 # （scripts/run-issue-session.sh）が引き継ぐ。
@@ -870,6 +873,11 @@ PY
   if [[ "$AGENT_KIND" != "claude" && -f "$CODEX_SUPPLEMENT" ]]; then
     agent_cli_append_codex_supplement "$CODEX_SUPPLEMENT" "$PROMPT_FILE" "$LAUNCHER_SCRIPTS_DIR"
   fi
+
+  # 別のAIからの引き継ぎ（#3496）。画面の「別のAIで続ける」から積まれたジョブのときだけ、pollerが
+  # 書いた要約を末尾へ追記する（`ISSUE_DECK_HANDOFF_FILE`がこのIssueの分と一致しなければ何もしない）。
+  # Codexの補足の後に置くのは、補足が「読み替えの規則」で、引き継ぎは「このセッションの状況」だから
+  session_handoff_append_to_prompt "$PROMPT_FILE" "$REPO_NAME" "$n"
 }
 
 # tmuxセッションへ引き継ぐ環境変数（#1178）。新しいセッションはtmuxサーバー側の環境を
