@@ -566,7 +566,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **`inputTokens`は「キャッシュに載らなかった分」**で、OpenAIだけは記録済みの`input_tokens`が読み込み
   キャッシュを含むため公開時に差し引く（記録側は区別していない）。1行でも形が違うとops-dashboardは
   応答全体を捨てるので、数値は有限の非負整数に丸める。既存の`/api/typesafe/usage`（Jevだけ・回数と入力
-  トークンだけ）はそのまま残す。**ops-dashboardの`AI_APP_USAGE_SOURCES`へこのURLを足すと、TypeSafe連携
+  トークンだけ）はそのまま残す。**`/api/typesafe/usage`の任意フィールド`totalInputTokens`は、7日で消える5分バケットとは別のDBテーブル`ClaudeApiUsageCumulative`（モデル別・加算のみの通算カウンタ。呼び出しのたびに`onCallRecorded`から`increment`）のJev分の合計**（#3500。DBを読めないときはフィールドごと省く）。**ops-dashboardの`AI_APP_USAGE_SOURCES`へこのURLを足すと、TypeSafe連携
   からのJevの補完をやめてこちらを正にする**（両方を数えるとJevが二重になる）。切り替えはops-dashboard側の設定。
   **単価は[`lib/ai-model-pricing.ts`](../src/lib/ai-model-pricing.ts)にあり**（#2717）、
   API換算の目安の金額を出すときに引く（プランの実費ではないと断る）。

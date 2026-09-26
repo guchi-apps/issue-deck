@@ -462,6 +462,15 @@ model ClaudeApiUsageBucket {
   @@index([startedAt])
 }
 
+// アプリ内AI APIの累計入力トークン数（モデル別・減らない通算カウンタ。#3500）。
+// ClaudeApiUsageBucketは7日で削除されるため、そこから組み立てると値が減る。
+// 呼び出しのたびに加算だけを行い、ops-dashboardがJevのクレジット残高を推定するのに使う。
+model ClaudeApiUsageCumulative {
+  model       String   @id
+  inputTokens BigInt
+  updatedAt   DateTime @updatedAt
+}
+
 // アプリ全体で共通の設定値を保持するシングルトンテーブル（id=1固定の1行のみ）。
 // autoRetryLimit: claude-issue-dispatch.ymlのフォールバック時に自動リトライする回数の上限
 // （0は自動リトライ無効）。リポジトリ間で個別設定にする必要が無いため全リポジトリ共通の値とする（#497）。

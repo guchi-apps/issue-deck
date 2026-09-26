@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getTypeSafeUsageSummary = vi.fn();
+const getTypeSafeTotalInputTokens = vi.fn();
 
 vi.mock("@/lib/typesafe/usage", () => ({
   getTypeSafeUsageSummary,
+  getTypeSafeTotalInputTokens,
 }));
 
 const { GET } = await import("./route");
@@ -23,7 +25,7 @@ describe("GET /api/typesafe/usage", () => {
   it("設定が無ければ503を返す", async () => {
     vi.stubEnv("OPS_API_TOKEN", "");
 
-    const response = GET(request("Bearer token"));
+    const response = await GET(request("Bearer token"));
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "not_configured" });
@@ -33,8 +35,8 @@ describe("GET /api/typesafe/usage", () => {
   it("トークンが無いか一致しなければ401を返す", async () => {
     vi.stubEnv("OPS_API_TOKEN", "expected-token");
 
-    await expect(GET(request()).json()).resolves.toEqual({ error: "unauthorized" });
-    await expect(GET(request("Bearer incorrect")).json()).resolves.toEqual({ error: "unauthorized" });
+    await expect((await GET(request())).json()).resolves.toEqual({ error: "unauthorized" });
+    await expect((await GET(request("Bearer incorrect"))).json()).resolves.toEqual({ error: "unauthorized" });
     expect(getTypeSafeUsageSummary).not.toHaveBeenCalled();
   });
 
@@ -46,12 +48,24 @@ describe("GET /api/typesafe/usage", () => {
       features: [],
     };
     getTypeSafeUsageSummary.mockReturnValue(usage);
+    getTypeSafeTotalInputTokens.mockResolvedValue(12345);
 
-    const response = GET(request("Bearer expected-token"));
+    const response = await GET(request("Bearer expected-token"));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual(usage);
+    await expect(response.json()).resolves.toEqual({ ...usage, totalInputTokens: 12345 });
     expect(getTypeSafeUsageSummary).toHaveBeenCalledOnce();
+  });
+
+  it("累計を読めないときはtotalInputTokensを載せずに返す", async () => {
+    vi.stubEnv("OPS_API_TOKEN", "expected-token");
+    const usage = { last24h: { calls: 0, inputTokens: 0 }, last7d: { calls: 0, inputTokens: 0 }, features: [] };
+    getTypeSafeUsageSummary.mockReturnValue(usage);
+    getTypeSafeTotalInputTokens.mockResolvedValue(undefined);
+
+    const response = await GET(request("Bearer expected-token"));
+
+    await expect(response.json()).resolves.toEqual(usage);
   });
 });

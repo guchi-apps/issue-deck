@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ClaudeApiUsageSummary } from "@/lib/claude/api-usage";
 import { isJevModel, summarizeTypeSafeUsage } from "@/lib/typesafe/usage";
@@ -77,5 +77,30 @@ describe("isJevModel", () => {
 
   it.each(["claude-haiku-4-5", "gpt-5.6", "not-jev"])("%sを除外する", (model) => {
     expect(isJevModel(model)).toBe(false);
+  });
+});
+
+describe("getTypeSafeTotalInputTokens", () => {
+  it("Jevの累計だけを合算し、他モデルは含めない", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/claude/api-usage-persistence", () => ({
+      readCumulativeInputTokens: async () =>
+        new Map([
+          ["jev-1.13.0", 1_000],
+          ["jev", 500],
+          ["claude-haiku-4-5", 9_999],
+        ]),
+    }));
+    const { getTypeSafeTotalInputTokens } = await import("@/lib/typesafe/usage");
+    await expect(getTypeSafeTotalInputTokens()).resolves.toBe(1_500);
+  });
+
+  it("DBから読めなければundefinedを返す", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/claude/api-usage-persistence", () => ({
+      readCumulativeInputTokens: async () => null,
+    }));
+    const { getTypeSafeTotalInputTokens } = await import("@/lib/typesafe/usage");
+    await expect(getTypeSafeTotalInputTokens()).resolves.toBeUndefined();
   });
 });
