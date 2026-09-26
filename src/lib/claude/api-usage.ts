@@ -76,6 +76,7 @@ type Bucket = {
 type ClaudeApiUsageState = {
   buckets: Bucket[];
   listeners: BucketUpdatedListener[];
+  callListeners: CallRecordedListener[];
 };
 
 const globalForUsage = globalThis as unknown as { claudeApiUsage?: ClaudeApiUsageState };
@@ -83,7 +84,10 @@ const globalForUsage = globalThis as unknown as { claudeApiUsage?: ClaudeApiUsag
 const state: ClaudeApiUsageState = (globalForUsage.claudeApiUsage ??= {
   buckets: [],
   listeners: [],
+  callListeners: [],
 });
+
+type CallRecordedListener = (call: { model: string; inputTokens: number }) => void;
 
 type BucketUpdatedListener = (bucket: ClaudeApiUsageBucketSnapshot) => void;
 
@@ -104,6 +108,15 @@ export type ClaudeApiUsageBucketSnapshot = {
  */
 export function onBucketUpdated(listener: BucketUpdatedListener): void {
   state.listeners.push(listener);
+}
+
+/**
+ * 呼び出しを1件数えるたびに、その呼び出し1件ぶんの増分を渡して`listener`を呼ぶ。
+ * バケットと違い保持期間で消えない通算カウンタ（累計入力トークン）の永続化に使う。
+ * 増分を渡すので、同じ呼び出しに対して1回だけ呼ばれる（バケットのように冪等ではない）。
+ */
+export function onCallRecorded(listener: CallRecordedListener): void {
+  state.callListeners.push(listener);
 }
 
 function snapshot(bucket: Bucket): ClaudeApiUsageBucketSnapshot {
@@ -159,6 +172,9 @@ export function recordClaudeApiCall(options: {
   bucket.totals.set(key, totals);
 
   notifyBucketUpdated(bucket);
+  for (const listener of state.callListeners) {
+    listener({ model: options.model, inputTokens: options.tokens.inputTokens });
+  }
 }
 
 /**
@@ -247,4 +263,5 @@ export function getClaudeApiUsageSummary(now: number = Date.now()): ClaudeApiUsa
 export function resetClaudeApiUsage(): void {
   state.buckets = [];
   state.listeners.length = 0;
+  state.callListeners.length = 0;
 }

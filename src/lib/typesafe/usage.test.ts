@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ClaudeApiUsageSummary } from "@/lib/claude/api-usage";
 import { isJevModel, summarizeTypeSafeUsage } from "@/lib/typesafe/usage";
@@ -57,6 +57,22 @@ describe("summarizeTypeSafeUsage", () => {
     });
   });
 
+  it("issue_suggestはJevの担当範囲に合わせて「ラベルの選択」と表示する", () => {
+    const suggest: ClaudeApiUsageSummary = {
+      ...source,
+      features: [
+        {
+          key: "issue_suggest",
+          label: "Issueの下書き提案",
+          last24h: totals(1, 100),
+          last7d: totals(1, 100),
+          models: [{ model: "jev-1.13.0", last24h: totals(1, 100), last7d: totals(1, 100) }],
+        },
+      ],
+    };
+    expect(summarizeTypeSafeUsage(suggest).features[0].label).toBe("ラベルの選択");
+  });
+
   it("Jevの記録が無ければゼロ値と空の内訳を返す", () => {
     const noJev = {
       ...source,
@@ -77,5 +93,30 @@ describe("isJevModel", () => {
 
   it.each(["claude-haiku-4-5", "gpt-5.6", "not-jev"])("%sを除外する", (model) => {
     expect(isJevModel(model)).toBe(false);
+  });
+});
+
+describe("getTypeSafeTotalInputTokens", () => {
+  it("Jevの累計だけを合算し、他モデルは含めない", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/claude/api-usage-persistence", () => ({
+      readCumulativeInputTokens: async () =>
+        new Map([
+          ["jev-1.13.0", 1_000],
+          ["jev", 500],
+          ["claude-haiku-4-5", 9_999],
+        ]),
+    }));
+    const { getTypeSafeTotalInputTokens } = await import("@/lib/typesafe/usage");
+    await expect(getTypeSafeTotalInputTokens()).resolves.toBe(1_500);
+  });
+
+  it("DBから読めなければundefinedを返す", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/claude/api-usage-persistence", () => ({
+      readCumulativeInputTokens: async () => null,
+    }));
+    const { getTypeSafeTotalInputTokens } = await import("@/lib/typesafe/usage");
+    await expect(getTypeSafeTotalInputTokens()).resolves.toBeUndefined();
   });
 });

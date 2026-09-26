@@ -6,6 +6,7 @@ import {
   getClaudeApiUsageSummary,
   loadPersistedBuckets,
   onBucketUpdated,
+  onCallRecorded,
   recordClaudeApiCall,
   resetClaudeApiUsage,
   totalTokens,
@@ -166,5 +167,20 @@ describe("claudeApiUsage", () => {
 
     expect(summary.totalLast24h.calls).toBe(4);
     expect(summary.totalLast24h.inputTokens).toBe(400);
+  });
+});
+
+describe("onCallRecorded", () => {
+  it("呼び出し1件ごとに、モデルと入力トークンの増分を渡す", () => {
+    resetClaudeApiUsage();
+    const calls: { model: string; inputTokens: number }[] = [];
+    onCallRecorded((call) => calls.push(call));
+    recordClaudeApiCall({
+      feature: "model_pick",
+      model: "jev-1.13.0",
+      tokens: { inputTokens: 120, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    });
+    expect(calls).toEqual([{ model: "jev-1.13.0", inputTokens: 120 }]);
+    resetClaudeApiUsage();
   });
 });

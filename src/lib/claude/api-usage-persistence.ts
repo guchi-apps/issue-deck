@@ -82,3 +82,33 @@ export async function flushBucketToDb(
     console.error("[claude/api-usage-persistence] failed to flush usage bucket to DB", error);
   }
 }
+
+/**
+ * 累計入力トークン数へ1件ぶんを加算する（#3500）。`onCallRecorded`からfire-and-forgetで呼ばれる想定で、
+ * 失敗してもアプリの動作へは影響させずconsole.errorのみに留める。DB側で`increment`するため、
+ * 再起動や複数プロセスをまたいでも減らない。
+ */
+export async function addCumulativeInputTokens(model: string, inputTokens: number): Promise<void> {
+  if (!Number.isFinite(inputTokens) || inputTokens <= 0) return;
+  const amount = BigInt(Math.trunc(inputTokens));
+  try {
+    await db.claudeApiUsageCumulative.upsert({
+      where: { model },
+      create: { model, inputTokens: amount },
+      update: { inputTokens: { increment: amount } },
+    });
+  } catch (error) {
+    console.error("[claude/api-usage-persistence] failed to add cumulative input tokens", error);
+  }
+}
+
+/** モデル別の累計入力トークン数をDBから読む。失敗したら`null`を返す。 */
+export async function readCumulativeInputTokens(): Promise<Map<string, number> | null> {
+  try {
+    const rows = await db.claudeApiUsageCumulative.findMany();
+    return new Map(rows.map((row) => [row.model, Number(row.inputTokens)]));
+  } catch (error) {
+    console.error("[claude/api-usage-persistence] failed to read cumulative input tokens", error);
+    return null;
+  }
+}

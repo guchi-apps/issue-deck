@@ -4,6 +4,7 @@ import {
   type ClaudeApiTotals,
   type ClaudeApiUsageSummary,
 } from "@/lib/claude/api-usage";
+import { readCumulativeInputTokens } from "@/lib/claude/api-usage-persistence";
 
 /** ops-dashboardへ公開するJevの使用量は、呼出回数と入力トークン数だけに限定する。 */
 export type TypeSafeUsageTotals = {
@@ -22,6 +23,20 @@ export type TypeSafeUsageSummary = {
   last24h: TypeSafeUsageTotals;
   last7d: TypeSafeUsageTotals;
   features: TypeSafeUsageFeature[];
+  /**
+   * 集計開始からのJevの累計入力トークン数（減らない通算カウンタ。#3500）。
+   * 7日で消える5分バケットからは組み立てない。DBから読めなかったときは載せない（任意フィールド）。
+   */
+  totalInputTokens?: number;
+};
+
+/**
+ * Jevが実際に担当している範囲を表すラベル。`CLAUDE_API_FEATURES`の表示名はアプリ内AI側の
+ * 機能全体を指すため、Jevの担当が一部だけの機能はここで上書きする（無ければ既存ラベル）。
+ * `issue_suggest`のうちJevが担当するのはラベル判定のみ（#3245）。
+ */
+const JEV_FEATURE_LABELS: Partial<Record<ClaudeApiFeature, string>> = {
+  issue_suggest: "ラベルの選択",
 };
 
 function emptyTotals(): TypeSafeUsageTotals {
@@ -67,7 +82,7 @@ export function summarizeTypeSafeUsage(summary: ClaudeApiUsageSummary): TypeSafe
     addTotals(last7d, featureLast7d);
     features.push({
       key: feature.key,
-      label: feature.label,
+      label: JEV_FEATURE_LABELS[feature.key] ?? feature.label,
       last24h: featureLast24h,
       last7d: featureLast7d,
     });
@@ -79,4 +94,15 @@ export function summarizeTypeSafeUsage(summary: ClaudeApiUsageSummary): TypeSafe
 /** TypeSafe Jevの実測使用量を、現在保持している5分バケットから返す。 */
 export function getTypeSafeUsageSummary(now: number = Date.now()): TypeSafeUsageSummary {
   return summarizeTypeSafeUsage(getClaudeApiUsageSummary(now));
+}
+
+/** DBの通算カウンタからJevだけの累計入力トークン数を返す。読めなければ`undefined`。 */
+export async function getTypeSafeTotalInputTokens(): Promise<number | undefined> {
+  const byModel = await readCumulativeInputTokens();
+  if (!byModel) return undefined;
+  let total = 0;
+  for (const [model, inputTokens] of byModel) {
+    if (isJevModel(model)) total += inputTokens;
+  }
+  return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }
