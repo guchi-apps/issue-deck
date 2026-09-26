@@ -15,7 +15,7 @@
  * [docs/multi-agent/release.md](../../docs/multi-agent/release.md)「Xcodeで実機へ反映するリポジトリ」。
  */
 export type DeviceBuildRepository = {
-  /** 反映が済んでいない束の札（「本番未反映」の代わり） */
+  /** 反映が済んでいない束の札（ビルド成否は分からない） */
   pendingLabel: string;
   /** 反映が済んだ束の日付に添える語（「◯/◯に本番反映」の「本番反映」の代わり） */
   reflectedLabel: string;
@@ -25,7 +25,7 @@ export type DeviceBuildRepository = {
 
 const DEVICE_BUILD_REPOSITORIES: Readonly<Record<string, DeviceBuildRepository>> = {
   "guchi-apps/aide-ios": {
-    pendingLabel: "Xcode未反映",
+    pendingLabel: "実機未反映",
     reflectedLabel: "実機反映（Xcode）",
     command: "cd ~/Projects/AIDEios &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nsecurity unlock-keychain ~/Library/Keychains/login.keychain-db &&\nscripts/xcode-release.sh",
   },
