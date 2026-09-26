@@ -6,6 +6,7 @@ import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
+  PLAN_REVIEW_REFLECT_REQUEST_TEXT,
   type SessionPlanRequestView,
 } from "@/lib/dispatch/session-plan-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -153,6 +154,31 @@ describe("PlanApprovalPanel", () => {
         id: "req-1",
         decision: "revise",
         text: PLAN_ARTIFACT_REQUEST_TEXT,
+      }),
+    );
+  });
+
+  it("計画レビューが未反映のときだけ反映ボタンを出し、固定文を修正として送る（#3521）", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    const { rerender } = render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle(decidePlan)} />,
+    );
+    expect(screen.queryByRole("button", { name: /レビューを反映して計画を出し直す/ })).toBeNull();
+
+    rerender(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+        planReviewPending
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /レビューを反映して計画を出し直す/ }));
+    await waitFor(() =>
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "revise",
+        text: PLAN_REVIEW_REFLECT_REQUEST_TEXT,
       }),
     );
   });

@@ -10,6 +10,7 @@ import {
   Keyboard,
   Loader2,
   Pencil,
+  ScanSearch,
   ScrollText,
   TriangleAlert,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
+  PLAN_REVIEW_REFLECT_REQUEST_TEXT,
   SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
@@ -62,6 +64,7 @@ export function PlanApprovalPanel({
   dispatch,
   onCheckUserResolved,
   artifactsMissing = false,
+  planReviewPending = false,
 }: {
   request: SessionPlanRequestView;
   /** 計画を出したセッション。見つかっていなければ`null` */
@@ -80,6 +83,8 @@ export function PlanApprovalPanel({
    * 読み込み中・取得失敗は`false`にして、無いと決めつけない。
    */
   artifactsMissing?: boolean;
+  /** 計画の後に計画レビューが届いていて未反映のとき`true`（#3521） */
+  planReviewPending?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
@@ -237,8 +242,24 @@ export function PlanApprovalPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {planReviewPending && (
+              <p className="w-full rounded-md bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                計画のあとに計画レビューが届いています。承認だけでは、指摘を反映した計画は確認できません。
+              </p>
+            )}
+            {planReviewPending && (
+              <Button
+                size="sm"
+                disabled={!canSend || dispatch.isSubmitting}
+                onClick={() => void send("revise", PLAN_REVIEW_REFLECT_REQUEST_TEXT)}
+              >
+                {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+                レビューを反映して計画を出し直す
+              </Button>
+            )}
             <Button
               size="sm"
+              variant={planReviewPending ? "outline" : "default"}
               disabled={!canSend || dispatch.isSubmitting}
               onClick={() => void send("approve")}
             >

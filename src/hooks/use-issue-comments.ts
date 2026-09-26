@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { Issue, IssueComment } from "@/types/issue";
 
@@ -9,6 +9,8 @@ type UseIssueCommentsResult = {
   isLoading: boolean;
   error: string | null;
   setComments: Dispatch<SetStateAction<IssueComment[]>>;
+  /** `isLoading`を立てずに取り直す。失敗しても画面へは出さない（#3521） */
+  refresh: () => void;
 };
 
 export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
@@ -104,5 +106,17 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
     return () => controller.abort();
   }, [qaAnswerPendingAt, issueId, repositoryFullName, issueNumber]);
 
-  return { comments, isLoading, error, setComments };
+  const refresh = useCallback(() => {
+    if (!repositoryFullName || issueNumber === null) return;
+    const [owner, repo] = repositoryFullName.split("/");
+    fetch(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data: { comments: IssueComment[] } = await res.json();
+        setComments(data.comments);
+      })
+      .catch(() => {});
+  }, [repositoryFullName, issueNumber]);
+
+  return { comments, isLoading, error, setComments, refresh };
 }

@@ -33,6 +33,7 @@ import {
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
+import { isPlanReviewPending } from "@/lib/github/plan-review";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
@@ -267,7 +268,8 @@ export function MobileIssueDetail({
 }: MobileIssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。PCの詳細と同じく、早期returnより前で呼ぶ
   const snoozeNow = useNow();
-  const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { comments, isLoading, error, setComments, refresh: refreshComments } =
+    useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
   const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
@@ -390,6 +392,14 @@ export function MobileIssueDetail({
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （PCの詳細と同じ判定）
   const planDecisionPending = planRequest?.status === "WAITING";
+  // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
+  // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
+  const awaitingPlanReview = planDecisionPending && !isPlanReviewPending(comments);
+  useEffect(() => {
+    if (!awaitingPlanReview) return;
+    const timer = setInterval(refreshComments, 60_000);
+    return () => clearInterval(timer);
+  }, [awaitingPlanReview, refreshComments]);
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
@@ -993,6 +1003,7 @@ export function MobileIssueDetail({
               session={issueSession}
               dispatch={dispatch}
               onCheckUserResolved={handleCheckUserResolved}
+              planReviewPending={isPlanReviewPending(comments)}
               artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&

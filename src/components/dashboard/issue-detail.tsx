@@ -38,6 +38,7 @@ import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
+import { isPlanReviewPending } from "@/lib/github/plan-review";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { SessionStallPanel } from "@/components/dashboard/session-stall-panel";
@@ -263,7 +264,8 @@ export function IssueDetail({
   // 保留の期限判定に使う現在時刻（#2398）。**Issueがnullでも呼ぶ**ため、他のフックと同じ
   // 位置（早期returnより前）に置く
   const snoozeNow = useNow();
-  const { comments, isLoading, error, setComments } = useIssueComments(issue);
+  const { comments, isLoading, error, setComments, refresh: refreshComments } =
+    useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
   // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
@@ -311,6 +313,18 @@ export function IssueDetail({
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
+  // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
+  // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
+  const awaitingPlanReview =
+    issue !== null &&
+    findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
+      ?.status === "WAITING" &&
+    !isPlanReviewPending(comments);
+  useEffect(() => {
+    if (!awaitingPlanReview) return;
+    const timer = setInterval(refreshComments, 60_000);
+    return () => clearInterval(timer);
+  }, [awaitingPlanReview, refreshComments]);
   // 計画が出し直されたら取り直す（#3493）。作成を依頼した後の計画では公開済みになっているため
   const planRequestId = (issue
     ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
@@ -1067,6 +1081,7 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
+                planReviewPending={isPlanReviewPending(comments)}
                 artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&
