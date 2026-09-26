@@ -2168,9 +2168,9 @@ describe("buildBranchFlow deviceBuild", () => {
     });
 
     expect(repository.deviceBuild).toEqual({
-      pendingLabel: "Xcode未反映",
+      pendingLabel: "実機未反映",
       reflectedLabel: "実機反映（Xcode）",
-      command: "cd ~/Projects/AIDEios && scripts/xcode-release.sh",
+      command: "cd ~/Projects/AIDEios &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nsecurity unlock-keychain ~/Library/Keychains/login.keychain-db &&\nscripts/xcode-release.sh",
       installed: mainHead,
       buildTargetOid: "a81b0e2bbbb",
     });
