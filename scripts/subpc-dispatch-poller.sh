@@ -3617,6 +3617,12 @@ launch_and_report() {
   local job_id="$1" expected_session="$2" running_message="$3"
   shift 3
 
+  # `prepare_handoff_launch`が直前にセットしたグローバル変数を、成否に関わらずここで
+  # 消費してすぐ消す。成功時に消し忘れると次の無関係なジョブの失敗メッセージへ紛れ込むため、
+  # 失敗時にだけ使う`local`変数へ移し替える。
+  local failure_note="${LAUNCH_FAILURE_NOTE:-}"
+  LAUNCH_FAILURE_NOTE=""
+
   # 重複起動の防止（#1179）。同じIssueのtmuxセッションが既にあるなら起動しない。
   # issue-deck側のactiveKeyとは別の層で、**手元のターミナルから直接起動した分**まで拾える
   # （そちらはissue-deckにジョブとして残らないため、DB側の制約では防げない）。
@@ -3681,8 +3687,7 @@ launch_and_report() {
     local message
     message="$(tail -c 1500 "$output_file")"
     # 出力は`report_job`が報告と同じ文字列で標準エラーへ出す（#1228）。
-    report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message ${LAUNCH_FAILURE_NOTE:-}"
-    LAUNCH_FAILURE_NOTE=""
+    report_job "$job_id" failed "起動できませんでした（終了コード $launch_status）: $message ${failure_note}"
   fi
   rm -f "$output_file"
 }
