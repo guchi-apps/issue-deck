@@ -962,7 +962,7 @@ function ReleaseGroupHeader({
   //
   // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
   // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
-  // Xcodeでのビルド。そのあいだは`pendingLabel`（「Xcode未反映」）を出し続ける。
+  // Xcodeでのビルド。そのあいだは`pendingLabel`（「実機未反映」）を出し続ける。
   const waitingUserMerge =
     !deviceBuild &&
     group.pullRequest !== null &&
@@ -1722,7 +1722,7 @@ function RepositorySummaryRow({
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
         // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
         // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
-        // 「Xcode未反映」を出す
+        // 「実機未反映」を出す
         repository.deviceBuild ? (
           <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
         ) : summary.releaseMergeTarget ? (
