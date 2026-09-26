@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Server } from "lucide-react";
+import { useState } from "react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
@@ -105,6 +106,10 @@ export function IssueStatusCard({
   pullRequestProgress = null,
   handoff,
 }: IssueStatusCardProps) {
+  // 「別のAIで続ける」を復旧メニューの項目から開くための状態（#3516）。終了したセッションだけが使う
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const handoffInMenu =
+    handoff !== undefined && issueSession !== null && issueSession.state !== "ALIVE";
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
   // 横断質問（#1454）は成功後に`IssueSessionStatus`が引き継ぐので、そこから先は数えない
@@ -217,10 +222,14 @@ export function IssueStatusCard({
               actionsRun={workflowRun}
               onIssueUpdated={onIssueUpdated}
               align="end"
+              onHandoff={handoffInMenu ? () => setHandoffOpen(true) : undefined}
             />
           )}
           {/* 別のAIで続ける（#3496）。復旧ボタンと同じく、セッションの行のすぐ下に置く。
-              枠を使い切って止まったセッションを、押した本人が見ているのはここ */}
+              枠を使い切って止まったセッションを、押した本人が見ているのはここ。
+              **終了したセッションでは、復旧メニューの項目から開く**（#3516。同じ行に
+              「別のAIを選んで起動し直す」導線を2つ並べない）。生きているセッションには
+              復旧の導線が無いので、従来どおりボタンを出す */}
           {issueSession && handoff && (
             <div className="flex w-full justify-end">
               <SessionHandoffButton
@@ -231,6 +240,9 @@ export function IssueStatusCard({
                 claudeLocalModel={handoff.claudeLocalModel}
                 codexModel={handoff.codexModel}
                 onCommentCreated={handoff.onCommentCreated}
+                {...(issueSession.state === "ALIVE"
+                  ? {}
+                  : { open: handoffOpen && handoffInMenu, onOpenChange: setHandoffOpen })}
               />
             </div>
           )}

@@ -3339,7 +3339,7 @@ export function POST(request: NextRequest) {
   **セッションの行の「別のAIで続ける」は、いまのセッションのやり取りとブランチの状態を引き継いだ新しい
   セッションを別のAI・モデルで起こす**（#3496。使い方の中心はClaudeの枠切れ→Codex CLI）。ボタンとダイアログは
   `components/dashboard/session-handoff-dialog.tsx`（エージェント・モデルのチップは
-  `agent-model-chips.tsx`を「実装を開始」と共有）、枠の使い切り判定とIssueへ残す記録の文面は
+  `agent-model-chips.tsx`を「実装を開始」と共有。終了したセッションでは復旧メニューの項目から開く・#3516）、枠の使い切り判定とIssueへ残す記録の文面は
   `lib/dispatch/session-handoff.ts`。積むのは`POST /api/dispatch`のLAUNCHに`handoffFrom`・
   `handoffTranscript`を付けたもの（`DispatchJob`の2列。`enqueueDispatchJob`は引き継ぎのときだけ
   生きているセッションで弾かない）。要約の生成は`scripts/lib/session-handoff.sh`、元セッションを止めてから
