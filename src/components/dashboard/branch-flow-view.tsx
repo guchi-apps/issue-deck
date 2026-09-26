@@ -962,7 +962,7 @@ function ReleaseGroupHeader({
   //
   // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
   // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
-  // Xcodeでのビルド。そのあいだは`pendingLabel`（「実機未反映」）を出し続ける。
+  // Macでのビルドからインストール・実機確認まで。そのあいだは`pendingLabel`（「実機未反映」）を出し続ける。
   const waitingUserMerge =
     !deviceBuild &&
     group.pullRequest !== null &&
