@@ -5,6 +5,7 @@ import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { authorizeImageUpload } from "@/lib/images/image-upload-auth";
 import { getUploadedImageInventory } from "@/lib/images/image-cleanup-run";
 import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
 import { getRequestOrigin } from "@/lib/request-origin";
@@ -39,11 +40,33 @@ export async function GET() {
   return NextResponse.json(inventory, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function POST(request: NextRequest) {
+/**
+ * アップロードしてよい呼び出し元か（#3507）。
+ *
+ * Authorizationヘッダが付いていれば`Bearer IMAGE_UPLOAD_SECRET`（AIDEなどサーバー間）だけを見て、
+ * 付いていなければ従来どおりログインCookieを見る。ヘッダ付きで外れたときにCookieへ
+ * フォールバックしない（誤った鍵を黙って通さない）。
+ */
+async function authorizeUpload(request: NextRequest): Promise<NextResponse | null> {
+  const authorization = request.headers.get("authorization");
+  if (authorization) {
+    const auth = authorizeImageUpload(authorization);
+    if (auth === "ok") return null;
+    if (auth === "not_configured") {
+      return NextResponse.json({ error: "not_configured" }, { status: 503 });
+    }
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  return null;
+}
+
+export async function POST(request: NextRequest) {
+  const denied = await authorizeUpload(request);
+  if (denied) return denied;
 
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("file");

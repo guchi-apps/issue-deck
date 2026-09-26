@@ -3847,7 +3847,7 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 
 ## 画像・アーティファクトはVPSのローカルディスクに置く
 
-- `POST /api/issues/images` … ログイン必須。`uploads/images/` へUUID名で保存する。
+- `POST /api/issues/images` … ログイン必須。**`Authorization: Bearer IMAGE_UPLOAD_SECRET`でも受け付ける**（#3507。AIDEのMCPツール用。認証は`lib/images/image-upload-auth.ts`。ヘッダが付けばBearerだけを見てCookieへフォールバックせず、未設定なら503`not_configured`。`PROGRESS_REPORT_SECRET`・`DISPATCH_SECRET`は流用しない）。`uploads/images/` へUUID名で保存する。
   **受け付ける形式はPNG・JPEG・GIF・WebP・SVG**（#3286）。SVGは拡張子・MIMEを名乗るだけの
   HTMLなどを保存しないよう、先頭が`<svg`（XML宣言・コメント・DOCTYPEは読み飛ばす）かを
   `looksLikeSvg`（`lib/uploaded-images.ts`）で確かめ、外れたら415`invalid_svg`を返す。
