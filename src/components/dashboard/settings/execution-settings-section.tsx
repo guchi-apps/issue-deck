@@ -21,13 +21,17 @@ import {
   CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_SETTING_OPTIONS,
+  DISPATCH_AGENT_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
+  DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX,
+  DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN,
   MODEL_PICK_ENGINE_OPTIONS,
   type AppAiModel,
   type ClaudeLocalModelSetting,
   type ClaudeModel,
   type CodexModelSetting,
+  type DefaultDispatchAgent,
   type ModelPickEngine,
 } from "@/lib/app-settings";
 
@@ -37,6 +41,9 @@ export type AppSettingsValues = {
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent: DefaultDispatchAgent;
+  dispatchFailoverEnabled: boolean;
+  dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   modelPickEngine: ModelPickEngine;
@@ -49,6 +56,9 @@ type ExecutionSettingsSectionProps = {
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent: DefaultDispatchAgent;
+  dispatchFailoverEnabled: boolean;
+  dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   modelPickEngine: ModelPickEngine;
@@ -70,6 +80,9 @@ export function ExecutionSettingsSection({
   claudeModelAssist: initialClaudeModelAssist,
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
+  defaultDispatchAgent: initialDefaultDispatchAgent,
+  dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+  dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
   appAiModel: initialAppAiModel,
   appAiModelReasoning: initialAppAiModelReasoning,
   modelPickEngine: initialModelPickEngine,
@@ -85,6 +98,13 @@ export function ExecutionSettingsSection({
   const [claudeLocalModel, setClaudeLocalModel] =
     useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModelSetting>(initialCodexModel);
+  const [defaultDispatchAgent, setDefaultDispatchAgent] = useState<DefaultDispatchAgent>(
+    initialDefaultDispatchAgent,
+  );
+  const [dispatchFailoverEnabled, setDispatchFailoverEnabled] = useState(initialDispatchFailoverEnabled);
+  const [dispatchFailoverThresholdPercent, setDispatchFailoverThresholdPercent] = useState(
+    initialDispatchFailoverThresholdPercent,
+  );
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
@@ -104,7 +124,10 @@ export function ExecutionSettingsSection({
     autoRetryLimit <= AUTO_RETRY_LIMIT_MAX &&
     Number.isInteger(dispatchConcurrency) &&
     dispatchConcurrency >= DISPATCH_CONCURRENCY_MIN &&
-    dispatchConcurrency <= DISPATCH_CONCURRENCY_MAX;
+    dispatchConcurrency <= DISPATCH_CONCURRENCY_MAX &&
+    Number.isInteger(dispatchFailoverThresholdPercent) &&
+    dispatchFailoverThresholdPercent >= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN &&
+    dispatchFailoverThresholdPercent <= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX;
 
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
@@ -112,6 +135,9 @@ export function ExecutionSettingsSection({
     claudeModelAssist !== initialClaudeModelAssist ||
     claudeLocalModel !== initialClaudeLocalModel ||
     codexModel !== initialCodexModel ||
+    defaultDispatchAgent !== initialDefaultDispatchAgent ||
+    dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
+    dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
     appAiModel !== initialAppAiModel ||
     appAiModelReasoning !== initialAppAiModelReasoning ||
     modelPickEngine !== initialModelPickEngine ||
@@ -129,6 +155,9 @@ export function ExecutionSettingsSection({
       appAiModel,
       appAiModelReasoning,
       modelPickEngine,
+      defaultDispatchAgent,
+      dispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent,
     );
     if (!claudeModelOk) return;
     const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
@@ -139,6 +168,9 @@ export function ExecutionSettingsSection({
       claudeModelAssist,
       claudeLocalModel,
       codexModel,
+      defaultDispatchAgent,
+      dispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent,
       appAiModel,
       appAiModelReasoning,
       modelPickEngine,
@@ -169,6 +201,65 @@ export function ExecutionSettingsSection({
           Actionsの無人実行（Issueからの計画・実装）が、計画コメントもPull
           Requestも残せずに終わった場合に、自動で再実行する回数の上限です。0で無効ですが、一過性の障害と判定した場合だけは0でも2回まで再実行します。ローカルセッションには適用されません。全リポジトリ共通の設定です。
         </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5 border-t pt-4">
+        <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
+        <Select
+          value={defaultDispatchAgent}
+          onValueChange={(value) => setDefaultDispatchAgent(value as DefaultDispatchAgent)}
+        >
+          <SelectTrigger id="default-dispatch-agent" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DISPATCH_AGENT_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t pt-4">
+        <div>
+          <Label htmlFor="dispatch-failover-enabled">使用量に応じた自動フェイルオーバー</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            既定のエージェントの使用率がしきい値以上なら、もう一方を「実装を開始」の最初の選択にします。
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm" htmlFor="dispatch-failover-enabled">
+          <input
+            id="dispatch-failover-enabled"
+            type="checkbox"
+            checked={dispatchFailoverEnabled}
+            onChange={(event) => setDispatchFailoverEnabled(event.target.checked)}
+          />
+          自動で切り替える
+        </label>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="dispatch-failover-threshold">切替しきい値（使用率）</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="dispatch-failover-threshold"
+              type="number"
+              min={DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN}
+              max={DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX}
+              value={dispatchFailoverThresholdPercent}
+              disabled={!dispatchFailoverEnabled}
+              onChange={(event) => setDispatchFailoverThresholdPercent(Number(event.target.value))}
+              className="w-28"
+            />
+            <span className="text-sm text-muted-foreground">%以上</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            使用量を取得できない・古い・期限切れの場合は切り替えません。手動で選び直したエージェントも維持します。
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-col gap-1.5">

@@ -166,7 +166,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
-import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
 import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
@@ -232,6 +232,9 @@ type IssueDetailProps = {
    */
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
 };
 
 export function IssueDetail({
@@ -260,6 +263,9 @@ export function IssueDetail({
   onStartManualStepGuide,
   claudeLocalModel,
   codexModel,
+  defaultDispatchAgent = "claude",
+  dispatchFailoverEnabled = true,
+  dispatchFailoverThresholdPercent = 90,
 }: IssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。**Issueがnullでも呼ぶ**ため、他のフックと同じ
   // 位置（早期returnより前）に置く
@@ -823,6 +829,9 @@ export function IssueDetail({
                   subIssueRelations={subIssueRelations}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
+                  defaultDispatchAgent={defaultDispatchAgent}
+                  dispatchFailoverEnabled={dispatchFailoverEnabled}
+                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                   renderTrigger={(isSubmitting) => (
                     <Button size="sm" disabled={isSubmitting}>
                       {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}
