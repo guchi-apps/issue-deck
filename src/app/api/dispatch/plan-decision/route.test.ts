@@ -7,6 +7,9 @@ const resolveSessionPlanCheckUser = vi.fn();
 const advanceSessionPlanProgress = vi.fn();
 const createComment = vi.fn();
 const getCurrentUser = vi.fn();
+const findDispatchSessionForIssue = vi.fn();
+const enqueueDispatchJob = vi.fn();
+const findUnique = vi.fn();
 
 vi.mock("@/lib/preview-mode", () => ({ previewModeGuard: () => null }));
 
@@ -34,6 +37,20 @@ vi.mock("@/lib/dispatch/codex-decision-notify", () => ({
     return notifyCodexSessionDecision;
   },
 }));
+
+vi.mock("@/lib/dispatch/sessions", () => ({
+  get findDispatchSessionForIssue() {
+    return findDispatchSessionForIssue;
+  },
+}));
+
+vi.mock("@/lib/dispatch/jobs", () => ({
+  get enqueueDispatchJob() {
+    return enqueueDispatchJob;
+  },
+}));
+
+vi.mock("@/lib/db", () => ({ db: { sessionPlanRequest: { findUnique } } }));
 
 vi.mock("@/lib/dispatch/session-plan", () => ({
   get resolveSessionPlanCheckUser() {
@@ -77,6 +94,13 @@ beforeEach(() => {
   recordSessionPlanCodexDelivery.mockResolvedValue(undefined);
   notifyCodexSessionDecision.mockResolvedValue({ ok: false, reason: "not_codex", message: "" });
   createComment.mockResolvedValue({});
+  findUnique.mockResolvedValue({ ...request, status: "WAITING" });
+  findDispatchSessionForIssue.mockResolvedValue({
+    host: "subpc",
+    state: "ALIVE",
+    codexThreadKnown: true,
+  });
+  enqueueDispatchJob.mockResolvedValue({ ok: true, job: {} });
 });
 
 describe("POST /api/dispatch/plan-decision", () => {
@@ -186,6 +210,26 @@ describe("POST /api/dispatch/plan-decision", () => {
     await POST(postRequest({ id: "plan-1", decision: "defer" }));
     expect(notifyCodexSessionDecision).not.toHaveBeenCalled();
     expect(recordSessionPlanCodexDelivery).not.toHaveBeenCalled();
+  });
+
+  it("Codexの軽いモデルを選ぶと、元の会話へ指示を重ねず引き継ぎジョブを積む", async () => {
+    const res = await POST(
+      postRequest({ id: "plan-1", decision: "approve", handoffModel: "gpt-6-luna" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(enqueueDispatchJob).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 2341,
+      hostName: "subpc",
+      agent: "codex",
+      claudeModel: null,
+      codexModel: "gpt-6-luna",
+      handoffFrom: "codex",
+      handoffTranscript: false,
+      requestedByUserId: "user-1",
+    });
+    expect(notifyCodexSessionDecision).not.toHaveBeenCalled();
   });
 
   // Claude Codeのセッションはフックが判断を取りに来る。配送の記録もそちらに任せる
