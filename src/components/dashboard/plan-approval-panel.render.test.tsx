@@ -38,6 +38,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     issueNumber: 2061,
     state: "ALIVE",
     activity: "WAITING_INPUT",
+    codexThreadKnown: null,
     ...overrides,
   } as DispatchSessionView;
 }
@@ -93,6 +94,31 @@ describe("PlanApprovalPanel", () => {
       });
     });
     await waitFor(() => expect(screen.getByText("承認を送りました。")).toBeTruthy());
+  });
+
+  it("Codexでは既定は同じモデルで継続し、選んだときだけ軽いモデルへの引き継ぎを送る", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session({ codexThreadKnown: true })}
+        dispatch={dispatchHandle(decidePlan)}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /同じモデルで継続/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /軽いモデルへ引き継ぐ/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /GPT-6 Luna/ }));
+    fireEvent.click(screen.getByRole("button", { name: /承認して実装へ進む/ }));
+
+    await waitFor(() => {
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "approve",
+        text: undefined,
+        handoffModel: "gpt-6-luna",
+      });
+    });
   });
 
   /**

@@ -15,6 +15,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { ModelChip } from "@/components/dashboard/agent-model-chips";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,11 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { splitAttachments } from "@/lib/markdown-attachments";
+import {
+  CODEX_LOCAL_MODEL_VALUES,
+  CODEX_MODEL_FIT_LABELS,
+  describeCodexModel,
+} from "@/lib/app-settings";
 
 /**
  * ローカルセッションが提示した計画を読んで、その場で承認・修正を送るパネル（#2061）。
@@ -91,6 +97,8 @@ export function PlanApprovalPanel({
   const [revision, setRevision] = useState("");
   // 画像のアップロード中に送ると、まだURLの入っていない本文がClaudeへ渡る（#2425）
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  // nullは元の会話をそのまま続ける（既定）。モデルを入れたときだけ新しい会話へ引き継ぐ。
+  const [handoffModel, setHandoffModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 押した結果は**どの計画に対して押したのか**まで持つ（#2158）。`"approve"`だけを覚えると、
   // 別の計画に差し替わってもその表示が残り、**押していない計画に「承認を送りました」が出る**
@@ -115,6 +123,7 @@ export function PlanApprovalPanel({
       id: request.id,
       decision,
       text: decision === "revise" ? (text ?? revision) : undefined,
+      ...(decision === "approve" && handoffModel ? { handoffModel } : {}),
     });
     if (!result.ok) {
       setError(result.message);
@@ -144,6 +153,7 @@ export function PlanApprovalPanel({
   }
 
   const canSend = !sessionGone && remainingMs > 0;
+  const canHandoff = session !== null && session.codexThreadKnown !== null;
   // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
   // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
   const { body: revisionBody, attachments: revisionAttachments } = splitAttachments(revision);
@@ -256,6 +266,48 @@ export function PlanApprovalPanel({
                 {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
                 レビューを反映して計画を出し直す
               </Button>
+            )}
+            {session && !sessionGone && canHandoff && (
+              <div className="w-full rounded-md border bg-muted/40 p-3">
+                <p className="text-xs font-medium">実装に使うモデル</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  同じ会話を続けると計画時の文脈とキャッシュを保てます。切り替えると軽いモデルで始められますが、新しい会話になるため直近のやり取りの抜粋とブランチ状態を引き継ぎます。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={handoffModel === null ? "default" : "outline"}
+                    onClick={() => setHandoffModel(null)}
+                  >
+                    同じモデルで継続（推奨）
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={handoffModel === null ? "outline" : "default"}
+                    onClick={() => setHandoffModel("gpt-5.6-terra")}
+                  >
+                    軽いモデルへ引き継ぐ
+                  </Button>
+                </div>
+                {handoffModel && (
+                  <div className="mt-2" role="radiogroup" aria-label="引き継ぎ先のモデル">
+                    <p className="mb-1.5 text-xs text-muted-foreground">引き継ぎ先</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {CODEX_LOCAL_MODEL_VALUES.map((model) => (
+                        <ModelChip
+                          key={model}
+                          label={describeCodexModel(model)}
+                          fit={CODEX_MODEL_FIT_LABELS[model]}
+                          selected={handoffModel === model}
+                          onSelect={() => setHandoffModel(model)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             <Button
               size="sm"

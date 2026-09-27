@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import type { ClaudeLocalModel, CodexLocalModel } from "@/lib/app-settings";
 import { notifyCodexSessionDecision } from "@/lib/dispatch/codex-decision-notify";
+import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
+import { findDispatchSessionForIssue } from "@/lib/dispatch/sessions";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import {
   decideSessionPlanRequest,
@@ -13,12 +16,14 @@ import {
   buildSessionPlanDecisionCommentBody,
   describeSessionPlanDecisionRejection,
   parseSessionPlanDecision,
+  parseSessionPlanHandoffModel,
   parseSessionPlanRevision,
 } from "@/lib/dispatch/session-plan-request";
 import { createComment } from "@/lib/github/issues-api";
 import { posterMarker } from "@/lib/github/project-status-dispatch";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { db } from "@/lib/db";
 
 /**
  * 計画の承認・修正を画面から送る入口（#2061）。
@@ -51,6 +56,33 @@ export async function POST(request: NextRequest) {
   const revisionText = decision === "revise" ? parseSessionPlanRevision(payload?.text) : null;
   if (decision === "revise" && !revisionText) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  let handoff: { agent: "claude" | "codex"; model: string; hostName: string } | null = null;
+  if (decision === "approve" && payload?.handoffModel !== undefined) {
+    const pending = await db.sessionPlanRequest.findUnique({
+      where: { id },
+      select: { repositoryFullName: true, issueNumber: true, status: true },
+    });
+    if (!pending || pending.status !== "WAITING") {
+      return NextResponse.json({ error: "already_decided" }, { status: 409 });
+    }
+    const session = await findDispatchSessionForIssue({
+      repositoryFullName: pending.repositoryFullName,
+      issueNumber: pending.issueNumber,
+    });
+    if (!session || session.state !== "ALIVE") {
+      return NextResponse.json({ error: "session_not_available" }, { status: 409 });
+    }
+    const agent = session.codexThreadKnown === null ? "claude" : "codex";
+    // Claude Codeは承認フックが元セッションをその場で実装へ進める。ここでhandoffを積むと
+    // 新旧セッションが同じworktreeを同時に触るため、停止と再開をキューで制御できるCodexだけに絞る。
+    if (agent !== "codex") {
+      return NextResponse.json({ error: "handoff_not_supported" }, { status: 409 });
+    }
+    const model = parseSessionPlanHandoffModel(payload.handoffModel, agent);
+    if (!model) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    handoff = { agent, model, hostName: session.host };
   }
 
   const result = await decideSessionPlanRequest({
@@ -103,11 +135,32 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // 切替を選んだ場合だけ、既存のhandoffジョブとして積む。pollerは要約を書いてから元を
+  // 停止するため、同じworktreeを2つのセッションが同時に編集しない。
+  let handoffQueued = false;
+  if (decision === "approve" && handoff) {
+    const queued = await enqueueDispatchJob({
+      repositoryFullName: result.request.repositoryFullName,
+      issueNumber: result.request.issueNumber,
+      hostName: handoff.hostName,
+      agent: handoff.agent,
+      claudeModel: handoff.agent === "claude" ? (handoff.model as ClaudeLocalModel) : null,
+      codexModel: handoff.agent === "codex" ? (handoff.model as CodexLocalModel) : null,
+      handoffFrom: handoff.agent,
+      handoffTranscript: false,
+      requestedByUserId: user.id,
+    });
+    handoffQueued = queued.ok;
+    if (!queued.ok) {
+      console.error(`[dispatch] 計画承認後のモデル切替を積めませんでした: ${queued.message}`);
+    }
+  }
+
   // **Codexのセッションには、ここから継続指示を積む**（#3218）。あちらは`submit-plan.sh`の
   // 完了を待たずにターンを終えているため、判断を取りに来る当事者がいない
   // （`src/lib/dispatch/codex-decision-notify.ts`）。**`defer`では送らない**——端末で答えると
   // 言っただけで、人はまだ答えていない。**失敗しても成功として返す**（判断はもうDBに入っている）
-  if (decision !== "defer") {
+  if (decision !== "defer" && !handoffQueued) {
     const notified = await notifyCodexSessionDecision({
       repositoryFullName: result.request.repositoryFullName,
       issueNumber: result.request.issueNumber,

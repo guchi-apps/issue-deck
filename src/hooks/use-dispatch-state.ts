@@ -933,6 +933,8 @@ export function useDispatchState(enabled: boolean) {
       decision: "approve" | "revise" | "defer";
       /** `decision`が`revise`のときの本文。そのままClaudeへ渡る */
       text?: string;
+      /** 指定時は、承認後に同じCLIの新規セッションへ引き継ぐ */
+      handoffModel?: string;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {

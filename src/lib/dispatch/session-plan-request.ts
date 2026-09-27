@@ -1,5 +1,12 @@
 import type { SessionPlanRequest, SessionPlanRequestStatus } from "@prisma/client";
 
+import {
+  parseClaudeLocalModel,
+  parseCodexLocalModel,
+  type ClaudeLocalModel,
+  type CodexLocalModel,
+} from "@/lib/app-settings";
+import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
 
 /**
@@ -89,6 +96,14 @@ export const SESSION_PLAN_DECIDED_VISIBLE_MS = 3 * 60 * 1000;
 
 /** 画面のボタンが送ってくる決め方 */
 export type SessionPlanDecision = "approve" | "revise" | "defer";
+
+/** 計画承認後に、現在と同じCLIの新規セッションへ渡すモデルを検証する。 */
+export function parseSessionPlanHandoffModel(
+  value: unknown,
+  agent: DispatchAgent,
+): ClaudeLocalModel | CodexLocalModel | null {
+  return agent === "codex" ? parseCodexLocalModel(value) : parseClaudeLocalModel(value);
+}
 
 export function parseSessionPlanDecision(value: unknown): SessionPlanDecision | null {
   if (value === "approve" || value === "revise" || value === "defer") return value;

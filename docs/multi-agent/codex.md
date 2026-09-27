@@ -123,6 +123,13 @@ poller（run_job → prepare_handoff_launch）
 
 ## モデルは起動ごとに選べる（#3192）
 
+### 計画承認後のモデル切替
+
+`21.plan-required`の**Codex**計画承認パネルでは、現在の会話を続けるか、同じCLIの別モデルへ引き継ぐかを
+選べる。既定は継続で、計画時の文脈とキャッシュを保つ。引き継ぎを選んだときだけ、既存の
+`handoffFrom`ジョブを積み、pollerが要約を書いて元セッションを停止してから新しい会話を起動する。
+CLIまで替える場合は、計画承認ではなく既存の「別のAIで続ける」を使う。
+
 「実装を開始」ダイアログの「モデル」欄は、エージェントに合わせて中身が変わる。**Claude Codeで
 立てるときの「おまかせ」・Fable・Opus・Sonnetと同じ形**で、Codexでは**おまかせ・Astra・Sol・Terra・Luna**。
 選んだ値は`DispatchJob.codexModel`へ入り、払い出し（`POST /api/dispatch/claim`）が
