@@ -1223,10 +1223,10 @@ function IssueGroupList({
 
   return (
     <ul className="flex flex-col gap-1">
-      {issues.map((issue, index) => {
+      {issues.map((issue) => {
         const key = issueGroupKey(issue);
-        // 既定では一番新しい活動のIssueだけ開く。それ以外はユーザーが押した分だけ開閉する（#2653）。
-        const isOpen = openKeys[key] ?? index === 0;
+        // 初期状態はすべて閉じる。ユーザーが押した行だけを開閉する（#3536）。
+        const isOpen = openKeys[key] ?? false;
         return (
           <IssueGroupRow
             key={key}
