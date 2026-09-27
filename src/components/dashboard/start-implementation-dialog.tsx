@@ -23,10 +23,12 @@ import {
   parseClaudeLocalModel,
   parseCodexLocalModel,
   resolveCodexInitialModel,
+  isDispatchUsageAtOrAboveThreshold,
   type ClaudeLocalModel,
   type ClaudeLocalModelSetting,
   type CodexLocalModel,
   type CodexModelSetting,
+  type DefaultDispatchAgent,
 } from "@/lib/app-settings";
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
@@ -59,7 +61,7 @@ import { useModelPick } from "@/hooks/use-model-pick";
 import { useNightlyRunSettings } from "@/hooks/use-nightly-run";
 import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
-import { hasClaudeLowRemainingQuota } from "@/lib/claude/usage";
+import { useCodexUsage } from "@/hooks/use-codex-usage";
 import {
   DEFAULT_DISPATCH_AGENT,
   describeDispatchAgent,
@@ -303,6 +305,9 @@ type StartImplementationDialogProps = {
    * 選べる3つ以外（`auto`・旧世代）は、初期選択がTerraになる（`resolveCodexInitialModel`）。
    */
   codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
 };
 
 /**
@@ -345,6 +350,9 @@ export function StartImplementationDialog({
   subIssueRelations,
   claudeLocalModel,
   codexModel: codexModelSetting,
+  defaultDispatchAgent = "claude",
+  dispatchFailoverEnabled = true,
+  dispatchFailoverThresholdPercent = 90,
 }: StartImplementationDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp ?? internalOpen;
@@ -373,7 +381,7 @@ export function StartImplementationDialog({
    * それ以外の実行先を選んだ状態のままでも値は残るが、**積むときに既定へ落とす**
    * （`effectiveAgent`）ので、GitHub Actionsの起動へ漏れることはない。
    */
-  const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
+  const [agent, setAgent] = useState<DispatchAgent>(defaultDispatchAgent);
   /**
    * このIssueだけに使うモデル（#2717）。**最初は設定（設定 ＞ 実行）の値**（#3106）。
    *
@@ -414,9 +422,10 @@ export function StartImplementationDialog({
     error: commentMutationError,
   } = useIssueCommentMutations();
   const { setProgressStatus } = useProgressStatusMutation();
-  // Claudeの枠が少ない場合だけ、Codex対応ホストで既定エージェントを切り替える。
+  // 既定側の使用量でだけ、Codex対応ホストの初期選択を切り替える。
   // ダイアログを閉じている間や、ローカル実行を選べない経路では探りリクエストを送らない。
   const claudeUsage = useClaudeUsage(open && includeDispatchTargets === true);
+  const codexUsage = useCodexUsage(open && includeDispatchTargets === true);
   // 開いている間だけ取得する。閉じているダイアログのためにポーリングを増やさない。
   // 親から渡されている場合はそちらを使い、自前の取得は止める（#1262）
   const ownDispatch = useDispatchState(
@@ -473,7 +482,7 @@ export function StartImplementationDialog({
     setTarget(undefined);
     setStartedTarget(null);
     agentTouchedRef.current = false;
-    setAgent(DEFAULT_DISPATCH_AGENT);
+    setAgent(defaultDispatchAgent);
     setModel(claudeLocalModelRef.current);
     setCodexModel(resolveCodexInitialModel(codexModelSettingRef.current));
     autoPickedRef.current = { claude: false, codex: false };
@@ -482,7 +491,7 @@ export function StartImplementationDialog({
     resetCodexModelPick();
     setCopied(false);
     setNightlyError(null);
-  }, [open, resetClaudeModelPick, resetCodexModelPick]);
+  }, [open, resetClaudeModelPick, resetCodexModelPick, defaultDispatchAgent]);
 
   /**
    * リポジトリのラベル一覧は非同期で届くため、開いた直後の同期では間に合わないことがある（#1956）。
@@ -627,17 +636,30 @@ export function StartImplementationDialog({
     (effectiveTarget.kind === "host" || isScheduledTarget) && isDispatchAgentSelectable(selectedHost);
 
   /**
-   * Claudeの枠が少ないときの初期選択。取得が古い・失敗した・未取得なら従来どおりClaudeへ倒す。
+   * 既定側の使用量がしきい値に達したときの初期選択。取得が古い・失敗した・未取得なら設定値を保つ。
    * Codexを選べない実行先では変更しないため、GitHub Actionsや非対応ホストへは影響しない。
    */
   useEffect(() => {
     if (!open || !showAgents || agentTouchedRef.current) return;
-    const shouldUseCodex =
-      claudeUsage.data !== null &&
-      !claudeUsage.data.stale &&
-      hasClaudeLowRemainingQuota(claudeUsage.data.windows);
-    setAgent(shouldUseCodex ? "codex" : DEFAULT_DISPATCH_AGENT);
-  }, [open, showAgents, claudeUsage.data]);
+    if (!dispatchFailoverEnabled) {
+      setAgent(defaultDispatchAgent);
+      return;
+    }
+    const defaultUsage = defaultDispatchAgent === "claude" ? claudeUsage.data : codexUsage.data;
+    const atThreshold =
+      defaultUsage !== null &&
+      !defaultUsage.stale &&
+      isDispatchUsageAtOrAboveThreshold(defaultUsage.windows, dispatchFailoverThresholdPercent);
+    setAgent(atThreshold ? (defaultDispatchAgent === "claude" ? "codex" : "claude") : defaultDispatchAgent);
+  }, [
+    open,
+    showAgents,
+    claudeUsage.data,
+    codexUsage.data,
+    defaultDispatchAgent,
+    dispatchFailoverEnabled,
+    dispatchFailoverThresholdPercent,
+  ]);
   /**
    * 実際に積むエージェント。**選択欄を出していない実行先では既定へ落とす。**
    * サブPCでCodexを選んだ後にGitHub Actionsへ切り替えても、選択が残ったまま付いていかない。

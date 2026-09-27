@@ -6,11 +6,15 @@ import {
   MODEL_PICK_ENGINE_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
+  DEFAULT_DISPATCH_AGENT_SETTING,
+  DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
   parseCodexModelSetting,
   parseAppAiModel,
+  parseDefaultDispatchAgent,
+  parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
@@ -80,6 +84,12 @@ export default async function DashboardPage() {
   const claudeLocalModel =
     parseClaudeLocalModelSetting(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModelSetting(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
+  const defaultDispatchAgent =
+    parseDefaultDispatchAgent(appSetting?.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING;
+  const dispatchFailoverEnabled = appSetting?.dispatchFailoverEnabled ?? true;
+  const dispatchFailoverThresholdPercent =
+    parseDispatchFailoverThresholdPercent(appSetting?.dispatchFailoverThresholdPercent) ??
+    DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT;
   const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
   const appAiModelReasoning =
     parseAppAiModel(appSetting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT;
@@ -126,6 +136,9 @@ export default async function DashboardPage() {
       claudeModelAssist={claudeModelAssist}
       claudeLocalModel={claudeLocalModel}
       codexModel={codexModel}
+      defaultDispatchAgent={defaultDispatchAgent}
+      dispatchFailoverEnabled={dispatchFailoverEnabled}
+      dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
       appAiModel={appAiModel}
       appAiModelReasoning={appAiModelReasoning}
       modelPickEngine={modelPickEngine}

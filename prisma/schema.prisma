@@ -488,6 +488,12 @@ model AppSetting {
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
   codexModel          String   @default("gpt-5.6-terra")
+  // サブPCの「実装を開始」で最初に選ぶCLI。明示して選び直した値や、既存セッションの再開には影響しない。
+  defaultDispatchAgent String  @default("claude")
+  // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
+  // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
+  dispatchFailoverEnabled Boolean @default(true)
+  dispatchFailoverThresholdPercent Int @default(90)
   // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
   appAiModel          String   @default("claude-haiku-4-5")
   // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。

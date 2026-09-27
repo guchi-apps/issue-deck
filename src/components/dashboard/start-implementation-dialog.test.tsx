@@ -9,6 +9,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { ClaudeUsage } from "@/lib/claude/usage";
+import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 import {
   ARTIFACT_REQUIRED_LABEL,
   MERGE_CONFIRM_REQUIRED_LABEL,
@@ -43,6 +44,10 @@ vi.mock("@/hooks/use-nightly-run", () => ({
 let claudeUsage: ClaudeUsage | null = null;
 vi.mock("@/hooks/use-claude-usage", () => ({
   useClaudeUsage: () => ({ data: claudeUsage, isLoading: false, error: null, notConfigured: false }),
+}));
+let codexUsage: CodexUsage | null = null;
+vi.mock("@/hooks/use-codex-usage", () => ({
+  useCodexUsage: () => ({ data: codexUsage, isLoading: false, error: null, notConfigured: false }),
 }));
 
 // モデルの自動選択（#2723）。**押したときだけ呼ばれる**ことも検証したいので、フックごと
@@ -195,6 +200,9 @@ function renderDialog(
     onOpenChange?: (open: boolean) => void;
     claudeLocalModel?: "fable" | "opus" | "sonnet" | "pick";
     codexModel?: ComponentProps<typeof StartImplementationDialog>["codexModel"];
+    defaultDispatchAgent?: "claude" | "codex";
+    dispatchFailoverEnabled?: boolean;
+    dispatchFailoverThresholdPercent?: number;
   } = {},
 ) {
   const issue = props.issue ?? makeIssue();
@@ -213,6 +221,9 @@ function renderDialog(
       localSessionCommand={props.localSessionCommand ?? null}
       claudeLocalModel={props.claudeLocalModel ?? "sonnet"}
       codexModel={props.codexModel ?? "gpt-5.6-terra"}
+      defaultDispatchAgent={props.defaultDispatchAgent}
+      dispatchFailoverEnabled={props.dispatchFailoverEnabled}
+      dispatchFailoverThresholdPercent={props.dispatchFailoverThresholdPercent}
     />
   );
   const result = render(element());
@@ -237,6 +248,7 @@ describe("StartImplementationDialog", () => {
     };
     repositoryLabelNames = [ARTIFACT_REQUIRED_LABEL];
     claudeUsage = null;
+    codexUsage = null;
     updateIssue.mockResolvedValue(makeIssue());
     createComment.mockResolvedValue({ id: 1 } as unknown as IssueComment);
     setProgressStatus.mockResolvedValue(undefined);
@@ -472,6 +484,49 @@ describe("StartImplementationDialog", () => {
         stale: true,
       };
       renderDialog({ includeDispatchTargets: true });
+
+      expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("Codexを既定にした場合も、使用率がしきい値に達すればClaude Codeへ切り替える", async () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      codexUsage = {
+        windows: [
+          {
+            key: "primary",
+            label: "5時間",
+            usedPercent: 90,
+            remainingPercent: 10,
+            resetsAt: 1_788_876_000,
+            durationMs: 5 * 60 * 60_000,
+            expired: false,
+          },
+        ],
+        planType: null,
+        host: "subpc",
+        source: "ops-dashboard",
+        fetchedAt: Date.now(),
+        stale: false,
+      };
+      renderDialog({
+        includeDispatchTargets: true,
+        defaultDispatchAgent: "codex",
+        dispatchFailoverThresholdPercent: 90,
+      });
+
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe("true"),
+      );
+    });
+
+    it("フェイルオーバーを無効にすると、使用量に関わらず保存済みの既定を保つ", () => {
+      dispatchState.hosts = [makeHost({ codexCapable: true })];
+      claudeUsage = {
+        windows: [{ key: "5h", label: "5時間", usedPercent: 99, remainingPercent: 1, resetsAt: null, status: null, durationMs: 1 }],
+        fetchedAt: Date.now(),
+        stale: false,
+      };
+      renderDialog({ includeDispatchTargets: true, dispatchFailoverEnabled: false });
 
       expect(screen.getByRole("radio", { name: "Claude Code" }).getAttribute("aria-checked")).toBe("true");
     });

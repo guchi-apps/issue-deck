@@ -50,7 +50,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
-import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
 import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
@@ -297,6 +297,9 @@ type CreateIssueDialogProps = {
    */
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
 };
 
 /**
@@ -351,6 +354,9 @@ export function CreateIssueDialog({
   cancelLabel,
   claudeLocalModel,
   codexModel,
+  defaultDispatchAgent = "claude",
+  dispatchFailoverEnabled = true,
+  dispatchFailoverThresholdPercent = 90,
 }: CreateIssueDialogProps) {
   const isWindow = presentation === "window";
   const Chrome = isWindow ? WINDOW_CHROME : DIALOG_CHROME;
@@ -1370,6 +1376,9 @@ export function CreateIssueDialog({
           subIssueRelations={{ parent: null, children: [], childCount: 0 }}
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
+          defaultDispatchAgent={defaultDispatchAgent}
+          dispatchFailoverEnabled={dispatchFailoverEnabled}
+          dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
         />
       )}
       {/* 作り終わった後の行き先（#2862）。実行先の選択と同じく、作成フォームは閉じているので

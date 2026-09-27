@@ -89,6 +89,7 @@ import type {
   ClaudeLocalModelSetting,
   ClaudeModel,
   CodexModelSetting,
+  DefaultDispatchAgent,
   ModelPickEngine,
 } from "@/lib/app-settings";
 import {
@@ -240,6 +241,9 @@ type IssueDeckShellProps = {
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent: DefaultDispatchAgent;
+  dispatchFailoverEnabled: boolean;
+  dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   modelPickEngine: ModelPickEngine;
@@ -258,6 +262,9 @@ export function IssueDeckShell({
   claudeModelAssist: initialClaudeModelAssist,
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
+  defaultDispatchAgent: initialDefaultDispatchAgent,
+  dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+  dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
   appAiModel: initialAppAiModel,
   appAiModelReasoning: initialAppAiModelReasoning,
   modelPickEngine: initialModelPickEngine,
@@ -334,6 +341,13 @@ export function IssueDeckShell({
   const [claudeLocalModel, setClaudeLocalModel] =
     useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModelSetting>(initialCodexModel);
+  const [defaultDispatchAgent, setDefaultDispatchAgent] = useState<DefaultDispatchAgent>(
+    initialDefaultDispatchAgent,
+  );
+  const [dispatchFailoverEnabled, setDispatchFailoverEnabled] = useState(initialDispatchFailoverEnabled);
+  const [dispatchFailoverThresholdPercent, setDispatchFailoverThresholdPercent] = useState(
+    initialDispatchFailoverThresholdPercent,
+  );
   const [appAiModel, setAppAiModel] = useState<AppAiModel>(initialAppAiModel);
   const [appAiModelReasoning, setAppAiModelReasoning] =
     useState<AppAiModel>(initialAppAiModelReasoning);
@@ -350,6 +364,9 @@ export function IssueDeckShell({
     setClaudeModelAssist(next.claudeModelAssist);
     setClaudeLocalModel(next.claudeLocalModel);
     setCodexModel(next.codexModel);
+    setDefaultDispatchAgent(next.defaultDispatchAgent);
+    setDispatchFailoverEnabled(next.dispatchFailoverEnabled);
+    setDispatchFailoverThresholdPercent(next.dispatchFailoverThresholdPercent);
     setAppAiModel(next.appAiModel);
     setAppAiModelReasoning(next.appAiModelReasoning);
     setModelPickEngine(next.modelPickEngine);
@@ -2323,6 +2340,9 @@ export function IssueDeckShell({
                   claudeModelAssist={claudeModelAssist}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
+                  defaultDispatchAgent={defaultDispatchAgent}
+                  dispatchFailoverEnabled={dispatchFailoverEnabled}
+                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                   appAiModel={appAiModel}
                   appAiModelReasoning={appAiModelReasoning}
                   modelPickEngine={modelPickEngine}
@@ -2397,6 +2417,9 @@ export function IssueDeckShell({
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
+                  defaultDispatchAgent={defaultDispatchAgent}
+                  dispatchFailoverEnabled={dispatchFailoverEnabled}
+                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                 />
               )}
 
@@ -2762,6 +2785,9 @@ export function IssueDeckShell({
                   onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
+                  defaultDispatchAgent={defaultDispatchAgent}
+                  dispatchFailoverEnabled={dispatchFailoverEnabled}
+                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                 />
               </div>
               {selectedIssue && (
@@ -2845,6 +2871,9 @@ export function IssueDeckShell({
           onNightlyRunQueued={nightlyRun.refresh}
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
+          defaultDispatchAgent={defaultDispatchAgent}
+          dispatchFailoverEnabled={dispatchFailoverEnabled}
+          dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
         />
         <BulkCreateCodeReviewIssuesDialog
           open={bulkCreateCodeReviewState !== null}
@@ -2882,6 +2911,9 @@ export function IssueDeckShell({
           claudeModelAssist={claudeModelAssist}
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
+          defaultDispatchAgent={defaultDispatchAgent}
+          dispatchFailoverEnabled={dispatchFailoverEnabled}
+          dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
           appAiModel={appAiModel}
           appAiModelReasoning={appAiModelReasoning}
           modelPickEngine={modelPickEngine}

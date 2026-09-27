@@ -5,11 +5,15 @@ import {
   APP_AI_MODEL_REASONING_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
+  DEFAULT_DISPATCH_AGENT_SETTING,
+  DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   MODEL_PICK_ENGINE_DEFAULT,
   parseAppAiModel,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
   parseCodexModelSetting,
+  parseDefaultDispatchAgent,
+  parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
 } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
@@ -25,6 +29,12 @@ async function getClaudeModels() {
     claudeLocalModel:
       parseClaudeLocalModelSetting(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
     codexModel: parseCodexModelSetting(setting?.codexModel) ?? CODEX_MODEL_DEFAULT,
+    defaultDispatchAgent:
+      parseDefaultDispatchAgent(setting?.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING,
+    dispatchFailoverEnabled: setting?.dispatchFailoverEnabled ?? true,
+    dispatchFailoverThresholdPercent:
+      parseDispatchFailoverThresholdPercent(setting?.dispatchFailoverThresholdPercent) ??
+      DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
     appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
     appAiModelReasoning:
       parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
@@ -97,6 +107,30 @@ export async function PATCH(request: NextRequest) {
   if (hasModelPickEngine && modelPickEngine === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasDefaultDispatchAgent =
+    payload !== null && typeof payload === "object" && "defaultDispatchAgent" in payload;
+  const defaultDispatchAgent = hasDefaultDispatchAgent
+    ? parseDefaultDispatchAgent(payload?.defaultDispatchAgent)
+    : undefined;
+  if (hasDefaultDispatchAgent && defaultDispatchAgent === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasDispatchFailoverEnabled =
+    payload !== null && typeof payload === "object" && "dispatchFailoverEnabled" in payload;
+  const dispatchFailoverEnabled = hasDispatchFailoverEnabled ? payload?.dispatchFailoverEnabled : undefined;
+  if (hasDispatchFailoverEnabled && typeof dispatchFailoverEnabled !== "boolean") {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasDispatchFailoverThreshold =
+    payload !== null && typeof payload === "object" && "dispatchFailoverThresholdPercent" in payload;
+  const dispatchFailoverThresholdPercent = hasDispatchFailoverThreshold
+    ? parseDispatchFailoverThresholdPercent(payload?.dispatchFailoverThresholdPercent)
+    : undefined;
+  if (hasDispatchFailoverThreshold && dispatchFailoverThresholdPercent === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const validDispatchFailoverThresholdPercent =
+    dispatchFailoverThresholdPercent === null ? undefined : dispatchFailoverThresholdPercent;
 
   const updated = (await db.appSetting.upsert({
     where: { id: 1 },
@@ -109,6 +143,11 @@ export async function PATCH(request: NextRequest) {
       ...(appAiModel ? { appAiModel } : {}),
       ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
       ...(modelPickEngine ? { modelPickEngine } : {}),
+      ...(defaultDispatchAgent ? { defaultDispatchAgent } : {}),
+      ...(dispatchFailoverEnabled !== undefined ? { dispatchFailoverEnabled } : {}),
+      ...(validDispatchFailoverThresholdPercent !== undefined
+        ? { dispatchFailoverThresholdPercent: validDispatchFailoverThresholdPercent }
+        : {}),
     },
     update: {
       claudeModel,
@@ -118,8 +157,18 @@ export async function PATCH(request: NextRequest) {
       ...(appAiModel ? { appAiModel } : {}),
       ...(appAiModelReasoning ? { appAiModelReasoning } : {}),
       ...(modelPickEngine ? { modelPickEngine } : {}),
+      ...(defaultDispatchAgent ? { defaultDispatchAgent } : {}),
+      ...(dispatchFailoverEnabled !== undefined ? { dispatchFailoverEnabled } : {}),
+      ...(validDispatchFailoverThresholdPercent !== undefined
+        ? { dispatchFailoverThresholdPercent: validDispatchFailoverThresholdPercent }
+        : {}),
     },
-  })) as Awaited<ReturnType<typeof db.appSetting.upsert>> & { claudeLocalModel?: string };
+  })) as Awaited<ReturnType<typeof db.appSetting.upsert>> & {
+    claudeLocalModel?: string;
+    defaultDispatchAgent?: string;
+    dispatchFailoverEnabled?: boolean;
+    dispatchFailoverThresholdPercent?: number;
+  };
 
   return NextResponse.json({
     claudeModel: updated.claudeModel,
@@ -131,5 +180,11 @@ export async function PATCH(request: NextRequest) {
     appAiModelReasoning:
       parseAppAiModel(updated.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
     modelPickEngine: parseModelPickEngine(updated.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
+    defaultDispatchAgent:
+      parseDefaultDispatchAgent(updated.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING,
+    dispatchFailoverEnabled: updated.dispatchFailoverEnabled ?? true,
+    dispatchFailoverThresholdPercent:
+      parseDispatchFailoverThresholdPercent(updated.dispatchFailoverThresholdPercent) ??
+      DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   });
 }
