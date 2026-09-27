@@ -77,6 +77,10 @@ function renderPanel(data: SessionUsageResponse | null, props: Record<string, un
   );
 }
 
+function openIssueGroup(detail: HTMLElement, label = "#2504") {
+  fireEvent.click(within(detail).getByRole("button", { name: new RegExp(label) }));
+}
+
 afterEach(() => cleanup());
 
 describe("SessionUsagePanel", () => {
@@ -305,24 +309,42 @@ describe("SessionUsagePanel", () => {
 
   it("GitHub Actionsの使用量を合計と明細へ表示する", () => {
     renderPanel(response([entry({ source: "github-actions", workflowName: "Claude Code Review", runUrl: "https://github.com/example/run/1", costUsd: 2 })]));
+    openIssueGroup(screen.getByText("Issue・PR別").closest("section") as HTMLElement);
     expect(screen.getAllByText("GitHub Actions").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Actions", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
   });
-  it("同じIssueのセッションは1つの行にまとめ、開いた状態から中の内訳を表示する（#2653）", () => {
+  it("同じIssueのセッションは1つの行にまとめ、初期状態ではすべて閉じて押した行だけを開く（#2653・#3536）", () => {
     renderPanel(
       response([
         entry({ sessionId: "impl", costUsd: 20, responses: 100 }),
-        entry({ sessionId: "plan", agent: "codex", models: ["gpt-5.6"], kind: "plan-review", costUsd: 1, responses: 3, contextTokens: 100, outputTokens: 50 }),
+        entry({
+          sessionId: "plan",
+          agent: "codex",
+          models: ["gpt-5.6"],
+          kind: "plan-review",
+          costUsd: 1,
+          responses: 3,
+          contextTokens: 100,
+          outputTokens: 50,
+        }),
+        entry({ sessionId: "older", issueNumber: 1, costUsd: 2, startedAt: "2026-08-29T01:00:00.000Z", endedAt: "2026-08-29T02:00:00.000Z" }),
       ]),
     );
 
     // 一覧だけを見る（「種別別」の内訳にも同じ語が並ぶため）。
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
 
-    // 同じIssue番号（#2504）の2セッションは1つの行にまとまる。一番新しい行は既定で開いている。
+    // 同じIssue番号（#2504）の2セッションは1つの行にまとまり、最初は全行が閉じている。
     expect(within(detail).getAllByText("#2504")).toHaveLength(1);
+    const toggles = within(detail).getAllByRole("button", { expanded: false });
+    expect(toggles).toHaveLength(2);
+    expect(within(detail).queryByText("Claude", { exact: false })).toBeNull();
+
+    fireEvent.click(within(detail).getByRole("button", { name: /#2504/ }));
+    expect(within(detail).getByRole("button", { name: /#2504/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(toggles.find((toggle) => toggle.getAttribute("aria-expanded") === "false")).toBeTruthy();
     // Issue行のヘッダーにはセッション数を出さない（#3432）
     expect(within(detail).queryByText("2セッション")).toBeNull();
     // 「実装」「計画レビュー」は閉じた行の種別ひと目表示（#3410）と、開いた行の種別別内訳
@@ -352,6 +374,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     const breakdown = within(detail).getByText("種別別").closest("div") as HTMLElement;
     // セッション種別別（`Breakdown`）と同じ粒度でフェーズへ割る。
     expect(within(breakdown).getByText("計画立案")).toBeTruthy();
@@ -442,6 +465,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     expect(within(detail).getByText("$20.10", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$5.00", { exact: false })).toBeTruthy();
     expect(within(detail).queryByText("約", { exact: false })).toBeNull();
@@ -453,6 +477,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     expect(within(detail).getAllByText("約", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getByText("$9.00", { exact: false })).toBeTruthy();
     expect(within(detail).getByText("$1.00", { exact: false })).toBeTruthy();
@@ -465,6 +490,7 @@ describe("SessionUsagePanel", () => {
 
     // 種別別内訳（`IssueKindBreakdown`、#3410）にも同じモデルのチップが出るため件数だけ見る。
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     expect(within(detail).getAllByText("Opus 5").length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("Sonnet 5").length).toBeGreaterThan(0);
   });
@@ -478,6 +504,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     // セッション明細側の計画/実装の内訳（PhaseSplitNote）は、区分のあるセッションだけに出る
     // （「計画」「$1.20」単体は計画/実装/Actionサマリー（#2670）にも出るため、結合済みの
     // 一意な文字列で判定する）。
@@ -622,6 +649,7 @@ describe("SessionUsagePanel", () => {
     renderPanel(response([entry()]));
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
 
     // 棒のtitleに4区分ぶんの内訳が出る（キャッシュを1色へ潰さない）。1セッションだけのIssueは
     // グループの帯とセッションの帯が同じ内訳になるため、複数本出ていてよい。
@@ -736,6 +764,7 @@ describe("SessionUsagePanel", () => {
     renderPanel(response([entry()]), { compact: true });
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     // 表は幅46remの横スクロールになるため使わない（PC・スマホ共通で使わなくなった）。
     expect(within(detail).queryByRole("table")).toBeNull();
     // グループ見出しと、展開済みのカードで料金・内訳を落とさず出す。
@@ -771,6 +800,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const detail = screen.getByText("Issue・PR別").closest("section") as HTMLElement;
+    openIssueGroup(detail);
     expect(within(detail).getAllByText("計画", { exact: false }).length).toBeGreaterThan(0);
     expect(within(detail).getAllByText("実装", { exact: false }).length).toBeGreaterThan(0);
     // "Action"は「GitHub Actions」にも部分一致するため件数だけ見る。金額もセッション明細側の
