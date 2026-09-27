@@ -641,12 +641,9 @@ export function StartImplementationDialog({
    */
   useEffect(() => {
     if (!open || !showAgents || agentTouchedRef.current) return;
-    if (!dispatchFailoverEnabled) {
-      setAgent(defaultDispatchAgent);
-      return;
-    }
     const defaultUsage = defaultDispatchAgent === "claude" ? claudeUsage.data : codexUsage.data;
     const atThreshold =
+      dispatchFailoverEnabled &&
       defaultUsage !== null &&
       !defaultUsage.stale &&
       isDispatchUsageAtOrAboveThreshold(defaultUsage.windows, dispatchFailoverThresholdPercent);
