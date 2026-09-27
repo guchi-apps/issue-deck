@@ -3,7 +3,17 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { CodeReviewRepoRow } from "@/lib/code-review-repo-overview";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  shouldRecommendCodeReview,
+  type CodeReviewRepoRow,
+} from "@/lib/code-review-repo-overview";
 import { formatMonthDay } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
@@ -36,8 +46,9 @@ function writeExpanded(expanded: boolean) {
  * このビューは上部の絞り込みが効かない作り〈#1750〉のため）、「実行」でそのリポジトリを
  * 選んだ状態のレビュー実行ダイアログが開く。
  *
- * **たたんでいる間は行の一覧も凡例も出さず**、見出しと「すべて表示」だけにする（#3125）。
- * 実行の入口は各行の「実行」だけで、見出しに別の「レビューを実行」は置かない。
+ * **PC・iPadでは、たたんでいる間は行の一覧も凡例も出さず**、見出しと「すべて表示」だけにする
+ * （#3125）。実行の入口は各行の「実行」だけで、見出しに別の「レビューを実行」は置かない。
+ * スマホは#3529で主ボタンとリポジトリ選択シートへ切り替える。
  * 絞り込み中の行だけは、解除できるようたたんでも残す。
  *
  * 幅が狭い（スマホ・一覧の列を細くしたPC）ときは帯を2行目へ回す。判定は画面幅ではなく
@@ -79,74 +90,171 @@ export function CodeReviewRepoOverview({
     : rows.filter((row) => row.repositoryFullName === selectedRepositoryFullName);
 
   return (
-    <section
-      aria-label="リポジトリ別のレビュー"
-      className="@container shrink-0 border-b bg-emerald-500/5"
-    >
-      <div className="flex items-center gap-2 px-4 pt-2 pb-1">
-        <h2 className="text-xs font-semibold">リポジトリ別のレビュー</h2>
-        <span className="text-[11px] text-muted-foreground">前回からの経過が長い順</span>
-      </div>
+    <>
+      <MobileCodeReviewLauncher
+        rows={rows}
+        sinceLastCounts={sinceLastCounts}
+        countsLoading={countsLoading}
+        onStartCodeReview={onStartCodeReview}
+      />
+      <section
+        aria-label="リポジトリ別のレビュー"
+        className="@container hidden shrink-0 border-b bg-emerald-500/5 md:block"
+      >
+        <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+          <h2 className="text-xs font-semibold">リポジトリ別のレビュー</h2>
+          <span className="text-[11px] text-muted-foreground">前回からの経過が長い順</span>
+        </div>
 
-      {rows.length === 0 ? (
-        <p className="px-4 pb-2 text-xs text-muted-foreground">
-          レビューを実行できるリポジトリがまだありません。サブPCにチェックアウトがあるリポジトリが
-          ここに並びます。
-        </p>
-      ) : (
-        <>
-          {expanded && (
-            <div className="flex flex-wrap items-center gap-x-3 px-4 pb-1 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <span className="size-2 rounded-full bg-emerald-500" />
-                レビュー
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-2 rounded-full border-2 border-emerald-500" />
-                結果待ち
-              </span>
-              <span className="hidden @md:inline">帯は直近12週（左端が12週前、右端が今日）</span>
-            </div>
-          )}
-          {/* 行の領域だけに高さの上限を置き、はみ出した分はこの中でスクロールさせる。
-              上限が無いと「すべて表示」で枠が画面を占めきり、下のレビュー結果の一覧が
-              押し出されて見えなくなる（#3113）。見出し・「たたむ」は枠の外なので常に届く */}
-          {visibleRows.length > 0 && (
-            <ul className="flex max-h-[45dvh] flex-col overflow-y-auto overscroll-contain pb-1">
-              {visibleRows.map((row) => (
-                <CodeReviewRepoOverviewRow
-                  key={row.repositoryFullName}
-                  row={row}
-                  sinceLastCount={sinceLastCounts.get(row.repositoryFullName)}
-                  countsLoading={countsLoading}
-                  selected={row.repositoryFullName === selectedRepositoryFullName}
-                  onSelect={() =>
-                    onSelectRepository(
-                      row.repositoryFullName === selectedRepositoryFullName
-                        ? null
-                        : row.repositoryFullName,
-                    )
-                  }
-                  onStartCodeReview={
-                    onStartCodeReview && row.canRun
-                      ? () => onStartCodeReview(row.repositoryFullName)
-                      : undefined
-                  }
-                />
-              ))}
+        {rows.length === 0 ? (
+          <p className="px-4 pb-2 text-xs text-muted-foreground">
+            レビューを実行できるリポジトリがまだありません。サブPCにチェックアウトがあるリポジトリが
+            ここに並びます。
+          </p>
+        ) : (
+          <>
+            {expanded && (
+              <div className="flex flex-wrap items-center gap-x-3 px-4 pb-1 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  レビュー
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="size-2 rounded-full border-2 border-emerald-500" />
+                  結果待ち
+                </span>
+                <span className="hidden @md:inline">帯は直近12週（左端が12週前、右端が今日）</span>
+              </div>
+            )}
+            {/* 行の領域だけに高さの上限を置き、はみ出した分はこの中でスクロールさせる。
+                上限が無いと「すべて表示」で枠が画面を占めきり、下のレビュー結果の一覧が
+                押し出されて見えなくなる（#3113）。見出し・「たたむ」は枠の外なので常に届く */}
+            {visibleRows.length > 0 && (
+              <ul className="flex max-h-[45dvh] flex-col overflow-y-auto overscroll-contain pb-1">
+                {visibleRows.map((row) => (
+                  <CodeReviewRepoOverviewRow
+                    key={row.repositoryFullName}
+                    row={row}
+                    sinceLastCount={sinceLastCounts.get(row.repositoryFullName)}
+                    countsLoading={countsLoading}
+                    selected={row.repositoryFullName === selectedRepositoryFullName}
+                    onSelect={() =>
+                      onSelectRepository(
+                        row.repositoryFullName === selectedRepositoryFullName
+                          ? null
+                          : row.repositoryFullName,
+                      )
+                    }
+                    onStartCodeReview={
+                      onStartCodeReview && row.canRun
+                        ? () => onStartCodeReview(row.repositoryFullName)
+                        : undefined
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+            <button
+              type="button"
+              onClick={toggleExpanded}
+              className="px-4 pb-2 text-xs text-emerald-700 hover:underline dark:text-emerald-400"
+            >
+              {expanded ? "たたむ" : `すべて表示（${rows.length}件）`}
+            </button>
+          </>
+        )}
+      </section>
+    </>
+  );
+}
+
+/**
+ * スマホでは各行の小さな「実行」を並べず、主ボタンから下部シートを開く。
+ * ただし実施時期を比べられるよう、従来の横棒タイムラインは選択肢ごとに残す（#3529）。
+ */
+function MobileCodeReviewLauncher({
+  rows,
+  sinceLastCounts,
+  countsLoading,
+  onStartCodeReview,
+}: {
+  rows: CodeReviewRepoRow[];
+  sinceLastCounts: ReadonlyMap<string, number>;
+  countsLoading: boolean;
+  onStartCodeReview?: (repositoryFullName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const runnableRows = rows.filter((row) => row.canRun);
+
+  return (
+    <section aria-label="コードレビューの新規実行" className="shrink-0 border-b bg-emerald-500/5 p-3 md:hidden">
+      <Button className="w-full" onClick={() => setOpen(true)} disabled={!onStartCodeReview}>
+        コードレビューを実行
+      </Button>
+      <p className="mt-1.5 px-1 text-[11px] text-muted-foreground">
+        リポジトリを選んで、読み取り専用のレビューを開始します。
+      </p>
+
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="bottom" className="max-h-[85svh] gap-3 overflow-y-auto p-4 pb-8">
+          <SheetHeader className="p-0 pr-8">
+            <SheetTitle>コードレビューを実行</SheetTitle>
+            <SheetDescription>レビューするリポジトリを選択してください</SheetDescription>
+          </SheetHeader>
+          {runnableRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              コードレビューを実行できるリポジトリがありません。サブPCにチェックアウトがあるリポジトリがここに並びます。
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {runnableRows.map((row) => {
+                const sinceLastCount = sinceLastCounts.get(row.repositoryFullName);
+                const recommended = shouldRecommendCodeReview(row, sinceLastCount);
+                const name = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
+                return (
+                  <li key={row.repositoryFullName}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false);
+                        onStartCodeReview?.(row.repositoryFullName);
+                      }}
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">{name}</span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                          {describeMobileReviewStats(row, sinceLastCount, countsLoading)}
+                        </span>
+                        <ReviewTimelineStrip row={row} className="mt-2 h-2" />
+                      </span>
+                      {recommended && (
+                        <span className="self-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                          {row.lastReviewedAt === null ? "初回を提案" : "レビューを提案"}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
-          <button
-            type="button"
-            onClick={toggleExpanded}
-            className="px-4 pb-2 text-xs text-emerald-700 hover:underline dark:text-emerald-400"
-          >
-            {expanded ? "たたむ" : `すべて表示（${rows.length}件）`}
-          </button>
-        </>
-      )}
+        </SheetContent>
+      </Sheet>
     </section>
   );
+}
+
+function describeMobileReviewStats(
+  row: CodeReviewRepoRow,
+  sinceLastCount: number | undefined,
+  countsLoading: boolean,
+): string {
+  if (row.lastReviewedAt === null) return "未実施";
+  const elapsed = row.daysSinceLast === 0 ? "今日" : `${row.daysSinceLast}日前`;
+  const pullRequests =
+    sinceLastCount !== undefined ? `${sinceLastCount}件` : countsLoading ? "…" : "—";
+  return `前回から${elapsed}・${row.reviews.length}回・以降のPR ${pullRequests}`;
 }
 
 function CodeReviewRepoOverviewRow({

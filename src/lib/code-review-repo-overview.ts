@@ -20,6 +20,9 @@ export const CODE_REVIEW_TIMELINE_DAYS = 84;
 /** これより空いたリポジトリは注意の色で出す */
 export const CODE_REVIEW_STALE_DAYS = 30;
 
+/** この件数以上のマージ済みPRが前回レビュー以降にあれば、再レビューを提案する */
+export const CODE_REVIEW_RECOMMENDED_PR_COUNT = 20;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type CodeReviewRepoReview = {
@@ -46,6 +49,23 @@ export type CodeReviewRepoRow = {
    */
   dots: { issueId: string; position: number; pending: boolean }[];
 };
+
+/**
+ * スマホの開始シートで、優先して確認してほしいリポジトリを示す。
+ *
+ * 未実施・30日以上の経過は既存の`stale`と同じ意味にし、PRの蓄積は20件以上を目安にする。
+ * PR件数を取得中・取得失敗のときは、確定している実施記録だけで判断する。
+ */
+export function shouldRecommendCodeReview(
+  row: Pick<CodeReviewRepoRow, "lastReviewedAt" | "stale">,
+  sinceLastCount: number | undefined,
+): boolean {
+  return (
+    row.lastReviewedAt === null ||
+    row.stale ||
+    (sinceLastCount !== undefined && sinceLastCount >= CODE_REVIEW_RECOMMENDED_PR_COUNT)
+  );
+}
 
 /**
  * リポジトリ別の行を組み立てる。
