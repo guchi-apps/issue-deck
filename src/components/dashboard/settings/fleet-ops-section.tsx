@@ -7,6 +7,7 @@ import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section"
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
 import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
+import { SharedTokensSection } from "@/components/dashboard/settings/shared-tokens-section";
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import {
   AlertDialog,
@@ -26,6 +27,7 @@ import type { SettingsData } from "@/hooks/use-settings-data";
 
 type FleetOpsSectionProps = {
   fineGrainedTokens: SettingsData["fineGrainedTokens"];
+  sharedTokens: SettingsData["sharedTokens"];
   /** 期限切れ・期限が近いPATの件数。**開かなくても気づけるように**見出しへ出す（#2022） */
   expiringFineGrainedTokenCount: number;
 };
@@ -46,6 +48,7 @@ type FleetOpsSectionProps = {
  */
 export function FleetOpsSection({
   fineGrainedTokens,
+  sharedTokens,
   expiringFineGrainedTokenCount,
 }: FleetOpsSectionProps) {
   const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
@@ -112,6 +115,19 @@ export function FleetOpsSection({
         loadHint="開くと直近の実行結果を取得します（1Passwordの枠は消費しません）"
       >
         <SecretsSyncSection open />
+      </LazyFleetPanel>
+
+      <LazyFleetPanel
+        icon={KeyRound}
+        title="アプリ間共有トークン"
+        description="1Passwordから移した認証値と利用状況を管理"
+      >
+        <SharedTokensSection
+          data={sharedTokens.data}
+          isLoading={sharedTokens.isLoading}
+          error={sharedTokens.error}
+          onChanged={sharedTokens.refetch}
+        />
       </LazyFleetPanel>
 
       <LazyFleetPanel

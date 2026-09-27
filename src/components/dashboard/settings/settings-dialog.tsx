@@ -179,6 +179,7 @@ export function SettingsDialog({
               {section === "fleet" && (
                 <FleetOpsSection
                   fineGrainedTokens={data.fineGrainedTokens}
+                  sharedTokens={data.sharedTokens}
                   expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
                 />
               )}

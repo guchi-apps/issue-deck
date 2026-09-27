@@ -27,6 +27,7 @@ const settingsData = {
   codexUsage: { data: null, isLoading: false, error: null, notConfigured: true },
   githubStatus: { data: null, isLoading: false, error: null },
   fineGrainedTokens: { data: [], isLoading: false, error: null, refetch: vi.fn() },
+  sharedTokens: { data: [], isLoading: false, error: null, refetch: vi.fn() },
   hasExpiringFineGrainedToken: false,
   hasGithubIncident: false,
 };

@@ -201,6 +201,7 @@ export function MobileSettingsScreen({
         {section === "fleet" && (
           <FleetOpsSection
             fineGrainedTokens={data.fineGrainedTokens}
+            sharedTokens={data.sharedTokens}
             expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
           />
         )}
