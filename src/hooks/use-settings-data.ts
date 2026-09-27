@@ -6,6 +6,7 @@ import { useGithubApiUsage } from "@/hooks/use-github-api-usage";
 import { useGithubRateLimit } from "@/hooks/use-github-rate-limit";
 import { useGithubStatus } from "@/hooks/use-github-status";
 import { useNow } from "@/hooks/use-now";
+import { useSharedTokens } from "@/hooks/use-shared-tokens";
 import { getFineGrainedTokenStatus } from "@/lib/fine-grained-tokens";
 
 /**
@@ -56,6 +57,12 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
     error: fineGrainedTokensError,
     refetch: refetchFineGrainedTokens,
   } = useFineGrainedTokens(enabled);
+  const {
+    data: sharedTokens,
+    isLoading: sharedTokensLoading,
+    error: sharedTokensError,
+    refetch: refetchSharedTokens,
+  } = useSharedTokens(enabled);
   const now = useNow();
 
   // 期限切れ・期限が近いPATが1つでもあれば「フリート運用」に警告を出す。
@@ -89,6 +96,12 @@ export function useSettingsData(enabled: boolean, statusActive: boolean) {
       isLoading: fineGrainedTokensLoading,
       error: fineGrainedTokensError,
       refetch: refetchFineGrainedTokens,
+    },
+    sharedTokens: {
+      data: sharedTokens,
+      isLoading: sharedTokensLoading,
+      error: sharedTokensError,
+      refetch: refetchSharedTokens,
     },
     hasExpiringFineGrainedToken,
     expiringFineGrainedTokenCount,

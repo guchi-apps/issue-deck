@@ -691,6 +691,34 @@ model FineGrainedToken {
   updatedAt DateTime @updatedAt
 }
 
+// アプリ間で共有する認証値の唯一の正。値そのものは暗号化して保持し、一覧・利用記録には含めない。
+// 1Passwordから移すときはsourceReferenceへ元の参照だけを残す（実値は保存しない）。
+model SharedToken {
+  id              String             @id @default(cuid())
+  name            String             @unique
+  encryptedValue  String             @db.Text
+  description     String?            @db.Text
+  sourceReference String?            @db.VarChar(500)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  usages          SharedTokenUsage[]
+}
+
+// 外部アプリ・AIエージェントが共有トークンを取得または登録した記録。
+// 利用元と時刻だけを残し、トークン値・認証用Bearer値は絶対に保持しない。
+model SharedTokenUsage {
+  id            String      @id @default(cuid())
+  sharedTokenId String
+  consumer      String
+  action        String
+  usedAt        DateTime    @default(now())
+
+  sharedToken SharedToken @relation(fields: [sharedTokenId], references: [id], onDelete: Cascade)
+
+  @@index([sharedTokenId, usedAt])
+  @@index([consumer, usedAt])
+}
+
 // --- サブPCへのディスパッチ（#1179） ---
 
 // ジョブの状態。queued → claimed → running → succeeded/failed が正常系で、
