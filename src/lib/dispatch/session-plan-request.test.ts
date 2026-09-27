@@ -5,6 +5,7 @@ import {
   findPlanRequestForIssue,
   isVisibleSessionPlanRequest,
   parseSessionPlanDecision,
+  parseSessionPlanHandoffModel,
   buildPlanRevisionReason,
   parseSessionPlanRevision,
   parseSessionPlanWaitSeconds,
@@ -137,6 +138,15 @@ describe("parseSessionPlanDecision", () => {
     expect(parseSessionPlanDecision("revise")).toBe("revise");
     expect(parseSessionPlanDecision("defer")).toBe("defer");
     expect(parseSessionPlanDecision("reject")).toBeNull();
+  });
+});
+
+describe("parseSessionPlanHandoffModel", () => {
+  it("現在のCLIに対応するローカル実行用モデルだけを通す", () => {
+    expect(parseSessionPlanHandoffModel("sonnet", "claude")).toBe("sonnet");
+    expect(parseSessionPlanHandoffModel("gpt-6-luna", "codex")).toBe("gpt-6-luna");
+    expect(parseSessionPlanHandoffModel("gpt-6-luna", "claude")).toBeNull();
+    expect(parseSessionPlanHandoffModel("haiku", "claude")).toBeNull();
   });
 });
 
