@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, CircleAlert, ExternalLink, Loader2, RefreshCw, Settings2 } from "lucide-react";
+import { Check, CircleAlert, ExternalLink, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -343,9 +343,6 @@ function CheckTargetPicker({
   );
 }
 
-/** 折りたたみ時に表示する行数。`extractReleaseHighlights`の既定`max`と揃える */
-const PREVIEW_LINE_COUNT = 3;
-
 function ReleaseHistoryCard({
   entry,
   status,
@@ -372,10 +369,7 @@ function ReleaseHistoryCard({
   onOpenPullRequest?: (pullRequestId: string) => void;
 }) {
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
-  const [expanded, setExpanded] = useState(false);
-  const { lines: allLines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
-  const lines = expanded ? allLines : allLines.slice(0, PREVIEW_LINE_COUNT);
-  const hiddenCount = allLines.length - lines.length;
+  const { lines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
   const target = { repoFullName: entry.repoFullName, tagName: entry.tagName };
 
   return (
@@ -461,17 +455,6 @@ function ReleaseHistoryCard({
             );
           })}
         </ul>
-      )}
-
-      {(hiddenCount > 0 || (expanded && allLines.length > PREVIEW_LINE_COUNT)) && (
-        <button
-          type="button"
-          onClick={() => setExpanded((prev) => !prev)}
-          className="mt-1 inline-flex items-center gap-0.5 pl-3 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
-        >
-          {expanded ? "折りたたむ" : `ほか${hiddenCount}件を見る`}
-          <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
-        </button>
       )}
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">

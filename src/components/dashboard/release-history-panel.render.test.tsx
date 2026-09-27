@@ -55,6 +55,19 @@ afterEach(() => {
   cleanup();
 });
 
+describe("ReleaseHistoryPanel の箇条書き表示（#3526）", () => {
+  it("箇条書きは折りたたまず全行を表示し、開閉ボタンを出さない", () => {
+    const body = `## What's Changed\n${[1, 2, 3, 4, 5, 6]
+      .map((n) => `* 変更${n}を足す by @m-guchi in guchi-apps/issue-deck#${2900 + n}`)
+      .join("\n")}\n`;
+    renderPanel({ entries: [entry({ body })] });
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+      expect(screen.getByText(`変更${n}を足す`)).toBeTruthy();
+    }
+    expect(screen.queryByRole("button", { name: /ほか.*件を見る|折りたたむ/ })).toBeNull();
+  });
+});
+
 describe("ReleaseHistoryPanel の動作確認フラグ（#2930）", () => {
   it("対象リポジトリの新しいリリースには未確認のバッジと件数が出る", () => {
     renderPanel();
