@@ -29,6 +29,7 @@ import type {
   ClaudeLocalModelSetting,
   ClaudeModel,
   CodexModelSetting,
+  DefaultDispatchAgent,
   ModelPickEngine,
 } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
@@ -43,6 +44,9 @@ type SettingsDialogProps = {
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
   appAiModel: AppAiModel;
   appAiModelReasoning: AppAiModel;
   modelPickEngine: ModelPickEngine;
@@ -70,6 +74,9 @@ export function SettingsDialog({
   claudeModelAssist,
   claudeLocalModel,
   codexModel,
+  defaultDispatchAgent = "claude",
+  dispatchFailoverEnabled = true,
+  dispatchFailoverThresholdPercent = 90,
   appAiModel,
   appAiModelReasoning,
   modelPickEngine,
@@ -159,6 +166,9 @@ export function SettingsDialog({
                   claudeModelAssist={claudeModelAssist}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
+                  defaultDispatchAgent={defaultDispatchAgent}
+                  dispatchFailoverEnabled={dispatchFailoverEnabled}
+                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                   appAiModel={appAiModel}
                   appAiModelReasoning={appAiModelReasoning}
                   modelPickEngine={modelPickEngine}

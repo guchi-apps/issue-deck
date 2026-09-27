@@ -15,6 +15,9 @@ import {
   parseCodexModel,
   parseCodexModelSetting,
   parseDispatchConcurrency,
+  parseDefaultDispatchAgent,
+  parseDispatchFailoverThresholdPercent,
+  isDispatchUsageAtOrAboveThreshold,
   resolveCodexInitialModel,
 } from "@/lib/app-settings";
 
@@ -35,6 +38,28 @@ describe("parseAutoRetryLimit", () => {
     expect(parseAutoRetryLimit("3")).toBeNull();
     expect(parseAutoRetryLimit(null)).toBeNull();
     expect(parseAutoRetryLimit(undefined)).toBeNull();
+  });
+});
+
+describe("既定エージェントとフェイルオーバー設定（#3531）", () => {
+  it("Claude CodeとCodex CLIだけを既定エージェントとして受け付ける", () => {
+    expect(parseDefaultDispatchAgent("claude")).toBe("claude");
+    expect(parseDefaultDispatchAgent("codex")).toBe("codex");
+    expect(parseDefaultDispatchAgent("other")).toBeNull();
+  });
+
+  it("使用率しきい値は1〜100の整数だけを受け付ける", () => {
+    expect(parseDispatchFailoverThresholdPercent(1)).toBe(1);
+    expect(parseDispatchFailoverThresholdPercent(90)).toBe(90);
+    expect(parseDispatchFailoverThresholdPercent(100)).toBe(100);
+    expect(parseDispatchFailoverThresholdPercent(0)).toBeNull();
+    expect(parseDispatchFailoverThresholdPercent(101)).toBeNull();
+  });
+
+  it("有効な枠のいずれかがしきい値以上なら切替対象にする", () => {
+    expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 90 }], 90)).toBe(true);
+    expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 89 }], 90)).toBe(false);
+    expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 100, expired: true }], 90)).toBe(false);
   });
 });
 

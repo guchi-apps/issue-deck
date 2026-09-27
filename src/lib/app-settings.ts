@@ -1,6 +1,44 @@
 export const AUTO_RETRY_LIMIT_MIN = 0;
 export const AUTO_RETRY_LIMIT_MAX = 10;
 
+/** サブPCの「実装を開始」で最初に選ぶエージェント（#3531）。 */
+export const DISPATCH_AGENT_OPTIONS = [
+  { value: "claude", label: "Claude Code" },
+  { value: "codex", label: "Codex CLI" },
+] as const;
+export const DEFAULT_DISPATCH_AGENT_SETTING = "claude" as const;
+export type DefaultDispatchAgent = (typeof DISPATCH_AGENT_OPTIONS)[number]["value"];
+
+export function parseDefaultDispatchAgent(value: unknown): DefaultDispatchAgent | null {
+  if (typeof value !== "string") return null;
+  return (DISPATCH_AGENT_OPTIONS as readonly { value: string }[]).some((option) => option.value === value)
+    ? (value as DefaultDispatchAgent)
+    : null;
+}
+
+// 100%では制限到達まで切り替わらない。0%は常に切り替わり既定の意味を失うため選ばせない。
+export const DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN = 1;
+export const DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX = 100;
+export const DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT = 90;
+
+export function parseDispatchFailoverThresholdPercent(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN &&
+    value <= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX
+    ? value
+    : null;
+}
+
+/** 取得できた有効な使用量枠のどれかがしきい値に達したか。期限切れの観測値は使わない。 */
+export function isDispatchUsageAtOrAboveThreshold(
+  windows: readonly { usedPercent: number; expired?: boolean }[],
+  thresholdPercent: number,
+): boolean {
+  return windows.some(
+    (window) => window.expired !== true && Number.isFinite(window.usedPercent) && window.usedPercent >= thresholdPercent,
+  );
+}
+
 // APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。
 // 不正な値は例外を投げず null にフォールバックし、呼び出し側でバリデーションエラーとして扱う。
 export function parseAutoRetryLimit(value: unknown): number | null {

@@ -141,7 +141,7 @@ import {
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
 import { checkUserTargetProps } from "@/lib/check-user-focus";
-import type { ClaudeLocalModelSetting, CodexModelSetting } from "@/lib/app-settings";
+import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
 import { findManualStepForQuestion } from "@/lib/manual-step-question";
@@ -236,6 +236,9 @@ type MobileIssueDetailProps = {
    */
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
 };
 
 export function MobileIssueDetail({
@@ -265,6 +268,9 @@ export function MobileIssueDetail({
   onStartManualStepGuide,
   claudeLocalModel,
   codexModel,
+  defaultDispatchAgent = "claude",
+  dispatchFailoverEnabled = true,
+  dispatchFailoverThresholdPercent = 90,
 }: MobileIssueDetailProps) {
   // 保留の期限判定に使う現在時刻（#2398）。PCの詳細と同じく、早期returnより前で呼ぶ
   const snoozeNow = useNow();
@@ -1036,6 +1042,9 @@ export function MobileIssueDetail({
             subIssueRelations={subIssueRelations}
             claudeLocalModel={claudeLocalModel}
             codexModel={codexModel}
+            defaultDispatchAgent={defaultDispatchAgent}
+            dispatchFailoverEnabled={dispatchFailoverEnabled}
+            dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
             renderTrigger={(isSubmitting) => (
               <Button className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Play />}

@@ -234,6 +234,9 @@ describe("SettingsDialog", () => {
       "claude-haiku-4-5",
       "claude-sonnet-5",
       "app-ai",
+      "claude",
+      true,
+      90,
     );
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
@@ -241,6 +244,9 @@ describe("SettingsDialog", () => {
       claudeModelAssist: "haiku",
       claudeLocalModel: "sonnet",
       codexModel: "auto",
+      defaultDispatchAgent: "claude",
+      dispatchFailoverEnabled: true,
+      dispatchFailoverThresholdPercent: 90,
       appAiModel: "claude-haiku-4-5",
       appAiModelReasoning: "claude-sonnet-5",
       modelPickEngine: "app-ai",

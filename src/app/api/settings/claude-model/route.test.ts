@@ -57,6 +57,9 @@ describe("GET", () => {
       appAiModel: "claude-haiku-4-5",
       appAiModelReasoning: "claude-sonnet-5",
       modelPickEngine: "app-ai",
+      defaultDispatchAgent: "claude",
+      dispatchFailoverEnabled: true,
+      dispatchFailoverThresholdPercent: 90,
     });
   });
 
@@ -77,6 +80,9 @@ describe("GET", () => {
       appAiModel: "claude-sonnet-5",
       appAiModelReasoning: "claude-opus-5-5",
       modelPickEngine: "app-ai",
+      defaultDispatchAgent: "claude",
+      dispatchFailoverEnabled: true,
+      dispatchFailoverThresholdPercent: 90,
     });
   });
 });
@@ -117,6 +123,28 @@ describe("PATCH", () => {
     expect((await res.json()).codexModel).toBe("pick");
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: expect.objectContaining({ codexModel: "pick" }) }),
+    );
+  });
+
+  it("既定エージェントとフェイルオーバー設定を保存できる", async () => {
+    const res = await PATCH(
+      patchRequest({
+        claudeModel: "sonnet",
+        defaultDispatchAgent: "codex",
+        dispatchFailoverEnabled: false,
+        dispatchFailoverThresholdPercent: 75,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          defaultDispatchAgent: "codex",
+          dispatchFailoverEnabled: false,
+          dispatchFailoverThresholdPercent: 75,
+        }),
+      }),
     );
   });
 

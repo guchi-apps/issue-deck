@@ -7,6 +7,7 @@ import type {
   ClaudeLocalModelSetting,
   ClaudeModel,
   CodexModelSetting,
+  DefaultDispatchAgent,
   ModelPickEngine,
 } from "@/lib/app-settings";
 
@@ -43,6 +44,9 @@ export function useAppSettingsMutations() {
     appAiModel: AppAiModel,
     appAiModelReasoning: AppAiModel,
     modelPickEngine: ModelPickEngine,
+    defaultDispatchAgent: DefaultDispatchAgent,
+    dispatchFailoverEnabled: boolean,
+    dispatchFailoverThresholdPercent: number,
   ): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -58,6 +62,9 @@ export function useAppSettingsMutations() {
           appAiModel,
           appAiModelReasoning,
           modelPickEngine,
+          defaultDispatchAgent,
+          dispatchFailoverEnabled,
+          dispatchFailoverThresholdPercent,
         }),
       });
       if (!res.ok) {

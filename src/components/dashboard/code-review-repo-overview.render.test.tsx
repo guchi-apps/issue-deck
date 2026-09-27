@@ -87,6 +87,34 @@ describe("CodeReviewRepoOverview", () => {
     expect(onStartCodeReview).toHaveBeenLastCalledWith("o/new");
   });
 
+  it("スマホの主ボタンから選択シートを開き、横棒タイムラインと提案を見て対象を選べる", () => {
+    const rows = [
+      row({ repositoryFullName: "o/new" }),
+      row({
+        repositoryFullName: "o/deck",
+        reviews: [{ issueId: "1", createdAt: "2026-09-17T00:00:00.000Z", pending: false }],
+        lastReviewedAt: "2026-09-17T00:00:00.000Z",
+        daysSinceLast: 2,
+        stale: false,
+        dots: [{ issueId: "1", position: 0.8, pending: false }],
+      }),
+    ];
+    const { onStartCodeReview } = renderOverview({
+      rows,
+      sinceLastCounts: new Map([["o/deck", 20]]),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "コードレビューを実行" }));
+
+    expect(screen.getByText("レビューするリポジトリを選択してください")).toBeTruthy();
+    expect(screen.getByText("初回を提案")).toBeTruthy();
+    expect(screen.getByText("レビューを提案")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "直近12週のレビュー 1回" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /deck/ }));
+    expect(onStartCodeReview).toHaveBeenLastCalledWith("o/deck");
+  });
+
   it("たたんでいる間は行も凡例も出さず、「すべて表示」で開き「たたむ」で戻る。件数に関わらず同じ動き", () => {
     renderOverview();
     expect(screen.queryByRole("button", { name: "new" })).toBeNull();
