@@ -4,6 +4,7 @@ import {
   buildCodeReviewRepoRows,
   reviewIntervalRanges,
   sinceLastReviewRange,
+  shouldRecommendCodeReview,
 } from "@/lib/code-review-repo-overview";
 import type { Issue } from "@/types/issue";
 
@@ -126,5 +127,20 @@ describe("数える期間", () => {
   it("未実施なら前回からの期間は無い", () => {
     const [empty] = build([], ["o/new"]);
     expect(sinceLastReviewRange(empty)).toBeNull();
+  });
+});
+
+describe("shouldRecommendCodeReview", () => {
+  const freshRow = { lastReviewedAt: "2026-09-18T00:00:00.000Z", stale: false };
+
+  it("未実施・30日以上の経過・前回以降20件以上のPRをレビュー候補にする", () => {
+    expect(shouldRecommendCodeReview({ lastReviewedAt: null, stale: true }, undefined)).toBe(true);
+    expect(shouldRecommendCodeReview({ ...freshRow, stale: true }, 0)).toBe(true);
+    expect(shouldRecommendCodeReview(freshRow, 20)).toBe(true);
+  });
+
+  it("新しいレビューでPRが20件未満、またはPR件数未取得なら提案しない", () => {
+    expect(shouldRecommendCodeReview(freshRow, 19)).toBe(false);
+    expect(shouldRecommendCodeReview(freshRow, undefined)).toBe(false);
   });
 });
