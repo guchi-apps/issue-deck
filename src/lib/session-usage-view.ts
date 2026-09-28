@@ -96,10 +96,11 @@ export type UsageByAgent = Record<SessionUsageEntry["agent"], UsageTotals>;
 export type UsageBySource = Record<"local" | "github-actions", UsageTotals>;
 
 /**
- * エージェント1つぶんの、モデルの重さ（tier）別の金額（#3396）。`agent-model-color.ts`の
- * `ModelWeightTier`（0=最重〜3=軽）と同じ並び。**GitHub Actionsのentryはここに積まない**——
- * 日別グラフはActionsを従来どおり単色（`bySource`由来）で表すため。段が決まらない
- * （単価表に無いモデル・`auto`のみ）ぶんは`unresolvedCostUsd`へ。
+ * エージェント1つぶんの、モデルの重さ（tier）別の金額（#3396・#3564）。`agent-model-color.ts`の
+ * `ModelWeightTier`（0=最重〜3=軽）と同じ並び。**GitHub Actionsのentryもここに積む**——
+ * GitHub ActionsはClaude Codeでの実行のため、実行経路で単色に分けず`agent`（常にclaude）の
+ * tierへそのまま合流させる。段が決まらない（単価表に無いモデル・`auto`のみ）ぶんは
+ * `unresolvedCostUsd`へ。
  */
 export type UsageModelTierTotals = {
   costUsd: readonly [number, number, number, number];
@@ -361,10 +362,11 @@ function emptyModelTiers(): UsageModelTiers {
 }
 
 /**
- * 「エージェント×モデルの重さ」内訳へ、1entryぶんの金額を積む（#3396・#3552）。**GitHub
- * Actionsのentryは積まない**（金額の棒はActionsを単色のまま表す）。1entryが複数モデルを
- * 使っていれば`pickPrimaryModel`と同じ「最も重い1つ」を代表とし、金額は丸ごとそこへ計上する
- * （按分の手立てが無いため。実行状況の●と同じ近似）。
+ * 「エージェント×モデルの重さ」内訳へ、1entryぶんの金額を積む（#3396・#3552・#3564）。**GitHub
+ * Actionsのentryも積む**（#3564で除外をやめた。GitHub ActionsはClaude Codeでの実行のため、
+ * 実行経路として単色に分けず、実際に使われたモデルの重さでClaude・Codexへそのまま合流させる）。
+ * 1entryが複数モデルを使っていれば`pickPrimaryModel`と同じ「最も重い1つ」を代表とし、金額は
+ * 丸ごとそこへ計上する（按分の手立てが無いため。実行状況の●と同じ近似）。
  *
  * **「セッション種別別」の実装フェーズ行（`kindRowsForEntry`が`scaleEntryToPhase`で割った行）も
  * この1段になる**（#3552・計画レビュー指摘）。フェーズ別のモデル情報は無く、割ったあとの
@@ -372,7 +374,6 @@ function emptyModelTiers(): UsageModelTiers {
  * 仕上げは全フェーズが同じ色（セッション全体でいちばん重いモデル）になる。
  */
 function addEntryModelTier(tiers: UsageModelTiers, entry: SessionUsageEntry): void {
-  if (entry.source === "github-actions") return;
   const tier = modelWeightTier(pickPrimaryModel(entry.models));
   const bucket = tiers[entry.agent];
   if (tier === null) {

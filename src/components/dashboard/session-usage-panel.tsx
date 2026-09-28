@@ -35,7 +35,6 @@ import {
   type CurrentSessionUsage,
   type SessionUsageEntry,
   type UsageByAgent,
-  type UsageBySource,
   type UsageGroup,
   type UsageIssue,
   type UsageModelTiers,
@@ -181,13 +180,13 @@ const OUTPUT_COLOR = "#4776e6";
  * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。以前の
  * rose-800（#9f1239）と明るい緑（#33cc4d）は明度が離れすぎていて、●の濃淡の段を作れなかった。
  * **金額の棒（日別・種別別・Issue・PR別）は`agentModelTierParts`が`AGENT_MODEL_TIER_COLORS`の
- * 濃淡へ差し替える**（#3396・#3552）ため、このColorsが直接使われるのは段が決まらないぶんの色と、
- * 「実行中のセッション」欄（1セッション＝1本で濃淡にする材料が無い）だけになった。
+ * 濃淡へ差し替える**（#3396・#3552）ため、`AGENT_BASE_COLORS`が直接使われるのは段が決まらない
+ * ぶんの色と、「実行中のセッション」欄（1セッション＝1本で濃淡にする材料が無い）だけになった。
+ * **GitHub Actions専用の色は持たない**（#3564でActionsを実行経路として塗り分けるのをやめた）。
  */
-const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 
 /**
- * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_COLORS`）とは別軸**なので、
+ * 計画（Plan mode）／実装の内訳の色（#2646）。**誰が使ったか（`AGENT_BASE_COLORS`）とは別軸**なので、
  * 既存のオレンジ／青を再利用せず、計画だけ目立たせるティール1色＋残りは中立色にする。
  */
 const PHASE_COLORS = { plan: "#0d9488", implementation: "#a8a29e" } as const;
@@ -312,14 +311,6 @@ function TokenLegend() {
           </span>
         ))}
         <span>濃いほど重いモデル</span>
-        <span>
-          <i
-            aria-hidden
-            className="mr-1 inline-block size-2 rounded-[2px]"
-            style={{ backgroundColor: AGENT_COLORS.actions }}
-          />
-          <span className="text-foreground">GitHub Actions</span>
-        </span>
         <span>長さは同じ表の最大との比較</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -367,35 +358,20 @@ function groupTokenSegments(totals: UsageTotals): TokenSegment[] {
   ];
 }
 
-/**
- * 金額の棒の内側の割合（#2633）。**GitHub ActionsはClaude Codeなので`byAgent.claude`にも
- * 入っている**（`session-usage-view.ts`が`agent`と`source`の両方へ同じ行を足す）。
- * 引かずに使うと、Claudeの帯がActionsのぶんまで伸びたうえで、残りとして描いていたCodexが
- * Actionsのぶんだけ短くなる。
- */
-function costSplitByAgent(row: CostRow) {
-  const actions = row.bySource["github-actions"].costUsd;
-  return {
-    claude: Math.max(0, row.byAgent.claude.costUsd - actions),
-    codex: row.byAgent.codex.costUsd,
-    actions,
-  };
-}
-
-type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource; modelTiers: UsageModelTiers };
+type CostRow = { costUsd: number; byAgent: UsageByAgent; modelTiers: UsageModelTiers };
 
 /**
- * 金額の棒1本ぶんの積み上げパーツ（#3396・#3552）。Claude／Codexは`byAgent`の合計ではなく
+ * 金額の棒1本ぶんの積み上げパーツ（#3396・#3552・#3564）。Claude／Codexは`byAgent`の合計ではなく
  * `modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
  * ●と同じ`AGENT_MODEL_TIER_COLORS`の濃淡を使う。段が決まらないぶんは`AGENT_BASE_COLORS`
- * （濃淡なしの代表色）。GitHub Actionsは従来どおり`costSplitByAgent`の単色のまま
- * （モデル情報が薄いため据え置き）。**日別の縦棒（`DailyChart`）・種別別／Issue・PR別の
+ * （濃淡なしの代表色）。**GitHub Actionsは実行経路として塗り分けず、`agent`（常にclaude）の
+ * tierへ合流済み**（#3564。`session-usage-view.ts`の`addEntryModelTier`が積む時点で合流させて
+ * いるため、ここでは何もしなくてよい）。**日別の縦棒（`DailyChart`）・種別別／Issue・PR別の
  * 横棒（`CostBar`）の両方で使う共通パーツ**（#3552より前は日別専用だった）。
- * **濃い（重い）ものを先、Actionsを最後に積む**（日別は呼び出し側が`flex-col-reverse`で
- * 描くため、配列の先頭が最下段＝濃い色になる）。
+ * **濃い（重い）ものを先に積む**（日別は呼び出し側が`flex-col-reverse`で描くため、配列の
+ * 先頭が最下段＝濃い色になる）。
  */
 function agentModelTierParts(row: CostRow) {
-  const split = costSplitByAgent(row);
   const tierParts = (["claude", "codex"] as const).flatMap((agent) => {
     const bucket = row.modelTiers[agent];
     return [
@@ -408,16 +384,15 @@ function agentModelTierParts(row: CostRow) {
     ];
   });
   // 金額0の区分は積んでも見えないので出さない（DOM要素数を実際の内訳と揃える）。
-  return [...tierParts, { key: "actions", value: split.actions, color: AGENT_COLORS.actions }].filter(
-    (part) => part.value > 0,
-  );
+  return tierParts.filter((part) => part.value > 0);
 }
 
 /**
- * 内訳の太い棒。長さが金額、内側はモデルの重さ別の濃淡＋GitHub Actions（#3552。日別の縦棒と
+ * 内訳の太い棒。長さが金額、内側はモデルの重さ別の濃淡（#3552・#3564。日別の縦棒と
  * 同じ`agentModelTierParts`）。**割合そのものは棒に数値を書けないので、ツールチップへ
- * Claude／Codex／GitHub Actions単位の金額で出す**（濃淡の段までは書かない。詳しくは
- * `TokenLegend`・行の凡例を見る）。
+ * Claude／Codex単位の金額で出す**（濃淡の段までは書かない。詳しくは`TokenLegend`・行の
+ * 凡例を見る）。**GitHub Actionsはこの2つのどちらかへ合流済みで単体では出さない**（#3564。
+ * 実行経路ごとの合計は画面上部のサマリーで見る）。
  *
  * **「セッション種別別」の実装フェーズ行は、フェーズ単位のモデル情報を持たないため、
  * セッション全体でいちばん重いモデルの色にまとまる**（`addEntryModelTier`のコメント参照）。
@@ -432,13 +407,11 @@ function CostBar({
   /** いちばん新しい日（集計途中）だけ枠線を足す */
   highlighted?: boolean;
 }) {
-  const split = costSplitByAgent(row);
   const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
   const parts = agentModelTierParts(row);
   const title = [
-    { label: "Claude", value: split.claude },
-    { label: "Codex", value: split.codex },
-    { label: "GitHub Actions", value: split.actions },
+    { label: "Claude", value: row.byAgent.claude.costUsd },
+    { label: "Codex", value: row.byAgent.codex.costUsd },
   ]
     .map((part) => `${part.label} ${formatUsageUsd(part.value)}`)
     .join(" / ");
@@ -537,8 +510,9 @@ const DAILY_VALUE_LABELS_MAX_DAYS = 7;
  *
  * **トークン量は使わない**（金額と比例しないための二段の帯は#2633で入れたが、日別では不要になった。
  * Issue・PR別には残っている）。**棒の内側は、Claude／Codexをモデルの重さ（tier）別の濃淡で
- * 分け、GitHub Actionsは単色のまま積む**（#3396。`dailyChartParts`）。最新日は集計の途中で
- * 必ず低く出るので、枠線を足して「減った」と読ませない。ライブラリを足さずCSSだけで描く。
+ * 分ける**（#3396・#3564。`agentModelTierParts`。GitHub Actionsは実行経路として単色にせず
+ * Claudeの濃淡へ合流済み）。最新日は集計の途中で必ず低く出るので、枠線を足して「減った」と
+ * 読ませない。ライブラリを足さずCSSだけで描く。
  */
 function DailyChart({
   days,
@@ -585,14 +559,13 @@ function DailyChart({
         <div className={cn("absolute inset-0 flex items-end", barsGap)}>
           {days.map((day, index) => {
             const parts = agentModelTierParts(day);
-            const split = costSplitByAgent(day);
             const isZero = day.costUsd <= 0;
             const showsValue = !isZero && (isFewDays || index === peakIndex);
             const modelNote = day.modelLabels.length > 0 ? `　・　モデル: ${day.modelLabels.join(", ")}` : "";
             const dayTitle =
               `${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　・　` +
-              `Claude ${formatUsageUsd(split.claude)} / Codex ${formatUsageUsd(split.codex)} / ` +
-              `GitHub Actions ${formatUsageUsd(split.actions)}${modelNote}`;
+              `Claude ${formatUsageUsd(day.byAgent.claude.costUsd)} / Codex ${formatUsageUsd(day.byAgent.codex.costUsd)}` +
+              `${modelNote}`;
             return (
               <div
                 key={day.date}
@@ -673,7 +646,8 @@ function DailyChart({
 /**
  * 日別カードの凡例（#3038）。**Claude／Codexは濃淡の4段（`AGENT_MODEL_TIER_COLORS`）で
  * 「濃いほど重いモデル」を示す**（#3396。実行状況の●の凡例`ModelDotLegend`と同じ体裁）。
- * GitHub Actionsは単色のまま。トークンの帯は日別では出さない（#3038）。
+ * **GitHub Actionsは実行経路として単色にせず、Claudeの濃淡へ合流済み**（#3564）。
+ * トークンの帯は日別では出さない（#3038）。
  */
 function DailyLegend() {
   const agents = [
@@ -700,14 +674,6 @@ function DailyLegend() {
       <span>
         <i
           aria-hidden
-          className="mr-1 inline-block size-2 rounded-[2px]"
-          style={{ backgroundColor: AGENT_COLORS.actions }}
-        />
-        <span className="text-foreground">GitHub Actions</span>
-      </span>
-      <span>
-        <i
-          aria-hidden
           className="mr-1.5 inline-block w-4 border-t-[1.5px] border-dashed border-sky-600 align-middle dark:border-sky-400"
         />
         <span className="text-foreground">期間の平均</span>
@@ -719,8 +685,8 @@ function DailyLegend() {
 /**
  * 種別別の内訳。**金額の棒だけで描く**（#3064。以前は細い帯〈トークン〉との二段だった。#2633）。
  * **リポジトリ別は円グラフ（`RepositoryPieChart`）へ替えた**（#3060）。
- * **太い棒の内側は日別の縦棒と同じパーツ**（`agentModelTierParts`。Claude／Codexはモデルの
- * 重さ別の濃淡、GitHub Actionsは単色）で塗る（#3552）。
+ * **太い棒の内側は日別の縦棒と同じパーツ**（`agentModelTierParts`。Claude／Codexをモデルの
+ * 重さ別の濃淡で塗る。GitHub Actionsも合流済み）（#3552・#3564）。
  */
 function Breakdown({
   title,
@@ -1338,7 +1304,7 @@ function CurrentSessionHeading({ session, elapsed }: { session: CurrentSessionUs
         <span
           aria-hidden
           className="size-[7px] shrink-0 self-center rounded-[2px]"
-          style={{ backgroundColor: AGENT_COLORS[session.agent] }}
+          style={{ backgroundColor: AGENT_BASE_COLORS[session.agent] }}
           title={session.agent === "claude" ? "Claude" : "Codex"}
         />
         <span className="shrink-0 font-semibold">#{session.issueNumber}</span>
@@ -1402,7 +1368,7 @@ function CurrentSessionBar({
           className="h-full rounded-full"
           style={{
             width: `${maxCost > 0 ? (session.costUsd / maxCost) * 100 : 0}%`,
-            backgroundColor: AGENT_COLORS[session.agent],
+            backgroundColor: AGENT_BASE_COLORS[session.agent],
           }}
         />
       </div>
