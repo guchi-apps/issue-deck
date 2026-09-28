@@ -37,7 +37,8 @@ import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
-import { isPlanReviewPending } from "@/lib/github/plan-review";
+import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
+import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { SessionStallPanel } from "@/components/dashboard/session-stall-panel";
@@ -318,6 +319,8 @@ export function IssueDetail({
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
+  // 未反映の計画レビュー（#3554）。計画承認パネルと、無人実行の計画のカードへ指摘ごとに出す
+  const pendingPlanReview = useMemo(() => resolvePendingPlanReview(comments), [comments]);
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
   // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
   const awaitingPlanReview =
@@ -1089,7 +1092,7 @@ export function IssueDetail({
                 session={issueSession}
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
-                planReviewPending={isPlanReviewPending(comments)}
+                planReview={pendingPlanReview}
                 artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&
@@ -1098,6 +1101,27 @@ export function IssueDetail({
               />
             </div>
           )}
+
+          {/* 無人実行の計画への計画レビュー（#3554）。計画承認パネルが出ない経路なので、同じ
+              位置（対応PRより上）へカードだけを出し、送るのは承認欄の「修正」と同じ`@claude`
+              コメント（`handleReject`）。**ローカルの計画では出さない**——計画承認パネルの中にも
+              同じカードがあり、送信ボタンが2つ並ぶ */}
+          {executionTarget.expectsActionsRun &&
+            !planDecisionPending &&
+            checkUserReason(issue.labels) === "plan" &&
+            pendingPlanReview && (
+              <PlanReviewFindings
+                key={pendingPlanReview.commentId}
+                review={pendingPlanReview.review}
+                reviewedAtLabel={pendingPlanReview.createdAtLabel}
+                repositoryFullName={issue.repositoryFullName}
+                submitLabel="選んだ指摘で修正を依頼"
+                fallbackSubmitLabel="レビューを反映するよう修正を依頼"
+                disabled={isSubmitting}
+                isSubmitting={isSubmitting}
+                onSubmit={handleReject}
+              />
+            )}
 
           {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
               上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
