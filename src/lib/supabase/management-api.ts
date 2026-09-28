@@ -68,11 +68,17 @@ async function authConfigRequest(method: "GET" | "PATCH", body?: string): Promis
 
 export const REDIRECT_URL_MAX_LENGTH = 500;
 
-/** APIリクエストのボディ（JSON.parse直後のunknown値）を検証する。不正な値はnullへ落とす */
+/**
+ * APIリクエストのボディ（JSON.parse直後のunknown値）を検証する。不正な値はnullへ落とす。
+ *
+ * `uri_allow_list`はカンマ区切りでエンコードされる（`writeAllowList`）ため、カンマを含む値を
+ * 1件として受け付けると実質的に複数URLとして登録されてしまう（レビュー指摘）。
+ */
 export function parseRedirectUrlInput(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > REDIRECT_URL_MAX_LENGTH) return null;
+  if (trimmed.includes(",")) return null;
   if (!/^https?:\/\//.test(trimmed)) return null;
   return trimmed;
 }

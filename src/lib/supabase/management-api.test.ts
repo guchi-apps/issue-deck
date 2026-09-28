@@ -67,6 +67,13 @@ describe("parseRedirectUrlInput", () => {
     expect(parseRedirectUrlInput(123)).toBeNull();
     expect(parseRedirectUrlInput(undefined)).toBeNull();
   });
+
+  it("カンマを含む値はnull（uri_allow_listがカンマ区切りのため複数URLに分裂してしまう）", () => {
+    expect(
+      parseRedirectUrlInput("https://a.example.com/cb,https://b.example.com/cb"),
+    ).toBeNull();
+    expect(parseRedirectUrlInput("https://example.com/cb,")).toBeNull();
+  });
 });
 
 describe("listRedirectUrls", () => {
