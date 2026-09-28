@@ -9,7 +9,6 @@
 
 /** 数える単位。ラベルはそのまま画面に出る */
 export const CLAUDE_API_FEATURES = [
-  { key: "issue_summary", label: "Issueの要約" },
   { key: "comment_summary", label: "コメントの要約" },
   { key: "issue_search", label: "AI検索" },
   { key: "issue_order", label: "着手順の提案" },

@@ -145,9 +145,6 @@ vi.mock("@/hooks/use-pull-request-merge-mutation", () => ({
 vi.mock("@/components/dashboard/comment-thread", () => ({
   CommentThread: () => <div data-testid="comment-thread" />,
 }));
-vi.mock("@/components/dashboard/issue-ai-summary", () => ({
-  IssueAiSummarySection: () => null,
-}));
 vi.mock("@/components/dashboard/issue-session-status", () => ({
   IssueSessionStatus: () => null,
   summarizeIssueSession: () => ({ remoteControlUrl: null }),

@@ -10,7 +10,6 @@ import {
   Keyboard,
   Loader2,
   Pencil,
-  ScanSearch,
   ScrollText,
   TriangleAlert,
 } from "lucide-react";
@@ -18,12 +17,12 @@ import {
 import { ModelChip } from "@/components/dashboard/agent-model-chips";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
-  PLAN_REVIEW_REFLECT_REQUEST_TEXT,
   SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
@@ -32,6 +31,7 @@ import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import type { PendingPlanReview } from "@/lib/github/plan-review";
 import { splitAttachments } from "@/lib/markdown-attachments";
 import {
   CODEX_LOCAL_MODEL_VALUES,
@@ -70,7 +70,7 @@ export function PlanApprovalPanel({
   dispatch,
   onCheckUserResolved,
   artifactsMissing = false,
-  planReviewPending = false,
+  planReview = null,
 }: {
   request: SessionPlanRequestView;
   /** 計画を出したセッション。見つかっていなければ`null` */
@@ -89,8 +89,11 @@ export function PlanApprovalPanel({
    * 読み込み中・取得失敗は`false`にして、無いと決めつけない。
    */
   artifactsMissing?: boolean;
-  /** 計画の後に計画レビューが届いていて未反映のとき`true`（#3521） */
-  planReviewPending?: boolean;
+  /**
+   * 計画の後に届いていて未反映の計画レビュー（#3521・#3554）。無ければ`null`。
+   * 指摘ごとのカードにして、承認・修正のボタンより上に出す
+   */
+  planReview?: PendingPlanReview | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
@@ -153,6 +156,9 @@ export function PlanApprovalPanel({
   }
 
   const canSend = !sessionGone && remainingMs > 0;
+  const planReviewHasFindings =
+    planReview !== null &&
+    (planReview.review.findings.length > 0 || !planReview.review.noFindings);
   const canHandoff = session !== null && session.codexThreadKnown !== null;
   // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
   // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
@@ -252,20 +258,22 @@ export function PlanApprovalPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {planReviewPending && (
-              <p className="w-full rounded-md bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-                計画のあとに計画レビューが届いています。承認だけでは、指摘を反映した計画は確認できません。
-              </p>
-            )}
-            {planReviewPending && (
-              <Button
-                size="sm"
-                disabled={!canSend || dispatch.isSubmitting}
-                onClick={() => void send("revise", PLAN_REVIEW_REFLECT_REQUEST_TEXT)}
-              >
-                {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-                レビューを反映して計画を出し直す
-              </Button>
+            {planReview && (
+              /* 指摘を読んで、どれを取り込ませるかをここで決める（#3554）。承認・修正のボタンより
+                 上に置く——読んでから押す順にする */
+              <div className="w-full">
+                <PlanReviewFindings
+                  key={planReview.commentId}
+                  review={planReview.review}
+                  reviewedAtLabel={planReview.createdAtLabel}
+                  repositoryFullName={request.repositoryFullName}
+                  submitLabel="選んだ指摘で計画を出し直す"
+                  fallbackSubmitLabel="レビューを反映して計画を出し直す"
+                  disabled={!canSend || dispatch.isSubmitting}
+                  isSubmitting={dispatch.isSubmitting}
+                  onSubmit={(text) => send("revise", text)}
+                />
+              </div>
             )}
             {session && !sessionGone && canHandoff && (
               <div className="w-full rounded-md border bg-muted/40 p-3">
@@ -311,7 +319,8 @@ export function PlanApprovalPanel({
             )}
             <Button
               size="sm"
-              variant={planReviewPending ? "outline" : "default"}
+              /* 反映させる指摘が残っているときは、出し直しを主ボタンにする */
+              variant={planReviewHasFindings ? "outline" : "default"}
               disabled={!canSend || dispatch.isSubmitting}
               onClick={() => void send("approve")}
             >

@@ -38,6 +38,7 @@ import {
   type UsageBySource,
   type UsageGroup,
   type UsageIssue,
+  type UsageModelTiers,
   type UsageTotals,
 } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
@@ -179,8 +180,9 @@ const OUTPUT_COLOR = "#4776e6";
  *
  * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。以前の
  * rose-800（#9f1239）と明るい緑（#33cc4d）は明度が離れすぎていて、●の濃淡の段を作れなかった。
- * **段が決まらないぶんの色として、進捗バー等ではこの1色に固定したまま使う**（#3396。
- * 日別グラフだけは`dailyChartParts`が`AGENT_MODEL_TIER_COLORS`の濃淡へ差し替える）。
+ * **金額の棒（日別・種別別・Issue・PR別）は`agentModelTierParts`が`AGENT_MODEL_TIER_COLORS`の
+ * 濃淡へ差し替える**（#3396・#3552）ため、このColorsが直接使われるのは段が決まらないぶんの色と、
+ * 「実行中のセッション」欄（1セッション＝1本で濃淡にする材料が無い）だけになった。
  */
 const AGENT_COLORS = { ...AGENT_BASE_COLORS, actions: "#86198f" } as const;
 
@@ -280,63 +282,63 @@ function TokenBreakdown({ segments, columns }: { segments: TokenSegment[]; colum
  * どちらの棒の話なのかを言う。単価の倍率は「なぜ薄いのか」を色だけに背負わせないため。
  */
 function TokenLegend() {
-  const groups: {
-    lead: string;
-    /** 見出しに添える棒の形。太い棒か細い帯かを色より先に示す */
-    glyph: "thick" | "thin";
-    items: { color: string; label: string; rate?: string }[];
-    tail?: string;
-  }[] = [
-    {
-      lead: "太い棒＝金額",
-      glyph: "thick",
-      items: [
-        { color: AGENT_COLORS.claude, label: "Claude" },
-        { color: AGENT_COLORS.codex, label: "Codex" },
-        { color: AGENT_COLORS.actions, label: "GitHub Actions" },
-      ],
-      tail: "長さは同じ表の最大との比較",
-    },
-    {
-      lead: "細い帯＝トークン",
-      glyph: "thin",
-      items: [
-        { color: TOKEN_COLORS.local.input, label: "入力", rate: "1.0倍" },
-        { color: TOKEN_COLORS.local.cacheCreate, label: "キャッシュ書込", rate: "1.25〜2倍" },
-        { color: TOKEN_COLORS.local.cacheRead, label: "キャッシュ読出", rate: "0.1倍" },
-        { color: OUTPUT_COLOR, label: "出力" },
-        { color: TOKEN_COLORS["github-actions"].input, label: "GitHub Actionsの入力" },
-      ],
-    },
+  const tokenItems: { color: string; label: string; rate?: string }[] = [
+    { color: TOKEN_COLORS.local.input, label: "入力", rate: "1.0倍" },
+    { color: TOKEN_COLORS.local.cacheCreate, label: "キャッシュ書込", rate: "1.25〜2倍" },
+    { color: TOKEN_COLORS.local.cacheRead, label: "キャッシュ読出", rate: "0.1倍" },
+    { color: OUTPUT_COLOR, label: "出力" },
+    { color: TOKEN_COLORS["github-actions"].input, label: "GitHub Actionsの入力" },
   ];
   return (
     <div className="flex flex-col gap-1 text-[11px] text-muted-foreground">
-      {groups.map((group) => (
-        <div key={group.lead} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-semibold text-foreground">
+      {/* 太い棒＝金額。Claude／Codexはモデルの重さ4段階の濃淡（`DailyLegend`と同じ体裁。#3552） */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold text-foreground">
+          <i aria-hidden className="mr-1.5 inline-block h-2 w-3.5 rounded-full bg-muted-foreground align-middle" />
+          太い棒＝金額
+        </span>
+        {(["claude", "codex"] as const).map((agent) => (
+          <span key={agent} className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-0.5" aria-hidden>
+              {AGENT_MODEL_TIER_COLORS[agent].map((color) => (
+                <span
+                  key={color}
+                  className="size-2 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </span>
+            <span className="text-foreground">{agent === "claude" ? "Claude" : "Codex"}</span>
+          </span>
+        ))}
+        <span>濃いほど重いモデル</span>
+        <span>
+          <i
+            aria-hidden
+            className="mr-1 inline-block size-2 rounded-[2px]"
+            style={{ backgroundColor: AGENT_COLORS.actions }}
+          />
+          <span className="text-foreground">GitHub Actions</span>
+        </span>
+        <span>長さは同じ表の最大との比較</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold text-foreground">
+          <i aria-hidden className="mr-1.5 inline-block h-1 w-3.5 rounded-full bg-muted-foreground align-middle" />
+          細い帯＝トークン
+        </span>
+        {tokenItems.map((item) => (
+          <span key={item.label}>
             <i
               aria-hidden
-              className={cn(
-                "mr-1.5 inline-block rounded-full bg-muted-foreground align-middle",
-                group.glyph === "thick" ? "h-2 w-3.5" : "h-1 w-3.5",
-              )}
+              className="mr-1 inline-block size-2 rounded-[2px]"
+              style={{ backgroundColor: item.color }}
             />
-            {group.lead}
+            <span className="text-foreground">{item.label}</span>
+            {item.rate ? <span className="ml-1 tabular-nums">{item.rate}</span> : null}
           </span>
-          {group.items.map((item) => (
-            <span key={item.label}>
-              <i
-                aria-hidden
-                className="mr-1 inline-block size-2 rounded-[2px]"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="text-foreground">{item.label}</span>
-              {item.rate ? <span className="ml-1 tabular-nums">{item.rate}</span> : null}
-            </span>
-          ))}
-          {group.tail ? <span>{group.tail}</span> : null}
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -380,20 +382,22 @@ function costSplitByAgent(row: CostRow) {
   };
 }
 
-type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource };
+type CostRow = { costUsd: number; byAgent: UsageByAgent; bySource: UsageBySource; modelTiers: UsageModelTiers };
 
 /**
- * 日別の縦棒1本ぶんの積み上げ内訳（#3396）。Claude／Codexは`byAgent`の合計ではなく
- * `day.modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
+ * 金額の棒1本ぶんの積み上げパーツ（#3396・#3552）。Claude／Codexは`byAgent`の合計ではなく
+ * `modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
  * ●と同じ`AGENT_MODEL_TIER_COLORS`の濃淡を使う。段が決まらないぶんは`AGENT_BASE_COLORS`
  * （濃淡なしの代表色）。GitHub Actionsは従来どおり`costSplitByAgent`の単色のまま
- * （モデル情報が薄いため据え置き）。**濃い（重い）ものを下、薄い（軽い）ものを上、
- * Actionsをいちばん上に積む**（呼び出し側が`flex-col-reverse`で描くため、配列の先頭が最下段）。
+ * （モデル情報が薄いため据え置き）。**日別の縦棒（`DailyChart`）・種別別／Issue・PR別の
+ * 横棒（`CostBar`）の両方で使う共通パーツ**（#3552より前は日別専用だった）。
+ * **濃い（重い）ものを先、Actionsを最後に積む**（日別は呼び出し側が`flex-col-reverse`で
+ * 描くため、配列の先頭が最下段＝濃い色になる）。
  */
-function dailyChartParts(day: SessionUsageResponse["byDay"][number]) {
-  const split = costSplitByAgent(day);
+function agentModelTierParts(row: CostRow) {
+  const split = costSplitByAgent(row);
   const tierParts = (["claude", "codex"] as const).flatMap((agent) => {
-    const bucket = day.modelTiers[agent];
+    const bucket = row.modelTiers[agent];
     return [
       ...([0, 1, 2, 3] as const).map((tier) => ({
         key: `${agent}-tier${tier}`,
@@ -410,8 +414,13 @@ function dailyChartParts(day: SessionUsageResponse["byDay"][number]) {
 }
 
 /**
- * 内訳の太い棒。長さが金額、内側がClaude／Codex／GitHub Actionsの割合（日別の縦棒も同じ3色）。
- * **割合そのものは棒に数値を書けないので、ツールチップへ金額で出す。**
+ * 内訳の太い棒。長さが金額、内側はモデルの重さ別の濃淡＋GitHub Actions（#3552。日別の縦棒と
+ * 同じ`agentModelTierParts`）。**割合そのものは棒に数値を書けないので、ツールチップへ
+ * Claude／Codex／GitHub Actions単位の金額で出す**（濃淡の段までは書かない。詳しくは
+ * `TokenLegend`・行の凡例を見る）。
+ *
+ * **「セッション種別別」の実装フェーズ行は、フェーズ単位のモデル情報を持たないため、
+ * セッション全体でいちばん重いモデルの色にまとまる**（`addEntryModelTier`のコメント参照）。
  */
 function CostBar({
   row,
@@ -425,20 +434,21 @@ function CostBar({
 }) {
   const split = costSplitByAgent(row);
   const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
-  const parts = [
-    { key: "claude", label: "Claude", value: split.claude, color: AGENT_COLORS.claude },
-    { key: "codex", label: "Codex", value: split.codex, color: AGENT_COLORS.codex },
-    { key: "actions", label: "GitHub Actions", value: split.actions, color: AGENT_COLORS.actions },
-  ];
+  const parts = agentModelTierParts(row);
+  const title = [
+    { label: "Claude", value: split.claude },
+    { label: "Codex", value: split.codex },
+    { label: "GitHub Actions", value: split.actions },
+  ]
+    .map((part) => `${part.label} ${formatUsageUsd(part.value)}`)
+    .join(" / ");
   return (
     <div
       className={cn(
         "h-2.5 overflow-hidden rounded-full bg-muted",
         highlighted && "ring-1 ring-muted-foreground/40",
       )}
-      title={parts
-        .map((part) => `${part.label} ${formatUsageUsd(part.value)}`)
-        .join(" / ")}
+      title={title}
     >
       <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${widthPercent}%` }}>
         {parts.map((part) => (
@@ -574,7 +584,7 @@ function DailyChart({
         ))}
         <div className={cn("absolute inset-0 flex items-end", barsGap)}>
           {days.map((day, index) => {
-            const parts = dailyChartParts(day);
+            const parts = agentModelTierParts(day);
             const split = costSplitByAgent(day);
             const isZero = day.costUsd <= 0;
             const showsValue = !isZero && (isFewDays || index === peakIndex);
@@ -709,8 +719,8 @@ function DailyLegend() {
 /**
  * 種別別の内訳。**金額の棒だけで描く**（#3064。以前は細い帯〈トークン〉との二段だった。#2633）。
  * **リポジトリ別は円グラフ（`RepositoryPieChart`）へ替えた**（#3060）。
- * **太い棒の内側は日別の縦棒と同じ3分割**（Claude／Codex／GitHub Actions）にする。ここだけ
- * 「Claude／それ以外」の2分割だったため、同じ画面の同じ色が行によって別の意味になっていた。
+ * **太い棒の内側は日別の縦棒と同じパーツ**（`agentModelTierParts`。Claude／Codexはモデルの
+ * 重さ別の濃淡、GitHub Actionsは単色）で塗る（#3552）。
  */
 function Breakdown({
   title,

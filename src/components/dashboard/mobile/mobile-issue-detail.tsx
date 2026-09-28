@@ -26,14 +26,14 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
-import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
   IssuePullRequestList,
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
-import { isPlanReviewPending } from "@/lib/github/plan-review";
+import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
+import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
 import { IssueSummaryDialog } from "@/components/dashboard/issue-summary-dialog";
@@ -398,6 +398,8 @@ export function MobileIssueDetail({
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （PCの詳細と同じ判定）
   const planDecisionPending = planRequest?.status === "WAITING";
+  // 未反映の計画レビュー（#3554。PCの詳細と同じ）
+  const pendingPlanReview = resolvePendingPlanReview(comments);
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
   // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
   const awaitingPlanReview = planDecisionPending && !isPlanReviewPending(comments);
@@ -1009,7 +1011,7 @@ export function MobileIssueDetail({
               session={issueSession}
               dispatch={dispatch}
               onCheckUserResolved={handleCheckUserResolved}
-              planReviewPending={isPlanReviewPending(comments)}
+              planReview={pendingPlanReview}
               artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&
@@ -1018,6 +1020,24 @@ export function MobileIssueDetail({
             />
           </div>
         )}
+
+        {/* 無人実行の計画への計画レビュー（#3554。PCの詳細と同じ条件・同じ送り先） */}
+        {executionTarget.expectsActionsRun &&
+          !planDecisionPending &&
+          checkUserReason(issue.labels) === "plan" &&
+          pendingPlanReview && (
+            <PlanReviewFindings
+              key={pendingPlanReview.commentId}
+              review={pendingPlanReview.review}
+              reviewedAtLabel={pendingPlanReview.createdAtLabel}
+              repositoryFullName={issue.repositoryFullName}
+              submitLabel="選んだ指摘で修正を依頼"
+              fallbackSubmitLabel="レビューを反映するよう修正を依頼"
+              disabled={isSubmitting}
+              isSubmitting={isSubmitting}
+              onSubmit={handleReject}
+            />
+          )}
 
         {/* 予約実行に積まれている注釈（#2866）。**開始ボタンのすぐ上に置く**——
             スマホでは全幅のボタンが視線の終点になるので、そこへ届く前に読ませる */}
@@ -1197,8 +1217,6 @@ export function MobileIssueDetail({
             />
           </IssueDetailSection>
         )}
-
-        <IssueAiSummarySection issue={issue} />
 
         {/* 進捗・担当者・ラベル・日付は「変えたいときに触るもの」なので畳んでおく（#1646・#1920） */}
         <MobileIssuePropertiesSection
