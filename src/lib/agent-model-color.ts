@@ -38,6 +38,23 @@ export const AGENT_BASE_COLORS: Readonly<Record<IssueImplementationAgent, string
 };
 
 /**
+ * 金額の棒（`agentModelTierParts`）で、モデルの段が決まらない金額に使う色（#3572）。
+ *
+ * **`AGENT_BASE_COLORS`を使わない。** Claudeの代表色は最重の段（`AGENT_MODEL_TIER_COLORS.claude[0]`）
+ * と同値のため、濃淡で重さを表す棒の中で使うと「未確定」が「確定した最重モデル」と同じ色になり、
+ * 実際には決まっていない重さを最重であるかのように見せてしまう（GitHub Actions分は#3555まで
+ * `models`が常に空で送られており、この見分けの付かなさがそのまま「CI/CD・レビュー」の帯を
+ * 最重色一色に見せていた）。
+ *
+ * **同じ画面で別の意味を持つ既存のグレーとは別の色にする**（計画レビュー#3572での指摘）。
+ * `session-usage-panel.tsx`の`PHASE_COLORS.implementation`・`KIND_ROW_COLORS.question`は
+ * どちらも`#a8a29e`（暖色寄りのグレー）で、行頭の点として別の意味に使っている。棒の内側（未使用部分）も
+ * `bg-muted`のグレーのため、暖色寄りのグレーを再利用すると「未確定の金額」「地の色」「行頭の点」が
+ * 互いに紛れる。そこで彩度は抑えつつ寒色寄り（青灰）にして、色相の向きで見分けられるようにする。
+ */
+export const UNRESOLVED_MODEL_TIER_COLOR = "#64748b";
+
+/**
  * モデルの重さの段。**出力単価（1Mトークンあたり）で決める**ので、Claude・Codexを同じ
  * 物差しで並べられる（Opus≒GPT-5.6 Sol、Sonnet≒Terra、Haiku≒Luna）。単価表に無い
  * モデル・`auto`（どのモデルで立つかCLI任せ）は`null`で、呼び出し側は「未確定」として扱う。
