@@ -1,3 +1,4 @@
+import { resolveSharedToken } from "@/lib/shared-token-reader";
 import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared-secret-auth";
 
 /**
@@ -6,6 +7,8 @@ import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared
  * 呼び出し側は`TYPESAFE_USAGE_TOKEN`、提供側は既存の`OPS_API_TOKEN`として同じ値を持つ。
  * 値の正はops-dashboard側にあり、issue-deckへ新しいシークレットを複製しない。
  */
-export function authorizeTypeSafeUsage(authorizationHeader: string | null): SharedSecretAuthResult {
-  return authorizeBearerSecret(authorizationHeader, process.env.OPS_API_TOKEN);
+export async function authorizeTypeSafeUsage(
+  authorizationHeader: string | null,
+): Promise<SharedSecretAuthResult> {
+  return authorizeBearerSecret(authorizationHeader, await resolveSharedToken("OPS_API_TOKEN", "OPS_API_TOKEN"));
 }

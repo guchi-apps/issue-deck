@@ -3,6 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeApiTotals, ClaudeApiUsageSummary } from "@/lib/claude/api-usage";
 import { authorizeAiUsage, summarizeAiUsage } from "@/lib/ai-usage-export";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 function totals(
   calls: number,
   inputTokens: number,
@@ -161,17 +169,17 @@ describe("summarizeAiUsage", () => {
 describe("authorizeAiUsage", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("OPS_API_TOKENと一致するBearerだけを通す", () => {
+  it("OPS_API_TOKENと一致するBearerだけを通す", async () => {
     vi.stubEnv("OPS_API_TOKEN", "expected-token");
 
-    expect(authorizeAiUsage("Bearer expected-token")).toBe("ok");
-    expect(authorizeAiUsage("Bearer incorrect")).toBe("unauthorized");
-    expect(authorizeAiUsage(null)).toBe("unauthorized");
+    expect(await authorizeAiUsage("Bearer expected-token")).toBe("ok");
+    expect(await authorizeAiUsage("Bearer incorrect")).toBe("unauthorized");
+    expect(await authorizeAiUsage(null)).toBe("unauthorized");
   });
 
-  it("OPS_API_TOKENが空なら設定漏れとして区別する", () => {
+  it("OPS_API_TOKENが空なら設定漏れとして区別する", async () => {
     vi.stubEnv("OPS_API_TOKEN", "");
 
-    expect(authorizeAiUsage("Bearer anything")).toBe("not_configured");
+    expect(await authorizeAiUsage("Bearer anything")).toBe("not_configured");
   });
 });

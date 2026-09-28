@@ -5,7 +5,7 @@ import { getTypeSafeTotalInputTokens, getTypeSafeUsageSummary } from "@/lib/type
 
 /** ops-dashboardへ、Jevだけの実測呼出回数・入力トークン数を公開する。 */
 export async function GET(request: NextRequest) {
-  const auth = authorizeTypeSafeUsage(request.headers.get("authorization"));
+  const auth = await authorizeTypeSafeUsage(request.headers.get("authorization"));
   if (auth === "not_configured") {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }

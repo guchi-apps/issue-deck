@@ -17,6 +17,14 @@ vi.mock("@/lib/images/image-cleanup-run", () => ({ getUploadedImageInventory: vi
 import { POST } from "@/app/api/issues/images/route";
 import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 function uploadRequest(file: File, authorization?: string) {
   const formData = new FormData();
   formData.append("file", file);

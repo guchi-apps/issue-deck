@@ -3,6 +3,7 @@ import {
   type ClaudeApiTotals,
   type ClaudeApiUsageSummary,
 } from "@/lib/claude/api-usage";
+import { resolveSharedToken } from "@/lib/shared-token-reader";
 import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared-secret-auth";
 
 /**
@@ -36,8 +37,8 @@ export type AiUsageSummary = {
  *
  * 値の正はops-dashboard側にあり、`/api/typesafe/usage`と同じ`OPS_API_TOKEN`を使う。
  */
-export function authorizeAiUsage(authorizationHeader: string | null): SharedSecretAuthResult {
-  return authorizeBearerSecret(authorizationHeader, process.env.OPS_API_TOKEN);
+export async function authorizeAiUsage(authorizationHeader: string | null): Promise<SharedSecretAuthResult> {
+  return authorizeBearerSecret(authorizationHeader, await resolveSharedToken("OPS_API_TOKEN", "OPS_API_TOKEN"));
 }
 
 function isOpenAiModel(model: string): boolean {
