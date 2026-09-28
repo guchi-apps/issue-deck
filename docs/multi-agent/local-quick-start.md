@@ -1425,7 +1425,7 @@ MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開�
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `.env.local` | `signInWithOAuth()`が存在しないホストへ飛ばし、画面が真っ白になる |
 | `ALLOWED_EMAILS` | `.env.local` | 認証は通るが`/auth/callback`の`isEmailAllowed()`が偽になり`?error=not_allowed`で戻る |
-| リダイレクト先の許可 | Supabaseダッシュボード（Redirect URLs） | Supabase側で弾かれ、コールバックまで戻ってこない。**worktreeごとにポートが違う**ため`http://<ホスト名>.<tailnet>.ts.net:*/auth/callback`のようにポートをワイルドカードで登録する |
+| リダイレクト先の許可 | issue-deckの設定画面（フリート運用 > Supabase Redirect URLs。#3568）またはSupabaseダッシュボード（Redirect URLs） | Supabase側で弾かれ、コールバックまで戻ってこない。**worktreeごとにポートが違う**ため`http://<ホスト名>.<tailnet>.ts.net:*/auth/callback`のようにポートをワイルドカードで登録する |
 
 **`ALLOWED_EMAILS`は実際のSupabaseの値より先に入れる。** 空のまま実プロジェクトへ繋ぐと、
 `/auth/callback`が許可外ユーザーとしてSupabase Authユーザーの削除（`admin.auth.admin.deleteUser`）へ
