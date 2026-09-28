@@ -13,7 +13,11 @@ import type { SessionUsagePlan, SessionUsagePlanState, SessionUsageResponse } fr
 import { useNow } from "@/hooks/use-now";
 import { formatCompactTime, formatDateTime, formatMonthDay, formatMonthDayTime } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { AGENT_BASE_COLORS, AGENT_MODEL_TIER_COLORS } from "@/lib/agent-model-color";
+import {
+  AGENT_BASE_COLORS,
+  AGENT_MODEL_TIER_COLORS,
+  UNRESOLVED_MODEL_TIER_COLOR,
+} from "@/lib/agent-model-color";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   buildRepositoryPieSlices,
@@ -180,8 +184,10 @@ const OUTPUT_COLOR = "#4776e6";
  * **Claude・Codexの色は実行状況の●と同じ系統**（#3075。`AGENT_BASE_COLORS`）。以前の
  * rose-800（#9f1239）と明るい緑（#33cc4d）は明度が離れすぎていて、●の濃淡の段を作れなかった。
  * **金額の棒（日別・種別別・Issue・PR別）は`agentModelTierParts`が`AGENT_MODEL_TIER_COLORS`の
- * 濃淡へ差し替える**（#3396・#3552）ため、`AGENT_BASE_COLORS`が直接使われるのは段が決まらない
- * ぶんの色と、「実行中のセッション」欄（1セッション＝1本で濃淡にする材料が無い）だけになった。
+ * 濃淡へ差し替える**（#3396・#3552）ため、`AGENT_BASE_COLORS`が直接使われるのは
+ * 「実行中のセッション」欄（1セッション＝1本で濃淡にする材料が無い）だけになった。段が決まらない
+ * ぶんの色は`UNRESOLVED_MODEL_TIER_COLOR`を別に持つ（#3572。`AGENT_BASE_COLORS`はClaudeが最重の
+ * 段と同色のため、濃淡で重さを表す棒の中で使うと未確定を最重モデルと見分けられなくなる）。
  * **GitHub Actions専用の色は持たない**（#3564でActionsを実行経路として塗り分けるのをやめた）。
  */
 
@@ -311,6 +317,14 @@ function TokenLegend() {
           </span>
         ))}
         <span>濃いほど重いモデル</span>
+        <span className="inline-flex items-center gap-1">
+          <span
+            aria-hidden
+            className="size-2 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+            style={{ backgroundColor: UNRESOLVED_MODEL_TIER_COLOR }}
+          />
+          モデル未確定
+        </span>
         <span>長さは同じ表の最大との比較</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -361,10 +375,11 @@ function groupTokenSegments(totals: UsageTotals): TokenSegment[] {
 type CostRow = { costUsd: number; byAgent: UsageByAgent; modelTiers: UsageModelTiers };
 
 /**
- * 金額の棒1本ぶんの積み上げパーツ（#3396・#3552・#3564）。Claude／Codexは`byAgent`の合計ではなく
- * `modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
- * ●と同じ`AGENT_MODEL_TIER_COLORS`の濃淡を使う。段が決まらないぶんは`AGENT_BASE_COLORS`
- * （濃淡なしの代表色）。**GitHub Actionsは実行経路として塗り分けず、`agent`（常にclaude）の
+ * 金額の棒1本ぶんの積み上げパーツ（#3396・#3552・#3564・#3572）。Claude／Codexは`byAgent`の合計では
+ * なく`modelTiers`（モデルの重さ別、`session-usage-view.ts`が集計済み）で分け、実行状況の
+ * ●と同じ`AGENT_MODEL_TIER_COLORS`の濃淡を使う。段が決まらないぶんは`UNRESOLVED_MODEL_TIER_COLOR`
+ * （#3572。`AGENT_BASE_COLORS`はClaudeが最重の段と同色のため、ここで使うと未確定を最重モデルと
+ * 見分けられなくなる）。**GitHub Actionsは実行経路として塗り分けず、`agent`（常にclaude）の
  * tierへ合流済み**（#3564。`session-usage-view.ts`の`addEntryModelTier`が積む時点で合流させて
  * いるため、ここでは何もしなくてよい）。**日別の縦棒（`DailyChart`）・種別別／Issue・PR別の
  * 横棒（`CostBar`）の両方で使う共通パーツ**（#3552より前は日別専用だった）。
@@ -380,7 +395,7 @@ function agentModelTierParts(row: CostRow) {
         value: bucket.costUsd[tier],
         color: AGENT_MODEL_TIER_COLORS[agent][tier],
       })),
-      { key: `${agent}-unresolved`, value: bucket.unresolvedCostUsd, color: AGENT_BASE_COLORS[agent] },
+      { key: `${agent}-unresolved`, value: bucket.unresolvedCostUsd, color: UNRESOLVED_MODEL_TIER_COLOR },
     ];
   });
   // 金額0の区分は積んでも見えないので出さない（DOM要素数を実際の内訳と揃える）。
@@ -671,6 +686,14 @@ function DailyLegend() {
         </span>
       ))}
       <span>濃いほど重いモデル</span>
+      <span className="inline-flex items-center gap-1">
+        <span
+          aria-hidden
+          className="size-2 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+          style={{ backgroundColor: UNRESOLVED_MODEL_TIER_COLOR }}
+        />
+        モデル未確定
+      </span>
       <span>
         <i
           aria-hidden
