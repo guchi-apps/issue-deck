@@ -76,6 +76,67 @@ export const PLAN_ARTIFACT_REQUEST_TEXT =
 export const PLAN_REVIEW_REFLECT_REQUEST_TEXT =
   "計画レビュー（<!-- supervisor:plan-review -->付きのコメント）が届いています。指摘を自分で確かめ、正しいものを取り込んだ計画を出し直してください。取り込まなかった指摘は理由を添えてください。応答はIssueコメントの末尾に<!-- issue-deck-agent:plan-reviser -->を付けて残してください。";
 
+/** 計画レビューの指摘1件に対する、人の判断（#3554） */
+export type PlanReviewFindingDecision = {
+  /** レビューが振った番号 */
+  number: number;
+  title: string;
+  decision: "apply" | "skip";
+  /** 見送る理由。任意 */
+  reason?: string;
+};
+
+/**
+ * 指摘ごとの判断を、修正として送る依頼文にする（#3554）。
+ *
+ * **載せるのは番号・見出し・判断・見送る理由だけ。** 指摘の本文・根拠・提案は
+ * `PLAN_REVIEW_REFLECT_REQUEST_TEXT`と同じくレビューコメントを読ませる。本文を引用すると
+ * 3件程度で`SESSION_PLAN_REVISION_MAX_LENGTH`に届き、`parseSessionPlanRevision`に弾かれる。
+ * **見出しと理由は長ければ切り詰め、それでも収まらなければ枠を狭めて組み直す**
+ * （どんな件数でも上限内の文を返す）。
+ */
+export function buildPlanReviewDecisionRequestText(
+  decisions: readonly PlanReviewFindingDecision[],
+): string {
+  for (const [titleMax, reasonMax] of [
+    [120, 300],
+    [60, 120],
+    [30, 40],
+    [16, 0],
+  ] as const) {
+    const text = composePlanReviewDecisionText(decisions, titleMax, reasonMax);
+    if (text.length <= SESSION_PLAN_REVISION_MAX_LENGTH) return text;
+  }
+  // 指摘が100件を超えるような異常な場合だけここに来る。途中で切っても判断の先頭は残る
+  return `${composePlanReviewDecisionText(decisions, 16, 0).slice(0, SESSION_PLAN_REVISION_MAX_LENGTH - 1)}…`;
+}
+
+function clip(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function composePlanReviewDecisionText(
+  decisions: readonly PlanReviewFindingDecision[],
+  titleMax: number,
+  reasonMax: number,
+): string {
+  const line = (item: PlanReviewFindingDecision) => {
+    const reason = item.reason?.trim();
+    const suffix =
+      item.decision === "skip" && reason && reasonMax > 0 ? `（理由: ${clip(reason, reasonMax)}）` : "";
+    return `- ${item.number}. ${clip(item.title, titleMax)}${suffix}`;
+  };
+  const applied = decisions.filter((item) => item.decision === "apply");
+  const skipped = decisions.filter((item) => item.decision === "skip");
+
+  return [
+    "計画レビュー（<!-- supervisor:plan-review -->付きのコメント）の指摘について、人が次のとおり判断しました。「反映する」の指摘は自分で確かめたうえで計画へ取り込み、「見送る」の指摘は取り込まずに、計画を出し直してください。確かめた結果、反映できない指摘があれば理由を添えてください。応答はIssueコメントの末尾に<!-- issue-deck-agent:plan-reviser -->を付けて残してください。",
+    ...(applied.length > 0 ? ["", "反映する:", ...applied.map(line)] : []),
+    ...(skipped.length > 0 ? ["", "見送る:", ...skipped.map(line)] : []),
+  ].join("\n");
+}
+
 /**
  * 修正1回に添付できる画像の枚数（#2425）。**Claudeへ渡す`deny`の理由に載る**ので、
  * URLの羅列で理由が埋まらない程度に抑える。画面はこの枚数で送信を止める。

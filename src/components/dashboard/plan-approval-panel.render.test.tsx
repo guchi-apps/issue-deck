@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
@@ -10,6 +10,7 @@ import {
   type SessionPlanRequestView,
 } from "@/lib/dispatch/session-plan-request";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { parsePlanReview, type PendingPlanReview } from "@/lib/github/plan-review";
 
 const REPO = "guchi-apps/issue-deck";
 
@@ -41,6 +42,10 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
     codexThreadKnown: null,
     ...overrides,
   } as DispatchSessionView;
+}
+
+function pendingReview(body: string): PendingPlanReview {
+  return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前" };
 }
 
 function dispatchHandle(decidePlan = vi.fn().mockResolvedValue({ ok: true })) {
@@ -184,7 +189,7 @@ describe("PlanApprovalPanel", () => {
     );
   });
 
-  it("計画レビューが未反映のときだけ反映ボタンを出し、固定文を修正として送る（#3521）", async () => {
+  it("指摘に分けられない計画レビューは、従来の一括反映ボタンで固定文を送る（#3521・#3554）", async () => {
     const decidePlan = vi.fn().mockResolvedValue({ ok: true });
     const { rerender } = render(
       <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle(decidePlan)} />,
@@ -196,7 +201,7 @@ describe("PlanApprovalPanel", () => {
         request={request()}
         session={session()}
         dispatch={dispatchHandle(decidePlan)}
-        planReviewPending
+        planReview={pendingReview("自由に書かれた講評\n\n<!-- supervisor:plan-review -->")}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /レビューを反映して計画を出し直す/ }));
@@ -207,6 +212,79 @@ describe("PlanApprovalPanel", () => {
         text: PLAN_REVIEW_REFLECT_REQUEST_TEXT,
       }),
     );
+  });
+
+  it("計画レビューの指摘ごとに反映・見送りを選び、見送る理由を添えて送る（#3554）", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+        planReview={pendingReview(
+          [
+            "**1. テストが型で落ちる**",
+            "- **指摘**: 5本のテストが落ちる",
+            "- **根拠**: `a.ts:1`",
+            "- **提案**: 変更対象に加える",
+            "",
+            "**2. docsに言及が残る**",
+            "- **指摘**: 記述が残る",
+            "",
+            "推奨: 修正のうえ承認（1を直せばよい）",
+            "<!-- supervisor:plan-review -->",
+          ].join("\n"),
+        )}
+      />,
+    );
+
+    // 推奨と指摘の中身がパネルの中で読める。根拠は畳んである
+    expect(screen.getByText("推奨: 修正のうえ承認")).toBeTruthy();
+    expect(screen.getByText("1を直せばよい")).toBeTruthy();
+    expect(screen.getByText("5本のテストが落ちる")).toBeTruthy();
+    expect(screen.queryByText("a.ts:1")).toBeNull();
+    // 反映させる指摘が残っている間は、承認より出し直しを主ボタンにする
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("outline");
+
+    fireEvent.click(within(screen.getByRole("group", { name: "指摘2の扱い" })).getByRole("button", { name: "見送る" }));
+    fireEvent.change(screen.getByLabelText("見送る理由（任意）"), { target: { value: "別Issueで直す" } });
+    expect(screen.getByText(/反映 1件・見送り 1件/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }));
+    await waitFor(() => expect(decidePlan).toHaveBeenCalledTimes(1));
+    const text = decidePlan.mock.calls[0][0].text as string;
+    expect(text).toContain("反映する:\n- 1. テストが型で落ちる");
+    expect(text).toContain("見送る:\n- 2. docsに言及が残る（理由: 別Issueで直す）");
+  });
+
+  it("すべて見送ると出し直しは押せず、承認を促す（#3554）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReview={pendingReview("**1. 見出し**\n- **指摘**: 問題\n<!-- supervisor:plan-review -->")}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "見送る" }));
+    expect(
+      (screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText("すべて見送る場合は、この計画のまま承認してください。")).toBeTruthy();
+  });
+
+  it("指摘なしのレビューは出し直しのボタンを出さず、承認を主ボタンに戻す（#3554）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReview={pendingReview("指摘なし。\n\n推奨: このまま承認してよい\n<!-- supervisor:plan-review -->")}
+      />,
+    );
+    expect(screen.getByText("指摘なし")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /出し直す/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("default");
   });
 
   /** `deny`の理由がそのまま次の指示になるので、本文が空のまま送れてはいけない */

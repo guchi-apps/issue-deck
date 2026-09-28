@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPlanReviewDecisionRequestText,
   buildSessionPlanDecisionCommentBody,
   findPlanRequestForIssue,
   isVisibleSessionPlanRequest,
@@ -232,5 +233,49 @@ describe("buildSessionPlanDecisionCommentBody", () => {
       posterMarker: "<!-- issue-deck:posted-by:m-guchi -->",
     });
     expect(body).toContain("端末で答えることにしました");
+  });
+});
+
+describe("buildPlanReviewDecisionRequestText（#3554）", () => {
+  it("反映する指摘と見送る指摘を分けて、見送る理由を添える", () => {
+    const text = buildPlanReviewDecisionRequestText([
+      { number: 1, title: "テストが型で落ちる", decision: "apply" },
+      { number: 2, title: "docsに言及が残る", decision: "skip", reason: "別Issueで\nまとめる" },
+      { number: 3, title: "再生成は不要", decision: "skip" },
+    ]);
+    expect(text).toContain("<!-- supervisor:plan-review -->");
+    expect(text).toContain("<!-- issue-deck-agent:plan-reviser -->");
+    expect(text).toContain("反映する:\n- 1. テストが型で落ちる");
+    expect(text).toContain("見送る:\n- 2. docsに言及が残る（理由: 別Issueで まとめる）\n- 3. 再生成は不要");
+  });
+
+  it("見送りが無ければ見送るの節を出さない", () => {
+    const text = buildPlanReviewDecisionRequestText([{ number: 1, title: "a", decision: "apply" }]);
+    expect(text).not.toContain("見送る:");
+  });
+
+  it("指摘が多く見出し・理由が長くても、修正の上限を超えず parseSessionPlanRevision を通る", () => {
+    const decisions = Array.from({ length: 30 }, (_, i) => ({
+      number: i + 1,
+      title: "長い見出し".repeat(40),
+      decision: i % 2 === 0 ? ("apply" as const) : ("skip" as const),
+      reason: "長い理由".repeat(100),
+    }));
+    const text = buildPlanReviewDecisionRequestText(decisions);
+    expect(text.length).toBeLessThanOrEqual(SESSION_PLAN_REVISION_MAX_LENGTH);
+    expect(parseSessionPlanRevision(text)).toBe(text);
+    // 全件の番号は残す（どの指摘をどう判断したかが読める）
+    expect(text).toContain("- 30. ");
+  });
+
+  it("3件程度なら見出しも理由も切り詰めない", () => {
+    const title = "あ".repeat(100);
+    const reason = "い".repeat(250);
+    const text = buildPlanReviewDecisionRequestText([
+      { number: 1, title, decision: "apply" },
+      { number: 2, title, decision: "skip", reason },
+      { number: 3, title, decision: "skip", reason },
+    ]);
+    expect(text).toContain(`- 2. ${title}（理由: ${reason}）`);
   });
 });

@@ -1,8 +1,19 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { isPlanReviewPending } from "@/lib/github/plan-review";
+import {
+  findPendingPlanReviewComment,
+  isPlanReviewPending,
+  parsePlanReview,
+} from "@/lib/github/plan-review";
 
 const c = (body: string) => ({ body, author: { login: "u" } }) as never;
+
+/** 実物の計画レビュー（#3554・#3551に付いたもの）。書式の慣習が変わったらここで気付く */
+const fixture = (name: string) =>
+  readFileSync(path.join(process.cwd(), "src/lib/github/__fixtures__", name), "utf8");
 
 describe("isPlanReviewPending", () => {
   it("計画の後にレビューが届いていれば true", () => {
@@ -24,5 +35,110 @@ describe("isPlanReviewPending", () => {
     expect(
       isPlanReviewPending([c("<!-- supervisor:plan-review -->"), c("<!-- issue-deck:session-plan -->")]),
     ).toBe(false);
+  });
+});
+
+describe("findPendingPlanReviewComment", () => {
+  it("同じ計画に複数のレビューが付いていれば、いちばん新しいものを返す", () => {
+    const older = c("古い <!-- supervisor:plan-review -->");
+    const newer = c("新しい <!-- supervisor:plan-review -->");
+    expect(findPendingPlanReviewComment([c("<!-- issue-deck:session-plan -->"), older, newer])).toBe(newer);
+  });
+  it("未反映のレビューが無ければ null", () => {
+    expect(findPendingPlanReviewComment([c("<!-- issue-deck:session-plan -->")])).toBeNull();
+  });
+});
+
+describe("parsePlanReview", () => {
+  it("実物の指摘3件を、見出し・指摘・根拠・提案に分ける", () => {
+    const review = parsePlanReview(fixture("plan-review-three-findings.md"));
+
+    expect(review.noFindings).toBe(false);
+    expect(review.findings.map((f) => f.number)).toEqual([1, 2, 3]);
+    expect(review.findings[0].title).toBe(
+      "反映・見送りの一覧を載せた修正依頼は、2000文字の上限で400になりうる",
+    );
+    expect(review.findings[0].problem).toMatch(/^新しいボタンは/);
+    expect(review.findings[0].evidence).toMatch(/SESSION_PLAN_REVISION_MAX_LENGTH = 2000/);
+    expect(review.findings[0].proposal).toMatch(/^組み立て関数は/);
+    expect(review.findings[0].rest).toBeNull();
+    // 前置きは最初の指摘より前の段落だけで、冒頭の見出しは落ちる
+    expect(review.summary).toMatch(/^対象は2本目の計画/);
+    expect(review.summary).not.toContain("計画レビュー（G1）");
+    // 推奨は本文から抜いて、定型句と理由に分ける
+    expect(review.recommendation).toEqual({
+      kind: "revise",
+      text: expect.stringMatching(/^修正のうえ承認。/),
+      reason: expect.stringMatching(/^修正依頼文を2000文字以内に/),
+    });
+    expect(review.findings[2].proposal).not.toContain("推奨");
+  });
+
+  it("根拠の入れ子の箇条書きは、字下げを保ったまま根拠に入れる", () => {
+    const review = parsePlanReview(
+      [
+        "**1. 見出し**",
+        "",
+        "- **指摘**: 問題",
+        "- **根拠**:",
+        "  - `a.ts:1`",
+        "  - `b.ts:2`",
+        "",
+        "  いずれも同じ理由です",
+        "- **提案**: 直す",
+      ].join("\n"),
+    );
+    expect(review.findings[0].evidence).toBe("- `a.ts:1`\n- `b.ts:2`\n\nいずれも同じ理由です");
+    expect(review.findings[0].proposal).toBe("直す");
+  });
+
+  it("見出し記法の番号付き見出しも指摘として読む", () => {
+    const review = parsePlanReview("### 1. 見出しA\n- **指摘** — 問題\n\n### 2) 見出しB\n本文だけ");
+    expect(review.findings.map((f) => [f.number, f.title])).toEqual([
+      [1, "見出しA"],
+      [2, "見出しB"],
+    ]);
+    expect(review.findings[0].problem).toBe("問題");
+    expect(review.findings[1].rest).toBe("本文だけ");
+  });
+
+  it("強調付きの「指摘なし」を読む", () => {
+    const review = parsePlanReview(fixture("plan-review-no-findings.md"));
+    expect(review.noFindings).toBe(true);
+    expect(review.findings).toEqual([]);
+    expect(review.recommendation?.kind).toBe("approve");
+  });
+
+  it("強調なしの「指摘なし」を読み、確かめた内容の箇条書きは指摘にしない", () => {
+    const review = parsePlanReview(fixture("plan-review-no-findings-plain.md"));
+    expect(review.noFindings).toBe(true);
+    expect(review.findings).toEqual([]);
+    expect(review.recommendation).toMatchObject({
+      kind: "approve",
+      reason: expect.stringMatching(/^前回までの指摘はすべて取り込まれており/),
+    });
+    expect(review.body).toContain("executionTarget.expectsActionsRun");
+    expect(review.body).not.toContain("<!--");
+  });
+
+  it("指摘に分けられず「指摘なし」でもなければ、本文をそのまま残す", () => {
+    const review = parsePlanReview("## 計画レビュー（G1）\n\n自由に書かれた講評\n\n実行ログ: https://example.com/run\n\n<!-- supervisor:plan-review -->");
+    expect(review.findings).toEqual([]);
+    expect(review.noFindings).toBe(false);
+    expect(review.recommendation).toBeNull();
+    expect(review.body).toBe("自由に書かれた講評");
+  });
+
+  it("定型句に当たらない推奨は other として全文を残す", () => {
+    expect(parsePlanReview("**推奨**: 人に相談").recommendation).toEqual({
+      kind: "other",
+      text: "人に相談",
+      reason: null,
+    });
+    expect(parsePlanReview("推奨: 計画の作り直し（前提が崩れている）").recommendation).toEqual({
+      kind: "redo",
+      text: "計画の作り直し（前提が崩れている）",
+      reason: "前提が崩れている",
+    });
   });
 });

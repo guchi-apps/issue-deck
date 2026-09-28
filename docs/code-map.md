@@ -3542,6 +3542,20 @@ export function POST(request: NextRequest) {
   差し込み方は`scripts/lib/plan-review-prompt.sh`で共有する。
   **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある。自動の入口も
   Actionsと同じ一覧を渡す）。設計は[multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
+- **届いた計画レビューは、Issue詳細で指摘ごとに読み「反映する／見送る」を選んで送れる**（#3554）。
+  どのコメントが未反映のレビューかは`lib/github/plan-review.ts`の`findPendingPlanReviewComment`
+  （最新の計画より後で、`plan-reviser`の応答がまだ無いもの）、本文の分解は同じファイルの
+  `parsePlanReview`（`**N. 見出し**`で区切り、`- **指摘**`／`- **根拠**`／`- **提案**`と末尾の
+  `推奨:`を拾う。書式は3つのプロンプトの「指摘の書式」で指示している）。画面は
+  `components/dashboard/plan-review-findings.tsx`で、ローカルの計画は計画承認パネルの中
+  （`decidePlan`の`revise`）、無人実行の計画は対応PRより上に単独で出して承認欄の「修正」と同じ
+  `handleReject`（`@claude`コメント）で送る。**無人実行向けのカードは`expectsActionsRun`の
+  ときだけ出す**（ローカルでも出すと、パネル内のカードと送信ボタンが2つ並ぶ）。
+  **送る文は番号・見出し・判断・見送る理由だけ**（`buildPlanReviewDecisionRequestText`）。
+  本文はレビューコメントを読ませる——引用すると修正の上限（`SESSION_PLAN_REVISION_MAX_LENGTH`）に
+  3件ほどで届く。**分けられないレビューは本文を1枚で出し、従来の一括の依頼文
+  （`PLAN_REVIEW_REFLECT_REQUEST_TEXT`）に戻す**。見送りの判断はDBに持たず、送った修正の
+  Issueコメントにだけ残る。
 - **計画レビューのセッションは`<リポジトリ名>-plan-review-<番号>`で、実装セッションの
   `-issue-`規約から外す**（#1855）。pollerのセッション報告・本数の計上・停止／終了の突き合わせは
   すべて`-issue-`に依存しており、混ぜると計画レビューを実装セッションと取り違えて畳む。
