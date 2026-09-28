@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "7.50.1",
+    date: "2026-09-28",
+    changes: [
+      "共有トークンの登録画面で、説明や参照元などの任意項目を空欄のまま登録するとエラーになる不具合を修正しました。また、入力内容に誤りがあった場合のエラーメッセージを分かりやすく改善しました。",
+    ],
+  },
+  {
     version: "7.50.0",
     date: "2026-09-27",
     changes: [

@@ -23,6 +23,12 @@ describe("parseSharedTokenInput", () => {
     });
   });
 
+  it("画面が空欄として送るnullの任意項目を未入力として受け付ける", () => {
+    expect(
+      parseSharedTokenInput({ name: "TOKEN", value: "value", description: null, sourceReference: null }),
+    ).toEqual({ name: "TOKEN", value: "value", description: null, sourceReference: null });
+  });
+
   it("空の値や不正な任意項目を拒否する", () => {
     expect(parseSharedTokenInput({ name: "TOKEN", value: "" })).toBeNull();
     expect(parseSharedTokenInput({ name: "TOKEN", value: "value", description: 1 })).toBeNull();
