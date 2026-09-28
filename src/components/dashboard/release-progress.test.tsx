@@ -272,3 +272,38 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
     expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).not.toBeNull();
   });
 });
+
+describe("ReleaseProgress deviceBuild対象リポジトリの表示（#3579）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("release_pending段は「PR作成中」ではなくMacでのビルド待ちを出す", () => {
+    render(
+      <ReleaseProgress
+        status={makeStatus({ phase: "release_pending", developVersion: "1.1.0" })}
+        isDeviceBuild
+      />,
+    );
+    expect(screen.queryByText("PR作成中")).toBeNull();
+    expect(
+      screen.getByText(
+        "Macでのビルド待ち（実機確認後、xcode-release.shがリリースPRの作成からmainへのマージまで行います）",
+      ),
+    ).not.toBeNull();
+  });
+
+  it("deviceBuild対象でなければrelease_pending段は従来どおり「PR作成中」", () => {
+    render(<ReleaseProgress status={makeStatus({ phase: "release_pending", developVersion: "1.1.0" })} />);
+    expect(screen.getByText("PR作成中")).not.toBeNull();
+  });
+
+  it("release_pr_open段は「タップしてmainへマージ」を出さず、参照リンクだけにする", () => {
+    render(<ReleaseProgress status={statusWithReleaseCi("success")} isDeviceBuild />);
+    expect(screen.queryByText("develop→main PR #42 をタップしてmainへマージ")).toBeNull();
+    expect(screen.getByText("develop→main PR #42 を確認")).not.toBeNull();
+    expect(
+      screen.getByText("Macでの実機確認後、xcode-release.shがこのPRをmainへマージします。"),
+    ).not.toBeNull();
+  });
+});

@@ -570,6 +570,55 @@ pushトリガーは当然`develop`のものになる。**ジョブが対象コ�
   別の正ができるため採らなかった。移動するgitタグで表す案は、`main`とタグの2つを見比べる必要が
   残るため採らなかった
 
+### 「リリース」画面（スマホ）にも同じ案内を出す（#3579）
+
+ブランチ画面だけでなく、リポジトリのロケットボタンから開く「リリース」画面
+（`MobileReleaseSheet`・`ReleaseProgress`）にも`aide-ios`向けの案内を出す。文言・コマンドは
+[`components/dashboard/device-build-instructions.tsx`](../../src/components/dashboard/device-build-instructions.tsx)
+へ切り出し、ブランチ画面・リリース画面の両方がこれを参照する（1箇所を直せば両方に効く）。
+
+- **`release_pending`段（バンプPRがdevelopへ入った後、develop→mainのPRがまだ無い状態）は、
+  `aide-ios`では自動では進まない定常状態。** `release-develop-to-main.yml`は
+  `workflow_dispatch`だけで`push`トリガーを持たず、develop→mainのPRは`xcode-release.sh`が
+  実機確認後に作成・マージを一度に行う。そのため`ReleaseProgress`はこの段を「PR作成中」の
+  スピナーではなく「Macでのビルド待ち」という注記に差し替え、`useReleaseStatus`のポーリングも
+  この段を進行中とみなさない（`isDeviceBuild`を渡す）
+- **シートを開くロケットボタン（`mobile-repo-issues-screen.tsx`）も同じ理由で直す。**
+  `summarizeReleaseButtonStatus`は素の`release_pending`を`progressing`（回転アニメーション）に
+  畳むため、`isDeviceBuild`を渡して`idle`へ落とす。`release-pending-merges/route.ts`
+  （通知・他画面のバッジの元）は元々この段を`releasePending: false`で除外しており、影響しない
+- **develop→mainのPRが実際に開いている間（`release_pr_open`）も、「タップしてmainへマージ」の
+  導線は出さない。** 参照リンクと、Macのスクリプトがマージする旨の注記だけにする
+- **リリースworkflowの手動起動ボタン（「リリースworkflowを起動」）も出さない。** ブランチ画面と
+  同じ理由で、バンプは`gh workflow run release-develop-to-main.yml --repo guchi-apps/aide-ios`
+  で行う運用のまま
+
+### WebViewでネイティブアプリを包むリポジトリ（`guchi-apps/myroom`。#3579）
+
+`myroom`のkurashio iOSアプリ（`ios/`、myroom #526・#528・PR #529）は`aide-ios`と違い、`main`
+へのマージ（Web側の変更）は`deploy.yml`がそのまま本番へ反映する。`ios/`やアプリアイコンを
+変えたときだけ、Mac miniでXcodeを開いて実機へ入れ直す必要がある。
+
+- 対象リポジトリと手順は
+  [`lib/webview-ios-repos.ts`](../../src/lib/webview-ios-repos.ts)に固定リストで持つ
+  （`device-build-repos.ts`と同じ判断。単に`ios/`フォルダがあるだけの対象外リポジトリを
+  誤って拾わないため）
+- **Web側の変更か`ios/`側の変更かは自動判定しない。** `ReleaseStatus`には変更ファイルの情報が
+  無く、判定にはGitHub compare APIの追加呼び出しが要る（1回の取得で既に7〜8回消費している）。
+  「Webだけ更新（再ビルド不要）」と「アプリ本体の入れ直し（Xcode操作が要る）」の2種類の手順を
+  並べて示し、どちらに当たるかは利用者が判断する
+- リリース画面には`aide-ios`と違って通常どおりの進捗（バンプPR→develop反映→mainへマージ→
+  本番デプロイ）を出したうえで、上記の案内を追加で表示する。`main`へのマージ自体は画面から
+  行ってよい（Web側は正しく反映されるため、`aide-ios`のような抑止はしない）
+
+### 自動化（Mac miniでの実行代行）は調査のみで見送り（#3579）
+
+VPS・サブPCへはTailscale SSH経由の代行実行基盤があるが（`71.manual-step`の代行実行）、
+**Mac miniには同等の基盤が無い。** 実機ビルド・インストール・実機確認はMac mini上での
+対話的な操作（`xcrun devicectl`・Xcode・実機での目視確認）を含み、安全な実行経路と実行結果の
+取得を新たに設計する必要があるため、本Issueでは自動化を実装せず、正確な手動手順の表示までに
+留める。自動化が必要になった場合は、Mac miniの代行実行基盤の設計を扱う別Issueとする。
+
 ## 自動マージされないことの担保
 
 バージョンbump用PR（`release/v*` → `develop`）・develop→mainのPR（`release-main/v*` → `main`）は
