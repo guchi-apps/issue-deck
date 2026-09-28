@@ -249,7 +249,7 @@ describe("SessionUsagePanel", () => {
     );
 
     const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
-    const bar = within(breakdown).getByTitle("Claude $10.00 / Codex $0.00 / GitHub Actions $0.00");
+    const bar = within(breakdown).getByTitle("Claude $10.00 / Codex $0.00");
     const segments = bar.querySelectorAll(":scope > div > span");
     // 単色の1本ではなく、モデルの重さ（tier1・tier2）で色の異なる2区分に分かれる。
     expect(segments.length).toBe(2);
@@ -328,7 +328,7 @@ describe("SessionUsagePanel", () => {
   it("GitHub Actionsの使用量を合計と明細へ表示する", () => {
     renderPanel(response([entry({ source: "github-actions", workflowName: "Claude Code Review", runUrl: "https://github.com/example/run/1", costUsd: 2 })]));
     openIssueGroup(screen.getByText("Issue・PR別").closest("section") as HTMLElement);
-    expect(screen.getAllByText("GitHub Actions").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("GitHub Actions", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Actions", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
@@ -699,7 +699,7 @@ describe("SessionUsagePanel", () => {
     // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
     expect(
       within(daily).getByTitle(
-        /^2026-08-30\s+\$20\.00\s+100応答\s+・\s+Claude \$20\.00 \/ Codex \$0\.00 \/ GitHub Actions \$0\.00\s+・\s+モデル: Opus 5$/,
+        /^2026-08-30\s+\$20\.00\s+100応答\s+・\s+Claude \$20\.00 \/ Codex \$0\.00\s+・\s+モデル: Opus 5$/,
       ),
     ).toBeTruthy();
     // トークンの細い帯は日別では出さない。
@@ -725,7 +725,8 @@ describe("SessionUsagePanel", () => {
     const legend = screen.getByText("太い棒＝金額").closest("div") as HTMLElement;
     expect(within(legend).getByText("Claude")).toBeTruthy();
     expect(within(legend).getByText("Codex")).toBeTruthy();
-    expect(within(legend).getByText("GitHub Actions")).toBeTruthy();
+    // GitHub Actions専用の表示は無い（#3564でClaude・Codexの濃淡へ合流させたため）。
+    expect(within(legend).queryByText("GitHub Actions")).toBeNull();
   });
 
   it("日別は期間の全日を並べ、金額0の日も日付を残す（#3038）", () => {
@@ -739,9 +740,7 @@ describe("SessionUsagePanel", () => {
     expect(within(daily).getAllByTitle(/応答/)).toHaveLength(7);
     // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
     expect(
-      within(daily).getByTitle(
-        /^2026-08-29\s+\$0\.00\s+0応答\s+・\s+Claude \$0\.00 \/ Codex \$0\.00 \/ GitHub Actions \$0\.00$/,
-      ),
+      within(daily).getByTitle(/^2026-08-29\s+\$0\.00\s+0応答\s+・\s+Claude \$0\.00 \/ Codex \$0\.00$/),
     ).toBeTruthy();
     // 縦軸は金額（$0と、最大を含む目盛り）。
     expect(within(daily).getByText("$0")).toBeTruthy();
@@ -764,12 +763,13 @@ describe("SessionUsagePanel", () => {
     expect(within(daily).getByText("Claude")).toBeTruthy();
     expect(within(daily).getByText("Codex")).toBeTruthy();
     expect(within(daily).getByText("濃いほど重いモデル")).toBeTruthy();
-    expect(within(daily).getByText("GitHub Actions")).toBeTruthy();
+    // GitHub Actions専用の表示は無い（#3564でClaude・Codexの濃淡へ合流させたため）。
+    expect(within(daily).queryByText("GitHub Actions")).toBeNull();
   });
 
-  it("金額の棒でGitHub ActionsぶんをClaudeから引く（Codexが短く出ない。#2633）", () => {
-    // ActionsはClaude Codeなので`byAgent.claude`にも入っている。引かずに描くと、Claudeの帯が
-    // Actionsのぶんまで伸び、残りとして描いていたCodexが消える。
+  it("GitHub ActionsぶんもClaude・Codexの帯へそのまま合流させる（実行経路では塗り分けない。#3564）", () => {
+    // ActionsはClaude Codeなので`byAgent.claude`にも入っている。実行経路として単色に分けず、
+    // 使われたモデルの重さに応じてClaude・Codexの濃淡へそのまま積む。
     renderPanel(
       response([
         entry({ sessionId: "local-claude", costUsd: 10 }),
@@ -780,13 +780,14 @@ describe("SessionUsagePanel", () => {
 
     const daily = screen.getByText("日別").closest("section") as HTMLElement;
     // タイトルの区切りは全角空白。テスト側の照合が空白を畳むので正規表現で受ける。
+    // local-claude($10)とactions($20)は同じモデル（claude-opus-5）のため、Claude欄は合計$30になる。
     const dayCell = within(daily).getByTitle(
-      /^2026-08-30\s+\$40\.00\s+300応答\s+・\s+Claude \$10\.00 \/ Codex \$10\.00 \/ GitHub Actions \$20\.00\s+・\s+モデル: Opus 5$/,
+      /^2026-08-30\s+\$40\.00\s+300応答\s+・\s+Claude \$30\.00 \/ Codex \$10\.00\s+・\s+モデル: Opus 5$/,
     );
     const bar = dayCell.querySelector(".flex-col-reverse") as HTMLElement;
-    // 縦棒なので、積み上げの割合は高さで持つ。
+    // 縦棒なので、積み上げの割合は高さで持つ。Claude($30・tier1)とCodex($10・tier1)の2区分のみ。
     const heights = [...bar.querySelectorAll("span")].map((span) => (span as HTMLElement).style.height);
-    expect(heights).toEqual(["25%", "25%", "50%"]);
+    expect(heights).toEqual(["75%", "25%"]);
   });
 
   it("スマホ（compact）でもPCと同じ横棒グラフ・展開の一覧を出す（#2628・#2653）", () => {

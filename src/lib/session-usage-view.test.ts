@@ -459,7 +459,7 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byIssue[0].byKind[0].modelTiers.claude.costUsd).toEqual([0, 4, 6, 0]);
   });
 
-  it("GitHub Actionsのentryはモデルtierへ積まない（日別グラフは単色のまま表す）", () => {
+  it("GitHub Actionsのentryもモデルtierへ積む（実行経路で単色に分けず、Claudeへ合流させる）", () => {
     const summary = buildSessionUsageSummary({
       entries: [entry({ source: "github-actions", models: ["claude-opus-5"], costUsd: 5 })],
       nowMs: NOW_MS,
@@ -468,7 +468,7 @@ describe("buildSessionUsageSummary", () => {
     });
 
     const tiers = summary.byDay[0].modelTiers.claude;
-    expect(tiers.costUsd).toEqual([0, 0, 0, 0]);
+    expect(tiers.costUsd).toEqual([0, 5, 0, 0]);
     expect(tiers.unresolvedCostUsd).toBe(0);
   });
 
