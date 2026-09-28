@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 const getTypeSafeUsageSummary = vi.fn();
 const getTypeSafeTotalInputTokens = vi.fn();
 

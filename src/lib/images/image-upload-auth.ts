@@ -1,3 +1,4 @@
+import { resolveSharedToken } from "@/lib/shared-token-reader";
 import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared-secret-auth";
 
 /**
@@ -11,6 +12,12 @@ import { authorizeBearerSecret, type SharedSecretAuthResult } from "@/lib/shared
  * （`src/lib/dispatch/dispatch-auth.ts`と同じ方針）。この値で書けるのはアップロードだけなので、
  * 漏洩時に止める・再発行する範囲をここに閉じられる。未設定なら`not_configured`（503）。
  */
-export function authorizeImageUpload(authorizationHeader: string | null): SharedSecretAuthResult {
-  return authorizeBearerSecret(authorizationHeader, process.env.IMAGE_UPLOAD_SECRET);
+export async function authorizeImageUpload(
+  authorizationHeader: string | null,
+): Promise<SharedSecretAuthResult> {
+  // 共有トークン`ISSUE_DECK_IMAGE_UPLOAD_SECRET`を優先し、取れなければ環境変数へ倒す（#3561）
+  return authorizeBearerSecret(
+    authorizationHeader,
+    await resolveSharedToken("ISSUE_DECK_IMAGE_UPLOAD_SECRET", "IMAGE_UPLOAD_SECRET"),
+  );
 }

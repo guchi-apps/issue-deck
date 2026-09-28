@@ -40,3 +40,13 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 ```
 
 各アプリを切り替えたら、issue-deckの設定画面で利用日時と利用元を確認してから、1Password側の旧値を削除します。
+
+## issue-deck自身が使う値は自DBから読む（#3561）
+
+issue-deckは共有トークンの保存先なので、自分が使う連携トークンはAPIを経由せず`src/lib/shared-token-reader.ts`の`resolveSharedToken(共有トークン名, 環境変数名)`でDBから直接復号して読む。60秒メモリへ置き、DBを読んだ時点で利用元`issue-deck`の`SharedTokenUsage`を1件残す（記録の頻度はキャッシュ単位）。**取得できなければ同名の環境変数へ倒す**ので、フォールバックに黙って落ちていないかは設定画面の利用元に`issue-deck`が出ているかで確かめる。
+
+| 共有トークン名 | フォールバックの環境変数 | 読む箇所 |
+| --- | --- | --- |
+| `OPS_API_TOKEN` | `OPS_API_TOKEN` | `ai-usage-export.ts`・`typesafe/usage-auth.ts`・`dispatch/ops-dashboard-codex-usage.ts` |
+| `ISSUE_DECK_IMAGE_UPLOAD_SECRET` | `IMAGE_UPLOAD_SECRET` | `images/image-upload-auth.ts` |
+| `TYPESAFE_API_KEY` | `TYPESAFE_API_KEY` | `typesafe/system-one.ts` |

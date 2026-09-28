@@ -3,6 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getClaudeApiUsageSummary, resetClaudeApiUsage } from "@/lib/claude/api-usage";
 import { askSystemOne, hasTypeSafeApiKey } from "@/lib/typesafe/system-one";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 const NOW = new Date(2026, 8, 20, 12, 0, 0).getTime();
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -123,10 +131,10 @@ describe("hasTypeSafeApiKey", () => {
     delete process.env.TYPESAFE_API_KEY;
   });
 
-  it("キーの有無を返す", () => {
+  it("キーの有無を返す", async () => {
     delete process.env.TYPESAFE_API_KEY;
-    expect(hasTypeSafeApiKey()).toBe(false);
+    expect(await hasTypeSafeApiKey()).toBe(false);
     process.env.TYPESAFE_API_KEY = "k";
-    expect(hasTypeSafeApiKey()).toBe(true);
+    expect(await hasTypeSafeApiKey()).toBe(true);
   });
 });

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 const getAiUsageSummary = vi.fn();
 
 vi.mock("@/lib/ai-usage-export", async (importOriginal) => ({
@@ -24,7 +32,7 @@ describe("GET /api/ai-usage", () => {
   it("設定が無ければ503を返す", async () => {
     vi.stubEnv("OPS_API_TOKEN", "");
 
-    const response = GET(request("Bearer token"));
+    const response = await GET(request("Bearer token"));
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: "not_configured" });
@@ -34,10 +42,10 @@ describe("GET /api/ai-usage", () => {
   it("トークンが無いか一致しなければ401を返す", async () => {
     vi.stubEnv("OPS_API_TOKEN", "expected-token");
 
-    const noToken = GET(request());
+    const noToken = await GET(request());
     expect(noToken.status).toBe(401);
     await expect(noToken.json()).resolves.toEqual({ error: "unauthorized" });
-    expect(GET(request("Bearer incorrect")).status).toBe(401);
+    expect((await GET(request("Bearer incorrect"))).status).toBe(401);
     expect(getAiUsageSummary).not.toHaveBeenCalled();
   });
 
@@ -46,7 +54,7 @@ describe("GET /api/ai-usage", () => {
     const usage = { features: [] };
     getAiUsageSummary.mockReturnValue(usage);
 
-    const response = GET(request("Bearer expected-token"));
+    const response = await GET(request("Bearer expected-token"));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
