@@ -113,20 +113,27 @@ const errorMessageForResponse = releaseErrorMessage;
 const ACTIVE_POLL_INTERVAL_MS = 10_000;
 const IDLE_POLL_INTERVAL_MS = 30_000;
 
-/** 放置していても自動で状態が進む段階かどうか（＝短い間隔でのポーリングに意味がある段階か） */
-function isProgressing(status: ReleaseStatus | null): boolean {
+/**
+ * 放置していても自動で状態が進む段階かどうか（＝短い間隔でのポーリングに意味がある段階か）。
+ *
+ * `isDeviceBuild`（`lib/device-build-repos.ts`対象。#3579）のときは`release_pending`を
+ * 進行中とみなさない。develop→mainのPRはMacの`xcode-release.sh`が実機確認後に作成するため、
+ * この段はポーリングでは進まず、10秒間隔で取り続けても無駄なGitHub API消費になるだけ。
+ */
+function isProgressing(status: ReleaseStatus | null, isDeviceBuild: boolean): boolean {
   if (!status || !status.available) return false;
   if (status.workflowRun && status.workflowRun.status !== "completed") return true;
   if (status.deployWorkflowRun && status.deployWorkflowRun.status !== "completed") return true;
   if (status.bumpPullRequest?.ciState === "pending") return true;
   // develop→mainのPRが自動作成されるのを待っている過渡状態
-  return status.phase === "release_pending";
+  return status.phase === "release_pending" && !isDeviceBuild;
 }
 
 export function useReleaseStatus(
   repoFullName: string | null,
   enabled: boolean,
   idlePollIntervalMs?: number,
+  isDeviceBuild = false,
 ) {
   const [data, setData] = useState<ReleaseStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -178,7 +185,10 @@ export function useReleaseStatus(
 
     function schedule() {
       if (cancelled) return;
-      timerId = setTimeout(poll, isProgressing(lastStatus) ? ACTIVE_POLL_INTERVAL_MS : idleIntervalMs);
+      timerId = setTimeout(
+        poll,
+        isProgressing(lastStatus, isDeviceBuild) ? ACTIVE_POLL_INTERVAL_MS : idleIntervalMs,
+      );
     }
 
     async function runOnce(initial: boolean) {
@@ -217,7 +227,7 @@ export function useReleaseStatus(
       clearTimeout(timerId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [enabled, repoFullName, reloadKey, idlePollIntervalMs]);
+  }, [enabled, repoFullName, reloadKey, idlePollIntervalMs, isDeviceBuild]);
 
   /** `bumpKind`を渡すとバージョンの上げ幅を指定する。省略時は自動判定（#1548） */
   async function triggerRelease(bumpKind?: BumpKind): Promise<boolean> {

@@ -124,8 +124,17 @@ export function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | n
  * `AvailableReleaseStatus`からヘッダーのRocketボタン表示用の状態サマリを算出する（#542）。
  * `phase`はバンプPRをdevelop→mainのPRより優先して決まるため、その優先順位を保ったまま
  * `summarizeReleaseStatus`の入力へ移し替える。
+ *
+ * `isDeviceBuild`（`lib/device-build-repos.ts`対象。#3579）のときは`releasePending`を
+ * 立てない。develop→mainのPRはMacの`xcode-release.sh`が実機確認後に作成するため、この段は
+ * アプリからは自動で進まず、`progressing`（回転アニメーション）にすると「放っておけば進む」と
+ * 誤解させる。`release-pending-merges/route.ts`が全リポジトリ一律で`releasePending: false`に
+ * しているのと同じ理由（コストではなく、この画面では判定できないため）。
  */
-export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): ReleaseButtonStatus {
+export function summarizeReleaseButtonStatus(
+  status: AvailableReleaseStatus,
+  isDeviceBuild = false,
+): ReleaseButtonStatus {
   return summarizeReleaseStatus({
     workflowRun: status.workflowRun,
     deployWorkflowRun: status.deployWorkflowRun,
@@ -145,7 +154,7 @@ export function summarizeReleaseButtonStatus(status: AvailableReleaseStatus): Re
             ),
           }
         : null,
-    releasePending: status.phase === "release_pending",
+    releasePending: status.phase === "release_pending" && !isDeviceBuild,
   });
 }
 

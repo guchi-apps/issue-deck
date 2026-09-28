@@ -130,7 +130,7 @@ function repairForPullRequest(pullRequest: {
  * はずの段が実際には止まっていることを明示するため、該当段を"error"にしてrunへのリンクを
  * 添える（それまでは`phase`が変わらないまま"PR作成中"等の表示が残り続け、失敗に気づきにくかった。#727）。
  */
-function buildSteps(status: AvailableReleaseStatus): Step[] {
+function buildSteps(status: AvailableReleaseStatus, isDeviceBuild: boolean): Step[] {
   const { phase, bumpPullRequest: bump, releasePullRequest: release, workflowRun, developVersion } = status;
   const runActive = workflowRun != null && workflowRun.status !== "completed";
   const failedRun =
@@ -170,6 +170,13 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
       steps[2].state = "error";
       steps[2].note = "develop→main PRの自動作成に失敗しました";
       steps[2].action = { href: failedRun.htmlUrl, label: "GitHub Actionsで確認して対処" };
+    } else if (isDeviceBuild) {
+      // aide-iosのようなdeviceBuild対象repoでは、developへのバンプ反映後は
+      // develop→mainのPRが自動作成されない（Macの`xcode-release.sh`が実機確認後に
+      // 作成とマージを一度に行う）。この段は自動では進まないので、「作成中」の
+      // スピナーではなく次に人が行うことを出す（#3579）。
+      steps[2].state = "action";
+      steps[2].note = "Macでのビルド待ち（実機確認後、xcode-release.shがリリースPRの作成からmainへのマージまで行います）";
     } else {
       steps[2].state = "active";
       steps[2].note = "PR作成中";
@@ -179,26 +186,34 @@ function buildSteps(status: AvailableReleaseStatus): Step[] {
     steps[0].note = developVersion ? `次バージョン: v${developVersion}` : undefined;
     steps[1].state = "done";
     steps[2].state = "done";
-    // CIが実行中の間はまだマージできないため「進行中」に留め、オレンジのマージ導線を出さない
-    // （#1433。バンプPRの段と同じ基準）。PRの中身は確認しに行けるよう参考リンクだけ添える。
-    const waitingCi = release.ciState === "pending";
-    steps[3].state = waitingCi ? "active" : "action";
     steps[3].ciState = release.ciState;
     steps[3].mergeable = release.mergeable;
     steps[3].repairRun = release.repairRun ?? null;
     steps[3].repair = repairForPullRequest(release);
-    if (waitingCi) {
-      steps[3].link = {
-        href: release.url,
-        label: `develop→main PR #${release.number} を確認`,
-        pending: true,
-      };
+    if (isDeviceBuild) {
+      // mainへのマージはMacの`xcode-release.sh`だけが行う（`--match-head-commit`）。
+      // 画面からは参照リンクだけを出し、「タップしてマージ」の導線は出さない（#3579）。
+      steps[3].state = "action";
+      steps[3].note = "Macでの実機確認後、xcode-release.shがこのPRをmainへマージします。";
+      steps[3].link = { href: release.url, label: `develop→main PR #${release.number} を確認` };
     } else {
-      steps[3].note = "内容を確認して「merge commit」でマージしてください。";
-      steps[3].action = {
-        href: release.url,
-        label: `develop→main PR #${release.number} をタップしてmainへマージ`,
-      };
+      // CIが実行中の間はまだマージできないため「進行中」に留め、オレンジのマージ導線を出さない
+      // （#1433。バンプPRの段と同じ基準）。PRの中身は確認しに行けるよう参考リンクだけ添える。
+      const waitingCi = release.ciState === "pending";
+      steps[3].state = waitingCi ? "active" : "action";
+      if (waitingCi) {
+        steps[3].link = {
+          href: release.url,
+          label: `develop→main PR #${release.number} を確認`,
+          pending: true,
+        };
+      } else {
+        steps[3].note = "内容を確認して「merge commit」でマージしてください。";
+        steps[3].action = {
+          href: release.url,
+          label: `develop→main PR #${release.number} をタップしてmainへマージ`,
+        };
+      }
     }
   } else if (runActive) {
     // まだPRが現れていないが実行中（起動直後）。最初の段を進行中にする。
@@ -273,6 +288,7 @@ export function ReleaseProgress({
   status,
   compact = false,
   repoFullName = null,
+  isDeviceBuild = false,
 }: {
   status: AvailableReleaseStatus;
   compact?: boolean;
@@ -281,8 +297,13 @@ export function ReleaseProgress({
    * 渡さない場合はボタンを出さない（進捗表示そのものはリポジトリ名なしでも成立するため）。
    */
   repoFullName?: string | null;
+  /**
+   * Xcodeで実機へ反映するリポジトリか（`lib/device-build-repos.ts`。#3579）。
+   * develop→mainのPR作成・マージをMacのスクリプトが行うため、その2段の表示・導線を変える。
+   */
+  isDeviceBuild?: boolean;
 }) {
-  const steps = buildSteps(status);
+  const steps = buildSteps(status, isDeviceBuild);
   const { workflowRun } = status;
   const text = compact ? "text-xs" : "text-sm";
   const nothingToDo = status.phase === "none" && !(workflowRun && workflowRun.status !== "completed");
