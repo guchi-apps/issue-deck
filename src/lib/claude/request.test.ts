@@ -53,7 +53,7 @@ describe("callClaudeMessages", () => {
     );
 
     const { response, json } = await callClaudeMessages({
-      feature: "issue_summary",
+      feature: "comment_summary",
       token: "test-token",
       body: { model: "claude-haiku-4-5", max_tokens: 16, messages: [] },
     });
@@ -171,7 +171,7 @@ describe("callClaudeMessages", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await callClaudeMessages({
-      feature: "issue_summary",
+      feature: "comment_summary",
       token: "test-token",
       body: { model: "claude-haiku-4-5", max_tokens: 8, messages: [] },
     });
@@ -196,7 +196,7 @@ describe("callClaudeMessages", () => {
       body: { max_tokens: 8, messages: [] },
     });
     await callClaudeMessages({
-      feature: "issue_summary",
+      feature: "comment_summary",
       token: "test-token",
       body: { max_tokens: 8, messages: [] },
     });
@@ -306,7 +306,7 @@ describe("callClaudeMessages", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { response, json } = await callClaudeMessages({
-      feature: "issue_summary",
+      feature: "comment_summary",
       token: "anthropic-token",
       body: { max_tokens: 16, messages: [] },
     });

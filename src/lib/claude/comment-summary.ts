@@ -30,7 +30,7 @@ type AnthropicMessageResponse = {
 /**
  * コメント1件の要約をClaudeに生成させる。
  *
- * `issue-summary.ts`と同様、`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
+ * `usage.ts`と同様、`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
  * `/v1/messages`を呼び出す（送信は`request.ts`が担う）。呼び出しごとにプラン枠を消費するため、
  * 呼び出し元でボタン操作等の明示的なトリガーに限定すること。
  */

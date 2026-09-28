@@ -244,7 +244,7 @@ export function parseConsultResponse(text: string): ConsultResult {
 /**
  * 相談を1往復進める。
  *
- * `issue-summary.ts`などと同じく`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
+ * `usage.ts`などと同じく`CLAUDE_CODE_OAUTH_TOKEN`（`user:inference`スコープ）で
  * `/v1/messages`を直接呼ぶ。**呼び出しごとにプラン枠を消費する**ので、呼び出し元は
  * 送信ボタンの操作に限定すること。
  */

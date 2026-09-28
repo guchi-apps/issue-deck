@@ -32,8 +32,8 @@ describe("claudeApiUsage", () => {
   });
 
   it("機能別・モデル別に呼び出し回数とトークン数を集計する", () => {
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
     recordClaudeApiCall({
       feature: "issue_search",
       model: "claude-sonnet-5",
@@ -46,10 +46,10 @@ describe("claudeApiUsage", () => {
     expect(summary.totalLast24h.calls).toBe(3);
     expect(totalTokens(summary.totalLast24h)).toBe(255);
     expect(summary.features.map((feature) => feature.key)).toEqual([
-      "issue_summary",
+      "comment_summary",
       "issue_search",
     ]);
-    expect(summary.features[0].label).toBe("Issueの要約");
+    expect(summary.features[0].label).toBe("コメントの要約");
     expect(summary.features[0].last24h.calls).toBe(2);
     expect(summary.features[0].models).toEqual([
       {
@@ -86,12 +86,12 @@ describe("claudeApiUsage", () => {
   it("過去1日と過去7日を分けて数える", () => {
     // 3日前の呼び出しは「過去7日」には入るが「過去1日」には入らない。
     recordClaudeApiCall({
-      feature: "issue_summary",
+      feature: "comment_summary",
       model: MODEL,
       tokens: tokens(),
       now: NOW - 3 * 24 * 60 * 60_000,
     });
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
 
     const summary = getClaudeApiUsageSummary(NOW);
 
@@ -101,7 +101,7 @@ describe("claudeApiUsage", () => {
 
   it("保持期間（7日）より古いバケットは捨てる", () => {
     recordClaudeApiCall({
-      feature: "issue_summary",
+      feature: "comment_summary",
       model: MODEL,
       tokens: tokens(),
       now: NOW - USAGE_WINDOW_MS - 60_000,
@@ -120,17 +120,17 @@ describe("claudeApiUsage", () => {
 
     // 1件目で即座に渡る。**繰り上がりを待つと、次の呼び出しまで数時間空くAIの使い方では
     // 直近の消費が保存されないまま消える。**
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
     expect(listener).toHaveBeenCalledTimes(1);
 
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
     expect(listener).toHaveBeenCalledTimes(2);
 
     const updated = listener.mock.calls[1][0] as ClaudeApiUsageBucketSnapshot;
     expect(updated.startedAt).toBe(NOW);
     expect(updated.entries).toEqual([
       {
-        feature: "issue_summary",
+        feature: "comment_summary",
         model: MODEL,
         calls: 2,
         inputTokens: 200,
@@ -142,14 +142,14 @@ describe("claudeApiUsage", () => {
   });
 
   it("DBから復元したバケットはメモリ上の集計へ加算する", () => {
-    recordClaudeApiCall({ feature: "issue_summary", model: MODEL, tokens: tokens(), now: NOW });
+    recordClaudeApiCall({ feature: "comment_summary", model: MODEL, tokens: tokens(), now: NOW });
     loadPersistedBuckets(
       [
         {
           startedAt: NOW,
           entries: [
             {
-              feature: "issue_summary",
+              feature: "comment_summary",
               model: MODEL,
               calls: 3,
               inputTokens: 300,
