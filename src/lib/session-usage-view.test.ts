@@ -442,6 +442,23 @@ describe("buildSessionUsageSummary", () => {
     expect(tiers.unresolvedCostUsd).toBe(1);
   });
 
+  it("リポジトリ別・種別別・Issue別の金額もエージェント×モデルの重さ別に積む（#3552）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "opus", models: ["claude-opus-5"], costUsd: 4 }),
+        entry({ sessionId: "sonnet", models: ["claude-sonnet-5"], costUsd: 6 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+
+    expect(summary.byRepository[0].modelTiers.claude.costUsd).toEqual([0, 4, 6, 0]);
+    expect(summary.byKind[0].modelTiers.claude.costUsd).toEqual([0, 4, 6, 0]);
+    expect(summary.byIssue[0].modelTiers.claude.costUsd).toEqual([0, 4, 6, 0]);
+    expect(summary.byIssue[0].byKind[0].modelTiers.claude.costUsd).toEqual([0, 4, 6, 0]);
+  });
+
   it("GitHub Actionsのentryはモデルtierへ積まない（日別グラフは単色のまま表す）", () => {
     const summary = buildSessionUsageSummary({
       entries: [entry({ source: "github-actions", models: ["claude-opus-5"], costUsd: 5 })],

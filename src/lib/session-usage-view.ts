@@ -115,7 +115,13 @@ export type UsageDay = UsageTotals & {
   /** その日に使われたモデルの表示ラベル（`sessionUsageModelLabel`、重複除去・出現順） */
   modelLabels: string[];
 };
-export type UsageGroup = UsageTotals & { key: string; byAgent: UsageByAgent; bySource: UsageBySource };
+export type UsageGroup = UsageTotals & {
+  key: string;
+  byAgent: UsageByAgent;
+  bySource: UsageBySource;
+  /** エージェント×モデルの重さ別の内訳（#3552）。`byDay`と同じ`addEntryModelTier`で積む */
+  modelTiers: UsageModelTiers;
+};
 
 /**
  * Issueスコープの種別別1行ぶん（#3410）。**「セッション種別別」（全体の`byKind`）と同じキー・
@@ -144,6 +150,8 @@ export type UsageIssue = UsageTotals & {
   entries: SessionUsageEntry[];
   byAgent: UsageByAgent;
   bySource: UsageBySource;
+  /** エージェント×モデルの重さ別の内訳（#3552）。`byDay`と同じ`addEntryModelTier`で積む */
+  modelTiers: UsageModelTiers;
   /**
    * 種別別（#3410）。**「セッション種別別」と同じ粒度**（実装はフェーズへ割ってある）で、
    * そのIssue・PRに絞った内訳。並びは全体の`byKind`と同じ`compareUsageKinds`（作業の順）。
@@ -353,10 +361,15 @@ function emptyModelTiers(): UsageModelTiers {
 }
 
 /**
- * 日別の「エージェント×モデルの重さ」内訳へ、1entryぶんの金額を積む（#3396）。**GitHub
- * Actionsのentryは積まない**（日別グラフはActionsを単色のまま表す）。1entryが複数モデルを
+ * 「エージェント×モデルの重さ」内訳へ、1entryぶんの金額を積む（#3396・#3552）。**GitHub
+ * Actionsのentryは積まない**（金額の棒はActionsを単色のまま表す）。1entryが複数モデルを
  * 使っていれば`pickPrimaryModel`と同じ「最も重い1つ」を代表とし、金額は丸ごとそこへ計上する
  * （按分の手立てが無いため。実行状況の●と同じ近似）。
+ *
+ * **「セッション種別別」の実装フェーズ行（`kindRowsForEntry`が`scaleEntryToPhase`で割った行）も
+ * この1段になる**（#3552・計画レビュー指摘）。フェーズ別のモデル情報は無く、割ったあとの
+ * `entry.models`はセッション全体のまま複製されるため、同じセッションの計画・調査・実装・検証・
+ * 仕上げは全フェーズが同じ色（セッション全体でいちばん重いモデル）になる。
  */
 function addEntryModelTier(tiers: UsageModelTiers, entry: SessionUsageEntry): void {
   if (entry.source === "github-actions") return;
@@ -627,9 +640,11 @@ export function buildSessionUsageSummary({
       ...emptyTotals(),
       byAgent: emptyByAgent(),
       bySource: emptyBySource(),
+      modelTiers: emptyModelTiers(),
     };
     addEntryWithAgent(repository, entry);
     addEntryWithSource(repository, entry);
+    addEntryModelTier(repository.modelTiers, entry);
     byRepository.set(repositoryKey, repository);
 
     // **実装はフェーズごとの行へ割る**（#2779）。ほかの種別は1本＝1行のまま。
@@ -640,9 +655,11 @@ export function buildSessionUsageSummary({
         ...emptyTotals(),
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        modelTiers: emptyModelTiers(),
       };
       addEntryWithAgent(kind, row.entry);
       addEntryWithSource(kind, row.entry);
+      addEntryModelTier(kind.modelTiers, row.entry);
       byKind.set(row.key, kind);
     }
 
@@ -669,12 +686,14 @@ export function buildSessionUsageSummary({
         entries: [],
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
+        modelTiers: emptyModelTiers(),
         byKind: [],
         quotaPercent: null,
         ...emptyTotals(),
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
     addEntryWithSource(issue, entry);
+    addEntryModelTier(issue.modelTiers, entry);
     issue.entries.push(entry);
     if (entry.startedAt > issue.latestStartedAt) issue.latestStartedAt = entry.startedAt;
     byIssue.set(issueKey, issue);
@@ -702,10 +721,12 @@ export function buildSessionUsageSummary({
           ...emptyTotals(),
           byAgent: emptyByAgent(),
           bySource: emptyBySource(),
+          modelTiers: emptyModelTiers(),
           models: [],
         };
         addEntryWithAgent(kind, row.entry);
         addEntryWithSource(kind, row.entry);
+        addEntryModelTier(kind.modelTiers, row.entry);
         addPhaseModels(kind.models, row.entry.models);
         issueByKind.set(row.key, kind);
       }

@@ -239,6 +239,24 @@ describe("SessionUsagePanel", () => {
     expect(rows.queryByText("作業の流れの外")).toBeNull();
   });
 
+  it("セッション種別別の棒は、モデルの重さ別の濃淡で塗り分ける（#3552）", () => {
+    renderPanel(
+      response([
+        // claude-opus-5はtier1、claude-sonnet-5はtier2（ai-model-pricing.tsの単価表が正）。
+        entry({ sessionId: "opus", models: ["claude-opus-5"], costUsd: 4 }),
+        entry({ sessionId: "sonnet", models: ["claude-sonnet-5"], costUsd: 6 }),
+      ]),
+    );
+
+    const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    const bar = within(breakdown).getByTitle("Claude $10.00 / Codex $0.00 / GitHub Actions $0.00");
+    const segments = bar.querySelectorAll(":scope > div > span");
+    // 単色の1本ではなく、モデルの重さ（tier1・tier2）で色の異なる2区分に分かれる。
+    expect(segments.length).toBe(2);
+    const colors = [...segments].map((segment) => (segment as HTMLElement).style.backgroundColor);
+    expect(new Set(colors).size).toBe(2);
+  });
+
   /**
    * #2954。金額順ではなく作業の順に並べ、横断質問・その他の手前に区切りを入れる。
    */
@@ -697,6 +715,17 @@ describe("SessionUsagePanel", () => {
     // 凡例は「どちらの棒の色か」を先に言う（内訳の手前に置く）。
     expect(screen.getByText("太い棒＝金額")).toBeTruthy();
     expect(screen.getByText("細い帯＝トークン")).toBeTruthy();
+  });
+
+  it("「太い棒＝金額」の凡例も、日別と同じくClaude／Codexをモデルの重さの濃淡で示す（#3552）", () => {
+    renderPanel(response([entry()]));
+
+    // 「濃いほど重いモデル」は日別の凡例（DailyLegend）と太い棒の凡例（TokenLegend）の2箇所に出る。
+    expect(screen.getAllByText("濃いほど重いモデル")).toHaveLength(2);
+    const legend = screen.getByText("太い棒＝金額").closest("div") as HTMLElement;
+    expect(within(legend).getByText("Claude")).toBeTruthy();
+    expect(within(legend).getByText("Codex")).toBeTruthy();
+    expect(within(legend).getByText("GitHub Actions")).toBeTruthy();
   });
 
   it("日別は期間の全日を並べ、金額0の日も日付を残す（#3038）", () => {
