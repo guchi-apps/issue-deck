@@ -35,10 +35,17 @@ import type { Issue } from "@/types/issue";
 export function PlanReviewButton({
   issue,
   dispatch,
+  hideStatus = false,
 }: {
   issue: Issue;
   /** 画面で1回だけ取ったディスパッチの状態（#1262） */
   dispatch: DispatchStateHandle;
+  /**
+   * 下の状態表示を出さない（#3565）。承認パネル（`PlanApprovalPanel`）に同じ「作成中」の
+   * インジケータが実際に出ているときだけ`true`にする——失敗・見送り等の理由はここにしか
+   * 出ないため、承認待ちというだけで一律に隠さない。
+   */
+  hideStatus?: boolean;
 }) {
   const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   const job = findPlanReviewJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
@@ -123,7 +130,7 @@ export function PlanReviewButton({
       </Button>
       {/* 積んだ後は状態を出す。**pull型で最大1分ほど何も起きない**ので、黙っていると
           押せていないように見える（#1332と同じ理由） */}
-      {job && (
+      {job && !hideStatus && (
         <p className="w-full break-words text-right text-xs text-muted-foreground">
           {describeDispatchJobStatus(job.status, job.kind).label}
           {job.message ? `（${job.message}）` : ""}

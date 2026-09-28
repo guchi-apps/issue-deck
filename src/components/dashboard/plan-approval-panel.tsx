@@ -20,6 +20,7 @@ import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { isPlanReviewJobCreating, type DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
@@ -71,6 +72,7 @@ export function PlanApprovalPanel({
   onCheckUserResolved,
   artifactsMissing = false,
   planReview = null,
+  planReviewJob = null,
 }: {
   request: SessionPlanRequestView;
   /** 計画を出したセッション。見つかっていなければ`null` */
@@ -94,6 +96,11 @@ export function PlanApprovalPanel({
    * 指摘ごとのカードにして、承認・修正のボタンより上に出す
    */
   planReview?: PendingPlanReview | null;
+  /**
+   * この計画に対して積まれている計画レビュー（G1）ジョブ。無ければ`null`（#3565）。
+   * `isPlanReviewJobCreating`で「作成中」かを判定し、承認パネルのヘッダー直下へ出す。
+   */
+  planReviewJob?: DispatchJobView | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
@@ -156,6 +163,10 @@ export function PlanApprovalPanel({
   }
 
   const canSend = !sessionGone && remainingMs > 0;
+  // 指摘コメントが届いていない間だけ、ジョブの状態から「作成中」を出す（#3565）。
+  // 届いた後は下の`PlanReviewFindings`カードがそちらを表す
+  const planReviewCreating =
+    planReview === null && isPlanReviewJobCreating(planReviewJob, new Date());
   const planReviewHasFindings =
     planReview !== null &&
     (planReview.review.findings.length > 0 || !planReview.review.noFindings);
@@ -178,6 +189,12 @@ export function PlanApprovalPanel({
           <p className="text-xs text-muted-foreground">
             {hostLabel}のセッションが{formatRelativeDate(request.createdAt)}に提示しました
           </p>
+          {planReviewCreating && (
+            <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+              計画レビューを作成中
+            </p>
+          )}
         </div>
         <div className="shrink-0 text-right">
           <div className="font-mono text-sm font-medium tabular-nums text-amber-700 dark:text-amber-400">

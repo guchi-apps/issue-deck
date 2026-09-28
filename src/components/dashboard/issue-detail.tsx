@@ -51,8 +51,10 @@ import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import {
   findBlockingSession,
   findDispatchJobForIssue,
+  findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
+  isPlanReviewJobCreating,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -700,6 +702,18 @@ export function IssueDetail({
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （`checkUserGuidance`へ渡す同名の式と同じ判定）
   const planDecisionPending = planRequest?.status === "WAITING";
+  // 計画レビュー（G1）が作成中かどうか（#3565）。承認パネルへ表示するのと、
+  // `PlanReviewButton`側の状態行が二重にならないよう隠すのとで同じ判定を使う。
+  // **`pendingPlanReview`（指摘コメント）が届いた後はfalseにする**——`PlanApprovalPanel`側は
+  // 届いた時点で「作成中」の代わりに指摘のカードを出すため、ここも同じ条件でないと
+  // 承認パネルには何も出ていないのにボタン側の状態行だけ消える
+  const planReviewJob = findPlanReviewJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const planReviewJobCreating =
+    pendingPlanReview === null && isPlanReviewJobCreating(planReviewJob, new Date());
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
@@ -1093,6 +1107,7 @@ export function IssueDetail({
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
                 planReview={pendingPlanReview}
+                planReviewJob={planReviewJob}
                 artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&
@@ -1317,7 +1332,13 @@ export function IssueDetail({
                 /* 計画の承認待ちのときだけ出す（#1855）。**自動起動が主経路**で、ここは
                    走らなかったとき・計画を直してもう一度かけたいときの入口 */
                 checkUserReason(issue.labels) === "plan" ? (
-                  <PlanReviewButton issue={issue} dispatch={dispatch} />
+                  <PlanReviewButton
+                    issue={issue}
+                    dispatch={dispatch}
+                    // 承認パネル側に同じ「作成中」表示が出ているときだけ隠す（#3565）。
+                    // 失敗・見送り等の理由はここでしか出ないため消さない
+                    hideStatus={planReviewJobCreating}
+                  />
                 ) : undefined
               }
               sessionWaitingInput={sessionWaitingInput}
