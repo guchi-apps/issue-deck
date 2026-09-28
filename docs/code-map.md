@@ -725,7 +725,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
   進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
-  対応PR・子Issue・AI要約・プロパティは
+  対応PR・子Issue・プロパティは
   [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
   折りたたみへ入れる。**どちらかの画面にだけ状態表示を足さない。** 足すとPCとスマホで
   「何が起きているか」の答えが食い違い、片方でしか気付けない状態が生まれる。
@@ -1194,7 +1194,7 @@ export function POST(request: NextRequest) {
     （`IssueDetail`・`MobileIssueDetail`）とコメント欄（`CommentThread`）の3か所が同じ値を渡す。
     **CI失敗・レビュー失敗・コンフリクトのPRでは、内訳の「マージ」段も現在地（琥珀）にしない**
     （`buildIssuePullRequestProgress`。止まっている原因の赤とマージ待ちの琥珀が並ぶのを避ける）。
-  - **対応PR・親子Issue・AI要約は既定で畳む**
+  - **対応PR・親子Issueは既定で畳む**
     （[`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)）。開閉は
     `usePersistedState`で`issue-detail.section.<id>`へ保存し、**Issueごとではなくセクションごとに1つ**。
     **マージ待ち（`isMergeApprovalPending`）のときだけ対応PRを`forceOpen`で開く** — 押すべきものが

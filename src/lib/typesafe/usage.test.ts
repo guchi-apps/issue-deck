@@ -23,8 +23,8 @@ const source: ClaudeApiUsageSummary = {
       ],
     },
     {
-      key: "issue_summary",
-      label: "Issueの要約",
+      key: "comment_summary",
+      label: "コメントの要約",
       last24h: totals(5, 500),
       last7d: totals(10, 1_000),
       models: [
@@ -48,8 +48,8 @@ describe("summarizeTypeSafeUsage", () => {
           last7d: { calls: 4, inputTokens: 400 },
         },
         {
-          key: "issue_summary",
-          label: "Issueの要約",
+          key: "comment_summary",
+          label: "コメントの要約",
           last24h: { calls: 1, inputTokens: 100 },
           last7d: { calls: 2, inputTokens: 200 },
         },

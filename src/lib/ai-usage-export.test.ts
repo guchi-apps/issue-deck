@@ -26,8 +26,8 @@ describe("summarizeAiUsage", () => {
     const result = summarizeAiUsage(
       summary([
         {
-          key: "issue_summary",
-          label: "Issueの要約",
+          key: "comment_summary",
+          label: "コメントの要約",
           last24h: totals(0, 0),
           last7d: totals(0, 0),
           models: [
@@ -51,13 +51,13 @@ describe("summarizeAiUsage", () => {
 
     expect(result.features).toEqual([
       {
-        label: "Issueの要約",
+        label: "コメントの要約",
         model: "claude-opus-5",
         last24h: { calls: 2, inputTokens: 200, outputTokens: 20, cacheReadTokens: 5, cacheWriteTokens: 7 },
         last7d: { calls: 6, inputTokens: 600, outputTokens: 60, cacheReadTokens: 15, cacheWriteTokens: 21 },
       },
       {
-        label: "Issueの要約",
+        label: "コメントの要約",
         model: "gpt-5.6",
         last24h: { calls: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
         last7d: { calls: 3, inputTokens: 300, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 },

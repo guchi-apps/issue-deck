@@ -36,7 +36,7 @@ const NOW = new Date(2026, 7, 4, 12, 0, 0).getTime();
 function row(overrides: Record<string, unknown> = {}) {
   return {
     startedAt: new Date(NOW - 60 * 60_000),
-    feature: "issue_summary",
+    feature: "comment_summary",
     model: "claude-haiku-4-5",
     calls: 2,
     inputTokens: 200,
@@ -101,7 +101,7 @@ describe("flushBucketToDb", () => {
         startedAt: NOW,
         entries: [
           {
-            feature: "issue_summary",
+            feature: "comment_summary",
             model: "claude-haiku-4-5",
             calls: 2,
             inputTokens: 200,
@@ -118,13 +118,13 @@ describe("flushBucketToDb", () => {
       where: {
         startedAt_feature_model: {
           startedAt: new Date(NOW),
-          feature: "issue_summary",
+          feature: "comment_summary",
           model: "claude-haiku-4-5",
         },
       },
       create: {
         startedAt: new Date(NOW),
-        feature: "issue_summary",
+        feature: "comment_summary",
         model: "claude-haiku-4-5",
         calls: 2,
         inputTokens: 200,
@@ -156,7 +156,7 @@ describe("flushBucketToDb", () => {
           startedAt: NOW,
           entries: [
             {
-              feature: "issue_summary",
+              feature: "comment_summary",
               model: "claude-haiku-4-5",
               calls: 1,
               inputTokens: 1,

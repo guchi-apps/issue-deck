@@ -26,7 +26,6 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
-import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import {
   IssuePullRequestList,
@@ -1197,8 +1196,6 @@ export function MobileIssueDetail({
             />
           </IssueDetailSection>
         )}
-
-        <IssueAiSummarySection issue={issue} />
 
         {/* 進捗・担当者・ラベル・日付は「変えたいときに触るもの」なので畳んでおく（#1646・#1920） */}
         <MobileIssuePropertiesSection

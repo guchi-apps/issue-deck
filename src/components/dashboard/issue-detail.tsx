@@ -25,7 +25,6 @@ import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { DeployFailurePanel } from "@/components/dashboard/deploy-failure-panel";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
-import { IssueAiSummarySection } from "@/components/dashboard/issue-ai-summary";
 import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
@@ -1231,12 +1230,10 @@ export function IssueDetail({
             </IssueDetailSection>
           )}
 
-          <IssueAiSummarySection issue={issue} />
-
           <Separator />
 
-          {/* 説明とコメントだけが本来の見出しの重さを持つ（#1577）。補助情報（対応PR・子Issue・
-              AI要約）は畳めるセクションの小さなラベルにしてあり、形で主従が読み取れる */}
+          {/* 説明とコメントだけが本来の見出しの重さを持つ（#1577）。補助情報（対応PR・
+              子Issue）は畳めるセクションの小さなラベルにしてあり、形で主従が読み取れる */}
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-base font-semibold">説明</h2>
