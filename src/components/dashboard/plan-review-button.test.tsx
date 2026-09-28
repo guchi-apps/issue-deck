@@ -209,4 +209,17 @@ describe("PlanReviewButton", () => {
     expect(screen.getByText(/順番待ち/)).toBeTruthy();
     expect((reviewButton() as HTMLButtonElement).disabled).toBe(true);
   });
+
+  // #3565。承認パネル側に同じ「作成中」インジケータが出ているときだけ隠す
+  it("hideStatusがtrueなら状態表示を出さない（ボタンは押せる状態のまま出す）", () => {
+    render(
+      <PlanReviewButton
+        issue={makeIssue()}
+        dispatch={makeDispatch({ jobs: [makeJob()] })}
+        hideStatus
+      />,
+    );
+
+    expect(screen.queryByText(/順番待ち/)).toBeNull();
+  });
 });

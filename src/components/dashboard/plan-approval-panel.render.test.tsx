@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
   PLAN_REVIEW_REFLECT_REQUEST_TEXT,
@@ -48,6 +49,42 @@ function pendingReview(body: string): PendingPlanReview {
   return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前" };
 }
 
+function planReviewJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+  return {
+    id: "plan-review-1",
+    repositoryFullName: REPO,
+    issueNumber: 2061,
+    issueTitle: null,
+    issueId: null,
+    targetHost: "subpc",
+    agent: "claude",
+    claudeModel: null,
+    kind: "PLAN_REVIEW",
+    status: "QUEUED",
+    message: null,
+    instruction: null,
+    recovery: false,
+    command: null,
+    placeholderValues: null,
+    resolvedCommand: null,
+    manualStepLine: null,
+    manualStepRunTarget: "subpc",
+    targetJobId: null,
+    previewAction: null,
+    exitCode: null,
+    commandOutput: null,
+    codexPairingCode: null,
+    codexPairingExpiresAt: null,
+    tmuxSessionName: null,
+    queuePriority: 0,
+    createdAt: "2026-08-17T00:00:00.000Z",
+    claimedAt: null,
+    startedAt: null,
+    finishedAt: null,
+    ...overrides,
+  };
+}
+
 function dispatchHandle(decidePlan = vi.fn().mockResolvedValue({ ok: true })) {
   return { decidePlan, isSubmitting: false } as unknown as DispatchStateHandle;
 }
@@ -77,6 +114,51 @@ describe("PlanApprovalPanel", () => {
     expect(screen.getByRole("button", { name: /承認して実装へ進む/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /修正を送る/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /端末・Remote Controlで答える/ })).toBeTruthy();
+  });
+
+  // #3565。計画レビュー（G1）が作成中かどうかが承認パネルから分からなかったのを直す
+  it("計画レビューのジョブが動いている間は「計画レビューを作成中」を出す", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({ status: "RUNNING" })}
+      />,
+    );
+    expect(screen.getByText("計画レビューを作成中")).toBeTruthy();
+  });
+
+  it("計画レビューのジョブが無ければ出さない", () => {
+    render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle()} />,
+    );
+    expect(screen.queryByText("計画レビューを作成中")).toBeNull();
+  });
+
+  it("計画レビューのジョブが終わっていれば（失敗・見送り等）出さない", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({ status: "FAILED" })}
+      />,
+    );
+    expect(screen.queryByText("計画レビューを作成中")).toBeNull();
+  });
+
+  it("指摘コメントが届いた後は、ジョブが作成中のままでも出さない（指摘のカードに切り替わる）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({ status: "RUNNING" })}
+        planReview={pendingReview("自由に書かれた講評\n\n<!-- supervisor:plan-review -->")}
+      />,
+    );
+    expect(screen.queryByText("計画レビューを作成中")).toBeNull();
   });
 
   it("承認を押すと`approve`を送り、押した結果をその場に出す", async () => {
