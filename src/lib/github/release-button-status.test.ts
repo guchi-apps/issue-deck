@@ -174,6 +174,10 @@ describe("summarizeReleaseButtonStatus", () => {
     expect(summarizeReleaseButtonStatus(baseStatus({ phase: "release_pending" }))).toBe("progressing");
   });
 
+  it("isDeviceBuildがtrueなら、release_pendingでも自動では進まないためidleを返す（#3579）", () => {
+    expect(summarizeReleaseButtonStatus(baseStatus({ phase: "release_pending" }), true)).toBe("idle");
+  });
+
   it("自動化workflowが実行中（未完了）はprogressingを返す", () => {
     expect(
       summarizeReleaseButtonStatus(baseStatus({ workflowRun: workflowRun({ status: "in_progress", conclusion: null }) })),

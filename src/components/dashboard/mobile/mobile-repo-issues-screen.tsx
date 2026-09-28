@@ -10,6 +10,7 @@ import { useNow } from "@/hooks/use-now";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
+import { getDeviceBuildRepository } from "@/lib/device-build-repos";
 import { summarizeReleaseButtonStatus } from "@/lib/github/release-button-status";
 import { buildIssueListScrollKey } from "@/lib/issue-list-scroll";
 import {
@@ -97,15 +98,20 @@ export function MobileRepoIssuesScreen({
   onOpenNightlyRun,
 }: MobileRepoIssuesScreenProps) {
   const [releaseSheetOpen, setReleaseSheetOpen] = useState(false);
+  // Xcodeで実機へ反映するリポジトリ（aide-ios等。#3468）では、develop→mainのPRが
+  // Macのスクリプトでしか作られず自動では進まない。「進行中」のポーリング・アニメーションを
+  // 出さないよう、この判定をポーリング間隔とボタン表示の両方へ渡す（#3579）。
+  const isDeviceBuild = getDeviceBuildRepository(repository.fullName) !== null;
   const {
     data: releaseStatus,
     isLoading: releaseStatusLoading,
     error: releaseStatusError,
     triggerRelease,
     isTriggering: isTriggeringRelease,
-  } = useReleaseStatus(repository.fullName, true, HEADER_IDLE_POLL_INTERVAL_MS);
-  const releaseButtonStatus =
-    releaseStatus?.available ? summarizeReleaseButtonStatus(releaseStatus) : "idle";
+  } = useReleaseStatus(repository.fullName, true, HEADER_IDLE_POLL_INTERVAL_MS, isDeviceBuild);
+  const releaseButtonStatus = releaseStatus?.available
+    ? summarizeReleaseButtonStatus(releaseStatus, isDeviceBuild)
+    : "idle";
 
   const repoIssues = useMemo(
     () => issues.filter((issue) => issue.repositoryFullName === repository.fullName),

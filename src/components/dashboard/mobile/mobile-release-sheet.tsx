@@ -4,9 +4,11 @@ import { useMemo, useState } from "react";
 
 import { Rocket } from "lucide-react";
 
+import { DeviceBuildInstructions } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
+import { WebviewIosInstructions } from "@/components/dashboard/webview-ios-instructions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { getDeviceBuildRepository } from "@/lib/device-build-repos";
 import type { ReleaseStatus } from "@/hooks/use-release-status";
 import {
   formatDevelopVersionDisplay,
@@ -26,6 +29,7 @@ import {
 } from "@/lib/github/release-version-display";
 import { isNextReleaseIssue } from "@/lib/issue-progress";
 import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -53,6 +57,13 @@ export function MobileReleaseSheet({
   isTriggeringRelease,
 }: MobileReleaseSheetProps) {
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
+
+  // iOSアプリを持つリポジトリだけの「iOSへの反映」欄（#3579）。対象リポジトリの固定リストは
+  // `lib/device-build-repos.ts`（Xcodeで実機ビルド。mainへのマージもMacのスクリプトが行う）と
+  // `lib/webview-ios-repos.ts`（WebView型。Web側はdeploy.ymlがそのまま反映する）の2種類で、
+  // 同じリポジトリが両方に載ることは無い。
+  const deviceBuild = getDeviceBuildRepository(repository.fullName);
+  const webviewIos = getWebviewIosRepository(repository.fullName);
 
   // 誤タップでの起動を防ぐため確認ダイアログを挟む。今回developにマージ済みでmain未反映のIssueを
   // 「今回反映する内容」として一覧表示する（#426）。
@@ -114,7 +125,11 @@ export function MobileReleaseSheet({
                   )}
                 </span>
               </div>
-              <ReleaseProgress status={releaseStatus} repoFullName={repository.fullName} />
+              <ReleaseProgress
+                status={releaseStatus}
+                repoFullName={repository.fullName}
+                isDeviceBuild={deviceBuild !== null}
+              />
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
               {releaseStatus.phase === "release_pr_open" &&
@@ -125,15 +140,22 @@ export function MobileReleaseSheet({
                     className="h-8 self-start"
                   />
                 )}
-              <Button
-                variant="outline"
-                disabled={isTriggeringRelease}
-                onClick={() => setReleaseConfirmOpen(true)}
-                className="mt-1"
-              >
-                <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
-                {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
-              </Button>
+              {deviceBuild ? (
+                // Xcodeで実機へ反映するリポジトリでは「リリースする」を出さない（#3468と同じ理由。
+                // バンプは`gh workflow run`で行う運用で、下の手順にも同じコマンドを出している）
+                <DeviceBuildInstructions deviceBuild={deviceBuild} />
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={isTriggeringRelease}
+                  onClick={() => setReleaseConfirmOpen(true)}
+                  className="mt-1"
+                >
+                  <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
+                  {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
+                </Button>
+              )}
+              {webviewIos && <WebviewIosInstructions repo={webviewIos} />}
             </div>
           )}
         </div>
