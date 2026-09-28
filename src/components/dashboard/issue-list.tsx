@@ -1058,6 +1058,9 @@ export function IssueList({
       session: sessionByIssueId.get(issue.id) ?? null,
       planDecisionPending: planPending || questionPending,
     });
+    // 親Issue／子Issueの区別（#3469）。質問に答える・Remote・コメント数・時刻と同じ行には
+    // 収まらないため、独立した行に出す（#3580）
+    const hierarchyBadges = resolveIssueHierarchyBadges(issue);
     return (
       <li
         key={issue.id}
@@ -1371,21 +1374,6 @@ export function IssueList({
                   </a>
                 </Button>
               )}
-              {/* 親Issue／子Issueの区別（#3469）。親は子の完了で終わるため通常は実装開始不要 */}
-              {resolveIssueHierarchyBadges(issue).map((badge) => (
-                <span
-                  key={badge.kind}
-                  title={badge.title}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
-                    badge.kind === "parent"
-                      ? "bg-violet-500/10 text-violet-700 ring-violet-500/40 dark:text-violet-300"
-                      : "text-muted-foreground ring-border",
-                  )}
-                >
-                  {badge.label}
-                </span>
-              ))}
               {issue.commentCount > 0 && (
                 <span className="flex items-center gap-0.5">
                   <MessageSquare className="size-3" />
@@ -1399,6 +1387,24 @@ export function IssueList({
               <span>{now === null ? null : formatRelativeDate(issue.updatedAt, now)}</span>
             </div>
           </div>
+          {hierarchyBadges.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {hierarchyBadges.map((badge) => (
+                <span
+                  key={badge.kind}
+                  title={badge.title}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
+                    badge.kind === "parent"
+                      ? "bg-violet-500/10 text-violet-700 ring-violet-500/40 dark:text-violet-300"
+                      : "text-muted-foreground ring-border",
+                  )}
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+          )}
           {/* 一括予約で選べない理由（#3284）。積めなかった結果は理由より優先して出す。
               行全体を薄くしているので、文字は前景色にして読める濃さを保つ */}
           {bulkFailure ? (
