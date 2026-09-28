@@ -2340,6 +2340,31 @@ export function findPlanReviewJobForIssue(
   );
 }
 
+/**
+ * 計画レビュー（G1）ジョブを「作成中」とみなす猶予（#3565）。`SUCCEEDED`は「レビューの
+ * セッションが立った」時点を指し、指摘コメントの投稿はそこから実測3分26秒〜5分45秒かかる
+ * （`scripts/wait-plan-review.sh`）。同じ既定タイムアウト（360秒）を使う。
+ */
+const PLAN_REVIEW_CREATING_GRACE_MS = 360_000;
+
+/**
+ * 計画レビュー（G1）ジョブを承認パネルへ「作成中」として出すかどうか（#3565）。
+ *
+ * **`SUCCEEDED`も対象に含める。** 除外すると、実際に指摘コメントを書いている時間
+ * （`SUCCEEDED`後の数分間）をほとんど拾えず表示区間が数秒〜十数秒しかなくなる。
+ * ただし無条件に含めると、ジョブが積めなかった等で**古い計画に対する`SUCCEEDED`ジョブ**が
+ * 残ったままになった場合に表示が消えなくなるため、`finishedAt`からの経過時間で区切る。
+ */
+export function isPlanReviewJobCreating(
+  job: Pick<DispatchJobView, "status" | "finishedAt"> | null,
+  now: Date,
+): boolean {
+  if (job === null) return false;
+  if (isActiveDispatchJobStatus(job.status)) return true;
+  if (job.status !== "SUCCEEDED" || job.finishedAt === null) return false;
+  return now.getTime() - new Date(job.finishedAt).getTime() < PLAN_REVIEW_CREATING_GRACE_MS;
+}
+
 function findJobForIssue(
   jobs: readonly DispatchJobView[],
   repositoryFullName: string,

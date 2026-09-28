@@ -40,6 +40,7 @@ import {
   resolvePlanReviewRejection,
   describePlanReviewRejection,
   findPlanReviewJobForIssue,
+  isPlanReviewJobCreating,
   canCodeReviewRepository,
   describeCodeReviewRejection,
   findCodeReviewJobForIssue,
@@ -1511,6 +1512,76 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
     ];
     expect(findPlanReviewJobForIssue(jobs, "guchi-apps/issue-deck", 1855)?.id).toBe("plan-review-1");
     expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1855)).toBeNull();
+  });
+});
+
+describe("isPlanReviewJobCreating（#3565）", () => {
+  function planReviewJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
+    return {
+      id: "plan-review-1",
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 3565,
+      issueTitle: null,
+      issueId: null,
+      targetHost: "subpc",
+      agent: "claude",
+      claudeModel: null,
+      kind: "PLAN_REVIEW",
+      status: "QUEUED",
+      message: null,
+      instruction: null,
+      recovery: false,
+      command: null,
+      placeholderValues: null,
+      resolvedCommand: null,
+      manualStepLine: null,
+      manualStepRunTarget: "subpc",
+      targetJobId: null,
+      previewAction: null,
+      exitCode: null,
+      commandOutput: null,
+      codexPairingCode: null,
+      codexPairingExpiresAt: null,
+      tmuxSessionName: null,
+      queuePriority: 0,
+      createdAt: "2026-08-17T00:00:00.000Z",
+      claimedAt: null,
+      startedAt: null,
+      finishedAt: null,
+      ...overrides,
+    };
+  }
+
+  const now = new Date("2026-08-17T00:10:00.000Z");
+
+  it("ジョブが無ければfalse", () => {
+    expect(isPlanReviewJobCreating(null, now)).toBe(false);
+  });
+
+  it.each(["QUEUED", "CLAIMED", "RUNNING"] as const)("%sの間はtrue", (status) => {
+    expect(isPlanReviewJobCreating(planReviewJob({ status }), now)).toBe(true);
+  });
+
+  it("SUCCEEDED直後（finishedAtから6分未満）はtrue", () => {
+    const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:08:00.000Z" });
+    expect(isPlanReviewJobCreating(job, now)).toBe(true);
+  });
+
+  // SUCCEEDEDは「レビューのセッションが立った」までを意味し、指摘コメントの投稿はそこから
+  // 実測3分26秒〜5分45秒かかる。無条件にtrueにすると、ジョブが積めなかった等で古い計画の
+  // SUCCEEDEDジョブが残った場合に表示が消えなくなるため、猶予を過ぎたらfalseに戻す
+  it("SUCCEEDEDから6分（既定の猶予）を過ぎたらfalse", () => {
+    const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:03:00.000Z" });
+    expect(isPlanReviewJobCreating(job, now)).toBe(false);
+  });
+
+  it("SUCCEEDEDでもfinishedAtが無ければfalse", () => {
+    const job = planReviewJob({ status: "SUCCEEDED", finishedAt: null });
+    expect(isPlanReviewJobCreating(job, now)).toBe(false);
+  });
+
+  it.each(["FAILED", "SKIPPED", "TIMEOUT", "CANCELED"] as const)("%sはfalse", (status) => {
+    expect(isPlanReviewJobCreating(planReviewJob({ status }), now)).toBe(false);
   });
 });
 

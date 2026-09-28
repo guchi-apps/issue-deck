@@ -56,6 +56,7 @@ import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
   findBlockingSession,
   findDispatchJobForIssue,
+  findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
   resolveDefaultDispatchHost,
@@ -398,6 +399,13 @@ export function MobileIssueDetail({
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （PCの詳細と同じ判定）
   const planDecisionPending = planRequest?.status === "WAITING";
+  // 計画レビュー（G1）が作成中かどうか（#3565。PCの詳細と同じ判定）。モバイルには
+  // `PlanReviewButton`が無いため、承認パネルへ渡すだけでよい
+  const planReviewJob = findPlanReviewJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
   // 未反映の計画レビュー（#3554。PCの詳細と同じ）
   const pendingPlanReview = resolvePendingPlanReview(comments);
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
@@ -1012,6 +1020,7 @@ export function MobileIssueDetail({
               dispatch={dispatch}
               onCheckUserResolved={handleCheckUserResolved}
               planReview={pendingPlanReview}
+              planReviewJob={planReviewJob}
               artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
                   isArtifactsLoaded &&
