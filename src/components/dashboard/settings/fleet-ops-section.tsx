@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Boxes, KeyRound, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
+import { Boxes, KeyRound, Link2, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
 
 import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
 import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
 import { SharedTokensSection } from "@/components/dashboard/settings/shared-tokens-section";
+import { SupabaseRedirectUrlsSection } from "@/components/dashboard/settings/supabase-redirect-urls-section";
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import {
   AlertDialog,
@@ -148,6 +149,15 @@ export function FleetOpsSection({
           error={fineGrainedTokens.error}
           onChanged={fineGrainedTokens.refetch}
         />
+      </LazyFleetPanel>
+
+      <LazyFleetPanel
+        icon={Link2}
+        title="Supabase Redirect URLs"
+        description="共有Supabaseプロジェクトの認証で許可するリダイレクト先"
+        loadHint="開くとManagement APIから現在の登録内容を取得します"
+      >
+        <SupabaseRedirectUrlsSection open />
       </LazyFleetPanel>
 
       <AlertDialog open={issueSyncConfirmOpen} onOpenChange={setIssueSyncConfirmOpen}>

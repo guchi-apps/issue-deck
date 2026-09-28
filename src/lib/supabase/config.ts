@@ -36,6 +36,17 @@ export function isSupabaseConfigured(): boolean {
 }
 
 /**
+ * Supabase Management API（Redirect URLsの自動管理。#3568）を呼べる設定になっているか（サーバー専用）。
+ * プロジェクトrefは`NEXT_PUBLIC_SUPABASE_URL`から抽出するため、そちらが未設定でもfalseになる。
+ */
+export function isSupabaseManagementApiConfigured(): boolean {
+  return (
+    isUsableValue(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+    isUsableValue(process.env.SUPABASE_MANAGEMENT_API_TOKEN)
+  );
+}
+
+/**
  * ログインを許可するメールアドレスが1件以上設定されているか（サーバー専用）。
  *
  * ここが空だと、Supabaseの設定が正しくても`/auth/callback`の`isEmailAllowed()`が必ず偽になり、
