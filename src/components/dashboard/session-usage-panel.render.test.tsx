@@ -257,6 +257,34 @@ describe("SessionUsagePanel", () => {
     expect(new Set(colors).size).toBe(2);
   });
 
+  it("モデルが未確定な金額は最重モデルと別の色で塗る（#3572）", () => {
+    renderPanel(
+      response([
+        // claude-fable-5-1はtier0（最重）。modelsが空配列は、GitHub Actions分が#3555より前に
+        // 送っていた「モデル未確定」の記録を再現したもの。
+        entry({
+          sessionId: "fable",
+          kind: "actions",
+          source: "github-actions",
+          models: ["claude-fable-5-1"],
+          costUsd: 4,
+        }),
+        entry({ sessionId: "unresolved", kind: "actions", source: "github-actions", models: [], costUsd: 6 }),
+      ]),
+    );
+
+    const breakdown = screen.getByText("セッション種別別").closest("section") as HTMLElement;
+    const bar = within(breakdown).getByTitle("Claude $10.00 / Codex $0.00");
+    const colors = [...bar.querySelectorAll(":scope > div > span")].map(
+      (segment) => (segment as HTMLElement).style.backgroundColor,
+    );
+
+    // 未確定分は最重モデル（tier0）と同じ色で塗らない。
+    expect(colors).toContain("rgb(122, 26, 18)"); // tier0（#7a1a12）
+    expect(colors).toContain("rgb(100, 116, 139)"); // 未確定（#64748b）
+    expect(new Set(colors).size).toBe(2);
+  });
+
   /**
    * #2954。金額順ではなく作業の順に並べ、横断質問・その他の手前に区切りを入れる。
    */
