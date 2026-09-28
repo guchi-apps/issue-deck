@@ -42,6 +42,12 @@ get() {
   printf '%s' "$RESULT_JSON" | jq -r "$1 // empty" 2>/dev/null || true
 }
 
+# 使用モデル。resultターンにはモデル名が含まれないため、全assistantターンの
+# message.modelを集めて重複除去する（ローカルセッションの集計 scripts/lib/session-usage.sh
+# の459行目と同じ考え方。#3555）。
+MODELS_JSON="$(jq -c '[.[] | select(.type == "assistant") | .message.model] | map(select(type == "string" and length > 0)) | unique' "$EXECUTION_FILE" 2>/dev/null || echo '[]')"
+[ -n "$MODELS_JSON" ] || MODELS_JSON='[]'
+
 COST="$(get '.total_cost_usd')"
 TURNS="$(get '.num_turns')"
 DURATION_MS="$(get '.duration_ms')"
@@ -89,6 +95,7 @@ report_to_issue_deck() {
       WORKFLOW_NAME="${GITHUB_WORKFLOW:-}" ISSUE_NUMBER="${ISSUE_NUMBER:-}" PR_NUMBER="${PR_NUMBER:-}" \
       COST="$COST" TURNS="${TURNS:-0}" IN_TOKENS="${IN_TOKENS:-0}" CACHE_CREATE="${CACHE_CREATE:-0}" \
       CACHE_READ="${CACHE_READ:-0}" OUT_TOKENS="${OUT_TOKENS:-0}" DURATION_MS="${DURATION_MS:-0}" \
+      MODELS_JSON="$MODELS_JSON" \
       python3 - <<'PY'
 import json, os
 from datetime import datetime, timedelta, timezone
@@ -98,6 +105,12 @@ duration = max(float(os.environ.get("DURATION_MS", "0") or 0), 0)
 started = ended - timedelta(milliseconds=duration)
 issue = os.environ.get("ISSUE_NUMBER", "")
 pr = os.environ.get("PR_NUMBER", "")
+try:
+    models = json.loads(os.environ.get("MODELS_JSON", "[]"))
+    if not isinstance(models, list) or not all(isinstance(m, str) for m in models):
+        models = []
+except (TypeError, ValueError):
+    models = []
 payload = {
     "repository": os.environ["REPOSITORY"],
     "runId": os.environ["RUN_ID"],
@@ -112,7 +125,7 @@ payload = {
     "cacheReadTokens": int(float(os.environ.get("CACHE_READ", "0") or 0)),
     "outputTokens": int(float(os.environ.get("OUT_TOKENS", "0") or 0)),
     "costUsd": float(os.environ["COST"]),
-    "models": [],
+    "models": models,
     "startedAt": started.isoformat(),
     "endedAt": ended.isoformat(),
 }
