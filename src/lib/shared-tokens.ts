@@ -11,7 +11,8 @@ export const SHARED_TOKEN_CONSUMER_MAX_LENGTH = 100;
 type SharedTokenWithUsages = SharedTokenRow & { usages: SharedTokenUsage[] };
 
 function optionalText(value: unknown, maxLength: number): string | null | undefined {
-  if (value === undefined) return null;
+  // 画面は空欄を null で送るため、undefined（キー省略）と同じく未入力として扱う（#3547）。
+  if (value === undefined || value === null) return null;
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return null;

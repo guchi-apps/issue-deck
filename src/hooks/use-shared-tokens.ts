@@ -55,6 +55,7 @@ export function useSharedTokenMutations() {
       });
       if (!res.ok) {
         if (res.status === 409) throw new Error("同じ名前のトークンが既に登録されています");
+        if (res.status === 400) throw new Error("入力内容が不正です。トークン名・値の入力と各項目の文字数を確認してください");
         throw new Error(`登録に失敗しました (${res.status})`);
       }
       return true;
