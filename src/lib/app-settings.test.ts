@@ -64,9 +64,13 @@ describe("既定エージェントとフェイルオーバー設定（#3531）",
 });
 
 describe("parseAppAiModel", () => {
+  it("旧IDのclaude-sonnet-5はSonnet 5.5へ読み替える（#3612）", () => {
+    expect(parseAppAiModel("claude-sonnet-5")).toBe("claude-sonnet-5-5");
+  });
+
   it("許可された値はそのまま返す", () => {
     expect(parseAppAiModel("claude-haiku-4-5")).toBe("claude-haiku-4-5");
-    expect(parseAppAiModel("claude-sonnet-5")).toBe("claude-sonnet-5");
+    expect(parseAppAiModel("claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
     expect(parseAppAiModel("claude-opus-5-5")).toBe("claude-opus-5-5");
     expect(parseAppAiModel("gpt-6-sol")).toBe("gpt-6-sol");
     expect(parseAppAiModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");

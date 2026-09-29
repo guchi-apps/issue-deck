@@ -15,7 +15,7 @@ describe("ModelDot", () => {
 
   it("起動時のエイリアスは短い名前にバージョンを添えて出す", () => {
     render(<ModelDot agent="claude" model="sonnet" />);
-    expect(screen.getByRole("img", { name: "Claude Sonnet 5" })).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Claude Sonnet 5.5" })).not.toBeNull();
   });
 
   it("CodexのGPT-6モデルにも世代名を添えて出す", () => {

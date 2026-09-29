@@ -12,6 +12,14 @@ describe("resolveModelRate", () => {
     });
   });
 
+  it("Sonnet 5.5はSonnet 5と同じ単価で、Sonnet 5に前方一致しない", () => {
+    expect(resolveModelRate("claude-sonnet-5-5")).toEqual({ input: 2.0, output: 10.0, cacheRead: 0.2 });
+  });
+
+  it("Mythos 5.1のキャッシュ読み出しはMythos 5ではなくFable 5.1と同じ$0.25", () => {
+    expect(resolveModelRate("claude-mythos-5-1")?.cacheRead).toBe(0.25);
+  });
+
   it("GPT-6 Astraの単価を返す", () => {
     expect(resolveModelRate("gpt-6-astra")).toEqual({
       input: 10.0,
