@@ -6,6 +6,12 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestSummary } from "@/types/pull-request";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => "/dashboard",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
     ciRunId: null,

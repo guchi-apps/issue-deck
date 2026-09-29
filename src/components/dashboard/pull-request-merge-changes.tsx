@@ -1,11 +1,20 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ChevronRight, ExternalLink } from "lucide-react";
 
+import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { UsePullRequestChangesResult } from "@/hooks/use-pull-request-changes";
+import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { pullRequestChangeIssueLabel, pullRequestChangeLabel } from "@/lib/pull-request-changes";
+import { cn } from "@/lib/utils";
 import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
+
+/** 行に印を出す判定。問題なし・実施なし・記録なしは何も出さない（指摘があるものだけを目立たせる） */
+const FINDING_LABEL: Partial<Record<ReviewVerdictKind, string>> = {
+  "changes-requested": "要修正",
+  "needs-check": "要確認",
+};
 
 /**
  * 一覧に出すのは実際に入る変更だけ。**バージョンバンプのPRは外す**（#3260）。
@@ -22,14 +31,27 @@ type PullRequestMergeChangesProps = {
   pullRequest: PullRequestSummary;
   /** 変更点の取得結果。取得は親（`PullRequestMergeProduction`）が1回だけ行い、「マージ前の確認」と共有する */
   state: UsePullRequestChangesResult;
+  /** 変更（`change.id`）ごとのClaudeレビューの判定（#3592）。無い行には印を出さない */
+  reviewKinds?: ReadonlyMap<string, ReviewVerdictKind>;
+  /** 行を押したときにPR詳細を開く（#3592）。PR番号が取れない行は押せない */
+  onOpenPullRequest?: (pullRequestNumber: number) => void;
 };
 
-function ChangeRow({ change }: { change: PullRequestChange }) {
+function ChangeRow({
+  change,
+  reviewKind,
+  onOpen,
+}: {
+  change: PullRequestChange;
+  reviewKind: ReviewVerdictKind | undefined;
+  onOpen: (() => void) | null;
+}) {
   const label = pullRequestChangeLabel(change);
   const issueLabel = pullRequestChangeIssueLabel(change);
+  const findingLabel = reviewKind ? FINDING_LABEL[reviewKind] : undefined;
 
-  return (
-    <li className="flex items-center gap-2 border-b px-3 py-1.5 last:border-b-0">
+  const body = (
+    <>
       {label && (
         <span className="w-11 shrink-0 text-right font-mono text-[11px] leading-6 text-primary tabular-nums">
           {label}
@@ -41,6 +63,33 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
         <span className="hidden shrink-0 font-mono text-[11px] leading-6 text-muted-foreground tabular-nums sm:inline">
           {issueLabel}
         </span>
+      )}
+      {reviewKind && findingLabel && (
+        <span
+          className={cn(
+            "shrink-0 rounded-full bg-muted px-2 text-[10.5px] leading-5 font-bold whitespace-nowrap",
+            REVIEW_TONE[reviewKind],
+          )}
+        >
+          <span aria-hidden="true">{REVIEW_MARK[reviewKind]}</span> {findingLabel}
+        </span>
+      )}
+    </>
+  );
+
+  return (
+    <li className="border-b last:border-b-0">
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
+        >
+          {body}
+          <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      ) : (
+        <div className="flex items-center gap-2 px-3 py-1.5">{body}</div>
       )}
     </li>
   );
@@ -61,11 +110,17 @@ function ChangeRow({ change }: { change: PullRequestChange }) {
  * **取得できなくてもマージは止めない。** 変更点は判断材料であって、マージの前提条件ではない。
  * 取得中は骨組みだけを出し、失敗したときは理由とGitHubへの導線を出す。
  *
- * **行の主語はPull Request。ここには「何が入るか」だけを出し、レビュー判定は出さない**（#3093）。
- * 各行に判定を並べていた（#2843）が、判定は「マージ前の確認」のレビュー行へ集約した
- * （`PullRequestMergePrecheck`）。一覧は何のPRが含まれるかを読む場所にとどめる。
+ * **行の主語はPull Request。判定は総合の見方を「マージ前の確認」のレビュー行へ集約し**（#3093。
+ * `PullRequestMergePrecheck`）、この一覧の行には**指摘があるもの（要修正・要確認）だけ**印を付ける
+ * （#3592）。全行に判定を並べていた（#2843）と違い、問題なし・記録なしの行は何も出さないので、
+ * どのPRを見に行くべきかだけが目に入る。行を押すとPR詳細を開く（`onOpenPullRequest`）。
  */
-export function PullRequestMergeChanges({ pullRequest, state }: PullRequestMergeChangesProps) {
+export function PullRequestMergeChanges({
+  pullRequest,
+  state,
+  reviewKinds,
+  onOpenPullRequest,
+}: PullRequestMergeChangesProps) {
   const { changes: allChanges, commitCount, truncated, isLoading, error } = state;
   const changes = allChanges === null ? null : withoutVersionBumps(allChanges);
 
@@ -105,7 +160,16 @@ export function PullRequestMergeChanges({ pullRequest, state }: PullRequestMerge
       {changes !== null && changes.length > 0 && (
         <ul className="max-h-[min(13.5rem,40vh)] overflow-y-auto">
           {changes.map((change) => (
-            <ChangeRow key={change.id} change={change} />
+            <ChangeRow
+              key={change.id}
+              change={change}
+              reviewKind={reviewKinds?.get(change.id)}
+              onOpen={
+                onOpenPullRequest && change.pullRequestNumber !== null
+                  ? () => onOpenPullRequest(change.pullRequestNumber as number)
+                  : null
+              }
+            />
           ))}
         </ul>
       )}
