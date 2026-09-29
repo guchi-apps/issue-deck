@@ -83,6 +83,8 @@ import {
   summarizeDispatchQueue,
 } from "@/lib/dispatch/queue-summary";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
+import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
+import { PlanReviewStateBadge } from "@/components/dashboard/plan-review-state-badge";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import {
@@ -1007,6 +1009,22 @@ export function IssueList({
     // 計画への返事を画面から送れる行（#2061）。**ここが主導線になり、Remote Controlは
     // 通常の枠線へ戻る**（`shouldEmphasizeRemoteControl`が`false`を返す）
     const planPending = planPendingIssueIds.has(issue.id);
+    // 計画レビューの作成中／提示済（#3607）。承認ボタンとは別の行に出すので狭い画面でも収まる
+    const planReviewState =
+      now === null
+        ? null
+        : resolvePlanReviewListState({
+            jobs: dispatch.jobs,
+            planRequest: findPlanRequestForIssue(
+              dispatch.planRequests ?? [],
+              issue.repositoryFullName,
+              issue.number,
+            ),
+            labels: issue.labels,
+            repositoryFullName: issue.repositoryFullName,
+            issueNumber: issue.number,
+            now: new Date(now),
+          });
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
     // 自動マージされずPRのマージを待っている行（#3083）。「Remote」しか出ないと、なぜ確認が
@@ -1208,6 +1226,11 @@ export function IssueList({
               #{issue.number} {issue.title}
             </span>
           </p>
+          {planReviewState && (
+            <div>
+              <PlanReviewStateBadge state={planReviewState} />
+            </div>
+          )}
           <div
             className={cn(
               "flex items-center justify-between gap-2 text-xs text-muted-foreground",
