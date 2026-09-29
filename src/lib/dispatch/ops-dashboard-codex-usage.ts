@@ -1,4 +1,5 @@
 import type { CodexUsage, CodexUsageWindow } from "@/lib/dispatch/codex-usage";
+import { resolveSharedToken } from "@/lib/shared-token-reader";
 
 /**
  * Codexのプラン枠を、ops-dashboardの`GET /api/ai-usage`から読む（#3037）。
@@ -92,8 +93,9 @@ export function clearOpsDashboardCodexUsageCache() {
 
 export async function fetchOpsDashboardCodexUsage(now = Date.now()): Promise<CodexUsage | null> {
   const baseUrl = process.env.OPS_DASHBOARD_URL?.trim();
-  const token = process.env.OPS_API_TOKEN?.trim();
-  if (!baseUrl || !token) return null;
+  if (!baseUrl) return null;
+  const token = await resolveSharedToken("OPS_API_TOKEN", "OPS_API_TOKEN");
+  if (!token) return null;
   if (cache && cache.expiresAt > now) return cache.usage;
 
   let usage: CodexUsage | null = null;

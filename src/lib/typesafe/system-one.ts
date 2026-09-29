@@ -16,6 +16,7 @@
  */
 
 import { recordClaudeApiCall } from "@/lib/claude/api-usage";
+import { resolveSharedToken } from "@/lib/shared-token-reader";
 
 const DEFAULT_BASE_URL = "https://api.typesafe.ai";
 const SYSTEM_ONE_PATH = "/v1/systemone";
@@ -93,8 +94,8 @@ export type SystemOneResponse = {
 };
 
 /** キーが設定されているか。画面へ「使えない理由」を出すためにも使う */
-export function hasTypeSafeApiKey(): boolean {
-  return Boolean(process.env.TYPESAFE_API_KEY);
+export async function hasTypeSafeApiKey(): Promise<boolean> {
+  return Boolean(await resolveSharedToken("TYPESAFE_API_KEY", "TYPESAFE_API_KEY"));
 }
 
 function readTokenCount(value: number | undefined): number {
@@ -137,7 +138,7 @@ export async function askSystemOne(options: {
   questions: Record<string, SystemOneQuestion>;
   timeoutMs?: number;
 }): Promise<SystemOneResponse | null> {
-  const apiKey = process.env.TYPESAFE_API_KEY;
+  const apiKey = await resolveSharedToken("TYPESAFE_API_KEY", "TYPESAFE_API_KEY");
   if (!apiKey) return null;
 
   let response: Response;

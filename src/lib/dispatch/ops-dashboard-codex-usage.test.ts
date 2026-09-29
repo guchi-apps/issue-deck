@@ -6,6 +6,14 @@ import {
   parseOpsDashboardCodexUsage,
 } from "@/lib/dispatch/ops-dashboard-codex-usage";
 
+// 共有トークンはDBに無い前提（環境変数へのフォールバックを見る）。#3561
+vi.mock("@/lib/db", () => ({
+  db: {
+    sharedToken: { findUnique: vi.fn().mockResolvedValue(null) },
+    sharedTokenUsage: { create: vi.fn() },
+  },
+}));
+
 const snapshot = {
   fetchedAt: "2026-09-18T01:00:00.000Z",
   providers: [

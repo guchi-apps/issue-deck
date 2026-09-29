@@ -50,7 +50,7 @@ export async function GET() {
 async function authorizeUpload(request: NextRequest): Promise<NextResponse | null> {
   const authorization = request.headers.get("authorization");
   if (authorization) {
-    const auth = authorizeImageUpload(authorization);
+    const auth = await authorizeImageUpload(authorization);
     if (auth === "ok") return null;
     if (auth === "not_configured") {
       return NextResponse.json({ error: "not_configured" }, { status: 503 });
