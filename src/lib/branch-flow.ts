@@ -558,6 +558,7 @@ function buildRepository({
     openReleasePullRequest: releasePullRequest,
     openBumpPullRequest: bumpPullRequest,
     unreleasedCommits: unreleasedCommitCount(branchStatus?.developVsMain),
+    pullRequests,
     deployState,
   });
 
@@ -921,6 +922,7 @@ function groupLanesByRelease({
   openReleasePullRequest,
   openBumpPullRequest,
   unreleasedCommits,
+  pullRequests,
   deployState,
 }: {
   lanes: BranchFlowLane[];
@@ -929,6 +931,8 @@ function groupLanesByRelease({
   /** openなバージョンバンプPR。先頭（未リリース）の束へ幹の一部として乗せる（#1548） */
   openBumpPullRequest: PullRequestSummary | null;
   unreleasedCommits: number;
+  /** バンプPRの作成時刻から、リリースPRの凍結点を推定するのに使う（#3601） */
+  pullRequests: PullRequestSummary[];
   /** 本番デプロイの状態。**いちばん新しくmainへ入った束にだけ乗せる**（#1579） */
   deployState: BranchFlowDeployState | null;
 }): {
@@ -978,6 +982,7 @@ function groupLanesByRelease({
           (openBumpPullRequest ? releaseVersionFromTitle(openBumpPullRequest.headRef) : null),
         pullRequest: openReleasePullRequest,
         bumpPullRequest: openBumpPullRequest,
+        frozenAt: mergedBumpPullRequestCreatedAt(pullRequests, openReleasePullRequest),
         mergedAt: null,
         // まだmainへ入っていない束にデプロイの状態は無い
         deploy: null,
@@ -1046,6 +1051,42 @@ function laneMergedAts(lanes: BranchFlowLane[]): string[] {
         .map((pullRequest) => pullRequest.mergedAt as string),
     )
     .sort();
+}
+
+/**
+ * リリースPRの凍結後にdevelopへマージされた作業があるか（#3601）。「修正を入れて作り直す」を
+ * 出すかどうかの判定で、**追加のGitHub API取得は要らない**（束が持つレーンと、リリースPRの
+ * 凍結点の推定時刻`frozenAt`だけで決まる）。
+ *
+ * **基準はリリースPRの作成時刻ではなくバンプPRの作成時刻**（凍結点）。リリースPRの作成は
+ * それより数分遅く、その間にdevelopへ入った修正はリリースPRに乗っていない（サーバーの
+ * 比較基点`releaseHeadSha`と同じ側に揃える）。
+ *
+ * 凍結後に入った変更が無いと、作り直しても中身が変わらない。リリースPRが無い束、または
+ * 凍結ブランチでない旧世代のリリースPR（head=develop）ではfalse（そもそも作り直さない）。
+ */
+export function hasChangesAfterReleaseFreeze(
+  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
+): boolean {
+  const release = group.pullRequest;
+  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) return false;
+  const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();
+  return laneMergedAts(group.lanes).some((mergedAt) => new Date(mergedAt).getTime() > frozenAt);
+}
+
+/** リリースPRの版に対応する、マージ済みバンプPR（`release/v<版>`）の作成時刻。無ければundefined */
+function mergedBumpPullRequestCreatedAt(
+  pullRequests: PullRequestSummary[],
+  release: PullRequestSummary | null,
+): string | undefined {
+  const version = release ? releaseVersionFromTitle(release.title) : null;
+  if (version === null) return undefined;
+  return pullRequests.find(
+    (pullRequest) =>
+      pullRequest.kind === "version-bump" &&
+      pullRequest.merged &&
+      pullRequest.headRef === `release/v${version}`,
+  )?.createdAt;
 }
 
 function toReleaseGroup(

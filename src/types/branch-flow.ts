@@ -349,6 +349,13 @@ export type BranchFlowReleaseGroup = {
    * としてぶら下がっていた。マージ済みのバンプPRは持たない（どの版で出たかは束の見出しが表す）。
    */
   bumpPullRequest: PullRequestSummary | null;
+  /**
+   * リリースPRが運ぶ内容の凍結点の推定時刻（ISO8601。#3601）。**未リリースの束にだけ入る。**
+   * 凍結点はバンプPRのhead（＝バンプPRを作った時点のdevelop）なので、マージ済みのバンプPRの
+   * 作成時刻を使う。見つからなければリリースPRの作成時刻（`releaseContentFrozenAt`）へ戻すため
+   * 未指定にする。
+   */
+  frozenAt?: string;
   /** mainへ入った日時（ISO8601）。**nullなら未リリース**（進行中またはこれから） */
   mergedAt: string | null;
   /**
