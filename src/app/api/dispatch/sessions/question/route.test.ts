@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const createSessionQuestionRequest = vi.fn();
+const expireWaitingSessionQuestionRequests = vi.fn();
 const requestSessionCheckUser = vi.fn();
 const isSessionAnswerInApp = vi.fn();
 
 vi.mock("@/lib/dispatch/question-requests", () => ({
   get createSessionQuestionRequest() {
     return createSessionQuestionRequest;
+  },
+  get expireWaitingSessionQuestionRequests() {
+    return expireWaitingSessionQuestionRequests;
   },
 }));
 
@@ -59,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.DISPATCH_SECRET = "secret-value";
   createSessionQuestionRequest.mockResolvedValue({ id: "question-request-1" });
+  expireWaitingSessionQuestionRequests.mockResolvedValue(undefined);
   requestSessionCheckUser.mockResolvedValue(true);
   isSessionAnswerInApp.mockResolvedValue(false);
 });
@@ -74,6 +79,23 @@ describe("POST /api/dispatch/sessions/question", () => {
       questionRequestId: "question-request-1",
       answerInApp: false,
     });
+    expect(createSessionQuestionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ context: null }),
+    );
+  });
+
+  // #3569。質問と同じ応答の本文（「上記のコード」）を、質問の前提として保存する
+  it("フックが送ってきた本文を、質問の前提として保存する", async () => {
+    await POST(
+      postRequest(
+        { ...validBody, context: "  次のコードを実行します。\n\n```bash\nls\n```  " },
+        "Bearer secret-value",
+      ),
+    );
+
+    expect(createSessionQuestionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ context: "次のコードを実行します。\n\n```bash\nls\n```" }),
+    );
   });
 
   /**
@@ -96,6 +118,10 @@ describe("POST /api/dispatch/sessions/question", () => {
     });
     expect(createSessionQuestionRequest).not.toHaveBeenCalled();
     expect(requestSessionCheckUser).toHaveBeenCalledTimes(1);
+    // 前の質問の待ちは畳む（#3569）。残すと古い質問文が「回答を待っています」として出続ける
+    expect(expireWaitingSessionQuestionRequests).toHaveBeenCalledWith(
+      expect.objectContaining({ repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2189 }),
+    );
   });
 
   it("待ち時間が0なら作らない", async () => {

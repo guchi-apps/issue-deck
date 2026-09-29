@@ -20,15 +20,25 @@ import type { IssueComment } from "@/types/issue";
  * そこで**取得済みのコメントの末尾から、エージェントが書いた最新の1件**を前提として扱う。
  * 断定できない以上、画面には役割（計画ボットなど）と投稿時刻を必ず添えて、読む側が
  * 「これは今の質問と関係がある発言か」を判断できるようにする。
+ *
+ * **質問と同じ応答の本文が届いていれば、そちらを優先する**（#3569）。「上記のコードを実行します」の
+ * 「上記」は端末に書いた本文で、Issueコメントには無い。コメントから推定すると古い計画などが
+ * 出て、肝心のコードが見えない。本文はフックが転記から読んで質問と一緒に送る
+ * （`SessionQuestionRequestView.context`）。
  */
 export type QuestionPremise = {
+  /**
+   * どこから取ったか。`session`＝質問と同じ応答の本文（確定）、`comment`＝最新の
+   * エージェントのコメント（推定）
+   */
+  source: "session" | "comment";
   /** コメント本文（マーカーのHTMLコメントもそのまま。Markdownとして描画すると消える） */
   body: string;
   /** 役割の表示名（例: 「計画ボット」）。コメント欄の吹き出しと同じ呼び方に揃える */
   roleLabel: string;
   /** 役割。アイコンの出し分けに使う */
   role: CommentAgentRole;
-  /** 相対時刻（`IssueComment.createdAtLabel`。例: 「3分前」） */
+  /** 相対時刻（`IssueComment.createdAtLabel`。例: 「3分前」）。`session`では空文字 */
   createdAtLabel: string;
 };
 
@@ -57,10 +67,22 @@ const PREMISE_ROLES: readonly CommentAgentRole[] = [
  * （`isMarkedAutomationComment`。書き出しの絵文字による推測は含まれない）。
  *
  * @param comments 取得順（古い→新しい）のコメント一覧
+ * @param context 質問と同じ応答でエージェントが書いた本文（#3569）。あればコメントより優先する
  */
 export function findQuestionPremise(
   comments: readonly IssueComment[] | null | undefined,
+  context?: string | null,
 ): QuestionPremise | null {
+  const sessionBody = context?.trim();
+  if (sessionBody) {
+    return {
+      source: "session",
+      body: sessionBody,
+      role: "implementer",
+      roleLabel: COMMENT_AGENT_PROFILES.implementer.label,
+      createdAtLabel: "",
+    };
+  }
   if (!comments) return null;
 
   for (let index = comments.length - 1; index >= 0; index -= 1) {
@@ -72,6 +94,7 @@ export function findQuestionPremise(
     const body = comment.body.trim();
     if (!body) continue;
     return {
+      source: "comment",
       body,
       role,
       roleLabel: COMMENT_AGENT_PROFILES[role].label,

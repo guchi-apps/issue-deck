@@ -2,10 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
-import { createSessionQuestionRequest } from "@/lib/dispatch/question-requests";
+import {
+  createSessionQuestionRequest,
+  expireWaitingSessionQuestionRequests,
+} from "@/lib/dispatch/question-requests";
 import { isSessionAnswerInApp } from "@/lib/dispatch/session-answer-mode";
 import { parseSessionHostName, requestSessionCheckUser } from "@/lib/dispatch/session-plan";
 import {
+  parseSessionQuestionContext,
   parseSessionQuestionWaitSeconds,
   parseSessionQuestions,
 } from "@/lib/dispatch/session-question-request";
@@ -47,6 +51,8 @@ export async function POST(request: NextRequest) {
   // 形が想定外のものは**受け付けずにnullへ倒す**（リクエスト自体は拒否しない）。
   // 質問が画面に出ることの方が価値が高く、付随情報が欠けても待ちを作る意味は変わらない
   const hostName = parseSessionHostName(payload?.hostName);
+  // 質問と同じ応答で書かれた本文（#3569）。無くても質問は受け付ける
+  const context = parseSessionQuestionContext(payload?.context);
 
   // **待ち時間が`0`（ホスト側で無効にしている）なら作らない。** 作ると、フックは待たないのに
   // 画面には押しても誰も受け取らないパネルが残る。
@@ -67,6 +73,7 @@ export async function POST(request: NextRequest) {
         issueNumber: target.issueNumber,
         hostName,
         questions,
+        context,
         waitSeconds,
       });
       questionRequestId = created.id;
@@ -78,6 +85,15 @@ export async function POST(request: NextRequest) {
         error,
       );
     }
+  } else {
+    // 待ちを作らなくても、前の質問の待ちは畳む（#3569）。残すと画面に古い質問文が
+    // 「回答を待っています」として出続ける
+    await expireWaitingSessionQuestionRequests(target).catch((error) => {
+      console.error(
+        `[dispatch] 前の質問の回答待ちを畳めませんでした（${target.repositoryFullName}#${target.issueNumber}）`,
+        error,
+      );
+    });
   }
 
   // **ラベルは待ちを作れたかどうかと切り離す。** 質問が出た＝人を待っているのは確かで、

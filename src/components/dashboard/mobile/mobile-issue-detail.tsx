@@ -426,7 +426,9 @@ export function MobileIssueDetail({
   // 質問の前提として見せるコメント（#2742）。「上記の計画で〜」の“上記”はコメント欄の
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
-  const questionPremise = questionRequest ? findQuestionPremise(comments) : null;
+  const questionPremise = questionRequest
+    ? findQuestionPremise(comments, questionRequest.context)
+    : null;
   // 質問が指している手作業の手順（#2820）。代行できない手順で「実施されましたか？」と
   // 聞かれたとき、答えるのに必要な「何をどこで実行するのか」は本文の中にしか無かった
   const questionManualStep = questionRequest

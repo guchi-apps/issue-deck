@@ -148,6 +148,7 @@ function makeQuestionRequest(
     issueNumber: 100,
     hostName: "subpc",
     questions: [],
+    context: null,
     answers: null,
     status: "WAITING",
     createdAt: new Date(NOW - 60_000).toISOString(),

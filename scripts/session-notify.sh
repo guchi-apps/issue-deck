@@ -713,6 +713,8 @@ export NOTIFY_HOOK_PERMISSION_FINGERPRINT
 #                                                           3行目に`AskUserQuestion`の引数を添える。#2189）
 #   plan-retry                                              `ExitPlanMode`を別の応答で呼び直させる
 #                                                           （入力に計画が無い。#3136）
+#   question-retry                                          `AskUserQuestion`を次の応答で呼び直させる
+#                                                           （前提の本文を転記から読むため。#3569）
 #   skip                                                    何もしない
 #
 # イベント名を返すのはシェル側がセッションの状態として記録するため（#1256）、
@@ -741,6 +743,9 @@ export NOTIFY_PLAN_BASE_SHA
 # `ExitPlanMode`を別の応答で呼び直させた印の置き場（#3136）。同じ計画につき1回だけ差し戻すために使う。
 # セッションの状態ファイルと同じXDGのstateディレクトリに置く（消えても差し戻しが1回増えるだけ）
 export NOTIFY_PLAN_RETRY_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state/issue-deck/sessions}/plan-retry"
+# `AskUserQuestion`を差し戻した印の置き場（#3569）。セッションごとに1つ置き、時刻で「直前に
+# 差し戻したか」を見る（消えても差し戻しが1回増えるだけ）
+export NOTIFY_QUESTION_RETRY_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state/issue-deck/sessions}/question-retry"
 
 result="$(python3 - <<'PY' 2>/dev/null || true
 import glob
@@ -749,6 +754,7 @@ import json
 import os
 import re
 import sys
+import time
 
 # 転記ファイル（transcript）から計画ファイルのパスを探すときに読む末尾の量。
 # 長いセッションでは数MBになるため、全部は読まない。
@@ -1040,6 +1046,129 @@ def plan_retry_needed(tool_input):
     return True
 
 
+# 質問を差し戻してから、呼び直しとして扱う時間（秒。#3569）。差し戻しの`deny`はすぐに
+# エージェントへ返り、呼び直しは次の応答で来る。長く取ると、差し戻しと無関係な後の質問まで
+# 「呼び直し」と読んで、別の応答の本文を前提として送ってしまう
+QUESTION_RETRY_WINDOW_SECONDS = 180
+
+# 前提として送る本文の上限（文字数）。issue-deck側も同じ値で切り詰める
+QUESTION_CONTEXT_MAX_CHARS = 8000
+
+
+def question_retry_marker_path():
+    marker_dir = os.environ.get("NOTIFY_QUESTION_RETRY_DIR", "")
+    session_id = hook.get("session_id", "")
+    if not marker_dir or not session_id:
+        return ""
+    return os.path.join(marker_dir, hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32])
+
+
+def question_retried_recently():
+    """このセッションで直前に質問を差し戻したか（#3569）。印の時刻で見る。"""
+    marker = question_retry_marker_path()
+    if not marker:
+        return False
+    try:
+        return time.time() - os.path.getmtime(marker) <= QUESTION_RETRY_WINDOW_SECONDS
+    except Exception:
+        return False
+
+
+def question_retry_needed():
+    """`AskUserQuestion`を次の応答で呼び直させるか（#3569）。
+
+    **質問の前提（「上記のコードを実行します」の「上記」）は、質問と同じ応答の本文にある。**
+    ところがその本文は、ツールの実行が終わるまで転記に書かれない（実測。#3136の`Write`と同じ）。
+    `PreToolUse`の時点では読めないので、1回だけ差し戻して次の応答で呼び直させる。呼び直しの
+    時点では、差し戻した応答が転記に載っている（`resolve_question_context`で読む）。
+
+    **差し戻すのは、直前に差し戻していないときだけ。** 呼び直しで質問の文面を変えられても、
+    差し戻しを繰り返して先へ進めなくなることはない。待ち時間が0（画面から答えない）のホストや
+    Codexでは、前提を出す先が無いので差し戻さない。
+    """
+    if os.environ.get("ISSUE_DECK_AGENT", "claude") == "codex":
+        return False
+    if int(os.environ.get("NOTIFY_QUESTION_WAIT_SECONDS") or 0) <= 0:
+        return False
+    if not hook.get("transcript_path"):
+        return False
+    marker = question_retry_marker_path()
+    if not marker or question_retried_recently():
+        return False
+    try:
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())) + "\n")
+    except Exception:
+        # 印を残せないなら差し戻さない（残せないまま差し戻すと、繰り返しを止められない）
+        return False
+    return True
+
+
+def resolve_question_context():
+    """差し戻した`AskUserQuestion`と同じ応答で書かれた本文（#3569）。無ければ空文字。
+
+    **読むのは、転記の最後のアシスタント応答が`AskUserQuestion`で終わっているときだけ。**
+    呼び直しの時点で、今の応答はまだ転記に無い。したがって最後の応答が差し戻した質問のはず。
+    そうでない（途中に別の応答が挟まった）なら、どの本文が前提か分からないので何も送らない。
+
+    応答の境界は`message.id`で取る。転記は1応答をブロックごとの行に分けて書くため、
+    同じ`message.id`の行の`text`ブロックだけを集める。それより前の応答の本文は拾わない。
+    """
+    if not question_retried_recently():
+        return ""
+    transcript = hook.get("transcript_path") or ""
+    if not transcript:
+        return ""
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            if size > TRANSCRIPT_TAIL_BYTES:
+                f.seek(size - TRANSCRIPT_TAIL_BYTES)
+                f.readline()
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return ""
+
+    entries = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "assistant":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict) or not message.get("id"):
+            continue
+        # サブエージェントの応答は別の流れ（本人の質問の前提ではない）
+        if entry.get("isSidechain"):
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            entries.append((message["id"], content))
+    if not entries:
+        return ""
+
+    last_id = entries[-1][0]
+    blocks = [block for message_id, content in entries if message_id == last_id for block in content]
+    asked = any(
+        isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "AskUserQuestion"
+        for block in blocks
+    )
+    if not asked:
+        return ""
+    texts = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_use":
+            break  # 質問より後に書かれた本文は前提ではない
+        if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"].strip():
+            texts.append(block["text"].strip())
+    return "\n\n".join(texts)[:QUESTION_CONTEXT_MAX_CHARS]
+
+
 # 計画の提示（#1342）。**`ExitPlanMode`の`PreToolUse`は、承認プロンプトが出る前に飛ぶ。**
 # ここが計画をIssueへ残す唯一の機会で、`Notification`のJSONには計画に関する情報が何も無い。
 #
@@ -1094,12 +1223,26 @@ if event == "PreToolUse" and hook.get("tool_name", "") == "AskUserQuestion":
     if not isinstance(questions, list) or not questions or not repo_slug or not issue_number.isdigit():
         print("skip")
         sys.exit(0)
+    # 質問の前提になる本文を読めるよう、まず次の応答で呼び直させる（#3569。
+    # `question_retry_needed`を参照）。質問はまだissue-deckへ送らない
+    if question_retry_needed():
+        print("question-retry")
+        sys.exit(0)
+    context = resolve_question_context()
+    # 呼び直しを受け取ったら印を消す。残すと、続けて出た次の質問が差し戻されないまま
+    # 「呼び直し」と読まれ、今答えた質問の応答の本文を前提として送ってしまう
+    if question_retried_recently():
+        try:
+            os.remove(question_retry_marker_path())
+        except Exception:
+            pass
     remote_url = resolve_remote_url()
     print("question", remote_url or "-")
     print(json.dumps({
         "repository": repo_slug,
         "issue": int(issue_number),
         "questions": questions,
+        "context": context or None,
         "hostName": host_name or None,
         "waitSeconds": int(os.environ.get("NOTIFY_QUESTION_WAIT_SECONDS") or 0),
     }))
@@ -1662,8 +1805,16 @@ mark_check_user_pending() {
 
 decision_line="$(printf '%s' "$result" | head -1)"
 # 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted` /
-#       `plan <URL または "-">` / `plan-retry` / `question <URL または "-">` / `skip`
+#       `plan <URL または "-">` / `plan-retry` / `question <URL または "-">` / `question-retry` / `skip`
 decision="${decision_line%% *}"
+
+if [[ "$decision" == "question-retry" ]]; then
+  # 質問の前提（同じ応答で書いた本文）は、`PreToolUse`の時点ではまだ転記に無い（#3569）。
+  # 選択フォームはまだ出していない（＝人は何も見ていない）ため、入力待ちの記録も
+  # `00.check-user`も付けない。`deny`の出力形式は計画の差し戻しと同じ
+  plan_decision_output deny "質問の前提（この応答で書いた本文やコード）をissue-deckの画面にも出すため、一度だけ差し戻しました。本文は書き直さず、ほかのツールを並べずに、同じ引数のAskUserQuestionだけを次の応答で呼び直してください。"
+  exit 0
+fi
 
 if [[ "$decision" == "plan-retry" ]]; then
   # 計画ファイルの`Write`と同じ応答で呼ばれ、入力に計画が無い（#3136）。**`deny`の理由が

@@ -294,11 +294,12 @@ export function QuestionAnswerPanel({
 }
 
 /**
- * 質問の直前にセッションが投稿したコメント（#2742）。
+ * 質問の前提（#2742）。質問と同じ応答の本文（#3569）か、質問の直前にセッションが投稿したコメント。
  *
  * **断定はしない。** 質問とコメントを結ぶデータは無く、選んでいるのは「エージェントが書いた
  * 最新の1件」でしかない（`findQuestionPremise`）。役割（計画ボットなど）と投稿時刻を必ず
- * 添えて、読む側が今の質問と関係のある発言かを判断できるようにする。
+ * 添えて、読む側が今の質問と関係のある発言かを判断できるようにする。コメントから選んだときは
+ * 「推定」と明示する（端末の本文を読めなかった場合で、古いコメントが出ることがある）。
  *
  * **既定では畳む。** 計画は30〜40行が目安で、開いたまま置くと選択肢が画面外へ出る——
  * それは前提を読みに行くのと同じことになる。
@@ -325,7 +326,9 @@ function QuestionPremiseCard({
         </span>
         <span className="text-xs font-semibold">この質問の前提</span>
         <span className="ml-auto text-[11px] text-muted-foreground">
-          {premise.createdAtLabel}のコメント
+          {premise.source === "session"
+            ? "質問直前の発言"
+            : `${premise.createdAtLabel}のコメント（推定）`}
         </span>
       </div>
       <div className="relative px-3 pt-2">
