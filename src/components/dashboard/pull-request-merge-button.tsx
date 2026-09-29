@@ -132,7 +132,11 @@ export function PullRequestMergeButton({
               ))}
             </ul>
             {productionMerge ? (
-              <PullRequestMergeProduction pullRequest={pullRequest} open={confirmOpen} />
+              <PullRequestMergeProduction
+                pullRequest={pullRequest}
+                open={confirmOpen}
+                onNavigate={() => setConfirmOpen(false)}
+              />
             ) : (
               <PullRequestMergeReview
                 verdict={pullRequest.reviewVerdict}

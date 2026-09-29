@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => "/dashboard",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
@@ -101,6 +107,42 @@ describe("PullRequestMergeProduction", () => {
     );
   });
 
+  it("指摘のある行にだけ印を付け、押すとダイアログを閉じてPR詳細を開く（#3592）", async () => {
+    mockChanges([
+      makeChange({ id: "a1", pullRequestNumber: 2077, title: "要修正のPR" }),
+      makeChange({ id: "a2", pullRequestNumber: 2078, issueNumber: 2063, title: "問題なしのPR" }),
+      makeChange({ id: "a3", pullRequestNumber: null, issueNumber: null, kind: "commit", title: "番号なしの変更" }),
+    ]);
+    const onNavigate = vi.fn();
+    const row = (issueNumber: number, pullRequestNumber: number, reviewKind: string) => ({
+      issueNumber,
+      pullRequestNumber,
+      reviewKind,
+      reviewLabel: reviewKind,
+    });
+
+    render(
+      <PullRequestMergeProduction
+        pullRequest={makePullRequest({
+          releaseVerification: {
+            rows: [row(2062, 2077, "changes-requested"), row(2063, 2078, "ok")],
+          } as unknown as PullRequestSummary["releaseVerification"],
+        })}
+        open
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const button = (await screen.findByText("要修正のPR")).closest("button");
+    expect(button?.textContent).toContain("要修正");
+    expect(screen.getByText("問題なしのPR").closest("button")?.textContent).not.toContain("要");
+    // PR番号が取れない行は押せない
+    expect(screen.getByText("番号なしの変更").closest("button")).toBeNull();
+
+    fireEvent.click(button as HTMLElement);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
   it("どの版からどの版へ上げるかを、変更一覧とは別に出す（#3260）", async () => {
     mockChanges([makeChange()], { previousVersion: "4.18.2" });
 
@@ -167,9 +209,11 @@ describe("PullRequestMergeProduction", () => {
     expect(await screen.findByText("要修正 1 ／ 問題なし 1")).toBeTruthy();
     expect(screen.getByText("#2077が要修正")).toBeTruthy();
     expect(screen.getByText("止めるべき項目があります（1件）")).toBeTruthy();
-    // 一覧の行には判定を並べない（何のPRが入るかだけを読む場所）
+    // 一覧の行には指摘のあるものだけ印を付ける（#3592）。問題なしの判定文は並べない
     expect(screen.queryByText("問題なし（LGTM）")).toBeNull();
-    expect(screen.queryByText("要修正")).toBeNull();
+    expect(
+      screen.getByText("自動マージ失敗時の理由表示機能の追加").closest("button")?.textContent,
+    ).toContain("要修正");
     expect(screen.getByText("自動マージ失敗時の理由表示機能の追加")).toBeTruthy();
     expect(screen.getByText("別の変更")).toBeTruthy();
   });

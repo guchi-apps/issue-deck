@@ -480,6 +480,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
   [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
   [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **行の内訳の「条件変更のIssueを起案」（#3590）は、現在の条件と直近の実行状況を入れた新規作成ダイアログを開くだけで、起票しない。** 下書きは[`lib/review-gate-issue-draft.ts`](../src/lib/review-gate-issue-draft.ts)。作成ダイアログで選べない（非表示・Issue作成対象外の）リポジトリの行はボタンを無効にする
   - **取得は「callerとPR一覧（リポジトリ5件ずつ）」→「Issue PRのチェック集約（PR10件ずつ・並行4本）」の
     2段階に分けてある（#2963）。** GitHubのGraphQLは約10秒で打ち切られて502・504（`We couldn't
     respond to your request in time`）を返し、所要時間は`statusCheckRollup`を読むPRの件数にほぼ
@@ -2258,8 +2259,8 @@ export function POST(request: NextRequest) {
   **一覧の応答へ載せるとき、指摘の本文（`reviewBody`）は落とす**（`withoutReviewBodies`）。
   PR一覧は全リポジトリぶんを1つの応答で返すため、本文まで載せると数十KB膨らむ。本文を読むのは
   PR詳細のパネルの役割で、そちらは詳細APIの`body`から読み直している。
-  **リリース（mainへのPR）では、判定は「マージ前の確認」のレビュー行へ集約し、「このリリースに
-  含まれる変更」の一覧には出さない**（#3093。[`pull-request-merge-precheck.tsx`](../src/components/dashboard/pull-request-merge-precheck.tsx)・
+  **リリース（mainへのPR）では、判定の総合は「マージ前の確認」のレビュー行へ集約し、「このリリースに
+  含まれる変更」の一覧には指摘のある行（要修正・要確認）にだけ印を付ける**（#3093・#3592。[`pull-request-merge-precheck.tsx`](../src/components/dashboard/pull-request-merge-precheck.tsx)・
   [`lib/pull-request-merge-precheck.ts`](../src/lib/pull-request-merge-precheck.ts)）。かつては一覧の
   各行に判定を、見出しの下に内訳の帯を出していた（#2843）が、「何のPRが入るか」を読む場所と
   「出してよいか」を判断する場所が混ざっていた。一覧はPR番号・タイトル・バンプの印だけにして
@@ -2408,8 +2409,10 @@ export function POST(request: NextRequest) {
   （`Merge pull request #<番号> from <owner>/<ブランチ>`）で、ブランチ名`issue-<番号>`から対応Issueまで
   辿り、**タイトルはDBキャッシュ（`Issue`テーブル）から解決する**ためIssueの件数ぶんのリクエストは
   増えない（[`lib/pull-request-changes.ts`](../src/lib/pull-request-changes.ts)）。
-  **この一覧は「何が入るか」だけを出し、レビュー判定は載せない**（#3093）。判定は同じダイアログの上に
-  置いた「マージ前の確認」（CI・コンフリクトと並べる。上の判定の節を参照）へ集約した。
+  **この一覧は「何が入るか」を出し、レビュー判定は指摘のある行（要修正・要確認）の印だけを載せる**
+  （#3093・#3592）。総合判定は同じダイアログの上に置いた「マージ前の確認」（CI・コンフリクトと並べる。
+  上の判定の節を参照）へ集約した。**行を押すとダイアログを閉じてPR詳細を開く**
+  （`useReferenceNavigation().openPullRequest`。PR番号が取れない行は押せない）。
   **PR本文の`## 対象issue`は使わない**——あれはPRを作った時点の一覧で、PRが開いているあいだに
   developへ入った変更が抜ける。出すのは`isProductionMerge`（`lib/pull-request-list.ts`。
   `mergeWarnings`が本番デプロイの警告を返すのと同じ判定）が真のPRだけで、develop向けPRの
