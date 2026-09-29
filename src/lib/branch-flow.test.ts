@@ -4,6 +4,7 @@ import {
   buildBranchFlow,
   extractManualStepOrigin,
   formatUnreleasedSummary,
+  hasChangesAfterReleaseFreeze,
   isClosedLane,
   isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
@@ -2201,5 +2202,57 @@ describe("buildBranchFlow deviceBuild", () => {
 
   it("表に無いリポジトリはnull", () => {
     expect(build({ branchStatuses: [branchStatus({ mainHead })] }).repositories[0].deviceBuild).toBeNull();
+  });
+});
+
+describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFreeze。#3601）", () => {
+  function unreleasedGroup(mergedAts: string[], releaseHeadRef = "release-main/v3.8.6") {
+    const flow = build({
+      pullRequests: [
+        // 過去にmainへ出た版があって初めて、その後の作業が「未リリース」に振り分けられる
+        releasePullRequest({
+          number: 178,
+          title: "v3.8.5をmainへリリースする",
+          state: "closed",
+          merged: true,
+          createdAt: "2026-08-10T00:00:00Z",
+          mergedAt: "2026-08-10T01:00:00Z",
+        }),
+        releasePullRequest({
+          number: 183,
+          title: "v3.8.6をmainへリリースする",
+          state: "open",
+          headRef: releaseHeadRef,
+          createdAt: "2026-08-15T02:00:00Z",
+        }),
+        ...mergedAts.map((mergedAt, index) =>
+          pullRequest({
+            number: 200 + index,
+            headRef: `issue-${200 + index}`,
+            linkedIssueNumber: 200 + index,
+            state: "closed",
+            merged: true,
+            mergedAt,
+          }),
+        ),
+      ],
+    });
+    return flow.repositories[0].releaseGroups[0];
+  }
+
+  it("凍結（リリースPR作成）より後にマージされた作業があればtrue", () => {
+    expect(hasChangesAfterReleaseFreeze(unreleasedGroup(["2026-08-15T03:00:00Z"]))).toBe(true);
+  });
+
+  it("作業が凍結より前にマージされたものだけならfalse（リリースPRに乗っている）", () => {
+    expect(hasChangesAfterReleaseFreeze(unreleasedGroup(["2026-08-15T01:00:00Z"]))).toBe(false);
+  });
+
+  it("作業が1本も無ければfalse", () => {
+    expect(hasChangesAfterReleaseFreeze(unreleasedGroup([]))).toBe(false);
+  });
+
+  it("head=developの旧世代リリースPRではfalse", () => {
+    expect(hasChangesAfterReleaseFreeze(unreleasedGroup(["2026-08-15T03:00:00Z"], "develop"))).toBe(false);
   });
 });

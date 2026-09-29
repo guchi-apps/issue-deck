@@ -1048,6 +1048,23 @@ function laneMergedAts(lanes: BranchFlowLane[]): string[] {
     .sort();
 }
 
+/**
+ * リリースPRの凍結後にdevelopへマージされた作業があるか（#3601）。「修正を入れて作り直す」を
+ * 出すかどうかの判定で、**追加のGitHub API取得は要らない**（束が持つレーンと、リリースPRの
+ * 作成時刻＝`releaseContentFrozenAt`だけで決まる）。
+ *
+ * 凍結後に入った変更が無いと、作り直しても中身が変わらない。リリースPRが無い束、または
+ * 凍結ブランチでない旧世代のリリースPR（head=develop）ではfalse（そもそも作り直さない）。
+ */
+export function hasChangesAfterReleaseFreeze(
+  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes">,
+): boolean {
+  const release = group.pullRequest;
+  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) return false;
+  const frozenAt = new Date(releaseContentFrozenAt(release)).getTime();
+  return laneMergedAts(group.lanes).some((mergedAt) => new Date(mergedAt).getTime() > frozenAt);
+}
+
 function toReleaseGroup(
   group: Omit<BranchFlowReleaseGroup, "openManualStepCount">,
 ): BranchFlowReleaseGroup {
