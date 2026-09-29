@@ -193,6 +193,9 @@ source "$SCRIPT_DIR/lib/session-transcript.sh"
 source "$SCRIPT_DIR/lib/session-handoff.sh"
 # shellcheck source=scripts/lib/session-resume.sh
 source "$SCRIPT_DIR/lib/session-resume.sh"
+# 「更新して再起動」の前に作業ツリーを確かめる（#3588）
+# shellcheck source=scripts/lib/self-update.sh
+source "$SCRIPT_DIR/lib/self-update.sh"
 # shellcheck source=scripts/lib/session-tool-call-stall.sh
 source "$SCRIPT_DIR/lib/session-tool-call-stall.sh"
 # shellcheck source=scripts/lib/session-codex-turn-stall.sh
@@ -2921,9 +2924,11 @@ run_self_update_job() {
   echo "チェックアウトを更新します（$CHECKOUT_DIR）..."
 
   # **作業ツリーが汚れていたら触らない。** 手で試した変更を巻き込んで消しうるため、
-  # 強制せずに人へ返す
-  if [[ -n "$(git -C "$CHECKOUT_DIR" status --porcelain 2>/dev/null)" ]]; then
-    report_job "$job_id" failed "作業ツリーに未コミットの変更があります。手元で確認してください。"
+  # 強制せずに人へ返す。止めるときは変更のあるファイル名を返し、取り込み先と同じ内容の
+  # 変更だけなら捨てて続ける（#3588。判定は lib/self-update.sh）
+  local dirty_reason
+  if ! dirty_reason="$(self_update_prepare_worktree "$CHECKOUT_DIR")"; then
+    report_job "$job_id" failed "$dirty_reason"
     return 0
   fi
 
