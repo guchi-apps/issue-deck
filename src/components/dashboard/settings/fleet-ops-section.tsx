@@ -6,6 +6,7 @@ import { Boxes, KeyRound, Link2, RefreshCw, ScanSearch, ShieldCheck } from "luci
 import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
+import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
 import { SharedTokensSection } from "@/components/dashboard/settings/shared-tokens-section";
 import { SupabaseRedirectUrlsSection } from "@/components/dashboard/settings/supabase-redirect-urls-section";
@@ -31,6 +32,9 @@ type FleetOpsSectionProps = {
   sharedTokens: SettingsData["sharedTokens"];
   /** 期限切れ・期限が近いPATの件数。**開かなくても気づけるように**見出しへ出す（#2022） */
   expiringFineGrainedTokenCount: number;
+  /** 「Claudeレビューの実行条件」から条件変更Issueの下書きを開く（#3590） */
+  onDraftReviewGateIssue?: (draft: ReviewGateIssueDraft) => void;
+  creatableRepositoryNames?: readonly string[];
 };
 
 /**
@@ -51,6 +55,8 @@ export function FleetOpsSection({
   fineGrainedTokens,
   sharedTokens,
   expiringFineGrainedTokenCount,
+  onDraftReviewGateIssue,
+  creatableRepositoryNames,
 }: FleetOpsSectionProps) {
   const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
   const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
@@ -106,7 +112,11 @@ export function FleetOpsSection({
         description="develop向けPRでclaude-reviewが走る条件と、直近の実行状況"
         loadHint="開くと各リポジトリのcallerと直近のdevelop向けPRをGitHubへ問い合わせます"
       >
-        <ReviewGateSection open />
+        <ReviewGateSection
+          open
+          onDraftIssue={onDraftReviewGateIssue}
+          creatableRepositoryNames={creatableRepositoryNames}
+        />
       </LazyFleetPanel>
 
       <LazyFleetPanel

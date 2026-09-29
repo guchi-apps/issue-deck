@@ -480,6 +480,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/review-gate-config.ts`](../src/lib/review-gate-config.ts)の純関数、取得は
   [`lib/github/review-gates.ts`](../src/lib/github/review-gates.ts)、画面は
   [`settings/review-gate-section.tsx`](../src/components/dashboard/settings/review-gate-section.tsx)。
+  - **行の内訳の「条件変更のIssueを起案」（#3590）は、現在の条件と直近の実行状況を入れた新規作成ダイアログを開くだけで、起票しない。** 下書きは[`lib/review-gate-issue-draft.ts`](../src/lib/review-gate-issue-draft.ts)。作成ダイアログで選べない（非表示・Issue作成対象外の）リポジトリの行はボタンを無効にする
   - **取得は「callerとPR一覧（リポジトリ5件ずつ）」→「Issue PRのチェック集約（PR10件ずつ・並行4本）」の
     2段階に分けてある（#2963）。** GitHubのGraphQLは約10秒で打ち切られて502・504（`We couldn't
     respond to your request in time`）を返し、所要時間は`statusCheckRollup`を読むPRの件数にほぼ

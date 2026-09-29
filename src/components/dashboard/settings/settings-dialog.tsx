@@ -33,6 +33,7 @@ import type {
   ModelPickEngine,
 } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
+import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
 
 type SettingsDialogProps = {
@@ -56,6 +57,8 @@ type SettingsDialogProps = {
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
   onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
   onUpdated: (values: AppSettingsValues) => void;
+  onDraftReviewGateIssue?: (draft: ReviewGateIssueDraft) => void;
+  creatableRepositoryNames?: readonly string[];
 };
 
 /**
@@ -86,6 +89,8 @@ export function SettingsDialog({
   onSetRepositoriesHidden,
   onSetRepositoryIssueCreationExcluded,
   onUpdated,
+  onDraftReviewGateIssue,
+  creatableRepositoryNames,
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
   // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
@@ -181,6 +186,8 @@ export function SettingsDialog({
                   fineGrainedTokens={data.fineGrainedTokens}
                   sharedTokens={data.sharedTokens}
                   expiringFineGrainedTokenCount={data.expiringFineGrainedTokenCount}
+                  onDraftReviewGateIssue={onDraftReviewGateIssue}
+                  creatableRepositoryNames={creatableRepositoryNames}
                 />
               )}
               {section === "images" && <ImagesSection />}

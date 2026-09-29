@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, ChevronRight, ExternalLink, Info, RefreshC
 
 import { FleetRepositoryRow } from "@/components/dashboard/fleet-repository-row";
 import { Button } from "@/components/ui/button";
+import { buildReviewGateIssueDraft, type ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { ReviewGateOverview, ReviewGateRepository } from "@/lib/github/review-gates";
 import {
   BUILTIN_RISK_PATTERNS,
@@ -24,7 +25,17 @@ import {
  * 先頭に出す**——パス名から判別できない領域に触れる小さなPRがレビューされないまま
  * developへ入っていることに、callerを開かずに気づけるようにするため（ops-dashboard#233）。
  */
-export function ReviewGateSection({ open }: { open: boolean }) {
+export function ReviewGateSection({
+  open,
+  onDraftIssue,
+  creatableRepositoryNames,
+}: {
+  open: boolean;
+  /** 「条件変更のIssueを起案」。未指定ならボタンを出さない */
+  onDraftIssue?: (draft: ReviewGateIssueDraft) => void;
+  /** 作成ダイアログで選べるリポジトリ。含まれない行はボタンを無効にする（欄が空に見えるため） */
+  creatableRepositoryNames?: readonly string[];
+}) {
   const [overview, setOverview] = useState<ReviewGateOverview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +124,8 @@ export function ReviewGateSection({ open }: { open: boolean }) {
               key={repository.fullName}
               repository={repository}
               open={expanded === repository.fullName}
+              onDraftIssue={onDraftIssue}
+              canDraftIssue={!creatableRepositoryNames || creatableRepositoryNames.includes(repository.fullName)}
               onToggle={() =>
                 setExpanded((current) => (current === repository.fullName ? null : repository.fullName))
               }
@@ -260,10 +273,14 @@ function ReviewGateRow({
   repository,
   open,
   onToggle,
+  onDraftIssue,
+  canDraftIssue,
 }: {
   repository: ReviewGateRepository;
   open: boolean;
   onToggle: () => void;
+  onDraftIssue?: (draft: ReviewGateIssueDraft) => void;
+  canDraftIssue: boolean;
 }) {
   const { config } = repository;
   const lockFiles = config.inputs["lock-files"];
@@ -299,6 +316,23 @@ function ReviewGateRow({
             )}
           </span>
           {open && <RiskPathsDetail repository={repository} />}
+          {open && onDraftIssue && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canDraftIssue}
+                onClick={() => onDraftIssue(buildReviewGateIssueDraft(repository))}
+              >
+                条件変更のIssueを起案
+              </Button>
+              {!canDraftIssue && (
+                <span className="text-[11px] text-muted-foreground">
+                  Issue作成の対象外のため起案できません
+                </span>
+              )}
+            </div>
+          )}
         </div>
       }
       action={
