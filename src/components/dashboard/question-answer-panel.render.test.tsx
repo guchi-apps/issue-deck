@@ -42,6 +42,7 @@ function request(overrides: Partial<SessionQuestionRequestView> = {}): SessionQu
     issueNumber: 2189,
     hostName: "subpc",
     questions: QUESTIONS,
+    context: null,
     answers: null,
     status: "WAITING",
     createdAt: new Date(Date.now() - 60 * 1000).toISOString(),
@@ -236,6 +237,7 @@ describe("QuestionAnswerPanel", () => {
         session={session()}
         dispatch={dispatchHandle()}
         premise={{
+          source: "comment",
           body: "## 要約\n\n**内訳を直せるようにする**",
           role: "planner",
           roleLabel: "計画ボット",
@@ -246,10 +248,37 @@ describe("QuestionAnswerPanel", () => {
 
     expect(screen.getByText("この質問の前提")).toBeTruthy();
     expect(screen.getByText("計画ボット")).toBeTruthy();
-    expect(screen.getByText("3分前のコメント")).toBeTruthy();
+    // コメントから選んだ前提は推定でしかない（#3569）。古いコメントが出ることがあると分かるようにする
+    expect(screen.getByText("3分前のコメント（推定）")).toBeTruthy();
     expect(screen.getByText("内訳を直せるようにする")).toBeTruthy();
     // 開いたまま置くと選択肢が画面外へ出る。畳んだ状態から始める
     expect(screen.getByRole("button", { name: /全文を表示/ })).toBeTruthy();
+  });
+
+  /**
+   * #3569。「上記のコードを実行します」の“上記”は端末に書いた本文で、Issueコメントには無い。
+   * フックが転記から読んだ本文は、推定ではなく質問直前の発言として出す。
+   */
+  it("質問と同じ応答の本文を、質問直前の発言として出す", () => {
+    render(
+      <QuestionAnswerPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        premise={{
+          source: "session",
+          body: "次のコマンドを実行します。\n\n```bash\npnpm prisma migrate deploy\n```",
+          role: "implementer",
+          roleLabel: "実装ボット",
+          createdAtLabel: "",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("この質問の前提")).toBeTruthy();
+    expect(screen.getByText("質問直前の発言")).toBeTruthy();
+    expect(screen.queryByText(/（推定）/)).toBeNull();
+    expect(screen.getByText("pnpm prisma migrate deploy")).toBeTruthy();
   });
 
   it("前提にできるコメントが無ければカードごと出さない", () => {
