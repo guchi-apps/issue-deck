@@ -23,20 +23,31 @@ export type WebviewIosRepository = {
   setupReferences: { label: string; url: string }[];
 };
 
+/**
+ * `guchi-apps/myroom`は`guchi-apps/kurashio`へリネームされた（#3594）。issue-deckの`Repository`の
+ * 名前は再同期されるまで旧名のままなので、**旧名も同じ内容で引けるようにしてある**。
+ * 旧名の行は再同期の完了を確かめてから消してよい。
+ *
+ * コマンドの`cd ~/apps/myroom`はMac mini側のチェックアウト先。ディレクトリ名はリネームで
+ * 自動では変わらないため、Mac側で`~/apps/kurashio`へ移したときにここも揃える。
+ */
+const KURASHIO: WebviewIosRepository = {
+  appLabel: "kurashio",
+  xcodeProjectPath: "ios/Kurashio.xcodeproj",
+  command:
+    "cd ~/apps/myroom &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/Kurashio.xcodeproj",
+  setupReferences: [
+    { label: "kurashio#528（初回セットアップ）", url: "https://github.com/guchi-apps/kurashio/issues/528" },
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/kurashio/blob/develop/ios/README.md",
+    },
+  ],
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
-  "guchi-apps/myroom": {
-    appLabel: "kurashio",
-    xcodeProjectPath: "ios/Kurashio.xcodeproj",
-    command:
-      "cd ~/apps/myroom &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/Kurashio.xcodeproj",
-    setupReferences: [
-      { label: "myroom#528（初回セットアップ）", url: "https://github.com/guchi-apps/myroom/issues/528" },
-      {
-        label: "ios/README.md",
-        url: "https://github.com/guchi-apps/myroom/blob/develop/ios/README.md",
-      },
-    ],
-  },
+  "guchi-apps/kurashio": KURASHIO,
+  "guchi-apps/myroom": KURASHIO,
 };
 
 export function getWebviewIosRepository(repositoryFullName: string): WebviewIosRepository | null {

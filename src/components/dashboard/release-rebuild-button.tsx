@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, RotateCcw } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -29,6 +29,12 @@ type ReleaseRebuildButtonProps = {
   repositoryFullName: string;
   /** 本番に出ている版（mainの版）。上げ幅の選択肢に目安を出すのに使う */
   mainVersion?: string | null;
+  /**
+   * developに新しい変更があるか。**呼び出し側が分かっているとき**に渡す（PCのブランチ画面は
+   * レーンから判定できる。#3601）。falseなら何も描画しない。未指定（スマホのリリースシートなど
+   * 判定の材料が無い場所）では、マウント時に作り直しの材料を1回取り、変更が無ければ隠す。
+   */
+  hasChanges?: boolean;
   /** 作り直しを起動できたあと。親が状態を取り直す */
   onTriggered?: () => void;
   className?: string;
@@ -49,6 +55,7 @@ type ReleaseRebuildButtonProps = {
 export function ReleaseRebuildButton({
   repositoryFullName,
   mainVersion = null,
+  hasChanges,
   onTriggered,
   className,
 }: ReleaseRebuildButtonProps) {
@@ -58,6 +65,25 @@ export function ReleaseRebuildButton({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
+
+  // 呼び出し側が判定できないときだけ、変更の有無を先に確かめる。取得に失敗したら隠さない
+  // （押せば確認ダイアログでエラーが読める）
+  const [probedEmpty, setProbedEmpty] = useState(false);
+  useEffect(() => {
+    if (hasChanges !== undefined) return;
+    let cancelled = false;
+    fetchReleaseRebuild(repositoryFullName)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.releasePullRequest !== null && !canRebuildRelease(result.candidate)) {
+          setProbedEmpty(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [hasChanges, repositoryFullName]);
 
   async function handleOpen() {
     setOpen(true);
@@ -93,6 +119,8 @@ export function ReleaseRebuildButton({
   const pullRequest = info?.releasePullRequest ?? null;
   const candidate = info?.candidate ?? null;
   const rebuildable = pullRequest !== null && canRebuildRelease(candidate);
+
+  if (hasChanges === false || (hasChanges === undefined && probedEmpty && !open)) return null;
 
   return (
     <>

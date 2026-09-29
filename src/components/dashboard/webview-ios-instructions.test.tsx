@@ -10,7 +10,7 @@ describe("WebviewIosInstructions", () => {
     cleanup();
   });
 
-  const repo = getWebviewIosRepository("guchi-apps/myroom")!;
+  const repo = getWebviewIosRepository("guchi-apps/kurashio")!;
 
   it("Web側だけの変更と、iOS本体の入れ直しを分けて表示する", () => {
     render(<WebviewIosInstructions repo={repo} />);

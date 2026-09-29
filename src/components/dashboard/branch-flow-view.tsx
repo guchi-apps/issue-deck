@@ -73,6 +73,7 @@ import {
   MAIN_BRANCH,
   MERGED_TO_MAIN_GROUP_KEY,
   formatUnreleasedSummary,
+  hasChangesAfterReleaseFreeze,
   isClosedLane,
   isReleaseAutoProgressing,
   unreleasedSummary,
@@ -1364,15 +1365,18 @@ function ReleaseFlowGraph({
             rebuildButton={
               /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                  headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
-                 ブランチを消すとdevelopが消えるため出さない */
+                 ブランチを消すとdevelopが消えるため出さない。凍結後にdevelopへ入った変更が
+                 無いときも、作り直しても中身が変わらないので出さない（#3601） */
               !repository.deviceBuild &&
               group.mergedAt === null &&
               group.pullRequest !== null &&
               group.pullRequest.state === "open" &&
-              group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) ? (
+              group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) &&
+              hasChangesAfterReleaseFreeze(group) ? (
                 <ReleaseRebuildButton
                   repositoryFullName={repository.repositoryFullName}
                   mainVersion={repository.release.latestVersion}
+                  hasChanges
                   onTriggered={onReleaseTriggered}
                 />
               ) : undefined
