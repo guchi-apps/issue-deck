@@ -3,8 +3,14 @@ import { describe, expect, it } from "vitest";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 
 describe("getWebviewIosRepository", () => {
-  it("myroomはWebView型のiOSアプリを持つリポジトリとして返す", () => {
-    const repo = getWebviewIosRepository("guchi-apps/myroom");
+  it("旧名（myroom）でも新名（kurashio）と同じ内容を返す", () => {
+    expect(getWebviewIosRepository("guchi-apps/myroom")).toBe(
+      getWebviewIosRepository("guchi-apps/kurashio"),
+    );
+  });
+
+  it("kurashioはWebView型のiOSアプリを持つリポジトリとして返す", () => {
+    const repo = getWebviewIosRepository("guchi-apps/kurashio");
     expect(repo).not.toBeNull();
     expect(repo?.appLabel).toBe("kurashio");
     expect(repo?.xcodeProjectPath).toBe("ios/Kurashio.xcodeproj");
