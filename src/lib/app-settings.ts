@@ -158,7 +158,7 @@ export const CLAUDE_MODEL_OPTIONS = [
   { value: "auto", label: "Claude Codeに任せる" },
   { value: "fable", label: "Claude Fable 5.1（最高精度）" },
   { value: "opus", label: "Claude Opus 5.5（高精度）" },
-  { value: "sonnet", label: "Claude Sonnet 5（標準）" },
+  { value: "sonnet", label: "Claude Sonnet 5.5（標準）" },
   { value: "haiku", label: "Claude Haiku 4.5（高速）" },
 ] as const;
 
@@ -179,7 +179,7 @@ export type ClaudeModel = (typeof CLAUDE_MODEL_VALUES)[number];
 export const CLAUDE_ALIAS_MODEL_IDS: Readonly<Record<Exclude<ClaudeModel, "auto">, string>> = {
   fable: "claude-fable-5-1",
   opus: "claude-opus-5-5",
-  sonnet: "claude-sonnet-5",
+  sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-4-5",
 };
 
@@ -199,7 +199,7 @@ export const CLAUDE_MODEL_SHORT_LABELS: Readonly<Record<ClaudeModel, string>> = 
   auto: "CLIの既定",
   fable: "Fable 5.1",
   opus: "Opus 5.5",
-  sonnet: "Sonnet 5",
+  sonnet: "Sonnet 5.5",
   haiku: "Haiku 4.5",
 };
 
@@ -403,9 +403,9 @@ export function resolveCodexInitialModel(
 // スナップショット日付を固定せず、同じモデル系列の更新を自動で受けられるエイリアスを使う。
 export const APP_AI_MODEL_OPTIONS = [
   { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）" },
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5（標準）" },
+  { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5（標準）" },
   { value: "claude-opus-5-5", label: "Claude Opus 5.5（高精度）" },
-  // Fable 5.1は単価がSonnet 5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
+  // Fable 5.1は単価がSonnet 5.5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）
   { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）" },
@@ -415,7 +415,7 @@ export const APP_AI_MODEL_OPTIONS = [
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
-export const APP_AI_MODEL_REASONING_DEFAULT = "claude-sonnet-5" as const;
+export const APP_AI_MODEL_REASONING_DEFAULT = "claude-sonnet-5-5" as const;
 export const APP_AI_MODEL_VALUES = APP_AI_MODEL_OPTIONS.map((option) => option.value);
 export type AppAiModel = (typeof APP_AI_MODEL_VALUES)[number];
 export type AppAiProvider = "anthropic" | "openai";
@@ -426,6 +426,8 @@ export function appAiProvider(model: AppAiModel): AppAiProvider {
 
 export function parseAppAiModel(value: unknown): AppAiModel | null {
   if (typeof value !== "string") return null;
+  // 旧IDで保存された設定・DBの既定値（`claude-sonnet-5`）はSonnet 5.5へ読み替える（#3612）
+  if (value === "claude-sonnet-5") return "claude-sonnet-5-5";
   return (APP_AI_MODEL_VALUES as readonly string[]).includes(value)
     ? (value as AppAiModel)
     : null;

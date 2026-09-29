@@ -155,6 +155,7 @@ export function PlanApprovalPanel({
         decision={decided}
         hostLabel={hostLabel}
         remoteControlUrl={remoteControlUrl}
+        autoReflected={request.autoReflected === true && sentForThisRequest === null}
         deliveryStatus={request.deliveryStatus}
         deliveryExitCode={request.deliveryExitCode}
         deliverySummary={request.deliverySummary}
@@ -281,6 +282,11 @@ export function PlanApprovalPanel({
                   <Loader2 className="size-3.5 animate-spin" aria-hidden />
                   計画レビューを作成中
                 </div>
+                {!canHandoff && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">
+                  届くと指摘を自動で計画へ反映します（1回まで）。それまでPush通知は送りません。
+                </p>
+                )}
               </div>
             )}
             {planReview && (
@@ -438,6 +444,7 @@ function PlanDecisionResult({
   decision,
   hostLabel,
   remoteControlUrl,
+  autoReflected,
   deliveryStatus,
   deliveryExitCode,
   deliverySummary,
@@ -446,6 +453,8 @@ function PlanDecisionResult({
   hostLabel: string;
   /** 端末で答えることになったときの行き先。無ければリンクを出さない */
   remoteControlUrl: string | null;
+  /** 計画レビューを受けて自動で修正を送った回（人が押した回ではない） */
+  autoReflected?: boolean;
   deliveryStatus?: string | null;
   deliveryExitCode?: number | null;
   deliverySummary?: string | null;
@@ -480,7 +489,9 @@ function PlanDecisionResult({
           )}
           {decision === "revise" && (
             <>
-              <strong className="font-semibold">修正を送りました。</strong>
+              <strong className="font-semibold">
+                {autoReflected ? "計画レビューの指摘を自動で反映しました。" : "修正を送りました。"}
+              </strong>
               計画を練り直しています。新しい計画が出たら、またここに出ます。
             </>
           )}

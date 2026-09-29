@@ -163,7 +163,7 @@ describe("callClaudeMessages", () => {
     });
   });
 
-  it("保存済みのアプリ内AIモデルでbodyの指定を上書きする", async () => {
+  it("旧IDで保存されたclaude-sonnet-5はSonnet 5.5へ読み替えて送る（#3612）", async () => {
     findUnique.mockResolvedValue({ appAiModel: "claude-sonnet-5" });
     const fetchMock = vi
       .fn()
@@ -177,13 +177,30 @@ describe("callClaudeMessages", () => {
     });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5");
+    expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5-5");
+  });
+
+  it("保存済みのアプリ内AIモデルでbodyの指定を上書きする", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "claude-sonnet-5-5" });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({
+      feature: "comment_summary",
+      token: "test-token",
+      body: { model: "claude-haiku-4-5", max_tokens: 8, messages: [] },
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).model).toBe("claude-sonnet-5-5");
   });
 
   it("原因診断・新規アプリ相談だけ判断用モデルを使う", async () => {
     findUnique.mockResolvedValue({
       appAiModel: "claude-haiku-4-5",
-      appAiModelReasoning: "claude-sonnet-5",
+      appAiModelReasoning: "claude-sonnet-5-5",
     });
     const fetchMock = vi
       .fn()
@@ -201,7 +218,7 @@ describe("callClaudeMessages", () => {
       body: { max_tokens: 8, messages: [] },
     });
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-sonnet-5");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-sonnet-5-5");
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
   });
 

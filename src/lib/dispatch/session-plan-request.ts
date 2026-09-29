@@ -259,6 +259,8 @@ export type SessionPlanRequestView = {
   decidedAt: string | null;
   /** フックが結論を受け取ったか。受け取る前でも押し直しはできない（決まった時点で確定） */
   delivered: boolean;
+  /** 計画レビューを受けて自動で修正を送った回か（人が押した回ではない） */
+  autoReflected?: boolean;
   pollCount?: number;
   lastPolledAt?: string | null;
   decisionObservedAt?: string | null;
@@ -280,6 +282,7 @@ export function toSessionPlanRequestView(row: SessionPlanRequest): SessionPlanRe
     expiresAt: row.expiresAt.toISOString(),
     decidedAt: row.decidedAt?.toISOString() ?? null,
     delivered: row.deliveredAt !== null,
+    autoReflected: row.status === "REVISION_REQUESTED" && row.decidedByUserId === null,
     pollCount: row.pollCount ?? 0,
     lastPolledAt: row.lastPolledAt?.toISOString() ?? null,
     decisionObservedAt: row.decisionObservedAt?.toISOString() ?? null,

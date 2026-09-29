@@ -123,7 +123,7 @@ function renderDialog() {
       claudeLocalModel="sonnet"
       codexModel="auto"
       appAiModel="claude-haiku-4-5"
-      appAiModelReasoning="claude-sonnet-5"
+      appAiModelReasoning="claude-sonnet-5-5"
       modelPickEngine="app-ai"
       dispatchConcurrency={2}
       repositories={repositories}
@@ -233,7 +233,7 @@ describe("SettingsDialog", () => {
       "sonnet",
       "auto",
       "claude-haiku-4-5",
-      "claude-sonnet-5",
+      "claude-sonnet-5-5",
       "app-ai",
       "claude",
       true,
@@ -249,7 +249,7 @@ describe("SettingsDialog", () => {
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
       appAiModel: "claude-haiku-4-5",
-      appAiModelReasoning: "claude-sonnet-5",
+      appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       dispatchConcurrency: 2,
     });
