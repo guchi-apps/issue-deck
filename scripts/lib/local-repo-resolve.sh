@@ -154,30 +154,64 @@ local_session_validate_target() {
   return 0
 }
 
+# 対応表の各行を `<owner>/<repo><TAB><チェックアウト先>` の形で列挙する（コメント・空行は除く）。
+local_repo_config_entries() {
+  local config_file line name path
+  config_file="$(local_repos_config_file)"
+  [[ -f "$config_file" ]] || return 0
+  # `read -r name path _` だとパスが空白で切れるため、1行読んで最初の空白で2分割する。
+  # 併せてCRLFの改行と行末の空白も落とす（Windows側のエディタで編集されうるため）。
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
+    name="${BASH_REMATCH[1]}"
+    path="${BASH_REMATCH[2]}"
+    path="${path%"${path##*[![:space:]]}"}"
+    # 設定ファイル側の `~` はシェル展開されないため自前で展開する。
+    printf '%s\t%s\n' "$name" "${path/#\~/$HOME}"
+  done <"$config_file"
+}
+
+# チェックアウトの `origin` が指すGitHubリポジトリを `owner/repo` で返す。読めなければ1を返す。
+#
+# GitHub上でリポジトリをリネームしても、対応表のキー（`~/.config/issue-deck/local-repos.conf`）は
+# 人が書き換えるまで旧名のまま残る。ディスパッチのジョブは新名で届くため、キーだけを見ていると
+# 「申告に無いので割り当てられない」「届いても引けない」で黙って止まる（#3603。myroom→kurashio）。
+# チェックアウトの `origin` は `git remote set-url` で新名へ揃えるのが通常の手順なので、
+# キーが古いときの答えとしてこちらを使う。
+local_repo_origin_name() {
+  local dir="$1" url name
+  url="$(git -C "$dir" config --get remote.origin.url 2>/dev/null)" || return 1
+  # https://github.com/owner/repo(.git) と git@github.com:owner/repo(.git) の両方を受ける
+  [[ "$url" =~ github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/?$ ]] || return 1
+  name="${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
+  printf '%s\n' "$name"
+}
+
 # 対応表からチェックアウト先を引く。見つからなければ1を返す。
+#
+# キーの完全一致を優先し、無ければ `origin` が同じリポジトリを指している行を採る
+# （リネーム後にキーが旧名のまま残っている場合。#3603）。
 local_repo_resolve_path() {
   local target="$1"
-  local config_file
-  config_file="$(local_repos_config_file)"
+  local name path entries
 
-  if [[ -f "$config_file" ]]; then
-    local line name path
-    # `read -r name path _` だとパスが空白で切れるため、1行読んで最初の空白で2分割する。
-    # 併せてCRLFの改行と行末の空白も落とす（Windows側のエディタで編集されうるため）。
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="${line%$'\r'}"
-      [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-      [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
-      name="${BASH_REMATCH[1]}"
-      path="${BASH_REMATCH[2]}"
-      path="${path%"${path##*[![:space:]]}"}"
-      if [[ "$name" == "$target" ]]; then
-        # 設定ファイル側の `~` はシェル展開されないため自前で展開する。
-        printf '%s\n' "${path/#\~/$HOME}"
-        return 0
-      fi
-    done <"$config_file"
-  fi
+  entries="$(local_repo_config_entries)"
+  while IFS=$'\t' read -r name path; do
+    [[ -n "$name" ]] || continue
+    if [[ "$name" == "$target" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done <<<"$entries"
+  while IFS=$'\t' read -r name path; do
+    [[ -n "$name" && -d "$path" ]] || continue
+    if [[ "$(local_repo_origin_name "$path" || true)" == "$target" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done <<<"$entries"
   if [[ "$target" == "guchi-apps/issue-deck" ]]; then
     printf '%s\n' "$HOME/apps/issue-deck"
     return 0
@@ -318,18 +352,19 @@ local_repo_status_summary() {
 }
 
 # 対応表に載っているリポジトリ名を列挙する（フォールバックのissue-deckを含む）。
+#
+# チェックアウトの `origin` が別の名前を指していれば、キーではなくそちらを出す（#3603）。
+# キーが旧名のまま残っていると、申告（`local_repo_list_runnable`）に新名が載らず、
+# issue-deckが新名で積んだジョブをこのホストへ割り当てなくなるため。
 local_repo_list_names() {
-  local config_file line name
-  config_file="$(local_repos_config_file)"
+  local name path origin
   {
-    if [[ -f "$config_file" ]]; then
-      while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"
-        [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-        [[ "$line" =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+(.+)$ ]] || continue
-        printf '%s\n' "${BASH_REMATCH[1]}"
-      done <"$config_file"
-    fi
+    while IFS=$'\t' read -r name path; do
+      [[ -n "$name" ]] || continue
+      origin=""
+      [[ -d "$path" ]] && origin="$(local_repo_origin_name "$path" || true)"
+      printf '%s\n' "${origin:-$name}"
+    done < <(local_repo_config_entries)
     # 対応表が無くても解決できる唯一のリポジトリ（resolve_repo_path のフォールバック）
     printf '%s\n' "guchi-apps/issue-deck"
   } | sort -u
