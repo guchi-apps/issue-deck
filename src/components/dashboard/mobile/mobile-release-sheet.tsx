@@ -8,6 +8,7 @@ import { DeviceBuildInstructions } from "@/components/dashboard/device-build-ins
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
+import { IosTestflightStatus } from "@/components/dashboard/ios-testflight-status";
 import { WebviewIosInstructions } from "@/components/dashboard/webview-ios-instructions";
 import {
   AlertDialog,
@@ -154,6 +155,12 @@ export function MobileReleaseSheet({
                   <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
                   {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
                 </Button>
+              )}
+              {webviewIos && (
+                <IosTestflightStatus
+                  owner={repository.fullName.split("/")[0]}
+                  repo={repository.fullName.split("/")[1]}
+                />
               )}
               {webviewIos && <WebviewIosInstructions repo={webviewIos} />}
             </div>
