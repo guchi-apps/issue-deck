@@ -586,6 +586,15 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
+  /**
+   * 設定＞フリート運用の「条件変更のIssueを起案」（#3590）。設定を閉じてから下書き入りの
+   * 新規作成ダイアログを開く（ダイアログの重なりを避ける）。**ここでも起票しない。**
+   */
+  function openReviewGateIssueDialog(draft: { repositoryFullName: string; title: string; body: string }) {
+    setSettingsDialogOpen(false);
+    openPullRequestFixIssueDialog(draft);
+  }
+
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
   // 元Issue番号を本文に記入した状態で新規Issueを作成できるようにする（#169）。
   // 元Issueの情報は入力欄ではなく固定接頭辞として渡し、入力欄は空のまま始める（#1322）。
@@ -1205,6 +1214,11 @@ export function IssueDeckShell({
   const creatableRepositories = useMemo(
     () => visibleRepositories.filter((repo) => !repo.excludedFromIssueCreation),
     [visibleRepositories],
+  );
+  // 設定の「条件変更のIssueを起案」が、作成ダイアログで選べない行を無効にするための名前の集合（#3590）
+  const creatableRepositoryNames = useMemo(
+    () => creatableRepositories.map((repo) => repo.fullName),
+    [creatableRepositories],
   );
 
   // マージ直後はGitHub側の反映を待たずにマージ済みとして描く（#1756）。反映するのは
@@ -2352,6 +2366,8 @@ export function IssueDeckShell({
                   onSetRepositoriesHidden={handleSetRepositoriesHidden}
                   onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
                   onUpdated={handleAppSettingsUpdated}
+                  onDraftReviewGateIssue={openReviewGateIssueDialog}
+                  creatableRepositoryNames={creatableRepositoryNames}
                 />
               )}
 
@@ -2923,6 +2939,8 @@ export function IssueDeckShell({
           onSetRepositoriesHidden={handleSetRepositoriesHidden}
           onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
           onUpdated={handleAppSettingsUpdated}
+          onDraftReviewGateIssue={openReviewGateIssueDialog}
+          creatableRepositoryNames={creatableRepositoryNames}
         />
         <EditIssueDialog
           open={editingIssue !== null}
