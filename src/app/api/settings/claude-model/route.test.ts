@@ -41,7 +41,7 @@ beforeEach(() => {
     claudeLocalModel: update.claudeLocalModel ?? "sonnet",
     codexModel: update.codexModel ?? "auto",
     appAiModel: update.appAiModel ?? "claude-haiku-4-5",
-    appAiModelReasoning: update.appAiModelReasoning ?? "claude-sonnet-5",
+    appAiModelReasoning: update.appAiModelReasoning ?? "claude-sonnet-5-5",
     modelPickEngine: update.modelPickEngine ?? "app-ai",
   }));
 });
@@ -55,7 +55,7 @@ describe("GET", () => {
       claudeLocalModel: "sonnet",
       codexModel: "gpt-5.6-terra",
       appAiModel: "claude-haiku-4-5",
-      appAiModelReasoning: "claude-sonnet-5",
+      appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
       dispatchFailoverEnabled: true,
@@ -69,7 +69,7 @@ describe("GET", () => {
       claudeModelAssist: "sonnet",
       claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
-      appAiModel: "claude-sonnet-5",
+      appAiModel: "claude-sonnet-5-5",
       appAiModelReasoning: "claude-opus-5-5",
     });
     await expect((await GET()).json()).resolves.toEqual({
@@ -77,7 +77,7 @@ describe("GET", () => {
       claudeModelAssist: "sonnet",
       claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",
-      appAiModel: "claude-sonnet-5",
+      appAiModel: "claude-sonnet-5-5",
       appAiModelReasoning: "claude-opus-5-5",
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
@@ -96,7 +96,7 @@ describe("PATCH", () => {
         claudeLocalModel: "sonnet",
         codexModel: "gpt-6-sol",
         appAiModel: "claude-opus-5-5",
-        appAiModelReasoning: "claude-sonnet-5",
+        appAiModelReasoning: "claude-sonnet-5-5",
       }),
     );
 
@@ -109,7 +109,7 @@ describe("PATCH", () => {
           claudeLocalModel: "sonnet",
           codexModel: "gpt-6-sol",
           appAiModel: "claude-opus-5-5",
-          appAiModelReasoning: "claude-sonnet-5",
+          appAiModelReasoning: "claude-sonnet-5-5",
         },
       }),
     );
