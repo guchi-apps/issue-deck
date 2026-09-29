@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
+import { recordRepositoryRename } from "@/lib/repository-alias";
 import type { Repository } from "@prisma/client";
 
 export type GithubRepositoryResponse = {
@@ -50,6 +51,16 @@ export async function syncInstallationRepositories(
 ): Promise<Repository[]> {
   const repositories = await fetchInstallationRepositories(installationToken);
 
+  // 改名の検知（#3613）。upsertが`name`を上書きする前のDBの名前を控えておく。
+  const previousNames = new Map(
+    (
+      await db.repository.findMany({
+        where: { githubRepositoryId: { in: repositories.map((repo) => repo.id) } },
+        select: { githubRepositoryId: true, name: true },
+      })
+    ).map((row) => [row.githubRepositoryId, row.name]),
+  );
+
   const savedRepositories = await Promise.all(
     repositories.map(async (repo) => {
       const hasClaudeWorkflow = await fetchClaudeWorkflowExists(
@@ -65,6 +76,15 @@ export async function syncInstallationRepositories(
         repo.name,
         installationToken,
       ).catch(() => false);
+
+      const previousName = previousNames.get(repo.id);
+      if (previousName !== undefined && previousName !== repo.name) {
+        await recordRepositoryRename({
+          githubRepositoryId: repo.id,
+          oldName: previousName,
+          newName: repo.name,
+        });
+      }
 
       return db.repository.upsert({
         where: { githubRepositoryId: repo.id },

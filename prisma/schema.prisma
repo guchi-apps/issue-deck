@@ -1975,6 +1975,22 @@ model SessionUsage {
   @@index([repository, issueNumber])
 }
 
+/// リポジトリ名の変更履歴（#3613）。`SessionUsage.repository`はownerを除いた短い名前で、
+/// 改名前の行は旧名のまま残るため、「AI使用量」の集計が読むときに旧名を現在の名前へ寄せる。
+/// **`SessionUsage`の行は書き換えない**——旧名のworktreeで走り続けるセッションが旧名で再報告して
+/// 上書きし戻すため。旧名は`oldName`で一意（同じ旧名の記録は最新の改名で上書きする）。
+/// リポジトリが削除されても履歴として残すので、`Repository`への外部キーは張らない。
+model RepositoryNameAlias {
+  id                 String   @id @default(cuid())
+  githubRepositoryId Int
+  oldName            String   @unique @db.VarChar(191)
+  newName            String   @db.VarChar(191)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([githubRepositoryId])
+}
+
 /// Codex CLIが転記へ記録したプラン枠の最新スナップショット（#2535）。
 /// 本番VPSはホスト上の`~/.codex/sessions`を読めないため、pollerが使用率・窓・リセット時刻だけを
 /// 抽出して送る。会話本文・トークン数・クレジット残高・資格情報は保存しない。

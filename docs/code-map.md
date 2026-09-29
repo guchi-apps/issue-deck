@@ -596,6 +596,15 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
+    作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
+    [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と
+    `installation_repositories`の`added`）で`Repository.name`が変わったときに旧名→新名を記録し、
+    `GET /api/session-usage`が読み取り時に旧名を現在名へ寄せる。**行は書き換えない**（旧名の
+    worktreeで走るセッションの再報告で上書き戻されるため）。**現存する名前は解決しない**
+    （旧名が別リポジトリで再利用されても合算しない）。**同期は手動**（設定＞フリート運用の
+    「GitHubからの再取得」）なので、改名後に再同期するまでは新名の行が別に表示され、再同期で
+    遡って合算される。myroom→kurashioはマイグレーションで初期投入している
   - **画面の並びは「見出し＋報告の経過時間＋更新ボタン（右端）→ 実行中のセッション → プラン枠 →
     期間選択 → 期間の集計」**（#3257）。期間選択がプラン枠の下にあるのは、切り替わるのが下の
     集計だけだから。**期間を変えてもプラン枠・実行中のセッションは取り直さず描き直さない。**

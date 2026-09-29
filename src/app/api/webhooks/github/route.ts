@@ -24,6 +24,7 @@ import {
 } from "@/lib/github/sync-issues";
 import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
+import { recordRepositoryRename } from "@/lib/repository-alias";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { AccountType, IssueState } from "@prisma/client";
 
@@ -274,6 +275,17 @@ async function handleInstallationRepositoriesEvent(payload: {
         repo.name,
         installationToken,
       ).catch(() => false);
+      const previous = await db.repository.findUnique({
+        where: { githubRepositoryId: repo.id },
+        select: { name: true },
+      });
+      if (previous && previous.name !== repo.name) {
+        await recordRepositoryRename({
+          githubRepositoryId: repo.id,
+          oldName: previous.name,
+          newName: repo.name,
+        });
+      }
       const created = await db.repository.upsert({
         where: { githubRepositoryId: repo.id },
         create: {
