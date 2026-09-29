@@ -203,6 +203,7 @@ describe("findQuestionRequestForIssue", () => {
     issueNumber: 2189,
     hostName: "subpc",
     questions: QUESTIONS,
+    context: null,
     answers: null,
     expiresAt: "2026-08-23T10:00:00.000Z",
     delivered: false,

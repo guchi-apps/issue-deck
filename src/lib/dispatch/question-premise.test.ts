@@ -26,6 +26,7 @@ describe("findQuestionPremise", () => {
   it("エージェントが書いた最新のコメントを前提として返す", () => {
     const premise = findQuestionPremise([comment(REPORT), comment(PLAN)]);
 
+    expect(premise?.source).toBe("comment");
     expect(premise?.role).toBe("planner");
     expect(premise?.roleLabel).toBe("計画ボット");
     expect(premise?.body).toContain("内訳を直せるようにする");
@@ -52,5 +53,20 @@ describe("findQuestionPremise", () => {
     expect(findQuestionPremise([comment(GUIDE)])).toBeNull();
     expect(findQuestionPremise([])).toBeNull();
     expect(findQuestionPremise(null)).toBeNull();
+  });
+
+  // #3569。「上記のコードを実行します」の“上記”は端末の本文にしか無い。コメントから推定すると
+  // 古い計画が出て、肝心のコードが見えなかった
+  it("質問と同じ応答の本文があれば、コメントより優先する", () => {
+    const premise = findQuestionPremise([comment(PLAN)], "次のコードを実行します。\n\n```bash\nls\n```");
+
+    expect(premise?.source).toBe("session");
+    expect(premise?.body).toContain("```bash");
+    expect(premise?.body).not.toContain("内訳を直せるようにする");
+  });
+
+  it("本文が空白だけなら、従来どおりコメントから選ぶ", () => {
+    expect(findQuestionPremise([comment(PLAN)], "  \n ")?.source).toBe("comment");
+    expect(findQuestionPremise([comment(PLAN)], null)?.source).toBe("comment");
   });
 });

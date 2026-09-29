@@ -65,6 +65,15 @@ export const SESSION_QUESTION_TEXT_LIMIT = 500;
  */
 export const SESSION_QUESTION_PREVIEW_LIMIT = 4000;
 
+/**
+ * 質問の前提（質問と同じ応答でエージェントが書いた本文。#3569）の上限。
+ *
+ * 「上記のコードを実行します」の「上記」はここに入る。コードが途中で切れると判断できないので
+ * `preview`より広く取る。フック（`scripts/session-notify.sh`の`QUESTION_CONTEXT_MAX_CHARS`）も
+ * 同じ値で切ってから送る。
+ */
+export const SESSION_QUESTION_CONTEXT_LIMIT = 8000;
+
 /** 「その他」の自由記述の上限。**そのままClaudeへ渡る文章**なので、計画の修正と同じ幅を取る */
 export const SESSION_QUESTION_FREE_TEXT_MAX_LENGTH = 2000;
 
@@ -142,6 +151,13 @@ export function parseSessionQuestions(value: unknown): SessionQuestion[] | null 
   }
 
   return questions.length > 0 ? questions : null;
+}
+
+/**
+ * フックから届いた質問の前提（#3569）。**読めなければ`null`**（前提が無いだけで、質問は受け付ける）。
+ */
+export function parseSessionQuestionContext(value: unknown): string | null {
+  return clip(value, SESSION_QUESTION_CONTEXT_LIMIT);
 }
 
 /** DBへ入れる形（JSON文字列）。読み出しは`parseStoredSessionQuestions` */
@@ -256,6 +272,11 @@ export type SessionQuestionRequestView = {
   issueNumber: number;
   hostName: string | null;
   questions: SessionQuestion[];
+  /**
+   * 質問と同じ応答でエージェントが書いた本文（#3569）。画面は「この質問の前提」として出す。
+   * フックが転記から読めなかった場合（旧版のフック・本文を書かずに質問した）は`null`
+   */
+  context: string | null;
   answers: Record<string, string> | null;
   status: SessionQuestionRequestStatus;
   createdAt: string;
@@ -274,6 +295,7 @@ export function toSessionQuestionRequestView(
     issueNumber: row.issueNumber,
     hostName: row.hostName,
     questions: parseStoredSessionQuestions(row.questions),
+    context: row.context,
     answers: parseStoredSessionAnswers(row.answers),
     status: row.status,
     createdAt: row.createdAt.toISOString(),

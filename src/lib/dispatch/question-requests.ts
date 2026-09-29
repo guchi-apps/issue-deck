@@ -24,6 +24,27 @@ import {
  */
 
 /**
+ * 同じIssueの古い回答待ちを畳む。
+ *
+ * 新しい質問が来たら、前の待ちはもう答えても届かない。**待ちを作らない場合（「アプリで答える」
+ * ON・待ち時間0）も畳む**（#3569）。畳まないと、前の質問が期限まで「回答を待っています」として
+ * 画面に残り、人は新しい質問ではなく古い質問文を見て答えてしまう。
+ */
+export async function expireWaitingSessionQuestionRequests(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<void> {
+  await db.sessionQuestionRequest.updateMany({
+    where: {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      status: "WAITING",
+    },
+    data: { status: "EXPIRED" },
+  });
+}
+
+/**
  * 回答待ちを1件作る。**同じIssueの古い待ちは畳む**（続けて質問したら前の待ちは無効）。
  *
  * 呼ぶのは`POST /api/dispatch/sessions/question`。
@@ -33,19 +54,13 @@ export async function createSessionQuestionRequest(params: {
   issueNumber: number;
   hostName: string | null;
   questions: readonly SessionQuestion[];
+  context?: string | null;
   waitSeconds: number;
   now?: Date;
 }): Promise<SessionQuestionRequestView> {
   const now = params.now ?? new Date();
 
-  await db.sessionQuestionRequest.updateMany({
-    where: {
-      repositoryFullName: params.repositoryFullName,
-      issueNumber: params.issueNumber,
-      status: "WAITING",
-    },
-    data: { status: "EXPIRED" },
-  });
+  await expireWaitingSessionQuestionRequests(params);
 
   const created = await db.sessionQuestionRequest.create({
     data: {
@@ -53,6 +68,7 @@ export async function createSessionQuestionRequest(params: {
       issueNumber: params.issueNumber,
       hostName: params.hostName,
       questions: serializeSessionQuestions(params.questions),
+      context: params.context ?? null,
       expiresAt: new Date(now.getTime() + params.waitSeconds * 1000),
     },
   });
