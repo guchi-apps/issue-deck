@@ -23,6 +23,7 @@ import {
   upsertIssueFromWebhookPayload,
 } from "@/lib/github/sync-issues";
 import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-support";
+import { autoReflectPlanReview } from "@/lib/dispatch/plan-review-auto-reflect";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import { recordRepositoryRename } from "@/lib/repository-alias";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
@@ -206,6 +207,17 @@ async function handleIssueCommentEvent(payload: {
   // 編集・削除は対象外とし、新規投稿のみを回答待ち状態の判定に使う
   if (payload.action === "created") {
     await updateQaAnswerPendingState(payload.issue.id, payload.comment.body);
+    // 計画レビュー（G1）が届いたら、指摘を自動で計画へ反映させる（#3616）。失敗しても
+    // Webhook本来の処理は成功として返す（再送で二重に走らせない）
+    try {
+      await autoReflectPlanReview({
+        repositoryFullName: repository.fullName,
+        issueNumber: payload.issue.number,
+        commentBody: payload.comment.body,
+      });
+    } catch (error) {
+      console.error("[webhooks/github] 計画レビューの自動反映に失敗しました", error);
+    }
   }
 }
 

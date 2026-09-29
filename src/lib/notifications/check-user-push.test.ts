@@ -55,6 +55,17 @@ describe("decideCheckUserPush", () => {
     expect(decideCheckUserPush({ ...input, holdUntil: null })).toBe("send");
   });
 
+  it("計画レビューの自動反映待ち（holdForPlanReview）は、待ちが生きていても送らない（#3616）", () => {
+    const input = {
+      labels: [CHECK_USER, { name: "01.check-plan" }],
+      checkUserLabeledAt: at(CHECK_USER_PUSH_DELAY_MS),
+      hasPendingSessionRequest: true,
+      now: NOW,
+    };
+    expect(decideCheckUserPush({ ...input, holdForPlanReview: true })).toBe("wait");
+    expect(decideCheckUserPush({ ...input, holdForPlanReview: false })).toBe("send");
+  });
+
   it("既定の待ち時間を過ぎたら送る", () => {
     expect(
       decideCheckUserPush({
@@ -187,6 +198,12 @@ describe("sweepCheckUserPushNotifications", () => {
     subscriptions?: unknown[];
     /** そのIssueを保留にしているユーザーの購読数（#2398。既定は0） */
     snoozedSubscriberCount?: number;
+    /** 期限内のWAITINGの計画待ち（既定は無し） */
+    waitingPlans?: unknown[];
+    /** 計画レビューのジョブ（新しい順） */
+    planReviewJobs?: unknown[];
+    /** 自動反映済みの行 */
+    autoReflected?: unknown[];
   }) {
     const findSubscriptions = vi.fn().mockResolvedValue(options?.subscriptions ?? []);
     const updateMany = vi.fn().mockResolvedValue({ count: options?.reservedCount ?? 1 });
@@ -209,7 +226,15 @@ describe("sweepCheckUserPushNotifications", () => {
         ]),
         updateMany,
       },
-      sessionPlanRequest: { findMany: vi.fn().mockResolvedValue([]) },
+      sessionPlanRequest: {
+        // 計画待ち（WAITING）と自動反映済み（REVISION_REQUESTED）は同じメソッドで引くので、絞り込みで返し分ける
+        findMany: vi.fn().mockImplementation(async (args: { where: { status?: string } }) =>
+          args.where.status === "REVISION_REQUESTED"
+            ? (options?.autoReflected ?? [])
+            : (options?.waitingPlans ?? []),
+        ),
+      },
+      dispatchJob: { findMany: vi.fn().mockResolvedValue(options?.planReviewJobs ?? []) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
       // 保留（#2398）で宛先が全員消えたかを見るための件数。既定は0（誰も伏せていない）
       pushSubscription: {
@@ -224,6 +249,56 @@ describe("sweepCheckUserPushNotifications", () => {
     vi.mocked(isPushConfigured).mockReturnValue(true);
     vi.mocked(sendPushNotification).mockReset();
     vi.mocked(sendPushNotification).mockResolvedValue({ sent: 1, removed: 0, failed: 0 });
+  });
+
+  describe("計画レビューの自動反映を待つ保留（#3616）", () => {
+    const plan = { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 12 };
+    const runningJob = { ...plan, agent: "claude", status: "RUNNING", finishedAt: null };
+
+    it("計画待ちがあり、レビューが作成中なら送らない", async () => {
+      mockDb({ waitingPlans: [plan], planReviewJobs: [runningJob] });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("成功から6分を過ぎていれば保留しない", async () => {
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [{ ...runningJob, status: "SUCCEEDED", finishedAt: at(7 * 60_000) }],
+        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("自動反映済みなら（2回目の計画）保留しない", async () => {
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [runningJob],
+        autoReflected: [plan],
+        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("Codexのレビュー・計画待ちが無い場合は保留しない", async () => {
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [{ ...runningJob, agent: "codex" }],
+        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalledTimes(1);
+
+      vi.mocked(sendPushNotification).mockClear();
+      mockDb({
+        planReviewJobs: [runningJob],
+        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("そのリポジトリを非表示にしているユーザーの購読は宛先から外す（#2279）", async () => {

@@ -1,4 +1,6 @@
 import { db } from "@/lib/db";
+import { isPlanReviewJobCreating } from "@/lib/dispatch/dispatch-job";
+import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import {
   CHECK_USER_REASON_TEXT,
   checkUserReason,
@@ -102,8 +104,15 @@ export function decideCheckUserPush(input: {
    * 方が先に立つ。`null`・省略は従来どおり
    */
   holdUntil?: Date | null;
+  /**
+   * 計画レビュー（G1）が届いて自動で反映されるまで送らない（#3616。`selectPlanReviewHoldKeys`）。
+   * **待ちが生きていても止める**——待たずに送る理由（理由が確定していて自動では消えない）より、
+   * 「反映が済んでいない計画を人に見せない」ことを優先する。省略時は従来どおり
+   */
+  holdForPlanReview?: boolean;
   now: Date;
 }): CheckUserPushDecision {
+  if (input.holdForPlanReview) return "wait";
   if (input.holdUntil && input.now.getTime() < input.holdUntil.getTime()) return "wait";
   if (input.hasPendingSessionRequest) return "send";
   const elapsed = input.now.getTime() - input.checkUserLabeledAt.getTime();
@@ -175,6 +184,85 @@ async function selectPendingSessionRequestKeys(
   return keys;
 }
 
+/** 計画提示からこれだけ経ったら、レビューが届かなくても保留をやめる（ジョブが詰まった場合の保険） */
+export const PLAN_REVIEW_PUSH_HOLD_MAX_MS = 15 * 60 * 1000;
+
+/**
+ * **計画レビューの自動反映を待って、通知を保留するIssue**の鍵を返す（#3616）。
+ *
+ * 保留するのは次をすべて満たすとき。**受け手の居ない保留は、通知が遅れるだけで何も起こらない**ので、
+ * 自動反映が実際に起こりうる場合に限る。
+ *
+ * - 理由が計画（`01.check-plan`）で、期限内の`WAITING`の計画待ちがある（「アプリで答える」ON・
+ *   待ち時間0のセッションは待ちが作られないので対象外）
+ * - 計画の提示から`PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内
+ * - **まだ自動反映していない**（`decidedByUserId=null`の`REVISION_REQUESTED`が無い）。反映後に出し直された
+ *   計画は保留せず、通常どおり通知する（自動反映は1回まで）
+ * - 計画レビューのジョブがClaude Codeのもので、作成中（`isPlanReviewJobCreating`。実行中、または
+ *   成功から6分以内）。積まれていない・失敗・見送りなら保留しない
+ */
+async function selectPlanReviewHoldKeys(
+  targets: readonly {
+    repositoryFullName: string;
+    issueNumber: number;
+    labels: readonly { name: string }[];
+  }[],
+  now: Date,
+): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const planTargets = targets.filter((t) => checkUserReason(t.labels) === "plan");
+  if (planTargets.length === 0) return keys;
+
+  const scope = {
+    repositoryFullName: { in: [...new Set(planTargets.map((t) => t.repositoryFullName))] },
+    issueNumber: { in: [...new Set(planTargets.map((t) => t.issueNumber))] },
+  };
+  const [waiting, reflected, jobs] = await Promise.all([
+    db.sessionPlanRequest.findMany({
+      where: {
+        ...scope,
+        status: "WAITING",
+        expiresAt: { gt: now },
+        createdAt: { gt: new Date(now.getTime() - PLAN_REVIEW_PUSH_HOLD_MAX_MS) },
+      },
+      select: { repositoryFullName: true, issueNumber: true },
+    }),
+    db.sessionPlanRequest.findMany({
+      where: { ...scope, status: "REVISION_REQUESTED", decidedByUserId: null },
+      select: { repositoryFullName: true, issueNumber: true },
+    }),
+    db.dispatchJob.findMany({
+      where: { ...scope, kind: "PLAN_REVIEW" },
+      orderBy: { createdAt: "desc" },
+      select: {
+        repositoryFullName: true,
+        issueNumber: true,
+        agent: true,
+        status: true,
+        finishedAt: true,
+      },
+    }),
+  ]);
+
+  const waitingKeys = new Set(waiting.map((r) => sessionRequestKey(r.repositoryFullName, r.issueNumber)));
+  const reflectedKeys = new Set(
+    reflected.map((r) => sessionRequestKey(r.repositoryFullName, r.issueNumber)),
+  );
+  const seen = new Set<string>();
+  for (const job of jobs) {
+    const key = sessionRequestKey(job.repositoryFullName, job.issueNumber);
+    if (seen.has(key)) continue; // 新しい順なので、最初に当たったものがそのIssueの最新
+    seen.add(key);
+    if (!waitingKeys.has(key) || reflectedKeys.has(key) || job.agent !== "claude") continue;
+    const creating = isPlanReviewJobCreating(
+      { status: job.status as DispatchJobStatus, finishedAt: job.finishedAt?.toISOString() ?? null },
+      now,
+    );
+    if (creating) keys.add(key);
+  }
+  return keys;
+}
+
 /**
  * 「これから送る」ことを先に記録して席を取る（#2300）。取れたらtrue。
  *
@@ -236,6 +324,15 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
     now,
   );
 
+  const planReviewHoldKeys = await selectPlanReviewHoldKeys(
+    candidates.map((issue) => ({
+      repositoryFullName: issue.repository.fullName,
+      issueNumber: issue.number,
+      labels: issue.labels,
+    })),
+    now,
+  );
+
   let sent = 0;
   for (const issue of candidates) {
     if (!issue.checkUserLabeledAt) continue;
@@ -244,6 +341,7 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
       labels: issue.labels,
       checkUserLabeledAt: issue.checkUserLabeledAt,
       hasPendingSessionRequest: pendingRequestKeys.has(key),
+      holdForPlanReview: planReviewHoldKeys.has(key),
       now,
     });
     if (decision === "wait") continue;

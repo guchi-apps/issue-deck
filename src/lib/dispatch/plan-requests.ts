@@ -217,7 +217,8 @@ export async function decideSessionPlanRequest(params: {
   id: string;
   decision: SessionPlanDecision;
   revisionText: string | null;
-  decidedByUserId: string;
+  /** 画面から押した人。**`null`は計画レビューを受けた自動反映**（`plan-review-auto-reflect.ts`） */
+  decidedByUserId: string | null;
   now?: Date;
 }): Promise<
   { ok: true; request: SessionPlanRequestView } | { ok: false; rejection: SessionPlanDecisionRejection }
