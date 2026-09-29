@@ -2206,7 +2206,11 @@ describe("buildBranchFlow deviceBuild", () => {
 });
 
 describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFreeze。#3601）", () => {
-  function unreleasedGroup(mergedAts: string[], releaseHeadRef = "release-main/v3.8.6") {
+  function unreleasedGroup(
+    mergedAts: string[],
+    releaseHeadRef = "release-main/v3.8.6",
+    bumpCreatedAt?: string,
+  ) {
     const flow = build({
       pullRequests: [
         // 過去にmainへ出た版があって初めて、その後の作業が「未リリース」に振り分けられる
@@ -2225,6 +2229,20 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
           headRef: releaseHeadRef,
           createdAt: "2026-08-15T02:00:00Z",
         }),
+        ...(bumpCreatedAt
+          ? [
+              pullRequest({
+                number: 182,
+                headRef: "release/v3.8.6",
+                kind: "version-bump",
+                linkedIssueNumber: null,
+                state: "closed",
+                merged: true,
+                createdAt: bumpCreatedAt,
+                mergedAt: "2026-08-15T01:30:00Z",
+              }),
+            ]
+          : []),
         ...mergedAts.map((mergedAt, index) =>
           pullRequest({
             number: 200 + index,
@@ -2246,6 +2264,14 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
 
   it("作業が凍結より前にマージされたものだけならfalse（リリースPRに乗っている）", () => {
     expect(hasChangesAfterReleaseFreeze(unreleasedGroup(["2026-08-15T01:00:00Z"]))).toBe(false);
+  });
+
+  it("バンプPR作成〜リリースPR作成の間にマージされた作業もtrue（凍結点はバンプPR側）", () => {
+    expect(
+      hasChangesAfterReleaseFreeze(
+        unreleasedGroup(["2026-08-15T01:45:00Z"], "release-main/v3.8.6", "2026-08-15T01:00:00Z"),
+      ),
+    ).toBe(true);
   });
 
   it("作業が1本も無ければfalse", () => {
