@@ -1269,9 +1269,12 @@ export function IssueDeckShell({
         // 計画・質問の待ちは`activity`に現れないので、待ちそのものを材料に足す（#2238）
         planRequests: dispatch.planRequests,
         questionRequests: dispatch.questionRequests,
+        // 計画レビューの作成中は確認待ちに数えない（#3625）
+        jobs: dispatch.jobs,
         now,
       }),
     [
+      dispatch.jobs,
       checkUserIssues,
       crossRepositoryPullRequests,
       dispatch.sessions,
