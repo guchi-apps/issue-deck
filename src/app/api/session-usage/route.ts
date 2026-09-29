@@ -12,6 +12,7 @@ import {
 } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
+import { loadRepositoryNameResolver } from "@/lib/repository-alias";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
@@ -462,7 +463,13 @@ export async function GET(request: NextRequest) {
     select: SESSION_USAGE_SELECT,
   });
 
-  const entries = rows.map(toEntry);
+  // 改名前の行を現在の名前へ寄せる（#3613）。失敗しても集計は旧名のまま出す。
+  const resolveRepositoryName = await loadRepositoryNameResolver().catch(() => null);
+  const entries = rows.map(toEntry).map((entry) =>
+    resolveRepositoryName && entry.repository
+      ? { ...entry, repository: resolveRepositoryName(entry.repository) }
+      : entry,
+  );
   // **「いちばん新しい報告」は期間内の行だけで見る。** `rows`は5時間枠のウィンドウぶん
   // 期間の外まで広げて取得しているため、そのまま最大値を取ると期間の意味とずれる。
   const reportedAt = rows.reduce<Date | null>((latest, row) => {

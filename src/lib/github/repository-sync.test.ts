@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const upsert = vi.fn();
 const deleteMany = vi.fn();
+const findMany = vi.fn();
+const recordRepositoryRename = vi.fn();
 const fetchClaudeWorkflowExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({
@@ -13,7 +15,16 @@ vi.mock("@/lib/db", () => ({
       get deleteMany() {
         return deleteMany;
       },
+      get findMany() {
+        return findMany;
+      },
     },
+  },
+}));
+
+vi.mock("@/lib/repository-alias", () => ({
+  get recordRepositoryRename() {
+    return recordRepositoryRename;
   },
 }));
 
@@ -38,6 +49,8 @@ describe("syncInstallationRepositories", () => {
   beforeEach(() => {
     upsert.mockReset().mockImplementation(async ({ create }) => ({ id: "repo-1", ...create }));
     deleteMany.mockReset().mockResolvedValue(undefined);
+    findMany.mockReset().mockResolvedValue([]);
+    recordRepositoryRename.mockReset().mockResolvedValue(undefined);
     fetchClaudeWorkflowExists.mockReset();
   });
 
@@ -122,5 +135,33 @@ describe("syncInstallationRepositories", () => {
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({ create: expect.objectContaining({ hasClaudeWorkflow: false }) }),
     );
+  });
+
+  it("DBの名前と異なる名前で返ってきたリポジトリは、改名として記録する（#3613）", async () => {
+    const repo = (id: number, name: string) => ({
+      id,
+      name,
+      full_name: `owner/${name}`,
+      private: false,
+      html_url: `https://github.com/owner/${name}`,
+      archived: false,
+      default_branch: "main",
+      owner: { login: "owner" },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(200, { repositories: [repo(1, "kurashio"), repo(2, "same")] })));
+    fetchClaudeWorkflowExists.mockResolvedValue(false);
+    findMany.mockResolvedValue([
+      { githubRepositoryId: 1, name: "myroom" },
+      { githubRepositoryId: 2, name: "same" },
+    ]);
+
+    await syncInstallationRepositories({ id: "installation-1" }, "token");
+
+    expect(recordRepositoryRename).toHaveBeenCalledTimes(1);
+    expect(recordRepositoryRename).toHaveBeenCalledWith({
+      githubRepositoryId: 1,
+      oldName: "myroom",
+      newName: "kurashio",
+    });
   });
 });
