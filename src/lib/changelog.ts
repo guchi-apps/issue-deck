@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.6.2",
+    date: "2026-09-30",
+    changes: [
+      "計画レビューを作成している最中のIssueが、確認待ちの件数に含まれたり橙色で強調されたりしないよう修正しました。人の確認が必要なものだけが目立つようになります。",
+    ],
+  },
+  {
     version: "8.6.0",
     date: "2026-09-30",
     changes: [
