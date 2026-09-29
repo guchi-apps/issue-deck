@@ -34,6 +34,9 @@ export const GITHUB_API_FEATURES = [
   // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
   { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "release_history", label: "リリース履歴の取得" },
+  // リリース画面のiOS（TestFlight）配布結果（#3626）。**リリース画面を開いている間だけ**、
+  // runの一覧・jobs・判定ジョブの注釈・配布済みタグの4リクエストを消費する
+  { key: "ios_testflight", label: "iOS配布結果の取得" },
   // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
   // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
   { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },
