@@ -1008,7 +1008,6 @@ export function IssueList({
     // 判定は`shouldEmphasizeRemoteControl`に置いてある
     // 計画への返事を画面から送れる行（#2061）。**ここが主導線になり、Remote Controlは
     // 通常の枠線へ戻る**（`shouldEmphasizeRemoteControl`が`false`を返す）
-    const planPending = planPendingIssueIds.has(issue.id);
     // 計画レビューの作成中／提示済（#3607）。承認ボタンとは別の行に出すので狭い画面でも収まる
     const planReviewState =
       now === null
@@ -1025,6 +1024,8 @@ export function IssueList({
             issueNumber: issue.number,
             now: new Date(now),
           });
+    // 作成中は押して進める操作が無いので、橙の「計画を承認」もRemoteの強調も出さない（#3625）
+    const planPending = planPendingIssueIds.has(issue.id) && planReviewState !== "creating";
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
     // 自動マージされずPRのマージを待っている行（#3083）。「Remote」しか出ないと、なぜ確認が
@@ -1071,11 +1072,13 @@ export function IssueList({
     const permissionPending = issueSession ? describeSessionPermission(issueSession) !== null : false;
     // 種類ラベルを出すのは未着手ビューだけ（#3285）
     const showKindLabels = view === "not-started";
-    const emphasizeRemoteControl = shouldEmphasizeRemoteControl({
-      labels: issue.labels,
-      session: sessionByIssueId.get(issue.id) ?? null,
-      planDecisionPending: planPending || questionPending,
-    });
+    const emphasizeRemoteControl =
+      planReviewState !== "creating" &&
+      shouldEmphasizeRemoteControl({
+        labels: issue.labels,
+        session: sessionByIssueId.get(issue.id) ?? null,
+        planDecisionPending: planPending || questionPending,
+      });
     // 親Issue／子Issueの区別（#3469）。質問に答える・Remote・コメント数・時刻と同じ行には
     // 収まらないため、独立した行に出す（#3580）
     const hierarchyBadges = resolveIssueHierarchyBadges(issue);
