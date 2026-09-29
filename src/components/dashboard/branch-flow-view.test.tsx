@@ -8,6 +8,12 @@ import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => "/dashboard",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const REPO = "guchi-apps/issue-deck";
 /** サマリー行に出るリポジトリ名（`owner/`は落とす） */
 const REPO_SHORT = "issue-deck";
