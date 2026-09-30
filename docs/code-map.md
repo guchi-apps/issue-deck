@@ -2255,6 +2255,12 @@ export function POST(request: NextRequest) {
   新規Issue作成ダイアログを開くだけにしてある（**ここでは起票しない**。立てるかは読んだ人が
   決める。ダイアログの「作成+実装開始」で起票の先まで一続きに進められる）。
   同じ指摘の二重起票防止（`buildCodeReviewFindingIssueIndex`相当の索引）は持たせていない。
+  **起票した修正Issueが次のリリースに入ると、元PRの行は「✅ #<修正Issue> で修正済み」になる**
+  （#3634）。元PRの本文の`## 検証結果`はマージ済みで書き換わらないため、リリースの
+  ワークフローが対象issueの本文の`対応PR: #<番号>`（この下書き）・`対象PR: #<番号>`
+  （PR詳細の「修正Issueを起案」）を読み、同じリリースに修正Issueがある場合だけ行を差し替える。
+  画面側の変更は無く、判定は`ok`として数える（マージ確認で止めない）。すでに作られたリリースPRには
+  効かず、「修正を入れて作り直す」で作り直した時点から反映される。
 - **マージ確認ダイアログは、押す直前にそのPRのレビュー判定を出す**（#2843。
   [`pull-request-merge-review.tsx`](../src/components/dashboard/pull-request-merge-review.tsx)・
   [`lib/github/pull-request-review-verdict.ts`](../src/lib/github/pull-request-review-verdict.ts)）。

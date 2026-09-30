@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.7.1",
+    date: "2026-09-30",
+    changes: [
+      "リリース前の確認で「要修正」と判定されたPRについて、修正用のIssueで直した内容が同じリリースに入っている場合は「修正済み」と表示されるようになりました。すでに直したはずのPRが「要修正」のまま残り、リリースのたびに確認で止まってしまう問題が解消されます。",
+    ],
+  },
+  {
     version: "8.7.0",
     date: "2026-09-30",
     changes: [
