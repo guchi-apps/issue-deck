@@ -1021,16 +1021,17 @@ function ReleaseGroupHeader({
           )}
         />
       ) : (
-        /* developのレールを下からたどり、この行でmainへ左に曲がって入る矢印（#3664）。
+        /* developのドットからmainのひし形へ向かう、左向きの直線だけの矢印（#3664・#3677）。
+           曲げて縦線を引くとdevelopのレールと重なるため、真横に描く。
            developを経由しない`main`直接マージの束には描かない（意味が逆になる） */
         <svg
           aria-hidden="true"
-          viewBox="0 0 28 24"
+          viewBox="0 0 28 2"
           preserveAspectRatio="none"
-          className="absolute top-[calc(1.15rem-1px)] left-[0.5rem] h-6 w-[1.75rem] overflow-visible text-purple-500 max-sm:left-[0.4rem] max-sm:w-[1.35rem]"
+          className="absolute top-[calc(1.15rem-1px)] left-[0.5rem] h-0.5 w-[1.75rem] overflow-visible text-purple-500 max-sm:left-[0.4rem] max-sm:w-[1.35rem]"
         >
           <path
-            d="M28 24 V12 Q28 1 17 1 H5"
+            d="M28 1 H5"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
