@@ -494,6 +494,10 @@ model AppSetting {
   // 起動し、reusable側のgateがこの値の境界をまたいだ回だけ進む。
   releasePrepIntervalMinutes Int?
 
+  // コードレビューの提案条件（#3685）。`null`は既定（30日・100件）。
+  codeReviewRecommendDays    Int?
+  codeReviewRecommendPrCount Int?
+
   // 参照されていない添付画像の自動削除（#2475）。**既定はOFF**——「未使用」の判定は
   // Issue本文とIssue／PRのコメントしか見ておらず、PR本文・リポジトリ内のファイル・
   // GitHub外への貼り付けは原理的に検出できない。人が中身を見て納得してから有効にする。

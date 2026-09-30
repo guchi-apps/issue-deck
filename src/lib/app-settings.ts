@@ -537,3 +537,27 @@ export function describeBulkReserveModel(value: string): string {
     choice.agent === "codex" ? describeCodexModel(choice.model) : describeClaudeModel(choice.model);
   return `${group} ・ ${name}`;
 }
+
+// コードレビューの提案条件（#3685）。「コードレビュー」ビューで、未実施でなくても再レビューを
+// 提案する基準。前回から経過日数が既定の30日以上、または前回以降に入ったマージ済みPRが既定の
+// 100件以上で提案する。
+export const CODE_REVIEW_RECOMMEND_DAYS_MIN = 1;
+export const CODE_REVIEW_RECOMMEND_DAYS_MAX = 365;
+export const CODE_REVIEW_RECOMMEND_DAYS_DEFAULT = 30;
+export const CODE_REVIEW_RECOMMEND_PR_COUNT_MIN = 1;
+export const CODE_REVIEW_RECOMMEND_PR_COUNT_MAX = 1000;
+export const CODE_REVIEW_RECOMMEND_PR_COUNT_DEFAULT = 100;
+
+export function parseCodeReviewRecommendDays(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < CODE_REVIEW_RECOMMEND_DAYS_MIN || value > CODE_REVIEW_RECOMMEND_DAYS_MAX) return null;
+  return value;
+}
+
+export function parseCodeReviewRecommendPrCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  if (value < CODE_REVIEW_RECOMMEND_PR_COUNT_MIN || value > CODE_REVIEW_RECOMMEND_PR_COUNT_MAX) {
+    return null;
+  }
+  return value;
+}
