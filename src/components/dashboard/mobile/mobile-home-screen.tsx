@@ -35,6 +35,7 @@ import {
   sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
   sidebarQuestionNavViews,
+  PREVIEW_NAV_VISIBLE,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import {
@@ -488,6 +489,7 @@ export function MobileHomeScreenView({
               })}
               {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
                   ならない）。動いていることはオレンジの丸で出す */}
+              {PREVIEW_NAV_VISIBLE && (
               <MobileNavRow
                 label="確認環境"
                 icon={MonitorPlay}
@@ -500,6 +502,7 @@ export function MobileHomeScreenView({
                     : "developの最新をサブPCで動かして画面で確かめる"
                 }
               />
+              )}
               {/* 予約実行（#2995）。数字は積んである予定の件数（PCの左メニューと同じ）。
                   **「リリース履歴」の行は#2811でフッターのタブ（「リリース」）へ移した**——
                   AI使用量（#2631）と同じで、同じ画面への入口を2か所に持たない */}
