@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  PullRequestStatusIcon,
+  toStatusIconKind,
+} from "@/components/dashboard/pull-request-status-icon";
+import {
   buildPullRequestStatusRail,
   type PullRequestRailSlot,
   type PullRequestRailSlotState,
@@ -26,13 +30,14 @@ const SLOT_STATUS: Record<PullRequestRailSlotState, { label: string; className: 
 
 function RailSlot({ slot, linkable }: { slot: PullRequestRailSlot; linkable: boolean }) {
   const status = SLOT_STATUS[slot.state];
+  const iconKind = toStatusIconKind(slot.state);
   const className = "inline-flex min-w-0 items-center justify-between gap-2 px-1 py-0.5 text-xs leading-5";
   const title = slot.title ? `${slot.columnLabel}: ${slot.title}` : slot.columnLabel;
   const content = (
     <>
       <span className="truncate">{slot.columnLabel}</span>
       <span className={cn("shrink-0 font-semibold", status.className)}>
-        {slot.statusText ?? status.label}
+        {iconKind && !slot.statusText ? <PullRequestStatusIcon kind={iconKind} /> : (slot.statusText ?? status.label)}
       </span>
     </>
   );
