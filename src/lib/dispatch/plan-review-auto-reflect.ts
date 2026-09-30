@@ -23,7 +23,11 @@ import { parseRepositoryFullName } from "@/lib/local-session";
  *
  * - **Claude Codeのセッションだけ。** Codexへの継続指示は`codex queue`で送るため、人の操作を挟まない
  *   自動送信を新しく作らない
- * - **1つのIssueにつき1回まで。** 反映後の計画へのレビューは、通常どおり人が読んで決める
+ * - **1つのIssueにつき1回まで。** 反映後の計画へのレビューは、通常どおり人が読んで決める。
+ *   **人が画面から送った修正も1回に数える**（#3660。判断カードで選んで出し直させたあとの
+ *   2回目のレビューまで自動で反映すると、人が読んで決める前提が崩れる）
+ * - **人が決めるべき「判断」を含むレビューは送らない**（#3660）。選ぶのは人なので、固定文面で
+ *   先に出し直させず、判断カードでの選択を待つ
  * - **`noFindings`のときは送らない。** 指摘に分けられなかった本文は、画面と同じく一括の依頼文で送る
  * - **決定コメントに`plan-reviser`を付けない。** 付けると`findPendingPlanReviewComment`が
  *   「応答済み」と読み、実装セッションの応答が無いまま指摘が消える
@@ -41,7 +45,7 @@ export type PlanReviewAutoReflectResult =
   | { reflected: true }
   | {
       reflected: false;
-      reason: "not_review" | "no_findings" | "no_request" | "not_claude" | "limit" | "lost_race";
+      reason: "not_review" | "no_findings" | "has_decisions" | "no_request" | "not_claude" | "limit" | "lost_race";
     };
 
 export function isPlanReviewCommentBody(body: string): boolean {
@@ -68,9 +72,12 @@ export async function autoReflectPlanReview(params: {
   const now = params.now ?? new Date();
 
   // 「指摘なし」だけ見送る。分けられなかった本文も、画面と同じく一括の依頼文で送る
-  if (parsePlanReview(params.commentBody).noFindings) {
+  const parsed = parsePlanReview(params.commentBody);
+  if (parsed.noFindings) {
     return { reflected: false, reason: "no_findings" };
   }
+
+  if (parsed.decisions.length > 0) return { reflected: false, reason: "has_decisions" };
 
   const target = { repositoryFullName: params.repositoryFullName, issueNumber: params.issueNumber };
   const request = await db.sessionPlanRequest.findFirst({
@@ -87,7 +94,7 @@ export async function autoReflectPlanReview(params: {
   if (job?.agent !== "claude") return { reflected: false, reason: "not_claude" };
 
   const done = await db.sessionPlanRequest.count({
-    where: { ...target, status: "REVISION_REQUESTED", decidedByUserId: null },
+    where: { ...target, status: "REVISION_REQUESTED" },
   });
   if (done >= PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS) return { reflected: false, reason: "limit" };
 
