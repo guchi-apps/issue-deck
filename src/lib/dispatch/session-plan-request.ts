@@ -86,6 +86,15 @@ export type PlanReviewFindingDecision = {
   reason?: string;
 };
 
+/** 計画レビューの「人が決める判断」1件に対する、人の選択（#3660）。`letter`が`null`なら「セッションに任せる」 */
+export type PlanReviewChoice = {
+  number: number;
+  title: string;
+  letter: string | null;
+  /** 選んだ選択肢の題。任せるときは無し */
+  label?: string;
+};
+
 /**
  * 指摘ごとの判断を、修正として送る依頼文にする（#3554）。
  *
@@ -97,6 +106,7 @@ export type PlanReviewFindingDecision = {
  */
 export function buildPlanReviewDecisionRequestText(
   decisions: readonly PlanReviewFindingDecision[],
+  choices: readonly PlanReviewChoice[] = [],
 ): string {
   for (const [titleMax, reasonMax] of [
     [120, 300],
@@ -104,11 +114,11 @@ export function buildPlanReviewDecisionRequestText(
     [30, 40],
     [16, 0],
   ] as const) {
-    const text = composePlanReviewDecisionText(decisions, titleMax, reasonMax);
+    const text = composePlanReviewDecisionText(decisions, choices, titleMax, reasonMax);
     if (text.length <= SESSION_PLAN_REVISION_MAX_LENGTH) return text;
   }
   // 指摘が100件を超えるような異常な場合だけここに来る。途中で切っても判断の先頭は残る
-  return `${composePlanReviewDecisionText(decisions, 16, 0).slice(0, SESSION_PLAN_REVISION_MAX_LENGTH - 1)}…`;
+  return `${composePlanReviewDecisionText(decisions, choices, 16, 0).slice(0, SESSION_PLAN_REVISION_MAX_LENGTH - 1)}…`;
 }
 
 function clip(text: string, max: number): string {
@@ -118,6 +128,7 @@ function clip(text: string, max: number): string {
 
 function composePlanReviewDecisionText(
   decisions: readonly PlanReviewFindingDecision[],
+  choices: readonly PlanReviewChoice[],
   titleMax: number,
   reasonMax: number,
 ): string {
@@ -130,10 +141,23 @@ function composePlanReviewDecisionText(
   const applied = decisions.filter((item) => item.decision === "apply");
   const skipped = decisions.filter((item) => item.decision === "skip");
 
+  const choiceLine = (item: PlanReviewChoice) =>
+    item.letter === null
+      ? `- 判断${item.number}. ${clip(item.title, titleMax)} → セッションに任せる`
+      : `- 判断${item.number}. ${clip(item.title, titleMax)} → ${item.letter}. ${clip(item.label ?? "", titleMax)}`;
+
   return [
-    "計画レビュー（<!-- supervisor:plan-review -->付きのコメント）の指摘について、人が次のとおり判断しました。「反映する」の指摘は自分で確かめたうえで計画へ取り込み、「見送る」の指摘は取り込まずに、計画を出し直してください。確かめた結果、反映できない指摘があれば理由を添えてください。応答はIssueコメントの末尾に<!-- issue-deck-agent:plan-reviser -->を付けて残してください。",
+    "計画レビュー（<!-- supervisor:plan-review -->付きのコメント）について、人が次のとおり判断しました。" +
+      (decisions.length > 0
+        ? "「反映する」の指摘は自分で確かめたうえで計画へ取り込み、「見送る」の指摘は取り込まずに、計画を出し直してください。確かめた結果、反映できない指摘があれば理由を添えてください。"
+        : "計画を出し直してください。") +
+      (choices.length > 0
+        ? "「判断」は人が選んだ選択肢のとおりに計画へ反映してください（選択肢の内容はレビューコメントに書かれています）。「セッションに任せる」の判断は、自分で決めたうえで理由を添えてください。"
+        : "") +
+      "応答はIssueコメントの末尾に<!-- issue-deck-agent:plan-reviser -->を付けて残してください。",
     ...(applied.length > 0 ? ["", "反映する:", ...applied.map(line)] : []),
     ...(skipped.length > 0 ? ["", "見送る:", ...skipped.map(line)] : []),
+    ...(choices.length > 0 ? ["", "判断:", ...choices.map(choiceLine)] : []),
   ].join("\n");
 }
 

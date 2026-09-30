@@ -339,6 +339,46 @@ describe("PlanApprovalPanel", () => {
     expect(text).toContain("見送る:\n- 2. docsに言及が残る（理由: 別Issueで直す）");
   });
 
+  it("判断は全件選ぶまで送れず、選んだ選択肢が修正に載る（#3660）", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+        planReview={pendingReview(
+          [
+            "**判断1. 書式をどうするか**",
+            "- **論点**: 好みの問題",
+            "- **選択肢**:",
+            "  - A. 専用の見出し",
+            "  - B. 指摘の中に足す",
+            "- **推奨**: A",
+            "",
+            "**判断2. 範囲**",
+            "- **選択肢**:",
+            "  - A. 今回だけ",
+            "  - B. 両方",
+            "<!-- supervisor:plan-review -->",
+          ].join("\n"),
+        )}
+      />,
+    );
+    const submit = () => screen.getByRole("button", { name: /選んだ内容で計画を出し直す/ }) as HTMLButtonElement;
+    expect(submit().disabled).toBe(true);
+    expect(screen.getByText(/判断があと2件残っています/)).toBeTruthy();
+
+    fireEvent.click(within(screen.getByRole("group", { name: "判断1の選択肢" })).getByRole("button", { name: /B\. 指摘の中に足す/ }));
+    expect(submit().disabled).toBe(true);
+    fireEvent.click(within(screen.getByRole("listitem", { name: "判断2" })).getByRole("button", { name: "セッションに任せる" }));
+    expect(submit().disabled).toBe(false);
+
+    fireEvent.click(submit());
+    await waitFor(() => expect(decidePlan).toHaveBeenCalledTimes(1));
+    const text = decidePlan.mock.calls[0][0].text as string;
+    expect(text).toContain("判断:\n- 判断1. 書式をどうするか → B. 指摘の中に足す\n- 判断2. 範囲 → セッションに任せる");
+  });
+
   it("すべて見送ると出し直しは押せず、承認を促す（#3554）", () => {
     render(
       <PlanApprovalPanel

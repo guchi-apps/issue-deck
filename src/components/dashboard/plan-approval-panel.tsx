@@ -284,7 +284,7 @@ export function PlanApprovalPanel({
                 </div>
                 {!canHandoff && (
                 <p className="px-3 py-2 text-xs text-muted-foreground">
-                  届くと指摘を自動で計画へ反映します（1回まで）。それまでPush通知は送りません。
+                  届くと指摘を自動で計画へ反映します（1回まで。人が選ぶ「判断」を含むレビューは自動では反映せず、ここで選んでもらいます）。それまでPush通知は送りません。
                 </p>
                 )}
               </div>
@@ -299,6 +299,7 @@ export function PlanApprovalPanel({
                   reviewedAtLabel={planReview.createdAtLabel}
                   repositoryFullName={request.repositoryFullName}
                   submitLabel="選んだ指摘で計画を出し直す"
+                  remainingMs={remainingMs}
                   fallbackSubmitLabel="レビューを反映して計画を出し直す"
                   disabled={!canSend || dispatch.isSubmitting}
                   isSubmitting={dispatch.isSubmitting}
