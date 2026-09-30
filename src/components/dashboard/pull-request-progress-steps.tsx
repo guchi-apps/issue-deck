@@ -1,5 +1,9 @@
 import { Loader2 } from "lucide-react";
 
+import {
+  PullRequestStatusIcon,
+  toStatusIconKind,
+} from "@/components/dashboard/pull-request-status-icon";
 import type {
   IssuePullRequestProgress,
   IssuePullRequestStepState,
@@ -68,11 +72,16 @@ export function PullRequestProgressStepList({
     >
       {progress.steps.map((step) => {
         const status = PR_STEP_STATUS[step.state];
+        const iconKind = toStatusIconKind(step.state);
         const content = (
           <>
             <span className="font-medium">{step.label}</span>
             <span className={cn("font-semibold", status.className)}>
-              {step.statusText ?? status.label}
+              {iconKind && !step.statusText ? (
+                <PullRequestStatusIcon kind={iconKind} />
+              ) : (
+                (step.statusText ?? status.label)
+              )}
             </span>
           </>
         );
