@@ -17,7 +17,11 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { parseReleaseVerification } from "@/lib/github/release-verification";
+import { buildPullRequestFixIssueDraft } from "@/lib/github/pull-request-fix-issue";
+import {
+  buildReleaseVerificationFixIssueDraft,
+  parseReleaseVerification,
+} from "@/lib/github/release-verification";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workflowPath = path.join(repoRoot, ".github/workflows/reusable-release-develop-to-main.yml");
@@ -41,10 +45,16 @@ function extractRunScript(stepName) {
   return body.join("\n");
 }
 
-// `gh pr list ... --json number,body,comments --jq '.[0] // empty'`の結果だけを返す。
-// `--jq`はgh側で適用されるので、スタブは対象PRのオブジェクトをそのまま出す。
+// `gh pr list ... --json number,body,comments --jq '.[0] // empty'`の結果と、
+// `gh issue view <番号> --json body --jq '.body // ""'`の結果（#3634）だけを返す。
+// `--jq`はgh側で適用されるので、スタブはPRのオブジェクト・Issueの本文をそのまま出す。
 const STUB_GH = `#!/usr/bin/env bash
 set -u
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  var="STUB_ISSUE_$3"
+  printf '%s' "\${!var:-}"
+  exit 0
+fi
 head=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "--head" ]; then head="$2"; fi
@@ -72,8 +82,9 @@ afterEach(() => {
  *
  * @param issueLines `## 対象issue`の行（`- #<番号> <タイトル>`）
  * @param prs Issue番号 → `gh pr list`が返すPRのJSON
+ * @param issueBodies Issue番号 → `gh issue view`が返す本文（#3634）
  */
-function runAggregation(issueLines, prs) {
+function runAggregation(issueLines, prs, issueBodies = {}) {
   writeFileSync(path.join(workDir, "release-issue-lines.txt"), `${issueLines.join("\n")}\n`);
 
   const script = extractRunScript("対象issueの検証結果を集計する").replaceAll(
@@ -83,6 +94,9 @@ function runAggregation(issueLines, prs) {
   const env = { ...process.env, PATH: `${workDir}:${process.env.PATH}` };
   for (const [number, json] of Object.entries(prs)) {
     env[`STUB_PR_${number}`] = JSON.stringify(json);
+  }
+  for (const [number, body] of Object.entries(issueBodies)) {
+    env[`STUB_ISSUE_${number}`] = body;
   }
 
   execFileSync("bash", ["-e", "-c", script], { env, encoding: "utf8" });
@@ -196,6 +210,89 @@ describe("対象issueの検証結果を集計する", () => {
       riskKind: "hit",
     });
     expect(parsed?.rows[0].reviewBody).toContain("要確認。");
+  });
+
+  describe("修正Issueで直したPR（#3634）", () => {
+    const changesRequested = {
+      number: 2446,
+      body: "<!-- issue-deck-verification:start review=changes-requested risk=none -->\n<!-- issue-deck-verification:end -->",
+      comments: [reviewComment("境界値の扱いが誤っています。", "changes-requested")],
+    };
+    const lgtm = {
+      number: 2460,
+      body: "<!-- issue-deck-verification:start review=lgtm risk=none -->\n<!-- issue-deck-verification:end -->",
+      comments: [],
+    };
+    // 本文は画面が実際に作る下書きから作る。文言がずれたら、ここで落ちる
+    const releaseFixBody = buildReleaseVerificationFixIssueDraft({
+      row: {
+        issueNumber: 2441,
+        issueTitle: "レビューのゲートを直す",
+        pullRequestNumber: 2446,
+        reviewKind: "changes-requested",
+        reviewLabel: "要修正",
+        riskKind: "none",
+        riskLabel: "該当なし",
+        reviewBody: null,
+      },
+      repositoryFullName: "guchi-apps/issue-deck",
+      releasePullRequestNumber: 2450,
+    }).body;
+    const pullRequestFixBody = buildPullRequestFixIssueDraft({
+      pullRequest: {
+        repositoryFullName: "guchi-apps/issue-deck",
+        number: 2446,
+        title: "レビューのゲートを直す",
+        baseRef: "develop",
+        headRef: "issue-2441",
+        merged: true,
+        state: "closed",
+        linkedIssueNumbers: [2441],
+        reviewVerdict: null,
+      },
+      review: null,
+      openChangeRequests: [],
+    }).body;
+
+    it.each([
+      ["リリースの検証結果から起票した修正Issue", releaseFixBody],
+      ["PR詳細から起票した修正Issue", pullRequestFixBody],
+    ])("%sが同じリリースに入っていれば、元PRの行を修正済みにする", (_, fixBody) => {
+      const out = runAggregation(
+        ["- #2455 レビューのゲートを直す の修正（レビュー指摘）", "- #2441 レビューのゲートを直す"],
+        { 2441: changesRequested, 2455: lgtm },
+        { 2455: fixBody },
+      );
+
+      expect(out).toContain("| #2441 | #2446 | ✅ #2455 で修正済み（元の判定: 要修正） | 該当なし |");
+      expect(out).toContain("| #2455 | #2460 | ✅ 問題なし | 該当なし |");
+
+      // 画面では問題なしとして数え、マージ確認で止めない
+      const parsed = parseReleaseVerification(out);
+      expect(parsed?.tally).toMatchObject({ total: 2, ok: 2, changesRequested: 0 });
+      expect(parsed?.rows.find((row) => row.issueNumber === 2441)).toMatchObject({
+        reviewKind: "ok",
+        reviewLabel: "#2455 で修正済み（元の判定: 要修正）",
+      });
+      // 元の指摘は折りたたみで読めるまま残す
+      expect(out).toContain("> 境界値の扱いが誤っています。");
+    });
+
+    it("修正Issueがリリースに入っていなければ、要修正のまま残す", () => {
+      const out = runAggregation(["- #2441 レビューのゲートを直す"], { 2441: changesRequested });
+
+      expect(out).toContain("| #2441 | #2446 | ❌ 要修正 | 該当なし |");
+    });
+
+    it("番号の前方一致で別のPRを修正済みにしない", () => {
+      const out = runAggregation(
+        ["- #2455 別件の修正", "- #2441 レビューのゲートを直す"],
+        { 2441: changesRequested, 2455: lgtm },
+        { 2455: "- 対象PR: #24460（develop ← issue-1・マージ済み）" },
+      );
+
+      expect(out).toContain("| #2441 | #2446 | ❌ 要修正 | 該当なし |");
+    });
   });
 
   it("対象issueが1件も無ければ、表そのものを作らない", () => {
