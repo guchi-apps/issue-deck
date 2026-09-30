@@ -37,7 +37,6 @@ function review(repositoryFullName: string, daysAgo: number, id: string): Issue 
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: `https://github.com/${repositoryFullName}/issues/1`,
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
   };

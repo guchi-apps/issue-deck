@@ -29,7 +29,6 @@ export async function getIssuesForUser(
       include: {
         labels: { orderBy: { id: "asc" } },
         repository: true,
-        favoritedBy: { where: { userId } },
         commentReadBy: { where: { userId } },
       },
     }),
@@ -45,7 +44,6 @@ export async function getIssuesForUser(
     const verifiedAt = manualStepVerifiedAt.get(activeKey);
     const issue: Issue = {
       ...dbIssueToDisplayIssue(row.repository, row),
-      favorite: row.favoritedBy.length > 0,
       hasUnreadComments: row.commentCount > readCommentCount,
       readCommentCount,
       dispatchPendingAt: dispatchedAt?.toISOString() ?? null,

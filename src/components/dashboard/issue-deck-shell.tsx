@@ -51,6 +51,7 @@ import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { KnowledgeBoardPanel } from "@/components/dashboard/knowledge-board-panel";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
+import { useIdeasCount } from "@/hooks/use-ideas";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
   SESSION_USAGE_PERIODS,
@@ -1441,6 +1442,8 @@ export function IssueDeckShell({
     () => countOpenPromotionPullRequests(crossRepositoryPullRequests, openPullRequests.fetchedAt !== null),
     [crossRepositoryPullRequests, openPullRequests.fetchedAt],
   );
+  // 左メニュー「構想」の件数（#3639）
+  const { count: ideasCount, refresh: refreshIdeasCount } = useIdeasCount();
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
   const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
   const visibleReleaseHistoryEntries = useMemo(
@@ -1981,28 +1984,6 @@ export function IssueDeckShell({
     }
   }
 
-  async function handleSetIssueFavorite(issue: Issue, favorite: boolean) {
-    function applyFavorite(target: boolean) {
-      setAllIssues((prev) =>
-        prev.map((item) => (item.id === issue.id ? { ...item, favorite: target } : item)),
-      );
-    }
-
-    applyFavorite(favorite);
-
-    try {
-      const response = await fetch("/api/issues/favorites", {
-        method: favorite ? "POST" : "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ issueId: issue.id }),
-      });
-      if (!response.ok) throw new Error("failed to update favorite issue");
-    } catch (error) {
-      console.error("[issue-deck-shell] failed to update favorite issue", error);
-      applyFavorite(!favorite);
-    }
-  }
-
   // 設定画面のように、フッターに対応するタブが無い画面ではnullになる（#1638）
   const activeBottomNavTab: MobileBottomNavTab | null = resolveBottomNavTab(mobileScreen);
 
@@ -2115,6 +2096,7 @@ export function IssueDeckShell({
                   onSelectIdeas={selectIdeas}
                   knowledgePromotionCount={knowledgePromotionCount}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
+                  ideasCount={ideasCount}
                   onSelectRepos={selectRepos}
                   /* 「リポジトリ」の行に出す件数（#2724）。**非表示にしたリポジトリは数えない**
                      ——開いた先の一覧が既定で非表示ぶんを畳むため、含めるとホームの数字と
@@ -2166,7 +2148,7 @@ export function IssueDeckShell({
 
               {mobileScreen.kind === "ideas" && (
                 <div className="h-full overflow-y-auto p-4">
-                  <IdeasPanel onBack={goBack} />
+                  <IdeasPanel onBack={goBack} onChanged={refreshIdeasCount} />
                 </div>
               )}
 
@@ -2417,7 +2399,6 @@ export function IssueDeckShell({
                   onIssueUpdated={handleIssueUpdated}
                   onIssueMoved={handleIssueMoved}
                   onIssueDeleted={handleIssueDeleted}
-                  onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}
@@ -2486,6 +2467,7 @@ export function IssueDeckShell({
                 onSelectIdeas={selectIdeasPane}
                 knowledgePromotionCount={knowledgePromotionCount}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
+                  ideasCount={ideasCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
                 navCounts={navCounts}
                 checkUserPullRequestCount={checkUserPullRequestCount}
@@ -2514,7 +2496,7 @@ export function IssueDeckShell({
 
           {filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-5xl"><IdeasPanel /></div>
+              <div className="mx-auto max-w-5xl"><IdeasPanel onChanged={refreshIdeasCount} /></div>
             </div>
           ) : filters.pane === "usage" ? (
             /* PC: AI使用量（#2504）。「確認環境」と同じく中央〜右を1カラムで使う */
@@ -2783,7 +2765,6 @@ export function IssueDeckShell({
                   onIssueUpdated={handleIssueUpdated}
                   onIssueMoved={handleIssueMoved}
                   onIssueDeleted={handleIssueDeleted}
-                  onToggleFavorite={(issue) => handleSetIssueFavorite(issue, !issue.favorite)}
                   onCreateFollowupIssue={openFollowupIssueDialog}
                   onCreateConfigIssue={openConfigChangeIssueDialog}
                   onCreateCodeReviewFindingIssue={openCodeReviewFindingIssueDialog}

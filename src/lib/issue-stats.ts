@@ -58,8 +58,6 @@ export function filterIssuesByView(
   referenceIssues: Issue[] = issues,
 ): Issue[] {
   switch (view) {
-    case "favorites":
-      return issues.filter((issue) => issue.favorite);
     case "recently-added":
       return issues.filter(
         (issue) => Date.now() - new Date(issue.createdAt).getTime() < RECENTLY_ADDED_WINDOW_MS,
@@ -487,7 +485,6 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
     a.manualStepVerifiedAt === b.manualStepVerifiedAt &&
     a.commentCount === b.commentCount &&
     a.updatedAt === b.updatedAt &&
-    a.favorite === b.favorite &&
     a.hasUnreadComments === b.hasUnreadComments &&
     a.readCommentCount === b.readCommentCount &&
     a.htmlUrl === b.htmlUrl &&

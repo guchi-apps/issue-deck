@@ -44,7 +44,7 @@ describe("スマホの一覧に並べるビュー（#1645）", () => {
 
   it("お気に入り・最近追加した・直近本番に反映したは出さない", () => {
     const ids = mobileListNavViews.map((view) => view.id);
-    expect(ids).not.toContain("favorites");
+    expect(ids).not.toContain("recently-added");
     expect(ids).not.toContain("recently-added");
     expect(ids).not.toContain("recently-merged");
   });
@@ -80,10 +80,9 @@ describe("左メニューのグループ（#1613）", () => {
   });
 
   // 絞ったものどうしは進捗の順（未着手 → 実行中 → 本番反映待ち、#1743）
-  it("Issueは広い順に5つ", () => {
+  it("Issueは広い順に4つ", () => {
     expect(sidebarIssueNavViews.map((view) => view.id)).toEqual([
       "all",
-      "favorites",
       "not-started",
       "in-progress",
       "release-pending",
@@ -99,7 +98,7 @@ describe("左メニューのグループ（#1613）", () => {
 describe("getNavViewDefaultState", () => {
   it("状態を要求しないビューはopen、「main反映済(直近)」はall", () => {
     expect(getNavViewDefaultState("all")).toBe("open");
-    expect(getNavViewDefaultState("favorites")).toBe("open");
+    expect(getNavViewDefaultState("recently-added")).toBe("open");
     expect(getNavViewDefaultState("recently-merged")).toBe("all");
   });
 
@@ -129,7 +128,7 @@ describe("getNavViewDefaultGroupByRepo", () => {
 
   it("ラベル絞り込みを持たないビューはデフォルトOFF", () => {
     expect(getNavViewDefaultGroupByRepo("all")).toBe(false);
-    expect(getNavViewDefaultGroupByRepo("favorites")).toBe(false);
+    expect(getNavViewDefaultGroupByRepo("recently-added")).toBe(false);
   });
 });
 
@@ -137,18 +136,18 @@ describe("resolveStateOnViewChange", () => {
   it("状態を要求するビューへ切り替えると、明示的な選択より要求を優先する", () => {
     // Issue #475: リポジトリ画面でopen絞り込みのまま選ぶと必ず0件になっていた。
     expect(resolveStateOnViewChange("recently-merged", "all", "open", true)).toBe("all");
-    expect(resolveStateOnViewChange("recently-merged", "favorites", "closed", true)).toBe("all");
+    expect(resolveStateOnViewChange("recently-merged", "recently-added", "closed", true)).toBe("all");
     expect(resolveStateOnViewChange("recently-merged", "all", "open", false)).toBe("all");
   });
 
   it("状態を要求しないビューへの切り替えでは、明示的に選ばれた状態を引き継ぐ", () => {
-    expect(resolveStateOnViewChange("favorites", "all", "closed", true)).toBe("closed");
+    expect(resolveStateOnViewChange("recently-added", "all", "closed", true)).toBe("closed");
     expect(resolveStateOnViewChange("check-user", "all", "all", true)).toBe("all");
   });
 
   it("明示的に選ばれていない状態は、切り替え先ビューの既定値に戻す", () => {
-    // 「main反映済(直近)」で暗黙に適用されていたallを、お気に入りへ持ち込まない。
-    expect(resolveStateOnViewChange("favorites", "recently-merged", "all", false)).toBe("open");
+    // 「main反映済(直近)」で暗黙に適用されていたallを、最近追加したへ持ち込まない。
+    expect(resolveStateOnViewChange("recently-added", "recently-merged", "all", false)).toBe("open");
     expect(resolveStateOnViewChange("all", "recently-merged", "all", false)).toBe("open");
   });
 
@@ -156,17 +155,17 @@ describe("resolveStateOnViewChange", () => {
     expect(resolveStateOnViewChange("recently-merged", "recently-merged", "open", true)).toBe(
       "open",
     );
-    expect(resolveStateOnViewChange("favorites", "favorites", "closed", true)).toBe("closed");
+    expect(resolveStateOnViewChange("recently-added", "recently-added", "closed", true)).toBe("closed");
   });
 });
 
 describe("getAdjacentNavViewId", () => {
   it("nextを指定すると次のビューIDを返す", () => {
-    expect(getAdjacentNavViewId("all", "next")).toBe("favorites");
+    expect(getAdjacentNavViewId("all", "next")).toBe("recently-added");
   });
 
   it("prevを指定すると前のビューIDを返す", () => {
-    expect(getAdjacentNavViewId("favorites", "prev")).toBe("all");
+    expect(getAdjacentNavViewId("recently-added", "prev")).toBe("all");
   });
 
   it("先頭のビューでprevを指定するとnullを返す（ループしない）", () => {

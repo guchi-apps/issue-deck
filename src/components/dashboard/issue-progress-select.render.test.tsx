@@ -31,7 +31,6 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     manualStepVerifiedAt: null,
     projectStatus: "Implementation",
     htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/1920",
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,

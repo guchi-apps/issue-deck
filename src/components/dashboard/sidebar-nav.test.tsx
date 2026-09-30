@@ -40,6 +40,7 @@ function renderSidebar(
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
     knowledgePromotionCount = null,
+    ideasCount = null,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
@@ -49,6 +50,7 @@ function renderSidebar(
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
     knowledgePromotionCount?: number | null;
+    ideasCount?: number | null;
   } = {},
 ) {
   render(
@@ -65,6 +67,7 @@ function renderSidebar(
       onSelectNightlyRun={() => {}}
       onSelectKnowledge={() => {}}
       knowledgePromotionCount={knowledgePromotionCount}
+      ideasCount={ideasCount}
       onLaunchNewApp={() => {}}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
@@ -158,6 +161,26 @@ afterEach(() => cleanup());
 function knowledgeNavItem() {
   return screen.getByText("共通知識").closest("button") as HTMLElement;
 }
+
+describe("SidebarNav 構想の件数（#3639）", () => {
+  const ideasRow = () => screen.getByText("構想").closest("button") as HTMLElement;
+
+  it("構想の行に件数をグレーの数字で出す（丸は付けない）", () => {
+    renderSidebar({ all: 0 } as never, undefined, { ideasCount: 7 });
+
+    expect(ideasRow().textContent).toBe("構想7");
+    expect(ideasRow().innerHTML).not.toContain("bg-amber-500");
+  });
+
+  it("0件は0と出し、未取得（null）なら何も出さない", () => {
+    renderSidebar({ all: 0 } as never, undefined, { ideasCount: 0 });
+    expect(ideasRow().textContent).toBe("構想0");
+
+    cleanup();
+    renderSidebar({ all: 0 } as never, undefined, { ideasCount: null });
+    expect(ideasRow().textContent).toBe("構想");
+  });
+});
 
 describe("SidebarNav 共通知識の反映PR（#3082）", () => {
   it("未マージの反映PRがあれば件数をオレンジの丸で出す", () => {
@@ -421,7 +444,7 @@ describe("SidebarNav", () => {
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 19)).toEqual([
+    expect(labels.slice(0, 18)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
@@ -432,7 +455,6 @@ describe("SidebarNav", () => {
       "共通知識",
       "AI使用量",
       "すべてのIssue",
-      "お気に入り",
       "未着手",
       "実行中",
       "本番反映待ち",

@@ -35,17 +35,17 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
   it("現在地が変わる操作（ビュー切替）は履歴を積む", () => {
     const { result } = renderFilters();
 
-    act(() => result.current.selectView("favorites"));
+    act(() => result.current.selectView("recently-added"));
 
     expect(push).toHaveBeenCalledTimes(1);
     expect(replace).not.toHaveBeenCalled();
-    expect(urlOf(push.mock.calls[0])).toContain("view=favorites");
+    expect(urlOf(push.mock.calls[0])).toContain("view=recently-added");
   });
 
   it("ビューを切り替えたら選択中Issueも同じ1回の更新で畳む", () => {
     const { result } = renderFilters("view=all&issue=123");
 
-    act(() => result.current.selectView("favorites"));
+    act(() => result.current.selectView("recently-added"));
 
     expect(push).toHaveBeenCalledTimes(1);
     expect(urlOf(push.mock.calls[0])).not.toContain("issue=");
@@ -97,7 +97,7 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
 
   it("ビュー・ペインを切り替えたら、重ねて開いていたPR詳細も畳む（#2149）", () => {
     const { result } = renderFilters("view=check-user&prmodal=owner%2Frepo%2312");
-    act(() => result.current.selectView("favorites"));
+    act(() => result.current.selectView("recently-added"));
     expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
 
     push.mockClear();
@@ -112,9 +112,9 @@ describe("useIssueFilters の履歴の積み方（#1396）", () => {
   });
 
   it("結果が今のURLと同じなら遷移しない（戻る操作が2回必要になるのを防ぐ）", () => {
-    const { result } = renderFilters("view=favorites");
+    const { result } = renderFilters("view=recently-added");
 
-    act(() => result.current.setFilter("view", "favorites"));
+    act(() => result.current.setFilter("view", "recently-added"));
 
     expect(push).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
