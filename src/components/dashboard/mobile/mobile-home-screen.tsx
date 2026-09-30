@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  BookOpen,
   CalendarClock,
   FolderGit2,
   Loader2,
@@ -43,7 +42,6 @@ import {
   isPullRequestViewAttention,
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
-import { describePromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import type { NavViewId, OverviewStat } from "@/types/issue";
@@ -93,12 +91,8 @@ type MobileHomeScreenProps = {
   nightlyRunQueuedCount: number | null;
   /** 構想の件数（#3639）。取得できていないときはnull */
   ideasCount?: number | null;
-  /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
-  onSelectKnowledge: () => void;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
-  /** 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じく行の件数と丸に使う */
-  knowledgePromotionCount?: number | null;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -186,9 +180,7 @@ export function MobileHomeScreenView({
   onSelectNightlyRun,
   nightlyRunQueuedCount,
   ideasCount = null,
-  onSelectKnowledge,
   onSelectIdeas = () => {},
-  knowledgePromotionCount = null,
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -521,21 +513,6 @@ export function MobileHomeScreenView({
                 onClick={onSelectIdeas}
                 count={ideasCount}
                 title="新規アプリの構想を確認・整理する"
-              />
-              <MobileNavRow
-                label="共通知識"
-                icon={BookOpen}
-                onClick={onSelectKnowledge}
-                count={
-                  knowledgePromotionCount && knowledgePromotionCount > 0
-                    ? knowledgePromotionCount
-                    : null
-                }
-                emphasis={(knowledgePromotionCount ?? 0) > 0 ? "attention" : "none"}
-                title={describePromotionPullRequests(
-                  "フリートの知見メモと、共有知識にたまった知見を見る",
-                  knowledgePromotionCount,
-                )}
               />
             </ul>
           </div>

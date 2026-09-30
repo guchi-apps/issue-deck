@@ -43,6 +43,8 @@ export const GITHUB_API_FEATURES = [
   // 共通知識画面（#2912）。**画面を開いたときだけ**消費し、結果は5分キャッシュする。
   // 1回につきGraphQLを最大4回（共有知識のファイル1回＋知見メモの検索3ページ）
   { key: "knowledge_board", label: "共通知識の取得" },
+  // 共通知識の反映PRの自動マージ（#3645）。間隔（既定10分）ごとにREST 1回＋反映PR1件につき1回。
+  { key: "knowledge_promotion_merge", label: "共通知識の反映PRの自動マージ" },
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },

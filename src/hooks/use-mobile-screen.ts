@@ -64,8 +64,6 @@ export type MobileScreen =
   | { kind: "release-history" }
   // 予約実行（#2995）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "nightly-run" }
-  // 共通知識（#2912）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
-  | { kind: "knowledge" }
   | { kind: "ideas" }
   | {
       kind: "repo-detail";
@@ -216,10 +214,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
       return { kind: "nightly-run" };
     }
 
-    if (screenParam === "knowledge") {
-      return { kind: "knowledge" };
-    }
-
     if (screenParam === "ideas") return { kind: "ideas" };
 
     return { kind: "home" };
@@ -246,7 +240,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           | "settings"
           | "preview"
           | "nightly-run"
-          | "knowledge"
           | "ideas";
         repo?: string | null;
         issue?: string | null;
@@ -410,7 +403,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
   const selectNightlyRun = useCallback(() => navigate({ screen: "nightly-run" }), [navigate]);
 
   // ホームのメニューから共通知識の画面へ遷移する（#2912）。確認環境と同じ形
-  const selectKnowledge = useCallback(() => navigate({ screen: "knowledge" }), [navigate]);
   const selectIdeas = useCallback(() => navigate({ screen: "ideas" }), [navigate]);
 
   const selectRepository = useCallback(
@@ -588,7 +580,6 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectSettings,
     selectPreview,
     selectNightlyRun,
-    selectKnowledge,
     selectIdeas,
     selectRepository,
     selectRepositoryByFullName,

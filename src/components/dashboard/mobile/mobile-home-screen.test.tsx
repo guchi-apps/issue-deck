@@ -129,7 +129,6 @@ function renderHome(
       onSelectPullRequests={() => {}}
       onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
-        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
       previewRunning={false}
       onSelectRepos={() => {}}
@@ -181,7 +180,6 @@ describe("MobileHomeScreen（#1690）", () => {
       // リリース履歴も#2811でフッターのタブ（「リリース」）へ移したので、ここには並ばない
       "予約実行",
       "構想",
-      "共通知識",
       // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
       "新規アプリを立ち上げる",
     ]);
@@ -238,7 +236,6 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(row.querySelector("span:last-child")?.className).not.toContain("bg-amber-500");
   });
 
-  // 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じ出し方
   it("構想の行に件数を出し、未取得なら出さない（#3639）", () => {
     renderHome({ ideasCount: 7 });
     expect(screen.getByRole("button", { name: /構想/ }).textContent).toBe("構想7");
@@ -246,25 +243,6 @@ describe("MobileHomeScreen（#1690）", () => {
     cleanup();
     renderHome({ ideasCount: null });
     expect(screen.getByRole("button", { name: /構想/ }).textContent).toBe("構想");
-  });
-
-  it("共通知識の行に、未マージの反映PRの件数をオレンジの丸で出す", () => {
-    renderHome({ knowledgePromotionCount: 2 });
-
-    const row = screen.getByRole("button", { name: /共通知識/ });
-    expect(row.textContent).toBe("共通知識2");
-    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
-  });
-
-  it("共通知識の反映PRが0件・未取得なら数字も丸も出さない", () => {
-    for (const count of [0, null]) {
-      cleanup();
-      renderHome({ knowledgePromotionCount: count });
-
-      const row = screen.getByRole("button", { name: /共通知識/ });
-      expect(row.textContent).toBe("共通知識");
-      expect(row.innerHTML).not.toContain("bg-amber-500");
-    }
   });
 
   it("「ユーザーの作業待ち」を強調するのは、いま実行できる手作業があるときだけ", () => {
@@ -294,7 +272,6 @@ describe("MobileHomeScreen（#1690）", () => {
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
-        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}
         onSelectRepos={() => {}}
@@ -529,7 +506,6 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
         onSelectPullRequests={() => {}}
         onSelectPreview={() => {}}
         onSelectNightlyRun={() => {}}
-        onSelectKnowledge={() => {}}
         nightlyRunQueuedCount={null}
         previewRunning={false}
         onSelectRepos={() => {}}

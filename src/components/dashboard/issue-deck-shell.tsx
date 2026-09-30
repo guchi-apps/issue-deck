@@ -45,11 +45,9 @@ import { PullRequestList } from "@/components/dashboard/pull-request-list";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { MobilePreviewScreen } from "@/components/dashboard/mobile/mobile-preview-screen";
 import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nightly-run-screen";
-import { MobileKnowledgeScreen } from "@/components/dashboard/mobile/mobile-knowledge-screen";
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
-import { KnowledgeBoardPanel } from "@/components/dashboard/knowledge-board-panel";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { useIdeasCount } from "@/hooks/use-ideas";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
@@ -62,7 +60,6 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useNightlyRun } from "@/hooks/use-nightly-run";
-import { useKnowledgeBoard } from "@/hooks/use-knowledge-board";
 import { useReleaseHistory } from "@/hooks/use-release-history";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -173,7 +170,6 @@ import {
   computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
-import { countOpenPromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
@@ -282,7 +278,6 @@ export function IssueDeckShell({
     selectUsagePane,
     selectReleaseHistoryPane,
     selectNightlyRunPane,
-    selectKnowledgePane,
     selectIdeasPane,
     selectPullRequest,
     selectPullRequestModal,
@@ -385,7 +380,6 @@ export function IssueDeckShell({
     selectSettings: selectMobileSettings,
     selectPreview,
     selectNightlyRun,
-    selectKnowledge,
     selectIdeas,
     selectRepository,
     selectRepositoryByFullName,
@@ -764,10 +758,6 @@ export function IssueDeckShell({
   // 「予約実行」画面（#2995）。開いている間は巡回の間隔で、閉じている間は左メニューの件数の
   // ためにゆっくり取り直す（フック側が間隔を切り替える）
   const isNightlyRunPaneActive = filters.pane === "nightly" || mobileScreen.kind === "nightly-run";
-  // 「共通知識」画面（#2912）。開いている間だけ取得する（材料が動くのは共有知識へのPRが
-  // マージされたときと、格上げ判定が走る毎日05:00 JSTだけ）。応答はサーバー側で5分キャッシュ
-  const isKnowledgePaneActive =
-    filters.pane === "knowledge" || mobileScreen.kind === "knowledge";
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「マージ待ち」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
@@ -1420,10 +1410,6 @@ export function IssueDeckShell({
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
   const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
-  // 共通知識（#2912）。取得はこの画面を開いている間だけ。母集団はフリート全リポジトリで、
-  // 非表示リポジトリの絞り込みは行わない——知見は「どのアプリで得たか」に関係なく共有知識へ
-  // 上がるもので、Issue一覧のように「開いた先に何も無い」が起きる並びではないため
-  const knowledgeBoard = useKnowledgeBoard(isKnowledgePaneActive);
   /**
    * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
    * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
@@ -1434,13 +1420,6 @@ export function IssueDeckShell({
   const nightlyRunQueued = useMemo(
     () => selectScheduledRunQueuedMarks(nightlyRun.state),
     [nightlyRun.state],
-  );
-  // 左メニュー「共通知識」の件数（#3082）。共通知識の反映PRは「マージ待ち」から外し（
-  // `filterPullRequestsByView`）、こちらで数える。母集団はリポジトリ絞り込みを掛けない集合
-  // （共通知識はリポジトリ横断の画面で、絞り込むと件数だけ消える）
-  const knowledgePromotionCount = useMemo(
-    () => countOpenPromotionPullRequests(crossRepositoryPullRequests, openPullRequests.fetchedAt !== null),
-    [crossRepositoryPullRequests, openPullRequests.fetchedAt],
   );
   // 左メニュー「構想」の件数（#3639）
   const { count: ideasCount, refresh: refreshIdeasCount } = useIdeasCount();
@@ -2092,9 +2071,7 @@ export function IssueDeckShell({
                   onSelectPreview={selectPreview}
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
-                  onSelectKnowledge={selectKnowledge}
                   onSelectIdeas={selectIdeas}
-                  knowledgePromotionCount={knowledgePromotionCount}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
                   onSelectRepos={selectRepos}
@@ -2133,16 +2110,6 @@ export function IssueDeckShell({
                   onToggleCheckedLine={releaseHistory.setReleaseLineChecked}
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
                   onOpenPullRequest={selectPullRequestModal}
-                />
-              )}
-
-              {mobileScreen.kind === "knowledge" && (
-                <MobileKnowledgeScreen
-                  data={knowledgeBoard.data}
-                  isLoading={knowledgeBoard.isLoading}
-                  error={knowledgeBoard.error}
-                  onRefresh={knowledgeBoard.refresh}
-                  onBack={goBack}
                 />
               )}
 
@@ -2463,9 +2430,7 @@ export function IssueDeckShell({
                 onSelectUsage={selectUsagePane}
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
-                onSelectKnowledge={selectKnowledgePane}
                 onSelectIdeas={selectIdeasPane}
-                knowledgePromotionCount={knowledgePromotionCount}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
@@ -2529,18 +2494,6 @@ export function IssueDeckShell({
                   onOpenIssue={(repositoryFullName, issueNumber) =>
                     openUsageIssue(repositoryFullName, issueNumber, null)
                   }
-                />
-              </div>
-            </div>
-          ) : filters.pane === "knowledge" ? (
-            /* PC: 共通知識（#2912）。「リリース履歴」と同じく中央〜右を1カラムで使う */
-            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-3xl">
-                <KnowledgeBoardPanel
-                  data={knowledgeBoard.data}
-                  isLoading={knowledgeBoard.isLoading}
-                  error={knowledgeBoard.error}
-                  onRefresh={knowledgeBoard.refresh}
                 />
               </div>
             </div>
