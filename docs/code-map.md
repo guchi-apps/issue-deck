@@ -4146,7 +4146,7 @@ pnpm test:unit   # vitestのみ
 積み上がった`develop`を見る場所が別に要るため
 （[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を確認環境で見る」）。
 
-- 押す口は画面のサイドメニュー「確認環境」（スマホはホームのメニュー）。組み立ては
+- 押す口だった画面のサイドメニュー「確認環境」（スマホはホームのメニュー）は**#3647で非表示**にしている（戻すときは`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`をtrueにする）。組み立ては
   [`lib/dispatch/preview-server.ts`](../src/lib/dispatch/preview-server.ts)、画面は
   [`dashboard/preview-panel.tsx`](../src/components/dashboard/preview-panel.tsx)（PC・スマホ共用）
 - 経路は**既存のディスパッチのまま**（`POST /api/dispatch`の`kind: preview` → `DispatchJob`の

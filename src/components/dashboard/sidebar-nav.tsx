@@ -42,6 +42,7 @@ import {
   sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
   sidebarQuestionNavViews,
+  PREVIEW_NAV_VISIBLE,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
@@ -492,7 +493,8 @@ export function SidebarNavView({
               title: signals.title,
             });
           })}
-          {navRow({
+          {PREVIEW_NAV_VISIBLE &&
+            navRow({
             key: "preview",
             label: "確認環境",
             icon: MonitorPlay,
