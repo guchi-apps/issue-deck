@@ -8,6 +8,7 @@ import {
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type { SessionQuestionRequestView } from "@/lib/dispatch/session-question-request";
+import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -169,6 +170,25 @@ describe("isCheckUserWaitingForAgent", () => {
       isCheckUserWaitingForAgent(makeIssue({ labels: [] }), {
         ...context({ pullRequests: [makePullRequest({ ciState: "pending" })] }),
       }),
+    ).toBe(false);
+  });
+
+  it("計画レビューの作成中は、計画の承認待ちがあっても実行中とみなす（#3625）", () => {
+    const planJob = {
+      repositoryFullName: REPO,
+      issueNumber: 100,
+      kind: "PLAN_REVIEW",
+      status: "RUNNING",
+      finishedAt: null,
+      createdAt: "2026-08-22T11:59:00.000Z",
+    } as unknown as DispatchJobView;
+    const plan = makeIssue({ labels: [label("00.check-user"), label("01.check-plan")] });
+    expect(isCheckUserWaitingForAgent(plan, context({ jobs: [planJob] }))).toBe(true);
+    expect(
+      isCheckUserWaitingForAgent(
+        plan,
+        context({ jobs: [{ ...planJob, status: "FAILED", finishedAt: "2026-08-22T11:00:00.000Z" }] }),
+      ),
     ).toBe(false);
   });
 

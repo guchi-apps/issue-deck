@@ -1,4 +1,9 @@
 import { findLinkedPullRequest } from "@/lib/check-user-notification";
+import {
+  findPlanReviewJobForIssue,
+  isPlanReviewJobCreating,
+  type DispatchJobView,
+} from "@/lib/dispatch/dispatch-job";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
 import {
   findPlanRequestForIssue,
@@ -69,6 +74,11 @@ export type CheckUserAgentContext = {
   planRequests?: readonly SessionPlanRequestView[];
   /** 質問への回答待ち（`useDispatchState`の`questionRequests`）。同上 */
   questionRequests?: readonly SessionQuestionRequestView[];
+  /**
+   * 起動・レビューのジョブ（`useDispatchState`の`jobs`）。計画レビューの作成中を見分けるのに使う
+   * （#3625）。未取得なら空配列でよい
+   */
+  jobs?: readonly DispatchJobView[];
   /** 現在時刻(epoch ms)。マウント前などで未取得(null)のときは報告の古さを見ない */
   now: number | null;
 };
@@ -109,6 +119,14 @@ export function isCheckUserWaitingForAgent(
   context: CheckUserAgentContext,
 ): boolean {
   if (!isApprovalPending(issue.labels)) return false;
+  // 計画レビューの作成中は、計画の承認待ちがあっても「人の番」にしない（#3625）。指摘が付くまでの
+  // 数分間は、待っていても押して進める操作が無い
+  const planReviewJob = findPlanReviewJobForIssue(
+    context.jobs ?? [],
+    issue.repositoryFullName,
+    issue.number,
+  );
+  if (isPlanReviewJobCreating(planReviewJob, new Date(context.now ?? Date.now()))) return true;
   // 画面から答えられる待ちがあるなら、セッションの様子によらず「人の番」（#2238）
   if (hasPendingSessionRequest(issue, context)) return false;
   const pullRequest = findLinkedPullRequest(context.pullRequests, issue);
