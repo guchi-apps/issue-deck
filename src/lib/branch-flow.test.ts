@@ -5,6 +5,7 @@ import {
   extractManualStepOrigin,
   formatUnreleasedSummary,
   hasChangesAfterReleaseFreeze,
+  splitLanesByReleaseFreeze,
   isClosedLane,
   isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
@@ -2280,5 +2281,21 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
 
   it("head=developの旧世代リリースPRではfalse", () => {
     expect(hasChangesAfterReleaseFreeze(unreleasedGroup(["2026-08-15T03:00:00Z"], "develop"))).toBe(false);
+  });
+
+  it("splitLanesByReleaseFreeze: 凍結後のレーンだけをafterFreezeへ分ける（#3664）", () => {
+    const { afterFreeze, included } = splitLanesByReleaseFreeze(
+      unreleasedGroup(["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"]),
+    );
+    expect(afterFreeze.map((lane) => lane.branchName)).toEqual(["issue-201"]);
+    expect(included.map((lane) => lane.branchName)).toEqual(["issue-200"]);
+  });
+
+  it("splitLanesByReleaseFreeze: head=developの旧世代リリースPRでは分けない", () => {
+    const { afterFreeze, included } = splitLanesByReleaseFreeze(
+      unreleasedGroup(["2026-08-15T03:00:00Z"], "develop"),
+    );
+    expect(afterFreeze).toEqual([]);
+    expect(included).toHaveLength(1);
   });
 });
