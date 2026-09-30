@@ -2030,9 +2030,9 @@ describe("未着手のIssueの件数（readyIssueCount。#3163）", () => {
     ).toBe(0);
   });
 
-  /** Projectへ載っていないリポジトリで、バックログ全件を未着手として数えない */
-  it("Project Statusが無いIssueは数えない", () => {
-    expect(readyCount([issue({ number: 1, projectStatus: null })])).toBe(0);
+  /** #3651: Issueとして登録済みなら、Projectへ未登録でも未着手として数える */
+  it("Project Statusが無いIssueも数える", () => {
+    expect(readyCount([issue({ number: 1, projectStatus: null })])).toBe(1);
   });
 
   /** 押した直後はStatusがReadyのまま。数えると押したのに未着手が減らない（#1347） */

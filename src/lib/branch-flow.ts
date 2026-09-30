@@ -726,8 +726,9 @@ function collectStartedIssues(
  *
  * 条件は左メニューの「未着手」ビュー（`not-started`）に揃えるが、**`00.check-user`は除かない**——
  * 保留にしているIssueも「待っている量」として見せるのがこの数字の目的。
- * - **Project Statusが無いIssueは数えない。** `resolveProgressStatus`は未登録を`ready`とみなす
- *   ため、盤面に載っていないリポジトリではバックログ全件が未着手に見えてしまう
+ * - **Project Statusが無いIssueも数える**（#3651）。`resolveProgressStatus`は未登録を`ready`と
+ *   みなす。Issueとして登録済みのものは、盤面へ載せる前でも未着手のバックログの一部なので、
+ *   セッションを起動したものだけでなく登録済みの量を出す
  * - **`dispatchPendingAt`が立っているIssueは数えない。** 押した直後はStatusが`Ready`のままで、
  *   数えると押したのに未着手が減らない（#1347）
  * - 手作業Issue・質問Issue・レビューIssueは実装するものではないので数えない
@@ -740,7 +741,6 @@ function countReadyIssues(
   return issues.filter(
     (issue) =>
       issue.state === "open" &&
-      issue.projectStatus != null &&
       !issue.dispatchPendingAt &&
       !isManualStepIssue(issue) &&
       !isAskRepoQuestionIssue(issue) &&
