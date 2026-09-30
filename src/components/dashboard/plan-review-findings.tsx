@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   buildPlanReviewDecisionRequestText,
+  type PlanReviewChoice,
   PLAN_REVIEW_REFLECT_REQUEST_TEXT,
 } from "@/lib/dispatch/session-plan-request";
 import type {
   ParsedPlanReview,
+  PlanReviewDecision,
   PlanReviewFinding,
   PlanReviewRecommendationKind,
 } from "@/lib/github/plan-review";
@@ -41,6 +43,7 @@ export function PlanReviewFindings({
   fallbackSubmitLabel,
   disabled = false,
   isSubmitting = false,
+  remainingMs,
   onSubmit,
 }: {
   review: ParsedPlanReview;
@@ -53,15 +56,20 @@ export function PlanReviewFindings({
   fallbackSubmitLabel: string;
   disabled?: boolean;
   isSubmitting?: boolean;
+  /** 計画待ちの残り時間（ミリ秒）。判断が残っている間だけ「あと◯分」を出す。無ければ出さない */
+  remainingMs?: number;
   onSubmit: (text: string) => void | Promise<void>;
 }) {
   // 番号ごとの判断。**無い番号は「反映する」**として扱う（既定を全件反映にするため）
   const [skipped, setSkipped] = useState<Record<number, boolean>>({});
   const [reasons, setReasons] = useState<Record<number, string>>({});
   const [isBodyOpen, setIsBodyOpen] = useState(false);
+  // 判断ごとの選択（#3660）。**無い番号は未選択**で、全件選ぶまで送れない（指摘と違い既定を持たない）
+  const [choices, setChoices] = useState<Record<number, string>>({});
 
-  const { findings } = review;
-  const hasFindings = findings.length > 0;
+  const { findings, decisions } = review;
+  const hasFindings = findings.length > 0 || decisions.length > 0;
+  const undecidedCount = decisions.filter((decision) => choices[decision.number] === undefined).length;
   const skipCount = findings.filter((finding) => skipped[finding.number]).length;
   const applyCount = findings.length - skipCount;
 
@@ -74,9 +82,25 @@ export function PlanReviewFindings({
           decision: skipped[finding.number] ? "skip" : "apply",
           reason: skipped[finding.number] ? reasons[finding.number] : undefined,
         })),
+        decisions.map((decision): PlanReviewChoice => {
+          const letter = choices[decision.number];
+          const option = decision.options.find((item) => item.letter === letter);
+          return option
+            ? { number: decision.number, title: decision.title, letter: option.letter, label: option.label }
+            : { number: decision.number, title: decision.title, letter: null };
+        }),
       ),
     );
   }
+
+  // 指摘を全件見送って判断も無いなら、出し直させる材料が無い（従来どおり）
+  const canSubmit = undecidedCount === 0 && (applyCount > 0 || decisions.length > 0);
+  const footerMessage =
+    undecidedCount > 0
+      ? `判断があと${undecidedCount}件残っています${remainingMs !== undefined ? `（計画待ちはあと${formatRemaining(remainingMs)}）` : ""}。`
+      : applyCount === 0 && decisions.length === 0
+        ? "すべて見送る場合は、この計画のまま承認してください。"
+        : `${decisions.length > 0 ? `判断 ${decisions.length}件・` : ""}反映 ${applyCount}件・見送り ${skipCount}件${skipCount > 0 ? "。見送る理由も一緒に送ります" : ""}`;
 
   return (
     <section className="overflow-hidden rounded-md border bg-card" aria-label="計画レビュー">
@@ -85,6 +109,18 @@ export function PlanReviewFindings({
         <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
           {hasFindings ? `指摘 ${findings.length}件` : review.noFindings ? "指摘なし" : "本文のみ"}
         </span>
+        {decisions.length > 0 && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              undecidedCount > 0
+                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+            )}
+          >
+            {undecidedCount > 0 ? `要判断 ${undecidedCount}件` : "判断 済"}
+          </span>
+        )}
         {reviewedAtLabel && (
           <span className="ml-auto text-[11px] text-muted-foreground">{reviewedAtLabel}</span>
         )}
@@ -117,6 +153,29 @@ export function PlanReviewFindings({
               />
             </div>
           )}
+          {decisions.length > 0 && (
+            <>
+              <h5 className="border-y border-amber-500/50 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold tracking-wide text-amber-700 dark:text-amber-400">
+                あなたの判断が必要（{decisions.length}件）
+              </h5>
+              <ol className="divide-y">
+                {decisions.map((decision) => (
+                  <DecisionItem
+                    key={decision.number}
+                    decision={decision}
+                    choice={choices[decision.number]}
+                    repositoryFullName={repositoryFullName}
+                    onChoose={(letter) => setChoices((prev) => ({ ...prev, [decision.number]: letter }))}
+                  />
+                ))}
+              </ol>
+            </>
+          )}
+          {findings.length > 0 && decisions.length > 0 && (
+            <h5 className="border-y bg-muted/60 px-3 py-1.5 text-[11px] font-bold tracking-wide text-muted-foreground">
+              指摘（レビューが根拠付きで判断した点）
+            </h5>
+          )}
           <ol className="divide-y">
             {findings.map((finding) => (
               <FindingItem
@@ -136,17 +195,16 @@ export function PlanReviewFindings({
           </ol>
           <footer className="flex flex-col gap-2 border-t bg-muted/50 px-3 py-2 sm:flex-row sm:items-center">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {applyCount === 0
-                ? "すべて見送る場合は、この計画のまま承認してください。"
-                : `反映 ${applyCount}件・見送り ${skipCount}件${skipCount > 0 ? "。見送る理由も一緒に送ります" : ""}`}
+              {footerMessage}
             </p>
             <Button
               size="sm"
-              disabled={disabled || isSubmitting || applyCount === 0}
+              className="h-11 md:h-8"
+              disabled={disabled || isSubmitting || !canSubmit}
               onClick={submitDecisions}
             >
               {isSubmitting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-              {submitLabel}
+              {decisions.length > 0 ? submitLabel.replace("選んだ指摘", "選んだ内容") : submitLabel}
             </Button>
           </footer>
         </>
@@ -195,6 +253,14 @@ export function PlanReviewFindings({
       )}
     </section>
   );
+}
+
+/** 残り時間の表示。1分未満は「1分未満」 */
+function formatRemaining(ms: number): string {
+  const minutes = Math.ceil(ms / 60_000);
+  if (minutes <= 0) return "1分未満";
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}時間${minutes % 60 > 0 ? `${minutes % 60}分` : ""}`;
+  return `${minutes}分`;
 }
 
 const RECOMMENDATION_TONE: Readonly<Record<PlanReviewRecommendationKind, string>> = {
@@ -331,6 +397,104 @@ function FindingItem({
     </li>
   );
 }
+
+/**
+ * 人が決める判断1件（#3660）。選択肢を押しボタンで並べ、レビューの推奨は印だけ付ける
+ * （**初期は何も選ばれていない**。推奨を既定にすると、読まずに送れてしまう）。
+ * 迷うときは「セッションに任せる」を選べる。
+ */
+function DecisionItem({
+  decision,
+  choice,
+  repositoryFullName,
+  onChoose,
+}: {
+  decision: PlanReviewDecision;
+  choice: string | undefined;
+  repositoryFullName?: string;
+  onChoose: (letter: string) => void;
+}) {
+  return (
+    <li className="flex flex-col gap-2 px-3 py-3" aria-label={`判断${decision.number}`}>
+      <p className="flex gap-2 text-sm font-bold">
+        <span className="mt-0.5 h-fit shrink-0 rounded bg-amber-500/15 px-1.5 font-mono text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+          判断{decision.number}
+        </span>
+        <span className="min-w-0">{decision.title}</span>
+      </p>
+      {decision.question && (
+        <MarkdownBody
+          content={decision.question}
+          className="text-xs text-muted-foreground"
+          repositoryFullName={repositoryFullName}
+        />
+      )}
+      <div
+        role="group"
+        aria-label={`判断${decision.number}の選択肢`}
+        className="grid gap-2 sm:grid-cols-[repeat(auto-fit,minmax(13rem,1fr))]"
+      >
+        {decision.options.map((option) => {
+          const selected = choice === option.letter;
+          return (
+            <button
+              key={option.letter}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChoose(option.letter)}
+              className={cn(
+                "flex min-h-14 flex-col gap-0.5 rounded-md border-[1.5px] px-2.5 py-2 text-left text-xs md:min-h-11",
+                selected
+                  ? "border-primary bg-blue-500/10 ring-1 ring-primary"
+                  : "bg-background hover:border-muted-foreground",
+              )}
+            >
+              <span className="flex items-center gap-1.5 text-[13px] font-semibold">
+                <span
+                  aria-hidden
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border-[1.5px]",
+                    selected ? "border-primary" : "border-muted-foreground",
+                  )}
+                >
+                  {selected && <span className="size-2 rounded-full bg-primary" />}
+                </span>
+                <span className="min-w-0">
+                  {option.letter}. {option.label}
+                </span>
+                {option.recommended && (
+                  <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                    レビュー推奨
+                  </span>
+                )}
+              </span>
+              {option.description && (
+                <span className="pl-[22px] text-muted-foreground">{option.description}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <button
+          type="button"
+          aria-pressed={choice === DELEGATE}
+          onClick={() => onChoose(DELEGATE)}
+          className={cn(
+            "min-h-8 rounded-md border border-dashed px-2.5",
+            choice === DELEGATE ? "border-solid border-primary bg-blue-500/10 text-foreground" : "hover:bg-muted",
+          )}
+        >
+          セッションに任せる
+        </button>
+        <span>迷うときはこちら。セッションが決めて理由を添えます</span>
+      </div>
+    </li>
+  );
+}
+
+/** 「セッションに任せる」の選択値。選択肢の記号（A〜Z）とは重ならない */
+const DELEGATE = "_delegate";
 
 function FindingField({
   label,

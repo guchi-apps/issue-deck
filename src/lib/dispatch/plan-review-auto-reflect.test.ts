@@ -93,6 +93,15 @@ describe("autoReflectPlanReview", () => {
     expect(decide).not.toHaveBeenCalled();
   });
 
+  it("人が決める判断を含むレビューは反映しない（#3660）", async () => {
+    const withDecision = `${WITH_FINDINGS}\n\n**判断1. どちらにするか**\n\n- **論点**: 方針\n- **選択肢**:\n  - A. 案A\n  - B. 案B\n- **推奨**: A\n`;
+    expect(await autoReflectPlanReview(params(withDecision))).toEqual({
+      reflected: false,
+      reason: "has_decisions",
+    });
+    expect(decide).not.toHaveBeenCalled();
+  });
+
   it("レビュー以外のコメントは何もしない", async () => {
     expect(await autoReflectPlanReview(params("ふつうのコメント"))).toEqual({
       reflected: false,

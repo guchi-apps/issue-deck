@@ -843,6 +843,13 @@ model DispatchJob {
   claimedAt          DateTime?
   startedAt          DateTime?
   finishedAt         DateTime?
+  // 計画レビュー（G1）の指摘コメントが届いた時刻（#3659。`kind`が`PLAN_REVIEW`のときだけ入る）。
+  //
+  // **`SUCCEEDED`はレビューのセッションが立った時点で、指摘の投稿はその数分後。** Issue一覧は
+  // コメント本文を持たないため、これが無いと`finishedAt`からの猶予（6分）が切れるまで、
+  // 指摘が届いた後も「計画レビュー作成中」のままになる。GitHubのWebhookで
+  // `supervisor:plan-review`コメントを受けた時点で埋める（`plan-review-posted.ts`）。
+  reviewPostedAt     DateTime?
   // RUNNING中の生存報告。途絶えたらTIMEOUTへ落とす
   heartbeatAt        DateTime?
   // 起動したtmuxセッション名。実行ログを見る唯一の手掛かり（`tmux attach -t <名前>`）で、

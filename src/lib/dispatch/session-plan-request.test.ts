@@ -278,4 +278,28 @@ describe("buildPlanReviewDecisionRequestText（#3554）", () => {
     ]);
     expect(text).toContain(`- 2. ${title}（理由: ${reason}）`);
   });
+
+  it("判断の選択を「判断:」の節に載せ、任せるも書く（#3660）", () => {
+    const text = buildPlanReviewDecisionRequestText(
+      [{ number: 1, title: "指摘", decision: "apply" }],
+      [
+        { number: 1, title: "書式をどうするか", letter: "A", label: "専用の判断見出し" },
+        { number: 2, title: "範囲", letter: null },
+      ],
+    );
+    expect(text).toContain("判断:\n- 判断1. 書式をどうするか → A. 専用の判断見出し\n- 判断2. 範囲 → セッションに任せる");
+    expect(parseSessionPlanRevision(text)).toBe(text);
+  });
+
+  it("指摘が無く判断だけでも、指摘の節を出さず上限内に収まる（#3660）", () => {
+    const choices = Array.from({ length: 20 }, (_, i) => ({
+      number: i + 1,
+      title: "長い見出し".repeat(40),
+      letter: "B",
+      label: "長い選択肢".repeat(40),
+    }));
+    const text = buildPlanReviewDecisionRequestText([], choices);
+    expect(text).not.toContain("反映する:");
+    expect(text.length).toBeLessThanOrEqual(SESSION_PLAN_REVISION_MAX_LENGTH);
+  });
 });

@@ -142,3 +142,55 @@ describe("parsePlanReview", () => {
     });
   });
 });
+
+describe("parsePlanReview の判断（#3660）", () => {
+  it("指摘の後ろの判断を、選択肢と推奨つきで読み、直前の指摘に混ぜない", () => {
+    const review = parsePlanReview(fixture("plan-review-with-decisions.md"));
+    expect(review.findings).toHaveLength(1);
+    expect(review.findings[0].proposal).toBe("見出しだけを載せる。");
+    expect(review.findings[0].rest).toBeNull();
+    expect(review.decisions).toHaveLength(2);
+
+    const [first, second] = review.decisions;
+    expect(first.number).toBe(1);
+    expect(first.question).toContain("互換性か分かりやすさか");
+    expect(first.options.map((o) => o.letter)).toEqual(["A", "B"]);
+    expect(first.options[0]).toMatchObject({
+      label: "専用の「判断」見出し",
+      description: "旧レビューは指摘だけで読める",
+      recommended: true,
+    });
+    expect(first.options[1].recommended).toBe(false);
+    // 推奨の行が無くても、選択肢の「（推奨）」印を拾う
+    expect(second.options.map((o) => o.recommended)).toEqual([true, false, false]);
+    expect(second.options[0].label).toBe("計画レビューだけ");
+    expect(review.recommendation?.kind).toBe("revise");
+  });
+
+  it("判断だけで指摘が無いレビューは「指摘なし」ではない", () => {
+    const body = [
+      "## 計画レビュー（G1）",
+      "指摘なし。",
+      "**判断1. どちらか**",
+      "- **選択肢**:",
+      "  - A. 案A",
+      "  - B. 案B",
+    ].join("\n");
+    const review = parsePlanReview(body);
+    expect(review.findings).toEqual([]);
+    expect(review.decisions).toHaveLength(1);
+    expect(review.noFindings).toBe(false);
+  });
+
+  it("選択肢が2つ読めない判断は選べないので、指摘として本文を残す", () => {
+    const review = parsePlanReview(["**判断1. 何か**", "- **論点**: 選択肢の書式が崩れた"].join("\n"));
+    expect(review.decisions).toEqual([]);
+    expect(review.findings).toHaveLength(1);
+    expect(review.findings[0].title).toBe("何か");
+  });
+
+  it("判断が無い旧書式のレビューは decisions が空", () => {
+    expect(parsePlanReview(fixture("plan-review-three-findings.md")).decisions).toEqual([]);
+  });
+});
+

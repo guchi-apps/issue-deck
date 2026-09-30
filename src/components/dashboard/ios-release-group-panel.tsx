@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, Smartphone } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, Smartphone } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
-import { RunRow } from "@/components/dashboard/ios-testflight-status";
+import { IosRunProgressPanel } from "@/components/dashboard/ios-run-progress-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +28,9 @@ const DISPATCH_ERROR: Record<IosDispatchBlock | string, string> = {
   ios_workflow_missing: "このリポジトリにはiOS配布のワークフローがありません。",
 };
 
+/** 内訳の自動更新の間隔（#3665） */
+const AUTO_REFRESH_MS = 10_000;
+
 /** 起動直後にrunが一覧へ現れるまで待つ上限（ミリ秒）。この間はボタンを押せなくする */
 const LAUNCH_WAIT_MS = 60_000;
 
@@ -46,13 +49,26 @@ export function IosReleaseGroupPanel({
   prNumber: number;
   version: string | null;
 }) {
-  const { data, error, isLoading, refresh } = useIosTestflight(owner, repo, true, prNumber);
+  // null=自動（実行中・失敗のときだけ開く）。人が開閉したらその値を優先する
+  const [detailToggle, setDetailToggle] = useState<boolean | null>(null);
+  const [tipKnown, setTipKnown] = useState<boolean | null>(null);
+  const { data, error, isLoading, refresh, lastFetchedAt } = useIosTestflight(owner, repo, true, prNumber, {
+    pollIntervalMs: AUTO_REFRESH_MS,
+    pollWhileActive: detailToggle === true,
+    // 過去の版（mainの先端でない束）は追わない
+    pollPaused: tipKnown === false,
+  });
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [launchedAt, setLaunchedAt] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const release = data?.available ? data.release : undefined;
+  const isMainTip = release?.isMainTip ?? null;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTipKnown(isMainTip);
+  }, [isMainTip]);
   const hasRun = data?.available === true && data.runs.some((run) => run.status !== "completed");
 
   // 起動直後はrunが一覧に出るまで数秒かかる。出るか上限に達するまで取り直し、その間は再起動できない
@@ -144,13 +160,17 @@ export function IosReleaseGroupPanel({
       label = <span>iOS未配布（更新の要否は起動後に判定されます）</span>;
   }
 
-  // 段階の内訳は、実行中と失敗のときだけ出す（更新不要・配布済みには不要）
+  // 内訳に出す実行。実行中があればそれ、失敗ならその版の失敗した実行、それ以外は直近の実行
   const detailRun =
-    state.kind === "running"
+    (state.kind === "running"
       ? data.runs.find((run) => run.status !== "completed")
       : state.kind === "failed"
         ? data.runs.find((run) => run.headSha === sha)
-        : undefined;
+        : undefined) ?? latestRun;
+  const autoOpen = state.kind === "running" || state.kind === "failed";
+  const detailOpen = detailToggle ?? autoOpen;
+  // 内訳を開いている、または実行中のrunがあるあいだだけ自動更新する（フック側の条件と同じ）
+  const autoRefreshing = tipKnown !== false && (detailOpen || data.runs.some((run) => run.status !== "completed"));
 
   return (
     <div className="mt-1 flex max-w-2xl flex-col gap-1 rounded border border-dashed px-2 py-1.5 text-xs">
@@ -164,6 +184,22 @@ export function IosReleaseGroupPanel({
             {state.kind === "failed" ? "再実行" : "iOSへ配布"}
           </Button>
         )}
+        {detailRun && (
+          <button
+            type="button"
+            onClick={() => setDetailToggle(!detailOpen)}
+            aria-expanded={detailOpen}
+            className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
+            title={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+            aria-label={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+          >
+            {detailOpen ? (
+              <ChevronDown className="size-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="size-3.5" aria-hidden="true" />
+            )}
+          </button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -176,7 +212,13 @@ export function IosReleaseGroupPanel({
         </Button>
       </div>
       {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
-      {detailRun && <RunRow run={detailRun} />}
+      {detailRun && detailOpen && (
+        <IosRunProgressPanel
+          run={detailRun}
+          lastFetchedAt={lastFetchedAt}
+          autoRefreshLabel={autoRefreshing ? `自動更新中（${AUTO_REFRESH_MS / 1000}秒）` : undefined}
+        />
+      )}
       {state.kind === "not-needed" && latestRun && (
         <GithubReferenceLink href={latestRun.htmlUrl} className="self-start underline underline-offset-2">
           判定の詳細を開く

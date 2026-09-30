@@ -62,10 +62,33 @@ export type PlanReviewFinding = {
   rest: string | null;
 };
 
+/** 判断の選択肢1つ。`letter`は`A`〜、`label`は1行の題、`description`は題の後ろの補足 */
+export type PlanReviewDecisionOption = {
+  letter: string;
+  label: string;
+  description: string | null;
+  /** レビューが推奨している選択肢か */
+  recommended: boolean;
+};
+
+/**
+ * 計画レビューが「人が決めるべき論点」として書いた判断1件（#3660）。プロンプトは`**判断N. 見出し**`で
+ * 始め、`- **論点**`・`- **選択肢**`（入れ子の`A. …`）・`- **推奨**`を書かせる。
+ * **選択肢が2つ未満なら選べないので判断として扱わず、指摘の本文へ残す**（`parsePlanReview`）。
+ */
+export type PlanReviewDecision = {
+  number: number;
+  title: string;
+  question: string | null;
+  options: PlanReviewDecisionOption[];
+};
+
 export type ParsedPlanReview = {
   /** 最初の指摘より前の段落（前提の確認など）。無ければnull */
   summary: string | null;
   findings: PlanReviewFinding[];
+  /** 人が選ぶ判断（#3660）。判断の書式が無い旧レビューでは空 */
+  decisions: PlanReviewDecision[];
   /** 「指摘なし」と書かれていて、指摘の見出しも無い */
   noFindings: boolean;
   recommendation: PlanReviewRecommendation | null;
@@ -89,6 +112,16 @@ const DROPPED_LINE_PATTERNS = [
  */
 const FINDING_HEADING_PATTERN =
   /^\s{0,3}(?:\*\*\s*(\d+)\s*[.．)）]\s*(.+?)\s*\*\*\s*$|#{2,6}\s*(\d+)\s*[.．)）]\s*(.+?)\s*$)/;
+
+/** 判断の見出し。`**判断1. 見出し**`か`### 判断1. 見出し`（指摘の見出しと番号が別なので`判断`の語で見分ける） */
+const DECISION_HEADING_PATTERN =
+  /^\s{0,3}(?:\*\*\s*判断\s*(\d+)\s*[.．)）:：]\s*(.+?)\s*\*\*\s*$|#{2,6}\s*判断\s*(\d+)\s*[.．)）:：]\s*(.+?)\s*$)/;
+
+/** 判断の下の3項目 */
+const DECISION_FIELD_PATTERN = /^[-*]\s+\*\*(論点|選択肢|推奨)\*\*\s*(?:[:：]|—|-)?\s*(.*)$/;
+
+/** 選択肢の行。`- A. 題 — 補足`・`A) 題`のどちらも受ける */
+const DECISION_OPTION_PATTERN = /^\s*(?:[-*]\s+)?([A-Z])\s*[.．)）]\s*(.+?)\s*$/;
 
 /** 末尾1行の推奨。`**推奨**:`のように強調されていても拾う */
 const RECOMMENDATION_PATTERN = /^\s*(?:\*\*)?推奨(?:\*\*)?\s*[:：]\s*(.+?)\s*$/;
@@ -169,8 +202,53 @@ function parseFinding(number: number, title: string, lines: readonly string[]): 
   };
 }
 
+function parseDecision(
+  number: number,
+  title: string,
+  lines: readonly string[],
+): PlanReviewDecision | null {
+  const question: string[] = [];
+  const optionLines: string[] = [];
+  let recommendedLetter: string | null = null;
+  let current: string[] | null = null;
+  for (const line of lines) {
+    const field = DECISION_FIELD_PATTERN.exec(line);
+    if (field) {
+      if (field[1] === "論点") current = question;
+      else if (field[1] === "選択肢") current = optionLines;
+      else {
+        current = null;
+        recommendedLetter = /^\s*([A-Z])(?![A-Za-z])/.exec(field[2])?.[1] ?? null;
+      }
+      if (current && field[2].trim() !== "") current.push(field[2]);
+      continue;
+    }
+    if (current) current.push(line);
+  }
+
+  const options: PlanReviewDecisionOption[] = [];
+  for (const line of optionLines) {
+    const match = DECISION_OPTION_PATTERN.exec(line);
+    if (!match) continue;
+    const marked = /[（(]\s*推奨\s*[）)]/.test(match[2]);
+    const text = match[2].replace(/[（(]\s*推奨\s*[）)]/, "").trim();
+    const [label, ...rest] = text.split(/\s+[—―]\s+|\s*[:：]\s+/);
+    options.push({
+      letter: match[1],
+      label: label.trim(),
+      description: rest.join(" — ").trim() || null,
+      recommended: marked,
+    });
+  }
+  if (options.length < 2) return null;
+  if (recommendedLetter) {
+    for (const option of options) option.recommended = option.recommended || option.letter === recommendedLetter;
+  }
+  return { number, title, question: tidy(question), options };
+}
+
 /**
- * 計画レビューのコメント本文を、推奨・前置き・指摘に分ける（#3554）。
+ * 計画レビューのコメント本文を、推奨・前置き・指摘・判断に分ける（#3554）。
  *
  * **分けられなくても何も落とさない。** 指摘の見出しが1つも読めず「指摘なし」でもなければ、
  * `findings`を空にして`body`をそのまま出させる（画面は従来どおりの一括反映に戻る）。
@@ -195,27 +273,53 @@ export function parsePlanReview(rawBody: string): ParsedPlanReview {
   const body = tidy(lines) ?? "";
   const summary: string[] = [];
   const findings: PlanReviewFinding[] = [];
-  let current: { number: number; title: string; lines: string[] } | null = null;
+  const decisions: PlanReviewDecision[] = [];
+  type Block = { kind: "finding" | "decision"; number: number; title: string; lines: string[] };
+  let current: Block | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    if (current.kind === "finding") {
+      findings.push(parseFinding(current.number, current.title, current.lines));
+    } else {
+      const decision = parseDecision(current.number, current.title, current.lines);
+      // 選択肢が読めない判断は選べないので、指摘として本文を残す（何も落とさない）
+      if (decision) decisions.push(decision);
+      else findings.push(parseFinding(current.number, current.title, current.lines));
+    }
+    current = null;
+  };
 
   for (const line of lines) {
-    const heading = FINDING_HEADING_PATTERN.exec(line);
-    if (heading) {
-      if (current) findings.push(parseFinding(current.number, current.title, current.lines));
-      current = {
-        number: Number(heading[1] ?? heading[3]),
-        title: (heading[2] ?? heading[4]).trim(),
-        lines: [],
-      };
+    const decisionHeading = DECISION_HEADING_PATTERN.exec(line);
+    const heading = decisionHeading ? null : FINDING_HEADING_PATTERN.exec(line);
+    if (decisionHeading || heading) {
+      flush();
+      current = decisionHeading
+        ? {
+            kind: "decision",
+            number: Number(decisionHeading[1] ?? decisionHeading[3]),
+            title: (decisionHeading[2] ?? decisionHeading[4]).trim(),
+            lines: [],
+          }
+        : {
+            kind: "finding",
+            number: Number(heading![1] ?? heading![3]),
+            title: (heading![2] ?? heading![4]).trim(),
+            lines: [],
+          };
       continue;
     }
     (current ? current.lines : summary).push(line);
   }
-  if (current) findings.push(parseFinding(current.number, current.title, current.lines));
+  flush();
 
+  const hasItems = findings.length > 0 || decisions.length > 0;
   return {
-    summary: findings.length > 0 ? tidy(summary) : null,
+    summary: hasItems ? tidy(summary) : null,
     findings,
-    noFindings: findings.length === 0 && NO_FINDINGS_PATTERN.test(body),
+    decisions,
+    noFindings: !hasItems && NO_FINDINGS_PATTERN.test(body),
     recommendation,
     body,
   };

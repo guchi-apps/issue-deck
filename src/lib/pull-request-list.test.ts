@@ -17,6 +17,8 @@ import {
   pullRequestsCountedAsCheckUser,
   pullRequestsWaitingForMergeChecks,
   checkUserIssueKeys,
+  isIssueAwaitingMerge,
+  mergePendingIssueKeys,
   isLinkedIssueListed,
   splitSnoozedPullRequests,
   requiresUserMerge,
@@ -578,6 +580,42 @@ describe("pullRequestsCountedAsCheckUser", () => {
     );
 
     expect(result.map((pr) => pr.number)).toEqual([5]);
+  });
+});
+
+describe("mergePendingIssueKeys（#3650）", () => {
+  // スマホは確認待ちからマージ待ちを外す。外す対象は「いまユーザーのマージを待っているPR」の対応Issueだけ
+  it("ユーザーのマージを待っているPRの対応Issueだけを引ける形にする", () => {
+    const keys = mergePendingIssueKeys([
+      pullRequest({ number: 101, linkedIssueNumber: 1590, linkedIssueCheckReason: "merge" }),
+      // 自動マージが有効なPRは待てば入るので対象外
+      pullRequest({
+        number: 102,
+        linkedIssueNumber: 1600,
+        linkedIssueCheckReason: "merge",
+        autoMergeEnabled: true,
+      }),
+      // 対応Issueが無い（リリースPRなど）
+      releasePullRequest({ number: 100 }),
+    ]);
+
+    expect(isIssueAwaitingMerge({ repositoryFullName: "guchi-apps/issue-deck", number: 1590 }, keys)).toBe(true);
+    expect(isIssueAwaitingMerge({ repositoryFullName: "guchi-apps/issue-deck", number: 1600 }, keys)).toBe(false);
+  });
+
+  // 判定より先にマージされた「事後の確認」は開いているPRが無いので、外さず確認待ちに残す
+  it("マージ済みPRの対応Issueは含めない", () => {
+    const keys = mergePendingIssueKeys([
+      pullRequest({
+        number: 103,
+        linkedIssueNumber: 1700,
+        linkedIssueCheckReason: "merge",
+        state: "closed",
+        merged: true,
+      }),
+    ]);
+
+    expect(keys.size).toBe(0);
   });
 });
 
