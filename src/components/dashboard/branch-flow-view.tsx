@@ -46,7 +46,9 @@ import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
+import { IosReleaseGroupPanel } from "@/components/dashboard/ios-release-group-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
 import {
@@ -934,6 +936,7 @@ function ReleaseGroupHeader({
   const deployRunId = group.deploy?.runId ?? null;
   const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
+  const webviewIos = getWebviewIosRepository(repositoryFullName);
   // `main`へ直接マージされた作業の束（#2911）。**版もリリースPRも持たない**ので、
   // 「v◯」とも「リリース済み」とも言えず、デプロイの状態も判定できない
   // （`group.deploy`は常にnull）。見出しと日付の文言だけを別にする。
@@ -1081,6 +1084,16 @@ function ReleaseGroupHeader({
         {/* 未反映の束には、マージの代わりにMacで打つコマンドを出す（#3468） */}
         {deviceBuild && !released && (
           <DeviceBuildInstructions deviceBuild={deviceBuild} buildTargetOid={deviceBuild.buildTargetOid} />
+        )}
+
+        {/* kurashioのiOS TestFlight配布（#3644）。Webのデプロイとは別の行で、iOSの成否を混ぜない */}
+        {webviewIos && released && group.pullRequest?.merged && (
+          <IosReleaseGroupPanel
+            owner={repositoryFullName.split("/")[0]}
+            repo={repositoryFullName.split("/")[1]}
+            prNumber={group.pullRequest.number}
+            version={group.version}
+          />
         )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}

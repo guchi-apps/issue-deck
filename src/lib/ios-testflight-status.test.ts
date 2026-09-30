@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildNumberFromTag,
+  checkIosDispatchable,
+  deliveredBuildForSha,
+  judgeIosReleasePanel,
+  toWebDeployState,
   judgeIosRun,
   latestDeliveredBuild,
   summarizeIosStages,
   toStageState,
+  type IosReleasePanelInput,
 } from "@/lib/ios-testflight-status";
 
 const job = (name: string, conclusion: string | null, steps: { name: string; conclusion: string | null }[] = []) => ({
@@ -83,5 +88,89 @@ describe("タグ", () => {
       buildNumber: 10,
     });
     expect(latestDeliveredBuild([])).toBeNull();
+  });
+});
+
+describe("deliveredBuildForSha（タグが指すコミットから配布済みを引く）", () => {
+  const refs = [
+    { ref: "refs/tags/ios-testflight/201", sha: "aaa" },
+    { ref: "refs/tags/ios-testflight/305", sha: "bbb" },
+    { ref: "refs/tags/ios-testflight/306", sha: "aaa" },
+    { ref: "refs/tags/ios-testflight/x", sha: "aaa" },
+  ];
+  it("一致するコミットの最大のビルド番号を返す", () => {
+    expect(deliveredBuildForSha(refs, "aaa")).toBe(306);
+    expect(deliveredBuildForSha(refs, "bbb")).toBe(305);
+  });
+  it("タグが無いコミットはnull", () => {
+    expect(deliveredBuildForSha(refs, "ccc")).toBeNull();
+  });
+});
+
+describe("judgeIosReleasePanel", () => {
+  const base = { webDeploy: "success", isMainTip: true, deliveredBuild: null, runs: [], sha: "aaa" } as const;
+  const run = (over: Partial<IosReleasePanelInput["runs"][number]>): IosReleasePanelInput["runs"][number] => ({
+    status: "completed",
+    headSha: "aaa",
+    verdict: { kind: "unknown" },
+    stages: [],
+    ...over,
+  });
+
+  it("配布済みはタグで決まり、古い束でも出る", () => {
+    expect(judgeIosReleasePanel({ ...base, isMainTip: false, deliveredBuild: 12 })).toEqual({
+      kind: "delivered",
+      buildNumber: 12,
+    });
+  });
+  it("Webのデプロイが済むまでは操作できない（失敗はfailed=true）", () => {
+    expect(judgeIosReleasePanel({ ...base, webDeploy: "pending" })).toEqual({ kind: "awaiting-web", failed: false });
+    expect(judgeIosReleasePanel({ ...base, webDeploy: "failed" })).toEqual({ kind: "awaiting-web", failed: true });
+  });
+  it("mainの先端でない束は操作できない", () => {
+    expect(judgeIosReleasePanel({ ...base, isMainTip: false })).toEqual({ kind: "stale" });
+  });
+  it("実行中のrunがあれば配布中", () => {
+    const state = judgeIosReleasePanel({
+      ...base,
+      runs: [run({ status: "in_progress", verdict: { kind: "running" } })],
+    });
+    expect(state.kind).toBe("running");
+  });
+  it("更新不要は失敗ではない", () => {
+    expect(judgeIosReleasePanel({ ...base, runs: [run({ verdict: { kind: "skipped" } })] })).toEqual({
+      kind: "not-needed",
+    });
+  });
+  it("失敗は失敗段階つき。別コミットのrunは対象外", () => {
+    expect(
+      judgeIosReleasePanel({ ...base, runs: [run({ verdict: { kind: "failed", failedStage: "署名" } })] }),
+    ).toEqual({ kind: "failed", failedStage: "署名" });
+    expect(
+      judgeIosReleasePanel({ ...base, runs: [run({ headSha: "zzz", verdict: { kind: "failed", failedStage: "署名" } })] }),
+    ).toEqual({ kind: "ready" });
+  });
+  it("runが無ければ未配布（起動できる）", () => {
+    expect(judgeIosReleasePanel(base)).toEqual({ kind: "ready" });
+  });
+});
+
+describe("toWebDeployState / checkIosDispatchable", () => {
+  it("デプロイのrunを3値へ寄せる", () => {
+    expect(toWebDeployState(null)).toBe("pending");
+    expect(toWebDeployState({ status: "in_progress", conclusion: null })).toBe("pending");
+    expect(toWebDeployState({ status: "completed", conclusion: "success" })).toBe("success");
+    expect(toWebDeployState({ status: "completed", conclusion: "failure" })).toBe("failed");
+  });
+  const ok = { merged: true, isMainTip: true, webDeploy: "success", deliveredBuild: null, hasActiveRun: false } as const;
+  it("すべて満たせば起動できる", () => {
+    expect(checkIosDispatchable(ok)).toBeNull();
+  });
+  it("満たさない条件ごとに理由を返す", () => {
+    expect(checkIosDispatchable({ ...ok, merged: false })).toBe("not_merged");
+    expect(checkIosDispatchable({ ...ok, isMainTip: false })).toBe("not_main_tip");
+    expect(checkIosDispatchable({ ...ok, webDeploy: "pending" })).toBe("deploy_not_succeeded");
+    expect(checkIosDispatchable({ ...ok, deliveredBuild: 3 })).toBe("already_delivered");
+    expect(checkIosDispatchable({ ...ok, hasActiveRun: true })).toBe("run_in_progress");
   });
 });

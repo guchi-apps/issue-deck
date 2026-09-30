@@ -37,6 +37,8 @@ export const GITHUB_API_FEATURES = [
   // リリース画面のiOS（TestFlight）配布結果（#3626）。**リリース画面を開いている間だけ**、
   // runの一覧・jobs・判定ジョブの注釈・配布済みタグの4リクエストを消費する
   { key: "ios_testflight", label: "iOS配布結果の取得" },
+  // ブランチ画面のリリース束からのiOS配布の起動（#3644）。押したときだけ数リクエストを消費する
+  { key: "ios_testflight_dispatch", label: "iOS配布の起動" },
   // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
   // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
   { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },
