@@ -409,6 +409,62 @@ describe("PlanApprovalPanel", () => {
     expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("default");
   });
 
+  it("推奨が「このまま承認」なら、指摘があっても承認を主ボタンにし、出し直しを通常ボタンにする（#3670）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReview={pendingReview(
+          "**1. 軽微な指摘**\n- **指摘**: 些細\n\n推奨: このまま承認してよい\n<!-- supervisor:plan-review -->",
+        )}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("default");
+    expect(screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }).dataset.variant).toBe(
+      "outline",
+    );
+  });
+
+  it("推奨が「修正のうえ承認」なら、従来どおり出し直しが主ボタン（#3670）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReview={pendingReview(
+          "**1. 指摘**\n- **指摘**: 問題\n\n推奨: 修正のうえ承認\n<!-- supervisor:plan-review -->",
+        )}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("outline");
+    expect(screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }).dataset.variant).toBe(
+      "default",
+    );
+  });
+
+  it("推奨が承認でも、人が選ぶ判断が残っていれば承認を強調しない（#3670）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReview={pendingReview(
+          [
+            "**判断1. 書式をどうするか**",
+            "- **選択肢**:",
+            "  - A. 専用の見出し",
+            "  - B. 指摘の中に足す",
+            "",
+            "推奨: このまま承認してよい",
+            "<!-- supervisor:plan-review -->",
+          ].join("\n"),
+        )}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /承認して実装へ進む/ }).dataset.variant).toBe("outline");
+  });
+
   /** `deny`の理由がそのまま次の指示になるので、本文が空のまま送れてはいけない */
   it("修正は本文を書くまで送れない", () => {
     render(

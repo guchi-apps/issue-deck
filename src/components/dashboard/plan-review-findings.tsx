@@ -44,6 +44,7 @@ export function PlanReviewFindings({
   disabled = false,
   isSubmitting = false,
   remainingMs,
+  deemphasizeSubmit = false,
   onSubmit,
 }: {
   review: ParsedPlanReview;
@@ -58,6 +59,8 @@ export function PlanReviewFindings({
   isSubmitting?: boolean;
   /** 計画待ちの残り時間（ミリ秒）。判断が残っている間だけ「あと◯分」を出す。無ければ出さない */
   remainingMs?: number;
+  /** 推奨が「このまま承認」のとき、出し直しのボタンを主ボタンにしない（#3670） */
+  deemphasizeSubmit?: boolean;
   onSubmit: (text: string) => void | Promise<void>;
 }) {
   // 番号ごとの判断。**無い番号は「反映する」**として扱う（既定を全件反映にするため）
@@ -199,6 +202,7 @@ export function PlanReviewFindings({
             </p>
             <Button
               size="sm"
+              variant={deemphasizeSubmit ? "outline" : "default"}
               className="h-11 md:h-8"
               disabled={disabled || isSubmitting || !canSubmit}
               onClick={submitDecisions}
@@ -241,6 +245,7 @@ export function PlanReviewFindings({
               </p>
               <Button
                 size="sm"
+                variant={deemphasizeSubmit ? "outline" : "default"}
                 disabled={disabled || isSubmitting}
                 onClick={() => void onSubmit(PLAN_REVIEW_REFLECT_REQUEST_TEXT)}
               >
