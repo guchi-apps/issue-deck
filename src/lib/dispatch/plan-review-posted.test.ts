@@ -24,31 +24,35 @@ const params = (commentBody: string) => ({
   commentCreatedAt: POSTED_AT,
 });
 
-describe("markPlanReviewPosted（#3659）", () => {
+describe("markPlanReviewPosted（#3659・#3648）", () => {
   beforeEach(() => {
     findJob.mockReset();
     updateJob.mockReset();
   });
 
   it("計画レビューのコメントでなければ何もしない", async () => {
-    expect(await markPlanReviewPosted(params("ただのコメント"))).toBe(false);
+    expect(await markPlanReviewPosted(params("ただのコメント"))).toBeNull();
     expect(findJob).not.toHaveBeenCalled();
   });
 
-  it("コメントより前に積まれた最新のSUCCEEDEDジョブへ届いた時刻を記録する", async () => {
-    findJob.mockResolvedValue({ id: "job-1", reviewPostedAt: null });
+  it("未記入のclaudeのSUCCEEDEDジョブのうち、15分以内で最も古いものへ届いた時刻を記録し、そのジョブを返す", async () => {
+    const createdAt = new Date("2026-09-30T11:55:00Z");
+    findJob.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "job-1", createdAt });
 
-    expect(await markPlanReviewPosted(params(REVIEW))).toBe(true);
-    expect(findJob).toHaveBeenCalledWith(
+    expect(await markPlanReviewPosted(params(REVIEW))).toEqual({ jobId: "job-1", createdAt });
+    expect(findJob).toHaveBeenNthCalledWith(
+      2,
       expect.objectContaining({
         where: {
           repositoryFullName: "guchi-apps/issue-deck",
           issueNumber: 3659,
           kind: "PLAN_REVIEW",
+          agent: "claude",
           status: "SUCCEEDED",
-          createdAt: { lte: POSTED_AT },
+          reviewPostedAt: null,
+          createdAt: { gte: new Date("2026-09-30T11:45:00Z"), lte: POSTED_AT },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "asc" },
       }),
     );
     expect(updateJob).toHaveBeenCalledWith({
@@ -57,17 +61,18 @@ describe("markPlanReviewPosted（#3659）", () => {
     });
   });
 
-  it("記録済みなら上書きしない", async () => {
-    findJob.mockResolvedValue({ id: "job-1", reviewPostedAt: new Date("2026-09-30T11:58:00Z") });
+  it("同じコメントを既に記録していれば（Webhookの再送）、次のジョブへは記録しない", async () => {
+    findJob.mockResolvedValueOnce({ id: "job-1" });
 
-    expect(await markPlanReviewPosted(params(REVIEW))).toBe(false);
+    expect(await markPlanReviewPosted(params(REVIEW))).toBeNull();
+    expect(findJob).toHaveBeenCalledTimes(1);
     expect(updateJob).not.toHaveBeenCalled();
   });
 
-  it("対象のジョブが無ければ何もしない", async () => {
+  it("対象のジョブが無ければ何もしない（投稿されず終わった古いジョブは候補から外れる）", async () => {
     findJob.mockResolvedValue(null);
 
-    expect(await markPlanReviewPosted(params(REVIEW))).toBe(false);
+    expect(await markPlanReviewPosted(params(REVIEW))).toBeNull();
     expect(updateJob).not.toHaveBeenCalled();
   });
 });

@@ -4,11 +4,12 @@ import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import { PLAN_REVIEW_REFLECT_REQUEST_TEXT } from "@/lib/dispatch/session-plan-request";
 import { createComment } from "@/lib/github/issues-api";
+import { pickPlanReviewAdoptionByJev } from "@/lib/claude/plan-review-pick";
 import { parsePlanReview } from "@/lib/github/plan-review";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /**
- * 計画レビュー（G1）を、届いた時点で自動で計画へ反映させる（#3616）。
+ * 計画レビュー（G1）を、届いた時点で、Jevが採用と判断した指摘だけ自動で計画へ反映させる（#3616・#3648）。
  *
  * **これまでは、人が指摘を読んで「レビューを反映して計画を出し直す」を押していた**（#3521・#3554）。
  * 計画を出すと直ちに確認待ちのPush通知が鳴るため、レビューが届く前に人が呼ばれ、届いたあとも
@@ -19,18 +20,23 @@ import { parseRepositoryFullName } from "@/lib/local-session";
  * （G1が承認しない原則は保つ。承認は人が押す）。フックが待っている`SessionPlanRequest`へ書くだけで、
  * 端末へキーを送る経路は無い。
  *
- * 守っていることは4つ。
+ * 守っていることは次のとおり。
  *
  * - **Claude Codeのセッションだけ。** Codexへの継続指示は`codex queue`で送るため、人の操作を挟まない
- *   自動送信を新しく作らない
- * - **1つのIssueにつき1回まで。** 反映後の計画へのレビューは、通常どおり人が読んで決める。
- *   **人が画面から送った修正も1回に数える**（#3660。判断カードで選んで出し直させたあとの
- *   2回目のレビューまで自動で反映すると、人が読んで決める前提が崩れる）
+ *   自動送信を新しく作らない。届いたレビューのジョブ（`markPlanReviewPosted`が返す）がclaudeのもの
+ * - **採用かどうかはJevが決める**（#3648）。設定（`AppSetting.planReviewAutoReflectEnabled`）がOFF、
+ *   Jevが「採用しない」と答えた、Jevの答えが取れなかったときは反映せず、人へ通知する
+ * - **指摘がなくなるまで繰り返す**（#3648）。上限は**人の修正を挟まずに連続した自動反映の回数**
+ *   （`AppSetting.planReviewAutoReflectMaxRounds`）。人が画面から送った修正で数え直す
  * - **人が決めるべき「判断」を含むレビューは送らない**（#3660）。選ぶのは人なので、固定文面で
  *   先に出し直させず、判断カードでの選択を待つ
+ * - **今の計画へのレビューだけ。** 届いたレビューのジョブが今の計画待ちより前に積まれていれば、
+ *   前の計画へのレビューなので反映しない（出し直した直後に遅れて届いた古い指摘で次の計画を直させない）
  * - **`noFindings`のときは送らない。** 指摘に分けられなかった本文は、画面と同じく一括の依頼文で送る
  * - **決定コメントに`plan-reviser`を付けない。** 付けると`findPendingPlanReviewComment`が
  *   「応答済み」と読み、実装セッションの応答が無いまま指摘が消える
+ * - **どの終わり方でも、最後にジョブへ`planReviewDecidedAt`を書く。** 一覧・通知の保留・承認パネルは
+ *   これが入るまで「作成中」として扱うので、書き漏れると通知が保留の上限まで遅れる
  */
 
 export const PLAN_REVIEW_MARKER = "<!-- supervisor:plan-review -->";
@@ -38,14 +44,24 @@ export const PLAN_REVIEW_MARKER = "<!-- supervisor:plan-review -->";
 /** 自動反映を記録するコメントのマーカー。`plan-reviser`とは別物にする（上記） */
 export const PLAN_REVIEW_AUTO_REFLECT_MARKER = "<!-- issue-deck:plan-review-auto-reflect -->";
 
-/** 1つのIssueで自動反映する回数の上限 */
-export const PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS = 1;
+/** 設定が読めないときの、連続して自動反映する回数の上限（`AppSetting`の既定と同じ） */
+export const PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS = 5;
 
 export type PlanReviewAutoReflectResult =
   | { reflected: true }
   | {
       reflected: false;
-      reason: "not_review" | "no_findings" | "has_decisions" | "no_request" | "not_claude" | "limit" | "lost_race";
+      reason:
+        | "not_review"
+        | "no_findings"
+        | "has_decisions"
+        | "no_job"
+        | "no_request"
+        | "stale_review"
+        | "disabled"
+        | "limit"
+        | "not_adopted"
+        | "lost_race";
     };
 
 export function isPlanReviewCommentBody(body: string): boolean {
@@ -56,19 +72,70 @@ export function buildPlanReviewAutoReflectCommentBody(): string {
   return [
     "🔁 **計画レビューの指摘を自動で反映するよう、セッションへ修正を送りました。**",
     "",
-    "セッションは指摘を自分で確かめ、取り込んだ計画を出し直します（自動反映は1つのIssueにつき1回です）。出し直された計画は、通常どおり承認を待ちます。",
+    "Jevが指摘を採用すると判断したので、セッションは指摘を自分で確かめ、取り込んだ計画を出し直します。出し直された計画も、指摘がなくなるか上限に達するまで同じように確かめます。",
     "",
     PLAN_REVIEW_AUTO_REFLECT_MARKER,
   ].join("\n");
 }
 
+/** 届いたレビューのジョブ。`markPlanReviewPosted`が記録したもの。記録できなかったら`null` */
+export type PostedPlanReviewJob = { jobId: string; createdAt: Date } | null;
+
 export async function autoReflectPlanReview(params: {
   repositoryFullName: string;
   issueNumber: number;
   commentBody: string;
+  postedJob: PostedPlanReviewJob;
   now?: Date;
 }): Promise<PlanReviewAutoReflectResult> {
   if (!isPlanReviewCommentBody(params.commentBody)) return { reflected: false, reason: "not_review" };
+  try {
+    return await decideAutoReflect(params);
+  } finally {
+    // どの終わり方でも採否の確定を残す（上の説明）。失敗しても握りつぶす（保留は上限で外れる）
+    if (params.postedJob) await markPlanReviewDecided(params.postedJob.jobId, params.now ?? new Date());
+  }
+}
+
+async function markPlanReviewDecided(jobId: string, now: Date) {
+  try {
+    await db.dispatchJob.update({ where: { id: jobId }, data: { planReviewDecidedAt: now } });
+  } catch (error) {
+    console.error(`[dispatch] 計画レビューの採否の確定を記録できませんでした（${jobId}）`, error);
+  }
+}
+
+/**
+ * 人が最後に決めた計画待ちより後の、自動反映（`decidedByUserId=null`の修正）の連続回数。
+ * 人が画面から送った修正・承認でも数え直す（#3648。#3660は人の修正も回数に含めていたが、
+ * 「指摘がなくなるまで続けたい」ため、人が介入した後はその次のレビューからまた判定する）。
+ */
+async function countConsecutiveAutoReflects(target: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<number> {
+  const lastHuman = await db.sessionPlanRequest.findFirst({
+    where: { ...target, decidedByUserId: { not: null } },
+    orderBy: { decidedAt: "desc" },
+    select: { decidedAt: true },
+  });
+  return db.sessionPlanRequest.count({
+    where: {
+      ...target,
+      status: "REVISION_REQUESTED",
+      decidedByUserId: null,
+      ...(lastHuman?.decidedAt ? { decidedAt: { gt: lastHuman.decidedAt } } : {}),
+    },
+  });
+}
+
+async function decideAutoReflect(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  commentBody: string;
+  postedJob: PostedPlanReviewJob;
+  now?: Date;
+}): Promise<PlanReviewAutoReflectResult> {
   const now = params.now ?? new Date();
 
   // 「指摘なし」だけ見送る。分けられなかった本文も、画面と同じく一括の依頼文で送る
@@ -77,7 +144,11 @@ export async function autoReflectPlanReview(params: {
     return { reflected: false, reason: "no_findings" };
   }
 
+  // 人が決める「判断」はJevに任せない。通知して、判断カードで人が選ぶ（#3660）
   if (parsed.decisions.length > 0) return { reflected: false, reason: "has_decisions" };
+
+  // どのレビュージョブのコメントか分からなければ、今の計画へのものと確かめられない
+  if (!params.postedJob) return { reflected: false, reason: "no_job" };
 
   const target = { repositoryFullName: params.repositoryFullName, issueNumber: params.issueNumber };
   const request = await db.sessionPlanRequest.findFirst({
@@ -86,17 +157,21 @@ export async function autoReflectPlanReview(params: {
   });
   if (!request) return { reflected: false, reason: "no_request" };
 
-  const job = await db.dispatchJob.findFirst({
-    where: { ...target, kind: "PLAN_REVIEW" },
-    orderBy: { createdAt: "desc" },
-    select: { agent: true },
-  });
-  if (job?.agent !== "claude") return { reflected: false, reason: "not_claude" };
+  // 前の計画へのレビューが遅れて届いた。今の計画には反映しない
+  if (params.postedJob.createdAt < request.createdAt) return { reflected: false, reason: "stale_review" };
 
-  const done = await db.sessionPlanRequest.count({
-    where: { ...target, status: "REVISION_REQUESTED" },
+  const settings = await db.appSetting.findUnique({
+    where: { id: 1 },
+    select: { planReviewAutoReflectEnabled: true, planReviewAutoReflectMaxRounds: true },
   });
-  if (done >= PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS) return { reflected: false, reason: "limit" };
+  if (settings && !settings.planReviewAutoReflectEnabled) return { reflected: false, reason: "disabled" };
+
+  const maxRounds = settings?.planReviewAutoReflectMaxRounds ?? PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS;
+  if ((await countConsecutiveAutoReflects(target)) >= maxRounds) return { reflected: false, reason: "limit" };
+
+  // 採否はJevが決める。決められない（`null`）・採用しないなら通知側へ倒す
+  const adopted = await pickPlanReviewAdoptionByJev(params.commentBody);
+  if (adopted !== true) return { reflected: false, reason: "not_adopted" };
 
   const decided = await decideSessionPlanRequest({
     id: request.id,
