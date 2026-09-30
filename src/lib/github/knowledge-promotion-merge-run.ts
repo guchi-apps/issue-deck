@@ -16,6 +16,10 @@ import { KNOWLEDGE_DOCS_REPOSITORY, PROMOTION_BRANCH_PREFIX } from "@/lib/knowle
  * 外して判定に任せる。**マージ可能（`mergeable_state`が`clean`）と確かめられたPRだけ**を
  * マージし、チェック待ち・失敗・コンフリクト・判定不能は見送って次の巡回で見直す。
  *
+ * ユーザーのいない巡回なので、`guchi-apps/docs`の`Repository`行のinstallation tokenで一覧取得と
+ * マージを行う（`deploy-launch-sweep-run.ts`と同じ）。docsの`main`にはブランチ保護が無く、
+ * チェックが1件も無いPRは`mergeable_state`が`clean`になるため、そのままマージする。
+ *
  * 呼ぶのはpoller（`POST /api/knowledge/promotion-merge-sweep`）。間隔の判定はここで持つ。
  */
 
@@ -69,7 +73,11 @@ export async function runPromotionMergeSweep(
     where: { fullName: KNOWLEDGE_DOCS_REPOSITORY, archived: false },
     include: { installation: true },
   });
-  if (!repository) return emptyResult({ swept: true });
+  if (!repository) {
+    // 連携していないと読めない。「PRが無い」と区別できるようログに残す
+    console.warn(`[knowledge-promotion-merge] ${KNOWLEDGE_DOCS_REPOSITORY}のRepository行がありません`);
+    return emptyResult({ swept: true });
+  }
 
   const result = emptyResult({ swept: true });
   const token = await getInstallationToken(repository.installation.installationId);
