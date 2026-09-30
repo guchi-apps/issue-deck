@@ -42,6 +42,15 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.11.1",
+    date: "2026-10-01",
+    changes: [
+      "ホーム画面の進行タイルが、進行状況の順に並ぶようになりました。",
+      "PRの判定（完了・要確認・要修正）が、色付きの丸いアイコンで見分けやすくなりました。",
+      "developからmainへのマージを示す矢印が、左向きのすっきりした直線になりました。",
+    ],
+  },
+  {
     version: "8.11.0",
     date: "2026-10-01",
     changes: [
