@@ -629,6 +629,8 @@ export type DispatchJobView = {
    * **テストの差し込みや古い応答では欠けうる**ので、無ければ「まだ届いていない」として読む
    */
   reviewPostedAt?: string | null;
+  /** 計画レビューの採否が決まった時刻（#3648）。入るまでは「作成中」として扱う */
+  planReviewDecidedAt?: string | null;
 };
 
 /** 画面へ返すホスト。実行可能リポジトリは配列に展開し、生存判定も済ませて渡す */
@@ -2361,18 +2363,19 @@ const PLAN_REVIEW_CREATING_GRACE_MS = 360_000;
  * ただし無条件に含めると、ジョブが積めなかった等で**古い計画に対する`SUCCEEDED`ジョブ**が
  * 残ったままになった場合に表示が消えなくなるため、`finishedAt`からの経過時間で区切る。
  *
- * **指摘コメントが届いたら（`reviewPostedAt`）猶予内でも作成中にしない**（#3659）。Issue詳細は
- * コメント本文から届いたことを知れるが、Issue一覧・通知の保留は本文を持たないため、これが無いと
- * 指摘が届いた後も猶予が切れるまで「作成中」のままになる。
+ * **指摘の採否が決まったら（`planReviewDecidedAt`）猶予内でも作成中にしない**（#3648。#3659では
+ * 届いた時刻`reviewPostedAt`で外していた）。届いてからJevの判定と自動反映が終わるまでの数秒に
+ * 通知が鳴らないよう、外す時点を「届いた」から「採否が決まった」へ後ろへ寄せた。Issue一覧・通知の
+ * 保留・承認パネルは**すべてこの関数を読む**（判定を分けると、画面と通知で食い違う）。
  */
 export function isPlanReviewJobCreating(
-  job: Pick<DispatchJobView, "status" | "finishedAt" | "reviewPostedAt"> | null,
+  job: Pick<DispatchJobView, "status" | "finishedAt" | "planReviewDecidedAt"> | null,
   now: Date,
 ): boolean {
   if (job === null) return false;
   if (isActiveDispatchJobStatus(job.status)) return true;
   if (job.status !== "SUCCEEDED" || job.finishedAt === null) return false;
-  if (job.reviewPostedAt) return false;
+  if (job.planReviewDecidedAt) return false;
   return now.getTime() - new Date(job.finishedAt).getTime() < PLAN_REVIEW_CREATING_GRACE_MS;
 }
 

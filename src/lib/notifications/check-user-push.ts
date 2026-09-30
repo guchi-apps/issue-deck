@@ -196,10 +196,11 @@ export const PLAN_REVIEW_PUSH_HOLD_MAX_MS = 15 * 60 * 1000;
  * - 理由が計画（`01.check-plan`）で、期限内の`WAITING`の計画待ちがある（「アプリで答える」ON・
  *   待ち時間0のセッションは待ちが作られないので対象外）
  * - 計画の提示から`PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内
- * - **まだ自動反映していない**（`decidedByUserId=null`の`REVISION_REQUESTED`が無い）。反映後に出し直された
- *   計画は保留せず、通常どおり通知する（自動反映は1回まで）
+ * - **反映済みでも保留する**（#3648）。自動反映は指摘がなくなるまで繰り返すため、出し直された計画にも
+ *   同じ保留を掛ける。ただし**今の計画より後に積まれた**ジョブだけを見る
  * - 計画レビューのジョブがClaude Codeのもので、作成中（`isPlanReviewJobCreating`。実行中、または
- *   成功から6分以内）。積まれていない・失敗・見送りなら保留しない
+ *   成功から6分以内で、採否（`planReviewDecidedAt`）が決まっていない）。積まれていない・失敗・
+ *   見送りなら保留しない
  */
 async function selectPlanReviewHoldKeys(
   targets: readonly {
@@ -217,7 +218,7 @@ async function selectPlanReviewHoldKeys(
     repositoryFullName: { in: [...new Set(planTargets.map((t) => t.repositoryFullName))] },
     issueNumber: { in: [...new Set(planTargets.map((t) => t.issueNumber))] },
   };
-  const [waiting, reflected, jobs] = await Promise.all([
+  const [waiting, jobs] = await Promise.all([
     db.sessionPlanRequest.findMany({
       where: {
         ...scope,
@@ -225,11 +226,8 @@ async function selectPlanReviewHoldKeys(
         expiresAt: { gt: now },
         createdAt: { gt: new Date(now.getTime() - PLAN_REVIEW_PUSH_HOLD_MAX_MS) },
       },
-      select: { repositoryFullName: true, issueNumber: true },
-    }),
-    db.sessionPlanRequest.findMany({
-      where: { ...scope, status: "REVISION_REQUESTED", decidedByUserId: null },
-      select: { repositoryFullName: true, issueNumber: true },
+      select: { repositoryFullName: true, issueNumber: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
     }),
     db.dispatchJob.findMany({
       where: { ...scope, kind: "PLAN_REVIEW" },
@@ -239,27 +237,31 @@ async function selectPlanReviewHoldKeys(
         issueNumber: true,
         agent: true,
         status: true,
+        createdAt: true,
         finishedAt: true,
-        reviewPostedAt: true,
+        planReviewDecidedAt: true,
       },
     }),
   ]);
 
-  const waitingKeys = new Set(waiting.map((r) => sessionRequestKey(r.repositoryFullName, r.issueNumber)));
-  const reflectedKeys = new Set(
-    reflected.map((r) => sessionRequestKey(r.repositoryFullName, r.issueNumber)),
+  // 同じIssueに計画待ちが複数あれば新しい方（昇順で並べて後勝ちにする）
+  const waitingCreatedAt = new Map(
+    waiting.map((r) => [sessionRequestKey(r.repositoryFullName, r.issueNumber), r.createdAt]),
   );
   const seen = new Set<string>();
   for (const job of jobs) {
     const key = sessionRequestKey(job.repositoryFullName, job.issueNumber);
     if (seen.has(key)) continue; // 新しい順なので、最初に当たったものがそのIssueの最新
     seen.add(key);
-    if (!waitingKeys.has(key) || reflectedKeys.has(key) || job.agent !== "claude") continue;
+    const planCreatedAt = waitingCreatedAt.get(key);
+    // **今の計画より前に積まれたジョブのレビューは待たない**（#3648）。出し直した計画のレビューが
+    // 積まれなかったときに、前の周の成功済みジョブで保留し続けない
+    if (!planCreatedAt || job.createdAt < planCreatedAt || job.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
       {
         status: job.status as DispatchJobStatus,
         finishedAt: job.finishedAt?.toISOString() ?? null,
-        reviewPostedAt: job.reviewPostedAt?.toISOString() ?? null,
+        planReviewDecidedAt: job.planReviewDecidedAt?.toISOString() ?? null,
       },
       now,
     );

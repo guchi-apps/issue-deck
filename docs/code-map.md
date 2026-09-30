@@ -3570,7 +3570,7 @@ export function POST(request: NextRequest) {
   差し込み方は`scripts/lib/plan-review-prompt.sh`で共有する。
   **承認せず、PR操作もラベル操作も持たない**（`--allowedTools`から外してある。自動の入口も
   Actionsと同じ一覧を渡す）。設計は[multi-agent/gates.md](multi-agent/gates.md)「G1の実装」。
-- **届いた計画レビューは、Issue詳細で指摘ごとに読み「反映する／見送る」を選んで送れる**（#3554）。ただし**1回目はClaude Codeのセッションへ自動で反映される**（#3616。`lib/dispatch/plan-review-auto-reflect.ts`。人が指摘を選べるのは反映後の計画から）。
+- **届いた計画レビューは、Issue詳細で指摘ごとに読み「反映する／見送る」を選んで送れる**（#3554）。ただし**Jevが採用と判断した指摘はClaude Codeのセッションへ自動で反映される**（#3616・#3648。`lib/dispatch/plan-review-auto-reflect.ts`・採否判定は`lib/claude/plan-review-pick.ts`。指摘がなくなるか、人の修正を挟まない連続上限〈設定＞実行設定〉に達するまで繰り返す。不採用・判断不能・設定OFFなら通知して人が選ぶ。採否が決まった時刻は`DispatchJob.planReviewDecidedAt`で、通知の保留・一覧・承認パネルが同じ`isPlanReviewJobCreating`を読む）。
   どのコメントが未反映のレビューかは`lib/github/plan-review.ts`の`findPendingPlanReviewComment`
   （最新の計画より後で、`plan-reviser`の応答がまだ無いもの）、本文の分解は同じファイルの
   `parsePlanReview`（`**N. 見出し**`で区切り、`- **指摘**`／`- **根拠**`／`- **提案**`と末尾の

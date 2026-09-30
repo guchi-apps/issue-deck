@@ -1575,14 +1575,24 @@ describe("isPlanReviewJobCreating（#3565）", () => {
     expect(isPlanReviewJobCreating(job, now)).toBe(false);
   });
 
-  // Issue一覧・通知の保留はコメント本文を持たないため、指摘が届いたことはこの列でしか知れない（#3659）
-  it("SUCCEEDED直後でも、指摘コメントが届いていれば（reviewPostedAt）false", () => {
+  // Issue一覧・通知の保留はコメント本文を持たないため、採否が決まったことはこの列でしか知れない（#3648）
+  it("SUCCEEDED直後でも、採否が決まっていれば（planReviewDecidedAt）false", () => {
+    const job = planReviewJob({
+      status: "SUCCEEDED",
+      finishedAt: "2026-08-17T00:08:00.000Z",
+      planReviewDecidedAt: "2026-08-17T00:09:30.000Z",
+    });
+    expect(isPlanReviewJobCreating(job, now)).toBe(false);
+  });
+
+  // 届いてからJevの判定と自動反映が終わるまでの間は、通知を保留し続ける（#3648）
+  it("指摘コメントが届いても、採否が決まるまでは作成中のまま", () => {
     const job = planReviewJob({
       status: "SUCCEEDED",
       finishedAt: "2026-08-17T00:08:00.000Z",
       reviewPostedAt: "2026-08-17T00:09:30.000Z",
     });
-    expect(isPlanReviewJobCreating(job, now)).toBe(false);
+    expect(isPlanReviewJobCreating(job, now)).toBe(true);
   });
 
   it("SUCCEEDEDでもfinishedAtが無ければfalse", () => {

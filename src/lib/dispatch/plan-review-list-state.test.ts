@@ -42,11 +42,11 @@ describe("resolvePlanReviewListState", () => {
     ).toBe("creating");
   });
 
-  it("猶予内でも、指摘コメントが届いていれば提示済（#3659）", () => {
+  it("猶予内でも、採否が決まっていれば提示済（#3648）", () => {
     expect(
       resolvePlanReviewListState({
         ...base,
-        jobs: [job({ finishedAt: "2026-09-29T11:57:00Z", reviewPostedAt: "2026-09-29T11:59:00Z" })],
+        jobs: [job({ finishedAt: "2026-09-29T11:57:00Z", planReviewDecidedAt: "2026-09-29T11:59:00Z" })],
         labels: planLabels,
       }),
     ).toBe("presented");

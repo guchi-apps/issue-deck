@@ -202,8 +202,6 @@ describe("sweepCheckUserPushNotifications", () => {
     waitingPlans?: unknown[];
     /** 計画レビューのジョブ（新しい順） */
     planReviewJobs?: unknown[];
-    /** 自動反映済みの行 */
-    autoReflected?: unknown[];
   }) {
     const findSubscriptions = vi.fn().mockResolvedValue(options?.subscriptions ?? []);
     const updateMany = vi.fn().mockResolvedValue({ count: options?.reservedCount ?? 1 });
@@ -227,12 +225,7 @@ describe("sweepCheckUserPushNotifications", () => {
         updateMany,
       },
       sessionPlanRequest: {
-        // 計画待ち（WAITING）と自動反映済み（REVISION_REQUESTED）は同じメソッドで引くので、絞り込みで返し分ける
-        findMany: vi.fn().mockImplementation(async (args: { where: { status?: string } }) =>
-          args.where.status === "REVISION_REQUESTED"
-            ? (options?.autoReflected ?? [])
-            : (options?.waitingPlans ?? []),
-        ),
+        findMany: vi.fn().mockResolvedValue(options?.waitingPlans ?? []),
       },
       dispatchJob: { findMany: vi.fn().mockResolvedValue(options?.planReviewJobs ?? []) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
@@ -251,9 +244,22 @@ describe("sweepCheckUserPushNotifications", () => {
     vi.mocked(sendPushNotification).mockResolvedValue({ sent: 1, removed: 0, failed: 0 });
   });
 
-  describe("計画レビューの自動反映を待つ保留（#3616）", () => {
-    const plan = { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 12 };
-    const runningJob = { ...plan, agent: "claude", status: "RUNNING", finishedAt: null };
+  describe("計画レビューの採否が決まるまで待つ保留（#3616・#3648）", () => {
+    const sub = [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }];
+    const plan = {
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 12,
+      createdAt: at(60_000),
+    };
+    const runningJob = {
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 12,
+      agent: "claude",
+      status: "RUNNING",
+      createdAt: at(50_000),
+      finishedAt: null,
+      planReviewDecidedAt: null,
+    };
 
     it("計画待ちがあり、レビューが作成中なら送らない", async () => {
       mockDb({ waitingPlans: [plan], planReviewJobs: [runningJob] });
@@ -265,18 +271,46 @@ describe("sweepCheckUserPushNotifications", () => {
       mockDb({
         waitingPlans: [plan],
         planReviewJobs: [{ ...runningJob, status: "SUCCEEDED", finishedAt: at(7 * 60_000) }],
-        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+        subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);
       expect(sendPushNotification).toHaveBeenCalled();
     });
 
-    it("自動反映済みなら（2回目の計画）保留しない", async () => {
+    it("指摘が届いても、採否が決まるまで（Jevの判定中）は送らない", async () => {
       mockDb({
         waitingPlans: [plan],
-        planReviewJobs: [runningJob],
-        autoReflected: [plan],
-        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+        planReviewJobs: [{ ...runningJob, status: "SUCCEEDED", finishedAt: at(10_000) }],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("採否が決まっていれば保留しない", async () => {
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [
+          { ...runningJob, status: "SUCCEEDED", finishedAt: at(10_000), planReviewDecidedAt: at(5_000) },
+        ],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("自動反映済みの計画を出し直したときも（2回目以降）保留する", async () => {
+      // 出し直した計画のあとに積まれたジョブが作成中
+      mockDb({ waitingPlans: [plan], planReviewJobs: [runningJob], subscriptions: sub });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("今の計画より前に積まれたジョブしか無ければ（今回のレビューが積まれていない）保留しない", async () => {
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [{ ...runningJob, createdAt: at(10 * 60_000) }],
+        subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);
       expect(sendPushNotification).toHaveBeenCalled();
@@ -286,16 +320,13 @@ describe("sweepCheckUserPushNotifications", () => {
       mockDb({
         waitingPlans: [plan],
         planReviewJobs: [{ ...runningJob, agent: "codex" }],
-        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
+        subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);
       expect(sendPushNotification).toHaveBeenCalledTimes(1);
 
       vi.mocked(sendPushNotification).mockClear();
-      mockDb({
-        planReviewJobs: [runningJob],
-        subscriptions: [{ id: "s", endpoint: "e", p256dh: "p", auth: "a" }],
-      });
+      mockDb({ planReviewJobs: [runningJob], subscriptions: sub });
       await sweepCheckUserPushNotifications(NOW);
       expect(sendPushNotification).toHaveBeenCalledTimes(1);
     });
