@@ -174,3 +174,21 @@ describe("toWebDeployState / checkIosDispatchable", () => {
     expect(checkIosDispatchable({ ...ok, hasActiveRun: true })).toBe("run_in_progress");
   });
 });
+
+describe("summarizeIosStages の時刻", () => {
+  it("同じ段階のジョブ・ステップは最も早い開始と最も遅い終了へ畳む", () => {
+    const stages = summarizeIosStages([
+      {
+        name: "build",
+        status: "completed",
+        conclusion: "success",
+        started_at: "2026-09-30T14:00:00Z",
+        completed_at: "2026-09-30T14:04:00Z",
+      },
+    ]);
+    const build = stages.find((s) => s.key === "build");
+    expect(build?.startedAt).toBe("2026-09-30T14:00:00Z");
+    expect(build?.completedAt).toBe("2026-09-30T14:04:00Z");
+    expect(stages.find((s) => s.key === "sign")?.startedAt).toBeNull();
+  });
+});
