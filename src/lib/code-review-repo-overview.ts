@@ -1,3 +1,7 @@
+import {
+  CODE_REVIEW_RECOMMEND_DAYS_DEFAULT,
+  CODE_REVIEW_RECOMMEND_PR_COUNT_DEFAULT,
+} from "@/lib/app-settings";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
 import type { MergedPullRequestRange } from "@/lib/github/merged-pr-range";
 import type { Issue } from "@/types/issue";
@@ -17,11 +21,8 @@ import type { Issue } from "@/types/issue";
 /** 帯に出す期間。12週（84日） */
 export const CODE_REVIEW_TIMELINE_DAYS = 84;
 
-/** これより空いたリポジトリは注意の色で出す */
-export const CODE_REVIEW_STALE_DAYS = 30;
-
-/** この件数以上のマージ済みPRが前回レビュー以降にあれば、再レビューを提案する */
-export const CODE_REVIEW_RECOMMENDED_PR_COUNT = 20;
+// 「注意の色で出す経過日数」と「再レビューを提案するPR件数」は設定（#3685）で変えられる。
+// 既定値は`@/lib/app-settings`の`CODE_REVIEW_RECOMMEND_*_DEFAULT`。
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -39,7 +40,7 @@ export type CodeReviewRepoRow = {
   lastReviewedAt: string | null;
   /** 前回からの経過日数（切り捨て）。未実施は`null` */
   daysSinceLast: number | null;
-  /** 30日以上空いた・未実施 */
+  /** 設定の経過日数以上空いた・未実施 */
   stale: boolean;
   /** サブPCでいまレビューを実行できるか（「実行」を出すか） */
   canRun: boolean;
@@ -53,17 +54,18 @@ export type CodeReviewRepoRow = {
 /**
  * スマホの開始シートで、優先して確認してほしいリポジトリを示す。
  *
- * 未実施・30日以上の経過は既存の`stale`と同じ意味にし、PRの蓄積は20件以上を目安にする。
+ * 未実施・設定日数以上の経過は既存の`stale`と同じ意味にし、PRの蓄積は設定件数以上を目安にする。
  * PR件数を取得中・取得失敗のときは、確定している実施記録だけで判断する。
  */
 export function shouldRecommendCodeReview(
   row: Pick<CodeReviewRepoRow, "lastReviewedAt" | "stale">,
   sinceLastCount: number | undefined,
+  recommendPrCount: number = CODE_REVIEW_RECOMMEND_PR_COUNT_DEFAULT,
 ): boolean {
   return (
     row.lastReviewedAt === null ||
     row.stale ||
-    (sinceLastCount !== undefined && sinceLastCount >= CODE_REVIEW_RECOMMENDED_PR_COUNT)
+    (sinceLastCount !== undefined && sinceLastCount >= recommendPrCount)
   );
 }
 
@@ -81,8 +83,11 @@ export function buildCodeReviewRepoRows(params: {
   canRun: (repositoryFullName: string) => boolean;
   isPending: (issue: Issue) => boolean;
   now: number;
+  /** 注意の色・提案の基準にする経過日数。省略時は既定 */
+  staleDays?: number;
 }): CodeReviewRepoRow[] {
   const { reviewIssues, repositoryFullNames, canRun, isPending, now } = params;
+  const staleDays = params.staleDays ?? CODE_REVIEW_RECOMMEND_DAYS_DEFAULT;
   const visible = new Set(repositoryFullNames);
 
   const reviewsByRepo = new Map<string, CodeReviewRepoReview[]>();
@@ -112,7 +117,7 @@ export function buildCodeReviewRepoRows(params: {
       reviews,
       lastReviewedAt: last?.createdAt ?? null,
       daysSinceLast,
-      stale: daysSinceLast === null || daysSinceLast >= CODE_REVIEW_STALE_DAYS,
+      stale: daysSinceLast === null || daysSinceLast >= staleDays,
       canRun: runnable,
       dots: reviews
         .filter((review) => Date.parse(review.createdAt) >= windowStart)

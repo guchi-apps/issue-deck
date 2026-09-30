@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
+import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
 import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
@@ -459,6 +460,8 @@ export function ExecutionSettingsSection({
       </div>
 
       <ReleasePrepIntervalField />
+
+      <CodeReviewRecommendField />
 
       <PlanReviewAutoReflectField />
 

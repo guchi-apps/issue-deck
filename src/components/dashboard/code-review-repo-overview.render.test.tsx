@@ -101,7 +101,7 @@ describe("CodeReviewRepoOverview", () => {
     ];
     const { onStartCodeReview } = renderOverview({
       rows,
-      sinceLastCounts: new Map([["o/deck", 20]]),
+      sinceLastCounts: new Map([["o/deck", 100]]),
     });
 
     fireEvent.click(screen.getByRole("button", { name: "コードレビューを実行" }));
