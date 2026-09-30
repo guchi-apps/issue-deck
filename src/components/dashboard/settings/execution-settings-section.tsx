@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
@@ -458,6 +459,8 @@ export function ExecutionSettingsSection({
       </div>
 
       <ReleasePrepIntervalField />
+
+      <PlanReviewAutoReflectField />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

@@ -472,6 +472,10 @@ model AppSetting {
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
   dispatchFailoverEnabled Boolean @default(true)
   dispatchFailoverThresholdPercent Int @default(90)
+  // 計画レビューの指摘をJevが判断し、採用なら通知なしで計画へ自動反映する（#3648）。
+  // 上限は人の修正を挟まずに連続して自動反映する回数。
+  planReviewAutoReflectEnabled Boolean @default(true)
+  planReviewAutoReflectMaxRounds Int @default(5)
   // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
   appAiModel          String   @default("claude-haiku-4-5")
   // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。
@@ -850,6 +854,12 @@ model DispatchJob {
   // 指摘が届いた後も「計画レビュー作成中」のままになる。GitHubのWebhookで
   // `supervisor:plan-review`コメントを受けた時点で埋める（`plan-review-posted.ts`）。
   reviewPostedAt     DateTime?
+  // 計画レビュー（G1）の指摘コメントの採否が決まった時刻（#3648。`kind`が`PLAN_REVIEW`のときだけ入る）。
+  //
+  // `reviewPostedAt`は「届いた」時点で、Jevの判定と自動反映が終わるまでの数秒は通知を保留し続ける
+  // 必要がある。自動反映の処理が「指摘なし」・見送り・Jevの採否・上限のどの終わり方でも最後に埋め、
+  // これが入るまで一覧・通知・承認パネルは「作成中」として扱う。
+  planReviewDecidedAt DateTime?
   // RUNNING中の生存報告。途絶えたらTIMEOUTへ落とす
   heartbeatAt        DateTime?
   // 起動したtmuxセッション名。実行ログを見る唯一の手掛かり（`tmux attach -t <名前>`）で、

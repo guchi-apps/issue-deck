@@ -209,8 +209,9 @@ async function handleIssueCommentEvent(payload: {
   if (payload.action === "created") {
     await updateQaAnswerPendingState(payload.issue.id, payload.comment.body);
     // 計画レビュー（G1）が届いたことをジョブへ記録し、一覧の「作成中」を終える（#3659）
+    let postedJob: Awaited<ReturnType<typeof markPlanReviewPosted>> = null;
     try {
-      await markPlanReviewPosted({
+      postedJob = await markPlanReviewPosted({
         repositoryFullName: repository.fullName,
         issueNumber: payload.issue.number,
         commentBody: payload.comment.body,
@@ -226,6 +227,7 @@ async function handleIssueCommentEvent(payload: {
         repositoryFullName: repository.fullName,
         issueNumber: payload.issue.number,
         commentBody: payload.comment.body,
+        postedJob,
       });
     } catch (error) {
       console.error("[webhooks/github] 計画レビューの自動反映に失敗しました", error);

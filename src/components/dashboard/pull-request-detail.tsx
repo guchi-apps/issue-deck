@@ -361,7 +361,10 @@ export function PullRequestDetail({
             />
             {/* レビュー実施中は上の四角い操作表示が担う。同じ文言の丸い判定バッジを重ねない。 */}
             {pullRequest.mergeJudgement.aiReview.state !== "pending" && (
-              <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
+              <MergeJudgementBadge
+                mergeJudgement={pullRequest.mergeJudgement}
+                ciState={pullRequest.ciState}
+              />
             )}
             <DeployStatusBadge status={deployStatus} />
             {pullRequest.autoMergeEnabled && (

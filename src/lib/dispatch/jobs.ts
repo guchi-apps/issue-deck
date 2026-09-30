@@ -218,6 +218,7 @@ function toJobView(
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
     reviewPostedAt: job.reviewPostedAt?.toISOString() ?? null,
+    planReviewDecidedAt: job.planReviewDecidedAt?.toISOString() ?? null,
   };
 }
 

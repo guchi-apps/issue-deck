@@ -274,8 +274,19 @@ export function PullRequestStateIcon({
  * `runUrl`があればピルごとそのジョブの実行ログへのリンクにする（進み具合を見に行けるように）。
  * 配色はCI実行中と同じprimaryで「待てば片付く」ことを表し、回転アイコンで見分けを付ける。
  */
-export function MergeJudgementBadge({ mergeJudgement }: { mergeJudgement: MergeJudgement }) {
+export function MergeJudgementBadge({
+  mergeJudgement,
+  ciState,
+}: {
+  mergeJudgement: MergeJudgement;
+  /**
+   * 隣に出しているCI状態。`pending`のとき`wait-for-ci`段のピル（「CIの完了待ち」）は
+   * 「CI実行中」と同じ意味で重なるため描かない（#3662）。渡さなければ従来どおり出す。
+   */
+  ciState?: CiState | null;
+}) {
   if (mergeJudgement.state !== "pending") return null;
+  if (mergeJudgement.step === "wait-for-ci" && ciState === "pending") return null;
 
   const label = mergeJudgementLabel(mergeJudgement.step);
   const reason = mergeJudgementReason(mergeJudgement.step);

@@ -171,6 +171,11 @@ export function PlanApprovalPanel({
   const planReviewHasFindings =
     planReview !== null &&
     (planReview.review.findings.length > 0 || !planReview.review.noFindings);
+  // 推奨が「このまま承認」で、人が選ぶ判断が残っていないときだけ承認を主ボタンにする（#3670）
+  const approveRecommended =
+    planReview !== null &&
+    planReview.review.recommendation?.kind === "approve" &&
+    planReview.review.decisions.length === 0;
   const canHandoff = session !== null && session.codexThreadKnown !== null;
   // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
   // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
@@ -284,7 +289,7 @@ export function PlanApprovalPanel({
                 </div>
                 {!canHandoff && (
                 <p className="px-3 py-2 text-xs text-muted-foreground">
-                  届くと指摘を自動で計画へ反映します（1回まで。人が選ぶ「判断」を含むレビューは自動では反映せず、ここで選んでもらいます）。それまでPush通知は送りません。
+                  届くとJevが指摘を採用するか判断し、採用なら自動で計画へ反映します（指摘がなくなるか上限に達するまで繰り返します。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
                 </p>
                 )}
               </div>
@@ -303,6 +308,7 @@ export function PlanApprovalPanel({
                   fallbackSubmitLabel="レビューを反映して計画を出し直す"
                   disabled={!canSend || dispatch.isSubmitting}
                   isSubmitting={dispatch.isSubmitting}
+                  deemphasizeSubmit={approveRecommended}
                   onSubmit={(text) => send("revise", text)}
                 />
               </div>
@@ -351,8 +357,10 @@ export function PlanApprovalPanel({
             )}
             <Button
               size="sm"
-              /* 反映させる指摘が残っているときは、出し直しを主ボタンにする */
-              variant={planReviewHasFindings ? "outline" : "default"}
+              /* 反映させる指摘が残っているときは、出し直しを主ボタンにする。ただし推奨が
+                 「このまま承認」なら承認を主ボタンにしてリングで強調する（#3670） */
+              variant={planReviewHasFindings && !approveRecommended ? "outline" : "default"}
+              className={approveRecommended ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : undefined}
               disabled={!canSend || dispatch.isSubmitting}
               onClick={() => void send("approve")}
             >

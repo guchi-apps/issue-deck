@@ -29,6 +29,19 @@ export function parseDispatchFailoverThresholdPercent(value: unknown): number | 
     : null;
 }
 
+// 計画レビューの自動反映（#3648）。上限は人の修正を挟まずに連続して自動反映する回数。
+export const PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_MIN = 1;
+export const PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_MAX = 10;
+export const PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_DEFAULT = 5;
+
+export function parsePlanReviewAutoReflectMaxRounds(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_MIN &&
+    value <= PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_MAX
+    ? value
+    : null;
+}
+
 /** 取得できた有効な使用量枠のどれかがしきい値に達したか。期限切れの観測値は使わない。 */
 export function isDispatchUsageAtOrAboveThreshold(
   windows: readonly { usedPercent: number; expired?: boolean }[],
