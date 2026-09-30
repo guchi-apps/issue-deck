@@ -1530,8 +1530,8 @@ function ReleaseGroupHeaderWithLanes({
       {afterFreeze.length > 0 && (
         <>
           <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-amber-700 max-sm:pl-[2.6rem] dark:text-amber-400">
-            {group.version ? `v${group.version}` : "このリリース"}には含まれない変更{" "}
-            {afterFreeze.length}件（リリースPR作成後にdevelopへ入った分）
+            {group.version ? `v${group.version}` : "このリリース"}の作成後にdevelopへ入った変更{" "}
+            {afterFreeze.length}件（次のリリースへ回ります）
           </li>
           {afterFreeze.map((lane) => (
             <LaneRow
