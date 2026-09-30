@@ -37,12 +37,16 @@ export const GITHUB_API_FEATURES = [
   // リリース画面のiOS（TestFlight）配布結果（#3626）。**リリース画面を開いている間だけ**、
   // runの一覧・jobs・判定ジョブの注釈・配布済みタグの4リクエストを消費する
   { key: "ios_testflight", label: "iOS配布結果の取得" },
+  // ブランチ画面のリリース束からのiOS配布の起動（#3644）。押したときだけ数リクエストを消費する
+  { key: "ios_testflight_dispatch", label: "iOS配布の起動" },
   // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
   // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
   { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },
   // 共通知識画面（#2912）。**画面を開いたときだけ**消費し、結果は5分キャッシュする。
   // 1回につきGraphQLを最大4回（共有知識のファイル1回＋知見メモの検索3ページ）
   { key: "knowledge_board", label: "共通知識の取得" },
+  // 共通知識の反映PRの自動マージ（#3645）。間隔（既定10分）ごとにREST 1回＋反映PR1件につき1回。
+  { key: "knowledge_promotion_merge", label: "共通知識の反映PRの自動マージ" },
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "branch_flow", label: "ブランチ状況の取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },

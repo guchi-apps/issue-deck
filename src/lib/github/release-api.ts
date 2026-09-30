@@ -795,3 +795,73 @@ export async function dispatchDeployWorkflow(
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
 }
+
+/** kurashioのiOS TestFlight配布workflow（#3644）。ワークフロー名は`ios-testflight-status.ts`の定数と同じ */
+const IOS_TESTFLIGHT_WORKFLOW = "ios-testflight.yml";
+
+/**
+ * `ios-testflight.yml`を対象コミット付きでmainに対して手動起動する（#3644）。
+ * 対象は`inputs.sha`で渡す。runの`head_sha`は`--ref main`の先端になり、対象コミットとは限らない。
+ */
+export async function dispatchIosTestflightWorkflow(
+  owner: string,
+  repo: string,
+  token: string,
+  sha: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${IOS_TESTFLIGHT_WORKFLOW}/dispatches`;
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: "main", inputs: { sha } } });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
+/** mainブランチの先端のコミットSHA。取れなければnull（#3644） */
+export async function fetchMainHeadSha(owner: string, repo: string, token: string): Promise<string | null> {
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/main`, token);
+  if (!res.ok) return null;
+  const data: { object?: { sha?: string } } = await res.json().catch(() => ({}));
+  return data.object?.sha ?? null;
+}
+
+/** PRのマージ状態とmergeコミットのSHA。取れなければnull（#3644） */
+export async function fetchPullMergeInfo(
+  owner: string,
+  repo: string,
+  token: string,
+  pullNumber: number,
+): Promise<{ merged: boolean; mergeCommitSha: string | null; baseRef: string } | null> {
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/pulls/${pullNumber}`, token);
+  if (!res.ok) return null;
+  const data: { merged?: boolean; merge_commit_sha?: string | null; base?: { ref?: string } } = await res
+    .json()
+    .catch(() => ({}));
+  return {
+    merged: data.merged === true,
+    mergeCommitSha: data.merge_commit_sha ?? null,
+    baseRef: data.base?.ref ?? "",
+  };
+}
+
+/**
+ * 指定コミットに対するmainの`deploy.yml`の最新run（#3644）。
+ * iOS配布の前提（そのコミットのWeb本番デプロイが済んでいること）を確かめる専用の取得で、
+ * ETag付きの共有取得（`fetchLatestDeployWorkflowRun`）は`head_sha`を返さないため使わない。
+ * runがまだ無い・取れないときはnull。
+ */
+export async function fetchDeployRunForSha(
+  owner: string,
+  repo: string,
+  token: string,
+  sha: string,
+): Promise<{ status: string; conclusion: string | null } | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${DEPLOY_WORKFLOW_FILE}/runs?branch=main&head_sha=${encodeURIComponent(sha)}&per_page=1`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return null;
+  const data: { workflow_runs?: Array<{ status?: string; conclusion?: string | null }> } = await res
+    .json()
+    .catch(() => ({}));
+  const run = data.workflow_runs?.[0];
+  return run?.status ? { status: run.status, conclusion: run.conclusion ?? null } : null;
+}

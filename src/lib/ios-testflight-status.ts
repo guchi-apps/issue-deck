@@ -150,3 +150,96 @@ export function latestDeliveredBuild(refs: readonly string[]): { tag: string; bu
   }
   return best;
 }
+
+/**
+ * `matching-refs`の結果（タグ名とそのタグが指すコミット）から、指定コミットへ配布済みのビルド番号を返す（#3644）。
+ * 配布のworkflowは配布し終えたときだけ、対象コミットへ軽量タグ`ios-testflight/<ビルド番号>`を付ける。
+ * run の`head_sha`は起動時のmain先端で束のコミットとは限らないため、配布済みの判定はrunではなくタグから引く。
+ */
+export function deliveredBuildForSha(
+  refs: readonly { ref: string; sha: string }[],
+  sha: string,
+): number | null {
+  let best: number | null = null;
+  for (const item of refs) {
+    if (item.sha !== sha) continue;
+    const buildNumber = buildNumberFromTag(item.ref.replace(/^refs\/tags\//, ""));
+    if (buildNumber !== null && (best === null || buildNumber > best)) best = buildNumber;
+  }
+  return best;
+}
+
+/** その版のWebの本番デプロイの状態（iOS配布欄の前提。Webの成否とは混ぜない） */
+export type IosWebDeployState = "success" | "pending" | "failed";
+
+/** デプロイのrun（無ければnull）から、iOS配布欄が使う3値へ寄せる */
+export function toWebDeployState(run: { status: string; conclusion: string | null } | null): IosWebDeployState {
+  if (!run || run.status !== "completed") return "pending";
+  return run.conclusion === "success" ? "success" : "failed";
+}
+
+export type IosReleasePanelInput = {
+  webDeploy: IosWebDeployState;
+  /** 束のmergeコミットが、いまのmainの先端か */
+  isMainTip: boolean;
+  /** 束のコミットへ配布済みのビルド番号（タグから） */
+  deliveredBuild: number | null;
+  /** 直近のrun（新しい順）。`headSha`は起動時のmain先端 */
+  runs: readonly { status: string; headSha: string; verdict: IosRunVerdict; stages: readonly IosStageStatus[] }[];
+  /** 束のmergeコミット */
+  sha: string;
+};
+
+export type IosReleasePanelState =
+  | { kind: "delivered"; buildNumber: number | null }
+  | { kind: "running"; stages: readonly IosStageStatus[] }
+  | { kind: "awaiting-web"; failed: boolean }
+  | { kind: "stale" }
+  | { kind: "not-needed" }
+  | { kind: "failed"; failedStage: string | null }
+  | { kind: "ready" };
+
+/**
+ * 束のiOS配布欄の表示状態（#3644）。
+ *
+ * - 配布済みはタグで決まる（古い束にも効く）
+ * - 実行中のrunがあれば、どの束のrunかを問わず「配布中」（concurrencyで直列化され二重起動もできない）
+ * - mainの先端でない束は、runと束を対応づけられない（`head_sha`が起動時のmain先端になる）ため操作しない
+ * - Webの本番デプロイが済むまでは操作できない。iOSの失敗とは別に扱う
+ * - 更新不要はrunの判定（skipped）から。失敗ではない
+ */
+export function judgeIosReleasePanel(input: IosReleasePanelInput): IosReleasePanelState {
+  if (input.deliveredBuild !== null) return { kind: "delivered", buildNumber: input.deliveredBuild };
+  const active = input.runs.find((run) => run.status !== "completed");
+  if (active) return { kind: "running", stages: active.stages };
+  if (!input.isMainTip) return { kind: "stale" };
+  if (input.webDeploy !== "success") return { kind: "awaiting-web", failed: input.webDeploy === "failed" };
+  const latest = input.runs.find((run) => run.headSha === input.sha);
+  if (latest?.verdict.kind === "skipped") return { kind: "not-needed" };
+  if (latest?.verdict.kind === "failed") return { kind: "failed", failedStage: latest.verdict.failedStage };
+  if (latest?.verdict.kind === "delivered") return { kind: "delivered", buildNumber: null };
+  return { kind: "ready" };
+}
+
+export type IosDispatchBlock =
+  | "not_merged"
+  | "not_main_tip"
+  | "deploy_not_succeeded"
+  | "already_delivered"
+  | "run_in_progress";
+
+/** 起動してよいかをサーバー側で確かめる（画面の非活性だけに頼らない）。起動できるならnull */
+export function checkIosDispatchable(input: {
+  merged: boolean;
+  isMainTip: boolean;
+  webDeploy: IosWebDeployState;
+  deliveredBuild: number | null;
+  hasActiveRun: boolean;
+}): IosDispatchBlock | null {
+  if (!input.merged) return "not_merged";
+  if (!input.isMainTip) return "not_main_tip";
+  if (input.webDeploy !== "success") return "deploy_not_succeeded";
+  if (input.deliveredBuild !== null) return "already_delivered";
+  if (input.hasActiveRun) return "run_in_progress";
+  return null;
+}

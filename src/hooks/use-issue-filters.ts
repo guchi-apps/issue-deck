@@ -32,9 +32,6 @@ export type IssueStateFilter = "all" | "open" | "closed";
  *
  * `releases`はリリース履歴（#2726）。全リポジトリのGitHub Releaseを時系列で見る。
  * `preview`と同じくホームのメニューからのドリルダウンだけで開き、ボトムナビのタブは持たない。
- *
- * `knowledge`は共通知識（#2912）。フリートの知見メモと`guchi-apps/docs`にたまった共通知識を
- * 見る。これも1カラムで、Issueの絞り込み条件とは無関係。
  */
 export type DashboardPane =
   | "issues"
@@ -44,7 +41,6 @@ export type DashboardPane =
   | "usage"
   | "releases"
   | "nightly"
-  | "knowledge"
   | "ideas";
 
 function parsePane(value: string | null): DashboardPane {
@@ -55,7 +51,6 @@ function parsePane(value: string | null): DashboardPane {
     value === "usage" ||
     value === "releases" ||
     value === "nightly" ||
-    value === "knowledge" ||
     value === "ideas"
   ) {
     return value;
@@ -285,11 +280,6 @@ export function useIssueFilters() {
     setFilters({ pane: "nightly", pr: null, prmodal: null });
   }, [setFilters]);
 
-  // 左メニューの「共通知識」画面への遷移（#2912）。上と同じくPRの選択状態を持たない。
-  const selectKnowledgePane = useCallback(() => {
-    setFilters({ pane: "knowledge", pr: null, prmodal: null });
-  }, [setFilters]);
-
   const selectIdeasPane = useCallback(() => {
     setFilters({ pane: "ideas", pr: null, prmodal: null });
   }, [setFilters]);
@@ -344,7 +334,6 @@ export function useIssueFilters() {
     selectUsagePane,
     selectReleaseHistoryPane,
     selectNightlyRunPane,
-    selectKnowledgePane,
     selectIdeasPane,
     selectPullRequest,
     selectPullRequestModal,

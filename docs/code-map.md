@@ -2626,7 +2626,9 @@ export function POST(request: NextRequest) {
   着手中は実行ボタンを押した後の2状態だけにする。**未着手は別の数字として、畳んだ行にだけ薄く出す**
   （#3163。`summary.readyIssueCount`・`countReadyIssues`）。保留のIssueも含むため、着手中より薄い色
   （不透明度55%）にして目立たせない。数える条件は左メニューの「未着手」ビューに揃え、**Project Statusが
-  無いIssue（`resolveProgressStatus`は未登録を一律`ready`とみなす）・`dispatchPendingAt`が立った
+  無いIssue（`resolveProgressStatus`は未登録を一律`ready`とみなす）も数える**（#3651。Issueとして登録済みの
+  ものを、セッション起動の有無に関わらず未着手のバックログとして出す。**盤面に載せていないリポジトリでは
+  open Issue全件が未着手になる**）。**`dispatchPendingAt`が立った
   Issue（押した直後はStatusが`Ready`のまま。#1347）・手作業／質問／レビューIssueは数えない**。
   `00.check-user`が付いた保留のIssueだけは意図して含める。一覧としては並べず、`hasAnything`
   （「動きなし」の判定）にも入れないので、未着手だけのリポジトリは「動きなし」の左に件数が並ぶ。**レーンとして出ているIssueを除くのは、畳んだ1行の
@@ -4146,7 +4148,7 @@ pnpm test:unit   # vitestのみ
 積み上がった`develop`を見る場所が別に要るため
 （[multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)「developの状態を確認環境で見る」）。
 
-- 押す口は画面のサイドメニュー「確認環境」（スマホはホームのメニュー）。組み立ては
+- 押す口だった画面のサイドメニュー「確認環境」（スマホはホームのメニュー）は**#3647で非表示**にしている（戻すときは`lib/nav-views.ts`の`PREVIEW_NAV_VISIBLE`をtrueにする）。組み立ては
   [`lib/dispatch/preview-server.ts`](../src/lib/dispatch/preview-server.ts)、画面は
   [`dashboard/preview-panel.tsx`](../src/components/dashboard/preview-panel.tsx)（PC・スマホ共用）
 - 経路は**既存のディスパッチのまま**（`POST /api/dispatch`の`kind: preview` → `DispatchJob`の
@@ -4283,16 +4285,19 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
 ## 「共通知識」画面は書式の揺れを前提に、best-effortで読む（#2912）
 
 フリート各リポジトリのIssueに残った知見メモ（`<!-- knowledge-candidate -->`）と、
-`guchi-apps/docs`の`knowledge/`にたまった共通知識を1画面で見る（`pane=knowledge`。スマホは
-「確認環境」と同じホームからのドリルダウン）。取得は
+`guchi-apps/docs`の`knowledge/`にたまった共通知識を1画面で見る（設定の「共通知識」区分。#3645で左メニューの専用画面から移した）。取得は
 [`lib/github/knowledge-api.ts`](../src/lib/github/knowledge-api.ts)、整形は
 [`lib/knowledge-board.ts`](../src/lib/knowledge-board.ts)、表示は
 [`components/dashboard/knowledge-board-panel.tsx`](../src/components/dashboard/knowledge-board-panel.tsx)。
 **判定させるボタンも共有知識を書き換えるボタンも置かない**——書き込めるのは`guchi-apps/docs`側の
 `promote-knowledge.yml`だけ、という[shared-knowledge.md](shared-knowledge.md)「9.4 汚染を防ぐための
-3重のガード」を崩さないため。**唯一の例外がマージ待ちの反映PRの「マージする」「マージしない」
-ボタン**（#2950。後述）で、これは共有知識を書き換えるのではなく、`promote-knowledge.yml`が
-作った既存のPRを人間の代わりにマージ・closeするだけなので、上のガードには触れない。
+3重のガード」を崩さないため。反映PRのマージは、以前は画面のボタン（#2950）で人が行っていたが、
+#3645でpollerの巡回（`POST /api/knowledge/promotion-merge-sweep`。実体は
+[`lib/github/knowledge-promotion-merge-run.ts`](../src/lib/github/knowledge-promotion-merge-run.ts)）が
+自動で行うようになった。`mergeable_state`が`clean`のPRだけをマージし、失敗・コンフリクト・
+判定待ちは見送る。共有知識を書き換えるのは変わらず`promote-knowledge.yml`が作ったPRだけで、
+巡回はそのPRをマージするだけ。間隔は`KNOWLEDGE_PROMOTION_MERGE_INTERVAL_MINUTES`（既定10分、0で停止）。
+下の#2950の記述にある「マージする」「マージしない」ボタンは、この変更で無くなっている。
 
 - **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
   設計したIssue（#2029・`guchi-apps/docs#65`）は、書式の説明としてマーカーをコードフェンスや
