@@ -1204,12 +1204,6 @@ export function IssueList({
                   now={now}
                 />
               )}
-              {issue.favorite && (
-                <Star
-                  className="size-3.5 shrink-0 fill-yellow-400 text-yellow-400"
-                  aria-label="お気に入り"
-                />
-              )}
               <UserAvatar login={issue.assignee?.login ?? issue.author.login} />
             </span>
           </div>

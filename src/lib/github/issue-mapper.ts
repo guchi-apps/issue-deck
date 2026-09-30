@@ -116,7 +116,6 @@ export function mapIssue(repository: RepositoryRef, raw: GithubApiIssue): Issue 
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: raw.html_url,
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
   };
@@ -169,7 +168,6 @@ export function dbIssueToDisplayIssue(
     manualStepVerifiedAt: null,
     projectStatus: row.projectStatus,
     htmlUrl: row.htmlUrl,
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
   };

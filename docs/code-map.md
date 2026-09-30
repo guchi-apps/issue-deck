@@ -3733,7 +3733,7 @@ export function POST(request: NextRequest) {
   [`scripts/reusable-sync-secrets.test.mjs`](../scripts/reusable-sync-secrets.test.mjs)が
   YAMLから`run:`本文を取り出し、同期スクリプトをスタブに差し替えて`bash -e`で実行する
   （`scripts/reusable-issue-labels.test.mjs`と同じ形）。
-- 独自テーブルを持つのは、既読状態・お気に入り・クイックフィルタ・リポジトリの非表示など
+- 独自テーブルを持つのは、既読状態・クイックフィルタ・リポジトリの非表示など
   **GitHub側に存在しない情報だけ**。GitHubにある情報を二重に持たない。
 
 ## 時刻を見る判定は`now`を引数で受け取る（描画中に`Date.now()`を呼ばない）（#2398）

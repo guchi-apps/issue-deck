@@ -7,7 +7,6 @@ import {
   MessageCircleQuestionMark,
   PlayCircle,
   Rocket,
-  Star,
   UserCheck,
   Wrench,
 } from "lucide-react";
@@ -112,7 +111,6 @@ const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
 
 export const baseNavViews: NavView[] = [
   { id: "all", label: "すべてのIssue" },
-  { id: "favorites", label: "お気に入り" },
   { id: "recently-added", label: "最近追加した" },
 ];
 
@@ -262,7 +260,6 @@ export function resolveMobileListNavViews(view: NavViewId): NavView[] {
  */
 export const sidebarIssueNavViews: NavView[] = [
   "all",
-  "favorites",
   "not-started",
   "in-progress",
   "release-pending",
@@ -272,7 +269,6 @@ export const sidebarIssueNavViews: NavView[] = [
 
 export const navViewIcons: Record<NavViewId, LucideIcon> = {
   all: ListChecks,
-  favorites: Star,
   "recently-added": Clock,
   ...LABEL_NAV_VIEW_ICONS,
 };

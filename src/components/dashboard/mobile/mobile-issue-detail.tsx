@@ -14,7 +14,6 @@ import {
   Pencil,
   Play,
   RotateCcw,
-  Star,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -196,7 +195,6 @@ type MobileIssueDetailProps = {
   /** 「Issueを移動」の成功後。移動でIDが変わるため、`onIssueUpdated`ではなく移動元・移動先を両方渡す（#3145） */
   onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
-  onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
   /**
    * 手作業の中の実機ファイル変更を、管理リポジトリ（`guchi-apps/vps`・`guchi-apps/subpc`）の
@@ -252,7 +250,6 @@ export function MobileIssueDetail({
   onIssueUpdated,
   onIssueMoved,
   onIssueDeleted,
-  onToggleFavorite,
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
@@ -788,18 +785,6 @@ export function MobileIssueDetail({
             出す。#1770）。その後、?（Claudeに質問する）はコメント欄の下の「質問する」と
             投稿されるコメントが同一だったため、⋯メニューからも外した（#1913）。
             マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
-        <button
-          type="button"
-          onClick={() => onToggleFavorite(issue)}
-          aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-          className="-m-3 rounded-full p-3 active:bg-muted"
-        >
-          <Star
-            className={
-              issue.favorite ? "size-5 fill-yellow-400 text-yellow-400" : "size-5 text-muted-foreground"
-            }
-          />
-        </button>
         <DropdownMenu open={isMoreMenuOpen} onOpenChange={setIsMoreMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button

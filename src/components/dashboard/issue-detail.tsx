@@ -13,7 +13,6 @@ import {
   Play,
   RotateCcw,
   SlidersHorizontal,
-  Star,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -193,7 +192,6 @@ type IssueDetailProps = {
   /** 「Issueを移動」の成功後（プロパティシート内）。IDが変わるため移動元・移動先を両方渡す（#3145） */
   onIssueMoved: (source: Issue, moved: Issue) => void;
   onIssueDeleted: (issue: Issue) => void;
-  onToggleFavorite: (issue: Issue) => void;
   onCreateFollowupIssue: (issue: Issue) => void;
   /**
    * 手作業の中の実機ファイル変更を、管理リポジトリ（`guchi-apps/vps`・`guchi-apps/subpc`）の
@@ -248,7 +246,6 @@ export function IssueDetail({
   onIssueUpdated,
   onIssueMoved,
   onIssueDeleted,
-  onToggleFavorite,
   onCreateFollowupIssue,
   onCreateConfigIssue,
   onCreateCodeReviewFindingIssue,
@@ -901,14 +898,6 @@ export function IssueDetail({
                 onClick={() => setIsPropertiesOpen(true)}
               >
                 <SlidersHorizontal />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label={issue.favorite ? "お気に入りから外す" : "お気に入りに追加"}
-                onClick={() => onToggleFavorite(issue)}
-              >
-                <Star className={cn(issue.favorite && "fill-yellow-400 text-yellow-400")} />
               </Button>
               {/* 開閉を持つのは、保留を選んだ時点でこのメニューも閉じるため（#2458）。
                   「いまは実施しない」はメニューを開いたまま選択肢を出すので、選び終えても

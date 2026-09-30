@@ -46,7 +46,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: "https://github.com/owner/repo/issues/1",
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,
@@ -499,12 +498,6 @@ describe("time-dependent stats", () => {
   });
 
   describe("filterIssuesByView", () => {
-    it("view=favoritesはfavorite=trueのIssueのみ返す", () => {
-      const issues = [makeIssue({ id: "1", favorite: true }), makeIssue({ id: "2", favorite: false })];
-      const result = filterIssuesByView(issues, "favorites", null);
-      expect(result.map((issue) => issue.id)).toEqual(["1"]);
-    });
-
     it("view=recently-addedは直近24時間以内に作成されたIssueのみ返す", () => {
       const issues = [
         makeIssue({ id: "1", createdAt: "2026-01-09T12:00:00.000Z" }),
@@ -756,19 +749,16 @@ describe("time-dependent stats", () => {
       const issues = [
         makeIssue({
           id: "1",
-          favorite: true,
           createdAt: "2026-01-09T12:00:00.000Z",
           labels: [{ name: "00.check-user", color: "red", description: null }],
         }),
         makeIssue({
           id: "2",
-          favorite: false,
           createdAt: "2025-01-01T00:00:00.000Z",
         }),
       ];
       expect(computeNavCountsForFilters(issues, listFilters, "me")).toEqual({
         all: 2,
-        favorites: 1,
         "recently-added": 1,
         "check-user": 1,
         "manual-step": 0,
