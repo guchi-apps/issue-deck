@@ -20,8 +20,17 @@ import { useIdeas, type IdeaSummary } from "@/hooks/use-ideas";
 
 const IDEAS_URL = "https://github.com/guchi-apps/ideas/tree/main/ideas";
 
-export function IdeasPanel({ active = true, onBack }: { active?: boolean; onBack?: () => void }) {
-  const { ideas, isLoading, deletingPath, error, refresh, remove } = useIdeas(active);
+export function IdeasPanel({
+  active = true,
+  onBack,
+  onChanged,
+}: {
+  active?: boolean;
+  onBack?: () => void;
+  /** 取得・削除のあとに呼ぶ。左メニューの件数の取り直しに使う（件数そのものは渡さない） */
+  onChanged?: () => void;
+}) {
+  const { ideas, isLoading, deletingPath, error, refresh, remove } = useIdeas(active, onChanged);
   const [deleteTarget, setDeleteTarget] = useState<IdeaSummary | null>(null);
 
   return (

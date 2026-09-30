@@ -90,6 +90,8 @@ type MobileHomeScreenProps = {
   onSelectNightlyRun: () => void;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す */
   nightlyRunQueuedCount: number | null;
+  /** 構想の件数（#3639）。取得できていないときはnull */
+  ideasCount?: number | null;
   /** 「共通知識」画面を開く（#2912）。「確認環境」と同じくメニューへ直接1行として置く */
   onSelectKnowledge: () => void;
   /** 新規アプリの構想一覧を開く */
@@ -182,6 +184,7 @@ export function MobileHomeScreenView({
   previewRunning,
   onSelectNightlyRun,
   nightlyRunQueuedCount,
+  ideasCount = null,
   onSelectKnowledge,
   onSelectIdeas = () => {},
   knowledgePromotionCount = null,
@@ -513,7 +516,7 @@ export function MobileHomeScreenView({
                 label="構想"
                 icon={Lightbulb}
                 onClick={onSelectIdeas}
-                count={null}
+                count={ideasCount}
                 title="新規アプリの構想を確認・整理する"
               />
               <MobileNavRow
