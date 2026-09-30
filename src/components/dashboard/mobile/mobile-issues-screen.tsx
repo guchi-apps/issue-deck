@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 
-import { MergePendingPullRequests } from "@/components/dashboard/merge-pending-pull-requests";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
@@ -17,10 +16,10 @@ import {
   sortIssues,
 } from "@/lib/issue-stats";
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
+import { isIssueAwaitingMerge } from "@/lib/pull-request-list";
 import { getNavViewLabel, navViewIsUserActionList } from "@/lib/nav-views";
 import {
   selectSnoozedIssueIds,
-  type SnoozeEntry,
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
@@ -40,26 +39,11 @@ type MobileIssuesScreenProps = {
   assignee: string | null;
   sort: IssueSort;
   /**
-   * 「ユーザーの確認待ち」の一覧の先頭に出す、ユーザーのマージを待っているPull Request
-   * （#1613・#1713）。ホーム画面の「要対応」とメニューの件数が数に含めているのと同じ配列を
-   * 受け取る。**数だけを渡して中身を出さないと、押して開いた一覧が空に見える。**
+   * ユーザーのマージを待っているPRの対応Issueのキー（`mergePendingIssueKeys`。#3650）。
+   * **スマホの確認待ちからはマージ待ちを外す**ため、これに当たるIssueを一覧・件数から除く。
+   * マージ待ちのPR自体は「Pull Request」の「マージ待ち」で見る。
    */
-  mergePendingPullRequests: PullRequestSummary[];
-  /**
-   * 上の配列のうち、確認待ちの件数へ足す数（#3345）。対応Issueが同じ一覧に並んでいるPRは
-   * そのIssueとして数えているため含まない。渡さなければ配列の件数をそのまま使う
-   */
-  checkUserPullRequestCount?: number;
-  /**
-   * 確認待ちに並んでいるIssue（`checkUserIssueKeys`。#3345）。対応Issueが並んでいるPRの
-   * カードに印を付けるのに使う
-   */
-  listedCheckUserIssueKeys?: ReadonlySet<string>;
-  /**
-   * CI・判定の完了待ちで上の配列から外したPRの件数（#2081）。件数表示には足さず、
-   * 枠の下の1行にだけ出す。
-   */
-  mergeCheckWaitingCount?: number;
+  mergePendingIssueKeys?: ReadonlySet<string>;
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
    * タブの件数から外し、ヘッダーの件数には内訳（`2件・実行中1件`）として出す。
@@ -80,30 +64,17 @@ type MobileIssuesScreenProps = {
   onNightlyRunQueued?: () => void;
   /** 一括予約の結果バーの「予約実行を見る」 */
   onOpenNightlyRun?: () => void;
-  /** 保留中で上の配列から外したマージ待ちPR（#2398）。「保留中N件」を開くと並ぶ */
-  snoozedMergePendingPullRequests?: PullRequestSummary[];
-  /** そのPRの期限（#2398）。「最短でいつ戻るか」の1行に使う */
-  snoozedMergePendingEntries?: SnoozeEntry[];
   /**
    * 取得済みのopenなPull Request（#2816）。`IssueList`へそのまま渡し、「developへマージ」の
    * 行に「CI実行中」「Claudeがレビュー中」といった添える字を出すために使う。
    */
   pullRequests?: PullRequestSummary[];
-  onSelectPullRequest: (pullRequest: PullRequestSummary) => void;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
   onBack?: () => void;
   /** 一覧を下へ引っ張ったときのIssueの取り直し（#1893） */
   onRefresh?: () => Promise<unknown> | void;
-  /**
-   * 同じ操作で走らせるPull Requestの取り直し（#2175）。**呼ぶのは「ユーザーの確認待ち」を
-   * 見ているときだけ。** この一覧の先頭にはマージ待ちPRが並ぶのに、確認待ちのビューでは
-   * PRの自動更新を止めている（`usePullRequests`に間隔を渡すのはPR画面とブランチ画面だけ）
-   * ため、Issueだけ取り直すと画面の上半分は開いた時点のまま残る。他のビューで呼ばないのは、
-   * 1回の取得でリポジトリ数ぶんのGitHub APIを使うため。
-   */
-  onRefreshPullRequests?: () => Promise<unknown> | void;
   /** 最終取得時刻（ISO8601）。`MobileIssueListScreen`へそのまま渡す（#1797） */
   fetchedAt?: string | null;
   /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
@@ -128,10 +99,7 @@ export function MobileIssuesScreen({
   state,
   assignee,
   sort,
-  mergePendingPullRequests,
-  checkUserPullRequestCount,
-  listedCheckUserIssueKeys,
-  mergeCheckWaitingCount = 0,
+  mergePendingIssueKeys,
   checkUserRunningIssueIds,
   snoozes,
   onSnooze,
@@ -139,16 +107,12 @@ export function MobileIssuesScreen({
   nightlyRunQueued,
   onNightlyRunQueued,
   onOpenNightlyRun,
-  snoozedMergePendingPullRequests,
-  snoozedMergePendingEntries,
   pullRequests,
-  onSelectPullRequest,
   onChangeView,
   onChangeFilters,
   onSelectIssue,
   onBack,
   onRefresh,
-  onRefreshPullRequests,
   fetchedAt,
   autoRefreshIntervalMs,
   onStartManualStepGuide,
@@ -172,17 +136,34 @@ export function MobileIssuesScreen({
     [issues, snoozes, now],
   );
 
+  // 確認待ちから外す、マージ待ちPRの対応Issue（#3650）。一覧と件数が同じ集合を読む
+  const awaitingMergeIssueIds = useMemo(
+    () =>
+      mergePendingIssueKeys && mergePendingIssueKeys.size > 0
+        ? new Set(
+            issues
+              .filter((issue) => isIssueAwaitingMerge(issue, mergePendingIssueKeys))
+              .map((issue) => issue.id),
+          )
+        : undefined,
+    [issues, mergePendingIssueKeys],
+  );
+
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
-    return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
-  }, [issues, view, currentUserLogin, listFilters, sort]);
+    const listed =
+      view === "check-user" && awaitingMergeIssueIds
+        ? scoped.filter((issue) => !awaitingMergeIssueIds.has(issue.id))
+        : scoped;
+    return sortIssues(applyIssueFilters(listed, listFilters), sort, view);
+  }, [issues, view, currentUserLogin, listFilters, sort, awaitingMergeIssueIds]);
 
   // タブごとの該当Issue件数（#880）。「ユーザーの確認待ち」のみだった件数バッジを
   // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じ数え方を使う。
-  const navCounts = useMemo(
-    () =>
+  const navCounts = useMemo(() => {
+    const count = (target: Issue[]) =>
       computeNavCountsForFilters(
-        issues,
+        target,
         listFilters,
         currentUserLogin,
         issues,
@@ -190,23 +171,24 @@ export function MobileIssuesScreen({
         checkUserRunningIssueIds,
         // どのビューからも保留中を外す（#2398・#2456。同上、PCと同じ数え方）
         snoozedIssueIds,
-      ),
-    [issues, listFilters, currentUserLogin, checkUserRunningIssueIds, snoozedIssueIds],
-  );
+      );
+    const counts = count(issues);
+    if (!awaitingMergeIssueIds) return counts;
+    // 確認待ちだけはマージ待ちPRの対応Issueを除いて数える（#3650）
+    const withoutAwaitingMerge = count(issues.filter((issue) => !awaitingMergeIssueIds.has(issue.id)));
+    return { ...counts, "check-user": withoutAwaitingMerge["check-user"] };
+  }, [
+    issues,
+    listFilters,
+    currentUserLogin,
+    checkUserRunningIssueIds,
+    snoozedIssueIds,
+    awaitingMergeIssueIds,
+  ]);
 
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
   // 一覧に並ぶのは手作業Issueだけで、その中からは参照先のIssueを引けない
   const prerequisiteReadiness = useMemo(() => computeIssuePrerequisiteReadiness(issues), [issues]);
-
-  // 一覧を下へ引っ張ったときの取り直し（#1893）。**確認待ちのときだけPull Requestも
-  // 一緒に取り直し、両方が返るまで待つ**（#2175）。待たずに返すと「更新中…」が最短表示の
-  // 0.5秒（`MIN_REFRESHING_MS`）で消え、数秒かかるGitHubからの取得が終わったように見える。
-  const handleRefresh = useCallback(async () => {
-    await Promise.all([
-      onRefresh?.(),
-      view === "check-user" ? onRefreshPullRequests?.() : undefined,
-    ]);
-  }, [onRefresh, onRefreshPullRequests, view]);
 
   // Issue詳細へ遷移するとこの画面はアンマウントされるため、スクロール位置は絞り込み条件
   // ごとにsessionStorageへ退避しておき、戻ってきたときに復元する（#773）。
@@ -245,7 +227,7 @@ export function MobileIssuesScreen({
       onSelectIssue={onSelectIssue}
       onBack={onBack}
       scrollKey={scrollKey}
-      onRefresh={onRefresh ? handleRefresh : undefined}
+      onRefresh={onRefresh}
       fetchedAt={fetchedAt}
       autoRefreshIntervalMs={autoRefreshIntervalMs}
       prerequisiteReadiness={prerequisiteReadiness}
@@ -256,43 +238,12 @@ export function MobileIssuesScreen({
       onStartCodeReview={onStartCodeReview}
       codeReviewIssues={codeReviewIssues}
       codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
-      // 確認待ちにはIssueだけでなくマージ待ちPRも並べる（#1713）。件数の合流も
-      // `MobileIssueListScreen`がこれを見て行うため、件数と中身が別々にならない
-      pinned={{
-        view: "check-user",
-        count: checkUserPullRequestCount ?? mergePendingPullRequests.length,
-        section: (
-          <MergePendingPullRequests
-            pullRequests={mergePendingPullRequests}
-            listedIssueKeys={listedCheckUserIssueKeys}
-            waitingForChecksCount={mergeCheckWaitingCount}
-            onSelectPullRequest={onSelectPullRequest}
-            onSnooze={onSnooze}
-            now={now}
-          />
-        ),
-      }}
       snoozes={snoozes}
       onSnooze={onSnooze}
       onUnsnooze={onUnsnooze}
       nightlyRunQueued={nightlyRunQueued}
       onNightlyRunQueued={onNightlyRunQueued}
       onOpenNightlyRun={onOpenNightlyRun}
-      snoozedPinned={
-        view === "check-user" && snoozes && onUnsnooze
-          ? {
-              count: snoozedMergePendingPullRequests?.length ?? 0,
-              entries: snoozedMergePendingEntries ?? [],
-              section: (
-                <MergePendingPullRequests
-                  pullRequests={snoozedMergePendingPullRequests ?? []}
-                  onSelectPullRequest={onSelectPullRequest}
-                  snoozed={{ snoozes, now, onUnsnooze }}
-                />
-              ),
-            }
-          : undefined
-      }
     />
   );
 }

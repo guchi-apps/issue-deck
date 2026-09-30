@@ -1,12 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileIssuesScreen } from "@/components/dashboard/mobile/mobile-issues-screen";
-import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { Issue } from "@/types/issue";
-import type { PullRequestSummary } from "@/types/pull-request";
 
 // 一覧本体はこの画面の関心事ではない（取得系フックを丸ごと抱えるため）ので差し替える。
 // 先頭の固定枠（#1713。マージ待ちPR）と、引っ張って更新の呼び出し口（#2175）だけは通す
@@ -61,51 +59,11 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
-  return {
-    ciRunId: null,
-    ciChecks: [],
-    id: "owner/repo#10",
-    repositoryFullName: "owner/repo",
-    repositoryPrivate: false,
-    number: 10,
-    title: "v1.0.0をmainへリリースする",
-    htmlUrl: "https://github.com/owner/repo/pull/10",
-    authorLogin: "claude",
-    draft: false,
-    state: "open",
-    merged: false,
-    mergedAt: null,
-    baseRef: "main",
-    headRef: "develop",
-    headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
-    kind: "release",
-    linkedIssueNumber: null,
-    linkedIssueNumbers: [],
-    autoMergeEnabled: false,
-    linkedIssueCheckUser: false,
-    linkedIssueCheckReason: null,
-    ciState: "success",
-    mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
-    mergeable: null,
-    repairWorkflowAvailability: {},
-    repairRun: null,
-    reviewVerdict: null,
-    releaseVerification: null,
-    createdAt: "2026-08-01T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
 function renderScreen(
   issues: Issue[],
   options: {
     view?: "all" | "check-user" | "manual-step";
-    mergePendingPullRequests?: PullRequestSummary[];
-    mergeCheckWaitingCount?: number;
-    onRefresh?: () => Promise<unknown> | void;
-    onRefreshPullRequests?: () => Promise<unknown> | void;
+    mergePendingIssueKeys?: ReadonlySet<string>;
   } = {},
 ) {
   render(
@@ -120,15 +78,11 @@ function renderScreen(
       state="open"
       assignee={null}
       sort="created"
-      mergePendingPullRequests={options.mergePendingPullRequests ?? []}
-      mergeCheckWaitingCount={options.mergeCheckWaitingCount ?? 0}
-      onSelectPullRequest={vi.fn()}
+      mergePendingIssueKeys={options.mergePendingIssueKeys}
       onChangeView={vi.fn()}
       onChangeFilters={vi.fn()}
       onSelectIssue={vi.fn()}
       onStartManualStepGuide={vi.fn()}
-      onRefresh={options.onRefresh}
-      onRefreshPullRequests={options.onRefreshPullRequests}
     />,
   );
 }
@@ -159,69 +113,40 @@ describe("MobileIssuesScreen のビュー件数（#1689）", () => {
   });
 });
 
-describe("MobileIssuesScreen の確認待ちに並ぶマージ待ちPR（#1713）", () => {
+const CHECK_USER_LABEL = { name: "00.check-user", color: "red", description: null };
+
+describe("MobileIssuesScreen の確認待ちからマージ待ちを外す（#3650）", () => {
   afterEach(() => {
     cleanup();
   });
 
-  it("確認待ちのIssueが0件でも、マージ待ちPRを一覧に出して件数にも数える", () => {
-    renderScreen([], {
-      view: "check-user",
-      mergePendingPullRequests: [
-        makePullRequest(),
-        makePullRequest({
-          id: "owner/other#3",
-          repositoryFullName: "owner/other",
-          number: 3,
-          title: "v2.0.0をmainへリリースする",
-        }),
+  it("マージ待ちPRの対応Issueは確認待ちの一覧と件数から除く", () => {
+    renderScreen(
+      [
+        makeIssue({ id: "1", number: 1, labels: [CHECK_USER_LABEL] }),
+        makeIssue({ id: "2", number: 2, labels: [CHECK_USER_LABEL] }),
       ],
-    });
+      { view: "check-user", mergePendingIssueKeys: new Set(["owner/repo#2"]) },
+    );
 
-    // Issue以外も並ぶビューなので、見出しは「Issue」ではなくビュー名（#2081）
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("ユーザーの確認待ち");
-    // ホーム画面の「要対応」と同じ2件になり、中身もその2件が並ぶ
-    // （#3165で枠の見出しにも総件数のバッジが出るため、ヘッダーの中へ絞って読む）
-    expect(within(headerOf()).getByText("2件")).toBeTruthy();
-    expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /v1.0.0をmainへリリースする/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("2");
+    expect(within(headerOf()).getByText("1件")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("1");
   });
 
-  it("マージ待ちPRが無ければ枠ごと出さない", () => {
+  it("対応するPRが無いIssue（事後の確認など）は確認待ちに残す", () => {
+    renderScreen([makeIssue({ id: "1", number: 1, labels: [CHECK_USER_LABEL] })], {
+      view: "check-user",
+      mergePendingIssueKeys: new Set(["owner/repo#99"]),
+    });
+
+    expect(within(headerOf()).getByText("1件")).toBeTruthy();
+  });
+
+  it("マージ待ちPRの枠は出さない（マージ待ちは「Pull Request」のタイルで見る）", () => {
     renderScreen([], { view: "check-user" });
 
     expect(screen.getByText("0件")).toBeTruthy();
     expect(screen.queryByText("あなたのマージを待っているPull Request")).toBeNull();
-  });
-});
-
-describe("MobileIssuesScreen のCI・判定の完了待ち（#2081）", () => {
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("押せるPRが無くても、完了待ちがあれば件数だけを1行出す", () => {
-    renderScreen([], { view: "check-user", mergeCheckWaitingCount: 3 });
-
-    expect(
-      screen.getByText(/CI・判定の完了待ちが3件あります/),
-    ).toBeTruthy();
-    // 件数には足さない（いま人が押せるものだけを数える）
-    expect(screen.getByText("0件")).toBeTruthy();
-    expect(screen.queryByText("あなたのマージを待っているPull Request")).toBeNull();
-  });
-
-  it("押せるPRがあるときは枠の中へ添える", () => {
-    renderScreen([], {
-      view: "check-user",
-      mergePendingPullRequests: [makePullRequest()],
-      mergeCheckWaitingCount: 2,
-    });
-
-    expect(screen.getByText("あなたのマージを待っているPull Request")).toBeTruthy();
-    expect(screen.getByText(/CI・判定の完了待ちが2件あります/)).toBeTruthy();
-    expect(within(headerOf()).getByText("1件")).toBeTruthy();
   });
 });
 
@@ -242,40 +167,5 @@ describe("MobileIssuesScreen のヘッダーの見出し（#2081）", () => {
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Issue");
     expect(screen.getByText("すべてのIssue・0件")).toBeTruthy();
-  });
-});
-
-describe("MobileIssuesScreen の引っ張って更新（#2175）", () => {
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("確認待ちではIssueとマージ待ちPRの両方を取り直す", async () => {
-    // この一覧の先頭にはマージ待ちPRが並ぶ（#1713）のに、確認待ちのビューではPRの
-    // 自動更新を止めているため、Issueだけ取り直すと画面の上半分が開いた時点のまま残る。
-    const onRefresh = vi.fn().mockResolvedValue(undefined);
-    const onRefreshPullRequests = vi.fn().mockResolvedValue(undefined);
-    renderScreen([makeIssue()], { view: "check-user", onRefresh, onRefreshPullRequests });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "引っ張って更新" }));
-    });
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(onRefreshPullRequests).toHaveBeenCalledTimes(1);
-  });
-
-  it("他のビューではPRを取りに行かない", async () => {
-    // 1回の取得でリポジトリ数ぶんのGitHub APIを使うため、PRが並ばない一覧では呼ばない
-    const onRefresh = vi.fn().mockResolvedValue(undefined);
-    const onRefreshPullRequests = vi.fn().mockResolvedValue(undefined);
-    renderScreen([makeIssue()], { view: "all", onRefresh, onRefreshPullRequests });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "引っ張って更新" }));
-    });
-
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-    expect(onRefreshPullRequests).not.toHaveBeenCalled();
   });
 });
