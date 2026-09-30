@@ -241,6 +241,15 @@ describe("MobileHomeScreen（#1690）", () => {
   });
 
   // 共通知識の反映PRの未マージ件数（#3082）。PCの左メニューと同じ出し方
+  it("構想の行に件数を出し、未取得なら出さない（#3639）", () => {
+    renderHome({ ideasCount: 7 });
+    expect(screen.getByRole("button", { name: /構想/ }).textContent).toBe("構想7");
+
+    cleanup();
+    renderHome({ ideasCount: null });
+    expect(screen.getByRole("button", { name: /構想/ }).textContent).toBe("構想");
+  });
+
   it("共通知識の行に、未マージの反映PRの件数をオレンジの丸で出す", () => {
     renderHome({ knowledgePromotionCount: 2 });
 

@@ -94,6 +94,8 @@ type SidebarNavProps = {
   knowledgePromotionCount?: number | null;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
+  /** 構想の件数（#3639）。取得できていないときはnullで、何も出さない */
+  ideasCount?: number | null;
   /**
    * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
    * 使うのは年に数回で、状態を持たない入口のため。
@@ -195,6 +197,7 @@ export function SidebarNavView({
   onSelectIdeas = () => {},
   knowledgePromotionCount = null,
   nightlyRunQueuedCount = null,
+  ideasCount = null,
   onLaunchNewApp,
   navCounts,
   checkUserPullRequestCount,
@@ -416,6 +419,7 @@ export function SidebarNavView({
             icon: Lightbulb,
             active: activePane === "ideas",
             onClick: onSelectIdeas,
+            count: ideasCount,
             title: "新規アプリの構想を確認・整理する",
           })}
           {navRow({
