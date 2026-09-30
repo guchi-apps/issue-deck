@@ -33,7 +33,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: `https://github.com/${REPO}/issues/${number}`,
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,

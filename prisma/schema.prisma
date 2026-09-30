@@ -30,7 +30,6 @@ model User {
   userInstallations    UserInstallation[]
   hiddenRepositories   HiddenRepository[]
   favoriteRepositories FavoriteRepository[]
-  favoriteIssues       FavoriteIssue[]
   commentReads         IssueCommentRead[]
   pushSubscriptions    PushSubscription[]
   snoozedItems         SnoozedItem[]
@@ -327,7 +326,6 @@ model Issue {
 
   repository       Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   labels           IssueLabel[]
-  favoritedBy      FavoriteIssue[]
   commentReadBy    IssueCommentRead[]
   commentSummaries IssueCommentSummary[]
 
@@ -349,21 +347,6 @@ model IssueCommentSummary {
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@unique([issueId, githubCommentId])
-  @@index([issueId])
-}
-
-// ユーザーごとにお気に入り登録したIssue
-model FavoriteIssue {
-  id      String @id @default(cuid())
-  userId  String
-  issueId String
-
-  createdAt DateTime @default(now())
-
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, issueId])
   @@index([issueId])
 }
 

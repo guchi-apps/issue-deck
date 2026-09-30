@@ -145,7 +145,6 @@ export type Issue = {
    */
   projectStatus: string | null;
   htmlUrl: string;
-  favorite: boolean;
   hasUnreadComments: boolean;
   /** ユーザーが最後に読んだ時点でのコメント総数。「ページ下部へ移動」ボタンで最初の未読コメントへ移動するために使う */
   readCommentCount: number;
@@ -175,7 +174,6 @@ export type LabelNavViewId = (typeof LABEL_NAV_VIEW_IDS)[number];
 
 export const NAV_VIEW_IDS = [
   "all",
-  "favorites",
   "recently-added",
   ...LABEL_NAV_VIEW_IDS,
 ] as const;

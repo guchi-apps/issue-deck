@@ -1547,7 +1547,7 @@ SHA-256（`<64桁>.html`）の名前で書き、同じ名前を`storedFilename`�
 
 | 埋まる | 埋まらない |
 | --- | --- |
-| Issue一覧・Issue詳細・カンバン・検索・お気に入り | PR一覧（`/api/pull-requests`）・ブランチ |
+| Issue一覧・Issue詳細・カンバン・検索 | PR一覧（`/api/pull-requests`）・ブランチ |
 | ラベル・進捗（DBキャッシュの値） | サブIssue（`/api/issues/sub-issues`） |
 | コメント（ダミーリポジトリ向けの短絡が`/api/issues/comments`にある） | 再同期（`POST /api/sync/issues`）・Webhook・Projectsへの進捗書き込み |
 

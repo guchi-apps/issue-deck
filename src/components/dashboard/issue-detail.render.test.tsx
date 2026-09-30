@@ -191,7 +191,6 @@ function buildIssue(overrides: Partial<Issue> = {}): Issue {
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/1",
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: comments.length,
     ...overrides,
@@ -209,7 +208,6 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
       onIssueMoved={vi.fn()}
       onIssueUpdated={vi.fn()}
       onIssueDeleted={vi.fn()}
-      onToggleFavorite={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
       onCreateCodeReviewFindingIssue={vi.fn()}
@@ -241,7 +239,6 @@ function renderMobileDetail(
       onIssueMoved={vi.fn()}
       onIssueUpdated={vi.fn()}
       onIssueDeleted={vi.fn()}
-      onToggleFavorite={vi.fn()}
       onCreateFollowupIssue={vi.fn()}
       onCreateConfigIssue={vi.fn()}
       onCreateCodeReviewFindingIssue={vi.fn()}

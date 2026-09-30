@@ -43,7 +43,6 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     manualStepVerifiedAt: null,
     projectStatus: null,
     htmlUrl: "https://github.com/guchi-apps/shopping-list/issues/100",
-    favorite: false,
     hasUnreadComments: false,
     readCommentCount: 0,
     ...overrides,

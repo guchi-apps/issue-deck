@@ -421,7 +421,7 @@ describe("SidebarNav", () => {
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 19)).toEqual([
+    expect(labels.slice(0, 18)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
@@ -432,7 +432,6 @@ describe("SidebarNav", () => {
       "共通知識",
       "AI使用量",
       "すべてのIssue",
-      "お気に入り",
       "未着手",
       "実行中",
       "本番反映待ち",
