@@ -718,6 +718,9 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 質問への回答待ちの間だけ（#3686）。回答後3分は結果表示の行が残る（`WAITING`以外）ので、
+  // アーティファクトの初期表示位置の出し分けには`WAITING`だけを使う
+  const questionAnswerPending = questionRequest?.status === "WAITING";
   // 質問の前提として見せるコメント（#2742）。「上記の計画で〜」の“上記”はコメント欄の
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
@@ -792,7 +795,7 @@ export function IssueDetail({
     hasPullRequestSection: visiblePullRequestLinks.length > 0,
     // 計画への返事を画面から送れる間は、行き先をRemote Controlではなく計画パネルにする（#2061）
     planDecisionPending: planRequest?.status === "WAITING",
-    questionAnswerPending: questionRequest?.status === "WAITING",
+    questionAnswerPending,
     sessionStatePending,
     implementationAgent: issueSession ? resolveIssueImplementationAgent(issueSession) : undefined,
     pullRequestStop,
@@ -1054,10 +1057,15 @@ export function IssueDetail({
               停滞していなければ`SessionStallPanel`自身が何も描かない */}
           <SessionStallPanel session={issueSession} dispatch={dispatch} />
 
-          {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——アーティファクト・計画の
-              どちらよりも上（#2860でアーティファクトを計画の上へ移した後も変わらない）。
-              計画やアーティファクトを出した後に質問することはあり、そのとき待たれているのは
-              新しい方（質問）になる */}
+          {/* 計画なしの質問待ちのアーティファクト（#3686）。`25.artifact-required`で計画を
+              挟まないときは見た目の承認を質問で待つので、計画承認待ちと同じく**承認する場所の
+              すぐ上**へ独立カードを出す（判断材料を先に見せる。計画承認待ちでは下記の位置） */}
+          {questionAnswerPending && !planDecisionPending && (
+            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+          )}
+
+          {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——計画パネルよりも上
+              （アーティファクトは、質問待ちのときだけこの上に出る。#3686） */}
           {questionRequest && (
             <div {...checkUserTargetProps("question")}>
               {/* **質問が変われば作り直す**（#2158と同じ理由。Issue詳細はIssueを切り替えても
@@ -1132,7 +1140,7 @@ export function IssueDetail({
           {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
               上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
               承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
-          {!planDecisionPending && (
+          {!planDecisionPending && !questionAnswerPending && (
             <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
           )}
 
@@ -1313,7 +1321,7 @@ export function IssueDetail({
                   <LocalSessionWaitingInputNotice
                     session={issueSession}
                     planDecisionPending={planRequest?.status === "WAITING"}
-                    questionAnswerPending={questionRequest?.status === "WAITING"}
+                    questionAnswerPending={questionAnswerPending}
                   />
                 ) : (
                   <LocalSessionApprovalNotice session={issueSession} />
