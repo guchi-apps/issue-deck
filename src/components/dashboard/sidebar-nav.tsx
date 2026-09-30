@@ -4,7 +4,6 @@ import { Fragment, useState } from "react";
 import type { CSSProperties } from "react";
 import {
   Archive,
-  BookOpen,
   CalendarClock,
   CircleSlash,
   Eye,
@@ -36,7 +35,6 @@ import {
   isPullRequestViewAttention,
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
-import { describePromotionPullRequests } from "@/lib/knowledge-promotion-pr";
 import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
@@ -83,15 +81,8 @@ type SidebarNavProps = {
   onSelectReleaseHistory: () => void;
   /** 予約実行（#2995）の画面を開く */
   onSelectNightlyRun: () => void;
-  /** 共通知識（#2912）の画面を開く */
-  onSelectKnowledge: () => void;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
-  /**
-   * 共通知識の反映PR（`guchi-apps/docs`の`knowledge/promote-*`）の未マージ件数（#3082）。
-   * 「共通知識」行の件数とオレンジの丸に使う。**nullは未取得**で、そのときは出さない
-   */
-  knowledgePromotionCount?: number | null;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
   /** 構想の件数（#3639）。取得できていないときはnullで、何も出さない */
@@ -193,9 +184,7 @@ export function SidebarNavView({
   onSelectUsage,
   onSelectReleaseHistory,
   onSelectNightlyRun,
-  onSelectKnowledge,
   onSelectIdeas = () => {},
-  knowledgePromotionCount = null,
   nightlyRunQueuedCount = null,
   ideasCount = null,
   onLaunchNewApp,
@@ -421,24 +410,6 @@ export function SidebarNavView({
             onClick: onSelectIdeas,
             count: ideasCount,
             title: "新規アプリの構想を確認・整理する",
-          })}
-          {navRow({
-            key: "knowledge",
-            label: "共通知識",
-            icon: BookOpen,
-            active: activePane === "knowledge",
-            onClick: onSelectKnowledge,
-            // 出すのは**マージ待ちの反映PRの件数だけ**（#3082）。未判定の知見メモの数は出さない
-            // （#2912。判定するのは`guchi-apps/docs`側のワークフローで、ここから押せる操作が
-            // 無く、数字を出すと「片付けると減るもの」に見える）。反映PRは開いた先の画面から
-            // マージ・closeできる人の待ちなので、「マージ待ち」と同じオレンジの丸で強調する。
-            // 0件のときは`0`も丸も出さない（出すと「取得できていない」と区別できない）
-            count: knowledgePromotionCount && knowledgePromotionCount > 0 ? knowledgePromotionCount : null,
-            emphasis: (knowledgePromotionCount ?? 0) > 0 ? "attention" : "none",
-            title: describePromotionPullRequests(
-              "フリートの知見メモと、共有知識にたまった知見を見る",
-              knowledgePromotionCount,
-            ),
           })}
           {navRow({
             key: "usage",

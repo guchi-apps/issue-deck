@@ -1,6 +1,7 @@
 import {
   Activity,
   Bell,
+  BookOpen,
   Boxes,
   Eye,
   History,
@@ -63,6 +64,12 @@ export const SETTINGS_SECTIONS = [
     label: "画像",
     icon: ImageIcon,
     description: "添付した画像の容量・使用状況・自動削除",
+  },
+  {
+    key: "knowledge",
+    label: "共通知識",
+    icon: BookOpen,
+    description: "フリートの知見メモと、共有知識にたまった知見（反映PRは自動でマージされます）",
   },
   { key: "status", label: "状態", icon: Activity, description: "使用量と障害状況" },
   {

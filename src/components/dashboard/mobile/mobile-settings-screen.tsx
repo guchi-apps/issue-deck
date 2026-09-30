@@ -15,6 +15,7 @@ import {
 } from "@/components/dashboard/settings/execution-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
 import { ImagesSection } from "@/components/dashboard/settings/images-section";
+import { KnowledgeSection } from "@/components/dashboard/settings/knowledge-section";
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
 import { PostCreateDestinationSection } from "@/components/dashboard/settings/post-create-destination-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
@@ -213,6 +214,7 @@ export function MobileSettingsScreen({
           />
         )}
         {section === "images" && <ImagesSection />}
+        {section === "knowledge" && <KnowledgeSection compact />}
         {section === "status" && (
           <StatusSection
             rateLimits={data.rateLimits}
