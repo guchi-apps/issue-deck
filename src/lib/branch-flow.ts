@@ -1068,10 +1068,32 @@ function laneMergedAts(lanes: BranchFlowLane[]): string[] {
 export function hasChangesAfterReleaseFreeze(
   group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
 ): boolean {
+  return splitLanesByReleaseFreeze(group).afterFreeze.length > 0;
+}
+
+/**
+ * 未リリースの束のレーンを、リリースPRの凍結の前後で分ける（#3664）。
+ *
+ * 凍結後にdevelopへ入った作業（`afterFreeze`）はそのリリースに含まれず次のリリースへ回るので、
+ * 画面ではリリース見出しの上へ出す。**基準は「レーン内の最新のマージ時刻が凍結点より後」**で、
+ * 「修正を入れて作り直す」の判定（`hasChangesAfterReleaseFreeze`）もここから導く（食い違わせない）。
+ * リリースPRが無い束・凍結ブランチでない旧世代のリリースPRでは分けず、全て`included`に入れる。
+ */
+export function splitLanesByReleaseFreeze(
+  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
+): { afterFreeze: BranchFlowLane[]; included: BranchFlowLane[] } {
   const release = group.pullRequest;
-  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) return false;
+  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) {
+    return { afterFreeze: [], included: group.lanes };
+  }
   const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();
-  return laneMergedAts(group.lanes).some((mergedAt) => new Date(mergedAt).getTime() > frozenAt);
+  const afterFreeze: BranchFlowLane[] = [];
+  const included: BranchFlowLane[] = [];
+  for (const lane of group.lanes) {
+    const latest = laneMergedAts([lane]).at(-1);
+    (latest !== undefined && new Date(latest).getTime() > frozenAt ? afterFreeze : included).push(lane);
+  }
+  return { afterFreeze, included };
 }
 
 /** リリースPRの版に対応する、マージ済みバンプPR（`release/v<版>`）の作成時刻。無ければundefined */

@@ -75,7 +75,9 @@ import {
   MAIN_BRANCH,
   MERGED_TO_MAIN_GROUP_KEY,
   formatUnreleasedSummary,
+  countOpenManualSteps,
   hasChangesAfterReleaseFreeze,
+  splitLanesByReleaseFreeze,
   isClosedLane,
   isReleaseAutoProgressing,
   unreleasedSummary,
@@ -976,13 +978,34 @@ function ReleaseGroupHeader({
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute top-[1.15rem] left-[0.5rem] w-[2.6rem] max-sm:left-[0.4rem] max-sm:w-[2rem]",
-          released ? "border-t-2 border-purple-500" : "border-t-2 border-dashed border-purple-500",
-        )}
-      />
+      {mergedToMain ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute top-[1.15rem] left-[0.5rem] w-[2.6rem] max-sm:left-[0.4rem] max-sm:w-[2rem]",
+            released ? "border-t-2 border-purple-500" : "border-t-2 border-dashed border-purple-500",
+          )}
+        />
+      ) : (
+        /* developのレールを下からたどり、この行でmainへ左に曲がって入る矢印（#3664）。
+           developを経由しない`main`直接マージの束には描かない（意味が逆になる） */
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 28 24"
+          preserveAspectRatio="none"
+          className="absolute top-[calc(1.15rem-1px)] left-[0.5rem] h-6 w-[1.75rem] overflow-visible text-purple-500 max-sm:left-[0.4rem] max-sm:w-[1.35rem]"
+        >
+          <path
+            d="M28 24 V12 Q28 1 17 1 H5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeDasharray={released ? undefined : "4 3"}
+            vectorEffect="non-scaling-stroke"
+          />
+          <path d="M10 -4 L3 1 L10 6 Z" fill="currentColor" />
+        </svg>
+      )}
       <span
         aria-hidden="true"
         className={cn(
@@ -1141,11 +1164,11 @@ function DeviceBuildInstalledBand({ deviceBuild }: { deviceBuild: BranchFlowDevi
 }
 
 /** バージョンの束に何件乗っているか。手作業が残っていればそれも出す */
-function ReleaseGroupNote({ group }: { group: BranchFlowReleaseGroup }) {
-  const released = group.mergedAt !== null;
+function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; released: boolean }) {
+  const openManualStepCount = countOpenManualSteps(lanes);
   const parts = [
-    `このバージョンに乗${released ? "った" : "る"}変更 ${group.lanes.length}件`,
-    ...(group.openManualStepCount > 0 ? [`残っている手作業 ${group.openManualStepCount}件`] : []),
+    `このバージョンに乗${released ? "った" : "る"}変更 ${lanes.length}件`,
+    ...(openManualStepCount > 0 ? [`残っている手作業 ${openManualStepCount}件`] : []),
   ];
 
   return (
@@ -1500,8 +1523,26 @@ function ReleaseGroupHeaderWithLanes({
   deviceBuild?: BranchFlowDeviceBuild | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
+  const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
   return (
     <>
+      {afterFreeze.length > 0 && (
+        <>
+          <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-amber-700 max-sm:pl-[2.6rem] dark:text-amber-400">
+            {group.version ? `v${group.version}` : "このリリース"}には含まれない変更{" "}
+            {afterFreeze.length}件（リリースPR作成後にdevelopへ入った分）
+          </li>
+          {afterFreeze.map((lane) => (
+            <LaneRow
+              key={lane.key}
+              repositoryFullName={repositoryFullName}
+              lane={lane}
+              onMerged={onMerged}
+            />
+          ))}
+        </>
+      )}
       <ReleaseGroupHeader
         repositoryFullName={repositoryFullName}
         group={group}
@@ -1510,8 +1551,10 @@ function ReleaseGroupHeaderWithLanes({
         deviceBuild={deviceBuild}
         onMerged={onMerged}
       />
-      {group.lanes.length > 0 && <ReleaseGroupNote group={group} />}
-      {group.lanes.map((lane) => (
+      {included.length > 0 && (
+        <ReleaseGroupNote lanes={included} released={group.mergedAt !== null} />
+      )}
+      {included.map((lane) => (
         <LaneRow
           key={lane.key}
           repositoryFullName={repositoryFullName}
