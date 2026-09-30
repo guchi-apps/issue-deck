@@ -150,7 +150,6 @@ import {
   computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCountsForFilters,
-  computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
@@ -180,6 +179,8 @@ import {
   computePullRequestNavCounts,
   filterPullRequestsByView,
   pullRequestsAwaitingUserMerge,
+  isIssueAwaitingMerge,
+  mergePendingIssueKeys,
   pullRequestsCountedAsCheckUser,
   pullRequestsWaitingForMergeChecks,
   splitSnoozedPullRequests,
@@ -1381,12 +1382,24 @@ export function IssueDeckShell({
   // （#1947。`refresh`は同期の合図で、待っても取得の完了とは無関係に返る）。
   const refreshCheckUserPullRequests = openPullRequests.refreshFromPull;
 
-  // スマホのホーム画面の先頭に出す3枚（#1690）。件数は数え直さず`navCounts`から引くので、
-  // すぐ下に並ぶメニューの行と必ず同じ数字になる。
-  const overviewStats = useMemo(
-    () => computeOverviewStats(navCounts, checkUserPullRequestCount),
-    [navCounts, checkUserPullRequestCount],
+  // スマホは確認待ちからマージ待ちを外し、「Pull Request」の「マージ待ち」へ寄せる（#3650）。
+  // 外すのはユーザーのマージを待っているPRの対応Issueだけで、対応するopenなPRが無い
+  // `01.check-merge`のIssue（事後の確認）は確認待ちに残す。PCの左メニューは変えない
+  const mobileMergePendingIssueKeys = useMemo(
+    () => mergePendingIssueKeys(crossRepositoryPullRequests),
+    [crossRepositoryPullRequests],
   );
+  // スマホのホームの確認待ちタイルの件数。`navCounts`が数えているIssue（実行中・保留中を除いた
+  // もの）から、外す分だけを引く。PRは足さない
+  const mobileCheckUserCount = useMemo(() => {
+    const excluded = checkUserIssues.filter(
+      (issue) =>
+        isIssueAwaitingMerge(issue, mobileMergePendingIssueKeys) &&
+        !checkUserRunningIssueIds.has(issue.id) &&
+        !snoozedIssueIds.has(issue.id),
+    ).length;
+    return Math.max(0, navCounts["check-user"] - excluded);
+  }, [checkUserIssues, mobileMergePendingIssueKeys, checkUserRunningIssueIds, snoozedIssueIds, navCounts]);
 
   // ブランチ画面のリリースの束が組み立てられる状態か（#1711）。**要求した`scope`ではなく、
   // 手元にある取得結果の母集団で判断する。** ブランチ画面を開いた直後は`open`のときの結果が
@@ -2058,9 +2071,7 @@ export function IssueDeckShell({
             <div className="relative flex-1 overflow-hidden">
               {mobileScreen.kind === "home" && (
                 <MobileHomeScreen
-                  overviewStats={overviewStats}
-                  navCounts={navCounts}
-                  checkUserPullRequestCount={checkUserPullRequestCount}
+                  navCounts={{ ...navCounts, "check-user": mobileCheckUserCount }}
                   manualStepAttention={manualStepAttention}
                   unconfirmedQuestionCount={unconfirmedQuestionCount}
                   waitingQuestionCount={waitingQuestionCount}
@@ -2239,12 +2250,8 @@ export function IssueDeckShell({
                   state={mobileScreen.state}
                   assignee={mobileScreen.assignee}
                   sort={mobileScreen.sort}
-                  /* ホーム画面の「要対応」が数に含めているのと同じ配列を渡す（#1713）。
-                     数だけ足して中身を出さないと、押して開いた一覧が空に見える */
-                  mergePendingPullRequests={mergePendingPullRequests}
-                  checkUserPullRequestCount={checkUserPullRequestCount}
-                  listedCheckUserIssueKeys={listedCheckUserIssueKeys}
-                  mergeCheckWaitingCount={mergeCheckWaitingCount}
+                  /* 確認待ちからマージ待ちPRの対応Issueを外す（#3650） */
+                  mergePendingIssueKeys={mobileMergePendingIssueKeys}
                   /* 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
                      PCの一覧と同じ集合を渡す */
                   pullRequests={crossRepositoryPullRequests}
@@ -2257,13 +2264,9 @@ export function IssueDeckShell({
                   /* 一覧から予約実行へまとめて積む（#3284）。積めたら件数・行のチップを取り直す */
                   onNightlyRunQueued={nightlyRun.refresh}
                   onOpenNightlyRun={selectNightlyRun}
-                  snoozedMergePendingPullRequests={snoozedMergePendingPullRequests}
-                  snoozedMergePendingEntries={snoozedMergePendingEntries}
                   /* 確認待ちのうちエージェントがまだ動いているもの（#2174）。ヘッダーの
                      件数の内訳に使う（左メニュー・ホームの数字からは外してある） */
                   checkUserRunningIssueIds={checkUserRunningIssueIds}
-                  /* PR画面へ移らず、その場に重ねて開く（#2149）。戻る操作で閉じる */
-                  onSelectPullRequest={(pullRequest) => selectPullRequestModal(pullRequest.id)}
                   onChangeView={(view) => updateListFilters({ view })}
                   onChangeFilters={(filters) => updateListFilters(filters)}
                   onSelectIssue={selectIssue}
@@ -2272,9 +2275,6 @@ export function IssueDeckShell({
                   /* 一覧を下へ引っ張ったときの取り直し（#1893）。ポーリングと同じ
                      経路（reconcileIssues・確認待ちトーストの判定）を通す */
                   onRefresh={issuePolling.refresh}
-                  /* 同じ操作で走らせるマージ待ちPRの取り直し（#2175）。呼ぶかどうかの
-                     判定（確認待ちを見ているときだけ）は受け取った側が持つ */
-                  onRefreshPullRequests={refreshCheckUserPullRequests}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
                   onStartManualStepGuide={manualStepGuide.start}

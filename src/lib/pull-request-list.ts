@@ -380,6 +380,31 @@ export function isLinkedIssueListed(
 }
 
 /**
+ * ユーザーのマージを待っているPR（`requiresUserMerge`）の対応Issueを、`isIssueAwaitingMerge`で
+ * 引ける形にする（#3650）。スマホのホームは「マージ待ち」を独立したタイルへ寄せ、確認待ちからは
+ * 外すため、外す対象のIssueをここで決める。
+ *
+ * **対応するopenなPRが無い`01.check-merge`のIssue（判定より先にマージされた「事後の確認」など）は
+ * ここに入らない**ので、確認待ちに残る。外すとマージ待ちにも確認待ちにも出なくなるため。
+ */
+export function mergePendingIssueKeys(pullRequests: PullRequestSummary[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const pullRequest of pullRequests) {
+    if (!requiresUserMerge(pullRequest) || pullRequest.linkedIssueNumber === null) continue;
+    keys.add(`${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`);
+  }
+  return keys;
+}
+
+/** Issueがユーザーのマージ待ちPRの対応Issueか（#3650）。`mergePendingIssueKeys`の結果で引く */
+export function isIssueAwaitingMerge(
+  issue: { repositoryFullName: string; number: number },
+  keys: ReadonlySet<string>,
+): boolean {
+  return keys.has(`${issue.repositoryFullName}#${issue.number}`);
+}
+
+/**
  * 枠に並べるPRのうち、確認待ちの**件数へ足す**もの（#1713・#3345）。
  *
  * develop向けPRは判定結果を対応Issueの`00.check-user`として書く（`requiresUserMerge`の

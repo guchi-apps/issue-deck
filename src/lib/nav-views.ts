@@ -261,8 +261,9 @@ export function resolveMobileListNavViews(view: NavViewId): NavView[] {
  * リリースの実行なので、「人が動くまで進まないもの」の枠へ入れると上から順に手を動かせば
  * 盤面が進む、という読み方が崩れる。
  *
- * **この配列はスマホのホーム画面のメニューも使う**（#1690。`mobile-home-screen.tsx`）ので、
- * ここへ足すとPCとスマホの両方に出る。
+ * **この配列はスマホのホーム画面のタイルも使う**（#1690。`mobile-home-screen.tsx`）ので、
+ * ここへ足すとPCとスマホの両方に出る。ただしスマホは#3650でPCと同じ並びをやめ、ホーム側の
+ * `HOME_TILE_LAYOUT`でグループ分けする。そこに無いものは「一覧」グループの末尾に出る。
  */
 export const sidebarIssueNavViews: NavView[] = [
   "all",

@@ -19,10 +19,9 @@ import {
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
-import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-count";
+import type { NavCountEmphasis } from "@/components/dashboard/nav-count";
 import { useNotificationState } from "@/components/dashboard/notification-state";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
-import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
@@ -44,19 +43,17 @@ import {
 } from "@/lib/merge-pending-attention";
 import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
-import type { NavViewId, OverviewStat } from "@/types/issue";
+import { cn } from "@/lib/utils";
+import type { NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 
 type MobileHomeScreenProps = {
-  /** 先頭の3枚（#1690。要対応・実行中・本番反映待ち） */
-  overviewStats: OverviewStat[];
-  navCounts: Record<NavViewId, number>;
   /**
-   * 「ユーザーの確認待ち」へ一緒に出す、ユーザーのマージ待ちPRの件数（#1690）。
-   * PCの左メニュー（`sidebar-nav.tsx`）と同じ数え方にするために受け取る。
+   * ビューごとの件数。**「ユーザーの確認待ち」は、マージ待ちPRの対応Issueを除いた数を渡す**
+   * （#3650。マージ待ちは「マージ待ち」のタイルで見る。除く規則は`mergePendingIssueKeys`）
    */
-  checkUserPullRequestCount: number;
+  navCounts: Record<NavViewId, number>;
   /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
   /**
@@ -125,13 +122,13 @@ type MobileHomeScreenProps = {
 /**
  * スマホのホーム画面。
  *
- * **並びは「いまの状況 → メニュー → お気に入りリポジトリ」**（#1690）。先頭のダッシュボードで
- * 盤面とサブPCの様子を掴み、その下のメニューから目的の一覧へ降りる、という読み方にしてある。
+ * **並びは「サブPCの様子 → 件数のタイル（要確認・進行・一覧）→ お気に入りリポジトリ」**（#3650）。
+ * 縦一列のリストでは「マージ待ち」「予約実行」が1画面目の外へ出ていたため、2列のタイルにした。
  *
- * **メニューはPCの左メニュー（`sidebar-nav.tsx`）と同じ配列・同じ並びを使う。** 以前はここだけ
- * `navViews`から機械的に作った9項目の平坦な一覧で、PCとどちらが正なのか分からない状態だった。
- * 出す項目を決めているのは`lib/nav-views.ts`・`lib/pull-request-views.ts`の`sidebar*`で、
- * 片方を足せば両方に出る。
+ * **出す項目はPCの左メニュー（`sidebar-nav.tsx`）と同じ`sidebar*`の配列から取るが、並びはPCと
+ * 揃えない**（#3650）。グループと順序は`HOME_TILE_LAYOUT`の1か所で決め、そこに無い項目は「一覧」
+ * の末尾へ出る。**「確認待ち」の件数にマージ待ちPRは含めない**——マージ待ちは「マージ待ち」の
+ * タイルで見る（呼び出し側が除いた`navCounts`を渡す）。
  *
  * **リポジトリは1行だけ置き、ラベルは置かない**（#2724）。リポジトリ一覧はフッターの「Issue」
  * タブが担っていたが、そのタブを外したのでここが唯一の入口になった（PCの左メニューのように
@@ -165,9 +162,7 @@ export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "onRefresh" 
  * 描画だけを持つ本体。Providerに依存しないので、件数を渡してそのまま試験できる。
  */
 export function MobileHomeScreenView({
-  overviewStats,
   navCounts,
-  checkUserPullRequestCount,
   manualStepAttention,
   unconfirmedQuestionCount,
   waitingQuestionCount,
@@ -201,8 +196,27 @@ export function MobileHomeScreenView({
     ため、状態はここで持つ。開く口が2つになるだけで、中身は1つのまま
   */
   const [dispatchStatusOpen, setDispatchStatusOpen] = useState(false);
-  // 確認待ちにはIssueだけでなく、ユーザーがマージするしかないPRも数に含める（PCと同じ）
-  const checkUserCount = navCounts["check-user"] + checkUserPullRequestCount;
+  // 確認待ちはIssueの確認待ち（計画待ちなど）だけを数える。マージ待ちは別のタイルで見る（#3650）
+  const checkUserCount = navCounts["check-user"];
+  const tiles = buildHomeTiles({
+    navCounts,
+    checkUserCount,
+    manualStepAttention,
+    unconfirmedQuestionCount,
+    waitingQuestionCount,
+    pullRequestNavCounts,
+    mergePendingAttention,
+    previewRunning,
+    nightlyRunQueuedCount,
+    ideasCount,
+    repositoryCount,
+    onSelectQuickView,
+    onSelectPullRequests,
+    onSelectPreview,
+    onSelectNightlyRun,
+    onSelectIdeas,
+    onSelectRepos,
+  });
 
   /*
     下へ引っ張って更新（#2182）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
@@ -278,30 +292,13 @@ export function MobileHomeScreenView({
           }}
         >
           {/*
-            先頭のダッシュボード（#1690）。盤面の3枚と、サブPCの様子を1枚ずつ。
+            先頭のサブPCの様子（#1690）。盤面の件数は下のタイルへ統合した（#3650）。
             ホストの様子はここへ戻したもので、#1638でヘッダーの実行状況シートへ移していた。
             **ホームは使用率だけのサマリ、ヘッダーのシートは動いているセッションとキュー全体
             （順番待ち・失敗・停止操作）**という切り分けにしてある（#1933でセッションの一覧を
             シート側へ寄せ、ホームのカードはシートを開く口を兼ねるようにした）
           */}
           <div className="p-4">
-            <h2 className="mb-2 text-sm font-semibold">いまの状況</h2>
-            <div className="grid grid-cols-3 gap-2">
-              {overviewStats.map((stat) => (
-                <button
-                  key={stat.label}
-                  type="button"
-                  onClick={() => onSelectQuickView(stat.linkedView)}
-                  className="w-full text-left"
-                >
-                  <Card className="gap-1 p-3 hover:bg-accent active:bg-accent">
-                    <p className="text-xs text-muted-foreground">{stat.label}</p>
-                    <p className="text-lg font-semibold">{stat.value}</p>
-                  </Card>
-                </button>
-              ))}
-            </div>
-
             {/*
               サブPCの様子（#1933）。**使用率だけを横並びにした縮めた版**で、動いている
               セッション・スクリプトの版・「更新して再起動」はここには出さず、押して開く
@@ -340,182 +337,24 @@ export function MobileHomeScreenView({
           </div>
 
           {/*
-            人が動くまで進まないもの（#1613と同じ枠）。PCと同じく見出しを付けずメニューの
-            最上段に固定する。ここに他のビューを足すと、上から順に手を動かせば盤面が進む、
-            という読み方が崩れる
+            件数のタイル（#3650）。**縦一列のリストでは「マージ待ち」「予約実行」が1画面目の外へ
+            出ていた**ため、2列のタイルにして1画面で件数が読めるようにした。並びは要確認（人が
+            動くまで進まないもの）→進行→一覧。グループ分けは`HOME_TILE_LAYOUT`の1か所で決める
           */}
-          <div className="px-4 pb-4">
-            <ul className="flex flex-col gap-1">
-              {sidebarAttentionNavViews.map((view) => (
-                <MobileNavRow
-                  key={view.id}
-                  label={view.label}
-                  icon={navViewIcons[view.id]}
-                  onClick={() => onSelectQuickView(view.id)}
-                  count={view.id === "check-user" ? checkUserCount : navCounts[view.id]}
-                  // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
-                  // あるときだけで、前提待ちしか無い間は強調しない（#1613）
-                  emphasis={
-                    (
-                      view.id === "check-user"
-                        ? checkUserCount > 0
-                        : manualStepAttention.actionable > 0
-                    )
-                      ? "attention"
-                      : "none"
-                  }
-                />
-              ))}
-            </ul>
-
-            <Separator className="my-2" />
-
-            <ul className="flex flex-col gap-1">
-              {sidebarQuestionNavViews.map((view) => {
-                // 合図は行ごとに決める（#2325・PCと同じ`resolveQuestionNavSignals`）。
-                // まとめて渡すと、質問の回答待ちのあいだ「コードレビュー」の行まで回る
-                const signals = resolveQuestionNavSignals(view.id, {
-                  total: navCounts.question,
-                  unconfirmed: unconfirmedQuestionCount,
-                  waiting: waitingQuestionCount,
-                });
-                return (
-                  <MobileNavRow
-                    key={view.id}
-                    label={view.label}
-                    icon={navViewIcons[view.id]}
-                    onClick={() => onSelectQuickView(view.id)}
-                    // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）。
-                    // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
-                    count={navCounts[view.id]}
-                    emphasis={signals.attention ? "attention" : "none"}
-                    busy={signals.busy}
-                    title={signals.title}
-                  />
-                );
-              })}
-            </ul>
-          </div>
-
-          <div className="px-4 pb-4">
-            <h2 className="mb-2 text-sm font-semibold">Issue</h2>
-            <ul className="flex flex-col gap-1">
-              {sidebarIssueNavViews.map((view) => (
-                <MobileNavRow
-                  key={view.id}
-                  label={view.label}
-                  icon={navViewIcons[view.id]}
-                  onClick={() => onSelectQuickView(view.id)}
-                  count={navCounts[view.id]}
-                />
-              ))}
-            </ul>
-          </div>
-
-          <div className="px-4 pb-4">
-            <h2 className="mb-2 text-sm font-semibold">Pull Request</h2>
-            <ul className="flex flex-col gap-1">
-              {sidebarPullRequestViews.map((view) => (
-                <MobileNavRow
-                  key={view.id}
-                  label={view.label}
-                  icon={pullRequestViewIcons[view.id]}
-                  onClick={() => onSelectPullRequests(view.id)}
-                  count={pullRequestNavCounts[view.id]}
-                  // 「マージ待ち」のうち人が手を動かすまで進まないものが残っているときだけ
-                  // オレンジの丸にする（#2334・PCの左メニューと同じ
-                  // `isPullRequestViewAttention`）。判定を画面ごとに書くと、片方だけ
-                  // 直された時点でPCとスマホで意味が食い違う
-                  emphasis={
-                    isPullRequestViewAttention(view.id, mergePendingAttention)
-                      ? "attention"
-                      : "none"
-                  }
-                  title={
-                    view.id === "completed"
-                      ? describeMergePendingAttention(view.description, mergePendingAttention)
-                      : undefined
-                  }
-                />
-              ))}
-            </ul>
-          </div>
-
-          {/*
-            「リポジトリ」「コードレビュー」「確認環境」。Pull Requestの枠の下・お気に入り
-            リポジトリの枠の上に置く。見出しは付けない——PCの左メニュー（`sidebar-nav.tsx`）と
-            同じ扱い
-          */}
-          <div className="px-4 pb-4">
-            <ul className="flex flex-col gap-1">
-              {/* リポジトリ一覧（#2724）。**フッターの「Issue」タブを外した代わりの入口**で、
-                  ここを置かないと、お気に入りに入れていないリポジトリはURLを直に打つしか
-                  開く方法が無くなる（下の「お気に入りリポジトリ」はお気に入りだけの一覧で、
-                  1件も無ければ枠ごと出ない）。件数は連携しているリポジトリの数。
-                  「コードレビュー」の直上に置く（#2737。以前はIssueの枠の末尾にあった） */}
-              <MobileNavRow
-                label="リポジトリ"
-                icon={FolderGit2}
-                onClick={onSelectRepos}
-                count={repositoryCount}
-                title="リポジトリを選んで、そのリポジトリのIssue一覧を開く"
-              />
-              {sidebarCodeReviewNavViews.map((view) => {
-                const signals = resolveQuestionNavSignals(view.id, {
-                  total: navCounts.question,
-                  unconfirmed: unconfirmedQuestionCount,
-                  waiting: waitingQuestionCount,
-                });
-                return (
-                  <MobileNavRow
-                    key={view.id}
-                    label={view.label}
-                    icon={navViewIcons[view.id]}
-                    onClick={() => onSelectQuickView(view.id)}
-                    count={navCounts[view.id]}
-                    emphasis={signals.attention ? "attention" : "none"}
-                    busy={signals.busy}
-                    title={signals.title}
-                  />
-                );
-              })}
-              {/* 確認環境（#2444）。**件数は出さない**（同時に動かせるのは1つなので0か1にしか
-                  ならない）。動いていることはオレンジの丸で出す */}
-              {PREVIEW_NAV_VISIBLE && (
-              <MobileNavRow
-                label="確認環境"
-                icon={MonitorPlay}
-                onClick={onSelectPreview}
-                count={null}
-                emphasis={previewRunning ? "attention" : "none"}
-                title={
-                  previewRunning
-                    ? "確認環境が動いています"
-                    : "developの最新をサブPCで動かして画面で確かめる"
-                }
-              />
-              )}
-              {/* 予約実行（#2995）。数字は積んである予定の件数（PCの左メニューと同じ）。
-                  **「リリース履歴」の行は#2811でフッターのタブ（「リリース」）へ移した**——
-                  AI使用量（#2631）と同じで、同じ画面への入口を2か所に持たない */}
-              <MobileNavRow
-                label="予約実行"
-                icon={CalendarClock}
-                onClick={onSelectNightlyRun}
-                count={nightlyRunQueuedCount}
-                title="次の5時間枠の予定、直近の結果を見る"
-              />
-              {/* 共通知識（#2912）。出す件数は**マージ待ちの反映PRだけ**（#3082。PCの左メニューと
-                  同じ。未判定の知見メモの数は、ここから押せる操作が無いので出さない） */}
-              <MobileNavRow
-                label="構想"
-                icon={Lightbulb}
-                onClick={onSelectIdeas}
-                count={ideasCount}
-                title="新規アプリの構想を確認・整理する"
-              />
-            </ul>
-          </div>
+          {HOME_TILE_GROUPS.map((group) => {
+            const groupTiles = tiles.filter((tile) => tile.group === group.id);
+            if (groupTiles.length === 0) return null;
+            return (
+              <div key={group.id} className="px-4 pb-3">
+                <h2 className="mb-2 text-sm font-semibold">{group.label}</h2>
+                <ul className="grid grid-cols-2 gap-2">
+                  {groupTiles.map((tile) => (
+                    <HomeTile key={tile.key} tile={tile} />
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
 
           {favoriteRepositories.length > 0 && (
             <div className="px-4 pb-4">
@@ -551,15 +390,15 @@ export function MobileHomeScreenView({
           */}
           <div className="px-4 pb-4">
             <Separator className="mb-2" />
-            <ul className="flex flex-col gap-1">
-              <MobileNavRow
-                label="新規アプリを立ち上げる"
-                icon={Rocket}
-                onClick={onLaunchNewApp}
-                count={null}
-                title="リポジトリの作成と、残りの作業のIssue起票までを行う"
-              />
-            </ul>
+            <button
+              type="button"
+              onClick={onLaunchNewApp}
+              title="リポジトリの作成と、残りの作業のIssue起票までを行う"
+              className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+            >
+              <Rocket className="size-3.5 shrink-0 text-muted-foreground" />
+              新規アプリを立ち上げる
+            </button>
           </div>
         </div>
       </div>
@@ -567,46 +406,238 @@ export function MobileHomeScreenView({
   );
 }
 
+
+type HomeTileGroupId = "attention" | "progress" | "list";
+
+/** タイルのグループ（#3650）。見出しの文言と並び順 */
+const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
+  { id: "attention", label: "要確認" },
+  { id: "progress", label: "進行" },
+  { id: "list", label: "一覧" },
+];
+
 /**
- * メニューの1行。**見た目はPCの`sidebar-nav.tsx`の`navRow`と揃え、高さだけスマホの
- * タップ領域（44px）に合わせる。** 選択中の表示は持たない——ホームは現在地ではなく
- * 入口の一覧で、押せばその画面へ遷移して離れるため。
+ * どのタイルをどのグループのどの順に置くか（#3650）。**組み直しの規則はここの1か所だけ**。
+ * キーはIssueのビューid、PRのビューは`pr:<id>`、ビューでないものは下の`buildHomeTiles`が付ける名前。
+ * ここに無いものは「一覧」の末尾に出る——`sidebar*`の配列へ項目を足しても、スマホで
+ * 出なくなることはない（PCと同じ並びに揃える約束は#3650で外した）。
  */
-function MobileNavRow({
-  label,
-  icon: Icon,
-  onClick,
-  count,
-  emphasis = "none",
-  busy = false,
-  title,
-}: {
+const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
+  attention: ["check-user", "manual-step", "pr:completed", "question"],
+  progress: ["in-progress", "release-pending", "not-started", "nightly-run", "pr:in-progress"],
+  list: ["all", "pr:all", "repos", "code-review", "ideas", "preview"],
+};
+
+type HomeTile = {
+  key: string;
+  group: HomeTileGroupId;
   label: string;
   icon: LucideIcon;
-  onClick: () => void;
-  /** null・未指定なら件数を出さない */
-  count?: number | null;
-  /** 件数の強調（`NavCount`。左メニューと同じ使い分け） */
-  emphasis?: NavCountEmphasis;
-  /** その行の先で何かが処理中か（#2309・PCの左メニューと同じ使い分け） */
-  busy?: boolean;
+  count: number | null;
+  emphasis: NavCountEmphasis;
+  busy: boolean;
   title?: string;
-}) {
+  onClick: () => void;
+};
+
+function resolveTileGroup(key: string): { group: HomeTileGroupId; rank: number } {
+  for (const group of HOME_TILE_GROUPS) {
+    const rank = HOME_TILE_LAYOUT[group.id].indexOf(key);
+    if (rank >= 0) return { group: group.id, rank };
+  }
+  return { group: "list", rank: Number.MAX_SAFE_INTEGER };
+}
+
+type BuildHomeTilesInput = {
+  navCounts: Record<NavViewId, number>;
+  checkUserCount: number;
+  manualStepAttention: ManualStepAttention;
+  unconfirmedQuestionCount: number;
+  waitingQuestionCount: number;
+  pullRequestNavCounts: PullRequestNavCounts;
+  mergePendingAttention: MergePendingAttention | null;
+  previewRunning: boolean;
+  nightlyRunQueuedCount: number | null;
+  ideasCount: number | null;
+  repositoryCount: number;
+  onSelectQuickView: (view: NavViewId) => void;
+  onSelectPullRequests: (view: PullRequestViewId) => void;
+  onSelectPreview: () => void;
+  onSelectNightlyRun: () => void;
+  onSelectIdeas: () => void;
+  onSelectRepos: () => void;
+};
+
+/**
+ * ホームに出すタイルを組み立てる（#3650）。出す項目の判定はPCの左メニューと同じ`sidebar*`の
+ * 配列から取り、グループと順序だけをこの画面の`HOME_TILE_LAYOUT`で決める。
+ * **PRの「実行中」は見出しが無くなってもIssueの「実行中」と区別できるよう「PR実行中」と出す。**
+ */
+function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
+  const tiles: Omit<HomeTile, "group">[] = [];
+
+  for (const view of sidebarAttentionNavViews) {
+    tiles.push({
+      key: view.id,
+      label: view.label,
+      icon: navViewIcons[view.id],
+      count: view.id === "check-user" ? input.checkUserCount : input.navCounts[view.id],
+      // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものがあるときだけで、
+      // 前提待ちしか無い間は強調しない（#1613）
+      emphasis: (
+        view.id === "check-user"
+          ? input.checkUserCount > 0
+          : input.manualStepAttention.actionable > 0
+      )
+        ? "attention"
+        : "none",
+      busy: false,
+      onClick: () => input.onSelectQuickView(view.id),
+    });
+  }
+
+  // 質問・コードレビューは合図を行ごとに決める（#2325・PCと同じ`resolveQuestionNavSignals`）
+  for (const view of [...sidebarQuestionNavViews, ...sidebarCodeReviewNavViews]) {
+    const signals = resolveQuestionNavSignals(view.id, {
+      total: input.navCounts.question,
+      unconfirmed: input.unconfirmedQuestionCount,
+      waiting: input.waitingQuestionCount,
+    });
+    tiles.push({
+      key: view.id,
+      label: view.label,
+      icon: navViewIcons[view.id],
+      // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）
+      count: input.navCounts[view.id],
+      emphasis: signals.attention ? "attention" : "none",
+      busy: signals.busy,
+      title: signals.title,
+      onClick: () => input.onSelectQuickView(view.id),
+    });
+  }
+
+  for (const view of sidebarIssueNavViews) {
+    tiles.push({
+      key: view.id,
+      label: view.label,
+      icon: navViewIcons[view.id],
+      count: input.navCounts[view.id],
+      emphasis: "none",
+      busy: false,
+      onClick: () => input.onSelectQuickView(view.id),
+    });
+  }
+
+  for (const view of sidebarPullRequestViews) {
+    tiles.push({
+      key: `pr:${view.id}`,
+      label: view.id === "in-progress" ? "PR実行中" : view.label,
+      icon: pullRequestViewIcons[view.id],
+      count: input.pullRequestNavCounts[view.id],
+      // 「マージ待ち」のうち人が手を動かすまで進まないものが残っているときだけオレンジの丸に
+      // する（#2334・PCの左メニューと同じ`isPullRequestViewAttention`）
+      emphasis: isPullRequestViewAttention(view.id, input.mergePendingAttention)
+        ? "attention"
+        : "none",
+      busy: false,
+      title:
+        view.id === "completed"
+          ? describeMergePendingAttention(view.description, input.mergePendingAttention)
+          : undefined,
+      onClick: () => input.onSelectPullRequests(view.id),
+    });
+  }
+
+  // リポジトリ一覧（#2724）。フッターの「Issue」タブを外した代わりの入口。件数は連携している数
+  tiles.push({
+    key: "repos",
+    label: "リポジトリ",
+    icon: FolderGit2,
+    count: input.repositoryCount,
+    emphasis: "none",
+    busy: false,
+    title: "リポジトリを選んで、そのリポジトリのIssue一覧を開く",
+    onClick: input.onSelectRepos,
+  });
+
+  // 確認環境（#2444）。件数は出さず、動いていることをオレンジの丸で出す
+  if (PREVIEW_NAV_VISIBLE) {
+    tiles.push({
+      key: "preview",
+      label: "確認環境",
+      icon: MonitorPlay,
+      count: null,
+      emphasis: input.previewRunning ? "attention" : "none",
+      busy: false,
+      title: input.previewRunning
+        ? "確認環境が動いています"
+        : "developの最新をサブPCで動かして画面で確かめる",
+      onClick: input.onSelectPreview,
+    });
+  }
+
+  tiles.push(
+    {
+      key: "nightly-run",
+      label: "予約実行",
+      icon: CalendarClock,
+      count: input.nightlyRunQueuedCount,
+      emphasis: "none",
+      busy: false,
+      title: "次の5時間枠の予定、直近の結果を見る",
+      onClick: input.onSelectNightlyRun,
+    },
+    {
+      key: "ideas",
+      label: "構想",
+      icon: Lightbulb,
+      count: input.ideasCount,
+      emphasis: "none",
+      busy: false,
+      title: "新規アプリの構想を確認・整理する",
+      onClick: input.onSelectIdeas,
+    },
+  );
+
+  return tiles
+    .map((tile) => ({ ...tile, ...resolveTileGroup(tile.key) }))
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ rank: _rank, ...tile }) => tile);
+}
+
+/**
+ * ホームのタイル1枚。**強調の使い分けは`NavCount`（PCの左メニュー）と揃える**——オレンジの丸は
+ * 「人が手を動かすまで進まないもの」の合図で、数字の見た目だけを大きくしてある。
+ * 選択中の表示は持たない（押せばその画面へ遷移して離れるため）。
+ */
+function HomeTile({ tile }: { tile: HomeTile }) {
+  const Icon = tile.icon;
   return (
     <li>
       <button
         type="button"
-        onClick={onClick}
-        title={title}
-        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 py-2.5 text-left text-sm hover:bg-accent"
+        onClick={tile.onClick}
+        title={tile.title}
+        className={cn(
+          "flex min-h-16 w-full flex-col justify-between gap-1 rounded-xl border bg-card px-3 py-2.5 text-left hover:bg-accent active:bg-accent",
+          tile.emphasis === "attention" && "border-amber-500/50 bg-amber-500/10",
+        )}
       >
-        <span className="flex items-center gap-2">
-          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-          {label}
-          {busy && <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />}
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Icon className="size-3.5 shrink-0" />
+          <span className="truncate">{tile.label}</span>
+          {tile.busy && <Loader2 className="size-3 shrink-0 animate-spin text-blue-500" />}
         </span>
-        {/* 強調の使い分けと見た目は`NavCount`（PCの左メニューと共通） */}
-        <NavCount count={count} emphasis={emphasis} />
+        {tile.count !== null && (
+          <span
+            className={cn(
+              "text-xl leading-none font-semibold",
+              tile.emphasis === "attention" && "text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {tile.count}
+          </span>
+        )}
       </button>
     </li>
   );

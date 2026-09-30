@@ -27,7 +27,7 @@ import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import type { MergePendingAttention } from "@/lib/merge-pending-attention";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
 import { NAV_VIEW_IDS } from "@/types/issue";
-import type { NavViewId, OverviewStat } from "@/types/issue";
+import type { NavViewId } from "@/types/issue";
 
 const NAV_COUNTS = Object.fromEntries(NAV_VIEW_IDS.map((id) => [id, 0])) as Record<
   NavViewId,
@@ -44,12 +44,6 @@ const NO_MERGE_PENDING: MergePendingAttention = {
   repairing: 0,
   actionRequired: 0,
 };
-
-const OVERVIEW_STATS: OverviewStat[] = [
-  { label: "要対応", value: "2", linkedView: "check-user" },
-  { label: "実行中", value: "4", linkedView: "in-progress" },
-  { label: "本番反映待ち", value: "3", linkedView: "release-pending" },
-];
 
 function makeDispatch(overrides: {
   hosts?: DispatchHostView[];
@@ -117,9 +111,7 @@ function renderHome(
 ) {
   return render(
     <MobileHomeScreen
-      overviewStats={OVERVIEW_STATS}
       navCounts={NAV_COUNTS}
-      checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
       unconfirmedQuestionCount={0}
       waitingQuestionCount={0}
@@ -151,10 +143,9 @@ afterEach(() => {
 });
 
 describe("MobileHomeScreen（#1690）", () => {
-  // PCの左メニュー（`sidebar-nav.tsx`）とはこの1行だけ並びが一致しない。フッターに常設の
-  // 「ブランチ」タブがあり同じ画面を開けるため、ホームのメニューには重複して出さない（#2737）。
-  // PCにはフッターが無く「ブランチ」の唯一の入口なので、そちらには残っている
-  it("メニューにPCの左メニューと同じ項目を同じ順で並べる（「ブランチ」を除く）", () => {
+  // 並びは「要確認→進行→一覧」の3グループ（#3650）。PCの左メニューと同じ順にする約束は外した。
+  // 確認環境は#3647で入口を隠している。「ブランチ」「リリース履歴」「AI使用量」はフッターへ移した
+  it("タイルを要確認→進行→一覧の順に並べる", () => {
     renderHome();
 
     const labels = screen
@@ -164,25 +155,30 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(labels).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
+      "マージ待ち",
       "質問",
-      // AI使用量は#2631でフッターのタブへ移したので、ここには並ばない
-      "すべてのIssue",
-      "未着手",
       "実行中",
       "本番反映待ち",
+      "未着手",
+      "予約実行",
+      // 見出しが無くなってもIssueの「実行中」と区別できるようにする
+      "PR実行中",
+      "すべてのIssue",
       "すべてのPR",
-      "実行中",
-      "マージ待ち",
-      // リポジトリ一覧は#2724でフッターの「Issue」タブを外した代わりに足した入口。
-      // 「コードレビュー」「確認環境」の直上に置く（#2674・#2737）
       "リポジトリ",
       "コードレビュー",
-      // リリース履歴も#2811でフッターのタブ（「リリース」）へ移したので、ここには並ばない
-      "予約実行",
       "構想",
-      // 最下部の1行（#2188）。使うのは年に数回なので上の常用の並びには混ぜない
-      "新規アプリを立ち上げる",
     ]);
+    // 最下部の1行（#2188）は年に数回なのでタイルには混ぜない
+    expect(screen.getByRole("button", { name: /新規アプリを立ち上げる/ })).toBeTruthy();
+  });
+
+  it("グループの見出しを出す", () => {
+    renderHome();
+
+    for (const heading of ["要確認", "進行", "一覧"]) {
+      expect(screen.getByRole("heading", { name: heading })).toBeTruthy();
+    }
   });
 
   // #2724でフッターの「Issue」タブ（リポジトリ一覧）を外した代わりの入口。無くなると、
@@ -205,14 +201,17 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(screen.queryByText("よくつかうフィルター")).toBeNull();
   });
 
-  it("「ユーザーの確認待ち」の件数にはユーザーのマージ待ちPRを足す（PCと同じ数え方）", () => {
+  // マージ待ちは「マージ待ち」のタイルで見る。確認待ちには足さない（#3650）
+  it("「ユーザーの確認待ち」の件数にマージ待ちPRを足さない", () => {
     renderHome({
       navCounts: { ...NAV_COUNTS, "check-user": 2 },
-      checkUserPullRequestCount: 3,
+      pullRequestNavCounts: { all: 3, "in-progress": 0, completed: 3 },
     });
 
-    const row = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
-    expect(row.textContent).toBe("ユーザーの確認待ち5");
+    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toBe(
+      "ユーザーの確認待ち2",
+    );
+    expect(screen.getByRole("button", { name: /^マージ待ち/ }).textContent).toBe("マージ待ち3");
   });
 
   // PCの左メニューと同じ判定（`isPullRequestViewAttention`）を使う（#2334）
@@ -223,7 +222,7 @@ describe("MobileHomeScreen（#1690）", () => {
     });
 
     const row = screen.getByRole("button", { name: /マージ待ち/ });
-    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+    expect(row.className).toContain("bg-amber-500");
   });
 
   it("マージ待ちが自動で進むものだけなら丸にしない", () => {
@@ -233,7 +232,7 @@ describe("MobileHomeScreen（#1690）", () => {
     });
 
     const row = screen.getByRole("button", { name: /マージ待ち/ });
-    expect(row.querySelector("span:last-child")?.className).not.toContain("bg-amber-500");
+    expect(row.className).not.toContain("bg-amber-500");
   });
 
   it("構想の行に件数を出し、未取得なら出さない（#3639）", () => {
@@ -253,16 +252,14 @@ describe("MobileHomeScreen（#1690）", () => {
 
     function badgeClassName() {
       const row = screen.getByRole("button", { name: /ユーザーの作業待ち/ });
-      return row.querySelector("span:last-child")?.className ?? "";
+      return row.className;
     }
 
     expect(badgeClassName()).not.toContain("bg-amber-500");
 
     rerender(
       <MobileHomeScreen
-        overviewStats={OVERVIEW_STATS}
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
-        checkUserPullRequestCount={0}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
         unconfirmedQuestionCount={0}
         waitingQuestionCount={0}
@@ -301,7 +298,7 @@ describe("MobileHomeScreen（#1690）", () => {
     });
 
     const row = questionRow(3);
-    expect(row.querySelector("span:last-child")?.className).toContain("bg-amber-500");
+    expect(row.className).toContain("bg-amber-500");
     // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
     expect(row.getAttribute("title")).toContain("3件");
     expect(row.getAttribute("title")).toContain("1件");
@@ -340,7 +337,7 @@ describe("MobileHomeScreen（#1690）", () => {
 
     const row = screen.getByRole("button", { name: /^コードレビュー/ });
     expect(row.querySelector(".animate-spin")).toBeNull();
-    expect(row.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(row.className).not.toContain("amber");
     expect(row.getAttribute("title")).toBeNull();
   });
 
@@ -351,15 +348,14 @@ describe("MobileHomeScreen（#1690）", () => {
     });
 
     const row = questionRow(3);
-    expect(row.querySelector("span:last-child")?.className).not.toContain("amber");
+    expect(row.className).not.toContain("amber");
     expect(row.getAttribute("title")).toContain("3件");
   });
 
-  it("先頭のカードを押すと、そのカードのビューへ遷移する", () => {
+  it("タイルを押すと、そのビューへ遷移する", () => {
     const onSelectQuickView = vi.fn();
-    renderHome({ onSelectQuickView });
+    renderHome({ onSelectQuickView, navCounts: { ...NAV_COUNTS, "release-pending": 3 } });
 
-    // メニューにも同名の行が並ぶため（#1743）、件数でカード側を指名する
     fireEvent.click(screen.getByRole("button", { name: /本番反映待ち\s*3/ }));
 
     expect(onSelectQuickView).toHaveBeenCalledWith("release-pending");
@@ -494,9 +490,7 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
   ) {
     return render(
       <MobileHomeScreenView
-        overviewStats={OVERVIEW_STATS}
         navCounts={NAV_COUNTS}
-        checkUserPullRequestCount={0}
         manualStepAttention={NO_MANUAL_STEP}
         unconfirmedQuestionCount={0}
         waitingQuestionCount={0}

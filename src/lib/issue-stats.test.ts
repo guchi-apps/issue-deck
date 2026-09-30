@@ -4,7 +4,6 @@ import {
   computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCountsForFilters,
-  computeOverviewStats,
   detectNewlyCheckUserIssues,
   filterIssuesByView,
   getAssigneeOptions,
@@ -1020,33 +1019,6 @@ describe("time-dependent stats", () => {
 
     it("実行中の集合を渡さなければ従来どおり全件を数える", () => {
       expect(computeNavCountsForFilters(issues, filters, null, issues)["check-user"]).toBe(2);
-    });
-  });
-
-  describe("computeOverviewStats", () => {
-    // 件数はnavCountsから引くだけなので、Issueの中身ではなく数え上げ済みの値を渡す
-    function makeNavCounts(overrides: Partial<Record<NavViewId, number>> = {}) {
-      const counts = Object.fromEntries(
-        NAV_VIEW_IDS.map((id) => [id, 0]),
-      ) as Record<NavViewId, number>;
-      return { ...counts, ...overrides };
-    }
-
-    it("要対応・実行中・本番反映待ちの3枚を返し、それぞれ遷移先のビューを持つ", () => {
-      const stats = computeOverviewStats(
-        makeNavCounts({ "check-user": 2, "in-progress": 4, "release-pending": 3 }),
-        0,
-      );
-      expect(stats).toEqual([
-        { label: "要対応", value: "2", linkedView: "check-user" },
-        { label: "実行中", value: "4", linkedView: "in-progress" },
-        { label: "本番反映待ち", value: "3", linkedView: "release-pending" },
-      ]);
-    });
-
-    it("「要対応」にはユーザーのマージ待ちPRの件数を足す（PCの左メニューと同じ数え方）", () => {
-      const stats = computeOverviewStats(makeNavCounts({ "check-user": 2 }), 3);
-      expect(stats[0]).toEqual({ label: "要対応", value: "5", linkedView: "check-user" });
     });
   });
 });
