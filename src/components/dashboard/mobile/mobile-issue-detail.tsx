@@ -420,6 +420,7 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  const questionAnswerPending = questionRequest?.status === "WAITING";
   // 質問の前提として見せるコメント（#2742）。「上記の計画で〜」の“上記”はコメント欄の
   // ずっと下にあり、選択肢を見ながら読み返せない。取得済みのコメントから直前のエージェントの
   // 発言を選んでパネルへ渡す（選び方は`findQuestionPremise`）
@@ -973,6 +974,11 @@ export function MobileIssueDetail({
 
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の
             どちらよりも上に置く（#2860でアーティファクトを計画の上へ移した後も変わらない） */}
+        {/* 計画なしの質問待ちのアーティファクト（#3686）。PC版と同じく質問パネルのすぐ上へ出す */}
+        {questionAnswerPending && !planDecisionPending && (
+          <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+        )}
+
         {questionRequest && (
           <div {...checkUserTargetProps("question")}>
             {/* **質問が変われば作り直す**（#2158。PCの詳細と同じ理由） */}
@@ -1139,7 +1145,7 @@ export function MobileIssueDetail({
         {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
             上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
             承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
-        {!planDecisionPending && (
+        {!planDecisionPending && !questionAnswerPending && (
           <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
         )}
 
