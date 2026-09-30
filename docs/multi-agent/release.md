@@ -647,6 +647,24 @@ kurashioは`ios-testflight.yml`（ワークフロー名`iOS TestFlight`、kurash
 - **ステップサマリー（`$GITHUB_STEP_SUMMARY`）はGitHub REST APIで取れない**ため本文は出さず、runへのリンクで
   代える。スキップ理由を画面に出したいときは、判定ジョブが`::notice::`で理由を出力する
 
+### ブランチ画面のリリース束からiOS配布を起動・確認する（#3644）
+
+ブランチ画面の、mainへマージ済みのリリース束（`webview-ios-repos.ts`のリポジトリのみ）に「iOS配布」欄を出す
+（`ios-release-group-panel.tsx`）。**Webの本番デプロイとは別の行**で、iOSの成否をWebに混ぜない。
+
+- **自動起動（kurashioの`ios-testflight-trigger.yml`）は残す。** 画面の「iOSへ配布」は自動で走らなかった場合・
+  失敗した場合の手動起動で、`ios-testflight.yml`を`--ref main`＋`inputs.sha`で`workflow_dispatch`する
+- **配布済み・ビルド番号はタグから引く。** runの`head_sha`は起動時のmain先端で束のコミットと一致しないため、
+  `ios-testflight/<N>`タグが指すコミットと束のmergeコミットを照合する（`deliveredBuildForSha`）。古い束にも効く
+- **起動できるのは「mergeコミット＝いまのmain先端」の束だけ。** それ以外はrunと束を対応づけられないので操作しない
+  （任意の束から起動するには、kurashio側の`run-name`にSHAを入れる必要がある）
+- `POST /api/repositories/ios-testflight`は対象SHAをクライアントから受け取らず、リリースPR番号から引く。
+  マージ済み・main先端・Webデプロイ成功（`deploy.yml`の`head_sha`一致のrun）・未配布・実行中なし
+  （`checkIosDispatchable`）をサーバーで確かめ、満たさなければ409。dispatchはrun IDを返さないため、
+  同一リポジトリへの60秒以内の再POSTも弾く
+- 「iOS変更の判定結果」は起動前には出せない（判定はworkflow内のdetectジョブで、`::notice::`も出していない）。
+  ダイアログでは「起動後に判定」と明示し、更新不要は`judgeIosRun`の`skipped`で「iOS更新不要」と出す（失敗にしない）
+
 ### 自動化（Mac miniでの実行代行）は調査のみで見送り（#3579）
 
 VPS・サブPCへはTailscale SSH経由の代行実行基盤があるが（`71.manual-step`の代行実行）、

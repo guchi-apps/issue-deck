@@ -8,7 +8,7 @@ import { useIosTestflight, type IosTestflightRun } from "@/hooks/use-ios-testfli
 import { formatDateTime } from "@/lib/format-date-time";
 import type { IosRunVerdict, IosStageState } from "@/lib/ios-testflight-status";
 
-const STATE_LABEL: Record<IosStageState, string> = {
+export const STATE_LABEL: Record<IosStageState, string> = {
   success: "成功",
   failure: "失敗",
   running: "実行中",
@@ -17,7 +17,7 @@ const STATE_LABEL: Record<IosStageState, string> = {
   unknown: "—",
 };
 
-const STATE_CLASS: Record<IosStageState, string> = {
+export const STATE_CLASS: Record<IosStageState, string> = {
   success: "text-green-700 dark:text-green-400",
   failure: "text-destructive font-semibold",
   running: "text-blue-700 dark:text-blue-400",
@@ -44,7 +44,7 @@ function verdictText(verdict: IosRunVerdict): { text: string; className: string 
   }
 }
 
-function RunRow({ run }: { run: IosTestflightRun }) {
+export function RunRow({ run }: { run: IosTestflightRun }) {
   const verdict = verdictText(run.verdict);
   return (
     <div className="flex flex-col gap-1 rounded border bg-background/60 px-2 py-2">

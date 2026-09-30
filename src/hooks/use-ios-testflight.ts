@@ -24,6 +24,14 @@ export type IosTestflightResponse =
       available: true;
       latestDeliveredBuild: { tag: string; buildNumber: number } | null;
       runs: IosTestflightRun[];
+      /** `prNumber`を渡したときだけ入る、その版（リリースPR）の配布状態（#3644） */
+      release?: {
+        sha: string | null;
+        merged: boolean;
+        isMainTip: boolean;
+        webDeploy: "success" | "pending" | "failed";
+        deliveredBuild: number | null;
+      };
     };
 
 /**
@@ -32,7 +40,7 @@ export type IosTestflightResponse =
  * 画面を開いたときと更新ボタンを押したときに取る。実行中のrunがあるあいだだけ30秒間隔で
  * 取り直す（配布の処理待ちは数分〜十数分かかるため）。それ以外はポーリングしない。
  */
-export function useIosTestflight(owner: string, repo: string, enabled: boolean) {
+export function useIosTestflight(owner: string, repo: string, enabled: boolean, prNumber?: number) {
   const [data, setData] = useState<IosTestflightResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,7 +56,8 @@ export function useIosTestflight(owner: string, repo: string, enabled: boolean) 
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    fetch(`/api/repositories/ios-testflight?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`, {
+    const pr = prNumber === undefined ? "" : `&pr=${prNumber}`;
+    fetch(`/api/repositories/ios-testflight?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}${pr}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -71,7 +80,7 @@ export function useIosTestflight(owner: string, repo: string, enabled: boolean) 
       cancelled = true;
       controller.abort();
     };
-  }, [owner, repo, enabled, reloadKey]);
+  }, [owner, repo, enabled, prNumber, reloadKey]);
 
   useEffect(() => {
     if (!enabled || !hasRunning) return;
