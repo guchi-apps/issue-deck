@@ -623,6 +623,12 @@ export type DispatchJobView = {
   claimedAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * 計画レビュー（G1）の指摘コメントが届いた時刻（#3659。`kind`が`PLAN_REVIEW`のときだけ入る）。
+   * 入っていれば`isPlanReviewJobCreating`は猶予内でも「作成中」とみなさない。
+   * **テストの差し込みや古い応答では欠けうる**ので、無ければ「まだ届いていない」として読む
+   */
+  reviewPostedAt?: string | null;
 };
 
 /** 画面へ返すホスト。実行可能リポジトリは配列に展開し、生存判定も済ませて渡す */
@@ -2354,14 +2360,19 @@ const PLAN_REVIEW_CREATING_GRACE_MS = 360_000;
  * （`SUCCEEDED`後の数分間）をほとんど拾えず表示区間が数秒〜十数秒しかなくなる。
  * ただし無条件に含めると、ジョブが積めなかった等で**古い計画に対する`SUCCEEDED`ジョブ**が
  * 残ったままになった場合に表示が消えなくなるため、`finishedAt`からの経過時間で区切る。
+ *
+ * **指摘コメントが届いたら（`reviewPostedAt`）猶予内でも作成中にしない**（#3659）。Issue詳細は
+ * コメント本文から届いたことを知れるが、Issue一覧・通知の保留は本文を持たないため、これが無いと
+ * 指摘が届いた後も猶予が切れるまで「作成中」のままになる。
  */
 export function isPlanReviewJobCreating(
-  job: Pick<DispatchJobView, "status" | "finishedAt"> | null,
+  job: Pick<DispatchJobView, "status" | "finishedAt" | "reviewPostedAt"> | null,
   now: Date,
 ): boolean {
   if (job === null) return false;
   if (isActiveDispatchJobStatus(job.status)) return true;
   if (job.status !== "SUCCEEDED" || job.finishedAt === null) return false;
+  if (job.reviewPostedAt) return false;
   return now.getTime() - new Date(job.finishedAt).getTime() < PLAN_REVIEW_CREATING_GRACE_MS;
 }
 

@@ -1575,6 +1575,16 @@ describe("isPlanReviewJobCreating（#3565）", () => {
     expect(isPlanReviewJobCreating(job, now)).toBe(false);
   });
 
+  // Issue一覧・通知の保留はコメント本文を持たないため、指摘が届いたことはこの列でしか知れない（#3659）
+  it("SUCCEEDED直後でも、指摘コメントが届いていれば（reviewPostedAt）false", () => {
+    const job = planReviewJob({
+      status: "SUCCEEDED",
+      finishedAt: "2026-08-17T00:08:00.000Z",
+      reviewPostedAt: "2026-08-17T00:09:30.000Z",
+    });
+    expect(isPlanReviewJobCreating(job, now)).toBe(false);
+  });
+
   it("SUCCEEDEDでもfinishedAtが無ければfalse", () => {
     const job = planReviewJob({ status: "SUCCEEDED", finishedAt: null });
     expect(isPlanReviewJobCreating(job, now)).toBe(false);

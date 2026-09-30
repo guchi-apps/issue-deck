@@ -240,6 +240,7 @@ async function selectPlanReviewHoldKeys(
         agent: true,
         status: true,
         finishedAt: true,
+        reviewPostedAt: true,
       },
     }),
   ]);
@@ -255,7 +256,11 @@ async function selectPlanReviewHoldKeys(
     seen.add(key);
     if (!waitingKeys.has(key) || reflectedKeys.has(key) || job.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
-      { status: job.status as DispatchJobStatus, finishedAt: job.finishedAt?.toISOString() ?? null },
+      {
+        status: job.status as DispatchJobStatus,
+        finishedAt: job.finishedAt?.toISOString() ?? null,
+        reviewPostedAt: job.reviewPostedAt?.toISOString() ?? null,
+      },
       now,
     );
     if (creating) keys.add(key);
