@@ -42,6 +42,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.7.0",
+    date: "2026-09-30",
+    changes: [
+      "リリース画面で、iOSアプリ（WebView）のTestFlight配布状況を確認できるようになりました。iOSの更新が不要と判定されたのか、配布済みなのか、失敗したのか（どの段階か）を、各段階の結果とあわせて表示します。",
+    ],
+    usage: [
+      "1. モバイル表示でリポジトリのリリース画面（リリースシート）を開く（iOSのWebViewアプリを持つリポジトリ）",
+      "2. 「リリースworkflowを起動」ボタンの下にある、iOS配布状況の欄を見る",
+      "3. 更新ボタンを押すと最新の状況に更新される",
+      "4. 成功なら「TestFlightへ配布済み」、更新不要なら「iOS更新は不要と判定（ビルドなし）」、失敗なら失敗した段階の名前つきで表示される",
+    ],
+  },
+  {
     version: "8.6.2",
     date: "2026-09-30",
     changes: [
