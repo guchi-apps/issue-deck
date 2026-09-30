@@ -34,6 +34,7 @@ type RunItem = {
   head_branch: string | null;
   event: string;
   created_at: string;
+  updated_at?: string;
   run_attempt?: number;
 };
 
@@ -44,7 +45,15 @@ type JobItem = {
   name: string;
   status: string;
   conclusion: string | null;
-  steps?: { name: string; status: string; conclusion: string | null }[];
+  started_at?: string | null;
+  completed_at?: string | null;
+  steps?: {
+    name: string;
+    status: string;
+    conclusion: string | null;
+    started_at?: string | null;
+    completed_at?: string | null;
+  }[];
 };
 
 const RUN_LIMIT = 3;
@@ -176,6 +185,7 @@ async function handleGET(request: NextRequest) {
           headBranch: run.head_branch,
           event: run.event,
           createdAt: run.created_at,
+          updatedAt: run.updated_at ?? run.created_at,
           status: run.status,
           conclusion: run.conclusion,
           verdict,

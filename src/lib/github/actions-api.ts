@@ -36,6 +36,8 @@ export type GithubApiWorkflowJobStep = {
   name: string;
   status: "queued" | "in_progress" | "completed" | string;
   conclusion: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
 };
 
 export type GithubApiWorkflowJob = {

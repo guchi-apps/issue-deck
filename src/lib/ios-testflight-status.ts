@@ -27,7 +27,14 @@ export const IOS_STAGES: readonly { key: IosStageKey; label: string; pattern: Re
 
 export type IosStageState = "success" | "failure" | "running" | "skipped" | "pending" | "unknown";
 
-export type IosStageStatus = { key: IosStageKey; label: string; state: IosStageState };
+export type IosStageStatus = {
+  key: IosStageKey;
+  label: string;
+  state: IosStageState;
+  /** 段階の開始・終了時刻（ISO8601）。内訳の所要時間用。ジョブ・ステップが時刻を持たなければnull */
+  startedAt: string | null;
+  completedAt: string | null;
+};
 
 /** ジョブ・ステップ1件の状態を段階の状態へ寄せる */
 export function toStageState(status: string, conclusion: string | null): IosStageState {
@@ -70,9 +77,20 @@ function stageOf(name: string): IosStageKey | null {
 
 export function summarizeIosStages(jobs: readonly GithubApiWorkflowJob[]): IosStageStatus[] {
   const found = new Map<IosStageKey, IosStageState>();
-  const record = (key: IosStageKey, state: IosStageState) => {
+  // 同じ段階に当たったジョブ・ステップの時刻は、最も早い開始と最も遅い終了へ畳む
+  const times = new Map<IosStageKey, { startedAt: string | null; completedAt: string | null }>();
+  const record = (
+    key: IosStageKey,
+    state: IosStageState,
+    startedAt?: string | null,
+    completedAt?: string | null,
+  ) => {
     const prev = found.get(key);
     if (prev === undefined || SEVERITY[state] > SEVERITY[prev]) found.set(key, state);
+    const t = times.get(key) ?? { startedAt: null, completedAt: null };
+    if (startedAt && (t.startedAt === null || startedAt < t.startedAt)) t.startedAt = startedAt;
+    if (completedAt && (t.completedAt === null || completedAt > t.completedAt)) t.completedAt = completedAt;
+    times.set(key, t);
   };
   // 段階名に当たらない名前のジョブが丸ごとスキップされたら、配布側の段階をまとめて飛ばした形とみなす
   let unmatchedJobSkipped = false;
@@ -84,12 +102,12 @@ export function summarizeIosStages(jobs: readonly GithubApiWorkflowJob[]): IosSt
       const key = stageOf(step.name);
       if (key) {
         matchedStep = true;
-        record(key, toStageState(step.status, step.conclusion));
+        record(key, toStageState(step.status, step.conclusion), step.started_at, step.completed_at);
       }
     }
     const jobKey = job.name ? stageOf(job.name) : null;
     if (jobKey && (!matchedStep || !found.has(jobKey))) {
-      record(jobKey, toStageState(job.status, job.conclusion));
+      record(jobKey, toStageState(job.status, job.conclusion), job.started_at, job.completed_at);
     }
     if (!jobKey && !matchedStep && toStageState(job.status, job.conclusion) === "skipped") {
       unmatchedJobSkipped = true;
@@ -99,6 +117,8 @@ export function summarizeIosStages(jobs: readonly GithubApiWorkflowJob[]): IosSt
     key,
     label,
     state: found.get(key) ?? (unmatchedJobSkipped && key !== "detect" ? "skipped" : "unknown"),
+    startedAt: times.get(key)?.startedAt ?? null,
+    completedAt: times.get(key)?.completedAt ?? null,
   }));
 }
 
