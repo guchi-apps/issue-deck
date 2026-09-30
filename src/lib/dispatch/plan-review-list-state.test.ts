@@ -42,6 +42,16 @@ describe("resolvePlanReviewListState", () => {
     ).toBe("creating");
   });
 
+  it("猶予内でも、指摘コメントが届いていれば提示済（#3659）", () => {
+    expect(
+      resolvePlanReviewListState({
+        ...base,
+        jobs: [job({ finishedAt: "2026-09-29T11:57:00Z", reviewPostedAt: "2026-09-29T11:59:00Z" })],
+        labels: planLabels,
+      }),
+    ).toBe("presented");
+  });
+
   it("猶予後で承認待ちなら提示済", () => {
     expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBe("presented");
   });
