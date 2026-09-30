@@ -1464,6 +1464,26 @@ sweep_deploy_launches() {
   return 0
 }
 
+# --- 共通知識の反映PRの自動マージ（#3645）--------------------------------------
+# 格上げ判定（`guchi-apps/docs`）が作る反映PRを、マージ可能と確かめられたものだけ自動でマージ
+# する。以前は画面のボタンで人がマージしていた。**pollerがやるのは「呼ぶ」ことだけ**で、
+# 間隔の判定もマージ可否の判断もissue-deck側が持つ。失敗しても1巡を止めない。
+sweep_knowledge_promotions() {
+  if ! api_call POST /api/knowledge/promotion-merge-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "共通知識の反映PRの自動マージに失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  # マージしたときだけ出す（毎巡「異常なし」を積まない）
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.merged // [] | .[] | "共通知識の反映PRを自動マージしました: guchi-apps/docs#\(.)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- トークン使用量の報告（#2504）-----------------------------------------------
 # サブPCのローカルセッションが使ったトークンを集計し、issue-deckへ送る。
 #
@@ -3744,6 +3764,9 @@ run_once() {
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
     # （本番デプロイの起動という外向きの副作用があるため）。
     sweep_deploy_launches
+    # 共通知識の反映PRの自動マージ（#3645）。**dry-runでは呼ばない**（共有知識リポジトリへの
+    # マージという外向きの副作用があるため）。
+    sweep_knowledge_promotions
     # 進捗の取り残しの巡回回収（#2294）。**dry-runでは呼ばない**（進捗の書き換えと
     # コメント投稿という外向きの副作用があるため）。
     sweep_progress

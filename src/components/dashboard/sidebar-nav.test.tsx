@@ -39,7 +39,6 @@ function renderSidebar(
     releaseActivity = null,
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
-    knowledgePromotionCount = null,
     ideasCount = null,
   }: {
     checkUserPullRequestCount?: number;
@@ -49,7 +48,6 @@ function renderSidebar(
     releaseActivity?: ReleaseActivityCounts | null;
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
-    knowledgePromotionCount?: number | null;
     ideasCount?: number | null;
   } = {},
 ) {
@@ -65,8 +63,6 @@ function renderSidebar(
       onSelectUsage={() => {}}
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
-      onSelectKnowledge={() => {}}
-      knowledgePromotionCount={knowledgePromotionCount}
       ideasCount={ideasCount}
       onLaunchNewApp={() => {}}
       navCounts={navCounts}
@@ -118,7 +114,6 @@ function renderSidebarWithRepositories(
       onSelectUsage={() => {}}
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
-      onSelectKnowledge={() => {}}
       onLaunchNewApp={() => {}}
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
@@ -157,11 +152,6 @@ function pullRequestNavItem(view: PullRequestViewId) {
 
 afterEach(() => cleanup());
 
-/** 「共通知識」の行のボタン。行全体でなく、件数の丸を見るために`span:last-child`から読む */
-function knowledgeNavItem() {
-  return screen.getByText("共通知識").closest("button") as HTMLElement;
-}
-
 describe("SidebarNav 構想の件数（#3639）", () => {
   const ideasRow = () => screen.getByText("構想").closest("button") as HTMLElement;
 
@@ -179,31 +169,6 @@ describe("SidebarNav 構想の件数（#3639）", () => {
     cleanup();
     renderSidebar({ all: 0 } as never, undefined, { ideasCount: null });
     expect(ideasRow().textContent).toBe("構想");
-  });
-});
-
-describe("SidebarNav 共通知識の反映PR（#3082）", () => {
-  it("未マージの反映PRがあれば件数をオレンジの丸で出す", () => {
-    renderSidebar({ all: 4, "in-progress": 3, completed: 0 }, NAV_COUNTS, {
-      knowledgePromotionCount: 1,
-    });
-
-    const badge = knowledgeNavItem().querySelector("span:last-child");
-    expect(badge?.textContent).toBe("1");
-    expect(badge?.className).toContain("bg-amber-500");
-    expect(knowledgeNavItem().getAttribute("title")).toContain("反映PRが1件");
-  });
-
-  it("0件・未取得なら数字も丸も出さない", () => {
-    for (const count of [0, null]) {
-      cleanup();
-      renderSidebar({ all: 4, "in-progress": 3, completed: 0 }, NAV_COUNTS, {
-        knowledgePromotionCount: count,
-      });
-
-      expect(knowledgeNavItem().textContent).toBe("共通知識");
-      expect(knowledgeNavItem().innerHTML).not.toContain("bg-amber-500");
-    }
   });
 });
 
@@ -438,13 +403,13 @@ describe("SidebarNav", () => {
   // Pull Requestの枠の下・リポジトリの枠の上に置く（#2674）。「リリース履歴」は
   // 「ブランチ」の直下に置く（#2827。ブランチの変更を確認したあと、公開されたリリースを
   // 続けて見る動線のため）
-  it("要対応・質問・ブランチ・リリース履歴・予約実行・共通知識・AI使用量・Issue・PR・コードレビュー・確認環境の順に並べる", () => {
+  it("要対応・質問・ブランチ・リリース履歴・予約実行・AI使用量・Issue・PR・コードレビュー・確認環境の順に並べる", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
     const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 18)).toEqual([
+    expect(labels.slice(0, 17)).toEqual([
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "質問",
@@ -452,7 +417,6 @@ describe("SidebarNav", () => {
       "リリース履歴",
       "予約実行",
       "構想",
-      "共通知識",
       "AI使用量",
       "すべてのIssue",
       "未着手",
