@@ -2626,7 +2626,9 @@ export function POST(request: NextRequest) {
   着手中は実行ボタンを押した後の2状態だけにする。**未着手は別の数字として、畳んだ行にだけ薄く出す**
   （#3163。`summary.readyIssueCount`・`countReadyIssues`）。保留のIssueも含むため、着手中より薄い色
   （不透明度55%）にして目立たせない。数える条件は左メニューの「未着手」ビューに揃え、**Project Statusが
-  無いIssue（`resolveProgressStatus`は未登録を一律`ready`とみなす）・`dispatchPendingAt`が立った
+  無いIssue（`resolveProgressStatus`は未登録を一律`ready`とみなす）も数える**（#3651。Issueとして登録済みの
+  ものを、セッション起動の有無に関わらず未着手のバックログとして出す。**盤面に載せていないリポジトリでは
+  open Issue全件が未着手になる**）。**`dispatchPendingAt`が立った
   Issue（押した直後はStatusが`Ready`のまま。#1347）・手作業／質問／レビューIssueは数えない**。
   `00.check-user`が付いた保留のIssueだけは意図して含める。一覧としては並べず、`hasAnything`
   （「動きなし」の判定）にも入れないので、未着手だけのリポジトリは「動きなし」の左に件数が並ぶ。**レーンとして出ているIssueを除くのは、畳んだ1行の
