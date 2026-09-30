@@ -124,6 +124,19 @@ describe("アーティファクトの表示位置（#2860・#2926）", () => {
   it.each(DETAIL_SOURCES)("%s がアーティファクトを計画承認待ちの有無で出し分ける", (path) => {
     const source = readFileSync(path, "utf8");
     expect(source).toContain("{planDecisionPending && (");
-    expect(source).toContain("{!planDecisionPending && (");
+    expect(source).toContain("{!planDecisionPending && !questionAnswerPending && (");
   });
+
+  it.each(DETAIL_SOURCES)(
+    "%s で計画なしの質問待ちのアーティファクトが質問パネルより前に出る（#3686）",
+    (path) => {
+      const source = readFileSync(path, "utf8");
+      const questionArtifact = "{questionAnswerPending && !planDecisionPending && (";
+      const artifactIndex = source.indexOf(questionArtifact);
+      const questionIndex = source.indexOf('<div {...checkUserTargetProps("question")}>');
+      expect(artifactIndex).toBeGreaterThan(-1);
+      expect(questionIndex).toBeGreaterThan(-1);
+      expect(artifactIndex).toBeLessThan(questionIndex);
+    },
+  );
 });
