@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import type { PullRequestLink } from "@/lib/github/pull-request-link";
 import {
   buildIssuePullRequestProgress,
+  ciStateFromPullRequestCiStatus,
   toIssuePullRequestProgressSource,
 } from "@/lib/issue-pull-request-progress";
 import {
@@ -206,7 +207,12 @@ export function IssuePullRequestList({
               {/* 自動修復の実行中は、PR画面と同じバッジ・同じ文言で出す（#2145）。経過時間を数え直す
                   生きたバッジなので、内訳の工程には入れずここに残す */}
               {detail && <RepairRunBadge run={detail.repairRun} compact />}
-              {detail && !progress && <MergeJudgementBadge mergeJudgement={detail.mergeJudgement} />}
+              {detail && !progress && (
+                <MergeJudgementBadge
+                  mergeJudgement={detail.mergeJudgement}
+                  ciState={ciStateFromPullRequestCiStatus(detail.ciStatus)}
+                />
+              )}
               {/* マージ・クローズ・修正依頼・コンフリクト解消はPR詳細が持つ（#3333）。
                   タイトルのリンクと行き先は同じだが、「ここで操作はできない、あちらで行う」ことを
                   ボタンの形で言う。マージ待ちの行はスマホで押し損ねないよう幅いっぱいにする */}

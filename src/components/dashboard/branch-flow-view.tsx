@@ -32,7 +32,7 @@ import {
 import { DeviceBuildInstructions, shortOid } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
-  CiStateBadge,
+  CiStatusButton,
   MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
@@ -579,6 +579,36 @@ function RemainingManualSteps({
 }
 
 /**
+ * 開いているPRのCI状態。**押すとCIのジョブ内訳がその場に開く**（PR詳細と同じ部品。#3662）。
+ * 「CI実行中」だけ見えても、どのworkflowが動いているのか分からなかった。
+ * 下書き・クローズ・マージ済みでは何も出さない。内訳は`panel`に返すので、行の外側に置く。
+ */
+function useCiDetail(pullRequest: PullRequestSummary): {
+  button: React.ReactNode;
+  panel: React.ReactNode;
+} {
+  const [open, setOpen] = useState(false);
+  if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) {
+    return { button: null, panel: null };
+  }
+  return {
+    button: (
+      <CiStatusButton ciState={pullRequest.ciState} expanded={open} onClick={() => setOpen(!open)} />
+    ),
+    panel: open ? (
+      <WorkflowRunProgressPanel
+        repositoryFullName={pullRequest.repositoryFullName}
+        runId={pullRequest.ciRunId}
+        open={open}
+        title="CIの内訳"
+        checks={pullRequest.ciChecks}
+        className="mt-1 max-w-2xl basis-full"
+      />
+    ) : null,
+  };
+}
+
+/**
  * レーンにぶら下がるPR1行。
  *
  * **マージボタンを出すのは「ユーザーがマージするしかないPR」だけ**（#1756）。この画面は
@@ -606,6 +636,7 @@ function PullRequestLine({
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   const userMerge = onMerged !== undefined && requiresUserMerge(pullRequest);
   const canMerge = userMerge && canMergeFromDeck(pullRequest);
+  const { button: ciButton, panel: ciPanel } = useCiDetail(pullRequest);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -624,9 +655,9 @@ function PullRequestLine({
       {pullRequest.draft ? (
         <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
       ) : (
-        pullRequest.state === "open" && <CiStateBadge ciState={pullRequest.ciState} />
+        ciButton
       )}
-      <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} />
+      <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} ciState={pullRequest.ciState} />
       {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
       {/* 種類は「今どうなっているか」ではないので、状態のピルと同じ強さで出さない（#1510） */}
       {kindLabel && pullRequest.kind !== "issue" && (
@@ -643,6 +674,7 @@ function PullRequestLine({
           variant="outline"
         />
       )}
+      {ciPanel}
     </div>
   );
 }
@@ -762,6 +794,7 @@ function BumpPullRequestLine({
   version: string | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  const { button: ciButton, panel: ciPanel } = useCiDetail(pullRequest);
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-purple-500/60 bg-purple-500/5 px-2 py-1.5">
       <span className="shrink-0 text-xs font-medium text-purple-700 dark:text-purple-300">
@@ -779,7 +812,7 @@ function BumpPullRequestLine({
       >
         #{pullRequest.number} {pullRequest.title}
       </GithubReferenceLink>
-      {pullRequest.state === "open" && <CiStateBadge ciState={pullRequest.ciState} />}
+      {ciButton}
       {pullRequest.autoMergeEnabled ? (
         <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
       ) : (
@@ -788,6 +821,7 @@ function BumpPullRequestLine({
       {!pullRequest.autoMergeEnabled && (
         <ReleaseMergeButton pullRequest={pullRequest} onMerged={onMerged} />
       )}
+      {ciPanel}
     </div>
   );
 }
@@ -962,7 +996,7 @@ function ReleaseGroupHeader({
   // **CIが落ちているときはここでは「マージ待ち」のまま**——畳んだ1行（`releaseMergeTarget`）が
   // `failure`を除くのは、同じ行に赤の「CI失敗」が並んで意味が競合するからで（#2038）、
   // この見出しには失敗を示すものが無く、外すと止まっているリリースが「リリース中」に見える。
-  // 失敗そのものはすぐ下のPRの行（`CiStateBadge`）が出す。
+  // 失敗そのものはすぐ下のPRの行（`CiStatusButton`）が出す。
   //
   // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
   // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
