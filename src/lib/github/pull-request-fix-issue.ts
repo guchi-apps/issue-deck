@@ -80,6 +80,10 @@ function stateLabel(pullRequest: Pick<PullRequestSummary, "merged" | "state">): 
  * **起票時（`buildPullRequestFixIssueDraft`）・検索時（`findExistingPullRequestFixIssue`）・
  * 対象PRのマージ検知によるclose巡回（`fix-issue-close-sweep-run.ts`）で同じ文字列を使う
  * 唯一の場所。** ここを直したら全部に効く。
+ *
+ * **リリースのワークフローも同じ文字列を読む**（#3634。修正Issueが入ったリリースで対象PRの
+ * 行を「修正済み」にする）。シェル側は直接参照できないため、変えるときは
+ * `reusable-release-develop-to-main.yml`も揃える（`scripts/check-review-verdict-marker.sh`が突き合わせる）。
  */
 export const TARGET_PULL_REQUEST_MARKER_PREFIX = "対象PR: #";
 

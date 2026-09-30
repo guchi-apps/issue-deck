@@ -955,6 +955,29 @@ jobs:
             exit 0
           fi
 
+          # **修正Issueで直したPRを「修正済み」にする**（#3634）。リリース前に「要修正」だった
+          # PRは、issue-deckの「修正をIssueにする」「修正Issueを起案」で修正Issueを立て、その
+          # 修正をdevelopへ入れてからリリースを作り直す。ところが元PRの本文の`## 検証結果`は
+          # マージ済みのため書き換わらず、作り直したリリースでも元PRの行が「要修正」のまま残り、
+          # マージ確認で毎回止められていた。
+          #
+          # 修正Issueの本文には対象のPRが書いてある（`対応PR: #<番号>`は
+          # `buildReleaseVerificationFixIssueDraft`、`対象PR: #<番号>`は
+          # `buildPullRequestFixIssueDraft`が書く。文言は`scripts/check-review-verdict-marker.sh`が
+          # 突き合わせる）。**その修正Issueが同じリリースの対象issueに入っている**＝修正が本番へ
+          # 一緒に出る場合だけ、元PRの行を修正済みにする。修正Issueがまだdevelopへ入っていなければ
+          # 対象issueに載らないので、元PRの行は要修正のまま残る。修正Issue自身の行は
+          # 自分のPRの判定で出るので、修正そのものの出来はそちらで読める。
+          FIXES=/tmp/release-verification-fixes.txt
+          : > "$FIXES"
+          for NUM in $NUMBERS; do
+            ISSUE_BODY="$(gh issue view "$NUM" --json body --jq '.body // ""' 2>/dev/null || true)"
+            [ -n "$ISSUE_BODY" ] || continue
+            # 1行に「<対象PR番号> <修正Issue番号>」を書く
+            printf '%s\n' "$ISSUE_BODY" | tr -d '\r' \
+              | sed -nE "s/.*(対応PR|対象PR): #([0-9]+)([^0-9].*)?\$/\\2 ${NUM}/p" >> "$FIXES"
+          done
+
           {
             echo "## コードレビューの検証結果"
             echo
@@ -1001,6 +1024,20 @@ jobs:
               skipped) REVIEW_CELL="— 実施なし" ;;
               unavailable) REVIEW_CELL="? 判定を取得できず" ;;
               *) REVIEW_CELL="? 記録なし" ;;
+            esac
+            # 同じリリースに入っている修正Issueで直したPR（#3634）。上の`$FIXES`の説明を参照。
+            # 直す対象になるのは要修正・要確認だけで、問題なしのPRを書き換えることはしない
+            case "$REVIEW" in
+              changes-requested|needs-check)
+                FIX_ISSUE=""
+                if [ "$PR_CELL" != "—" ]; then
+                  FIX_ISSUE="$(awk -v pr="${PR_CELL#\#}" -v self="$NUM" \
+                    '$1 == pr && $2 != self { print $2; exit }' "$FIXES")"
+                fi
+                if [ -n "$FIX_ISSUE" ]; then
+                  REVIEW_CELL="✅ #${FIX_ISSUE} で修正済み（元の判定: ${REVIEW_CELL#* }）"
+                fi
+                ;;
             esac
             case "$RISK" in
               none) RISK_CELL="該当なし" ;;

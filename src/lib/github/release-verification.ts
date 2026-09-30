@@ -264,6 +264,10 @@ export function parseReleaseVerification(body: string | null | undefined): Relea
  * `mode=additional`（既存ブランチへの追加コミット）にはならず、元Issue本文から`mode=implement`
  * として最初から実装し直してしまう（レビュー指摘の修正としては成立しない）。そのため、
  * 指摘内容を引き継いだ新規Issueとして切り出す。
+ *
+ * **`- 対応PR: #<番号>`の行はリリースのワークフローが読む**（#3634）。この修正Issueが次の
+ * リリースに入ると、対応PRの行が「修正済み」になる（`reusable-release-develop-to-main.yml`の
+ * 「対象issueの検証結果を集計する」）。文言は`scripts/check-review-verdict-marker.sh`が突き合わせる。
  */
 export function buildReleaseVerificationFixIssueDraft(params: {
   row: ReleaseVerificationRow;
