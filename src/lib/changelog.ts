@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.14.2",
+    date: "2026-10-02",
+    changes: [
+      "計画レビューを作成している間は、オレンジの「計画の承認を待っています」枠と承認ボタンを出さず、「計画レビューを作成中」のカードだけを表示するようにしました。また、レビュー作成中のPush通知の保留が、ラベルの付与直後でも確実に効くよう修正しました。",
+    ],
+  },
+  {
     version: "8.14.1",
     date: "2026-10-01",
     changes: [
