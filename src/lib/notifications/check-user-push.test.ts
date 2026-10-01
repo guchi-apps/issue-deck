@@ -202,6 +202,8 @@ describe("sweepCheckUserPushNotifications", () => {
     waitingPlans?: unknown[];
     /** 計画レビューのジョブ（新しい順） */
     planReviewJobs?: unknown[];
+    /** 自動反映の決定直後の計画待ち（decidedByUserId=nullのREVISION_REQUESTED） */
+    reflectedPlans?: unknown[];
   }) {
     const findSubscriptions = vi.fn().mockResolvedValue(options?.subscriptions ?? []);
     const updateMany = vi.fn().mockResolvedValue({ count: options?.reservedCount ?? 1 });
@@ -225,7 +227,11 @@ describe("sweepCheckUserPushNotifications", () => {
         updateMany,
       },
       sessionPlanRequest: {
-        findMany: vi.fn().mockResolvedValue(options?.waitingPlans ?? []),
+        findMany: vi.fn().mockImplementation(async (args: { where: { status: string } }) =>
+          args.where.status === "REVISION_REQUESTED"
+            ? (options?.reflectedPlans ?? [])
+            : (options?.waitingPlans ?? []),
+        ),
       },
       dispatchJob: { findMany: vi.fn().mockResolvedValue(options?.planReviewJobs ?? []) },
       sessionQuestionRequest: { findMany: vi.fn().mockResolvedValue([]) },
@@ -267,10 +273,10 @@ describe("sweepCheckUserPushNotifications", () => {
       expect(sendPushNotification).not.toHaveBeenCalled();
     });
 
-    it("成功から6分を過ぎていれば保留しない", async () => {
+    it("成功から10分を過ぎていれば保留しない", async () => {
       mockDb({
         waitingPlans: [plan],
-        planReviewJobs: [{ ...runningJob, status: "SUCCEEDED", finishedAt: at(7 * 60_000) }],
+        planReviewJobs: [{ ...runningJob, status: "SUCCEEDED", finishedAt: at(11 * 60_000) }],
         subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);
@@ -310,6 +316,54 @@ describe("sweepCheckUserPushNotifications", () => {
       mockDb({
         waitingPlans: [plan],
         planReviewJobs: [{ ...runningJob, createdAt: at(10 * 60_000) }],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("計画待ちの作成直後でジョブが未積みなら、理由ラベルが無くても保留する（#3709）", async () => {
+      mockDb({
+        labels: [CHECK_USER],
+        waitingPlans: [{ ...plan, createdAt: at(10_000) }],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("前の周のジョブが残っていても、出し直した計画の直後は保留する（#3709）", async () => {
+      mockDb({
+        labels: [CHECK_USER],
+        waitingPlans: [{ ...plan, createdAt: at(10_000) }],
+        planReviewJobs: [
+          { ...runningJob, status: "SUCCEEDED", createdAt: at(8 * 60_000), finishedAt: at(7 * 60_000), planReviewDecidedAt: at(6 * 60_000) },
+        ],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("ジョブが積まれないまま60秒を過ぎたら保留しない（#3709）", async () => {
+      mockDb({ waitingPlans: [{ ...plan, createdAt: at(90_000) }], subscriptions: sub });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalled();
+    });
+
+    it("自動反映の決定直後は、ラベルがDBに残っていても保留する（#3709）", async () => {
+      mockDb({
+        reflectedPlans: [{ ...plan, decidedAt: at(5_000) }],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
+    it("自動反映のあとに新しい計画待ちが出ていれば、その計画の判定に任せる（#3709）", async () => {
+      mockDb({
+        reflectedPlans: [{ ...plan, decidedAt: at(100_000) }],
+        waitingPlans: [{ ...plan, createdAt: at(90_000) }],
         subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);

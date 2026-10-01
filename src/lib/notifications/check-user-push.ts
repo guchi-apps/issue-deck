@@ -188,19 +188,40 @@ async function selectPendingSessionRequestKeys(
 export const PLAN_REVIEW_PUSH_HOLD_MAX_MS = 15 * 60 * 1000;
 
 /**
+ * 計画待ちの作成から、計画レビューのジョブが積まれるのを待つ時間（#3709）。
+ * `postSessionPlan`は`00.check-user`を付けてからジョブを積むため、その間に走った巡回は
+ * ジョブを引けない。積まれなかった計画（Codex等）でも、通知はこの時間だけ遅れるだけ
+ */
+export const PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS = 60 * 1000;
+
+/**
+ * 自動反映（`decidedByUserId=null`の修正）の決定から、GitHub側のラベル解除がDBへ届くのを待つ時間
+ * （#3709）。決定は計画待ちを先に`REVISION_REQUESTED`にしてからラベルを外すので、その間は
+ * 保留も計画待ちも無いままDBに`00.check-user`だけが残り、経過時間の判定で送られてしまう
+ */
+export const PLAN_REVIEW_REFLECT_PUSH_HOLD_MS = 2 * 60 * 1000;
+
+/**
  * **計画レビューの自動反映を待って、通知を保留するIssue**の鍵を返す（#3616）。
  *
- * 保留するのは次をすべて満たすとき。**受け手の居ない保留は、通知が遅れるだけで何も起こらない**ので、
+ * 保留するのは次のどれか。**受け手の居ない保留は、通知が遅れるだけで何も起こらない**ので、
  * 自動反映が実際に起こりうる場合に限る。
  *
- * - 理由が計画（`01.check-plan`）で、期限内の`WAITING`の計画待ちがある（「アプリで答える」ON・
- *   待ち時間0のセッションは待ちが作られないので対象外）
- * - 計画の提示から`PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内
- * - **反映済みでも保留する**（#3648）。自動反映は指摘がなくなるまで繰り返すため、出し直された計画にも
- *   同じ保留を掛ける。ただし**今の計画より後に積まれた**ジョブだけを見る
- * - 計画レビューのジョブがClaude Codeのもので、作成中（`isPlanReviewJobCreating`。実行中、または
- *   成功から6分以内で、採否（`planReviewDecidedAt`）が決まっていない）。積まれていない・失敗・
- *   見送りなら保留しない
+ * - **レビューが作成中**: 理由が計画（`01.check-plan`）で、期限内の`WAITING`の計画待ちがあり
+ *   （「アプリで答える」ON・待ち時間0のセッションは待ちが作られないので対象外）、計画の提示から
+ *   `PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内で、計画レビューのジョブがClaude Codeのもので作成中
+ *   （`isPlanReviewJobCreating`。実行中、または成功から猶予内で、採否`planReviewDecidedAt`が未決定）。
+ *   **反映済みでも保留する**（#3648。自動反映は指摘がなくなるまで繰り返す）が、**今の計画より後に
+ *   積まれた**ジョブだけを見る。積まれていない・失敗・見送りなら保留しない
+ * - **ジョブが積まれるのを待つ**（#3709）: 計画待ちの作成から`PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS`以内で、
+ *   **その計画待ちより後に積まれたジョブがまだ無い**。2周目以降は前の周のジョブが残るので、
+ *   「ジョブが1件も無い」ではなく「今の計画より後のジョブが無い」で見る
+ * - **自動反映の直後**（#3709）: 自動反映の決定から`PLAN_REVIEW_REFLECT_PUSH_HOLD_MS`以内で、
+ *   その後に新しい計画待ちが無い
+ *
+ * **下の2つは理由ラベルで絞らない。** `00.check-user`は理由ラベルより先に付く
+ * （`dispatch/check-user-labels.ts`）ので、付与直後の巡回では理由がまだ`plan`と読めない。
+ * 計画待ちがあれば理由は計画と確定している
  */
 async function selectPlanReviewHoldKeys(
   targets: readonly {
@@ -211,14 +232,13 @@ async function selectPlanReviewHoldKeys(
   now: Date,
 ): Promise<Set<string>> {
   const keys = new Set<string>();
-  const planTargets = targets.filter((t) => checkUserReason(t.labels) === "plan");
-  if (planTargets.length === 0) return keys;
+  if (targets.length === 0) return keys;
 
   const scope = {
-    repositoryFullName: { in: [...new Set(planTargets.map((t) => t.repositoryFullName))] },
-    issueNumber: { in: [...new Set(planTargets.map((t) => t.issueNumber))] },
+    repositoryFullName: { in: [...new Set(targets.map((t) => t.repositoryFullName))] },
+    issueNumber: { in: [...new Set(targets.map((t) => t.issueNumber))] },
   };
-  const [waiting, jobs] = await Promise.all([
+  const [waiting, jobs, reflected] = await Promise.all([
     db.sessionPlanRequest.findMany({
       where: {
         ...scope,
@@ -242,27 +262,61 @@ async function selectPlanReviewHoldKeys(
         planReviewDecidedAt: true,
       },
     }),
+    db.sessionPlanRequest.findMany({
+      where: {
+        ...scope,
+        status: "REVISION_REQUESTED",
+        decidedByUserId: null,
+        decidedAt: { gt: new Date(now.getTime() - PLAN_REVIEW_REFLECT_PUSH_HOLD_MS) },
+      },
+      select: { repositoryFullName: true, issueNumber: true, decidedAt: true },
+    }),
   ]);
 
   // 同じIssueに計画待ちが複数あれば新しい方（昇順で並べて後勝ちにする）
   const waitingCreatedAt = new Map(
     waiting.map((r) => [sessionRequestKey(r.repositoryFullName, r.issueNumber), r.createdAt]),
   );
-  const seen = new Set<string>();
+
+  // 自動反映の直後。その後に新しい計画待ちが出ていれば、そちらを下の判定へ任せる
+  for (const row of reflected) {
+    if (!row.decidedAt) continue;
+    const key = sessionRequestKey(row.repositoryFullName, row.issueNumber);
+    const next = waitingCreatedAt.get(key);
+    if (!next || next < row.decidedAt) keys.add(key);
+  }
+
+  const reasonIsPlan = new Set(
+    targets
+      .filter((t) => checkUserReason(t.labels) === "plan")
+      .map((t) => sessionRequestKey(t.repositoryFullName, t.issueNumber)),
+  );
+
+  // Issueごとの最新ジョブ（新しい順なので、最初に当たったものがそのIssueの最新）
+  const latestJob = new Map<string, (typeof jobs)[number]>();
   for (const job of jobs) {
     const key = sessionRequestKey(job.repositoryFullName, job.issueNumber);
-    if (seen.has(key)) continue; // 新しい順なので、最初に当たったものがそのIssueの最新
-    seen.add(key);
-    const planCreatedAt = waitingCreatedAt.get(key);
+    if (!latestJob.has(key)) latestJob.set(key, job);
+  }
+
+  for (const [key, planCreatedAt] of waitingCreatedAt) {
     // **今の計画より前に積まれたジョブのレビューは待たない**（#3648）。出し直した計画のレビューが
     // 積まれなかったときに、前の周の成功済みジョブで保留し続けない。**計画待ちはレビューのジョブより
     // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）
-    if (!planCreatedAt || job.createdAt < planCreatedAt || job.agent !== "claude") continue;
+    const job = latestJob.get(key);
+    const current = job && job.createdAt >= planCreatedAt ? job : null;
+
+    if (!current) {
+      // まだ積まれていないだけかもしれない（#3709）
+      if (now.getTime() - planCreatedAt.getTime() < PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS) keys.add(key);
+      continue;
+    }
+    if (!reasonIsPlan.has(key) || current.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
       {
-        status: job.status as DispatchJobStatus,
-        finishedAt: job.finishedAt?.toISOString() ?? null,
-        planReviewDecidedAt: job.planReviewDecidedAt?.toISOString() ?? null,
+        status: current.status as DispatchJobStatus,
+        finishedAt: current.finishedAt?.toISOString() ?? null,
+        planReviewDecidedAt: current.planReviewDecidedAt?.toISOString() ?? null,
       },
       now,
     );

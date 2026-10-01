@@ -1562,7 +1562,7 @@ describe("isPlanReviewJobCreating（#3565）", () => {
     expect(isPlanReviewJobCreating(planReviewJob({ status }), now)).toBe(true);
   });
 
-  it("SUCCEEDED直後（finishedAtから6分未満）はtrue", () => {
+  it("SUCCEEDED直後（finishedAtから10分未満）はtrue", () => {
     const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:08:00.000Z" });
     expect(isPlanReviewJobCreating(job, now)).toBe(true);
   });
@@ -1570,8 +1570,8 @@ describe("isPlanReviewJobCreating（#3565）", () => {
   // SUCCEEDEDは「レビューのセッションが立った」までを意味し、指摘コメントの投稿はそこから
   // 実測3分26秒〜5分45秒かかる。無条件にtrueにすると、ジョブが積めなかった等で古い計画の
   // SUCCEEDEDジョブが残った場合に表示が消えなくなるため、猶予を過ぎたらfalseに戻す
-  it("SUCCEEDEDから6分（既定の猶予）を過ぎたらfalse", () => {
-    const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:03:00.000Z" });
+  it("SUCCEEDEDから10分（既定の猶予）を過ぎたらfalse", () => {
+    const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:00:00.000Z" });
     expect(isPlanReviewJobCreating(job, now)).toBe(false);
   });
 
