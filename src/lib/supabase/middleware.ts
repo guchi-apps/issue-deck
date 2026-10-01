@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isEmailAllowed } from "@/lib/allowed-emails";
 import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
 
 const publicPaths = ["/login", "/auth/callback"];
 
@@ -59,8 +60,7 @@ export async function updateSession(request: NextRequest) {
   // 戻れてしまわないようにする。
   if (pathname === "/login" && allowedUser) {
     const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
-    const target = callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : "/dashboard";
-    return NextResponse.redirect(new URL(target, getRequestOrigin(request)));
+    return NextResponse.redirect(new URL(toSafeRedirectPath(callbackUrl), getRequestOrigin(request)));
   }
 
   if (isPublicPath(pathname)) {
