@@ -35,6 +35,8 @@ export type GithubApiIssue = {
 export type GithubApiComment = {
   id: number;
   user: { login: string } | null;
+  // 投稿者がこのリポジトリに対してどんな関係か。計画レビューのマーカーを信じてよいかの判定に使う（#3716）
+  author_association?: string;
   body: string | null;
   created_at: string;
   /** GitHub上でそのコメントを開くURL。「GitHubで読む」の行き先に使う（#2849） */

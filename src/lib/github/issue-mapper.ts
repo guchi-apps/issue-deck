@@ -1,6 +1,7 @@
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { buildIssueHierarchy } from "@/lib/issue-hierarchy";
 import { isBotComment } from "@/lib/github/is-bot-comment";
+import { isTrustedGithubAuthor } from "@/lib/github/trusted-author";
 import type { GithubApiComment, GithubApiIssue } from "@/lib/github/issues-api";
 import type { Issue, IssueComment, IssueLabel, IssueStateReason } from "@/types/issue";
 import type {
@@ -179,6 +180,8 @@ export function mapComment(raw: GithubApiComment): IssueComment {
   return {
     id: String(raw.id),
     author: { login: resolveCommentAuthorLogin(body, login) },
+    // 表示用に差し替える前の実際の投稿者で判定する
+    authorTrusted: isTrustedGithubAuthor({ login, association: raw.author_association ?? null }),
     createdAtLabel: formatRelativeDate(raw.created_at),
     body: stripPosterMarker(body),
     reactionCount: raw.reactions?.["+1"] ?? 0,

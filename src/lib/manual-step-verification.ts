@@ -1,4 +1,4 @@
-import { isBotLogin } from "@/lib/github/is-bot-login";
+import { isTrustedGithubAuthor, type GithubAuthor } from "@/lib/github/trusted-author";
 import {
   extractVerificationCommands,
   resolveManualStepRunTarget,
@@ -290,28 +290,11 @@ export type ManualStepPatrolTarget =
     }
   | { patrollable: false; rejection: ManualStepPatrolRejection };
 
-/** 起票者がリポジトリに対して持つ関係。判定に使うのはこの2つだけ（#3365） */
-export type ManualStepPatrolAuthor = {
-  login: string;
-  /** GitHubの`author_association`。同期していないIssue・古いレコードでは`null` */
-  association: string | null;
-};
+/** 起票者がリポジトリに対して持つ関係（#3365）。判定は`isTrustedGithubAuthor`と共通（#3716） */
+export type ManualStepPatrolAuthor = GithubAuthor;
 
-/**
- * 起票者を信頼して無人実行してよいか（#3365）。
- *
- * **人はOWNER/MEMBER/COLLABORATORだけを通す。** `CONTRIBUTOR`・`NONE`などは、GitHubアカウントさえ
- * あれば誰でも該当しうるため通さない。**`[bot]`名義はissue-deck自身の自動化とみなして通す**——
- * このリポジトリにインストールされたGitHub Appの権限は起票者本人（リポジトリのオーナー）が
- * 管理しており、外部の人が任意の`[bot]`アカウントとしてこのリポジトリへIssueを起票することは
- * できない（コメントの投稿者解決`resolveCommentAuthorLogin`と同じ判断）。
- */
-export function isTrustedManualStepPatrolAuthor(author: ManualStepPatrolAuthor): boolean {
-  if (isBotLogin(author.login)) return true;
-  return author.association !== null && TRUSTED_AUTHOR_ASSOCIATIONS.has(author.association);
-}
-
-const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/** 起票者を信頼して無人実行してよいか（#3365）。判定の中身は`isTrustedGithubAuthor`を参照 */
+export const isTrustedManualStepPatrolAuthor = isTrustedGithubAuthor;
 
 /**
  * その手作業Issueの確認コマンドを、定期巡回で流してよいか判定する。

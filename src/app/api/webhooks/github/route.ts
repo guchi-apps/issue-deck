@@ -15,6 +15,7 @@ import {
 } from "@/lib/github/project-status-dispatch";
 import { fetchProjectItem } from "@/lib/github/projects-api";
 import { reportProgressStatus } from "@/lib/github/report-progress";
+import { isTrustedGithubAuthor } from "@/lib/github/trusted-author";
 import { CLOSE_TERMINAL_SOURCE_STATUSES, resolveProgressStatus } from "@/lib/issue-progress";
 import {
   deleteIssueByGithubId,
@@ -186,7 +187,12 @@ async function closeStrandedProgress(
 async function handleIssueCommentEvent(payload: {
   action: string;
   issue: GithubApiIssue;
-  comment: { body: string; created_at: string };
+  comment: {
+    body: string;
+    created_at: string;
+    user?: { login: string } | null;
+    author_association?: string;
+  };
   repository: { id: number };
 }) {
   // issue_commentイベントはPRへのコメントでも発火する（GitHub内部ではPRもissueの一種のため）。
@@ -208,6 +214,17 @@ async function handleIssueCommentEvent(payload: {
   // 編集・削除は対象外とし、新規投稿のみを回答待ち状態の判定に使う
   if (payload.action === "created") {
     await updateQaAnswerPendingState(payload.issue.id, payload.comment.body);
+    // 計画レビューの記録と自動反映は本文のマーカーだけで動くため、投稿者を絞る（#3716）。
+    // issue-deckはPUBLICで、外部の誰でもマーカー入りのコメントを書ける。通すと最も古いジョブへ
+    // 偽の到着が記録され、本文がそのまま採否の判定（LLM）と計画待ちへの「修正」に渡る
+    if (
+      !isTrustedGithubAuthor({
+        login: payload.comment.user?.login ?? "",
+        association: payload.comment.author_association ?? null,
+      })
+    ) {
+      return;
+    }
     // 計画レビュー（G1）が届いたことをジョブへ記録し、一覧の「作成中」を終える（#3659）
     let postedJob: Awaited<ReturnType<typeof markPlanReviewPosted>> = null;
     try {
