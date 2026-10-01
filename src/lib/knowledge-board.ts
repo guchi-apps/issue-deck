@@ -15,7 +15,7 @@
  * 一覧に出ない」という最悪の形になる**ため、精度より取りこぼしの無さを優先する。
  */
 
-import { startOfJstDayMs } from "@/lib/format-date-time";
+import { startOfJstDayMs, toJstParts } from "@/lib/format-date-time";
 
 /** 知見メモの目印。`promote-knowledge.yml`・各プロンプトが使うものと同じ */
 export const CANDIDATE_MARKER = "<!-- knowledge-candidate -->";
@@ -37,6 +37,13 @@ export type KnowledgeSection = {
   confirmedOn: string | null;
   /** `- **出典リポジトリ**: guchi-apps/issue-deck#123`の値。取れなければnull */
   source: string | null;
+  /**
+   * 共通知識へ入った日時（ISO）。見出し行のgit blameから取る（#3695）。**blameのコミット日時は
+   * 反映PRを作った時刻**なので、対応PRがあればそのマージ日時を使う。取れなければ`undefined`／null
+   */
+  enteredAt?: string | null;
+  /** 入った反映PRの番号（`guchi-apps/docs`）。PRを経ない行はnull */
+  enteredPrNumber?: number | null;
 };
 
 /** 知見メモ1件（`###`見出し1つ、またはマーカー1つぶん） */
@@ -183,6 +190,16 @@ export type RawIssue = {
   title: string;
   htmlUrl: string;
   comments: RawComment[];
+};
+
+/** 見出し行のblame1範囲（`knowledge-api.ts`が返す形） */
+export type RawBlameRange = {
+  startingLine: number;
+  endingLine: number;
+  /** 範囲のコミット日時（ISO）。反映PRではPRのheadコミット＝作成時刻になる */
+  committedDate: string;
+  /** コミットに対応するPR。無ければnull（初期取り込み・直接コミット） */
+  pullRequest: { number: number; mergedAt: string | null } | null;
 };
 
 /** 取得元のファイル1件 */
@@ -855,4 +872,113 @@ export function detectKnowledgeStall(
     shouldWarn,
     collectWindowSaturated,
   };
+}
+
+// ---- 入った順（#3695） -------------------------------------------------------
+
+/**
+ * 生テキストから`##`見出しの行番号（1始まり）を出す。**`parseKnowledgeFile`と同じフェンス判定**
+ * （`stripCodeFences`と同じ規則）で走査するので、コードブロック内の`##`は数えず、返る見出しの
+ * 並びは`parseKnowledgeFile`のセクションと一致する。blameの行番号は生テキストのものなので、
+ * フェンス除去後の本文からは行番号を取れない。
+ */
+export function findHeadingLines(text: string): { title: string; line: number }[] {
+  const found: { title: string; line: number }[] = [];
+  let fence: { char: string; length: number } | null = null;
+
+  text.split("\n").forEach((line, index) => {
+    const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (match) {
+      const char = match[1][0];
+      const length = match[1].length;
+      if (!fence) {
+        fence = { char, length };
+        return;
+      }
+      if (char === fence.char && length >= fence.length) {
+        fence = null;
+        return;
+      }
+    }
+    if (!fence && /^##\s+/.test(line)) {
+      found.push({ title: cleanHeading(line), line: index + 1 });
+    }
+  });
+  return found;
+}
+
+/**
+ * 各セクションへ「入った日時」を付ける。見出し行を含むblame範囲を探し、対応PRの`mergedAt`を優先、
+ * 無ければコミット日時。セクションとの突き合わせは見出し文字列（`cleanHeading`後）＋出現順。
+ * blameが無いファイル・範囲に入らない行は付けない（呼び出し側は確認日へフォールバックする）。
+ */
+export function attachEnteredAt(
+  sections: KnowledgeSection[],
+  files: RawKnowledgeFile[],
+  blameByPath: ReadonlyMap<string, RawBlameRange[]>,
+): KnowledgeSection[] {
+  const lineByKey = new Map<string, number>();
+  for (const file of files) {
+    const seen = new Map<string, number>();
+    for (const heading of findHeadingLines(file.text)) {
+      const n = (seen.get(heading.title) ?? 0) + 1;
+      seen.set(heading.title, n);
+      lineByKey.set(`${file.path}\u0000${n}\u0000${heading.title}`, heading.line);
+    }
+  }
+
+  const seenBySection = new Map<string, number>();
+  return sections.map((section) => {
+    const seenKey = `${section.path}\u0000${section.title}`;
+    const n = (seenBySection.get(seenKey) ?? 0) + 1;
+    seenBySection.set(seenKey, n);
+
+    const line = lineByKey.get(`${section.path}\u0000${n}\u0000${section.title}`);
+    const range = line
+      ? blameByPath.get(section.path)?.find((r) => r.startingLine <= line && line <= r.endingLine)
+      : undefined;
+    if (!range) return section;
+
+    return {
+      ...section,
+      enteredAt: range.pullRequest?.mergedAt ?? range.committedDate,
+      enteredPrNumber: range.pullRequest?.number ?? null,
+    };
+  });
+}
+
+/** 入った日ごとのまとまり（JSTの日付）。`date`がnullは「日時不明」 */
+export type KnowledgeEnteredGroup = {
+  /** `2026-09-30`（JST）。blameを読めなかったものはnull */
+  date: string | null;
+  sections: KnowledgeSection[];
+};
+
+/**
+ * 共通知識を入った順（新しい順）に、JSTの日付ごとへまとめる。**日付はUTCで切らない**
+ * （`mergedAt`はUTCで、`slice(0, 10)`だとJST 0〜9時の反映が前日に入る）。
+ * 入った日時が取れなかったものは末尾に「日時不明」として、確認日の新しい順で置く。
+ */
+export function groupKnowledgeByEntered(sections: KnowledgeSection[]): KnowledgeEnteredGroup[] {
+  const dated = sections
+    .filter((s) => s.enteredAt)
+    .sort((a, b) => Date.parse(b.enteredAt!) - Date.parse(a.enteredAt!));
+  const undated = sections
+    .filter((s) => !s.enteredAt)
+    .sort((a, b) => (b.confirmedOn ?? "").localeCompare(a.confirmedOn ?? ""));
+
+  const groups: KnowledgeEnteredGroup[] = [];
+  for (const section of dated) {
+    const parts = toJstParts(section.enteredAt!);
+    if (!parts) {
+      undated.push(section);
+      continue;
+    }
+    const date = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+    const last = groups[groups.length - 1];
+    if (last && last.date === date) last.sections.push(section);
+    else groups.push({ date, sections: [section] });
+  }
+  if (undated.length > 0) groups.push({ date: null, sections: undated });
+  return groups;
 }
