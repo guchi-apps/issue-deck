@@ -2728,7 +2728,7 @@ export function IssueDeckShell({
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
                 onStartManualStepGuide={manualStepGuide.start}
                 // リポジトリ全体のコードレビューを実行する入口（#698）
-                // リポジトリ別の枠（#3092）の各行の「実行」がそのリポジトリを渡す
+                // リポジトリ別の枠（#3092）の「コードレビューを実行」モーダルで選んだリポジトリを渡す
                 onStartCodeReview={openCodeReviewDialog}
                 codeReviewIssues={codeReviewIssues}
                 codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}

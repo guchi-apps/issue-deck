@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -42,14 +49,16 @@ function writeExpanded(expanded: boolean) {
  * 1行が1リポジトリで、**いつレビューしたか**（直近12週の帯に点・前回の日付と経過日数・回数）と
  * **前回以降に入ったPRの件数**を出す。PRの件数はグラフにせず数字だけにする。
  *
- * 行を押すとそのリポジトリのレビューだけに一覧が絞られ（選択はこの画面の中だけで持つ。
- * このビューは上部の絞り込みが効かない作り〈#1750〉のため）、「実行」でそのリポジトリを
- * 選んだ状態のレビュー実行ダイアログが開く。
+ * 行を押すとそのリポジトリのレビューだけに一覧が絞られる（選択はこの画面の中だけで持つ。
+ * このビューは上部の絞り込みが効かない作り〈#1750〉のため）。
  *
+ * **実行の入口は「コードレビューを実行」ボタンだけ**で、押すとリポジトリを選ぶモーダルが開き、
+ * 選ぶとそのリポジトリを選んだ状態のレビュー実行ダイアログへ進む。スマホは下部シート
+ * （#3529）、PC・iPadは中央のモーダル（#3719）で、一覧の中身は共通（`RepoPickerList`）。
+ * 出し分けは幅判定のフックではなく、`md:hidden`／`hidden md:block`の2つのsectionがそれぞれ
+ * シート／モーダルを持つ形にしている（どちらもポータルへ描画されるため）。
  * **PC・iPadでは、たたんでいる間は行の一覧も凡例も出さず**、見出しと「すべて表示」だけにする
- * （#3125）。実行の入口は各行の「実行」だけで、見出しに別の「レビューを実行」は置かない。
- * スマホは#3529で主ボタンとリポジトリ選択シートへ切り替える。
- * 絞り込み中の行だけは、解除できるようたたんでも残す。
+ * （#3125）。絞り込み中の行だけは、解除できるようたたんでも残す。
  *
  * 幅が狭い（スマホ・一覧の列を細くしたPC）ときは帯を2行目へ回す。判定は画面幅ではなく
  * 一覧の列の幅で行う（`@container`）。
@@ -70,7 +79,7 @@ export function CodeReviewRepoOverview({
   countsLoading: boolean;
   selectedRepositoryFullName: string | null;
   onSelectRepository: (repositoryFullName: string | null) => void;
-  /** 渡されていなければ各行の実行ボタンを出さない */
+  /** 渡されていなければ「コードレビューを実行」ボタンを押せなくする */
   onStartCodeReview?: (repositoryFullName: string) => void;
 }) {
   // 端末の記憶はマウント後に読む（サーバーの描画と食い違わせない）
@@ -93,7 +102,8 @@ export function CodeReviewRepoOverview({
 
   return (
     <>
-      <MobileCodeReviewLauncher
+      <CodeReviewLauncher
+        variant="sheet"
         rows={rows}
         sinceLastCounts={sinceLastCounts}
         countsLoading={countsLoading}
@@ -107,6 +117,14 @@ export function CodeReviewRepoOverview({
         <div className="flex items-center gap-2 px-4 pt-2 pb-1">
           <h2 className="text-xs font-semibold">リポジトリ別のレビュー</h2>
           <span className="text-[11px] text-muted-foreground">前回からの経過が長い順</span>
+          <CodeReviewLauncher
+            variant="dialog"
+            rows={rows}
+            sinceLastCounts={sinceLastCounts}
+            countsLoading={countsLoading}
+            onStartCodeReview={onStartCodeReview}
+            recommendPrCount={recommendPrCount}
+          />
         </div>
 
         {rows.length === 0 ? (
@@ -148,11 +166,6 @@ export function CodeReviewRepoOverview({
                           : row.repositoryFullName,
                       )
                     }
-                    onStartCodeReview={
-                      onStartCodeReview && row.canRun
-                        ? () => onStartCodeReview(row.repositoryFullName)
-                        : undefined
-                    }
                   />
                 ))}
               </ul>
@@ -172,16 +185,19 @@ export function CodeReviewRepoOverview({
 }
 
 /**
- * スマホでは各行の小さな「実行」を並べず、主ボタンから下部シートを開く。
- * ただし実施時期を比べられるよう、従来の横棒タイムラインは選択肢ごとに残す（#3529）。
+ * 「コードレビューを実行」ボタンと、リポジトリを選ぶモーダル。スマホは下部シート（#3529）、
+ * PC・iPadは中央のモーダル（#3719）。ただし実施時期を比べられるよう、横棒タイムラインは
+ * どちらの選択肢にも残す。
  */
-function MobileCodeReviewLauncher({
+function CodeReviewLauncher({
+  variant,
   rows,
   sinceLastCounts,
   countsLoading,
   onStartCodeReview,
   recommendPrCount,
 }: {
+  variant: "sheet" | "dialog";
   recommendPrCount?: number;
   rows: CodeReviewRepoRow[];
   sinceLastCounts: ReadonlyMap<string, number>;
@@ -189,7 +205,38 @@ function MobileCodeReviewLauncher({
   onStartCodeReview?: (repositoryFullName: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const runnableRows = rows.filter((row) => row.canRun);
+
+  const picker = (
+    <RepoPickerList
+      rows={rows}
+      sinceLastCounts={sinceLastCounts}
+      countsLoading={countsLoading}
+      recommendPrCount={recommendPrCount}
+      onPick={(repositoryFullName) => {
+        setOpen(false);
+        onStartCodeReview?.(repositoryFullName);
+      }}
+    />
+  );
+
+  if (variant === "dialog") {
+    return (
+      <div className="ml-auto" role="group" aria-label="コードレビューの新規実行（PC）">
+        <Button size="xs" onClick={() => setOpen(true)} disabled={!onStartCodeReview}>
+          コードレビューを実行
+        </Button>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="flex max-h-[85dvh] flex-col gap-3 sm:max-w-lg">
+            <DialogHeader className="pr-8">
+              <DialogTitle>コードレビューを実行</DialogTitle>
+              <DialogDescription>レビューするリポジトリを選択してください</DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto">{picker}</div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   return (
     <section aria-label="コードレビューの新規実行" className="shrink-0 border-b bg-emerald-500/5 p-3 md:hidden">
@@ -206,47 +253,65 @@ function MobileCodeReviewLauncher({
             <SheetTitle>コードレビューを実行</SheetTitle>
             <SheetDescription>レビューするリポジトリを選択してください</SheetDescription>
           </SheetHeader>
-          {runnableRows.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              コードレビューを実行できるリポジトリがありません。サブPCにチェックアウトがあるリポジトリがここに並びます。
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {runnableRows.map((row) => {
-                const sinceLastCount = sinceLastCounts.get(row.repositoryFullName);
-                const recommended = shouldRecommendCodeReview(row, sinceLastCount, recommendPrCount);
-                const name = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
-                return (
-                  <li key={row.repositoryFullName}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpen(false);
-                        onStartCodeReview?.(row.repositoryFullName);
-                      }}
-                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">{name}</span>
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                          {describeMobileReviewStats(row, sinceLastCount, countsLoading)}
-                        </span>
-                        <ReviewTimelineStrip row={row} className="mt-2 h-2" />
-                      </span>
-                      {recommended && (
-                        <span className="self-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                          {row.lastReviewedAt === null ? "初回を提案" : "レビューを提案"}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {picker}
         </SheetContent>
       </Sheet>
     </section>
+  );
+}
+
+/** シートとモーダルで共通の、実行できるリポジトリの選択肢 */
+function RepoPickerList({
+  rows,
+  sinceLastCounts,
+  countsLoading,
+  recommendPrCount,
+  onPick,
+}: {
+  rows: CodeReviewRepoRow[];
+  sinceLastCounts: ReadonlyMap<string, number>;
+  countsLoading: boolean;
+  recommendPrCount?: number;
+  onPick: (repositoryFullName: string) => void;
+}) {
+  const runnableRows = rows.filter((row) => row.canRun);
+  if (runnableRows.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        コードレビューを実行できるリポジトリがありません。サブPCにチェックアウトがあるリポジトリがここに並びます。
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-2">
+      {runnableRows.map((row) => {
+        const sinceLastCount = sinceLastCounts.get(row.repositoryFullName);
+        const recommended = shouldRecommendCodeReview(row, sinceLastCount, recommendPrCount);
+        const name = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
+        return (
+          <li key={row.repositoryFullName}>
+            <button
+              type="button"
+              onClick={() => onPick(row.repositoryFullName)}
+              className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{name}</span>
+                <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                  {describeMobileReviewStats(row, sinceLastCount, countsLoading)}
+                </span>
+                <ReviewTimelineStrip row={row} className="mt-2 h-2" />
+              </span>
+              {recommended && (
+                <span className="self-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                  {row.lastReviewedAt === null ? "初回を提案" : "レビューを提案"}
+                </span>
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -268,21 +333,19 @@ function CodeReviewRepoOverviewRow({
   countsLoading,
   selected,
   onSelect,
-  onStartCodeReview,
 }: {
   row: CodeReviewRepoRow;
   sinceLastCount: number | undefined;
   countsLoading: boolean;
   selected: boolean;
   onSelect: () => void;
-  onStartCodeReview?: () => void;
 }) {
   const name = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
   return (
     <li
       className={cn(
-        "grid grid-cols-[minmax(0,1fr)_6.5rem_3rem] items-center gap-x-2 gap-y-1 px-4 py-1",
-        "@md:grid-cols-[minmax(0,1fr)_9rem_6.5rem_3rem]",
+        "grid grid-cols-[minmax(0,1fr)_6.5rem] items-center gap-x-2 gap-y-1 px-4 py-1",
+        "@md:grid-cols-[minmax(0,1fr)_9rem_6.5rem]",
         selected ? "bg-emerald-500/15" : "hover:bg-muted/60",
       )}
     >
@@ -301,7 +364,7 @@ function CodeReviewRepoOverviewRow({
       </button>
       <ReviewTimelineStrip
         row={row}
-        className="order-last col-span-3 @md:order-none @md:col-span-1"
+        className="order-last col-span-2 @md:order-none @md:col-span-1"
       />
       <div
         className={cn(
@@ -331,13 +394,6 @@ function CodeReviewRepoOverviewRow({
               </span>
             </span>
           </>
-        )}
-      </div>
-      <div className="flex justify-end">
-        {onStartCodeReview && (
-          <Button size="xs" variant="outline" onClick={onStartCodeReview}>
-            実行
-          </Button>
         )}
       </div>
     </li>
