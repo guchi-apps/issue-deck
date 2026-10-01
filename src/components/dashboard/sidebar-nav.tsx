@@ -13,6 +13,7 @@ import {
   GitBranch,
   History,
   Lightbulb,
+  Smartphone,
   Loader2,
   Lock,
   MonitorPlay,
@@ -84,6 +85,8 @@ type SidebarNavProps = {
   onSelectNightlyRun: () => void;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
+  /** iOS拡張（#3708）の画面を開く */
+  onSelectIosExtensions?: () => void;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
   nightlyRunQueuedCount?: number | null;
   /** 構想の件数（#3639）。取得できていないときはnullで、何も出さない */
@@ -186,6 +189,7 @@ export function SidebarNavView({
   onSelectReleaseHistory,
   onSelectNightlyRun,
   onSelectIdeas = () => {},
+  onSelectIosExtensions = () => {},
   nightlyRunQueuedCount = null,
   ideasCount = null,
   onLaunchNewApp,
@@ -411,6 +415,14 @@ export function SidebarNavView({
             onClick: onSelectIdeas,
             count: ideasCount,
             title: "新規アプリの構想を確認・整理する",
+          })}
+          {navRow({
+            key: "ios-extensions",
+            label: "iOS拡張",
+            icon: Smartphone,
+            active: activePane === "ios-extensions",
+            onClick: onSelectIosExtensions,
+            title: "ウィジェット・ロック画面・ライブアクティビティ・コントロールを一覧する",
           })}
           {navRow({
             key: "usage",
