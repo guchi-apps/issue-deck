@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
@@ -77,14 +77,19 @@ describe("CodeReviewRepoOverview", () => {
     expect(second.onSelectRepository).toHaveBeenCalledWith(null);
   });
 
-  it("「実行」は実行できる行だけに出し、そのリポジトリを渡す。見出しに別の実行ボタンは無い", () => {
+  it("PCは「コードレビューを実行」からモーダルを開き、実行できる行だけが並び、選ぶと対象を渡す。各行に「実行」は無い", () => {
     const { onStartCodeReview } = renderOverview();
-    expect(screen.queryByRole("button", { name: "レビューを実行" })).toBeNull();
     openList();
-    const runButtons = screen.getAllByRole("button", { name: "実行" });
-    expect(runButtons).toHaveLength(1);
-    fireEvent.click(runButtons[0]);
+    expect(screen.queryByRole("button", { name: "実行" })).toBeNull();
+
+    const pc = within(screen.getByRole("group", { name: "コードレビューの新規実行（PC）" }));
+    fireEvent.click(pc.getByRole("button", { name: "コードレビューを実行" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("レビューするリポジトリを選択してください")).toBeTruthy();
+    expect(dialog.queryByRole("button", { name: /deck/ })).toBeNull();
+    fireEvent.click(dialog.getByRole("button", { name: /new/ }));
     expect(onStartCodeReview).toHaveBeenLastCalledWith("o/new");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("スマホの主ボタンから選択シートを開き、横棒タイムラインと提案を見て対象を選べる", () => {
@@ -104,7 +109,8 @@ describe("CodeReviewRepoOverview", () => {
       sinceLastCounts: new Map([["o/deck", 100]]),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "コードレビューを実行" }));
+    const mobile = within(screen.getByRole("region", { name: "コードレビューの新規実行" }));
+    fireEvent.click(mobile.getByRole("button", { name: "コードレビューを実行" }));
 
     expect(screen.getByText("レビューするリポジトリを選択してください")).toBeTruthy();
     expect(screen.getByText("初回を提案")).toBeTruthy();
