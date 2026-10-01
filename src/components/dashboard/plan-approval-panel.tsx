@@ -168,6 +168,26 @@ export function PlanApprovalPanel({
   // 届いた後は下の`PlanReviewFindings`カードがそちらを表す
   const planReviewCreating =
     planReview === null && isPlanReviewJobCreating(planReviewJob, new Date());
+  // 計画レビューの作成中は、オレンジの承認枠ごと出さず作成中カードだけを出す（#3726）。
+  // 採否が決まるまで人が押す場面が無く、Push通知も保留している間なので、目を引く枠は要らない。
+  // 完成後は`PlanReviewFindings`カードと承認枠へ入れ替わる（#3573）
+  if (planReviewCreating) {
+    return (
+      <section
+        className="w-full overflow-hidden rounded-md border bg-card"
+        aria-label="計画レビュー"
+      >
+        <div className="flex items-center gap-1.5 border-b bg-blue-500/10 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          計画レビューを作成中
+        </div>
+        <p className="px-3 py-2 text-xs text-muted-foreground">
+          届くとJevが指摘を採用するか判断し、採用なら自動で計画へ反映します（指摘がなくなるか上限に達するまで繰り返します。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
+        </p>
+      </section>
+    );
+  }
+
   const planReviewHasFindings =
     planReview !== null &&
     (planReview.review.findings.length > 0 || !planReview.review.noFindings);
@@ -275,25 +295,6 @@ export function PlanApprovalPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            {planReviewCreating && (
-              /* 完成後に出る計画レビューカード（PlanReviewFindings）と同じ枠・同じ場所に
-                 出す（#3573）。届いたらこのカードがそのままそちらへ入れ替わるので、
-                 「計画レビューの表示と同じようなデザイン」という要求に位置ごと揃う */
-              <div
-                className="w-full overflow-hidden rounded-md border bg-card"
-                aria-label="計画レビュー"
-              >
-                <div className="flex items-center gap-1.5 border-b bg-blue-500/10 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
-                  <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                  計画レビューを作成中
-                </div>
-                {!canHandoff && (
-                <p className="px-3 py-2 text-xs text-muted-foreground">
-                  届くとJevが指摘を採用するか判断し、採用なら自動で計画へ反映します（指摘がなくなるか上限に達するまで繰り返します。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
-                </p>
-                )}
-              </div>
-            )}
             {planReview && (
               /* 指摘を読んで、どれを取り込ませるかをここで決める（#3554）。承認・修正のボタンより
                  上に置く——読んでから押す順にする */

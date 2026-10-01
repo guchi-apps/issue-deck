@@ -207,7 +207,7 @@ export const PLAN_REVIEW_REFLECT_PUSH_HOLD_MS = 2 * 60 * 1000;
  * 保留するのは次のどれか。**受け手の居ない保留は、通知が遅れるだけで何も起こらない**ので、
  * 自動反映が実際に起こりうる場合に限る。
  *
- * - **レビューが作成中**: 理由が計画（`01.check-plan`）で、期限内の`WAITING`の計画待ちがあり
+ * - **レビューが作成中**: 期限内の`WAITING`の計画待ちがあり
  *   （「アプリで答える」ON・待ち時間0のセッションは待ちが作られないので対象外）、計画の提示から
  *   `PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内で、計画レビューのジョブがClaude Codeのもので作成中
  *   （`isPlanReviewJobCreating`。実行中、または成功から猶予内で、採否`planReviewDecidedAt`が未決定）。
@@ -219,7 +219,7 @@ export const PLAN_REVIEW_REFLECT_PUSH_HOLD_MS = 2 * 60 * 1000;
  * - **自動反映の直後**（#3709）: 自動反映の決定から`PLAN_REVIEW_REFLECT_PUSH_HOLD_MS`以内で、
  *   その後に新しい計画待ちが無い
  *
- * **下の2つは理由ラベルで絞らない。** `00.check-user`は理由ラベルより先に付く
+ * **3つとも理由ラベルで絞らない**（#3726。作成中も絞らない）。`00.check-user`は理由ラベルより先に付く
  * （`dispatch/check-user-labels.ts`）ので、付与直後の巡回では理由がまだ`plan`と読めない。
  * 計画待ちがあれば理由は計画と確定している
  */
@@ -286,12 +286,6 @@ async function selectPlanReviewHoldKeys(
     if (!next || next < row.decidedAt) keys.add(key);
   }
 
-  const reasonIsPlan = new Set(
-    targets
-      .filter((t) => checkUserReason(t.labels) === "plan")
-      .map((t) => sessionRequestKey(t.repositoryFullName, t.issueNumber)),
-  );
-
   // Issueごとの最新ジョブ（新しい順なので、最初に当たったものがそのIssueの最新）
   const latestJob = new Map<string, (typeof jobs)[number]>();
   for (const job of jobs) {
@@ -311,7 +305,7 @@ async function selectPlanReviewHoldKeys(
       if (now.getTime() - planCreatedAt.getTime() < PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS) keys.add(key);
       continue;
     }
-    if (!reasonIsPlan.has(key) || current.agent !== "claude") continue;
+    if (current.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
       {
         status: current.status as DispatchJobStatus,
