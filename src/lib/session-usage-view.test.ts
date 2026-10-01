@@ -393,14 +393,15 @@ describe("buildSessionUsageSummary", () => {
       "phase-research",
       "phase-coding",
       "phase-wrapup",
-      "code-review",
       "actions",
+      "code-review",
       "question",
       "other",
       "new-kind-b",
       "new-kind-a",
     ]);
     expect(isUsageKindInWorkFlow("actions")).toBe(true);
+    expect(isUsageKindInWorkFlow("code-review")).toBe(false);
     expect(isUsageKindInWorkFlow("question")).toBe(false);
     expect(isUsageKindInWorkFlow("new-kind-a")).toBe(false);
   });
