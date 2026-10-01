@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
-import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
+import {
+  resolvePlanReviewListState,
+  selectPlanReviewCreatingIssueIds,
+} from "@/lib/dispatch/plan-review-list-state";
 
 const NOW = new Date("2026-09-29T12:00:00Z");
 const REPO = "guchi-apps/issue-deck";
@@ -79,5 +82,19 @@ describe("resolvePlanReviewListState", () => {
 
   it("計画リクエストが消えていれば（期限切れ後）ジョブの存在だけで提示済", () => {
     expect(resolvePlanReviewListState({ ...base, jobs: [job({})], labels: planLabels })).toBe("presented");
+  });
+});
+
+describe("selectPlanReviewCreatingIssueIds", () => {
+  it("作成中のIssueだけを返す", () => {
+    const issues = [
+      { id: "a", repositoryFullName: REPO, number: 1 },
+      { id: "b", repositoryFullName: REPO, number: 2 },
+    ];
+    const jobs = [
+      job({ issueNumber: 1, status: "RUNNING", finishedAt: null }),
+      job({ issueNumber: 2, planReviewDecidedAt: "2026-09-29T11:02:00Z" }),
+    ];
+    expect([...selectPlanReviewCreatingIssueIds(issues, jobs, NOW)]).toEqual(["a"]);
   });
 });
