@@ -5,6 +5,7 @@ import {
   FolderGit2,
   Loader2,
   Lightbulb,
+  Smartphone,
   MonitorPlay,
   Rocket,
   Settings,
@@ -90,6 +91,8 @@ type MobileHomeScreenProps = {
   ideasCount?: number | null;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
+  /** iOS拡張（#3708）の画面を開く */
+  onSelectIosExtensions?: () => void;
   /**
    * リポジトリ一覧の画面を開く（#2724。フッターの「Issue」タブを外した代わりの入口）。
    * 「ブランチ」「確認環境」と同じくビューではないので、メニューへ直接1行として置く
@@ -176,6 +179,7 @@ export function MobileHomeScreenView({
   nightlyRunQueuedCount,
   ideasCount = null,
   onSelectIdeas = () => {},
+  onSelectIosExtensions = () => {},
   onSelectRepos,
   repositoryCount,
   favoriteRepositories,
@@ -215,6 +219,7 @@ export function MobileHomeScreenView({
     onSelectPreview,
     onSelectNightlyRun,
     onSelectIdeas,
+    onSelectIosExtensions,
     onSelectRepos,
   });
 
@@ -425,7 +430,7 @@ const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
 const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
   attention: ["check-user", "manual-step", "pr:completed", "question"],
   progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending"],
-  list: ["all", "pr:all", "repos", "code-review", "ideas", "preview"],
+  list: ["all", "pr:all", "repos", "code-review", "ideas", "ios-extensions", "preview"],
 };
 
 type HomeTile = {
@@ -465,6 +470,7 @@ type BuildHomeTilesInput = {
   onSelectPreview: () => void;
   onSelectNightlyRun: () => void;
   onSelectIdeas: () => void;
+  onSelectIosExtensions: () => void;
   onSelectRepos: () => void;
 };
 
@@ -596,6 +602,16 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       busy: false,
       title: "新規アプリの構想を確認・整理する",
       onClick: input.onSelectIdeas,
+    },
+    {
+      key: "ios-extensions",
+      label: "iOS拡張",
+      icon: Smartphone,
+      count: null,
+      emphasis: "none",
+      busy: false,
+      title: "ウィジェット・ロック画面・ライブアクティビティ・コントロールを一覧する",
+      onClick: input.onSelectIosExtensions,
     },
   );
 

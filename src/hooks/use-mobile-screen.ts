@@ -65,6 +65,8 @@ export type MobileScreen =
   // 予約実行（#2995）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "nightly-run" }
   | { kind: "ideas" }
+  // iOS拡張（#3708）。構想と同じくホームのメニューからのドリルダウンだけで開く
+  | { kind: "ios-extensions" }
   | {
       kind: "repo-detail";
       repository: ConnectedRepository;
@@ -215,6 +217,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     if (screenParam === "ideas") return { kind: "ideas" };
+    if (screenParam === "ios-extensions") return { kind: "ios-extensions" };
 
     return { kind: "home" };
   }, [screenParam, repoParam, issueParam, view, labels, state, assignee, sort, origin, issues, repositories]);
@@ -240,7 +243,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           | "settings"
           | "preview"
           | "nightly-run"
-          | "ideas";
+          | "ideas"
+          | "ios-extensions";
         repo?: string | null;
         issue?: string | null;
         view?: NavViewId | null;
@@ -404,6 +408,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
   // ホームのメニューから共通知識の画面へ遷移する（#2912）。確認環境と同じ形
   const selectIdeas = useCallback(() => navigate({ screen: "ideas" }), [navigate]);
+  const selectIosExtensions = useCallback(() => navigate({ screen: "ios-extensions" }), [navigate]);
 
   const selectRepository = useCallback(
     (repository: ConnectedRepository) => navigate({ screen: "repo-detail", repo: repository.fullName }),
@@ -581,6 +586,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPreview,
     selectNightlyRun,
     selectIdeas,
+    selectIosExtensions,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
