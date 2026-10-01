@@ -2351,9 +2351,10 @@ export function findPlanReviewJobForIssue(
 /**
  * 計画レビュー（G1）ジョブを「作成中」とみなす猶予（#3565）。`SUCCEEDED`は「レビューの
  * セッションが立った」時点を指し、指摘コメントの投稿はそこから実測3分26秒〜5分45秒かかる
- * （`scripts/wait-plan-review.sh`）。同じ既定タイムアウト（360秒）を使う。
+ * （`scripts/wait-plan-review.sh`）。6分では余裕が薄く、超えると採否が決まる前に通知が鳴って
+ * 後から自動反映で確認待ちが消えるため、10分へ延ばしてある（#3709）。
  */
-const PLAN_REVIEW_CREATING_GRACE_MS = 360_000;
+const PLAN_REVIEW_CREATING_GRACE_MS = 600_000;
 
 /**
  * 計画レビュー（G1）ジョブを承認パネルへ「作成中」として出すかどうか（#3565）。

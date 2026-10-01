@@ -39,6 +39,8 @@ export const GITHUB_API_FEATURES = [
   { key: "ios_testflight", label: "iOS配布結果の取得" },
   // ブランチ画面のリリース束からのiOS配布の起動（#3644）。押したときだけ数リクエストを消費する
   { key: "ios_testflight_dispatch", label: "iOS配布の起動" },
+  // iOS拡張一覧（#3708）。**画面を開いたときだけ**、1リポジトリにつきツリー1回＋拡張らしいSwiftファイルのBlob（最大40）を取る。結果は5分キャッシュする
+  { key: "ios_extensions", label: "iOS拡張一覧の取得" },
   // 左メニュー・スマホのフッタータブに出す未確認件数（#2951）。**常時5分間隔でポーリング**
   // するが、「確認を追う対象」に選んだリポジトリが無いユーザーはGitHub APIを呼ばない
   { key: "release_unchecked_count", label: "リリース未確認件数のポーリング" },

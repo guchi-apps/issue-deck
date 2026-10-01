@@ -356,14 +356,24 @@ export function findPlanRequestForIssue(
   repositoryFullName: string,
   issueNumber: number,
   now: Date = new Date(),
+  options: { sessionWaitingInput?: boolean } = {},
 ): SessionPlanRequestView | null {
-  const mine = requests.filter(
+  const all = requests.filter(
     (request) =>
-      request.repositoryFullName === repositoryFullName &&
-      request.issueNumber === issueNumber &&
-      isVisibleSessionPlanRequest(request, now),
+      request.repositoryFullName === repositoryFullName && request.issueNumber === issueNumber,
   );
-  if (mine.length === 0) return null;
+  const mine = all.filter((request) => isVisibleSessionPlanRequest(request, now));
+  if (mine.length === 0) {
+    // 画面の返事待ちが畳まれた（待ち時間切れ・「端末で答える」・フックの離脱）あとも、**セッションが
+    // 入力待ちのままなら端末には承認プロンプトが残っている**（#3711）。結果表示の猶予（3分）で
+    // 消すと、端末には計画が出ているのにissue-deckには何も出ない状態になる。最新の計画がそのどちらか
+    // のときだけ、セッションが動き出すまで案内を出し続ける
+    if (options.sessionWaitingInput) {
+      const latest = [...all].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (latest && (latest.status === "EXPIRED" || latest.status === "DEFERRED")) return latest;
+    }
+    return null;
+  }
   const waiting = mine.find((request) => request.status === "WAITING");
   if (waiting) return waiting;
   return [...mine].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];

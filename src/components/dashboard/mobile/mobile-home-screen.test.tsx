@@ -169,6 +169,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "リポジトリ",
       "コードレビュー",
       "構想",
+      "iOS拡張",
     ]);
     // 最下部の1行（#2188）は年に数回なのでタイルには混ぜない
     expect(screen.getByRole("button", { name: /新規アプリを立ち上げる/ })).toBeTruthy();

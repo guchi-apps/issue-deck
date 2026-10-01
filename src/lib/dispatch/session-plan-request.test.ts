@@ -178,6 +178,29 @@ describe("isVisibleSessionPlanRequest", () => {
 });
 
 describe("findPlanRequestForIssue", () => {
+  /** 端末に承認プロンプトが残っているのに画面から計画が消える不具合（#3711） */
+  it("セッションが入力待ちなら、畳まれた計画の案内を出し続ける", () => {
+    const requests = [view({ id: "deferred", status: "DEFERRED", decidedAt: null })];
+    expect(findPlanRequestForIssue(requests, "guchi-apps/issue-deck", 2061, NOW)).toBeNull();
+    expect(
+      findPlanRequestForIssue(requests, "guchi-apps/issue-deck", 2061, NOW, {
+        sessionWaitingInput: true,
+      })?.id,
+    ).toBe("deferred");
+  });
+
+  it("最新の計画が承認済みなら、古い期限切れの行は掘り起こさない", () => {
+    const requests = [
+      view({ id: "old", status: "EXPIRED", createdAt: new Date(NOW.getTime() - 60000).toISOString() }),
+      view({ id: "new", status: "APPROVED", createdAt: NOW.toISOString(), decidedAt: null }),
+    ];
+    expect(
+      findPlanRequestForIssue(requests, "guchi-apps/issue-deck", 2061, NOW, {
+        sessionWaitingInput: true,
+      }),
+    ).toBeNull();
+  });
+
   it("別のIssue・別リポジトリのものは拾わない", () => {
     const requests = [
       view({ id: "other-repo", repositoryFullName: "guchi-apps/vps" }),

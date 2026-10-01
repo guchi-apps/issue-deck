@@ -4491,3 +4491,10 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 - 一覧の行は`Issue.hierarchy`（`src/types/issue.ts`）で親Issue／子Issueのバッジを出す。材料はGitHubのIssue payload（REST・Webhook）に載る`sub_issues_summary`と`parent_issue_url`で、`sync-issues.ts`が`Issue`テーブルの`subIssuesTotal`・`subIssuesCompleted`・`parentIssueUrl`へ保存し、`issue-mapper.ts`が`lib/issue-hierarchy.ts`の`buildIssueHierarchy`で写す。判定と文言は`resolveIssueHierarchyBadges`
 - **一覧のための近似値**で、詳細の「子Issue」（`/api/issues/sub-issues`、GitHubのネイティブ関係を都度取得）が正。列が埋まるのは同期後で、それまではバッジが出ないだけ
 - スマホ一覧も`IssueList`を使うため、バッジは同じ実装で出る
+
+## iOS拡張の一覧（#3708）
+
+- 左メニュー「iOS拡張」（`?pane=ios-extensions`・スマホは`screen=ios-extensions`）。ウィジェット・ロック画面・ライブアクティビティ・コントロールを、iOSアプリのリポジトリごとに一覧する。パネルは`components/dashboard/ios-extensions-panel.tsx`（PC・スマホ共用）、取得は`hooks/use-ios-extensions.ts`
+- 対象リポジトリは`lib/ios-extensions.ts`の`IOS_EXTENSION_REPOSITORY_NAMES`の固定リスト（`Repository`に種別の列は無い。`webview-ios-repos.ts`・`device-build-repos.ts`と同じ判断）。**新しいiOSアプリを足すときはここにも足す**
+- 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
+- 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）

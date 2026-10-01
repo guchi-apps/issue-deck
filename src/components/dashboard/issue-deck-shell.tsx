@@ -49,6 +49,7 @@ import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
+import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
 import { useIdeasCount } from "@/hooks/use-ideas";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
@@ -281,6 +282,7 @@ export function IssueDeckShell({
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectIdeasPane,
+    selectIosExtensionsPane,
     selectPullRequest,
     selectPullRequestModal,
     toggleLabel,
@@ -383,6 +385,7 @@ export function IssueDeckShell({
     selectPreview,
     selectNightlyRun,
     selectIdeas,
+    selectIosExtensions,
     selectRepository,
     selectRepositoryByFullName,
     selectIssue,
@@ -2098,6 +2101,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectIdeas={selectIdeas}
+                  onSelectIosExtensions={selectIosExtensions}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
                   onSelectRepos={selectRepos}
@@ -2142,6 +2146,12 @@ export function IssueDeckShell({
               {mobileScreen.kind === "ideas" && (
                 <div className="h-full overflow-y-auto p-4">
                   <IdeasPanel onBack={goBack} onChanged={refreshIdeasCount} />
+                </div>
+              )}
+
+              {mobileScreen.kind === "ios-extensions" && (
+                <div className="h-full overflow-y-auto p-4">
+                  <IosExtensionsPanel onBack={goBack} />
                 </div>
               )}
 
@@ -2448,6 +2458,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectIdeas={selectIdeasPane}
+                onSelectIosExtensions={selectIosExtensionsPane}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
                 onLaunchNewApp={() => setNewAppDialogOpen(true)}
@@ -2476,7 +2487,11 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "ideas" ? (
+          {filters.pane === "ios-extensions" ? (
+            <div className="hidden flex-1 overflow-y-auto p-4 md:block">
+              <div className="mx-auto max-w-5xl"><IosExtensionsPanel /></div>
+            </div>
+          ) : filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
               <div className="mx-auto max-w-5xl"><IdeasPanel onChanged={refreshIdeasCount} /></div>
             </div>
