@@ -339,11 +339,12 @@ describe("SessionUsagePanel", () => {
     expect([...issueCard.querySelectorAll("[title]")].some((node) => tokenTitle.test(node.getAttribute("title") ?? ""))).toBe(true);
   });
 
-  it("フェーズを持たない古い行は「実装（フェーズ未集計）」へまとめる", () => {
+  it("フェーズを持たない古い行は「実装」へまとめ、未集計の行は出さない", () => {
     renderPanel(response([entry({ costUsd: 20 })]));
 
     const card = screen.getByText("セッション種別別").closest("section");
-    expect(within(card as HTMLElement).getByText("実装（フェーズ未集計）")).toBeTruthy();
+    expect(within(card as HTMLElement).queryByText("実装（フェーズ未集計）")).toBeNull();
+    expect(within(card as HTMLElement).getByText("実装")).toBeTruthy();
   });
 
   it("ClaudeとCodexを切り替えずに同じ画面へ表示する", () => {
