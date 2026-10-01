@@ -860,7 +860,7 @@ def classifier_blocked_at_end(transcript):
 # 応答の最終段落が「人に判断を求める問いかけ」で終わっているかを見る語（#3447）。
 QUESTION_ASK_WORDS = (
     "どちら", "どれ", "いずれ", "どう", "よろしい", "しますか", "ますか", "でしょうか",
-    "ください", "いかが", "どの", "which", "should i", "shall i", "would you", "do you",
+    "ください", "いかが", "どの", "ですか", "ませんか", "よいか", "いいか", "which", "should i", "shall i", "would you", "do you",
 )
 # 完了報告とみなす印。PRのURLや完了報告の言い回しがあれば、末尾の「〜しますか？」は
 # 「次にやりますか」程度の添え物で、止まって人の判断を待っているわけではない。
@@ -868,27 +868,36 @@ QUESTION_DONE_MARKERS = ("/pull/", "完了報告", "PRを作成しました", "P
 
 
 def question_asked_at_end(message):
-    """応答が文章での問いかけで終わっているか（#3447）。誤検知を避けるため保守的に見る。
+    """応答が文章での問いかけで終わっているか（#3447・#3703）。誤検知を避けるため保守的に見る。
 
-    すべて満たすときだけ真: 最終段落が`？`/`?`で終わる／その段落に選択・承認を求める語がある／
-    本文に完了報告の印（PRのURLなど）が無い。判定材料は`Stop`フックの`last_assistant_message`
-    だけで、無い版では偽（従来どおり応答終了として報告する）。
+    すべて満たすときだけ真: 末尾から数えて「補足の括弧書き」を除いた最後の段落に、`？`/`?`で
+    終わり選択・承認を求める語を含む行がある（番号リストの各項目も1行ずつ見る）／本文に完了報告の
+    印（PRのURLなど）が無い。補足の括弧書きを読み飛ばすのは、質問のあとに「（.env.localが無い
+    ので〜）」のような注記を足す応答が最終段落判定をすり抜けたため（status-hub #479）。
+    判定材料は`Stop`フックの`last_assistant_message`だけで、無い版では偽。
     """
     if not isinstance(message, str) or not message.strip():
         return False
     if any(marker in message for marker in QUESTION_DONE_MARKERS):
         return False
     paragraphs = [p.strip() for p in message.strip().split("\n\n") if p.strip()]
+    # 末尾の補足（括弧で始まる段落）は、最大2つまで読み飛ばす
+    skipped = 0
+    while paragraphs and skipped < 2 and paragraphs[-1][:1] in ("(", "（"):
+        paragraphs.pop()
+        skipped += 1
     if not paragraphs:
         return False
     last = paragraphs[-1]
     if last.startswith("```") or last.endswith("```"):
         return False
-    stripped = last.rstrip("*_`」』）) \t\n")
-    if not (stripped.endswith("？") or stripped.endswith("?")):
-        return False
-    lowered = last.lower()
-    return any(word in lowered for word in QUESTION_ASK_WORDS)
+    for line in last.split("\n"):
+        stripped = line.strip().rstrip("*_`」』）) \t")
+        if stripped.endswith("？") or stripped.endswith("?"):
+            lowered = line.lower()
+            if any(word in lowered for word in QUESTION_ASK_WORDS):
+                return True
+    return False
 
 
 def resolve_plan_text(tool_input):

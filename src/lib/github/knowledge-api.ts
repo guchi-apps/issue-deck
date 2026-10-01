@@ -20,6 +20,7 @@ import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
   isKnowledgeFilePath,
   type RawIssue,
+  type RawBlameRange,
   type RawKnowledgeFile,
   type RawPromotionFile,
   type RawPromotionPullRequest,
@@ -59,6 +60,7 @@ const KNOWLEDGE_FILES_QUERY = `
 query KnowledgeFiles($owner: String!, $repo: String!, $expression: String!) {
   repository(owner: $owner, name: $repo) {
     url
+    head: object(expression: "HEAD") { oid }
     object(expression: $expression) {
       ... on Tree {
         entries {
@@ -74,6 +76,7 @@ query KnowledgeFiles($owner: String!, $repo: String!, $expression: String!) {
 type KnowledgeFilesResponse = {
   repository: {
     url: string;
+    head?: { oid?: string } | null;
     object: {
       entries?: {
         name: string;
@@ -87,6 +90,8 @@ type KnowledgeFilesResponse = {
 export type KnowledgeFilesResult = {
   files: RawKnowledgeFile[];
   docsRepoUrl: string;
+  /** 本文を読んだ時点の`HEAD`のコミット。blameを同じ時点で引くために返す。取れなければnull */
+  headOid: string | null;
 };
 
 /**
@@ -99,6 +104,7 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
   const fallback: KnowledgeFilesResult = {
     files: [],
     docsRepoUrl: `https://github.com/${DOCS_OWNER}/${DOCS_REPO}`,
+    headOid: null,
   };
 
   let data: KnowledgeFilesResponse;
@@ -123,7 +129,99 @@ export async function fetchKnowledgeFiles(token: string): Promise<KnowledgeFiles
     .filter((entry) => typeof entry.object?.text === "string" && !entry.object.isTruncated)
     .map((entry) => ({ path: `${KNOWLEDGE_DIR}/${entry.name}`, text: entry.object!.text! }));
 
-  return { files, docsRepoUrl: data.repository?.url ?? fallback.docsRepoUrl };
+  return {
+    files,
+    docsRepoUrl: data.repository?.url ?? fallback.docsRepoUrl,
+    headOid: data.repository?.head?.oid ?? null,
+  };
+}
+
+/** 1クエリへ束ねるblameのファイル数。約85ファイルを2〜3クエリに収める（40ファイルで約5秒を実測） */
+const BLAME_FILES_PER_QUERY = 30;
+
+type BlameResponse = {
+  repository: {
+    object: Record<
+      string,
+      {
+        ranges: {
+          startingLine: number;
+          endingLine: number;
+          commit: {
+            committedDate: string;
+            associatedPullRequests: { nodes: { number: number; mergedAt: string | null }[] } | null;
+          };
+        }[];
+      } | null
+    > | null;
+  } | null;
+};
+
+/**
+ * 共通知識の各ファイルのblameを取る（#3695）。**「いつ共通知識へ入ったか」を見出し行から読む**ため。
+ *
+ * 1ファイル1リクエストにせず、`fetchPromotionFileTexts`と同じくエイリアスで束ねて数クエリにする
+ * （同時に何十本も投げると二次レート制限に掛かりやすい）。`oid`は本文を読んだ`HEAD`と同じ時点。
+ * blameのコミットは反映PRのheadコミットで、日時はPRの作成時刻になるため、対応PRの`mergedAt`も取る。
+ * **読めなかったチャンクは空で返す**（呼び出し側は確認日へ落とす）。
+ */
+export async function fetchKnowledgeBlame(
+  token: string,
+  headOid: string | null,
+  paths: string[],
+): Promise<Map<string, RawBlameRange[]>> {
+  const result = new Map<string, RawBlameRange[]>();
+  if (!headOid || paths.length === 0) return result;
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < paths.length; i += BLAME_FILES_PER_QUERY) {
+    chunks.push(paths.slice(i, i + BLAME_FILES_PER_QUERY));
+  }
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      const declarations = chunk.map((_, i) => `$p${i}: String!`).join(", ");
+      const fields = chunk
+        .map(
+          (_, i) =>
+            `f${i}: blame(path: $p${i}) { ranges { startingLine endingLine commit { committedDate associatedPullRequests(first: 1) { nodes { number mergedAt } } } } }`,
+        )
+        .join("\n");
+      const query = `
+query KnowledgeBlame($owner: String!, $repo: String!, $oid: GitObjectID!, ${declarations}) {
+  repository(owner: $owner, name: $repo) {
+    object(oid: $oid) { ... on Commit { ${fields} } }
+  }
+}`;
+      const variables: Record<string, string> = { owner: DOCS_OWNER, repo: DOCS_REPO, oid: headOid };
+      chunk.forEach((path, i) => {
+        variables[`p${i}`] = path;
+      });
+
+      try {
+        const data = await githubGraphql<BlameResponse>(token, query, variables, "fetchKnowledgeBlame", {
+          permissionHint: "（共有知識リポジトリを読む権限が要ります）",
+        });
+        chunk.forEach((path, i) => {
+          const ranges = data.repository?.object?.[`f${i}`]?.ranges;
+          if (!ranges) return;
+          result.set(
+            path,
+            ranges.map((range) => ({
+              startingLine: range.startingLine,
+              endingLine: range.endingLine,
+              committedDate: range.commit.committedDate,
+              pullRequest: range.commit.associatedPullRequests?.nodes[0] ?? null,
+            })),
+          );
+        });
+      } catch (error) {
+        console.error("[fetchKnowledgeBlame]", error);
+      }
+    }),
+  );
+
+  return result;
 }
 
 /** 反映PRを見るぶんには十分な件数。溜まっていても数件〜十数件止まりの想定（#126の見送り仕様） */

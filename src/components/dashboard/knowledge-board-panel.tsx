@@ -13,12 +13,14 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toJstParts } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
   countByFile,
   daysSinceJstDate,
   detectKnowledgeStall,
   groupKnowledgeByDate,
+  groupKnowledgeByEntered,
   type KnowledgeBoardData,
   type KnowledgeCandidate,
   type KnowledgeSection,
@@ -59,7 +61,7 @@ export function KnowledgeBoardPanel({
   compact?: boolean;
   className?: string;
 }) {
-  const [tab, setTab] = useState<"candidates" | "knowledge">("candidates");
+  const [tab, setTab] = useState<"candidates" | "knowledge" | "entered">("candidates");
   const [filePath, setFilePath] = useState<string | null>(null);
 
   const stall = useMemo(
@@ -75,6 +77,7 @@ export function KnowledgeBoardPanel({
     [data, filePath],
   );
   const groups = useMemo(() => groupKnowledgeByDate(visibleSections), [visibleSections]);
+  const enteredGroups = useMemo(() => groupKnowledgeByEntered(visibleSections), [visibleSections]);
 
   const lastPromotedDays = stall?.lastPromotedOn ? daysSinceJstDate(stall.lastPromotedOn) : null;
 
@@ -119,7 +122,7 @@ export function KnowledgeBoardPanel({
       {data && stall && (
         <>
           {/* 状態の要約。数字が主役の画面ではないので、大きなタイルにはしない */}
-          <dl className="flex overflow-hidden rounded-md border bg-card">
+          <dl className="flex flex-col overflow-hidden rounded-md border bg-card sm:flex-row">
             <Stat label="たまった共通知識" value={String(data.sections.length)} unit={`件 / ${data.fileCount}ファイル`} />
             {/* **件数は検索の総数から出す**（#2912）。一覧は300件で打ち切っているので、
                 そちらから数えると「表示範囲での下限」にしかならない。総数は本文で言及して
@@ -184,27 +187,62 @@ export function KnowledgeBoardPanel({
               label="たまった共通知識"
               count={data.sections.length}
             />
+            <TabButton
+              active={tab === "entered"}
+              onClick={() => setTab("entered")}
+              label="入った順"
+              count={data.sections.length}
+            />
           </nav>
 
           {tab === "candidates" ? (
             <CandidateList data={data} />
+          ) : tab === "entered" ? (
+            <div className="flex flex-col gap-3">
+              <FileChips
+                total={data.sections.length}
+                files={files}
+                filePath={filePath}
+                onSelect={setFilePath}
+              />
+              {enteredGroups.length === 0 ? (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  共有知識をまだ読み込めていません。
+                </p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {enteredGroups.map((group) => (
+                    <section key={group.date ?? "unknown"}>
+                      <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold">
+                        <span className="font-mono">{group.date ?? "日時不明"}</span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          {group.sections.length}件
+                          {group.date === null && " · 入った日時を取れなかったため確認日の順"}
+                        </span>
+                      </h3>
+                      <ul className="flex flex-col gap-1.5">
+                        {group.sections.map((section) => (
+                          <KnowledgeRow
+                            key={`${section.path}-${section.title}`}
+                            section={section}
+                            docsRepoUrl={data.docsRepoUrl}
+                            showEntered
+                          />
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-1">
-                <FileChip
-                  label={`すべて ${data.sections.length}`}
-                  active={filePath === null}
-                  onClick={() => setFilePath(null)}
-                />
-                {files.map((file) => (
-                  <FileChip
-                    key={file.path}
-                    label={`${fileLabel(file.path)} ${file.count}`}
-                    active={filePath === file.path}
-                    onClick={() => setFilePath(file.path)}
-                  />
-                ))}
-              </div>
+              <FileChips
+                total={data.sections.length}
+                files={files}
+                filePath={filePath}
+                onSelect={setFilePath}
+              />
 
               {groups.length === 0 ? (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -490,16 +528,16 @@ function Stat({
   warn?: boolean;
 }) {
   return (
-    <div className="min-w-0 flex-1 border-l px-3 py-2 first:border-l-0">
+    <div className="flex min-w-0 items-baseline justify-between gap-3 border-t px-3 py-2 first:border-t-0 sm:block sm:flex-1 sm:border-t-0 sm:border-l sm:first:border-l-0">
       <dt className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</dt>
       <dd
         className={cn(
-          "truncate font-mono text-lg leading-tight tabular-nums",
+          "flex flex-wrap items-baseline justify-end gap-x-1 text-right font-mono text-lg leading-tight tabular-nums sm:justify-start sm:text-left",
           warn && "text-amber-600 dark:text-amber-400",
         )}
       >
         {value}
-        {unit && <span className="ml-1 font-sans text-[11px] font-medium text-muted-foreground">{unit}</span>}
+        {unit && <span className="font-sans text-[11px] font-medium text-muted-foreground">{unit}</span>}
       </dd>
     </div>
   );
@@ -533,6 +571,32 @@ function TabButton({
         {count}
       </span>
     </button>
+  );
+}
+
+function FileChips({
+  total,
+  files,
+  filePath,
+  onSelect,
+}: {
+  total: number;
+  files: { path: string; count: number }[];
+  filePath: string | null;
+  onSelect: (path: string | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <FileChip label={`すべて ${total}`} active={filePath === null} onClick={() => onSelect(null)} />
+      {files.map((file) => (
+        <FileChip
+          key={file.path}
+          label={`${fileLabel(file.path)} ${file.count}`}
+          active={filePath === file.path}
+          onClick={() => onSelect(file.path)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -751,29 +815,58 @@ function VerdictPill({ candidate }: { candidate: KnowledgeCandidate }) {
 function KnowledgeRow({
   section,
   docsRepoUrl,
+  showEntered = false,
 }: {
   section: KnowledgeSection;
   docsRepoUrl: string;
+  /** 「入った順」タブ用。入った時刻と反映PRへのリンクを添える */
+  showEntered?: boolean;
 }) {
   return (
     <li className="rounded-md border bg-card p-2.5">
-      <a
-        href={`${docsRepoUrl}/blob/HEAD/${section.path}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-mono text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-      >
-        {section.path}
-      </a>
+      <div className="flex items-baseline gap-2">
+        <a
+          href={`${docsRepoUrl}/blob/HEAD/${section.path}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 break-all font-mono text-[10px] text-muted-foreground hover:text-foreground hover:underline"
+        >
+          {section.path}
+        </a>
+        {showEntered && section.enteredAt && (
+          <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+            {formatJstTime(section.enteredAt)}
+          </span>
+        )}
+      </div>
       <p className="mt-0.5 text-xs leading-relaxed font-semibold">{section.title}</p>
       {section.summary && (
         <p className="mt-0.5 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">
           {section.summary}
         </p>
       )}
-      {section.source && (
-        <p className="mt-1 font-mono text-[10px] text-muted-foreground">出典 {section.source}</p>
+      {(section.source || (showEntered && section.enteredPrNumber)) && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+          {section.source && <span>出典 {section.source}</span>}
+          {showEntered && section.enteredPrNumber && (
+            <a
+              href={`${docsRepoUrl}/pull/${section.enteredPrNumber}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+            >
+              <GitPullRequest className="size-3" aria-hidden />
+              反映PR docs#{section.enteredPrNumber}
+            </a>
+          )}
+        </div>
       )}
     </li>
   );
+}
+
+/** `2026-09-30T20:12:00Z` -> `05:12`（JST） */
+function formatJstTime(iso: string): string {
+  const parts = toJstParts(iso);
+  return parts ? `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}` : "";
 }

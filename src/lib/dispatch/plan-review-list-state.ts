@@ -34,6 +34,27 @@ export function resolvePlanReviewListState(params: {
   if (isPlanReviewJobCreating(job, params.now)) return "creating";
   if (job.status !== "SUCCEEDED") return null;
   if (checkUserReason(params.labels) !== "plan") return null;
+  // 今の計画待ちより前に積まれたジョブは前の計画へのレビュー。**計画待ちはレビューのジョブより
+  // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）
   if (params.planRequest !== null && job.createdAt < params.planRequest.createdAt) return null;
   return "presented";
+}
+
+/**
+ * 計画レビューを作成中のIssueのid集合（#3701）。
+ *
+ * 作成中は指摘が付くまでの数分間で、開いても押して進める操作が無い。件数からは#3625で
+ * 外してあるが、「ユーザーの確認待ち」の一覧にも並ばないよう、一覧側が同じ集合を読む。
+ */
+export function selectPlanReviewCreatingIssueIds(
+  issues: readonly { id: string; repositoryFullName: string; number: number }[],
+  jobs: readonly DispatchJobView[],
+  now: Date,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const issue of issues) {
+    const job = findPlanReviewJobForIssue(jobs, issue.repositoryFullName, issue.number);
+    if (isPlanReviewJobCreating(job, now)) ids.add(issue.id);
+  }
+  return ids;
 }

@@ -87,17 +87,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const posted = await postSessionPlan({
-    repositoryFullName: target.repositoryFullName,
-    issueNumber: target.issueNumber,
-    plan,
-    remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
-    planBaseSha: parsePlanBaseSha(payload?.planBaseSha),
-    hostName,
-    agent: payload?.agent === "codex" ? "codex" : "claude",
-    artifactUpdated,
-  });
-
   // 画面からの返事を待つ（#2061）。**Issueコメントの投稿に成功したかどうかとは切り離す**
   // （#2108）。パネルが描いているのはここで保存する`plan`そのもので、コメントの取得には
   // 依存していない。コメントを書けなかったことを理由に待ちを作らないと、端末には計画が
@@ -108,6 +97,12 @@ export async function POST(request: NextRequest) {
   //
   // **「アプリで答える」がONのセッションでも作らない**（#2822）。**計画コメントの投稿は
   // 止めない**——変えるのは「どこで承認するか」だけで、計画がIssueに残ることは変わらない。
+  //
+  // **計画の投稿（`postSessionPlan`）より先に作る**（#3697）。投稿の中で計画レビュー（G1）の
+  // ジョブが積まれ、次の3か所は「今の計画待ちより前に積まれたジョブは前の計画へのレビュー」と
+  // 読む。待ちを後に作ると今の計画のレビューまで毎回「前の計画のもの」になり、自動反映
+  // （`plan-review-auto-reflect.ts`）・確認待ちPushの保留（`check-user-push.ts`）・一覧の
+  // 「提示済」（`plan-review-list-state.ts`）がどれも効かなくなっていた。
   const waitSeconds = parseSessionPlanWaitSeconds(payload?.waitSeconds);
   const answerInApp = await isSessionAnswerInApp({
     repositoryFullName: target.repositoryFullName,
@@ -134,6 +129,17 @@ export async function POST(request: NextRequest) {
       );
     }
   }
+
+  const posted = await postSessionPlan({
+    repositoryFullName: target.repositoryFullName,
+    issueNumber: target.issueNumber,
+    plan,
+    remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
+    planBaseSha: parsePlanBaseSha(payload?.planBaseSha),
+    hostName,
+    agent: payload?.agent === "codex" ? "codex" : "claude",
+    artifactUpdated,
+  });
 
   // 投稿できなくても200で返す。呼び出し側（フック）は再送の判断ができる相手ではなく、
   // 非0を返してもセッションのログにエラーが増えるだけになる

@@ -251,12 +251,14 @@ const USAGE_WORK_FLOW_KIND_ORDER: readonly string[] = [
   usagePhaseKindKey("coding"),
   usagePhaseKindKey("verify"),
   usagePhaseKindKey("wrapup"),
-  "code-review",
   "actions",
 ];
 
-/** Issueの作業の流れに属さない種別。流れの後ろに置き、画面は手前に区切りを入れる */
-const USAGE_KIND_ORDER: readonly string[] = [...USAGE_WORK_FLOW_KIND_ORDER, "question", "other"];
+/**
+ * Issueの作業の流れに属さない種別。流れの後ろに置き、画面は手前に区切りを入れる。
+ * コードレビューはIssueの実装とは別に走る点検のため、流れの外へ置く（#3696）。
+ */
+const USAGE_KIND_ORDER: readonly string[] = [...USAGE_WORK_FLOW_KIND_ORDER, "code-review", "question", "other"];
 
 /**
  * 種別の行がIssueの作業の流れに入るか（#2954）。**未知の種別は流れの外として扱う**

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attachEnteredAt,
   buildCandidate,
+  findHeadingLines,
+  groupKnowledgeByEntered,
   buildOpenPromotionPullRequest,
   buildPromotionKnowledgeFiles,
   diffKnowledgeSections,
@@ -687,5 +690,62 @@ describe("isKnowledgeFilePath / buildPromotionKnowledgeFiles", () => {
         { path: "knowledge/a.md", changeType: "MODIFIED", additions: 0, deletions: 0, texts: { base: "x", head: "x" } },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("入った順（#3695）", () => {
+  const text = [
+    "# 見出し前", // 1
+    "## 最初の知見", // 2
+    "- **結論**: a", // 3
+    "```md", // 4
+    "## フェンス内は見出しでない", // 5
+    "```", // 6
+    "## 次の知見", // 7
+    "- **結論**: b", // 8
+  ].join("\n");
+  const file = { path: "knowledge/x.md", text };
+
+  it("findHeadingLinesはフェンス内の##を数えず、生テキストの行番号を返す", () => {
+    expect(findHeadingLines(text)).toEqual([
+      { title: "最初の知見", line: 2 },
+      { title: "次の知見", line: 7 },
+    ]);
+  });
+
+  it("attachEnteredAtはPRのmergedAtを優先し、PRが無ければコミット日時を使う", () => {
+    const sections = parseKnowledgeFile(file);
+    const blame = new Map([
+      [
+        "knowledge/x.md",
+        [
+          {
+            startingLine: 1,
+            endingLine: 5,
+            committedDate: "2026-08-26T23:28:59Z",
+            pullRequest: { number: 100, mergedAt: "2026-08-27T11:35:24Z" },
+          },
+          { startingLine: 6, endingLine: 9, committedDate: "2026-08-08T01:00:00Z", pullRequest: null },
+        ],
+      ],
+    ]);
+    const result = attachEnteredAt(sections, [file], blame);
+    expect(result[0]).toMatchObject({ enteredAt: "2026-08-27T11:35:24Z", enteredPrNumber: 100 });
+    expect(result[1]).toMatchObject({ enteredAt: "2026-08-08T01:00:00Z", enteredPrNumber: null });
+  });
+
+  it("groupKnowledgeByEnteredはJSTの日付で束ね、取れないものを末尾へ置く", () => {
+    const base = { path: "knowledge/x.md", summary: "", confirmedOn: null, source: null };
+    const groups = groupKnowledgeByEntered([
+      { ...base, title: "古い", enteredAt: "2026-09-29T10:00:00Z" },
+      // UTC 15時以降はJSTで翌日になる
+      { ...base, title: "新しい", enteredAt: "2026-09-30T15:30:00Z" },
+      { ...base, title: "不明" },
+    ]);
+    expect(groups.map((g) => [g.date, g.sections.map((s) => s.title)])).toEqual([
+      ["2026-10-01", ["新しい"]],
+      ["2026-09-29", ["古い"]],
+      [null, ["不明"]],
+    ]);
   });
 });

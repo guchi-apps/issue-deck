@@ -157,7 +157,9 @@ async function decideAutoReflect(params: {
   });
   if (!request) return { reflected: false, reason: "no_request" };
 
-  // 前の計画へのレビューが遅れて届いた。今の計画には反映しない
+  // 前の計画へのレビューが遅れて届いた。今の計画には反映しない。**計画待ちはレビューのジョブより
+  // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）。逆順だと今の計画のレビューまで
+  // 毎回ここで落ちる
   if (params.postedJob.createdAt < request.createdAt) return { reflected: false, reason: "stale_review" };
 
   const settings = await db.appSetting.findUnique({

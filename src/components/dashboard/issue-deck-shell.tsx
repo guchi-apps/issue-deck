@@ -103,6 +103,7 @@ import {
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
+import { selectPlanReviewCreatingIssueIds } from "@/lib/dispatch/plan-review-list-state";
 import { selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
@@ -992,17 +993,31 @@ export function IssueDeckShell({
     [issues, viewFilters],
   );
 
-  const filteredIssues = useMemo(
-    () =>
-      sortIssues(
-        // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
-        // 基準がずれて古いリリース分が現れないようにする）。
-        filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues),
-        filters.sort,
-        filters.view,
-      ),
-    [viewFilteredIssues, issues, filters.view, filters.sort, currentUserLogin],
+  // 計画レビューを作成中のIssue（#3701）。「ユーザーの確認待ち」の一覧からは外す
+  const planReviewCreatingIssueIds = useMemo(
+    () => selectPlanReviewCreatingIssueIds(issues, dispatch.jobs, new Date(now ?? Date.now())),
+    [issues, dispatch.jobs, now],
   );
+
+  const filteredIssues = useMemo(() => {
+    const scoped = filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues);
+    return sortIssues(
+      // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
+      // 基準がずれて古いリリース分が現れないようにする）。
+      filters.view === "check-user"
+        ? scoped.filter((issue) => !planReviewCreatingIssueIds.has(issue.id))
+        : scoped,
+      filters.sort,
+      filters.view,
+    );
+  }, [
+    viewFilteredIssues,
+    issues,
+    filters.view,
+    filters.sort,
+    currentUserLogin,
+    planReviewCreatingIssueIds,
+  ]);
 
   // AI検索へ渡す自由語（`label:`等のトークンを除いた残り）。これが空ならボタンを出さない。
   const aiSearchKeyword = useMemo(() => parseSearchQuery(filters.q).keyword, [filters.q]);
@@ -2252,6 +2267,8 @@ export function IssueDeckShell({
                   sort={mobileScreen.sort}
                   /* 確認待ちからマージ待ちPRの対応Issueを外す（#3650） */
                   mergePendingIssueKeys={mobileMergePendingIssueKeys}
+                  /* 計画レビュー作成中のIssueも確認待ちから外す（#3701） */
+                  planReviewCreatingIssueIds={planReviewCreatingIssueIds}
                   /* 「developへマージ」の行に、いまPRの何を待っているかを出す（#2816）。
                      PCの一覧と同じ集合を渡す */
                   pullRequests={crossRepositoryPullRequests}
