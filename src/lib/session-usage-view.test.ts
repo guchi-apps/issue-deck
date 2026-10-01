@@ -155,7 +155,7 @@ describe("buildSessionUsageSummary", () => {
 
     const issue = summary.byIssue[0];
     // 並びは全体のbyKindと同じ「作業の順」（#2954）。
-    expect(issue.byKind.map((row) => row.key)).toEqual(["plan-review", "implementation-unsplit"]);
+    expect(issue.byKind.map((row) => row.key)).toEqual(["plan-review", "phase-coding"]);
     expect(issue.byKind.map((row) => row.costUsd)).toEqual([0.5, 9]);
     expect(issue.byKind.map((row) => row.models)).toEqual([["claude-opus-5"], ["claude-sonnet-4-5"]]);
   });
@@ -323,8 +323,8 @@ describe("buildSessionUsageSummary", () => {
     });
 
     expect(summary.byRepository.map((row) => row.key)).toEqual(["dayspan", "", "issue-deck"]);
-    // 実装はフェーズごとの行へ割る（#2779）。この3件はフェーズを持たないので「未集計」へ入る。
-    expect(summary.byKind.map((row) => row.key)).toEqual(["implementation-unsplit", "other"]);
+    // 実装はフェーズごとの行へ割る（#2779）。この3件はフェーズを持たないので「実装」へ入る。
+    expect(summary.byKind.map((row) => row.key)).toEqual(["phase-coding", "other"]);
   });
 
   it("実装はフェーズごとの行へ割り、合計は変わらない（#2779）", () => {
@@ -347,12 +347,11 @@ describe("buildSessionUsageSummary", () => {
       reportedAt: null,
     });
 
-    // 金額（実装5・未集計4・調査2・仕上げ2・計画1）ではなく作業の順に並ぶ（#2954）。
+    // 金額（実装5＋フェーズなし4・調査2・仕上げ2・計画1）ではなく作業の順に並ぶ（#2954）。
     expect(summary.byKind.map((row) => row.key)).toEqual([
       "phase-plan",
       "phase-research",
       "phase-coding",
-      "implementation-unsplit",
       "phase-wrapup",
     ]);
     // 割ったあとの合計が、割る前の合計と一致すること（カードの合計が動かない）。

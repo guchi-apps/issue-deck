@@ -57,7 +57,7 @@ export type SessionUsageEntry = {
    * `implementationCostUsd`をさらに割った内訳（#2779）。境界はどれも転記のツール呼び出しで、
    * 調査＝最初のファイル編集まで／実装＝最初の`git commit`まで／仕上げ＝それ以降。
    * **3つ揃っていなければ3つともnull**（境界を1つも拾えなかったセッション）。
-   * `sessionUsageImplementationPhases`が「フェーズ未集計」として扱う。**Codexの行にも入る**
+   * `sessionUsageImplementationPhases`がnullを返し、実装へ振り分ける。**Codexの行にも入る**
    * （#3169。あちらの書き込みは`tools.apply_patch`）
    */
   researchCostUsd?: number | null;
@@ -218,13 +218,6 @@ export function usagePhaseKindKey(phase: UsageImplementationPhase): string {
   return `phase-${phase}`;
 }
 
-/**
- * フェーズを拾えなかった実装セッションの行（#2779）。**合計を変えないために置く。**
- * pollerを入れ替える前に集計された行はフェーズを持たず、落とすとカードの合計が
- * 「従量課金相当」タイルと合わなくなる。数日で保持期間の外へ出て消える。
- */
-export const IMPLEMENTATION_UNSPLIT_KIND_KEY = "implementation-unsplit";
-
 /** 画面に出す種別の名前。シェル側の`KIND_LABELS`と揃える */
 const KIND_LABELS: Record<string, string> = {
   implementation: "実装",
@@ -241,7 +234,6 @@ const KIND_LABELS: Record<string, string> = {
   "phase-coding": "実装",
   "phase-verify": "検証（テスト・Lint・型）",
   "phase-wrapup": "仕上げ（コミット・PR・報告）",
-  [IMPLEMENTATION_UNSPLIT_KIND_KEY]: "実装（フェーズ未集計）",
 };
 
 export function sessionUsageKindLabel(kind: string): string {
@@ -258,7 +250,6 @@ const USAGE_WORK_FLOW_KIND_ORDER: readonly string[] = [
   usagePhaseKindKey("research"),
   usagePhaseKindKey("coding"),
   usagePhaseKindKey("verify"),
-  IMPLEMENTATION_UNSPLIT_KIND_KEY,
   usagePhaseKindKey("wrapup"),
   "code-review",
   "actions",
@@ -458,13 +449,31 @@ function scaleEntryToPhase(entry: SessionUsageEntry, costUsd: number): SessionUs
 function kindRowsForEntry(entry: SessionUsageEntry): { key: string; entry: SessionUsageEntry }[] {
   if (entry.kind !== "implementation") return [{ key: entry.kind, entry }];
   const phases = sessionUsageImplementationPhases(entry);
-  if (phases === null) return [{ key: IMPLEMENTATION_UNSPLIT_KIND_KEY, entry }];
+  if (phases === null) return unsplitImplementationRows(entry);
   const rows = USAGE_PHASE_ORDER.filter((phase) => phases[phase] > 0).map((phase) => ({
     key: usagePhaseKindKey(phase),
     entry: scaleEntryToPhase(entry, phases[phase]),
   }));
   // 金額が全て0のセッション（`<synthetic>`だけの行など）は、按分しても意味が無いのでまとめて出す。
-  return rows.length > 0 ? rows : [{ key: IMPLEMENTATION_UNSPLIT_KIND_KEY, entry }];
+  return rows.length > 0 ? rows : [{ key: usagePhaseKindKey("coding"), entry }];
+}
+
+/**
+ * フェーズを拾えなかった実装セッション（pollerを入れ替える前の報告・境界を拾えなかった転記）を
+ * 既存のフェーズへ振り分ける（#3671）。「未集計」の行は設けない。
+ * 計画の金額が分かっていればそのぶんを計画立案へ、残りは実装へ入れる。**合計は変わらない。**
+ */
+function unsplitImplementationRows(entry: SessionUsageEntry): { key: string; entry: SessionUsageEntry }[] {
+  const plan =
+    typeof entry.planCostUsd === "number" && Number.isFinite(entry.planCostUsd)
+      ? Math.min(Math.max(entry.planCostUsd, 0), entry.costUsd)
+      : 0;
+  if (plan <= 0 || entry.costUsd <= 0) return [{ key: usagePhaseKindKey("coding"), entry }];
+  const rows = [{ key: usagePhaseKindKey("plan"), entry: scaleEntryToPhase(entry, plan) }];
+  if (entry.costUsd - plan > 0) {
+    rows.push({ key: usagePhaseKindKey("coding"), entry: scaleEntryToPhase(entry, entry.costUsd - plan) });
+  }
+  return rows;
 }
 
 function addEntryWithAgent(
