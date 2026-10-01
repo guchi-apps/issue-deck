@@ -89,8 +89,11 @@ async function handleGET(request: NextRequest) {
     orderBy: { fullName: "asc" },
   });
 
+  // リネーム前後の名前（kurashio／myroom）が同じリポジトリを指すことがあるため、GitHub上のidで重複を除く
+  const unique = [...new Map(repositories.map((repository) => [repository.githubRepositoryId, repository])).values()];
+
   const results = await Promise.all(
-    repositories.map(async (repository): Promise<RepositoryResult> => {
+    unique.map(async (repository): Promise<RepositoryResult> => {
       const cached = cache.get(repository.fullName);
       if (!refresh && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
