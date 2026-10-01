@@ -12,11 +12,14 @@ const PLAN_REVISER_MARKER = "<!-- issue-deck-agent:plan-reviser -->";
  * （`plan-base`の行は付かない計画があるため、それをアンカーにしない）。**同じ計画に複数のレビューが
  * 付いていたら、いちばん新しいものを返す**（後ろから見て最初に当たったもの）。
  */
-export function findPendingPlanReviewComment<T extends Pick<IssueComment, "body" | "author">>(
-  comments: readonly T[],
-): T | null {
+export function findPendingPlanReviewComment<
+  T extends Pick<IssueComment, "body" | "author" | "authorTrusted">,
+>(comments: readonly T[]): T | null {
   for (let i = comments.length - 1; i >= 0; i--) {
     const comment = comments[i];
+    // マーカーは誰でも書けるので、信頼できる投稿者のコメントだけを見る（#3716）。外部の人が
+    // `plan-reviser`を書いて本物の指摘を隠したり、`plan-review`を書いて偽の指摘を出したりできないように
+    if (comment.authorTrusted !== true) continue;
     if (comment.body.includes(PLAN_REVISER_MARKER)) return null;
     if (comment.body.includes(PLAN_REVIEW_MARKER)) return comment;
     if (isPlanComment(comment)) return null;
@@ -26,7 +29,7 @@ export function findPendingPlanReviewComment<T extends Pick<IssueComment, "body"
 
 /** 最新の計画コメントより後に計画レビューが届いていて、まだ実装エージェントが応答していないか（#3521） */
 export function isPlanReviewPending(
-  comments: readonly Pick<IssueComment, "body" | "author">[],
+  comments: readonly Pick<IssueComment, "body" | "author" | "authorTrusted">[],
 ): boolean {
   return findPendingPlanReviewComment(comments) !== null;
 }
@@ -337,7 +340,7 @@ export type PendingPlanReview = {
  * 無ければnull。
  */
 export function resolvePendingPlanReview(
-  comments: readonly Pick<IssueComment, "id" | "body" | "author" | "createdAtLabel">[],
+  comments: readonly Pick<IssueComment, "id" | "body" | "author" | "authorTrusted" | "createdAtLabel">[],
 ): PendingPlanReview | null {
   const comment = findPendingPlanReviewComment(comments);
   if (!comment) return null;

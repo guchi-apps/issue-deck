@@ -21,6 +21,11 @@ export type LabelSummary = {
 export type IssueComment = {
   id: string;
   author: GithubUser;
+  /**
+   * GitHub上の実際の投稿者がOWNER/MEMBER/COLLABORATORか`[bot]`か（`isTrustedGithubAuthor`。#3716）。
+   * 本文のマーカーだけで判定する表示（計画レビューの未反映など）は、これがtrueのコメントだけを見る
+   */
+  authorTrusted?: boolean;
   createdAtLabel: string;
   body: string;
   reactionCount: number;

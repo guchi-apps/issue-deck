@@ -29,6 +29,16 @@ afterEach(() => {
 });
 
 describe("mapComment の投稿者解決", () => {
+  it("投稿者の信頼は、表示用に差し替える前の実際の投稿者で判定する（#3716）", () => {
+    expect(mapComment({ ...raw("本文", "attacker"), author_association: "NONE" }).authorTrusted).toBe(
+      false,
+    );
+    expect(mapComment({ ...raw("本文", "m-guchi"), author_association: "OWNER" }).authorTrusted).toBe(
+      true,
+    );
+    expect(mapComment(raw(`本文${MARKER}`, "issue-deck[bot]")).authorTrusted).toBe(true);
+  });
+
   it("issue-deckのApp名義のコメントは、投稿者マーカーの人間として表示する", () => {
     // カンバンのStatus変更で起動したコメント。ボタン経由と同じ見た目にするため人間へ寄せる
     const comment = mapComment(raw(`@claude 実装を開始してください${MARKER}`, "issue-deck[bot]"));

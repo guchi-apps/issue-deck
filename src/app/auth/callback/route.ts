@@ -4,6 +4,7 @@ import { isEmailAllowed } from "@/lib/allowed-emails";
 import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const origin = getRequestOrigin(request);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = toSafeRedirectPath(searchParams.get("next"));
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login`);
