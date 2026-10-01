@@ -23,8 +23,9 @@ import {
 /**
  * 返事待ちを1件作る。**同じIssueの古い待ちは畳む**（計画を出し直したら前の待ちは無効）。
  *
- * 呼ぶのは`POST /api/dispatch/sessions/plan`で、**計画コメントを実際に投稿できたときだけ**。
- * 投稿できていない＝画面に計画が出ないので、待たせても押す材料が無い。
+ * 呼ぶのは`POST /api/dispatch/sessions/plan`で、**計画コメントの投稿より先に**作る（#3697）。
+ * 投稿に成否は問わない（#2108。パネルはここで保存する計画本文を描く）。先に作るのは、投稿の中で
+ * 積まれる計画レビュー（G1）のジョブが「今の計画待ちより後」になるようにするため（同ルートの説明）。
  */
 export async function createSessionPlanRequest(params: {
   repositoryFullName: string;

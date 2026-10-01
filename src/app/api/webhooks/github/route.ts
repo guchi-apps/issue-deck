@@ -223,12 +223,19 @@ async function handleIssueCommentEvent(payload: {
     // 計画レビュー（G1）が届いたら、指摘を自動で計画へ反映させる（#3616）。失敗しても
     // Webhook本来の処理は成功として返す（再送で二重に走らせない）
     try {
-      await autoReflectPlanReview({
+      const reflected = await autoReflectPlanReview({
         repositoryFullName: repository.fullName,
         issueNumber: payload.issue.number,
         commentBody: payload.comment.body,
         postedJob,
       });
+      // 見送った理由を残す（#3697。残っていなかったため、反映されない原因を後から追えなかった）。
+      // `not_review`は計画レビュー以外の全コメントで返るので出さない
+      if (!reflected.reflected && reflected.reason !== "not_review") {
+        console.info(
+          `[webhooks/github] 計画レビューを自動反映しませんでした（${repository.fullName}#${payload.issue.number}・ジョブ${postedJob?.jobId ?? "なし"}）: ${reflected.reason}`,
+        );
+      }
     } catch (error) {
       console.error("[webhooks/github] 計画レビューの自動反映に失敗しました", error);
     }

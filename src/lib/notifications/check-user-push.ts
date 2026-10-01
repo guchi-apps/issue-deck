@@ -255,7 +255,8 @@ async function selectPlanReviewHoldKeys(
     seen.add(key);
     const planCreatedAt = waitingCreatedAt.get(key);
     // **今の計画より前に積まれたジョブのレビューは待たない**（#3648）。出し直した計画のレビューが
-    // 積まれなかったときに、前の周の成功済みジョブで保留し続けない
+    // 積まれなかったときに、前の周の成功済みジョブで保留し続けない。**計画待ちはレビューのジョブより
+    // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）
     if (!planCreatedAt || job.createdAt < planCreatedAt || job.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
       {
