@@ -119,7 +119,7 @@ export function KnowledgeBoardPanel({
       {data && stall && (
         <>
           {/* 状態の要約。数字が主役の画面ではないので、大きなタイルにはしない */}
-          <dl className="flex overflow-hidden rounded-md border bg-card">
+          <dl className="flex flex-col overflow-hidden rounded-md border bg-card sm:flex-row">
             <Stat label="たまった共通知識" value={String(data.sections.length)} unit={`件 / ${data.fileCount}ファイル`} />
             {/* **件数は検索の総数から出す**（#2912）。一覧は300件で打ち切っているので、
                 そちらから数えると「表示範囲での下限」にしかならない。総数は本文で言及して
@@ -490,16 +490,16 @@ function Stat({
   warn?: boolean;
 }) {
   return (
-    <div className="min-w-0 flex-1 border-l px-3 py-2 first:border-l-0">
+    <div className="flex min-w-0 items-baseline justify-between gap-3 border-t px-3 py-2 first:border-t-0 sm:block sm:flex-1 sm:border-t-0 sm:border-l sm:first:border-l-0">
       <dt className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</dt>
       <dd
         className={cn(
-          "truncate font-mono text-lg leading-tight tabular-nums",
+          "flex flex-wrap items-baseline justify-end gap-x-1 text-right font-mono text-lg leading-tight tabular-nums sm:justify-start sm:text-left",
           warn && "text-amber-600 dark:text-amber-400",
         )}
       >
         {value}
-        {unit && <span className="ml-1 font-sans text-[11px] font-medium text-muted-foreground">{unit}</span>}
+        {unit && <span className="font-sans text-[11px] font-medium text-muted-foreground">{unit}</span>}
       </dd>
     </div>
   );
