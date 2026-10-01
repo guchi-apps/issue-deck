@@ -2424,7 +2424,10 @@ export function BranchFlowView({
             />
           ))}
 
-          {footerSpacing && <div className="h-14" aria-hidden="true" />}
+          {/* 画面右下に浮くFAB（新規Issue作成ボタン。高さ56px＋下端から16px）の上端より上まで
+              スクロールで逃がす空白。ボトムナビは兄弟要素なので、FABを避ける分だけ要る（#3722）。
+              IssueListの`fabSpacing`（pb-20）と同じ高さ */}
+          {footerSpacing && <div className="h-20" aria-hidden="true" />}
         </div>
 
         {/* 右ペイン（#2157）。中身は`RepositorySection`がここへ送り込む */}
