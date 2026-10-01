@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { BulkReserveDock, BulkReserveEntryBar } from "@/components/dashboard/bulk-reserve-bar";
+import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-review-recommend-settings";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
@@ -734,6 +735,7 @@ export function IssueList({
    * リポジトリ別の枠（#3092）の行。「結果待ち」は一覧の行のバッジと同じ要約から読む
    * （一覧に並ばないclose済みのレビューは要約が無く、結果待ちとしては出ない）。
    */
+  const codeReviewRecommend = useCodeReviewRecommendSettings(view === "code-review");
   const codeReviewRepoRows = useMemo(() => {
     if (view !== "code-review" || now === null) return [];
     const reviewIssues = codeReviewIssues ?? allIssues;
@@ -746,10 +748,12 @@ export function IssueList({
       isPending: (issue) =>
         codeReviewSummaries.get(codeReviewSummaryKey(issue))?.state === "pending",
       now,
+      staleDays: codeReviewRecommend?.days,
     });
   }, [
     view,
     now,
+    codeReviewRecommend?.days,
     codeReviewIssues,
     allIssues,
     codeReviewRepositoryFullNames,
@@ -1536,6 +1540,7 @@ export function IssueList({
           selectedRepositoryFullName={activeCodeReviewRepository}
           onSelectRepository={setCodeReviewRepository}
           onStartCodeReview={onStartCodeReview}
+          recommendPrCount={codeReviewRecommend?.prCount}
         />
       )}
       {activeCodeReviewRepository !== null && (

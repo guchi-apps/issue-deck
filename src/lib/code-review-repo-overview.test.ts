@@ -123,6 +123,18 @@ describe("数える期間", () => {
     });
   });
 
+  it("経過日数の基準は設定で変えられる", () => {
+    const rows = buildCodeReviewRepoRows({
+      reviewIssues: [review("o/a", 10, "i1")],
+      repositoryFullNames: ["o/a"],
+      canRun: () => true,
+      isPending: () => false,
+      now: NOW,
+      staleDays: 7,
+    });
+    expect(rows[0]).toMatchObject({ daysSinceLast: 10, stale: true });
+  });
+
   it("未実施なら前回からの期間は無い", () => {
     const [empty] = build([], ["o/new"]);
     expect(sinceLastReviewRange(empty)).toBeNull();
@@ -132,14 +144,15 @@ describe("数える期間", () => {
 describe("shouldRecommendCodeReview", () => {
   const freshRow = { lastReviewedAt: "2026-09-18T00:00:00.000Z", stale: false };
 
-  it("未実施・30日以上の経過・前回以降20件以上のPRをレビュー候補にする", () => {
+  it("未実施・30日以上の経過・前回以降100件以上のPRをレビュー候補にする", () => {
     expect(shouldRecommendCodeReview({ lastReviewedAt: null, stale: true }, undefined)).toBe(true);
     expect(shouldRecommendCodeReview({ ...freshRow, stale: true }, 0)).toBe(true);
-    expect(shouldRecommendCodeReview(freshRow, 20)).toBe(true);
+    expect(shouldRecommendCodeReview(freshRow, 100)).toBe(true);
+    expect(shouldRecommendCodeReview(freshRow, 5, 5)).toBe(true);
   });
 
-  it("新しいレビューでPRが20件未満、またはPR件数未取得なら提案しない", () => {
-    expect(shouldRecommendCodeReview(freshRow, 19)).toBe(false);
+  it("新しいレビューでPRが100件未満、またはPR件数未取得なら提案しない", () => {
+    expect(shouldRecommendCodeReview(freshRow, 99)).toBe(false);
     expect(shouldRecommendCodeReview(freshRow, undefined)).toBe(false);
   });
 });

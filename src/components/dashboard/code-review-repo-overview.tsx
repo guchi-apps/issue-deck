@@ -61,7 +61,9 @@ export function CodeReviewRepoOverview({
   selectedRepositoryFullName,
   onSelectRepository,
   onStartCodeReview,
+  recommendPrCount,
 }: {
+  recommendPrCount?: number;
   rows: CodeReviewRepoRow[];
   /** リポジトリ名 → 前回以降に入ったPRの件数。取れていないものは入らない */
   sinceLastCounts: ReadonlyMap<string, number>;
@@ -96,6 +98,7 @@ export function CodeReviewRepoOverview({
         sinceLastCounts={sinceLastCounts}
         countsLoading={countsLoading}
         onStartCodeReview={onStartCodeReview}
+        recommendPrCount={recommendPrCount}
       />
       <section
         aria-label="リポジトリ別のレビュー"
@@ -177,7 +180,9 @@ function MobileCodeReviewLauncher({
   sinceLastCounts,
   countsLoading,
   onStartCodeReview,
+  recommendPrCount,
 }: {
+  recommendPrCount?: number;
   rows: CodeReviewRepoRow[];
   sinceLastCounts: ReadonlyMap<string, number>;
   countsLoading: boolean;
@@ -209,7 +214,7 @@ function MobileCodeReviewLauncher({
             <ul className="flex flex-col gap-2">
               {runnableRows.map((row) => {
                 const sinceLastCount = sinceLastCounts.get(row.repositoryFullName);
-                const recommended = shouldRecommendCodeReview(row, sinceLastCount);
+                const recommended = shouldRecommendCodeReview(row, sinceLastCount, recommendPrCount);
                 const name = row.repositoryFullName.split("/")[1] ?? row.repositoryFullName;
                 return (
                   <li key={row.repositoryFullName}>
