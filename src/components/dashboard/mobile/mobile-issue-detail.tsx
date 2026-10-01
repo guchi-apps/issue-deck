@@ -388,10 +388,14 @@ export function MobileIssueDetail({
   // 承認・修正の出口が片方の画面にしか無いと、スマホから見たときに従来どおり
   // 「Remote Controlから答えてください」しか出ない
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
+  // セッションが入力待ちのままなら、返事待ちが畳まれたあとも「端末に承認プロンプトが残っている」案内を
+  // 出し続ける（#3711）
   const planRequest = findPlanRequestForIssue(
     dispatch.planRequests ?? [],
     issue.repositoryFullName,
     issue.number,
+    new Date(),
+    { sessionWaitingInput: isSessionWaitingInput(issueSession) },
   );
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （PCの詳細と同じ判定）

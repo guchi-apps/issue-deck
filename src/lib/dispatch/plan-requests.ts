@@ -267,6 +267,12 @@ export async function listSessionPlanRequests(
       OR: [
         { status: "WAITING" },
         { decidedAt: { gte: new Date(now.getTime() - SESSION_PLAN_DECIDED_VISIBLE_MS) } },
+        // 端末に承認プロンプトが残っている計画（#3711）。画面は、セッションが入力待ちのあいだだけ
+        // これを使う（`findPlanRequestForIssue`）ので、ここでは直近のものを返しておく
+        {
+          status: { in: ["EXPIRED", "DEFERRED"] },
+          createdAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+        },
       ],
     },
     orderBy: { createdAt: "desc" },
