@@ -4361,6 +4361,15 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
   短縮記法が混じることがある（実例: `guchi-apps/docs#133`）。`## 出典Issue`より後ろは
   シェルステップが`- owner/repo#番号: URL`の固定書式で機械的に追記する節なので、ここだけを
   対象にすれば誤検出しない
+- **「入った順」タブは、見出し行のgit blameから共通知識へ入った日時を取る**（#3695。
+  `knowledge-api.ts`の`fetchKnowledgeBlame`・`knowledge-board.ts`の`attachEnteredAt`・
+  `groupKnowledgeByEntered`）。`knowledge/*.md`約85ファイルのblameは30ファイルずつエイリアスで束ね、
+  `fetchKnowledgeFiles`が読んだ`HEAD`の`oid`に対して引く（ファイル取得のすぐ後ろへつなぎ、他の取得と
+  並べる）。**blameのコミット日時は反映PRのheadコミット＝PRの作成時刻**で、マージより数時間〜半日
+  早いため、`associatedPullRequests`の`mergedAt`を優先し、PRを経ない行だけ`committedDate`を使う。
+  blameの行番号は生テキストのものなので、`findHeadingLines`がフェンスを考慮して見出し行を出し、
+  セクションとは見出し文字列＋出現順で突き合わせる。日ごとのまとめは`toJstParts`でJSTの日付にする
+  （UTCで切ると約4分の1が前日に入る）。取れなかった行は「日時不明」として末尾に置く
 - **「マージされる知識」は、PR本文ではなくPRの前後の`knowledge/*.md`を`##`セクション単位で比べて
   出す**（#3107。`knowledge-board.ts`の`diffKnowledgeSections`・`buildPromotionKnowledgeFiles`、
   表示は`PromotionKnowledgeList`）。出典Issueと違い、PR本文の`## Summary`は**読まない**——
