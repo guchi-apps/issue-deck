@@ -44,6 +44,8 @@ type MobileIssuesScreenProps = {
    * マージ待ちのPR自体は「Pull Request」の「マージ待ち」で見る。
    */
   mergePendingIssueKeys?: ReadonlySet<string>;
+  /** 計画レビューを作成中のIssueのid（#3701）。マージ待ちと同じく確認待ちの一覧・件数から除く */
+  planReviewCreatingIssueIds?: ReadonlySet<string>;
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
    * タブの件数から外し、ヘッダーの件数には内訳（`2件・実行中1件`）として出す。
@@ -100,6 +102,7 @@ export function MobileIssuesScreen({
   assignee,
   sort,
   mergePendingIssueKeys,
+  planReviewCreatingIssueIds,
   checkUserRunningIssueIds,
   snoozes,
   onSnooze,
@@ -137,17 +140,17 @@ export function MobileIssuesScreen({
   );
 
   // 確認待ちから外す、マージ待ちPRの対応Issue（#3650）。一覧と件数が同じ集合を読む
-  const awaitingMergeIssueIds = useMemo(
-    () =>
-      mergePendingIssueKeys && mergePendingIssueKeys.size > 0
-        ? new Set(
-            issues
-              .filter((issue) => isIssueAwaitingMerge(issue, mergePendingIssueKeys))
-              .map((issue) => issue.id),
-          )
-        : undefined,
-    [issues, mergePendingIssueKeys],
-  );
+  // 計画レビュー作成中のIssue（#3701）も同じ扱いで外す
+  const awaitingMergeIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (mergePendingIssueKeys && mergePendingIssueKeys.size > 0) {
+      for (const issue of issues) {
+        if (isIssueAwaitingMerge(issue, mergePendingIssueKeys)) ids.add(issue.id);
+      }
+    }
+    planReviewCreatingIssueIds?.forEach((id) => ids.add(id));
+    return ids.size > 0 ? ids : undefined;
+  }, [issues, mergePendingIssueKeys, planReviewCreatingIssueIds]);
 
   const displayedIssues = useMemo(() => {
     const scoped = filterIssuesByView(issues, view, currentUserLogin);
