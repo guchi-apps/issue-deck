@@ -691,10 +691,14 @@ export function IssueDetail({
   // ここが唯一の答える場所になる（切れると従来どおり端末のプロンプトへ戻る）
   // **テストの差し込みや古い応答では欠けうる**ので、無ければ「待っているものは無い」として読む
   // （`use-dispatch-state.ts`の`hasActiveJob`が`manualStepRuns`をこう扱っているのと同じ）
+  // セッションが入力待ちのままなら、返事待ちが畳まれたあとも「端末に承認プロンプトが残っている」案内を
+  // 出し続ける（#3711）
   const planRequest = findPlanRequestForIssue(
     dispatch.planRequests ?? [],
     issue.repositoryFullName,
     issue.number,
+    new Date(),
+    { sessionWaitingInput: isSessionWaitingInput(issueSession) },
   );
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （`checkUserGuidance`へ渡す同名の式と同じ判定）
