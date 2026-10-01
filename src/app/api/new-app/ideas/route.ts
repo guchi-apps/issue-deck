@@ -5,6 +5,7 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { deleteIdeaDirectory, fetchIdeaDoc, listIdeaDocs, listIdeaSummaries } from "@/lib/github/ideas-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { isIdeaDocPath, parseIdeaDoc } from "@/lib/new-app/idea-doc";
+import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * 構想メモ（`guchi-apps/ideas`）をウィザードへ渡す（#2432）。
@@ -54,6 +55,8 @@ async function handleGET(request: NextRequest) {
 }
 
 export function DELETE(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
   return withGithubApiFeature("new_app_launch", () => handleDELETE(request));
 }
 
