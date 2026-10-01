@@ -252,6 +252,18 @@ describe("session-notify.sh の様子の報告", () => {
       expect(activityReports()[0].body).toMatchObject({ activity: "waiting_input" });
     });
 
+    it("番号リストの質問のあとに補足の括弧書きが付く形も引き上げる（#3703）", async () => {
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        last_assistant_message:
+          "確認結果です。\n\n質問が2つあります。\n\n1. PRを作成してよいですか？\n2. 編集をダイアログで出す形のまま進めてよいですか？\n\n(.env.localが無いので、一時ルートが必要です。)",
+      });
+
+      expect(escalations()).toHaveLength(1);
+      expect(escalations()[0].body).toMatchObject({ reason: "question_asked" });
+    });
+
     it("PRのURLを含む完了報告の末尾の問いかけは対象外", async () => {
       await runHook({
         hook_event_name: "Stop",
