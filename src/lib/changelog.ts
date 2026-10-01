@@ -42,6 +42,15 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.14.1",
+    date: "2026-10-01",
+    changes: [
+      "PCでも、コードレビューの実行をリポジトリ選択のモーダルから行えるようになりました。",
+      "スマホのブランチ画面で、右下のボタンと最終行が重ならないようになりました。",
+      "Issue作成画面のリポジトリ選択がボタンのすぐ下に開き、最初のスクロールからスムーズに動くようになりました。",
+    ],
+  },
+  {
     version: "8.14.0",
     date: "2026-10-01",
     changes: [
