@@ -129,6 +129,19 @@ describe("PlanApprovalPanel", () => {
     expect(screen.getByText("計画レビューを作成中")).toBeTruthy();
   });
 
+  it("作成中はオレンジの承認枠（見出し・承認ボタン）を出さない（#3726）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({ status: "RUNNING" })}
+      />,
+    );
+    expect(screen.queryByText("計画の承認を待っています")).toBeNull();
+    expect(screen.queryByRole("button", { name: /承認して実装へ進む/ })).toBeNull();
+  });
+
   it("計画レビューのジョブが無ければ出さない", () => {
     render(
       <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle()} />,

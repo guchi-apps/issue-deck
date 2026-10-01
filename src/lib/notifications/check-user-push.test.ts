@@ -273,6 +273,12 @@ describe("sweepCheckUserPushNotifications", () => {
       expect(sendPushNotification).not.toHaveBeenCalled();
     });
 
+    it("理由ラベルがまだ付いていなくても、レビューが作成中なら送らない（#3726）", async () => {
+      mockDb({ labels: [CHECK_USER], waitingPlans: [plan], planReviewJobs: [runningJob], subscriptions: sub });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).not.toHaveBeenCalled();
+    });
+
     it("成功から10分を過ぎていれば保留しない", async () => {
       mockDb({
         waitingPlans: [plan],
