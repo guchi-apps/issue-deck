@@ -1035,7 +1035,14 @@ export function CreateIssueDialog({
               <SelectTrigger id="create-issue-repo" className="w-full">
                 <SelectValue placeholder="リポジトリを選択" />
               </SelectTrigger>
-              <SelectContent>
+              {/* `popper`で開く（#3723）。既定の`item-aligned`は、枠がウィンドウの高さに届くまで
+                  スクロール量を枠を広げるのに使い、下端寄せでは`scrollTop`を0へ戻すため、
+                  十数件あるリポジトリでは最初のスクロールで中身が動かない。上限は
+                  `max-h-72`単独だと既定の画面内の上限（available-height）を消すため`min()`で両方効かせる */}
+              <SelectContent
+                position="popper"
+                className="max-h-[min(18rem,var(--radix-select-content-available-height))]"
+              >
                 <RepositorySelectItems
                   registered={registeredRepositories}
                   unregistered={selectableUnregisteredRepositories}
