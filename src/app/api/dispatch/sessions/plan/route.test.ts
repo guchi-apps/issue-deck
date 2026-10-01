@@ -15,8 +15,7 @@ vi.mock("@/lib/dispatch/session-plan", async (importOriginal) => {
   };
 });
 
-// 画面からの返事待ち（#2061）。**投稿できたときだけ作る**ので、`postSessionPlan`の
-// 戻り値と対で確かめる
+// 画面からの返事待ち（#2061）。投稿の成否は問わず、**投稿より先に**作る（#2108・#3697）
 vi.mock("@/lib/dispatch/plan-requests", () => ({
   get createSessionPlanRequest() {
     return createSessionPlanRequest;
@@ -223,6 +222,23 @@ describe("POST /api/dispatch/sessions/plan", () => {
       answerInApp: false,
     });
     expect(createSessionPlanRequest).toHaveBeenCalled();
+  });
+
+  /**
+   * **返事待ちは計画の投稿より先に作る**（#3697）。投稿（`postSessionPlan`）の中で計画レビューの
+   * ジョブが積まれ、自動反映（`plan-review-auto-reflect.ts`）・確認待ちPushの保留
+   * （`check-user-push.ts`）・一覧の「提示済」（`plan-review-list-state.ts`）の3か所が
+   * 「今の計画待ちより前に積まれたジョブは前の計画へのレビュー」と読む。逆順にすると今の計画の
+   * レビューまで毎回「前の計画のもの」になり、3か所とも効かなくなる。
+   */
+  it("返事待ちを計画の投稿（レビュージョブの投入）より先に作る", async () => {
+    await POST(postRequest(validBody, "Bearer secret-value"));
+
+    expect(createSessionPlanRequest).toHaveBeenCalledTimes(1);
+    expect(postSessionPlan).toHaveBeenCalledTimes(1);
+    expect(createSessionPlanRequest.mock.invocationCallOrder[0]).toBeLessThan(
+      postSessionPlan.mock.invocationCallOrder[0],
+    );
   });
 
   /**

@@ -34,6 +34,8 @@ export function resolvePlanReviewListState(params: {
   if (isPlanReviewJobCreating(job, params.now)) return "creating";
   if (job.status !== "SUCCEEDED") return null;
   if (checkUserReason(params.labels) !== "plan") return null;
+  // 今の計画待ちより前に積まれたジョブは前の計画へのレビュー。**計画待ちはレビューのジョブより
+  // 先に作られる前提**（`POST /api/dispatch/sessions/plan`。#3697）
   if (params.planRequest !== null && job.createdAt < params.planRequest.createdAt) return null;
   return "presented";
 }
