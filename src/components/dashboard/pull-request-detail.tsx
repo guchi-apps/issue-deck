@@ -509,6 +509,7 @@ export function PullRequestDetail({
               <VerificationSummaryPanel
                 verification={verification}
                 repositoryFullName={pullRequest.repositoryFullName}
+                showRebuildGuide={!pullRequest.merged && pullRequest.state === "open"}
                 onCreateFixIssue={
                   onCreateFixIssue && ((row) => onCreateFixIssue(row, pullRequest))
                 }

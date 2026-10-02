@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { VerdictText } from "@/components/dashboard/review-verdict";
 import { Button } from "@/components/ui/button";
 import type {
@@ -214,9 +215,17 @@ export function VerificationSummaryPanel({
   onCreateFixIssue,
   onAcknowledge,
   onRevokeAcknowledgement,
+  showRebuildGuide = false,
 }: {
   verification: ReleaseVerification;
   repositoryFullName: string;
+  /**
+   * 開いているリリースPRで、要確認・要修正の行に作り直しの案内を出す（#3760）。
+   * リリースPRは凍結ブランチで本文は作成時に1回しか書かれないため、修正Issueをdevelopへ入れても
+   * このパネルは変わらない。「修正を入れて作り直す」で作り直した時点から、修正Issueで直した行が
+   * 修正済みになる（#3634）。
+   */
+  showRebuildGuide?: boolean;
   /**
    * 「要修正」「要確認」の行から、指摘を新規Issueの下書きにして開く（#2838）。
    * 渡さない画面ではボタンを出さない。
@@ -248,6 +257,17 @@ export function VerificationSummaryPanel({
         <VerdictText kind="skipped" label="レビューなし" count={tally.skipped} />
         <VerdictText kind="unknown" label="記録なし" count={tally.unknown} />
       </div>
+      {showRebuildGuide && tally.needsCheck + tally.changesRequested > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground"
+          data-testid="verification-rebuild-guide"
+        >
+          <span>
+            修正Issueをdevelopへマージしても、このリリースPRの表示は変わりません。作り直すと、修正Issueで直した行は「修正済み」になります。
+          </span>
+          <ReleaseRebuildButton repositoryFullName={repositoryFullName} />
+        </div>
+      )}
       <ul>
         {rows.map((row) => (
           <Row
