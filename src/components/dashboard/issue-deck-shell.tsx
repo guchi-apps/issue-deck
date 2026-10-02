@@ -1454,6 +1454,20 @@ export function IssueDeckShell({
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
   const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
+
+  // iOS拡張ダイアログの起票後「実装を開始」へ渡す値（作成フォームと同じ）。更新の反映先は
+  // 画面を移さない`registerCreatedIssue`（詳細を開く`handleIosExtensionIssueCreated`ではない）
+  const iosExtensionStartProps = {
+    repositories,
+    issues: allIssues,
+    onIssueUpdated: registerCreatedIssue,
+    onNightlyRunQueued: nightlyRun.refresh,
+    claudeLocalModel,
+    codexModel,
+    defaultDispatchAgent,
+    dispatchFailoverEnabled,
+    dispatchFailoverThresholdPercent,
+  };
   /**
    * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
    * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
@@ -2165,7 +2179,7 @@ export function IssueDeckShell({
 
               {mobileScreen.kind === "ios-extensions" && (
                 <div className="h-full overflow-y-auto p-4">
-                  <IosExtensionsPanel onBack={goBack} onIssueCreated={handleIosExtensionIssueCreated} />
+                  <IosExtensionsPanel onBack={goBack} onIssueCreated={handleIosExtensionIssueCreated} start={iosExtensionStartProps} />
                 </div>
               )}
 
@@ -2516,7 +2530,7 @@ export function IssueDeckShell({
 
           {filters.pane === "ios-extensions" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-5xl"><IosExtensionsPanel onIssueCreated={handleIosExtensionIssueCreated} /></div>
+              <div className="mx-auto max-w-5xl"><IosExtensionsPanel onIssueCreated={handleIosExtensionIssueCreated} start={iosExtensionStartProps} /></div>
             </div>
           ) : filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">

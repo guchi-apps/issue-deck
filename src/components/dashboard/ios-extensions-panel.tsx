@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import {
   IosExtensionIssueDialog,
+  type IosExtensionStartProps,
   type IosExtensionIssueTarget,
 } from "@/components/dashboard/ios-extension-issue-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,7 @@ import { IOS_EXTENSION_KIND_LABELS } from "@/lib/ios-extensions";
 import type { Issue } from "@/types/issue";
 
 /** iOS拡張一覧（#3708）。リポジトリのSwiftソースから検出したウィジェット・ロック画面・ライブアクティビティ・コントロール */
-export function IosExtensionsPanel({ active = true, onBack, onIssueCreated }: { active?: boolean; onBack?: () => void; onIssueCreated: (issue: Issue) => void }) {
+export function IosExtensionsPanel({ active = true, onBack, onIssueCreated, start }: { active?: boolean; onBack?: () => void; onIssueCreated: (issue: Issue) => void; start: IosExtensionStartProps }) {
   const { repositories, isLoading, error, refresh } = useIosExtensions(active);
   const [target, setTarget] = useState<IosExtensionIssueTarget | null>(null);
   const names = repositories.map((repository) => repository.fullName);
@@ -81,7 +82,7 @@ export function IosExtensionsPanel({ active = true, onBack, onIssueCreated }: { 
         </div>
       )}
 
-      <IosExtensionIssueDialog target={target} repositories={names} onClose={() => setTarget(null)} onCreated={onIssueCreated} />
+      <IosExtensionIssueDialog target={target} repositories={names} start={start} onClose={() => setTarget(null)} onCreated={onIssueCreated} />
     </section>
   );
 }
