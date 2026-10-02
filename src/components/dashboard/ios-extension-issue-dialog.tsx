@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,8 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
+import { ImageExtractButton } from "@/components/dashboard/image-extract-button";
+import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
+import { startImplementationDisabledReason } from "@/lib/github/start-implementation";
+import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import type { Issue } from "@/types/issue";
+import type { ConnectedRepository } from "@/types/repository";
 import {
   buildIosExtensionIssue,
   IOS_EXTENSION_KINDS,
@@ -27,6 +34,24 @@ export type IosExtensionIssueTarget = {
   extension: IosExtension | null;
 };
 
+/** 起票後の「実装を開始」（`StartImplementationDialog`）に渡す値。作成フォームと同じもの */
+export type IosExtensionStartProps = {
+  repositories: ConnectedRepository[];
+  /** `#123`のIssue補完の候補 */
+  issues: Issue[];
+  /**
+   * 実装開始で届く更新（`11.local`の付与など）の反映先。**画面を移さず一覧へ入れるだけのものを渡す**
+   * （詳細を開く`onCreated`をつなぐと、実行先を選んだ直後に画面が切り替わる。#1434）
+   */
+  onIssueUpdated: (issue: Issue) => void;
+  onNightlyRunQueued?: () => void;
+  claudeLocalModel: ClaudeLocalModelSetting;
+  codexModel: CodexModelSetting;
+  defaultDispatchAgent?: DefaultDispatchAgent;
+  dispatchFailoverEnabled?: boolean;
+  dispatchFailoverThresholdPercent?: number;
+};
+
 /**
  * iOS拡張の追加・編集依頼（#3708）。種類別テンプレートでIssueを起票するだけで、Swiftは生成しない。
  * 起票は通常のIssue作成API（`POST /api/issues`）で、実装は通常の実装エージェント経路に任せる。
@@ -34,18 +59,20 @@ export type IosExtensionIssueTarget = {
 export function IosExtensionIssueDialog({
   target,
   repositories,
+  start,
   onClose,
   onCreated,
 }: {
   target: IosExtensionIssueTarget | null;
   repositories: string[];
+  start: IosExtensionStartProps;
   onClose: () => void;
   onCreated: (issue: Issue) => void;
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        {target && <DialogForm key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`} target={target} repositories={repositories} onClose={onClose} onCreated={onCreated} />}
+        {target && <DialogForm key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`} target={target} repositories={repositories} start={start} onClose={onClose} onCreated={onCreated} />}
       </DialogContent>
     </Dialog>
   );
@@ -54,11 +81,13 @@ export function IosExtensionIssueDialog({
 function DialogForm({
   target,
   repositories,
+  start,
   onClose,
   onCreated,
 }: {
   target: IosExtensionIssueTarget;
   repositories: string[];
+  start: IosExtensionStartProps;
   onClose: () => void;
   onCreated: (issue: Issue) => void;
 }) {
@@ -69,6 +98,16 @@ function DialogForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Issue | null>(null);
+  const [isImageUploading, setIsImageUploading] = useState(false);
+  // 起票後に「実装を開始」で開く。起票したIssueは一覧へ反映済みで、表示用に最新の更新を持つ
+  const [startTarget, setStartTarget] = useState<Issue | null>(null);
+  const startRepository = startTarget
+    ? start.repositories.find((repo) => repo.fullName === startTarget.repositoryFullName)
+    : undefined;
+  const issueSuggestions = useMemo(
+    () => getRepoIssueSuggestions(start.issues, repositoryFullName),
+    [start.issues, repositoryFullName],
+  );
 
   const draft = buildIosExtensionIssue({
     mode: isEdit ? "edit" : "add",
@@ -90,6 +129,7 @@ function DialogForm({
       const json = (await response.json().catch(() => null)) as { issue?: Issue } | null;
       if (!response.ok || !json?.issue) throw new Error(`Issueを起票できませんでした (${response.status})`);
       setCreated(json.issue);
+      start.onIssueUpdated(json.issue);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Issueを起票できませんでした");
     } finally {
@@ -107,7 +147,11 @@ function DialogForm({
       {created ? (
         <div className="space-y-3 text-sm">
           <p>Issue #{created.number} を起票しました。</p>
-          <Button variant="outline" size="sm" onClick={() => { onCreated(created); onClose(); }}>Issueを開く</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => setStartTarget(startTarget ?? created)}>実装を開始…</Button>
+            <Button variant="outline" size="sm" onClick={() => { onCreated(created); onClose(); }}>Issueを開く</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">「実装を開始」で、実行先・オプションを選んで実装エージェントを起動できます。</p>
         </div>
       ) : (
         <div className="space-y-3 text-sm">
@@ -131,10 +175,26 @@ function DialogForm({
             </div>
           </fieldset>
           {target.extension && <p className="font-mono text-xs text-muted-foreground">{target.extension.name}（{target.extension.path}）</p>}
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">{isEdit ? "変えたい内容" : "表示したい内容"}</span>
-            <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例: 今日の予定を3件表示する" />
-          </label>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+              <label htmlFor="ios-extension-description" className="flex h-6 items-center text-xs text-muted-foreground">
+                {isEdit ? "変えたい内容" : "表示したい内容"}
+              </label>
+              <BodyCleanupButton value={description} onCleaned={setDescription} disabled={isSubmitting} />
+              <ImageExtractButton value={description} onChange={setDescription} disabled={isSubmitting} />
+            </div>
+            <MentionTextarea
+              id="ios-extension-description"
+              value={description}
+              onChange={setDescription}
+              issueSuggestions={issueSuggestions}
+              onUploadingChange={setIsImageUploading}
+              repositoryFullName={repositoryFullName}
+              placeholder="例: 今日の予定を3件表示する（画像は貼り付け・ドラッグ&ドロップで添付できます）"
+              className="h-36 max-h-36 min-h-0 field-sizing-fixed leading-snug md:text-sm md:leading-normal"
+              showPreviewToggle={false}
+            />
+          </div>
           <details className="text-xs text-muted-foreground">
             <summary className="cursor-pointer">起票されるIssueのプレビュー</summary>
             <p className="mt-2 font-semibold text-foreground">{draft.title}</p>
@@ -144,9 +204,37 @@ function DialogForm({
         </div>
       )}
 
+      {startTarget && (
+        <StartImplementationDialog
+          issue={startTarget}
+          open
+          onOpenChange={(nextOpen) => { if (!nextOpen) setStartTarget(null); }}
+          onIssueUpdated={(updated) => {
+            // 閉じた後に届いた更新で開き直さない（#1434）
+            setStartTarget((prev) => (prev ? updated : prev));
+            start.onIssueUpdated(updated);
+          }}
+          onCommentCreated={() => {}}
+          onNightlyRunQueued={start.onNightlyRunQueued}
+          includeDispatchTargets
+          actionsDisabledReason={startImplementationDisabledReason(startRepository?.hasClaudeWorkflow)}
+          localSessionCommand={
+            canStartLocalSession(startRepository?.hasLocalStartScript)
+              ? buildLocalSessionCommand(startTarget.repositoryFullName, startTarget.number)
+              : null
+          }
+          subIssueRelations={{ parent: null, children: [], childCount: 0 }}
+          claudeLocalModel={start.claudeLocalModel}
+          codexModel={start.codexModel}
+          defaultDispatchAgent={start.defaultDispatchAgent}
+          dispatchFailoverEnabled={start.dispatchFailoverEnabled}
+          dispatchFailoverThresholdPercent={start.dispatchFailoverThresholdPercent}
+        />
+      )}
+
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>{created ? "閉じる" : "キャンセル"}</Button>
-        {!created && <Button onClick={() => void submit()} disabled={isSubmitting}>{isSubmitting ? "起票中…" : "Issueを起票"}</Button>}
+        {!created && <Button onClick={() => void submit()} disabled={isSubmitting || isImageUploading}>{isSubmitting ? "起票中…" : "Issueを起票"}</Button>}
       </DialogFooter>
     </>
   );

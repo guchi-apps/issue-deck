@@ -83,4 +83,13 @@ describe("buildIosExtensionIssue", () => {
     expect(title).toBe("iOSウィジェット「今日の予定」を変更する");
     expect(body).toContain("`W/TodayWidget.swift`");
   });
+
+  it("画像だけを添付したときはタイトルへ画像記法を入れない", () => {
+    const image = "![image.png](https://example.com/api/issues/images/a.png)";
+    const only = buildIosExtensionIssue({ mode: "add", repositoryFullName: "guchi-apps/aide-ios", kind: "widget", description: image });
+    expect(only.title).toBe("iOSウィジェットを追加する");
+    expect(only.body).toContain(image);
+    const withText = buildIosExtensionIssue({ mode: "add", repositoryFullName: "guchi-apps/aide-ios", kind: "widget", description: `天気を出す\n\n${image}` });
+    expect(withText.title).toBe("iOSウィジェットを追加する: 天気を出す");
+  });
 });
