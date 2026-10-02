@@ -1,5 +1,10 @@
 import {
   BellRing,
+  Bot,
+  PlayCircle,
+  RefreshCw,
+  Search,
+  Stethoscope,
   ClipboardCheck,
   ClipboardList,
   GitFork,
@@ -49,6 +54,10 @@ export const COMMENT_SOURCE_IDS = [
   // developへのマージ後に取り残された進捗を回収する巡回（#2294）。`issue-labels`の
   // `develop-merge-sweep`ジョブが投稿していたものを、issue-deck側の巡回へ移した先
   "progress-sweep",
+  // 修正・修復のワークフローと、手作業Issueの本文検査が投稿するコメント（#3756）
+  "claude-review-fix",
+  "claude-pr-repair",
+  "manual-step-body-check",
 ] as const;
 
 export type CommentSourceId = (typeof COMMENT_SOURCE_IDS)[number];
@@ -121,12 +130,36 @@ function extractEmojiRoleFallback(body: string): CommentAgentRole | null {
   return found ? found[1] : null;
 }
 
+/**
+ * 専用の`issue-deck-agent`マーカーを持たないが、本文のマーカーだけで自動投稿と断定できるコメント（#3756）。
+ * ローカルセッション経由の投稿はloginがユーザー本人になるため、マーカーが無いと人の発言に見えてしまう。
+ * **役割は既存の`planner`/`reviewer`等を流用せず専用にする**——`planning-phase`・`approval-labels`・
+ * `question-premise`が既存の役割で判定しており、流用すると結果が変わるため。
+ */
+const MARKER_ROLES: ReadonlyArray<readonly [string, CommentAgentRole]> = [
+  ["<!-- supervisor:plan-review -->", "plan-reviewer"],
+  ["<!-- issue-deck:plan-review-auto-reflect -->", "auto-reflector"],
+  ["<!-- issue-deck:session-plan -->", "session-notifier"],
+  ["<!-- issue-deck:session-started -->", "session-notifier"],
+  ["<!-- issue-deck:session-wrapup -->", "session-notifier"],
+  ["<!-- supervisor:session-failed -->", "session-notifier"],
+  ["<!-- supervisor:session-not-started -->", "session-notifier"],
+  ["<!-- supervisor:session-interrupted -->", "session-notifier"],
+  ["<!-- issue-deck:deploy-launch-dispatched -->", "notifier"],
+  ["<!-- issue-deck:deploy-launch-failed -->", "notifier"],
+];
+
+function extractMarkerRole(body: string): CommentAgentRole | null {
+  return MARKER_ROLES.find(([marker]) => body.includes(marker))?.[1] ?? null;
+}
+
 export type ResolvedCommentSource =
   | { kind: "fallback-notice" }
   | { kind: "qa-answer" }
   | { kind: "plan"; planType: PlanType }
   | { kind: "agent"; role: CommentAgentMarkerRole }
   | { kind: "source"; id: CommentSourceId }
+  | { kind: "marker"; role: CommentAgentRole }
   | { kind: "emoji-fallback"; role: CommentAgentRole }
   | { kind: "unknown-automation" };
 
@@ -148,6 +181,8 @@ export function resolveCommentSource(
   if (agentRole) return { kind: "agent", role: agentRole };
   const sourceId = extractCommentSourceId(comment);
   if (sourceId) return { kind: "source", id: sourceId };
+  const markerRole = extractMarkerRole(comment.body);
+  if (markerRole) return { kind: "marker", role: markerRole };
   const emojiRole = extractEmojiRoleFallback(comment.body);
   if (emojiRole) return { kind: "emoji-fallback", role: emojiRole };
   if (isBotLogin(login)) return { kind: "unknown-automation" };
@@ -166,7 +201,12 @@ export type CommentAgentRole =
   | "conflict-resolver"
   | "ci-fixer"
   | "notifier"
-  | "error-notifier";
+  | "error-notifier"
+  | "plan-reviewer"
+  | "auto-reflector"
+  | "session-notifier"
+  | "review-fixer"
+  | "pr-repairer";
 
 /**
  * issue-deck-sourceのidのうち、そのidだけで役割が一意に決まるもの（claude-issue-dispatchは
@@ -179,6 +219,9 @@ const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "claude-ci-fix": "ci-fixer",
   "issue-labels": "notifier",
   "progress-sweep": "notifier",
+  "manual-step-body-check": "notifier",
+  "claude-review-fix": "review-fixer",
+  "claude-pr-repair": "pr-repairer",
   // project-status-dispatchは意図的に割り当てない。カンバンのStatus変更で起動した
   // コメントは、issue-mapper.tsが投稿者マーカーから操作者本人へ寄せて表示するため
   // （ボタン経由の起動と同じ見た目にする。#1026）、ボットの役割を持たせるとボット名と
@@ -198,6 +241,8 @@ export function commentAgentRole(resolved: ResolvedCommentSource): CommentAgentR
       return resolved.role;
     case "source":
       return SOURCE_ID_ROLES[resolved.id] ?? null;
+    case "marker":
+      return resolved.role;
     case "emoji-fallback":
       return resolved.role;
     case "unknown-automation":
@@ -227,6 +272,7 @@ export function isMarkedAutomationComment(resolved: ResolvedCommentSource | null
     case "qa-answer":
     case "plan":
     case "agent":
+    case "marker":
       return true;
     case "source":
       return SOURCE_ID_ROLES[resolved.id] != null;
@@ -326,4 +372,48 @@ export const COMMENT_AGENT_PROFILES: Record<CommentAgentRole, CommentAgentProfil
     textClassName: "text-red-600 dark:text-red-400",
     bubbleClassName: "border-red-500/30 bg-red-500/5",
   },
+  "plan-reviewer": {
+    label: "計画レビューボット",
+    icon: Search,
+    avatarColor: "#8b5cf6",
+    textClassName: "text-violet-600 dark:text-violet-400",
+    bubbleClassName: "border-violet-500/30 bg-violet-500/5",
+  },
+  "auto-reflector": {
+    label: "レビュー自動反映ボット",
+    icon: RefreshCw,
+    avatarColor: "#d946ef",
+    textClassName: "text-fuchsia-600 dark:text-fuchsia-400",
+    bubbleClassName: "border-fuchsia-500/30 bg-fuchsia-500/5",
+  },
+  "session-notifier": {
+    label: "セッション通知ボット",
+    icon: PlayCircle,
+    avatarColor: "#3b82f6",
+    textClassName: "text-blue-600 dark:text-blue-400",
+    bubbleClassName: "border-blue-500/30 bg-blue-500/5",
+  },
+  "review-fixer": {
+    label: "レビュー修正ボット",
+    icon: Stethoscope,
+    avatarColor: "#84cc16",
+    textClassName: "text-lime-700 dark:text-lime-400",
+    bubbleClassName: "border-lime-500/30 bg-lime-500/5",
+  },
+  "pr-repairer": {
+    label: "PR修復ボット",
+    icon: Hammer,
+    avatarColor: "#a855f7",
+    textClassName: "text-purple-600 dark:text-purple-400",
+    bubbleClassName: "border-purple-500/30 bg-purple-500/5",
+  },
+};
+
+/** 役割を特定できない自動投稿（`[bot]`名義）の汎用プロフィール。ログイン名の代わりに表示する */
+export const GENERIC_BOT_PROFILE: CommentAgentProfile = {
+  label: "自動投稿ボット",
+  icon: Bot,
+  avatarColor: "#64748b",
+  textClassName: "text-slate-600 dark:text-slate-400",
+  bubbleClassName: "border-slate-500/30 bg-slate-500/5",
 };

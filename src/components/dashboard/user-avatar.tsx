@@ -12,11 +12,16 @@ type UserAvatarProps = {
   image?: string | null;
   /** 役割が解決できたボットコメントに指定する。役割ごとのアイコン・色で表示する */
   agent?: CommentAgentRole | null;
+  /**
+   * 自動投稿のコメントに指定する（#3756）。ローカルセッションの投稿はloginがユーザー本人になるため、
+   * loginが`[bot]`でなくてもGitHubのアバター画像を読まず、ボットのアイコンで表示する
+   */
+  automation?: boolean;
   className?: string;
 };
 
-export function UserAvatar({ login, image, agent, className }: UserAvatarProps) {
-  const isBot = isBotLogin(login);
+export function UserAvatar({ login, image, agent, automation = false, className }: UserAvatarProps) {
+  const isBot = isBotLogin(login) || automation || agent != null;
   const profile = agent ? COMMENT_AGENT_PROFILES[agent] : null;
   const avatarSrc = image ?? (isBot ? null : githubAvatarUrl(login));
   const Icon = profile?.icon ?? Bot;

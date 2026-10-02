@@ -52,12 +52,14 @@ import type { PullRequestStop } from "@/lib/issue-pull-request-progress";
 import { isAskClaudeQuestionComment, isQaAnswerComment } from "@/lib/github/ask-claude";
 import {
   COMMENT_AGENT_PROFILES,
+  GENERIC_BOT_PROFILE,
   commentAgentRole,
   isMarkedAutomationComment,
   resolveCommentSource,
 } from "@/lib/github/comment-source";
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import { isBotComment } from "@/lib/github/is-bot-comment";
+import { isBotLogin } from "@/lib/github/is-bot-login";
 import { cn } from "@/lib/utils";
 import type { IssueComment } from "@/types/issue";
 
@@ -68,7 +70,7 @@ type CommentThreadProps = {
   comments: IssueComment[];
   isLoading?: boolean;
   error?: string | null;
-  /** ログイン中ユーザーのlogin名。一致するコメントは右寄せの吹き出しで表示する。未ログイン時はnull */
+  /** ログイン中ユーザーのlogin名。互換のため残している（左右は投稿者の自動投稿判定で決めるため使わない。#3756）。未ログイン時はnull */
   currentUserLogin?: string | null;
   repositoryFullName: string;
   issueSuggestions: IssueSuggestion[];
@@ -544,7 +546,6 @@ export function CommentThread({
   comments,
   isLoading,
   error,
-  currentUserLogin,
   repositoryFullName,
   issueSuggestions,
   onUpdate,
@@ -683,16 +684,19 @@ export function CommentThread({
           const isQuestion = isAskClaudeQuestionComment(comment);
           const isAnswer = isQaAnswerComment(comment);
           const source = resolveCommentSource(comment, comment.author.login);
-          const role = source ? commentAgentRole(source) : null;
-          const profile = role ? COMMENT_AGENT_PROFILES[role] : null;
+          // 自動投稿（左・ボット表示）か人の発言（右・GitHubアバター）か（#3756）。
           // ローカル（サブPC）セッションのコメントはユーザー本人のlogin名で投稿されるため、
-          // login名の一致だけで自分の発言と判定すると実装ボットの報告が右寄せになる（#1346）。
-          // 本文のマーカーで自動投稿と断定できるものは、自分の名義でもボットとして左に出す。
-          const isSelf =
-            currentUserLogin != null &&
-            comment.author.login === currentUserLogin &&
-            !isMarkedAutomationComment(source);
-          const headerName = isSelf || !profile ? comment.author.login : profile.label;
+          // login名だけでは区別できない。本文のマーカーで自動投稿と断定できるもの、または
+          // `[bot]`名義のものを左に出す。**ただし`posted-by`で操作者の人へ寄せたコメントは、
+          // 本文の引用にボット用マーカーが含まれていても人として扱う**（画面の「修正を送る」等）。
+          const isAutomation =
+            !comment.postedOnBehalfOfHuman &&
+            (isMarkedAutomationComment(source) || isBotLogin(comment.author.login));
+          // 人として右に出すコメントには役割を渡さない（絵文字推測の「実装ボット」等を出さない）
+          const role = isAutomation && source ? commentAgentRole(source) : null;
+          const profile = role ? COMMENT_AGENT_PROFILES[role] : isAutomation ? GENERIC_BOT_PROFILE : null;
+          const isSelf = !isAutomation;
+          const headerName = profile ? profile.label : comment.author.login;
           const timeLabel = (
             <span className="shrink-0 whitespace-nowrap text-[10px] text-muted-foreground">
               {comment.createdAtLabel}
@@ -707,7 +711,8 @@ export function CommentThread({
               <div className={cn("flex gap-2", isSelf && "flex-row-reverse")}>
                 <UserAvatar
                   login={comment.author.login}
-                  agent={isSelf ? null : role}
+                  agent={role}
+                  automation={isAutomation}
                   className="mt-0.5 size-7 shrink-0"
                 />
                 <div

@@ -262,3 +262,31 @@ describe("COMMENT_AGENT_PROFILES", () => {
     }
   });
 });
+
+describe("本文マーカーだけで判定する自動投稿（#3756）", () => {
+  const cases: Array<[string, string]> = [
+    ["<!-- supervisor:plan-review -->", "plan-reviewer"],
+    ["<!-- issue-deck:plan-review-auto-reflect -->", "auto-reflector"],
+    ["<!-- issue-deck:session-plan -->", "session-notifier"],
+    ["<!-- issue-deck:session-wrapup -->", "session-notifier"],
+    ["<!-- supervisor:session-interrupted -->", "session-notifier"],
+    ["<!-- issue-deck:deploy-launch-failed -->", "notifier"],
+    ["<!-- issue-deck-source:claude-review-fix -->", "review-fixer"],
+    ["<!-- issue-deck-source:claude-pr-repair -->", "pr-repairer"],
+  ];
+
+  it.each(cases)("%s は、ユーザー名義でも専用の役割の自動投稿になる", (marker, role) => {
+    const resolved = resolveCommentSource({ body: `本文\n\n${marker}` }, "m-guchi");
+    expect(resolved).not.toBeNull();
+    expect(commentAgentRole(resolved!)).toBe(role);
+    expect(isMarkedAutomationComment(resolved)).toBe(true);
+  });
+
+  it("agentマーカーがあればそちらが優先され、既存の役割は変わらない", () => {
+    const resolved = resolveCommentSource(
+      { body: "<!-- supervisor:plan-review -->\n<!-- issue-deck-agent:reviewer -->" },
+      "m-guchi",
+    );
+    expect(commentAgentRole(resolved!)).toBe("reviewer");
+  });
+});
