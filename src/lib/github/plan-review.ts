@@ -333,6 +333,11 @@ export type PendingPlanReview = {
   commentId: string;
   review: ParsedPlanReview;
   createdAtLabel: string;
+  /**
+   * このIssueで何回目の計画レビューか（1始まり。#3757）。信頼できる投稿者の計画レビューコメントを、
+   * 表示するものまで数える。計画の版ではなくレビューの回数で、同じ計画への再レビューも1回に数える
+   */
+  round: number;
 };
 
 /**
@@ -344,9 +349,14 @@ export function resolvePendingPlanReview(
 ): PendingPlanReview | null {
   const comment = findPendingPlanReviewComment(comments);
   if (!comment) return null;
+  const index = comments.indexOf(comment);
+  const round = comments
+    .slice(0, index + 1)
+    .filter((item) => item.authorTrusted === true && item.body.includes(PLAN_REVIEW_MARKER)).length;
   return {
     commentId: comment.id,
     review: parsePlanReview(comment.body),
     createdAtLabel: comment.createdAtLabel,
+    round,
   };
 }

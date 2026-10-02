@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * 計画レビュー（G1・`<!-- supervisor:plan-review -->`）を、推奨と指摘ごとのカードに分けて出し、
- * 指摘ごとに「反映する／見送る」を選んで送らせる（#3554）。
+ * 指摘ごとに「反映する／見送る」を選んで送らせる（#3554）。見出しには何回目のレビューかを出す（#3757）。
  *
  * **これまで画面に出ていたのは「計画レビューが届いています」の1行と、全部を任せる
  * 「レビューを反映して計画を出し直す」だけ**（#3521）で、何を指摘されたのかはコメント欄まで
@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 export function PlanReviewFindings({
   review,
   reviewedAtLabel,
+  round,
   repositoryFullName,
   submitLabel,
   fallbackSubmitLabel,
@@ -50,6 +51,11 @@ export function PlanReviewFindings({
   review: ParsedPlanReview;
   /** レビューコメントの投稿日時の表示（`IssueComment.createdAtLabel`）。無ければ出さない */
   reviewedAtLabel?: string;
+  /**
+   * このIssueで何回目の計画レビューか（#3757）。無ければ回数を出さない。見出しの旧表記「G1」は
+   * 関門の番号（gates.md）で回数ではなく、何度レビューしても変わらないため利用者を迷わせていた
+   */
+  round?: number;
   repositoryFullName?: string;
   /** 指摘ごとの判断を送るボタンの文言（例: 「選んだ指摘で計画を出し直す」） */
   submitLabel: string;
@@ -108,7 +114,9 @@ export function PlanReviewFindings({
   return (
     <section className="overflow-hidden rounded-md border bg-card" aria-label="計画レビュー">
       <header className="flex flex-wrap items-center gap-2 border-b bg-blue-500/10 px-3 py-2">
-        <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">計画レビュー（G1）</h4>
+        <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+          計画レビュー{round !== undefined && `（${round}回目）`}
+        </h4>
         <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
           {hasFindings ? `指摘 ${findings.length}件` : review.noFindings ? "指摘なし" : "本文のみ"}
         </span>
