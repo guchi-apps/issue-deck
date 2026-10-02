@@ -35,6 +35,20 @@ describe("resolvePlanReviewListState", () => {
     ).toBe("creating");
   });
 
+  // 起動待ちは作成中と分ける（#3772）。猶予を超えても起動するまでは同じ表示
+  it.each([
+    ["積んだ直後", "2026-09-29T11:59:00Z"],
+    ["10分を超えて待っている", "2026-09-29T07:00:00Z"],
+  ])("起動待ちは%sでも起動待ち", (_label, createdAt) => {
+    expect(
+      resolvePlanReviewListState({
+        ...base,
+        jobs: [job({ status: "QUEUED", createdAt, finishedAt: null })],
+        labels: planLabels,
+      }),
+    ).toBe("queued");
+  });
+
   it("成功直後（猶予内）は作成中", () => {
     expect(
       resolvePlanReviewListState({
@@ -94,6 +108,19 @@ describe("selectPlanReviewCreatingIssueIds", () => {
     const jobs = [
       job({ issueNumber: 1, status: "RUNNING", finishedAt: null }),
       job({ issueNumber: 2, planReviewDecidedAt: "2026-09-29T11:02:00Z" }),
+    ];
+    expect([...selectPlanReviewCreatingIssueIds(issues, jobs, NOW)]).toEqual(["a"]);
+  });
+
+  // 起動待ちが10分を超えたら、確認待ちの一覧へ戻す（#3772）
+  it("起動待ちは10分未満だけ返す", () => {
+    const issues = [
+      { id: "a", repositoryFullName: REPO, number: 1 },
+      { id: "b", repositoryFullName: REPO, number: 2 },
+    ];
+    const jobs = [
+      job({ issueNumber: 1, status: "QUEUED", createdAt: "2026-09-29T11:58:00Z", finishedAt: null }),
+      job({ issueNumber: 2, status: "QUEUED", createdAt: "2026-09-29T07:00:00Z", finishedAt: null }),
     ];
     expect([...selectPlanReviewCreatingIssueIds(issues, jobs, NOW)]).toEqual(["a"]);
   });

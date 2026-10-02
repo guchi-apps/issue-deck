@@ -20,7 +20,7 @@ import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
-import { isPlanReviewJobCreating, type DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import { resolvePlanReviewJobPhase, type DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
@@ -101,7 +101,7 @@ export function PlanApprovalPanel({
   planReviewNotice?: PlanReviewNotice | null;
   /**
    * この計画に対して積まれている計画レビュー（G1）ジョブ。無ければ`null`（#3565）。
-   * `isPlanReviewJobCreating`で「作成中」かを判定し、承認パネルのヘッダー直下へ出す。
+   * `resolvePlanReviewJobPhase`で「起動待ち」「作成中」かを判定し、承認パネルのヘッダー直下へ出す。
    */
   planReviewJob?: DispatchJobView | null;
 }) {
@@ -168,9 +168,12 @@ export function PlanApprovalPanel({
 
   const canSend = !sessionGone && remainingMs > 0;
   // 指摘コメントが届いていない間だけ、ジョブの状態から「作成中」を出す（#3565）。
-  // 届いた後は下の`PlanReviewFindings`カードがそちらを表す
-  const planReviewCreating =
-    planReview === null && isPlanReviewJobCreating(planReviewJob, new Date());
+  // 届いた後は下の`PlanReviewFindings`カードがそちらを表す。
+  // **起動待ち（`QUEUED`）は作成中と分けて出す**（#3772）。サブPCが空きを待っている間も
+  // 「作成中」と出していたため、5時間超その表示のままになっていた
+  const planReviewPhase =
+    planReview === null ? resolvePlanReviewJobPhase(planReviewJob ?? null, new Date()) : null;
+  const planReviewCreating = planReviewPhase === "creating" || planReviewPhase === "queued";
   // 計画レビューの作成中は、オレンジの承認枠ごと出さず作成中カードだけを出す（#3726）。
   // 採否が決まるまで人が押す場面が無く、Push通知も保留している間なので、目を引く枠は要らない。
   // 完成後は`PlanReviewFindings`カードと承認枠へ入れ替わる（#3573）
@@ -182,9 +185,11 @@ export function PlanApprovalPanel({
       >
         <div className="flex items-center gap-1.5 border-b bg-blue-500/10 px-3 py-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          計画レビューを作成中
+          {planReviewPhase === "queued" ? "計画レビューの起動を待っています" : "計画レビューを作成中"}
         </div>
         <p className="px-3 py-2 text-xs text-muted-foreground">
+          {planReviewPhase === "queued" &&
+            "サブPCが計画レビューを取りに来るのを待っています（通常1分以内）。10分を超えても起動しないときは、このまま計画を承認・修正できるようにします。"}
           届くとJevが重大な指摘を採用するか判断し、採用なら自動で計画へ反映します（反映後の解消確認は1回だけで、自動の見直しはそこで終わります。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
         </p>
       </section>
@@ -228,6 +233,14 @@ export function PlanApprovalPanel({
       </header>
 
       <div className="flex flex-col gap-3 p-3">
+        {planReviewPhase === "queued_overdue" && (
+          // 起動待ちが猶予を超えた（#3772）。待っていても届く時刻が読めないので、承認枠を出して
+          // 人に委ねる。ジョブは残っているので、起動すれば指摘のカードへ切り替わる
+          <p className="flex items-center gap-1.5 rounded-md border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
+            計画レビューがサブPCの空きを待っていて、まだ起動していません。届くのを待たずに承認・修正することもできます。
+          </p>
+        )}
         <div className="relative rounded-md border bg-muted/60 px-3 py-2">
           <div className={isExpanded ? undefined : COLLAPSED_PLAN_CLASS}>
             <MarkdownBody content={request.plan} repositoryFullName={request.repositoryFullName} />

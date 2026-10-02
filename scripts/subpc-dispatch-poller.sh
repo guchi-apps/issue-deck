@@ -599,9 +599,27 @@ count_issue_sessions() {
 # 外してあり（そうしないとセッション報告・停止／終了の突き合わせに混ざる）、そのぶん
 # `DISPATCH_MAX_SESSIONS`の計上からも外れる。ジョブはセッションが立った時点で成功として
 # 閉じるため枠も即座に空き、**このまま何も見ないと同時に何本でも走りうる**。
+#
+# **生きているペインを持つセッションだけを数える**（#3772）。`start-plan-review.sh`は
+# `remain-on-exit failed`で、失敗したレビューのペインを読めるよう残す。これを数えると、
+# 失敗が2本残った時点から計画レビューが二度と起動しなくなる（空き本数が0のまま、
+# ジョブは`QUEUED`で待ち続ける）。
 count_plan_review_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null |
-    grep -cE '^.+-plan-review-[1-9][0-9]*$' || true
+  tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null |
+    awk -F '\t' '$2 != "1" && $1 ~ /^.+-plan-review-[1-9][0-9]*$/ { print $1 }' |
+    sort -u | wc -l | tr -d ' '
+}
+
+# 計画レビューの空き本数（#3772）。claimへ`planReviewMaxJobs`として渡し、計画レビューを
+# 実装セッションの本数上限（`DISPATCH_MAX_SESSIONS`）の外で受け取る。
+plan_review_slots() {
+  local live
+  live="$(count_plan_review_sessions)"
+  if [[ "${live:-0}" -ge "$MAX_PLAN_REVIEWS" ]]; then
+    printf '0\n'
+  else
+    printf '%s\n' "$((MAX_PLAN_REVIEWS - ${live:-0}))"
+  fi
 }
 
 # 生きているコードレビューのセッションの本数（#698）。**`count_plan_review_sessions`と同じ理由で
@@ -3470,7 +3488,10 @@ run_job() {
     # `count_issue_sessions`に数えられず、ジョブも起動した時点で閉じるため、
     # `DISPATCH_MAX_SESSIONS`とは独立に積み上がる。**失敗ではなく見送り**として報告する
     # （ガードが正常に働いた結果で、何も壊れていない。#1229と同じ扱い）。見送った計画は
-    # 画面の「計画をレビュー」から起こし直せる
+    # 画面の「計画をレビュー」から起こし直せる。
+    #
+    # 空き本数はclaimの時点で`planReviewMaxJobs`として送ってあり（#3772）、通常はここに来ない。
+    # 残してあるのは、取ってから起動するまでの間に手動のレビューが割り込んだときの保険
     local live_reviews
     live_reviews="$(count_plan_review_sessions)"
     if [[ "$MAX_PLAN_REVIEWS" -gt 0 && "${live_reviews:-0}" -ge "$MAX_PLAN_REVIEWS" ]]; then
@@ -3845,20 +3866,29 @@ run_once() {
   # のは本数だけで、実際の空きメモリではない。重い作業が重なっているところへ足すと、12本に
   # 届く前にホストごと止まる（2026-08-14に実際に起きている）。判定に使うのは`announce`が
   # この巡の入口で集めた使用率で、**画面に出ている数字と同じもの**。
-  local live_sessions claim_max_jobs
+  #
+  # **計画レビューだけは本数上限とは別の枠で受け取る**（#3772）。計画レビューは
+  # `DISPATCH_MAX_SESSIONS`に数えず`DISPATCH_MAX_PLAN_REVIEWS`で別に絞っているのに、払い出しだけ
+  # 起動枠に混ぜていたため、12/12の間は計画の承認を待つセッションが枠を埋めたまま、そのレビューが
+  # 何時間も`QUEUED`で待たされた。空き本数を`planReviewMaxJobs`で送り、それを超えたぶんは
+  # 見送り（`skipped`）にせず`QUEUED`のまま次の巡を待たせる。**メモリ逼迫の見送りは計画レビューにも効かせる**
+  local live_sessions claim_max_jobs claim_plan_reviews
   live_sessions="$(count_issue_sessions)"
   claim_max_jobs="$MAX_JOBS"
-  if [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
-    echo "セッションが上限に達しているため、起動ジョブは取りに行きません（$live_sessions/$MAX_SESSIONS 本）。"
-    claim_max_jobs=0
-  elif [[ -n "$LAUNCH_HOLD_MESSAGE" ]]; then
+  claim_plan_reviews="$(plan_review_slots)"
+  if [[ -n "$LAUNCH_HOLD_MESSAGE" ]]; then
     echo "$LAUNCH_HOLD_MESSAGE"
+    claim_max_jobs=0
+    claim_plan_reviews=0
+  elif [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
+    echo "セッションが上限に達しているため、起動ジョブは取りに行きません（$live_sessions/$MAX_SESSIONS 本。計画レビューは別枠で空き $claim_plan_reviews 本）。"
     claim_max_jobs=0
   fi
 
   local claim_payload jobs_json job_count job
   claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$claim_max_jobs" \
-    '{host: $host, maxJobs: $maxJobs}')"
+    --argjson planReviewMaxJobs "$claim_plan_reviews" \
+    '{host: $host, maxJobs: $maxJobs, planReviewMaxJobs: $planReviewMaxJobs}')"
   if ! api_call POST /api/dispatch/claim "$claim_payload"; then
     report_api_failure "ジョブの取得に失敗しました"
     return 1

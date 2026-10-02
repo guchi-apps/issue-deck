@@ -142,6 +142,37 @@ describe("PlanApprovalPanel", () => {
     expect(screen.queryByRole("button", { name: /承認して実装へ進む/ })).toBeNull();
   });
 
+  // #3772。サブPCが取りに来ない間も「作成中」と出し続け、5時間超その表示のままになっていた
+  it("起動待ち（QUEUED）の間は「作成中」ではなく起動待ちを出す", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({ status: "QUEUED", createdAt: new Date().toISOString() })}
+      />,
+    );
+    expect(screen.getByText("計画レビューの起動を待っています")).toBeTruthy();
+    expect(screen.queryByText("計画レビューを作成中")).toBeNull();
+    expect(screen.queryByRole("button", { name: /承認して実装へ進む/ })).toBeNull();
+  });
+
+  it("起動待ちが10分を超えたら、注記を添えて承認枠を出す", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({
+          status: "QUEUED",
+          createdAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+        })}
+      />,
+    );
+    expect(screen.getByText(/まだ起動していません/)).toBeTruthy();
+    expect(screen.getByText("計画の承認を待っています")).toBeTruthy();
+  });
+
   it("計画レビューのジョブが無ければ出さない", () => {
     render(
       <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle()} />,

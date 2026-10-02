@@ -309,6 +309,7 @@ async function selectPlanReviewHoldKeys(
     const creating = isPlanReviewJobCreating(
       {
         status: current.status as DispatchJobStatus,
+        createdAt: current.createdAt.toISOString(),
         finishedAt: current.finishedAt?.toISOString() ?? null,
         planReviewDecidedAt: current.planReviewDecidedAt?.toISOString() ?? null,
       },
