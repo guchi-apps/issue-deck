@@ -182,6 +182,7 @@ export function mapComment(raw: GithubApiComment): IssueComment {
     author: { login: resolveCommentAuthorLogin(body, login) },
     // 表示用に差し替える前の実際の投稿者で判定する
     authorTrusted: isTrustedGithubAuthor({ login, association: raw.author_association ?? null }),
+    postedOnBehalfOfHuman: resolveCommentAuthorLogin(body, login) !== login || undefined,
     createdAtLabel: formatRelativeDate(raw.created_at),
     body: stripPosterMarker(body),
     reactionCount: raw.reactions?.["+1"] ?? 0,

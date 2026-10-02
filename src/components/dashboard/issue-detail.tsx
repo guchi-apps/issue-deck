@@ -1132,9 +1132,11 @@ export function IssueDetail({
                 key={pendingPlanReview.commentId}
                 review={pendingPlanReview.review}
                 reviewedAtLabel={pendingPlanReview.createdAtLabel}
+                round={pendingPlanReview.round}
                 repositoryFullName={issue.repositoryFullName}
                 submitLabel="選んだ指摘で修正を依頼"
                 fallbackSubmitLabel="レビューを反映するよう修正を依頼"
+                approveHint="下の承認欄の「承認」を押す"
                 disabled={isSubmitting}
                 isSubmitting={isSubmitting}
                 onSubmit={handleReject}

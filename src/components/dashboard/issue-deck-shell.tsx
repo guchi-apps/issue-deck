@@ -74,7 +74,7 @@ import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
@@ -2352,19 +2352,18 @@ export function IssueDeckShell({
                 />
               )}
 
-              {/* URLの`mscreen=settings`がPC幅で開かれてもシートを出さない（ポータルは`md:hidden`の外へ出る） */}
-              <Sheet
+              {/* URLの`mscreen=settings`がPC幅で開かれてもモーダルを出さない（ポータルは`md:hidden`の外へ出る） */}
+              <Dialog
                 open={mobileScreen.kind === "settings" && isMobileViewport}
                 onOpenChange={(open) => {
                   if (!open) goBack();
                 }}
               >
-                <SheetContent
-                  side="bottom"
+                <DialogContent
                   showCloseButton={false}
-                  className="h-[calc(100svh-4.5rem)] gap-0 rounded-t-2xl p-0"
+                  className="flex h-[min(48rem,calc(100svh-2rem))] flex-col gap-0 overflow-hidden p-0"
                 >
-                  <SheetTitle className="sr-only">設定</SheetTitle>
+                  <DialogTitle className="sr-only">設定</DialogTitle>
                   <MobileSettingsScreen
                     onBack={goBack}
                     currentUser={currentUser}
@@ -2388,8 +2387,8 @@ export function IssueDeckShell({
                     onDraftReviewGateIssue={openReviewGateIssueDialog}
                     creatableRepositoryNames={creatableRepositoryNames}
                   />
-                </SheetContent>
-              </Sheet>
+                </DialogContent>
+              </Dialog>
 
               {mobileScreen.kind === "repo-detail" && (
                 <MobileRepoIssuesScreen

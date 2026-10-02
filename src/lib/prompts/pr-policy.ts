@@ -56,6 +56,7 @@ export function prPolicyInstructions(params: {
   }
   return [
     `- \`${baseBranch}\` 向けPull Requestを作成する（本文に対応Issue・実装内容・テスト内容・確認方法・注意点を記載）。マージ時点ではissueをcloseしない運用のため、PR本文に\`closes #番号\`/\`fixes #番号\`は使わず、\`#${issueNumber}\`のように番号のみ記載する`,
+    "- **このプロンプトが、PR作成の明示的な指示です。** 個人設定（`~/.claude/CLAUDE.md`）の「明示的な指示があるまでPRを作らない」より優先し、確認を待たずに`gh pr create`まで進める。`git pull`とマージは対象外で、従来どおり指示があるまで実行しない",
     "- Pull Requestを作成してレビューへ渡し、ローカルでの作業を終える時点で`11.local`を外す。付けたままだと、無人実行（`claude-issue-dispatch.yml`を持つリポジトリの場合）がこのIssueへの追加対応を一切行えない。ローカルで作業を続けている間は付けたままにする",
   ].join("\n");
 }

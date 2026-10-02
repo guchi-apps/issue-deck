@@ -24,6 +24,7 @@ import {
   Loader2,
   Lock,
   RefreshCw,
+  Smartphone,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -1724,6 +1725,20 @@ function RepositorySummaryRow({
           v{repository.release.latestVersion}
         </span>
       )}
+      {/* iOSの自動配布（TestFlight）を持つリポジトリの印（#3759）。開かなくても分かるようにする。
+          **文字を出さずアイコンだけ**にする。文字入りのピルはスマホ幅で行が折り返す（#2172・#2243）。
+          版番号・鍵と同じ「静的な属性」なので右側の「手が要るか」の列へは並べず、「動きなし」の
+          判定（`hasAnything`）にも数えない。色は配布カード・内訳（`ios-release-group-panel.tsx`）の
+          青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
+      {getWebviewIosRepository(repository.repositoryFullName) && (
+        <span
+          title="iOS自動配布"
+          aria-label="iOS自動配布"
+          className="inline-flex shrink-0 text-blue-600 dark:text-blue-400"
+        >
+          <Smartphone className="size-3.5" aria-hidden="true" />
+        </span>
+      )}
 
       <span className="flex-1" />
 
@@ -1803,7 +1818,7 @@ function RepositorySummaryRow({
           icon={GitBranch}
           label={`進行中 ${summary.activeLaneCount}件`}
           count={summary.activeLaneCount}
-          className="text-sky-600 dark:text-sky-400"
+          className="text-teal-600 dark:text-teal-400"
         />
       )}
       {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886） */}

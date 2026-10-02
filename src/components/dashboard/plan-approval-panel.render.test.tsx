@@ -46,7 +46,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
 }
 
 function pendingReview(body: string): PendingPlanReview {
-  return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前" };
+  return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前", round: 2 };
 }
 
 function planReviewJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
@@ -172,6 +172,8 @@ describe("PlanApprovalPanel", () => {
       />,
     );
     expect(screen.queryByText("計画レビューを作成中")).toBeNull();
+    // 見出しは何回目のレビューかを出す。関門の番号「G1」は出さない（#3757）
+    expect(screen.getByRole("heading", { name: "計画レビュー（2回目）" })).toBeTruthy();
   });
 
   it("承認を押すと`approve`を送り、押した結果をその場に出す", async () => {
@@ -335,6 +337,9 @@ describe("PlanApprovalPanel", () => {
 
     // 推奨と指摘の中身がパネルの中で読める。根拠は畳んである
     expect(screen.getByText("推奨: 修正のうえ承認")).toBeTruthy();
+    // 推奨の理由は既定で隠れていて、開閉ボタンで開く（#3754）
+    expect(screen.queryByText("1を直せばよい")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /推奨の理由とレビュー要約/ }));
     expect(screen.getByText("1を直せばよい")).toBeTruthy();
     expect(screen.getByText("5本のテストが落ちる")).toBeTruthy();
     expect(screen.queryByText("a.ts:1")).toBeNull();
