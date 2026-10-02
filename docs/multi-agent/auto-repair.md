@@ -646,6 +646,25 @@ issue-deckが**失敗したまま止まっているリポジトリを巡回し�
 （`<!-- deploy-failure: {...} -->`）による。Issueの本文はissue-deckのDBへ同期済みなので、
 パネルを出すのに追加のAPI呼び出しが要らない。
 
+### iOS配布の失敗も同じ形で起票する（#3745）
+
+kurashio・yoteiflowの`ios-testflight.yml`が失敗したまま止まったときも、Webのデプロイ失敗と同じ巡回の形で
+`[iOS配布失敗]`Issueを1件立てる。**判定は`decideDeployFailure`をそのまま再利用**し（猶予・成功時のクローズ・
+別のrunが落ちたら書き足す、が同じ）、違うのは対象のworkflowと、本文へ失敗した**段階**（`summarizeIosStages`の推定）を書く点だけ。
+
+| | |
+| --- | --- |
+| 巡回の起動 | pollerが1巡ごとに`POST /api/repositories/ios-distribution-failure-sweep` |
+| 間隔・猶予 | `IOS_DISTRIBUTION_FAILURE_SWEEP_INTERVAL_MINUTES`（既定5分・0で無効）／`IOS_DISTRIBUTION_FAILURE_ISSUE_GRACE_MINUTES`（既定10分） |
+| 対象 | `Repository`の行を`webview-ios-repos.ts`で絞る（**固定リストのキーでは回さない**。旧名`myroom`と新名で二重に起票するため） |
+| 追跡 | DBの`IosDistributionFailureIssue`（`DeployFailureIssue`とは別表。既存クエリに種別条件を足さない） |
+| マーカー | `<!-- ios-distribution-failure: {...} -->`（Webのデプロイ失敗のマーカーとは別名） |
+| IO | [`src/lib/github/ios-distribution-failure-sweep-run.ts`](../../src/lib/github/ios-distribution-failure-sweep-run.ts) |
+
+**起票のみで、実装の自動起動はしない。** 署名の期限切れ・Apple側の一時障害のようにコードでは直らない失敗が多く、
+失敗段階の判定は名前からの推定で「不明」もあり得るため。実際の失敗の型が溜まってから自動化の線を引く（#3745の判断）。
+ジョブ一覧は起票・更新のときだけ取るので、平常時の消費は最新run 1回（ETag）に収まる。
+
 ### 拾えない失敗が1つある——issue-deck自身の`deploy`ジョブの失敗
 
 `deploy.yml`の`deploy`ジョブは、配布物の展開・`.env`更新・`pnpm install --prod`・

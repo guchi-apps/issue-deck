@@ -1039,6 +1039,42 @@ jobs:
                 fi
                 ;;
             esac
+            # **人が「確認済み・対応しない」と記録した指摘を確認済みにする**（#3739）。要確認・要修正の
+            # まま残る行は、リリースのたびに同じ指摘でマージ確認に止められる。記録はissue-deckの
+            # 画面がdevelop向けPRへ投稿する`<!-- issue-deck-review-ack sha=<レビューしたコミット> by=<人> -->`
+            # のコメント（取り消しは`issue-deck-review-ack-revoke`）で、**そのレビューのshaと一致する
+            # ものだけ**を読む——追いコミットで再レビューされたら前の記録は効かない。
+            #
+            # **採用するのはissue-deckのApp botが投稿したコメントだけ。** このリポジトリはPUBLICで、
+            # 誰でも同じマーカーをコメントできる。`gh --json`（GraphQL）ではbotのloginが
+            # `issue-deck`になり`[bot]`も付かず、同名の通常ユーザーと見分けられないため、ここだけ
+            # RESTで読んで`user.login == "issue-deck[bot]"`かつ`user.type == "Bot"`で絞る。
+            # 書式は`src/lib/github/review-acknowledgement.ts`と対（`scripts/check-review-verdict-marker.sh`が突き合わせる）
+            case "$REVIEW_CELL" in
+              "⚠️"*|"❌"*)
+                if [ "$PR_CELL" != "—" ] && [ -n "$REVIEW_BODY" ]; then
+                  REVIEWED_SHA="$(printf '%s' "$REVIEW_BODY" \
+                    | sed -nE 's/.*issue-deck-review-(verdict:[a-z-]+|report)[[:space:]]+sha=([0-9a-fA-F]+).*/\2/p' | tail -n 1)"
+                  if [ -n "$REVIEWED_SHA" ]; then
+                    # 記録があれば`ack:<記録者>`、無い・取り消されていれば空
+                    ACK_STATE="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_CELL#\#}/comments" \
+                      --jq '[.[] | select(.user.login == "issue-deck[bot]" and .user.type == "Bot") | .body]' 2>/dev/null \
+                      | jq -rs --arg sha "$REVIEWED_SHA" '
+                          [.[][]] | reduce .[] as $b (null;
+                            if ($b | test("issue-deck-review-ack-revoke sha=" + $sha; "i")) then null
+                            elif ($b | test("issue-deck-review-ack sha=" + $sha; "i"))
+                              then "ack:" + (($b | capture("by=(?<by>[^ ]+)")? | .by) // "")
+                            else . end) // empty' 2>/dev/null || true)"
+                    case "$ACK_STATE" in
+                      ack:*)
+                        ACK_BY="${ACK_STATE#ack:}"
+                        REVIEW_CELL="✅ 確認済み（元の判定: ${REVIEW_CELL#* }${ACK_BY:+、記録: $ACK_BY}）"
+                        ;;
+                    esac
+                  fi
+                fi
+                ;;
+            esac
             case "$RISK" in
               none) RISK_CELL="該当なし" ;;
               hit) RISK_CELL="⚠️ 該当あり" ;;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
@@ -20,6 +20,7 @@ import { NotificationSettingsSection } from "@/components/dashboard/settings/not
 import { PostCreateDestinationSection } from "@/components/dashboard/settings/post-create-destination-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
+  SETTINGS_LIST_SECTIONS,
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
 } from "@/components/dashboard/settings/settings-sections";
@@ -106,14 +107,15 @@ export function MobileSettingsScreen({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex shrink-0 items-center gap-2 border-b py-2 pr-2 pl-4">
-        {/* 区分の中では一覧へ、一覧では前の画面へ戻る（#1638。フッターにタブが無くなった） */}
+        {/* 区分の中では一覧へ戻り、一覧ではモーダルを閉じる（#1638・#3744）。
+            戻る判定は選択中のキーで行う（見出しは全区分の定義から引く） */}
         <button
           type="button"
-          onClick={() => (activeSection ? setSection(null) : onBack())}
+          onClick={() => (section !== null ? setSection(null) : onBack())}
           className="-ml-2 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
-          aria-label="戻る"
+          aria-label={section !== null ? "戻る" : "閉じる"}
         >
-          <ChevronLeft className="size-5" />
+          {section !== null ? <ChevronLeft className="size-5" /> : <X className="size-5" />}
         </button>
         <h1 className="flex-1 text-base font-semibold">{activeSection?.label ?? "設定"}</h1>
         <MobileDispatchStatusButton />
@@ -122,9 +124,15 @@ export function MobileSettingsScreen({
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
-        {activeSection === undefined && (
+        {section === null && (
           <>
-            <div className="flex items-center gap-3 rounded-lg border p-3">
+            {/* アカウント設定はアカウント名のカードを押して開く（#3744） */}
+            <button
+              type="button"
+              onClick={() => setSection("account")}
+              aria-label="アカウント設定"
+              className="flex items-center gap-3 rounded-lg border p-3 text-left hover:bg-accent"
+            >
               <UserAvatar
                 login={currentUser?.login ?? "?"}
                 image={currentUser?.image}
@@ -136,10 +144,11 @@ export function MobileSettingsScreen({
                 </p>
                 <p className="truncate text-xs text-muted-foreground">@{currentUser?.login}</p>
               </div>
-            </div>
+              <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+            </button>
 
             <ul className="flex flex-col gap-2">
-              {SETTINGS_SECTIONS.map((item) => {
+              {SETTINGS_LIST_SECTIONS.map((item) => {
                 const Icon = item.icon;
                 return (
                   <li key={item.key}>

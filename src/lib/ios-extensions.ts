@@ -5,6 +5,8 @@
  * 命名や書き方によっては漏れるため、画面にも「検出結果」と明記する。
  * 追加・編集は画面からSwiftを生成せず、種類別テンプレートでIssueを起票して通常の実装経路に渡す。
  */
+import { splitAttachments } from "@/lib/markdown-attachments";
+
 export const IOS_EXTENSION_KINDS = ["widget", "lock-screen", "live-activity", "control"] as const;
 export type IosExtensionKind = (typeof IOS_EXTENSION_KINDS)[number];
 
@@ -127,10 +129,13 @@ export function buildIosExtensionIssue(draft: IosExtensionIssueDraft): { title: 
   const kindLabel = IOS_EXTENSION_KIND_LABELS[draft.kind];
   const targetLabel = draft.target ? (draft.target.displayName ?? draft.target.name) : null;
   const description = draft.description.trim();
+  // タイトルには文章だけを使う。画像だけを添付すると本文の1行目が画像記法になるため、
+  // 添付（末尾の画像記法の行）を除いてから1行目を取る
+  const titleSource = splitAttachments(description).body.trim();
   const title =
     draft.mode === "edit" && targetLabel
       ? `iOS${kindLabel}「${targetLabel}」を変更する`
-      : `iOS${kindLabel}を追加する${description ? `: ${firstLine(description, 40)}` : ""}`;
+      : `iOS${kindLabel}を追加する${titleSource ? `: ${firstLine(titleSource, 40)}` : ""}`;
 
   const lines = [
     "<!-- ios-extension-request -->",

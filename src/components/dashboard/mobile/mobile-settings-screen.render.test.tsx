@@ -119,9 +119,12 @@ describe("MobileSettingsScreen", () => {
   it("PCの設定ダイアログと同じ区分を一覧に出す（#1539・#1552）", () => {
     renderScreen();
 
-    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
+    for (const label of ["表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
+    // 「アカウント」は区分に並べず、アカウント名のカードから開く（#3744）
+    expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "アカウント設定" })).toBeTruthy();
     // 一覧の時点では中身を出さない（ドリルダウン式）
     expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
   });
@@ -146,6 +149,47 @@ describe("MobileSettingsScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
     expect(screen.getByRole("button", { name: /フリート運用/ })).toBeTruthy();
+  });
+
+  it("アカウント名を押すとアカウント設定へ入り、戻るで一覧へ帰る（#3744）", () => {
+    renderScreen();
+
+    fireEvent.click(screen.getByRole("button", { name: "アカウント設定" }));
+    expect(screen.getByRole("heading", { name: "アカウント" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ログアウト/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /アカウントを削除/ })).toBeNull();
+    // 一覧は重ならない
+    expect(screen.queryByRole("button", { name: /フリート運用/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "戻る" }));
+    expect(screen.getByRole("button", { name: /フリート運用/ })).toBeTruthy();
+  });
+
+  it("一覧ではモーダルを閉じるボタンが出て、押すとonBackを呼ぶ（#3744）", () => {
+    const onBack = vi.fn();
+    render(
+      <MobileSettingsScreen
+        onBack={onBack}
+        currentUser={{ login: "octocat", name: "Octo Cat", image: null }}
+        autoRetryLimit={2}
+        claudeModel="auto"
+        claudeModelAssist="haiku"
+        claudeLocalModel="sonnet"
+        codexModel="auto"
+        appAiModel="claude-haiku-4-5"
+        appAiModelReasoning="claude-sonnet-5-5"
+        modelPickEngine="app-ai"
+        dispatchConcurrency={2}
+        repositories={repositories}
+        onSetRepositoryHidden={onSetRepositoryHidden}
+        onSetRepositoriesHidden={onSetRepositoriesHidden}
+        onSetRepositoryIssueCreationExcluded={vi.fn()}
+        onUpdated={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(onBack).toHaveBeenCalled();
   });
 
   it("表示の区分でもPCと同じリポジトリ一覧を出す（#1552）", () => {

@@ -216,6 +216,7 @@ describe("applyReviewVerdicts", () => {
       riskKind: "none",
       riskLabel: "該当なし",
       reviewBody: null,
+      acknowledgement: null,
       ...overrides,
     };
   }
@@ -290,6 +291,7 @@ describe("tallyChangeReviews", () => {
           riskKind: "none",
           riskLabel: "該当なし",
           reviewBody: null,
+          acknowledgement: null,
         },
         {
           issueNumber: 2063,
@@ -300,6 +302,7 @@ describe("tallyChangeReviews", () => {
           riskKind: "none",
           riskLabel: "該当なし",
           reviewBody: null,
+          acknowledgement: null,
         },
       ],
       // 表の集計はIssueを数えたもので、並べた行（PR）とは母数が違う

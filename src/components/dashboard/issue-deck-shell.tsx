@@ -72,7 +72,9 @@ import { useIssueBodies } from "@/hooks/use-issue-bodies";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
@@ -373,6 +375,8 @@ export function IssueDeckShell({
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
+  // スマホの設定シートはポータルで`md:hidden`の外へ出るため、幅でも出し分ける（#3744）
+  const isMobileViewport = !useMediaQuery("(min-width: 768px)");
   const {
     mobileScreen,
     selectTab,
@@ -627,6 +631,15 @@ export function IssueDeckShell({
    * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
    * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
    */
+  /**
+   * iOS拡張画面から起票したIssueの詳細を開く（#3743）。`handleIssueCreated`の`selectIssue`は
+   * `pane`を消さず、PCではiOS拡張パネルが残るため、`pane`を消す`openIssueUrl`で開く。
+   */
+  function handleIosExtensionIssueCreated(issue: Issue) {
+    setAllIssues((prev) => upsertIssue(prev, issue));
+    openIssueUrl(issue.id);
+  }
+
   function handleIssueCreated(issue: Issue) {
     registerCreatedIssue(issue);
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
@@ -1441,6 +1454,20 @@ export function IssueDeckShell({
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
   const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
+
+  // iOS拡張ダイアログの起票後「実装を開始」へ渡す値（作成フォームと同じ）。更新の反映先は
+  // 画面を移さない`registerCreatedIssue`（詳細を開く`handleIosExtensionIssueCreated`ではない）
+  const iosExtensionStartProps = {
+    repositories,
+    issues: allIssues,
+    onIssueUpdated: registerCreatedIssue,
+    onNightlyRunQueued: nightlyRun.refresh,
+    claudeLocalModel,
+    codexModel,
+    defaultDispatchAgent,
+    dispatchFailoverEnabled,
+    dispatchFailoverThresholdPercent,
+  };
   /**
    * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
    * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
@@ -2087,7 +2114,8 @@ export function IssueDeckShell({
           {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
           <div className="flex flex-1 flex-col overflow-hidden md:hidden">
             <div className="relative flex-1 overflow-hidden">
-              {mobileScreen.kind === "home" && (
+              {/* 設定はモーダルなので、背後にホームを残す（#3744） */}
+              {(mobileScreen.kind === "home" || mobileScreen.kind === "settings") && (
                 <MobileHomeScreen
                   navCounts={{ ...navCounts, "check-user": mobileCheckUserCount }}
                   manualStepAttention={manualStepAttention}
@@ -2151,7 +2179,7 @@ export function IssueDeckShell({
 
               {mobileScreen.kind === "ios-extensions" && (
                 <div className="h-full overflow-y-auto p-4">
-                  <IosExtensionsPanel onBack={goBack} />
+                  <IosExtensionsPanel onBack={goBack} onIssueCreated={handleIosExtensionIssueCreated} start={iosExtensionStartProps} />
                 </div>
               )}
 
@@ -2324,31 +2352,44 @@ export function IssueDeckShell({
                 />
               )}
 
-              {mobileScreen.kind === "settings" && (
-                <MobileSettingsScreen
-                  onBack={goBack}
-                  currentUser={currentUser}
-                  autoRetryLimit={autoRetryLimit}
-                  claudeModel={claudeModel}
-                  claudeModelAssist={claudeModelAssist}
-                  claudeLocalModel={claudeLocalModel}
-                  codexModel={codexModel}
-                  defaultDispatchAgent={defaultDispatchAgent}
-                  dispatchFailoverEnabled={dispatchFailoverEnabled}
-                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                  appAiModel={appAiModel}
-                  appAiModelReasoning={appAiModelReasoning}
-                  modelPickEngine={modelPickEngine}
-                  dispatchConcurrency={dispatchConcurrency}
-                  repositories={repositories}
-                  onSetRepositoryHidden={handleSetRepositoryHidden}
-                  onSetRepositoriesHidden={handleSetRepositoriesHidden}
-                  onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
-                  onUpdated={handleAppSettingsUpdated}
-                  onDraftReviewGateIssue={openReviewGateIssueDialog}
-                  creatableRepositoryNames={creatableRepositoryNames}
-                />
-              )}
+              {/* URLの`mscreen=settings`がPC幅で開かれてもシートを出さない（ポータルは`md:hidden`の外へ出る） */}
+              <Sheet
+                open={mobileScreen.kind === "settings" && isMobileViewport}
+                onOpenChange={(open) => {
+                  if (!open) goBack();
+                }}
+              >
+                <SheetContent
+                  side="bottom"
+                  showCloseButton={false}
+                  className="h-[calc(100svh-4.5rem)] gap-0 rounded-t-2xl p-0"
+                >
+                  <SheetTitle className="sr-only">設定</SheetTitle>
+                  <MobileSettingsScreen
+                    onBack={goBack}
+                    currentUser={currentUser}
+                    autoRetryLimit={autoRetryLimit}
+                    claudeModel={claudeModel}
+                    claudeModelAssist={claudeModelAssist}
+                    claudeLocalModel={claudeLocalModel}
+                    codexModel={codexModel}
+                    defaultDispatchAgent={defaultDispatchAgent}
+                    dispatchFailoverEnabled={dispatchFailoverEnabled}
+                    dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
+                    appAiModel={appAiModel}
+                    appAiModelReasoning={appAiModelReasoning}
+                    modelPickEngine={modelPickEngine}
+                    dispatchConcurrency={dispatchConcurrency}
+                    repositories={repositories}
+                    onSetRepositoryHidden={handleSetRepositoryHidden}
+                    onSetRepositoriesHidden={handleSetRepositoriesHidden}
+                    onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
+                    onUpdated={handleAppSettingsUpdated}
+                    onDraftReviewGateIssue={openReviewGateIssueDialog}
+                    creatableRepositoryNames={creatableRepositoryNames}
+                  />
+                </SheetContent>
+              </Sheet>
 
               {mobileScreen.kind === "repo-detail" && (
                 <MobileRepoIssuesScreen
@@ -2489,7 +2530,7 @@ export function IssueDeckShell({
 
           {filters.pane === "ios-extensions" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-5xl"><IosExtensionsPanel /></div>
+              <div className="mx-auto max-w-5xl"><IosExtensionsPanel onIssueCreated={handleIosExtensionIssueCreated} start={iosExtensionStartProps} /></div>
             </div>
           ) : filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">

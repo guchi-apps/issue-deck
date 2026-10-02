@@ -248,6 +248,36 @@ export function PullRequestDetail({
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
+  // 検証結果の行の「確認済み・対応しない」の記録・取り消し（#3739）。develop向けPRへ記録を残し、
+  // このリリースPR本文の該当行も書き換える（本文は作成時に1回しか書かれないため）。
+  const sendReviewAck = async (
+    row: ReleaseVerificationRow,
+    action: "acknowledge" | "revoke",
+    reason?: string,
+  ) => {
+    if (row.pullRequestNumber === null) {
+      throw new Error("対応するdevelop向けPRが見つからないため記録できません");
+    }
+    const [owner, repo] = pullRequest.repositoryFullName.split("/");
+    const response = await fetch("/api/pull-requests/review-ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        owner,
+        repo,
+        number: row.pullRequestNumber,
+        issueNumber: row.issueNumber,
+        releasePullRequestNumber: pullRequest.number,
+        action,
+        reason,
+      }),
+    });
+    if (!response.ok) {
+      const payload: { message?: string; error?: string } = await response.json().catch(() => ({}));
+      throw new Error(payload.message ?? payload.error ?? "記録できませんでした");
+    }
+    onRefresh();
+  };
   // CIの内訳は、チェック一覧を行の元にし、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
   // 一覧の再取得でチェックが一時的に空になっても、CIの操作表示そのものは読み取り専用へ戻さない。
   const showsCiBadge = !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft;
@@ -481,6 +511,16 @@ export function PullRequestDetail({
                 repositoryFullName={pullRequest.repositoryFullName}
                 onCreateFixIssue={
                   onCreateFixIssue && ((row) => onCreateFixIssue(row, pullRequest))
+                }
+                onAcknowledge={
+                  pullRequest.merged || pullRequest.state !== "open"
+                    ? undefined
+                    : (row, reason) => sendReviewAck(row, "acknowledge", reason)
+                }
+                onRevokeAcknowledgement={
+                  pullRequest.merged || pullRequest.state !== "open"
+                    ? undefined
+                    : (row) => sendReviewAck(row, "revoke")
                 }
               />
             )}
