@@ -1824,6 +1824,35 @@ model DeployFailureIssue {
   @@index([repositoryFullName, state])
 }
 
+/// iOS配布（`ios-testflight.yml`）の失敗を追跡するために自動起票したIssue（#3745）。
+///
+/// `DeployFailureIssue`と同じ形で、**Webの本番デプロイとは別の表**にしてある（既存の
+/// クエリへ種別の条件を足さないため）。持つのは起票したかどうかだけで、失敗の正はGitHubのrun。
+model IosDistributionFailureIssue {
+  id                 String @id @default(cuid())
+  repositoryFullName String
+  /// 失敗した`ios-testflight.yml`のrun id。**同じrunで二重に起票しないための鍵**
+  runId              BigInt
+  /// 起票したIssueの番号
+  issueNumber        Int
+  /// `open` / `closed`。後続の配布が成功した時点で`closed`にする
+  state              String @default("open")
+  /// 失敗した段階の表示名（「署名」など）。特定できなければnull
+  failedStage        String?
+  /// 失敗したrunのURL
+  runUrl             String @db.Text
+
+  detectedAt DateTime  @default(now())
+  /// 自動でクローズした時刻。人が先に閉じた場合はnullのまま`closed`になる
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, runId])
+  @@index([repositoryFullName, state])
+}
+
 /// 本番へのマージ待ち（develop→mainのリリースPR）をPush通知した記録（#2376）。
 ///
 /// **Push通知は「もう鳴らしたか」をプロセスの外に持つ必要がある。** 巡回の再実行そのものは

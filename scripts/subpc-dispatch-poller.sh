@@ -1427,6 +1427,32 @@ sweep_deploy_failures() {
   return 0
 }
 
+# --- iOS配布失敗の巡回検知 ---------------------------------------------------------
+# iOS配布（`ios-testflight.yml`）が失敗したまま止まっているリポジトリを、issue-deckに巡回して
+# 見つけさせ、追跡用のIssueを起票させる（#3745）。上のデプロイ失敗の巡回検知と同じ形で、
+# **pollerがやるのは「呼ぶ」ことだけ**。巡回間隔・起票の判断はissue-deck側が持つ。
+sweep_ios_distribution_failures() {
+  if ! api_call POST /api/repositories/ios-distribution-failure-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "iOS配布失敗の巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+
+  local swept actions
+  swept="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.swept // false' 2>/dev/null || echo false)"
+  [[ "$swept" == "true" ]] || return 0
+
+  actions="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.actions | length' 2>/dev/null || echo 0)"
+  [[ "${actions:-0}" -gt 0 ]] || return 0
+
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[] | "iOS配布失敗Issueを\(if .kind == "created" then "起票" elif .kind == "updated" then "更新" else "クローズ" end)しました: \(.repositoryFullName)#\(.issueNumber)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- デプロイ起動漏れの巡回検知と起動し直し ------------------------------------
 # mainへマージしたのに本番デプロイ（`deploy.yml`）が起動していないものをissue-deckに巡回して
 # 見つけさせ、`main`から起動し直させる（#2703）。
@@ -3761,6 +3787,8 @@ run_once() {
     # 本番デプロイ失敗の巡回検知（#2236）。**dry-runでは呼ばない**（Issueの起票という
     # 外向きの副作用があるため）。
     sweep_deploy_failures
+    # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
+    sweep_ios_distribution_failures
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
     # （本番デプロイの起動という外向きの副作用があるため）。
     sweep_deploy_launches

@@ -2956,6 +2956,7 @@ export function POST(request: NextRequest) {
   **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
   ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
+- iOS配布（`ios-testflight.yml`）の失敗も同じ形で巡回し起票する（#3745。判定は`lib/deploy-failure.ts`の`decideDeployFailure`を再利用、本文は[`lib/ios-distribution-failure.ts`](../src/lib/ios-distribution-failure.ts)、IOは[`lib/github/ios-distribution-failure-sweep-run.ts`](../src/lib/github/ios-distribution-failure-sweep-run.ts)、受け口は`POST /api/repositories/ios-distribution-failure-sweep`）。対象は`Repository`の行を`webview-ios-repos.ts`で絞る
 - **mainへマージしたのにデプロイが起動しなかったときは、issue-deckが起動し直す**
   （#2703。判定は[`lib/deploy-launch.ts`](../src/lib/deploy-launch.ts)、IOは
   [`lib/github/deploy-launch-sweep-run.ts`](../src/lib/github/deploy-launch-sweep-run.ts)）。
