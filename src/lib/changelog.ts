@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.15.0",
+    date: "2026-10-02",
+    changes: [
+      "yoteiflowも、リリース画面とブランチ画面で「iOS配布（TestFlight）」の結果を確認したり、必要なときに手動でiOSへ配布したりできるようになりました。iOS拡張の一覧にもyoteiflowが表示されます。",
+    ],
+    usage: [
+      "1. yoteiflowのリリース画面、またはブランチ画面のmainへマージ済みのリリース束を開きます。",
+      "2. 「iOS配布（TestFlight）の結果」欄で配布の状況を確認します。自動で配布されなかった場合や失敗した場合は「iOSへ配布」を押します。",
+      "3. 配布が成功すると、欄に配布済みのビルド番号が表示されれば完了です。",
+    ],
+  },
+  {
     version: "8.14.2",
     date: "2026-10-02",
     changes: [
