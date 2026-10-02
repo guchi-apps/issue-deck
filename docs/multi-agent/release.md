@@ -667,7 +667,6 @@ kurashioとyoteiflow（yoteiflow#961・#3737。kurashioと同じ契約）は`ios
 - 更新不要でビルドを作らなかったrunは「iOS更新は不要と判定」と表示し、失敗と区別する
 - **ステップサマリー（`$GITHUB_STEP_SUMMARY`）はGitHub REST APIで取れない**ため本文は出さず、runへのリンクで
   代える。スキップ理由を画面に出したいときは、判定ジョブが`::notice::`で理由を出力する
-
 - **失敗したまま止まったiOS配布は、issue-deckが巡回して`[iOS配布失敗]`Issueとして起票する**（#3745。起票のみで自動修正はしない）。仕様は[auto-repair.md](auto-repair.md)「iOS配布の失敗も同じ形で起票する」
 
 ### ブランチ画面のリリース束からiOS配布を起動・確認する（#3644）
