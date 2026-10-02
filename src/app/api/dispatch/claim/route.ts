@@ -63,6 +63,16 @@ export async function POST(request: NextRequest) {
   // 変わるのは相乗りを省くかどうかだけ。古いpollerはこのキーを送らないため、従来どおり回る。
   const fast = payload?.fast === true;
 
+  // 計画レビューの空き本数（#3772）。**送ってきたpollerにだけ、計画レビューを起動枠の外で配る。**
+  // 送らない古いpoller（キーが無い・不正な値）は従来どおり起動枠で配る
+  const requestedPlanReviews = payload?.planReviewMaxJobs;
+  const planReviewMaxJobs =
+    typeof requestedPlanReviews === "number" &&
+    Number.isInteger(requestedPlanReviews) &&
+    requestedPlanReviews >= 0
+      ? Math.min(requestedPlanReviews, 10)
+      : undefined;
+
   // 確認待ちのPush通知（#838）を、この取りに来るついでに1歩進める。
   // **常駐プロセスは置かない**（`runManualStepVerificationPatrol`と同じ方針）。ここを選ぶのは
   // pollerが30秒ごとに叩き、**ブラウザを開いていなくても回る**唯一の定期経路だから
@@ -134,7 +144,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const jobs = await claimDispatchJobs({ hostName, maxJobs });
+  const jobs = await claimDispatchJobs({ hostName, maxJobs, planReviewMaxJobs });
   if (jobs.length === 0) {
     return NextResponse.json({ ok: true, jobs }, { headers: { "Cache-Control": "no-store" } });
   }

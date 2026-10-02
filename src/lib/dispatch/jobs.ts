@@ -1766,6 +1766,12 @@ const MAX_CONTROL_JOBS_PER_CLAIM = 10;
 export async function claimDispatchJobs(params: {
   hostName: string;
   maxJobs: number;
+  /**
+   * 計画レビュー（`PLAN_REVIEW`）の空き本数（#3772）。指定したpollerには、計画レビューを
+   * 起動枠（`maxJobs`・同時実行数）の外でこの本数まで配る。未指定（古いpoller）は従来どおり
+   * 起動枠で配る
+   */
+  planReviewMaxJobs?: number;
   now?: Date;
 }): Promise<DispatchJobView[]> {
   const now = params.now ?? new Date();
@@ -1821,8 +1827,10 @@ export async function claimDispatchJobs(params: {
   const launchKinds: DispatchJobKind[] = ["LAUNCH"];
   if (host?.crossRepoQuestionCapable === true) launchKinds.push("CROSS_REPO_QUESTION");
   // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は横断質問と同じで、
-  // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ
-  if (host?.planReviewCapable === true) launchKinds.push("PLAN_REVIEW");
+  // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ。
+  // **空き本数を申告したpollerには、下で枠外として配る**（#3772）
+  const planReviewSeparate = params.planReviewMaxJobs !== undefined;
+  if (host?.planReviewCapable === true && !planReviewSeparate) launchKinds.push("PLAN_REVIEW");
   // **コードレビュー（#698）も同じ枠。** レビュー1本で終わるが、走っている間はtmuxセッションを
   // 1本占めるため、枠外へ出すと本数の見積もりが崩れる（計画レビューと同じ扱い）
   if (host?.codeReviewCapable === true) launchKinds.push("CODE_REVIEW");
@@ -1840,7 +1848,9 @@ export async function claimDispatchJobs(params: {
     },
   });
   const available = Math.min(limit - running, params.maxJobs);
-  if (available <= 0) return claimed;
+  const planReviewAvailable =
+    host?.planReviewCapable === true && planReviewSeparate ? (params.planReviewMaxJobs ?? 0) : 0;
+  if (available <= 0 && planReviewAvailable <= 0) return claimed;
 
   // **再起動が積まれている間は起動ジョブを配らない**（#2496）。落とす前に入口を閉じないと、
   // 押してから届くまでの数十秒に新しいセッションが立ち、pollerの側の「0本か」の確かめ直しに
@@ -1859,6 +1869,21 @@ export async function claimDispatchJobs(params: {
     },
   });
   if (pendingReboot > 0) return claimed;
+
+  // **計画レビュー（#3772）は実装セッションの本数上限・同時実行数の外で配る。** 計画レビューは
+  // セッション名を`-issue-`の規約から外してあって`DISPATCH_MAX_SESSIONS`に数えず、本数は
+  // poller側の`DISPATCH_MAX_PLAN_REVIEWS`で別に絞っている。起動枠に混ぜていた頃は、実装
+  // セッションが12/12で`maxJobs: 0`になるたびに計画レビューも取られず、計画の承認を待つ
+  // セッションが枠を埋めたまま、そのレビューが5時間超`QUEUED`で待たされていた（#3767で実測）
+  if (planReviewAvailable > 0) {
+    const planReviews = await db.dispatchJob.findMany({
+      where: { targetHost: params.hostName, status: "QUEUED", kind: "PLAN_REVIEW" },
+      orderBy: [{ queuePriority: "desc" }, { createdAt: "asc" }],
+      take: planReviewAvailable,
+    });
+    claimed.push(...(await claimCandidates(planReviews, params.hostName, now)));
+  }
+  if (available <= 0) return claimed;
 
   // **質問ジョブ（`QUESTION`、#1294）はどのpollerにも配らない。** 種別を明示して引くため
   // ここに混ざることは無いが、意図として書いておく。現行のpollerは未知の種別を

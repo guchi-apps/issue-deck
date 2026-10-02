@@ -41,6 +41,7 @@ import {
   describePlanReviewRejection,
   findPlanReviewJobForIssue,
   isPlanReviewJobCreating,
+  resolvePlanReviewJobPhase,
   canCodeReviewRepository,
   describeCodeReviewRejection,
   findCodeReviewJobForIssue,
@@ -1558,8 +1559,21 @@ describe("isPlanReviewJobCreating（#3565）", () => {
     expect(isPlanReviewJobCreating(null, now)).toBe(false);
   });
 
-  it.each(["QUEUED", "CLAIMED", "RUNNING"] as const)("%sの間はtrue", (status) => {
+  it.each(["CLAIMED", "RUNNING"] as const)("%sの間はtrue", (status) => {
     expect(isPlanReviewJobCreating(planReviewJob({ status }), now)).toBe(true);
+  });
+
+  // 起動待ちは通常1巡で抜けるので、積んだ直後は従来どおり人へ回さない（#3772）
+  it("QUEUEDでも積んでから10分未満はtrue", () => {
+    const job = planReviewJob({ status: "QUEUED", createdAt: "2026-08-17T00:00:01.000Z" });
+    expect(isPlanReviewJobCreating(job, now)).toBe(true);
+  });
+
+  // サブPCがセッション上限・メモリ逼迫で取りに来ない間は、待ちに上限が無い（#3772）。
+  // 確認待ちから外し続けると、計画が人の目に届かないまま何時間も過ぎる
+  it("QUEUEDのまま10分を超えたらfalse", () => {
+    const job = planReviewJob({ status: "QUEUED", createdAt: "2026-08-17T00:00:00.000Z" });
+    expect(isPlanReviewJobCreating(job, now)).toBe(false);
   });
 
   it("SUCCEEDED直後（finishedAtから10分未満）はtrue", () => {
@@ -1602,6 +1616,48 @@ describe("isPlanReviewJobCreating（#3565）", () => {
 
   it.each(["FAILED", "SKIPPED", "TIMEOUT", "CANCELED"] as const)("%sはfalse", (status) => {
     expect(isPlanReviewJobCreating(planReviewJob({ status }), now)).toBe(false);
+  });
+
+  describe("resolvePlanReviewJobPhase（#3772）", () => {
+    it("ジョブが無ければnull", () => {
+      expect(resolvePlanReviewJobPhase(null, now)).toBeNull();
+    });
+
+    it("QUEUEDは積んでから10分未満ならqueued、超えたらqueued_overdue", () => {
+      expect(
+        resolvePlanReviewJobPhase(
+          planReviewJob({ status: "QUEUED", createdAt: "2026-08-17T00:05:00.000Z" }),
+          now,
+        ),
+      ).toBe("queued");
+      expect(
+        resolvePlanReviewJobPhase(
+          planReviewJob({ status: "QUEUED", createdAt: "2026-08-16T19:00:00.000Z" }),
+          now,
+        ),
+      ).toBe("queued_overdue");
+    });
+
+    // 取られてからは積んだ時刻によらず作成中（起動待ちが長かったぶんを引きずらない）
+    it.each(["CLAIMED", "RUNNING"] as const)("%sは積んだ時刻によらずcreating", (status) => {
+      const job = planReviewJob({ status, createdAt: "2026-08-16T19:00:00.000Z" });
+      expect(resolvePlanReviewJobPhase(job, now)).toBe("creating");
+    });
+
+    it("SUCCEEDEDは猶予内だけcreating", () => {
+      expect(
+        resolvePlanReviewJobPhase(
+          planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:05:00.000Z" }),
+          now,
+        ),
+      ).toBe("creating");
+      expect(
+        resolvePlanReviewJobPhase(
+          planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-16T23:50:00.000Z" }),
+          now,
+        ),
+      ).toBeNull();
+    });
   });
 });
 
