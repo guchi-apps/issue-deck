@@ -45,9 +45,25 @@ const KURASHIO: WebviewIosRepository = {
   ],
 };
 
+/** yoteiflow（旧DaySpan）。kurashioと同じ契約のTestFlight自動配信を持つ（#3737） */
+const YOTEIFLOW: WebviewIosRepository = {
+  appLabel: "yoteiflow",
+  xcodeProjectPath: "ios/YoteiFlow.xcodeproj",
+  command:
+    "cd ~/apps/yoteiflow &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/YoteiFlow.xcodeproj",
+  setupReferences: [
+    { label: "yoteiflow#961（TestFlight自動配信）", url: "https://github.com/guchi-apps/yoteiflow/issues/961" },
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/yoteiflow/blob/develop/ios/README.md",
+    },
+  ],
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
   "guchi-apps/kurashio": KURASHIO,
   "guchi-apps/myroom": KURASHIO,
+  "guchi-apps/yoteiflow": YOTEIFLOW,
 };
 
 export function getWebviewIosRepository(repositoryFullName: string): WebviewIosRepository | null {

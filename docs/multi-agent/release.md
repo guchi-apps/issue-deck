@@ -633,7 +633,7 @@ pushトリガーは当然`develop`のものになる。**ジョブが対象コ�
 
 ### kurashioのiOS変更判定・TestFlight配布結果の表示（#3626）
 
-kurashioは`ios-testflight.yml`（ワークフロー名`iOS TestFlight`、kurashio#591）が、リリースごとにiOS更新の
+kurashioとyoteiflow（yoteiflow#961・#3737。kurashioと同じ契約）は`ios-testflight.yml`（ワークフロー名`iOS TestFlight`、kurashio#591）が、リリースごとにiOS更新の
 要否を判定し、必要なら署名・ビルド・アップロード・処理待ち・内部グループ配布を実行する。リリース画面
 （`MobileReleaseSheet`）の「iOS配布（TestFlight）の結果」欄がそれを**Webのデプロイとは別に**表示する。
 
@@ -652,7 +652,7 @@ kurashioは`ios-testflight.yml`（ワークフロー名`iOS TestFlight`、kurash
 ブランチ画面の、mainへマージ済みのリリース束（`webview-ios-repos.ts`のリポジトリのみ）に「iOS配布」欄を出す
 （`ios-release-group-panel.tsx`）。**Webの本番デプロイとは別の行**で、iOSの成否をWebに混ぜない。
 
-- **自動起動（kurashioの`ios-testflight-trigger.yml`）は残す。** 画面の「iOSへ配布」は自動で走らなかった場合・
+- **自動起動（kurashio・yoteiflowの`ios-testflight-trigger.yml`）は残す。** 画面の「iOSへ配布」は自動で走らなかった場合・
   失敗した場合の手動起動で、`ios-testflight.yml`を`--ref main`＋`inputs.sha`で`workflow_dispatch`する
 - **配布済み・ビルド番号はタグから引く。** runの`head_sha`は起動時のmain先端で束のコミットと一致しないため、
   `ios-testflight/<N>`タグが指すコミットと束のmergeコミットを照合する（`deliveredBuildForSha`）。古い束にも効く
