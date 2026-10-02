@@ -54,6 +54,11 @@ export type PlanReviewRecommendation = {
  * 箇条書きから拾い、欠けていればnull**（書式は自由記述の慣習頼みなので、欠けても落とさない）。
  */
 export type PlanReviewFinding = {
+  /**
+   * 区分（#3765）。`blocking`＝計画を直さなければ実装の成立・安全性・受け入れ条件を損なう重大な指摘、
+   * `note`＝実装時に対応できる補足。**区分の行が無い旧形式は`null`で、重大として扱う**（安全側）
+   */
+  severity: "blocking" | "note" | null;
   /** レビューが振った番号。修正依頼で「どの指摘か」を指すのに使う */
   number: number;
   title: string;
@@ -130,7 +135,7 @@ const DECISION_OPTION_PATTERN = /^\s*(?:[-*]\s+)?([A-Z])\s*[.．)）]\s*(.+?)\s*
 const RECOMMENDATION_PATTERN = /^\s*(?:\*\*)?推奨(?:\*\*)?\s*[:：]\s*(.+?)\s*$/;
 
 /** 指摘の下の3項目。`- **指摘**: …`・`- **指摘** — …`の両方を受ける */
-const FIELD_PATTERN = /^[-*]\s+\*\*(指摘|根拠|提案)\*\*\s*(?:[:：]|—|-)?\s*(.*)$/;
+const FIELD_PATTERN = /^[-*]\s+\*\*(区分|指摘|根拠|提案)\*\*\s*(?:[:：]|—|-)?\s*(.*)$/;
 
 /** 「指摘なし」の宣言。行頭の`**指摘なし。**`・`指摘なし。`のどちらも実物にある */
 const NO_FINDINGS_PATTERN = /^\s*(?:\*\*)?\s*指摘なし/m;
@@ -173,7 +178,8 @@ function tidy(lines: readonly string[]): string | null {
 }
 
 function parseFinding(number: number, title: string, lines: readonly string[]): PlanReviewFinding {
-  const fields: Record<"指摘" | "根拠" | "提案", string[] | null> = {
+  const fields: Record<"区分" | "指摘" | "根拠" | "提案", string[] | null> = {
+    区分: null,
     指摘: null,
     根拠: null,
     提案: null,
@@ -195,7 +201,15 @@ function parseFinding(number: number, title: string, lines: readonly string[]): 
     current.push(line);
   }
 
+  const severityText = fields.区分 ? (tidy(fields.区分) ?? "") : "";
+  const severity: PlanReviewFinding["severity"] = /補足|実装時/.test(severityText)
+    ? "note"
+    : /重大|計画修正|計画を直/.test(severityText)
+      ? "blocking"
+      : null;
+
   return {
+    severity,
     number,
     title,
     problem: fields.指摘 ? tidy(fields.指摘) : null,
@@ -328,6 +342,38 @@ export function parsePlanReview(rawBody: string): ParsedPlanReview {
   };
 }
 
+export type PlanReviewNotice = {
+  kind: "skipped" | "limit" | "unresolved";
+  /** 理由（コメント本文の最初の行から装飾を落としたもの） */
+  text: string;
+};
+
+const NOTICE_MARKERS: readonly [string, PlanReviewNotice["kind"]][] = [
+  ["<!-- issue-deck:plan-review-skipped -->", "skipped"],
+  ["<!-- issue-deck:plan-review-limit -->", "limit"],
+  ["<!-- issue-deck:plan-review-unresolved -->", "unresolved"],
+];
+
+/**
+ * 最新の計画コメントより後にある、計画レビューの省略・打ち止め・未解消の記録（#3765）。
+ * 画面は「レビュー省略」などの短い理由を出し、存在しないレビューを待たせない。無ければnull。
+ */
+export function resolvePlanReviewNotice(
+  comments: readonly Pick<IssueComment, "body" | "author" | "authorTrusted">[],
+): PlanReviewNotice | null {
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (comment.authorTrusted !== true) continue;
+    if (isPlanComment(comment)) return null;
+    const hit = NOTICE_MARKERS.find(([marker]) => comment.body.includes(marker));
+    if (hit) {
+      const first = comment.body.split("\n").find((line) => line.trim() !== "") ?? "";
+      return { kind: hit[1], text: first.replace(/\*\*/g, "").trim() };
+    }
+  }
+  return null;
+}
+
 export type PendingPlanReview = {
   /** 元のコメント。カードの`key`に使い、レビューが差し替わったら選択を持ち越さない */
   commentId: string;
@@ -338,6 +384,8 @@ export type PendingPlanReview = {
    * 表示するものまで数える。計画の版ではなくレビューの回数で、同じ計画への再レビューも1回に数える
    */
   round: number;
+  /** 初回レビューか解消確認か（#3765） */
+  kind: "initial" | "resolve";
 };
 
 /**
@@ -358,5 +406,22 @@ export function resolvePendingPlanReview(
     review: parsePlanReview(comment.body),
     createdAtLabel: comment.createdAtLabel,
     round,
+    kind: readPlanReviewKind(comment.body),
   };
+}
+
+/**
+ * 自動反映の対象になる「計画を直さなければならない重大な指摘」があるか（#3765）。
+ * 補足（`note`）だけ・指摘なしなら`false`で、計画の出し直しも再レビューも要求しない。
+ * 区分が読めない旧形式の指摘は重大として数える。
+ */
+export function hasBlockingFindings(review: ParsedPlanReview): boolean {
+  // 書式が崩れて指摘に分けられなかった本文は、補足だけと言い切れないので重大として扱う
+  if (review.findings.length === 0) return review.decisions.length === 0 && !review.noFindings;
+  return review.findings.some((finding) => finding.severity !== "note");
+}
+
+/** 計画レビューの種別（`## 計画レビュー（G1・解消確認）`の見出しで見分ける。見出しが無ければ初回） */
+export function readPlanReviewKind(body: string): "initial" | "resolve" {
+  return /^\s{0,3}#{1,6}\s*計画レビュー[（(]\s*G1\s*[・･]\s*解消確認/m.test(body) ? "resolve" : "initial";
 }

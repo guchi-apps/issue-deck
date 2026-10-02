@@ -36,7 +36,11 @@ import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
-import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
+import {
+  isPlanReviewPending,
+  resolvePendingPlanReview,
+  resolvePlanReviewNotice,
+} from "@/lib/github/plan-review";
 import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
 import { PlanApprovalPanel } from "@/components/dashboard/plan-approval-panel";
 import { QuestionAnswerPanel } from "@/components/dashboard/question-answer-panel";
@@ -320,6 +324,7 @@ export function IssueDetail({
   const dispatch = useDispatchState(true);
   // 未反映の計画レビュー（#3554）。計画承認パネルと、無人実行の計画のカードへ指摘ごとに出す
   const pendingPlanReview = useMemo(() => resolvePendingPlanReview(comments), [comments]);
+  const planReviewNotice = useMemo(() => resolvePlanReviewNotice(comments), [comments]);
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
   // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
   const awaitingPlanReview =
@@ -1110,6 +1115,7 @@ export function IssueDetail({
                 dispatch={dispatch}
                 onCheckUserResolved={handleCheckUserResolved}
                 planReview={pendingPlanReview}
+                planReviewNotice={planReviewNotice}
                 planReviewJob={planReviewJob}
                 artifactsMissing={
                   issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&

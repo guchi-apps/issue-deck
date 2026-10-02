@@ -73,7 +73,7 @@ Actionsの外へ出せないかを先に考える**（下記#2294）。出せな
 
 ### 画面から見る（#2212）
 
-issue-deckの設定 ▸「状態」▸ GitHub使用量の`ACTIONS`に、今日・今月の実行時間とリポジトリ別の
+issue-deckの設定 ▸「使用量と障害状況」▸ GitHub使用量の`ACTIONS`に、今日・今月の実行時間とリポジトリ別の
 内訳が出る。**上のコマンドを叩かなくても、課金が出ているリポジトリは金額付きで並ぶ。**
 取得元は上の確認コマンドと同じ`/organizations/{org}/settings/billing/usage`で、実装は
 [`src/lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)。

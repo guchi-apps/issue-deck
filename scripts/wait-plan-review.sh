@@ -26,7 +26,8 @@
 #
 # 出力（標準出力の1行目が結果。終了コードは待ち切れなかった場合も0）:
 #   found    … 計画レビューが投稿されている（続けて本文を出力する。読んでから進む）
-#   skipped  … `21.plan-required`が付いておらず、そもそもレビューは走らない
+#   skipped  … `21.plan-required`が付いておらず、そもそもレビューは走らない。または影響が小さいため
+#              省略した・解消確認まで済んで打ち止めにした（#3765）
 #   timeout  … 上限まで待っても届かなかった。そのまま進んでよい
 set -euo pipefail
 
@@ -109,6 +110,14 @@ latest_review() {
     --jq "[.comments[] | select((.body | contains(\"$REVIEW_MARKER\")) and (.createdAt > \"$since\")) | .body] | last // \"\""
 }
 
+# 計画レビューを省略した・打ち止めにした記録（#3765）が最新の計画より後にあれば、レビューは来ない。
+# 待つと上限いっぱい空振りするので、すぐ返す
+review_not_coming() {
+  local since="$1"
+  gh issue view "$issue_number" "${gh_args[@]}" --json comments \
+    --jq "[.comments[] | select(((.body | contains(\"issue-deck:plan-review-skipped\")) or (.body | contains(\"issue-deck:plan-review-limit\"))) and (.createdAt > \"$since\")) | .createdAt] | length"
+}
+
 # 計画コメントが見つからない場合は、時刻の下限を空文字にして全件を対象にする
 # （フックの投稿に失敗して手で計画を出した場合など）
 since="$(plan_posted_at)"
@@ -119,6 +128,11 @@ while :; do
   if [ -n "$body" ]; then
     echo "found"
     printf '%s\n' "$body"
+    exit 0
+  fi
+  if [ "$(review_not_coming "$since")" -gt 0 ] 2>/dev/null; then
+    echo "skipped"
+    echo "計画レビューは省略または打ち止めになっています（Issueコメントに理由があります）。そのまま進んでください。"
     exit 0
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
