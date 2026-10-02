@@ -32,6 +32,30 @@
 # 同じ内容を保つ。** 片方だけ変えると、経路によって指示が食い違う。
 AGENT_LANGUAGE_SYSTEM_PROMPT="出力言語は日本語です。ユーザーの目に触れる文章はすべて日本語で書いてください。応答本文・作業の要約・TODO・提示する計画・ツール実行時の説明・コミットメッセージ・PRのタイトルと本文・Issueコメントを含みます。コード・識別子・ファイルパス・コマンド・設定値・ログやエラーメッセージの引用は原文（英語）のままで構いません。"
 
+# PR作成が起動プロンプトで明示指示済みであることの指示文（#3752）。
+#
+# 個人設定（`~/.claude/CLAUDE.md`）の「明示的な指示があるまでPRを作らない」が、プロンプトの
+# 「PRを作成する」より優先され、PR未作成のまま止まって盤面に出なくなる事象があった。
+# 言語指示とは違い**全ての役に付けてよい文面ではない**（レビュー・統合エージェントのマージ、
+# PRを人の指示で作るリポジトリ、PRを作らない横断質問・手作業）ため、専用の関数に分け、
+# 実装セッション（run-issue-session.sh）が条件を満たすときだけ呼ぶ。
+# `git pull`・マージは対象外のまま。
+AGENT_PR_SYSTEM_PROMPT="このセッションの起動プロンプトが、コミット・push・\`gh pr create\`によるPull Requestの作成についての明示的な指示です。個人設定の「明示的な指示があるまでPRを作らない」より優先し、確認を待たずにPR作成まで進めてください。ただし\`git pull\`とマージ（\`git merge\`・\`gh pr merge\`）は対象外で、従来どおり指示があるまで実行しません。"
+
+# 呼び出し側の CLAUDE_EXTRA_ARGS 配列へ PR作成の指示を追記する。未対応時は素通りする
+# （起動プロンプト本文の「責務」節にも同じ趣旨を置いている）。戻り値は常に0。
+append_pr_system_prompt() {
+  local log_prefix="${1:-}"
+
+  if ! claude --help 2>/dev/null | grep -q -- "--append-system-prompt"; then
+    echo "${log_prefix}情報: このClaude Codeは --append-system-prompt に未対応のため、PR作成の指示はプロンプト本文のみで行います。" >&2
+    return 0
+  fi
+
+  CLAUDE_EXTRA_ARGS+=(--append-system-prompt "$AGENT_PR_SYSTEM_PROMPT")
+  return 0
+}
+
 # 呼び出し側の CLAUDE_EXTRA_ARGS 配列へ `--append-system-prompt` を追記する。
 # 第1引数はログの接頭辞（例: "#123: "）。省略可。戻り値は常に0（`set -e` で呼び出し側を落とさない）。
 append_language_system_prompt() {
